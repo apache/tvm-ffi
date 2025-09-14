@@ -721,7 +721,7 @@ def _add_class_attrs_by_reflection(int type_index, object cls):
 
         if doc is not None:
             method_pyfunc.__doc__ = doc
-            method_pyfunc.__name__ = name
+        method_pyfunc.__name__ = name
 
         if hasattr(cls, name):
             # skip already defined attributes
