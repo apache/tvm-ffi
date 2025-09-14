@@ -37,12 +37,19 @@ github:
     # enable squash button:
     squash:  true
     # default commit message when merging with a squash commit
+    # can either be: DEFAULT | PR_TITLE | PR_TITLE_AND_COMMIT_DETAILS | PR_TITLE_AND_DESC
     squash_commit_message: DEFAULT
     # enable merge button:
     merge:   false
+    # default commit message when merging with a merge commit
+    # can either be: DEFAULT | PR_TITLE | PR_TITLE_AND_DESC
+    merge_commit_message: DEFAULT
     # disable rebase button:
     rebase:  false
 
 notifications:
   commits: commits@tvm.apache.org
   issues: discuss-archive@tvm.apache.org
+  pullrequests: discuss-archive@tvm.apache.org
+  jobs: discuss-archive@tvm.apache.org
+  discussions: discuss-archive@tvm.apache.org
