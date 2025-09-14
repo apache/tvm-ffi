@@ -20,40 +20,44 @@ import pytest
 import tvm_ffi
 import tvm_ffi.cpp
 
-ffi_mod = tvm_ffi.cpp.load_inline(
-    name="check_stream",
-    cpp_sources="""
-        void check_stream(int device_type, int device_id, uint64_t stream);
-    """,
-    cuda_sources=r"""
+try:
+    import torch
+except ImportError:
+    torch = None
+
+
+def gen_check_stream_mod():
+    return tvm_ffi.cpp.load_inline(
+        name="check_stream",
+        cpp_sources="""
         void check_stream(int device_type, int device_id, uint64_t stream) {
             uint64_t cur_stream = reinterpret_cast<uint64_t>(TVMFFIEnvGetStream(device_type, device_id));
             TVM_FFI_ICHECK_EQ(cur_stream, stream);
         }
     """,
-    functions=["check_stream"],
-)
+        functions=["check_stream"],
+    )
 
 
 def test_raw_stream():
+    mod = gen_check_stream_mod()
     device = tvm_ffi.device("cuda:0")
     stream_1 = 123456789
     stream_2 = 987654321
     with tvm_ffi.use_raw_stream(device, stream_1):
-        ffi_mod.check_stream(device.dlpack_device_type(), device.index, stream_1)
+        mod.check_stream(device.dlpack_device_type(), device.index, stream_1)
 
         with tvm_ffi.use_raw_stream(device, stream_2):
-            ffi_mod.check_stream(device.dlpack_device_type(), device.index, stream_2)
+            mod.check_stream(device.dlpack_device_type(), device.index, stream_2)
 
-        ffi_mod.check_stream(device.dlpack_device_type(), device.index, stream_1)
+        mod.check_stream(device.dlpack_device_type(), device.index, stream_1)
 
 
+@pytest.mark.skipif(
+    torch is None or not torch.cuda.is_available(), reason="Requires torch and CUDA"
+)
 def test_torch_stream():
-    torch = pytest.importorskip("torch")
-
-    if not torch.cuda.is_available():
-        pytest.skip("torch.cuda.is_available() is False")
-
+    mod = gen_check_stream_mod()
     device_id = torch.cuda.current_device()
     device = tvm_ffi.device("cuda", device_id)
     device_type = device.dlpack_device_type()
@@ -61,23 +65,21 @@ def test_torch_stream():
     stream_2 = torch.cuda.Stream(device_id)
     with tvm_ffi.use_torch_stream(torch.cuda.stream(stream_1)):
         assert torch.cuda.current_stream() == stream_1
-        ffi_mod.check_stream(device_type, device_id, stream_1.cuda_stream)
+        mod.check_stream(device_type, device_id, stream_1.cuda_stream)
 
         with tvm_ffi.use_torch_stream(torch.cuda.stream(stream_2)):
             assert torch.cuda.current_stream() == stream_2
-            ffi_mod.check_stream(device_type, device_id, stream_2.cuda_stream)
+            mod.check_stream(device_type, device_id, stream_2.cuda_stream)
 
         assert torch.cuda.current_stream() == stream_1
-        ffi_mod.check_stream(device_type, device_id, stream_1.cuda_stream)
+        mod.check_stream(device_type, device_id, stream_1.cuda_stream)
 
 
+@pytest.mark.skipif(
+    torch is None or not torch.cuda.is_available(), reason="Requires torch and CUDA"
+)
 def test_torch_current_stream():
-
-    torch = pytest.importorskip("torch")
-
-    if not torch.cuda.is_available():
-        pytest.skip("torch.cuda.is_available() is False")
-
+    mod = gen_check_stream_mod()
     device_id = torch.cuda.current_device()
     device = tvm_ffi.device("cuda", device_id)
     device_type = device.dlpack_device_type()
@@ -86,24 +88,23 @@ def test_torch_current_stream():
     with torch.cuda.stream(stream_1):
         assert torch.cuda.current_stream() == stream_1
         with tvm_ffi.use_torch_stream():
-            ffi_mod.check_stream(device_type, device_id, stream_1.cuda_stream)
+            mod.check_stream(device_type, device_id, stream_1.cuda_stream)
 
         with torch.cuda.stream(stream_2):
             assert torch.cuda.current_stream() == stream_2
             with tvm_ffi.use_torch_stream():
-                ffi_mod.check_stream(device_type, device_id, stream_2.cuda_stream)
+                mod.check_stream(device_type, device_id, stream_2.cuda_stream)
 
         assert torch.cuda.current_stream() == stream_1
         with tvm_ffi.use_torch_stream():
-            ffi_mod.check_stream(device_type, device_id, stream_1.cuda_stream)
+            mod.check_stream(device_type, device_id, stream_1.cuda_stream)
 
 
+@pytest.mark.skipif(
+    torch is None or not torch.cuda.is_available(), reason="Requires torch and CUDA"
+)
 def test_torch_graph():
-    torch = pytest.importorskip("torch")
-
-    if not torch.cuda.is_available():
-        pytest.skip("torch.cuda.is_available() is False")
-
+    mod = gen_check_stream_mod()
     device_id = torch.cuda.current_device()
     device = tvm_ffi.device("cuda", device_id)
     device_type = device.dlpack_device_type()
@@ -111,4 +112,4 @@ def test_torch_graph():
     stream = torch.cuda.Stream(device_id)
     with tvm_ffi.use_torch_stream(torch.cuda.graph(graph, stream=stream)):
         assert torch.cuda.current_stream() == stream
-        ffi_mod.check_stream(device_type, device_id, stream.cuda_stream)
+        mod.check_stream(device_type, device_id, stream.cuda_stream)
