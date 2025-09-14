@@ -39,8 +39,8 @@ Before starting, ensure you have:
 Then obtain a copy of the tvm-ffi source code.
 
 ```bash
-git clone https://github.com/apache/tvm --recursive
-cd tvm/ffi
+git clone https://github.com/apache/tvm-ffi --recursive
+cd tvm-ffi
 ```
 
 The examples are now in the example folder, you can quickly build
@@ -85,10 +85,13 @@ examples/quick_start/
 #include <tvm/ffi/dtype.h>
 #include <tvm/ffi/error.h>
 #include <tvm/ffi/function.h>
+#include <tvm/ffi/container/tensor.h>
 
 namespace tvm_ffi_example {
 
-void AddOne(DLTensor* x, DLTensor* y) {
+namespace ffi = tvm::ffi;
+
+void AddOne(ffi::Tensor x, ffi::Tensor y) {
   // Validate inputs
   TVM_FFI_ICHECK(x->ndim == 1) << "x must be a 1D tensor";
   DLDataType f32_dtype{kDLFloat, 32, 1};
@@ -109,13 +112,13 @@ TVM_FFI_DLL_EXPORT_TYPED_FUNC(add_one_cpu, tvm_ffi_example::AddOne);
 ```
 
 **Key Points:**
-- Functions take `DLTensor*` parameters for cross-language compatibility
+- Functions take `tvm::ffi::Tensor` parameters for cross-language compatibility
 - The `TVM_FFI_DLL_EXPORT_TYPED_FUNC` macro exposes the function with a given name
 
 ### CUDA Implementation
 
 ```cpp
-void AddOneCUDA(DLTensor* x, DLTensor* y) {
+void AddOneCUDA(ffi::Tensor x, ffi::Tensor y) {
   // Validation (same as CPU version)
   // ...
 
