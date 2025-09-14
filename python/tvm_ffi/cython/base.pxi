@@ -354,6 +354,10 @@ cdef inline str bytearray_to_str(const TVMFFIByteArray* x):
     return PyBytes_FromStringAndSize(x.data, x.size).decode("utf-8")
 
 
+cdef inline bytes bytearray_to_bytes(const TVMFFIByteArray* x):
+    return PyBytes_FromStringAndSize(x.data, x.size)
+
+
 cdef inline c_str(pystr):
     """Create ctypes char * from a python string
 

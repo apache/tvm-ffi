@@ -37,14 +37,14 @@ cdef inline object make_ret_small_str(TVMFFIAny result):
     """convert small string to return value."""
     cdef TVMFFIByteArray bytes
     bytes = TVMFFISmallBytesGetContentByteArray(&result)
-    return py_str(PyBytes_FromStringAndSize(bytes.data, bytes.size))
+    return bytearray_to_str(&bytes)
 
 
 cdef inline object make_ret_small_bytes(TVMFFIAny result):
     """convert small bytes to return value."""
     cdef TVMFFIByteArray bytes
     bytes = TVMFFISmallBytesGetContentByteArray(&result)
-    return PyBytes_FromStringAndSize(bytes.data, bytes.size)
+    return bytearray_to_bytes(&bytes)
 
 
 cdef inline object make_ret(TVMFFIAny result, DLPackToPyObject c_dlpack_to_pyobject = NULL):
@@ -689,12 +689,8 @@ def _add_class_attrs_by_reflection(int type_index, object cls):
         (<FieldSetter>setter).offset = field.offset
         if (field.flags & kTVMFFIFieldFlagBitMaskWritable) == 0:
             setter = None
-        doc = (
-            py_str(PyBytes_FromStringAndSize(field.doc.data, field.doc.size))
-            if field.doc.size != 0
-            else None
-        )
-        name = py_str(PyBytes_FromStringAndSize(field.name.data, field.name.size))
+        doc = bytearray_to_str(&field.doc) if field.doc.size != 0 else None
+        name = bytearray_to_str(&field.name)
         if hasattr(cls, name):
             # skip already defined attributes
             continue
@@ -703,12 +699,8 @@ def _add_class_attrs_by_reflection(int type_index, object cls):
     for i in range(num_methods):
         # attach methods to the class
         method = &(info.methods[i])
-        name = py_str(PyBytes_FromStringAndSize(method.name.data, method.name.size))
-        doc = (
-            py_str(PyBytes_FromStringAndSize(method.doc.data, method.doc.size))
-            if method.doc.size != 0
-            else None
-        )
+        name = bytearray_to_str(&method.name)
+        doc = bytearray_to_str(&method.doc) if method.doc.size != 0 else None
         method_func = _get_method_from_method_info(method)
 
         if method.flags & kTVMFFIFieldFlagBitMaskIsStaticMethod:
