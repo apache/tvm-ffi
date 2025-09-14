@@ -236,6 +236,7 @@ cdef extern from "tvm/ffi/c_api.h":
     DLTensor* TVMFFITensorGetDLTensorPtr(TVMFFIObjectHandle obj) nogil
     DLDevice TVMFFIDLDeviceFromIntPair(int32_t device_type, int32_t device_id) nogil
 
+
 cdef extern from "tvm/ffi/extra/c_env_api.h":
     ctypedef void* TVMFFIStreamHandle
 
@@ -244,6 +245,43 @@ cdef extern from "tvm/ffi/extra/c_env_api.h":
     int TVMFFIEnvSetStream(int32_t device_type, int32_t device_id,
                                   TVMFFIStreamHandle stream,
                                   TVMFFIStreamHandle* opt_out_original_stream) nogil
+
+cdef _env_set_current_stream(int device_type, int device_id, uint64_t stream):
+    cdef TVMFFIStreamHandle prev_stream = NULL
+    CHECK_CALL(TVMFFIEnvSetStream(
+        device_type,
+        device_id,
+        <void*>stream,
+        &prev_stream))
+    return <uint64_t>prev_stream
+
+
+class StreamContext:
+    """StreamContext represents a stream context in the ffi system.
+    StreamContext helps setup ffi env stream by python `with` statement.
+
+    Parameters
+    ----------
+    device : Device
+        The device to which the stream belongs.
+
+    stream : Union[int, c_void_p]
+        The stream handle.
+    """
+    def __init__(self, device, stream):
+        self.device_type = device.dlpack_device_type()
+        self.device_id = device.index
+        self.stream = stream
+
+    def __enter__(self):
+        self.prev_stream = _env_set_current_stream(
+            self.device_type, self.device_id, self.stream
+        )
+
+    def __exit__(self, *args):
+        self.prev_stream = _env_set_current_stream(
+            self.device_type, self.device_id, self.prev_stream
+        )
 
 
 cdef extern from "tvm_ffi_python_helpers.h":
