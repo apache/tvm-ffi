@@ -29,9 +29,10 @@ build code. To connect these functions to the FFI convention, one can use the
 following options:
 
 - For compilers that generate host functions via codegen (e.g., LLVM), one can
-  generate the symbol `__tvm_ffi_func_name` directly following the ABI convention.
+  generate the symbol `__tvm_ffi_<func_name>`, where `<funcname>` is the exported
+  function.
 - For kernel generators that generate C++ host code, one can directly
-  use `TVM_FFI_DLL_EXPORT_TYPED_FUNC` to expose the symbol.
+  use {c:macro}`TVM_FFI_DLL_EXPORT_TYPED_FUNC` to expose the symbol.
 
 The following code snippet shows C code that corresponds to a
 function performing `add_one` under the ABI. It is reasonably straightforward for
@@ -77,8 +78,8 @@ int __tvm_ffi_add_one(
 
 Some of the key takeaways include:
 - Prefix the symbol with `__tvm_ffi_`
-- Call `TVMFFIEnvGetStream` to get the current environment stream
-- Use return value for error handling, set error via `TVMFFIErrorSetRaisedFromCStr`.
+- Call {cpp:func}`TVMFFIEnvGetStream` to get the current environment stream
+- Use return value for error handling, set error via {cpp:func}`TVMFFIErrorSetRaisedFromCStr`.
 
 You can also check out the [ABI overview](../concepts/abi_overview.md) for a more complete guide.
 
@@ -95,7 +96,7 @@ Op.call_tvm_ffi("my_func", *args)
   global functions that are registered and invoke them.
 - For ahead-of-time compilation (AOT) with minimum runtime, the AOT compiler can generate
   direct calls into FFI functions:
-  - Use the TVMFFIFunctionCall API to call into custom `ffi::Function`s
+  - Use the TVMFFIFunctionCall API to call into custom {cpp:class}`tvm::ffi::Function`s
   - If the function exposes a C symbol following the FFI ABI, call it directly.
 
 This approach provides a unified mechanism to call into any libraries and other DSLs
@@ -106,16 +107,16 @@ with various kernel DSLs and libraries.
 
 While the standard dynamic library module is sufficient for many use cases,
 sometimes it may be helpful to package a custom runtime module that wraps over a driver API.
-For example, using `cuModuleLoad` explicitly to load generated PTX code and expose it as an `ffi::Function`.
+For example, using `cuModuleLoad` explicitly to load generated PTX code and expose it as an {cpp:class}`tvm::ffi::Function`.
 The {cpp:class}`tvm::ffi::ModuleObj` interface provides a way to support this need.
-Generally, the steps include subclassing the `tvm::ffi::ModuleObj`:
+Generally, the steps include subclassing the {cpp:class}`tvm::ffi::ModuleObj`:
 
-- Provide a specific `kind` string to identify the module type
-- Override `GetPropertyMask` to indicate:
+- Provide a specific {cpp:func}`tvm::ffi::ModuleObj::kind` string to identify the module type
+- Override {cpp:func}`tvm::ffi::ModuleObj::GetPropertyMask` to indicate:
   - The module is `ffi::Module::kRunnable` (executable)
   - If binary serialization is supported, also add `ffi::Module::kBinarySerializable`
-- Override `GetFunction` to specify how functions can be loaded from custom data
-- Register binary serialization/deserialization `SaveToBytes` and register a global
+- Override {cpp:func}`tvm::ffi::ModuleObj::GetFunction` to specify how functions loaded
+- Register binary serialization/deserialization {cpp:func}`tvm::ffi::ModuleObj::SaveToBytes` and register a global
   function `ffi.Module.load_from_bytes.<kind>`
 
 ### Enable Export and Loading
@@ -128,7 +129,7 @@ We allow libraries to embed a binary symbol `__tvm_ffi__library_bin` in the foll
 - `<import_tree>` uses CSR sparse array format: `<indptr: vec<u64>> <child_indices: vec<u64>>`
   to store child indices of each node (each node is a Module instance)
 - `<key>` stores the module kind, or can be `_lib`:
-  - `_lib` indicates the module corresponds to the dynamic library itself with functions in shared library symbols
+  - `_lib` indicates the module corresponds to the dynamic library itself
   - For other cases, `val: bytes` contains the serialized bytes from the custom module
 - Both `bytes` and `str` are serialized as `<size: u64> <content>`
 
