@@ -36,6 +36,7 @@ or reading through the guides and concepts sections.
    guides/packaging.md
    guides/cpp_guide.md
    guides/python_guide.md
+   guides/compiler_integration.md
 
 
 .. toctree::

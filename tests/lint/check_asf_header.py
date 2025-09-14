@@ -229,7 +229,7 @@ def check_header(fname, header):
 
     if not has_asf_header:
         print(f"ERROR: Missing ASF header in {fname}")
-        print("Run `python check_asf_header.py --fix` to add the header")
+        print("Run `python tests/lint/check_asf_header.py --fix` to add the header")
         return False
 
     if has_copyright:

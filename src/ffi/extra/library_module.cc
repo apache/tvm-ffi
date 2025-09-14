@@ -83,10 +83,11 @@ Module LoadModuleFromBytes(const std::string& kind, const Bytes& bytes) {
 Module ProcessLibraryBin(const char* library_bin, ObjectPtr<Library> opt_lib,
                          void** library_ctx_addr = nullptr) {
   // Layout of the library binary:
-  // <nbytes : u64> <import_tree> <key0: str> <val0: bytes> <key1: str> <val1: bytes> ...
+  // <nbytes : u64> <import_tree> <key0: str> [<val0: bytes>] <key1: str> [<val1: bytes>] ...
   // key can be: "_lib", or a module kind
   //   - "_lib" indicate this location places the library module
-  //   - other keys are module kinds
+  //   - other keys are module kind, in which case [val: bytes] contains
+  //     the serialized bytes from the custom module
   // Import tree structure (CSR structure of child indices):
   // <import_tree> = <indptr: vec<u64>> <child_indices: vec<u64>>
   TVM_FFI_ICHECK(library_bin != nullptr);

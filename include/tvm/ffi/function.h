@@ -828,7 +828,7 @@ inline int32_t TypeKeyToIndex(std::string_view type_key) {
 }
 
 /*!
- * \brief Export typed function as a SafeCallType symbol.
+ * \brief Export typed function as a SafeCallType symbol that follows the FFI ABI.
  *
  * \param ExportName The symbol name to be exported.
  * \param Function The typed function.
@@ -850,16 +850,9 @@ inline int32_t TypeKeyToIndex(std::string_view type_key) {
  * TVM_FFI_DLL_EXPORT_TYPED_FUNC(SubOne, [](int x) {
  *   return x - 1;
  * });
- *
- * // The following code will cause compilation error.
- * // Because the same Function and ExportName
- * // TVM_FFI_DLL_EXPORT_TYPED_FUNC(AddOne_, AddOne_);
- *
- * // The following code is OK, assuming the macro
- * // is in a different namespace from xyz
- * // TVM_FFI_DLL_EXPORT_TYPED_FUNC(AddOne_, xyz::AddOne_);
- *
  * \endcode
+ *
+ * \note The final symbol name is `__tvm_ffi_<ExportName>`.
  */
 #define TVM_FFI_DLL_EXPORT_TYPED_FUNC(ExportName, Function)                                    \
   extern "C" {                                                                                 \
