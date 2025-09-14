@@ -20,7 +20,6 @@ import pytest
 import tvm_ffi
 import tvm_ffi.cpp
 
-
 ffi_mod = tvm_ffi.cpp.load_inline(
     name="check_stream",
     cpp_sources="""
