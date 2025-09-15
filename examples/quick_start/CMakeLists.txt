@@ -31,11 +31,18 @@ find_package(tvm_ffi CONFIG REQUIRED)
 
 # use the projects as usual
 add_library(add_one_cpu SHARED src/add_one_cpu.cc)
+add_library(add_one_c SHARED src/add_one_c.c)
 target_link_libraries(add_one_cpu tvm_ffi_header)
 target_link_libraries(add_one_cpu tvm_ffi_shared)
+target_link_libraries(add_one_c tvm_ffi_shared)
 # show as add_one_cpu.so
 set_target_properties(
   add_one_cpu PROPERTIES
+  PREFIX ""
+  SUFFIX ".so"
+)
+set_target_properties(
+  add_one_c PROPERTIES
   PREFIX ""
   SUFFIX ".so"
 )

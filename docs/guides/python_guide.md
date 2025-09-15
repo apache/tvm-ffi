@@ -139,6 +139,47 @@ assert map_obj["b"] == 2
 When container values are returned from FFI functions, they are also stored in these
 types respectively.
 
+## Inline Module
+
+You can also load a _inline module_ where the C++/CUDA code is directly embedded in the Python script and then compiled
+on the fly. For example, we can define a simple kernel that adds one to each element of an array as follows:
+
+```python
+import torch
+from tvm_ffi import Module
+import tvm_ffi.cpp
+
+# define the cpp source code
+cpp_source = '''
+     void add_one_cpu(tvm::ffi::Tensor x, tvm::ffi::Tensor y) {
+       // implementation of a library function
+       TVM_FFI_ICHECK(x->ndim == 1) << "x must be a 1D tensor";
+       DLDataType f32_dtype{kDLFloat, 32, 1};
+       TVM_FFI_ICHECK(x->dtype == f32_dtype) << "x must be a float tensor";
+       TVM_FFI_ICHECK(y->ndim == 1) << "y must be a 1D tensor";
+       TVM_FFI_ICHECK(y->dtype == f32_dtype) << "y must be a float tensor";
+       TVM_FFI_ICHECK(x->shape[0] == y->shape[0]) << "x and y must have the same shape";
+       for (int i = 0; i < x->shape[0]; ++i) {
+         static_cast<float*>(y->data)[i] = static_cast<float*>(x->data)[i] + 1;
+       }
+     }
+'''
+
+# compile the cpp source code and load the module
+mod: Module = tvm_ffi.cpp.load_inline(
+    name='hello', cpp_sources=cpp_source, functions='add_one_cpu'
+)
+
+# use the function from the loaded module to perform
+x = torch.tensor([1, 2, 3, 4, 5], dtype=torch.float32)
+y = torch.empty_like(x)
+mod.add_one_cpu(x, y)
+torch.testing.assert_close(x + 1, y)
+```
+
+The above code defines a C++ function `add_one_cpu` in Python script, compiles it on the fly and then loads the compiled
+{py:class}`tvm_ffi.Module` object via {py:func}`tvm_ffi.cpp.load_inline`. You can then call the function `add_one_cpu` 
+from the module as usual.
 
 ## Error Handling
 

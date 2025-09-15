@@ -15,7 +15,6 @@
 # specific language governing permissions and limitations
 # under the License.
 
-import sys
 
 import numpy
 import pytest
@@ -29,12 +28,11 @@ import tvm_ffi.cpp
 from tvm_ffi.module import Module
 
 
-@pytest.mark.xfail(sys.platform.startswith("win"), reason="needs to robustify windows support")
 def test_load_inline_cpp():
     mod: Module = tvm_ffi.cpp.load_inline(
         name="hello",
         cpp_sources=r"""
-            void add_one_cpu(DLTensor* x, DLTensor* y) {
+            void add_one_cpu(tvm::ffi::Tensor x, tvm::ffi::Tensor y) {
               // implementation of a library function
               TVM_FFI_ICHECK(x->ndim == 1) << "x must be a 1D tensor";
               DLDataType f32_dtype{kDLFloat, 32, 1};
@@ -56,12 +54,11 @@ def test_load_inline_cpp():
     numpy.testing.assert_equal(x + 1, y)
 
 
-@pytest.mark.xfail(sys.platform.startswith("win"), reason="needs to robustify windows support")
 def test_load_inline_cpp_with_docstrings():
     mod: Module = tvm_ffi.cpp.load_inline(
         name="hello",
         cpp_sources=r"""
-            void add_one_cpu(DLTensor* x, DLTensor* y) {
+            void add_one_cpu(tvm::ffi::Tensor x, tvm::ffi::Tensor y) {
               // implementation of a library function
               TVM_FFI_ICHECK(x->ndim == 1) << "x must be a 1D tensor";
               DLDataType f32_dtype{kDLFloat, 32, 1};
@@ -83,13 +80,12 @@ def test_load_inline_cpp_with_docstrings():
     numpy.testing.assert_equal(x + 1, y)
 
 
-@pytest.mark.xfail(sys.platform.startswith("win"), reason="needs to robustify windows support")
 def test_load_inline_cpp_multiple_sources():
     mod: Module = tvm_ffi.cpp.load_inline(
         name="hello",
         cpp_sources=[
             r"""
-            void add_one_cpu(DLTensor* x, DLTensor* y) {
+            void add_one_cpu(tvm::ffi::Tensor x, tvm::ffi::Tensor y) {
               // implementation of a library function
               TVM_FFI_ICHECK(x->ndim == 1) << "x must be a 1D tensor";
               DLDataType f32_dtype{kDLFloat, 32, 1};
@@ -103,7 +99,7 @@ def test_load_inline_cpp_multiple_sources():
             }
         """,
             r"""
-            void add_two_cpu(DLTensor* x, DLTensor* y) {
+            void add_two_cpu(tvm::ffi::Tensor x, tvm::ffi::Tensor y) {
               // implementation of a library function
               TVM_FFI_ICHECK(x->ndim == 1) << "x must be a 1D tensor";
               DLDataType f32_dtype{kDLFloat, 32, 1};
@@ -126,12 +122,11 @@ def test_load_inline_cpp_multiple_sources():
     numpy.testing.assert_equal(x + 1, y)
 
 
-@pytest.mark.xfail(sys.platform.startswith("win"), reason="needs to robustify windows support")
 def test_load_inline_cpp_build_dir():
     mod: Module = tvm_ffi.cpp.load_inline(
         name="hello",
         cpp_sources=r"""
-            void add_one_cpu(DLTensor* x, DLTensor* y) {
+            void add_one_cpu(tvm::ffi::Tensor x, tvm::ffi::Tensor y) {
               // implementation of a library function
               TVM_FFI_ICHECK(x->ndim == 1) << "x must be a 1D tensor";
               DLDataType f32_dtype{kDLFloat, 32, 1};
@@ -168,7 +163,7 @@ def test_load_inline_cuda():
               }
             }
 
-            void add_one_cuda(DLTensor* x, DLTensor* y) {
+            void add_one_cuda(tvm::ffi::Tensor x, tvm::ffi::Tensor y) {
               // implementation of a library function
               TVM_FFI_ICHECK(x->ndim == 1) << "x must be a 1D tensor";
               DLDataType f32_dtype{kDLFloat, 32, 1};
@@ -249,7 +244,7 @@ def test_load_inline_both():
     mod: Module = tvm_ffi.cpp.load_inline(
         name="hello",
         cpp_sources=r"""
-            void add_one_cpu(DLTensor* x, DLTensor* y) {
+            void add_one_cpu(tvm::ffi::Tensor x, tvm::ffi::Tensor y) {
               // implementation of a library function
               TVM_FFI_ICHECK(x->ndim == 1) << "x must be a 1D tensor";
               DLDataType f32_dtype{kDLFloat, 32, 1};
@@ -262,7 +257,7 @@ def test_load_inline_both():
               }
             }
 
-            void add_one_cuda(DLTensor* x, DLTensor* y);
+            void add_one_cuda(tvm::ffi::Tensor x, tvm::ffi::Tensor y);
         """,
         cuda_sources=r"""
             __global__ void AddOneKernel(float* x, float* y, int n) {
@@ -272,7 +267,7 @@ def test_load_inline_both():
               }
             }
 
-            void add_one_cuda(DLTensor* x, DLTensor* y) {
+            void add_one_cuda(tvm::ffi::Tensor x, tvm::ffi::Tensor y) {
               // implementation of a library function
               TVM_FFI_ICHECK(x->ndim == 1) << "x must be a 1D tensor";
               DLDataType f32_dtype{kDLFloat, 32, 1};

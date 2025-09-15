@@ -214,7 +214,7 @@ def footer_html():
 
 
 html_theme_options = {
-    "repository_url": "https://github.com/apache/tvm",
+    "repository_url": "https://github.com/apache/tvm-ffi",
     "use_repository_button": True,
     "extra_footer": footer_html(),
 }
@@ -223,5 +223,9 @@ html_context = {
     "display_github": True,
     "github_user": "apache",
     "github_version": "main",
-    "conf_py_path": "/ffi/docs/",
+    "conf_py_path": "/docs/",
 }
+
+html_static_path = ['_static']
+
+html_css_files = ['custom.css']

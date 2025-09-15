@@ -48,6 +48,7 @@ macro(tvm_ffi_add_googletest target_name)
   target_link_libraries(${target_name} PRIVATE gtest_main)
   gtest_discover_tests(${target_name}
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+    TEST_DISCOVERY_TIMEOUT 600
     DISCOVERY_MODE PRE_TEST
     PROPERTIES
       VS_DEBUGGER_WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"

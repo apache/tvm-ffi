@@ -32,8 +32,8 @@ Let's start by building and running the example.
 First, obtain a copy of the tvm-ffi source code.
 
 ```bash
-git clone https://github.com/apache/tvm --recursive
-cd tvm/ffi
+git clone https://github.com/apache/tvm-ffi --recursive
+cd tvm-ffi
 ```
 
 The examples are now in the examples folder. You can quickly build
@@ -147,7 +147,7 @@ which can later be accessed via `tvm_ffi.load_module`.
 Here's a basic example of the function implementation:
 
 ```c++
-void AddOne(DLTensor* x, DLTensor* y) {
+void AddOne(ffi::Tensor x, ffi::Tensor y) {
   // ... implementation omitted ...
 }
 

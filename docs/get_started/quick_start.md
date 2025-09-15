@@ -39,8 +39,8 @@ Before starting, ensure you have:
 Then obtain a copy of the tvm-ffi source code.
 
 ```bash
-git clone https://github.com/apache/tvm --recursive
-cd tvm/ffi
+git clone https://github.com/apache/tvm-ffi --recursive
+cd tvm-ffi
 ```
 
 The examples are now in the example folder, you can quickly build
@@ -72,6 +72,7 @@ tensor and expose that function as TVM FFI compatible function. The key file str
 examples/quick_start/
 ├── src/
 │   ├── add_one_cpu.cc      # CPU implementation
+│   ├── add_one_c.c         # A low-level C based implementation
 │   ├── add_one_cuda.cu     # CUDA implementation
 │   └── run_example.cc      # C++ usage example
 ├── run_example.py          # Python usage example
@@ -85,10 +86,13 @@ examples/quick_start/
 #include <tvm/ffi/dtype.h>
 #include <tvm/ffi/error.h>
 #include <tvm/ffi/function.h>
+#include <tvm/ffi/container/tensor.h>
 
 namespace tvm_ffi_example {
 
-void AddOne(DLTensor* x, DLTensor* y) {
+namespace ffi = tvm::ffi;
+
+void AddOne(ffi::Tensor x, ffi::Tensor y) {
   // Validate inputs
   TVM_FFI_ICHECK(x->ndim == 1) << "x must be a 1D tensor";
   DLDataType f32_dtype{kDLFloat, 32, 1};
@@ -109,13 +113,13 @@ TVM_FFI_DLL_EXPORT_TYPED_FUNC(add_one_cpu, tvm_ffi_example::AddOne);
 ```
 
 **Key Points:**
-- Functions take `DLTensor*` parameters for cross-language compatibility
+- Functions take `tvm::ffi::Tensor` parameters for cross-language compatibility
 - The `TVM_FFI_DLL_EXPORT_TYPED_FUNC` macro exposes the function with a given name
 
 ### CUDA Implementation
 
 ```cpp
-void AddOneCUDA(DLTensor* x, DLTensor* y) {
+void AddOneCUDA(ffi::Tensor x, ffi::Tensor y) {
   // Validation (same as CPU version)
   // ...
 
@@ -198,16 +202,81 @@ shows how to run the example exported function in C++.
 #include <tvm/ffi/container/tensor.h>
 #include <tvm/ffi/extra/module.h>
 
-void CallAddOne(DLTensor* x, DLTensor *y) {
-  namespace ffi = tvm::ffi;
+namespace ffi = tvm::ffi;
+
+void CallAddOne(ffi::Tensor x, ffi::Tensor y) {
   ffi::Module mod = ffi::Module::LoadFromFile("build/add_one_cpu.so");
   ffi::Function add_one_cpu = mod->GetFunction("add_one_cpu").value();
   add_one_cpu(x, y);
 }
 ```
 
+## Advanced: Minimal C ABI demonstration
+
+For those who need to understand the low-level C ABI or are implementing
+compiler codegen, we also provided an example that is C only as follows:
+
+```c
+#include <tvm/ffi/c_api.h>
+#include <tvm/ffi/extra/c_env_api.h>
+
+// Helper to extract DLTensor from TVMFFIAny
+int ReadDLTensorPtr(const TVMFFIAny *value, DLTensor** out) {
+  if (value->type_index == kTVMFFIDLTensorPtr) {
+    *out = (DLTensor*)(value->v_ptr);
+    return 0;
+  }
+  if (value->type_index != kTVMFFITensor) {
+    TVMFFIErrorSetRaisedFromCStr("ValueError", "Expects a Tensor input");
+    return -1;
+  }
+  *out = (DLTensor*)((char*)(value->v_obj) + sizeof(TVMFFIObject));
+  return 0;
+}
+
+// Raw C FFI function
+int __tvm_ffi_add_one_c(
+  void* handle, const TVMFFIAny* args, int32_t num_args, TVMFFIAny* result
+) {
+  DLTensor *x, *y;
+
+  // Extract tensor arguments
+  if (ReadDLTensorPtr(&args[0], &x) == -1) return -1;
+  if (ReadDLTensorPtr(&args[1], &y) == -1) return -1;
+
+  // Get current stream for device synchronization (e.g., CUDA)
+  // not needed for CPU, just keep here for demonstration purpose
+  void* stream = TVMFFIEnvGetStream(x->device.device_type, x->device.device_id);
+
+  // Perform computation
+  for (int i = 0; i < x->shape[0]; ++i) {
+    ((float*)(y->data))[i] = ((float*)(x->data))[i] + 1;
+  }
+  return 0;  // Success
+}
+```
+To compile this code, you need to add {py:func}`tvm_ffi.libinfo.find_include_paths` to your include
+path and link the shared library that can be found through {py:func}`tvm_ffi.libinfo.find_libtvm_ffi`.
+We also provide command line tools to link, so you can compile with the following command:
+
+```bash
+gcc -shared -fPIC `tvm-ffi-config --cflags`  \
+    src/add_one_c.c -o build/add_one_c.so    \
+    `tvm-ffi-config --ldflags` `tvm-ffi-config --libs`
+```
+
+The main takeaway points are:
+- Function symbols follow name `int __tvm_ffi_<name>`
+- The function follows signaure of `TVMFFISafeCallType`
+- Use `TVMFFIAny` to handle dynamic argument types
+- Return `0` for success, `-1` for error (set via `TVMFFIErrorSetRaisedFromCStr`)
+- This function can be compiled using a c compiler and loaded in the same one as
+  other libraries in this example.
+
 ## Summary Key Concepts
 
 - **TVM_FFI_DLL_EXPORT_TYPED_FUNC** exposes a c++ function into tvm-ffi C ABI
-- **DLTensor** is a universal tensor structure that enables zero-copy exchange of array data
+- **ffi::Tensor** is a universal tensor structure that enables zero-copy exchange of array data
 - **Module loading** is provided by tvm ffi APIs in multiple languages.
+- **C ABI** is provided for easy low-level integration
+

@@ -61,6 +61,7 @@ ALLOW_EXTENSION = {
     "txt",
     "md",
     "rst",
+    "css",
     # sgx
     "edl",
     "lds",

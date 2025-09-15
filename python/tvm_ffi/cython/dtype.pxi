@@ -99,11 +99,11 @@ cdef class DataType:
         CHECK_CALL(TVMFFIDataTypeToString(&(self.cdtype), &temp_any))
         if temp_any.type_index == kTVMFFISmallStr:
             bytes = TVMFFISmallBytesGetContentByteArray(&temp_any)
-            res = py_str(PyBytes_FromStringAndSize(bytes.data, bytes.size))
+            res = bytearray_to_str(&bytes)
             return res
 
         bytes_ptr = TVMFFIBytesGetByteArrayPtr(temp_any.v_obj)
-        res = py_str(PyBytes_FromStringAndSize(bytes_ptr.data, bytes_ptr.size))
+        res = bytearray_to_str(bytes_ptr)
         CHECK_CALL(TVMFFIObjectDecRef(temp_any.v_obj))
         return res
 

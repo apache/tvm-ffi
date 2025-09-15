@@ -52,6 +52,26 @@ def run_add_one_cpu():
     print(y)
 
 
+def run_add_one_c():
+    """Load the add_one_c module and call the add_one_c function."""
+    mod = tvm_ffi.load_module("build/add_one_c.so")
+
+    x = numpy.array([1, 2, 3, 4, 5], dtype=numpy.float32)
+    y = numpy.empty_like(x)
+    mod.add_one_c(x, y)
+    print("numpy.result after add_one_c(x, y)")
+    print(x)
+
+    if torch is None:
+        return
+
+    x = torch.tensor([1, 2, 3, 4, 5], dtype=torch.float32)
+    y = torch.empty_like(x)
+    mod.add_one_c(x, y)
+    print("torch.result after add_one_c(x, y)")
+    print(y)
+
+
 def run_add_one_cuda():
     """Load the add_one_cuda module and call the add_one_cuda function."""
     if torch is None or not torch.cuda.is_available():
@@ -76,6 +96,7 @@ def run_add_one_cuda():
 def main():
     """Main function to run the example."""
     run_add_one_cpu()
+    run_add_one_c()
     run_add_one_cuda()
 
 

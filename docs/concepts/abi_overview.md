@@ -29,8 +29,8 @@ so the code itself illustrates the low-level semantics of how to work with the A
 These can serve as references for how to build language bindings and compiler codegen for the ABI.
 
 ```{note}
-The authoritative ABI specifications are defined in [tvm/ffi/c_api.h](https://github.com/apache/tvm/blob/main/ffi/include/tvm/ffi/c_api.h) for core ABI,
-and [tvm/ffi/extra/c_env_api.h](https://github.com/apache/tvm/blob/main/ffi/include/tvm/ffi/extra/c_env_api.h) for extra support features
+The authoritative ABI specifications are defined in [tvm/ffi/c_api.h](https://github.com/apache/tvm-ffi/blob/main/include/tvm/ffi/c_api.h) for core ABI,
+and [tvm/ffi/extra/c_env_api.h](https://github.com/apache/tvm-ffi/blob/main/include/tvm/ffi/extra/c_env_api.h) for extra support features
 such as stream handling. This document provides explanations about design concepts and rationales.
 ```
 

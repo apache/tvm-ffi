@@ -128,6 +128,63 @@ def _get_cuda_target() -> str:
             return "-gencode=arch=compute_70,code=sm_70"
 
 
+def _run_command_in_dev_prompt(args, cwd, capture_output):
+    """Locates the Developer Command Prompt and runs a command within its environment."""
+    try:
+        # Path to vswhere.exe
+        vswhere_path = os.path.join(
+            os.environ.get("ProgramFiles(x86)", "C:\\Program Files (x86)"),
+            "Microsoft Visual Studio",
+            "Installer",
+            "vswhere.exe",
+        )
+
+        if not os.path.exists(vswhere_path):
+            raise FileNotFoundError("vswhere.exe not found.")
+
+        # Find the Visual Studio installation path
+        vs_install_path = subprocess.run(
+            [
+                vswhere_path,
+                "-latest",
+                "-prerelease",
+                "-products",
+                "*",
+                "-property",
+                "installationPath",
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+
+        if not vs_install_path:
+            raise FileNotFoundError("No Visual Studio installation found.")
+
+        # Construct the path to the VsDevCmd.bat file
+        vsdevcmd_path = os.path.join(vs_install_path, "Common7", "Tools", "VsDevCmd.bat")
+
+        if not os.path.exists(vsdevcmd_path):
+            raise FileNotFoundError(f"VsDevCmd.bat not found at: {vsdevcmd_path}")
+
+        # Use cmd.exe to run the batch file and then your command.
+        # The /k flag keeps the command prompt open after the batch file runs.
+        # The "&" symbol chains the commands.
+        cmd_command = '"{vsdevcmd_path}" -arch=x64 & {command}'.format(
+            vsdevcmd_path=vsdevcmd_path, command=" ".join(args)
+        )
+
+        # Execute the command in a new shell
+        return subprocess.run(cmd_command, cwd=cwd, capture_output=capture_output, shell=True)
+
+    except (FileNotFoundError, subprocess.CalledProcessError) as e:
+        raise RuntimeError(
+            "Failed to run the following command in MSVC developer environment: {}".format(
+                " ".join(args)
+            )
+        ) from e
+
+
 def _generate_ninja_build(
     name: str,
     build_dir: str,
@@ -248,7 +305,10 @@ def _build_ninja(build_dir: str) -> None:
     num_workers = os.environ.get("MAX_JOBS", None)
     if num_workers is not None:
         command += ["-j", num_workers]
-    status = subprocess.run(args=command, cwd=build_dir, capture_output=True)
+    if IS_WINDOWS:
+        status = _run_command_in_dev_prompt(args=command, cwd=build_dir, capture_output=True)
+    else:
+        status = subprocess.run(args=command, cwd=build_dir, capture_output=True)
     if status.returncode != 0:
         msg = ["ninja exited with status {}".format(status.returncode)]
         encoding = "oem" if IS_WINDOWS else "utf-8"
@@ -263,6 +323,7 @@ def _build_ninja(build_dir: str) -> None:
 def _decorate_with_tvm_ffi(source: str, functions: Mapping[str, str]) -> str:
     """Decorate the given source code with TVM FFI export macros."""
     sources = [
+        "#include <tvm/ffi/container/tensor.h>",
         "#include <tvm/ffi/dtype.h>",
         "#include <tvm/ffi/error.h>",
         "#include <tvm/ffi/extra/c_env_api.h>",
@@ -292,33 +353,34 @@ def load_inline(
     extra_include_paths: Sequence[str] | None = None,
     build_directory: Optional[str] = None,
 ) -> Module:
-    """Compile and load a C++/CUDA tvm ffi module from inline source code.
+    """Compile and load a C++/CUDA module from inline source code.
 
-    This function compiles the given C++ and/or CUDA source code into a shared library. Both cpp_sources and
-    cuda_sources are compiled to an object file, and then linked together into a shared library. It's possible to only
+    This function compiles the given C++ and/or CUDA source code into a shared library. Both ``cpp_sources`` and
+    ``cuda_sources`` are compiled to an object file, and then linked together into a shared library. It's possible to only
     provide cpp_sources or cuda_sources.
 
-    The `functions` parameter is used to specify which functions in the source code should be exported to the tvm ffi module.
-    It can be a mapping, a sequence, or a single string. When a mapping is given, the keys are the names of the exported
-    functions, and the values are docstrings for the functions. When a sequence or a single string is given, they are the
-    functions needed to be exported, and the docstrings are set to empty strings. A single function name can also be given
-    as a string, indicating that only one function is to be exported.
+    The ``functions`` parameter is used to specify which functions in the source code should be exported to the tvm ffi
+    module. It can be a mapping, a sequence, or a single string. When a mapping is given, the keys are the names of the
+    exported functions, and the values are docstrings for the functions. When a sequence of string is given, they are
+    the function names needed to be exported, and the docstrings are set to empty strings. A single function name can
+    also be given as a string, indicating that only one function is to be exported.
 
-    Extra compiler and linker flags can be provided via the `extra_cflags`, `extra_cuda_cflags`, and `extra_ldflags`
+    Extra compiler and linker flags can be provided via the ``extra_cflags``, ``extra_cuda_cflags``, and ``extra_ldflags``
     parameters. The default flags are generally sufficient for most use cases, but you may need to provide additional
     flags for your specific use case.
 
-    The include dir of tvm ffi and dlpack are used by default for linker to find the headers. Thus, you can include
-    any header from tvm ffi and dlpack in your source code. You can also provide additional include paths via the
-    `extra_include_paths` parameter and include custom headers in your source code.
+    The include dir of tvm ffi and dlpack are used by default for the compiler to find the headers. Thus, you can
+    include any header from tvm ffi in your source code. You can also provide additional include paths via the
+    ``extra_include_paths`` parameter and include custom headers in your source code.
 
     The compiled shared library is cached in a cache directory to avoid recompilation. The `build_directory` parameter
     is provided to specify the build directory. If not specified, a default tvm ffi cache directory will be used.
     The default cache directory can be specified via the `TVM_FFI_CACHE_DIR` environment variable. If not specified,
-    the default cache directory is `~/.cache/tvm-ffi`.
+    the default cache directory is ``~/.cache/tvm-ffi``.
 
     Parameters
     ----------
+
     name: str
         The name of the tvm ffi module.
     cpp_sources: Sequence[str] | str, optional
@@ -335,31 +397,71 @@ def load_inline(
     extra_cflags: Sequence[str], optional
         The extra compiler flags for C++ compilation.
         The default flags are:
+
         - On Linux/macOS: ['-std=c++17', '-fPIC', '-O2']
-        - On Windows: ['/std:c++17']
-    extra_cuda_cflags:
+        - On Windows: ['/std:c++17', '/O2']
+
+    extra_cuda_cflags: Sequence[str], optional
         The extra compiler flags for CUDA compilation.
-        The default flags are:
-        - On Linux/macOS: ['-Xcompiler', '-fPIC', '-std=c++17', '-O2']
-        - On Windows: ['-Xcompiler', '/std:c++17', '/O2']
+
     extra_ldflags: Sequence[str], optional
         The extra linker flags.
         The default flags are:
+
         - On Linux/macOS: ['-shared']
         - On Windows: ['/DLL']
+
     extra_include_paths: Sequence[str], optional
         The extra include paths.
-        The default include paths are:
-        - The include path of tvm ffi
+
     build_directory: str, optional
         The build directory. If not specified, a default tvm ffi cache directory will be used. By default, the
-        cache directory is `~/.cache/tvm-ffi`. You can also set the `TVM_FFI_CACHE_DIR` environment variable to
+        cache directory is ``~/.cache/tvm-ffi``. You can also set the ``TVM_FFI_CACHE_DIR`` environment variable to
         specify the cache directory.
 
     Returns
     -------
     mod: Module
         The loaded tvm ffi module.
+
+
+    Example
+    -------
+
+    .. code-block:: python
+
+        import torch
+        from tvm_ffi import Module
+        import tvm_ffi.cpp
+
+        # define the cpp source code
+        cpp_source = '''
+             void add_one_cpu(tvm::ffi::Tensor x, tvm::ffi::Tensor y) {
+               // implementation of a library function
+               TVM_FFI_ICHECK(x->ndim == 1) << "x must be a 1D tensor";
+               DLDataType f32_dtype{kDLFloat, 32, 1};
+               TVM_FFI_ICHECK(x->dtype == f32_dtype) << "x must be a float tensor";
+               TVM_FFI_ICHECK(y->ndim == 1) << "y must be a 1D tensor";
+               TVM_FFI_ICHECK(y->dtype == f32_dtype) << "y must be a float tensor";
+               TVM_FFI_ICHECK(x->shape[0] == y->shape[0]) << "x and y must have the same shape";
+               for (int i = 0; i < x->shape[0]; ++i) {
+                 static_cast<float*>(y->data)[i] = static_cast<float*>(x->data)[i] + 1;
+               }
+             }
+        '''
+
+        # compile the cpp source code and load the module
+        mod: Module = tvm_ffi.cpp.load_inline(
+            name='hello',
+            cpp_sources=cpp_source,
+            functions='add_one_cpu'
+        )
+
+        # use the function from the loaded module to perform
+        x = torch.tensor([1, 2, 3, 4, 5], dtype=torch.float32)
+        y = torch.empty_like(x)
+        mod.add_one_cpu(x, y)
+        torch.testing.assert_close(x + 1, y)
     """
     if cpp_sources is None:
         cpp_sources = []

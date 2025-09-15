@@ -257,7 +257,7 @@ cdef inline str _type_index_to_key(int32_t tindex):
     if info == NULL:
         return "<unknown>"
     type_key = &(info.type_key)
-    return py_str(PyBytes_FromStringAndSize(type_key.data, type_key.size))
+    return bytearray_to_str(type_key)
 
 
 cdef inline object make_ret_opaque_object(TVMFFIAny result):

@@ -58,7 +58,7 @@ You can also build and install tvm-ffi from source.
 Developers can clone the source repository from GitHub.
 
 ```bash
-git clone --recursive https://github.com/apache/tvm tvm
+git clone --recursive https://github.com/apache/tvm-ffi
 ```
 
 ```{note}
@@ -70,7 +70,7 @@ by running ``git submodule update --init --recursive`` in the root directory.
 Then you can install directly in development mode
 
 ```bash
-cd tvm/ffi
+cd tvm-ffi
 pip install -ve .
 ```
 
