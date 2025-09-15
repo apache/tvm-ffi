@@ -67,7 +67,7 @@ def getitem_helper(obj, elem_getter, length, idx):
 class Array(core.Object, collections.abc.Sequence):
     """Array container that represents a sequence of values in ffi.
 
-    {py:func}`tvm_ffi.convert` will map python list/tuple to this class.
+    :py:func:`tvm_ffi.convert` will map python list/tuple to this class.
 
     Parameters
     ----------
@@ -76,7 +76,7 @@ class Array(core.Object, collections.abc.Sequence):
 
     See Also
     --------
-    {py:func}`tvm_ffi.convert`
+    :py:func:`tvm_ffi.convert`
 
     Examples
     --------
@@ -173,7 +173,7 @@ class ItemsView(collections.abc.ItemsView):
 class Map(core.Object, collections.abc.Mapping):
     """Map container.
 
-    {py:func}`tvm_ffi.convert` will map python dict to this class.
+    :py:func:`tvm_ffi.convert` will map python dict to this class.
 
     Parameters
     ----------
@@ -182,7 +182,7 @@ class Map(core.Object, collections.abc.Mapping):
 
     See Also
     --------
-    {py:func}`tvm_ffi.convert`
+    :py:func:`tvm_ffi.convert`
 
     Examples
     --------
