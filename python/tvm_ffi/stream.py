@@ -22,6 +22,43 @@ from typing import Any, Optional, Union
 from . import core
 from ._tensor import device
 
+
+class StreamContext:
+    """StreamContext represents a stream context in the ffi system.
+    StreamContext helps setup ffi environment stream by python `with` statement.
+    When entering `with` scope, it caches the current environment stream and
+    setup the given new stream.
+    When exiting `with` scope, it recovers the stream to the cached environment stream.
+
+    Parameters
+    ----------
+    device : Device
+        The device to which the stream belongs.
+
+    stream : Union[int, c_void_p]
+        The stream handle.
+
+    See Also
+    --------
+    :py:func:`tvm_ffi.use_raw_stream`, :py:func:`tvm_ffi.use_torch_stream`
+    """
+
+    def __init__(self, device: core.Device, stream: Union[int, c_void_p]):
+        self.device_type = device.dlpack_device_type()
+        self.device_id = device.index
+        self.stream = stream
+
+    def __enter__(self):
+        self.prev_stream = core._env_set_current_stream(
+            self.device_type, self.device_id, self.stream
+        )
+
+    def __exit__(self, *args):
+        self.prev_stream = core._env_set_current_stream(
+            self.device_type, self.device_id, self.prev_stream
+        )
+
+
 try:
     import torch
 
@@ -33,7 +70,7 @@ try:
             if self.torch_context:
                 self.torch_context.__enter__()
             current_stream = torch.cuda.current_stream()
-            self.ffi_context = core.StreamContext(
+            self.ffi_context = StreamContext(
                 device(str(current_stream.device)), current_stream.cuda_stream
             )
             self.ffi_context.__enter__()
@@ -61,13 +98,18 @@ try:
         Examples
         --------
         .. code-block:: python
-        s = torch.cuda.Stream()
-        with tvm_ffi.use_torch_stream(torch.cuda.stream(s)):
-          ...
 
-        g = torch.cuda.CUDAGraph()
-        with tvm_ffi.use_torch_stream(torch.cuda.graph(g)):
-          ...
+            s = torch.cuda.Stream()
+            with tvm_ffi.use_torch_stream(torch.cuda.stream(s)):
+                ...
+
+            g = torch.cuda.CUDAGraph()
+            with tvm_ffi.use_torch_stream(torch.cuda.graph(g)):
+                ...
+
+        Note
+        ----
+        When working with raw cudaStream_t handle, using :py:func:`tvm_ffi.use_raw_stream` instead.
         """
         return TorchStreamContext(context)
 
@@ -93,10 +135,14 @@ def use_raw_stream(device: core.Device, stream: Union[int, c_void_p]):
     -------
     context : tvm_ffi.StreamContext
         The ffi stream context.
+
+    Note
+    ----
+    When working with torch stram or cuda graph, using :py:func:`tvm_ffi.use_torch_stream` instead.
     """
     if not isinstance(stream, (int, c_void_p)):
         raise ValueError(
             "use_raw_stream only accepts int or c_void_p as stram input, "
             "try use_torch_stream when using torch.cuda.Stream or torch.cuda.graph"
         )
-    return core.StreamContext(device, stream)
+    return StreamContext(device, stream)

@@ -68,6 +68,16 @@ Containers
   Map
 
 
+Stream Context
+--------------
+.. autosummary::
+  :toctree: generated/
+
+  StreamContext
+  use_torch_stream
+  use_raw_stream
+
+
 Utility
 -------
 
