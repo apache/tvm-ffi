@@ -35,43 +35,49 @@ following options:
   use {c:macro}`TVM_FFI_DLL_EXPORT_TYPED_FUNC` to expose the symbol.
 
 The following code snippet shows C code that corresponds to a
-function performing `add_one` under the ABI. It is reasonably straightforward for
+function performing `add_one_c` under the ABI. It is reasonably straightforward for
 low-level code generators to replicate this C logic.
+You can run this code as part of the [quick start example](https://github.com/apache/tvm-ffi/tree/dev/examples/quick_start).
 
 ```c
 #include <tvm/ffi/c_api.h>
 #include <tvm/ffi/extra/c_env_api.h>
 
 // Helper function to extract DLTensor from TVMFFIAny (can be inlined into generated code)
-int ReadDLTensorPtr(const TVMFFIAny *value, DLTensor* out) {
+int ReadDLTensorPtr(const TVMFFIAny *value, DLTensor** out) {
   if (value->type_index == kTVMFFIDLTensorPtr) {
-    *out = static_cast<DLTensor*>(value->v_ptr);
+    *out = (DLTensor*)(value->v_ptr);
     return 0;
   }
-  if (value->type_index == kTVMFFITensor) {
+  if (value->type_index != kTVMFFITensor) {
+    // Use TVMFFIErrorSetRaisedFromCStr to set an error which will
+    // be propagated to the caller
     TVMFFIErrorSetRaisedFromCStr("ValueError", "Expects a Tensor input");
     return -1;
   }
-  *out = reinterpret_cast<DLTensor*>(
-    reinterpret_cast<char*>(value->v_obj) + sizeof(TVMFFIObject));
+  *out = (DLTensor*)((char*)(value->v_obj) + sizeof(TVMFFIObject));
   return 0;
 }
 
 // FFI function implementing add_one operation
-int __tvm_ffi_add_one(
+int __tvm_ffi_add_one_c(
   void* handle, const TVMFFIAny* args, int32_t num_args, TVMFFIAny* result
 ) {
-  DLTensor *a, *b, *c;
+  DLTensor *x, *y;
   // Extract tensor arguments
-  if (ReadDLTensorPtr(&args[0], &a) == -1) return -1;
-  if (ReadDLTensorPtr(&args[1], &b) == -1) return -1;
-  if (ReadDLTensorPtr(&args[2], &c) == -1) return -1;
+  // return -1 for error, error is set through TVMFFIErrorSetRaisedFromCStr
+  if (ReadDLTensorPtr(&args[0], &x) == -1) return -1;
+  if (ReadDLTensorPtr(&args[1], &y) == -1) return -1;
 
   // Get current stream for device synchronization (e.g., CUDA)
-  void* stream = TVMFFIEnvGetStream(a->device.device_type, a->device.device_id);
+  // not needed for CPU, just keep here for demonstration purpose
+  void* stream = TVMFFIEnvGetStream(x->device.device_type, x->device.device_id);
 
-  // Generated computation code would follow here to perform the actual operation
-  // on tensors a, b, c and store result in c
+  // perform the actual operation
+  for (int i = 0; i < x->shape[0]; ++i) {
+    ((float*)(y->data))[i] = ((float*)(x->data))[i] + 1;
+  }
+  // return 0 for success run
   return 0;
 }
 ```

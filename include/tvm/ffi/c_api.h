@@ -27,21 +27,6 @@
 #include <dlpack/dlpack.h>
 #include <stdint.h>
 
-/*
- * \brief C-style Allocator that allocates memory for a DLPack tensor.
- * \param prototype The prototype DLTensor to offer details about device and shape.
- * \param out The output DLManagedTensorVersioned.
- * \param error_ctx The context to set the error.
- * \param SetError The function to set the error.
- * \return 0 on success, -1 on failure.
- *         call SetError(error_ctx, kind, message) to set the error kind and message.
- * \note Error propagation via SetError.
- */
-typedef int (*DLPackTensorAllocator)(                                         //
-    DLTensor* prototype, DLManagedTensorVersioned** out, void* error_ctx,     //
-    void (*SetError)(void* error_ctx, const char* kind, const char* message)  //
-);
-
 // Macros to do weak linking
 #ifdef _MSC_VER
 #define TVM_FFI_WEAK __declspec(selectany)
@@ -75,12 +60,29 @@ typedef int (*DLPackTensorAllocator)(                                         //
 extern "C" {
 #endif
 
+// TODO(tqchen): remove this once dlpack.h is updated
+typedef struct DLManagedTensorVersioned DLManagedTensorVersioned;
+
+/*
+ * \brief C-style Allocator that allocates memory for a DLPack tensor.
+ * \param prototype The prototype DLTensor to offer details about device and shape.
+ * \param out The output DLManagedTensorVersioned.
+ * \param error_ctx The context to set the error.
+ * \param SetError The function to set the error.
+ * \return 0 on success, -1 on failure.
+ *         call SetError(error_ctx, kind, message) to set the error kind and message.
+ * \note Error propagation via SetError.
+ */
+typedef int (*DLPackTensorAllocator)(                                         //
+    DLTensor* prototype, DLManagedTensorVersioned** out, void* error_ctx,     //
+    void (*SetError)(void* error_ctx, const char* kind, const char* message)  //
+);
+
 #ifdef __cplusplus
 enum TVMFFITypeIndex : int32_t {
 #else
 typedef enum {
 #endif
-
   /*
    * \brief The root type of all FFI objects.
    *
@@ -279,7 +281,6 @@ typedef struct {
     DLDataType v_dtype;    // data type
     DLDevice v_device;     // device
     char v_bytes[8];       // small string
-    char32_t v_char32[2];  // small UCS4 string and Unicode
     uint64_t v_uint64;     // uint64 repr mainly used for hashing
   };
 } TVMFFIAny;

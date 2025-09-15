@@ -52,7 +52,7 @@ You can also compile the modules directly using
 flags provided by the `tvm-ffi-config` tool.
 
 ```bash
-g++ -shared -fPIC `tvm-ffi-config --cxxflags`  \
-    src/add_one_cpu.cc -o build/add_one_cpu.so \
+gcc -shared -fPIC `tvm-ffi-config --cflags`  \
+    src/add_one_c.c -o build/add_one_c.so \
     `tvm-ffi-config --ldflags` `tvm-ffi-config --libs`
 ```

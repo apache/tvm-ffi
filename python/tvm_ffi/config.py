@@ -48,6 +48,7 @@ def __main__():
     parser.add_argument("--libs", action="store_true", help="Libraries to be linked")
     parser.add_argument("--cython-lib-path", action="store_true", help="Print cython path")
     parser.add_argument("--cxxflags", action="store_true", help="Print cxx flags")
+    parser.add_argument("--cflags", action="store_true", help="Print c flags")
     parser.add_argument("--ldflags", action="store_true", help="Print ld flags")
 
     args = parser.parse_args()
@@ -78,12 +79,15 @@ def __main__():
         include_dir = libinfo.find_include_path()
         dlpack_include_dir = libinfo.find_dlpack_include_path()
         print(f"-I{include_dir} -I{dlpack_include_dir} -std=c++17")
+    if args.cflags:
+        include_dir = libinfo.find_include_path()
+        dlpack_include_dir = libinfo.find_dlpack_include_path()
+        print(f"-I{include_dir} -I{dlpack_include_dir}")
     if args.libs:
         if sys.platform.startswith("win32"):
             print(find_windows_implib())
         else:
             print("-ltvm_ffi")
-
     if args.ldflags:
         if not sys.platform.startswith("win32"):
             print(f"-L{os.path.dirname(libinfo.find_libtvm_ffi())}")
