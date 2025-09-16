@@ -231,10 +231,10 @@ if (TVM_FFI_BUILD_PYTHON_MODULE)
 
   ########## Installing the source ##########
   install(
-    DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/dlpack/include DESTINATION 3rdparty/dlpack/include
+    DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/dlpack/include/ DESTINATION 3rdparty/dlpack/include/
   )
   install(
-    DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/libbacktrace DESTINATION 3rdparty/libbacktrace
+    DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/libbacktrace/ DESTINATION 3rdparty/libbacktrace/
     PATTERN ".git" EXCLUDE
     PATTERN ".git*" EXCLUDE
     PATTERN "*.tmp" EXCLUDE
