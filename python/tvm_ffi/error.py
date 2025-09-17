@@ -21,11 +21,12 @@ import ast
 import re
 import sys
 import types
+from typing import Any, Optional
 
 from . import core
 
 
-def _parse_traceback(traceback):
+def _parse_traceback(traceback: str) -> list[tuple[str, int, str]]:
     """Parse the traceback string into a list of (filename, lineno, func).
 
     Parameters
@@ -57,11 +58,11 @@ def _parse_traceback(traceback):
 class TracebackManager:
     """Helper to manage traceback generation."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the traceback manager and its cache."""
         self._code_cache = {}
 
-    def _get_cached_code_object(self, filename, lineno, func):
+    def _get_cached_code_object(self, filename: str, lineno: int, func: str) -> types.CodeType:
         # Hack to create a code object that points to the correct
         # line number and function name
         key = (filename, lineno, func)
@@ -83,7 +84,7 @@ class TracebackManager:
         self._code_cache[key] = code_object
         return code_object
 
-    def _create_frame(self, filename, lineno, func):
+    def _create_frame(self, filename: str, lineno: int, func: str) -> types.FrameType:
         """Create a frame object from the filename, lineno, and func."""
         code_object = self._get_cached_code_object(filename, lineno, func)
         # call into get frame, but changes the context so the code
@@ -92,7 +93,13 @@ class TracebackManager:
         # pylint: disable=eval-used
         return eval(code_object, context, context)
 
-    def append_traceback(self, tb, filename, lineno, func):
+    def append_traceback(
+        self,
+        tb: Optional[types.TracebackType],
+        filename: str,
+        lineno: int,
+        func: str,
+    ) -> types.TracebackType:
         """Append a traceback to the given traceback.
 
         Parameters
@@ -119,7 +126,7 @@ class TracebackManager:
 _TRACEBACK_MANAGER = TracebackManager()
 
 
-def _with_append_traceback(py_error, traceback):
+def _with_append_traceback(py_error: BaseException, traceback: str) -> BaseException:
     """Append the traceback to the py_error and return it."""
     tb = py_error.__traceback__
     for filename, lineno, func in reversed(_parse_traceback(traceback)):
@@ -127,7 +134,7 @@ def _with_append_traceback(py_error, traceback):
     return py_error.with_traceback(tb)
 
 
-def _traceback_to_str(tb):
+def _traceback_to_str(tb: Optional[types.TracebackType]) -> str:
     """Convert the traceback to a string."""
     lines = []
     while tb is not None:
@@ -144,7 +151,10 @@ core._WITH_APPEND_TRACEBACK = _with_append_traceback
 core._TRACEBACK_TO_STR = _traceback_to_str
 
 
-def register_error(name_or_cls=None, cls=None):
+def register_error(
+    name_or_cls: str | type | None = None,
+    cls: Optional[type] = None,
+) -> Any:
     """Register an error class so it can be recognized by the ffi error handler.
 
     Parameters
@@ -176,7 +186,7 @@ def register_error(name_or_cls=None, cls=None):
         cls = name_or_cls
         name_or_cls = cls.__name__
 
-    def register(mycls):
+    def register(mycls: type) -> type:
         """Register the error class name with the FFI core."""
         err_name = name_or_cls if isinstance(name_or_cls, str) else mycls.__name__
         core.ERROR_NAME_TO_TYPE[err_name] = mycls

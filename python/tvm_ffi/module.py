@@ -18,6 +18,7 @@
 # pylint: disable=invalid-name
 
 from enum import IntEnum
+from typing import Any
 
 from . import _ffi_api, core
 from .registry import register_object
@@ -58,12 +59,12 @@ class Module(core.Object):
     entry_name = "main"
 
     @property
-    def kind(self):
+    def kind(self) -> str:
         """Get type key of the module."""
         return _ffi_api.ModuleGetKind(self)
 
     @property
-    def imports(self):
+    def imports(self) -> list["Module"]:
         """Get imported modules.
 
         Returns
@@ -74,7 +75,7 @@ class Module(core.Object):
         """
         return self.imports_
 
-    def implements_function(self, name, query_imports=False):
+    def implements_function(self, name: str, query_imports: bool = False) -> bool:
         """Return True if the module defines a global function.
 
         Note
@@ -101,7 +102,7 @@ class Module(core.Object):
         """
         return _ffi_api.ModuleImplementsFunction(self, name, query_imports)
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str) -> core.Function:
         """Accessor to allow getting functions as attributes."""
         try:
             func = self.get_function(name)
@@ -110,7 +111,7 @@ class Module(core.Object):
         except AttributeError:
             raise AttributeError(f"Module has no function '{name}'")
 
-    def get_function(self, name, query_imports=False):
+    def get_function(self, name: str, query_imports: bool = False) -> core.Function:
         """Get function from the module.
 
         Parameters
@@ -132,7 +133,7 @@ class Module(core.Object):
             raise AttributeError(f"Module has no function '{name}'")
         return func
 
-    def import_module(self, module):
+    def import_module(self, module: "Module") -> None:
         """Add module to the import list of current one.
 
         Parameters
@@ -143,18 +144,18 @@ class Module(core.Object):
         """
         _ffi_api.ModuleImportModule(self, module)
 
-    def __getitem__(self, name):
+    def __getitem__(self, name: str) -> core.Function:
         """Return function by name using item access (module["func"])."""
         if not isinstance(name, str):
             raise ValueError("Can only take string as function name")
         return self.get_function(name)
 
-    def __call__(self, *args):
+    def __call__(self, *args: Any) -> Any:
         """Call the module's entry function (`main`)."""
         # pylint: disable=not-callable
         return self.main(*args)
 
-    def inspect_source(self, fmt=""):
+    def inspect_source(self, fmt: str = "") -> str:
         """Get source code from module, if available.
 
         Parameters
@@ -170,11 +171,11 @@ class Module(core.Object):
         """
         return _ffi_api.ModuleInspectSource(self, fmt)
 
-    def get_write_formats(self):
+    def get_write_formats(self) -> list[str]:
         """Get the format of the module."""
         return _ffi_api.ModuleGetWriteFormats(self)
 
-    def get_property_mask(self):
+    def get_property_mask(self) -> int:
         """Get the runtime module property mask. The mapping is stated in ModulePropertyMask.
 
         Returns
@@ -185,7 +186,7 @@ class Module(core.Object):
         """
         return _ffi_api.ModuleGetPropertyMask(self)
 
-    def is_binary_serializable(self):
+    def is_binary_serializable(self) -> bool:
         """Return whether the module is binary serializable (supports save_to_bytes).
 
         Returns
@@ -196,7 +197,7 @@ class Module(core.Object):
         """
         return (self.get_property_mask() & ModulePropertyMask.BINARY_SERIALIZABLE) != 0
 
-    def is_runnable(self):
+    def is_runnable(self) -> bool:
         """Return whether the module is runnable (supports get_function).
 
         Returns
@@ -207,7 +208,7 @@ class Module(core.Object):
         """
         return (self.get_property_mask() & ModulePropertyMask.RUNNABLE) != 0
 
-    def is_compilation_exportable(self):
+    def is_compilation_exportable(self) -> bool:
         """Return whether the module is compilation exportable.
 
         write_to_file is supported for object or source.
@@ -220,11 +221,11 @@ class Module(core.Object):
         """
         return (self.get_property_mask() & ModulePropertyMask.COMPILATION_EXPORTABLE) != 0
 
-    def clear_imports(self):
+    def clear_imports(self) -> None:
         """Remove all imports of the module."""
         _ffi_api.ModuleClearImports(self)
 
-    def write_to_file(self, file_name, fmt=""):
+    def write_to_file(self, file_name: str, fmt: str = "") -> None:
         """Write the current module to file.
 
         Parameters
@@ -242,7 +243,7 @@ class Module(core.Object):
         _ffi_api.ModuleWriteToFile(self, file_name, fmt)
 
 
-def system_lib(symbol_prefix=""):
+def system_lib(symbol_prefix: str = "") -> Module:
     """Get system-wide library module singleton.
 
     System lib is a global module that contains self register functions in startup.
@@ -267,7 +268,7 @@ def system_lib(symbol_prefix=""):
     return _ffi_api.SystemLib(symbol_prefix)
 
 
-def load_module(path):
+def load_module(path: str) -> Module:
     """Load module from file.
 
     Parameters

@@ -27,7 +27,7 @@ except ImportError:
 import numpy
 
 
-def run_add_one_cpu():
+def run_add_one_cpu() -> None:
     """Load the add_one_cpu module and call the add_one_cpu function."""
     mod = tvm_ffi.load_module("build/add_one_cpu.so")
 
@@ -53,7 +53,7 @@ def run_add_one_cpu():
     print(y)
 
 
-def run_add_one_c():
+def run_add_one_c() -> None:
     """Load the add_one_c module and call the add_one_c function."""
     mod = tvm_ffi.load_module("build/add_one_c.so")
 
@@ -73,7 +73,7 @@ def run_add_one_c():
     print(y)
 
 
-def run_add_one_cuda():
+def run_add_one_cuda() -> None:
     """Load the add_one_cuda module and call the add_one_cuda function."""
     if torch is None or not torch.cuda.is_available():
         return
@@ -94,7 +94,7 @@ def run_add_one_cuda():
     print(y)
 
 
-def main():
+def main() -> None:
     """Run the quick start example."""
     run_add_one_cpu()
     run_add_one_c()

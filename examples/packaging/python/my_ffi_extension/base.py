@@ -22,7 +22,7 @@ from pathlib import Path
 import tvm_ffi
 
 
-def _load_lib():
+def _load_lib() -> tvm_ffi.Module:
     # first look at the directory of the current file
     file_dir = Path(__file__).resolve().parent
 

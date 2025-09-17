@@ -116,7 +116,7 @@ ALLOW_FILE_NAME = {
 ALLOW_SPECIFIC_FILE = {"LICENSE", "NOTICE", "KEYS", "DISCLAIMER"}
 
 
-def filename_allowed(name):
+def filename_allowed(name: str) -> bool:
     """Check if name is allowed by the current policy.
 
     Paramaters
@@ -146,7 +146,7 @@ def filename_allowed(name):
     return False
 
 
-def copyright_line(line):
+def copyright_line(line: str) -> bool:
     # Following two items are intentionally break apart
     # so that the copyright detector won't detect the file itself.
     if line.find("Copyright " + "(c)") != -1:
@@ -158,7 +158,7 @@ def copyright_line(line):
     return False
 
 
-def check_asf_copyright(fname):
+def check_asf_copyright(fname: str) -> bool:
     if fname.endswith(".png"):
         return True
     if not Path(fname).is_file():
@@ -178,7 +178,7 @@ def check_asf_copyright(fname):
     return True
 
 
-def main():
+def main() -> None:
     cmd = ["git", "ls-files"]
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     (out, _) = proc.communicate()

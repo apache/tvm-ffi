@@ -17,11 +17,13 @@
 # isort: skip_file
 """Public Python API for the example tvm-ffi extension package."""
 
+from typing import Any
+
 from .base import _LIB
 from . import _ffi_api
 
 
-def add_one(x, y):
+def add_one(x: Any, y: Any) -> None:
     """Add one to the input tensor.
 
     Parameters
@@ -35,7 +37,7 @@ def add_one(x, y):
     return _LIB.add_one(x, y)
 
 
-def raise_error(msg):
+def raise_error(msg: str) -> None:
     """Raise an error with the given message.
 
     Parameters

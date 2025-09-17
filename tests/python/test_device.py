@@ -22,7 +22,7 @@ import tvm_ffi
 from tvm_ffi import DLDeviceType
 
 
-def test_device():
+def test_device() -> None:
     device = tvm_ffi.Device("cuda", 0)
     assert device.dlpack_device_type() == tvm_ffi.DLDeviceType.kDLCUDA
     assert device.index == 0
@@ -30,7 +30,7 @@ def test_device():
     assert device.__repr__() == "device(type='cuda', index=0)"
 
 
-def test_device_from_str():
+def test_device_from_str() -> None:
     device = tvm_ffi.device("ext_dev:0")
     assert device.dlpack_device_type() == tvm_ffi.DLDeviceType.kDLExtDev
     assert device.index == 0
@@ -48,7 +48,11 @@ def test_device_from_str():
         ("metal:2", DLDeviceType.kDLMetal, 2),
     ],
 )
-def test_device_dlpack_device_type(dev_str, expected_device_type, expect_device_id):
+def test_device_dlpack_device_type(
+    dev_str: str,
+    expected_device_type: DLDeviceType,
+    expect_device_id: int,
+) -> None:
     dev = tvm_ffi.device(dev_str)
     assert dev.dlpack_device_type() == expected_device_type
     assert dev.index == expect_device_id
@@ -64,24 +68,29 @@ def test_device_dlpack_device_type(dev_str, expected_device_type, expect_device_
         (DLDeviceType.kDLMetal, 2, DLDeviceType.kDLMetal, 2),
     ],
 )
-def test_device_with_dev_id(dev_type, dev_id, expected_device_type, expect_device_id):
+def test_device_with_dev_id(
+    dev_type: str | DLDeviceType,
+    dev_id: int,
+    expected_device_type: DLDeviceType,
+    expect_device_id: int,
+) -> None:
     dev = tvm_ffi.device(dev_type, dev_id)
     assert dev.dlpack_device_type() == expected_device_type
     assert dev.index == expect_device_id
 
 
 @pytest.mark.parametrize("dev_type, dev_id", [("cpu:0:0", None), ("cpu:?", None), ("cpu:", None)])
-def test_deive_type_error(dev_type, dev_id):
+def test_deive_type_error(dev_type: str, dev_id: int | None) -> None:
     with pytest.raises(ValueError):
         tvm_ffi.device(dev_type, dev_id)
 
 
-def test_deive_id_error():
+def test_deive_id_error() -> None:
     with pytest.raises(TypeError):
         tvm_ffi.device("cpu", "?")
 
 
-def test_device_pickle():
+def test_device_pickle() -> None:
     device = tvm_ffi.device("cuda", 0)
     device_pickled = pickle.loads(pickle.dumps(device))
     assert device_pickled.dlpack_device_type() == device.dlpack_device_type()

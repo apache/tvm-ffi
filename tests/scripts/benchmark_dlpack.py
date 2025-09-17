@@ -31,24 +31,25 @@ Summary of some takeaways:
 """
 
 import time
+from typing import Any, Callable
 
 import numpy as np
 import torch
 import tvm_ffi
 
 
-def print_speed(name, speed):
+def print_speed(name: str, speed: float) -> None:
     print(f"{name:<60} {speed} sec/call")
 
 
-def print_error(name, error):
+def print_error(name: str, error: Any) -> None:
     print(f"{name:<60} {error}")
 
 
-def baseline_torch_add(repeat):
+def baseline_torch_add(repeat: int) -> None:
     """Run torch.add with one element."""
 
-    def run_bench(device):
+    def run_bench(device: str) -> None:
         x = torch.arange(1, device=device)
         y = torch.arange(1, device=device)
         z = torch.arange(1, device=device)
@@ -69,7 +70,7 @@ def baseline_torch_add(repeat):
     run_bench("cuda")
 
 
-def baseline_numpy_add(repeat):
+def baseline_numpy_add(repeat: int) -> None:
     """Run numpy.add with one element."""
     x = np.arange(1)
     y = np.arange(1)
@@ -84,7 +85,7 @@ def baseline_numpy_add(repeat):
     print_speed("numpy.add", speed)
 
 
-def baseline_cupy_add(repeat):
+def baseline_cupy_add(repeat: int) -> None:
     """Run cupy.add with one element."""
     try:
         import cupy  # noqa: PLC0415
@@ -104,7 +105,7 @@ def baseline_cupy_add(repeat):
     print_speed("cupy.add", speed)
 
 
-def tvm_ffi_nop(repeat):
+def tvm_ffi_nop(repeat: int) -> None:
     """Overhead of tvm FFI python call via calling a NOP.
 
     testing.nop is defined in c++ and do nothing.
@@ -121,7 +122,7 @@ def tvm_ffi_nop(repeat):
     print_speed("tvm_ffi.nop", (end - start) / repeat)
 
 
-def bench_ffi_nop_from_dlpack(name, x, y, z, repeat):
+def bench_ffi_nop_from_dlpack(name: str, x: Any, y: Any, z: Any, repeat: int) -> None:
     """Run dlpack conversion + tvm_ffi.nop.
 
     Measures overhead of running dlpack for each args then invoke
@@ -142,7 +143,7 @@ def bench_ffi_nop_from_dlpack(name, x, y, z, repeat):
     print_speed(name, (end - start) / repeat)
 
 
-def tvm_ffi_nop_from_torch_dlpack(repeat):
+def tvm_ffi_nop_from_torch_dlpack(repeat: int) -> None:
     """Run dlpack conversion + tvm_ffi.nop.
 
     Measures overhead of running dlpack for each args then invoke
@@ -153,7 +154,7 @@ def tvm_ffi_nop_from_torch_dlpack(repeat):
     bench_ffi_nop_from_dlpack("tvm_ffi.nop+from_dlpack(torch)", x, y, z, repeat)
 
 
-def tvm_ffi_nop_from_numpy_dlpack(repeat):
+def tvm_ffi_nop_from_numpy_dlpack(repeat: int) -> None:
     """Run dlpack conversion + tvm_ffi.nop.
 
     Measures overhead of running dlpack for each args then invoke
@@ -164,7 +165,7 @@ def tvm_ffi_nop_from_numpy_dlpack(repeat):
     bench_ffi_nop_from_dlpack("tvm_ffi.nop+from_dlpack(numpy)", x, y, z, repeat)
 
 
-def tvm_ffi_self_dlpack_nop(repeat):
+def tvm_ffi_self_dlpack_nop(repeat: int) -> None:
     """Run dlpack conversion + tvm_ffi.nop.
 
     Measures overhead of running dlpack for each args then invoke
@@ -175,7 +176,7 @@ def tvm_ffi_self_dlpack_nop(repeat):
     bench_ffi_nop_from_dlpack("tvm_ffi.nop+from_dlpack(tvm)", x, y, z, repeat)
 
 
-def tvm_ffi_nop_from_torch_utils_to_dlpack(repeat):
+def tvm_ffi_nop_from_torch_utils_to_dlpack(repeat: int) -> None:
     """Measures overhead of running dlpack for each args then invoke
     but uses the legacy torch.utils.dlpack.to_dlpack API.
 
@@ -202,7 +203,7 @@ def tvm_ffi_nop_from_torch_utils_to_dlpack(repeat):
     print_speed("tvm_ffi.nop+from_dlpack(torch.utils)", speed)
 
 
-def bench_tvm_ffi_nop_autodlpack(name, x, y, z, repeat):
+def bench_tvm_ffi_nop_autodlpack(name: str, x: Any, y: Any, z: Any, repeat: int) -> None:
     """Measures overhead of running dlpack via auto convert by directly
     take torch.Tensor as inputs.
     """
@@ -216,7 +217,9 @@ def bench_tvm_ffi_nop_autodlpack(name, x, y, z, repeat):
     print_speed(name, speed)
 
 
-def tvm_ffi_nop_autodlpack_from_torch(repeat, device="cpu", stream=False):
+def tvm_ffi_nop_autodlpack_from_torch(
+    repeat: int, device: str = "cpu", stream: bool = False
+) -> None:
     """Measures overhead of running dlpack via auto convert by directly
     take torch.Tensor as inputs.
     """
@@ -233,7 +236,7 @@ def tvm_ffi_nop_autodlpack_from_torch(repeat, device="cpu", stream=False):
         bench_tvm_ffi_nop_autodlpack(f"tvm_ffi.nop.autodlpack(torch[{device}])", x, y, z, repeat)
 
 
-def tvm_ffi_nop_autodlpack_from_numpy(repeat):
+def tvm_ffi_nop_autodlpack_from_numpy(repeat: int) -> None:
     """Measures overhead of running dlpack via auto convert by directly
     take numpy.ndarray as inputs.
     """
@@ -244,7 +247,7 @@ def tvm_ffi_nop_autodlpack_from_numpy(repeat):
     bench_tvm_ffi_nop_autodlpack("tvm_ffi.nop.autodlpack(numpy)", x, y, z, repeat)
 
 
-def tvm_ffi_nop_autodlpack_from_dltensor_test_wrapper(repeat, device):
+def tvm_ffi_nop_autodlpack_from_dltensor_test_wrapper(repeat: int, device: str) -> None:
     """Measures overhead of running dlpack via auto convert by directly
     take test wrapper as inputs. This effectively measure DLPack exchange in tvm ffi.
     """
@@ -259,7 +262,7 @@ def tvm_ffi_nop_autodlpack_from_dltensor_test_wrapper(repeat, device):
     )
 
 
-def bench_to_dlpack(x, name, repeat):
+def bench_to_dlpack(x: Any, name: str, repeat: int) -> None:
     x.__dlpack__()
     start = time.time()
     for i in range(repeat):
@@ -269,7 +272,9 @@ def bench_to_dlpack(x, name, repeat):
     print_speed(name, speed)
 
 
-def bench_to_dlpack_versioned(x, name, repeat, max_version=(1, 1)):
+def bench_to_dlpack_versioned(
+    x: Any, name: str, repeat: int, max_version: tuple[int, int] = (1, 1)
+) -> None:
     """Measures overhead of running dlpack with latest 1.1."""
     try:
         x.__dlpack__(max_version=max_version)
@@ -283,7 +288,7 @@ def bench_to_dlpack_versioned(x, name, repeat, max_version=(1, 1)):
         print_error(name, e)
 
 
-def bench_torch_utils_to_dlpack(repeat):
+def bench_torch_utils_to_dlpack(repeat: int) -> None:
     """Measures overhead of running torch.utils.dlpack.to_dlpack."""
     x = torch.arange(1)
     torch.utils.dlpack.to_dlpack(x)
@@ -295,11 +300,11 @@ def bench_torch_utils_to_dlpack(repeat):
     print_speed("torch.utils.dlpack.to_dlpack", speed)
 
 
-def torch_get_cuda_stream_native(device_id):
+def torch_get_cuda_stream_native(device_id: int) -> int:
     return torch.cuda.current_stream(device_id).cuda_stream
 
 
-def load_torch_get_current_cuda_stream():
+def load_torch_get_current_cuda_stream() -> Callable[[int], int]:
     """Create a faster get_current_cuda_stream for torch through cpp extension."""
     from torch.utils import cpp_extension  # noqa: PLC0415
 
@@ -325,7 +330,7 @@ def load_torch_get_current_cuda_stream():
     return result.get_current_cuda_stream
 
 
-def bench_torch_get_current_stream(repeat, name, func):
+def bench_torch_get_current_stream(repeat: int, name: str, func: Callable[[int], int]) -> None:
     """Measures overhead of running torch.cuda.current_stream."""
     x = torch.arange(1, device="cuda")  # noqa: F841
     func(0)
@@ -337,14 +342,14 @@ def bench_torch_get_current_stream(repeat, name, func):
     print_speed(f"torch.cuda.current_stream[{name}]", speed)
 
 
-def populate_object_table(num_classes):
+def populate_object_table(num_classes: int) -> None:
     nop = tvm_ffi.get_global_func("testing.nop")
     dummy_instances = [type(f"DummyClass{i}", (object,), {})() for i in range(num_classes)]
     for instance in dummy_instances:
         nop(instance)
 
 
-def main():  # noqa: PLR0915
+def main() -> None:  # noqa: PLR0915
     repeat = 10000
     # measures impact of object dispatch table size
     # takeaway so far is that there is no impact on the performance

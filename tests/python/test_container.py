@@ -15,12 +15,13 @@
 # specific language governing permissions and limitations
 # under the License.
 import pickle
+from typing import Any
 
 import pytest
 import tvm_ffi
 
 
-def test_array():
+def test_array() -> None:
     a = tvm_ffi.convert([1, 2, 3])
     assert isinstance(a, tvm_ffi.Array)
     assert len(a) == 3
@@ -29,7 +30,7 @@ def test_array():
     assert (a_slice[0], a_slice[1]) == (1, 2)
 
 
-def test_bad_constructor_init_state():
+def test_bad_constructor_init_state() -> None:
     """Test when error is raised before __init_handle_by_constructor.
 
     This case we need the FFI binding to gracefully handle both repr
@@ -43,7 +44,7 @@ def test_bad_constructor_init_state():
         tvm_ffi.Map(1)
 
 
-def test_array_of_array_map():
+def test_array_of_array_map() -> None:
     a = tvm_ffi.convert([[1, 2, 3], {"A": 5, "B": 6}])
     assert isinstance(a, tvm_ffi.Array)
     assert len(a) == 2
@@ -54,7 +55,7 @@ def test_array_of_array_map():
     assert a[1]["B"] == 6
 
 
-def test_int_map():
+def test_int_map() -> None:
     amap = tvm_ffi.convert({3: 2, 4: 3})
     assert 3 in amap
     assert len(amap) == 2
@@ -67,9 +68,9 @@ def test_int_map():
     assert tuple(amap.values()) == (2, 3)
 
 
-def test_array_map_of_opaque_object():
+def test_array_map_of_opaque_object() -> None:
     class MyObject:
-        def __init__(self, value):
+        def __init__(self, value: Any) -> None:
             self.value = value
 
     a = tvm_ffi.convert([MyObject("hello"), MyObject(1)])
@@ -89,7 +90,7 @@ def test_array_map_of_opaque_object():
     assert y["b"].value == "hello"
 
 
-def test_str_map():
+def test_str_map() -> None:
     data = []
     for i in reversed(range(10)):
         data.append((f"a{i}", i))
@@ -103,13 +104,13 @@ def test_str_map():
     assert tuple(k for k in amap) == tuple(k for k, _ in data)
 
 
-def test_key_not_found():
+def test_key_not_found() -> None:
     amap = tvm_ffi.convert({3: 2, 4: 3})
     with pytest.raises(KeyError):
         amap[5]
 
 
-def test_repr():
+def test_repr() -> None:
     a = tvm_ffi.convert([1, 2, 3])
     assert str(a) == "[1, 2, 3]"
     amap = tvm_ffi.convert({3: 2, 4: 3})
@@ -119,7 +120,7 @@ def test_repr():
     assert str(smap) == "{'a': 1, 'b': 2}"
 
 
-def test_serialization():
+def test_serialization() -> None:
     a = tvm_ffi.convert([1, 2, 3])
     b = pickle.loads(pickle.dumps(a))
     assert str(b) == "[1, 2, 3]"

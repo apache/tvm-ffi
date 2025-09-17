@@ -19,7 +19,7 @@
 from tvm_ffi.access_path import AccessKind, AccessPath
 
 
-def test_root_path():
+def test_root_path() -> None:
     root = AccessPath.root()
     assert isinstance(root, AccessPath)
     steps = root.to_steps()
@@ -27,7 +27,7 @@ def test_root_path():
     assert root == AccessPath.root()
 
 
-def test_path_attr():
+def test_path_attr() -> None:
     path = AccessPath.root().attr("foo")
     assert isinstance(path, AccessPath)
     steps = path.to_steps()
@@ -37,7 +37,7 @@ def test_path_attr():
     assert path.parent == AccessPath.root()
 
 
-def test_path_array_item():
+def test_path_array_item() -> None:
     path = AccessPath.root().array_item(2)
     assert isinstance(path, AccessPath)
     steps = path.to_steps()
@@ -47,7 +47,7 @@ def test_path_array_item():
     assert path.parent == AccessPath.root()
 
 
-def test_path_missing_array_element():
+def test_path_missing_array_element() -> None:
     path = AccessPath.root().array_item_missing(2)
     assert isinstance(path, AccessPath)
     steps = path.to_steps()
@@ -57,7 +57,7 @@ def test_path_missing_array_element():
     assert path.parent == AccessPath.root()
 
 
-def test_path_map_item():
+def test_path_map_item() -> None:
     path = AccessPath.root().map_item("foo")
     assert isinstance(path, AccessPath)
     steps = path.to_steps()
@@ -67,7 +67,7 @@ def test_path_map_item():
     assert path.parent == AccessPath.root()
 
 
-def test_path_missing_map_item():
+def test_path_missing_map_item() -> None:
     path = AccessPath.root().map_item_missing("foo")
     assert isinstance(path, AccessPath)
     steps = path.to_steps()
@@ -77,7 +77,7 @@ def test_path_missing_map_item():
     assert path.parent == AccessPath.root()
 
 
-def test_path_is_prefix_of():
+def test_path_is_prefix_of() -> None:
     # Root is prefix of root
     assert AccessPath.root().is_prefix_of(AccessPath.root())
 
@@ -107,7 +107,7 @@ def test_path_is_prefix_of():
     )
 
 
-def test_path_equal():
+def test_path_equal() -> None:
     # Root equals root
     assert AccessPath.root() == AccessPath.root()
 

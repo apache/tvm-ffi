@@ -38,7 +38,7 @@ if not (sys.version_info[0] >= 3 and sys.version_info[1] >= 9):
 # ----------------------------
 
 
-def _load_lib():
+def _load_lib() -> ctypes.CDLL:
     """Load libary by searching possible path."""
     lib_path = libinfo.find_libtvm_ffi()
     # The dll search path need to be added explicitly in windows

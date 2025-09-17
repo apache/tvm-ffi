@@ -16,6 +16,8 @@
 # under the License.
 """Testing utilities."""
 
+from typing import Any
+
 from . import _ffi_api
 from .core import Object
 from .registry import register_object
@@ -31,7 +33,7 @@ class TestObjectDerived(TestObjectBase):
     """Test object derived class."""
 
 
-def create_object(type_key: str, **kwargs) -> Object:
+def create_object(type_key: str, **kwargs: Any) -> Object:
     """Make an object by reflection.
 
     Parameters

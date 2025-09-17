@@ -19,6 +19,7 @@
 import os
 import sys
 import time
+from typing import Any, Optional
 
 # Platform-specific imports for file locking
 if sys.platform == "win32":
@@ -34,12 +35,12 @@ class FileLock:
     cooperating processes.
     """
 
-    def __init__(self, lock_file_path):
+    def __init__(self, lock_file_path: str) -> None:
         """Initialize a file lock using the given lock file path."""
         self.lock_file_path = lock_file_path
         self._file_descriptor = None
 
-    def __enter__(self):
+    def __enter__(self) -> "FileLock":
         """Acquire the lock upon entering the context.
 
         This method blocks until the lock is acquired.
@@ -47,12 +48,12 @@ class FileLock:
         self.blocking_acquire()
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> bool:
         """Context manager protocol: release the lock upon exiting the 'with' block."""
         self.release()
         return False  # Propagate exceptions, if any
 
-    def acquire(self):
+    def acquire(self) -> Optional[bool]:
         """Acquire an exclusive, non-blocking lock on the file.
 
         Returns True if the lock was acquired, False otherwise.
@@ -78,7 +79,9 @@ class FileLock:
                 self._file_descriptor = None
             raise RuntimeError(f"An unexpected error occurred: {e}")
 
-    def blocking_acquire(self, timeout=None, poll_interval=0.1):
+    def blocking_acquire(
+        self, timeout: Optional[float] = None, poll_interval: float = 0.1
+    ) -> Optional[bool]:
         """Wait until an exclusive lock can be acquired, with an optional timeout.
 
         Args:
@@ -100,7 +103,7 @@ class FileLock:
 
             time.sleep(poll_interval)
 
-    def release(self):
+    def release(self) -> None:
         """Releases the lock and closes the file descriptor."""
         if self._file_descriptor is not None:
             if sys.platform == "win32":

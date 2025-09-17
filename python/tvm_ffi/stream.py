@@ -18,7 +18,7 @@
 """Stream context."""
 
 from ctypes import c_void_p
-from typing import Any, Optional, Union
+from typing import Any, NoReturn, Optional, Union
 
 from . import core
 from ._tensor import device
@@ -46,19 +46,20 @@ class StreamContext:
 
     """
 
-    def __init__(self, device: core.Device, stream: Union[int, c_void_p]):
+    def __init__(self, device: core.Device, stream: Union[int, c_void_p]) -> None:
         """Initialize a stream context with a device and stream handle."""
         self.device_type = device.dlpack_device_type()
         self.device_id = device.index
         self.stream = stream
 
-    def __enter__(self):
+    def __enter__(self) -> "StreamContext":
         """Enter the context and set the current stream."""
         self.prev_stream = core._env_set_current_stream(
             self.device_type, self.device_id, self.stream
         )
+        return self
 
-    def __exit__(self, *args):
+    def __exit__(self, *args: Any) -> None:
         """Exit the context and restore the previous stream."""
         self.prev_stream = core._env_set_current_stream(
             self.device_type, self.device_id, self.prev_stream
@@ -71,11 +72,11 @@ try:
     class TorchStreamContext:
         """Context manager that syncs Torch and FFI stream contexts."""
 
-        def __init__(self, context: Optional[Any]):
+        def __init__(self, context: Optional[Any]) -> None:
             """Initialize with an optional Torch stream/graph context wrapper."""
             self.torch_context = context
 
-        def __enter__(self):
+        def __enter__(self) -> "TorchStreamContext":
             """Enter both Torch and FFI stream contexts."""
             if self.torch_context:
                 self.torch_context.__enter__()
@@ -84,14 +85,15 @@ try:
                 device(str(current_stream.device)), current_stream.cuda_stream
             )
             self.ffi_context.__enter__()
+            return self
 
-        def __exit__(self, *args):
+        def __exit__(self, *args: Any) -> None:
             """Exit both Torch and FFI stream contexts."""
             if self.torch_context:
                 self.torch_context.__exit__(*args)
             self.ffi_context.__exit__(*args)
 
-    def use_torch_stream(context: Optional[Any] = None):
+    def use_torch_stream(context: Optional[Any] = None) -> "TorchStreamContext":
         """Create an FFI stream context with a Torch stream or graph.
 
         cuda graph or current stream if `None` provided.
@@ -127,12 +129,12 @@ try:
 
 except ImportError:
 
-    def use_torch_stream(context: Optional[Any] = None):
+    def use_torch_stream(context: Optional[Any] = None) -> NoReturn:
         """Raise an informative error when Torch is unavailable."""
         raise ImportError("Cannot import torch")
 
 
-def use_raw_stream(device: core.Device, stream: Union[int, c_void_p]):
+def use_raw_stream(device: core.Device, stream: Union[int, c_void_p]) -> StreamContext:
     """Create a ffi stream context with given device and stream handle.
 
     Parameters

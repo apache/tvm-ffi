@@ -130,7 +130,11 @@ def _get_cuda_target() -> str:
             return "-gencode=arch=compute_70,code=sm_70"
 
 
-def _run_command_in_dev_prompt(args, cwd, capture_output):
+def _run_command_in_dev_prompt(
+    args: list[str],
+    cwd: str | os.PathLike[str],
+    capture_output: bool,
+) -> subprocess.CompletedProcess:
     """Locates the Developer Command Prompt and runs a command within its environment."""
     try:
         # Path to vswhere.exe

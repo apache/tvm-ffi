@@ -62,16 +62,16 @@ class dtype(str):
 
     _NUMPY_DTYPE_TO_STR: ClassVar[dict[Any, str]] = {}
 
-    def __new__(cls, content):
+    def __new__(cls, content: Any) -> "dtype":
         content = str(content)
         val = str.__new__(cls, content)
         val.__tvm_ffi_dtype__ = core.DataType(content)
         return val
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"dtype('{self}')"
 
-    def with_lanes(self, lanes):
+    def with_lanes(self, lanes: int) -> "dtype":
         """Create a new dtype with the given number of lanes.
 
         Parameters
@@ -96,19 +96,19 @@ class dtype(str):
         return val
 
     @property
-    def itemsize(self):
+    def itemsize(self) -> int:
         return self.__tvm_ffi_dtype__.itemsize
 
     @property
-    def type_code(self):
+    def type_code(self) -> int:
         return self.__tvm_ffi_dtype__.type_code
 
     @property
-    def bits(self):
+    def bits(self) -> int:
         return self.__tvm_ffi_dtype__.bits
 
     @property
-    def lanes(self):
+    def lanes(self) -> int:
         return self.__tvm_ffi_dtype__.lanes
 
 

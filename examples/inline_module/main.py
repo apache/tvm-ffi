@@ -21,7 +21,7 @@ import tvm_ffi.cpp
 from tvm_ffi.module import Module
 
 
-def main():
+def main() -> None:
     """Build, load, and run inline CPU/CUDA functions."""
     mod: Module = tvm_ffi.cpp.load_inline(
         name="hello",

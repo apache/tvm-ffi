@@ -22,7 +22,7 @@ import pytest
 import tvm_ffi
 
 
-def test_dtype():
+def test_dtype() -> None:
     float32 = tvm_ffi.dtype("float32")
     assert float32.__repr__() == "dtype('float32')"
     assert type(float32) == tvm_ffi.dtype
@@ -42,13 +42,13 @@ def test_dtype():
         ("bool", 1),
     ],
 )
-def test_dtype_itemsize(dtype_str, expected_size):
+def test_dtype_itemsize(dtype_str: str, expected_size: int) -> None:
     dtype = tvm_ffi.dtype(dtype_str)
     assert dtype.itemsize == expected_size
 
 
 @pytest.mark.parametrize("dtype_str", ["int32xvscalex4"])
-def test_dtype_itemmize_error(dtype_str):
+def test_dtype_itemmize_error(dtype_str: str) -> None:
     with pytest.raises(ValueError):
         tvm_ffi.dtype(dtype_str).itemsize
 
@@ -65,7 +65,7 @@ def test_dtype_itemmize_error(dtype_str):
         "bool",
     ],
 )
-def test_dtype_pickle(dtype_str):
+def test_dtype_pickle(dtype_str: str) -> None:
     dtype = tvm_ffi.dtype(dtype_str)
     dtype_pickled = pickle.loads(pickle.dumps(dtype))
     assert dtype_pickled.type_code == dtype.type_code
@@ -74,7 +74,7 @@ def test_dtype_pickle(dtype_str):
 
 
 @pytest.mark.parametrize("dtype_str", ["float32", "bool"])
-def test_dtype_with_lanes(dtype_str):
+def test_dtype_with_lanes(dtype_str: str) -> None:
     dtype = tvm_ffi.dtype(dtype_str)
     dtype_with_lanes = dtype.with_lanes(4)
     assert dtype_with_lanes.type_code == dtype.type_code

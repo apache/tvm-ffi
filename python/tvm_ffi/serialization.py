@@ -21,7 +21,7 @@ from typing import Any, Optional
 from . import _ffi_api
 
 
-def to_json_graph_str(obj: Any, metadata: Optional[dict] = None):
+def to_json_graph_str(obj: Any, metadata: Optional[dict] = None) -> str:
     """Dump an object to a JSON graph string.
 
     The JSON graph string is a string representation of of the object
@@ -45,7 +45,7 @@ def to_json_graph_str(obj: Any, metadata: Optional[dict] = None):
     return _ffi_api.ToJSONGraphString(obj, metadata)
 
 
-def from_json_graph_str(json_str: str):
+def from_json_graph_str(json_str: str) -> Any:
     """Load an object from a JSON graph string.
 
     The JSON graph string is a string representation of of the object

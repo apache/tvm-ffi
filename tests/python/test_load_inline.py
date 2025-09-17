@@ -28,7 +28,7 @@ import tvm_ffi.cpp
 from tvm_ffi.module import Module
 
 
-def test_load_inline_cpp():
+def test_load_inline_cpp() -> None:
     mod: Module = tvm_ffi.cpp.load_inline(
         name="hello",
         cpp_sources=r"""
@@ -54,7 +54,7 @@ def test_load_inline_cpp():
     numpy.testing.assert_equal(x + 1, y)
 
 
-def test_load_inline_cpp_with_docstrings():
+def test_load_inline_cpp_with_docstrings() -> None:
     mod: Module = tvm_ffi.cpp.load_inline(
         name="hello",
         cpp_sources=r"""
@@ -80,7 +80,7 @@ def test_load_inline_cpp_with_docstrings():
     numpy.testing.assert_equal(x + 1, y)
 
 
-def test_load_inline_cpp_multiple_sources():
+def test_load_inline_cpp_multiple_sources() -> None:
     mod: Module = tvm_ffi.cpp.load_inline(
         name="hello",
         cpp_sources=[
@@ -122,7 +122,7 @@ def test_load_inline_cpp_multiple_sources():
     numpy.testing.assert_equal(x + 1, y)
 
 
-def test_load_inline_cpp_build_dir():
+def test_load_inline_cpp_build_dir() -> None:
     mod: Module = tvm_ffi.cpp.load_inline(
         name="hello",
         cpp_sources=r"""
@@ -152,7 +152,7 @@ def test_load_inline_cpp_build_dir():
 @pytest.mark.skipif(
     torch is None or not torch.cuda.is_available(), reason="Requires torch and CUDA"
 )
-def test_load_inline_cuda():
+def test_load_inline_cuda() -> None:
     mod: Module = tvm_ffi.cpp.load_inline(
         name="hello",
         cuda_sources=r"""
@@ -196,7 +196,7 @@ def test_load_inline_cuda():
 
 
 @pytest.mark.skipif(torch is None, reason="Requires torch")
-def test_load_inline_with_env_tensor_allocator():
+def test_load_inline_with_env_tensor_allocator() -> None:
     if not hasattr(torch.Tensor, "__c_dlpack_tensor_allocator__"):
         pytest.skip("Torch does not support __c_dlpack_tensor_allocator__")
     mod: Module = tvm_ffi.cpp.load_inline(
@@ -240,7 +240,7 @@ def test_load_inline_with_env_tensor_allocator():
 @pytest.mark.skipif(
     torch is None or not torch.cuda.is_available(), reason="Requires torch and CUDA"
 )
-def test_load_inline_both():
+def test_load_inline_both() -> None:
     mod: Module = tvm_ffi.cpp.load_inline(
         name="hello",
         cpp_sources=r"""

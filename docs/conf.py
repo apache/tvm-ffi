@@ -182,7 +182,7 @@ footer_note = (
 )
 
 
-def footer_html():
+def footer_html() -> str:
     """Generate HTML for the documentation footer."""
     # Create footer HTML with two-line layout
     # Generate dropdown menu items

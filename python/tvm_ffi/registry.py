@@ -17,6 +17,7 @@
 """FFI registry to register function and objects."""
 
 import sys
+from typing import Any, Callable, Optional
 
 from . import core
 
@@ -24,7 +25,7 @@ from . import core
 _SKIP_UNKNOWN_OBJECTS = False
 
 
-def register_object(type_key=None):
+def register_object(type_key: str | type | None = None) -> Any:
     """Register object type.
 
     Parameters
@@ -46,7 +47,7 @@ def register_object(type_key=None):
     """
     object_name = type_key if isinstance(type_key, str) else type_key.__name__
 
-    def register(cls):
+    def register(cls: type) -> type:
         """Register the object type with the FFI core."""
         type_index = core._object_type_key_to_index(object_name)
         if type_index is None:
@@ -63,7 +64,11 @@ def register_object(type_key=None):
     return register(type_key)
 
 
-def register_global_func(func_name, f=None, override=False):
+def register_global_func(
+    func_name: str | Callable[..., Any],
+    f: Optional[Callable[..., Any]] = None,
+    override: bool = False,
+) -> Any:
     """Register global function.
 
     Parameters
@@ -114,7 +119,7 @@ def register_global_func(func_name, f=None, override=False):
     if not isinstance(func_name, str):
         raise ValueError("expect string function name")
 
-    def register(myf):
+    def register(myf: Callable[..., Any]) -> Any:
         """Register the global function with the FFI core."""
         return core._register_global_func(func_name, myf, override)
 
@@ -123,7 +128,7 @@ def register_global_func(func_name, f=None, override=False):
     return register
 
 
-def get_global_func(name, allow_missing=False):
+def get_global_func(name: str, allow_missing: bool = False) -> Optional[core.Function]:
     """Get a global function by name.
 
     Parameters
@@ -147,7 +152,7 @@ def get_global_func(name, allow_missing=False):
     return core._get_global_func(name, allow_missing)
 
 
-def list_global_func_names():
+def list_global_func_names() -> list[str]:
     """Get list of global functions registered.
 
     Returns
@@ -161,7 +166,7 @@ def list_global_func_names():
     return [name_functor(i) for i in range(num_names)]
 
 
-def remove_global_func(name):
+def remove_global_func(name: str) -> None:
     """Remove a global function by name.
 
     Parameters
@@ -173,7 +178,7 @@ def remove_global_func(name):
     get_global_func("ffi.FunctionRemoveGlobal")(name)
 
 
-def init_ffi_api(namespace, target_module_name=None):
+def init_ffi_api(namespace: str, target_module_name: Optional[str] = None) -> None:
     """Initialize register ffi api  functions into a given module.
 
     Parameters

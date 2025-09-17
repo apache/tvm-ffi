@@ -31,11 +31,12 @@ subsequent calls will be much faster.
 """
 
 import warnings
+from typing import Any, Optional
 
 from . import libinfo
 
 
-def load_torch_c_dlpack_extension():
+def load_torch_c_dlpack_extension() -> Optional[Any]:
     """Load the torch c dlpack extension."""
     cpp_source = """
 #include <dlpack/dlpack.h>

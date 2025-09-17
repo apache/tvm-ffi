@@ -15,12 +15,13 @@
 # specific language governing permissions and limitations
 # under the License.
 import sys
+from typing import Any
 
 import pytest
 import tvm_ffi
 
 
-def test_make_object():
+def test_make_object() -> None:
     # with default values
     obj0 = tvm_ffi.testing.create_object("testing.TestObjectBase")
     assert obj0.v_i64 == 10
@@ -28,14 +29,14 @@ def test_make_object():
     assert obj0.v_str == "hello"
 
 
-def test_method():
+def test_method() -> None:
     obj0 = tvm_ffi.testing.create_object("testing.TestObjectBase", v_i64=12)
     assert obj0.add_i64(1) == 13
     assert type(obj0).add_i64.__doc__ == "add_i64 method"
     assert type(obj0).v_i64.__doc__ == "i64 field"
 
 
-def test_setter():
+def test_setter() -> None:
     # test setter
     obj0 = tvm_ffi.testing.create_object("testing.TestObjectBase", v_i64=10, v_str="hello")
     assert obj0.v_i64 == 10
@@ -51,7 +52,7 @@ def test_setter():
         obj0.v_i64 = "hello"
 
 
-def test_derived_object():
+def test_derived_object() -> None:
     with pytest.raises(TypeError):
         obj0 = tvm_ffi.testing.create_object("testing.TestObjectDerived")
 
@@ -72,11 +73,11 @@ def test_derived_object():
 
 
 class MyObject:
-    def __init__(self, value):
+    def __init__(self, value: Any) -> None:
         self.value = value
 
 
-def test_opaque_object():
+def test_opaque_object() -> None:
     obj0 = MyObject("hello")
     assert sys.getrefcount(obj0) == 2
     obj0_converted = tvm_ffi.convert(obj0)

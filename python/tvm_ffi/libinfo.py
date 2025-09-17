@@ -21,7 +21,7 @@ import sys
 from pathlib import Path
 
 
-def split_env_var(env_var, split):
+def split_env_var(env_var: str, split: str) -> list[str]:
     """Split an environment variable string.
 
     Parameters
@@ -43,7 +43,7 @@ def split_env_var(env_var, split):
     return []
 
 
-def get_dll_directories():
+def get_dll_directories() -> list[str]:
     """Get the possible dll directories."""
     ffi_dir = Path(__file__).expanduser().resolve().parent
     dll_path = [ffi_dir / "lib"]
@@ -62,7 +62,7 @@ def get_dll_directories():
     return [str(Path(x).resolve()) for x in dll_path if Path(x).is_dir()]
 
 
-def find_libtvm_ffi():
+def find_libtvm_ffi() -> str:
     """Find libtvm_ffi."""
     dll_path = get_dll_directories()
     if sys.platform.startswith("win32"):
@@ -82,7 +82,7 @@ def find_libtvm_ffi():
     return lib_found[0]
 
 
-def find_source_path():
+def find_source_path() -> str:
     """Find packaged source home path."""
     candidates = [
         str(Path(__file__).resolve().parent),
@@ -94,7 +94,7 @@ def find_source_path():
     raise RuntimeError("Cannot find home path.")
 
 
-def find_cmake_path():
+def find_cmake_path() -> str:
     """Find the preferred cmake path."""
     candidates = [
         str(Path(__file__).resolve().parent / "cmake"),
@@ -106,7 +106,7 @@ def find_cmake_path():
     raise RuntimeError("Cannot find cmake path.")
 
 
-def find_include_path():
+def find_include_path() -> str:
     """Find header files for C compilation."""
     candidates = [
         str(Path(__file__).resolve().parent / "include"),
@@ -118,7 +118,7 @@ def find_include_path():
     raise RuntimeError("Cannot find include path.")
 
 
-def find_python_helper_include_path():
+def find_python_helper_include_path() -> str:
     """Find header files for C compilation."""
     candidates = [
         str(Path(__file__).resolve().parent / "include"),
@@ -130,7 +130,7 @@ def find_python_helper_include_path():
     raise RuntimeError("Cannot find python helper include path.")
 
 
-def find_dlpack_include_path():
+def find_dlpack_include_path() -> str:
     """Find dlpack header files for C compilation."""
     install_include_path = Path(__file__).resolve().parent / "include"
     if (install_include_path / "dlpack").is_dir():
@@ -145,7 +145,7 @@ def find_dlpack_include_path():
     raise RuntimeError("Cannot find include path.")
 
 
-def find_cython_lib():
+def find_cython_lib() -> str:
     """Find the path to tvm cython."""
     path_candidates = [
         Path(__file__).resolve().parent,
@@ -158,7 +158,7 @@ def find_cython_lib():
     raise RuntimeError("Cannot find tvm cython path.")
 
 
-def include_paths():
+def include_paths() -> list[str]:
     """Find all include paths needed for FFI related compilation."""
     include_path = find_include_path()
     python_helper_include_path = find_python_helper_include_path()

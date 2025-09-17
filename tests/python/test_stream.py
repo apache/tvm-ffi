@@ -25,7 +25,7 @@ except ImportError:
     torch = None
 
 
-def gen_check_stream_mod():
+def gen_check_stream_mod() -> tvm_ffi.Module:
     return tvm_ffi.cpp.load_inline(
         name="check_stream",
         cpp_sources="""
@@ -38,7 +38,7 @@ def gen_check_stream_mod():
     )
 
 
-def test_raw_stream():
+def test_raw_stream() -> None:
     mod = gen_check_stream_mod()
     device = tvm_ffi.device("cuda:0")
     stream_1 = 123456789
@@ -55,7 +55,7 @@ def test_raw_stream():
 @pytest.mark.skipif(
     torch is None or not torch.cuda.is_available(), reason="Requires torch and CUDA"
 )
-def test_torch_stream():
+def test_torch_stream() -> None:
     mod = gen_check_stream_mod()
     device_id = torch.cuda.current_device()
     device = tvm_ffi.device("cuda", device_id)
@@ -77,7 +77,7 @@ def test_torch_stream():
 @pytest.mark.skipif(
     torch is None or not torch.cuda.is_available(), reason="Requires torch and CUDA"
 )
-def test_torch_current_stream():
+def test_torch_current_stream() -> None:
     mod = gen_check_stream_mod()
     device_id = torch.cuda.current_device()
     device = tvm_ffi.device("cuda", device_id)
@@ -102,7 +102,7 @@ def test_torch_current_stream():
 @pytest.mark.skipif(
     torch is None or not torch.cuda.is_available(), reason="Requires torch and CUDA"
 )
-def test_torch_graph():
+def test_torch_graph() -> None:
     mod = gen_check_stream_mod()
     device_id = torch.cuda.current_device()
     device = tvm_ffi.device("cuda", device_id)

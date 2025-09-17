@@ -21,6 +21,7 @@ import fnmatch
 import subprocess
 import sys
 from pathlib import Path
+from typing import Optional
 
 header_cstyle = """
 /*
@@ -171,7 +172,7 @@ FMT_MAP = {
 SKIP_LIST = []
 
 
-def should_skip_file(filepath):
+def should_skip_file(filepath: str) -> bool:
     """Check if file should be skipped based on SKIP_LIST."""
     for pattern in SKIP_LIST:
         if fnmatch.fnmatch(filepath, pattern):
@@ -179,7 +180,7 @@ def should_skip_file(filepath):
     return False
 
 
-def get_git_files():
+def get_git_files() -> Optional[list[str]]:
     """Get list of files tracked by git."""
     try:
         result = subprocess.run(
@@ -196,7 +197,7 @@ def get_git_files():
         return None
 
 
-def copyright_line(line):
+def copyright_line(line: str) -> bool:
     # Following two items are intentionally break apart
     # so that the copyright detector won"t detect the file itself.
     if line.find("Copyright " + "(c)") != -1:
@@ -208,7 +209,7 @@ def copyright_line(line):
     return False
 
 
-def check_header(fname, header):
+def check_header(fname: str, header: str) -> bool:
     """Check header status of file without modifying it."""
     if not Path(fname).exists():
         print(f"ERROR: Cannot find {fname}")
@@ -240,7 +241,7 @@ def check_header(fname, header):
     return True
 
 
-def collect_files():
+def collect_files() -> Optional[list[str]]:
     """Collect all files that need header checking from git."""
     files = []
 
@@ -271,7 +272,7 @@ def collect_files():
     return files
 
 
-def add_header(fname, header):  # noqa: PLR0912
+def add_header(fname: str, header: str) -> None:  # noqa: PLR0912
     """Add header to file."""
     if not Path(fname).exists():
         print(f"Cannot find {fname} ...")
@@ -320,7 +321,7 @@ def add_header(fname, header):  # noqa: PLR0912
         print(f"Removed copyright line from {fname}")
 
 
-def main():  # noqa: PLR0911, PLR0912
+def main() -> int:  # noqa: PLR0911, PLR0912
     parser = argparse.ArgumentParser(
         description="Check and fix ASF headers in source files tracked by git",
         formatter_class=argparse.RawDescriptionHelpFormatter,

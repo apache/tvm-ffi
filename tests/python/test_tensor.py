@@ -25,7 +25,7 @@ import numpy as np
 import tvm_ffi
 
 
-def test_tensor_attributes():
+def test_tensor_attributes() -> None:
     data = np.zeros((10, 8, 4, 2), dtype="int16")
     if not hasattr(data, "__dlpack__"):
         return
@@ -39,7 +39,7 @@ def test_tensor_attributes():
     np.testing.assert_equal(x2, data)
 
 
-def test_shape_object():
+def test_shape_object() -> None:
     shape = tvm_ffi.Shape((10, 8, 4, 2))
     assert isinstance(shape, tvm_ffi.Shape)
     assert shape == (10, 8, 4, 2)
@@ -56,7 +56,7 @@ def test_shape_object():
 
 
 @pytest.mark.skipif(torch is None, reason="Fast torch dlpack importer is not enabled")
-def test_tensor_auto_dlpack():
+def test_tensor_auto_dlpack() -> None:
     x = torch.arange(128)
     fecho = tvm_ffi.get_global_func("testing.echo")
     y = fecho(x)

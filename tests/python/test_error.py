@@ -16,11 +16,13 @@
 # under the License.
 
 
+from typing import NoReturn
+
 import pytest
 import tvm_ffi
 
 
-def test_parse_traceback():
+def test_parse_traceback() -> None:
     traceback = """
     File "test.py", line 1, in <module>
     File "test.py", line 3, in run_test
@@ -31,7 +33,7 @@ def test_parse_traceback():
     assert parsed[1] == ("test.py", 3, "run_test")
 
 
-def test_error_from_cxx():
+def test_error_from_cxx() -> None:
     test_raise_error = tvm_ffi.get_global_func("testing.test_raise_error")
 
     try:
@@ -51,14 +53,14 @@ def test_error_from_cxx():
         tvm_ffi.convert(lambda x: x)()
 
 
-def test_error_from_nested_pyfunc():
+def test_error_from_nested_pyfunc() -> None:
     fapply = tvm_ffi.convert(lambda f, *args: f(*args))
     cxx_test_raise_error = tvm_ffi.get_global_func("testing.test_raise_error")
     cxx_test_apply = tvm_ffi.get_global_func("testing.apply")
 
     record_object = []
 
-    def raise_error():
+    def raise_error() -> None:
         try:
             fapply(cxx_test_raise_error, "ValueError", "error XYZ")
         except ValueError as e:
@@ -87,10 +89,10 @@ def test_error_from_nested_pyfunc():
             pytest.xfail("May fail if debug symbols are missing")
 
 
-def test_error_traceback_update():
+def test_error_traceback_update() -> None:
     fecho = tvm_ffi.get_global_func("testing.echo")
 
-    def raise_error():
+    def raise_error() -> NoReturn:
         raise ValueError("error XYZ")
 
     try:
@@ -99,7 +101,7 @@ def test_error_traceback_update():
         ffi_error = tvm_ffi.convert(e)
         assert ffi_error.traceback.find("raise_error") != -1
 
-    def raise_cxx_error():
+    def raise_cxx_error() -> None:
         cxx_test_raise_error = tvm_ffi.get_global_func("testing.test_raise_error")
         cxx_test_raise_error("ValueError", "error XYZ")
 

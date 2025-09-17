@@ -17,8 +17,8 @@
 """Container classes."""
 
 import collections.abc
-from collections.abc import Mapping, Sequence
-from typing import Any
+from collections.abc import Iterator, Mapping, Sequence
+from typing import Any, Callable
 
 from . import _ffi_api, core
 from .registry import register_object
@@ -26,15 +26,20 @@ from .registry import register_object
 __all__ = ["Array", "Map"]
 
 
-def getitem_helper(obj, elem_getter, length, idx):
+def getitem_helper(
+    obj: Any,
+    elem_getter: Callable[[Any, int], Any],
+    length: int,
+    idx: int | slice,
+) -> Any:
     """Implement a pythonic __getitem__ helper.
 
     Parameters
     ----------
-    obj: object
+    obj: Any
         The original object
 
-    elem_getter : function
+    elem_getter : Callable[[Any, int], Any]
         A simple function that takes index and return a single element.
 
     length : int
@@ -93,19 +98,19 @@ class Array(core.Object, collections.abc.Sequence):
 
     """
 
-    def __init__(self, input_list: Sequence[Any]):
+    def __init__(self, input_list: Sequence[Any]) -> None:
         """Construct an Array from a Python sequence."""
         self.__init_handle_by_constructor__(_ffi_api.Array, *input_list)
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx: int | slice) -> Any:
         """Return one element or a Python list for a slice."""
         return getitem_helper(self, _ffi_api.ArrayGetItem, len(self), idx)
 
-    def __len__(self):
+    def __len__(self) -> int:
         """Return the number of elements in the array."""
         return _ffi_api.ArraySize(self)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         """Return a string representation of the array."""
         # exception safety handling for chandle=None
         if self.__chandle__() == 0:
@@ -116,13 +121,13 @@ class Array(core.Object, collections.abc.Sequence):
 class KeysView(collections.abc.KeysView):
     """Helper class to return keys view."""
 
-    def __init__(self, backend_map):
+    def __init__(self, backend_map: "Map") -> None:
         self._backend_map = backend_map
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self._backend_map)
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[Any]:
         if self.__len__() == 0:
             return
         functor = _ffi_api.MapForwardIterFunctor(self._backend_map)
@@ -132,20 +137,20 @@ class KeysView(collections.abc.KeysView):
             if not functor(2):
                 break
 
-    def __contains__(self, k):
+    def __contains__(self, k: Any) -> bool:
         return self._backend_map.__contains__(k)
 
 
 class ValuesView(collections.abc.ValuesView):
     """Helper class to return values view."""
 
-    def __init__(self, backend_map):
+    def __init__(self, backend_map: "Map") -> None:
         self._backend_map = backend_map
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self._backend_map)
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[Any]:
         if self.__len__() == 0:
             return
         functor = _ffi_api.MapForwardIterFunctor(self._backend_map)
@@ -159,13 +164,13 @@ class ValuesView(collections.abc.ValuesView):
 class ItemsView(collections.abc.ItemsView):
     """Helper class to return items view."""
 
-    def __init__(self, backend_map):
+    def __init__(self, backend_map: "Map") -> None:
         self.backend_map = backend_map
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.backend_map)
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[tuple[Any, Any]]:
         if self.__len__() == 0:
             return
         functor = _ffi_api.MapForwardIterFunctor(self.backend_map)
@@ -206,7 +211,7 @@ class Map(core.Object, collections.abc.Mapping):
 
     """
 
-    def __init__(self, input_dict: Mapping[Any, Any]):
+    def __init__(self, input_dict: Mapping[Any, Any]) -> None:
         """Construct a Map from a Python mapping."""
         list_kvs = []
         for k, v in input_dict.items():
@@ -214,35 +219,35 @@ class Map(core.Object, collections.abc.Mapping):
             list_kvs.append(v)
         self.__init_handle_by_constructor__(_ffi_api.Map, *list_kvs)
 
-    def __getitem__(self, k):
+    def __getitem__(self, k: Any) -> Any:
         """Return the value for key `k` or raise KeyError."""
         return _ffi_api.MapGetItem(self, k)
 
-    def __contains__(self, k):
+    def __contains__(self, k: Any) -> bool:
         """Return True if the map contains key `k`."""
         return _ffi_api.MapCount(self, k) != 0
 
-    def keys(self):
+    def keys(self) -> KeysView:
         """Return a dynamic view of the map's keys."""
         return KeysView(self)
 
-    def values(self):
+    def values(self) -> "ValuesView":
         """Return a dynamic view of the map's values."""
         return ValuesView(self)
 
-    def items(self):
+    def items(self) -> ItemsView:
         """Get the items from the map."""
         return ItemsView(self)
 
-    def __len__(self):
+    def __len__(self) -> int:
         """Return the number of items in the map."""
         return _ffi_api.MapSize(self)
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[Any]:
         """Iterate over the map's keys."""
         return iter(self.keys())
 
-    def get(self, key, default=None):
+    def get(self, key: Any, default: Any | None = None) -> Any:
         """Get an element with a default value.
 
         Parameters
@@ -261,7 +266,7 @@ class Map(core.Object, collections.abc.Mapping):
         """
         return self[key] if key in self else default
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         """Return a string representation of the map."""
         # exception safety handling for chandle=None
         if self.__chandle__() == 0:

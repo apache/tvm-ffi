@@ -22,7 +22,7 @@ import my_ffi_extension
 import torch
 
 
-def run_add_one():
+def run_add_one() -> None:
     """Invoke add_one from the extension and print the result."""
     x = torch.tensor([1, 2, 3, 4, 5], dtype=torch.float32)
     y = torch.empty_like(x)
@@ -30,7 +30,7 @@ def run_add_one():
     print(y)
 
 
-def run_raise_error():
+def run_raise_error() -> None:
     """Invoke raise_error from the extension to demonstrate error handling."""
     my_ffi_extension.raise_error("This is an error")
 

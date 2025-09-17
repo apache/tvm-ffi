@@ -15,13 +15,15 @@
 # specific language governing permissions and limitations
 # under the License.
 # testcases appearing in example docstrings
+from typing import Any
+
 import tvm_ffi
 
 
-def test_register_global_func():
+def test_register_global_func() -> None:
     # we can use decorator to register a function
     @tvm_ffi.register_global_func("example.echo")
-    def echo(x):
+    def echo(x: Any) -> Any:
         return x
 
     # After registering, we can get the function by its name
@@ -33,13 +35,13 @@ def test_register_global_func():
     assert f(1) == 2
 
 
-def test_array():
+def test_array() -> None:
     a = tvm_ffi.convert([1, 2, 3])
     assert isinstance(a, tvm_ffi.Array)
     assert len(a) == 3
 
 
-def test_map():
+def test_map() -> None:
     amap = tvm_ffi.convert({"a": 1, "b": 2})
     assert isinstance(amap, tvm_ffi.Map)
     assert len(amap) == 2

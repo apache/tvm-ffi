@@ -18,12 +18,13 @@
 import ctypes
 import gc
 import sys
+from typing import Any
 
 import numpy as np
 import tvm_ffi
 
 
-def test_echo():
+def test_echo() -> None:
     fecho = tvm_ffi.get_global_func("testing.echo")
     assert isinstance(fecho, tvm_ffi.Function)
     # test each type
@@ -75,7 +76,7 @@ def test_echo():
     assert fadd1(1, 2) == 3
     assert fadd1.same_as(fadd)
 
-    def check_tensor():
+    def check_tensor() -> None:
         np_data = np.arange(10, dtype="int32")
         if not hasattr(np_data, "__dlpack__"):
             return
@@ -92,13 +93,13 @@ def test_echo():
     check_tensor()
 
 
-def test_return_raw_str_bytes():
+def test_return_raw_str_bytes() -> None:
     assert tvm_ffi.convert(lambda: "hello")() == "hello"
     assert tvm_ffi.convert(lambda: b"hello")() == b"hello"
     assert tvm_ffi.convert(lambda: bytearray(b"hello"))() == b"hello"
 
 
-def test_string_bytes_passing():
+def test_string_bytes_passing() -> None:
     fecho = tvm_ffi.get_global_func("testing.echo")
     use_count = tvm_ffi.get_global_func("testing.object_use_count")
     # small string
@@ -119,7 +120,7 @@ def test_string_bytes_passing():
     fecho(y) == 1
 
 
-def test_nested_container_passing():
+def test_nested_container_passing() -> None:
     # test and make sure our ref counting is correct
     fecho = tvm_ffi.get_global_func("testing.echo")
     use_count = tvm_ffi.get_global_func("testing.object_use_count")
@@ -131,24 +132,24 @@ def test_nested_container_passing():
     assert use_count(y[1]) == 2
 
 
-def test_pyfunc_convert():
-    def add(a, b):
+def test_pyfunc_convert() -> None:
+    def add(a: int, b: int) -> int:
         return a + b
 
     fadd = tvm_ffi.convert(add)
     assert isinstance(fadd, tvm_ffi.Function)
     assert fadd(1, 2) == 3
 
-    def fapply(f, *args):
+    def fapply(f: Any, *args: Any) -> Any:
         return f(*args)
 
     fapply = tvm_ffi.convert(fapply)
     assert fapply(add, 1, 3.3) == 4.3
 
 
-def test_global_func():
+def test_global_func() -> None:
     @tvm_ffi.register_global_func("mytest.echo")
-    def echo(x):
+    def echo(x: Any) -> Any:
         return x
 
     f = tvm_ffi.get_global_func("mytest.echo")
@@ -162,10 +163,10 @@ def test_global_func():
     assert tvm_ffi.get_global_func("mytest.echo", allow_missing=True) is None
 
 
-def test_rvalue_ref():
+def test_rvalue_ref() -> None:
     use_count = tvm_ffi.get_global_func("testing.object_use_count")
 
-    def callback(x, expected_count):
+    def callback(x: Any, expected_count: int) -> Any:
         # The use count of TVM FFI objects is decremented as part of
         # `ObjectRef.__del__`, which runs when the Python object is
         # destructed.  However, Python object destruction is not
@@ -179,14 +180,14 @@ def test_rvalue_ref():
 
     f = tvm_ffi.convert(callback)
 
-    def check0():
+    def check0() -> None:
         x = tvm_ffi.convert([1, 2])
         assert use_count(x) == 1
         f(x, 2)
         f(x._move(), 1)
         assert x.__ctypes_handle__().value is None
 
-    def check1():
+    def check1() -> None:
         x = tvm_ffi.convert([1, 2])
         assert use_count(x) == 1
         y = f(x, 2)
@@ -198,9 +199,9 @@ def test_rvalue_ref():
     check1()
 
 
-def test_echo_with_opaque_object():
+def test_echo_with_opaque_object() -> None:
     class MyObject:
-        def __init__(self, value):
+        def __init__(self, value: Any) -> None:
             self.value = value
 
     fecho = tvm_ffi.get_global_func("testing.echo")
@@ -211,7 +212,7 @@ def test_echo_with_opaque_object():
     assert y is x
     assert sys.getrefcount(x) == 3
 
-    def py_callback(z):
+    def py_callback(z: Any) -> Any:
         """Python callback with opaque object."""
         assert z is x
         return z

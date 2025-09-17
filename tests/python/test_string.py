@@ -20,7 +20,7 @@ import pickle
 import tvm_ffi
 
 
-def test_string():
+def test_string() -> None:
     fecho = tvm_ffi.get_global_func("testing.echo")
     s = tvm_ffi.core.String("hello")
     s2 = fecho(s)
@@ -35,7 +35,7 @@ def test_string():
     assert s4 == "hello"
 
 
-def test_bytes():
+def test_bytes() -> None:
     fecho = tvm_ffi.get_global_func("testing.echo")
     b = tvm_ffi.core.Bytes(b"hello")
     assert isinstance(b, tvm_ffi.core.Bytes)

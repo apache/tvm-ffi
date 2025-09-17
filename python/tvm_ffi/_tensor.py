@@ -19,6 +19,7 @@
 # if we also want to expose a tensor function in the root namespace
 
 from numbers import Integral
+from typing import Any, Optional, Union
 
 from . import _ffi_api, core, registry
 from .core import Device, DLDeviceType, Tensor, from_dlpack
@@ -35,7 +36,7 @@ class Shape(tuple, core.PyNativeObject):
 
     """
 
-    def __new__(cls, content):
+    def __new__(cls, content: tuple[int, ...]) -> "Shape":
         if any(not isinstance(x, Integral) for x in content):
             raise ValueError("Shape must be a tuple of integers")
         val = tuple.__new__(cls, content)
@@ -43,7 +44,7 @@ class Shape(tuple, core.PyNativeObject):
         return val
 
     # pylint: disable=no-self-argument
-    def __from_tvm_ffi_object__(cls, obj):
+    def __from_tvm_ffi_object__(cls, obj: Any) -> "Shape":
         """Construct from a given tvm object."""
         content = core._shape_obj_get_py_tuple(obj)
         val = tuple.__new__(cls, content)
@@ -51,7 +52,7 @@ class Shape(tuple, core.PyNativeObject):
         return val
 
 
-def device(device_type, index=None):
+def device(device_type: Union[str, int, DLDeviceType], index: Optional[int] = None) -> Device:
     """Construct a TVM FFI device with given device type and index.
 
     Parameters
