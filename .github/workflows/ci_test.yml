@@ -131,3 +131,9 @@ jobs:
       - name: Run python tests
         run: |
           pytest -vvs tests/python
+
+      # Run Rust tests, must happen after installing the pip package.
+      - name: Run rust tests
+        working-directory: rust
+        run: |
+          cargo test
