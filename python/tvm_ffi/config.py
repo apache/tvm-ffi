@@ -24,6 +24,7 @@ from . import libinfo
 
 
 def find_windows_implib():
+    """Find and return the Windows import library path for tvm_ffi.lib."""
     libdir = Path(libinfo.find_libtvm_ffi()).parent
     implib = libdir / "tvm_ffi.lib"
     if not implib.is_file():
@@ -32,7 +33,7 @@ def find_windows_implib():
 
 
 def __main__():  # noqa: PLR0912
-    """Main function."""
+    """Parse CLI args and print build and include configuration paths."""
     parser = argparse.ArgumentParser(
         description="Get various configuration information needed to compile with tvm-ffi"
     )

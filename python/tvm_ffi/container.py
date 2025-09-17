@@ -27,7 +27,7 @@ __all__ = ["Array", "Map"]
 
 
 def getitem_helper(obj, elem_getter, length, idx):
-    """Helper function to implement a pythonic getitem function.
+    """Implement a pythonic __getitem__ helper.
 
     Parameters
     ----------
@@ -94,15 +94,19 @@ class Array(core.Object, collections.abc.Sequence):
     """
 
     def __init__(self, input_list: Sequence[Any]):
+        """Construct an Array from a Python sequence."""
         self.__init_handle_by_constructor__(_ffi_api.Array, *input_list)
 
     def __getitem__(self, idx):
+        """Return one element or a Python list for a slice."""
         return getitem_helper(self, _ffi_api.ArrayGetItem, len(self), idx)
 
     def __len__(self):
+        """Return the number of elements in the array."""
         return _ffi_api.ArraySize(self)
 
     def __repr__(self):
+        """Return a string representation of the array."""
         # exception safety handling for chandle=None
         if self.__chandle__() == 0:
             return type(self).__name__ + "(chandle=None)"
@@ -203,6 +207,7 @@ class Map(core.Object, collections.abc.Mapping):
     """
 
     def __init__(self, input_dict: Mapping[Any, Any]):
+        """Construct a Map from a Python mapping."""
         list_kvs = []
         for k, v in input_dict.items():
             list_kvs.append(k)
@@ -210,15 +215,19 @@ class Map(core.Object, collections.abc.Mapping):
         self.__init_handle_by_constructor__(_ffi_api.Map, *list_kvs)
 
     def __getitem__(self, k):
+        """Return the value for key `k` or raise KeyError."""
         return _ffi_api.MapGetItem(self, k)
 
     def __contains__(self, k):
+        """Return True if the map contains key `k`."""
         return _ffi_api.MapCount(self, k) != 0
 
     def keys(self):
+        """Return a dynamic view of the map's keys."""
         return KeysView(self)
 
     def values(self):
+        """Return a dynamic view of the map's values."""
         return ValuesView(self)
 
     def items(self):
@@ -226,9 +235,11 @@ class Map(core.Object, collections.abc.Mapping):
         return ItemsView(self)
 
     def __len__(self):
+        """Return the number of items in the map."""
         return _ffi_api.MapSize(self)
 
     def __iter__(self):
+        """Iterate over the map's keys."""
         return iter(self.keys())
 
     def get(self, key, default=None):
@@ -251,6 +262,7 @@ class Map(core.Object, collections.abc.Mapping):
         return self[key] if key in self else default
 
     def __repr__(self):
+        """Return a string representation of the map."""
         # exception safety handling for chandle=None
         if self.__chandle__() == 0:
             return type(self).__name__ + "(chandle=None)"

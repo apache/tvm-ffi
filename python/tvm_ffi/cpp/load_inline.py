@@ -14,6 +14,7 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+"""Build and load inline C++/CUDA sources into a tvm_ffi Module using Ninja."""
 
 import functools
 import hashlib

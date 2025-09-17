@@ -134,18 +134,27 @@ select = [
   "F",   # pyflakes, https://docs.astral.sh/ruff/rules/#pyflakes-f
   # "ANN", # flake8-annotations, https://docs.astral.sh/ruff/rules/#flake8-annotations-ann
   "PTH", # flake8-use-pathlib, https://docs.astral.sh/ruff/rules/#flake8-use-pathlib-pth
-  # "D", # pydocstyle, https://docs.astral.sh/ruff/rules/#pydocstyle-d
+  "D",   # pydocstyle, https://docs.astral.sh/ruff/rules/#pydocstyle-d
 ]
 ignore = [
   "PLR2004", # pylint: magic-value-comparison
   "ANN401",  # flake8-annotations: any-type
+  "D203",    # pydocstyle: incorrect-blank-line-before-class
+  "D213",    # pydocstyle: multi-line-summary-second-line
 ]
 fixable = ["ALL"]
 unfixable = []
 
 [tool.ruff.lint.per-file-ignores]
-"__init__.py" = ["F401"]
-"tests/*" = ["E741"]
+"__init__.py" = ["F401"] # pyflakes: unused-import
+"tests/*" = [
+  "E741", # pycodestyle: ambiguous-variable-name
+  "D100", # pydocstyle: undocumented-public-module
+  "D101", # pydocstyle: undocumented-public-class
+  "D103", # pydocstyle: undocumented-public-function
+  "D107", # pydocstyle: undocumented-public-init
+  "D205", # pydocstyle: missing-blank-line-after-summary
+]
 
 [tool.ruff.lint.pylint]
 max-args = 10

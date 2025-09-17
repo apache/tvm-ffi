@@ -15,13 +15,14 @@
 # specific language governing permissions and limitations.
 # order matters here so we need to skip isort here
 # isort: skip_file
+"""Public Python API for the example tvm-ffi extension package."""
 
 from .base import _LIB
 from . import _ffi_api
 
 
 def add_one(x, y):
-    """Adds one to the input tensor.
+    """Add one to the input tensor.
 
     Parameters
     ----------
@@ -35,7 +36,7 @@ def add_one(x, y):
 
 
 def raise_error(msg):
-    """Raises an error with the given message.
+    """Raise an error with the given message.
 
     Parameters
     ----------

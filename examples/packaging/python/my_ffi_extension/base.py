@@ -14,6 +14,8 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations.
 # Base logic to load library for extension package
+"""Utilities to locate and load the example extension shared library."""
+
 import sys
 from pathlib import Path
 

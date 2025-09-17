@@ -14,6 +14,7 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+"""Utilities to locate tvm_ffi libraries, headers, and helper include paths."""
 
 import os
 import sys
@@ -21,7 +22,7 @@ from pathlib import Path
 
 
 def split_env_var(env_var, split):
-    """Splits environment variable string.
+    """Split an environment variable string.
 
     Parameters
     ----------

@@ -14,5 +14,6 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+"""Utilities used by the tvm_ffi Python package."""
 
 from .lockfile import FileLock

@@ -14,12 +14,10 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-"""This script is used to benchmark the API overhead of different
-python FFI API calling overhead, through DLPack API.
+"""Benchmark API overhead of different python FFI API calling overhead through DLPack API.
 
-Specifically, we would like to understand the overall overhead
-python/C++ API calls. The general goal is to understand the overall
-space and get a sense of what are the possible operations.
+Specifically, we would like to understand the overall overhead python/C++ API calls.
+The general goal is to understand the overall space and get a sense of what are the possible operations.
 
 We pick function f(x, y, z) where x, y, z are length 1 tensors.
 The benchmark is running in eager mode so we can see what is possible.
@@ -28,12 +26,8 @@ eliminate these overheads completely. So the goal is to get a sense
 of what is possible under eager mode.
 
 Summary of some takeaways:
-- numpy.add roughly takes 0.36 us per call, which gives roughly what can
-  be done in python env.
-- torch.add on gpu takes about 3.7us per call, giving us an idea of what
-  roughly we need to get to in eager mode.
--
-
+- numpy.add roughly takes 0.36 us per call, which gives roughly what can be done in python env.
+- torch.add on gpu takes about 3.7us per call, giving us an idea of what roughly we need to get to in eager mode.
 """
 
 import time

@@ -14,6 +14,8 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+"""Quick start script to run tvm-ffi examples from prebuilt libraries."""
+
 import tvm_ffi
 
 try:
@@ -93,7 +95,7 @@ def run_add_one_cuda():
 
 
 def main():
-    """Main function to run the example."""
+    """Run the quick start example."""
     run_add_one_cpu()
     run_add_one_c()
     run_add_one_cuda()

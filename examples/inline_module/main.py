@@ -14,6 +14,7 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+"""Example: Build and run an inline C++/CUDA tvm-ffi module."""
 
 import torch
 import tvm_ffi.cpp
@@ -21,6 +22,7 @@ from tvm_ffi.module import Module
 
 
 def main():
+    """Build, load, and run inline CPU/CUDA functions."""
     mod: Module = tvm_ffi.cpp.load_inline(
         name="hello",
         cpp_sources=r"""

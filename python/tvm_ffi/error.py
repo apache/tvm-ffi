@@ -58,6 +58,7 @@ class TracebackManager:
     """Helper to manage traceback generation."""
 
     def __init__(self):
+        """Initialize the traceback manager and its cache."""
         self._code_cache = {}
 
     def _get_cached_code_object(self, filename, lineno, func):
@@ -176,7 +177,7 @@ def register_error(name_or_cls=None, cls=None):
         name_or_cls = cls.__name__
 
     def register(mycls):
-        """Internal register function."""
+        """Register the error class name with the FFI core."""
         err_name = name_or_cls if isinstance(name_or_cls, str) else mycls.__name__
         core.ERROR_NAME_TO_TYPE[err_name] = mycls
         core.ERROR_TYPE_TO_NAME[mycls] = err_name

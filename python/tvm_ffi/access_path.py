@@ -25,6 +25,8 @@ from .registry import register_object
 
 
 class AccessKind(IntEnum):
+    """Kinds of access steps in an access path."""
+
     ATTR = 0
     ARRAY_ITEM = 1
     MAP_ITEM = 2
@@ -43,6 +45,7 @@ class AccessPath(core.Object):
     """Access path container."""
 
     def __init__(self) -> None:
+        """Disallow direct construction; use `AccessPath.root()` instead."""
         super().__init__()
         raise ValueError(
             "AccessPath can't be initialized directly. "
@@ -55,11 +58,13 @@ class AccessPath(core.Object):
         return AccessPath._root()
 
     def __eq__(self, other: Any) -> bool:
+        """Return whether two access paths are equal."""
         if not isinstance(other, AccessPath):
             return False
         return self._path_equal(other)
 
     def __ne__(self, other: Any) -> bool:
+        """Return whether two access paths are not equal."""
         if not isinstance(other, AccessPath):
             return True
         return not self._path_equal(other)

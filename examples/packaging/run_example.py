@@ -14,6 +14,8 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations.
 # Base logic to load library for extension package
+"""Run functions from the example packaged tvm-ffi extension."""
+
 import sys
 
 import my_ffi_extension
@@ -21,6 +23,7 @@ import torch
 
 
 def run_add_one():
+    """Invoke add_one from the extension and print the result."""
     x = torch.tensor([1, 2, 3, 4, 5], dtype=torch.float32)
     y = torch.empty_like(x)
     my_ffi_extension.add_one(x, y)
@@ -28,6 +31,7 @@ def run_add_one():
 
 
 def run_raise_error():
+    """Invoke raise_error from the extension to demonstrate error handling."""
     my_ffi_extension.raise_error("This is an error")
 
 

@@ -14,6 +14,8 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+"""Sphinx configuration for the tvm-ffi documentation site."""
+
 # -*- coding: utf-8 -*-
 import os
 from pathlib import Path
@@ -181,6 +183,7 @@ footer_note = (
 
 
 def footer_html():
+    """Generate HTML for the documentation footer."""
     # Create footer HTML with two-line layout
     # Generate dropdown menu items
     dropdown_items = ""

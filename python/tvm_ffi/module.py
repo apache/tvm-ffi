@@ -75,7 +75,11 @@ class Module(core.Object):
         return self.imports_
 
     def implements_function(self, name, query_imports=False):
-        """Returns True if the module has a definition for the global function with name. Note
+        """Return True if the module defines a global function.
+
+        Note
+        ----
+        that has_function(name) does not imply get_function(name) is non-null since the module
         that has_function(name) does not imply get_function(name) is non-null since the module
         may be, eg, a CSourceModule which cannot supply a packed-func implementation of the function
         without further compilation. However, get_function(name) non null should always imply
@@ -140,11 +144,13 @@ class Module(core.Object):
         _ffi_api.ModuleImportModule(self, module)
 
     def __getitem__(self, name):
+        """Return function by name using item access (module["func"])."""
         if not isinstance(name, str):
             raise ValueError("Can only take string as function name")
         return self.get_function(name)
 
     def __call__(self, *args):
+        """Call the module's entry function (`main`)."""
         # pylint: disable=not-callable
         return self.main(*args)
 
@@ -180,7 +186,7 @@ class Module(core.Object):
         return _ffi_api.ModuleGetPropertyMask(self)
 
     def is_binary_serializable(self):
-        """Module 'binary serializable', save_to_bytes is supported.
+        """Return whether the module is binary serializable (supports save_to_bytes).
 
         Returns
         -------
@@ -191,7 +197,7 @@ class Module(core.Object):
         return (self.get_property_mask() & ModulePropertyMask.BINARY_SERIALIZABLE) != 0
 
     def is_runnable(self):
-        """Module 'runnable', get_function is supported.
+        """Return whether the module is runnable (supports get_function).
 
         Returns
         -------
@@ -202,7 +208,9 @@ class Module(core.Object):
         return (self.get_property_mask() & ModulePropertyMask.RUNNABLE) != 0
 
     def is_compilation_exportable(self):
-        """Module 'compilation exportable', write_to_file is supported for object or source.
+        """Return whether the module is compilation exportable.
+
+        write_to_file is supported for object or source.
 
         Returns
         -------

@@ -47,7 +47,7 @@ def register_object(type_key=None):
     object_name = type_key if isinstance(type_key, str) else type_key.__name__
 
     def register(cls):
-        """Internal register function."""
+        """Register the object type with the FFI core."""
         type_index = core._object_type_key_to_index(object_name)
         if type_index is None:
             if _SKIP_UNKNOWN_OBJECTS:
@@ -115,7 +115,7 @@ def register_global_func(func_name, f=None, override=False):
         raise ValueError("expect string function name")
 
     def register(myf):
-        """Internal register function."""
+        """Register the global function with the FFI core."""
         return core._register_global_func(func_name, myf, override)
 
     if f:
