@@ -17,7 +17,6 @@
 
 
 import pytest
-
 import tvm_ffi
 
 

@@ -27,8 +27,7 @@ else:
 
 
 class FileLock:
-    """
-    A cross-platform file locking mechanism using Python's standard library.
+    """A cross-platform file locking mechanism using Python's standard library.
     This class implements an advisory lock, which must be respected by all
     cooperating processes.
     """
@@ -38,23 +37,19 @@ class FileLock:
         self._file_descriptor = None
 
     def __enter__(self):
-        """
-        Context manager protocol: acquire the lock upon entering the 'with' block.
+        """Context manager protocol: acquire the lock upon entering the 'with' block.
         This method will block indefinitely until the lock is acquired.
         """
         self.blocking_acquire()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        """
-        Context manager protocol: release the lock upon exiting the 'with' block.
-        """
+        """Context manager protocol: release the lock upon exiting the 'with' block."""
         self.release()
         return False  # Propagate exceptions, if any
 
     def acquire(self):
-        """
-        Acquires an exclusive, non-blocking lock on the file.
+        """Acquires an exclusive, non-blocking lock on the file.
         Returns True if the lock was acquired, False otherwise.
         """
         try:
@@ -64,12 +59,10 @@ class FileLock:
                 )
                 msvcrt.locking(self._file_descriptor, msvcrt.LK_NBLCK, 1)
             else:  # Unix-like systems
-                self._file_descriptor = os.open(
-                    self.lock_file_path, os.O_WRONLY | os.O_CREAT
-                )
+                self._file_descriptor = os.open(self.lock_file_path, os.O_WRONLY | os.O_CREAT)
                 fcntl.flock(self._file_descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
             return True
-        except (IOError, BlockingIOError):
+        except (OSError, BlockingIOError):
             if self._file_descriptor is not None:
                 os.close(self._file_descriptor)
                 self._file_descriptor = None
@@ -81,13 +74,13 @@ class FileLock:
             raise RuntimeError(f"An unexpected error occurred: {e}")
 
     def blocking_acquire(self, timeout=None, poll_interval=0.1):
-        """
-        Waits until an exclusive lock can be acquired, with an optional timeout.
+        """Waits until an exclusive lock can be acquired, with an optional timeout.
 
         Args:
             timeout (float): The maximum time to wait for the lock in seconds.
                              A value of None means wait indefinitely.
             poll_interval (float): The time to wait between lock attempts in seconds.
+
         """
         start_time = time.time()
         while True:
@@ -103,9 +96,7 @@ class FileLock:
             time.sleep(poll_interval)
 
     def release(self):
-        """
-        Releases the lock and closes the file descriptor.
-        """
+        """Releases the lock and closes the file descriptor."""
         if self._file_descriptor is not None:
             if sys.platform == "win32":
                 msvcrt.locking(self._file_descriptor, msvcrt.LK_UNLCK, 1)

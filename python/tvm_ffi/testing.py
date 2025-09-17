@@ -23,21 +23,16 @@ from .registry import register_object
 
 @register_object("testing.TestObjectBase")
 class TestObjectBase(Object):
-    """
-    Test object base class.
-    """
+    """Test object base class."""
 
 
 @register_object("testing.TestObjectDerived")
 class TestObjectDerived(TestObjectBase):
-    """
-    Test object derived class.
-    """
+    """Test object derived class."""
 
 
 def create_object(type_key: str, **kwargs) -> Object:
-    """
-    Make an object by reflection.
+    """Make an object by reflection.
 
     Parameters
     ----------
@@ -55,6 +50,7 @@ def create_object(type_key: str, **kwargs) -> Object:
     ----
     This function is only used for testing purposes and should
     not be used in other cases.
+
     """
     args = [type_key]
     for k, v in kwargs.items():

@@ -67,7 +67,7 @@ cmake.build-type = "Release"
 cmake.args = [
   "-DTVM_FFI_ATTACH_DEBUG_SYMBOLS=ON",
   "-DTVM_FFI_BUILD_TESTS=OFF",
-  "-DTVM_FFI_BUILD_PYTHON_MODULE=ON"
+  "-DTVM_FFI_BUILD_PYTHON_MODULE=ON",
 ]
 
 # Logging
@@ -106,36 +106,42 @@ sdist.include = [
   "/tests/**/*",
 ]
 
-sdist.exclude = ["**/.git", "**/.github", "**/__pycache__", "**/*.pyc", "build", "dist"]
+sdist.exclude = [
+  "**/.git",
+  "**/.github",
+  "**/__pycache__",
+  "**/*.pyc",
+  "build",
+  "dist",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
-[tool.black]
-line-length = 100
-skip-magic-trailing-comma = true
-
-exclude = '''
-/(
-    \.venv
-  | build
-  | docs
-  | dist
-  | 3rdparty/*
-)/
-'''
-
-[tool.isort]
-profile = "black"
-src_paths = ["python", "tests"]
-extend_skip = ["3rdparty"]
-line_length = 100
-skip_gitignore = true
-
 [tool.ruff]
 include = ["python/**/*.py", "tests/**/*.py"]
+line-length = 100
+indent-width = 4
+target-version = "py39"
 
 [tool.ruff.lint]
+select = [
+  "UP",  # pyupgrade, https://docs.astral.sh/ruff/rules/#pyupgrade-up
+  "PL",  # pylint, https://docs.astral.sh/ruff/rules/#pylint-pl
+  "I",   # isort, https://docs.astral.sh/ruff/rules/#isort-i
+  "RUF", # ruff, https://docs.astral.sh/ruff/rules/#ruff-specific-rules-ruf
+  "NPY", # numpy, https://docs.astral.sh/ruff/rules/#numpy-specific-rules-npy
+  "F",   # pyflakes, https://docs.astral.sh/ruff/rules/#pyflakes-f
+  # "ANN", # flake8-annotations, https://docs.astral.sh/ruff/rules/#flake8-annotations-ann
+  # "PTH", # flake8-use-pathlib, https://docs.astral.sh/ruff/rules/#flake8-use-pathlib-pth
+  # "D", # pydocstyle, https://docs.astral.sh/ruff/rules/#pydocstyle-d
+]
+ignore = [
+  "PLR2004", # pylint: magic-value-comparison
+  "ANN401",  # flake8-annotations: any-type
+]
+fixable = ["ALL"]
+unfixable = []
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
@@ -144,26 +150,23 @@ include = ["python/**/*.py", "tests/**/*.py"]
 [tool.ruff.lint.pylint]
 max-args = 10
 
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+docstring-code-format = false
+docstring-code-line-length = "dynamic"
+
 [tool.cibuildwheel]
 build-verbosity = 1
 
 # only build up to cp312, cp312
 # will be abi3 and can be used in future versions
-build = [
-  "cp39-*",
-  "cp310-*",
-  "cp311-*",
-  "cp312-*",
-]
-skip = [
-  "*musllinux*"
-]
+build = ["cp39-*", "cp310-*", "cp311-*", "cp312-*"]
+skip = ["*musllinux*"]
 # we only need to test on cp312
-test-skip = [
-  "cp39-*",
-  "cp310-*",
-  "cp311-*",
-]
+test-skip = ["cp39-*", "cp310-*", "cp311-*"]
 # focus on testing abi3 wheel
 build-frontend = "build[uv]"
 test-command = "pytest {package}/tests/python -vvs"

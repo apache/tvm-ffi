@@ -17,7 +17,6 @@
 import pickle
 
 import pytest
-
 import tvm_ffi
 
 
@@ -31,7 +30,7 @@ def test_array():
 
 
 def test_bad_constructor_init_state():
-    """Test when error is raised before __init_handle_by_constructor
+    """Test when error is raised before __init_handle_by_constructor.
 
     This case we need the FFI binding to gracefully handle both repr
     and dealloc by ensuring the chandle is initialized and there is

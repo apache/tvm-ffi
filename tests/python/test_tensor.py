@@ -22,7 +22,6 @@ except ImportError:
     torch = None
 
 import numpy as np
-
 import tvm_ffi
 
 

@@ -378,8 +378,8 @@ int64_t TorchDLPackTensorAllocatorPtr() {
     """
     try:
         # optionally import torch
-        import torch
-        from torch.utils import cpp_extension
+        import torch  # noqa: PLC0415
+        from torch.utils import cpp_extension  # noqa: PLC0415
 
         include_paths = libinfo.include_paths()
         extra_cflags = ["-O3"]
@@ -408,8 +408,7 @@ int64_t TorchDLPackTensorAllocatorPtr() {
         pass
     except Exception as e:
         warnings.warn(
-            f"Failed to load torch c dlpack extension: {e},"
-            "EnvTensorAllocator will not be enabled."
+            f"Failed to load torch c dlpack extension: {e},EnvTensorAllocator will not be enabled."
         )
         return None
 

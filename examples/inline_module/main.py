@@ -16,7 +16,6 @@
 # under the License.
 
 import torch
-
 import tvm_ffi.cpp
 from tvm_ffi.module import Module
 

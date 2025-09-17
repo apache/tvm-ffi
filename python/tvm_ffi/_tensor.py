@@ -28,10 +28,11 @@ from .core import Device, DLDeviceType, Tensor, from_dlpack
 class Shape(tuple, core.PyNativeObject):
     """Shape tuple that represents `ffi::Shape` returned by a ffi call.
 
-    Note
+    Note:
     ----
     This class subclasses `tuple` so it can be used in most places where
     tuple is used in python array apis.
+
     """
 
     def __new__(cls, content):
@@ -51,7 +52,7 @@ class Shape(tuple, core.PyNativeObject):
 
 
 def device(device_type, index=None):
-    """Construct a TVM FFI device with given device type and index
+    """Construct a TVM FFI device with given device type and index.
 
     Parameters
     ----------
@@ -74,8 +75,9 @@ def device(device_type, index=None):
 
       assert tvm_ffi.device("cuda:0") == tvm_ffi.device("cuda", 0)
       assert tvm_ffi.device("cpu:0") == tvm_ffi.device("cpu", 0)
+
     """
     return core._CLASS_DEVICE(device_type, index)
 
 
-__all__ = ["from_dlpack", "Tensor", "device", "Device", "DLDeviceType"]
+__all__ = ["DLDeviceType", "Device", "Tensor", "device", "from_dlpack"]

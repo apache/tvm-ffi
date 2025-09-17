@@ -42,6 +42,7 @@ class StreamContext:
     See Also
     --------
     :py:func:`tvm_ffi.use_raw_stream`, :py:func:`tvm_ffi.use_torch_stream`
+
     """
 
     def __init__(self, device: core.Device, stream: Union[int, c_void_p]):
@@ -82,8 +83,7 @@ try:
             self.ffi_context.__exit__(*args)
 
     def use_torch_stream(context: Optional[Any] = None):
-        """
-        Create a ffi stream context with given torch stream,
+        """Create a ffi stream context with given torch stream,
         cuda graph or current stream if `None` provided.
 
         Parameters
@@ -111,6 +111,7 @@ try:
         Note
         ----
         When working with raw cudaStream_t handle, using :py:func:`tvm_ffi.use_raw_stream` instead.
+
         """
         return TorchStreamContext(context)
 
@@ -121,8 +122,7 @@ except ImportError:
 
 
 def use_raw_stream(device: core.Device, stream: Union[int, c_void_p]):
-    """
-    Create a ffi stream context with given device and stream handle.
+    """Create a ffi stream context with given device and stream handle.
 
     Parameters
     ----------
@@ -140,6 +140,7 @@ def use_raw_stream(device: core.Device, stream: Union[int, c_void_p]):
     Note
     ----
     When working with torch stram or cuda graph, using :py:func:`tvm_ffi.use_torch_stream` instead.
+
     """
     if not isinstance(stream, (int, c_void_p)):
         raise ValueError(

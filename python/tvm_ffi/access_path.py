@@ -18,7 +18,7 @@
 """Access path classes."""
 
 from enum import IntEnum
-from typing import Any, List
+from typing import Any
 
 from . import core
 from .registry import register_object
@@ -35,12 +35,12 @@ class AccessKind(IntEnum):
 
 @register_object("ffi.reflection.AccessStep")
 class AccessStep(core.Object):
-    """Access step container"""
+    """Access step container."""
 
 
 @register_object("ffi.reflection.AccessPath")
 class AccessPath(core.Object):
-    """Access path container"""
+    """Access path container."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -51,7 +51,7 @@ class AccessPath(core.Object):
 
     @staticmethod
     def root() -> "AccessPath":
-        """Create a root access path"""
+        """Create a root access path."""
         return AccessPath._root()
 
     def __eq__(self, other: Any) -> bool:
@@ -65,7 +65,7 @@ class AccessPath(core.Object):
         return not self._path_equal(other)
 
     def is_prefix_of(self, other: "AccessPath") -> bool:
-        """Check if this access path is a prefix of another access path
+        """Check if this access path is a prefix of another access path.
 
         Parameters
         ----------
@@ -76,11 +76,12 @@ class AccessPath(core.Object):
         -------
         bool
             True if this access path is a prefix of the other access path, False otherwise
+
         """
         return self._is_prefix_of(other)
 
     def attr(self, attr_key: str) -> "AccessPath":
-        """Create an access path to the attribute of the current object
+        """Create an access path to the attribute of the current object.
 
         Parameters
         ----------
@@ -91,11 +92,12 @@ class AccessPath(core.Object):
         -------
         AccessPath
             The extended access path
+
         """
         return self._attr(attr_key)
 
     def attr_missing(self, attr_key: str) -> "AccessPath":
-        """Create an access path that indicate an attribute is missing
+        """Create an access path that indicate an attribute is missing.
 
         Parameters
         ----------
@@ -106,11 +108,12 @@ class AccessPath(core.Object):
         -------
         AccessPath
             The extended access path
+
         """
         return self._attr_missing(attr_key)
 
     def array_item(self, index: int) -> "AccessPath":
-        """Create an access path to the item of the current array
+        """Create an access path to the item of the current array.
 
         Parameters
         ----------
@@ -121,11 +124,12 @@ class AccessPath(core.Object):
         -------
         AccessPath
             The extended access path
+
         """
         return self._array_item(index)
 
     def array_item_missing(self, index: int) -> "AccessPath":
-        """Create an access path that indicate an array item is missing
+        """Create an access path that indicate an array item is missing.
 
         Parameters
         ----------
@@ -136,11 +140,12 @@ class AccessPath(core.Object):
         -------
         AccessPath
             The extended access path
+
         """
         return self._array_item_missing(index)
 
     def map_item(self, key: Any) -> "AccessPath":
-        """Create an access path to the item of the current map
+        """Create an access path to the item of the current map.
 
         Parameters
         ----------
@@ -151,11 +156,12 @@ class AccessPath(core.Object):
         -------
         AccessPath
             The extended access path
+
         """
         return self._map_item(key)
 
     def map_item_missing(self, key: Any) -> "AccessPath":
-        """Create an access path that indicate a map item is missing
+        """Create an access path that indicate a map item is missing.
 
         Parameters
         ----------
@@ -166,16 +172,18 @@ class AccessPath(core.Object):
         -------
         AccessPath
             The extended access path
+
         """
         return self._map_item_missing(key)
 
-    def to_steps(self) -> List["AccessStep"]:
-        """Convert the access path to a list of access steps
+    def to_steps(self) -> list["AccessStep"]:
+        """Convert the access path to a list of access steps.
 
         Returns
         -------
         List[AccessStep]
             The list of access steps
+
         """
         return self._to_steps()
 

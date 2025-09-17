@@ -20,7 +20,6 @@ import gc
 import sys
 
 import numpy as np
-
 import tvm_ffi
 
 
@@ -213,7 +212,7 @@ def test_echo_with_opaque_object():
     assert sys.getrefcount(x) == 3
 
     def py_callback(z):
-        """python callback with opaque object"""
+        """Python callback with opaque object."""
         assert z is x
         return z
 

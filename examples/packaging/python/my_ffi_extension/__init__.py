@@ -21,8 +21,7 @@ from . import _ffi_api
 
 
 def add_one(x, y):
-    """
-    Adds one to the input tensor.
+    """Adds one to the input tensor.
 
     Parameters
     ----------
@@ -30,13 +29,13 @@ def add_one(x, y):
       The input tensor.
     y : Tensor
       The output tensor.
+
     """
     return _LIB.add_one(x, y)
 
 
 def raise_error(msg):
-    """
-    Raises an error with the given message.
+    """Raises an error with the given message.
 
     Parameters
     ----------
@@ -47,5 +46,6 @@ def raise_error(msg):
     ------
     RuntimeError
         The error raised by the function.
+
     """
     return _ffi_api.raise_error(msg)

@@ -128,6 +128,7 @@ def filename_allowed(name):
     -------
     allowed : bool
         Whether the filename is allowed.
+
     """
     arr = name.rsplit(".", 1)
     if arr[-1] in ALLOW_EXTENSION:
@@ -193,7 +194,7 @@ def main():
     if error_list:
         report = "------File type check report----\n"
         report += "\n".join(error_list)
-        report += "\nFound %d files that are not allowed\n" % len(error_list)
+        report += f"\nFound {len(error_list)} files that are not allowed\n"
         report += (
             "We do not check in binary files into the repo.\n"
             "If necessary, please discuss with committers and"
@@ -212,14 +213,9 @@ def main():
     if asf_copyright_list:
         report = "------File type check report----\n"
         report += "\n".join(asf_copyright_list) + "\n"
-        report += (
-            "------Found %d files that has ASF header with copyright message----\n"
-            % len(asf_copyright_list)
-        )
+        report += f"------Found {len(asf_copyright_list)} files that has ASF header with copyright message----\n"
         report += "--- Files with ASF header do not need Copyright lines.\n"
-        report += (
-            "--- Contributors retain copyright to their contribution by default.\n"
-        )
+        report += "--- Contributors retain copyright to their contribution by default.\n"
         report += "--- If a file comes with a different license, consider put it under the 3rdparty folder instead.\n"
         report += "---\n"
         report += "--- You can use the following steps to remove the copyright lines\n"

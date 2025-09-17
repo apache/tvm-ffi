@@ -22,7 +22,7 @@ from typing import Any
 from . import container, core
 
 
-def convert(value: Any) -> Any:
+def convert(value: Any) -> Any:  # noqa: PLR0911
     """Convert a python object to ffi values.
 
     Parameters
@@ -40,6 +40,7 @@ def convert(value: Any) -> Any:
     Function arguments to ffi function calls are
     automatically converted. So this function is mainly
     only used in internal or testing scenarios.
+
     """
     if isinstance(value, (core.Object, core.PyNativeObject, bool, Number)):
         return value

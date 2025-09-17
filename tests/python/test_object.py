@@ -17,7 +17,6 @@
 import sys
 
 import pytest
-
 import tvm_ffi
 
 
@@ -38,9 +37,7 @@ def test_method():
 
 def test_setter():
     # test setter
-    obj0 = tvm_ffi.testing.create_object(
-        "testing.TestObjectBase", v_i64=10, v_str="hello"
-    )
+    obj0 = tvm_ffi.testing.create_object("testing.TestObjectBase", v_i64=10, v_str="hello")
     assert obj0.v_i64 == 10
     obj0.v_i64 = 11
     assert obj0.v_i64 == 11

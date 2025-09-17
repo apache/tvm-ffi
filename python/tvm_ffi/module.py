@@ -22,7 +22,7 @@ from enum import IntEnum
 from . import _ffi_api, core
 from .registry import register_object
 
-__all__ = ["Module", "ModulePropertyMask", "system_lib", "load_module"]
+__all__ = ["Module", "ModulePropertyMask", "load_module", "system_lib"]
 
 
 class ModulePropertyMask(IntEnum):
@@ -37,7 +37,7 @@ class ModulePropertyMask(IntEnum):
 class Module(core.Object):
     """Module container for dynamically loaded Module.
 
-    Example
+    Example:
     -------
     .. code-block:: python
 
@@ -48,9 +48,10 @@ class Module(core.Object):
         # you can use mod.func_name to call the exported function
         mod.func_name(*args)
 
-    See Also
+    See Also:
     --------
     :py:func:`tvm_ffi.load_module`
+
     """
 
     # constant for entry function name
@@ -63,12 +64,13 @@ class Module(core.Object):
 
     @property
     def imports(self):
-        """Get imported modules
+        """Get imported modules.
 
         Returns
-        ----------
+        -------
         modules : list of Module
             The module
+
         """
         return self.imports_
 
@@ -91,6 +93,7 @@ class Module(core.Object):
         -------
         b : Bool
             True if module (or one of its imports) has a definition for name.
+
         """
         return _ffi_api.ModuleImplementsFunction(self, name, query_imports)
 
@@ -118,6 +121,7 @@ class Module(core.Object):
         -------
         f : tvm_ffi.Function
             The result function.
+
         """
         func = _ffi_api.ModuleGetFunction(self, name, query_imports)
         if func is None:
@@ -131,6 +135,7 @@ class Module(core.Object):
         ----------
         module : tvm.runtime.Module
             The other module.
+
         """
         _ffi_api.ModuleImportModule(self, module)
 
@@ -155,6 +160,7 @@ class Module(core.Object):
         -------
         source : str
             The result source code.
+
         """
         return _ffi_api.ModuleInspectSource(self, fmt)
 
@@ -169,6 +175,7 @@ class Module(core.Object):
         -------
         mask : int
             Bitmask of runtime module property
+
         """
         return _ffi_api.ModuleGetPropertyMask(self)
 
@@ -179,6 +186,7 @@ class Module(core.Object):
         -------
         b : Bool
             True if the module is binary serializable.
+
         """
         return (self.get_property_mask() & ModulePropertyMask.BINARY_SERIALIZABLE) != 0
 
@@ -189,6 +197,7 @@ class Module(core.Object):
         -------
         b : Bool
             True if the module is runnable.
+
         """
         return (self.get_property_mask() & ModulePropertyMask.RUNNABLE) != 0
 
@@ -199,10 +208,9 @@ class Module(core.Object):
         -------
         b : Bool
             True if the module is compilation exportable.
+
         """
-        return (
-            self.get_property_mask() & ModulePropertyMask.COMPILATION_EXPORTABLE
-        ) != 0
+        return (self.get_property_mask() & ModulePropertyMask.COMPILATION_EXPORTABLE) != 0
 
     def clear_imports(self):
         """Remove all imports of the module."""
@@ -221,6 +229,7 @@ class Module(core.Object):
         See Also
         --------
         runtime.Module.export_library : export the module to shared library.
+
         """
         _ffi_api.ModuleWriteToFile(self, file_name, fmt)
 
@@ -245,6 +254,7 @@ def system_lib(symbol_prefix=""):
     -------
     module : runtime.Module
         The system-wide library module.
+
     """
     return _ffi_api.SystemLib(symbol_prefix)
 
@@ -272,5 +282,6 @@ def load_module(path):
     See Also
     --------
     :py:class:`tvm_ffi.Module`
+
     """
     return _ffi_api.ModuleLoadFromFile(path)

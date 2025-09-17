@@ -18,6 +18,7 @@
 
 # pylint: disable=invalid-name
 from enum import IntEnum
+from typing import Any, ClassVar
 
 from . import core
 
@@ -54,11 +55,12 @@ class dtype(str):
     ----
     This class subclasses str so it can be directly passed
     into other array api's dtype arguments.
+
     """
 
     __slots__ = ["__tvm_ffi_dtype__"]
 
-    _NUMPY_DTYPE_TO_STR = {}
+    _NUMPY_DTYPE_TO_STR: ClassVar[dict[Any, str]] = {}
 
     def __new__(cls, content):
         content = str(content)
@@ -70,8 +72,7 @@ class dtype(str):
         return f"dtype('{self}')"
 
     def with_lanes(self, lanes):
-        """
-        Create a new dtype with the given number of lanes.
+        """Create a new dtype with the given number of lanes.
 
         Parameters
         ----------
@@ -82,6 +83,7 @@ class dtype(str):
         -------
         dtype
             The new dtype with the given number of lanes.
+
         """
         cdtype = core._create_dtype_from_tuple(
             core.DataType,
@@ -128,7 +130,7 @@ try:
     dtype._NUMPY_DTYPE_TO_STR[np.dtype(np.float32)] = "float32"
     dtype._NUMPY_DTYPE_TO_STR[np.dtype(np.float64)] = "float64"
     if hasattr(np, "float_"):
-        dtype._NUMPY_DTYPE_TO_STR[np.dtype(np.float_)] = "float64"
+        dtype._NUMPY_DTYPE_TO_STR[np.dtype(np.float64)] = "float64"
 except ImportError:
     pass
 

@@ -22,7 +22,8 @@ import os
 import shutil
 import subprocess
 import sys
-from typing import Mapping, Optional, Sequence
+from collections.abc import Mapping, Sequence
+from typing import Optional
 
 from tvm_ffi.libinfo import find_dlpack_include_path, find_include_path, find_libtvm_ffi
 from tvm_ffi.module import Module, load_module
@@ -65,7 +66,7 @@ def _hash_sources(
 def _maybe_write(path: str, content: str) -> None:
     """Write content to path if it does not already exist with the same content."""
     if os.path.exists(path):
-        with open(path, "r") as f:
+        with open(path) as f:
             existing_content = f.read()
         if existing_content == content:
             return
@@ -86,9 +87,7 @@ def _find_cuda_home() -> Optional[str]:
         else:
             # Guess #3
             if IS_WINDOWS:
-                cuda_homes = glob.glob(
-                    "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v*.*"
-                )
+                cuda_homes = glob.glob("C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v*.*")
                 if len(cuda_homes) == 0:
                     cuda_home = ""
                 else:
@@ -97,8 +96,7 @@ def _find_cuda_home() -> Optional[str]:
                 cuda_home = "/usr/local/cuda"
             if not os.path.exists(cuda_home):
                 raise RuntimeError(
-                    "Could not find CUDA installation. "
-                    "Please set CUDA_HOME environment variable."
+                    "Could not find CUDA installation. Please set CUDA_HOME environment variable."
                 )
     return cuda_home
 
@@ -115,7 +113,6 @@ def _get_cuda_target() -> str:
             flags.append(f"-gencode=arch=compute_{major}{minor},code=sm_{major}{minor}")
         return " ".join(flags)
     else:
-        #
         try:
             status = subprocess.run(
                 args=["nvidia-smi", "--query-gpu=compute_cap", "--format=csv,noheader"],
@@ -164,9 +161,7 @@ def _run_command_in_dev_prompt(args, cwd, capture_output):
             raise FileNotFoundError("No Visual Studio installation found.")
 
         # Construct the path to the VsDevCmd.bat file
-        vsdevcmd_path = os.path.join(
-            vs_install_path, "Common7", "Tools", "VsDevCmd.bat"
-        )
+        vsdevcmd_path = os.path.join(vs_install_path, "Common7", "Tools", "VsDevCmd.bat")
 
         if not os.path.exists(vsdevcmd_path):
             raise FileNotFoundError(f"VsDevCmd.bat not found at: {vsdevcmd_path}")
@@ -180,7 +175,7 @@ def _run_command_in_dev_prompt(args, cwd, capture_output):
 
         # Execute the command in a new shell
         return subprocess.run(
-            cmd_command, cwd=cwd, capture_output=capture_output, shell=True
+            cmd_command, check=False, cwd=cwd, capture_output=capture_output, shell=True
         )
 
     except (FileNotFoundError, subprocess.CalledProcessError) as e:
@@ -191,7 +186,7 @@ def _run_command_in_dev_prompt(args, cwd, capture_output):
         ) from e
 
 
-def _generate_ninja_build(
+def _generate_ninja_build(  # noqa: PLR0915
     name: str,
     build_dir: str,
     with_cuda: bool,
@@ -231,7 +226,7 @@ def _generate_ninja_build(
     else:
         default_cflags = ["-std=c++17", "-fPIC", "-O2"]
         default_cuda_cflags = ["-Xcompiler", "-fPIC", "-std=c++17", "-O2"]
-        default_ldflags = ["-shared", "-L{}".format(tvm_ffi_lib_path), "-ltvm_ffi"]
+        default_ldflags = ["-shared", f"-L{tvm_ffi_lib_path}", "-ltvm_ffi"]
 
         if with_cuda:
             # determine the compute capability of the current GPU
@@ -244,9 +239,7 @@ def _generate_ninja_build(
     cflags = default_cflags + [flag.strip() for flag in extra_cflags]
     cuda_cflags = default_cuda_cflags + [flag.strip() for flag in extra_cuda_cflags]
     ldflags = default_ldflags + [flag.strip() for flag in extra_ldflags]
-    include_paths = default_include_paths + [
-        os.path.abspath(path) for path in extra_include_paths
-    ]
+    include_paths = default_include_paths + [os.path.abspath(path) for path in extra_include_paths]
 
     # append include paths
     for path in include_paths:
@@ -256,9 +249,7 @@ def _generate_ninja_build(
     # flags
     ninja = []
     ninja.append("ninja_required_version = 1.3")
-    ninja.append(
-        "cxx = {}".format(os.environ.get("CXX", "cl" if IS_WINDOWS else "c++"))
-    )
+    ninja.append("cxx = {}".format(os.environ.get("CXX", "cl" if IS_WINDOWS else "c++")))
     ninja.append("cflags = {}".format(" ".join(cflags)))
     if with_cuda:
         ninja.append("nvcc = {}".format(os.path.join(_find_cuda_home(), "bin", "nvcc")))
@@ -307,13 +298,11 @@ def _generate_ninja_build(
         )
     # Use appropriate extension based on platform
     ext = ".dll" if IS_WINDOWS else ".so"
-    ninja.append(
-        "build {}{}: link main.o{}".format(name, ext, " cuda.o" if with_cuda else "")
-    )
+    ninja.append("build {}{}: link main.o{}".format(name, ext, " cuda.o" if with_cuda else ""))
     ninja.append("")
 
     # default target
-    ninja.append("default {}{}".format(name, ext))
+    ninja.append(f"default {name}{ext}")
     ninja.append("")
     return "\n".join(ninja)
 
@@ -325,18 +314,16 @@ def _build_ninja(build_dir: str) -> None:
     if num_workers is not None:
         command += ["-j", num_workers]
     if IS_WINDOWS:
-        status = _run_command_in_dev_prompt(
-            args=command, cwd=build_dir, capture_output=True
-        )
+        status = _run_command_in_dev_prompt(args=command, cwd=build_dir, capture_output=True)
     else:
-        status = subprocess.run(args=command, cwd=build_dir, capture_output=True)
+        status = subprocess.run(check=False, args=command, cwd=build_dir, capture_output=True)
     if status.returncode != 0:
-        msg = ["ninja exited with status {}".format(status.returncode)]
+        msg = [f"ninja exited with status {status.returncode}"]
         encoding = "oem" if IS_WINDOWS else "utf-8"
         if status.stdout:
-            msg.append("stdout:\n{}".format(status.stdout.decode(encoding)))
+            msg.append(f"stdout:\n{status.stdout.decode(encoding)}")
         if status.stderr:
-            msg.append("stderr:\n{}".format(status.stderr.decode(encoding)))
+            msg.append(f"stderr:\n{status.stderr.decode(encoding)}")
 
         raise RuntimeError("\n".join(msg))
 
@@ -401,7 +388,6 @@ def load_inline(
 
     Parameters
     ----------
-
     name: str
         The name of the tvm ffi module.
     cpp_sources: Sequence[str] | str, optional
@@ -483,6 +469,7 @@ def load_inline(
         y = torch.empty_like(x)
         mod.add_one_cpu(x, y)
         torch.testing.assert_close(x + 1, y)
+
     """
     if cpp_sources is None:
         cpp_sources = []
@@ -529,9 +516,7 @@ def load_inline(
             extra_ldflags,
             extra_include_paths,
         )
-        build_dir: str = os.path.join(
-            build_directory, "{}_{}".format(name, source_hash)
-        )
+        build_dir: str = os.path.join(build_directory, f"{name}_{source_hash}")
     else:
         build_dir = os.path.abspath(build_directory)
     os.makedirs(build_dir, exist_ok=True)
@@ -559,6 +544,4 @@ def load_inline(
 
         # Use appropriate extension based on platform
         ext = ".dll" if IS_WINDOWS else ".so"
-        return load_module(
-            os.path.abspath(os.path.join(build_dir, "{}{}".format(name, ext)))
-        )
+        return load_module(os.path.abspath(os.path.join(build_dir, f"{name}{ext}")))

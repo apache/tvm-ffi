@@ -172,7 +172,7 @@ SKIP_LIST = []
 
 
 def should_skip_file(filepath):
-    """Check if file should be skipped based on SKIP_LIST"""
+    """Check if file should be skipped based on SKIP_LIST."""
     for pattern in SKIP_LIST:
         if fnmatch.fnmatch(filepath, pattern):
             return True
@@ -180,17 +180,15 @@ def should_skip_file(filepath):
 
 
 def get_git_files():
-    """Get list of files tracked by git"""
+    """Get list of files tracked by git."""
     try:
         result = subprocess.run(
-            ["git", "ls-files"], capture_output=True, text=True, cwd=os.getcwd()
+            ["git", "ls-files"], check=False, capture_output=True, text=True, cwd=os.getcwd()
         )
         if result.returncode == 0:
             return [line.strip() for line in result.stdout.split("\n") if line.strip()]
         else:
-            print(
-                "Error: Could not get git files. Make sure you're in a git repository."
-            )
+            print("Error: Could not get git files. Make sure you're in a git repository.")
             print("Git command failed:", result.stderr.strip())
             return None
     except FileNotFoundError:
@@ -211,7 +209,7 @@ def copyright_line(line):
 
 
 def check_header(fname, header):
-    """Check header status of file without modifying it"""
+    """Check header status of file without modifying it."""
     if not os.path.exists(fname):
         print(f"ERROR: Cannot find {fname}")
         return False
@@ -243,7 +241,7 @@ def check_header(fname, header):
 
 
 def collect_files():
-    """Collect all files that need header checking from git"""
+    """Collect all files that need header checking from git."""
     files = []
 
     # Get files from git (required)
@@ -266,18 +264,17 @@ def collect_files():
         if (
             suffix in FMT_MAP
             or basename == "gradle.properties"
-            or suffix == ""
-            and basename in ["CMakeLists", "Makefile"]
+            or (suffix == "" and basename in ["CMakeLists", "Makefile"])
         ):
             files.append(git_file)
 
     return files
 
 
-def add_header(fname, header):
-    """Add header to file"""
+def add_header(fname, header):  # noqa: PLR0912
+    """Add header to file."""
     if not os.path.exists(fname):
-        print("Cannot find %s ..." % fname)
+        print(f"Cannot find {fname} ...")
         return
 
     lines = open(fname).readlines()
@@ -318,12 +315,12 @@ def add_header(fname, header):
                 outfile.write(header + "\n\n")
             outfile.write("".join(lines))
     if not has_asf_header:
-        print("Add header to %s" % fname)
+        print(f"Add header to {fname}")
     if has_copyright:
-        print("Removed copyright line from %s" % fname)
+        print(f"Removed copyright line from {fname}")
 
 
-def main():
+def main():  # noqa: PLR0911, PLR0912
     parser = argparse.ArgumentParser(
         description="Check and fix ASF headers in source files tracked by git",
         formatter_class=argparse.RawDescriptionHelpFormatter,

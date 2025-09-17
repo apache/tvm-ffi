@@ -14,7 +14,7 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-"""Serialization related utilities to enable some object can be pickled"""
+"""Serialization related utilities to enable some object can be pickled."""
 
 from typing import Any, Optional
 
@@ -22,8 +22,7 @@ from . import _ffi_api
 
 
 def to_json_graph_str(obj: Any, metadata: Optional[dict] = None):
-    """
-    Dump an object to a JSON graph string.
+    """Dump an object to a JSON graph string.
 
     The JSON graph string is a string representation of of the object
     graph includes the reference information of same objects, which can
@@ -41,13 +40,13 @@ def to_json_graph_str(obj: Any, metadata: Optional[dict] = None):
     -------
     json_str : str
         The JSON graph string.
+
     """
     return _ffi_api.ToJSONGraphString(obj, metadata)
 
 
 def from_json_graph_str(json_str: str):
-    """
-    Load an object from a JSON graph string.
+    """Load an object from a JSON graph string.
 
     The JSON graph string is a string representation of of the object
     graph that also includes the reference information.
@@ -61,6 +60,7 @@ def from_json_graph_str(json_str: str):
     -------
     obj : Any
         The loaded object.
+
     """
     return _ffi_api.FromJSONGraphString(json_str)
 

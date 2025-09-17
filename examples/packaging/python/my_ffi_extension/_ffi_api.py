@@ -17,6 +17,7 @@
 import tvm_ffi
 
 # make sure lib is loaded first
+from .base import _LIB  # noqa: F401
 
 # this is a short cut to register all the global functions
 # prefixed by `my_ffi_extension.` to this module

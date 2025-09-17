@@ -17,7 +17,8 @@
 """Container classes."""
 
 import collections.abc
-from typing import Any, Mapping, Sequence
+from collections.abc import Mapping, Sequence
+from typing import Any
 
 from . import _ffi_api, core
 from .registry import register_object
@@ -46,6 +47,7 @@ def getitem_helper(obj, elem_getter, length, idx):
     -------
     result : object
         The result of getitem
+
     """
     if isinstance(idx, slice):
         start = idx.start if idx.start is not None else 0
@@ -88,6 +90,7 @@ class Array(core.Object, collections.abc.Sequence):
         a = tvm_ffi.convert([1, 2, 3])
         assert isinstance(a, tvm_ffi.Array)
         assert len(a) == 3
+
     """
 
     def __init__(self, input_list: Sequence[Any]):
@@ -107,7 +110,7 @@ class Array(core.Object, collections.abc.Sequence):
 
 
 class KeysView(collections.abc.KeysView):
-    """Helper class to return keys view"""
+    """Helper class to return keys view."""
 
     def __init__(self, backend_map):
         self._backend_map = backend_map
@@ -130,7 +133,7 @@ class KeysView(collections.abc.KeysView):
 
 
 class ValuesView(collections.abc.ValuesView):
-    """Helper class to return values view"""
+    """Helper class to return values view."""
 
     def __init__(self, backend_map):
         self._backend_map = backend_map
@@ -150,7 +153,7 @@ class ValuesView(collections.abc.ValuesView):
 
 
 class ItemsView(collections.abc.ItemsView):
-    """Helper class to return items view"""
+    """Helper class to return items view."""
 
     def __init__(self, backend_map):
         self.backend_map = backend_map
@@ -196,6 +199,7 @@ class Map(core.Object, collections.abc.Mapping):
         assert len(amap) == 2
         assert amap["a"] == 1
         assert amap["b"] == 2
+
     """
 
     def __init__(self, input_dict: Mapping[Any, Any]):
@@ -218,7 +222,7 @@ class Map(core.Object, collections.abc.Mapping):
         return ValuesView(self)
 
     def items(self):
-        """Get the items from the map"""
+        """Get the items from the map."""
         return ItemsView(self)
 
     def __len__(self):
@@ -242,6 +246,7 @@ class Map(core.Object, collections.abc.Mapping):
         -------
         value: object
             The result value.
+
         """
         return self[key] if key in self else default
 
@@ -249,8 +254,4 @@ class Map(core.Object, collections.abc.Mapping):
         # exception safety handling for chandle=None
         if self.__chandle__() == 0:
             return type(self).__name__ + "(chandle=None)"
-        return (
-            "{"
-            + ", ".join([f"{k.__repr__()}: {v.__repr__()}" for k, v in self.items()])
-            + "}"
-        )
+        return "{" + ", ".join([f"{k.__repr__()}: {v.__repr__()}" for k, v in self.items()]) + "}"

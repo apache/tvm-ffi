@@ -35,6 +35,7 @@ def split_env_var(env_var, split):
     -------
     splits : list(string)
         If env_var exists, split env_var. Otherwise, empty list.
+
     """
     if os.environ.get(env_var, None):
         return [p.strip() for p in os.environ[env_var].split(split)]
@@ -42,7 +43,7 @@ def split_env_var(env_var, split):
 
 
 def get_dll_directories():
-    """Get the possible dll directories"""
+    """Get the possible dll directories."""
     ffi_dir = os.path.dirname(os.path.realpath(os.path.expanduser(__file__)))
     dll_path = [os.path.join(ffi_dir, "lib")]
     dll_path += [os.path.join(ffi_dir, "..", "..", "build", "lib")]
@@ -75,9 +76,7 @@ def find_libtvm_ffi():
     lib_found = [p for p in lib_dll_path if os.path.exists(p) and os.path.isfile(p)]
 
     if not lib_found:
-        raise RuntimeError(
-            f"Cannot find library: {name}\nList of candidates:\n{lib_dll_path}"
-        )
+        raise RuntimeError(f"Cannot find library: {name}\nList of candidates:\n{lib_dll_path}")
 
     return lib_found[0]
 
@@ -110,9 +109,7 @@ def find_include_path():
     """Find header files for C compilation."""
     candidates = [
         os.path.join(os.path.dirname(os.path.realpath(__file__)), "include"),
-        os.path.join(
-            os.path.dirname(os.path.realpath(__file__)), "..", "..", "include"
-        ),
+        os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "..", "include"),
     ]
     for candidate in candidates:
         if os.path.isdir(candidate):
@@ -134,9 +131,7 @@ def find_python_helper_include_path():
 
 def find_dlpack_include_path():
     """Find dlpack header files for C compilation."""
-    install_include_path = os.path.join(
-        os.path.dirname(os.path.realpath(__file__)), "include"
-    )
+    install_include_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "include")
     if os.path.isdir(os.path.join(install_include_path, "dlpack")):
         return install_include_path
 

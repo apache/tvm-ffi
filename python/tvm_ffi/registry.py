@@ -25,7 +25,7 @@ _SKIP_UNKNOWN_OBJECTS = False
 
 
 def register_object(type_key=None):
-    """register object type.
+    """Register object type.
 
     Parameters
     ----------
@@ -42,16 +42,17 @@ def register_object(type_key=None):
       @tvm_ffi.register_object("test.MyObject")
       class MyObject(Object):
           pass
+
     """
     object_name = type_key if isinstance(type_key, str) else type_key.__name__
 
     def register(cls):
-        """internal register function"""
+        """Internal register function."""
         type_index = core._object_type_key_to_index(object_name)
         if type_index is None:
             if _SKIP_UNKNOWN_OBJECTS:
                 return cls
-            raise ValueError("Cannot find object type index for %s" % object_name)
+            raise ValueError(f"Cannot find object type index for {object_name}")
         core._add_class_attrs_by_reflection(type_index, cls)
         core._register_object_by_index(type_index, cls)
         return cls
@@ -63,7 +64,7 @@ def register_object(type_key=None):
 
 
 def register_global_func(func_name, f=None, override=False):
-    """Register global function
+    """Register global function.
 
     Parameters
     ----------
@@ -104,6 +105,7 @@ def register_global_func(func_name, f=None, override=False):
     --------
     :py:func:`tvm_ffi.get_global_func`
     :py:func:`tvm_ffi.remove_global_func`
+
     """
     if callable(func_name):
         f = func_name
@@ -113,7 +115,7 @@ def register_global_func(func_name, f=None, override=False):
         raise ValueError("expect string function name")
 
     def register(myf):
-        """internal register function"""
+        """Internal register function."""
         return core._register_global_func(func_name, myf, override)
 
     if f:
@@ -122,7 +124,7 @@ def register_global_func(func_name, f=None, override=False):
 
 
 def get_global_func(name, allow_missing=False):
-    """Get a global function by name
+    """Get a global function by name.
 
     Parameters
     ----------
@@ -140,6 +142,7 @@ def get_global_func(name, allow_missing=False):
     See Also
     --------
     :py:func:`tvm_ffi.register_global_func`
+
     """
     return core._get_global_func(name, allow_missing)
 
@@ -151,6 +154,7 @@ def list_global_func_names():
     -------
     names : list
        List of global functions names.
+
     """
     name_functor = get_global_func("ffi.FunctionListGlobalNamesFunctor")()
     num_names = name_functor(-1)
@@ -158,18 +162,19 @@ def list_global_func_names():
 
 
 def remove_global_func(name):
-    """Remove a global function by name
+    """Remove a global function by name.
 
     Parameters
     ----------
     name : str
         The name of the global function
+
     """
     get_global_func("ffi.FunctionRemoveGlobal")(name)
 
 
 def init_ffi_api(namespace, target_module_name=None):
-    """Initialize register ffi api  functions into a given module
+    """Initialize register ffi api  functions into a given module.
 
     Parameters
     ----------
@@ -181,7 +186,6 @@ def init_ffi_api(namespace, target_module_name=None):
 
     Examples
     --------
-
     A typical usage pattern is to create a _ffi_api.py file to register
     the functions under a given module. The following
     code populates all registered global functions
@@ -195,6 +199,7 @@ def init_ffi_api(namespace, target_module_name=None):
         import tvm_ffi
 
         tvm_ffi.init_ffi_api("mypackage", __name__)
+
     """
     target_module_name = target_module_name if target_module_name else namespace
 
@@ -219,10 +224,10 @@ def init_ffi_api(namespace, target_module_name=None):
 
 
 __all__ = [
-    "register_object",
-    "register_global_func",
     "get_global_func",
-    "list_global_func_names",
-    "remove_global_func",
     "init_ffi_api",
+    "list_global_func_names",
+    "register_global_func",
+    "register_object",
+    "remove_global_func",
 ]
