@@ -16,13 +16,13 @@
 # under the License.
 
 import functools
-import glob
 import hashlib
 import os
 import shutil
 import subprocess
 import sys
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Optional
 
 from tvm_ffi.libinfo import find_dlpack_include_path, find_include_path, find_libtvm_ffi
@@ -65,12 +65,13 @@ def _hash_sources(
 
 def _maybe_write(path: str, content: str) -> None:
     """Write content to path if it does not already exist with the same content."""
-    if os.path.exists(path):
-        with open(path) as f:
+    p = Path(path)
+    if p.exists():
+        with p.open() as f:
             existing_content = f.read()
         if existing_content == content:
             return
-    with open(path, "w") as f:
+    with p.open("w") as f:
         f.write(content)
 
 
@@ -83,18 +84,19 @@ def _find_cuda_home() -> Optional[str]:
         # Guess #2
         nvcc_path = shutil.which("nvcc")
         if nvcc_path is not None:
-            cuda_home = os.path.dirname(os.path.dirname(nvcc_path))
+            cuda_home = str(Path(nvcc_path).parent.parent)
         else:
             # Guess #3
             if IS_WINDOWS:
-                cuda_homes = glob.glob("C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v*.*")
+                cuda_root = Path("C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA")
+                cuda_homes = list(cuda_root.glob("v*.*"))
                 if len(cuda_homes) == 0:
                     cuda_home = ""
                 else:
-                    cuda_home = cuda_homes[0]
+                    cuda_home = str(cuda_homes[0])
             else:
                 cuda_home = "/usr/local/cuda"
-            if not os.path.exists(cuda_home):
+            if not Path(cuda_home).exists():
                 raise RuntimeError(
                     "Could not find CUDA installation. Please set CUDA_HOME environment variable."
                 )
@@ -131,14 +133,14 @@ def _run_command_in_dev_prompt(args, cwd, capture_output):
     """Locates the Developer Command Prompt and runs a command within its environment."""
     try:
         # Path to vswhere.exe
-        vswhere_path = os.path.join(
-            os.environ.get("ProgramFiles(x86)", "C:\\Program Files (x86)"),
-            "Microsoft Visual Studio",
-            "Installer",
-            "vswhere.exe",
+        vswhere_path = str(
+            Path(os.environ.get("ProgramFiles(x86)", "C:\\Program Files (x86)"))
+            / "Microsoft Visual Studio"
+            / "Installer"
+            / "vswhere.exe"
         )
 
-        if not os.path.exists(vswhere_path):
+        if not Path(vswhere_path).exists():
             raise FileNotFoundError("vswhere.exe not found.")
 
         # Find the Visual Studio installation path
@@ -161,9 +163,9 @@ def _run_command_in_dev_prompt(args, cwd, capture_output):
             raise FileNotFoundError("No Visual Studio installation found.")
 
         # Construct the path to the VsDevCmd.bat file
-        vsdevcmd_path = os.path.join(vs_install_path, "Common7", "Tools", "VsDevCmd.bat")
+        vsdevcmd_path = str(Path(vs_install_path) / "Common7" / "Tools" / "VsDevCmd.bat")
 
-        if not os.path.exists(vsdevcmd_path):
+        if not Path(vsdevcmd_path).exists():
             raise FileNotFoundError(f"VsDevCmd.bat not found at: {vsdevcmd_path}")
 
         # Use cmd.exe to run the batch file and then your command.
@@ -199,8 +201,8 @@ def _generate_ninja_build(  # noqa: PLR0915
     default_include_paths = [find_include_path(), find_dlpack_include_path()]
 
     tvm_ffi_lib = find_libtvm_ffi()
-    tvm_ffi_lib_path = os.path.dirname(tvm_ffi_lib)
-    tvm_ffi_lib_name = os.path.splitext(os.path.basename(tvm_ffi_lib))[0]
+    tvm_ffi_lib_path = str(Path(tvm_ffi_lib).parent)
+    tvm_ffi_lib_name = Path(tvm_ffi_lib).stem
     if IS_WINDOWS:
         default_cflags = [
             "/std:c++17",
@@ -232,14 +234,16 @@ def _generate_ninja_build(  # noqa: PLR0915
             # determine the compute capability of the current GPU
             default_cuda_cflags += [_get_cuda_target()]
             default_ldflags += [
-                "-L{}".format(os.path.join(_find_cuda_home(), "lib64")),
+                "-L{}".format(str(Path(_find_cuda_home()) / "lib64")),
                 "-lcudart",
             ]
 
     cflags = default_cflags + [flag.strip() for flag in extra_cflags]
     cuda_cflags = default_cuda_cflags + [flag.strip() for flag in extra_cuda_cflags]
     ldflags = default_ldflags + [flag.strip() for flag in extra_ldflags]
-    include_paths = default_include_paths + [os.path.abspath(path) for path in extra_include_paths]
+    include_paths = default_include_paths + [
+        str(Path(path).resolve()) for path in extra_include_paths
+    ]
 
     # append include paths
     for path in include_paths:
@@ -252,7 +256,7 @@ def _generate_ninja_build(  # noqa: PLR0915
     ninja.append("cxx = {}".format(os.environ.get("CXX", "cl" if IS_WINDOWS else "c++")))
     ninja.append("cflags = {}".format(" ".join(cflags)))
     if with_cuda:
-        ninja.append("nvcc = {}".format(os.path.join(_find_cuda_home(), "bin", "nvcc")))
+        ninja.append("nvcc = {}".format(str(Path(_find_cuda_home()) / "bin" / "nvcc")))
         ninja.append("cuda_cflags = {}".format(" ".join(cuda_cflags)))
     ninja.append("ldflags = {}".format(" ".join(ldflags)))
 
@@ -287,13 +291,13 @@ def _generate_ninja_build(  # noqa: PLR0915
     # build targets
     ninja.append(
         "build main.o: compile {}".format(
-            os.path.abspath(os.path.join(build_dir, "main.cpp")).replace(":", "$:")
+            str((Path(build_dir) / "main.cpp").resolve()).replace(":", "$:")
         )
     )
     if with_cuda:
         ninja.append(
             "build cuda.o: compile_cuda {}".format(
-                os.path.abspath(os.path.join(build_dir, "cuda.cu")).replace(":", "$:")
+                str((Path(build_dir) / "cuda.cu").resolve()).replace(":", "$:")
             )
         )
     # Use appropriate extension based on platform
@@ -505,7 +509,7 @@ def load_inline(
     # determine the cache dir for the built module
     if build_directory is None:
         build_directory = os.environ.get(
-            "TVM_FFI_CACHE_DIR", os.path.expanduser("~/.cache/tvm-ffi")
+            "TVM_FFI_CACHE_DIR", str(Path("~/.cache/tvm-ffi").expanduser())
         )
         source_hash: str = _hash_sources(
             cpp_source,
@@ -516,10 +520,10 @@ def load_inline(
             extra_ldflags,
             extra_include_paths,
         )
-        build_dir: str = os.path.join(build_directory, f"{name}_{source_hash}")
+        build_dir: str = str(Path(build_directory) / f"{name}_{source_hash}")
     else:
-        build_dir = os.path.abspath(build_directory)
-    os.makedirs(build_dir, exist_ok=True)
+        build_dir = str(Path(build_directory).resolve())
+    Path(build_dir).mkdir(parents=True, exist_ok=True)
 
     # generate build.ninja
     ninja_source = _generate_ninja_build(
@@ -532,16 +536,16 @@ def load_inline(
         extra_include_paths=extra_include_paths,
     )
 
-    with FileLock(os.path.join(build_dir, "lock")):
+    with FileLock(str(Path(build_dir) / "lock")):
         # write source files and build.ninja if they do not already exist
-        _maybe_write(os.path.join(build_dir, "main.cpp"), cpp_source)
+        _maybe_write(str(Path(build_dir) / "main.cpp"), cpp_source)
         if with_cuda:
-            _maybe_write(os.path.join(build_dir, "cuda.cu"), cuda_source)
-        _maybe_write(os.path.join(build_dir, "build.ninja"), ninja_source)
+            _maybe_write(str(Path(build_dir) / "cuda.cu"), cuda_source)
+        _maybe_write(str(Path(build_dir) / "build.ninja"), ninja_source)
 
         # build the module
         _build_ninja(build_dir)
 
         # Use appropriate extension based on platform
         ext = ".dll" if IS_WINDOWS else ".so"
-        return load_module(os.path.abspath(os.path.join(build_dir, f"{name}{ext}")))
+        return load_module(str((Path(build_dir) / f"{name}{ext}").resolve()))

@@ -16,6 +16,7 @@
 # under the License.
 # -*- coding: utf-8 -*-
 import os
+from pathlib import Path
 
 import tomli
 
@@ -25,9 +26,8 @@ build_exhale = os.environ.get("BUILD_CPP_DOCS", "0") == "1"
 
 
 # -- General configuration ------------------------------------------------
-
 # Load version from pyproject.toml
-with open("../pyproject.toml", "rb") as f:
+with Path("../pyproject.toml").open("rb") as f:
     pyproject_data = tomli.load(f)
 __version__ = pyproject_data["project"]["version"]
 

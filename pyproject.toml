@@ -133,7 +133,7 @@ select = [
   "NPY", # numpy, https://docs.astral.sh/ruff/rules/#numpy-specific-rules-npy
   "F",   # pyflakes, https://docs.astral.sh/ruff/rules/#pyflakes-f
   # "ANN", # flake8-annotations, https://docs.astral.sh/ruff/rules/#flake8-annotations-ann
-  # "PTH", # flake8-use-pathlib, https://docs.astral.sh/ruff/rules/#flake8-use-pathlib-pth
+  "PTH", # flake8-use-pathlib, https://docs.astral.sh/ruff/rules/#flake8-use-pathlib-pth
   # "D", # pydocstyle, https://docs.astral.sh/ruff/rules/#pydocstyle-d
 ]
 ignore = [

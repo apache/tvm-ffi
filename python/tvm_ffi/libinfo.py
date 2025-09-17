@@ -15,9 +15,9 @@
 # specific language governing permissions and limitations
 # under the License.
 
-import glob
 import os
 import sys
+from pathlib import Path
 
 
 def split_env_var(env_var, split):
@@ -44,11 +44,11 @@ def split_env_var(env_var, split):
 
 def get_dll_directories():
     """Get the possible dll directories."""
-    ffi_dir = os.path.dirname(os.path.realpath(os.path.expanduser(__file__)))
-    dll_path = [os.path.join(ffi_dir, "lib")]
-    dll_path += [os.path.join(ffi_dir, "..", "..", "build", "lib")]
+    ffi_dir = Path(__file__).expanduser().resolve().parent
+    dll_path = [ffi_dir / "lib"]
+    dll_path += [ffi_dir / ".." / ".." / "build" / "lib"]
     # in source build from parent if needed
-    dll_path += [os.path.join(ffi_dir, "..", "..", "..", "build", "lib")]
+    dll_path += [ffi_dir / ".." / ".." / ".." / "build" / "lib"]
 
     if sys.platform.startswith("linux") or sys.platform.startswith("freebsd"):
         dll_path.extend(split_env_var("LD_LIBRARY_PATH", ":"))
@@ -58,7 +58,7 @@ def get_dll_directories():
         dll_path.extend(split_env_var("PATH", ":"))
     elif sys.platform.startswith("win32"):
         dll_path.extend(split_env_var("PATH", ";"))
-    return [os.path.abspath(x) for x in dll_path if os.path.isdir(x)]
+    return [str(Path(x).resolve()) for x in dll_path if Path(x).is_dir()]
 
 
 def find_libtvm_ffi():
@@ -72,8 +72,8 @@ def find_libtvm_ffi():
         lib_dll_names = ["libtvm_ffi.so"]
 
     name = lib_dll_names
-    lib_dll_path = [os.path.join(p, name) for name in lib_dll_names for p in dll_path]
-    lib_found = [p for p in lib_dll_path if os.path.exists(p) and os.path.isfile(p)]
+    lib_dll_path = [str(Path(p) / name) for name in lib_dll_names for p in dll_path]
+    lib_found = [p for p in lib_dll_path if Path(p).exists() and Path(p).is_file()]
 
     if not lib_found:
         raise RuntimeError(f"Cannot find library: {name}\nList of candidates:\n{lib_dll_path}")
@@ -84,11 +84,11 @@ def find_libtvm_ffi():
 def find_source_path():
     """Find packaged source home path."""
     candidates = [
-        os.path.join(os.path.dirname(os.path.realpath(__file__))),
-        os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", ".."),
+        str(Path(__file__).resolve().parent),
+        str(Path(__file__).resolve().parent / ".." / ".."),
     ]
     for candidate in candidates:
-        if os.path.isdir(os.path.join(candidate, "cmake")):
+        if Path(candidate, "cmake").is_dir():
             return candidate
     raise RuntimeError("Cannot find home path.")
 
@@ -96,11 +96,11 @@ def find_source_path():
 def find_cmake_path():
     """Find the preferred cmake path."""
     candidates = [
-        os.path.join(os.path.dirname(os.path.realpath(__file__)), "cmake"),
-        os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "..", "cmake"),
+        str(Path(__file__).resolve().parent / "cmake"),
+        str(Path(__file__).resolve().parent / ".." / ".." / "cmake"),
     ]
     for candidate in candidates:
-        if os.path.isdir(candidate):
+        if Path(candidate).is_dir():
             return candidate
     raise RuntimeError("Cannot find cmake path.")
 
@@ -108,11 +108,11 @@ def find_cmake_path():
 def find_include_path():
     """Find header files for C compilation."""
     candidates = [
-        os.path.join(os.path.dirname(os.path.realpath(__file__)), "include"),
-        os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "..", "include"),
+        str(Path(__file__).resolve().parent / "include"),
+        str(Path(__file__).resolve().parent / ".." / ".." / "include"),
     ]
     for candidate in candidates:
-        if os.path.isdir(candidate):
+        if Path(candidate).is_dir():
             return candidate
     raise RuntimeError("Cannot find include path.")
 
@@ -120,31 +120,26 @@ def find_include_path():
 def find_python_helper_include_path():
     """Find header files for C compilation."""
     candidates = [
-        os.path.join(os.path.dirname(os.path.realpath(__file__)), "include"),
-        os.path.join(os.path.dirname(os.path.realpath(__file__)), "cython"),
+        str(Path(__file__).resolve().parent / "include"),
+        str(Path(__file__).resolve().parent / "cython"),
     ]
     for candidate in candidates:
-        if os.path.isfile(os.path.join(candidate, "tvm_ffi_python_helpers.h")):
+        if Path(candidate, "tvm_ffi_python_helpers.h").is_file():
             return candidate
     raise RuntimeError("Cannot find python helper include path.")
 
 
 def find_dlpack_include_path():
     """Find dlpack header files for C compilation."""
-    install_include_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "include")
-    if os.path.isdir(os.path.join(install_include_path, "dlpack")):
-        return install_include_path
+    install_include_path = Path(__file__).resolve().parent / "include"
+    if (install_include_path / "dlpack").is_dir():
+        return str(install_include_path)
 
-    source_include_path = os.path.join(
-        os.path.dirname(os.path.realpath(__file__)),
-        "..",
-        "..",
-        "3rdparty",
-        "dlpack",
-        "include",
+    source_include_path = (
+        Path(__file__).resolve().parent / ".." / ".." / "3rdparty" / "dlpack" / "include"
     )
-    if os.path.isdir(source_include_path):
-        return source_include_path
+    if source_include_path.is_dir():
+        return str(source_include_path)
 
     raise RuntimeError("Cannot find include path.")
 
@@ -152,13 +147,13 @@ def find_dlpack_include_path():
 def find_cython_lib():
     """Find the path to tvm cython."""
     path_candidates = [
-        os.path.dirname(os.path.realpath(__file__)),
-        os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "..", "build"),
+        Path(__file__).resolve().parent,
+        Path(__file__).resolve().parent / ".." / ".." / "build",
     ]
     suffixes = "pyd" if sys.platform.startswith("win32") else "so"
     for candidate in path_candidates:
-        for path in glob.glob(os.path.join(candidate, f"core*.{suffixes}")):
-            return os.path.abspath(path)
+        for path in Path(candidate).glob(f"core*.{suffixes}"):
+            return str(Path(path).resolve())
     raise RuntimeError("Cannot find tvm cython path.")
 
 

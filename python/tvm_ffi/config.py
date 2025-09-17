@@ -17,18 +17,18 @@
 """Config utilities for finding paths to lib and headers."""
 
 import argparse
-import os
 import sys
+from pathlib import Path
 
 from . import libinfo
 
 
 def find_windows_implib():
-    libdir = os.path.dirname(libinfo.find_libtvm_ffi())
-    implib = os.path.join(libdir, "tvm_ffi.lib")
-    if not os.path.isfile(implib):
+    libdir = Path(libinfo.find_libtvm_ffi()).parent
+    implib = libdir / "tvm_ffi.lib"
+    if not implib.is_file():
         raise RuntimeError(f"Cannot find imp lib {implib}")
-    return implib
+    return str(implib)
 
 
 def __main__():  # noqa: PLR0912
@@ -67,7 +67,7 @@ def __main__():  # noqa: PLR0912
     if args.cmakedir:
         print(libinfo.find_cmake_path())
     if args.libdir:
-        print(os.path.dirname(libinfo.find_libtvm_ffi()))
+        print(Path(libinfo.find_libtvm_ffi()).parent)
     if args.libfiles:
         if sys.platform.startswith("win32"):
             print(find_windows_implib())
@@ -92,7 +92,7 @@ def __main__():  # noqa: PLR0912
             print("-ltvm_ffi")
     if args.ldflags:
         if not sys.platform.startswith("win32"):
-            print(f"-L{os.path.dirname(libinfo.find_libtvm_ffi())}")
+            print(f"-L{Path(libinfo.find_libtvm_ffi()).parent}")
 
 
 if __name__ == "__main__":

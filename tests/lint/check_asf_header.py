@@ -18,9 +18,9 @@
 
 import argparse
 import fnmatch
-import os
 import subprocess
 import sys
+from pathlib import Path
 
 header_cstyle = """
 /*
@@ -183,7 +183,7 @@ def get_git_files():
     """Get list of files tracked by git."""
     try:
         result = subprocess.run(
-            ["git", "ls-files"], check=False, capture_output=True, text=True, cwd=os.getcwd()
+            ["git", "ls-files"], check=False, capture_output=True, text=True, cwd=Path.cwd()
         )
         if result.returncode == 0:
             return [line.strip() for line in result.stdout.split("\n") if line.strip()]
@@ -210,11 +210,11 @@ def copyright_line(line):
 
 def check_header(fname, header):
     """Check header status of file without modifying it."""
-    if not os.path.exists(fname):
+    if not Path(fname).exists():
         print(f"ERROR: Cannot find {fname}")
         return False
 
-    lines = open(fname).readlines()
+    lines = Path(fname).open().readlines()
 
     has_asf_header = False
     has_copyright = False
@@ -259,7 +259,7 @@ def collect_files():
 
         # Check if this file type is supported
         suffix = git_file.split(".")[-1] if "." in git_file else ""
-        basename = os.path.basename(git_file)
+        basename = Path(git_file).name
 
         if (
             suffix in FMT_MAP
@@ -273,11 +273,11 @@ def collect_files():
 
 def add_header(fname, header):  # noqa: PLR0912
     """Add header to file."""
-    if not os.path.exists(fname):
+    if not Path(fname).exists():
         print(f"Cannot find {fname} ...")
         return
 
-    lines = open(fname).readlines()
+    lines = Path(fname).open().readlines()
 
     has_asf_header = False
     has_copyright = False
@@ -292,7 +292,7 @@ def add_header(fname, header):  # noqa: PLR0912
     if has_asf_header and not has_copyright:
         return
 
-    with open(fname, "w") as outfile:
+    with Path(fname).open("w") as outfile:
         skipline = False
         if not lines:
             skipline = False  # File is enpty
@@ -397,7 +397,7 @@ Examples:
     for fname in files:
         processed_count += 1
         suffix = fname.split(".")[-1] if "." in fname else ""
-        basename = os.path.basename(fname)
+        basename = Path(fname).name
 
         # Determine header type
         if suffix in FMT_MAP:

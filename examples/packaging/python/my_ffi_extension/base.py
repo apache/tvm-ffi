@@ -14,15 +14,15 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations.
 # Base logic to load library for extension package
-import os
 import sys
+from pathlib import Path
 
 import tvm_ffi
 
 
 def _load_lib():
     # first look at the directory of the current file
-    file_dir = os.path.dirname(os.path.realpath(__file__))
+    file_dir = Path(__file__).resolve().parent
 
     if sys.platform.startswith("win32"):
         lib_dll_name = "my_ffi_extension.dll"
@@ -31,8 +31,8 @@ def _load_lib():
     else:
         lib_dll_name = "my_ffi_extension.so"
 
-    lib_path = os.path.join(file_dir, lib_dll_name)
-    return tvm_ffi.load_module(lib_path)
+    lib_path = file_dir / lib_dll_name
+    return tvm_ffi.load_module(str(lib_path))
 
 
 _LIB = _load_lib()

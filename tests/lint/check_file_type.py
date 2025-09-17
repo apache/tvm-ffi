@@ -16,9 +16,9 @@
 # under the License.
 """Helper tool to check file types that are allowed to checkin."""
 
-import os
 import subprocess
 import sys
+from pathlib import Path
 
 # List of file types we allow
 ALLOW_EXTENSION = {
@@ -134,7 +134,7 @@ def filename_allowed(name):
     if arr[-1] in ALLOW_EXTENSION:
         return True
 
-    if os.path.basename(name) in ALLOW_FILE_NAME:
+    if Path(name).name in ALLOW_FILE_NAME:
         return True
 
     if name.startswith("3rdparty"):
@@ -161,12 +161,12 @@ def copyright_line(line):
 def check_asf_copyright(fname):
     if fname.endswith(".png"):
         return True
-    if not os.path.isfile(fname):
+    if not Path(fname).is_file():
         return True
     has_asf_header = False
     has_copyright = False
     try:
-        for line in open(fname):
+        for line in Path(fname).open():
             if line.find("Licensed to the Apache Software Foundation") != -1:
                 has_asf_header = True
             if copyright_line(line):
