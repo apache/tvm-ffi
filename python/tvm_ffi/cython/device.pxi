@@ -20,6 +20,7 @@ from enum import IntEnum
 
 _CLASS_DEVICE = None
 
+
 def _set_class_device(cls):
     global _CLASS_DEVICE
     _CLASS_DEVICE = cls
@@ -161,7 +162,6 @@ cdef class Device:
 
     def __hash__(self):
         return hash((self.cdevice.device_type, self.cdevice.device_id))
-
 
     def __device_type_name__(self):
         return self._DEVICE_TYPE_TO_NAME[self.cdevice.device_type]

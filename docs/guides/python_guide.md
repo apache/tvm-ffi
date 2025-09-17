@@ -178,7 +178,7 @@ torch.testing.assert_close(x + 1, y)
 ```
 
 The above code defines a C++ function `add_one_cpu` in Python script, compiles it on the fly and then loads the compiled
-{py:class}`tvm_ffi.Module` object via {py:func}`tvm_ffi.cpp.load_inline`. You can then call the function `add_one_cpu` 
+{py:class}`tvm_ffi.Module` object via {py:func}`tvm_ffi.cpp.load_inline`. You can then call the function `add_one_cpu`
 from the module as usual.
 
 ## Error Handling

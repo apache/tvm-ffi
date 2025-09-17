@@ -71,7 +71,9 @@ def test_device_with_dev_id(dev_type, dev_id, expected_device_type, expect_devic
     assert dev.index == expect_device_id
 
 
-@pytest.mark.parametrize("dev_type, dev_id", [("cpu:0:0", None), ("cpu:?", None), ("cpu:", None)])
+@pytest.mark.parametrize(
+    "dev_type, dev_id", [("cpu:0:0", None), ("cpu:?", None), ("cpu:", None)]
+)
 def test_deive_type_error(dev_type, dev_id):
     with pytest.raises(ValueError):
         tvm_ffi.device(dev_type, dev_id)

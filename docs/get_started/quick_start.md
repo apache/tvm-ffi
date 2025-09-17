@@ -279,4 +279,3 @@ The main takeaway points are:
 - **ffi::Tensor** is a universal tensor structure that enables zero-copy exchange of array data
 - **Module loading** is provided by tvm ffi APIs in multiple languages.
 - **C ABI** is provided for easy low-level integration
-

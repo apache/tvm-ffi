@@ -250,6 +250,7 @@ def _object_type_key_to_index(str type_key):
         return tidx
     return None
 
+
 cdef inline str _type_index_to_key(int32_t tindex):
     """get the type key of object class"""
     cdef const TVMFFITypeInfo* info = TVMFFIGetTypeInfo(tindex)

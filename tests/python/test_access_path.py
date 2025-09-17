@@ -94,16 +94,25 @@ def test_path_is_prefix_of():
     assert not AccessPath.root().attr("bar").is_prefix_of(AccessPath.root().attr("foo"))
 
     # Shorter path is prefix of longer path with same start
-    assert AccessPath.root().attr("foo").is_prefix_of(AccessPath.root().attr("foo").array_item(2))
+    assert (
+        AccessPath.root()
+        .attr("foo")
+        .is_prefix_of(AccessPath.root().attr("foo").array_item(2))
+    )
 
     # Longer path is not prefix of shorter path
     assert (
-        not AccessPath.root().attr("foo").array_item(2).is_prefix_of(AccessPath.root().attr("foo"))
+        not AccessPath.root()
+        .attr("foo")
+        .array_item(2)
+        .is_prefix_of(AccessPath.root().attr("foo"))
     )
 
     # Different paths are not prefixes
     assert (
-        not AccessPath.root().attr("foo").is_prefix_of(AccessPath.root().attr("bar").array_item(2))
+        not AccessPath.root()
+        .attr("foo")
+        .is_prefix_of(AccessPath.root().attr("bar").array_item(2))
     )
 
 
@@ -124,10 +133,16 @@ def test_path_equal():
     assert not (AccessPath.root().attr("bar") == AccessPath.root().attr("foo"))
 
     # Shorter path does not equal longer path
-    assert not (AccessPath.root().attr("foo") == AccessPath.root().attr("foo").array_item(2))
+    assert not (
+        AccessPath.root().attr("foo") == AccessPath.root().attr("foo").array_item(2)
+    )
 
     # Longer path does not equal shorter path
-    assert not (AccessPath.root().attr("foo").array_item(2) == AccessPath.root().attr("foo"))
+    assert not (
+        AccessPath.root().attr("foo").array_item(2) == AccessPath.root().attr("foo")
+    )
 
     # Different paths are not equal
-    assert not (AccessPath.root().attr("foo") == AccessPath.root().attr("bar").array_item(2))
+    assert not (
+        AccessPath.root().attr("foo") == AccessPath.root().attr("bar").array_item(2)
+    )

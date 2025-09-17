@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 """Container classes."""
+
 import collections.abc
 from typing import Any, Mapping, Sequence
 
@@ -248,4 +249,8 @@ class Map(core.Object, collections.abc.Mapping):
         # exception safety handling for chandle=None
         if self.__chandle__() == 0:
             return type(self).__name__ + "(chandle=None)"
-        return "{" + ", ".join([f"{k.__repr__()}: {v.__repr__()}" for k, v in self.items()]) + "}"
+        return (
+            "{"
+            + ", ".join([f"{k.__repr__()}: {v.__repr__()}" for k, v in self.items()])
+            + "}"
+        )

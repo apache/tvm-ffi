@@ -108,7 +108,6 @@ cdef extern from "tvm/ffi/c_api.h":
         kTVMFFIModule = 73
         kTVMFFIOpaquePyObject = 74
 
-
     ctypedef void* TVMFFIObjectHandle
 
     ctypedef struct TVMFFIObject:
@@ -153,9 +152,9 @@ cdef extern from "tvm/ffi/c_api.h":
         kTVMFFIFieldFlagBitMaskHasDefault = 1 << 1
         kTVMFFIFieldFlagBitMaskIsStaticMethod = 1 << 2
 
-    ctypedef int (*TVMFFIFieldGetter)(void* field, TVMFFIAny* result) noexcept;
-    ctypedef int (*TVMFFIFieldSetter)(void* field, const TVMFFIAny* value) noexcept;
-    ctypedef int (*TVMFFIObjectCreator)(TVMFFIObjectHandle* result) noexcept;
+    ctypedef int (*TVMFFIFieldGetter)(void* field, TVMFFIAny* result) noexcept
+    ctypedef int (*TVMFFIFieldSetter)(void* field, const TVMFFIAny* value) noexcept
+    ctypedef int (*TVMFFIObjectCreator)(TVMFFIObjectHandle* result) noexcept
 
     ctypedef struct TVMFFIFieldInfo:
         TVMFFIByteArray name
@@ -202,7 +201,7 @@ cdef extern from "tvm/ffi/c_api.h":
     int TVMFFIFunctionCall(TVMFFIObjectHandle func, TVMFFIAny* args, int32_t num_args,
                            TVMFFIAny* result) nogil
     int TVMFFIFunctionCreate(void* self, TVMFFISafeCallType safe_call,
-                         void (*deleter)(void*), TVMFFIObjectHandle* out) nogil
+                             void (*deleter)(void*), TVMFFIObjectHandle* out) nogil
     int TVMFFIAnyViewToOwnedAny(const TVMFFIAny* any_view, TVMFFIAny* out) nogil
     int TVMFFIFunctionSetGlobal(TVMFFIByteArray* name, TVMFFIObjectHandle f, int override) nogil
     int TVMFFIFunctionGetGlobal(TVMFFIByteArray* name, TVMFFIObjectHandle* out) nogil
@@ -216,17 +215,17 @@ cdef extern from "tvm/ffi/c_api.h":
     int TVMFFIBytesFromByteArray(TVMFFIByteArray* input_, TVMFFIAny* out) nogil
     int TVMFFIDataTypeFromString(TVMFFIByteArray* str, DLDataType* out) nogil
     int TVMFFIDataTypeToString(const DLDataType* dtype, TVMFFIAny* out) nogil
-    const TVMFFIByteArray* TVMFFITraceback(
-        const char* filename, int lineno, const char* func, int cross_ffi_boundary) nogil;
+    const TVMFFIByteArray* TVMFFITraceback(const char* filename, int lineno,
+                                           const char* func, int cross_ffi_boundary) nogil
     int TVMFFITensorFromDLPack(DLManagedTensor* src, int32_t require_alignment,
-                                int32_t require_contiguous, TVMFFIObjectHandle* out) nogil
+                               int32_t require_contiguous, TVMFFIObjectHandle* out) nogil
     int TVMFFITensorFromDLPackVersioned(DLManagedTensorVersioned* src,
                                         int32_t require_alignment,
                                         int32_t require_contiguous,
                                         TVMFFIObjectHandle* out) nogil
     int TVMFFITensorToDLPack(TVMFFIObjectHandle src, DLManagedTensor** out) nogil
     int TVMFFITensorToDLPackVersioned(TVMFFIObjectHandle src,
-                                        DLManagedTensorVersioned** out) nogil
+                                      DLManagedTensorVersioned** out) nogil
     const TVMFFITypeInfo* TVMFFIGetTypeInfo(int32_t type_index) nogil
     TVMFFIByteArray TVMFFISmallBytesGetContentByteArray(const TVMFFIAny* value) nogil
     TVMFFIByteArray* TVMFFIBytesGetByteArrayPtr(TVMFFIObjectHandle obj) nogil
@@ -241,9 +240,9 @@ cdef extern from "tvm/ffi/extra/c_env_api.h":
 
     int TVMFFIEnvRegisterCAPI(const char* name, void* ptr) nogil
     void* TVMFFIEnvGetStream(int32_t device_type, int32_t device_id) nogil
-    int TVMFFIEnvSetStream(int32_t device_type, int32_t device_id,
-                                  TVMFFIStreamHandle stream,
-                                  TVMFFIStreamHandle* opt_out_original_stream) nogil
+    int TVMFFIEnvSetStream(int32_t device_type, int32_t device_id, TVMFFIStreamHandle stream,
+                           TVMFFIStreamHandle* opt_out_original_stream) nogil
+
 
 def _env_set_current_stream(int device_type, int device_id, uint64_t stream):
     cdef TVMFFIStreamHandle prev_stream = NULL
@@ -256,8 +255,7 @@ def _env_set_current_stream(int device_type, int device_id, uint64_t stream):
 
 
 cdef extern from "tvm_ffi_python_helpers.h":
-    # no need to expose fields of the call context
-     # setter data structure
+    # no need to expose fields of the call context setter data structure
     ctypedef int (*DLPackFromPyObject)(
         void* py_obj, DLManagedTensorVersioned** out, TVMFFIStreamHandle* env_stream
     ) except -1

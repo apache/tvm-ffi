@@ -16,6 +16,7 @@
 # under the License.
 # pylint: disable=invalid-name
 """Stream context."""
+
 from ctypes import c_void_p
 from typing import Any, Optional, Union
 

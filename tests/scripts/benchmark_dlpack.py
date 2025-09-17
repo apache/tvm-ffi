@@ -36,6 +36,7 @@ Summary of some takeaways:
 -
 
 """
+
 import time
 
 import numpy as np
@@ -182,27 +183,6 @@ def tvm_ffi_self_dlpack_nop(repeat):
     bench_ffi_nop_from_dlpack("tvm_ffi.nop+from_dlpack(tvm)", x, y, z, repeat)
 
 
-def bench_ffi_nop_from_dlpack(name, x, y, z, repeat):
-    """run dlpack conversion + tvm_ffi.nop
-
-    Measures overhead of running dlpack for each args then invoke
-    """
-    nop = tvm_ffi.get_global_func("testing.nop")
-    tx = tvm_ffi.from_dlpack(x)
-    ty = tvm_ffi.from_dlpack(y)
-    tz = tvm_ffi.from_dlpack(z)
-    nop(tx, ty, tz)
-
-    start = time.time()
-    for i in range(repeat):
-        tx = tvm_ffi.from_dlpack(x)
-        ty = tvm_ffi.from_dlpack(y)
-        tz = tvm_ffi.from_dlpack(z)
-        nop(tx, ty, tz)
-    end = time.time()
-    print_speed(name, (end - start) / repeat)
-
-
 def tvm_ffi_nop_from_torch_utils_to_dlpack(repeat):
     """
     Measures overhead of running dlpack for each args then invoke
@@ -238,7 +218,6 @@ def bench_tvm_ffi_nop_autodlpack(name, x, y, z, repeat):
     """
     nop = tvm_ffi.get_global_func("testing.nop")
     nop(x, y, z)
-    eps = 1e-6
     start = time.time()
     for i in range(repeat):
         nop(x, y, z)
@@ -262,7 +241,9 @@ def tvm_ffi_nop_autodlpack_from_torch(repeat, device="cpu", stream=False):
                 f"tvm_ffi.nop.autodlpack(torch[{device}][stream])", x, y, z, repeat
             )
     else:
-        bench_tvm_ffi_nop_autodlpack(f"tvm_ffi.nop.autodlpack(torch[{device}])", x, y, z, repeat)
+        bench_tvm_ffi_nop_autodlpack(
+            f"tvm_ffi.nop.autodlpack(torch[{device}])", x, y, z, repeat
+        )
 
 
 def tvm_ffi_nop_autodlpack_from_numpy(repeat):
@@ -367,7 +348,7 @@ def bench_torch_get_current_stream(repeat, name, func):
     """
     Measures overhead of running torch.cuda.current_stream
     """
-    x = torch.arange(1, device="cuda")
+    x = torch.arange(1, device="cuda")  # noqa: F841
     func(0)
     start = time.time()
     for i in range(repeat):
@@ -379,7 +360,9 @@ def bench_torch_get_current_stream(repeat, name, func):
 
 def populate_object_table(num_classes):
     nop = tvm_ffi.get_global_func("testing.nop")
-    dummy_instances = [type(f"DummyClass{i}", (object,), {})() for i in range(num_classes)]
+    dummy_instances = [
+        type(f"DummyClass{i}", (object,), {})() for i in range(num_classes)
+    ]
     for instance in dummy_instances:
         nop(instance)
 
@@ -418,15 +401,23 @@ def main():
     print("---------------------------------------------------")
     print("Benchmark x.__dlpack__(max_version=(1,1)) overhead")
     print("---------------------------------------------------")
-    bench_to_dlpack_versioned(torch.arange(1), "torch.__dlpack__(max_version=(1,1))", repeat)
-    bench_to_dlpack_versioned(np.arange(1), "numpy.__dlpack__(max_version=(1,1))", repeat)
     bench_to_dlpack_versioned(
-        tvm_ffi.from_dlpack(torch.arange(1)), "tvm.__dlpack__(max_version=(1,1))", repeat
+        torch.arange(1), "torch.__dlpack__(max_version=(1,1))", repeat
+    )
+    bench_to_dlpack_versioned(
+        np.arange(1), "numpy.__dlpack__(max_version=(1,1))", repeat
+    )
+    bench_to_dlpack_versioned(
+        tvm_ffi.from_dlpack(torch.arange(1)),
+        "tvm.__dlpack__(max_version=(1,1))",
+        repeat,
     )
     print("---------------------------------------------------")
     print("Benchmark torch.get_cuda_stream[default stream]")
     print("---------------------------------------------------")
-    bench_torch_get_current_stream(repeat, "cpp-extension", load_torch_get_current_cuda_stream())
+    bench_torch_get_current_stream(
+        repeat, "cpp-extension", load_torch_get_current_cuda_stream()
+    )
     bench_torch_get_current_stream(repeat, "python", torch_get_cuda_stream_native)
     print("---------------------------------------------------")
     print("Benchmark torch.get_cuda_stream[non-default stream]")

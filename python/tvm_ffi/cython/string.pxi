@@ -28,7 +28,6 @@ cdef inline bytes _bytes_obj_get_py_bytes(obj):
     return bytearray_to_bytes(bytes)
 
 
-
 class String(str, PyNativeObject):
     __slots__ = ["__tvm_ffi_object__"]
     """String object that is possibly returned by FFI call.

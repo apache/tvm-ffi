@@ -106,7 +106,7 @@ cdef inline int _from_dlpack_universal(
     # move to false as most frameworks get upgraded.
     cdef int favor_legacy_dlpack = True
 
-    if hasattr(ext_tensor, '__dlpack__'):
+    if hasattr(ext_tensor, "__dlpack__"):
         if favor_legacy_dlpack:
             _from_dlpack(
                 ext_tensor.__dlpack__(),
@@ -305,6 +305,7 @@ cdef class DLTensorTestWrapper:
 
     cdef Tensor tensor
     cdef dict __dict__
+
     def __init__(self, tensor):
         self.tensor = tensor
 

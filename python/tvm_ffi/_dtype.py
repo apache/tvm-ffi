@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 """dtype class."""
+
 # pylint: disable=invalid-name
 from enum import IntEnum
 
@@ -83,7 +84,10 @@ class dtype(str):
             The new dtype with the given number of lanes.
         """
         cdtype = core._create_dtype_from_tuple(
-            core.DataType, self.__tvm_ffi_dtype__.type_code, self.__tvm_ffi_dtype__.bits, lanes
+            core.DataType,
+            self.__tvm_ffi_dtype__.type_code,
+            self.__tvm_ffi_dtype__.bits,
+            lanes,
         )
         val = str.__new__(dtype, str(cdtype))
         val.__tvm_ffi_dtype__ = cdtype

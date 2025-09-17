@@ -113,7 +113,7 @@ class AttachFieldFlag : public FieldInfoTrait {
  * \returns The byteoffset
  */
 template <typename Class, typename T>
-TVM_FFI_INLINE int64_t GetFieldByteOffsetToObject(T Class::*field_ptr) {
+TVM_FFI_INLINE int64_t GetFieldByteOffsetToObject(T Class::* field_ptr) {
   int64_t field_offset_to_class =
       reinterpret_cast<int64_t>(&(static_cast<Class*>(nullptr)->*field_ptr));
   return field_offset_to_class - details::ObjectUnsafe::GetObjectOffsetToSubclass<Class>();
@@ -350,7 +350,7 @@ class ObjectDef : public ReflectionDefBase {
    * \return The reflection definition.
    */
   template <typename T, typename BaseClass, typename... Extra>
-  TVM_FFI_INLINE ObjectDef& def_ro(const char* name, T BaseClass::*field_ptr, Extra&&... extra) {
+  TVM_FFI_INLINE ObjectDef& def_ro(const char* name, T BaseClass::* field_ptr, Extra&&... extra) {
     RegisterField(name, field_ptr, false, std::forward<Extra>(extra)...);
     return *this;
   }
@@ -369,7 +369,7 @@ class ObjectDef : public ReflectionDefBase {
    * \return The reflection definition.
    */
   template <typename T, typename BaseClass, typename... Extra>
-  TVM_FFI_INLINE ObjectDef& def_rw(const char* name, T BaseClass::*field_ptr, Extra&&... extra) {
+  TVM_FFI_INLINE ObjectDef& def_rw(const char* name, T BaseClass::* field_ptr, Extra&&... extra) {
     static_assert(Class::_type_mutable, "Only mutable classes are supported for writable fields");
     RegisterField(name, field_ptr, true, std::forward<Extra>(extra)...);
     return *this;
@@ -430,7 +430,7 @@ class ObjectDef : public ReflectionDefBase {
   }
 
   template <typename T, typename BaseClass, typename... ExtraArgs>
-  void RegisterField(const char* name, T BaseClass::*field_ptr, bool writable,
+  void RegisterField(const char* name, T BaseClass::* field_ptr, bool writable,
                      ExtraArgs&&... extra_args) {
     static_assert(std::is_base_of_v<BaseClass, Class>, "BaseClass must be a base class of Class");
     TVMFFIFieldInfo info;

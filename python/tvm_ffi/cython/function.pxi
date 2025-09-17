@@ -88,9 +88,9 @@ cdef inline object make_ret(TVMFFIAny result, DLPackToPyObject c_dlpack_to_pyobj
     raise ValueError("Unhandled type index %d" % type_index)
 
 
-##----------------------------------------------------------------------------
-## Helper to simplify calling constructor
-##----------------------------------------------------------------------------
+# ----------------------------------------------------------------------------
+#  Helper to simplify calling constructor
+# ----------------------------------------------------------------------------
 cdef inline int ConstructorCall(void* constructor_handle,
                                 PyObject* py_arg_tuple,
                                 void** handle,
@@ -109,9 +109,9 @@ cdef inline int ConstructorCall(void* constructor_handle,
     handle[0] = result.v_ptr
     return 0
 
-##----------------------------------------------------------------------------
-## Implementation of setters using same naming style as TVMFFIPyArgSetterXXX_
-##----------------------------------------------------------------------------
+# ----------------------------------------------------------------------------
+#  Implementation of setters using same naming style as TVMFFIPyArgSetterXXX_
+# ----------------------------------------------------------------------------
 cdef int TVMFFIPyArgSetterTensor_(
     TVMFFIPyArgSetter* handle, TVMFFIPyCallContext* ctx,
     PyObject* arg, TVMFFIAny* out
@@ -219,8 +219,7 @@ cdef int TVMFFIPyArgSetterDLPack_(
     out.v_ptr = temp_chandle
     # record the stream from the source framework context when possible
     temp_dltensor = TVMFFITensorGetDLTensorPtr(temp_chandle)
-    if (temp_dltensor.device.device_type != kDLCPU and
-        ctx.device_type != -1):
+    if (temp_dltensor.device.device_type != kDLCPU and ctx.device_type != -1):
         # __tvm_ffi_env_stream__ returns the expected stream that should be set
         # through TVMFFIEnvSetStream when calling a TVM FFI function
         if hasattr(arg, "__tvm_ffi_env_stream__"):
@@ -571,9 +570,9 @@ cdef int TVMFFIPyArgSetterFactory_(PyObject* value, TVMFFIPyArgSetter* out) exce
     out.func = TVMFFIPyArgSetterFallback_
     return 0
 
-#---------------------------------------------------------------------------------------------
-## Implementation of function calling
-#---------------------------------------------------------------------------------------------
+# ---------------------------------------------------------------------------------------------
+# Implementation of function calling
+# ---------------------------------------------------------------------------------------------
 cdef class Function(Object):
     """Python class that wraps a function with tvm-ffi ABI.
 
@@ -591,6 +590,7 @@ cdef class Function(Object):
     property release_gil:
         def __get__(self):
             return self.c_release_gil != 0
+
         def __set__(self, value):
             self.c_release_gil = value
 
@@ -747,7 +747,7 @@ def _get_global_func(name, allow_missing):
         return ret
 
     if allow_missing:
-       return None
+        return None
 
     raise ValueError("Cannot find global function %s" % name)
 
@@ -835,7 +835,7 @@ def _convert_to_opaque_object(object pyobject):
 
 def _print_debug_info():
     """Get the size of the dispatch map"""
-    cdef size_t size =   TVMFFIPyGetDispatchMapSize()
+    cdef size_t size = TVMFFIPyGetDispatchMapSize()
     print(f"TVMFFIPyGetDispatchMapSize: {size}")
 
 

@@ -18,30 +18,29 @@
 
 set -euxo pipefail
 
-cleanup()
-{
-  rm -rf /tmp/$$.*
+cleanup() {
+	rm -rf /tmp/$$.*
 }
 trap cleanup 0
 
 function run_lint {
-  echo "Checking file types..."
-  python tests/lint/check_file_type.py
+	echo "Checking file types..."
+	python tests/lint/check_file_type.py
 
-  echo "Checking ASF headers..."
-  python tests/lint/check_asf_header.py --check
+	echo "Checking ASF headers..."
+	python tests/lint/check_asf_header.py --check
 
-  echo "isort check..."
-  isort --check --diff .
+	echo "isort check..."
+	isort --check --diff .
 
-  echo "black check..."
-  black --check --diff .
+	echo "black check..."
+	black --check --diff .
 
-  echo "ruff check..."
-  ruff check --diff .
+	echo "ruff check..."
+	ruff check --diff .
 
-  echo "clang-format check..."
-  tests/lint/git-clang-format.sh
+	echo "clang-format check..."
+	tests/lint/git-clang-format.sh
 }
 
 run_lint

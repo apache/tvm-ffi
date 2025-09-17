@@ -18,5 +18,3 @@
 # tvm ffi
 
 [![CI](https://github.com/apache/tvm-ffi/actions/workflows/ci_test.yml/badge.svg)](https://github.com/apache/tvm-ffi/actions/workflows/ci_test.yml)
-
-

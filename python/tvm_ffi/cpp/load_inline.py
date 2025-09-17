@@ -86,7 +86,9 @@ def _find_cuda_home() -> Optional[str]:
         else:
             # Guess #3
             if IS_WINDOWS:
-                cuda_homes = glob.glob("C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v*.*")
+                cuda_homes = glob.glob(
+                    "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v*.*"
+                )
                 if len(cuda_homes) == 0:
                     cuda_home = ""
                 else:
@@ -162,7 +164,9 @@ def _run_command_in_dev_prompt(args, cwd, capture_output):
             raise FileNotFoundError("No Visual Studio installation found.")
 
         # Construct the path to the VsDevCmd.bat file
-        vsdevcmd_path = os.path.join(vs_install_path, "Common7", "Tools", "VsDevCmd.bat")
+        vsdevcmd_path = os.path.join(
+            vs_install_path, "Common7", "Tools", "VsDevCmd.bat"
+        )
 
         if not os.path.exists(vsdevcmd_path):
             raise FileNotFoundError(f"VsDevCmd.bat not found at: {vsdevcmd_path}")
@@ -175,7 +179,9 @@ def _run_command_in_dev_prompt(args, cwd, capture_output):
         )
 
         # Execute the command in a new shell
-        return subprocess.run(cmd_command, cwd=cwd, capture_output=capture_output, shell=True)
+        return subprocess.run(
+            cmd_command, cwd=cwd, capture_output=capture_output, shell=True
+        )
 
     except (FileNotFoundError, subprocess.CalledProcessError) as e:
         raise RuntimeError(
@@ -217,7 +223,11 @@ def _generate_ninja_build(
             "/EHsc",
         ]
         default_cuda_cflags = ["-Xcompiler", "/std:c++17", "/O2"]
-        default_ldflags = ["/DLL", f"/LIBPATH:{tvm_ffi_lib_path}", f"{tvm_ffi_lib_name}.lib"]
+        default_ldflags = [
+            "/DLL",
+            f"/LIBPATH:{tvm_ffi_lib_path}",
+            f"{tvm_ffi_lib_name}.lib",
+        ]
     else:
         default_cflags = ["-std=c++17", "-fPIC", "-O2"]
         default_cuda_cflags = ["-Xcompiler", "-fPIC", "-std=c++17", "-O2"]
@@ -226,12 +236,17 @@ def _generate_ninja_build(
         if with_cuda:
             # determine the compute capability of the current GPU
             default_cuda_cflags += [_get_cuda_target()]
-            default_ldflags += ["-L{}".format(os.path.join(_find_cuda_home(), "lib64")), "-lcudart"]
+            default_ldflags += [
+                "-L{}".format(os.path.join(_find_cuda_home(), "lib64")),
+                "-lcudart",
+            ]
 
     cflags = default_cflags + [flag.strip() for flag in extra_cflags]
     cuda_cflags = default_cuda_cflags + [flag.strip() for flag in extra_cuda_cflags]
     ldflags = default_ldflags + [flag.strip() for flag in extra_ldflags]
-    include_paths = default_include_paths + [os.path.abspath(path) for path in extra_include_paths]
+    include_paths = default_include_paths + [
+        os.path.abspath(path) for path in extra_include_paths
+    ]
 
     # append include paths
     for path in include_paths:
@@ -241,7 +256,9 @@ def _generate_ninja_build(
     # flags
     ninja = []
     ninja.append("ninja_required_version = 1.3")
-    ninja.append("cxx = {}".format(os.environ.get("CXX", "cl" if IS_WINDOWS else "c++")))
+    ninja.append(
+        "cxx = {}".format(os.environ.get("CXX", "cl" if IS_WINDOWS else "c++"))
+    )
     ninja.append("cflags = {}".format(" ".join(cflags)))
     if with_cuda:
         ninja.append("nvcc = {}".format(os.path.join(_find_cuda_home(), "bin", "nvcc")))
@@ -290,7 +307,9 @@ def _generate_ninja_build(
         )
     # Use appropriate extension based on platform
     ext = ".dll" if IS_WINDOWS else ".so"
-    ninja.append("build {}{}: link main.o{}".format(name, ext, " cuda.o" if with_cuda else ""))
+    ninja.append(
+        "build {}{}: link main.o{}".format(name, ext, " cuda.o" if with_cuda else "")
+    )
     ninja.append("")
 
     # default target
@@ -306,7 +325,9 @@ def _build_ninja(build_dir: str) -> None:
     if num_workers is not None:
         command += ["-j", num_workers]
     if IS_WINDOWS:
-        status = _run_command_in_dev_prompt(args=command, cwd=build_dir, capture_output=True)
+        status = _run_command_in_dev_prompt(
+            args=command, cwd=build_dir, capture_output=True
+        )
     else:
         status = subprocess.run(args=command, cwd=build_dir, capture_output=True)
     if status.returncode != 0:
@@ -508,7 +529,9 @@ def load_inline(
             extra_ldflags,
             extra_include_paths,
         )
-        build_dir: str = os.path.join(build_directory, "{}_{}".format(name, source_hash))
+        build_dir: str = os.path.join(
+            build_directory, "{}_{}".format(name, source_hash)
+        )
     else:
         build_dir = os.path.abspath(build_directory)
     os.makedirs(build_dir, exist_ok=True)
@@ -536,4 +559,6 @@ def load_inline(
 
         # Use appropriate extension based on platform
         ext = ".dll" if IS_WINDOWS else ".so"
-        return load_module(os.path.abspath(os.path.join(build_dir, "{}{}".format(name, ext))))
+        return load_module(
+            os.path.abspath(os.path.join(build_dir, "{}{}".format(name, ext)))
+        )

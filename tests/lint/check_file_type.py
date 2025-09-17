@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 """Helper tool to check file types that are allowed to checkin."""
+
 import os
 import subprocess
 import sys
@@ -180,7 +181,7 @@ def main():
     cmd = ["git", "ls-files"]
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     (out, _) = proc.communicate()
-    assert proc.returncode == 0, f'{" ".join(cmd)} errored: {out}'
+    assert proc.returncode == 0, f"{' '.join(cmd)} errored: {out}"
     res = out.decode("utf-8")
     flist = res.split()
     error_list = []
@@ -211,11 +212,14 @@ def main():
     if asf_copyright_list:
         report = "------File type check report----\n"
         report += "\n".join(asf_copyright_list) + "\n"
-        report += "------Found %d files that has ASF header with copyright message----\n" % len(
-            asf_copyright_list
+        report += (
+            "------Found %d files that has ASF header with copyright message----\n"
+            % len(asf_copyright_list)
         )
         report += "--- Files with ASF header do not need Copyright lines.\n"
-        report += "--- Contributors retain copyright to their contribution by default.\n"
+        report += (
+            "--- Contributors retain copyright to their contribution by default.\n"
+        )
         report += "--- If a file comes with a different license, consider put it under the 3rdparty folder instead.\n"
         report += "---\n"
         report += "--- You can use the following steps to remove the copyright lines\n"

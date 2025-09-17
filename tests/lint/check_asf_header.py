@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 """Helper tool to add ASF header to files that cannot be handled by Rat."""
+
 import argparse
 import fnmatch
 import os
@@ -187,7 +188,9 @@ def get_git_files():
         if result.returncode == 0:
             return [line.strip() for line in result.stdout.split("\n") if line.strip()]
         else:
-            print("Error: Could not get git files. Make sure you're in a git repository.")
+            print(
+                "Error: Could not get git files. Make sure you're in a git repository."
+            )
             print("Git command failed:", result.stderr.strip())
             return None
     except FileNotFoundError:
@@ -343,7 +346,9 @@ Examples:
     )
 
     parser.add_argument(
-        "--check", action="store_true", help="Check mode: report errors without modifying files"
+        "--check",
+        action="store_true",
+        help="Check mode: report errors without modifying files",
     )
 
     parser.add_argument(

@@ -16,7 +16,6 @@
 # under the License.
 # -*- coding: utf-8 -*-
 import os
-import sys
 
 import tomli
 
@@ -198,7 +197,7 @@ def footer_html():
               <div class="dropdown">
                   <button class="btn btn-link dropdown-toggle" type="button" id="footerDropdown" data-bs-toggle="dropdown"
                   aria-expanded="false" style="font-size: 0.9em; color: #6c757d; text-decoration: none; padding: 0; border: none; background: none;">
-                      {footer_dropdown['name']}
+                      {footer_dropdown["name"]}
                   </button>
                   <ul class="dropdown-menu" aria-labelledby="footerDropdown" style="font-size: 0.9em;">
 {dropdown_items}                  </ul>
@@ -226,6 +225,6 @@ html_context = {
     "conf_py_path": "/docs/",
 }
 
-html_static_path = ['_static']
+html_static_path = ["_static"]
 
-html_css_files = ['custom.css']
+html_css_files = ["custom.css"]

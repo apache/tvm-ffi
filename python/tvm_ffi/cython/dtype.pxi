@@ -18,6 +18,7 @@
 
 _CLASS_DTYPE = None
 
+
 def _set_class_dtype(cls):
     global _CLASS_DTYPE
     _CLASS_DTYPE = cls

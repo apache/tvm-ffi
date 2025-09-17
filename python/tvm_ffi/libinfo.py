@@ -75,7 +75,9 @@ def find_libtvm_ffi():
     lib_found = [p for p in lib_dll_path if os.path.exists(p) and os.path.isfile(p)]
 
     if not lib_found:
-        raise RuntimeError(f"Cannot find library: {name}\nList of candidates:\n{lib_dll_path}")
+        raise RuntimeError(
+            f"Cannot find library: {name}\nList of candidates:\n{lib_dll_path}"
+        )
 
     return lib_found[0]
 
@@ -108,7 +110,9 @@ def find_include_path():
     """Find header files for C compilation."""
     candidates = [
         os.path.join(os.path.dirname(os.path.realpath(__file__)), "include"),
-        os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "..", "include"),
+        os.path.join(
+            os.path.dirname(os.path.realpath(__file__)), "..", "..", "include"
+        ),
     ]
     for candidate in candidates:
         if os.path.isdir(candidate):
@@ -130,12 +134,19 @@ def find_python_helper_include_path():
 
 def find_dlpack_include_path():
     """Find dlpack header files for C compilation."""
-    install_include_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "include")
+    install_include_path = os.path.join(
+        os.path.dirname(os.path.realpath(__file__)), "include"
+    )
     if os.path.isdir(os.path.join(install_include_path, "dlpack")):
         return install_include_path
 
     source_include_path = os.path.join(
-        os.path.dirname(os.path.realpath(__file__)), "..", "..", "3rdparty", "dlpack", "include"
+        os.path.dirname(os.path.realpath(__file__)),
+        "..",
+        "..",
+        "3rdparty",
+        "dlpack",
+        "include",
     )
     if os.path.isdir(source_include_path):
         return source_include_path

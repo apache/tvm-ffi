@@ -37,16 +37,28 @@ def __main__():
         description="Get various configuration information needed to compile with tvm-ffi"
     )
 
-    parser.add_argument("--includedir", action="store_true", help="Print include directory")
     parser.add_argument(
-        "--dlpack-includedir", action="store_true", help="Print dlpack include directory"
+        "--includedir", action="store_true", help="Print include directory"
     )
-    parser.add_argument("--cmakedir", action="store_true", help="Print library directory")
-    parser.add_argument("--sourcedir", action="store_true", help="Print source directory")
-    parser.add_argument("--libfiles", action="store_true", help="Fully qualified library filenames")
+    parser.add_argument(
+        "--dlpack-includedir",
+        action="store_true",
+        help="Print dlpack include directory",
+    )
+    parser.add_argument(
+        "--cmakedir", action="store_true", help="Print library directory"
+    )
+    parser.add_argument(
+        "--sourcedir", action="store_true", help="Print source directory"
+    )
+    parser.add_argument(
+        "--libfiles", action="store_true", help="Fully qualified library filenames"
+    )
     parser.add_argument("--libdir", action="store_true", help="Print library directory")
     parser.add_argument("--libs", action="store_true", help="Libraries to be linked")
-    parser.add_argument("--cython-lib-path", action="store_true", help="Print cython path")
+    parser.add_argument(
+        "--cython-lib-path", action="store_true", help="Print cython path"
+    )
     parser.add_argument("--cxxflags", action="store_true", help="Print cxx flags")
     parser.add_argument("--cflags", action="store_true", help="Print c flags")
     parser.add_argument("--ldflags", action="store_true", help="Print ld flags")

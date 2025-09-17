@@ -21,7 +21,6 @@ try:
 except ImportError:
     torch = None
 
-import ctypes
 
 import numpy
 

@@ -64,7 +64,9 @@ class FileLock:
                 )
                 msvcrt.locking(self._file_descriptor, msvcrt.LK_NBLCK, 1)
             else:  # Unix-like systems
-                self._file_descriptor = os.open(self.lock_file_path, os.O_WRONLY | os.O_CREAT)
+                self._file_descriptor = os.open(
+                    self.lock_file_path, os.O_WRONLY | os.O_CREAT
+                )
                 fcntl.flock(self._file_descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
             return True
         except (IOError, BlockingIOError):

@@ -200,7 +200,9 @@ class Module(core.Object):
         b : Bool
             True if the module is compilation exportable.
         """
-        return (self.get_property_mask() & ModulePropertyMask.COMPILATION_EXPORTABLE) != 0
+        return (
+            self.get_property_mask() & ModulePropertyMask.COMPILATION_EXPORTABLE
+        ) != 0
 
     def clear_imports(self):
         """Remove all imports of the module."""

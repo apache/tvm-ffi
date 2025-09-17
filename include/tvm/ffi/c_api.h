@@ -272,16 +272,16 @@ typedef struct {
      */
     uint32_t small_str_len;
   };
-  union {                  // 8 bytes
-    int64_t v_int64;       // integers
-    double v_float64;      // floating-point numbers
-    void* v_ptr;           // typeless pointers
-    const char* v_c_str;   // raw C-string
-    TVMFFIObject* v_obj;   // ref counted objects
-    DLDataType v_dtype;    // data type
-    DLDevice v_device;     // device
-    char v_bytes[8];       // small string
-    uint64_t v_uint64;     // uint64 repr mainly used for hashing
+  union {                 // 8 bytes
+    int64_t v_int64;      // integers
+    double v_float64;     // floating-point numbers
+    void* v_ptr;          // typeless pointers
+    const char* v_c_str;  // raw C-string
+    TVMFFIObject* v_obj;  // ref counted objects
+    DLDataType v_dtype;   // data type
+    DLDevice v_device;    // device
+    char v_bytes[8];      // small string
+    uint64_t v_uint64;    // uint64 repr mainly used for hashing
   };
 } TVMFFIAny;
 
