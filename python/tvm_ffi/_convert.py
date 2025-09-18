@@ -21,6 +21,11 @@ from typing import Any
 
 from . import container, core
 
+try:
+    import torch
+except ImportError:
+    torch = None
+
 
 def convert(value: Any) -> Any:  # noqa: PLR0911
     """Convert a python object to ffi values.
@@ -60,6 +65,8 @@ def convert(value: Any) -> Any:  # noqa: PLR0911
         return None
     elif hasattr(value, "__dlpack__"):
         return core.from_dlpack(value)
+    elif torch is not None and isinstance(value, torch.dtype):
+        return core._convert_torch_dtype_to_ffi_dtype(value)
     elif isinstance(value, Exception):
         return core._convert_to_ffi_error(value)
     else:

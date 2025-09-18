@@ -470,6 +470,58 @@ cdef int TVMFFIPyArgSetterFallback_(
     TVMFFIPyPushTempFFIObject(ctx, chandle)
 
 
+if torch is not None:
+    TORCH_DTYPE_TO_DTYPE = {
+        torch.int8: (0, 8, 1),
+        torch.short: (0, 16, 1),
+        torch.int16: (0, 16, 1),
+        torch.int32: (0, 32, 1),
+        torch.int: (0, 32, 1),
+        torch.int64: (0, 64, 1),
+        torch.long: (0, 64, 1),
+        torch.uint8: (1, 8, 1),
+        torch.uint16: (1, 16, 1),
+        torch.uint32: (1, 32, 1),
+        torch.uint64: (1, 64, 1),
+        torch.float16: (2, 16, 1),
+        torch.half: (2, 16, 1),
+        torch.float32: (2, 32, 1),
+        torch.float: (2, 32, 1),
+        torch.float64: (2, 64, 1),
+        torch.double: (2, 64, 1),
+        torch.bfloat16: (4, 16, 1),
+        torch.bool: (6, 8, 1),
+        torch.float8_e4m3fn: (10, 8, 1),
+        torch.float8_e4m3fnuz: (11, 8, 1),
+        torch.float8_e5m2: (12, 8, 1),
+        torch.float8_e5m2fnuz: (13, 8, 1),
+        torch.float8_e8m0fnu: (14, 8, 1),
+    }
+    
+    def _convert_torch_dtype_to_ffi_dtype(torch_dtype):
+        return _create_dtype_from_tuple(DataType, *TORCH_DTYPE_TO_DTYPE[torch_dtype])
+else:
+    TORCH_DTYPE_TO_DTYPE = {}
+
+    def _convert_torch_dtype_to_ffi_dtype(torch_dtype):
+        raise ValueError("torch not found")
+
+
+cdef int TVMFFIPyArgSetterDTypeFromTorch_(
+    TVMFFIPyArgSetter* handle, TVMFFIPyCallContext* ctx,
+    PyObject* py_arg, TVMFFIAny* out
+) except -1:
+    """Setter for torch dtype"""
+    code, bits, lanes = TORCH_DTYPE_TO_DTYPE[<object>py_arg]
+    cdef DLDataType cdtype
+    cdtype.code = code
+    cdtype.bits = bits
+    cdtype.lanes = lanes
+    out.type_index = kTVMFFIDataType
+    out.v_dtype = cdtype
+    return 0
+
+
 cdef int TVMFFIPyArgSetterFactory_(PyObject* value, TVMFFIPyArgSetter* out) except -1:
     """
     Factory function that creates an argument setter for a given Python argument type.
@@ -559,6 +611,9 @@ cdef int TVMFFIPyArgSetterFactory_(PyObject* value, TVMFFIPyArgSetter* out) exce
         return 0
     if callable(arg):
         out.func = TVMFFIPyArgSetterCallable_
+        return 0
+    if torch is not None and isinstance(arg, torch.dtype):
+        out.func = TVMFFIPyArgSetterDTypeFromTorch_
         return 0
     if isinstance(arg, Exception):
         out.func = TVMFFIPyArgSetterException_
