@@ -210,7 +210,7 @@ template <class T>
 T* toDLPackImpl(const Tensor& src) {
   auto view = src;
 
-  bool need_normalize_strides = src.ndim() == 1 && src.size(0) == 1 && src.stride(0) != 1;
+  bool need_normalize_strides = src.dim() == 1 && src.size(0) == 1 && src.stride(0) != 1;
   // less common case, try normalizing the strides
   if (need_normalize_strides) {
     // create a new tensor with possibly normalized strides
