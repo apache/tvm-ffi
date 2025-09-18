@@ -497,7 +497,7 @@ if torch is not None:
         torch.float8_e5m2fnuz: (13, 8, 1),
         torch.float8_e8m0fnu: (14, 8, 1),
     }
-    
+
     def _convert_torch_dtype_to_ffi_dtype(torch_dtype):
         return _create_dtype_from_tuple(DataType, *TORCH_DTYPE_TO_DTYPE[torch_dtype])
 else:
