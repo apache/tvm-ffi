@@ -576,7 +576,7 @@ cdef int TVMFFIPyArgSetterDTypeFromTorch_(
 ) except -1:
     """Setter for torch dtype"""
     cdef py_obj = <object>py_arg
-    if not py_obj in TORCH_DTYPE_TO_DTYPE:
+    if py_obj not in TORCH_DTYPE_TO_DTYPE:
         raise ValueError("Unsupported torch dtype: ", py_obj)
     out.type_index = kTVMFFIDataType
     out.v_dtype = TORCH_DTYPE_TO_DTYPE[py_obj]
@@ -588,7 +588,7 @@ cdef int TVMFFIPyArgSetterDTypeFromNumpy_(
 ) except -1:
     """Setter for torch dtype"""
     cdef py_obj = <object>py_arg
-    if not py_obj in NUMPY_DTYPE_TO_DTYPE:
+    if py_obj not in NUMPY_DTYPE_TO_DTYPE:
         raise ValueError("Unsupported numpy or ml_dtypes dtype: ", py_obj)
     out.type_index = kTVMFFIDataType
     out.v_dtype = NUMPY_DTYPE_TO_DTYPE[py_obj]
