@@ -20,6 +20,7 @@ import pickle
 import numpy as np
 import pytest
 import tvm_ffi
+from typing import Any
 
 
 def test_dtype() -> None:
@@ -85,7 +86,7 @@ def test_dtype_with_lanes(dtype_str: str) -> None:
 _fecho = tvm_ffi.get_global_func("testing.echo")
 
 
-def _check_dtype(dtype, code, bits, lanes):
+def _check_dtype(dtype: Any, code: int, bits: int, lanes: int) -> None:
     echo_dtype = _fecho(dtype)
     assert echo_dtype.type_code == code
     assert echo_dtype.bits == bits

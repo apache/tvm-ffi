@@ -32,7 +32,7 @@ except ImportError:
     numpy = None
 
 
-def convert(value: Any) -> Any:  # noqa: PLR0911
+def convert(value: Any) -> Any:  # noqa: PLR0911,PLR0912
     """Convert a python object to ffi values.
 
     Parameters
