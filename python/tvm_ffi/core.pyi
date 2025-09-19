@@ -74,9 +74,9 @@ class PyNativeObject:
     ) -> None: ...
 
 def _set_class_object(cls: type) -> None: ...
-def _register_object_by_index(index: int, cls: type) -> None: ...
+def _register_object_by_index(type_index: int, type_cls: type) -> TypeInfo: ...
 def _object_type_key_to_index(type_key: str) -> int | None: ...
-def _add_class_attrs_by_reflection(type_index: int, cls: type) -> type: ...
+def _lookup_type_info_from_type_key(type_key: str) -> TypeInfo: ...
 
 class Error(Object):
     """Base class for FFI errors."""
@@ -225,3 +225,38 @@ class Bytes(bytes, PyNativeObject):
 
     # pylint: disable=no-self-argument
     def __from_tvm_ffi_object__(cls, obj: Any) -> Bytes: ...
+
+# ---------------------------------------------------------------------------
+# Type reflection metadata (from cython/type_info.pxi)
+# ---------------------------------------------------------------------------
+
+class TypeField:
+    """Description of a single reflected field on an FFI-backed type."""
+
+    name: str
+    doc: str | None
+    size: int
+    offset: int
+    frozen: bool
+    getter: Any
+    setter: Any
+
+    def as_property(self, cls: type) -> property: ...
+
+class TypeMethod:
+    """Description of a single reflected method on an FFI-backed type."""
+
+    name: str
+    doc: str | None
+    func: Any
+    is_static: bool
+
+class TypeInfo:
+    """Aggregated type information required to build a proxy class."""
+
+    type_cls: type | None
+    type_index: int
+    type_key: str
+    fields: list[TypeField]
+    methods: list[TypeMethod]
+    parent_type_info: TypeInfo | None

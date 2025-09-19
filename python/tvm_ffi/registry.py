@@ -20,6 +20,7 @@ import sys
 from typing import Any, Callable, Optional
 
 from . import core
+from .core import TypeInfo
 
 # whether we simplify skip unknown objects regtistration
 _SKIP_UNKNOWN_OBJECTS = False
@@ -54,8 +55,8 @@ def register_object(type_key: str | type | None = None) -> Any:
             if _SKIP_UNKNOWN_OBJECTS:
                 return cls
             raise ValueError(f"Cannot find object type index for {object_name}")
-        core._add_class_attrs_by_reflection(type_index, cls)
-        core._register_object_by_index(type_index, cls)
+        info = core._register_object_by_index(type_index, cls)
+        _add_class_attrs(type_cls=cls, type_info=info)
         return cls
 
     if isinstance(type_key, str):
@@ -226,6 +227,46 @@ def init_ffi_api(namespace: str, target_module_name: Optional[str] = None) -> No
         f = get_global_func(name)
         f.__name__ = fname
         setattr(target_module, f.__name__, f)
+
+
+def _member_method_wrapper(method_func: Callable[..., Any]) -> Callable[..., Any]:
+    def wrapper(self: Any, *args: Any) -> Any:
+        return method_func(self, *args)
+
+    return wrapper
+
+
+def _add_class_attrs(type_cls: type, type_info: TypeInfo) -> type:
+    for field in type_info.fields:
+        getter = field.getter
+        setter = field.setter if not field.frozen else None
+        doc = field.doc if field.doc else None
+        name = field.name
+        if hasattr(type_cls, name):
+            # skip already defined attributes
+            continue
+        setattr(type_cls, name, property(getter, setter, doc=doc))
+    for method in type_info.methods:
+        name = method.name
+        doc = method.doc if method.doc else None
+        method_func = method.func
+        if method.is_static:
+            method_pyfunc = staticmethod(method_func)
+        else:
+            # must call into another method instead of direct capture
+            # to avoid the same method_func variable being used
+            # across multiple loop iterations
+            method_pyfunc = _member_method_wrapper(method_func)
+
+        if doc is not None:
+            method_pyfunc.__doc__ = doc
+        method_pyfunc.__name__ = name
+
+        if hasattr(type_cls, name):
+            # skip already defined attributes
+            continue
+        setattr(type_cls, name, method_pyfunc)
+    return type_cls
 
 
 __all__ = [

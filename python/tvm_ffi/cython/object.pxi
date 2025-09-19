@@ -227,18 +227,6 @@ class PyNativeObject:
         self.__tvm_ffi_object__ = obj
 
 
-"""Maps object type index to its constructor"""
-cdef list OBJECT_TYPE = []
-
-
-def _register_object_by_index(int index, object cls):
-    """register object class"""
-    global OBJECT_TYPE
-    while len(OBJECT_TYPE) <= index:
-        OBJECT_TYPE.append(None)
-    OBJECT_TYPE[index] = cls
-
-
 def _object_type_key_to_index(str type_key):
     """get the type index of object class"""
     cdef int32_t tidx
@@ -265,13 +253,13 @@ cdef inline object make_ret_opaque_object(TVMFFIAny result):
 
 
 cdef inline object make_ret_object(TVMFFIAny result):
-    global OBJECT_TYPE
+    global TYPE_INDEX_TO_INFO
     cdef int32_t tindex
     cdef object cls
     tindex = result.type_index
 
-    if tindex < len(OBJECT_TYPE):
-        cls = OBJECT_TYPE[tindex]
+    if tindex < len(TYPE_INDEX_TO_INFO):
+        cls = TYPE_INDEX_TO_INFO[tindex].type_cls
         if cls is not None:
             if issubclass(cls, PyNativeObject):
                 obj = Object.__new__(Object)
@@ -289,5 +277,87 @@ cdef inline object make_ret_object(TVMFFIAny result):
     (<Object>obj).chandle = result.v_obj
     return obj
 
+
+cdef _get_method_from_method_info(const TVMFFIMethodInfo* method):
+    cdef TVMFFIAny result
+    CHECK_CALL(TVMFFIAnyViewToOwnedAny(&(method.method), &result))
+    return make_ret(result)
+
+
+def _type_info_create_from_type_key(object type_cls, str type_key):
+    cdef const TVMFFIFieldInfo* field
+    cdef const TVMFFIMethodInfo* method
+    cdef const TVMFFITypeInfo* info
+    cdef int32_t type_index
+    cdef object fields = []
+    cdef object methods = []
+    cdef FieldGetter getter
+    cdef FieldSetter setter
+
+    if TVMFFITypeKeyToIndex(ByteArrayArg(c_str(type_key)).cptr(), &type_index) != 0:
+        raise ValueError(f"Cannot find type key: {type_key}")
+    info = TVMFFIGetTypeInfo(type_index)
+    for i in range(info.num_fields):
+        field = &(info.fields[i])
+        getter = FieldGetter.__new__(FieldGetter)
+        (<FieldGetter>getter).getter = field.getter
+        (<FieldGetter>getter).offset = field.offset
+        setter = FieldSetter.__new__(FieldSetter)
+        (<FieldSetter>setter).setter = field.setter
+        (<FieldSetter>setter).offset = field.offset
+        fields.append(
+            TypeField(
+                name=bytearray_to_str(&field.name),
+                doc=bytearray_to_str(&field.doc) if field.doc.size != 0 else None,
+                size=field.size,
+                offset=field.offset,
+                frozen=(field.flags & kTVMFFIFieldFlagBitMaskWritable) == 0,
+                getter=getter,
+                setter=setter,
+            )
+        )
+
+    for i in range(info.num_methods):
+        method = &(info.methods[i])
+        methods.append(
+            TypeMethod(
+                name=bytearray_to_str(&method.name),
+                doc=bytearray_to_str(&method.doc) if method.doc.size != 0 else None,
+                func=_get_method_from_method_info(method),
+                is_static=(method.flags & kTVMFFIFieldFlagBitMaskIsStaticMethod) != 0,
+            )
+        )
+
+    return TypeInfo(
+        type_cls=type_cls,
+        type_index=type_index,
+        type_key=bytearray_to_str(&info.type_key),
+        fields=fields,
+        methods=methods,
+        parent_type_info=None,
+    )
+
+
+def _register_object_by_index(int type_index, object type_cls):
+    global TYPE_INDEX_TO_INFO, TYPE_KEY_TO_INFO
+    cdef str type_key = _type_index_to_key(type_index)
+    cdef object info = _type_info_create_from_type_key(type_cls, type_key)
+    if (extra := type_index + 1 - len(TYPE_INDEX_TO_INFO)) > 0:
+        TYPE_INDEX_TO_INFO.extend([None] * extra)
+    TYPE_INDEX_TO_INFO[type_index] = info
+    TYPE_KEY_TO_INFO[type_key] = info
+    return info
+
+
+def _lookup_type_info_from_type_key(type_key: str) -> TypeInfo:
+    if info := TYPE_KEY_TO_INFO.get(type_key, None):
+        return info
+    info = _type_info_create_from_type_key(None, type_key)
+    TYPE_KEY_TO_INFO[type_key] = info
+    return info
+
+
+cdef list TYPE_INDEX_TO_INFO = []
+cdef dict TYPE_KEY_TO_INFO = {}
 
 _set_class_object(Object)

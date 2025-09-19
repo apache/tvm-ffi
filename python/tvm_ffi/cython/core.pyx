@@ -14,9 +14,8 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
-
 include "./base.pxi"
+include "./type_info.pxi"
 include "./dtype.pxi"
 include "./device.pxi"
 include "./object.pxi"
