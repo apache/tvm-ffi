@@ -54,6 +54,7 @@ if(NOT WIN32)
     enable_language(CUDA)
     add_library(add_one_cuda SHARED src/add_one_cuda.cu)
     target_link_libraries(add_one_cuda tvm_ffi_shared)
+    target_include_directories(add_one_cuda PRIVATE ${CUDA_INCLUDE_DIRS})
 
     # show as add_one_cuda.so
     set_target_properties(
@@ -61,6 +62,19 @@ if(NOT WIN32)
       PREFIX ""
       SUFFIX ".so"
       )
+
+    add_executable(run_example_cuda src/run_example_cuda.cc)
+    set_target_properties(
+      run_example_cuda PROPERTIES
+      CXX_STANDARD 17
+    )
+    target_link_libraries(run_example_cuda tvm_ffi_shared)
+    target_include_directories(run_example_cuda PRIVATE ${CUDA_INCLUDE_DIRS})
+    if(TARGET CUDA::cudart)
+      target_link_libraries(run_example_cuda CUDA::cudart)
+    elseif(DEFINED CUDA_CUDART_LIBRARY)
+      target_link_libraries(run_example_cuda ${CUDA_CUDART_LIBRARY})
+    endif()
   endif()
 endif()
 
