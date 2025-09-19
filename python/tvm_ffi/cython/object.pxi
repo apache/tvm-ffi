@@ -229,8 +229,6 @@ class PyNativeObject:
 
 """Maps object type index to its constructor"""
 cdef list OBJECT_TYPE = []
-"""Maps object type to its type index"""
-cdef dict OBJECT_INDEX = {}
 
 
 def _register_object_by_index(int index, object cls):
@@ -239,7 +237,6 @@ def _register_object_by_index(int index, object cls):
     while len(OBJECT_TYPE) <= index:
         OBJECT_TYPE.append(None)
     OBJECT_TYPE[index] = cls
-    OBJECT_INDEX[cls] = index
 
 
 def _object_type_key_to_index(str type_key):
