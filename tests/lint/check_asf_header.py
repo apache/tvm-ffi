@@ -148,6 +148,7 @@ FMT_MAP = {
     "go": header_cstyle,
     "java": header_cstyle,
     "h": header_cstyle,
+    "pyi": header_pystyle,
     "py": header_pystyle,
     "toml": header_pystyle,
     "yml": header_pystyle,
