@@ -19,17 +19,17 @@ cmake_minimum_required(VERSION 3.18)
 project(tvm_ffi_example)
 
 
-# first find python related components
+# Discover the Python interpreter so we can query tvm-ffi for its CMake package path.
 find_package(Python COMPONENTS Interpreter REQUIRED)
 
-# call tvm_ffi.config to get the cmake directory and set it to tvm_ffi_ROOT
+# Ask tvm-ffi where it stores its exported CMake files.
 execute_process(
   COMMAND "${Python_EXECUTABLE}" -m tvm_ffi.config --cmakedir
   OUTPUT_STRIP_TRAILING_WHITESPACE OUTPUT_VARIABLE tvm_ffi_ROOT)
-# find package will automatically include the related projects
+# Pull in the tvm-ffi CMake targets so we can link against them below.
 find_package(tvm_ffi CONFIG REQUIRED)
 
-# use the projects as usual
+# Build the CPU and C versions of the simple "add one" function that the examples call.
 add_library(add_one_cpu SHARED src/add_one_cpu.cc)
 add_library(add_one_c SHARED src/add_one_c.c)
 target_link_libraries(add_one_cpu tvm_ffi_header)
@@ -47,37 +47,31 @@ set_target_properties(
   SUFFIX ".so"
 )
 
-# Check if CUDA is available
+# Optionally build the CUDA variant if the CUDA toolkit is present.
 if(NOT WIN32)
-  find_package(CUDA QUIET)
-  if(CUDA_FOUND)
+  find_package(CUDAToolkit QUIET)
+  if(CUDAToolkit_FOUND)
     enable_language(CUDA)
-    add_library(add_one_cuda SHARED src/add_one_cuda.cu)
-    target_link_libraries(add_one_cuda tvm_ffi_shared)
-    target_include_directories(add_one_cuda PRIVATE ${CUDA_INCLUDE_DIRS})
 
-    # show as add_one_cuda.so
+    add_library(add_one_cuda SHARED src/add_one_cuda.cu)
+    target_link_libraries(add_one_cuda PRIVATE tvm_ffi_shared)
+
     set_target_properties(
       add_one_cuda PROPERTIES
       PREFIX ""
       SUFFIX ".so"
-      )
+    )
 
     add_executable(run_example_cuda src/run_example_cuda.cc)
     set_target_properties(
       run_example_cuda PROPERTIES
       CXX_STANDARD 17
     )
-    target_link_libraries(run_example_cuda tvm_ffi_shared)
-    target_include_directories(run_example_cuda PRIVATE ${CUDA_INCLUDE_DIRS})
-    if(TARGET CUDA::cudart)
-      target_link_libraries(run_example_cuda CUDA::cudart)
-    elseif(DEFINED CUDA_CUDART_LIBRARY)
-      target_link_libraries(run_example_cuda ${CUDA_CUDART_LIBRARY})
-    endif()
+    target_link_libraries(run_example_cuda PRIVATE tvm_ffi_shared CUDA::cudart)
   endif()
 endif()
 
+# CPU-only C++ driver used in the quick start guide.
 add_executable(run_example src/run_example.cc)
 set_target_properties(
   run_example PROPERTIES

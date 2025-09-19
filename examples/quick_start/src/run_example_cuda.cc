@@ -28,6 +28,9 @@
 
 namespace ffi = tvm::ffi;
 
+// This example mirrors run_example.cc but keeps all data on the GPU by allocating
+// CUDA tensors, invoking the add_one_cuda FFI function, and copying the result back
+// to host memory so users can inspect the output.
 struct CUDANDAlloc {
   void AllocData(DLTensor* tensor) {
     size_t data_size = ffi::GetDataSize(*tensor);
@@ -51,6 +54,7 @@ inline ffi::Tensor Empty(ffi::Shape shape, DLDataType dtype, DLDevice device) {
 }
 
 int main() {
+  // Load the CUDA implementation that run_example.cu exports during the CMake build.
   ffi::Module mod = ffi::Module::LoadFromFile("build/add_one_cuda.so");
 
   DLDataType f32_dtype{kDLFloat, 32, 1};
@@ -69,6 +73,8 @@ int main() {
   TVM_FFI_ICHECK_EQ(err, cudaSuccess)
       << "cudaMemcpy host to device failed: " << cudaGetErrorString(err);
 
+  // Call into the FFI function; tensors remain on device because they carry a
+  // kDLCUDA device tag.
   ffi::Function add_one_cuda = mod->GetFunction("add_one_cuda").value();
   add_one_cuda(x, y);
 
@@ -85,4 +91,3 @@ int main() {
 
   return 0;
 }
-

@@ -33,6 +33,7 @@ Before starting, ensure you have:
 - TVM FFI installed following [installation](./install.md)
 - C++ compiler with C++17 support
 - CMake 3.18 or later
+- (Optional) Ninja build system (the quick-start uses Ninja for fast incremental builds)
 - (Optional) CUDA toolkit for GPU examples
 - (Optional) PyTorch for checking torch integrations
 
@@ -47,8 +48,10 @@ The examples are now in the example folder, you can quickly build
 the example using the following command.
 ```bash
 cd examples/quick_start
-cmake -B build -S . --fresh
-cmake --build build
+
+# with ninja or omit -G Ninja to use default generator
+cmake --fresh -G Ninja -B build -S .
+cmake --build build --parallel
 ```
 
 After the build finishes, you can run the python examples by
@@ -59,7 +62,13 @@ python run_example.py
 You can also run the c++ example
 
 ```
-./build/example
+./build/run_example
+```
+
+If the CUDA toolkit is available, the GPU demo binary is built alongside the CPU sample:
+
+```
+./build/run_example_cuda
 ```
 
 ## Walk through the Example
@@ -74,7 +83,8 @@ examples/quick_start/
 │   ├── add_one_cpu.cc      # CPU implementation
 │   ├── add_one_c.c         # A low-level C based implementation
 │   ├── add_one_cuda.cu     # CUDA implementation
-│   └── run_example.cc      # C++ usage example
+│   ├── run_example.cc      # C++ usage example
+│   └── run_example_cuda.cc # C++ with CUDA kernel usage example
 ├── run_example.py          # Python usage example
 ├── run_example.sh          # Build and run script
 └── CMakeLists.txt          # Build configuration

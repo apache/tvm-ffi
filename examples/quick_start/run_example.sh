@@ -17,9 +17,13 @@
 # under the License.
 set -ex
 
-# Always start from a clean build
-cmake --fresh -B build -S . 
-cmake --build build
+if ! command -v ninja >/dev/null 2>&1; then
+  echo "Ninja is required to build this example" >&2
+  exit 1
+fi
+
+cmake --fresh -G Ninja -B build -S .
+cmake --build build --parallel
 
 # install python dependencies
 python -m pip install -r requirements.txt
@@ -29,3 +33,7 @@ python run_example.py
 
 # running c++ example
 ./build/run_example
+
+if [ -x ./build/run_example_cuda ]; then
+  ./build/run_example_cuda
+fi
