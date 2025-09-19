@@ -29,6 +29,12 @@ def test_make_object() -> None:
     assert obj0.v_str == "hello"
 
 
+def test_make_object_via_init() -> None:
+    obj0 = tvm_ffi.testing.TestIntPair(1, 2)
+    assert obj0.a == 1
+    assert obj0.b == 2
+
+
 def test_method() -> None:
     obj0 = tvm_ffi.testing.create_object("testing.TestObjectBase", v_i64=12)
     assert obj0.add_i64(1) == 13

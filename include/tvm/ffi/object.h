@@ -960,7 +960,7 @@ struct ObjectPtrEqual {
   using __PtrType = std::conditional_t<ObjectName::_type_mutable, ObjectName*, const ObjectName*>; \
   __PtrType operator->() const { return static_cast<__PtrType>(data_.get()); }                     \
   __PtrType get() const { return static_cast<__PtrType>(data_.get()); }                            \
-  static constexpr bool _type_is_nullable = true;                                                  \
+  [[maybe_unused]] static constexpr bool _type_is_nullable = true;                                 \
   using ContainerType = ObjectName
 
 /*!
@@ -976,7 +976,7 @@ struct ObjectPtrEqual {
   using __PtrType = std::conditional_t<ObjectName::_type_mutable, ObjectName*, const ObjectName*>; \
   __PtrType operator->() const { return static_cast<__PtrType>(data_.get()); }                     \
   __PtrType get() const { return static_cast<__PtrType>(data_.get()); }                            \
-  static constexpr bool _type_is_nullable = false;                                                 \
+  [[maybe_unused]] static constexpr bool _type_is_nullable = false;                                \
   using ContainerType = ObjectName
 
 namespace details {

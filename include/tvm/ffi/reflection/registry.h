@@ -558,6 +558,39 @@ inline void EnsureTypeAttrColumn(std::string_view name) {
                                                  reinterpret_cast<const TVMFFIAny*>(&any_view)));
 }
 
+/*!
+ * \brief Invokes the constructor of a particular object type and returns an `ObjectRef`.
+ * \tparam T The object type to be constructed.
+ * \tparam Args The argument types.
+ * \param args The arguments to be passed to the constructor.
+ * \return The constructed object wrapped in an `ObjectRef`.
+ * \note This is usually used in FFI reflection boundary to register `__init__` methods.
+ *
+ * Example
+ *
+ * \code
+ *
+ *   class ExampleObject : public Object {
+ *    public:
+ *      int64_t v_i64;
+ *      int32_t v_i32;
+ *
+ *      ExampleObject(int64_t v_i64, int32_t v_i32) : v_i64(v_i64), v_i32(v_i32) {}
+ *      TVM_FFI_DECLARE_OBJECT_INFO("example.ExampleObject", ExampleObject, Object);
+ *   };
+ *   refl::ObjectDef<ExampleObject>()
+ *      .def_static("__init__", refl::init<ExampleObject, int64_t, int32_t>);
+ */
+template <typename T, typename... Args>
+inline ObjectRef init(Args&&... args) {
+  if constexpr (std::is_base_of_v<Object, T>) {
+    return ObjectRef(ffi::make_object<T>(std::forward<Args>(args)...));
+  } else {
+    using U = typename T::ContainerType;
+    return ObjectRef(ffi::make_object<U>(std::forward<Args>(args)...));
+  }
+}
+
 }  // namespace reflection
 }  // namespace ffi
 }  // namespace tvm

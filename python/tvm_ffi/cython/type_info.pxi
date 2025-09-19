@@ -73,7 +73,7 @@ class TypeField:
         assert self.setter is not None
         assert self.getter is not None
 
-    def as_property(self, cls: type) -> property:
+    def as_property(self, cls: type):
         """Create a Python ``property`` object for this field on ``cls``."""
         name = self.name
         fget = self.getter

@@ -28,6 +28,15 @@ class TestObjectBase(Object):
     """Test object base class."""
 
 
+@register_object("testing.TestIntPair")
+class TestIntPair(Object):
+    """Test Int Pair."""
+
+    def __init__(self, a: int, b: int) -> None:
+        """Construct the object."""
+        self.__init_handle_by_constructor__(TestIntPair.__ffi_init__, a, b)
+
+
 @register_object("testing.TestObjectDerived")
 class TestObjectDerived(TestObjectBase):
     """Test object derived class."""

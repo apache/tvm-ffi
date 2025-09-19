@@ -60,8 +60,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   refl::ObjectDef<TestIntPairObj>()
       .def_ro("a", &TestIntPairObj::a)
       .def_ro("b", &TestIntPairObj::b)
-      .def_static("__create__",
-                  [](int64_t a, int64_t b) -> TestIntPair { return TestIntPair(a, b); });
+      .def_static("__ffi_init__", refl::init<TestIntPairObj, int64_t, int64_t>);
 }
 
 class TestObjectBase : public Object {
