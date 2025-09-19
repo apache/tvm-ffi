@@ -97,7 +97,7 @@ def _check_dtype(dtype: Any, code: int, bits: int, lanes: int) -> None:
     assert converted_dtype.lanes == lanes
 
 
-def test_torch_dtype_conversion():
+def test_torch_dtype_conversion() -> None:
     torch = pytest.importorskip("torch")
     _check_dtype(torch.int8, 0, 8, 1)
     _check_dtype(torch.short, 0, 16, 1)
@@ -125,7 +125,7 @@ def test_torch_dtype_conversion():
     _check_dtype(torch.float8_e8m0fnu, 14, 8, 1)
 
 
-def test_numpy_dtype_conversion():
+def test_numpy_dtype_conversion() -> None:
     np = pytest.importorskip("numpy")
     _check_dtype(np.dtype(np.int8), 0, 8, 1)
     _check_dtype(np.dtype(np.int16), 0, 16, 1)
@@ -140,7 +140,7 @@ def test_numpy_dtype_conversion():
     _check_dtype(np.dtype(np.float64), 2, 64, 1)
 
 
-def test_ml_dtypes_dtype_conversion():
+def test_ml_dtypes_dtype_conversion() -> None:
     np = pytest.importorskip("numpy")
     ml_dtypes = pytest.importorskip("ml_dtypes")
     _check_dtype(np.dtype(ml_dtypes.int2), 0, 2, 1)
