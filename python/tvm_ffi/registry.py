@@ -248,6 +248,8 @@ def _add_class_attrs(type_cls: type, type_info: TypeInfo) -> type:
         setattr(type_cls, name, property(getter, setter, doc=doc))
     for method in type_info.methods:
         name = method.name
+        if name == "__ffi_init__":
+            name = "__c_ffi_init__"
         doc = method.doc if method.doc else None
         method_func = method.func
         if method.is_static:

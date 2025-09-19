@@ -86,6 +86,41 @@ class TestObjectDerived : public TestObjectBase {
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("testing.TestObjectDerived", TestObjectDerived, TestObjectBase);
 };
 
+class TestCxxClassBase : public Object {
+ public:
+  int64_t v_i64;
+  int32_t v_i32;
+
+  TestCxxClassBase(int64_t v_i64, int32_t v_i32) : v_i64(v_i64), v_i32(v_i32) {}
+
+  static constexpr bool _type_mutable = true;
+  TVM_FFI_DECLARE_OBJECT_INFO("testing.TestCxxClassBase", TestCxxClassBase, Object);
+};
+
+class TestCxxClassDerived : public TestCxxClassBase {
+ public:
+  double v_f64;
+  float v_f32;
+
+  TestCxxClassDerived(int64_t v_i64, int32_t v_i32, double v_f64, float v_f32)
+      : TestCxxClassBase(v_i64, v_i32), v_f64(v_f64), v_f32(v_f32) {}
+
+  TVM_FFI_DECLARE_OBJECT_INFO("testing.TestCxxClassDerived", TestCxxClassDerived, TestCxxClassBase);
+};
+
+class TestCxxClassDerivedDerived : public TestCxxClassDerived {
+ public:
+  String v_str;
+  bool v_bool;
+
+  TestCxxClassDerivedDerived(int64_t v_i64, int32_t v_i32, double v_f64, float v_f32, String v_str,
+                             bool v_bool)
+      : TestCxxClassDerived(v_i64, v_i32, v_f64, v_f32), v_str(v_str), v_bool(v_bool) {}
+
+  TVM_FFI_DECLARE_OBJECT_INFO("testing.TestCxxClassDerivedDerived", TestCxxClassDerivedDerived,
+                              TestCxxClassDerived);
+};
+
 TVM_FFI_NO_INLINE void TestRaiseError(String kind, String msg) {
   // keep name and no liner for testing traceback
   throw ffi::Error(kind, msg, TVMFFITraceback(__FILE__, __LINE__, TVM_FFI_FUNC_SIG, 0));
@@ -109,6 +144,22 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   refl::ObjectDef<TestObjectDerived>()
       .def_ro("v_map", &TestObjectDerived::v_map)
       .def_ro("v_array", &TestObjectDerived::v_array);
+
+  refl::ObjectDef<TestCxxClassBase>()
+      .def_static("__ffi_init__", refl::init<TestCxxClassBase, int64_t, int32_t>)
+      .def_rw("v_i64", &TestCxxClassBase::v_i64)
+      .def_rw("v_i32", &TestCxxClassBase::v_i32);
+
+  refl::ObjectDef<TestCxxClassDerived>()
+      .def_static("__ffi_init__", refl::init<TestCxxClassDerived, int64_t, int32_t, double, float>)
+      .def_rw("v_f64", &TestCxxClassDerived::v_f64)
+      .def_rw("v_f32", &TestCxxClassDerived::v_f32);
+  refl::ObjectDef<TestCxxClassDerivedDerived>()
+      .def_static(
+          "__ffi_init__",
+          refl::init<TestCxxClassDerivedDerived, int64_t, int32_t, double, float, String, bool>)
+      .def_rw("v_str", &TestCxxClassDerivedDerived::v_str)
+      .def_rw("v_bool", &TestCxxClassDerivedDerived::v_bool);
 
   refl::GlobalDef()
       .def("testing.test_raise_error", TestRaiseError)

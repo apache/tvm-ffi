@@ -16,10 +16,11 @@
 # under the License.
 """Testing utilities."""
 
-from typing import Any
+from typing import Any, ClassVar
 
 from . import _ffi_api
 from .core import Object
+from .dataclasses import c_class, field
 from .registry import register_object
 
 
@@ -34,7 +35,7 @@ class TestIntPair(Object):
 
     def __init__(self, a: int, b: int) -> None:
         """Construct the object."""
-        self.__init_handle_by_constructor__(TestIntPair.__ffi_init__, a, b)
+        self.__ffi_init__(a, b)
 
 
 @register_object("testing.TestObjectDerived")
@@ -68,3 +69,26 @@ def create_object(type_key: str, **kwargs: Any) -> Object:
         args.append(k)
         args.append(v)
     return _ffi_api.MakeObjectFromPackedArgs(*args)
+
+
+@c_class("testing.TestCxxClassBase")
+class _TestCxxClassBase:
+    v_i64: int
+    v_i32: int
+    not_field_1 = 1
+    not_field_2: ClassVar[int] = 2
+
+    def __init__(self, v_i64: int, v_i32: int) -> None:
+        self.__ffi_init__(v_i64 + 1, v_i32 + 2)
+
+
+@c_class("testing.TestCxxClassDerived")
+class _TestCxxClassDerived(_TestCxxClassBase):
+    v_f64: float
+    v_f32: float = 8
+
+
+@c_class("testing.TestCxxClassDerivedDerived")
+class _TestCxxClassDerivedDerived(_TestCxxClassDerived):
+    v_str: str = field(default_factory=lambda: "default")
+    v_bool: bool

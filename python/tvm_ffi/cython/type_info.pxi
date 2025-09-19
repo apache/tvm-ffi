@@ -68,6 +68,7 @@ class TypeField:
     frozen: bool
     getter: FieldGetter
     setter: FieldSetter
+    dataclass_field: object | None = None
 
     def __post_init__(self):
         assert self.setter is not None
