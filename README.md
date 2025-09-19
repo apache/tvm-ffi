@@ -33,13 +33,22 @@ docker run --rm -it \
     -v "$(pwd)":/workspace/tvm-ffi \
     -w /workspace/tvm-ffi \
     tvm-ffi-dev bash
+
+# Start an interactive shell with GPU access
+docker run --rm -it --gpus all \
+    -v "$(pwd)":/workspace/tvm-ffi \
+    -w /workspace/tvm-ffi \
+    tvm-ffi-dev bash
+
+> **Note** Ensure the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
+> is installed on the host to make GPUs available inside the container.
 ```
 
 Inside the container you can install the project in editable mode and run the quick
 start example exactly as described in `examples/quick_start/README.md`:
 
 ```bash
-pip install -e .
+pip install -ve .
 
 cd examples/quick_start
 bash run_example.sh

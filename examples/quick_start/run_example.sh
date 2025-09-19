@@ -17,8 +17,12 @@
 # under the License.
 set -ex
 
-cmake -B build -S .
+# Always start from a clean build
+cmake --fresh -B build -S . 
 cmake --build build
+
+# install python dependencies
+python -m pip install -r requirements.txt
 
 # running python example
 python run_example.py

@@ -47,7 +47,7 @@ The examples are now in the example folder, you can quickly build
 the example using the following command.
 ```bash
 cd examples/quick_start
-cmake -B build -S .
+cmake -B build -S . --fresh
 cmake --build build
 ```
 

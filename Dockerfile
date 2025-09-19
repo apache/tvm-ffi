@@ -1,6 +1,9 @@
 # syntax=docker/dockerfile:1
 
-FROM ubuntu:22.04
+# Using NVIDIA CUDA base image https://hub.docker.com/r/nvidia/cuda
+# Based on your host CUDA driver version, you may need to select an older CUDA base image.
+# See https://gitlab.com/nvidia/container-images/cuda/blob/master/doc/supported-tags.md
+FROM nvidia/cuda:12.6.3-devel-ubuntu22.04 
 
 ARG DEBIAN_FRONTEND=noninteractive
 
@@ -36,24 +39,13 @@ RUN apt-get update \
         python-is-python3 \
         python3 \
         python3-dev \
-        python3-distutils \
         python3-pip \
         python3-setuptools \
         python3-venv \
         python3-wheel \
         unzip \
         zip \
-    && rm -rf /var/lib/apt/lists/*
-
-# Upgrade pip and provide a python convenience symlink
-RUN python3 -m pip install --upgrade pip \
-    && python -m pip install --no-cache-dir numpy pytest \
-    && ln -sf /usr/bin/python3 /usr/local/bin/python
-
-# Install documentation tooling that depends on pip packages
-COPY docs/requirements.txt /tmp/docs-requirements.txt
-RUN python -m pip install --no-cache-dir -r /tmp/docs-requirements.txt \
-    && rm -f /tmp/docs-requirements.txt
+    && rm -rf /var/lib/apt/lists/* 
 
 # Provide a working directory for the project
 WORKDIR /workspace
