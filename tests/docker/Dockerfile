@@ -5,9 +5,9 @@
 # to you under the Apache License, Version 2.0 (the
 # "License"); you may not use this file except in compliance
 # with the License.  You may obtain a copy of the License at
-# 
+#
 #   http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing,
 # software distributed under the License is distributed on an
 # "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
@@ -18,7 +18,7 @@
 # Using NVIDIA CUDA base image https://hub.docker.com/r/nvidia/cuda
 # Based on your host CUDA driver version, you may need to select an older CUDA base image.
 # See https://gitlab.com/nvidia/container-images/cuda/blob/master/doc/supported-tags.md
-FROM nvidia/cuda:12.6.3-devel-ubuntu22.04 
+FROM nvidia/cuda:12.6.3-devel-ubuntu22.04
 
 ARG DEBIAN_FRONTEND=noninteractive
 
@@ -60,7 +60,7 @@ RUN apt-get update \
         python3-wheel \
         unzip \
         zip \
-    && rm -rf /var/lib/apt/lists/* 
+    && rm -rf /var/lib/apt/lists/*
 
 # Provide a working directory for the project
 WORKDIR /workspace

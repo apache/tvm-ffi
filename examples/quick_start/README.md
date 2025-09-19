@@ -32,7 +32,7 @@ Before running the quick start, ensure you have:
 
 ```bash
 # From the quick_start directory
-pip install -ve ../.. 
+pip install -ve ../..
 ```
 
 ## Run the Quick Start

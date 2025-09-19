@@ -18,13 +18,12 @@
  */
 
 #include <cuda_runtime.h>
-
-#include <iostream>
-#include <vector>
-
 #include <tvm/ffi/container/tensor.h>
 #include <tvm/ffi/error.h>
 #include <tvm/ffi/extra/module.h>
+
+#include <iostream>
+#include <vector>
 
 namespace ffi = tvm::ffi;
 

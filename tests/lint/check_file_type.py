@@ -113,7 +113,7 @@ ALLOW_FILE_NAME = {
 }
 
 # List of specific files allowed in relpath to <proj_root>
-ALLOW_SPECIFIC_FILE = {"LICENSE", "NOTICE", "KEYS", "DISCLAIMER"}
+ALLOW_SPECIFIC_FILE = {"LICENSE", "NOTICE", "KEYS", "DISCLAIMER", "Dockerfile"}
 
 
 def filename_allowed(name: str) -> bool:

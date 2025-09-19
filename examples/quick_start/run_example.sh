@@ -18,10 +18,10 @@
 set -ex
 
 if command -v ninja >/dev/null 2>&1; then
-  generator="Ninja"
+	generator="Ninja"
 else
-  echo "Ninja not found, falling back to Unix Makefiles" >&2
-  generator="Unix Makefiles"
+	echo "Ninja not found, falling back to Unix Makefiles" >&2
+	generator="Unix Makefiles"
 fi
 
 cmake --fresh -G "$generator" -B build -S .
@@ -37,5 +37,5 @@ python run_example.py
 ./build/run_example
 
 if [ -x ./build/run_example_cuda ]; then
-  ./build/run_example_cuda
+	./build/run_example_cuda
 fi
