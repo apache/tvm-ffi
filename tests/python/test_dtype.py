@@ -16,11 +16,11 @@
 # under the License.
 
 import pickle
+from typing import Any
 
 import numpy as np
 import pytest
 import tvm_ffi
-from typing import Any
 
 
 def test_dtype() -> None:
