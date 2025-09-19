@@ -17,12 +17,14 @@
 # under the License.
 set -ex
 
-if ! command -v ninja >/dev/null 2>&1; then
-  echo "Ninja is required to build this example" >&2
-  exit 1
+if command -v ninja >/dev/null 2>&1; then
+  generator="Ninja"
+else
+  echo "Ninja not found, falling back to Unix Makefiles" >&2
+  generator="Unix Makefiles"
 fi
 
-cmake --fresh -G Ninja -B build -S .
+cmake --fresh -G "$generator" -B build -S .
 cmake --build build --parallel
 
 # install python dependencies

@@ -60,11 +60,13 @@ int main() {
   DLDataType f32_dtype{kDLFloat, 32, 1};
   DLDevice cuda_device{kDLCUDA, 0};
 
-  ffi::Tensor x = Empty({5}, f32_dtype, cuda_device);
-  ffi::Tensor y = Empty({5}, f32_dtype, cuda_device);
+  constexpr int ARRAY_SIZE = 5;
 
-  std::vector<float> host_x(5);
-  for (int i = 0; i < 5; ++i) {
+  ffi::Tensor x = Empty({ARRAY_SIZE}, f32_dtype, cuda_device);
+  ffi::Tensor y = Empty({ARRAY_SIZE}, f32_dtype, cuda_device);
+
+  std::vector<float> host_x(ARRAY_SIZE);
+  for (int i = 0; i < ARRAY_SIZE; ++i) {
     host_x[i] = static_cast<float>(i);
   }
 
