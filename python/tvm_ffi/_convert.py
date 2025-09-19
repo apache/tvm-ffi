@@ -26,6 +26,11 @@ try:
 except ImportError:
     torch = None
 
+try:
+    import numpy
+except ImportError:
+    numpy = None
+
 
 def convert(value: Any) -> Any:  # noqa: PLR0911
     """Convert a python object to ffi values.
@@ -67,6 +72,8 @@ def convert(value: Any) -> Any:  # noqa: PLR0911
         return core.from_dlpack(value)
     elif torch is not None and isinstance(value, torch.dtype):
         return core._convert_torch_dtype_to_ffi_dtype(value)
+    elif numpy is not None and isinstance(value, numpy.dtype):
+        return core._convert_numpy_dtype_to_ffi_dtype(value)
     elif isinstance(value, Exception):
         return core._convert_to_ffi_error(value)
     else:

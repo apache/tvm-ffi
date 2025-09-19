@@ -65,6 +65,9 @@ inline const char* DLDataTypeCodeAsCStr(DLDataTypeCode type_code) {  // NOLINT(*
     case kDLBfloat: {
       return "bfloat";
     }
+    case kDLBool: {
+      return "bool";
+    }
     case kDLFloat8_e3m4: {
       return "float8_e3m4";
     }

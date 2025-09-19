@@ -80,3 +80,81 @@ def test_dtype_with_lanes(dtype_str: str) -> None:
     assert dtype_with_lanes.type_code == dtype.type_code
     assert dtype_with_lanes.bits == dtype.bits
     assert dtype_with_lanes.lanes == 4
+
+
+_fecho = tvm_ffi.get_global_func("testing.echo")
+
+
+def _check_dtype(dtype, code, bits, lanes):
+    echo_dtype = _fecho(dtype)
+    assert echo_dtype.type_code == code
+    assert echo_dtype.bits == bits
+    assert echo_dtype.lanes == lanes
+    converted_dtype = tvm_ffi.convert(dtype)
+    assert converted_dtype.type_code == code
+    assert converted_dtype.bits == bits
+    assert converted_dtype.lanes == lanes
+
+
+def test_torch_dtype_conversion():
+    torch = pytest.importorskip("torch")
+    _check_dtype(torch.int8, 0, 8, 1)
+    _check_dtype(torch.short, 0, 16, 1)
+    _check_dtype(torch.int16, 0, 16, 1)
+    _check_dtype(torch.int32, 0, 32, 1)
+    _check_dtype(torch.int, 0, 32, 1)
+    _check_dtype(torch.int64, 0, 64, 1)
+    _check_dtype(torch.long, 0, 64, 1)
+    _check_dtype(torch.uint8, 1, 8, 1)
+    _check_dtype(torch.uint16, 1, 16, 1)
+    _check_dtype(torch.uint32, 1, 32, 1)
+    _check_dtype(torch.uint64, 1, 64, 1)
+    _check_dtype(torch.float16, 2, 16, 1)
+    _check_dtype(torch.half, 2, 16, 1)
+    _check_dtype(torch.float32, 2, 32, 1)
+    _check_dtype(torch.float, 2, 32, 1)
+    _check_dtype(torch.float64, 2, 64, 1)
+    _check_dtype(torch.double, 2, 64, 1)
+    _check_dtype(torch.bfloat16, 4, 16, 1)
+    _check_dtype(torch.bool, 6, 8, 1)
+    _check_dtype(torch.float8_e4m3fn, 10, 8, 1)
+    _check_dtype(torch.float8_e4m3fnuz, 11, 8, 1)
+    _check_dtype(torch.float8_e5m2, 12, 8, 1)
+    _check_dtype(torch.float8_e5m2fnuz, 13, 8, 1)
+    _check_dtype(torch.float8_e8m0fnu, 14, 8, 1)
+
+
+def test_numpy_dtype_conversion():
+    np = pytest.importorskip("numpy")
+    _check_dtype(np.dtype(np.int8), 0, 8, 1)
+    _check_dtype(np.dtype(np.int16), 0, 16, 1)
+    _check_dtype(np.dtype(np.int32), 0, 32, 1)
+    _check_dtype(np.dtype(np.int64), 0, 64, 1)
+    _check_dtype(np.dtype(np.uint8), 1, 8, 1)
+    _check_dtype(np.dtype(np.uint16), 1, 16, 1)
+    _check_dtype(np.dtype(np.uint32), 1, 32, 1)
+    _check_dtype(np.dtype(np.uint64), 1, 64, 1)
+    _check_dtype(np.dtype(np.float16), 2, 16, 1)
+    _check_dtype(np.dtype(np.float32), 2, 32, 1)
+    _check_dtype(np.dtype(np.float64), 2, 64, 1)
+
+
+def test_ml_dtypes_dtype_conversion():
+    np = pytest.importorskip("numpy")
+    ml_dtypes = pytest.importorskip("ml_dtypes")
+    _check_dtype(np.dtype(ml_dtypes.int2), 0, 2, 1)
+    _check_dtype(np.dtype(ml_dtypes.int4), 0, 4, 1)
+    _check_dtype(np.dtype(ml_dtypes.uint2), 1, 2, 1)
+    _check_dtype(np.dtype(ml_dtypes.uint4), 1, 4, 1)
+    _check_dtype(np.dtype(ml_dtypes.bfloat16), 4, 16, 1)
+    _check_dtype(np.dtype(ml_dtypes.float8_e3m4), 7, 8, 1)
+    _check_dtype(np.dtype(ml_dtypes.float8_e4m3), 8, 8, 1)
+    _check_dtype(np.dtype(ml_dtypes.float8_e4m3b11fnuz), 9, 8, 1)
+    _check_dtype(np.dtype(ml_dtypes.float8_e4m3fn), 10, 8, 1)
+    _check_dtype(np.dtype(ml_dtypes.float8_e4m3fnuz), 11, 8, 1)
+    _check_dtype(np.dtype(ml_dtypes.float8_e5m2), 12, 8, 1)
+    _check_dtype(np.dtype(ml_dtypes.float8_e5m2fnuz), 13, 8, 1)
+    _check_dtype(np.dtype(ml_dtypes.float8_e8m0fnu), 14, 8, 1)
+    _check_dtype(np.dtype(ml_dtypes.float6_e2m3fn), 15, 6, 1)
+    _check_dtype(np.dtype(ml_dtypes.float6_e3m2fn), 16, 6, 1)
+    _check_dtype(np.dtype(ml_dtypes.float4_e2m1fn), 17, 4, 1)

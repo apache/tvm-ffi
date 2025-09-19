@@ -25,8 +25,22 @@ if os.environ.get("TVM_FFI_BUILD_DOCS", "0") == "0":
         import torch
     except ImportError:
         torch = None
+
+    try:
+        # optionally import numpy
+        import numpy
+    except ImportError:
+        numpy = None
+
+    try:
+        # optionally import ml_dtypes
+        import ml_dtypes
+    except ImportError:
+        ml_dtypes = None
 else:
     torch = None
+    numpy = None
+    ml_dtypes = None
 
 
 cdef int _RELEASE_GIL_BY_DEFAULT = int(
@@ -469,42 +483,91 @@ cdef int TVMFFIPyArgSetterFallback_(
     out.v_ptr = chandle
     TVMFFIPyPushTempFFIObject(ctx, chandle)
 
+cdef TORCH_DTYPE_TO_DTYPE = {}
+cdef NUMPY_DTYPE_TO_DTYPE = {}
+cdef MLDTYPES_DTYPE_TO_DTYPE = {}
 
 if torch is not None:
     TORCH_DTYPE_TO_DTYPE = {
-        torch.int8: (0, 8, 1),
-        torch.short: (0, 16, 1),
-        torch.int16: (0, 16, 1),
-        torch.int32: (0, 32, 1),
-        torch.int: (0, 32, 1),
-        torch.int64: (0, 64, 1),
-        torch.long: (0, 64, 1),
-        torch.uint8: (1, 8, 1),
-        torch.uint16: (1, 16, 1),
-        torch.uint32: (1, 32, 1),
-        torch.uint64: (1, 64, 1),
-        torch.float16: (2, 16, 1),
-        torch.half: (2, 16, 1),
-        torch.float32: (2, 32, 1),
-        torch.float: (2, 32, 1),
-        torch.float64: (2, 64, 1),
-        torch.double: (2, 64, 1),
-        torch.bfloat16: (4, 16, 1),
-        torch.bool: (6, 8, 1),
-        torch.float8_e4m3fn: (10, 8, 1),
-        torch.float8_e4m3fnuz: (11, 8, 1),
-        torch.float8_e5m2: (12, 8, 1),
-        torch.float8_e5m2fnuz: (13, 8, 1),
-        torch.float8_e8m0fnu: (14, 8, 1),
+        torch.int8: DLDataType(0, 8, 1),
+        torch.short: DLDataType(0, 16, 1),
+        torch.int16: DLDataType(0, 16, 1),
+        torch.int32: DLDataType(0, 32, 1),
+        torch.int: DLDataType(0, 32, 1),
+        torch.int64: DLDataType(0, 64, 1),
+        torch.long: DLDataType(0, 64, 1),
+        torch.uint8: DLDataType(1, 8, 1),
+        torch.uint16: DLDataType(1, 16, 1),
+        torch.uint32: DLDataType(1, 32, 1),
+        torch.uint64: DLDataType(1, 64, 1),
+        torch.float16: DLDataType(2, 16, 1),
+        torch.half: DLDataType(2, 16, 1),
+        torch.float32: DLDataType(2, 32, 1),
+        torch.float: DLDataType(2, 32, 1),
+        torch.float64: DLDataType(2, 64, 1),
+        torch.double: DLDataType(2, 64, 1),
+        torch.bfloat16: DLDataType(4, 16, 1),
+        torch.bool: DLDataType(6, 8, 1),
+        torch.float8_e4m3fn: DLDataType(10, 8, 1),
+        torch.float8_e4m3fnuz: DLDataType(11, 8, 1),
+        torch.float8_e5m2: DLDataType(12, 8, 1),
+        torch.float8_e5m2fnuz: DLDataType(13, 8, 1),
+        torch.float8_e8m0fnu: DLDataType(14, 8, 1),
     }
 
     def _convert_torch_dtype_to_ffi_dtype(torch_dtype):
-        return _create_dtype_from_tuple(DataType, *TORCH_DTYPE_TO_DTYPE[torch_dtype])
+        cdef DLDataType cdtype = TORCH_DTYPE_TO_DTYPE[torch_dtype]
+        ret = DataType.__new__(DataType, str(cdtype))
+        (<DataType>ret).cdtype = cdtype
+        return ret
 else:
-    TORCH_DTYPE_TO_DTYPE = {}
-
     def _convert_torch_dtype_to_ffi_dtype(torch_dtype):
         raise ValueError("torch not found")
+
+if ml_dtypes is not None:
+    MLDTYPES_DTYPE_TO_DTYPE = {
+        numpy.dtype(ml_dtypes.int2): DLDataType(0, 2, 1),
+        numpy.dtype(ml_dtypes.int4): DLDataType(0, 4, 1),
+        numpy.dtype(ml_dtypes.uint2): DLDataType(1, 2, 1),
+        numpy.dtype(ml_dtypes.uint4): DLDataType(1, 4, 1),
+        numpy.dtype(ml_dtypes.bfloat16): DLDataType(4, 16, 1),
+        numpy.dtype(ml_dtypes.float8_e3m4): DLDataType(7, 8, 1),
+        numpy.dtype(ml_dtypes.float8_e4m3): DLDataType(8, 8, 1),
+        numpy.dtype(ml_dtypes.float8_e4m3b11fnuz): DLDataType(9, 8, 1),
+        numpy.dtype(ml_dtypes.float8_e4m3fn): DLDataType(10, 8, 1),
+        numpy.dtype(ml_dtypes.float8_e4m3fnuz): DLDataType(11, 8, 1),
+        numpy.dtype(ml_dtypes.float8_e5m2): DLDataType(12, 8, 1),
+        numpy.dtype(ml_dtypes.float8_e5m2fnuz): DLDataType(13, 8, 1),
+        numpy.dtype(ml_dtypes.float8_e8m0fnu): DLDataType(14, 8, 1),
+        numpy.dtype(ml_dtypes.float6_e2m3fn): DLDataType(15, 6, 1),
+        numpy.dtype(ml_dtypes.float6_e3m2fn): DLDataType(16, 6, 1),
+        numpy.dtype(ml_dtypes.float4_e2m1fn): DLDataType(17, 4, 1),
+    }
+
+if numpy is not None:
+    NUMPY_DTYPE_TO_DTYPE = {
+        numpy.dtype(numpy.int8): DLDataType(0, 8, 1),
+        numpy.dtype(numpy.int16): DLDataType(0, 16, 1),
+        numpy.dtype(numpy.int32): DLDataType(0, 32, 1),
+        numpy.dtype(numpy.int64): DLDataType(0, 64, 1),
+        numpy.dtype(numpy.uint8): DLDataType(1, 8, 1),
+        numpy.dtype(numpy.uint16): DLDataType(1, 16, 1),
+        numpy.dtype(numpy.uint32): DLDataType(1, 32, 1),
+        numpy.dtype(numpy.uint64): DLDataType(1, 64, 1),
+        numpy.dtype(numpy.float16): DLDataType(2, 16, 1),
+        numpy.dtype(numpy.float32): DLDataType(2, 32, 1),
+        numpy.dtype(numpy.float64): DLDataType(2, 64, 1),
+        **MLDTYPES_DTYPE_TO_DTYPE,
+    }
+
+    def _convert_numpy_dtype_to_ffi_dtype(numpy_dtype):
+        cdef DLDataType cdtype = NUMPY_DTYPE_TO_DTYPE[numpy_dtype]
+        ret = DataType.__new__(DataType, str(cdtype))
+        (<DataType>ret).cdtype = cdtype
+        return ret
+else:
+    def _convert_torch_dtype_to_ffi_dtype(torch_dtype):
+        raise ValueError("numpy not found")
 
 
 cdef int TVMFFIPyArgSetterDTypeFromTorch_(
@@ -512,15 +575,24 @@ cdef int TVMFFIPyArgSetterDTypeFromTorch_(
     PyObject* py_arg, TVMFFIAny* out
 ) except -1:
     """Setter for torch dtype"""
-    code, bits, lanes = TORCH_DTYPE_TO_DTYPE[<object>py_arg]
-    cdef DLDataType cdtype
-    cdtype.code = code
-    cdtype.bits = bits
-    cdtype.lanes = lanes
+    cdef py_obj = <object>py_arg
+    if not py_obj in TORCH_DTYPE_TO_DTYPE:
+        raise ValueError("Unsupported torch dtype: ", py_obj)
     out.type_index = kTVMFFIDataType
-    out.v_dtype = cdtype
+    out.v_dtype = TORCH_DTYPE_TO_DTYPE[py_obj]
     return 0
 
+cdef int TVMFFIPyArgSetterDTypeFromNumpy_(
+    TVMFFIPyArgSetter* handle, TVMFFIPyCallContext* ctx,
+    PyObject* py_arg, TVMFFIAny* out
+) except -1:
+    """Setter for torch dtype"""
+    cdef py_obj = <object>py_arg
+    if not py_obj in NUMPY_DTYPE_TO_DTYPE:
+        raise ValueError("Unsupported numpy or ml_dtypes dtype: ", py_obj)
+    out.type_index = kTVMFFIDataType
+    out.v_dtype = NUMPY_DTYPE_TO_DTYPE[py_obj]
+    return 0
 
 cdef int TVMFFIPyArgSetterFactory_(PyObject* value, TVMFFIPyArgSetter* out) except -1:
     """
@@ -614,6 +686,9 @@ cdef int TVMFFIPyArgSetterFactory_(PyObject* value, TVMFFIPyArgSetter* out) exce
         return 0
     if torch is not None and isinstance(arg, torch.dtype):
         out.func = TVMFFIPyArgSetterDTypeFromTorch_
+        return 0
+    if numpy is not None and isinstance(arg, numpy.dtype):
+        out.func = TVMFFIPyArgSetterDTypeFromNumpy_
         return 0
     if isinstance(arg, Exception):
         out.func = TVMFFIPyArgSetterException_
