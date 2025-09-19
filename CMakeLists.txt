@@ -243,13 +243,13 @@ if (TVM_FFI_BUILD_PYTHON_MODULE)
   install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/cmake/Utils/ DESTINATION cmake/Utils)
   install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt DESTINATION .)
   install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/cmake/tvm_ffi-config.cmake DESTINATION cmake)
+  install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/python/tvm_ffi/cython/tvm_ffi_python_helpers.h DESTINATION include/)
 endif()
 
 ########## Install the related for normal cmake library ##########
 
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/tvm/ffi/ DESTINATION include/tvm/ffi/)
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/dlpack/include/ DESTINATION include/)
-install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/python/tvm_ffi/cython/tvm_ffi_python_helpers.h DESTINATION include/)
 install(TARGETS tvm_ffi_shared  DESTINATION lib)
 # ship additional dSYM files for debugging symbols on if available
 if (APPLE)

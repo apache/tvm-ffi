@@ -126,6 +126,8 @@ DLDataType getDLDataTypeForDLPackv1(const Tensor& t) {
 #if TORCH_VERSION_MAJOR >= 2 && TORCH_VERSION_MINOR >= 8
     case ScalarType::Float4_e2m1fn_x2:
       dtype.code = DLDataTypeCode::kDLFloat4_e2m1fn;
+      dtype.lanes = 2;
+      dtype.bits = 4;
       break;
 #endif
    default:
@@ -208,30 +210,13 @@ template <class T>
 T* toDLPackImpl(const Tensor& src) {
   auto view = src;
 
-  bool need_normalize_strides = false;
-  int64_t expected_stride = 1;
-  for (int i = src.dim() - 1; i >= 0; i--) {
-    // detect if we do not meet continuous pattern
-    // and the size is 1, so there is opportunity to normalize
-    if (src.stride(i) != expected_stride && src.size(i) == 1) {
-      need_normalize_strides = true;
-      break;
-    }
-    expected_stride *= src.size(i);
-  }
-
+  bool need_normalize_strides = src.dim() == 1 && src.size(0) == 1 && src.stride(0) != 1;
   // less common case, try normalizing the strides
   if (need_normalize_strides) {
     // create a new tensor with possibly normalized strides
     // gh-83069
     auto shape = src.sizes();
-    auto strides = src.strides().vec();
-    for (int i = 0; i < src.dim(); i++) {
-      if (shape[i] < 2) {
-        strides[i] = 1;
-      }
-    }
-    view = src.as_strided(shape, strides, src.storage_offset());
+    view = src.as_strided(shape, {1}, src.storage_offset());
   }
 
   ATenDLMTensor<T>* atDLMTensor(new ATenDLMTensor<T>);
@@ -282,6 +267,176 @@ static Device getATenDeviceForDLPackv1(DLDeviceType type, c10::DeviceIndex index
   }
 }
 
+ScalarType toScalarTypeForDLPackv1(const DLDataType& dtype) {
+  ScalarType stype = ScalarType::Undefined;
+  if (dtype.code != DLDataTypeCode::kDLFloat4_e2m1fn) {
+    TORCH_CHECK(
+        dtype.lanes == 1,
+        "ATen does not support lanes != 1 for dtype code", std::to_string(dtype.code));
+  }
+  switch (dtype.code) {
+    case DLDataTypeCode::kDLUInt:
+      switch (dtype.bits) {
+        case 8:
+          stype = ScalarType::Byte;
+          break;
+        case 16:
+          stype = ScalarType::UInt16;
+          break;
+        case 32:
+          stype = ScalarType::UInt32;
+          break;
+        case 64:
+          stype = ScalarType::UInt64;
+          break;
+        default:
+          TORCH_CHECK(
+              false, "Unsupported kUInt bits ", std::to_string(dtype.bits));
+      }
+      break;
+    case DLDataTypeCode::kDLInt:
+      switch (dtype.bits) {
+        case 8:
+          stype = ScalarType::Char;
+          break;
+        case 16:
+          stype = ScalarType::Short;
+          break;
+        case 32:
+          stype = ScalarType::Int;
+          break;
+        case 64:
+          stype = ScalarType::Long;
+          break;
+        default:
+          TORCH_CHECK(
+              false, "Unsupported kInt bits ", std::to_string(dtype.bits));
+      }
+      break;
+    case DLDataTypeCode::kDLFloat:
+      switch (dtype.bits) {
+        case 16:
+          stype = ScalarType::Half;
+          break;
+        case 32:
+          stype = ScalarType::Float;
+          break;
+        case 64:
+          stype = ScalarType::Double;
+          break;
+        default:
+          TORCH_CHECK(
+              false, "Unsupported kFloat bits ", std::to_string(dtype.bits));
+      }
+      break;
+    case DLDataTypeCode::kDLBfloat:
+      switch (dtype.bits) {
+        case 16:
+          stype = ScalarType::BFloat16;
+          break;
+        default:
+          TORCH_CHECK(
+              false, "Unsupported kFloat bits ", std::to_string(dtype.bits));
+      }
+      break;
+    case DLDataTypeCode::kDLComplex:
+      switch (dtype.bits) {
+        case 32:
+          stype = ScalarType::ComplexHalf;
+          break;
+        case 64:
+          stype = ScalarType::ComplexFloat;
+          break;
+        case 128:
+          stype = ScalarType::ComplexDouble;
+          break;
+        default:
+          TORCH_CHECK(
+              false, "Unsupported kFloat bits ", std::to_string(dtype.bits));
+      }
+      break;
+    case DLDataTypeCode::kDLBool:
+      switch (dtype.bits) {
+        case 8:
+          stype = ScalarType::Bool;
+          break;
+        default:
+          TORCH_CHECK(
+              false, "Unsupported kDLBool bits ", std::to_string(dtype.bits));
+      }
+      break;
+    case DLDataTypeCode::kDLFloat8_e5m2:
+      switch (dtype.bits) {
+        case 8:
+          stype = ScalarType::Float8_e5m2;
+          break;
+        default:
+          TORCH_CHECK(
+              false, "Unsupported kDLFloat8_e5m2 bits ", std::to_string(dtype.bits));
+      }
+      break;
+    case DLDataTypeCode::kDLFloat8_e5m2fnuz:
+      switch (dtype.bits) {
+        case 8:
+          stype = ScalarType::Float8_e5m2fnuz;
+          break;
+        default:
+          TORCH_CHECK(
+              false, "Unsupported kDLFloat8_e5m2fnuz bits ", std::to_string(dtype.bits));
+      }
+      break;
+    case DLDataTypeCode::kDLFloat8_e4m3fn:
+      switch (dtype.bits) {
+        case 8:
+          stype = ScalarType::Float8_e4m3fn;
+          break;
+        default:
+          TORCH_CHECK(
+              false, "Unsupported kDLFloat8_e4m3fn bits ", std::to_string(dtype.bits));
+      }
+      break;
+    case DLDataTypeCode::kDLFloat8_e4m3fnuz:
+      switch (dtype.bits) {
+        case 8:
+          stype = ScalarType::Float8_e4m3fnuz;
+          break;
+        default:
+          TORCH_CHECK(
+              false, "Unsupported kDLFloat8_e4m3fnuz bits ", std::to_string(dtype.bits));
+      }
+      break;
+    case DLDataTypeCode::kDLFloat8_e8m0fnu:
+      switch (dtype.bits) {
+        case 8:
+          stype = ScalarType::Float8_e8m0fnu;
+          break;
+        default:
+          TORCH_CHECK(
+              false, "Unsupported kDLFloat8_e8m0fnu bits ", std::to_string(dtype.bits));
+      }
+      break;
+    case DLDataTypeCode::kDLFloat4_e2m1fn:
+      switch (dtype.bits) {
+        case 4:
+          switch (dtype.lanes) {
+            case 2:
+              stype = ScalarType::Float4_e2m1fn_x2;
+              break;
+            default:
+              TORCH_CHECK(
+                false, "Unsupported kDLFloat4_e2m1fn lanes ", std::to_string(dtype.lanes));
+          }
+          break;
+        default:
+          TORCH_CHECK(
+              false, "Unsupported kDLFloat4_e2m1fn bits ", std::to_string(dtype.bits));
+      }
+      break;
+    default:
+      TORCH_CHECK(false, "Unsupported code ", std::to_string(dtype.code));
+  }
+  return stype;
+}
 
 // This function constructs a Tensor from a memory managed DLPack which
 // may be represented as either: DLManagedTensor and DLManagedTensorVersioned.
@@ -297,7 +452,7 @@ at::Tensor fromDLPackImpl(T* src, std::function<void(void*)> deleter) {
 
   DLTensor& dl_tensor = src->dl_tensor;
   Device device = getATenDeviceForDLPackv1(dl_tensor.device.device_type, dl_tensor.device.device_id, dl_tensor.data);
-  ScalarType stype = toScalarType(dl_tensor.dtype);
+  ScalarType stype = toScalarTypeForDLPackv1(dl_tensor.dtype);
 
   if (!dl_tensor.strides) {
     return at::from_blob(

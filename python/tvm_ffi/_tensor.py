@@ -21,12 +21,20 @@
 from numbers import Integral
 from typing import Any, Optional, Union
 
-from . import _ffi_api, core, registry
-from .core import Device, DLDeviceType, Tensor, from_dlpack
+from . import _ffi_api, registry
+from .core import (
+    _CLASS_DEVICE,
+    Device,
+    DLDeviceType,
+    PyNativeObject,
+    Tensor,
+    _shape_obj_get_py_tuple,
+    from_dlpack,
+)
 
 
 @registry.register_object("ffi.Shape")
-class Shape(tuple, core.PyNativeObject):
+class Shape(tuple, PyNativeObject):
     """Shape tuple that represents `ffi::Shape` returned by a ffi call.
 
     Note:
@@ -46,7 +54,7 @@ class Shape(tuple, core.PyNativeObject):
     # pylint: disable=no-self-argument
     def __from_tvm_ffi_object__(cls, obj: Any) -> "Shape":
         """Construct from a given tvm object."""
-        content = core._shape_obj_get_py_tuple(obj)
+        content = _shape_obj_get_py_tuple(obj)
         val = tuple.__new__(cls, content)
         val.__tvm_ffi_object__ = obj
         return val
@@ -78,7 +86,7 @@ def device(device_type: Union[str, int, DLDeviceType], index: Optional[int] = No
       assert tvm_ffi.device("cpu:0") == tvm_ffi.device("cpu", 0)
 
     """
-    return core._CLASS_DEVICE(device_type, index)
+    return _CLASS_DEVICE(device_type, index)
 
 
 __all__ = ["DLDeviceType", "Device", "Tensor", "device", "from_dlpack"]
