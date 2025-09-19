@@ -18,3 +18,32 @@
 # tvm ffi
 
 [![CI](https://github.com/apache/tvm-ffi/actions/workflows/ci_test.yml/badge.svg)](https://github.com/apache/tvm-ffi/actions/workflows/ci_test.yml)
+
+## Development with Docker
+
+The repository ships a development container that contains the full toolchain for
+building the core library, and running examples.
+
+```bash
+# Build the image (from the repository root)
+docker build -t tvm-ffi-dev .
+
+# Start an interactive shell
+docker run --rm -it \
+    -v "$(pwd)":/workspace/tvm-ffi \
+    -w /workspace/tvm-ffi \
+    tvm-ffi-dev bash
+```
+
+Inside the container you can install the project in editable mode and run the quick
+start example exactly as described in `examples/quick_start/README.md`:
+
+```bash
+pip install -e .
+
+cd examples/quick_start
+bash run_example.sh
+```
+
+All build artifacts are written to the mounted workspace on the host machine, so you
+can continue editing files with your local tooling.
