@@ -23,14 +23,44 @@ that can be loaded in different environments.
 The example implements a simple "add one" operation that adds 1 to each element
 of an input tensor, showing how to create C++ functions callable from Python.
 
-You can run this quick start example by:
+## Prerequisites
+
+Before running the quick start, ensure you have:
+
+- tvm-ffi installed locally (editable installs are convenient while iterating):
+- Installation guide: [Installation guide](https://tvm.apache.org/ffi/get_started/install.html)
 
 ```bash
-# ensure you installed tvm-ffi first
-pip install -e ../..
+# From the quick_start directory
+pip install -ve ../.. 
+```
 
-# Build and run the complete example
+## Run the Quick Start
+
+From `examples/quick_start` you can build and run everything with the helper script:
+
+```bash
 ./run_example.sh
+```
+
+The script picks an available CMake generator (preferring Ninja), configures a build in `build/`, compiles the C++ libraries and drivers, installs the Python dependencies from `requirements.txt`, and finally runs the Python and C++ demos. If the CUDA toolkit is detected it will also build and execute `run_example_cuda`.
+
+If you prefer to drive the build manually, run the following instead:
+
+```bash
+# configure (omit -G Ninja if Ninja is not installed)
+cmake --fresh -G Ninja -B build -S .
+
+# compile the example targets
+cmake --build build --parallel
+
+# install python dependencies for the scripts
+python -m pip install -r requirements.txt
+
+# run the demos
+python run_example.py
+./build/run_example
+./build/run_example_cuda  # optional, requires CUDA toolkit
 ```
 
 At a high level, the `TVM_FFI_DLL_EXPORT_TYPED_FUNC` macro helps to expose
@@ -42,9 +72,12 @@ in Python and C++.
 ## Key Files
 
 - `src/add_one_cpu.cc` - CPU implementation of the add_one function
+- `src/add_one_c.c` - C implementation showing the C ABI workflow
 - `src/add_one_cuda.cu` - CUDA implementation for GPU operations
+- `src/run_example.cc` - C++ example showing how to call the functions
+- `src/run_example_cuda.cc` - C++ example showing how to call the CUDA functions
 - `run_example.py` - Python example showing how to call the functions
-- `run_example.cc` - C++ example demonstrating the same functionality
+- `run_example.sh` - Convenience script that builds and runs all examples
 
 ## Compile without CMake
 
