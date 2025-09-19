@@ -139,12 +139,12 @@ cdef class Object:
         self.chandle = chandle
 
     def __ffi_init__(self, *args) -> None:
-        """Initialize the instance using the ` __init__` method registered on C++ side.
+        """Initialize the instance using the `__init__` method registered on the C++ side.
 
         Parameters
         ----------
-        args: list of objects
-            The arguments to the constructor
+        args : Any
+            Positional arguments forwarded to the registered C++ __init__.
         """
         self.__init_handle_by_constructor__(type(self)._C___init__, *args)
 
