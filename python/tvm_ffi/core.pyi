@@ -45,6 +45,15 @@ class Object:
     def __ne__(self, other: Any) -> bool: ...
     def __hash__(self) -> int: ...
     def __init_handle_by_constructor__(self, fconstructor: Function, *args: Any) -> None: ...
+    def __ffi_init__(self, *args: Any) -> None:
+        """Initialize the instance using the ` __init__` method registered on C++ side.
+
+        Parameters
+        ----------
+        args: list of objects
+            The arguments to the constructor
+
+        """
     def same_as(self, other: Any) -> bool: ...
     def _move(self) -> ObjectRValueRef: ...
     def __move_handle_from__(self, other: Object) -> None: ...
@@ -240,6 +249,7 @@ class TypeField:
     frozen: bool
     getter: Any
     setter: Any
+    dataclass_field: Any | None
 
     def as_property(self, cls: type) -> property: ...
 

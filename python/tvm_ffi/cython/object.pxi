@@ -138,6 +138,16 @@ cdef class Object:
             (<Object>fconstructor).chandle, <PyObject*>args, &chandle, NULL)
         self.chandle = chandle
 
+    def __ffi_init__(self, *args) -> None:
+        """Initialize the instance using the ` __init__` method registered on C++ side.
+
+        Parameters
+        ----------
+        args: list of objects
+            The arguments to the constructor
+        """
+        self.__init_handle_by_constructor__(type(self)._C___init__, *args)
+
     def same_as(self, other):
         """Check object identity.
 
