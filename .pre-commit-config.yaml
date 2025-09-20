@@ -51,6 +51,10 @@ repos:
       - id: trailing-whitespace
       - id: check-yaml
       - id: check-toml
+  - repo: https://github.com/ComPWA/taplo-pre-commit
+    rev: v0.9.3
+    hooks:
+      - id: taplo-format
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.12.3
     hooks:
