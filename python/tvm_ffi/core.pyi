@@ -240,6 +240,7 @@ class TypeField:
     frozen: bool
     getter: Any
     setter: Any
+    dataclass_field: Any | None
 
     def as_property(self, cls: type) -> property: ...
 
