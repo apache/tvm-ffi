@@ -110,10 +110,11 @@ ALLOW_FILE_NAME = {
     ".clang-format",
     ".gitmodules",
     "CODEOWNERSHIP",
+    "Dockerfile",
 }
 
 # List of specific files allowed in relpath to <proj_root>
-ALLOW_SPECIFIC_FILE = {"LICENSE", "NOTICE", "KEYS", "DISCLAIMER", "Dockerfile"}
+ALLOW_SPECIFIC_FILE = {"LICENSE", "NOTICE", "KEYS", "DISCLAIMER"}
 
 
 def filename_allowed(name: str) -> bool:
