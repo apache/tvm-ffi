@@ -110,6 +110,7 @@ ALLOW_FILE_NAME = {
     ".clang-format",
     ".gitmodules",
     "CODEOWNERSHIP",
+    "Dockerfile",
 }
 
 # List of specific files allowed in relpath to <proj_root>

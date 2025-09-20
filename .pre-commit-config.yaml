@@ -27,7 +27,8 @@ repos:
       - id: check-asf-header
         name: check ASF Header
         entry: python tests/lint/check_asf_header.py --check
-        language: system
+        language: python
+        language_version: python3
         pass_filenames: false
         verbose: false
   - repo: local
@@ -35,7 +36,8 @@ repos:
       - id: check-file-type
         name: check file types
         entry: python tests/lint/check_file_type.py
-        language: system
+        language: python
+        language_version: python3
         pass_filenames: false
         verbose: false
   - repo: https://github.com/pre-commit/pre-commit-hooks

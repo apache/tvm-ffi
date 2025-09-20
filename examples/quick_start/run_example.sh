@@ -17,11 +17,25 @@
 # under the License.
 set -ex
 
-cmake -B build -S .
-cmake --build build
+if command -v ninja >/dev/null 2>&1; then
+	generator="Ninja"
+else
+	echo "Ninja not found, falling back to Unix Makefiles" >&2
+	generator="Unix Makefiles"
+fi
+
+cmake --fresh -G "$generator" -B build -S .
+cmake --build build --parallel
+
+# install python dependencies
+python -m pip install -r requirements.txt
 
 # running python example
 python run_example.py
 
 # running c++ example
 ./build/run_example
+
+if [ -x ./build/run_example_cuda ]; then
+	./build/run_example_cuda
+fi
