@@ -32,9 +32,7 @@ classifiers = [
 ]
 keywords = ["machine learning", "inference"]
 requires-python = ">=3.9"
-
 dependencies = []
-
 
 [project.urls]
 Homepage = "https://github.com/apache/tvm-ffi"
@@ -45,6 +43,31 @@ GitHub = "https://github.com/apache/tvm-ffi"
 torch = ["torch", "setuptools", "ninja"]
 cpp = ["ninja"]
 test = ["pytest", "numpy", "torch", "ninja"]
+
+[dependency-groups]
+docs = [
+  "autodocsumm",
+  "breathe",
+  "exhale",
+  "linkify-it-py",
+  "matplotlib",
+  "myst-parser",
+  "nbconvert",
+  "nbsphinx",
+  "nbstripout",
+  "sphinx",
+  "sphinx-autobuild",
+  "sphinx-book-theme",
+  "sphinx-copybutton",
+  "sphinx-reredirects==0.1.2",
+  "sphinx-tabs==3.4.1",
+  "sphinx-toolbox==3.4.0",
+  "sphinxcontrib-mermaid",
+  "sphinxcontrib-napoleon==0.7",
+  "sphinxcontrib_httpdomain==1.8.1",
+  "tomli",
+  "urllib3>=2.5.0",
+]
 
 [project.scripts]
 tvm-ffi-config = "tvm_ffi.config:__main__"
