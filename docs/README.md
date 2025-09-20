@@ -16,31 +16,28 @@
 <!--- under the License. -->
 # TVM FFI Documentation
 
-To build locally
+## Build Locally with uv
 
-First install the tvm-ffi package
-```bash
-pip install ..
-```
+All documentation dependencies are managed via [`uv`](https://docs.astral.sh/uv/).
+Run the following commands from the repository root:
 
-Install all the requirements to build docs
 
 ```bash
-pip install -r requirements.txt
+uv run --extra docs make -C docs livehtml
 ```
 
-Then build the doc
-```bash
-make livehtml
-```
+For a one-off build you can run `uv run --extra docs make -C docs html` instead.
+
+`uv run` executes the `make` targets inside the synced environment, so manual
+virtualenv activation is unnecessary.
 
 ## Build with C++ Docs
 
-To build with C++ docs, we need to first install Doxygen. Then
-set the environment variable `BUILD_CPP_DOCS=1`, to turn on c++ docs.
+To include the generated C++ API documentation, install Doxygen and set the
+`BUILD_CPP_DOCS=1` environment variable when invoking the build target:
 
 ```bash
-BUILD_CPP_DOCS=1 make livehtml
+BUILD_CPP_DOCS=1 uv run --extra docs make -C docs livehtml
 ```
 
-Building c++ docs can take longer, so it is not on by default.
+Generating the C++ docs can take noticeably longer, so it remains opt-in.

@@ -16,8 +16,9 @@
 # under the License.
 # You can set these variables from the command line, and also
 # from the environment for the first two.
+UV_RUN        ?= uv run --extra docs
 SPHINXOPTS    ?=
-SPHINXBUILD   ?= python3 -m sphinx
+SPHINXBUILD   ?= $(UV_RUN) python -m sphinx
 SOURCEDIR     = .
 BUILDDIR      = _build
 
@@ -28,7 +29,7 @@ help:
 .PHONY: help Makefile livehtml clean
 
 livehtml:
-	@sphinx-autobuild "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O) --ignore reference/cpp/generated
+	@$(UV_RUN) sphinx-autobuild "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O) --ignore reference/cpp/generated
 
 clean:
 	rm -rf $(BUILDDIR)
