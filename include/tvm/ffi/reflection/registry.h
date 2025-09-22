@@ -73,10 +73,7 @@ class AttachFieldFlag : public FieldInfoTrait {
  public:
   /*!
    * \brief Attach a field flag to the field
-   *
    * \param flag The flag to be set
-   *
-   * \return The trait object.
    */
   explicit AttachFieldFlag(int32_t flag) : flag_(flag) {}
 
@@ -580,6 +577,7 @@ inline void EnsureTypeAttrColumn(std::string_view name) {
  *   };
  *   refl::ObjectDef<ExampleObject>()
  *      .def_static("__init__", refl::init<ExampleObject, int64_t, int32_t>);
+ * \endcode
  */
 template <typename T, typename... Args>
 inline ObjectRef init(Args&&... args) {

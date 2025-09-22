@@ -108,7 +108,6 @@ class AccessStep : public ObjectRef {
    * \brief Constructor
    * \param kind The kind of the access step.
    * \param key The key of the access step.
-   * \return The access step.
    */
   AccessStep(AccessKind kind, Any key) : ObjectRef(make_object<AccessStepObj>(kind, key)) {}
 

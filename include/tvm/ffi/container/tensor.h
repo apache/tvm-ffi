@@ -218,7 +218,6 @@ class TensorObj : public Object, public DLTensor {
   }
 
   friend class Tensor;
-  /// \endcond
 };
 
 namespace details {

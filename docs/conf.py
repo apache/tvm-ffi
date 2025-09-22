@@ -71,14 +71,16 @@ breathe_projects = {"tvm-ffi": "./_build/doxygen/xml"}
 
 exhaleDoxygenStdin = """
 INPUT = ../include
-PREDEFINED  += TVM_FFI_DLL= TVM_FFI_INLINE= TVM_FFI_EXTRA_CXX_API= __cplusplus=201703
-
-EXCLUDE_SYMBOLS   += *details*  *TypeTraits* std \
+PREDEFINED             += TVM_FFI_DLL= TVM_FFI_DLL_EXPORT= TVM_FFI_INLINE= \
+                          TVM_FFI_EXTRA_CXX_API= TVM_FFI_WEAK= TVM_FFI_DOCUMENTATION \
+                          __cplusplus=201703
+EXCLUDE_SYMBOLS        += *details*  *TypeTraits* std \
                          *use_default_type_traits_v* *is_optional_type_v* *operator* \
-
-EXCLUDE_PATTERNS   += *details.h
+EXCLUDE_PATTERNS       += *details.h
 ENABLE_PREPROCESSING   = YES
 MACRO_EXPANSION        = YES
+WARNINGS               = YES
+WARN_AS_ERROR          = FAIL_ON_WARNINGS_PRINT   # if your Doxygen version supports it
 """
 
 exhaleAfterTitleDescription = """
@@ -97,6 +99,20 @@ exhale_args = {
     "afterTitleDescription": exhaleAfterTitleDescription,
 }
 nbsphinx_allow_errors = True
+cpp_id_attributes = [
+    "TVM_FFI_DLL",
+    "TVM_FFI_DLL_EXPORT",
+    "TVM_FFI_INLINE",
+    "TVM_FFI_EXTRA_CXX_API",
+    "TVM_FFI_WEAK",
+]
+
+c_id_attributes = [
+    "TVM_FFI_DLL",
+    "TVM_FFI_DLL_EXPORT",
+    "TVM_FFI_WEAK",
+]
+
 nbsphinx_execute = "never"
 
 autosectionlabel_prefix_document = True

@@ -1357,8 +1357,14 @@ inline void MapObj::InsertMaybeReHash(KVType&& kv, ObjectPtr<Object>* map) {
   }
 }
 
+/// \cond Doxygen_Suppress
+/*!
+ * \brief Specialize make_object<MapObj> to be deleted for make_object<DenseMapObj> and
+ * make_object<SmallMapObj> only.
+ */
 template <>
 inline ObjectPtr<MapObj> make_object<>() = delete;
+/// \endcond
 
 /*!
  * \brief Map container of NodeRef->NodeRef in DSL graph.

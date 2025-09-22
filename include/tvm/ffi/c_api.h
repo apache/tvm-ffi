@@ -233,7 +233,9 @@ typedef struct {
   uint32_t weak_ref_count;
   /*! \brief Strong reference counter of the object. */
   uint64_t strong_ref_count;
+#if !defined(TVM_FFI_DOCUMENTATION)
   union {
+#endif
     /*!
      * \brief Deleter to be invoked when strong reference counter goes to zero.
      * \param self The self object handle.
@@ -246,7 +248,9 @@ typedef struct {
      * \note This helps us to ensure cross platform compatibility.
      */
     int64_t __ensure_align;
+#if !defined(TVM_FFI_DOCUMENTATION)
   };
+#endif
 } TVMFFIObject;
 
 /*!
@@ -261,7 +265,9 @@ typedef struct {
    * \note The type index of Object and Any are shared in FFI.
    */
   int32_t type_index;
+#if !defined(TVM_FFI_DOCUMENTATION)
   union {  // 4 bytes
+#endif
     /*! \brief padding, must set to zero for values other than small string. */
     uint32_t zero_padding;
     /*!
@@ -271,18 +277,33 @@ typedef struct {
      * when accessing the small str content.
      */
     uint32_t small_str_len;
+#if !defined(TVM_FFI_DOCUMENTATION)
   };
-  union {                 // 8 bytes
-    int64_t v_int64;      // integers
-    double v_float64;     // floating-point numbers
-    void* v_ptr;          // typeless pointers
-    const char* v_c_str;  // raw C-string
-    TVMFFIObject* v_obj;  // ref counted objects
-    DLDataType v_dtype;   // data type
-    DLDevice v_device;    // device
-    char v_bytes[8];      // small string
-    uint64_t v_uint64;    // uint64 repr mainly used for hashing
+#endif
+#if !defined(TVM_FFI_DOCUMENTATION)
+  union {  // 8 bytes
+#endif
+    /*! \brief integers */
+    int64_t v_int64;
+    /*! \brief floating-point numbers */
+    double v_float64;
+    /*! \brief typeless pointers */
+    void* v_ptr;
+    /*! \brief raw C-string */
+    const char* v_c_str;
+    /*! \brief ref counted objects */
+    TVMFFIObject* v_obj;
+    /*! \brief data type */
+    DLDataType v_dtype;
+    /*! \brief device */
+    DLDevice v_device;
+    /*! \brief small string */
+    char v_bytes[8];
+    /*! \brief uint64 repr mainly used for hashing */
+    uint64_t v_uint64;
+#if !defined(TVM_FFI_DOCUMENTATION)
   };
+#endif
 } TVMFFIAny;
 
 /*!
