@@ -36,12 +36,12 @@ from .core import (
 
 @registry.register_object("ffi.Shape")
 class Shape(tuple, PyNativeObject):
-    """Shape tuple that represents `ffi::Shape` returned by a ffi call.
+    """Shape tuple that represents ``ffi::Shape`` returned by an FFI call.
 
-    Note:
-    ----
-    This class subclasses `tuple` so it can be used in most places where
-    tuple is used in python array apis.
+    Notes
+    -----
+    This class subclasses :class:`tuple` so it can be used in most places where
+    :class:`tuple` is used in Python array APIs.
 
     """
 

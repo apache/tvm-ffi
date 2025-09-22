@@ -20,6 +20,7 @@
 import os
 from pathlib import Path
 
+import sphinx
 import tomli
 
 os.environ["TVM_FFI_BUILD_DOCS"] = "1"
@@ -124,6 +125,34 @@ intersphinx_mapping = {
     "torch": ("https://pytorch.org/docs/stable", None),
 }
 
+_DOCS_DIR = Path(__file__).resolve().parent
+_STUBS = {
+    "_stubs/cpp_index.rst": "reference/cpp/generated/index.rst",
+}
+
+
+def _prepare_stub_files() -> None:
+    """Move stub files into place if they do not already exist."""
+    for src, dst in _STUBS.items():
+        src_path = _DOCS_DIR / src
+        dst_path = _DOCS_DIR / dst
+        dst_path.parent.mkdir(parents=True, exist_ok=True)
+        if not dst_path.exists():
+            dst_path.write_text(src_path.read_text(encoding="utf-8"), encoding="utf-8")
+
+
+def _apply_config_overrides(_: object, config: object) -> None:
+    """Apply runtime configuration overrides derived from environment variables."""
+    config.build_exhale = build_exhale
+
+
+def setup(app: sphinx.application.Sphinx) -> None:
+    """Register custom Sphinx configuration values."""
+    _prepare_stub_files()
+    app.add_config_value("build_exhale", build_exhale, "env")
+    app.connect("config-inited", _apply_config_overrides)
+
+
 autodoc_mock_imports = ["torch"]
 autodoc_default_options = {
     "members": True,
@@ -143,7 +172,7 @@ source_suffix = {".rst": "restructuredtext", ".md": "markdown"}
 
 language = "en"
 
-exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "README.md"]
+exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "README.md", "_stubs"]
 
 # The name of the Pygments (syntax highlighting) style to use.
 pygments_style = "sphinx"

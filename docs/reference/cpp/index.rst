@@ -101,7 +101,9 @@ Key Classes
 Full API Index
 --------------
 
-.. toctree::
-   :maxdepth: 2
+.. ifconfig:: build_exhale
 
-   generated/index.rst
+   .. toctree::
+      :maxdepth: 2
+
+      generated/index

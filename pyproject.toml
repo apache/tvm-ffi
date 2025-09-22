@@ -65,6 +65,7 @@ docs = [
   "sphinxcontrib-mermaid",
   "sphinxcontrib-napoleon==0.7",
   "sphinxcontrib_httpdomain==1.8.1",
+  "setuptools<81",
   "tomli",
   "urllib3>=2.5.0",
 ]

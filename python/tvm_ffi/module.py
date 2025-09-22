@@ -38,8 +38,8 @@ class ModulePropertyMask(IntEnum):
 class Module(core.Object):
     """Module container for dynamically loaded Module.
 
-    Example:
-    -------
+    Examples
+    --------
     .. code-block:: python
 
         import tvm_ffi
@@ -49,7 +49,7 @@ class Module(core.Object):
         # you can use mod.func_name to call the exported function
         mod.func_name(*args)
 
-    See Also:
+    See Also
     --------
     :py:func:`tvm_ffi.load_module`
 
