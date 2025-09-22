@@ -16,10 +16,12 @@
 # under the License.
 """Simple cross-platform advisory file lock utilities."""
 
+from __future__ import annotations
+
 import os
 import sys
 import time
-from typing import Any, Optional
+from typing import Any, Literal
 
 # Platform-specific imports for file locking
 if sys.platform == "win32":
@@ -38,9 +40,9 @@ class FileLock:
     def __init__(self, lock_file_path: str) -> None:
         """Initialize a file lock using the given lock file path."""
         self.lock_file_path = lock_file_path
-        self._file_descriptor = None
+        self._file_descriptor: int | None = None
 
-    def __enter__(self) -> "FileLock":
+    def __enter__(self) -> FileLock:
         """Acquire the lock upon entering the context.
 
         This method blocks until the lock is acquired.
@@ -48,12 +50,12 @@ class FileLock:
         self.blocking_acquire()
         return self
 
-    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> bool:
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> Literal[False]:
         """Context manager protocol: release the lock upon exiting the 'with' block."""
         self.release()
         return False  # Propagate exceptions, if any
 
-    def acquire(self) -> Optional[bool]:
+    def acquire(self) -> bool:
         """Acquire an exclusive, non-blocking lock on the file.
 
         Returns True if the lock was acquired, False otherwise.
@@ -79,9 +81,7 @@ class FileLock:
                 self._file_descriptor = None
             raise RuntimeError(f"An unexpected error occurred: {e}")
 
-    def blocking_acquire(
-        self, timeout: Optional[float] = None, poll_interval: float = 0.1
-    ) -> Optional[bool]:
+    def blocking_acquire(self, timeout: float | None = None, poll_interval: float = 0.1) -> bool:
         """Wait until an exclusive lock can be acquired, with an optional timeout.
 
         Args:

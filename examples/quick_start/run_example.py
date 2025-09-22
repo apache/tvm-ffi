@@ -16,15 +16,9 @@
 # under the License.
 """Quick start script to run tvm-ffi examples from prebuilt libraries."""
 
-import tvm_ffi
-
-try:
-    import torch
-except ImportError:
-    torch = None
-
-
 import numpy
+import torch
+import tvm_ffi
 
 
 def run_add_one_cpu() -> None:
@@ -39,9 +33,6 @@ def run_add_one_cpu() -> None:
     mod.add_one_cpu(x, y)
     print("numpy.result after add_one(x, y)")
     print(x)
-
-    if torch is None:
-        return
 
     x = torch.tensor([1, 2, 3, 4, 5], dtype=torch.float32)
     y = torch.empty_like(x)
@@ -63,9 +54,6 @@ def run_add_one_c() -> None:
     print("numpy.result after add_one_c(x, y)")
     print(x)
 
-    if torch is None:
-        return
-
     x = torch.tensor([1, 2, 3, 4, 5], dtype=torch.float32)
     y = torch.empty_like(x)
     mod.add_one_c(x, y)
@@ -75,7 +63,7 @@ def run_add_one_c() -> None:
 
 def run_add_one_cuda() -> None:
     """Load the add_one_cuda module and call the add_one_cuda function."""
-    if torch is None or not torch.cuda.is_available():
+    if not torch.cuda.is_available():
         return
 
     mod = tvm_ffi.load_module("build/add_one_cuda.so")

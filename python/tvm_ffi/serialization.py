@@ -16,12 +16,14 @@
 # under the License.
 """Serialization related utilities to enable some object can be pickled."""
 
-from typing import Any, Optional
+from __future__ import annotations
+
+from typing import Any
 
 from . import _ffi_api
 
 
-def to_json_graph_str(obj: Any, metadata: Optional[dict] = None) -> str:
+def to_json_graph_str(obj: Any, metadata: dict[str, Any] | None = None) -> str:
     """Dump an object to a JSON graph string.
 
     The JSON graph string is a string representation of of the object

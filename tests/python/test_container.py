@@ -38,10 +38,10 @@ def test_bad_constructor_init_state() -> None:
     proper repr code
     """
     with pytest.raises(TypeError):
-        tvm_ffi.Array(1)
+        tvm_ffi.Array(1)  # type: ignore[arg-type]
 
     with pytest.raises(AttributeError):
-        tvm_ffi.Map(1)
+        tvm_ffi.Map(1)  # type: ignore[arg-type]
 
 
 def test_array_of_array_map() -> None:

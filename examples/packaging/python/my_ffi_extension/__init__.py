@@ -51,4 +51,4 @@ def raise_error(msg: str) -> None:
         The error raised by the function.
 
     """
-    return _ffi_api.raise_error(msg)
+    return _ffi_api.raise_error(msg)  # type: ignore[attr-defined]

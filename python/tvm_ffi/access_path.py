@@ -39,10 +39,15 @@ class AccessKind(IntEnum):
 class AccessStep(core.Object):
     """Access step container."""
 
+    kind: AccessKind
+    key: Any
+
 
 @register_object("ffi.reflection.AccessPath")
 class AccessPath(core.Object):
     """Access path container."""
+
+    parent: "AccessPath"
 
     def __init__(self) -> None:
         """Disallow direct construction; use `AccessPath.root()` instead."""
@@ -55,19 +60,19 @@ class AccessPath(core.Object):
     @staticmethod
     def root() -> "AccessPath":
         """Create a root access path."""
-        return AccessPath._root()
+        return AccessPath._root()  # type: ignore[attr-defined]
 
     def __eq__(self, other: Any) -> bool:
         """Return whether two access paths are equal."""
         if not isinstance(other, AccessPath):
             return False
-        return self._path_equal(other)
+        return self._path_equal(other)  # type: ignore[attr-defined]
 
     def __ne__(self, other: Any) -> bool:
         """Return whether two access paths are not equal."""
         if not isinstance(other, AccessPath):
             return True
-        return not self._path_equal(other)
+        return not self._path_equal(other)  # type: ignore[attr-defined]
 
     def is_prefix_of(self, other: "AccessPath") -> bool:
         """Check if this access path is a prefix of another access path.
@@ -83,7 +88,7 @@ class AccessPath(core.Object):
             True if this access path is a prefix of the other access path, False otherwise
 
         """
-        return self._is_prefix_of(other)
+        return self._is_prefix_of(other)  # type: ignore[attr-defined]
 
     def attr(self, attr_key: str) -> "AccessPath":
         """Create an access path to the attribute of the current object.
@@ -99,7 +104,7 @@ class AccessPath(core.Object):
             The extended access path
 
         """
-        return self._attr(attr_key)
+        return self._attr(attr_key)  # type: ignore[attr-defined]
 
     def attr_missing(self, attr_key: str) -> "AccessPath":
         """Create an access path that indicate an attribute is missing.
@@ -115,7 +120,7 @@ class AccessPath(core.Object):
             The extended access path
 
         """
-        return self._attr_missing(attr_key)
+        return self._attr_missing(attr_key)  # type: ignore[attr-defined]
 
     def array_item(self, index: int) -> "AccessPath":
         """Create an access path to the item of the current array.
@@ -131,7 +136,7 @@ class AccessPath(core.Object):
             The extended access path
 
         """
-        return self._array_item(index)
+        return self._array_item(index)  # type: ignore[attr-defined]
 
     def array_item_missing(self, index: int) -> "AccessPath":
         """Create an access path that indicate an array item is missing.
@@ -147,7 +152,7 @@ class AccessPath(core.Object):
             The extended access path
 
         """
-        return self._array_item_missing(index)
+        return self._array_item_missing(index)  # type: ignore[attr-defined]
 
     def map_item(self, key: Any) -> "AccessPath":
         """Create an access path to the item of the current map.
@@ -163,7 +168,7 @@ class AccessPath(core.Object):
             The extended access path
 
         """
-        return self._map_item(key)
+        return self._map_item(key)  # type: ignore[attr-defined]
 
     def map_item_missing(self, key: Any) -> "AccessPath":
         """Create an access path that indicate a map item is missing.
@@ -179,7 +184,7 @@ class AccessPath(core.Object):
             The extended access path
 
         """
-        return self._map_item_missing(key)
+        return self._map_item_missing(key)  # type: ignore[attr-defined]
 
     def to_steps(self) -> list["AccessStep"]:
         """Convert the access path to a list of access steps.
@@ -190,6 +195,6 @@ class AccessPath(core.Object):
             The list of access steps
 
         """
-        return self._to_steps()
+        return self._to_steps()  # type: ignore[attr-defined]
 
     __hash__ = core.Object.__hash__

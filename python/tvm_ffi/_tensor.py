@@ -15,11 +15,13 @@
 # specific language governing permissions and limitations
 # under the License.
 """Tensor related objects and functions."""
+
+from __future__ import annotations
+
 # we name it as _tensor.py to avoid potential future case
 # if we also want to expose a tensor function in the root namespace
-
 from numbers import Integral
-from typing import Any, Optional, Union
+from typing import Any
 
 from . import _ffi_api, core, registry
 from .core import (
@@ -43,23 +45,25 @@ class Shape(tuple, PyNativeObject):
 
     """
 
-    def __new__(cls, content: tuple[int, ...]) -> "Shape":
+    __tvm_ffi_object__: Any
+
+    def __new__(cls, content: tuple[int, ...]) -> Shape:
         if any(not isinstance(x, Integral) for x in content):
             raise ValueError("Shape must be a tuple of integers")
-        val = tuple.__new__(cls, content)
+        val: Shape = tuple.__new__(cls, content)
         val.__init_tvm_ffi_object_by_constructor__(_ffi_api.Shape, *content)
         return val
 
     # pylint: disable=no-self-argument
-    def __from_tvm_ffi_object__(cls, obj: Any) -> "Shape":
+    def __from_tvm_ffi_object__(cls, obj: Any) -> Shape:
         """Construct from a given tvm object."""
         content = _shape_obj_get_py_tuple(obj)
-        val = tuple.__new__(cls, content)
-        val.__tvm_ffi_object__ = obj
+        val: Shape = tuple.__new__(cls, content)  # type: ignore[arg-type]
+        val.__tvm_ffi_object__ = obj  # type: ignore[attr-defined]
         return val
 
 
-def device(device_type: Union[str, int, DLDeviceType], index: Optional[int] = None) -> Device:
+def device(device_type: str | int | DLDeviceType, index: int | None = None) -> Device:
     """Construct a TVM FFI device with given device type and index.
 
     Parameters

@@ -15,6 +15,8 @@
 # specific language governing permissions and limitations
 # under the License.
 
+from __future__ import annotations
+
 import pickle
 
 import pytest
@@ -87,7 +89,7 @@ def test_deive_type_error(dev_type: str, dev_id: int | None) -> None:
 
 def test_deive_id_error() -> None:
     with pytest.raises(TypeError):
-        tvm_ffi.device("cpu", "?")
+        tvm_ffi.device("cpu", "?")  # type: ignore[arg-type]
 
 
 def test_device_pickle() -> None:

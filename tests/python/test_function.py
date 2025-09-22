@@ -113,11 +113,11 @@ def test_string_bytes_passing() -> None:
     # small bytes
     assert fecho(b"hello") == b"hello"
     # large bytes
-    x = b"hello" * 100
-    y = fecho(x)
-    assert y == x
-    assert y.__tvm_ffi_object__ is not None
-    fecho(y) == 1
+    x2 = b"hello" * 100
+    y2 = fecho(x2)
+    assert y2 == x2
+    assert y2.__tvm_ffi_object__ is not None
+    fecho(y2) == 1
 
 
 def test_nested_container_passing() -> None:

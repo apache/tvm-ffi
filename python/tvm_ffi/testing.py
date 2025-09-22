@@ -16,9 +16,12 @@
 # under the License.
 """Testing utilities."""
 
+from __future__ import annotations
+
 from typing import Any, ClassVar
 
 from . import _ffi_api
+from .container import Array, Map
 from .core import Object
 from .dataclasses import c_class, field
 from .registry import register_object
@@ -28,10 +31,17 @@ from .registry import register_object
 class TestObjectBase(Object):
     """Test object base class."""
 
+    v_i64: int
+    v_f64: float
+    v_str: str
+
 
 @register_object("testing.TestIntPair")
 class TestIntPair(Object):
     """Test Int Pair."""
+
+    a: int
+    b: int
 
     def __init__(self, a: int, b: int) -> None:
         """Construct the object."""
@@ -41,6 +51,9 @@ class TestIntPair(Object):
 @register_object("testing.TestObjectDerived")
 class TestObjectDerived(TestObjectBase):
     """Test object derived class."""
+
+    v_map: Map
+    v_array: Array
 
 
 def create_object(type_key: str, **kwargs: Any) -> Object:
@@ -79,7 +92,7 @@ class _TestCxxClassBase:
     not_field_2: ClassVar[int] = 2
 
     def __init__(self, v_i64: int, v_i32: int) -> None:
-        self.__ffi_init__(v_i64 + 1, v_i32 + 2)
+        self.__ffi_init__(v_i64 + 1, v_i32 + 2)  # type: ignore[attr-defined]
 
 
 @c_class("testing.TestCxxClassDerived")
@@ -90,5 +103,5 @@ class _TestCxxClassDerived(_TestCxxClassBase):
 
 @c_class("testing.TestCxxClassDerivedDerived")
 class _TestCxxClassDerivedDerived(_TestCxxClassDerived):
-    v_str: str = field(default_factory=lambda: "default")
-    v_bool: bool
+    v_str: str = field(default_factory=lambda: "default")  # type: ignore[assignment]
+    v_bool: bool  # type: ignore[misc]

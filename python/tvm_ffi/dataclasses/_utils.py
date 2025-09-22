@@ -21,7 +21,7 @@ from __future__ import annotations
 import functools
 import inspect
 from dataclasses import MISSING
-from typing import Any, Callable, NamedTuple, TypeVar
+from typing import Any, Callable, NamedTuple, TypeVar, cast
 
 from ..core import (
     Object,
@@ -68,7 +68,7 @@ def type_info_to_cls(
         attrs[field.name] = field.as_property(cls)
 
     # Step 3. Add methods
-    def _add_method(name: str, func: Callable) -> None:
+    def _add_method(name: str, func: Callable[..., Any]) -> None:
         if name == "__ffi_init__":
             name = "__c_ffi_init__"
         if name in attrs:  # already defined
@@ -80,9 +80,9 @@ def type_info_to_cls(
         attrs[name] = func
         setattr(cls, name, func)
 
-    for name, method in methods.items():
-        if method is not None:
-            _add_method(name, method)
+    for name, method_impl in methods.items():
+        if method_impl is not None:
+            _add_method(name, method_impl)
     for method in type_info.methods:
         _add_method(method.name, method.func)
 
@@ -90,7 +90,7 @@ def type_info_to_cls(
     new_cls = type(cls.__name__, cls_bases, attrs)
     new_cls.__module__ = cls.__module__
     new_cls = functools.wraps(cls, updated=())(new_cls)  # type: ignore
-    return new_cls
+    return cast(type[_InputClsType], new_cls)
 
 
 def fill_dataclass_field(type_cls: type, type_field: TypeField) -> None:
@@ -123,15 +123,12 @@ def method_init(type_cls: type, type_info: TypeInfo) -> Callable[..., None]:  # 
 
         fn: Callable[[], Any]
 
-    fields: list[TypeInfo] = []
-    cur_type_info = type_info
-    while True:
+    fields: list[TypeField] = []
+    cur_type_info: TypeInfo | None = type_info
+    while cur_type_info is not None:
         fields.extend(reversed(cur_type_info.fields))
         cur_type_info = cur_type_info.parent_type_info
-        if cur_type_info is None:
-            break
     fields.reverse()
-    del cur_type_info
 
     annotations: dict[str, Any] = {"return": None}
     # Step 1. Split the parameters into two groups to ensure that
@@ -187,7 +184,7 @@ def method_init(type_cls: type, type_info: TypeInfo) -> Callable[..., None]:  # 
     else:
         raise ValueError(f"Cannot find constructor method: `{type_info.type_key}.__ffi_init__`")
 
-    def __init__(self: type, *args: Any, **kwargs: Any) -> None:
+    def __init__(self: Any, *args: Any, **kwargs: Any) -> None:
         e = None
         try:
             args = bind_args(*args, **kwargs)

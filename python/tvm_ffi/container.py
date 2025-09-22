@@ -16,6 +16,8 @@
 # under the License.
 """Container classes."""
 
+from __future__ import annotations
+
 import collections.abc
 from collections.abc import Iterator, Mapping, Sequence
 from typing import Any, Callable
@@ -121,7 +123,7 @@ class Array(core.Object, collections.abc.Sequence):
 class KeysView(collections.abc.KeysView):
     """Helper class to return keys view."""
 
-    def __init__(self, backend_map: "Map") -> None:
+    def __init__(self, backend_map: Map) -> None:
         self._backend_map = backend_map
 
     def __len__(self) -> int:
@@ -144,7 +146,7 @@ class KeysView(collections.abc.KeysView):
 class ValuesView(collections.abc.ValuesView):
     """Helper class to return values view."""
 
-    def __init__(self, backend_map: "Map") -> None:
+    def __init__(self, backend_map: Map) -> None:
         self._backend_map = backend_map
 
     def __len__(self) -> int:
@@ -164,7 +166,7 @@ class ValuesView(collections.abc.ValuesView):
 class ItemsView(collections.abc.ItemsView):
     """Helper class to return items view."""
 
-    def __init__(self, backend_map: "Map") -> None:
+    def __init__(self, backend_map: Map) -> None:
         self.backend_map = backend_map
 
     def __len__(self) -> int:
@@ -231,7 +233,7 @@ class Map(core.Object, collections.abc.Mapping):
         """Return a dynamic view of the map's keys."""
         return KeysView(self)
 
-    def values(self) -> "ValuesView":
+    def values(self) -> ValuesView:
         """Return a dynamic view of the map's values."""
         return ValuesView(self)
 

@@ -213,3 +213,7 @@ environment = { MACOSX_DEPLOYMENT_TARGET = "10.14" }
 
 [tool.cibuildwheel.windows]
 archs = ["AMD64"]
+
+[tool.mypy]
+allow_redefinition = true
+ignore_missing_imports = true

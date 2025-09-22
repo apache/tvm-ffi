@@ -15,12 +15,16 @@
 # specific language governing permissions and limitations
 # under the License.
 
+from __future__ import annotations
+
+from types import ModuleType
 
 import numpy
 import pytest
 
+torch: ModuleType | None
 try:
-    import torch
+    import torch  # type: ignore[no-redef]
 except ImportError:
     torch = None
 
@@ -197,6 +201,7 @@ def test_load_inline_cuda() -> None:
 
 @pytest.mark.skipif(torch is None, reason="Requires torch")
 def test_load_inline_with_env_tensor_allocator() -> None:
+    assert torch is not None
     if not hasattr(torch.Tensor, "__c_dlpack_tensor_allocator__"):
         pytest.skip("Torch does not support __c_dlpack_tensor_allocator__")
     mod: Module = tvm_ffi.cpp.load_inline(
@@ -241,6 +246,7 @@ def test_load_inline_with_env_tensor_allocator() -> None:
     torch is None or not torch.cuda.is_available(), reason="Requires torch and CUDA"
 )
 def test_load_inline_both() -> None:
+    assert torch is not None
     mod: Module = tvm_ffi.cpp.load_inline(
         name="hello",
         cpp_sources=r"""

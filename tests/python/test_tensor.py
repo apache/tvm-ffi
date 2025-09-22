@@ -14,10 +14,16 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+
+from __future__ import annotations
+
+from types import ModuleType
+
 import pytest
 
+torch: ModuleType | None
 try:
-    import torch
+    import torch  # type: ignore[no-redef]
 except ImportError:
     torch = None
 
@@ -45,18 +51,19 @@ def test_shape_object() -> None:
     assert shape == (10, 8, 4, 2)
 
     fecho = tvm_ffi.convert(lambda x: x)
-    shape2 = fecho(shape)
+    shape2: tvm_ffi.Shape = fecho(shape)
     assert shape2.__tvm_ffi_object__.same_as(shape.__tvm_ffi_object__)
     assert isinstance(shape2, tvm_ffi.Shape)
     assert isinstance(shape2, tuple)
 
-    shape3 = tvm_ffi.convert(shape)
+    shape3: tvm_ffi.Shape = tvm_ffi.convert(shape)
     assert shape3.__tvm_ffi_object__.same_as(shape.__tvm_ffi_object__)
     assert isinstance(shape3, tvm_ffi.Shape)
 
 
 @pytest.mark.skipif(torch is None, reason="Fast torch dlpack importer is not enabled")
 def test_tensor_auto_dlpack() -> None:
+    assert torch is not None
     x = torch.arange(128)
     fecho = tvm_ffi.get_global_func("testing.echo")
     y = fecho(x)

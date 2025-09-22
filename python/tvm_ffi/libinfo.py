@@ -46,25 +46,24 @@ def split_env_var(env_var: str, split: str) -> list[str]:
 def get_dll_directories() -> list[str]:
     """Get the possible dll directories."""
     ffi_dir = Path(__file__).expanduser().resolve().parent
-    dll_path = [ffi_dir / "lib"]
-    dll_path += [ffi_dir / ".." / ".." / "build" / "lib"]
+    dll_path: list[Path] = [ffi_dir / "lib"]
+    dll_path.append(ffi_dir / ".." / ".." / "build" / "lib")
     # in source build from parent if needed
-    dll_path += [ffi_dir / ".." / ".." / ".." / "build" / "lib"]
-
+    dll_path.append(ffi_dir / ".." / ".." / ".." / "build" / "lib")
     if sys.platform.startswith("linux") or sys.platform.startswith("freebsd"):
-        dll_path.extend(split_env_var("LD_LIBRARY_PATH", ":"))
-        dll_path.extend(split_env_var("PATH", ":"))
+        dll_path.extend(Path(p) for p in split_env_var("LD_LIBRARY_PATH", ":"))
+        dll_path.extend(Path(p) for p in split_env_var("PATH", ":"))
     elif sys.platform.startswith("darwin"):
-        dll_path.extend(split_env_var("DYLD_LIBRARY_PATH", ":"))
-        dll_path.extend(split_env_var("PATH", ":"))
+        dll_path.extend(Path(p) for p in split_env_var("DYLD_LIBRARY_PATH", ":"))
+        dll_path.extend(Path(p) for p in split_env_var("PATH", ":"))
     elif sys.platform.startswith("win32"):
-        dll_path.extend(split_env_var("PATH", ";"))
-    return [str(Path(x).resolve()) for x in dll_path if Path(x).is_dir()]
+        dll_path.extend(Path(p) for p in split_env_var("PATH", ";"))
+    return [str(path.resolve()) for path in dll_path if path.is_dir()]
 
 
 def find_libtvm_ffi() -> str:
     """Find libtvm_ffi."""
-    dll_path = get_dll_directories()
+    dll_path = [Path(p) for p in get_dll_directories()]
     if sys.platform.startswith("win32"):
         lib_dll_names = ["tvm_ffi.dll"]
     elif sys.platform.startswith("darwin"):
@@ -72,14 +71,18 @@ def find_libtvm_ffi() -> str:
     else:
         lib_dll_names = ["libtvm_ffi.so"]
 
-    name = lib_dll_names
-    lib_dll_path = [str(Path(p) / name) for name in lib_dll_names for p in dll_path]
-    lib_found = [p for p in lib_dll_path if Path(p).exists() and Path(p).is_file()]
+    lib_dll_path = [p / name for name in lib_dll_names for p in dll_path]
+    lib_found = [p for p in lib_dll_path if p.exists() and p.is_file()]
 
     if not lib_found:
-        raise RuntimeError(f"Cannot find library: {name}\nList of candidates:\n{lib_dll_path}")
+        candidate_list = "\n".join(str(p) for p in lib_dll_path)
+        raise RuntimeError(
+            "Cannot find library: {}\nList of candidates:\n{}".format(
+                ", ".join(lib_dll_names), candidate_list
+            )
+        )
 
-    return lib_found[0]
+    return str(lib_found[0])
 
 
 def find_source_path() -> str:

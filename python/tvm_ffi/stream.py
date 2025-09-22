@@ -18,7 +18,7 @@
 """Stream context."""
 
 from ctypes import c_void_p
-from typing import Any, NoReturn, Optional, Union
+from typing import Any, Union
 
 from . import core
 from ._tensor import device
@@ -72,7 +72,7 @@ try:
     class TorchStreamContext:
         """Context manager that syncs Torch and FFI stream contexts."""
 
-        def __init__(self, context: Optional[Any]) -> None:
+        def __init__(self, context: Any) -> None:
             """Initialize with an optional Torch stream/graph context wrapper."""
             self.torch_context = context
 
@@ -93,14 +93,14 @@ try:
                 self.torch_context.__exit__(*args)
             self.ffi_context.__exit__(*args)
 
-    def use_torch_stream(context: Optional[Any] = None) -> "TorchStreamContext":
+    def use_torch_stream(context: Any = None) -> "TorchStreamContext":
         """Create an FFI stream context with a Torch stream or graph.
 
         cuda graph or current stream if `None` provided.
 
         Parameters
         ----------
-        context : Optional[Any]
+        context : Any = None
             The wrapped torch stream or cuda graph.
 
         Returns
@@ -129,7 +129,7 @@ try:
 
 except ImportError:
 
-    def use_torch_stream(context: Optional[Any] = None) -> NoReturn:
+    def use_torch_stream(context: Any = None) -> "TorchStreamContext":
         """Raise an informative error when Torch is unavailable."""
         raise ImportError("Cannot import torch")
 

@@ -31,12 +31,12 @@ subsequent calls will be much faster.
 """
 
 import warnings
-from typing import Any, Optional
+from typing import Any
 
 from . import libinfo
 
 
-def load_torch_c_dlpack_extension() -> Optional[Any]:
+def load_torch_c_dlpack_extension() -> Any:
     """Load the torch c dlpack extension."""
     cpp_source = """
 #include <dlpack/dlpack.h>
@@ -556,9 +556,9 @@ int64_t TorchDLPackTensorAllocatorPtr() {
             extra_include_paths=include_paths,
         )
         # set the dlpack related flags
-        torch.Tensor.__c_dlpack_from_pyobject__ = mod.TorchDLPackFromPyObjectPtr()
-        torch.Tensor.__c_dlpack_to_pyobject__ = mod.TorchDLPackToPyObjectPtr()
-        torch.Tensor.__c_dlpack_tensor_allocator__ = mod.TorchDLPackTensorAllocatorPtr()
+        setattr(torch.Tensor, "__c_dlpack_from_pyobject__", mod.TorchDLPackFromPyObjectPtr())
+        setattr(torch.Tensor, "__c_dlpack_to_pyobject__", mod.TorchDLPackToPyObjectPtr())
+        setattr(torch.Tensor, "__c_dlpack_tensor_allocator__", mod.TorchDLPackTensorAllocatorPtr())
         return mod
     except ImportError:
         pass
@@ -566,7 +566,7 @@ int64_t TorchDLPackTensorAllocatorPtr() {
         warnings.warn(
             f"Failed to load torch c dlpack extension: {e},EnvTensorAllocator will not be enabled."
         )
-        return None
+    return None
 
 
 # keep alive

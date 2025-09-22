@@ -28,18 +28,21 @@ from dataclasses import InitVar
 from typing import ClassVar, TypeVar, get_origin, get_type_hints
 
 from ..core import TypeField, TypeInfo
-from . import _utils, field
+from . import _utils
+from .field import Field, field
 
 try:
-    from typing import dataclass_transform
+    from typing_extensions import dataclass_transform  # type: ignore[attr-defined]
 except ImportError:
-    from typing_extensions import dataclass_transform
+    from typing import dataclass_transform  # type: ignore[no-redef,attr-defined]
+except ImportError:
+    pass
 
 
 _InputClsType = TypeVar("_InputClsType")
 
 
-@dataclass_transform(field_specifiers=(field.field, field.Field))
+@dataclass_transform(field_specifiers=(field, Field))
 def c_class(
     type_key: str, init: bool = True
 ) -> Callable[[type[_InputClsType]], type[_InputClsType]]:
@@ -157,7 +160,7 @@ def _inspect_c_class_fields(type_cls: type, type_info: TypeInfo) -> list[TypeFie
     for field_name, _field_ty_py in type_hints_py.items():
         if field_name.startswith("__tvm_ffi"):  # TVM's private fields - skip
             continue
-        type_field: TypeField = type_fields_cxx.pop(field_name, None)
+        type_field = type_fields_cxx.pop(field_name, None)
         if type_field is None:
             raise ValueError(
                 f"Extraneous field `{type_cls}.{field_name}`. Defined in Python but not in C++"

@@ -16,8 +16,10 @@
 # under the License.
 """FFI registry to register function and objects."""
 
+from __future__ import annotations
+
 import sys
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Literal, overload
 
 from . import core
 from .core import TypeInfo
@@ -26,7 +28,7 @@ from .core import TypeInfo
 _SKIP_UNKNOWN_OBJECTS = False
 
 
-def register_object(type_key: str | type | None = None) -> Any:
+def register_object(type_key: str | type | None = None) -> Callable[[type], type] | type:
     """Register object type.
 
     Parameters
@@ -46,9 +48,8 @@ def register_object(type_key: str | type | None = None) -> Any:
           pass
 
     """
-    object_name = type_key if isinstance(type_key, str) else type_key.__name__
 
-    def register(cls: type) -> type:
+    def _register(cls: type, object_name: str) -> type:
         """Register the object type with the FFI core."""
         type_index = core._object_type_key_to_index(object_name)
         if type_index is None:
@@ -60,14 +61,25 @@ def register_object(type_key: str | type | None = None) -> Any:
         return cls
 
     if isinstance(type_key, str):
-        return register
 
-    return register(type_key)
+        def _decorator_with_name(cls: type) -> type:
+            return _register(cls, type_key)
+
+        return _decorator_with_name
+
+    def _decorator_default(cls: type) -> type:
+        return _register(cls, cls.__name__)
+
+    if type_key is None:
+        return _decorator_default
+    if isinstance(type_key, type):
+        return _decorator_default(type_key)
+    raise TypeError("type_key must be a string, type, or None")
 
 
 def register_global_func(
     func_name: str | Callable[..., Any],
-    f: Optional[Callable[..., Any]] = None,
+    f: Callable[..., Any] | None = None,
     override: bool = False,
 ) -> Any:
     """Register global function.
@@ -124,12 +136,20 @@ def register_global_func(
         """Register the global function with the FFI core."""
         return core._register_global_func(func_name, myf, override)
 
-    if f:
+    if f is not None:
         return register(f)
     return register
 
 
-def get_global_func(name: str, allow_missing: bool = False) -> Optional[core.Function]:
+@overload
+def get_global_func(name: str, allow_missing: Literal[True]) -> core.Function | None: ...
+
+
+@overload
+def get_global_func(name: str, allow_missing: Literal[False] = False) -> core.Function: ...
+
+
+def get_global_func(name: str, allow_missing: bool = False) -> core.Function | None:
     """Get a global function by name.
 
     Parameters
@@ -179,7 +199,7 @@ def remove_global_func(name: str) -> None:
     get_global_func("ffi.FunctionRemoveGlobal")(name)
 
 
-def init_ffi_api(namespace: str, target_module_name: Optional[str] = None) -> None:
+def init_ffi_api(namespace: str, target_module_name: str | None = None) -> None:
     """Initialize register ffi api  functions into a given module.
 
     Parameters
@@ -225,8 +245,8 @@ def init_ffi_api(namespace: str, target_module_name: Optional[str] = None) -> No
             continue
 
         f = get_global_func(name)
-        f.__name__ = fname
-        setattr(target_module, f.__name__, f)
+        setattr(f, "__name__", fname)
+        setattr(target_module, fname, f)
 
 
 def _member_method_wrapper(method_func: Callable[..., Any]) -> Callable[..., Any]:
@@ -253,16 +273,16 @@ def _add_class_attrs(type_cls: type, type_info: TypeInfo) -> type:
         doc = method.doc if method.doc else None
         method_func = method.func
         if method.is_static:
-            method_pyfunc = staticmethod(method_func)
+            if doc is not None:
+                method_func.__doc__ = doc
+            method_func.__name__ = name
+            method_pyfunc: Any = staticmethod(method_func)
         else:
-            # must call into another method instead of direct capture
-            # to avoid the same method_func variable being used
-            # across multiple loop iterations
-            method_pyfunc = _member_method_wrapper(method_func)
-
-        if doc is not None:
-            method_pyfunc.__doc__ = doc
-        method_pyfunc.__name__ = name
+            wrapped_func = _member_method_wrapper(method_func)
+            if doc is not None:
+                wrapped_func.__doc__ = doc
+            wrapped_func.__name__ = name
+            method_pyfunc = wrapped_func
 
         if hasattr(type_cls, name):
             # skip already defined attributes

@@ -16,6 +16,8 @@
 # under the License.
 """Build and load inline C++/CUDA sources into a tvm_ffi Module using Ninja."""
 
+from __future__ import annotations
+
 import functools
 import hashlib
 import os
@@ -24,7 +26,6 @@ import subprocess
 import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Optional
 
 from tvm_ffi.libinfo import find_dlpack_include_path, find_include_path, find_libtvm_ffi
 from tvm_ffi.module import Module, load_module
@@ -77,7 +78,7 @@ def _maybe_write(path: str, content: str) -> None:
 
 
 @functools.lru_cache
-def _find_cuda_home() -> Optional[str]:
+def _find_cuda_home() -> str:
     """Find the CUDA install path."""
     # Guess #1
     cuda_home = os.environ.get("CUDA_HOME") or os.environ.get("CUDA_PATH")
@@ -92,9 +93,10 @@ def _find_cuda_home() -> Optional[str]:
                 cuda_root = Path("C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA")
                 cuda_homes = list(cuda_root.glob("v*.*"))
                 if len(cuda_homes) == 0:
-                    cuda_home = ""
-                else:
-                    cuda_home = str(cuda_homes[0])
+                    raise RuntimeError(
+                        "Could not find CUDA installation. Please set CUDA_HOME environment variable."
+                    )
+                cuda_home = str(cuda_homes[0])
             else:
                 cuda_home = "/usr/local/cuda"
             if not Path(cuda_home).exists():
@@ -358,17 +360,17 @@ def _decorate_with_tvm_ffi(source: str, functions: Mapping[str, str]) -> str:
     return "\n".join(sources)
 
 
-def load_inline(
+def load_inline(  # noqa: PLR0912, PLR0915
     name: str,
     *,
-    cpp_sources: str | None = None,
-    cuda_sources: str | None = None,
-    functions: Sequence[str] | None = None,
+    cpp_sources: Sequence[str] | str | None = None,
+    cuda_sources: Sequence[str] | str | None = None,
+    functions: Mapping[str, str] | Sequence[str] | str | None = None,
     extra_cflags: Sequence[str] | None = None,
     extra_cuda_cflags: Sequence[str] | None = None,
     extra_ldflags: Sequence[str] | None = None,
     extra_include_paths: Sequence[str] | None = None,
-    build_directory: Optional[str] = None,
+    build_directory: str | None = None,
 ) -> Module:
     """Compile and load a C++/CUDA module from inline source code.
 
@@ -481,76 +483,83 @@ def load_inline(
 
     """
     if cpp_sources is None:
-        cpp_sources = []
+        cpp_source_list: list[str] = []
     elif isinstance(cpp_sources, str):
-        cpp_sources = [cpp_sources]
-    cpp_source = "\n".join(cpp_sources)
-    if cuda_sources is None:
-        cuda_sources = []
-    elif isinstance(cuda_sources, str):
-        cuda_sources = [cuda_sources]
-    cuda_source = "\n".join(cuda_sources)
-    with_cpp = len(cpp_sources) > 0
-    with_cuda = len(cuda_sources) > 0
+        cpp_source_list = [cpp_sources]
+    else:
+        cpp_source_list = list(cpp_sources)
+    cpp_source = "\n".join(cpp_source_list)
+    with_cpp = bool(cpp_source_list)
+    del cpp_source_list
 
-    extra_ldflags = extra_ldflags or []
-    extra_cflags = extra_cflags or []
-    extra_cuda_cflags = extra_cuda_cflags or []
-    extra_include_paths = extra_include_paths or []
+    if cuda_sources is None:
+        cuda_source_list: list[str] = []
+    elif isinstance(cuda_sources, str):
+        cuda_source_list = [cuda_sources]
+    else:
+        cuda_source_list = list(cuda_sources)
+    cuda_source = "\n".join(cuda_source_list)
+    with_cuda = bool(cuda_source_list)
+    del cuda_source_list
+
+    extra_ldflags_list = list(extra_ldflags) if extra_ldflags is not None else []
+    extra_cflags_list = list(extra_cflags) if extra_cflags is not None else []
+    extra_cuda_cflags_list = list(extra_cuda_cflags) if extra_cuda_cflags is not None else []
+    extra_include_paths_list = list(extra_include_paths) if extra_include_paths is not None else []
 
     # add function registration code to sources
-    if isinstance(functions, str):
-        functions = {functions: ""}
-    elif isinstance(functions, Sequence):
-        functions = {name: "" for name in functions}
+    if functions is None:
+        function_map: dict[str, str] = {}
+    elif isinstance(functions, str):
+        function_map = {functions: ""}
+    elif isinstance(functions, Mapping):
+        function_map = dict(functions)
+    else:
+        function_map = {name: "" for name in functions}
 
     if with_cpp:
-        cpp_source = _decorate_with_tvm_ffi(cpp_source, functions)
+        cpp_source = _decorate_with_tvm_ffi(cpp_source, function_map)
         cuda_source = _decorate_with_tvm_ffi(cuda_source, {})
     else:
         cpp_source = _decorate_with_tvm_ffi(cpp_source, {})
-        cuda_source = _decorate_with_tvm_ffi(cuda_source, functions)
+        cuda_source = _decorate_with_tvm_ffi(cuda_source, function_map)
 
     # determine the cache dir for the built module
+    build_dir: Path
     if build_directory is None:
-        build_directory = os.environ.get(
-            "TVM_FFI_CACHE_DIR", str(Path("~/.cache/tvm-ffi").expanduser())
-        )
+        cache_dir = os.environ.get("TVM_FFI_CACHE_DIR", str(Path("~/.cache/tvm-ffi").expanduser()))
         source_hash: str = _hash_sources(
             cpp_source,
             cuda_source,
-            functions,
-            extra_cflags,
-            extra_cuda_cflags,
-            extra_ldflags,
-            extra_include_paths,
+            function_map,
+            extra_cflags_list,
+            extra_cuda_cflags_list,
+            extra_ldflags_list,
+            extra_include_paths_list,
         )
-        build_dir: str = str(Path(build_directory) / f"{name}_{source_hash}")
+        build_dir = Path(cache_dir).expanduser() / f"{name}_{source_hash}"
     else:
-        build_dir = str(Path(build_directory).resolve())
-    Path(build_dir).mkdir(parents=True, exist_ok=True)
+        build_dir = Path(build_directory).resolve()
+    build_dir.mkdir(parents=True, exist_ok=True)
 
     # generate build.ninja
     ninja_source = _generate_ninja_build(
         name=name,
-        build_dir=build_dir,
+        build_dir=str(build_dir),
         with_cuda=with_cuda,
-        extra_cflags=extra_cflags,
-        extra_cuda_cflags=extra_cuda_cflags,
-        extra_ldflags=extra_ldflags,
-        extra_include_paths=extra_include_paths,
+        extra_cflags=extra_cflags_list,
+        extra_cuda_cflags=extra_cuda_cflags_list,
+        extra_ldflags=extra_ldflags_list,
+        extra_include_paths=extra_include_paths_list,
     )
-
-    with FileLock(str(Path(build_dir) / "lock")):
+    with FileLock(str(build_dir / "lock")):
         # write source files and build.ninja if they do not already exist
-        _maybe_write(str(Path(build_dir) / "main.cpp"), cpp_source)
+        _maybe_write(str(build_dir / "main.cpp"), cpp_source)
         if with_cuda:
-            _maybe_write(str(Path(build_dir) / "cuda.cu"), cuda_source)
-        _maybe_write(str(Path(build_dir) / "build.ninja"), ninja_source)
-
+            _maybe_write(str(build_dir / "cuda.cu"), cuda_source)
+        _maybe_write(str(build_dir / "build.ninja"), ninja_source)
         # build the module
-        _build_ninja(build_dir)
-
+        _build_ninja(str(build_dir))
         # Use appropriate extension based on platform
         ext = ".dll" if IS_WINDOWS else ".so"
-        return load_module(str((Path(build_dir) / f"{name}{ext}").resolve()))
+        return load_module(str((build_dir / f"{name}{ext}").resolve()))

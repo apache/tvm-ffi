@@ -39,9 +39,9 @@ def test_error_from_cxx() -> None:
     try:
         test_raise_error("ValueError", "error XYZ")
     except ValueError as e:
-        assert e.__tvm_ffi_error__.kind == "ValueError"
-        assert e.__tvm_ffi_error__.message == "error XYZ"
-        assert e.__tvm_ffi_error__.backtrace.find("TestRaiseError") != -1
+        assert e.__tvm_ffi_error__.kind == "ValueError"  # type: ignore[attr-defined]
+        assert e.__tvm_ffi_error__.message == "error XYZ"  # type: ignore[attr-defined]
+        assert e.__tvm_ffi_error__.backtrace.find("TestRaiseError") != -1  # type: ignore[attr-defined]
 
     fapply = tvm_ffi.convert(lambda f, *args: f(*args))
 
@@ -64,17 +64,17 @@ def test_error_from_nested_pyfunc() -> None:
         try:
             fapply(cxx_test_raise_error, "ValueError", "error XYZ")
         except ValueError as e:
-            assert e.__tvm_ffi_error__.kind == "ValueError"
-            assert e.__tvm_ffi_error__.message == "error XYZ"
-            assert e.__tvm_ffi_error__.backtrace.find("TestRaiseError") != -1
-            record_object.append(e.__tvm_ffi_error__)
+            assert e.__tvm_ffi_error__.kind == "ValueError"  # type: ignore[attr-defined]
+            assert e.__tvm_ffi_error__.message == "error XYZ"  # type: ignore[attr-defined]
+            assert e.__tvm_ffi_error__.backtrace.find("TestRaiseError") != -1  # type: ignore[attr-defined]
+            record_object.append(e.__tvm_ffi_error__)  # type: ignore[attr-defined]
             raise e
 
     try:
         cxx_test_apply(raise_error)
     except ValueError as e:
-        backtrace = e.__tvm_ffi_error__.backtrace
-        assert e.__tvm_ffi_error__.same_as(record_object[0])
+        backtrace = e.__tvm_ffi_error__.backtrace  # type: ignore[attr-defined]
+        assert e.__tvm_ffi_error__.same_as(record_object[0])  # type: ignore[attr-defined]
         assert backtrace.count("TestRaiseError") == 1
         # The following lines may fail if debug symbols are missing
         try:
@@ -108,7 +108,7 @@ def test_error_traceback_update() -> None:
     try:
         raise_cxx_error()
     except ValueError as e:
-        assert e.__tvm_ffi_error__.backtrace.find("raise_cxx_error") == -1
+        assert e.__tvm_ffi_error__.backtrace.find("raise_cxx_error") == -1  # type: ignore[attr-defined]
         ffi_error1 = tvm_ffi.convert(e)
         ffi_error2 = fecho(e)
         assert ffi_error1.backtrace.find("raise_cxx_error") != -1

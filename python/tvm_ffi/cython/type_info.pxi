@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 import dataclasses
+from typing import Optional, Any
 
 
 cdef class FieldGetter:
@@ -62,13 +63,13 @@ class TypeField:
     """Description of a single reflected field on an FFI-backed type."""
 
     name: str
-    doc: str | None
+    doc: Optional[str]
     size: int
     offset: int
     frozen: bool
     getter: FieldGetter
     setter: FieldSetter
-    dataclass_field: object | None = None
+    dataclass_field: Any = None
 
     def __post_init__(self):
         assert self.setter is not None
@@ -96,7 +97,7 @@ class TypeMethod:
     """Description of a single reflected method on an FFI-backed type."""
 
     name: str
-    doc: str | None
+    doc: Optional[str]
     func: object
     is_static: bool
 
@@ -105,9 +106,9 @@ class TypeMethod:
 class TypeInfo:
     """Aggregated type information required to build a proxy class."""
 
-    type_cls: type | None
+    type_cls: Optional[type]
     type_index: int
     type_key: str
     fields: list[TypeField]
     methods: list[TypeMethod]
-    parent_type_info: TypeInfo | None
+    parent_type_info: Optional[TypeInfo]

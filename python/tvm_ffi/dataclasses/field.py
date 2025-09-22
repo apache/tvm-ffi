@@ -18,11 +18,10 @@
 
 from __future__ import annotations
 
-from dataclasses import MISSING, dataclass
+from dataclasses import MISSING
 from typing import Any, Callable
 
 
-@dataclass(kw_only=True)
 class Field:
     """(Experimental) Descriptor placeholder returned by :func:`tvm_ffi.dataclasses.field`.
 
@@ -36,8 +35,12 @@ class Field:
     way the decorator understands.
     """
 
-    name: str | None = None
-    default_factory: Callable[[], Any]
+    __slots__ = ("default_factory", "name")
+
+    def __init__(self, *, name: str | None = None, default_factory: Callable[[], Any]) -> None:
+        """Do not call directly; use :func:`field` instead."""
+        self.name = name
+        self.default_factory = default_factory
 
 
 def field(*, default: Any = MISSING, default_factory: Any = MISSING) -> Field:

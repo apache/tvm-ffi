@@ -254,9 +254,9 @@ def tvm_ffi_nop_autodlpack_from_dltensor_test_wrapper(repeat: int, device: str) 
     x = tvm_ffi.from_dlpack(torch.arange(1, device=device))
     y = tvm_ffi.from_dlpack(torch.arange(1, device=device))
     z = tvm_ffi.from_dlpack(torch.arange(1, device=device))
-    x = tvm_ffi.core.DLTensorTestWrapper(x)
-    y = tvm_ffi.core.DLTensorTestWrapper(y)
-    z = tvm_ffi.core.DLTensorTestWrapper(z)
+    x = tvm_ffi.core.DLTensorTestWrapper(x)  # type: ignore[assignment]
+    y = tvm_ffi.core.DLTensorTestWrapper(y)  # type: ignore[assignment]
+    z = tvm_ffi.core.DLTensorTestWrapper(z)  # type: ignore[assignment]
     bench_tvm_ffi_nop_autodlpack(
         f"tvm_ffi.nop.autodlpack(DLTensorTestWrapper[{device}])", x, y, z, repeat
     )

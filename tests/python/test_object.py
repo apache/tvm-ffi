@@ -24,6 +24,7 @@ import tvm_ffi
 def test_make_object() -> None:
     # with default values
     obj0 = tvm_ffi.testing.create_object("testing.TestObjectBase")
+    assert isinstance(obj0, tvm_ffi.testing.TestObjectBase)
     assert obj0.v_i64 == 10
     assert obj0.v_f64 == 10.0
     assert obj0.v_str == "hello"
@@ -37,14 +38,16 @@ def test_make_object_via_init() -> None:
 
 def test_method() -> None:
     obj0 = tvm_ffi.testing.create_object("testing.TestObjectBase", v_i64=12)
-    assert obj0.add_i64(1) == 13
-    assert type(obj0).add_i64.__doc__ == "add_i64 method"
-    assert type(obj0).v_i64.__doc__ == "i64 field"
+    assert isinstance(obj0, tvm_ffi.testing.TestObjectBase)
+    assert obj0.add_i64(1) == 13  # type: ignore[attr-defined]
+    assert type(obj0).add_i64.__doc__ == "add_i64 method"  # type: ignore[attr-defined]
+    assert type(obj0).v_i64.__doc__ == "i64 field"  # type: ignore[attr-defined]
 
 
 def test_setter() -> None:
     # test setter
     obj0 = tvm_ffi.testing.create_object("testing.TestObjectBase", v_i64=10, v_str="hello")
+    assert isinstance(obj0, tvm_ffi.testing.TestObjectBase)
     assert obj0.v_i64 == 10
     obj0.v_i64 = 11
     assert obj0.v_i64 == 11
@@ -52,10 +55,10 @@ def test_setter() -> None:
     assert obj0.v_str == "world"
 
     with pytest.raises(TypeError):
-        obj0.v_str = 1
+        obj0.v_str = 1  # type: ignore[assignment]
 
     with pytest.raises(TypeError):
-        obj0.v_i64 = "hello"
+        obj0.v_i64 = "hello"  # type: ignore[assignment]
 
 
 def test_derived_object() -> None:
@@ -68,6 +71,7 @@ def test_derived_object() -> None:
     obj0 = tvm_ffi.testing.create_object(
         "testing.TestObjectDerived", v_i64=20, v_map=v_map, v_array=v_array
     )
+    assert isinstance(obj0, tvm_ffi.testing.TestObjectDerived)
     assert obj0.v_map.same_as(v_map)
     assert obj0.v_array.same_as(v_array)
     assert obj0.v_i64 == 20

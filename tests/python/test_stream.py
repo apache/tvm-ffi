@@ -15,12 +15,17 @@
 # specific language governing permissions and limitations
 # under the License.
 
+from __future__ import annotations
+
+from types import ModuleType
+
 import pytest
 import tvm_ffi
 import tvm_ffi.cpp
 
+torch: ModuleType | None
 try:
-    import torch
+    import torch  # type: ignore[no-redef]
 except ImportError:
     torch = None
 
@@ -56,6 +61,7 @@ def test_raw_stream() -> None:
     torch is None or not torch.cuda.is_available(), reason="Requires torch and CUDA"
 )
 def test_torch_stream() -> None:
+    assert torch is not None
     mod = gen_check_stream_mod()
     device_id = torch.cuda.current_device()
     device = tvm_ffi.device("cuda", device_id)
@@ -78,6 +84,7 @@ def test_torch_stream() -> None:
     torch is None or not torch.cuda.is_available(), reason="Requires torch and CUDA"
 )
 def test_torch_current_stream() -> None:
+    assert torch is not None
     mod = gen_check_stream_mod()
     device_id = torch.cuda.current_device()
     device = tvm_ffi.device("cuda", device_id)
@@ -103,6 +110,7 @@ def test_torch_current_stream() -> None:
     torch is None or not torch.cuda.is_available(), reason="Requires torch and CUDA"
 )
 def test_torch_graph() -> None:
+    assert torch is not None
     mod = gen_check_stream_mod()
     device_id = torch.cuda.current_device()
     device = tvm_ffi.device("cuda", device_id)

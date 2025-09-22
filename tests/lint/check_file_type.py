@@ -183,8 +183,8 @@ def main() -> None:
     cmd = ["git", "ls-files"]
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     (out, _) = proc.communicate()
-    assert proc.returncode == 0, f"{' '.join(cmd)} errored: {out}"
     res = out.decode("utf-8")
+    assert proc.returncode == 0, f"{' '.join(cmd)} errored: {res}"
     flist = res.split()
     error_list = []
 

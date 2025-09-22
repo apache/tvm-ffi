@@ -73,7 +73,7 @@ class Module(core.Object):
             The module
 
         """
-        return self.imports_
+        return self.imports_  # type: ignore[return-value]
 
     def implements_function(self, name: str, query_imports: bool = False) -> bool:
         """Return True if the module defines a global function.
@@ -255,7 +255,7 @@ def system_lib(symbol_prefix: str = "") -> Module:
 
     Parameters
     ----------
-    symbol_prefix: Optional[str]
+    symbol_prefix: str = ""
         Optional symbol prefix that can be used for search. When we lookup a symbol
         symbol_prefix + name will first be searched, then the name without symbol_prefix.
 

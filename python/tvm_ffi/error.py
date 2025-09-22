@@ -17,11 +17,13 @@
 # pylint: disable=invalid-name
 """Error handling."""
 
+from __future__ import annotations
+
 import ast
 import re
 import sys
 import types
-from typing import Any, Optional
+from typing import Any
 
 from . import core
 
@@ -60,7 +62,7 @@ class TracebackManager:
 
     def __init__(self) -> None:
         """Initialize the traceback manager and its cache."""
-        self._code_cache = {}
+        self._code_cache: dict[tuple[str, int, str], types.CodeType] = {}
 
     def _get_cached_code_object(self, filename: str, lineno: int, func: str) -> types.CodeType:
         # Hack to create a code object that points to the correct
@@ -95,7 +97,7 @@ class TracebackManager:
 
     def append_traceback(
         self,
-        tb: Optional[types.TracebackType],
+        tb: types.TracebackType | None,
         filename: str,
         lineno: int,
         func: str,
@@ -134,7 +136,7 @@ def _with_append_backtrace(py_error: BaseException, backtrace: str) -> BaseExcep
     return py_error.with_traceback(tb)
 
 
-def _traceback_to_backtrace_str(tb: Optional[types.TracebackType]) -> str:
+def _traceback_to_backtrace_str(tb: types.TracebackType | None) -> str:
     """Convert the traceback to a string."""
     lines = []
     while tb is not None:
@@ -155,7 +157,7 @@ core._TRACEBACK_TO_BACKTRACE_STR = _traceback_to_backtrace_str
 
 def register_error(
     name_or_cls: str | type | None = None,
-    cls: Optional[type] = None,
+    cls: type | None = None,
 ) -> Any:
     """Register an error class so it can be recognized by the ffi error handler.
 

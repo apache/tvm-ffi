@@ -59,6 +59,7 @@ class dtype(str):
     """
 
     __slots__ = ["__tvm_ffi_dtype__"]
+    __tvm_ffi_dtype__: core.DataType
 
     _NUMPY_DTYPE_TO_STR: ClassVar[dict[Any, str]] = {}
 

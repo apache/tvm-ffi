@@ -57,7 +57,7 @@ def test_cxx_class_derived_derived() -> None:
 
 
 def test_cxx_class_derived_derived_default() -> None:
-    obj = _TestCxxClassDerivedDerived(123, 456, 4, True)
+    obj = _TestCxxClassDerivedDerived(123, 456, 4, True)  # type: ignore[call-arg,misc]
     assert obj.v_i64 == 123
     assert obj.v_i32 == 456
     assert isinstance(obj.v_f64, float) and obj.v_f64 == 4

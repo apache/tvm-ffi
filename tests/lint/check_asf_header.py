@@ -170,7 +170,7 @@ FMT_MAP = {
 }
 
 # Files and patterns to skip during header checking
-SKIP_LIST = []
+SKIP_LIST: list[str] = []
 
 
 def should_skip_file(filepath: str) -> bool:

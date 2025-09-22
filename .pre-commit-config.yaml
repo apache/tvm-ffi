@@ -83,3 +83,30 @@ repos:
     rev: v0.10.0.1
     hooks:
       - id: shellcheck
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: "v1.17.0"
+    hooks:
+      - id: mypy
+        name: mypy for `python/` and `tests/`
+        additional_dependencies: ['numpy >= 1.22', "ml-dtypes >= 0.1", "pytest", "typing-extensions>=4.5"]
+        args: [--show-error-codes, --python-version=3.9]
+        exclude: ^.*/_ffi_api\.py$
+        files: ^(python/|tests/).*\.py$
+      - id: mypy
+        name: mypy for `examples/inline_module`
+        additional_dependencies: ['numpy >= 1.22', "ml-dtypes >= 0.1", "pytest", "typing-extensions>=4.5"]
+        args: [--show-error-codes, --python-version=3.9]
+        exclude: ^.*/_ffi_api\.py$
+        files: ^examples/inline_module/.*\.py$
+      - id: mypy
+        name: mypy for `examples/packaging`
+        additional_dependencies: ['numpy >= 1.22', "ml-dtypes >= 0.1", "pytest", "typing-extensions>=4.5"]
+        args: [--show-error-codes, --python-version=3.9]
+        exclude: ^.*/_ffi_api\.py$
+        files: ^examples/packaging/.*\.py$
+      - id: mypy
+        name: mypy for `examples/quick_start`
+        additional_dependencies: ['numpy >= 1.22', "ml-dtypes >= 0.1", "pytest", "typing-extensions>=4.5"]
+        args: [--show-error-codes, --python-version=3.9]
+        exclude: ^.*/_ffi_api\.py$
+        files: ^examples/quick_start/.*\.py$

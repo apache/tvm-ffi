@@ -16,20 +16,25 @@
 # under the License.
 """Conversion utilities to bring python objects into ffi values."""
 
+from __future__ import annotations
+
 from numbers import Number
+from types import ModuleType
 from typing import Any
 
 from . import container, core
 
+torch: ModuleType | None = None
 try:
-    import torch
+    import torch  # type: ignore[no-redef]
 except ImportError:
-    torch = None
+    pass
 
+numpy: ModuleType | None = None
 try:
     import numpy
 except ImportError:
-    numpy = None
+    pass
 
 
 def convert(value: Any) -> Any:  # noqa: PLR0911,PLR0912
