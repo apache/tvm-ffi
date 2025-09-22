@@ -63,30 +63,26 @@ jobs:
       fail-fast: true
       matrix:
         include:
-          - {os: ubuntu-latest, arch: x86_64}
-          - {os: ubuntu-24.04-arm, arch: aarch64}
-          - {os: windows-latest, arch: AMD64}
-          - {os: macos-14, arch: arm64}
+          - {os: ubuntu-latest, arch: x86_64, python_version: '3.13'}
+          - {os: ubuntu-24.04-arm, arch: aarch64, python_version: '3.9'}
+          - {os: windows-latest, arch: AMD64, python_version: '3.12'}
+          - {os: macos-14, arch: arm64, python_version: '3.10'}
 
     steps:
-      - uses: actions/setup-python@v6
-        with:
-          python-version: '3.13'
-
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+      - name: Print current commit
+        run: git log -1 --oneline
 
+      # Detect CPU count
       - uses: ./.github/actions/detect-env-vars
         id: env_vars
-
       - name: Print CPU count
         run: |
           echo "CPU count: ${{ steps.env_vars.outputs.cpu_count }}"
 
-      - name: Print current commit
-        run: git log -1 --oneline
-
+      # Run C++ tests
       - name: Run cpp tests
         if: ${{ matrix.os != 'windows-latest' }}
         env:
@@ -95,7 +91,6 @@ jobs:
           cmake . -B build_test -DTVM_FFI_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Debug
           cmake --build build_test --clean-first --config Debug --target tvm_ffi_tests
           ctest -V -C Debug --test-dir build_test --output-on-failure
-
       - name: Run cpp tests[windows]
         if: ${{ matrix.os == 'windows-latest' }}
         shell: cmd
@@ -106,13 +101,17 @@ jobs:
           cmake --build build_test --clean-first --config Debug --target tvm_ffi_tests &&
           ctest -V -C Debug --test-dir build_test --output-on-failure
 
+      # Run Python tests
+      - name: Setup Python ${{ matrix.python_version }}
+        uses: astral-sh/setup-uv@b75a909f75acd358c2196fb9a5f1299a9a8868a4 # v6.7.0
+        with:
+          python-version: ${{ matrix.python_version }}
+          activate-environment: true
       - name: Build and install python package
         env:
           CMAKE_BUILD_PARALLEL_LEVEL: ${{ steps.env_vars.outputs.cpu_count }}
         run: |
-          python -m pip install --upgrade pip
-          pip install -v ".[test]"
-
+          uv pip install --reinstall --verbose -e ".[test]"
       - name: Run python tests
         run: |
           pytest -vvs tests/python
