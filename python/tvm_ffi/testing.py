@@ -52,8 +52,8 @@ class TestIntPair(Object):
 class TestObjectDerived(TestObjectBase):
     """Test object derived class."""
 
-    v_map: Map
-    v_array: Array
+    v_map: Map[Any, Any]
+    v_array: Array[Any]
 
 
 def create_object(type_key: str, **kwargs: Any) -> Object:
