@@ -66,3 +66,21 @@ def test_tensor_auto_dlpack() -> None:
     assert y.shape == x.shape
     assert y.device == x.device
     np.testing.assert_equal(y.numpy(), x.numpy())
+
+
+def test_tensor_class_override() -> None:
+    class MyTensor(tvm_ffi.Tensor):
+        pass
+
+    old_tensor = tvm_ffi.core._CLASS_TENSOR
+    tvm_ffi.core._set_class_tensor(MyTensor)
+
+    data = np.zeros((10, 8, 4, 2), dtype="int16")
+    if not hasattr(data, "__dlpack__"):
+        return
+    x = tvm_ffi.from_dlpack(data)
+
+    fecho = tvm_ffi.get_global_func("testing.echo")
+    y = fecho(x)
+    assert isinstance(y, MyTensor)
+    tvm_ffi.core._set_class_tensor(old_tensor)

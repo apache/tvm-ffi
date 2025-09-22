@@ -95,3 +95,15 @@ def test_device_pickle() -> None:
     device_pickled = pickle.loads(pickle.dumps(device))
     assert device_pickled.dlpack_device_type() == device.dlpack_device_type()
     assert device_pickled.index == device.index
+
+
+def test_device_class_override() -> None:
+    class MyDevice(tvm_ffi.Device):
+        pass
+
+    old_device = tvm_ffi.core._CLASS_DEVICE
+    tvm_ffi.core._set_class_device(MyDevice)
+
+    device = tvm_ffi.device("cuda", 0)
+    assert isinstance(device, MyDevice)
+    tvm_ffi.core._set_class_device(old_device)

@@ -21,9 +21,8 @@
 from numbers import Integral
 from typing import Any, Optional, Union
 
-from . import _ffi_api, registry
+from . import _ffi_api, core, registry
 from .core import (
-    _CLASS_DEVICE,
     Device,
     DLDeviceType,
     PyNativeObject,
@@ -86,7 +85,8 @@ def device(device_type: Union[str, int, DLDeviceType], index: Optional[int] = No
       assert tvm_ffi.device("cpu:0") == tvm_ffi.device("cpu", 0)
 
     """
-    return _CLASS_DEVICE(device_type, index)
+    # must refer to core._CLASS_DEVICE so we pick up override here
+    return core._CLASS_DEVICE(device_type, index)
 
 
 __all__ = ["DLDeviceType", "Device", "Tensor", "device", "from_dlpack"]
