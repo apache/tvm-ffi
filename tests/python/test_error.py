@@ -22,12 +22,12 @@ import pytest
 import tvm_ffi
 
 
-def test_parse_traceback() -> None:
-    traceback = """
+def test_parse_backtrace() -> None:
+    backtrace = """
     File "test.py", line 1, in <module>
     File "test.py", line 3, in run_test
     """
-    parsed = tvm_ffi.error._parse_traceback(traceback)
+    parsed = tvm_ffi.error._parse_backtrace(backtrace)
     assert len(parsed) == 2
     assert parsed[0] == ("test.py", 1, "<module>")
     assert parsed[1] == ("test.py", 3, "run_test")
@@ -41,7 +41,7 @@ def test_error_from_cxx() -> None:
     except ValueError as e:
         assert e.__tvm_ffi_error__.kind == "ValueError"
         assert e.__tvm_ffi_error__.message == "error XYZ"
-        assert e.__tvm_ffi_error__.traceback.find("TestRaiseError") != -1
+        assert e.__tvm_ffi_error__.backtrace.find("TestRaiseError") != -1
 
     fapply = tvm_ffi.convert(lambda f, *args: f(*args))
 
@@ -66,25 +66,25 @@ def test_error_from_nested_pyfunc() -> None:
         except ValueError as e:
             assert e.__tvm_ffi_error__.kind == "ValueError"
             assert e.__tvm_ffi_error__.message == "error XYZ"
-            assert e.__tvm_ffi_error__.traceback.find("TestRaiseError") != -1
+            assert e.__tvm_ffi_error__.backtrace.find("TestRaiseError") != -1
             record_object.append(e.__tvm_ffi_error__)
             raise e
 
     try:
         cxx_test_apply(raise_error)
     except ValueError as e:
-        traceback = e.__tvm_ffi_error__.traceback
+        backtrace = e.__tvm_ffi_error__.backtrace
         assert e.__tvm_ffi_error__.same_as(record_object[0])
-        assert traceback.count("TestRaiseError") == 1
+        assert backtrace.count("TestRaiseError") == 1
         # The following lines may fail if debug symbols are missing
         try:
-            assert traceback.count("TestApply") == 1
-            assert traceback.count("<lambda>") == 1
-            pos_cxx_raise = traceback.find("TestRaiseError")
-            pos_cxx_apply = traceback.find("TestApply")
-            pos_lambda = traceback.find("<lambda>")
-            assert pos_cxx_raise > pos_lambda
-            assert pos_lambda > pos_cxx_apply
+            assert backtrace.count("TestApply") == 1
+            assert backtrace.count("<lambda>") == 1
+            pos_cxx_raise = backtrace.find("TestRaiseError")
+            pos_cxx_apply = backtrace.find("TestApply")
+            pos_lambda = backtrace.find("<lambda>")
+            assert pos_cxx_raise < pos_lambda
+            assert pos_lambda < pos_cxx_apply
         except Exception as e:
             pytest.xfail("May fail if debug symbols are missing")
 
@@ -99,7 +99,7 @@ def test_error_traceback_update() -> None:
         raise_error()
     except ValueError as e:
         ffi_error = tvm_ffi.convert(e)
-        assert ffi_error.traceback.find("raise_error") != -1
+        assert ffi_error.backtrace.find("raise_error") != -1
 
     def raise_cxx_error() -> None:
         cxx_test_raise_error = tvm_ffi.get_global_func("testing.test_raise_error")
@@ -108,8 +108,8 @@ def test_error_traceback_update() -> None:
     try:
         raise_cxx_error()
     except ValueError as e:
-        assert e.__tvm_ffi_error__.traceback.find("raise_cxx_error") == -1
+        assert e.__tvm_ffi_error__.backtrace.find("raise_cxx_error") == -1
         ffi_error1 = tvm_ffi.convert(e)
         ffi_error2 = fecho(e)
-        assert ffi_error1.traceback.find("raise_cxx_error") != -1
-        assert ffi_error2.traceback.find("raise_cxx_error") != -1
+        assert ffi_error1.backtrace.find("raise_cxx_error") != -1
+        assert ffi_error2.backtrace.find("raise_cxx_error") != -1

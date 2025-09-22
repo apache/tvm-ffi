@@ -22,8 +22,8 @@ import re
 ERROR_NAME_TO_TYPE = {}
 ERROR_TYPE_TO_NAME = {}
 
-_WITH_APPEND_TRACEBACK = None
-_TRACEBACK_TO_STR = None
+_WITH_APPEND_BACKTRACE = None
+_TRACEBACK_TO_BACKTRACE_STR = None
 
 
 cdef class Error(Object):
@@ -35,24 +35,37 @@ cdef class Error(Object):
     to convert it to a python error then raise it.
     """
 
-    def __init__(self, kind, message, traceback):
+    def __init__(self, kind, message, backtrace):
         cdef ByteArrayArg kind_arg = ByteArrayArg(c_str(kind))
         cdef ByteArrayArg message_arg = ByteArrayArg(c_str(message))
-        cdef ByteArrayArg traceback_arg = ByteArrayArg(c_str(traceback))
-        (<Object>self).chandle = TVMFFIErrorCreate(
-            kind_arg.cptr(), message_arg.cptr(), traceback_arg.cptr()
+        cdef ByteArrayArg backtrace_arg = ByteArrayArg(c_str(backtrace))
+        cdef TVMFFIObjectHandle out
+        cdef int ret = TVMFFIErrorCreate(
+            kind_arg.cptr(), message_arg.cptr(), backtrace_arg.cptr(), &out
         )
+        if ret != 0:
+            raise MemoryError("Failed to create error object")
+        (<Object>self).chandle = out
 
-    def update_traceback(self, traceback):
-        """Update the traceback of the error
+    def update_backtrace(self, backtrace):
+        """Update the backtrace of the error
 
         Parameters
         ----------
-        traceback : str
-            The traceback to update.
+        backtrace : str
+            The backtrace to update.
+
+        Note
+        ----
+        The backtrace is stored in the reverse order of python traceback.
+        Such storage pattern makes it easier to append the backtrace to
+        the end when error is propagated. When we translate the backtrace to python traceback,
+        we will reverse the order of the lines to make it align with python traceback.
         """
-        cdef ByteArrayArg traceback_arg = ByteArrayArg(c_str(traceback))
-        TVMFFIErrorGetCellPtr(self.chandle).update_traceback(self.chandle, traceback_arg.cptr())
+        cdef ByteArrayArg backtrace_arg = ByteArrayArg(c_str(backtrace))
+        TVMFFIErrorGetCellPtr(self.chandle).update_backtrace(
+            self.chandle, backtrace_arg.cptr(), kTVMFFIBacktraceUpdateModeReplace
+        )
 
     def py_error(self):
         """
@@ -60,7 +73,7 @@ cdef class Error(Object):
         """
         error_cls = ERROR_NAME_TO_TYPE.get(self.kind, RuntimeError)
         py_error = error_cls(self.message)
-        py_error = _WITH_APPEND_TRACEBACK(py_error, self.traceback)
+        py_error = _WITH_APPEND_BACKTRACE(py_error, self.backtrace)
         py_error.__tvm_ffi_error__ = self
         return py_error
 
@@ -73,8 +86,8 @@ cdef class Error(Object):
         return bytearray_to_str(&(TVMFFIErrorGetCellPtr(self.chandle).message))
 
     @property
-    def traceback(self):
-        return bytearray_to_str(&(TVMFFIErrorGetCellPtr(self.chandle).traceback))
+    def backtrace(self):
+        return bytearray_to_str(&(TVMFFIErrorGetCellPtr(self.chandle).backtrace))
 
 
 _register_object_by_index(kTVMFFIError, Error)
@@ -97,31 +110,32 @@ cdef inline int set_last_ffi_error(error) except -1:
 
     kind = ERROR_TYPE_TO_NAME.get(type(error), "RuntimeError")
     message = error.__str__()
-    py_traceback = _TRACEBACK_TO_STR(error.__traceback__)
-    c_traceback = bytearray_to_str(TVMFFITraceback(NULL, 0, NULL, 0))
+    # NOTE: backtrace storage convention is reverse of python traceback
+    py_backtrace = _TRACEBACK_TO_BACKTRACE_STR(error.__traceback__)
+    c_backtrace = bytearray_to_str(TVMFFIBacktrace(NULL, 0, NULL, 0))
 
     # error comes from an exception thrown from C++ side
     if hasattr(error, "__tvm_ffi_error__"):
         # already have stack trace
         ffi_error = error.__tvm_ffi_error__
-        # attach the python traceback together with the C++ traceback to get full trace
-        ffi_error.update_traceback(c_traceback + py_traceback)
+        # attach the python backtrace together with the C++ backtrace to get full trace
+        ffi_error.update_backtrace(py_backtrace + c_backtrace)
         TVMFFIErrorSetRaised(ffi_error.chandle)
     else:
-        ffi_error = Error(kind, message, c_traceback + py_traceback)
+        ffi_error = Error(kind, message, py_backtrace + c_backtrace)
         TVMFFIErrorSetRaised(ffi_error.chandle)
 
 
 def _convert_to_ffi_error(error):
     """Convert the python error to the FFI error"""
-    py_traceback = _TRACEBACK_TO_STR(error.__traceback__)
+    py_backtrace = _TRACEBACK_TO_BACKTRACE_STR(error.__traceback__)
     if hasattr(error, "__tvm_ffi_error__"):
-        error.__tvm_ffi_error__.update_traceback(py_traceback)
+        error.__tvm_ffi_error__.update_backtrace(py_backtrace)
         return error.__tvm_ffi_error__
     else:
         kind = ERROR_TYPE_TO_NAME.get(type(error), "RuntimeError")
         message = error.__str__()
-        return Error(kind, message, py_traceback)
+        return Error(kind, message, py_backtrace)
 
 
 cdef inline int CHECK_CALL(int ret) except -2:

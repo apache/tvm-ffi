@@ -32,7 +32,8 @@ Before running the quick start, ensure you have:
 
 ```bash
 # From the quick_start directory
-pip install -ve ../..
+# install and include test dependency(this will install torch and numpy)
+pip install -ve "../..[test]"
 ```
 
 ## Run the Quick Start
@@ -43,19 +44,17 @@ From `examples/quick_start` you can build and run everything with the helper scr
 ./run_example.sh
 ```
 
-The script picks an available CMake generator (preferring Ninja), configures a build in `build/`, compiles the C++ libraries and drivers, installs the Python dependencies from `requirements.txt`, and finally runs the Python and C++ demos. If the CUDA toolkit is detected it will also build and execute `run_example_cuda`.
+The script picks an available CMake generator (preferring Ninja), configures a build in `build/`, compiles the C++ libraries and examples,
+and finally runs the Python and C++ demos. If the CUDA toolkit is detected it will also build and execute `run_example_cuda`.
 
 If you prefer to drive the build manually, run the following instead:
 
 ```bash
 # configure (omit -G Ninja if Ninja is not installed)
-cmake --fresh -G Ninja -B build -S .
+cmake -G Ninja -B build -S .
 
 # compile the example targets
 cmake --build build --parallel
-
-# install python dependencies for the scripts
-python -m pip install -r requirements.txt
 
 # run the demos
 python run_example.py

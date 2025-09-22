@@ -17,9 +17,9 @@
  * under the License.
  */
 /*!
- * \file traceback.h
- * \brief Common headers for traceback.
- * \note We use the term "traceback" to be consistent with python naming convention.
+ * \file backtrace.h
+ * \brief Common headers for backtrace.
+ * \note We use the term "backtrace" to be consistent with python naming convention.
  */
 #ifndef TVM_FFI_TRACEBACK_H_
 #define TVM_FFI_TRACEBACK_H_
@@ -39,7 +39,7 @@ namespace ffi {
 #pragma warning(disable : 4996)  // std::getenv is unsafe
 #endif
 
-inline int32_t GetTracebackLimit() {
+inline int32_t GetBacktraceLimit() {
   if (const char* env = std::getenv("TVM_TRACEBACK_LIMIT")) {
     return std::stoi(env);
   }
@@ -61,7 +61,7 @@ inline bool ShouldExcludeFrame(const char* filename, const char* symbol) {
     if (strncmp(symbol, "tvm::ffi::details::", 19) == 0) {
       return true;
     }
-    if (strncmp(symbol, "TVMFFITraceback", 15) == 0) {
+    if (strncmp(symbol, "TVMFFIBacktrace", 15) == 0) {
       return true;
     }
     if (strncmp(symbol, "TVMFFIErrorSetRaisedFromCStr", 28) == 0) {
@@ -102,11 +102,11 @@ inline bool ShouldExcludeFrame(const char* filename, const char* symbol) {
 }
 
 /**
- * \brief List frames that should stop the traceback.
+ * \brief List frames that should stop the backtrace.
  * \param filename The filename of the frame.
  * \param symbol The symbol name of the frame.
- * \return true if the frame should stop the traceback.
- * \note We stop traceback at the FFI boundary.
+ * \return true if the frame should stop the backtrace.
+ * \note We stop backtrace at the FFI boundary.
  */
 inline bool DetectFFIBoundary(const char* filename, const char* symbol) {
   if (symbol != nullptr) {
@@ -121,7 +121,7 @@ inline bool DetectFFIBoundary(const char* filename, const char* symbol) {
       return true;
     }
     // Python interpreter stack frames
-    // we stop traceback at the Python interpreter stack frames
+    // we stop backtrace at the Python interpreter stack frames
     // since these frame will be handled from by the python side.
     if (strncmp(symbol, "_Py", 3) == 0 || strncmp(symbol, "PyObject", 8) == 0) {
       return true;
@@ -131,12 +131,15 @@ inline bool DetectFFIBoundary(const char* filename, const char* symbol) {
 }
 
 /*!
- * \brief storage to store traceback
+ * \brief storage to store backtrace
  */
-struct TracebackStorage {
-  std::vector<std::string> lines;
-  /*! \brief Maximum size of the traceback. */
-  size_t max_frame_size = GetTracebackLimit();
+struct BacktraceStorage {
+  /*! \brief The stream to store the backtrace. */
+  std::ostringstream backtrace_stream_;
+  /*! \brief The number of lines in the backtrace. */
+  size_t line_count_ = 0;
+  /*! \brief Maximum size of the backtrace. */
+  size_t max_frame_size = GetBacktraceLimit();
   /*! \brief Number of frames to skip. */
   size_t skip_frame_count = 0;
   /*! \brief Whether to stop at the ffi boundary. */
@@ -157,23 +160,16 @@ struct TracebackStorage {
         return;
       }
     }
-    std::ostringstream trackeback_stream;
-    trackeback_stream << "  File \"" << filename << "\"";
-    trackeback_stream << ", line " << lineno;
-    trackeback_stream << ", in " << func << '\n';
-    lines.push_back(trackeback_stream.str());
+    backtrace_stream_ << "  File \"" << filename << "\"";
+    backtrace_stream_ << ", line " << lineno;
+    backtrace_stream_ << ", in " << func << '\n';
+    line_count_++;
   }
 
-  bool ExceedTracebackLimit() const { return lines.size() >= max_frame_size; }
+  bool ExceedBacktraceLimit() const { return line_count_ >= max_frame_size; }
 
-  // get traceback in the order of most recent call last
-  std::string GetTraceback() const {
-    std::string traceback;
-    for (auto it = lines.rbegin(); it != lines.rend(); ++it) {
-      traceback.insert(traceback.end(), it->begin(), it->end());
-    }
-    return traceback;
-  }
+  // get backtrace in the order of most recent call last
+  std::string GetBacktrace() const { return backtrace_stream_.str(); }
 };
 
 }  // namespace ffi

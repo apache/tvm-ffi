@@ -33,8 +33,8 @@ class SafeCallContext {
         details::ObjectUnsafe::ObjectPtrFromUnowned<ErrorObj>(static_cast<TVMFFIObject*>(error));
   }
 
-  void SetRaisedByCstr(const char* kind, const char* message, const TVMFFIByteArray* traceback) {
-    Error error(kind, message, traceback);
+  void SetRaisedByCstr(const char* kind, const char* message, const TVMFFIByteArray* backtrace) {
+    Error error(kind, message, backtrace);
     last_error_ = details::ObjectUnsafe::ObjectPtrFromObjectRef<ErrorObj>(std::move(error));
   }
 
@@ -55,9 +55,9 @@ class SafeCallContext {
 }  // namespace tvm
 
 void TVMFFIErrorSetRaisedFromCStr(const char* kind, const char* message) {
-  // NOTE: run traceback here to simplify the depth of tracekback
+  // NOTE: run backtrace here to simplify the depth of tracekback
   tvm::ffi::SafeCallContext::ThreadLocal()->SetRaisedByCstr(
-      kind, message, TVMFFITraceback(nullptr, 0, nullptr, 0));
+      kind, message, TVMFFIBacktrace(nullptr, 0, nullptr, 0));
 }
 
 void TVMFFIErrorSetRaised(TVMFFIObjectHandle error) {
@@ -68,14 +68,18 @@ void TVMFFIErrorMoveFromRaised(TVMFFIObjectHandle* result) {
   tvm::ffi::SafeCallContext::ThreadLocal()->MoveFromRaised(result);
 }
 
-TVMFFIObjectHandle TVMFFIErrorCreate(const TVMFFIByteArray* kind, const TVMFFIByteArray* message,
-                                     const TVMFFIByteArray* traceback) {
+int TVMFFIErrorCreate(const TVMFFIByteArray* kind, const TVMFFIByteArray* message,
+                      const TVMFFIByteArray* backtrace, TVMFFIObjectHandle* out) {
+  // log other errors to the logger
   TVM_FFI_LOG_EXCEPTION_CALL_BEGIN();
-  tvm::ffi::Error error(std::string(kind->data, kind->size),
-                        std::string(message->data, message->size),
-                        std::string(traceback->data, traceback->size));
-  TVMFFIObjectHandle out =
-      tvm::ffi::details::ObjectUnsafe::MoveObjectRefToTVMFFIObjectPtr(std::move(error));
-  return out;
+  try {
+    tvm::ffi::Error error(std::string(kind->data, kind->size),
+                          std::string(message->data, message->size),
+                          std::string(backtrace->data, backtrace->size));
+    *out = tvm::ffi::details::ObjectUnsafe::MoveObjectRefToTVMFFIObjectPtr(std::move(error));
+    return 0;
+  } catch (const std::bad_alloc& e) {
+    return -1;
+  }
   TVM_FFI_LOG_EXCEPTION_CALL_END(TVMFFIErrorCreate);
 }

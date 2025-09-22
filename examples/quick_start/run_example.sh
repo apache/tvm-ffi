@@ -24,11 +24,9 @@ else
 	generator="Unix Makefiles"
 fi
 
-cmake --fresh -G "$generator" -B build -S .
+rm -rf build/CMakeCache.txt
+cmake -G "$generator" -B build -S .
 cmake --build build --parallel
-
-# install python dependencies
-python -m pip install -r requirements.txt
 
 # running python example
 python run_example.py

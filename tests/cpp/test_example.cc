@@ -110,7 +110,7 @@ void ExampleErrorHandling() {
   } catch (const ffi::Error& e) {
     EXPECT_EQ(e.kind(), "TypeError");
     EXPECT_EQ(e.message(), "test0");
-    std::cout << e.traceback() << std::endl;
+    std::cout << e.TracebackMostRecentCallLast() << std::endl;
   }
 }
 

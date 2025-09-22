@@ -49,7 +49,7 @@ cdef class FieldSetter:
             &c_api_ret_code
         )
         # NOTE: logic is same as check_call
-        # directly inline here to simplify traceback
+        # directly inline here to simplify backtrace
         if c_api_ret_code == 0:
             return
         elif c_api_ret_code == -2:

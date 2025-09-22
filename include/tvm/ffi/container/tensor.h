@@ -392,7 +392,7 @@ class Tensor : public ObjectRef {
     int ret = (*allocator)(&prototype, &tensor, &error_context, ErrorContext::SetError);
     if (ret != 0) {
       throw ffi::Error(error_context.kind, error_context.message,
-                       TVMFFITraceback(__FILE__, __LINE__, __func__, 0));
+                       TVMFFIBacktrace(__FILE__, __LINE__, __func__, 0));
     }
     return Tensor(make_object<details::TensorObjFromDLPack<DLManagedTensorVersioned>>(tensor));
   }

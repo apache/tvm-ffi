@@ -122,12 +122,12 @@ class TestCxxClassDerivedDerived : public TestCxxClassDerived {
 };
 
 TVM_FFI_NO_INLINE void TestRaiseError(String kind, String msg) {
-  // keep name and no liner for testing traceback
-  throw ffi::Error(kind, msg, TVMFFITraceback(__FILE__, __LINE__, TVM_FFI_FUNC_SIG, 0));
+  // keep name and no liner for testing backtrace
+  throw ffi::Error(kind, msg, TVMFFIBacktrace(__FILE__, __LINE__, TVM_FFI_FUNC_SIG, 0));
 }
 
 TVM_FFI_NO_INLINE void TestApply(PackedArgs args, Any* ret) {
-  // keep name and no liner for testing traceback
+  // keep name and no liner for testing backtrace
   auto f = args[0].cast<Function>();
   f.CallPacked(args.Slice(1), ret);
 }

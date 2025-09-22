@@ -137,11 +137,17 @@ cdef extern from "tvm/ffi/c_api.h":
         const int64_t* data
         size_t size
 
+    ctypedef enum TVMFFIBacktraceUpdateMode:
+        kTVMFFIBacktraceUpdateModeReplace = 0
+        kTVMFFIBacktraceUpdateModeAppend = 1
+
     ctypedef struct TVMFFIErrorCell:
         TVMFFIByteArray kind
         TVMFFIByteArray message
-        TVMFFIByteArray traceback
-        void (*update_traceback)(TVMFFIObjectHandle self, const TVMFFIByteArray* traceback)
+        TVMFFIByteArray backtrace
+        void (*update_backtrace)(
+            TVMFFIObjectHandle self, const TVMFFIByteArray* backtrace, int32_t update_mode
+        )
 
     ctypedef int (*TVMFFISafeCallType)(
         void* handle, const TVMFFIAny* args, int32_t num_args,
@@ -207,15 +213,15 @@ cdef extern from "tvm/ffi/c_api.h":
     int TVMFFIFunctionGetGlobal(TVMFFIByteArray* name, TVMFFIObjectHandle* out) nogil
     void TVMFFIErrorMoveFromRaised(TVMFFIObjectHandle* result) nogil
     void TVMFFIErrorSetRaised(TVMFFIObjectHandle error) nogil
-    TVMFFIObjectHandle TVMFFIErrorCreate(TVMFFIByteArray* kind, TVMFFIByteArray* message,
-                                         TVMFFIByteArray* traceback) nogil
+    int TVMFFIErrorCreate(TVMFFIByteArray* kind, TVMFFIByteArray* message,
+                          TVMFFIByteArray* backtrace, TVMFFIObjectHandle* out) nogil
 
     int TVMFFITypeKeyToIndex(TVMFFIByteArray* type_key, int32_t* out_tindex) nogil
     int TVMFFIStringFromByteArray(TVMFFIByteArray* input_, TVMFFIAny* out) nogil
     int TVMFFIBytesFromByteArray(TVMFFIByteArray* input_, TVMFFIAny* out) nogil
     int TVMFFIDataTypeFromString(TVMFFIByteArray* str, DLDataType* out) nogil
     int TVMFFIDataTypeToString(const DLDataType* dtype, TVMFFIAny* out) nogil
-    const TVMFFIByteArray* TVMFFITraceback(const char* filename, int lineno,
+    const TVMFFIByteArray* TVMFFIBacktrace(const char* filename, int lineno,
                                            const char* func, int cross_ffi_boundary) nogil
     int TVMFFITensorFromDLPack(DLManagedTensor* src, int32_t require_alignment,
                                int32_t require_contiguous, TVMFFIObjectHandle* out) nogil

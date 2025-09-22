@@ -647,7 +647,7 @@ cdef class Function(Object):
             &c_dlpack_to_pyobject
         )
         # NOTE: logic is same as check_call
-        # directly inline here to simplify traceback
+        # directly inline here to simplify the resulting trace
         if c_api_ret_code == 0:
             return make_ret(result, c_dlpack_to_pyobject)
         elif c_api_ret_code == -2:

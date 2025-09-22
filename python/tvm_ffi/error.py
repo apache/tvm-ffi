@@ -26,13 +26,13 @@ from typing import Any, Optional
 from . import core
 
 
-def _parse_traceback(traceback: str) -> list[tuple[str, int, str]]:
-    """Parse the traceback string into a list of (filename, lineno, func).
+def _parse_backtrace(backtrace: str) -> list[tuple[str, int, str]]:
+    """Parse the backtrace string into a list of (filename, lineno, func).
 
     Parameters
     ----------
-    traceback : str
-        The traceback string.
+    backtrace : str
+        The backtrace string.
 
     Returns
     -------
@@ -42,7 +42,7 @@ def _parse_traceback(traceback: str) -> list[tuple[str, int, str]]:
     """
     pattern = r'File "(.+?)", line (\d+), in (.+)'
     result = []
-    for line in traceback.split("\n"):
+    for line in backtrace.split("\n"):
         match = re.match(pattern, line.strip())
         if match:
             try:
@@ -126,15 +126,15 @@ class TracebackManager:
 _TRACEBACK_MANAGER = TracebackManager()
 
 
-def _with_append_traceback(py_error: BaseException, traceback: str) -> BaseException:
-    """Append the traceback to the py_error and return it."""
+def _with_append_backtrace(py_error: BaseException, backtrace: str) -> BaseException:
+    """Append the backtrace to the py_error and return it."""
     tb = py_error.__traceback__
-    for filename, lineno, func in reversed(_parse_traceback(traceback)):
+    for filename, lineno, func in _parse_backtrace(backtrace):
         tb = _TRACEBACK_MANAGER.append_traceback(tb, filename, lineno, func)
     return py_error.with_traceback(tb)
 
 
-def _traceback_to_str(tb: Optional[types.TracebackType]) -> str:
+def _traceback_to_backtrace_str(tb: Optional[types.TracebackType]) -> str:
     """Convert the traceback to a string."""
     lines = []
     while tb is not None:
@@ -144,11 +144,13 @@ def _traceback_to_str(tb: Optional[types.TracebackType]) -> str:
         funcname = frame.f_code.co_name
         lines.append(f'  File "{filename}", line {lineno}, in {funcname}\n')
         tb = tb.tb_next
-    return "".join(lines)
+    # needs to reverse the order of the lines so backtrace stores in
+    # the reverse order of python traceback
+    return "".join(reversed(lines))
 
 
-core._WITH_APPEND_TRACEBACK = _with_append_traceback
-core._TRACEBACK_TO_STR = _traceback_to_str
+core._WITH_APPEND_BACKTRACE = _with_append_backtrace
+core._TRACEBACK_TO_BACKTRACE_STR = _traceback_to_backtrace_str
 
 
 def register_error(

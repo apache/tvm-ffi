@@ -19,9 +19,10 @@ set -euxo pipefail
 
 BUILD_TYPE=RelWithDebugInfo
 
-rm -rf build/CMakeCache.txt
+rm -rf build/cpp_tests/CMakeCache.txt
+mkdir -p build/cpp_tests
 
-cmake -G Ninja -S . -B build -DTVM_FFI_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
+cmake -G Ninja -S . -B build/cpp_tests -DTVM_FFI_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
 	-DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
-cmake --build build --clean-first --config ${BUILD_TYPE} --target tvm_ffi_tests
-GTEST_COLOR=1 ctest -V -C ${BUILD_TYPE} --test-dir build --output-on-failure
+cmake --build build/cpp_tests --clean-first --config ${BUILD_TYPE} --target tvm_ffi_tests
+GTEST_COLOR=1 ctest -V -C ${BUILD_TYPE} --test-dir build/cpp_tests --output-on-failure

@@ -1,3 +1,0 @@
-# Editable Git install with no remote (apache-tvm-ffi==0.1.0b3)
-numpy==2.2.6
-PyYAML==5.4.1

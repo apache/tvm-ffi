@@ -17,16 +17,16 @@
  * under the License.
  */
 /*!
- * \file traceback.cc
- * \brief Traceback implementation on non-windows platforms
- * \note We use the term "traceback" to be consistent with python naming convention.
+ * \file backtrace.cc
+ * \brief Backtrace implementation on non-windows platforms
+ * \note We use the term "backtrace" to be consistent with python naming convention.
  */
 #ifndef _MSC_VER
 
-#include "./traceback.h"
-
 #include <tvm/ffi/c_api.h>
 #include <tvm/ffi/error.h>
+
+#include "./backtrace_utils.h"
 
 #if TVM_FFI_USE_LIBBACKTRACE
 
@@ -86,7 +86,7 @@ void BacktraceSyminfoCallback(void* data, uintptr_t pc, const char* symname, uin
 
 int BacktraceFullCallback(void* data, uintptr_t pc, const char* filename, int lineno,
                           const char* symbol) {
-  auto stack_trace = reinterpret_cast<TracebackStorage*>(data);
+  auto stack_trace = reinterpret_cast<BacktraceStorage*>(data);
   std::string symbol_str = "<unknown>";
   if (symbol) {
     symbol_str = DemangleName(symbol);
@@ -95,7 +95,7 @@ int BacktraceFullCallback(void* data, uintptr_t pc, const char* filename, int li
     backtrace_syminfo(_bt_state, pc, BacktraceSyminfoCallback, BacktraceErrorCallback, &symbol_str);
   }
   symbol = symbol_str.data();
-  if (stack_trace->ExceedTracebackLimit()) {
+  if (stack_trace->ExceedBacktraceLimit()) {
     return 1;
   }
   if (stack_trace->stop_at_boundary && DetectFFIBoundary(filename, symbol)) {
@@ -116,21 +116,21 @@ int BacktraceFullCallback(void* data, uintptr_t pc, const char* filename, int li
 }  // namespace ffi
 }  // namespace tvm
 
-const TVMFFIByteArray* TVMFFITraceback(const char* filename, int lineno, const char* func,
+const TVMFFIByteArray* TVMFFIBacktrace(const char* filename, int lineno, const char* func,
                                        int cross_ffi_boundary) {
-  // We collapse the traceback into a single function
-  // to simplify the traceback detection handling (since we need to detect TVMFFITraceback)
-  static thread_local std::string traceback_str;
-  static thread_local TVMFFIByteArray traceback_array;
-  // pass in current line as here so last line of traceback is always accurate
-  tvm::ffi::TracebackStorage traceback;
-  traceback.stop_at_boundary = cross_ffi_boundary == 0;
+  // We collapse the backtrace into a single function
+  // to simplify the backtrace detection handling (since we need to detect TVMFFIBacktrace)
+  static thread_local std::string backtrace_str;
+  static thread_local TVMFFIByteArray backtrace_array;
+  // pass in current line as here so last line of backtrace is always accurate
+  tvm::ffi::BacktraceStorage backtrace;
+  backtrace.stop_at_boundary = cross_ffi_boundary == 0;
   if (filename != nullptr && func != nullptr) {
-    // need to skip TVMFFITraceback and the caller function
+    // need to skip TVMFFIBacktrace and the caller function
     // which is already included in filename and func
-    traceback.skip_frame_count = 2;
+    backtrace.skip_frame_count = 2;
     if (!tvm::ffi::ShouldExcludeFrame(filename, func)) {
-      traceback.Append(filename, func, lineno);
+      backtrace.Append(filename, func, lineno);
     }
   }
   // libbacktrace eats memory if run on multiple threads at the same time, so we guard against it
@@ -138,12 +138,12 @@ const TVMFFIByteArray* TVMFFITraceback(const char* filename, int lineno, const c
     static std::mutex m;
     std::lock_guard<std::mutex> lock(m);
     backtrace_full(tvm::ffi::_bt_state, 0, tvm::ffi::BacktraceFullCallback,
-                   tvm::ffi::BacktraceErrorCallback, &traceback);
+                   tvm::ffi::BacktraceErrorCallback, &backtrace);
   }
-  traceback_str = traceback.GetTraceback();
-  traceback_array.data = traceback_str.data();
-  traceback_array.size = traceback_str.size();
-  return &traceback_array;
+  backtrace_str = backtrace.GetBacktrace();
+  backtrace_array.data = backtrace_str.data();
+  backtrace_array.size = backtrace_str.size();
+  return &backtrace_array;
 }
 
 #if TVM_FFI_BACKTRACE_ON_SEGFAULT
@@ -151,9 +151,9 @@ void TVMFFISegFaultHandler(int sig) {
   // Technically we shouldn't do any allocation in a signal handler, but
   // Backtrace may allocate. What's the worst it could do? We're already
   // crashing.
-  const TVMFFIByteArray* traceback = TVMFFITraceback(nullptr, 0, nullptr, 1);
+  const TVMFFIByteArray* backtrace = TVMFFIBacktrace(nullptr, 0, nullptr, 1);
   std::cerr << "!!!!!!! Segfault encountered !!!!!!!\n"
-            << std::string(traceback->data, traceback->size) << std::endl;
+            << std::string(backtrace->data, backtrace->size) << std::endl;
   // Re-raise signal with default handler
   struct sigaction act;
   std::memset(&act, 0, sizeof(struct sigaction));
@@ -170,19 +170,19 @@ __attribute__((constructor)) void TVMFFIInstallSignalHandler(void) {
 #endif  // TVM_FFI_BACKTRACE_ON_SEGFAULT
 #else
 // fallback implementation simply print out the last trace
-const TVMFFIByteArray* TVMFFITraceback(const char* filename, int lineno, const char* func,
+const TVMFFIByteArray* TVMFFIBacktrace(const char* filename, int lineno, const char* func,
                                        int cross_ffi_boundary) {
-  static thread_local std::string traceback_str;
-  static thread_local TVMFFIByteArray traceback_array;
-  std::ostringstream traceback_stream;
+  static thread_local std::string backtrace_str;
+  static thread_local TVMFFIByteArray backtrace_array;
+  std::ostringstream backtrace_stream;
   if (filename != nullptr && func != nullptr) {
     // python style backtrace
-    traceback_stream << "  File \"" << filename << "\", line " << lineno << ", in " << func << '\n';
+    backtrace_stream << "  File \"" << filename << "\", line " << lineno << ", in " << func << '\n';
   }
-  traceback_str = traceback_stream.str();
-  traceback_array.data = traceback_str.data();
-  traceback_array.size = traceback_str.size();
-  return &traceback_array;
+  backtrace_str = backtrace_stream.str();
+  backtrace_array.data = backtrace_str.data();
+  backtrace_array.size = backtrace_str.size();
+  return &backtrace_array;
 }
 #endif  // TVM_FFI_USE_LIBBACKTRACE
 #endif  // _MSC_VER

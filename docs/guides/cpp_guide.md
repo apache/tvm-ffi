@@ -321,14 +321,15 @@ void ExampleErrorHandling() {
   } catch (const ffi::Error& e) {
     EXPECT_EQ(e.kind(), "TypeError");
     EXPECT_EQ(e.message(), "test0");
-    std::cout << e.traceback() << std::endl;
+    std::cout << e.TracebackMostRecentCallLast() << std::endl;
   }
 }
 ```
-The structured error class records kind, message and traceback that can be mapped to
-Pythonic style error types and tracebacks. The traceback follows the Python style,
-tvm-ffi will try to preserve the traceback when possible. In the above example,
-you can see the traceback output as
+The structured error class records kind, message and backtrace that can be mapped to
+Pythonic style error types and traces. The `TracebackMostRecentCallLast()` call reverses
+the backtrace and print out follows the Python style,
+tvm-ffi will try to preserve the backtrace when possible. In the above example,
+you can see the output as
 ```
 ... more lines omitted
 File "cpp/test_example.cc", line 106, in ExampleErrorHandling

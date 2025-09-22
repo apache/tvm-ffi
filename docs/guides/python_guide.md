@@ -190,7 +190,7 @@ translate the error to the corresponding error kind in Python
 import tvm_ffi
 
 # defined in C++
-# [](String kind, String msg) { throw Error(kind, msg, traceback); }
+# [](String kind, String msg) { throw Error(kind, msg, backtrace); }
 test_raise_error = tvm_ffi.get_global_func("testing.test_raise_error")
 
 test_raise_error("ValueError", "message")

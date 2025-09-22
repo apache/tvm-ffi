@@ -314,6 +314,22 @@ typedef struct {
 } TVMFFIShapeCell;
 
 /*!
+ * \brief Mode to update the backtrace of the error.
+ */
+#ifdef __cplusplus
+enum TVMFFIBacktraceUpdateMode : int32_t {
+#else
+typedef enum {
+#endif
+  kTVMFFIBacktraceUpdateModeReplace = 0,
+  kTVMFFIBacktraceUpdateModeAppend = 1,
+#ifdef __cplusplus
+};
+#else
+} TVMFFIBacktraceUpdateMode;
+#endif
+
+/*!
  * \brief Error cell used in error object following header.
  */
 typedef struct {
@@ -322,15 +338,25 @@ typedef struct {
   /*! \brief The message of the error. */
   TVMFFIByteArray message;
   /*!
-   * \brief The traceback of the error.
+   * \brief The backtrace of the error.
+   *
+   * The backtrace is in the order of recent call first from the top of the stack
+   * to the bottom of the stack. This order makes it helpful for appending
+   * the extra backtrace to the end as we go up when error is propagated.
+   *
+   * When printing out, we encourage reverse the order of lines to make it
+   * align with python style.
    */
-  TVMFFIByteArray traceback;
+  TVMFFIByteArray backtrace;
   /*!
-   * \brief Function handle to update the traceback of the error.
+   * \brief Function handle to update the backtrace of the error.
    * \param self The self object handle.
-   * \param traceback The traceback to update.
+   * \param backtrace The backtrace to update.
+   * \param update_mode The mode to update the backtrace,
+   *        can be either kTVMFFIBacktraceUpdateModeReplace, kTVMFFIBacktraceUpdateModeAppend.
    */
-  void (*update_traceback)(TVMFFIObjectHandle self, const TVMFFIByteArray* traceback);
+  void (*update_backtrace)(TVMFFIObjectHandle self, const TVMFFIByteArray* backtrace,
+                           int32_t update_mode);
 } TVMFFIErrorCell;
 
 /*!
@@ -504,14 +530,17 @@ TVM_FFI_DLL void TVMFFIErrorSetRaisedFromCStr(const char* kind, const char* mess
  * \brief Create an initial error object.
  * \param kind The kind of the error.
  * \param message The error message.
- * \param traceback The traceback of the error.
- * \return The created error object handle.
+ * \param backtrace The backtrace of the error.
+ * \param out The output error object handle.
+ * \return 0 on success, nonzero on failure(likely MemoryError)
+ *
  * \note This function is different from other functions as it is used in the error handling loop.
- * So we do not follow normal error handling patterns via returning an error code.
+ *       So we do not follow normal error handling patterns. When error happens it will not set
+ *       the error in TLS (since TLS error setting also involves creating an Error object).
+ *       Instead, caller should simply report MemoryError to the logger.
  */
-TVM_FFI_DLL TVMFFIObjectHandle TVMFFIErrorCreate(const TVMFFIByteArray* kind,
-                                                 const TVMFFIByteArray* message,
-                                                 const TVMFFIByteArray* traceback);
+TVM_FFI_DLL int TVMFFIErrorCreate(const TVMFFIByteArray* kind, const TVMFFIByteArray* message,
+                                  const TVMFFIByteArray* backtrace, TVMFFIObjectHandle* out);
 
 //------------------------------------------------------------
 // Section: DLPack support APIs
@@ -954,18 +983,26 @@ TVM_FFI_DLL const TVMFFITypeAttrColumn* TVMFFIGetTypeAttrColumn(const TVMFFIByte
 // so exception handling do not apply
 //------------------------------------------------------------
 /*!
- * \brief Get stack traceback in a string.
+ * \brief Get stack backtrace in a string.
+ *
+ * The backtrace is in the order of recent call first from the top of the stack
+ * to the bottom of the stack. This order makes it helpful for appending
+ * the extra backtrace as we unwind the stack.
+ *
+ * When printing out, we encourage reverse the order of lines to make it
+ * align with python style.
+ *
  * \param filename The current file name.
  * \param lineno The current line number
  * \param func The current function
- * \param cross_ffi_boundary Whether the traceback is crossing the ffi boundary
+ * \param cross_ffi_boundary Whether the backtrace is crossing the ffi boundary
  *                           or we should stop at the ffi boundary when detected
- * \return The traceback string
+ * \return The backtrace string
  *
  * \note filename/func can be nullptr, then this info is skipped, they are useful
  * for cases when debug symbols are not available.
  */
-TVM_FFI_DLL const TVMFFIByteArray* TVMFFITraceback(const char* filename, int lineno,
+TVM_FFI_DLL const TVMFFIByteArray* TVMFFIBacktrace(const char* filename, int lineno,
                                                    const char* func, int cross_ffi_boundary);
 
 /*!

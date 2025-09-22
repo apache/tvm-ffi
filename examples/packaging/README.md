@@ -53,7 +53,7 @@ across the language boundaries.
 python run_example.py raise_error
 ```
 
-When possible, tvm_ffi will try to preserve traceback across language boundary. You will see traceback like
+When possible, tvm_ffi will try to preserve backtrace across language boundary. You will see output like
 ```
 File "src/extension.cc", line 45, in void my_ffi_extension::RaiseError(tvm::ffi::String)
 ```

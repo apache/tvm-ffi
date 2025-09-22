@@ -27,7 +27,7 @@ using namespace tvm::ffi;
 
 void ThrowRuntimeError() { TVM_FFI_THROW(RuntimeError) << "test0"; }
 
-TEST(Error, Traceback) {
+TEST(Error, Backtrace) {
   EXPECT_THROW(
       {
         try {
@@ -45,7 +45,7 @@ TEST(Error, Traceback) {
       ::tvm::ffi::Error);
 }
 
-TEST(CheckError, Traceback) {
+TEST(CheckError, Backtrace) {
   EXPECT_THROW(
       {
         try {
@@ -66,5 +66,10 @@ TEST(Error, AnyConvert) {
   Optional<Error> opt_err = any.as<Error>();
   EXPECT_EQ(opt_err.value().kind(), "TypeError");
   EXPECT_EQ(opt_err.value().message(), "here");
+}
+
+TEST(Error, TracebackMostRecentCallLast) {
+  Error error("TypeError", "here", "test0\ntest1\ntest2\n");
+  EXPECT_EQ(error.TracebackMostRecentCallLast(), "test2\ntest1\ntest0\n");
 }
 }  // namespace

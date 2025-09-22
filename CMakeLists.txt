@@ -23,7 +23,7 @@ project(
 
 option(TVM_FFI_USE_LIBBACKTRACE "Enable libbacktrace" ON)
 option(TVM_FFI_USE_EXTRA_CXX_API "Enable extra CXX API in shared lib" ON)
-option(TVM_FFI_BACKTRACE_ON_SEGFAULT "Set signal handler to print traceback on segfault" ON)
+option(TVM_FFI_BACKTRACE_ON_SEGFAULT "Set signal handler to print backtrace on segfault" ON)
 
 if (TVM_FFI_USE_LIBBACKTRACE)
   include(${CMAKE_CURRENT_LIST_DIR}/cmake/Utils/AddLibbacktrace.cmake)
@@ -52,8 +52,8 @@ target_include_directories(
 ########## Target: `tvm_ffi_objs` ##########
 
 set(tvm_ffi_objs_sources
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/traceback.cc"
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/traceback_win.cc"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/backtrace.cc"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/backtrace_win.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/object.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/error.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/function.cc"
@@ -156,7 +156,7 @@ include(cmake/Utils/CxxWarning.cmake)
 include(cmake/Utils/Sanitizer.cmake)
 
 # remap the file name to the source directory so we can see the
-# exact file name in traceback relative to the project source root
+# exact file name in backtrace relative to the project source root
 tvm_ffi_add_prefix_map(tvm_ffi_objs ${CMAKE_SOURCE_DIR})
 
 ########## Adding cpp tests ##########
@@ -193,7 +193,7 @@ if (TVM_FFI_BUILD_PYTHON_MODULE)
     ${CMAKE_CURRENT_SOURCE_DIR}/python/tvm_ffi/cython/object.pxi
     ${CMAKE_CURRENT_SOURCE_DIR}/python/tvm_ffi/cython/string.pxi
   )
-  # set working directory to source so we can see the exact file name in traceback
+  # set working directory to source so we can see the exact file name in backtrace
   # relatived to the project source root
   add_custom_command(
       OUTPUT ${core_cpp}

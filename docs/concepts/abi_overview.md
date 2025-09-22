@@ -348,19 +348,34 @@ using `TVMFFIErrorMoveFromRaised` function.
 The ABI stores Error also as a specific Object,
 the overall error object is stored as follows
 ```c++
+/*!
+ * \brief Error cell used in error object following header.
+ */
 typedef struct {
   /*! \brief The kind of the error. */
   TVMFFIByteArray kind;
   /*! \brief The message of the error. */
   TVMFFIByteArray message;
-  /*! \brief The traceback of the error. */
-  TVMFFIByteArray traceback;
   /*!
-   * \brief Function handle to update the traceback of the error.
-   * \param self The self object handle.
-   * \param traceback The traceback to update.
+   * \brief The backtrace of the error.
+   *
+   * The backtrace is in the order of recent call first from the top of the stack
+   * to the bottom of the stack. This order makes it helpful for appending
+   * the extra backtrace to the end as we go up when error is propagated.
+   *
+   * When printing out, we encourage reverse the order of lines to make it
+   * align with python style.
    */
-  void (*update_traceback)(TVMFFIObjectHandle self, const TVMFFIByteArray* traceback);
+  TVMFFIByteArray backtrace;
+  /*!
+   * \brief Function handle to update the backtrace of the error.
+   * \param self The self object handle.
+   * \param backtrace The backtrace to update.
+   * \param update_mode The mode to update the backtrace,
+   *        can be either kTVMFFIBacktraceUpdateModeReplace, kTVMFFIBacktraceUpdateModeAppend.
+   */
+  void (*update_backtrace)(
+    TVMFFIObjectHandle self, const TVMFFIByteArray* backtrace, int32_t update_mode);
 } TVMFFIErrorCell;
 
 // error object
@@ -368,8 +383,8 @@ class ErrorObj : public ffi::Object, public TVMFFIErrorCell {
 };
 ```
 
-The error object stores kind, message and traceback as string. When possible,
-we store the traceback in the same format of python traceback (see an example as follows):
+The error object stores kind, message and backtrace as string. When possible,
+we store the backtrace in the same format of python-style (see an example as follows):
 ```
 File "src/extension.cc", line 45, in void my_ffi_extension::RaiseError(tvm::ffi::String)
 ```

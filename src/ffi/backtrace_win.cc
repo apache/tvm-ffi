@@ -17,9 +17,9 @@
  * under the License.
  */
 /*!
- * \file traceback_win.cc
- * \brief Traceback implementation on windows platform
- * \note We use the term "traceback" to be consistent with python naming convention.
+ * \file backtrace_win.cc
+ * \brief Backtrace implementation on windows platform
+ * \note We use the term "backtrace" to be consistent with python naming convention.
  */
 #ifdef _MSC_VER
 
@@ -34,21 +34,21 @@
 #include <iostream>
 #include <vector>
 
-#include "./traceback.h"
+#include "./backtrace_utils.h"
 
-const TVMFFIByteArray* TVMFFITraceback(const char* filename, int lineno, const char* func,
+const TVMFFIByteArray* TVMFFIBacktrace(const char* filename, int lineno, const char* func,
                                        int cross_ffi_boundary) {
-  static thread_local std::string traceback_str;
-  static thread_local TVMFFIByteArray traceback_array;
+  static thread_local std::string backtrace_str;
+  static thread_local TVMFFIByteArray backtrace_array;
 
-  // pass in current line as here so last line of traceback is always accurate
-  tvm::ffi::TracebackStorage traceback;
-  traceback.stop_at_boundary = cross_ffi_boundary == 0;
+  // pass in current line as here so last line of backtrace is always accurate
+  tvm::ffi::BacktraceStorage backtrace;
+  backtrace.stop_at_boundary = cross_ffi_boundary == 0;
   if (filename != nullptr && func != nullptr) {
-    // need to skip TVMFFITraceback and the caller function
+    // need to skip TVMFFIBacktrace and the caller function
     // which is already included in filename and func
-    traceback.skip_frame_count = 2;
-    traceback.Append(filename, func, lineno);
+    backtrace.skip_frame_count = 2;
+    backtrace.Append(filename, func, lineno);
   }
 
   HANDLE process = GetCurrentProcess();
@@ -80,7 +80,7 @@ const TVMFFIByteArray* TVMFFITraceback(const char* filename, int lineno, const c
   stack.AddrFrame.Mode = AddrModeFlat;
   stack.AddrStack.Mode = AddrModeFlat;
 
-  while (!traceback.ExceedTracebackLimit()) {
+  while (!backtrace.ExceedBacktraceLimit()) {
     if (!StackWalk64(machine_type, process, thread, &stack, &context, nullptr,
                      SymFunctionTableAccess64, SymGetModuleBase64, nullptr)) {
       break;
@@ -120,23 +120,23 @@ const TVMFFIByteArray* TVMFFITraceback(const char* filename, int lineno, const c
         symbol = symbol_info->Name;
       }
     }
-    if (traceback.stop_at_boundary && tvm::ffi::DetectFFIBoundary(filename, symbol)) {
+    if (backtrace.stop_at_boundary && tvm::ffi::DetectFFIBoundary(filename, symbol)) {
       break;
     }
     // skip extra frames
-    if (traceback.skip_frame_count > 0) {
-      traceback.skip_frame_count--;
+    if (backtrace.skip_frame_count > 0) {
+      backtrace.skip_frame_count--;
       continue;
     }
     if (tvm::ffi::ShouldExcludeFrame(filename, symbol)) {
       continue;
     }
-    traceback.Append(filename, symbol, lineno);
+    backtrace.Append(filename, symbol, lineno);
   }
   SymCleanup(process);
-  traceback_str = traceback.GetTraceback();
-  traceback_array.data = traceback_str.data();
-  traceback_array.size = traceback_str.size();
-  return &traceback_array;
+  backtrace_str = backtrace.GetBacktrace();
+  backtrace_array.data = backtrace_str.data();
+  backtrace_array.size = backtrace_str.size();
+  return &backtrace_array;
 }
 #endif  // _MSC_VER

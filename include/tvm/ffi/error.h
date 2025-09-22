@@ -29,12 +29,14 @@
 #include <tvm/ffi/memory.h>
 #include <tvm/ffi/object.h>
 
+#include <cstring>
 #include <iostream>
 #include <memory>
 #include <sstream>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 /*!
  * \brief Macro defines whether we enable libbacktrace
@@ -94,28 +96,37 @@ class ErrorObj : public Object, public TVMFFIErrorCell {
 namespace details {
 class ErrorObjFromStd : public ErrorObj {
  public:
-  ErrorObjFromStd(std::string kind, std::string message, std::string traceback)
-      : kind_data_(kind), message_data_(message), traceback_data_(traceback) {
+  ErrorObjFromStd(std::string kind, std::string message, std::string backtrace)
+      : kind_data_(kind), message_data_(message), backtrace_data_(backtrace) {
     this->kind = TVMFFIByteArray{kind_data_.data(), kind_data_.length()};
     this->message = TVMFFIByteArray{message_data_.data(), message_data_.length()};
-    this->traceback = TVMFFIByteArray{traceback_data_.data(), traceback_data_.length()};
-    this->update_traceback = UpdateTraceback;
+    this->backtrace = TVMFFIByteArray{backtrace_data_.data(), backtrace_data_.length()};
+    this->update_backtrace = UpdateBacktrace;
   }
 
  private:
   /*!
-   * \brief Update the traceback of the error object.
-   * \param traceback The traceback to update.
+   * \brief Update the backtrace of the error object.
+   * \param backtrace The backtrace to update.
+   * \param update_mode The mode to update the backtrace,
+   *        can be either kTVMFFIBacktraceUpdateModeReplace, kTVMFFIBacktraceUpdateModeAppend.
    */
-  static void UpdateTraceback(TVMFFIObjectHandle self, const TVMFFIByteArray* traceback_str) {
+  static void UpdateBacktrace(TVMFFIObjectHandle self, const TVMFFIByteArray* backtrace_str,
+                              int32_t update_mode) {
     ErrorObjFromStd* obj = static_cast<ErrorObjFromStd*>(self);
-    obj->traceback_data_ = std::string(traceback_str->data, traceback_str->size);
-    obj->traceback = TVMFFIByteArray{obj->traceback_data_.data(), obj->traceback_data_.length()};
+    if (update_mode == kTVMFFIBacktraceUpdateModeReplace) {
+      obj->backtrace_data_.resize(backtrace_str->size);
+      std::memcpy(obj->backtrace_data_.data(), backtrace_str->data, backtrace_str->size);
+      obj->backtrace = TVMFFIByteArray{obj->backtrace_data_.data(), obj->backtrace_data_.length()};
+    } else {
+      obj->backtrace_data_.append(backtrace_str->data, backtrace_str->size);
+      obj->backtrace = TVMFFIByteArray{obj->backtrace_data_.data(), obj->backtrace_data_.length()};
+    }
   }
 
   std::string kind_data_;
   std::string message_data_;
-  std::string traceback_data_;
+  std::string backtrace_data_;
 };
 }  // namespace details
 
@@ -129,20 +140,20 @@ class Error : public ObjectRef, public std::exception {
    * \brief Constructor
    * \param kind The kind of the error.
    * \param message The message of the error.
-   * \param traceback The traceback of the error.
+   * \param backtrace The backtrace of the error.
    */
-  Error(std::string kind, std::string message, std::string traceback) {
-    data_ = make_object<details::ErrorObjFromStd>(kind, message, traceback);
+  Error(std::string kind, std::string message, std::string backtrace) {
+    data_ = make_object<details::ErrorObjFromStd>(kind, message, backtrace);
   }
 
   /*!
    * \brief Constructor
    * \param kind The kind of the error.
    * \param message The message of the error.
-   * \param traceback The traceback of the error.
+   * \param backtrace The backtrace of the error.
    */
-  Error(std::string kind, std::string message, const TVMFFIByteArray* traceback)
-      : Error(kind, message, std::string(traceback->data, traceback->size)) {}
+  Error(std::string kind, std::string message, const TVMFFIByteArray* backtrace)
+      : Error(kind, message, std::string(backtrace->data, backtrace->size)) {}
 
   /*!
    * \brief Get the kind of the error object.
@@ -163,21 +174,52 @@ class Error : public ObjectRef, public std::exception {
   }
 
   /*!
-   * \brief Get the traceback of the error object.
-   * \return The traceback of the error object.
+   * \brief Get the backtrace of the error object.
+   * \return The backtrace of the error object.
+   * \note Consider use TracebackMostRecentCallLast for pythonic style traceback.
+   *
+   * \sa TracebackMostRecentCallLast
    */
-  std::string traceback() const {
+  std::string backtrace() const {
     ErrorObj* obj = static_cast<ErrorObj*>(data_.get());
-    return std::string(obj->traceback.data, obj->traceback.size);
+    return std::string(obj->backtrace.data, obj->backtrace.size);
   }
 
   /*!
-   * \brief Update the traceback of the error object.
-   * \param traceback_str The traceback to update.
+   * \brief Get the traceback in the order of most recent call last.
+   *
+   * \return The traceback of the error object.
    */
-  void UpdateTraceback(const TVMFFIByteArray* traceback_str) {
+  std::string TracebackMostRecentCallLast() const {
+    // add placeholder for the first line
+    std::vector<int64_t> line_breakers = {-1};
     ErrorObj* obj = static_cast<ErrorObj*>(data_.get());
-    obj->update_traceback(obj, traceback_str);
+    for (size_t i = 0; i < obj->backtrace.size; i++) {
+      if (obj->backtrace.data[i] == '\n') {
+        line_breakers.push_back(i);
+      }
+    }
+    std::string result;
+    result.reserve(obj->backtrace.size);
+    for (size_t i = line_breakers.size() - 1; i > 0; --i) {
+      int64_t line_start = line_breakers[i - 1] + 1;
+      int64_t line_end = line_breakers[i];
+      if (line_start == line_end) continue;
+      result.append(obj->backtrace.data + line_start, line_end - line_start);
+      result.append("\n");
+    }
+    return result;
+  }
+
+  /*!
+   * \brief Update the backtrace of the error object.
+   * \param backtrace_str The backtrace to update.
+   * \param update_mode The mode to update the backtrace,
+   *        can be either kTVMFFIBacktraceUpdateModeReplace, kTVMFFIBacktraceUpdateModeAppend.
+   */
+  void UpdateBacktrace(const TVMFFIByteArray* backtrace_str, int32_t update_mode) {
+    ErrorObj* obj = static_cast<ErrorObj*>(data_.get());
+    obj->update_backtrace(obj, backtrace_str, update_mode);
   }
 
   /*!
@@ -188,9 +230,8 @@ class Error : public ObjectRef, public std::exception {
     thread_local std::string what_data;
     ErrorObj* obj = static_cast<ErrorObj*>(data_.get());
     what_data = (std::string("Traceback (most recent call last):\n") +
-                 std::string(obj->traceback.data, obj->traceback.size) +
-                 std::string(obj->kind.data, obj->kind.size) + std::string(": ") +
-                 std::string(obj->message.data, obj->message.size) + '\n');
+                 TracebackMostRecentCallLast() + std::string(obj->kind.data, obj->kind.size) +
+                 std::string(": ") + std::string(obj->message.data, obj->message.size) + '\n');
     return what_data.c_str();
   }
 
@@ -203,11 +244,11 @@ namespace details {
 
 class ErrorBuilder {
  public:
-  explicit ErrorBuilder(std::string kind, std::string traceback, bool log_before_throw)
-      : kind_(kind), traceback_(traceback), log_before_throw_(log_before_throw) {}
+  explicit ErrorBuilder(std::string kind, std::string backtrace, bool log_before_throw)
+      : kind_(kind), backtrace_(backtrace), log_before_throw_(log_before_throw) {}
 
-  explicit ErrorBuilder(std::string kind, const TVMFFIByteArray* traceback, bool log_before_throw)
-      : ErrorBuilder(kind, std::string(traceback->data, traceback->size), log_before_throw) {}
+  explicit ErrorBuilder(std::string kind, const TVMFFIByteArray* backtrace, bool log_before_throw)
+      : ErrorBuilder(kind, std::string(backtrace->data, backtrace->size), log_before_throw) {}
 
 // MSVC disable warning in error builder as it is exepected
 #ifdef _MSC_VER
@@ -216,7 +257,7 @@ class ErrorBuilder {
 #endif
   // avoid inline to reduce binary size, error throw path do not need to be fast
   [[noreturn]] ~ErrorBuilder() noexcept(false) {
-    ::tvm::ffi::Error error(std::move(kind_), stream_.str(), std::move(traceback_));
+    ::tvm::ffi::Error error(std::move(kind_), stream_.str(), std::move(backtrace_));
     if (log_before_throw_) {
       std::cerr << error.what();
     }
@@ -231,14 +272,14 @@ class ErrorBuilder {
  protected:
   std::string kind_;
   std::ostringstream stream_;
-  std::string traceback_;
+  std::string backtrace_;
   bool log_before_throw_;
 };
 
 }  // namespace details
 
 /*!
- * \brief Helper macro to throw an error with traceback and message
+ * \brief Helper macro to throw an error with backtrace and message
  *
  * \code
  *
@@ -250,7 +291,7 @@ class ErrorBuilder {
  */
 #define TVM_FFI_THROW(ErrorKind)                                                              \
   ::tvm::ffi::details::ErrorBuilder(#ErrorKind,                                               \
-                                    TVMFFITraceback(__FILE__, __LINE__, TVM_FFI_FUNC_SIG, 0), \
+                                    TVMFFIBacktrace(__FILE__, __LINE__, TVM_FFI_FUNC_SIG, 0), \
                                     TVM_FFI_ALWAYS_LOG_BEFORE_THROW)                          \
       .stream()
 
@@ -263,7 +304,7 @@ class ErrorBuilder {
  */
 #define TVM_FFI_LOG_AND_THROW(ErrorKind)                                          \
   ::tvm::ffi::details::ErrorBuilder(                                              \
-      #ErrorKind, TVMFFITraceback(__FILE__, __LINE__, TVM_FFI_FUNC_SIG, 0), true) \
+      #ErrorKind, TVMFFIBacktrace(__FILE__, __LINE__, TVM_FFI_FUNC_SIG, 0), true) \
       .stream()
 
 // Glog style checks with TVM_FFI prefix
