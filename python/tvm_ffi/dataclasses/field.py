@@ -18,8 +18,10 @@
 
 from __future__ import annotations
 
-from dataclasses import MISSING
-from typing import Any, Callable
+from dataclasses import _MISSING_TYPE, MISSING
+from typing import Any, Callable, TypeVar, cast
+
+_FieldValue = TypeVar("_FieldValue")
 
 
 class Field:
@@ -37,13 +39,22 @@ class Field:
 
     __slots__ = ("default_factory", "name")
 
-    def __init__(self, *, name: str | None = None, default_factory: Callable[[], Any]) -> None:
+    def __init__(
+        self,
+        *,
+        name: str | None = None,
+        default_factory: Callable[[], _FieldValue] | _MISSING_TYPE = MISSING,
+    ) -> None:
         """Do not call directly; use :func:`field` instead."""
         self.name = name
         self.default_factory = default_factory
 
 
-def field(*, default: Any = MISSING, default_factory: Any = MISSING) -> Field:
+def field(
+    *,
+    default: _FieldValue | _MISSING_TYPE = MISSING,  # type: ignore[assignment]
+    default_factory: Callable[[], _FieldValue] | _MISSING_TYPE = MISSING,  # type: ignore[assignment]
+) -> _FieldValue:
     """(Experimental) Declare a dataclass-style field on a :func:`c_class` proxy.
 
     Use this helper exactly like :func:`dataclasses.field` when defining the
@@ -86,7 +97,8 @@ def field(*, default: Any = MISSING, default_factory: Any = MISSING) -> Field:
         raise ValueError("Cannot specify both `default` and `default_factory`")
     if default is not MISSING:
         default_factory = _make_default_factory(default)
-    return Field(default_factory=default_factory)
+    ret = Field(default_factory=default_factory)
+    return cast(_FieldValue, ret)
 
 
 def _make_default_factory(value: Any) -> Callable[[], Any]:

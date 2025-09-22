@@ -103,5 +103,5 @@ class _TestCxxClassDerived(_TestCxxClassBase):
 
 @c_class("testing.TestCxxClassDerivedDerived")
 class _TestCxxClassDerivedDerived(_TestCxxClassDerived):
-    v_str: str = field(default_factory=lambda: "default")  # type: ignore[assignment]
-    v_bool: bool  # type: ignore[misc]
+    v_str: str = field(default_factory=lambda: "default")
+    v_bool: bool  # type: ignore[misc]  # Suppress: Attributes without a default cannot follow attributes with one
