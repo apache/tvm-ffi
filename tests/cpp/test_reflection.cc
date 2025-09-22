@@ -25,6 +25,7 @@
 #include <tvm/ffi/reflection/creator.h>
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/ffi/string.h>
+#include <tvm/ffi/type_parser.h>
 
 #include "./testing_object.h"
 
@@ -99,12 +100,16 @@ TEST(Reflection, FieldInfo) {
   EXPECT_FALSE(info_int->flags & kTVMFFIFieldFlagBitMaskHasDefault);
   EXPECT_FALSE(info_int->flags & kTVMFFIFieldFlagBitMaskWritable);
   EXPECT_EQ(Bytes(info_int->doc).operator std::string(), "");
+  EXPECT_EQ(std::string(info_int->type_schema.data, info_int->type_schema.size),
+            ParseType<int64_t>());
 
   const TVMFFIFieldInfo* info_float = reflection::GetFieldInfo("test.Float", "value");
   EXPECT_EQ(info_float->default_value.v_float64, 10.0);
   EXPECT_TRUE(info_float->flags & kTVMFFIFieldFlagBitMaskHasDefault);
   EXPECT_FALSE(info_float->flags & kTVMFFIFieldFlagBitMaskWritable);
   EXPECT_EQ(Bytes(info_float->doc).operator std::string(), "float value field");
+  EXPECT_EQ(std::string(info_float->type_schema.data, info_float->type_schema.size),
+            ParseType<double>());
 
   const TVMFFIFieldInfo* info_prim_expr_dtype = reflection::GetFieldInfo("test.PrimExpr", "dtype");
   AnyView default_value = AnyView::CopyFromTVMFFIAny(info_prim_expr_dtype->default_value);
@@ -112,20 +117,35 @@ TEST(Reflection, FieldInfo) {
   EXPECT_TRUE(info_prim_expr_dtype->flags & kTVMFFIFieldFlagBitMaskHasDefault);
   EXPECT_TRUE(info_prim_expr_dtype->flags & kTVMFFIFieldFlagBitMaskWritable);
   EXPECT_EQ(Bytes(info_prim_expr_dtype->doc).operator std::string(), "dtype field");
+  EXPECT_EQ(
+      std::string(info_prim_expr_dtype->type_schema.data, info_prim_expr_dtype->type_schema.size),
+      ParseType<std::string>());
 }
 
 TEST(Reflection, MethodInfo) {
   const TVMFFIMethodInfo* info_int_static_add = reflection::GetMethodInfo("test.Int", "static_add");
   EXPECT_TRUE(info_int_static_add->flags & kTVMFFIFieldFlagBitMaskIsStaticMethod);
   EXPECT_EQ(Bytes(info_int_static_add->doc).operator std::string(), "static add method");
+  const std::string& static_add_schema = GetFunctionTypeSchemaString<TInt, TInt, TInt>();
+  EXPECT_EQ(
+      std::string(info_int_static_add->type_schema.data, info_int_static_add->type_schema.size),
+      static_add_schema);
 
   const TVMFFIMethodInfo* info_float_add = reflection::GetMethodInfo("test.Float", "add");
   EXPECT_FALSE(info_float_add->flags & kTVMFFIFieldFlagBitMaskIsStaticMethod);
   EXPECT_EQ(Bytes(info_float_add->doc).operator std::string(), "add method");
+  const std::string& float_add_schema =
+      GetFunctionTypeSchemaString<double, const TFloatObj*, double>();
+  EXPECT_EQ(std::string(info_float_add->type_schema.data, info_float_add->type_schema.size),
+            float_add_schema);
 
   const TVMFFIMethodInfo* info_float_sub = reflection::GetMethodInfo("test.Float", "sub");
   EXPECT_FALSE(info_float_sub->flags & kTVMFFIFieldFlagBitMaskIsStaticMethod);
   EXPECT_EQ(Bytes(info_float_sub->doc).operator std::string(), "");
+  const std::string& float_sub_schema =
+      GetFunctionTypeSchemaString<double, const TFloatObj*, double>();
+  EXPECT_EQ(std::string(info_float_sub->type_schema.data, info_float_sub->type_schema.size),
+            float_sub_schema);
 }
 
 TEST(Reflection, CallMethod) {
