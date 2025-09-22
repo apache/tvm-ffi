@@ -233,7 +233,7 @@ typedef struct {
   uint32_t weak_ref_count;
   /*! \brief Strong reference counter of the object. */
   uint64_t strong_ref_count;
-#if !defined(TVM_FFI_DOCUMENTATION)
+#if !defined(TVM_FFI_DOXYGEN_MODE)
   union {
 #endif
     /*!
@@ -248,7 +248,7 @@ typedef struct {
      * \note This helps us to ensure cross platform compatibility.
      */
     int64_t __ensure_align;
-#if !defined(TVM_FFI_DOCUMENTATION)
+#if !defined(TVM_FFI_DOXYGEN_MODE)
   };
 #endif
 } TVMFFIObject;
@@ -265,7 +265,7 @@ typedef struct {
    * \note The type index of Object and Any are shared in FFI.
    */
   int32_t type_index;
-#if !defined(TVM_FFI_DOCUMENTATION)
+#if !defined(TVM_FFI_DOXYGEN_MODE)
   union {  // 4 bytes
 #endif
     /*! \brief padding, must set to zero for values other than small string. */
@@ -277,10 +277,10 @@ typedef struct {
      * when accessing the small str content.
      */
     uint32_t small_str_len;
-#if !defined(TVM_FFI_DOCUMENTATION)
+#if !defined(TVM_FFI_DOXYGEN_MODE)
   };
 #endif
-#if !defined(TVM_FFI_DOCUMENTATION)
+#if !defined(TVM_FFI_DOXYGEN_MODE)
   union {  // 8 bytes
 #endif
     /*! \brief integers */
@@ -301,7 +301,7 @@ typedef struct {
     char v_bytes[8];
     /*! \brief uint64 repr mainly used for hashing */
     uint64_t v_uint64;
-#if !defined(TVM_FFI_DOCUMENTATION)
+#if !defined(TVM_FFI_DOXYGEN_MODE)
   };
 #endif
 } TVMFFIAny;
