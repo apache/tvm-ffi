@@ -269,15 +269,17 @@ cdef inline object make_ret_object(TVMFFIAny result):
     tindex = result.type_index
 
     if tindex < len(TYPE_INDEX_TO_INFO):
-        cls = TYPE_INDEX_TO_INFO[tindex].type_cls
-        if cls is not None:
-            if issubclass(cls, PyNativeObject):
-                obj = Object.__new__(Object)
+        type_info = TYPE_INDEX_TO_INFO[tindex]
+        if type_info is not None:
+            cls = type_info.type_cls
+            if cls is not None:
+                if issubclass(cls, PyNativeObject):
+                    obj = Object.__new__(Object)
+                    (<Object>obj).chandle = result.v_obj
+                    return cls.__from_tvm_ffi_object__(cls, obj)
+                obj = cls.__new__(cls)
                 (<Object>obj).chandle = result.v_obj
-                return cls.__from_tvm_ffi_object__(cls, obj)
-            obj = cls.__new__(cls)
-            (<Object>obj).chandle = result.v_obj
-            return obj
+                return obj
 
     # object is not found in registered entry
     # in this case we need to report an warning

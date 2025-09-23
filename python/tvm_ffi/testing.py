@@ -24,7 +24,7 @@ from . import _ffi_api
 from .container import Array, Map
 from .core import Object
 from .dataclasses import c_class, field
-from .registry import register_object
+from .registry import get_global_func, register_object
 
 
 @register_object("testing.TestObjectBase")
@@ -82,6 +82,11 @@ def create_object(type_key: str, **kwargs: Any) -> Object:
         args.append(k)
         args.append(v)
     return _ffi_api.MakeObjectFromPackedArgs(*args)
+
+
+def make_unregistered_object() -> Object:
+    """Return an object whose type is not registered on the Python side."""
+    return get_global_func("testing.make_unregistered_object")()
 
 
 @c_class("testing.TestCxxClassBase")

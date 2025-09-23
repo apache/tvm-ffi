@@ -121,6 +121,15 @@ class TestCxxClassDerivedDerived : public TestCxxClassDerived {
                               TestCxxClassDerived);
 };
 
+class TestUnregisteredObject : public Object {
+ public:
+  int64_t value;
+
+  explicit TestUnregisteredObject(int64_t value) : value(value) {}
+
+  TVM_FFI_DECLARE_OBJECT_INFO("testing.TestUnregisteredObject", TestUnregisteredObject, Object);
+};
+
 TVM_FFI_NO_INLINE void TestRaiseError(String kind, String msg) {
   // keep name and no liner for testing backtrace
   throw ffi::Error(kind, msg, TVMFFIBacktrace(__FILE__, __LINE__, TVM_FFI_FUNC_SIG, 0));
@@ -176,7 +185,9 @@ TVM_FFI_STATIC_INIT_BLOCK() {
              }
              std::cout << "Function finished without catching signal" << std::endl;
            })
-      .def("testing.object_use_count", [](const Object* obj) { return obj->use_count(); });
+      .def("testing.object_use_count", [](const Object* obj) { return obj->use_count(); })
+      .def("testing.make_unregistered_object",
+           []() { return ObjectRef(make_object<TestUnregisteredObject>(42)); });
 }
 
 }  // namespace ffi

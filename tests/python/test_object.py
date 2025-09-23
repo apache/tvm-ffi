@@ -100,3 +100,15 @@ def test_opaque_object() -> None:
     assert sys.getrefcount(obj0) == 3
     obj0_cpy = None
     assert sys.getrefcount(obj0) == 2
+
+
+def test_unregistered_object_fallback() -> None:
+    with pytest.warns(
+        UserWarning,
+        match=(
+            r"Returning type `testing\.TestUnregisteredObject` "
+            r"which is not registered via register_object, fallback to Object"
+        ),
+    ):
+        obj = tvm_ffi.testing.make_unregistered_object()
+    assert type(obj) is tvm_ffi.Object
