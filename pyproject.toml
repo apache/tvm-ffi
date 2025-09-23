@@ -218,6 +218,7 @@ archs = ["AMD64"]
 
 [tool.mypy]
 python_version = "3.9"
+show_error_codes = true
 mypy_path = ["python", "examples", "tests/python"]
 files = ["python/tvm_ffi", "examples", "tests/python"]
 namespace_packages = true
