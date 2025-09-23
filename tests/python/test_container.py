@@ -28,6 +28,7 @@ def test_array() -> None:
     assert len(a) == 3
     assert a[-1] == 3
     a_slice = a[-3:-1]
+    assert isinstance(a_slice, list)  # TVM array slicing returns a list[T] instead of Array[T]
     assert (a_slice[0], a_slice[1]) == (1, 2)
 
 
