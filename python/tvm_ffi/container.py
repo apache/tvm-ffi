@@ -117,9 +117,9 @@ class Array(core.Object, Sequence[T]):
     def __getitem__(self, idx: SupportsIndex, /) -> T: ...
 
     @overload
-    def __getitem__(self, idx: slice, /) -> Array[T] | list[T]: ...
+    def __getitem__(self, idx: slice, /) -> list[T]: ...
 
-    def __getitem__(self, idx: SupportsIndex | slice, /) -> T | Array[T] | list[T]:
+    def __getitem__(self, idx: SupportsIndex | slice, /) -> T | list[T]:
         """Return one element or a new :class:`Array` for a slice."""
         length = len(self)
         result = getitem_helper(self, _ffi_api.ArrayGetItem, length, idx)
