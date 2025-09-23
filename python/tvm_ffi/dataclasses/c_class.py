@@ -27,16 +27,16 @@ from collections.abc import Callable
 from dataclasses import InitVar
 from typing import ClassVar, TypeVar, get_origin, get_type_hints
 
-from typing_extensions import dataclass_transform  # type: ignore[attr-defined]
+from typing_extensions import dataclass_transform
 
-from ..core import TypeField, TypeInfo
+from ..core import TypeField, TypeInfo, _lookup_or_register_type_info_from_type_key, _set_type_cls
 from . import _utils
-from .field import Field, field
+from .field import field
 
 _InputClsType = TypeVar("_InputClsType")
 
 
-@dataclass_transform(field_specifiers=(field, Field))
+@dataclass_transform(field_specifiers=(field,))
 def c_class(
     type_key: str, init: bool = True
 ) -> Callable[[type[_InputClsType]], type[_InputClsType]]:
@@ -116,9 +116,8 @@ def c_class(
         nonlocal init
         init = init and "__init__" not in super_type_cls.__dict__
         # Step 1. Retrieve `type_info` from registry
-        type_info: TypeInfo = _utils._lookup_type_info_from_type_key(type_key)
-        assert type_info.parent_type_info is None, f"Already registered type: {type_key}"
-        type_info.parent_type_info = _utils.get_parent_type_info(super_type_cls)
+        type_info: TypeInfo = _lookup_or_register_type_info_from_type_key(type_key)
+        assert type_info.parent_type_info is not None
         # Step 2. Reflect all the fields of the type
         type_info.fields = _inspect_c_class_fields(super_type_cls, type_info)
         for type_field in type_info.fields:
@@ -130,7 +129,7 @@ def c_class(
             cls=super_type_cls,
             methods={"__init__": fn_init},
         )
-        type_info.type_cls = type_cls
+        _set_type_cls(type_info, type_cls)
         return type_cls
 
     return decorator

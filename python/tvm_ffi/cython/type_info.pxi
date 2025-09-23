@@ -16,6 +16,7 @@
 # under the License.
 import dataclasses
 from typing import Optional, Any
+from io import StringIO
 
 
 cdef class FieldGetter:
@@ -75,20 +76,20 @@ class TypeField:
         assert self.setter is not None
         assert self.getter is not None
 
-    def as_property(self, cls: type):
+    def as_property(self, object cls):
         """Create a Python ``property`` object for this field on ``cls``."""
-        name = self.name
-        fget = self.getter
-        fset = self.setter
+        cdef str name = self.name
+        cdef str doc = self.doc or f"{cls.__module__}.{cls.__qualname__}.{name}"
+        cdef FieldGetter fget = self.getter
+        cdef FieldSetter fset = self.setter
         fget.__name__ = fset.__name__ = name
         fget.__module__ = fset.__module__ = cls.__module__
-        fget.__qualname__ = fset.__qualname__ = f"{cls.__qualname__}.{name}"  # type: ignore[attr-defined]
-        fget.__doc__ = fset.__doc__ = f"Property `{name}` of class `{cls.__qualname__}`"  # type: ignore[attr-defined]
-
+        fget.__qualname__ = fset.__qualname__ = f"{cls.__qualname__}.{name}"
+        fget.__doc__ = fset.__doc__ = f"Property `{name}` of class `{cls.__qualname__}`"
         return property(
-            fget=fget if self.getter is not None else None,
-            fset=fset if (not self.frozen) and self.setter is not None else None,
-            doc=f"{cls.__module__}.{cls.__qualname__}.{name}",
+            fget=fget,
+            fset=fset if (not self.frozen) else None,
+            doc=doc,
         )
 
 
@@ -101,6 +102,21 @@ class TypeMethod:
     func: object
     is_static: bool
 
+    def as_callable(self, object cls):
+        """Create a Python method attribute for this method on ``cls``."""
+        cdef str name = self.name
+        cdef str doc = self.doc or f"Method `{name}` of class `{cls.__qualname__}`"
+        cdef object func = self.func
+        if not self.is_static:
+            func = _member_method_wrapper(func)
+        func.__module__ = cls.__module__
+        func.__name__ = name
+        func.__qualname__ = f"{cls.__qualname__}.{name}"
+        func.__doc__ = doc
+        if self.is_static:
+            func = staticmethod(func)
+        return func
+
 
 @dataclasses.dataclass(eq=False)
 class TypeInfo:
@@ -109,6 +125,24 @@ class TypeInfo:
     type_cls: Optional[type]
     type_index: int
     type_key: str
+    type_ancestors: list[int]
     fields: list[TypeField]
     methods: list[TypeMethod]
     parent_type_info: Optional[TypeInfo]
+
+    def __post_init__(self):
+        cdef int parent_type_index
+        cdef str parent_type_key
+        if not self.type_ancestors:
+            return
+        parent_type_index = self.type_ancestors[-1]
+        parent_type_key = _type_index_to_key(parent_type_index)
+        # ensure parent is registered
+        self.parent_type_info = _lookup_or_register_type_info_from_type_key(parent_type_key)
+
+
+def _member_method_wrapper(method_func: Callable[..., Any]) -> Callable[..., Any]:
+    def wrapper(self: Any, *args: Any) -> Any:
+        return method_func(self, *args)
+
+    return wrapper

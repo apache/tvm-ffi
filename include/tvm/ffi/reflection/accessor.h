@@ -216,7 +216,7 @@ inline void ForEachFieldInfo(const TypeInfo* type_info, Callback callback) {
   // iterate through acenstors in parent to child order
   // skip the first one since it is always the root object
   for (int i = 1; i < type_info->type_depth; ++i) {
-    const TVMFFITypeInfo* parent_info = type_info->type_acenstors[i];
+    const TVMFFITypeInfo* parent_info = type_info->type_ancestors[i];
     for (int j = 0; j < parent_info->num_fields; ++j) {
       callback(parent_info->fields + j);
     }
@@ -243,7 +243,7 @@ inline bool ForEachFieldInfoWithEarlyStop(const TypeInfo* type_info,
   // iterate through acenstors in parent to child order
   // skip the first one since it is always the root object
   for (int i = 1; i < type_info->type_depth; ++i) {
-    const TVMFFITypeInfo* parent_info = type_info->type_acenstors[i];
+    const TVMFFITypeInfo* parent_info = type_info->type_ancestors[i];
     for (int j = 0; j < parent_info->num_fields; ++j) {
       if (callback_with_early_stop(parent_info->fields + j)) return true;
     }

@@ -19,6 +19,7 @@ from typing import Any
 
 import pytest
 import tvm_ffi
+from tvm_ffi.core import TypeInfo
 
 
 def test_make_object() -> None:
@@ -103,12 +104,22 @@ def test_opaque_object() -> None:
 
 
 def test_unregistered_object_fallback() -> None:
-    with pytest.warns(
-        UserWarning,
-        match=(
-            r"Returning type `testing\.TestUnregisteredObject` "
-            r"which is not registered via register_object, fallback to Object"
-        ),
-    ):
+    def _check_type(x: Any) -> None:
+        type_info: TypeInfo = type(x).__tvm_ffi_type_info__  # type: ignore[attr-defined]
+        assert type_info.type_key == "testing.TestUnregisteredObject"
+        assert x.v1 == 41
+        assert x.v2 == 42
+        assert x.get_v1_plus_one() == 42  # type: ignore[attr-defined]
+        assert x.get_v2_plus_two() == 44  # type: ignore[attr-defined]
+        assert type(x).__name__ == "TestUnregisteredObject"
+        assert type(x).__module__ == "testing"
+        assert type(x).__qualname__ == "testing.TestUnregisteredObject"
+        assert "Auto-generated fallback class" in type(x).__doc__  # type: ignore[operator]
+        assert "Get (v1 + 1) from TestUnregisteredBaseObject" in type(x).get_v1_plus_one.__doc__  # type: ignore[attr-defined]
+        assert "Get (v2 + 2) from TestUnregisteredObject" in type(x).get_v2_plus_two.__doc__  # type: ignore[attr-defined]
+
+    obj = tvm_ffi.testing.make_unregistered_object()
+    _check_type(obj)
+    for _ in range(5):
         obj = tvm_ffi.testing.make_unregistered_object()
-    assert type(obj) is tvm_ffi.Object
+        _check_type(obj)

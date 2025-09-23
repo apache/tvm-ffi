@@ -90,7 +90,7 @@ void MakeObjectFromPackedArgs(ffi::PackedArgs args, Any* ret) {
   // iterate through acenstors in parent to child order
   // skip the first one since it is always the root object
   for (int i = 1; i < type_info->type_depth; ++i) {
-    update_fields(type_info->type_acenstors[i]);
+    update_fields(type_info->type_ancestors[i]);
   }
   update_fields(type_info);
 

@@ -191,7 +191,7 @@ cdef extern from "tvm/ffi/c_api.h":
         int32_t type_index
         int32_t type_depth
         TVMFFIByteArray type_key
-        const int32_t* type_acenstors
+        const TVMFFITypeInfo** type_ancestors
         uint64_t type_key_hash
         int32_t num_fields
         int32_t num_methods

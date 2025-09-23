@@ -15,6 +15,8 @@
 # specific language governing permissions and limitations
 # under the License.
 import warnings
+from typing import Any
+
 
 _CLASS_OBJECT = None
 
@@ -261,29 +263,66 @@ cdef inline object make_ret_opaque_object(TVMFFIAny result):
     (<Object>obj).chandle = result.v_obj
     return obj.pyobject()
 
+cdef inline object make_fallback_cls_for_type_index(int32_t type_index):
+    cdef str type_key = _type_index_to_key(type_index)
+    cdef object type_info = _lookup_or_register_type_info_from_type_key(type_key)
+    cdef object parent_type_info = type_info.parent_type_info
+    assert type_info.type_cls is None
+
+    # Ensure parent classes are created first
+    assert parent_type_info is not None
+    if parent_type_info.type_cls is None:   # recursively create parent class first
+        make_fallback_cls_for_type_index(parent_type_info.type_index)
+    assert parent_type_info.type_cls is not None
+
+    # Create `type_info.type_cls` now
+    class cls(parent_type_info.type_cls):
+        pass
+    attrs = dict(cls.__dict__)
+    attrs.pop("__dict__", None)
+    attrs.pop("__weakref__", None)
+    attrs.update({
+        "__slots__": (),
+        "__tvm_ffi_type_info__": type_info,
+        "__name__": type_key.split(".")[-1],
+        "__qualname__": type_key,
+        "__module__": ".".join(type_key.split(".")[:-1]),
+        "__doc__": f"Auto-generated fallback class for {type_key}.\n"
+                   "This class is generated because the class is not registered.\n"
+                   "Please do not use this class directly, instead register the class\n"
+                   "using `register_object` decorator.",
+    })
+    for field in type_info.fields:
+        attrs[field.name] = field.as_property(cls)
+    for method in type_info.methods:
+        name = method.name
+        if name == "__ffi_init__":
+            name = "__c_ffi_init__"
+        attrs[name] = method.as_callable(cls)
+    for name, val in attrs.items():
+        setattr(cls, name, val)
+    # Update the registry
+    type_info.type_cls = cls
+    _update_registry(type_index, type_key, type_info, cls)
+    return cls
+
 
 cdef inline object make_ret_object(TVMFFIAny result):
-    global TYPE_INDEX_TO_INFO
-    cdef int32_t tindex
-    cdef object cls
-    tindex = result.type_index
+    cdef int32_t type_index
+    cdef object cls, obj
+    type_index = result.type_index
 
-    if tindex < len(TYPE_INDEX_TO_CLS):
-        cls = TYPE_INDEX_TO_CLS[tindex]
-        if cls is not None:
-            if issubclass(cls, PyNativeObject):
-                obj = Object.__new__(Object)
-                (<Object>obj).chandle = result.v_obj
-                return cls.__from_tvm_ffi_object__(cls, obj)
-            obj = cls.__new__(cls)
+    if type_index < len(TYPE_INDEX_TO_CLS) and (cls := TYPE_INDEX_TO_CLS[type_index]) is not None:
+        if issubclass(cls, PyNativeObject):
+            obj = Object.__new__(Object)
             (<Object>obj).chandle = result.v_obj
-            return obj
-
-    # object is not found in registered entry
-    # in this case we need to report an warning
-    type_key = _type_index_to_key(tindex)
-    warnings.warn(f"Returning type `{type_key}` which is not registered via register_object, fallback to Object")
-    obj = _CLASS_OBJECT.__new__(_CLASS_OBJECT)
+            return cls.__from_tvm_ffi_object__(cls, obj)
+    else:
+        # Slow path: object is not found in registered entry
+        # In this case create a dummy stub class for future usage.
+        # For every unregistered class, this slow path will be triggered only once.
+        cls = make_fallback_cls_for_type_index(type_index)
+    obj = cls.__new__(cls)
     (<Object>obj).chandle = result.v_obj
     return obj
 
@@ -294,17 +333,21 @@ cdef _get_method_from_method_info(const TVMFFIMethodInfo* method):
     return make_ret(result)
 
 
-def _type_info_create_from_type_key(object type_cls, str type_key):
+cdef _type_info_create_from_type_key(object type_cls, str type_key):
     cdef const TVMFFIFieldInfo* field
     cdef const TVMFFIMethodInfo* method
     cdef const TVMFFITypeInfo* info
     cdef int32_t type_index
+    cdef list ancestors = []
+    cdef int ancestor
     cdef object fields = []
     cdef object methods = []
     cdef FieldGetter getter
     cdef FieldSetter setter
     cdef ByteArrayArg type_key_arg = ByteArrayArg(c_str(type_key))
 
+    # NOTE: `type_key_arg` must be kept alive until after the call to `TVMFFITypeKeyToIndex`,
+    # because Cython doesn't defer the destruction of `type_key_arg` until after the call.
     if TVMFFITypeKeyToIndex(type_key_arg.cptr(), &type_index) != 0:
         raise ValueError(f"Cannot find type key: {type_key}")
     info = TVMFFIGetTypeInfo(type_index)
@@ -339,44 +382,54 @@ def _type_info_create_from_type_key(object type_cls, str type_key):
             )
         )
 
+    for i in range(info.type_depth):
+        ancestor = info.type_ancestors[i].type_index
+        ancestors.append(ancestor)
+
     return TypeInfo(
         type_cls=type_cls,
         type_index=type_index,
         type_key=bytearray_to_str(&info.type_key),
+        type_ancestors=ancestors,
         fields=fields,
         methods=methods,
         parent_type_info=None,
     )
 
 
+cdef _update_registry(int type_index, object type_key, object type_info, object type_cls):
+    cdef int extra = type_index + 1 - len(TYPE_INDEX_TO_INFO)
+    assert len(TYPE_INDEX_TO_INFO) == len(TYPE_INDEX_TO_CLS)
+    if extra > 0:
+        TYPE_INDEX_TO_INFO.extend([None] * extra)
+        TYPE_INDEX_TO_CLS.extend([None] * extra)
+    TYPE_INDEX_TO_CLS[type_index] = type_cls
+    TYPE_INDEX_TO_INFO[type_index] = type_info
+    TYPE_KEY_TO_INFO[type_key] = type_info
+
+
 def _register_object_by_index(int type_index, object type_cls):
     global TYPE_INDEX_TO_INFO, TYPE_KEY_TO_INFO, TYPE_INDEX_TO_CLS
     cdef str type_key = _type_index_to_key(type_index)
     cdef object info = _type_info_create_from_type_key(type_cls, type_key)
-    assert len(TYPE_INDEX_TO_INFO) == len(TYPE_INDEX_TO_CLS)
-    if (extra := type_index + 1 - len(TYPE_INDEX_TO_INFO)) > 0:
-        TYPE_INDEX_TO_INFO.extend([None] * extra)
-        TYPE_INDEX_TO_CLS.extend([None] * extra)
-    TYPE_INDEX_TO_CLS[type_index] = type_cls
-    TYPE_INDEX_TO_INFO[type_index] = info
-    TYPE_KEY_TO_INFO[type_key] = info
+    _update_registry(type_index, type_key, info, type_cls)
     return info
 
 
-def _set_type_cls(int type_index, object type_cls):
+def _set_type_cls(object type_info, object type_cls):
     global TYPE_INDEX_TO_INFO, TYPE_INDEX_TO_CLS
-    assert len(TYPE_INDEX_TO_INFO) == len(TYPE_INDEX_TO_CLS)
-    type_info = TYPE_INDEX_TO_INFO[type_index]
     assert type_info.type_cls is None, f"Type already registered for {type_info.type_key}"
+    assert TYPE_INDEX_TO_INFO[type_info.type_index] is type_info
+    assert TYPE_KEY_TO_INFO[type_info.type_key] is type_info
     type_info.type_cls = type_cls
-    TYPE_INDEX_TO_CLS[type_index] = type_cls
+    TYPE_INDEX_TO_CLS[type_info.type_index] = type_cls
 
 
-def _lookup_type_info_from_type_key(type_key: str) -> TypeInfo:
+def _lookup_or_register_type_info_from_type_key(type_key: str) -> TypeInfo:
     if info := TYPE_KEY_TO_INFO.get(type_key, None):
         return info
     info = _type_info_create_from_type_key(None, type_key)
-    TYPE_KEY_TO_INFO[type_key] = info
+    _update_registry(info.type_index, type_key, info, None)
     return info
 
 

@@ -134,13 +134,23 @@ class TestCxxInitSubsetObj : public Object {
   TVM_FFI_DECLARE_OBJECT_INFO("testing.TestCxxInitSubset", TestCxxInitSubsetObj, Object);
 };
 
-class TestUnregisteredObject : public Object {
+class TestUnregisteredBaseObject : public Object {
  public:
-  int64_t value;
+  int64_t v1;
+  explicit TestUnregisteredBaseObject(int64_t v1) : v1(v1) {}
+  int64_t GetV1PlusOne() const { return v1 + 1; }
+  TVM_FFI_DECLARE_OBJECT_INFO("testing.TestUnregisteredBaseObject", TestUnregisteredBaseObject,
+                              Object);
+};
 
-  explicit TestUnregisteredObject(int64_t value) : value(value) {}
-
-  TVM_FFI_DECLARE_OBJECT_INFO("testing.TestUnregisteredObject", TestUnregisteredObject, Object);
+class TestUnregisteredObject : public TestUnregisteredBaseObject {
+ public:
+  int64_t v2;
+  explicit TestUnregisteredObject(int64_t v1, int64_t v2)
+      : TestUnregisteredBaseObject(v1), v2(v2) {}
+  int64_t GetV2PlusTwo() const { return v2 + 2; }
+  TVM_FFI_DECLARE_OBJECT_INFO("testing.TestUnregisteredObject", TestUnregisteredObject,
+                              TestUnregisteredBaseObject);
 };
 
 TVM_FFI_NO_INLINE void TestRaiseError(String kind, String msg) {
@@ -176,6 +186,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def_static("__ffi_init__", refl::init<TestCxxClassDerived, int64_t, int32_t, double, float>)
       .def_rw("v_f64", &TestCxxClassDerived::v_f64)
       .def_rw("v_f32", &TestCxxClassDerived::v_f32);
+
   refl::ObjectDef<TestCxxClassDerivedDerived>()
       .def_static(
           "__ffi_init__",
@@ -188,6 +199,21 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def_rw("required_field", &TestCxxInitSubsetObj::required_field)
       .def_rw("optional_field", &TestCxxInitSubsetObj::optional_field)
       .def_rw("note", &TestCxxInitSubsetObj::note);
+
+  refl::ObjectDef<TestUnregisteredBaseObject>()
+      .def_ro("v1", &TestUnregisteredBaseObject::v1)
+      .def_static("__ffi_init__", refl::init<TestUnregisteredBaseObject, int64_t>,
+                  "Constructor of TestUnregisteredBaseObject")
+      .def("get_v1_plus_one", &TestUnregisteredBaseObject::GetV1PlusOne,
+           "Get (v1 + 1) from TestUnregisteredBaseObject");
+
+  refl::ObjectDef<TestUnregisteredObject>()
+      .def_ro("v1", &TestUnregisteredObject::v1)
+      .def_ro("v2", &TestUnregisteredObject::v2)
+      .def_static("__ffi_init__", refl::init<TestUnregisteredObject, int64_t, int64_t>,
+                  "Constructor of TestUnregisteredObject")
+      .def("get_v2_plus_two", &TestUnregisteredObject::GetV2PlusTwo,
+           "Get (v2 + 2) from TestUnregisteredObject");
 
   refl::GlobalDef()
       .def("testing.test_raise_error", TestRaiseError)
@@ -206,7 +232,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
            })
       .def("testing.object_use_count", [](const Object* obj) { return obj->use_count(); })
       .def("testing.make_unregistered_object",
-           []() { return ObjectRef(make_object<TestUnregisteredObject>(42)); });
+           []() { return ObjectRef(make_object<TestUnregisteredObject>(41, 42)); });
 }
 
 }  // namespace ffi

@@ -249,45 +249,17 @@ def init_ffi_api(namespace: str, target_module_name: str | None = None) -> None:
         setattr(target_module, fname, f)
 
 
-def _member_method_wrapper(method_func: Callable[..., Any]) -> Callable[..., Any]:
-    def wrapper(self: Any, *args: Any) -> Any:
-        return method_func(self, *args)
-
-    return wrapper
-
-
 def _add_class_attrs(type_cls: type, type_info: TypeInfo) -> type:
     for field in type_info.fields:
-        getter = field.getter
-        setter = field.setter if not field.frozen else None
-        doc = field.doc if field.doc else None
         name = field.name
-        if hasattr(type_cls, name):
-            # skip already defined attributes
-            continue
-        setattr(type_cls, name, property(getter, setter, doc=doc))
+        if not hasattr(type_cls, name):  # skip already defined attributes
+            setattr(type_cls, name, field.as_property(type_cls))
     for method in type_info.methods:
         name = method.name
         if name == "__ffi_init__":
             name = "__c_ffi_init__"
-        doc = method.doc if method.doc else None
-        method_func = method.func
-        if method.is_static:
-            if doc is not None:
-                method_func.__doc__ = doc
-            method_func.__name__ = name
-            method_pyfunc: Any = staticmethod(method_func)
-        else:
-            wrapped_func = _member_method_wrapper(method_func)
-            if doc is not None:
-                wrapped_func.__doc__ = doc
-            wrapped_func.__name__ = name
-            method_pyfunc = wrapped_func
-
-        if hasattr(type_cls, name):
-            # skip already defined attributes
-            continue
-        setattr(type_cls, name, method_pyfunc)
+        if not hasattr(type_cls, name):
+            setattr(type_cls, name, method.as_callable(type_cls))
     return type_cls
 
 

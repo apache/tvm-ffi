@@ -26,21 +26,9 @@ from ..core import (
     Object,
     TypeField,
     TypeInfo,
-    _lookup_type_info_from_type_key,
 )
 
 _InputClsType = TypeVar("_InputClsType")
-
-
-def get_parent_type_info(type_cls: type) -> TypeInfo:
-    """Find the nearest ancestor with registered ``__tvm_ffi_type_info__``.
-
-    If none are found, return the base ``ffi.Object`` type info.
-    """
-    for base in type_cls.__bases__:
-        if (info := getattr(base, "__tvm_ffi_type_info__", None)) is not None:
-            return info
-    return _lookup_type_info_from_type_key("ffi.Object")
 
 
 def type_info_to_cls(

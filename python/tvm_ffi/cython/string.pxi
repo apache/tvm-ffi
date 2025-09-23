@@ -77,3 +77,4 @@ class Bytes(bytes, PyNativeObject):
 
 
 _register_object_by_index(kTVMFFIBytes, Bytes)
+_register_object_by_index(kTVMFFIObject, Object)
