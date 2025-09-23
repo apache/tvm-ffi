@@ -58,6 +58,7 @@ ALLOW_EXTENSION = {
     "yml",
     "yaml",
     "json",
+    "cfg",
     # docs
     "txt",
     "md",

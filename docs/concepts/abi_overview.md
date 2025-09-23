@@ -95,6 +95,7 @@ int CallTVMFFISafeCall(const char* param0, int param1) {
 ```
 
 At a high level, the `TVMFFISafeCallType` signature does the following things:
+
 - Arguments and return values are stored in structured `TVMFFIAny`
   - Each value comes with a `type_index` to indicate its type
   - Values are stored in union fields, depending on the specific type.
@@ -109,7 +110,6 @@ like Any value format and error handling. The following sections will provide a 
 treatment of each of these specific topics.
 You can keep this example in mind as the overall picture and refine it as you read through
 the following sections.
-
 
 ## TVMFFIAny Storage Format
 
@@ -145,7 +145,6 @@ TVMFFIAny is a 16-byte C structure that follows the design principle of tagged-u
   - Small POD values (like integers and floats) are stored directly as "on-stack" values.
   - `v_obj` can also point to a managed heap-allocated object, which we will discuss next.
 - The second field stores metadata for small strings.
-
 
 ### Storing a POD Value
 
@@ -185,7 +184,6 @@ and hash TVMFFIAny in bytes for quick equality checks without going through
 type index switching.
 :::
 
-
 ## Object Storage Format
 
 When TVMFFIAny points to a heap-allocated object (such as n-dimensional arrays),
@@ -214,6 +212,7 @@ typedef struct TVMFFIObject {
   - When `weak_ref_count` gets to zero, the deleter needs to free the memory allocated by self.
 
 **Rationales:** There are several considerations when designing the data structure:
+
 - `type_index` enables runtime dynamic type checking and casting.
 - We introduce weak/strong ref counters so we can be compatible with systems that need weak pointers.
 - The weak ref counter is kept as 32-bit so we can pack the object header as 24 bytes.
@@ -222,7 +221,6 @@ typedef struct TVMFFIObject {
 The object format provides a unified way to manage object life-cycle and dynamic type casting
 for heap-allocated objects, including Shape, Tensor,
 Function, Array, Map and other custom objects.
-
 
 ### DLPack Compatible Tensor
 
@@ -244,9 +242,10 @@ DLTensor* ReadDLTensorPtr(const TVMFFIAny *value) {
   }
   assert(value->type_index == kTVMFFITensor);
   return reinterpret_cast<DLTensor*>(
-    reinterpret_cast<char*>(value->v_obj) + sizeof(TVMFFIObject));
+  reinterpret_cast<char*>(value->v_obj) + sizeof(TVMFFIObject));
 }
 ```
+
 The above code can be used as a reference to implement compiler codegen for data.
 Note that the C++ API automatically handles such conversion.
 
@@ -264,7 +263,8 @@ values are unique by appending namespace prefix to the key.
 
 An `TVMFFIAny` can either be treated as a strongly managed value (corresponding to `ffi::Any` in C++),
 or an unmanaged value (corresponding to `ffi::AnyView` in C++).
-- For POD types, there is no difference between the two
+
+- For POD types, there is no difference between the two.
 - For object types, copying of AnyView should not change reference counters, while copying and deletion
   of managed Any should result in increase and decrease of strong reference counters.
 - When we convert AnyView to Any, we will convert raw C string `const char*` and `const TVMFFIByteArray*`
@@ -317,13 +317,13 @@ to an on-heap object.
 ```
 
 We call this approach a packed function, as it provides a single signature to represent all functions in a "type-erased" way. It saves the need to declare and jit shim for each FFI function call while maintaining reasonable efficiency. This mechanism enables the following scenarios:
+
 - Calling from Dynamic Languages (e.g., Python): we provide a tvm_ffi binding that prepares the args based on dynamically examining Python arguments passed in.
 - Calling from Static Languages (e.g., C++): For static languages, we can leverage C++ templates to directly instantiate the arguments on the stack, saving the need for dynamic examination.
 - Dynamic language Callbacks: the signature enables us to easily bring dynamic language (Python) callbacks as ffi::Function, as we can take each argument and convert to the dynamic values.
 - Efficiency: In practice, we find this approach is sufficient for machine learning focused workloads. For example, we can get to microsecond level overhead for Python/C++ calls, which is generally similar to overhead for eager mode. When both sides of calls are static languages, the overhead will go down to tens of nanoseconds. As a side note, although we did not find it necessary, the signature still leaves room for link time optimization (LTO), when both sides are static languages with a known symbol and linked into a single binary when we inline the callee into caller side and the stack argument memory passing into register passing.
 
 We support first-class Function objects that allow us to also pass function/closures from different places around, enabling cool usages such as quick python callback for prototyping, and dynamic Functor creation for driver-based kernel launching.
-
 
 ## Error Handling
 
@@ -347,6 +347,7 @@ The caller can retrieve the error from thread-local error storage
 using `TVMFFIErrorMoveFromRaised` function.
 The ABI stores Error also as a specific Object,
 the overall error object is stored as follows
+
 ```c++
 /*!
  * \brief Error cell used in error object following header.
@@ -385,7 +386,8 @@ class ErrorObj : public ffi::Object, public TVMFFIErrorCell {
 
 The error object stores kind, message and backtrace as string. When possible,
 we store the backtrace in the same format of python-style (see an example as follows):
-```
+
+```text
 File "src/extension.cc", line 45, in void my_ffi_extension::RaiseError(tvm::ffi::String)
 ```
 
@@ -407,6 +409,7 @@ its `type_index`.
 - `kTVMFFIStr`: on-heap string object for strings that are longer than 7 characters.
 
 The following code shows the layout of the on-heap string object.
+
 ```c++
 // span-like data structure to store header and length
 typedef struct {
@@ -420,6 +423,7 @@ class StringObj : public ffi::Object, public TVMFFIByteArray {
 ```
 
 The following code shows how to read a string from `TVMFFIAny`
+
 ```c++
 TVMFFIByteArray ReadString(const TVMFFIAny *value) {
   TVMFFIByteArray ret;

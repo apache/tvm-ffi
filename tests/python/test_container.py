@@ -191,3 +191,9 @@ def test_array_concat(
     assert type(c_actual) is type(c_expected)
     assert len(c_actual) == len(c_expected)
     assert tuple(c_actual) == tuple(c_expected)
+
+
+def test_large_map_get() -> None:
+    amap = tvm_ffi.convert({k: k**2 for k in range(100)})
+    assert amap.get(101) is None
+    assert amap.get(3) == 9

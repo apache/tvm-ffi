@@ -14,9 +14,9 @@
 <!--- KIND, either express or implied.  See the License for the -->
 <!--- specific language governing permissions and limitations -->
 <!--- under the License. -->
-{#cpp-guide}
-
 # C++ Guide
+
+{#cpp-guide}
 
 This guide introduces the tvm-ffi C++ API.
 We provide C++ API on top of the stable C ABI to provide a type-safe and efficient way to work with the tvm-ffi.
@@ -123,6 +123,7 @@ void ExampleObjectPtr() {
 We typically provide a reference class that wraps the ObjectPtr.
 The `ObjectRef` base class provides the interface and reference counting
 functionality for these wrapper classes.
+
 ```cpp
 #include <tvm/ffi/object.h>
 #include <tvm/ffi/memory.h>
@@ -152,6 +153,7 @@ void ExampleObjectRef() {
 The ObjectRef acts as a smart pointer wrapper that automatically manages the ObjectPtr lifecycle.
 
 The overall implementation pattern is as follows:
+
 - **Object Class**: Inherits from `ffi::Object`, stores data and implements the core functionality.
 - **ObjectPtr**: Smart pointer that manages the Object lifecycle and reference counting.
 - **Ref Class**: Inherits from `ffi::ObjectRef`, provides a user-friendly interface and automatic memory management.
@@ -181,11 +183,9 @@ This design allows us to allocate the control block and object memory together. 
 all of our heap-allocated classes such as Function, on-heap String, Array and Map are managed using subclasses of Object,
 and the user-facing classes such as Function are ObjectRefs.
 
-
 We provide a collection of built-in object and reference types, which are sufficient for common cases.
 Developers can also bring new object types as shown in the example of this section. We provide mechanisms
 to expose these objects to other language bindings such as Python.
-
 
 ## Function
 
@@ -230,6 +230,7 @@ void ExampleFunctionFromPacked() {
 ```
 
 At a high level, `ffi::Function` implements function calling by the following convention:
+
 - The arguments are passed through an on-stack array of `ffi::AnyView`
 - Return values are passed through `ffi::Any`
 
@@ -255,7 +256,6 @@ void ExampleFunctionPassFunction() {
 This pattern is very powerful because we can construct `ffi::Function` not only from C++,
 but from any languages that expose to the tvm-ffi ABI. For example, this means we can easily call functions
 passed in or registered from Python for quick debugging or other purposes.
-
 
 ### Global Function Registry
 
@@ -325,12 +325,14 @@ void ExampleErrorHandling() {
   }
 }
 ```
+
 The structured error class records kind, message and backtrace that can be mapped to
 Pythonic style error types and traces. The `TracebackMostRecentCallLast()` call reverses
 the backtrace and print out follows the Python style,
 tvm-ffi will try to preserve the backtrace when possible. In the above example,
 you can see the output as
-```
+
+```text
 ... more lines omitted
 File "cpp/test_example.cc", line 106, in ExampleErrorHandling
 File "cpp/test_example.cc", line 100, in void FuncThrowError()
@@ -341,7 +343,6 @@ language boundaries.
 So when we call the function from Python, the Error will be translated into a corresponding
 Error type. Similarly, when we call a Python callback from C++, the error will be translated
 into the right error kind and message.
-
 
 ## Tensor
 
@@ -524,7 +525,6 @@ void ExampleMap() {
 }
 ```
 
-
 Under the hood, Map is backed by a reference-counted Object `MapObj` that stores
 a collection of Any values. The implementation provides a SmallMap variant that stores
 values as an array and another variant that is based on a hashmap. The Map preserves insertion
@@ -558,7 +558,6 @@ void ExampleOptional() {
   EXPECT_EQ(opt1.value_or("default"), "default");
 }
 ```
-
 
 ### Variant
 

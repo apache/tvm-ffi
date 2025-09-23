@@ -38,7 +38,6 @@ tvm-ffi-config -h
 This configuration tool is also useful in various ways to help you build
 libraries with tvm-ffi.
 
-
 ## Install From Source
 
 You can also build and install tvm-ffi from source.
@@ -48,12 +47,11 @@ You can also build and install tvm-ffi from source.
 - CMake (>= 3.24.0)
 - Git
 - A recent C++ compiler supporting C++17, at minimum:
-    - GCC 7.1
-    - Clang 5.0
-    - Apple Clang 9.3
-    - Visual Studio 2019 (v16.7)
+  - GCC 7.1
+  - Clang 5.0
+  - Apple Clang 9.3
+  - Visual Studio 2019 (v16.7)
 - Python (>= 3.9)
-
 
 Developers can clone the source repository from GitHub.
 

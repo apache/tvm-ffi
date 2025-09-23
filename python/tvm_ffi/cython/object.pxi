@@ -268,18 +268,16 @@ cdef inline object make_ret_object(TVMFFIAny result):
     cdef object cls
     tindex = result.type_index
 
-    if tindex < len(TYPE_INDEX_TO_INFO):
-        type_info = TYPE_INDEX_TO_INFO[tindex]
-        if type_info is not None:
-            cls = type_info.type_cls
-            if cls is not None:
-                if issubclass(cls, PyNativeObject):
-                    obj = Object.__new__(Object)
-                    (<Object>obj).chandle = result.v_obj
-                    return cls.__from_tvm_ffi_object__(cls, obj)
-                obj = cls.__new__(cls)
+    if tindex < len(TYPE_INDEX_TO_CLS):
+        cls = TYPE_INDEX_TO_CLS[tindex]
+        if cls is not None:
+            if issubclass(cls, PyNativeObject):
+                obj = Object.__new__(Object)
                 (<Object>obj).chandle = result.v_obj
-                return obj
+                return cls.__from_tvm_ffi_object__(cls, obj)
+            obj = cls.__new__(cls)
+            (<Object>obj).chandle = result.v_obj
+            return obj
 
     # object is not found in registered entry
     # in this case we need to report an warning
@@ -351,14 +349,26 @@ def _type_info_create_from_type_key(object type_cls, str type_key):
 
 
 def _register_object_by_index(int type_index, object type_cls):
-    global TYPE_INDEX_TO_INFO, TYPE_KEY_TO_INFO
+    global TYPE_INDEX_TO_INFO, TYPE_KEY_TO_INFO, TYPE_INDEX_TO_CLS
     cdef str type_key = _type_index_to_key(type_index)
     cdef object info = _type_info_create_from_type_key(type_cls, type_key)
+    assert len(TYPE_INDEX_TO_INFO) == len(TYPE_INDEX_TO_CLS)
     if (extra := type_index + 1 - len(TYPE_INDEX_TO_INFO)) > 0:
         TYPE_INDEX_TO_INFO.extend([None] * extra)
+        TYPE_INDEX_TO_CLS.extend([None] * extra)
+    TYPE_INDEX_TO_CLS[type_index] = type_cls
     TYPE_INDEX_TO_INFO[type_index] = info
     TYPE_KEY_TO_INFO[type_key] = info
     return info
+
+
+def _set_type_cls(int type_index, object type_cls):
+    global TYPE_INDEX_TO_INFO, TYPE_INDEX_TO_CLS
+    assert len(TYPE_INDEX_TO_INFO) == len(TYPE_INDEX_TO_CLS)
+    type_info = TYPE_INDEX_TO_INFO[type_index]
+    assert type_info.type_cls is None, f"Type already registered for {type_info.type_key}"
+    type_info.type_cls = type_cls
+    TYPE_INDEX_TO_CLS[type_index] = type_cls
 
 
 def _lookup_type_info_from_type_key(type_key: str) -> TypeInfo:
@@ -369,6 +379,7 @@ def _lookup_type_info_from_type_key(type_key: str) -> TypeInfo:
     return info
 
 
+cdef list TYPE_INDEX_TO_CLS = []
 cdef list TYPE_INDEX_TO_INFO = []
 cdef dict TYPE_KEY_TO_INFO = {}
 

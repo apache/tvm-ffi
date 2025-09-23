@@ -49,13 +49,15 @@ python run_example.py add_one
 You can also run the following command to see how error is raised and propagated
 across the language boundaries.
 
-```python
+```bash
 python run_example.py raise_error
 ```
 
 When possible, tvm_ffi will try to preserve backtrace across language boundary. You will see output like
-```
+
+```text
 File "src/extension.cc", line 45, in void my_ffi_extension::RaiseError(tvm::ffi::String)
 ```
+
 If you are in an IDE like VSCode, you can click and jump to the C++ lines of error when
 the debug symbols are preserved.

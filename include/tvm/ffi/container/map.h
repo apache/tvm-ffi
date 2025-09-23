@@ -691,7 +691,7 @@ class DenseMapObj : public MapObj {
   mapped_type& At(const key_type& key) const {
     ListNode iter = Search(key);
     if (iter.IsNone()) {
-      TVM_FFI_THROW(IndexError) << "key is not in Map";
+      TVM_FFI_THROW(KeyError) << "key is not in Map";
     }
     return iter.Val();
   }
