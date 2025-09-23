@@ -112,6 +112,7 @@ ALLOW_FILE_NAME = {
     ".gitmodules",
     "CODEOWNERSHIP",
     "Dockerfile",
+    "py.typed",
 }
 
 # List of specific files allowed in relpath to <proj_root>

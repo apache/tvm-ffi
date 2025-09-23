@@ -27,17 +27,11 @@ from collections.abc import Callable
 from dataclasses import InitVar
 from typing import ClassVar, TypeVar, get_origin, get_type_hints
 
+from typing_extensions import dataclass_transform  # type: ignore[attr-defined]
+
 from ..core import TypeField, TypeInfo
 from . import _utils
 from .field import Field, field
-
-try:
-    from typing_extensions import dataclass_transform  # type: ignore[attr-defined]
-except ImportError:
-    from typing import dataclass_transform  # type: ignore[no-redef,attr-defined]
-except ImportError:
-    pass
-
 
 _InputClsType = TypeVar("_InputClsType")
 

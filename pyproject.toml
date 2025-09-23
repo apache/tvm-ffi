@@ -32,7 +32,7 @@ classifiers = [
 ]
 keywords = ["machine learning", "inference"]
 requires-python = ">=3.9"
-dependencies = ["typing-extensions"]
+dependencies = ["typing-extensions>=4.5"]
 
 [project.urls]
 Homepage = "https://github.com/apache/tvm-ffi"
@@ -115,6 +115,7 @@ sdist.include = [
   "/python/tvm_ffi/**/*.py",
   "/python/tvm_ffi/**/*.pyx",
   "/python/tvm_ffi/**/*.pyi",
+  "/python/tvm_ffi/py.typed",
 
   # Third party files
   "/3rdparty/libbacktrace/**/*",
@@ -216,5 +217,19 @@ environment = { MACOSX_DEPLOYMENT_TARGET = "10.14" }
 archs = ["AMD64"]
 
 [tool.mypy]
+python_version = "3.9"
+mypy_path = ["python", "examples", "tests/python"]
+files = ["python/tvm_ffi", "examples", "tests/python"]
+namespace_packages = true
+explicit_package_bases = true
 allow_redefinition = true
+exclude = '''(?x)(
+  ^\.venv/|
+  ^build/|
+  ^dist/|
+  ^\.mypy_cache/
+)'''
+
+[[tool.mypy.overrides]]
+module = ["torch", "torch.*", "my_ffi_extension", "my_ffi_extension.*"]
 ignore_missing_imports = true
