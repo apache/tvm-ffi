@@ -83,21 +83,23 @@ int __tvm_ffi_add_one_c(
 ```
 
 Some of the key takeaways include:
+
 - Prefix the symbol with `__tvm_ffi_`
 - Call {cpp:func}`TVMFFIEnvGetStream` to get the current environment stream
 - Use return value for error handling, set error via {cpp:func}`TVMFFIErrorSetRaisedFromCStr`.
 
 You can also check out the [ABI overview](../concepts/abi_overview.md) for a more complete guide.
 
-
 ## Graph Compilers
 
 Machine learning graph compilers take computational graphs and can integrate with TVM FFI through:
 
 - Supporting the `call_tvm_ffi` primitive that calls into `my_func` that follows the ABI:
-```python
-Op.call_tvm_ffi("my_func", *args)
-```
+
+  ```python
+  Op.call_tvm_ffi("my_func", *args)
+  ```
+
 - Using the module API to load the modules into context and run. Alternatively, look up
   global functions that are registered and invoke them.
 - For ahead-of-time compilation (AOT) with minimum runtime, the AOT compiler can generate
@@ -108,7 +110,6 @@ Op.call_tvm_ffi("my_func", *args)
 This approach provides a unified mechanism to call into any libraries and other DSLs
 that expose kernels following the FFI convention, enabling seamless interoperability
 with various kernel DSLs and libraries.
-
 
 ## Runtime and State Management for Compilers
 
@@ -124,25 +125,27 @@ This library exposes its functionality by registering functions as global `tvm::
 
 Here's a breakdown of the process:
 
-1.  **Define a Global State**: Create a class or structure to hold your compiler's runtime state. A simple singleton pattern is often used for this.
-2.  **Register Global Functions**: Use the `TVM_FFI_STATIC_INIT_BLOCK()` macro to register a global function that returns a pointer to your state. For example:
-    ```c++
-    class GlobalState {
-      ... // your state variables here
-     public:
-       GlobalState* Global() {
-          static auto *inst = new GlobalState();
-          return inst;
-       }
-    };
-    TVM_FFI_STATIC_INIT_BLOCK() {
-      using refl = tvm::ffi::reflection;
-      refl.GlobalDef().def("mylang.get_global_state", []()-> void*{ return GlobalState::Global()});
-      // other runtime APIs can be registered here
-    }
-    ```
-    This method allows both C++ and Python to access the runtime state through a consistent API.
-3.  **Access State from Kernels**: Within your compiler-generated kernels, you can use
+1. **Define a Global State**: Create a class or structure to hold your compiler's runtime state. A simple singleton pattern is often used for this.
+2. **Register Global Functions**: Use the `TVM_FFI_STATIC_INIT_BLOCK()` macro to register a global function that returns a pointer to your state. For example:
+
+   ```c++
+   class GlobalState {
+     ... // your state variables here
+    public:
+      GlobalState* Global() {
+         static auto *inst = new GlobalState();
+         return inst;
+      }
+   };
+   TVM_FFI_STATIC_INIT_BLOCK() {
+     using refl = tvm::ffi::reflection;
+     refl.GlobalDef().def("mylang.get_global_state", []()-> void*{ return GlobalState::Global()});
+     // other runtime APIs can be registered here
+   }
+   ```
+
+   This method allows both C++ and Python to access the runtime state through a consistent API.
+3. **Access State from Kernels**: Within your compiler-generated kernels, you can use
     `GetGlobalRequired("mylang.get_global_state")` in C++ or the C equivalent
     `TVMFFIGetGlobalFunction("mylang.get_global_state", ...)` to get the function and then call it to retrieve the state
     pointer.

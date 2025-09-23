@@ -195,8 +195,10 @@ test_raise_error = tvm_ffi.get_global_func("testing.test_raise_error")
 
 test_raise_error("ValueError", "message")
 ```
+
 The above code shows an example where an error is raised in C++, resulting in the following error trace
-```
+
+```text
 Traceback (most recent call last):
 File "example.py", line 7, in <module>
   test_raise_error("ValueError", "message")
@@ -206,6 +208,7 @@ File "python/tvm_ffi/cython/function.pxi", line 325, in core.Function.__call__
   ^^^
 File "src/ffi/extra/testing.cc", line 60, in void tvm::ffi::TestRaiseError(tvm::ffi::String, tvm::ffi::String)
   throw ffi::Error(kind, msg, TVMFFITraceback(__FILE__, __LINE__, TVM_FFI_FUNC_SIG, 0));
+
 ```
 
 We register common error kinds. You can also register extra error dispatch via the {py:func}`tvm_ffi.register_error` function.
@@ -276,6 +279,7 @@ test_int_pair = TestIntPair(1, 2)
 assert test_int_pair.a == 1
 assert test_int_pair.b == 2
 ```
+
 Under the hood, we leverage the information registered through the reflection registry to
 generate efficient field accessors and methods for each class.
 

@@ -38,6 +38,7 @@ cd tvm-ffi
 
 The examples are now in the examples folder. You can quickly build
 and install the example using the following command.
+
 ```bash
 cd examples/packaging
 pip install -v .
@@ -53,7 +54,7 @@ python run_example.py add_one
 
 A typical tvm-ffi-based project has the following structure:
 
-```
+```text
 ├── CMakeLists.txt          # CMake build configuration
 ├── pyproject.toml          # Python packaging configuration
 ├── src/
@@ -130,6 +131,7 @@ add_subdirectory(${tvm_ffi_ROOT} tvm_ffi)
 # linking the library
 target_link_libraries(my_ffi_extension tvm_ffi_shared)
 ```
+
 Note that it is always safe to build from source, and the extra cost of building tvm-ffi is small
 because tvm-ffi is a lightweight library. If you are in doubt,
 you can always choose to build tvm-ffi from source.
@@ -235,11 +237,13 @@ def raise_error(msg):
 ## Build and Use the Package
 
 First, build the wheel:
+
 ```bash
 pip wheel -v -w dist .
 ```
 
 Then install the built wheel:
+
 ```bash
 pip install dist/*.whl
 ```
@@ -262,12 +266,13 @@ print(y)  # Output: tensor([2., 3., 4., 5., 6.])
 You can also run the following command to see how errors are raised and propagated
 across language boundaries:
 
-```python
+```bash
 python run_example.py raise_error
 ```
 
 When possible, tvm-ffi will try to preserve backtraces across language boundaries. You will see outputs like:
-```
+
+```text
 File "src/extension.cc", line 45, in void my_ffi_extension::RaiseError(tvm::ffi::String)
 ```
 
