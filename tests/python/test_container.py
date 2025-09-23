@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 import pickle
+from collections.abc import Sequence
 from typing import Any
 
 import pytest
@@ -124,3 +125,69 @@ def test_serialization() -> None:
     a = tvm_ffi.convert([1, 2, 3])
     b = pickle.loads(pickle.dumps(a))
     assert str(b) == "[1, 2, 3]"
+
+
+@pytest.mark.parametrize(
+    "a, b, c_expected",
+    [
+        (
+            tvm_ffi.Array([1, 2, 3]),
+            tvm_ffi.Array([4, 5, 6]),
+            tvm_ffi.Array([1, 2, 3, 4, 5, 6]),
+        ),
+        (
+            tvm_ffi.Array([1, 2, 3]),
+            [4, 5, 6],
+            tvm_ffi.Array([1, 2, 3, 4, 5, 6]),
+        ),
+        (
+            [1, 2, 3],
+            tvm_ffi.Array([4, 5, 6]),
+            tvm_ffi.Array([1, 2, 3, 4, 5, 6]),
+        ),
+        (
+            tvm_ffi.Array([]),
+            tvm_ffi.Array([1, 2, 3]),
+            tvm_ffi.Array([1, 2, 3]),
+        ),
+        (
+            tvm_ffi.Array([1, 2, 3]),
+            [],
+            tvm_ffi.Array([1, 2, 3]),
+        ),
+        (
+            [],
+            tvm_ffi.Array([1, 2, 3]),
+            tvm_ffi.Array([1, 2, 3]),
+        ),
+        (
+            tvm_ffi.Array([]),
+            [],
+            tvm_ffi.Array([]),
+        ),
+        (
+            tvm_ffi.Array([]),
+            [],
+            tvm_ffi.Array([]),
+        ),
+        (
+            tvm_ffi.Array([1, 2, 3]),
+            (4, 5, 6),
+            tvm_ffi.Array([1, 2, 3, 4, 5, 6]),
+        ),
+        (
+            (1, 2, 3),
+            tvm_ffi.Array([4, 5, 6]),
+            tvm_ffi.Array([1, 2, 3, 4, 5, 6]),
+        ),
+    ],
+)
+def test_array_concat(
+    a: Sequence[int],
+    b: Sequence[int],
+    c_expected: Sequence[int],
+) -> None:
+    c_actual = a + b  # type: ignore[operator]
+    assert type(c_actual) is type(c_expected)
+    assert len(c_actual) == len(c_expected)
+    assert tuple(c_actual) == tuple(c_expected)

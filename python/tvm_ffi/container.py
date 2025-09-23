@@ -18,9 +18,10 @@
 
 from __future__ import annotations
 
+import itertools
 import operator
 from collections.abc import ItemsView as ItemsViewBase
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from collections.abc import KeysView as KeysViewBase
 from collections.abc import ValuesView as ValuesViewBase
 from typing import Any, Callable, SupportsIndex, TypeVar, cast, overload
@@ -89,7 +90,7 @@ class Array(core.Object, Sequence[T]):
 
     Parameters
     ----------
-    input_list : Sequence[T]
+    input_list : Iterable[T]
         The list of values to be stored in the array.
 
     See Also
@@ -108,7 +109,7 @@ class Array(core.Object, Sequence[T]):
 
     """
 
-    def __init__(self, input_list: Sequence[T]) -> None:
+    def __init__(self, input_list: Iterable[T]) -> None:
         """Construct an Array from a Python sequence."""
         self.__init_handle_by_constructor__(_ffi_api.Array, *input_list)
 
@@ -142,6 +143,14 @@ class Array(core.Object, Sequence[T]):
         if self.__chandle__() == 0:
             return type(self).__name__ + "(chandle=None)"
         return "[" + ", ".join([x.__repr__() for x in self]) + "]"
+
+    def __add__(self, other: Iterable[T]) -> Array[T]:
+        """Concatenate two arrays."""
+        return type(self)(itertools.chain(self, other))
+
+    def __radd__(self, other: Iterable[T]) -> Array[T]:
+        """Concatenate two arrays."""
+        return type(self)(itertools.chain(other, self))
 
 
 class KeysView(KeysViewBase[K]):
