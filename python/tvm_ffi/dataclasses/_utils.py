@@ -19,9 +19,8 @@
 from __future__ import annotations
 
 import functools
-import inspect
 from dataclasses import MISSING
-from typing import Any, Callable, NamedTuple, TypeVar, cast
+from typing import Any, Callable, TypeVar, cast
 
 from ..core import (
     Object,
@@ -111,96 +110,79 @@ def fill_dataclass_field(type_cls: type, type_field: TypeField) -> None:
     type_field.dataclass_field = rhs
 
 
-def method_init(type_cls: type, type_info: TypeInfo) -> Callable[..., None]:  # noqa: PLR0915
+def method_init(type_cls: type, type_info: TypeInfo) -> Callable[..., None]:
     """Generate an ``__init__`` that forwards to the FFI constructor.
 
     The generated initializer has a proper Python signature built from the
     reflected field list, supporting default values and ``__post_init__``.
     """
-
-    class DefaultFactory(NamedTuple):
-        """Wrapper that marks a parameter as having a default factory."""
-
-        fn: Callable[[], Any]
-
+    # Step 0. Collect all fields from the type hierarchy
     fields: list[TypeField] = []
     cur_type_info: TypeInfo | None = type_info
     while cur_type_info is not None:
         fields.extend(reversed(cur_type_info.fields))
         cur_type_info = cur_type_info.parent_type_info
     fields.reverse()
-
-    annotations: dict[str, Any] = {"return": None}
-    # Step 1. Split the parameters into two groups to ensure that
-    # those without defaults appear first in the signature.
-    params_without_defaults: list[inspect.Parameter] = []
-    params_with_defaults: list[inspect.Parameter] = []
-    ordering = [0] * len(fields)
-    for i, field in enumerate(fields):
-        assert field.name is not None
-        name: str = field.name
-        annotations[name] = Any  # NOTE: We might be able to handle annotations better
-        assert field.dataclass_field is not None
-        default_factory = field.dataclass_field.default_factory
-        if default_factory is MISSING:
-            ordering[i] = len(params_without_defaults)
-            params_without_defaults.append(
-                inspect.Parameter(name=name, kind=inspect.Parameter.POSITIONAL_OR_KEYWORD)
-            )
-        else:
-            ordering[i] = -len(params_with_defaults) - 1
-            params_with_defaults.append(
-                inspect.Parameter(
-                    name=name,
-                    kind=inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                    default=DefaultFactory(fn=default_factory),
-                )
-            )
-    for i, order in enumerate(ordering):
-        if order < 0:
-            ordering[i] = len(params_without_defaults) - order - 1
-    # Step 2. Create the signature object
-    sig = inspect.Signature(parameters=[*params_without_defaults, *params_with_defaults])
-    signature_str = (
-        f"{type_cls.__module__}.{type_cls.__qualname__}.__init__("
-        + ", ".join(p.name for p in sig.parameters.values())
-        + ")"
-    )
-
-    # Step 3. Create the `binding` method that reorders parameters
-    def touch_arg(x: Any) -> Any:
-        return x.fn() if isinstance(x, DefaultFactory) else x
-
-    def bind_args(*args: Any, **kwargs: Any) -> tuple[Any, ...]:
-        bound = sig.bind(*args, **kwargs)
-        bound.apply_defaults()
-        args = bound.args
-        args = tuple(touch_arg(args[i]) for i in ordering)
-        return args
-
+    # sanity check
     for type_method in type_info.methods:
         if type_method.name == "__ffi_init__":
             break
     else:
         raise ValueError(f"Cannot find constructor method: `{type_info.type_key}.__ffi_init__`")
+    # Step 1. Split args into sections and register default factories
+    args_no_defaults: list[str] = []
+    args_with_defaults: list[str] = []
+    fields_with_defaults: list[tuple[str, bool]] = []
+    ffi_arg_order: list[str] = []
+    exec_globals = {"MISSING": MISSING}
+    for field in fields:
+        assert field.name is not None
+        assert field.dataclass_field is not None
+        dataclass_field = field.dataclass_field
+        has_default_factory = (default_factory := dataclass_field.default_factory) is not MISSING
+        if dataclass_field.init:
+            ffi_arg_order.append(field.name)
+            if has_default_factory:
+                args_with_defaults.append(field.name)
+                fields_with_defaults.append((field.name, True))
+                exec_globals[f"_default_factory_{field.name}"] = default_factory
+            else:
+                args_no_defaults.append(field.name)
+        elif has_default_factory:
+            ffi_arg_order.append(field.name)
+            fields_with_defaults.append((field.name, False))
+            exec_globals[f"_default_factory_{field.name}"] = default_factory
 
-    def __init__(self: Any, *args: Any, **kwargs: Any) -> None:
-        e = None
-        try:
-            args = bind_args(*args, **kwargs)
-            del kwargs
-            self.__ffi_init__(*args)
-        except Exception as _e:
-            e = TypeError(f"Error in `{signature_str}`: {_e}").with_traceback(_e.__traceback__)
-        if e is not None:
-            raise e
-        try:
-            fn_post_init = self.__post_init__  # type: ignore[attr-defined]
-        except AttributeError:
-            pass
+    args: list[str] = ["self"]
+    args.extend(args_no_defaults)
+    args.extend(f"{name}=MISSING" for name in args_with_defaults)
+    body_lines: list[str] = []
+    for field_name, is_init in fields_with_defaults:
+        if is_init:
+            body_lines.append(
+                f"if {field_name} is MISSING: {field_name} = _default_factory_{field_name}()"
+            )
         else:
-            fn_post_init()
-
-    __init__.__signature__ = sig  # type: ignore[attr-defined]
-    __init__.__annotations__ = annotations
+            body_lines.append(f"{field_name} = _default_factory_{field_name}()")
+    body_lines.append(f"self.__ffi_init__({', '.join(ffi_arg_order)})")
+    body_lines.extend(
+        [
+            "try:",
+            "    fn_post_init = self.__post_init__",
+            "except AttributeError:",
+            "    pass",
+            "else:",
+            "    fn_post_init()",
+        ]
+    )
+    source_lines = [f"def __init__({', '.join(args)}):"]
+    source_lines.extend(f"    {line}" for line in body_lines)
+    source_lines.append("    ...")
+    source = "\n".join(source_lines)
+    # Note: Code generation in this case is guaranteed to be safe,
+    # because the generated code does not contain any untrusted input.
+    # This is also a common practice used by `dataclasses` and `pydantic`.
+    namespace: dict[str, Any] = {}
+    exec(source, exec_globals, namespace)
+    __init__ = namespace["__init__"]
     return __init__

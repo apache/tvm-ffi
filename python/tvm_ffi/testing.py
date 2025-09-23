@@ -110,3 +110,10 @@ class _TestCxxClassDerived(_TestCxxClassBase):
 class _TestCxxClassDerivedDerived(_TestCxxClassDerived):
     v_str: str = field(default_factory=lambda: "default")
     v_bool: bool  # type: ignore[misc]  # Suppress: Attributes without a default cannot follow attributes with one
+
+
+@c_class("testing.TestCxxInitSubset")
+class _TestCxxInitSubset:
+    required_field: int
+    optional_field: int = field(init=False)
+    note: str = field(default_factory=lambda: "py-default", init=False)

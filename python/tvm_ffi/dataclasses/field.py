@@ -37,23 +37,26 @@ class Field:
     way the decorator understands.
     """
 
-    __slots__ = ("default_factory", "name")
+    __slots__ = ("default_factory", "init", "name")
 
     def __init__(
         self,
         *,
         name: str | None = None,
         default_factory: Callable[[], _FieldValue] | _MISSING_TYPE = MISSING,
+        init: bool = True,
     ) -> None:
         """Do not call directly; use :func:`field` instead."""
         self.name = name
         self.default_factory = default_factory
+        self.init = init
 
 
 def field(
     *,
     default: _FieldValue | _MISSING_TYPE = MISSING,  # type: ignore[assignment]
     default_factory: Callable[[], _FieldValue] | _MISSING_TYPE = MISSING,  # type: ignore[assignment]
+    init: bool = True,
 ) -> _FieldValue:
     """(Experimental) Declare a dataclass-style field on a :func:`c_class` proxy.
 
@@ -65,13 +68,33 @@ def field(
     Parameters
     ----------
     default : Any, optional
-        A literal default value that should populate the field when no argument
-        is given.  The value is copied into a closure because TVM FFI does not
-        mutate the Python placeholder instance.
+        A literal default value that populates the field when no argument
+        is given. At most one of ``default`` or ``default_factory`` may be
+        given.
     default_factory : Callable[[], Any], optional
         A zero-argument callable that produces the default.  This matches the
         semantics of :func:`dataclasses.field` and is useful for mutable
         defaults such as ``list`` or ``dict``.
+    init : bool, default True
+        If ``True`` the field is included in the generated ``__init__``.
+        If ``False`` the field is omitted from input arguments of ``__init__``.
+
+    Note
+    ----
+    The decision to forward a field to the C++ ``__ffi_init__`` constructor
+    depends on its configuration:
+
+    *   If ``init=True``, the field's value (from user input or defaults)
+        is forwarded.
+
+    *   If ``init=False``:
+
+        -   With a ``default`` or ``default_factory``, its computed value is
+            forwarded. The user cannot provide this value via Python ``__init__``.
+
+        -   Without a ``default`` or ``default_factory``, the field is *not*
+            forwarded to C++ ``__ffi_init__`` and must be initialized by the
+            C++ constructor.
 
     Returns
     -------
@@ -82,7 +105,9 @@ def field(
     Examples
     --------
     ``field`` integrates with :func:`c_class` to express defaults the same way a
-    Python ``dataclass`` would::
+    Python ``dataclass`` would:
+
+    .. code-block:: python
 
         @c_class("testing.TestCxxClassBase")
         class PyBase:
@@ -95,9 +120,11 @@ def field(
     """
     if default is not MISSING and default_factory is not MISSING:
         raise ValueError("Cannot specify both `default` and `default_factory`")
+    if not isinstance(init, bool):
+        raise TypeError("`init` must be a bool")
     if default is not MISSING:
         default_factory = _make_default_factory(default)
-    ret = Field(default_factory=default_factory)
+    ret = Field(default_factory=default_factory, init=init)
     return cast(_FieldValue, ret)
 
 

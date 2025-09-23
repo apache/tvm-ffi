@@ -14,7 +14,14 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-from tvm_ffi.testing import _TestCxxClassBase, _TestCxxClassDerived, _TestCxxClassDerivedDerived
+import inspect
+
+from tvm_ffi.testing import (
+    _TestCxxClassBase,
+    _TestCxxClassDerived,
+    _TestCxxClassDerivedDerived,
+    _TestCxxInitSubset,
+)
 
 
 def test_cxx_class_base() -> None:
@@ -64,3 +71,26 @@ def test_cxx_class_derived_derived_default() -> None:
     assert isinstance(obj.v_f32, float) and obj.v_f32 == 8
     assert obj.v_str == "default"
     assert isinstance(obj.v_bool, bool) and obj.v_bool is True
+
+
+def test_cxx_class_init_subset_signature() -> None:
+    sig = inspect.signature(_TestCxxInitSubset.__init__)
+    params = tuple(sig.parameters)
+    assert "required_field" in params
+    assert "optional_field" not in params
+    assert "note" not in params
+
+
+def test_cxx_class_init_subset_defaults() -> None:
+    obj = _TestCxxInitSubset(required_field=42)
+    assert obj.required_field == 42
+    assert obj.optional_field == -1
+    assert obj.note == "py-default"
+
+
+def test_cxx_class_init_subset_positional() -> None:
+    obj = _TestCxxInitSubset(7)  # type: ignore[call-arg]
+    assert obj.required_field == 7
+    assert obj.optional_field == -1
+    obj.optional_field = 11
+    assert obj.optional_field == 11

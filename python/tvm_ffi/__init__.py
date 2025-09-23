@@ -42,6 +42,7 @@ from .stream import StreamContext, use_raw_stream, use_torch_stream
 from . import serialization
 from . import access_path
 from . import testing
+from . import dataclasses
 
 # optional module to speedup dlpack conversion
 from . import _optional_torch_c_dlpack
@@ -61,6 +62,7 @@ __all__ = [
     "Tensor",
     "access_path",
     "convert",
+    "dataclasses",
     "device",
     "dtype",
     "from_dlpack",

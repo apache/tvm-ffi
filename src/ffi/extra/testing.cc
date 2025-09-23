@@ -121,6 +121,19 @@ class TestCxxClassDerivedDerived : public TestCxxClassDerived {
                               TestCxxClassDerived);
 };
 
+class TestCxxInitSubsetObj : public Object {
+ public:
+  int64_t required_field;
+  int64_t optional_field;
+  String note;
+
+  explicit TestCxxInitSubsetObj(int64_t value, String note)
+      : required_field(value), optional_field(-1), note(note) {}
+
+  static constexpr bool _type_mutable = true;
+  TVM_FFI_DECLARE_OBJECT_INFO("testing.TestCxxInitSubset", TestCxxInitSubsetObj, Object);
+};
+
 class TestUnregisteredObject : public Object {
  public:
   int64_t value;
@@ -169,6 +182,12 @@ TVM_FFI_STATIC_INIT_BLOCK() {
           refl::init<TestCxxClassDerivedDerived, int64_t, int32_t, double, float, String, bool>)
       .def_rw("v_str", &TestCxxClassDerivedDerived::v_str)
       .def_rw("v_bool", &TestCxxClassDerivedDerived::v_bool);
+
+  refl::ObjectDef<TestCxxInitSubsetObj>()
+      .def_static("__ffi_init__", refl::init<TestCxxInitSubsetObj, int64_t, String>)
+      .def_rw("required_field", &TestCxxInitSubsetObj::required_field)
+      .def_rw("optional_field", &TestCxxInitSubsetObj::optional_field)
+      .def_rw("note", &TestCxxInitSubsetObj::note);
 
   refl::GlobalDef()
       .def("testing.test_raise_error", TestRaiseError)

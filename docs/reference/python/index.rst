@@ -81,7 +81,19 @@ Stream Context
 Utility
 -------
 
-.. toctree::
-  :maxdepth: 1
+C++ integration helpers for building and loading inline modules.
 
-  cpp/index.rst
+.. autosummary::
+  :toctree: cpp/generated/
+
+  cpp.load_inline
+
+
+.. (Experimental) Dataclasses
+.. --------------------------
+
+.. .. autosummary::
+..   :toctree: generated/
+
+..   dataclasses.c_class
+..   dataclasses.field
