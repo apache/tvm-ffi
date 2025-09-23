@@ -124,3 +124,9 @@ def test_serialization() -> None:
     a = tvm_ffi.convert([1, 2, 3])
     b = pickle.loads(pickle.dumps(a))
     assert str(b) == "[1, 2, 3]"
+
+
+def test_large_map_get() -> None:
+    amap = tvm_ffi.convert({k: k**2 for k in range(100)})
+    assert amap.get(101) is None
+    assert amap.get(3) == 9
