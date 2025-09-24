@@ -415,6 +415,7 @@ ScalarType toScalarTypeForDLPackv1(const DLDataType& dtype) {
               false, "Unsupported kDLFloat8_e8m0fnu bits ", std::to_string(dtype.bits));
       }
       break;
+#if TORCH_VERSION_MAJOR >= 2 && TORCH_VERSION_MINOR >= 8
     case DLDataTypeCode::kDLFloat4_e2m1fn:
       switch (dtype.bits) {
         case 4:
@@ -432,6 +433,7 @@ ScalarType toScalarTypeForDLPackv1(const DLDataType& dtype) {
               false, "Unsupported kDLFloat4_e2m1fn bits ", std::to_string(dtype.bits));
       }
       break;
+#endif
     default:
       TORCH_CHECK(false, "Unsupported code ", std::to_string(dtype.code));
   }
