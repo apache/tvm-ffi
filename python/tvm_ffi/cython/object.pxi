@@ -303,8 +303,9 @@ def _type_info_create_from_type_key(object type_cls, str type_key):
     cdef object methods = []
     cdef FieldGetter getter
     cdef FieldSetter setter
+    cdef ByteArrayArg type_key_arg = ByteArrayArg(c_str(type_key))
 
-    if TVMFFITypeKeyToIndex(ByteArrayArg(c_str(type_key)).cptr(), &type_index) != 0:
+    if TVMFFITypeKeyToIndex(type_key_arg.cptr(), &type_index) != 0:
         raise ValueError(f"Cannot find type key: {type_key}")
     info = TVMFFIGetTypeInfo(type_index)
     for i in range(info.num_fields):
