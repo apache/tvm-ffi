@@ -250,7 +250,7 @@ class Object {
   int32_t use_count() const {
     // only need relaxed load of counters
 #ifdef _MSC_VER
-    return (reinterpret_cast<const volatile __int64*>(&header_.strong_ref_count))[0];  // NOLINT(*)
+    return (reinterpret_cast<const volatile long*>(&header_.strong_ref_count))[0];  // NOLINT(*)
 #else
     return __atomic_load_n(&(header_.strong_ref_count), __ATOMIC_RELAXED);
 #endif
@@ -293,8 +293,8 @@ class Object {
   /*! \brief increase strong reference count, the caller must already hold a strong reference */
   void IncRef() {
 #ifdef _MSC_VER
-    _InterlockedIncrement64(
-        reinterpret_cast<volatile __int64*>(&header_.strong_ref_count));  // NOLINT(*)
+    _InterlockedIncrement(
+        reinterpret_cast<volatile long*>(&header_.strong_ref_count));  // NOLINT(*)
 #else
     __atomic_fetch_add(&(header_.strong_ref_count), 1, __ATOMIC_RELAXED);
 #endif
@@ -306,12 +306,12 @@ class Object {
    */
   bool TryPromoteWeakPtr() {
 #ifdef _MSC_VER
-    uint64_t old_count =
-        (reinterpret_cast<const volatile __int64*>(&header_.strong_ref_count))[0];  // NOLINT(*)
+    uint32_t old_count =
+        (reinterpret_cast<const volatile long*>(&header_.strong_ref_count))[0];  // NOLINT(*)
     while (old_count > 0) {
-      uint64_t new_count = old_count + 1;
-      uint64_t old_count_loaded = _InterlockedCompareExchange64(
-          reinterpret_cast<volatile __int64*>(&header_.strong_ref_count), new_count, old_count);
+      uint32_t new_count = old_count + 1;
+      uint32_t old_count_loaded = _InterlockedCompareExchange(
+          reinterpret_cast<volatile long*>(&header_.strong_ref_count), new_count, old_count);
       if (old_count == old_count_loaded) {
         return true;
       }
@@ -319,12 +319,12 @@ class Object {
     }
     return false;
 #else
-    uint64_t old_count = __atomic_load_n(&(header_.strong_ref_count), __ATOMIC_RELAXED);
+    uint32_t old_count = __atomic_load_n(&(header_.strong_ref_count), __ATOMIC_RELAXED);
     while (old_count > 0) {
       // must do CAS to ensure that we are the only one that increases the reference count
       // avoid condition when two threads tries to promote weak to strong at same time
       // or when strong deletion happens between the load and the CAS
-      uint64_t new_count = old_count + 1;
+      uint32_t new_count = old_count + 1;
       if (__atomic_compare_exchange_n(&(header_.strong_ref_count), &old_count, new_count, true,
                                       __ATOMIC_ACQ_REL, __ATOMIC_RELAXED)) {
         return true;
@@ -347,8 +347,8 @@ class Object {
   void DecRef() {
 #ifdef _MSC_VER
     // use simpler impl in windows to ensure correctness
-    if (_InterlockedDecrement64(                                                     //
-            reinterpret_cast<volatile __int64*>(&header_.strong_ref_count)) == 0) {  // NOLINT(*)
+    if (_InterlockedDecrement(                                                    //
+            reinterpret_cast<volatile long*>(&header_.strong_ref_count)) == 0) {  // NOLINT(*)
       // full barrrier is implicit in InterlockedDecrement
       if (header_.deleter != nullptr) {
         header_.deleter(&(this->header_), kTVMFFIObjectDeleterFlagBitMaskStrong);

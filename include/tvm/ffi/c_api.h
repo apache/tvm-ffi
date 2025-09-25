@@ -217,22 +217,26 @@ typedef enum {
 
 /*!
  * \brief C-based type of all FFI object header that allocates on heap.
- * \note TVMFFIObject and TVMFFIAny share the common type_index header
  */
 typedef struct {
+  // Ref counter goes first to align ABI with most intrusive ptr designs.
+  // It is also likely more efficient as rc operations can be quite common
+  // ABI note: Strong ref counter and weak ref counter can be packed into a single 64-bit field
+  // Hopefully in future being able to use 64bit atomic that avoids extra reading of
+  // weak counter during deletion.
+  /*! \brief Strong reference counter of the object. */
+  uint32_t strong_ref_count;
+  /*!
+   * \brief Weak reference counter of the object, for compatiblity with weak_ptr design.
+   */
+  uint32_t weak_ref_count;
   /*!
    * \brief type index of the object.
    * \note The type index of Object and Any are shared in FFI.
    */
   int32_t type_index;
-  /*!
-   * \brief Weak reference counter of the object, for compatiblity with weak_ptr design.
-   * \note Use u32 to ensure that overall object stays within 24-byte boundary, usually
-   *       manipulation of weak counter is less common than strong counter.
-   */
-  uint32_t weak_ref_count;
-  /*! \brief Strong reference counter of the object. */
-  uint64_t strong_ref_count;
+  /*! \brief Extra padding to ensure 8 bytes alignment. */
+  uint32_t __padding;
 #if !defined(TVM_FFI_DOXYGEN_MODE)
   union {
 #endif
