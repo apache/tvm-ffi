@@ -29,7 +29,6 @@
 #include <tvm/ffi/string.h>
 
 #include <memory>
-#include <string>
 #include <utility>
 #include <vector>
 
@@ -340,6 +339,7 @@ class TypeTable {
                             TypeIndex::kTVMFFIObjectRValueRef);
     ReserveBuiltinTypeIndex(StaticTypeKey::kTVMFFISmallStr, TypeIndex::kTVMFFISmallStr);
     ReserveBuiltinTypeIndex(StaticTypeKey::kTVMFFISmallBytes, TypeIndex::kTVMFFISmallBytes);
+    ReserveBuiltinTypeIndex(StaticTypeKey::kTVMFFIOpaquePyObject, TypeIndex::kTVMFFIOpaquePyObject);
     // no need to reserve for object types as they will be registered
   }
 

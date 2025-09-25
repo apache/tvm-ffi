@@ -89,6 +89,11 @@ def make_unregistered_object() -> Object:
     return get_global_func("testing.make_unregistered_object")()
 
 
+def add_one(x: int) -> int:
+    """Add one to the input integer."""
+    return get_global_func("testing.add_one")(x)
+
+
 @c_class("testing.TestCxxClassBase")
 class _TestCxxClassBase:
     v_i64: int

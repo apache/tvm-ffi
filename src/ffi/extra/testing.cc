@@ -191,6 +191,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
 
   refl::GlobalDef()
       .def("testing.test_raise_error", TestRaiseError)
+      .def("testing.add_one", [](int x) { return x + 1; })
       .def_packed("testing.nop", [](PackedArgs args, Any* ret) {})
       .def_packed("testing.echo", [](PackedArgs args, Any* ret) { *ret = args[0]; })
       .def_packed("testing.apply", TestApply)

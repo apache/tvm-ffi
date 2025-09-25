@@ -102,6 +102,16 @@ def test_opaque_object() -> None:
     assert sys.getrefcount(obj0) == 2
 
 
+def test_opaque_type_error() -> None:
+    obj0 = MyObject("hello")
+    with pytest.raises(TypeError) as e:
+        tvm_ffi.testing.add_one(obj0)  # type: ignore[arg-type]
+    assert (
+        "Mismatched type on argument #0 when calling: `testing.add_one(0: int) -> int`. Expected `int` but got `ffi.OpaquePyObject`"
+        in str(e.value)
+    )
+
+
 def test_unregistered_object_fallback() -> None:
     with pytest.warns(
         UserWarning,
