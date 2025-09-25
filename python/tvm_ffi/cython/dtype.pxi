@@ -172,8 +172,11 @@ if torch is not None:
         torch.float8_e4m3fnuz: DLDataType(11, 8, 1),
         torch.float8_e5m2: DLDataType(12, 8, 1),
         torch.float8_e5m2fnuz: DLDataType(13, 8, 1),
-        torch.float8_e8m0fnu: DLDataType(14, 8, 1),
     }
+    if hasattr(torch, "float8_e8m0fnu"):
+        TORCH_DTYPE_TO_DTYPE[torch.float8_e8m0fnu] = DLDataType(14, 8, 1)
+    if hasattr(torch, "float4_e2m1fn_x2"):
+        TORCH_DTYPE_TO_DTYPE[torch.float8_e8m0fnu] = DLDataType(17, 4, 2)
 
     def _convert_torch_dtype_to_ffi_dtype(torch_dtype):
         cdef DLDataType cdtype = TORCH_DTYPE_TO_DTYPE[torch_dtype]

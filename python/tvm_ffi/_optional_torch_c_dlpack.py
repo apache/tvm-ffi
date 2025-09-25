@@ -120,10 +120,10 @@ DLDataType getDLDataTypeForDLPackv1(const Tensor& t) {
     case ScalarType::Float8_e4m3fnuz:
       dtype.code = DLDataTypeCode::kDLFloat8_e4m3fnuz;
       break;
+#if TORCH_VERSION_MAJOR >= 2 && TORCH_VERSION_MINOR >= 8
     case ScalarType::Float8_e8m0fnu:
       dtype.code = DLDataTypeCode::kDLFloat8_e8m0fnu;
       break;
-#if TORCH_VERSION_MAJOR >= 2 && TORCH_VERSION_MINOR >= 8
     case ScalarType::Float4_e2m1fn_x2:
       dtype.code = DLDataTypeCode::kDLFloat4_e2m1fn;
       dtype.lanes = 2;
@@ -269,11 +269,13 @@ static Device getATenDeviceForDLPackv1(DLDeviceType type, c10::DeviceIndex index
 
 ScalarType toScalarTypeForDLPackv1(const DLDataType& dtype) {
   ScalarType stype = ScalarType::Undefined;
+#if TORCH_VERSION_MAJOR >= 2 && TORCH_VERSION_MINOR >= 8
   if (dtype.code != DLDataTypeCode::kDLFloat4_e2m1fn) {
     TORCH_CHECK(
         dtype.lanes == 1,
         "ATen does not support lanes != 1 for dtype code", std::to_string(dtype.code));
   }
+#endif
   switch (dtype.code) {
     case DLDataTypeCode::kDLUInt:
       switch (dtype.bits) {
@@ -405,6 +407,7 @@ ScalarType toScalarTypeForDLPackv1(const DLDataType& dtype) {
               false, "Unsupported kDLFloat8_e4m3fnuz bits ", std::to_string(dtype.bits));
       }
       break;
+#if TORCH_VERSION_MAJOR >= 2 && TORCH_VERSION_MINOR >= 8
     case DLDataTypeCode::kDLFloat8_e8m0fnu:
       switch (dtype.bits) {
         case 8:
@@ -415,7 +418,6 @@ ScalarType toScalarTypeForDLPackv1(const DLDataType& dtype) {
               false, "Unsupported kDLFloat8_e8m0fnu bits ", std::to_string(dtype.bits));
       }
       break;
-#if TORCH_VERSION_MAJOR >= 2 && TORCH_VERSION_MINOR >= 8
     case DLDataTypeCode::kDLFloat4_e2m1fn:
       switch (dtype.bits) {
         case 4:
