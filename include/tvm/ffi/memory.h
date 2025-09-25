@@ -66,8 +66,7 @@ class ObjAllocatorBase {
     static_assert(std::is_base_of<Object, T>::value, "make can only be used to create Object");
     T* ptr = Handler::New(static_cast<Derived*>(this), std::forward<Args>(args)...);
     TVMFFIObject* ffi_ptr = details::ObjectUnsafe::GetHeader(ptr);
-    ffi_ptr->strong_ref_count = 1;
-    ffi_ptr->weak_ref_count = 1;
+    ffi_ptr->combined_ref_count = kCombinedRefCountBothOne;
     ffi_ptr->type_index = T::RuntimeTypeIndex();
     ffi_ptr->deleter = Handler::Deleter();
     return details::ObjectUnsafe::ObjectPtrFromOwned<T>(ptr);
@@ -88,8 +87,7 @@ class ObjAllocatorBase {
     ArrayType* ptr =
         Handler::New(static_cast<Derived*>(this), num_elems, std::forward<Args>(args)...);
     TVMFFIObject* ffi_ptr = details::ObjectUnsafe::GetHeader(ptr);
-    ffi_ptr->strong_ref_count = 1;
-    ffi_ptr->weak_ref_count = 1;
+    ffi_ptr->combined_ref_count = kCombinedRefCountBothOne;
     ffi_ptr->type_index = ArrayType::RuntimeTypeIndex();
     ffi_ptr->deleter = Handler::Deleter();
     return details::ObjectUnsafe::ObjectPtrFromOwned<ArrayType>(ptr);

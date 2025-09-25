@@ -224,12 +224,18 @@ typedef struct {
   // ABI note: Strong ref counter and weak ref counter can be packed into a single 64-bit field
   // Hopefully in future being able to use 64bit atomic that avoids extra reading of
   // weak counter during deletion.
-  /*! \brief Strong reference counter of the object. */
-  uint32_t strong_ref_count;
   /*!
-   * \brief Weak reference counter of the object, for compatiblity with weak_ptr design.
+   * \brief Combined strong and weak reference counter of the object.
+   *
+   * Strong ref counter is packed into the lower 32 bits.
+   * Weak ref counter is packed into the upper 32 bits.
+   *
+   * It is equivalent to { uint32_t strong_ref_count, uint32_t weak_ref_count }
+   * in little-endian structure.
+   *
+   * \note We can use u64 atomic to reduce extra reading of weak counter during deletion.
    */
-  uint32_t weak_ref_count;
+  uint64_t combined_ref_count;
   /*!
    * \brief type index of the object.
    * \note The type index of Object and Any are shared in FFI.

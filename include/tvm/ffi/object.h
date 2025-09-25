@@ -129,6 +129,15 @@ namespace details {
 // unsafe operations related to object
 struct ObjectUnsafe;
 
+/*! \brief One counter for weak reference. */
+constexpr uint64_t kCombinedRefCountWeakOne = static_cast<uint64_t>(1) << 32;
+/*! \brief One counter for strong reference. */
+constexpr uint64_t kCombinedRefCountStrongOne = 1;
+/*! \brief Both reference counts. */
+constexpr uint64_t kCombinedRefCountBothOne = kCombinedRefCountWeakOne | kCombinedRefCountStrongOne;
+/*! \brief Mask to get the lower 32 bits of the combined reference count. */
+constexpr uint64_t kCombinedRefCountMaskUInt32 = (static_cast<uint64_t>(1) << 32) - 1;
+
 /*!
  * Check if the type_index is an instance of TargetObjectType.
  *
@@ -192,8 +201,7 @@ class Object {
 
  public:
   Object() {
-    header_.strong_ref_count = 0;
-    header_.weak_ref_count = 0;
+    header_.combined_ref_count = 0;
     header_.deleter = nullptr;
   }
   /*!
@@ -247,12 +255,16 @@ class Object {
    * \return The usage count of the cell.
    * \note We use STL style naming to be consistent with known API in shared_ptr.
    */
-  int32_t use_count() const {
+  uint64_t use_count() const {
     // only need relaxed load of counters
 #ifdef _MSC_VER
-    return (reinterpret_cast<const volatile long*>(&header_.strong_ref_count))[0];  // NOLINT(*)
+    return ((reinterpret_cast<const volatile uint64_t*>(
+               &header_.combined_ref_count))[0]  // NOLINT(*)
+            ) &
+           kCombinedRefCountMaskUInt32;
 #else
-    return __atomic_load_n(&(header_.strong_ref_count), __ATOMIC_RELAXED);
+    return __atomic_load_n(&(header_.combined_ref_count), __ATOMIC_RELAXED) &
+           kCombinedRefCountMaskUInt32;
 #endif
   }
 
@@ -290,13 +302,18 @@ class Object {
   static int32_t _GetOrAllocRuntimeTypeIndex() { return TypeIndex::kTVMFFIObject; }
 
  private:
+  // exposing detailed constants to here
+  static constexpr uint64_t kCombinedRefCountMaskUInt32 = details::kCombinedRefCountMaskUInt32;
+  static constexpr uint64_t kCombinedRefCountStrongOne = details::kCombinedRefCountStrongOne;
+  static constexpr uint64_t kCombinedRefCountWeakOne = details::kCombinedRefCountWeakOne;
+  static constexpr uint64_t kCombinedRefCountBothOne = details::kCombinedRefCountBothOne;
   /*! \brief increase strong reference count, the caller must already hold a strong reference */
   void IncRef() {
 #ifdef _MSC_VER
-    _InterlockedIncrement(
-        reinterpret_cast<volatile long*>(&header_.strong_ref_count));  // NOLINT(*)
+    _InterlockedIncrement64(
+        reinterpret_cast<volatile __int64*>(&header_.combined_ref_count));  // NOLINT(*)
 #else
-    __atomic_fetch_add(&(header_.strong_ref_count), 1, __ATOMIC_RELAXED);
+    __atomic_fetch_add(&(header_.combined_ref_count), 1, __ATOMIC_RELAXED);
 #endif
   }
   /*!
@@ -306,12 +323,12 @@ class Object {
    */
   bool TryPromoteWeakPtr() {
 #ifdef _MSC_VER
-    uint32_t old_count =
-        (reinterpret_cast<const volatile long*>(&header_.strong_ref_count))[0];  // NOLINT(*)
-    while (old_count > 0) {
-      uint32_t new_count = old_count + 1;
-      uint32_t old_count_loaded = _InterlockedCompareExchange(
-          reinterpret_cast<volatile long*>(&header_.strong_ref_count), new_count, old_count);
+    uint64_t old_count =
+        (reinterpret_cast<const volatile __int64*>(&header_.combined_ref_count))[0];  // NOLINT(*)
+    while ((old_count & kCombinedRefCountMaskUInt32) != 0) {
+      uint64_t new_count = old_count + kCombinedRefCountStrongOne;
+      uint64_t old_count_loaded = _InterlockedCompareExchange64(
+          reinterpret_cast<volatile __int64*>(&header_.combined_ref_count), new_count, old_count);
       if (old_count == old_count_loaded) {
         return true;
       }
@@ -319,13 +336,13 @@ class Object {
     }
     return false;
 #else
-    uint32_t old_count = __atomic_load_n(&(header_.strong_ref_count), __ATOMIC_RELAXED);
-    while (old_count > 0) {
+    uint64_t old_count = __atomic_load_n(&(header_.combined_ref_count), __ATOMIC_RELAXED);
+    while ((old_count & kCombinedRefCountMaskUInt32) != 0) {
       // must do CAS to ensure that we are the only one that increases the reference count
       // avoid condition when two threads tries to promote weak to strong at same time
       // or when strong deletion happens between the load and the CAS
-      uint32_t new_count = old_count + 1;
-      if (__atomic_compare_exchange_n(&(header_.strong_ref_count), &old_count, new_count, true,
+      uint64_t new_count = old_count + kCombinedRefCountStrongOne;
+      if (__atomic_compare_exchange_n(&(header_.combined_ref_count), &old_count, new_count, true,
                                       __ATOMIC_ACQ_REL, __ATOMIC_RELAXED)) {
         return true;
       }
@@ -337,9 +354,11 @@ class Object {
   /*! \brief increase weak reference count */
   void IncWeakRef() {
 #ifdef _MSC_VER
-    _InterlockedIncrement(reinterpret_cast<volatile long*>(&header_.weak_ref_count));  // NOLINT(*)
+    _InlineInterlockedAdd64(
+        reinterpret_cast<volatile __int64*>(&header_.combined_ref_count),  // NOLINT(*)
+        kCombinedRefCountWeakOne);
 #else
-    __atomic_fetch_add(&(header_.weak_ref_count), 1, __ATOMIC_RELAXED);
+    __atomic_fetch_add(&(header_.combined_ref_count), kCombinedRefCountWeakOne, __ATOMIC_RELAXED);
 #endif
   }
 
@@ -347,43 +366,62 @@ class Object {
   void DecRef() {
 #ifdef _MSC_VER
     // use simpler impl in windows to ensure correctness
-    if (_InterlockedDecrement(                                                    //
-            reinterpret_cast<volatile long*>(&header_.strong_ref_count)) == 0) {  // NOLINT(*)
-      // full barrrier is implicit in InterlockedDecrement
+    uint64_t count_before_sub =
+        _InterlockedDecrement64(                                              //
+            reinterpret_cast<volatile __int64*>(&header_.combined_ref_count)  // NOLINT(*)
+            ) +
+        1;
+    if (count_before_sub == kCombinedRefCountBothOne) {  // NOLINT(*)
+      // fast path: both reference counts will go to zero
+      if (header_.deleter != nullptr) {
+        // full barrrier is implicit in InterlockedDecrement
+        header_.deleter(&(this->header_), kTVMFFIObjectDeleterFlagBitMaskBoth);
+      }
+    } else if ((count_before_sub & kCombinedRefCountMaskUInt32) == kCombinedRefCountStrongOne) {
+      // strong reference count becomes zero, we need to first do strong deletion
+      // then decrease weak reference count
+      // full barrrier is implicit in InterlockedAdd
       if (header_.deleter != nullptr) {
         header_.deleter(&(this->header_), kTVMFFIObjectDeleterFlagBitMaskStrong);
       }
-      if (_InterlockedDecrement(                                                  //
-              reinterpret_cast<volatile long*>(&header_.weak_ref_count)) == 0) {  // NOLINT(*)
+      // decrease weak reference count
+      if (_InlineInterlockedAdd64(  //
+              reinterpret_cast<volatile __int64*>(&header_.combined_ref_count),
+              -kCombinedRefCountWeakOne) == 0) {  // NOLINT(*)
         if (header_.deleter != nullptr) {
+          // full barrrier is implicit in InterlockedAdd
           header_.deleter(&(this->header_), kTVMFFIObjectDeleterFlagBitMaskWeak);
         }
       }
     }
 #else
     // first do a release, note we only need to acquire for deleter
-    if (__atomic_fetch_sub(&(header_.strong_ref_count), 1, __ATOMIC_RELEASE) == 1) {
-      if (__atomic_load_n(&(header_.weak_ref_count), __ATOMIC_RELAXED) == 1) {
-        // common case, we need to delete both the object and the memory block
-        // only acquire when we need to call deleter
+    // optimization: we only need one atomic to tell the common case
+    // where both reference counts are zero
+    uint64_t count_before_sub = __atomic_fetch_sub(&(header_.combined_ref_count),
+                                                   kCombinedRefCountStrongOne, __ATOMIC_RELEASE);
+    if (count_before_sub == kCombinedRefCountBothOne) {
+      // common case, we need to delete both the object and the memory block
+      // only acquire when we need to call deleter
+      __atomic_thread_fence(__ATOMIC_ACQUIRE);
+      if (header_.deleter != nullptr) {
+        // call deleter once
+        header_.deleter(&(this->header_), kTVMFFIObjectDeleterFlagBitMaskBoth);
+      }
+    } else if ((count_before_sub & kCombinedRefCountMaskUInt32) == kCombinedRefCountStrongOne) {
+      // strong count is already zero
+      // Slower path: there is still a weak reference left
+      __atomic_thread_fence(__ATOMIC_ACQUIRE);
+      // call destructor first, then decrease weak reference count
+      if (header_.deleter != nullptr) {
+        header_.deleter(&(this->header_), kTVMFFIObjectDeleterFlagBitMaskStrong);
+      }
+      // now decrease weak reference count
+      if (__atomic_fetch_sub(&(header_.combined_ref_count), kCombinedRefCountWeakOne,
+                             __ATOMIC_RELEASE) == kCombinedRefCountWeakOne) {
         __atomic_thread_fence(__ATOMIC_ACQUIRE);
         if (header_.deleter != nullptr) {
-          // call deleter once
-          header_.deleter(&(this->header_), kTVMFFIObjectDeleterFlagBitMaskBoth);
-        }
-      } else {
-        // Slower path: there is still a weak reference left
-        __atomic_thread_fence(__ATOMIC_ACQUIRE);
-        // call destructor first, then decrease weak reference count
-        if (header_.deleter != nullptr) {
-          header_.deleter(&(this->header_), kTVMFFIObjectDeleterFlagBitMaskStrong);
-        }
-        // now decrease weak reference count
-        if (__atomic_fetch_sub(&(header_.weak_ref_count), 1, __ATOMIC_RELEASE) == 1) {
-          __atomic_thread_fence(__ATOMIC_ACQUIRE);
-          if (header_.deleter != nullptr) {
-            header_.deleter(&(this->header_), kTVMFFIObjectDeleterFlagBitMaskWeak);
-          }
+          header_.deleter(&(this->header_), kTVMFFIObjectDeleterFlagBitMaskWeak);
         }
       }
     }
@@ -393,15 +431,17 @@ class Object {
   /*! \brief decrease weak reference count */
   void DecWeakRef() {
 #ifdef _MSC_VER
-    if (_InterlockedDecrement(                                                  //
-            reinterpret_cast<volatile long*>(&header_.weak_ref_count)) == 0) {  // NOLINT(*)
+    if (_InlineInterlockedAdd64(                                               //
+            reinterpret_cast<volatile __int64*>(&header_.combined_ref_count),  // NOLINT(*)
+            -kCombinedRefCountWeakOne) == 0) {
       if (header_.deleter != nullptr) {
         header_.deleter(&(this->header_), kTVMFFIObjectDeleterFlagBitMaskWeak);
       }
     }
 #else
     // now decrease weak reference count
-    if (__atomic_fetch_sub(&(header_.weak_ref_count), 1, __ATOMIC_RELEASE) == 1) {
+    if (__atomic_fetch_sub(&(header_.combined_ref_count), kCombinedRefCountWeakOne,
+                           __ATOMIC_RELEASE) == kCombinedRefCountWeakOne) {
       __atomic_thread_fence(__ATOMIC_ACQUIRE);
       if (header_.deleter != nullptr) {
         header_.deleter(&(this->header_), kTVMFFIObjectDeleterFlagBitMaskWeak);

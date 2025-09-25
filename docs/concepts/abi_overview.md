@@ -191,8 +191,7 @@ we adopt a unified object storage format, defined as follows:
 
 ```c++
 typedef struct TVMFFIObject {
-  uint32_t strong_ref_count;
-  uint32_t weak_ref_count;
+  uint64_t combined_ref_count;
   int32_t type_index;
   uint32_t __padding;
   union {
@@ -204,13 +203,14 @@ typedef struct TVMFFIObject {
 
 `TVMFFIObject` defines a common 24-byte intrusive header that all in-memory objects share:
 
-- `strong_ref_count` stores the strong atomic reference counter of the object.
-- `weak_ref_count` stores the weak atomic reference counter of the object.
+- `combined_ref_count` packs strong and weak reference counter of the object into a single 64bit field
+  - The lower 32bits stores the strong atomic reference counter
+  - The higher 32bits stores the weak atomic reference counter
 - `type_index` helps us identify the type being stored, which is consistent with `TVMFFIAny.type_index`.
 - `deleter` should be called when either the strong or weak ref counter goes to zero.
   - The flags are set to indicate the event of either weak or strong going to zero, or both.
-  - When `strong_ref_count` gets to zero, the deleter needs to call the destructor of the object.
-  - When `weak_ref_count` gets to zero, the deleter needs to free the memory allocated by self.
+  - When strong reference counter gets to zero, the deleter needs to call the destructor of the object.
+  - When weak reference counter gets to zero, the deleter needs to free the memory allocated by self.
 
 **Rationales:** There are several considerations when designing the data structure:
 
