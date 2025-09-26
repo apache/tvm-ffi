@@ -219,11 +219,6 @@ typedef enum {
  * \brief C-based type of all FFI object header that allocates on heap.
  */
 typedef struct {
-  // Ref counter goes first to align ABI with most intrusive ptr designs.
-  // It is also likely more efficient as rc operations can be quite common
-  // ABI note: Strong ref counter and weak ref counter can be packed into a single 64-bit field
-  // Hopefully in future being able to use 64bit atomic that avoids extra reading of
-  // weak counter during deletion.
   /*!
    * \brief Combined strong and weak reference counter of the object.
    *
@@ -231,9 +226,17 @@ typedef struct {
    * Weak ref counter is packed into the upper 32 bits.
    *
    * It is equivalent to { uint32_t strong_ref_count, uint32_t weak_ref_count }
-   * in little-endian structure.
+   * in little-endian structure:
    *
-   * \note We can use u64 atomic to reduce extra reading of weak counter during deletion.
+   * - strong_ref_count: `combined_ref_count & 0xFFFFFFFF`
+   * - weak_ref_count: `(combined_ref_count >> 32) & 0xFFFFFFFF`
+   *
+   * Rationale: atomic ops on strong ref counter remains the same as +1/-1,
+   * this combined ref counter allows us to use u64 atomic once
+   * instead of a separate atomic read of weak counter during deletion.
+   *
+   * The ref counter goes first to align ABI with most intrusive ptr designs.
+   * It is also likely more efficient as rc operations can be quite common.
    */
   uint64_t combined_ref_count;
   /*!

@@ -204,8 +204,10 @@ typedef struct TVMFFIObject {
 `TVMFFIObject` defines a common 24-byte intrusive header that all in-memory objects share:
 
 - `combined_ref_count` packs strong and weak reference counter of the object into a single 64bit field
-  - The lower 32bits stores the strong atomic reference counter
-  - The higher 32bits stores the weak atomic reference counter
+  - The lower 32bits stores the strong atomic reference counter:
+    `strong_ref_count = combined_ref_count & 0xFFFFFFFF`
+  - The higher 32bits stores the weak atomic reference counter:
+    `weak_ref_count = (combined_ref_count >> 32) & 0xFFFFFFFF`
 - `type_index` helps us identify the type being stored, which is consistent with `TVMFFIAny.type_index`.
 - `deleter` should be called when either the strong or weak ref counter goes to zero.
   - The flags are set to indicate the event of either weak or strong going to zero, or both.
