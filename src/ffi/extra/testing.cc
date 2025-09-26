@@ -58,8 +58,8 @@ class TestIntPair : public tvm::ffi::ObjectRef {
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::ObjectDef<TestIntPairObj>()
-      .def_ro("a", &TestIntPairObj::a)
-      .def_ro("b", &TestIntPairObj::b)
+      .def_ro("a", &TestIntPairObj::a, "Field `a`")
+      .def_ro("b", &TestIntPairObj::b, "Field `b`")
       .def_static("__ffi_init__", refl::init<TestIntPairObj, int64_t, int64_t>);
 }
 

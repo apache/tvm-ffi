@@ -79,18 +79,21 @@ class TypeField:
     def as_property(self, object cls):
         """Create a Python ``property`` object for this field on ``cls``."""
         cdef str name = self.name
-        cdef str doc = self.doc or f"{cls.__module__}.{cls.__qualname__}.{name}"
         cdef FieldGetter fget = self.getter
         cdef FieldSetter fset = self.setter
+        cdef object ret
         fget.__name__ = fset.__name__ = name
         fget.__module__ = fset.__module__ = cls.__module__
         fget.__qualname__ = fset.__qualname__ = f"{cls.__qualname__}.{name}"
-        fget.__doc__ = fset.__doc__ = f"Property `{name}` of class `{cls.__qualname__}`"
-        return property(
+        ret = property(
             fget=fget,
             fset=fset if (not self.frozen) else None,
-            doc=doc,
         )
+        if self.doc:
+            ret.__doc__ = self.doc
+            fget.__doc__ = self.doc
+            fset.__doc__ = self.doc
+        return ret
 
 
 @dataclasses.dataclass(eq=False)
@@ -105,14 +108,14 @@ class TypeMethod:
     def as_callable(self, object cls):
         """Create a Python method attribute for this method on ``cls``."""
         cdef str name = self.name
-        cdef str doc = self.doc or f"Method `{name}` of class `{cls.__qualname__}`"
         cdef object func = self.func
         if not self.is_static:
             func = _member_method_wrapper(func)
         func.__module__ = cls.__module__
         func.__name__ = name
         func.__qualname__ = f"{cls.__qualname__}.{name}"
-        func.__doc__ = doc
+        if self.doc:
+            func.__doc__ = self.doc
         if self.is_static:
             func = staticmethod(func)
         return func

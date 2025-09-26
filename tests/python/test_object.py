@@ -45,6 +45,14 @@ def test_method() -> None:
     assert type(obj0).v_i64.__doc__ == "i64 field"  # type: ignore[attr-defined]
 
 
+def test_attribute() -> None:
+    obj = tvm_ffi.testing.TestIntPair(3, 4)
+    assert obj.a == 3
+    assert obj.b == 4
+    assert type(obj).a.__doc__ == "Field `a`"
+    assert type(obj).b.__doc__ == "Field `b`"
+
+
 def test_setter() -> None:
     # test setter
     obj0 = tvm_ffi.testing.create_object("testing.TestObjectBase", v_i64=10, v_str="hello")
