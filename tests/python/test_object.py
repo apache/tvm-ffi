@@ -53,6 +53,15 @@ def test_attribute() -> None:
     assert type(obj).b.__doc__ == "Field `b`"
 
 
+def test_attribute_no_doc() -> None:
+    from tvm_ffi.testing import TestObjectBase  # noqa: PLC0415
+
+    # The docs for v_f64 and v_str are None because they are not explicitly set.
+    assert TestObjectBase.v_i64.__doc__ == "i64 field"
+    assert TestObjectBase.v_f64.__doc__ is None
+    assert TestObjectBase.v_str.__doc__ is None
+
+
 def test_setter() -> None:
     # test setter
     obj0 = tvm_ffi.testing.create_object("testing.TestObjectBase", v_i64=10, v_str="hello")
