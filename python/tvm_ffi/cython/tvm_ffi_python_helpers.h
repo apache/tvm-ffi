@@ -27,6 +27,15 @@
 #include <tvm/ffi/c_api.h>
 #include <tvm/ffi/extra/c_env_api.h>
 
+// Define here to avoid dependencies on non-c headers for now
+#ifndef TVM_FFI_INLINE
+#if defined(_MSC_VER)
+#define TVM_FFI_INLINE [[msvc::forceinline]] inline
+#else
+#define TVM_FFI_INLINE [[gnu::always_inline]] inline
+#endif
+#endif
+
 #include <cstring>
 #include <exception>
 #include <iostream>
@@ -117,7 +126,8 @@ struct TVMFFIPyArgSetter {
    * \param out The output argument.
    * \return 0 on success, -1 on failure. PyError should be set if -1 is returned.
    */
-  int operator()(TVMFFIPyCallContext* call_ctx, PyObject* arg, TVMFFIAny* out) const {
+  TVM_FFI_INLINE int operator()(TVMFFIPyCallContext* call_ctx, PyObject* arg,
+                                TVMFFIAny* out) const {
     return (*func)(const_cast<TVMFFIPyArgSetter*>(this), call_ctx, arg, out);
   }
 };
@@ -267,9 +277,9 @@ class TVMFFIPyCallManager {
    * \return 0 on when there is no python error, -1 on python error
    * \note When an error happens on FFI side, we should return 0 and set c_api_ret_code
    */
-  int FuncCall(TVMFFIPyArgSetterFactory setter_factory, void* func_handle, PyObject* py_arg_tuple,
-               TVMFFIAny* result, int* c_api_ret_code, bool release_gil,
-               DLPackToPyObject* optional_out_dlpack_importer) {
+  TVM_FFI_INLINE int FuncCall(TVMFFIPyArgSetterFactory setter_factory, void* func_handle,
+                              PyObject* py_arg_tuple, TVMFFIAny* result, int* c_api_ret_code,
+                              bool release_gil, DLPackToPyObject* optional_out_dlpack_importer) {
     int64_t num_args = PyTuple_Size(py_arg_tuple);
     if (num_args == -1) return -1;
     try {
@@ -346,9 +356,9 @@ class TVMFFIPyCallManager {
    * \param parent_ctx The parent call context to
    * \return 0 on success, -1 on failure
    */
-  int ConstructorCall(TVMFFIPyArgSetterFactory setter_factory, void* func_handle,
-                      PyObject* py_arg_tuple, TVMFFIAny* result, int* c_api_ret_code,
-                      TVMFFIPyCallContext* parent_ctx) {
+  TVM_FFI_INLINE int ConstructorCall(TVMFFIPyArgSetterFactory setter_factory, void* func_handle,
+                                     PyObject* py_arg_tuple, TVMFFIAny* result, int* c_api_ret_code,
+                                     TVMFFIPyCallContext* parent_ctx) {
     int64_t num_args = PyTuple_Size(py_arg_tuple);
     if (num_args == -1) return -1;
     try {
@@ -386,8 +396,9 @@ class TVMFFIPyCallManager {
     }
   }
 
-  int SetField(TVMFFIPyArgSetterFactory setter_factory, TVMFFIFieldSetter field_setter,
-               void* field_ptr, PyObject* py_arg, int* c_api_ret_code) {
+  TVM_FFI_INLINE int SetField(TVMFFIPyArgSetterFactory setter_factory,
+                              TVMFFIFieldSetter field_setter, void* field_ptr, PyObject* py_arg,
+                              int* c_api_ret_code) {
     try {
       CallStack ctx(this, 1);
       TVMFFIAny* c_arg = ctx.packed_args;
@@ -424,9 +435,10 @@ class TVMFFIPyCallManager {
  private:
   TVMFFIPyCallManager() {
     static constexpr size_t kDefaultDispatchCapacity = 32;
-    static constexpr size_t kDefaultStackSize = 32;
+    // keep it 4K as default stack size so it is page aligned
+    static constexpr size_t kDefaultStackSize = 4096;
     dispatch_map_.reserve(kDefaultDispatchCapacity);
-    temp_stack_.resize(kDefaultStackSize * 2);
+    temp_stack_.resize(kDefaultStackSize / sizeof(TVMFFIAny));
   }
   /*!
    * \brief Set an py_arg to out.
@@ -436,8 +448,8 @@ class TVMFFIPyCallManager {
    * \param out The output argument
    * \return 0 on success, -1 on failure
    */
-  int SetArgument(TVMFFIPyArgSetterFactory setter_factory, TVMFFIPyCallContext* ctx,
-                  PyObject* py_arg, TVMFFIAny* out) {
+  TVM_FFI_INLINE int SetArgument(TVMFFIPyArgSetterFactory setter_factory, TVMFFIPyCallContext* ctx,
+                                 PyObject* py_arg, TVMFFIAny* out) {
     PyTypeObject* py_type = Py_TYPE(py_arg);
     // pre-zero the output argument, modulo the type index
     out->type_index = kTVMFFINone;
@@ -481,10 +493,10 @@ class TVMFFIPyCallManager {
  * \param out_dlpack_exporter The DLPack exporter to be used for the result
  * \return 0 on success, nonzero on failure
  */
-inline int TVMFFIPyFuncCall(TVMFFIPyArgSetterFactory setter_factory, void* func_handle,
-                            PyObject* py_arg_tuple, TVMFFIAny* result, int* c_api_ret_code,
-                            bool release_gil = true,
-                            DLPackToPyObject* out_dlpack_importer = nullptr) {
+TVM_FFI_INLINE int TVMFFIPyFuncCall(TVMFFIPyArgSetterFactory setter_factory, void* func_handle,
+                                    PyObject* py_arg_tuple, TVMFFIAny* result, int* c_api_ret_code,
+                                    bool release_gil = true,
+                                    DLPackToPyObject* out_dlpack_importer = nullptr) {
   return TVMFFIPyCallManager::ThreadLocal()->FuncCall(setter_factory, func_handle, py_arg_tuple,
                                                       result, c_api_ret_code, release_gil,
                                                       out_dlpack_importer);
@@ -510,9 +522,10 @@ inline int TVMFFIPyFuncCall(TVMFFIPyArgSetterFactory setter_factory, void* func_
  * \param out_dlpack_exporter The DLPack exporter to be used for the result
  * \return 0 on success, nonzero on failure
  */
-inline int TVMFFIPyConstructorCall(TVMFFIPyArgSetterFactory setter_factory, void* func_handle,
-                                   PyObject* py_arg_tuple, TVMFFIAny* result, int* c_api_ret_code,
-                                   TVMFFIPyCallContext* parent_ctx) {
+TVM_FFI_INLINE int TVMFFIPyConstructorCall(TVMFFIPyArgSetterFactory setter_factory,
+                                           void* func_handle, PyObject* py_arg_tuple,
+                                           TVMFFIAny* result, int* c_api_ret_code,
+                                           TVMFFIPyCallContext* parent_ctx) {
   return TVMFFIPyCallManager::ThreadLocal()->ConstructorCall(
       setter_factory, func_handle, py_arg_tuple, result, c_api_ret_code, parent_ctx);
 }
@@ -526,9 +539,9 @@ inline int TVMFFIPyConstructorCall(TVMFFIPyArgSetterFactory setter_factory, void
  * \param c_api_ret_code The return code of the function
  * \return 0 on success, nonzero on failure
  */
-inline int TVMFFIPyCallFieldSetter(TVMFFIPyArgSetterFactory setter_factory,
-                                   TVMFFIFieldSetter field_setter, void* field_ptr,
-                                   PyObject* py_arg, int* c_api_ret_code) {
+TVM_FFI_INLINE int TVMFFIPyCallFieldSetter(TVMFFIPyArgSetterFactory setter_factory,
+                                           TVMFFIFieldSetter field_setter, void* field_ptr,
+                                           PyObject* py_arg, int* c_api_ret_code) {
   return TVMFFIPyCallManager::ThreadLocal()->SetField(setter_factory, field_setter, field_ptr,
                                                       py_arg, c_api_ret_code);
 }
@@ -541,8 +554,8 @@ inline int TVMFFIPyCallFieldSetter(TVMFFIPyArgSetterFactory setter_factory,
  * \param c_api_ret_code The return code of the function
  * \return 0 on success, nonzero on failure
  */
-inline int TVMFFIPyPyObjectToFFIAny(TVMFFIPyArgSetterFactory setter_factory, PyObject* py_arg,
-                                    TVMFFIAny* out, int* c_api_ret_code) {
+TVM_FFI_INLINE int TVMFFIPyPyObjectToFFIAny(TVMFFIPyArgSetterFactory setter_factory,
+                                            PyObject* py_arg, TVMFFIAny* out, int* c_api_ret_code) {
   return TVMFFIPyCallManager::ThreadLocal()->PyObjectToFFIAny(setter_factory, py_arg, out,
                                                               c_api_ret_code);
 }
@@ -551,7 +564,7 @@ inline int TVMFFIPyPyObjectToFFIAny(TVMFFIPyArgSetterFactory setter_factory, PyO
  * \brief Get the size of the dispatch map
  * \return The size of the dispatch map
  */
-inline size_t TVMFFIPyGetDispatchMapSize() {
+TVM_FFI_INLINE size_t TVMFFIPyGetDispatchMapSize() {
   return TVMFFIPyCallManager::ThreadLocal()->GetDispatchMapSize();
 }
 
@@ -560,7 +573,8 @@ inline size_t TVMFFIPyGetDispatchMapSize() {
  * \param ctx The call context
  * \param arg The FFI object to push
  */
-inline void TVMFFIPyPushTempFFIObject(TVMFFIPyCallContext* ctx, TVMFFIObjectHandle arg) noexcept {
+TVM_FFI_INLINE void TVMFFIPyPushTempFFIObject(TVMFFIPyCallContext* ctx,
+                                              TVMFFIObjectHandle arg) noexcept {
   // invariance: each ArgSetter can have at most one temporary Python object
   // so it ensures that we won't overflow the temporary Python object stack
   ctx->temp_ffi_objects[ctx->num_temp_ffi_objects++] = arg;
@@ -571,7 +585,7 @@ inline void TVMFFIPyPushTempFFIObject(TVMFFIPyCallContext* ctx, TVMFFIObjectHand
  * \param ctx The call context
  * \param arg The Python object to push
  */
-inline void TVMFFIPyPushTempPyObject(TVMFFIPyCallContext* ctx, PyObject* arg) noexcept {
+TVM_FFI_INLINE void TVMFFIPyPushTempPyObject(TVMFFIPyCallContext* ctx, PyObject* arg) noexcept {
   // invariance: each ArgSetter can have at most one temporary Python object
   // so it ensures that we won't overflow the temporary Python object stack
   Py_IncRef(arg);
