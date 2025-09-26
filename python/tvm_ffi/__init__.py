@@ -16,6 +16,9 @@
 # under the License.
 """TVM FFI Python package."""
 
+# version
+__version__ = "0.1.0b9"
+
 # order matters here so we need to skip isort here
 # isort: skip_file
 # base always go first to load the libtvm_ffi
@@ -60,6 +63,7 @@ __all__ = [
     "ObjectConvertible",
     "Shape",
     "Tensor",
+    "__version__",
     "access_path",
     "convert",
     "dataclasses",
