@@ -36,6 +36,67 @@
 namespace tvm {
 namespace ffi {
 
+/*!
+ * \brief Lightweight view non-owning class for shape.
+ */
+class ShapeView {
+ public:
+  /*! \brief Default constructor. */
+  ShapeView() : cell_{nullptr, 0} {}
+  /*! \brief Copy constructor. */
+  ShapeView(const ShapeView& other) = default;
+  /*! \brief Copy assignment operator. */
+  ShapeView& operator=(const ShapeView& other) = default;
+  /*! \brief Move constructor. */
+  ShapeView(ShapeView&& other) = default;
+  /*! \brief Move assignment operator. */
+  ShapeView& operator=(ShapeView&& other) = default;
+  /*! \brief Constructor from data and size. */
+  ShapeView(const int64_t* data, size_t size) : cell_{data, size} {}
+  /*! \brief Get the data pointer. */
+  const int64_t* data() const { return cell_.data; }
+  /*! \brief Get the size of the shape. */
+  size_t size() const { return cell_.size; }
+
+  /*! \brief Get the product of the shape. */
+  int64_t Product() const {
+    int64_t product = 1;
+    for (size_t i = 0; i < cell_.size; ++i) {
+      product *= cell_.data[i];
+    }
+    return product;
+  }
+
+  /*! \brief Get the i-th element of the shape. */
+  int64_t operator[](size_t idx) const { return cell_.data[idx]; }
+
+  /*! \return Whether shape tuple is empty */
+  bool empty() const { return size() == 0; }
+
+  /*! \return The first element of the shape tuple */
+  int64_t front() const { return this->at(0); }
+
+  /*! \return The last element of the shape tuple */
+  int64_t back() const { return this->at(this->size() - 1); }
+
+  /*! \return begin iterator */
+  const int64_t* begin() const { return cell_.data; }
+
+  /*! \return end iterator */
+  const int64_t* end() const { return cell_.data + cell_.size; }
+
+  /*! \brief Get the i-th element of the shape. */
+  int64_t at(size_t idx) const {
+    if (idx >= this->size()) {
+      TVM_FFI_THROW(IndexError) << "indexing " << idx << " on a Shape of size " << this->size();
+    }
+    return cell_.data[idx];
+  }
+
+ private:
+  TVMFFIShapeCell cell_;
+};
+
 /*! \brief An object representing a shape tuple. */
 class ShapeObj : public Object, public TVMFFIShapeCell {
  public:
@@ -93,21 +154,41 @@ TVM_FFI_INLINE ObjectPtr<ShapeObj> MakeInplaceShape(IterType begin, IterType end
   return p;
 }
 
-TVM_FFI_INLINE ObjectPtr<ShapeObj> MakeStridesFromShape(const int64_t* data, int64_t ndim) {
-  int64_t* strides_data;
-  ObjectPtr<ShapeObj> strides = details::MakeEmptyShape(ndim, &strides_data);
+/*!
+ * \brief Get the product of a shape.
+ * \param shape The input shape.
+ * \param out_strides The output strides.
+ * \return The product of the shape.
+ */
+TVM_FFI_INLINE void FillStridesFromShape(ShapeView shape, int64_t* out_strides) {
   int64_t stride = 1;
-  for (int i = ndim - 1; i >= 0; --i) {
-    strides_data[i] = stride;
-    stride *= data[i];
+  for (int i = static_cast<int>(shape.size()) - 1; i >= 0; --i) {
+    out_strides[i] = stride;
+    stride *= shape[i];
   }
+}
+
+/*!
+ * \brief Make a strides shape from a shape view.
+ * \param shape The input shape.
+ * \return The shape.
+ */
+TVM_FFI_INLINE ObjectPtr<ShapeObj> MakeStridesFromShape(ShapeView shape) {
+  int64_t* strides_data;
+  ObjectPtr<ShapeObj> strides = details::MakeEmptyShape(shape.size(), &strides_data);
+  FillStridesFromShape(shape, strides_data);
   return strides;
 }
 
 }  // namespace details
 
 /*!
- * \brief Reference to shape object.
+ * \brief Managed reference to shape object.
+ *
+ * When possible, use ShapeView instead of Shape to reduce memory allocation.
+ * Use Shape when you need to have a managed reference to on-heap allocated shape.
+ *
+ * \sa ShapeView
  */
 class Shape : public ObjectRef {
  public:
@@ -150,14 +231,25 @@ class Shape : public ObjectRef {
       : ObjectRef(make_object<details::ShapeObjStdImpl>(std::move(other))) {}
 
   /*!
+   * \brief constructor from shape view.
+   * \param other The shape view.
+   */
+  Shape(ShapeView other) : Shape(other.begin(), other.end()) {}  // NOLINT(*)
+
+  /*!
    * \brief Create a strides from a shape.
-   * \param data The shape data.
-   * \param ndim The number of dimensions.
+   * \param shape The input shape.
    * \return The strides.
    */
-  static Shape StridesFromShape(const int64_t* data, int64_t ndim) {
-    return Shape(details::MakeStridesFromShape(data, ndim));
+  static Shape StridesFromShape(ShapeView shape) {
+    return Shape(details::MakeStridesFromShape(shape));
   }
+
+  /*!
+   * \brief Convert to shape view.
+   * \return The shape view.
+   */
+  operator ShapeView() const { return ShapeView(data(), size()); }  // NOLINT(*)
 
   /*!
    * \brief Return the data pointer

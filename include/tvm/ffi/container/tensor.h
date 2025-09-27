@@ -126,15 +126,7 @@ class TensorObj : public Object, public DLTensor {
   static constexpr const uint32_t _type_index = TypeIndex::kTVMFFITensor;
   TVM_FFI_DECLARE_OBJECT_INFO_STATIC(StaticTypeKey::kTVMFFITensor, TensorObj, Object);
   /// \endcond
-  ~TensorObj() {
-    // deleting the cached dl managed tensor versioned
-    // need to acquire the value in case it is released by another thread
-    DLManagedTensorVersioned* cached =
-        cached_dl_managed_tensor_versioned_.load(std::memory_order_acquire);
-    if (cached != nullptr) {
-      delete cached;
-    }
-  }
+
   /*!
    * \brief Move a Tensor to a DLPack managed tensor.
    * \return The converted DLPack managed tensor.
@@ -144,7 +136,7 @@ class TensorObj : public Object, public DLTensor {
     DLManagedTensor* ret = new DLManagedTensor();
     ret->dl_tensor = *static_cast<DLTensor*>(self);
     ret->manager_ctx = self;
-    ret->deleter = DLManagedTensorDeleter;
+    ret->deleter = DLManagedTensorDeleter<DLManagedTensor>;
     details::ObjectUnsafe::IncRefObjectHandle(self);
     return ret;
   }
@@ -154,67 +146,27 @@ class TensorObj : public Object, public DLTensor {
    * \return The converted DLPack managed tensor.
    */
   DLManagedTensorVersioned* ToDLPackVersioned() const {
-    TensorObj* from = const_cast<TensorObj*>(this);
-    // if cache is set, directly return it
-    // we need to use acquire to ensure that write to DLManagedTensorVersioned
-    // from another thread is visible to this thread.
-    DLManagedTensorVersioned* cached =
-        cached_dl_managed_tensor_versioned_.load(std::memory_order_acquire);
-    // if cache is not set, create a new one
-    if (cached == nullptr) {
-      DLManagedTensorVersioned* ret = new DLManagedTensorVersioned();
-      ret->version.major = DLPACK_MAJOR_VERSION;
-      ret->version.minor = DLPACK_MINOR_VERSION;
-      ret->dl_tensor = *static_cast<DLTensor*>(from);
-      ret->manager_ctx = from;
-      ret->deleter = EmbeddedDLManagedTensorVersionedDeleter;
-      ret->flags = 0;
-      DLManagedTensorVersioned* expected = nullptr;
-      // success set must release the new value to all other threads
-      // failure set must acquire, since the expected value is now coming
-      // from another thread that released this value
-      if (std::atomic_compare_exchange_strong_explicit(&cached_dl_managed_tensor_versioned_,
-                                                       &expected, ret, std::memory_order_release,
-                                                       std::memory_order_acquire)) {
-        // set is succes
-        cached = ret;
-      } else {
-        // delete the ret value as another thread raced to set this one first
-        delete ret;
-        cached = expected;
-      }
-      // at this point, cached is the value that officially set to the field
-    }
-    // inc the ref count of the from object
-    details::ObjectUnsafe::IncRefObjectHandle(from);
-    return cached;
+    TensorObj* self = const_cast<TensorObj*>(this);
+    DLManagedTensorVersioned* ret = new DLManagedTensorVersioned();
+    ret->version.major = DLPACK_MAJOR_VERSION;
+    ret->version.minor = DLPACK_MINOR_VERSION;
+    ret->dl_tensor = *static_cast<DLTensor*>(self);
+    ret->manager_ctx = self;
+    ret->deleter = DLManagedTensorDeleter<DLManagedTensorVersioned>;
+    details::ObjectUnsafe::IncRefObjectHandle(self);
+    return ret;
   }
 
  protected:
-  /*! \brief Internal data to back returning shape. */
-  Optional<Shape> shape_data_;
-  /*! \brief Internal data to back returning strides. */
-  Optional<Shape> strides_data_;
-  /*! \brief cached data to back returning DLManagedTensorVersioned. */
-  mutable std::atomic<DLManagedTensorVersioned*> cached_dl_managed_tensor_versioned_ = nullptr;
-
   /*!
    * \brief Deleter for DLManagedTensor.
    * \param tensor The DLManagedTensor to be deleted.
    */
-  static void DLManagedTensorDeleter(DLManagedTensor* tensor) {
+  template <typename TDLManagedTensor>
+  static void DLManagedTensorDeleter(TDLManagedTensor* tensor) {
     TensorObj* obj = static_cast<TensorObj*>(tensor->manager_ctx);
     details::ObjectUnsafe::DecRefObjectHandle(obj);
     delete tensor;
-  }
-
-  /*!
-   * \brief Deleter for DLManagedTensorVersioned.
-   * \param tensor The DLManagedTensorVersioned to be deleted.
-   */
-  static void EmbeddedDLManagedTensorVersionedDeleter(DLManagedTensorVersioned* tensor) {
-    TensorObj* obj = static_cast<TensorObj*>(tensor->manager_ctx);
-    details::ObjectUnsafe::DecRefObjectHandle(obj);
   }
 
   friend class Tensor;
@@ -237,7 +189,7 @@ class TensorObjFromNDAlloc : public TensorObj {
     this->ndim = static_cast<int>(shape.size());
     this->dtype = dtype;
     this->shape = const_cast<int64_t*>(shape.data());
-    Shape strides = Shape::StridesFromShape(this->shape, this->ndim);
+    Shape strides = Shape::StridesFromShape(ShapeView(this->shape, this->ndim));
     this->strides = const_cast<int64_t*>(strides.data());
     this->byte_offset = 0;
     this->shape_data_ = std::move(shape);
@@ -248,6 +200,10 @@ class TensorObjFromNDAlloc : public TensorObj {
   ~TensorObjFromNDAlloc() { alloc_.FreeData(static_cast<DLTensor*>(this)); }
 
  private:
+  /*! \brief Internal data to back returning shape. */
+  Optional<Shape> shape_data_;
+  /*! \brief Internal data to back returning strides. */
+  Optional<Shape> strides_data_;
   TNDAlloc alloc_;
 };
 
@@ -258,7 +214,8 @@ class TensorObjFromDLPack : public TensorObj {
   explicit TensorObjFromDLPack(TDLPackManagedTensor* tensor) : tensor_(tensor) {
     *static_cast<DLTensor*>(this) = tensor_->dl_tensor;
     if (tensor_->dl_tensor.strides == nullptr) {
-      Shape strides = Shape::StridesFromShape(tensor_->dl_tensor.shape, tensor_->dl_tensor.ndim);
+      Shape strides =
+          Shape::StridesFromShape(ShapeView(tensor_->dl_tensor.shape, tensor_->dl_tensor.ndim));
       this->strides = const_cast<int64_t*>(strides.data());
       this->strides_data_ = std::move(strides);
     }
@@ -272,6 +229,8 @@ class TensorObjFromDLPack : public TensorObj {
   }
 
  private:
+  /*! \brief Internal data to back returning strides. */
+  Optional<Shape> strides_data_;
   TDLPackManagedTensor* tensor_;
 };
 }  // namespace details
@@ -289,24 +248,18 @@ class Tensor : public ObjectRef {
    * \brief Get the shape of the Tensor.
    * \return The shape of the Tensor.
    */
-  tvm::ffi::Shape shape() const {
-    TensorObj* obj = get_mutable();
-    if (!obj->shape_data_.has_value()) {
-      obj->shape_data_ = tvm::ffi::Shape(obj->shape, obj->shape + obj->ndim);
-    }
-    return *(obj->shape_data_);
+  tvm::ffi::ShapeView shape() const {
+    const TensorObj* obj = get();
+    return tvm::ffi::ShapeView(obj->shape, obj->ndim);
   }
   /*!
    * \brief Get the strides of the Tensor.
    * \return The strides of the Tensor.
    */
-  tvm::ffi::Shape strides() const {
-    TensorObj* obj = get_mutable();
+  tvm::ffi::ShapeView strides() const {
+    const TensorObj* obj = get();
     TVM_FFI_ICHECK(obj->strides != nullptr);
-    if (!obj->strides_data_.has_value()) {
-      obj->strides_data_ = tvm::ffi::Shape(obj->strides, obj->strides + obj->ndim);
-    }
-    return *(obj->strides_data_);
+    return tvm::ffi::ShapeView(obj->strides, obj->ndim);
   }
   /*!
    * \brief Get the data type of the Tensor.
