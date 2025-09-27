@@ -26,9 +26,11 @@
 #include <tvm/ffi/any.h>
 #include <tvm/ffi/c_api.h>
 #include <tvm/ffi/function.h>
+#include <tvm/ffi/type_parser.h>
 #include <tvm/ffi/type_traits.h>
 
 #include <string>
+#include <tuple>
 #include <utility>
 
 namespace tvm {
@@ -120,6 +122,34 @@ TVM_FFI_INLINE int64_t GetFieldByteOffsetToObject(T Class::* field_ptr) {
 class ReflectionDefBase {
  protected:
   template <typename T>
+  TVM_FFI_INLINE static TVMFFIByteArray MakeTypeSchema() {
+    const std::string& schema = ffi::GetTypeSchemaString<T>();
+    return TVMFFIByteArray{schema.data(), schema.size()};
+  }
+
+  template <typename R, typename... Args>
+  TVM_FFI_INLINE static TVMFFIByteArray MakeFunctionTypeSchema() {
+    const std::string& schema = ffi::GetFunctionTypeSchemaString<R, Args...>();
+    return TVMFFIByteArray{schema.data(), schema.size()};
+  }
+
+  template <typename Callable, size_t... Is>
+  TVM_FFI_INLINE static TVMFFIByteArray MakeCallableTypeSchemaImpl(std::index_sequence<Is...>) {
+    using CallableType = std::decay_t<Callable>;
+    using FuncInfo = details::FunctionInfo<CallableType>;
+    using ArgTuple = typename FuncInfo::ArgType;
+    return MakeFunctionTypeSchema<typename FuncInfo::RetType,
+                                  std::tuple_element_t<Is, ArgTuple>...>();
+  }
+
+  template <typename Callable>
+  TVM_FFI_INLINE static TVMFFIByteArray MakeCallableTypeSchema() {
+    using CallableType = std::decay_t<Callable>;
+    using FuncInfo = details::FunctionInfo<CallableType>;
+    return MakeCallableTypeSchemaImpl<CallableType>(std::make_index_sequence<FuncInfo::num_args>{});
+  }
+
+  template <typename T>
   static int FieldGetter(void* field, TVMFFIAny* result) {
     TVM_FFI_SAFE_CALL_BEGIN();
     *result = details::AnyUnsafe::MoveAnyToTVMFFIAny(Any(*reinterpret_cast<T*>(field)));
@@ -178,10 +208,14 @@ class ReflectionDefBase {
   }
 
   template <typename Class, typename R, typename... Args>
-  TVM_FFI_INLINE static Function GetMethod(std::string name, R (Class::*func)(Args...)) {
+  TVM_FFI_INLINE static Function GetMethod(std::string name, R (Class::*func)(Args...),
+                                           TVMFFIByteArray* type_schema = nullptr) {
     static_assert(std::is_base_of_v<ObjectRef, Class> || std::is_base_of_v<Object, Class>,
                   "Class must be derived from ObjectRef or Object");
     if constexpr (std::is_base_of_v<ObjectRef, Class>) {
+      if (type_schema != nullptr) {
+        *type_schema = MakeFunctionTypeSchema<R, Class, Args...>();
+      }
       auto fwrap = [func](Class target, Args... params) -> R {
         // call method pointer
         return (target.*func)(std::forward<Args>(params)...);
@@ -190,6 +224,9 @@ class ReflectionDefBase {
     }
 
     if constexpr (std::is_base_of_v<Object, Class>) {
+      if (type_schema != nullptr) {
+        *type_schema = MakeFunctionTypeSchema<R, const Class*, Args...>();
+      }
       auto fwrap = [func](const Class* target, Args... params) -> R {
         // call method pointer
         return (const_cast<Class*>(target)->*func)(std::forward<Args>(params)...);
@@ -199,10 +236,14 @@ class ReflectionDefBase {
   }
 
   template <typename Class, typename R, typename... Args>
-  TVM_FFI_INLINE static Function GetMethod(std::string name, R (Class::*func)(Args...) const) {
+  TVM_FFI_INLINE static Function GetMethod(std::string name, R (Class::*func)(Args...) const,
+                                           TVMFFIByteArray* type_schema = nullptr) {
     static_assert(std::is_base_of_v<ObjectRef, Class> || std::is_base_of_v<Object, Class>,
                   "Class must be derived from ObjectRef or Object");
     if constexpr (std::is_base_of_v<ObjectRef, Class>) {
+      if (type_schema != nullptr) {
+        *type_schema = MakeFunctionTypeSchema<R, Class, Args...>();
+      }
       auto fwrap = [func](const Class target, Args... params) -> R {
         // call method pointer
         return (target.*func)(std::forward<Args>(params)...);
@@ -211,6 +252,9 @@ class ReflectionDefBase {
     }
 
     if constexpr (std::is_base_of_v<Object, Class>) {
+      if (type_schema != nullptr) {
+        *type_schema = MakeFunctionTypeSchema<R, const Class*, Args...>();
+      }
       auto fwrap = [func](const Class* target, Args... params) -> R {
         // call method pointer
         return (target->*func)(std::forward<Args>(params)...);
@@ -220,7 +264,11 @@ class ReflectionDefBase {
   }
 
   template <typename Func>
-  TVM_FFI_INLINE static Function GetMethod(std::string name, Func&& func) {
+  TVM_FFI_INLINE static Function GetMethod(std::string name, Func&& func,
+                                           TVMFFIByteArray* type_schema = nullptr) {
+    if (type_schema != nullptr) {
+      *type_schema = MakeCallableTypeSchema<Func>();
+    }
     return ffi::Function::FromTyped(std::forward<Func>(func), name);
   }
 };
@@ -250,8 +298,9 @@ class GlobalDef : public ReflectionDefBase {
    */
   template <typename Func, typename... Extra>
   GlobalDef& def(const char* name, Func&& func, Extra&&... extra) {
+    TVMFFIByteArray type_schema = MakeCallableTypeSchema<Func>();
     RegisterFunc(name, ffi::Function::FromTyped(std::forward<Func>(func), std::string(name)),
-                 std::forward<Extra>(extra)...);
+                 type_schema, std::forward<Extra>(extra)...);
     return *this;
   }
 
@@ -269,7 +318,8 @@ class GlobalDef : public ReflectionDefBase {
    */
   template <typename Func, typename... Extra>
   GlobalDef& def_packed(const char* name, Func func, Extra&&... extra) {
-    RegisterFunc(name, ffi::Function::FromPacked(func), std::forward<Extra>(extra)...);
+    RegisterFunc(name, ffi::Function::FromPacked(func), TVMFFIByteArray{nullptr, 0},
+                 std::forward<Extra>(extra)...);
     return *this;
   }
 
@@ -289,18 +339,20 @@ class GlobalDef : public ReflectionDefBase {
    */
   template <typename Func, typename... Extra>
   GlobalDef& def_method(const char* name, Func&& func, Extra&&... extra) {
-    RegisterFunc(name, GetMethod(std::string(name), std::forward<Func>(func)),
-                 std::forward<Extra>(extra)...);
+    TVMFFIByteArray type_schema{nullptr, 0};
+    RegisterFunc(name, GetMethod(std::string(name), std::forward<Func>(func), &type_schema),
+                 type_schema, std::forward<Extra>(extra)...);
     return *this;
   }
 
  private:
   template <typename... Extra>
-  void RegisterFunc(const char* name, ffi::Function func, Extra&&... extra) {
+  void RegisterFunc(const char* name, ffi::Function func, TVMFFIByteArray type_schema,
+                    Extra&&... extra) {
     TVMFFIMethodInfo info;
     info.name = TVMFFIByteArray{name, std::char_traits<char>::length(name)};
     info.doc = TVMFFIByteArray{nullptr, 0};
-    info.type_schema = TVMFFIByteArray{nullptr, 0};
+    info.type_schema = type_schema;
     info.flags = 0;
     // obtain the method function
     info.method = AnyView(func).CopyToTVMFFIAny();
@@ -447,7 +499,7 @@ class ObjectDef : public ReflectionDefBase {
     // initialize default value to nullptr
     info.default_value = AnyView(nullptr).CopyToTVMFFIAny();
     info.doc = TVMFFIByteArray{nullptr, 0};
-    info.type_schema = TVMFFIByteArray{nullptr, 0};
+    info.type_schema = MakeTypeSchema<T>();
     // apply field info traits
     ((ApplyFieldInfoTrait(&info, std::forward<ExtraArgs>(extra_args)), ...));
     // call register
@@ -460,13 +512,15 @@ class ObjectDef : public ReflectionDefBase {
     TVMFFIMethodInfo info;
     info.name = TVMFFIByteArray{name, std::char_traits<char>::length(name)};
     info.doc = TVMFFIByteArray{nullptr, 0};
-    info.type_schema = TVMFFIByteArray{nullptr, 0};
+    TVMFFIByteArray type_schema{nullptr, 0};
     info.flags = 0;
     if (is_static) {
       info.flags |= kTVMFFIFieldFlagBitMaskIsStaticMethod;
     }
     // obtain the method function
-    Function method = GetMethod(std::string(type_key_) + "." + name, std::forward<Func>(func));
+    Function method =
+        GetMethod(std::string(type_key_) + "." + name, std::forward<Func>(func), &type_schema);
+    info.type_schema = type_schema;
     info.method = AnyView(method).CopyToTVMFFIAny();
     // apply method info traits
     ((ApplyMethodInfoTrait(&info, std::forward<Extra>(extra)), ...));

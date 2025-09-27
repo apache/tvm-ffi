@@ -60,6 +60,7 @@ set(tvm_ffi_objs_sources
   "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/tensor.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/dtype.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/container.cc"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/type_parser.cc"
 )
 
 set(tvm_ffi_extra_objs_sources
