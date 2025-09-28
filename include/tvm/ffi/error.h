@@ -362,6 +362,9 @@ TVM_FFI_CHECK_FUNC(_NE, !=)
 #define TVM_FFI_ICHECK(x) \
   if (!(x)) TVM_FFI_THROW(InternalError) << "Check failed: (" #x << ") is false: "
 
+#define TVM_FFI_CHECK(ErrorKind, cond) \
+  if (!(cond)) TVM_FFI_THROW(ErrorKind) << "Check failed: (" #cond << ") is false: "
+
 #define TVM_FFI_ICHECK_LT(x, y) TVM_FFI_ICHECK_BINARY_OP(_LT, <, x, y)
 #define TVM_FFI_ICHECK_GT(x, y) TVM_FFI_ICHECK_BINARY_OP(_GT, >, x, y)
 #define TVM_FFI_ICHECK_LE(x, y) TVM_FFI_ICHECK_BINARY_OP(_LE, <=, x, y)
