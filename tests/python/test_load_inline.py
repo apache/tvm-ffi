@@ -167,7 +167,7 @@ def test_load_inline_cuda() -> None:
               }
             }
 
-            void add_one_cuda(tvm::ffi::Tensor x, tvm::ffi::Tensor y) {
+            void add_one_cuda(tvm::ffi::Tensor x, tvm::ffi::Tensor y, int64_t raw_stream) {
               // implementation of a library function
               TVM_FFI_ICHECK(x->ndim == 1) << "x must be a 1D tensor";
               DLDataType f32_dtype{kDLFloat, 32, 1};
@@ -184,6 +184,8 @@ def test_load_inline_cuda() -> None:
               // with torch.Tensors
               cudaStream_t stream = static_cast<cudaStream_t>(
                   TVMFFIEnvGetStream(x->device.device_type, x->device.device_id));
+              TVM_FFI_ICHECK_EQ(reinterpret_cast<int64_t>(stream), raw_stream)
+                << "stream must be the same as raw_stream";
               // launch the kernel
               AddOneKernel<<<nblock, nthread_per_block, 0, stream>>>(static_cast<float*>(x->data),
                                                                      static_cast<float*>(y->data), n);
@@ -193,9 +195,18 @@ def test_load_inline_cuda() -> None:
     )
 
     if torch is not None:
+        # test with raw stream
         x_cuda = torch.asarray([1, 2, 3, 4, 5], dtype=torch.float32, device="cuda")
         y_cuda = torch.empty_like(x_cuda)
-        mod.add_one_cuda(x_cuda, y_cuda)
+        mod.add_one_cuda(x_cuda, y_cuda, 0)
+        torch.testing.assert_close(x_cuda + 1, y_cuda)
+
+        # test with torch stream
+        y_cuda = torch.empty_like(x_cuda)
+        stream = torch.cuda.Stream()
+        with torch.cuda.stream(stream):
+            mod.add_one_cuda(x_cuda, y_cuda, stream.cuda_stream)
+        stream.synchronize()
         torch.testing.assert_close(x_cuda + 1, y_cuda)
 
 

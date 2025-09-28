@@ -155,7 +155,7 @@ cdef int TVMFFIPyArgSetterDLPackCExporter_(
     if this.c_dlpack_tensor_allocator != NULL:
         ctx.c_dlpack_tensor_allocator = this.c_dlpack_tensor_allocator
 
-    if ctx.device_id != -1:
+    if ctx.device_type != -1:
         # already queried device, do not do it again, pass NULL to stream
         if (this.c_dlpack_from_pyobject)(arg, &temp_managed_tensor, NULL) != 0:
             return -1
