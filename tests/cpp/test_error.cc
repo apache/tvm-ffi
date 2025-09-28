@@ -61,6 +61,50 @@ TEST(CheckError, Backtrace) {
       ::tvm::ffi::Error);
 }
 
+TEST(CheckError, ValueError) {
+  int value = -5;
+  EXPECT_THROW(
+      {
+        try {
+          TVM_FFI_CHECK(ValueError, value >= 0) << "Value must be non-negative, got " << value;
+        } catch (const Error& error) {
+          EXPECT_EQ(error.kind(), "ValueError");
+          std::string what = error.what();
+          EXPECT_NE(what.find("line"), std::string::npos);
+          EXPECT_NE(what.find("Check failed: (value >= 0) is false"), std::string::npos);
+          EXPECT_NE(what.find("Value must be non-negative, got -5"), std::string::npos);
+          throw;
+        }
+      },
+      ::tvm::ffi::Error);
+}
+
+TEST(CheckError, IndexError) {
+  int index = 10;
+  int array_size = 5;
+  EXPECT_THROW(
+      {
+        try {
+          TVM_FFI_CHECK(IndexError, index < array_size)
+              << "Index " << index << " out of bounds for array of size " << array_size;
+        } catch (const Error& error) {
+          EXPECT_EQ(error.kind(), "IndexError");
+          std::string what = error.what();
+          EXPECT_NE(what.find("line"), std::string::npos);
+          EXPECT_NE(what.find("Check failed: (index < array_size) is false"), std::string::npos);
+          EXPECT_NE(what.find("Index 10 out of bounds for array of size 5"), std::string::npos);
+          throw;
+        }
+      },
+      ::tvm::ffi::Error);
+}
+
+TEST(CheckError, PassingCondition) {
+  // This should not throw
+  EXPECT_NO_THROW(TVM_FFI_CHECK(ValueError, true));
+  EXPECT_NO_THROW(TVM_FFI_CHECK(IndexError, 5 < 10));
+}
+
 TEST(Error, AnyConvert) {
   Any any = Error("TypeError", "here", "test0");
   Optional<Error> opt_err = any.as<Error>();
