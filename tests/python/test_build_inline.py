@@ -14,19 +14,8 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
-from __future__ import annotations
-
-from types import ModuleType
-
 import numpy
 import pytest
-
-torch: ModuleType | None
-try:
-    import torch  # type: ignore[no-redef]
-except ImportError:
-    torch = None
 
 import tvm_ffi.cpp
 from tvm_ffi.module import Module
@@ -52,7 +41,7 @@ def test_build_inline_cpp() -> None:
         functions=["add_one_cpu"],
     )
 
-    mod = tvm_ffi.load_module(output_lib_path)
+    mod: Module = tvm_ffi.load_module(output_lib_path)
 
     x = numpy.array([1, 2, 3, 4, 5], dtype=numpy.float32)
     y = numpy.empty_like(x)
