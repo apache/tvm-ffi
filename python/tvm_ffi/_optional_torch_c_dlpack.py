@@ -210,15 +210,6 @@ template <class T>
 T* toDLPackImpl(const Tensor& src) {
   auto view = src;
 
-  bool need_normalize_strides = src.dim() == 1 && src.size(0) == 1 && src.stride(0) != 1;
-  // less common case, try normalizing the strides
-  if (need_normalize_strides) {
-    // create a new tensor with possibly normalized strides
-    // gh-83069
-    auto shape = src.sizes();
-    view = src.as_strided(shape, {1}, src.storage_offset());
-  }
-
   ATenDLMTensor<T>* atDLMTensor(new ATenDLMTensor<T>);
   atDLMTensor->handle = view;
   atDLMTensor->tensor.manager_ctx = atDLMTensor;
