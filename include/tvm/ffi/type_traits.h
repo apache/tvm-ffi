@@ -167,6 +167,9 @@ struct TypeTraits<std::nullptr_t> : public TypeTraitsBase {
   }
 
   TVM_FFI_INLINE static std::string TypeStr() { return StaticTypeKey::kTVMFFINone; }
+  TVM_FFI_INLINE static std::string TypeSchema() {
+    return "{\"type\":\"" + std::string(StaticTypeKey::kTVMFFINone) + "\"}";
+  }
 };
 
 /**
@@ -226,6 +229,9 @@ struct TypeTraits<StrictBool> : public TypeTraitsBase {
   }
 
   TVM_FFI_INLINE static std::string TypeStr() { return StaticTypeKey::kTVMFFIBool; }
+  TVM_FFI_INLINE static std::string TypeSchema() {
+    return "{\"type\":\"" + std::string(StaticTypeKey::kTVMFFIBool) + "\"}";
+  }
 };
 
 // Bool type, allow implicit casting from int
@@ -262,6 +268,9 @@ struct TypeTraits<bool> : public TypeTraitsBase {
   }
 
   TVM_FFI_INLINE static std::string TypeStr() { return StaticTypeKey::kTVMFFIBool; }
+  TVM_FFI_INLINE static std::string TypeSchema() {
+    return "{\"type\":\"" + std::string(StaticTypeKey::kTVMFFIBool) + "\"}";
+  }
 };
 
 // Integer POD values
@@ -299,6 +308,9 @@ struct TypeTraits<Int, std::enable_if_t<std::is_integral_v<Int>>> : public TypeT
   }
 
   TVM_FFI_INLINE static std::string TypeStr() { return StaticTypeKey::kTVMFFIInt; }
+  TVM_FFI_INLINE static std::string TypeSchema() {
+    return "{\"type\":\"" + std::string(StaticTypeKey::kTVMFFIInt) + "\"}";
+  }
 };
 
 /// \cond Doxygen_Suppress
@@ -351,6 +363,9 @@ struct TypeTraits<IntEnum, std::enable_if_t<is_integeral_enum_v<IntEnum>>> : pub
   }
 
   TVM_FFI_INLINE static std::string TypeStr() { return StaticTypeKey::kTVMFFIInt; }
+  TVM_FFI_INLINE static std::string TypeSchema() {
+    return "{\"type\":\"" + std::string(StaticTypeKey::kTVMFFIInt) + "\"}";
+  }
 };
 
 // Float POD values
@@ -392,6 +407,9 @@ struct TypeTraits<Float, std::enable_if_t<std::is_floating_point_v<Float>>>
   }
 
   TVM_FFI_INLINE static std::string TypeStr() { return StaticTypeKey::kTVMFFIFloat; }
+  TVM_FFI_INLINE static std::string TypeSchema() {
+    return "{\"type\":\"" + std::string(StaticTypeKey::kTVMFFIFloat) + "\"}";
+  }
 };
 
 // void*
@@ -431,6 +449,9 @@ struct TypeTraits<void*> : public TypeTraitsBase {
   }
 
   TVM_FFI_INLINE static std::string TypeStr() { return StaticTypeKey::kTVMFFIOpaquePtr; }
+  TVM_FFI_INLINE static std::string TypeSchema() {
+    return "{\"type\":\"" + std::string(StaticTypeKey::kTVMFFIOpaquePtr) + "\"}";
+  }
 };
 
 // Device
@@ -471,6 +492,9 @@ struct TypeTraits<DLDevice> : public TypeTraitsBase {
   }
 
   TVM_FFI_INLINE static std::string TypeStr() { return StaticTypeKey::kTVMFFIDevice; }
+  TVM_FFI_INLINE static std::string TypeSchema() {
+    return "{\"type\":\"" + std::string(StaticTypeKey::kTVMFFIDevice) + "\"}";
+  }
 };
 
 // DLTensor*, requirement: not nullable, do not retain ownership
@@ -514,6 +538,7 @@ struct TypeTraits<DLTensor*> : public TypeTraitsBase {
   }
 
   TVM_FFI_INLINE static std::string TypeStr() { return "DLTensor*"; }
+  TVM_FFI_INLINE static std::string TypeSchema() { return "{\"type\":\"DLTensor*\"}"; }
 };
 
 // Traits for ObjectRef, None to ObjectRef will always fail.
@@ -599,6 +624,9 @@ struct ObjectRefTypeTraitsBase : public TypeTraitsBase {
   }
 
   TVM_FFI_INLINE static std::string TypeStr() { return ContainerType::_type_key; }
+  TVM_FFI_INLINE static std::string TypeSchema() {
+    return "{\"type\":\"" + std::string(ContainerType::_type_key) + "\"}";
+  }
 };
 
 template <typename TObjRef>
@@ -725,6 +753,9 @@ struct TypeTraits<TObject*, std::enable_if_t<std::is_base_of_v<Object, TObject>>
   }
 
   TVM_FFI_INLINE static std::string TypeStr() { return TObject::_type_key; }
+  TVM_FFI_INLINE static std::string TypeSchema() {
+    return "{\"type\":\"" + std::string(TObject::_type_key) + "\"}";
+  }
 };
 
 template <typename T>
@@ -785,6 +816,9 @@ struct TypeTraits<Optional<T>> : public TypeTraitsBase {
 
   TVM_FFI_INLINE static std::string TypeStr() {
     return "Optional<" + TypeTraits<T>::TypeStr() + ">";
+  }
+  TVM_FFI_INLINE static std::string TypeSchema() {
+    return "{\"type\":\"Optional\",\"args\":[" + details::TypeSchema<T>::v() + "]}";
   }
 };
 }  // namespace ffi

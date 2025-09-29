@@ -267,8 +267,7 @@ struct TypeTraits<Tuple<Types...>> : public ObjectRefTypeTraitsBase<Tuple<Types.
     return true;
   }
 
-  TVM_FFI_INLINE static std::optional<Tuple<Types...>> TryCastFromAnyView(const TVMFFIAny* src  //
-  ) {
+  TVM_FFI_INLINE static std::optional<Tuple<Types...>> TryCastFromAnyView(const TVMFFIAny* src) {
     if (src->type_index != TypeIndex::kTVMFFIArray) return std::nullopt;
     const ArrayObj* n = reinterpret_cast<const ArrayObj*>(src->v_obj);
     if (n->size() != sizeof...(Types)) return std::nullopt;
@@ -304,6 +303,14 @@ struct TypeTraits<Tuple<Types...>> : public ObjectRefTypeTraitsBase<Tuple<Types.
 
   TVM_FFI_INLINE static std::string TypeStr() {
     return details::ContainerTypeStr<Types...>("Tuple");
+  }
+  TVM_FFI_INLINE static std::string TypeSchema() {
+    std::ostringstream oss;
+    oss << "{\"type\":\"Tuple\",\"args\":[";
+    const char* sep = "";
+    ((oss << sep << details::TypeSchema<Types>::v(), sep = ","), ...);
+    oss << "]}";
+    return oss.str();
   }
 };
 

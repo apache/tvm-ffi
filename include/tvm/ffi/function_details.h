@@ -34,6 +34,8 @@
 
 namespace tvm {
 namespace ffi {
+// forward declaration
+class Function;
 namespace details {
 
 template <typename ArgType>
@@ -76,7 +78,6 @@ struct FuncFunctorImpl {
   /*! \brief Whether this function can be converted to ffi::Function via FromTyped */
   static constexpr bool unpacked_supported = (ArgSupported<Args> && ...) && (RetSupported<R>);
 #endif
-
   TVM_FFI_INLINE static std::string Sig() {
     using IdxSeq = std::make_index_sequence<sizeof...(Args)>;
     std::ostringstream ss;
@@ -84,6 +85,14 @@ struct FuncFunctorImpl {
     Arg2Str<std::tuple<Args...>>::Run(ss, IdxSeq{});
     ss << ") -> " << Type2Str<R>::v();
     return ss.str();
+  }
+  TVM_FFI_INLINE static std::string TypeSchema() {
+    std::ostringstream oss;
+    oss << "{\"type\":\"" << StaticTypeKey::kTVMFFIFunction << "\",\"args\":[";
+    oss << details::TypeSchema<R>::v();
+    ((oss << "," << details::TypeSchema<Args>::v()), ...);
+    oss << "]}";
+    return oss.str();
   }
 };
 
@@ -102,11 +111,15 @@ struct FunctionInfoHelper<R (T::*)(Args...) const> : FuncFunctorImpl<R, Args...>
  */
 template <typename T>
 struct FunctionInfo : FunctionInfoHelper<decltype(&T::operator())> {};
-
 template <typename R, typename... Args>
 struct FunctionInfo<R(Args...)> : FuncFunctorImpl<R, Args...> {};
 template <typename R, typename... Args>
 struct FunctionInfo<R (*)(Args...)> : FuncFunctorImpl<R, Args...> {};
+// Support pointer-to-member functions used in reflection (e.g. &Class::method)
+template <typename Class, typename R, typename... Args>
+struct FunctionInfo<R (Class::*)(Args...)> : FuncFunctorImpl<R, Args...> {};
+template <typename Class, typename R, typename... Args>
+struct FunctionInfo<R (Class::*)(Args...) const> : FuncFunctorImpl<R, Args...> {};
 
 /*! \brief Using static function to output typed function signature */
 typedef std::string (*FGetFuncSignature)();
@@ -204,6 +217,32 @@ TVM_FFI_INLINE static Error MoveFromSafeCallRaised() {
 TVM_FFI_INLINE static void SetSafeCallRaised(const Error& error) {
   TVMFFIErrorSetRaised(details::ObjectUnsafe::TVMFFIObjectPtrFromObjectRef(error));
 }
+
+template <typename T>
+struct TypeSchemaImpl {
+  static std::string v() {
+    using U = std::remove_const_t<std::remove_reference_t<T>>;
+    return TypeTraits<U>::TypeSchema();
+  }
+};
+
+template <>
+struct TypeSchemaImpl<void> {
+  static std::string v() {
+    return "{\"type\":\"" + std::string(StaticTypeKey::kTVMFFINone) + "\"}";
+  }
+};
+
+template <>
+struct TypeSchemaImpl<Any> {
+  static std::string v() { return "{\"type\":\"" + std::string(StaticTypeKey::kTVMFFIAny) + "\"}"; }
+};
+
+template <>
+struct TypeSchemaImpl<AnyView> {
+  static std::string v() { return "{\"type\":\"" + std::string(StaticTypeKey::kTVMFFIAny) + "\"}"; }
+};
+
 }  // namespace details
 }  // namespace ffi
 }  // namespace tvm

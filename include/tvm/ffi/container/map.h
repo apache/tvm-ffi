@@ -1755,6 +1755,14 @@ struct TypeTraits<Map<K, V>> : public ObjectRefTypeTraitsBase<Map<K, V>> {
   TVM_FFI_INLINE static std::string TypeStr() {
     return "Map<" + details::Type2Str<K>::v() + ", " + details::Type2Str<V>::v() + ">";
   }
+  TVM_FFI_INLINE static std::string TypeSchema() {
+    std::ostringstream oss;
+    oss << "{\"type\":\"" << StaticTypeKey::kTVMFFIMap << "\",\"args\":[";
+    oss << details::TypeSchema<K>::v() << ",";
+    oss << details::TypeSchema<V>::v();
+    oss << "]}";
+    return oss.str();
+  }
 };
 
 namespace details {

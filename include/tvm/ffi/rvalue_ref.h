@@ -148,6 +148,14 @@ struct TypeTraits<RValueRef<TObjRef>> : public TypeTraitsBase {
   TVM_FFI_INLINE static std::string TypeStr() {
     return "RValueRef<" + TypeTraits<TObjRef>::TypeStr() + ">";
   }
+
+  TVM_FFI_INLINE static std::string TypeSchema() {
+    std::ostringstream oss;
+    oss << "{\"type\":\"" << StaticTypeKey::kTVMFFIObjectRValueRef << "\",\"args\":[";
+    oss << TypeTraits<TObjRef>::TypeSchema();
+    oss << "]}";
+    return oss.str();
+  }
 };
 }  // namespace ffi
 }  // namespace tvm

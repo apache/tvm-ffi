@@ -246,6 +246,17 @@ class Bytes(bytes, PyNativeObject):
 # Type reflection metadata (from cython/type_info.pxi)
 # ---------------------------------------------------------------------------
 
+class TypeSchema:
+    """Type schema for a TVM FFI type."""
+
+    origin: str
+    args: tuple[TypeSchema, ...] = ()
+
+    @staticmethod
+    def from_json_obj(obj: dict[str, Any]) -> TypeSchema: ...
+    @staticmethod
+    def from_json_str(s: str) -> TypeSchema: ...
+
 class TypeField:
     """Description of a single reflected field on an FFI-backed type."""
 
@@ -254,6 +265,7 @@ class TypeField:
     size: int
     offset: int
     frozen: bool
+    metadata: dict[str, Any]
     getter: Any
     setter: Any
     dataclass_field: Any | None
@@ -267,6 +279,7 @@ class TypeMethod:
     doc: str | None
     func: Any
     is_static: bool
+    metadata: dict[str, Any]
 
     def as_callable(self, cls: type) -> Callable[..., Any]: ...
 

@@ -17,10 +17,16 @@
  * under the License.
  */
 // This file is used for testing the FFI API.
+#include <dlpack/dlpack.h>
 #include <tvm/ffi/container/array.h>
 #include <tvm/ffi/container/map.h>
+#include <tvm/ffi/container/tensor.h>
+#include <tvm/ffi/container/variant.h>
+#include <tvm/ffi/dtype.h>
 #include <tvm/ffi/extra/c_env_api.h>
 #include <tvm/ffi/function.h>
+#include <tvm/ffi/optional.h>
+#include <tvm/ffi/reflection/accessor.h>
 #include <tvm/ffi/reflection/registry.h>
 
 #include <chrono>
@@ -234,6 +240,174 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("testing.object_use_count", [](const Object* obj) { return obj->use_count(); })
       .def("testing.make_unregistered_object",
            []() { return ObjectRef(make_object<TestUnregisteredObject>(41, 42)); });
+}
+
+}  // namespace ffi
+}  // namespace tvm
+
+// -----------------------------------------------------------------------------
+// Additional comprehensive schema coverage
+// -----------------------------------------------------------------------------
+namespace tvm {
+namespace ffi {
+
+// A class with a wide variety of field types and method signatures
+class SchemaAllTypesObj : public Object {
+ public:
+  // POD and builtin types
+  bool v_bool;
+  int64_t v_int;
+  double v_float;
+  DLDevice v_device;
+  DLDataType v_dtype;
+
+  // Atomic object types
+  String v_string;
+  Bytes v_bytes;
+
+  // Containers and combinations
+  Optional<int64_t> v_opt_int;
+  Optional<String> v_opt_str;
+  Array<int64_t> v_arr_int;
+  Array<String> v_arr_str;
+  Map<String, int64_t> v_map_str_int;
+  Map<String, Array<int64_t>> v_map_str_arr_int;
+  Variant<String, Array<int64_t>, Map<String, int64_t>> v_variant;
+  Optional<Array<Variant<int64_t, String>>> v_opt_arr_variant;
+
+  // Constructor used by refl::init in make_with
+  SchemaAllTypesObj(int64_t vi, double vf, String s)  // NOLINT(*): explicit not necessary here
+      : v_bool(true),
+        v_int(vi),
+        v_float(vf),
+        v_device(TVMFFIDLDeviceFromIntPair(kDLCPU, 0)),
+        v_dtype(StringToDLDataType("float32")),
+        v_string(std::move(s)),
+        v_variant(String("v")) {}
+
+  // Some methods to exercise RegisterMethod
+  int64_t AddInt(int64_t x) const { return v_int + x; }
+  Array<int64_t> AppendInt(Array<int64_t> xs, int64_t y) const {
+    xs.push_back(y);
+    return xs;
+  }
+  Optional<String> MaybeConcat(Optional<String> a, Optional<String> b) const {
+    if (a.has_value() && b.has_value()) return String(a.value() + b.value());
+    if (a.has_value()) return a;
+    if (b.has_value()) return b;
+    return Optional<String>(std::nullopt);
+  }
+  Map<String, Array<int64_t>> MergeMap(Map<String, Array<int64_t>> lhs,
+                                       Map<String, Array<int64_t>> rhs) const {
+    for (const auto& kv : rhs) {
+      if (!lhs.count(kv.first)) {
+        lhs.Set(kv.first, kv.second);
+      } else {
+        Array<int64_t> arr = lhs[kv.first];
+        for (const auto& v : kv.second) arr.push_back(v);
+        lhs.Set(kv.first, arr);
+      }
+    }
+    return lhs;
+  }
+
+  static constexpr bool _type_mutable = true;
+  TVM_FFI_DECLARE_OBJECT_INFO("testing.SchemaAllTypes", SchemaAllTypesObj, Object);
+};
+
+class SchemaAllTypes : public ObjectRef {
+ public:
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(SchemaAllTypes, ObjectRef, SchemaAllTypesObj);
+};
+
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  // Register fields of various types (RegisterField usage)
+  refl::ObjectDef<SchemaAllTypesObj>()
+      .def_rw("v_bool", &SchemaAllTypesObj::v_bool, "bool field",
+              refl::Metadata{{"bool_attr", true},  //
+                             {"int_attr", 1},      //
+                             {"str_attr", "hello"}})
+      .def_rw("v_int", &SchemaAllTypesObj::v_int, refl::DefaultValue(0), "int field")
+      .def_rw("v_float", &SchemaAllTypesObj::v_float, refl::DefaultValue(0.0), "float field")
+      .def_rw("v_device", &SchemaAllTypesObj::v_device, "device field")
+      .def_rw("v_dtype", &SchemaAllTypesObj::v_dtype, "dtype field")
+      .def_rw("v_string", &SchemaAllTypesObj::v_string, refl::DefaultValue("s"), "string field")
+      .def_rw("v_bytes", &SchemaAllTypesObj::v_bytes, "bytes field")
+      .def_rw("v_opt_int", &SchemaAllTypesObj::v_opt_int, "optional int")
+      .def_rw("v_opt_str", &SchemaAllTypesObj::v_opt_str, "optional str")
+      .def_rw("v_arr_int", &SchemaAllTypesObj::v_arr_int, "array<int>")
+      .def_rw("v_arr_str", &SchemaAllTypesObj::v_arr_str, "array<str>")
+      .def_rw("v_map_str_int", &SchemaAllTypesObj::v_map_str_int, "map<str,int>")
+      .def_rw("v_map_str_arr_int", &SchemaAllTypesObj::v_map_str_arr_int, "map<str,array<int>>")
+      .def_rw("v_variant", &SchemaAllTypesObj::v_variant, "variant<str,array<int>,map<str,int>>")
+      .def_rw("v_opt_arr_variant", &SchemaAllTypesObj::v_opt_arr_variant,
+              "optional<array<variant<int,str>>>")
+      // Register methods (RegisterMethod usage)
+      .def("add_int", &SchemaAllTypesObj::AddInt, "add int method",
+           refl::Metadata{{"bool_attr", true},  //
+                          {"int_attr", 1},      //
+                          {"str_attr", "hello"}})
+      .def("append_int", &SchemaAllTypesObj::AppendInt, "append int to array")
+      .def("maybe_concat", &SchemaAllTypesObj::MaybeConcat, "optional concat")
+      .def("merge_map", &SchemaAllTypesObj::MergeMap, "merge maps")
+      // Register static creator (also a static method)
+      .def_static(
+          "make_with",
+          [](int64_t vi, double vf, String s) {
+            return SchemaAllTypes(make_object<SchemaAllTypesObj>(vi, vf, std::move(s)));
+          },
+          "Constructor with subset of fields");
+
+  // Global typed functions to exercise RegisterFunc with various schemas
+  refl::GlobalDef()
+      .def(
+          "testing.schema_id_int", [](int64_t x) { return x; },
+          refl::Metadata{{"bool_attr", true},  //
+                         {"int_attr", 1},      //
+                         {"str_attr", "hello"}})
+      .def("testing.schema_id_float", [](double x) { return x; })
+      .def("testing.schema_id_bool", [](bool x) { return x; })
+      .def("testing.schema_id_device", [](DLDevice d) { return d; })
+      .def("testing.schema_id_dtype", [](DLDataType dt) { return dt; })
+      .def("testing.schema_id_string", [](String s) { return s; })
+      .def("testing.schema_id_bytes", [](Bytes b) { return b; })
+      .def("testing.schema_id_func", [](Function f) -> Function { return f; })
+      .def("testing.schema_id_any", [](Any a) { return a; })
+      .def("testing.schema_id_object", [](ObjectRef o) { return o; })
+      .def("testing.schema_id_dltensor", [](DLTensor* t) { return t; })
+      .def("testing.schema_id_tensor", [](Tensor t) { return t; })
+      .def("testing.schema_tensor_view_input", [](TensorView t) -> void {})
+      .def("testing.schema_id_opt_int", [](Optional<int64_t> o) { return o; })
+      .def("testing.schema_id_opt_str", [](Optional<String> o) { return o; })
+      .def("testing.schema_id_opt_obj", [](Optional<ObjectRef> o) { return o; })
+      .def("testing.schema_id_arr_int", [](Array<int64_t> arr) { return arr; })
+      .def("testing.schema_id_arr_str", [](Array<String> arr) { return arr; })
+      .def("testing.schema_id_arr_obj", [](Array<ObjectRef> arr) { return arr; })
+      .def("testing.schema_id_map_str_int", [](Map<String, int64_t> m) { return m; })
+      .def("testing.schema_id_map_str_str", [](Map<String, String> m) { return m; })
+      .def("testing.schema_id_map_str_obj", [](Map<String, ObjectRef> m) { return m; })
+      .def("testing.schema_id_variant_int_str", [](Variant<int64_t, String> v) { return v; })
+      .def_packed("testing.schema_packed", [](PackedArgs args, Any* ret) {})
+      .def("testing.schema_arr_map_opt",
+           [](Array<Optional<int64_t>> arr, Map<String, Array<int64_t>> mp,
+              Optional<String> os) -> Map<String, Array<int64_t>> {
+             // no-op combine
+             if (os.has_value()) {
+               Array<int64_t> extra;
+               for (size_t i = 0; i < arr.size(); ++i) {
+                 if (arr[i].has_value()) extra.push_back(arr[i].value());
+               }
+               mp.Set(os.value(), extra);
+             }
+             return mp;
+           })
+      .def(
+          "testing.schema_variant_mix",
+          [](Variant<int64_t, String, Array<int64_t>> v) { return v; }, "variant passthrough")
+      .def("testing.schema_no_args", []() { return 1; })
+      .def("testing.schema_no_return", [](int64_t x) {})
+      .def("testing.schema_no_args_no_return", []() {});
 }
 
 }  // namespace ffi

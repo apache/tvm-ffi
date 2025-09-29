@@ -30,6 +30,7 @@ from .registry import (
     register_object,
     register_global_func,
     get_global_func,
+    get_global_func_metadata,
     remove_global_func,
     init_ffi_api,
 )
@@ -71,6 +72,7 @@ __all__ = [
     "dtype",
     "from_dlpack",
     "get_global_func",
+    "get_global_func_metadata",
     "init_ffi_api",
     "load_module",
     "register_error",

@@ -32,10 +32,9 @@
 
 #include <cstddef>
 #include <cstring>
-#include <initializer_list>
+#include <sstream>
 #include <string>
 #include <string_view>
-#include <type_traits>
 #include <utility>
 
 // Note: We place string in tvm/ffi instead of tvm/ffi/container
@@ -43,6 +42,18 @@
 // core component for return string handling.
 // The following dependency relation holds
 // any -> string -> object
+
+/// \cond Doxygen_Suppress
+#ifdef _MSC_VER
+#define TVM_FFI_SNPRINTF _snprintf_s
+#pragma warning(push)
+#pragma warning(disable : 4244)
+#pragma warning(disable : 4127)
+#pragma warning(disable : 4702)
+#else
+#define TVM_FFI_SNPRINTF snprintf
+#endif
+/// \endcond
 
 namespace tvm {
 namespace ffi {
@@ -664,6 +675,52 @@ class String {
   friend String operator+(const char* lhs, const String& rhs);
 };
 
+/*!
+ * \brief Return an escaped version of the string
+ * \param value The input string
+ * \return The escaped string, quoted with double quotes
+ */
+inline String EscapeString(const String& value) {
+  std::ostringstream oss;
+  oss << '"';
+  const char* data = value.data();
+  const size_t size = value.size();
+  for (size_t i = 0; i < size; ++i) {
+    switch (data[i]) {
+/// \cond Doxygen_Suppress
+#define TVM_FFI_ESCAPE_CHAR(pattern, val) \
+  case pattern:                           \
+    oss << val;                           \
+    break
+      TVM_FFI_ESCAPE_CHAR('\"', "\\\"");
+      TVM_FFI_ESCAPE_CHAR('\\', "\\\\");
+      TVM_FFI_ESCAPE_CHAR('/', "\\/");
+      TVM_FFI_ESCAPE_CHAR('\b', "\\b");
+      TVM_FFI_ESCAPE_CHAR('\f', "\\f");
+      TVM_FFI_ESCAPE_CHAR('\n', "\\n");
+      TVM_FFI_ESCAPE_CHAR('\r', "\\r");
+      TVM_FFI_ESCAPE_CHAR('\t', "\\t");
+#undef TVM_FFI_ESCAPE_CHAR
+        /// \endcond
+      default: {
+        uint8_t u8_val = static_cast<uint8_t>(data[i]);
+        // this is a control character, print as \uXXXX
+        if (u8_val < 0x20 || u8_val == 0x7f) {
+          char buffer[8];
+          int size = TVM_FFI_SNPRINTF(buffer, sizeof(buffer), "\\u%04x",
+                                      static_cast<int32_t>(data[i]) & 0xff);
+          oss.write(buffer, size);
+        } else {
+          oss << data[i];
+        }
+        break;
+      }
+    }
+  }
+  oss << '"';
+  return String(oss.str());
+}
+
 /*! \brief Convert TVMFFIByteArray to std::string_view */
 TVM_FFI_INLINE std::string_view ToStringView(TVMFFIByteArray str) {
   return std::string_view(str.data, str.size);
@@ -712,6 +769,9 @@ struct TypeTraits<Bytes> : public TypeTraitsBase {
   }
 
   TVM_FFI_INLINE static std::string TypeStr() { return "bytes"; }
+  TVM_FFI_INLINE static std::string TypeSchema() {
+    return "{\"type\":\"" + std::string(StaticTypeKey::kTVMFFIBytes) + "\"}";
+  }
 };
 
 template <>
@@ -755,6 +815,9 @@ struct TypeTraits<String> : public TypeTraitsBase {
   }
 
   TVM_FFI_INLINE static std::string TypeStr() { return "str"; }
+  TVM_FFI_INLINE static std::string TypeSchema() {
+    return "{\"type\":\"" + std::string(StaticTypeKey::kTVMFFIStr) + "\"}";
+  }
 };
 
 // const char*, requirement: not nullable, do not retain ownership
@@ -799,6 +862,7 @@ struct TypeTraits<const char*> : public TypeTraitsBase {
   }
 
   TVM_FFI_INLINE static std::string TypeStr() { return "const char*"; }
+  TVM_FFI_INLINE static std::string TypeSchema() { return "{\"type\":\"const char*\"}"; }
 };
 
 // TVMFFIByteArray, requirement: not nullable, do not retain ownership
@@ -827,6 +891,9 @@ struct TypeTraits<TVMFFIByteArray*> : public TypeTraitsBase {
   }
 
   TVM_FFI_INLINE static std::string TypeStr() { return StaticTypeKey::kTVMFFIByteArrayPtr; }
+  TVM_FFI_INLINE static std::string TypeSchema() {
+    return "{\"type\":\"" + std::string(StaticTypeKey::kTVMFFIByteArrayPtr) + "\"}";
+  }
 };
 
 template <>
@@ -847,6 +914,7 @@ struct TypeTraits<std::string>
   }
 
   TVM_FFI_INLINE static std::string TypeStr() { return "std::string"; }
+  TVM_FFI_INLINE static std::string TypeSchema() { return "{\"type\":\"std::string\"}"; }
 
   TVM_FFI_INLINE static std::string ConvertFallbackValue(const char* src) {
     return std::string(src);

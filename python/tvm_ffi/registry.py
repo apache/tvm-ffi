@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from typing import Any, Callable, Literal, overload
 
@@ -58,6 +59,7 @@ def register_object(type_key: str | type | None = None) -> Callable[[type], type
             raise ValueError(f"Cannot find object type index for {object_name}")
         info = core._register_object_by_index(type_index, cls)
         _add_class_attrs(type_cls=cls, type_info=info)
+        setattr(cls, "__tvm_ffi_type_info__", info)
         return cls
 
     if isinstance(type_key, str):
@@ -199,6 +201,23 @@ def remove_global_func(name: str) -> None:
     get_global_func("ffi.FunctionRemoveGlobal")(name)
 
 
+def get_global_func_metadata(name: str) -> dict[str, Any]:
+    """Get the type schema string of a global function by name.
+
+    Parameters
+    ----------
+    name : str
+        The name of the global function
+
+    Returns
+    -------
+    metadata : dict
+        The metadata of the function
+
+    """
+    return json.loads(get_global_func("ffi.GetGlobalFuncMetadata")(name))
+
+
 def init_ffi_api(namespace: str, target_module_name: str | None = None) -> None:
     """Initialize register ffi api  functions into a given module.
 
@@ -265,6 +284,7 @@ def _add_class_attrs(type_cls: type, type_info: TypeInfo) -> type:
 
 __all__ = [
     "get_global_func",
+    "get_global_func_metadata",
     "init_ffi_api",
     "list_global_func_names",
     "register_global_func",

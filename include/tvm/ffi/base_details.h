@@ -290,6 +290,22 @@ TVM_FFI_INLINE uint64_t StableHashSmallStrBytes(const TVMFFIAny* data) {
   return StableHashBytes(reinterpret_cast<const void*>(data), sizeof(data->v_uint64));
 }
 
+/*!
+ * \brief Helper to generate a JSON-based type schema for a given type.
+ * \tparam T The type to generate the schema for. Assuming `T` is not
+ *        const-qualified or reference-qualified.
+ */
+template <typename T>
+struct TypeSchemaImpl;
+/*!
+ * \brief Helper to generate a JSON-based type schema for a given type.
+ * \tparam T The type to generate the schema for.
+ * \note This type removes const and reference qualifiers from `T` before
+ *       passing it to `TypeSchemaImpl`.
+ */
+template <typename T>
+using TypeSchema = TypeSchemaImpl<std::remove_const_t<std::remove_reference_t<T>>>;
+
 }  // namespace details
 }  // namespace ffi
 }  // namespace tvm

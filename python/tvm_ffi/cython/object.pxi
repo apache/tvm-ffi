@@ -14,7 +14,7 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-import warnings
+import json
 from typing import Any
 
 
@@ -340,8 +340,10 @@ cdef _type_info_create_from_type_key(object type_cls, str type_key):
     cdef int32_t type_index
     cdef list ancestors = []
     cdef int ancestor
+    cdef dict metadata_obj
     cdef object fields = []
     cdef object methods = []
+    cdef str type_schema_json
     cdef FieldGetter getter
     cdef FieldSetter setter
     cdef ByteArrayArg type_key_arg = ByteArrayArg(c_str(type_key))
@@ -359,6 +361,7 @@ cdef _type_info_create_from_type_key(object type_cls, str type_key):
         setter = FieldSetter.__new__(FieldSetter)
         (<FieldSetter>setter).setter = field.setter
         (<FieldSetter>setter).offset = field.offset
+        metadata_obj = json.loads(bytearray_to_str(&field.metadata)) if field.metadata.size != 0 else {}
         fields.append(
             TypeField(
                 name=bytearray_to_str(&field.name),
@@ -366,6 +369,7 @@ cdef _type_info_create_from_type_key(object type_cls, str type_key):
                 size=field.size,
                 offset=field.offset,
                 frozen=(field.flags & kTVMFFIFieldFlagBitMaskWritable) == 0,
+                metadata=metadata_obj,
                 getter=getter,
                 setter=setter,
             )
@@ -373,12 +377,14 @@ cdef _type_info_create_from_type_key(object type_cls, str type_key):
 
     for i in range(info.num_methods):
         method = &(info.methods[i])
+        metadata_obj = json.loads(bytearray_to_str(&method.metadata)) if method.metadata.size != 0 else {}
         methods.append(
             TypeMethod(
                 name=bytearray_to_str(&method.name),
                 doc=bytearray_to_str(&method.doc) if method.doc.size != 0 else None,
                 func=_get_method_from_method_info(method),
                 is_static=(method.flags & kTVMFFIFieldFlagBitMaskIsStaticMethod) != 0,
+                metadata=metadata_obj,
             )
         )
 

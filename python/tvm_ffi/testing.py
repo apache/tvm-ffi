@@ -122,3 +122,7 @@ class _TestCxxInitSubset:
     required_field: int
     optional_field: int = field(init=False)
     note: str = field(default_factory=lambda: "py-default", init=False)
+
+
+@register_object("testing.SchemaAllTypes")
+class _SchemaAllTypes: ...

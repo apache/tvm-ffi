@@ -1135,6 +1135,13 @@ struct TypeTraits<Array<T>> : public ObjectRefTypeTraitsBase<Array<T>> {
   }
 
   TVM_FFI_INLINE static std::string TypeStr() { return "Array<" + details::Type2Str<T>::v() + ">"; }
+  TVM_FFI_INLINE static std::string TypeSchema() {
+    std::ostringstream oss;
+    oss << "{\"type\":\"" << StaticTypeKey::kTVMFFIArray << "\",\"args\":[";
+    oss << details::TypeSchema<T>::v();
+    oss << "]}";
+    return oss.str();
+  }
 };
 
 namespace details {

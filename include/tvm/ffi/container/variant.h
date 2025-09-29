@@ -280,6 +280,14 @@ struct TypeTraits<Variant<V...>> : public TypeTraitsBase {
   }
 
   TVM_FFI_INLINE static std::string TypeStr() { return details::ContainerTypeStr<V...>("Variant"); }
+  TVM_FFI_INLINE static std::string TypeSchema() {
+    std::ostringstream oss;
+    oss << "{\"type\":\"Variant\",\"args\":[";
+    const char* sep = "";
+    ((oss << sep << details::TypeSchema<V>::v(), sep = ","), ...);
+    oss << "]}";
+    return oss.str();
+  }
 };
 
 template <typename... V>

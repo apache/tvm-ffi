@@ -615,6 +615,9 @@ struct TypeTraits<TensorView> : public TypeTraitsBase {
   }
 
   TVM_FFI_INLINE static std::string TypeStr() { return StaticTypeKey::kTVMFFIDLTensorPtr; }
+  TVM_FFI_INLINE static std::string TypeSchema() {
+    return "{\"type\":\"" + std::string(StaticTypeKey::kTVMFFIDLTensorPtr) + "\"}";
+  }
 };
 
 }  // namespace ffi
