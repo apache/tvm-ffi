@@ -66,7 +66,7 @@ TEST(CheckError, ValueError) {
   EXPECT_THROW(
       {
         try {
-          TVM_FFI_CHECK(ValueError, value >= 0) << "Value must be non-negative, got " << value;
+          TVM_FFI_CHECK(value >= 0, ValueError) << "Value must be non-negative, got " << value;
         } catch (const Error& error) {
           EXPECT_EQ(error.kind(), "ValueError");
           std::string what = error.what();
@@ -85,7 +85,7 @@ TEST(CheckError, IndexError) {
   EXPECT_THROW(
       {
         try {
-          TVM_FFI_CHECK(IndexError, index < array_size)
+          TVM_FFI_CHECK(index < array_size, IndexError)
               << "Index " << index << " out of bounds for array of size " << array_size;
         } catch (const Error& error) {
           EXPECT_EQ(error.kind(), "IndexError");
@@ -101,8 +101,8 @@ TEST(CheckError, IndexError) {
 
 TEST(CheckError, PassingCondition) {
   // This should not throw
-  EXPECT_NO_THROW(TVM_FFI_CHECK(ValueError, true));
-  EXPECT_NO_THROW(TVM_FFI_CHECK(IndexError, 5 < 10));
+  EXPECT_NO_THROW(TVM_FFI_CHECK(true, ValueError));
+  EXPECT_NO_THROW(TVM_FFI_CHECK(5 < 10, IndexError));
 }
 
 TEST(Error, AnyConvert) {
