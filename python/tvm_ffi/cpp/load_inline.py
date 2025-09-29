@@ -439,9 +439,8 @@ def build_inline(
 
     Returns
     -------
-    mod: Module
-        The loaded tvm ffi module.
-
+    lib_path: str
+        The path to the built shared library.
 
     Example
     -------
