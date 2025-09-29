@@ -208,18 +208,16 @@ void fillVersion<DLManagedTensorVersioned>(
 // constructed out of ATen tensor
 template <class T>
 T* toDLPackImpl(const Tensor& src) {
-  auto view = src;
-
   ATenDLMTensor<T>* atDLMTensor(new ATenDLMTensor<T>);
-  atDLMTensor->handle = view;
+  atDLMTensor->handle = src;
   atDLMTensor->tensor.manager_ctx = atDLMTensor;
   atDLMTensor->tensor.deleter = &deleter<T>;
-  atDLMTensor->tensor.dl_tensor.data = view.data_ptr();
+  atDLMTensor->tensor.dl_tensor.data = src.data_ptr();
   atDLMTensor->tensor.dl_tensor.device = torchDeviceToDLDeviceForDLPackv1(src.device());
   atDLMTensor->tensor.dl_tensor.ndim = static_cast<int32_t>(src.dim());
   atDLMTensor->tensor.dl_tensor.dtype = getDLDataTypeForDLPackv1(src);
-  atDLMTensor->tensor.dl_tensor.shape = const_cast<int64_t*>(view.sizes().data());
-  atDLMTensor->tensor.dl_tensor.strides = const_cast<int64_t*>(view.strides().data());
+  atDLMTensor->tensor.dl_tensor.shape = const_cast<int64_t*>(src.sizes().data());
+  atDLMTensor->tensor.dl_tensor.strides = const_cast<int64_t*>(src.strides().data());
   atDLMTensor->tensor.dl_tensor.byte_offset = 0;
   fillVersion(&atDLMTensor->tensor);
   return &(atDLMTensor->tensor);
