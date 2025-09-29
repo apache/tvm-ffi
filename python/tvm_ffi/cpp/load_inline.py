@@ -469,7 +469,7 @@ def build_inline(
         '''
 
         # compile the cpp source code and load the module
-        lib_path: str = tvm_ffi.cpp.load_inline(
+        lib_path: str = tvm_ffi.cpp.build_inline(
             name='hello',
             cpp_sources=cpp_source,
             functions='add_one_cpu'
