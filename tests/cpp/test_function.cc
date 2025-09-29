@@ -236,4 +236,14 @@ TEST(Func, ObjectRefWithFallbackTraits) {
       ::tvm::ffi::Error);
 }
 
+int testing_add1(int x) { return x + 1; }
+
+TVM_FFI_DLL_EXPORT_TYPED_FUNC(testing_add1, testing_add1);
+
+TEST(Func, FromExternC) {
+  // this is the function abi convention
+  Function fadd1 = Function::FromExternC(nullptr, __tvm_ffi_testing_add1, nullptr);
+  EXPECT_EQ(fadd1(1).cast<int>(), 2);
+}
+
 }  // namespace

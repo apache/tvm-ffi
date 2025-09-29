@@ -434,6 +434,19 @@ typedef int (*TVMFFISafeCallType)(void* handle, const TVMFFIAny* args, int32_t n
 typedef struct {
   /*! \brief A C API compatible call with exception catching. */
   TVMFFISafeCallType safe_call;
+  /*!
+   * \brief A function pointer to an underlying cpp call.
+   *
+   * The signature is the same as TVMFFISafeCallType except the return type is void,
+   * and the function throws exception directly instead of returning error code.
+   * We use void* here to avoid depending on c++ compiler.
+   *
+   * This pointer should be set to NULL for functions that are not originally created in cpp.
+   *
+   * \note The caller must assume the same cpp exception catching abi when using this pointer.
+   *       When used across FFI boundaries, always use safe_call.
+   */
+  void* cpp_call;
 } TVMFFIFunctionCell;
 
 /*!
