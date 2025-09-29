@@ -691,4 +691,13 @@ def load_inline(  # noqa: PLR0912, PLR0915
         torch.testing.assert_close(x + 1, y)
 
     """
-    return load_module(build_inline(name, cpp_sources, cuda_sources, functions, extra_cflags, extra_cuda_cflags, extra_ldflags, extra_include_paths, build_directory))
+    return load_module(build_inline(name=name,
+        cpp_sources=cpp_sources,
+        cuda_sources=cuda_sources,
+        functions=functions,
+        extra_cflags=extra_cflags,
+        extra_cuda_cflags=extra_cuda_cflags,
+        extra_ldflags=extra_ldflags,
+        extra_include_paths=extra_include_paths,
+        build_directory=build_directory,
+    ))

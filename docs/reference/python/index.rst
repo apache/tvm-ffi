@@ -87,6 +87,7 @@ C++ integration helpers for building and loading inline modules.
   :toctree: cpp/generated/
 
   cpp.load_inline
+  cpp.build_inline
 
 
 .. (Experimental) Dataclasses

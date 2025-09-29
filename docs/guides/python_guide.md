@@ -181,6 +181,9 @@ The above code defines a C++ function `add_one_cpu` in Python script, compiles i
 {py:class}`tvm_ffi.Module` object via {py:func}`tvm_ffi.cpp.load_inline`. You can then call the function `add_one_cpu`
 from the module as usual.
 
+We can also use {py:func}`tvm_ffi.cpp.build_inline` to build the inline module without loading it. The built shared library is returned
+and can be loaded via {py:func}`tvm_ffi.load_module`.
+
 ## Error Handling
 
 An FFI function may raise an error. In such cases, the Python package will automatically
