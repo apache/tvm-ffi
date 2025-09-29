@@ -16,4 +16,4 @@
 # under the License.
 """C++ integration helpers for building and loading inline modules."""
 
-from .load_inline import load_inline, build_inline
+from .load_inline import build_inline, load_inline

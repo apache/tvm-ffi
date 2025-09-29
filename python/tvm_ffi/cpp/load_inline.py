@@ -360,7 +360,7 @@ def _decorate_with_tvm_ffi(source: str, functions: Mapping[str, str]) -> str:
     return "\n".join(sources)
 
 
-def build_inline(
+def build_inline(  # noqa: PLR0915, PLR0912
     name: str,
     *,
     cpp_sources: Sequence[str] | str | None = None,
@@ -567,8 +567,7 @@ def build_inline(
         return str((build_dir / f"{name}{ext}").resolve())
 
 
-
-def load_inline(  # noqa: PLR0912, PLR0915
+def load_inline(
     name: str,
     *,
     cpp_sources: Sequence[str] | str | None = None,
@@ -690,13 +689,16 @@ def load_inline(  # noqa: PLR0912, PLR0915
         torch.testing.assert_close(x + 1, y)
 
     """
-    return load_module(build_inline(name=name,
-        cpp_sources=cpp_sources,
-        cuda_sources=cuda_sources,
-        functions=functions,
-        extra_cflags=extra_cflags,
-        extra_cuda_cflags=extra_cuda_cflags,
-        extra_ldflags=extra_ldflags,
-        extra_include_paths=extra_include_paths,
-        build_directory=build_directory,
-    ))
+    return load_module(
+        build_inline(
+            name=name,
+            cpp_sources=cpp_sources,
+            cuda_sources=cuda_sources,
+            functions=functions,
+            extra_cflags=extra_cflags,
+            extra_cuda_cflags=extra_cuda_cflags,
+            extra_ldflags=extra_ldflags,
+            extra_include_paths=extra_include_paths,
+            build_directory=build_directory,
+        )
+    )

@@ -16,7 +16,6 @@
 # under the License.
 import numpy
 import pytest
-
 import tvm_ffi.cpp
 from tvm_ffi.module import Module
 

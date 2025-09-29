@@ -177,7 +177,7 @@ autodoc_default_options = {
     "inherited-members": False,
     "member-order": "bysource",
 }
-autodoc_typehints = 'description'
+autodoc_typehints = "description"
 
 # -- Other Options --------------------------------------------------------
 
