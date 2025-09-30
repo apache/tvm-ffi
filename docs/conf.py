@@ -264,6 +264,7 @@ def footer_html() -> str:
 html_theme_options = {
     "repository_url": "https://github.com/apache/tvm-ffi",
     "use_repository_button": True,
+    "show_toc_level": 2,
     "extra_footer": footer_html(),
 }
 
