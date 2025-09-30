@@ -49,6 +49,7 @@ class DLDeviceType(IntEnum):
     kDLOneAPI = 14
     kDLWebGPU = 15
     kDLHexagon = 16
+    kDLTrn = 18
 
 
 cdef class Device:
@@ -90,6 +91,7 @@ cdef class Device:
       DLDeviceType.kDLOneAPI: "oneapi",
       DLDeviceType.kDLWebGPU: "webgpu",
       DLDeviceType.kDLHexagon: "hexagon",
+      DLDeviceType.kDLTrn: "trainium",
     }
 
     _DEVICE_NAME_TO_TYPE = {
@@ -108,6 +110,7 @@ cdef class Device:
         "ext_dev": DLDeviceType.kDLExtDev,
         "hexagon": DLDeviceType.kDLHexagon,
         "webgpu": DLDeviceType.kDLWebGPU,
+        "trainium": DLDeviceType.kDLTrn,
     }
 
     def __init__(self, device_type, index = None):

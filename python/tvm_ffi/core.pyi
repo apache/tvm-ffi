@@ -143,6 +143,7 @@ class DLDeviceType(IntEnum):
     kDLOneAPI = 14
     kDLWebGPU = 15
     kDLHexagon = 16
+    kDLTrn = 18
 
 class Device:
     """Device represents a device in the ffi system."""
