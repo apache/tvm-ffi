@@ -257,7 +257,7 @@ class Tensor : public ObjectRef {
    */
   ShapeView strides() const {
     const TensorObj* obj = get();
-    TVM_FFI_ICHECK(obj->strides != nullptr);
+    TVM_FFI_ICHECK(obj->strides != nullptr || obj->ndim == 0);
     return ShapeView(obj->strides, obj->ndim);
   }
 
@@ -367,7 +367,7 @@ class Tensor : public ObjectRef {
       throw ffi::Error(error_context.kind, error_context.message,
                        TVMFFIBacktrace(__FILE__, __LINE__, __func__, 0));
     }
-    if (tensor->dl_tensor.strides != nullptr) {
+    if (tensor->dl_tensor.strides != nullptr || tensor->dl_tensor.ndim == 0) {
       return Tensor(make_object<details::TensorObjFromDLPack<DLManagedTensorVersioned>>(
           tensor, /*extra_strides_at_tail=*/false));
     } else {
@@ -394,7 +394,7 @@ class Tensor : public ObjectRef {
     if (require_contiguous && !ffi::IsContiguous(tensor->dl_tensor)) {
       TVM_FFI_THROW(RuntimeError) << "FromDLPack: Tensor is not contiguous.";
     }
-    if (tensor->dl_tensor.strides != nullptr) {
+    if (tensor->dl_tensor.strides != nullptr || tensor->dl_tensor.ndim == 0) {
       return Tensor(make_object<details::TensorObjFromDLPack<DLManagedTensor>>(
           tensor, /*extra_strides_at_tail=*/false));
     } else {
@@ -423,7 +423,7 @@ class Tensor : public ObjectRef {
     if (tensor->flags & DLPACK_FLAG_BITMASK_IS_SUBBYTE_TYPE_PADDED) {
       TVM_FFI_THROW(RuntimeError) << "Subbyte type padded is not yet supported";
     }
-    if (tensor->dl_tensor.strides != nullptr) {
+    if (tensor->dl_tensor.strides != nullptr || tensor->dl_tensor.ndim == 0) {
       return Tensor(make_object<details::TensorObjFromDLPack<DLManagedTensorVersioned>>(
           tensor, /*extra_strides_at_tail=*/false));
     } else {
@@ -545,7 +545,7 @@ class TensorView {
    * \return The strides of the Tensor.
    */
   ShapeView strides() const {
-    TVM_FFI_ICHECK(tensor_.strides != nullptr);
+    TVM_FFI_ICHECK(tensor_.strides != nullptr || tensor_.ndim == 0);
     return ShapeView(tensor_.strides, tensor_.ndim);
   }
 
