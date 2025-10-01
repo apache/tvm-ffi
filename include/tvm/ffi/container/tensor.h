@@ -458,6 +458,165 @@ class Tensor : public ObjectRef {
   TensorObj* get_mutable() const { return const_cast<TensorObj*>(get()); }
 };
 
+/*!
+ * \brief A non-owning view of a Tensor.
+ *
+ * This class stores a light-weight non-owning view of a Tensor.
+ * This is useful for accessing tensor data without retaining a strong reference to the Tensor.
+ * Since the caller may not always be able to pass in a strong referenced tensor.
+ *
+ * It is the user's responsibility to ensure
+ * that the underlying tensor data outlives the `TensorView`.
+ * This responsibility extends to all data pointed to by the underlying DLTensor.
+ * This includes not only the tensor elements in data but also the memory for shape and strides.
+ *
+ * When exposing a function that expects only expects a TensorView, we recommend using
+ * ffi::TensorView as the argument type instead of ffi::Tensor.
+ */
+class TensorView {
+ public:
+  /*!
+   * \brief Create a TensorView from a Tensor.
+   * \param tensor The input Tensor.
+   */
+  TensorView(const Tensor& tensor) {  // NOLINT(*)
+    TVM_FFI_ICHECK(tensor.defined());
+    tensor_ = *tensor.operator->();
+  }  // NOLINT(*)
+  /*!
+   * \brief Create a TensorView from a DLTensor.
+   * \param tensor The input DLTensor.
+   */
+  TensorView(const DLTensor* tensor) {  // NOLINT(*)
+    TVM_FFI_ICHECK(tensor != nullptr);
+    tensor_ = *tensor;
+  }
+  /*!
+   * \brief Copy constructor.
+   * \param tensor The input TensorView.
+   */
+  TensorView(const TensorView& tensor) = default;
+  /*!
+   * \brief Move constructor.
+   * \param tensor The input TensorView.
+   */
+  TensorView(TensorView&& tensor) = default;
+  /*!
+   * \brief Copy assignment operator.
+   * \param tensor The input TensorView.
+   * \return The created TensorView.
+   */
+  TensorView& operator=(const TensorView& tensor) = default;
+  /*!
+   * \brief Move assignment operator.
+   * \param tensor The input TensorView.
+   * \return The created TensorView.
+   */
+  TensorView& operator=(TensorView&& tensor) = default;
+  /*!
+   * \brief Assignment operator from a Tensor.
+   * \param tensor The input Tensor.
+   * \return The created TensorView.
+   */
+  TensorView& operator=(const Tensor& tensor) {
+    TVM_FFI_ICHECK(tensor.defined());
+    tensor_ = *tensor.operator->();
+    return *this;
+  }
+
+  // explicitly delete move constructor
+  TensorView(Tensor&& tensor) = delete;  // NOLINT(*)
+  // delete move assignment operator from owned tensor
+  TensorView& operator=(Tensor&& tensor) = delete;
+  /*!
+   * \brief Get the underlying DLTensor pointer.
+   * \return The underlying DLTensor pointer.
+   */
+  const DLTensor* operator->() const { return &tensor_; }
+
+  /*!
+   * \brief Get the shape of the Tensor.
+   * \return The shape of the Tensor.
+   */
+  ShapeView shape() const { return ShapeView(tensor_.shape, tensor_.ndim); }
+
+  /*!
+   * \brief Get the strides of the Tensor.
+   * \return The strides of the Tensor.
+   */
+  ShapeView strides() const {
+    TVM_FFI_ICHECK(tensor_.strides != nullptr);
+    return ShapeView(tensor_.strides, tensor_.ndim);
+  }
+
+  /*!
+   * \brief Get the data pointer of the Tensor.
+   * \return The data pointer of the Tensor.
+   */
+  void* data_ptr() const { return tensor_.data; }
+
+  /*!
+   * \brief Get the number of dimensions in the Tensor.
+   * \return The number of dimensions in the Tensor.
+   */
+  int32_t ndim() const { return tensor_.ndim; }
+
+  /*!
+   * \brief Get the number of elements in the Tensor.
+   * \return The number of elements in the Tensor.
+   */
+  int64_t numel() const { return this->shape().Product(); }
+
+  /*!
+   * \brief Get the data type of the Tensor.
+   * \return The data type of the Tensor.
+   */
+  DLDataType dtype() const { return tensor_.dtype; }
+
+  /*!
+   * \brief Check if the Tensor is contiguous.
+   * \return True if the Tensor is contiguous, false otherwise.
+   */
+  bool IsContiguous() const { return tvm::ffi::IsContiguous(tensor_); }
+
+ private:
+  DLTensor tensor_;
+};
+
+// TensorView type, allow implicit casting from DLTensor*
+// NOTE: we deliberately do not support MoveToAny and MoveFromAny since it does not retain ownership
+template <>
+struct TypeTraits<TensorView> : public TypeTraitsBase {
+  static constexpr bool storage_enabled = false;
+  static constexpr int32_t field_static_type_index = TypeIndex::kTVMFFIDLTensorPtr;
+
+  TVM_FFI_INLINE static void CopyToAnyView(const TensorView& src, TVMFFIAny* result) {
+    result->type_index = TypeIndex::kTVMFFIDLTensorPtr;
+    result->zero_padding = 0;
+    TVM_FFI_CLEAR_PTR_PADDING_IN_FFI_ANY(result);
+    result->v_ptr = const_cast<DLTensor*>(src.operator->());
+  }
+
+  TVM_FFI_INLINE static bool CheckAnyStrict(const TVMFFIAny* src) {
+    return src->type_index == TypeIndex::kTVMFFIDLTensorPtr;
+  }
+
+  TVM_FFI_INLINE static TensorView CopyFromAnyViewAfterCheck(const TVMFFIAny* src) {
+    return TensorView(static_cast<DLTensor*>(src->v_ptr));
+  }
+
+  TVM_FFI_INLINE static std::optional<TensorView> TryCastFromAnyView(const TVMFFIAny* src) {
+    if (src->type_index == TypeIndex::kTVMFFIDLTensorPtr) {
+      return TensorView(static_cast<DLTensor*>(src->v_ptr));
+    } else if (src->type_index == TypeIndex::kTVMFFITensor) {
+      return TensorView(TVMFFITensorGetDLTensorPtr(src->v_obj));
+    }
+    return std::nullopt;
+  }
+
+  TVM_FFI_INLINE static std::string TypeStr() { return StaticTypeKey::kTVMFFIDLTensorPtr; }
+};
+
 }  // namespace ffi
 }  // namespace tvm
 

@@ -36,7 +36,7 @@ def test_load_inline_cpp() -> None:
     mod: Module = tvm_ffi.cpp.load_inline(
         name="hello",
         cpp_sources=r"""
-            void add_one_cpu(tvm::ffi::Tensor x, tvm::ffi::Tensor y) {
+            void add_one_cpu(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
               // implementation of a library function
               TVM_FFI_ICHECK(x->ndim == 1) << "x must be a 1D tensor";
               DLDataType f32_dtype{kDLFloat, 32, 1};
@@ -62,7 +62,7 @@ def test_load_inline_cpp_with_docstrings() -> None:
     mod: Module = tvm_ffi.cpp.load_inline(
         name="hello",
         cpp_sources=r"""
-            void add_one_cpu(tvm::ffi::Tensor x, tvm::ffi::Tensor y) {
+            void add_one_cpu(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
               // implementation of a library function
               TVM_FFI_ICHECK(x->ndim == 1) << "x must be a 1D tensor";
               DLDataType f32_dtype{kDLFloat, 32, 1};
@@ -89,7 +89,7 @@ def test_load_inline_cpp_multiple_sources() -> None:
         name="hello",
         cpp_sources=[
             r"""
-            void add_one_cpu(tvm::ffi::Tensor x, tvm::ffi::Tensor y) {
+            void add_one_cpu(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
               // implementation of a library function
               TVM_FFI_ICHECK(x->ndim == 1) << "x must be a 1D tensor";
               DLDataType f32_dtype{kDLFloat, 32, 1};
@@ -103,7 +103,7 @@ def test_load_inline_cpp_multiple_sources() -> None:
             }
         """,
             r"""
-            void add_two_cpu(tvm::ffi::Tensor x, tvm::ffi::Tensor y) {
+            void add_two_cpu(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
               // implementation of a library function
               TVM_FFI_ICHECK(x->ndim == 1) << "x must be a 1D tensor";
               DLDataType f32_dtype{kDLFloat, 32, 1};
@@ -130,7 +130,7 @@ def test_load_inline_cpp_build_dir() -> None:
     mod: Module = tvm_ffi.cpp.load_inline(
         name="hello",
         cpp_sources=r"""
-            void add_one_cpu(tvm::ffi::Tensor x, tvm::ffi::Tensor y) {
+            void add_one_cpu(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
               // implementation of a library function
               TVM_FFI_ICHECK(x->ndim == 1) << "x must be a 1D tensor";
               DLDataType f32_dtype{kDLFloat, 32, 1};
@@ -167,7 +167,7 @@ def test_load_inline_cuda() -> None:
               }
             }
 
-            void add_one_cuda(tvm::ffi::Tensor x, tvm::ffi::Tensor y, int64_t raw_stream) {
+            void add_one_cuda(tvm::ffi::TensorView x, tvm::ffi::TensorView y, int64_t raw_stream) {
               // implementation of a library function
               TVM_FFI_ICHECK(x->ndim == 1) << "x must be a 1D tensor";
               DLDataType f32_dtype{kDLFloat, 32, 1};
@@ -261,7 +261,7 @@ def test_load_inline_both() -> None:
     mod: Module = tvm_ffi.cpp.load_inline(
         name="hello",
         cpp_sources=r"""
-            void add_one_cpu(tvm::ffi::Tensor x, tvm::ffi::Tensor y) {
+            void add_one_cpu(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
               // implementation of a library function
               TVM_FFI_ICHECK(x->ndim == 1) << "x must be a 1D tensor";
               DLDataType f32_dtype{kDLFloat, 32, 1};
@@ -274,7 +274,7 @@ def test_load_inline_both() -> None:
               }
             }
 
-            void add_one_cuda(tvm::ffi::Tensor x, tvm::ffi::Tensor y);
+            void add_one_cuda(tvm::ffi::TensorView x, tvm::ffi::TensorView y);
         """,
         cuda_sources=r"""
             __global__ void AddOneKernel(float* x, float* y, int n) {
@@ -284,7 +284,7 @@ def test_load_inline_both() -> None:
               }
             }
 
-            void add_one_cuda(tvm::ffi::Tensor x, tvm::ffi::Tensor y) {
+            void add_one_cuda(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
               // implementation of a library function
               TVM_FFI_ICHECK(x->ndim == 1) << "x must be a 1D tensor";
               DLDataType f32_dtype{kDLFloat, 32, 1};

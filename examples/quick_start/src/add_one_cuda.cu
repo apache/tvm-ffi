@@ -31,7 +31,7 @@ __global__ void AddOneKernel(float* x, float* y, int n) {
   }
 }
 
-void AddOneCUDA(tvm::ffi::Tensor x, tvm::ffi::Tensor y) {
+void AddOneCUDA(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
   // implementation of a library function
   TVM_FFI_ICHECK(x->ndim == 1) << "x must be a 1D tensor";
   DLDataType f32_dtype{kDLFloat, 32, 1};

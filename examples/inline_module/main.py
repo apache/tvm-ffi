@@ -26,7 +26,7 @@ def main() -> None:
     mod: Module = tvm_ffi.cpp.load_inline(
         name="hello",
         cpp_sources=r"""
-            void add_one_cpu(tvm::ffi::Tensor x, tvm::ffi::Tensor y) {
+            void add_one_cpu(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
               // implementation of a library function
               TVM_FFI_ICHECK(x->ndim == 1) << "x must be a 1D tensor";
               DLDataType f32_dtype{kDLFloat, 32, 1};
@@ -39,7 +39,7 @@ def main() -> None:
               }
             }
 
-            void add_one_cuda(tvm::ffi::Tensor x, tvm::ffi::Tensor y);
+            void add_one_cuda(tvm::ffi::TensorView x, tvm::ffi::TensorView y);
         """,
         cuda_sources=r"""
             __global__ void AddOneKernel(float* x, float* y, int n) {
@@ -49,7 +49,7 @@ def main() -> None:
               }
             }
 
-            void add_one_cuda(tvm::ffi::Tensor x, tvm::ffi::Tensor y) {
+            void add_one_cuda(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
               // implementation of a library function
               TVM_FFI_ICHECK(x->ndim == 1) << "x must be a 1D tensor";
               DLDataType f32_dtype{kDLFloat, 32, 1};

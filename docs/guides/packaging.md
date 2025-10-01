@@ -149,7 +149,7 @@ which can later be accessed via `tvm_ffi.load_module`.
 Here's a basic example of the function implementation:
 
 ```c++
-void AddOne(ffi::Tensor x, ffi::Tensor y) {
+void AddOne(ffi::TensorView x, ffi::TensorView y) {
   // ... implementation omitted ...
 }
 

@@ -163,4 +163,28 @@ TEST(Tensor, DLPackAllocError) {
       tvm::ffi::Error);
 }
 
+TEST(Tensor, TensorView) {
+  Tensor tensor = Empty({1, 2, 3}, DLDataType({kDLFloat, 32, 1}), DLDevice({kDLCPU, 0}));
+  TensorView tensor_view = tensor;
+
+  EXPECT_EQ(tensor_view.shape().size(), 3);
+  EXPECT_EQ(tensor_view.shape()[0], 1);
+  EXPECT_EQ(tensor_view.shape()[1], 2);
+  EXPECT_EQ(tensor_view.shape()[2], 3);
+  EXPECT_EQ(tensor_view.dtype().code, kDLFloat);
+  EXPECT_EQ(tensor_view.dtype().bits, 32);
+  EXPECT_EQ(tensor_view.dtype().lanes, 1);
+
+  AnyView result = tensor_view;
+  EXPECT_EQ(result.type_index(), TypeIndex::kTVMFFIDLTensorPtr);
+  TensorView tensor_view2 = result.as<TensorView>().value();
+  EXPECT_EQ(tensor_view2.shape().size(), 3);
+  EXPECT_EQ(tensor_view2.shape()[0], 1);
+  EXPECT_EQ(tensor_view2.shape()[1], 2);
+  EXPECT_EQ(tensor_view2.shape()[2], 3);
+  EXPECT_EQ(tensor_view2.dtype().code, kDLFloat);
+  EXPECT_EQ(tensor_view2.dtype().bits, 32);
+  EXPECT_EQ(tensor_view2.dtype().lanes, 1);
+}
+
 }  // namespace

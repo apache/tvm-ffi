@@ -103,7 +103,7 @@ namespace tvm_ffi_example {
 
 namespace ffi = tvm::ffi;
 
-void AddOne(ffi::Tensor x, ffi::Tensor y) {
+void AddOne(ffi::TensorView x, ffi::TensorView y) {
   // Validate inputs
   TVM_FFI_ICHECK(x->ndim == 1) << "x must be a 1D tensor";
   DLDataType f32_dtype{kDLFloat, 32, 1};
@@ -131,7 +131,7 @@ TVM_FFI_DLL_EXPORT_TYPED_FUNC(add_one_cpu, tvm_ffi_example::AddOne);
 ### CUDA Implementation
 
 ```cpp
-void AddOneCUDA(ffi::Tensor x, ffi::Tensor y) {
+void AddOneCUDA(ffi::TensorView x, ffi::TensorView y) {
   // Validation (same as CPU version)
   // ...
 
@@ -216,7 +216,7 @@ shows how to run the example exported function in C++.
 
 namespace ffi = tvm::ffi;
 
-void CallAddOne(ffi::Tensor x, ffi::Tensor y) {
+void CallAddOne(ffi::TensorView x, ffi::TensorView y) {
   ffi::Module mod = ffi::Module::LoadFromFile("build/add_one_cpu.so");
   ffi::Function add_one_cpu = mod->GetFunction("add_one_cpu").value();
   add_one_cpu(x, y);

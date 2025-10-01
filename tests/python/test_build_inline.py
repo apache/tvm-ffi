@@ -24,7 +24,7 @@ def test_build_inline_cpp() -> None:
     output_lib_path = tvm_ffi.cpp.build_inline(
         name="hello",
         cpp_sources=r"""
-            void add_one_cpu(tvm::ffi::Tensor x, tvm::ffi::Tensor y) {
+            void add_one_cpu(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
               // implementation of a library function
               TVM_FFI_ICHECK(x->ndim == 1) << "x must be a 1D tensor";
               DLDataType f32_dtype{kDLFloat, 32, 1};

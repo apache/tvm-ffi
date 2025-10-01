@@ -453,7 +453,7 @@ def build_inline(  # noqa: PLR0915, PLR0912
 
         # define the cpp source code
         cpp_source = '''
-             void add_one_cpu(tvm::ffi::Tensor x, tvm::ffi::Tensor y) {
+             void add_one_cpu(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
                // implementation of a library function
                TVM_FFI_ICHECK(x->ndim == 1) << "x must be a 1D tensor";
                DLDataType f32_dtype{kDLFloat, 32, 1};
@@ -661,7 +661,7 @@ def load_inline(
 
         # define the cpp source code
         cpp_source = '''
-             void add_one_cpu(tvm::ffi::Tensor x, tvm::ffi::Tensor y) {
+             void add_one_cpu(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
                // implementation of a library function
                TVM_FFI_ICHECK(x->ndim == 1) << "x must be a 1D tensor";
                DLDataType f32_dtype{kDLFloat, 32, 1};

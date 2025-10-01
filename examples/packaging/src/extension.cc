@@ -44,7 +44,7 @@ namespace ffi = tvm::ffi;
  */
 void RaiseError(ffi::String msg) { TVM_FFI_THROW(RuntimeError) << msg; }
 
-void AddOne(ffi::Tensor x, ffi::Tensor y) {
+void AddOne(ffi::TensorView x, ffi::TensorView y) {
   // implementation of a library function
   TVM_FFI_ICHECK(x->ndim == 1) << "x must be a 1D tensor";
   DLDataType f32_dtype{kDLFloat, 32, 1};

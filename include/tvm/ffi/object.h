@@ -82,6 +82,8 @@ struct StaticTypeKey {
   static constexpr const char* kTVMFFIDataType = "DataType";
   /*! \brief The type key for Device */
   static constexpr const char* kTVMFFIDevice = "Device";
+  /*! \brief The type key for DLTensor* */
+  static constexpr const char* kTVMFFIDLTensorPtr = "DLTensor*";
   /*! \brief The type key for const char* */
   static constexpr const char* kTVMFFIRawStr = "const char*";
   /*! \brief The type key for TVMFFIByteArray* */
