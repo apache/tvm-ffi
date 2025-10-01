@@ -198,7 +198,7 @@ class TypeTable {
     TVMFFIFieldInfo field_data = *info;
     field_data.name = this->CopyString(info->name);
     field_data.doc = this->CopyString(info->doc);
-    field_data.type_schema = this->CopyString(info->type_schema);
+    field_data.metadata = this->CopyString(info->metadata);
     if (info->flags & kTVMFFIFieldFlagBitMaskHasDefault) {
       field_data.default_value =
           this->CopyAny(AnyView::CopyFromTVMFFIAny(info->default_value)).CopyToTVMFFIAny();
@@ -216,7 +216,7 @@ class TypeTable {
     TVMFFIMethodInfo method_data = *info;
     method_data.name = this->CopyString(info->name);
     method_data.doc = this->CopyString(info->doc);
-    method_data.type_schema = this->CopyString(info->type_schema);
+    method_data.metadata = this->CopyString(info->metadata);
     method_data.method = this->CopyAny(AnyView::CopyFromTVMFFIAny(info->method)).CopyToTVMFFIAny();
     entry->type_methods_data.push_back(method_data);
     entry->methods = entry->type_methods_data.data();

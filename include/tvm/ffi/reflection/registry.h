@@ -300,7 +300,7 @@ class GlobalDef : public ReflectionDefBase {
     TVMFFIMethodInfo info;
     info.name = TVMFFIByteArray{name, std::char_traits<char>::length(name)};
     info.doc = TVMFFIByteArray{nullptr, 0};
-    info.type_schema = TVMFFIByteArray{nullptr, 0};
+    info.metadata = TVMFFIByteArray{nullptr, 0};
     info.flags = 0;
     // obtain the method function
     info.method = AnyView(func).CopyToTVMFFIAny();
@@ -447,7 +447,7 @@ class ObjectDef : public ReflectionDefBase {
     // initialize default value to nullptr
     info.default_value = AnyView(nullptr).CopyToTVMFFIAny();
     info.doc = TVMFFIByteArray{nullptr, 0};
-    info.type_schema = TVMFFIByteArray{nullptr, 0};
+    info.metadata = TVMFFIByteArray{nullptr, 0};
     // apply field info traits
     ((ApplyFieldInfoTrait(&info, std::forward<ExtraArgs>(extra_args)), ...));
     // call register
@@ -460,7 +460,7 @@ class ObjectDef : public ReflectionDefBase {
     TVMFFIMethodInfo info;
     info.name = TVMFFIByteArray{name, std::char_traits<char>::length(name)};
     info.doc = TVMFFIByteArray{nullptr, 0};
-    info.type_schema = TVMFFIByteArray{nullptr, 0};
+    info.metadata = TVMFFIByteArray{nullptr, 0};
     info.flags = 0;
     if (is_static) {
       info.flags |= kTVMFFIFieldFlagBitMaskIsStaticMethod;

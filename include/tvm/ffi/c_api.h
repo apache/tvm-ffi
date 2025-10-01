@@ -810,8 +810,8 @@ typedef struct {
   TVMFFIByteArray name;
   /*! \brief The docstring about the field. */
   TVMFFIByteArray doc;
-  /*! \brief The type schema of the field in JSON string. */
-  TVMFFIByteArray type_schema;
+  /*! \brief The structured metadata of the field in JSON string. */
+  TVMFFIByteArray metadata;
   /*!
    * \brief bitmask flags of the field.
    */
@@ -864,8 +864,11 @@ typedef struct {
   TVMFFIByteArray name;
   /*! \brief The docstring about the method. */
   TVMFFIByteArray doc;
-  /*! \brief Optional type schema of the method in JSON string. */
-  TVMFFIByteArray type_schema;
+  // Rationale: We separate the docstring from the metadata since docstrings
+  // can be unstructured and sometimes large, while metadata can be focused
+  // on storing structured information.
+  /*! \brief Optional structured metadata of the method in JSON string. */
+  TVMFFIByteArray metadata;
   /*! \brief bitmask flags of the method. */
   int64_t flags;
   /*!

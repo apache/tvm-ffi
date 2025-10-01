@@ -58,6 +58,20 @@ Optional<String> ModuleObj::GetFunctionMetadata(const String& name, bool query_i
   return std::nullopt;
 }
 
+Optional<String> ModuleObj::GetFunctionDoc(const String& name, bool query_imports) {
+  if (auto opt_str = this->GetFunctionDoc(name)) {
+    return opt_str;
+  }
+  if (query_imports) {
+    for (const Any& import : imports_) {
+      if (auto opt_str = import.cast<Module>()->GetFunctionDoc(name, query_imports)) {
+        return *opt_str;
+      }
+    }
+  }
+  return std::nullopt;
+}
+
 void ModuleObj::ImportModule(const Module& other) {
   std::unordered_set<const ModuleObj*> visited{other.operator->()};
   std::vector<const ModuleObj*> stack{other.operator->()};
@@ -132,6 +146,10 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def_method("ffi.ModuleGetFunctionMetadata",
                   [](Module mod, String name, bool query_imports) {
                     return mod->GetFunctionMetadata(name, query_imports);
+                  })
+      .def_method("ffi.ModuleGetFunctionDoc",
+                  [](Module mod, String name, bool query_imports) {
+                    return mod->GetFunctionDoc(name, query_imports);
                   })
       .def_method("ffi.ModuleGetFunction",
                   [](Module mod, String name, bool query_imports) {

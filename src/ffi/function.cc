@@ -54,14 +54,14 @@ class GlobalFunctionTable {
    public:
     String name_data;
     String doc_data;
-    String type_schema_data;
+    String metadata_data;
     ffi::Function func_data;
 
     explicit Entry(const TVMFFIMethodInfo* method_info) {
       // make copy of the metadata
       name_data = String(method_info->name.data, method_info->name.size);
       doc_data = String(method_info->doc.data, method_info->doc.size);
-      type_schema_data = String(method_info->type_schema.data, method_info->type_schema.size);
+      metadata_data = String(method_info->metadata.data, method_info->metadata.size);
       func_data = AnyView::CopyFromTVMFFIAny(method_info->method).cast<ffi::Function>();
       this->SyncMethodInfo(method_info->flags);
       // no need to update method pointer as it would remain the same as func and we retained
@@ -75,7 +75,7 @@ class GlobalFunctionTable {
       this->flags = flags;
       this->name = TVMFFIByteArray{name_data.data(), name_data.size()};
       this->doc = TVMFFIByteArray{doc_data.data(), doc_data.size()};
-      this->type_schema = TVMFFIByteArray{type_schema_data.data(), type_schema_data.size()};
+      this->metadata = TVMFFIByteArray{metadata_data.data(), metadata_data.size()};
     }
   };
 

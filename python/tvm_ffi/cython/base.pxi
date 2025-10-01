@@ -166,7 +166,7 @@ cdef extern from "tvm/ffi/c_api.h":
     ctypedef struct TVMFFIFieldInfo:
         TVMFFIByteArray name
         TVMFFIByteArray doc
-        TVMFFIByteArray type_schema
+        TVMFFIByteArray metadata
         int64_t flags
         int64_t size
         int64_t alignment
@@ -179,7 +179,7 @@ cdef extern from "tvm/ffi/c_api.h":
     ctypedef struct TVMFFIMethodInfo:
         TVMFFIByteArray name
         TVMFFIByteArray doc
-        TVMFFIByteArray type_schema
+        TVMFFIByteArray metadata
         int64_t flags
         TVMFFIAny method
 

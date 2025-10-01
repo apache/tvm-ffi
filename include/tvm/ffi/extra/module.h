@@ -70,6 +70,15 @@ class TVM_FFI_EXTRA_CXX_API ModuleObj : public Object {
    */
   virtual bool ImplementsFunction(const String& name) { return GetFunction(name).defined(); }
   /*!
+   * \brief Get the docstring of the function, if available.
+   * \param name The name of the function.
+   * \return The docstring of the function.
+   */
+  virtual Optional<String> GetFunctionDoc(const String& name) { return std::nullopt; }
+  // Rationale: We separate the docstring from the metadata since docstrings
+  // can be unstructured and sometimes large, while metadata can be focused
+  // on storing structured information.
+  /*!
    * \brief Get the metadata of the function, if available.
    * \param name The name of the function.
    * \return The metadata stored in json string format.
@@ -128,6 +137,13 @@ class TVM_FFI_EXTRA_CXX_API ModuleObj : public Object {
    * \return True if the module implements the function, false otherwise.
    */
   bool ImplementsFunction(const String& name, bool query_imports);
+  /*!
+   * \brief Get the function docstring of the function if available.
+   * \param name The name of the function.
+   * \param query_imports Whether to query imported modules.
+   * \return The function docstring of the function.
+   */
+  Optional<String> GetFunctionDoc(const String& name, bool query_imports);
   /*!
    * \brief Get the function metadata of the function if available.
    * \param name The name of the function.
