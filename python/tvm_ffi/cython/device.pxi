@@ -91,7 +91,7 @@ cdef class Device:
       DLDeviceType.kDLOneAPI: "oneapi",
       DLDeviceType.kDLWebGPU: "webgpu",
       DLDeviceType.kDLHexagon: "hexagon",
-      DLDeviceType.kDLTrn: "trainium",
+      DLDeviceType.kDLTrn: "trn",
     }
 
     _DEVICE_NAME_TO_TYPE = {
@@ -110,7 +110,7 @@ cdef class Device:
         "ext_dev": DLDeviceType.kDLExtDev,
         "hexagon": DLDeviceType.kDLHexagon,
         "webgpu": DLDeviceType.kDLWebGPU,
-        "trainium": DLDeviceType.kDLTrn,
+        "trn": DLDeviceType.kDLTrn,
     }
 
     def __init__(self, device_type, index = None):
