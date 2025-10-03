@@ -301,6 +301,8 @@ struct TypeTraits<Int, std::enable_if_t<std::is_integral_v<Int>>> : public TypeT
   TVM_FFI_INLINE static std::string TypeStr() { return StaticTypeKey::kTVMFFIInt; }
 };
 
+/// \cond Doxygen_Suppress
+
 // trait to check if a type is an integeral enum
 // note that we need this trait so we can confirm underlying_type_t is an integral type
 // to avoid potential undefined behavior
@@ -309,6 +311,8 @@ constexpr bool is_integeral_enum_v = false;
 
 template <typename T>
 constexpr bool is_integeral_enum_v<T, true> = std::is_integral_v<std::underlying_type_t<T>>;
+
+/// \endcond
 
 // Enum Integer POD values
 template <typename IntEnum>
