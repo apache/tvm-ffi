@@ -101,7 +101,7 @@ namespace ffi {
 class FunctionObj : public Object, public TVMFFIFunctionCell {
  public:
   /*! \brief Typedef for C++ style calling signature that comes with exception propagation */
-  typedef void (*FCall)(const FunctionObj*, const AnyView*, int32_t, Any*);
+  using FCall = void (*)(const FunctionObj*, const AnyView*, int32_t, Any*);
   using TVMFFIFunctionCell::cpp_call;
   using TVMFFIFunctionCell::safe_call;
   /*!
@@ -145,14 +145,14 @@ namespace details {
 template <typename TCallable>
 class FunctionObjImpl : public FunctionObj {
  public:
-  using TStorage = typename std::remove_cv<typename std::remove_reference<TCallable>::type>::type;
+  using TStorage = std::remove_cv_t<std::remove_reference_t<TCallable>>;
   /*! \brief The type of derived object class */
   using TSelf = FunctionObjImpl<TCallable>;
   /*!
    * \brief Derived object class for constructing ffi::FunctionObj.
    * \param callable The type-erased callable object.
    */
-  explicit FunctionObjImpl(TCallable callable) : callable_(callable) {
+  explicit FunctionObjImpl(TCallable callable) : callable_(std::move(callable)) {
     this->safe_call = SafeCall;
     this->cpp_call = reinterpret_cast<void*>(CppCall);
   }
@@ -327,9 +327,9 @@ class Function : public ObjectRef {
         PackedArgs args_pack(args, num_args);
         packed_call(args_pack, rv);
       };
-      return FromPackedInternal(wrapped_call);
+      return FromPackedInternal(std::move(wrapped_call));
     } else {
-      return FromPackedInternal(packed_call);
+      return FromPackedInternal(std::move(packed_call));
     }
   }
 
@@ -451,7 +451,7 @@ class Function : public ObjectRef {
    * \param func The function
    * \param override Whether to override when there is duplication.
    */
-  static void SetGlobal(std::string_view name, Function func, bool override = false) {
+  static void SetGlobal(std::string_view name, const Function& func, bool override = false) {
     TVMFFIByteArray name_arr{name.data(), name.size()};
     TVM_FFI_CHECK_SAFE_CALL(
         TVMFFIFunctionSetGlobal(&name_arr, details::ObjectUnsafe::GetHeader(func.get()), override));
@@ -466,6 +466,7 @@ class Function : public ObjectRef {
         GetGlobalRequired("ffi.FunctionListGlobalNamesFunctor")().cast<Function>();
     std::vector<String> names;
     int len = fname_functor(-1).cast<int>();
+    names.reserve(len);
     for (int i = 0; i < len; ++i) {
       names.push_back(fname_functor(i).cast<String>());
     }
@@ -487,11 +488,12 @@ class Function : public ObjectRef {
   template <typename TCallable>
   static Function FromTyped(TCallable callable) {
     using FuncInfo = details::FunctionInfo<TCallable>;
-    auto call_packed = [callable](const AnyView* args, int32_t num_args, Any* rv) mutable -> void {
+    auto call_packed = [callable = std::move(callable)](const AnyView* args, int32_t num_args,
+                                                        Any* rv) mutable -> void {
       details::unpack_call<typename FuncInfo::RetType>(
           std::make_index_sequence<FuncInfo::num_args>{}, nullptr, callable, args, num_args, rv);
     };
-    return FromPackedInternal(call_packed);
+    return FromPackedInternal(std::move(call_packed));
   }
   /*!
    * \brief Constructing a packed function from a normal function.
@@ -502,12 +504,12 @@ class Function : public ObjectRef {
   template <typename TCallable>
   static Function FromTyped(TCallable callable, std::string name) {
     using FuncInfo = details::FunctionInfo<TCallable>;
-    auto call_packed = [callable, name](const AnyView* args, int32_t num_args,
-                                        Any* rv) mutable -> void {
+    auto call_packed = [callable = std::move(callable), name = std::move(name)](
+                           const AnyView* args, int32_t num_args, Any* rv) mutable -> void {
       details::unpack_call<typename FuncInfo::RetType>(
           std::make_index_sequence<FuncInfo::num_args>{}, &name, callable, args, num_args, rv);
     };
-    return FromPackedInternal(call_packed);
+    return FromPackedInternal(std::move(call_packed));
   }
   /*!
    * \brief Call function by directly passing in unpacked arguments.
@@ -573,7 +575,8 @@ class Function : public ObjectRef {
   static Function FromPackedInternal(TCallable packed_call) {
     using ObjType = typename details::FunctionObjImpl<TCallable>;
     Function func;
-    func.data_ = make_object<ObjType>(std::forward<TCallable>(packed_call));
+    func.data_ = make_object<ObjType>(
+        std::forward<TCallable>(packed_call));  // NOLINT(bugprone-chained-comparison)
     return func;
   }
 };
@@ -622,7 +625,7 @@ class TypedFunction<R(Args...)> {
   /*! \brief short hand for this function type */
   using TSelf = TypedFunction<R(Args...)>;
   /*! \brief default constructor */
-  TypedFunction() {}
+  TypedFunction() = default;
   /*! \brief constructor from null */
   TypedFunction(std::nullptr_t null) {}  // NOLINT(*)
   /*!
@@ -646,8 +649,8 @@ class TypedFunction<R(Args...)> {
    * \param name the name of the lambda function.
    * \tparam FLambda the type of the lambda function.
    */
-  template <typename FLambda, typename = typename std::enable_if<std::is_convertible<
-                                  FLambda, std::function<R(Args...)>>::value>::type>
+  template <typename FLambda,
+            typename = std::enable_if_t<std::is_convertible_v<FLambda, std::function<R(Args...)>>>>
   TypedFunction(FLambda typed_lambda, std::string name) {  // NOLINT(*)
     packed_ = Function::FromTyped(typed_lambda, name);
   }
@@ -669,8 +672,8 @@ class TypedFunction<R(Args...)> {
    * \param typed_lambda typed lambda function.
    * \tparam FLambda the type of the lambda function.
    */
-  template <typename FLambda, typename = typename std::enable_if<std::is_convertible<
-                                  FLambda, std::function<R(Args...)>>::value>::type>
+  template <typename FLambda,
+            typename = std::enable_if_t<std::is_convertible_v<FLambda, std::function<R(Args...)>>>>
   TypedFunction(const FLambda& typed_lambda) {  // NOLINT(*)
     packed_ = Function::FromTyped(typed_lambda);
   }
@@ -690,9 +693,8 @@ class TypedFunction<R(Args...)> {
    * \tparam FLambda the type of the lambda function.
    * \returns reference to self.
    */
-  template <typename FLambda, typename = typename std::enable_if<
-                                  std::is_convertible<FLambda,
-                                                      std::function<R(Args...)>>::value>::type>
+  template <typename FLambda,
+            typename = std::enable_if_t<std::is_convertible_v<FLambda, std::function<R(Args...)>>>>
   TSelf& operator=(FLambda typed_lambda) {  // NOLINT(*)
     packed_ = Function::FromTyped(typed_lambda);
     return *this;
@@ -711,11 +713,11 @@ class TypedFunction<R(Args...)> {
    * \param args The arguments
    * \returns The return value.
    */
-  TVM_FFI_INLINE R operator()(Args... args) const {
+  TVM_FFI_INLINE R operator()(const Args&... args) const {
     if constexpr (std::is_same_v<R, void>) {
-      packed_(std::forward<Args>(args)...);
+      packed_(args...);
     } else {
-      Any res = packed_(std::forward<Args>(args)...);
+      Any res = packed_(args...);
       if constexpr (std::is_same_v<R, Any>) {
         return res;
       } else {
@@ -727,7 +729,7 @@ class TypedFunction<R(Args...)> {
    * \brief convert to ffi::Function
    * \return the internal ffi::Function
    */
-  operator Function() const { return packed(); }
+  operator Function() const { return packed(); }  // NOLINT(google-explicit-constructor)
   /*!
    * \return reference the internal ffi::Function
    */

@@ -25,7 +25,12 @@
 #define TVM_FFI_C_API_H_
 
 #include <dlpack/dlpack.h>
+
+#ifdef __cplusplus
+#include <cstdint>
+#else
 #include <stdint.h>
+#endif
 
 // Macros to do weak linking
 #ifdef _MSC_VER
@@ -61,7 +66,11 @@ extern "C" {
 #endif
 
 // TODO(tqchen): remove this once dlpack.h is updated
+#ifdef __cplusplus
+struct DLManagedTensorVersioned;
+#else
 typedef struct DLManagedTensorVersioned DLManagedTensorVersioned;
+#endif
 
 /*
  * \brief C-style Allocator that allocates memory for a DLPack tensor.
@@ -73,13 +82,20 @@ typedef struct DLManagedTensorVersioned DLManagedTensorVersioned;
  *         call SetError(error_ctx, kind, message) to set the error kind and message.
  * \note Error propagation via SetError.
  */
+#ifdef __cplusplus
+using DLPackTensorAllocator = int (*)(                                        //
+    DLTensor* prototype, DLManagedTensorVersioned** out, void* error_ctx,     //
+    void (*SetError)(void* error_ctx, const char* kind, const char* message)  //
+);
+#else
 typedef int (*DLPackTensorAllocator)(                                         //
     DLTensor* prototype, DLManagedTensorVersioned** out, void* error_ctx,     //
     void (*SetError)(void* error_ctx, const char* kind, const char* message)  //
 );
+#endif
 
 #ifdef __cplusplus
-enum TVMFFITypeIndex : int32_t {
+enum TVMFFITypeIndex : int16_t {
 #else
 typedef enum {
 #endif
@@ -183,13 +199,17 @@ typedef enum {
 #endif
 
 /*! \brief Handle to Object from C API's pov */
+#ifdef __cplusplus
+using TVMFFIObjectHandle = void*;
+#else
 typedef void* TVMFFIObjectHandle;
+#endif
 
 /*!
  * \brief bitmask of the object deleter flag.
  */
 #ifdef __cplusplus
-enum TVMFFIObjectDeleterFlagBitMask : int32_t {
+enum TVMFFIObjectDeleterFlagBitMask : uint8_t {
 #else
 typedef enum {
 #endif
@@ -218,7 +238,27 @@ typedef enum {
 /*!
  * \brief C-based type of all FFI object header that allocates on heap.
  */
+#ifdef __cplusplus
+struct TVMFFIObject {
+#else
+#ifdef __cplusplus
+struct TVMFFIMethodInfo {
+#else
+#ifdef __cplusplus
+struct TVMFFIFieldInfo {
+#else
+#ifdef __cplusplus
+struct TVMFFIMethodInfo {
+#else
+#ifdef __cplusplus
+struct TVMFFITypeMetadata {
+#else
 typedef struct {
+#endif
+#endif
+#endif
+#endif
+#endif
   /*!
    * \brief Combined strong and weak reference counter of the object.
    *
@@ -245,7 +285,7 @@ typedef struct {
    */
   int32_t type_index;
   /*! \brief Extra padding to ensure 8 bytes alignment. */
-  uint32_t __padding;
+  uint32_t __padding;  // NOLINT(bugprone-reserved-identifier)
 #if !defined(TVM_FFI_DOXYGEN_MODE)
   union {
 #endif
@@ -260,11 +300,15 @@ typedef struct {
      * \brief auxilary field to TVMFFIObject is always 8 bytes aligned.
      * \note This helps us to ensure cross platform compatibility.
      */
-    int64_t __ensure_align;
+    int64_t ensure_align;
 #if !defined(TVM_FFI_DOXYGEN_MODE)
   };
 #endif
+#ifdef __cplusplus
+};
+#else
 } TVMFFIObject;
+#endif
 
 /*!
  * \brief C-based type of all on stack Any value.
@@ -272,7 +316,11 @@ typedef struct {
  * Any value can hold on stack values like int,
  * as well as reference counted pointers to object.
  */
+#ifdef __cplusplus
+struct TVMFFIAny {
+#else
 typedef struct {
+#endif
   /*!
    * \brief type index of the object.
    * \note The type index of Object and Any are shared in FFI.
@@ -317,7 +365,11 @@ typedef struct {
 #if !defined(TVM_FFI_DOXYGEN_MODE)
   };
 #endif
+#ifdef __cplusplus
+};
+#else
 } TVMFFIAny;
+#endif
 
 /*!
  * \brief Byte array data structure used by String and Bytes.
@@ -330,28 +382,44 @@ typedef struct {
  *       for the size field on 32-bit platforms.
  *       The FFI binding should be careful when treating this ABI.
  */
+#ifdef __cplusplus
+struct TVMFFIByteArray {
+#else
 typedef struct {
+#endif
   /*! \brief The data pointer. */
   const char* data;
   /*! \brief The size of the data. */
   size_t size;
-} TVMFFIByteArray;
+};
+#ifndef __cplusplus
+}
+TVMFFIByteArray;
+#endif
 
 /*!
  * \brief Shape cell used in shape object following header.
  */
+#ifdef __cplusplus
+struct TVMFFIShapeCell {
+#else
 typedef struct {
+#endif
   /*! \brief The data pointer. */
   const int64_t* data;
   /*! \brief The size of the data. */
   size_t size;
-} TVMFFIShapeCell;
+};
+#ifndef __cplusplus
+}
+TVMFFIShapeCell;
+#endif
 
 /*!
  * \brief Mode to update the backtrace of the error.
  */
 #ifdef __cplusplus
-enum TVMFFIBacktraceUpdateMode : int32_t {
+enum TVMFFIBacktraceUpdateMode : uint8_t {
 #else
 typedef enum {
 #endif
@@ -366,7 +434,11 @@ typedef enum {
 /*!
  * \brief Error cell used in error object following header.
  */
+#ifdef __cplusplus
+struct TVMFFIErrorCell {
+#else
 typedef struct {
+#endif
   /*! \brief The kind of the error. */
   TVMFFIByteArray kind;
   /*! \brief The message of the error. */
@@ -391,7 +463,11 @@ typedef struct {
    */
   void (*update_backtrace)(TVMFFIObjectHandle self, const TVMFFIByteArray* backtrace,
                            int32_t update_mode);
-} TVMFFIErrorCell;
+};
+#ifndef __cplusplus
+}
+TVMFFIErrorCell;
+#endif
 
 /*!
  * \brief Type that defines C-style safe call convention
@@ -425,13 +501,22 @@ typedef struct {
  * \sa TVMFFIErrorSetRaised
  * \sa TVMFFIErrorSetRaisedFromCStr
  */
+#ifdef __cplusplus
+using TVMFFISafeCallType = int (*)(void* handle, const TVMFFIAny* args, int32_t num_args,
+                                   TVMFFIAny* result);
+#else
 typedef int (*TVMFFISafeCallType)(void* handle, const TVMFFIAny* args, int32_t num_args,
                                   TVMFFIAny* result);
+#endif
 
 /*!
  * \brief Object cell for function object following header.
  */
+#ifdef __cplusplus
+struct TVMFFIFunctionCell {
+#else
 typedef struct {
+#endif
   /*! \brief A C API compatible call with exception catching. */
   TVMFFISafeCallType safe_call;
   /*!
@@ -447,15 +532,19 @@ typedef struct {
    *       When used across FFI boundaries, always use safe_call.
    */
   void* cpp_call;
-} TVMFFIFunctionCell;
+};
 
 /*!
  * \brief Object cell for opaque object following header.
  */
+#ifdef __cplusplus
+struct TVMFFIOpaqueObjectCell {
+#else
 typedef struct {
+#endif
   /*! \brief The handle of the opaque object, for python it is PyObject* */
   void* handle;
-} TVMFFIOpaqueObjectCell;
+};
 
 //------------------------------------------------------------
 // Section: Basic object API
@@ -688,7 +777,11 @@ TVM_FFI_DLL int TVMFFIDataTypeToString(const DLDataType* dtype, TVMFFIAny* out);
  * \param result Stores the result.
  * \return 0 on success, nonzero on failure.
  */
+#ifdef __cplusplus
+using TVMFFIFieldGetter = int (*)(void* field, TVMFFIAny* result);
+#else
 typedef int (*TVMFFIFieldGetter)(void* field, TVMFFIAny* result);
+#endif
 
 /*!
  * \brief Getter that can take the address of a field and set it to a value.
@@ -696,20 +789,28 @@ typedef int (*TVMFFIFieldGetter)(void* field, TVMFFIAny* result);
  * \param value The value to set.
  * \return 0 on success, nonzero on failure.
  */
+#ifdef __cplusplus
+using TVMFFIFieldSetter = int (*)(void* field, const TVMFFIAny* value);
+#else
 typedef int (*TVMFFIFieldSetter)(void* field, const TVMFFIAny* value);
+#endif
 
 /*!
  * \brief Function that creates a new instance of the type.
  * \param result The new object handle
  * \return 0 on success, nonzero on failure.
  */
+#ifdef __cplusplus
+using TVMFFIObjectCreator = int (*)(TVMFFIObjectHandle* result);
+#else
 typedef int (*TVMFFIObjectCreator)(TVMFFIObjectHandle* result);
+#endif
 
 /*!
  * \brief bitmask of the field.
  */
 #ifdef __cplusplus
-enum TVMFFIFieldFlagBitMask : int32_t {
+enum TVMFFIFieldFlagBitMask : uint8_t {
 #else
 typedef enum {
 #endif
@@ -761,7 +862,7 @@ typedef enum {
  * structural equals to each other.
  */
 #ifdef __cplusplus
-enum TVMFFISEqHashKind : int32_t {
+enum TVMFFISEqHashKind : uint8_t {
 #else
 typedef enum {
 #endif
@@ -805,7 +906,11 @@ typedef enum {
 /*!
  * \brief Information support for optional object reflection.
  */
+#ifdef __cplusplus
+struct TVMFFIFieldInfo {
+#else
 typedef struct {
+#endif
   /*! \brief The name of the field. */
   TVMFFIByteArray name;
   /*! \brief The docstring about the field. */
@@ -854,12 +959,20 @@ typedef struct {
    * It also helps to provide opportunities to enable short-cut getter to ObjectRef fields.
    */
   int32_t field_static_type_index;
-} TVMFFIFieldInfo;
+};
+#ifndef __cplusplus
+}
+TVMFFIFieldInfo;
+#endif
 
 /*!
  * \brief Method information that can appear in reflection table.
  */
+#ifdef __cplusplus
+struct TVMFFIMethodInfo {
+#else
 typedef struct {
+#endif
   /*! \brief The name of the field. */
   TVMFFIByteArray name;
   /*! \brief The docstring about the method. */
@@ -876,7 +989,11 @@ typedef struct {
    * \note The first argument to the method is always the self for instance methods.
    */
   TVMFFIAny method;
-} TVMFFIMethodInfo;
+};
+#ifndef __cplusplus
+}
+TVMFFIMethodInfo;
+#endif
 
 /*!
  * \brief Extra information of object type that can be used for reflection.
@@ -884,7 +1001,11 @@ typedef struct {
  * \note This information is optional and can be used to enable reflection based
  *       creation of the object.
  */
+#ifdef __cplusplus
+struct TVMFFITypeMetadata {
+#else
 typedef struct {
+#endif
   /*! \brief The docstring about the object. */
   TVMFFIByteArray doc;
   /*!
@@ -909,7 +1030,11 @@ typedef struct {
    * \brief Optional meta-data for structural eq/hash.
    */
   TVMFFISEqHashKind structural_eq_hash_kind;
-} TVMFFITypeMetadata;
+};
+#ifndef __cplusplus
+}
+TVMFFITypeMetadata;
+#endif
 
 /*!
  * \brief Column array that stores extra attributes about types
@@ -921,12 +1046,24 @@ typedef struct {
  * \note
  * \sa TVMFFIRegisterTypeAttr
  */
+#ifdef __cplusplus
+struct TVMFFITypeAttrColumn {
+#else
+#ifdef __cplusplus
+struct TVMFFITypeAttrColumn {
+#else
 typedef struct {
+#endif
+#endif
   /*! \brief The data of the column. */
   const TVMFFIAny* data;
   /*! \brief The size of the column. */
   size_t size;
-} TVMFFITypeAttrColumn;
+};
+#ifndef __cplusplus
+}
+TVMFFITypeAttrColumn;
+#endif
 
 /*!
  * \brief Runtime type information for object type checking.

@@ -60,23 +60,18 @@ class Optional<T, std::enable_if_t<!use_ptr_based_optional_v<T> && !std::is_same
  public:
   // default constructors.
   Optional() = default;
-  Optional(const Optional<T>& other) : data_(other.data_) {}
-  Optional(Optional<T>&& other) : data_(std::move(other.data_)) {}
-  Optional(std::optional<T> other) : data_(std::move(other)) {}  // NOLINT(*)
-  Optional(std::nullopt_t) {}                                    // NOLINT(*)
+  Optional(const Optional<T>& other) = default;      // NOLINT(google-explicit-constructor)
+  Optional(Optional<T>&& other) noexcept = default;  // NOLINT(google-explicit-constructor)
+  Optional(std::optional<T> other)                   // NOLINT(google-explicit-constructor)
+      : data_(std::move(other)) {}
+  Optional(std::nullopt_t) {}  // NOLINT(google-explicit-constructor)
   // normal value handling.
   Optional(T other)  // NOLINT(*)
       : data_(std::move(other)) {}
 
-  TVM_FFI_INLINE Optional<T>& operator=(const Optional<T>& other) {
-    data_ = other.data_;
-    return *this;
-  }
+  TVM_FFI_INLINE Optional<T>& operator=(const Optional<T>& other) = default;
 
-  TVM_FFI_INLINE Optional<T>& operator=(Optional<T>&& other) {
-    data_ = std::move(other.data_);
-    return *this;
-  }
+  TVM_FFI_INLINE Optional<T>& operator=(Optional<T>&& other) noexcept = default;
 
   TVM_FFI_INLINE Optional<T>& operator=(T other) {
     data_ = std::move(other);
@@ -129,7 +124,12 @@ class Optional<T, std::enable_if_t<!use_ptr_based_optional_v<T> && !std::is_same
    * \return the xvalue reference to the stored value.
    * \note only use this function after checking has_value()
    */
-  TVM_FFI_INLINE T&& operator*() && noexcept { return *std::move(data_); }
+  TVM_FFI_INLINE T&& operator*() && noexcept {
+    if (!data_.has_value()) {
+      TVM_FFI_THROW(RuntimeError) << "Back optional access";
+    }
+    return *std::move(data_);
+  }
   /*!
    * \brief Direct access to the value.
    * \return the const reference to the stored value.
@@ -147,11 +147,12 @@ class Optional<T, std::enable_if_t<std::is_same_v<T, String> || std::is_same_v<T
  public:
   // default constructors.
   Optional() = default;
-  Optional(const Optional<T>& other) : data_(other.data_) {}
-  Optional(Optional<T>&& other) : data_(std::move(other.data_)) {}
-  Optional(std::nullopt_t) {}  // NOLINT(*)
+  Optional(const Optional<T>& other) : data_(other.data_) {}  // NOLINT(google-explicit-constructor)
+  Optional(Optional<T>&& other)                               // NOLINT(google-explicit-constructor)
+      : data_(std::move(other.data_)) {}
+  Optional(std::nullopt_t) {}  // NOLINT(google-explicit-constructor)
   // normal value handling.
-  Optional(T other)  // NOLINT(*)
+  Optional(T other)  // NOLINT(google-explicit-constructor)
       : data_(std::move(other)) {}
 
   TVM_FFI_INLINE Optional<T>& operator=(const Optional<T>& other) {
@@ -260,8 +261,8 @@ class Optional<T, std::enable_if_t<use_ptr_based_optional_v<T>>> : public Object
  public:
   using ContainerType = typename T::ContainerType;
   Optional() = default;
-  Optional(const Optional<T>& other) : ObjectRef(other.data_) {}
-  Optional(Optional<T>&& other) : ObjectRef(std::move(other.data_)) {}
+  Optional(const Optional<T>& other) = default;      // NOLINT(google-explicit-constructor)
+  Optional(Optional<T>&& other) noexcept = default;  // NOLINT(google-explicit-constructor)
   explicit Optional(ffi::UnsafeInit tag) : ObjectRef(tag) {}
   // nullopt hanlding
   Optional(std::nullopt_t) {}  // NOLINT(*)

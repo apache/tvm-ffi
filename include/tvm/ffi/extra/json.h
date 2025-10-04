@@ -76,7 +76,7 @@ TVM_FFI_EXTRA_CXX_API json::Value Parse(const String& json_str, String* error_ms
  * \return The output JSON string.
  */
 TVM_FFI_EXTRA_CXX_API String Stringify(const json::Value& value,
-                                       Optional<int> indent = std::nullopt);
+                                       const Optional<int>& indent = std::nullopt);
 
 }  // namespace json
 }  // namespace ffi

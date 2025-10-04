@@ -79,7 +79,9 @@ TVM_FFI_STATIC_INIT_BLOCK() {
            [](const ffi::MapObj* n) -> int64_t { return static_cast<int64_t>(n->size()); })
       .def("ffi.MapGetItem", [](const ffi::MapObj* n, const Any& k) -> Any { return n->at(k); })
       .def("ffi.MapCount",
-           [](const ffi::MapObj* n, const Any& k) -> int64_t { return n->count(k); })
+           [](const ffi::MapObj* n, const Any& k) -> int64_t {
+             return static_cast<int64_t>(n->count(k));
+           })
       .def("ffi.MapForwardIterFunctor", [](const ffi::MapObj* n) -> ffi::Function {
         return ffi::Function::FromTyped(MapForwardIterFunctor(n->begin(), n->end()));
       });

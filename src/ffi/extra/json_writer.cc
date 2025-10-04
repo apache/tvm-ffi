@@ -34,6 +34,7 @@
 #include <cstdint>
 #include <limits>
 #include <string>
+#include <utility>
 
 namespace tvm {
 namespace ffi {
@@ -41,7 +42,7 @@ namespace json {
 
 class JSONWriter {
  public:
-  static String Stringify(const json::Value& value, Optional<int> indent) {
+  static String Stringify(const json::Value& value, const Optional<int>& indent) {
     JSONWriter writer(indent.value_or(0));
     writer.WriteValue(value);
     return String(std::move(writer.result_));
@@ -187,14 +188,17 @@ class JSONWriter {
     if (indent_ != 0) {
       total_indent_ += indent_;
     }
-    for (size_t i = 0; i < value.size(); ++i) {
-      if (i != 0) {
-        *out_iter_++ = ',';
+    {
+      const int64_t n = static_cast<int64_t>(value.size());
+      for (int64_t i = 0; i < n; ++i) {
+        if (i != 0) {
+          *out_iter_++ = ',';
+        }
+        if (indent_ != 0) {
+          WriteIndent();
+        }
+        WriteValue(value[i]);
       }
-      if (indent_ != 0) {
-        WriteIndent();
-      }
-      WriteValue(value[i]);
     }
     if (indent_ != 0) {
       total_indent_ -= indent_;
@@ -248,7 +252,7 @@ class JSONWriter {
   std::back_insert_iterator<std::string> out_iter_;
 };
 
-String Stringify(const json::Value& value, Optional<int> indent) {
+String Stringify(const json::Value& value, const Optional<int>& indent) {
   return JSONWriter::Stringify(value, indent);
 }
 

@@ -66,8 +66,9 @@ class VariantBase<true> : public ObjectRef {
  protected:
   template <typename T>
   explicit VariantBase(const T& other) : ObjectRef(other) {}
-  template <typename T>
-  explicit VariantBase(T&& other) : ObjectRef(std::move(other)) {}
+  template <typename T,
+            typename = std::enable_if_t<!std::is_same_v<std::decay_t<T>, VariantBase<true>>>>
+  explicit VariantBase(T&& other) : ObjectRef(std::forward<T>(other)) {}
   explicit VariantBase(UnsafeInit tag) : ObjectRef(tag) {}
   explicit VariantBase(Any other)
       : ObjectRef(details::AnyUnsafe::MoveFromAnyAfterCheck<ObjectRef>(std::move(other))) {}
@@ -124,7 +125,7 @@ class Variant : public details::VariantBase<details::all_object_ref_v<V...>> {
    * \brief Constructor from another variant
    * \param other The other variant
    */
-  Variant(Variant<V...>&& other) : TParent(std::move(other.data_)) {}
+  Variant(Variant<V...>&& other) noexcept : TParent(std::move(other.data_)) {}
 
   /*!
    * \brief Assignment from another variant
@@ -139,7 +140,7 @@ class Variant : public details::VariantBase<details::all_object_ref_v<V...>> {
    * \brief Assignment from another variant
    * \param other The other variant
    */
-  TVM_FFI_INLINE Variant& operator=(Variant<V...>&& other) {
+  TVM_FFI_INLINE Variant& operator=(Variant<V...>&& other) noexcept {
     this->SetData(std::move(other.data_));
     return *this;
   }
@@ -256,7 +257,7 @@ struct TypeTraits<Variant<V...>> : public TypeTraitsBase {
   }
 
   TVM_FFI_INLINE static Variant<V...> MoveFromAnyAfterCheck(TVMFFIAny* src) {
-    return Variant<V...>(details::AnyUnsafe::MoveTVMFFIAnyToAny(std::move(*src)));
+    return Variant<V...>(details::AnyUnsafe::MoveTVMFFIAnyToAny(src));
   }
 
   TVM_FFI_INLINE static std::optional<Variant<V...>> TryCastFromAnyView(const TVMFFIAny* src) {
@@ -282,7 +283,7 @@ struct TypeTraits<Variant<V...>> : public TypeTraitsBase {
   TVM_FFI_INLINE static std::string TypeStr() { return details::ContainerTypeStr<V...>("Variant"); }
   TVM_FFI_INLINE static std::string TypeSchema() {
     std::ostringstream oss;
-    oss << "{\"type\":\"Variant\",\"args\":[";
+    oss << R"({"type":"Variant","args":[)";
     const char* sep = "";
     ((oss << sep << details::TypeSchema<V>::v(), sep = ","), ...);
     oss << "]}";

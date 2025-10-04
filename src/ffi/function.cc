@@ -31,6 +31,8 @@
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/ffi/string.h>
 
+#include <utility>
+
 namespace tvm {
 namespace ffi {
 
@@ -63,10 +65,15 @@ class GlobalFunctionTable {
       doc_data = String(method_info->doc.data, method_info->doc.size);
       metadata_data = String(method_info->metadata.data, method_info->metadata.size);
       func_data = AnyView::CopyFromTVMFFIAny(method_info->method).cast<ffi::Function>();
+      // Initialize method Any to avoid uninitialized TVMFFIAny inside TVMFFIMethodInfo
+      this->method = AnyView(func_data).CopyToTVMFFIAny();
       this->SyncMethodInfo(method_info->flags);
       // no need to update method pointer as it would remain the same as func and we retained
     }
-    explicit Entry(String name, ffi::Function func) : name_data(name), func_data(func) {
+    explicit Entry(String name, ffi::Function func)
+        : name_data(std::move(name)), func_data(std::move(func)) {
+      // Initialize method Any to avoid uninitialized TVMFFIAny inside TVMFFIMethodInfo
+      this->method = AnyView(func_data).CopyToTVMFFIAny();
       this->SyncMethodInfo(kTVMFFIFieldFlagBitMaskIsStaticMethod);
     }
 
@@ -79,7 +86,7 @@ class GlobalFunctionTable {
     }
   };
 
-  void Update(const String& name, Function func, bool can_override) {
+  void Update(const String& name, const Function& func, bool can_override) {
     if (table_.count(name)) {
       if (!can_override) {
         TVM_FFI_THROW(RuntimeError) << "Global Function `" << name << "` is already registered";
@@ -117,7 +124,7 @@ class GlobalFunctionTable {
 
   Array<String> ListNames() const {
     Array<String> names;
-    names.reserve(table_.size());
+    names.reserve(static_cast<int64_t>(table_.size()));
     for (const auto& kv : table_) {
       names.push_back(kv.first);
     }
@@ -226,7 +233,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
            })
       .def("ffi.String", [](tvm::ffi::String val) -> tvm::ffi::String { return val; })
       .def("ffi.Bytes", [](tvm::ffi::Bytes val) -> tvm::ffi::Bytes { return val; })
-      .def("ffi.GetGlobalFuncMetadata", [](tvm::ffi::String name) -> tvm::ffi::String {
+      .def("ffi.GetGlobalFuncMetadata", [](const tvm::ffi::String& name) -> tvm::ffi::String {
         const auto* f = tvm::ffi::GlobalFunctionTable::Global()->Get(name);
         if (f == nullptr) {
           TVM_FFI_THROW(RuntimeError) << "Global Function is not found: " << name;
