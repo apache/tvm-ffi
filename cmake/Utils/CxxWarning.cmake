@@ -15,16 +15,24 @@
 # specific language governing permissions and limitations
 # under the License.
 
-function(tvm_ffi_add_cxx_warning target_name)
+# ~~~
+# tvm_ffi_add_cxx_warning(target_name)
+# Apply a consistent set of warning flags (or placeholders) depending on the active compiler family.
+# Parameters:
+#   target_name: CMake target to modify
+# ~~~
+function (tvm_ffi_add_cxx_warning target_name)
   # GNU, Clang, or AppleClang
-  if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
-    target_compile_options(${target_name} PRIVATE "-Werror" "-Wall" "-Wextra" "-Wpedantic" "-Wno-unused-parameter")
+  if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+    target_compile_options(
+      ${target_name} PRIVATE "-Werror" "-Wall" "-Wextra" "-Wpedantic" "-Wno-unused-parameter"
+    )
     return()
-  endif()
+  endif ()
   # MSVC
-  if(MSVC)
+  if (MSVC)
     # target_compile_options(${target_name} PRIVATE "/W4" "/WX")
     return()
-  endif()
+  endif ()
   message(FATAL_ERROR "Unsupported compiler: ${CMAKE_CXX_COMPILER_ID}")
-endfunction()
+endfunction ()

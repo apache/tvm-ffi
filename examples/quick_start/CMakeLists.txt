@@ -18,14 +18,19 @@
 cmake_minimum_required(VERSION 3.18)
 project(tvm_ffi_example)
 
-
 # Discover the Python interpreter so we can query tvm-ffi for its CMake package path.
-find_package(Python COMPONENTS Interpreter REQUIRED)
+find_package(
+  Python
+  COMPONENTS Interpreter
+  REQUIRED
+)
 
 # Ask tvm-ffi where it stores its exported CMake files.
 execute_process(
   COMMAND "${Python_EXECUTABLE}" -m tvm_ffi.config --cmakedir
-  OUTPUT_STRIP_TRAILING_WHITESPACE OUTPUT_VARIABLE tvm_ffi_ROOT)
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+  OUTPUT_VARIABLE tvm_ffi_ROOT
+)
 # Pull in the tvm-ffi CMake targets so we can link against them below.
 find_package(tvm_ffi CONFIG REQUIRED)
 
@@ -36,45 +41,27 @@ target_link_libraries(add_one_cpu tvm_ffi_header)
 target_link_libraries(add_one_cpu tvm_ffi_shared)
 target_link_libraries(add_one_c tvm_ffi_shared)
 # show as add_one_cpu.so
-set_target_properties(
-  add_one_cpu PROPERTIES
-  PREFIX ""
-  SUFFIX ".so"
-)
-set_target_properties(
-  add_one_c PROPERTIES
-  PREFIX ""
-  SUFFIX ".so"
-)
+set_target_properties(add_one_cpu PROPERTIES PREFIX "" SUFFIX ".so")
+set_target_properties(add_one_c PROPERTIES PREFIX "" SUFFIX ".so")
 
 # Optionally build the CUDA variant if the CUDA toolkit is present.
-if(NOT WIN32)
+if (NOT WIN32)
   find_package(CUDAToolkit QUIET)
-  if(CUDAToolkit_FOUND)
+  if (CUDAToolkit_FOUND)
     enable_language(CUDA)
 
     add_library(add_one_cuda SHARED src/add_one_cuda.cu)
     target_link_libraries(add_one_cuda PRIVATE tvm_ffi_shared)
 
-    set_target_properties(
-      add_one_cuda PROPERTIES
-      PREFIX ""
-      SUFFIX ".so"
-    )
+    set_target_properties(add_one_cuda PROPERTIES PREFIX "" SUFFIX ".so")
 
     add_executable(run_example_cuda src/run_example_cuda.cc)
-    set_target_properties(
-      run_example_cuda PROPERTIES
-      CXX_STANDARD 17
-    )
+    set_target_properties(run_example_cuda PROPERTIES CXX_STANDARD 17)
     target_link_libraries(run_example_cuda PRIVATE tvm_ffi_shared CUDA::cudart)
-  endif()
-endif()
+  endif ()
+endif ()
 
 # CPU-only C++ driver used in the quick start guide.
 add_executable(run_example src/run_example.cc)
-set_target_properties(
-  run_example PROPERTIES
-  CXX_STANDARD 17
-)
+set_target_properties(run_example PROPERTIES CXX_STANDARD 17)
 target_link_libraries(run_example tvm_ffi_shared)

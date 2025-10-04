@@ -28,30 +28,37 @@ option(TVM_FFI_EXT_SHIP_DEBUG_SYMBOLS "Ship debug symbols" ON)
 #
 # This example shows both options, you only need to pick a specific one.
 #
-# - For common build cases, using pre-built and link tvm_ffi_shared is sufficient.
-# - For cases where you may want to cross-compile or bundle part of tvm_ffi_objects directly
-#   into your project, opt for building tvm_ffi from source path.
-#   Note that it is always safe to build from source and extra cost of building tvm_ffi is small.
-#   So when in doubt, you can always choose to the building tvm_ffi from source route.
+# * For common build cases, using pre-built and link tvm_ffi_shared is sufficient.
+# * For cases where you may want to cross-compile or bundle part of tvm_ffi_objects directly into
+#   your project, opt for building tvm_ffi from source path. Note that it is always safe to build
+#   from source and extra cost of building tvm_ffi is small. So when in doubt, you can always choose
+#   to the building tvm_ffi from source route.
 #
-# In python or other cases when we dynamically load libtvm_ffi_shared. Even when you build
-# from source, you do not need to ship libtvm_ffi.so built here as they are only
-# used to supply the linking information.
-# first find python related components
-find_package(Python COMPONENTS Interpreter REQUIRED)
+# In python or other cases when we dynamically load libtvm_ffi_shared. Even when you build from
+# source, you do not need to ship libtvm_ffi.so built here as they are only used to supply the
+# linking information. first find python related components
+find_package(
+  Python
+  COMPONENTS Interpreter
+  REQUIRED
+)
 if (TVM_FFI_BUILD_FROM_SOURCE)
   execute_process(
     COMMAND "${Python_EXECUTABLE}" -m tvm_ffi.config --sourcedir
-    OUTPUT_STRIP_TRAILING_WHITESPACE OUTPUT_VARIABLE tvm_ffi_ROOT)
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    OUTPUT_VARIABLE tvm_ffi_ROOT
+  )
   message(STATUS "Building tvm_ffi from source: ${tvm_ffi_ROOT}")
   add_subdirectory(${tvm_ffi_ROOT} tvm_ffi)
-else()
+else ()
   # call tvm_ffi.config to get the cmake directory and set it to tvm_ffi_ROOT
   execute_process(
     COMMAND "${Python_EXECUTABLE}" -m tvm_ffi.config --cmakedir
-    OUTPUT_STRIP_TRAILING_WHITESPACE OUTPUT_VARIABLE tvm_ffi_ROOT)
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    OUTPUT_VARIABLE tvm_ffi_ROOT
+  )
   find_package(tvm_ffi CONFIG REQUIRED)
-endif()
+endif ()
 
 # use the projects as usual
 add_library(my_ffi_extension SHARED src/extension.cc)
@@ -59,15 +66,18 @@ target_link_libraries(my_ffi_extension tvm_ffi_header)
 target_link_libraries(my_ffi_extension tvm_ffi_shared)
 
 # show as my_ffi_extension.so
-set_target_properties(
-  my_ffi_extension PROPERTIES PREFIX ""
-)
+set_target_properties(my_ffi_extension PROPERTIES PREFIX "")
 
 if (TVM_FFI_EXT_SHIP_DEBUG_SYMBOLS)
   # ship debugging symbols for backtrace on macos
   tvm_ffi_add_prefix_map(my_ffi_extension ${CMAKE_CURRENT_SOURCE_DIR})
   tvm_ffi_add_apple_dsymutil(my_ffi_extension)
-  install(DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/ DESTINATION . FILES_MATCHING PATTERN "*.dSYM")
-endif()
+  install(
+    DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/
+    DESTINATION .
+    FILES_MATCHING
+    PATTERN "*.dSYM"
+  )
+endif ()
 
 install(TARGETS my_ffi_extension DESTINATION .)

@@ -60,7 +60,7 @@ jobs:
         with:
           submodules: recursive
       - name: Set up uv
-        uses: astral-sh/setup-uv@b75a909f75acd358c2196fb9a5f1299a9a8868a4 # v6.7.0
+        uses: astral-sh/setup-uv@b75a909f75acd358c2196fb9a5f1299a9a8868a4  # v6.7.0
         with:
           python-version: 3.13
       - name: Generate docs
@@ -119,7 +119,7 @@ jobs:
 
       # Run Python tests
       - name: Setup Python ${{ matrix.python_version }}
-        uses: astral-sh/setup-uv@b75a909f75acd358c2196fb9a5f1299a9a8868a4 # v6.7.0
+        uses: astral-sh/setup-uv@b75a909f75acd358c2196fb9a5f1299a9a8868a4  # v6.7.0
         with:
           python-version: ${{ matrix.python_version }}
           activate-environment: true

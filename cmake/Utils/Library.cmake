@@ -15,74 +15,110 @@
 # specific language governing permissions and limitations
 # under the License.
 
-function(tvm_ffi_add_prefix_map target_name prefix_path)
+# ~~~
+# tvm_ffi_add_prefix_map(target_name, prefix_path)
+# Add a compile prefix map so absolute paths under `prefix_path` are remapped to a stable,
+# relative form for reproducible builds and cleaner diagnostics.
+#
+# Parameters:
+#   target_name: CMake target to modify
+#   prefix_path: Absolute path prefix to remap
+# ~~~
+function (tvm_ffi_add_prefix_map target_name prefix_path)
   # Add prefix map so the path displayed becomes relative to prefix_path
-  if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+  if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(${target_name} PRIVATE "-ffile-prefix-map=${prefix_path}/=")
-  endif()
-endfunction()
+  endif ()
+endfunction ()
 
-function(tvm_ffi_add_apple_dsymutil target_name)
+# ~~~
+# tvm_ffi_add_apple_dsymutil(target_name)
+# On Apple platforms, run `dsymutil` post-build to generate debug symbols for better backtraces.
+# No-ops on non-Apple or when libbacktrace is disabled.
+#
+# Parameters:
+#   target_name: CMake target to attach post-build step
+# ~~~
+function (tvm_ffi_add_apple_dsymutil target_name)
   # running dsymutil on macos to generate debugging symbols for backtraces
-  if(APPLE AND TVM_FFI_USE_LIBBACKTRACE)
+  if (APPLE AND TVM_FFI_USE_LIBBACKTRACE)
     find_program(DSYMUTIL dsymutil)
     mark_as_advanced(DSYMUTIL)
-    add_custom_command(TARGET ${target_name}
-        POST_BUILD
-        COMMAND ${DSYMUTIL} ARGS $<TARGET_FILE:${target_name}>
-        COMMENT "[COMMAND] dsymutil $<TARGET_FILE:${target_name}>"
-        VERBATIM
+    add_custom_command(
+      TARGET ${target_name}
+      POST_BUILD
+      COMMAND ${DSYMUTIL} ARGS $<TARGET_FILE:${target_name}>
+      COMMENT "[COMMAND] dsymutil $<TARGET_FILE:${target_name}>"
+      VERBATIM
     )
-  endif()
-endfunction()
+  endif ()
+endfunction ()
 
-function(tvm_ffi_add_msvc_flags target_name)
+# ~~~
+# tvm_ffi_add_msvc_flags(target_name)
+# Apply MSVC-specific definitions and flags to improve build compatibility and warnings behavior
+# on Windows.
+#
+# Parameters:
+#   target_name: CMake target to modify
+# ~~~
+function (tvm_ffi_add_msvc_flags target_name)
   # running if we are under msvc
-  if(MSVC)
+  if (MSVC)
     target_compile_definitions(${target_name} PUBLIC -DWIN32_LEAN_AND_MEAN)
     target_compile_definitions(${target_name} PUBLIC -D_CRT_SECURE_NO_WARNINGS)
     target_compile_definitions(${target_name} PUBLIC -D_SCL_SECURE_NO_WARNINGS)
     target_compile_definitions(${target_name} PUBLIC -D_ENABLE_EXTENDED_ALIGNED_STORAGE)
     target_compile_definitions(${target_name} PUBLIC -DNOMINMAX)
     target_compile_options(${target_name} PRIVATE "/Zi")
-  endif()
-endfunction()
+  endif ()
+endfunction ()
 
-function(tvm_ffi_add_target_from_obj target_name obj_target_name)
+# ~~~
+# tvm_ffi_add_target_from_obj(target_name, obj_target_name)
+# Create static and shared library targets from an object library and set output directories
+# consistently across platforms. Also runs dsymutil on Apple for the shared target.
+#
+# Parameters:
+#   target_name: Base name for created targets
+#   obj_target_name: Object library to link into the outputs
+# ~~~
+function (tvm_ffi_add_target_from_obj target_name obj_target_name)
   add_library(${target_name}_static STATIC $<TARGET_OBJECTS:${obj_target_name}>)
   set_target_properties(
-    ${target_name}_static PROPERTIES
-    OUTPUT_NAME "${target_name}_static"
-    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
-    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
-    )
+    ${target_name}_static
+    PROPERTIES OUTPUT_NAME "${target_name}_static"
+               ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+               LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+               RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+  )
   add_library(${target_name}_shared SHARED $<TARGET_OBJECTS:${obj_target_name}>)
   set_target_properties(
-    ${target_name}_shared PROPERTIES
-    OUTPUT_NAME "${target_name}"
-    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
-    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+    ${target_name}_shared
+    PROPERTIES OUTPUT_NAME "${target_name}"
+               ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+               LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+               RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
   )
   if (WIN32)
     target_compile_definitions(${obj_target_name} PRIVATE TVM_FFI_EXPORTS)
-    # set the output directory for each config type so msbuild also get into lib
-    # without appending the config type to the output directory
-    # do both Release and RELEASE suffix, since while cmake docs suggest Release is ok.
-    # real runs on MSbuild suggest that we might need RELEASE instead
-    foreach(CONFIG_TYPE Release RELEASE)
-      set_target_properties(${target_name}_shared PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY_${CONFIG_TYPE} "${CMAKE_BINARY_DIR}/lib"
-        LIBRARY_OUTPUT_DIRECTORY_${CONFIG_TYPE} "${CMAKE_BINARY_DIR}/lib"
-        ARCHIVE_OUTPUT_DIRECTORY_${CONFIG_TYPE} "${CMAKE_BINARY_DIR}/lib"
+    # set the output directory for each config type so msbuild also get into lib without appending
+    # the config type to the output directory do both Release and RELEASE suffix, since while cmake
+    # docs suggest Release is ok. real runs on MSbuild suggest that we might need RELEASE instead
+    foreach (config_type Release RELEASE)
+      set_target_properties(
+        ${target_name}_shared
+        PROPERTIES RUNTIME_OUTPUT_DIRECTORY_${config_type} "${CMAKE_BINARY_DIR}/lib"
+                   LIBRARY_OUTPUT_DIRECTORY_${config_type} "${CMAKE_BINARY_DIR}/lib"
+                   ARCHIVE_OUTPUT_DIRECTORY_${config_type} "${CMAKE_BINARY_DIR}/lib"
       )
-      set_target_properties(${target_name}_static PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY_${CONFIG_TYPE} "${CMAKE_BINARY_DIR}/lib"
-        LIBRARY_OUTPUT_DIRECTORY_${CONFIG_TYPE} "${CMAKE_BINARY_DIR}/lib"
-        ARCHIVE_OUTPUT_DIRECTORY_${CONFIG_TYPE} "${CMAKE_BINARY_DIR}/lib"
+      set_target_properties(
+        ${target_name}_static
+        PROPERTIES RUNTIME_OUTPUT_DIRECTORY_${config_type} "${CMAKE_BINARY_DIR}/lib"
+                   LIBRARY_OUTPUT_DIRECTORY_${config_type} "${CMAKE_BINARY_DIR}/lib"
+                   ARCHIVE_OUTPUT_DIRECTORY_${config_type} "${CMAKE_BINARY_DIR}/lib"
       )
-    endforeach()
-  endif()
+    endforeach ()
+  endif ()
   tvm_ffi_add_apple_dsymutil(${target_name}_shared)
-endfunction()
+endfunction ()

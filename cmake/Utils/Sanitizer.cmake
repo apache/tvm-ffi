@@ -15,21 +15,31 @@
 # specific language governing permissions and limitations
 # under the License.
 
-function(add_sanitizer_address target_name)
-  if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+# ~~~
+# add_sanitizer_address(target_name)
+# Enable AddressSanitizer (ASan) for the given target when supported by the
+# current compiler. Safe no-op on unsupported compilers.
+#
+# Parameters:
+#   target_name: CMake target to instrument with ASan
+# ~~~
+function (add_sanitizer_address target_name)
+  if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
     include(CheckCXXCompilerFlag)
-    set (_saved_CRF ${CMAKE_REQUIRED_FLAGS})
-    set(CMAKE_REQUIRED_FLAGS "-fsanitize=address")
+    set(saved_crf ${CMAKE_REQUIRED_FLAGS})
+    set(CMAKE_REQUIRED_FLAGS "-fsanitize=address") # cmake-lint: disable=C0103
     check_cxx_source_compiles("int main() { return 0; }" COMPILER_SUPPORTS_ASAN)
-    set (CMAKE_REQUIRED_FLAGS ${_saved_CRF})
-    get_target_property(_saved_type ${target_name} TYPE)
-    if (${_saved_type} STREQUAL "INTERFACE_LIBRARY")
-      set(_saved_type INTERFACE)
-    else()
-      set(_saved_type PRIVATE)
-    endif()
-    target_link_options(${target_name} ${_saved_type} "-fsanitize=address")
-    target_compile_options(${target_name} ${_saved_type} "-fsanitize=address" "-fno-omit-frame-pointer" "-g")
+    set(CMAKE_REQUIRED_FLAGS ${saved_crf}) # cmake-lint: disable=C0103
+    get_target_property(saved_type ${target_name} TYPE)
+    if (${saved_type} STREQUAL "INTERFACE_LIBRARY")
+      set(saved_type INTERFACE)
+    else ()
+      set(saved_type PRIVATE)
+    endif ()
+    target_link_options(${target_name} ${saved_type} "-fsanitize=address")
+    target_compile_options(
+      ${target_name} ${saved_type} "-fsanitize=address" "-fno-omit-frame-pointer" "-g"
+    )
     return()
-  endif()
-endfunction()
+  endif ()
+endfunction ()
