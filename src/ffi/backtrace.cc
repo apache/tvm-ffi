@@ -46,7 +46,7 @@ namespace tvm {
 namespace ffi {
 namespace {
 void BacktraceCreateErrorCallback(void*, const char* msg, int) {
-  std::cerr << "Could not initialize backtrace state: " << msg << std::endl;
+  std::cerr << "Could not initialize backtrace state: " << msg << '\n';
 }
 
 backtrace_state* BacktraceCreate() {
@@ -136,7 +136,7 @@ const TVMFFIByteArray* TVMFFIBacktrace(const char* filename, int lineno, const c
   // libbacktrace eats memory if run on multiple threads at the same time, so we guard against it
   if (tvm::ffi::_bt_state != nullptr) {
     static std::mutex m;
-    std::lock_guard<std::mutex> lock(m);
+    std::scoped_lock<std::mutex> lock(m);
     backtrace_full(tvm::ffi::_bt_state, 0, tvm::ffi::BacktraceFullCallback,
                    tvm::ffi::BacktraceErrorCallback, &backtrace);
   }
@@ -153,7 +153,7 @@ void TVMFFISegFaultHandler(int sig) {
   // crashing.
   const TVMFFIByteArray* backtrace = TVMFFIBacktrace(nullptr, 0, nullptr, 1);
   std::cerr << "!!!!!!! Segfault encountered !!!!!!!\n"
-            << std::string(backtrace->data, backtrace->size) << std::endl;
+            << std::string(backtrace->data, backtrace->size) << '\n';
   // Re-raise signal with default handler
   struct sigaction act;
   std::memset(&act, 0, sizeof(struct sigaction));
@@ -163,7 +163,7 @@ void TVMFFISegFaultHandler(int sig) {
   raise(sig);
 }
 
-__attribute__((constructor)) void TVMFFIInstallSignalHandler(void) {
+__attribute__((constructor)) void TVMFFIInstallSignalHandler() {
   // this may override already installed signal handlers
   std::signal(SIGSEGV, TVMFFISegFaultHandler);
 }

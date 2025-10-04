@@ -49,10 +49,10 @@ class EnvCAPIRegistry {
    *
    * \return 0 if no error happens, -1 if error happens.
    */
-  typedef int (*F_PyErr_CheckSignals)();
+  using F_PyErr_CheckSignals = int (*)();
 
   /*! \brief Callback to increment/decrement the python ref count */
-  typedef void (*F_Py_IncDefRef)(void*);
+  using F_Py_IncDefRef = void (*)(void*);
 
   /*!
    * \brief PyErr_CheckSignal function

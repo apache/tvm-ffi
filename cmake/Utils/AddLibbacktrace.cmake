@@ -36,22 +36,22 @@ function(_libbacktrace_compile)
     SOURCE_DIR ${_libbacktrace_source}
     BINARY_DIR ${_libbacktrace_prefix}
     CONFIGURE_COMMAND
-      "sh"
-      "${_libbacktrace_source}/configure"
-      "--prefix=${_libbacktrace_prefix}"
-      --with-pic
-      "CC=${_cmake_c_compiler}"
-      "CPP=${_cmake_c_compiler} -E"
-      "CFLAGS=${CMAKE_C_FLAGS}"
-      "LDFLAGS=${CMAKE_EXE_LINKER_FLAGS}"
-      "NM=${CMAKE_NM}"
-      "STRIP=${CMAKE_STRIP}"
-      "--host=${MACHINE_NAME}"
-  INSTALL_DIR ${_libbacktrace_prefix}
-  BUILD_COMMAND make
-  INSTALL_COMMAND make install
-  BUILD_BYPRODUCTS "${_libbacktrace_prefix}/lib/libbacktrace.a"
-                   "${_libbacktrace_prefix}/include/backtrace.h"
+    "sh"
+    "${_libbacktrace_source}/configure"
+    "--prefix=${_libbacktrace_prefix}"
+    --with-pic
+    "CC=${_cmake_c_compiler}"
+    "CPP=${_cmake_c_compiler} -E"
+    "CFLAGS=${CMAKE_C_FLAGS}"
+    "LDFLAGS=${CMAKE_EXE_LINKER_FLAGS}"
+    "NM=${CMAKE_NM}"
+    "STRIP=${CMAKE_STRIP}"
+    "--host=${MACHINE_NAME}"
+    INSTALL_DIR ${_libbacktrace_prefix}
+    BUILD_COMMAND make
+    INSTALL_COMMAND make install
+    BUILD_BYPRODUCTS "${_libbacktrace_prefix}/lib/libbacktrace.a"
+    "${_libbacktrace_prefix}/include/backtrace.h"
   )
   ExternalProject_Add_Step(project_libbacktrace checkout DEPENDERS configure DEPENDEES download)
   set_target_properties(project_libbacktrace PROPERTIES EXCLUDE_FROM_ALL TRUE)
@@ -59,7 +59,7 @@ function(_libbacktrace_compile)
   add_dependencies(libbacktrace project_libbacktrace)
   set_target_properties(libbacktrace PROPERTIES
     IMPORTED_LOCATION ${_libbacktrace_prefix}/lib/libbacktrace.a
-    INTERFACE_INCLUDE_DIRECTORIES ${_libbacktrace_prefix}/include
+    INTERFACE_INCLUDE_DIRECTORIES ${CMAKE_CURRENT_LIST_DIR}/../../3rdparty/libbacktrace/
   )
 endfunction()
 

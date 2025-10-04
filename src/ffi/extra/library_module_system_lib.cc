@@ -28,6 +28,7 @@
 #include <tvm/ffi/string.h>
 
 #include <mutex>
+#include <utility>
 
 #include "module_internal.h"
 
@@ -40,7 +41,7 @@ class SystemLibSymbolRegistry {
     auto it = symbol_table_.find(name);
     if (it != symbol_table_.end() && ptr != (*it).second) {
       std::cerr << "Warning:SystemLib symbol " << name << " get overriden to a different address "
-                << ptr << "->" << (*it).second << std::endl;
+                << ptr << "->" << (*it).second << '\n';
     }
     symbol_table_.Set(name, ptr);
   }
@@ -66,7 +67,7 @@ class SystemLibSymbolRegistry {
 
 class SystemLibrary final : public Library {
  public:
-  explicit SystemLibrary(const String& symbol_prefix) : symbol_prefix_(symbol_prefix) {}
+  explicit SystemLibrary(String symbol_prefix) : symbol_prefix_(std::move(symbol_prefix)) {}
 
   void* GetSymbol(const String& name) final {
     // The `name` might or might not already contain the symbol prefix.
@@ -98,8 +99,8 @@ class SystemLibrary final : public Library {
 
 class SystemLibModuleRegistry {
  public:
-  Module GetOrCreateModule(String symbol_prefix) {
-    std::lock_guard<std::mutex> lock(mutex_);
+  Module GetOrCreateModule(const String& symbol_prefix) {
+    std::scoped_lock<std::mutex> lock(mutex_);
     auto it = lib_map_.find(symbol_prefix);
     if (it != lib_map_.end()) {
       return (*it).second;

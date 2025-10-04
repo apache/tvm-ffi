@@ -37,7 +37,7 @@ extern "C" {
 /*!
  * \brief The type of the stream handle.
  */
-typedef void* TVMFFIStreamHandle;
+using TVMFFIStreamHandle = void*;
 
 /*!
  * \brief FFI function to set the current stream for a device
