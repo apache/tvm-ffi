@@ -39,7 +39,7 @@ target_include_directories(
 
 # ######### Target: `tvm_ffi_objs` ##########
 
-set(tvm_ffi_objs_sources
+set(_tvm_ffi_objs_sources
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/backtrace.cc"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/backtrace_win.cc"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/object.cc"
@@ -49,7 +49,7 @@ set(tvm_ffi_objs_sources
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/dtype.cc"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/container.cc")
 
-set(tvm_ffi_extra_objs_sources
+set(_tvm_ffi_extra_objs_sources
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/extra/structural_equal.cc"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/extra/structural_hash.cc"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/extra/json_parser.cc"
@@ -64,10 +64,10 @@ set(tvm_ffi_extra_objs_sources
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/extra/env_c_api.cc"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/extra/testing.cc")
 if (TVM_FFI_USE_EXTRA_CXX_API)
-    list(APPEND tvm_ffi_objs_sources ${tvm_ffi_extra_objs_sources})
+    list(APPEND _tvm_ffi_objs_sources ${_tvm_ffi_extra_objs_sources})
 endif ()
 
-add_library(tvm_ffi_objs OBJECT ${tvm_ffi_objs_sources})
+add_library(tvm_ffi_objs OBJECT ${_tvm_ffi_objs_sources})
 target_compile_features(tvm_ffi_objs PRIVATE cxx_std_17)
 
 set_target_properties(
@@ -166,9 +166,9 @@ if (TVM_FFI_BUILD_PYTHON_MODULE)
         Python
         COMPONENTS Interpreter Development.Module Development.SABIModule
         REQUIRED)
-    set(core_cpp ${CMAKE_CURRENT_BINARY_DIR}/core.cpp)
-    set(core_pyx ${CMAKE_CURRENT_SOURCE_DIR}/python/tvm_ffi/cython/core.pyx)
-    set(cython_sources
+    set(_core_cpp ${CMAKE_CURRENT_BINARY_DIR}/core.cpp)
+    set(_core_pyx ${CMAKE_CURRENT_SOURCE_DIR}/python/tvm_ffi/cython/core.pyx)
+    set(_cython_sources
         ${CMAKE_CURRENT_SOURCE_DIR}/python/tvm_ffi/cython/core.pyx
         ${CMAKE_CURRENT_SOURCE_DIR}/python/tvm_ffi/cython/base.pxi
         ${CMAKE_CURRENT_SOURCE_DIR}/python/tvm_ffi/cython/device.pxi
@@ -181,22 +181,22 @@ if (TVM_FFI_BUILD_PYTHON_MODULE)
     # set working directory to source so we can see the exact file name in backtrace relatived to
     # the project source root
     add_custom_command(
-        OUTPUT ${core_cpp}
-        COMMAND ${Python_EXECUTABLE} -m cython --cplus ${core_pyx} -o ${core_cpp}
+        OUTPUT ${_core_cpp}
+        COMMAND ${Python_EXECUTABLE} -m cython --cplus ${_core_pyx} -o ${_core_cpp}
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-        COMMENT "Transpiling ${core_pyx} to ${core_cpp}"
-        DEPENDS ${cython_sources}
+        COMMENT "Transpiling ${_core_pyx} to ${_core_cpp}"
+        DEPENDS ${_cython_sources}
         VERBATIM)
     if (Python_VERSION VERSION_GREATER_EQUAL "3.12")
         # >= Python3.12, use Use_SABI version
-        python_add_library(tvm_ffi_cython MODULE "${core_cpp}" USE_SABI 3.12)
+        python_add_library(tvm_ffi_cython MODULE "${_core_cpp}" USE_SABI 3.12)
         set_target_properties(tvm_ffi_cython PROPERTIES OUTPUT_NAME "core")
         if (NOT WIN32)
             set_target_properties(tvm_ffi_cython PROPERTIES SUFFIX ".abi3.so")
         endif ()
     else ()
         # before Python3.12, use WITH_SOABI version
-        python_add_library(tvm_ffi_cython MODULE "${core_cpp}" WITH_SOABI)
+        python_add_library(tvm_ffi_cython MODULE "${_core_cpp}" WITH_SOABI)
         set_target_properties(tvm_ffi_cython PROPERTIES OUTPUT_NAME "core")
     endif ()
     target_include_directories(tvm_ffi_cython

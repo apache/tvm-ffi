@@ -12,7 +12,7 @@
 # the License.
 
 include(FetchContent)
-set(gtest_force_shared_crt
+set(gtest_force_shared_crt # cmake-lint: disable=C0103
     ON
     CACHE BOOL "Always use msvcrt.dll" FORCE)
 set(BUILD_GMOCK
@@ -61,7 +61,10 @@ if (NOT googletest_POPULATED)
         gtest_hide_internal_symbols)
 endif ()
 
-macro (tvm_ffi_add_googletest target_name)
+# TVM_FFI_ADD_GTEST(target_name) Register a GoogleTest executable as a CTest, link it against
+# gtest_main, and configure test discovery and properties. Parameters: target_name: Name of the test
+# executable target
+macro (TVM_FFI_ADD_GTEST target_name)
     add_test(
         NAME ${target_name}
         COMMAND ${target_name}

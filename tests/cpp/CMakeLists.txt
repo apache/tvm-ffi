@@ -21,7 +21,7 @@ add_sanitizer_address(tvm_ffi_tests)
 tvm_ffi_add_apple_dsymutil(tvm_ffi_tests)
 tvm_ffi_add_msvc_flags(tvm_ffi_tests)
 target_link_libraries(tvm_ffi_tests PRIVATE tvm_ffi_shared)
-tvm_ffi_add_googletest(tvm_ffi_tests)
+tvm_ffi_add_gtest(tvm_ffi_tests)
 
 if (MSVC)
     target_link_options(tvm_ffi_tests PRIVATE /DEBUG)

@@ -47,9 +47,9 @@ if (WIN32)
 else ()
     set_target_properties(tvm_ffi_shared PROPERTIES IMPORTED_LOCATION "${tvm_ffi_LIB_FILES}")
 endif ()
-
+# cmake-lint: disable=C0307
 set_target_properties(
     tvm_ffi_shared PROPERTIES INTERFACE_INCLUDE_DIRECTORIES
                               "${tvm_ffi_INCLUDE_DIR};${tvm_ffi_DLPACK_INCLUDE_DIR}")
-# extra cmake functions
+
 include(${CMAKE_CURRENT_LIST_DIR}/Utils/Library.cmake)

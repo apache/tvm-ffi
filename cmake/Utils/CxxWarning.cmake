@@ -9,8 +9,9 @@
 # Unless required by applicable law or agreed to in writing, software distributed under the License
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied.  See the License for the specific language governing permissions and limitations under
-# the License.
-
+# the License. tvm_ffi_add_cxx_warning(target_name) Apply a consistent set of warning flags (or
+# placeholders) depending on the active compiler family. Parameters: target_name: CMake target to
+# modify
 function (tvm_ffi_add_cxx_warning target_name)
     # GNU, Clang, or AppleClang
     if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
