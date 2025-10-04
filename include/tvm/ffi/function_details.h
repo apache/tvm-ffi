@@ -34,8 +34,6 @@
 
 namespace tvm {
 namespace ffi {
-// forward declaration
-class Function;
 namespace details {
 
 template <typename ArgType>
