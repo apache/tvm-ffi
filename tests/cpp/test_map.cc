@@ -285,6 +285,7 @@ TEST(Map, MapInsertOrder) {
     return reverse_order;
   };
 
+  // NOLINTNEXTLINE(performance-unnecessary-value-param)
   auto check_map = [&](Map<String, int> m0, size_t size, const std::vector<int>& order) {
     auto lhs = m0.begin();
     auto rhs = order.begin();
@@ -295,7 +296,7 @@ TEST(Map, MapInsertOrder) {
       ++rhs;
     }
     lhs = m0.end();
-    rhs = order.begin() + size;
+    rhs = order.begin() + static_cast<std::ptrdiff_t>(size);
     do {
       --lhs;
       --rhs;

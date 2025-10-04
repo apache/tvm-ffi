@@ -45,7 +45,7 @@ namespace ffi {
 class DSOLibrary final : public Library {
  public:
   explicit DSOLibrary(const String& name) { Load(name); }
-  ~DSOLibrary() {
+  ~DSOLibrary() final {
     if (lib_handle_) Unload();
   }
 
@@ -110,9 +110,10 @@ void DSOLibrary::Unload() {
 
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("ffi.Module.load_from_file.so", [](String library_path, String) {
-    return CreateLibraryModule(make_object<DSOLibrary>(library_path));
-  });
+  refl::GlobalDef().def("ffi.Module.load_from_file.so",
+                        [](const String& library_path, const String&) {
+                          return CreateLibraryModule(make_object<DSOLibrary>(library_path));
+                        });
 }
 }  // namespace ffi
 }  // namespace tvm

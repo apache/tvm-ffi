@@ -42,7 +42,7 @@ namespace ffi {
 class Library : public Object {
  public:
   // destructor.
-  virtual ~Library() {}
+  virtual ~Library() = default;
   /*!
    * \brief Get the symbol address for a given name.
    * \param name The name of the symbol.
@@ -69,7 +69,7 @@ struct ModuleObj::InternalUnsafe {
   static void* GetFunctionFromImports(ModuleObj* module, const char* name) {
     // backend implementation for TVMFFIEnvModLookupFromImports
     static std::mutex mutex_;
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::scoped_lock<std::mutex> lock(mutex_);
     String s_name(name);
     auto it = module->import_lookup_cache_.find(s_name);
     if (it != module->import_lookup_cache_.end()) {

@@ -44,8 +44,9 @@ inline int ParseCustomDataTypeCode(const std::string_view& str, const char** sca
   TVM_FFI_ICHECK(str.data() == tmp);
   *scan = str.data() + 6;
   TVM_FFI_ICHECK(str.data() == tmp);
-  if (**scan != '[')
+  if (**scan != '[') {
     TVM_FFI_THROW(ValueError) << "expected opening brace after 'custom' type in" << str;
+  }
   TVM_FFI_ICHECK(str.data() == tmp);
   *scan += 1;
   TVM_FFI_ICHECK(str.data() == tmp);

@@ -30,6 +30,7 @@
 #include <tvm/ffi/string.h>
 #include <tvm/ffi/type_traits.h>
 
+#include <cstdint>
 #include <string>
 
 namespace tvm {
@@ -179,7 +180,7 @@ struct TypeTraits<DLDataType> : public TypeTraitsBase {
 
   TVM_FFI_INLINE static std::string TypeStr() { return ffi::StaticTypeKey::kTVMFFIDataType; }
   TVM_FFI_INLINE static std::string TypeSchema() {
-    return "{\"type\":\"" + std::string(ffi::StaticTypeKey::kTVMFFIDataType) + "\"}";
+    return R"({"type":")" + std::string(ffi::StaticTypeKey::kTVMFFIDataType) + R"("})";
   }
 };
 }  // namespace ffi

@@ -83,6 +83,7 @@ void ExampleFunctionPassFunction() {
   namespace ffi = tvm::ffi;
   // Create a function from a typed lambda
   ffi::Function fapply = ffi::Function::FromTyped(
+      // NOLINTNEXTLINE(performance-unnecessary-value-param)
       [](const ffi::Function f, ffi::Any param) { return f(param.cast<int>()); });
   ffi::Function fadd1 = ffi::Function::FromTyped(  //
       [](const int a) -> int { return a + 1; });
@@ -168,6 +169,7 @@ void ExampleArray() {
   EXPECT_EQ(numbers.size(), 3);
   EXPECT_EQ(numbers[0], 1);
 
+  // NOLINTNEXTLINE(performance-unnecessary-value-param)
   ffi::Function head = ffi::Function::FromTyped([](const ffi::Array<int> a) { return a[0]; });
   EXPECT_EQ(head(numbers).cast<int>(), 1);
 
@@ -225,7 +227,7 @@ void ExampleVariant() {
 
   var0 = ffi::String("hello");
   std::optional<ffi::String> maybe_str = var0.as<ffi::String>();
-  EXPECT_EQ(maybe_str.value(), "hello");
+  EXPECT_EQ(maybe_str.value(), "hello");  // NOLINT(bugprone-unchecked-optional-access)
 
   std::optional<int> maybe_int2 = var0.as<int>();
   EXPECT_EQ(maybe_int2.has_value(), false);

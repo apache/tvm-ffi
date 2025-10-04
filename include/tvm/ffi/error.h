@@ -97,7 +97,9 @@ namespace details {
 class ErrorObjFromStd : public ErrorObj {
  public:
   ErrorObjFromStd(std::string kind, std::string message, std::string backtrace)
-      : kind_data_(kind), message_data_(message), backtrace_data_(backtrace) {
+      : kind_data_(std::move(kind)),
+        message_data_(std::move(message)),
+        backtrace_data_(std::move(backtrace)) {
     this->kind = TVMFFIByteArray{kind_data_.data(), kind_data_.length()};
     this->message = TVMFFIByteArray{message_data_.data(), message_data_.length()};
     this->backtrace = TVMFFIByteArray{backtrace_data_.data(), backtrace_data_.length()};
@@ -143,7 +145,8 @@ class Error : public ObjectRef, public std::exception {
    * \param backtrace The backtrace of the error.
    */
   Error(std::string kind, std::string message, std::string backtrace) {
-    data_ = make_object<details::ErrorObjFromStd>(kind, message, backtrace);
+    data_ = make_object<details::ErrorObjFromStd>(std::move(kind), std::move(message),
+                                                  std::move(backtrace));
   }
 
   /*!
@@ -153,7 +156,7 @@ class Error : public ObjectRef, public std::exception {
    * \param backtrace The backtrace of the error.
    */
   Error(std::string kind, std::string message, const TVMFFIByteArray* backtrace)
-      : Error(kind, message, std::string(backtrace->data, backtrace->size)) {}
+      : Error(std::move(kind), std::move(message), std::string(backtrace->data, backtrace->size)) {}
 
   /*!
    * \brief Get the kind of the error object.
@@ -196,7 +199,7 @@ class Error : public ObjectRef, public std::exception {
     ErrorObj* obj = static_cast<ErrorObj*>(data_.get());
     for (size_t i = 0; i < obj->backtrace.size; i++) {
       if (obj->backtrace.data[i] == '\n') {
-        line_breakers.push_back(i);
+        line_breakers.push_back(static_cast<int64_t>(i));
       }
     }
     std::string result;
@@ -245,10 +248,13 @@ namespace details {
 class ErrorBuilder {
  public:
   explicit ErrorBuilder(std::string kind, std::string backtrace, bool log_before_throw)
-      : kind_(kind), backtrace_(backtrace), log_before_throw_(log_before_throw) {}
+      : kind_(std::move(kind)),
+        backtrace_(std::move(backtrace)),
+        log_before_throw_(log_before_throw) {}
 
   explicit ErrorBuilder(std::string kind, const TVMFFIByteArray* backtrace, bool log_before_throw)
-      : ErrorBuilder(kind, std::string(backtrace->data, backtrace->size), log_before_throw) {}
+      : ErrorBuilder(std::move(kind), std::string(backtrace->data, backtrace->size),
+                     log_before_throw) {}
 
 // MSVC disable warning in error builder as it is exepected
 #ifdef _MSC_VER
@@ -355,9 +361,11 @@ TVM_FFI_CHECK_FUNC(_NE, !=)
 #endif
 }  // namespace details
 
-#define TVM_FFI_ICHECK_BINARY_OP(name, op, x, y)                        \
-  if (auto __tvm__log__err = ::tvm::ffi::details::LogCheck##name(x, y)) \
-  TVM_FFI_THROW(InternalError) << "Check failed: " << #x " " #op " " #y << *__tvm__log__err << ": "
+#define TVM_FFI_ICHECK_BINARY_OP(name, op, x, y)                                              \
+  if (auto __tvm_ffi_log_err = /* NOLINT(bugprone-reserved-identifier) */                     \
+      ::tvm::ffi::details::LogCheck##name(x, y))                                              \
+  TVM_FFI_THROW(InternalError) << "Check failed: " << #x " " #op " " #y << *__tvm_ffi_log_err \
+                               << ": "
 
 #define TVM_FFI_ICHECK(x) \
   if (!(x)) TVM_FFI_THROW(InternalError) << "Check failed: (" #x << ") is false: "

@@ -31,6 +31,7 @@
 #include <tvm/ffi/error.h>
 #include <tvm/ffi/reflection/registry.h>
 
+#include <cstdint>
 #include <vector>
 
 namespace tvm {
@@ -82,7 +83,7 @@ class AccessStepObj : public Object {
    * \param kind The kind of the access step.
    * \param key The key of the access step.
    */
-  AccessStepObj(AccessKind kind, Any key) : kind(kind), key(key) {}
+  AccessStepObj(AccessKind kind, Any key) : kind(kind), key(std::move(key)) {}
 
   /*!
    * \brief Deep check if two steps are equal.
@@ -109,14 +110,17 @@ class AccessStep : public ObjectRef {
    * \param kind The kind of the access step.
    * \param key The key of the access step.
    */
-  AccessStep(AccessKind kind, Any key) : ObjectRef(make_object<AccessStepObj>(kind, key)) {}
+  AccessStep(AccessKind kind, Any key)
+      : ObjectRef(make_object<AccessStepObj>(kind, std::move(key))) {}
 
   /*!
    * \brief Create an access step for a object attribute access.
    * \param field_name The name of the field to access.
    * \return The access step.
    */
-  static AccessStep Attr(String field_name) { return AccessStep(AccessKind::kAttr, field_name); }
+  static AccessStep Attr(String field_name) {
+    return AccessStep(AccessKind::kAttr, std::move(field_name));
+  }
 
   /*!
    * \brief Create an access step for a object attribute missing access.
@@ -124,7 +128,7 @@ class AccessStep : public ObjectRef {
    * \return The access step.
    */
   static AccessStep AttrMissing(String field_name) {
-    return AccessStep(AccessKind::kAttrMissing, field_name);
+    return AccessStep(AccessKind::kAttrMissing, std::move(field_name));
   }
 
   /*!
@@ -148,7 +152,7 @@ class AccessStep : public ObjectRef {
    * \param key The key of the map item to access.
    * \return The access step.
    */
-  static AccessStep MapItem(Any key) { return AccessStep(AccessKind::kMapItem, key); }
+  static AccessStep MapItem(Any key) { return AccessStep(AccessKind::kMapItem, std::move(key)); }
 
   /*!
    * \brief Create an access step for a map item missing access.
@@ -156,7 +160,7 @@ class AccessStep : public ObjectRef {
    * \return The access step.
    */
   static AccessStep MapItemMissing(Any key = nullptr) {
-    return AccessStep(AccessKind::kMapItemMissing, key);
+    return AccessStep(AccessKind::kMapItemMissing, std::move(key));
   }
 
   /// \cond Doxygen_Suppress
@@ -206,7 +210,7 @@ class AccessPathObj : public Object {
    * \param depth The current depth of the access path.
    */
   AccessPathObj(Optional<ObjectRef> parent, Optional<AccessStep> step, int32_t depth)
-      : parent(parent), step(step), depth(depth) {}
+      : parent(std::move(parent)), step(std::move(step)), depth(depth) {}
 
   /*!
    * \brief Get the parent of the access path.
@@ -338,7 +342,7 @@ class AccessPath : public ObjectRef {
    * \param steps The array of steps.
    * \return The access path.
    */
-  static AccessPath FromSteps(Array<AccessStep> steps) {
+  static AccessPath FromSteps(const Array<AccessStep>& steps) {
     AccessPath path = AccessPath::Root();
     for (AccessStep step : steps) {
       path = path->Extend(step);
@@ -360,7 +364,7 @@ class AccessPath : public ObjectRef {
 
  private:
   friend class AccessPathObj;
-  explicit AccessPath(ObjectPtr<AccessPathObj> ptr) : ObjectRef(ptr) {}
+  explicit AccessPath(ObjectPtr<AccessPathObj> ptr) : ObjectRef(std::move(ptr)) {}
 };
 
 /*!
@@ -376,15 +380,16 @@ inline Optional<AccessPath> AccessPathObj::GetParent() const {
 }
 
 inline AccessPath AccessPathObj::Extend(AccessStep step) const {
-  return AccessPath(make_object<AccessPathObj>(GetRef<AccessPath>(this), step, this->depth + 1));
+  return AccessPath(
+      make_object<AccessPathObj>(GetRef<AccessPath>(this), std::move(step), this->depth + 1));
 }
 
 inline AccessPath AccessPathObj::Attr(String field_name) const {
-  return this->Extend(AccessStep::Attr(field_name));
+  return this->Extend(AccessStep::Attr(std::move(field_name)));
 }
 
 inline AccessPath AccessPathObj::AttrMissing(String field_name) const {
-  return this->Extend(AccessStep::AttrMissing(field_name));
+  return this->Extend(AccessStep::AttrMissing(std::move(field_name)));
 }
 
 inline AccessPath AccessPathObj::ArrayItem(int64_t index) const {
@@ -396,11 +401,11 @@ inline AccessPath AccessPathObj::ArrayItemMissing(int64_t index) const {
 }
 
 inline AccessPath AccessPathObj::MapItem(Any key) const {
-  return this->Extend(AccessStep::MapItem(key));
+  return this->Extend(AccessStep::MapItem(std::move(key)));
 }
 
 inline AccessPath AccessPathObj::MapItemMissing(Any key) const {
-  return this->Extend(AccessStep::MapItemMissing(key));
+  return this->Extend(AccessStep::MapItemMissing(std::move(key)));
 }
 
 inline Array<AccessStep> AccessPathObj::ToSteps() const {

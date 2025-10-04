@@ -54,7 +54,7 @@ class Tuple : public ObjectRef {
   /*! \brief Copy constructor */
   Tuple(const Tuple<Types...>& other) : ObjectRef(other) {}
   /*! \brief Move constructor */
-  Tuple(Tuple<Types...>&& other) : ObjectRef(std::move(other)) {}
+  Tuple(Tuple<Types...>&& other) noexcept : ObjectRef(std::move(other)) {}
   /*!
    * \brief Constructor from another tuple
    * \param other The other tuple
@@ -63,7 +63,7 @@ class Tuple : public ObjectRef {
    */
   template <typename... UTypes,
             typename = std::enable_if_t<(details::type_contains_v<Types, UTypes> && ...), int>>
-  Tuple(const Tuple<UTypes...>& other) : ObjectRef(other) {}
+  Tuple(const Tuple<UTypes...>& other) : ObjectRef(other) {}  // NOLINT(google-explicit-constructor)
 
   /*!
    * \brief Constructor from another tuple
@@ -73,7 +73,8 @@ class Tuple : public ObjectRef {
    */
   template <typename... UTypes,
             typename = std::enable_if_t<(details::type_contains_v<Types, UTypes> && ...), int>>
-  Tuple(Tuple<UTypes...>&& other) : ObjectRef(std::move(other)) {}
+  Tuple(Tuple<UTypes...>&& other)  // NOLINT(google-explicit-constructor)
+      : ObjectRef(std::move(other)) {}
 
   /*!
    * \brief Constructor from arguments
@@ -101,7 +102,7 @@ class Tuple : public ObjectRef {
    * \param other The other tuple
    * \tparam The enable_if_t type
    */
-  TVM_FFI_INLINE Tuple& operator=(Tuple<Types...>&& other) {
+  TVM_FFI_INLINE Tuple& operator=(Tuple<Types...>&& other) noexcept {
     data_ = std::move(other.data_);
     return *this;
   }
@@ -306,7 +307,7 @@ struct TypeTraits<Tuple<Types...>> : public ObjectRefTypeTraitsBase<Tuple<Types.
   }
   TVM_FFI_INLINE static std::string TypeSchema() {
     std::ostringstream oss;
-    oss << "{\"type\":\"Tuple\",\"args\":[";
+    oss << R"({"type":"Tuple","args":[)";
     const char* sep = "";
     ((oss << sep << details::TypeSchema<Types>::v(), sep = ","), ...);
     oss << "]}";

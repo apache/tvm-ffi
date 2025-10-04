@@ -48,6 +48,7 @@ TEST(RValueRef, Basic) {
 
 TEST(RValueRef, ParamChecking) {
   // try decution
+  // NOLINTNEXTLINE(performance-unnecessary-value-param)
   Function fadd1 = Function::FromTyped([](TInt a) -> int64_t { return a->value + 1; });
 
   // convert that triggers error

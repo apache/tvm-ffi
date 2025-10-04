@@ -28,7 +28,7 @@ struct CPUNDAlloc {
   void FreeData(DLTensor* tensor) { free(tensor->data); }
 };
 
-inline Tensor Empty(Shape shape, DLDataType dtype, DLDevice device) {
+inline Tensor Empty(const Shape& shape, DLDataType dtype, DLDevice device) {
   return Tensor::FromNDAlloc(CPUNDAlloc(), shape, dtype, device);
 }
 
@@ -71,7 +71,7 @@ TEST(Tensor, Basic) {
   EXPECT_EQ(nd.data_ptr(), nd->data);
 
   Any any0 = nd;
-  Tensor nd2 = any0.as<Tensor>().value();
+  Tensor nd2 = any0.as<Tensor>().value();  // NOLINT(bugprone-unchecked-optional-access)
   EXPECT_EQ(nd2.dtype(), DLDataType({kDLFloat, 32, 1}));
   for (int64_t i = 0; i < shape.Product(); ++i) {
     EXPECT_EQ(reinterpret_cast<float*>(nd2->data)[i], i);
@@ -177,6 +177,7 @@ TEST(Tensor, TensorView) {
 
   AnyView result = tensor_view;
   EXPECT_EQ(result.type_index(), TypeIndex::kTVMFFIDLTensorPtr);
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   TensorView tensor_view2 = result.as<TensorView>().value();
   EXPECT_EQ(tensor_view2.shape().size(), 3);
   EXPECT_EQ(tensor_view2.shape()[0], 1);

@@ -110,6 +110,7 @@ TEST(Func, FromTyped) {
 
   // try decution
   Function fpass_and_return = Function::FromTyped(
+      // NOLINTNEXTLINE(performance-unnecessary-value-param)
       [](TInt x, int value, AnyView z) -> Function {
         EXPECT_EQ(x.use_count(), 2);
         EXPECT_EQ(x->value, value);
@@ -144,6 +145,7 @@ TEST(Func, FromTyped) {
 }
 
 TEST(Func, PassReturnAny) {
+  // NOLINTNEXTLINE(performance-unnecessary-value-param)
   Function fadd_one = Function::FromTyped([](Any a) -> Any { return a.cast<int>() + 1; });
   EXPECT_EQ(fadd_one(1).cast<int>(), 2);
 }
@@ -157,7 +159,7 @@ TEST(Func, Global) {
   auto fnot_exist = Function::GetGlobal("testing.not_existing_func");
   EXPECT_TRUE(!fnot_exist);
 
-  auto fname_functor =
+  auto fname_functor =  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       Function::GetGlobal("ffi.FunctionListGlobalNamesFunctor").value()().cast<Function>();
   Array<String> names;
   int len = fname_functor(-1).cast<int>();
@@ -184,7 +186,7 @@ TEST(Func, TypedFunction) {
 TEST(Func, TypedFunctionAsAny) {
   TypedFunction<int(int)> fadd1 = [](int a) -> int { return a + 1; };
   Any fany(std::move(fadd1));
-  EXPECT_TRUE(fadd1 == nullptr);
+  EXPECT_TRUE(fadd1 == nullptr);  // NOLINT(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
   auto fadd1_dup = fany.cast<TypedFunction<int(int)>>();
   EXPECT_EQ(fadd1_dup(1), 2);
 }

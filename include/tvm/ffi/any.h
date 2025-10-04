@@ -83,12 +83,12 @@ class AnyView {
   /*! \brief Copy assignment operator */
   AnyView& operator=(const AnyView&) = default;
   /*! \brief Move constructor */
-  AnyView(AnyView&& other) : data_(other.data_) {
+  AnyView(AnyView&& other) noexcept : data_(other.data_) {
     other.data_.type_index = TypeIndex::kTVMFFINone;
     other.data_.zero_padding = 0;
     other.data_.v_int64 = 0;
   }
-  TVM_FFI_INLINE AnyView& operator=(AnyView&& other) {
+  TVM_FFI_INLINE AnyView& operator=(AnyView&& other) noexcept {
     // copy-and-swap idiom
     AnyView(std::move(other)).swap(*this);  // NOLINT(*)
     return *this;
@@ -286,7 +286,7 @@ class Any {
    * \brief Move constructor from another Any
    * \param other The other Any
    */
-  Any(Any&& other) : data_(other.data_) {
+  Any(Any&& other) noexcept : data_(other.data_) {
     other.data_.type_index = TypeIndex::kTVMFFINone;
     other.data_.zero_padding = 0;
     other.data_.v_int64 = 0;
@@ -304,7 +304,7 @@ class Any {
    * \brief Move assign from another Any
    * \param other The other Any
    */
-  TVM_FFI_INLINE Any& operator=(Any&& other) {
+  TVM_FFI_INLINE Any& operator=(Any&& other) noexcept {
     // copy-and-swap idiom
     Any(std::move(other)).swap(*this);  // NOLINT(*)
     return *this;
@@ -326,7 +326,9 @@ class Any {
     return *this;
   }
   /*! \brief Any can be converted to AnyView in zero cost. */
-  operator AnyView() const { return AnyView::CopyFromTVMFFIAny(data_); }
+  operator AnyView() const {  // NOLINT(google-explicit-constructor)
+    return AnyView::CopyFromTVMFFIAny(data_);
+  }
   /*!
    * \brief Constructor from a general type
    * \tparam T The value type of the other
@@ -540,12 +542,12 @@ struct AnyUnsafe : public ObjectUnsafe {
     return result;
   }
 
-  TVM_FFI_INLINE static Any MoveTVMFFIAnyToAny(TVMFFIAny&& data) {
+  TVM_FFI_INLINE static Any MoveTVMFFIAnyToAny(TVMFFIAny* data) {
     Any any;
-    any.data_ = data;
-    data.type_index = TypeIndex::kTVMFFINone;
-    data.zero_padding = 0;
-    data.v_int64 = 0;
+    any.data_ = *data;
+    data->type_index = TypeIndex::kTVMFFINone;
+    data->zero_padding = 0;
+    data->v_int64 = 0;
     return any;
   }
 

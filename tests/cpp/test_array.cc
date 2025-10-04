@@ -51,6 +51,7 @@ TEST(Array, MutateInPlaceForUniqueReference) {
   EXPECT_TRUE(arr.unique());
   auto* before = arr.get();
 
+  // NOLINTNEXTLINE(performance-unnecessary-value-param)
   arr.MutateByApply([](TInt) { return TInt(2); });
   auto* after = arr.get();
   EXPECT_EQ(before, after);
@@ -64,6 +65,7 @@ TEST(Array, CopyWhenMutatingNonUniqueReference) {
   EXPECT_TRUE(!arr.unique());
   auto* before = arr.get();
 
+  // NOLINTNEXTLINE(performance-unnecessary-value-param)
   arr.MutateByApply([](TInt) { return TInt(2); });
   auto* after = arr.get();
   EXPECT_NE(before, after);
@@ -73,8 +75,11 @@ TEST(Array, Map) {
   // Basic functionality
   TInt x(1), y(1);
   Array<TInt> var_arr{x, y};
+
   Array<TNumber> expr_arr =
-      var_arr.Map([](TInt var) -> TNumber { return TFloat(static_cast<double>(var->value + 1)); });
+      var_arr.Map([](TInt var) -> TNumber {  // NOLINT(performance-unnecessary-value-param)
+        return TFloat(static_cast<double>(var->value + 1));
+      });
 
   EXPECT_NE(var_arr.get(), expr_arr.get());
   EXPECT_TRUE(expr_arr[0]->IsInstance<TFloatObj>());
@@ -119,8 +124,8 @@ TEST(Array, ResizeReserveClear) {
   for (size_t n = 0; n < 10; ++n) {
     Array<int> a;
     Array<int> b;
-    a.resize(n);
-    b.reserve(n);
+    a.resize(static_cast<int64_t>(n));
+    b.reserve(static_cast<int64_t>(n));
     ASSERT_EQ(a.size(), n);
     ASSERT_GE(a.capacity(), n);
     a.clear();
@@ -166,8 +171,8 @@ TEST(Array, InsertEraseRange) {
     a.insert(a.end(), static_cast<int>(n));
     b.insert(b.end(), static_cast<int>(n));
     for (size_t pos = 0; pos <= n; ++pos) {
-      a.insert(a.begin() + pos, range_a.begin(), range_a.end());
-      b.insert(b.begin() + pos, range_b.begin(), range_b.end());
+      a.insert(a.begin() + static_cast<std::ptrdiff_t>(pos), range_a.begin(), range_a.end());
+      b.insert(b.begin() + static_cast<std::ptrdiff_t>(pos), range_b.begin(), range_b.end());
       ASSERT_EQ(a.front(), b.front());
       ASSERT_EQ(a.back(), b.back());
       ASSERT_EQ(a.size(), n + range_a.size());
@@ -176,8 +181,10 @@ TEST(Array, InsertEraseRange) {
       for (size_t k = 0; k < m; ++k) {
         ASSERT_EQ(a[k], b[k]);
       }
-      a.erase(a.begin() + pos, a.begin() + pos + range_a.size());
-      b.erase(b.begin() + pos, b.begin() + pos + range_b.size());
+      a.erase(a.begin() + static_cast<std::ptrdiff_t>(pos),
+              a.begin() + static_cast<std::ptrdiff_t>(pos + range_a.size()));
+      b.erase(b.begin() + static_cast<std::ptrdiff_t>(pos),
+              b.begin() + static_cast<std::ptrdiff_t>(pos + range_b.size()));
     }
     ASSERT_EQ(a.front(), b.front());
     ASSERT_EQ(a.back(), b.back());
@@ -186,6 +193,7 @@ TEST(Array, InsertEraseRange) {
 }
 
 TEST(Array, FuncArrayAnyArg) {
+  // NOLINTNEXTLINE(performance-unnecessary-value-param)
   Function fadd_one = Function::FromTyped([](Array<Any> a) -> Any { return a[0].cast<int>() + 1; });
   EXPECT_EQ(fadd_one(Array<Any>{1}).cast<int>(), 2);
 }
@@ -193,6 +201,7 @@ TEST(Array, FuncArrayAnyArg) {
 TEST(Array, MapUniquePropogation) {
   // Basic functionality
   Array<TInt> var_arr{TInt(1), TInt(2)};
+  // NOLINTNEXTLINE(performance-unnecessary-value-param)
   var_arr.MutateByApply([](TInt x) -> TInt {
     EXPECT_TRUE(x.unique());
     return x;

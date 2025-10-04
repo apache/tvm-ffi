@@ -47,7 +47,7 @@ namespace reflection {
  * \brief Types of temporary metadata hold in FieldInfoBuilder and MethodInfoBuilder,
  * before they are filled into final C metadata
  */
-using _MetadataType = std::vector<std::pair<String, Any>>;
+using _MetadataType = std::vector<std::pair<String, Any>>;  // NOLINT(bugprone-reserved-identifier)
 /*!
  * \brief Builder for TVMFFIFieldInfo
  * \sa TVMFFIFieldInfo
@@ -78,7 +78,7 @@ class Metadata : public InfoTrait {
    * \brief Constructor
    * \param dict The initial dictionary
    */
-  explicit Metadata(std::initializer_list<std::pair<String, Any>> dict) : dict_(dict) {}
+  Metadata(std::initializer_list<std::pair<String, Any>> dict) : dict_(dict) {}
   /*!
    * \brief Move metadata into `FieldInfoBuilder`
    * \param info The field info builder.
@@ -141,7 +141,7 @@ class DefaultValue : public InfoTrait {
    * \brief Constructor
    * \param value The value to be set
    */
-  explicit DefaultValue(Any value) : value_(value) {}
+  explicit DefaultValue(Any value) : value_(std::move(value)) {}
 
   /*!
    * \brief Apply the default value to the field info
@@ -279,7 +279,7 @@ class ReflectionDefBase {
         // call method pointer
         return (target.*func)(std::forward<Args>(params)...);
       };
-      return ffi::Function::FromTyped(fwrap, name);
+      return ffi::Function::FromTyped(fwrap, std::move(name));
     }
 
     if constexpr (std::is_base_of_v<Object, Class>) {
@@ -287,7 +287,7 @@ class ReflectionDefBase {
         // call method pointer
         return (const_cast<Class*>(target)->*func)(std::forward<Args>(params)...);
       };
-      return ffi::Function::FromTyped(fwrap, name);
+      return ffi::Function::FromTyped(fwrap, std::move(name));
     }
   }
 
@@ -300,7 +300,7 @@ class ReflectionDefBase {
         // call method pointer
         return (target.*func)(std::forward<Args>(params)...);
       };
-      return ffi::Function::FromTyped(fwrap, name);
+      return ffi::Function::FromTyped(fwrap, std::move(name));
     }
 
     if constexpr (std::is_base_of_v<Object, Class>) {
@@ -308,13 +308,13 @@ class ReflectionDefBase {
         // call method pointer
         return (target->*func)(std::forward<Args>(params)...);
       };
-      return ffi::Function::FromTyped(fwrap, name);
+      return ffi::Function::FromTyped(fwrap, std::move(name));
     }
   }
 
   template <typename Func>
   TVM_FFI_INLINE static Function GetMethod(std::string name, Func&& func) {
-    return ffi::Function::FromTyped(std::forward<Func>(func), name);
+    return ffi::Function::FromTyped(std::forward<Func>(func), std::move(name));
   }
 };
 /// \endcond
@@ -391,7 +391,7 @@ class GlobalDef : public ReflectionDefBase {
   }
 
  private:
-  template <typename... Extra>
+  template <typename... Extra>  // NOLINTNEXTLINE(performance-unnecessary-value-param)
   void RegisterFunc(const char* name, ffi::Function func, String type_schema, Extra&&... extra) {
     MethodInfoBuilder info;
     info.name = TVMFFIByteArray{name, std::char_traits<char>::length(name)};

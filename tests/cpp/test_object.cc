@@ -45,7 +45,7 @@ TEST(Object, RefCounter) {
 
   ObjectPtr<TIntObj> c = std::move(a);
   EXPECT_EQ(c.use_count(), 1);
-  EXPECT_TRUE(a == nullptr);
+  EXPECT_TRUE(a == nullptr);  // NOLINT(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
 
   EXPECT_EQ(c->value, 11);
 }
@@ -152,6 +152,7 @@ TEST(Object, WeakObjectPtrAssignment) {
 
   // Test move construction
   WeakObjectPtr<TIntObj> weak3(std::move(weak1));
+  // NOLINTNEXTLINE(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
   EXPECT_TRUE(weak1.expired());  // weak1 should be moved from
   EXPECT_FALSE(weak3.expired());
   EXPECT_EQ(weak3.use_count(), 1);
@@ -167,6 +168,7 @@ TEST(Object, WeakObjectPtrAssignment) {
   // Test move assignment
   WeakObjectPtr<TIntObj> weak5;
   weak5 = std::move(weak2);
+  // NOLINTNEXTLINE(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
   EXPECT_TRUE(weak2.expired());  // weak2 should be moved from
   EXPECT_FALSE(weak5.expired());
   EXPECT_EQ(weak5.use_count(), 1);
@@ -234,7 +236,7 @@ TEST(Object, OpaqueObject) {
   thread_local int deleter_trigger_counter = 0;
   struct DummyOpaqueObject {
     int value;
-    DummyOpaqueObject(int value) : value(value) {}
+    explicit DummyOpaqueObject(int value) : value(value) {}
 
     static void Deleter(void* handle) {
       deleter_trigger_counter++;

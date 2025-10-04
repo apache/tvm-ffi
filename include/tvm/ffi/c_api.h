@@ -16,7 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
+// NOLINTBEGIN(modernize-use-using,bugprone-reserved-identifier,modernize-deprecated-headers)
 /*
  * \file tvm/ffi/c_api.h
  * \brief This file defines the C convention of the FFI convention
@@ -1183,3 +1183,4 @@ inline DLDevice TVMFFIDLDeviceFromIntPair(int32_t device_type, int32_t device_id
 }
 #endif  // __cplusplus
 #endif  // TVM_FFI_C_API_H_
+// NOLINTEND(modernize-use-using,bugprone-reserved-identifier,modernize-deprecated-headers)

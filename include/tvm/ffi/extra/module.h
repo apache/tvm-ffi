@@ -28,6 +28,8 @@
 #include <tvm/ffi/extra/base.h>
 #include <tvm/ffi/function.h>
 
+#include <cstdint>
+
 namespace tvm {
 namespace ffi {
 
@@ -113,7 +115,7 @@ class TVM_FFI_EXTRA_CXX_API ModuleObj : public Object {
    * \param format Format of the source code, can be empty by default.
    * \return Possible source code when available, or empty string if not available.
    */
-  virtual String InspectSource(const String& format = "") const { return String(); }
+  virtual String InspectSource(const String& format) const { return String(); }
   /*!
    * \brief Import another module.
    * \param other The module to import.
@@ -233,7 +235,9 @@ class Module : public ObjectRef {
    * \brief Constructor from ObjectPtr<ModuleObj>.
    * \param ptr The object pointer.
    */
-  explicit Module(ObjectPtr<ModuleObj> ptr) : ObjectRef(ptr) { TVM_FFI_ICHECK(ptr != nullptr); }
+  explicit Module(const ObjectPtr<ModuleObj>& ptr) : ObjectRef(ptr) {
+    TVM_FFI_ICHECK(ptr != nullptr);
+  }
   /*!
    * \brief Load a module from file.
    * \param file_name The name of the host function module.

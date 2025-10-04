@@ -32,6 +32,7 @@
 #include <chrono>
 #include <iostream>
 #include <thread>
+#include <utility>
 
 namespace tvm {
 namespace ffi {
@@ -121,7 +122,7 @@ class TestCxxClassDerivedDerived : public TestCxxClassDerived {
 
   TestCxxClassDerivedDerived(int64_t v_i64, int32_t v_i32, double v_f64, float v_f32, String v_str,
                              bool v_bool)
-      : TestCxxClassDerived(v_i64, v_i32, v_f64, v_f32), v_str(v_str), v_bool(v_bool) {}
+      : TestCxxClassDerived(v_i64, v_i32, v_f64, v_f32), v_str(std::move(v_str)), v_bool(v_bool) {}
 
   TVM_FFI_DECLARE_OBJECT_INFO("testing.TestCxxClassDerivedDerived", TestCxxClassDerivedDerived,
                               TestCxxClassDerived);
@@ -130,11 +131,11 @@ class TestCxxClassDerivedDerived : public TestCxxClassDerived {
 class TestCxxInitSubsetObj : public Object {
  public:
   int64_t required_field;
-  int64_t optional_field;
+  int64_t optional_field = -1;
   String note;
 
   explicit TestCxxInitSubsetObj(int64_t value, String note)
-      : required_field(value), optional_field(-1), note(note) {}
+      : required_field(value), note(std::move(note)) {}
 
   static constexpr bool _type_mutable = true;
   TVM_FFI_DECLARE_OBJECT_INFO("testing.TestCxxInitSubset", TestCxxInitSubsetObj, Object);
@@ -159,6 +160,7 @@ class TestUnregisteredObject : public TestUnregisteredBaseObject {
                               TestUnregisteredBaseObject);
 };
 
+// NOLINTNEXTLINE(performance-unnecessary-value-param)
 TVM_FFI_NO_INLINE void TestRaiseError(String kind, String msg) {
   // keep name and no liner for testing backtrace
   throw ffi::Error(kind, msg, TVMFFIBacktrace(__FILE__, __LINE__, TVM_FFI_FUNC_SIG, 0));
@@ -255,7 +257,7 @@ namespace ffi {
 class SchemaAllTypesObj : public Object {
  public:
   // POD and builtin types
-  bool v_bool;
+  bool v_bool{true};
   int64_t v_int;
   double v_float;
   DLDevice v_device;
@@ -277,8 +279,7 @@ class SchemaAllTypesObj : public Object {
 
   // Constructor used by refl::init in make_with
   SchemaAllTypesObj(int64_t vi, double vf, String s)  // NOLINT(*): explicit not necessary here
-      : v_bool(true),
-        v_int(vi),
+      : v_int(vi),
         v_float(vf),
         v_device(TVMFFIDLDeviceFromIntPair(kDLCPU, 0)),
         v_dtype(StringToDLDataType("float32")),
@@ -298,6 +299,7 @@ class SchemaAllTypesObj : public Object {
     return Optional<String>(std::nullopt);
   }
   Map<String, Array<int64_t>> MergeMap(Map<String, Array<int64_t>> lhs,
+                                       // NOLINTNEXTLINE(performance-unnecessary-value-param)
                                        Map<String, Array<int64_t>> rhs) const {
     for (const auto& kv : rhs) {
       if (!lhs.count(kv.first)) {
@@ -390,13 +392,15 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("testing.schema_id_variant_int_str", [](Variant<int64_t, String> v) { return v; })
       .def_packed("testing.schema_packed", [](PackedArgs args, Any* ret) {})
       .def("testing.schema_arr_map_opt",
+           // NOLINTNEXTLINE(performance-unnecessary-value-param)
            [](Array<Optional<int64_t>> arr, Map<String, Array<int64_t>> mp,
+              // NOLINTNEXTLINE(performance-unnecessary-value-param)
               Optional<String> os) -> Map<String, Array<int64_t>> {
              // no-op combine
              if (os.has_value()) {
                Array<int64_t> extra;
-               for (size_t i = 0; i < arr.size(); ++i) {
-                 if (arr[i].has_value()) extra.push_back(arr[i].value());
+               for (const auto& i : arr) {
+                 if (i.has_value()) extra.push_back(i.value());
                }
                mp.Set(os.value(), extra);
              }

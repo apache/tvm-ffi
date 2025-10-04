@@ -43,6 +43,7 @@ TEST(Optional, TInt) {
   Any z_any = std::move(y);
   EXPECT_TRUE(z_any != nullptr);
   EXPECT_EQ((z_any.cast<TInt>())->value, 11);
+  // NOLINTNEXTLINE(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
   EXPECT_TRUE(!y.has_value());
 
   // move from any to optional
@@ -67,7 +68,7 @@ TEST(Optional, double) {
   EXPECT_TRUE(y != 12);
 }
 
-TEST(Optional, AnyConvert_int) {
+TEST(Optional, AnyConvertInt) {
   Optional<int> opt_v0 = 1;
   EXPECT_EQ(opt_v0.value(), 1);
   EXPECT_TRUE(opt_v0.has_value());
@@ -83,7 +84,7 @@ TEST(Optional, AnyConvert_int) {
   EXPECT_EQ(any2.cast<int>(), 11);
 }
 
-TEST(Optional, AnyConvert_Array) {
+TEST(Optional, AnyConvertArray) {
   AnyView view0;
   Array<Array<TNumber>> arr_nested = {{}, {TInt(1), TFloat(2)}};
   view0 = arr_nested;
@@ -142,6 +143,7 @@ TEST(Optional, OptionalOfOptional) {
 TEST(Optional, ValueMove) {
   Optional<TInt> y = TInt(11);
   TInt x = std::move(y).value();
+  // NOLINTNEXTLINE(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
   EXPECT_TRUE(!y.has_value());
   EXPECT_EQ(x->value, 11);
 
@@ -151,6 +153,7 @@ TEST(Optional, ValueMove) {
 
   TInt moved_tint = *std::move(opt_tint);
   EXPECT_EQ(moved_tint->value, 21);
+  // NOLINTNEXTLINE(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
   EXPECT_TRUE(!opt_tint.has_value());
 }
 

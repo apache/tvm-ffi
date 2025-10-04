@@ -44,23 +44,23 @@ inline String Base64Encode(TVMFFIByteArray bytes) {
 
   for (size_t i = 0; i < (bytes.size / 3) * 3; i += 3) {
     int32_t buf[3];
-    buf[0] = static_cast<int32_t>(bytes.data[i]);
-    buf[1] = static_cast<int32_t>(bytes.data[i + 1]);
-    buf[2] = static_cast<int32_t>(bytes.data[i + 2]);
+    buf[0] = static_cast<int32_t>(static_cast<unsigned char>(bytes.data[i]));
+    buf[1] = static_cast<int32_t>(static_cast<unsigned char>(bytes.data[i + 1]));
+    buf[2] = static_cast<int32_t>(static_cast<unsigned char>(bytes.data[i + 2]));
     encoded.push_back(kEncodeTable[buf[0] >> 2]);
     encoded.push_back(kEncodeTable[((buf[0] << 4) | (buf[1] >> 4)) & 0x3F]);
     encoded.push_back(kEncodeTable[((buf[1] << 2) | (buf[2] >> 6)) & 0x3F]);
     encoded.push_back(kEncodeTable[buf[2] & 0x3F]);
   }
   if (bytes.size % 3 == 1) {
-    int32_t buf[1] = {static_cast<int32_t>(bytes.data[bytes.size - 1])};
+    int32_t buf[1] = {static_cast<int32_t>(static_cast<unsigned char>(bytes.data[bytes.size - 1]))};
     encoded.push_back(kEncodeTable[buf[0] >> 2]);
     encoded.push_back(kEncodeTable[(buf[0] << 4) & 0x3F]);
     encoded.push_back('=');
     encoded.push_back('=');
   } else if (bytes.size % 3 == 2) {
-    int32_t buf[2] = {static_cast<int32_t>(bytes.data[bytes.size - 2]),
-                      static_cast<int32_t>(bytes.data[bytes.size - 1])};
+    int32_t buf[2] = {static_cast<int32_t>(static_cast<unsigned char>(bytes.data[bytes.size - 2])),
+                      static_cast<int32_t>(static_cast<unsigned char>(bytes.data[bytes.size - 1]))};
     encoded.push_back(kEncodeTable[buf[0] >> 2]);
     encoded.push_back(kEncodeTable[((buf[0] << 4) | (buf[1] >> 4)) & 0x3F]);
     encoded.push_back(kEncodeTable[(buf[1] << 2) & 0x3F]);
@@ -107,10 +107,10 @@ inline Bytes Base64Decode(TVMFFIByteArray bytes) {
     // decode every 4 characters into 24bits, each character contains 6 bits
     // note that = is also decoded as 0, which is safe to skip
     int32_t buf[4] = {
-        static_cast<int32_t>(bytes.data[i]),
-        static_cast<int32_t>(bytes.data[i + 1]),
-        static_cast<int32_t>(bytes.data[i + 2]),
-        static_cast<int32_t>(bytes.data[i + 3]),
+        static_cast<int32_t>(static_cast<unsigned char>(bytes.data[i])),
+        static_cast<int32_t>(static_cast<unsigned char>(bytes.data[i + 1])),
+        static_cast<int32_t>(static_cast<unsigned char>(bytes.data[i + 2])),
+        static_cast<int32_t>(static_cast<unsigned char>(bytes.data[i + 3])),
     };
     int32_t value_i24 = (static_cast<int32_t>(kDecodeTable[buf[0]]) << 18) |
                         (static_cast<int32_t>(kDecodeTable[buf[1]]) << 12) |

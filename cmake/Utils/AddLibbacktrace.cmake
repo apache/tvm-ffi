@@ -62,8 +62,9 @@ function (_libbacktrace_compile)
   add_library(libbacktrace STATIC IMPORTED)
   add_dependencies(libbacktrace project_libbacktrace)
   set_target_properties(
-    libbacktrace PROPERTIES IMPORTED_LOCATION ${libbacktrace_prefix}/lib/libbacktrace.a
-                            INTERFACE_INCLUDE_DIRECTORIES ${libbacktrace_prefix}/include
+    libbacktrace
+    PROPERTIES IMPORTED_LOCATION ${libbacktrace_prefix}/lib/libbacktrace.a
+               INTERFACE_INCLUDE_DIRECTORIES ${CMAKE_CURRENT_LIST_DIR}/../../3rdparty/libbacktrace/
   )
 endfunction ()
 

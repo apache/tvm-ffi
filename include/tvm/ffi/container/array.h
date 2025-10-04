@@ -368,31 +368,34 @@ class Array : public ObjectRef {
   /*!
    * \brief default constructor
    */
-  Array() { data_ = ArrayObj::Empty(); }
+  Array() { data_ = ArrayObj::Empty(); }  // NOLINT(modernize-use-equals-default)
   /*!
    * \brief Move constructor
    * \param other The other array
    */
-  Array(Array<T>&& other) : ObjectRef(std::move(other.data_)) {}
+  Array(Array<T>&& other)  // NOLINT(google-explicit-constructor)
+      : ObjectRef(std::move(other.data_)) {}
   /*!
    * \brief Copy constructor
    * \param other The other array
    */
-  Array(const Array<T>& other) : ObjectRef(other.data_) {}
+  Array(const Array<T>& other) : ObjectRef(other.data_) {}  // NOLINT(google-explicit-constructor)
   /*!
    * \brief Constructor from another array
    * \param other The other array
    * \tparam U The value type of the other array
    */
   template <typename U, typename = std::enable_if_t<details::type_contains_v<T, U>>>
-  Array(Array<U>&& other) : ObjectRef(std::move(other.data_)) {}
+  Array(Array<U>&& other)  // NOLINT(google-explicit-constructor)
+      : ObjectRef(std::move(other.data_)) {}
   /*!
    * \brief Constructor from another array
    * \param other The other array
    * \tparam U The value type of the other array
    */
   template <typename U, typename = std::enable_if_t<details::type_contains_v<T, U>>>
-  Array(const Array<U>& other) : ObjectRef(other.data_) {}
+  Array(const Array<U>& other)  // NOLINT(google-explicit-constructor)
+      : ObjectRef(other.data_) {}
 
   /*!
    * \brief Move assignment from another array
@@ -435,7 +438,7 @@ class Array : public ObjectRef {
    * \brief Constructor from pointer
    * \param n the container pointer
    */
-  explicit Array(ObjectPtr<Object> n) : ObjectRef(n) {}
+  explicit Array(ObjectPtr<Object> n) : ObjectRef(std::move(n)) {}
 
   /*!
    * \brief Constructor from iterator
@@ -982,7 +985,7 @@ class Array : public ObjectRef {
           // will be overwritten before returning, all objects will be
           // of type `U` for the calling scope.
           all_identical = false;
-          output = ArrayObj::CreateRepeated(arr->size(), Any());
+          output = ArrayObj::CreateRepeated(static_cast<int64_t>(arr->size()), Any());
           output->InitRange(0, arr->begin(), it);
           output->SetItem(it - arr->begin(), std::move(mapped));
           it++;
@@ -1002,7 +1005,7 @@ class Array : public ObjectRef {
       // non-nullable type.  Since the default `Any()` will be
       // overwritten before returning, all objects will be of type `U`
       // for the calling scope.
-      output = ArrayObj::CreateRepeated(arr->size(), Any());
+      output = ArrayObj::CreateRepeated(static_cast<int64_t>(arr->size()), Any());
     }
 
     // Normal path for incompatible types, or post-copy path for
@@ -1073,7 +1076,7 @@ struct TypeTraits<Array<T>> : public ObjectRefTypeTraitsBase<Array<T>> {
     if constexpr (!std::is_same_v<T, Any>) {
       const ArrayObj* n = reinterpret_cast<const ArrayObj*>(src->v_obj);
       for (size_t i = 0; i < n->size(); i++) {
-        const Any& any_v = (*n)[i];
+        const Any& any_v = (*n)[static_cast<int64_t>(i)];
         // CheckAnyStrict is cheaper than try_cast<T>
         if (details::AnyUnsafe::CheckAnyStrict<T>(any_v)) continue;
         // try see if p is convertible to T
@@ -1093,8 +1096,7 @@ struct TypeTraits<Array<T>> : public ObjectRefTypeTraitsBase<Array<T>> {
       return true;
     } else {
       const ArrayObj* n = reinterpret_cast<const ArrayObj*>(src->v_obj);
-      for (size_t i = 0; i < n->size(); i++) {
-        const Any& any_v = (*n)[i];
+      for (const Any& any_v : *n) {
         if (!details::AnyUnsafe::CheckAnyStrict<T>(any_v)) return false;
       }
       return true;
@@ -1107,8 +1109,7 @@ struct TypeTraits<Array<T>> : public ObjectRefTypeTraitsBase<Array<T>> {
     if constexpr (!std::is_same_v<T, Any>) {
       const ArrayObj* n = reinterpret_cast<const ArrayObj*>(src->v_obj);
       bool storage_check = [&]() {
-        for (size_t i = 0; i < n->size(); i++) {
-          const Any& any_v = (*n)[i];
+        for (const Any& any_v : *n) {
           if (!details::AnyUnsafe::CheckAnyStrict<T>(any_v)) return false;
         }
         return true;
@@ -1120,8 +1121,7 @@ struct TypeTraits<Array<T>> : public ObjectRefTypeTraitsBase<Array<T>> {
       // slow path, try to run a conversion to Array<T>
       Array<T> result;
       result.reserve(n->size());
-      for (size_t i = 0; i < n->size(); i++) {
-        const Any& any_v = (*n)[i];
+      for (const Any& any_v : *n) {
         if (auto opt_v = any_v.try_cast<T>()) {
           result.push_back(*std::move(opt_v));
         } else {
@@ -1137,7 +1137,7 @@ struct TypeTraits<Array<T>> : public ObjectRefTypeTraitsBase<Array<T>> {
   TVM_FFI_INLINE static std::string TypeStr() { return "Array<" + details::Type2Str<T>::v() + ">"; }
   TVM_FFI_INLINE static std::string TypeSchema() {
     std::ostringstream oss;
-    oss << "{\"type\":\"" << StaticTypeKey::kTVMFFIArray << "\",\"args\":[";
+    oss << R"({"type":")" << StaticTypeKey::kTVMFFIArray << R"(","args":[)";
     oss << details::TypeSchema<T>::v();
     oss << "]}";
     return oss.str();

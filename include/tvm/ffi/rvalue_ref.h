@@ -151,7 +151,7 @@ struct TypeTraits<RValueRef<TObjRef>> : public TypeTraitsBase {
 
   TVM_FFI_INLINE static std::string TypeSchema() {
     std::ostringstream oss;
-    oss << "{\"type\":\"" << StaticTypeKey::kTVMFFIObjectRValueRef << "\",\"args\":[";
+    oss << R"({"type":")" << StaticTypeKey::kTVMFFIObjectRValueRef << R"(","args":[)";
     oss << TypeTraits<TObjRef>::TypeSchema();
     oss << "]}";
     return oss.str();

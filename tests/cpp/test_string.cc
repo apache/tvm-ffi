@@ -29,17 +29,17 @@ TEST(String, MoveFromStd) {
   string source = "this is a string";
   string expect = source;
   String s(std::move(source));
-  string copy = (string)s;
+  string copy = string(s);
   EXPECT_EQ(copy, expect);
-  EXPECT_EQ(source.size(), 0);
+  EXPECT_EQ(source.size(), 0);  // NOLINT(bugprone-use-after-move)
 }
 
 TEST(String, CopyFromStd) {
   using namespace std;
   string source = "this is a string";
-  string expect = source;
+  string expect = source;  // NOLINT(performance-unnecessary-copy-initialization)
   String s{source};
-  string copy = (string)s;
+  string copy = string(s);
   EXPECT_EQ(copy, expect);
   EXPECT_EQ(source.size(), expect.size());
 }
@@ -113,7 +113,7 @@ TEST(String, Compare) {
 }
 
 // Check '\0' handling
-TEST(String, null_byte_handling) {
+TEST(String, NullByteHandling) {
   using namespace std;
   // Ensure string still compares equal if it contains '\0'.
   string v1 = "hello world";
@@ -154,7 +154,7 @@ TEST(String, null_byte_handling) {
   EXPECT_GT(v4.compare(v5), 0);
 }
 
-TEST(String, compare_same_memory_region_different_size) {
+TEST(String, CompareSameMemoryRegionDifferentSize) {
   using namespace std;
   string source = "a string";
   String str_source{source};
@@ -232,7 +232,7 @@ TEST(String, compare) {
   EXPECT_TRUE(str_source < str_mismatch4);
 }
 
-TEST(String, c_str) {
+TEST(String, CString) {
   using namespace std;
   string source = "this is a string";
   string mismatch = "mismatch";
@@ -296,23 +296,30 @@ TEST(String, Any) {
 
   Any b = view;
   EXPECT_EQ(b.type_index(), TypeIndex::kTVMFFISmallStr);
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   EXPECT_EQ(b.as<String>().value(), "hello");
   EXPECT_TRUE(b.as<String>().has_value());
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   EXPECT_EQ(b.try_cast<std::string>().value(), "hello");
 
   std::string s_world = "world";
   view = s_world;
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   EXPECT_EQ(view.try_cast<std::string>().value(), "world");
 
   String s{"hello"};
   Any a = s;
   EXPECT_EQ(a.type_index(), TypeIndex::kTVMFFISmallStr);
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   EXPECT_EQ(a.as<String>().value(), "hello");
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   EXPECT_EQ(a.try_cast<std::string>().value(), "hello");
 
   Any c = "long string very long";
   EXPECT_EQ(c.type_index(), TypeIndex::kTVMFFIStr);
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   EXPECT_EQ(c.as<String>().value(), "long string very long");
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   EXPECT_EQ(c.try_cast<std::string>().value(), "long string very long");
 }
 
@@ -339,11 +346,13 @@ TEST(String, BytesAny) {
 
   AnyView view = &arr;
   EXPECT_EQ(view.type_index(), TypeIndex::kTVMFFIByteArrayPtr);
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   EXPECT_EQ(view.try_cast<Bytes>().value().operator std::string(), s);
 
   Any b = view;
   EXPECT_EQ(b.type_index(), TypeIndex::kTVMFFISmallBytes);
 
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   EXPECT_EQ(b.try_cast<Bytes>().value().operator std::string(), s);
   EXPECT_EQ(b.cast<std::string>(), s);
 
@@ -351,7 +360,8 @@ TEST(String, BytesAny) {
   s2[0] = '\0';
   Any b2 = Bytes(s2);
   EXPECT_EQ(b2.type_index(), TypeIndex::kTVMFFIBytes);
-  EXPECT_EQ(b2.try_cast<std::string>().value(), s2);
+  EXPECT_EQ(b2.try_cast<std::string>().value(),  // NOLINT(bugprone-unchecked-optional-access)
+            s2);
   EXPECT_EQ(b2.cast<std::string>(), s2);
 }
 
@@ -359,39 +369,47 @@ TEST(String, StdString) {
   std::string s1 = "test_string";
   AnyView view1 = s1;
   EXPECT_EQ(view1.type_index(), TypeIndex::kTVMFFIRawStr);
-  EXPECT_EQ(view1.try_cast<std::string>().value(), s1);
+  EXPECT_EQ(view1.try_cast<std::string>().value(),  // NOLINT(bugprone-unchecked-optional-access)
+            s1);
 
   TVMFFIByteArray arr1{s1.data(), static_cast<size_t>(s1.size())};
   AnyView view2 = &arr1;
   EXPECT_EQ(view2.type_index(), TypeIndex::kTVMFFIByteArrayPtr);
-  EXPECT_EQ(view2.try_cast<std::string>().value(), s1);
+  EXPECT_EQ(view2.try_cast<std::string>().value(),  // NOLINT(bugprone-unchecked-optional-access)
+            s1);
 
   Bytes bytes1 = s1;
   AnyView view3 = bytes1;
   EXPECT_EQ(view3.type_index(), TypeIndex::kTVMFFIBytes);
-  EXPECT_EQ(view3.try_cast<std::string>().value(), s1);
+  EXPECT_EQ(view3.try_cast<std::string>().value(),  // NOLINT(bugprone-unchecked-optional-access)
+            s1);
 
   String string1 = s1;
   AnyView view4 = string1;
   EXPECT_EQ(view4.type_index(), TypeIndex::kTVMFFIStr);
-  EXPECT_EQ(view4.try_cast<std::string>().value(), s1);
+  EXPECT_EQ(view4.try_cast<std::string>().value(),  // NOLINT(bugprone-unchecked-optional-access)
+            s1);
 
   // Test with Any
   Any any1 = s1;
   EXPECT_EQ(any1.type_index(), TypeIndex::kTVMFFIStr);
-  EXPECT_EQ(any1.try_cast<std::string>().value(), s1);
+  EXPECT_EQ(any1.try_cast<std::string>().value(),  // NOLINT(bugprone-unchecked-optional-access)
+            s1);
 
   Any any2 = &arr1;
   EXPECT_EQ(any2.type_index(), TypeIndex::kTVMFFIBytes);
-  EXPECT_EQ(any2.try_cast<std::string>().value(), s1);
+  EXPECT_EQ(any2.try_cast<std::string>().value(),  // NOLINT(bugprone-unchecked-optional-access)
+            s1);
 
   Any any3 = bytes1;
   EXPECT_EQ(any3.type_index(), TypeIndex::kTVMFFIBytes);
-  EXPECT_EQ(any3.try_cast<std::string>().value(), s1);
+  EXPECT_EQ(any3.try_cast<std::string>().value(),  // NOLINT(bugprone-unchecked-optional-access)
+            s1);
 
   Any any4 = string1;
   EXPECT_EQ(any4.type_index(), TypeIndex::kTVMFFIStr);
-  EXPECT_EQ(any4.try_cast<std::string>().value(), s1);
+  EXPECT_EQ(any4.try_cast<std::string>().value(),  // NOLINT(bugprone-unchecked-optional-access)
+            s1);
 }
 
 TEST(String, CAPIAccessor) {
@@ -406,7 +424,7 @@ TEST(String, BytesHash) {
   std::vector<int64_t> data1(10);
   std::vector<int64_t> data2(11);
   for (size_t i = 0; i < data1.size(); ++i) {
-    data1[i] = i;
+    data1[i] = static_cast<int64_t>(i);
   }
   char* data1_ptr = reinterpret_cast<char*>(data1.data());
   char* data2_ptr = reinterpret_cast<char*>(data2.data()) + 1;

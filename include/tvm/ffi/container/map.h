@@ -68,7 +68,7 @@ class MapObj : public Object {
   /*! \brief Iterator class */
   class iterator;
 
-  static_assert(std::is_standard_layout<KVType>::value, "KVType is not standard layout");
+  static_assert(std::is_standard_layout_v<KVType>, "KVType is not standard layout");
   static_assert(sizeof(KVType) == 32, "sizeof(KVType) incorrect");
 
   /// \cond Doxygen_Suppress
@@ -421,8 +421,8 @@ class SmallMapObj : public MapObj,
       ++map_node->size_;
       return;
     }
-    uint64_t next_size = std::max(map_node->NumSlots() * 2, uint64_t(kInitSize));
-    next_size = std::min(next_size, uint64_t(kMaxSize));
+    uint64_t next_size = std::max(map_node->NumSlots() * 2, kInitSize);
+    next_size = std::min(next_size, kMaxSize);
     TVM_FFI_ICHECK_GT(next_size, map_node->NumSlots());
     ObjectPtr<Object> new_map = CreateFromRange(next_size, map_node->begin(), map_node->end());
     InsertMaybeReHash(std::move(kv), &new_map);
@@ -520,9 +520,9 @@ class DenseMapObj : public MapObj {
   /*! \brief Maximum load factor of the hash map */
   static constexpr double kMaxLoadFactor = 0.99;
   /*! \brief Binary representation of the metadata of an empty slot */
-  static constexpr uint8_t kEmptySlot = uint8_t(0b11111111);
+  static constexpr uint8_t kEmptySlot = static_cast<uint8_t>(0b11111111);
   /*! \brief Binary representation of the metadata of a protected slot */
-  static constexpr uint8_t kProtectedSlot = uint8_t(0b11111110);
+  static constexpr uint8_t kProtectedSlot = static_cast<uint8_t>(0b11111110);
   /*! \brief Number of probing choices available */
   static constexpr int kNumJumpDists = 126;
   /*! \brief Index indicator to indicate an invalid index */
@@ -536,14 +536,14 @@ class DenseMapObj : public MapObj {
     uint64_t next = kInvalidIndex;
 
     explicit ItemType(KVType&& data) : data(std::move(data)) {}
-    explicit ItemType(key_type key, mapped_type value) : data(key, value) {}
+    explicit ItemType(key_type key, mapped_type value) : data(std::move(key), std::move(value)) {}
   };
   /*! \brief POD type of a block of memory */
   struct Block {
     uint8_t bytes[kBlockCap + kBlockCap * sizeof(ItemType)];
   };
   static_assert(sizeof(Block) == kBlockCap * (sizeof(ItemType) + 1), "sizeof(Block) incorrect");
-  static_assert(std::is_standard_layout<Block>::value, "Block is not standard layout");
+  static_assert(std::is_standard_layout_v<Block>, "Block is not standard layout");
 
   /*!
    * \brief Deleter for the Block
@@ -858,8 +858,8 @@ class DenseMapObj : public MapObj {
       ItemType* data_ptr = reinterpret_cast<ItemType*>(GetBlock(bi)->bytes + kBlockCap);
       for (int j = 0; j < kBlockCap; ++j, ++meta_ptr, ++data_ptr) {
         uint8_t& meta = *meta_ptr;
-        if (meta != uint8_t(kProtectedSlot) && meta != uint8_t(kEmptySlot)) {
-          meta = uint8_t(kEmptySlot);
+        if (meta != kProtectedSlot && meta != kEmptySlot) {
+          meta = kEmptySlot;
           data_ptr->ItemType::~ItemType();
         }
       }
@@ -903,7 +903,7 @@ class DenseMapObj : public MapObj {
     p->iter_list_head_ = kInvalidIndex;
     p->iter_list_tail_ = kInvalidIndex;
     for (uint64_t i = 0; i < n_blocks; ++i, ++block) {
-      std::fill(block->bytes, block->bytes + kBlockCap, uint8_t(kEmptySlot));
+      std::fill(block->bytes, block->bytes + kBlockCap, kEmptySlot);
     }
     return p;
   }
@@ -934,7 +934,7 @@ class DenseMapObj : public MapObj {
            ++j, ++meta_ptr_from, ++data_ptr_from, ++meta_ptr_to, ++data_ptr_to) {
         uint8_t& meta = *meta_ptr_to = *meta_ptr_from;
         TVM_FFI_ICHECK(meta != kProtectedSlot);
-        if (meta != uint8_t(kEmptySlot)) {
+        if (meta != kEmptySlot) {
           new (data_ptr_to) ItemType(*data_ptr_from);
         }
       }
@@ -984,7 +984,9 @@ class DenseMapObj : public MapObj {
    * \brief Check whether the hash table is full
    * \return A boolean indicating whether hash table is full
    */
-  bool IsFull() const { return size_ + 1 > NumSlots() * kMaxLoadFactor; }
+  bool IsFull() const {  // NOLINTNEXTLINE(bugprone-narrowing-conversions)
+    return (size_ + 1) > static_cast<uint64_t>(NumSlots()) * kMaxLoadFactor;
+  }
   /*!
    * \brief Increment the pointer
    * \param index The pointer to be incremented
@@ -1087,11 +1089,11 @@ class DenseMapObj : public MapObj {
     /*! \brief If the entry is none */
     bool IsNone() const { return block == nullptr; }
     /*! \brief If the entry is empty slot */
-    bool IsEmpty() const { return Meta() == uint8_t(kEmptySlot); }
+    bool IsEmpty() const { return Meta() == kEmptySlot; }
     /*! \brief If the entry is protected slot */
-    bool IsProtected() const { return Meta() == uint8_t(kProtectedSlot); }
+    bool IsProtected() const { return Meta() == kProtectedSlot; }
     /*! \brief Set the entry to be empty */
-    void SetEmpty() const { Meta() = uint8_t(kEmptySlot); }
+    void SetEmpty() const { Meta() = kEmptySlot; }
     /*! \brief Destruct the item in the entry */
     void DestructData() const {
       // explicit call destructor to destroy the item
@@ -1100,7 +1102,7 @@ class DenseMapObj : public MapObj {
       (&Data())->second.Any::~Any();
     }
     /*! \brief Set the entry to be protected */
-    void SetProtected() const { Meta() = uint8_t(kProtectedSlot); }
+    void SetProtected() const { Meta() = kProtectedSlot; }
     /*! \brief Set the entry's jump to its next entry */
     void SetJump(uint8_t jump) const { (Meta() &= 0b10000000) |= jump; }
     /*! \brief Construct a head of linked list in-place */
@@ -1214,28 +1216,28 @@ class DenseMapObj : public MapObj {
 };
 
 /// \cond
-#define TVM_FFI_DISPATCH_MAP(base, var, body) \
-  {                                           \
-    using TSmall = SmallMapObj*;              \
-    using TDense = DenseMapObj*;              \
-    if (base->IsSmallMap()) {                 \
-      TSmall var = static_cast<TSmall>(base); \
-      body;                                   \
-    } else {                                  \
-      TDense var = static_cast<TDense>(base); \
-      body;                                   \
-    }                                         \
+#define TVM_FFI_DISPATCH_MAP(base, var, body)   \
+  {                                             \
+    using TSmall = SmallMapObj*;                \
+    using TDense = DenseMapObj*;                \
+    if ((base)->IsSmallMap()) {                 \
+      TSmall var = static_cast<TSmall>((base)); \
+      body;                                     \
+    } else {                                    \
+      TDense var = static_cast<TDense>((base)); \
+      body;                                     \
+    }                                           \
   }
 
 #define TVM_FFI_DISPATCH_MAP_CONST(base, var, body) \
   {                                                 \
     using TSmall = const SmallMapObj*;              \
     using TDense = const DenseMapObj*;              \
-    if (base->IsSmallMap()) {                       \
-      TSmall var = static_cast<TSmall>(base);       \
+    if ((base)->IsSmallMap()) {                     \
+      TSmall var = static_cast<TSmall>((base));     \
       body;                                         \
     } else {                                        \
-      TDense var = static_cast<TDense>(base);       \
+      TDense var = static_cast<TDense>((base));     \
       body;                                         \
     }                                               \
   }
@@ -1398,12 +1400,14 @@ class Map : public ObjectRef {
    * \brief move constructor
    * \param other source
    */
-  Map(Map<K, V>&& other) : ObjectRef(std::move(other.data_)) {}
+  Map(Map<K, V>&& other)  // NOLINT(google-explicit-constructor)
+      : ObjectRef(std::move(other.data_)) {}
   /*!
    * \brief copy constructor
    * \param other source
    */
-  Map(const Map<K, V>& other) : ObjectRef(other.data_) {}
+  Map(const Map<K, V>& other)  // NOLINT(google-explicit-constructor)
+      : ObjectRef(other.data_) {}
 
   /*!
    * \brief Move constructor
@@ -1414,7 +1418,8 @@ class Map : public ObjectRef {
   template <typename KU, typename VU,
             typename = std::enable_if_t<details::type_contains_v<K, KU> &&
                                         details::type_contains_v<V, VU>>>
-  Map(Map<KU, VU>&& other) : ObjectRef(std::move(other.data_)) {}
+  Map(Map<KU, VU>&& other)  // NOLINT(google-explicit-constructor)
+      : ObjectRef(std::move(other.data_)) {}
 
   /*!
    * \brief Copy constructor
@@ -1425,7 +1430,7 @@ class Map : public ObjectRef {
   template <typename KU, typename VU,
             typename = std::enable_if_t<details::type_contains_v<K, KU> &&
                                         details::type_contains_v<V, VU>>>
-  Map(const Map<KU, VU>& other) : ObjectRef(other.data_) {}
+  Map(const Map<KU, VU>& other) : ObjectRef(other.data_) {}  // NOLINT(google-explicit-constructor)
 
   /*!
    * \brief Move assignment
@@ -1757,7 +1762,7 @@ struct TypeTraits<Map<K, V>> : public ObjectRefTypeTraitsBase<Map<K, V>> {
   }
   TVM_FFI_INLINE static std::string TypeSchema() {
     std::ostringstream oss;
-    oss << "{\"type\":\"" << StaticTypeKey::kTVMFFIMap << "\",\"args\":[";
+    oss << R"({"type":")" << StaticTypeKey::kTVMFFIMap << R"(","args":[)";
     oss << details::TypeSchema<K>::v() << ",";
     oss << details::TypeSchema<V>::v();
     oss << "]}";

@@ -142,7 +142,7 @@ TEST(Reflection, CallMethod) {
   EXPECT_EQ(prim_expr_sub(TPrimExpr("float", 1), 2.0).cast<double>(), -1.0);
 }
 
-TEST(Reflection, InitFunction_Base) {
+TEST(Reflection, InitFunctionBase) {
   Function int_init = reflection::GetMethod("test.TestObjA", "__ffi_init__");
   Any obj_a = int_init(1, 2);
   EXPECT_TRUE(obj_a.as<TestObjA>() != nullptr);
@@ -150,7 +150,7 @@ TEST(Reflection, InitFunction_Base) {
   EXPECT_EQ(obj_a.as<TestObjA>()->y, 2);
 }
 
-TEST(Reflection, InitFunction_Derived) {
+TEST(Reflection, InitFunctionDerived) {
   Function derived_init = reflection::GetMethod("test.TestObjADerived", "__ffi_init__");
   Any obj_derived = derived_init(1, 2, 3);
   EXPECT_TRUE(obj_derived.as<TestObjADerived>() != nullptr);
@@ -163,7 +163,7 @@ TEST(Reflection, ForEachFieldInfo) {
   const TypeInfo* info = TVMFFIGetTypeInfo(TestObjADerived::RuntimeTypeIndex());
   Map<String, int> field_name_to_offset;
   reflection::ForEachFieldInfo(info, [&](const TVMFFIFieldInfo* field_info) {
-    field_name_to_offset.Set(String(field_info->name), field_info->offset);
+    field_name_to_offset.Set(String(field_info->name), static_cast<int>(field_info->offset));
   });
   EXPECT_EQ(field_name_to_offset["x"], sizeof(TVMFFIObject));
   EXPECT_EQ(field_name_to_offset["y"], 8 + sizeof(TVMFFIObject));

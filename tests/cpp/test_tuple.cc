@@ -68,9 +68,12 @@ TEST(Tuple, Basic) {
 TEST(Tuple, AnyConvert) {
   Tuple<int, TInt> tuple0(1, 2);
   AnyView view0 = tuple0;
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   Array<Any> arr0 = view0.as<Array<Any>>().value();
   EXPECT_EQ(arr0.size(), 2);
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   EXPECT_EQ(arr0[0].as<int>().value(), 1);
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   EXPECT_EQ(arr0[1].as<TInt>().value()->value, 2);
 
   // directly reuse the underlying storage.

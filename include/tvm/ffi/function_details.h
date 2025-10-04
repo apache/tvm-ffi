@@ -86,7 +86,7 @@ struct FuncFunctorImpl {
   }
   TVM_FFI_INLINE static std::string TypeSchema() {
     std::ostringstream oss;
-    oss << "{\"type\":\"" << StaticTypeKey::kTVMFFIFunction << "\",\"args\":[";
+    oss << R"({"type":")" << StaticTypeKey::kTVMFFIFunction << R"(","args":[)";
     oss << details::TypeSchema<R>::v();
     ((oss << "," << details::TypeSchema<Args>::v()), ...);
     oss << "]}";
@@ -120,7 +120,7 @@ template <typename Class, typename R, typename... Args>
 struct FunctionInfo<R (Class::*)(Args...) const> : FuncFunctorImpl<R, Args...> {};
 
 /*! \brief Using static function to output typed function signature */
-typedef std::string (*FGetFuncSignature)();
+using FGetFuncSignature = std::string (*)();
 
 /*!
  * \brief Auxilary argument value with context for error reporting
@@ -140,7 +140,7 @@ class ArgValueWithContext {
       : args_(args), arg_index_(arg_index), optional_name_(optional_name), f_sig_(f_sig) {}
 
   template <typename Type>
-  TVM_FFI_INLINE operator Type() {
+  TVM_FFI_INLINE operator Type() {  // NOLINT(google-explicit-constructor)
     using TypeWithoutCR = std::remove_const_t<std::remove_reference_t<Type>>;
 
     if constexpr (std::is_same_v<TypeWithoutCR, AnyView>) {
@@ -227,18 +227,22 @@ struct TypeSchemaImpl {
 template <>
 struct TypeSchemaImpl<void> {
   static std::string v() {
-    return "{\"type\":\"" + std::string(StaticTypeKey::kTVMFFINone) + "\"}";
+    return R"({"type":")" + std::string(StaticTypeKey::kTVMFFINone) + R"("})";
   }
 };
 
 template <>
 struct TypeSchemaImpl<Any> {
-  static std::string v() { return "{\"type\":\"" + std::string(StaticTypeKey::kTVMFFIAny) + "\"}"; }
+  static std::string v() {
+    return R"({"type":")" + std::string(StaticTypeKey::kTVMFFIAny) + R"("})";
+  }
 };
 
 template <>
 struct TypeSchemaImpl<AnyView> {
-  static std::string v() { return "{\"type\":\"" + std::string(StaticTypeKey::kTVMFFIAny) + "\"}"; }
+  static std::string v() {
+    return R"({"type":")" + std::string(StaticTypeKey::kTVMFFIAny) + R"("})";
+  }
 };
 
 }  // namespace details

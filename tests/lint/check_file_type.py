@@ -109,6 +109,7 @@ ALLOW_FILE_NAME = {
     "Doxyfile",
     "pylintrc",
     ".clang-format",
+    ".clang-tidy",
     ".gitmodules",
     "CODEOWNERSHIP",
     "Dockerfile",

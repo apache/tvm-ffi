@@ -256,7 +256,7 @@ TEST(Any, Object) {
   // convert to raw opaque ptr
   void* raw_v1_ptr = const_cast<TIntObj*>(v1_ptr);
   any2 = raw_v1_ptr;
-  EXPECT_TRUE(any2.as<void*>().value() == v1_ptr);
+  EXPECT_TRUE(any2.as<void*>().value() == v1_ptr);  // NOLINT(bugprone-unchecked-optional-access)
 
   // convert to ObjectRef
   {
@@ -308,7 +308,7 @@ TEST(Any, ObjectRefWithFallbackTraits) {
   EXPECT_EQ(v1->value, 1);
   EXPECT_EQ(v1->dtype, "bool");
 
-  any1 = int64_t(42);
+  any1 = static_cast<int64_t>(42);
   auto v2 = any1.cast<TPrimExpr>();
   EXPECT_EQ(v2->value, 42);
   EXPECT_EQ(v2->dtype, "int64");
@@ -330,7 +330,7 @@ TEST(Any, ObjectRefWithFallbackTraits) {
   EXPECT_EQ(v5->value, 1);
   EXPECT_EQ(v5->dtype, "bool");
 
-  view1 = int64_t(42);
+  view1 = static_cast<int64_t>(42);
   auto v6 = view1.cast<TPrimExpr>();
   EXPECT_EQ(v6->value, 42);
   EXPECT_EQ(v6->dtype, "int64");
@@ -358,7 +358,7 @@ TEST(Any, CastVsAs) {
   // as only runs strict check
   auto opt_v0 = view0.as<int64_t>();
   EXPECT_TRUE(opt_v0.has_value());
-  EXPECT_EQ(opt_v0.value(), 1);
+  EXPECT_EQ(opt_v0.value(), 1);  // NOLINT(bugprone-unchecked-optional-access)
 
   auto opt_v1 = view0.as<bool>();
   EXPECT_TRUE(!opt_v1.has_value());
@@ -368,19 +368,19 @@ TEST(Any, CastVsAs) {
   // try_cast will try run the conversion.
   auto opt_v3 = view0.try_cast<bool>();
   EXPECT_TRUE(opt_v3.has_value());
-  EXPECT_EQ(opt_v3.value(), 1);
+  EXPECT_EQ(opt_v3.value(), 1);  // NOLINT(bugprone-unchecked-optional-access)
   auto opt_v4 = view0.try_cast<double>();
   EXPECT_TRUE(opt_v4.has_value());
-  EXPECT_EQ(opt_v4.value(), 1);
+  EXPECT_EQ(opt_v4.value(), 1);  // NOLINT(bugprone-unchecked-optional-access)
 
   Any any1 = true;
   auto opt_v5 = any1.as<bool>();
   EXPECT_TRUE(opt_v5.has_value());
-  EXPECT_EQ(opt_v5.value(), 1);
+  EXPECT_EQ(opt_v5.value(), 1);  // NOLINT(bugprone-unchecked-optional-access)
 
   auto opt_v6 = any1.try_cast<int>();
   EXPECT_TRUE(opt_v6.has_value());
-  EXPECT_EQ(opt_v6.value(), 1);
+  EXPECT_EQ(opt_v6.value(), 1);  // NOLINT(bugprone-unchecked-optional-access)
 
   auto opt_v7 = any1.try_cast<double>();
   EXPECT_TRUE(opt_v7.has_value());
@@ -391,7 +391,7 @@ TEST(Any, ObjectMove) {
   auto v0 = std::move(any1).cast<TPrimExpr>();
   EXPECT_EQ(v0->value, 3.14);
   EXPECT_EQ(v0.use_count(), 1);
-  EXPECT_TRUE(any1 == nullptr);
+  EXPECT_TRUE(any1 == nullptr);  // NOLINT(bugprone-use-after-move)
 }
 
 TEST(Any, AnyEqualHash) {

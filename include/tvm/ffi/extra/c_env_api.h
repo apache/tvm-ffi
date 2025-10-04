@@ -16,6 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+// NOLINTBEGIN(modernize-use-using)
 /*!
  * \file tvm/ffi/extra/c_env_api.h
  * \brief Extra environment API.
@@ -140,3 +141,4 @@ TVM_FFI_DLL int TVMFFIEnvModRegisterSystemLibSymbol(const char* name, void* symb
 }  // extern "C"
 #endif
 #endif  // TVM_FFI_EXTRA_C_ENV_API_H_
+// NOLINTEND(modernize-use-using)

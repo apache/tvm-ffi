@@ -255,6 +255,7 @@ class StructEqualHandler {
     }
   }
 
+  // NOLINTNEXTLINE(performance-unnecessary-value-param)
   bool CompareMap(Map<Any, Any> lhs, Map<Any, Any> rhs) {
     if (lhs.size() != rhs.size()) {
       // size mismatch, and there is no path tracing
@@ -299,13 +300,14 @@ class StructEqualHandler {
     return false;
   }
 
+  // NOLINTNEXTLINE(performance-unnecessary-value-param)
   bool CompareArray(ffi::Array<Any> lhs, ffi::Array<Any> rhs) {
     if (lhs.size() != rhs.size()) {
       // fast path, size mismatch, and there is no path tracing
       // return false since we don't need informative error message
       if (mismatch_lhs_reverse_path_ == nullptr) return false;
     }
-    for (size_t i = 0; i < std::min(lhs.size(), rhs.size()); ++i) {
+    for (int64_t i = 0, n = static_cast<int64_t>(std::min(lhs.size(), rhs.size())); i < n; ++i) {
       if (!CompareAny(lhs[i], rhs[i])) {
         if (mismatch_lhs_reverse_path_ != nullptr) {
           mismatch_lhs_reverse_path_->emplace_back(reflection::AccessStep::ArrayItem(i));
@@ -317,23 +319,26 @@ class StructEqualHandler {
     if (lhs.size() == rhs.size()) return true;
     if (mismatch_lhs_reverse_path_ != nullptr) {
       if (lhs.size() > rhs.size()) {
-        mismatch_lhs_reverse_path_->emplace_back(reflection::AccessStep::ArrayItem(rhs.size()));
+        mismatch_lhs_reverse_path_->emplace_back(
+            reflection::AccessStep::ArrayItem(static_cast<int64_t>(rhs.size())));
         mismatch_rhs_reverse_path_->emplace_back(
-            reflection::AccessStep::ArrayItemMissing(rhs.size()));
+            reflection::AccessStep::ArrayItemMissing(static_cast<int64_t>(rhs.size())));
       } else {
         mismatch_lhs_reverse_path_->emplace_back(
-            reflection::AccessStep::ArrayItemMissing(lhs.size()));
-        mismatch_rhs_reverse_path_->emplace_back(reflection::AccessStep::ArrayItem(lhs.size()));
+            reflection::AccessStep::ArrayItemMissing(static_cast<int64_t>(lhs.size())));
+        mismatch_rhs_reverse_path_->emplace_back(
+            reflection::AccessStep::ArrayItem(static_cast<int64_t>(lhs.size())));
       }
     }
     return false;
   }
 
+  // NOLINTNEXTLINE(performance-unnecessary-value-param)
   bool CompareShape(Shape lhs, Shape rhs) {
     if (lhs.size() != rhs.size()) {
       return false;
     }
-    for (size_t i = 0; i < lhs.size(); ++i) {
+    for (int64_t i = 0, n = static_cast<int64_t>(lhs.size()); i < n; ++i) {
       if (lhs[i] != rhs[i]) {
         return false;
       }
@@ -341,6 +346,7 @@ class StructEqualHandler {
     return true;
   }
 
+  // NOLINTNEXTLINE(performance-unnecessary-value-param)
   bool CompareTensor(Tensor lhs, Tensor rhs) {
     if (lhs.same_as(rhs)) return true;
     if (lhs->ndim != rhs->ndim) return false;

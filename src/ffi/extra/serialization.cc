@@ -38,7 +38,7 @@ namespace ffi {
 
 class ObjectGraphSerializer {
  public:
-  static json::Value Serialize(const Any& value, Any metadata) {
+  static json::Value Serialize(const Any& value, const Any& metadata) {
     ObjectGraphSerializer serializer;
     json::Object result;
     result.Set("root_index", serializer.GetOrCreateNodeIndex(value));
@@ -137,7 +137,7 @@ class ObjectGraphSerializer {
         }
       }
     }
-    int64_t node_index = nodes_.size();
+    int64_t node_index = static_cast<int64_t>(nodes_.size());
     nodes_.push_back(node);
     node_index_map_.Set(value, node_index);
     return node_index;
@@ -145,7 +145,7 @@ class ObjectGraphSerializer {
 
   json::Array CreateArrayData(const Array<Any>& value) {
     json::Array data;
-    data.reserve(value.size());
+    data.reserve(static_cast<int64_t>(value.size()));
     for (const Any& item : value) {
       data.push_back(GetOrCreateNodeIndex(item));
     }
@@ -154,7 +154,7 @@ class ObjectGraphSerializer {
 
   json::Array CreateMapData(const Map<Any, Any>& value) {
     json::Array data;
-    data.reserve(value.size() * 2);
+    data.reserve(static_cast<int64_t>(value.size()) * 2);
     for (const auto& [key, value] : value) {
       data.push_back(GetOrCreateNodeIndex(key));
       data.push_back(GetOrCreateNodeIndex(value));
@@ -305,16 +305,17 @@ class ObjectGraphDeserializer {
 
   Array<Any> DecodeArrayData(const json::Array& data) {
     Array<Any> array;
-    array.reserve(data.size());
-    for (size_t i = 0; i < data.size(); i++) {
-      array.push_back(GetOrDecodeNode(data[i].cast<int64_t>()));
+    array.reserve(static_cast<int64_t>(data.size()));
+    for (const auto& elem : data) {
+      array.push_back(GetOrDecodeNode(elem.cast<int64_t>()));
     }
     return array;
   }
 
   Map<Any, Any> DecodeMapData(const json::Array& data) {
     Map<Any, Any> map;
-    for (size_t i = 0; i < data.size(); i += 2) {
+    const int64_t n = static_cast<int64_t>(data.size());
+    for (int64_t i = 0; i < n; i += 2) {
       int64_t key_index = data[i].cast<int64_t>();
       int64_t value_index = data[i + 1].cast<int64_t>();
       map.Set(GetOrDecodeNode(key_index), GetOrDecodeNode(value_index));
@@ -340,7 +341,8 @@ class ObjectGraphDeserializer {
     ObjectPtr<Object> ptr =
         details::ObjectUnsafe::ObjectPtrFromOwned<Object>(static_cast<TVMFFIObject*>(handle));
 
-    auto decode_field_value = [&](const TVMFFIFieldInfo* field_info, json::Value data) -> Any {
+    auto decode_field_value = [&](const TVMFFIFieldInfo* field_info,
+                                  const json::Value& data) -> Any {
       switch (field_info->field_static_type_index) {
         case TypeIndex::kTVMFFINone: {
           return nullptr;
@@ -381,7 +383,7 @@ class ObjectGraphDeserializer {
     return ObjectRef(ptr);
   }
 
-  explicit ObjectGraphDeserializer(json::Value serialized) {
+  explicit ObjectGraphDeserializer(const json::Value& serialized) {
     if (!serialized.as<json::Object>()) {
       TVM_FFI_THROW(ValueError) << "Invalid JSON Object Graph, expected an object";
     }

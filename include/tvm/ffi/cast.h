@@ -70,7 +70,7 @@ inline RefType GetRef(const ObjectType* ptr) {
  */
 template <typename BaseType, typename ObjectType>
 inline ObjectPtr<BaseType> GetObjectPtr(ObjectType* ptr) {
-  static_assert(std::is_base_of<BaseType, ObjectType>::value,
+  static_assert(std::is_base_of_v<BaseType, ObjectType>,
                 "Can only cast to the ref of same container type");
   return details::ObjectUnsafe::ObjectPtrFromUnowned<BaseType>(ptr);
 }

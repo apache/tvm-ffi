@@ -24,6 +24,8 @@
 #ifndef TVM_FFI_EXTRA_BUFFER_STREAM_H_
 #define TVM_FFI_EXTRA_BUFFER_STREAM_H_
 
+#include <tvm/ffi/endian.h>
+
 #include <algorithm>
 #include <cstring>
 #include <string>
@@ -67,7 +69,7 @@ class BufferInStream {
   bool Read(T* data) {
     bool ret = Read(static_cast<void*>(data), sizeof(T)) == sizeof(T);  // NOLINT(*)
     if (!TVM_FFI_IO_NO_ENDIAN_SWAP) {
-      ByteSwap(&data, sizeof(T), 1);
+      ByteSwap(static_cast<void*>(data), sizeof(T), 1);
     }
     return ret;
   }

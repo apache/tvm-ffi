@@ -136,7 +136,7 @@ const TVMFFIByteArray* TVMFFIBacktrace(const char* filename, int lineno, const c
   // libbacktrace eats memory if run on multiple threads at the same time, so we guard against it
   if (tvm::ffi::_bt_state != nullptr) {
     static std::mutex m;
-    std::lock_guard<std::mutex> lock(m);
+    std::scoped_lock<std::mutex> lock(m);
     backtrace_full(tvm::ffi::_bt_state, 0, tvm::ffi::BacktraceFullCallback,
                    tvm::ffi::BacktraceErrorCallback, &backtrace);
   }
@@ -163,7 +163,7 @@ void TVMFFISegFaultHandler(int sig) {
   raise(sig);
 }
 
-__attribute__((constructor)) void TVMFFIInstallSignalHandler(void) {
+__attribute__((constructor)) void TVMFFIInstallSignalHandler() {
   // this may override already installed signal handlers
   std::signal(SIGSEGV, TVMFFISegFaultHandler);
 }
@@ -177,7 +177,8 @@ const TVMFFIByteArray* TVMFFIBacktrace(const char* filename, int lineno, const c
   std::ostringstream backtrace_stream;
   if (filename != nullptr && func != nullptr) {
     // python style backtrace
-    backtrace_stream << "  File \"" << filename << "\", line " << lineno << ", in " << func << '\n';
+    backtrace_stream << "  File \"" << filename << "\", line " << lineno << ", in " << func
+                     << std::endl;
   }
   backtrace_str = backtrace_stream.str();
   backtrace_array.data = backtrace_str.data();

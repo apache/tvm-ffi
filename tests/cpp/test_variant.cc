@@ -43,6 +43,7 @@ TEST(Variant, Basic) {
 TEST(Variant, AnyConvert) {
   Variant<int, TInt> v = 1;
   AnyView view0 = v;
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   EXPECT_EQ(view0.as<int>().value(), 1);
 
   // implicit convert to variant
@@ -65,7 +66,7 @@ TEST(Variant, ObjectPtrHashEqual) {
 
   Variant<TFloat, TInt> v0 = x;
   Variant<TFloat, TInt> v1 = y;
-  Variant<TFloat, TInt> v2 = v1;
+  Variant<TFloat, TInt> v2 = v1;  // NOLINT(performance-unnecessary-copy-initialization)
 
   EXPECT_EQ(ObjectPtrHash()(v0), ObjectPtrHash()(x));
   EXPECT_TRUE(!ObjectPtrEqual()(v0, v1));

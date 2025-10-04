@@ -1,0 +1,29 @@
+# -clang-analyzer-unix.Malloc is disabled due to false positives
+Checks: >
+  clang-diagnostic-*,
+  clang-analyzer-*,
+  modernize-*,
+  bugprone-*,
+  performance-*,
+  portability-*,
+  google-*,
+  -modernize-use-trailing-return-type,
+  -modernize-concat-nested-namespaces,
+  -modernize-use-auto,
+  -modernize-use-nodiscard,
+  -modernize-return-braced-init-list,
+  -modernize-avoid-c-arrays,
+  -bugprone-easily-swappable-parameters,
+  -google-build-using-namespace,
+  -performance-enum-size,
+  -clang-analyzer-unix.Malloc,
+  -performance-avoid-endl
+WarningsAsErrors: '*'
+HeaderFilterRegex: '.*(include/tvm/ffi|src/ffi)/.*\.h$'
+HeaderFileExtensions: ['h']
+ImplementationFileExtensions: ['cc']
+CheckOptions:
+  - key: misc-include-cleaner.UnusedIncludes
+    value: 'true'
+  - key: misc-include-cleaner.MissingIncludes
+    value: 'true'

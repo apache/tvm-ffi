@@ -25,6 +25,8 @@
 #include <tvm/ffi/extra/c_env_api.h>
 #include <tvm/ffi/extra/module.h>
 
+#include <utility>
+
 #include "buffer_stream.h"
 #include "module_internal.h"
 
@@ -33,7 +35,7 @@ namespace ffi {
 
 class LibraryModuleObj final : public ModuleObj {
  public:
-  explicit LibraryModuleObj(ObjectPtr<Library> lib) : lib_(lib) {}
+  explicit LibraryModuleObj(ObjectPtr<Library> lib) : lib_(std::move(lib)) {}
 
   const char* kind() const final { return "library"; }
 
@@ -80,7 +82,7 @@ Module LoadModuleFromBytes(const std::string& kind, const Bytes& bytes) {
  * \return the root module
  *
  */
-Module ProcessLibraryBin(const char* library_bin, ObjectPtr<Library> opt_lib,
+Module ProcessLibraryBin(const char* library_bin, const ObjectPtr<Library>& opt_lib,
                          void** library_ctx_addr = nullptr) {
   // Layout of the library binary:
   // <nbytes : u64> <import_tree> <key0: str> [<val0: bytes>] <key1: str> [<val1: bytes>] ...
@@ -93,7 +95,7 @@ Module ProcessLibraryBin(const char* library_bin, ObjectPtr<Library> opt_lib,
   TVM_FFI_ICHECK(library_bin != nullptr);
   uint64_t nbytes = 0;
   for (size_t i = 0; i < sizeof(nbytes); ++i) {
-    uint64_t c = library_bin[i];
+    uint64_t c = static_cast<unsigned char>(library_bin[i]);
     nbytes |= (c & 0xffUL) << (i * 8);
   }
 
@@ -117,7 +119,7 @@ Module ProcessLibraryBin(const char* library_bin, ObjectPtr<Library> opt_lib,
       if (library_ctx_addr) {
         *library_ctx_addr = lib_mod_ptr.get();
       }
-      modules.emplace_back(Module(lib_mod_ptr));
+      modules.emplace_back(lib_mod_ptr);
     } else {
       std::string module_bytes;
       TVM_FFI_ICHECK(stream.Read(&module_bytes));
@@ -139,7 +141,7 @@ Module ProcessLibraryBin(const char* library_bin, ObjectPtr<Library> opt_lib,
 // registry to store context symbols
 class ContextSymbolRegistry {
  public:
-  void InitContextSymbols(ObjectPtr<Library> lib) {
+  void InitContextSymbols(const ObjectPtr<Library>& lib) {
     for (const auto& [name, symbol] : context_symbols_) {
       if (void** symbol_addr = reinterpret_cast<void**>(lib->GetSymbol(name))) {
         *symbol_addr = symbol;
@@ -153,7 +155,9 @@ class ContextSymbolRegistry {
     }
   }
 
-  void Register(String name, void* symbol) { context_symbols_.emplace_back(name, symbol); }
+  void Register(String name, void* symbol) {
+    context_symbols_.emplace_back(std::move(name), symbol);
+  }
 
   static ContextSymbolRegistry* Global() {
     static ContextSymbolRegistry* inst = new ContextSymbolRegistry();
@@ -168,7 +172,7 @@ void Module::VisitContextSymbols(const ffi::TypedFunction<void(String, void*)>& 
   ContextSymbolRegistry::Global()->VisitContextSymbols(callback);
 }
 
-Module CreateLibraryModule(ObjectPtr<Library> lib) {
+Module CreateLibraryModule(ObjectPtr<Library> lib) {  // NOLINT(performance-unnecessary-value-param)
   const char* library_bin =
       reinterpret_cast<const char*>(lib->GetSymbol(ffi::symbol::tvm_ffi_library_bin));
   void** library_ctx_addr =

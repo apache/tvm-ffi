@@ -148,7 +148,7 @@ class TypeTable {
       TVM_FFI_ICHECK(parent->child_slots_can_overflow)
           << "Reach maximum number of sub-classes for " << ToStringView(parent->type_key);
       // allocate new entries.
-      int32_t allocated_tindex = type_counter_;
+      int32_t allocated_tindex = static_cast<int32_t>(type_counter_);
       type_counter_ += num_slots;
       TVM_FFI_ICHECK_LE(type_table_.size(), type_counter_);
       type_table_.reserve(type_counter_);
@@ -246,13 +246,13 @@ class TypeTable {
     if (it == type_attr_name_to_column_index_.end()) {
       column_index = type_attr_columns_.size();
       type_attr_columns_.emplace_back(std::make_unique<TypeAttrColumnData>());
-      type_attr_name_to_column_index_.Set(name_str, column_index);
+      type_attr_name_to_column_index_.Set(name_str, static_cast<int64_t>(column_index));
     } else {
       column_index = (*it).second;
     }
     TypeAttrColumnData* column = type_attr_columns_[column_index].get();
-    if (column->data_.size() < static_cast<size_t>(type_index + 1)) {
-      column->data_.resize(type_index + 1, Any(nullptr));
+    if (column->data_.size() < static_cast<size_t>(type_index) + 1) {
+      column->data_.resize(static_cast<size_t>(type_index) + 1, Any(nullptr));
       column->data = reinterpret_cast<const TVMFFIAny*>(column->data_.data());
       column->size = column->data_.size();
     }

@@ -207,7 +207,7 @@ TEST(JSONParser, Object) {
 }
 
 TEST(JSONParser, ObjectOrderPreserving) {
-  auto obj = json::Parse("{\"c\": 1, \"a\": 2, \"b\": 3}   ");
+  auto obj = json::Parse(R"({"c": 1, "a": 2, "b": 3}   )");
   json::Array keys;
   for (auto& [key, value] : obj.cast<json::Object>()) {
     keys.push_back(key);

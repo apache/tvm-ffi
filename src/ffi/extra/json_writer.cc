@@ -34,6 +34,7 @@
 #include <cstdint>
 #include <limits>
 #include <string>
+#include <utility>
 
 namespace tvm {
 namespace ffi {
@@ -41,6 +42,7 @@ namespace json {
 
 class JSONWriter {
  public:
+  // NOLINTNEXTLINE(performance-unnecessary-value-param)
   static String Stringify(const json::Value& value, Optional<int> indent) {
     JSONWriter writer(indent.value_or(0));
     writer.WriteValue(value);
@@ -194,7 +196,7 @@ class JSONWriter {
       if (indent_ != 0) {
         WriteIndent();
       }
-      WriteValue(value[i]);
+      WriteValue(value[static_cast<int64_t>(i)]);
     }
     if (indent_ != 0) {
       total_indent_ -= indent_;
@@ -249,7 +251,7 @@ class JSONWriter {
 };
 
 String Stringify(const json::Value& value, Optional<int> indent) {
-  return JSONWriter::Stringify(value, indent);
+  return JSONWriter::Stringify(value, indent);  // NOLINT(performance-unnecessary-value-param)
 }
 
 TVM_FFI_STATIC_INIT_BLOCK() {
