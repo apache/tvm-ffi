@@ -12,23 +12,6 @@
 # software distributed under the License is distributed on an
 # "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
 # KIND, either express or implied.  See the License for the
-# specific language governing permissions and limitations.
-
-from typing import TYPE_CHECKING
-
-import tvm_ffi
-
-# make sure lib is loaded first
-from .base import _LIB  # noqa: F401
-
-# this is a short cut to register all the global functions
-# prefixed by `my_ffi_extension.` to this module
-tvm_ffi.init_ffi_api("my_ffi_extension", __name__)
-
-
-# tvm-ffi-stubgen(begin): global/my_ffi_extension
-if TYPE_CHECKING:
-    # fmt: off
-    def raise_error(_0: str, /) -> None: ...
-    # fmt: on
-# tvm-ffi-stubgen(end)
+# specific language governing permissions and limitations
+# under the License.
+"""A series of stub generator tools."""

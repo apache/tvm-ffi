@@ -17,8 +17,9 @@
 """Module related objects and functions."""
 # pylint: disable=invalid-name
 
+from collections.abc import Sequence
 from enum import IntEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from . import _ffi_api, core
 from .registry import register_object
@@ -55,8 +56,14 @@ class Module(core.Object):
 
     """
 
-    # constant for entry function name
-    entry_name = "main"
+    # tvm-ffi-stubgen(begin): object/ffi.Module
+    if TYPE_CHECKING:
+        # fmt: off
+        imports_: Sequence[Any]
+        # fmt: on
+    # tvm-ffi-stubgen(end)
+
+    entry_name: ClassVar[str] = "main"  # constant for entry function name
 
     @property
     def kind(self) -> str:
@@ -129,6 +136,7 @@ class Module(core.Object):
 
         """
         func = _ffi_api.ModuleGetFunction(self, name, query_imports)
+        func = cast(core.Function, func)
         if func is None:
             raise AttributeError(f"Module has no function '{name}'")
         return func
@@ -171,7 +179,7 @@ class Module(core.Object):
         """
         return _ffi_api.ModuleInspectSource(self, fmt)
 
-    def get_write_formats(self) -> list[str]:
+    def get_write_formats(self) -> Sequence[str]:
         """Get the format of the module."""
         return _ffi_api.ModuleGetWriteFormats(self)
 
