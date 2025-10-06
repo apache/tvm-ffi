@@ -90,8 +90,8 @@ def test_derived_object() -> None:
         "testing.TestObjectDerived", v_i64=20, v_map=v_map, v_array=v_array
     )
     assert isinstance(obj0, tvm_ffi.testing.TestObjectDerived)
-    assert obj0.v_map.same_as(v_map)
-    assert obj0.v_array.same_as(v_array)
+    assert obj0.v_map.same_as(v_map)  # type: ignore[attr-defined]
+    assert obj0.v_array.same_as(v_array)  # type: ignore[attr-defined]
     assert obj0.v_i64 == 20
     assert obj0.v_f64 == 10.0
     assert obj0.v_str == "hello"
