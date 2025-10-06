@@ -15,33 +15,50 @@
 # specific language governing permissions and limitations
 # under the License.
 """Testing utilities."""
+# ruff: noqa: D102,D105
 
 from __future__ import annotations
 
-from typing import Any, ClassVar
+from collections.abc import Mapping, Sequence
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from . import _ffi_api
-from .container import Array, Map
 from .core import Object
 from .dataclasses import c_class, field
 from .registry import get_global_func, register_object
+
+if TYPE_CHECKING:
+    from tvm_ffi import Device, dtype
 
 
 @register_object("testing.TestObjectBase")
 class TestObjectBase(Object):
     """Test object base class."""
 
-    v_i64: int
-    v_f64: float
-    v_str: str
+    # tvm-ffi-stubgen(begin): object/testing.TestObjectBase
+    if TYPE_CHECKING:
+        # fmt: off
+        v_i64: int
+        v_f64: float
+        v_str: str
+        def add_i64(_0: TestObjectBase, _1: int, /) -> int: ...
+        # fmt: on
+    # tvm-ffi-stubgen(end)
 
 
 @register_object("testing.TestIntPair")
 class TestIntPair(Object):
     """Test Int Pair."""
 
-    a: int
-    b: int
+    # tvm-ffi-stubgen(begin): object/testing.TestIntPair
+    if TYPE_CHECKING:
+        # fmt: off
+        a: int
+        b: int
+        @staticmethod
+        def __c_ffi_init__(_0: int, _1: int, /) -> Object: ...
+        # fmt: on
+    # tvm-ffi-stubgen(end)
 
     def __init__(self, a: int, b: int) -> None:
         """Construct the object."""
@@ -52,8 +69,44 @@ class TestIntPair(Object):
 class TestObjectDerived(TestObjectBase):
     """Test object derived class."""
 
-    v_map: Map[Any, Any]
-    v_array: Array[Any]
+    # tvm-ffi-stubgen(begin): object/testing.TestObjectDerived
+    if TYPE_CHECKING:
+        # fmt: off
+        v_map: Mapping[Any, Any]
+        v_array: Sequence[Any]
+        # fmt: on
+    # tvm-ffi-stubgen(end)
+
+
+@register_object("testing.SchemaAllTypes")
+class _SchemaAllTypes:
+    # tvm-ffi-stubgen(begin): object/testing.SchemaAllTypes
+    # tvm-ffi-stubgen(ty_map): testing.SchemaAllTypes -> _SchemaAllTypes
+    if TYPE_CHECKING:
+        # fmt: off
+        v_bool: bool
+        v_int: int
+        v_float: float
+        v_device: Device
+        v_dtype: dtype
+        v_string: str
+        v_bytes: bytes
+        v_opt_int: int | None
+        v_opt_str: str | None
+        v_arr_int: Sequence[int]
+        v_arr_str: Sequence[str]
+        v_map_str_int: Mapping[str, int]
+        v_map_str_arr_int: Mapping[str, Sequence[int]]
+        v_variant: str | Sequence[int] | Mapping[str, int]
+        v_opt_arr_variant: Sequence[int | str] | None
+        def add_int(_0: _SchemaAllTypes, _1: int, /) -> int: ...
+        def append_int(_0: _SchemaAllTypes, _1: Sequence[int], _2: int, /) -> Sequence[int]: ...
+        def maybe_concat(_0: _SchemaAllTypes, _1: str | None, _2: str | None, /) -> str | None: ...
+        def merge_map(_0: _SchemaAllTypes, _1: Mapping[str, Sequence[int]], _2: Mapping[str, Sequence[int]], /) -> Mapping[str, Sequence[int]]: ...
+        @staticmethod
+        def make_with(_0: int, _1: float, _2: str, /) -> _SchemaAllTypes: ...
+        # fmt: on
+    # tvm-ffi-stubgen(end)
 
 
 def create_object(type_key: str, **kwargs: Any) -> Object:
@@ -122,7 +175,3 @@ class _TestCxxInitSubset:
     required_field: int
     optional_field: int = field(init=False)
     note: str = field(default_factory=lambda: "py-default", init=False)
-
-
-@register_object("testing.SchemaAllTypes")
-class _SchemaAllTypes: ...
