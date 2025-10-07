@@ -82,6 +82,7 @@ _TYPE_SCHEMA_ORIGIN_CONVERTER = {
     "const char*": "str",
     "ffi.SmallStr": "str",
     "ffi.String": "str",
+    "DataType": "dtype",
 }
 
 
