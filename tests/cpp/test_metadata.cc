@@ -70,6 +70,9 @@ TEST(Schema, GlobalFuncTypeSchema) {
             R"({"type":"ffi.Function","args":[{"type":"ffi.Bytes"},{"type":"ffi.Bytes"}]})");
   EXPECT_EQ(fetch("testing.schema_id_func"),
             R"({"type":"ffi.Function","args":[{"type":"ffi.Function"},{"type":"ffi.Function"}]})");
+  EXPECT_EQ(
+      fetch("testing.schema_id_func_typed"),
+      R"({"type":"ffi.Function","args":[{"type":"ffi.Function","args":[{"type":"None"},{"type":"int"},{"type":"float"},{"type":"ffi.Function"}]},{"type":"ffi.Function","args":[{"type":"None"},{"type":"int"},{"type":"float"},{"type":"ffi.Function"}]}]})");
 
   EXPECT_EQ(fetch("testing.schema_id_any"),
             R"({"type":"ffi.Function","args":[{"type":"Any"},{"type":"Any"}]})");
@@ -173,17 +176,18 @@ TEST(Schema, MethodTypeSchemas) {
   };
 
   // Instance methods
-  EXPECT_EQ(method_schema("add_int"),
-            R"({"type":"ffi.Function","args":[{"type":"int"},{"type":"int"}]})");
+  EXPECT_EQ(
+      method_schema("add_int"),
+      R"({"type":"ffi.Function","args":[{"type":"int"},{"type":"testing.SchemaAllTypes"},{"type":"int"}]})");
   EXPECT_EQ(
       method_schema("append_int"),
-      R"({"type":"ffi.Function","args":[{"type":"ffi.Array","args":[{"type":"int"}]},{"type":"ffi.Array","args":[{"type":"int"}]},{"type":"int"}]})");
+      R"({"type":"ffi.Function","args":[{"type":"ffi.Array","args":[{"type":"int"}]},{"type":"testing.SchemaAllTypes"},{"type":"ffi.Array","args":[{"type":"int"}]},{"type":"int"}]})");
   EXPECT_EQ(
       method_schema("maybe_concat"),
-      R"({"type":"ffi.Function","args":[{"type":"Optional","args":[{"type":"ffi.String"}]},{"type":"Optional","args":[{"type":"ffi.String"}]},{"type":"Optional","args":[{"type":"ffi.String"}]}]})");
+      R"({"type":"ffi.Function","args":[{"type":"Optional","args":[{"type":"ffi.String"}]},{"type":"testing.SchemaAllTypes"},{"type":"Optional","args":[{"type":"ffi.String"}]},{"type":"Optional","args":[{"type":"ffi.String"}]}]})");
   EXPECT_EQ(
       method_schema("merge_map"),
-      R"({"type":"ffi.Function","args":[{"type":"ffi.Map","args":[{"type":"ffi.String"},{"type":"ffi.Array","args":[{"type":"int"}]}]},{"type":"ffi.Map","args":[{"type":"ffi.String"},{"type":"ffi.Array","args":[{"type":"int"}]}]},{"type":"ffi.Map","args":[{"type":"ffi.String"},{"type":"ffi.Array","args":[{"type":"int"}]}]}]})");
+      R"({"type":"ffi.Function","args":[{"type":"ffi.Map","args":[{"type":"ffi.String"},{"type":"ffi.Array","args":[{"type":"int"}]}]},{"type":"testing.SchemaAllTypes"},{"type":"ffi.Map","args":[{"type":"ffi.String"},{"type":"ffi.Array","args":[{"type":"int"}]}]},{"type":"ffi.Map","args":[{"type":"ffi.String"},{"type":"ffi.Array","args":[{"type":"int"}]}]}]})");
 
   // Static method make_with: return type is the object type itself.
   // Build expected JSON as ffi.Function with return type = type_key and args = (int, float, str)

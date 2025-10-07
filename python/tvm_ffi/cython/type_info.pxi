@@ -99,9 +99,9 @@ class TypeSchema:
         elif origin == "Optional":
             assert len(args) == 1, "Optional must have exactly one argument"
         elif origin == "list":
-            assert len(args) == 1, "list must have exactly one argument"
+            assert len(args) in (0, 1), "list must have 0 or 1 argument"
         elif origin == "dict":
-            assert len(args) == 2, "dict must have exactly two arguments"
+            assert len(args) in (0, 2), "dict must have 0 or 2 arguments"
         elif origin == "tuple":
             pass  # tuple can have arbitrary number of arguments
 

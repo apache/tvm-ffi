@@ -373,6 +373,9 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("testing.schema_id_string", [](String s) { return s; })
       .def("testing.schema_id_bytes", [](Bytes b) { return b; })
       .def("testing.schema_id_func", [](Function f) -> Function { return f; })
+      .def("testing.schema_id_func_typed",
+           [](TypedFunction<void(int64_t, float, Function)> f)
+               -> TypedFunction<void(int64_t, float, Function)> { return f; })
       .def("testing.schema_id_any", [](Any a) { return a; })
       .def("testing.schema_id_object", [](ObjectRef o) { return o; })
       .def("testing.schema_id_dltensor", [](DLTensor* t) { return t; })

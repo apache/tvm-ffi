@@ -33,6 +33,10 @@ from tvm_ffi.testing import _SchemaAllTypes
         ("testing.schema_id_string", "Callable[[str], str]"),
         ("testing.schema_id_bytes", "Callable[[bytes], bytes]"),
         ("testing.schema_id_func", "Callable[[Callable[..., Any]], Callable[..., Any]]"),
+        (
+            "testing.schema_id_func_typed",
+            "Callable[[Callable[[int, float, Callable[..., Any]], None]], Callable[[int, float, Callable[..., Any]], None]]",
+        ),
         ("testing.schema_id_any", "Callable[[Any], Any]"),
         ("testing.schema_id_object", "Callable[[Object], Object]"),
         ("testing.schema_id_dltensor", "Callable[[Tensor], Tensor]"),
@@ -99,12 +103,12 @@ def test_schema_field(field_name: str, expected: str) -> None:
 @pytest.mark.parametrize(
     "method_name,expected",
     [
-        ("add_int", "Callable[[int], int]"),
-        ("append_int", "Callable[[list[int], int], list[int]]"),
-        ("maybe_concat", "Callable[[str | None, str | None], str | None]"),
+        ("add_int", "Callable[[testing.SchemaAllTypes, int], int]"),
+        ("append_int", "Callable[[testing.SchemaAllTypes, list[int], int], list[int]]"),
+        ("maybe_concat", "Callable[[testing.SchemaAllTypes, str | None, str | None], str | None]"),
         (
             "merge_map",
-            "Callable[[dict[str, list[int]], dict[str, list[int]]], dict[str, list[int]]]",
+            "Callable[[testing.SchemaAllTypes, dict[str, list[int]], dict[str, list[int]]], dict[str, list[int]]]",
         ),
         ("make_with", "Callable[[int, float, str], testing.SchemaAllTypes]"),
     ],

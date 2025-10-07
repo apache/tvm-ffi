@@ -115,9 +115,9 @@ template <typename R, typename... Args>
 struct FunctionInfo<R (*)(Args...)> : FuncFunctorImpl<R, Args...> {};
 // Support pointer-to-member functions used in reflection (e.g. &Class::method)
 template <typename Class, typename R, typename... Args>
-struct FunctionInfo<R (Class::*)(Args...)> : FuncFunctorImpl<R, Args...> {};
+struct FunctionInfo<R (Class::*)(Args...)> : FuncFunctorImpl<R, Class*, Args...> {};
 template <typename Class, typename R, typename... Args>
-struct FunctionInfo<R (Class::*)(Args...) const> : FuncFunctorImpl<R, Args...> {};
+struct FunctionInfo<R (Class::*)(Args...) const> : FuncFunctorImpl<R, const Class*, Args...> {};
 
 /*! \brief Using static function to output typed function signature */
 typedef std::string (*FGetFuncSignature)();
