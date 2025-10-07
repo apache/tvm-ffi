@@ -37,7 +37,11 @@ from . import libinfo
 
 
 def load_torch_c_dlpack_extension() -> Any:
-    """Load the torch c dlpack extension."""
+    """Load the torch c dlpack extension.
+
+    This implements the DLPackExchangeAPI struct-based approach for fast
+    zero-overhead tensor exchange between frameworks.
+    """
     cpp_source = """
 #include <dlpack/dlpack.h>
 #include <ATen/DLConvertor.h>
@@ -467,15 +471,17 @@ at::Tensor fromDLPackImpl(T* src, std::function<void(void*)> deleter) {
 } // namespace
 } // namespace at
 
-int TorchDLPackFromPyObject(void* py_obj, DLManagedTensorVersioned** out, void** env_stream) {
+//--------------------------------------------------------------------
+// DLPack Exchange API Implementation
+//--------------------------------------------------------------------
+
+/*!
+ * \brief Convert torch.Tensor PyObject to DLManagedTensorVersioned without sync
+ */
+int TorchDLPackFromPyObject(void* py_obj, DLManagedTensorVersioned** out) {
   try {
     py::handle handle(static_cast<PyObject*>(py_obj));
     at::Tensor tensor = handle.cast<at::Tensor>();
-#ifdef BUILD_WITH_CUDA
-    if (env_stream != nullptr && tensor.is_cuda()) {
-      *env_stream = at::cuda::getCurrentCUDAStream(tensor.device().index()).stream();
-    }
-#endif
     *out = at::toDLPackImpl<DLManagedTensorVersioned>(tensor);
     return 0;
   } catch (const std::exception& e) {
@@ -484,6 +490,9 @@ int TorchDLPackFromPyObject(void* py_obj, DLManagedTensorVersioned** out, void**
   }
 }
 
+/*!
+ * \brief Convert DLManagedTensorVersioned to torch.Tensor PyObject without sync
+ */
 int TorchDLPackToPyObject(DLManagedTensorVersioned* src, void** py_obj_out) {
   try {
     at::Tensor tensor = at::fromDLPackImpl<DLManagedTensorVersioned>(src, nullptr);
@@ -495,6 +504,37 @@ int TorchDLPackToPyObject(DLManagedTensorVersioned* src, void** py_obj_out) {
   }
 }
 
+/*!
+ * \brief Convert torch.Tensor PyObject to stack-allocated DLTensor (non-owning)
+ */
+int TorchDLTensorFromPyObject(void* py_obj, DLTensor* out) {
+  try {
+    py::handle handle(static_cast<PyObject*>(py_obj));
+    at::Tensor tensor = handle.cast<at::Tensor>();
+
+    // Get DLPack representation
+    auto* dlpack = at::toDLPackImpl<DLManagedTensorVersioned>(tensor);
+
+    // Shallow copy DLTensor struct to caller's stack
+    *out = dlpack->dl_tensor;
+
+    // Manually free the management structure without calling the deleter
+    // The deleter would decrement tensor refcount, but we want the original
+    // tensor to stay alive (caller doesn't own it)
+    auto* manager = static_cast<at::ATenDLMTensor<DLManagedTensorVersioned>*>(dlpack->manager_ctx);
+    manager->handle = at::Tensor();  // Release the reference
+    delete manager;
+
+    return 0;
+  } catch (const std::exception& e) {
+    PyErr_SetString(PyExc_RuntimeError, e.what());
+    return -1;
+  }
+}
+
+/*!
+ * \brief Allocate a tensor using PyTorch's allocator
+ */
 int TorchDLPackTensorAllocator(
     DLTensor* prototype, DLManagedTensorVersioned** out, void* error_ctx,
     void (*SetError)(void* error_ctx, const char* kind, const char* message)
@@ -502,27 +542,74 @@ int TorchDLPackTensorAllocator(
   try {
     at::IntArrayRef shape(prototype->shape, prototype->shape + prototype->ndim);
     at::TensorOptions options = at::TensorOptions()
-      .dtype(at::toScalarType(prototype->dtype))
+      .dtype(at::toScalarTypeForDLPackv1(prototype->dtype))
       .device(at::getATenDeviceForDLPackv1(prototype->device.device_type, prototype->device.device_id));
     at::Tensor tensor = at::empty(shape, options);
     *out = at::toDLPackImpl<DLManagedTensorVersioned>(tensor);
     return 0;
   } catch (const std::exception& e) {
-    SetError(error_ctx, "TorchDLPackTensorAllocator", e.what());
+    if (SetError != nullptr) {
+      SetError(error_ctx, "TorchDLPackTensorAllocator", e.what());
+    }
     return -1;
   }
 }
 
-int64_t TorchDLPackFromPyObjectPtr() {
-  return reinterpret_cast<int64_t>(TorchDLPackFromPyObject);
+/*!
+ * \brief Get the current work stream for a device
+ */
+int TorchCurrentWorkStream(DLDeviceType device_type, int32_t device_id, void** out_stream) {
+  try {
+#ifdef BUILD_WITH_CUDA
+    if (device_type == kDLCUDA || device_type == kDLROCM) {
+      *out_stream = at::cuda::getCurrentCUDAStream(device_id).stream();
+      return 0;
+    }
+#endif
+    // For CPU or if CUDA not available, return NULL stream
+    *out_stream = nullptr;
+    return 0;
+  } catch (const std::exception& e) {
+    PyErr_SetString(PyExc_RuntimeError, e.what());
+    return -1;
+  }
 }
 
-int64_t TorchDLPackToPyObjectPtr() {
-  return reinterpret_cast<int64_t>(TorchDLPackToPyObject);
-}
+//--------------------------------------------------------------------
+// DLPackExchangeAPI struct and global instance
+//--------------------------------------------------------------------
 
-int64_t TorchDLPackTensorAllocatorPtr() {
-  return reinterpret_cast<int64_t>(TorchDLPackTensorAllocator);
+/*!
+ * \brief PyTorch's implementation of DLPackExchangeAPI
+ */
+struct TorchDLPackExchangeAPI : public DLPackExchangeAPI {
+  TorchDLPackExchangeAPI() {
+    // Set version
+    version.major = DLPACK_MAJOR_VERSION;
+    version.minor = DLPACK_MINOR_VERSION;
+
+    // No previous version
+    prev_version_api = nullptr;
+
+    // Set all function pointers
+    managed_tensor_allocator = TorchDLPackTensorAllocator;
+    managed_tensor_from_py_object_no_sync = TorchDLPackFromPyObject;
+    managed_tensor_to_py_object_no_sync = TorchDLPackToPyObject;
+    dltensor_from_py_object_no_sync = TorchDLTensorFromPyObject;
+    current_work_stream = TorchCurrentWorkStream;
+  }
+
+  static const DLPackExchangeAPI* Global() {
+    static TorchDLPackExchangeAPI inst;
+    return &inst;
+  }
+};
+
+/*!
+ * \brief Get pointer to PyTorch's DLPackExchangeAPI as int64
+ */
+int64_t TorchDLPackExchangeAPIPtr() {
+  return reinterpret_cast<int64_t>(TorchDLPackExchangeAPI::Global());
 }
     """
     try:
@@ -541,17 +628,13 @@ int64_t TorchDLPackTensorAllocatorPtr() {
             name="c_dlpack",
             cpp_sources=cpp_source,
             functions=[
-                "TorchDLPackFromPyObjectPtr",
-                "TorchDLPackToPyObjectPtr",
-                "TorchDLPackTensorAllocatorPtr",
+                "TorchDLPackExchangeAPIPtr",
             ],
             extra_cflags=extra_cflags,
             extra_include_paths=include_paths,
         )
-        # set the dlpack related flags
-        setattr(torch.Tensor, "__c_dlpack_from_pyobject__", mod.TorchDLPackFromPyObjectPtr())
-        setattr(torch.Tensor, "__c_dlpack_to_pyobject__", mod.TorchDLPackToPyObjectPtr())
-        setattr(torch.Tensor, "__c_dlpack_tensor_allocator__", mod.TorchDLPackTensorAllocatorPtr())
+        # Set the DLPackExchangeAPI struct pointer on torch.Tensor class
+        setattr(torch.Tensor, "__c_dlpack_exchange_api__", mod.TorchDLPackExchangeAPIPtr())
         return mod
     except ImportError:
         pass

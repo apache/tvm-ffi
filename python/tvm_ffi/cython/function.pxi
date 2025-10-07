@@ -142,10 +142,60 @@ cdef int TVMFFIPyArgSetterObject_(
     return 0
 
 
+cdef int TVMFFIPyArgSetterDLPackExchangeAPI_(
+    TVMFFIPyArgSetter* this, TVMFFIPyCallContext* ctx,
+    PyObject* arg, TVMFFIAny* out
+) except -1:
+    """
+    Fast converter using DLPackExchangeAPI struct.
+    This is the new struct-based approach that bundles all function pointers.
+    """
+    cdef DLManagedTensorVersioned* temp_managed_tensor
+    cdef TVMFFIObjectHandle temp_chandle
+    cdef void* current_stream = NULL
+    cdef const DLPackExchangeAPI* api = <const DLPackExchangeAPI*>this.c_dlpack_exchange_api
+
+    # Set allocator and ToPyObject converter in context if available
+    if api.managed_tensor_allocator != NULL:
+        ctx.c_dlpack_tensor_allocator = api.managed_tensor_allocator
+    if api.managed_tensor_to_py_object_no_sync != NULL:
+        ctx.c_dlpack_to_pyobject = <DLPackToPyObject>api.managed_tensor_to_py_object_no_sync
+
+    # Convert PyObject to DLPack using the struct's function pointer
+    if api.managed_tensor_from_py_object_no_sync(arg, &temp_managed_tensor) != 0:
+        return -1
+
+    # Query current stream from producer if device is not CPU
+    if temp_managed_tensor.dl_tensor.device.device_type != kDLCPU:
+        if ctx.device_type == -1 and api.current_work_stream != NULL:
+            # First time seeing a device, query the stream
+            if api.current_work_stream(
+                temp_managed_tensor.dl_tensor.device.device_type,
+                temp_managed_tensor.dl_tensor.device.device_id,
+                &current_stream
+            ) == 0:
+                ctx.stream = <TVMFFIStreamHandle>current_stream
+                ctx.device_type = temp_managed_tensor.dl_tensor.device.device_type
+                ctx.device_id = temp_managed_tensor.dl_tensor.device.device_id
+
+    # Convert to TVM Tensor
+    if TVMFFITensorFromDLPackVersioned(temp_managed_tensor, 0, 0, &temp_chandle) != 0:
+        raise BufferError("Failed to convert DLManagedTensorVersioned to ffi.Tensor")
+
+    out.type_index = kTVMFFITensor
+    out.v_ptr = temp_chandle
+    TVMFFIPyPushTempFFIObject(ctx, temp_chandle)
+    return 0
+
+
 cdef int TVMFFIPyArgSetterDLPackCExporter_(
     TVMFFIPyArgSetter* this, TVMFFIPyCallContext* ctx,
     PyObject* arg, TVMFFIAny* out
 ) except -1:
+    """
+    Converter using individual function pointers (legacy approach).
+    This supports frameworks that expose individual __c_dlpack_from_pyobject__ etc.
+    """
     cdef DLManagedTensorVersioned* temp_managed_tensor
     cdef TVMFFIObjectHandle temp_chandle
     cdef TVMFFIStreamHandle env_stream = NULL
@@ -546,6 +596,16 @@ cdef int TVMFFIPyArgSetterFactory_(PyObject* value, TVMFFIPyArgSetter* out) exce
         out.func = TVMFFIPyArgSetterObjectRValueRef_
         return 0
     if os.environ.get("TVM_FFI_SKIP_c_dlpack_from_pyobject", "0") != "1":
+        # Check for DLPackExchangeAPI struct (RFC proposal - new approach)
+        # This is checked on the CLASS, not the instance
+        arg_class = type(arg)
+        if hasattr(arg_class, "__c_dlpack_exchange_api__"):
+            out.func = TVMFFIPyArgSetterDLPackExchangeAPI_
+            temp_ptr = arg_class.__c_dlpack_exchange_api__
+            out.c_dlpack_exchange_api = <const void*>temp_ptr
+            return 0
+
+        # Check for individual function pointers (legacy approach)
         # external tensors
         if hasattr(arg, "__c_dlpack_from_pyobject__"):
             out.func = TVMFFIPyArgSetterDLPackCExporter_

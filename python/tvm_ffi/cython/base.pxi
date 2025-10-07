@@ -77,6 +77,44 @@ cdef extern from "dlpack/dlpack.h":
         void (*deleter)(DLManagedTensorVersioned* self)
         uint64_t flags
 
+    # DLPack Exchange API function pointer types
+    ctypedef int (*DLPackManagedTensorAllocator)(
+        DLTensor* prototype,
+        DLManagedTensorVersioned** out,
+        void* error_ctx,
+        void (*SetError)(void* error_ctx, const char* kind, const char* message)
+    ) noexcept
+
+    ctypedef int (*DLPackManagedTensorFromPyObjectNoSync)(
+        void* py_object,
+        DLManagedTensorVersioned** out
+    ) noexcept
+
+    ctypedef int (*DLPackManagedTensorToPyObjectNoSync)(
+        DLManagedTensorVersioned* tensor,
+        void** out_py_object
+    ) noexcept
+
+    ctypedef int (*DLPackCurrentWorkStream)(
+        int device_type,
+        int32_t device_id,
+        void** out_current_stream
+    ) noexcept
+
+    ctypedef int (*DLPackDLTensorFromPyObjectNoSync)(
+        void* py_object,
+        DLTensor* out
+    ) noexcept
+
+    ctypedef struct DLPackExchangeAPI:
+        DLPackVersion version
+        DLPackExchangeAPI* prev_version_api
+        DLPackManagedTensorAllocator managed_tensor_allocator
+        DLPackManagedTensorFromPyObjectNoSync managed_tensor_from_py_object_no_sync
+        DLPackManagedTensorToPyObjectNoSync managed_tensor_to_py_object_no_sync
+        DLPackDLTensorFromPyObjectNoSync dltensor_from_py_object_no_sync
+        DLPackCurrentWorkStream current_work_stream
+
 
 # Cython binding for TVM FFI C API
 cdef extern from "tvm/ffi/c_api.h":
@@ -249,6 +287,9 @@ cdef extern from "tvm/ffi/extra/c_env_api.h":
     void* TVMFFIEnvGetStream(int32_t device_type, int32_t device_id) nogil
     int TVMFFIEnvSetStream(int32_t device_type, int32_t device_id, TVMFFIStreamHandle stream,
                            TVMFFIStreamHandle* opt_out_original_stream) nogil
+
+    # DLPack Exchange API
+    const DLPackExchangeAPI* TVMFFIGetDLPackExchangeAPI() nogil
 
 
 def _env_set_current_stream(int device_type, int device_id, uint64_t stream):

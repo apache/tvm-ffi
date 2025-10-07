@@ -120,6 +120,11 @@ struct TVMFFIPyArgSetter {
    */
   DLPackTensorAllocator c_dlpack_tensor_allocator{nullptr};
   /*!
+   * \brief Optional DLPackExchangeAPI struct pointer.
+   * This is the new struct-based approach that bundles all DLPack exchange functions.
+   */
+  const void* c_dlpack_exchange_api{nullptr};
+  /*!
    * \brief Invoke the setter.
    * \param call_ctx The call context.
    * \param arg The python argument to be set
