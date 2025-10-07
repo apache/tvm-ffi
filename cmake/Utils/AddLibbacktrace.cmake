@@ -32,26 +32,36 @@ function (_libbacktrace_compile)
   else ()
     set(cmake_c_compiler "${CMAKE_C_COMPILER}")
   endif ()
-  message(STATUS CMAKC_C_COMPILER="${CMAKE_C_COMPILER}")
 
   file(MAKE_DIRECTORY ${libbacktrace_prefix}/include)
   file(MAKE_DIRECTORY ${libbacktrace_prefix}/lib)
-
+  detect_target_triple(TVM_FFI_MACHINE_NAME)
+  message(STATUS "Detected target triple: ${TVM_FFI_MACHINE_NAME}")
   ExternalProject_Add(
     project_libbacktrace
     PREFIX libbacktrace
     SOURCE_DIR ${libbacktrace_source}
     BINARY_DIR ${libbacktrace_prefix}
     CONFIGURE_COMMAND
-      "sh" "${libbacktrace_source}/configure" "--prefix=${libbacktrace_prefix}" --with-pic
-      "CC=${cmake_c_compiler}" "CPP=${cmake_c_compiler} -E" "CFLAGS=${CMAKE_C_FLAGS}"
-      "LDFLAGS=${CMAKE_EXE_LINKER_FLAGS}" "NM=${CMAKE_NM}" "STRIP=${CMAKE_STRIP}"
-      "--host=${MACHINE_NAME}"
+      "sh" #
+      "${libbacktrace_source}/configure" #
+      "--prefix=${libbacktrace_prefix}" #
+      "--with-pic" #
+      "CC=${cmake_c_compiler}" #
+      "CPP=${cmake_c_compiler} -E" #
+      "CFLAGS=${CMAKE_C_FLAGS}" #
+      "LDFLAGS=${CMAKE_EXE_LINKER_FLAGS}" #
+      "NM=${CMAKE_NM}" #
+      "STRIP=${CMAKE_STRIP}" #
+      "--host=${TVM_FFI_MACHINE_NAME}"
     INSTALL_DIR ${libbacktrace_prefix}
-    BUILD_COMMAND make
     INSTALL_COMMAND make install
     BUILD_BYPRODUCTS "${libbacktrace_prefix}/lib/libbacktrace.a"
                      "${libbacktrace_prefix}/include/backtrace.h"
+    LOG_CONFIGURE ON
+    LOG_INSTALL ON
+    LOG_BUILD ON
+    LOG_OUTPUT_ON_FAILURE ON
   )
   ExternalProject_Add_Step(
     project_libbacktrace checkout

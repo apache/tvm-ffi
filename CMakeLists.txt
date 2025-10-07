@@ -23,6 +23,8 @@ option(TVM_FFI_USE_LIBBACKTRACE "Enable libbacktrace" ON)
 option(TVM_FFI_USE_EXTRA_CXX_API "Enable extra CXX API in shared lib" ON)
 option(TVM_FFI_BACKTRACE_ON_SEGFAULT "Set signal handler to print backtrace on segfault" ON)
 
+include(${CMAKE_SOURCE_DIR}/cmake/Utils/DetectTargetTriple.cmake)
+
 if (TVM_FFI_USE_LIBBACKTRACE)
   include(${CMAKE_CURRENT_LIST_DIR}/cmake/Utils/AddLibbacktrace.cmake)
 endif ()
