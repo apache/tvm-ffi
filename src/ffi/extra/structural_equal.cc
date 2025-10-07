@@ -338,7 +338,7 @@ class StructEqualHandler {
     if (lhs.size() != rhs.size()) {
       return false;
     }
-    for (int64_t i = 0, n = static_cast<int64_t>(lhs.size()); i < n; ++i) {
+    for (size_t i = 0; i < lhs.size(); ++i) {
       if (lhs[i] != rhs[i]) {
         return false;
       }

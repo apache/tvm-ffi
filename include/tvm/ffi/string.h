@@ -931,11 +931,13 @@ struct TypeTraits<std::string>
     return std::string(src->data, src->size);
   }
 
-  TVM_FFI_INLINE static std::string ConvertFallbackValue(const Bytes& src) {
+  // NOLINTNEXTLINE(performance-unnecessary-value-param)
+  TVM_FFI_INLINE static std::string ConvertFallbackValue(Bytes src) {
     return src.operator std::string();
   }
 
-  TVM_FFI_INLINE static std::string ConvertFallbackValue(const String& src) {
+  // NOLINTNEXTLINE(performance-unnecessary-value-param)
+  TVM_FFI_INLINE static std::string ConvertFallbackValue(String src) {
     return src.operator std::string();
   }
 };
