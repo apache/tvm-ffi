@@ -175,5 +175,6 @@ def get_raw_stream(device: core.Device) -> int:
     -------
     stream : int
         The current ffi stream.
+
     """
     return core._env_get_stream(device.dlpack_device_type(), device.index)
