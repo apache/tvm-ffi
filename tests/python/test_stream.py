@@ -50,11 +50,14 @@ def test_raw_stream() -> None:
     stream_2 = 987654321
     with tvm_ffi.use_raw_stream(device, stream_1):
         mod.check_stream(device.dlpack_device_type(), device.index, stream_1)
+        assert tvm_ffi.get_raw_stream(device) == stream_1
 
         with tvm_ffi.use_raw_stream(device, stream_2):
             mod.check_stream(device.dlpack_device_type(), device.index, stream_2)
+            assert tvm_ffi.get_raw_stream(device) == stream_2
 
         mod.check_stream(device.dlpack_device_type(), device.index, stream_1)
+        assert tvm_ffi.get_raw_stream(device) == stream_1
 
 
 @pytest.mark.skipif(

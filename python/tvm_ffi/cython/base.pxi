@@ -261,6 +261,12 @@ def _env_set_current_stream(int device_type, int device_id, uint64_t stream):
     return <uint64_t>prev_stream
 
 
+def _env_get_stream(int device_type, int device_id):
+    cdef void* current_stream
+    current_stream = TVMFFIEnvGetStream(device_type, device_id)
+    return <uint64_t>current_stream
+
+
 cdef extern from "tvm_ffi_python_helpers.h":
     # no need to expose fields of the call context setter data structure
     ctypedef int (*DLPackFromPyObject)(

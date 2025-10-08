@@ -161,3 +161,19 @@ def use_raw_stream(device: core.Device, stream: Union[int, c_void_p]) -> StreamC
             "try use_torch_stream when using torch.cuda.Stream or torch.cuda.graph"
         )
     return StreamContext(device, stream)
+
+
+def get_raw_stream(device: core.Device) -> int:
+    """Get the current ffi stream of given device.
+
+    Parameters
+    ----------
+    device : tvm_ffi.Device
+        The device to which the stream belongs.
+
+    Returns
+    -------
+    stream : int
+        The current ffi stream.
+    """
+    return core._env_get_stream(device.dlpack_device_type(), device.index)
