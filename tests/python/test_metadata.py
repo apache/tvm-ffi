@@ -22,6 +22,13 @@ from tvm_ffi.core import TypeInfo, TypeSchema
 from tvm_ffi.testing import _SchemaAllTypes
 
 
+def _replace_list_dict(ty: str) -> str:
+    return {
+        "list": "Sequence",
+        "dict": "Mapping",
+    }.get(ty, ty)
+
+
 @pytest.mark.parametrize(
     "func_name,expected",
     [
@@ -48,9 +55,11 @@ from tvm_ffi.testing import _SchemaAllTypes
         ("testing.schema_id_arr_int", "Callable[[list[int]], list[int]]"),
         ("testing.schema_id_arr_str", "Callable[[list[str]], list[str]]"),
         ("testing.schema_id_arr_obj", "Callable[[list[Object]], list[Object]]"),
+        ("testing.schema_id_arr", "Callable[[list[Any]], list[Any]]"),
         ("testing.schema_id_map_str_int", "Callable[[dict[str, int]], dict[str, int]]"),
         ("testing.schema_id_map_str_str", "Callable[[dict[str, str]], dict[str, str]]"),
         ("testing.schema_id_map_str_obj", "Callable[[dict[str, Object]], dict[str, Object]]"),
+        ("testing.schema_id_map", "Callable[[dict[Any, Any]], dict[Any, Any]]"),
         ("testing.schema_id_variant_int_str", "Callable[[int | str], int | str]"),
         ("testing.schema_packed", "Callable[..., Any]"),
         (
@@ -67,6 +76,13 @@ def test_schema_global_func(func_name: str, expected: str) -> None:
     metadata: dict[str, Any] = get_global_func_metadata(func_name)
     actual: TypeSchema = TypeSchema.from_json_str(metadata["type_schema"])
     assert str(actual) == expected, f"{func_name}: {actual}"
+    assert actual.repr(_replace_list_dict) == expected.replace(
+        "list",
+        "Sequence",
+    ).replace(
+        "dict",
+        "Mapping",
+    )
 
 
 @pytest.mark.parametrize(
@@ -95,6 +111,13 @@ def test_schema_field(field_name: str, expected: str) -> None:
         if field.name == field_name:
             actual: TypeSchema = TypeSchema.from_json_str(field.metadata["type_schema"])
             assert str(actual) == expected, f"{field_name}: {actual}"
+            assert actual.repr(_replace_list_dict) == expected.replace(
+                "list",
+                "Sequence",
+            ).replace(
+                "dict",
+                "Mapping",
+            )
             break
     else:
         raise ValueError(f"Field not found: {field_name}")
@@ -119,6 +142,13 @@ def test_schema_member_method(method_name: str, expected: str) -> None:
         if method.name == method_name:
             actual: TypeSchema = TypeSchema.from_json_str(method.metadata["type_schema"])
             assert str(actual) == expected, f"{method_name}: {actual}"
+            assert actual.repr(_replace_list_dict) == expected.replace(
+                "list",
+                "Sequence",
+            ).replace(
+                "dict",
+                "Mapping",
+            )
             break
     else:
         raise ValueError(f"Method not found: {method_name}")

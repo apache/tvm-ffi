@@ -86,7 +86,7 @@ _TYPE_SCHEMA_ORIGIN_CONVERTER = {
 }
 
 
-@dataclasses.dataclass(repr=False, frozen=True)
+@dataclasses.dataclass(repr=False)
 class TypeSchema:
     """Type schema for a TVM FFI type."""
     origin: str
@@ -101,27 +101,17 @@ class TypeSchema:
             assert len(args) == 1, "Optional must have exactly one argument"
         elif origin == "list":
             assert len(args) in (0, 1), "list must have 0 or 1 argument"
+            if args == ():
+                self.args = (TypeSchema("Any"),)
         elif origin == "dict":
             assert len(args) in (0, 2), "dict must have 0 or 2 arguments"
+            if args == ():
+                self.args = (TypeSchema("Any"), TypeSchema("Any"))
         elif origin == "tuple":
             pass  # tuple can have arbitrary number of arguments
 
     def __repr__(self) -> str:
-        if self.origin == "Union":
-            return " | ".join(repr(a) for a in self.args)
-        elif self.origin == "Optional":
-            return repr(self.args[0]) + " | None"
-        elif self.origin == "Callable":
-            if not self.args:
-                return "Callable[..., Any]"
-            else:
-                arg_ret = self.args[0]
-                arg_args = self.args[1:]
-                return f"Callable[[{', '.join(repr(a) for a in arg_args)}], {repr(arg_ret)}]"
-        elif not self.args:
-            return self.origin
-        else:
-            return f"{self.origin}[{', '.join(repr(a) for a in self.args)}]"
+        return self.repr(ty_map=None)
 
     @staticmethod
     def from_json_obj(obj: dict[str, Any]) -> "TypeSchema":
@@ -135,6 +125,29 @@ class TypeSchema:
     @staticmethod
     def from_json_str(s) -> "TypeSchema":
         return TypeSchema.from_json_obj(json.loads(s))
+
+    def repr(self, ty_map = None) -> str:
+        if ty_map is None:
+            origin = self.origin
+        else:
+            origin = ty_map(self.origin)
+        args = [i.repr(ty_map) for i in self.args]
+        if origin == "Union":
+            return " | ".join(args)
+        elif origin == "Optional":
+            return args[0] + " | None"
+        elif origin == "Callable":
+            if not args:
+                return "Callable[..., Any]"
+            else:
+                ret = args[0]
+                args = ", ".join(args[1:])
+                return f"Callable[[{args}], {ret}]"
+        elif not args:
+            return origin
+        else:
+            args = ", ".join(args)
+            return f"{origin}[{args}]"
 
 
 @dataclasses.dataclass(eq=False)

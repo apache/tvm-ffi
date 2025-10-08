@@ -102,6 +102,8 @@ TEST(Schema, GlobalFuncTypeSchema) {
   EXPECT_EQ(
       fetch("testing.schema_id_arr_obj"),
       R"({"type":"ffi.Function","args":[{"type":"ffi.Array","args":[{"type":"ffi.Object"}]},{"type":"ffi.Array","args":[{"type":"ffi.Object"}]}]})");
+  EXPECT_EQ(fetch("testing.schema_id_arr"),
+            R"({"type":"ffi.Function","args":[{"type":"ffi.Array"},{"type":"ffi.Array"}]})");
   EXPECT_EQ(
       fetch("testing.schema_id_map_str_int"),
       R"({"type":"ffi.Function","args":[{"type":"ffi.Map","args":[{"type":"ffi.String"},{"type":"int"}]},{"type":"ffi.Map","args":[{"type":"ffi.String"},{"type":"int"}]}]})");
@@ -111,6 +113,8 @@ TEST(Schema, GlobalFuncTypeSchema) {
   EXPECT_EQ(
       fetch("testing.schema_id_map_str_obj"),
       R"({"type":"ffi.Function","args":[{"type":"ffi.Map","args":[{"type":"ffi.String"},{"type":"ffi.Object"}]},{"type":"ffi.Map","args":[{"type":"ffi.String"},{"type":"ffi.Object"}]}]})");
+  EXPECT_EQ(fetch("testing.schema_id_map"),
+            R"({"type":"ffi.Function","args":[{"type":"ffi.Map"},{"type":"ffi.Map"}]})");
   EXPECT_EQ(
       fetch("testing.schema_id_variant_int_str"),
       R"({"type":"ffi.Function","args":[{"type":"Variant","args":[{"type":"int"},{"type":"ffi.String"}]},{"type":"Variant","args":[{"type":"int"},{"type":"ffi.String"}]}]})");

@@ -389,9 +389,11 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("testing.schema_id_arr_int", [](Array<int64_t> arr) { return arr; })
       .def("testing.schema_id_arr_str", [](Array<String> arr) { return arr; })
       .def("testing.schema_id_arr_obj", [](Array<ObjectRef> arr) { return arr; })
+      .def("testing.schema_id_arr", [](const ArrayObj* arr) { return arr; })
       .def("testing.schema_id_map_str_int", [](Map<String, int64_t> m) { return m; })
       .def("testing.schema_id_map_str_str", [](Map<String, String> m) { return m; })
       .def("testing.schema_id_map_str_obj", [](Map<String, ObjectRef> m) { return m; })
+      .def("testing.schema_id_map", [](const MapObj* m) { return m; })
       .def("testing.schema_id_variant_int_str", [](Variant<int64_t, String> v) { return v; })
       .def_packed("testing.schema_packed", [](PackedArgs args, Any* ret) {})
       .def("testing.schema_arr_map_opt",
