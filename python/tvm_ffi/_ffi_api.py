@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     from tvm_ffi.access_path import AccessPath
 
 
-# tvm-stubgen(begin): global/ffi
+# tvm-ffi-stubgen(begin): global/ffi
 if TYPE_CHECKING:
     # fmt: off
     def FunctionRemoveGlobal(_0: str, /) -> bool: ...
@@ -67,6 +67,6 @@ if TYPE_CHECKING:
     def ModuleClearImports(_0: Module, /) -> None: ...
     def SystemLib(*args: Any) -> Any: ...
     # fmt: on
-# tvm-stubgen(end)
+# tvm-ffi-stubgen(end)
 
 registry.init_ffi_api("ffi", __name__)

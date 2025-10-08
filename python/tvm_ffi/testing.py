@@ -35,7 +35,7 @@ if TYPE_CHECKING:
 class TestObjectBase(Object):
     """Test object base class."""
 
-    # tvm-stubgen(begin): object/testing.TestObjectBase
+    # tvm-ffi-stubgen(begin): object/testing.TestObjectBase
     if TYPE_CHECKING:
         # fmt: off
         v_i64: int
@@ -43,14 +43,14 @@ class TestObjectBase(Object):
         v_str: str
         def add_i64(_0: TestObjectBase, _1: int, /) -> int: ...
         # fmt: on
-    # tvm-stubgen(end)
+    # tvm-ffi-stubgen(end)
 
 
 @register_object("testing.TestIntPair")
 class TestIntPair(Object):
     """Test Int Pair."""
 
-    # tvm-stubgen(begin): object/testing.TestIntPair
+    # tvm-ffi-stubgen(begin): object/testing.TestIntPair
     if TYPE_CHECKING:
         # fmt: off
         a: int
@@ -58,7 +58,7 @@ class TestIntPair(Object):
         @staticmethod
         def __c_ffi_init__(_0: int, _1: int, /) -> Object: ...
         # fmt: on
-    # tvm-stubgen(end)
+    # tvm-ffi-stubgen(end)
 
     def __init__(self, a: int, b: int) -> None:
         """Construct the object."""
@@ -69,19 +69,19 @@ class TestIntPair(Object):
 class TestObjectDerived(TestObjectBase):
     """Test object derived class."""
 
-    # tvm-stubgen(begin): object/testing.TestObjectDerived
+    # tvm-ffi-stubgen(begin): object/testing.TestObjectDerived
     if TYPE_CHECKING:
         # fmt: off
         v_map: Mapping[Any, Any]
         v_array: Sequence[Any]
         # fmt: on
-    # tvm-stubgen(end)
+    # tvm-ffi-stubgen(end)
 
 
 @register_object("testing.SchemaAllTypes")
 class _SchemaAllTypes:
-    # tvm-stubgen(begin): object/testing.SchemaAllTypes
-    # tvm-stubgen(ty_map): testing.SchemaAllTypes -> _SchemaAllTypes
+    # tvm-ffi-stubgen(begin): object/testing.SchemaAllTypes
+    # tvm-ffi-stubgen(ty_map): testing.SchemaAllTypes -> _SchemaAllTypes
     if TYPE_CHECKING:
         # fmt: off
         v_bool: bool
@@ -106,7 +106,7 @@ class _SchemaAllTypes:
         @staticmethod
         def make_with(_0: int, _1: float, _2: str, /) -> _SchemaAllTypes: ...
         # fmt: on
-    # tvm-stubgen(end)
+    # tvm-ffi-stubgen(end)
 
 
 def create_object(type_key: str, **kwargs: Any) -> Object:

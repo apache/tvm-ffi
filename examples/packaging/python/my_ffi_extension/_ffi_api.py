@@ -26,9 +26,9 @@ from .base import _LIB  # noqa: F401
 tvm_ffi.init_ffi_api("my_ffi_extension", __name__)
 
 
-# tvm-stubgen(begin): global/my_ffi_extension
+# tvm-ffi-stubgen(begin): global/my_ffi_extension
 if TYPE_CHECKING:
     # fmt: off
     def raise_error(_0: str, /) -> None: ...
     # fmt: on
-# tvm-stubgen(end)
+# tvm-ffi-stubgen(end)

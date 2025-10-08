@@ -42,20 +42,20 @@ class AccessKind(IntEnum):
 class AccessStep(Object):
     """Access step container."""
 
-    # tvm-stubgen(begin): object/ffi.reflection.AccessStep
+    # tvm-ffi-stubgen(begin): object/ffi.reflection.AccessStep
     if TYPE_CHECKING:
         # fmt: off
         kind: int
         key: Any
         # fmt: on
-    # tvm-stubgen(end)
+    # tvm-ffi-stubgen(end)
 
 
 @register_object("ffi.reflection.AccessPath")
 class AccessPath(Object):
     """Access path container."""
 
-    # tvm-stubgen(begin): object/ffi.reflection.AccessPath
+    # tvm-ffi-stubgen(begin): object/ffi.reflection.AccessPath
     if TYPE_CHECKING:
         # fmt: off
         parent: Object | None
@@ -74,7 +74,7 @@ class AccessPath(Object):
         def _to_steps(_0: AccessPath, /) -> Sequence[AccessStep]: ...
         def _path_equal(_0: AccessPath, _1: AccessPath, /) -> bool: ...
         # fmt: on
-    # tvm-stubgen(end)
+    # tvm-ffi-stubgen(end)
 
     def __init__(self) -> None:
         """Disallow direct construction; use `AccessPath.root()` instead."""
