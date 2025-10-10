@@ -512,15 +512,15 @@ int TorchDLTensorFromPyObject(void* py_obj, DLTensor* out) {
   try {
     // Use handle (non-owning) to avoid unnecessary refcount operations
     py::handle handle(static_cast<PyObject*>(py_obj));
-    const at::Tensor& tensor = handle.cast<const at::Tensor&>();
+    at::Tensor tensor = handle.cast<at::Tensor>();
 
     // Fill in the pre-allocated DLTensor struct with direct pointers
     // This is a non-owning conversion - the original PyObject owns the data
     // and is kept alive by the caller for the duration of this call
     out->data = tensor.data_ptr();
-    out->device = torchDeviceToDLDeviceForDLPackv1(tensor.device());
+    out->device = at::torchDeviceToDLDeviceForDLPackv1(tensor.device());
     out->ndim = static_cast<int32_t>(tensor.dim());
-    out->dtype = getDLDataTypeForDLPackv1(tensor);
+    out->dtype = at::getDLDataTypeForDLPackv1(tensor);
     // sizes() and strides() return pointers to TensorImpl's stable storage
     // which remains valid as long as the original PyObject is alive
     out->shape = const_cast<int64_t*>(tensor.sizes().data());
