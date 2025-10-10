@@ -25,6 +25,9 @@ from cpython cimport pycapsule, PyCapsule_Destructor
 from cpython cimport PyErr_SetNone
 
 cdef extern from "dlpack/dlpack.h":
+    int DLPACK_MAJOR_VERSION
+    int DLPACK_MINOR_VERSION
+
     cdef enum:
         kDLCPU = 1,
         kDLCUDA = 2,
