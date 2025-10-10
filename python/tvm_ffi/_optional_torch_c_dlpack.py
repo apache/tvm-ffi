@@ -550,9 +550,9 @@ int TorchCurrentWorkStream(DLDeviceType device_type, int32_t device_id, void** o
 
 struct TorchDLPackExchangeAPI : public DLPackExchangeAPI {
   TorchDLPackExchangeAPI() {
-    version.major = DLPACK_MAJOR_VERSION;
-    version.minor = DLPACK_MINOR_VERSION;
-    prev_version_api = nullptr;
+    header.version.major = DLPACK_MAJOR_VERSION;
+    header.version.minor = DLPACK_MINOR_VERSION;
+    header.prev_api = nullptr;
     managed_tensor_allocator = TorchDLPackTensorAllocator;
     managed_tensor_from_py_object_no_sync = TorchDLPackFromPyObject;
     managed_tensor_to_py_object_no_sync = TorchDLPackToPyObject;

@@ -106,9 +106,12 @@ cdef extern from "dlpack/dlpack.h":
         DLTensor* out
     ) noexcept
 
-    ctypedef struct DLPackExchangeAPI:
+    ctypedef struct DLPackExchangeAPIHeader:
         DLPackVersion version
-        DLPackExchangeAPI* prev_version_api
+        DLPackExchangeAPIHeader* prev_api
+
+    ctypedef struct DLPackExchangeAPI:
+        DLPackExchangeAPIHeader header
         DLPackManagedTensorAllocator managed_tensor_allocator
         DLPackManagedTensorFromPyObjectNoSync managed_tensor_from_py_object_no_sync
         DLPackManagedTensorToPyObjectNoSync managed_tensor_to_py_object_no_sync
