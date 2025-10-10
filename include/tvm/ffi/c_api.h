@@ -632,30 +632,6 @@ TVM_FFI_DLL int TVMFFITensorFromDLPackVersioned(DLManagedTensorVersioned* from,
  */
 TVM_FFI_DLL int TVMFFITensorToDLPackVersioned(TVMFFIObjectHandle from,
                                               DLManagedTensorVersioned** out);
-
-//------------------------------------------------------------
-// Section: DLPack Exchange API
-// https://github.com/dmlc/dlpack/issues/175
-//------------------------------------------------------------
-/*!
- * \brief Get pointer to TVM-FFI's DLPackExchangeAPI struct
- *
- * This function returns a pointer to a static global DLPackExchangeAPI instance
- * that contains function pointers for fast C-level DLPack exchange without
- * going through the Python interpreter.
- *
- * The returned struct contains:
- * - managed_tensor_from_py_object_no_sync: Export tvm_ffi.Tensor to DLPack
- * - managed_tensor_to_py_object_no_sync: Import DLPack to tvm_ffi.Tensor
- * - dltensor_from_py_object_no_sync: Fast non-owning export (stack-allocated)
- * - managed_tensor_allocator: Allocate tensors using TVM's allocator
- * - current_work_stream: Query TVM's current stream for a device
- *
- * \return Pointer to static global DLPackExchangeAPI instance
- * \note The returned pointer is valid for the entire process lifetime
- * \sa DLPackExchangeAPI in dlpack/dlpack.h
- */
-TVM_FFI_DLL const DLPackExchangeAPI* TVMFFIGetDLPackExchangeAPI();
 //---------------------------------------------------------------
 // Section: string/bytes support APIs.
 // These APIs are used to simplify the string/bytes construction

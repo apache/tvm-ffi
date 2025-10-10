@@ -274,10 +274,6 @@ cdef class Tensor(Object):
 _set_class_tensor(Tensor)
 _register_object_by_index(kTVMFFITensor, Tensor)
 
-# Expose DLPack Exchange API
-cdef const DLPackExchangeAPI* _tvm_ffi_dlpack_exchange_api = TVMFFIGetDLPackExchangeAPI()
-Tensor.__c_dlpack_exchange_api__ = <long long>_tvm_ffi_dlpack_exchange_api
-
 
 cdef int _dltensor_test_wrapper_c_dlpack_from_pyobject(
     void* obj, DLManagedTensorVersioned** out, TVMFFIStreamHandle* env_stream

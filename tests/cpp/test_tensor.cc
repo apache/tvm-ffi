@@ -17,11 +17,7 @@
  * under the License.
  */
 #include <gtest/gtest.h>
-#include <tvm/ffi/c_api.h>
 #include <tvm/ffi/container/tensor.h>
-#include <tvm/ffi/extra/c_env_api.h>
-
-#include <cstddef>
 
 namespace {
 
@@ -190,89 +186,6 @@ TEST(Tensor, TensorView) {
   EXPECT_EQ(tensor_view2.dtype().code, kDLFloat);
   EXPECT_EQ(tensor_view2.dtype().bits, 32);
   EXPECT_EQ(tensor_view2.dtype().lanes, 1);
-}
-
-TEST(Tensor, DLPackExchangeAPI) {
-  // Get the DLPackExchangeAPI struct pointer
-  const DLPackExchangeAPI* api = TVMFFIGetDLPackExchangeAPI();
-
-  // step 1: Verify API struct is valid
-  ASSERT_NE(api, nullptr);
-
-  // step 2: Verify version information
-  EXPECT_EQ(api->version.major, DLPACK_MAJOR_VERSION);
-  EXPECT_EQ(api->version.minor, DLPACK_MINOR_VERSION);
-
-  // step 3: Verify prev_version_api
-  EXPECT_EQ(api->prev_version_api, nullptr);
-
-  // step 4: Verify all function pointers are set
-  EXPECT_NE(api->managed_tensor_allocator, nullptr);
-  EXPECT_NE(api->managed_tensor_from_py_object_no_sync, nullptr);
-  EXPECT_NE(api->managed_tensor_to_py_object_no_sync, nullptr);
-  EXPECT_NE(api->dltensor_from_py_object_no_sync, nullptr);
-  EXPECT_NE(api->current_work_stream, nullptr);
-
-  // step 5: Test managed_tensor_allocator function
-  {
-    DLTensor prototype;
-    int64_t shape_data[] = {2, 3, 4};
-    prototype.shape = shape_data;
-    prototype.ndim = 3;
-    prototype.dtype = DLDataType({kDLFloat, 32, 1});
-    prototype.device = DLDevice({kDLCPU, 0});
-    prototype.strides = nullptr;
-    prototype.byte_offset = 0;
-    prototype.data = nullptr;
-
-    DLManagedTensorVersioned* allocated = nullptr;
-    struct ErrorCtx {
-      std::string kind;
-      std::string message;
-      static void SetError(void* ctx, const char* kind, const char* msg) {
-        auto* error_ctx = static_cast<ErrorCtx*>(ctx);
-        error_ctx->kind = kind;
-        error_ctx->message = msg;
-      }
-    } error_ctx;
-
-    int ret = api->managed_tensor_allocator(&prototype, &allocated, &error_ctx, ErrorCtx::SetError);
-
-    EXPECT_EQ(ret, -1);  // Should fail because no allocator is set
-    EXPECT_EQ(error_ctx.kind, "NoAllocatorError");
-
-    // Now test with allocator set
-    TVMFFIEnvSetTensorAllocator(TestDLPackTensorAllocator, 0, nullptr);
-    ret = api->managed_tensor_allocator(&prototype, &allocated, &error_ctx, ErrorCtx::SetError);
-
-    EXPECT_EQ(ret, 0);
-    ASSERT_NE(allocated, nullptr);
-    EXPECT_EQ(allocated->dl_tensor.ndim, 3);
-    EXPECT_EQ(allocated->dl_tensor.shape[0], 2);
-    EXPECT_EQ(allocated->dl_tensor.shape[1], 3);
-    EXPECT_EQ(allocated->dl_tensor.shape[2], 4);
-    EXPECT_EQ(allocated->dl_tensor.dtype.code, kDLFloat);
-    EXPECT_EQ(allocated->dl_tensor.dtype.bits, 32);
-    EXPECT_EQ(allocated->dl_tensor.device.device_type, kDLCPU);
-    EXPECT_NE(allocated->dl_tensor.data, nullptr);
-
-    // Clean up
-    if (allocated->deleter) {
-      allocated->deleter(allocated);
-    }
-
-    // Reset allocator
-    TVMFFIEnvSetTensorAllocator(nullptr, 0, nullptr);
-  }
-
-  // step 6: Test current_work_stream function
-  {
-    void* stream = nullptr;
-    int ret = api->current_work_stream(kDLCPU, 0, &stream);
-
-    EXPECT_EQ(ret, 0);
-    // For CPU, stream can be NULL or any value - just verify no crash
-  }
 }
 
 }  // namespace

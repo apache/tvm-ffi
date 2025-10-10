@@ -288,9 +288,6 @@ cdef extern from "tvm/ffi/extra/c_env_api.h":
     int TVMFFIEnvSetStream(int32_t device_type, int32_t device_id, TVMFFIStreamHandle stream,
                            TVMFFIStreamHandle* opt_out_original_stream) nogil
 
-    # DLPack Exchange API
-    const DLPackExchangeAPI* TVMFFIGetDLPackExchangeAPI() nogil
-
 
 def _env_set_current_stream(int device_type, int device_id, uint64_t stream):
     cdef TVMFFIStreamHandle prev_stream = NULL

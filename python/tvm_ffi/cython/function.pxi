@@ -146,10 +146,6 @@ cdef int TVMFFIPyArgSetterDLPackExchangeAPI_(
     TVMFFIPyArgSetter* this, TVMFFIPyCallContext* ctx,
     PyObject* arg, TVMFFIAny* out
 ) except -1:
-    """
-    Fast converter using DLPackExchangeAPI struct.
-    This is the new struct-based approach that bundles all function pointers.
-    """
     cdef DLManagedTensorVersioned* temp_managed_tensor
     cdef TVMFFIObjectHandle temp_chandle
     cdef void* current_stream = NULL
@@ -192,10 +188,6 @@ cdef int TVMFFIPyArgSetterDLPackCExporter_(
     TVMFFIPyArgSetter* this, TVMFFIPyCallContext* ctx,
     PyObject* arg, TVMFFIAny* out
 ) except -1:
-    """
-    Converter using individual function pointers (legacy approach).
-    This supports frameworks that expose individual __c_dlpack_from_pyobject__ etc.
-    """
     cdef DLManagedTensorVersioned* temp_managed_tensor
     cdef TVMFFIObjectHandle temp_chandle
     cdef TVMFFIStreamHandle env_stream = NULL
@@ -596,27 +588,13 @@ cdef int TVMFFIPyArgSetterFactory_(PyObject* value, TVMFFIPyArgSetter* out) exce
         out.func = TVMFFIPyArgSetterObjectRValueRef_
         return 0
     if os.environ.get("TVM_FFI_SKIP_c_dlpack_from_pyobject", "0") != "1":
-        # Check for DLPackExchangeAPI struct (RFC proposal - new approach)
+        # Check for DLPackExchangeAPI struct (new approach)
         # This is checked on the CLASS, not the instance
         arg_class = type(arg)
         if hasattr(arg_class, "__c_dlpack_exchange_api__"):
             out.func = TVMFFIPyArgSetterDLPackExchangeAPI_
             temp_ptr = arg_class.__c_dlpack_exchange_api__
             out.c_dlpack_exchange_api = <const void*>temp_ptr
-            return 0
-
-        # Check for individual function pointers (legacy approach)
-        # external tensors
-        if hasattr(arg, "__c_dlpack_from_pyobject__"):
-            out.func = TVMFFIPyArgSetterDLPackCExporter_
-            temp_ptr = arg.__c_dlpack_from_pyobject__
-            out.c_dlpack_from_pyobject = <DLPackFromPyObject>temp_ptr
-            if hasattr(arg, "__c_dlpack_to_pyobject__"):
-                temp_ptr = arg.__c_dlpack_to_pyobject__
-                out.c_dlpack_to_pyobject = <DLPackToPyObject>temp_ptr
-            if hasattr(arg, "__c_dlpack_tensor_allocator__"):
-                temp_ptr = arg.__c_dlpack_tensor_allocator__
-                out.c_dlpack_tensor_allocator = <DLPackTensorAllocator>temp_ptr
             return 0
     if torch is not None and isinstance(arg, torch.Tensor):
         out.func = TVMFFIPyArgSetterTorchFallback_
