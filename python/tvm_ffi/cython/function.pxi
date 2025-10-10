@@ -149,11 +149,11 @@ cdef int TVMFFIPyArgSetterDLPackExchangeAPI_(
     cdef DLManagedTensorVersioned* temp_managed_tensor
     cdef TVMFFIObjectHandle temp_chandle
     cdef void* current_stream = NULL
-    cdef const DLPackExchangeAPI* api = <const DLPackExchangeAPI*>this.c_dlpack_exchange_api
+    cdef const DLPackExchangeAPI* api = this.c_dlpack_exchange_api
 
     # Set allocator and ToPyObject converter in context if available
     if api.managed_tensor_allocator != NULL:
-        ctx.c_dlpack_tensor_allocator = api.managed_tensor_allocator
+        ctx.c_dlpack_tensor_allocator = <DLPackTensorAllocator>api.managed_tensor_allocator
     if api.managed_tensor_to_py_object_no_sync != NULL:
         ctx.c_dlpack_to_pyobject = <DLPackToPyObject>api.managed_tensor_to_py_object_no_sync
 
@@ -178,41 +178,6 @@ cdef int TVMFFIPyArgSetterDLPackExchangeAPI_(
     if TVMFFITensorFromDLPackVersioned(temp_managed_tensor, 0, 0, &temp_chandle) != 0:
         raise BufferError("Failed to convert DLManagedTensorVersioned to ffi.Tensor")
 
-    out.type_index = kTVMFFITensor
-    out.v_ptr = temp_chandle
-    TVMFFIPyPushTempFFIObject(ctx, temp_chandle)
-    return 0
-
-
-cdef int TVMFFIPyArgSetterDLPackCExporter_(
-    TVMFFIPyArgSetter* this, TVMFFIPyCallContext* ctx,
-    PyObject* arg, TVMFFIAny* out
-) except -1:
-    cdef DLManagedTensorVersioned* temp_managed_tensor
-    cdef TVMFFIObjectHandle temp_chandle
-    cdef TVMFFIStreamHandle env_stream = NULL
-
-    if this.c_dlpack_to_pyobject != NULL:
-        ctx.c_dlpack_to_pyobject = this.c_dlpack_to_pyobject
-    if this.c_dlpack_tensor_allocator != NULL:
-        ctx.c_dlpack_tensor_allocator = this.c_dlpack_tensor_allocator
-
-    if ctx.device_type != -1:
-        # already queried device, do not do it again, pass NULL to stream
-        if (this.c_dlpack_from_pyobject)(arg, &temp_managed_tensor, NULL) != 0:
-            return -1
-    else:
-        # query string on the envrionment stream
-        if (this.c_dlpack_from_pyobject)(arg, &temp_managed_tensor, &env_stream) != 0:
-            return -1
-        # If device is not CPU, we should set the device type and id
-        if temp_managed_tensor.dl_tensor.device.device_type != kDLCPU:
-            ctx.stream = env_stream
-            ctx.device_type = temp_managed_tensor.dl_tensor.device.device_type
-            ctx.device_id = temp_managed_tensor.dl_tensor.device.device_id
-    # run conversion
-    if TVMFFITensorFromDLPackVersioned(temp_managed_tensor, 0, 0, &temp_chandle) != 0:
-        raise BufferError("Failed to convert DLManagedTensorVersioned to ffi.Tensor")
     out.type_index = kTVMFFITensor
     out.v_ptr = temp_chandle
     TVMFFIPyPushTempFFIObject(ctx, temp_chandle)
@@ -594,7 +559,7 @@ cdef int TVMFFIPyArgSetterFactory_(PyObject* value, TVMFFIPyArgSetter* out) exce
         if hasattr(arg_class, "__c_dlpack_exchange_api__"):
             out.func = TVMFFIPyArgSetterDLPackExchangeAPI_
             temp_ptr = arg_class.__c_dlpack_exchange_api__
-            out.c_dlpack_exchange_api = <const void*>temp_ptr
+            out.c_dlpack_exchange_api = <const DLPackExchangeAPI*>(<long long>temp_ptr)
             return 0
     if torch is not None and isinstance(arg, torch.Tensor):
         out.func = TVMFFIPyArgSetterTorchFallback_

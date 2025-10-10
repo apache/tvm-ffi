@@ -108,22 +108,10 @@ struct TVMFFIPyArgSetter {
   int (*func)(TVMFFIPyArgSetter* self, TVMFFIPyCallContext* call_ctx, PyObject* arg,
               TVMFFIAny* out);
   /*!
-   * \brief Optional DLPack exporter for for setters that leverages DLPack protocol.
-   */
-  DLPackFromPyObject c_dlpack_from_pyobject{nullptr};
-  /*!
-   * \brief Optional DLPack importer for for setters that leverages DLPack protocol.
-   */
-  DLPackToPyObject c_dlpack_to_pyobject{nullptr};
-  /*!
-   * \brief Optional DLPack allocator for for setters that leverages DLPack protocol.
-   */
-  DLPackTensorAllocator c_dlpack_tensor_allocator{nullptr};
-  /*!
    * \brief Optional DLPackExchangeAPI struct pointer.
    * This is the new struct-based approach that bundles all DLPack exchange functions.
    */
-  const void* c_dlpack_exchange_api{nullptr};
+  const DLPackExchangeAPI* c_dlpack_exchange_api{nullptr};
   /*!
    * \brief Invoke the setter.
    * \param call_ctx The call context.

@@ -328,9 +328,7 @@ cdef extern from "tvm_ffi_python_helpers.h":
 
     ctypedef struct TVMFFIPyArgSetter:
         int (*func)(TVMFFIPyArgSetter* handle, TVMFFIPyCallContext* ctx,  PyObject* py_arg, TVMFFIAny* out) except -1
-        DLPackFromPyObject c_dlpack_from_pyobject
-        DLPackToPyObject c_dlpack_to_pyobject
-        DLPackTensorAllocator c_dlpack_tensor_allocator
+        const DLPackExchangeAPI* c_dlpack_exchange_api
 
     ctypedef int (*TVMFFIPyArgSetterFactory)(PyObject* value, TVMFFIPyArgSetter* out) except -1
     # The main call function
