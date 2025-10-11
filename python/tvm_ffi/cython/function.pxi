@@ -183,15 +183,19 @@ cdef int TVMFFIPyArgSetterDLPackExchangeAPI_(
 
 cdef int TorchDLPackToPyObjectFallback_(
     DLManagedTensorVersioned* dltensor, void** py_obj_out
-) except -1:
+) noexcept:
     # a bit convoluted but ok as a fallback
     cdef TVMFFIObjectHandle temp_chandle
-    TVMFFITensorFromDLPackVersioned(dltensor, 0, 0, &temp_chandle)
-    tensor = make_tensor_from_chandle(temp_chandle)
-    torch_tensor = torch.from_dlpack(tensor)
-    Py_INCREF(torch_tensor)
-    py_obj_out[0] = <void*>(<PyObject*>torch_tensor)
-    return 0
+    if TVMFFITensorFromDLPackVersioned(dltensor, 0, 0, &temp_chandle) != 0:
+        return -1
+    try:
+        tensor = make_tensor_from_chandle(temp_chandle)
+        torch_tensor = torch.from_dlpack(tensor)
+        Py_INCREF(torch_tensor)
+        py_obj_out[0] = <void*>(<PyObject*>torch_tensor)
+        return 0
+    except Exception:
+        return -1
 
 cdef inline const DLPackExchangeAPI* GetTorchFallbackExchangeAPI() noexcept:
     global _torch_fallback_exchange_api
