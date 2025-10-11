@@ -264,13 +264,13 @@ class TVMFFIPyCallManager {
    * \param result The result of the function
    * \param c_api_ret_code The return code of the C-call
    * \param release_gil Whether to release the GIL
-   * \param optional_out_dlpack_importer The DLPack importer to be used for the result
+   * \param optional_out_ctx_dlpack_api The DLPack exchange API to be used for the result
    * \return 0 on when there is no python error, -1 on python error
    * \note When an error happens on FFI side, we should return 0 and set c_api_ret_code
    */
   TVM_FFI_INLINE int FuncCall(TVMFFIPyArgSetterFactory setter_factory, void* func_handle,
                               PyObject* py_arg_tuple, TVMFFIAny* result, int* c_api_ret_code,
-                              bool release_gil, DLPackToPyObject* optional_out_dlpack_importer) {
+                              bool release_gil, const DLPackExchangeAPI** optional_out_ctx_dlpack_api) {
     int64_t num_args = PyTuple_Size(py_arg_tuple);
     if (num_args == -1) return -1;
     try {
@@ -320,10 +320,8 @@ class TVMFFIPyCallManager {
         c_api_ret_code[0] = TVMFFIEnvSetTensorAllocator(prev_tensor_allocator, 0, nullptr);
         if (c_api_ret_code[0] != 0) return 0;
       }
-      if (optional_out_dlpack_importer != nullptr && ctx.c_dlpack_exchange_api != nullptr &&
-          ctx.c_dlpack_exchange_api->managed_tensor_to_py_object_no_sync != nullptr) {
-        *optional_out_dlpack_importer =
-            ctx.c_dlpack_exchange_api->managed_tensor_to_py_object_no_sync;
+      if (optional_out_ctx_dlpack_api != nullptr && ctx.c_dlpack_exchange_api != nullptr) {
+        *optional_out_ctx_dlpack_api = ctx.c_dlpack_exchange_api;
       }
       return 0;
     } catch (const std::exception& ex) {
@@ -481,16 +479,16 @@ class TVMFFIPyCallManager {
  * \param result The result of the function
  * \param c_api_ret_code The return code of the function
  * \param release_gil Whether to release the GIL
- * \param out_dlpack_exporter The DLPack exporter to be used for the result
+ * \param out_ctx_dlpack_api The DLPack exchange API to be used for the result
  * \return 0 on success, nonzero on failure
  */
 TVM_FFI_INLINE int TVMFFIPyFuncCall(TVMFFIPyArgSetterFactory setter_factory, void* func_handle,
                                     PyObject* py_arg_tuple, TVMFFIAny* result, int* c_api_ret_code,
                                     bool release_gil = true,
-                                    DLPackToPyObject* out_dlpack_importer = nullptr) {
+                                    const DLPackExchangeAPI** out_ctx_dlpack_api = nullptr) {
   return TVMFFIPyCallManager::ThreadLocal()->FuncCall(setter_factory, func_handle, py_arg_tuple,
                                                       result, c_api_ret_code, release_gil,
-                                                      out_dlpack_importer);
+                                                      out_ctx_dlpack_api);
 }
 
 /*!

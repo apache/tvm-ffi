@@ -344,7 +344,7 @@ cdef extern from "tvm_ffi_python_helpers.h":
         TVMFFIAny* result,
         int* c_api_ret_code,
         int release_gil,
-        DLPackToPyObject* out_dlpack_importer
+        const DLPackExchangeAPI** out_ctx_dlpack_api
     ) except -1
 
     int TVMFFIPyConstructorCall(

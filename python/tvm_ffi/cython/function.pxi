@@ -55,13 +55,13 @@ cdef inline object make_ret_small_bytes(TVMFFIAny result):
     return bytearray_to_bytes(&bytes)
 
 
-cdef inline object make_ret(TVMFFIAny result, DLPackToPyObject c_dlpack_to_pyobject = NULL):
+cdef inline object make_ret(TVMFFIAny result, const DLPackExchangeAPI* c_ctx_dlpack_api = NULL):
     """convert result to return value."""
     cdef int32_t type_index
     type_index = result.type_index
     if type_index == kTVMFFITensor:
         # specially handle Tensor as it needs a special dltensor field
-        return make_tensor_from_any(result, c_dlpack_to_pyobject)
+        return make_tensor_from_any(result, c_ctx_dlpack_api)
     elif type_index == kTVMFFIOpaquePyObject:
         return make_ret_opaque_object(result)
     elif type_index >= kTVMFFIStaticObjectBegin:
@@ -678,7 +678,7 @@ cdef class Function(Object):
     def __call__(self, *args):
         cdef TVMFFIAny result
         cdef int c_api_ret_code
-        cdef DLPackToPyObject c_dlpack_to_pyobject = NULL
+        cdef const DLPackExchangeAPI* c_ctx_dlpack_api = NULL
         # IMPORTANT: caller need to initialize result->type_index to kTVMFFINone
         result.type_index = kTVMFFINone
         result.v_int64 = 0
@@ -688,12 +688,12 @@ cdef class Function(Object):
             &result,
             &c_api_ret_code,
             self.release_gil,
-            &c_dlpack_to_pyobject
+            &c_ctx_dlpack_api
         )
         # NOTE: logic is same as check_call
         # directly inline here to simplify the resulting trace
         if c_api_ret_code == 0:
-            return make_ret(result, c_dlpack_to_pyobject)
+            return make_ret(result, c_ctx_dlpack_api)
         elif c_api_ret_code == -2:
             raise_existing_error()
         raise move_from_last_error().py_error()

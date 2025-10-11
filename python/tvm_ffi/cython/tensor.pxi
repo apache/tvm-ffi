@@ -369,19 +369,19 @@ cdef inline object make_ret_dltensor(TVMFFIAny result):
     return tensor
 
 
-cdef inline object make_tensor_from_chandle(TVMFFIObjectHandle chandle, DLPackToPyObject c_dlpack_to_pyobject = NULL):
+cdef inline object make_tensor_from_chandle(TVMFFIObjectHandle chandle, const DLPackExchangeAPI* c_ctx_dlpack_api = NULL):
     # TODO: Implement
     cdef Tensor tensor
     cdef void* py_obj
     cdef DLManagedTensorVersioned* dlpack
 
-    if c_dlpack_to_pyobject != NULL:
+    if c_ctx_dlpack_api != NULL and c_ctx_dlpack_api.managed_tensor_to_py_object_no_sync != NULL:
         # try convert and import into the environment array if possible
         if TVMFFITensorToDLPackVersioned(chandle, &dlpack) == 0:
             try:
                 # note that py_obj already holds an extra reference to the tensor
                 # so we need to decref it after the conversion
-                c_dlpack_to_pyobject(dlpack, &py_obj)
+                c_ctx_dlpack_api.managed_tensor_to_py_object_no_sync(dlpack, &py_obj)
                 tensor = <Tensor>(<PyObject*>py_obj)
                 Py_DECREF(tensor)
                 # decref original handle to prevent leak.
@@ -400,5 +400,5 @@ cdef inline object make_tensor_from_chandle(TVMFFIObjectHandle chandle, DLPackTo
     return tensor
 
 
-cdef inline object make_tensor_from_any(TVMFFIAny any, DLPackToPyObject c_dlpack_to_pyobject):
-    return make_tensor_from_chandle(any.v_ptr, c_dlpack_to_pyobject)
+cdef inline object make_tensor_from_any(TVMFFIAny any, const DLPackExchangeAPI* c_ctx_dlpack_api):
+    return make_tensor_from_chandle(any.v_ptr, c_ctx_dlpack_api)
