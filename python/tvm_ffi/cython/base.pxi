@@ -329,8 +329,7 @@ cdef extern from "tvm_ffi_python_helpers.h":
         int device_type
         int device_id
         TVMFFIStreamHandle stream
-        DLPackToPyObject c_dlpack_to_pyobject
-        DLPackTensorAllocator c_dlpack_tensor_allocator
+        const DLPackExchangeAPI* c_dlpack_exchange_api
 
     ctypedef struct TVMFFIPyArgSetter:
         int (*func)(TVMFFIPyArgSetter* handle, TVMFFIPyCallContext* ctx,  PyObject* py_arg, TVMFFIAny* out) except -1

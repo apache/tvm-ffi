@@ -89,10 +89,8 @@ struct TVMFFIPyCallContext {
   void** temp_py_objects = nullptr;
   /*! \brief the number of temporary arguments */
   int num_temp_py_objects = 0;
-  /*! \brief the DLPack exporter, if any */
-  DLPackToPyObject c_dlpack_to_pyobject{nullptr};
-  /*! \brief the DLPack allocator, if any */
-  DLPackTensorAllocator c_dlpack_tensor_allocator{nullptr};
+  /*! \brief the DLPack exchange API, if any */
+  const DLPackExchangeAPI* c_dlpack_exchange_api{nullptr};
 };
 
 /*! \brief Argument setter for a given python argument. */
@@ -293,9 +291,10 @@ class TVMFFIPyCallManager {
         // setting failed, directly return
         if (c_api_ret_code[0] != 0) return 0;
       }
-      if (ctx.c_dlpack_tensor_allocator != nullptr) {
-        c_api_ret_code[0] =
-            TVMFFIEnvSetTensorAllocator(ctx.c_dlpack_tensor_allocator, 0, &prev_tensor_allocator);
+      if (ctx.c_dlpack_exchange_api != nullptr &&
+          ctx.c_dlpack_exchange_api->managed_tensor_allocator != nullptr) {
+        c_api_ret_code[0] = TVMFFIEnvSetTensorAllocator(
+            ctx.c_dlpack_exchange_api->managed_tensor_allocator, 0, &prev_tensor_allocator);
         if (c_api_ret_code[0] != 0) return 0;
       }
       // call the function
@@ -316,12 +315,15 @@ class TVMFFIPyCallManager {
           return -1;
         }
       }
-      if (prev_tensor_allocator != ctx.c_dlpack_tensor_allocator) {
+      if (ctx.c_dlpack_exchange_api != nullptr &&
+          prev_tensor_allocator != ctx.c_dlpack_exchange_api->managed_tensor_allocator) {
         c_api_ret_code[0] = TVMFFIEnvSetTensorAllocator(prev_tensor_allocator, 0, nullptr);
         if (c_api_ret_code[0] != 0) return 0;
       }
-      if (optional_out_dlpack_importer != nullptr && ctx.c_dlpack_to_pyobject != nullptr) {
-        *optional_out_dlpack_importer = ctx.c_dlpack_to_pyobject;
+      if (optional_out_dlpack_importer != nullptr && ctx.c_dlpack_exchange_api != nullptr &&
+          ctx.c_dlpack_exchange_api->managed_tensor_to_py_object_no_sync != nullptr) {
+        *optional_out_dlpack_importer =
+            ctx.c_dlpack_exchange_api->managed_tensor_to_py_object_no_sync;
       }
       return 0;
     } catch (const std::exception& ex) {
@@ -372,13 +374,9 @@ class TVMFFIPyCallManager {
           parent_ctx->device_id = ctx.device_id;
           parent_ctx->stream = ctx.stream;
         }
-        // DLPack allocator
-        if (parent_ctx->c_dlpack_tensor_allocator == nullptr) {
-          parent_ctx->c_dlpack_tensor_allocator = ctx.c_dlpack_tensor_allocator;
-        }
-        // DLPack importer
-        if (parent_ctx->c_dlpack_to_pyobject == nullptr) {
-          parent_ctx->c_dlpack_to_pyobject = ctx.c_dlpack_to_pyobject;
+        // DLPack exchange API
+        if (parent_ctx->c_dlpack_exchange_api == nullptr) {
+          parent_ctx->c_dlpack_exchange_api = ctx.c_dlpack_exchange_api;
         }
       }
       return 0;

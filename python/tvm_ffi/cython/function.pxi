@@ -151,11 +151,8 @@ cdef int TVMFFIPyArgSetterDLPackExchangeAPI_(
     cdef void* current_stream = NULL
     cdef const DLPackExchangeAPI* api = this.c_dlpack_exchange_api
 
-    # Set allocator and ToPyObject converter in context if available
-    if api.managed_tensor_allocator != NULL:
-        ctx.c_dlpack_tensor_allocator = <DLPackTensorAllocator>api.managed_tensor_allocator
-    if api.managed_tensor_to_py_object_no_sync != NULL:
-        ctx.c_dlpack_to_pyobject = <DLPackToPyObject>api.managed_tensor_to_py_object_no_sync
+    # Set the exchange API in context
+    ctx.c_dlpack_exchange_api = api
 
     # Convert PyObject to DLPack using the struct's function pointer
     if api.managed_tensor_from_py_object_no_sync(arg, &temp_managed_tensor) != 0:
@@ -196,6 +193,23 @@ cdef int TorchDLPackToPyObjectFallback_(
     py_obj_out[0] = <void*>(<PyObject*>torch_tensor)
     return 0
 
+cdef inline const DLPackExchangeAPI* GetTorchFallbackExchangeAPI() noexcept:
+    global _torch_fallback_exchange_api
+
+    _torch_fallback_exchange_api.header.version.major = DLPACK_MAJOR_VERSION
+    _torch_fallback_exchange_api.header.version.minor = DLPACK_MINOR_VERSION
+    _torch_fallback_exchange_api.header.prev_api = NULL
+    _torch_fallback_exchange_api.managed_tensor_allocator = NULL
+    _torch_fallback_exchange_api.managed_tensor_from_py_object_no_sync = NULL
+    _torch_fallback_exchange_api.managed_tensor_to_py_object_no_sync = TorchDLPackToPyObjectFallback_
+    _torch_fallback_exchange_api.dltensor_from_py_object_no_sync = NULL
+    _torch_fallback_exchange_api.current_work_stream = NULL
+
+    return &_torch_fallback_exchange_api
+
+# Static storage for the fallback exchange API
+cdef DLPackExchangeAPI _torch_fallback_exchange_api
+
 
 cdef int TVMFFIPyArgSetterTorchFallback_(
     TVMFFIPyArgSetter* handle, TVMFFIPyCallContext* ctx,
@@ -209,7 +223,7 @@ cdef int TVMFFIPyArgSetterTorchFallback_(
     out.type_index = kTVMFFITensor
     out.v_ptr = (<Tensor>arg).chandle
     temp_dltensor = TVMFFITensorGetDLTensorPtr((<Tensor>arg).chandle)
-    ctx.c_dlpack_to_pyobject = TorchDLPackToPyObjectFallback_
+    ctx.c_dlpack_exchange_api = GetTorchFallbackExchangeAPI()
     # record the stream and device for torch context
     if is_cuda and ctx.device_type != -1:
         ctx.device_type = temp_dltensor.device.device_type
