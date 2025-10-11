@@ -320,10 +320,16 @@ cdef const DLPackExchangeAPI* _dltensor_test_wrapper_get_exchange_api() noexcept
 
     # Initialize function pointers
     _dltensor_test_wrapper_static_api.managed_tensor_allocator = NULL
-    _dltensor_test_wrapper_static_api.managed_tensor_from_py_object_no_sync = <DLPackManagedTensorFromPyObjectNoSync>_dltensor_test_wrapper_from_pyobject
-    _dltensor_test_wrapper_static_api.managed_tensor_to_py_object_no_sync = <DLPackManagedTensorToPyObjectNoSync>_dltensor_test_wrapper_to_pyobject
+    _dltensor_test_wrapper_static_api.managed_tensor_from_py_object_no_sync = (
+        <DLPackManagedTensorFromPyObjectNoSync>_dltensor_test_wrapper_from_pyobject
+    )
+    _dltensor_test_wrapper_static_api.managed_tensor_to_py_object_no_sync = (
+        <DLPackManagedTensorToPyObjectNoSync>_dltensor_test_wrapper_to_pyobject
+    )
     _dltensor_test_wrapper_static_api.dltensor_from_py_object_no_sync = NULL
-    _dltensor_test_wrapper_static_api.current_work_stream = <DLPackCurrentWorkStream>_dltensor_test_wrapper_current_work_stream
+    _dltensor_test_wrapper_static_api.current_work_stream = (
+        <DLPackCurrentWorkStream>_dltensor_test_wrapper_current_work_stream
+    )
 
     return &_dltensor_test_wrapper_static_api
 
@@ -369,7 +375,9 @@ cdef inline object make_ret_dltensor(TVMFFIAny result):
     return tensor
 
 
-cdef inline object make_tensor_from_chandle(TVMFFIObjectHandle chandle, const DLPackExchangeAPI* c_ctx_dlpack_api = NULL):
+cdef inline object make_tensor_from_chandle(
+    TVMFFIObjectHandle chandle, const DLPackExchangeAPI* c_ctx_dlpack_api = NULL
+):
     # TODO: Implement
     cdef Tensor tensor
     cdef void* py_obj

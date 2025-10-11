@@ -270,7 +270,8 @@ class TVMFFIPyCallManager {
    */
   TVM_FFI_INLINE int FuncCall(TVMFFIPyArgSetterFactory setter_factory, void* func_handle,
                               PyObject* py_arg_tuple, TVMFFIAny* result, int* c_api_ret_code,
-                              bool release_gil, const DLPackExchangeAPI** optional_out_ctx_dlpack_api) {
+                              bool release_gil,
+                              const DLPackExchangeAPI** optional_out_ctx_dlpack_api) {
     int64_t num_args = PyTuple_Size(py_arg_tuple);
     if (num_args == -1) return -1;
     try {
