@@ -539,7 +539,7 @@ int TorchDLPackManagedTensorAllocator(
 int TorchDLPackCurrentWorkStream(DLDeviceType device_type, int32_t device_id, void** out_stream) {
   try {
 #ifdef BUILD_WITH_CUDA
-    if (device_type != kDLCPU) {
+    if (device_type == kDLCUDA || device_type == kDLROCM) {
       *out_stream = at::cuda::getCurrentCUDAStream(device_id).stream();
     }
 #endif
