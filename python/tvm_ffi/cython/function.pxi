@@ -142,35 +142,39 @@ cdef int TVMFFIPyArgSetterObject_(
     return 0
 
 
-cdef int TVMFFIPyArgSetterDLPackCExporter_(
+cdef int TVMFFIPyArgSetterDLPackExchangeAPI_(
     TVMFFIPyArgSetter* this, TVMFFIPyCallContext* ctx,
     PyObject* arg, TVMFFIAny* out
 ) except -1:
     cdef DLManagedTensorVersioned* temp_managed_tensor
     cdef TVMFFIObjectHandle temp_chandle
-    cdef TVMFFIStreamHandle env_stream = NULL
+    cdef void* current_stream = NULL
+    cdef const DLPackExchangeAPI* api = this.c_dlpack_exchange_api
 
-    if this.c_dlpack_to_pyobject != NULL:
-        ctx.c_dlpack_to_pyobject = this.c_dlpack_to_pyobject
-    if this.c_dlpack_tensor_allocator != NULL:
-        ctx.c_dlpack_tensor_allocator = this.c_dlpack_tensor_allocator
+    # Set the exchange API in context
+    ctx.c_dlpack_exchange_api = api
 
-    if ctx.device_type != -1:
-        # already queried device, do not do it again, pass NULL to stream
-        if (this.c_dlpack_from_pyobject)(arg, &temp_managed_tensor, NULL) != 0:
-            return -1
-    else:
-        # query string on the envrionment stream
-        if (this.c_dlpack_from_pyobject)(arg, &temp_managed_tensor, &env_stream) != 0:
-            return -1
-        # If device is not CPU, we should set the device type and id
-        if temp_managed_tensor.dl_tensor.device.device_type != kDLCPU:
-            ctx.stream = env_stream
-            ctx.device_type = temp_managed_tensor.dl_tensor.device.device_type
-            ctx.device_id = temp_managed_tensor.dl_tensor.device.device_id
-    # run conversion
+    # Convert PyObject to DLPack using the struct's function pointer
+    if api.managed_tensor_from_py_object_no_sync(arg, &temp_managed_tensor) != 0:
+        return -1
+
+    # Query current stream from producer if device is not CPU
+    if temp_managed_tensor.dl_tensor.device.device_type != kDLCPU:
+        if ctx.device_type == -1 and api.current_work_stream != NULL:
+            # First time seeing a device, query the stream
+            if api.current_work_stream(
+                temp_managed_tensor.dl_tensor.device.device_type,
+                temp_managed_tensor.dl_tensor.device.device_id,
+                &current_stream
+            ) == 0:
+                ctx.stream = <TVMFFIStreamHandle>current_stream
+                ctx.device_type = temp_managed_tensor.dl_tensor.device.device_type
+                ctx.device_id = temp_managed_tensor.dl_tensor.device.device_id
+
+    # Convert to TVM Tensor
     if TVMFFITensorFromDLPackVersioned(temp_managed_tensor, 0, 0, &temp_chandle) != 0:
         raise BufferError("Failed to convert DLManagedTensorVersioned to ffi.Tensor")
+
     out.type_index = kTVMFFITensor
     out.v_ptr = temp_chandle
     TVMFFIPyPushTempFFIObject(ctx, temp_chandle)
@@ -179,15 +183,36 @@ cdef int TVMFFIPyArgSetterDLPackCExporter_(
 
 cdef int TorchDLPackToPyObjectFallback_(
     DLManagedTensorVersioned* dltensor, void** py_obj_out
-) except -1:
+) noexcept:
     # a bit convoluted but ok as a fallback
     cdef TVMFFIObjectHandle temp_chandle
-    TVMFFITensorFromDLPackVersioned(dltensor, 0, 0, &temp_chandle)
-    tensor = make_tensor_from_chandle(temp_chandle)
-    torch_tensor = torch.from_dlpack(tensor)
-    Py_INCREF(torch_tensor)
-    py_obj_out[0] = <void*>(<PyObject*>torch_tensor)
-    return 0
+    if TVMFFITensorFromDLPackVersioned(dltensor, 0, 0, &temp_chandle) != 0:
+        return -1
+    try:
+        tensor = make_tensor_from_chandle(temp_chandle)
+        torch_tensor = torch.from_dlpack(tensor)
+        Py_INCREF(torch_tensor)
+        py_obj_out[0] = <void*>(<PyObject*>torch_tensor)
+        return 0
+    except Exception:
+        return -1
+
+cdef inline const DLPackExchangeAPI* GetTorchFallbackExchangeAPI() noexcept:
+    global _torch_fallback_exchange_api
+
+    _torch_fallback_exchange_api.header.version.major = DLPACK_MAJOR_VERSION
+    _torch_fallback_exchange_api.header.version.minor = DLPACK_MINOR_VERSION
+    _torch_fallback_exchange_api.header.prev_api = NULL
+    _torch_fallback_exchange_api.managed_tensor_allocator = NULL
+    _torch_fallback_exchange_api.managed_tensor_from_py_object_no_sync = NULL
+    _torch_fallback_exchange_api.managed_tensor_to_py_object_no_sync = TorchDLPackToPyObjectFallback_
+    _torch_fallback_exchange_api.dltensor_from_py_object_no_sync = NULL
+    _torch_fallback_exchange_api.current_work_stream = NULL
+
+    return &_torch_fallback_exchange_api
+
+# Static storage for the fallback exchange API
+cdef DLPackExchangeAPI _torch_fallback_exchange_api
 
 
 cdef int TVMFFIPyArgSetterTorchFallback_(
@@ -202,7 +227,7 @@ cdef int TVMFFIPyArgSetterTorchFallback_(
     out.type_index = kTVMFFITensor
     out.v_ptr = (<Tensor>arg).chandle
     temp_dltensor = TVMFFITensorGetDLTensorPtr((<Tensor>arg).chandle)
-    ctx.c_dlpack_to_pyobject = TorchDLPackToPyObjectFallback_
+    ctx.c_dlpack_exchange_api = GetTorchFallbackExchangeAPI()
     # record the stream and device for torch context
     if is_cuda and ctx.device_type != -1:
         ctx.device_type = temp_dltensor.device.device_type
@@ -546,17 +571,13 @@ cdef int TVMFFIPyArgSetterFactory_(PyObject* value, TVMFFIPyArgSetter* out) exce
         out.func = TVMFFIPyArgSetterObjectRValueRef_
         return 0
     if os.environ.get("TVM_FFI_SKIP_c_dlpack_from_pyobject", "0") != "1":
-        # external tensors
-        if hasattr(arg, "__c_dlpack_from_pyobject__"):
-            out.func = TVMFFIPyArgSetterDLPackCExporter_
-            temp_ptr = arg.__c_dlpack_from_pyobject__
-            out.c_dlpack_from_pyobject = <DLPackFromPyObject>temp_ptr
-            if hasattr(arg, "__c_dlpack_to_pyobject__"):
-                temp_ptr = arg.__c_dlpack_to_pyobject__
-                out.c_dlpack_to_pyobject = <DLPackToPyObject>temp_ptr
-            if hasattr(arg, "__c_dlpack_tensor_allocator__"):
-                temp_ptr = arg.__c_dlpack_tensor_allocator__
-                out.c_dlpack_tensor_allocator = <DLPackTensorAllocator>temp_ptr
+        # Check for DLPackExchangeAPI struct (new approach)
+        # This is checked on the CLASS, not the instance
+        arg_class = type(arg)
+        if hasattr(arg_class, "__c_dlpack_exchange_api__"):
+            out.func = TVMFFIPyArgSetterDLPackExchangeAPI_
+            temp_ptr = arg_class.__c_dlpack_exchange_api__
+            out.c_dlpack_exchange_api = <const DLPackExchangeAPI*>(<long long>temp_ptr)
             return 0
     if torch is not None and isinstance(arg, torch.Tensor):
         out.func = TVMFFIPyArgSetterTorchFallback_

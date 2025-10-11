@@ -25,6 +25,9 @@ from cpython cimport pycapsule, PyCapsule_Destructor
 from cpython cimport PyErr_SetNone
 
 cdef extern from "dlpack/dlpack.h":
+    int DLPACK_MAJOR_VERSION
+    int DLPACK_MINOR_VERSION
+
     cdef enum:
         kDLCPU = 1,
         kDLCUDA = 2,
@@ -76,6 +79,47 @@ cdef extern from "dlpack/dlpack.h":
         void* manager_ctx
         void (*deleter)(DLManagedTensorVersioned* self)
         uint64_t flags
+
+    # DLPack Exchange API function pointer types
+    ctypedef int (*DLPackManagedTensorAllocator)(
+        DLTensor* prototype,
+        DLManagedTensorVersioned** out,
+        void* error_ctx,
+        void (*SetError)(void* error_ctx, const char* kind, const char* message)
+    ) noexcept
+
+    ctypedef int (*DLPackManagedTensorFromPyObjectNoSync)(
+        void* py_object,
+        DLManagedTensorVersioned** out
+    ) noexcept
+
+    ctypedef int (*DLPackManagedTensorToPyObjectNoSync)(
+        DLManagedTensorVersioned* tensor,
+        void** out_py_object
+    ) noexcept
+
+    ctypedef int (*DLPackCurrentWorkStream)(
+        int device_type,
+        int32_t device_id,
+        void** out_current_stream
+    ) noexcept
+
+    ctypedef int (*DLPackDLTensorFromPyObjectNoSync)(
+        void* py_object,
+        DLTensor* out
+    ) noexcept
+
+    ctypedef struct DLPackExchangeAPIHeader:
+        DLPackVersion version
+        DLPackExchangeAPIHeader* prev_api
+
+    ctypedef struct DLPackExchangeAPI:
+        DLPackExchangeAPIHeader header
+        DLPackManagedTensorAllocator managed_tensor_allocator
+        DLPackManagedTensorFromPyObjectNoSync managed_tensor_from_py_object_no_sync
+        DLPackManagedTensorToPyObjectNoSync managed_tensor_to_py_object_no_sync
+        DLPackDLTensorFromPyObjectNoSync dltensor_from_py_object_no_sync
+        DLPackCurrentWorkStream current_work_stream
 
 
 # Cython binding for TVM FFI C API
@@ -285,14 +329,11 @@ cdef extern from "tvm_ffi_python_helpers.h":
         int device_type
         int device_id
         TVMFFIStreamHandle stream
-        DLPackToPyObject c_dlpack_to_pyobject
-        DLPackTensorAllocator c_dlpack_tensor_allocator
+        const DLPackExchangeAPI* c_dlpack_exchange_api
 
     ctypedef struct TVMFFIPyArgSetter:
         int (*func)(TVMFFIPyArgSetter* handle, TVMFFIPyCallContext* ctx,  PyObject* py_arg, TVMFFIAny* out) except -1
-        DLPackFromPyObject c_dlpack_from_pyobject
-        DLPackToPyObject c_dlpack_to_pyobject
-        DLPackTensorAllocator c_dlpack_tensor_allocator
+        const DLPackExchangeAPI* c_dlpack_exchange_api
 
     ctypedef int (*TVMFFIPyArgSetterFactory)(PyObject* value, TVMFFIPyArgSetter* out) except -1
     # The main call function
