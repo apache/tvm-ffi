@@ -308,26 +308,22 @@ cdef int _dltensor_test_wrapper_current_work_stream(
 
 # Module-level static DLPackExchangeAPI for DLTensorTestWrapper
 cdef DLPackExchangeAPI _dltensor_test_wrapper_static_api
-cdef bint _dltensor_test_wrapper_api_initialized = False
 
 cdef const DLPackExchangeAPI* _dltensor_test_wrapper_get_exchange_api() noexcept:
     """Get the static DLPackExchangeAPI instance for DLTensorTestWrapper."""
-    global _dltensor_test_wrapper_static_api, _dltensor_test_wrapper_api_initialized
+    global _dltensor_test_wrapper_static_api
 
-    if not _dltensor_test_wrapper_api_initialized:
-        # Initialize header using macros from dlpack.h
-        _dltensor_test_wrapper_static_api.header.version.major = DLPACK_MAJOR_VERSION
-        _dltensor_test_wrapper_static_api.header.version.minor = DLPACK_MINOR_VERSION
-        _dltensor_test_wrapper_static_api.header.prev_api = NULL
+    # Initialize header using macros from dlpack.h
+    _dltensor_test_wrapper_static_api.header.version.major = DLPACK_MAJOR_VERSION
+    _dltensor_test_wrapper_static_api.header.version.minor = DLPACK_MINOR_VERSION
+    _dltensor_test_wrapper_static_api.header.prev_api = NULL
 
-        # Initialize function pointers
-        _dltensor_test_wrapper_static_api.managed_tensor_allocator = NULL
-        _dltensor_test_wrapper_static_api.managed_tensor_from_py_object_no_sync = <DLPackManagedTensorFromPyObjectNoSync>_dltensor_test_wrapper_from_pyobject
-        _dltensor_test_wrapper_static_api.managed_tensor_to_py_object_no_sync = <DLPackManagedTensorToPyObjectNoSync>_dltensor_test_wrapper_to_pyobject
-        _dltensor_test_wrapper_static_api.dltensor_from_py_object_no_sync = NULL
-        _dltensor_test_wrapper_static_api.current_work_stream = <DLPackCurrentWorkStream>_dltensor_test_wrapper_current_work_stream
-
-        _dltensor_test_wrapper_api_initialized = True
+    # Initialize function pointers
+    _dltensor_test_wrapper_static_api.managed_tensor_allocator = NULL
+    _dltensor_test_wrapper_static_api.managed_tensor_from_py_object_no_sync = <DLPackManagedTensorFromPyObjectNoSync>_dltensor_test_wrapper_from_pyobject
+    _dltensor_test_wrapper_static_api.managed_tensor_to_py_object_no_sync = <DLPackManagedTensorToPyObjectNoSync>_dltensor_test_wrapper_to_pyobject
+    _dltensor_test_wrapper_static_api.dltensor_from_py_object_no_sync = NULL
+    _dltensor_test_wrapper_static_api.current_work_stream = <DLPackCurrentWorkStream>_dltensor_test_wrapper_current_work_stream
 
     return &_dltensor_test_wrapper_static_api
 
