@@ -75,6 +75,8 @@ Key Classes
      - Reference class for objects.
    * - :cpp:class:`tvm::ffi::Tensor`
      - Multi-dimensional tensor with DLPack support.
+   * - :cpp:class:`tvm::ffi::TensorView`
+     - Multi-dimensional tensor view with DLPack support. It does not own the underlying data.
    * - :cpp:class:`tvm::ffi::Shape`
      - Tensor shape container.
    * - :cpp:class:`tvm::ffi::Module`
