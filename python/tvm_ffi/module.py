@@ -76,7 +76,7 @@ class Module(core.Object):
 
         Returns
         -------
-        modules : list of Module
+        modules
             The module
 
         """
@@ -95,15 +95,15 @@ class Module(core.Object):
 
         Parameters
         ----------
-        name : str
+        name
             The name of the function
 
-        query_imports : bool
+        query_imports
             Whether to also query modules imported by this module.
 
         Returns
         -------
-        b : Bool
+        b
             True if module (or one of its imports) has a definition for name.
 
         """
@@ -123,15 +123,15 @@ class Module(core.Object):
 
         Parameters
         ----------
-        name : str
+        name
             The name of the function
 
-        query_imports : bool
+        query_imports
             Whether also query modules imported by this module.
 
         Returns
         -------
-        f : tvm_ffi.Function
+        f
             The result function.
 
         """
@@ -146,7 +146,7 @@ class Module(core.Object):
 
         Parameters
         ----------
-        module : tvm.runtime.Module
+        module
             The other module.
 
         """
@@ -168,12 +168,12 @@ class Module(core.Object):
 
         Parameters
         ----------
-        fmt : str, optional
+        fmt
             The specified format.
 
         Returns
         -------
-        source : str
+        source
             The result source code.
 
         """
@@ -188,7 +188,7 @@ class Module(core.Object):
 
         Returns
         -------
-        mask : int
+        mask
             Bitmask of runtime module property
 
         """
@@ -199,7 +199,7 @@ class Module(core.Object):
 
         Returns
         -------
-        b : Bool
+        b
             True if the module is binary serializable.
 
         """
@@ -210,7 +210,7 @@ class Module(core.Object):
 
         Returns
         -------
-        b : Bool
+        b
             True if the module is runnable.
 
         """
@@ -223,7 +223,7 @@ class Module(core.Object):
 
         Returns
         -------
-        b : Bool
+        b
             True if the module is compilation exportable.
 
         """
@@ -238,9 +238,9 @@ class Module(core.Object):
 
         Parameters
         ----------
-        file_name : str
+        file_name
             The name of the file.
-        fmt : str
+        fmt
             The format of the file.
 
         See Also
@@ -263,13 +263,13 @@ def system_lib(symbol_prefix: str = "") -> Module:
 
     Parameters
     ----------
-    symbol_prefix: str = ""
+    symbol_prefix
         Optional symbol prefix that can be used for search. When we lookup a symbol
         symbol_prefix + name will first be searched, then the name without symbol_prefix.
 
     Returns
     -------
-    module : runtime.Module
+    module
         The system-wide library module.
 
     """
@@ -281,12 +281,12 @@ def load_module(path: str) -> Module:
 
     Parameters
     ----------
-    path : str
+    path
         The path to the module file.
 
     Returns
     -------
-    module : :py:class:`tvm_ffi.Module`
+    module
         The loaded module
 
     Examples

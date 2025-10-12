@@ -48,21 +48,21 @@ def getitem_helper(
 
     Parameters
     ----------
-    obj: Any
+    obj
         The original object
 
-    elem_getter : Callable[[Any, int], T]
+    elem_getter
         A simple function that takes index and return a single element.
 
-    length : int
+    length
         The size of the array
 
-    idx : SupportsIndex or slice
+    idx
         The argument passed to getitem
 
     Returns
     -------
-    result : object
+    result
         The element for integer indices or a ``list`` for slices.
 
     """
@@ -90,7 +90,7 @@ class Array(core.Object, Sequence[T]):
 
     Parameters
     ----------
-    input_list : Iterable[T]
+    input_list
         The list of values to be stored in the array.
 
     See Also
@@ -231,7 +231,7 @@ class Map(core.Object, Mapping[K, V]):
 
     Parameters
     ----------
-    input_dict : Mapping[K, V]
+    input_dict
         The dictionary of values to be stored in the map.
 
     See Also
@@ -299,15 +299,15 @@ class Map(core.Object, Mapping[K, V]):
 
         Parameters
         ----------
-        key : object
+        key
             The attribute key.
 
-        default : object
+        default
             The default object.
 
         Returns
         -------
-        value: object
+        value
             The result value.
 
         """

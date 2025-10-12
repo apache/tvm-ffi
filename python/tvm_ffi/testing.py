@@ -114,14 +114,14 @@ def create_object(type_key: str, **kwargs: Any) -> Object:
 
     Parameters
     ----------
-    type_key : str
+    type_key
         The type key of the object.
-    kwargs : dict
+    kwargs
         The keyword arguments to the object.
 
     Returns
     -------
-    obj : object
+    obj
         The created object.
 
     Note

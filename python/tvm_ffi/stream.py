@@ -34,10 +34,10 @@ class StreamContext:
 
     Parameters
     ----------
-    device : Device
+    device
         The device to which the stream belongs.
 
-    stream : Union[int, c_void_p]
+    stream
         The stream handle.
 
     See Also
@@ -100,12 +100,12 @@ try:
 
         Parameters
         ----------
-        context : Any = None
+        context
             The wrapped torch stream or cuda graph.
 
         Returns
         -------
-        context : tvm_ffi.TorchStreamContext
+        context
             The ffi stream context wrapping torch stream context.
 
         Examples
@@ -139,15 +139,15 @@ def use_raw_stream(device: core.Device, stream: Union[int, c_void_p]) -> StreamC
 
     Parameters
     ----------
-    device : tvm_ffi.Device
+    device
         The device to which the stream belongs.
 
-    stream : Union[int, c_void_p]
+    stream
         The stream handle.
 
     Returns
     -------
-    context : tvm_ffi.StreamContext
+    context
         The ffi stream context.
 
     Note
@@ -168,12 +168,12 @@ def get_raw_stream(device: core.Device) -> int:
 
     Parameters
     ----------
-    device : tvm_ffi.Device
+    device
         The device to which the stream belongs.
 
     Returns
     -------
-    stream : int
+    stream
         The current ffi stream.
 
     """

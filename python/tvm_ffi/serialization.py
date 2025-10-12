@@ -32,15 +32,15 @@ def to_json_graph_str(obj: Any, metadata: dict[str, Any] | None = None) -> str:
 
     Parameters
     ----------
-    obj : Any
+    obj
         The object to save.
 
-    metadata : Optional[dict], optional
+    metadata
         Extra metadata to save into the json graph string.
 
     Returns
     -------
-    json_str : str
+    json_str
         The JSON graph string.
 
     """
@@ -55,12 +55,12 @@ def from_json_graph_str(json_str: str) -> Any:
 
     Parameters
     ----------
-    json_str : str
+    json_str
         The JSON graph string to load.
 
     Returns
     -------
-    obj : Any
+    obj
         The loaded object.
 
     """

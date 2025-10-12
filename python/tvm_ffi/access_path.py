@@ -106,7 +106,7 @@ class AccessPath(Object):
 
         Parameters
         ----------
-        other : AccessPath
+        other
             The access path to check if it is a prefix of this access path
 
         Returns
@@ -122,7 +122,7 @@ class AccessPath(Object):
 
         Parameters
         ----------
-        attr_key : str
+        attr_key
             The key of the attribute to access
 
         Returns
@@ -138,7 +138,7 @@ class AccessPath(Object):
 
         Parameters
         ----------
-        attr_key : str
+        attr_key
             The key of the attribute to access
 
         Returns
@@ -154,7 +154,7 @@ class AccessPath(Object):
 
         Parameters
         ----------
-        index : int
+        index
             The index of the item to access
 
         Returns
@@ -170,7 +170,7 @@ class AccessPath(Object):
 
         Parameters
         ----------
-        index : int
+        index
             The index of the item to access
 
         Returns
@@ -186,7 +186,7 @@ class AccessPath(Object):
 
         Parameters
         ----------
-        key : Any
+        key
             The key of the item to access
 
         Returns
@@ -202,7 +202,7 @@ class AccessPath(Object):
 
         Parameters
         ----------
-        key : Any
+        key
             The key of the item to access
 
         Returns
@@ -218,7 +218,7 @@ class AccessPath(Object):
 
         Returns
         -------
-        List[AccessStep]
+        access_steps
             The list of access steps
 
         """

@@ -33,12 +33,12 @@ def _parse_backtrace(backtrace: str) -> list[tuple[str, int, str]]:
 
     Parameters
     ----------
-    backtrace : str
+    backtrace
         The backtrace string.
 
     Returns
     -------
-    result : List[Tuple[str, int, str]]
+    result
         The list of (filename, lineno, func)
 
     """
@@ -106,18 +106,18 @@ class TracebackManager:
 
         Parameters
         ----------
-        tb : types.TracebackType
+        tb
             The traceback to append to.
-        filename : str
+        filename
             The filename of the traceback
-        lineno : int
+        lineno
             The line number of the traceback
-        func : str
+        func
             The function name of the traceback
 
         Returns
         -------
-        new_tb : types.TracebackType
+        new_tb
             The new traceback with the appended frame.
 
         """
@@ -163,15 +163,15 @@ def register_error(
 
     Parameters
     ----------
-    name_or_cls : str or class
+    name_or_cls
         The name of the error class.
 
-    cls : class
+    cls
         The class to register.
 
     Returns
     -------
-    fregister : function
+    fregister
         Register function if f is not specified.
 
     Examples

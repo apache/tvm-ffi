@@ -57,12 +57,12 @@ def c_class(
 
     Parameters
     ----------
-    type_key : str
+    type_key
         The reflection key that identifies the C++ type in the FFI registry,
         e.g. ``"testing.MyClass"`` as registered in
         ``src/ffi/extra/testing.cc``.
 
-    init : bool, default True
+    init
         If ``True`` and the Python class does not define ``__init__``, an
         initializer is auto-generated that mirrors the reflected constructor
         signature.  The generated initializer calls the C++ ``__init__``

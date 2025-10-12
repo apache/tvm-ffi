@@ -55,6 +55,7 @@ extensions = [
     "sphinx.ext.napoleon",
     "sphinx.ext.viewcode",
     "sphinx.ext.ifconfig",
+    "sphinx_autodoc_typehints",
     "sphinx_copybutton",
     "sphinx_reredirects",
     "sphinx_tabs.tabs",
@@ -178,8 +179,22 @@ autodoc_default_options = {
     "inherited-members": False,
     "member-order": "bysource",
 }
-autodoc_typehints = "description"
+autodoc_typehints = "description"  # or "none"
+always_use_bars_union = True
 
+# Preserve how defaults are written in your source (e.g., DEFAULT_SENTINEL)
+# Requires Sphinx ≥ 4.0
+autodoc_preserve_defaults = True
+
+# Ask the extension to include defaults alongside types
+# 'braces' works well with NumPy-style "Parameters" tables
+typehints_defaults = "comma"  # also accepts: "comma", "braces-after"
+
+# Optional: also add stubs for params you didn't list in the docstring
+always_document_param_types = True
+
+# Optional (pairs nicely with NumPy style)
+napoleon_use_rtype = False
 # -- Other Options --------------------------------------------------------
 
 templates_path = []

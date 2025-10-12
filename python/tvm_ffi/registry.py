@@ -34,7 +34,7 @@ def register_object(type_key: str | type | None = None) -> Callable[[type], type
 
     Parameters
     ----------
-    type_key : str or cls
+    type_key
         The type key of the node
 
     Examples
@@ -88,18 +88,18 @@ def register_global_func(
 
     Parameters
     ----------
-    func_name : str or function
+    func_name
         The function name
 
-    f : function, optional
+    f
         The function to be registered.
 
-    override: boolean optional
+    override
         Whether override existing entry.
 
     Returns
     -------
-    fregister : function
+    fregister
         Register function if f is not specified.
 
     Examples
@@ -156,15 +156,15 @@ def get_global_func(name: str, allow_missing: bool = False) -> core.Function | N
 
     Parameters
     ----------
-    name : str
+    name
         The name of the global function
 
-    allow_missing : bool
+    allow_missing
         Whether allow missing function or raise an error.
 
     Returns
     -------
-    func : Function
+    func
         The function to be returned, None if function is missing.
 
     See Also
@@ -180,7 +180,7 @@ def list_global_func_names() -> list[str]:
 
     Returns
     -------
-    names : list
+    names
        List of global functions names.
 
     """
@@ -194,7 +194,7 @@ def remove_global_func(name: str) -> None:
 
     Parameters
     ----------
-    name : str
+    name
         The name of the global function
 
     """
@@ -206,12 +206,12 @@ def get_global_func_metadata(name: str) -> dict[str, Any]:
 
     Parameters
     ----------
-    name : str
+    name
         The name of the global function
 
     Returns
     -------
-    metadata : dict
+    metadata
         The metadata of the function
 
     """
@@ -223,10 +223,10 @@ def init_ffi_api(namespace: str, target_module_name: str | None = None) -> None:
 
     Parameters
     ----------
-    namespace : str
+    namespace
        The namespace of the source registry
 
-    target_module_name : str
+    target_module_name
        The target module name if different from namespace
 
     Examples

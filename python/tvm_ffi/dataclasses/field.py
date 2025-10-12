@@ -67,15 +67,15 @@ def field(
 
     Parameters
     ----------
-    default : Any, optional
+    default
         A literal default value that populates the field when no argument
         is given. At most one of ``default`` or ``default_factory`` may be
         given.
-    default_factory : Callable[[], Any], optional
+    default_factory
         A zero-argument callable that produces the default.  This matches the
         semantics of :func:`dataclasses.field` and is useful for mutable
         defaults such as ``list`` or ``dict``.
-    init : bool, default True
+    init
         If ``True`` the field is included in the generated ``__init__``.
         If ``False`` the field is omitted from input arguments of ``__init__``.
 

@@ -26,15 +26,15 @@ def split_env_var(env_var: str, split: str) -> list[str]:
 
     Parameters
     ----------
-    env_var : str
+    env_var
         Name of environment variable.
 
-    split : str
+    split
         String to split env_var on.
 
     Returns
     -------
-    splits : list(string)
+    splits
         If env_var exists, split env_var. Otherwise, empty list.
 
     """

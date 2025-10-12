@@ -49,7 +49,7 @@ class dtype(str):
 
     Parameters
     ----------
-    dtype_str : str
+    dtype_str
 
     Note
     ----
@@ -77,7 +77,7 @@ class dtype(str):
 
         Parameters
         ----------
-        lanes : int
+        lanes
             The number of lanes.
 
         Returns

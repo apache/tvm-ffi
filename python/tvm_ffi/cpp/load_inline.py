@@ -399,40 +399,40 @@ def build_inline(  # noqa: PLR0915, PLR0912
 
     Parameters
     ----------
-    name: str
+    name
         The name of the tvm ffi module.
-    cpp_sources: Sequence[str] | str, optional
+    cpp_sources
         The C++ source code. It can be a list of sources or a single source.
-    cuda_sources: Sequence[str] | str, optional
+    cuda_sources
         The CUDA source code. It can be a list of sources or a single source.
-    functions: Mapping[str, str] | Sequence[str] | str, optional
+    functions
         The functions in cpp_sources or cuda_source that will be exported to the tvm ffi module. When a mapping is
         given, the keys are the names of the exported functions, and the values are docstrings for the functions. When
         a sequence or a single string is given, they are the functions needed to be exported, and the docstrings are set
         to empty strings. A single function name can also be given as a string. When cpp_sources is given, the functions
         must be declared (not necessarily defined) in the cpp_sources. When cpp_sources is not given, the functions
         must be defined in the cuda_sources. If not specified, no function will be exported.
-    extra_cflags: Sequence[str], optional
+    extra_cflags
         The extra compiler flags for C++ compilation.
         The default flags are:
 
         - On Linux/macOS: ['-std=c++17', '-fPIC', '-O2']
         - On Windows: ['/std:c++17', '/O2']
 
-    extra_cuda_cflags: Sequence[str], optional
+    extra_cuda_cflags
         The extra compiler flags for CUDA compilation.
 
-    extra_ldflags: Sequence[str], optional
+    extra_ldflags
         The extra linker flags.
         The default flags are:
 
         - On Linux/macOS: ['-shared']
         - On Windows: ['/DLL']
 
-    extra_include_paths: Sequence[str], optional
+    extra_include_paths
         The extra include paths.
 
-    build_directory: str, optional
+    build_directory
         The build directory. If not specified, a default tvm ffi cache directory will be used. By default, the
         cache directory is ``~/.cache/tvm-ffi``. You can also set the ``TVM_FFI_CACHE_DIR`` environment variable to
         specify the cache directory.

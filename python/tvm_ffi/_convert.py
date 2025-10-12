@@ -42,12 +42,12 @@ def convert(value: Any) -> Any:  # noqa: PLR0911,PLR0912
 
     Parameters
     ----------
-    value : Any
+    value
         The python object to be converted.
 
     Returns
     -------
-    ffi_obj : Any
+    ffi_obj
         The converted TVM FFI object.
 
     Note
