@@ -46,6 +46,7 @@ extensions = [
     "myst_parser",
     "nbsphinx",
     "autodocsumm",
+    "sphinx_design",
     "sphinx.ext.autodoc",
     "sphinx.ext.autosectionlabel",
     "sphinx.ext.autosummary",
