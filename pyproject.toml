@@ -76,7 +76,7 @@ tvm-ffi-config = "tvm_ffi.config:__main__"
 tvm-ffi-stubgen = "tvm_ffi.stub.stubgen:__main__"
 
 [build-system]
-requires = ["scikit-build-core>=0.10.0", "cython"]
+requires = ["scikit-build-core>=0.10.0", "cython", "cmake>=3.18"]
 build-backend = "scikit_build_core.build"
 
 [tool.scikit-build]
