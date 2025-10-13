@@ -287,6 +287,20 @@ cdef int TVMFFIPyArgSetterFFITensorCompatible_(
     return 0
 
 
+cdef int TVMFFIPyArgSetterCUDAStream_(
+    TVMFFIPyArgSetter* handle, TVMFFIPyCallContext* ctx,
+    PyObject* py_arg, TVMFFIAny* out
+) except -1:
+    """Setter for cuda stream protocol"""
+    cdef object arg = <object>py_arg
+    # cuda stream is a subclass of str, so this check occur before str
+    cdef tuple cu_stream_tuple = arg.__cuda_stream__()
+    cdef long long long_ptr = <long long>cu_stream_tuple[1]
+    out.type_index = kTVMFFIOpaquePtr
+    out.v_ptr = <void*>long_ptr
+    return 0
+
+
 cdef int TVMFFIPyArgSetterDType_(
     TVMFFIPyArgSetter* handle, TVMFFIPyCallContext* ctx,
     PyObject* py_arg, TVMFFIAny* out
@@ -605,10 +619,14 @@ cdef int TVMFFIPyArgSetterFactory_(PyObject* value, TVMFFIPyArgSetter* out) exce
             temp_ptr = arg_class.__c_dlpack_exchange_api__
             out.c_dlpack_exchange_api = <const DLPackExchangeAPI*>(<long long>temp_ptr)
             return 0
+    if hasattr(arg_class, "__cuda_stream__"):
+        # cuda stream protocol
+        out.func = TVMFFIPyArgSetterCUDAStream_
+        return 0
     if torch is not None and isinstance(arg, torch.Tensor):
         out.func = TVMFFIPyArgSetterTorchFallback_
         return 0
-    if hasattr(arg, "__dlpack__"):
+    if hasattr(arg_class, "__dlpack__"):
         out.func = TVMFFIPyArgSetterDLPack_
         return 0
     if isinstance(arg, bool):

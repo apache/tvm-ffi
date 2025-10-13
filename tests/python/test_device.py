@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import ctypes
 import pickle
 
 import pytest
@@ -109,3 +110,18 @@ def test_device_class_override() -> None:
     device = tvm_ffi.device("cuda", 0)
     assert isinstance(device, MyDevice)
     tvm_ffi.core._set_class_device(old_device)
+
+
+def test_cuda_stream_handling() -> None:
+    class MyDummyStream:
+        def __init__(self, stream: int) -> None:
+            self.stream = stream
+
+        def __cuda_stream__(self) -> tuple[str, int]:
+            return ("cuda", self.stream)
+
+    stream = MyDummyStream(1)
+    echo = tvm_ffi.get_global_func("testing.echo")
+    y = echo(stream)
+    assert isinstance(y, ctypes.c_void_p)
+    assert y.value == 1
