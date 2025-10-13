@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-__dlpack_version__ = (1, 1)
+__dlpack_version__ = (DLPACK_MAJOR_VERSION, DLPACK_MINOR_VERSION)
 _CLASS_TENSOR = None
 
 
