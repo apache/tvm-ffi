@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 try:
@@ -31,33 +33,20 @@ try:
 except ImportError:
     torch = None
 
-
-@pytest.mark.skipif(torch is None, reason="PyTorch not available")
-def test_torch_has_dlpack_exchange_api() -> None:
-    """Test that torch.Tensor has __c_dlpack_exchange_api__ attribute."""
-    assert torch is not None
-    assert hasattr(torch.Tensor, "__c_dlpack_exchange_api__"), (
-        "torch.Tensor does not have __c_dlpack_exchange_api__"
-    )
-    api_ptr = torch.Tensor.__c_dlpack_exchange_api__
-    assert isinstance(api_ptr, int), "API pointer should be an integer"
-    assert api_ptr != 0, "API pointer should not be NULL"
+# Check if DLPack Exchange API is available
+_has_dlpack_api = torch is not None and hasattr(torch.Tensor, "__c_dlpack_exchange_api__")
 
 
-@pytest.mark.skipif(torch is None, reason="PyTorch not available")
-def test_dlpack_exchange_api_version() -> None:
-    assert torch is not None
-    assert hasattr(torch.Tensor, "__c_dlpack_exchange_api__"), (
-        "torch.Tensor does not have __c_dlpack_exchange_api__"
-    )
-
-    api_ptr = torch.Tensor.__c_dlpack_exchange_api__
+@pytest.fixture(scope="module")
+def dlpack_test_module() -> Any:
+    if not _has_dlpack_api:
+        pytest.skip("PyTorch DLPack Exchange API not available")
 
     source = """
     #include <torch/extension.h>
     #include <dlpack/dlpack.h>
 
-    void test_api_version(int64_t api_ptr_int) {
+    void test_api_structure(int64_t api_ptr_int, bool test_cuda) {
         DLPackExchangeAPI* api = reinterpret_cast<DLPackExchangeAPI*>(api_ptr_int);
 
         TORCH_CHECK(api != nullptr, "API pointer is NULL");
@@ -66,39 +55,7 @@ def test_dlpack_exchange_api_version() -> None:
                     "Expected major version ", DLPACK_MAJOR_VERSION, ", got ", api->header.version.major);
         TORCH_CHECK(api->header.version.minor == DLPACK_MINOR_VERSION,
                     "Expected minor version ", DLPACK_MINOR_VERSION, ", got ", api->header.version.minor);
-    }
-    """
 
-    mod = cpp_extension.load_inline(
-        name="test_api_version",
-        cpp_sources=[source],
-        functions=["test_api_version"],
-        extra_include_paths=libinfo.include_paths(),
-    )
-
-    mod.test_api_version(api_ptr)
-
-
-@pytest.mark.skipif(torch is None, reason="PyTorch not available")
-def test_dlpack_exchange_api_function_pointers_not_null() -> None:
-    assert torch is not None
-
-    assert hasattr(torch.Tensor, "__c_dlpack_exchange_api__"), (
-        "torch.Tensor does not have __c_dlpack_exchange_api__"
-    )
-
-    api_ptr = torch.Tensor.__c_dlpack_exchange_api__
-
-    source = """
-    #include <torch/extension.h>
-    #include <dlpack/dlpack.h>
-
-    void test_function_pointers_not_null(int64_t api_ptr_int) {
-        DLPackExchangeAPI* api = reinterpret_cast<DLPackExchangeAPI*>(api_ptr_int);
-
-        TORCH_CHECK(api != nullptr, "API pointer is NULL");
-
-        // Check that required function pointers are not NULL
         TORCH_CHECK(api->managed_tensor_allocator != nullptr,
                     "managed_tensor_allocator is NULL");
         TORCH_CHECK(api->managed_tensor_from_py_object_no_sync != nullptr,
@@ -107,37 +64,7 @@ def test_dlpack_exchange_api_function_pointers_not_null() -> None:
                     "managed_tensor_to_py_object_no_sync is NULL");
         TORCH_CHECK(api->current_work_stream != nullptr,
                     "current_work_stream is NULL");
-    }
-    """
 
-    mod = cpp_extension.load_inline(
-        name="test_function_pointers_not_null",
-        cpp_sources=[source],
-        functions=["test_function_pointers_not_null"],
-        extra_include_paths=libinfo.include_paths(),
-    )
-
-    mod.test_function_pointers_not_null(api_ptr)
-
-
-@pytest.mark.skipif(torch is None, reason="PyTorch not available")
-def test_managed_tensor_allocator() -> None:
-    assert torch is not None
-
-    assert hasattr(torch.Tensor, "__c_dlpack_exchange_api__"), (
-        "torch.Tensor does not have __c_dlpack_exchange_api__"
-    )
-
-    api_ptr = torch.Tensor.__c_dlpack_exchange_api__
-
-    source = """
-    #include <torch/extension.h>
-    #include <dlpack/dlpack.h>
-
-    void test_allocator(int64_t api_ptr_int) {
-        DLPackExchangeAPI* api = reinterpret_cast<DLPackExchangeAPI*>(api_ptr_int);
-
-        // Create a prototype DLTensor
         DLTensor prototype;
         prototype.device.device_type = kDLCPU;
         prototype.device.device_id = 0;
@@ -156,7 +83,6 @@ def test_managed_tensor_allocator() -> None:
         prototype.data = nullptr;
         prototype.byte_offset = 0;
 
-        // Call allocator
         DLManagedTensorVersioned* out_tensor = nullptr;
         int result = api->managed_tensor_allocator(
             &prototype,
@@ -167,298 +93,148 @@ def test_managed_tensor_allocator() -> None:
 
         TORCH_CHECK(result == 0, "Allocator failed with code ", result);
         TORCH_CHECK(out_tensor != nullptr, "Allocator returned NULL");
-
-        // Check shape
         TORCH_CHECK(out_tensor->dl_tensor.ndim == 3, "Wrong ndim");
         TORCH_CHECK(out_tensor->dl_tensor.shape[0] == 3, "Wrong shape[0]");
         TORCH_CHECK(out_tensor->dl_tensor.shape[1] == 4, "Wrong shape[1]");
         TORCH_CHECK(out_tensor->dl_tensor.shape[2] == 5, "Wrong shape[2]");
-
-        // Check dtype
         TORCH_CHECK(out_tensor->dl_tensor.dtype.code == kDLFloat, "Wrong dtype code");
         TORCH_CHECK(out_tensor->dl_tensor.dtype.bits == 32, "Wrong dtype bits");
-
-        // Check device
         TORCH_CHECK(out_tensor->dl_tensor.device.device_type == kDLCPU, "Wrong device type");
 
-        // Call deleter to clean up
-        if (out_tensor->deleter) {
-            out_tensor->deleter(out_tensor);
-        }
-    }
-    """
-
-    mod = cpp_extension.load_inline(
-        name="test_allocator",
-        cpp_sources=[source],
-        functions=["test_allocator"],
-        extra_include_paths=libinfo.include_paths(),
-    )
-
-    mod.test_allocator(api_ptr)
-
-
-@pytest.mark.skipif(torch is None, reason="PyTorch not available")
-def test_managed_tensor_from_py_object() -> None:
-    assert torch is not None
-
-    assert hasattr(torch.Tensor, "__c_dlpack_exchange_api__"), (
-        "torch.Tensor does not have __c_dlpack_exchange_api__"
-    )
-
-    api_ptr = torch.Tensor.__c_dlpack_exchange_api__
-
-    source = """
-    #include <torch/extension.h>
-    #include <dlpack/dlpack.h>
-
-    void test_from_py_object(at::Tensor tensor, int64_t api_ptr_int) {
-        DLPackExchangeAPI* api = reinterpret_cast<DLPackExchangeAPI*>(api_ptr_int);
-
-        TORCH_CHECK(api->managed_tensor_from_py_object_no_sync != nullptr,
-                    "managed_tensor_from_py_object_no_sync is NULL");
-
-        // Get PyObject* from at::Tensor
-        PyObject* py_obj = THPVariable_Wrap(tensor);
-        TORCH_CHECK(py_obj != nullptr, "Failed to wrap tensor to PyObject");
-
-        // Call from_py_object_no_sync
-        DLManagedTensorVersioned* out_tensor = nullptr;
-        int result = api->managed_tensor_from_py_object_no_sync(
-            py_obj,
-            &out_tensor
-        );
-
-        TORCH_CHECK(result == 0, "from_py_object_no_sync failed with code ", result);
-        TORCH_CHECK(out_tensor != nullptr, "from_py_object_no_sync returned NULL");
-
-        // Check version
-        TORCH_CHECK(out_tensor->version.major == DLPACK_MAJOR_VERSION,
-                    "Expected major version ", DLPACK_MAJOR_VERSION);
-        TORCH_CHECK(out_tensor->version.minor == DLPACK_MINOR_VERSION,
-                    "Expected minor version ", DLPACK_MINOR_VERSION);
-
-        // Check shape
-        TORCH_CHECK(out_tensor->dl_tensor.ndim == 3, "Wrong ndim");
-        TORCH_CHECK(out_tensor->dl_tensor.shape[0] == 2, "Wrong shape[0]");
-        TORCH_CHECK(out_tensor->dl_tensor.shape[1] == 3, "Wrong shape[1]");
-        TORCH_CHECK(out_tensor->dl_tensor.shape[2] == 4, "Wrong shape[2]");
-
-        // Check dtype (float32)
-        TORCH_CHECK(out_tensor->dl_tensor.dtype.code == kDLFloat, "Wrong dtype code");
-        TORCH_CHECK(out_tensor->dl_tensor.dtype.bits == 32, "Wrong dtype bits");
-
-        // Check data pointer is not NULL
-        TORCH_CHECK(out_tensor->dl_tensor.data != nullptr, "Data pointer is NULL");
-
-        // Call deleter to clean up
         if (out_tensor->deleter) {
             out_tensor->deleter(out_tensor);
         }
 
-        // Decrement refcount of the wrapped PyObject
-        Py_DECREF(py_obj);
+        if (test_cuda) {
+            void* stream_out = nullptr;
+            result = api->current_work_stream(kDLCUDA, 0, &stream_out);
+            TORCH_CHECK(result == 0, "current_work_stream failed with code ", result);
+        }
     }
-    """
 
-    mod = cpp_extension.load_inline(
-        name="test_from_py_object",
-        cpp_sources=[source],
-        functions=["test_from_py_object"],
-        extra_include_paths=libinfo.include_paths(),
-    )
-
-    tensor = torch.arange(24, dtype=torch.float32).reshape(2, 3, 4)
-    mod.test_from_py_object(tensor, api_ptr)
-
-
-@pytest.mark.skipif(torch is None, reason="PyTorch not available")
-def test_managed_tensor_to_py_object() -> None:
-    assert torch is not None
-
-    assert hasattr(torch.Tensor, "__c_dlpack_exchange_api__"), (
-        "torch.Tensor does not have __c_dlpack_exchange_api__"
-    )
-
-    api_ptr = torch.Tensor.__c_dlpack_exchange_api__
-
-    source = """
-    #include <torch/extension.h>
-    #include <dlpack/dlpack.h>
-
-    void test_to_py_object(at::Tensor tensor, int64_t api_ptr_int) {
+    void test_tensor_conversions(at::Tensor tensor1, at::Tensor tensor2, at::Tensor tensor3, int64_t api_ptr_int) {
         DLPackExchangeAPI* api = reinterpret_cast<DLPackExchangeAPI*>(api_ptr_int);
 
-        TORCH_CHECK(api->managed_tensor_from_py_object_no_sync != nullptr);
-        TORCH_CHECK(api->managed_tensor_to_py_object_no_sync != nullptr,
-                    "managed_tensor_to_py_object_no_sync is NULL");
+        {
+            PyObject* py_obj = THPVariable_Wrap(tensor1);  // tensor1: shape (2,3,4), float32
+            TORCH_CHECK(py_obj != nullptr, "Failed to wrap tensor1 to PyObject");
 
-        // Step 1: Convert tensor to DLManagedTensorVersioned
-        PyObject* py_obj = THPVariable_Wrap(tensor);
-        TORCH_CHECK(py_obj != nullptr, "Failed to wrap tensor to PyObject");
+            DLManagedTensorVersioned* out_tensor = nullptr;
+            int result = api->managed_tensor_from_py_object_no_sync(py_obj, &out_tensor);
 
-        DLManagedTensorVersioned* managed_tensor = nullptr;
-        int result = api->managed_tensor_from_py_object_no_sync(
-            py_obj,
-            &managed_tensor
-        );
+            TORCH_CHECK(result == 0, "from_py_object_no_sync failed with code ", result);
+            TORCH_CHECK(out_tensor != nullptr, "from_py_object_no_sync returned NULL");
 
-        TORCH_CHECK(result == 0, "from_py_object_no_sync failed");
-        TORCH_CHECK(managed_tensor != nullptr, "from_py_object_no_sync returned NULL");
+            TORCH_CHECK(out_tensor->version.major == DLPACK_MAJOR_VERSION,
+                        "Expected major version ", DLPACK_MAJOR_VERSION);
+            TORCH_CHECK(out_tensor->version.minor == DLPACK_MINOR_VERSION,
+                        "Expected minor version ", DLPACK_MINOR_VERSION);
 
-        Py_DECREF(py_obj);
+            TORCH_CHECK(out_tensor->dl_tensor.ndim == 3, "Wrong ndim");
+            TORCH_CHECK(out_tensor->dl_tensor.shape[0] == 2, "Wrong shape[0]");
+            TORCH_CHECK(out_tensor->dl_tensor.shape[1] == 3, "Wrong shape[1]");
+            TORCH_CHECK(out_tensor->dl_tensor.shape[2] == 4, "Wrong shape[2]");
 
-        // Step 2: Convert DLManagedTensorVersioned back to PyObject
-        PyObject* py_obj_out = nullptr;
-        result = api->managed_tensor_to_py_object_no_sync(
-            managed_tensor,
-            reinterpret_cast<void**>(&py_obj_out)
-        );
+            TORCH_CHECK(out_tensor->dl_tensor.dtype.code == kDLFloat, "Wrong dtype code");
+            TORCH_CHECK(out_tensor->dl_tensor.dtype.bits == 32, "Wrong dtype bits");
+            TORCH_CHECK(out_tensor->dl_tensor.data != nullptr, "Data pointer is NULL");
 
-        TORCH_CHECK(result == 0, "to_py_object_no_sync failed with code ", result);
-        TORCH_CHECK(py_obj_out != nullptr, "to_py_object_no_sync returned NULL");
+            if (out_tensor->deleter) {
+                out_tensor->deleter(out_tensor);
+            }
+            Py_DECREF(py_obj);
+        }
 
-        // Step 3: Verify the returned PyObject is a valid tensor
-        // Check that it's a Tensor type
-        TORCH_CHECK(THPVariable_Check(py_obj_out),
-                    "Returned PyObject is not a Tensor");
+        {
+            PyObject* py_obj = THPVariable_Wrap(tensor2);  // tensor2: shape (3,4,1), int64
+            TORCH_CHECK(py_obj != nullptr, "Failed to wrap tensor2 to PyObject");
 
-        // Extract the tensor and verify properties
-        at::Tensor result_tensor = THPVariable_Unpack(py_obj_out);
-        TORCH_CHECK(result_tensor.dim() == 3, "Wrong number of dimensions");
-        TORCH_CHECK(result_tensor.size(0) == 3, "Wrong size at dim 0");
-        TORCH_CHECK(result_tensor.size(1) == 4, "Wrong size at dim 1");
-        TORCH_CHECK(result_tensor.size(2) == 1, "Wrong size at dim 2");
-        TORCH_CHECK(result_tensor.scalar_type() == at::kLong, "Wrong dtype");
+            DLManagedTensorVersioned* managed_tensor = nullptr;
+            int result = api->managed_tensor_from_py_object_no_sync(py_obj, &managed_tensor);
+            TORCH_CHECK(result == 0, "from_py_object_no_sync failed");
+            TORCH_CHECK(managed_tensor != nullptr, "from_py_object_no_sync returned NULL");
+            Py_DECREF(py_obj);
 
-        // Cleanup - decrement the refcount of the returned PyObject
-        Py_DECREF(py_obj_out);
+            PyObject* py_obj_out = nullptr;
+            result = api->managed_tensor_to_py_object_no_sync(
+                managed_tensor,
+                reinterpret_cast<void**>(&py_obj_out)
+            );
 
-        // Note: managed_tensor was consumed by to_py_object_no_sync,
-        // so we should NOT call its deleter (ownership transferred)
+            TORCH_CHECK(result == 0, "to_py_object_no_sync failed with code ", result);
+            TORCH_CHECK(py_obj_out != nullptr, "to_py_object_no_sync returned NULL");
+            TORCH_CHECK(THPVariable_Check(py_obj_out), "Returned PyObject is not a Tensor");
+
+            at::Tensor result_tensor = THPVariable_Unpack(py_obj_out);
+            TORCH_CHECK(result_tensor.dim() == 3, "Wrong number of dimensions");
+            TORCH_CHECK(result_tensor.size(0) == 3, "Wrong size at dim 0");
+            TORCH_CHECK(result_tensor.size(1) == 4, "Wrong size at dim 1");
+            TORCH_CHECK(result_tensor.size(2) == 1, "Wrong size at dim 2");
+            TORCH_CHECK(result_tensor.scalar_type() == at::kLong, "Wrong dtype");
+
+            Py_DECREF(py_obj_out);
+        }
+
+        if (api->dltensor_from_py_object_no_sync != nullptr) {
+            PyObject* py_obj = THPVariable_Wrap(tensor3);  // tensor3: shape (4,5), float32
+            TORCH_CHECK(py_obj != nullptr, "Failed to wrap tensor3 to PyObject");
+
+            DLTensor dltensor;
+            int result = api->dltensor_from_py_object_no_sync(py_obj, &dltensor);
+
+            TORCH_CHECK(result == 0, "dltensor_from_py_object_no_sync failed with code ", result);
+            TORCH_CHECK(dltensor.ndim == 2, "Wrong ndim");
+            TORCH_CHECK(dltensor.shape[0] == 4, "Wrong shape[0]");
+            TORCH_CHECK(dltensor.shape[1] == 5, "Wrong shape[1]");
+            TORCH_CHECK(dltensor.dtype.code == kDLFloat, "Wrong dtype code");
+            TORCH_CHECK(dltensor.dtype.bits == 32, "Wrong dtype bits");
+            TORCH_CHECK(dltensor.data != nullptr, "Data pointer is NULL");
+
+            Py_DECREF(py_obj);
+        }
     }
     """
 
-    mod = cpp_extension.load_inline(
-        name="test_to_py_object",
-        cpp_sources=[source],
-        functions=["test_to_py_object"],
-        extra_include_paths=libinfo.include_paths(),
-    )
-
-    tensor = torch.arange(12, dtype=torch.int64).reshape(3, 4, 1)
-    mod.test_to_py_object(tensor, api_ptr)
-
-
-@pytest.mark.skipif(torch is None or not torch.cuda.is_available(), reason="CUDA not available")
-def test_current_work_stream_cuda() -> None:
-    assert torch is not None
-
-    assert hasattr(torch.Tensor, "__c_dlpack_exchange_api__"), (
-        "torch.Tensor does not have __c_dlpack_exchange_api__"
-    )
-
-    api_ptr = torch.Tensor.__c_dlpack_exchange_api__
-
-    source = """
-    #include <torch/extension.h>
-    #include <dlpack/dlpack.h>
-
-    void test_work_stream_cuda(int64_t api_ptr_int) {
-        DLPackExchangeAPI* api = reinterpret_cast<DLPackExchangeAPI*>(api_ptr_int);
-
-        TORCH_CHECK(api->current_work_stream != nullptr,
-                    "current_work_stream is NULL");
-
-        void* stream_out = nullptr;
-        int result = api->current_work_stream(
-            kDLCUDA,  // device_type (2)
-            0,        // device_id
-            &stream_out
-        );
-
-        TORCH_CHECK(result == 0, "current_work_stream failed with code ", result);
-        // For CUDA, stream may or may not be NULL depending on the current stream
-    }
-    """
-
-    include_paths = libinfo.include_paths() + cpp_extension.include_paths("cuda")
+    include_paths = libinfo.include_paths()
+    if torch.cuda.is_available():
+        include_paths += cpp_extension.include_paths("cuda")
 
     mod = cpp_extension.load_inline(
-        name="test_work_stream_cuda",
+        name="dlpack_tests",
         cpp_sources=[source],
-        functions=["test_work_stream_cuda"],
+        functions=["test_api_structure", "test_tensor_conversions"],
         extra_include_paths=include_paths,
     )
 
-    mod.test_work_stream_cuda(api_ptr)
+    return mod
 
 
-@pytest.mark.skipif(torch is None, reason="PyTorch not available")
-def test_dltensor_from_py_object_non_owning() -> None:
+@pytest.mark.skipif(not _has_dlpack_api, reason="PyTorch DLPack Exchange API not available")
+def test_dlpack_exchange_api(dlpack_test_module: Any) -> None:
     assert torch is not None
 
-    assert hasattr(torch.Tensor, "__c_dlpack_exchange_api__"), (
-        "torch.Tensor does not have __c_dlpack_exchange_api__"
-    )
+    assert hasattr(torch.Tensor, "__c_dlpack_exchange_api__")
+    api_ptr = torch.Tensor.__c_dlpack_exchange_api__
+    assert isinstance(api_ptr, int), "API pointer should be an integer"
+    assert api_ptr != 0, "API pointer should not be NULL"
 
+    dlpack_test_module.test_api_structure(api_ptr, False)  # test_cuda=False
+
+    tensor1 = torch.arange(24, dtype=torch.float32).reshape(2, 3, 4)
+    tensor2 = torch.arange(12, dtype=torch.int64).reshape(3, 4, 1)
+    tensor3 = torch.arange(20, dtype=torch.float32).reshape(4, 5)
+    dlpack_test_module.test_tensor_conversions(tensor1, tensor2, tensor3, api_ptr)
+
+
+@pytest.mark.skipif(
+    not _has_dlpack_api or not torch.cuda.is_available(),
+    reason="PyTorch DLPack Exchange API or CUDA not available",
+)
+def test_dlpack_exchange_api_cuda(dlpack_test_module: Any) -> None:
+    assert torch is not None
     api_ptr = torch.Tensor.__c_dlpack_exchange_api__
 
-    source = """
-    #include <torch/extension.h>
-    #include <dlpack/dlpack.h>
-
-    void test_dltensor_from_py_object(at::Tensor tensor, int64_t api_ptr_int) {
-        DLPackExchangeAPI* api = reinterpret_cast<DLPackExchangeAPI*>(api_ptr_int);
-
-        // Check if this function is implemented (can be NULL)
-        if (api->dltensor_from_py_object_no_sync == nullptr) {
-            // This is optional, so we just return success
-            return;
-        }
-
-        // Get PyObject* from at::Tensor
-        PyObject* py_obj = THPVariable_Wrap(tensor);
-        TORCH_CHECK(py_obj != nullptr, "Failed to wrap tensor to PyObject");
-
-        // Stack-allocate DLTensor
-        DLTensor dltensor;
-
-        int result = api->dltensor_from_py_object_no_sync(
-            py_obj,
-            &dltensor
-        );
-
-        TORCH_CHECK(result == 0, "dltensor_from_py_object_no_sync failed with code ", result);
-
-        // Verify shape
-        TORCH_CHECK(dltensor.ndim == 2, "Wrong ndim");
-        TORCH_CHECK(dltensor.shape[0] == 4, "Wrong shape[0]");
-        TORCH_CHECK(dltensor.shape[1] == 5, "Wrong shape[1]");
-
-        // Verify dtype (float32)
-        TORCH_CHECK(dltensor.dtype.code == kDLFloat, "Wrong dtype code");
-        TORCH_CHECK(dltensor.dtype.bits == 32, "Wrong dtype bits");
-
-        // Verify data pointer
-        TORCH_CHECK(dltensor.data != nullptr, "Data pointer is NULL");
-
-        // NOTE: No deleter needed - this is non-owning
-        // The DLTensor only remains valid while the tensor is alive
-
-        Py_DECREF(py_obj);
-    }
-    """
-
-    mod = cpp_extension.load_inline(
-        name="test_dltensor_from_py_object",
-        cpp_sources=[source],
-        functions=["test_dltensor_from_py_object"],
-        extra_include_paths=libinfo.include_paths(),
-    )
-
-    tensor = torch.arange(20, dtype=torch.float32).reshape(4, 5)
-    mod.test_dltensor_from_py_object(tensor, api_ptr)
+    dlpack_test_module.test_api_structure(api_ptr, True)  # test_cuda=True
 
 
 if __name__ == "__main__":
