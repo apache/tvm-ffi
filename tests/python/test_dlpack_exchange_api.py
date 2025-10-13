@@ -93,13 +93,13 @@ def dlpack_test_module() -> Any:
 
         TORCH_CHECK(result == 0, "Allocator failed with code ", result);
         TORCH_CHECK(out_tensor != nullptr, "Allocator returned NULL");
-        TORCH_CHECK(out_tensor->dl_tensor.ndim == 3, "Wrong ndim");
-        TORCH_CHECK(out_tensor->dl_tensor.shape[0] == 3, "Wrong shape[0]");
-        TORCH_CHECK(out_tensor->dl_tensor.shape[1] == 4, "Wrong shape[1]");
-        TORCH_CHECK(out_tensor->dl_tensor.shape[2] == 5, "Wrong shape[2]");
-        TORCH_CHECK(out_tensor->dl_tensor.dtype.code == kDLFloat, "Wrong dtype code");
-        TORCH_CHECK(out_tensor->dl_tensor.dtype.bits == 32, "Wrong dtype bits");
-        TORCH_CHECK(out_tensor->dl_tensor.device.device_type == kDLCPU, "Wrong device type");
+        TORCH_CHECK(out_tensor->dl_tensor.ndim == 3, "Expected ndim 3, got ", out_tensor->dl_tensor.ndim);
+        TORCH_CHECK(out_tensor->dl_tensor.shape[0] == 3, "Expected shape[0] = 3, got ", out_tensor->dl_tensor.shape[0]);
+        TORCH_CHECK(out_tensor->dl_tensor.shape[1] == 4, "Expected shape[1] = 4, got ", out_tensor->dl_tensor.shape[1]);
+        TORCH_CHECK(out_tensor->dl_tensor.shape[2] == 5, "Expected shape[2] = 5, got ", out_tensor->dl_tensor.shape[2]);
+        TORCH_CHECK(out_tensor->dl_tensor.dtype.code == kDLFloat, "Expected dtype code kDLFloat, got ", out_tensor->dl_tensor.dtype.code);
+        TORCH_CHECK(out_tensor->dl_tensor.dtype.bits == 32, "Expected dtype bits 32, got ", out_tensor->dl_tensor.dtype.bits);
+        TORCH_CHECK(out_tensor->dl_tensor.device.device_type == kDLCPU, "Expected device type kDLCPU, got ", out_tensor->dl_tensor.device.device_type);
 
         if (out_tensor->deleter) {
             out_tensor->deleter(out_tensor);
@@ -126,17 +126,17 @@ def dlpack_test_module() -> Any:
             TORCH_CHECK(out_tensor != nullptr, "from_py_object_no_sync returned NULL");
 
             TORCH_CHECK(out_tensor->version.major == DLPACK_MAJOR_VERSION,
-                        "Expected major version ", DLPACK_MAJOR_VERSION);
+                        "Expected major version ", DLPACK_MAJOR_VERSION, ", got ", out_tensor->version.major);
             TORCH_CHECK(out_tensor->version.minor == DLPACK_MINOR_VERSION,
-                        "Expected minor version ", DLPACK_MINOR_VERSION);
+                        "Expected minor version ", DLPACK_MINOR_VERSION, ", got ", out_tensor->version.minor);
 
-            TORCH_CHECK(out_tensor->dl_tensor.ndim == 3, "Wrong ndim");
-            TORCH_CHECK(out_tensor->dl_tensor.shape[0] == 2, "Wrong shape[0]");
-            TORCH_CHECK(out_tensor->dl_tensor.shape[1] == 3, "Wrong shape[1]");
-            TORCH_CHECK(out_tensor->dl_tensor.shape[2] == 4, "Wrong shape[2]");
+            TORCH_CHECK(out_tensor->dl_tensor.ndim == 3, "Expected ndim 3, got ", out_tensor->dl_tensor.ndim);
+            TORCH_CHECK(out_tensor->dl_tensor.shape[0] == 2, "Expected shape[0] = 2, got ", out_tensor->dl_tensor.shape[0]);
+            TORCH_CHECK(out_tensor->dl_tensor.shape[1] == 3, "Expected shape[1] = 3, got ", out_tensor->dl_tensor.shape[1]);
+            TORCH_CHECK(out_tensor->dl_tensor.shape[2] == 4, "Expected shape[2] = 4, got ", out_tensor->dl_tensor.shape[2]);
 
-            TORCH_CHECK(out_tensor->dl_tensor.dtype.code == kDLFloat, "Wrong dtype code");
-            TORCH_CHECK(out_tensor->dl_tensor.dtype.bits == 32, "Wrong dtype bits");
+            TORCH_CHECK(out_tensor->dl_tensor.dtype.code == kDLFloat, "Expected dtype code kDLFloat, got ", out_tensor->dl_tensor.dtype.code);
+            TORCH_CHECK(out_tensor->dl_tensor.dtype.bits == 32, "Expected dtype bits 32, got ", out_tensor->dl_tensor.dtype.bits);
             TORCH_CHECK(out_tensor->dl_tensor.data != nullptr, "Data pointer is NULL");
 
             if (out_tensor->deleter) {
@@ -166,11 +166,11 @@ def dlpack_test_module() -> Any:
             TORCH_CHECK(THPVariable_Check(py_obj_out), "Returned PyObject is not a Tensor");
 
             at::Tensor result_tensor = THPVariable_Unpack(py_obj_out);
-            TORCH_CHECK(result_tensor.dim() == 3, "Wrong number of dimensions");
-            TORCH_CHECK(result_tensor.size(0) == 3, "Wrong size at dim 0");
-            TORCH_CHECK(result_tensor.size(1) == 4, "Wrong size at dim 1");
-            TORCH_CHECK(result_tensor.size(2) == 1, "Wrong size at dim 2");
-            TORCH_CHECK(result_tensor.scalar_type() == at::kLong, "Wrong dtype");
+            TORCH_CHECK(result_tensor.dim() == 3, "Expected 3 dimensions, got ", result_tensor.dim());
+            TORCH_CHECK(result_tensor.size(0) == 3, "Expected size(0) = 3, got ", result_tensor.size(0));
+            TORCH_CHECK(result_tensor.size(1) == 4, "Expected size(1) = 4, got ", result_tensor.size(1));
+            TORCH_CHECK(result_tensor.size(2) == 1, "Expected size(2) = 1, got ", result_tensor.size(2));
+            TORCH_CHECK(result_tensor.scalar_type() == at::kLong, "Expected dtype kLong, got ", result_tensor.scalar_type());
 
             Py_DECREF(py_obj_out);
         }
@@ -183,11 +183,11 @@ def dlpack_test_module() -> Any:
             int result = api->dltensor_from_py_object_no_sync(py_obj, &dltensor);
 
             TORCH_CHECK(result == 0, "dltensor_from_py_object_no_sync failed with code ", result);
-            TORCH_CHECK(dltensor.ndim == 2, "Wrong ndim");
-            TORCH_CHECK(dltensor.shape[0] == 4, "Wrong shape[0]");
-            TORCH_CHECK(dltensor.shape[1] == 5, "Wrong shape[1]");
-            TORCH_CHECK(dltensor.dtype.code == kDLFloat, "Wrong dtype code");
-            TORCH_CHECK(dltensor.dtype.bits == 32, "Wrong dtype bits");
+            TORCH_CHECK(dltensor.ndim == 2, "Expected ndim 2, got ", dltensor.ndim);
+            TORCH_CHECK(dltensor.shape[0] == 4, "Expected shape[0] = 4, got ", dltensor.shape[0]);
+            TORCH_CHECK(dltensor.shape[1] == 5, "Expected shape[1] = 5, got ", dltensor.shape[1]);
+            TORCH_CHECK(dltensor.dtype.code == kDLFloat, "Expected dtype code kDLFloat, got ", dltensor.dtype.code);
+            TORCH_CHECK(dltensor.dtype.bits == 32, "Expected dtype bits 32, got ", dltensor.dtype.bits);
             TORCH_CHECK(dltensor.data != nullptr, "Data pointer is NULL");
 
             Py_DECREF(py_obj);
