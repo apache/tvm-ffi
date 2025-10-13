@@ -135,8 +135,7 @@ def test_dlpack_exchange_api() -> None:
 
         // Test 4: managed_tensor_to_py_object_no_sync
         {
-            auto py_obj_deleter = [](PyObject* p) { if (p) Py_DECREF(p); };
-            std::unique_ptr<PyObject, decltype(py_obj_deleter)> py_obj(THPVariable_Wrap(tensor), py_obj_deleter);
+            std::unique_ptr<PyObject, decltype(&Py_DECREF)> py_obj(THPVariable_Wrap(tensor), &Py_DECREF);
             TORCH_CHECK(py_obj.get() != nullptr, "Failed to wrap tensor to PyObject");
 
             DLManagedTensorVersioned* managed_tensor = nullptr;
@@ -144,7 +143,7 @@ def test_dlpack_exchange_api() -> None:
             TORCH_CHECK(result == 0, "from_py_object_no_sync failed");
             TORCH_CHECK(managed_tensor != nullptr, "from_py_object_no_sync returned NULL");
 
-            std::unique_ptr<PyObject, decltype(py_obj_deleter)> py_obj_out(nullptr, py_obj_deleter);
+            std::unique_ptr<PyObject, decltype(&Py_DECREF)> py_obj_out(nullptr, &Py_DECREF);
             PyObject* py_obj_out_raw = nullptr;
             result = api->managed_tensor_to_py_object_no_sync(managed_tensor, reinterpret_cast<void**>(&py_obj_out_raw));
             py_obj_out.reset(py_obj_out_raw);
