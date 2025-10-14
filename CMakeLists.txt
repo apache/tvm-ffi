@@ -141,7 +141,6 @@ set_target_properties(
   tvm_ffi_testing
   PROPERTIES CXX_EXTENSIONS OFF
              CXX_STANDARD_REQUIRED ON
-             PREFIX "lib"
              LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
 )
 target_link_libraries(tvm_ffi_testing PRIVATE tvm_ffi_shared)

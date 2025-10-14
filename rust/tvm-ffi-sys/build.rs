@@ -61,7 +61,6 @@ fn main() {
     println!("cargo:rustc-link-search=native={}", lib_dir);
     // link the library
     println!("cargo:rustc-link-lib=dylib=tvm_ffi");
-    #[cfg(feature = "testing")]
     println!("cargo:rustc-link-lib=dylib=tvm_ffi_testing");
     // update the LD_LIBRARY_PATH environment variable
     update_ld_library_path(&lib_dir);

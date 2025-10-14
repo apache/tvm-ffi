@@ -136,4 +136,4 @@ jobs:
       - name: Run rust tests
         working-directory: rust
         run: |
-          cargo test --features testing
+          cargo test

@@ -62,18 +62,23 @@ const TVMFFIByteArray* TVMFFIBacktrace(const char* filename, int lineno, const c
   STACKFRAME64 stack = {};
   DWORD machine_type;
 
-#if defined(_M_X64)
-  machine_type = IMAGE_FILE_MACHINE_AMD64;
-  stack.AddrPC.Offset = context.Rip;
-  stack.AddrFrame.Offset = context.Rbp;
-  stack.AddrStack.Offset = context.Rsp;
-#elif defined(_M_IX86)
+#ifdef _M_IX86
   machine_type = IMAGE_FILE_MACHINE_I386;
   stack.AddrPC.Offset = context.Eip;
-  stack.AddrFrame.Offset = context.Ebp;
   stack.AddrStack.Offset = context.Esp;
+  stack.AddrFrame.Offset = context.Ebp;
+#elif _M_X64
+  machine_type = IMAGE_FILE_MACHINE_AMD64;
+  stack.AddrPC.Offset = context.Rip;
+  stack.AddrStack.Offset = context.Rsp;
+  stack.AddrFrame.Offset = context.Rbp;
+#elif _M_ARM64
+  machine_type = IMAGE_FILE_MACHINE_ARM64;
+  stack.AddrPC.Offset = context.Pc;
+  stack.AddrStack.Offset = context.Sp;
+  stack.AddrFrame.Offset = context.Fp;
 #else
-#error "Platform not supported!"
+#error "Unsupported architecture"
 #endif
 
   stack.AddrPC.Mode = AddrModeFlat;

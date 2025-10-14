@@ -269,4 +269,11 @@ int invoke_testing_add1(int x) {
 
 TEST(Func, InvokeExternC) { EXPECT_EQ(invoke_testing_add1(1), 2); }
 
+extern "C" TVM_FFI_DLL int TVMFFITestingDummyTarget();
+
+TEST(Func, DummyCFunc) {
+  int value = TVMFFITestingDummyTarget();
+  EXPECT_EQ(value, 0);
+}
+
 }  // namespace

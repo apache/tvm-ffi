@@ -429,6 +429,5 @@ unsafe extern "C" {
         cross_ffi_boundary: i32,
     ) -> *const TVMFFIByteArray;
     pub fn TVMFFIGetTypeInfo(type_index: i32) -> *const TVMFFITypeInfo;
-    #[cfg(feature = "testing")]
     pub fn TVMFFITestingDummyTarget() -> i32;
 }
