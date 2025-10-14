@@ -45,7 +45,6 @@ from .module import Module, system_lib, load_module
 from .stream import StreamContext, get_raw_stream, use_raw_stream, use_torch_stream
 from . import serialization
 from . import access_path
-from . import testing
 from . import dataclasses
 
 # optional module to speedup dlpack conversion
@@ -81,5 +80,4 @@ __all__ = [
     "remove_global_func",
     "serialization",
     "system_lib",
-    "testing",
 ]

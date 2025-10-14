@@ -14,7 +14,11 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-"""Utilities to locate tvm_ffi libraries, headers, and helper include paths."""
+"""Utilities to locate tvm_ffi libraries, headers, and helper include paths.
+
+This module also provides helpers to locate and load platform-specific shared
+libraries by a base name (e.g., ``tvm_ffi`` -> ``libtvm_ffi.so`` on Linux).
+"""
 
 import os
 import sys
@@ -62,14 +66,46 @@ def get_dll_directories() -> list[str]:
 
 
 def find_libtvm_ffi() -> str:
-    """Find libtvm_ffi."""
+    """Find libtvm_ffi.
+
+    Returns
+    -------
+    path
+        The full path to the located library.
+
+    """
+    return find_library_by_basename("tvm_ffi")
+
+
+def find_library_by_basename(base: str) -> str:
+    """Find a shared library by base name across known directories.
+
+    Parameters
+    ----------
+    base
+        Base name (e.g., ``"tvm_ffi"`` or ``"tvm_ffi_testing"``).
+
+    Returns
+    -------
+    path
+        The full path to the located library.
+
+    Raises
+    ------
+    RuntimeError
+        If the library cannot be found in any of the candidate directories.
+
+    """
     dll_path = [Path(p) for p in get_dll_directories()]
     if sys.platform.startswith("win32"):
-        lib_dll_names = ["tvm_ffi.dll"]
+        lib_dll_names = [f"{base}.dll"]
     elif sys.platform.startswith("darwin"):
-        lib_dll_names = ["libtvm_ffi.dylib", "libtvm_ffi.so"]
-    else:
-        lib_dll_names = ["libtvm_ffi.so"]
+        lib_dll_names = [  # Prefer dylib, also allow .so for some toolchains
+            f"lib{base}.dylib",
+            f"lib{base}.so",
+        ]
+    else:  # Linux, FreeBSD, etc
+        lib_dll_names = [f"lib{base}.so"]
 
     lib_dll_path = [p / name for name in lib_dll_names for p in dll_path]
     lib_found = [p for p in lib_dll_path if p.exists() and p.is_file()]
@@ -77,9 +113,7 @@ def find_libtvm_ffi() -> str:
     if not lib_found:
         candidate_list = "\n".join(str(p) for p in lib_dll_path)
         raise RuntimeError(
-            "Cannot find library: {}\nList of candidates:\n{}".format(
-                ", ".join(lib_dll_names), candidate_list
-            )
+            f"Cannot find library: {', '.join(lib_dll_names)}\nList of candidates:\n{candidate_list}"
         )
 
     return str(lib_found[0])

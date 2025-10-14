@@ -19,6 +19,12 @@
 
 from __future__ import annotations
 
+from . import libinfo
+from .module import load_module
+
+_LIBTVM_FFI_TESTING = load_module(libinfo.find_library_by_basename("tvm_ffi_testing"))
+
+
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, ClassVar
 

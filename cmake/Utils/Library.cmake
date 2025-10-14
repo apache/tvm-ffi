@@ -100,6 +100,14 @@ function (tvm_ffi_add_target_from_obj target_name obj_target_name)
                LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
                RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
   )
+  add_library(${target_name}_testing SHARED)
+  set_target_properties(
+    ${target_name}_testing
+    PROPERTIES OUTPUT_NAME "${target_name}_testing"
+               ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+               LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+               RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+  )
   if (WIN32)
     target_compile_definitions(${obj_target_name} PRIVATE TVM_FFI_EXPORTS)
     # set the output directory for each config type so msbuild also get into lib without appending
@@ -118,7 +126,14 @@ function (tvm_ffi_add_target_from_obj target_name obj_target_name)
                    LIBRARY_OUTPUT_DIRECTORY_${config_type} "${CMAKE_BINARY_DIR}/lib"
                    ARCHIVE_OUTPUT_DIRECTORY_${config_type} "${CMAKE_BINARY_DIR}/lib"
       )
+      set_target_properties(
+        ${target_name}_testing
+        PROPERTIES RUNTIME_OUTPUT_DIRECTORY_${config_type} "${CMAKE_BINARY_DIR}/lib"
+                   LIBRARY_OUTPUT_DIRECTORY_${config_type} "${CMAKE_BINARY_DIR}/lib"
+                   ARCHIVE_OUTPUT_DIRECTORY_${config_type} "${CMAKE_BINARY_DIR}/lib"
+      )
     endforeach ()
   endif ()
   tvm_ffi_add_apple_dsymutil(${target_name}_shared)
+  tvm_ffi_add_apple_dsymutil(${target_name}_testing)
 endfunction ()

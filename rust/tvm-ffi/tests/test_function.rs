@@ -19,6 +19,12 @@
 use tvm_ffi::*;
 
 #[test]
+fn test_function_dummpy_c_api() {
+    let ret = unsafe { tvm_ffi_sys::TVMFFITestingDummyTarget() };
+    assert_eq!(ret, 0);
+}
+
+#[test]
 fn test_function_get_global_required() {
     let fecho = Function::get_global("testing.echo").unwrap();
     let a = 1;
