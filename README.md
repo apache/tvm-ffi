@@ -30,7 +30,7 @@ yet flexible open convention with the following systems in mind:
 
 It has the following technical features:
 
-- DLPack-compatible Tensor data ABI to seamlessly support many frameworks such as PyTorch, JAX, cuPy and others that support DLPack convention.
+- DLPack-compatible Tensor data ABI to seamlessly support many frameworks such as PyTorch, JAX, CuPy and others that support DLPack convention.
 - Compact value and function calling convention for common data types in machine learning.
 - Stable, minimal, and flexible C ABI to support machine learning system use-cases.
 - Out-of-the-box multi-language support for Python, C++, Rust, and future path for other languages.
