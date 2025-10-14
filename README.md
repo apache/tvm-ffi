@@ -23,16 +23,17 @@ Apache TVM FFI is an open ABI and FFI for machine learning systems. It is a mini
 yet flexible open convention with the following systems in mind:
 
 - Kernel libraries: ship one wheel to support multiple frameworks, Python versions, and different languages.
-- Kernel DSLs: reusable open ABI for JIT and AOT kernel exposure to PyTorch, JAX, and other machine learning systems.
+- Kernel DSLs: reusable open ABI for JIT and AOT kernel exposure to PyTorch, JAX, and other ML runtimes.
 - ML frameworks and runtimes: unified mechanism to connect libraries and DSLs that adopt the ABI convention.
 - Coding agents: unified mechanism to package and ship generated code to production environments.
-- ML infrastructure: cross-language support for Python, C++, Rust, and other languages that interface with the ABI.
+- ML infrastructure: cross-language support for Python, C++, and Rust, and DSLs.
 
 It has the following technical features:
 
+- DLPack-compatible Tensor data ABI to seamlessly support many frameworks such as PyTorch, JAX, cuPy and others that support DLPack convention.
+- Compact value and function calling convention for common data types in machine learning.
 - Stable, minimal, and flexible C ABI to support machine learning system use-cases.
-- First class support for PyTorch, JAX, and other array libraries.
-- Out-of-the-box multi-language support for Python, C++, Rust, and future compatibility to other languages that bind to the ABI.
+- Out-of-the-box multi-language support for Python, C++, Rust, and future path for other languages.
 
 With these technical solutions, we can enable better **interoperability** across machine learning frameworks,
 libraries, kernel DSLs, and coding agents, **ship one wheel** to support multiple frameworks and Python versions (including free-threaded python),
