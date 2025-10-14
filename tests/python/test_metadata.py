@@ -189,3 +189,9 @@ def test_metadata_member_method() -> None:
             break
     else:
         raise ValueError("Method not found: add_int")
+
+
+def test_mem_fn_as_global_func() -> None:
+    metadata: dict[str, Any] = get_global_func_metadata("testing.TestIntPairSum")
+    type_schema: TypeSchema = TypeSchema.from_json_str(metadata["type_schema"])
+    assert str(type_schema) == "Callable[[testing.TestIntPair], int]"

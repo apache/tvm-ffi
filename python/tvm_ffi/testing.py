@@ -57,6 +57,7 @@ class TestIntPair(Object):
         b: int
         @staticmethod
         def __c_ffi_init__(_0: int, _1: int, /) -> Object: ...
+        def sum(_0: TestIntPair, /) -> int: ...
         # fmt: on
     # tvm-ffi-stubgen(end)
 

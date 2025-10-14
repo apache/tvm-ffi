@@ -59,6 +59,8 @@ class TestIntPair : public tvm::ffi::ObjectRef {
     data_ = tvm::ffi::make_object<TestIntPairObj>(a, b);
   }
 
+  int64_t Sum() const { return get()->a + get()->b; }
+
   // Required: define object reference methods
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(TestIntPair, tvm::ffi::ObjectRef, TestIntPairObj);
 };
@@ -68,7 +70,8 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   refl::ObjectDef<TestIntPairObj>()
       .def_ro("a", &TestIntPairObj::a, "Field `a`")
       .def_ro("b", &TestIntPairObj::b, "Field `b`")
-      .def_static("__ffi_init__", refl::init<TestIntPairObj, int64_t, int64_t>);
+      .def_static("__ffi_init__", refl::init<TestIntPairObj, int64_t, int64_t>)
+      .def("sum", &TestIntPair::Sum, "Method to compute sum of a and b");
 }
 
 class TestObjectBase : public Object {
@@ -264,9 +267,11 @@ TVM_FFI_STATIC_INIT_BLOCK() {
              TVMFFISafeCallType symbol = __add_one_c_symbol;
              return reinterpret_cast<int64_t>(reinterpret_cast<void*>(symbol));
            })
-      .def("testing.get_mlir_add_one_c_symbol", []() {
-        return reinterpret_cast<int64_t>(reinterpret_cast<void*>(_mlir_add_one_c_symbol));
-      });
+      .def("testing.get_mlir_add_one_c_symbol",
+           []() {
+             return reinterpret_cast<int64_t>(reinterpret_cast<void*>(_mlir_add_one_c_symbol));
+           })
+      .def_method("testing.TestIntPairSum", &TestIntPair::Sum, "Get sum of the pair");
 }
 
 }  // namespace ffi
