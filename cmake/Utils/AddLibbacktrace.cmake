@@ -42,6 +42,7 @@ function (_libbacktrace_compile)
     PREFIX libbacktrace
     SOURCE_DIR ${libbacktrace_source}
     BINARY_DIR ${libbacktrace_prefix}
+    LOG_DIR ${libbacktrace_prefix}/logs
     CONFIGURE_COMMAND
       "sh" #
       "${libbacktrace_source}/configure" #
@@ -61,6 +62,7 @@ function (_libbacktrace_compile)
     LOG_CONFIGURE ON
     LOG_INSTALL ON
     LOG_BUILD ON
+    LOG_MERGED_STDOUTERR ON
     LOG_OUTPUT_ON_FAILURE ON
   )
   ExternalProject_Add_Step(
