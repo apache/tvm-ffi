@@ -133,10 +133,7 @@ jobs:
       #     pytest -vvs tests/python
       - name: Try pytorch
         run: |
-          uv run --no-project \
-            --with "torch>=2.9.0" \
-            --with numpy \
-            python -c "import torch; print(torch.__version__)"
+          uv run --no-project --with "torch>=2.9.0" --with numpy python -c "import torch; print(torch.__version__)"
 
       # # Run Rust tests, must happen after installing the pip package.
       # - name: Run rust tests
