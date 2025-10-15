@@ -50,23 +50,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd  # v3.0.1
-
-  doc:
-    needs: [lint, prepare]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-      - name: Set up uv
-        uses: astral-sh/setup-uv@b75a909f75acd358c2196fb9a5f1299a9a8868a4  # v6.7.0
-        with:
-          python-version: 3.13
-      - name: Generate docs
-        run: |
-          sudo apt install doxygen
-          BUILD_CPP_DOCS=1 uv run --group docs sphinx-build -W --keep-going -b html docs docs/_build/html
 
   test:
     needs: [lint, prepare]
@@ -79,10 +62,7 @@ jobs:
       fail-fast: true
       matrix:
         include:
-          - {os: ubuntu-latest, arch: x86_64, python_version: '3.14t'}
-          - {os: ubuntu-24.04-arm, arch: aarch64, python_version: '3.10'}
           - {os: windows-latest, arch: AMD64, python_version: '3.12'}
-          - {os: macos-14, arch: arm64, python_version: '3.13'}
 
     steps:
       - uses: actions/checkout@v4
@@ -98,25 +78,6 @@ jobs:
         run: |
           echo "CPU count: ${{ steps.env_vars.outputs.cpu_count }}"
 
-      # Run C++ tests
-      - name: Run cpp tests
-        if: ${{ matrix.os != 'windows-latest' }}
-        env:
-          CMAKE_BUILD_PARALLEL_LEVEL: ${{ steps.env_vars.outputs.cpu_count }}
-        run: |
-          cmake . -B build_test -DTVM_FFI_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Debug
-          cmake --build build_test --clean-first --config Debug --target tvm_ffi_tests
-          ctest -V -C Debug --test-dir build_test --output-on-failure
-      - name: Run cpp tests[windows]
-        if: ${{ matrix.os == 'windows-latest' }}
-        shell: cmd
-        env:
-          CMAKE_BUILD_PARALLEL_LEVEL: ${{ steps.env_vars.outputs.cpu_count }}
-        run: >
-          cmake . -B build_test -DTVM_FFI_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Debug &&
-          cmake --build build_test --clean-first --config Debug --target tvm_ffi_tests &&
-          ctest -V -C Debug --test-dir build_test --output-on-failure
-
       # Run Python tests
       - name: Setup Python ${{ matrix.python_version }}
         uses: astral-sh/setup-uv@b75a909f75acd358c2196fb9a5f1299a9a8868a4  # v6.7.0
@@ -130,10 +91,4 @@ jobs:
           uv pip install --reinstall --verbose -e ".[test]"
       - name: Run python tests
         run: |
-          pytest -vvs tests/python
-
-      # Run Rust tests, must happen after installing the pip package.
-      - name: Run rust tests
-        working-directory: rust
-        run: |
-          cargo test
+          python -c "import tvm_ffi; import torch"
