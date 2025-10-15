@@ -63,11 +63,11 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   TCustomFuncObj::RegisterReflection();
 
   refl::ObjectDef<TestObjA>()
-      .def_static("__ffi_init__", refl::init<TestObjA, int64_t, int64_t>)
+      .def(refl::init<int64_t, int64_t>())
       .def_ro("x", &TestObjA::x)
       .def_rw("y", &TestObjA::y);
   refl::ObjectDef<TestObjADerived>()
-      .def_static("__ffi_init__", refl::init<TestObjRefADerived, int64_t, int64_t, int64_t>)
+      .def(refl::init<int64_t, int64_t, int64_t>())
       .def_ro("z", &TestObjADerived::z);
 }
 

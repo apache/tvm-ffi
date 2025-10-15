@@ -5,7 +5,7 @@ if (TVM_FFI_USE_EXTRA_CXX_API)
   list(APPEND _test_sources ${_test_extra_sources})
 endif ()
 
-add_executable(tvm_ffi_tests EXCLUDE_FROM_ALL ${_test_sources})
+add_executable(tvm_ffi_tests ${_test_sources})
 
 set_target_properties(
   tvm_ffi_tests

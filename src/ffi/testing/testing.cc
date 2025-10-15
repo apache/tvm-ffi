@@ -68,9 +68,9 @@ class TestIntPair : public tvm::ffi::ObjectRef {
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::ObjectDef<TestIntPairObj>()
+      .def(refl::init<int64_t, int64_t>())
       .def_ro("a", &TestIntPairObj::a, "Field `a`")
       .def_ro("b", &TestIntPairObj::b, "Field `b`")
-      .def_static("__ffi_init__", refl::init<TestIntPairObj, int64_t, int64_t>)
       .def("sum", &TestIntPair::Sum, "Method to compute sum of a and b");
 }
 
@@ -206,40 +206,36 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def_ro("v_array", &TestObjectDerived::v_array);
 
   refl::ObjectDef<TestCxxClassBase>()
-      .def_static("__ffi_init__", refl::init<TestCxxClassBase, int64_t, int32_t>)
+      .def(refl::init<int64_t, int32_t>())
       .def_rw("v_i64", &TestCxxClassBase::v_i64)
       .def_rw("v_i32", &TestCxxClassBase::v_i32);
 
   refl::ObjectDef<TestCxxClassDerived>()
-      .def_static("__ffi_init__", refl::init<TestCxxClassDerived, int64_t, int32_t, double, float>)
+      .def(refl::init<int64_t, int32_t, double, float>())
       .def_rw("v_f64", &TestCxxClassDerived::v_f64)
       .def_rw("v_f32", &TestCxxClassDerived::v_f32);
 
   refl::ObjectDef<TestCxxClassDerivedDerived>()
-      .def_static(
-          "__ffi_init__",
-          refl::init<TestCxxClassDerivedDerived, int64_t, int32_t, double, float, String, bool>)
+      .def(refl::init<int64_t, int32_t, double, float, String, bool>())
       .def_rw("v_str", &TestCxxClassDerivedDerived::v_str)
       .def_rw("v_bool", &TestCxxClassDerivedDerived::v_bool);
 
   refl::ObjectDef<TestCxxInitSubsetObj>()
-      .def_static("__ffi_init__", refl::init<TestCxxInitSubsetObj, int64_t, String>)
+      .def(refl::init<int64_t, String>())
       .def_rw("required_field", &TestCxxInitSubsetObj::required_field)
       .def_rw("optional_field", &TestCxxInitSubsetObj::optional_field)
       .def_rw("note", &TestCxxInitSubsetObj::note);
 
   refl::ObjectDef<TestUnregisteredBaseObject>()
+      .def(refl::init<int64_t>(), "Constructor of TestUnregisteredBaseObject")
       .def_ro("v1", &TestUnregisteredBaseObject::v1)
-      .def_static("__ffi_init__", refl::init<TestUnregisteredBaseObject, int64_t>,
-                  "Constructor of TestUnregisteredBaseObject")
       .def("get_v1_plus_one", &TestUnregisteredBaseObject::GetV1PlusOne,
            "Get (v1 + 1) from TestUnregisteredBaseObject");
 
   refl::ObjectDef<TestUnregisteredObject>()
+      .def(refl::init<int64_t, int64_t>(), "Constructor of TestUnregisteredObject")
       .def_ro("v1", &TestUnregisteredObject::v1)
       .def_ro("v2", &TestUnregisteredObject::v2)
-      .def_static("__ffi_init__", refl::init<TestUnregisteredObject, int64_t, int64_t>,
-                  "Constructor of TestUnregisteredObject")
       .def("get_v2_plus_two", &TestUnregisteredObject::GetV2PlusTwo,
            "Get (v2 + 2) from TestUnregisteredObject");
 

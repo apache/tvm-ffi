@@ -407,6 +407,56 @@ class GlobalDef : public ReflectionDefBase {
 };
 
 /*!
+ * \brief Helper class to register a constructor method for object types.
+ *
+ * This helper is used with `ObjectDef::def()` to register an `__init__` method
+ * that constructs an object instance with the specified argument types.
+ *
+ * \tparam Args The argument types for the constructor.
+ *
+ * Example usage:
+ * \code
+ *   class ExampleObject : public Object {
+ *    public:
+ *      int64_t v_i64;
+ *      int32_t v_i32;
+ *
+ *      ExampleObject(int64_t v_i64, int32_t v_i32) : v_i64(v_i64), v_i32(v_i32) {}
+ *      TVM_FFI_DECLARE_OBJECT_INFO("example.ExampleObject", ExampleObject, Object);
+ *   };
+ *
+ *   // Register the constructor
+ *   refl::ObjectDef<ExampleObject>()
+ *      .def(refl::init<int64_t, int32_t>());
+ * \endcode
+ *
+ * \note The object type is automatically deduced from the `ObjectDef` context.
+ */
+template <typename... Args>
+struct init {
+  // Allow ObjectDef to access the execute function
+  template <typename Class>
+  friend class ObjectDef;
+
+  /*!
+   * \brief Constructor
+   */
+  init() {}
+
+ private:
+  /*!
+   * \brief Execute the constructor
+   * \tparam Class The class type.
+   * \param args The arguments to be passed to the constructor.
+   * \return The constructed object wrapped in an `ObjectRef`.
+   */
+  template <typename Class>
+  static inline ObjectRef execute(Args&&... args) {
+    return ObjectRef(ffi::make_object<Class>(std::forward<Args>(args)...));
+  }
+};
+
+/*!
  * \brief Helper to register Object's reflection metadata.
  * \tparam Class The class type.
  *
@@ -504,6 +554,34 @@ class ObjectDef : public ReflectionDefBase {
     return *this;
   }
 
+  /*!
+   * \brief Register a constructor for this object type.
+   *
+   * This method registers a static `__init__` method that constructs an instance
+   * of the object with the specified argument types. The constructor can be invoked
+   * from Python or other FFI bindings.
+   *
+   * \tparam Args The argument types for the constructor.
+   * \tparam Extra Additional arguments (e.g., docstring).
+   *
+   * \param init_func An instance of `init<Args...>` specifying constructor signature.
+   * \param extra Optional additional metadata such as docstring.
+   *
+   * \return Reference to this `ObjectDef` for method chaining.
+   *
+   * Example:
+   * \code
+   *   refl::ObjectDef<MyObject>()
+   *       .def(refl::init<int64_t, std::string>(), "Constructor docstring");
+   * \endcode
+   */
+  template <typename... Args, typename... Extra>
+  TVM_FFI_INLINE ObjectDef& def(init<Args...> init_func, Extra&&... extra) {
+    RegisterMethod(INIT_METHOD_NAME, true, &init<Args...>::template execute<Class>,
+                   std::forward<Extra>(extra)...);
+    return *this;
+  }
+
  private:
   template <typename... ExtraArgs>
   void RegisterExtraInfo(ExtraArgs&&... extra_args) {
@@ -576,6 +654,7 @@ class ObjectDef : public ReflectionDefBase {
 
   int32_t type_index_;
   const char* type_key_;
+  static constexpr const char* INIT_METHOD_NAME = "__ffi_init__";
 };
 
 /*!
@@ -654,40 +733,6 @@ inline void EnsureTypeAttrColumn(std::string_view name) {
   AnyView any_view(nullptr);
   TVM_FFI_CHECK_SAFE_CALL(TVMFFITypeRegisterAttr(kTVMFFINone, &name_array,
                                                  reinterpret_cast<const TVMFFIAny*>(&any_view)));
-}
-
-/*!
- * \brief Invokes the constructor of a particular object type and returns an `ObjectRef`.
- * \tparam T The object type to be constructed.
- * \tparam Args The argument types.
- * \param args The arguments to be passed to the constructor.
- * \return The constructed object wrapped in an `ObjectRef`.
- * \note This is usually used in FFI reflection boundary to register `__init__` methods.
- *
- * Example
- *
- * \code
- *
- *   class ExampleObject : public Object {
- *    public:
- *      int64_t v_i64;
- *      int32_t v_i32;
- *
- *      ExampleObject(int64_t v_i64, int32_t v_i32) : v_i64(v_i64), v_i32(v_i32) {}
- *      TVM_FFI_DECLARE_OBJECT_INFO("example.ExampleObject", ExampleObject, Object);
- *   };
- *   refl::ObjectDef<ExampleObject>()
- *      .def_static("__init__", refl::init<ExampleObject, int64_t, int32_t>);
- * \endcode
- */
-template <typename T, typename... Args>
-inline ObjectRef init(Args&&... args) {
-  if constexpr (std::is_base_of_v<Object, T>) {
-    return ObjectRef(ffi::make_object<T>(std::forward<Args>(args)...));
-  } else {
-    using U = typename T::ContainerType;
-    return ObjectRef(ffi::make_object<U>(std::forward<Args>(args)...));
-  }
 }
 
 }  // namespace reflection

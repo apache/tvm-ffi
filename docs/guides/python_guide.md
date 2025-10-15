@@ -235,7 +235,7 @@ public:
   TestIntPairObj(int64_t a, int64_t b) : a(a), b(b) {}
 
   // Required: declare type information
-TVM_FFI_DECLARE_OBJECT_INFO_FINAL("testing.TestIntPair", TestIntPairObj, tvm::ffi::Object);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("testing.TestIntPair", TestIntPairObj, tvm::ffi::Object);
 };
 
 // Step 2: Define the reference wrapper (user-facing interface)
@@ -253,13 +253,11 @@ public:
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   // register the object into the system
-  // register field accessors and a global static function `__create__` as ffi::Function
+  // register field accessors and a global static function `__ffi_init__` as ffi::Function
   refl::ObjectDef<TestIntPairObj>()
+    .def(refl::init<int64_t, int64_t>())
     .def_ro("a", &TestIntPairObj::a)
-    .def_ro("b", &TestIntPairObj::b)
-    .def_static("__create__", [](int64_t a, int64_t b) -> TestIntPair {
-      return TestIntPair(a, b);
-    });
+    .def_ro("b", &TestIntPairObj::b);
 }
 ```
 
@@ -274,7 +272,7 @@ class TestIntPair(tvm_ffi.Object):
     def __init__(self, a, b):
         # This is a special method to call an FFI function whose return
         # value exactly initializes the object handle of the object
-        self.__init_handle_by_constructor__(TestIntPair.__create__, a, b)
+        self.__ffi_init__(a, b)
 
 test_int_pair = TestIntPair(1, 2)
 # We can access the fields by name

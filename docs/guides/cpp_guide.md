@@ -105,7 +105,7 @@ class MyIntPairObj : public tvm::ffi::Object {
 
   // Required: declare type information
   // to register a dynamic type index through the system
-TVM_FFI_DECLARE_OBJECT_INFO_FINAL("example.MyIntPair", MyIntPairObj, tvm::ffi::Object);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("example.MyIntPair", MyIntPairObj, tvm::ffi::Object);
 };
 
 void ExampleObjectPtr() {
