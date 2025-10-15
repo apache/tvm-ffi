@@ -482,89 +482,97 @@ void toDLPackNonOwningImpl(const Tensor& tensor, DLTensor& out) {
 } // namespace
 } // namespace at
 
-int TorchDLPackDLTensorFromPyObjectNoSync(void* py_obj, DLTensor* out) {
-  try {
-    // Use handle (non-owning) to avoid unnecessary refcount operations
-    py::handle handle(static_cast<PyObject*>(py_obj));
-    at::Tensor tensor = handle.cast<at::Tensor>();
-    at::toDLPackNonOwningImpl(tensor, *out);
-    return 0;
-  } catch (const std::exception& e) {
-    PyErr_SetString(PyExc_RuntimeError, e.what());
-    return -1;
-  }
-}
-
-int TorchDLPackManagedTensorFromPyObjectNoSync(void* py_obj, DLManagedTensorVersioned** out) {
-  try {
-    py::handle handle(static_cast<PyObject*>(py_obj));
-    at::Tensor tensor = handle.cast<at::Tensor>();
-    *out = at::toDLPackImpl<DLManagedTensorVersioned>(tensor);
-    return 0;
-  } catch (const std::exception& e) {
-    PyErr_SetString(PyExc_RuntimeError, e.what());
-    return -1;
-  }
-}
-
-int TorchDLPackManagedTensorToPyObjectNoSync(DLManagedTensorVersioned* src, void** py_obj_out) {
-  try {
-    at::Tensor tensor = at::fromDLPackImpl<DLManagedTensorVersioned>(src, nullptr);
-    *py_obj_out = THPVariable_Wrap(tensor);
-    return 0;
-  } catch (const std::exception& e) {
-    PyErr_SetString(PyExc_RuntimeError, e.what());
-    return -1;
-  }
-}
-
-int TorchDLPackManagedTensorAllocator(
-    DLTensor* prototype, DLManagedTensorVersioned** out, void* error_ctx,
-    void (*SetError)(void* error_ctx, const char* kind, const char* message)
-) {
-  try {
-    at::IntArrayRef shape(prototype->shape, prototype->shape + prototype->ndim);
-    at::TensorOptions options = at::TensorOptions()
-      .dtype(at::toScalarType(prototype->dtype))
-      .device(at::getATenDeviceForDLPackv1(prototype->device.device_type, prototype->device.device_id));
-    at::Tensor tensor = at::empty(shape, options);
-    *out = at::toDLPackImpl<DLManagedTensorVersioned>(tensor);
-    return 0;
-  } catch (const std::exception& e) {
-    SetError(error_ctx, "TorchDLPackManagedTensorAllocator", e.what());
-    return -1;
-  }
-}
-
-int TorchDLPackCurrentWorkStream(DLDeviceType device_type, int32_t device_id, void** out_stream) {
-  try {
-#ifdef BUILD_WITH_CUDA
-    if (device_type == kDLCUDA || device_type == kDLROCM) {
-      *out_stream = at::cuda::getCurrentCUDAStream(device_id).stream();
-    }
-#endif
-    return 0;
-  } catch (const std::exception& e) {
-    PyErr_SetString(PyExc_RuntimeError, e.what());
-    return -1;
-  }
-}
-
 struct TorchDLPackExchangeAPI : public DLPackExchangeAPI {
   TorchDLPackExchangeAPI() {
     header.version.major = DLPACK_MAJOR_VERSION;
     header.version.minor = DLPACK_MINOR_VERSION;
     header.prev_api = nullptr;
-    managed_tensor_allocator = TorchDLPackManagedTensorAllocator;
-    managed_tensor_from_py_object_no_sync = TorchDLPackManagedTensorFromPyObjectNoSync;
-    managed_tensor_to_py_object_no_sync = TorchDLPackManagedTensorToPyObjectNoSync;
-    dltensor_from_py_object_no_sync = TorchDLPackDLTensorFromPyObjectNoSync;
-    current_work_stream = TorchDLPackCurrentWorkStream;
+    managed_tensor_allocator = ManagedTensorAllocator;
+    managed_tensor_from_py_object_no_sync = ManagedTensorFromPyObjectNoSync;
+    managed_tensor_to_py_object_no_sync = ManagedTensorToPyObjectNoSync;
+    dltensor_from_py_object_no_sync = DLTensorFromPyObjectNoSync;
+    current_work_stream = CurrentWorkStream;
   }
 
   static const DLPackExchangeAPI* Global() {
     static TorchDLPackExchangeAPI inst;
     return &inst;
+  }
+
+ private:
+  static int DLTensorFromPyObjectNoSync(void* py_obj, DLTensor* out) {
+    try {
+      // Use handle (non-owning) to avoid unnecessary refcount operations
+      py::handle handle(static_cast<PyObject*>(py_obj));
+      at::Tensor tensor = handle.cast<at::Tensor>();
+      at::toDLPackNonOwningImpl(tensor, *out);
+      return 0;
+    } catch (const std::exception& e) {
+      PyErr_SetString(PyExc_RuntimeError, e.what());
+      return -1;
+    }
+  }
+
+  static int ManagedTensorFromPyObjectNoSync(void* py_obj, DLManagedTensorVersioned** out) {
+    try {
+      py::handle handle(static_cast<PyObject*>(py_obj));
+      at::Tensor tensor = handle.cast<at::Tensor>();
+      *out = at::toDLPackImpl<DLManagedTensorVersioned>(tensor);
+      return 0;
+    } catch (const std::exception& e) {
+      PyErr_SetString(PyExc_RuntimeError, e.what());
+      return -1;
+    }
+  }
+
+  static int ManagedTensorToPyObjectNoSync(DLManagedTensorVersioned* src, void** py_obj_out) {
+    try {
+      at::Tensor tensor = at::fromDLPackImpl<DLManagedTensorVersioned>(src, nullptr);
+      *py_obj_out = THPVariable_Wrap(tensor);
+      return 0;
+    } catch (const std::exception& e) {
+      PyErr_SetString(PyExc_RuntimeError, e.what());
+      return -1;
+    }
+  }
+
+  static int ManagedTensorAllocator(
+      DLTensor* prototype, DLManagedTensorVersioned** out, void* error_ctx,
+      void (*SetError)(void* error_ctx, const char* kind, const char* message)
+  ) {
+    try {
+      at::IntArrayRef shape(prototype->shape, prototype->shape + prototype->ndim);
+      at::TensorOptions options = at::TensorOptions()
+        .dtype(at::toScalarType(prototype->dtype))
+        .device(at::getATenDeviceForDLPackv1(prototype->device.device_type, prototype->device.device_id));
+      at::Tensor tensor = at::empty(shape, options);
+      *out = at::toDLPackImpl<DLManagedTensorVersioned>(tensor);
+      return 0;
+    } catch (const std::exception& e) {
+      SetError(error_ctx, "TorchDLPackManagedTensorAllocator", e.what());
+      return -1;
+    }
+  }
+
+  // Get current CUDA/ROCm work stream
+  static int CurrentWorkStream(
+      DLDeviceType device_type,
+      int32_t device_id,
+      void** out_stream) {
+    try {
+#ifdef BUILD_WITH_CUDA
+      if (device_type == kDLCUDA || device_type == kDLROCM) {
+        *out_stream = at::cuda::getCurrentCUDAStream(device_id).stream();
+        return 0;
+      }
+#endif
+      // For CPU and other devices, return NULL (no stream concept)
+      *out_stream = nullptr;
+      return 0;
+    } catch (const std::exception& e) {
+      PyErr_SetString(PyExc_RuntimeError, e.what());
+      return -1;
+    }
   }
 };
 
