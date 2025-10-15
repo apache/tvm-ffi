@@ -80,7 +80,7 @@ jobs:
       matrix:
         include:
           - {os: ubuntu-latest, arch: x86_64, python_version: '3.14t'}
-          - {os: ubuntu-24.04-arm, arch: aarch64, python_version: '3.9'}
+          - {os: ubuntu-24.04-arm, arch: aarch64, python_version: '3.10'}
           - {os: windows-latest, arch: AMD64, python_version: '3.12'}
           - {os: macos-14, arch: arm64, python_version: '3.13'}
 

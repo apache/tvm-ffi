@@ -41,6 +41,10 @@
 #endif
 
 #include <windows.h>
+#if (defined(_M_ARM64) || defined(_ARM64_) || defined(_M_ARM64EC)) && \
+    !defined(_InlineInterlockedAdd64)
+#define _InlineInterlockedAdd64 InterlockedAdd64
+#endif
 
 #ifdef ERROR
 #undef ERROR
