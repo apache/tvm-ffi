@@ -29,6 +29,7 @@ packaging as well.
 ## Install the wheel
 
 ```bash
+cd examples/packaging
 pip install .
 ```
 

@@ -89,6 +89,10 @@ minimum-version = "build-system.requires"
 build-dir = "build"
 build.verbose = true
 
+# Editable install configuration
+editable.rebuild = false
+editable.verbose = true
+
 # CMake configuration
 cmake.version = "CMakeLists.txt"
 cmake.build-type = "Release"

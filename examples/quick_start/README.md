@@ -41,6 +41,7 @@ pip install -ve "../..[test]"
 From `examples/quick_start` you can build and run everything with the helper script:
 
 ```bash
+cd examples/quick_start
 ./run_example.sh
 ```
 

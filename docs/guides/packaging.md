@@ -104,9 +104,6 @@ cmake_minimum_required(VERSION 3.18)
 project(my_ffi_extension)
 
 find_package(Python COMPONENTS Interpreter REQUIRED)
-execute_process(
-  COMMAND "${Python_EXECUTABLE}" -m tvm_ffi.config --cmakedir
-  OUTPUT_STRIP_TRAILING_WHITESPACE OUTPUT_VARIABLE tvm_ffi_ROOT)
 # find the prebuilt package
 find_package(tvm_ffi CONFIG REQUIRED)
 

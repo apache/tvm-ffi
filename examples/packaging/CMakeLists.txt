@@ -51,12 +51,7 @@ if (TVM_FFI_BUILD_FROM_SOURCE)
   message(STATUS "Building tvm_ffi from source: ${tvm_ffi_ROOT}")
   add_subdirectory(${tvm_ffi_ROOT} tvm_ffi)
 else ()
-  # call tvm_ffi.config to get the cmake directory and set it to tvm_ffi_ROOT
-  execute_process(
-    COMMAND "${Python_EXECUTABLE}" -m tvm_ffi.config --cmakedir
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    OUTPUT_VARIABLE tvm_ffi_ROOT
-  )
+  # tvm_ffi is installed via pip. Try to find tvm_ffi automatically
   find_package(tvm_ffi CONFIG REQUIRED)
 endif ()
 

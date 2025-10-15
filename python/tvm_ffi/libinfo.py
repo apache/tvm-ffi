@@ -134,8 +134,8 @@ def find_source_path() -> str:
 def find_cmake_path() -> str:
     """Find the preferred cmake path."""
     candidates = [
-        str(Path(__file__).resolve().parent / "cmake"),
-        str(Path(__file__).resolve().parent / ".." / ".." / "cmake"),
+        str(Path(__file__).resolve().parent / "share" / "cmake" / "tvm_ffi"),  # Standard install
+        str(Path(__file__).resolve().parent / ".." / ".." / "cmake"),  # Development mode
     ]
     for candidate in candidates:
         if Path(candidate).is_dir():
