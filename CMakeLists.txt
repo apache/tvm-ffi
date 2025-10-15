@@ -148,6 +148,15 @@ target_link_libraries(tvm_ffi_testing PUBLIC tvm_ffi_header)
 tvm_ffi_add_msvc_flags(tvm_ffi_testing)
 tvm_ffi_add_apple_dsymutil(tvm_ffi_testing)
 
+# Set the install RPATH for tvm_ffi_testing so it can find tvm_ffi.so relatively
+if (APPLE)
+  # macOS uses @loader_path
+  set_target_properties(tvm_ffi_testing PROPERTIES INSTALL_RPATH "@loader_path")
+elseif (UNIX AND NOT APPLE)
+  # Linux uses $ORIGIN
+  set_target_properties(tvm_ffi_testing PROPERTIES INSTALL_RPATH "\$ORIGIN")
+endif ()
+
 # ----------------------------------------------------------------------------
 # The following code section only is triggered when the project is the root and will be skipped when
 # the project is a subproject.
@@ -250,7 +259,7 @@ if (TVM_FFI_BUILD_PYTHON_MODULE)
   if (APPLE)
     # macOS uses @loader_path
     set_target_properties(tvm_ffi_cython PROPERTIES INSTALL_RPATH "@loader_path/lib")
-  elseif (LINUX)
+  elseif (UNIX AND NOT APPLE)
     # Linux uses $ORIGIN
     set_target_properties(tvm_ffi_cython PROPERTIES INSTALL_RPATH "\$ORIGIN/lib")
   endif ()
