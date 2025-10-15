@@ -43,12 +43,7 @@ GitHub = "https://github.com/apache/tvm-ffi"
 torch = ["torch", "setuptools", "ninja"]
 cpp = ["ninja"]
 # note pytorch does not yet ship with 3.14t
-test = [
-  "pytest",
-  "numpy",
-  "ninja",
-  "torch>=2.9; '3.9' < python_version and python_version < '3.14'",
-]
+test = ["pytest", "numpy", "ninja", "torch; python_version < '3.14'"]
 
 [dependency-groups]
 dev = [
