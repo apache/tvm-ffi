@@ -18,7 +18,14 @@
 cmake_minimum_required(VERSION 3.18)
 project(tvm_ffi_example)
 
-# Try to find tvm-ffi automatically (like pybind11)
+# Discover the Python interpreter so we can query tvm-ffi for its CMake package path.
+find_package(
+  Python
+  COMPONENTS Interpreter
+  REQUIRED
+)
+
+# Find tvm-ffi automatically
 find_package(tvm_ffi CONFIG REQUIRED)
 
 # Build the CPU and C versions of the simple "add one" function that the examples call.
