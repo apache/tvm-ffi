@@ -36,7 +36,7 @@ use crate::dlpack::DLTensor;
 pub type TVMFFIStreamHandle = *mut c_void;
 
 /// DLPack tensor allocator function type
-pub type DLPackTensorAllocator = unsafe extern "C" fn(
+pub type DLPackManagedTensorAllocator = unsafe extern "C" fn(
     prototype: *mut DLTensor,
     out: *mut *mut c_void, // DLManagedTensorVersioned**
     error_ctx: *mut c_void,
@@ -54,12 +54,12 @@ unsafe extern "C" {
     pub fn TVMFFIEnvGetStream(device_type: i32, device_id: i32) -> TVMFFIStreamHandle;
 
     pub fn TVMFFIEnvSetTensorAllocator(
-        allocator: DLPackTensorAllocator,
+        allocator: DLPackManagedTensorAllocator,
         write_to_global_context: i32,
-        opt_out_original_allocator: *mut DLPackTensorAllocator,
+        opt_out_original_allocator: *mut DLPackManagedTensorAllocator,
     ) -> i32;
 
-    pub fn TVMFFIEnvGetTensorAllocator() -> DLPackTensorAllocator;
+    pub fn TVMFFIEnvGetTensorAllocator() -> DLPackManagedTensorAllocator;
 
     pub fn TVMFFIEnvCheckSignals() -> i32;
 

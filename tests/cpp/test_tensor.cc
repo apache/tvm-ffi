@@ -32,20 +32,21 @@ inline Tensor Empty(const Shape& shape, DLDataType dtype, DLDevice device) {
   return Tensor::FromNDAlloc(CPUNDAlloc(), shape, dtype, device);
 }
 
-int TestDLPackTensorAllocator(DLTensor* prototype, DLManagedTensorVersioned** out, void* error_ctx,
-                              void (*SetError)(void* error_ctx, const char* kind,
-                                               const char* message)) {
+int TestDLPackManagedTensorAllocator(DLTensor* prototype, DLManagedTensorVersioned** out,
+                                     void* error_ctx,
+                                     void (*SetError)(void* error_ctx, const char* kind,
+                                                      const char* message)) {
   Shape shape(prototype->shape, prototype->shape + prototype->ndim);
   Tensor nd = Empty(shape, prototype->dtype, prototype->device);
   *out = nd.ToDLPackVersioned();
   return 0;
 }
 
-int TestDLPackTensorAllocatorError(DLTensor* prototype, DLManagedTensorVersioned** out,
-                                   void* error_ctx,
-                                   void (*SetError)(void* error_ctx, const char* kind,
-                                                    const char* message)) {
-  SetError(error_ctx, "RuntimeError", "TestDLPackTensorAllocatorError");
+int TestDLPackManagedTensorAllocatorError(DLTensor* prototype, DLManagedTensorVersioned** out,
+                                          void* error_ctx,
+                                          void (*SetError)(void* error_ctx, const char* kind,
+                                                           const char* message)) {
+  SetError(error_ctx, "RuntimeError", "TestDLPackManagedTensorAllocatorError");
   return -1;
 }
 
@@ -138,7 +139,7 @@ TEST(Tensor, DLPackVersioned) {
 
 TEST(Tensor, DLPackAlloc) {
   // Test successful allocation
-  Tensor tensor = Tensor::FromDLPackAlloc(TestDLPackTensorAllocator, {1, 2, 3},
+  Tensor tensor = Tensor::FromDLPackAlloc(TestDLPackManagedTensorAllocator, {1, 2, 3},
                                           DLDataType({kDLFloat, 32, 1}), DLDevice({kDLCPU, 0}));
   EXPECT_EQ(tensor.use_count(), 1);
   EXPECT_EQ(tensor.shape().size(), 3);
@@ -157,7 +158,7 @@ TEST(Tensor, DLPackAllocError) {
   // Test error handling in DLPackAlloc
   EXPECT_THROW(
       {
-        Tensor::FromDLPackAlloc(TestDLPackTensorAllocatorError, {1, 2, 3},
+        Tensor::FromDLPackAlloc(TestDLPackManagedTensorAllocatorError, {1, 2, 3},
                                 DLDataType({kDLFloat, 32, 1}), DLDevice({kDLCPU, 0}));
       },
       tvm::ffi::Error);

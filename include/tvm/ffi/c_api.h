@@ -60,24 +60,6 @@
 extern "C" {
 #endif
 
-// TODO(tqchen): remove this once dlpack.h is updated
-typedef struct DLManagedTensorVersioned DLManagedTensorVersioned;
-
-/*
- * \brief C-style Allocator that allocates memory for a DLPack tensor.
- * \param prototype The prototype DLTensor to offer details about device and shape.
- * \param out The output DLManagedTensorVersioned.
- * \param error_ctx The context to set the error.
- * \param SetError The function to set the error.
- * \return 0 on success, -1 on failure.
- *         call SetError(error_ctx, kind, message) to set the error kind and message.
- * \note Error propagation via SetError.
- */
-typedef int (*DLPackTensorAllocator)(                                         //
-    DLTensor* prototype, DLManagedTensorVersioned** out, void* error_ctx,     //
-    void (*SetError)(void* error_ctx, const char* kind, const char* message)  //
-);
-
 #ifdef __cplusplus
 enum TVMFFITypeIndex : int32_t {
 #else

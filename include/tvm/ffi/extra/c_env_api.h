@@ -70,9 +70,9 @@ TVM_FFI_DLL TVMFFIStreamHandle TVMFFIEnvGetStream(int32_t device_type, int32_t d
  * \param opt_out_original_allocator Output original TLS allocator if the address is not nullptr.
  * \return 0 when success, nonzero when failure happens
  */
-TVM_FFI_DLL int TVMFFIEnvSetTensorAllocator(DLPackTensorAllocator allocator,
-                                            int write_to_global_context,
-                                            DLPackTensorAllocator* opt_out_original_allocator);
+TVM_FFI_DLL int TVMFFIEnvSetTensorAllocator(
+    DLPackManagedTensorAllocator allocator, int write_to_global_context,
+    DLPackManagedTensorAllocator* opt_out_original_allocator);
 
 /*!
  * \brief FFI function get the current DLPack allocator stored in context.
@@ -82,7 +82,7 @@ TVM_FFI_DLL int TVMFFIEnvSetTensorAllocator(DLPackTensorAllocator allocator,
  *
  * \return The current DLPack allocator.
  */
-TVM_FFI_DLL DLPackTensorAllocator TVMFFIEnvGetTensorAllocator();
+TVM_FFI_DLL DLPackManagedTensorAllocator TVMFFIEnvGetTensorAllocator();
 
 /*!
  * \brief Check if there are any signals raised in the surrounding env.

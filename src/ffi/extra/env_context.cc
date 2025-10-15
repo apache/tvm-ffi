@@ -54,15 +54,16 @@ class EnvContext {
     return nullptr;
   }
 
-  DLPackTensorAllocator GetDLPackTensorAllocator() {
+  DLPackManagedTensorAllocator GetDLPackManagedTensorAllocator() {
     if (dlpack_allocator_ != nullptr) {
       return dlpack_allocator_;
     }
     return GlobalTensorAllocator();
   }
 
-  void SetDLPackTensorAllocator(DLPackTensorAllocator allocator, int write_to_global_context,
-                                DLPackTensorAllocator* opt_out_original_allocator) {
+  void SetDLPackManagedTensorAllocator(DLPackManagedTensorAllocator allocator,
+                                       int write_to_global_context,
+                                       DLPackManagedTensorAllocator* opt_out_original_allocator) {
     dlpack_allocator_ = allocator;
     if (write_to_global_context != 0) {
       GlobalTensorAllocator() = allocator;
@@ -80,12 +81,12 @@ class EnvContext {
 
  private:
   // use static function to avoid static initialization order issue
-  static DLPackTensorAllocator& GlobalTensorAllocator() {  // NOLINT(*)
-    static DLPackTensorAllocator allocator = nullptr;
+  static DLPackManagedTensorAllocator& GlobalTensorAllocator() {  // NOLINT(*)
+    static DLPackManagedTensorAllocator allocator = nullptr;
     return allocator;
   }
   std::vector<std::vector<TVMFFIStreamHandle>> stream_table_;
-  DLPackTensorAllocator dlpack_allocator_ = nullptr;
+  DLPackManagedTensorAllocator dlpack_allocator_ = nullptr;
 };
 
 }  // namespace ffi
@@ -105,16 +106,16 @@ TVMFFIStreamHandle TVMFFIEnvGetStream(int32_t device_type, int32_t device_id) {
   TVM_FFI_LOG_EXCEPTION_CALL_END(TVMFFIEnvGetStream);
 }
 
-int TVMFFIEnvSetTensorAllocator(DLPackTensorAllocator allocator, int write_to_global_context,
-                                DLPackTensorAllocator* opt_out_original_allocator) {
+int TVMFFIEnvSetTensorAllocator(DLPackManagedTensorAllocator allocator, int write_to_global_context,
+                                DLPackManagedTensorAllocator* opt_out_original_allocator) {
   TVM_FFI_SAFE_CALL_BEGIN();
-  tvm::ffi::EnvContext::ThreadLocal()->SetDLPackTensorAllocator(allocator, write_to_global_context,
-                                                                opt_out_original_allocator);
+  tvm::ffi::EnvContext::ThreadLocal()->SetDLPackManagedTensorAllocator(
+      allocator, write_to_global_context, opt_out_original_allocator);
   TVM_FFI_SAFE_CALL_END();
 }
 
-DLPackTensorAllocator TVMFFIEnvGetTensorAllocator() {
+DLPackManagedTensorAllocator TVMFFIEnvGetTensorAllocator() {
   TVM_FFI_LOG_EXCEPTION_CALL_BEGIN();
-  return tvm::ffi::EnvContext::ThreadLocal()->GetDLPackTensorAllocator();
+  return tvm::ffi::EnvContext::ThreadLocal()->GetDLPackManagedTensorAllocator();
   TVM_FFI_LOG_EXCEPTION_CALL_END(TVMFFIEnvGetTensorAllocator);
 }

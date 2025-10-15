@@ -58,7 +58,7 @@ pub(crate) fn attr_to_str(attr: &syn::Attribute) -> syn::LitStr {
             lit: syn::Lit::Str(s),
             ..
         })) => s,
-        Ok(m) => panic!("Expected a string literal, got"),
+        Ok(_m) => panic!("Expected a string literal, got"),
         Err(e) => panic!("{}", e),
     }
 }

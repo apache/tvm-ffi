@@ -359,7 +359,7 @@ class Tensor : public ObjectRef {
         std::forward<ExtraArgs>(extra_args)...));
   }
   /*!
-   * \brief Create a Tensor from a DLPackTensorAllocator
+   * \brief Create a Tensor from a DLPackManagedTensorAllocator
    *
    * This function can be used together with TVMFFIEnvSetTensorAllocator
    * in the extra/c_env_api.h to create Tensor from the thread-local
@@ -378,7 +378,7 @@ class Tensor : public ObjectRef {
    * \param device The device of the Tensor.
    * \return The created Tensor.
    */
-  static Tensor FromDLPackAlloc(DLPackTensorAllocator allocator, ffi::ShapeView shape,
+  static Tensor FromDLPackAlloc(DLPackManagedTensorAllocator allocator, ffi::ShapeView shape,
                                 DLDataType dtype, DLDevice device) {
     if (allocator == nullptr) {
       TVM_FFI_THROW(RuntimeError)

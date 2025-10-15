@@ -41,29 +41,6 @@
 #include <iostream>
 #include <unordered_map>
 
-//----------------------------------------------------------
-// Extra support for DLPack
-//----------------------------------------------------------
-/*!
- * \brief C-style function pointer to speed convert a PyObject Tensor to a DLManagedTensorVersioned.
- * \param py_obj The Python object to convert, this should be PyObject*
- * \param out The output DLManagedTensorVersioned.
- * \param env_stream Outputs the current context stream of the device provided by the tensor.
- * \return 0 on success, -1 on failure. PyError should be set if -1 is returned.
- * \note We use void* to avoid dependency on Python.h so this specific type is
- *       not dependent on Python.h and can be copied to dlpack.h
- */
-typedef int (*DLPackFromPyObject)(void* py_obj, DLManagedTensorVersioned** out, void** env_stream);
-/*!
- * \brief C-style function pointer to speed convert a DLManagedTensorVersioned to a PyObject Tensor.
- * \param tensor The DLManagedTensorVersioned to convert.
- * \param py_obj_out The output Python object.
- * \return 0 on success, -1 on failure. PyError should be set if -1 is returned.
- * \note We use void* to avoid dependency on Python.h so this specific type is
- *       not dependent on Python.h and can be copied to dlpack.h
- */
-typedef int (*DLPackToPyObject)(DLManagedTensorVersioned* tensor, void** py_obj_out);
-
 ///--------------------------------------------------------------------------------
 /// We deliberately designed the data structure and function to be C-style
 //  prefixed with TVMFFIPy so they can be easily invoked through Cython.
@@ -284,7 +261,7 @@ class TVMFFIPyCallManager {
         if (SetArgument(setter_factory, &ctx, py_arg, c_arg) != 0) return -1;
       }
       TVMFFIStreamHandle prev_stream = nullptr;
-      DLPackTensorAllocator prev_tensor_allocator = nullptr;
+      DLPackManagedTensorAllocator prev_tensor_allocator = nullptr;
       // setup stream context if needed
       if (ctx.device_type != -1) {
         c_api_ret_code[0] =

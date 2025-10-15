@@ -313,18 +313,6 @@ def _env_get_current_stream(int device_type, int device_id):
 
 cdef extern from "tvm_ffi_python_helpers.h":
     # no need to expose fields of the call context setter data structure
-    ctypedef int (*DLPackFromPyObject)(
-        void* py_obj, DLManagedTensorVersioned** out, TVMFFIStreamHandle* env_stream
-    ) except -1
-
-    ctypedef int (*DLPackToPyObject)(
-        DLManagedTensorVersioned* tensor, void** py_obj_out
-    ) except -1
-    ctypedef int (*DLPackTensorAllocator)(
-        DLTensor* prototype, DLManagedTensorVersioned** out, void* error_ctx,
-        void (*SetError)(void* error_ctx, const char* kind, const char* message)
-    ) except -1
-
     ctypedef struct TVMFFIPyCallContext:
         int device_type
         int device_id
