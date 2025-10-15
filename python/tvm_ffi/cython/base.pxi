@@ -91,23 +91,23 @@ cdef extern from "dlpack/dlpack.h":
     ctypedef int (*DLPackManagedTensorFromPyObjectNoSync)(
         void* py_object,
         DLManagedTensorVersioned** out
-    ) noexcept
+    ) except -1
 
     ctypedef int (*DLPackManagedTensorToPyObjectNoSync)(
         DLManagedTensorVersioned* tensor,
         void** out_py_object
-    ) noexcept
+    ) except -1
 
     ctypedef int (*DLPackCurrentWorkStream)(
         int device_type,
         int32_t device_id,
         void** out_current_stream
-    ) noexcept
+    ) except -1
 
     ctypedef int (*DLPackDLTensorFromPyObjectNoSync)(
         void* py_object,
         DLTensor* out
-    ) noexcept
+    ) except -1
 
     ctypedef struct DLPackExchangeAPIHeader:
         DLPackVersion version
