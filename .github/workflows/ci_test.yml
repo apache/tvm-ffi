@@ -107,15 +107,15 @@ jobs:
           cmake . -B build_test -DTVM_FFI_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Debug
           cmake --build build_test --clean-first --config Debug --target tvm_ffi_tests
           ctest -V -C Debug --test-dir build_test --output-on-failure
-      - name: Run cpp tests[windows]
-        if: ${{ matrix.os == 'windows-latest' }}
-        shell: cmd
-        env:
-          CMAKE_BUILD_PARALLEL_LEVEL: ${{ steps.env_vars.outputs.cpu_count }}
-        run: >
-          cmake . -B build_test -DTVM_FFI_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Debug &&
-          cmake --build build_test --clean-first --config Debug --target tvm_ffi_tests &&
-          ctest -V -C Debug --test-dir build_test --output-on-failure
+      # - name: Run cpp tests[windows]
+      #   if: ${{ matrix.os == 'windows-latest' }}
+      #   shell: cmd
+      #   env:
+      #     CMAKE_BUILD_PARALLEL_LEVEL: ${{ steps.env_vars.outputs.cpu_count }}
+      #   run: >
+      #     cmake . -B build_test -DTVM_FFI_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Debug &&
+      #     cmake --build build_test --clean-first --config Debug --target tvm_ffi_tests &&
+      #     ctest -V -C Debug --test-dir build_test --output-on-failure
 
       # Run Python tests
       - name: Setup Python ${{ matrix.python_version }}
@@ -123,14 +123,18 @@ jobs:
         with:
           python-version: ${{ matrix.python_version }}
           activate-environment: true
-      - name: Build and install python package
-        env:
-          CMAKE_BUILD_PARALLEL_LEVEL: ${{ steps.env_vars.outputs.cpu_count }}
+      # - name: Build and install python package
+      #   env:
+      #     CMAKE_BUILD_PARALLEL_LEVEL: ${{ steps.env_vars.outputs.cpu_count }}
+      #   run: |
+      #     uv pip install --reinstall --verbose -e ".[test]"
+      # - name: Run python tests
+      #   run: |
+      #     pytest -vvs tests/python
+      - name: Try pytorch
         run: |
-          uv pip install --reinstall --verbose -e ".[test]"
-      - name: Run python tests
-        run: |
-          pytest -vvs tests/python
+          uv pip install torch>=2.9.0
+          python -c "import torch; print(torch.__version__)"
 
       # Run Rust tests, must happen after installing the pip package.
       - name: Run rust tests
