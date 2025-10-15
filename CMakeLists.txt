@@ -19,6 +19,20 @@ cmake_minimum_required(VERSION 3.18)
 
 project(tvm_ffi LANGUAGES CXX C)
 
+# load the config.cmake file
+if (EXISTS ${CMAKE_BINARY_DIR}/config.cmake)
+  message(STATUS "Config file: ${CMAKE_BINARY_DIR}/config.cmake")
+  include(${CMAKE_BINARY_DIR}/config.cmake)
+elseif (EXISTS ${PROJECT_SOURCE_DIR}/config.cmake)
+  message(STATUS "Config file: ${PROJECT_SOURCE_DIR}/config.cmake")
+  include(${PROJECT_SOURCE_DIR}/config.cmake)
+elseif (EXISTS ${PROJECT_SOURCE_DIR}/cmake/config.cmake)
+  message(STATUS "Config file: ${PROJECT_SOURCE_DIR}/cmake/config.cmake")
+  include(${PROJECT_SOURCE_DIR}/cmake/config.cmake)
+else ()
+  message(STATUS "No config.cmake found. Using the default config")
+endif ()
+
 option(TVM_FFI_USE_LIBBACKTRACE "Enable libbacktrace" ON)
 option(TVM_FFI_USE_EXTRA_CXX_API "Enable extra CXX API in shared lib" ON)
 option(TVM_FFI_BACKTRACE_ON_SEGFAULT "Set signal handler to print backtrace on segfault" ON)
