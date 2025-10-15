@@ -374,6 +374,8 @@ cdef extern from "tvm_ffi_python_helpers.h":
     void TVMFFIPyMLIRPackedSafeCallDeleter(void* self)
     # deleter for python objects
     void TVMFFIPyObjectDeleter(void* py_obj) noexcept nogil
+    # dummy target for testing
+    int TVMFFITestingDummyTarget() nogil
 
 
 cdef class ByteArrayArg:
@@ -449,4 +451,8 @@ cdef _init_env_api():
     CHECK_CALL(TVMFFIEnvRegisterCAPI(c_str("PyGILState_Ensure"), <void*>PyGILState_Ensure))
     CHECK_CALL(TVMFFIEnvRegisterCAPI(c_str("PyGILState_Release"), <void*>PyGILState_Release))
 
+
 _init_env_api()
+
+# ensure testing is linked and we can run testcases
+TVMFFITestingDummyTarget()

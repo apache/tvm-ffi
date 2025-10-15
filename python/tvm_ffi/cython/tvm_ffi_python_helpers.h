@@ -674,4 +674,9 @@ extern "C" void TVMFFIPyObjectDeleter(void* py_obj) noexcept {
   Py_DecRef(static_cast<PyObject*>(py_obj));
 }
 
+/*
+ * \brief Dummy target to ensure testing is linked and we can run testcases
+ */
+extern "C" TVM_FFI_DLL int TVMFFITestingDummyTarget();
+
 #endif  // TVM_FFI_PYTHON_HELPERS_H_
