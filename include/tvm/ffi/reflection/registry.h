@@ -441,7 +441,7 @@ struct init {
   /*!
    * \brief Constructor
    */
-  init() {}
+  constexpr init() noexcept = default;
 
  private:
   /*!
@@ -576,8 +576,8 @@ class ObjectDef : public ReflectionDefBase {
    * \endcode
    */
   template <typename... Args, typename... Extra>
-  TVM_FFI_INLINE ObjectDef& def(init<Args...> init_func, Extra&&... extra) {
-    RegisterMethod(INIT_METHOD_NAME, true, &init<Args...>::template execute<Class>,
+  TVM_FFI_INLINE ObjectDef& def([[maybe_unused]] init<Args...> init_func, Extra&&... extra) {
+    RegisterMethod(kInitMethodName, true, &init<Args...>::template execute<Class>,
                    std::forward<Extra>(extra)...);
     return *this;
   }
@@ -654,7 +654,7 @@ class ObjectDef : public ReflectionDefBase {
 
   int32_t type_index_;
   const char* type_key_;
-  static constexpr const char* INIT_METHOD_NAME = "__ffi_init__";
+  static constexpr const char* kInitMethodName = "__ffi_init__";
 };
 
 /*!
