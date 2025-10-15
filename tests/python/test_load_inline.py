@@ -243,7 +243,14 @@ def test_load_inline_with_env_tensor_allocator() -> None:
         """,
         functions=["return_add_one"],
     )
-    if torch is not None:
+    assert torch is not None
+
+    def run_check() -> None:
+        """Must run in a separate function to ensure deletion happens before mod unloads.
+
+        When a module returns an object, the object deleter address is part of the
+        loaded library. We need to keep the module loaded until the object is deleted.
+        """
         x_cpu = torch.asarray([1, 2, 3, 4, 5], dtype=torch.float32, device="cpu")
         # test support for nested container passing
         y_cpu = mod.return_add_one({"x": [x_cpu]})
@@ -251,6 +258,8 @@ def test_load_inline_with_env_tensor_allocator() -> None:
         assert y_cpu.shape == (5,)
         assert y_cpu.dtype == torch.float32
         torch.testing.assert_close(x_cpu + 1, y_cpu)
+
+    run_check()
 
 
 @pytest.mark.skipif(
@@ -341,11 +350,16 @@ def test_cuda_memory_alloc_noleak() -> None:
         """,
         functions=["return_tensor"],
     )
-    x = torch.arange(1024 * 1024, dtype=torch.float32, device="cuda")
-    current_allocated = torch.cuda.memory_allocated()
-    repeat = 8
-    for i in range(repeat):
-        mod.return_tensor(x)
-        diff = torch.cuda.memory_allocated() - current_allocated
-        # memory should not grow as we loop over
-        assert diff <= 1024**2 * 8
+
+    def run_check() -> None:
+        """Must run in a separate function to ensure deletion happens before mod unloads."""
+        x = torch.arange(1024 * 1024, dtype=torch.float32, device="cuda")
+        current_allocated = torch.cuda.memory_allocated()
+        repeat = 8
+        for i in range(repeat):
+            mod.return_tensor(x)
+            diff = torch.cuda.memory_allocated() - current_allocated
+            # memory should not grow as we loop over
+            assert diff <= 1024**2 * 8
+
+    run_check()

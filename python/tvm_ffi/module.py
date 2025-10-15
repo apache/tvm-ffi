@@ -54,6 +54,33 @@ class Module(core.Object):
     --------
     :py:func:`tvm_ffi.load_module`
 
+    Notes
+    -----
+    If you load a module within a local scope, be careful when any called function
+    creates and returns an object. The memory deallocation routines are part of
+    the library's code. If the module is unloaded before the object is destroyed,
+    the deleter may call an invalid address. Keep the module loaded until all returned
+    objects are deleted. You can safely use returned objects inside a nested function
+    that finishes before the module goes out of scope. When possible, consider keeping
+    the module alive in a long-lived/global scope (for example, in a global state) to
+    avoid premature unloading.
+
+    .. code-block:: python
+
+        def bad_pattern(x):
+            # Bad: unload order of `tensor` and `mod` is not guaranteed
+            mod = tvm_ffi.load_module("path/to/library.so")
+            # ... do something with the tensor
+            tensor = mod.func_create_and_return_tensor(x)
+
+        def good_pattern(x):
+            # Good: `tensor` is freed before `mod` goes out of scope
+            mod = tvm_ffi.load_module("path/to/library.so")
+            def run_some_tests():
+                tensor = mod.func_create_and_return_tensor(x)
+                # ... do something with the tensor
+            run_some_tests()
+
     """
 
     # tvm-ffi-stubgen(begin): object/ffi.Module
