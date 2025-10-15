@@ -68,6 +68,45 @@ jobs:
           sudo apt install doxygen
           BUILD_CPP_DOCS=1 uv run --group docs sphinx-build -W --keep-going -b html docs docs/_build/html
 
+  run_example:
+    needs: [lint, prepare]
+    name: Examples on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - {os: ubuntu-latest, arch: x86_64, python_version: '3.14t'}
+          - {os: ubuntu-24.04-arm, arch: aarch64, python_version: '3.9'}
+          - {os: windows-latest, arch: AMD64, python_version: '3.12'}
+          - {os: macos-14, arch: arm64, python_version: '3.13'}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Set up uv
+        uses: astral-sh/setup-uv@b75a909f75acd358c2196fb9a5f1299a9a8868a4  # v6.7.0
+        with:
+          python-version: ${{ matrix.python_version }}
+      - name: Install tvm-ffi with test dependencies
+        run: |
+          uv pip install --reinstall --verbose -e ".[test]"
+      - name: Run quick_start example
+        working-directory: examples/quick_start
+        run: |
+          bash run_example.sh
+      - name: Install and run packaging example
+        working-directory: examples/packaging
+        run: |
+          pip install .
+          python run_example.py add_one
+          python run_example.py raise_error
+      - name: Run inline_module example
+        working-directory: examples/inline_module
+        run: |
+          python main.py
+
   test:
     needs: [lint, prepare]
     if: >
