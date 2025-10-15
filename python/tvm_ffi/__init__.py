@@ -16,11 +16,21 @@
 # under the License.
 """TVM FFI Python package."""
 
-# version
-__version__ = "0.1.0b19"
-
 # order matters here so we need to skip isort here
 # isort: skip_file
+__version__ = "0.1.0b19"
+
+# HACK: try importing torch first, to avoid a potential
+# symbol conflict when both torch and tvm_ffi are imported.
+# This conflict can be reproduced in a very narrow scenario:
+# 1. GitHub action on Windows X64
+# 2. Python 3.12
+# 3. torch 2.9.0
+try:
+    import torch  # type: ignore
+except ImportError:
+    pass
+
 # base always go first to load the libtvm_ffi
 from . import base
 from . import libinfo

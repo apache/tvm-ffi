@@ -47,10 +47,26 @@ test = [
   "pytest",
   "numpy",
   "ninja",
-  "torch; python_version < '3.14' and sys_platform != 'win32'",
+  "torch>=2.9; '3.9' < python_version and python_version < '3.14'",
 ]
 
 [dependency-groups]
+dev = [
+  "ruff",
+  "mypy",
+  "clang-format",
+  "clang-tidy",
+  "ipdb",
+  "ipython",
+  "ninja",
+  "pre-commit",
+  "pytest",
+  "numpy",
+  "ml_dtypes",
+  "cython",
+  "cmake",
+  "scikit-build-core",
+]
 docs = [
   "autodocsumm",
   "breathe",
@@ -83,12 +99,14 @@ tvm-ffi-config = "tvm_ffi.config:__main__"
 tvm-ffi-stubgen = "tvm_ffi.stub.stubgen:__main__"
 
 [build-system]
-requires = ["scikit-build-core>=0.10.0", "cython", "cmake>=3.18"]
+requires = ["scikit-build-core>=0.10.0", "cython", "cmake>=3.18", "ninja"]
 build-backend = "scikit_build_core.build"
 
 [tool.scikit-build]
 wheel.py-api = "cp312"
 minimum-version = "build-system.requires"
+ninja.version = ">=1.11"
+ninja.make-fallback = false
 
 # Build configuration
 build-dir = "build"
@@ -248,3 +266,6 @@ exclude = '''(?x)(
 [[tool.mypy.overrides]]
 module = ["torch", "torch.*", "my_ffi_extension", "my_ffi_extension.*"]
 ignore_missing_imports = true
+
+[tool.uv.dependency-groups]
+docs = { requires-python = ">=3.13" }
