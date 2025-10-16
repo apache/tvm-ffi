@@ -274,6 +274,9 @@ def test_function_subclass() -> None:
         def __init__(self, metadata: Any) -> None:
             JitFunction.__init__(self, metadata)
 
+        # When subclassing a Cython cdef class and overriding `__init__`,
+        # special methods like `__call__` may not be inherited automatically.
+        # This explicit assignment ensures the subclass remains callable.
         __call__ = tvm_ffi.Function.__call__  # type: ignore
 
     f = tvm_ffi.convert(lambda x: x)
