@@ -263,3 +263,32 @@ def test_function_from_mlir_packed_safe_call() -> None:
     assert sys.getrefcount(keep_alive) == base_ref_count + 1
     fadd_one = None
     assert sys.getrefcount(keep_alive) == base_ref_count
+
+
+def test_function_subclass() -> None:
+    class JitFunction:
+        def __init__(self, metadata: Any) -> None:
+            self.metadata = metadata
+
+    class MyFunction(tvm_ffi.Function, JitFunction):
+        def __init__(self, metadata: Any) -> None:
+            JitFunction.__init__(self, metadata)
+
+        __call__ = tvm_ffi.Function.__call__  # type: ignore
+
+    f = tvm_ffi.convert(lambda x: x)
+    assert isinstance(f, tvm_ffi.Function)
+    f_sub = MyFunction(128)
+    # move handle from f to f_sub an existing function
+    f_sub.__move_handle_from__(f)
+    assert isinstance(f_sub, MyFunction)
+    assert isinstance(f_sub, JitFunction)
+    assert f_sub.metadata == 128
+
+    y: int = f_sub(2)
+    assert y == 2
+    echo = tvm_ffi.get_global_func("testing.echo")
+    fechoed = echo(f_sub)
+    assert isinstance(fechoed, tvm_ffi.Function)
+    assert fechoed.__chandle__() == f_sub.__chandle__()
+    assert fechoed(10) == 10
