@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import functools
 from dataclasses import MISSING
-from typing import Any, Callable, TypeVar, cast
+from typing import Any, Callable, Type, TypeVar, cast
 
 from ..core import (
     Object,
@@ -33,9 +33,9 @@ _InputClsType = TypeVar("_InputClsType")
 
 def type_info_to_cls(
     type_info: TypeInfo,
-    cls: type[_InputClsType],
+    cls: Type[_InputClsType],  # noqa: UP006
     methods: dict[str, Callable[..., Any] | None],
-) -> type[_InputClsType]:
+) -> Type[_InputClsType]:  # noqa: UP006
     assert type_info.type_cls is None, "Type class is already created"
     # Step 1. Determine the base classes
     cls_bases = cls.__bases__
@@ -77,7 +77,7 @@ def type_info_to_cls(
     new_cls = type(cls.__name__, cls_bases, attrs)
     new_cls.__module__ = cls.__module__
     new_cls = functools.wraps(cls, updated=())(new_cls)  # type: ignore
-    return cast(type[_InputClsType], new_cls)
+    return cast(Type[_InputClsType], new_cls)
 
 
 def fill_dataclass_field(type_cls: type, type_field: TypeField) -> None:

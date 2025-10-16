@@ -25,9 +25,10 @@ method is synthesized to call the FFI constructor when requested.
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Callable
 from dataclasses import InitVar
-from typing import ClassVar, TypeVar, get_origin, get_type_hints
+from typing import ClassVar, Type, TypeVar, get_origin, get_type_hints
 
 from typing_extensions import dataclass_transform
 
@@ -41,7 +42,7 @@ _InputClsType = TypeVar("_InputClsType")
 @dataclass_transform(field_specifiers=(field,))
 def c_class(
     type_key: str, init: bool = True
-) -> Callable[[type[_InputClsType]], type[_InputClsType]]:
+) -> Callable[[Type[_InputClsType]], Type[_InputClsType]]:  # noqa: UP006
     """(Experimental) Create a dataclass-like proxy for a C++ class registered with TVM FFI.
 
     The decorator reads the reflection metadata that was registered on the C++
@@ -114,7 +115,7 @@ def c_class(
 
     """
 
-    def decorator(super_type_cls: type[_InputClsType]) -> type[_InputClsType]:
+    def decorator(super_type_cls: Type[_InputClsType]) -> Type[_InputClsType]:  # noqa: UP006
         nonlocal init
         init = init and "__init__" not in super_type_cls.__dict__
         # Step 1. Retrieve `type_info` from registry
@@ -126,7 +127,7 @@ def c_class(
             _utils.fill_dataclass_field(super_type_cls, type_field)
         # Step 3. Create the proxy class with the fields as properties
         fn_init = _utils.method_init(super_type_cls, type_info) if init else None
-        type_cls: type[_InputClsType] = _utils.type_info_to_cls(
+        type_cls: Type[_InputClsType] = _utils.type_info_to_cls(  # noqa: UP006
             type_info=type_info,
             cls=super_type_cls,
             methods={"__init__": fn_init},
@@ -138,7 +139,10 @@ def c_class(
 
 
 def _inspect_c_class_fields(type_cls: type, type_info: TypeInfo) -> list[TypeField]:
-    type_hints_resolved = get_type_hints(type_cls, include_extras=True)
+    if sys.version_info >= (3, 9):
+        type_hints_resolved = get_type_hints(type_cls, include_extras=True)
+    else:
+        type_hints_resolved = get_type_hints(type_cls)
     type_hints_py = {
         name: type_hints_resolved[name]
         for name in getattr(type_cls, "__annotations__", {}).keys()

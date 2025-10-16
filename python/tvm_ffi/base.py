@@ -29,7 +29,9 @@ logger = logging.getLogger(__name__)
 # ----------------------------
 # Python3 version.
 # ----------------------------
-if not (sys.version_info[0] >= 3 and sys.version_info[1] >= 8):
+if sys.version_info[:2] < (3, 8):  # noqa: UP036
+    # Disables ruff(UP036): Version block is outdated for minimum Python version
+    # This is to ensure that the error message is sufficiently user friendly
     PY3STATEMENT = "The minimal Python requirement is Python 3.8"
     raise Exception(PY3STATEMENT)
 

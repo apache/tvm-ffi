@@ -21,10 +21,6 @@ from __future__ import annotations
 import itertools
 import operator
 import sys
-from collections.abc import ItemsView as ItemsViewBase
-from collections.abc import Iterable, Iterator, Mapping, Sequence
-from collections.abc import KeysView as KeysViewBase
-from collections.abc import ValuesView as ValuesViewBase
 from typing import (
     Any,
     Callable,
@@ -37,17 +33,37 @@ from typing import (
 from . import _ffi_api, core
 from .registry import register_object
 
-# workarounds for python 3.8
-if not (sys.version_info[0] == 3 and sys.version_info[1] <= 8):
+if sys.version_info >= (3, 9):
+    # PEP 585 generics
+    from collections.abc import (
+        ItemsView as ItemsViewBase,
+    )
+    from collections.abc import (
+        Iterable,
+        Iterator,
+        Mapping,
+        Sequence,
+    )
+    from collections.abc import (
+        KeysView as KeysViewBase,
+    )
+    from collections.abc import (
+        ValuesView as ValuesViewBase,
+    )
+else:  # Python 3.8
+    # workarounds for python 3.8
+    # typing-module generics (subscriptable on 3.8)
     from typing import (
         ItemsView as ItemsViewBase,
     )
     from typing import (
-        KeysView as KeysViewBase,
-    )
-    from typing import (
+        Iterable,
+        Iterator,
         Mapping,
         Sequence,
+    )
+    from typing import (
+        KeysView as KeysViewBase,
     )
     from typing import (
         ValuesView as ValuesViewBase,

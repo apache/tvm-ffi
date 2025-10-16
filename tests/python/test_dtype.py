@@ -122,7 +122,8 @@ def test_torch_dtype_conversion() -> None:
     _check_dtype(torch.float8_e4m3fnuz, 11, 8, 1)
     _check_dtype(torch.float8_e5m2, 12, 8, 1)
     _check_dtype(torch.float8_e5m2fnuz, 13, 8, 1)
-    _check_dtype(torch.float8_e8m0fnu, 14, 8, 1)
+    if hasattr(torch, "float8_e8m0fnu"):
+        _check_dtype(torch.float8_e8m0fnu, 14, 8, 1)
 
 
 def test_numpy_dtype_conversion() -> None:
