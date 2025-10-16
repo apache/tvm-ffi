@@ -272,6 +272,8 @@ def test_function_subclass() -> None:
 
     class MyFunction(tvm_ffi.Function, JitFunction):
         def __init__(self, metadata: Any) -> None:
+            # Explicitly initialize the mixin. `super()` is not used because `tvm_ffi.Function`
+            # is an extension type without a standard `__init__`.
             JitFunction.__init__(self, metadata)
 
         # When subclassing a Cython cdef class and overriding `__init__`,
