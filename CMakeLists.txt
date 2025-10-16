@@ -296,7 +296,14 @@ endif ()
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/tvm/ffi/ DESTINATION include/tvm/ffi/)
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/dlpack/include/ DESTINATION include/)
 install(TARGETS tvm_ffi_shared DESTINATION lib)
-install(TARGETS tvm_ffi_testing DESTINATION lib)
+# if tvm_ffi_testing is built, we also install it
+if (TARGET tvm_ffi_testing)
+  install(
+    TARGETS tvm_ffi_testing
+    DESTINATION lib
+    OPTIONAL
+  )
+endif ()
 # ship additional dSYM files for debugging symbols on if available
 if (APPLE)
   install(
@@ -309,5 +316,9 @@ endif ()
 
 if (NOT TVM_FFI_BUILD_PYTHON_MODULE)
   # when building wheel, we do not ship static as we already ships source and dll
-  install(TARGETS tvm_ffi_static DESTINATION lib)
+  install(
+    TARGETS tvm_ffi_static
+    DESTINATION lib
+    OPTIONAL
+  )
 endif ()

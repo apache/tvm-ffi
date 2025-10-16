@@ -22,11 +22,23 @@ Welcome to the documentation for TVM FFI. You can get started by reading the get
 or reading through the guides and concepts sections.
 
 
+Installation
+------------
+
+To install via pip, run:
+
+.. code-block:: bash
+
+   pip install apache-tvm-ffi
+
+
+Table of Contents
+-----------------
+
 .. toctree::
    :maxdepth: 1
    :caption: Get Started
 
-   get_started/install.md
    get_started/quick_start.md
 
 .. toctree::
@@ -37,6 +49,7 @@ or reading through the guides and concepts sections.
    guides/cpp_guide.md
    guides/python_guide.md
    guides/compiler_integration.md
+   guides/build_from_source.md
 
 
 .. toctree::

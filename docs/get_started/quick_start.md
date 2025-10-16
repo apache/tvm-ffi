@@ -29,7 +29,7 @@ Let us first get started by build and run the example. The example will show us:
 
 Before starting, ensure you have:
 
-- TVM FFI installed following [installation](./install.md)
+- TVM FFI installed
 - C++ compiler with C++17 support
 - CMake 3.18 or later
 - (Optional) Ninja build system (the quick-start uses Ninja for fast incremental builds)
