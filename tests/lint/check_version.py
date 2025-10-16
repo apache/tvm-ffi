@@ -16,15 +16,16 @@
 # under the License.
 """Helper tool to check version consistency between pyproject.toml and __init__.py."""
 
+from __future__ import annotations
+
 import re
 import sys
 from pathlib import Path
-from typing import Optional
 
 import tomli
 
 
-def read_pyproject_version(pyproject_path: Path) -> Optional[str]:
+def read_pyproject_version(pyproject_path: Path) -> str | None:
     """Read version from pyproject.toml."""
     with pyproject_path.open("rb") as f:
         data = tomli.load(f)
@@ -32,7 +33,7 @@ def read_pyproject_version(pyproject_path: Path) -> Optional[str]:
     return data.get("project", {}).get("version")
 
 
-def read_init_version(init_path: Path) -> Optional[str]:
+def read_init_version(init_path: Path) -> str | None:
     """Read __version__ from __init__.py."""
     with init_path.open(encoding="utf-8") as f:
         content = f.read()

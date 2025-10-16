@@ -23,6 +23,8 @@ properties that forward to the underlying C++ object, while an ``__init__``
 method is synthesized to call the FFI constructor when requested.
 """
 
+from __future__ import annotations
+
 from collections.abc import Callable
 from dataclasses import InitVar
 from typing import ClassVar, TypeVar, get_origin, get_type_hints

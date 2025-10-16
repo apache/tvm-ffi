@@ -25,6 +25,13 @@ from collections.abc import Iterable, Iterator, Mapping, Sequence
 from collections.abc import KeysView as KeysViewBase
 from collections.abc import ValuesView as ValuesViewBase
 from typing import Any, Callable, SupportsIndex, TypeVar, cast, overload
+from typing import (
+    Sequence,
+    KeysView as KeysViewBase,
+    ValuesView as ValuesViewBase,
+    ItemsView as ItemsViewBase,
+    Mapping,
+)
 
 from . import _ffi_api, core
 from .registry import register_object

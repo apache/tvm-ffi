@@ -30,6 +30,8 @@ Summary of some takeaways:
 - torch.add on gpu takes about 3.7us per call, giving us an idea of what roughly we need to get to in eager mode.
 """
 
+from __future__ import annotations
+
 import time
 from typing import Any, Callable
 

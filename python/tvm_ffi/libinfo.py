@@ -20,6 +20,8 @@ This module also provides helpers to locate and load platform-specific shared
 libraries by a base name (e.g., ``tvm_ffi`` -> ``libtvm_ffi.so`` on Linux).
 """
 
+from __future__ import annotations
+
 import os
 import sys
 from pathlib import Path

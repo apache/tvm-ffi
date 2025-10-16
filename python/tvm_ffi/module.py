@@ -15,7 +15,9 @@
 # specific language governing permissions and limitations
 # under the License.
 """Module related objects and functions."""
+
 # pylint: disable=invalid-name
+from __future__ import annotations
 
 from collections.abc import Sequence
 from enum import IntEnum
@@ -98,7 +100,7 @@ class Module(core.Object):
         return _ffi_api.ModuleGetKind(self)
 
     @property
-    def imports(self) -> list["Module"]:
+    def imports(self) -> list[Module]:
         """Get imported modules.
 
         Returns
@@ -168,7 +170,7 @@ class Module(core.Object):
             raise AttributeError(f"Module has no function '{name}'")
         return func
 
-    def import_module(self, module: "Module") -> None:
+    def import_module(self, module: Module) -> None:
         """Add module to the import list of current one.
 
         Parameters

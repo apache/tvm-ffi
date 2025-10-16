@@ -31,7 +31,7 @@ classifiers = [
   "Intended Audience :: Science/Research",
 ]
 keywords = ["machine learning", "inference"]
-requires-python = ">=3.9"
+requires-python = ">=3.8"
 dependencies = ["typing-extensions>=4.5"]
 
 [project.urls]
@@ -173,7 +173,7 @@ testpaths = ["tests"]
 include = ["python/**/*.py", "tests/**/*.py"]
 line-length = 100
 indent-width = 4
-target-version = "py39"
+target-version = "py38"
 
 [tool.ruff.lint]
 select = [
@@ -183,6 +183,7 @@ select = [
   "RUF", # ruff, https://docs.astral.sh/ruff/rules/#ruff-specific-rules-ruf
   "NPY", # numpy, https://docs.astral.sh/ruff/rules/#numpy-specific-rules-npy
   "F",   # pyflakes, https://docs.astral.sh/ruff/rules/#pyflakes-f
+  "FA",
   "ANN", # flake8-annotations, https://docs.astral.sh/ruff/rules/#flake8-annotations-ann
   "PTH", # flake8-use-pathlib, https://docs.astral.sh/ruff/rules/#flake8-use-pathlib-pth
   "D",   # pydocstyle, https://docs.astral.sh/ruff/rules/#pydocstyle-d
@@ -224,10 +225,10 @@ build-verbosity = 1
 # only build up to cp312, cp312
 # will be abi3 and can be used in future versions
 # ship 314t threaded nogil version
-build = ["cp39-*", "cp310-*", "cp311-*", "cp312-*", "cp314t-*"]
+build = ["cp38-*"]
 skip = ["*musllinux*"]
 # we only need to test on cp312
-test-skip = ["cp39-*", "cp310-*", "cp311-*"]
+test-skip = ["cp38-*", "cp39-*", "cp310-*", "cp311-*"]
 # focus on testing abi3 wheel
 build-frontend = "build[uv]"
 test-command = "pytest {package}/tests/python -vvs"
@@ -244,7 +245,7 @@ environment = { MACOSX_DEPLOYMENT_TARGET = "10.14" }
 archs = ["AMD64"]
 
 [tool.mypy]
-python_version = "3.9"
+python_version = "3.8"
 show_error_codes = true
 mypy_path = ["python", "examples", "tests/python"]
 files = ["python/tvm_ffi", "examples", "tests/python"]

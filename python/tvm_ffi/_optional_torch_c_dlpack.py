@@ -30,6 +30,8 @@ This module will load slowly at first time due to JITing,
 subsequent calls will be much faster.
 """
 
+from __future__ import annotations
+
 import warnings
 from typing import Any
 

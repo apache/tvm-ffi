@@ -17,6 +17,8 @@
 """dtype class."""
 
 # pylint: disable=invalid-name
+from __future__ import annotations
+
 from enum import IntEnum
 from typing import Any, ClassVar
 
@@ -63,7 +65,7 @@ class dtype(str):
 
     _NUMPY_DTYPE_TO_STR: ClassVar[dict[Any, str]] = {}
 
-    def __new__(cls, content: Any) -> "dtype":
+    def __new__(cls, content: Any) -> dtype:
         content = str(content)
         val = str.__new__(cls, content)
         val.__tvm_ffi_dtype__ = core.DataType(content)
@@ -72,7 +74,7 @@ class dtype(str):
     def __repr__(self) -> str:
         return f"dtype('{self}')"
 
-    def with_lanes(self, lanes: int) -> "dtype":
+    def with_lanes(self, lanes: int) -> dtype:
         """Create a new dtype with the given number of lanes.
 
         Parameters

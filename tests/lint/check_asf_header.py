@@ -16,12 +16,13 @@
 # under the License.
 """Helper tool to add ASF header to files that cannot be handled by Rat."""
 
+from __future__ import annotations
+
 import argparse
 import fnmatch
 import subprocess
 import sys
 from pathlib import Path
-from typing import Optional
 
 header_cstyle = """
 /*
@@ -181,7 +182,7 @@ def should_skip_file(filepath: str) -> bool:
     return False
 
 
-def get_git_files() -> Optional[list[str]]:
+def get_git_files() -> list[str] | None:
     """Get list of files tracked by git."""
     try:
         result = subprocess.run(
@@ -242,7 +243,7 @@ def check_header(fname: str, header: str) -> bool:
     return True
 
 
-def collect_files() -> Optional[list[str]]:
+def collect_files() -> list[str] | None:
     """Collect all files that need header checking from git."""
     files = []
 
