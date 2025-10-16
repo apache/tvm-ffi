@@ -69,7 +69,6 @@ jobs:
           CIBW_ARCHS_MACOS: ${{ matrix.arch }}
           CIBW_ARCHS_LINUX: ${{ matrix.arch }}
           CIBW_ARCHS_WINDOWS: ${{ matrix.arch }}
-          CIBW_SKIP: "cp38-macosx_*"
           CIBW_BUILD_VERBOSITY: 1
           CMAKE_BUILD_PARALLEL_LEVEL: ${{ steps.env_vars.outputs.cpu_count }}
 

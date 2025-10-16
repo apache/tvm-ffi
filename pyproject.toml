@@ -228,7 +228,7 @@ manylinux-aarch64-image = "manylinux2014"
 # will be abi3 and can be used in future versions
 # ship 314t threaded nogil version
 build = ["cp38-*", "cp39-*", "cp310-*", "cp311-*", "cp312-*", "cp314t-*"]
-skip = ["*musllinux*"]
+skip = ["*musllinux*", "cp38-macosx_*"]
 # we only need to test on cp312
 test-skip = ["cp38-*", "cp39-*", "cp310-*", "cp311-*"]
 # focus on testing abi3 wheel
