@@ -221,8 +221,6 @@ docstring-code-line-length = "dynamic"
 
 [tool.cibuildwheel]
 build-verbosity = 1
-manylinux-x86_64-image = "manylinux2014"
-manylinux-aarch64-image = "manylinux2014"
 
 # only build up to cp312, cp312
 # will be abi3 and can be used in future versions
