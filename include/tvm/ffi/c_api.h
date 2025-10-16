@@ -61,7 +61,7 @@
 /*! \brief TVM FFI minor version. */
 #define TVM_FFI_VERSION_MINOR 1
 /*! \brief TVM FFI patch version. */
-#define TVM_FFI_VERSION_PATCH 0
+#define TVM_FFI_VERSION_PATCH 1
 
 #ifdef __cplusplus
 extern "C" {

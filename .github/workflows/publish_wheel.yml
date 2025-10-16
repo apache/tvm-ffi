@@ -57,6 +57,8 @@ jobs:
           # Use the input only for manual runs; otherwise use the triggering ref
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.branch || github.ref }}
           submodules: recursive
+          fetch-depth: 2
+          fetch-tags: true
 
       - uses: ./.github/actions/detect-env-vars
         id: env_vars
@@ -101,6 +103,8 @@ jobs:
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.branch || github.ref }}
           submodules: recursive
+          fetch-depth: 2
+          fetch-tags: true
 
       - uses: astral-sh/setup-uv@b75a909f75acd358c2196fb9a5f1299a9a8868a4  # v6.7.0
 

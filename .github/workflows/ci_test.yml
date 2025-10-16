@@ -37,6 +37,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 2
+          fetch-tags: true
       - name: Detect skip ci and docs changes
         id: detect
         uses: ./.github/actions/detect-skip-ci
@@ -50,6 +51,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+          fetch-tags: true
       - uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd  # v3.0.1
 
   doc:
@@ -59,6 +63,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+          fetch-depth: 2
+          fetch-tags: true
       - name: Set up uv
         uses: astral-sh/setup-uv@b75a909f75acd358c2196fb9a5f1299a9a8868a4  # v6.7.0
         with:
@@ -88,6 +94,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+          fetch-depth: 2
+          fetch-tags: true
       - name: Print current commit
         run: git log -1 --oneline
 

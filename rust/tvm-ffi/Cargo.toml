@@ -19,10 +19,9 @@
 name = "tvm-ffi"
 description = "tvm-ffi rust support"
 
-version = "0.1.0-alpha.0"
+version = "0.1.1"
 edition = "2021"
 license = "Apache-2.0"
-
 
 [lib]
 name = "tvm_ffi"
@@ -30,8 +29,8 @@ crate-type = ["lib"]
 
 [dependencies]
 paste = "1.0"
-tvm-ffi-sys = { version = "0.1.0-alpha.0", path = "../tvm-ffi-sys" }
-tvm-ffi-macros = { version = "0.1.0-alpha.0", path = "../tvm-ffi-macros" }
+tvm-ffi-sys = { version = "0.1.1", path = "../tvm-ffi-sys" }
+tvm-ffi-macros = { version = "0.1.1", path = "../tvm-ffi-macros" }
 
 # only needed for example building
 [features]

@@ -19,10 +19,9 @@
 name = "tvm-ffi-sys"
 description = "Low-level sys crate for tvm-ffi"
 
-version = "0.1.0-alpha.0"
+version = "0.1.1"
 edition = "2021"
 license = "Apache-2.0"
-
 
 [lib]
 name = "tvm_ffi_sys"
