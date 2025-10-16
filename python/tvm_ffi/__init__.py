@@ -18,7 +18,7 @@
 
 # order matters here so we need to skip isort here
 # isort: skip_file
-__version__ = "0.1.0b20"
+__version__ = "0.1.0"
 
 # HACK: try importing torch first, to avoid a potential
 # symbol conflict when both torch and tvm_ffi are imported.
