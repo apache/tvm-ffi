@@ -225,7 +225,7 @@ build-verbosity = 1
 # only build up to cp312, cp312
 # will be abi3 and can be used in future versions
 # ship 314t threaded nogil version
-build = ["cp38-*"]
+build = ["cp38-*", "cp39-*", "cp310-*", "cp311-*", "cp312-*", "cp314t-*"]
 skip = ["*musllinux*"]
 # we only need to test on cp312
 test-skip = ["cp38-*", "cp39-*", "cp310-*", "cp311-*"]
