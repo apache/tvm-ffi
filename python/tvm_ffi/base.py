@@ -29,8 +29,8 @@ logger = logging.getLogger(__name__)
 # ----------------------------
 # Python3 version.
 # ----------------------------
-if not (sys.version_info[0] >= 3 and sys.version_info[1] >= 9):
-    PY3STATEMENT = "The minimal Python requirement is Python 3.9"
+if not (sys.version_info[0] >= 3 and sys.version_info[1] >= 8):
+    PY3STATEMENT = "The minimal Python requirement is Python 3.8"
     raise Exception(PY3STATEMENT)
 
 # ----------------------------
