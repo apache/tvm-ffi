@@ -20,21 +20,38 @@ from __future__ import annotations
 
 import itertools
 import operator
+import sys
 from collections.abc import ItemsView as ItemsViewBase
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from collections.abc import KeysView as KeysViewBase
 from collections.abc import ValuesView as ValuesViewBase
-from typing import Any, Callable, SupportsIndex, TypeVar, cast, overload
 from typing import (
-    Sequence,
-    KeysView as KeysViewBase,
-    ValuesView as ValuesViewBase,
-    ItemsView as ItemsViewBase,
-    Mapping,
+    Any,
+    Callable,
+    SupportsIndex,
+    TypeVar,
+    cast,
+    overload,
 )
 
 from . import _ffi_api, core
 from .registry import register_object
+
+# workarounds for python 3.8
+if not (sys.version_info[0] == 3 and sys.version_info[1] <= 8):
+    from typing import (
+        ItemsView as ItemsViewBase,
+    )
+    from typing import (
+        KeysView as KeysViewBase,
+    )
+    from typing import (
+        Mapping,
+        Sequence,
+    )
+    from typing import (
+        ValuesView as ValuesViewBase,
+    )
 
 __all__ = ["Array", "Map"]
 
