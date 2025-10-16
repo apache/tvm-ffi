@@ -18,10 +18,12 @@
 name: Publish wheel
 
 on:
+  push:
+    branches: [main]        # <-- build on every commit to main
   workflow_dispatch:
     inputs:
       branch:
-        description: "Branch or tag publish"
+        description: "Branch or tag to publish (manual run)"
         required: true
 
 jobs:
@@ -42,7 +44,8 @@ jobs:
 
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.ref }}
+          # Use the input only for manual runs; otherwise use the triggering ref
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.branch || github.ref }}
           submodules: recursive
 
       - uses: ./.github/actions/detect-env-vars
@@ -84,6 +87,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.branch || github.ref }}
           submodules: recursive
 
       - uses: astral-sh/setup-uv@v4
@@ -106,7 +110,7 @@ jobs:
     permissions:
       id-token: write
       attestations: write
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch'   # <-- publish only on manual trigger
     steps:
       - uses: actions/download-artifact@v4
         with:
