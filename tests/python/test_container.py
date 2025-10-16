@@ -16,7 +16,6 @@
 # under the License.
 import pickle
 import sys
-from collections.abc import Sequence
 from typing import Any
 
 import pytest
