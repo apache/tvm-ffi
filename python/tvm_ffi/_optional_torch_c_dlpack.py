@@ -71,7 +71,7 @@ DLDataType getDLDataTypeForDLPackv1(const Tensor& t) {
     case ScalarType::UInt64:
       dtype.code = DLDataTypeCode::kDLUInt;
       break;
-#if TORCH_VERSION_MAJOR >= 2 && TORCH_VERSION_MINOR >= 5
+#if TORCH_VERSION_MAJOR >= 2 && TORCH_VERSION_MINOR >= 6
     case ScalarType::Int1:
     case ScalarType::Int2:
     case ScalarType::Int3:
