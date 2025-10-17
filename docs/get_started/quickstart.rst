@@ -327,8 +327,3 @@ Troubleshooting
 - ``OSError: cannot open shared object file``: Add an rpath (Linux/macOS) or ensure the DLL is on ``PATH`` (Windows). Example run-path: ``-Wl,-rpath,`tvm-ffi-config --libdir```.
 - ``undefined symbol: __tvm_ffi_add_one``: Ensure you used ``TVM_FFI_DLL_EXPORT_TYPED_FUNC`` and compiled with default symbol visibility (``-fvisibility=hidden`` is fine; the macro ensures export).
 - ``CUDA error: invalid device function``: Rebuild with the right ``-arch=sm_XX`` for your GPU, or include multiple ``-gencode`` entries.
-
-What's next?
-------------
-
-TBD
