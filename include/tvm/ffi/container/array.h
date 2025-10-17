@@ -447,7 +447,7 @@ class Array : public ObjectRef {
    * \tparam IterType The type of iterator
    */
   template <typename IterType>
-  Array(IterType first, IterType last) {
+  Array(IterType first, IterType last) {  // NOLINT(performance-unnecessary-value-param)
     static_assert(is_valid_iterator_v<T, IterType>,
                   "IterType cannot be inserted into a tvm::Array<T>");
     Assign(first, last);
@@ -817,7 +817,7 @@ class Array : public ObjectRef {
    * \tparam IterType The type of iterator
    */
   template <typename IterType>
-  void Assign(IterType first, IterType last) {
+  void Assign(IterType first, IterType last) {  // NOLINT(performance-unnecessary-value-param)
     int64_t cap = std::distance(first, last);
     if (cap < 0) {
       TVM_FFI_THROW(ValueError) << "cannot construct an Array of negative size";
