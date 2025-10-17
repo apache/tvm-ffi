@@ -54,8 +54,8 @@ def add_one(x):
 
 This approach is like using {py:mod}`ctypes` to load and run DLLs, except we have more powerful features:
 
-- We can pass in `torch.Tensor`(or any other DLPack-compatible arrays)
-- We can pass in richer set of data structures such as strings, tuple, dict.
+- We can pass in `torch.Tensor` (or any other DLPack-compatible arrays).
+- We can pass in a richer set of data structures such as strings, tuples, and dicts.
 - {py:class}`tvm_ffi.Function` enables natural callbacks to Python lambdas or other languages.
 - Exceptions are propagated naturally across language boundaries.
 
