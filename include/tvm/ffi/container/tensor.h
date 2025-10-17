@@ -310,8 +310,8 @@ class Tensor : public ObjectRef {
    * \return The size of the idx-th dimension.
    */
   int64_t size(int64_t idx) const {
-    if (idx < 0) return get()->shape[get()->ndim - idx];
-    return get()->shape[idx];
+    const TensorObj* ptr = get();
+    return ptr->shape[idx >= 0 ? idx : (ptr->ndim + idx)];
   }
 
   /*!
@@ -321,8 +321,8 @@ class Tensor : public ObjectRef {
    * \return The stride of the idx-th dimension.
    */
   int64_t stride(int64_t idx) const {
-    if (idx < 0) return get()->strides[get()->ndim - idx];
-    return get()->strides[idx];
+    const TensorObj* ptr = get();
+    return ptr->strides[idx >= 0 ? idx : (ptr->ndim + idx)];
   }
 
   /*!
@@ -626,10 +626,7 @@ class TensorView {
    * \param idx The index of the size.
    * \return The size of the idx-th dimension.
    */
-  int64_t size(int64_t idx) const {
-    if (idx < 0) return tensor_.shape[tensor_.ndim - idx];
-    return tensor_.shape[idx];
-  }
+  int64_t size(int64_t idx) const { return tensor_.shape[idx >= 0 ? idx : tensor_.ndim + idx]; }
 
   /*!
    * \brief Get the stride of the idx-th dimension. If the idx is negative,
@@ -637,10 +634,7 @@ class TensorView {
    * \param idx The index of the stride.
    * \return The stride of the idx-th dimension.
    */
-  int64_t stride(int64_t idx) const {
-    if (idx < 0) return tensor_.strides[tensor_.ndim - idx];
-    return tensor_.strides[idx];
-  }
+  int64_t stride(int64_t idx) const { return tensor_.strides[idx >= 0 ? idx : tensor_.ndim + idx]; }
 
   /*!
    * \brief Get the byte offset of the Tensor.
