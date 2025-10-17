@@ -35,11 +35,20 @@ def run_raise_error() -> None:
     my_ffi_extension.raise_error("This is an error")
 
 
+def run_int_pair() -> None:
+    """Invoke IntPair from the extension to demonstrate object handling."""
+    pair = my_ffi_extension.IntPair(1, 2)
+    print(f"first={pair.get_first()}")
+    print(f"second={my_ffi_extension.IntPair.static_get_second(pair)}")
+
+
 if __name__ == "__main__":
     if len(sys.argv) > 1:
         if sys.argv[1] == "add_one":
             run_add_one()
+        elif sys.argv[1] == "int_pair":
+            run_int_pair()
         elif sys.argv[1] == "raise_error":
             run_raise_error()
     else:
-        print("Usage: python run_example.py <add_one|raise_error>")
+        print("Usage: python run_example.py <add_one|int_pair|raise_error>")

@@ -60,6 +60,38 @@ void AddOne(ffi::TensorView x, ffi::TensorView y) {
 // expose global symbol add_one
 TVM_FFI_DLL_EXPORT_TYPED_FUNC(add_one, my_ffi_extension::AddOne);
 
+/*!
+ * \brief Example of a custom object that is exposed to the FFI library
+ */
+class IntPairObj : public tvm::ffi::Object {
+ public:
+  int64_t a;
+  int64_t b;
+
+  IntPairObj() = default;
+  IntPairObj(int64_t a, int64_t b) : a(a), b(b) {}
+
+  int64_t GetFirst() const { return this->a; }
+
+  // Required: declare type information
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("my_ffi_extension.IntPair", IntPairObj, tvm::ffi::Object);
+};
+
+/*!
+ * \brief Defines an explicit reference to IntPairObj
+ *
+ * A reference wrapper serves as a reference-counted ptr to the object.
+ * you can use obj->field to access the fields of the object.
+ */
+class IntPair : public tvm::ffi::ObjectRef {
+ public:
+  // Constructor
+  explicit IntPair(int64_t a, int64_t b) { data_ = tvm::ffi::make_object<IntPairObj>(a, b); }
+
+  // Required: define object reference methods
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(IntPair, tvm::ffi::ObjectRef, IntPairObj);
+};
+
 // The static initialization block is
 // called once when the library is loaded.
 TVM_FFI_STATIC_INIT_BLOCK() {
@@ -85,5 +117,15 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   // tvm::ffi::Module::LoadFromFile, instead, just load the dll or simply bundle into the
   // final project
   refl::GlobalDef().def("my_ffi_extension.raise_error", RaiseError);
+  // register the object into the system
+  // register field accessors and a global static function `__ffi_init__` as ffi::Function
+  refl::ObjectDef<IntPairObj>()
+      .def(refl::init<int64_t, int64_t>())
+      // Example static method that returns the second element of the pair
+      .def_static("static_get_second", [](IntPair pair) -> int64_t { return pair->b; })
+      // Example to bind an instance method
+      .def("get_first", &IntPairObj::GetFirst)
+      .def_ro("a", &IntPairObj::a)
+      .def_ro("b", &IntPairObj::b);
 }
 }  // namespace my_ffi_extension

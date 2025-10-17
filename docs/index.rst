@@ -45,7 +45,7 @@ Table of Contents
    :maxdepth: 1
    :caption: Guides
 
-   guides/packaging.md
+   guides/python_packaging.md
    guides/cpp_guide.md
    guides/python_guide.md
    guides/stable_c_abi.md

@@ -17,10 +17,23 @@
 # isort: skip_file
 """Public Python API for the example tvm-ffi extension package."""
 
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+import tvm_ffi
 
 from .base import _LIB
 from . import _ffi_api
+
+
+@tvm_ffi.register_object("my_ffi_extension.IntPair")
+class IntPair(tvm_ffi.Object):
+    """IntPair object."""
+
+    def __init__(self, a: int, b: int) -> None:
+        """Construct the object."""
+        # __ffi_init__ call into the refl::init<> registered
+        # in the static initialization block of the extension library
+        self.__ffi_init__(a, b)
 
 
 def add_one(x: Any, y: Any) -> None:
