@@ -18,18 +18,14 @@
 Ship Across Boundaries
 ======================
 
-This quickstart guide walks through shipping a minimal ``add_one`` function that computes
-``y = x + 1`` for 1-D float32 tensors in two variants:
+This guide walks through shipping a minimal ``add_one`` function that computes
+``y = x + 1`` in C++ and CUDA.
 
-- A simplistic C++ implementation;
-- A CUDA implementation that launches a kernel on the caller's stream.
+TVM-FFI's Open ABI and FFI makes it possible to **build once, ship everywhere**. That said,
+a single shared library works across:
 
-Built with TVM-FFI's open ABI and FFI, a single shared library works across boundaries of:
-
-- languages, e.g. C++, Python, Rust, etc., and
-- ML frameworks, e.g. NumPy, PyTorch, JAX, CuPy, etc.
-
-without having to write any boilerplate code or worry about ABIs.
+- language boundaries, e.g. C++, Python, Rust, etc., and
+- ML framework boundaries, e.g. NumPy, PyTorch, JAX, CuPy, etc.
 
 .. admonition:: Prerequisite
    :class: hint
@@ -46,22 +42,22 @@ without having to write any boilerplate code or worry about ABIs.
         pip install --reinstall --upgrade apache-tvm-ffi
 
 
-Simple ``add_one``
-------------------
+Write a Simple ``add_one``
+--------------------------
 
 .. _sec-cpp-source-code:
 
 Source Code
 ~~~~~~~~~~~
 
-Suppose we implement a C++ function ``AddOne`` that performs elementwise ``y = x + 1`` for a 1-D ``float32`` vector. The source file ``main.cc`` is:
+Suppose we implement a C++ function ``AddOne`` that performs elementwise ``y = x + 1`` for a 1-D ``float32`` vector. The source code (C++, CUDA) is:
 
 .. tabs::
 
   .. group-tab:: C++
 
     .. code-block:: cpp
-      :emphasize-lines: 8, 14
+      :emphasize-lines: 8, 17
 
       // File: main.cc
       #include <tvm/ffi/container/tensor.h>
@@ -71,18 +67,22 @@ Suppose we implement a C++ function ``AddOne`` that performs elementwise ``y = x
 
       /*! \brief Perform vector add one: y = x + 1 (1-D float32) */
       void AddOne(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
-        for (int i = 0; i < x->shape[0]; ++i) {
-          static_cast<float *>(y->data)[i] = static_cast<float *>(x->data)[i] + 1;
+        int64_t n = x.shape()[0];
+        float* x_data = static_cast<float *>(x.data_ptr());
+        float* y_data = static_cast<float *>(y.data_ptr());
+        for (int64_t i = 0; i < n; ++i) {
+          y_data[i] = x_data[i] + 1;
         }
       }
 
       TVM_FFI_DLL_EXPORT_TYPED_FUNC(add_one, tvm_ffi_example_cpp::AddOne);
       }
 
+
   .. group-tab:: CUDA
 
     .. code-block:: cpp
-      :emphasize-lines: 15, 20, 25
+      :emphasize-lines: 15, 22, 26
 
       // File: main.cu
       #include <tvm/ffi/container/tensor.h>
@@ -99,13 +99,14 @@ Suppose we implement a C++ function ``AddOne`` that performs elementwise ``y = x
       }
 
       void AddOne(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
-        int64_t n = x->shape[0];
+        int64_t n = x.shape()[0];
+        float* x_data = static_cast<float *>(x.data_ptr());
+        float* y_data = static_cast<float *>(y.data_ptr());
         int64_t threads = 256;
         int64_t blocks = (n + threads - 1) / threads;
         cudaStream_t stream = static_cast<cudaStream_t>(
-          TVMFFIEnvGetStream(x->device.device_type, x->device.device_id));
-        AddOneKernel<<<blocks, threads, 0, stream>>>(static_cast<float*>(x->data),
-                                                     static_cast<float*>(y->data), n);
+          TVMFFIEnvGetStream(x.device().device_type, x.device().device_id));
+        AddOneKernel<<<blocks, threads, 0, stream>>>(x_data, y_data, n);
       }
 
       TVM_FFI_DLL_EXPORT_TYPED_FUNC(add_one, tvm_ffi_example_cuda::AddOne);
@@ -118,9 +119,8 @@ TVM-FFI looks it up at runtime to make the function available across languages.
 
 Class :cpp:class:`tvm::ffi::TensorView` allows zero-copy interop with tensors from different ML frameworks:
 
-- NumPy/CuPy ``ndarray``,
-- a PyTorch ``Tensor``,
-- a JAX ``Array``, or
+- NumPy, CuPy,
+- PyTorch, JAX, or
 - any array type that supports the standard `DLPack protocol <https://data-apis.org/array-api/2024.12/design_topics/data_interchange.html>`_.
 
 Finally, :cpp:func:`TVMFFIEnvGetStream` used in CUDA code makes it possible to launch a kernel on caller's stream.
@@ -138,23 +138,24 @@ Compile with TVM-FFI
 
     .. code-block:: bash
 
-      g++ -shared -fPIC -fvisibility=hidden -O3  \
-          main.cc                                \
-          `tvm-ffi-config --cxxflags`            \
-          `tvm-ffi-config --ldflags`             \
-          `tvm-ffi-config --libs`                \
+      g++ -shared -O3 main.cc                   \
+          -fPIC -fvisibility=hidden             \
+          `tvm-ffi-config --cxxflags`           \
+          `tvm-ffi-config --ldflags`            \
+          `tvm-ffi-config --libs`               \
           -o libmain.so
 
   .. group-tab:: CUDA
 
     .. code-block:: bash
 
-      nvcc -shared -fPIC -fvisibility=hidden -O3 \
-          main.cu                                \
-          `tvm-ffi-config --cxxflags`            \
-          `tvm-ffi-config --ldflags`             \
-          `tvm-ffi-config --libs`                \
-          -o libmain.so
+      nvcc -shared -O3 main.cu                  \
+        --compiler-options -fPIC                \
+        --compiler-options -fvisibility=hidden  \
+        `tvm-ffi-config --cxxflags`             \
+        `tvm-ffi-config --ldflags`              \
+        `tvm-ffi-config --libs`                 \
+        -o libmain.so
 
 This produces a shared library ``libmain.so``. TVM-FFI automatically embeds the metadata needed to call the function across language and framework boundaries.
 
@@ -210,8 +211,8 @@ Note that ``libmain.so`` is neutral and agnostic to:
 
 .. _sec-use-across-framework:
 
-Use across ML Frameworks
-------------------------
+Ship Across ML Frameworks
+-------------------------
 
 TVM FFI's Python package provides :py:func:`tvm_ffi.load_module`, which loads either C++ or CUDA's ``libmain.so`` into :py:class:`tvm_ffi.Module`.
 
@@ -219,21 +220,11 @@ TVM FFI's Python package provides :py:func:`tvm_ffi.load_module`, which loads ei
 
    import tvm_ffi
    mod  : tvm_ffi.Module   = tvm_ffi.load_module("libmain.so")
-   func : tvm_ffi.Function = mod["add_one"]
+   func : tvm_ffi.Function = mod.add_one
 
 ``mod["add_one"]`` retrieves a callable :py:class:`tvm_ffi.Function` that accepts tensors from host frameworks directly, which can be zero-copy incorporated in all popular ML frameworks. This process is done seamlessly without any boilerplate code, and with ultra low latency.
 
 .. tab-set::
-
-    .. tab-item:: NumPy (C++)
-
-        .. code-block:: python
-
-          import numpy as np
-          x = np.array([1, 2, 3, 4, 5], dtype=np.float32)
-          y = np.empty_like(x)
-          func(x, y)
-          print(y)
 
     .. tab-item:: PyTorch (C++/CUDA)
 
@@ -248,19 +239,31 @@ TVM FFI's Python package provides :py:func:`tvm_ffi.load_module`, which loads ei
 
     .. tab-item:: JAX (C++/CUDA)
 
+        Upcoming. See `jax-tvm-ffi <https://github.com/nvidia/jax-tvm-ffi>`_ for preview.
+
+    .. tab-item:: NumPy (C++)
+
         .. code-block:: python
 
-          # TBD: add JAX example
+          import numpy as np
+          x = np.array([1, 2, 3, 4, 5], dtype=np.float32)
+          y = np.empty_like(x)
+          func(x, y)
+          print(y)
 
     .. tab-item:: CuPy (CUDA)
 
         .. code-block:: python
 
-          # TBD: add CuPy example
+          import cupy as cp
+          x = cp.array([1, 2, 3, 4, 5], dtype=cp.float32)
+          y = cp.empty_like(x)
+          func(x, y)
+          print(y)
 
 
-Use across Languages
---------------------
+Ship Across Languages
+---------------------
 
 TVM-FFI's core loading mechanism is ABI stable and works across language boundaries.
 That said, a single artifact can be loaded in every language TVM-FFI supports,
@@ -270,7 +273,7 @@ without having to recompile different artifact targeting different ABIs or langu
 Python
 ~~~~~~
 
-As introduced in the :ref:`previous section<sec-use-across-framework>`, :py:func:`tvm_ffi.load_module` loads a language- and framework-neutral ``libmain.so`` and supports incorporating it into all Python frameworks that implements the standard `DLPack protocol <https://data-apis.org/array-api/2024.12/design_topics/data_interchange.html>`_.
+As shown in the :ref:`previous section<sec-use-across-framework>`, :py:func:`tvm_ffi.load_module` loads a language- and framework-neutral ``libmain.so`` and supports incorporating it into all Python frameworks that implements the standard `DLPack protocol <https://data-apis.org/array-api/2024.12/design_topics/data_interchange.html>`_.
 
 C++
 ~~~
@@ -311,8 +314,11 @@ TVM-FFI's Rust API ``tvm_ffi::Module::load_from_file`` loads ``libmain.so``, and
 
 .. code-block:: rust
 
-    let module : tvm_ffi::Module   = tvm_ffi::Module::load_from_file("libmain.so").unwrap();
-    let func   : tvm_ffi::Function = module.get_function("add_one").unwrap();
+    fn load_add_one() -> Result<tvm_ffi::Function> {
+        let module: tvm_ffi::Module = tvm_ffi::Module::load_from_file("libmain.so")?;
+        let result: tvm_ffi::Function = module.get_function("add_one")?;
+        Ok(result)
+    }
 
 
 Troubleshooting
