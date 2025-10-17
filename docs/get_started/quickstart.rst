@@ -15,8 +15,8 @@
 .. specific language governing permissions and limitations
 .. under the License.
 
-Ship Across Boundaries
-======================
+Quick Start
+===========
 
 This guide walks through shipping a minimal ``add_one`` function that computes
 ``y = x + 1`` in C++ and CUDA.

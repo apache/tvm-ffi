@@ -29,7 +29,7 @@ If so, we will also briefly copy snippets that show the corresponding C++ behavi
 ## Load and Run Module
 
 The most common use case of TVM FFI is to load a runnable module and run the corresponding function.
-You can follow the [quickstart guide](../get_started/quick_start.md) for details on building the
+You can follow the [quickstart guide](../get_started/quickstart.md) for details on building the
 library `build/add_one_cpu.so`. Let's walk through the load and run example again for NumPy
 
 ```python
