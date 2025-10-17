@@ -41,7 +41,16 @@ jobs:
           - {os: macos-14, arch: arm64, linux_image: ""}
 
     steps:
-      - uses: astral-sh/setup-uv@v4
+      # Special handling for macOS arm64 + python 3.8.
+      # Install Python 3.8 from `actions/setup-python`, which is an arm64 build;
+      # N.B. Don't use `astral-sh/setup-uv` here as it provides an x86_64 build instead.
+      # See also: https://cibuildwheel.pypa.io/en/stable/faq/#macos-building-cpython-38-wheels-on-arm64
+      - uses: actions/setup-python@v5
+        with:
+          python-version: 3.8
+        if: runner.os == 'macOS' && runner.arch == 'ARM64'
+      - uses: astral-sh/setup-uv@b75a909f75acd358c2196fb9a5f1299a9a8868a4
+        if: matrix.os != 'macOS' || matrix.arch != 'arm64'
 
       - uses: actions/checkout@v4
         with:
@@ -93,7 +102,7 @@ jobs:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.branch || github.ref }}
           submodules: recursive
 
-      - uses: astral-sh/setup-uv@v4
+      - uses: astral-sh/setup-uv@b75a909f75acd358c2196fb9a5f1299a9a8868a4  # v6.7.0
 
       - name: Build sdist
         run: pipx run build --sdist --outdir dist .
