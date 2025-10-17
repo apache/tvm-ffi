@@ -48,6 +48,7 @@ Table of Contents
    guides/packaging.md
    guides/cpp_guide.md
    guides/python_guide.md
+   guides/stable_c_abi.md
    guides/compiler_integration.md
    guides/build_from_source.md
 
