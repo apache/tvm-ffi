@@ -20,7 +20,7 @@ This guide explains how to leverage tvm-ffi to expose C++ functions into Python 
 At a high level, packaging with tvm-ffi offers several benefits:
 
 - **Ship one wheel** that can be used across Python versions, including free-threaded Python.
-- **Multi-language access** to functions from Python, C++, Rust and other languages that connect to the ABI.
+- **Multi-language access** to functions from Python, C++, Rust and other languages that support the ABI.
 - **ML Systems Interop** with ML frameworks, DSLs, and libraries while maintaining minimal dependency.
 
 ## Directly using Exported Library
@@ -54,7 +54,8 @@ def add_one(x):
 
 This approach is like using {py:mod}`ctypes` to load and run DLLs, except we have more powerful features:
 
-- We can pass in and return a richer set of data types such as {py:class}`tvm_ffi.Tensor` and strings.
+- We can pass in `torch.Tensor`(or any other DLPack-compatible arrays)
+- We can pass in richer set of data structures such as strings, tuple, dict.
 - {py:class}`tvm_ffi.Function` enables natural callbacks to Python lambdas or other languages.
 - Exceptions are propagated naturally across language boundaries.
 
@@ -406,7 +407,7 @@ def raise_error(msg):
     return _ffi_api.raise_error(msg)
 ```
 
-## Build and Use the Package
+### Build and Use the Package
 
 First, build the wheel:
 
