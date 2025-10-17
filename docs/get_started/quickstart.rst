@@ -24,8 +24,8 @@ This guide walks through shipping a minimal ``add_one`` function that computes
 TVM-FFI's Open ABI and FFI makes it possible to **build once, ship everywhere**. That said,
 a single shared library works across:
 
-- language boundaries, e.g. C++, Python, Rust, etc., and
-- ML framework boundaries, e.g. NumPy, PyTorch, JAX, CuPy, etc.
+- **ML frameworks**, e.g. PyTorch, JAX, NumPy, CuPy, etc., and
+- **languages**, e.g. C++, Python, Rust, etc.
 
 .. admonition:: Prerequisite
    :class: hint
