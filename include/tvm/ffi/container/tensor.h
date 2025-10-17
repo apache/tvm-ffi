@@ -279,6 +279,11 @@ class Tensor : public ObjectRef {
   int32_t ndim() const { return get()->ndim; }
 
   /*!
+   * \brief Alias for torch aten naming.
+   */
+  inline int32_t dim() { return ndim(); }
+
+  /*!
    * \brief Get the data type of the Tensor.
    * \return The data type of the Tensor.
    */
@@ -292,6 +297,11 @@ class Tensor : public ObjectRef {
     const TensorObj* obj = get();
     return tvm::ffi::ShapeView(obj->shape, obj->ndim);
   }
+
+  /*!
+   * \brief Alias for torch aten naming.
+   */
+  inline ShapeView sizes() const { return shape(); }
 
   /*!
    * \brief Get the strides of the Tensor.
@@ -308,14 +318,14 @@ class Tensor : public ObjectRef {
    * \param idx The index of the size.
    * \return The size of the idx-th dimension.
    */
-  int64_t size(size_t idx) const { return get()->shape[idx]; }
+  int64_t size(int64_t idx) const { return get()->shape[idx]; }
 
   /*!
    * \brief Get the stride of the idx-th dimension.
    * \param idx The index of the stride.
    * \return The stride of the idx-th dimension.
    */
-  int64_t stride(size_t idx) const { return get()->strides[idx]; }
+  int64_t stride(int64_t idx) const { return get()->strides[idx]; }
 
   /*!
    * \brief Get the number of elements in the Tensor.
@@ -332,6 +342,10 @@ class Tensor : public ObjectRef {
    * \return True if the Tensor is contiguous, false otherwise.
    */
   bool IsContiguous() const { return tvm::ffi::IsContiguous(*get()); }
+  /*!
+   * \brief Alias for torch aten naming.
+   */
+  inline bool is_contiguous() const { return IsContiguous(); }
   /*!
    * \brief Check if the Tensor data is aligned to the given alignment.
    * \param alignment The alignment to check.
@@ -570,6 +584,10 @@ class TensorView {
    */
   int32_t ndim() const { return tensor_.ndim; }
   /*!
+   * \brief Alias for torch aten naming.
+   */
+  inline int32_t dim() { return ndim(); }
+  /*!
    * \brief Get the data type of the Tensor.
    * \return The data type of the Tensor.
    */
@@ -579,6 +597,11 @@ class TensorView {
    * \return The shape of the Tensor.
    */
   ShapeView shape() const { return ShapeView(tensor_.shape, tensor_.ndim); }
+
+  /*!
+   * \brief Alias for torch aten naming.
+   */
+  inline ShapeView sizes() const { return shape(); }
 
   /*!
    * \brief Get the number of elements in the Tensor.
@@ -600,14 +623,14 @@ class TensorView {
    * \param idx The index of the size.
    * \return The size of the idx-th dimension.
    */
-  int64_t size(size_t idx) const { return tensor_.shape[idx]; }
+  int64_t size(int64_t idx) const { return tensor_.shape[idx]; }
 
   /*!
    * \brief Get the stride of the idx-th dimension.
    * \param idx The index of the stride.
    * \return The stride of the idx-th dimension.
    */
-  int64_t stride(size_t idx) const { return tensor_.strides[idx]; }
+  int64_t stride(int64_t idx) const { return tensor_.strides[idx]; }
 
   /*!
    * \brief Get the byte offset of the Tensor.
@@ -620,6 +643,11 @@ class TensorView {
    * \return True if the Tensor is contiguous, false otherwise.
    */
   bool IsContiguous() const { return tvm::ffi::IsContiguous(tensor_); }
+
+  /*!
+   * \brief Alias for torch aten naming.
+   */
+  inline bool is_contiguous() const { return IsContiguous(); }
 
  private:
   DLTensor tensor_;
