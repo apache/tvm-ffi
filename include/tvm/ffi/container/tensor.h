@@ -38,6 +38,8 @@
 namespace tvm {
 namespace ffi {
 
+class Tensor;
+
 /*!
  * \brief Check if the device uses direct address, where address of data indicate alignment.
  * \param device The input device.
