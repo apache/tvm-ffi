@@ -39,7 +39,7 @@ Table of Contents
    :maxdepth: 1
    :caption: Get Started
 
-   get_started/quick_start.md
+   get_started/ship_one_wheel.rst
 
 .. toctree::
    :maxdepth: 1
