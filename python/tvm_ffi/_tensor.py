@@ -36,7 +36,7 @@ from .core import (
 
 @registry.register_object("ffi.Shape")
 class Shape(tuple, PyNativeObject):
-    """Shape tuple that represents ``ffi::Shape`` returned by an FFI call.
+    """Shape tuple that represents :cpp:class:`tvm::ffi::Shape` returned by an FFI call.
 
     Notes
     -----

@@ -23,49 +23,72 @@ Python API
 
 .. currentmodule:: tvm_ffi
 
+.. contents:: Table of Contents
+   :local:
+   :depth: 2
+
+
 Object
 ------
 .. autosummary::
   :toctree: generated/
 
   Object
-  register_object
 
 
-Function and Module
--------------------
+Tensor
+~~~~~~
+.. autosummary::
+  :toctree: generated/
+
+  Tensor
+  Shape
+  Device
+  from_dlpack
+  DLDeviceType
+  device
+  dtype
+
+
+Function
+~~~~~~~~
 .. autosummary::
   :toctree: generated/
 
   Function
-  Module
-  register_global_func
-  get_global_func
-  system_lib
-  load_module
-  init_ffi_api
-  register_error
-  convert
 
 
-Tensor
-------
+Module
+~~~~~~
 .. autosummary::
   :toctree: generated/
 
-  Shape
-  Tensor
-  Device
-  from_dlpack
+  Module
+  system_lib
+  load_module
 
 
 Containers
-----------
+~~~~~~~~~~
 .. autosummary::
   :toctree: generated/
 
   Array
   Map
+
+
+Global Registry
+---------------
+.. autosummary::
+  :toctree: generated/
+
+  register_error
+  register_object
+  register_global_func
+  get_global_func
+  get_global_func_metadata
+  init_ffi_api
+  remove_global_func
 
 
 Stream Context
@@ -78,8 +101,8 @@ Stream Context
   use_raw_stream
 
 
-Utility
--------
+Inline Loading
+--------------
 
 C++ integration helpers for building and loading inline modules.
 
@@ -89,6 +112,16 @@ C++ integration helpers for building and loading inline modules.
   cpp.load_inline
   cpp.build_inline
 
+
+Misc
+----
+.. autosummary::
+  :toctree: generated/
+
+  serialization
+  access_path
+  convert
+  ObjectConvertible
 
 .. (Experimental) Dataclasses
 .. --------------------------

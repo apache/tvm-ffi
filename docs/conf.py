@@ -143,6 +143,14 @@ intersphinx_mapping = {
     "torch": ("https://pytorch.org/docs/stable", None),
 }
 
+autosummary_generate = True  # actually create stub pages
+
+# Map object names -> stub docnames (no ".rst"; relative to your :toctree: dir)
+autosummary_filename_map = {
+    "tvm_ffi.device": "tvm_ffi.device_function",
+    "tvm_ffi.Device": "tvm_ffi.Device_class",
+}
+
 _DOCS_DIR = Path(__file__).resolve().parent
 _STUBS = {
     "_stubs/cpp_index.rst": "reference/cpp/generated/index.rst",
