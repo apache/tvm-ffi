@@ -74,7 +74,7 @@ gcc -shared -fPIC `tvm-ffi-config --cflags`  \
 The main takeaway points are:
 
 - Function symbols follow name `int __tvm_ffi_<name>`
-- The function follows signaure of `TVMFFISafeCallType`
+- The function follows signature of `TVMFFISafeCallType`
 - Use `TVMFFIAny` to handle dynamic argument types
 - Return `0` for success, `-1` for error (set via `TVMFFIErrorSetRaisedFromCStr`)
 - This function can be compiled using a c compiler and loaded in the same one as
