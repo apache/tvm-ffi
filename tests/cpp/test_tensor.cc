@@ -140,6 +140,15 @@ TEST(Tensor, EnvAlloc) {
   EXPECT_EQ(tensor.size(0), 1);
   EXPECT_EQ(tensor.size(1), 2);
   EXPECT_EQ(tensor.size(2), 3);
+  EXPECT_EQ(tensor.size(-3), 1);
+  EXPECT_EQ(tensor.size(-2), 2);
+  EXPECT_EQ(tensor.size(-1), 3);
+  EXPECT_EQ(tensor.stride(0), 6);
+  EXPECT_EQ(tensor.stride(1), 3);
+  EXPECT_EQ(tensor.stride(2), 1);
+  EXPECT_EQ(tensor.stride(-3), 6);
+  EXPECT_EQ(tensor.stride(-2), 3);
+  EXPECT_EQ(tensor.stride(-1), 1);
   EXPECT_EQ(tensor.dtype().code, kDLFloat);
   EXPECT_EQ(tensor.dtype().bits, 32);
   EXPECT_EQ(tensor.dtype().lanes, 1);
