@@ -24,6 +24,11 @@
 namespace {
 namespace ffi = tvm::ffi;
 
+/*!
+ * \brief Main logics of library loading and function calling.
+ * \param x The input tensor.
+ * \param y The output tensor.
+ */
 void Run(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
   // Load shared library `build/add_one_cpu.so`
   ffi::Module mod = ffi::Module::LoadFromFile("build/add_one_cpu.so");
@@ -34,32 +39,20 @@ void Run(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
 }
 }  // namespace
 
+/*!
+ * \brief The main function, which prepares input/output tensors and calls `Run`.
+ * \return The exit code.
+ */
 int main() {
-  // Step 1. Prepare input data `x` and `y`
   std::vector<float> x_data = {1, 2, 3, 4, 5};
   std::vector<float> y_data(5, 0);
   std::vector<int64_t> shape = {5};
-  DLTensor x{
-      /*data=*/x_data.data(),
-      /*device=*/DLDevice{kDLCPU, 0},
-      /*ndim=*/1,
-      /*dtype=*/DLDataType{kDLFloat, 32, 1},
-      /*shape=*/shape.data(),
-      /*strides=*/nullptr,
-      /*byte_offset=*/0,
-  };
-  DLTensor y{
-      /*data=*/y_data.data(),
-      /*device=*/DLDevice{kDLCPU, 0},
-      /*ndim=*/1,
-      /*dtype=*/DLDataType{kDLFloat, 32, 1},
-      /*shape=*/shape.data(),
-      /*strides=*/nullptr,
-      /*byte_offset=*/0,
-  };
-  // Step 2. Call the function from the shared library
+  std::vector<int64_t> strides = {1};
+  // clang-format off
+  DLTensor x{/*data=*/x_data.data(), /*device=*/DLDevice{kDLCPU, 0}, /*ndim=*/1, /*dtype=*/DLDataType{kDLFloat, 32, 1}, /*shape=*/shape.data(), /*strides=*/strides.data(), /*byte_offset=*/0};
+  DLTensor y{/*data=*/y_data.data(), /*device=*/DLDevice{kDLCPU, 0}, /*ndim=*/1, /*dtype=*/DLDataType{kDLFloat, 32, 1}, /*shape=*/shape.data(), /*strides=*/strides.data(), /*byte_offset=*/0,};
+  // clang-format on
   Run(tvm::ffi::TensorView(&x), tvm::ffi::TensorView(&y));
-  // Step 3. Print the result
   std::cout << "[ ";
   for (int i = 0; i < 5; ++i) {
     std::cout << y_data[i] << " ";
