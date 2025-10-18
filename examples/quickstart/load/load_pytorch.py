@@ -14,8 +14,6 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-"""Load `add_one_cpu.so` or `add_one_cuda.so` and run the `add_one` function."""
-
 # fmt: off
 # ruff: noqa
 # mypy: ignore-errors
@@ -25,7 +23,7 @@
 import tvm_ffi
 mod = tvm_ffi.load_module("build/add_one_cuda.so")
 
-# Step 2. Run `mod.add_one` with PyTorch
+# Step 2. Run `mod.add_one_cuda` with PyTorch
 import torch
 x = torch.tensor([1, 2, 3, 4, 5], dtype=torch.float32, device="cuda")
 y = torch.empty_like(x)

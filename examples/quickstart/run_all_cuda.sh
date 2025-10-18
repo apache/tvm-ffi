@@ -1,3 +1,4 @@
+#!/bin/bash
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
 # distributed with this work for additional information
@@ -14,17 +15,18 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-# fmt: off
-# ruff: noqa
-# mypy: ignore-errors
-# [example.begin]
-# File: load/load_cupy.py
-import tvm_ffi
-mod = tvm_ffi.load_module("build/add_one_cuda.so")
+set -ex
 
-import cupy as cp
-x = cp.array([1, 2, 3, 4, 5], dtype=cp.float32)
-y = cp.empty_like(x)
-mod.add_one_cuda(x, y)
-print(y)
-# [example.end]
+# To compile `compile/add_one_cuda.cu` to shared library `build/add_one_cuda.so`
+cmake . -B build -DEXAMPLE_NAME="compile_cuda" -DCMAKE_BUILD_TYPE=RelWithDebInfo
+cmake --build build --config RelWithDebInfo
+
+# To load and run `add_one_cuda.so` in PyTorch
+
+python load/load_pytorch.py
+
+# To load and run `add_one_cuda.so` in JAX
+python load/load_jax.py
+
+# To load and run `add_one_cuda.so` in CuPy
+python load/load_cupy.py

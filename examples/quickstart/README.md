@@ -19,6 +19,8 @@
 
 This directory contains all the source code for [tutorial](https://tvm.apache.org/ffi/get_started/quickstart.html).
 
+## Compile and Distribute `add_one_*`
+
 To compile the C++ Example:
 
 ```bash
@@ -32,6 +34,8 @@ To compile CUDA Example:
 cmake . -B build -DEXAMPLE_NAME="compile_cuda" -DCMAKE_BUILD_TYPE=RelWithDebInfo
 cmake --build build --config RelWithDebInfo
 ```
+
+## Load the Distributed `add_one_*`
 
 To run library loading examples across ML frameworks:
 

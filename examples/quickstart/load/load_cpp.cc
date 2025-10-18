@@ -24,13 +24,13 @@
 namespace {
 namespace ffi = tvm::ffi;
 
-int Run(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
-  // Load `add_one_cpu` function from the shared library `build/add_one_cpu.so`
+void Run(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
+  // Load shared library `build/add_one_cpu.so`
   ffi::Module mod = ffi::Module::LoadFromFile("build/add_one_cpu.so");
+  // Look up `add_one_cpu` function
   ffi::Function add_one_cpu = mod->GetFunction("add_one_cpu").value();
   // Call the function
   add_one_cpu(x, y);
-  return 0;
 }
 }  // namespace
 
