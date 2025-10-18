@@ -23,11 +23,11 @@
 import tvm_ffi
 mod = tvm_ffi.load_module("build/add_one_cuda.so")
 
-# Step 2. Register `mod.add_one` into JAX
+# Step 2. Register `mod.add_one_cuda` into JAX
 import jax_tvm_ffi
 jax_tvm_ffi.register_ffi_target("add_one", mod.add_one_cuda, platform="gpu")
 
-# Step 3. Run `mod.add_one` with JAX
+# Step 3. Run `mod.add_one_cuda` with JAX
 import jax
 import jax.numpy as jnp
 jax_device, *_ = jax.devices("gpu")
