@@ -14,16 +14,14 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-"""Load `add_one_cpu.so` or `add_one_cuda.so` and run the `add_one` function."""
-
 # fmt: off
 # ruff: noqa
 # mypy: ignore-errors
 # [example.begin]
 # File: load/load_jax.py
-# Step 1. Load `build/add_one_cpu.so` or `build/add_one_cuda.so`
+# Step 1. Load `build/add_one_cuda.so`
 import tvm_ffi
-mod = tvm_ffi.load_module(f"build/add_one_cuda.so")
+mod = tvm_ffi.load_module("build/add_one_cuda.so")
 
 # Step 2. Register `mod.add_one` into JAX
 import jax_tvm_ffi

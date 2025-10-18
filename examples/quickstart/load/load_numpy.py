@@ -14,15 +14,13 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-"""Load `add_one_cpu.so` or `add_one_cuda.so` and run the `add_one` function."""
-
 # fmt: off
 # ruff: noqa
 # mypy: ignore-errors
 # [example.begin]
 # File: load/load_numpy.py
 import tvm_ffi
-mod = tvm_ffi.load_module(f"build/add_one_cpu.so")
+mod = tvm_ffi.load_module("build/add_one_cpu.so")
 
 import numpy as np
 x = np.array([1, 2, 3, 4, 5], dtype=np.float32)

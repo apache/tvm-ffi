@@ -265,3 +265,5 @@ ignore_missing_imports = true
 
 [tool.uv.dependency-groups]
 docs = { requires-python = ">=3.13" }
+
+[tool.setuptools_scm]
