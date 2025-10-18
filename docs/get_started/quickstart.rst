@@ -76,7 +76,7 @@ Suppose we implement a C++ function ``AddOne`` that performs elementwise ``y = x
 
 
 The macro :c:macro:`TVM_FFI_DLL_EXPORT_TYPED_FUNC` exports the C++ function ``AddOne``
-as a TVM FFI compatible symbol with the name ``add_one_cpu`` or ``add_one_cuda`` in the resulting library.
+as a TVM FFI compatible symbol with the name ``__tvm_ffi_add_one`` in the resulting library.
 
 The class :cpp:class:`tvm::ffi::TensorView` allows zero-copy interop with tensors from different ML frameworks:
 
@@ -118,7 +118,7 @@ This step produces a shared library ``add_one_cpu.so`` and ``add_one_cuda.so`` t
 
 
 **CMake.** CMake is the preferred approach for building across platforms.
-After setting `tvm_ffi_DIR` to the output of ``tvm-ffi-config --cmakedir``,
+After setting ``tvm_ffi_DIR`` to the output of ``tvm-ffi-config --cmakedir``,
 CMake is able to locate TVM-FFI's CMake package automatically.
 
 .. tabs::
@@ -289,7 +289,7 @@ This procedure is identical to those in C++ and Python:
 
     fn run_add_one(x: &Tensor, y: &Tensor) -> Result<()> {
         let module = tvm_ffi::Module::load_from_file("add_one_cpu.so")?;
-        let func = module.get_function("add_one_cpu")?;
+        let func = module.get_function("add_one")?;
         let typed_fn = into_typed_fn!(func, Fn(&Tensor, &Tensor) -> Result<()>);
         typed_fn(x, y)?;
         Ok(())
