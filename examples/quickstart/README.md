@@ -17,6 +17,8 @@
 
 # Quick Start Code Example
 
+This directory contains all the source code for [tutorial](https://tvm.apache.org/ffi/get_started/quickstart.html).
+
 To compile the C++ Example:
 
 ```bash
