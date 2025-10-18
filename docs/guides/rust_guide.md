@@ -212,6 +212,6 @@ For detailed API documentation, see the [Rust API Reference](../reference/rust/i
 
 ## Related Resources
 
-- [Quick Start Guide](../get_started/quick_start.md) - General TVM FFI introduction
+- [Quick Start Guide](../get_started/quickstart.rst) - General TVM FFI introduction
 - [C++ Guide](cpp_guide.md) - C++ API usage
 - [Python Guide](python_guide.md) - Python API usage
