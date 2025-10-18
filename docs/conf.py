@@ -229,7 +229,9 @@ def _copy_rust_docs_to_output(app: sphinx.application.Sphinx, exception: Excepti
         shutil.copytree(src_dir, dst_dir)
         print(f"Copied Rust documentation from {src_dir} to {dst_dir}")
     else:
-        print(f"Warning: Rust documentation source directory not found at {src_dir}. Skipping copy.")
+        print(
+            f"Warning: Rust documentation source directory not found at {src_dir}. Skipping copy."
+        )
 
 
 def setup(app: sphinx.application.Sphinx) -> None:
