@@ -60,7 +60,7 @@ Suppose we implement a C++ function ``AddOne`` that performs elementwise ``y = x
 
   .. group-tab:: C++
 
-    .. literalinclude:: ../../examples/quickstart/src/add_one_cpu.cc
+    .. literalinclude:: ../../examples/quickstart/compile/add_one_cpu.cc
       :language: cpp
       :emphasize-lines: 8, 17
       :start-after: [example.begin]
@@ -68,7 +68,7 @@ Suppose we implement a C++ function ``AddOne`` that performs elementwise ``y = x
 
   .. group-tab:: CUDA
 
-    .. literalinclude:: ../../examples/quickstart/src/add_one_cuda.cu
+    .. literalinclude:: ../../examples/quickstart/compile/add_one_cuda.cu
       :language: cpp
       :emphasize-lines: 15, 22, 26
       :start-after: [example.begin]
@@ -76,7 +76,7 @@ Suppose we implement a C++ function ``AddOne`` that performs elementwise ``y = x
 
 
 The macro :c:macro:`TVM_FFI_DLL_EXPORT_TYPED_FUNC` exports the C++ function ``AddOne``
-as a TVM FFI compatible symbol with the name ``__tvm_ffi_add_one`` in the resulting library.
+as a TVM FFI compatible symbol with the name ``__tvm_ffi_add_one_cpu/cuda`` in the resulting library.
 
 The class :cpp:class:`tvm::ffi::TensorView` allows zero-copy interop with tensors from different ML frameworks:
 
@@ -177,7 +177,7 @@ We can then use these functions in the following ways:
 
     .. tab-item:: PyTorch
 
-        .. literalinclude:: ../../examples/quickstart/load_pytorch.py
+        .. literalinclude:: ../../examples/quickstart/load/load_pytorch.py
           :language: python
           :start-after: [example.begin]
           :end-before: [example.end]
@@ -190,23 +190,23 @@ We can then use these functions in the following ways:
 
           pip install git+https://github.com/NVIDIA/jax-tvm-ffi.git
 
-        After installation, ``add_one`` is available as a JAX FFI target:
+        After installation, ``add_one_cuda`` can be registered as a target to JAX's ``ffi_call``.
 
-        .. literalinclude:: ../../examples/quickstart/load_jax.py
+        .. literalinclude:: ../../examples/quickstart/load/load_jax.py
           :language: python
           :start-after: [example.begin]
           :end-before: [example.end]
 
     .. tab-item:: NumPy
 
-        .. literalinclude:: ../../examples/quickstart/load_numpy.py
+        .. literalinclude:: ../../examples/quickstart/load/load_numpy.py
           :language: python
           :start-after: [example.begin]
           :end-before: [example.end]
 
     .. tab-item:: CuPy
 
-        .. literalinclude:: ../../examples/quickstart/load_cupy.py
+        .. literalinclude:: ../../examples/quickstart/load/load_cupy.py
           :language: python
           :start-after: [example.begin]
           :end-before: [example.end]
@@ -232,7 +232,7 @@ C++
 TVM-FFI's C++ API :cpp:func:`tvm::ffi::Module::LoadFromFile` loads ``add_one_cpu.so`` or ``add_one_cuda.so`` and
 can be used directly in C/C++ with no Python dependency.
 
-.. literalinclude:: ../../examples/quickstart/load_cpp.cc
+.. literalinclude:: ../../examples/quickstart/load/load_cpp.cc
    :language: cpp
    :start-after: [example.begin]
    :end-before: [example.end]
@@ -268,13 +268,13 @@ Compile and run it with:
       #include <tvm/ffi/container/tensor.h>
 
       // declare reference to the exported symbol
-      extern "C" int __tvm_ffi_add_one(void*, const TVMFFIAny*, int32_t, TVMFFIAny*);
+      extern "C" int __tvm_ffi_add_one_cpu(void*, const TVMFFIAny*, int32_t, TVMFFIAny*);
 
       namespace ffi = tvm::ffi;
 
       int bundle_add_one(ffi::TensorView x, ffi::TensorView y) {
         void* closure_handle = nullptr;
-        ffi::Function::InvokeExternC(closure_handle, __tvm_ffi_add_one, x, y);
+        ffi::Function::InvokeExternC(closure_handle, __tvm_ffi_add_one_cpu, x, y);
         return 0;
       }
 
@@ -289,7 +289,7 @@ This procedure is identical to those in C++ and Python:
 
     fn run_add_one(x: &Tensor, y: &Tensor) -> Result<()> {
         let module = tvm_ffi::Module::load_from_file("add_one_cpu.so")?;
-        let func = module.get_function("add_one")?;
+        let func = module.get_function("add_one_cpu")?;
         let typed_fn = into_typed_fn!(func, Fn(&Tensor, &Tensor) -> Result<()>);
         typed_fn(x, y)?;
         Ok(())
@@ -306,5 +306,5 @@ Troubleshooting
 ---------------
 
 - ``OSError: cannot open shared object file``: Add an rpath (Linux/macOS) or ensure the DLL is on ``PATH`` (Windows). Example run-path: ``-Wl,-rpath,`tvm-ffi-config --libdir```.
-- ``undefined symbol: __tvm_ffi_add_one``: Ensure you used ``TVM_FFI_DLL_EXPORT_TYPED_FUNC`` and compiled with default symbol visibility (``-fvisibility=hidden`` is fine; the macro ensures export).
+- ``undefined symbol: __tvm_ffi_add_one_cpu``: Ensure you used :c:macro:`TVM_FFI_DLL_EXPORT_TYPED_FUNC` and compiled with default symbol visibility (``-fvisibility=hidden`` is fine; the macro ensures export).
 - ``CUDA error: invalid device function``: Rebuild with the correct ``-arch=sm_XX`` for your GPU, or include multiple ``-gencode`` entries.
