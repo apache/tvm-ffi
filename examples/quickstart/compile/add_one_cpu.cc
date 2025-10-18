@@ -16,26 +16,24 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+
+// [example.begin]
+// File: src/add_one_cpu.cc
 #include <tvm/ffi/container/tensor.h>
-#include <tvm/ffi/dtype.h>
-#include <tvm/ffi/error.h>
 #include <tvm/ffi/function.h>
 
-namespace tvm_ffi_example {
+namespace tvm_ffi_example_cpu {
 
+/*! \brief Perform vector add one: y = x + 1 (1-D float32) */
 void AddOne(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
-  // implementation of a library function
-  TVM_FFI_ICHECK(x.ndim() == 1) << "x must be a 1D tensor";
-  DLDataType f32_dtype{kDLFloat, 32, 1};
-  TVM_FFI_ICHECK(x.dtype() == f32_dtype) << "x must be a float tensor";
-  TVM_FFI_ICHECK(y.ndim() == 1) << "y must be a 1D tensor";
-  TVM_FFI_ICHECK(y.dtype() == f32_dtype) << "y must be a float tensor";
-  TVM_FFI_ICHECK(x.size(0) == y.size(0)) << "x and y must have the same shape";
-  for (int i = 0; i < x.size(0); ++i) {
-    static_cast<float*>(y.data_ptr())[i] = static_cast<float*>(x.data_ptr())[i] + 1;
+  int64_t n = x.size(0);
+  float* x_data = static_cast<float*>(x.data_ptr());
+  float* y_data = static_cast<float*>(y.data_ptr());
+  for (int64_t i = 0; i < n; ++i) {
+    y_data[i] = x_data[i] + 1;
   }
 }
 
-// Expose global symbol `add_one_cpu` that follows tvm-ffi abi
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(add_one_cpu, tvm_ffi_example::AddOne);
-}  // namespace tvm_ffi_example
+TVM_FFI_DLL_EXPORT_TYPED_FUNC(add_one_cpu, tvm_ffi_example_cpu::AddOne);
+}  // namespace tvm_ffi_example_cpu
+// [example.end]

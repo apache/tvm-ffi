@@ -16,13 +16,14 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+
+// [example.begin]
+// File: src/add_one_cuda.cu
 #include <tvm/ffi/container/tensor.h>
-#include <tvm/ffi/dtype.h>
-#include <tvm/ffi/error.h>
 #include <tvm/ffi/extra/c_env_api.h>
 #include <tvm/ffi/function.h>
 
-namespace tvm_ffi_example {
+namespace tvm_ffi_example_cuda {
 
 __global__ void AddOneKernel(float* x, float* y, int n) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -31,28 +32,17 @@ __global__ void AddOneKernel(float* x, float* y, int n) {
   }
 }
 
-void AddOneCUDA(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
-  // implementation of a library function
-  TVM_FFI_ICHECK(x.ndim() == 1) << "x must be a 1D tensor";
-  DLDataType f32_dtype{kDLFloat, 32, 1};
-  TVM_FFI_ICHECK(x.dtype() == f32_dtype) << "x must be a float tensor";
-  TVM_FFI_ICHECK(y.ndim() == 1) << "y must be a 1D tensor";
-  TVM_FFI_ICHECK(y.dtype() == f32_dtype) << "y must be a float tensor";
-  TVM_FFI_ICHECK(x.size(0) == y.size(0)) << "x and y must have the same shape";
-
+void AddOne(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
   int64_t n = x.size(0);
-  int64_t nthread_per_block = 256;
-  int64_t nblock = (n + nthread_per_block - 1) / nthread_per_block;
-  // Obtain the current stream from the environment
-  // it will be set to torch.cuda.current_stream() when calling the function
-  // with torch.Tensors
+  float* x_data = static_cast<float*>(x.data_ptr());
+  float* y_data = static_cast<float*>(y.data_ptr());
+  int64_t threads = 256;
+  int64_t blocks = (n + threads - 1) / threads;
   cudaStream_t stream =
       static_cast<cudaStream_t>(TVMFFIEnvGetStream(x.device().device_type, x.device().device_id));
-  // launch the kernel
-  AddOneKernel<<<nblock, nthread_per_block, 0, stream>>>(static_cast<float*>(x.data_ptr()),
-                                                         static_cast<float*>(y.data_ptr()), n);
+  AddOneKernel<<<blocks, threads, 0, stream>>>(x_data, y_data, n);
 }
 
-// Expose global symbol `add_one_cpu` that follows tvm-ffi abi
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(add_one_cuda, tvm_ffi_example::AddOneCUDA);
-}  // namespace tvm_ffi_example
+TVM_FFI_DLL_EXPORT_TYPED_FUNC(add_one_cuda, tvm_ffi_example_cuda::AddOne);
+}  // namespace tvm_ffi_example_cuda
+// [example.end]

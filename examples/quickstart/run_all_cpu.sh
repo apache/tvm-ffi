@@ -17,23 +17,14 @@
 # under the License.
 set -ex
 
-if command -v ninja >/dev/null 2>&1; then
-	generator="Ninja"
-else
-	echo "Ninja not found, falling back to Unix Makefiles" >&2
-	generator="Unix Makefiles"
-fi
+# To compile `compile/add_one_cpu.cc` to shared library `build/add_one_cpu.so`
+cmake . -B build -DEXAMPLE_NAME="compile_cpu" -DCMAKE_BUILD_TYPE=RelWithDebInfo
+cmake --build build --config RelWithDebInfo
 
-rm -rf build/CMakeCache.txt
-cmake -G "$generator" -B build -S .
-cmake --build build --parallel
+# To load and run `add_one_cpu.so` in NumPy
+python load/load_numpy.py
 
-# running python example
-python run_example.py
-
-# running c++ example
-./build/run_example
-
-if [ -x ./build/run_example_cuda ]; then
-	./build/run_example_cuda
-fi
+# To load and run `add_one_cpu.so` in C++
+cmake . -B build -DEXAMPLE_NAME="load_cpp" -DCMAKE_BUILD_TYPE=RelWithDebInfo
+cmake --build build --config RelWithDebInfo
+build/load_cpp
