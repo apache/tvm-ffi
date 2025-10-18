@@ -17,16 +17,39 @@
 
 # Quick Start Code Example
 
-Compile C++ Example:
+To compile the C++ Example:
 
 ```bash
 cmake . -B build -DEXAMPLE_NAME="cpp" -DCMAKE_BUILD_TYPE=RelWithDebInfo
 cmake --build build --config RelWithDebInfo
 ```
 
-Compile CUDA Example:
+To compile CUDA Example:
 
 ```bash
 cmake . -B build -DEXAMPLE_NAME="cuda" -DCMAKE_BUILD_TYPE=RelWithDebInfo
 cmake --build build --config RelWithDebInfo
+```
+
+To run library loading examples across ML frameworks:
+
+```bash
+python load_pytorch.py
+python load_jax.py
+python load_numpy.py
+python load_cupy.py
+```
+
+To run library loading example in C++:
+
+```bash
+g++ -fvisibility=hidden -O3             \
+  load_cpp.cc                           \
+  `tvm-ffi-config --cxxflags`           \
+  `tvm-ffi-config --ldflags`            \
+  `tvm-ffi-config --libs`               \
+  -Wl,-rpath,`tvm-ffi-config --libdir`  \
+  -o build/load_cpp
+
+build/load_cpp
 ```
