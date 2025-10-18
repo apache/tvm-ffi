@@ -17,22 +17,28 @@
  * under the License.
  */
 // [example.begin]
-// File: load_cpp.cc
+// File: load/load_cpp.cc
 #include <tvm/ffi/container/tensor.h>
 #include <tvm/ffi/extra/module.h>
 
 namespace {
 namespace ffi = tvm::ffi;
 
-int Run() {
-  // Step 1. Load `add_one_cpu.so` module and retrieve `add_one` function
+int Run(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
+  // Load `add_one_cpu` function from the shared library `build/add_one_cpu.so`
   ffi::Module mod = ffi::Module::LoadFromFile("build/add_one_cpu.so");
-  ffi::Function add_one_cpu = mod->GetFunction("add_one").value();
+  ffi::Function add_one_cpu = mod->GetFunction("add_one_cpu").value();
+  // Call the function
+  add_one_cpu(x, y);
+  return 0;
+}
+}  // namespace
 
-  // Step 2. Create input and output tensors
-  std::vector<int64_t> shape = {5};
+int main() {
+  // Step 1. Prepare input data `x` and `y`
   std::vector<float> x_data = {1, 2, 3, 4, 5};
   std::vector<float> y_data(5, 0);
+  std::vector<int64_t> shape = {5};
   DLTensor x{
       /*data=*/x_data.data(),
       /*device=*/DLDevice{kDLCPU, 0},
@@ -51,17 +57,14 @@ int Run() {
       /*strides=*/nullptr,
       /*byte_offset=*/0,
   };
-
-  // Step 3. Call the function
-  add_one_cpu(&x, &y);
-
-  // Step 4. Print the result
+  // Step 2. Call the function from the shared library
+  Run(tvm::ffi::TensorView(&x), tvm::ffi::TensorView(&y));
+  // Step 3. Print the result
+  std::cout << "[ ";
   for (int i = 0; i < 5; ++i) {
     std::cout << y_data[i] << " ";
   }
-  std::cout << std::endl;
+  std::cout << "]" << std::endl;
   return 0;
 }
-}  // namespace
-int main() { return Run(); }
 // [example.end]

@@ -20,13 +20,15 @@
 # ruff: noqa
 # mypy: ignore-errors
 # [example.begin]
-# File: load_numpy.py
+# File: load/load_pytorch.py
+# Step 1. Load `build/add_one_cuda.so`
 import tvm_ffi
-mod = tvm_ffi.load_module(f"build/add_one_cpu.so")
+mod = tvm_ffi.load_module("build/add_one_cuda.so")
 
-import numpy as np
-x = np.array([1, 2, 3, 4, 5], dtype=np.float32)
-y = np.empty_like(x)
-mod.add_one(x, y)
+# Step 2. Run `mod.add_one` with PyTorch
+import torch
+x = torch.tensor([1, 2, 3, 4, 5], dtype=torch.float32, device="cuda")
+y = torch.empty_like(x)
+mod.add_one_cuda(x, y)
 print(y)
 # [example.end]

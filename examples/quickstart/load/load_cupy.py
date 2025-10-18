@@ -20,13 +20,13 @@
 # ruff: noqa
 # mypy: ignore-errors
 # [example.begin]
-# File: load_cupy.py
+# File: load/load_cupy.py
 import tvm_ffi
 mod = tvm_ffi.load_module(f"build/add_one_cuda.so")
 
 import cupy as cp
 x = cp.array([1, 2, 3, 4, 5], dtype=cp.float32)
 y = cp.empty_like(x)
-mod.add_one(x, y)
+mod.add_one_cuda(x, y)
 print(y)
 # [example.end]

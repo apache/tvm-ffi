@@ -20,18 +20,13 @@
 # ruff: noqa
 # mypy: ignore-errors
 # [example.begin]
-# File: load_pytorch.py
-# PyTorch supports "cpu" and "cuda"
-device = "cpu"
-
-# Step 1. Load `build/add_one_cpu.so` or `build/add_one_cuda.so`
+# File: load/load_numpy.py
 import tvm_ffi
-mod = tvm_ffi.load_module(f"build/add_one_{device}.so")
+mod = tvm_ffi.load_module(f"build/add_one_cpu.so")
 
-# Step 2. Run `mod.add_one` with PyTorch
-import torch
-x = torch.tensor([1, 2, 3, 4, 5], dtype=torch.float32, device=device)
-y = torch.empty_like(x)
-mod.add_one(x, y)
+import numpy as np
+x = np.array([1, 2, 3, 4, 5], dtype=np.float32)
+y = np.empty_like(x)
+mod.add_one_cpu(x, y)
 print(y)
 # [example.end]

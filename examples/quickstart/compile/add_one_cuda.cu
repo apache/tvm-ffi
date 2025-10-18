@@ -33,7 +33,7 @@ __global__ void AddOneKernel(float* x, float* y, int n) {
 }
 
 void AddOne(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
-  int64_t n = x.shape()[0];
+  int64_t n = x.size(0);
   float* x_data = static_cast<float*>(x.data_ptr());
   float* y_data = static_cast<float*>(y.data_ptr());
   int64_t threads = 256;
@@ -43,6 +43,6 @@ void AddOne(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
   AddOneKernel<<<blocks, threads, 0, stream>>>(x_data, y_data, n);
 }
 
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(add_one, tvm_ffi_example_cuda::AddOne);
+TVM_FFI_DLL_EXPORT_TYPED_FUNC(add_one_cuda, tvm_ffi_example_cuda::AddOne);
 }  // namespace tvm_ffi_example_cuda
 // [example.end]

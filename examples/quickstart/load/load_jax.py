@@ -20,22 +20,19 @@
 # ruff: noqa
 # mypy: ignore-errors
 # [example.begin]
-# File: load_jax.py
-# JAX supports "cpu" and "cuda"
-device = "cpu"
-
+# File: load/load_jax.py
 # Step 1. Load `build/add_one_cpu.so` or `build/add_one_cuda.so`
 import tvm_ffi
-mod = tvm_ffi.load_module(f"build/add_one_{device}.so")
+mod = tvm_ffi.load_module(f"build/add_one_cuda.so")
 
 # Step 2. Register `mod.add_one` into JAX
 import jax_tvm_ffi
-jax_tvm_ffi.register_ffi_target("add_one", mod.add_one, platform=device)
+jax_tvm_ffi.register_ffi_target("add_one", mod.add_one_cuda, platform="gpu")
 
 # Step 3. Run `mod.add_one` with JAX
 import jax
 import jax.numpy as jnp
-jax_device, *_ = jax.devices(device)
+jax_device, *_ = jax.devices("gpu")
 x = jnp.array([1, 2, 3, 4, 5], dtype=jnp.float32, device=jax_device)
 y = jax.ffi.ffi_call(
     "add_one",  # name of the registered function
