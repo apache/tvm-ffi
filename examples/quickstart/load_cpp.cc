@@ -16,38 +16,52 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+// [example.begin]
+// File: load_cpp.cc
 #include <tvm/ffi/container/tensor.h>
 #include <tvm/ffi/extra/module.h>
 
-// This file shows how to load the same compiled module and interact with it in C++
+namespace {
 namespace ffi = tvm::ffi;
 
-struct CPUNDAlloc {
-  void AllocData(DLTensor* tensor) { tensor->data = malloc(ffi::GetDataSize(*tensor)); }
-  void FreeData(DLTensor* tensor) { free(tensor->data); }
-};
-
-inline ffi::Tensor Empty(ffi::Shape shape, DLDataType dtype, DLDevice device) {
-  return ffi::Tensor::FromNDAlloc(CPUNDAlloc(), shape, dtype, device);
-}
-
-int main() {
-  // load the module
+int Run() {
+  // Step 1. Load `add_one_cpu.so` module and retrieve `add_one` function
   ffi::Module mod = ffi::Module::LoadFromFile("build/add_one_cpu.so");
+  ffi::Function add_one_cpu = mod->GetFunction("add_one").value();
 
-  // create an Tensor, alternatively, one can directly pass in a DLTensor*
-  ffi::Tensor x = Empty({5}, DLDataType({kDLFloat, 32, 1}), DLDevice({kDLCPU, 0}));
+  // Step 2. Create input and output tensors
+  std::vector<int64_t> shape = {5};
+  std::vector<float> x_data = {1, 2, 3, 4, 5};
+  std::vector<float> y_data(5, 0);
+  DLTensor x{
+      /*data=*/x_data.data(),
+      /*device=*/DLDevice{kDLCPU, 0},
+      /*ndim=*/1,
+      /*dtype=*/DLDataType{kDLFloat, 32, 1},
+      /*shape=*/shape.data(),
+      /*strides=*/nullptr,
+      /*byte_offset=*/0,
+  };
+  DLTensor y{
+      /*data=*/y_data.data(),
+      /*device=*/DLDevice{kDLCPU, 0},
+      /*ndim=*/1,
+      /*dtype=*/DLDataType{kDLFloat, 32, 1},
+      /*shape=*/shape.data(),
+      /*strides=*/nullptr,
+      /*byte_offset=*/0,
+  };
+
+  // Step 3. Call the function
+  add_one_cpu(&x, &y);
+
+  // Step 4. Print the result
   for (int i = 0; i < 5; ++i) {
-    reinterpret_cast<float*>(x.data_ptr())[i] = static_cast<float>(i);
-  }
-
-  ffi::Function add_one_cpu = mod->GetFunction("add_one_cpu").value();
-  add_one_cpu(x, x);
-
-  std::cout << "x after add_one_cpu(x, x)" << std::endl;
-  for (int i = 0; i < 5; ++i) {
-    std::cout << reinterpret_cast<float*>(x.data_ptr())[i] << " ";
+    std::cout << y_data[i] << " ";
   }
   std::cout << std::endl;
   return 0;
 }
+}  // namespace
+int main() { return Run(); }
+// [example.end]

@@ -1,4 +1,3 @@
-#!/bin/bash
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
 # distributed with this work for additional information
@@ -15,25 +14,24 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-set -ex
+"""Load `add_one_cpu.so` or `add_one_cuda.so` and run the `add_one` function."""
 
-if command -v ninja >/dev/null 2>&1; then
-	generator="Ninja"
-else
-	echo "Ninja not found, falling back to Unix Makefiles" >&2
-	generator="Unix Makefiles"
-fi
+# fmt: off
+# ruff: noqa
+# mypy: ignore-errors
+# [example.begin]
+# File: load_pytorch.py
+# PyTorch supports "cpu" and "cuda"
+device = "cpu"
 
-rm -rf build/CMakeCache.txt
-cmake -G "$generator" -B build -S .
-cmake --build build --parallel
+# Step 1. Load `build/add_one_cpu.so` or `build/add_one_cuda.so`
+import tvm_ffi
+mod = tvm_ffi.load_module(f"build/add_one_{device}.so")
 
-# running python example
-python run_example.py
-
-# running c++ example
-./build/run_example
-
-if [ -x ./build/run_example_cuda ]; then
-	./build/run_example_cuda
-fi
+# Step 2. Run `mod.add_one` with PyTorch
+import torch
+x = torch.tensor([1, 2, 3, 4, 5], dtype=torch.float32, device=device)
+y = torch.empty_like(x)
+mod.add_one(x, y)
+print(y)
+# [example.end]

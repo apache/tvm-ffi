@@ -15,10 +15,6 @@
 # specific language governing permissions and limitations
 # under the License.
 
-# TODO(@junrushao): adding a few extra hooks:
-# - Python type checking via mypy or ty
-# - CMake linters
-# - Conventional commits
 default_install_hook_types:
   - pre-commit
 repos:
@@ -96,6 +92,7 @@ repos:
     rev: v3.12.0-2
     hooks:
       - id: shfmt
+        args: [--indent=2]
   - repo: https://github.com/shellcheck-py/shellcheck-py
     rev: v0.10.0.1
     hooks:

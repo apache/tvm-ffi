@@ -56,62 +56,19 @@ Suppose we implement a C++ function ``AddOne`` that performs elementwise ``y = x
 
   .. group-tab:: C++
 
-    .. code-block:: cpp
+    .. literalinclude:: ../../examples/quickstart/src/add_one_cpu.cc
+      :language: cpp
       :emphasize-lines: 8, 17
-
-      // File: add_one_cpu.cc
-      #include <tvm/ffi/container/tensor.h>
-      #include <tvm/ffi/function.h>
-
-      namespace tvm_ffi_example_cpp {
-
-      /*! \brief Perform vector add one: y = x + 1 (1-D float32) */
-      void AddOne(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
-        int64_t n = x.shape()[0];
-        float* x_data = static_cast<float *>(x.data_ptr());
-        float* y_data = static_cast<float *>(y.data_ptr());
-        for (int64_t i = 0; i < n; ++i) {
-          y_data[i] = x_data[i] + 1;
-        }
-      }
-
-      TVM_FFI_DLL_EXPORT_TYPED_FUNC(add_one_cpu, tvm_ffi_example_cpp::AddOne);
-      }
-
+      :start-after: [example.begin]
+      :end-before: [example.end]
 
   .. group-tab:: CUDA
 
-    .. code-block:: cpp
+    .. literalinclude:: ../../examples/quickstart/src/add_one_cuda.cu
+      :language: cpp
       :emphasize-lines: 15, 22, 26
-
-      // File: main.cu
-      #include <tvm/ffi/container/tensor.h>
-      #include <tvm/ffi/extra/c_env_api.h>
-      #include <tvm/ffi/function.h>
-
-      namespace tvm_ffi_example_cuda {
-
-      __global__ void AddOneKernel(float* x, float* y, int n) {
-        int idx = blockIdx.x * blockDim.x + threadIdx.x;
-        if (idx < n) {
-          y[idx] = x[idx] + 1;
-        }
-      }
-
-      void AddOne(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
-        int64_t n = x.shape()[0];
-        float* x_data = static_cast<float *>(x.data_ptr());
-        float* y_data = static_cast<float *>(y.data_ptr());
-        int64_t threads = 256;
-        int64_t blocks = (n + threads - 1) / threads;
-        cudaStream_t stream = static_cast<cudaStream_t>(
-          TVMFFIEnvGetStream(x.device().device_type, x.device().device_id));
-        AddOneKernel<<<blocks, threads, 0, stream>>>(x_data, y_data, n);
-      }
-
-      TVM_FFI_DLL_EXPORT_TYPED_FUNC(add_one_cuda, tvm_ffi_example_cuda::AddOne);
-      }
-
+      :start-after: [example.begin]
+      :end-before: [example.end]
 
 
 The macro :c:macro:`TVM_FFI_DLL_EXPORT_TYPED_FUNC` exports the C++ function ``AddOne``
@@ -136,28 +93,25 @@ Compile with TVM-FFI
 
   .. group-tab:: C++
 
-    .. code-block:: bash
-
-      g++ -shared -O3 add_one_cpu.cc                   \
-          -fPIC -fvisibility=hidden             \
-          `tvm-ffi-config --cxxflags`           \
-          `tvm-ffi-config --ldflags`            \
-          `tvm-ffi-config --libs`               \
-          -o add_one_cpu.so
+    .. literalinclude:: ../../examples/quickstart/compile.sh
+      :language: bash
+      :start-after: [cpp_compile.begin]
+      :end-before: [cpp_compile.end]
 
   .. group-tab:: CUDA
 
-    .. code-block:: bash
-
-      nvcc -shared -O3 add_one_cuda.cu                  \
-        --compiler-options -fPIC                \
-        --compiler-options -fvisibility=hidden  \
-        `tvm-ffi-config --cxxflags`             \
-        `tvm-ffi-config --ldflags`              \
-        `tvm-ffi-config --libs`                 \
-        -o add_one_cuda.so
+    .. literalinclude:: ../../examples/quickstart/compile.sh
+      :language: bash
+      :start-after: [cuda_compile.begin]
+      :end-before: [cuda_compile.end]
 
 This step produces a shared library ``add_one_cpu.so`` and ``add_one_cuda.so`` that can be used across languages and frameworks.
+
+.. hint::
+
+   For a single-file C++/CUDA project, a convenient method :py:func:`tvm_ffi.cpp.load_inline`
+   is provided to minimize boilerplate code in compilation, linking, and loading.
+
 
 **CMake.** As the preferred approach for building across platforms,
 CMake relies on the CMake package ``tvm_ffi``, which can be found via ``tvm-ffi-config --cmakedir``.
@@ -203,15 +157,10 @@ CMake relies on the CMake package ``tvm_ffi``, which can be found via ``tvm-ffi-
       # show as add_one_cuda.so
       set_target_properties(add_one_cuda PROPERTIES PREFIX "" SUFFIX ".so")
 
-.. hint::
-
-   For a single-file C++/CUDA project, a convenient method :py:func:`tvm_ffi.cpp.load_inline`
-   is provided to minimize boilerplate code in compilation, linking, and loading.
-
-The resulting ``add_one_cpu.so`` and ``add_one_cuda.so`` are minimal libraries that are agnostic to:
+**Artifact.** The resulting ``add_one_cpu.so`` and ``add_one_cuda.so`` are minimal libraries that are agnostic to:
 
 - Python version/ABI, because it is pure C++ and not compiled or linked against Python
-- C++ ABI, because TVM-FFI interacts with the artifact only via stable C APIs
+- C++ ABI, because TVM-FFI interacts with the library only via stable C APIs
 - Languages, which can be C++, Rust or Python.
 
 .. _sec-use-across-framework:
@@ -229,82 +178,55 @@ the ``add_one_cpu.so`` or ``add_one_cuda.so`` into :py:class:`tvm_ffi.Module`.
    func : tvm_ffi.Function = mod.add_one_cpu
 
 ``mod.add_one_cpu`` retrieves a callable :py:class:`tvm_ffi.Function` that accepts tensors from host frameworks
-directly, which can be zero-copy incorporated into all popular ML frameworks. This process is done seamlessly
-without any boilerplate code and with extremely low latency.
-We can then use these functions in the following ways:
+directly. This process is done zero-copy, without any boilerplate code, under extremely low latency.
 
+We can then use these functions in the following ways:
 
 .. tab-set::
 
     .. tab-item:: PyTorch
 
-        .. code-block:: python
-
-          import torch
-          # cpu also works by changing the module to add_one_cpu.so and device to "cpu"
-          mod = tvm_ffi.load_module("add_one_cuda.so")
-          device = "cuda"
-          x = torch.tensor([1, 2, 3, 4, 5], dtype=torch.float32, device=device)
-          y = torch.empty_like(x)
-          mod.add_one_cuda(x, y)
-          print(y)
-
+        .. literalinclude:: ../../examples/quickstart/load_pytorch.py
+          :language: python
+          :start-after: [example.begin]
+          :end-before: [example.end]
 
     .. tab-item:: JAX
 
-        Support via `jax-tvm-ffi <https://github.com/nvidia/jax-tvm-ffi>`_
+        Support via `jax-tvm-ffi <https://github.com/nvidia/jax-tvm-ffi>`_. This can be installed via
 
-        .. code-block:: python
+        .. code-block:: bash
 
-          import jax
-          import jax.numpy as jnp
-          import jax_tvm_ffi
-          import tvm_ffi
+          pip install git+https://github.com/NVIDIA/jax-tvm-ffi.git
 
-          mod = tvm_ffi.load_module("add_one_cuda.so")
+        After installation, ``add_one`` is available as a JAX FFI target:
 
-          # Register the function with JAX
-          jax_tvm_ffi.register_ffi_target("add_one_cuda", mod.add_one_cuda, platform="cuda")
-          x = jnp.array([1.0, 2.0, 3.0], dtype=jnp.float32)
-          y = jax.ffi.ffi_call(
-              "add_one_cuda",
-              jax.ShapeDtypeStruct(x.shape, x.dtype),
-              vmap_method="broadcast_all",
-          )(x)
-          print(y)
+        .. literalinclude:: ../../examples/quickstart/load_jax.py
+          :language: python
+          :start-after: [example.begin]
+          :end-before: [example.end]
 
-    .. tab-item:: NumPy (CPU)
+    .. tab-item:: NumPy
 
-        .. code-block:: python
+        .. literalinclude:: ../../examples/quickstart/load_numpy.py
+          :language: python
+          :start-after: [example.begin]
+          :end-before: [example.end]
 
-          import numpy as np
+    .. tab-item:: CuPy
 
-          mod = tvm_ffi.load_module("add_one_cpu.so")
-          x = np.array([1, 2, 3, 4, 5], dtype=np.float32)
-          y = np.empty_like(x)
-          mod.add_one_cpu(x, y)
-          print(y)
-
-    .. tab-item:: CuPy (CUDA)
-
-        .. code-block:: python
-
-          import cupy as cp
-
-          mod = tvm_ffi.load_module("add_one_cuda.so")
-          x = cp.array([1, 2, 3, 4, 5], dtype=cp.float32)
-          y = cp.empty_like(x)
-          mod.add_one_cuda(x, y)
-          print(y)
+        .. literalinclude:: ../../examples/quickstart/load_cupy.py
+          :language: python
+          :start-after: [example.begin]
+          :end-before: [example.end]
 
 
 Ship Across Languages
 ---------------------
 
 TVM-FFI's core loading mechanism is ABI stable and works across language boundaries.
-A single artifact can be loaded in every language TVM-FFI supports,
-without having to recompile different artifacts targeting different ABIs or languages.
-
+A single library can be loaded in every language TVM-FFI supports,
+without having to recompile different libraries targeting different ABIs or languages.
 
 Python
 ~~~~~~
@@ -319,64 +241,35 @@ C++
 TVM-FFI's C++ API :cpp:func:`tvm::ffi::Module::LoadFromFile` loads ``add_one_cpu.so`` or ``add_one_cuda.so`` and
 can be used directly in C/C++ with no Python dependency.
 
-.. code-block:: cpp
+.. literalinclude:: ../../examples/quickstart/load_cpp.cc
+   :language: cpp
+   :start-after: [example.begin]
+   :end-before: [example.end]
 
-  // File: run_example.cc
-  #include <tvm/ffi/container/tensor.h>
-  #include <tvm/ffi/extra/module.h>
-
-  namespace ffi = tvm::ffi;
-  struct CPUNDAlloc {
-    void AllocData(DLTensor* tensor) { tensor->data = malloc(ffi::GetDataSize(*tensor)); }
-    void FreeData(DLTensor* tensor) { free(tensor->data); }
-  };
-
-  inline ffi::Tensor Empty(ffi::Shape shape, DLDataType dtype, DLDevice device) {
-    return ffi::Tensor::FromNDAlloc(CPUNDAlloc(), shape, dtype, device);
-  }
-
-  int main() {
-    // load the module
-    ffi::Module mod = ffi::Module::LoadFromFile("add_one_cpu.so");
-
-    // create an Tensor, alternatively, one can directly pass in a DLTensor*
-    ffi::Tensor x = Empty({5}, DLDataType({kDLFloat, 32, 1}), DLDevice({kDLCPU, 0}));
-    for (int i = 0; i < 5; ++i) {
-      reinterpret_cast<float*>(x.data_ptr())[i] = static_cast<float>(i);
-    }
-
-    ffi::Function add_one_cpu = mod->GetFunction("add_one_cpu").value();
-    add_one_cpu(x, x);
-
-    std::cout << "x after add_one_cpu(x, x)" << std::endl;
-    for (int i = 0; i < 5; ++i) {
-      std::cout << reinterpret_cast<float*>(x.data_ptr())[i] << " ";
-    }
-    std::cout << std::endl;
-    return 0;
-  }
-
-Compile it with:
+Compile and run it with:
 
 .. code-block:: bash
 
-    g++ -fvisibility=hidden -O3               \
-        run_example.cc                        \
-        `tvm-ffi-config --cxxflags`           \
-        `tvm-ffi-config --ldflags`            \
-        `tvm-ffi-config --libs`               \
-        -Wl,-rpath,`tvm-ffi-config --libdir`  \
-        -o run_example
+    g++ -fvisibility=hidden -O3             \
+      load_cpp.cc                           \
+      `tvm-ffi-config --cxxflags`           \
+      `tvm-ffi-config --ldflags`            \
+      `tvm-ffi-config --libs`               \
+      -Wl,-rpath,`tvm-ffi-config --libdir`  \
+      -o build/load_cpp
 
-    ./run_example
+    build/load_cpp
 
-.. hint::
+.. note::
 
-  Sometimes it may be desirable to directly bundle the exported module into the same binary as the main program.
+  Don't like loading shared libraries? Static linking is also supported.
+
+  That said, exported library can be bundled directly into the main program binary.
   In such cases, we can use :cpp:func:`tvm::ffi::Function::FromExternC` to create a
   :cpp:class:`tvm::ffi::Function` from the exported symbol, or directly use
-  :cpp:func:`tvm::ffi::Function::InvokeExternC` to invoke the function. This feature can be useful
-  when the exported module is generated by another DSL compiler matching the ABI.
+  :cpp:func:`tvm::ffi::Function::InvokeExternC` to invoke the function.
+
+  This feature can be useful when the exported module is generated by another DSL compiler matching the ABI.
 
   .. code-block:: cpp
 
@@ -406,8 +299,8 @@ This procedure is identical to those in C++ and Python:
 
     fn run_add_one(x: &Tensor, y: &Tensor) -> Result<()> {
         let module = tvm_ffi::Module::load_from_file("add_one_cpu.so")?;
-        let fn = module.get_function("add_one_cpu")?;
-        let typed_fn = into_typed_fn!(fn, Fn(&Tensor, &Tensor) -> Result<()>);
+        let func = module.get_function("add_one_cpu")?;
+        let typed_fn = into_typed_fn!(func, Fn(&Tensor, &Tensor) -> Result<()>);
         typed_fn(x, y)?;
         Ok(())
     }

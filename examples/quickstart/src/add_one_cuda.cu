@@ -16,26 +16,33 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+
+// [example.begin]
+// File: src/add_one_cuda.cu
 #include <tvm/ffi/container/tensor.h>
-#include <tvm/ffi/dtype.h>
-#include <tvm/ffi/error.h>
+#include <tvm/ffi/extra/c_env_api.h>
 #include <tvm/ffi/function.h>
 
-namespace tvm_ffi_example {
+namespace tvm_ffi_example_cuda {
 
-void AddOne(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
-  // implementation of a library function
-  TVM_FFI_ICHECK(x.ndim() == 1) << "x must be a 1D tensor";
-  DLDataType f32_dtype{kDLFloat, 32, 1};
-  TVM_FFI_ICHECK(x.dtype() == f32_dtype) << "x must be a float tensor";
-  TVM_FFI_ICHECK(y.ndim() == 1) << "y must be a 1D tensor";
-  TVM_FFI_ICHECK(y.dtype() == f32_dtype) << "y must be a float tensor";
-  TVM_FFI_ICHECK(x.size(0) == y.size(0)) << "x and y must have the same shape";
-  for (int i = 0; i < x.size(0); ++i) {
-    static_cast<float*>(y.data_ptr())[i] = static_cast<float*>(x.data_ptr())[i] + 1;
+__global__ void AddOneKernel(float* x, float* y, int n) {
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx < n) {
+    y[idx] = x[idx] + 1;
   }
 }
 
-// Expose global symbol `add_one_cpu` that follows tvm-ffi abi
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(add_one_cpu, tvm_ffi_example::AddOne);
-}  // namespace tvm_ffi_example
+void AddOne(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
+  int64_t n = x.shape()[0];
+  float* x_data = static_cast<float*>(x.data_ptr());
+  float* y_data = static_cast<float*>(y.data_ptr());
+  int64_t threads = 256;
+  int64_t blocks = (n + threads - 1) / threads;
+  cudaStream_t stream =
+      static_cast<cudaStream_t>(TVMFFIEnvGetStream(x.device().device_type, x.device().device_id));
+  AddOneKernel<<<blocks, threads, 0, stream>>>(x_data, y_data, n);
+}
+
+TVM_FFI_DLL_EXPORT_TYPED_FUNC(add_one, tvm_ffi_example_cuda::AddOne);
+}  // namespace tvm_ffi_example_cuda
+// [example.end]
