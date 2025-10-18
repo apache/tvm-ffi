@@ -48,6 +48,7 @@ Table of Contents
    guides/python_packaging.md
    guides/cpp_guide.md
    guides/python_guide.md
+   guides/rust_guide.md
    guides/stable_c_abi.md
    guides/compiler_integration.md
    guides/build_from_source.md
@@ -66,3 +67,4 @@ Table of Contents
 
    reference/python/index.rst
    reference/cpp/index.rst
+   reference/rust/index.rst

@@ -47,15 +47,37 @@ fn update_ld_library_path(lib_dir: &str) {
 }
 
 fn main() {
+    // When building documentation, we may not need actual linking
+    // Check if this is a rustdoc build
+    let is_rustdoc = env::var("RUSTDOC").is_ok() || env::var("CARGO_CFG_DOC").is_ok();
+
     // Run `mylib-config --libdir` to get the library path
-    let config_output = Command::new("tvm-ffi-config")
-        .arg("--libdir")
-        .output()
-        .expect("Failed to run tvm-ffi-config");
-    let lib_dir = String::from_utf8(config_output.stdout)
-        .expect("Invalid UTF-8 output from tvm-ffi-config")
-        .trim()
-        .to_string();
+    let config_result = Command::new("tvm-ffi-config").arg("--libdir").output();
+
+    let lib_dir = match config_result {
+        Ok(output) if output.status.success() => String::from_utf8(output.stdout)
+            .unwrap_or_default()
+            .trim()
+            .to_string(),
+        _ if is_rustdoc => {
+            // For rustdoc builds, we can proceed without the library
+            eprintln!("Warning: tvm-ffi-config not available, skipping for documentation build");
+            return;
+        }
+        _ => {
+            panic!("Failed to run tvm-ffi-config. Make sure tvm-ffi is installed.");
+        }
+    };
+
+    if lib_dir.is_empty() {
+        if is_rustdoc {
+            eprintln!(
+                "Warning: Empty lib_dir from tvm-ffi-config, skipping for documentation build"
+            );
+            return;
+        }
+        panic!("tvm-ffi-config returned empty library path");
+    }
 
     // add the library directory to the linker search path
     println!("cargo:rustc-link-search=native={}", lib_dir);

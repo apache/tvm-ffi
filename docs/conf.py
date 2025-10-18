@@ -18,6 +18,9 @@
 
 # -*- coding: utf-8 -*-
 import os
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 import sphinx
@@ -26,7 +29,15 @@ import tomli
 os.environ["TVM_FFI_BUILD_DOCS"] = "1"
 
 build_exhale = os.environ.get("BUILD_CPP_DOCS", "0") == "1"
+build_rust_docs = os.environ.get("BUILD_RUST_DOCS", "0") == "1"
 
+# Auto-detect sphinx-autobuild: Check if sphinx-autobuild is in the execution path
+is_autobuild = any("sphinx-autobuild" in str(arg) for arg in sys.argv)
+
+# -- Path constants -------------------------------------------------------
+_DOCS_DIR = Path(__file__).resolve().parent
+_RUST_DIR = _DOCS_DIR.parent / "rust"
+_RUST_OUTPUT_DIR = _DOCS_DIR / "reference" / "rust" / "generated"
 
 # -- General configuration ------------------------------------------------
 # Load version from pyproject.toml
@@ -90,6 +101,7 @@ This page contains the full API index for the C++ API.
 """
 
 # Setup the exhale extension
+
 exhale_args = {
     "containmentFolder": "reference/cpp/generated",
     "rootFileName": "index.rst",
@@ -151,7 +163,6 @@ autosummary_filename_map = {
     "tvm_ffi.Device": "tvm_ffi.Device_class",
 }
 
-_DOCS_DIR = Path(__file__).resolve().parent
 _STUBS = {
     "_stubs/cpp_index.rst": "reference/cpp/generated/index.rst",
 }
@@ -167,15 +178,53 @@ def _prepare_stub_files() -> None:
             dst_path.write_text(src_path.read_text(encoding="utf-8"), encoding="utf-8")
 
 
+def _build_rust_docs() -> None:
+    """Build Rust documentation using cargo doc."""
+    if not build_rust_docs:
+        return
+
+    print("Building Rust documentation...")
+    try:
+        target_doc = _RUST_DIR / "target" / "doc"
+
+        # In auto-reload mode (sphinx-autobuild), keep incremental builds
+        # Otherwise (CI/production), do clean rebuild
+        if not is_autobuild and target_doc.exists():
+            print("Clean rebuild: removing old documentation...")
+            shutil.rmtree(target_doc)
+
+        # Generate documentation (without dependencies)
+        subprocess.run(
+            ["cargo", "doc", "--no-deps", "--workspace", "--target-dir", "target"],
+            check=True,
+            cwd=_RUST_DIR,
+            env={**os.environ, "RUSTDOCFLAGS": "--cfg docsrs"},
+        )
+
+        # Copy generated documentation
+        if _RUST_OUTPUT_DIR.exists():
+            shutil.rmtree(_RUST_OUTPUT_DIR)
+        shutil.copytree(target_doc, _RUST_OUTPUT_DIR)
+
+        print(f"Rust documentation built successfully at {_RUST_OUTPUT_DIR}")
+    except subprocess.CalledProcessError as e:
+        print(f"Warning: Failed to build Rust documentation: {e}")
+    except FileNotFoundError:
+        print("Warning: cargo not found, skipping Rust documentation build")
+
+
 def _apply_config_overrides(_: object, config: object) -> None:
     """Apply runtime configuration overrides derived from environment variables."""
     config.build_exhale = build_exhale
+    config.build_rust_docs = build_rust_docs
 
 
 def setup(app: sphinx.application.Sphinx) -> None:
     """Register custom Sphinx configuration values."""
     _prepare_stub_files()
+    _build_rust_docs()
     app.add_config_value("build_exhale", build_exhale, "env")
+    app.add_config_value("build_rust_docs", build_rust_docs, "env")
     app.connect("config-inited", _apply_config_overrides)
 
 
@@ -300,5 +349,9 @@ html_context = {
 }
 
 html_static_path = ["_static"]
+
+# Copy Rust documentation to output if enabled
+html_extra_path = ["reference/rust/generated"] if build_rust_docs else []
+
 
 html_css_files = ["custom.css"]
