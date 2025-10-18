@@ -22,11 +22,11 @@
 #include <tvm/ffi/container/tensor.h>
 #include <tvm/ffi/function.h>
 
-namespace tvm_ffi_example_cpp {
+namespace tvm_ffi_example_cpu {
 
 /*! \brief Perform vector add one: y = x + 1 (1-D float32) */
 void AddOne(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
-  int64_t n = x.shape()[0];
+  int64_t n = x.size(0);
   float* x_data = static_cast<float*>(x.data_ptr());
   float* y_data = static_cast<float*>(y.data_ptr());
   for (int64_t i = 0; i < n; ++i) {
@@ -34,6 +34,6 @@ void AddOne(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
   }
 }
 
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(add_one, tvm_ffi_example_cpp::AddOne);
-}  // namespace tvm_ffi_example_cpp
+TVM_FFI_DLL_EXPORT_TYPED_FUNC(add_one_cpu, tvm_ffi_example_cpu::AddOne);
+}  // namespace tvm_ffi_example_cpu
 // [example.end]
