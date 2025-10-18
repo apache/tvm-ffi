@@ -50,6 +50,10 @@ Write a Simple ``add_one``
 Source Code
 ~~~~~~~~~~~
 
+.. note::
+
+  All the code in this tutorial can be found under `examples/quickstart <https://github.com/apache/tvm-ffi/tree/main/examples/quickstart>`_ in the repository.
+
 Suppose we implement a C++ function ``AddOne`` that performs elementwise ``y = x + 1`` for a 1-D ``float32`` vector. The source code (C++, CUDA) is:
 
 .. tabs::
@@ -113,8 +117,9 @@ This step produces a shared library ``add_one_cpu.so`` and ``add_one_cuda.so`` t
    is provided to minimize boilerplate code in compilation, linking, and loading.
 
 
-**CMake.** As the preferred approach for building across platforms,
-CMake relies on the CMake package ``tvm_ffi``, which can be found via ``tvm-ffi-config --cmakedir``.
+**CMake.** CMake is the preferred approach for building across platforms.
+After setting `tvm_ffi_DIR` to the output of ``tvm-ffi-config --cmakedir``,
+CMake is able to locate TVM-FFI's CMake package automatically.
 
 .. tabs::
 
@@ -122,40 +127,26 @@ CMake relies on the CMake package ``tvm_ffi``, which can be found via ``tvm-ffi-
 
     .. code-block:: cmake
 
-      find_package(Python COMPONENTS Interpreter REQUIRED)
-      # Run `tvm_ffi.config --cmakedir` to find tvm-ffi targets
-      execute_process(
-        COMMAND "${Python_EXECUTABLE}" -m tvm_ffi.config --cmakedir
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        OUTPUT_VARIABLE tvm_ffi_ROOT
-      )
+      # Make sure to set `tvm_ffi_DIR` to the output of
+      # `tvm-ffi-config --cmakedir` before calling `find_package`
       find_package(tvm_ffi CONFIG REQUIRED)
-      # Create C++ target `add_one_cpu`
-      add_library(add_one_cpu SHARED add_one_cpu.cc)
+      # Link C++ target to `tvm_ffi_header` and `tvm_ffi_shared`
+      add_library(add_one_cpu SHARED src/add_one_cpu.cc)
       target_link_libraries(add_one_cpu PRIVATE tvm_ffi_header)
       target_link_libraries(add_one_cpu PRIVATE tvm_ffi_shared)
-      # show as add_one_cpu.so
-      set_target_properties(add_one_cpu PROPERTIES PREFIX "" SUFFIX ".so")
 
   .. group-tab:: CUDA
 
     .. code-block:: cmake
 
-      find_package(Python COMPONENTS Interpreter REQUIRED)
-      # Run `tvm_ffi.config --cmakedir` to find tvm-ffi targets
-      execute_process(
-        COMMAND "${Python_EXECUTABLE}" -m tvm_ffi.config --cmakedir
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        OUTPUT_VARIABLE tvm_ffi_ROOT
-      )
+      # Make sure to set `tvm_ffi_DIR` to the output of
+      # `tvm-ffi-config --cmakedir` before calling `find_package`
       find_package(tvm_ffi CONFIG REQUIRED)
-      # Create C++ target `add_one_cuda`
+      # Link CUDA target to `tvm_ffi_header` and `tvm_ffi_shared`
       enable_language(CUDA)
       add_library(add_one_cuda SHARED add_one_cuda.cu)
       target_link_libraries(add_one_cuda PRIVATE tvm_ffi_header)
       target_link_libraries(add_one_cuda PRIVATE tvm_ffi_shared)
-      # show as add_one_cuda.so
-      set_target_properties(add_one_cuda PROPERTIES PREFIX "" SUFFIX ".so")
 
 **Artifact.** The resulting ``add_one_cpu.so`` and ``add_one_cuda.so`` are minimal libraries that are agnostic to:
 
