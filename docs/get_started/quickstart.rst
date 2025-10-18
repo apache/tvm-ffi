@@ -28,8 +28,8 @@ TVM-FFI's Open ABI and FFI make it possible to **ship one library** for multiple
 We can build a single shared library that works across:
 
 - **ML frameworks**, e.g. PyTorch, JAX, NumPy, CuPy, etc., and
-- **Languages**, e.g. C++, Python, Rust, etc.
-- **Python ABI versions**, e.g. ship one wheel to support all Python versions.
+- **Languages**, e.g. C++, Python, Rust, etc.,
+- **Python ABI versions**, e.g. ship one wheel to support all Python versions, including free-threaded ones.
 
 .. admonition:: Prerequisite
    :class: hint
@@ -118,8 +118,7 @@ This step produces a shared library ``add_one_cpu.so`` and ``add_one_cuda.so`` t
 
 
 **CMake.** CMake is the preferred approach for building across platforms.
-After setting ``tvm_ffi_DIR`` to the output of ``tvm-ffi-config --cmakedir``,
-CMake is able to locate TVM-FFI's CMake package automatically.
+TVM-FFI natively integrates with CMake via ``find_package`` as demonstrated below:
 
 .. tabs::
 
@@ -127,9 +126,11 @@ CMake is able to locate TVM-FFI's CMake package automatically.
 
     .. code-block:: cmake
 
-      # Make sure to set `tvm_ffi_DIR` to the output of
-      # `tvm-ffi-config --cmakedir` before calling `find_package`
+      # Run `tvm-ffi-config --cmakedir` to set `tvm_ffi_DIR`
+      find_package(Python COMPONENTS Interpreter REQUIRED)
+      execute_process(COMMAND "${Python_EXECUTABLE}" -m tvm_ffi.config --cmakedir OUTPUT_STRIP_TRAILING_WHITESPACE OUTPUT_VARIABLE tvm_ffi_ROOT)
       find_package(tvm_ffi CONFIG REQUIRED)
+
       # Link C++ target to `tvm_ffi_header` and `tvm_ffi_shared`
       add_library(add_one_cpu SHARED src/add_one_cpu.cc)
       target_link_libraries(add_one_cpu PRIVATE tvm_ffi_header)
@@ -139,20 +140,22 @@ CMake is able to locate TVM-FFI's CMake package automatically.
 
     .. code-block:: cmake
 
-      # Make sure to set `tvm_ffi_DIR` to the output of
-      # `tvm-ffi-config --cmakedir` before calling `find_package`
-      find_package(tvm_ffi CONFIG REQUIRED)
-      # Link CUDA target to `tvm_ffi_header` and `tvm_ffi_shared`
       enable_language(CUDA)
+      # Run `tvm-ffi-config --cmakedir` to set `tvm_ffi_DIR`
+      find_package(Python COMPONENTS Interpreter REQUIRED)
+      execute_process(COMMAND "${Python_EXECUTABLE}" -m tvm_ffi.config --cmakedir OUTPUT_STRIP_TRAILING_WHITESPACE OUTPUT_VARIABLE tvm_ffi_ROOT)
+      find_package(tvm_ffi CONFIG REQUIRED)
+
+      # Link CUDA target to `tvm_ffi_header` and `tvm_ffi_shared`
       add_library(add_one_cuda SHARED add_one_cuda.cu)
       target_link_libraries(add_one_cuda PRIVATE tvm_ffi_header)
       target_link_libraries(add_one_cuda PRIVATE tvm_ffi_shared)
 
 **Artifact.** The resulting ``add_one_cpu.so`` and ``add_one_cuda.so`` are minimal libraries that are agnostic to:
 
-- Python version/ABI, because it is pure C++ and not compiled or linked against Python
-- C++ ABI, because TVM-FFI interacts with the library only via stable C APIs
-- Languages, which can be C++, Rust or Python.
+- Python version/ABI. It is not compiled/linked with Python and depends only on TVM-FFI's stable C ABI;
+- Languages, including C++, Python, Rust or any other language that can interop with C ABI;
+- ML frameworks, such as PyTorch, JAX, NumPy, CuPy, or anything with standard `DLPack protocol <https://data-apis.org/array-api/2024.12/design_topics/data_interchange.html>`_.
 
 .. _sec-use-across-framework:
 
@@ -184,11 +187,11 @@ We can then use these functions in the following ways:
 
     .. tab-item:: JAX
 
-        Support via `jax-tvm-ffi <https://github.com/nvidia/jax-tvm-ffi>`_. This can be installed via
+        Support via `nvidia/jax-tvm-ffi <https://github.com/nvidia/jax-tvm-ffi>`_. This can be installed via
 
         .. code-block:: bash
 
-          pip install git+https://github.com/NVIDIA/jax-tvm-ffi.git
+          pip install jax-tvm-ffi
 
         After installation, ``add_one_cuda`` can be registered as a target to JAX's ``ffi_call``.
 
