@@ -17,6 +17,8 @@
 """Sphinx configuration for the tvm-ffi documentation site."""
 
 # -*- coding: utf-8 -*-
+from __future__ import annotations
+
 import os
 import shutil
 import subprocess
@@ -37,7 +39,6 @@ is_autobuild = any("sphinx-autobuild" in str(arg) for arg in sys.argv)
 # -- Path constants -------------------------------------------------------
 _DOCS_DIR = Path(__file__).resolve().parent
 _RUST_DIR = _DOCS_DIR.parent / "rust"
-_RUST_OUTPUT_DIR = _DOCS_DIR / "reference" / "rust" / "generated"
 
 # -- General configuration ------------------------------------------------
 # Load version from pyproject.toml
@@ -201,12 +202,7 @@ def _build_rust_docs() -> None:
             env={**os.environ, "RUSTDOCFLAGS": "--cfg docsrs"},
         )
 
-        # Copy generated documentation
-        if _RUST_OUTPUT_DIR.exists():
-            shutil.rmtree(_RUST_OUTPUT_DIR)
-        shutil.copytree(target_doc, _RUST_OUTPUT_DIR)
-
-        print(f"Rust documentation built successfully at {_RUST_OUTPUT_DIR}")
+        print(f"Rust documentation built successfully at {target_doc}")
     except subprocess.CalledProcessError as e:
         print(f"Warning: Failed to build Rust documentation: {e}")
     except FileNotFoundError:
@@ -219,6 +215,21 @@ def _apply_config_overrides(_: object, config: object) -> None:
     config.build_rust_docs = build_rust_docs
 
 
+def _copy_rust_docs_to_output(app: sphinx.application.Sphinx, exception: Exception | None) -> None:
+    """Copy Rust documentation to the HTML output directory after build completes."""
+    if exception is not None or not build_rust_docs:
+        return
+
+    src_dir = _RUST_DIR / "target" / "doc"
+    dst_dir = Path(app.outdir) / "reference" / "rust" / "generated"
+
+    if src_dir.exists():
+        if dst_dir.exists():
+            shutil.rmtree(dst_dir)
+        shutil.copytree(src_dir, dst_dir)
+        print(f"Copied Rust documentation from {src_dir} to {dst_dir}")
+
+
 def setup(app: sphinx.application.Sphinx) -> None:
     """Register custom Sphinx configuration values."""
     _prepare_stub_files()
@@ -226,6 +237,7 @@ def setup(app: sphinx.application.Sphinx) -> None:
     app.add_config_value("build_exhale", build_exhale, "env")
     app.add_config_value("build_rust_docs", build_rust_docs, "env")
     app.connect("config-inited", _apply_config_overrides)
+    app.connect("build-finished", _copy_rust_docs_to_output)
 
 
 autodoc_mock_imports = ["torch"]
