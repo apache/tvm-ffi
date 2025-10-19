@@ -18,7 +18,7 @@
  */
 
 // [example.begin]
-// File: src/add_one_cuda.cu
+// File: compile/add_one_cuda.cu
 #include <tvm/ffi/container/tensor.h>
 #include <tvm/ffi/extra/c_env_api.h>
 #include <tvm/ffi/function.h>

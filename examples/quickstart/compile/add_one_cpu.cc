@@ -18,7 +18,7 @@
  */
 
 // [example.begin]
-// File: src/add_one_cpu.cc
+// File: compile/add_one_cpu.cc
 #include <tvm/ffi/container/tensor.h>
 #include <tvm/ffi/function.h>
 
