@@ -195,10 +195,27 @@ We can then use these functions in the following ways:
 
         After installation, ``add_one_cuda`` can be registered as a target to JAX's ``ffi_call``.
 
-        .. literalinclude:: ../../examples/quickstart/load/load_jax.py
-          :language: python
-          :start-after: [example.begin]
-          :end-before: [example.end]
+        .. code-block:: python
+
+          # Step 1. Load `build/add_one_cuda.so`
+          import tvm_ffi
+          mod = tvm_ffi.load_module("build/add_one_cuda.so")
+
+          # Step 2. Register `mod.add_one_cuda` into JAX
+          import jax_tvm_ffi
+          jax_tvm_ffi.register_ffi_target("add_one", mod.add_one_cuda, platform="gpu")
+
+          # Step 3. Run `mod.add_one_cuda` with JAX
+          import jax
+          import jax.numpy as jnp
+          jax_device, *_ = jax.devices("gpu")
+          x = jnp.array([1, 2, 3, 4, 5], dtype=jnp.float32, device=jax_device)
+          y = jax.ffi.ffi_call(
+              "add_one",  # name of the registered function
+              jax.ShapeDtypeStruct(x.shape, x.dtype),  # shape and dtype of the output
+              vmap_method="broadcast_all",
+          )(x)
+          print(y)
 
     .. tab-item:: NumPy
 

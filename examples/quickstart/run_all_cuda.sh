@@ -22,11 +22,7 @@ cmake . -B build -DEXAMPLE_NAME="compile_cuda" -DCMAKE_BUILD_TYPE=RelWithDebInfo
 cmake --build build --config RelWithDebInfo
 
 # To load and run `add_one_cuda.so` in PyTorch
-
 python load/load_pytorch.py
-
-# To load and run `add_one_cuda.so` in JAX
-python load/load_jax.py
 
 # To load and run `add_one_cuda.so` in CuPy
 python load/load_cupy.py
