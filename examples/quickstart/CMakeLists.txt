@@ -38,8 +38,8 @@ find_package(tvm_ffi CONFIG REQUIRED)
 if (EXAMPLE_NAME STREQUAL "compile_cpu")
   # Example 1. C++ `add_one`
   add_library(add_one_cpu SHARED compile/add_one_cpu.cc)
-  target_link_libraries(add_one_cpu tvm_ffi_header)
-  target_link_libraries(add_one_cpu tvm_ffi_shared)
+  target_link_libraries(add_one_cpu PRIVATE tvm_ffi_header)
+  target_link_libraries(add_one_cpu PRIVATE tvm_ffi_shared)
   set_target_properties(
     add_one_cpu
     PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/"
@@ -60,8 +60,8 @@ elseif (EXAMPLE_NAME STREQUAL "compile_cuda")
 elseif (EXAMPLE_NAME STREQUAL "load_cpp")
   # Example 3. Load C++ shared library
   add_executable(load_cpp load/load_cpp.cc)
-  target_link_libraries(load_cpp tvm_ffi_header)
-  target_link_libraries(load_cpp tvm_ffi_shared)
+  target_link_libraries(load_cpp PRIVATE tvm_ffi_header)
+  target_link_libraries(load_cpp PRIVATE tvm_ffi_shared)
   set_target_properties(
     load_cpp
     PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/"
