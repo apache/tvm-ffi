@@ -132,7 +132,7 @@ TVM-FFI natively integrates with CMake via ``find_package`` as demonstrated belo
       find_package(tvm_ffi CONFIG REQUIRED)
 
       # Link C++ target to `tvm_ffi_header` and `tvm_ffi_shared`
-      add_library(add_one_cpu SHARED src/add_one_cpu.cc)
+      add_library(add_one_cpu SHARED compile/add_one_cpu.cc)
       target_link_libraries(add_one_cpu PRIVATE tvm_ffi_header)
       target_link_libraries(add_one_cpu PRIVATE tvm_ffi_shared)
 
@@ -147,7 +147,7 @@ TVM-FFI natively integrates with CMake via ``find_package`` as demonstrated belo
       find_package(tvm_ffi CONFIG REQUIRED)
 
       # Link CUDA target to `tvm_ffi_header` and `tvm_ffi_shared`
-      add_library(add_one_cuda SHARED add_one_cuda.cu)
+      add_library(add_one_cuda SHARED compile/add_one_cuda.cu)
       target_link_libraries(add_one_cuda PRIVATE tvm_ffi_header)
       target_link_libraries(add_one_cuda PRIVATE tvm_ffi_shared)
 
@@ -262,7 +262,7 @@ Compile and run it with:
 .. code-block:: bash
 
     g++ -fvisibility=hidden -O3             \
-      load_cpp.cc                           \
+      load/load_cpp.cc                      \
       `tvm-ffi-config --cxxflags`           \
       `tvm-ffi-config --ldflags`            \
       `tvm-ffi-config --libs`               \

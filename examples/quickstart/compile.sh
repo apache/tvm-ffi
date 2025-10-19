@@ -23,11 +23,11 @@ mkdir -p $BUILD_DIR
 
 # Example 1. Compile C++ `add_one_cpu.cc` to shared library `add_one_cpu.so`
 # [cpp_compile.begin]
-g++ -shared -O3 src/add_one_cpu.cc  \
-    -fPIC -fvisibility=hidden       \
-    $(tvm-ffi-config --cxxflags)    \
-    $(tvm-ffi-config --ldflags)     \
-    $(tvm-ffi-config --libs)        \
+g++ -shared -O3 compile/add_one_cpu.cc  \
+    -fPIC -fvisibility=hidden           \
+    $(tvm-ffi-config --cxxflags)        \
+    $(tvm-ffi-config --ldflags)         \
+    $(tvm-ffi-config --libs)            \
     -o $BUILD_DIR/add_one_cpu.so
 # [cpp_compile.end]
 
@@ -35,7 +35,7 @@ g++ -shared -O3 src/add_one_cpu.cc  \
 
 if command -v nvcc >/dev/null 2>&1; then
 # [cuda_compile.begin]
-nvcc -shared -O3 src/add_one_cuda.cu        \
+nvcc -shared -O3 compile/add_one_cuda.cu    \
     -Xcompiler -fPIC,-fvisibility=hidden    \
     $(tvm-ffi-config --cxxflags)            \
     $(tvm-ffi-config --ldflags)             \
