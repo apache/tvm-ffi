@@ -61,10 +61,6 @@ class TestIntPair(Object):
         # fmt: on
     # tvm-ffi-stubgen(end)
 
-    def __init__(self, a: int, b: int) -> None:
-        """Construct the object."""
-        self.__ffi_init__(a, b)
-
 
 @register_object("testing.TestObjectDerived")
 class TestObjectDerived(TestObjectBase):

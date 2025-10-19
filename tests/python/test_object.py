@@ -32,7 +32,7 @@ def test_make_object() -> None:
 
 
 def test_make_object_via_init() -> None:
-    obj0 = tvm_ffi.testing.TestIntPair(1, 2)
+    obj0 = tvm_ffi.testing.TestIntPair(1, 2)  # type: ignore[call-arg]
     assert obj0.a == 1
     assert obj0.b == 2
 
@@ -46,7 +46,7 @@ def test_method() -> None:
 
 
 def test_attribute() -> None:
-    obj = tvm_ffi.testing.TestIntPair(3, 4)
+    obj = tvm_ffi.testing.TestIntPair(3, 4)  # type: ignore[call-arg]
     assert obj.a == 3
     assert obj.b == 4
     assert type(obj).a.__doc__ == "Field `a`"

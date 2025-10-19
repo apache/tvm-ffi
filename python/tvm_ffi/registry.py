@@ -273,13 +273,24 @@ def _add_class_attrs(type_cls: type, type_info: TypeInfo) -> type:
         name = field.name
         if not hasattr(type_cls, name):  # skip already defined attributes
             setattr(type_cls, name, field.as_property(type_cls))
+    has_c_init = False
     for method in type_info.methods:
         name = method.name
         if name == "__ffi_init__":
             name = "__c_ffi_init__"
+            has_c_init = True
         if not hasattr(type_cls, name):
             setattr(type_cls, name, method.as_callable(type_cls))
+    if "__init__" not in type_cls.__dict__:
+        if has_c_init:
+            setattr(type_cls, "__init__", getattr(type_cls, "__ffi_init__"))
+        elif not issubclass(type_cls, core.PyNativeObject):
+            setattr(type_cls, "__init__", __init__invalid)
     return type_cls
+
+
+def __init__invalid(self: Any, *args: Any, **kwargs: Any) -> None:
+    raise RuntimeError("The __init__ method of this class is not implemented.")
 
 
 __all__ = [

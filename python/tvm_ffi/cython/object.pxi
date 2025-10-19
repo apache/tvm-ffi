@@ -278,7 +278,7 @@ cdef inline object make_fallback_cls_for_type_index(int32_t type_index):
     # Create `type_info.type_cls` now
     class cls(parent_type_info.type_cls):
         pass
-    attrs = dict(cls.__dict__)
+    attrs = cls.__dict__.copy()
     attrs.pop("__dict__", None)
     attrs.pop("__weakref__", None)
     attrs.update({
