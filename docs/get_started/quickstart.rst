@@ -259,17 +259,10 @@ can be used directly in C/C++ with no Python dependency.
 
 Compile and run it with:
 
-.. code-block:: bash
-
-    g++ -fvisibility=hidden -O3             \
-      load/load_cpp.cc                      \
-      `tvm-ffi-config --cxxflags`           \
-      `tvm-ffi-config --ldflags`            \
-      `tvm-ffi-config --libs`               \
-      -Wl,-rpath,`tvm-ffi-config --libdir`  \
-      -o build/load_cpp
-
-    build/load_cpp
+.. literalinclude:: ../../examples/quickstart/compile.sh
+   :language: bash
+   :start-after: [load_cpp.begin]
+   :end-before: [load_cpp.end]
 
 .. note::
 

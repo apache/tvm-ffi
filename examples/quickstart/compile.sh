@@ -43,3 +43,19 @@ nvcc -shared -O3 compile/add_one_cuda.cu    \
     -o $BUILD_DIR/add_one_cuda.so
 # [cuda_compile.end]
 fi
+
+# Example 3. Load and run `add_one_cpu.so` in C++
+
+if [ -f "$BUILD_DIR/add_one_cpu.so" ]; then
+# [load_cpp.begin]
+g++ -fvisibility=hidden -O3                 \
+    load/load_cpp.cc                        \
+    $(tvm-ffi-config --cxxflags)            \
+    $(tvm-ffi-config --ldflags)             \
+    $(tvm-ffi-config --libs)                \
+    -Wl,-rpath,$(tvm-ffi-config --libdir)   \
+    -o build/load_cpp
+
+build/load_cpp
+# [load_cpp.end]
+fi
