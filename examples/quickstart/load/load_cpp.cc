@@ -24,6 +24,8 @@
 namespace {
 namespace ffi = tvm::ffi;
 
+/************* Main logics *************/
+
 /*!
  * \brief Main logics of library loading and function calling.
  * \param x The input tensor.
@@ -37,23 +39,40 @@ void Run(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
   // Call the function
   add_one_cpu(x, y);
 }
-}  // namespace
+
+/************* Auxiliary Logics *************/
 
 /*!
- * \brief The main function, which prepares input/output tensors and calls `Run`.
- * \return The exit code.
+ * \brief Allocate a 1D float32 `tvm::ffi::Tensor` on CPU from an braced initializer list.
+ * \param data The input data.
+ * \return The allocated Tensor.
  */
+ffi::Tensor Alloc1DTensor(std::initializer_list<float> data) {
+  struct CPUAllocator {
+    void AllocData(DLTensor* tensor) {
+      tensor->data = std::malloc(tensor->shape[0] * sizeof(float));
+    }
+    void FreeData(DLTensor* tensor) { std::free(tensor->data); }
+  };
+  DLDataType f32 = DLDataType({kDLFloat, 32, 1});
+  DLDevice cpu = DLDevice({kDLCPU, 0});
+  int64_t n = static_cast<int64_t>(data.size());
+  ffi::Tensor x = ffi::Tensor::FromNDAlloc(CPUAllocator(), {n}, f32, cpu);
+  float* x_data = static_cast<float*>(x.data_ptr());
+  for (float v : data) {
+    *x_data++ = v;
+  }
+  return x;
+}
+
+}  // namespace
+
 int main() {
-  std::vector<float> x_data = {1, 2, 3, 4, 5};
-  std::vector<float> y_data(5, 0);
-  std::vector<int64_t> shape = {5};
-  std::vector<int64_t> strides = {1};
-  // clang-format off
-  DLTensor x{/*data=*/x_data.data(), /*device=*/DLDevice{kDLCPU, 0}, /*ndim=*/1, /*dtype=*/DLDataType{kDLFloat, 32, 1}, /*shape=*/shape.data(), /*strides=*/strides.data(), /*byte_offset=*/0};
-  DLTensor y{/*data=*/y_data.data(), /*device=*/DLDevice{kDLCPU, 0}, /*ndim=*/1, /*dtype=*/DLDataType{kDLFloat, 32, 1}, /*shape=*/shape.data(), /*strides=*/strides.data(), /*byte_offset=*/0,};
-  // clang-format on
-  Run(tvm::ffi::TensorView(&x), tvm::ffi::TensorView(&y));
+  ffi::Tensor x = Alloc1DTensor({1, 2, 3, 4, 5});
+  ffi::Tensor y = Alloc1DTensor({0, 0, 0, 0, 0});
+  Run(x, y);
   std::cout << "[ ";
+  const float* y_data = static_cast<const float*>(y.data_ptr());
   for (int i = 0; i < 5; ++i) {
     std::cout << y_data[i] << " ";
   }
