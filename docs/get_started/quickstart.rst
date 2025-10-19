@@ -97,14 +97,14 @@ Compile with TVM-FFI
 
   .. group-tab:: C++
 
-    .. literalinclude:: ../../examples/quickstart/compile.sh
+    .. literalinclude:: ../../examples/quickstart/raw_compile.sh
       :language: bash
       :start-after: [cpp_compile.begin]
       :end-before: [cpp_compile.end]
 
   .. group-tab:: CUDA
 
-    .. literalinclude:: ../../examples/quickstart/compile.sh
+    .. literalinclude:: ../../examples/quickstart/raw_compile.sh
       :language: bash
       :start-after: [cuda_compile.begin]
       :end-before: [cuda_compile.end]
@@ -259,7 +259,7 @@ can be used directly in C/C++ with no Python dependency.
 
 Compile and run it with:
 
-.. literalinclude:: ../../examples/quickstart/compile.sh
+.. literalinclude:: ../../examples/quickstart/raw_compile.sh
    :language: bash
    :start-after: [load_cpp.begin]
    :end-before: [load_cpp.end]
