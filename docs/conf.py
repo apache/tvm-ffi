@@ -278,9 +278,10 @@ def _link_inherited_members(app, what, name, obj, options, lines) -> None:  # no
     if base in _py_native_classes or getattr(base, "__module__", "") == "builtins":
         return
     owner_fq = f"{base.__module__}.{base.__qualname__}"
+    role = "attr" if what in {"attribute", "property"} else "meth"
     lines.clear()
     lines.append(
-        f"*Defined in* :class:`~{owner_fq}` *as method* :meth:`~{owner_fq}.{member_name}`."
+        f"*Defined in* :class:`~{owner_fq}` *as {what}* :{role}:`~{owner_fq}.{member_name}`."
     )
 
 

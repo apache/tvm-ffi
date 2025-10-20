@@ -96,8 +96,12 @@ __all__ = [
     "use_torch_stream",
 ]
 
-for _name in __all__:
-    try:
-        setattr(globals()[_name], "__module__", "tvm_ffi")
-    except (AttributeError, TypeError):
-        pass
+
+def _update_module() -> None:
+    for name in __all__:
+        obj = globals()[name]
+        if not getattr(obj, "__module__", "tvm_ffi").startswith("tvm_ffi"):
+            obj.__module__ = "tvm_ffi"
+
+
+_update_module()
