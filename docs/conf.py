@@ -246,7 +246,6 @@ def setup(app: sphinx.application.Sphinx) -> None:
 
 
 def _never_skip_selected_dunders(app, what, name, obj, skip, options):  # noqa: ANN001, ANN202
-    print(f"autodoc-skip-member: what={what}, obj={obj}, name={name}, skip={skip}")
     if name in _autodoc_always_show:
         return False  # do not skip
     return None
