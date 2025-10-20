@@ -308,7 +308,7 @@ cdef int TVMFFIPyArgSetterDType_(
     """Setter for dtype"""
     cdef object arg = <object>py_arg
     # dtype is a subclass of str, so this check occur before str
-    arg = arg.__tvm_ffi_dtype__
+    arg = arg._tvm_ffi_dtype
     out.type_index = kTVMFFIDataType
     out.v_dtype = (<DataType>arg).cdtype
     return 0
@@ -573,6 +573,18 @@ cdef int TVMFFIPyArgSetterDTypeFromNumpy_(
     out.v_dtype = NUMPY_DTYPE_TO_DTYPE[py_obj]
     return 0
 
+cdef int TVMFFIPyArgSetterDLPackDataTypeProtocol_(
+    TVMFFIPyArgSetter* handle, TVMFFIPyCallContext* ctx,
+    PyObject* py_arg, TVMFFIAny* out
+) except -1:
+    """Setter for dtype protocol"""
+    cdef object arg = <object>py_arg
+    cdef tuple dltype_data_type = arg.__dlpack_data_type__()
+    out.type_index = kTVMFFIDataType
+    out.v_dtype.code = <long long>dltype_data_type[0]
+    out.v_dtype.bits = <long long>dltype_data_type[1]
+    out.v_dtype.lanes = <long long>dltype_data_type[2]
+    return 0
 
 cdef _DISPATCH_TYPE_KEEP_ALIVE = set()
 cdef _DISPATCH_TYPE_KEEP_ALIVE_LOCK = threading.Lock()
@@ -699,6 +711,10 @@ cdef int TVMFFIPyArgSetterFactory_(PyObject* value, TVMFFIPyArgSetter* out) exce
         return 0
     if numpy is not None and isinstance(arg, numpy.dtype):
         out.func = TVMFFIPyArgSetterDTypeFromNumpy_
+        return 0
+    if hasattr(arg_class, "__dlpack_data_type__"):
+        # prefer dlpack as it covers all DLDataType struct
+        out.func = TVMFFIPyArgSetterDLPackDataTypeProtocol_
         return 0
     if isinstance(arg, Exception):
         out.func = TVMFFIPyArgSetterException_

@@ -160,3 +160,10 @@ def test_ml_dtypes_dtype_conversion() -> None:
     _check_dtype(np.dtype(ml_dtypes.float6_e2m3fn), 15, 6, 1)
     _check_dtype(np.dtype(ml_dtypes.float6_e3m2fn), 16, 6, 1)
     _check_dtype(np.dtype(ml_dtypes.float4_e2m1fn), 17, 4, 1)
+
+
+def test_dtype_from_dlpack_data_type() -> None:
+    dtype = tvm_ffi.dtype.from_dlpack_data_type((0, 8, 1))
+    assert dtype.type_code == 0
+    assert dtype.bits == 8
+    assert dtype.lanes == 1

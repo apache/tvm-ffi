@@ -60,15 +60,39 @@ class dtype(str):
 
     """
 
-    __slots__ = ["__tvm_ffi_dtype__"]
-    __tvm_ffi_dtype__: core.DataType
+    __slots__ = ["_tvm_ffi_dtype"]
+    _tvm_ffi_dtype: core.DataType
 
     _NUMPY_DTYPE_TO_STR: ClassVar[dict[Any, str]] = {}
 
     def __new__(cls, content: Any) -> dtype:
         content = str(content)
         val = str.__new__(cls, content)
-        val.__tvm_ffi_dtype__ = core.DataType(content)
+        val._tvm_ffi_dtype = core.DataType(content)
+        return val
+
+    @staticmethod
+    def from_dlpack_data_type(dltype_data_type: tuple[int, int, int]) -> dtype:
+        """Create a dtype from a DLPack data type tuple.
+
+        Parameters
+        ----------
+        dltype_data_type
+            The DLPack data type tuple (type_code, bits, lanes).
+
+        Returns
+        -------
+        The created dtype.
+
+        """
+        cdtype = core._create_dtype_from_tuple(
+            core.DataType,
+            dltype_data_type[0],
+            dltype_data_type[1],
+            dltype_data_type[2],
+        )
+        val = str.__new__(dtype, str(cdtype))
+        val._tvm_ffi_dtype = cdtype
         return val
 
     def __repr__(self) -> str:
@@ -90,29 +114,29 @@ class dtype(str):
         """
         cdtype = core._create_dtype_from_tuple(
             core.DataType,
-            self.__tvm_ffi_dtype__.type_code,
-            self.__tvm_ffi_dtype__.bits,
+            self._tvm_ffi_dtype.type_code,
+            self._tvm_ffi_dtype.bits,
             lanes,
         )
         val = str.__new__(dtype, str(cdtype))
-        val.__tvm_ffi_dtype__ = cdtype
+        val._tvm_ffi_dtype = cdtype
         return val
 
     @property
     def itemsize(self) -> int:
-        return self.__tvm_ffi_dtype__.itemsize
+        return self._tvm_ffi_dtype.itemsize
 
     @property
     def type_code(self) -> int:
-        return self.__tvm_ffi_dtype__.type_code
+        return self._tvm_ffi_dtype.type_code
 
     @property
     def bits(self) -> int:
-        return self.__tvm_ffi_dtype__.bits
+        return self._tvm_ffi_dtype.bits
 
     @property
     def lanes(self) -> int:
-        return self.__tvm_ffi_dtype__.lanes
+        return self._tvm_ffi_dtype.lanes
 
 
 try:

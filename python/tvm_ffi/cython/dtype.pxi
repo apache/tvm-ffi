@@ -155,7 +155,7 @@ cdef inline object make_ret_dtype(TVMFFIAny result):
     cdtype = DataType.__new__(DataType)
     (<DataType>cdtype).cdtype = result.v_dtype
     val = str.__new__(_CLASS_DTYPE, cdtype.__str__())
-    val.__tvm_ffi_dtype__ = cdtype
+    val._tvm_ffi_dtype = cdtype
     return val
 
 

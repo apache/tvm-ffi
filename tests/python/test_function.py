@@ -14,6 +14,7 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+from __future__ import annotations
 
 import ctypes
 import gc
@@ -312,3 +313,18 @@ def test_function_with_opaque_ptr_protocol() -> None:
     y = fecho(x)
     assert isinstance(y, ctypes.c_void_p)
     assert y.value == 10
+
+
+def test_function_with_dlpack_data_type_protocol() -> None:
+    class DLPackDataTypeProtocol:
+        def __init__(self, dlpack_data_type: tuple[int, int, int]) -> None:
+            self.dlpack_data_type = dlpack_data_type
+
+        def __dlpack_data_type__(self) -> tuple[int, int, int]:
+            return self.dlpack_data_type
+
+    dtype = tvm_ffi.dtype("float32")
+    fecho = tvm_ffi.get_global_func("testing.echo")
+    x = DLPackDataTypeProtocol((dtype.type_code, dtype.bits, dtype.lanes))
+    y = fecho(x)
+    assert y == dtype
