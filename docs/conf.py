@@ -279,7 +279,9 @@ def _link_inherited_members(app, what, name, obj, options, lines) -> None:  # no
         return
     owner_fq = f"{base.__module__}.{base.__qualname__}"
     lines.clear()
-    lines.append(f"*Defined in* :class:`~{owner_fq}`.")
+    lines.append(
+        f"*Defined in* :class:`~{owner_fq}` *as method* :meth:`~{owner_fq}.{member_name}`."
+    )
 
 
 def _defining_class(cls: type | None, attr_name: str) -> type | None:

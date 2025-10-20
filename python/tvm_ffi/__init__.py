@@ -95,3 +95,9 @@ __all__ = [
     "use_raw_stream",
     "use_torch_stream",
 ]
+
+for _name in __all__:
+    try:
+        setattr(globals()[_name], "__module__", "tvm_ffi")
+    except AttributeError:
+        pass
