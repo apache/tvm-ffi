@@ -99,5 +99,5 @@ __all__ = [
 for _name in __all__:
     try:
         setattr(globals()[_name], "__module__", "tvm_ffi")
-    except AttributeError:
+    except (AttributeError, TypeError):
         pass
