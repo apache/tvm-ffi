@@ -19,6 +19,8 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import importlib
+import inspect
 import os
 import shutil
 import subprocess
@@ -242,13 +244,66 @@ def setup(app: sphinx.application.Sphinx) -> None:
     app.add_config_value("build_rust_docs", build_rust_docs, "env")
     app.connect("config-inited", _apply_config_overrides)
     app.connect("build-finished", _copy_rust_docs_to_output)
-    app.connect("autodoc-skip-member", _never_skip_selected_dunders)
+    app.connect("autodoc-skip-member", _filter_inherited_members)
+    app.connect("autodoc-process-docstring", _link_inherited_members)
 
 
-def _never_skip_selected_dunders(app, what, name, obj, skip, options):  # noqa: ANN001, ANN202
+def _filter_inherited_members(app, what, name, obj, skip, options):  # noqa: ANN001, ANN202
     if name in _autodoc_always_show:
-        return False  # do not skip
+        return False
+    if "built-in method " in str(obj):
+        # Skip: `str.maketrans`, `EnumType.from_bytes`
+        return True
+    if getattr(obj, "__objclass__", None) in _py_native_classes:
+        return True
     return None
+
+
+def _link_inherited_members(app, what, name, obj, options, lines) -> None:  # noqa: ANN001
+    # Only act on members (methods/attributes/properties)
+    if what not in {"method", "attribute", "property"}:
+        return
+    cls = _import_cls(name.rsplit(".", 1)[0])
+    if cls is None:
+        return
+
+    member_name = name.rsplit(".", 1)[-1]  # just "foo"
+    base = _defining_class(cls, member_name)
+
+    # If we can't find a base or this class defines it, nothing to do
+    if base is None or base is cls:
+        return
+
+    # If it comes from builtins we already hide it; no link needed
+    if base in _py_native_classes or getattr(base, "__module__", "") == "builtins":
+        return
+    owner_fq = f"{base.__module__}.{base.__qualname__}"
+    lines.clear()
+    lines.append(f"*Defined in* :class:`~{owner_fq}`.")
+
+
+def _defining_class(cls: type | None, attr_name: str) -> type | None:
+    """Find the first class in cls.__mro__ that defines attr_name in its __dict__."""
+    if not isinstance(cls, type):
+        return None
+    method = getattr(cls, attr_name, None)
+    if method is None:
+        return None
+    for base in reversed(inspect.getmro(cls)):
+        d = getattr(base, "__dict__", {})
+        if d.get(attr_name, None) is method:
+            return base
+    return None
+
+
+def _import_cls(cls_name: str) -> type | None:
+    """Import and return the class object given its module and class name."""
+    try:
+        mod, clsname = cls_name.rsplit(".", 1)
+        m = importlib.import_module(mod)
+        return getattr(m, clsname, None)
+    except Exception:
+        return None
 
 
 autodoc_mock_imports = ["torch"]
@@ -266,6 +321,23 @@ _autodoc_always_show = {
     "__from_extern_c__",
     "__from_mlir_packed_safe_call__",
 }
+# If a member method comes from one of these native types, hide it in the docs
+_py_native_classes: tuple[type, ...] = (
+    str,
+    tuple,
+    list,
+    dict,
+    set,
+    frozenset,
+    bytes,
+    bytearray,
+    memoryview,
+    int,
+    float,
+    complex,
+    bool,
+    object,
+)
 
 autodoc_typehints = "description"  # or "none"
 always_use_bars_union = True
