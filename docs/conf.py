@@ -251,6 +251,8 @@ autodoc_default_options = {
     "show-inheritance": True,
     "inherited-members": False,
     "member-order": "bysource",
+    # Include important dunder methods by default across the API docs
+    "special-members": "__dlpack__, __dlpack_device__, __device_type_name__, __ffi_init__, __from_extern_c__, __from_mlir_packed_safe_call__",
 }
 autodoc_typehints = "description"  # or "none"
 always_use_bars_union = True

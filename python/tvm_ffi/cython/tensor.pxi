@@ -288,14 +288,14 @@ cdef class Tensor(Object):
 
         Parameters
         ----------
-        stream : Any, optional
+        stream
             Framework-specific stream/context object.
-        max_version : Tuple[int, int], optional
+        max_version
             Upper bound on the supported DLPack version of the
             consumer. When ``None``, use the built-in protocol version.
-        dl_device : Tuple[int, int], optional
+        dl_device
             Override the device reported by :py:meth:`__dlpack_device__`.
-        copy : bool, optional
+        copy
             If ``True``, produce a copy rather than exporting in-place.
 
         Raises
