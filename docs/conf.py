@@ -242,6 +242,14 @@ def setup(app: sphinx.application.Sphinx) -> None:
     app.add_config_value("build_rust_docs", build_rust_docs, "env")
     app.connect("config-inited", _apply_config_overrides)
     app.connect("build-finished", _copy_rust_docs_to_output)
+    app.connect("autodoc-skip-member", _never_skip_selected_dunders)
+
+
+def _never_skip_selected_dunders(app, what, name, obj, skip, options):  # noqa: ANN001, ANN202
+    print(f"autodoc-skip-member: what={what}, obj={obj}, name={name}, skip={skip}")
+    if name in _autodoc_always_show:
+        return False  # do not skip
+    return None
 
 
 autodoc_mock_imports = ["torch"]
@@ -251,9 +259,15 @@ autodoc_default_options = {
     "show-inheritance": True,
     "inherited-members": False,
     "member-order": "bysource",
-    # Include important dunder methods by default across the API docs
-    "special-members": "__dlpack__, __dlpack_device__, __device_type_name__, __ffi_init__, __from_extern_c__, __from_mlir_packed_safe_call__",
 }
+_autodoc_always_show = {
+    "__dlpack__",
+    "__dlpack_device__",
+    "__device_type_name__",
+    "__from_extern_c__",
+    "__from_mlir_packed_safe_call__",
+}
+
 autodoc_typehints = "description"  # or "none"
 always_use_bars_union = True
 
