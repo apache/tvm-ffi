@@ -101,7 +101,11 @@ def _update_module() -> None:
     for name in __all__:
         obj = globals()[name]
         if not getattr(obj, "__module__", "tvm_ffi").startswith("tvm_ffi"):
-            obj.__module__ = "tvm_ffi"
+            try:
+                obj.__module__ = "tvm_ffi"
+            except (AttributeError, TypeError):
+                # some types don't allow setting __module__
+                pass
 
 
 _update_module()
