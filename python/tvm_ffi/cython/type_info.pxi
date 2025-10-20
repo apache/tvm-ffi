@@ -129,11 +129,11 @@ class TypeSchema:
         return TypeSchema(origin, args)
 
     @staticmethod
-    def from_json_str(s) -> "TypeSchema":
+    def from_json_str(s: str) -> "TypeSchema":
         """Construct a :class:`TypeSchema` from a JSON string."""
         return TypeSchema.from_json_obj(json.loads(s))
 
-    def repr(self, ty_map = None) -> str:
+    def repr(self, ty_map: "Optional[Callable[[str], str]]" = None) -> str:
         """Render a human-readable representation of this schema.
 
         Parameters

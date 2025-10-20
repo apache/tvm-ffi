@@ -189,12 +189,12 @@ def from_dlpack(
 
 
 # helper class for shape handling
-def _shape_obj_get_py_tuple(obj) -> tuple[int, ...]:
+def _shape_obj_get_py_tuple(obj: "Object") -> tuple[int, ...]:
     cdef TVMFFIShapeCell* shape = TVMFFIShapeGetCellPtr((<Object>obj).chandle)
     return tuple(shape.data[i] for i in range(shape.size))
 
 
-def _make_strides_from_shape(tuple shape) -> tuple[int, ...]:
+def _make_strides_from_shape(tuple shape: tuple[int, ...]) -> tuple[int, ...]:
     cdef int64_t expected_stride = 1
     cdef list strides = []
     cdef int64_t ndim = len(shape)

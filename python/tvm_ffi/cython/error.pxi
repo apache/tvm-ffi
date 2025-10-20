@@ -44,7 +44,7 @@ cdef class Error(Object):
     to convert it to a Python exception and raise that.
     """
 
-    def __init__(self, kind, message, backtrace):
+    def __init__(self, kind: str, message: str, backtrace: str):
         """Construct an error wrapper.
 
         Parameters

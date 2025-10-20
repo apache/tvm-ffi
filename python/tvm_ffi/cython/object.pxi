@@ -26,7 +26,7 @@ def _set_class_object(cls):
     _CLASS_OBJECT = cls
 
 
-def __object_repr__(obj) -> str:
+def __object_repr__(obj: "Object") -> str:
     """Object repr function that can be overridden by assigning to it"""
     return type(obj).__name__ + "(" + str(obj.__ctypes_handle__().value) + ")"
 
@@ -43,7 +43,7 @@ class ObjectConvertible:
     :class:`Object` instance used by the FFI runtime.
     """
 
-    def asobject(self):
+    def asobject(self) -> "Object":
         """Return an :class:`Object` view of this value.
 
         This method is used by the conversion helpers (e.g.
@@ -155,10 +155,10 @@ cdef class Object:
             return type(self).__name__ + "(chandle=None)"
         return str(__object_repr__(self))
 
-    def __eq__(self, other) -> bool:
+    def __eq__(self, other: "Object") -> bool:
         return self.same_as(other)
 
-    def __ne__(self, other) -> bool:
+    def __ne__(self, other: "Object") -> bool:
         return not self.__eq__(other)
 
     def __init_handle_by_constructor__(self, fconstructor: Any, *args: Any) -> None:

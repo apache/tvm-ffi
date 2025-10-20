@@ -957,7 +957,7 @@ cdef inline int _convert_to_ffi_func_handle(
     return 0
 
 
-def _convert_to_ffi_func(object pyfunc) -> Function:
+def _convert_to_ffi_func(object pyfunc: Callable[..., Any]) -> Function:
     """Convert a python function to TVM FFI function"""
     cdef TVMFFIObjectHandle chandle
     _convert_to_ffi_func_handle(pyfunc, &chandle)
@@ -979,7 +979,7 @@ cdef inline int _convert_to_opaque_object_handle(
     return 0
 
 
-def _convert_to_opaque_object(object pyobject) -> OpaquePyObject:
+def _convert_to_opaque_object(object pyobject: Any) -> OpaquePyObject:
     """Convert a python object to TVM FFI opaque object"""
     cdef TVMFFIObjectHandle chandle
     _convert_to_opaque_object_handle(pyobject, &chandle)
