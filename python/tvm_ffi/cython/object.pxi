@@ -26,7 +26,7 @@ def _set_class_object(cls):
     _CLASS_OBJECT = cls
 
 
-def __object_repr__(obj):
+def __object_repr__(obj) -> str:
     """Object repr function that can be overridden by assigning to it"""
     return type(obj).__name__ + "(" + str(obj.__ctypes_handle__().value) + ")"
 
@@ -37,20 +37,38 @@ def _new_object(cls):
 
 
 class ObjectConvertible:
-    """Base class for all classes that can be converted to object."""
+    """Base class for Python classes convertible to :class:`Object`.
+
+    Subclasses implement :py:meth:`asobject` to produce an
+    :class:`Object` instance used by the FFI runtime.
+    """
 
     def asobject(self):
-        """Convert value to object"""
+        """Return an :class:`Object` view of this value.
+
+        This method is used by the conversion helpers (e.g.
+        :func:`tvm_ffi.convert`) when a Python value needs to be passed
+        into FFI calls.
+
+        Returns
+        -------
+        tvm_ffi.core.Object
+
+        """
         raise NotImplementedError()
 
 
 class ObjectRValueRef:
-    """Represent an RValue ref to an object that can be moved.
+    """Rvalue reference wrapper used to express move semantics.
+
+    Instances are created from :py:meth:`Object._move` and signal to
+    the FFI layer that ownership of the underlying handle can be
+    transferred.
 
     Parameters
     ----------
-    obj : tvm.runtime.Object
-        The object that this value refers to
+    obj : tvm_ffi.core.Object
+        The source object from which to move the underlying handle.
     """
 
     __slots__ = ["obj"]
@@ -61,6 +79,33 @@ class ObjectRValueRef:
 
 cdef class Object:
     """Base class of all TVM FFI objects.
+
+    This is the root Python type for objects backed by the TVM FFI
+    runtime. Each instance references a handle to a C++ runtime
+    object. Python subclasses typically correspond to C++ runtime
+    types and are registered via ``tvm_ffi.register_object``.
+
+    Notes
+    -----
+    - Equality of two ``Object`` instances uses underlying handle
+      identity unless an overridden implementation is provided on the
+      concrete type. Use :py:meth:`same_as` to check whether two
+      references point to the same underlying object.
+    - Most users interact with subclasses (e.g. :class:`Tensor`,
+      :class:`Function`) rather than ``Object`` directly.
+
+    Examples
+    --------
+    Constructing objects is typically performed by Python wrappers that
+    call into registered constructors on the FFI side.
+
+    .. code-block:: python
+
+        # Acquire a testing object constructed through FFI
+        obj = tvm_ffi.testing.create_object("testing.TestObjectBase", v_i64=12)
+        assert isinstance(obj, tvm_ffi.Object)
+        assert obj.same_as(obj)
+
     """
     cdef void* chandle
 
@@ -74,10 +119,10 @@ cdef class Object:
             CHECK_CALL(TVMFFIObjectDecRef(self.chandle))
             self.chandle = NULL
 
-    def __ctypes_handle__(self):
+    def __ctypes_handle__(self) -> object:
         return ctypes_handle(self.chandle)
 
-    def __chandle__(self):
+    def __chandle__(self) -> int:
         cdef uint64_t chandle = <uint64_t>self.chandle
         return chandle
 
@@ -85,7 +130,7 @@ cdef class Object:
         cls = type(self)
         return (_new_object, (cls,), self.__getstate__())
 
-    def __getstate__(self):
+    def __getstate__(self) -> dict[str, Any]:
         if _OBJECT_TO_JSON_GRAPH_STR is None:
             raise RuntimeError("ffi.ToJSONGraphString is not registered, make sure build project with extra API")
         if not self.__chandle__() == 0:
@@ -94,7 +139,7 @@ cdef class Object:
             return {"handle": str(_OBJECT_TO_JSON_GRAPH_STR(self, None))}
         return {"handle": None}
 
-    def __setstate__(self, state):
+    def __setstate__(self, state: dict[str, Any]) -> None:
         # pylint: disable=assigning-non-slot, assignment-from-no-return
         if _OBJECT_FROM_JSON_GRAPH_STR is None:
             raise RuntimeError("ffi.FromJSONGraphString is not registered, make sure build project with extra API")
@@ -104,19 +149,19 @@ cdef class Object:
         else:
             self.chandle = NULL
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         # exception safety handling for chandle=None
         if self.chandle == NULL:
             return type(self).__name__ + "(chandle=None)"
         return str(__object_repr__(self))
 
-    def __eq__(self, other):
+    def __eq__(self, other) -> bool:
         return self.same_as(other)
 
-    def __ne__(self, other):
+    def __ne__(self, other) -> bool:
         return not self.__eq__(other)
 
-    def __init_handle_by_constructor__(self, fconstructor, *args):
+    def __init_handle_by_constructor__(self, fconstructor: Any, *args: Any) -> None:
         """Initialize the handle by calling constructor function.
 
         Parameters
@@ -127,8 +172,8 @@ cdef class Object:
         args: list of objects
             The arguments to the constructor
 
-        Note
-        ----
+        Notes
+        -----
         We have a special calling convention to call constructor functions.
         So the return handle is directly set into the Node object
         instead of creating a new Node.
@@ -140,8 +185,8 @@ cdef class Object:
             (<Object>fconstructor).chandle, <PyObject*>args, &chandle, NULL)
         self.chandle = chandle
 
-    def __ffi_init__(self, *args) -> None:
-        """Initialize the instance using the ` __init__` method registered on C++ side.
+    def __ffi_init__(self, *args: Any) -> None:
+        """Initialize the instance using the ``__ffi_init__`` method registered on C++ side.
 
         Parameters
         ----------
@@ -150,63 +195,83 @@ cdef class Object:
         """
         self.__init_handle_by_constructor__(type(self).__c_ffi_init__, *args)
 
-    def same_as(self, other):
-        """Check object identity.
+    def same_as(self, other: object) -> bool:
+        """Return ``True`` if both references point to the same object.
+
+        This checks identity of the underlying FFI handle rather than
+        performing a structural, value-based comparison.
 
         Parameters
         ----------
         other : object
-            The other object to compare against.
+            The object to compare against.
 
         Returns
         -------
-        result : bool
-             The comparison result.
+        bool
+
+        Examples
+        --------
+        .. code-block:: python
+
+            x = tvm_ffi.testing.create_object("testing.TestObjectBase")
+            y = x
+            z = tvm_ffi.testing.create_object("testing.TestObjectBase")
+            assert x.same_as(y)
+            assert not x.same_as(z)
+
         """
         if not isinstance(other, Object):
             return False
         return self.chandle == (<Object>other).chandle
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         cdef uint64_t hash_value = <uint64_t>self.chandle
         return hash_value
 
-    def _move(self):
-        """Create an RValue reference to the object and mark the object as moved.
+    def _move(self) -> ObjectRValueRef:
+        """Create an rvalue reference that transfers ownership.
 
-        This is a advanced developer API that can be useful when passing an
-        unique reference to an Object that you no longer needed to a function.
+        The returned :class:`ObjectRValueRef` indicates move semantics
+        to the FFI layer, and is intended for performance-sensitive
+        paths that wish to avoid an additional retain/release pair.
 
-        A unique reference can trigger copy on write optimization that avoids
-        copy when we transform an object.
-
-        Note
-        ----
-        All the reference of the object becomes invalid after it is moved.
-        Be very careful when using this feature.
+        Notes
+        -----
+        After a successful move, the original object should be treated
+        as invalid on the FFI side. Do not rely on the handle after
+        transferring.
 
         Returns
         -------
-        rvalue : The rvalue reference.
+        ObjectRValueRef
+            The rvalue reference wrapper.
         """
         return ObjectRValueRef(self)
 
-    def __move_handle_from__(self, other):
-        """Move the handle from other to self"""
+    def __move_handle_from__(self, other: Object) -> None:
+        """Steal the FFI handle from ``other``.
+
+        Internal helper used by the runtime to implement move
+        semantics. Users should prefer :py:meth:`_move`.
+        """
         self.chandle = (<Object>other).chandle
         (<Object>other).chandle = NULL
 
 
 cdef class OpaquePyObject(Object):
-    """Opaque PyObject container
+    """Wrapper that carries an arbitrary Python object across the FFI.
 
-    This is a helper class to store opaque python objects
-    that will be passed to the ffi functions.
+    The contained object is held with correct reference counting, and
+    can be recovered on the Python side using :py:meth:`pyobject`.
 
-    Users do not need to directly create this class.
+    Notes
+    -----
+    ``OpaquePyObject`` is useful when a Python value must traverse the
+    FFI boundary without conversion into a native FFI type.
     """
-    def pyobject(self):
-        """Get the underlying python object"""
+    def pyobject(self) -> object:
+        """Return the original Python object held by this wrapper."""
         cdef object obj
         cdef PyObject* py_handle
         py_handle = <PyObject*>(TVMFFIOpaqueObjectGetCellPtr(self.chandle).handle)
@@ -215,10 +280,16 @@ cdef class OpaquePyObject(Object):
 
 
 class PyNativeObject:
-    """Base class of all TVM objects that also subclass python's builtin types."""
+    """Base class for TVM objects that also inherit Python builtins.
+
+    This mixin is used by Python-native proxy types such as
+    :class:`String` and :class:`Bytes`, which subclass :class:`str` and
+    :class:`bytes` respectively while also carrying an attached FFI
+    object for zero-copy exchange with the runtime when beneficial.
+    """
     __slots__ = []
 
-    def __init_cached_object_by_constructor__(self, fconstructor, *args):
+    def __init_cached_object_by_constructor__(self, fconstructor: Any, *args: Any) -> None:
         """Initialize the internal _tvm_ffi_cached_object by calling constructor function.
 
         Parameters

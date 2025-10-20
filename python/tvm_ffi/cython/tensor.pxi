@@ -15,7 +15,9 @@
 # specific language governing permissions and limitations
 # under the License.
 
-__dlpack_version__ = (DLPACK_MAJOR_VERSION, DLPACK_MINOR_VERSION)
+from typing import Any
+
+__dlpack_version__: tuple[int, int] = (DLPACK_MAJOR_VERSION, DLPACK_MINOR_VERSION)
 _CLASS_TENSOR = None
 
 
@@ -148,25 +150,38 @@ cdef inline int _from_dlpack_universal(
             raise TypeError("Expect from_dlpack to take either a compatible tensor or PyCapsule")
 
 
-def from_dlpack(ext_tensor, *, require_alignment=0, require_contiguous=False):
-    """
-    Convert an external tensor to an Tensor.
+def from_dlpack(
+    ext_tensor: Any, *, require_alignment: int = 0, require_contiguous: bool = False
+) -> Tensor:
+    """Import a foreign array that implements the DLPack producer protocol.
 
     Parameters
     ----------
     ext_tensor : object
-        The external tensor to convert.
-
-    require_alignment : int
-        The minimum required alignment to check for the tensor.
-
-    require_contiguous : bool
-        Whether to check for contiguous memory.
+        An object supporting ``__dlpack__`` and ``__dlpack_device__``.
+    require_alignment : int, optional
+        If greater than zero, require the underlying data pointer to be
+        aligned to this many bytes. Misaligned inputs raise
+        :class:`ValueError`.
+    require_contiguous : bool, optional
+        When ``True``, require the layout to be contiguous. Non-contiguous
+        inputs raise :class:`ValueError`.
 
     Returns
     -------
-    tensor : :py:class:`tvm_ffi.Tensor`
-        The converted tensor.
+    Tensor
+        A TVM FFI :class:`Tensor` that references the same memory.
+
+    Examples
+    --------
+    .. code-block:: python
+
+        import numpy as np
+        x_np = np.arange(8, dtype="int32")
+        x = tvm_ffi.from_dlpack(x_np)
+        y_np = np.from_dlpack(x)
+        assert np.shares_memory(x_np, y_np)
+
     """
     cdef TVMFFIObjectHandle chandle
     _from_dlpack_universal(ext_tensor, require_alignment, require_contiguous, &chandle)
@@ -174,12 +189,12 @@ def from_dlpack(ext_tensor, *, require_alignment=0, require_contiguous=False):
 
 
 # helper class for shape handling
-def _shape_obj_get_py_tuple(obj):
+def _shape_obj_get_py_tuple(obj) -> tuple[int, ...]:
     cdef TVMFFIShapeCell* shape = TVMFFIShapeGetCellPtr((<Object>obj).chandle)
     return tuple(shape.data[i] for i in range(shape.size))
 
 
-def _make_strides_from_shape(tuple shape):
+def _make_strides_from_shape(tuple shape) -> tuple[int, ...]:
     cdef int64_t expected_stride = 1
     cdef list strides = []
     cdef int64_t ndim = len(shape)
@@ -192,44 +207,62 @@ def _make_strides_from_shape(tuple shape):
 
 
 cdef class Tensor(Object):
-    """Tensor object that represents a managed n-dimensional array.
+    """Managed n-dimensional array compatible with DLPack.
+
+    ``Tensor`` provides zero-copy interoperability with array libraries
+    through the DLPack protocol. Instances are typically created with
+    :func:`from_dlpack` or returned from FFI functions.
+
+    Examples
+    --------
+    .. code-block:: python
+
+        import numpy as np
+        x = tvm_ffi.from_dlpack(np.arange(6, dtype="int32"))
+        assert x.shape == (6,)
+        assert x.dtype == tvm_ffi.dtype("int32")
+        # Round-trip through NumPy using DLPack
+        np.testing.assert_equal(np.from_dlpack(x), np.arange(6, dtype="int32"))
+
     """
     cdef DLTensor* cdltensor
 
     @property
-    def shape(self):
-        """Shape of this array"""
+    def shape(self) -> tuple[int, ...]:
+        """Tensor shape as a tuple of integers."""
         return tuple(self.cdltensor.shape[i] for i in range(self.cdltensor.ndim))
 
     @property
-    def strides(self):
-        """Strides of this array"""
+    def strides(self) -> tuple[int, ...]:
+        """Tensor strides as a tuple of integers."""
         if self.cdltensor.strides == NULL:
             return _make_strides_from_shape(self.shape)
         return tuple(self.cdltensor.strides[i] for i in range(self.cdltensor.ndim))
 
     @property
-    def dtype(self):
-        """Data type of this array"""
+    def dtype(self) -> Any:
+        """Data type as :class:`tvm_ffi.dtype` (``str`` subclass)."""
         cdef TVMFFIAny dtype_any
         dtype_any.v_dtype = self.cdltensor.dtype
         return make_ret_dtype(dtype_any)
 
     @property
-    def device(self):
-        """Device of this Tensor"""
+    def device(self) -> Device:
+        """The :class:`Device` on which the tensor is placed."""
         cdef TVMFFIAny device_any
         device_any.v_device = self.cdltensor.device
         return make_ret_device(device_any)
 
-    def _to_dlpack(self):
+    def _to_dlpack(self) -> object:
+        """Return a DLPack capsule representing this tensor (internal)."""
         cdef DLManagedTensor* dltensor
         cdef int c_api_ret_code
         c_api_ret_code = TVMFFITensorToDLPack(self.chandle, &dltensor)
         CHECK_CALL(c_api_ret_code)
         return pycapsule.PyCapsule_New(dltensor, _c_str_dltensor, <PyCapsule_Destructor>_c_dlpack_deleter)
 
-    def _to_dlpack_versioned(self):
+    def _to_dlpack_versioned(self) -> object:
+        """Return a versioned DLPack capsule (internal)."""
         cdef DLManagedTensorVersioned* dltensor
         cdef int c_api_ret_code
         c_api_ret_code = TVMFFITensorToDLPackVersioned(self.chandle, &dltensor)
@@ -237,36 +270,38 @@ cdef class Tensor(Object):
         return pycapsule.PyCapsule_New(
             dltensor, _c_str_dltensor_versioned, <PyCapsule_Destructor>_c_dlpack_versioned_deleter)
 
-    def __dlpack_device__(self):
+    def __dlpack_device__(self) -> tuple[int, int]:
+        """Implement the standard ``__dlpack_device__`` protocol."""
         cdef int device_type = self.cdltensor.device.device_type
         cdef int device_id = self.cdltensor.device.device_id
         return (device_type, device_id)
 
-    def __dlpack__(self, *, stream=None, max_version=None, dl_device=None, copy=None):
-        """Produce a DLPack tensor from this array
+    def __dlpack__(
+        self,
+        *,
+        stream: Any | None = None,
+        max_version: tuple[int, int] | None = None,
+        dl_device: tuple[int, int] | None = None,
+        copy: bool | None = None,
+    ) -> object:
+        """Implement the standard ``__dlpack__`` protocol.
 
         Parameters
         ----------
-        stream : Optional[int]
-            The stream to use for the DLPack tensor
-
-        max_version : int, optional
-            The maximum version of the DLPack tensor to produce
-
-        dl_device : Optional[Tuple[int, int]]
-            The device to use for the DLPack tensor
-
-        copy : Optional[bool]
-            Whether to copy the data to the new device
-
-        Returns
-        -------
-        dlpack : DLPack tensor
+        stream : Any, optional
+            Framework-specific stream/context object.
+        max_version : Tuple[int, int], optional
+            Upper bound on the supported DLPack version of the
+            consumer. When ``None``, use the built-in protocol version.
+        dl_device : Tuple[int, int], optional
+            Override the device reported by :py:meth:`__dlpack_device__`.
+        copy : bool, optional
+            If ``True``, produce a copy rather than exporting in-place.
 
         Raises
         ------
         BufferError
-            Export failed
+            If the requested behavior cannot be satisfied.
         """
         if max_version is None:
             # Keep and use the DLPack 0.X implementation
@@ -361,15 +396,15 @@ def _dltensor_test_wrapper_exchange_api_ptr():
 cdef class DLTensorTestWrapper:
     """Wrapper of a Tensor that exposes DLPack protocol, only for testing purpose.
     """
-    __c_dlpack_exchange_api__ = _dltensor_test_wrapper_exchange_api_ptr()
+    __c_dlpack_exchange_api__: int = _dltensor_test_wrapper_exchange_api_ptr()
 
     cdef Tensor tensor
     cdef dict __dict__
 
-    def __init__(self, tensor):
+    def __init__(self, tensor: Tensor) -> None:
         self.tensor = tensor
 
-    def __tvm_ffi_env_stream__(self):
+    def __tvm_ffi_env_stream__(self) -> int:
         cdef TVMFFIStreamHandle stream
         cdef long long stream_as_int
         cdef int c_api_ret_code
@@ -378,10 +413,10 @@ cdef class DLTensorTestWrapper:
         stream_as_int = <long long>stream
         return stream_as_int
 
-    def __dlpack_device__(self):
+    def __dlpack_device__(self) -> tuple[int, int]:
         return self.tensor.__dlpack_device__()
 
-    def __dlpack__(self, *, **kwargs):
+    def __dlpack__(self, *, **kwargs: Any) -> object:
         return self.tensor.__dlpack__(**kwargs)
 
 

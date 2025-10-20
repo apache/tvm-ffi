@@ -42,12 +42,12 @@ Tensor
   :toctree: generated/
 
   Tensor
-  Shape
-  Device
   from_dlpack
+  Shape
+  dtype
+  Device
   DLDeviceType
   device
-  dtype
 
 
 Function

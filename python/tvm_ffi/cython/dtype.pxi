@@ -16,6 +16,7 @@
 # specific language governing permissions and limitations
 # under the License.
 import os
+from typing import Any
 
 
 if os.environ.get("TVM_FFI_BUILD_DOCS", "0") == "0":
@@ -61,25 +62,35 @@ def _create_dtype_from_tuple(cls, code, bits, lanes):
 
 
 cdef class DataType:
-    """DataType is a wrapper around DLDataType.
+    """Internal wrapper around ``DLDataType``.
 
-    Parameters
-    ----------
-    dtype_str : str
-        The string representation of the data type
+    This is a low-level representation used by the FFI layer. It is
+    not intended as a user-facing API. For user code, prefer
+    :class:`tvm_ffi.dtype`, which behaves like a Python ``str`` and
+    integrates with array libraries.
+
+    Examples
+    --------
+    .. code-block:: python
+
+        # Prefer the user-facing helper
+        d = tvm_ffi.dtype("int32")
+        assert d.bits == 32
+        assert str(d) == "int32"
+
     """
     cdef DLDataType cdtype
 
-    def __init__(self, dtype_str):
+    def __init__(self, dtype_str: str) -> None:
         cdef ByteArrayArg dtype_str_arg = ByteArrayArg(c_str(dtype_str))
         CHECK_CALL(TVMFFIDataTypeFromString(dtype_str_arg.cptr(), &(self.cdtype)))
 
-    def __reduce__(self):
+    def __reduce__(self) -> Any:
         cls = type(self)
         return (_create_dtype_from_tuple,
                 (cls, self.cdtype.code, self.cdtype.bits, self.cdtype.lanes))
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         if not isinstance(other, DataType):
             return False
         return (
@@ -88,37 +99,42 @@ cdef class DataType:
             and self.cdtype.lanes == other.cdtype.lanes
         )
 
-    def __ne__(self, other):
+    def __ne__(self, other: object) -> bool:
         return not self.__eq__(other)
 
     @property
-    def type_code(self):
+    def type_code(self) -> int:
+        """Integer DLDataTypeCode of the scalar base type."""
         return self.cdtype.code
 
     @property
-    def bits(self):
+    def bits(self) -> int:
+        """Number of bits of the scalar base type."""
         return self.cdtype.bits
 
     @property
-    def lanes(self):
+    def lanes(self) -> int:
+        """Number of lanes (for vector types)."""
         return self.cdtype.lanes
 
     @property
-    def itemsize(self):
-        """Get the number of bytes of a single element of this data type. When the number of lanes
-        is greater than 1, the itemsize is the size of the vector type.
+    def itemsize(self) -> int:
+        """Size of one element in bytes (``bits * lanes // 8``).
+
+        When the number of lanes is greater than 1, the ``itemsize`` is
+        the size of the vector type.
 
         Returns
         -------
-        itemsize : int
-            The number of bytes of a single element of this data type
+        int
+            The number of bytes of a single element of this data type.
         """
         lanes_as_int = self.cdtype.lanes
         if lanes_as_int < 0:
             raise ValueError("Cannot determine itemsize for scalable vector types")
         return (self.cdtype.bits * self.cdtype.lanes + 7) // 8
 
-    def __str__(self):
+    def __str__(self) -> str:
         cdef TVMFFIAny temp_any
         cdef TVMFFIByteArray* bytes_ptr
         cdef TVMFFIByteArray bytes

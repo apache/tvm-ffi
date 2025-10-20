@@ -18,6 +18,7 @@ import ctypes
 import threading
 import os
 from numbers import Real, Integral
+from typing import Any, Callable
 
 
 if os.environ.get("TVM_FFI_BUILD_DOCS", "0") == "0":
@@ -714,7 +715,23 @@ cdef int TVMFFIPyArgSetterFactory_(PyObject* value, TVMFFIPyArgSetter* out) exce
 # Implementation of function calling
 # ---------------------------------------------------------------------------------------------
 cdef class Function(Object):
-    """Python class that wraps a function with tvm-ffi ABI.
+    """Callable wrapper around a TVM FFI function.
+
+    Instances are obtained by converting Python callables with
+    :func:`tvm_ffi.convert`, or by looking up globally-registered FFI
+    functions using :func:`tvm_ffi.get_global_func`.
+
+    Examples
+    --------
+    .. code-block:: python
+
+        @tvm_ffi.register_global_func("my.add")
+        def add(a, b):
+            return a + b
+
+        f = tvm_ffi.get_global_func("my.add")
+        assert isinstance(f, tvm_ffi.Function)
+        assert f(1, 2) == 3
 
     See Also
     --------
@@ -724,17 +741,20 @@ cdef class Function(Object):
     cdef int c_release_gil
     cdef dict __dict__
 
-    def __cinit__(self):
+    def __cinit__(self) -> None:
         self.c_release_gil = _RELEASE_GIL_BY_DEFAULT
 
     property release_gil:
-        def __get__(self):
+        """Whether calls release the Python GIL while executing."""
+
+        def __get__(self) -> bool:
             return self.c_release_gil != 0
 
-        def __set__(self, value):
+        def __set__(self, value: bool) -> None:
             self.c_release_gil = value
 
-    def __call__(self, *args):
+    def __call__(self, *args: Any) -> Any:
+        """Invoke the wrapped FFI function with ``args``."""
         cdef TVMFFIAny result
         cdef int c_api_ret_code
         cdef const DLPackExchangeAPI* c_ctx_dlpack_api = NULL
@@ -761,7 +781,7 @@ cdef class Function(Object):
     def __from_extern_c__(
         c_symbol: int,
         *,
-        keep_alive_object: object = None
+        keep_alive_object: object | None = None
     ) -> Function:
         """Convert a function from extern C address.
 
@@ -814,7 +834,7 @@ cdef class Function(Object):
     def __from_mlir_packed_safe_call__(
         mlir_packed_symbol: int,
         *,
-        keep_alive_object: object = None
+        keep_alive_object: object | None = None
     ) -> Function:
         """Convert a function from MLIR packed safe call function pointer.
 
@@ -867,7 +887,7 @@ cdef class Function(Object):
 _register_object_by_index(kTVMFFIFunction, Function)
 
 
-def _register_global_func(name, pyfunc, override):
+def _register_global_func(name: str, pyfunc: Callable[..., Any] | Function, override: bool) -> Function:
     cdef TVMFFIObjectHandle chandle
     cdef int c_api_ret_code
     cdef int ioverride = override
@@ -880,7 +900,7 @@ def _register_global_func(name, pyfunc, override):
     return pyfunc
 
 
-def _get_global_func(name, allow_missing):
+def _get_global_func(name: str, allow_missing: bool):
     cdef TVMFFIObjectHandle chandle
     cdef ByteArrayArg name_arg = ByteArrayArg(c_str(name))
 
@@ -937,7 +957,7 @@ cdef inline int _convert_to_ffi_func_handle(
     return 0
 
 
-def _convert_to_ffi_func(object pyfunc):
+def _convert_to_ffi_func(object pyfunc) -> Function:
     """Convert a python function to TVM FFI function"""
     cdef TVMFFIObjectHandle chandle
     _convert_to_ffi_func_handle(pyfunc, &chandle)
@@ -959,7 +979,7 @@ cdef inline int _convert_to_opaque_object_handle(
     return 0
 
 
-def _convert_to_opaque_object(object pyobject):
+def _convert_to_opaque_object(object pyobject) -> OpaquePyObject:
     """Convert a python object to TVM FFI opaque object"""
     cdef TVMFFIObjectHandle chandle
     _convert_to_opaque_object_handle(pyobject, &chandle)
@@ -968,7 +988,7 @@ def _convert_to_opaque_object(object pyobject):
     return ret
 
 
-def _print_debug_info():
+def _print_debug_info() -> None:
     """Get the size of the dispatch map"""
     cdef size_t size = TVMFFIPyGetDispatchMapSize()
     print(f"TVMFFIPyGetDispatchMapSize: {size}")

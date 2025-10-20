@@ -18,24 +18,45 @@
 
 import types
 import re
+from typing import Callable, Optional
 
-ERROR_NAME_TO_TYPE = {}
-ERROR_TYPE_TO_NAME = {}
+ERROR_NAME_TO_TYPE: dict[str, type] = {}
+ERROR_TYPE_TO_NAME: dict[type, str] = {}
 
-_WITH_APPEND_BACKTRACE = None
-_TRACEBACK_TO_BACKTRACE_STR = None
+_WITH_APPEND_BACKTRACE: Optional[Callable[[BaseException, str], BaseException]] = None
+_TRACEBACK_TO_BACKTRACE_STR: Optional[Callable[[types.TracebackType | None], str]] = None
 
 
 cdef class Error(Object):
-    """Base class for all FFI errors, usually they are attached to errors
+    """Base class for FFI errors.
 
-    Note
-    ----
-    Do not directly raise this object, instead use the `py_error` method
-    to convert it to a python error then raise it.
+    An :class:`Error` is a lightweight wrapper around a concrete Python
+    exception raised by FFI calls. It stores the error ``kind`` (e.g.
+    ``"ValueError"``), the message, and a serialized FFI backtrace that
+    can be re-attached to produce a Python traceback.
+
+    Users normally interact with specific error subclasses that are
+    registered via :func:`tvm_ffi.error.register_error`.
+
+    Notes
+    -----
+    Do not directly raise this object. Instead, use :py:meth:`py_error`
+    to convert it to a Python exception and raise that.
     """
 
     def __init__(self, kind, message, backtrace):
+        """Construct an error wrapper.
+
+        Parameters
+        ----------
+        kind : str
+            Name of the Python exception type (e.g. ``"ValueError"``).
+        message : str
+            The error message from the FFI side.
+        backtrace : str
+            Serialized backtrace encoded by the runtime.
+
+        """
         cdef ByteArrayArg kind_arg = ByteArrayArg(c_str(kind))
         cdef ByteArrayArg message_arg = ByteArrayArg(c_str(message))
         cdef ByteArrayArg backtrace_arg = ByteArrayArg(c_str(backtrace))
@@ -47,30 +68,23 @@ cdef class Error(Object):
             raise MemoryError("Failed to create error object")
         (<Object>self).chandle = out
 
-    def update_backtrace(self, backtrace):
-        """Update the backtrace of the error
+    def update_backtrace(self, backtrace: str) -> None:
+        """Replace the stored backtrace string with ``backtrace``.
 
         Parameters
         ----------
         backtrace : str
-            The backtrace to update.
-
-        Note
-        ----
-        The backtrace is stored in the reverse order of python traceback.
-        Such storage pattern makes it easier to append the backtrace to
-        the end when error is propagated. When we translate the backtrace to python traceback,
-        we will reverse the order of the lines to make it align with python traceback.
+            The backtrace to store. The internal storage is reverse of
+            Python's traceback order to simplify appending during
+            propagation; it is reversed again when rendered.
         """
         cdef ByteArrayArg backtrace_arg = ByteArrayArg(c_str(backtrace))
         TVMFFIErrorGetCellPtr(self.chandle).update_backtrace(
             self.chandle, backtrace_arg.cptr(), kTVMFFIBacktraceUpdateModeReplace
         )
 
-    def py_error(self):
-        """
-        Convert the FFI error to the python error
-        """
+    def py_error(self) -> BaseException:
+        """Return a Python :class:`BaseException` instance for this error."""
         error_cls = ERROR_NAME_TO_TYPE.get(self.kind, RuntimeError)
         py_error = error_cls(self.message)
         py_error = _WITH_APPEND_BACKTRACE(py_error, self.backtrace)
@@ -126,7 +140,7 @@ cdef inline int set_last_ffi_error(error) except -1:
         TVMFFIErrorSetRaised(ffi_error.chandle)
 
 
-def _convert_to_ffi_error(error):
+def _convert_to_ffi_error(error: BaseException) -> Error:
     """Convert the python error to the FFI error"""
     py_backtrace = _TRACEBACK_TO_BACKTRACE_STR(error.__traceback__)
     if hasattr(error, "__tvm_ffi_error__"):

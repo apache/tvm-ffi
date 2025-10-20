@@ -17,6 +17,7 @@
 # specific language governing permissions and limitations
 # under the License.
 from enum import IntEnum
+from typing import Any, Optional
 
 _CLASS_DEVICE = None
 
@@ -34,7 +35,18 @@ def _create_device_from_tuple(cls, device_type, device_id):
 
 
 class DLDeviceType(IntEnum):
-    """The enum that maps to DLDeviceType."""
+    """Enumeration mirroring DLPack's ``DLDeviceType``.
+
+    Values can be compared against :py:meth:`Device.dlpack_device_type`.
+
+    Examples
+    --------
+    .. code-block:: python
+
+        dev = tvm_ffi.device("cuda", 0)
+        assert dev.dlpack_device_type() == tvm_ffi.DLDeviceType.kDLCUDA
+
+    """
     kDLCPU = 1
     kDLCUDA = 2
     kDLCUDAHost = 3
@@ -53,26 +65,28 @@ class DLDeviceType(IntEnum):
 
 
 cdef class Device:
-    """Device represents a device in the ffi system.
+    """A device descriptor used by TVM FFI and DLPack.
 
-    Device is a thin wrapper around DLDevice in DLPack standard.
+    A :class:`Device` identifies a placement (e.g. CPU, CUDA GPU) and
+    a device index within that placement. Most users construct devices
+    using :func:`tvm_ffi.device`.
 
     Parameters
     ----------
     device_type : Union[str, int]
-        The string representation of the device type
-
-    index : int
-        The device id
+        A device type name (e.g. ``"cpu"``, ``"cuda"``) or a
+        DLPack device type code.
+    index : int, optional
+        Zero-based device index (defaults to ``0`` when omitted).
 
     Examples
     --------
-    You can use `tvm_ffi.device` function to create a `Device`.
-
     .. code-block:: python
 
-      assert tvm_ffi.device("cuda:0") == tvm_ffi.device("cuda", 0)
-      assert tvm_ffi.device("cpu:0") == tvm_ffi.device("cpu", 0)
+        dev = tvm_ffi.device("cuda:0")
+        assert dev.type == "cuda"
+        assert dev.index == 0
+        assert str(dev) == "cuda:0"
 
     """
     cdef DLDevice cdevice
@@ -114,7 +128,7 @@ cdef class Device:
         "trn": DLDeviceType.kDLTrn,
     }
 
-    def __init__(self, device_type, index = None):
+    def __init__(self, device_type: str | int, index: Optional[int] = None) -> None:
         device_type_or_name = device_type
         index = index if index is not None else 0
         if isinstance(device_type_or_name, str):
@@ -137,11 +151,11 @@ cdef class Device:
             raise TypeError(f"Invalid device index: {index}")
         self.cdevice = TVMFFIDLDeviceFromIntPair(device_type, index)
 
-    def __reduce__(self):
+    def __reduce__(self) -> Any:
         cls = type(self)
         return (_create_device_from_tuple, (cls, self.cdevice.device_type, self.cdevice.device_id))
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         if not isinstance(other, Device):
             return False
         return (
@@ -149,40 +163,40 @@ cdef class Device:
             and self.cdevice.device_id == (<Device>other).cdevice.device_id
         )
 
-    def __ne__(self, other):
+    def __ne__(self, other: object) -> bool:
         return not self.__eq__(other)
 
-    def __str__(self):
+    def __str__(self) -> str:
         cdef int dev_type = self.cdevice.device_type
         name = self.__device_type_name__()
         index = self.cdevice.device_id
         return f"{name}:{index}"
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         cdef int dev_type = self.cdevice.device_type
         name = self.__device_type_name__()
         index = self.cdevice.device_id
         return f"device(type='{name}', index={index})"
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         return hash((self.cdevice.device_type, self.cdevice.device_id))
 
-    def __device_type_name__(self):
+    def __device_type_name__(self) -> str:
+        """Return the canonical device type name (e.g. ``"cuda"``)."""
         return self._DEVICE_TYPE_TO_NAME[self.cdevice.device_type]
 
     @property
-    def type(self):
-        """String representation of the device type."""
+    def type(self) -> str:
+        """Device type name such as ``"cpu"`` or ``"cuda"``."""
         return self.__device_type_name__()
 
     @property
-    def index(self):
-        """The device index."""
+    def index(self) -> int:
+        """Zero-based device index."""
         return self.cdevice.device_id
 
-    def dlpack_device_type(self):
-        """The device type int code used in the DLPack specification.
-        """
+    def dlpack_device_type(self) -> int:
+        """Return the corresponding :class:`DLDeviceType` enum value."""
         return self.cdevice.device_type
 
 

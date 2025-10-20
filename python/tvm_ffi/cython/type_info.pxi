@@ -88,7 +88,12 @@ _TYPE_SCHEMA_ORIGIN_CONVERTER = {
 
 @dataclasses.dataclass(repr=False)
 class TypeSchema:
-    """Type schema for a TVM FFI type."""
+    """Type schema that describes a TVM FFI type.
+
+    The schema is expressed using a compact JSON-compatible structure
+    and can be rendered as a Python typing string with
+    :py:meth:`repr`.
+    """
     origin: str
     args: tuple[TypeSchema, ...] = ()
 
@@ -115,6 +120,7 @@ class TypeSchema:
 
     @staticmethod
     def from_json_obj(obj: dict[str, Any]) -> "TypeSchema":
+        """Construct a :class:`TypeSchema` from a parsed JSON object."""
         assert isinstance(obj, dict) and "type" in obj, obj
         origin = obj["type"]
         origin = _TYPE_SCHEMA_ORIGIN_CONVERTER.get(origin, origin)
@@ -124,9 +130,48 @@ class TypeSchema:
 
     @staticmethod
     def from_json_str(s) -> "TypeSchema":
+        """Construct a :class:`TypeSchema` from a JSON string."""
         return TypeSchema.from_json_obj(json.loads(s))
 
     def repr(self, ty_map = None) -> str:
+        """Render a human-readable representation of this schema.
+
+        Parameters
+        ----------
+        ty_map : Callable[[str], str], optional
+            A mapping function applied to the schema origin name before
+            rendering (e.g. map ``"list" -> "Sequence"`` and
+            ``"dict" -> "Mapping"``). If ``None``, the raw origin is used.
+
+        Returns
+        -------
+        str
+            A readable string using Python typing syntax. Formats include:
+            - Unions as ``"T1 | T2"``
+            - Optional as ``"T | None"``
+            - Callables as ``"Callable[[arg1, ...], ret]"``
+            - Containers as ``"origin[arg1, ...]"``
+
+        Examples
+        --------
+        .. code-block:: python
+
+            # From JSON emitted by the runtime
+            s = TypeSchema.from_json_str('{"type":"Optional","args":[{"type":"int"}]}')
+            assert s.repr() == "int | None"
+
+            # Callable where the first arg is return type, remaining are parameters
+            s = TypeSchema("Callable", (TypeSchema("int"), TypeSchema("str")))
+            assert s.repr() == "Callable[[str], int]"
+
+            # Custom mapping to stdlib typing collections
+            def _map(t: str) -> str:
+                return {"list": "Sequence", "dict": "Mapping"}.get(t, t)
+
+            s = TypeSchema.from_json_str('{"type":"dict","args":[{"type":"str"},{"type":"int"}]}')
+            assert s.repr(_map) == "Mapping[str, int]"
+
+        """
         if ty_map is None:
             origin = self.origin
         else:

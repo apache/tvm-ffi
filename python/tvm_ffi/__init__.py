@@ -56,6 +56,7 @@ from .stream import StreamContext, get_raw_stream, use_raw_stream, use_torch_str
 from . import serialization
 from . import access_path
 from . import dataclasses
+from . import cpp
 
 # optional module to speedup dlpack conversion
 from . import _optional_torch_c_dlpack
@@ -75,6 +76,7 @@ __all__ = [
     "__version__",
     "access_path",
     "convert",
+    "cpp",
     "dataclasses",
     "device",
     "dtype",

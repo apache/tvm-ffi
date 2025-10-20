@@ -28,23 +28,38 @@ cdef inline bytes _bytes_obj_get_py_bytes(obj):
     return bytearray_to_bytes(bytes)
 
 
+from typing import Any
+
+
 class String(str, PyNativeObject):
     __slots__ = ["_tvm_ffi_cached_object"]
-    """String object that is possibly returned by FFI call.
+    """UTF-8 string that interoperates with FFI while behaving like ``str``.
 
-    Note
-    ----
-    This class subclasses str so it can be directly treated as str.
-    There is no need to construct this object explicitly.
+    ``String`` is a :class:`str` subclass that can travel across the
+    FFI boundary without copying for large payloads. For most Python
+    APIs, using a plain ``str`` works seamlessly; the runtime converts
+    to and from ``String`` as needed.
+
+    Examples
+    --------
+    .. code-block:: python
+
+        fecho = tvm_ffi.get_global_func("testing.echo")
+        s = tvm_ffi.core.String("hello")
+        assert fecho(s) == "hello"
+        assert fecho("world") == "world"
+
     """
-    def __new__(cls, value):
+    _tvm_ffi_cached_object: Object | None
+
+    def __new__(cls, value: str) -> "String":
         val = str.__new__(cls, value)
         val._tvm_ffi_cached_object = None
         return val
 
     # pylint: disable=no-self-argument
-    def __from_tvm_ffi_object__(cls, obj):
-        """Construct from a given tvm object."""
+    def __from_tvm_ffi_object__(cls, obj: Any) -> "String":
+        """Construct a ``String`` from an FFI object (internal)."""
         content = _string_obj_get_py_str(obj)
         val = str.__new__(cls, content)
         val._tvm_ffi_cached_object = obj
@@ -55,21 +70,22 @@ _register_object_by_index(kTVMFFIStr, String)
 
 
 class Bytes(bytes, PyNativeObject):
-    """Bytes object that is possibly returned by FFI call.
+    """Byte buffer that interoperates with FFI while behaving like ``bytes``.
 
-    Note
-    ----
-    This class subclasses bytes so it can be directly treated as bytes.
-    There is no need to construct this object explicitly.
+    Like :class:`String`, this class enables zero-copy exchange for
+    large data. Most Python code can use ``bytes`` directly; the FFI
+    layer constructs :class:`Bytes` as needed.
     """
-    def __new__(cls, value):
+    _tvm_ffi_cached_object: Object | None
+
+    def __new__(cls, value: bytes) -> "Bytes":
         val = bytes.__new__(cls, value)
         val._tvm_ffi_cached_object = None
         return val
 
     # pylint: disable=no-self-argument
-    def __from_tvm_ffi_object__(cls, obj):
-        """Construct from a given tvm object."""
+    def __from_tvm_ffi_object__(cls, obj: Any) -> "Bytes":
+        """Construct ``Bytes`` from an FFI object (internal)."""
         content = _bytes_obj_get_py_bytes(obj)
         val = bytes.__new__(cls, content)
         val._tvm_ffi_cached_object = obj
