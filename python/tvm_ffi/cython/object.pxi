@@ -155,10 +155,10 @@ cdef class Object:
             return type(self).__name__ + "(chandle=None)"
         return str(__object_repr__(self))
 
-    def __eq__(self, other: "Object") -> bool:
+    def __eq__(self, other: object) -> bool:
         return self.same_as(other)
 
-    def __ne__(self, other: "Object") -> bool:
+    def __ne__(self, other: object) -> bool:
         return not self.__eq__(other)
 
     def __init_handle_by_constructor__(self, fconstructor: Any, *args: Any) -> None:
