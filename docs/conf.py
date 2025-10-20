@@ -318,6 +318,7 @@ _autodoc_always_show = {
     "__dlpack__",
     "__dlpack_device__",
     "__device_type_name__",
+    "__ffi_init__",
     "__from_extern_c__",
     "__from_mlir_packed_safe_call__",
 }

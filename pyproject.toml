@@ -77,16 +77,16 @@ docs = [
   "sphinx-book-theme",
   "sphinx-copybutton",
   "sphinx-design",
-  "sphinx-reredirects==0.1.2",
-  "sphinx-tabs==3.4.1",
-  "sphinx-toolbox==3.4.0",
+  "sphinx-reredirects",
+  "sphinx-tabs",
+  "sphinx-toolbox",
   "sphinx-autodoc-typehints",
   "sphinxcontrib-mermaid",
-  "sphinxcontrib-napoleon==0.7",
-  "sphinxcontrib_httpdomain==1.8.1",
-  "setuptools<81",
+  "sphinxcontrib-napoleon",
+  "sphinxcontrib_httpdomain",
+  "setuptools",
   "tomli",
-  "urllib3>=2.5.0",
+  "urllib3",
 ]
 
 [project.scripts]
