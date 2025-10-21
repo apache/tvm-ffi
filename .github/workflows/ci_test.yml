@@ -34,9 +34,9 @@ jobs:
       should_skip_ci_commit: ${{ steps.detect.outputs.should_skip_ci_commit }}
       should_skip_ci_docs_only: ${{ steps.detect.outputs.should_skip_ci_docs_only }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
-          fetch-depth: 2
+          fetch-depth: 0
           fetch-tags: true
       - name: Detect skip ci and docs changes
         id: detect
@@ -50,9 +50,9 @@ jobs:
     needs: [prepare]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
-          fetch-depth: 2
+          fetch-depth: 0
           fetch-tags: true
       - uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd  # v3.0.1
 
@@ -60,10 +60,10 @@ jobs:
     needs: [lint, prepare]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: recursive
-          fetch-depth: 2
+          fetch-depth: 0
           fetch-tags: true
       - name: Set up uv
         uses: astral-sh/setup-uv@b75a909f75acd358c2196fb9a5f1299a9a8868a4  # v6.7.0
@@ -91,10 +91,10 @@ jobs:
           - {os: macos-14, arch: arm64, python_version: '3.13'}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: recursive
-          fetch-depth: 2
+          fetch-depth: 0
           fetch-tags: true
       - name: Print current commit
         run: git log -1 --oneline
