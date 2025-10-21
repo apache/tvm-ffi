@@ -40,6 +40,7 @@ Table of Contents
    :caption: Get Started
 
    get_started/quickstart.rst
+   get_started/stable_c_abi.rst
 
 .. toctree::
    :maxdepth: 1
@@ -49,7 +50,6 @@ Table of Contents
    guides/cpp_guide.md
    guides/python_guide.md
    guides/rust_guide.md
-   guides/stable_c_abi.md
    guides/compiler_integration.md
    guides/build_from_source.md
 

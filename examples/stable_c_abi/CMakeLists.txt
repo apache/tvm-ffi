@@ -15,11 +15,9 @@
 # specific language governing permissions and limitations
 # under the License.
 cmake_minimum_required(VERSION 3.20)
-project(quickstart LANGUAGES CXX)
+project(tvm_ffi_example LANGUAGES C)
 
-option(EXAMPLE_NAME "Which example to build ('compile_cpu'/'compile_cuda'/'load_cpp')"
-       "compile_cpu"
-)
+option(EXAMPLE_NAME "Which example to build ('kernel'/'load')" "kernel")
 message(STATUS "Building example: ${EXAMPLE_NAME}")
 
 # Run `tvm_ffi.config --cmakedir` to find tvm-ffi package
@@ -35,9 +33,9 @@ execute_process(
 )
 find_package(tvm_ffi CONFIG REQUIRED)
 
-if (EXAMPLE_NAME STREQUAL "compile_cpu")
-  # Example 1. C++ `add_one`
-  add_library(add_one_cpu SHARED compile/add_one_cpu.cc)
+if (EXAMPLE_NAME STREQUAL "kernel")
+  # Example 1. `add_one_cpu` in C
+  add_library(add_one_cpu SHARED src/add_one_cpu.c)
   target_link_libraries(add_one_cpu PRIVATE tvm_ffi_header)
   target_link_libraries(add_one_cpu PRIVATE tvm_ffi_shared)
   set_target_properties(
@@ -45,31 +43,26 @@ if (EXAMPLE_NAME STREQUAL "compile_cpu")
     PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/"
                PREFIX ""
                SUFFIX ".so"
+               C_STANDARD 11
+               C_STANDARD_REQUIRED YES
+               C_EXTENSIONS NO
   )
-elseif (EXAMPLE_NAME STREQUAL "compile_cuda")
-  # Example 2. CUDA `add_one`
-  enable_language(CUDA)
-  add_library(add_one_cuda SHARED compile/add_one_cuda.cu)
-  target_link_libraries(add_one_cuda PRIVATE tvm_ffi_shared)
+elseif (EXAMPLE_NAME STREQUAL "load")
+  # Example 2. Load `add_one_cpu` shared library in C
+  add_executable(load src/load.c)
+  target_link_libraries(load PRIVATE tvm_ffi_header)
+  target_link_libraries(load PRIVATE tvm_ffi_shared)
   set_target_properties(
-    add_one_cuda
-    PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/"
-               PREFIX ""
-               SUFFIX ".so"
-  )
-elseif (EXAMPLE_NAME STREQUAL "load_cpp")
-  # Example 3. Load C++ shared library
-  add_executable(load_cpp load/load_cpp.cc)
-  target_link_libraries(load_cpp PRIVATE tvm_ffi_header)
-  target_link_libraries(load_cpp PRIVATE tvm_ffi_shared)
-  set_target_properties(
-    load_cpp
+    load
     PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/"
                PREFIX ""
                SUFFIX ""
+               C_STANDARD 11
+               C_STANDARD_REQUIRED YES
+               C_EXTENSIONS NO
   )
 else ()
   message(FATAL_ERROR "Unknown EXAMPLE_NAME option: ${EXAMPLE_NAME}. "
-                      "Expected: 'compile_cpu', 'compile_cuda', 'load_cpp'."
+                      "Expected: 'kernel' or 'load'."
   )
 endif ()

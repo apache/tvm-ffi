@@ -49,8 +49,6 @@ We can build a single shared library that works across:
 Write a Simple ``add_one``
 --------------------------
 
-.. _sec-cpp-source-code:
-
 Source Code
 ~~~~~~~~~~~
 
@@ -59,6 +57,8 @@ Suppose we implement a C++ function ``AddOne`` that performs elementwise ``y = x
 .. tabs::
 
   .. group-tab:: C++
+
+    .. _cpp_add_one_kernel:
 
     .. literalinclude:: ../../examples/quickstart/compile/add_one_cpu.cc
       :language: cpp
@@ -246,6 +246,8 @@ As shown in the :ref:`previous section<sec-use-across-framework>`, :py:func:`tvm
 and framework-independent ``add_one_cpu.so`` or ``add_one_cuda.so`` and can be used to incorporate it into all Python
 array frameworks that implement the standard `DLPack protocol <https://data-apis.org/array-api/2024.12/design_topics/data_interchange.html>`_.
 
+.. _cpp_load:
+
 C++
 ~~~
 
@@ -254,8 +256,15 @@ can be used directly in C/C++ with no Python dependency.
 
 .. literalinclude:: ../../examples/quickstart/load/load_cpp.cc
    :language: cpp
-   :start-after: [example.begin]
-   :end-before: [example.end]
+   :start-after: [main.begin]
+   :end-before: [main.end]
+
+.. dropdown:: Auxiliary Logics
+
+  .. literalinclude:: ../../examples/quickstart/load/load_cpp.cc
+    :language: cpp
+    :start-after: [aux.begin]
+    :end-before: [aux.end]
 
 Compile and run it with:
 

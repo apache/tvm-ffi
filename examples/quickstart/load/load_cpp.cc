@@ -16,16 +16,13 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-// [example.begin]
+// [main.begin]
 // File: load/load_cpp.cc
 #include <tvm/ffi/container/tensor.h>
 #include <tvm/ffi/extra/module.h>
 
 namespace {
 namespace ffi = tvm::ffi;
-
-/************* Main logics *************/
-
 /*!
  * \brief Main logics of library loading and function calling.
  * \param x The input tensor.
@@ -39,9 +36,10 @@ void Run(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
   // Call the function
   add_one_cpu(x, y);
 }
-
+}  // namespace
+// [main.end]
 /************* Auxiliary Logics *************/
-
+// [aux.begin]
 /*!
  * \brief Allocate a 1D float32 `tvm::ffi::Tensor` on CPU from an braced initializer list.
  * \param data The input data.
@@ -65,8 +63,6 @@ ffi::Tensor Alloc1DTensor(std::initializer_list<float> data) {
   return x;
 }
 
-}  // namespace
-
 int main() {
   ffi::Tensor x = Alloc1DTensor({1, 2, 3, 4, 5});
   ffi::Tensor y = Alloc1DTensor({0, 0, 0, 0, 0});
@@ -79,4 +75,4 @@ int main() {
   std::cout << "]" << std::endl;
   return 0;
 }
-// [example.end]
+// [aux.end]
