@@ -64,7 +64,17 @@ def get_dll_directories() -> list[str]:
         dll_path.extend(Path(p) for p in split_env_var("PATH", ":"))
     elif sys.platform.startswith("win32"):
         dll_path.extend(Path(p) for p in split_env_var("PATH", ";"))
-    return [str(path.resolve()) for path in dll_path if path.is_dir()]
+
+    valid_paths = []
+    for path in dll_path:
+        try:
+            if path.is_dir():
+                valid_paths.append(str(path.resolve()))
+        except OSError:
+            # need to ignore as resolve may fail if
+            # we don't have permission to access it
+            pass
+    return valid_paths
 
 
 def find_libtvm_ffi() -> str:
