@@ -27,8 +27,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import setuptools_scm
 import sphinx
-import tomli
 
 os.environ["TVM_FFI_BUILD_DOCS"] = "1"
 
@@ -43,10 +43,9 @@ _DOCS_DIR = Path(__file__).resolve().parent
 _RUST_DIR = _DOCS_DIR.parent / "rust"
 
 # -- General configuration ------------------------------------------------
-# Load version from pyproject.toml
-with Path("../pyproject.toml").open("rb") as f:
-    pyproject_data = tomli.load(f)
-__version__ = pyproject_data["project"]["version"]
+# Determine version without reading pyproject.toml
+# Always use setuptools_scm (assumed available in docs env)
+__version__ = setuptools_scm.get_version(root="..")
 
 project = "tvm-ffi"
 

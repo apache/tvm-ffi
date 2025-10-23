@@ -52,11 +52,13 @@ jobs:
       - uses: astral-sh/setup-uv@b75a909f75acd358c2196fb9a5f1299a9a8868a4
         if: matrix.os != 'macOS' || matrix.arch != 'arm64'
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           # Use the input only for manual runs; otherwise use the triggering ref
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.branch || github.ref }}
           submodules: recursive
+          fetch-depth: 0
+          fetch-tags: true
 
       - uses: ./.github/actions/detect-env-vars
         id: env_vars
@@ -97,10 +99,12 @@ jobs:
     name: Build source distribution
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.branch || github.ref }}
           submodules: recursive
+          fetch-depth: 0
+          fetch-tags: true
 
       - uses: astral-sh/setup-uv@b75a909f75acd358c2196fb9a5f1299a9a8868a4  # v6.7.0
 
