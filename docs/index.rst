@@ -52,6 +52,7 @@ Table of Contents
    guides/stable_c_abi.md
    guides/compiler_integration.md
    guides/build_from_source.md
+   guides/kernel_library_guide.rst
 
 
 .. toctree::
