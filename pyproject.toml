@@ -95,7 +95,8 @@ tvm-ffi-stubgen = "tvm_ffi.stub.stubgen:__main__"
 
 [build-system]
 requires = ["scikit-build-core>=0.10.0", "cython", "cmake>=3.18", "ninja"]
-build-backend = "scikit_build_core.build"
+build-backend = "build_backend"
+backend-path = ["."]
 
 [tool.scikit-build]
 wheel.py-api = "cp312"
