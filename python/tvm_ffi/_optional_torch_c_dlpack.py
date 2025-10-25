@@ -47,20 +47,10 @@ def load_torch_c_dlpack_extension() -> Any:
             # attribute is already set so we don't have to do it in
             # newer version of PyTorch
             return None
-
-        # Try to import pre-built extension first
-        try:
-            from . import torch_c_dlpack_ext  # noqa: PLC0415
-            # Set the DLPackExchangeAPI pointer on the class
-            setattr(torch.Tensor, "__c_dlpack_exchange_api__", torch_c_dlpack_ext.TorchDLPackExchangeAPIPtr())
-            return torch_c_dlpack_ext
-        except ImportError:
-            # Pre-built extension not available, fall back to JIT compilation
-            pass
     except ImportError:
         return None
 
-    """Load the torch c dlpack extension via JIT compilation."""
+    """Load the torch c dlpack extension."""
     cpp_source = """
 #include <dlpack/dlpack.h>
 #include <ATen/DLConvertor.h>

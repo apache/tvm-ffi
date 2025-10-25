@@ -1,4 +1,3 @@
-torch_ext_build/
 /tmp/
 *.bak
 # Byte-compiled / optimized / DLL files

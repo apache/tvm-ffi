@@ -75,16 +75,6 @@ Use ``tvm-ffi-config`` to query include and link flags when consuming TVM FFI fr
     tvm-ffi-config --libfiles   # or --libs/--ldflags on Unix
 ```
 
-### Optional: Pre-compile PyTorch DLPack Extension
-
-By default, the PyTorch DLPack extension uses JIT compilation on first import. To pre-compile it at build time:
-
-```bash
-TVM_FFI_BUILD_TORCH_EXT=1 pip install --reinstall --verbose -e .
-```
-
-This reduces first import time from ~11 seconds to ~0.4 seconds.
-
 ## Build the C/C++ Library Only
 
 TVM FFI can be used as a standalone C/C++ library without Python. The instruction below should work for Linux, macOS and Windows.
