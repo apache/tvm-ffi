@@ -32,13 +32,13 @@ subsequent calls will be much faster.
 
 from __future__ import annotations
 
-import warnings
-from typing import Any, Optional
 import sysconfig
+import warnings
+from typing import Any
 
 from . import libinfo
+from .cpp.load_inline import build_inline
 from .module import load_module
-from .cpp.load_inline import load_inline, build_inline
 
 cpp_source = """
 #include <torch/extension.h>
@@ -587,9 +587,8 @@ int64_t TorchDLPackExchangeAPIPtr() {
 """
 
 
-def build_torch_c_dlpack_extension(build_directory: Optional[str] = None) -> str:
-    """
-    Build the torch c dlpack extension as a tvm-ffi module.
+def build_torch_c_dlpack_extension(build_directory: str | None = None) -> str:
+    """Build the torch c dlpack extension as a tvm-ffi module.
 
     This function builds the torch c dlpack extension as a tvm-ffi module under given
     build directory. If build_directory is None, a directory under tvm-ffi cache will be used.
@@ -601,11 +600,12 @@ def build_torch_c_dlpack_extension(build_directory: Optional[str] = None) -> str
     build_directory : Optional[str]
         The build directory to store the built extension. If None, a directory
         under tvm-ffi cache will be used.
-        
+
     Returns
     -------
     str
         The path to the built shared library.
+
     """
     import torch  # noqa: PLC0415
     from torch.utils import cpp_extension  # noqa: PLC0415
@@ -617,14 +617,14 @@ def build_torch_c_dlpack_extension(build_directory: Optional[str] = None) -> str
     if torch.cuda.is_available():
         include_paths += cpp_extension.include_paths("cuda")
         extra_cflags += ["-DBUILD_WITH_CUDA"]
-      
-    include_paths += [sysconfig.get_paths()["include"]] # for Python.h
+
+    include_paths += [sysconfig.get_paths()["include"]]  # for Python.h
 
     # prepare ldflags
     extra_ldflags = []
-    for path in cpp_extension.library_paths('cuda'):
-        extra_ldflags += ['-L' + path]
-    extra_ldflags += ['-ltorch_python']
+    for path in cpp_extension.library_paths("cuda"):
+        extra_ldflags += ["-L" + path]
+    extra_ldflags += ["-ltorch_python"]
 
     return build_inline(
         name="c_dlpack",
@@ -654,7 +654,7 @@ def load_torch_c_dlpack_extension() -> Any:
     """Load the torch c dlpack extension."""
     try:
         # build the extension and store it in tvm-ffi cache
-        mod_path = build_torch_c_dlpack_extension(build_directory=None) 
+        mod_path = build_torch_c_dlpack_extension(build_directory=None)
 
         # load the extension
         mod = load_module(mod_path)
