@@ -38,14 +38,17 @@ repos:
         verbose: false
   - repo: local
     hooks:
-      - id: check-version
-        name: check version
-        entry: python tests/lint/check_version.py
+      - id: check-version-consistency
+        name: check version consistency
+        entry: python tests/lint/check_version.py --cpp  # TODO: add `--rust` once Rust binding matures
         language: python
         language_version: python3
+        additional_dependencies:
+          - setuptools-scm
+          - packaging
+          - tomli
         pass_filenames: false
         verbose: false
-        additional_dependencies: [tomli]
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:

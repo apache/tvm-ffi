@@ -17,7 +17,7 @@
 
 [project]
 name = "apache-tvm-ffi"
-version = "0.1.0"
+dynamic = ["version"]
 description = "tvm ffi"
 
 authors = [{ name = "TVM FFI team" }]
@@ -61,6 +61,8 @@ dev = [
   "cython",
   "cmake",
   "scikit-build-core",
+  "tomli",
+  "setuptools-scm",
 ]
 docs = [
   "autodocsumm",
@@ -85,6 +87,7 @@ docs = [
   "sphinxcontrib-napoleon",
   "sphinxcontrib_httpdomain",
   "setuptools",
+  "setuptools-scm",
   "tomli",
   "urllib3",
 ]
@@ -94,10 +97,11 @@ tvm-ffi-config = "tvm_ffi.config:__main__"
 tvm-ffi-stubgen = "tvm_ffi.stub.stubgen:__main__"
 
 [build-system]
-requires = ["scikit-build-core>=0.10.0", "cython", "cmake>=3.18", "ninja"]
+requires = ["scikit-build-core>=0.10.0", "cython", "setuptools-scm"]
 build-backend = "scikit_build_core.build"
 
 [tool.scikit-build]
+metadata.version.provider = "scikit_build_core.metadata.setuptools_scm"
 wheel.py-api = "cp312"
 minimum-version = "build-system.requires"
 ninja.version = ">=1.11"
@@ -142,6 +146,7 @@ sdist.include = [
   "/python/tvm_ffi/**/*.pyx",
   "/python/tvm_ffi/**/*.pyi",
   "/python/tvm_ffi/py.typed",
+  "/python/tvm_ffi/_version.py",
 
   # Third party files
   "/3rdparty/libbacktrace/**/*",
@@ -267,3 +272,5 @@ ignore_missing_imports = true
 docs = { requires-python = ">=3.13" }
 
 [tool.setuptools_scm]
+version_file = "python/tvm_ffi/_version.py"
+write_to = "python/tvm_ffi/_version.py"
