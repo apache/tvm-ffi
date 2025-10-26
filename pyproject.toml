@@ -137,6 +137,9 @@ sdist.include = [
   "/src/**/*.cc",
   "/include/**/*",
 
+  # addon
+  "/python/tvm_ffi/torch_c_dlpack_addon/**/*",
+
   # python and cython
   "/python/tvm_ffi/**/*.py",
   "/python/tvm_ffi/**/*.pyx",
