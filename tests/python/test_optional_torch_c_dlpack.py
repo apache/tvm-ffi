@@ -15,21 +15,35 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import ctypes
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 import tvm_ffi
-from tvm_ffi._optional_torch_c_dlpack import build_torch_c_dlpack_extension
+
+IS_WINDOWS = sys.platform.startswith("win")
 
 
 def test_build_torch_c_dlpack_extension() -> None:
-    libpath = build_torch_c_dlpack_extension(build_directory="./build_test_dir")
-    assert Path(libpath).exists()
+    build_script = Path(tvm_ffi.__file__).parent / "torch_c_dlpack_addon" / "build.py"
+    subprocess.run(
+        [sys.executable, str(build_script), "--build_dir", "./build_test_dir"], check=True
+    )
 
-    mod = tvm_ffi.load_module(libpath)
-    assert mod is not None
+    lib_path = str(
+        Path(
+            "./build_test_dir/libtorch_c_dlpack_addon.{}".format("dll" if IS_WINDOWS else "so")
+        ).resolve()
+    )
+    assert Path(lib_path).exists()
 
-    assert mod.TorchDLPackExchangeAPIPtr() is not None
+    lib = ctypes.CDLL(lib_path)
+    func = lib.TorchDLPackExchangeAPIPtr
+    func.restype = ctypes.c_int64
+    ptr = func()
+    assert ptr != 0
 
 
 if __name__ == "__main__":
