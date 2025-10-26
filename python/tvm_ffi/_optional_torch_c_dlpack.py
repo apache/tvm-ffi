@@ -33,25 +33,15 @@ subsequent calls will be much faster.
 from __future__ import annotations
 
 import warnings
-from typing import Any
+from typing import Any, Optional
+import sysconfig
 
 from . import libinfo
+from .module import load_module
+from .cpp.load_inline import load_inline, build_inline
 
-
-def load_torch_c_dlpack_extension() -> Any:
-    try:
-        import torch  # noqa: PLC0415
-
-        if hasattr(torch.Tensor, "__c_dlpack_exchange_api__"):
-            # skip loading the extension if the __c_dlpack_exchange_api__
-            # attribute is already set so we don't have to do it in
-            # newer version of PyTorch
-            return None
-    except ImportError:
-        return None
-
-    """Load the torch c dlpack extension."""
-    cpp_source = """
+cpp_source = """
+#include <torch/extension.h>
 #include <dlpack/dlpack.h>
 #include <ATen/DLConvertor.h>
 #include <ATen/Functions.h>
@@ -594,28 +584,81 @@ struct TorchDLPackExchangeAPI : public DLPackExchangeAPI {
 int64_t TorchDLPackExchangeAPIPtr() {
   return reinterpret_cast<int64_t>(TorchDLPackExchangeAPI::Global());
 }
+"""
+
+
+def build_torch_c_dlpack_extension(build_directory: Optional[str] = None) -> str:
     """
+    Build the torch c dlpack extension as a tvm-ffi module.
+
+    This function builds the torch c dlpack extension as a tvm-ffi module under given
+    build directory. If build_directory is None, a directory under tvm-ffi cache will be used.
+    The path to the shared library that contains the extension is returned. It can be loaded
+    via tvm_ffi.module.load_module.
+
+    Parameters
+    ----------
+    build_directory : Optional[str]
+        The build directory to store the built extension. If None, a directory
+        under tvm-ffi cache will be used.
+        
+    Returns
+    -------
+    str
+        The path to the built shared library.
+    """
+    import torch  # noqa: PLC0415
+    from torch.utils import cpp_extension  # noqa: PLC0415
+
+    # prepare include paths and cflags
+    include_paths = libinfo.include_paths()
+    extra_cflags = ["-O3"]
+
+    if torch.cuda.is_available():
+        include_paths += cpp_extension.include_paths("cuda")
+        extra_cflags += ["-DBUILD_WITH_CUDA"]
+      
+    include_paths += [sysconfig.get_paths()["include"]] # for Python.h
+
+    # prepare ldflags
+    extra_ldflags = []
+    for path in cpp_extension.library_paths('cuda'):
+        extra_ldflags += ['-L' + path]
+    extra_ldflags += ['-ltorch_python']
+
+    return build_inline(
+        name="c_dlpack",
+        cpp_sources=cpp_source,
+        functions=[
+            "TorchDLPackExchangeAPIPtr",
+        ],
+        extra_cflags=extra_cflags,
+        extra_include_paths=include_paths,
+        extra_ldflags=extra_ldflags,
+        build_directory=build_directory,
+    )
+
+
+def load_torch_c_dlpack_extension() -> Any:
     try:
-        # optionally import torch
         import torch  # noqa: PLC0415
-        from torch.utils import cpp_extension  # noqa: PLC0415
 
-        include_paths = libinfo.include_paths()
-        extra_cflags = ["-O3"]
+        if hasattr(torch.Tensor, "__c_dlpack_exchange_api__"):
+            # skip loading the extension if the __c_dlpack_exchange_api__
+            # attribute is already set so we don't have to do it in
+            # newer version of PyTorch
+            return None
+    except ImportError:
+        return None
 
-        if torch.cuda.is_available():
-            include_paths += cpp_extension.include_paths("cuda")
-            extra_cflags += ["-DBUILD_WITH_CUDA"]
+    """Load the torch c dlpack extension."""
+    try:
+        # build the extension and store it in tvm-ffi cache
+        mod_path = build_torch_c_dlpack_extension(build_directory=None) 
 
-        mod = cpp_extension.load_inline(
-            name="c_dlpack",
-            cpp_sources=cpp_source,
-            functions=[
-                "TorchDLPackExchangeAPIPtr",
-            ],
-            extra_cflags=extra_cflags,
-            extra_include_paths=include_paths,
-        )
+        # load the extension
+        mod = load_module(mod_path)
+
         # Set the DLPackExchangeAPI pointer on the class
         setattr(torch.Tensor, "__c_dlpack_exchange_api__", mod.TorchDLPackExchangeAPIPtr())
         return mod
