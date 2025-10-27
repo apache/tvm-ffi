@@ -21,7 +21,6 @@ from __future__ import annotations
 import argparse
 import os
 import shutil
-import subprocess
 import sys
 import sysconfig
 from collections.abc import Sequence
@@ -33,9 +32,9 @@ import torch.utils.cpp_extension
 # we need to set the following env to avoid tvm_ffi to build the torch c-dlpack addon during importing
 os.environ["TVM_FFI_DISABLE_TORCH_C_DLPACK"] = "1"
 
-from tvm_ffi.utils.lockfile import FileLock  
-from tvm_ffi.libinfo import find_dlpack_include_path
 from tvm_ffi.cpp.load_inline import build_ninja
+from tvm_ffi.libinfo import find_dlpack_include_path
+from tvm_ffi.utils.lockfile import FileLock
 
 IS_WINDOWS = sys.platform == "win32"
 
@@ -563,6 +562,7 @@ extern "C" int64_t TorchDLPackExchangeAPIPtr() {
 }
 """
 
+
 def _generate_ninja_build(
     build_dir: Path,
     libname: str,
@@ -630,9 +630,7 @@ def _generate_ninja_build(
     ninja.append("")
 
     # build targets
-    ninja.append(
-        "build main.o: compile {}".format(str(source_path.resolve()).replace(":", "$:"))
-    )
+    ninja.append("build main.o: compile {}".format(str(source_path.resolve()).replace(":", "$:")))
 
     # Use appropriate extension based on platform
     ninja.append(f"build {libname}: link main.o")
@@ -653,7 +651,12 @@ parser.add_argument(
     default=str(Path("~/.tvm_ffi/torch_c_dlpack_addon").expanduser()),
     help="Directory to store the built extension library.",
 )
-parser.add_argument("--build_with_cuda", action="store_true", default=torch.cuda.is_available(), help="Build with CUDA support.")
+parser.add_argument(
+    "--build_with_cuda",
+    action="store_true",
+    default=torch.cuda.is_available(),
+    help="Build with CUDA support.",
+)
 
 
 def main() -> None:
@@ -673,10 +676,10 @@ def main() -> None:
         if (build_dir / libname).exists():
             # already built
             return
-        
+
         # write the source
         source_path = build_dir / "addon.cc"
-        with open(source_path, "w") as f:
+        with open(source_path, "w") as f:  # noqa: PTH123
             f.write(cpp_source)
 
         # resolve configs
@@ -714,4 +717,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
