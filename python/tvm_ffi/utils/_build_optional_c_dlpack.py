@@ -644,12 +644,16 @@ def _generate_ninja_build(
     with open(build_dir / "build.ninja", "w") as f:  # noqa: PTH123
         f.write("\n".join(ninja))
 
+
 def get_torch_include_paths(build_with_cuda: bool) -> Sequence[str]:
     """Get the include paths for building with torch."""
     if torch.__version__ >= torch.torch_version.TorchVersion("2.6.0"):
-        return torch.utils.cpp_extension.include_paths(device_type="cuda" if build_with_cuda else "cpu")
+        return torch.utils.cpp_extension.include_paths(
+            device_type="cuda" if build_with_cuda else "cpu"
+        )
     else:
         return torch.utils.cpp_extension.include_paths(cuda=build_with_cuda)
+
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
