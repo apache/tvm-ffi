@@ -66,8 +66,11 @@ def load_torch_c_dlpack_extension() -> Any:
         )
         if not lib_path.exists():
             build_script_path = Path(__file__).parent / "torch_c_dlpack_addon" / "build.py"
+            args = [sys.executable, str(build_script_path), "--build_dir", str(addon_build_dir)]
+            if torch.cuda.is_available():
+                args.append('--build_with_cuda')
             subprocess.run(
-                [sys.executable, str(build_script_path), "--build_dir", str(addon_build_dir)],
+                args,
                 check=True,
             )
             assert lib_path.exists(), "Failed to build torch c dlpack addon."
