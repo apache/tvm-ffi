@@ -65,7 +65,7 @@ def load_torch_c_dlpack_extension() -> Any:
             "libtorch_c_dlpack_addon" + (".dll" if sys.platform == "win32" else ".so")
         )
         if not lib_path.exists():
-            build_script_path = Path(__file__).parent / "torch_c_dlpack_addon" / "build.py"
+            build_script_path = Path(__file__).parent / "utils" / "build_optional_c_dlpack.py"
             args = [sys.executable, str(build_script_path), "--build_dir", str(addon_build_dir)]
             if torch.cuda.is_available():
                 args.append("--build_with_cuda")
@@ -91,9 +91,6 @@ def load_torch_c_dlpack_extension() -> Any:
     return None
 
 
-load_torch_c_dlpack_extension()
-
-
 def patch_torch_cuda_stream_protocol() -> Any:
     """Load the torch cuda stream protocol for older versions of torch."""
     try:
@@ -112,4 +109,6 @@ def patch_torch_cuda_stream_protocol() -> Any:
         pass
 
 
-patch_torch_cuda_stream_protocol()
+if os.environ.get("TVM_FFI_DISABLE_TORCH_C_DLPACK", "0") == "0":
+    load_torch_c_dlpack_extension()
+    patch_torch_cuda_stream_protocol()
