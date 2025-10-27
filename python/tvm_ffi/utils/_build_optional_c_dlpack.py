@@ -27,6 +27,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 import torch
+import torch.torch_version
 import torch.utils.cpp_extension
 
 # we need to set the following env to avoid tvm_ffi to build the torch c-dlpack addon during importing
@@ -643,6 +644,12 @@ def _generate_ninja_build(
     with open(build_dir / "build.ninja", "w") as f:  # noqa: PTH123
         f.write("\n".join(ninja))
 
+def get_torch_include_paths(build_with_cuda: bool) -> Sequence[str]:
+    """Get the include paths for building with torch."""
+    if torch.__version__ >= torch.torch_version.TorchVersion("2.6.0"):
+        return torch.utils.cpp_extension.include_paths(device_type="cuda" if build_with_cuda else "cpu")
+    else:
+        return torch.utils.cpp_extension.include_paths(cuda=build_with_cuda)
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
@@ -690,9 +697,7 @@ def main() -> None:
 
         if args.build_with_cuda:
             cflags.append("-DBUILD_WITH_CUDA")
-            include_paths.extend(torch.utils.cpp_extension.include_paths("cuda"))
-        else:
-            include_paths.extend(torch.utils.cpp_extension.include_paths("cpu"))
+        include_paths.extend(get_torch_include_paths(args.build_with_cuda))
 
         for lib_dir in torch.utils.cpp_extension.library_paths():
             ldflags.append(f"-L{lib_dir}")
