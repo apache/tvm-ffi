@@ -79,7 +79,7 @@ Layout of :cpp:class:`TVMFFIAny`
 - Next 32 bits: reserved (used for flags in rare cases, e.g. small-string optimization).
 - Last 64 bits: payload that is either a 64-bit integer, a 64-bit floating-point number, or a pointer to a heap-allocated object.
 
-.. figure:: https://raw.githubusercontent.com/tlc-pack/web-data/refs/heads/main/images/tvm-ffi/stable-c-abi-layout-any.svg
+.. figure:: https://raw.githubusercontent.com/tlc-pack/web-data/main/images/tvm-ffi/stable-c-abi-layout-any.svg?sanitize=true
    :alt: Layout of the 128-bit Any tagged union
    :name: fig:layout-any
 
@@ -112,7 +112,7 @@ Function calls in TVM-FFI share the same calling convention, :ref:`tvm_ffi_c_abi
 - ``num_args: int``: number of input arguments.
 - ``result: TVMFFIAny*``: out-parameter that receives the function result (use ``kTVMFFINone`` for "no return value").
 
-.. figure:: https://raw.githubusercontent.com/tlc-pack/web-data/refs/heads/main/images/tvm-ffi/stable-c-abi-layout-func.svg
+.. figure:: https://raw.githubusercontent.com/tlc-pack/web-data/main/images/tvm-ffi/stable-c-abi-layout-func.svg?sanitize=true
    :alt: Layout and calling convention for tvm_ffi_c_abi
    :name: fig:layout-func
 
