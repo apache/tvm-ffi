@@ -245,6 +245,7 @@ def setup(app: sphinx.application.Sphinx) -> None:
     app.connect("build-finished", _copy_rust_docs_to_output)
     app.connect("autodoc-skip-member", _filter_inherited_members)
     app.connect("autodoc-process-docstring", _link_inherited_members)
+    app.connect("builder-inited", _force_local_images)
 
 
 def _filter_inherited_members(app, what, name, obj, skip, options):  # noqa: ANN001, ANN202
@@ -306,6 +307,14 @@ def _import_cls(cls_name: str) -> type | None:
         return getattr(m, clsname, None)
     except Exception:
         return None
+
+
+def _force_local_images(app: sphinx.application.Sphinx) -> None:
+    # For HTML-family builders, tell Sphinx "do NOT support remote images".
+    # This triggers the built-in ImageDownloader post-transform to fetch & rewrite.
+    if getattr(app, "builder", None) and app.builder.name in {"html", "dirhtml", "singlehtml"}:
+        # Sphinx core will then download to .doctrees/images/ and rewrite URIs.
+        app.builder.supported_remote_images = False
 
 
 autodoc_mock_imports = ["torch"]
