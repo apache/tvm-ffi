@@ -27,7 +27,7 @@ IS_WINDOWS = sys.platform.startswith("win")
 
 
 def test_build_torch_c_dlpack_extension() -> None:
-    build_script = Path(tvm_ffi.__file__).parent / "torch_c_dlpack_addon" / "build.py"
+    build_script = Path(tvm_ffi.__file__).parent / "utils" / "build_optional_c_dlpack.py"
     subprocess.run(
         [sys.executable, str(build_script), "--build_dir", "./build_test_dir"], check=True
     )
