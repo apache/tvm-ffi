@@ -1,25 +1,44 @@
-/*
- * Licensed to the Apache Software Foundation (ASF) under one
- * or more contributor license agreements.  See the NOTICE file
- * distributed with this work for additional information
- * regarding copyright ownership.  The ASF licenses this file
- * to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance
- * with the License.  You may obtain a copy of the License at
- *
- *   http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+"""Build Torch C DLPack Addon."""
 
+from __future__ import annotations
+
+import argparse
+import os
+import shutil
+import subprocess
+import sys
+import sysconfig
+from collections.abc import Sequence
+from pathlib import Path
+
+import torch
+import torch.utils.cpp_extension
+from tvm_ffi.utils.lockfile import FileLock  
+from tvm_ffi.libinfo import find_dlpack_include_path
+from tvm_ffi.cpp.load_inline import build_ninja
+
+IS_WINDOWS = sys.platform == "win32"
+
+cpp_source = """
+#include <dlpack/dlpack.h>
 #include <ATen/DLConvertor.h>
 #include <ATen/Functions.h>
-#include <dlpack/dlpack.h>
 #include <torch/extension.h>
 
 #ifdef BUILD_WITH_CUDA
@@ -538,3 +557,157 @@ struct TorchDLPackExchangeAPI : public DLPackExchangeAPI {
 extern "C" int64_t TorchDLPackExchangeAPIPtr() {
   return reinterpret_cast<int64_t>(TorchDLPackExchangeAPI::Global());
 }
+"""
+
+def _generate_ninja_build(
+    build_dir: Path,
+    libname: str,
+    source_path: Path,
+    extra_cflags: Sequence[str],
+    extra_ldflags: Sequence[str],
+    extra_include_paths: Sequence[str],
+) -> None:
+    """Generate the content of build.ninja for building the module."""
+    if IS_WINDOWS:
+        default_cflags = [
+            "/std:c++17",
+            "/MD",
+            "/wd4819",
+            "/wd4251",
+            "/wd4244",
+            "/wd4267",
+            "/wd4275",
+            "/wd4018",
+            "/wd4190",
+            "/wd4624",
+            "/wd4067",
+            "/wd4068",
+            "/EHsc",
+        ]
+        default_ldflags = ["/DLL"]
+    else:
+        default_cflags = ["-std=c++17", "-fPIC", "-O2"]
+        default_ldflags = ["-shared"]
+
+    cflags = default_cflags + [flag.strip() for flag in extra_cflags]
+    ldflags = default_ldflags + [flag.strip() for flag in extra_ldflags]
+    include_paths = [find_dlpack_include_path()] + [
+        str(Path(path).resolve()) for path in extra_include_paths
+    ]
+
+    # append include paths
+    for path in include_paths:
+        cflags.append("-I{}".format(path.replace(":", "$:")))
+
+    # flags
+    ninja = []
+    ninja.append("ninja_required_version = 1.3")
+    ninja.append("cxx = {}".format(os.environ.get("CXX", "cl" if IS_WINDOWS else "c++")))
+    ninja.append("cflags = {}".format(" ".join(cflags)))
+    ninja.append("ldflags = {}".format(" ".join(ldflags)))
+
+    # rules
+    ninja.append("")
+    ninja.append("rule compile")
+    if IS_WINDOWS:
+        ninja.append("  command = $cxx /showIncludes $cflags -c $in /Fo$out")
+        ninja.append("  deps = msvc")
+    else:
+        ninja.append("  depfile = $out.d")
+        ninja.append("  deps = gcc")
+        ninja.append("  command = $cxx -MMD -MF $out.d $cflags -c $in -o $out")
+    ninja.append("")
+
+    ninja.append("rule link")
+    if IS_WINDOWS:
+        ninja.append("  command = $cxx $in /link $ldflags /out:$out")
+    else:
+        ninja.append("  command = $cxx $in $ldflags -o $out")
+    ninja.append("")
+
+    # build targets
+    ninja.append(
+        "build main.o: compile {}".format(str(source_path.resolve()).replace(":", "$:"))
+    )
+
+    # Use appropriate extension based on platform
+    ninja.append(f"build {libname}: link main.o")
+    ninja.append("")
+
+    # default target
+    ninja.append(f"default {libname}")
+    ninja.append("")
+
+    with open(build_dir / "build.ninja", "w") as f:  # noqa: PTH123
+        f.write("\n".join(ninja))
+
+
+parser = argparse.ArgumentParser()
+parser.add_argument(
+    "--build_dir",
+    type=str,
+    default=str(Path("~/.tvm_ffi/torch_c_dlpack_addon").expanduser()),
+    help="Directory to store the built extension library.",
+)
+parser.add_argument("--build_with_cuda", action="store_true", help="Build with CUDA support.")
+
+
+def main() -> None:
+    """Build the torch c dlpack extension."""
+    args = parser.parse_args()
+    build_dir = Path(args.build_dir)
+
+    if not build_dir.exists():
+        build_dir.mkdir(parents=True, exist_ok=True)
+
+    name = "libtorch_c_dlpack_addon"
+    suffix = ".dll" if IS_WINDOWS else ".so"
+    libname = name + suffix
+    tmp_libname = name + ".tmp" + suffix
+
+    with FileLock(str(build_dir / "build.lock")):
+        if (build_dir / libname).exists():
+            # already built
+            return
+        
+        # write the source
+        source_path = build_dir / "addon.cc"
+        with open(source_path, "w") as f:
+            f.write(cpp_source)
+
+        # resolve configs
+        include_paths = []
+        ldflags = []
+        cflags = []
+        include_paths.append(sysconfig.get_paths()["include"])
+
+        if args.build_with_cuda:
+            cflags.append("-DBUILD_WITH_CUDA")
+            include_paths.extend(torch.utils.cpp_extension.include_paths("cuda"))
+        else:
+            include_paths.extend(torch.utils.cpp_extension.include_paths("cpu"))
+
+        for lib_dir in torch.utils.cpp_extension.library_paths():
+            ldflags.append(f"-L{lib_dir}")
+        ldflags.append("-ltorch_python")
+
+        # generate ninja build file
+        _generate_ninja_build(
+            build_dir=build_dir,
+            libname=tmp_libname,
+            source_path=source_path,
+            extra_cflags=cflags,
+            extra_ldflags=ldflags,
+            extra_include_paths=include_paths,
+        )
+
+        # build the shared library
+        build_ninja(build_dir=str(build_dir))
+
+        # rename the tmp file to final libname
+        shutil.move(str(build_dir / tmp_libname), str(build_dir / libname))
+
+
+if __name__ == "__main__":
+    main()
+

@@ -318,7 +318,7 @@ def _generate_ninja_build(  # noqa: PLR0915
     return "\n".join(ninja)
 
 
-def _build_ninja(build_dir: str) -> None:
+def build_ninja(build_dir: str) -> None:
     """Build the module in the given build directory using ninja."""
     command = ["ninja", "-v"]
     num_workers = os.environ.get("MAX_JOBS", None)
@@ -561,7 +561,7 @@ def build_inline(  # noqa: PLR0915, PLR0912
             _maybe_write(str(build_dir / "cuda.cu"), cuda_source)
         _maybe_write(str(build_dir / "build.ninja"), ninja_source)
         # build the module
-        _build_ninja(str(build_dir))
+        build_ninja(str(build_dir))
         # Use appropriate extension based on platform
         ext = ".dll" if IS_WINDOWS else ".so"
         return str((build_dir / f"{name}{ext}").resolve())
