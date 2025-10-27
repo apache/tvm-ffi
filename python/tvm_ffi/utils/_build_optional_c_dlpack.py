@@ -704,8 +704,38 @@ def main() -> None:
         include_paths.extend(get_torch_include_paths(args.build_with_cuda))
 
         for lib_dir in torch.utils.cpp_extension.library_paths():
-            ldflags.append(f"-L{lib_dir}")
-        ldflags.append("-ltorch_python")
+            if IS_WINDOWS:
+                ldflags.append(f"/LIBPATH:{lib_dir}")
+            else:
+                ldflags.append(f"-L{lib_dir}")
+        
+        # Add all required PyTorch libraries
+        if IS_WINDOWS:
+            # On Windows, use .lib format for linking
+            ldflags.extend(["c10.lib", "torch.lib", "torch_cpu.lib", "torch_python.lib"])
+        else:
+            # On Unix/macOS, use -l format for linking
+            ldflags.extend(["-lc10", "-ltorch", "-ltorch_cpu", "-ltorch_python"])
+        
+        # Add Python library linking for standalone shared library
+        # All platforms need Python library linking because libtorch_python has undefined Python symbols
+        python_libdir = sysconfig.get_config_var('LIBDIR')
+        if python_libdir:
+            if IS_WINDOWS:
+                ldflags.append(f"/LIBPATH:{python_libdir}")
+            else:
+                ldflags.append(f"-L{python_libdir}")
+        
+        # Get Python library name and link appropriately per platform
+        if IS_WINDOWS:
+            # On Windows, use python3X.lib import library (e.g., python312.lib)
+            major, minor = sysconfig.get_python_version().split('.')
+            python_lib = f"python{major}{minor}.lib"
+            ldflags.append(python_lib)
+        else:
+            # On Unix/macOS, use -lpython3.X format (e.g., -lpython3.12)
+            py_version = f"python{sysconfig.get_python_version()}"
+            ldflags.append(f"-l{py_version}")
 
         # generate ninja build file
         _generate_ninja_build(
