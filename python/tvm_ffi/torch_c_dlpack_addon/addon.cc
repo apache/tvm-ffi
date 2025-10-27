@@ -17,9 +17,9 @@
  * under the License.
  */
 
-#include <dlpack/dlpack.h>
 #include <ATen/DLConvertor.h>
 #include <ATen/Functions.h>
+#include <dlpack/dlpack.h>
 #include <torch/extension.h>
 
 #ifdef BUILD_WITH_CUDA

@@ -68,7 +68,7 @@ def load_torch_c_dlpack_extension() -> Any:
             build_script_path = Path(__file__).parent / "torch_c_dlpack_addon" / "build.py"
             args = [sys.executable, str(build_script_path), "--build_dir", str(addon_build_dir)]
             if torch.cuda.is_available():
-                args.append('--build_with_cuda')
+                args.append("--build_with_cuda")
             subprocess.run(
                 args,
                 check=True,

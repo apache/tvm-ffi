@@ -144,7 +144,9 @@ def _generate_ninja_build(
 
     cflags = default_cflags + [flag.strip() for flag in extra_cflags]
     ldflags = default_ldflags + [flag.strip() for flag in extra_ldflags]
-    include_paths = [find_dlpack_include_path()] + [str(Path(path).resolve()) for path in extra_include_paths]
+    include_paths = [find_dlpack_include_path()] + [
+        str(Path(path).resolve()) for path in extra_include_paths
+    ]
 
     # append include paths
     for path in include_paths:
@@ -222,11 +224,7 @@ parser.add_argument(
     default=str(Path("~/.tvm_ffi/torch_c_dlpack_addon").expanduser()),
     help="Directory to store the built extension library.",
 )
-parser.add_argument(
-    '--build_with_cuda',
-    action='store_true',
-    help="Build with CUDA support."
-)
+parser.add_argument("--build_with_cuda", action="store_true", help="Build with CUDA support.")
 
 
 def main() -> None:
@@ -253,10 +251,10 @@ def main() -> None:
         include_paths.append(sysconfig.get_paths()["include"])
 
         if args.build_with_cuda:
-            cflags.append('-DBUILD_WITH_CUDA')
-            include_paths.extend(torch.utils.cpp_extension.include_paths('cuda'))
+            cflags.append("-DBUILD_WITH_CUDA")
+            include_paths.extend(torch.utils.cpp_extension.include_paths("cuda"))
         else:
-            include_paths.extend(torch.utils.cpp_extension.include_paths('cpu'))
+            include_paths.extend(torch.utils.cpp_extension.include_paths("cpu"))
 
         for lib_dir in torch.utils.cpp_extension.library_paths():
             ldflags.append(f"-L{lib_dir}")
