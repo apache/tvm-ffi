@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from enum import IntEnum
+from os import PathLike, fspath
 from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from . import _ffi_api, core
@@ -305,12 +306,12 @@ def system_lib(symbol_prefix: str = "") -> Module:
     return _ffi_api.SystemLib(symbol_prefix)
 
 
-def load_module(path: str) -> Module:
+def load_module(path: str | PathLike) -> Module:
     """Load module from file.
 
     Parameters
     ----------
-    path
+    path : str | PathLike
         The path to the module file.
 
     Returns
@@ -322,12 +323,19 @@ def load_module(path: str) -> Module:
     --------
     .. code-block:: python
 
-      mod = tvm_ffi.load_module("path/to/module.so")
-      mod.func_name(*args)
+        # Works with string paths
+        mod = tvm_ffi.load_module("path/to/module.so")
+        mod.func_name(*args)
+
+        # Also works with pathlib.Path objects
+        from pathlib import Path
+        mod = tvm_ffi.load_module(Path("path/to/module.so"))
+        mod.func_name(*args)
 
     See Also
     --------
     :py:class:`tvm_ffi.Module`
 
     """
+    path = fspath(path)
     return _ffi_api.ModuleLoadFromFile(path)

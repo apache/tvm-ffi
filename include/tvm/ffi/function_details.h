@@ -113,6 +113,8 @@ template <typename R, typename... Args>
 struct FunctionInfo<R(Args...), void> : FuncFunctorImpl<R, Args...> {};
 template <typename R, typename... Args>
 struct FunctionInfo<R (*)(Args...), void> : FuncFunctorImpl<R, Args...> {};
+template <typename R, typename... Args>
+struct FunctionInfo<R (&)(Args...), void> : FuncFunctorImpl<R, Args...> {};
 // Support pointer-to-member functions used in reflection (e.g. &Class::method)
 template <typename Class, typename R, typename... Args>
 struct FunctionInfo<R (Class::*)(Args...), std::enable_if_t<std::is_base_of_v<Object, Class>>>

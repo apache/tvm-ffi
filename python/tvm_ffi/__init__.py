@@ -18,7 +18,6 @@
 
 # order matters here so we need to skip isort here
 # isort: skip_file
-__version__ = "0.1.0"
 
 # HACK: try importing torch first, to avoid a potential
 # symbol conflict when both torch and tvm_ffi are imported.
@@ -61,6 +60,13 @@ from . import cpp
 # optional module to speedup dlpack conversion
 from . import _optional_torch_c_dlpack
 
+
+try:
+    from ._version import __version__, __version_tuple__  # type: ignore[import-not-found]
+except ImportError:
+    __version__ = "0.0.0.dev0"
+    __version_tuple__ = (0, 0, 0, "dev0", "7d34eb8ab.d20250913")
+
 __all__ = [
     "Array",
     "DLDeviceType",
@@ -74,6 +80,7 @@ __all__ = [
     "StreamContext",
     "Tensor",
     "__version__",
+    "__version_tuple__",
     "access_path",
     "convert",
     "cpp",

@@ -1,3 +1,6 @@
+# version file is auto-generated
+python/tvm_ffi/_version.py
+
 /tmp/
 *.bak
 # Byte-compiled / optimized / DLL files
