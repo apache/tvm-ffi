@@ -592,7 +592,7 @@ def _generate_ninja_build(
         default_ldflags = ["/DLL"]
     else:
         default_cflags = ["-std=c++17", "-fPIC", "-O2"]
-        default_ldflags = ["-shared"]
+        default_ldflags = ["-shared", "-Wl,-rpath,$ORIGIN", "-Wl,--no-as-needed"]
 
     cflags = default_cflags + [flag.strip() for flag in extra_cflags]
     ldflags = default_ldflags + [flag.strip() for flag in extra_ldflags]
@@ -702,6 +702,9 @@ def main() -> None:  # noqa: PLR0912
         if args.build_with_cuda:
             cflags.append("-DBUILD_WITH_CUDA")
         include_paths.extend(get_torch_include_paths(args.build_with_cuda))
+
+        # use CXX11 ABI
+        cflags.append("-D_GLIBCXX_USE_CXX11_ABI=1")
 
         for lib_dir in torch.utils.cpp_extension.library_paths():
             if IS_WINDOWS:
