@@ -670,7 +670,7 @@ parser.add_argument(
 )
 
 
-def main() -> None:
+def main() -> None:  # noqa: PLR0912
     """Build the torch c dlpack extension."""
     args = parser.parse_args()
     build_dir = Path(args.build_dir)
@@ -708,7 +708,7 @@ def main() -> None:
                 ldflags.append(f"/LIBPATH:{lib_dir}")
             else:
                 ldflags.append(f"-L{lib_dir}")
-        
+
         # Add all required PyTorch libraries
         if IS_WINDOWS:
             # On Windows, use .lib format for linking
@@ -716,20 +716,20 @@ def main() -> None:
         else:
             # On Unix/macOS, use -l format for linking
             ldflags.extend(["-lc10", "-ltorch", "-ltorch_cpu", "-ltorch_python"])
-        
+
         # Add Python library linking for standalone shared library
         # All platforms need Python library linking because libtorch_python has undefined Python symbols
-        python_libdir = sysconfig.get_config_var('LIBDIR')
+        python_libdir = sysconfig.get_config_var("LIBDIR")
         if python_libdir:
             if IS_WINDOWS:
                 ldflags.append(f"/LIBPATH:{python_libdir}")
             else:
                 ldflags.append(f"-L{python_libdir}")
-        
+
         # Get Python library name and link appropriately per platform
         if IS_WINDOWS:
             # On Windows, use python3X.lib import library (e.g., python312.lib)
-            major, minor = sysconfig.get_python_version().split('.')
+            major, minor = sysconfig.get_python_version().split(".")
             python_lib = f"python{major}{minor}.lib"
             ldflags.append(python_lib)
         else:
