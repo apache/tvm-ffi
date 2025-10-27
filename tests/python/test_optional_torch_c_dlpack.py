@@ -21,11 +21,19 @@ import sys
 from pathlib import Path
 
 import pytest
+
+try:
+    import torch
+except ImportError:
+    torch = None
+
+
 import tvm_ffi
 
 IS_WINDOWS = sys.platform.startswith("win")
 
 
+@pytest.mark.skipif(torch is None, reason="torch is not installed")
 def test_build_torch_c_dlpack_extension() -> None:
     build_script = Path(tvm_ffi.__file__).parent / "utils" / "_build_optional_c_dlpack.py"
     subprocess.run(
@@ -46,6 +54,7 @@ def test_build_torch_c_dlpack_extension() -> None:
     assert ptr != 0
 
 
+@pytest.mark.skipif(torch is None, reason="torch is not installed")
 def test_parallel_build() -> None:
     build_script = Path(tvm_ffi.__file__).parent / "utils" / "_build_optional_c_dlpack.py"
     num_processes = 4
