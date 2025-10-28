@@ -56,12 +56,14 @@
 #define TVM_FFI_DLL_EXPORT __attribute__((visibility("default")))
 #endif
 
+// NOLINTBEGIN(modernize-macro-to-enum)
 /*! \brief TVM FFI major version. */
 #define TVM_FFI_VERSION_MAJOR 0
 /*! \brief TVM FFI minor version. */
 #define TVM_FFI_VERSION_MINOR 1
 /*! \brief TVM FFI patch version. */
 #define TVM_FFI_VERSION_PATCH 1
+// NOLINTEND(modernize-macro-to-enum)
 
 #ifdef __cplusplus
 extern "C" {

@@ -296,7 +296,7 @@ class ReflectionDefBase {
     static_assert(std::is_base_of_v<ObjectRef, Class> || std::is_base_of_v<Object, Class>,
                   "Class must be derived from ObjectRef or Object");
     if constexpr (std::is_base_of_v<ObjectRef, Class>) {
-      auto fwrap = [func](const Class target, Args... params) -> R {
+      auto fwrap = [func](const Class& target, Args... params) -> R {
         // call method pointer
         return (target.*func)(std::forward<Args>(params)...);
       };

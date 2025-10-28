@@ -176,6 +176,7 @@ TVM_FFI_NO_INLINE void TestApply(PackedArgs args, Any* ret) {
   f.CallPacked(args.Slice(1), ret);
 }
 
+// NOLINTNEXTLINE(bugprone-reserved-identifier)
 int __add_one_c_symbol(void*, const TVMFFIAny* args, int32_t num_args, TVMFFIAny* ret) {
   TVM_FFI_SAFE_CALL_BEGIN();
   int x = reinterpret_cast<const AnyView*>(args)[0].cast<int>();
@@ -261,10 +262,12 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("testing.get_add_one_c_symbol",
            []() {
              TVMFFISafeCallType symbol = __add_one_c_symbol;
+             // NOLINTNEXTLINE(bugprone-casting-through-void)
              return reinterpret_cast<int64_t>(reinterpret_cast<void*>(symbol));
            })
       .def("testing.get_mlir_add_one_c_symbol",
            []() {
+             // NOLINTNEXTLINE(bugprone-casting-through-void)
              return reinterpret_cast<int64_t>(reinterpret_cast<void*>(_mlir_add_one_c_symbol));
            })
       .def_method("testing.TestIntPairSum", &TestIntPair::Sum, "Get sum of the pair");
