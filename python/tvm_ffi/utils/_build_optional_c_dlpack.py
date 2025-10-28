@@ -704,7 +704,10 @@ def main() -> None:  # noqa: PLR0912
         include_paths.extend(get_torch_include_paths(args.build_with_cuda))
 
         # use CXX11 ABI
-        cflags.append("-D_GLIBCXX_USE_CXX11_ABI=1")
+        if torch.compiled_with_cxx11_abi():
+            cflags.append("-D_GLIBCXX_USE_CXX11_ABI=1")
+        else:
+            cflags.append("-D_GLIBCXX_USE_CXX11_ABI=0")
 
         for lib_dir in torch.utils.cpp_extension.library_paths():
             if IS_WINDOWS:
