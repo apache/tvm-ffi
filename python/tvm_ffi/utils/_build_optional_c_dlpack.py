@@ -631,10 +631,13 @@ def _generate_ninja_build(
     ninja.append("")
 
     # build targets
-    ninja.append("build main.o: compile {}".format(str(source_path.resolve()).replace(":", "$:")))
+    obj_name = "main.obj" if IS_WINDOWS else "main.o"
+    ninja.append(
+        "build {}: compile {}".format(obj_name, str(source_path.resolve()).replace(":", "$:"))
+    )
 
     # Use appropriate extension based on platform
-    ninja.append(f"build {libname}: link main.o")
+    ninja.append(f"build {libname}: link {obj_name}")
     ninja.append("")
 
     # default target
@@ -727,11 +730,26 @@ def main() -> None:  # noqa: PLR0912, PLR0915
 
         # Add Python library linking for standalone shared library
         # All platforms need Python library linking because libtorch_python has undefined Python symbols
-        python_libdir = sysconfig.get_config_var("LIBDIR")
-        if python_libdir:
-            if IS_WINDOWS:
+        if IS_WINDOWS:
+            # On Windows, try multiple methods to find the Python library directory
+            python_libdir = None
+
+            # Method 1: Try sysconfig LIBDIR
+            python_libdir = sysconfig.get_config_var("LIBDIR")
+
+            # Method 2: If LIBDIR is None or doesn't exist, try the libs directory
+            if not python_libdir or not Path(python_libdir).exists():
+                python_libdir = str(Path(sys.exec_prefix) / "libs")
+
+            # Method 3: If still not found, try the base directory
+            if not Path(python_libdir).exists():
+                python_libdir = sys.exec_prefix
+
+            if python_libdir and Path(python_libdir).exists():
                 ldflags.append(f"/LIBPATH:{python_libdir}")
-            else:
+        else:
+            python_libdir = sysconfig.get_config_var("LIBDIR")
+            if python_libdir:
                 ldflags.append(f"-L{python_libdir}")
 
         # Get Python library name and link appropriately per platform
@@ -739,7 +757,35 @@ def main() -> None:  # noqa: PLR0912, PLR0915
             # On Windows, use python3X.lib import library (e.g., python312.lib)
             major, minor = sysconfig.get_python_version().split(".")
             python_lib = f"python{major}{minor}.lib"
-            ldflags.append(python_lib)
+
+            # Check if the python library exists in the detected library directory
+            lib_found = False
+            if python_libdir and Path(python_libdir).exists():
+                python_lib_path = Path(python_libdir) / python_lib
+                if python_lib_path.exists():
+                    ldflags.append(python_lib)
+                    lib_found = True
+
+            # If not found, try alternative library names (some distributions use different naming)
+            if not lib_found:
+                alternative_names = [
+                    f"python{major}{minor}.lib",
+                    f"python{major}.lib",
+                    "python.lib",
+                ]
+                for alt_name in alternative_names:
+                    if python_libdir and (Path(python_libdir) / alt_name).exists():
+                        ldflags.append(alt_name)
+                        lib_found = True
+                        break
+
+                # If still not found, add the library anyway and let the linker report the specific error
+                if not lib_found:
+                    ldflags.append(python_lib)
+                    print(
+                        f"Warning: Python library {python_lib} not found in {python_libdir}",
+                        file=sys.stderr,
+                    )
         else:
             # On Unix/macOS, use -lpython3.X format (e.g., -lpython3.12)
             py_version = f"python{sysconfig.get_python_version()}"
