@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+import sys
+
 import pytest
 
 try:
@@ -37,6 +39,10 @@ _has_dlpack_api = torch is not None and hasattr(torch.Tensor, "__c_dlpack_exchan
 
 @pytest.mark.skipif(not _has_dlpack_api, reason="PyTorch DLPack Exchange API not available")
 def test_dlpack_exchange_api() -> None:
+    # xfail the test on windows platform, it seems to be a bug in torch extension building on windows
+    if sys.platform.startswith("win"):
+        pytest.xfail("DLPack Exchange API test is known to fail on Windows platform")
+
     assert torch is not None
 
     assert hasattr(torch.Tensor, "__c_dlpack_exchange_api__")

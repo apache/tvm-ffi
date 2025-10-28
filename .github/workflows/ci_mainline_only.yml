@@ -1,0 +1,62 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+name: mainline-only
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  prepare:
+    name: Prepare
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Detect skip ci and docs changes
+        id: detect
+        uses: ./.github/actions/detect-skip-ci
+        with:
+          github_event_name: ${{ github.event_name }}
+          pr_base_ref: ${{ github.event.pull_request.base.ref || '' }}
+          pr_head_sha: ${{ github.event.pull_request.head.sha || '' }}
+
+  clang-tidy:
+    needs: [prepare]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Set up uv
+        uses: astral-sh/setup-uv@b75a909f75acd358c2196fb9a5f1299a9a8868a4  # v6.7.0
+      - uses: ./.github/actions/detect-env-vars
+        id: env_vars
+      - name: Run clang-tidy
+        run: |
+          uv run --no-project --with "clang-tidy==21.1.1"     \
+            python tests/lint/clang_tidy_precommit.py         \
+              --build-dir=build-pre-commit                    \
+              --jobs=${{ steps.env_vars.outputs.cpu_count }}  \
+              ./src/ ./include ./tests

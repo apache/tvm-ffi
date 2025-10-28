@@ -558,7 +558,14 @@ struct TorchDLPackExchangeAPI : public DLPackExchangeAPI {
   }
 };
 
-extern "C" int64_t TorchDLPackExchangeAPIPtr() {
+// defien a cross-platgorm macro to export the symbol
+#ifdef _WIN32
+#define DLL_EXPORT __declspec(dllexport)
+#else
+#define DLL_EXPORT __attribute__((visibility("default")))
+#endif
+
+extern "C" DLL_EXPORT int64_t TorchDLPackExchangeAPIPtr() {
   return reinterpret_cast<int64_t>(TorchDLPackExchangeAPI::Global());
 }
 """
@@ -592,7 +599,7 @@ def _generate_ninja_build(
         default_ldflags = ["/DLL"]
     else:
         default_cflags = ["-std=c++17", "-fPIC", "-O2"]
-        default_ldflags = ["-shared"]
+        default_ldflags = ["-shared", "-Wl,-rpath,$ORIGIN", "-Wl,--no-as-needed"]
 
     cflags = default_cflags + [flag.strip() for flag in extra_cflags]
     ldflags = default_ldflags + [flag.strip() for flag in extra_ldflags]
@@ -631,10 +638,13 @@ def _generate_ninja_build(
     ninja.append("")
 
     # build targets
-    ninja.append("build main.o: compile {}".format(str(source_path.resolve()).replace(":", "$:")))
+    obj_name = "main.obj" if IS_WINDOWS else "main.o"
+    ninja.append(
+        "build {}: compile {}".format(obj_name, str(source_path.resolve()).replace(":", "$:"))
+    )
 
     # Use appropriate extension based on platform
-    ninja.append(f"build {libname}: link main.o")
+    ninja.append(f"build {libname}: link {obj_name}")
     ninja.append("")
 
     # default target
@@ -659,7 +669,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument(
     "--build_dir",
     type=str,
-    default=str(Path("~/.tvm_ffi/torch_c_dlpack_addon").expanduser()),
+    default=str(Path("~/.cache/tvm-ffi/torch_c_dlpack_addon").expanduser()),
     help="Directory to store the built extension library.",
 )
 parser.add_argument(
@@ -670,7 +680,7 @@ parser.add_argument(
 )
 
 
-def main() -> None:  # noqa: PLR0912
+def main() -> None:  # noqa: PLR0912, PLR0915
     """Build the torch c dlpack extension."""
     args = parser.parse_args()
     build_dir = Path(args.build_dir)
@@ -703,6 +713,12 @@ def main() -> None:  # noqa: PLR0912
             cflags.append("-DBUILD_WITH_CUDA")
         include_paths.extend(get_torch_include_paths(args.build_with_cuda))
 
+        # use CXX11 ABI
+        if torch.compiled_with_cxx11_abi():
+            cflags.append("-D_GLIBCXX_USE_CXX11_ABI=1")
+        else:
+            cflags.append("-D_GLIBCXX_USE_CXX11_ABI=0")
+
         for lib_dir in torch.utils.cpp_extension.library_paths():
             if IS_WINDOWS:
                 ldflags.append(f"/LIBPATH:{lib_dir}")
@@ -717,25 +733,31 @@ def main() -> None:  # noqa: PLR0912
             # On Unix/macOS, use -l format for linking
             ldflags.extend(["-lc10", "-ltorch", "-ltorch_cpu", "-ltorch_python"])
 
-        # Add Python library linking for standalone shared library
-        # All platforms need Python library linking because libtorch_python has undefined Python symbols
-        python_libdir = sysconfig.get_config_var("LIBDIR")
-        if python_libdir:
-            if IS_WINDOWS:
-                ldflags.append(f"/LIBPATH:{python_libdir}")
-            else:
-                ldflags.append(f"-L{python_libdir}")
-
-        # Get Python library name and link appropriately per platform
+        # Add Python library linking
         if IS_WINDOWS:
-            # On Windows, use python3X.lib import library (e.g., python312.lib)
-            major, minor = sysconfig.get_python_version().split(".")
-            python_lib = f"python{major}{minor}.lib"
-            ldflags.append(python_lib)
+            python_lib = f"python{sys.version_info.major}.lib"
+            python_libdir_list = [
+                sysconfig.get_config_var("LIBDIR"),
+                sysconfig.get_path("include"),
+            ]
+            if (
+                sysconfig.get_path("include") is not None
+                and (Path(sysconfig.get_path("include")).parent / "libs").exists()
+            ):
+                python_libdir_list.append(
+                    str((Path(sysconfig.get_path("include")).parent / "libs").resolve())
+                )
+            for python_libdir in python_libdir_list:
+                if python_libdir and (Path(python_libdir) / python_lib).exists():
+                    ldflags.append(f"/LIBPATH:{python_libdir.replace(':', '$:')}")
+                    ldflags.append(python_lib)
+                    break
         else:
-            # On Unix/macOS, use -lpython3.X format (e.g., -lpython3.12)
-            py_version = f"python{sysconfig.get_python_version()}"
-            ldflags.append(f"-l{py_version}")
+            python_libdir = sysconfig.get_config_var("LIBDIR")
+            if python_libdir:
+                ldflags.append(f"-L{python_libdir}")
+                py_version = f"python{sysconfig.get_python_version()}"
+                ldflags.append(f"-l{py_version}")
 
         # generate ninja build file
         _generate_ninja_build(

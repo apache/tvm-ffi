@@ -329,7 +329,7 @@ class AccessPath : public ObjectRef {
    * \param end The end of the iterator range.
    * \return The access path.
    */
-  template <typename Iter>
+  template <typename Iter>  // NOLINTNEXTLINE(performance-unnecessary-value-param)
   static AccessPath FromSteps(Iter begin, Iter end) {
     AccessPath path = AccessPath::Root();
     for (Iter it = begin; it != end; ++it) {
