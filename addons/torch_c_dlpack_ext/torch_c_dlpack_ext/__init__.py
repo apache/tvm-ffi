@@ -14,6 +14,6 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-"""torch c dlpack ext pakcage"""
+"""torch c dlpack ext pakcage."""
 
 from .core import get_torch_c_dlpack_lib_path, load_torch_c_dlpack_lib
