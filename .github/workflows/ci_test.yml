@@ -98,6 +98,12 @@ jobs:
           fetch-tags: true
       - name: Print current commit
         run: git log -1 --oneline
+      
+      - name: Activate VS Dev Env on Windows
+        if: ${{ matrix.os == 'windows-latest' }}
+        shell: powershell
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\VsDevCmd.bat" -arch=x64 -host_arch=x64
 
       # Detect CPU count
       - uses: ./.github/actions/detect-env-vars
