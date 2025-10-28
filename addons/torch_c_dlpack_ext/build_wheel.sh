@@ -22,11 +22,15 @@ set -o pipefail
 
 pip install uv
 
-bash ./addons/torch_c_dlpack_ext/build_so.sh 2.4 "$1" cu124
-bash ./addons/torch_c_dlpack_ext/build_so.sh 2.5 "$1" cu124
-bash ./addons/torch_c_dlpack_ext/build_so.sh 2.6 "$1" cu126
-bash ./addons/torch_c_dlpack_ext/build_so.sh 2.7 "$1" cu126
-bash ./addons/torch_c_dlpack_ext/build_so.sh 2.8 "$1" cu128
+if [[ "$1" != "3.13" && "$1" != "3.14" ]]; then
+  bash ./addons/torch_c_dlpack_ext/build_so.sh 2.4 "$1" cu124
+fi
+if [[ "$1" != "3.14" ]]; then
+  bash ./addons/torch_c_dlpack_ext/build_so.sh 2.5 "$1" cu124
+  bash ./addons/torch_c_dlpack_ext/build_so.sh 2.6 "$1" cu126
+  bash ./addons/torch_c_dlpack_ext/build_so.sh 2.7 "$1" cu126
+  bash ./addons/torch_c_dlpack_ext/build_so.sh 2.8 "$1" cu128
+fi
 bash ./addons/torch_c_dlpack_ext/build_so.sh 2.9 "$1" cu128
 
 uv venv /base --python "$1" && source /base/bin/activate
