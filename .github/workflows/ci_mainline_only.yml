@@ -19,10 +19,9 @@ name: mainline-only
 
 on:
   workflow_dispatch:
-  pull_request:
-  # push:
-  #   branches:
-  #     - main
+  push:
+    branches:
+      - main
 
 jobs:
   prepare:
