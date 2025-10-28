@@ -662,7 +662,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument(
     "--build_dir",
     type=str,
-    default=str(Path("~/.tvm_ffi/torch_c_dlpack_addon").expanduser()),
+    default=str(Path("~/.cache/tvm-ffi/torch_c_dlpack_addon").expanduser()),
     help="Directory to store the built extension library.",
 )
 parser.add_argument(
@@ -728,25 +728,26 @@ def main() -> None:  # noqa: PLR0912, PLR0915
             # On Unix/macOS, use -l format for linking
             ldflags.extend(["-lc10", "-ltorch", "-ltorch_cpu", "-ltorch_python"])
 
-        # Add Python library linking for standalone shared library
-        # All platforms need Python library linking because libtorch_python has undefined Python symbols
+        # Add Python library linking 
         if IS_WINDOWS:
-            python_libdir = sysconfig.get_config_var("LIBDIR")
-            if python_libdir:
-                ldflags.append(f"/LIBPATH:{python_libdir.replace(':', '$:')}")
+            python_lib = f"python{sys.version_info.major}.lib"
+            python_libdir_list = [
+              sysconfig.get_config_var("LIBDIR"),
+              sysconfig.get_path("include"),
+            ]
+            if sysconfig.get_path("include") is not None and (Path(sysconfig.get_path("include")).parent / "libs").exists():
+                python_libdir_list.append(str((Path(sysconfig.get_path("include")).parent / "libs").resolve()))
+            for python_libdir in python_libdir_list:
+                if python_libdir and (Path(python_libdir) / python_lib).exists():
+                    ldflags.append(f"/LIBPATH:{python_libdir.replace(':', '$:')}")
+                    ldflags.append(python_lib)
+                    break
         else:
-            python_libdir = sysconfig.get_config_var("LIBDIR")
+            python_libdir = sysconfig.get_path("LIBDIR")
             if python_libdir:
                 ldflags.append(f"-L{python_libdir}")
-
-        # Get Python library name and link appropriately per platform
-        if IS_WINDOWS:
-            py_version = f"python{sysconfig.get_python_version()}.lib"
-            ldflags.append(py_version)
-        else:
-            # On Unix/macOS, use -lpython3.X format (e.g., -lpython3.12)
-            py_version = f"python{sysconfig.get_python_version()}"
-            ldflags.append(f"-l{py_version}")
+                py_version = f"python{sysconfig.get_python_version()}"
+                ldflags.append(f"-l{py_version}")
 
         # generate ninja build file
         _generate_ninja_build(
