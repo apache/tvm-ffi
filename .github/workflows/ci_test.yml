@@ -99,12 +99,6 @@ jobs:
       - name: Print current commit
         run: git log -1 --oneline
 
-      - name: Activate VS Dev Env on Windows
-        if: ${{ matrix.os == 'windows-latest' }}
-        shell: powershell
-        run: |
-          & "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\VsDevCmd.bat" -arch=x64 -host_arch=x64
-
       # Detect CPU count
       - uses: ./.github/actions/detect-env-vars
         id: env_vars
@@ -142,6 +136,11 @@ jobs:
           CMAKE_BUILD_PARALLEL_LEVEL: ${{ steps.env_vars.outputs.cpu_count }}
         run: |
           uv pip install --reinstall --verbose -e ".[test]"
+      - name: Activate VS Dev Env on Windows  # needed by JIT
+        if: ${{ matrix.os == 'windows-latest' }}
+        shell: powershell
+        run: |
+          & (python .github/workflows/utils/locate_vsdevcmd_bat.py)
       - name: Run python tests
         run: |
           pytest -vvs tests/python
