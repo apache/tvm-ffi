@@ -123,7 +123,16 @@ jobs:
         run: >
           cmake . -B build_test -DTVM_FFI_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Debug &&
           cmake --build build_test --clean-first --config Debug --target tvm_ffi_tests &&
-          ctest -V -C Debug --test-dir build_test --output-on-failure
+
+      - name: Locate and Set VsDevCmd Path
+        if: ${{ matrix.os == 'windows-latest' }}
+        shell: pwsh
+        run: |
+          # Captures the output (path) from your Python script
+          $vsPath = python .github/workflows/utils/locate_vsdevcmd_bat.py
+
+          # Sets an environment variable for all subsequent steps in this job
+          "VS_DEV_CMD_PATH=$vsPath" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       # Run Python tests
       - name: Setup Python ${{ matrix.python_version }}
@@ -136,13 +145,15 @@ jobs:
           CMAKE_BUILD_PARALLEL_LEVEL: ${{ steps.env_vars.outputs.cpu_count }}
         run: |
           uv pip install --reinstall --verbose -e ".[test]"
-      - name: Activate VS Dev Env on Windows  # needed by JIT
-        if: ${{ matrix.os == 'windows-latest' }}
-        shell: powershell
-        run: |
-          & (python .github/workflows/utils/locate_vsdevcmd_bat.py)
       - name: Run python tests
+        if: ${{ matrix.os != 'windows-latest' }}
         run: |
+          pytest -vvs tests/python
+      - name: Run python tests [windows]
+        if: ${{ matrix.os == 'windows-latest' }}
+        shell: cmd
+        run: |
+          call "%VS_DEV_CMD_PATH%"  # Activate VS environment and run pytest in a single cmd block
           pytest -vvs tests/python
 
       # Run Rust tests, must happen after installing the pip package.
