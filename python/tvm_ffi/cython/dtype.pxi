@@ -205,23 +205,27 @@ else:
 
 if ml_dtypes is not None:
     MLDTYPES_DTYPE_TO_DTYPE = {
-        numpy.dtype(ml_dtypes.int2): DLDataType(0, 2, 1),
         numpy.dtype(ml_dtypes.int4): DLDataType(0, 4, 1),
-        numpy.dtype(ml_dtypes.uint2): DLDataType(1, 2, 1),
         numpy.dtype(ml_dtypes.uint4): DLDataType(1, 4, 1),
         numpy.dtype(ml_dtypes.bfloat16): DLDataType(4, 16, 1),
-        numpy.dtype(ml_dtypes.float8_e3m4): DLDataType(7, 8, 1),
-        numpy.dtype(ml_dtypes.float8_e4m3): DLDataType(8, 8, 1),
         numpy.dtype(ml_dtypes.float8_e4m3b11fnuz): DLDataType(9, 8, 1),
         numpy.dtype(ml_dtypes.float8_e4m3fn): DLDataType(10, 8, 1),
         numpy.dtype(ml_dtypes.float8_e4m3fnuz): DLDataType(11, 8, 1),
         numpy.dtype(ml_dtypes.float8_e5m2): DLDataType(12, 8, 1),
         numpy.dtype(ml_dtypes.float8_e5m2fnuz): DLDataType(13, 8, 1),
-        numpy.dtype(ml_dtypes.float8_e8m0fnu): DLDataType(14, 8, 1),
-        numpy.dtype(ml_dtypes.float6_e2m3fn): DLDataType(15, 6, 1),
-        numpy.dtype(ml_dtypes.float6_e3m2fn): DLDataType(16, 6, 1),
-        numpy.dtype(ml_dtypes.float4_e2m1fn): DLDataType(17, 4, 1),
     }
+
+    if hasattr(ml_dtypes, "int2"):  # ml_dtypes >= 0.5.0
+        MLDTYPES_DTYPE_TO_DTYPE[numpy.dtype(ml_dtypes.int2)] = DLDataType(0, 2, 1)
+        MLDTYPES_DTYPE_TO_DTYPE[numpy.dtype(ml_dtypes.uint2)] = DLDataType(1, 2, 1)
+
+        MLDTYPES_DTYPE_TO_DTYPE[numpy.dtype(ml_dtypes.float8_e3m4)] = DLDataType(7, 8, 1)
+        MLDTYPES_DTYPE_TO_DTYPE[numpy.dtype(ml_dtypes.float8_e4m3)] = DLDataType(8, 8, 1)
+        MLDTYPES_DTYPE_TO_DTYPE[numpy.dtype(ml_dtypes.float8_e8m0fnu)] = DLDataType(14, 8, 1)
+        MLDTYPES_DTYPE_TO_DTYPE[numpy.dtype(ml_dtypes.float6_e2m3fn)] = DLDataType(15, 6, 1)
+        MLDTYPES_DTYPE_TO_DTYPE[numpy.dtype(ml_dtypes.float6_e3m2fn)] = DLDataType(16, 6, 1)
+        MLDTYPES_DTYPE_TO_DTYPE[numpy.dtype(ml_dtypes.float4_e2m1fn)] = DLDataType(17, 4, 1)
+
 
 if numpy is not None:
     NUMPY_DTYPE_TO_DTYPE = {
