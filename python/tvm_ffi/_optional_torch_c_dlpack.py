@@ -82,6 +82,8 @@ def load_torch_c_dlpack_extension() -> Any:
 
         # Set the DLPackExchangeAPI pointer on the class
         setattr(torch.Tensor, "__c_dlpack_exchange_api__", func())
+
+        return lib
     except ImportError:
         pass
     except Exception as e:
@@ -110,5 +112,5 @@ def patch_torch_cuda_stream_protocol() -> Any:
 
 
 if os.environ.get("TVM_FFI_DISABLE_TORCH_C_DLPACK", "0") == "0":
-    load_torch_c_dlpack_extension()
+    _LIB = load_torch_c_dlpack_extension()  # keep a reference to the loaded shared library
     patch_torch_cuda_stream_protocol()
