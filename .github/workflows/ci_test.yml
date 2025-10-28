@@ -98,7 +98,7 @@ jobs:
           fetch-tags: true
       - name: Print current commit
         run: git log -1 --oneline
-      
+
       - name: Activate VS Dev Env on Windows
         if: ${{ matrix.os == 'windows-latest' }}
         shell: powershell

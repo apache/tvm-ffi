@@ -715,10 +715,8 @@ def main() -> None:  # noqa: PLR0912, PLR0915
 
         # use CXX11 ABI
         if torch.compiled_with_cxx11_abi():
-            print("Building Torch C DLPack Addon with CXX11 ABI", file=sys.stderr)
             cflags.append("-D_GLIBCXX_USE_CXX11_ABI=1")
         else:
-            print("Building Torch C DLPack Addon without CXX11 ABI", file=sys.stderr)
             cflags.append("-D_GLIBCXX_USE_CXX11_ABI=0")
 
         for lib_dir in torch.utils.cpp_extension.library_paths():
