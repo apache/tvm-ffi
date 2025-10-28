@@ -11,7 +11,7 @@ do
   rm /torch2$torch_minor -rf
 done
 
-uv venv base --python 3.12 && source /base/bin/activate
+uv venv /base --python 3.12 && source /base/bin/activate
 uv pip install build auditwheel
 uv pip install -v .
 cd ./addons/torch_c_dlpack_ext
