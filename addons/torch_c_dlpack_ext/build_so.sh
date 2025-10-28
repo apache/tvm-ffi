@@ -1,6 +1,6 @@
-echo "torch version == $1"
-echo "python version == $2"
-echo "cuda version == $3"
+#!/bin/bash
+set -eux
+set -o pipefail
 
 uv venv /torch$1 --python $2 && source /torch$1/bin/activate
 uv pip install torch==$1 --index-url https://download.pytorch.org/whl/$3

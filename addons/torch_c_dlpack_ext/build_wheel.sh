@@ -1,11 +1,15 @@
+#!/bin/bash
+set -eux
+set -o pipefail
+
 pip install uv
 
-./build_so.sh 2.4 $1 cu124
-./build_so.sh 2.5 $1 cu124
-./build_so.sh 2.6 $1 cu126
-./build_so.sh 2.7 $1 cu126
-./build_so.sh 2.8 $1 cu128
-./build_so.sh 2.9 $1 cu128
+./addons/torch_c_dlpack_ext/build_so.sh 2.4 $1 cu124
+./addons/torch_c_dlpack_ext/build_so.sh 2.5 $1 cu124
+./addons/torch_c_dlpack_ext/build_so.sh 2.6 $1 cu126
+./addons/torch_c_dlpack_ext/build_so.sh 2.7 $1 cu126
+./addons/torch_c_dlpack_ext/build_so.sh 2.8 $1 cu128
+./addons/torch_c_dlpack_ext/build_so.sh 2.9 $1 cu128
 
 uv venv /base --python $1 && source /base/bin/activate
 uv pip install build auditwheel

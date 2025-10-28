@@ -14,14 +14,27 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
+"""torch c dlpack ext core methods"""
 import ctypes
 from packaging.version import Version
 from pathlib import Path
 import sys
+from typing import Callable
 
 
-def get_torch_c_dlpack_lib_path(version_str: str):
+def get_torch_c_dlpack_lib_path(version_str: str) -> Path:
+    """Get the torch c dlpack lib path with given torch version.
+
+    Parameters
+    ----------
+    version_str: str
+        The torch version, obtained by `torch.__version__`.
+
+    Returns
+    -------
+    path
+        The path to the torch c dlpack lib.
+    """
     version = Version(version_str)
 
     if sys.platform.startswith("win32"):
@@ -39,7 +52,19 @@ def get_torch_c_dlpack_lib_path(version_str: str):
     raise ValueError
 
 
-def load_torch_c_dlpack_lib(version_str: str):
+def load_torch_c_dlpack_lib(version_str: str) -> Callable[[None], int]:
+    """Load TorchDLPackExchangeAPIPtr of the torch c dlpack lib with given torch version.
+
+    Parameters
+    ----------
+    version_str: str
+        The torch version, obtained by `torch.__version__`.
+
+    Returns
+    -------
+    path
+        The TorchDLPackExchangeAPIPtr function of the torch c dlpack lib.
+    """
     lib_path = get_torch_c_dlpack_lib_path(version_str)
     lib = ctypes.CDLL(str(lib_path))
     func = lib.TorchDLPackExchangeAPIPtr
