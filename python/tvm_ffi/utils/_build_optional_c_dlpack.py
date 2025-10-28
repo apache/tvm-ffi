@@ -748,7 +748,7 @@ def main() -> None:  # noqa: PLR0912, PLR0915
                     ldflags.append(python_lib)
                     break
         else:
-            python_libdir = sysconfig.get_path("LIBDIR")
+            python_libdir = sysconfig.get_config_var("LIBDIR")
             if python_libdir:
                 ldflags.append(f"-L{python_libdir}")
                 py_version = f"python{sysconfig.get_python_version()}"
