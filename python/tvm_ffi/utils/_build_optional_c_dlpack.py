@@ -728,15 +728,20 @@ def main() -> None:  # noqa: PLR0912, PLR0915
             # On Unix/macOS, use -l format for linking
             ldflags.extend(["-lc10", "-ltorch", "-ltorch_cpu", "-ltorch_python"])
 
-        # Add Python library linking 
+        # Add Python library linking
         if IS_WINDOWS:
             python_lib = f"python{sys.version_info.major}.lib"
             python_libdir_list = [
-              sysconfig.get_config_var("LIBDIR"),
-              sysconfig.get_path("include"),
+                sysconfig.get_config_var("LIBDIR"),
+                sysconfig.get_path("include"),
             ]
-            if sysconfig.get_path("include") is not None and (Path(sysconfig.get_path("include")).parent / "libs").exists():
-                python_libdir_list.append(str((Path(sysconfig.get_path("include")).parent / "libs").resolve()))
+            if (
+                sysconfig.get_path("include") is not None
+                and (Path(sysconfig.get_path("include")).parent / "libs").exists()
+            ):
+                python_libdir_list.append(
+                    str((Path(sysconfig.get_path("include")).parent / "libs").resolve())
+                )
             for python_libdir in python_libdir_list:
                 if python_libdir and (Path(python_libdir) / python_lib).exists():
                     ldflags.append(f"/LIBPATH:{python_libdir.replace(':', '$:')}")
