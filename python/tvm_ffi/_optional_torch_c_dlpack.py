@@ -59,7 +59,7 @@ def load_torch_c_dlpack_extension() -> Any:
 
         func = torch_c_dlpack_ext.load_torch_c_dlpack_lib(torch.__version__)
         setattr(torch.Tensor, "__c_dlpack_exchange_api__", func())
-        print("using prebuilt torch c dlpack")
+        return None
     except ImportError:
         pass
 

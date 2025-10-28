@@ -34,7 +34,7 @@ def get_torch_c_dlpack_lib_path(version_str: str):
     if version >= Version("2.4") and version < Version("3.0"):
         return (
             Path(__file__).parent
-            / f"libtorch_c_dlpack_addon_torch{version.major}{version.minor}{extension}"
+            / f"libtorch_c_dlpack_addon_torch{version.major}.{version.minor}{extension}"
         )
     raise ValueError
 
