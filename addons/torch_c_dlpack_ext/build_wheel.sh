@@ -16,4 +16,4 @@ uv pip install build auditwheel
 uv pip install -v .
 cd ./addons/torch_c_dlpack_ext
 python -m build
-auditwheel repair --exclude libtorch --exclude libtorch_cpu --exclude libc10 --exclude libtorch_python --plat manylinux_2_28_x86_64 dist/*.whl
+auditwheel repair --exclude libtorch.so --exclude libtorch_cpu.so --exclude libc10.so --exclude libtorch_python.so --plat manylinux_2_28_x86_64 dist/*.whl -w wheelhouse
