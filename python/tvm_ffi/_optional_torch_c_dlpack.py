@@ -55,6 +55,15 @@ def load_torch_c_dlpack_extension() -> Any:
 
     """Load the torch c dlpack extension."""
     try:
+        import torch_c_dlpack_ext
+
+        func = torch_c_dlpack_ext.load_torch_c_dlpack_lib(torch.__version__)
+        setattr(torch.Tensor, "__c_dlpack_exchange_api__", func())
+        print("using prebuilt torch c dlpack")
+    except ImportError:
+        pass
+
+    try:
         # todo: check whether a prebuilt package is installed, if so, use it.
         ...
 

@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import ctypes
 from packaging.version import Version
 from pathlib import Path
 import sys
@@ -31,9 +32,17 @@ def get_torch_c_dlpack_lib_path(version_str: str):
         extension = ".so"
 
     if version >= Version("2.4") and version <= Version("2.9"):
-        return Path(__file__).parent / f"torch{version.major}{version.minor}{extension}"
+        return (
+            Path(__file__).parent
+            / f"libtorch_c_dlpack_addon_torch{version.major}{version.minor}{extension}"
+        )
     raise ValueError
 
 
 def load_torch_c_dlpack_lib(version_str: str):
-    path = get_torch_c_dlpack_lib_path(version_str)
+    lib_path = get_torch_c_dlpack_lib_path(version_str)
+    lib = ctypes.CDLL(str(lib_path))
+    func = lib.TorchDLPackExchangeAPIPtr
+    func.restype = ctypes.c_uint64
+    func.argtypes = []
+    return func
