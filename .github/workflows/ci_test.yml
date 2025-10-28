@@ -154,7 +154,7 @@ jobs:
         if: ${{ matrix.os == 'windows-latest' }}
         shell: cmd
         run: |
-          call "%VS_DEV_CMD_PATH%"  # Activate VS environment and run pytest in a single cmd block
+          call "%VS_DEV_CMD_PATH%"
           pytest -vvs tests/python
 
       # Run Rust tests, must happen after installing the pip package.
