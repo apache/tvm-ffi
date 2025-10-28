@@ -558,7 +558,14 @@ struct TorchDLPackExchangeAPI : public DLPackExchangeAPI {
   }
 };
 
-extern "C" int64_t TorchDLPackExchangeAPIPtr() {
+// defien a cross-platgorm macro to export the symbol
+#ifdef _WIN32
+#define DLL_EXPORT __declspec(dllexport)
+#else
+#define DLL_EXPORT __attribute__((visibility("default")))
+#endif
+
+extern "C" DLL_EXPORT int64_t TorchDLPackExchangeAPIPtr() {
   return reinterpret_cast<int64_t>(TorchDLPackExchangeAPI::Global());
 }
 """
