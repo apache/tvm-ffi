@@ -146,4 +146,4 @@ jobs:
           attestations: true
           verbose: true
           # testing publish url
-          repository-url: https://test.pypi.org/legacy/
+          # repository-url: https://test.pypi.org/legacy/
