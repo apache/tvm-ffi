@@ -22,7 +22,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "torch_c_dlpack_ext"
 version = "0.1.0a0"
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 
 [tool.setuptools]
 include-package-data = true
