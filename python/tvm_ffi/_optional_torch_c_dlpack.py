@@ -55,7 +55,7 @@ def load_torch_c_dlpack_extension() -> Any:
 
     """Load the torch c dlpack extension."""
     try:
-        import torch_c_dlpack_ext  # noqa: PLC0415
+        import torch_c_dlpack_ext  # type: ignore  # noqa: PLC0415
 
         func = torch_c_dlpack_ext.load_torch_c_dlpack_lib(torch.__version__)
         setattr(torch.Tensor, "__c_dlpack_exchange_api__", func())

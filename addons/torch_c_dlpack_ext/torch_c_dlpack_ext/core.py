@@ -15,11 +15,13 @@
 # specific language governing permissions and limitations
 # under the License.
 """torch c dlpack ext core methods"""
+
 import ctypes
-from packaging.version import Version
-from pathlib import Path
 import sys
+from pathlib import Path
 from typing import Callable
+
+from packaging.version import Version
 
 
 def get_torch_c_dlpack_lib_path(version_str: str) -> Path:
@@ -34,6 +36,7 @@ def get_torch_c_dlpack_lib_path(version_str: str) -> Path:
     -------
     path
         The path to the torch c dlpack lib.
+
     """
     version = Version(version_str)
 
@@ -64,6 +67,7 @@ def load_torch_c_dlpack_lib(version_str: str) -> Callable[[None], int]:
     -------
     path
         The TorchDLPackExchangeAPIPtr function of the torch c dlpack lib.
+
     """
     lib_path = get_torch_c_dlpack_lib_path(version_str)
     lib = ctypes.CDLL(str(lib_path))
