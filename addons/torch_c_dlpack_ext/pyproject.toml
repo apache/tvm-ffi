@@ -24,9 +24,11 @@ name = "torch_c_dlpack_ext"
 version = "0.1.0"
 requires-python = ">=3.8"
 
-
 [tool.setuptools]
 include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["torch_c_dlpack_ext*"]
 
 [tool.setuptools.package-data]
 torch_c_dlpack_ext = ["*.so", "*.dll", "*.dylib"]
