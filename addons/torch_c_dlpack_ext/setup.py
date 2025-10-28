@@ -14,21 +14,15 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+"""setup script."""
 
-[build-system]
-requires = ["setuptools>=61.0", "wheel"]
-build-backend = "setuptools.build_meta"
+from setuptools import find_packages, setup
 
-[project]
-name = "torch_c_dlpack_ext"
-version = "0.1.0a0"
-requires-python = ">=3.9"
-
-[tool.setuptools]
-include-package-data = true
-
-[tool.setuptools.packages.find]
-include = ["torch_c_dlpack_ext*"]
-
-[tool.setuptools.package-data]
-torch_c_dlpack_ext = ["*.so", "*.dll", "*.dylib"]
+setup(
+    name="torch_c_dlpack_ext",
+    version="0.1.0a0",
+    python_requires=">=3.9",
+    packages=find_packages(include="torch_c_dlpack_ext*"),
+    include_package_data=True,
+    package_data={"torch_c_dlpack_ext": ["*.so", "*.dll", "*.dylib"]},
+)
