@@ -35,7 +35,7 @@ IS_WINDOWS = sys.platform.startswith("win")
 
 @pytest.mark.skipif(torch is None, reason="torch is not installed")
 def test_build_torch_c_dlpack_extension() -> None:
-    build_script = Path(tvm_ffi.__file__).parent / "utils" / "_build_optional_c_dlpack.py"
+    build_script = Path(tvm_ffi.__file__).parent / "utils" / "_build_optional_torch_c_dlpack.py"
     subprocess.run(
         [sys.executable, str(build_script), "--build_dir", "./build_test_dir"], check=True
     )
@@ -56,7 +56,7 @@ def test_build_torch_c_dlpack_extension() -> None:
 
 @pytest.mark.skipif(torch is None, reason="torch is not installed")
 def test_parallel_build() -> None:
-    build_script = Path(tvm_ffi.__file__).parent / "utils" / "_build_optional_c_dlpack.py"
+    build_script = Path(tvm_ffi.__file__).parent / "utils" / "_build_optional_torch_c_dlpack.py"
     num_processes = 4
     build_dir = "./build_test_dir_parallel"
     processes = []

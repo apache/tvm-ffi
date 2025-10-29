@@ -65,7 +65,9 @@ def load_torch_c_dlpack_extension() -> Any:
             "libtorch_c_dlpack_addon" + (".dll" if sys.platform == "win32" else ".so")
         )
         if not lib_path.exists():
-            build_script_path = Path(__file__).parent / "utils" / "_build_optional_c_dlpack.py"
+            build_script_path = (
+                Path(__file__).parent / "utils" / "_build_optional_torch_c_dlpack.py"
+            )
             args = [sys.executable, str(build_script_path), "--build_dir", str(addon_build_dir)]
             if torch.cuda.is_available():
                 args.append("--build_with_cuda")

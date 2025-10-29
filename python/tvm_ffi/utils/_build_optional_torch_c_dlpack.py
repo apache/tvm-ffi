@@ -30,13 +30,6 @@ import torch
 import torch.torch_version
 import torch.utils.cpp_extension
 
-# we need to set the following env to avoid tvm_ffi to build the torch c-dlpack addon during importing
-os.environ["TVM_FFI_DISABLE_TORCH_C_DLPACK"] = "1"
-
-from tvm_ffi.cpp.load_inline import build_ninja
-from tvm_ffi.libinfo import find_dlpack_include_path
-from tvm_ffi.utils.lockfile import FileLock
-
 IS_WINDOWS = sys.platform == "win32"
 
 cpp_source = """
@@ -580,6 +573,8 @@ def _generate_ninja_build(
     extra_include_paths: Sequence[str],
 ) -> None:
     """Generate the content of build.ninja for building the module."""
+    from tvm_ffi.libinfo import find_dlpack_include_path  # noqa: PLC0415
+
     if IS_WINDOWS:
         default_cflags = [
             "/std:c++17",
@@ -665,23 +660,27 @@ def get_torch_include_paths(build_with_cuda: bool) -> Sequence[str]:
         return torch.utils.cpp_extension.include_paths(cuda=build_with_cuda)
 
 
-parser = argparse.ArgumentParser()
-parser.add_argument(
-    "--build_dir",
-    type=str,
-    default=str(Path("~/.cache/tvm-ffi/torch_c_dlpack_addon").expanduser()),
-    help="Directory to store the built extension library.",
-)
-parser.add_argument(
-    "--build_with_cuda",
-    action="store_true",
-    default=torch.cuda.is_available(),
-    help="Build with CUDA support.",
-)
-
-
 def main() -> None:  # noqa: PLR0912, PLR0915
     """Build the torch c dlpack extension."""
+    # we need to set the following env to avoid tvm_ffi to build the torch c-dlpack addon during importing
+    os.environ["TVM_FFI_DISABLE_TORCH_C_DLPACK"] = "1"
+    from tvm_ffi.cpp.load_inline import build_ninja  # noqa: PLC0415
+    from tvm_ffi.utils.lockfile import FileLock  # noqa: PLC0415
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--build_dir",
+        type=str,
+        default=str(Path("~/.cache/tvm-ffi/torch_c_dlpack_addon").expanduser()),
+        help="Directory to store the built extension library.",
+    )
+    parser.add_argument(
+        "--build_with_cuda",
+        action="store_true",
+        default=torch.cuda.is_available(),
+        help="Build with CUDA support.",
+    )
+
     args = parser.parse_args()
     build_dir = Path(args.build_dir)
 
