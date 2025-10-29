@@ -20,7 +20,7 @@ from setuptools import find_packages, setup
 
 setup(
     name="torch_c_dlpack_ext",
-    version="0.1.0a0",
+    version="0.1.0a1",
     python_requires=">=3.9",
     packages=find_packages(include="torch_c_dlpack_ext*"),
     include_package_data=True,
