@@ -22,20 +22,19 @@ set -o pipefail
 
 pip install uv
 
-if [[ "$1" != "3.13" && "$1" != "3.14" ]]; then
-  bash ./addons/torch_c_dlpack_ext/build_so.sh 2.4 "$1" cu124
-fi
+# if [[ "$1" != "3.13" && "$1" != "3.14" ]]; then
+#   bash ./addons/torch_c_dlpack_ext/build_so.sh 2.4 "$1" cu124
+# fi
 if [[ "$1" != "3.14" ]]; then
-  bash ./addons/torch_c_dlpack_ext/build_so.sh 2.5 "$1" cu124
-  bash ./addons/torch_c_dlpack_ext/build_so.sh 2.6 "$1" cu126
-  bash ./addons/torch_c_dlpack_ext/build_so.sh 2.7 "$1" cu126
+  # bash ./addons/torch_c_dlpack_ext/build_so.sh 2.5 "$1" cu124
+  # bash ./addons/torch_c_dlpack_ext/build_so.sh 2.6 "$1" cu126
+  # bash ./addons/torch_c_dlpack_ext/build_so.sh 2.7 "$1" cu126
   bash ./addons/torch_c_dlpack_ext/build_so.sh 2.8 "$1" cu128
 fi
 bash ./addons/torch_c_dlpack_ext/build_so.sh 2.9 "$1" cu128
 
 uv venv /base --python "$1" && source /base/bin/activate
 uv pip install setuptools auditwheel
-uv pip install -v .
 cd ./addons/torch_c_dlpack_ext
 python setup.py sdist bdist_wheel --python-tag py"${1//\./}"
 auditwheel repair --exclude libtorch.so --exclude libtorch_cpu.so --exclude libc10.so --exclude libtorch_python.so --plat manylinux_2_28_x86_64 dist/*.whl -w wheelhouse
