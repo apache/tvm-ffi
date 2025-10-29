@@ -60,17 +60,26 @@ def load_torch_c_dlpack_extension() -> Any:
 
         # check whether a JIT shared library is built in cache
         cache_dir = Path(os.environ.get("TVM_FFI_CACHE_DIR", "~/.cache/tvm-ffi")).expanduser()
-        addon_build_dir = cache_dir / "torch_c_dlpack_addon"
-        lib_path = addon_build_dir / (
-            "libtorch_c_dlpack_addon" + (".dll" if sys.platform == "win32" else ".so")
-        )
+        addon_output_dir = cache_dir
+        major, minor = torch.__version__.split(".")[:2]
+        device = "cpu" if not torch.cuda.is_available() else "cuda"
+        suffix = ".dll" if sys.platform.startswith("win") else ".so"
+        libname = f"libtorch_c_dlpack_addon_torch{major}{minor}-{device}{suffix}"
+        lib_path = addon_output_dir / libname
         if not lib_path.exists():
             build_script_path = (
                 Path(__file__).parent / "utils" / "_build_optional_torch_c_dlpack.py"
             )
-            args = [sys.executable, str(build_script_path), "--build_dir", str(addon_build_dir)]
+            args = [
+                sys.executable,
+                str(build_script_path),
+                "--output-dir",
+                str(cache_dir),
+                "--libname",
+                libname,
+            ]
             if torch.cuda.is_available():
-                args.append("--build_with_cuda")
+                args.append("--build-with-cuda")
             subprocess.run(
                 args,
                 check=True,
