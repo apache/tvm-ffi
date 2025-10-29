@@ -446,6 +446,8 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("testing.schema_no_args", []() { return 1; })
       .def("testing.schema_no_return", [](int64_t x) {})
       .def("testing.schema_no_args_no_return", []() {});
+  TVMFFIEnvModRegisterSystemLibSymbol("__tvm_ffi_testing.add_one",
+                                      reinterpret_cast<void*>(__add_one_c_symbol));
 }
 
 }  // namespace ffi

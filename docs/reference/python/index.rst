@@ -99,6 +99,7 @@ Stream Context
   StreamContext
   use_torch_stream
   use_raw_stream
+  get_raw_stream
 
 
 Inline Loading
@@ -118,8 +119,11 @@ Misc
 .. autosummary::
   :toctree: generated/
 
-  serialization
-  access_path
+  serialization.from_json_graph_str
+  serialization.to_json_graph_str
+  access_path.AccessKind
+  access_path.AccessPath
+  access_path.AccessStep
   convert
   ObjectConvertible
 

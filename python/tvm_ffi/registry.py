@@ -35,12 +35,13 @@ def register_object(type_key: str | type | None = None) -> Callable[[type], type
     Parameters
     ----------
     type_key
-        The type key of the node
+        The type key of the node. It requires ``type_key`` to be registered already
+        on the C++ side. If not specified, the class name will be used.
 
     Examples
     --------
-    The following code registers MyObject
-    using type key "test.MyObject"
+    The following code registers MyObject using type key "test.MyObject", if the
+    type key is already registered on the C++ side.
 
     .. code-block:: python
 
@@ -165,7 +166,20 @@ def get_global_func(name: str, allow_missing: bool = False) -> core.Function | N
     Returns
     -------
     func
-        The function to be returned, None if function is missing.
+        The function to be returned, ``None`` if function is missing.
+
+    Examples
+    --------
+    .. code-block:: python
+
+        import tvm_ffi
+
+        @tvm_ffi.register_global_func("demo.echo")
+        def echo(x):
+            return x
+
+        f = tvm_ffi.get_global_func("demo.echo")
+        assert f(123) == 123
 
     See Also
     --------
@@ -195,24 +209,60 @@ def remove_global_func(name: str) -> None:
     Parameters
     ----------
     name
-        The name of the global function
+        The name of the global function.
+
+    Examples
+    --------
+    .. code-block:: python
+
+        import tvm_ffi
+
+        @tvm_ffi.register_global_func("my.temp")
+        def temp():
+            return 42
+
+        assert tvm_ffi.get_global_func("my.temp", allow_missing=True) is not None
+        tvm_ffi.remove_global_func("my.temp")
+        assert tvm_ffi.get_global_func("my.temp", allow_missing=True) is None
+
+    See Also
+    --------
+    :py:func:`tvm_ffi.register_global_func`
+    :py:func:`tvm_ffi.get_global_func`
 
     """
     get_global_func("ffi.FunctionRemoveGlobal")(name)
 
 
 def get_global_func_metadata(name: str) -> dict[str, Any]:
-    """Get the type schema string of a global function by name.
+    """Get metadata (including type schema) for a global function.
 
     Parameters
     ----------
     name
-        The name of the global function
+        The name of the global function.
 
     Returns
     -------
     metadata
-        The metadata of the function
+        A dictionary containing function metadata. The ``type_schema`` field
+        encodes the callable signature.
+
+    Examples
+    --------
+    .. code-block:: python
+
+        import tvm_ffi
+
+        meta = tvm_ffi.get_global_func_metadata("testing.add_one")
+        print(meta)
+
+    See Also
+    --------
+    :py:func:`tvm_ffi.get_global_func`
+        Retrieve a callable for an existing global function.
+    :py:func:`tvm_ffi.register_global_func`
+        Register a Python callable as a global FFI function.
 
     """
     return json.loads(get_global_func("ffi.GetGlobalFuncMetadata")(name))

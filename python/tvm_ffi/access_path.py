@@ -53,7 +53,25 @@ class AccessStep(Object):
 
 @register_object("ffi.reflection.AccessPath")
 class AccessPath(Object):
-    """Access path container."""
+    """Access path container.
+
+    An ``AccessPath`` describes how to reach a nested attribute or item
+    inside a complex FFI object by recording a sequence of steps
+    (attribute, array index, or map key). It is primarily used by
+    diagnostics to pinpoint structural mismatches.
+
+    Examples
+    --------
+    .. code-block:: python
+
+        from tvm_ffi.access_path import AccessPath
+
+        root = AccessPath.root()
+        # Build a path equivalent to obj.layer.weight[2]
+        p = root.attr("layer").attr("weight").array_item(2)
+        assert isinstance(p, AccessPath)
+
+    """
 
     # tvm-ffi-stubgen(begin): object/ffi.reflection.AccessPath
     if TYPE_CHECKING:
@@ -86,7 +104,14 @@ class AccessPath(Object):
 
     @staticmethod
     def root() -> AccessPath:
-        """Create a root access path."""
+        """Create a root access path.
+
+        Returns
+        -------
+        AccessPath
+            A path representing the root of an object graph.
+
+        """
         return AccessPath._root()
 
     def __eq__(self, other: Any) -> bool:

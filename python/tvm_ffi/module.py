@@ -115,13 +115,14 @@ class Module(core.Object):
     def implements_function(self, name: str, query_imports: bool = False) -> bool:
         """Return True if the module defines a global function.
 
-        Note
-        ----
-        that has_function(name) does not imply get_function(name) is non-null since the module
-        that has_function(name) does not imply get_function(name) is non-null since the module
-        may be, eg, a CSourceModule which cannot supply a packed-func implementation of the function
-        without further compilation. However, get_function(name) non null should always imply
-        has_function(name).
+        Notes
+        -----
+        ``implements_function(name)`` does not guarantee that
+        ``get_function(name)`` will return a callable, because some module
+        kinds (e.g. a source-only module) may not provide a packed function
+        implementation until further compilation occurs. However, a non-null
+        result from ``get_function(name)`` should imply the module implements
+        the function.
 
         Parameters
         ----------
@@ -133,8 +134,7 @@ class Module(core.Object):
 
         Returns
         -------
-        b
-            True if module (or one of its imports) has a definition for name.
+        True if module (or one of its imports) has a definition for name.
 
         """
         return _ffi_api.ModuleImplementsFunction(self, name, query_imports)
@@ -157,12 +157,11 @@ class Module(core.Object):
             The name of the function
 
         query_imports
-            Whether also query modules imported by this module.
+            Whether to also query modules imported by this module.
 
         Returns
         -------
-        f
-            The result function.
+        The result function.
 
         """
         func = _ffi_api.ModuleGetFunction(self, name, query_imports)
@@ -203,8 +202,7 @@ class Module(core.Object):
 
         Returns
         -------
-        source
-            The result source code.
+        The result source code.
 
         """
         return _ffi_api.ModuleInspectSource(self, fmt)
@@ -218,8 +216,7 @@ class Module(core.Object):
 
         Returns
         -------
-        mask
-            Bitmask of runtime module property
+        Bitmask of runtime module property
 
         """
         return _ffi_api.ModuleGetPropertyMask(self)
@@ -229,8 +226,7 @@ class Module(core.Object):
 
         Returns
         -------
-        b
-            True if the module is binary serializable.
+        True if the module is binary serializable.
 
         """
         return (self.get_property_mask() & ModulePropertyMask.BINARY_SERIALIZABLE) != 0
@@ -240,8 +236,7 @@ class Module(core.Object):
 
         Returns
         -------
-        b
-            True if the module is runnable.
+        True if the module is runnable.
 
         """
         return (self.get_property_mask() & ModulePropertyMask.RUNNABLE) != 0
@@ -253,8 +248,7 @@ class Module(core.Object):
 
         Returns
         -------
-        b
-            True if the module is compilation exportable.
+        True if the module is compilation exportable.
 
         """
         return (self.get_property_mask() & ModulePropertyMask.COMPILATION_EXPORTABLE) != 0
@@ -275,21 +269,20 @@ class Module(core.Object):
 
         See Also
         --------
-        runtime.Module.export_library : export the module to shared library.
+        tvm.runtime.Module.export_library : export the module to shared library.
 
         """
         _ffi_api.ModuleWriteToFile(self, file_name, fmt)
 
 
 def system_lib(symbol_prefix: str = "") -> Module:
-    """Get system-wide library module singleton.
+    """Get system-wide library module singleton with functions prefixed by ``__tvm_ffi_{symbol_prefix}``.
 
-    System lib is a global module that contains self register functions in startup.
-    Unlike normal dso modules which need to be loaded explicitly.
-    It is useful in environments where dynamic loading api like dlopen is banned.
+    The library module contains symbols that are registered via :cpp:func:`TVMFFIEnvModRegisterSystemLibSymbol`.
 
-    The system lib is intended to be linked and loaded during the entire life-cyle of the program.
-    If you want dynamic loading features, use dso modules instead.
+    .. note::
+        The system lib is intended to be statically linked and loaded during the entire lifecycle of the program.
+        If you want dynamic loading features, use DSO modules instead.
 
     Parameters
     ----------
@@ -299,8 +292,36 @@ def system_lib(symbol_prefix: str = "") -> Module:
 
     Returns
     -------
-    module
-        The system-wide library module.
+    The system-wide library module.
+
+    Examples
+    --------
+    Register the function ``test_symbol_add_one`` in C++ with the name ``__tvm_ffi_test_symbol_add_one``
+    via :cpp:func:`TVMFFIEnvModRegisterSystemLibSymbol`.
+
+    .. code-block:: cpp
+
+        // A function to be registered in the system lib
+        static int test_symbol_add_one(void*, const TVMFFIAny* args, int32_t num_args, TVMFFIAny* ret) {
+          TVM_FFI_SAFE_CALL_BEGIN();
+          TVM_FFI_CHECK(num_args == 1, "Expected 1 argument, but got: " + std::to_string(num_args));
+          int64_t x = reinterpret_cast<const AnyView*>(args)[0].cast<int64_t>();
+          reinterpret_cast<Any*>(ret)[0] = x + 1;
+          TVM_FFI_SAFE_CALL_END();
+        }
+
+        // Register the function with name `test_symbol_add_one` prefixed by `__tvm_ffi_`
+        int _ = TVMFFIEnvModRegisterSystemLibSymbol("__tvm_ffi_testing.add_one", reinterpret_cast<void*>(test_symbol_add_one));
+
+    Look up and call the function from Python:
+
+    .. code-block:: python
+
+        import tvm_ffi
+
+        mod: tvm_ffi.Module = tvm_ffi.system_lib("testing.")  # symbols prefixed with `__tvm_ffi_testing.`
+        func: tvm_ffi.Function = mod["add_one"]  # looks up `__tvm_ffi_testing.add_one`
+        assert func(10) == 11
 
     """
     return _ffi_api.SystemLib(symbol_prefix)
@@ -311,25 +332,25 @@ def load_module(path: str | PathLike) -> Module:
 
     Parameters
     ----------
-    path : str | PathLike
+    path
         The path to the module file.
 
     Returns
     -------
-    module
-        The loaded module
+    The loaded module
 
     Examples
     --------
     .. code-block:: python
 
+        import tvm_ffi
+        from pathlib import Path
+
         # Works with string paths
         mod = tvm_ffi.load_module("path/to/module.so")
-        mod.func_name(*args)
-
         # Also works with pathlib.Path objects
-        from pathlib import Path
         mod = tvm_ffi.load_module(Path("path/to/module.so"))
+
         mod.func_name(*args)
 
     See Also

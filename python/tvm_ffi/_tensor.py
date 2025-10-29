@@ -43,6 +43,16 @@ class Shape(tuple, PyNativeObject):
     This class subclasses :class:`tuple` so it can be used in most places where
     :class:`tuple` is used in Python array APIs.
 
+    Examples
+    --------
+    .. code-block:: python
+
+        import numpy as np
+        import tvm_ffi
+
+        x = tvm_ffi.from_dlpack(np.arange(6, dtype="int32").reshape(2, 3))
+        assert x.shape == (2, 3)
+
     """
 
     _tvm_ffi_cached_object: Any
@@ -85,6 +95,7 @@ def device(device_type: str | int | DLDeviceType, index: int | None = None) -> D
 
     .. code-block:: python
 
+      import tvm_ffi
       assert tvm_ffi.device("cuda:0") == tvm_ffi.device("cuda", 0)
       assert tvm_ffi.device("cpu:0") == tvm_ffi.device("cpu", 0)
 

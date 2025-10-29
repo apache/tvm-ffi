@@ -101,6 +101,8 @@ cdef class Object:
 
     .. code-block:: python
 
+        import tvm_ffi.testing
+
         # Acquire a testing object constructed through FFI
         obj = tvm_ffi.testing.create_object("testing.TestObjectBase", v_i64=12)
         assert isinstance(obj, tvm_ffi.Object)
@@ -213,6 +215,8 @@ cdef class Object:
         Examples
         --------
         .. code-block:: python
+
+            import tvm_ffi.testing
 
             x = tvm_ffi.testing.create_object("testing.TestObjectBase")
             y = x

@@ -35,6 +35,19 @@ class FileLock:
 
     This class implements an advisory lock, which must be respected by all
     cooperating processes.
+
+    Examples
+    --------
+    .. code-block:: python
+
+        from tvm_ffi.utils import FileLock
+
+        with FileLock("/tmp/my.lock"):
+            # Critical section guarded by the lock.
+            # Other processes attempting to acquire the same lock will block
+            # (or fail, if using ``acquire()``) until this context exits.
+            do_work()
+
     """
 
     def __init__(self, lock_file_path: str) -> None:

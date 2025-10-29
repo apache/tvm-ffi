@@ -769,8 +769,10 @@ cdef class Function(Object):
 
     See Also
     --------
-    tvm_ffi.register_global_func: How to register global function.
-    tvm_ffi.get_global_func: How to get global function.
+    :py:func:`tvm_ffi.register_global_func`
+        Register a Python callable as a global FFI function.
+    :py:func:`tvm_ffi.get_global_func`
+        Look up a previously registered global FFI function by name.
     """
     cdef int c_release_gil
     cdef dict __dict__

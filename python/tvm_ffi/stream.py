@@ -124,7 +124,8 @@ try:
 
         Note
         ----
-        When working with raw cudaStream_t handle, using :py:func:`tvm_ffi.use_raw_stream` instead.
+        When working with a raw ``cudaStream_t`` handle, use
+        :py:func:`tvm_ffi.use_raw_stream` instead.
 
         """
         return TorchStreamContext(context)
@@ -137,7 +138,7 @@ except ImportError:
 
 
 def use_raw_stream(device: core.Device, stream: int | c_void_p) -> StreamContext:
-    """Create a ffi stream context with given device and stream handle.
+    """Create an FFI stream context with the given device and stream handle.
 
     Parameters
     ----------
@@ -145,28 +146,45 @@ def use_raw_stream(device: core.Device, stream: int | c_void_p) -> StreamContext
         The device to which the stream belongs.
 
     stream
-        The stream handle.
+        The stream handle (for example, a CUDA ``cudaStream_t`` as an integer, or ``0``).
 
     Returns
     -------
     context
-        The ffi stream context.
+        The FFI stream context.
 
-    Note
-    ----
-    When working with torch stram or cuda graph, using :py:func:`tvm_ffi.use_torch_stream` instead.
+    Examples
+    --------
+    The example below uses a CPU device and a dummy stream handle. On CUDA, pass a
+    real ``cudaStream_t`` integer.
+
+    .. code-block:: python
+
+        import tvm_ffi
+
+        dev = tvm_ffi.device("cpu:0")
+        with tvm_ffi.use_raw_stream(dev, 0):
+            # Within the context, the current stream for this device is set
+            assert tvm_ffi.get_raw_stream(dev) == 0
+
+    See Also
+    --------
+    :py:func:`tvm_ffi.use_torch_stream`
+        Use a Torch stream or CUDA graph as the source of truth.
+    :py:func:`tvm_ffi.get_raw_stream`
+        Query the current FFI stream for a device.
 
     """
     if not isinstance(stream, (int, c_void_p)):
         raise ValueError(
-            "use_raw_stream only accepts int or c_void_p as stram input, "
+            "use_raw_stream only accepts int or c_void_p as stream input, "
             "try use_torch_stream when using torch.cuda.Stream or torch.cuda.graph"
         )
     return StreamContext(device, stream)
 
 
 def get_raw_stream(device: core.Device) -> int:
-    """Get the current ffi stream of given device.
+    """Get the current FFI stream of a given device.
 
     Parameters
     ----------
@@ -176,7 +194,23 @@ def get_raw_stream(device: core.Device) -> int:
     Returns
     -------
     stream
-        The current ffi stream.
+        The current FFI stream as an integer handle.
+
+    Examples
+    --------
+    .. code-block:: python
+
+        import tvm_ffi
+
+        dev = tvm_ffi.device("cpu:0")
+        # Default stream is implementation-defined; set it explicitly
+        with tvm_ffi.use_raw_stream(dev, 0):
+            assert tvm_ffi.get_raw_stream(dev) == 0
+
+    See Also
+    --------
+    :py:func:`tvm_ffi.use_raw_stream`
+        Set the current stream for a device.
 
     """
     return core._env_get_current_stream(device.dlpack_device_type(), device.index)

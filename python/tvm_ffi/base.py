@@ -41,7 +41,7 @@ if sys.version_info[:2] < (3, 8):  # noqa: UP036
 
 
 def _load_lib() -> ctypes.CDLL:
-    """Load libary by searching possible path."""
+    """Load the tvm_ffi shared library by searching likely paths."""
     lib_path = libinfo.find_libtvm_ffi()
     # The dll search path need to be added explicitly in windows
     if sys.platform.startswith("win32"):

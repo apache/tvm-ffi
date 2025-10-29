@@ -14,7 +14,7 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-"""Conversion utilities to bring python objects into ffi values."""
+"""Conversion utilities to convert Python objects into TVM FFI values."""
 
 from __future__ import annotations
 
@@ -38,17 +38,50 @@ except ImportError:
 
 
 def convert(value: Any) -> Any:  # noqa: PLR0911,PLR0912
-    """Convert a python object to ffi values.
+    """Convert a Python object into TVM FFI values.
+
+    This helper mirrors the automatic argument conversion that happens when
+    calling FFI functions. It is primarily useful in tests or places where
+    an explicit conversion is desired.
 
     Parameters
     ----------
     value
-        The python object to be converted.
+        The Python object to be converted.
 
     Returns
     -------
     ffi_obj
         The converted TVM FFI object.
+
+    Examples
+    --------
+    .. code-block:: python
+
+        import tvm_ffi
+
+        # Lists and tuples become tvm_ffi.Array
+        a = tvm_ffi.convert([1, 2, 3])
+        assert isinstance(a, tvm_ffi.Array)
+
+        # Dicts become tvm_ffi.Map
+        m = tvm_ffi.convert({"a": 1, "b": 2})
+        assert isinstance(m, tvm_ffi.Map)
+
+        # Strings and bytes become zero-copy FFI-aware types
+        s = tvm_ffi.convert("hello")
+        b = tvm_ffi.convert(b"bytes")
+        assert isinstance(s, tvm_ffi.core.String)
+        assert isinstance(b, tvm_ffi.core.Bytes)
+
+        # Callables are wrapped as tvm_ffi.Function
+        f = tvm_ffi.convert(lambda x: x + 1)
+        assert isinstance(f, tvm_ffi.Function)
+
+        # Array libraries that support DLPack export can be converted to Tensor
+        import numpy as np
+        x = tvm_ffi.convert(np.arange(4, dtype="int32"))
+        assert isinstance(x, tvm_ffi.Tensor)
 
     Note
     ----

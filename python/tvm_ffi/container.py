@@ -124,7 +124,7 @@ def getitem_helper(
 
 @register_object("ffi.Array")
 class Array(core.Object, Sequence[T]):
-    """Array container that represents a sequence of values in ffi.
+    """Array container that represents a sequence of values in the FFI.
 
     :py:func:`tvm_ffi.convert` will map python list/tuple to this class.
 
@@ -133,19 +133,18 @@ class Array(core.Object, Sequence[T]):
     input_list
         The list of values to be stored in the array.
 
-    See Also
-    --------
-    :py:func:`tvm_ffi.convert`
-
     Examples
     --------
     .. code-block:: python
 
         import tvm_ffi
 
-        a = tvm_ffi.convert([1, 2, 3])
-        assert isinstance(a, tvm_ffi.Array)
-        assert len(a) == 3
+        a = tvm_ffi.Array([1, 2, 3])
+        assert tuple(a) == (1, 2, 3)
+
+    See Also
+    --------
+    :py:func:`tvm_ffi.convert`
 
     """
 
@@ -274,21 +273,20 @@ class Map(core.Object, Mapping[K, V]):
     input_dict
         The dictionary of values to be stored in the map.
 
-    See Also
-    --------
-    :py:func:`tvm_ffi.convert`
-
     Examples
     --------
     .. code-block:: python
 
         import tvm_ffi
 
-        amap = tvm_ffi.convert({"a": 1, "b": 2})
-        assert isinstance(amap, tvm_ffi.Map)
+        amap = tvm_ffi.Map({"a": 1, "b": 2})
         assert len(amap) == 2
         assert amap["a"] == 1
         assert amap["b"] == 2
+
+    See Also
+    --------
+    :py:func:`tvm_ffi.convert`
 
     """
 

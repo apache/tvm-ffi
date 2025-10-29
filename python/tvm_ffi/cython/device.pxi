@@ -35,7 +35,7 @@ def _create_device_from_tuple(cls, device_type, device_id):
 
 
 class DLDeviceType(IntEnum):
-    """Enumeration mirroring DLPack's ``DLDeviceType``.
+    """Enumeration mirroring DLPack's `DLDeviceType <https://dmlc.github.io/dlpack/latest/c_api.html#c.DLDeviceType>`_
 
     Values can be compared against :py:meth:`Device.dlpack_device_type`.
 
@@ -43,6 +43,7 @@ class DLDeviceType(IntEnum):
     --------
     .. code-block:: python
 
+        import tvm_ffi
         dev = tvm_ffi.device("cuda", 0)
         assert dev.dlpack_device_type() == tvm_ffi.DLDeviceType.kDLCUDA
 
@@ -82,6 +83,8 @@ cdef class Device:
     Examples
     --------
     .. code-block:: python
+
+        import tvm_ffi
 
         dev = tvm_ffi.device("cuda:0")
         assert dev.type == "cuda"

@@ -177,6 +177,8 @@ def from_dlpack(
     .. code-block:: python
 
         import numpy as np
+        import tvm_ffi
+
         x_np = np.arange(8, dtype="int32")
         x = tvm_ffi.from_dlpack(x_np)
         y_np = np.from_dlpack(x)
@@ -218,6 +220,8 @@ cdef class Tensor(Object):
     .. code-block:: python
 
         import numpy as np
+        import tvm_ffi
+
         x = tvm_ffi.from_dlpack(np.arange(6, dtype="int32"))
         assert x.shape == (6,)
         assert x.dtype == tvm_ffi.dtype("int32")

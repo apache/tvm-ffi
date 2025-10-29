@@ -14,7 +14,7 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-"""dtype class."""
+"""Lightweight ``dtype`` wrapper for TVM FFI."""
 
 # pylint: disable=invalid-name
 from __future__ import annotations
@@ -47,11 +47,35 @@ class DataTypeCode(IntEnum):
 
 
 class dtype(str):
-    """TVM FFI dtype class.
+    """Lightweight ``dtype`` in TVM FFI.
+
+    ``dtype`` behaves like a Python ``str`` but also carries an internal FFI
+    representation. You can construct it from strings, NumPy/ML dtypes, or
+    via :py:meth:`from_dlpack_data_type`.
 
     Parameters
     ----------
     dtype_str
+        The string representation of the dtype.
+
+    Examples
+    --------
+    .. code-block:: python
+
+        import tvm_ffi
+
+        # Create from string
+        f32 = tvm_ffi.dtype("float32")
+        assert f32.bits == 32
+        assert f32.itemsize == 4
+
+        # Adjust lanes to create vector types
+        v4f32 = f32.with_lanes(4)
+        assert v4f32 == "float32x4"
+
+        # Round-trip from a DLPack (code, bits, lanes) triple
+        f16 = tvm_ffi.dtype.from_dlpack_data_type((2, 16, 1))
+        assert f16 == "float16"
 
     Note
     ----
@@ -78,11 +102,31 @@ class dtype(str):
         Parameters
         ----------
         dltype_data_type
-            The DLPack data type tuple (type_code, bits, lanes).
+            The DLPack data type tuple ``(type_code, bits, lanes)``.
 
         Returns
         -------
-        The created dtype.
+        dtype
+            The created dtype.
+
+        Examples
+        --------
+        .. code-block:: python
+
+            import tvm_ffi
+
+            # Create float16 and int8 directly from DLPack triples
+            f16 = tvm_ffi.dtype.from_dlpack_data_type((2, 16, 1))
+            i8 = tvm_ffi.dtype.from_dlpack_data_type((0, 8, 1))
+            assert f16 == "float16"
+            assert i8 == "int8"
+
+        See Also
+        --------
+        :py:class:`tvm_ffi.dtype`
+            User-facing dtype wrapper.
+        :py:meth:`tvm_ffi.dtype.with_lanes`
+            Create vector dtypes from a scalar base.
 
         """
         cdtype = core._create_dtype_from_tuple(
@@ -104,12 +148,28 @@ class dtype(str):
         Parameters
         ----------
         lanes
-            The number of lanes.
+            The number of lanes for the resulting vector type.
 
         Returns
         -------
         dtype
             The new dtype with the given number of lanes.
+
+        Examples
+        --------
+        .. code-block:: python
+
+            import tvm_ffi
+
+            f32 = tvm_ffi.dtype("float32")
+            v4f32 = f32.with_lanes(4)
+            assert v4f32 == "float32x4"
+            assert v4f32.bits == f32.bits and v4f32.lanes == 4
+
+        See Also
+        --------
+        :py:meth:`tvm_ffi.dtype.from_dlpack_data_type`
+            Construct from a DLPack ``(code, bits, lanes)`` triple.
 
         """
         cdtype = core._create_dtype_from_tuple(
@@ -124,18 +184,105 @@ class dtype(str):
 
     @property
     def itemsize(self) -> int:
+        """Size of one element in bytes.
+
+        The size is computed as ``bits * lanes // 8``. When the number of
+        lanes is greater than 1, the ``itemsize`` represents the byte size
+        of the vector element.
+
+        Examples
+        --------
+        .. code-block:: python
+
+            import tvm_ffi
+
+            assert tvm_ffi.dtype("float32").itemsize == 4
+            assert tvm_ffi.dtype("float32").with_lanes(4).itemsize == 16
+
+        See Also
+        --------
+        :py:attr:`tvm_ffi.dtype.bits`
+            Bit width of the scalar base type.
+        :py:attr:`tvm_ffi.dtype.lanes`
+            Number of lanes for vector types.
+        :py:meth:`tvm_ffi.dtype.with_lanes`
+            Create a vector dtype from a scalar base.
+
+        """
         return self._tvm_ffi_dtype.itemsize
 
     @property
     def type_code(self) -> int:
+        """Integer DLDataTypeCode of the scalar base type.
+
+        Examples
+        --------
+        .. code-block:: python
+
+            import tvm_ffi
+
+            f32 = tvm_ffi.dtype("float32")
+            # The type code is an integer following DLPack conventions
+            assert isinstance(f32.type_code, int)
+            # Consistent with constructing from an explicit (code, bits, lanes)
+            assert f32.type_code == tvm_ffi.dtype.from_dlpack_data_type((2, 32, 1)).type_code
+
+        See Also
+        --------
+        :py:meth:`tvm_ffi.dtype.from_dlpack_data_type`
+            Construct a dtype from a DLPack ``(code, bits, lanes)`` triple.
+
+        """
         return self._tvm_ffi_dtype.type_code
 
     @property
     def bits(self) -> int:
+        """Number of bits of the scalar base type.
+
+        Examples
+        --------
+        .. code-block:: python
+
+            import tvm_ffi
+
+            assert tvm_ffi.dtype("int8").bits == 8
+            v4f32 = tvm_ffi.dtype("float32").with_lanes(4)
+            assert v4f32.bits == 32  # per-lane bit width
+
+        See Also
+        --------
+        :py:attr:`tvm_ffi.dtype.itemsize`
+            Byte size accounting for lanes.
+        :py:attr:`tvm_ffi.dtype.lanes`
+            Number of lanes for vector types.
+
+        """
         return self._tvm_ffi_dtype.bits
 
     @property
     def lanes(self) -> int:
+        """Number of lanes (for vector types).
+
+        Returns ``1`` for scalar dtypes and the lane count for vector dtypes
+        created via :py:meth:`tvm_ffi.dtype.with_lanes`.
+
+        Examples
+        --------
+        .. code-block:: python
+
+            import tvm_ffi
+
+            assert tvm_ffi.dtype("float32").lanes == 1
+            assert tvm_ffi.dtype("float32").with_lanes(4).lanes == 4
+
+        See Also
+        --------
+        :py:meth:`tvm_ffi.dtype.with_lanes`
+            Create a vector dtype from a scalar base.
+        :py:attr:`tvm_ffi.dtype.itemsize`
+            Byte size accounting for lanes.
+
+        """
         return self._tvm_ffi_dtype.lanes
 
 
