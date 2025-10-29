@@ -671,13 +671,13 @@ def main() -> None:  # noqa: PLR0912, PLR0915
 
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--build_dir",
+        "--build-dir",
         type=str,
         default=str(Path("~/.cache/tvm-ffi/torch_c_dlpack_addon").expanduser()),
         help="Directory to store the built extension library.",
     )
     parser.add_argument(
-        "--build_with_cuda",
+        "--build-with-cuda",
         action="store_true",
         default=torch.cuda.is_available(),
         help="Build with CUDA support.",
