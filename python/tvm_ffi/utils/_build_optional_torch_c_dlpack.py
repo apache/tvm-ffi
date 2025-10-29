@@ -23,6 +23,7 @@ import os
 import shutil
 import sys
 import sysconfig
+import tempfile
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -669,12 +670,21 @@ def main() -> None:  # noqa: PLR0912, PLR0915
     from tvm_ffi.cpp.load_inline import build_ninja  # noqa: PLC0415
     from tvm_ffi.utils.lockfile import FileLock  # noqa: PLC0415
 
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        description="Build the torch c dlpack extension. After building, a shared library will be placed in the output directory.",
+    )
     parser.add_argument(
         "--build-dir",
         type=str,
-        default=str(Path("~/.cache/tvm-ffi/torch_c_dlpack_addon").expanduser()),
-        help="Directory to store the built extension library.",
+        required=False,
+        help="Directory to store the built extension library. If not provided, a temporary directory will be used.",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        required=False,
+        default=str(Path(os.environ.get("TVM_FFI_CACHE_DIR", "~/.cache/tvm-ffi")).expanduser()),
+        help="Directory to store the built extension library. If not specified, the default cache directory of tvm-ffi will be used.",
     )
     parser.add_argument(
         "--build-with-cuda",
@@ -689,11 +699,17 @@ def main() -> None:  # noqa: PLR0912, PLR0915
     )
 
     args = parser.parse_args()
-    build_dir = Path(args.build_dir)
 
+    # resolve build directory
+    if args.build_dir is None:
+        build_dir = Path(tempfile.mkdtemp(prefix="tvm-ffi-torch-c-dlpack-"))
+    else:
+        build_dir = Path(args.build_dir)
+    build_dir = build_dir.resolve()
     if not build_dir.exists():
         build_dir.mkdir(parents=True, exist_ok=True)
 
+    # resolve library name
     if args.libname == "auto":
         major, minor = torch.__version__.split(".")[:2]
         device = "cpu" if not args.build_with_cuda else "cuda"
@@ -701,11 +717,15 @@ def main() -> None:  # noqa: PLR0912, PLR0915
         libname = f"libtorch_c_dlpack_addon_torch{major}{minor}-{device}{suffix}"
     else:
         libname = args.libname
-
     tmp_libname = libname + ".tmp"
 
-    with FileLock(str(build_dir / "build.lock")):
-        if (build_dir / libname).exists():
+    # create output directory is not exists
+    output_dir = Path(args.output_dir).expanduser()
+    if not output_dir.exists():
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+    with FileLock(str(output_dir / (libname + ".lock"))):
+        if (output_dir / libname).exists():
             # already built
             return
 
@@ -784,7 +804,7 @@ def main() -> None:  # noqa: PLR0912, PLR0915
         build_ninja(build_dir=str(build_dir))
 
         # rename the tmp file to final libname
-        shutil.move(str(build_dir / tmp_libname), str(build_dir / libname))
+        shutil.move(str(build_dir / tmp_libname), str(output_dir / libname))
 
 
 if __name__ == "__main__":
