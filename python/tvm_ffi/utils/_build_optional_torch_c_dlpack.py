@@ -30,6 +30,8 @@ import torch
 import torch.torch_version
 import torch.utils.cpp_extension
 
+# Important: to avoid cyclic dependency, we avoid import tvm_ffi names at top level here.
+
 IS_WINDOWS = sys.platform == "win32"
 
 cpp_source = """
