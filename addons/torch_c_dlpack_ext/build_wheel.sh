@@ -34,7 +34,7 @@ fi
 bash ./addons/torch_c_dlpack_ext/build_so.sh 2.9 "$1" cu128
 
 uv venv /base --python "$1" && source /base/bin/activate
-uv pip install build auditwheel
+uv pip install setuptools auditwheel
 uv pip install -v .
 cd ./addons/torch_c_dlpack_ext
 python setup.py sdist bdist_wheel --python-tag py"${1//\./}"
