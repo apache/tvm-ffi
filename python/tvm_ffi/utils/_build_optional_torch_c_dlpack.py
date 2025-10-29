@@ -679,8 +679,13 @@ def main() -> None:  # noqa: PLR0912, PLR0915
     parser.add_argument(
         "--build-with-cuda",
         action="store_true",
-        default=torch.cuda.is_available(),
         help="Build with CUDA support.",
+    )
+    parser.add_argument(
+        "--libname",
+        type=str,
+        default="auto",
+        help="The name of the generated library. It can be a name 'auto' to auto-generate a name following 'libtorch_c_dlpack_addon_torch{version.major}{version.minor}-cpu/cuda.{extension}'.",
     )
 
     args = parser.parse_args()
@@ -689,10 +694,15 @@ def main() -> None:  # noqa: PLR0912, PLR0915
     if not build_dir.exists():
         build_dir.mkdir(parents=True, exist_ok=True)
 
-    name = "libtorch_c_dlpack_addon"
-    suffix = ".dll" if IS_WINDOWS else ".so"
-    libname = name + suffix
-    tmp_libname = name + ".tmp" + suffix
+    if args.libname == "auto":
+        major, minor = torch.__version__.split(".")[:2]
+        device = "cpu" if not args.build_with_cuda else "cuda"
+        suffix = ".dll" if IS_WINDOWS else ".so"
+        libname = f"libtorch_c_dlpack_addon_torch{major}{minor}-{device}{suffix}"
+    else:
+        libname = args.libname
+
+    tmp_libname = libname + ".tmp"
 
     with FileLock(str(build_dir / "build.lock")):
         if (build_dir / libname).exists():
