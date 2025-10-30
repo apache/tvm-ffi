@@ -845,8 +845,6 @@ inline int32_t TypeKeyToIndex(std::string_view type_key) {
  *
  * \param ExportName The symbol name to be exported.
  * \param Function The typed function.
- * \note ExportName and Function must be different,
- *       see code examples below.
  *
  * \sa ffi::TypedFunction
  *

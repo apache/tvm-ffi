@@ -35,16 +35,20 @@ IS_WINDOWS = sys.platform.startswith("win")
 
 @pytest.mark.skipif(torch is None, reason="torch is not installed")
 def test_build_torch_c_dlpack_extension() -> None:
-    build_script = Path(tvm_ffi.__file__).parent / "utils" / "_build_optional_c_dlpack.py"
-    subprocess.run(
-        [sys.executable, str(build_script), "--build_dir", "./build_test_dir"], check=True
-    )
+    build_script = Path(tvm_ffi.__file__).parent / "utils" / "_build_optional_torch_c_dlpack.py"
+    args = [
+        sys.executable,
+        str(build_script),
+        "--output-dir",
+        "./output-dir",
+        "--libname",
+        "libtorch_c_dlpack_addon_test.so",
+    ]
+    if torch.cuda.is_available():
+        args.append("--build-with-cuda")
+    subprocess.run(args, check=True)
 
-    lib_path = str(
-        Path(
-            "./build_test_dir/libtorch_c_dlpack_addon.{}".format("dll" if IS_WINDOWS else "so")
-        ).resolve()
-    )
+    lib_path = str(Path("./output-dir/libtorch_c_dlpack_addon_test.so").resolve())
     assert Path(lib_path).exists()
 
     lib = ctypes.CDLL(lib_path)
@@ -56,22 +60,21 @@ def test_build_torch_c_dlpack_extension() -> None:
 
 @pytest.mark.skipif(torch is None, reason="torch is not installed")
 def test_parallel_build() -> None:
-    build_script = Path(tvm_ffi.__file__).parent / "utils" / "_build_optional_c_dlpack.py"
+    build_script = Path(tvm_ffi.__file__).parent / "utils" / "_build_optional_torch_c_dlpack.py"
     num_processes = 4
-    build_dir = "./build_test_dir_parallel"
+    output_dir = "./output-dir-parallel"
+    libname = "libtorch_c_dlpack_addon_test.so"
     processes = []
     for i in range(num_processes):
-        p = subprocess.Popen([sys.executable, str(build_script), "--build_dir", build_dir])
-        processes.append((p, build_dir))
+        p = subprocess.Popen(
+            [sys.executable, str(build_script), "--output-dir", output_dir, "--libname", libname]
+        )
+        processes.append((p, output_dir))
 
-    for p, build_dir in processes:
+    for p, output_dir in processes:
         p.wait()
         assert p.returncode == 0
-    lib_path = str(
-        Path(
-            "{}/libtorch_c_dlpack_addon.{}".format(build_dir, "dll" if IS_WINDOWS else "so")
-        ).resolve()
-    )
+    lib_path = str(Path(f"{output_dir}/{libname}").resolve())
     assert Path(lib_path).exists()
 
 
