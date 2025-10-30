@@ -16,6 +16,8 @@
 # under the License.
 """build backend for torch c dlpack ext."""
 
+from __future__ import annotations
+
 import subprocess
 import sys
 from pathlib import Path
@@ -61,10 +63,10 @@ def build_wheel(
     config_settings: orig._ConfigSettings = None,
     metadata_directory: orig.StrPath | None = None,
 ) -> str:
-    """Customized wheel building."""
+    """Custom wheel building."""
     if not _is_lib_prebuilt():
         # build wheel from sdist package, compile the torch c dlpack ext library locally.
-        import torch
+        import torch  # noqa: PLC0415
 
         subprocess.run(
             [
