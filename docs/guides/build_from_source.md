@@ -24,7 +24,7 @@ This guide covers two common workflows:
 ```{admonition} Prerequisite
 :class: tip
 
-- Python: 3.11 or newer
+- Python: 3.9 or newer
 - Compiler: C++17-capable toolchain
   - Linux: GCC or Clang with C++17 support
   - macOS: Apple Clang (via Xcode Command Line Tools)
