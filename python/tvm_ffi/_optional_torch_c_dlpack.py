@@ -57,8 +57,6 @@ def load_torch_c_dlpack_extension() -> Any:
     try:
         import torch_c_dlpack_ext  # type: ignore  # noqa: PLC0415
 
-        func = torch_c_dlpack_ext.load_torch_c_dlpack_lib(torch.__version__)
-        setattr(torch.Tensor, "__c_dlpack_exchange_api__", func())
         return None
     except ImportError:
         pass

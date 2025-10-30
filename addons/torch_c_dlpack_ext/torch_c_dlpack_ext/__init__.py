@@ -16,4 +16,4 @@
 # under the License.
 """torch c dlpack ext pakcage."""
 
-from .core import get_torch_c_dlpack_lib_path, load_torch_c_dlpack_lib
+import core

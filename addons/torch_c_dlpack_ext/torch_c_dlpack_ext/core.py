@@ -19,59 +19,29 @@
 import ctypes
 import sys
 from pathlib import Path
-from typing import Callable
 
 from packaging.version import Version
+import torch
 
 
-def get_torch_c_dlpack_lib_path(version_str: str) -> Path:
-    """Get the torch c dlpack lib path with given torch version.
-
-    Parameters
-    ----------
-    version_str: str
-        The torch version, obtained by `torch.__version__`.
-
-    Returns
-    -------
-    path
-        The path to the torch c dlpack lib.
-
-    """
-    version = Version(version_str)
-
+def load_torch_c_dlpack_extension():
+    version = Version(torch.__version__)
     if sys.platform.startswith("win32"):
-        extension = ".dll"
+        extension = "dll"
     elif sys.platform.startswith("darwin"):
-        extension = ".dylib"
+        extension = "dylib"
     else:
-        extension = ".so"
-
-    if version >= Version("2.4") and version < Version("3.0"):
-        return (
-            Path(__file__).parent
-            / f"libtorch_c_dlpack_addon_torch{version.major}.{version.minor}{extension}"
-        )
-    raise ValueError
-
-
-def load_torch_c_dlpack_lib(version_str: str) -> Callable[[None], int]:
-    """Load TorchDLPackExchangeAPIPtr of the torch c dlpack lib with given torch version.
-
-    Parameters
-    ----------
-    version_str: str
-        The torch version, obtained by `torch.__version__`.
-
-    Returns
-    -------
-    path
-        The TorchDLPackExchangeAPIPtr function of the torch c dlpack lib.
-
-    """
-    lib_path = get_torch_c_dlpack_lib_path(version_str)
+        extension = "so"
+    suffix = "cuda" if torch.cuda.is_available() else "cpu"
+    lib_path = (
+        Path(__file__).parent
+        / f"libtorch_c_dlpack_addon_torch{version.major}{version.minor}-{suffix}.{extension}"
+    )
     lib = ctypes.CDLL(str(lib_path))
     func = lib.TorchDLPackExchangeAPIPtr
     func.restype = ctypes.c_uint64
     func.argtypes = []
-    return func
+    setattr(torch.Tensor, "__c_dlpack_exchange_api__", func())
+
+
+load_torch_c_dlpack_extension()
