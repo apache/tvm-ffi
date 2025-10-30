@@ -49,6 +49,8 @@ __version__ = setuptools_scm.get_version(root="..")
 
 project = "tvm-ffi"
 
+author = "Apache TVM FFI contributors"
+
 version = __version__
 release = __version__
 
