@@ -63,7 +63,7 @@ def build_wheel(
     config_settings: orig._ConfigSettings = None,
     metadata_directory: orig.StrPath | None = None,
 ) -> str:
-    """Custom wheel building."""
+    """Customized build wheel."""
     if not _is_lib_prebuilt():
         # build wheel from sdist package, compile the torch c dlpack ext library locally.
         import torch  # noqa: PLC0415
