@@ -20,11 +20,12 @@ import ctypes
 import sys
 from pathlib import Path
 
-from packaging.version import Version
 import torch
+from packaging.version import Version
 
 
-def load_torch_c_dlpack_extension():
+def load_torch_c_dlpack_extension() -> None:
+    """Load the torch c dlpack extension based on torch version."""
     version = Version(torch.__version__)
     if sys.platform.startswith("win32"):
         extension = "dll"

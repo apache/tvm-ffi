@@ -16,8 +16,8 @@
 # under the License.
 """build backend for torch c dlpack ext."""
 
-import sys
 import subprocess
+import sys
 from pathlib import Path
 
 from setuptools import build_meta as orig
@@ -47,26 +47,33 @@ def _is_lib_prebuilt() -> bool:
 def get_requires_for_build_wheel(
     config_settings: orig._ConfigSettings = None,
 ) -> list[str]:
-    """Get build requirements for wheel, conditionally including torch."""
+    """Get build requirements for wheel, conditionally including torch and apache-tvm-ffi."""
     requires = orig.get_requires_for_build_wheel(config_settings)
     if not _is_lib_prebuilt():
+        # build wheel from sdist package, requires torch and apache-tvm-ffi
         requires.append("torch")
         requires.append("apache-tvm-ffi")
     return requires
 
 
-def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
+def build_wheel(
+    wheel_directory: orig.StrPath,
+    config_settings: orig._ConfigSettings = None,
+    metadata_directory: orig.StrPath | None = None,
+) -> str:
+    """Customized wheel building."""
     if not _is_lib_prebuilt():
+        # build wheel from sdist package, compile the torch c dlpack ext library locally.
         import torch
 
         subprocess.run(
             [
                 sys.executable,
                 "-m",
-                "tvm_ffi.utils._build_optional_c_dlpack",
-                "--build_dir",
+                "tvm_ffi.utils._build_optional_torch_c_dlpack",
+                "--output-dir",
                 str(_package_path),
-                "--build_with_cuda" if torch.cuda.is_available() else "",
+                "--build-with-cuda" if torch.cuda.is_available() else "",
             ],
             check=True,
         )

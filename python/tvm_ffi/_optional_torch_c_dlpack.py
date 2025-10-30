@@ -55,7 +55,7 @@ def load_torch_c_dlpack_extension() -> Any:
 
     """Load the torch c dlpack extension."""
     try:
-        import torch_c_dlpack_ext  # type: ignore  # noqa: PLC0415
+        import torch_c_dlpack_ext  # type: ignore  # noqa: PLC0415, F401
 
         return None
     except ImportError:
