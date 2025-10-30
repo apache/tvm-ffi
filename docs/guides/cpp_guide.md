@@ -582,4 +582,3 @@ void ExampleVariant() {
 ```
 
 Under the hood, Variant is a wrapper around Any that restricts the type to the specific types in the list.
-
