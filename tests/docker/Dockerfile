@@ -62,6 +62,9 @@ RUN apt-get update \
         zip \
     && rm -rf /var/lib/apt/lists/*
 
+# Upgrade pip to the latest version
+RUN python3 -m pip install --upgrade pip
+
 # Provide a working directory for the project
 WORKDIR /workspace
 

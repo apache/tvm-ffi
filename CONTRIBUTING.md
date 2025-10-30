@@ -31,6 +31,133 @@ pip install --no-build-isolation -e . -v
 ```
 
 We recommend using the `--no-build-isolation` flag to ensure compatibility with your existing environment.
+
+## Setting Up Pre-commit Hooks
+
+This project uses [pre-commit](https://pre-commit.com/) to maintain code quality and consistency.
+Pre-commit hooks automatically check your code for common issues before you commit changes.
+
+### Installing Pre-commit
+
+First, install pre-commit (requires version 2.18.0 or later):
+
+```bash
+pip install pre-commit
+```
+
+### Installing the Git Hooks
+
+After cloning the repository, install the pre-commit hooks:
+
+```bash
+cd tvm-ffi
+pre-commit install
+```
+
+This configures git to automatically run the hooks before each commit.
+
+### Running Hooks Manually
+
+You can run the hooks manually on all files:
+
+```bash
+pre-commit run --all-files
+```
+
+Or run them only on staged files:
+
+```bash
+pre-commit run
+```
+
+### What the Hooks Check
+
+The pre-commit configuration includes checks for:
+
+- **License headers**: Ensures all files have proper Apache Software Foundation headers
+- **Code formatting**: Runs clang-format (C++), ruff (Python), shfmt (Shell scripts)
+- **Linting**: Runs clang-tidy, ruff, shellcheck, markdownlint, yamllint, and more
+- **Type checking**: Runs mypy for Python type annotations
+- **File quality**: Checks for trailing whitespace, file sizes, merge conflicts, etc.
+
+### Hook Versions and Requirements
+
+The project uses the following pre-commit hooks with specific versions (as defined in `.pre-commit-config.yaml`):
+
+**Pre-commit Framework:**
+
+- **pre-commit**: Minimum version 2.18.0 (required for `default_install_hook_types`)
+
+**Custom Local Hooks:**
+
+- **check-asf-header**: Validates Apache Software Foundation license headers
+- **check-file-type**: Validates file type consistency
+- **check-version-consistency**: Ensures version consistency across files
+  - Dependencies: setuptools-scm, packaging, tomli
+
+**Third-party Hooks:**
+
+- **pre-commit-hooks** (v5.0.0): General file checks
+  - check-added-large-files, check-case-conflict, check-merge-conflict, check-symlinks
+  - end-of-file-fixer, mixed-line-ending, requirements-txt-fixer, trailing-whitespace
+  - check-yaml, check-toml
+
+- **yamllint** (v1.35.1): YAML file linting
+
+- **taplo** (v0.9.3): TOML file formatting
+
+- **ruff** (v0.12.3): Python linting and formatting
+  - Runs on Python, .pyi, and Jupyter notebook files
+
+- **clang-format** (v20.1.8): C/C++ code formatting
+
+- **cython-lint** (v0.16.7): Cython code linting and formatting
+  - Max line length: 120 characters
+
+- **shfmt** (v3.12.0-2): Shell script formatting
+  - Indent: 2 spaces
+
+- **shellcheck** (v0.10.0.1): Shell script static analysis
+
+- **markdownlint-cli2** (v0.14.0): Markdown linting
+
+- **rstcheck** (v6.2.4): reStructuredText validation
+  - Dependencies: rstcheck[sphinx]
+
+- **mypy** (v1.18.2): Python static type checking
+  - Dependencies: numpy>=1.22, ml-dtypes>=0.1, pytest, typing-extensions>=4.5
+
+- **cmake-format** (v0.6.13): CMake file formatting and linting
+
+All hook versions are pinned to ensure reproducible environments. When updating hooks,
+please verify compatibility across the development team and CI/CD pipelines.
+
+### Troubleshooting
+
+If you encounter errors:
+
+1. **Version issues**: Ensure you have pre-commit 2.18.0 or later:
+
+   ```bash
+   pre-commit --version
+   pip install --upgrade pre-commit
+   ```
+
+2. **Cache issues**: Clean the pre-commit cache:
+
+   ```bash
+   pre-commit clean
+   ```
+
+3. **Hook failures**: Most formatting hooks will automatically fix issues. Review the changes and stage them:
+
+   ```bash
+   git add -u
+   git commit
+   ```
+
+## Contributing Workflow
+
 You can contribute to the repo through the following steps.
 
 - Fork the repository and create a new branch for your work.
@@ -72,14 +199,15 @@ Inside the container you can install the project in editable mode and run the qu
 start example exactly as described in `examples/quick_start/README.md`:
 
 ```bash
-# In /workspace/tvm-ffi/
-pip install -ve .
+# In /workspace/tvm-ffi/ see https://tvm.apache.org/ffi/guides/build_from_source.html for reference
+pip install --force-reinstall --verbose -e . \
+  --config-settings cmake.define.TVM_FFI_ATTACH_DEBUG_SYMBOLS=ON
 
 # Change working directory to sample
-cd examples/quick_start
+cd examples/quickstart
 
 # Install dependency, Build and run all examples
-bash run_example.sh
+bash raw_compile.sh
 ```
 
 All build artifacts are written to the mounted workspace on the host machine, so you

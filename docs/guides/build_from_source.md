@@ -24,7 +24,7 @@ This guide covers two common workflows:
 ```{admonition} Prerequisite
 :class: tip
 
-- Python: 3.9 or newer
+- Python: 3.11 or newer
 - Compiler: C++17-capable toolchain
   - Linux: GCC or Clang with C++17 support
   - macOS: Apple Clang (via Xcode Command Line Tools)
@@ -51,7 +51,7 @@ Always clone with ``--recursive`` to pull submodules. If you already cloned with
 Follow the instruction below to build the Python package with scikit-build-core, which drives CMake to compile the C++ core and Cython extension.
 
 ```bash
-pip install --reinstall --verbose -e . \
+pip install --force-reinstall --verbose -e . \
   --config-settings cmake.define.TVM_FFI_ATTACH_DEBUG_SYMBOLS=ON
 ```
 

@@ -59,3 +59,25 @@ g++ -fvisibility=hidden -O3                 \
 build/load_cpp
 # [load_cpp.end]
 fi
+
+# Example 4. Load and run `add_one_cuda.so` in C++
+# Before run this example, make sure you have a CUDA-capable GPU and the CUDA toolkit installed.
+# See CONTRIBUTING.md to use a pre-built Docker image with CUDA support.
+
+# if [ -f "$BUILD_DIR/add_one_cuda.so" ] && command -v nvcc >/dev/null 2>&1; then
+# # [load_cuda.begin]
+# g++ -fvisibility=hidden -O3                 \
+#     load/load_cuda.cc                       \
+#     $(tvm-ffi-config --cxxflags)            \
+#     $(tvm-ffi-config --ldflags)             \
+#     $(tvm-ffi-config --libs)                \
+#     -I/usr/local/cuda/include               \
+#     -L/usr/local/cuda/lib64                 \
+#     -lcudart                                \
+#     -Wl,-rpath,$(tvm-ffi-config --libdir)   \
+#     -Wl,-rpath,/usr/local/cuda/lib64        \
+#     -o build/load_cuda
+
+# build/load_cuda
+# # [load_cuda.end]
+# fi
