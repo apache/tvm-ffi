@@ -38,6 +38,8 @@ def load_torch_c_dlpack_extension() -> None:
         Path(__file__).parent
         / f"libtorch_c_dlpack_addon_torch{version.major}{version.minor}-{suffix}.{extension}"
     )
+    if not lib_path.exists() or not lib_path.is_file():
+        raise ImportError("No matching prebuilt torch c dlpack extension")
     lib = ctypes.CDLL(str(lib_path))
     func = lib.TorchDLPackExchangeAPIPtr
     func.restype = ctypes.c_uint64
