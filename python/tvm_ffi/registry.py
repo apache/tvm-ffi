@@ -29,7 +29,10 @@ from .core import TypeInfo
 _SKIP_UNKNOWN_OBJECTS = False
 
 
-def register_object(type_key: str | type | None = None) -> Callable[[type], type] | type:
+_T = TypeVar('_T', bound=type)
+
+
+def register_object(type_key: str | type | None = None) -> Callable[[_T], _T] | type:
     """Register object type.
 
     Parameters
