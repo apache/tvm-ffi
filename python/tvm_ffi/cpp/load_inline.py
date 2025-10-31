@@ -68,7 +68,7 @@ def _hash_sources(
     if isinstance(functions, Mapping):
         _hash_mapping(functions)
     else:
-        _hash_sequence(functions)
+        _hash_sequence(sorted(functions))
     _hash_sequence(extra_cflags)
     _hash_sequence(extra_cuda_cflags)
     _hash_sequence(extra_ldflags)
