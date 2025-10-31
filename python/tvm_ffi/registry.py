@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import json
 import sys
-from typing import Any, Callable, Literal, overload, TypeVar
+from typing import Any, Callable, Literal, TypeVar, overload
 
 from . import core
 from .core import TypeInfo
@@ -29,10 +29,10 @@ from .core import TypeInfo
 _SKIP_UNKNOWN_OBJECTS = False
 
 
-_T = TypeVar('_T', bound=type)
+_T = TypeVar("_T", bound=type)
 
 
-def register_object(type_key: str | type | None = None) -> Callable[[_T], _T] | type:
+def register_object(type_key: str | None = None) -> Callable[[_T], _T]:
     """Register object type.
 
     Parameters
