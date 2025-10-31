@@ -52,9 +52,8 @@ def get_requires_for_build_wheel(
     """Get build requirements for wheel, conditionally including torch and apache-tvm-ffi."""
     requires = orig.get_requires_for_build_wheel(config_settings)
     if not _is_lib_prebuilt():
-        # build wheel from sdist package, requires torch and apache-tvm-ffi
-        requires.append("torch")
-        requires.append("apache-tvm-ffi")
+        # build wheel from sdist package, requires apache-tvm-ffi>=0.1.1 to build lib
+        requires.append("apache-tvm-ffi>=0.1.1")
     return requires
 
 
@@ -68,15 +67,21 @@ def build_wheel(
         # build wheel from sdist package, compile the torch c dlpack ext library locally.
         import torch  # noqa: PLC0415
 
-        subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "tvm_ffi.utils._build_optional_torch_c_dlpack",
-                "--output-dir",
-                str(_package_path),
-                "--build-with-cuda" if torch.cuda.is_available() else "",
-            ],
-            check=True,
-        )
+        if hasattr(torch.Tensor, "__c_dlpack_exchange_api__"):
+            print(
+                "torch.Tensor already has attribute __c_dlpack_exchange_api__. "
+                "No need to build any torch c dlpackc libs."
+            )
+        else:
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "tvm_ffi.utils._build_optional_torch_c_dlpack",
+                    "--output-dir",
+                    str(_package_path),
+                    "--build-with-cuda" if torch.cuda.is_available() else "",
+                ],
+                check=True,
+            )
     return orig.build_wheel(wheel_directory, config_settings, metadata_directory)

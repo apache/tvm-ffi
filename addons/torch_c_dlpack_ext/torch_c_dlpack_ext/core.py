@@ -26,6 +26,8 @@ from packaging.version import Version
 
 def load_torch_c_dlpack_extension() -> None:
     """Load the torch c dlpack extension based on torch version."""
+    if hasattr(torch.Tensor, "__c_dlpack_exchange_api__"):
+        return None
     version = Version(torch.__version__)
     if sys.platform.startswith("win32"):
         extension = "dll"
@@ -45,6 +47,7 @@ def load_torch_c_dlpack_extension() -> None:
     func.restype = ctypes.c_uint64
     func.argtypes = []
     setattr(torch.Tensor, "__c_dlpack_exchange_api__", func())
+    return lib
 
 
-load_torch_c_dlpack_extension()
+_lib = load_torch_c_dlpack_extension()
