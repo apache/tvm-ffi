@@ -47,6 +47,7 @@ Table of Contents
    :caption: Guides
 
    guides/python_packaging.md
+   guides/cpp_packaging.md
    guides/cpp_guide.md
    guides/python_guide.md
    guides/rust_guide.md
