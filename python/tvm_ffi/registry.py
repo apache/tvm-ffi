@@ -54,7 +54,7 @@ def register_object(type_key: str | None = None) -> Callable[[_T], _T]:
 
     """
 
-    def _register(cls: type, object_name: str) -> type:
+    def _register(cls: _T, object_name: str) -> _T:
         """Register the object type with the FFI core."""
         type_index = core._object_type_key_to_index(object_name)
         if type_index is None:
