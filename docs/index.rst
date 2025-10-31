@@ -53,6 +53,7 @@ Table of Contents
    guides/rust_guide.md
    guides/compiler_integration.md
    guides/build_from_source.md
+   guides/kernel_library_guide.rst
 
 
 .. toctree::
