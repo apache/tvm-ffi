@@ -68,12 +68,12 @@ def register_object(type_key: str | None = None) -> Callable[[_T], _T]:
 
     if isinstance(type_key, str):
 
-        def _decorator_with_name(cls: type) -> type:
+        def _decorator_with_name(cls: _T) -> _T:
             return _register(cls, type_key)
 
         return _decorator_with_name
 
-    def _decorator_default(cls: type) -> type:
+    def _decorator_default(cls: _T) -> _T:
         return _register(cls, cls.__name__)
 
     if type_key is None:
