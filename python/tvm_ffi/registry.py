@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import json
 import sys
-from typing import Any, Callable, Literal, overload
+from typing import Any, Callable, Literal, overload, TypeVar
 
 from . import core
 from .core import TypeInfo
