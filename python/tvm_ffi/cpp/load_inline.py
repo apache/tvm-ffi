@@ -230,8 +230,8 @@ def _resolve_linker(
             link_files.append("cuda.o")
     else:
         if cpp_files is not None:
-            for cpp_path in cpp_files:
-                obj_name = f"{Path(cpp_path).stem}.o"
+            for i, cpp_path in enumerate(sorted(cpp_files)):
+                obj_name = f"cpp_{i}.o"
                 ninja.append(
                     "build {}: compile {}".format(
                         obj_name, str(Path(cpp_path).resolve()).replace(":", "$:")
@@ -240,8 +240,8 @@ def _resolve_linker(
                 link_files.append(obj_name)
         if cuda_files is not None:
             assert with_cuda, "cuda_files is provided but with_cuda is False"
-            for cuda_path in cuda_files:
-                obj_name = f"{Path(cuda_path).stem}.o"
+            for i, cuda_path in enumerate(sorted(cuda_files)):
+                obj_name = f"cuda_{i}.o"
                 ninja.append(
                     "build {}: compile_cuda {}".format(
                         obj_name, str(Path(cuda_path).resolve()).replace(":", "$:")
