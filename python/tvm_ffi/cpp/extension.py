@@ -215,6 +215,7 @@ def _generate_ninja_build(  # noqa: PLR0915
     extra_include_paths: Sequence[str],
     cpp_files: Sequence[str],
     cuda_files: Sequence[str],
+    object_mapping: Mapping[str, str] | None = None,
 ) -> str:
     """Generate the content of build.ninja for building the module."""
     default_include_paths = [find_include_path(), find_dlpack_include_path()]
@@ -310,12 +311,12 @@ def _generate_ninja_build(  # noqa: PLR0915
     # build targets
     link_files: list[str] = []
     for i, cpp_path in enumerate(sorted(cpp_files)):
-        obj_name = f"cpp_{i}.o"
+        obj_name = object_mapping[cpp_path] if object_mapping else f"cpp_{i}.o"
         ninja.append("build {}: compile {}".format(obj_name, cpp_path.replace(":", "$:")))
         link_files.append(obj_name)
 
     for i, cuda_path in enumerate(sorted(cuda_files)):
-        obj_name = f"cuda_{i}.o"
+        obj_name = object_mapping[cuda_path] if object_mapping else f"cuda_{i}.o"
         ninja.append("build {}: compile_cuda {}".format(obj_name, cuda_path.replace(":", "$:")))
         link_files.append(obj_name)
 
@@ -571,6 +572,7 @@ def build_inline(
         extra_include_paths=extra_include_paths_list,
         cpp_files=[cpp_file],
         cuda_files=[cuda_file] if with_cuda else [],
+        object_mapping={cpp_file: "main.o", cuda_file: "cuda.o"},
     )
     with FileLock(str(build_dir / "lock")):
         # write source files and build.ninja if they do not already exist
