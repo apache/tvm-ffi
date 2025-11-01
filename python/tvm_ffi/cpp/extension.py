@@ -14,7 +14,7 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-"""Build and load inline C++/CUDA sources into a tvm_ffi Module using Ninja."""
+"""Build and load C++/CUDA sources into a tvm_ffi Module using Ninja."""
 
 from __future__ import annotations
 
@@ -206,62 +206,15 @@ def _run_command_in_dev_prompt(
         ) from e
 
 
-def _resolve_linker(
-    with_cuda: bool,
-    build_dir: str,
-    cpp_files: Sequence[str] | None,
-    cuda_files: Sequence[str] | None,
-) -> tuple[list[str], list[str]]:
-    ninja: list[str] = []
-    link_files: list[str] = []
-    if cpp_files is None and cuda_files is None:
-        ninja.append(
-            "build main.o: compile {}".format(
-                str((Path(build_dir) / "main.cpp").resolve()).replace(":", "$:")
-            )
-        )
-        link_files.append("main.o")
-        if with_cuda:
-            ninja.append(
-                "build cuda.o: compile_cuda {}".format(
-                    str((Path(build_dir) / "cuda.cu").resolve()).replace(":", "$:")
-                )
-            )
-            link_files.append("cuda.o")
-    else:
-        if cpp_files is not None:
-            for i, cpp_path in enumerate(sorted(cpp_files)):
-                obj_name = f"cpp_{i}.o"
-                ninja.append(
-                    "build {}: compile {}".format(
-                        obj_name, str(Path(cpp_path).resolve()).replace(":", "$:")
-                    )
-                )
-                link_files.append(obj_name)
-        if cuda_files is not None:
-            assert with_cuda, "cuda_files is provided but with_cuda is False"
-            for i, cuda_path in enumerate(sorted(cuda_files)):
-                obj_name = f"cuda_{i}.o"
-                ninja.append(
-                    "build {}: compile_cuda {}".format(
-                        obj_name, str(Path(cuda_path).resolve()).replace(":", "$:")
-                    )
-                )
-                link_files.append(obj_name)
-
-    return ninja, link_files
-
-
 def _generate_ninja_build(  # noqa: PLR0915
     name: str,
-    build_dir: str,
     with_cuda: bool,
     extra_cflags: Sequence[str],
     extra_cuda_cflags: Sequence[str],
     extra_ldflags: Sequence[str],
     extra_include_paths: Sequence[str],
-    cpp_files: Sequence[str] | None = None,
-    cuda_files: Sequence[str] | None = None,
+    cpp_files: Sequence[str],
+    cuda_files: Sequence[str],
 ) -> str:
     """Generate the content of build.ninja for building the module."""
     default_include_paths = [find_include_path(), find_dlpack_include_path()]
@@ -355,13 +308,16 @@ def _generate_ninja_build(  # noqa: PLR0915
     ninja.append("")
 
     # build targets
-    extra_ninja_lines, link_files = _resolve_linker(
-        with_cuda=with_cuda,
-        build_dir=build_dir,
-        cpp_files=cpp_files,
-        cuda_files=cuda_files,
-    )
-    ninja.extend(extra_ninja_lines)
+    link_files: list[str] = []
+    for i, cpp_path in enumerate(sorted(cpp_files)):
+        obj_name = f"cpp_{i}.o"
+        ninja.append("build {}: compile {}".format(obj_name, cpp_path.replace(":", "$:")))
+        link_files.append(obj_name)
+
+    for i, cuda_path in enumerate(sorted(cuda_files)):
+        obj_name = f"cuda_{i}.o"
+        ninja.append("build {}: compile_cuda {}".format(obj_name, cuda_path.replace(":", "$:")))
+        link_files.append(obj_name)
 
     # Use appropriate extension based on platform
     ext = ".dll" if IS_WINDOWS else ".so"
@@ -602,21 +558,25 @@ def build_inline(
         build_dir = Path(build_directory).resolve()
     build_dir.mkdir(parents=True, exist_ok=True)
 
+    cpp_file = str((build_dir / "main.cpp").resolve())
+    cuda_file = str((build_dir / "cuda.cu").resolve())
+
     # generate build.ninja
     ninja_source = _generate_ninja_build(
         name=name,
-        build_dir=str(build_dir),
         with_cuda=with_cuda,
         extra_cflags=extra_cflags_list,
         extra_cuda_cflags=extra_cuda_cflags_list,
         extra_ldflags=extra_ldflags_list,
         extra_include_paths=extra_include_paths_list,
+        cpp_files=[cpp_file],
+        cuda_files=[cuda_file] if with_cuda else [],
     )
     with FileLock(str(build_dir / "lock")):
         # write source files and build.ninja if they do not already exist
-        _maybe_write(str(build_dir / "main.cpp"), cpp_source)
+        _maybe_write(cpp_file, cpp_source)
         if with_cuda:
-            _maybe_write(str(build_dir / "cuda.cu"), cuda_source)
+            _maybe_write(cuda_file, cuda_source)
         _maybe_write(str(build_dir / "build.ninja"), ninja_source)
         # build the module
         build_ninja(str(build_dir))
@@ -808,14 +768,13 @@ def build(
     # generate build.ninja
     ninja_source = _generate_ninja_build(
         name=name,
-        build_dir=str(build_dir),
         with_cuda=with_cuda,
         extra_cflags=extra_cflags_list,
         extra_cuda_cflags=extra_cuda_cflags_list,
         extra_ldflags=extra_ldflags_list,
         extra_include_paths=extra_include_paths_list,
-        cpp_files=cpp_path_list if cpp_path_list else None,
-        cuda_files=cuda_path_list if cuda_path_list else None,
+        cpp_files=cpp_path_list,
+        cuda_files=cuda_path_list,
     )
     with FileLock(str(build_dir / "lock")):
         # write source files and build.ninja if they do not already exist
