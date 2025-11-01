@@ -16,11 +16,11 @@
 # under the License.
 """C++ integration helpers for building and loading inline modules."""
 
-from .extension import build, build_and_load, build_inline, load_inline
+from .extension import build, build_inline, load, load_inline
 
 __all__ = [
     "build",
-    "build_and_load",
     "build_inline",
+    "load",
     "load_inline",
 ]
