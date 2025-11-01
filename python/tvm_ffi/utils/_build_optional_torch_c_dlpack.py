@@ -668,7 +668,7 @@ def main() -> None:  # noqa: PLR0912, PLR0915
     """Build the torch c dlpack extension."""
     # we need to set the following env to avoid tvm_ffi to build the torch c-dlpack addon during importing
     os.environ["TVM_FFI_DISABLE_TORCH_C_DLPACK"] = "1"
-    from tvm_ffi.cpp.load_inline import build_ninja  # noqa: PLC0415
+    from tvm_ffi.cpp.extension import build_ninja  # noqa: PLC0415
     from tvm_ffi.utils.lockfile import FileLock  # noqa: PLC0415
 
     parser = argparse.ArgumentParser(
