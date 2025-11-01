@@ -102,7 +102,7 @@ Stream Context
   get_raw_stream
 
 
-Inline Loading
+C++ Extension
 --------------
 
 C++ integration helpers for building and loading inline modules.
@@ -112,7 +112,8 @@ C++ integration helpers for building and loading inline modules.
 
   cpp.load_inline
   cpp.build_inline
-
+  cpp.load
+  cpp.build
 
 Misc
 ----

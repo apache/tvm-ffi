@@ -735,7 +735,121 @@ def build(
     extra_include_paths: Sequence[str] | None = None,
     build_directory: str | None = None,
 ) -> str:
-    """Compile and build a C++/CUDA module from source files."""
+    """Compile and build a C++/CUDA module from source files.
+
+    This function compiles the given C++ and/or CUDA source files into a shared library. Both ``cpp_files`` and
+    ``cuda_files`` are compiled to object files, and then linked together into a shared library. It's possible to only
+    provide cpp_files or cuda_files. The path to the compiled shared library is returned.
+
+    Note that this function does not automatically export functions to the tvm ffi module. You need to
+    manually use the TVM FFI export macros (e.g., ``TVM_FFI_DLL_EXPORT_TYPED_FUNC``) in your source files to export
+    functions. This gives you more control over which functions are exported and how they are exported.
+
+    Extra compiler and linker flags can be provided via the ``extra_cflags``, ``extra_cuda_cflags``, and ``extra_ldflags``
+    parameters. The default flags are generally sufficient for most use cases, but you may need to provide additional
+    flags for your specific use case.
+
+    The include dir of tvm ffi and dlpack are used by default for the compiler to find the headers. Thus, you can
+    include any header from tvm ffi in your source files. You can also provide additional include paths via the
+    ``extra_include_paths`` parameter and include custom headers in your source code.
+
+    The compiled shared library is cached in a cache directory to avoid recompilation. The `build_directory` parameter
+    is provided to specify the build directory. If not specified, a default tvm ffi cache directory will be used.
+    The default cache directory can be specified via the `TVM_FFI_CACHE_DIR` environment variable. If not specified,
+    the default cache directory is ``~/.cache/tvm-ffi``.
+
+    Parameters
+    ----------
+    name
+        The name of the tvm ffi module.
+    cpp_files
+        The C++ source files to compile. It can be a list of file paths or a single file path. Both absolute and
+        relative paths are supported.
+    cuda_files
+        The CUDA source files to compile. It can be a list of file paths or a single file path. Both absolute and
+        relative paths are supported.
+    extra_cflags
+        The extra compiler flags for C++ compilation.
+        The default flags are:
+
+        - On Linux/macOS: ['-std=c++17', '-fPIC', '-O2']
+        - On Windows: ['/std:c++17', '/MD', '/O2']
+
+    extra_cuda_cflags
+        The extra compiler flags for CUDA compilation.
+        The default flags are:
+
+        - ['-Xcompiler', '-fPIC', '-std=c++17', '-O2'] (Linux/macOS)
+        - ['-Xcompiler', '/std:c++17', '/O2'] (Windows)
+
+    extra_ldflags
+        The extra linker flags.
+        The default flags are:
+
+        - On Linux/macOS: ['-shared', '-L<tvm_ffi_lib_path>', '-ltvm_ffi']
+        - On Windows: ['/DLL', '/LIBPATH:<tvm_ffi_lib_path>', '<tvm_ffi_lib_name>.lib']
+
+    extra_include_paths
+        The extra include paths for header files. Both absolute and relative paths are supported.
+
+    build_directory
+        The build directory. If not specified, a default tvm ffi cache directory will be used. By default, the
+        cache directory is ``~/.cache/tvm-ffi``. You can also set the ``TVM_FFI_CACHE_DIR`` environment variable to
+        specify the cache directory.
+
+    Returns
+    -------
+    lib_path: str
+        The path to the built shared library.
+
+    Example
+    -------
+
+    .. code-block:: python
+
+        import torch
+        from tvm_ffi import Module
+        import tvm_ffi.cpp
+
+        # Assume we have a C++ source file "my_ops.cpp" with the following content:
+        # ```cpp
+        # #include <tvm/ffi/container/tensor.h>
+        # #include <tvm/ffi/dtype.h>
+        # #include <tvm/ffi/error.h>
+        # #include <tvm/ffi/extra/c_env_api.h>
+        # #include <tvm/ffi/function.h>
+        #
+        # void add_one_cpu(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
+        #   TVM_FFI_ICHECK(x.ndim() == 1) << "x must be a 1D tensor";
+        #   DLDataType f32_dtype{kDLFloat, 32, 1};
+        #   TVM_FFI_ICHECK(x.dtype() == f32_dtype) << "x must be a float tensor";
+        #   TVM_FFI_ICHECK(y.ndim() == 1) << "y must be a 1D tensor";
+        #   TVM_FFI_ICHECK(y.dtype() == f32_dtype) << "y must be a float tensor";
+        #   TVM_FFI_ICHECK(x.size(0) == y.size(0)) << "x and y must have the same shape";
+        #   for (int i = 0; i < x.size(0); ++i) {
+        #     static_cast<float*>(y.data_ptr())[i] = static_cast<float*>(x.data_ptr())[i] + 1;
+        #   }
+        # }
+        #
+        # TVM_FFI_DLL_EXPORT_TYPED_FUNC(add_one_cpu, add_one_cpu);
+        # ```
+
+        # compile the cpp source file and get the library path
+        lib_path: str = tvm_ffi.cpp.build(
+            name='my_ops',
+            cpp_files='my_ops.cpp'
+        )
+
+        # load the module
+        mod: Module = tvm_ffi.load_module(lib_path)
+
+        # use the function from the loaded module
+        x = torch.tensor([1, 2, 3, 4, 5], dtype=torch.float32)
+        y = torch.empty_like(x)
+        mod.add_one_cpu(x, y)
+        torch.testing.assert_close(x + 1, y)
+
+    """
     # need to resolve the path to make it unique
     cpp_path_list = [str(Path(p).resolve()) for p in _str_seq2list(cpp_files)]
     cuda_path_list = [str(Path(p).resolve()) for p in _str_seq2list(cuda_files)]
@@ -788,7 +902,7 @@ def build(
         return str((build_dir / f"{name}{ext}").resolve())
 
 
-def build_and_load(
+def load(
     name: str,
     *,
     cpp_files: Sequence[str] | str | None = None,
@@ -799,7 +913,119 @@ def build_and_load(
     extra_include_paths: Sequence[str] | None = None,
     build_directory: str | None = None,
 ) -> Module:
-    """Compile, build and load a C++/CUDA module from source files."""
+    """Compile, build and load a C++/CUDA module from source files.
+
+    This function compiles the given C++ and/or CUDA source files into a shared library and loads it as a tvm ffi
+    module. Both ``cpp_files`` and ``cuda_files`` are compiled to object files, and then linked together into a shared
+    library. It's possible to only provide cpp_files or cuda_files.
+
+    Note that this function does not automatically export functions to the tvm ffi module. You need to
+    manually use the TVM FFI export macros (e.g., ``TVM_FFI_DLL_EXPORT_TYPED_FUNC``) in your source files to export
+    functions. This gives you more control over which functions are exported and how they are exported.
+
+    Extra compiler and linker flags can be provided via the ``extra_cflags``, ``extra_cuda_cflags``, and ``extra_ldflags``
+    parameters. The default flags are generally sufficient for most use cases, but you may need to provide additional
+    flags for your specific use case.
+
+    The include dir of tvm ffi and dlpack are used by default for the compiler to find the headers. Thus, you can
+    include any header from tvm ffi in your source files. You can also provide additional include paths via the
+    ``extra_include_paths`` parameter and include custom headers in your source code.
+
+    The compiled shared library is cached in a cache directory to avoid recompilation. The `build_directory` parameter
+    is provided to specify the build directory. If not specified, a default tvm ffi cache directory will be used.
+    The default cache directory can be specified via the `TVM_FFI_CACHE_DIR` environment variable. If not specified,
+    the default cache directory is ``~/.cache/tvm-ffi``.
+
+    Parameters
+    ----------
+    name: str
+        The name of the tvm ffi module.
+    cpp_files: Sequence[str] | str, optional
+        The C++ source files to compile. It can be a list of file paths or a single file path. Both absolute and
+        relative paths are supported.
+    cuda_files: Sequence[str] | str, optional
+        The CUDA source files to compile. It can be a list of file paths or a single file path. Both absolute and
+        relative paths are supported.
+    extra_cflags: Sequence[str], optional
+        The extra compiler flags for C++ compilation.
+        The default flags are:
+
+        - On Linux/macOS: ['-std=c++17', '-fPIC', '-O2']
+        - On Windows: ['/std:c++17', '/MD', '/O2']
+
+    extra_cuda_cflags: Sequence[str], optional
+        The extra compiler flags for CUDA compilation.
+        The default flags are:
+
+        - ['-Xcompiler', '-fPIC', '-std=c++17', '-O2'] (Linux/macOS)
+        - ['-Xcompiler', '/std:c++17', '/O2'] (Windows)
+
+    extra_ldflags: Sequence[str], optional
+        The extra linker flags.
+        The default flags are:
+
+        - On Linux/macOS: ['-shared', '-L<tvm_ffi_lib_path>', '-ltvm_ffi']
+        - On Windows: ['/DLL', '/LIBPATH:<tvm_ffi_lib_path>', '<tvm_ffi_lib_name>.lib']
+
+    extra_include_paths: Sequence[str], optional
+        The extra include paths for header files. Both absolute and relative paths are supported.
+
+    build_directory: str, optional
+        The build directory. If not specified, a default tvm ffi cache directory will be used. By default, the
+        cache directory is ``~/.cache/tvm-ffi``. You can also set the ``TVM_FFI_CACHE_DIR`` environment variable to
+        specify the cache directory.
+
+    Returns
+    -------
+    mod: Module
+        The loaded tvm ffi module.
+
+
+    Example
+    -------
+
+    .. code-block:: python
+
+        import torch
+        from tvm_ffi import Module
+        import tvm_ffi.cpp
+
+        # Assume we have a C++ source file "my_ops.cpp" with the following content:
+        # ```cpp
+        # #include <tvm/ffi/container/tensor.h>
+        # #include <tvm/ffi/dtype.h>
+        # #include <tvm/ffi/error.h>
+        # #include <tvm/ffi/extra/c_env_api.h>
+        # #include <tvm/ffi/function.h>
+        #
+        # void add_one_cpu(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
+        #   TVM_FFI_ICHECK(x.ndim() == 1) << "x must be a 1D tensor";
+        #   DLDataType f32_dtype{kDLFloat, 32, 1};
+        #   TVM_FFI_ICHECK(x.dtype() == f32_dtype) << "x must be a float tensor";
+        #   TVM_FFI_ICHECK(y.ndim() == 1) << "y must be a 1D tensor";
+        #   TVM_FFI_ICHECK(y.dtype() == f32_dtype) << "y must be a float tensor";
+        #   TVM_FFI_ICHECK(x.size(0) == y.size(0)) << "x and y must have the same shape";
+        #   for (int i = 0; i < x.size(0); ++i) {
+        #     static_cast<float*>(y.data_ptr())[i] = static_cast<float*>(x.data_ptr())[i] + 1;
+        #   }
+        # }
+        #
+        # TVM_FFI_DLL_EXPORT_TYPED_FUNC(add_one_cpu, add_one_cpu);
+        # ```
+
+        # compile the cpp source file and load the module
+        mod: Module = tvm_ffi.cpp.load(
+            name='my_ops',
+            cpp_files='my_ops.cpp'
+        )
+
+        # use the function from the loaded module
+        x = torch.tensor([1, 2, 3, 4, 5], dtype=torch.float32)
+        y = torch.empty_like(x)
+        mod.add_one_cpu(x, y)
+        torch.testing.assert_close(x + 1, y)
+
+    """
     return load_module(
         build(
             name=name,
