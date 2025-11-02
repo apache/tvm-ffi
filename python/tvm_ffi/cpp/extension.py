@@ -25,6 +25,7 @@ import shutil
 import subprocess
 import sys
 from collections.abc import Mapping, Sequence
+from contextlib import nullcontext
 from pathlib import Path
 
 from tvm_ffi.libinfo import find_dlpack_include_path, find_include_path, find_libtvm_ffi
@@ -215,7 +216,6 @@ def _generate_ninja_build(  # noqa: PLR0915
     extra_include_paths: Sequence[str],
     cpp_files: Sequence[str],
     cuda_files: Sequence[str],
-    object_mapping: Mapping[str, str] | None = None,
 ) -> str:
     """Generate the content of build.ninja for building the module."""
     default_include_paths = [find_include_path(), find_dlpack_include_path()]
@@ -311,12 +311,12 @@ def _generate_ninja_build(  # noqa: PLR0915
     # build targets
     link_files: list[str] = []
     for i, cpp_path in enumerate(sorted(cpp_files)):
-        obj_name = object_mapping[cpp_path] if object_mapping else f"cpp_{i}.o"
+        obj_name = f"cpp_{i}.o"
         ninja.append("build {}: compile {}".format(obj_name, cpp_path.replace(":", "$:")))
         link_files.append(obj_name)
 
     for i, cuda_path in enumerate(sorted(cuda_files)):
-        obj_name = object_mapping[cuda_path] if object_mapping else f"cuda_{i}.o"
+        obj_name = f"cuda_{i}.o"
         ninja.append("build {}: compile_cuda {}".format(obj_name, cuda_path.replace(":", "$:")))
         link_files.append(obj_name)
 
@@ -381,6 +381,72 @@ def _str_seq2list(seq: Sequence[str] | str | None) -> list[str]:
         return [seq]
     else:
         return list(seq)
+
+
+def _build_impl(
+    name: str,
+    cpp_files: Sequence[str] | str | None,
+    cuda_files: Sequence[str] | str | None,
+    extra_cflags: Sequence[str] | None,
+    extra_cuda_cflags: Sequence[str] | None,
+    extra_ldflags: Sequence[str] | None,
+    extra_include_paths: Sequence[str] | None,
+    build_directory: str | None,
+    need_lock: bool = True,
+) -> str:
+    """Real implementation of build function."""
+    # need to resolve the path to make it unique
+    cpp_path_list = [str(Path(p).resolve()) for p in _str_seq2list(cpp_files)]
+    cuda_path_list = [str(Path(p).resolve()) for p in _str_seq2list(cuda_files)]
+    with_cpp = bool(cpp_path_list)
+    with_cuda = bool(cuda_path_list)
+    assert with_cpp or with_cuda, "Either cpp_files or cuda_files must be provided."
+
+    extra_ldflags_list = list(extra_ldflags) if extra_ldflags is not None else []
+    extra_cflags_list = list(extra_cflags) if extra_cflags is not None else []
+    extra_cuda_cflags_list = list(extra_cuda_cflags) if extra_cuda_cflags is not None else []
+    extra_include_paths_list = list(extra_include_paths) if extra_include_paths is not None else []
+
+    build_dir: Path
+    if build_directory is None:
+        cache_dir = os.environ.get("TVM_FFI_CACHE_DIR", str(Path("~/.cache/tvm-ffi").expanduser()))
+        source_hash: str = _hash_sources(
+            None,
+            None,
+            cpp_path_list,
+            cuda_path_list,
+            {},
+            extra_cflags_list,
+            extra_cuda_cflags_list,
+            extra_ldflags_list,
+            extra_include_paths_list,
+        )
+        build_dir = Path(cache_dir).expanduser() / f"{name}_{source_hash}"
+    else:
+        build_dir = Path(build_directory).resolve()
+    build_dir.mkdir(parents=True, exist_ok=True)
+
+    # generate build.ninja
+    ninja_source = _generate_ninja_build(
+        name=name,
+        with_cuda=with_cuda,
+        extra_cflags=extra_cflags_list,
+        extra_cuda_cflags=extra_cuda_cflags_list,
+        extra_ldflags=extra_ldflags_list,
+        extra_include_paths=extra_include_paths_list,
+        cpp_files=cpp_path_list,
+        cuda_files=cuda_path_list,
+    )
+
+    # may not hold lock when build_directory is specified, prevent deadlock
+    with FileLock(str(build_dir / "lock")) if need_lock else nullcontext():
+        # write build.ninja if it does not already exist
+        _maybe_write(str(build_dir / "build.ninja"), ninja_source)
+        # build the module
+        build_ninja(str(build_dir))
+        # Use appropriate extension based on platform
+        ext = ".dll" if IS_WINDOWS else ".so"
+        return str((build_dir / f"{name}{ext}").resolve())
 
 
 def build_inline(
@@ -562,29 +628,23 @@ def build_inline(
     cpp_file = str((build_dir / "main.cpp").resolve())
     cuda_file = str((build_dir / "cuda.cu").resolve())
 
-    # generate build.ninja
-    ninja_source = _generate_ninja_build(
-        name=name,
-        with_cuda=with_cuda,
-        extra_cflags=extra_cflags_list,
-        extra_cuda_cflags=extra_cuda_cflags_list,
-        extra_ldflags=extra_ldflags_list,
-        extra_include_paths=extra_include_paths_list,
-        cpp_files=[cpp_file],
-        cuda_files=[cuda_file] if with_cuda else [],
-        object_mapping={cpp_file: "main.o", cuda_file: "cuda.o"},
-    )
     with FileLock(str(build_dir / "lock")):
-        # write source files and build.ninja if they do not already exist
+        # write source files if they do not already exist
         _maybe_write(cpp_file, cpp_source)
         if with_cuda:
             _maybe_write(cuda_file, cuda_source)
-        _maybe_write(str(build_dir / "build.ninja"), ninja_source)
-        # build the module
-        build_ninja(str(build_dir))
-        # Use appropriate extension based on platform
-        ext = ".dll" if IS_WINDOWS else ".so"
-        return str((build_dir / f"{name}{ext}").resolve())
+
+        return _build_impl(
+            name=name,
+            cpp_files=[cpp_file] if with_cpp else [],
+            cuda_files=[cuda_file] if with_cuda else [],
+            extra_cflags=extra_cflags_list,
+            extra_cuda_cflags=extra_cuda_cflags_list,
+            extra_ldflags=extra_ldflags_list,
+            extra_include_paths=extra_include_paths_list,
+            build_directory=str(build_dir),
+            need_lock=False,  # already hold the lock
+        )
 
 
 def load_inline(
@@ -850,56 +910,17 @@ def build(
         torch.testing.assert_close(x + 1, y)
 
     """
-    # need to resolve the path to make it unique
-    cpp_path_list = [str(Path(p).resolve()) for p in _str_seq2list(cpp_files)]
-    cuda_path_list = [str(Path(p).resolve()) for p in _str_seq2list(cuda_files)]
-    with_cpp = bool(cpp_path_list)
-    with_cuda = bool(cuda_path_list)
-    assert with_cpp or with_cuda, "Either cpp_files or cuda_files must be provided."
-
-    extra_ldflags_list = list(extra_ldflags) if extra_ldflags is not None else []
-    extra_cflags_list = list(extra_cflags) if extra_cflags is not None else []
-    extra_cuda_cflags_list = list(extra_cuda_cflags) if extra_cuda_cflags is not None else []
-    extra_include_paths_list = list(extra_include_paths) if extra_include_paths is not None else []
-
-    build_dir: Path
-    if build_directory is None:
-        cache_dir = os.environ.get("TVM_FFI_CACHE_DIR", str(Path("~/.cache/tvm-ffi").expanduser()))
-        source_hash: str = _hash_sources(
-            None,
-            None,
-            cpp_path_list,
-            cuda_path_list,
-            {},
-            extra_cflags_list,
-            extra_cuda_cflags_list,
-            extra_ldflags_list,
-            extra_include_paths_list,
-        )
-        build_dir = Path(cache_dir).expanduser() / f"{name}_{source_hash}"
-    else:
-        build_dir = Path(build_directory).resolve()
-    build_dir.mkdir(parents=True, exist_ok=True)
-
-    # generate build.ninja
-    ninja_source = _generate_ninja_build(
+    return _build_impl(
         name=name,
-        with_cuda=with_cuda,
-        extra_cflags=extra_cflags_list,
-        extra_cuda_cflags=extra_cuda_cflags_list,
-        extra_ldflags=extra_ldflags_list,
-        extra_include_paths=extra_include_paths_list,
-        cpp_files=cpp_path_list,
-        cuda_files=cuda_path_list,
+        cpp_files=cpp_files,
+        cuda_files=cuda_files,
+        extra_cflags=extra_cflags,
+        extra_cuda_cflags=extra_cuda_cflags,
+        extra_ldflags=extra_ldflags,
+        extra_include_paths=extra_include_paths,
+        build_directory=build_directory,
+        need_lock=True,
     )
-    with FileLock(str(build_dir / "lock")):
-        # write source files and build.ninja if they do not already exist
-        _maybe_write(str(build_dir / "build.ninja"), ninja_source)
-        # build the module
-        build_ninja(str(build_dir))
-        # Use appropriate extension based on platform
-        ext = ".dll" if IS_WINDOWS else ".so"
-        return str((build_dir / f"{name}{ext}").resolve())
 
 
 def load(
