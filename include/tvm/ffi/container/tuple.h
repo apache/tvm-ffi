@@ -26,6 +26,7 @@
 
 #include <tvm/ffi/container/array.h>
 
+#include <cstddef>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -141,11 +142,30 @@ class Tuple : public ObjectRef {
    * \note We use stl style since get usually is like a getter.
    */
   template <size_t I>
-  auto get() const {
+  auto get() const& {
     static_assert(I < sizeof...(Types), "Tuple index out of bounds");
     using ReturnType = std::tuple_element_t<I, std::tuple<Types...>>;
     const Any* ptr = GetArrayObj()->begin() + I;
     return details::AnyUnsafe::CopyFromAnyViewAfterCheck<ReturnType>(*ptr);
+  }
+
+  /*!
+   * \brief Move out I-th element of the tuple
+   *
+   * \tparam I The index of the element to get
+   * \return The I-th element of the tuple
+   * \note We use stl style since get usually is like a getter.
+   */
+  template <size_t I>
+  auto get() && {
+    if (!this->unique()) {
+      // fallback to const& version if not unique
+      return std::as_const(*this).template get<I>();
+    }
+    static_assert(I < sizeof...(Types), "Tuple index out of bounds");
+    using ReturnType = std::tuple_element_t<I, std::tuple<Types...>>;
+    Any* ptr = GetArrayObj()->MutableBegin() + I;
+    return details::AnyUnsafe::MoveFromAnyAfterCheck<ReturnType>(std::move(*ptr));
   }
 
   /*!
@@ -315,6 +335,16 @@ struct TypeTraits<Tuple<Types...>> : public ObjectRefTypeTraitsBase<Tuple<Types.
   }
 };
 
+/// NOTE: ADL will find the right resolution, we should not specify std::get, but just get.
+template <std::size_t I, typename... Types>
+inline constexpr auto get(const Tuple<Types...>& t) -> decltype(t.template get<I>()) {
+  return t.template get<I>();
+}
+template <std::size_t I, typename... Types>
+inline constexpr auto get(Tuple<Types...>&& t) -> decltype(std::move(t).template get<I>()) {
+  return std::move(t).template get<I>();
+}
+
 namespace details {
 template <typename... T, typename... U>
 inline constexpr bool type_contains_v<Tuple<T...>, Tuple<U...>> = (type_contains_v<T, U> && ...);
@@ -322,4 +352,18 @@ inline constexpr bool type_contains_v<Tuple<T...>, Tuple<U...>> = (type_contains
 
 }  // namespace ffi
 }  // namespace tvm
+
+namespace std {
+
+template <typename... Types>
+struct tuple_size<::tvm::ffi::Tuple<Types...>>
+    : public std::integral_constant<size_t, sizeof...(Types)> {};
+
+template <size_t I, typename... Types>
+struct tuple_element<I, ::tvm::ffi::Tuple<Types...>> {
+  using type = std::tuple_element_t<I, std::tuple<Types...>>;
+};
+
+}  // namespace std
+
 #endif  // TVM_FFI_CONTAINER_TUPLE_H_

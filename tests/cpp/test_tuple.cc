@@ -20,6 +20,8 @@
 #include <tvm/ffi/container/tuple.h>
 #include <tvm/ffi/function.h>
 
+#include <string>
+
 #include "./testing_object.h"
 
 namespace {
@@ -166,6 +168,14 @@ TEST(Tuple, ArrayIterForwardSingleElem) {
   EXPECT_EQ(vec0[0].get<0>()->value, 1);
   EXPECT_EQ(vec0[1].get<0>()->value, 1);
   EXPECT_EQ(vec0[2].get<0>()->value, 2);
+}
+
+TEST(Tuple, CPPStructuralBinding) {
+  Tuple<int, float, String> t(1, 2.0f, "hello");
+  auto [a, b, c] = t;
+  EXPECT_EQ(a, 1);
+  EXPECT_EQ(b, 2.0f);
+  EXPECT_EQ(c, "hello");
 }
 
 }  // namespace
