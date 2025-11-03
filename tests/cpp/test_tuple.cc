@@ -20,8 +20,6 @@
 #include <tvm/ffi/container/tuple.h>
 #include <tvm/ffi/function.h>
 
-#include <string>
-
 #include "./testing_object.h"
 
 namespace {
