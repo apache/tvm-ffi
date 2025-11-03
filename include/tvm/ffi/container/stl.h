@@ -190,14 +190,14 @@ struct TypeTraits<std::optional<T>> : public TypeTraitsBase {
 
   TVM_FFI_INLINE static std::optional<Self> TryCastFromAnyView(const TVMFFIAny* src) {
     if (src->type_index == TypeIndex::kTVMFFINone) return Self{std::nullopt};
+    auto result = std::optional<Self>{};
     if (std::optional<T> opt = TypeTraits<T>::TryCastFromAnyView(src)) {
-      return Self{*std::move(opt)};
+      /// NOTE: std::optional<T> is just what we want (Self).
+      result.emplace(std::move(opt));
     } else {
-      // important to be explicit here
-      // because nullopt can convert to std::optional<T>(nullopt) which indicate success
-      // return std::optional<std::optional<T>>() to indicate failure
-      return std::optional<Self>{};
+      result.reset();  // failed to cast, indicate failure
     }
+    return result;
   }
 
   TVM_FFI_INLINE static std::string GetMismatchTypeInfo(const TVMFFIAny* src) {
