@@ -239,8 +239,8 @@ class ReverseIterAdapter {
  public:
   using difference_type = typename std::iterator_traits<TIter>::difference_type;
   using value_type = typename Converter::ResultType;
-  using pointer = typename Converter::ResultType*;
-  using reference = typename Converter::ResultType&;  // NOLINT(*)
+  using pointer = const typename Converter::ResultType*;
+  using reference = const typename Converter::ResultType;
   using iterator_category = typename std::iterator_traits<TIter>::iterator_category;
 
   explicit ReverseIterAdapter(TIter iter) : iter_(iter) {}
@@ -275,7 +275,7 @@ class ReverseIterAdapter {
 
   bool operator==(ReverseIterAdapter other) const { return iter_ == other.iter_; }
   bool operator!=(ReverseIterAdapter other) const { return !(*this == other); }
-  const value_type operator*() const { return Converter::convert(*iter_); }
+  reference operator*() const { return Converter::convert(*iter_); }
 
  private:
   TIter iter_;
