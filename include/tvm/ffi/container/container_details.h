@@ -175,7 +175,7 @@ template <typename Converter, typename TIter>
 class IterAdapter {
  public:
   using difference_type = typename std::iterator_traits<TIter>::difference_type;
-  using value_type = const typename Converter::ResultType;
+  using value_type = typename Converter::ResultType;
   using pointer = const typename Converter::ResultType*;
   using reference = const typename Converter::ResultType;
   using iterator_category = typename std::iterator_traits<TIter>::iterator_category;
