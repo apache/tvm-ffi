@@ -131,15 +131,15 @@ jobs:
           && rm -rf /torch2.9"
       - name: build wheels
         run: |
-          docker exec build_lib bash -c "cp /libs/*.so /tvm_ffi/addons/torch_c_dlpack_ext/torch_c_dlpack_ext \
+          docker exec build_lib bash -c "cp /libs/*.so /tvm-ffi/addons/torch_c_dlpack_ext/torch_c_dlpack_ext \
           && /opt/python/${{ matrix.python-version }}-${{ matrix.python-version }}/bin/pip3 install build wheel auditwheel \
-          && cd /tvm_ffi/addons/torch_c_dlpack_ext \
+          && cd /tvm-ffi/addons/torch_c_dlpack_ext \
           && /opt/python/${{ matrix.python-version }}-${{ matrix.python-version }}/bin/python -m build -w \
           && /opt/python/${{ matrix.python-version }}-${{ matrix.python-version }}/bin/python -m wheel tags dist/*.whl --python-tag=${{ matrix.python-version }} --abi-tag=${{ matrix.python-version }} --remove \
           && auditwheel repair --exclude libtorch.so --exclude libtorch_cpu.so --exclude libc10.so --exclude libtorch_python.so dist/*.whl -w wheelhouse"
       - name: collect built wheels
         run: |
-          docker cp build_lib:/tvm_ffi/addons/torch_c_dlpack_ext/wheelhouse .
+          docker cp build_lib:/tvm-ffi/addons/torch_c_dlpack_ext/wheelhouse .
       - uses: actions/upload-artifact@v4
         with:
           name: pypi-wheels-${{ matrix.arch }}-${{ matrix.python-version }}
