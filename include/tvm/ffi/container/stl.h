@@ -189,7 +189,6 @@ struct TypeTraits<std::optional<T>> : public TypeTraitsBase {
   }
 
   TVM_FFI_INLINE static std::optional<Self> TryCastFromAnyView(const TVMFFIAny* src) {
-    std::cerr << "DEBUG optional::TryCastFromAnyView\n";
     if (src->type_index == TypeIndex::kTVMFFINone) return Self{std::nullopt};
     if (std::optional<T> opt = TypeTraits<T>::TryCastFromAnyView(src)) {
       return Self{*std::move(opt)};
