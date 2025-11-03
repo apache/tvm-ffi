@@ -175,9 +175,9 @@ template <typename Converter, typename TIter>
 class IterAdapter {
  public:
   using difference_type = typename std::iterator_traits<TIter>::difference_type;
-  using value_type = typename Converter::ResultType;
-  using pointer = typename Converter::ResultType*;
-  using reference = typename Converter::ResultType&;
+  using value_type = const typename Converter::ResultType;
+  using pointer = const typename Converter::ResultType*;
+  using reference = const typename Converter::ResultType;
   using iterator_category = typename std::iterator_traits<TIter>::iterator_category;
 
   explicit IterAdapter(TIter iter) : iter_(iter) {}
@@ -223,7 +223,7 @@ class IterAdapter {
 
   bool operator==(IterAdapter other) const { return iter_ == other.iter_; }
   bool operator!=(IterAdapter other) const { return !(*this == other); }
-  const value_type operator*() const { return Converter::convert(*iter_); }
+  reference operator*() const { return Converter::convert(*iter_); }
 
  private:
   TIter iter_;
