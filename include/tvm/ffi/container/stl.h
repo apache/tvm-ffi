@@ -225,19 +225,41 @@ struct TypeTraits<std::tuple<Args...>> : public TypeTraitsBase {
   }
 
   template <std::size_t... Is>
-  static Self MoveToTuple(std::index_sequence<Is...>, Tuple&& tuple) {
+  static Tuple CopyToFFITupleAux(std::index_sequence<Is...>, const Self& tuple) {
+    return Tuple{std::get<Is>(tuple)...};
+  }
+
+  template <std::size_t... Is>
+  static Tuple MoveToFFITupleAux(std::index_sequence<Is...>, Self&& tuple) {
+    return Tuple{std::get<Is>(std::move(tuple))...};
+  }
+
+  template <std::size_t... Is>
+  static Self MoveToSTDTupleAux(std::index_sequence<Is...>, Tuple&& tuple) {
     return Self{std::move(tuple.template get<Is>())...};
+  }
+
+  static Tuple CopyToFFITuple(const Self& tuple) {
+    return CopyToFFITupleAux(std::make_index_sequence<Nm>{}, tuple);
+  }
+
+  static Tuple MoveToFFITuple(Self&& tuple) {
+    return MoveToFFITupleAux(std::make_index_sequence<Nm>{}, std::move(tuple));
+  }
+
+  static Self MoveToSTDTuple(Tuple&& tuple) {
+    return MoveToSTDTupleAux(std::make_index_sequence<Nm>{}, std::move(tuple));
   }
 
  public:
   static constexpr int32_t field_static_type_index = TypeIndex::kTVMFFIArray;
 
   TVM_FFI_INLINE static void CopyToAnyView(const Self& src, TVMFFIAny* result) {
-    return TypeTraits<Tuple>::MoveToAny(Tuple{std::get<Args>(src)...}, result);
+    return TypeTraits<Tuple>::MoveToAny(CopyToFFITuple(src), result);
   }
 
   TVM_FFI_INLINE static void MoveToAny(Self&& src, TVMFFIAny* result) {
-    return TypeTraits<Tuple>::MoveToAny(Tuple{std::move(std::get<Args>(src))...}, result);
+    return TypeTraits<Tuple>::MoveToAny(MoveToFFITuple(std::move(src)), result);
   }
 
   TVM_FFI_INLINE static bool CheckAnyStrict(const TVMFFIAny* src) {
@@ -250,13 +272,11 @@ struct TypeTraits<std::tuple<Args...>> : public TypeTraitsBase {
   }
 
   TVM_FFI_INLINE static Self CopyFromAnyViewAfterCheck(const TVMFFIAny* src) {
-    auto tuple = TypeTraits<Tuple>::CopyFromAnyViewAfterCheck(src);
-    return MoveToTuple(std::make_index_sequence<Nm>{}, std::move(tuple));
+    return MoveToSTDTuple(TypeTraits<Tuple>::CopyFromAnyViewAfterCheck(src));
   }
 
   TVM_FFI_INLINE static Self MoveFromAnyAfterCheck(TVMFFIAny* src) {
-    auto tuple = TypeTraits<Tuple>::MoveFromAnyAfterCheck(src);
-    return MoveToTuple(std::make_index_sequence<Nm>{}, std::move(tuple));
+    return MoveToSTDTuple(TypeTraits<Tuple>::MoveFromAnyAfterCheck(src));
   }
 
   TVM_FFI_INLINE static std::optional<Self> TryCastFromAnyView(const TVMFFIAny* src) {
