@@ -228,7 +228,7 @@ TEST(Tuple, CPPFeatures) {
       // making p in an not defined state (p.data_ == 0).
       // Our get resolution accepts rvalue reference,
       // which keeps p in a defined state for testing purposes.
-      // DO NOTE rely on this behavior in real code.
+      // DO NOT rely on this behavior in real code.
       const auto _ = get<0>(std::move(q));
     }
     EXPECT_FALSE(get<0>(p).defined());
