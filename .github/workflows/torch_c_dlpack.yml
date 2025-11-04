@@ -23,7 +23,6 @@ on:
       branch:
         description: "Branch or tag to publish (manual run)"
         required: true
-  pull_request:
 
 jobs:
   build_libs:
