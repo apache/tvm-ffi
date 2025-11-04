@@ -15,13 +15,14 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+# shellcheck disable=SC1090
 set -eux
 
 arch=$1
 python_version=$2
 
 tvm_ffi="$PWD"
-torch_c_dlpack_ext="$tvm_ffi"/addons/torch_c_dlpack_ext
+# torch_c_dlpack_ext="$tvm_ffi"/addons/torch_c_dlpack_ext
 
 
 function get_torch_url() {
@@ -77,7 +78,7 @@ function build_libs() {
         uv venv "$tvm_ffi"/.venv/torch"$torch_version" --python "$python_version"
         source "$tvm_ffi"/.venv/torch"$torch_version"/bin/activate
         uv pip install setuptools ninja
-        uv pip install torch=="$torch_version" --index-url "$(get_torch_url '$torch_version')"
+        uv pip install torch=="$torch_version" --index-url "$(get_torch_url "$torch_version")"
         uv pip install -v .
         mkdir "$tvm_ffi"/lib -p
         python -m tvm_ffi.utils._build_optional_torch_c_dlpack --output-dir "$tvm_ffi"/lib
