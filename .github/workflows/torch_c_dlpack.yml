@@ -55,11 +55,10 @@ jobs:
           && dnf clean all \
           && dnf -y install cuda-toolkit-13-0 \
           && rm /cuda-repo-rhel8-13-0-local-13.0.2_580.95.05-1.${{ matrix.arch }}.rpm \
-          && dnf clean all \
-          && mkdir /libs"
+          && dnf clean all"
       - name: build torch libs
         run: |
-          docker exec build_lib cd /tvm-ffi && bash ./addons/torch_c_dlpack_ext/build_aot_libs.sh
+          docker exec build_lib -w /tvm-ffi bash ./addons/torch_c_dlpack_ext/build_aot_libs.sh
       - name: collect built libs
         run: |
           mkdir libs
