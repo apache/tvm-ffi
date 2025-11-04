@@ -29,6 +29,7 @@
 #include <cstddef>
 #include <string>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 
 namespace tvm {
@@ -335,20 +336,45 @@ struct TypeTraits<Tuple<Types...>> : public ObjectRefTypeTraitsBase<Tuple<Types.
   }
 };
 
-/// NOTE: ADL will find the right resolution, we should not specify std::get, but just get.
-template <std::size_t I, typename... Types>
-inline constexpr auto get(const Tuple<Types...>& t) -> decltype(t.template get<I>()) {
-  return t.template get<I>();
-}
-template <std::size_t I, typename... Types>
-inline constexpr auto get(Tuple<Types...>&& t) -> decltype(std::move(t).template get<I>()) {
-  return std::move(t).template get<I>();
-}
-
 namespace details {
 template <typename... T, typename... U>
 inline constexpr bool type_contains_v<Tuple<T...>, Tuple<U...>> = (type_contains_v<T, U> && ...);
 }  // namespace details
+
+/// \cond Doxygen_Suppress
+
+/// NOTE: ADL friendly get functions
+/// Example usage: { using std::get; get<0>(t); }
+/// ADL will find the right get function
+
+/**
+ * \brief get I-th element of the tuple
+ * \tparam I The index of the element to get
+ * \param t The tuple
+ * \return The I-th element of the tuple
+ */
+template <std::size_t I, typename... Types>
+inline constexpr auto get(const Tuple<Types...>& t)
+    -> std::tuple_element_t<I, std::tuple<Types...>> {
+  return t.template get<I>();
+}
+
+/**
+ * \brief get I-th element of the tuple
+ * \tparam I The index of the element to get
+ * \param t The tuple (rvalue)
+ * \return The I-th element of the tuple
+ */
+template <std::size_t I, typename... Types>
+inline constexpr auto get(Tuple<Types...>&& t) -> std::tuple_element_t<I, std::tuple<Types...>> {
+  return std::move(t).template get<I>();
+}
+
+/// NOTE: C++17 deduction guide
+template <typename... UTypes>
+Tuple(UTypes&&...) -> Tuple<std::remove_cv_t<std::remove_reference_t<UTypes>>...>;
+
+/// \endcond
 
 }  // namespace ffi
 }  // namespace tvm
