@@ -23,7 +23,6 @@ on:
       branch:
         description: "Branch or tag to publish (manual run)"
         required: true
-  pull_request:
 
 jobs:
   build_wheels:
@@ -38,8 +37,8 @@ jobs:
         if: ${{ matrix.arch == 'x86_64'}}
       - uses: actions/checkout@v5
         with:
-          repository: cyx-6/tvm-ffi
-          ref: torch-c-dlpack-script
+          repository: apache/tvm-ffi
+          ref: main
           fetch-depth: 0
           submodules: recursive
           path: tvm-ffi
@@ -72,8 +71,8 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          repository: cyx-6/tvm-ffi
-          ref: torch-c-dlpack-script
+          repository: apache/tvm-ffi
+          ref: main
           fetch-depth: 0
           submodules: recursive
           path: tvm-ffi
