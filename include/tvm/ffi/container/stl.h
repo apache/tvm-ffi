@@ -165,14 +165,14 @@ struct TypeTraits<std::optional<T>> : public TypeTraitsBase {
  public:
   TVM_FFI_INLINE static void CopyToAnyView(const Self& src, TVMFFIAny* result) {
     if (src.has_value()) {
-      TypeTraits<Self>::CopyToAnyView(*src, result);
+      TypeTraits<T>::CopyToAnyView(*src, result);
     } else {
       TypeTraits<std::nullptr_t>::CopyToAnyView(nullptr, result);
     }
   }
   TVM_FFI_INLINE static void MoveToAny(Self&& src, TVMFFIAny* result) {
     if (src.has_value()) {
-      TypeTraits<Self>::MoveToAny(std::move(*src), result);
+      TypeTraits<T>::MoveToAny(std::move(*src), result);
     } else {
       TypeTraits<std::nullptr_t>::MoveToAny(nullptr, result);
     }
