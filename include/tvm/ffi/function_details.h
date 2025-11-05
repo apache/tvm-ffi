@@ -168,7 +168,7 @@ class ArgValueWithContext<Type, /*NeedStorage=*/false> {
     } else if constexpr (std::is_same_v<Type, Any>) {
       return Any(args_[arg_index_]);
     } else {
-      auto opt = args_[arg_index_].try_cast<Type>();
+      auto opt = args_[arg_index_].template try_cast<Type>();
       if (!opt.has_value()) {
         TVMFFIAny any_data = args_[arg_index_].CopyToTVMFFIAny();
         TVM_FFI_THROW(TypeError) << "Mismatched type on argument #" << arg_index_
@@ -218,7 +218,7 @@ class ArgValueWithContext<Type, /*NeedStorage=*/true> {
     } else if constexpr (std::is_same_v<Type, Any>) {
       temp_storage_.emplace(Any(args_[arg_index_]));
     } else {
-      temp_storage_ = args_[arg_index_].try_cast<Type>();
+      temp_storage_ = args_[arg_index_].template try_cast<Type>();
       if (!temp_storage_.has_value()) {
         TVMFFIAny any_data = args_[arg_index_].CopyToTVMFFIAny();
         TVM_FFI_THROW(TypeError) << "Mismatched type on argument #" << arg_index_
