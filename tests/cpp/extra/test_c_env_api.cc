@@ -48,7 +48,7 @@ int TestDLPackManagedTensorAllocatorError(DLTensor* prototype, DLManagedTensorVe
                                           void* error_ctx,
                                           void (*SetError)(void* error_ctx, const char* kind,
                                                            const char* message)) {
-  SetError(error_ctx, "RuntimeError", "TestDLPackManagedTensorAllocatorError");
+  SetError(error_ctx, "MemoryError", "TestDLPackManagedTensorAllocatorError");
   return -1;
 }
 
@@ -74,13 +74,19 @@ TEST(CEnvAPI, TVMFFIEnvTensorAlloc) {
 TEST(CEnvAPI, TVMFFIEnvTensorAllocError) {
   auto old_allocator = TVMFFIEnvGetDLPackManagedTensorAllocator();
   TVMFFIEnvSetDLPackManagedTensorAllocator(TestDLPackManagedTensorAllocatorError, 0, nullptr);
+
   EXPECT_THROW(
       {
-        Tensor::FromEnvAlloc(TVMFFIEnvTensorAlloc, {1, 2, 3}, DLDataType({kDLFloat, 32, 1}),
-                             DLDevice({kDLCPU, 0}));
+        try {
+          Tensor::FromEnvAlloc(TVMFFIEnvTensorAlloc, {1, 2, 3}, DLDataType({kDLFloat, 32, 1}),
+                               DLDevice({kDLCPU, 0}));
+        } catch (const tvm::ffi::Error& e) {
+          EXPECT_EQ(e.kind(), "MemoryError");
+          EXPECT_EQ(e.message(), "TestDLPackManagedTensorAllocatorError");
+          throw;
+        }
       },
       tvm::ffi::Error);
   TVMFFIEnvSetDLPackManagedTensorAllocator(old_allocator, 0, nullptr);
 }
-
 }  // namespace

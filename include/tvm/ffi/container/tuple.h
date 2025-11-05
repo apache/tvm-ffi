@@ -26,8 +26,10 @@
 
 #include <tvm/ffi/container/array.h>
 
+#include <cstddef>
 #include <string>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 
 namespace tvm {
@@ -141,11 +143,30 @@ class Tuple : public ObjectRef {
    * \note We use stl style since get usually is like a getter.
    */
   template <size_t I>
-  auto get() const {
+  auto get() const& {
     static_assert(I < sizeof...(Types), "Tuple index out of bounds");
     using ReturnType = std::tuple_element_t<I, std::tuple<Types...>>;
     const Any* ptr = GetArrayObj()->begin() + I;
     return details::AnyUnsafe::CopyFromAnyViewAfterCheck<ReturnType>(*ptr);
+  }
+
+  /*!
+   * \brief Move out I-th element of the tuple
+   *
+   * \tparam I The index of the element to get
+   * \return The I-th element of the tuple
+   * \note We use stl style since get usually is like a getter.
+   */
+  template <size_t I>
+  auto get() && {
+    if (!this->unique()) {
+      // fallback to const& version if not unique
+      return std::as_const(*this).template get<I>();
+    }
+    static_assert(I < sizeof...(Types), "Tuple index out of bounds");
+    using ReturnType = std::tuple_element_t<I, std::tuple<Types...>>;
+    Any* ptr = GetArrayObj()->MutableBegin() + I;
+    return details::AnyUnsafe::MoveFromAnyAfterCheck<ReturnType>(std::move(*ptr));
   }
 
   /*!
@@ -320,6 +341,55 @@ template <typename... T, typename... U>
 inline constexpr bool type_contains_v<Tuple<T...>, Tuple<U...>> = (type_contains_v<T, U> && ...);
 }  // namespace details
 
+/// \cond Doxygen_Suppress
+
+/// NOTE: ADL friendly get functions
+/// Example usage: { using std::get; get<0>(t); }
+/// ADL will find the right get function
+
+/**
+ * \brief get I-th element of the tuple
+ * \tparam I The index of the element to get
+ * \param t The tuple
+ * \return The I-th element of the tuple
+ */
+template <std::size_t I, typename... Types>
+inline constexpr auto get(const Tuple<Types...>& t)
+    -> std::tuple_element_t<I, std::tuple<Types...>> {
+  return t.template get<I>();
+}
+
+/**
+ * \brief get I-th element of the tuple
+ * \tparam I The index of the element to get
+ * \param t The tuple (rvalue)
+ * \return The I-th element of the tuple
+ */
+template <std::size_t I, typename... Types>
+inline constexpr auto get(Tuple<Types...>&& t) -> std::tuple_element_t<I, std::tuple<Types...>> {
+  return std::move(t).template get<I>();
+}
+
+/// NOTE: C++17 deduction guide
+template <typename... UTypes>
+Tuple(UTypes&&...) -> Tuple<std::remove_cv_t<std::remove_reference_t<UTypes>>...>;
+
+/// \endcond
+
 }  // namespace ffi
 }  // namespace tvm
+
+namespace std {
+
+template <typename... Types>
+struct tuple_size<::tvm::ffi::Tuple<Types...>>
+    : public std::integral_constant<size_t, sizeof...(Types)> {};
+
+template <size_t I, typename... Types>
+struct tuple_element<I, ::tvm::ffi::Tuple<Types...>> {
+  using type = std::tuple_element_t<I, std::tuple<Types...>>;
+};
+
+}  // namespace std
+
 #endif  // TVM_FFI_CONTAINER_TUPLE_H_

@@ -20,6 +20,8 @@
 #include <tvm/ffi/container/tuple.h>
 #include <tvm/ffi/function.h>
 
+#include <utility>
+
 #include "./testing_object.h"
 
 namespace {
@@ -166,6 +168,71 @@ TEST(Tuple, ArrayIterForwardSingleElem) {
   EXPECT_EQ(vec0[0].get<0>()->value, 1);
   EXPECT_EQ(vec0[1].get<0>()->value, 1);
   EXPECT_EQ(vec0[2].get<0>()->value, 2);
+}
+
+TEST(Tuple, CPPFeatures) {
+  {
+    // deduction guide
+    auto t = Tuple{1, 2.0f, String{"hello"}};
+    // structural binding (lvalue)
+    auto [a, b, c] = t;
+    EXPECT_EQ(a, 1);
+    EXPECT_EQ(b, 2.0f);
+    EXPECT_EQ(c, "hello");
+  }
+
+  {
+    // ADL-friendly get will find the right get function
+    auto p = Tuple{Array<int>{0}};
+    EXPECT_EQ(p.use_count(), 1);
+    // p<0> and q each hold a reference
+    const auto q = get<0>(p);
+    EXPECT_EQ(q.use_count(), 2);
+  }
+
+  {
+    auto p = Tuple{Array<int>{0}};
+    EXPECT_EQ(p.use_count(), 1);
+    // structured binding (rvalue)
+    // move out the only ownership
+    auto [q] = std::move(p);
+    EXPECT_EQ(q.use_count(), 1);
+  }
+
+  {
+    // ADL-friendly get with move semantics
+    auto p = Tuple{Array<int>{0}};
+
+    // normal copy get, won't move out anything
+    {
+      auto& q = p;
+      EXPECT_EQ(q.use_count(), 1);
+      const auto _ = get<0>(q);
+    }
+    EXPECT_TRUE(get<0>(p).defined());
+
+    // ref-count of q > 1, so the array obj is not moved out
+    {
+      auto q = p;
+      EXPECT_EQ(q.use_count(), 2);
+      const auto _ = get<0>(std::move(q));
+    }
+    EXPECT_TRUE(get<0>(p).defined());
+
+    // ref-count of q = 1, so the array obj is moved out
+    {
+      auto& q = p;
+      EXPECT_EQ(q.use_count(), 1);
+      // NOTE: we do not use structured binding here,
+      // as it creates a temporary value that will move out the q (i.e. p),
+      // making p in an not defined state (p.data_ == 0).
+      // Our get resolution accepts rvalue reference,
+      // which keeps p in a defined state for testing purposes.
+      // DO NOT rely on this behavior in real code.
+      const auto _ = get<0>(std::move(q));
+    }
+    EXPECT_FALSE(get<0>(p).defined());
+  }
 }
 
 }  // namespace

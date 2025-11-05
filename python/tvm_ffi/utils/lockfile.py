@@ -34,7 +34,9 @@ class FileLock:
     """Provide a cross-platform file locking mechanism using Python's stdlib.
 
     This class implements an advisory lock, which must be respected by all
-    cooperating processes.
+    cooperating processes. Please note that this lock does not prevent the same process
+    from acquiring the lock multiple times; it is the caller's responsibility to
+    manage this.
 
     Examples
     --------
@@ -71,9 +73,20 @@ class FileLock:
     def acquire(self) -> bool:
         """Acquire an exclusive, non-blocking lock on the file.
 
-        Returns True if the lock was acquired, False otherwise.
+        Returns
+        -------
+        ret: bool
+            True if the lock was acquired, False otherwise.
+
+        Raises
+        ------
+        RuntimeError
+            If an unexpected error occurs during lock acquisition.
+
         """
         try:
+            if self._file_descriptor is not None:
+                return False  # Lock is already held by this instance
             if sys.platform == "win32":
                 self._file_descriptor = os.open(
                     self.lock_file_path, os.O_RDWR | os.O_CREAT | os.O_BINARY
@@ -97,12 +110,28 @@ class FileLock:
     def blocking_acquire(self, timeout: float | None = None, poll_interval: float = 0.1) -> bool:
         """Wait until an exclusive lock can be acquired, with an optional timeout.
 
-        Args:
-            timeout (float): The maximum time to wait for the lock in seconds.
-                             A value of None means wait indefinitely.
-            poll_interval (float): The time to wait between lock attempts in seconds.
+        Parameters
+        ----------
+        timeout: float, optional
+            The maximum time to wait for the lock in seconds.  A value of None means wait indefinitely.
+        poll_interval: float
+            The time to wait between lock attempts in seconds.
+
+        Returns
+        -------
+        ret: bool
+            True if the lock was acquired.
+
+        Raises
+        ------
+        TimeoutError
+            If the lock is not acquired within the timeout period.
+        RuntimeError
+            If the lock is already held by this instance.
 
         """
+        if self._file_descriptor is not None:
+            raise RuntimeError("Lock is already held by this instance.")
         start_time = time.time()
         while True:
             if self.acquire():
