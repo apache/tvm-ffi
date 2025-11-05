@@ -97,11 +97,13 @@ for version in "${torch_versions[@]}"; do
 done
 
 cp "$tvm_ffi"/lib/*.so "$torch_c_dlpack_ext"/torch_c_dlpack_ext
-/opt/python/"$python_version"-"$python_version"/bin/pip3 install build wheel auditwheel
+uv venv "$tvm_ffi"/.venv/build" --python "$python_version"
+source "$tvm_ffi"/.venv/build/bin/activate
+uv pip install build wheel auditwheel
 cd "$torch_c_dlpack_ext"
-/opt/python/"$python_version"-"$python_version"/bin/python -m build -w
+python -m build -w
 ls dist
-/opt/python/"$python_version"-"$python_version"/bin/python -m wheel tags dist/*.whl --python-tag="$python_version" --abi-tag="$python_version" --remove
+python -m wheel tags dist/*.whl --python-tag="$python_version" --abi-tag="$python_version" --remove
 ls dist
 auditwheel repair --exclude libtorch.so --exclude libtorch_cpu.so --exclude libc10.so --exclude libtorch_python.so dist/*.whl -w wheelhouse
 ls wheelhouse
