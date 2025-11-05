@@ -58,7 +58,7 @@ jobs:
           && dnf clean all"
       - name: build torch libs
         run: |
-          docker exec -w /tvm-ffi build_lib bash ./addons/torch_c_dlpack_ext/build_aot_libs.sh
+          docker exec -w /tvm-ffi build_lib bash ./addons/torch_c_dlpack_ext/build_aot_libs.sh ${{ matrix.arch }} ${{ matrix.python-version }}
       - name: collect built libs
         run: |
           mkdir libs
