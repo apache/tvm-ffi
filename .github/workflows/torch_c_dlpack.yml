@@ -55,7 +55,7 @@ jobs:
           && dnf -y install cuda-toolkit-13-0 \
           && rm /cuda-repo-rhel8-13-0-local-13.0.2_580.95.05-1.${{ matrix.arch }}.rpm \
           && dnf clean all"
-      - name: build torch libs
+      - name: build torch libs and wheels
         run: |
           docker exec -w /tvm-ffi build_lib bash ./addons/torch_c_dlpack_ext/build_aot_wheels.sh ${{ matrix.arch }} ${{ matrix.python-version }}
       - name: collect built wheels
