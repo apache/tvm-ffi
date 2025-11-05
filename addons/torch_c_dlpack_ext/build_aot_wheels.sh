@@ -15,7 +15,7 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-# shellcheck disable=SC1090
+# shellcheck disable=SC1090,1091
 set -eux
 
 arch=$1
@@ -97,7 +97,7 @@ for version in "${torch_versions[@]}"; do
 done
 
 cp "$tvm_ffi"/lib/*.so "$torch_c_dlpack_ext"/torch_c_dlpack_ext
-uv venv "$tvm_ffi"/.venv/build" --python "$python_version"
+uv venv "$tvm_ffi"/.venv/build --python "$python_version"
 source "$tvm_ffi"/.venv/build/bin/activate
 uv pip install build wheel auditwheel
 cd "$torch_c_dlpack_ext"
