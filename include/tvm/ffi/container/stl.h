@@ -36,7 +36,12 @@
 #include <cstddef>
 #include <optional>
 #include <tuple>
+#include <type_traits>
+#include <variant>
 #include <vector>
+
+#include "tvm/ffi/c_api.h"
+#include "tvm/ffi/error.h"
 
 namespace tvm {
 namespace ffi {
@@ -296,6 +301,113 @@ struct TypeTraits<std::tuple<Args...>> : public TypeTraitsBase {
   TVM_FFI_INLINE static std::string TypeSchema() {
     std::stringstream os;
     os << R"({"type":"std::tuple","args":[)";
+    const char* sep = "";
+    ((os << sep << details::TypeSchema<Args>::v(), sep = ", "), ...);
+    os << "]}";
+    return std::move(os).str();
+  }
+};
+
+template <typename... Args>
+struct TypeTraits<std::variant<Args...>> : public TypeTraitsBase {
+ private:
+  using Self = std::variant<Args...>;
+  using Tuple = std::tuple<Args...>;
+  static constexpr std::size_t Nm = sizeof...(Args);
+
+  template <std::size_t Is = 0>
+  static Self MoveUnsafeAux(TVMFFIAny* src) {
+    if constexpr (Is >= Nm) {
+      TVM_FFI_ICHECK(false) << "Unreachable: variant TryCast failed.";
+    } else {
+      using ElemType = std::tuple_element_t<Is, Tuple>;
+      if (TypeTraits<ElemType>::CheckAnyStrict(src)) {
+        return Self{TypeTraits<ElemType>::MoveFromAnyAfterCheck(src)};
+      } else {
+        return MoveUnsafeAux<Is + 1>(src);
+      }
+    }
+  }
+
+  template <std::size_t Is = 0>
+  static Self CopyUnsafeAux(const TVMFFIAny* src) {
+    if constexpr (Is >= Nm) {
+      TVM_FFI_ICHECK(false) << "Unreachable: variant TryCast failed.";
+      throw;  // unreachable
+    } else {
+      using ElemType = std::tuple_element_t<Is, Tuple>;
+      if (TypeTraits<ElemType>::CheckAnyStrict(src)) {
+        return Self{TypeTraits<ElemType>::CopyFromAnyViewAfterCheck(src)};
+      } else {
+        return CopyUnsafeAux<Is + 1>(src);
+      }
+    }
+  }
+
+  template <std::size_t Is = 0>
+  static std::optional<Self> TryCastAux(const TVMFFIAny* src) {
+    if constexpr (Is >= Nm) {
+      return std::nullopt;
+    } else {
+      using ElemType = std::tuple_element_t<Is, Tuple>;
+      if (TypeTraits<ElemType>::CheckAnyStrict(src)) {
+        return Self{TypeTraits<ElemType>::CopyFromAnyViewAfterCheck(src)};
+      } else {
+        return TryCastAux<Is + 1>(src);
+      }
+    }
+  }
+
+ public:
+  TVM_FFI_INLINE static void CopyToAnyView(const Self& src, TVMFFIAny* result) {
+    return std::visit(
+        [&](const auto& value) {
+          using ValueType = std::decay_t<decltype(value)>;
+          TypeTraits<ValueType>::CopyToAnyView(value, result);
+        },
+        src);
+  }
+
+  TVM_FFI_INLINE static void MoveToAny(Self&& src, TVMFFIAny* result) {
+    return std::visit(
+        [&](auto&& value) {
+          using ValueType = std::decay_t<decltype(value)>;
+          TypeTraits<ValueType>::MoveToAny(std::forward<ValueType>(value), result);
+        },
+        std::move(src));
+  }
+
+  TVM_FFI_INLINE static bool CheckAnyStrict(const TVMFFIAny* src) {
+    return (TypeTraits<Args>::CheckAnyStrict(src) || ...);
+  }
+
+  TVM_FFI_INLINE static Self CopyFromAnyViewAfterCheck(const TVMFFIAny* src) {
+    // find the first possible type to copy
+    return CopyUnsafeAux(src);
+  }
+
+  TVM_FFI_INLINE static Self MoveFromAnyAfterCheck(TVMFFIAny* src) {
+    // find the first possible type to move
+    return MoveUnsafeAux(src);
+  }
+
+  TVM_FFI_INLINE static std::optional<Self> TryCastFromAnyView(const TVMFFIAny* src) {
+    // find the first possible type to copy
+    return TryCastAux(src);
+  }
+
+  TVM_FFI_INLINE static std::string TypeStr() {
+    std::stringstream os;
+    os << "std::variant<";
+    const char* sep = "";
+    ((os << sep << details::Type2Str<Args>::v(), sep = ", "), ...);
+    os << ">";
+    return std::move(os).str();
+  }
+
+  TVM_FFI_INLINE static std::string TypeSchema() {
+    std::stringstream os;
+    os << R"({"type":"std::variant","args":[)";
     const char* sep = "";
     ((os << sep << details::TypeSchema<Args>::v(), sep = ", "), ...);
     os << "]}";
