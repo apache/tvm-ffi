@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   htT://www.apache.org/licenses/LICENSE-2.0
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
@@ -18,16 +18,23 @@
  */
 
 /*!
- * \file tvm/ffi/container/stl.h
+ * \file tvm/ffi/extra/stl.h
  * \brief STL container support.
+ * \note This file is an extra extension of TVM FFI,
+ * which provides support for STL containers in C++ exported functions.
  *
+ * Whenever possible, prefer using tvm/ffi/container/ implementations,
+ * such as `tvm::ffi::Array` and `tvm::ffi::Tuple`, over STL containers
+ * in exported functions for better performance and compatibility.
  */
-#ifndef TVM_FFI_CONTAINER_STL_H_
-#define TVM_FFI_CONTAINER_STL_H_
+#ifndef TVM_FFI_EXTRA_STL_H_
+#define TVM_FFI_EXTRA_STL_H_
 
 #include <tvm/ffi/base_details.h>
+#include <tvm/ffi/c_api.h>
 #include <tvm/ffi/container/array.h>
 #include <tvm/ffi/container/tuple.h>
+#include <tvm/ffi/error.h>
 #include <tvm/ffi/object.h>
 #include <tvm/ffi/type_traits.h>
 
@@ -39,9 +46,6 @@
 #include <type_traits>
 #include <variant>
 #include <vector>
-
-#include "tvm/ffi/c_api.h"
-#include "tvm/ffi/error.h"
 
 namespace tvm {
 namespace ffi {
@@ -418,4 +422,4 @@ struct TypeTraits<std::variant<Args...>> : public TypeTraitsBase {
 }  // namespace ffi
 }  // namespace tvm
 
-#endif  // TVM_FFI_CONTAINER_STL_H_
+#endif  // TVM_FFI_EXTRA_STL_H_
