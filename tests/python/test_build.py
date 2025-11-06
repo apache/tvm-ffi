@@ -18,7 +18,9 @@ import pathlib
 
 import numpy
 import pytest
+import tvm_ffi
 import tvm_ffi.cpp
+from tvm_ffi.core import TypeSchema
 from tvm_ffi.module import Module
 
 
@@ -30,6 +32,11 @@ def test_build_cpp() -> None:
     )
 
     mod: Module = tvm_ffi.load_module(output_lib_path)
+
+    metadata = mod.get_function_metadata("add_one_cpu")
+    assert "type_schema" in metadata
+    actual = TypeSchema.from_json_str(metadata["type_schema"])
+    assert str(actual) == "Callable[[Tensor, Tensor], None]", f"{'add_one_cpu'}: {actual}"
 
     x = numpy.array([1, 2, 3, 4, 5], dtype=numpy.float32)
     y = numpy.empty_like(x)
