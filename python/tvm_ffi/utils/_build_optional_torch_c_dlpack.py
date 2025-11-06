@@ -568,6 +568,22 @@ extern "C" DLL_EXPORT int64_t TorchDLPackExchangeAPIPtr() {
 """
 
 
+def parse_env_flags(env_var_name: str) -> list[str]:
+    env_flags = os.environ.get(env_var_name)
+    if env_flags:
+        try:
+            import shlex  # noqa: PLC0415
+
+            return shlex.split(env_flags)
+        except ValueError as e:
+            print(
+                f"Warning: Could not parse {env_var_name} with shlex: {e}. Falling back to simple split.",
+                file=sys.stderr,
+            )
+            return env_flags.split()
+    return []
+
+
 def _generate_ninja_build(
     build_dir: Path,
     libname: str,
@@ -790,6 +806,14 @@ def main() -> None:  # noqa: PLR0912, PLR0915
                 py_version = f"python{sysconfig.get_python_version()}"
                 ldflags.append(f"-L{python_libdir}")
                 ldflags.append(f"-l{py_version}")
+
+        env_ldflags = parse_env_flags("TVM_FFI_JIT_EXTRA_LDFLAGS")
+        if env_ldflags:
+            ldflags.extend(env_ldflags)
+
+        env_cflags = parse_env_flags("TVM_FFI_JIT_EXTRA_CFLAGS")
+        if env_cflags:
+            cflags.extend(env_cflags)
 
         # generate ninja build file
         _generate_ninja_build(
