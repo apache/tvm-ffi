@@ -352,7 +352,13 @@ void schema_no_return(int64_t x) {}
 void schema_no_args_no_return() {}
 
 // Member function pattern
-int64_t test_int_pair_sum_wrapper(const tvm::ffi::TestIntPair& target) { return target.Sum(); }
+int64_t test_int_pair_sum_wrapper(const TestIntPair& target) { return target.Sum(); }
+
+// Documentation export
+int64_t test_add_with_docstring(int64_t a, int64_t b) { return a + b; }
+
+// Const-ness detection
+void schema_input_const(const Tensor& a, const Tensor& b, TensorView result) {}
 
 }  // namespace schema_test_impl
 
@@ -573,5 +579,26 @@ TVM_FFI_DLL_EXPORT_TYPED_FUNC(testing_dll_schema_no_args_no_return,
                               tvm::ffi::schema_test_impl::schema_no_args_no_return);
 TVM_FFI_DLL_EXPORT_TYPED_FUNC(testing_dll_schema_test_int_pair_sum,
                               tvm::ffi::schema_test_impl::test_int_pair_sum_wrapper);
+
+// Documentation export
+TVM_FFI_DLL_EXPORT_TYPED_FUNC_DOC(testing_dll_test_add_with_docstring,
+                                  tvm::ffi::schema_test_impl::test_add_with_docstring,
+                                  "Add two integers and return the sum.\n"
+                                  "\n"
+                                  "Parameters\n"
+                                  "----------\n"
+                                  "a : int\n"
+                                  "    First integer\n"
+                                  "b : int\n"
+                                  "    Second integer\n"
+                                  "\n"
+                                  "Returns\n"
+                                  "-------\n"
+                                  "result : int\n"
+                                  "    Sum of a and b");
+
+// Const-ness detection
+TVM_FFI_DLL_EXPORT_TYPED_FUNC(testing_dll_schema_input_const,
+                              tvm::ffi::schema_test_impl::schema_input_const);
 
 extern "C" TVM_FFI_DLL_EXPORT int TVMFFITestingDummyTarget() { return 0; }

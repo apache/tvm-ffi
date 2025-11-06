@@ -51,6 +51,9 @@ const char* __tvm_ffi__metadata_testing_dll_schema_no_args();
 const char* __tvm_ffi__metadata_testing_dll_schema_no_return();
 const char* __tvm_ffi__metadata_testing_dll_schema_no_args_no_return();
 const char* __tvm_ffi__metadata_testing_dll_schema_test_int_pair_sum();
+const char* __tvm_ffi__metadata_testing_dll_schema_input_const();
+const char* __tvm_ffi__metadata_testing_dll_test_add_with_docstring();
+const char* __tvm_ffi__doc_testing_dll_test_add_with_docstring();
 }
 
 namespace {
@@ -289,6 +292,27 @@ TEST(Schema, DLLExportedFuncMetadata) {
   // Member function wrapper pattern
   EXPECT_EQ(ParseMetadataToSchema(__tvm_ffi__metadata_testing_dll_schema_test_int_pair_sum()),
             R"({"type":"ffi.Function","args":[{"type":"int"},{"type":"testing.TestIntPair"}]})");
+}
+
+TEST(Schema, DLLExportedFuncConstness) {
+  const char* meta_json = __tvm_ffi__metadata_testing_dll_schema_input_const();
+  Map<String, Any> meta = json::Parse(String(meta_json)).cast<Map<String, Any>>();
+  Array<Any> arg_const = meta["arg_const"].cast<Array<Any>>();
+  EXPECT_EQ(arg_const.size(), 3);
+  EXPECT_TRUE(arg_const[0].cast<bool>());
+  EXPECT_TRUE(arg_const[1].cast<bool>());
+  EXPECT_FALSE(arg_const[2].cast<bool>());
+}
+
+TEST(Schema, DLLExportedFuncDocumentation) {
+  EXPECT_EQ(ParseMetadataToSchema(__tvm_ffi__metadata_testing_dll_test_add_with_docstring()),
+            R"({"type":"ffi.Function","args":[{"type":"int"},{"type":"int"},{"type":"int"}]})");
+  const char* doc = __tvm_ffi__doc_testing_dll_test_add_with_docstring();
+  EXPECT_NE(doc, nullptr);
+  std::string doc_str(doc);
+  EXPECT_TRUE(doc_str.find("Add two integers") != std::string::npos);
+  EXPECT_TRUE(doc_str.find("Parameters") != std::string::npos);
+  EXPECT_TRUE(doc_str.find("Returns") != std::string::npos);
 }
 
 }  // namespace
