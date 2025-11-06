@@ -244,6 +244,7 @@ def test_class_metadata_none() -> None:
         ("testing_dll_schema_no_args", "Callable[[], int]"),
         ("testing_dll_schema_no_return", "Callable[[int], None]"),
         ("testing_dll_schema_no_args_no_return", "Callable[[], None]"),
+        ("testing_dll_schema_input_const", "Callable[[Tensor, Tensor, Tensor], None]"),
     ],
 )
 def test_schema_dll_exported_func(func_name: str, expected: str) -> None:
@@ -260,6 +261,13 @@ def test_schema_dll_exported_func(func_name: str, expected: str) -> None:
         "dict",
         "Mapping",
     )
+    assert mod.get_function_doc(func_name) is None
+    if func_name == "testing_dll_schema_input_const":
+        assert metadata["arg_const"] == [True, True, False], f"{func_name}: {metadata['arg_const']}"
+    else:
+        assert metadata["arg_const"] == [False] * len(metadata["arg_const"]), (
+            f"{func_name}: {metadata['arg_const']}"
+        )
 
 
 def test_mem_fn_as_dll_exported_func() -> None:
@@ -269,3 +277,18 @@ def test_mem_fn_as_dll_exported_func() -> None:
     metadata: dict[str, Any] = mod.get_function_metadata("testing_dll_schema_test_int_pair_sum")
     type_schema: TypeSchema = TypeSchema.from_json_str(metadata["type_schema"])
     assert str(type_schema) == "Callable[[testing.TestIntPair], int]"
+
+
+def test_dll_exported_func_with_doc() -> None:
+    """Test TVM_FFI_DLL_EXPORT_TYPED_FUNC_DOC exports metadata and documentation."""
+    testing_lib_path = libinfo.find_library_by_basename("tvm_ffi_testing")
+    mod = tvm_ffi.load_module(testing_lib_path)
+    metadata: dict[str, Any] = mod.get_function_metadata("testing_dll_test_add_with_docstring")
+    assert "type_schema" in metadata
+    schema = TypeSchema.from_json_str(metadata["type_schema"])
+    assert str(schema) == "Callable[[int, int], int]"
+    doc = mod.get_function_doc("testing_dll_test_add_with_docstring")
+    assert doc is not None
+    assert "Add two integers" in doc
+    assert "Parameters" in doc
+    assert "Returns" in doc
