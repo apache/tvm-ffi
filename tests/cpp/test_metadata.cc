@@ -29,6 +29,30 @@
 #include <tvm/ffi/reflection/accessor.h>
 #include <tvm/ffi/string.h>
 
+// Forward declarations
+extern "C" {
+const char* __tvm_ffi__metadata_testing_dll_schema_id_int();
+const char* __tvm_ffi__metadata_testing_dll_schema_id_float();
+const char* __tvm_ffi__metadata_testing_dll_schema_id_bool();
+const char* __tvm_ffi__metadata_testing_dll_schema_id_device();
+const char* __tvm_ffi__metadata_testing_dll_schema_id_dtype();
+const char* __tvm_ffi__metadata_testing_dll_schema_id_string();
+const char* __tvm_ffi__metadata_testing_dll_schema_id_bytes();
+const char* __tvm_ffi__metadata_testing_dll_schema_id_tensor();
+const char* __tvm_ffi__metadata_testing_dll_schema_tensor_view_input();
+const char* __tvm_ffi__metadata_testing_dll_schema_id_opt_int();
+const char* __tvm_ffi__metadata_testing_dll_schema_id_opt_str();
+const char* __tvm_ffi__metadata_testing_dll_schema_id_arr_int();
+const char* __tvm_ffi__metadata_testing_dll_schema_id_arr_str();
+const char* __tvm_ffi__metadata_testing_dll_schema_id_map_str_int();
+const char* __tvm_ffi__metadata_testing_dll_schema_id_variant_int_str();
+const char* __tvm_ffi__metadata_testing_dll_schema_arr_map_opt();
+const char* __tvm_ffi__metadata_testing_dll_schema_no_args();
+const char* __tvm_ffi__metadata_testing_dll_schema_no_return();
+const char* __tvm_ffi__metadata_testing_dll_schema_no_args_no_return();
+const char* __tvm_ffi__metadata_testing_dll_schema_test_int_pair_sum();
+}
+
 namespace {
 
 using namespace tvm::ffi;
@@ -198,6 +222,73 @@ TEST(Schema, MethodTypeSchemas) {
   EXPECT_EQ(
       method_schema("make_with"),
       R"({"type":"ffi.Function","args":[{"type":"testing.SchemaAllTypes"},{"type":"int"},{"type":"float"},{"type":"ffi.String"}]})");
+}
+
+TEST(Schema, DLLExportedFuncMetadata) {
+  // Simple types
+  EXPECT_EQ(ParseMetadataToSchema(__tvm_ffi__metadata_testing_dll_schema_id_int()),
+            R"({"type":"ffi.Function","args":[{"type":"int"},{"type":"int"}]})");
+  EXPECT_EQ(ParseMetadataToSchema(__tvm_ffi__metadata_testing_dll_schema_id_float()),
+            R"({"type":"ffi.Function","args":[{"type":"float"},{"type":"float"}]})");
+  EXPECT_EQ(ParseMetadataToSchema(__tvm_ffi__metadata_testing_dll_schema_id_bool()),
+            R"({"type":"ffi.Function","args":[{"type":"bool"},{"type":"bool"}]})");
+  EXPECT_EQ(ParseMetadataToSchema(__tvm_ffi__metadata_testing_dll_schema_id_device()),
+            R"({"type":"ffi.Function","args":[{"type":"Device"},{"type":"Device"}]})");
+  EXPECT_EQ(ParseMetadataToSchema(__tvm_ffi__metadata_testing_dll_schema_id_dtype()),
+            R"({"type":"ffi.Function","args":[{"type":"DataType"},{"type":"DataType"}]})");
+  EXPECT_EQ(ParseMetadataToSchema(__tvm_ffi__metadata_testing_dll_schema_id_string()),
+            R"({"type":"ffi.Function","args":[{"type":"ffi.String"},{"type":"ffi.String"}]})");
+  EXPECT_EQ(ParseMetadataToSchema(__tvm_ffi__metadata_testing_dll_schema_id_bytes()),
+            R"({"type":"ffi.Function","args":[{"type":"ffi.Bytes"},{"type":"ffi.Bytes"}]})");
+
+  // Tensor types
+  EXPECT_EQ(ParseMetadataToSchema(__tvm_ffi__metadata_testing_dll_schema_id_tensor()),
+            R"({"type":"ffi.Function","args":[{"type":"ffi.Tensor"},{"type":"ffi.Tensor"}]})");
+  EXPECT_EQ(ParseMetadataToSchema(__tvm_ffi__metadata_testing_dll_schema_tensor_view_input()),
+            R"({"type":"ffi.Function","args":[{"type":"None"},{"type":"DLTensor*"}]})");
+
+  // Optional types
+  EXPECT_EQ(
+      ParseMetadataToSchema(__tvm_ffi__metadata_testing_dll_schema_id_opt_int()),
+      R"({"type":"ffi.Function","args":[{"type":"Optional","args":[{"type":"int"}]},{"type":"Optional","args":[{"type":"int"}]}]})");
+  EXPECT_EQ(
+      ParseMetadataToSchema(__tvm_ffi__metadata_testing_dll_schema_id_opt_str()),
+      R"({"type":"ffi.Function","args":[{"type":"Optional","args":[{"type":"ffi.String"}]},{"type":"Optional","args":[{"type":"ffi.String"}]}]})");
+
+  // Array types
+  EXPECT_EQ(
+      ParseMetadataToSchema(__tvm_ffi__metadata_testing_dll_schema_id_arr_int()),
+      R"({"type":"ffi.Function","args":[{"type":"ffi.Array","args":[{"type":"int"}]},{"type":"ffi.Array","args":[{"type":"int"}]}]})");
+  EXPECT_EQ(
+      ParseMetadataToSchema(__tvm_ffi__metadata_testing_dll_schema_id_arr_str()),
+      R"({"type":"ffi.Function","args":[{"type":"ffi.Array","args":[{"type":"ffi.String"}]},{"type":"ffi.Array","args":[{"type":"ffi.String"}]}]})");
+
+  // Map types
+  EXPECT_EQ(
+      ParseMetadataToSchema(__tvm_ffi__metadata_testing_dll_schema_id_map_str_int()),
+      R"({"type":"ffi.Function","args":[{"type":"ffi.Map","args":[{"type":"ffi.String"},{"type":"int"}]},{"type":"ffi.Map","args":[{"type":"ffi.String"},{"type":"int"}]}]})");
+
+  // Variant types
+  EXPECT_EQ(
+      ParseMetadataToSchema(__tvm_ffi__metadata_testing_dll_schema_id_variant_int_str()),
+      R"({"type":"ffi.Function","args":[{"type":"Variant","args":[{"type":"int"},{"type":"ffi.String"}]},{"type":"Variant","args":[{"type":"int"},{"type":"ffi.String"}]}]})");
+
+  // Complex nested types
+  EXPECT_EQ(
+      ParseMetadataToSchema(__tvm_ffi__metadata_testing_dll_schema_arr_map_opt()),
+      R"({"type":"ffi.Function","args":[{"type":"ffi.Map","args":[{"type":"ffi.String"},{"type":"ffi.Array","args":[{"type":"int"}]}]},{"type":"ffi.Array","args":[{"type":"Optional","args":[{"type":"int"}]}]},{"type":"ffi.Map","args":[{"type":"ffi.String"},{"type":"ffi.Array","args":[{"type":"int"}]}]},{"type":"Optional","args":[{"type":"ffi.String"}]}]})");
+
+  // Edge cases
+  EXPECT_EQ(ParseMetadataToSchema(__tvm_ffi__metadata_testing_dll_schema_no_args()),
+            R"({"type":"ffi.Function","args":[{"type":"int"}]})");
+  EXPECT_EQ(ParseMetadataToSchema(__tvm_ffi__metadata_testing_dll_schema_no_return()),
+            R"({"type":"ffi.Function","args":[{"type":"None"},{"type":"int"}]})");
+  EXPECT_EQ(ParseMetadataToSchema(__tvm_ffi__metadata_testing_dll_schema_no_args_no_return()),
+            R"({"type":"ffi.Function","args":[{"type":"None"}]})");
+
+  // Member function wrapper pattern
+  EXPECT_EQ(ParseMetadataToSchema(__tvm_ffi__metadata_testing_dll_schema_test_int_pair_sum()),
+            R"({"type":"ffi.Function","args":[{"type":"int"},{"type":"testing.TestIntPair"}]})");
 }
 
 }  // namespace
