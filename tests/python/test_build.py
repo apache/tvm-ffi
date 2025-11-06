@@ -35,8 +35,12 @@ def test_build_cpp() -> None:
 
     metadata = mod.get_function_metadata("add_one_cpu")
     assert "type_schema" in metadata
-    actual = TypeSchema.from_json_str(metadata["type_schema"])
-    assert str(actual) == "Callable[[Tensor, Tensor], None]", f"{'add_one_cpu'}: {actual}"
+    schema = TypeSchema.from_json_str(metadata["type_schema"])
+    assert str(schema) == "Callable[[Tensor, Tensor], None]", f"{'add_one_cpu'}: {schema}"
+    assert "arg_const" in metadata
+    arg_const = metadata["arg_const"]
+    assert len(arg_const) == 2, "Should have 2 arguments"
+    assert arg_const[0] is False and arg_const[1] is False, f"{'add_one_cpu'}: {arg_const}"
 
     x = numpy.array([1, 2, 3, 4, 5], dtype=numpy.float32)
     y = numpy.empty_like(x)
