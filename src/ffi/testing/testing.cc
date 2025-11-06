@@ -351,6 +351,9 @@ int64_t schema_no_args() { return 1; }
 void schema_no_return(int64_t x) {}
 void schema_no_args_no_return() {}
 
+// Member function pattern
+int64_t test_int_pair_sum_wrapper(const tvm::ffi::TestIntPair& target) { return target.Sum(); }
+
 }  // namespace schema_test_impl
 
 // A class with a wide variety of field types and method signatures
@@ -568,5 +571,7 @@ TVM_FFI_DLL_EXPORT_TYPED_FUNC(testing_dll_schema_no_return,
                               tvm::ffi::schema_test_impl::schema_no_return);
 TVM_FFI_DLL_EXPORT_TYPED_FUNC(testing_dll_schema_no_args_no_return,
                               tvm::ffi::schema_test_impl::schema_no_args_no_return);
+TVM_FFI_DLL_EXPORT_TYPED_FUNC(testing_dll_schema_test_int_pair_sum,
+                              tvm::ffi::schema_test_impl::test_int_pair_sum_wrapper);
 
 extern "C" TVM_FFI_DLL_EXPORT int TVMFFITestingDummyTarget() { return 0; }
