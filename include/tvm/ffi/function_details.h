@@ -28,10 +28,8 @@
 #include <tvm/ffi/c_api.h>
 #include <tvm/ffi/error.h>
 
-#include <optional>
 #include <string>
 #include <tuple>
-#include <type_traits>
 #include <utility>
 
 namespace tvm {
@@ -65,6 +63,13 @@ static constexpr bool ArgSupported =
 template <typename T>
 static constexpr bool RetSupported =
     (std::is_same_v<T, Any> || std::is_void_v<T> || TypeTraits<T>::convert_enabled);
+
+/// NOTE: we only support `T`, `const T`, `const T&` and `T &&` as argument types
+template <typename T>
+static constexpr bool TypeSupported =
+    (!std::is_reference_v<T>) ||
+    (std::is_const_v<std::remove_reference_t<T>> && std::is_lvalue_reference_v<T>) ||
+    (!std::is_const_v<std::remove_reference_t<T>> && std::is_rvalue_reference_v<T>);
 
 template <typename R, typename... Args>
 struct FuncFunctorImpl {
@@ -136,19 +141,10 @@ struct FunctionInfo<R (Class::*)(Args...) const,
 /*! \brief Using static function to output typed function signature */
 using FGetFuncSignature = std::string (*)();
 
-/*!
- * \brief Auxilary argument value with context for error reporting
- */
-template <typename Type, bool NeedStorage>
-class ArgValueWithContext;
-
-template <typename Type>
-class ArgValueWithContext<Type, /*NeedStorage=*/false> {
+template <typename Type, bool = TypeSupported<Type>>
+class ArgValueWithContext {
  public:
-  // We only support pure value type to convert to, to avoid any dangling reference issues.
-  // C++ will automatically eliminate unnecessary constructor calls by NRVO,
-  // so return by value won't cause performance issue.
-  static_assert(std::is_same_v<Type, std::remove_const_t<std::remove_reference_t<Type>>>);
+  using TypeWithoutCR = std::remove_const_t<std::remove_reference_t<Type>>;
 
   /*!
    * \brief move constructor from another return value.
@@ -162,21 +158,22 @@ class ArgValueWithContext<Type, /*NeedStorage=*/false> {
                                      const std::string* optional_name, FGetFuncSignature f_sig)
       : args_(args), arg_index_(arg_index), optional_name_(optional_name), f_sig_(f_sig) {}
 
-  TVM_FFI_INLINE operator Type() {  // NOLINT(google-explicit-constructor)
-    if constexpr (std::is_same_v<Type, AnyView>) {
+  TVM_FFI_INLINE operator TypeWithoutCR() {  // NOLINT(google-explicit-constructor)
+    if constexpr (std::is_same_v<TypeWithoutCR, AnyView>) {
       return args_[arg_index_];
-    } else if constexpr (std::is_same_v<Type, Any>) {
+    } else if constexpr (std::is_same_v<TypeWithoutCR, Any>) {
       return Any(args_[arg_index_]);
     } else {
-      auto opt = args_[arg_index_].template try_cast<Type>();
+      std::optional<TypeWithoutCR> opt = args_[arg_index_].template try_cast<TypeWithoutCR>();
       if (!opt.has_value()) {
         TVMFFIAny any_data = args_[arg_index_].CopyToTVMFFIAny();
         TVM_FFI_THROW(TypeError) << "Mismatched type on argument #" << arg_index_
                                  << " when calling: `"
                                  << (optional_name_ == nullptr ? "" : *optional_name_)
                                  << (f_sig_ == nullptr ? "" : (*f_sig_)()) << "`. Expected `"
-                                 << Type2Str<Type>::v() << "` but got `"
-                                 << TypeTraits<Type>::GetMismatchTypeInfo(&any_data) << '`';
+                                 << Type2Str<TypeWithoutCR>::v() << "` but got `"
+                                 << TypeTraits<TypeWithoutCR>::GetMismatchTypeInfo(&any_data)
+                                 << '`';
       }
       return *std::move(opt);
     }
@@ -190,67 +187,18 @@ class ArgValueWithContext<Type, /*NeedStorage=*/false> {
 };
 
 template <typename Type>
-class ArgValueWithContext<Type, /*NeedStorage=*/true> {
+class ArgValueWithContext<Type, false> {
  public:
-  // We only support pure value type to convert to, to avoid any dangling reference issues.
-  // C++ will automatically eliminate unnecessary constructor calls by NRVO,
-  // so return by value won't cause performance issue.
-  static_assert(std::is_same_v<Type, std::remove_const_t<std::remove_reference_t<Type>>>);
-  /*!
-   * \brief move constructor from another return value.
-   * \param args The argument list
-   * \param arg_index In a function call, this argument is at index arg_index (0-indexed).
-   * \param optional_name Name of the function being called. Can be nullptr if the function is
-   * not.
-   * \param f_sig Pointer to static function outputting signature of the function being called.
-   * named.
-   */
-  TVM_FFI_INLINE ArgValueWithContext(const AnyView* args, int32_t arg_index,
-                                     const std::string* optional_name, FGetFuncSignature f_sig)
-      : args_(args), arg_index_(arg_index), optional_name_(optional_name), f_sig_(f_sig) {}
+  static_assert(
+      TypeSupported<Type>,
+      "Argument type in FFI function signature can only be T, const T, or const T& or T&&");
 
-  // to avoid dangling reference, we only allow one-time conversion to Type&
-  TVM_FFI_INLINE operator Type&() {  // NOLINT(google-explicit-constructor)
-    TVM_FFI_ICHECK(!temp_storage_.has_value())
-        << "ArgValueWithContext<Type> can only be converted to Type& once.";
-    if constexpr (std::is_same_v<Type, AnyView>) {
-      temp_storage_.emplace(args_[arg_index_]);
-    } else if constexpr (std::is_same_v<Type, Any>) {
-      temp_storage_.emplace(Any(args_[arg_index_]));
-    } else {
-      temp_storage_ = args_[arg_index_].template try_cast<Type>();
-      if (!temp_storage_.has_value()) {
-        TVMFFIAny any_data = args_[arg_index_].CopyToTVMFFIAny();
-        TVM_FFI_THROW(TypeError) << "Mismatched type on argument #" << arg_index_
-                                 << " when calling: `"
-                                 << (optional_name_ == nullptr ? "" : *optional_name_)
-                                 << (f_sig_ == nullptr ? "" : (*f_sig_)()) << "`. Expected `"
-                                 << Type2Str<Type>::v() << "` but got `"
-                                 << TypeTraits<Type>::GetMismatchTypeInfo(&any_data) << '`';
-      }
-    }
-    return temp_storage_.value();
-  }
-
- private:
-  const AnyView* args_;
-  int32_t arg_index_;
-  const std::string* optional_name_;
-  FGetFuncSignature f_sig_;
-  std::optional<Type> temp_storage_;
+  // These functions are kept to avoid extra errors,
+  // so that only the static_assert above is triggered, leaving a clear error message.
+  template <typename... Args>
+  explicit ArgValueWithContext(const Args&...);
+  operator Type();  // NOLINT(google-explicit-constructor)
 };
-
-/**
- * \brief Auxilary argument value with context for error reporting
- * For `Type &` non-const lvalue reference types, we need to
- * store a temporary value to avoid dangling reference issues.
- * For `const Type`, `Type &&`, returning value can be cast to
- * the desired type directly.
- */
-template <typename Type>
-using ArgValue = ArgValueWithContext<std::remove_const_t<std::remove_reference_t<Type>>,
-                                     (!std::is_const_v<std::remove_reference_t<Type>> &&
-                                      std::is_lvalue_reference_v<Type>)>;
 
 template <typename R, std::size_t... Is, typename F>
 TVM_FFI_INLINE void unpack_call(std::index_sequence<Is...>, const std::string* optional_name,
@@ -273,9 +221,10 @@ TVM_FFI_INLINE void unpack_call(std::index_sequence<Is...>, const std::string* o
   }
   // use index sequence to do recursive-less unpacking
   if constexpr (std::is_same_v<R, void>) {
-    f(ArgValue<std::tuple_element_t<Is, PackedArgs>>{args, Is, optional_name, f_sig}...);
+    f(ArgValueWithContext<std::tuple_element_t<Is, PackedArgs>>{args, Is, optional_name, f_sig}...);
   } else {
-    *rv = R(f(ArgValue<std::tuple_element_t<Is, PackedArgs>>{args, Is, optional_name, f_sig}...));
+    *rv = R(f(ArgValueWithContext<std::tuple_element_t<Is, PackedArgs>>{args, Is, optional_name,
+                                                                        f_sig}...));
   }
 }
 
