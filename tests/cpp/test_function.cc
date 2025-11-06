@@ -19,6 +19,8 @@
 #include <gtest/gtest.h>
 #include <tvm/ffi/any.h>
 #include <tvm/ffi/container/array.h>
+#include <tvm/ffi/container/map.h>
+#include <tvm/ffi/extra/json.h>
 #include <tvm/ffi/function.h>
 #include <tvm/ffi/memory.h>
 
@@ -284,6 +286,21 @@ int invoke_testing_add1(int x) {
 }
 
 TEST(Func, InvokeExternC) { EXPECT_EQ(invoke_testing_add1(1), 2); }
+
+extern "C" const char* __tvm_ffi__metadata_testing_add1();
+
+TEST(Func, StaticLinkingMetadata) {
+  const char* metadata_json = __tvm_ffi__metadata_testing_add1();
+  EXPECT_NE(metadata_json, nullptr);
+  Map<String, Any> metadata = json::Parse(String(metadata_json)).cast<Map<String, Any>>();
+  EXPECT_TRUE(metadata.count("type_schema"));
+  EXPECT_TRUE(metadata.count("arg_const"));
+  std::string type_schema_str = metadata["type_schema"].cast<String>();
+  EXPECT_TRUE(type_schema_str.find("int") != std::string::npos);
+  Array<Any> arg_const = metadata["arg_const"].cast<Array<Any>>();
+  EXPECT_EQ(arg_const.size(), 1);
+  EXPECT_FALSE(arg_const[0].cast<bool>());
+}
 
 extern "C" TVM_FFI_DLL int TVMFFITestingDummyTarget();
 
