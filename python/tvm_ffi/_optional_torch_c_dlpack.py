@@ -109,7 +109,7 @@ def load_torch_c_dlpack_extension() -> Any:
     return None
 
 
-def patch_torch_cuda_stream_protocol() -> Any:
+def patch_torch_cuda_stream_protocol() -> None:
     """Load the torch cuda stream protocol for older versions of torch."""
     try:
         import torch  # noqa: PLC0415
@@ -118,7 +118,7 @@ def patch_torch_cuda_stream_protocol() -> Any:
             return
         if not hasattr(torch.cuda.Stream, "__cuda_stream__"):
 
-            def __torch_cuda_stream__(self: torch.cuda.Stream) -> tuple[int, torch.cuda.Stream]:
+            def __torch_cuda_stream__(self: torch.cuda.Stream) -> tuple[int, int]:
                 """Return the version number and the cuda stream."""
                 return (0, self.cuda_stream)
 

@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import ctypes
 from types import ModuleType
 
 import pytest
@@ -28,6 +29,24 @@ try:
     import torch  # type: ignore[no-redef]
 except ImportError:
     torch = None
+
+
+try:
+    from cuda.bindings import driver as cuda_driver  # type: ignore[import-not-found]
+except ImportError:
+    cuda_driver = None
+
+
+@pytest.mark.skipif(cuda_driver is None, reason="Requires cuda-python")
+def test_cuda_driver_stream() -> None:
+    assert cuda_driver is not None
+    echo = tvm_ffi.get_global_func("testing.echo")
+    stream = cuda_driver.CUstream(0)
+    y = echo(stream)
+    assert y is not None
+    z = echo(cuda_driver.CUstream(1))
+    assert isinstance(z, ctypes.c_void_p)
+    assert z.value == 1
 
 
 def gen_check_stream_mod() -> tvm_ffi.Module:

@@ -33,9 +33,15 @@ if os.environ.get("TVM_FFI_BUILD_DOCS", "0") == "0":
         import numpy
     except ImportError:
         numpy = None
+
+    try:
+        from cuda.bindings import driver as cuda_driver
+    except ImportError:
+        cuda_driver = None
 else:
     torch = None
     numpy = None
+    cuda_driver = None
 
 
 cdef int _RELEASE_GIL_BY_DEFAULT = int(
@@ -287,7 +293,7 @@ cdef int TVMFFIPyArgSetterFFIObjectCompatible_(
     return 0
 
 
-cdef int TVMFFIPyArgSetterCUDAStream_(
+cdef int TVMFFIPyArgSetterCUDAStreamProtocol_(
     TVMFFIPyArgSetter* handle, TVMFFIPyCallContext* ctx,
     PyObject* py_arg, TVMFFIAny* out
 ) except -1:
@@ -296,6 +302,19 @@ cdef int TVMFFIPyArgSetterCUDAStream_(
     # cuda stream is a subclass of str, so this check occur before str
     cdef tuple cu_stream_tuple = arg.__cuda_stream__()
     cdef long long long_ptr = <long long>cu_stream_tuple[1]
+    out.type_index = kTVMFFIOpaquePtr
+    out.v_ptr = <void*>long_ptr
+    return 0
+
+
+cdef int TVMFFIPyArgSetterCUDADriverStreamFallback_(
+    TVMFFIPyArgSetter* handle, TVMFFIPyCallContext* ctx,
+    PyObject* py_arg, TVMFFIAny* out
+) except -1:
+    """Setter for cuda.bindings.driver.CUstream as a fallback without __cuda_stream__ protocol"""
+    cdef object arg = <object>py_arg
+    # call driver stream
+    cdef long long long_ptr = int(arg)
     out.type_index = kTVMFFIOpaquePtr
     out.v_ptr = <void*>long_ptr
     return 0
@@ -658,7 +677,11 @@ cdef int TVMFFIPyArgSetterFactory_(PyObject* value, TVMFFIPyArgSetter* out) exce
             return 0
     if hasattr(arg_class, "__cuda_stream__"):
         # cuda stream protocol
-        out.func = TVMFFIPyArgSetterCUDAStream_
+        out.func = TVMFFIPyArgSetterCUDAStreamProtocol_
+        return 0
+    if cuda_driver is not None and isinstance(arg, cuda_driver.CUstream):
+        # TODO(tqchen): remove this once cuda-python supports __cuda_stream__ protocol
+        out.func = TVMFFIPyArgSetterCUDADriverStreamFallback_
         return 0
     if torch is not None and isinstance(arg, torch.Tensor):
         out.func = TVMFFIPyArgSetterTorchFallback_
