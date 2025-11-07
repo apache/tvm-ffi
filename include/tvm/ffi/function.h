@@ -863,7 +863,8 @@ inline int32_t TypeKeyToIndex(std::string_view type_key) {
  * });
  * \endcode
  *
- * \note The final symbol name is `__tvm_ffi_<ExportName>`.
+ * \note The final symbol names are `__tvm_ffi_<ExportName>` (function)
+ *       and `__tvm_ffi__metadata_<ExportName>` (metadata).
  */
 #define TVM_FFI_DLL_EXPORT_TYPED_FUNC(ExportName, Function)                            \
   extern "C" {                                                                         \
@@ -878,6 +879,56 @@ inline int32_t TypeKeyToIndex(std::string_view type_key) {
         reinterpret_cast<::tvm::ffi::Any*>(result));                                   \
     TVM_FFI_SAFE_CALL_END();                                                           \
   }                                                                                    \
+  TVM_FFI_DLL_EXPORT const char* __tvm_ffi__metadata_##ExportName() {                  \
+    using FuncInfo = ::tvm::ffi::details::FunctionInfo<decltype(Function)>;            \
+    static std::string metadata_json = []() {                                          \
+      std::ostringstream oss;                                                          \
+      oss << R"({"type_schema":)"                                                      \
+          << ::tvm::ffi::EscapeString(::tvm::ffi::String(FuncInfo::TypeSchema()));     \
+      oss << R"(,"arg_const":[)";                                                      \
+      ::tvm::ffi::details::ArgConstHelper<typename FuncInfo::ArgType>::Generate(oss);  \
+      oss << "]}";                                                                     \
+      return oss.str();                                                                \
+    }();                                                                               \
+    return metadata_json.c_str();                                                      \
+  }                                                                                    \
+  }
+
+/*!
+ * \brief Export typed function with documentation as SafeCallType symbols.
+ *
+ * This is an extended version of TVM_FFI_DLL_EXPORT_TYPED_FUNC that also exports
+ * a documentation string. The docstring can be used by stub generators and
+ * documentation tools.
+ *
+ * \param ExportName The symbol name to be exported.
+ * \param Function The typed function.
+ * \param DocString The documentation string (C string literal).
+ *
+ * \sa ffi::TypedFunction, TVM_FFI_DLL_EXPORT_TYPED_FUNC
+ *
+ * \code
+ *
+ * void ProcessBatch(tvm::ffi::TensorView input, tvm::ffi::TensorView output) {
+ *   // ... implementation
+ * }
+ *
+ * TVM_FFI_DLL_EXPORT_TYPED_FUNC_DOC(
+ *     process_batch,
+ *     ProcessBatch,
+ *     "Process a batch of inputs and write results to output tensor.");
+ *
+ * \endcode
+ *
+ * \note The final symbol names are:
+ *       - `__tvm_ffi_<ExportName>` (function)
+ *       - `__tvm_ffi__metadata_<ExportName>` (metadata)
+ *       - `__tvm_ffi__doc_<ExportName>` (docstring)
+ */
+#define TVM_FFI_DLL_EXPORT_TYPED_FUNC_DOC(ExportName, Function, DocString)           \
+  TVM_FFI_DLL_EXPORT_TYPED_FUNC(ExportName, Function)                                \
+  extern "C" {                                                                       \
+  TVM_FFI_DLL_EXPORT const char* __tvm_ffi__doc_##ExportName() { return DocString; } \
   }
 }  // namespace ffi
 }  // namespace tvm

@@ -170,6 +170,95 @@ class Module(core.Object):
             raise AttributeError(f"Module has no function '{name}'")
         return func
 
+    def get_function_metadata(self, name: str, query_imports: bool = False) -> dict[str, Any]:
+        """Get metadata for a function exported from the module.
+
+        This retrieves metadata for functions exported via TVM_FFI_DLL_EXPORT_TYPED_FUNC,
+        which includes type schema information.
+
+        Parameters
+        ----------
+        name
+            The name of the function
+
+        query_imports
+            Whether to also query modules imported by this module.
+
+        Returns
+        -------
+        metadata
+            A dictionary containing function metadata. The ``type_schema`` field
+            encodes the callable signature.
+
+        Examples
+        --------
+        .. code-block:: python
+
+            import tvm_ffi
+            from tvm_ffi.core import TypeSchema
+            import json
+
+            mod = tvm_ffi.load_module("add_one_cpu.so")
+            metadata = mod.get_function_metadata("add_one_cpu")
+            schema = TypeSchema.from_json_str(metadata["type_schema"])
+            print(schema)  # Shows function signature
+
+        See Also
+        --------
+        :py:func:`tvm_ffi.get_global_func_metadata`
+            Get metadata for global registry functions.
+
+        """
+        import json
+
+        metadata_str = _ffi_api.ModuleGetFunctionMetadata(self, name, query_imports)
+        if metadata_str is None:
+            raise AttributeError(
+                f"Module has no metadata for function '{name}'. "
+                f"Ensure the function was exported with TVM_FFI_DLL_EXPORT_TYPED_FUNC."
+            )
+        return json.loads(metadata_str)
+
+    def get_function_doc(self, name: str, query_imports: bool = False) -> str | None:
+        """Get documentation string for a function exported from the module.
+
+        This retrieves documentation for functions exported via TVM_FFI_DLL_EXPORT_TYPED_FUNC_DOC.
+        If the function was exported with TVM_FFI_DLL_EXPORT_TYPED_FUNC, this function will
+        return None.
+
+        Parameters
+        ----------
+        name
+            The name of the function
+
+        query_imports
+            Whether to also query modules imported by this module.
+
+        Returns
+        -------
+        doc : str or None
+            The documentation string if available, None otherwise.
+
+        Examples
+        --------
+        .. code-block:: python
+
+            import tvm_ffi
+
+            mod = tvm_ffi.load_module("mylib.so")
+            doc = mod.get_function_doc("process_batch")
+            if doc:
+                print(doc)
+
+        See Also
+        --------
+        :py:meth:`get_function_metadata`
+            Get metadata including type schema.
+
+        """
+        doc_str = _ffi_api.ModuleGetFunctionDoc(self, name, query_imports)
+        return doc_str if doc_str else None
+
     def import_module(self, module: Module) -> None:
         """Add module to the import list of current one.
 

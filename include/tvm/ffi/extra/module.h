@@ -275,6 +275,8 @@ constexpr const char* tvm_ffi_library_ctx = "__tvm_ffi__library_ctx";
 constexpr const char* tvm_ffi_library_bin = "__tvm_ffi__library_bin";
 /*! \brief Optional metadata prefix of a symbol. */
 constexpr const char* tvm_ffi_metadata_prefix = "__tvm_ffi__metadata_";
+/*! \brief Optional documentation prefix of a symbol. */
+constexpr const char* tvm_ffi_doc_prefix = "__tvm_ffi__doc_";
 }  // namespace symbol
 }  // namespace ffi
 }  // namespace tvm
