@@ -19,6 +19,7 @@
 # pylint: disable=invalid-name
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 from enum import IntEnum
 from os import PathLike, fspath
@@ -218,8 +219,6 @@ class Module(core.Object):
             Get metadata for global registry functions.
 
         """
-        import json
-
         metadata_str = _ffi_api.ModuleGetFunctionMetadata(self, name, query_imports)
         if metadata_str is None:
             raise AttributeError(

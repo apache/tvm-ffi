@@ -38,7 +38,7 @@ String GetTestingLibFilename() {
 }
 
 String GetTestingLibPath() {
-    // Testing library resides in the same directory as the test executable
+  // Testing library resides in the same directory as the test executable
   return GetTestingLibFilename();
 }
 

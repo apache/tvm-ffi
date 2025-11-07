@@ -298,6 +298,7 @@ The macro exports both the function and its type metadata, enabling signature va
 without calling the function.
 
 The metadata includes:
+
 - **type_schema**: JSON string describing function signature (return type and argument types)
 - **arg_const**: Array of booleans indicating which parameters are const (for memory effect validation)
 
