@@ -51,6 +51,7 @@ class String(str, PyNativeObject):
 
     """
     _tvm_ffi_cached_object: Object | None
+    __tvm_ffi_type_info__: object = TypeInfo.make_dummy()
 
     def __new__(cls, value: str) -> "String":
         val = str.__new__(cls, value)
@@ -66,9 +67,6 @@ class String(str, PyNativeObject):
         return val
 
 
-_register_object_by_index(kTVMFFIStr, String)
-
-
 class Bytes(bytes, PyNativeObject):
     """Byte buffer that interoperates with FFI while behaving like ``bytes``.
 
@@ -77,6 +75,7 @@ class Bytes(bytes, PyNativeObject):
     layer constructs :class:`Bytes` as needed.
     """
     _tvm_ffi_cached_object: Object | None
+    __tvm_ffi_type_info__: object = TypeInfo.make_dummy()
 
     def __new__(cls, value: bytes) -> "Bytes":
         val = bytes.__new__(cls, value)
@@ -90,7 +89,3 @@ class Bytes(bytes, PyNativeObject):
         val = bytes.__new__(cls, content)
         val._tvm_ffi_cached_object = obj
         return val
-
-
-_register_object_by_index(kTVMFFIBytes, Bytes)
-_register_object_by_index(kTVMFFIObject, Object)

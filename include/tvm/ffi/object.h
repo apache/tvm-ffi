@@ -293,6 +293,10 @@ class Object {
   static constexpr int32_t _type_index = TypeIndex::kTVMFFIObject;
   /*! \brief The static depth of the class in the object hierarchy */
   static constexpr int32_t _type_depth = 0;
+  /*! \brief The file where the class is defined. */
+  static constexpr const char* _type_file [[maybe_unused]] = __FILE__;
+  /*! \brief The line number in the file where the class is defined. */
+  static constexpr const int _type_line [[maybe_unused]] = __LINE__;
   /*! \brief The structural equality and hash kind of the type */
   static constexpr TVMFFISEqHashKind _type_s_eq_hash_kind = kTVMFFISEqHashKindUnsupported;
   // The following functions are provided by macro
@@ -929,6 +933,8 @@ struct ObjectPtrEqual {
  * \see tvm::ffi::reflection::ObjectDef
  */
 #define TVM_FFI_DECLARE_OBJECT_INFO_STATIC(TypeKey, TypeName, ParentType)                     \
+  static constexpr const char* _type_file [[maybe_unused]] = __FILE__;                        \
+  static constexpr const int _type_line [[maybe_unused]] = __LINE__;                          \
   static constexpr int32_t _type_depth = ParentType::_type_depth + 1;                         \
   static int32_t _GetOrAllocRuntimeTypeIndex() {                                              \
     static_assert(!ParentType::_type_final, "ParentType marked as final");                    \
@@ -952,6 +958,8 @@ struct ObjectPtrEqual {
  * \param ParentType The name of the ParentType
  */
 #define TVM_FFI_DECLARE_OBJECT_INFO_PREDEFINED_TYPE_KEY(TypeName, ParentType)                 \
+  static constexpr const char* _type_file [[maybe_unused]] = __FILE__;                        \
+  static constexpr const int _type_line [[maybe_unused]] = __LINE__;                          \
   static constexpr int32_t _type_depth = ParentType::_type_depth + 1;                         \
   static int32_t _GetOrAllocRuntimeTypeIndex() {                                              \
     static_assert(!ParentType::_type_final, "ParentType marked as final");                    \
@@ -1031,6 +1039,8 @@ struct ObjectPtrEqual {
  * \param ObjectName The type name of the object.
  */
 #define TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(TypeName, ParentType, ObjectName)      \
+  static constexpr const char* _type_file [[maybe_unused]] = __FILE__;                       \
+  static constexpr const int _type_line [[maybe_unused]] = __LINE__;                         \
   explicit TypeName(::tvm::ffi::UnsafeInit tag) : ParentType(tag) {}                         \
   TVM_FFI_DEFINE_DEFAULT_COPY_MOVE_AND_ASSIGN(TypeName)                                      \
   using __PtrType = std::conditional_t<(ObjectName::_type_mutable),                          \

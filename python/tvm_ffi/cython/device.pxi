@@ -93,6 +93,7 @@ cdef class Device:
 
     """
     cdef DLDevice cdevice
+    __tvm_ffi_type_info__: object = TypeInfo.make_dummy()
 
     _DEVICE_TYPE_TO_NAME = {
       DLDeviceType.kDLCPU: "cpu",

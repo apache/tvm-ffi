@@ -80,6 +80,7 @@ cdef class DataType:
 
     """
     cdef DLDataType cdtype
+    __tvm_ffi_type_info__: object = TypeInfo.make_dummy()
 
     def __init__(self, dtype_str: str) -> None:
         cdef ByteArrayArg dtype_str_arg = ByteArrayArg(c_str(dtype_str))

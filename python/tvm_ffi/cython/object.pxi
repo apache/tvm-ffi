@@ -110,6 +110,7 @@ cdef class Object:
 
     """
     cdef void* chandle
+    __tvm_ffi_type_info__: object = TypeInfo.make_dummy()
 
     def __cinit__(self):
         # initialize chandle to NULL to avoid leak in
@@ -487,6 +488,17 @@ cdef _update_registry(int type_index, object type_key, object type_info, object 
     TYPE_INDEX_TO_CLS[type_index] = type_cls
     TYPE_INDEX_TO_INFO[type_index] = type_info
     TYPE_KEY_TO_INFO[type_key] = type_info
+    if type_cls is not None:
+        if "__tvm_ffi_type_info__" not in type_cls.__dict__:
+            setattr(type_cls, "__tvm_ffi_type_info__", type_info)
+        elif (dst_type_info := type_cls.__tvm_ffi_type_info__) is not type_info:
+            dst_type_info.type_cls = type_info.type_cls
+            dst_type_info.type_index = type_info.type_index
+            dst_type_info.type_key = type_info.type_key
+            dst_type_info.type_ancestors = type_info.type_ancestors
+            dst_type_info.fields = type_info.fields
+            dst_type_info.methods = type_info.methods
+            dst_type_info.parent_type_info = type_info.parent_type_info
 
 
 def _register_object_by_index(int type_index, object type_cls):
@@ -504,6 +516,10 @@ def _set_type_cls(object type_info, object type_cls):
     assert TYPE_KEY_TO_INFO[type_info.type_key] is type_info
     type_info.type_cls = type_cls
     TYPE_INDEX_TO_CLS[type_info.type_index] = type_cls
+    if orig_type_info := getattr(type_cls, "__tvm_ffi_type_info__", None):
+        assert orig_type_info is type_info
+    else:
+        setattr(type_cls, "__tvm_ffi_type_info__", type_info)
 
 
 def _lookup_or_register_type_info_from_type_key(type_key: str) -> TypeInfo:
@@ -512,6 +528,15 @@ def _lookup_or_register_type_info_from_type_key(type_key: str) -> TypeInfo:
     info = _type_info_create_from_type_key(None, type_key)
     _update_registry(info.type_index, type_key, info, None)
     return info
+
+
+def _lookup_type_attr(type_index: int32_t, attr_key: str) -> Any:
+    cdef ByteArrayArg attr_key_bytes = ByteArrayArg(c_str(attr_key))
+    cdef const TVMFFITypeAttrColumn* column = TVMFFIGetTypeAttrColumn(&attr_key_bytes.cdata)
+    cdef TVMFFIAny data
+    if column == NULL or column.size <= type_index:
+        return None
+    return make_ret(column.data[type_index])
 
 
 cdef list TYPE_INDEX_TO_CLS = []

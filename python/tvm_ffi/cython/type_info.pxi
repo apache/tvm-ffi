@@ -274,6 +274,19 @@ class TypeInfo:
     methods: list[TypeMethod]
     parent_type_info: Optional[TypeInfo]
 
+    @staticmethod
+    def make_dummy() -> "TypeInfo":
+        """Create a dummy TypeInfo with no fields or methods."""
+        return TypeInfo(
+            type_cls=None,
+            type_index=-1,
+            type_key="",
+            type_ancestors=[],
+            fields=[],
+            methods=[],
+            parent_type_info=None,
+        )
+
     def __post_init__(self):
         cdef int parent_type_index
         cdef str parent_type_key
@@ -281,8 +294,13 @@ class TypeInfo:
             return
         parent_type_index = self.type_ancestors[-1]
         parent_type_key = _type_index_to_key(parent_type_index)
-        # ensure parent is registered
-        self.parent_type_info = _lookup_or_register_type_info_from_type_key(parent_type_key)
+        parent_type_info = _lookup_or_register_type_info_from_type_key(parent_type_key)
+        if parent_type_info is None:
+            self.parent_type_info = None
+        elif parent_type_info.type_cls is None:
+            self.parent_type_info = parent_type_info
+        else:
+            self.parent_type_info = parent_type_info.type_cls.__tvm_ffi_type_info__
 
 
 def _member_method_wrapper(method_func: Callable[..., Any]) -> Callable[..., Any]:

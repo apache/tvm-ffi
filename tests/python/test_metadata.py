@@ -14,9 +14,12 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+import json
 from typing import Any
 
 import pytest
+import tvm_ffi
+import tvm_ffi.testing
 from tvm_ffi import get_global_func_metadata
 from tvm_ffi.core import TypeInfo, TypeSchema
 from tvm_ffi.testing import _SchemaAllTypes
@@ -195,3 +198,41 @@ def test_mem_fn_as_global_func() -> None:
     metadata: dict[str, Any] = get_global_func_metadata("testing.TestIntPairSum")
     type_schema: TypeSchema = TypeSchema.from_json_str(metadata["type_schema"])
     assert str(type_schema) == "Callable[[testing.TestIntPair], int]"
+
+
+@pytest.mark.parametrize(
+    "test_cls",
+    [
+        tvm_ffi.Object,
+        tvm_ffi.Tensor,
+        tvm_ffi.Shape,
+        tvm_ffi.core.DataType,
+        tvm_ffi.Device,
+        tvm_ffi.Module,
+        tvm_ffi.Function,
+        tvm_ffi.core.Error,
+        tvm_ffi.core.String,
+        tvm_ffi.core.Bytes,
+        tvm_ffi.Array,
+        tvm_ffi.Map,
+        tvm_ffi.access_path.AccessStep,
+        tvm_ffi.access_path.AccessPath,
+        tvm_ffi.testing.TestIntPair,
+        tvm_ffi.testing.TestObjectBase,
+        tvm_ffi.testing.TestObjectDerived,
+        tvm_ffi.testing._TestCxxClassBase,
+        tvm_ffi.testing._TestCxxClassDerived,
+        tvm_ffi.testing._TestCxxClassDerivedDerived,
+        tvm_ffi.testing._TestCxxInitSubset,
+        tvm_ffi.testing._SchemaAllTypes,
+    ],
+)
+def test_cls_source_location(test_cls: type) -> None:
+    type_info: tvm_ffi.core.TypeInfo = test_cls.__tvm_ffi_type_info__  # type: ignore[attr-defined]
+    metadata = tvm_ffi.core._lookup_type_attr(type_info.type_index, "__metadata__")
+    if metadata is None:
+        assert test_cls in [tvm_ffi.Object, tvm_ffi.core.DataType, tvm_ffi.Device]
+    else:
+        metadata = json.loads(metadata)
+        assert "source_file" in metadata
+        assert "source_line" in metadata

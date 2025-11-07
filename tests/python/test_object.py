@@ -14,11 +14,14 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+from __future__ import annotations
+
 import sys
 from typing import Any
 
 import pytest
 import tvm_ffi
+import tvm_ffi.testing
 from tvm_ffi.core import TypeInfo
 
 
@@ -169,3 +172,43 @@ def test_unregistered_object_fallback() -> None:
     for _ in range(5):
         obj = tvm_ffi.testing.make_unregistered_object()
         _check_type(obj)
+
+
+@pytest.mark.parametrize(
+    "test_cls, parent_cls",
+    [
+        (tvm_ffi.Object, None),
+        (tvm_ffi.Tensor, tvm_ffi.Object),
+        (tvm_ffi.Shape, tvm_ffi.Object),
+        (tvm_ffi.core.DataType, None),
+        (tvm_ffi.Device, None),
+        (tvm_ffi.Module, tvm_ffi.Object),
+        (tvm_ffi.Function, tvm_ffi.Object),
+        (tvm_ffi.core.Error, tvm_ffi.Object),
+        (tvm_ffi.core.String, tvm_ffi.Object),
+        (tvm_ffi.core.Bytes, tvm_ffi.Object),
+        (tvm_ffi.Tensor, tvm_ffi.Object),
+        (tvm_ffi.Array, tvm_ffi.Object),
+        (tvm_ffi.Map, tvm_ffi.Object),
+        (tvm_ffi.access_path.AccessStep, tvm_ffi.Object),
+        (tvm_ffi.access_path.AccessPath, tvm_ffi.Object),
+        (tvm_ffi.testing.TestIntPair, tvm_ffi.Object),
+        (tvm_ffi.testing.TestObjectBase, tvm_ffi.Object),
+        (tvm_ffi.testing.TestObjectDerived, tvm_ffi.testing.TestObjectBase),
+        (tvm_ffi.testing._TestCxxClassBase, tvm_ffi.Object),
+        (tvm_ffi.testing._TestCxxClassDerived, tvm_ffi.testing._TestCxxClassBase),
+        (tvm_ffi.testing._TestCxxClassDerivedDerived, tvm_ffi.testing._TestCxxClassDerived),
+        (tvm_ffi.testing._TestCxxInitSubset, tvm_ffi.Object),
+        (tvm_ffi.testing._SchemaAllTypes, tvm_ffi.Object),
+    ],
+)
+def test_type_info_attachment(test_cls: type, parent_cls: type | None) -> None:
+    type_info: tvm_ffi.core.TypeInfo = test_cls.__tvm_ffi_type_info__  # type: ignore[attr-defined]
+    assert type_info.type_index is not None and type_info.type_index > 0
+    assert type_info.type_key is not None and len(type_info.type_key) > 0
+    assert type_info.type_cls is test_cls
+    parent_type_info = type_info.parent_type_info
+    if parent_type_info:
+        assert parent_type_info is parent_type_info.type_cls.__tvm_ffi_type_info__  # type: ignore[union-attr]
+    else:
+        assert parent_cls is None

@@ -21,7 +21,10 @@
  * \brief Registry to record dynamic types
  */
 #include <tvm/ffi/c_api.h>
+#include <tvm/ffi/container/array.h>
 #include <tvm/ffi/container/map.h>
+#include <tvm/ffi/container/shape.h>
+#include <tvm/ffi/container/tensor.h>
 #include <tvm/ffi/error.h>
 #include <tvm/ffi/function.h>
 #include <tvm/ffi/memory.h>
@@ -34,6 +37,31 @@
 
 namespace tvm {
 namespace ffi {
+
+/**
+ * \brief Opaque implementation
+ */
+class OpaqueObjectImpl : public Object, public TVMFFIOpaqueObjectCell {
+ public:
+  OpaqueObjectImpl(void* handle, void (*deleter)(void* handle)) : deleter_(deleter) {
+    this->handle = handle;
+  }
+
+  void SetTypeIndex(int32_t type_index) {
+    details::ObjectUnsafe::GetHeader(this)->type_index = type_index;
+  }
+
+  ~OpaqueObjectImpl() {
+    if (deleter_ != nullptr) {
+      deleter_(handle);
+    }
+  }
+  static constexpr const char* _type_file [[maybe_unused]] = __FILE__;
+  static constexpr const int _type_line [[maybe_unused]] = __LINE__;
+
+ private:
+  void (*deleter_)(void* handle);
+};
 
 /*!
  * \brief Global registry that manages
@@ -316,6 +344,13 @@ class TypeTable {
 
  private:
   TypeTable() {
+    {
+      // Pre-allocate the metadata column for the type attributes.
+      std::unique_ptr<TypeAttrColumnData> column = std::make_unique<TypeAttrColumnData>();
+      column->data_.resize(kTVMFFIDynObjectBegin, Any(nullptr));
+      type_attr_name_to_column_index_.Set("__metadata__", 0);
+      type_attr_columns_.emplace_back(std::move(column));
+    }
     type_table_.reserve(TypeIndex::kTVMFFIDynObjectBegin);
     for (int32_t i = 0; i < TypeIndex::kTVMFFIDynObjectBegin; ++i) {
       type_table_.emplace_back(nullptr);
@@ -344,26 +379,32 @@ class TypeTable {
     ReserveBuiltinTypeIndex(StaticTypeKey::kTVMFFISmallStr, TypeIndex::kTVMFFISmallStr);
     ReserveBuiltinTypeIndex(StaticTypeKey::kTVMFFISmallBytes, TypeIndex::kTVMFFISmallBytes);
     // reserved static type indices for depth 1 object types
-    ReserveDepthOneObjectTypeIndex(StaticTypeKey::kTVMFFIStr, TypeIndex::kTVMFFIStr);
-    ReserveDepthOneObjectTypeIndex(StaticTypeKey::kTVMFFIBytes, TypeIndex::kTVMFFIBytes);
-    ReserveDepthOneObjectTypeIndex(StaticTypeKey::kTVMFFIError, TypeIndex::kTVMFFIError);
-    ReserveDepthOneObjectTypeIndex(StaticTypeKey::kTVMFFIFunction, TypeIndex::kTVMFFIFunction);
-    ReserveDepthOneObjectTypeIndex(StaticTypeKey::kTVMFFIShape, TypeIndex::kTVMFFIShape);
-    ReserveDepthOneObjectTypeIndex(StaticTypeKey::kTVMFFITensor, TypeIndex::kTVMFFITensor);
-    ReserveDepthOneObjectTypeIndex(StaticTypeKey::kTVMFFIArray, TypeIndex::kTVMFFIArray);
-    ReserveDepthOneObjectTypeIndex(StaticTypeKey::kTVMFFIMap, TypeIndex::kTVMFFIMap);
-    ReserveDepthOneObjectTypeIndex(StaticTypeKey::kTVMFFIModule, TypeIndex::kTVMFFIModule);
-    ReserveDepthOneObjectTypeIndex(StaticTypeKey::kTVMFFIOpaquePyObject,
-                                   TypeIndex::kTVMFFIOpaquePyObject);
+    ReserveDepthOneObjectTypeIndex<details::StringObj>(StaticTypeKey::kTVMFFIStr,
+                                                       TypeIndex::kTVMFFIStr);
+    ReserveDepthOneObjectTypeIndex<details::BytesObj>(StaticTypeKey::kTVMFFIBytes,
+                                                      TypeIndex::kTVMFFIBytes);
+    ReserveDepthOneObjectTypeIndex<ErrorObj>(StaticTypeKey::kTVMFFIError, TypeIndex::kTVMFFIError);
+    ReserveDepthOneObjectTypeIndex<FunctionObj>(StaticTypeKey::kTVMFFIFunction,
+                                                TypeIndex::kTVMFFIFunction);
+    ReserveDepthOneObjectTypeIndex<ShapeObj>(StaticTypeKey::kTVMFFIShape, TypeIndex::kTVMFFIShape);
+    ReserveDepthOneObjectTypeIndex<TensorObj>(StaticTypeKey::kTVMFFITensor,
+                                              TypeIndex::kTVMFFITensor);
+    ReserveDepthOneObjectTypeIndex<ArrayObj>(StaticTypeKey::kTVMFFIArray, TypeIndex::kTVMFFIArray);
+    ReserveDepthOneObjectTypeIndex<MapObj>(StaticTypeKey::kTVMFFIMap, TypeIndex::kTVMFFIMap);
+    ReserveDepthOneObjectTypeIndex<OpaqueObjectImpl>(StaticTypeKey::kTVMFFIOpaquePyObject,
+                                                     TypeIndex::kTVMFFIOpaquePyObject);
   }
 
   void ReserveBuiltinTypeIndex(const char* type_key, int32_t static_type_index) {
     this->GetOrAllocTypeIndex(String(type_key), static_type_index, 0, 0, false, -1);
   }
 
+  template <typename Class>
   void ReserveDepthOneObjectTypeIndex(const char* type_key, int32_t static_type_index) {
-    this->GetOrAllocTypeIndex(String(type_key), static_type_index, 1, 0, false,
-                              TypeIndex::kTVMFFIObject);
+    int32_t type_index = this->GetOrAllocTypeIndex(String(type_key), static_type_index, 1, 0, false,
+                                                   TypeIndex::kTVMFFIObject);
+    TypeAttrColumnData* column = type_attr_columns_.at(0).get();
+    column->data_[type_index] = reflection::ObjectDef<Class>::MakeClassMetadata(type_index);
   }
 
   static ObjectPtr<details::StringObj> MakeInplaceString(const char* data, size_t length) {
@@ -403,29 +444,6 @@ class TypeTable {
   // type attribute columns
   std::vector<std::unique_ptr<TypeAttrColumnData>> type_attr_columns_;
   Map<String, int64_t> type_attr_name_to_column_index_;
-};
-
-/**
- * \brief Opaque implementation
- */
-class OpaqueObjectImpl : public Object, public TVMFFIOpaqueObjectCell {
- public:
-  OpaqueObjectImpl(void* handle, void (*deleter)(void* handle)) : deleter_(deleter) {
-    this->handle = handle;
-  }
-
-  void SetTypeIndex(int32_t type_index) {
-    details::ObjectUnsafe::GetHeader(this)->type_index = type_index;
-  }
-
-  ~OpaqueObjectImpl() {
-    if (deleter_ != nullptr) {
-      deleter_(handle);
-    }
-  }
-
- private:
-  void (*deleter_)(void* handle);
 };
 
 }  // namespace ffi

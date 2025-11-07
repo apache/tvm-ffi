@@ -43,6 +43,7 @@ cdef class Error(Object):
     Do not directly raise this object. Instead, use :py:meth:`py_error`
     to convert it to a Python exception and raise that.
     """
+    __tvm_ffi_type_info__: object = TypeInfo.make_dummy()
 
     def __init__(self, kind: str, message: str, backtrace: str):
         """Construct an error wrapper.
@@ -102,9 +103,6 @@ cdef class Error(Object):
     @property
     def backtrace(self):
         return bytearray_to_str(&(TVMFFIErrorGetCellPtr(self.chandle).backtrace))
-
-
-_register_object_by_index(kTVMFFIError, Error)
 
 
 cdef inline Error move_from_last_error():

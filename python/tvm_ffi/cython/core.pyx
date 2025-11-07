@@ -19,10 +19,18 @@
 # under the License.
 include "./base.pxi"
 include "./type_info.pxi"
-include "./dtype.pxi"
-include "./device.pxi"
 include "./object.pxi"
+_register_object_by_index(kTVMFFIObject, Object)
 include "./error.pxi"
+_register_object_by_index(kTVMFFIError, Error)
+include "./dtype.pxi"
+_register_object_by_index(kTVMFFIDataType, DataType)
+include "./device.pxi"
+_register_object_by_index(kTVMFFIDevice, Device)
 include "./string.pxi"
+_register_object_by_index(kTVMFFIStr, String)
+_register_object_by_index(kTVMFFIBytes, Bytes)
 include "./tensor.pxi"
+_register_object_by_index(kTVMFFITensor, Tensor)
 include "./function.pxi"
+_register_object_by_index(kTVMFFIFunction, Function)

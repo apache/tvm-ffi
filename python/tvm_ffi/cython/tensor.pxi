@@ -230,6 +230,7 @@ cdef class Tensor(Object):
 
     """
     cdef DLTensor* cdltensor
+    __tvm_ffi_type_info__: object = TypeInfo.make_dummy()
 
     @property
     def shape(self) -> tuple[int, ...]:
@@ -330,7 +331,6 @@ cdef class Tensor(Object):
 
 
 _set_class_tensor(Tensor)
-_register_object_by_index(kTVMFFITensor, Tensor)
 
 
 cdef int _dltensor_test_wrapper_from_pyobject(

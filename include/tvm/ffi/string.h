@@ -684,20 +684,18 @@ class String {
 
 /*!
  * \brief Return an escaped version of the string
- * \param value The input string
- * \return The escaped string, quoted with double quotes
+ * \param data The input char array
+ * \param size The size of the input char array
+ * \param oss The output stream to write the escaped string to
  */
-inline String EscapeString(const String& value) {
-  std::ostringstream oss;
-  oss << '"';
-  const char* data = value.data();
-  const size_t size = value.size();
+inline void EscapeString(const char* data, size_t size, std::ostringstream* oss) {
+  (*oss) << '"';
   for (size_t i = 0; i < size; ++i) {
     switch (data[i]) {
 /// \cond Doxygen_Suppress
 #define TVM_FFI_ESCAPE_CHAR(pattern, val) \
   case pattern:                           \
-    oss << (val);                         \
+    (*oss) << (val);                      \
     break
       TVM_FFI_ESCAPE_CHAR('\"', "\\\"");
       TVM_FFI_ESCAPE_CHAR('\\', "\\\\");
@@ -716,15 +714,25 @@ inline String EscapeString(const String& value) {
           char buffer[8];
           int size = TVM_FFI_SNPRINTF(buffer, sizeof(buffer), "\\u%04x",
                                       static_cast<int32_t>(data[i]) & 0xff);
-          oss.write(buffer, size);
+          (*oss).write(buffer, size);
         } else {
-          oss << data[i];
+          (*oss) << data[i];
         }
         break;
       }
     }
   }
-  oss << '"';
+  (*oss) << '"';
+}
+
+/*!
+ * \brief Return an escaped version of the string
+ * \param value The input string
+ * \return The escaped string, quoted with double quotes
+ */
+inline String EscapeString(const String& value) {
+  std::ostringstream oss;
+  EscapeString(value.data(), value.size(), &oss);
   return String(oss.str());
 }
 

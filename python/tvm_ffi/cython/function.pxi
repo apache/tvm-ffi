@@ -774,6 +774,7 @@ cdef class Function(Object):
     :py:func:`tvm_ffi.get_global_func`
         Look up a previously registered global FFI function by name.
     """
+    __tvm_ffi_type_info__: object = TypeInfo.make_dummy()
     cdef int c_release_gil
     cdef dict __dict__
 
@@ -919,8 +920,6 @@ cdef class Function(Object):
         func = Function.__new__(Function)
         (<Object>func).chandle = chandle
         return func
-
-_register_object_by_index(kTVMFFIFunction, Function)
 
 
 def _register_global_func(name: str, pyfunc: Callable[..., Any] | Function, override: bool) -> Function:

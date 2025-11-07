@@ -48,6 +48,7 @@ namespace reflection {
  * before they are filled into final C metadata
  */
 using _MetadataType = std::vector<std::pair<String, Any>>;  // NOLINT(bugprone-reserved-identifier)
+
 /*!
  * \brief Builder for TVMFFIFieldInfo
  * \sa TVMFFIFieldInfo
@@ -582,6 +583,21 @@ class ObjectDef : public ReflectionDefBase {
     return *this;
   }
 
+  /*!
+   * \brief Make class metadata, such as source file and line number.
+   * \param type_index The type index of the class.
+   * \return The metadata as a JSON string wrapped in Any.
+   */
+  static Any MakeClassMetadata(int32_t type_index) {
+    constexpr auto source_file = Class::_type_file;
+    constexpr auto source_line = Class::_type_line;
+    std::ostringstream oss;
+    oss << R"({"source_file": )";
+    EscapeString(source_file, std::char_traits<char>::length(source_file), &oss);
+    oss << R"(, "source_line": )" << source_line << "}";
+    return Any(oss.str());
+  }
+
  private:
   template <typename... ExtraArgs>
   void RegisterExtraInfo(ExtraArgs&&... extra_args) {
@@ -598,6 +614,12 @@ class ObjectDef : public ReflectionDefBase {
     // apply extra info traits
     ((ApplyExtraInfoTrait(&info, std::forward<ExtraArgs>(extra_args)), ...));
     TVM_FFI_CHECK_SAFE_CALL(TVMFFITypeRegisterMetadata(type_index_, &info));
+    {
+      Any metadata = MakeClassMetadata(type_index_);
+      TVMFFIAny metadata_any = AnyView(metadata).CopyToTVMFFIAny();
+      TVMFFIByteArray name_array = {kMetadata, std::char_traits<char>::length(kMetadata)};
+      TVM_FFI_CHECK_SAFE_CALL(TVMFFITypeRegisterAttr(type_index_, &name_array, &metadata_any));
+    }
   }
 
   template <typename T, typename BaseClass, typename... ExtraArgs>
@@ -655,6 +677,7 @@ class ObjectDef : public ReflectionDefBase {
   int32_t type_index_;
   const char* type_key_;
   static constexpr const char* kInitMethodName = "__ffi_init__";
+  static constexpr const char* kMetadata = "__metadata__";
 };
 
 /*!

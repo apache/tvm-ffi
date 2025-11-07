@@ -322,6 +322,7 @@ if (APPLE)
     PATTERN "*.dSYM"
   )
 endif ()
+tvm_ffi_add_prefix_map(tvm_ffi_testing ${CMAKE_SOURCE_DIR})
 
 if (NOT TVM_FFI_BUILD_PYTHON_MODULE)
   # when building wheel, we do not ship static as we already ships source and dll
