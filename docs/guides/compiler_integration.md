@@ -30,9 +30,11 @@ following options:
 
 - For compilers that generate host functions via codegen (e.g., LLVM), one can
   generate the symbol `__tvm_ffi_<func_name>`, where `<funcname>` is the exported
-  function.
-- For kernel generators that generate C++ host code, one can directly
-  use {c:macro}`TVM_FFI_DLL_EXPORT_TYPED_FUNC` to expose the symbol.
+  function. Optionally, also generate `__tvm_ffi__metadata_<func_name>` for reflection.
+- For kernel generators that generate C++ host code, use {c:macro}`TVM_FFI_DLL_EXPORT_TYPED_FUNC`
+  to export the function with automatic metadata generation.
+- To also export documentation strings, use {c:macro}`TVM_FFI_DLL_EXPORT_TYPED_FUNC_DOC`
+  for enhanced tooling support (stub generation, IDE tooltips).
 
 The following code snippet shows C code that corresponds to a
 function performing `add_one_c` under the ABI. It is reasonably straightforward for

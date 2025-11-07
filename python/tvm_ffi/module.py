@@ -48,14 +48,23 @@ class Module(core.Object):
 
         import tvm_ffi
 
-        # load the module from a tvm-ffi shared library
-        mod : tvm_ffi.Module = tvm_ffi.load_module("path/to/library.so")
-        # you can use mod.func_name to call the exported function
+        # Load the module from a shared library
+        mod = tvm_ffi.load_module("path/to/library.so")
+
+        # Call exported function
         mod.func_name(*args)
+
+        # Query function metadata (type signature, const-ness)
+        metadata = mod.get_function_metadata("func_name")
+
+        # Query function documentation (if available)
+        doc = mod.get_function_doc("func_name")
 
     See Also
     --------
     :py:func:`tvm_ffi.load_module`
+    :py:meth:`get_function_metadata`
+    :py:meth:`get_function_doc`
 
     Notes
     -----

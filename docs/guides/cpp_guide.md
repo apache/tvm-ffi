@@ -292,12 +292,50 @@ void AddOne(DLTensor* x, DLTensor* y) {
 TVM_FFI_DLL_EXPORT_TYPED_FUNC(add_one, my_ffi_extension::AddOne);
 ```
 
-The new `add_one` takes the signature of `TVMFFISafeCallType` and can be wrapped as `ffi::Function`
-through the C++ `ffi::Module` API.
+The new `add_one` takes the signature of `TVMFFISafeCallType`, and can loaded and queried through the C++ `ffi::Module` API.
+
+The macro exports both the function and its type metadata, enabling signature validation
+without calling the function.
+
+The metadata includes:
+- **type_schema**: JSON string describing function signature (return type and argument types)
+- **arg_const**: Array of booleans indicating which parameters are const (for memory effect validation)
 
 ```cpp
 ffi::Module mod = ffi::Module::LoadFromFile("path/to/export_lib.so");
+
+// Get the function
 ffi::Function func = mod->GetFunction("add_one").value();
+
+// Query metadata (type schema and const-ness information)
+ffi::Optional<ffi::String> metadata = mod->GetFunctionMetadata("add_one");
+if (metadata.has_value()) {
+  // Parse JSON metadata for validation
+  // Contains: {"type_schema": "...", "arg_const": [true, false, ...]}
+}
+```
+
+For functions that need documentation, use the `TVM_FFI_DLL_EXPORT_TYPED_FUNC_DOC` variant:
+
+```cpp
+void ProcessBatch(ffi::TensorView input, ffi::TensorView output) {
+  // ... implementation
+}
+
+TVM_FFI_DLL_EXPORT_TYPED_FUNC_DOC(
+    process_batch,
+    ProcessBatch,
+    "Process a batch of inputs and write results to output tensor.\n"
+    "\n"
+    "Parameters\n"
+    "----------\n"
+    "input : TensorView\n"
+    "    Input tensor to process\n"
+    "output : TensorView\n"
+    "    Output tensor for results");
+
+// Query documentation
+ffi::Optional<ffi::String> doc = mod->GetFunctionDoc("process_batch");
 ```
 
 ## Error Handling

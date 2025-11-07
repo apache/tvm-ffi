@@ -863,8 +863,9 @@ inline int32_t TypeKeyToIndex(std::string_view type_key) {
  * });
  * \endcode
  *
- * \note The final symbol names are `__tvm_ffi_<ExportName>` (function)
- *       and `__tvm_ffi__metadata_<ExportName>` (metadata).
+ * \note The final symbol names are:
+ *       - `__tvm_ffi_<ExportName>` (function)
+ *       - `__tvm_ffi__metadata_<ExportName>` (metadata with type_schema and arg_const)
  */
 #define TVM_FFI_DLL_EXPORT_TYPED_FUNC(ExportName, Function)                            \
   extern "C" {                                                                         \
