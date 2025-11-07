@@ -439,7 +439,8 @@ cdef inline object ctypes_handle(void* chandle):
 cdef inline void* c_handle(object handle):
     """Cast C types handle to c handle."""
     cdef unsigned long long v_ptr
-    v_ptr = handle.value
+    cdef object value = handle.value
+    v_ptr = 0 if value is None else value
     return <void*>(v_ptr)
 
 

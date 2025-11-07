@@ -72,6 +72,10 @@ def test_echo() -> None:
     assert isinstance(c_void_p_result, ctypes.c_void_p)
     assert c_void_p_result.value == 0x12345678
 
+    # test c_void_p for nullptr
+    c_void_p_nullptr_result = fecho(ctypes.c_void_p(0))
+    c_void_p_nullptr_result is None
+
     # test function: aka object
     fadd = tvm_ffi.convert(lambda a, b: a + b)
     fadd1 = fecho(fadd)
