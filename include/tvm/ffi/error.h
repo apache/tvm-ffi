@@ -226,16 +226,24 @@ class Error : public ObjectRef, public std::exception {
   }
 
   /*!
+   * \brief Get the full message of the error, including kind, message and traceback.
+   * \return The full message of the error object.
+   */
+  std::string FullMessage() const {
+    ErrorObj* obj = static_cast<ErrorObj*>(data_.get());
+    return (std::string("Traceback (most recent call last):\n") + TracebackMostRecentCallLast() +
+            std::string(obj->kind.data, obj->kind.size) + std::string(": ") +
+            std::string(obj->message.data, obj->message.size) + '\n');
+  }
+
+  /*!
    * \brief Get the error message
    * \return The error message
+   * \note To get the full message including kind and traceback, use FullMessage() instead.
    */
   const char* what() const noexcept(true) override {
-    thread_local std::string what_data;
     ErrorObj* obj = static_cast<ErrorObj*>(data_.get());
-    what_data = (std::string("Traceback (most recent call last):\n") +
-                 TracebackMostRecentCallLast() + std::string(obj->kind.data, obj->kind.size) +
-                 std::string(": ") + std::string(obj->message.data, obj->message.size) + '\n');
-    return what_data.c_str();
+    return obj->message.data;
   }
 
   /// \cond Doxygen_Suppress
@@ -265,7 +273,7 @@ class ErrorBuilder {
   [[noreturn]] ~ErrorBuilder() noexcept(false) {
     ::tvm::ffi::Error error(std::move(kind_), stream_.str(), std::move(backtrace_));
     if (log_before_throw_) {
-      std::cerr << error.what();
+      std::cerr << error.FullMessage();
     }
     throw error;
   }
