@@ -102,9 +102,10 @@ def load_torch_c_dlpack_extension() -> Any:
         return lib
     except ImportError:
         pass
-    except Exception as e:
+    except Exception:
         warnings.warn(
-            f"Failed to load torch c dlpack extension, EnvTensorAllocator will not be enabled:\n  {e}"
+            "Failed to JIT torch c dlpack extension, EnvTensorAllocator will not be enabled.\n"
+            "You may try AOT-module via `pip install torch-c-dlpack-ext`"
         )
     return None
 

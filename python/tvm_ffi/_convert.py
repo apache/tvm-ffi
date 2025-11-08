@@ -18,11 +18,12 @@
 
 from __future__ import annotations
 
+import ctypes
 from numbers import Number
 from types import ModuleType
 from typing import Any
 
-from . import container, core
+from . import _dtype, container, core
 
 torch: ModuleType | None = None
 try:
@@ -90,7 +91,7 @@ def convert(value: Any) -> Any:  # noqa: PLR0911,PLR0912
     only used in internal or testing scenarios.
 
     """
-    if isinstance(value, (core.Object, core.PyNativeObject, bool, Number)):
+    if isinstance(value, (core.Object, core.PyNativeObject, bool, Number, ctypes.c_void_p)):
         return value
     elif isinstance(value, (tuple, list)):
         return container.Array(value)
@@ -112,8 +113,22 @@ def convert(value: Any) -> Any:  # noqa: PLR0911,PLR0912
         return core._convert_torch_dtype_to_ffi_dtype(value)
     elif numpy is not None and isinstance(value, numpy.dtype):
         return core._convert_numpy_dtype_to_ffi_dtype(value)
+    elif hasattr(value, "__dlpack_data_type__"):
+        cdtype = core._create_cdtype_from_tuple(core.DataType, *value.__dlpack_data_type__())
+        dtype = str.__new__(_dtype.dtype, str(cdtype))
+        dtype._tvm_ffi_dtype = cdtype
+        return dtype
     elif isinstance(value, Exception):
         return core._convert_to_ffi_error(value)
+    elif hasattr(value, "__tvm_ffi_object__"):
+        return value.__tvm_ffi_object__()
+    # keep rest protocol values as it is as they can be handled by ffi function
+    elif hasattr(value, "__cuda_stream__"):
+        return value
+    elif hasattr(value, "__tvm_ffi_opaque_ptr__"):
+        return value
+    elif hasattr(value, "__dlpack_device__"):
+        return value
     else:
         # in this case, it is an opaque python object
         return core._convert_to_opaque_object(value)

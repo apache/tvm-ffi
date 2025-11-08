@@ -129,7 +129,7 @@ class dtype(str):
             Create vector dtypes from a scalar base.
 
         """
-        cdtype = core._create_dtype_from_tuple(
+        cdtype = core._create_cdtype_from_tuple(
             core.DataType,
             dltype_data_type[0],
             dltype_data_type[1],
@@ -172,7 +172,7 @@ class dtype(str):
             Construct from a DLPack ``(code, bits, lanes)`` triple.
 
         """
-        cdtype = core._create_dtype_from_tuple(
+        cdtype = core._create_cdtype_from_tuple(
             core.DataType,
             self._tvm_ffi_dtype.type_code,
             self._tvm_ffi_dtype.bits,

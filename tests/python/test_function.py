@@ -332,6 +332,8 @@ def test_function_with_dlpack_data_type_protocol() -> None:
     x = DLPackDataTypeProtocol((dtype.type_code, dtype.bits, dtype.lanes))
     y = fecho(x)
     assert y == dtype
+    converted_y = tvm_ffi.convert(x)
+    assert converted_y == dtype
 
 
 def test_function_with_dlpack_device_protocol() -> None:

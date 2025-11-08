@@ -188,7 +188,7 @@ cdef int TVMFFIPyArgSetterDLPackExchangeAPI_(
     return 0
 
 
-cdef int TorchDLPackToPyObjectFallback_(
+cdef int TorchManagedTensorToPyObjectNoSyncFallback_(
     DLManagedTensorVersioned* dltensor, void** py_obj_out
 ) except -1:
     # a bit convoluted but ok as a fallback
@@ -211,7 +211,9 @@ cdef inline const DLPackExchangeAPI* GetTorchFallbackExchangeAPI() noexcept:
     _torch_fallback_exchange_api.header.prev_api = NULL
     _torch_fallback_exchange_api.managed_tensor_allocator = NULL
     _torch_fallback_exchange_api.managed_tensor_from_py_object_no_sync = NULL
-    _torch_fallback_exchange_api.managed_tensor_to_py_object_no_sync = TorchDLPackToPyObjectFallback_
+    _torch_fallback_exchange_api.managed_tensor_to_py_object_no_sync = (
+        TorchManagedTensorToPyObjectNoSyncFallback_
+    )
     _torch_fallback_exchange_api.dltensor_from_py_object_no_sync = NULL
     _torch_fallback_exchange_api.current_work_stream = NULL
 
@@ -228,6 +230,7 @@ cdef int TVMFFIPyArgSetterTorchFallback_(
     """Current setter for torch.Tensor, go through python and not as fast as c exporter"""
     # TODO(tqchen): remove this once torch always support fast DLPack importer
     cdef object arg = <object>py_arg
+    cdef long long temp_ptr
     is_cuda = arg.is_cuda
     arg = from_dlpack(torch.utils.dlpack.to_dlpack(arg))
     out.type_index = kTVMFFITensor
@@ -235,7 +238,7 @@ cdef int TVMFFIPyArgSetterTorchFallback_(
     temp_dltensor = TVMFFITensorGetDLTensorPtr((<Tensor>arg).chandle)
     ctx.c_dlpack_exchange_api = GetTorchFallbackExchangeAPI()
     # record the stream and device for torch context
-    if is_cuda and ctx.device_type != -1:
+    if is_cuda and ctx.device_type == -1:
         ctx.device_type = temp_dltensor.device.device_type
         ctx.device_id = temp_dltensor.device.device_id
         # This is an API that dynamo and other uses to get the raw stream from torch
@@ -587,10 +590,10 @@ cdef int TVMFFIPyArgSetterDTypeFromTorch_(
 ) except -1:
     """Setter for torch dtype"""
     cdef py_obj = <object>py_arg
-    if py_obj not in TORCH_DTYPE_TO_DTYPE:
+    if py_obj not in TORCH_DTYPE_TO_DL_DATA_TYPE:
         raise ValueError("Unsupported torch dtype: ", py_obj)
     out.type_index = kTVMFFIDataType
-    out.v_dtype = TORCH_DTYPE_TO_DTYPE[py_obj]
+    out.v_dtype = TORCH_DTYPE_TO_DL_DATA_TYPE[py_obj]
     return 0
 
 cdef int TVMFFIPyArgSetterDTypeFromNumpy_(
@@ -599,10 +602,10 @@ cdef int TVMFFIPyArgSetterDTypeFromNumpy_(
 ) except -1:
     """Setter for torch dtype"""
     cdef py_obj = <object>py_arg
-    if py_obj not in NUMPY_DTYPE_TO_DTYPE:
+    if py_obj not in NUMPY_DTYPE_TO_DL_DATA_TYPE:
         raise ValueError("Unsupported numpy or ml_dtypes dtype: ", py_obj)
     out.type_index = kTVMFFIDataType
-    out.v_dtype = NUMPY_DTYPE_TO_DTYPE[py_obj]
+    out.v_dtype = NUMPY_DTYPE_TO_DL_DATA_TYPE[py_obj]
     return 0
 
 cdef int TVMFFIPyArgSetterDLPackDataTypeProtocol_(
@@ -667,7 +670,7 @@ cdef int TVMFFIPyArgSetterFactory_(PyObject* value, TVMFFIPyArgSetter* out) exce
         # as a member variable
         out.func = TVMFFIPyArgSetterFFIObjectCompatible_
         return 0
-    if os.environ.get("TVM_FFI_SKIP_c_dlpack_from_pyobject", "0") != "1":
+    if os.environ.get("TVM_FFI_SKIP_C_DLPACK_EXCHANGE_API", "0") != "1":
         # Check for DLPackExchangeAPI struct (new approach)
         # This is checked on the CLASS, not the instance
         if hasattr(arg_class, "__c_dlpack_exchange_api__"):
