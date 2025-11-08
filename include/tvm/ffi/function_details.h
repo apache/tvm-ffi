@@ -53,23 +53,24 @@ struct Arg2Str {
   }
 };
 
+/// NOTE: We only support `T`, `const T`, `const T&` and `T&&` as argument types.
+template <typename T>
+static constexpr bool ArgTypeSupported =
+    (!std::is_reference_v<T>) ||
+    (std::is_const_v<std::remove_reference_t<T>> && std::is_lvalue_reference_v<T>) ||
+    (!std::is_const_v<std::remove_reference_t<T>> && std::is_rvalue_reference_v<T>);
+
 template <typename T>
 static constexpr bool ArgSupported =
-    (std::is_same_v<std::remove_const_t<std::remove_reference_t<T>>, Any> ||
-     std::is_same_v<std::remove_const_t<std::remove_reference_t<T>>, AnyView> ||
-     TypeTraitsNoCR<T>::convert_enabled);
+    (ArgTypeSupported<T> &&
+     (std::is_same_v<std::remove_const_t<std::remove_reference_t<T>>, Any> ||
+      std::is_same_v<std::remove_const_t<std::remove_reference_t<T>>, AnyView> ||
+      TypeTraitsNoCR<T>::convert_enabled));
 
 // NOTE: return type can only support non-reference managed returns
 template <typename T>
 static constexpr bool RetSupported =
     (std::is_same_v<T, Any> || std::is_void_v<T> || TypeTraits<T>::convert_enabled);
-
-/// NOTE: we only support `T`, `const T`, `const T&` and `T &&` as argument types
-template <typename T>
-static constexpr bool TypeSupported =
-    (!std::is_reference_v<T>) ||
-    (std::is_const_v<std::remove_reference_t<T>> && std::is_lvalue_reference_v<T>) ||
-    (!std::is_const_v<std::remove_reference_t<T>> && std::is_rvalue_reference_v<T>);
 
 template <typename R, typename... Args>
 struct FuncFunctorImpl {
@@ -141,7 +142,10 @@ struct FunctionInfo<R (Class::*)(Args...) const,
 /*! \brief Using static function to output typed function signature */
 using FGetFuncSignature = std::string (*)();
 
-template <typename Type, bool = TypeSupported<Type>>
+/*!
+ * \brief Auxilary argument value with context for error reporting
+ */
+template <typename Type>
 class ArgValueWithContext {
  public:
   using TypeWithoutCR = std::remove_const_t<std::remove_reference_t<Type>>;
@@ -184,20 +188,6 @@ class ArgValueWithContext {
   int32_t arg_index_;
   const std::string* optional_name_;
   FGetFuncSignature f_sig_;
-};
-
-template <typename Type>
-class ArgValueWithContext<Type, false> {
- public:
-  static_assert(
-      TypeSupported<Type>,
-      "Argument type in FFI function signature can only be T, const T, or const T& or T&&");
-
-  // These functions are kept to avoid extra errors,
-  // so that only the static_assert above is triggered, leaving a clear error message.
-  template <typename... Args>
-  explicit ArgValueWithContext(const Args&...);
-  operator Type();  // NOLINT(google-explicit-constructor)
 };
 
 template <typename R, std::size_t... Is, typename F>
