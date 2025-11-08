@@ -315,7 +315,7 @@ class TypeTable {
   }
 
  private:
-  TypeTable() {
+  TypeTable() : type_attr_columns_{}, type_attr_name_to_column_index_{} {
     type_table_.reserve(TypeIndex::kTVMFFIDynObjectBegin);
     for (int32_t i = 0; i < TypeIndex::kTVMFFIDynObjectBegin; ++i) {
       type_table_.emplace_back(nullptr);
@@ -332,13 +332,13 @@ class TypeTable {
     // reserve the static types
     ReserveBuiltinTypeIndex(StaticTypeKey::kTVMFFINone, TypeIndex::kTVMFFINone);
     ReserveBuiltinTypeIndex(StaticTypeKey::kTVMFFIInt, TypeIndex::kTVMFFIInt);
-    ReserveBuiltinTypeIndex(StaticTypeKey::kTVMFFIFloat, TypeIndex::kTVMFFIFloat);
     ReserveBuiltinTypeIndex(StaticTypeKey::kTVMFFIBool, TypeIndex::kTVMFFIBool);
-    ReserveBuiltinTypeIndex(StaticTypeKey::kTVMFFIRawStr, TypeIndex::kTVMFFIRawStr);
+    ReserveBuiltinTypeIndex(StaticTypeKey::kTVMFFIFloat, TypeIndex::kTVMFFIFloat);
     ReserveBuiltinTypeIndex(StaticTypeKey::kTVMFFIOpaquePtr, TypeIndex::kTVMFFIOpaquePtr);
-    ReserveBuiltinTypeIndex(StaticTypeKey::kTVMFFIDLTensorPtr, TypeIndex::kTVMFFIDLTensorPtr);
     ReserveBuiltinTypeIndex(StaticTypeKey::kTVMFFIDataType, TypeIndex::kTVMFFIDataType);
     ReserveBuiltinTypeIndex(StaticTypeKey::kTVMFFIDevice, TypeIndex::kTVMFFIDevice);
+    ReserveBuiltinTypeIndex(StaticTypeKey::kTVMFFIDLTensorPtr, TypeIndex::kTVMFFIDLTensorPtr);
+    ReserveBuiltinTypeIndex(StaticTypeKey::kTVMFFIRawStr, TypeIndex::kTVMFFIRawStr);
     ReserveBuiltinTypeIndex(StaticTypeKey::kTVMFFIByteArrayPtr, TypeIndex::kTVMFFIByteArrayPtr);
     ReserveBuiltinTypeIndex(StaticTypeKey::kTVMFFIObjectRValueRef,
                             TypeIndex::kTVMFFIObjectRValueRef);

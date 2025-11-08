@@ -514,6 +514,15 @@ def _lookup_or_register_type_info_from_type_key(type_key: str) -> TypeInfo:
     return info
 
 
+def _lookup_type_attr(type_index: int32_t, attr_key: str) -> Any:
+    cdef ByteArrayArg attr_key_bytes = ByteArrayArg(c_str(attr_key))
+    cdef const TVMFFITypeAttrColumn* column = TVMFFIGetTypeAttrColumn(&attr_key_bytes.cdata)
+    cdef TVMFFIAny data
+    if column == NULL or column.size <= type_index:
+        return None
+    return make_ret(column.data[type_index])
+
+
 cdef list TYPE_INDEX_TO_CLS = []
 cdef list TYPE_INDEX_TO_INFO = []
 cdef dict TYPE_KEY_TO_INFO = {}
