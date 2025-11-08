@@ -104,9 +104,6 @@ cdef class Error(Object):
         return bytearray_to_str(&(TVMFFIErrorGetCellPtr(self.chandle).backtrace))
 
 
-_register_object_by_index(kTVMFFIError, Error)
-
-
 cdef inline Error move_from_last_error():
     # raise last error
     error = Error.__new__(Error)

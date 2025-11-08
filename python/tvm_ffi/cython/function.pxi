@@ -1007,8 +1007,6 @@ cdef class Function(Object):
         (<Object>func).chandle = chandle
         return func
 
-_register_object_by_index(kTVMFFIFunction, Function)
-
 
 def _register_global_func(name: str, pyfunc: Callable[..., Any] | Function, override: bool) -> Function:
     cdef TVMFFIObjectHandle chandle

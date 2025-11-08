@@ -330,7 +330,6 @@ cdef class Tensor(Object):
 
 
 _set_class_tensor(Tensor)
-_register_object_by_index(kTVMFFITensor, Tensor)
 
 
 cdef int _dltensor_test_wrapper_from_pyobject(

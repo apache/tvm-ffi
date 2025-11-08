@@ -14,11 +14,14 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+from __future__ import annotations
+
 import sys
 from typing import Any
 
 import pytest
 import tvm_ffi
+import tvm_ffi.testing
 from tvm_ffi.core import TypeInfo
 
 
@@ -169,3 +172,59 @@ def test_unregistered_object_fallback() -> None:
     for _ in range(5):
         obj = tvm_ffi.testing.make_unregistered_object()
         _check_type(obj)
+
+
+@pytest.mark.parametrize(
+    "test_cls, type_key, parent_cls",
+    [
+        (tvm_ffi.Object, "ffi.Object", None),
+        (tvm_ffi.Tensor, "ffi.Tensor", tvm_ffi.Object),
+        (tvm_ffi.core.DataType, "DataType", None),
+        (tvm_ffi.Device, "Device", None),
+        (tvm_ffi.Shape, "ffi.Shape", tvm_ffi.Object),
+        (tvm_ffi.Module, "ffi.Module", tvm_ffi.Object),
+        (tvm_ffi.Function, "ffi.Function", tvm_ffi.Object),
+        (tvm_ffi.core.Error, "ffi.Error", tvm_ffi.Object),
+        (tvm_ffi.core.String, "ffi.String", tvm_ffi.Object),
+        (tvm_ffi.core.Bytes, "ffi.Bytes", tvm_ffi.Object),
+        (tvm_ffi.Tensor, "ffi.Tensor", tvm_ffi.Object),
+        (tvm_ffi.Array, "ffi.Array", tvm_ffi.Object),
+        (tvm_ffi.Map, "ffi.Map", tvm_ffi.Object),
+        (tvm_ffi.access_path.AccessStep, "ffi.reflection.AccessStep", tvm_ffi.Object),
+        (tvm_ffi.access_path.AccessPath, "ffi.reflection.AccessPath", tvm_ffi.Object),
+        (tvm_ffi.testing.TestIntPair, "testing.TestIntPair", tvm_ffi.Object),
+        (tvm_ffi.testing.TestObjectBase, "testing.TestObjectBase", tvm_ffi.Object),
+        (
+            tvm_ffi.testing.TestObjectDerived,
+            "testing.TestObjectDerived",
+            tvm_ffi.testing.TestObjectBase,
+        ),
+        (tvm_ffi.testing._TestCxxClassBase, "testing.TestCxxClassBase", tvm_ffi.Object),
+        (
+            tvm_ffi.testing._TestCxxClassDerived,
+            "testing.TestCxxClassDerived",
+            tvm_ffi.testing._TestCxxClassBase,
+        ),
+        (
+            tvm_ffi.testing._TestCxxClassDerivedDerived,
+            "testing.TestCxxClassDerivedDerived",
+            tvm_ffi.testing._TestCxxClassDerived,
+        ),
+        (tvm_ffi.testing._TestCxxInitSubset, "testing.TestCxxInitSubset", tvm_ffi.Object),
+        (tvm_ffi.testing._SchemaAllTypes, "testing.SchemaAllTypes", tvm_ffi.Object),
+    ],
+)
+def test_type_info_attachment(test_cls: type, type_key: str, parent_cls: type | None) -> None:
+    type_info = tvm_ffi.core._type_cls_to_type_info(test_cls)
+    assert type_info is not None
+    assert type_info.type_cls is test_cls
+    assert type_info.type_key == type_key, (
+        f"Expected type key `{type_key}` but got `{type_info.type_key}`"
+    )
+    parent_type_info = type_info.parent_type_info
+    if parent_type_info is None:
+        assert parent_cls is None
+    else:
+        assert parent_type_info.type_cls is parent_cls, (
+            f"Expected parent type {parent_cls}, but got {parent_type_info.type_cls}"
+        )

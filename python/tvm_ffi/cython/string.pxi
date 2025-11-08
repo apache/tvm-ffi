@@ -66,9 +66,6 @@ class String(str, PyNativeObject):
         return val
 
 
-_register_object_by_index(kTVMFFIStr, String)
-
-
 class Bytes(bytes, PyNativeObject):
     """Byte buffer that interoperates with FFI while behaving like ``bytes``.
 
@@ -90,7 +87,3 @@ class Bytes(bytes, PyNativeObject):
         val = bytes.__new__(cls, content)
         val._tvm_ffi_cached_object = obj
         return val
-
-
-_register_object_by_index(kTVMFFIBytes, Bytes)
-_register_object_by_index(kTVMFFIObject, Object)

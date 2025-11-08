@@ -487,6 +487,8 @@ cdef _update_registry(int type_index, object type_key, object type_info, object 
     TYPE_INDEX_TO_CLS[type_index] = type_cls
     TYPE_INDEX_TO_INFO[type_index] = type_info
     TYPE_KEY_TO_INFO[type_key] = type_info
+    if type_cls is not None:
+        TYPE_CLS_TO_INFO[type_cls] = type_info
 
 
 def _register_object_by_index(int type_index, object type_cls):
@@ -498,12 +500,13 @@ def _register_object_by_index(int type_index, object type_cls):
 
 
 def _set_type_cls(object type_info, object type_cls):
-    global TYPE_INDEX_TO_INFO, TYPE_INDEX_TO_CLS
+    global TYPE_INDEX_TO_INFO, TYPE_INDEX_TO_CLS, TYPE_CLS_TO_INFO
     assert type_info.type_cls is None, f"Type already registered for {type_info.type_key}"
     assert TYPE_INDEX_TO_INFO[type_info.type_index] is type_info
     assert TYPE_KEY_TO_INFO[type_info.type_key] is type_info
     type_info.type_cls = type_cls
     TYPE_INDEX_TO_CLS[type_info.type_index] = type_cls
+    TYPE_CLS_TO_INFO[type_cls] = type_info
 
 
 def _lookup_or_register_type_info_from_type_key(type_key: str) -> TypeInfo:
@@ -523,8 +526,13 @@ def _lookup_type_attr(type_index: int32_t, attr_key: str) -> Any:
     return make_ret(column.data[type_index])
 
 
+def _type_cls_to_type_info(type_cls: type) -> TypeInfo | None:
+    return TYPE_CLS_TO_INFO.get(type_cls, None)
+
+
 cdef list TYPE_INDEX_TO_CLS = []
 cdef list TYPE_INDEX_TO_INFO = []
+cdef dict TYPE_CLS_TO_INFO = {}
 cdef dict TYPE_KEY_TO_INFO = {}
 
 _set_class_object(Object)
