@@ -21,8 +21,8 @@ Ahead-Of-Time (AOT) compiled module to support faster DLPack conversion in DLPac
 By default, `tvm-ffi` will JIT-compile a version of this functionality during loading,
 and use a safe-fallback if JIT-compilation fails.
 Installing this wheel allows users to avoid this JIT compilation overhead and
-also avoid the cases where user environment do not have necessarily compiler toolchain
-to run JIT-compile.
+also avoid the cases where the user environment does not necessarily have a compiler toolchain
+to run JIT-compilation.
 
 ```bash
 pip install torch-c-dlpack-ext
