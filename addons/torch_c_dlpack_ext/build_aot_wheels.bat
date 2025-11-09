@@ -15,7 +15,7 @@ for %%P in (2.4 2.5 2.6 2.7 2.8 2.9) do (
 
 copy %tvm_ffi%\lib\*.dll %torch_c_dlpack_ext%\torch_c_dlpack_ext
 uv venv %tvm_ffi%\.venv\build --python %python_version%
-source %tvm_ffi%\.venv\build\Scripts\activate
+%tvm_ffi%\.venv\build\Scripts\activate
 uv pip install build wheel auditwheel
 cd %torch_c_dlpack_ext%
 python -m build -w
@@ -77,7 +77,7 @@ exit /b 0
         echo %arch% %python_version% %torch_version% %torch_url%
         mkdir %tvm_ffi%\.venv
         uv venv %tvm_ffi%\.venv\torch%torch_version% --python %python_version%
-        .\%tvm_ffi%\.venv\torch%torch_version%\Scripts\activate
+        %tvm_ffi%\.venv\torch%torch_version%\Scripts\activate
         uv pip install setuptools ninja
         uv pip install torch==%torch_version% --index-url %torch_url%
         uv pip install -v .
