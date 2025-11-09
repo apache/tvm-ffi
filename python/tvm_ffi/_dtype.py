@@ -14,7 +14,7 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-"""Lightweight ``dtype`` wrapper for TVM FFI."""
+"""Lightweight dtype wrapper for TVM FFI."""
 
 # pylint: disable=invalid-name
 from __future__ import annotations
@@ -47,9 +47,9 @@ class DataTypeCode(IntEnum):
 
 
 class dtype(str):
-    """Lightweight ``dtype`` in TVM FFI.
+    """Lightweight data type in TVM FFI.
 
-    ``dtype`` behaves like a Python ``str`` but also carries an internal FFI
+    It behaves like a Python :class:`str` but also carries an internal FFI
     representation. You can construct it from strings, NumPy/ML dtypes, or
     via :py:meth:`from_dlpack_data_type`.
 

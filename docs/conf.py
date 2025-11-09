@@ -278,7 +278,7 @@ def _link_inherited_members(app, what, name, obj, options, lines) -> None:  # no
     # If it comes from builtins we already hide it; no link needed
     if base in _py_native_classes or getattr(base, "__module__", "") == "builtins":
         return
-    owner_fq = f"{base.__module__}.{base.__qualname__}"
+    owner_fq = f"{base.__module__}.{base.__qualname__}".replace("tvm_ffi.core.", "tvm_ffi.")
     role = "attr" if what in {"attribute", "property"} else "meth"
     lines.clear()
     lines.append(

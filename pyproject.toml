@@ -64,7 +64,7 @@ dev = [
   "pytest",
   "numpy",
   "ml_dtypes",
-  "cython",
+  "cython>=3.0",
   "cmake",
   "scikit-build-core",
   "tomli",
@@ -103,7 +103,7 @@ tvm-ffi-config = "tvm_ffi.config:__main__"
 tvm-ffi-stubgen = "tvm_ffi.stub.stubgen:__main__"
 
 [build-system]
-requires = ["scikit-build-core>=0.10.0", "cython", "setuptools-scm"]
+requires = ["scikit-build-core>=0.10.0", "cython>=3.0", "setuptools-scm"]
 build-backend = "scikit_build_core.build"
 
 [tool.scikit-build]

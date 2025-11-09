@@ -941,7 +941,7 @@ def load(
     library. It's possible to only provide cpp_files or cuda_files.
 
     Note that this function does not automatically export functions to the tvm ffi module. You need to
-    manually use the TVM FFI export macros (e.g., ``TVM_FFI_DLL_EXPORT_TYPED_FUNC``) in your source files to export
+    manually use the TVM FFI export macros (e.g., :c:macro:`TVM_FFI_DLL_EXPORT_TYPED_FUNC`) in your source files to export
     functions. This gives you more control over which functions are exported and how they are exported.
 
     Extra compiler and linker flags can be provided via the ``extra_cflags``, ``extra_cuda_cflags``, and ``extra_ldflags``

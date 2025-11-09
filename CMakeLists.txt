@@ -239,7 +239,8 @@ if (TVM_FFI_BUILD_PYTHON_MODULE)
 
   add_custom_command(
     OUTPUT ${_core_cpp}
-    COMMAND ${Python_EXECUTABLE} -m cython --cplus ${_core_pyx} -o ${_core_cpp}
+    COMMAND ${Python_EXECUTABLE} -m cython --cplus ${_core_pyx} -o ${_core_cpp} --module-name
+            "tvm_ffi.core"
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     COMMENT "Transpiling ${_core_pyx} to ${_core_cpp}"
     DEPENDS ${_cython_sources}

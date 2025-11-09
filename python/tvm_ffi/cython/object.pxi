@@ -83,16 +83,16 @@ cdef class Object:
     This is the root Python type for objects backed by the TVM FFI
     runtime. Each instance references a handle to a C++ runtime
     object. Python subclasses typically correspond to C++ runtime
-    types and are registered via ``tvm_ffi.register_object``.
+    types and are registered via :py:meth:`tvm_ffi.register_object`.
 
     Notes
     -----
-    - Equality of two ``Object`` instances uses underlying handle
+    - Equality of two :py:class:`Object` instances uses underlying handle
       identity unless an overridden implementation is provided on the
       concrete type. Use :py:meth:`same_as` to check whether two
       references point to the same underlying object.
     - Most users interact with subclasses (e.g. :class:`Tensor`,
-      :class:`Function`) rather than ``Object`` directly.
+      :class:`Function`) rather than :py:class:`Object` directly.
 
     Examples
     --------

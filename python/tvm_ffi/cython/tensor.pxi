@@ -158,13 +158,14 @@ def from_dlpack(
     Parameters
     ----------
     ext_tensor : object
-        An object supporting ``__dlpack__`` and ``__dlpack_device__``.
+        An object supporting `__dlpack__ <https://data-apis.org/array-api/latest/API_specification/generated/array_api.array.__dlpack__.html#array_api.array.__dlpack__>`_
+        and `__dlpack_device__ <https://data-apis.org/array-api/latest/API_specification/generated/array_api.array.__dlpack_device__.html#array_api.array.__dlpack_device__>`_.
     require_alignment : int, optional
         If greater than zero, require the underlying data pointer to be
         aligned to this many bytes. Misaligned inputs raise
         :class:`ValueError`.
     require_contiguous : bool, optional
-        When ``True``, require the layout to be contiguous. Non-contiguous
+        When True, require the layout to be contiguous. Non-contiguous
         inputs raise :class:`ValueError`.
 
     Returns
@@ -184,7 +185,7 @@ def from_dlpack(
         y_np = np.from_dlpack(x)
         assert np.shares_memory(x_np, y_np)
 
-    """
+    """  # noqa: E501
     cdef TVMFFIObjectHandle chandle
     _from_dlpack_universal(ext_tensor, require_alignment, require_contiguous, &chandle)
     return make_tensor_from_chandle(chandle)
@@ -211,7 +212,7 @@ def _make_strides_from_shape(tuple shape: tuple[int, ...]) -> tuple[int, ...]:
 cdef class Tensor(Object):
     """Managed n-dimensional array compatible with DLPack.
 
-    ``Tensor`` provides zero-copy interoperability with array libraries
+    It provides zero-copy interoperability with array libraries
     through the DLPack protocol. Instances are typically created with
     :func:`from_dlpack` or returned from FFI functions.
 
@@ -275,7 +276,7 @@ cdef class Tensor(Object):
             dltensor, _c_str_dltensor_versioned, <PyCapsule_Destructor>_c_dlpack_versioned_deleter)
 
     def __dlpack_device__(self) -> tuple[int, int]:
-        """Implement the standard ``__dlpack_device__`` protocol."""
+        """Implement the standard `__dlpack_device__ <https://data-apis.org/array-api/latest/API_specification/generated/array_api.array.__dlpack_device__.html#array_api.array.__dlpack_device__>`_ protocol."""  # noqa: E501
         cdef int device_type = self.cdltensor.device.device_type
         cdef int device_id = self.cdltensor.device.device_id
         return (device_type, device_id)
@@ -288,7 +289,7 @@ cdef class Tensor(Object):
         dl_device: tuple[int, int] | None = None,
         copy: bool | None = None,
     ) -> object:
-        """Implement the standard ``__dlpack__`` protocol.
+        """Implement the standard `__dlpack__ <https://data-apis.org/array-api/latest/API_specification/generated/array_api.array.__dlpack__.html#array_api.array.__dlpack__>`_ protocol.
 
         Parameters
         ----------
@@ -306,7 +307,7 @@ cdef class Tensor(Object):
         ------
         BufferError
             If the requested behavior cannot be satisfied.
-        """
+        """  # noqa: E501
         if max_version is None:
             # Keep and use the DLPack 0.X implementation
             # Note: from March 2025 onwards (but ideally as late as
