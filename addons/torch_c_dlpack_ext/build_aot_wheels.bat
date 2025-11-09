@@ -36,6 +36,7 @@ exit /b 0
         echo fff %arch% %python_version% %torch_version% !torch_url!
         mkdir %tvm_ffi%\.venv
         uv venv %tvm_ffi%\.venv\torch%torch_version% --python %python_version%
+        dir %tvm_ffi%\.venv\torch%torch_version%\Scripts\activate
         %tvm_ffi%\.venv\torch%torch_version%\Scripts\activate
         uv pip install setuptools ninja
         uv pip install torch==%torch_version% --index-url !torch_url!
