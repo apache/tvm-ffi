@@ -17,45 +17,39 @@ exit /b 0
 
 :get_torch_url
     set torch_version=%1
-    if %torch_version%==2.4 (set %~2=https://download.pytorch.org/whl/cu124 & exit /b 0)
-    if %torch_version%==2.5 (set %~2=https://download.pytorch.org/whl/cu124 & exit /b 0)
-    if %torch_version%==2.6 (set %~2=https://download.pytorch.org/whl/cu126 & exit /b 0)
-    if %torch_version%==2.7 (set %~2=https://download.pytorch.org/whl/cu128 & exit /b 0)
-    if %torch_version%==2.8 (set %~2=https://download.pytorch.org/whl/cu129 & exit /b 0)
-    if %torch_version%==2.9 (set %~2=https://download.pytorch.org/whl/cu129 & exit /b 0)
-    echo Unknown or unsupported torch version: %torch_version% >&2
-    set %~2=
-    exit /b 1
+    if %torch_version%==2.4 set %~2=https://download.pytorch.org/whl/cu124
+    else if %torch_version%==2.5 set %~2=https://download.pytorch.org/whl/cu124
+    else if %torch_version%==2.6 set %~2=https://download.pytorch.org/whl/cu126
+    else if %torch_version%==2.7 set %~2=https://download.pytorch.org/whl/cu128
+    else if %torch_version%==2.8 set %~2=https://download.pytorch.org/whl/cu129
+    else if %torch_version%==2.9 set %~2=https://download.pytorch.org/whl/cu129
+    else (
+        echo Unknown or unsupported torch version: %torch_version% >&2
+        set %~2=
+        exit /b 1
+    )
+    exit /b 0
 
 :check_availability
     set torch_version=%1
     if %torch_version%==2.4 (
         if %python_version%==cp313 exit /b 1
         if %python_version%==cp314 exit /b 1
-        exit /b 0
-    )
-    if %torch_version%==2.5 (
+    ) else if %torch_version%==2.5 (
         if %python_version%==cp314 exit /b 1
-        exit /b 0
-    )
-    if %torch_version%==2.6 (
+    ) else if %torch_version%==2.6 (
         if %python_version%==cp314 exit /b 1
-        exit /b 0
-    )
-    if %torch_version%==2.7 (
+    ) else if %torch_version%==2.7 (
         if %python_version%==cp314 exit /b 1
-        exit /b 0
-    )
-    if %torch_version%==2.8 (
+    ) else if %torch_version%==2.8 (
         if %python_version%==cp314 exit /b 1
-        exit /b 0
-    )
-    if %torch_version%==2.9 (
+    ) else if %torch_version%==2.9 (
         if %python_version%==cp39 exit /b 1
-        exit /b 0
+    ) else (
+        echo Unknown or unsupported torch version: %torch_version% >&2
+        exit /b 1
     )
-    echo Unknown or unsupported torch version: %torch_version% >&2
-    exit /b 1
+    exit /b 0
 
 :build_libs
     set torch_version=%1
