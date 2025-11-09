@@ -15,7 +15,7 @@ set torch_c_dlpack_ext=%tvm_ffi%\addons\torch_c_dlpack_ext
 
 @REM copy %tvm_ffi%\lib\*.dll %torch_c_dlpack_ext%\torch_c_dlpack_ext
 uv venv %tvm_ffi%\venv\build --python %python_version%
-%tvm_ffi%\venv\build\Scripts\activate
+call %tvm_ffi%\venv\build\Scripts\activate
 uv pip install build wheel auditwheel
 @REM cd %torch_c_dlpack_ext%
 @REM python -m build -w
