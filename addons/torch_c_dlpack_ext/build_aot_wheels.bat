@@ -1,12 +1,12 @@
-set arch=%1
-set python_version=%2
+set arch=%~1
+set python_version=%~2
 
 set tvm_ffi="%cd%"
 set torch_c_dlpack_ext="%tvm_ffi%/addons/torch_c_dlpack_ext"
 
 :get_torch_url
     setlocal
-    set version="%1"
+    set version="%~1"
     if "%version%"=="2.4" (
         set url="https://download.pytorch.org/whl/cu124"
     ) else if "%version%"=="2.5" (
@@ -28,7 +28,7 @@ set torch_c_dlpack_ext="%tvm_ffi%/addons/torch_c_dlpack_ext"
 
 :check_availability
     setlocal
-    set torch_version="%1"
+    set torch_version="%~1"
     set return=0
     if "%torch_version%"=="2.4" (
         if "%python_version%"=="cp313" set return=1
@@ -52,10 +52,10 @@ set torch_c_dlpack_ext="%tvm_ffi%/addons/torch_c_dlpack_ext"
 
 :build_libs
     setlocal
-    set torch_version="%1"
+    set torch_version="%~1"
     call :check_availability "%torch_version%"
     if %errorlevel%==0 (
-        call :get_torch_url "%torch_version%" get_torch_url
+        call :get_torch_url "%torch_version%" torch_url
         echo "%arch%" "%python_version%" "%torch_version%" "%torch_url%"
     ) else (
         echo "Skipping build for torch %torch_version% on %arch% with python %python_version% as it is not available."
@@ -64,5 +64,6 @@ set torch_c_dlpack_ext="%tvm_ffi%/addons/torch_c_dlpack_ext"
     exit /b 0
 
 for %%torch_version in ("2.4" "2.5" "2.6" "2.7" "2.8" "2.9") do (
+    echo %%torch_version
     call :build_libs %%torch_version
 )
