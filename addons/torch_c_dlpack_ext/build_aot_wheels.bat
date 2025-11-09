@@ -6,20 +6,19 @@ set python_version=%~2
 echo arch=%arch%
 echo python_version=%python_version%
 
-set tvm_ffi="%cd%"
-set torch_c_dlpack_ext="%tvm_ffi%/addons/torch_c_dlpack_ext"
+set tvm_ffi=%cd%
+set torch_c_dlpack_ext=%tvm_ffi%/addons/torch_c_dlpack_ext
 
 echo tvm_ffi=%tvm_ffi%
 echo torch_c_dlpack_ext=%torch_c_dlpack_ext%
 
 for %%P in ("2.4" "2.5" "2.6" "2.7" "2.8" "2.9") do (
-    echo torch_version=%%P
-    call :build_libs %%P
+    call :build_libs %%~P
 )
 
 :get_torch_url
     setlocal
-    set version="%~1"
+    set version=%~1
     if "%version%"=="2.4" (
         set url="https://download.pytorch.org/whl/cu124"
     ) else if "%version%"=="2.5" (
@@ -41,7 +40,7 @@ for %%P in ("2.4" "2.5" "2.6" "2.7" "2.8" "2.9") do (
 
 :check_availability
     setlocal
-    set torch_version="%~1"
+    set torch_version=%1
     echo %torch_version%
     set return=0
     if "%torch_version%"=="2.4" (
@@ -58,22 +57,22 @@ for %%P in ("2.4" "2.5" "2.6" "2.7" "2.8" "2.9") do (
     ) else if "%version%"=="2.9" (
         if "%python_version%"=="cp39" set return=1
     ) else (
-        echo  "Unknown or unsupported torch version: %version%" >&2
+        echo Unknown or unsupported torch version: %version% >&2
         set return=1
     )
     endlocal
-    exit /b "%return%"
+    exit /b %return%
 
 :build_libs
     setlocal
-    set torch_version="%~1"
+    set torch_version=%1
     echo %torch_version%
-    call :check_availability "%torch_version%"
+    call :check_availability %torch_version%
     if %errorlevel%==0 (
-        call :get_torch_url "%torch_version%" torch_url
-        echo "%arch%" "%python_version%" "%torch_version%" "%torch_url%"
+        call :get_torch_url %torch_version% torch_url
+        echo %arch% %python_version% %torch_version% %torch_url%
     ) else (
-        echo "Skipping build for torch %torch_version% on %arch% with python %python_version% as it is not available."
+        echo Skipping build for torch %torch_version% on %arch% with python %python_version% as it is not available.
     )
     endlocal
     exit /b 0
