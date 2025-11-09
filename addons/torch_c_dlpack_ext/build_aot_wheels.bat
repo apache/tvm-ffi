@@ -17,13 +17,19 @@ exit /b 0
 
 :get_torch_url
     set torch_version=%1
-    if %torch_version%==2.4 (set %~2=https://download.pytorch.org/whl/cu124)
-    else if %torch_version%==2.5 (set %~2=https://download.pytorch.org/whl/cu124)
-    else if %torch_version%==2.6 (set %~2=https://download.pytorch.org/whl/cu126)
-    else if %torch_version%==2.7 (set %~2=https://download.pytorch.org/whl/cu128)
-    else if %torch_version%==2.8 (set %~2=https://download.pytorch.org/whl/cu129)
-    else if %torch_version%==2.9 (set %~2=https://download.pytorch.org/whl/cu129)
-    else (
+    if %torch_version%==2.4 (
+        set %~2=https://download.pytorch.org/whl/cu124
+    ) else if %torch_version%==2.5 (
+        set %~2=https://download.pytorch.org/whl/cu124
+    ) else if %torch_version%==2.6 (
+        set %~2=https://download.pytorch.org/whl/cu126
+    ) else if %torch_version%==2.7 (
+        set %~2=https://download.pytorch.org/whl/cu128
+    ) else if %torch_version%==2.8 (
+        set %~2=https://download.pytorch.org/whl/cu129
+    ) else if %torch_version%==2.9 (
+        set %~2=https://download.pytorch.org/whl/cu129
+    ) else (
         echo Unknown or unsupported torch version: %torch_version% >&2
         set %~2=
         exit /b 1
