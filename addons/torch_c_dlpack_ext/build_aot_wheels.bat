@@ -20,9 +20,10 @@ uv pip install build wheel auditwheel
 cd %torch_c_dlpack_ext%
 python -m build -w
 dir dist
-python -m wheel tags dist/*.whl --python-tag=%python_version% --abi-tag=%python_version% --remove
+for %%f in (dist\*.whl) do python -m wheel tags "%%f" --python-tag=%python_version% --abi-tag=%python_version% --platform-tag=win_amd64
 dir dist
-auditwheel repair --exclude libtorch.so --exclude libtorch_cpu.so --exclude libc10.so --exclude libtorch_python.so dist/*.whl -w wheelhouse
+mkdir wheelhouse
+copy dist\*-win_amd64.whl wheelhouse
 dir wheelhouse
 
 exit /b 0
@@ -44,7 +45,7 @@ exit /b 0
         uv pip install -v .
         mkdir %tvm_ffi%\lib
         python -m tvm_ffi.utils._build_optional_torch_c_dlpack --output-dir %tvm_ffi%\lib
-        python -m tvm_ffi.utils._build_optional_torch_c_dlpack --output-dir %tvm_ffi%\lib --build-with-cuda
+        @REM python -m tvm_ffi.utils._build_optional_torch_c_dlpack --output-dir %tvm_ffi%\lib --build-with-cuda
         dir %tvm_ffi%\lib
         call deactivate
         rmdir -s -q %tvm_ffi%\.venv\torch%torch_version%
