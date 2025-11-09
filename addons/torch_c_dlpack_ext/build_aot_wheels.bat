@@ -13,6 +13,8 @@ for %%P in (2.4 2.5 2.6 2.7 2.8 2.9) do (
     call :build_libs %%P
 )
 
+exit /b 0
+
 :get_torch_url
     set torch_version=%1
     if %torch_version%==2.4 (set %~2=https://download.pytorch.org/whl/cu124 & exit /b 0)
