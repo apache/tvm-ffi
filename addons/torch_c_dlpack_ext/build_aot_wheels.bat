@@ -28,19 +28,16 @@ dir wheelhouse
 exit /b 0
 
 :get_torch_url
-    set torch_version=%1
-    if %torch_version%==2.4 (set %~2=https://download.pytorch.org/whl/cu124 & exit /b 0)
-    if %torch_version%==2.5 (set %~2=https://download.pytorch.org/whl/cu124 & exit /b 0)
-    if %torch_version%==2.6 (set %~2=https://download.pytorch.org/whl/cu126 & exit /b 0)
-    if %torch_version%==2.7 (set %~2=https://download.pytorch.org/whl/cu128 & exit /b 0)
-    if %torch_version%==2.8 (set %~2=https://download.pytorch.org/whl/cu129 & exit /b 0)
-    if %torch_version%==2.9 (set %~2=https://download.pytorch.org/whl/cu129 & exit /b 0)
+    if %torch_version%==2.4 (set torch_url=https://download.pytorch.org/whl/cu124 & exit /b 0)
+    if %torch_version%==2.5 (set torch_url=https://download.pytorch.org/whl/cu124 & exit /b 0)
+    if %torch_version%==2.6 (set torch_url=https://download.pytorch.org/whl/cu126 & exit /b 0)
+    if %torch_version%==2.7 (set torch_url=https://download.pytorch.org/whl/cu128 & exit /b 0)
+    if %torch_version%==2.8 (set torch_url=https://download.pytorch.org/whl/cu129 & exit /b 0)
+    if %torch_version%==2.9 (set torch_url=https://download.pytorch.org/whl/cu129 & exit /b 0)
     echo Unknown or unsupported torch version: %torch_version% >&2
-    set %~2=
     exit /b 1
 
 :check_availability
-    set torch_version=%1
     if %torch_version%==2.4 (
         if %python_version%==cp313 exit /b 1
         if %python_version%==cp314 exit /b 1
@@ -71,9 +68,9 @@ exit /b 0
 
 :build_libs
     set torch_version=%1
-    call :check_availability %torch_version%
+    call :check_availability
     if %errorlevel%==0 (
-        call :get_torch_url %torch_version% torch_url
+        call :get_torch_url
         echo %arch% %python_version% %torch_version% %torch_url%
         mkdir %tvm_ffi%\.venv
         uv venv %tvm_ffi%\.venv\torch%torch_version% --python %python_version%
