@@ -144,6 +144,13 @@ using FGetFuncSignature = std::string (*)();
 
 /*!
  * \brief Auxilary argument value with context for error reporting
+ * \tparam Type The expected type of the argument.
+ * \note We use a template class with non-template operator conversion
+ * instead of a non-template class with template operator conversion.
+ * This is because template operator conversion doesn't play well with
+ * classes with template constructors.
+ * In this case, it may lead to some unintended compiler errors.
+ * An example of class can be `std::optional<T>`.
  */
 template <typename Type>
 class ArgValueWithContext {
