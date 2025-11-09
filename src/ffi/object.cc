@@ -21,6 +21,7 @@
  * \brief Registry to record dynamic types
  */
 #include <tvm/ffi/c_api.h>
+#include <tvm/ffi/container/array.h>
 #include <tvm/ffi/container/map.h>
 #include <tvm/ffi/error.h>
 #include <tvm/ffi/function.h>
@@ -191,6 +192,16 @@ class TypeTable {
     }
     TVM_FFI_ICHECK(entry != nullptr) << "Cannot find type info for type_index=" << type_index;
     return entry;
+  }
+
+  Array<String> GetRegisteredTypeKeys() const {
+    Array<String> ret;
+    for (const auto& entry : type_table_) {
+      if (entry) {
+        ret.push_back(entry->type_key_data);
+      }
+    }
+    return ret;
   }
 
   void RegisterTypeField(int32_t type_index, const TVMFFIFieldInfo* info) {
@@ -537,3 +548,13 @@ int TVMFFIBytesFromByteArray(const TVMFFIByteArray* input, TVMFFIAny* out) {
   tvm::ffi::TypeTraits<tvm::ffi::Bytes>::MoveToAny(tvm::ffi::Bytes(input->data, input->size), out);
   TVM_FFI_SAFE_CALL_END();
 }
+
+namespace {
+TVM_FFI_STATIC_INIT_BLOCK() {
+  using namespace tvm::ffi;
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def_method("ffi.GetRegisteredTypeKeys", []() -> Array<String> {
+    return tvm::ffi::TypeTable::Global()->GetRegisteredTypeKeys();
+  });
+}
+}  // namespace

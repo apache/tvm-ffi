@@ -17,7 +17,7 @@
 from __future__ import annotations
 
 import sys
-from typing import Any
+from typing import Any, Sequence
 
 import pytest
 import tvm_ffi
@@ -227,4 +227,32 @@ def test_type_info_attachment(test_cls: type, type_key: str, parent_cls: type | 
     else:
         assert parent_type_info.type_cls is parent_cls, (
             f"Expected parent type {parent_cls}, but got {parent_type_info.type_cls}"
+        )
+
+
+def test_get_registered_type_keys() -> None:
+    keys = tvm_ffi.registry.get_registered_type_keys()
+    assert isinstance(keys, Sequence)
+    assert all(isinstance(k, str) for k in keys)
+    keys = set(keys)
+    assert "ffi.Object" in keys
+    assert "ffi.String" in keys
+    for ty in [
+        "None",
+        "int",
+        "bool",
+        "float",
+        "void*",
+        "DataType",
+        "Device",
+        "DLTensor*",
+        "const char*",
+        "TVMFFIByteArray*",
+        "ObjectRValueRef",
+    ]:
+        assert ty in keys, f"Expected to find `{ty}` in registered type keys, but it was not found."
+        keys.remove(ty)
+    for ty in keys:
+        assert ty.startswith("ffi.") or ty.startswith("testing."), (
+            f"Expected type key `{ty}` to start with `ffi.` or `testing.`"
         )
