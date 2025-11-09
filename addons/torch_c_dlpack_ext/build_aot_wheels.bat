@@ -1,3 +1,4 @@
+@echo on
 set arch=%~1
 set python_version=%~2
 
