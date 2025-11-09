@@ -29,6 +29,7 @@ set torch_c_dlpack_ext="%tvm_ffi%/addons/torch_c_dlpack_ext"
 :check_availability
     setlocal
     set torch_version="%~1"
+    echo %torch_version%
     set return=0
     if "%torch_version%"=="2.4" (
         if "%python_version%"=="cp313" set return=1
@@ -53,6 +54,7 @@ set torch_c_dlpack_ext="%tvm_ffi%/addons/torch_c_dlpack_ext"
 :build_libs
     setlocal
     set torch_version="%~1"
+    echo %torch_version%
     call :check_availability "%torch_version%"
     if %errorlevel%==0 (
         call :get_torch_url "%torch_version%" torch_url
