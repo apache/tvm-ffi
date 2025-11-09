@@ -29,10 +29,11 @@ exit /b 0
 
 :build_libs
     set torch_version=%1
+    setlocal enabledelayedexpansion
     call :check_availability
     if %errorlevel%==0 (
         call :get_torch_url
-        echo fff %arch% %python_version% %torch_version% %torch_url%
+        echo fff %arch% %python_version% %torch_version% !torch_url!
         @REM mkdir %tvm_ffi%\.venv
         @REM uv venv %tvm_ffi%\.venv\torch%torch_version% --python %python_version%
         @REM %tvm_ffi%\.venv\torch%torch_version%\Scripts\activate
@@ -48,6 +49,7 @@ exit /b 0
     ) else (
         echo Skipping build for torch %torch_version% on %arch% with python %python_version% as it is not available.
     )
+    endlocal
     exit /b 0
 
 
