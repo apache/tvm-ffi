@@ -9,21 +9,21 @@ echo python_version=%python_version%
 set tvm_ffi=%cd%
 set torch_c_dlpack_ext=%tvm_ffi%\addons\torch_c_dlpack_ext
 
-@REM for %%P in (2.4 2.5 2.6 2.7 2.8 2.9) do (
-@REM     call :build_libs %%P
-@REM )
+for %%P in (2.4 2.5 2.6 2.7 2.8 2.9) do (
+    call :build_libs %%P
+)
 
-@REM copy %tvm_ffi%\lib\*.dll %torch_c_dlpack_ext%\torch_c_dlpack_ext
-uv venv %tvm_ffi%\venv\build --python %python_version%
-call %tvm_ffi%\venv\build\Scripts\activate
+copy %tvm_ffi%\lib\*.dll %torch_c_dlpack_ext%\torch_c_dlpack_ext
+uv venv %tvm_ffi%\.venv\build --python %python_version%
+call %tvm_ffi%\.venv\build\Scripts\activate
 uv pip install build wheel auditwheel
-@REM cd %torch_c_dlpack_ext%
-@REM python -m build -w
-@REM dir dist
-@REM python -m wheel tags dist/*.whl --python-tag=%python_version% --abi-tag=%python_version% --remove
-@REM dir dist
-@REM auditwheel repair --exclude libtorch.so --exclude libtorch_cpu.so --exclude libc10.so --exclude libtorch_python.so dist/*.whl -w wheelhouse
-@REM dir wheelhouse
+cd %torch_c_dlpack_ext%
+python -m build -w
+dir dist
+python -m wheel tags dist/*.whl --python-tag=%python_version% --abi-tag=%python_version% --remove
+dir dist
+auditwheel repair --exclude libtorch.so --exclude libtorch_cpu.so --exclude libc10.so --exclude libtorch_python.so dist/*.whl -w wheelhouse
+dir wheelhouse
 
 exit /b 0
 
@@ -34,11 +34,11 @@ exit /b 0
     if %errorlevel%==0 (
         call :get_torch_url
         echo fff %arch% %python_version% %torch_version% !torch_url!
-        mkdir %tvm_ffi%\venv
-        uv venv %tvm_ffi%\venv\torch%torch_version% --python %python_version%
-        dir %tvm_ffi%\venv\torch%torch_version%
-        dir %tvm_ffi%\venv\torch%torch_version%\Scripts\activate
-        %tvm_ffi%\venv\torch%torch_version%\Scripts\activate
+        mkdir %tvm_ffi%\.venv
+        uv venv %tvm_ffi%\.venv\torch%torch_version% --python %python_version%
+        dir %tvm_ffi%\.venv\torch%torch_version%
+        dir %tvm_ffi%\.venv\torch%torch_version%\Scripts\activate
+        call %tvm_ffi%\.venv\torch%torch_version%\Scripts\activate
         uv pip install setuptools ninja
         uv pip install torch==%torch_version% --index-url !torch_url!
         uv pip install -v .
@@ -46,8 +46,8 @@ exit /b 0
         python -m tvm_ffi.utils._build_optional_torch_c_dlpack --output-dir %tvm_ffi%\lib
         python -m tvm_ffi.utils._build_optional_torch_c_dlpack --output-dir %tvm_ffi%\lib --build-with-cuda
         dir %tvm_ffi%\lib
-        deactivate
-        rmdir -s -q %tvm_ffi%\venv\torch%torch_version%
+        call deactivate
+        rmdir -s -q %tvm_ffi%\.venv\torch%torch_version%
     ) else (
         echo Skipping build for torch %torch_version% on %arch% with python %python_version% as it is not available.
     )
