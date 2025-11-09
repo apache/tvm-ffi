@@ -1,9 +1,17 @@
-@echo on
+@echo off
+
+echo on
 set arch=%~1
 set python_version=%~2
 
+echo arch=%arch%
+echo python_version=%python_version%
+
 set tvm_ffi="%cd%"
 set torch_c_dlpack_ext="%tvm_ffi%/addons/torch_c_dlpack_ext"
+
+echo tvm_ffi=%tvm_ffi%
+echo torch_c_dlpack_ext=%torch_c_dlpack_ext%
 
 :get_torch_url
     setlocal
@@ -67,6 +75,6 @@ set torch_c_dlpack_ext="%tvm_ffi%/addons/torch_c_dlpack_ext"
     exit /b 0
 
 for %%torch_version in ("2.4" "2.5" "2.6" "2.7" "2.8" "2.9") do (
-    echo %%torch_version
+    echo "aaaa" %%torch_version
     call :build_libs %%torch_version
 )
