@@ -12,9 +12,9 @@ set torch_c_dlpack_ext="%tvm_ffi%/addons/torch_c_dlpack_ext"
 echo tvm_ffi=%tvm_ffi%
 echo torch_c_dlpack_ext=%torch_c_dlpack_ext%
 
-for %%torch_version in ("2.4" "2.5" "2.6" "2.7" "2.8" "2.9") do (
-    echo torch_version=%%torch_version
-    call :build_libs %%torch_version
+for %%P in ("2.4" "2.5" "2.6" "2.7" "2.8" "2.9") do (
+    echo torch_version=%%P
+    call :build_libs %%P
 )
 
 :get_torch_url
