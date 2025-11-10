@@ -75,6 +75,7 @@ Suppose we implement a C++ function ``AddOne`` that performs elementwise ``y = x
       :end-before: [example.end]
 
 
+
 The macro :c:macro:`TVM_FFI_DLL_EXPORT_TYPED_FUNC` exports the C++ function ``AddOne``
 as a TVM FFI compatible symbol with the name ``__tvm_ffi_add_one_cpu/cuda`` in the resulting library.
 
