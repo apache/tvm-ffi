@@ -26,47 +26,34 @@ on:
   pull_request:
 
 jobs:
-  build_wheels_linux:
+  build_wheels_windows:
     strategy:
       fail-fast: false
       matrix:
-        arch: ["x86_64", "aarch64"]
+        arch: ["x86_64"]
         python-version: ["cp39", "cp310", "cp311", "cp312", "cp313", "cp314"]
-    runs-on: ${{ matrix.arch == 'aarch64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    runs-on: windows-latest
     steps:
-      - uses: jlumbroso/free-disk-space@main
-        if: ${{ matrix.arch == 'x86_64'}}
       - uses: actions/checkout@v5
         with:
-          repository: apache/tvm-ffi
-          ref: main
+          repository: cyx-6/tvm-ffi
+          ref: torch-c-dlpack-windows
           fetch-depth: 0
           submodules: recursive
           path: tvm-ffi
-      - name: prepare docker environment
-        run: |
-          docker pull quay.io/pypa/manylinux_2_28_${{ matrix.arch }}:latest
-          docker run --name build_lib -d quay.io/pypa/manylinux_2_28_${{ matrix.arch }}:latest tail -f /dev/null
-          docker cp tvm-ffi build_lib:/tvm-ffi
-          wget https://developer.download.nvidia.com/compute/cuda/13.0.2/local_installers/cuda-repo-rhel8-13-0-local-13.0.2_580.95.05-1.${{ matrix.arch }}.rpm > /dev/null 2>&1
-          docker cp cuda-repo-rhel8-13-0-local-13.0.2_580.95.05-1.${{ matrix.arch }}.rpm build_lib:/
-          rm cuda-repo-rhel8-13-0-local-13.0.2_580.95.05-1.${{ matrix.arch }}.rpm
-          docker exec build_lib bash -c "rpm -i /cuda-repo-rhel8-13-0-local-13.0.2_580.95.05-1.${{ matrix.arch }}.rpm \
-          && dnf clean all \
-          && dnf -y install cuda-toolkit-13-0 \
-          && rm /cuda-repo-rhel8-13-0-local-13.0.2_580.95.05-1.${{ matrix.arch }}.rpm \
-          && dnf clean all"
-      - name: build torch libs and wheels
-        run: |
-          docker exec -w /tvm-ffi build_lib bash ./addons/torch_c_dlpack_ext/build_aot_wheels.sh ${{ matrix.arch }} ${{ matrix.python-version }}
-      - name: collect built wheels
-        run: |
-          mkdir wheelhouse
-          docker cp build_lib:/tvm-ffi/addons/torch_c_dlpack_ext/wheelhouse/ .
+      - uses: Jimver/cuda-toolkit@6008063726ffe3309d1b22e413d9e88fed91a2f2
+        id: cuda-toolkit
+      - uses: astral-sh/setup-uv@v7
+      - name: build wheels
+        env:
+          CUDA_HOME: ${{steps.cuda-toolkit.outputs.CUDA_PATH}}
+        shell: cmd
+        working-directory: ./tvm-ffi
+        run: ./addons/torch_c_dlpack_ext/build_aot_wheels.bat ${{ matrix.arch }} ${{ matrix.python-version }}
       - uses: actions/upload-artifact@v4
         with:
           name: pypi-wheels-${{ matrix.arch }}-${{ matrix.python-version }}
-          path: ./wheelhouse/*.whl
+          path: ./tvm-ffi/wheelhouse/*.whl
   build_source:
     runs-on: ubuntu-latest
     steps:
@@ -91,7 +78,7 @@ jobs:
           name: pypi-source
           path: ./tvm-ffi/addons/torch_c_dlpack_ext/dist/*tar.gz
   upload_pypi:
-    needs: [build_wheels_linux, build_source]
+    needs: [build_wheels_windows, build_source]
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
