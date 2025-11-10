@@ -14,7 +14,7 @@ for %%P in (2.4 2.5 2.6 2.7 2.8 2.9) do (
 copy %tvm_ffi%\lib\*.dll %torch_c_dlpack_ext%\torch_c_dlpack_ext
 uv venv %tvm_ffi%\.venv\build --python %python_version%
 call %tvm_ffi%\.venv\build\Scripts\activate
-uv pip install build wheel auditwheel
+uv pip install build wheel
 cd %torch_c_dlpack_ext%
 python -m build -w
 dir dist
