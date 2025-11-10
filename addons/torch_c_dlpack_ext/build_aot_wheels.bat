@@ -1,3 +1,19 @@
+@REM Licensed to the Apache Software Foundation (ASF) under one
+@REM or more contributor license agreements.  See the NOTICE file
+@REM distributed with this work for additional information
+@REM regarding copyright ownership.  The ASF licenses this file
+@REM to you under the Apache License, Version 2.0 (the
+@REM "License"); you may not use this file except in compliance
+@REM with the License.  You may obtain a copy of the License at
+@REM
+@REM   http://www.apache.org/licenses/LICENSE-2.0
+@REM
+@REM Unless required by applicable law or agreed to in writing,
+@REM software distributed under the License is distributed on an
+@REM "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+@REM KIND, either express or implied.  See the License for the
+@REM specific language governing permissions and limitations
+@REM under the License.
 @echo off
 setlocal enabledelayedexpansion
 
@@ -7,6 +23,8 @@ set python_version=%~2
 set tvm_ffi=%cd%
 set torch_c_dlpack_ext=%tvm_ffi%\addons\torch_c_dlpack_ext
 
+if not exist "%tvm_ffi%\.venv" mkdir "%tvm_ffi%\.venv"
+if not exist "%tvm_ffi%\lib" mkdir "%tvm_ffi%\lib"
 for %%P in (2.4 2.5 2.6 2.7 2.8 2.9) do (
     call :build_libs %%P
 )
@@ -31,13 +49,11 @@ exit /b
     call :check_availability
     if %errorlevel%==0 (
         call :get_torch_url
-        mkdir %tvm_ffi%\.venv
         uv venv %tvm_ffi%\.venv\torch%torch_version% --python %python_version%
         call %tvm_ffi%\.venv\torch%torch_version%\Scripts\activate
         uv pip install setuptools ninja
         uv pip install torch==%torch_version% --index-url !torch_url!
         uv pip install -v .
-        mkdir %tvm_ffi%\lib
         python -m tvm_ffi.utils._build_optional_torch_c_dlpack --output-dir %tvm_ffi%\lib
         python -m tvm_ffi.utils._build_optional_torch_c_dlpack --output-dir %tvm_ffi%\lib --build-with-cuda
         call deactivate
@@ -78,11 +94,16 @@ exit /b
     exit /b 1
 
 :get_torch_url
-    if %torch_version%==2.4 (set torch_url=https://download.pytorch.org/whl/cu124 && exit /b 0)
-    if %torch_version%==2.5 (set torch_url=https://download.pytorch.org/whl/cu124 && exit /b 0)
-    if %torch_version%==2.6 (set torch_url=https://download.pytorch.org/whl/cu126 && exit /b 0)
-    if %torch_version%==2.7 (set torch_url=https://download.pytorch.org/whl/cu128 && exit /b 0)
-    if %torch_version%==2.8 (set torch_url=https://download.pytorch.org/whl/cu129 && exit /b 0)
-    if %torch_version%==2.9 (set torch_url=https://download.pytorch.org/whl/cu129 && exit /b 0)
+    set cuda_version=
+    if %torch_version%==2.4 set cuda_version=cu124
+    if %torch_version%==2.5 set cuda_version=cu124
+    if %torch_version%==2.6 set cuda_version=cu126
+    if %torch_version%==2.7 set cuda_version=cu128
+    if %torch_version%==2.8 set cuda_version=cu129
+    if %torch_version%==2.9 set cuda_version=cu129
+    if defined cuda_version (
+        set torch_url=https://download.pytorch.org/whl/%cuda_version%
+        exit /b 0
+    )
     echo Unknown or unsupported torch version: %torch_version% >&2
     exit /b 1
