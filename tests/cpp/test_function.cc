@@ -108,6 +108,22 @@ TEST(Func, FromTyped) {
       },
       ::tvm::ffi::Error);
 
+  // convert with DLTensor* triggers error
+  EXPECT_THROW(
+      {
+        try {
+          DLTensor dltensor;
+          fadd1(&dltensor);
+        } catch (const Error& error) {
+          EXPECT_EQ(error.kind(), "TypeError");
+          EXPECT_EQ(error.message(),
+                    "Mismatched type on argument #0 when calling: `(0: int) -> int`. "
+                    "Expected `int` but got `DLTensor*`");
+          throw;
+        }
+      },
+      ::tvm::ffi::Error);
+
   // try decution
   Function fpass_and_return = Function::FromTyped(
       // NOLINTNEXTLINE(performance-unnecessary-value-param)

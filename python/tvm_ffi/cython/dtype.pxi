@@ -51,12 +51,12 @@ def _set_class_dtype(cls):
     _CLASS_DTYPE = cls
 
 
-def _create_dtype_from_tuple(cls, code, bits, lanes):
+def _create_cdtype_from_tuple(cls, code, bits, lanes):
     cdef DLDataType cdtype
     cdtype.code = code
     cdtype.bits = bits
     cdtype.lanes = lanes
-    ret = cls.__new__(cls, str(cdtype))
+    ret = cls.__new__(cls)
     (<DataType>ret).cdtype = cdtype
     return ret
 
@@ -87,7 +87,7 @@ cdef class DataType:
 
     def __reduce__(self) -> Any:
         cls = type(self)
-        return (_create_dtype_from_tuple,
+        return (_create_cdtype_from_tuple,
                 (cls, self.cdtype.code, self.cdtype.bits, self.cdtype.lanes))
 
     def __eq__(self, other: object) -> bool:
@@ -101,6 +101,9 @@ cdef class DataType:
 
     def __ne__(self, other: object) -> bool:
         return not self.__eq__(other)
+
+    def __hash__(self) -> int:
+        return hash((self.cdtype.code, self.cdtype.bits, self.cdtype.lanes))
 
     @property
     def type_code(self) -> int:
@@ -151,20 +154,24 @@ cdef class DataType:
         return res
 
 
-cdef inline object make_ret_dtype(TVMFFIAny result):
+cdef inline object make_dtype_from_dl_data_type(DLDataType dl_data_type):
     cdtype = DataType.__new__(DataType)
-    (<DataType>cdtype).cdtype = result.v_dtype
+    (<DataType>cdtype).cdtype = dl_data_type
     val = str.__new__(_CLASS_DTYPE, cdtype.__str__())
     val._tvm_ffi_dtype = cdtype
     return val
 
 
-cdef TORCH_DTYPE_TO_DTYPE = {}
-cdef NUMPY_DTYPE_TO_DTYPE = {}
-cdef MLDTYPES_DTYPE_TO_DTYPE = {}
+cdef inline object make_ret_dtype(TVMFFIAny result):
+    return make_dtype_from_dl_data_type(result.v_dtype)
+
+
+cdef TORCH_DTYPE_TO_DL_DATA_TYPE = {}
+cdef NUMPY_DTYPE_TO_DL_DATA_TYPE = {}
+cdef MLDTYPES_DTYPE_TO_DL_DATA_TYPE = {}
 
 if torch is not None:
-    TORCH_DTYPE_TO_DTYPE = {
+    TORCH_DTYPE_TO_DL_DATA_TYPE = {
         torch.int8: DLDataType(0, 8, 1),
         torch.short: DLDataType(0, 16, 1),
         torch.int16: DLDataType(0, 16, 1),
@@ -190,21 +197,19 @@ if torch is not None:
         torch.float8_e5m2fnuz: DLDataType(13, 8, 1),
     }
     if hasattr(torch, "float8_e8m0fnu"):
-        TORCH_DTYPE_TO_DTYPE[torch.float8_e8m0fnu] = DLDataType(14, 8, 1)
+        TORCH_DTYPE_TO_DL_DATA_TYPE[torch.float8_e8m0fnu] = DLDataType(14, 8, 1)
     if hasattr(torch, "float4_e2m1fn_x2"):
-        TORCH_DTYPE_TO_DTYPE[torch.float4_e2m1fn_x2] = DLDataType(17, 4, 2)
+        TORCH_DTYPE_TO_DL_DATA_TYPE[torch.float4_e2m1fn_x2] = DLDataType(17, 4, 2)
 
     def _convert_torch_dtype_to_ffi_dtype(torch_dtype):
-        cdef DLDataType cdtype = TORCH_DTYPE_TO_DTYPE[torch_dtype]
-        ret = DataType.__new__(DataType, str(cdtype))
-        (<DataType>ret).cdtype = cdtype
-        return ret
+        cdef DLDataType dl_data_type = TORCH_DTYPE_TO_DL_DATA_TYPE[torch_dtype]
+        return make_dtype_from_dl_data_type(dl_data_type)
 else:
     def _convert_torch_dtype_to_ffi_dtype(torch_dtype):
         raise ValueError("torch not found")
 
 if ml_dtypes is not None:
-    MLDTYPES_DTYPE_TO_DTYPE = {
+    MLDTYPES_DTYPE_TO_DL_DATA_TYPE = {
         numpy.dtype(ml_dtypes.int4): DLDataType(0, 4, 1),
         numpy.dtype(ml_dtypes.uint4): DLDataType(1, 4, 1),
         numpy.dtype(ml_dtypes.bfloat16): DLDataType(4, 16, 1),
@@ -216,19 +221,19 @@ if ml_dtypes is not None:
     }
 
     if hasattr(ml_dtypes, "int2"):  # ml_dtypes >= 0.5.0
-        MLDTYPES_DTYPE_TO_DTYPE[numpy.dtype(ml_dtypes.int2)] = DLDataType(0, 2, 1)
-        MLDTYPES_DTYPE_TO_DTYPE[numpy.dtype(ml_dtypes.uint2)] = DLDataType(1, 2, 1)
+        MLDTYPES_DTYPE_TO_DL_DATA_TYPE[numpy.dtype(ml_dtypes.int2)] = DLDataType(0, 2, 1)
+        MLDTYPES_DTYPE_TO_DL_DATA_TYPE[numpy.dtype(ml_dtypes.uint2)] = DLDataType(1, 2, 1)
 
-        MLDTYPES_DTYPE_TO_DTYPE[numpy.dtype(ml_dtypes.float8_e3m4)] = DLDataType(7, 8, 1)
-        MLDTYPES_DTYPE_TO_DTYPE[numpy.dtype(ml_dtypes.float8_e4m3)] = DLDataType(8, 8, 1)
-        MLDTYPES_DTYPE_TO_DTYPE[numpy.dtype(ml_dtypes.float8_e8m0fnu)] = DLDataType(14, 8, 1)
-        MLDTYPES_DTYPE_TO_DTYPE[numpy.dtype(ml_dtypes.float6_e2m3fn)] = DLDataType(15, 6, 1)
-        MLDTYPES_DTYPE_TO_DTYPE[numpy.dtype(ml_dtypes.float6_e3m2fn)] = DLDataType(16, 6, 1)
-        MLDTYPES_DTYPE_TO_DTYPE[numpy.dtype(ml_dtypes.float4_e2m1fn)] = DLDataType(17, 4, 1)
+        MLDTYPES_DTYPE_TO_DL_DATA_TYPE[numpy.dtype(ml_dtypes.float8_e3m4)] = DLDataType(7, 8, 1)
+        MLDTYPES_DTYPE_TO_DL_DATA_TYPE[numpy.dtype(ml_dtypes.float8_e4m3)] = DLDataType(8, 8, 1)
+        MLDTYPES_DTYPE_TO_DL_DATA_TYPE[numpy.dtype(ml_dtypes.float8_e8m0fnu)] = DLDataType(14, 8, 1)
+        MLDTYPES_DTYPE_TO_DL_DATA_TYPE[numpy.dtype(ml_dtypes.float6_e2m3fn)] = DLDataType(15, 6, 1)
+        MLDTYPES_DTYPE_TO_DL_DATA_TYPE[numpy.dtype(ml_dtypes.float6_e3m2fn)] = DLDataType(16, 6, 1)
+        MLDTYPES_DTYPE_TO_DL_DATA_TYPE[numpy.dtype(ml_dtypes.float4_e2m1fn)] = DLDataType(17, 4, 1)
 
 
 if numpy is not None:
-    NUMPY_DTYPE_TO_DTYPE = {
+    NUMPY_DTYPE_TO_DL_DATA_TYPE = {
         numpy.dtype(numpy.int8): DLDataType(0, 8, 1),
         numpy.dtype(numpy.int16): DLDataType(0, 16, 1),
         numpy.dtype(numpy.int32): DLDataType(0, 32, 1),
@@ -240,14 +245,12 @@ if numpy is not None:
         numpy.dtype(numpy.float16): DLDataType(2, 16, 1),
         numpy.dtype(numpy.float32): DLDataType(2, 32, 1),
         numpy.dtype(numpy.float64): DLDataType(2, 64, 1),
-        **MLDTYPES_DTYPE_TO_DTYPE,
+        **MLDTYPES_DTYPE_TO_DL_DATA_TYPE,
     }
 
     def _convert_numpy_dtype_to_ffi_dtype(numpy_dtype):
-        cdef DLDataType cdtype = NUMPY_DTYPE_TO_DTYPE[numpy_dtype]
-        ret = DataType.__new__(DataType, str(cdtype))
-        (<DataType>ret).cdtype = cdtype
-        return ret
+        cdef DLDataType cdtype = NUMPY_DTYPE_TO_DL_DATA_TYPE[numpy_dtype]
+        return make_dtype_from_dl_data_type(cdtype)
 else:
     def _convert_torch_dtype_to_ffi_dtype(torch_dtype):
         raise ValueError("numpy not found")

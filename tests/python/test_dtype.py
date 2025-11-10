@@ -88,10 +88,12 @@ _fecho = tvm_ffi.get_global_func("testing.echo")
 
 def _check_dtype(dtype: Any, code: int, bits: int, lanes: int) -> None:
     echo_dtype = _fecho(dtype)
+    assert isinstance(echo_dtype, tvm_ffi.dtype)
     assert echo_dtype.type_code == code
     assert echo_dtype.bits == bits
     assert echo_dtype.lanes == lanes
     converted_dtype = tvm_ffi.convert(dtype)
+    assert isinstance(converted_dtype, tvm_ffi.dtype)
     assert converted_dtype.type_code == code
     assert converted_dtype.bits == bits
     assert converted_dtype.lanes == lanes

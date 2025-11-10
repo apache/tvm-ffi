@@ -244,6 +244,10 @@ cdef extern from "tvm/ffi/c_api.h":
         const TVMFFIMethodInfo* methods
         const TVMFFITypeMetadata* metadata
 
+    ctypedef struct TVMFFITypeAttrColumn:
+        const TVMFFIAny* data
+        size_t size
+
     int TVMFFIObjectDecRef(TVMFFIObjectHandle obj) nogil
     int TVMFFIObjectIncRef(TVMFFIObjectHandle obj) nogil
     int TVMFFIObjectCreateOpaque(void* handle, int32_t type_index,
@@ -285,6 +289,7 @@ cdef extern from "tvm/ffi/c_api.h":
     TVMFFIShapeCell* TVMFFIShapeGetCellPtr(TVMFFIObjectHandle obj) nogil
     DLTensor* TVMFFITensorGetDLTensorPtr(TVMFFIObjectHandle obj) nogil
     DLDevice TVMFFIDLDeviceFromIntPair(int32_t device_type, int32_t device_id) nogil
+    const TVMFFITypeAttrColumn* TVMFFIGetTypeAttrColumn(const TVMFFIByteArray* attr_name) nogil
 
 cdef extern from "tvm/ffi/extra/c_env_api.h":
     ctypedef void* TVMFFIStreamHandle

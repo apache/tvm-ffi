@@ -55,7 +55,7 @@ class AccessStep(Object):
 class AccessPath(Object):
     """Access path container.
 
-    An ``AccessPath`` describes how to reach a nested attribute or item
+    It describes how to reach a nested attribute or item
     inside a complex FFI object by recording a sequence of steps
     (attribute, array index, or map key). It is primarily used by
     diagnostics to pinpoint structural mismatches.

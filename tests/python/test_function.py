@@ -332,6 +332,8 @@ def test_function_with_dlpack_data_type_protocol() -> None:
     x = DLPackDataTypeProtocol((dtype.type_code, dtype.bits, dtype.lanes))
     y = fecho(x)
     assert y == dtype
+    converted_y = tvm_ffi.convert(x)
+    assert converted_y == dtype
 
 
 def test_function_with_dlpack_device_protocol() -> None:
@@ -348,3 +350,36 @@ def test_function_with_dlpack_device_protocol() -> None:
     x = DLPackDeviceProtocol(device)
     y = fecho(x)
     assert y == device
+
+
+def test_integral_float_variants_passing() -> None:
+    fecho = tvm_ffi.get_global_func("testing.echo")
+    y = fecho(np.int32(1))
+    assert isinstance(y, int)
+    assert y == 1
+
+    y = fecho(np.float64(2.0))
+    assert isinstance(y, float)
+    assert y == 2.0
+
+    class IntProtocol:
+        def __init__(self, value: int) -> None:
+            self.value = value
+
+        def __tvm_ffi_int__(self) -> int:
+            return self.value
+
+    y = fecho(IntProtocol(10))
+    assert isinstance(y, int)
+    assert y == 10
+
+    class FloatProtocol:
+        def __init__(self, value: float) -> None:
+            self.value = value
+
+        def __tvm_ffi_float__(self) -> float:
+            return self.value
+
+    y = fecho(FloatProtocol(10))
+    assert isinstance(y, float)
+    assert y == 10

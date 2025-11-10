@@ -16,10 +16,13 @@
 <!--- under the License. -->
 # Torch C DLPack Extension
 
-This folder contains the source for the `torch-c-dlpack-ext` package, which provides an Ahead-Of-Time (AOT) compiled module to support faster DLPack conversion.
-This module will likely become unnecessary once PyTorch releases include DLPack v1.2 support.
-By default, `tvm-ffi` will JIT-compile a version of this functionality during loading.
-Installing this wheel allows users to avoid this JIT compilation overhead.
+This folder contains the source for the `torch-c-dlpack-ext` package, which provides an
+Ahead-Of-Time (AOT) compiled module to support faster DLPack conversion in DLPack v1.2.
+By default, `tvm-ffi` will JIT-compile a version of this functionality during loading,
+and use a safe-fallback if JIT-compilation fails.
+Installing this wheel allows users to avoid this JIT compilation overhead and
+also avoid the cases where the user environment does not necessarily have a compiler toolchain
+to run JIT-compilation.
 
 ```bash
 pip install torch-c-dlpack-ext

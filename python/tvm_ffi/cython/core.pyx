@@ -17,12 +17,24 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+
+# N.B. Make sure `_register_object_by_index` is called in inheritance order,
+# where the base class has to be registered before the derived class.
+# Otherwise, `TypeInfo.parent_type_info` may not be properly propagated to the derived class.
 include "./base.pxi"
 include "./type_info.pxi"
-include "./dtype.pxi"
-include "./device.pxi"
 include "./object.pxi"
+_register_object_by_index(kTVMFFIObject, Object)
 include "./error.pxi"
+_register_object_by_index(kTVMFFIError, Error)
+include "./dtype.pxi"
+_register_object_by_index(kTVMFFIDataType, DataType)
+include "./device.pxi"
+_register_object_by_index(kTVMFFIDevice, Device)
 include "./string.pxi"
+_register_object_by_index(kTVMFFIStr, String)
+_register_object_by_index(kTVMFFIBytes, Bytes)
 include "./tensor.pxi"
+_register_object_by_index(kTVMFFITensor, Tensor)
 include "./function.pxi"
+_register_object_by_index(kTVMFFIFunction, Function)

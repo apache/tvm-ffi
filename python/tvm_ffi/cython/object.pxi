@@ -83,16 +83,16 @@ cdef class Object:
     This is the root Python type for objects backed by the TVM FFI
     runtime. Each instance references a handle to a C++ runtime
     object. Python subclasses typically correspond to C++ runtime
-    types and are registered via ``tvm_ffi.register_object``.
+    types and are registered via :py:meth:`tvm_ffi.register_object`.
 
     Notes
     -----
-    - Equality of two ``Object`` instances uses underlying handle
+    - Equality of two :py:class:`Object` instances uses underlying handle
       identity unless an overridden implementation is provided on the
       concrete type. Use :py:meth:`same_as` to check whether two
       references point to the same underlying object.
     - Most users interact with subclasses (e.g. :class:`Tensor`,
-      :class:`Function`) rather than ``Object`` directly.
+      :class:`Function`) rather than :py:class:`Object` directly.
 
     Examples
     --------
@@ -487,6 +487,8 @@ cdef _update_registry(int type_index, object type_key, object type_info, object 
     TYPE_INDEX_TO_CLS[type_index] = type_cls
     TYPE_INDEX_TO_INFO[type_index] = type_info
     TYPE_KEY_TO_INFO[type_key] = type_info
+    if type_cls is not None:
+        TYPE_CLS_TO_INFO[type_cls] = type_info
 
 
 def _register_object_by_index(int type_index, object type_cls):
@@ -498,12 +500,13 @@ def _register_object_by_index(int type_index, object type_cls):
 
 
 def _set_type_cls(object type_info, object type_cls):
-    global TYPE_INDEX_TO_INFO, TYPE_INDEX_TO_CLS
+    global TYPE_INDEX_TO_INFO, TYPE_INDEX_TO_CLS, TYPE_CLS_TO_INFO
     assert type_info.type_cls is None, f"Type already registered for {type_info.type_key}"
     assert TYPE_INDEX_TO_INFO[type_info.type_index] is type_info
     assert TYPE_KEY_TO_INFO[type_info.type_key] is type_info
     type_info.type_cls = type_cls
     TYPE_INDEX_TO_CLS[type_info.type_index] = type_cls
+    TYPE_CLS_TO_INFO[type_cls] = type_info
 
 
 def _lookup_or_register_type_info_from_type_key(type_key: str) -> TypeInfo:
@@ -514,8 +517,22 @@ def _lookup_or_register_type_info_from_type_key(type_key: str) -> TypeInfo:
     return info
 
 
+def _lookup_type_attr(type_index: int32_t, attr_key: str) -> Any:
+    cdef ByteArrayArg attr_key_bytes = ByteArrayArg(c_str(attr_key))
+    cdef const TVMFFITypeAttrColumn* column = TVMFFIGetTypeAttrColumn(&attr_key_bytes.cdata)
+    cdef TVMFFIAny data
+    if column == NULL or column.size <= type_index:
+        return None
+    return make_ret(column.data[type_index])
+
+
+def _type_cls_to_type_info(type_cls: type) -> TypeInfo | None:
+    return TYPE_CLS_TO_INFO.get(type_cls, None)
+
+
 cdef list TYPE_INDEX_TO_CLS = []
 cdef list TYPE_INDEX_TO_INFO = []
+cdef dict TYPE_CLS_TO_INFO = {}
 cdef dict TYPE_KEY_TO_INFO = {}
 
 _set_class_object(Object)

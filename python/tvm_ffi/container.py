@@ -103,7 +103,7 @@ def getitem_helper(
     Returns
     -------
     result
-        The element for integer indices or a ``list`` for slices.
+        The element for integer indices or a :class:`list` for slices.
 
     """
     if isinstance(idx, slice):

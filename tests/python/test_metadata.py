@@ -18,7 +18,7 @@ from typing import Any
 
 import pytest
 from tvm_ffi import get_global_func_metadata
-from tvm_ffi.core import TypeInfo, TypeSchema
+from tvm_ffi.core import TypeInfo, TypeSchema, _lookup_type_attr
 from tvm_ffi.testing import _SchemaAllTypes
 
 
@@ -195,3 +195,7 @@ def test_mem_fn_as_global_func() -> None:
     metadata: dict[str, Any] = get_global_func_metadata("testing.TestIntPairSum")
     type_schema: TypeSchema = TypeSchema.from_json_str(metadata["type_schema"])
     assert str(type_schema) == "Callable[[testing.TestIntPair], int]"
+
+
+def test_class_metadata_none() -> None:
+    assert _lookup_type_attr(64, "__metadata__") is None

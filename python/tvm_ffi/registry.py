@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import json
 import sys
-from typing import Any, Callable, Literal, TypeVar, overload
+from typing import Any, Callable, Literal, Sequence, TypeVar, overload
 
 from . import core
 from .core import TypeInfo
@@ -268,7 +268,7 @@ def get_global_func_metadata(name: str) -> dict[str, Any]:
         Register a Python callable as a global FFI function.
 
     """
-    return json.loads(get_global_func("ffi.GetGlobalFuncMetadata")(name))
+    return json.loads(get_global_func("ffi.GetGlobalFuncMetadata")(name) or "{}")
 
 
 def init_ffi_api(namespace: str, target_module_name: str | None = None) -> None:
@@ -346,9 +346,22 @@ def __init__invalid(self: Any, *args: Any, **kwargs: Any) -> None:
     raise RuntimeError("The __init__ method of this class is not implemented.")
 
 
+def get_registered_type_keys() -> Sequence[str]:
+    """Get the list of valid type keys registered to TVM-FFI.
+
+    Returns
+    -------
+    type_keys
+        List of valid type keys.
+
+    """
+    return get_global_func("ffi.GetRegisteredTypeKeys")()
+
+
 __all__ = [
     "get_global_func",
     "get_global_func_metadata",
+    "get_registered_type_keys",
     "init_ffi_api",
     "list_global_func_names",
     "register_global_func",

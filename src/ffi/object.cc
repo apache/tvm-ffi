@@ -21,6 +21,7 @@
  * \brief Registry to record dynamic types
  */
 #include <tvm/ffi/c_api.h>
+#include <tvm/ffi/container/array.h>
 #include <tvm/ffi/container/map.h>
 #include <tvm/ffi/error.h>
 #include <tvm/ffi/function.h>
@@ -193,6 +194,16 @@ class TypeTable {
     return entry;
   }
 
+  Array<String> GetRegisteredTypeKeys() const {
+    Array<String> ret;
+    for (const auto& entry : type_table_) {
+      if (entry) {
+        ret.push_back(entry->type_key_data);
+      }
+    }
+    return ret;
+  }
+
   void RegisterTypeField(int32_t type_index, const TVMFFIFieldInfo* info) {
     Entry* entry = GetTypeEntry(type_index);
     TVMFFIFieldInfo field_data = *info;
@@ -315,7 +326,7 @@ class TypeTable {
   }
 
  private:
-  TypeTable() {
+  TypeTable() : type_attr_columns_{}, type_attr_name_to_column_index_{} {
     type_table_.reserve(TypeIndex::kTVMFFIDynObjectBegin);
     for (int32_t i = 0; i < TypeIndex::kTVMFFIDynObjectBegin; ++i) {
       type_table_.emplace_back(nullptr);
@@ -332,12 +343,13 @@ class TypeTable {
     // reserve the static types
     ReserveBuiltinTypeIndex(StaticTypeKey::kTVMFFINone, TypeIndex::kTVMFFINone);
     ReserveBuiltinTypeIndex(StaticTypeKey::kTVMFFIInt, TypeIndex::kTVMFFIInt);
-    ReserveBuiltinTypeIndex(StaticTypeKey::kTVMFFIFloat, TypeIndex::kTVMFFIFloat);
     ReserveBuiltinTypeIndex(StaticTypeKey::kTVMFFIBool, TypeIndex::kTVMFFIBool);
-    ReserveBuiltinTypeIndex(StaticTypeKey::kTVMFFIRawStr, TypeIndex::kTVMFFIRawStr);
+    ReserveBuiltinTypeIndex(StaticTypeKey::kTVMFFIFloat, TypeIndex::kTVMFFIFloat);
     ReserveBuiltinTypeIndex(StaticTypeKey::kTVMFFIOpaquePtr, TypeIndex::kTVMFFIOpaquePtr);
     ReserveBuiltinTypeIndex(StaticTypeKey::kTVMFFIDataType, TypeIndex::kTVMFFIDataType);
     ReserveBuiltinTypeIndex(StaticTypeKey::kTVMFFIDevice, TypeIndex::kTVMFFIDevice);
+    ReserveBuiltinTypeIndex(StaticTypeKey::kTVMFFIDLTensorPtr, TypeIndex::kTVMFFIDLTensorPtr);
+    ReserveBuiltinTypeIndex(StaticTypeKey::kTVMFFIRawStr, TypeIndex::kTVMFFIRawStr);
     ReserveBuiltinTypeIndex(StaticTypeKey::kTVMFFIByteArrayPtr, TypeIndex::kTVMFFIByteArrayPtr);
     ReserveBuiltinTypeIndex(StaticTypeKey::kTVMFFIObjectRValueRef,
                             TypeIndex::kTVMFFIObjectRValueRef);
@@ -536,3 +548,13 @@ int TVMFFIBytesFromByteArray(const TVMFFIByteArray* input, TVMFFIAny* out) {
   tvm::ffi::TypeTraits<tvm::ffi::Bytes>::MoveToAny(tvm::ffi::Bytes(input->data, input->size), out);
   TVM_FFI_SAFE_CALL_END();
 }
+
+namespace {
+TVM_FFI_STATIC_INIT_BLOCK() {
+  using namespace tvm::ffi;
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef().def_method("ffi.GetRegisteredTypeKeys", []() -> Array<String> {
+    return tvm::ffi::TypeTable::Global()->GetRegisteredTypeKeys();
+  });
+}
+}  // namespace

@@ -31,6 +31,13 @@ To install via pip, run:
 
    pip install apache-tvm-ffi
 
+We also recommend installing the optional package below for improved
+torch tensor conversion performance.
+
+.. code-block:: bash
+
+   pip install torch-c-dlpack-ext
+
 
 Table of Contents
 -----------------

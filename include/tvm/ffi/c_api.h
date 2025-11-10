@@ -156,9 +156,6 @@ typedef enum {
   kTVMFFITensor = 70,
   /*! \brief Array object. */
   kTVMFFIArray = 71,
-  //----------------------------------------------------------------
-  // more complex objects
-  //----------------------------------------------------------------
   /*! \brief Map object. */
   kTVMFFIMap = 72,
   /*! \brief Runtime dynamic loaded module object. */
@@ -175,6 +172,9 @@ typedef enum {
    * \sa TVMFFIObjectCreateOpaque
    */
   kTVMFFIOpaquePyObject = 74,
+  //----------------------------------------------------------------
+  // more complex objects
+  //----------------------------------------------------------------
   kTVMFFIStaticObjectEnd,
   // [Section] Dynamic Boxed: [kTVMFFIDynObjectBegin, +oo)
   /*! \brief Start of type indices that are allocated at runtime. */

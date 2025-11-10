@@ -35,10 +35,10 @@ TEST(Error, Backtrace) {
         } catch (const Error& error) {
           EXPECT_EQ(error.message(), "test0");
           EXPECT_EQ(error.kind(), "RuntimeError");
-          std::string what = error.what();
-          EXPECT_NE(what.find("line"), std::string::npos);
-          EXPECT_NE(what.find("ThrowRuntimeError"), std::string::npos);
-          EXPECT_NE(what.find("RuntimeError: test0"), std::string::npos);
+          std::string full_message = error.FullMessage();
+          EXPECT_NE(full_message.find("line"), std::string::npos);
+          EXPECT_NE(full_message.find("ThrowRuntimeError"), std::string::npos);
+          EXPECT_NE(full_message.find("RuntimeError: test0"), std::string::npos);
           throw;
         }
       },
@@ -52,9 +52,9 @@ TEST(CheckError, Backtrace) {
           TVM_FFI_ICHECK_GT(2, 3);
         } catch (const Error& error) {
           EXPECT_EQ(error.kind(), "InternalError");
-          std::string what = error.what();
-          EXPECT_NE(what.find("line"), std::string::npos);
-          EXPECT_NE(what.find("2 > 3"), std::string::npos);
+          std::string full_message = error.FullMessage();
+          EXPECT_NE(full_message.find("line"), std::string::npos);
+          EXPECT_NE(full_message.find("2 > 3"), std::string::npos);
           throw;
         }
       },
@@ -69,10 +69,10 @@ TEST(CheckError, ValueError) {
           TVM_FFI_CHECK(value >= 0, ValueError) << "Value must be non-negative, got " << value;
         } catch (const Error& error) {
           EXPECT_EQ(error.kind(), "ValueError");
-          std::string what = error.what();
-          EXPECT_NE(what.find("line"), std::string::npos);
-          EXPECT_NE(what.find("Check failed: (value >= 0) is false"), std::string::npos);
-          EXPECT_NE(what.find("Value must be non-negative, got -5"), std::string::npos);
+          std::string full_message = error.FullMessage();
+          EXPECT_NE(full_message.find("line"), std::string::npos);
+          EXPECT_NE(full_message.find("Check failed: (value >= 0) is false"), std::string::npos);
+          EXPECT_NE(full_message.find("Value must be non-negative, got -5"), std::string::npos);
           throw;
         }
       },
@@ -89,10 +89,12 @@ TEST(CheckError, IndexError) {
               << "Index " << index << " out of bounds for array of size " << array_size;
         } catch (const Error& error) {
           EXPECT_EQ(error.kind(), "IndexError");
-          std::string what = error.what();
-          EXPECT_NE(what.find("line"), std::string::npos);
-          EXPECT_NE(what.find("Check failed: (index < array_size) is false"), std::string::npos);
-          EXPECT_NE(what.find("Index 10 out of bounds for array of size 5"), std::string::npos);
+          std::string full_message = error.FullMessage();
+          EXPECT_NE(full_message.find("line"), std::string::npos);
+          EXPECT_NE(full_message.find("Check failed: (index < array_size) is false"),
+                    std::string::npos);
+          EXPECT_NE(full_message.find("Index 10 out of bounds for array of size 5"),
+                    std::string::npos);
           throw;
         }
       },

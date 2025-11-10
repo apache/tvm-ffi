@@ -505,6 +505,24 @@ struct TorchDLPackExchangeAPI : public DLPackExchangeAPI {
     }
   }
 
+  // Get current CUDA/ROCm work stream
+  static int CurrentWorkStream(DLDeviceType device_type, int32_t device_id, void** out_stream) {
+    try {
+#ifdef BUILD_WITH_CUDA
+      if (device_type == kDLCUDA || device_type == kDLROCM) {
+        *out_stream = at::cuda::getCurrentCUDAStream(device_id).stream();
+        return 0;
+      }
+#endif
+      // For CPU and other devices, return NULL (no stream concept)
+      *out_stream = nullptr;
+      return 0;
+    } catch (const std::exception& e) {
+      PyErr_SetString(PyExc_RuntimeError, e.what());
+      return -1;
+    }
+  }
+
   static int ManagedTensorToPyObjectNoSync(DLManagedTensorVersioned* src, void** py_obj_out) {
     try {
       at::Tensor tensor = at::fromDLPackImpl<DLManagedTensorVersioned>(src, nullptr);
@@ -532,24 +550,6 @@ struct TorchDLPackExchangeAPI : public DLPackExchangeAPI {
       return 0;
     } catch (const std::exception& e) {
       SetError(error_ctx, "MemoryError", e.what());
-      return -1;
-    }
-  }
-
-  // Get current CUDA/ROCm work stream
-  static int CurrentWorkStream(DLDeviceType device_type, int32_t device_id, void** out_stream) {
-    try {
-#ifdef BUILD_WITH_CUDA
-      if (device_type == kDLCUDA || device_type == kDLROCM) {
-        *out_stream = at::cuda::getCurrentCUDAStream(device_id).stream();
-        return 0;
-      }
-#endif
-      // For CPU and other devices, return NULL (no stream concept)
-      *out_stream = nullptr;
-      return 0;
-    } catch (const std::exception& e) {
-      PyErr_SetString(PyExc_RuntimeError, e.what());
       return -1;
     }
   }
@@ -613,7 +613,7 @@ def _generate_ninja_build(
         ]
         default_ldflags = ["/DLL"]
     else:
-        default_cflags = ["-std=c++17", "-fPIC", "-O2"]
+        default_cflags = ["-std=c++17", "-fPIC", "-O3"]
         default_ldflags = ["-shared", "-Wl,-rpath,$ORIGIN", "-Wl,--no-as-needed"]
 
     cflags = default_cflags + [flag.strip() for flag in extra_cflags]
