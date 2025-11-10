@@ -624,11 +624,12 @@ def _generate_ninja_build(
 
     # append include paths
     for path in include_paths:
-        if " " in path:
-            path = f'"{path}"'
+        path_str = str(path)
+        if " " in path_str:
+            path_str = f'"{path_str}"'
         if IS_WINDOWS:
-            path = path.replace(":", "$:")
-        cflags.append(f"-I{path}")
+            path_str = path_str.replace(":", "$:")
+        cflags.append(f"-I{path_str}")
 
     # flags
     ninja = []
