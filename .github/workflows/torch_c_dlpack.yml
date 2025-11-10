@@ -23,9 +23,10 @@ on:
       branch:
         description: "Branch or tag to publish (manual run)"
         required: true
+  pull_request:
 
 jobs:
-  build_wheels:
+  build_wheels_linux:
     strategy:
       fail-fast: false
       matrix:
@@ -66,6 +67,34 @@ jobs:
         with:
           name: pypi-wheels-${{ matrix.arch }}-${{ matrix.python-version }}
           path: ./wheelhouse/*.whl
+  build_wheels_windows:
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: ["x86_64"]
+        python-version: ["cp39", "cp310", "cp311", "cp312", "cp313", "cp314"]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          repository: cyx-6/tvm-ffi
+          ref: torch-c-dlpack-windows
+          fetch-depth: 0
+          submodules: recursive
+          path: tvm-ffi
+      - uses: Jimver/cuda-toolkit@master
+        id: cuda-toolkit
+      - uses: astral-sh/setup-uv@v7
+      - name: build wheels
+        env:
+          CUDA_HOME: ${{steps.cuda-toolkit.outputs.CUDA_PATH}}
+        shell: cmd
+        working-directory: ./tvm-ffi
+        run: ./addons/torch_c_dlpack_ext/build_aot_wheels.bat ${{ matrix.arch }} ${{ matrix.python-version }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pypi-wheels-${{ matrix.arch }}-${{ matrix.python-version }}
+          path: ./tvm-ffi/wheelhouse/*.whl
   build_source:
     runs-on: ubuntu-latest
     steps:
@@ -90,7 +119,7 @@ jobs:
           name: pypi-source
           path: ./tvm-ffi/addons/torch_c_dlpack_ext/dist/*tar.gz
   upload_pypi:
-    needs: [build_wheels, build_source]
+    needs: [build_wheels_linux, build_wheels_windows, build_source]
     runs-on: ubuntu-latest
     environment: pypi
     permissions:

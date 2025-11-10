@@ -1,10 +1,8 @@
-@echo on
+@echo off
+setlocal enabledelayedexpansion
 
 set arch=%~1
 set python_version=%~2
-
-echo arch=%arch%
-echo python_version=%python_version%
 
 set tvm_ffi=%cd%
 set torch_c_dlpack_ext=%tvm_ffi%\addons\torch_c_dlpack_ext
@@ -25,20 +23,16 @@ dir dist
 mkdir wheelhouse
 copy dist\*-win_amd64.whl wheelhouse
 dir wheelhouse
-
-exit /b 0
+endlocal
+exit /b
 
 :build_libs
     set torch_version=%1
-    setlocal enabledelayedexpansion
     call :check_availability
     if %errorlevel%==0 (
         call :get_torch_url
-        echo fff %arch% %python_version% %torch_version% !torch_url!
         mkdir %tvm_ffi%\.venv
         uv venv %tvm_ffi%\.venv\torch%torch_version% --python %python_version%
-        dir %tvm_ffi%\.venv\torch%torch_version%
-        dir %tvm_ffi%\.venv\torch%torch_version%\Scripts\activate
         call %tvm_ffi%\.venv\torch%torch_version%\Scripts\activate
         uv pip install setuptools ninja
         uv pip install torch==%torch_version% --index-url !torch_url!
@@ -46,13 +40,11 @@ exit /b 0
         mkdir %tvm_ffi%\lib
         python -m tvm_ffi.utils._build_optional_torch_c_dlpack --output-dir %tvm_ffi%\lib
         python -m tvm_ffi.utils._build_optional_torch_c_dlpack --output-dir %tvm_ffi%\lib --build-with-cuda
-        dir %tvm_ffi%\lib
         call deactivate
         rmdir -s -q %tvm_ffi%\.venv\torch%torch_version%
     ) else (
         echo Skipping build for torch %torch_version% on %arch% with python %python_version% as it is not available.
     )
-    endlocal
     exit /b 0
 
 
