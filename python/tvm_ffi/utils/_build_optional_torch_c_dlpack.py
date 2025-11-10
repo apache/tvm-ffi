@@ -45,6 +45,9 @@ cpp_source = """
 #ifdef BUILD_WITH_CUDA
 #include <c10/cuda/CUDAStream.h>
 #endif
+#ifdef BUILD_WITH_ROCM
+#include <c10/hip/HIPStream.h>
+#endif
 
 using namespace std;
 namespace at {
@@ -709,6 +712,11 @@ def main() -> None:  # noqa: PLR0912, PLR0915
         help="Build with CUDA support.",
     )
     parser.add_argument(
+        "--build-with-rocm",
+        action="store_true",
+        help="Build with ROCm support.",
+    )
+    parser.add_argument(
         "--libname",
         type=str,
         default="auto",
@@ -716,6 +724,8 @@ def main() -> None:  # noqa: PLR0912, PLR0915
     )
 
     args = parser.parse_args()
+    if args.build_with_cuda and args.build_with_rocm:
+        raise ValueError("Cannot enable both CUDA and ROCm at the same time.")
 
     # resolve build directory
     if args.build_dir is None:
@@ -729,7 +739,12 @@ def main() -> None:  # noqa: PLR0912, PLR0915
     # resolve library name
     if args.libname == "auto":
         major, minor = torch.__version__.split(".")[:2]
-        device = "cpu" if not args.build_with_cuda else "cuda"
+        if args.build_with_cuda:
+            device = "cuda"
+        elif args.build_with_rocm:
+            device = "rocm"
+        else:
+            device = "cpu"
         suffix = ".dll" if IS_WINDOWS else ".so"
         libname = f"libtorch_c_dlpack_addon_torch{major}{minor}-{device}{suffix}"
     else:
@@ -759,7 +774,10 @@ def main() -> None:  # noqa: PLR0912, PLR0915
 
         if args.build_with_cuda:
             cflags.append("-DBUILD_WITH_CUDA")
-        include_paths.extend(get_torch_include_paths(args.build_with_cuda))
+        elif args.build_with_rocm:
+            cflags.extend(torch.utils.cpp_extension.COMMON_HIP_FLAGS)
+            cflags.append("-DBUILD_WITH_ROCM")
+        include_paths.extend(get_torch_include_paths(args.build_with_cuda or args.build_with_rocm))
 
         # use CXX11 ABI
         if torch.compiled_with_cxx11_abi():

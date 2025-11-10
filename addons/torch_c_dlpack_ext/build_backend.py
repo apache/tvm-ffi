@@ -74,6 +74,11 @@ def build_wheel(
                 "No need to build any torch c dlpackc libs."
             )
         else:
+            extra_args = []
+            if torch.version.cuda is not None:
+                extra_args.append("--build-with-cuda")
+            elif torch.version.hip is not None:
+                extra_args.append("--build-with-rocm")
             subprocess.run(
                 [
                     sys.executable,
@@ -81,7 +86,7 @@ def build_wheel(
                     "tvm_ffi.utils._build_optional_torch_c_dlpack",
                     "--output-dir",
                     str(_package_path),
-                    "--build-with-cuda" if torch.cuda.is_available() else "",
+                    *extra_args,
                 ],
                 check=True,
                 env={**os.environ, "TVM_FFI_DISABLE_TORCH_C_DLPACK": "1"},

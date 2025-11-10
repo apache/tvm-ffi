@@ -44,8 +44,10 @@ def test_build_torch_c_dlpack_extension() -> None:
         "--libname",
         "libtorch_c_dlpack_addon_test.so",
     ]
-    if torch.cuda.is_available():
+    if torch.version.cuda is not None:
         args.append("--build-with-cuda")
+    elif torch.version.hip is not None:
+        args.append("--build-with-rocm")
     subprocess.run(args, check=True)
 
     lib_path = str(Path("./output-dir/libtorch_c_dlpack_addon_test.so").resolve())

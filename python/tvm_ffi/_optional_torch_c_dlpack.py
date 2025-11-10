@@ -67,7 +67,12 @@ def load_torch_c_dlpack_extension() -> Any:
         cache_dir = Path(os.environ.get("TVM_FFI_CACHE_DIR", "~/.cache/tvm-ffi")).expanduser()
         addon_output_dir = cache_dir
         major, minor = torch.__version__.split(".")[:2]
-        device = "cpu" if not torch.cuda.is_available() else "cuda"
+        if torch.version.cuda is not None:
+            device = "cuda"
+        elif torch.version.hip is not None:
+            device = "rocm"
+        else:
+            device = "cpu"
         suffix = ".dll" if sys.platform.startswith("win") else ".so"
         libname = f"libtorch_c_dlpack_addon_torch{major}{minor}-{device}{suffix}"
         lib_path = addon_output_dir / libname
@@ -83,8 +88,10 @@ def load_torch_c_dlpack_extension() -> Any:
                 "--libname",
                 libname,
             ]
-            if torch.cuda.is_available():
+            if device == "cuda":
                 args.append("--build-with-cuda")
+            elif device == "rocm":
+                args.append("--build-with-rocm")
             subprocess.run(
                 args,
                 check=True,

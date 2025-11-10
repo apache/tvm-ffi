@@ -112,3 +112,23 @@ def test_tvm_ffi_tensor_compatible() -> None:
     fecho = tvm_ffi.get_global_func("testing.echo")
     z = fecho(y)
     assert z.__chandle__() == x.__chandle__()
+
+
+@pytest.mark.skipif(
+    torch is None or torch.version.hip is None, reason="ROCm is not enabled in PyTorch"
+)
+def test_tensor_from_pytorch_rocm() -> None:
+    assert torch is not None
+
+    @tvm_ffi.register_global_func("testing.check_device", override=True)
+    def _check_device(x: tvm_ffi.Tensor) -> str:
+        return x.device.type
+
+    # PyTorch uses device name "cuda" to represent ROCm device
+    x = torch.randn(128, device="cuda")
+    device_type = tvm_ffi.get_global_func("testing.check_device")(x)
+    assert device_type == "rocm"
+
+
+if __name__ == "__main__":
+    pytest.main([__file__])
