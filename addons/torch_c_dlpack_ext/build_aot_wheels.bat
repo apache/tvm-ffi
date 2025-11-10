@@ -45,7 +45,7 @@ exit /b 0
         uv pip install -v .
         mkdir %tvm_ffi%\lib
         python -m tvm_ffi.utils._build_optional_torch_c_dlpack --output-dir %tvm_ffi%\lib
-        @REM python -m tvm_ffi.utils._build_optional_torch_c_dlpack --output-dir %tvm_ffi%\lib --build-with-cuda
+        python -m tvm_ffi.utils._build_optional_torch_c_dlpack --output-dir %tvm_ffi%\lib --build-with-cuda
         dir %tvm_ffi%\lib
         call deactivate
         rmdir -s -q %tvm_ffi%\.venv\torch%torch_version%
