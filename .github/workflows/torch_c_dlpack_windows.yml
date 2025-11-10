@@ -51,7 +51,7 @@ jobs:
         run: ./addons/torch_c_dlpack_ext/build_aot_wheels.bat ${{ matrix.arch }} ${{ matrix.python-version }}
       - uses: actions/upload-artifact@v4
         with:
-          name: pypi-wheels-${{ matrix.arch }}-${{ matrix.python-version }}
+          name: pypi-wheels-windows-${{ matrix.arch }}-${{ matrix.python-version }}
           path: ./tvm-ffi/addons/torch_c_dlpack_ext/wheelhouse/*.whl
   upload_pypi:
     needs: [build_wheels_windows]
