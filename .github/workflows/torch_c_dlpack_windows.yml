@@ -23,7 +23,6 @@ on:
       branch:
         description: "Branch or tag to publish (manual run)"
         required: true
-  pull_request:
 
 jobs:
   build_wheels_windows:
@@ -36,8 +35,8 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          repository: cyx-6/tvm-ffi
-          ref: torch-c-dlpack-windows
+          repository: apache/tvm-ffi
+          ref: main
           fetch-depth: 0
           submodules: recursive
           path: tvm-ffi
@@ -54,31 +53,8 @@ jobs:
         with:
           name: pypi-wheels-${{ matrix.arch }}-${{ matrix.python-version }}
           path: ./tvm-ffi/addons/torch_c_dlpack_ext/wheelhouse/*.whl
-  build_source:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          repository: apache/tvm-ffi
-          ref: main
-          fetch-depth: 0
-          submodules: recursive
-          path: tvm-ffi
-      - uses: astral-sh/setup-uv@v7
-        with:
-          python-version: "3.12"
-          activate-environment: true
-      - name: build source
-        run: |
-          uv pip install build
-          cd ./tvm-ffi/addons/torch_c_dlpack_ext
-          python -m build -s
-      - uses: actions/upload-artifact@v4
-        with:
-          name: pypi-source
-          path: ./tvm-ffi/addons/torch_c_dlpack_ext/dist/*tar.gz
   upload_pypi:
-    needs: [build_wheels_windows, build_source]
+    needs: [build_wheels_windows]
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
