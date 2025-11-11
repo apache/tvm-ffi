@@ -116,11 +116,7 @@ for version in "${torch_versions[@]}"; do
     build_libs "$version"
 done
 
-if [[ "$os" == "Linux" ]]; then
-    cp "$tvm_ffi"/lib/*.so "$torch_c_dlpack_ext"/torch_c_dlpack_ext
-else
-    cp "$tvm_ffi"/lib/*.dylib "$torch_c_dlpack_ext"/torch_c_dlpack_ext
-fi
+cp "$tvm_ffi"/lib/*.so "$torch_c_dlpack_ext"/torch_c_dlpack_ext
 uv venv "$tvm_ffi"/.venv/build --python "$python_version"
 source "$tvm_ffi"/.venv/build/bin/activate
 uv pip install build wheel
