@@ -113,8 +113,8 @@ function build_libs() {
     fi
 }
 
-mkdir "$tvm_ffi"/.venv -p
-mkdir "$tvm_ffi"/lib -p
+mkdir -p "$tvm_ffi"/.venv
+mkdir -p "$tvm_ffi"/lib
 torch_versions=("2.4" "2.5" "2.6" "2.7" "2.8" "2.9")
 for version in "${torch_versions[@]}"; do
     build_libs "$version"
