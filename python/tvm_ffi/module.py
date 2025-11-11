@@ -180,7 +180,9 @@ class Module(core.Object):
             raise AttributeError(f"Module has no function '{name}'")
         return func
 
-    def get_function_metadata(self, name: str, query_imports: bool = False) -> dict[str, Any]:
+    def get_function_metadata(
+        self, name: str, query_imports: bool = False
+    ) -> dict[str, Any] | None:
         """Get metadata for a function exported from the module.
 
         This retrieves metadata for functions exported via TVM_FFI_DLL_EXPORT_TYPED_FUNC,

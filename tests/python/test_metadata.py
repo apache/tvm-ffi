@@ -252,7 +252,8 @@ def test_schema_dll_exported_func(func_name: str, expected: str) -> None:
     """Test metadata schemas from DLL-exported functions via TVM_FFI_DLL_EXPORT_TYPED_FUNC."""
     testing_lib_path = libinfo.find_library_by_basename("tvm_ffi_testing")
     mod = tvm_ffi.load_module(testing_lib_path)
-    metadata: dict[str, Any] = mod.get_function_metadata(func_name)
+    metadata = mod.get_function_metadata(func_name)
+    assert metadata is not None
     actual: TypeSchema = TypeSchema.from_json_str(metadata["type_schema"])
     assert str(actual) == expected, f"{func_name}: {actual}"
     assert actual.repr(_replace_list_dict) == expected.replace(
@@ -275,7 +276,8 @@ def test_mem_fn_as_dll_exported_func() -> None:
     """Test member functions exported as DLL symbols when wrapped in lambda."""
     testing_lib_path = libinfo.find_library_by_basename("tvm_ffi_testing")
     mod = tvm_ffi.load_module(testing_lib_path)
-    metadata: dict[str, Any] = mod.get_function_metadata("testing_dll_schema_test_int_pair_sum")
+    metadata = mod.get_function_metadata("testing_dll_schema_test_int_pair_sum")
+    assert metadata is not None
     type_schema: TypeSchema = TypeSchema.from_json_str(metadata["type_schema"])
     assert str(type_schema) == "Callable[[testing.TestIntPair], int]"
 
@@ -284,7 +286,8 @@ def test_dll_exported_func_with_doc() -> None:
     """Test TVM_FFI_DLL_EXPORT_TYPED_FUNC_DOC exports metadata and documentation."""
     testing_lib_path = libinfo.find_library_by_basename("tvm_ffi_testing")
     mod = tvm_ffi.load_module(testing_lib_path)
-    metadata: dict[str, Any] = mod.get_function_metadata("testing_dll_test_add_with_docstring")
+    metadata = mod.get_function_metadata("testing_dll_test_add_with_docstring")
+    assert metadata is not None
     assert "type_schema" in metadata
     schema = TypeSchema.from_json_str(metadata["type_schema"])
     assert str(schema) == "Callable[[int, int], int]"
