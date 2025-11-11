@@ -41,7 +41,7 @@ from pathlib import Path
 from typing import Any
 
 
-def load_torch_c_dlpack_extension() -> Any:
+def load_torch_c_dlpack_extension() -> Any:  # noqa: PLR0912
     try:
         import torch  # noqa: PLC0415
 
@@ -67,10 +67,15 @@ def load_torch_c_dlpack_extension() -> Any:
         cache_dir = Path(os.environ.get("TVM_FFI_CACHE_DIR", "~/.cache/tvm-ffi")).expanduser()
         addon_output_dir = cache_dir
         major, minor = torch.__version__.split(".")[:2]
-        if torch.version.cuda is not None:
-            device = "cuda"
-        elif torch.version.hip is not None:
-            device = "rocm"
+        # First use "torch.cuda.is_available()" to check whether GPU environment
+        # is available. Then determine the GPU type.
+        if torch.cuda.is_available():
+            if torch.version.cuda is not None:
+                device = "cuda"
+            elif torch.version.hip is not None:
+                device = "rocm"
+            else:
+                raise ValueError("Cannot determine whether to build with CUDA or ROCm.")
         else:
             device = "cpu"
         suffix = ".dll" if sys.platform.startswith("win") else ".so"

@@ -115,7 +115,8 @@ def test_tvm_ffi_tensor_compatible() -> None:
 
 
 @pytest.mark.skipif(
-    torch is None or torch.version.hip is None, reason="ROCm is not enabled in PyTorch"
+    torch is None or not torch.cuda.is_available() or torch.version.hip is None,
+    reason="ROCm is not enabled in PyTorch",
 )
 def test_tensor_from_pytorch_rocm() -> None:
     assert torch is not None
