@@ -65,7 +65,14 @@ function check_availability() {
         "2.4")
             ! [[ "$arch" == "aarch64" || "$python_version" == "cp313" || "$python_version" == "cp314" ]]
             ;;
-        "2.5" | "2.6")
+        "2.5")
+            if [[ "$os"=="Linux" ]]; then
+                ! [[ "$arch" == "aarch64" || "$python_version" == "cp314" ]]
+            else
+                ! [["$python_version" == "cp313" || "$python_version" == "cp314" ]]
+            fi
+            ;;
+        "2.6")
             ! [[ "$arch" == "aarch64" || "$python_version" == "cp314" ]]
             ;;
         "2.7" | "2.8")
@@ -95,7 +102,7 @@ function build_libs() {
         fi
         uv pip install -v .
         python -m tvm_ffi.utils._build_optional_torch_c_dlpack --output-dir "$tvm_ffi"/lib
-        if [["$os"=="Linux"]]; then
+        if [[ "$os"=="Linux" ]]; then
             python -m tvm_ffi.utils._build_optional_torch_c_dlpack --output-dir "$tvm_ffi"/lib --build-with-cuda
         fi
         ls "$tvm_ffi"/lib
