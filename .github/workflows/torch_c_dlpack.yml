@@ -115,7 +115,7 @@ jobs:
           name: pypi-source
           path: ./tvm-ffi/addons/torch_c_dlpack_ext/dist/*tar.gz
   upload_pypi:
-    needs: [build_wheels_linux, build_source]
+    needs: [build_wheels_linux, build_wheels_macos, build_source]
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
