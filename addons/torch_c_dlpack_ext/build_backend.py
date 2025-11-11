@@ -40,8 +40,6 @@ build_editable = orig.build_editable
 def _is_lib_prebuilt() -> bool:
     if sys.platform.startswith("win32"):
         extension = "dll"
-    elif sys.platform.startswith("darwin"):
-        extension = "dylib"
     else:
         extension = "so"
     return next(_package_path.rglob(f"*.{extension}"), None) is not None
