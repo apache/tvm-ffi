@@ -21,6 +21,17 @@ set -eux
 arch=$1
 python_version=$2
 
+os=$(uname -s)
+
+case "$os" in
+    "Linux" | "Darwin")
+        ;;
+    *)
+        echo "Unknown OS: $os_name"
+        return 1
+        ;;
+esac
+
 tvm_ffi="$PWD"
 torch_c_dlpack_ext="$tvm_ffi"/addons/torch_c_dlpack_ext
 
@@ -74,15 +85,19 @@ function check_availability() {
 function build_libs() {
     local torch_version=$1
     if check_availability "$torch_version"; then
-        mkdir "$tvm_ffi"/.venv -p
         uv venv "$tvm_ffi"/.venv/torch"$torch_version" --python "$python_version"
         source "$tvm_ffi"/.venv/torch"$torch_version"/bin/activate
         uv pip install setuptools ninja
-        uv pip install torch=="$torch_version" --index-url "$(get_torch_url "$torch_version")"
+        if [[ "$os" == "Linux" ]]; then
+            uv pip install torch=="$torch_version" --index-url "$(get_torch_url "$torch_version")"
+        else
+            uv pip install torch=="$torch_version"
+        fi
         uv pip install -v .
-        mkdir "$tvm_ffi"/lib -p
         python -m tvm_ffi.utils._build_optional_torch_c_dlpack --output-dir "$tvm_ffi"/lib
-        python -m tvm_ffi.utils._build_optional_torch_c_dlpack --output-dir "$tvm_ffi"/lib --build-with-cuda
+        if [["$os"=="Linux"]]; then
+            python -m tvm_ffi.utils._build_optional_torch_c_dlpack --output-dir "$tvm_ffi"/lib --build-with-cuda
+        fi
         ls "$tvm_ffi"/lib
         deactivate
         rm -rf "$tvm_ffi"/.venv/torch"$torch_version"
@@ -91,19 +106,31 @@ function build_libs() {
     fi
 }
 
+mkdir "$tvm_ffi"/.venv -p
+mkdir "$tvm_ffi"/lib -p
 torch_versions=("2.4" "2.5" "2.6" "2.7" "2.8" "2.9")
 for version in "${torch_versions[@]}"; do
     build_libs "$version"
 done
 
-cp "$tvm_ffi"/lib/*.so "$torch_c_dlpack_ext"/torch_c_dlpack_ext
+if [[ "$os" == "Linux" ]]; then
+    cp "$tvm_ffi"/lib/*.so "$torch_c_dlpack_ext"/torch_c_dlpack_ext
+else
+    cp "$tvm_ffi"/lib/*.dylib "$torch_c_dlpack_ext"/torch_c_dlpack_ext
+fi
 uv venv "$tvm_ffi"/.venv/build --python "$python_version"
 source "$tvm_ffi"/.venv/build/bin/activate
-uv pip install build wheel auditwheel
+uv pip install build wheel
 cd "$torch_c_dlpack_ext"
 python -m build -w
 ls dist
 python -m wheel tags dist/*.whl --python-tag="$python_version" --abi-tag="$python_version" --remove
 ls dist
-auditwheel repair --exclude libtorch.so --exclude libtorch_cpu.so --exclude libc10.so --exclude libtorch_python.so dist/*.whl -w wheelhouse
+if [[ "$os" == "Linux" ]]; then
+    uv pip install auditwheel
+    auditwheel repair --exclude libtorch.so --exclude libtorch_cpu.so --exclude libc10.so --exclude libtorch_python.so dist/*.whl -w wheelhouse
+else
+    uv pip install delocate
+    delocate-listdeps --all dist/*.whl
+fi
 ls wheelhouse

@@ -23,6 +23,7 @@ on:
       branch:
         description: "Branch or tag to publish (manual run)"
         required: true
+  pull_request:
 
 jobs:
   build_wheels_linux:
@@ -37,8 +38,8 @@ jobs:
         if: ${{ matrix.arch == 'x86_64'}}
       - uses: actions/checkout@v5
         with:
-          repository: apache/tvm-ffi
-          ref: main
+          repository: cyx-6/tvm-ffi
+          ref: torch-c-dlpack-macos
           fetch-depth: 0
           submodules: recursive
           path: tvm-ffi
@@ -66,6 +67,30 @@ jobs:
         with:
           name: pypi-wheels-linux-${{ matrix.arch }}-${{ matrix.python-version }}
           path: ./wheelhouse/*.whl
+  build_wheels_macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: ["arm64"]
+        python-version: ["cp39", "cp310", "cp311", "cp312", "cp313", "cp314"]
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          repository: cyx-6/tvm-ffi
+          ref: torch-c-dlpack-macos
+          fetch-depth: 0
+          submodules: recursive
+          path: tvm-ffi
+      - uses: astral-sh/setup-uv@v7
+      - name: build torch libs and wheels
+        working-directory: ./tvm-ffi
+        run: |
+          bash ./addons/torch_c_dlpack_ext/build_aot_wheels.sh ${{ matrix.arch }} ${{ matrix.python-version }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pypi-wheels-macos-${{ matrix.arch }}-${{ matrix.python-version }}
+          path: ./tvm-ffi/addons/torch_c_dlpack_ext/wheelhouse/*.whl
   build_source:
     runs-on: ubuntu-latest
     steps:
