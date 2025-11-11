@@ -201,6 +201,7 @@ def test_mem_fn_as_global_func() -> None:
 def test_class_metadata_none() -> None:
     assert _lookup_type_attr(64, "__metadata__") is None
 
+
 @pytest.mark.parametrize(
     "func_name,expected",
     [

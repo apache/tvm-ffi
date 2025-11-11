@@ -856,17 +856,36 @@ inline int32_t TypeKeyToIndex(std::string_view type_key) {
   }                                                                                    \
   }
 
+#ifdef TVM_FFI_DLL_EXPORT_TYPED_FUNC_METADATA
+#define TVM_FFI_DLL_EXPORT_TYPED_FUNC_METADATA_IMPL_(ExportName, Function)           \
+  static inline ::tvm::ffi::String __tvm_ffi_get_metadata_##ExportName() {           \
+    using FuncInfo = ::tvm::ffi::details::FunctionInfo<decltype(Function)>;          \
+    static ::tvm::ffi::String cached_metadata = []() {                               \
+      std::ostringstream os;                                                         \
+      os << R"({"type_schema":)"                                                     \
+         << ::tvm::ffi::EscapeString(::tvm::ffi::String(FuncInfo::TypeSchema()))     \
+         << R"(,"arg_const":[)";                                                     \
+      ::tvm::ffi::details::ArgConstHelper<typename FuncInfo::ArgType>::Generate(os); \
+      os << "]}";                                                                    \
+      return ::tvm::ffi::String(os.str());                                           \
+    }();                                                                             \
+    return cached_metadata;                                                          \
+  }                                                                                  \
+  TVM_FFI_DLL_EXPORT_TYPED_FUNC_IMPL_(_metadata_##ExportName, __tvm_ffi_get_metadata_##ExportName)
+#else
+#define TVM_FFI_DLL_EXPORT_TYPED_FUNC_METADATA_IMPL_(ExportName, Function)
+#endif
+
 /*!
  * \brief Export typed function as a SafeCallType symbol that follows the FFI ABI.
  *
  * This macro exports the function and automatically exports metadata when
- * TVM_FFI_DLL_EXPORT_TYPED_FUNC_METADATA is defined, and exports documentation when
- * TVM_FFI_DLL_EXPORT_TYPED_FUNC_DOC is defined.
+ * TVM_FFI_DLL_EXPORT_TYPED_FUNC_METADATA is defined.
  *
  * \param ExportName The symbol name to be exported.
  * \param Function The typed function.
  *
- * \sa ffi::TypedFunction
+ * \sa ffi::TypedFunction, TVM_FFI_DLL_EXPORT_TYPED_FUNC_WITH_DOC
  *
  * \code
  *
@@ -887,40 +906,62 @@ inline int32_t TypeKeyToIndex(std::string_view type_key) {
  *       - `__tvm_ffi_<ExportName>` (function)
  *       - `__tvm_ffi__metadata_<ExportName>` (metadata - only when
  * TVM_FFI_DLL_EXPORT_TYPED_FUNC_METADATA is defined)
- *       - `__tvm_ffi__doc_<ExportName>` (documentation - only when
- * TVM_FFI_DLL_EXPORT_TYPED_FUNC_DOC is defined)
  */
-#define TVM_FFI_DLL_EXPORT_TYPED_FUNC(ExportName, Function)          \
-  TVM_FFI_DLL_EXPORT_TYPED_FUNC_IMPL_(ExportName, Function)          \
-  TVM_FFI_DLL_EXPORT_TYPED_FUNC_METADATA_IMPL_(ExportName, Function) \
-  TVM_FFI_DLL_EXPORT_TYPED_FUNC_DOC_IMPL_(ExportName, Function)
+#define TVM_FFI_DLL_EXPORT_TYPED_FUNC(ExportName, Function) \
+  TVM_FFI_DLL_EXPORT_TYPED_FUNC_IMPL_(ExportName, Function) \
+  TVM_FFI_DLL_EXPORT_TYPED_FUNC_METADATA_IMPL_(ExportName, Function)
 
-#ifdef TVM_FFI_DLL_EXPORT_TYPED_FUNC_METADATA
-#define TVM_FFI_DLL_EXPORT_TYPED_FUNC_METADATA_IMPL_(ExportName, Function)                 \
-  TVM_FFI_DLL_EXPORT_TYPED_FUNC_IMPL_(_metadata_##ExportName, []() -> ::tvm::ffi::String { \
-    using FuncInfo = ::tvm::ffi::details::FunctionInfo<decltype(Function)>;                \
-    static ::tvm::ffi::String cached_metadata = []() {                                     \
-      std::ostringstream os;                                                               \
-      os << R"({"type_schema":)"                                                           \
-         << ::tvm::ffi::EscapeString(::tvm::ffi::String(FuncInfo::TypeSchema()))           \
-         << R"(,"arg_const":[)";                                                           \
-      ::tvm::ffi::details::ArgConstHelper<typename FuncInfo::ArgType>::Generate(os);       \
-      os << "]}";                                                                          \
-      return ::tvm::ffi::String(os.str());                                                 \
-    }();                                                                                   \
-    return cached_metadata;                                                                \
-  })
-#else
-#define TVM_FFI_DLL_EXPORT_TYPED_FUNC_METADATA_IMPL_(ExportName, Function)
-#endif
-
-#ifdef TVM_FFI_DLL_EXPORT_TYPED_FUNC_DOC
-#define TVM_FFI_DLL_EXPORT_TYPED_FUNC_DOC_IMPL_(ExportName, DocString) \
-  TVM_FFI_DLL_EXPORT_TYPED_FUNC_IMPL_(                                 \
-      _doc_##ExportName, []() -> ::tvm::ffi::String { return ::tvm::ffi::String(DocString); })
-#else
-#define TVM_FFI_DLL_EXPORT_TYPED_FUNC_DOC_IMPL_(ExportName, DocString)
-#endif
+/*!
+ * \brief Export typed function with documentation as SafeCallType symbols.
+ *
+ * This is an extended version of TVM_FFI_DLL_EXPORT_TYPED_FUNC that also exports
+ * a documentation string. The docstring can be used by stub generators and
+ * documentation tools.
+ *
+ * \param ExportName The symbol name to be exported.
+ * \param Function The typed function.
+ * \param DocString The documentation string (C string literal).
+ *
+ * \sa ffi::TypedFunction, TVM_FFI_DLL_EXPORT_TYPED_FUNC
+ *
+ * \code
+ *
+ * int Add(int a, int b) {
+ *   return a + b;
+ * }
+ *
+ * TVM_FFI_DLL_EXPORT_TYPED_FUNC_WITH_DOC(
+ *     add,
+ *     Add,
+ *     "Add two integers and return the sum.\n"
+ *     "\n"
+ *     "Parameters\n"
+ *     "----------\n"
+ *     "a : int\n"
+ *     "    First integer\n"
+ *     "b : int\n"
+ *     "    Second integer\n"
+ *     "\n"
+ *     "Returns\n"
+ *     "-------\n"
+ *     "result : int\n"
+ *     "    Sum of a and b");
+ *
+ * \endcode
+ *
+ * \note The final symbol names are:
+ *       - `__tvm_ffi_<ExportName>` (function)
+ *       - `__tvm_ffi__metadata_<ExportName>` (metadata - only when
+ * TVM_FFI_DLL_EXPORT_TYPED_FUNC_METADATA is defined)
+ *       - `__tvm_ffi__doc_<ExportName>` (docstring)
+ */
+#define TVM_FFI_DLL_EXPORT_TYPED_FUNC_WITH_DOC(ExportName, Function, DocString) \
+  TVM_FFI_DLL_EXPORT_TYPED_FUNC(ExportName, Function)                           \
+  static inline ::tvm::ffi::String __tvm_ffi_get_doc_##ExportName() {           \
+    static ::tvm::ffi::String cached_doc(DocString);                            \
+    return cached_doc;                                                          \
+  }                                                                             \
+  TVM_FFI_DLL_EXPORT_TYPED_FUNC_IMPL_(_doc_##ExportName, __tvm_ffi_get_doc_##ExportName)
 
 }  // namespace ffi
 }  // namespace tvm

@@ -16,6 +16,8 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+#define TVM_FFI_DLL_EXPORT_TYPED_FUNC_METADATA
+
 #include <gtest/gtest.h>
 #include <tvm/ffi/any.h>
 #include <tvm/ffi/container/array.h>
@@ -287,12 +289,12 @@ int invoke_testing_add1(int x) {
 
 TEST(Func, InvokeExternC) { EXPECT_EQ(invoke_testing_add1(1), 2); }
 
-extern "C" const char* __tvm_ffi__metadata_testing_add1();
+extern "C" int __tvm_ffi__metadata_testing_add1(void*, const TVMFFIAny*, int32_t, TVMFFIAny*);
 
 TEST(Func, StaticLinkingMetadata) {
-  const char* metadata_json = __tvm_ffi__metadata_testing_add1();
-  EXPECT_NE(metadata_json, nullptr);
-  Map<String, Any> metadata = json::Parse(String(metadata_json)).cast<Map<String, Any>>();
+  String metadata_str =
+      Function::InvokeExternC(nullptr, __tvm_ffi__metadata_testing_add1).cast<String>();
+  Map<String, Any> metadata = json::Parse(metadata_str).cast<Map<String, Any>>();
   EXPECT_TRUE(metadata.count("type_schema"));
   EXPECT_TRUE(metadata.count("arg_const"));
   std::string type_schema_str = metadata["type_schema"].cast<String>();

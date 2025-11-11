@@ -17,6 +17,8 @@
  * under the License.
  */
 // This file is used for testing the FFI API.
+#define TVM_FFI_DLL_EXPORT_TYPED_FUNC_METADATA
+
 #include <dlpack/dlpack.h>
 #include <tvm/ffi/any.h>
 #include <tvm/ffi/container/array.h>
@@ -581,21 +583,21 @@ TVM_FFI_DLL_EXPORT_TYPED_FUNC(testing_dll_schema_test_int_pair_sum,
                               tvm::ffi::schema_test_impl::test_int_pair_sum_wrapper);
 
 // Documentation export
-TVM_FFI_DLL_EXPORT_TYPED_FUNC_DOC(testing_dll_test_add_with_docstring,
-                                  tvm::ffi::schema_test_impl::test_add_with_docstring,
-                                  "Add two integers and return the sum.\n"
-                                  "\n"
-                                  "Parameters\n"
-                                  "----------\n"
-                                  "a : int\n"
-                                  "    First integer\n"
-                                  "b : int\n"
-                                  "    Second integer\n"
-                                  "\n"
-                                  "Returns\n"
-                                  "-------\n"
-                                  "result : int\n"
-                                  "    Sum of a and b");
+TVM_FFI_DLL_EXPORT_TYPED_FUNC_WITH_DOC(testing_dll_test_add_with_docstring,
+                                       tvm::ffi::schema_test_impl::test_add_with_docstring,
+                                       "Add two integers and return the sum.\n"
+                                       "\n"
+                                       "Parameters\n"
+                                       "----------\n"
+                                       "a : int\n"
+                                       "    First integer\n"
+                                       "b : int\n"
+                                       "    Second integer\n"
+                                       "\n"
+                                       "Returns\n"
+                                       "-------\n"
+                                       "result : int\n"
+                                       "    Sum of a and b");
 
 // Const-ness detection
 TVM_FFI_DLL_EXPORT_TYPED_FUNC(testing_dll_schema_input_const,
