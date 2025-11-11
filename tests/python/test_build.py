@@ -34,7 +34,7 @@ def test_build_cpp() -> None:
     mod: Module = tvm_ffi.load_module(output_lib_path)
 
     metadata = mod.get_function_metadata("add_one_cpu")
-    assert "type_schema" in metadata
+    assert metadata is not None and "type_schema" in metadata
     schema = TypeSchema.from_json_str(metadata["type_schema"])
     assert str(schema) == "Callable[[Tensor, Tensor], None]", f"{'add_one_cpu'}: {schema}"
     assert "arg_const" in metadata

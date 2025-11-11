@@ -221,10 +221,7 @@ class Module(core.Object):
         """
         metadata_str = _ffi_api.ModuleGetFunctionMetadata(self, name, query_imports)
         if metadata_str is None:
-            raise AttributeError(
-                f"Module has no metadata for function '{name}'. "
-                f"Ensure the function was exported with TVM_FFI_DLL_EXPORT_TYPED_FUNC."
-            )
+            return None
         return json.loads(metadata_str)
 
     def get_function_doc(self, name: str, query_imports: bool = False) -> str | None:
