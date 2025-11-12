@@ -294,8 +294,8 @@ TVM_FFI_DLL_EXPORT_TYPED_FUNC(add_one, my_ffi_extension::AddOne);
 
 The new `add_one` takes the signature of `TVMFFISafeCallType`, and can loaded and queried through the C++ `ffi::Module` API.
 
-The macro exports both the function and its type metadata, enabling signature validation
-without calling the function.
+When flag `TVM_FFI_DLL_EXPORT_TYPED_FUNC_METADATA` is on, the macro exports both the function and its type metadata, enabling
+signature validation without calling the function.
 
 The metadata includes:
 

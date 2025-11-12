@@ -840,7 +840,11 @@ inline int32_t TypeKeyToIndex(std::string_view type_key) {
   return type_index;
 }
 
-// Internal implementation macro
+/// \cond Doxygen_Suppress
+// Internal implementation macros used by TVM_FFI_DLL_EXPORT_TYPED_FUNC and related macros.
+// These should not be used directly; use the public macros instead.
+
+// Internal implementation macro that generates the C ABI wrapper function
 #define TVM_FFI_DLL_EXPORT_TYPED_FUNC_IMPL_(ExportName, Function)                      \
   extern "C" {                                                                         \
   TVM_FFI_DLL_EXPORT int __tvm_ffi_##ExportName(void* self, const TVMFFIAny* args,     \
@@ -856,6 +860,7 @@ inline int32_t TypeKeyToIndex(std::string_view type_key) {
   }                                                                                    \
   }
 
+// Internal implementation macro that optionally generates metadata export function
 #ifdef TVM_FFI_DLL_EXPORT_TYPED_FUNC_METADATA
 #define TVM_FFI_DLL_EXPORT_TYPED_FUNC_METADATA_IMPL_(ExportName, Function)           \
   static inline ::tvm::ffi::String __tvm_ffi_get_metadata_##ExportName() {           \
@@ -875,6 +880,7 @@ inline int32_t TypeKeyToIndex(std::string_view type_key) {
 #else
 #define TVM_FFI_DLL_EXPORT_TYPED_FUNC_METADATA_IMPL_(ExportName, Function)
 #endif
+/// \endcond
 
 /*!
  * \brief Export typed function as a SafeCallType symbol that follows the FFI ABI.
