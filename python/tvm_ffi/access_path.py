@@ -17,11 +17,18 @@
 # pylint: disable=invalid-name
 """Access path classes."""
 
+# tvm-ffi-stubgen(begin): import
+# fmt: off
+# isort: off
 from __future__ import annotations
-
-from collections.abc import Sequence
+from typing import Any, TYPE_CHECKING
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+    from tvm_ffi import Object
+# isort: on
+# fmt: on
+# tvm-ffi-stubgen(end)
 from enum import IntEnum
-from typing import TYPE_CHECKING, Any
 
 from .core import Object
 from .registry import register_object
@@ -42,12 +49,12 @@ class AccessKind(IntEnum):
 class AccessStep(Object):
     """Access step container."""
 
+    # tvm-ffi-stubgen(ty-map): ffi.reflection.AccessStep -> ffi.access_path.AccessStep
     # tvm-ffi-stubgen(begin): object/ffi.reflection.AccessStep
-    if TYPE_CHECKING:
-        # fmt: off
-        kind: int
-        key: Any
-        # fmt: on
+    # fmt: off
+    kind: int
+    key: Any
+    # fmt: on
     # tvm-ffi-stubgen(end)
 
 
@@ -73,25 +80,26 @@ class AccessPath(Object):
 
     """
 
+    # tvm-ffi-stubgen(ty-map): ffi.reflection.AccessPath -> ffi.access_path.AccessPath
     # tvm-ffi-stubgen(begin): object/ffi.reflection.AccessPath
+    # fmt: off
+    parent: Object | None
+    step: AccessStep | None
+    depth: int
     if TYPE_CHECKING:
-        # fmt: off
-        parent: Object | None
-        step: AccessStep | None
-        depth: int
         @staticmethod
         def _root() -> AccessPath: ...
-        def _extend(_0: AccessPath, _1: AccessStep, /) -> AccessPath: ...
-        def _attr(_0: AccessPath, _1: str, /) -> AccessPath: ...
-        def _array_item(_0: AccessPath, _1: int, /) -> AccessPath: ...
-        def _map_item(_0: AccessPath, _1: Any, /) -> AccessPath: ...
-        def _attr_missing(_0: AccessPath, _1: str, /) -> AccessPath: ...
-        def _array_item_missing(_0: AccessPath, _1: int, /) -> AccessPath: ...
-        def _map_item_missing(_0: AccessPath, _1: Any, /) -> AccessPath: ...
-        def _is_prefix_of(_0: AccessPath, _1: AccessPath, /) -> bool: ...
-        def _to_steps(_0: AccessPath, /) -> Sequence[AccessStep]: ...
-        def _path_equal(_0: AccessPath, _1: AccessPath, /) -> bool: ...
-        # fmt: on
+        def _extend(self, _1: AccessStep, /) -> AccessPath: ...
+        def _attr(self, _1: str, /) -> AccessPath: ...
+        def _array_item(self, _1: int, /) -> AccessPath: ...
+        def _map_item(self, _1: Any, /) -> AccessPath: ...
+        def _attr_missing(self, _1: str, /) -> AccessPath: ...
+        def _array_item_missing(self, _1: int, /) -> AccessPath: ...
+        def _map_item_missing(self, _1: Any, /) -> AccessPath: ...
+        def _is_prefix_of(self, _1: AccessPath, /) -> bool: ...
+        def _to_steps(self, /) -> Sequence[AccessStep]: ...
+        def _path_equal(self, _1: AccessPath, /) -> bool: ...
+    # fmt: on
     # tvm-ffi-stubgen(end)
 
     def __init__(self) -> None:

@@ -16,22 +16,24 @@
 # under the License.
 """FFI API."""
 
+# tvm-ffi-stubgen(begin): import
+# fmt: off
+# isort: off
 from __future__ import annotations
-
-from typing import TYPE_CHECKING, Any, Callable
+from typing import Any, Callable, TYPE_CHECKING
+if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+    from tvm_ffi import Module
+    from tvm_ffi.access_path import AccessPath
+# isort: on
+# fmt: on
+# tvm-ffi-stubgen(end)
 
 from . import registry
 
-if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
-
-    from tvm_ffi import Module
-    from tvm_ffi.access_path import AccessPath
-
-
 # tvm-ffi-stubgen(begin): global/ffi
+# fmt: off
 if TYPE_CHECKING:
-    # fmt: off
     def Array(*args: Any) -> Any: ...
     def ArrayGetItem(_0: Sequence[Any], _1: int, /) -> Any: ...
     def ArraySize(_0: Sequence[Any], /) -> int: ...
@@ -67,7 +69,7 @@ if TYPE_CHECKING:
     def SystemLib(*args: Any) -> Any: ...
     def ToJSONGraph(_0: Any, _1: Any, /) -> Any: ...
     def ToJSONGraphString(_0: Any, _1: Any, /) -> str: ...
-    # fmt: on
+# fmt: on
 # tvm-ffi-stubgen(end)
 
 registry.init_ffi_api("ffi", __name__)

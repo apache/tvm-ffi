@@ -15,20 +15,26 @@
 # specific language governing permissions and limitations
 # under the License.
 """Testing utilities."""
+
 # ruff: noqa: D102,D105
-
+# tvm-ffi-stubgen(begin): import
+# fmt: off
+# isort: off
 from __future__ import annotations
+from typing import Any, TYPE_CHECKING
+if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+    from tvm_ffi import Device, Object, dtype
+# isort: on
+# fmt: on
+# tvm-ffi-stubgen(end)
 
-from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import ClassVar
 
 from . import _ffi_api
 from .core import Object
 from .dataclasses import c_class, field
 from .registry import get_global_func, register_object
-
-if TYPE_CHECKING:
-    from tvm_ffi import Device, dtype
 
 
 @register_object("testing.TestObjectBase")
@@ -36,13 +42,13 @@ class TestObjectBase(Object):
     """Test object base class."""
 
     # tvm-ffi-stubgen(begin): object/testing.TestObjectBase
+    # fmt: off
+    v_i64: int
+    v_f64: float
+    v_str: str
     if TYPE_CHECKING:
-        # fmt: off
-        v_i64: int
-        v_f64: float
-        v_str: str
-        def add_i64(_0: TestObjectBase, _1: int, /) -> int: ...
-        # fmt: on
+        def add_i64(self, _1: int, /) -> int: ...
+    # fmt: on
     # tvm-ffi-stubgen(end)
 
 
@@ -51,14 +57,14 @@ class TestIntPair(Object):
     """Test Int Pair."""
 
     # tvm-ffi-stubgen(begin): object/testing.TestIntPair
+    # fmt: off
+    a: int
+    b: int
     if TYPE_CHECKING:
-        # fmt: off
-        a: int
-        b: int
         @staticmethod
         def __c_ffi_init__(_0: int, _1: int, /) -> Object: ...
-        def sum(_0: TestIntPair, /) -> int: ...
-        # fmt: on
+        def sum(self, /) -> int: ...
+    # fmt: on
     # tvm-ffi-stubgen(end)
 
 
@@ -67,42 +73,41 @@ class TestObjectDerived(TestObjectBase):
     """Test object derived class."""
 
     # tvm-ffi-stubgen(begin): object/testing.TestObjectDerived
-    if TYPE_CHECKING:
-        # fmt: off
-        v_map: Mapping[Any, Any]
-        v_array: Sequence[Any]
-        # fmt: on
+    # fmt: off
+    v_map: Mapping[Any, Any]
+    v_array: Sequence[Any]
+    # fmt: on
     # tvm-ffi-stubgen(end)
 
 
 @register_object("testing.SchemaAllTypes")
 class _SchemaAllTypes:
+    # tvm-ffi-stubgen(ty-map): testing.SchemaAllTypes -> testing._SchemaAllTypes
     # tvm-ffi-stubgen(begin): object/testing.SchemaAllTypes
-    # tvm-ffi-stubgen(ty_map): testing.SchemaAllTypes -> _SchemaAllTypes
+    # fmt: off
+    v_bool: bool
+    v_int: int
+    v_float: float
+    v_device: Device
+    v_dtype: dtype
+    v_string: str
+    v_bytes: bytes
+    v_opt_int: int | None
+    v_opt_str: str | None
+    v_arr_int: Sequence[int]
+    v_arr_str: Sequence[str]
+    v_map_str_int: Mapping[str, int]
+    v_map_str_arr_int: Mapping[str, Sequence[int]]
+    v_variant: str | Sequence[int] | Mapping[str, int]
+    v_opt_arr_variant: Sequence[int | str] | None
     if TYPE_CHECKING:
-        # fmt: off
-        v_bool: bool
-        v_int: int
-        v_float: float
-        v_device: Device
-        v_dtype: dtype
-        v_string: str
-        v_bytes: bytes
-        v_opt_int: int | None
-        v_opt_str: str | None
-        v_arr_int: Sequence[int]
-        v_arr_str: Sequence[str]
-        v_map_str_int: Mapping[str, int]
-        v_map_str_arr_int: Mapping[str, Sequence[int]]
-        v_variant: str | Sequence[int] | Mapping[str, int]
-        v_opt_arr_variant: Sequence[int | str] | None
-        def add_int(_0: _SchemaAllTypes, _1: int, /) -> int: ...
-        def append_int(_0: _SchemaAllTypes, _1: Sequence[int], _2: int, /) -> Sequence[int]: ...
-        def maybe_concat(_0: _SchemaAllTypes, _1: str | None, _2: str | None, /) -> str | None: ...
-        def merge_map(_0: _SchemaAllTypes, _1: Mapping[str, Sequence[int]], _2: Mapping[str, Sequence[int]], /) -> Mapping[str, Sequence[int]]: ...
+        def add_int(self, _1: int, /) -> int: ...
+        def append_int(self, _1: Sequence[int], _2: int, /) -> Sequence[int]: ...
+        def maybe_concat(self, _1: str | None, _2: str | None, /) -> str | None: ...
+        def merge_map(self, _1: Mapping[str, Sequence[int]], _2: Mapping[str, Sequence[int]], /) -> Mapping[str, Sequence[int]]: ...
         @staticmethod
         def make_with(_0: int, _1: float, _2: str, /) -> _SchemaAllTypes: ...
-        # fmt: on
+    # fmt: on
     # tvm-ffi-stubgen(end)
 
 
