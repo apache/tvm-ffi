@@ -127,10 +127,9 @@ python -m wheel tags dist/*.whl --python-tag="$python_version" --abi-tag="$pytho
 ls dist
 if [[ "$os" == "Linux" ]]; then
     uv pip install auditwheel
-    auditwheel repair --exclude libtorch.so --exclude libtorch_cpu.so --exclude libc10.so --exclude libtorch_python.so --exlcude libtorch_cuda.so dist/*.whl -w wheelhouse
+    auditwheel repair --exclude libtorch.so --exclude libtorch_cpu.so --exclude libc10.so --exclude libtorch_python.so --exclude libtorch_cuda.so dist/*.whl -w wheelhouse
 else
     uv pip install delocate
-    delocate-listdeps --all dist/*.whl
-    delocate-wheel --exclude libtorch.dylib --exclude libtorch_cpu.dylib --exclude libc10.dylib --exclude libtorch_python.dylib dist/*.whl -w wheelhouse
+    delocate-wheel -v --exclude libtorch.dylib --exclude libtorch_cpu.dylib --exclude libc10.dylib --exclude libtorch_python.dylib dist/*.whl -w wheelhouse
 fi
 ls wheelhouse
