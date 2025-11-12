@@ -41,6 +41,8 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstdint>
+#include <iterator>
 #include <optional>
 #include <tuple>
 #include <type_traits>
@@ -49,24 +51,103 @@
 
 namespace tvm {
 namespace ffi {
+namespace details {
 
-template <typename T, std::size_t Nm>
-struct TypeTraits<std::array<T, Nm>> : public TypeTraitsBase {
- private:
-  using Self = std::array<T, Nm>;
-  using Array = ::tvm::ffi::Array<T>;
-  static_assert(Nm > 0, "Zero-length std::array is not supported.");
+template <typename Type>
+struct STLTypeTrait : public TypeTraitsBase {
+ public:
+  using TypeTraitsBase::convert_enabled;
+  using TypeTraitsBase::storage_enabled;
 
+ protected:
+  // we always copy STL types into an Object first, then move the ObjectPtr to Any.
+  TVM_FFI_INLINE static void MoveToAnyImpl(ObjectPtr<Type>&& src, TVMFFIAny* result) {
+    TVMFFIObject* obj_ptr = ObjectUnsafe::MoveObjectPtrToTVMFFIObjectPtr(std::move(src));
+    result->type_index = obj_ptr->type_index;
+    result->zero_padding = 0;
+    TVM_FFI_CLEAR_PTR_PADDING_IN_FFI_ANY(result);
+    result->v_obj = obj_ptr;
+  }
+
+  // we always construct STL types from an Object first, then copy from the ObjectPtr in Any.
+  TVM_FFI_INLINE static ObjectPtr<Type> CopyFromAnyViewAfterCheckImpl(const TVMFFIAny* src) {
+    return details::ObjectUnsafe::ObjectPtrFromUnowned<Type>(src->v_obj);
+  }
+};
+
+struct ContainerTemplate {};
+
+}  // namespace details
+
+template <>
+struct TypeTraits<details::ContainerTemplate> : public details::STLTypeTrait<::tvm::ffi::ArrayObj> {
  public:
   static constexpr int32_t field_static_type_index = TypeIndex::kTVMFFIArray;
 
+ private:
+  template <std::size_t... Is, typename Tuple>
+  TVM_FFI_INLINE static ObjectPtr<ArrayObj> CopyToTupleImpl(std::index_sequence<Is...>,
+                                                            Tuple&& src) {
+    auto array = ArrayObj::Empty(static_cast<std::int64_t>(sizeof...(Is)));
+    auto dst = array->MutableBegin();
+    // increase size after each new to ensure exception safety
+    ((::new (dst++) Any(std::get<Is>(std::forward<Tuple>(src))), array->size_++), ...);
+    return array;
+  }
+
+  template <typename Iter>
+  TVM_FFI_INLINE static ObjectPtr<ArrayObj> CopyToArrayImpl(Iter src, std::size_t size) {
+    auto array = ArrayObj::Empty(static_cast<std::int64_t>(size));
+    auto dst = array->MutableBegin();
+    // increase size after each new to ensure exception safety
+    for (std::size_t i = 0; i < size; ++i) {
+      ::new (dst++) Any(*(src++));
+      array->size_++;
+    }
+    return array;
+  }
+
+ protected:
+  template <typename Tuple>
+  TVM_FFI_INLINE static ObjectPtr<ArrayObj> CopyToTuple(const Tuple& src) {
+    return CopyToTupleImpl(std::make_index_sequence<std::tuple_size_v<Tuple>>{}, src);
+  }
+
+  template <typename Tuple>
+  TVM_FFI_INLINE static ObjectPtr<ArrayObj> MoveToTuple(Tuple&& src) {
+    return CopyToTupleImpl(std::make_index_sequence<std::tuple_size_v<Tuple>>{},
+                           std::forward<Tuple>(src));
+  }
+
+  template <typename Range>
+  TVM_FFI_INLINE static ObjectPtr<ArrayObj> CopyToArray(const Range& src) {
+    return CopyToArrayImpl(std::begin(src), std::size(src));
+  }
+
+  template <typename Range>
+  TVM_FFI_INLINE static ObjectPtr<ArrayObj> MoveToArray(Range&& src) {
+    return CopyToArrayImpl(std::make_move_iterator(std::begin(src)), std::size(src));
+  }
+
+  /// NOTE: STL types are not natively movable from Any, so we always make a new copy.
+  template <typename T>
+  TVM_FFI_INLINE static T CopyFromAny(const Any& value) {
+    return details::AnyUnsafe::CopyFromAnyViewAfterCheck<T>(value);
+  }
+};
+
+template <typename T, std::size_t Nm>
+struct TypeTraits<std::array<T, Nm>> : public TypeTraits<details::ContainerTemplate> {
+ public:
+  using Self = std::array<T, Nm>;
+  static_assert(Nm > 0, "Zero-length std::array is not supported.");
+
   TVM_FFI_INLINE static void CopyToAnyView(const Self& src, TVMFFIAny* result) {
-    return TypeTraits<Array>::MoveToAny({src.begin(), src.end()}, result);
+    return MoveToAnyImpl(CopyToArray(src), result);
   }
 
   TVM_FFI_INLINE static void MoveToAny(Self&& src, TVMFFIAny* result) {
-    return TypeTraits<Array>::MoveToAny(
-        {std::make_move_iterator(src.begin()), std::make_move_iterator(src.end())}, result);
+    return MoveToAnyImpl(MoveToArray(std::move(src)), result);
   }
 
   TVM_FFI_INLINE static bool CheckAnyStrict(const TVMFFIAny* src) {
@@ -83,17 +164,17 @@ struct TypeTraits<std::array<T, Nm>> : public TypeTraitsBase {
   }
 
   TVM_FFI_INLINE static Self CopyFromAnyViewAfterCheck(const TVMFFIAny* src) {
-    auto array = TypeTraits<Array>::CopyFromAnyViewAfterCheck(src);
+    auto array = CopyFromAnyViewAfterCheckImpl(src);
+    auto begin = array->MutableBegin();
     Self result;  // no initialization to avoid overhead
-    std::copy_n(std::make_move_iterator(array.begin()), Nm, result.begin());
+    for (std::size_t i = 0; i < Nm; ++i) {
+      result[i] = CopyFromAny<T>(begin[i]);
+    }
     return result;
   }
 
   TVM_FFI_INLINE static Self MoveFromAnyAfterCheck(TVMFFIAny* src) {
-    auto array = TypeTraits<Array>::MoveFromAnyAfterCheck(src);
-    Self result;  // no initialization to avoid overhead
-    std::copy_n(std::make_move_iterator(array.begin()), Nm, result.begin());
-    return result;
+    return CopyFromAnyViewAfterCheck(src);
   }
 
   TVM_FFI_INLINE static std::optional<Self> TryCastFromAnyView(const TVMFFIAny* src) {
@@ -104,6 +185,7 @@ struct TypeTraits<std::array<T, Nm>> : public TypeTraitsBase {
   TVM_FFI_INLINE static std::string TypeStr() {
     return "std::array<" + details::Type2Str<T>::v() + ", " + std::to_string(Nm) + ">";
   }
+
   TVM_FFI_INLINE static std::string TypeSchema() {
     return R"({"type":"std::array","args":[)" + details::TypeSchema<T>::v() + "," +
            std::to_string(Nm) + "]}";
@@ -111,21 +193,16 @@ struct TypeTraits<std::array<T, Nm>> : public TypeTraitsBase {
 };
 
 template <typename T>
-struct TypeTraits<std::vector<T>> : public TypeTraitsBase {
- private:
-  using Self = std::vector<T>;
-  using Array = ::tvm::ffi::Array<T>;
-
+struct TypeTraits<std::vector<T>> : public TypeTraits<details::ContainerTemplate> {
  public:
-  static constexpr int32_t field_static_type_index = TypeIndex::kTVMFFIArray;
+  using Self = std::vector<T>;
 
   TVM_FFI_INLINE static void CopyToAnyView(const Self& src, TVMFFIAny* result) {
-    return TypeTraits<Array>::MoveToAny({src.begin(), src.end()}, result);
+    return MoveToAnyImpl(CopyToArray(src), result);
   }
 
   TVM_FFI_INLINE static void MoveToAny(Self&& src, TVMFFIAny* result) {
-    return TypeTraits<Array>::MoveToAny(
-        {std::make_move_iterator(src.begin()), std::make_move_iterator(src.end())}, result);
+    return MoveToAnyImpl(MoveToArray(std::move(src)), result);
   }
 
   TVM_FFI_INLINE static bool CheckAnyStrict(const TVMFFIAny* src) {
@@ -139,13 +216,19 @@ struct TypeTraits<std::vector<T>> : public TypeTraitsBase {
   }
 
   TVM_FFI_INLINE static Self CopyFromAnyViewAfterCheck(const TVMFFIAny* src) {
-    auto array = TypeTraits<Array>::CopyFromAnyViewAfterCheck(src);
-    return Self{std::make_move_iterator(array.begin()), std::make_move_iterator(array.end())};
+    auto array = CopyFromAnyViewAfterCheckImpl(src);
+    auto begin = array->MutableBegin();
+    auto result = Self{};
+    auto length = array->size_;
+    result.reserve(length);
+    for (std::size_t i = 0; i < length; ++i) {
+      result.emplace_back(CopyFromAny<T>(begin[i]));
+    }
+    return result;
   }
 
   TVM_FFI_INLINE static Self MoveFromAnyAfterCheck(TVMFFIAny* src) {
-    auto array = TypeTraits<Array>::MoveFromAnyAfterCheck(src);
-    return Self{std::make_move_iterator(array.begin()), std::make_move_iterator(array.end())};
+    return CopyFromAnyViewAfterCheck(src);
   }
 
   TVM_FFI_INLINE static std::optional<Self> TryCastFromAnyView(const TVMFFIAny* src) {
@@ -156,6 +239,7 @@ struct TypeTraits<std::vector<T>> : public TypeTraitsBase {
   TVM_FFI_INLINE static std::string TypeStr() {
     return "std::vector<" + details::Type2Str<T>::v() + ">";
   }
+
   TVM_FFI_INLINE static std::string TypeSchema() {
     return R"({"type":"std::vector","args":[)" + details::TypeSchema<T>::v() + "]}";
   }
@@ -163,10 +247,9 @@ struct TypeTraits<std::vector<T>> : public TypeTraitsBase {
 
 template <typename T>
 struct TypeTraits<std::optional<T>> : public TypeTraitsBase {
- private:
+ public:
   using Self = std::optional<T>;
 
- public:
   TVM_FFI_INLINE static void CopyToAnyView(const Self& src, TVMFFIAny* result) {
     if (src.has_value()) {
       TypeTraits<T>::CopyToAnyView(*src, result);
@@ -212,103 +295,13 @@ struct TypeTraits<std::optional<T>> : public TypeTraitsBase {
   TVM_FFI_INLINE static std::string GetMismatchTypeInfo(const TVMFFIAny* src) {
     return TypeTraits<T>::GetMismatchTypeInfo(src);
   }
+
   TVM_FFI_INLINE static std::string TypeStr() {
     return "std::optional<" + TypeTraits<T>::TypeStr() + ">";
   }
+
   TVM_FFI_INLINE static std::string TypeSchema() {
     return R"({"type":"std::optional","args":[)" + details::TypeSchema<T>::v() + "]}";
-  }
-};
-
-template <typename... Args>
-struct TypeTraits<std::tuple<Args...>> : public TypeTraitsBase {
- private:
-  using Self = std::tuple<Args...>;
-  using Tuple = ::tvm::ffi::Tuple<Args...>;
-  static constexpr std::size_t Nm = sizeof...(Args);
-  static_assert(Nm > 0, "Zero-length std::tuple is not supported.");
-
-  template <std::size_t... Is>
-  static bool CheckTupleSubType(std::index_sequence<Is...>, const ArrayObj& n) {
-    return (... && details::AnyUnsafe::CheckAnyStrict<std::tuple_element_t<Is, Self>>(n[Is]));
-  }
-
-  template <std::size_t... Is>
-  static Tuple CopyToFFITupleAux(std::index_sequence<Is...>, const Self& tuple) {
-    return Tuple{std::get<Is>(tuple)...};
-  }
-
-  template <std::size_t... Is>
-  static Tuple MoveToFFITupleAux(std::index_sequence<Is...>, Self&& tuple) {
-    return Tuple{std::get<Is>(std::move(tuple))...};
-  }
-
-  template <std::size_t... Is>
-  static Self MoveToSTDTupleAux(std::index_sequence<Is...>, Tuple&& tuple) {
-    return Self{std::move(tuple.template get<Is>())...};
-  }
-
-  static Tuple CopyToFFITuple(const Self& tuple) {
-    return CopyToFFITupleAux(std::make_index_sequence<Nm>{}, tuple);
-  }
-
-  static Tuple MoveToFFITuple(Self&& tuple) {
-    return MoveToFFITupleAux(std::make_index_sequence<Nm>{}, std::move(tuple));
-  }
-
-  static Self MoveToSTDTuple(Tuple&& tuple) {
-    return MoveToSTDTupleAux(std::make_index_sequence<Nm>{}, std::move(tuple));
-  }
-
- public:
-  static constexpr int32_t field_static_type_index = TypeIndex::kTVMFFIArray;
-
-  TVM_FFI_INLINE static void CopyToAnyView(const Self& src, TVMFFIAny* result) {
-    return TypeTraits<Tuple>::MoveToAny(CopyToFFITuple(src), result);
-  }
-
-  TVM_FFI_INLINE static void MoveToAny(Self&& src, TVMFFIAny* result) {
-    return TypeTraits<Tuple>::MoveToAny(MoveToFFITuple(std::move(src)), result);
-  }
-
-  TVM_FFI_INLINE static bool CheckAnyStrict(const TVMFFIAny* src) {
-    if (src->type_index != TypeIndex::kTVMFFIArray) return false;
-    const ArrayObj& n = *reinterpret_cast<const ArrayObj*>(src->v_obj);
-    // check static length first
-    if (n.size_ != Nm) return false;
-    // then check element type
-    return CheckTupleSubType(std::make_index_sequence<Nm>{}, n);
-  }
-
-  TVM_FFI_INLINE static Self CopyFromAnyViewAfterCheck(const TVMFFIAny* src) {
-    return MoveToSTDTuple(TypeTraits<Tuple>::CopyFromAnyViewAfterCheck(src));
-  }
-
-  TVM_FFI_INLINE static Self MoveFromAnyAfterCheck(TVMFFIAny* src) {
-    return MoveToSTDTuple(TypeTraits<Tuple>::MoveFromAnyAfterCheck(src));
-  }
-
-  TVM_FFI_INLINE static std::optional<Self> TryCastFromAnyView(const TVMFFIAny* src) {
-    if (!CheckAnyStrict(src)) return std::nullopt;
-    return CopyFromAnyViewAfterCheck(src);
-  }
-
-  TVM_FFI_INLINE static std::string TypeStr() {
-    std::stringstream os;
-    os << "std::tuple<";
-    const char* sep = "";
-    ((os << sep << details::Type2Str<Args>::v(), sep = ", "), ...);
-    os << ">";
-    return std::move(os).str();
-  }
-
-  TVM_FFI_INLINE static std::string TypeSchema() {
-    std::stringstream os;
-    os << R"({"type":"std::tuple","args":[)";
-    const char* sep = "";
-    ((os << sep << details::TypeSchema<Args>::v(), sep = ", "), ...);
-    os << "]}";
-    return std::move(os).str();
   }
 };
 
@@ -316,22 +309,8 @@ template <typename... Args>
 struct TypeTraits<std::variant<Args...>> : public TypeTraitsBase {
  private:
   using Self = std::variant<Args...>;
-  using Tuple = std::tuple<Args...>;
+  using ArgTuple = std::tuple<Args...>;
   static constexpr std::size_t Nm = sizeof...(Args);
-
-  template <std::size_t Is = 0>
-  static Self MoveUnsafeAux(TVMFFIAny* src) {
-    if constexpr (Is >= Nm) {
-      TVM_FFI_ICHECK(false) << "Unreachable: variant TryCast failed.";
-    } else {
-      using ElemType = std::tuple_element_t<Is, Tuple>;
-      if (TypeTraits<ElemType>::CheckAnyStrict(src)) {
-        return Self{TypeTraits<ElemType>::MoveFromAnyAfterCheck(src)};
-      } else {
-        return MoveUnsafeAux<Is + 1>(src);
-      }
-    }
-  }
 
   template <std::size_t Is = 0>
   static Self CopyUnsafeAux(const TVMFFIAny* src) {
@@ -339,7 +318,7 @@ struct TypeTraits<std::variant<Args...>> : public TypeTraitsBase {
       TVM_FFI_ICHECK(false) << "Unreachable: variant TryCast failed.";
       throw;  // unreachable
     } else {
-      using ElemType = std::tuple_element_t<Is, Tuple>;
+      using ElemType = std::tuple_element_t<Is, ArgTuple>;
       if (TypeTraits<ElemType>::CheckAnyStrict(src)) {
         return Self{TypeTraits<ElemType>::CopyFromAnyViewAfterCheck(src)};
       } else {
@@ -353,7 +332,7 @@ struct TypeTraits<std::variant<Args...>> : public TypeTraitsBase {
     if constexpr (Is >= Nm) {
       return std::nullopt;
     } else {
-      using ElemType = std::tuple_element_t<Is, Tuple>;
+      using ElemType = std::tuple_element_t<Is, ArgTuple>;
       if (TypeTraits<ElemType>::CheckAnyStrict(src)) {
         return Self{TypeTraits<ElemType>::CopyFromAnyViewAfterCheck(src)};
       } else {
@@ -391,8 +370,8 @@ struct TypeTraits<std::variant<Args...>> : public TypeTraitsBase {
   }
 
   TVM_FFI_INLINE static Self MoveFromAnyAfterCheck(TVMFFIAny* src) {
-    // find the first possible type to move
-    return MoveUnsafeAux(src);
+    // find the first possible type to copy
+    return CopyUnsafeAux(src);
   }
 
   TVM_FFI_INLINE static std::optional<Self> TryCastFromAnyView(const TVMFFIAny* src) {
@@ -412,6 +391,76 @@ struct TypeTraits<std::variant<Args...>> : public TypeTraitsBase {
   TVM_FFI_INLINE static std::string TypeSchema() {
     std::stringstream os;
     os << R"({"type":"std::variant","args":[)";
+    const char* sep = "";
+    ((os << sep << details::TypeSchema<Args>::v(), sep = ", "), ...);
+    os << "]}";
+    return std::move(os).str();
+  }
+};
+
+template <typename... Args>
+struct TypeTraits<std::tuple<Args...>> : public TypeTraits<details::ContainerTemplate> {
+ private:
+  using Self = std::tuple<Args...>;
+  static constexpr std::size_t Nm = sizeof...(Args);
+  static_assert(Nm > 0, "Zero-length std::tuple is not supported.");
+
+  template <std::size_t... Is>
+  static bool CheckSubTypeAux(std::index_sequence<Is...>, const ArrayObj& n) {
+    return (... && details::AnyUnsafe::CheckAnyStrict<std::tuple_element_t<Is, Self>>(n[Is]));
+  }
+
+  template <std::size_t... Is>
+  static Self ConstructTupleAux(std::index_sequence<Is...>, const ArrayObj& n) {
+    return Self{CopyFromAny<std::tuple_element_t<Is, Self>>(n[Is])...};
+  }
+
+ public:
+  static constexpr int32_t field_static_type_index = TypeIndex::kTVMFFIArray;
+
+  TVM_FFI_INLINE static void CopyToAnyView(const Self& src, TVMFFIAny* result) {
+    return MoveToAnyImpl(CopyToTuple(src), result);
+  }
+
+  TVM_FFI_INLINE static void MoveToAny(Self&& src, TVMFFIAny* result) {
+    return MoveToAnyImpl(MoveToTuple(std::move(src)), result);
+  }
+
+  TVM_FFI_INLINE static bool CheckAnyStrict(const TVMFFIAny* src) {
+    if (src->type_index != TypeIndex::kTVMFFIArray) return false;
+    const ArrayObj& n = *reinterpret_cast<const ArrayObj*>(src->v_obj);
+    // check static length first
+    if (n.size_ != Nm) return false;
+    // then check element type
+    return CheckSubTypeAux(std::make_index_sequence<Nm>{}, n);
+  }
+
+  TVM_FFI_INLINE static Self CopyFromAnyViewAfterCheck(const TVMFFIAny* src) {
+    auto array = CopyFromAnyViewAfterCheckImpl(src);
+    return ConstructTupleAux(std::make_index_sequence<Nm>{}, *array);
+  }
+
+  TVM_FFI_INLINE static Self MoveFromAnyAfterCheck(TVMFFIAny* src) {
+    return CopyFromAnyViewAfterCheck(src);
+  }
+
+  TVM_FFI_INLINE static std::optional<Self> TryCastFromAnyView(const TVMFFIAny* src) {
+    if (!CheckAnyStrict(src)) return std::nullopt;
+    return CopyFromAnyViewAfterCheck(src);
+  }
+
+  TVM_FFI_INLINE static std::string TypeStr() {
+    std::stringstream os;
+    os << "std::tuple<";
+    const char* sep = "";
+    ((os << sep << details::Type2Str<Args>::v(), sep = ", "), ...);
+    os << ">";
+    return std::move(os).str();
+  }
+
+  TVM_FFI_INLINE static std::string TypeSchema() {
+    std::stringstream os;
+    os << R"({"type":"std::tuple","args":[)";
     const char* sep = "";
     ((os << sep << details::TypeSchema<Args>::v(), sep = ", "), ...);
     os << "]}";
