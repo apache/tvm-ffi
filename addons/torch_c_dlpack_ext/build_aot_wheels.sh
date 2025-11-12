@@ -123,12 +123,12 @@ uv pip install build wheel
 cd "$torch_c_dlpack_ext"
 python -m build -w
 ls dist
-python -m wheel tags dist/*.whl --python-tag="$python_version" --abi-tag="$python_version" --remove
-ls dist
 if [[ "$os" == "Linux" ]]; then
+    python -m wheel tags dist/*.whl --python-tag="$python_version" --abi-tag="$python_version" --remove
     uv pip install auditwheel
     auditwheel repair --exclude libtorch.so --exclude libtorch_cpu.so --exclude libc10.so --exclude libtorch_python.so --exclude libtorch_cuda.so --exclude libc10_cuda.so dist/*.whl -w wheelhouse
 else
+    python -m wheel tags dist/*.whl --python-tag="$python_version" --abi-tag="$python_version" --platform-tag=macosx_11_0_arm64 --remove
     uv pip install delocate
     delocate-wheel -v --ignore-missing-dependencies --exclude libtorch.dylib,libtorch_cpu.dylib,libc10.dylib,libtorch_python.dylib dist/*.whl -w wheelhouse
 fi
