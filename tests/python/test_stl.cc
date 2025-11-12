@@ -20,6 +20,7 @@
 #include <tvm/ffi/function.h>
 
 #include <array>
+#include <functional>
 #include <map>
 #include <numeric>
 #include <optional>
@@ -84,10 +85,15 @@ auto test_map_2(const std::unordered_map<std::string, int>& map)
   return result;
 }
 
+auto test_function(std::function<int(void)> f) -> std::function<int(void)> {
+  return [fn = std::move(f)] { return fn() + 1; };
+}
+
 TVM_FFI_DLL_EXPORT_TYPED_FUNC(test_tuple, test_tuple);
 TVM_FFI_DLL_EXPORT_TYPED_FUNC(test_vector, test_vector);
 TVM_FFI_DLL_EXPORT_TYPED_FUNC(test_variant, test_variant);
 TVM_FFI_DLL_EXPORT_TYPED_FUNC(test_map, test_map);
 TVM_FFI_DLL_EXPORT_TYPED_FUNC(test_map_2, test_map_2);
+TVM_FFI_DLL_EXPORT_TYPED_FUNC(test_function, test_function);
 
 }  // namespace

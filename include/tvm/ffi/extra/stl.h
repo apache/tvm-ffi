@@ -43,6 +43,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <exception>
+#include <functional>
 #include <iterator>
 #include <map>
 #include <optional>
@@ -51,6 +52,8 @@
 #include <utility>
 #include <variant>
 #include <vector>
+
+#include "tvm/ffi/function.h"
 
 namespace tvm {
 namespace ffi {
@@ -584,6 +587,57 @@ struct TypeTraits<std::unordered_map<K, V>> : public TypeTraits<details::MapTemp
   TVM_FFI_INLINE static std::string TypeSchema() {
     return R"({"type":"std::unordered_map","args":[)" + details::TypeSchema<K>::v() + "," +
            details::TypeSchema<V>::v() + "]}";
+  }
+};
+
+template <typename Ret, typename... Args>
+struct TypeTraits<std::function<Ret(Args...)>> : TypeTraitsBase {
+ private:
+  using Self = std::function<Ret(Args...)>;
+  using Function = TypedFunction<Ret(Args...)>;
+  using ProxyTrait = TypeTraits<TypedFunction<Ret(Args...)>>;
+
+  TVM_FFI_INLINE static Self GetFunc(Function&& f) {
+    return [fn = std::move(f)](Args... args) -> Ret { return fn(std::forward<Args>(args)...); };
+  }
+
+ public:
+  static constexpr int32_t field_static_type_index = TypeIndex::kTVMFFIFunction;
+  static constexpr bool storage_enabled = false;
+
+  TVM_FFI_INLINE static void CopyToAnyView(const Self& src, TVMFFIAny* result) {
+    return ProxyTrait::MoveToAny(Function{src}, result);
+  }
+
+  TVM_FFI_INLINE static void MoveToAny(Self&& src, TVMFFIAny* result) {
+    return ProxyTrait::MoveToAny(Function{std::move(src)}, result);
+  }
+
+  TVM_FFI_INLINE static std::optional<Self> TryCastFromAnyView(const TVMFFIAny* src) {
+    auto opt = ProxyTrait::TryCastFromAnyView(src);
+    if (opt.has_value()) {
+      return GetFunc(std::move(*opt));
+    } else {
+      return std::nullopt;
+    }
+  }
+
+  TVM_FFI_INLINE static std::string TypeStr() {
+    std::stringstream os;
+    os << "std::function<" << details::Type2Str<Ret>::v() << "(";
+    const char* sep = "";
+    ((os << sep << details::Type2Str<Args>::v(), sep = ", "), ...);
+    os << ")>";
+    return std::move(os).str();
+  }
+
+  TVM_FFI_INLINE static std::string TypeSchema() {
+    std::stringstream os;
+    os << R"({"type":"std::function","args":[)" << details::TypeSchema<Ret>::v() << ",[";
+    const char* sep = "";
+    ((os << sep << details::TypeSchema<Args>::v(), sep = ", "), ...);
+    os << "]]}";
+    return std::move(os).str();
   }
 };
 
