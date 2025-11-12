@@ -130,6 +130,6 @@ if [[ "$os" == "Linux" ]]; then
     auditwheel repair --exclude libtorch.so --exclude libtorch_cpu.so --exclude libc10.so --exclude libtorch_python.so --exclude libtorch_cuda.so dist/*.whl -w wheelhouse
 else
     uv pip install delocate
-    delocate-wheel -v --exclude libtorch.dylib --exclude libtorch_cpu.dylib --exclude libc10.dylib --exclude libtorch_python.dylib dist/*.whl -w wheelhouse
+    delocate-wheel -v --exclude libtorch.dylib,libtorch_cpu.dylib,libc10.dylib,libtorch_python.dylib dist/*.whl -w wheelhouse
 fi
 ls wheelhouse
