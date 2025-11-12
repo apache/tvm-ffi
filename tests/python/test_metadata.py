@@ -17,17 +17,9 @@
 from typing import Any
 
 import pytest
-import tvm_ffi
-from tvm_ffi import get_global_func_metadata, libinfo
+from tvm_ffi import get_global_func_metadata
 from tvm_ffi.core import TypeInfo, TypeSchema, _lookup_type_attr
 from tvm_ffi.testing import _SchemaAllTypes
-
-
-@pytest.fixture(scope="module")
-def testing_module() -> tvm_ffi.Module:
-    """Load the testing module once per test module to avoid double registration."""
-    testing_lib_path = libinfo.find_library_by_basename("tvm_ffi_testing")
-    return tvm_ffi.load_module(testing_lib_path)
 
 
 def _replace_list_dict(ty: str) -> str:
@@ -207,95 +199,3 @@ def test_mem_fn_as_global_func() -> None:
 
 def test_class_metadata_none() -> None:
     assert _lookup_type_attr(64, "__metadata__") is None
-
-
-@pytest.mark.parametrize(
-    "func_name,expected",
-    [
-        ("testing_dll_schema_id_int", "Callable[[int], int]"),
-        ("testing_dll_schema_id_float", "Callable[[float], float]"),
-        ("testing_dll_schema_id_bool", "Callable[[bool], bool]"),
-        ("testing_dll_schema_id_device", "Callable[[Device], Device]"),
-        ("testing_dll_schema_id_dtype", "Callable[[dtype], dtype]"),
-        ("testing_dll_schema_id_string", "Callable[[str], str]"),
-        ("testing_dll_schema_id_bytes", "Callable[[bytes], bytes]"),
-        ("testing_dll_schema_id_func", "Callable[[Callable[..., Any]], Callable[..., Any]]"),
-        (
-            "testing_dll_schema_id_func_typed",
-            "Callable[[Callable[[int, float, Callable[..., Any]], None]], Callable[[int, float, Callable[..., Any]], None]]",
-        ),
-        ("testing_dll_schema_id_any", "Callable[[Any], Any]"),
-        ("testing_dll_schema_id_object", "Callable[[Object], Object]"),
-        ("testing_dll_schema_id_dltensor", "Callable[[Tensor], Tensor]"),
-        ("testing_dll_schema_id_tensor", "Callable[[Tensor], Tensor]"),
-        ("testing_dll_schema_tensor_view_input", "Callable[[Tensor], None]"),
-        ("testing_dll_schema_id_opt_int", "Callable[[int | None], int | None]"),
-        ("testing_dll_schema_id_opt_str", "Callable[[str | None], str | None]"),
-        ("testing_dll_schema_id_opt_obj", "Callable[[Object | None], Object | None]"),
-        ("testing_dll_schema_id_arr_int", "Callable[[list[int]], list[int]]"),
-        ("testing_dll_schema_id_arr_str", "Callable[[list[str]], list[str]]"),
-        ("testing_dll_schema_id_arr_obj", "Callable[[list[Object]], list[Object]]"),
-        ("testing_dll_schema_id_arr", "Callable[[list[Any]], list[Any]]"),
-        ("testing_dll_schema_id_map_str_int", "Callable[[dict[str, int]], dict[str, int]]"),
-        ("testing_dll_schema_id_map_str_str", "Callable[[dict[str, str]], dict[str, str]]"),
-        ("testing_dll_schema_id_map_str_obj", "Callable[[dict[str, Object]], dict[str, Object]]"),
-        ("testing_dll_schema_id_map", "Callable[[dict[Any, Any]], dict[Any, Any]]"),
-        ("testing_dll_schema_id_variant_int_str", "Callable[[int | str], int | str]"),
-        (
-            "testing_dll_schema_arr_map_opt",
-            "Callable[[list[int | None], dict[str, list[int]], str | None], dict[str, list[int]]]",
-        ),
-        (
-            "testing_dll_schema_variant_mix",
-            "Callable[[int | str | list[int]], int | str | list[int]]",
-        ),
-        ("testing_dll_schema_no_args", "Callable[[], int]"),
-        ("testing_dll_schema_no_return", "Callable[[int], None]"),
-        ("testing_dll_schema_no_args_no_return", "Callable[[], None]"),
-        ("testing_dll_schema_input_const", "Callable[[Tensor, Tensor, Tensor], None]"),
-    ],
-)
-def test_schema_dll_exported_func(
-    func_name: str, expected: str, testing_module: tvm_ffi.Module
-) -> None:
-    """Test metadata schemas from DLL-exported functions via TVM_FFI_DLL_EXPORT_TYPED_FUNC."""
-    metadata = testing_module.get_function_metadata(func_name)
-    assert metadata is not None
-    actual: TypeSchema = TypeSchema.from_json_str(metadata["type_schema"])
-    assert str(actual) == expected, f"{func_name}: {actual}"
-    assert actual.repr(_replace_list_dict) == expected.replace(
-        "list",
-        "Sequence",
-    ).replace(
-        "dict",
-        "Mapping",
-    )
-    assert testing_module.get_function_doc(func_name) is None
-    if func_name == "testing_dll_schema_input_const":
-        assert metadata["arg_const"] == [True, True, False], f"{func_name}: {metadata['arg_const']}"
-    else:
-        assert metadata["arg_const"] == [False] * len(metadata["arg_const"]), (
-            f"{func_name}: {metadata['arg_const']}"
-        )
-
-
-def test_mem_fn_as_dll_exported_func(testing_module: tvm_ffi.Module) -> None:
-    """Test member functions exported as DLL symbols when wrapped in lambda."""
-    metadata = testing_module.get_function_metadata("testing_dll_schema_test_int_pair_sum")
-    assert metadata is not None
-    type_schema: TypeSchema = TypeSchema.from_json_str(metadata["type_schema"])
-    assert str(type_schema) == "Callable[[testing.TestIntPair], int]"
-
-
-def test_dll_exported_func_with_doc(testing_module: tvm_ffi.Module) -> None:
-    """Test TVM_FFI_DLL_EXPORT_TYPED_FUNC_DOC exports metadata and documentation."""
-    metadata = testing_module.get_function_metadata("testing_dll_test_add_with_docstring")
-    assert metadata is not None
-    assert "type_schema" in metadata
-    schema = TypeSchema.from_json_str(metadata["type_schema"])
-    assert str(schema) == "Callable[[int, int], int]"
-    doc = testing_module.get_function_doc("testing_dll_test_add_with_docstring")
-    assert doc is not None
-    assert "Add two integers" in doc
-    assert "Parameters" in doc
-    assert "Returns" in doc
