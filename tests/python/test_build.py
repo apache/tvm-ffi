@@ -14,6 +14,7 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+import gc
 import pathlib
 
 import numpy
@@ -51,11 +52,9 @@ def test_build_cpp() -> None:
     numpy.testing.assert_equal(x + 1, y)
 
 
-def test_build_inline_with_metadata() -> None:
+def test_build_inline_with_metadata() -> None:  # noqa: PLR0915
     """Test functions with various input and output types."""
     # Keep module alive until all returned objects are destroyed
-    import gc
-
     output_lib_path = tvm_ffi.cpp.build_inline(
         name="test_io_types",
         cpp_sources=r"""
@@ -138,6 +137,7 @@ def test_build_inline_with_metadata() -> None:
     # Test square: int -> int
     assert mod.square(5) == 25
     metadata = mod.get_function_metadata("square")
+    assert metadata is not None
     schema = TypeSchema.from_json_str(metadata["type_schema"])
     assert str(schema) == "Callable[[int], int]"
 
@@ -145,6 +145,7 @@ def test_build_inline_with_metadata() -> None:
     result = mod.reciprocal(2.0)
     assert abs(result - 0.5) < 0.001
     metadata = mod.get_function_metadata("reciprocal")
+    assert metadata is not None
     schema = TypeSchema.from_json_str(metadata["type_schema"])
     assert str(schema) == "Callable[[float], float]"
 
@@ -152,6 +153,7 @@ def test_build_inline_with_metadata() -> None:
     assert mod.negate(True) is False
     assert mod.negate(False) is True
     metadata = mod.get_function_metadata("negate")
+    assert metadata is not None
     schema = TypeSchema.from_json_str(metadata["type_schema"])
     assert str(schema) == "Callable[[bool], bool]"
 
@@ -159,6 +161,7 @@ def test_build_inline_with_metadata() -> None:
     result = mod.uppercase_first("hello")
     assert result == "Hello"
     metadata = mod.get_function_metadata("uppercase_first")
+    assert metadata is not None
     schema = TypeSchema.from_json_str(metadata["type_schema"])
     assert str(schema) == "Callable[[str], str]"
 
@@ -166,6 +169,7 @@ def test_build_inline_with_metadata() -> None:
     result = mod.weighted_sum(10, 2.5)
     assert abs(result - 25.0) < 0.001
     metadata = mod.get_function_metadata("weighted_sum")
+    assert metadata is not None
     schema = TypeSchema.from_json_str(metadata["type_schema"])
     assert str(schema) == "Callable[[int, float], float]"
 
@@ -173,6 +177,7 @@ def test_build_inline_with_metadata() -> None:
     result = mod.repeat_string("ab", 3)
     assert result == "ababab"
     metadata = mod.get_function_metadata("repeat_string")
+    assert metadata is not None
     schema = TypeSchema.from_json_str(metadata["type_schema"])
     assert str(schema) == "Callable[[str, int], str]"
 
@@ -183,6 +188,7 @@ def test_build_inline_with_metadata() -> None:
     assert "count=42" in result
     assert "value=3.14" in result
     metadata = mod.get_function_metadata("format_data")
+    assert metadata is not None
     schema = TypeSchema.from_json_str(metadata["type_schema"])
     assert str(schema) == "Callable[[bool, int, float, str], str]"
 
@@ -192,6 +198,7 @@ def test_build_inline_with_metadata() -> None:
     mod.double_tensor(x, y)
     numpy.testing.assert_allclose(y, x * 2.0)
     metadata = mod.get_function_metadata("double_tensor")
+    assert metadata is not None
     schema = TypeSchema.from_json_str(metadata["type_schema"])
     assert str(schema) == "Callable[[Tensor, Tensor], None]"
 
@@ -203,8 +210,6 @@ def test_build_inline_with_metadata() -> None:
 def test_build_inline_with_docstrings() -> None:
     """Test building functions with documentation using the functions dict."""
     # Keep module alive until all returned objects are destroyed
-    import gc
-
     output_lib_path = tvm_ffi.cpp.build_inline(
         name="test_docs",
         cpp_sources=r"""
