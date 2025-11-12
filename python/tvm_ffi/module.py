@@ -185,8 +185,9 @@ class Module(core.Object):
     ) -> dict[str, Any] | None:
         """Get metadata for a function exported from the module.
 
-        This retrieves metadata for functions exported via TVM_FFI_DLL_EXPORT_TYPED_FUNC,
-        which includes type schema information.
+        This retrieves metadata for functions exported via TVM_FFI_DLL_EXPORT_TYPED_FUNC
+        and when TVM_FFI_DLL_EXPORT_TYPED_FUNC_METADATA is on, which includes type schema
+        and const-ness information.
 
         Parameters
         ----------

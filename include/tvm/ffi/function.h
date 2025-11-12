@@ -862,20 +862,18 @@ inline int32_t TypeKeyToIndex(std::string_view type_key) {
 
 // Internal implementation macro that optionally generates metadata export function
 #ifdef TVM_FFI_DLL_EXPORT_TYPED_FUNC_METADATA
-#define TVM_FFI_DLL_EXPORT_TYPED_FUNC_METADATA_IMPL_(ExportName, Function)           \
-  static inline ::tvm::ffi::String __tvm_ffi_get_metadata_##ExportName() {           \
-    using FuncInfo = ::tvm::ffi::details::FunctionInfo<decltype(Function)>;          \
-    static ::tvm::ffi::String cached_metadata = []() {                               \
-      std::ostringstream os;                                                         \
-      os << R"({"type_schema":)"                                                     \
-         << ::tvm::ffi::EscapeString(::tvm::ffi::String(FuncInfo::TypeSchema()))     \
-         << R"(,"arg_const":[)";                                                     \
-      ::tvm::ffi::details::ArgConstHelper<typename FuncInfo::ArgType>::Generate(os); \
-      os << "]}";                                                                    \
-      return ::tvm::ffi::String(os.str());                                           \
-    }();                                                                             \
-    return cached_metadata;                                                          \
-  }                                                                                  \
+#define TVM_FFI_DLL_EXPORT_TYPED_FUNC_METADATA_IMPL_(ExportName, Function)         \
+  inline ::tvm::ffi::String __tvm_ffi_get_metadata_##ExportName() {                \
+    using FuncInfo = ::tvm::ffi::details::FunctionInfo<decltype(Function)>;        \
+    /* Generate metadata on demand */                                              \
+    std::ostringstream os;                                                         \
+    os << R"({"type_schema":)"                                                     \
+       << ::tvm::ffi::EscapeString(::tvm::ffi::String(FuncInfo::TypeSchema()))     \
+       << R"(,"arg_const":[)";                                                     \
+    ::tvm::ffi::details::ArgConstHelper<typename FuncInfo::ArgType>::Generate(os); \
+    os << "]}";                                                                    \
+    return ::tvm::ffi::String(os.str());                                           \
+  }                                                                                \
   TVM_FFI_DLL_EXPORT_TYPED_FUNC_IMPL_(_metadata_##ExportName, __tvm_ffi_get_metadata_##ExportName)
 #else
 #define TVM_FFI_DLL_EXPORT_TYPED_FUNC_METADATA_IMPL_(ExportName, Function)
@@ -964,8 +962,7 @@ inline int32_t TypeKeyToIndex(std::string_view type_key) {
 #define TVM_FFI_DLL_EXPORT_TYPED_FUNC_WITH_DOC(ExportName, Function, DocString) \
   TVM_FFI_DLL_EXPORT_TYPED_FUNC(ExportName, Function)                           \
   static inline ::tvm::ffi::String __tvm_ffi_get_doc_##ExportName() {           \
-    static ::tvm::ffi::String cached_doc(DocString);                            \
-    return cached_doc;                                                          \
+    return ::tvm::ffi::String(DocString);                                       \
   }                                                                             \
   TVM_FFI_DLL_EXPORT_TYPED_FUNC_IMPL_(_doc_##ExportName, __tvm_ffi_get_doc_##ExportName)
 
