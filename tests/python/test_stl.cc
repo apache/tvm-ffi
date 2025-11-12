@@ -16,14 +16,15 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-#include <tvm/ffi/container/array.h>
-#include <tvm/ffi/container/tensor.h>
 #include <tvm/ffi/extra/stl.h>
+#include <tvm/ffi/function.h>
 
 #include <array>
+#include <map>
 #include <numeric>
 #include <optional>
 #include <tuple>
+#include <unordered_map>
 #include <variant>
 #include <vector>
 
@@ -66,8 +67,27 @@ auto test_variant(std::variant<int, float, std::vector<std::variant<int, float>>
   }
 }
 
+auto test_map(const std::map<std::string, int>& map) -> std::map<int, std::string> {
+  auto result = std::map<int, std::string>{};
+  for (const auto& [key, value] : map) {
+    result[value] = key;
+  }
+  return result;
+}
+
+auto test_map_2(const std::unordered_map<std::string, int>& map)
+    -> std::unordered_map<int, std::string> {
+  auto result = std::unordered_map<int, std::string>{};
+  for (const auto& [key, value] : map) {
+    result[value] = key;
+  }
+  return result;
+}
+
 TVM_FFI_DLL_EXPORT_TYPED_FUNC(test_tuple, test_tuple);
 TVM_FFI_DLL_EXPORT_TYPED_FUNC(test_vector, test_vector);
 TVM_FFI_DLL_EXPORT_TYPED_FUNC(test_variant, test_variant);
+TVM_FFI_DLL_EXPORT_TYPED_FUNC(test_map, test_map);
+TVM_FFI_DLL_EXPORT_TYPED_FUNC(test_map_2, test_map_2);
 
 }  // namespace

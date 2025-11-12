@@ -36,6 +36,8 @@ def test_stl() -> None:
     assert mod.test_variant(1) == "int"
     assert mod.test_variant(1.0) == "float"
     assert list(mod.test_variant([1, 1.0])) == ["int", "float"]
+    assert dict(mod.test_map({"a": 1, "b": 2})) == {1: "a", 2: "b"}
+    assert dict(mod.test_map_2({"a": 1, "b": 2})) == {1: "a", 2: "b"}
 
 
 if __name__ == "__main__":

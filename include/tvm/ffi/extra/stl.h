@@ -33,7 +33,7 @@
 #include <tvm/ffi/base_details.h>
 #include <tvm/ffi/c_api.h>
 #include <tvm/ffi/container/array.h>
-#include <tvm/ffi/container/tuple.h>
+#include <tvm/ffi/container/map.h>
 #include <tvm/ffi/error.h>
 #include <tvm/ffi/object.h>
 #include <tvm/ffi/type_traits.h>
@@ -42,10 +42,13 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <iterator>
+#include <map>
 #include <optional>
 #include <tuple>
 #include <type_traits>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -53,15 +56,18 @@ namespace tvm {
 namespace ffi {
 namespace details {
 
-template <typename Type>
+struct STLTypeMismatch : public std::exception {
+  const char* what() const noexcept override { return "STL type mismatch"; }
+};
+
 struct STLTypeTrait : public TypeTraitsBase {
  public:
-  using TypeTraitsBase::convert_enabled;
-  using TypeTraitsBase::storage_enabled;
+  static constexpr bool storage_enabled = false;
 
  protected:
-  // we always copy STL types into an Object first, then move the ObjectPtr to Any.
-  TVM_FFI_INLINE static void MoveToAnyImpl(ObjectPtr<Type>&& src, TVMFFIAny* result) {
+  /// NOTE: we always copy STL types into an Object first, then move the ObjectPtr to Any.
+  template <typename T>
+  TVM_FFI_INLINE static void MoveToAnyImpl(ObjectPtr<T>&& src, TVMFFIAny* result) {
     TVMFFIObject* obj_ptr = ObjectUnsafe::MoveObjectPtrToTVMFFIObjectPtr(std::move(src));
     result->type_index = obj_ptr->type_index;
     result->zero_padding = 0;
@@ -69,18 +75,38 @@ struct STLTypeTrait : public TypeTraitsBase {
     result->v_obj = obj_ptr;
   }
 
-  // we always construct STL types from an Object first, then copy from the ObjectPtr in Any.
-  TVM_FFI_INLINE static ObjectPtr<Type> CopyFromAnyViewAfterCheckImpl(const TVMFFIAny* src) {
-    return details::ObjectUnsafe::ObjectPtrFromUnowned<Type>(src->v_obj);
+  /// NOTE: we always construct STL types from an Object first, then copy from the ObjectPtr in Any.
+  template <typename T>
+  TVM_FFI_INLINE static ObjectPtr<T> CopyFromAnyImpl(const TVMFFIAny* src) {
+    return ObjectUnsafe::ObjectPtrFromUnowned<T>(src->v_obj);
+  }
+
+  /// NOTE: STL types are not natively movable from Any, so we always make a new copy.
+  template <typename T>
+  TVM_FFI_INLINE static T ConstructFromAny(const Any& value) {
+    using TypeTrait = TypeTraits<T>;
+    if constexpr (std::is_same_v<T, Any>) {
+      return value;
+    } else if constexpr (auto any_ptr = AnyUnsafe::TVMFFIAnyPtrFromAny(value);
+                         TypeTrait::storage_enabled) {
+      return TypeTrait::CopyFromAnyViewAfterCheck(any_ptr);
+    } else {  // STL types allow TryCast
+      auto opt = TypeTrait::TryCastFromAnyView(any_ptr);
+      if (!opt.has_value()) {
+        throw STLTypeMismatch{};
+      }
+      return std::move(*opt);
+    }
   }
 };
 
-struct ContainerTemplate {};
+struct ListTemplate {};
+struct MapTemplate {};
 
 }  // namespace details
 
 template <>
-struct TypeTraits<details::ContainerTemplate> : public details::STLTypeTrait<::tvm::ffi::ArrayObj> {
+struct TypeTraits<details::ListTemplate> : public details::STLTypeTrait {
  public:
   static constexpr int32_t field_static_type_index = TypeIndex::kTVMFFIArray;
 
@@ -128,18 +154,53 @@ struct TypeTraits<details::ContainerTemplate> : public details::STLTypeTrait<::t
   TVM_FFI_INLINE static ObjectPtr<ArrayObj> MoveToArray(Range&& src) {
     return CopyToArrayImpl(std::make_move_iterator(std::begin(src)), std::size(src));
   }
+};
 
-  /// NOTE: STL types are not natively movable from Any, so we always make a new copy.
-  template <typename T>
-  TVM_FFI_INLINE static T CopyFromAny(const Any& value) {
-    return details::AnyUnsafe::CopyFromAnyViewAfterCheck<T>(value);
+template <>
+struct TypeTraits<details::MapTemplate> : public details::STLTypeTrait {
+ public:
+  static constexpr int32_t field_static_type_index = TypeIndex::kTVMFFIMap;
+
+ protected:
+  template <typename MapType>
+  TVM_FFI_INLINE static ObjectPtr<Object> CopyToMap(const MapType& src) {
+    return MapObj::CreateFromRange(std::begin(src), std::end(src));
+  }
+
+  template <typename MapType>
+  TVM_FFI_INLINE static ObjectPtr<Object> MoveToMap(MapType&& src) {
+    return MapObj::CreateFromRange(std::make_move_iterator(std::begin(src)),
+                                   std::make_move_iterator(std::end(src)));
+  }
+
+  template <typename MapType, bool CanReserve>
+  TVM_FFI_INLINE static MapType ConstructMap(const TVMFFIAny* src) {
+    using KeyType = typename MapType::key_type;
+    using ValueType = typename MapType::mapped_type;
+    auto result = MapType{};
+    auto map_obj = CopyFromAnyImpl<MapObj>(src);
+    if constexpr (CanReserve) {
+      result.reserve(map_obj->size());
+    }
+    for (const auto& [key, value] : *map_obj) {
+      result.try_emplace(ConstructFromAny<KeyType>(key), ConstructFromAny<ValueType>(value));
+    }
+    return result;
   }
 };
 
 template <typename T, std::size_t Nm>
-struct TypeTraits<std::array<T, Nm>> : public TypeTraits<details::ContainerTemplate> {
- public:
+struct TypeTraits<std::array<T, Nm>> : public TypeTraits<details::ListTemplate> {
+ private:
   using Self = std::array<T, Nm>;
+
+  TVM_FFI_INLINE static bool CheckAnyFast(const TVMFFIAny* src) {
+    if (src->type_index != TypeIndex::kTVMFFIArray) return false;
+    const ArrayObj& n = *reinterpret_cast<const ArrayObj*>(src->v_obj);
+    return n.size_ == Nm;
+  }
+
+ public:
   static_assert(Nm > 0, "Zero-length std::array is not supported.");
 
   TVM_FFI_INLINE static void CopyToAnyView(const Self& src, TVMFFIAny* result) {
@@ -150,36 +211,19 @@ struct TypeTraits<std::array<T, Nm>> : public TypeTraits<details::ContainerTempl
     return MoveToAnyImpl(MoveToArray(std::move(src)), result);
   }
 
-  TVM_FFI_INLINE static bool CheckAnyStrict(const TVMFFIAny* src) {
-    if (src->type_index != TypeIndex::kTVMFFIArray) return false;
-    const ArrayObj& n = *reinterpret_cast<const ArrayObj*>(src->v_obj);
-    // check static length first
-    if (n.size_ != Nm) return false;
-    // then check element type
-    if constexpr (std::is_same_v<T, Any>) {
-      return true;
-    } else {
-      return std::all_of(n.begin(), n.end(), details::AnyUnsafe::CheckAnyStrict<T>);
-    }
-  }
-
-  TVM_FFI_INLINE static Self CopyFromAnyViewAfterCheck(const TVMFFIAny* src) {
-    auto array = CopyFromAnyViewAfterCheckImpl(src);
-    auto begin = array->MutableBegin();
-    Self result;  // no initialization to avoid overhead
-    for (std::size_t i = 0; i < Nm; ++i) {
-      result[i] = CopyFromAny<T>(begin[i]);
-    }
-    return result;
-  }
-
-  TVM_FFI_INLINE static Self MoveFromAnyAfterCheck(TVMFFIAny* src) {
-    return CopyFromAnyViewAfterCheck(src);
-  }
-
   TVM_FFI_INLINE static std::optional<Self> TryCastFromAnyView(const TVMFFIAny* src) {
-    if (!CheckAnyStrict(src)) return std::nullopt;
-    return CopyFromAnyViewAfterCheck(src);
+    if (!CheckAnyFast(src)) return std::nullopt;
+    try {
+      auto array = CopyFromAnyImpl<ArrayObj>(src);
+      auto begin = array->MutableBegin();
+      Self result;  // no initialization to avoid overhead
+      for (std::size_t i = 0; i < Nm; ++i) {
+        result[i] = ConstructFromAny<T>(begin[i]);
+      }
+      return result;
+    } catch (const details::STLTypeMismatch&) {
+      return std::nullopt;
+    }
   }
 
   TVM_FFI_INLINE static std::string TypeStr() {
@@ -193,10 +237,15 @@ struct TypeTraits<std::array<T, Nm>> : public TypeTraits<details::ContainerTempl
 };
 
 template <typename T>
-struct TypeTraits<std::vector<T>> : public TypeTraits<details::ContainerTemplate> {
- public:
+struct TypeTraits<std::vector<T>> : public TypeTraits<details::ListTemplate> {
+ private:
   using Self = std::vector<T>;
 
+  TVM_FFI_INLINE static bool CheckAnyFast(const TVMFFIAny* src) {
+    return src->type_index == TypeIndex::kTVMFFIArray;
+  }
+
+ public:
   TVM_FFI_INLINE static void CopyToAnyView(const Self& src, TVMFFIAny* result) {
     return MoveToAnyImpl(CopyToArray(src), result);
   }
@@ -205,35 +254,21 @@ struct TypeTraits<std::vector<T>> : public TypeTraits<details::ContainerTemplate
     return MoveToAnyImpl(MoveToArray(std::move(src)), result);
   }
 
-  TVM_FFI_INLINE static bool CheckAnyStrict(const TVMFFIAny* src) {
-    if (src->type_index != TypeIndex::kTVMFFIArray) return false;
-    const ArrayObj& n = *reinterpret_cast<const ArrayObj*>(src->v_obj);
-    if constexpr (std::is_same_v<T, Any>) {
-      return true;
-    } else {
-      return std::all_of(n.begin(), n.end(), details::AnyUnsafe::CheckAnyStrict<T>);
-    }
-  }
-
-  TVM_FFI_INLINE static Self CopyFromAnyViewAfterCheck(const TVMFFIAny* src) {
-    auto array = CopyFromAnyViewAfterCheckImpl(src);
-    auto begin = array->MutableBegin();
-    auto result = Self{};
-    auto length = array->size_;
-    result.reserve(length);
-    for (std::size_t i = 0; i < length; ++i) {
-      result.emplace_back(CopyFromAny<T>(begin[i]));
-    }
-    return result;
-  }
-
-  TVM_FFI_INLINE static Self MoveFromAnyAfterCheck(TVMFFIAny* src) {
-    return CopyFromAnyViewAfterCheck(src);
-  }
-
   TVM_FFI_INLINE static std::optional<Self> TryCastFromAnyView(const TVMFFIAny* src) {
-    if (!CheckAnyStrict(src)) return std::nullopt;
-    return CopyFromAnyViewAfterCheck(src);
+    if (!CheckAnyFast(src)) return std::nullopt;
+    try {
+      auto array = CopyFromAnyImpl<ArrayObj>(src);
+      auto begin = array->MutableBegin();
+      auto result = Self{};
+      auto length = array->size_;
+      result.reserve(length);
+      for (std::size_t i = 0; i < length; ++i) {
+        result.emplace_back(ConstructFromAny<T>(begin[i]));
+      }
+      return result;
+    } catch (const details::STLTypeMismatch&) {
+      return std::nullopt;
+    }
   }
 
   TVM_FFI_INLINE static std::string TypeStr() {
@@ -309,18 +344,17 @@ template <typename... Args>
 struct TypeTraits<std::variant<Args...>> : public TypeTraitsBase {
  private:
   using Self = std::variant<Args...>;
-  using ArgTuple = std::tuple<Args...>;
   static constexpr std::size_t Nm = sizeof...(Args);
 
   template <std::size_t Is = 0>
-  static Self CopyUnsafeAux(const TVMFFIAny* src) {
+  TVM_FFI_INLINE static Self CopyUnsafeAux(const TVMFFIAny* src) {
     if constexpr (Is >= Nm) {
       TVM_FFI_ICHECK(false) << "Unreachable: variant TryCast failed.";
       throw;  // unreachable
     } else {
-      using ElemType = std::tuple_element_t<Is, ArgTuple>;
+      using ElemType = std::variant_alternative_t<Is, Self>;
       if (TypeTraits<ElemType>::CheckAnyStrict(src)) {
-        return Self{TypeTraits<ElemType>::CopyFromAnyViewAfterCheck(src)};
+        return Self{std::in_place_index<Is>, TypeTraits<ElemType>::CopyFromAnyViewAfterCheck(src)};
       } else {
         return CopyUnsafeAux<Is + 1>(src);
       }
@@ -328,13 +362,28 @@ struct TypeTraits<std::variant<Args...>> : public TypeTraitsBase {
   }
 
   template <std::size_t Is = 0>
-  static std::optional<Self> TryCastAux(const TVMFFIAny* src) {
+  TVM_FFI_INLINE static Self MoveUnsafeAux(const TVMFFIAny* src) {
+    if constexpr (Is >= Nm) {
+      TVM_FFI_ICHECK(false) << "Unreachable: variant TryCast failed.";
+      throw;  // unreachable
+    } else {
+      using ElemType = std::variant_alternative_t<Is, Self>;
+      if (TypeTraits<ElemType>::CheckAnyStrict(src)) {
+        return Self{std::in_place_index<Is>, TypeTraits<ElemType>::MoveFromAnyAfterCheck(src)};
+      } else {
+        return MoveUnsafeAux<Is + 1>(src);
+      }
+    }
+  }
+
+  template <std::size_t Is = 0>
+  TVM_FFI_INLINE static std::optional<Self> TryCastAux(const TVMFFIAny* src) {
     if constexpr (Is >= Nm) {
       return std::nullopt;
     } else {
-      using ElemType = std::tuple_element_t<Is, ArgTuple>;
-      if (TypeTraits<ElemType>::CheckAnyStrict(src)) {
-        return Self{TypeTraits<ElemType>::CopyFromAnyViewAfterCheck(src)};
+      using ElemType = std::variant_alternative_t<Is, Self>;
+      if (auto opt = TypeTraits<ElemType>::TryCastFromAnyView(src)) {
+        return Self{std::in_place_index<Is>, std::move(*opt)};
       } else {
         return TryCastAux<Is + 1>(src);
       }
@@ -370,12 +419,12 @@ struct TypeTraits<std::variant<Args...>> : public TypeTraitsBase {
   }
 
   TVM_FFI_INLINE static Self MoveFromAnyAfterCheck(TVMFFIAny* src) {
-    // find the first possible type to copy
-    return CopyUnsafeAux(src);
+    // find the first possible type to move
+    return MoveUnsafeAux(src);
   }
 
   TVM_FFI_INLINE static std::optional<Self> TryCastFromAnyView(const TVMFFIAny* src) {
-    // find the first possible type to copy
+    // try to find the first possible type to copy
     return TryCastAux(src);
   }
 
@@ -399,20 +448,21 @@ struct TypeTraits<std::variant<Args...>> : public TypeTraitsBase {
 };
 
 template <typename... Args>
-struct TypeTraits<std::tuple<Args...>> : public TypeTraits<details::ContainerTemplate> {
+struct TypeTraits<std::tuple<Args...>> : public TypeTraits<details::ListTemplate> {
  private:
   using Self = std::tuple<Args...>;
   static constexpr std::size_t Nm = sizeof...(Args);
   static_assert(Nm > 0, "Zero-length std::tuple is not supported.");
 
-  template <std::size_t... Is>
-  static bool CheckSubTypeAux(std::index_sequence<Is...>, const ArrayObj& n) {
-    return (... && details::AnyUnsafe::CheckAnyStrict<std::tuple_element_t<Is, Self>>(n[Is]));
+  TVM_FFI_INLINE static bool CheckAnyFast(const TVMFFIAny* src) {
+    if (src->type_index != TypeIndex::kTVMFFIArray) return false;
+    const ArrayObj& n = *reinterpret_cast<const ArrayObj*>(src->v_obj);
+    return n.size_ == Nm;
   }
 
   template <std::size_t... Is>
-  static Self ConstructTupleAux(std::index_sequence<Is...>, const ArrayObj& n) {
-    return Self{CopyFromAny<std::tuple_element_t<Is, Self>>(n[Is])...};
+  TVM_FFI_INLINE static Self ConstructTupleAux(std::index_sequence<Is...>, const ArrayObj& n) {
+    return Self{ConstructFromAny<std::tuple_element_t<Is, Self>>(n[Is])...};
   }
 
  public:
@@ -435,18 +485,14 @@ struct TypeTraits<std::tuple<Args...>> : public TypeTraits<details::ContainerTem
     return CheckSubTypeAux(std::make_index_sequence<Nm>{}, n);
   }
 
-  TVM_FFI_INLINE static Self CopyFromAnyViewAfterCheck(const TVMFFIAny* src) {
-    auto array = CopyFromAnyViewAfterCheckImpl(src);
-    return ConstructTupleAux(std::make_index_sequence<Nm>{}, *array);
-  }
-
-  TVM_FFI_INLINE static Self MoveFromAnyAfterCheck(TVMFFIAny* src) {
-    return CopyFromAnyViewAfterCheck(src);
-  }
-
   TVM_FFI_INLINE static std::optional<Self> TryCastFromAnyView(const TVMFFIAny* src) {
-    if (!CheckAnyStrict(src)) return std::nullopt;
-    return CopyFromAnyViewAfterCheck(src);
+    if (!CheckAnyFast(src)) return std::nullopt;
+    try {
+      auto array = CopyFromAnyImpl<ArrayObj>(src);
+      return ConstructTupleAux(std::make_index_sequence<Nm>{}, *array);
+    } catch (const details::STLTypeMismatch&) {
+      return std::nullopt;
+    }
   }
 
   TVM_FFI_INLINE static std::string TypeStr() {
@@ -465,6 +511,79 @@ struct TypeTraits<std::tuple<Args...>> : public TypeTraits<details::ContainerTem
     ((os << sep << details::TypeSchema<Args>::v(), sep = ", "), ...);
     os << "]}";
     return std::move(os).str();
+  }
+};
+
+template <typename K, typename V>
+struct TypeTraits<std::map<K, V>> : public TypeTraits<details::MapTemplate> {
+ private:
+  using Self = std::map<K, V>;
+  TVM_FFI_INLINE static bool CheckAnyFast(const TVMFFIAny* src) {
+    return src->type_index == TypeIndex::kTVMFFIMap;
+  }
+
+ public:
+  TVM_FFI_INLINE static void CopyToAnyView(const Self& src, TVMFFIAny* result) {
+    return MoveToAnyImpl(CopyToMap(src), result);
+  }
+
+  TVM_FFI_INLINE static void MoveToAny(Self&& src, TVMFFIAny* result) {
+    return MoveToAnyImpl(MoveToMap(std::move(src)), result);
+  }
+
+  TVM_FFI_INLINE static std::optional<Self> TryCastFromAnyView(const TVMFFIAny* src) {
+    if (!CheckAnyFast(src)) return std::nullopt;
+    try {
+      return ConstructMap<Self, /*CanReserve=*/false>(src);
+    } catch (const details::STLTypeMismatch&) {
+      return std::nullopt;
+    }
+  }
+
+  TVM_FFI_INLINE static std::string TypeStr() {
+    return "std::map<" + details::Type2Str<K>::v() + ", " + details::Type2Str<V>::v() + ">";
+  }
+
+  TVM_FFI_INLINE static std::string TypeSchema() {
+    return R"({"type":"std::map","args":[)" + details::TypeSchema<K>::v() + "," +
+           details::TypeSchema<V>::v() + "]}";
+  }
+};
+
+template <typename K, typename V>
+struct TypeTraits<std::unordered_map<K, V>> : public TypeTraits<details::MapTemplate> {
+ private:
+  using Self = std::unordered_map<K, V>;
+  TVM_FFI_INLINE static bool CheckAnyFast(const TVMFFIAny* src) {
+    return src->type_index == TypeIndex::kTVMFFIMap;
+  }
+
+ public:
+  TVM_FFI_INLINE static void CopyToAnyView(const Self& src, TVMFFIAny* result) {
+    return MoveToAnyImpl(CopyToMap(src), result);
+  }
+
+  TVM_FFI_INLINE static void MoveToAny(Self&& src, TVMFFIAny* result) {
+    return MoveToAnyImpl(MoveToMap(std::move(src)), result);
+  }
+
+  TVM_FFI_INLINE static std::optional<Self> TryCastFromAnyView(const TVMFFIAny* src) {
+    if (!CheckAnyFast(src)) return std::nullopt;
+    try {
+      return ConstructMap<Self, /*CanReserve=*/true>(src);
+    } catch (const details::STLTypeMismatch&) {
+      return std::nullopt;
+    }
+  }
+
+  TVM_FFI_INLINE static std::string TypeStr() {
+    return "std::unordered_map<" + details::Type2Str<K>::v() + ", " + details::Type2Str<V>::v() +
+           ">";
+  }
+
+  TVM_FFI_INLINE static std::string TypeSchema() {
+    return R"({"type":"std::unordered_map","args":[)" + details::TypeSchema<K>::v() + "," +
+           details::TypeSchema<V>::v() + "]}";
   }
 };
 

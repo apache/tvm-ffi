@@ -246,6 +246,9 @@ class MapObj : public Object {
   // Reference class
   template <typename, typename, typename>
   friend class Map;
+
+  template <typename, typename>
+  friend struct TypeTraits;
 };
 
 /*! \brief A specialization of small-sized hash map */
