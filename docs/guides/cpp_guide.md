@@ -297,7 +297,7 @@ The new `add_one` takes the signature of `TVMFFISafeCallType`, and can loaded an
 When flag `TVM_FFI_DLL_EXPORT_TYPED_FUNC_METADATA` is on, the macro exports both the function and its type metadata, enabling
 signature validation without calling the function.
 
-The metadata includes:
+The metadata contains:
 
 - **type_schema**: JSON string describing function signature (return type and argument types)
 - **arg_const**: Array of booleans indicating which parameters are const (for memory effect validation)
