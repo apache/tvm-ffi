@@ -41,6 +41,11 @@ def test_stl() -> None:
     assert mod.test_function(lambda: 0)() == 1
     assert mod.test_function(lambda: 10)() == 11
 
+    with pytest.raises(TypeError):
+        mod.test_tuple([1.5, 2.5])
+    with pytest.raises(TypeError):
+        mod.test_function(lambda: 0)(100)
+
 
 if __name__ == "__main__":
     pytest.main([__file__])
