@@ -90,11 +90,10 @@ struct STLTypeTrait : public TypeTraitsBase {
     using TypeTrait = TypeTraits<T>;
     if constexpr (std::is_same_v<T, Any>) {
       return value;
-    } else if constexpr (auto any_ptr = AnyUnsafe::TVMFFIAnyPtrFromAny(value);
-                         TypeTrait::storage_enabled) {
-      return TypeTrait::CopyFromAnyViewAfterCheck(any_ptr);
-    } else {  // STL types allow TryCast
-      auto opt = TypeTrait::TryCastFromAnyView(any_ptr);
+    } else {
+      /// NOTE: Not all type support `CheckArgStrict` (e.g. std::string),
+      /// so we use `TryCast` instead (without any prior check).
+      auto opt = TypeTrait::TryCastFromAnyView(AnyUnsafe::TVMFFIAnyPtrFromAny(value));
       if (!opt.has_value()) {
         throw STLTypeMismatch{};
       }
@@ -432,7 +431,7 @@ struct TypeTraits<std::variant<Args...>> : public TypeTraitsBase {
   }
 
   TVM_FFI_INLINE static std::string TypeStr() {
-    std::stringstream os;
+    std::ostringstream os;
     os << "std::variant<";
     const char* sep = "";
     ((os << sep << details::Type2Str<Args>::v(), sep = ", "), ...);
@@ -441,7 +440,7 @@ struct TypeTraits<std::variant<Args...>> : public TypeTraitsBase {
   }
 
   TVM_FFI_INLINE static std::string TypeSchema() {
-    std::stringstream os;
+    std::ostringstream os;
     os << R"({"type":"std::variant","args":[)";
     const char* sep = "";
     ((os << sep << details::TypeSchema<Args>::v(), sep = ", "), ...);
@@ -499,7 +498,7 @@ struct TypeTraits<std::tuple<Args...>> : public TypeTraits<details::ListTemplate
   }
 
   TVM_FFI_INLINE static std::string TypeStr() {
-    std::stringstream os;
+    std::ostringstream os;
     os << "std::tuple<";
     const char* sep = "";
     ((os << sep << details::Type2Str<Args>::v(), sep = ", "), ...);
@@ -508,7 +507,7 @@ struct TypeTraits<std::tuple<Args...>> : public TypeTraits<details::ListTemplate
   }
 
   TVM_FFI_INLINE static std::string TypeSchema() {
-    std::stringstream os;
+    std::ostringstream os;
     os << R"({"type":"std::tuple","args":[)";
     const char* sep = "";
     ((os << sep << details::TypeSchema<Args>::v(), sep = ", "), ...);
@@ -595,7 +594,7 @@ struct TypeTraits<std::function<Ret(Args...)>> : TypeTraitsBase {
  private:
   using Self = std::function<Ret(Args...)>;
   using Function = TypedFunction<Ret(Args...)>;
-  using ProxyTrait = TypeTraits<TypedFunction<Ret(Args...)>>;
+  using ProxyTrait = TypeTraits<Function>;
 
   TVM_FFI_INLINE static Self GetFunc(Function&& f) {
     return [fn = std::move(f)](Args... args) -> Ret { return fn(std::forward<Args>(args)...); };
@@ -623,7 +622,7 @@ struct TypeTraits<std::function<Ret(Args...)>> : TypeTraitsBase {
   }
 
   TVM_FFI_INLINE static std::string TypeStr() {
-    std::stringstream os;
+    std::ostringstream os;
     os << "std::function<" << details::Type2Str<Ret>::v() << "(";
     const char* sep = "";
     ((os << sep << details::Type2Str<Args>::v(), sep = ", "), ...);
@@ -632,7 +631,7 @@ struct TypeTraits<std::function<Ret(Args...)>> : TypeTraitsBase {
   }
 
   TVM_FFI_INLINE static std::string TypeSchema() {
-    std::stringstream os;
+    std::ostringstream os;
     os << R"({"type":"std::function","args":[)" << details::TypeSchema<Ret>::v() << ",[";
     const char* sep = "";
     ((os << sep << details::TypeSchema<Args>::v(), sep = ", "), ...);
