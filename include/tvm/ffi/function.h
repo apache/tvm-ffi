@@ -338,7 +338,7 @@ class Function : public ObjectRef {
             packed_call(PackedArgs{args, num_args}, rv);
           });
     } else {
-      return FromPackedInternal(packed_call);
+      return FromPackedInternal(std::forward<TCallable>(packed_call));
     }
   }
 
