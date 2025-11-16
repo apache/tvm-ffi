@@ -73,3 +73,44 @@ if TYPE_CHECKING:
 # tvm-ffi-stubgen(end)
 
 registry.init_ffi_api("ffi", __name__)
+
+
+__all__ = [
+    # tvm-ffi-stubgen(begin): __all__
+    "Array",
+    "ArrayGetItem",
+    "ArraySize",
+    "Bytes",
+    "FromJSONGraph",
+    "FromJSONGraphString",
+    "FunctionListGlobalNamesFunctor",
+    "FunctionRemoveGlobal",
+    "GetFirstStructuralMismatch",
+    "GetGlobalFuncMetadata",
+    "GetRegisteredTypeKeys",
+    "MakeObjectFromPackedArgs",
+    "Map",
+    "MapCount",
+    "MapForwardIterFunctor",
+    "MapGetItem",
+    "MapSize",
+    "ModuleClearImports",
+    "ModuleGetFunction",
+    "ModuleGetFunctionDoc",
+    "ModuleGetFunctionMetadata",
+    "ModuleGetKind",
+    "ModuleGetPropertyMask",
+    "ModuleGetWriteFormats",
+    "ModuleImplementsFunction",
+    "ModuleImportModule",
+    "ModuleInspectSource",
+    "ModuleLoadFromFile",
+    "ModuleWriteToFile",
+    "Shape",
+    "String",
+    "StructuralHash",
+    "SystemLib",
+    "ToJSONGraph",
+    "ToJSONGraphString",
+    # tvm-ffi-stubgen(end)
+]

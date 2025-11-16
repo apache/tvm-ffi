@@ -31,7 +31,7 @@ from . import consts as C
 class CodeBlock:
     """A block of code to be generated in a stub file."""
 
-    kind: Literal["global", "object", "ty-map", "import", None]
+    kind: Literal["global", "object", "ty-map", "import", "__all__", None]
     param: str
     lineno_start: int
     lineno_end: int | None
@@ -39,7 +39,7 @@ class CodeBlock:
 
     def __post_init__(self) -> None:
         """Validate the code block after initialization."""
-        assert self.kind in {"global", "object", "ty-map", "import", None}
+        assert self.kind in {"global", "object", "ty-map", "import", "__all__", None}
 
     @property
     def indent(self) -> int:
@@ -73,6 +73,9 @@ class CodeBlock:
             param = stub[len("ty-map/") :].strip()
         elif stub.startswith("import"):
             kind = "import"
+            param = ""
+        elif stub == "__all__":
+            kind = "__all__"
             param = ""
         else:
             raise ValueError(f"Unknown stub type `{stub}` at line {lineo}")
@@ -178,7 +181,7 @@ def collect_files(paths: list[Path]) -> list[FileInfo]:
 
     def _on_error(e: Exception) -> None:
         print(
-            f'{C.TERM_RED}[Failed] File "{file}"\n{traceback.format_exc()}{C.TERM_RESET}',
+            f"{C.TERM_RED}[Error]\n{traceback.format_exc()}{C.TERM_RESET}",
             end="",
             flush=True,
         )

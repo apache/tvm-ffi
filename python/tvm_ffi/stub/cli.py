@@ -28,7 +28,7 @@ from typing import Callable
 
 from . import codegen as G
 from . import consts as C
-from .analysis import collect_global_funcs, collect_ty_maps
+from .analysis import collect_global_funcs
 from .file_utils import FileInfo, collect_files
 from .utils import Options
 
@@ -56,17 +56,37 @@ def __main__() -> int:
     """
     opt = _parse_args()
     dlls = [ctypes.CDLL(lib) for lib in opt.dlls]
-    global_funcs = collect_global_funcs()
     files: list[FileInfo] = collect_files([Path(f) for f in opt.files])
 
     # Stage 1: Process `tvm-ffi-stubgen(ty-map)`
-    ty_map: dict[str, str] = collect_ty_maps(files, opt)
+    ty_map: dict[str, str] = C.TY_MAP_DEFAULTS.copy()
+
+    def _stage_1(file: FileInfo) -> None:
+        for code in file.code_blocks:
+            if code.kind == "ty-map":
+                try:
+                    lhs, rhs = code.param.split("->")
+                except ValueError as e:
+                    raise ValueError(
+                        f"Invalid ty_map format at line {code.lineno_start}. Example: `A.B -> C.D`"
+                    ) from e
+                ty_map[lhs.strip()] = rhs.strip()
+
+    for file in files:
+        try:
+            _stage_1(file)
+        except Exception:
+            print(
+                f'{C.TERM_RED}[Failed] File "{file.path}": {traceback.format_exc()}{C.TERM_RESET}'
+            )
 
     # Stage 2: Process
     # - `tvm-ffi-stubgen(begin): global/...`
     # - `tvm-ffi-stubgen(begin): object/...`
+    global_funcs = collect_global_funcs()
 
     def _stage_2(file: FileInfo) -> None:
+        all_defined = set()
         if opt.verbose:
             print(f"{C.TERM_CYAN}[File] {file.path}{C.TERM_RESET}")
         ty_used: set[str] = set()
@@ -75,17 +95,26 @@ def __main__() -> int:
         # Stage 2.1. Process `tvm-ffi-stubgen(begin): global/...`
         for code in file.code_blocks:
             if code.kind == "global":
-                G.generate_global_funcs(code, global_funcs, fn_ty_map_fn, opt)
+                funcs = global_funcs.get(code.param, [])
+                for func in funcs:
+                    all_defined.add(func.schema.name)
+                G.generate_global_funcs(code, funcs, fn_ty_map_fn, opt)
         # Stage 2.2. Process `tvm-ffi-stubgen(begin): object/...`
         for code in file.code_blocks:
             if code.kind == "object":
+                type_key = code.param
+                ty_on_file.add(ty_map.get(type_key, type_key))
                 G.generate_object(code, fn_ty_map_fn, opt)
-                ty_on_file.add(ty_map.get(code.param, code.param))
         # Stage 2.3. Add imports for used types.
         for code in file.code_blocks:
             if code.kind == "import":
                 G.generate_imports(code, ty_used - ty_on_file, opt)
                 break  # Only one import block per file is supported for now.
+        # Stage 2.4. Add `__all__` for defined classes and functions.
+        for code in file.code_blocks:
+            if code.kind == "__all__":
+                G.generate_all(code, all_defined | ty_on_file, opt)
+                break  # Only one __all__ block per file is supported for now.
         file.update(show_diff=opt.verbose, dry_run=opt.dry_run)
 
     for file in files:

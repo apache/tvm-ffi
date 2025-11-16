@@ -21,42 +21,21 @@ from __future__ import annotations
 from tvm_ffi.registry import list_global_func_names
 
 from . import consts as C
-from .file_utils import FileInfo
-from .utils import Options
+from .utils import FuncInfo
 
 
-def collect_global_funcs() -> dict[str, list[str]]:
+def collect_global_funcs() -> dict[str, list[FuncInfo]]:
     """Collect global functions from TVM FFI's global registry."""
     # Build global function table only if we are going to process blocks.
-    global_funcs: dict[str, list[str]] = {}
+    global_funcs: dict[str, list[FuncInfo]] = {}
     for name in list_global_func_names():
         try:
-            prefix, suffix = name.rsplit(".", 1)
+            prefix, _ = name.rsplit(".", 1)
         except ValueError:
             print(f"{C.TERM_YELLOW}[Skipped] Invalid name in global function: {name}{C.TERM_RESET}")
         else:
-            global_funcs.setdefault(prefix, []).append(suffix)
+            global_funcs.setdefault(prefix, []).append(FuncInfo.from_global_name(name))
     # Ensure stable ordering for deterministic output.
     for k in list(global_funcs.keys()):
-        global_funcs[k].sort()
+        global_funcs[k].sort(key=lambda x: x.schema.name)
     return global_funcs
-
-
-def collect_ty_maps(files: list[FileInfo], opt: Options) -> dict[str, str]:
-    """Collect type maps from the given files."""
-    ty_map: dict[str, str] = C.TY_MAP_DEFAULTS.copy()
-    for file in files:
-        for code in file.code_blocks:
-            if code.kind == "ty-map":
-                try:
-                    lhs, rhs = code.param.split("->")
-                except ValueError as e:
-                    raise ValueError(
-                        f"Invalid ty_map format at line {code.lineno_start}. Example: `A.B -> C.D`"
-                    ) from e
-                ty_map[lhs.strip()] = rhs.strip()
-    if opt.verbose:
-        for lhs in sorted(ty_map):
-            rhs = ty_map[lhs]
-            print(f"{C.TERM_CYAN}[TY-MAP] {lhs} -> {rhs}{C.TERM_RESET}")
-    return ty_map

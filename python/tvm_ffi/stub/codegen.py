@@ -18,77 +18,36 @@
 
 from __future__ import annotations
 
-from io import StringIO
 from typing import Callable
-
-from tvm_ffi.core import TypeSchema, _lookup_or_register_type_info_from_type_key
-from tvm_ffi.registry import get_global_func_metadata
 
 from . import consts as C
 from .file_utils import CodeBlock
-from .utils import Options
-
-
-def generate_func_signature(
-    schema: TypeSchema,
-    func_name: str,
-    ty_map: Callable[[str], str],
-    is_member: bool,
-) -> str:
-    """Generate a function signature string from a TypeSchema."""
-    buf = StringIO()
-    buf.write(f"def {func_name}(")
-    if schema.origin != "Callable":
-        raise ValueError(f"Expected Callable type schema, but got: {schema}")
-    if not schema.args:
-        ty_map("Any")
-        buf.write("*args: Any) -> Any: ...")
-        return buf.getvalue()
-    arg_ret = schema.args[0]
-    arg_args = schema.args[1:]
-    for i, arg in enumerate(arg_args):
-        if is_member and i == 0:
-            buf.write("self, ")
-        else:
-            buf.write(f"_{i}: ")
-            buf.write(arg.repr(ty_map))
-            buf.write(", ")
-    if arg_args:
-        buf.write("/")
-    buf.write(") -> ")
-    buf.write(arg_ret.repr(ty_map))
-    buf.write(": ...")
-    return buf.getvalue()
+from .utils import FuncInfo, ObjectInfo, Options
 
 
 def generate_global_funcs(
-    code: CodeBlock,
-    global_funcs: dict[str, list[str]],
-    fn_ty_map: Callable[[str], str],
-    opt: Options,
+    code: CodeBlock, global_funcs: list[FuncInfo], fn_ty_map: Callable[[str], str], opt: Options
 ) -> None:
     """Generate function signatures for global functions."""
     assert len(code.lines) >= 2
-    indent = " " * code.indent
-    indent_long = " " * (code.indent + opt.indent)
-    prefix = code.param
-    results: list[str] = [
-        generate_func_signature(
-            TypeSchema.from_json_str(get_global_func_metadata(f"{prefix}.{name}")["type_schema"]),
-            name,
-            ty_map=fn_ty_map,
-            is_member=False,
-        )
-        for name in global_funcs.get(prefix, [])
-    ]
-    if not results:
+    if not global_funcs:
         return
+    results: list[str] = [
+        "# fmt: off",
+        "if TYPE_CHECKING:",
+        *[
+            func.gen(
+                fn_ty_map,
+                indent=opt.indent,
+            )
+            for func in global_funcs
+        ],
+        "# fmt: on",
+    ]
+    indent = " " * code.indent
     code.lines = [
         code.lines[0],
-        f"{indent}# fmt: off",
-        f"{indent}if TYPE_CHECKING:",
-        *[indent_long + sig for sig in results],
-        f"{indent}# fmt: on",
+        *[indent + line for line in results],
         code.lines[-1],
     ]
 
@@ -96,50 +55,30 @@ def generate_global_funcs(
 def generate_object(code: CodeBlock, fn_ty_map: Callable[[str], str], opt: Options) -> None:
     """Generate a class definition for an object type."""
     assert len(code.lines) >= 2
-    type_key = code.param
-    type_info = _lookup_or_register_type_info_from_type_key(type_key)
+    info = ObjectInfo.from_type_key(code.param)
+    if info.methods:
+        results = [
+            "# fmt: off",
+            *info.gen_fields(fn_ty_map, indent=0),
+            "if TYPE_CHECKING:",
+            *info.gen_methods(fn_ty_map, indent=opt.indent),
+            "# fmt: on",
+        ]
+    else:
+        results = [
+            "# fmt: off",
+            *info.gen_fields(fn_ty_map, indent=0),
+            "# fmt: on",
+        ]
     indent = " " * code.indent
-    indent_long = " " * (code.indent + opt.indent)
-
-    fields: list[str] = []
-    for field in type_info.fields:
-        fields.append(
-            f"{indent}{field.name}: "
-            + TypeSchema.from_json_str(field.metadata["type_schema"]).repr(fn_ty_map)
-        )
-
-    methods: list[str] = []
-    if type_info.methods:
-        methods = [f"{indent}if TYPE_CHECKING:"]
-    for method in type_info.methods:
-        if method.is_static:
-            methods.append(f"{indent_long}@staticmethod")
-        methods.append(
-            indent_long
-            + generate_func_signature(
-                TypeSchema.from_json_str(method.metadata["type_schema"]),
-                {
-                    "__ffi_init__": "__c_ffi_init__",
-                }.get(method.name, method.name),
-                fn_ty_map,
-                is_member=not method.is_static,
-            )
-        )
     code.lines = [
         code.lines[0],
-        f"{indent}# fmt: off",
-        *fields,
-        *methods,
-        f"{indent}# fmt: on",
+        *[indent + line for line in results],
         code.lines[-1],
     ]
 
 
-def generate_imports(
-    code: CodeBlock,
-    ty_used: set[str],
-    opt: Options,
-) -> None:
+def generate_imports(code: CodeBlock, ty_used: set[str], opt: Options) -> None:
     """Generate import statements for the types used in the stub."""
     ty_collected: dict[str, list[str]] = {}
     for ty in ty_used:
@@ -181,3 +120,18 @@ def generate_imports(
             "# fmt: on",
             code.lines[-1],
         ]
+
+
+def generate_all(code: CodeBlock, names: set[str], opt: Options) -> None:
+    """Generate an `__all__` variable for the given names."""
+    assert len(code.lines) >= 2
+    if not names:
+        return
+
+    indent = " " * code.indent
+    names = {f.rsplit(".", 1)[-1] for f in names}
+    code.lines = [
+        code.lines[0],
+        *[f'{indent}"{name}",' for name in sorted(names)],
+        code.lines[-1],
+    ]

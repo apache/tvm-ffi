@@ -54,3 +54,7 @@ MOD_MAP = {
     "testing": "tvm_ffi.testing",
     "ffi": "tvm_ffi",
 }
+
+FN_NAME_MAP = {
+    "__ffi_init__": "__c_ffi_init__",
+}

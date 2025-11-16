@@ -230,6 +230,7 @@ class TypeSchema:
     origin: str
     args: tuple[TypeSchema, ...] = ()
 
+    def __init__(self, origin: str, args: tuple[TypeSchema, ...] = ()) -> None: ...
     @staticmethod
     def from_json_obj(obj: dict[str, Any]) -> TypeSchema: ...
     @staticmethod
