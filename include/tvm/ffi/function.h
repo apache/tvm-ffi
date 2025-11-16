@@ -142,10 +142,14 @@ namespace details {
  * \brief Derived object class for constructing FunctionObj backed by a TCallable
  *
  * This is a helper class that implements the function call interface.
+ * Invariance: TCallable cannot be const or reference type.
  */
 template <typename TCallable>
 class FunctionObjImpl : public FunctionObj {
  public:
+  static_assert(std::is_same_v<TCallable, std::remove_cv_t<std::remove_reference_t<TCallable>>>,
+                "TCallable of FunctionObjImpl cannot be const or reference type");
+
   /*! \brief The type of derived object class */
   using TSelf = FunctionObjImpl<TCallable>;
 
@@ -622,6 +626,7 @@ class Function : public ObjectRef {
    */
   template <typename TCallable>
   static Function FromPackedInternal(TCallable&& packed_call) {
+    // We must make TCallable a value type (decay_t) that can hold the callable object
     using ObjType = typename details::FunctionObjImpl<std::decay_t<TCallable>>;
     Function func;
     func.data_ = make_object<ObjType>(std::forward<TCallable>(packed_call));
