@@ -51,7 +51,7 @@ def test_build_cpp() -> None:
 def test_build_inline_with_metadata() -> None:  # noqa: PLR0915
     """Test functions with various input and output types."""
     # Keep module alive until all returned objects are destroyed
-    output_lib_path = tvm_ffi.cpp.build_inline(
+    mod: Module = tvm_ffi.cpp.load_inline(
         name="test_io_types",
         cpp_sources=r"""
             // int input -> int output
@@ -125,10 +125,8 @@ def test_build_inline_with_metadata() -> None:  # noqa: PLR0915
             "format_data",
             "double_tensor",
         ],
-        extra_cflags=["-DTVM_FFI_DLL_EXPORT_TYPED_FUNC_METADATA"],
+        extra_cflags=["-DTVM_FFI_DLL_EXPORT_INCLUDE_METADATA=1"],
     )
-
-    mod: Module = tvm_ffi.load_module(output_lib_path)
 
     # Test square: int -> int
     assert mod.square(5) == 25
@@ -206,7 +204,7 @@ def test_build_inline_with_metadata() -> None:  # noqa: PLR0915
 def test_build_inline_with_docstrings() -> None:
     """Test building functions with documentation using the functions dict."""
     # Keep module alive until all returned objects are destroyed
-    output_lib_path = tvm_ffi.cpp.build_inline(
+    mod: Module = tvm_ffi.cpp.load_inline(
         name="test_docs",
         cpp_sources=r"""
             int add(int a, int b) {
@@ -241,10 +239,8 @@ def test_build_inline_with_docstrings() -> None:
             "subtract": None,  # No documentation
             "divide": "Divides two floats. Returns a/b.",
         },
-        extra_cflags=["-DTVM_FFI_DLL_EXPORT_TYPED_FUNC_METADATA"],
+        extra_cflags=["-DTVM_FFI_DLL_EXPORT_INCLUDE_METADATA=1"],
     )
-
-    mod: Module = tvm_ffi.load_module(output_lib_path)
 
     # Test add function with full documentation
     assert mod.add(10, 5) == 15
@@ -289,7 +285,7 @@ def test_build_inline_with_docstrings() -> None:
 
 def test_build_without_metadata() -> None:
     """Test building without metadata export."""
-    output_lib_path = tvm_ffi.cpp.build_inline(
+    mod: Module = tvm_ffi.cpp.load_inline(
         name="test_no_meta",
         cpp_sources=r"""
             // Note: NOT defining TVM_FFI_DLL_EXPORT_INCLUDE_METADATA
@@ -300,8 +296,6 @@ def test_build_without_metadata() -> None:
         """,
         functions=["simple_add"],
     )
-
-    mod: Module = tvm_ffi.load_module(output_lib_path)
 
     # Function should still work
     result = mod.simple_add(10, 20)

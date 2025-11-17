@@ -23,6 +23,12 @@
 #ifndef TVM_FFI_FUNCTION_H_
 #define TVM_FFI_FUNCTION_H_
 
+/*!
+ * \brief Controls whether DLL exports should include metadata.
+ *
+ * When set to 1, exported functions will include additional metadata.
+ * When set to 0 (default), exports are minimal without metadata.
+ */
 #ifndef TVM_FFI_DLL_EXPORT_INCLUDE_METADATA
 #define TVM_FFI_DLL_EXPORT_INCLUDE_METADATA 0
 #endif
@@ -885,15 +891,15 @@ inline int32_t TypeKeyToIndex(std::string_view type_key) {
 
 // Internal implementation macro that optionally generates metadata export function
 #if TVM_FFI_DLL_EXPORT_INCLUDE_METADATA
-#define TVM_FFI_DLL_EXPORT_TYPED_FUNC_METADATA_IMPL_(ExportName, Function)               \
-  inline ::tvm::ffi::String __tvm_ffi_get_metadata_##ExportName() {                      \
-    using FuncInfo = ::tvm::ffi::details::FunctionInfo<decltype(Function)>;              \
-    /* Generate metadata on demand */                                                    \
-    std::ostringstream os;                                                               \
-    os << R"({"type_schema":)"                                                           \
-       << ::tvm::ffi::EscapeString(::tvm::ffi::String(FuncInfo::TypeSchema())) << "\"}"; \
-    return ::tvm::ffi::String(os.str());                                                 \
-  }                                                                                      \
+#define TVM_FFI_DLL_EXPORT_TYPED_FUNC_METADATA_IMPL_(ExportName, Function)             \
+  inline ::tvm::ffi::String __tvm_ffi_get_metadata_##ExportName() {                    \
+    using FuncInfo = ::tvm::ffi::details::FunctionInfo<decltype(Function)>;            \
+    /* Generate metadata on demand */                                                  \
+    std::ostringstream os;                                                             \
+    os << R"({"type_schema":)"                                                         \
+       << ::tvm::ffi::EscapeString(::tvm::ffi::String(FuncInfo::TypeSchema())) << "}"; \
+    return ::tvm::ffi::String(os.str());                                               \
+  }                                                                                    \
   TVM_FFI_DLL_EXPORT_TYPED_FUNC_IMPL_(_metadata_##ExportName, __tvm_ffi_get_metadata_##ExportName)
 #else
 #define TVM_FFI_DLL_EXPORT_TYPED_FUNC_METADATA_IMPL_(ExportName, Function)

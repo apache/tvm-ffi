@@ -288,7 +288,6 @@ namespace ffi {
 
 // -----------------------------------------------------------------------------
 // Implementation functions for schema testing
-// These are registered via both GlobalDef and TVM_FFI_DLL_EXPORT_TYPED_FUNC
 // -----------------------------------------------------------------------------
 namespace schema_test_impl {
 
@@ -519,67 +518,8 @@ TVM_FFI_STATIC_INIT_BLOCK() {
 // -----------------------------------------------------------------------------
 // Exported symbols for metadata testing on DLL-exported functions
 // -----------------------------------------------------------------------------
-
+// We keep minimal DLL exports here to verify the export mechanism.
 TVM_FFI_DLL_EXPORT_TYPED_FUNC(testing_dll_schema_id_int, tvm::ffi::schema_test_impl::schema_id_int);
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(testing_dll_schema_id_float,
-                              tvm::ffi::schema_test_impl::schema_id_float);
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(testing_dll_schema_id_bool,
-                              tvm::ffi::schema_test_impl::schema_id_bool);
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(testing_dll_schema_id_device,
-                              tvm::ffi::schema_test_impl::schema_id_device);
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(testing_dll_schema_id_dtype,
-                              tvm::ffi::schema_test_impl::schema_id_dtype);
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(testing_dll_schema_id_string,
-                              tvm::ffi::schema_test_impl::schema_id_string);
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(testing_dll_schema_id_bytes,
-                              tvm::ffi::schema_test_impl::schema_id_bytes);
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(testing_dll_schema_id_func,
-                              tvm::ffi::schema_test_impl::schema_id_func);
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(testing_dll_schema_id_func_typed,
-                              tvm::ffi::schema_test_impl::schema_id_func_typed);
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(testing_dll_schema_id_any, tvm::ffi::schema_test_impl::schema_id_any);
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(testing_dll_schema_id_object,
-                              tvm::ffi::schema_test_impl::schema_id_object);
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(testing_dll_schema_id_dltensor,
-                              tvm::ffi::schema_test_impl::schema_id_dltensor);
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(testing_dll_schema_id_tensor,
-                              tvm::ffi::schema_test_impl::schema_id_tensor);
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(testing_dll_schema_tensor_view_input,
-                              tvm::ffi::schema_test_impl::schema_tensor_view_input);
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(testing_dll_schema_id_opt_int,
-                              tvm::ffi::schema_test_impl::schema_id_opt_int);
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(testing_dll_schema_id_opt_str,
-                              tvm::ffi::schema_test_impl::schema_id_opt_str);
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(testing_dll_schema_id_opt_obj,
-                              tvm::ffi::schema_test_impl::schema_id_opt_obj);
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(testing_dll_schema_id_arr_int,
-                              tvm::ffi::schema_test_impl::schema_id_arr_int);
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(testing_dll_schema_id_arr_str,
-                              tvm::ffi::schema_test_impl::schema_id_arr_str);
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(testing_dll_schema_id_arr_obj,
-                              tvm::ffi::schema_test_impl::schema_id_arr_obj);
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(testing_dll_schema_id_arr, tvm::ffi::schema_test_impl::schema_id_arr);
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(testing_dll_schema_id_map_str_int,
-                              tvm::ffi::schema_test_impl::schema_id_map_str_int);
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(testing_dll_schema_id_map_str_str,
-                              tvm::ffi::schema_test_impl::schema_id_map_str_str);
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(testing_dll_schema_id_map_str_obj,
-                              tvm::ffi::schema_test_impl::schema_id_map_str_obj);
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(testing_dll_schema_id_map, tvm::ffi::schema_test_impl::schema_id_map);
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(testing_dll_schema_id_variant_int_str,
-                              tvm::ffi::schema_test_impl::schema_id_variant_int_str);
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(testing_dll_schema_arr_map_opt,
-                              tvm::ffi::schema_test_impl::schema_arr_map_opt);
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(testing_dll_schema_variant_mix,
-                              tvm::ffi::schema_test_impl::schema_variant_mix);
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(testing_dll_schema_no_args,
-                              tvm::ffi::schema_test_impl::schema_no_args);
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(testing_dll_schema_no_return,
-                              tvm::ffi::schema_test_impl::schema_no_return);
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(testing_dll_schema_no_args_no_return,
-                              tvm::ffi::schema_test_impl::schema_no_args_no_return);
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(testing_dll_schema_test_int_pair_sum,
-                              tvm::ffi::schema_test_impl::test_int_pair_sum_wrapper);
 
 // Documentation export
 TVM_FFI_DLL_EXPORT_TYPED_FUNC_WITH_DOC(testing_dll_test_add_with_docstring,
