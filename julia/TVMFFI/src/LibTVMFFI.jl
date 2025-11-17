@@ -41,7 +41,7 @@ function _find_libtvm_ffi()
         "libtvm_ffi.$(Libdl.dlext)",           # System library path
         joinpath(@__DIR__, "..", "..", "..", "build", "lib", "libtvm_ffi.$(Libdl.dlext)")     # Build directory
     ]
-    
+
     for lib in candidates
         try
             # Try to dlopen to verify it exists
@@ -62,7 +62,7 @@ function _find_libtvm_ffi()
             continue
         end
     end
-    
+
     # Default fallback - let the linker find it
     return "libtvm_ffi"
 end
@@ -267,11 +267,11 @@ end
 Create an error object.
 Returns (return_code, error_handle).
 """
-function TVMFFIErrorCreate(kind::TVMFFIByteArray, message::TVMFFIByteArray, 
+function TVMFFIErrorCreate(kind::TVMFFIByteArray, message::TVMFFIByteArray,
                           backtrace::TVMFFIByteArray)
     out_handle = Ref{TVMFFIObjectHandle}(C_NULL)
     ret = ccall((:TVMFFIErrorCreate, libtvm_ffi), Cint,
-                (Ref{TVMFFIByteArray}, Ref{TVMFFIByteArray}, Ref{TVMFFIByteArray}, 
+                (Ref{TVMFFIByteArray}, Ref{TVMFFIByteArray}, Ref{TVMFFIByteArray},
                  Ptr{TVMFFIObjectHandle}),
                 Ref(kind), Ref(message), Ref(backtrace), out_handle)
     return ret, out_handle[]
@@ -304,7 +304,7 @@ end
 
 Call a TVM function with arguments.
 """
-function TVMFFIFunctionCall(func::TVMFFIObjectHandle, args::Ptr{TVMFFIAny}, 
+function TVMFFIFunctionCall(func::TVMFFIObjectHandle, args::Ptr{TVMFFIAny},
                            num_args::Int32, result::Ptr{TVMFFIAny})
     ccall((:TVMFFIFunctionCall, libtvm_ffi), Cint,
           (TVMFFIObjectHandle, Ptr{TVMFFIAny}, Int32, Ptr{TVMFFIAny}),

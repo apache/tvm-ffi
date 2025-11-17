@@ -141,7 +141,7 @@ println("\n8. Creating vector for slice demo...")
 vector = Float32[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 println("   Vector: ", vector)
 
-# Test 1: Contiguous slice  
+# Test 1: Contiguous slice
 println("\n9. Testing contiguous slice (zero-copy!)...")
 slice = @view vector[3:7]  # Elements 3-7
 slice_output = zeros(Float32, 5)

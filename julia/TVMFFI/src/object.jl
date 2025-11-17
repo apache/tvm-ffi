@@ -22,27 +22,16 @@ using .LibTVMFFI
 """
     TVMObject
 
-Base type for all TVM FFI objects.
-
-This is a simple wrapper around TVMFFIObjectHandle that manages
-reference counting via Julia's finalizer mechanism.
-
-# Reference Counting Rules (Clear and Consistent)
-1. Constructor takes ownership of a reference (controlled by `own` parameter)
-2. Finalizer always DecRefs when GC collects
-3. to_tvm_any always creates a new reference (IncRef)
-4. from_tvm_any receives ownership (no extra IncRef needed)
-
-This eliminates special cases and makes ownership explicit.
+Base wrapper for TVM FFI object handles with automatic memory management.
 """
 mutable struct TVMObject
     handle::LibTVMFFI.TVMFFIObjectHandle
-    
+
     """
         TVMObject(handle; own=true)
-    
+
     Create a TVMObject from a raw handle.
-    
+
     # Arguments
     - `handle`: The raw object handle
     - `own`: If true, increment refcount (default). If false, take ownership without IncRef.
@@ -51,21 +40,21 @@ mutable struct TVMObject
         if handle == C_NULL
             error("Cannot create TVMObject from NULL handle")
         end
-        
+
         # Optionally increase reference count
         if own
             LibTVMFFI.TVMFFIObjectIncRef(handle)
         end
-        
+
         obj = new(handle)
-        
+
         # Finalizer to decrease ref count when GC collects this
         finalizer(obj) do o
             if o.handle != C_NULL
                 LibTVMFFI.TVMFFIObjectDecRef(o.handle)
             end
         end
-        
+
         return obj
     end
 end

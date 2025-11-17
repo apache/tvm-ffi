@@ -47,6 +47,7 @@ export TVMError, TVMErrorKind
 export TVMString, TVMBytes
 export TVMFunction
 export TVMTensor
+export TVMModule
 
 # Export error kinds
 export ValueError, TypeError, RuntimeError, AttributeError, KeyError, IndexError
@@ -56,6 +57,9 @@ export check_call, shape, dtype, device
 export get_global_func
 export to_julia_array, from_julia_array
 export cpu, cuda, opencl, vulkan, metal, rocm
+
+# Export high-level module API
+export load_module, get_function
 
 # Export GPU support functions
 # Note: No from_gpu_array - from_julia_array handles everything!
@@ -72,5 +76,12 @@ include("object.jl")
 include("tensor.jl")              # Defines DLTensor and basic conversions
 include("gpuarrays_support.jl")   # GPU abstraction (uses DLTensor, extends from_julia_array)
 include("function.jl")            # Uses DLTensor
+include("module.jl")              # High-level module API
+
+# Module initialization
+function __init__()
+    # Initialize module API (cache global functions)
+    _init_module_api()
+end
 
 end # module

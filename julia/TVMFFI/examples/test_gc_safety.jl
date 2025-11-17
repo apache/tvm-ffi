@@ -56,17 +56,17 @@ function create_temp_arrays()
     # Create arrays that would be GC'd if not protected
     local_x = Float32[10, 20, 30, 40, 50]
     local_y = zeros(Float32, 5)
-    
+
     # Force some allocations to trigger GC
     for i in 1:100
         _ = rand(Float32, 1000)
     end
-    
+
     GC.gc()  # Force GC
-    
+
     # Call with auto-conversion
     add_one(local_x, local_y)
-    
+
     return local_x, local_y
 end
 
@@ -103,17 +103,17 @@ println("\n5. Test 4: Stress test (many calls under GC pressure)")
 for i in 1:100
     x_temp = Float32[i, i+1, i+2]
     y_temp = zeros(Float32, 3)
-    
+
     # Allocate garbage to trigger GC
     _ = [rand(Float32, 100) for _ in 1:10]
-    
+
     if i % 20 == 0
         GC.gc()  # Periodic forced GC
     end
-    
+
     # Auto-conversion call
     add_one(x_temp, y_temp)
-    
+
     if !(y_temp ≈ x_temp .+ 1)
         println("   ❌ Failed at iteration $i")
         exit(1)
@@ -130,7 +130,7 @@ holder = from_julia_array(x5)
 for i in 1:1000
     fill!(y5, 0)
     add_one(holder, y5)  # Reuse holder
-    
+
     if !(y5 ≈ x5 .+ 1)
         println("   ❌ Holder reuse failed at iteration $i")
         exit(1)
@@ -148,4 +148,3 @@ println("   ✓ Slices work correctly")
 println("   ✓ Survives aggressive GC")
 println("   ✓ Holder reuse works for optimization")
 println("\nConclusion: Auto-conversion is both convenient AND safe! 🎉")
-

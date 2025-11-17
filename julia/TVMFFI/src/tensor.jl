@@ -27,7 +27,7 @@ This is a C-compatible struct representing a multi-dimensional array.
 
 # Note on GPU Pointers
 For GPU arrays (CuArray, ROCArray, etc.), the data field contains a GPU device
-pointer, not a CPU pointer. We use UInt64 to store the pointer value and 
+pointer, not a CPU pointer. We use UInt64 to store the pointer value and
 reinterpret it as needed, since GPU pointers can't be directly converted to Ptr{Cvoid}.
 """
 struct DLTensor
@@ -45,7 +45,7 @@ end
 
 Construct DLTensor with automatic GPU pointer handling.
 """
-function DLTensor(data_ptr, device::DLDevice, ndim::Int32, dtype::DLDataType, 
+function DLTensor(data_ptr, device::DLDevice, ndim::Int32, dtype::DLDataType,
                   shape::Ptr{Int64}, strides::Ptr{Int64}, byte_offset::UInt64)
     # Convert GPU pointers (CuPtr, etc.) to generic pointer
     # by reinterpreting through UInt
@@ -56,40 +56,28 @@ function DLTensor(data_ptr, device::DLDevice, ndim::Int32, dtype::DLDataType,
         # Get the raw pointer value
         reinterpret(UInt, data_ptr)
     end
-    
+
     # Convert to Ptr{Cvoid}
     data_cvoid = reinterpret(Ptr{Cvoid}, ptr_as_uint)
-    
+
     return DLTensor(data_cvoid, device, ndim, dtype, shape, strides, byte_offset)
 end
 
 """
     TVMTensor
 
-TVM FFI tensor object wrapper.
+TVM tensor wrapper with automatic memory management.
 
-Provides a Julia interface to TVM tensors with interoperability
-with Julia Arrays.
-
-# Design Philosophy
-Keep it simple:
-- Wrap the TVM tensor handle
-- Provide accessors for shape, dtype, device
-- Enable zero-copy conversion to/from Julia arrays when possible
-- Let Julia's GC handle cleanup via finalizers
-
-# Reference Counting
-Follows standard pattern: constructor with `own` parameter,
-finalizer always DecRefs.
+Provides accessors for shape, dtype, and device information.
 """
 mutable struct TVMTensor
     handle::LibTVMFFI.TVMFFIObjectHandle
-    
+
     """
         TVMTensor(handle; own=true)
-    
+
     Create a TVMTensor from a raw handle.
-    
+
     # Arguments
     - `handle`: The raw tensor handle
     - `own`: If true, increment refcount (default). If false, take ownership without IncRef.
@@ -98,21 +86,21 @@ mutable struct TVMTensor
         if handle == C_NULL
             error("Cannot create TVMTensor from NULL handle")
         end
-        
+
         # Optionally increase reference count
         if own
             LibTVMFFI.TVMFFIObjectIncRef(handle)
         end
-        
+
         tensor = new(handle)
-        
+
         # Finalizer
         finalizer(tensor) do t
             if t.handle != C_NULL
                 LibTVMFFI.TVMFFIObjectDecRef(t.handle)
             end
         end
-        
+
         return tensor
     end
 end
@@ -139,12 +127,12 @@ This function returns a vector for compatibility with some use cases.
 function shape(tensor::TVMTensor)
     dltensor_ptr = get_dltensor_ptr(tensor)
     dltensor = unsafe_load(dltensor_ptr)
-    
+
     ndim = Int(dltensor.ndim)
     if ndim == 0
         return Int64[]
     end
-    
+
     shape_vec = unsafe_wrap(Array, dltensor.shape, ndim)
     return copy(shape_vec)
 end
@@ -219,17 +207,17 @@ Get the strides of the tensor.
 function strides(tensor::TVMTensor)
     dltensor_ptr = get_dltensor_ptr(tensor)
     dltensor = unsafe_load(dltensor_ptr)
-    
+
     if dltensor.strides == C_NULL
         # Compute default C-contiguous strides
         shape_vec = shape(tensor)
         ndim = length(shape_vec)
         strides_vec = ones(Int64, ndim)
-        
+
         for i in (ndim-1):-1:1
             strides_vec[i] = strides_vec[i+1] * shape_vec[i+1]
         end
-        
+
         return strides_vec
     else
         ndim = Int(dltensor.ndim)
@@ -247,7 +235,7 @@ function is_contiguous(tensor::TVMTensor)
     shape_vec = shape(tensor)
     strides_vec = strides(tensor)
     ndim = length(shape_vec)
-    
+
     expected_stride = 1
     for i in ndim:-1:1
         if strides_vec[i] != expected_stride
@@ -255,7 +243,7 @@ function is_contiguous(tensor::TVMTensor)
         end
         expected_stride *= shape_vec[i]
     end
-    
+
     return true
 end
 
@@ -273,25 +261,9 @@ end
 """
     to_julia_array(tensor::TVMTensor, ::Type{T}) -> Array{T}
 
-Convert TVM tensor to Julia array with specified element type.
+Convert TVM tensor to Julia array (zero-copy for CPU contiguous tensors).
 
-# Arguments
-- `tensor::TVMTensor`: The TVM tensor to convert
-- `T`: The Julia element type (must match tensor dtype)
-
-# Returns
-- `Array{T}`: Julia array wrapping the tensor data (zero-copy if possible)
-
-# Notes
-This is a zero-copy operation if the tensor is on CPU and contiguous.
-The returned array shares memory with the TVM tensor, so modifications
-will affect the original tensor.
-
-# Examples
-```julia
-# Assuming `tensor` is a float32 tensor on CPU
-arr = to_julia_array(tensor, Float32)
-```
+Returns an array that shares memory with the tensor.
 """
 function to_julia_array(tensor::TVMTensor, ::Type{T}) where T
     # Check device
@@ -300,30 +272,30 @@ function to_julia_array(tensor::TVMTensor, ::Type{T}) where T
         error("Can only convert CPU tensors to Julia arrays. " *
               "Tensor is on device type $(dev.device_type)")
     end
-    
+
     # Verify dtype matches
     expected_dtype = DLDataType(T)
     actual_dtype = dtype(tensor)
-    
-    if expected_dtype.code != actual_dtype.code || 
+
+    if expected_dtype.code != actual_dtype.code ||
        expected_dtype.bits != actual_dtype.bits
         error("Type mismatch: tensor has dtype $(string(actual_dtype)), " *
               "but requested type $T (dtype $(string(expected_dtype)))")
     end
-    
+
     # Check contiguity
     if !is_contiguous(tensor)
         error("Can only convert contiguous tensors. For non-contiguous: use copy(to_julia_array())")
     end
-    
+
     # Get shape and data pointer
     shape_tuple = size(tensor)
     ptr = Ptr{T}(data_ptr(tensor))
-    
+
     # Create zero-copy view
     # Note: The array keeps a reference to the tensor to prevent GC
     arr = unsafe_wrap(Array, ptr, shape_tuple)
-    
+
     return arr
 end
 
@@ -332,7 +304,7 @@ function Base.show(io::IO, tensor::TVMTensor)
     shape_tuple = size(tensor)
     dt = dtype(tensor)
     dev = device(tensor)
-    
+
     print(io, "TVMTensor{", string(dt), "}(")
     print(io, "shape=", shape_tuple, ", ")
     print(io, "device=", dev, ")")
@@ -352,37 +324,21 @@ end
 """
     DLTensorHolder{T, S}
 
-Self-contained holder for DLTensor that owns all referenced data.
+Self-contained DLTensor holder with automatic lifetime management.
 
-Works for **both CPU and GPU arrays**.
+Works for both CPU and GPU arrays, including slices (SubArray).
 
 # Fields
-- `tensor::DLTensor`: The DLPack tensor structure (contains device info)
-- `shape::Vector{Int64}`: Shape array (kept alive)
-- `strides::Vector{Int64}`: Strides array (kept alive)
-- `source::S`: Source array - CPU or GPU (kept alive to prevent GC)
-
-# Design Philosophy (Linus-style)
-- One type for CPU and GPU (DLTensor.device tells you which)
-- Eliminate the special case of CPU vs GPU holders
-- Use Julia's type system (S can be Array, SubArray, CuArray, etc.)
-
-Supports:
-- CPU arrays: Array{T}, SubArray{T}
-- GPU arrays: CuArray, ROCArray, MtlArray, etc. (and their slices!)
+- `tensor::DLTensor`: DLPack tensor structure
+- `shape::Vector{Int64}`: Shape array
+- `strides::Vector{Int64}`: Strides array
+- `source::S`: Source array (Array, CuArray, SubArray, etc.)
 """
 mutable struct DLTensorHolder{T, S}
     tensor::DLTensor
     shape::Vector{Int64}
     strides::Vector{Int64}
     source::S  # Can be any array type (CPU or GPU)
-    
-    # Inner constructor - called by outer constructors
-    # This allows both CPU and GPU constructors to create the same type
-    function DLTensorHolder{T, S}(tensor::DLTensor, shape::Vector{Int64}, 
-                                   strides::Vector{Int64}, source::S) where {T, S}
-        new{T, S}(tensor, shape, strides, source)
-    end
 end
 
 # Outer constructor for CPU arrays
@@ -391,20 +347,20 @@ function DLTensorHolder(arr::Union{Array{T}, SubArray{T}}, device::DLDevice=cpu(
     shape_tuple = size(arr)
     ndim = length(shape_tuple)
     shape_vec = collect(Int64, shape_tuple)
-    
+
     # Get strides - Julia provides this for both Array and SubArray
     arr_strides = Base.strides(arr)
     strides_vec = collect(Int64, arr_strides)
-    
+
     # Get data pointer - Julia's pointer() handles SubArray correctly
     data_ptr = pointer(arr)
-    
+
     # byte_offset is 0 (pointer already points to first element)
     byte_offset = UInt64(0)
-    
+
     # Get dtype
     dt = DLDataType(T)
-    
+
     # Create DLTensor
     tensor = DLTensor(
         data_ptr,
@@ -415,7 +371,7 @@ function DLTensorHolder(arr::Union{Array{T}, SubArray{T}}, device::DLDevice=cpu(
         pointer(strides_vec),
         byte_offset
     )
-    
+
     return DLTensorHolder{T, typeof(arr)}(tensor, shape_vec, strides_vec, arr)
 end
 
@@ -440,47 +396,24 @@ function Base.unsafe_convert(::Type{Ptr{DLTensor}}, holder::DLTensorHolder)
 end
 
 """
-    from_julia_array(arr::Union{Array{T}, SubArray{T}}, device::DLDevice=cpu()) where T -> DLTensorHolder{T, S}
+    from_julia_array(arr, device=cpu()) -> DLTensorHolder
 
-Create a self-contained DLTensor holder from a Julia CPU array or slice.
+Create DLTensor holder from Julia array or slice.
 
-# New API (Safe)
-Returns a single holder object that owns all referenced data.
-As long as you keep the holder alive, all pointers remain valid.
-
-Supports both contiguous arrays and slices (views) - just like Rust version!
-
-# Arguments
-- `arr`: Julia array or SubArray (slice/view)
-- `device`: Device context (default: CPU)
-
-# Returns
-- `DLTensorHolder{T, S}`: Self-contained holder (keep this alive!)
+Supports CPU and GPU arrays, including zero-copy slices.
 
 # Examples
 ```julia
-# Regular array
-x = Float32[1, 2, 3, 4, 5]
+# Array
 holder = from_julia_array(x)
-func(holder)
 
-# Slice/view - zero copy!
-matrix = Float32[1 2 3; 4 5 6; 7 8 9]
-row_view = @view matrix[2, :]  # Second row
-holder = from_julia_array(row_view)
-func(holder)  # Passes view directly to TVM, no copy!
+# Slice (zero-copy)
+col = @view matrix[:, 2]
+holder = from_julia_array(col)
 
-# Non-contiguous slice also works
-sub_matrix = @view matrix[1:2, 1:2]
-holder = from_julia_array(sub_matrix)
-func(holder)  # Correct strides and offset calculated automatically
+# GPU array (auto-detects device)
+gpu_holder = from_julia_array(cuda_array)
 ```
-
-# Design Philosophy (Linus-style)
-- Old API: Three-tuple footgun
-- New API: Single holder, impossible to misuse
-- Slices: Zero-copy views, proper stride/offset handling
-- Like Rust: Support for both arrays and slices
 """
 function from_julia_array(arr::Union{Array{T}, SubArray{T}}, device::DLDevice=cpu()) where T
     return DLTensorHolder(arr, device)

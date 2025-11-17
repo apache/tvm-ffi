@@ -36,7 +36,7 @@ Convert DLDataType to string representation (e.g., "int32", "float64").
 function Base.string(dtype::DLDataType)
     ret, any_result = LibTVMFFI.TVMFFIDataTypeToString(dtype)
     check_call(ret)
-    
+
     # Extract string from TVMFFIAny
     # C API returns a new reference, so we take ownership
     if any_result.type_index == Int32(LibTVMFFI.kTVMFFISmallStr)
@@ -130,4 +130,3 @@ end
 function Base.show(io::IO, dtype::DLDataType)
     print(io, "DLDataType(", string(dtype), ")")
 end
-

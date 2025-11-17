@@ -1,8 +1,21 @@
-# Julia Interface for TVM FFI
+<!--- Licensed to the Apache Software Foundation (ASF) under one -->
+<!--- or more contributor license agreements.  See the NOTICE file -->
+<!--- distributed with this work for additional information -->
+<!--- regarding copyright ownership.  The ASF licenses this file -->
+<!--- to you under the Apache License, Version 2.0 (the -->
+<!--- "License"); you may not use this file except in compliance -->
+<!--- with the License.  You may obtain a copy of the License at -->
 
-✅ **Status**: COMPLETE, TESTED, AND WORKING  
-✅ **Tests**: 39/39 PASSED  
-✅ **Demo**: CPU & GPU execution verified  
+<!---   http://www.apache.org/licenses/LICENSE-2.0 -->
+
+<!--- Unless required by applicable law or agreed to in writing, -->
+<!--- software distributed under the License is distributed on an -->
+<!--- "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY -->
+<!--- KIND, either express or implied.  See the License for the -->
+<!--- specific language governing permissions and limitations -->
+<!--- under the License. -->
+
+# Julia Interface for TVM FFI
 
 This directory contains the Julia language bindings for TVM FFI.
 
@@ -19,6 +32,7 @@ This directory contains the Julia language bindings for TVM FFI.
 ## Quick Start
 
 ### 1. Build TVM FFI Library
+
 ```bash
 cd tvm-ffi
 mkdir -p build && cd build
@@ -26,6 +40,7 @@ cmake .. && make -j$(nproc)
 ```
 
 ### 2. Run Working Demo
+
 ```bash
 cd tvm-ffi/julia/TVMFFI
 
@@ -38,6 +53,7 @@ julia examples/complete_demo.jl
 ```
 
 ### 3. Use in Your Code
+
 ```julia
 using Pkg
 Pkg.add(path="/path/to/tvm-ffi/julia/TVMFFI")
@@ -45,12 +61,13 @@ Pkg.add(path="/path/to/tvm-ffi/julia/TVMFFI")
 using TVMFFI
 
 # Load TVM module
-mod_loader = get_global_func("ffi.ModuleLoadFromFile")
-mod = mod_loader("my_module.so")
+mod = load_module("my_module.so")
 
 # Get function
-func_getter = get_global_func("ffi.ModuleGetFunction")
-my_func = func_getter(mod, "my_function", true)
+my_func = get_function(mod, "my_function")
+
+# Or use bracket notation
+my_func = mod["my_function"]
 
 # Create arrays
 x = Float32[1, 2, 3, 4, 5]
@@ -77,7 +94,7 @@ end
 
 ## Directory Structure
 
-```
+```text
 julia/
 ├── TVMFFI/              Main package directory
 │   ├── Project.toml     Package metadata
@@ -141,6 +158,7 @@ include("TVMFFI/test/runtests.jl")
 ## Contributing
 
 Contributions welcome! Please:
+
 - Follow Julia style guide
 - Add tests for new features
 - Update documentation
@@ -153,7 +171,7 @@ Licensed under Apache License 2.0. See LICENSE file in repository root.
 ## Acknowledgments
 
 Design inspired by:
+
 - TVM FFI C API
 - Rust implementation (simplified for Julia)
 - Julia's C interop best practices
-

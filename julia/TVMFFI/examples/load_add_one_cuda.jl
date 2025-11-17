@@ -103,14 +103,14 @@ println("✓ Got CUDA function: ", typeof(add_one_cuda))
 
 if has_cuda
     println("\n4. Using CUDA.jl arrays...")
-    
+
     # Create CUDA arrays
     x_gpu = CUDA.CuArray(Float32[1, 2, 3, 4, 5])
     y_gpu = CUDA.zeros(Float32, 5)
-    
+
     println("   Input (x_gpu):  ", Array(x_gpu))
     println("   Output (y_gpu): ", Array(y_gpu))
-    
+
     # NEW: Direct GPU array passing! (Auto-conversion)
     # GPU arrays are automatically converted to DLTensorHolder with CUDA device
     println("\n5. Calling add_one_cuda(x, y) on GPU - direct array passing!")
@@ -124,7 +124,7 @@ if has_cuda
         println("   ", e)
         exit(1)
     end
-    
+
     # Check results
     println("\n7. Results:")
     y_host = Array(y_gpu)
@@ -132,7 +132,7 @@ if has_cuda
     println("   Input (x):   ", x_host)
     println("   Output (y):  ", y_host)
     println("   Expected:    ", x_host .+ 1)
-    
+
     # Verify
     if y_host ≈ x_host .+ 1
         println("\n✅ SUCCESS! GPU output matches expected values!")
@@ -140,41 +140,41 @@ if has_cuda
         println("\n❌ FAILED! Output does not match")
         println("   Difference: ", y_host .- (x_host .+ 1))
     end
-    
+
     # ============================================================
     # NEW: Zero-copy slice support for GPU arrays!
     # ============================================================
     println("\n" * "="^60)
     println("🚀 BONUS: Zero-Copy GPU Slice Support")
     println("="^60)
-    
+
     # Create a GPU vector for contiguous slice demo
     println("\n8. Creating GPU vector for slice demo...")
     gpu_vector = CUDA.CuArray(Float32[1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
     println("   GPU Vector: ", Array(gpu_vector))
-    
+
     # Test 1: Contiguous slice (first half)
     println("\n9. Testing contiguous GPU slice (zero-copy!)...")
     gpu_slice = @view gpu_vector[1:5]  # First 5 elements
     gpu_slice_output = CUDA.zeros(Float32, 5)
-    
+
     println("   Input slice:  ", Array(gpu_slice))
     println("   Stride: ", Base.strides(gpu_slice), " (contiguous)")
-    
+
     # Direct GPU slice passing! Auto-converted
     add_one_cuda(gpu_slice, gpu_slice_output)  # ← Slices work too!
     CUDA.synchronize()
-    
+
     println("   Output:       ", Array(gpu_slice_output))
     println("   Expected:     ", Array(gpu_slice) .+ 1)
-    
+
     if Array(gpu_slice_output) ≈ Array(gpu_slice) .+ 1
         println("   ✅ GPU contiguous slice works!")
     else
         println("   ❌ GPU slice failed!")
         exit(1)
     end
-    
+
     # Test 2: GPU column slice (contiguous in column-major)
     println("\n10. Testing GPU column slice (zero-copy!)...")
     gpu_matrix = CUDA.CuArray(Float32[
@@ -184,24 +184,24 @@ if has_cuda
     ])
     gpu_col = @view gpu_matrix[:, 3]  # Third column (contiguous!)
     gpu_col_output = CUDA.zeros(Float32, 3)
-    
+
     println("   Input column:  ", Array(gpu_col))
     println("   Stride: ", Base.strides(gpu_col), " (contiguous)")
-    
+
     # Direct GPU column slice passing!
     add_one_cuda(gpu_col, gpu_col_output)
     CUDA.synchronize()
-    
+
     println("   Output:       ", Array(gpu_col_output))
     println("   Expected:     ", Array(gpu_col) .+ 1)
-    
+
     if Array(gpu_col_output) ≈ Array(gpu_col) .+ 1
         println("   ✅ GPU column slice works!")
     else
         println("   ❌ GPU column slice failed!")
         exit(1)
     end
-    
+
     println("\n" * "="^60)
     println("✅ GPU CONTIGUOUS SLICE SUPPORT VERIFIED!")
     println("="^60)
@@ -214,7 +214,7 @@ if has_cuda
     println("  • ✅ Column slices: Contiguous in column-major layout")
     println("  • ✅ Safe: Holders keep parent GPU arrays alive")
     println("  • ⚠️  Non-contiguous slices: Require stride-aware kernels")
-    
+
 else
     # Demo without CUDA.jl - show the concept
     println("\n4. CUDA not available - showing concept...")
@@ -223,7 +223,7 @@ else
     println("   • Convert to DLTensor with cuda() device")
     println("   • Call TVM CUDA function")
     println("   • Results computed on GPU!")
-    
+
     println("\n   To enable CUDA support:")
     println("   julia> using Pkg")
     println("   julia> Pkg.add(\"CUDA\")")
@@ -254,4 +254,3 @@ else
     println("\nInstall CUDA.jl to run on GPU:")
     println("   using Pkg; Pkg.add(\"CUDA\")")
 end
-

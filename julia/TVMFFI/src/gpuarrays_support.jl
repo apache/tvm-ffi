@@ -104,7 +104,7 @@ function gpu_backend_to_dldevice(backend::Symbol)
         :Vulkan => LibTVMFFI.kDLVulkan,
         :OpenCL => LibTVMFFI.kDLOpenCL,
     )
-    
+
     if haskey(backend_map, backend)
         return backend_map[backend]
     else
@@ -140,21 +140,21 @@ backend, dev_id = detect_gpu_backend(x)  # (:CUDA, 0)
 function detect_gpu_backend(arr)
     arr_type = typeof(arr)
     type_name = string(arr_type.name.name)
-    
+
     # Detect backend from array type name
     # Simple pattern matching - no runtime introspection needed
     if occursin("Cu", type_name) || occursin("CUDA", type_name)
         return (:CUDA, 0)  # Default to device 0
-        
+
     elseif occursin("ROC", type_name) || occursin("AMD", type_name)
         return (:ROCm, 0)  # Default to device 0
-        
+
     elseif occursin("Mtl", type_name) || occursin("Metal", type_name)
         return (:Metal, 0)
-        
+
     elseif occursin("oneAPI", type_name)
         return (:oneAPI, 0)
-        
+
     else
         error("Cannot detect GPU backend from array type: $arr_type. " *
               "If you're using a custom GPU array type, specify backend explicitly.")
@@ -225,13 +225,13 @@ println("Available GPU backends: ", backends)
 function list_available_gpu_backends()
     all_backends = [:CUDA, :ROCm, :Metal, :oneAPI]
     available = Symbol[]
-    
+
     for backend in all_backends
         if supports_gpu_backend(backend)
             push!(available, backend)
         end
     end
-    
+
     return available
 end
 
@@ -254,9 +254,9 @@ print_gpu_info()
 """
 function print_gpu_info()
     println("Available GPU Backends:")
-    
+
     backends = list_available_gpu_backends()
-    
+
     if isempty(backends)
         println("  ❌ No GPU backends available")
         println("\nTo enable GPU support, install one of:")
@@ -266,7 +266,7 @@ function print_gpu_info()
         println("  • oneAPI.jl: using Pkg; Pkg.add(\"oneAPI\")")
         return
     end
-    
+
     for backend in backends
         vendor = if backend == :CUDA
             "NVIDIA"
@@ -279,9 +279,9 @@ function print_gpu_info()
         else
             "Unknown"
         end
-        
+
         println("  ✓ $backend ($vendor)")
-        
+
         # Simplified: just report backend is available
         # Device enumeration requires calling into the backend packages
         # which we've intentionally avoided for simplicity
@@ -317,19 +317,19 @@ gpu_holder = from_julia_array(gpu_arr)     # Auto: CUDA device
 """
 function from_julia_array(arr::S) where {S <: AbstractArray}
     T = eltype(arr)
-    
+
     # Auto-detect backend and create GPU device
     backend, device_id = detect_gpu_backend(arr)
     dl_device_type = gpu_backend_to_dldevice(backend)
     device = DLDevice(Int32(dl_device_type), Int32(device_id))
-    
+
     # Get shape and strides - same as CPU
     shape_vec = collect(Int64, size(arr))
     strides_vec = collect(Int64, Base.strides(arr))
-    
+
     # Get dtype
     dt = DLDataType(T)
-    
+
     # Create DLTensor
     tensor = DLTensor(
         pointer(arr),
@@ -340,7 +340,7 @@ function from_julia_array(arr::S) where {S <: AbstractArray}
         pointer(strides_vec),
         UInt64(0)
     )
-    
+
     return DLTensorHolder{T, S}(tensor, shape_vec, strides_vec, arr)
 end
 
@@ -364,7 +364,7 @@ gpu_array_info(x)
 """
 function gpu_array_info(arr)
     println("GPU Array Information:")
-    
+
     try
         backend, dev_id = detect_gpu_backend(arr)
         println("  Backend: $backend")
@@ -373,12 +373,12 @@ function gpu_array_info(arr)
         println("  Shape: ", size(arr))
         println("  Size: ", length(arr), " elements")
         println("  Memory Pointer: ", repr(UInt(pointer(arr))))
-        
+
         # Map to DLDevice
         dl_type = gpu_backend_to_dldevice(backend)
         dl_dev = DLDevice(Int32(dl_type), Int32(dev_id))
         println("  DLDevice: ", dl_dev)
-        
+
     catch e
         println("  Error getting info: ", e)
     end

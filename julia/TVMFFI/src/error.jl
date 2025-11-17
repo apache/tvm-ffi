@@ -39,80 +39,75 @@ const KeyError = TVMErrorKind("KeyError")
 const IndexError = TVMErrorKind("IndexError")
 
 """
-    TVMError
+    TVMError <: Exception
 
-TVM FFI error type. Wraps a TVM error object handle.
+TVM FFI error type.
 
 # Fields
-- `handle::TVMFFIObjectHandle`: The underlying error object
 - `kind::String`: Error kind (ValueError, TypeError, etc.)
 - `message::String`: Error message
 - `backtrace::String`: Stack backtrace
-
-# Design Notes
-Julia's exception system handles error propagation, so we don't need
-complex reference counting here. The finalizer handles cleanup.
 """
 mutable struct TVMError <: Exception
     handle::LibTVMFFI.TVMFFIObjectHandle
     kind::String
     message::String
     backtrace::String
-    
+
     function TVMError(kind::TVMErrorKind, message::AbstractString, backtrace::AbstractString="")
         # Create byte arrays for C API
         kind_bytes = LibTVMFFI.TVMFFIByteArray(pointer(kind.name), sizeof(kind.name))
         msg_bytes = LibTVMFFI.TVMFFIByteArray(pointer(message), sizeof(message))
         bt_bytes = LibTVMFFI.TVMFFIByteArray(pointer(backtrace), sizeof(backtrace))
-        
+
         ret, handle = LibTVMFFI.TVMFFIErrorCreate(kind_bytes, msg_bytes, bt_bytes)
         if ret != 0
             # Error creating error object - this is bad, but we can't recurse
             error("Failed to create TVM error object (out of memory?)")
         end
-        
+
         err = new(handle, kind.name, string(message), string(backtrace))
-        
+
         # Register finalizer to decrease reference count
         finalizer(err) do e
             if e.handle != C_NULL
                 LibTVMFFI.TVMFFIObjectDecRef(e.handle)
             end
         end
-        
+
         return err
     end
-    
+
     # Constructor from existing handle (e.g., from TLS)
     # Note: Takes ownership without IncRef (handle is already owned by caller)
     function TVMError(handle::LibTVMFFI.TVMFFIObjectHandle; own::Bool=false)
         if handle == C_NULL
             error("Cannot create TVMError from NULL handle")
         end
-        
+
         # Optionally increase reference count
         if own
             LibTVMFFI.TVMFFIObjectIncRef(handle)
         end
-        
+
         # Get the error cell pointer
         cell_ptr = LibTVMFFI.TVMFFIErrorGetCellPtr(handle)
         cell = unsafe_load(cell_ptr)
-        
+
         # Extract kind, message, and backtrace
         kind_str = unsafe_string(cell.kind.data, cell.kind.size)
         msg_str = unsafe_string(cell.message.data, cell.message.size)
         bt_str = unsafe_string(cell.backtrace.data, cell.backtrace.size)
-        
+
         err = new(handle, kind_str, msg_str, bt_str)
-        
+
         # Register finalizer
         finalizer(err) do e
             if e.handle != C_NULL
                 LibTVMFFI.TVMFFIObjectDecRef(e.handle)
             end
         end
-        
+
         return err
     end
 end
@@ -120,17 +115,7 @@ end
 """
     check_call(ret::Integer)
 
-Check the return code from a TVM FFI C API call.
-If non-zero, retrieve and throw the error from TLS.
-
-# Arguments
-- `ret::Integer`: Return code from C API (0 = success, non-zero = error)
-
-# Example
-```julia
-ret = LibTVMFFI.TVMFFISomeFunction(...)
-check_call(ret)
-```
+Check C API return code and throw TVMError if non-zero.
 """
 function check_call(ret::Integer)
     if ret != 0

@@ -22,26 +22,16 @@ using .LibTVMFFI
 """
     TVMFunction
 
-Wrapper for TVM function objects.
-
-Allows calling TVM functions from Julia with automatic argument conversion.
-
-# Design Philosophy
-The core is simple: wrap a handle, provide call interface.
-Julia's multiple dispatch handles type conversions naturally.
-
-# Reference Counting
-Uses the standard pattern: constructor with `own` parameter,
-finalizer always DecRefs.
+Wrapper for TVM function objects with automatic argument conversion.
 """
 mutable struct TVMFunction
     handle::LibTVMFFI.TVMFFIObjectHandle
-    
+
     """
         TVMFunction(handle; own=true)
-    
+
     Create a TVMFunction from a raw handle.
-    
+
     # Arguments
     - `handle`: The raw function handle
     - `own`: If true, increment refcount (default). If false, take ownership without IncRef.
@@ -50,21 +40,21 @@ mutable struct TVMFunction
         if handle == C_NULL
             error("Cannot create TVMFunction from NULL handle")
         end
-        
+
         # Optionally increase reference count
         if own
             LibTVMFFI.TVMFFIObjectIncRef(handle)
         end
-        
+
         func = new(handle)
-        
+
         # Finalizer
         finalizer(func) do f
             if f.handle != C_NULL
                 LibTVMFFI.TVMFFIObjectDecRef(f.handle)
             end
         end
-        
+
         return func
     end
 end
@@ -92,9 +82,9 @@ end
 function get_global_func(name::AbstractString)
     name_str = String(name)
     byte_array = LibTVMFFI.TVMFFIByteArray(pointer(name_str), sizeof(name_str))
-    
+
     ret, handle = LibTVMFFI.TVMFFIFunctionGetGlobal(byte_array)
-    
+
     if ret != 0
         # Check if error is "function not found" or something else
         error_handle = LibTVMFFI.TVMFFIErrorMoveFromRaised()
@@ -105,11 +95,11 @@ function get_global_func(name::AbstractString)
             error("Failed to get global function '$name' with code $ret")
         end
     end
-    
+
     if handle == C_NULL
         return nothing
     end
-    
+
     # C API returns a new reference, so we take ownership without IncRef
     return TVMFunction(handle; own=false)
 end
@@ -117,11 +107,7 @@ end
 """
     to_tvm_any(value) -> LibTVMFFI.TVMFFIAny
 
-Convert Julia value to TVMFFIAny for function call arguments.
-
-# Reference Counting Rule
-ALWAYS creates a new reference (IncRef for objects).
-The caller is responsible for releasing this reference after use.
+Convert Julia value to TVMFFIAny for function arguments.
 """
 function to_tvm_any(value::Int64)
     # POD type - no refcounting
@@ -222,14 +208,10 @@ end
     from_tvm_any(any::LibTVMFFI.TVMFFIAny) -> Any
 
 Convert TVMFFIAny back to Julia value.
-
-# Reference Counting Rule
-Receives ownership from C API (no extra IncRef).
-Constructors are called with own=false.
 """
 function from_tvm_any(any::LibTVMFFI.TVMFFIAny)
     type_idx = any.type_index
-    
+
     if type_idx == Int32(LibTVMFFI.kTVMFFINone)
         return nothing
     elseif type_idx == Int32(LibTVMFFI.kTVMFFIInt)
@@ -275,56 +257,44 @@ end
 
 Call a TVM function with arguments.
 
-# Automatic Array Conversion (Convenience!)
-AbstractArray arguments are automatically converted to DLTensorHolder.
-This makes the API more convenient while still allowing optimization.
+Arrays are automatically converted to DLTensorHolder for convenience.
+Pre-created holders can be passed for performance optimization.
 
 # Examples
 ```julia
-func = get_global_func("my_function")
+# Simple - auto-conversion
+func(x, y)
 
-# Simple usage - arrays auto-converted
-x = Float32[1, 2, 3]
-result = func(x)  # x automatically converted to DLTensorHolder
-
-# Optimized usage - pre-create holders for reuse
+# Optimized - reuse holders
 holder = from_julia_array(x)
 for i in 1:1000000
-    func(holder)  # Reuse holder, no allocation
+    func(holder)
 end
-
-# Mixed arguments
-func(x, 1.0, "hello", y)  # Arrays + scalars + strings
 ```
-
-# Design Philosophy (Linus-style)
-- Convenience: Auto-convert arrays (most common case)
-- Performance: Accept pre-made holders (optimization case)  
-- Flexibility: Support both without special cases
 """
 function (func::TVMFunction)(args...)
     # Auto-convert AbstractArrays to DLTensorHolder
     # This allows users to pass arrays directly for convenience,
     # or pass pre-made holders for performance optimization
     processed_args = Any[
-        arg isa AbstractArray && !(arg isa DLTensorHolder) ? 
+        arg isa AbstractArray && !(arg isa DLTensorHolder) ?
             from_julia_array(arg) : arg
         for arg in args
     ]
-    
+
     # Convert arguments to TVMFFIAny array
     num_args = length(processed_args)
     args_array = Vector{LibTVMFFI.TVMFFIAny}(undef, num_args)
-    
+
     for (i, arg) in enumerate(processed_args)
         args_array[i] = to_tvm_any(arg)
     end
-    
+
     # Prepare result
     result = Ref{LibTVMFFI.TVMFFIAny}(
         LibTVMFFI.TVMFFIAny(Int32(LibTVMFFI.kTVMFFINone), 0, 0)
     )
-    
+
     # CRITICAL GC Safety:
     # We must preserve BOTH the original args AND processed_args
     # - args: contains original arrays (data source)
@@ -349,12 +319,12 @@ function (func::TVMFunction)(args...)
             )
         end
     end
-    
+
     check_call(ret)
-    
+
     # Convert result back to Julia type
     julia_result = from_tvm_any(result[])
-    
+
     # Cleanup: decrease ref counts for object arguments we created
     for arg_any in args_array
         if arg_any.type_index >= Int32(LibTVMFFI.kTVMFFIStaticObjectBegin)
@@ -364,7 +334,7 @@ function (func::TVMFunction)(args...)
             end
         end
     end
-    
+
     return julia_result
 end
 
