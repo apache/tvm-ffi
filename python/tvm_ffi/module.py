@@ -16,14 +16,20 @@
 # under the License.
 """Module related objects and functions."""
 
-# pylint: disable=invalid-name
+# tvm-ffi-stubgen(begin): import
+# fmt: off
+# isort: off
 from __future__ import annotations
-
+from typing import Any, TYPE_CHECKING
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+# isort: on
+# fmt: on
+# tvm-ffi-stubgen(end)
 import json
-from collections.abc import Sequence
 from enum import IntEnum
 from os import PathLike, fspath
-from typing import TYPE_CHECKING, Any, ClassVar, cast
+from typing import ClassVar, cast
 
 from . import _ffi_api, core
 from .registry import register_object
