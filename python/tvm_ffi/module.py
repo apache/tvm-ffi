@@ -185,8 +185,8 @@ class Module(core.Object):
     ) -> dict[str, Any] | None:
         """Get metadata for a function exported from the module.
 
-        This retrieves metadata for functions exported via TVM_FFI_DLL_EXPORT_TYPED_FUNC
-        and when TVM_FFI_DLL_EXPORT_INCLUDE_METADATA is on, which includes type schema
+        This retrieves metadata for functions exported via c:macro:`TVM_FFI_DLL_EXPORT_TYPED_FUNC`
+        and when c:macro:`TVM_FFI_DLL_EXPORT_INCLUDE_METADATA` is on, which includes type schema
         and const-ness information.
 
         Parameters
@@ -230,8 +230,8 @@ class Module(core.Object):
     def get_function_doc(self, name: str, query_imports: bool = False) -> str | None:
         """Get documentation string for a function exported from the module.
 
-        This retrieves documentation for functions exported via TVM_FFI_DLL_EXPORT_TYPED_FUNC_DOC.
-        If the function was exported with TVM_FFI_DLL_EXPORT_TYPED_FUNC, this function will
+        This retrieves documentation for functions exported via c:macro:`TVM_FFI_DLL_EXPORT_TYPED_FUNC_DOC`.
+        If the function was exported with c:macro:`TVM_FFI_DLL_EXPORT_TYPED_FUNC`, this function will
         return None.
 
         Parameters
