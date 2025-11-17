@@ -76,7 +76,7 @@ Suppose we implement a C++ function ``AddOne`` that performs elementwise ``y = x
 
 
 The macro :c:macro:`TVM_FFI_DLL_EXPORT_TYPED_FUNC` exports the C++ function ``AddOne``
-as a TVM FFI compatible symbol ``__tvm_ffi_add_one_cpu/cuda``. If ``TVM_FFI_DLL_EXPORT_TYPED_FUNC_METADATA`` is on,
+as a TVM FFI compatible symbol ``__tvm_ffi_add_one_cpu/cuda``. If ``TVM_FFI_DLL_EXPORT_INCLUDE_METADATA`` is set to 1,
 it also exports the function's metadata as a symbol ``__tvm_ffi__metadata_add_one_cpu/cuda`` for type checking and stub generation.
 
 The class :cpp:class:`tvm::ffi::TensorView` allows zero-copy interop with tensors from different ML frameworks:

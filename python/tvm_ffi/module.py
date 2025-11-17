@@ -186,7 +186,7 @@ class Module(core.Object):
         """Get metadata for a function exported from the module.
 
         This retrieves metadata for functions exported via TVM_FFI_DLL_EXPORT_TYPED_FUNC
-        and when TVM_FFI_DLL_EXPORT_TYPED_FUNC_METADATA is on, which includes type schema
+        and when TVM_FFI_DLL_EXPORT_INCLUDE_METADATA is on, which includes type schema
         and const-ness information.
 
         Parameters

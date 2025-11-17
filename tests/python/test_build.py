@@ -296,7 +296,7 @@ def test_build_without_metadata() -> None:
     output_lib_path = tvm_ffi.cpp.build_inline(
         name="test_no_meta",
         cpp_sources=r"""
-            // Note: NOT defining TVM_FFI_DLL_EXPORT_TYPED_FUNC_METADATA
+            // Note: NOT defining TVM_FFI_DLL_EXPORT_INCLUDE_METADATA
 
             int simple_add(int a, int b) {
                 return a + b;
@@ -314,7 +314,7 @@ def test_build_without_metadata() -> None:
     # But metadata should not be available
     metadata = mod.get_function_metadata("simple_add")
     assert metadata is None, (
-        "Metadata should not be available without TVM_FFI_DLL_EXPORT_TYPED_FUNC_METADATA"
+        "Metadata should not be available without TVM_FFI_DLL_EXPORT_INCLUDE_METADATA"
     )
 
     # Doc should also not be available

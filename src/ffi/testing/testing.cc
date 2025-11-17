@@ -17,7 +17,7 @@
  * under the License.
  */
 // This file is used for testing the FFI API.
-#define TVM_FFI_DLL_EXPORT_TYPED_FUNC_METADATA
+#define TVM_FFI_DLL_EXPORT_INCLUDE_METADATA 1
 
 #include <dlpack/dlpack.h>
 #include <tvm/ffi/any.h>
