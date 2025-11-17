@@ -313,7 +313,7 @@ function to_julia_array(tensor::TVMTensor, ::Type{T}) where T
     
     # Check contiguity
     if !is_contiguous(tensor)
-        error("Can only convert contiguous tensors. Use copy_to_julia() for non-contiguous tensors.")
+        error("Can only convert contiguous tensors. For non-contiguous: use copy(to_julia_array())")
     end
     
     # Get shape and data pointer
@@ -325,36 +325,6 @@ function to_julia_array(tensor::TVMTensor, ::Type{T}) where T
     arr = unsafe_wrap(Array, ptr, shape_tuple)
     
     return arr
-end
-
-"""
-    copy_to_julia(tensor::TVMTensor, ::Type{T}) -> Array{T}
-
-Copy TVM tensor data to a new Julia array.
-
-This always creates a new array, so it works for non-contiguous tensors
-and tensors on non-CPU devices (though non-CPU requires additional support).
-
-# Examples
-```julia
-arr = copy_to_julia(tensor, Float32)
-```
-"""
-function copy_to_julia(tensor::TVMTensor, ::Type{T}) where T
-    # For now, only support CPU tensors
-    dev = device(tensor)
-    if dev.device_type != Int32(LibTVMFFI.kDLCPU)
-        error("Copying from non-CPU devices not yet implemented")
-    end
-    
-    if is_contiguous(tensor)
-        # Fast path: just copy the array
-        arr = to_julia_array(tensor, T)
-        return copy(arr)
-    else
-        # Slow path: need to handle strides
-        error("Non-contiguous tensor copy not yet implemented")
-    end
 end
 
 # Pretty printing

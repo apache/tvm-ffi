@@ -275,18 +275,48 @@ end
 
 Call a TVM function with arguments.
 
+# Automatic Array Conversion (Convenience!)
+AbstractArray arguments are automatically converted to DLTensorHolder.
+This makes the API more convenient while still allowing optimization.
+
 # Examples
 ```julia
 func = get_global_func("my_function")
-result = func(1, 2.0, "hello")
+
+# Simple usage - arrays auto-converted
+x = Float32[1, 2, 3]
+result = func(x)  # x automatically converted to DLTensorHolder
+
+# Optimized usage - pre-create holders for reuse
+holder = from_julia_array(x)
+for i in 1:1000000
+    func(holder)  # Reuse holder, no allocation
+end
+
+# Mixed arguments
+func(x, 1.0, "hello", y)  # Arrays + scalars + strings
 ```
+
+# Design Philosophy (Linus-style)
+- Convenience: Auto-convert arrays (most common case)
+- Performance: Accept pre-made holders (optimization case)  
+- Flexibility: Support both without special cases
 """
 function (func::TVMFunction)(args...)
+    # Auto-convert AbstractArrays to DLTensorHolder
+    # This allows users to pass arrays directly for convenience,
+    # or pass pre-made holders for performance optimization
+    processed_args = Any[
+        arg isa AbstractArray && !(arg isa DLTensorHolder) ? 
+            from_julia_array(arg) : arg
+        for arg in args
+    ]
+    
     # Convert arguments to TVMFFIAny array
-    num_args = length(args)
+    num_args = length(processed_args)
     args_array = Vector{LibTVMFFI.TVMFFIAny}(undef, num_args)
     
-    for (i, arg) in enumerate(args)
+    for (i, arg) in enumerate(processed_args)
         args_array[i] = to_tvm_any(arg)
     end
     
@@ -295,10 +325,13 @@ function (func::TVMFunction)(args...)
         LibTVMFFI.TVMFFIAny(Int32(LibTVMFFI.kTVMFFINone), 0, 0)
     )
     
-    # CRITICAL: Use GC.@preserve to keep args alive during C call
-    # This ensures DLTensorHolders and their data stay valid
+    # CRITICAL GC Safety:
+    # We must preserve BOTH the original args AND processed_args
+    # - args: contains original arrays (data source)
+    # - processed_args: contains holders (pointers extracted from these)
+    # The C call uses pointers from holders, which reference data in arrays
     local ret
-    GC.@preserve args begin
+    GC.@preserve args processed_args begin
         # Call function
         ret = if num_args > 0
             LibTVMFFI.TVMFFIFunctionCall(

@@ -111,25 +111,12 @@ if has_cuda
     println("   Input (x_gpu):  ", Array(x_gpu))
     println("   Output (y_gpu): ", Array(y_gpu))
     
-    # Get device ID from CUDA
-    device_id = CUDA.device().handle
-    cuda_device = cuda(device_id)
-    
-    # Create DLTensor views
-    println("\n5. Converting CUDA arrays to DLTensor...")
-    
-    # Unified interface: from_julia_array now handles GPU arrays automatically!
-    # Returns self-contained holders - memory-safe API
-    x_holder = from_julia_array(x_gpu)  # Auto-detects CUDA, returns GPUDLTensorHolder
-    y_holder = from_julia_array(y_gpu)  # Auto-detects CUDA
-    
-    println("✓ Created DLTensor views (auto-detected CUDA backend)")
-    
-    # Call the CUDA function
-    # Pass holders directly - they keep GPU arrays alive
-    println("\n6. Calling add_one_cuda(x, y) on GPU...")
+    # NEW: Direct GPU array passing! (Auto-conversion)
+    # GPU arrays are automatically converted to DLTensorHolder with CUDA device
+    println("\n5. Calling add_one_cuda(x, y) on GPU - direct array passing!")
+    println("   (GPU arrays auto-converted to holders with auto-detected CUDA device)")
     try
-        add_one_cuda(x_holder, y_holder)
+        add_one_cuda(x_gpu, y_gpu)  # ← Pass GPU arrays directly!
         CUDA.synchronize()  # Wait for GPU to finish
         println("✓ CUDA function call succeeded!")
     catch e
@@ -174,12 +161,8 @@ if has_cuda
     println("   Input slice:  ", Array(gpu_slice))
     println("   Stride: ", Base.strides(gpu_slice), " (contiguous)")
     
-    # Create holders from GPU slices
-    slice_holder = from_julia_array(gpu_slice)
-    slice_out_holder = from_julia_array(gpu_slice_output)
-    
-    # Call TVM function with GPU slice
-    add_one_cuda(slice_holder, slice_out_holder)
+    # Direct GPU slice passing! Auto-converted
+    add_one_cuda(gpu_slice, gpu_slice_output)  # ← Slices work too!
     CUDA.synchronize()
     
     println("   Output:       ", Array(gpu_slice_output))
@@ -205,10 +188,8 @@ if has_cuda
     println("   Input column:  ", Array(gpu_col))
     println("   Stride: ", Base.strides(gpu_col), " (contiguous)")
     
-    col_holder = from_julia_array(gpu_col)
-    col_out_holder = from_julia_array(gpu_col_output)
-    
-    add_one_cuda(col_holder, col_out_holder)
+    # Direct GPU column slice passing!
+    add_one_cuda(gpu_col, gpu_col_output)
     CUDA.synchronize()
     
     println("   Output:       ", Array(gpu_col_output))

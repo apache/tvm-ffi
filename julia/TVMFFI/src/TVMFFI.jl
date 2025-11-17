@@ -54,7 +54,7 @@ export ValueError, TypeError, RuntimeError, AttributeError, KeyError, IndexError
 # Export utility functions
 export check_call, shape, dtype, device
 export get_global_func
-export to_julia_array, copy_to_julia, from_julia_array
+export to_julia_array, from_julia_array
 export cpu, cuda, opencl, vulkan, metal, rocm
 
 # Export GPU support functions

@@ -36,7 +36,7 @@ println("TVM FFI Julia Example: Loading add_one_cpu.so")
 println("=" ^ 60)
 
 # Path to the compiled module
-module_path = joinpath(@__DIR__, "../../../examples/quickstart/build/add_one_cpu.so")
+module_path = joinpath(@__DIR__, "..", "..", "..", "examples", "quickstart", "build", "add_one_cpu.so")
 
 println("\n1. Loading module from: $module_path")
 
@@ -102,18 +102,12 @@ y = zeros(Float32, 5)
 println("   Input (x):  ", x)
 println("   Output (y): ", y)
 
-# Convert Julia arrays to DLTensor holders (new safe API!)
-println("\n5. Converting arrays to DLTensor...")
-x_holder = from_julia_array(x)
-y_holder = from_julia_array(y)
-
-println("✓ Created DLTensor holders (self-contained, memory-safe)")
-
-# Call the function!
-# Pass holders directly - they keep all data alive automatically
-println("\n6. Calling add_one_cpu(x, y)...")
+# NEW: Direct array passing! (Auto-conversion)
+# Arrays are automatically converted to DLTensorHolder
+println("\n5. Calling add_one_cpu(x, y) - direct array passing!")
+println("   (Arrays auto-converted to holders internally)")
 try
-    add_one_cpu(x_holder, y_holder)
+    add_one_cpu(x, y)  # ← Pass arrays directly!
     println("✓ Function call succeeded!")
 catch e
     println("❌ Error calling function:")
@@ -147,7 +141,7 @@ println("\n8. Creating vector for slice demo...")
 vector = Float32[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 println("   Vector: ", vector)
 
-# Test 1: Contiguous slice
+# Test 1: Contiguous slice  
 println("\n9. Testing contiguous slice (zero-copy!)...")
 slice = @view vector[3:7]  # Elements 3-7
 slice_output = zeros(Float32, 5)
@@ -155,12 +149,8 @@ slice_output = zeros(Float32, 5)
 println("   Input slice:  ", slice)
 println("   Stride: ", Base.strides(slice), " (contiguous)")
 
-# Create holders from slices
-slice_holder = from_julia_array(slice)
-slice_out_holder = from_julia_array(slice_output)
-
-# Call TVM function with slice
-add_one_cpu(slice_holder, slice_out_holder)
+# NEW: Direct slice passing! Auto-converted to holder
+add_one_cpu(slice, slice_output)  # ← Pass slices directly!
 
 println("   Output:       ", slice_output)
 println("   Expected:     ", collect(slice) .+ 1)
@@ -185,10 +175,8 @@ col_output = zeros(Float32, 3)
 println("   Input column:  ", col)
 println("   Stride: ", Base.strides(col), " (contiguous)")
 
-col_holder = from_julia_array(col)
-col_out_holder = from_julia_array(col_output)
-
-add_one_cpu(col_holder, col_out_holder)
+# Direct slice passing - auto-converted!
+add_one_cpu(col, col_output)
 
 println("   Output:       ", col_output)
 println("   Expected:     ", collect(col) .+ 1)
@@ -232,4 +220,3 @@ println("   • Zero-copy tensor passing")
 println("   • Successful execution on CPU")
 println("   • 🆕 Slice support (like Rust!)")
 println("   • 🆕 Zero-copy views with proper strides")
-

@@ -56,21 +56,23 @@ my_func = func_getter(mod, "my_function", true)
 x = Float32[1, 2, 3, 4, 5]
 y = zeros(Float32, 5)
 
-# Convert to DLTensor holders (new safe API!)
-x_holder = from_julia_array(x)
-y_holder = from_julia_array(y)
-
-# Call TVM function - pass holders directly
-my_func(x_holder, y_holder)
+# NEW: Direct array passing! (Auto-conversion)
+# Arrays are automatically converted to DLTensorHolder
+my_func(x, y)  # ← Simple! Just pass arrays!
 
 # Check results
 println(y)  # Results from TVM!
 
-# NEW: Zero-copy slice support (like Rust!)
+# Works with slices too! (Zero-copy)
 matrix = Float32[1 2 3; 4 5 6; 7 8 9]
-row = @view matrix[2, :]           # Get second row
-holder = from_julia_array(row)     # Zero copy!
-my_func(holder)                    # Pass slice directly to TVM
+col = @view matrix[:, 2]           # Column slice (contiguous)
+my_func(col)                       # Pass slice directly!
+
+# For optimization: pre-create holders
+holder = from_julia_array(x)
+for i in 1:1000000
+    my_func(holder)  # Reuse holder, no allocation
+end
 ```
 
 ## Directory Structure
