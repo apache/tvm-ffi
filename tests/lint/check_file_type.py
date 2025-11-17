@@ -28,6 +28,7 @@ ALLOW_EXTENSION = {
     "h",
     "s",
     "rs",
+    "jl",
     "m",
     "mm",
     "g4",
