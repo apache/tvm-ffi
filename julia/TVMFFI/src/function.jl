@@ -129,7 +129,7 @@ end
 
 function to_tvm_any(value::TVMString)
     # Return the internal TVMFFIAny
-    # Need to increment ref count if it's an object
+    # Need to increment ref count if it's a heap-allocated object
     if value.data.type_index >= Int32(LibTVMFFI.kTVMFFIStaticObjectBegin)
         obj_ptr = reinterpret(LibTVMFFI.TVMFFIObjectHandle, value.data.data)
         if obj_ptr != C_NULL
@@ -144,6 +144,10 @@ function to_tvm_any(value::AbstractString)
 end
 
 function to_tvm_any(value::TVMFunction)
+    # Increase ref count since we're creating a new reference
+    if value.handle != C_NULL
+        LibTVMFFI.TVMFFIObjectIncRef(value.handle)
+    end
     LibTVMFFI.TVMFFIAny(
         Int32(LibTVMFFI.kTVMFFIFunction),
         0,
@@ -151,8 +155,30 @@ function to_tvm_any(value::TVMFunction)
     )
 end
 
+function to_tvm_any(value::TVMObject)
+    # Generic object - use its handle directly
+    # Increase ref count since we're creating a new reference
+    if value.handle != C_NULL
+        LibTVMFFI.TVMFFIObjectIncRef(value.handle)
+    end
+    LibTVMFFI.TVMFFIAny(
+        type_index(value),
+        0,
+        reinterpret(UInt64, value.handle)
+    )
+end
+
 function to_tvm_any(::Nothing)
     LibTVMFFI.TVMFFIAny(Int32(LibTVMFFI.kTVMFFINone), 0, 0)
+end
+
+function to_tvm_any(value::Base.RefValue{DLTensor})
+    # DLTensor pointer (for passing tensors to functions)
+    LibTVMFFI.TVMFFIAny(
+        Int32(LibTVMFFI.kTVMFFIDLTensorPtr),
+        0,
+        reinterpret(UInt64, Base.unsafe_convert(Ptr{DLTensor}, value))
+    )
 end
 
 """
@@ -230,14 +256,14 @@ function (func::TVMFunction)(args...)
             func.handle,
             pointer(args_array),
             Int32(num_args),
-            result
+            Base.unsafe_convert(Ptr{LibTVMFFI.TVMFFIAny}, result)
         )
     else
         LibTVMFFI.TVMFFIFunctionCall(
             func.handle,
             C_NULL,
             Int32(0),
-            result
+            Base.unsafe_convert(Ptr{LibTVMFFI.TVMFFIAny}, result)
         )
     end
     

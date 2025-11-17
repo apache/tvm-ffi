@@ -336,3 +336,58 @@ function Base.summary(io::IO, tensor::TVMTensor)
     print(io, join(shape_tuple, "×"), " TVMTensor{", string(dt), "}")
 end
 
+"""
+    from_julia_array(arr::Array{T}, device::DLDevice=cpu()) where T -> (Ref{DLTensor}, Vector, Vector)
+
+Create a DLTensor structure pointing to a Julia array's data.
+
+# Warning
+This creates a view - the DLTensor shares memory with the Julia array.
+The Julia array must remain alive while the DLTensor is in use.
+The returned shape and stride vectors must also remain alive.
+
+# Arguments
+- `arr`: Julia array (must be contiguous)
+- `device`: Device context (default: CPU)
+
+# Returns
+- `Ref{DLTensor}`: Reference to DLPack tensor structure
+- `Vector{Int64}`: Shape vector (must be kept alive)
+- `Vector{Int64}`: Strides vector (must be kept alive)
+
+# Example
+```julia
+x = Float32[1, 2, 3, 4, 5]
+dltensor_ref, shape, strides = from_julia_array(x)
+# Use dltensor_ref for C calls
+```
+"""
+function from_julia_array(arr::Array{T}, device::DLDevice=cpu()) where T
+    # Get shape
+    shape_tuple = size(arr)
+    ndim = length(shape_tuple)
+    shape_vec = collect(Int64, shape_tuple)
+    
+    # Calculate strides (Julia is column-major, same as Fortran)
+    strides_vec = ones(Int64, ndim)
+    for i in 2:ndim
+        strides_vec[i] = strides_vec[i-1] * shape_vec[i-1]
+    end
+    
+    # Get dtype
+    dt = DLDataType(T)
+    
+    # Create DLTensor
+    dltensor = DLTensor(
+        pointer(arr),           # data pointer
+        device,                 # device
+        Int32(ndim),           # ndim
+        dt,                    # dtype
+        pointer(shape_vec),    # shape
+        pointer(strides_vec),  # strides
+        UInt64(0)              # byte_offset
+    )
+    
+    return Ref(dltensor), shape_vec, strides_vec  # Return vectors to keep them alive
+end
+

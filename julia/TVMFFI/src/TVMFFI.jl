@@ -42,6 +42,7 @@ module TVMFFI
 
 # Export core types
 export DLDevice, DLDataType, DLDeviceType, DLDataTypeCode
+export DLTensor
 export TVMError, TVMErrorKind
 export TVMString, TVMBytes
 export TVMFunction
@@ -53,7 +54,7 @@ export ValueError, TypeError, RuntimeError, AttributeError, KeyError, IndexError
 # Export utility functions
 export check_call, shape, dtype, device
 export get_global_func
-export to_julia_array, copy_to_julia
+export to_julia_array, copy_to_julia, from_julia_array
 export cpu, cuda, opencl, vulkan, metal, rocm
 
 # Include submodules in dependency order
@@ -63,8 +64,8 @@ include("dtype.jl")
 include("device.jl")
 include("string.jl")
 include("object.jl")
+include("tensor.jl")     # Must come before function.jl (DLTensor is used there)
 include("function.jl")
-include("tensor.jl")
 
 end # module
 
