@@ -503,6 +503,7 @@ class Function : public ObjectRef {
   template <typename TCallable>
   static Function FromTyped(TCallable&& callable) {
     using FuncInfo = details::FunctionInfo<std::decay_t<TCallable>>;
+    // Callable is always captured by value here to avoid possible dangling reference
     auto call_packed = [callable = std::forward<TCallable>(callable)](
                            const AnyView* args, int32_t num_args, Any* rv) mutable -> void {
       details::unpack_call<typename FuncInfo::RetType>(
@@ -519,6 +520,7 @@ class Function : public ObjectRef {
   template <typename TCallable>
   static Function FromTyped(TCallable&& callable, std::string name) {
     using FuncInfo = details::FunctionInfo<std::decay_t<TCallable>>;
+    // Callable is always captured by value here to avoid possible dangling reference
     auto call_packed = [callable = std::forward<TCallable>(callable), name = std::move(name)](
                            const AnyView* args, int32_t num_args, Any* rv) mutable -> void {
       details::unpack_call<typename FuncInfo::RetType>(
