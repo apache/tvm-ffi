@@ -1,0 +1,80 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+name: torch c dlpack
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: "Branch or tag to publish (manual run)"
+        required: true
+
+jobs:
+  build_wheels_windows:
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: ["x86_64"]
+        python-version: ["cp39", "cp310", "cp311", "cp312", "cp313", "cp314"]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          repository: apache/tvm-ffi
+          ref: main
+          fetch-depth: 0
+          submodules: recursive
+          path: tvm-ffi
+      - uses: Jimver/cuda-toolkit@6008063726ffe3309d1b22e413d9e88fed91a2f2
+        id: cuda-toolkit
+      - uses: astral-sh/setup-uv@v7
+      - name: build wheels
+        env:
+          CUDA_HOME: ${{steps.cuda-toolkit.outputs.CUDA_PATH}}
+        shell: cmd
+        working-directory: ./tvm-ffi
+        run: ./addons/torch_c_dlpack_ext/build_aot_wheels.bat ${{ matrix.arch }} ${{ matrix.python-version }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pypi-wheels-windows-${{ matrix.arch }}-${{ matrix.python-version }}
+          path: ./tvm-ffi/addons/torch_c_dlpack_ext/wheelhouse/*.whl
+  upload_pypi:
+    needs: [build_wheels_windows]
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+      attestations: write
+    if: github.event_name == 'workflow_dispatch'   # <-- publish only on manual trigger
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: pypi-*
+          path: dist
+          merge-multiple: true
+      - name: Generate artifact attestation for sdist and wheels
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: dist/*
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          attestations: true
+          verbose: true
+          # testing publish url
+          # repository-url: https://test.pypi.org/legacy/

@@ -40,8 +40,6 @@ build_editable = orig.build_editable
 def _is_lib_prebuilt() -> bool:
     if sys.platform.startswith("win32"):
         extension = "dll"
-    elif sys.platform.startswith("darwin"):
-        extension = "dylib"
     else:
         extension = "so"
     return next(_package_path.rglob(f"*.{extension}"), None) is not None
@@ -74,6 +72,16 @@ def build_wheel(
                 "No need to build any torch c dlpackc libs."
             )
         else:
+            extra_args = []
+            # First use "torch.cuda.is_available()" to check whether GPU environment
+            # is available. Then determine the GPU type.
+            if torch.cuda.is_available():
+                if torch.version.cuda is not None:
+                    extra_args.append("--build-with-cuda")
+                elif torch.version.hip is not None:
+                    extra_args.append("--build-with-rocm")
+                else:
+                    raise ValueError("Cannot determine whether to build with CUDA or ROCm.")
             subprocess.run(
                 [
                     sys.executable,
@@ -81,7 +89,7 @@ def build_wheel(
                     "tvm_ffi.utils._build_optional_torch_c_dlpack",
                     "--output-dir",
                     str(_package_path),
-                    "--build-with-cuda" if torch.cuda.is_available() else "",
+                    *extra_args,
                 ],
                 check=True,
                 env={**os.environ, "TVM_FFI_DISABLE_TORCH_C_DLPACK": "1"},

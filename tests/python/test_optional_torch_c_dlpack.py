@@ -44,8 +44,15 @@ def test_build_torch_c_dlpack_extension() -> None:
         "--libname",
         "libtorch_c_dlpack_addon_test.so",
     ]
+    # First use "torch.cuda.is_available()" to check whether GPU environment
+    # is available. Then determine the GPU type.
     if torch.cuda.is_available():
-        args.append("--build-with-cuda")
+        if torch.version.cuda is not None:
+            args.append("--build-with-cuda")
+        elif torch.version.hip is not None:
+            args.append("--build-with-rocm")
+        else:
+            raise ValueError("Cannot determine whether to build with CUDA or ROCm.")
     subprocess.run(args, check=True)
 
     lib_path = str(Path("./output-dir/libtorch_c_dlpack_addon_test.so").resolve())

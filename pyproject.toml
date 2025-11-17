@@ -100,7 +100,7 @@ docs = [
 
 [project.scripts]
 tvm-ffi-config = "tvm_ffi.config:__main__"
-tvm-ffi-stubgen = "tvm_ffi.stub.stubgen:__main__"
+tvm-ffi-stubgen = "tvm_ffi.stub.cli:__main__"
 
 [build-system]
 requires = ["scikit-build-core>=0.10.0", "cython>=3.0", "setuptools-scm"]
@@ -273,6 +273,10 @@ exclude = '''(?x)(
 [[tool.mypy.overrides]]
 module = ["torch", "torch.*", "my_ffi_extension", "my_ffi_extension.*"]
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "_pytest.*"
+follow_imports = "skip"
 
 [tool.uv.dependency-groups]
 docs = { requires-python = ">=3.13" }

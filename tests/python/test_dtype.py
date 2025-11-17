@@ -164,8 +164,43 @@ def test_ml_dtypes_dtype_conversion() -> None:
     _check_dtype(np.dtype(ml_dtypes.float4_e2m1fn), 17, 4, 1)
 
 
+def test_builtin_dtype_conversion() -> None:
+    _check_dtype(tvm_ffi.bool, 6, 8, 1)
+    _check_dtype(tvm_ffi.int8, 0, 8, 1)
+    _check_dtype(tvm_ffi.int16, 0, 16, 1)
+    _check_dtype(tvm_ffi.int32, 0, 32, 1)
+    _check_dtype(tvm_ffi.int64, 0, 64, 1)
+    _check_dtype(tvm_ffi.uint8, 1, 8, 1)
+    _check_dtype(tvm_ffi.uint16, 1, 16, 1)
+    _check_dtype(tvm_ffi.uint32, 1, 32, 1)
+    _check_dtype(tvm_ffi.uint64, 1, 64, 1)
+    _check_dtype(tvm_ffi.float16, 2, 16, 1)
+    _check_dtype(tvm_ffi.float32, 2, 32, 1)
+    _check_dtype(tvm_ffi.float64, 2, 64, 1)
+    _check_dtype(tvm_ffi.bfloat16, 4, 16, 1)
+    _check_dtype(tvm_ffi.float8_e4m3fn, 10, 8, 1)
+    _check_dtype(tvm_ffi.float8_e4m3fnuz, 11, 8, 1)
+    _check_dtype(tvm_ffi.float8_e5m2, 12, 8, 1)
+    _check_dtype(tvm_ffi.float8_e5m2fnuz, 13, 8, 1)
+    _check_dtype(tvm_ffi.float8_e8m0fnu, 14, 8, 1)
+    _check_dtype(tvm_ffi.float4_e2m1fnx2, 17, 4, 2)
+
+
 def test_dtype_from_dlpack_data_type() -> None:
     dtype = tvm_ffi.dtype.from_dlpack_data_type((0, 8, 1))
     assert dtype.type_code == 0
     assert dtype.bits == 8
     assert dtype.lanes == 1
+
+
+def test_dtype_bool() -> None:
+    dtype = tvm_ffi.dtype("bool")
+    assert dtype.type_code == 6
+    assert dtype.bits == 8
+    assert dtype.lanes == 1
+
+    dtype_with_lanes = dtype.with_lanes(4)
+    assert dtype_with_lanes.type_code == 6
+    assert dtype_with_lanes.bits == 8
+    assert dtype_with_lanes.lanes == 4
+    assert dtype_with_lanes == "boolx4"

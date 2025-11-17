@@ -91,7 +91,9 @@ def convert(value: Any) -> Any:  # noqa: PLR0911,PLR0912
     only used in internal or testing scenarios.
 
     """
-    if isinstance(value, (core.Object, core.PyNativeObject, bool, Number, ctypes.c_void_p)):
+    if isinstance(
+        value, (core.Object, core.PyNativeObject, bool, Number, ctypes.c_void_p, _dtype.dtype)
+    ):
         return value
     elif isinstance(value, (tuple, list)):
         return container.Array(value)

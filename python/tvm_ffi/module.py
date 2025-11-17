@@ -103,10 +103,9 @@ class Module(core.Object):
     """
 
     # tvm-ffi-stubgen(begin): object/ffi.Module
-    if TYPE_CHECKING:
-        # fmt: off
-        imports_: Sequence[Any]
-        # fmt: on
+    # fmt: off
+    imports_: Sequence[Any]
+    # fmt: on
     # tvm-ffi-stubgen(end)
 
     entry_name: ClassVar[str] = "main"  # constant for entry function name

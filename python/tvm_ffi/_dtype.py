@@ -33,6 +33,7 @@ class DataTypeCode(IntEnum):
     FLOAT = 2
     HANDLE = 3
     BFLOAT = 4
+    BOOL = 6
     Float8E3M4 = 7
     Float8E4M3 = 8
     Float8E4M3B11FNUZ = 9
@@ -320,3 +321,31 @@ except ImportError:
     pass
 
 core._set_class_dtype(dtype)
+
+# list of common dtype literals in machine learning systems apps
+# note that we can always cover more dtypes via explicit construction
+# from dlpack data type tuple
+# align with choice of numpy 2.0, which moved away from bool_ to bool
+bool = dtype("bool")
+int8 = dtype("int8")
+int16 = dtype("int16")
+int32 = dtype("int32")
+int64 = dtype("int64")
+uint8 = dtype("uint8")
+uint16 = dtype("uint16")
+uint32 = dtype("uint32")
+uint64 = dtype("uint64")
+float64 = dtype("float64")
+float32 = dtype("float32")
+float16 = dtype("float16")
+bfloat16 = dtype("bfloat16")
+# float8 dtypes
+float8_e4m3fn = dtype("float8_e4m3fn")
+float8_e4m3fnuz = dtype("float8_e4m3fnuz")
+float8_e5m2 = dtype("float8_e5m2")
+float8_e5m2fnuz = dtype("float8_e5m2fnuz")
+float8_e8m0fnu = dtype("float8_e8m0fnu")
+# float4x2 dtypes
+float4_e2m1fnx2 = dtype("float4_e2m1fnx2")
+# alias for torch naming pattern for f4x2
+float4_e2m1fn_x2 = float4_e2m1fnx2

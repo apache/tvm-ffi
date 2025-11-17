@@ -60,6 +60,28 @@ from . import cpp
 # optional module to speedup dlpack conversion
 from . import _optional_torch_c_dlpack
 
+# import the dtype literals
+from ._dtype import (
+    bool,
+    int8,
+    int16,
+    int32,
+    int64,
+    uint8,
+    uint16,
+    uint32,
+    uint64,
+    float64,
+    float32,
+    float16,
+    bfloat16,
+    float8_e4m3fn,
+    float8_e4m3fnuz,
+    float8_e5m2,
+    float8_e5m2fnuz,
+    float8_e8m0fnu,
+    float4_e2m1fnx2,
+)
 
 try:
     from ._version import __version__, __version_tuple__  # type: ignore[import-not-found]

@@ -33,6 +33,7 @@ subsequent calls will be much faster.
 from __future__ import annotations
 
 import ctypes
+import logging
 import os
 import subprocess
 import sys
@@ -40,8 +41,10 @@ import warnings
 from pathlib import Path
 from typing import Any
 
+logger = logging.getLogger(__name__)  # type: ignore
 
-def load_torch_c_dlpack_extension() -> Any:
+
+def load_torch_c_dlpack_extension() -> Any:  # noqa: PLR0912, PLR0915
     try:
         import torch  # noqa: PLC0415
 
@@ -67,11 +70,22 @@ def load_torch_c_dlpack_extension() -> Any:
         cache_dir = Path(os.environ.get("TVM_FFI_CACHE_DIR", "~/.cache/tvm-ffi")).expanduser()
         addon_output_dir = cache_dir
         major, minor = torch.__version__.split(".")[:2]
-        device = "cpu" if not torch.cuda.is_available() else "cuda"
+        # First use "torch.cuda.is_available()" to check whether GPU environment
+        # is available. Then determine the GPU type.
+        if torch.cuda.is_available():
+            if torch.version.cuda is not None:
+                device = "cuda"
+            elif torch.version.hip is not None:
+                device = "rocm"
+            else:
+                raise ValueError("Cannot determine whether to build with CUDA or ROCm.")
+        else:
+            device = "cpu"
         suffix = ".dll" if sys.platform.startswith("win") else ".so"
         libname = f"libtorch_c_dlpack_addon_torch{major}{minor}-{device}{suffix}"
         lib_path = addon_output_dir / libname
         if not lib_path.exists():
+            logger.info("JIT-compiling torch-c-dlpack-ext to cache...")
             build_script_path = (
                 Path(__file__).parent / "utils" / "_build_optional_torch_c_dlpack.py"
             )
@@ -83,13 +97,22 @@ def load_torch_c_dlpack_extension() -> Any:
                 "--libname",
                 libname,
             ]
-            if torch.cuda.is_available():
+            if device == "cuda":
                 args.append("--build-with-cuda")
-            subprocess.run(
-                args,
-                check=True,
-            )
-            assert lib_path.exists(), "Failed to build torch c dlpack addon."
+            elif device == "rocm":
+                args.append("--build-with-rocm")
+
+            # use capture_output to reduce noise when building the torch c dlpack addon
+            result = subprocess.run(args, check=False, capture_output=True)
+            if result.returncode != 0:
+                msg = [f"Build failed with status {result.returncode}"]
+                if result.stdout:
+                    msg.append(f"stdout:\n{result.stdout.decode('utf-8')}")
+                if result.stderr:
+                    msg.append(f"stderr:\n{result.stderr.decode('utf-8')}")
+                raise RuntimeError("\n".join(msg))
+            if not lib_path.exists():
+                raise RuntimeError("Failed to build torch c dlpack addon.")
 
         lib = ctypes.CDLL(str(lib_path))
         func = lib.TorchDLPackExchangeAPIPtr
@@ -105,7 +128,7 @@ def load_torch_c_dlpack_extension() -> Any:
     except Exception:
         warnings.warn(
             "Failed to JIT torch c dlpack extension, EnvTensorAllocator will not be enabled.\n"
-            "You may try AOT-module via `pip install torch-c-dlpack-ext`"
+            "We recommend installing via `pip install torch-c-dlpack-ext`"
         )
     return None
 

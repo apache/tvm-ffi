@@ -156,20 +156,20 @@ cdef int TVMFFIPyArgSetterDLPackExchangeAPI_(
     cdef DLManagedTensorVersioned* temp_managed_tensor
     cdef TVMFFIObjectHandle temp_chandle
     cdef void* current_stream = NULL
-    cdef const DLPackExchangeAPI* api = this.c_dlpack_exchange_api
+    cdef const DLPackExchangeAPI* exchange_api = this.c_dlpack_exchange_api
 
     # Set the exchange API in context
-    ctx.c_dlpack_exchange_api = api
+    ctx.c_dlpack_exchange_api = exchange_api
 
     # Convert PyObject to DLPack using the struct's function pointer
-    if api.managed_tensor_from_py_object_no_sync(arg, &temp_managed_tensor) != 0:
+    if exchange_api.managed_tensor_from_py_object_no_sync(arg, &temp_managed_tensor) != 0:
         return -1
 
     # Query current stream from producer if device is not CPU
     if temp_managed_tensor.dl_tensor.device.device_type != kDLCPU:
-        if ctx.device_type == -1 and api.current_work_stream != NULL:
+        if ctx.device_type == -1 and exchange_api.current_work_stream != NULL:
             # First time seeing a device, query the stream
-            if api.current_work_stream(
+            if exchange_api.current_work_stream(
                 temp_managed_tensor.dl_tensor.device.device_type,
                 temp_managed_tensor.dl_tensor.device.device_id,
                 &current_stream
@@ -180,6 +180,9 @@ cdef int TVMFFIPyArgSetterDLPackExchangeAPI_(
 
     # Convert to TVM Tensor
     if TVMFFITensorFromDLPackVersioned(temp_managed_tensor, 0, 0, &temp_chandle) != 0:
+        # recycle the managed tensor to avoid leak
+        if temp_managed_tensor.deleter != NULL:
+            temp_managed_tensor.deleter(temp_managed_tensor)
         raise BufferError("Failed to convert DLManagedTensorVersioned to ffi.Tensor")
 
     out.type_index = kTVMFFITensor

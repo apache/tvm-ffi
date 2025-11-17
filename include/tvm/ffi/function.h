@@ -36,6 +36,7 @@
 #include <functional>
 #include <sstream>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -146,18 +147,30 @@ namespace details {
  * \brief Derived object class for constructing FunctionObj backed by a TCallable
  *
  * This is a helper class that implements the function call interface.
+ * Invariance: TCallable cannot be const or reference type.
  */
 template <typename TCallable>
 class FunctionObjImpl : public FunctionObj {
  public:
-  using TStorage = std::remove_cv_t<std::remove_reference_t<TCallable>>;
+  static_assert(std::is_same_v<TCallable, std::remove_cv_t<std::remove_reference_t<TCallable>>>,
+                "TCallable of FunctionObjImpl cannot be const or reference type");
+
   /*! \brief The type of derived object class */
   using TSelf = FunctionObjImpl<TCallable>;
+
   /*!
    * \brief Derived object class for constructing ffi::FunctionObj.
-   * \param callable The type-erased callable object.
+   * \param callable The type-erased callable object (rvalue).
    */
-  explicit FunctionObjImpl(TCallable callable) : callable_(std::move(callable)) {
+  explicit FunctionObjImpl(TCallable&& callable) : callable_(std::move(callable)) {
+    this->safe_call = SafeCall;
+    this->cpp_call = reinterpret_cast<void*>(CppCall);
+  }
+  /*!
+   * \brief Derived object class for constructing ffi::FunctionObj.
+   * \param callable The type-erased callable object (lvalue).
+   */
+  explicit FunctionObjImpl(const TCallable& callable) : callable_(callable) {
     this->safe_call = SafeCall;
     this->cpp_call = reinterpret_cast<void*>(CppCall);
   }
@@ -179,7 +192,7 @@ class FunctionObjImpl : public FunctionObj {
   }
   /// \endcond
   /*! \brief Type-erased filed for storing callable object*/
-  mutable TStorage callable_;
+  mutable TCallable callable_;
 };
 
 /*!
@@ -310,17 +323,18 @@ class Function : public ObjectRef {
    * \param packed_call The packed function signature
    * \note legacy purpose, should change to Function::FromPacked for mostfuture use.
    */
-  template <typename TCallable>
-  explicit Function(TCallable packed_call) {
-    *this = FromPacked(packed_call);
+  template <typename TCallable,
+            typename = std::enable_if_t<!std::is_same_v<std::decay_t<TCallable>, Function>>>
+  explicit Function(TCallable&& packed_call) {
+    *this = FromPacked(std::forward<TCallable>(packed_call));
   }
   /*!
    * \brief Constructing a packed function from a callable type
    *        whose signature is consistent with `ffi::Function`
    * \param packed_call The packed function signature
    */
-  template <typename TCallable>  // // NOLINTNEXTLINE(performance-unnecessary-value-param)
-  static Function FromPacked(TCallable packed_call) {
+  template <typename TCallable>
+  static Function FromPacked(TCallable&& packed_call) {
     static_assert(
         std::is_convertible_v<TCallable, std::function<void(const AnyView*, int32_t, Any*)>> ||
             std::is_convertible_v<TCallable, std::function<void(PackedArgs args, Any*)>>,
@@ -328,12 +342,12 @@ class Function : public ObjectRef {
         "format");
     if constexpr (std::is_convertible_v<TCallable, std::function<void(PackedArgs args, Any*)>>) {
       return FromPackedInternal(
-          [packed_call](const AnyView* args, int32_t num_args, Any* rv) mutable -> void {
-            PackedArgs args_pack(args, num_args);
-            packed_call(args_pack, rv);
+          [packed_call = std::forward<TCallable>(packed_call)](
+              const AnyView* args, int32_t num_args, Any* rv) mutable -> void {
+            packed_call(PackedArgs{args, num_args}, rv);
           });
     } else {
-      return FromPackedInternal(packed_call);
+      return FromPackedInternal(std::forward<TCallable>(packed_call));
     }
   }
 
@@ -492,10 +506,11 @@ class Function : public ObjectRef {
    * \param callable the internal container of packed function.
    */
   template <typename TCallable>
-  static Function FromTyped(TCallable callable) {
-    using FuncInfo = details::FunctionInfo<TCallable>;
-    auto call_packed = [callable = std::move(callable)](const AnyView* args, int32_t num_args,
-                                                        Any* rv) mutable -> void {
+  static Function FromTyped(TCallable&& callable) {
+    using FuncInfo = details::FunctionInfo<std::decay_t<TCallable>>;
+    // Callable is always captured by value here to avoid possible dangling reference
+    auto call_packed = [callable = std::forward<TCallable>(callable)](
+                           const AnyView* args, int32_t num_args, Any* rv) mutable -> void {
       details::unpack_call<typename FuncInfo::RetType>(
           std::make_index_sequence<FuncInfo::num_args>{}, nullptr, callable, args, num_args, rv);
     };
@@ -508,9 +523,10 @@ class Function : public ObjectRef {
    * \param name optional name attacked to the function.
    */
   template <typename TCallable>
-  static Function FromTyped(TCallable callable, std::string name) {
-    using FuncInfo = details::FunctionInfo<TCallable>;
-    auto call_packed = [callable = std::move(callable), name = std::move(name)](
+  static Function FromTyped(TCallable&& callable, std::string name) {
+    using FuncInfo = details::FunctionInfo<std::decay_t<TCallable>>;
+    // Callable is always captured by value here to avoid possible dangling reference
+    auto call_packed = [callable = std::forward<TCallable>(callable), name = std::move(name)](
                            const AnyView* args, int32_t num_args, Any* rv) mutable -> void {
       details::unpack_call<typename FuncInfo::RetType>(
           std::make_index_sequence<FuncInfo::num_args>{}, &name, callable, args, num_args, rv);
@@ -616,11 +632,11 @@ class Function : public ObjectRef {
    * \param packed_call The packed function signature
    */
   template <typename TCallable>
-  static Function FromPackedInternal(TCallable packed_call) {
-    using ObjType = typename details::FunctionObjImpl<TCallable>;
+  static Function FromPackedInternal(TCallable&& packed_call) {
+    // We must make TCallable a value type (decay_t) that can hold the callable object
+    using ObjType = typename details::FunctionObjImpl<std::decay_t<TCallable>>;
     Function func;
-    func.data_ = make_object<ObjType>(
-        std::forward<TCallable>(packed_call));  // NOLINT(bugprone-chained-comparison)
+    func.data_ = make_object<ObjType>(std::forward<TCallable>(packed_call));
     return func;
   }
 };
@@ -676,7 +692,7 @@ class TypedFunction<R(Args...)> {
    * \brief constructor from a function
    * \param packed The function
    */
-  TypedFunction(Function packed) : packed_(packed) {}  // NOLINT(*)
+  TypedFunction(Function packed) : packed_(std::move(packed)) {}  // NOLINT(*)
   /*!
    * \brief construct from a lambda function with the same signature.
    *
@@ -695,8 +711,8 @@ class TypedFunction<R(Args...)> {
    */
   template <typename FLambda,
             typename = std::enable_if_t<std::is_convertible_v<FLambda, std::function<R(Args...)>>>>
-  TypedFunction(FLambda typed_lambda, std::string name) {  // NOLINT(*)
-    packed_ = Function::FromTyped(typed_lambda, name);
+  TypedFunction(FLambda&& typed_lambda, std::string name) {
+    packed_ = Function::FromTyped(std::forward<FLambda>(typed_lambda), std::move(name));
   }
   /*!
    * \brief construct from a lambda function with the same signature.
@@ -717,9 +733,10 @@ class TypedFunction<R(Args...)> {
    * \tparam FLambda the type of the lambda function.
    */
   template <typename FLambda,
-            typename = std::enable_if_t<std::is_convertible_v<FLambda, std::function<R(Args...)>>>>
-  TypedFunction(const FLambda& typed_lambda) {  // NOLINT(*)
-    packed_ = Function::FromTyped(typed_lambda);
+            typename = std::enable_if_t<std::is_convertible_v<FLambda, std::function<R(Args...)>> &&
+                                        !std::is_same_v<std::decay_t<FLambda>, TSelf>>>
+  TypedFunction(FLambda&& typed_lambda) {  // NOLINT(google-explicit-constructor)
+    packed_ = Function::FromTyped(std::forward<FLambda>(typed_lambda));
   }
   /*!
    * \brief copy assignment operator from typed lambda
@@ -738,9 +755,10 @@ class TypedFunction<R(Args...)> {
    * \returns reference to self.
    */
   template <typename FLambda,
-            typename = std::enable_if_t<std::is_convertible_v<FLambda, std::function<R(Args...)>>>>
-  TSelf& operator=(FLambda typed_lambda) {  // NOLINT(*)
-    packed_ = Function::FromTyped(typed_lambda);
+            typename = std::enable_if_t<std::is_convertible_v<FLambda, std::function<R(Args...)>> &&
+                                        !std::is_same_v<std::decay_t<FLambda>, TSelf>>>
+  TSelf& operator=(FLambda&& typed_lambda) {
+    packed_ = Function::FromTyped(std::forward<FLambda>(typed_lambda));
     return *this;
   }
   /*!

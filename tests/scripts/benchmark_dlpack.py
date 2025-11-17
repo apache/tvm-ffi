@@ -337,17 +337,30 @@ def load_torch_get_current_cuda_stream() -> Callable[[int], int]:
     """Create a faster get_current_cuda_stream for torch through cpp extension."""
     from torch.utils import cpp_extension  # noqa: PLC0415
 
-    source = """
-    #include <c10/cuda/CUDAStream.h>
+    if torch.version.cuda is not None:
+        source = """
+        #include <c10/cuda/CUDAStream.h>
 
-    int64_t get_current_cuda_stream(int device_id) {
-        at::cuda::CUDAStream stream = at::cuda::getCurrentCUDAStream(device_id);
-        // fast invariant, default stream is always 0
-        if (stream.id() == 0) return 0;
-        // convert to cudaStream_t
-        return reinterpret_cast<int64_t>(static_cast<cudaStream_t>(stream));
-    }
-    """
+        int64_t get_current_cuda_stream(int device_id) {
+            at::cuda::CUDAStream stream = at::cuda::getCurrentCUDAStream(device_id);
+            // fast invariant, default stream is always 0
+            if (stream.id() == 0) return 0;
+            // convert to cudaStream_t
+            return reinterpret_cast<int64_t>(static_cast<cudaStream_t>(stream));
+        }
+        """
+    elif torch.version.hip is not None:
+        source = """
+        #include <c10/hip/HIPStream.h>
+
+        int64_t get_current_cuda_stream(int device_id) {
+            at::hip::HIPStream stream = at::hip::getCurrentHIPStream(device_id);
+            // fast invariant, default stream is always 0
+            if (stream.id() == 0) return 0;
+            // convert to hipStream_t
+            return reinterpret_cast<int64_t>(static_cast<hipStream_t>(stream));
+        }
+        """
     result = cpp_extension.load_inline(
         name="get_current_cuda_stream",
         cpp_sources=[source],

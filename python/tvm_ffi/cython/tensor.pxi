@@ -45,20 +45,6 @@ cdef void _c_dlpack_versioned_deleter(object pycaps):
         dltensor.deleter(dltensor)
 
 
-cdef inline object _from_dlpack_intptr(
-    void* dlpack
-):
-    cdef TVMFFIObjectHandle chandle
-    cdef DLManagedTensor* ptr = <DLManagedTensor*>dlpack
-    cdef int c_api_ret_code
-    cdef int c_req_alignment = 0
-    cdef int c_req_contiguous = 0
-    c_api_ret_code = TVMFFITensorFromDLPack(
-        ptr, c_req_alignment, c_req_contiguous, &chandle)
-    CHECK_CALL(c_api_ret_code)
-    return make_tensor_from_chandle(chandle)
-
-
 cdef inline int _from_dlpack(
     object dltensor, int require_alignment,
     int require_contiguous, TVMFFIObjectHandle* out
@@ -100,6 +86,26 @@ cdef inline int _from_dlpack_versioned(
     raise ValueError("Expect a dltensor_versioned field, PyCapsule can only be consumed once")
 
 
+cdef inline int _from_dlpack_exchange_api(
+    object ext_tensor, DLPackExchangeAPI* exchange_api, int require_alignment,
+    int require_contiguous, TVMFFIObjectHandle* out
+) except -1:
+    cdef DLManagedTensorVersioned* temp_managed_tensor
+    cdef PyObject* ext_tensor_pyobj = <PyObject*>ext_tensor
+    if exchange_api.managed_tensor_from_py_object_no_sync(ext_tensor_pyobj, &temp_managed_tensor) != 0:
+        return -1
+
+    # Convert to TVM Tensor
+    if TVMFFITensorFromDLPackVersioned(
+        temp_managed_tensor, require_alignment, require_contiguous, out
+    ) != 0:
+        # recycle the managed tensor to avoid leak
+        if temp_managed_tensor.deleter != NULL:
+            temp_managed_tensor.deleter(temp_managed_tensor)
+        raise BufferError("Failed to convert DLManagedTensorVersioned to ffi.Tensor")
+
+    return 0
+
 cdef inline int _from_dlpack_universal(
     object ext_tensor, int require_alignment,
     int require_contiguous, TVMFFIObjectHandle* out
@@ -108,9 +114,21 @@ cdef inline int _from_dlpack_universal(
     # move to false as most frameworks get upgraded.
     cdef int favor_legacy_dlpack = True
 
+    if hasattr(ext_tensor, "__c_dlpack_exchange_api__"):
+        try:
+            return _from_dlpack_exchange_api(
+                ext_tensor,
+                <DLPackExchangeAPI*><long long>(ext_tensor.__c_dlpack_exchange_api__),
+                require_alignment,
+                require_contiguous,
+                out
+            )
+        except BufferError:
+            pass
+
     if hasattr(ext_tensor, "__dlpack__"):
         if favor_legacy_dlpack:
-            _from_dlpack(
+            return _from_dlpack(
                 ext_tensor.__dlpack__(),
                 require_alignment,
                 require_contiguous,
@@ -118,14 +136,14 @@ cdef inline int _from_dlpack_universal(
             )
         else:
             try:
-                _from_dlpack_versioned(
+                return _from_dlpack_versioned(
                     ext_tensor.__dlpack__(max_version=__dlpack_version__),
                     require_alignment,
                     require_contiguous,
                     out
                 )
             except TypeError:
-                _from_dlpack(
+                return _from_dlpack(
                     ext_tensor.__dlpack__(),
                     require_alignment,
                     require_contiguous,
@@ -133,14 +151,14 @@ cdef inline int _from_dlpack_universal(
                 )
     else:
         if pycapsule.PyCapsule_IsValid(ext_tensor, _c_str_dltensor_versioned):
-            _from_dlpack_versioned(
+            return _from_dlpack_versioned(
                 ext_tensor,
                 require_alignment,
                 require_contiguous,
                 out
             )
         elif pycapsule.PyCapsule_IsValid(ext_tensor, _c_str_dltensor):
-            _from_dlpack(
+            return _from_dlpack(
                 ext_tensor,
                 require_alignment,
                 require_contiguous,
