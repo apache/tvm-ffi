@@ -1,14 +1,21 @@
 name = "TVMFFI"
 uuid = "6e4b1e8f-3e1d-4f5e-9b1e-5e1e1e1e1e1e"
-authors = ["TVM Community"]
 version = "0.1.0"
+authors = ["TVM Community"]
+
+[deps]
+CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
+GPUArrays = "0c68f7d7-f131-5f86-a1c3-88cf8149b2d7"
+Libdl = "8f399da3-3557-5675-b5ff-fb832c97cbdb"
 
 [compat]
-julia = "1.6"
+CUDA = "5"
+GPUArrays = "11"
+Libdl = "1"
+julia = "1.10"
 
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
 test = ["Test"]
-

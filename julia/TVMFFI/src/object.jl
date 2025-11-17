@@ -79,4 +79,3 @@ function is_type(obj::TVMObject, idx::LibTVMFFI.TVMFFITypeIndex)
 end
 
 Base.show(io::IO, obj::TVMObject) = print(io, "TVMObject(type_index=", type_index(obj), ")")
-

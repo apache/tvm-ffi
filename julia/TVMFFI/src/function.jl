@@ -286,4 +286,3 @@ function (func::TVMFunction)(args...)
 end
 
 Base.show(io::IO, func::TVMFunction) = print(io, "TVMFunction(@", repr(UInt(func.handle)), ")")
-

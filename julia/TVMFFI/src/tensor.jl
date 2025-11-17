@@ -24,6 +24,11 @@ using .LibTVMFFI
 
 DLPack tensor structure (from dlpack.h).
 This is a C-compatible struct representing a multi-dimensional array.
+
+# Note on GPU Pointers
+For GPU arrays (CuArray, ROCArray, etc.), the data field contains a GPU device
+pointer, not a CPU pointer. We use UInt64 to store the pointer value and 
+reinterpret it as needed, since GPU pointers can't be directly converted to Ptr{Cvoid}.
 """
 struct DLTensor
     data::Ptr{Cvoid}
@@ -33,6 +38,29 @@ struct DLTensor
     shape::Ptr{Int64}
     strides::Ptr{Int64}
     byte_offset::UInt64
+end
+
+"""
+    DLTensor(data_ptr, device, ndim, dtype, shape, strides, byte_offset)
+
+Construct DLTensor with automatic GPU pointer handling.
+"""
+function DLTensor(data_ptr, device::DLDevice, ndim::Int32, dtype::DLDataType, 
+                  shape::Ptr{Int64}, strides::Ptr{Int64}, byte_offset::UInt64)
+    # Convert GPU pointers (CuPtr, etc.) to generic pointer
+    # by reinterpreting through UInt
+    ptr_as_uint = if data_ptr isa Ptr
+        UInt(data_ptr)
+    else
+        # GPU pointer (CuPtr, ROCPtr, etc.)
+        # Get the raw pointer value
+        reinterpret(UInt, data_ptr)
+    end
+    
+    # Convert to Ptr{Cvoid}
+    data_cvoid = reinterpret(Ptr{Cvoid}, ptr_as_uint)
+    
+    return DLTensor(data_cvoid, device, ndim, dtype, shape, strides, byte_offset)
 end
 
 """
@@ -339,7 +367,7 @@ end
 """
     from_julia_array(arr::Array{T}, device::DLDevice=cpu()) where T -> (Ref{DLTensor}, Vector, Vector)
 
-Create a DLTensor structure pointing to a Julia array's data.
+Create a DLTensor structure pointing to a Julia CPU array's data.
 
 # Warning
 This creates a view - the DLTensor shares memory with the Julia array.
@@ -390,4 +418,3 @@ function from_julia_array(arr::Array{T}, device::DLDevice=cpu()) where T
     
     return Ref(dltensor), shape_vec, strides_vec  # Return vectors to keep them alive
 end
-

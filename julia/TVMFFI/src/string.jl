@@ -203,4 +203,3 @@ Base.length(b::TVMBytes) = length(Vector{UInt8}(b))
 Base.sizeof(b::TVMBytes) = sizeof(Vector{UInt8}(b))
 
 Base.show(io::IO, b::TVMBytes) = print(io, "TVMBytes(", Vector{UInt8}(b), ")")
-

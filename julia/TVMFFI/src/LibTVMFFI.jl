@@ -32,17 +32,14 @@ All functions follow the naming convention from c_api.h.
 """
 module LibTVMFFI
 
+using Libdl
+
 # Find the TVM FFI shared library
 # This assumes libtvm_ffi.so is in a standard location or LD_LIBRARY_PATH
 function _find_libtvm_ffi()
     candidates = [
-        "libtvm_ffi.so",  # Linux
-        "libtvm_ffi.dylib",  # macOS
-        "libtvm_ffi.dll",  # Windows
-        # Also check build directory relative to this file
-        joinpath(@__DIR__, "../../../build/lib/libtvm_ffi.so"),
-        joinpath(@__DIR__, "../../../build/lib/libtvm_ffi.dylib"),
-        joinpath(@__DIR__, "../../../build/lib/libtvm_ffi.dll"),
+        "libtvm_ffi.$(Libdl.dlext)",           # System library path
+        joinpath(@__DIR__, "..", "..", "..", "build", "lib", "libtvm_ffi.$(Libdl.dlext)")     # Build directory
     ]
     
     for lib in candidates
@@ -85,7 +82,14 @@ const libtvm_ffi = _find_libtvm_ffi()
     kDLMetal = 8
     kDLVPI = 9
     kDLROCM = 10
+    kDLROCMHost = 11
     kDLExtDev = 12
+    kDLCUDAManaged = 13
+    kDLOneAPI = 14
+    kDLWebGPU = 15
+    kDLHexagon = 16
+    kDLMAIA = 17
+    kDLTrn = 18
 end
 
 """
@@ -107,9 +111,20 @@ end
     kDLUInt = 1
     kDLFloat = 2
     kDLBfloat = 4
+    kDLOpaqueHandle = 3
     kDLComplex = 5
     kDLBool = 6
-    kDLOpaqueHandle = 3
+    kDLFloat8_e3m4 = 7
+    kDLFloat8_e4m3 = 8
+    kDLFloat8_e4m3b11fnuz = 9
+    kDLFloat8_e4m3fn = 10
+    kDLFloat8_e4m3fnuz = 11
+    kDLFloat8_e5m2 = 12
+    kDLFloat8_e5m2fnuz = 13
+    kDLFloat8_e8m0fnu = 14
+    kDLFloat6_e2m3fn = 15
+    kDLFloat6_e3m2fn = 16
+    kDLFloat4_e2m1fn = 17
 end
 
 """

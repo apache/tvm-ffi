@@ -57,6 +57,11 @@ export get_global_func
 export to_julia_array, copy_to_julia, from_julia_array
 export cpu, cuda, opencl, vulkan, metal, rocm
 
+# Export GPU support functions
+export from_gpu_array, from_abstract_gpu_array
+export supports_gpu_backend, list_available_gpu_backends
+export print_gpu_info, gpu_array_info
+
 # Include submodules in dependency order
 include("LibTVMFFI.jl")
 include("error.jl")
@@ -64,8 +69,9 @@ include("dtype.jl")
 include("device.jl")
 include("string.jl")
 include("object.jl")
-include("tensor.jl")     # Must come before function.jl (DLTensor is used there)
-include("function.jl")
+include("tensor.jl")              # Defines DLTensor and basic conversions
+include("gpuarrays_support.jl")   # GPU abstraction (uses DLTensor, extends from_julia_array)
+include("function.jl")            # Uses DLTensor
 
 end # module
 

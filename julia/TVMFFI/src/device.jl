@@ -86,21 +86,21 @@ Create a ROCm device context.
 """
 rocm(id::Integer=0) = DLDevice(LibTVMFFI.kDLROCM, id)
 
+# Device type name mapping (global constant for performance)
+const DEVICE_TYPE_NAMES = Dict(
+    Int32(LibTVMFFI.kDLCPU) => "CPU",
+    Int32(LibTVMFFI.kDLCUDA) => "CUDA",
+    Int32(LibTVMFFI.kDLCUDAHost) => "CUDAHost",
+    Int32(LibTVMFFI.kDLOpenCL) => "OpenCL",
+    Int32(LibTVMFFI.kDLVulkan) => "Vulkan",
+    Int32(LibTVMFFI.kDLMetal) => "Metal",
+    Int32(LibTVMFFI.kDLVPI) => "VPI",
+    Int32(LibTVMFFI.kDLROCM) => "ROCm",
+    Int32(LibTVMFFI.kDLExtDev) => "ExtDev",
+)
+
 # Pretty printing
 function Base.show(io::IO, device::DLDevice)
-    type_names = Dict(
-        Int32(LibTVMFFI.kDLCPU) => "CPU",
-        Int32(LibTVMFFI.kDLCUDA) => "CUDA",
-        Int32(LibTVMFFI.kDLCUDAHost) => "CUDAHost",
-        Int32(LibTVMFFI.kDLOpenCL) => "OpenCL",
-        Int32(LibTVMFFI.kDLVulkan) => "Vulkan",
-        Int32(LibTVMFFI.kDLMetal) => "Metal",
-        Int32(LibTVMFFI.kDLVPI) => "VPI",
-        Int32(LibTVMFFI.kDLROCM) => "ROCm",
-        Int32(LibTVMFFI.kDLExtDev) => "ExtDev",
-    )
-    
-    type_name = get(type_names, device.device_type, "Unknown")
+    type_name = get(DEVICE_TYPE_NAMES, device.device_type, "Unknown")
     print(io, "DLDevice(", type_name, ":", device.device_id, ")")
 end
-
