@@ -1,0 +1,10 @@
+# This file is machine-generated - editing it directly is not advised
+
+julia_version = "1.12.1"
+manifest_format = "2.0"
+project_hash = "adf85a2e920530a1a83bfe2550100084388b669c"
+
+[[deps.TVMFFI]]
+path = "."
+uuid = "6e4b1e8f-3e1d-4f5e-9b1e-5e1e1e1e1e1e"
+version = "0.1.0"
