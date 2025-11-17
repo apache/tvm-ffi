@@ -38,9 +38,9 @@ function Base.string(dtype::DLDataType)
     check_call(ret)
     
     # Extract string from TVMFFIAny
-    # The result should be a string object
+    # C API returns a new reference, so we take ownership
     if any_result.type_index == Int32(LibTVMFFI.kTVMFFISmallStr)
-        # Small string optimization
+        # Small string optimization - no refcounting needed
         str_len = Int(any_result.small_str_len)
         if str_len == 0
             return ""
@@ -50,14 +50,9 @@ function Base.string(dtype::DLDataType)
         return String(copy(bytes_vec[1:str_len]))
     elseif any_result.type_index == Int32(LibTVMFFI.kTVMFFIStr)
         # Heap-allocated string object
-        obj_handle = reinterpret(LibTVMFFI.TVMFFIObjectHandle, any_result.data)
-        byte_array_ptr = LibTVMFFI.TVMFFIBytesGetByteArrayPtr(obj_handle)
-        byte_array = unsafe_load(byte_array_ptr)
-        result = unsafe_string(byte_array.data, byte_array.size)
-        
-        # Decrease reference count (we got ownership from the C API)
-        LibTVMFFI.TVMFFIObjectDecRef(obj_handle)
-        return result
+        # Create TVMString with own=false to take ownership
+        tvmstr = TVMString(any_result; own=false)
+        return String(tvmstr)
     else
         error("Unexpected type index from TVMFFIDataTypeToString: $(any_result.type_index)")
     end

@@ -29,17 +29,32 @@ Allows calling TVM functions from Julia with automatic argument conversion.
 # Design Philosophy
 The core is simple: wrap a handle, provide call interface.
 Julia's multiple dispatch handles type conversions naturally.
+
+# Reference Counting
+Uses the standard pattern: constructor with `own` parameter,
+finalizer always DecRefs.
 """
 mutable struct TVMFunction
     handle::LibTVMFFI.TVMFFIObjectHandle
     
-    function TVMFunction(handle::LibTVMFFI.TVMFFIObjectHandle)
+    """
+        TVMFunction(handle; own=true)
+    
+    Create a TVMFunction from a raw handle.
+    
+    # Arguments
+    - `handle`: The raw function handle
+    - `own`: If true, increment refcount (default). If false, take ownership without IncRef.
+    """
+    function TVMFunction(handle::LibTVMFFI.TVMFFIObjectHandle; own::Bool=true)
         if handle == C_NULL
             error("Cannot create TVMFunction from NULL handle")
         end
         
-        # Increase reference count
-        LibTVMFFI.TVMFFIObjectIncRef(handle)
+        # Optionally increase reference count
+        if own
+            LibTVMFFI.TVMFFIObjectIncRef(handle)
+        end
         
         func = new(handle)
         
@@ -84,7 +99,7 @@ function get_global_func(name::AbstractString)
         # Check if error is "function not found" or something else
         error_handle = LibTVMFFI.TVMFFIErrorMoveFromRaised()
         if error_handle != C_NULL
-            throw(TVMError(error_handle))
+            throw(TVMError(error_handle; own=false))  # C API transferred ownership
         else
             # No error but non-zero return
             error("Failed to get global function '$name' with code $ret")
@@ -95,41 +110,48 @@ function get_global_func(name::AbstractString)
         return nothing
     end
     
-    return TVMFunction(handle)
+    # C API returns a new reference, so we take ownership without IncRef
+    return TVMFunction(handle; own=false)
 end
 
 """
     to_tvm_any(value) -> LibTVMFFI.TVMFFIAny
 
 Convert Julia value to TVMFFIAny for function call arguments.
+
+# Reference Counting Rule
+ALWAYS creates a new reference (IncRef for objects).
+The caller is responsible for releasing this reference after use.
 """
 function to_tvm_any(value::Int64)
+    # POD type - no refcounting
     LibTVMFFI.TVMFFIAny(Int32(LibTVMFFI.kTVMFFIInt), 0, reinterpret(UInt64, value))
 end
 
 function to_tvm_any(value::Float64)
+    # POD type - no refcounting
     LibTVMFFI.TVMFFIAny(Int32(LibTVMFFI.kTVMFFIFloat), 0, reinterpret(UInt64, value))
 end
 
 function to_tvm_any(value::Bool)
+    # POD type - no refcounting
     LibTVMFFI.TVMFFIAny(Int32(LibTVMFFI.kTVMFFIBool), 0, UInt64(value))
 end
 
 function to_tvm_any(value::DLDevice)
-    # Pack device into UInt64
+    # POD type - no refcounting
     packed = UInt64(value.device_type) | (UInt64(value.device_id) << 32)
     LibTVMFFI.TVMFFIAny(Int32(LibTVMFFI.kTVMFFIDevice), 0, packed)
 end
 
 function to_tvm_any(value::DLDataType)
-    # Pack dtype into UInt64
+    # POD type - no refcounting
     packed = UInt64(value.code) | (UInt64(value.bits) << 8) | (UInt64(value.lanes) << 16)
     LibTVMFFI.TVMFFIAny(Int32(LibTVMFFI.kTVMFFIDataType), 0, packed)
 end
 
 function to_tvm_any(value::TVMString)
-    # Return the internal TVMFFIAny
-    # Need to increment ref count if it's a heap-allocated object
+    # Object type - create new reference
     if value.data.type_index >= Int32(LibTVMFFI.kTVMFFIStaticObjectBegin)
         obj_ptr = reinterpret(LibTVMFFI.TVMFFIObjectHandle, value.data.data)
         if obj_ptr != C_NULL
@@ -140,11 +162,12 @@ function to_tvm_any(value::TVMString)
 end
 
 function to_tvm_any(value::AbstractString)
+    # Convert to TVMString then to Any
     to_tvm_any(TVMString(value))
 end
 
 function to_tvm_any(value::TVMFunction)
-    # Increase ref count since we're creating a new reference
+    # Object type - create new reference
     if value.handle != C_NULL
         LibTVMFFI.TVMFFIObjectIncRef(value.handle)
     end
@@ -156,8 +179,7 @@ function to_tvm_any(value::TVMFunction)
 end
 
 function to_tvm_any(value::TVMObject)
-    # Generic object - use its handle directly
-    # Increase ref count since we're creating a new reference
+    # Generic object - create new reference
     if value.handle != C_NULL
         LibTVMFFI.TVMFFIObjectIncRef(value.handle)
     end
@@ -169,11 +191,12 @@ function to_tvm_any(value::TVMObject)
 end
 
 function to_tvm_any(::Nothing)
+    # Special value - no refcounting
     LibTVMFFI.TVMFFIAny(Int32(LibTVMFFI.kTVMFFINone), 0, 0)
 end
 
 function to_tvm_any(value::Base.RefValue{DLTensor})
-    # DLTensor pointer (for passing tensors to functions)
+    # Pointer type - no refcounting (borrowed reference)
     LibTVMFFI.TVMFFIAny(
         Int32(LibTVMFFI.kTVMFFIDLTensorPtr),
         0,
@@ -181,10 +204,28 @@ function to_tvm_any(value::Base.RefValue{DLTensor})
     )
 end
 
+function to_tvm_any(holder::DLTensorHolder)
+    # Convert holder to DLTensor pointer
+    # Holder keeps data alive, we just borrow the reference
+    # Use unsafe_convert which we defined for DLTensorHolder
+    tensor_ptr = Base.unsafe_convert(Ptr{DLTensor}, holder)
+    LibTVMFFI.TVMFFIAny(
+        Int32(LibTVMFFI.kTVMFFIDLTensorPtr),
+        0,
+        reinterpret(UInt64, tensor_ptr)
+    )
+end
+
+# Note: to_tvm_any for GPUDLTensorHolder is defined in gpuarrays_support.jl
+
 """
     from_tvm_any(any::LibTVMFFI.TVMFFIAny) -> Any
 
 Convert TVMFFIAny back to Julia value.
+
+# Reference Counting Rule
+Receives ownership from C API (no extra IncRef).
+Constructors are called with own=false.
 """
 function from_tvm_any(any::LibTVMFFI.TVMFFIAny)
     type_idx = any.type_index
@@ -207,19 +248,23 @@ function from_tvm_any(any::LibTVMFFI.TVMFFIAny)
         lanes = UInt16((any.data >> 16) & 0xFFFF)
         return DLDataType(code, bits, lanes)
     elseif type_idx == Int32(LibTVMFFI.kTVMFFISmallStr) || type_idx == Int32(LibTVMFFI.kTVMFFIStr)
-        return String(TVMString(any))
+        # Take ownership without extra IncRef
+        return String(TVMString(any; own=false))
     elseif type_idx == Int32(LibTVMFFI.kTVMFFISmallBytes) || type_idx == Int32(LibTVMFFI.kTVMFFIBytes)
-        return Vector{UInt8}(TVMBytes(any))
+        # Take ownership without extra IncRef
+        return Vector{UInt8}(TVMBytes(any; own=false))
     elseif type_idx == Int32(LibTVMFFI.kTVMFFIFunction)
         handle = reinterpret(LibTVMFFI.TVMFFIObjectHandle, any.data)
-        return TVMFunction(handle)
+        # Take ownership without extra IncRef
+        return TVMFunction(handle; own=false)
     elseif type_idx == Int32(LibTVMFFI.kTVMFFIError)
         handle = reinterpret(LibTVMFFI.TVMFFIObjectHandle, any.data)
-        return TVMError(handle)
+        # Take ownership without extra IncRef
+        return TVMError(handle; own=false)
     elseif type_idx >= Int32(LibTVMFFI.kTVMFFIStaticObjectBegin)
-        # Generic object
+        # Generic object - take ownership without extra IncRef
         handle = reinterpret(LibTVMFFI.TVMFFIObjectHandle, any.data)
-        return TVMObject(handle)
+        return TVMObject(handle; own=false)
     else
         error("Unsupported type index for conversion: $type_idx")
     end
@@ -250,21 +295,26 @@ function (func::TVMFunction)(args...)
         LibTVMFFI.TVMFFIAny(Int32(LibTVMFFI.kTVMFFINone), 0, 0)
     )
     
-    # Call function
-    ret = if num_args > 0
-        LibTVMFFI.TVMFFIFunctionCall(
-            func.handle,
-            pointer(args_array),
-            Int32(num_args),
-            Base.unsafe_convert(Ptr{LibTVMFFI.TVMFFIAny}, result)
-        )
-    else
-        LibTVMFFI.TVMFFIFunctionCall(
-            func.handle,
-            C_NULL,
-            Int32(0),
-            Base.unsafe_convert(Ptr{LibTVMFFI.TVMFFIAny}, result)
-        )
+    # CRITICAL: Use GC.@preserve to keep args alive during C call
+    # This ensures DLTensorHolders and their data stay valid
+    local ret
+    GC.@preserve args begin
+        # Call function
+        ret = if num_args > 0
+            LibTVMFFI.TVMFFIFunctionCall(
+                func.handle,
+                pointer(args_array),
+                Int32(num_args),
+                Base.unsafe_convert(Ptr{LibTVMFFI.TVMFFIAny}, result)
+            )
+        else
+            LibTVMFFI.TVMFFIFunctionCall(
+                func.handle,
+                C_NULL,
+                Int32(0),
+                Base.unsafe_convert(Ptr{LibTVMFFI.TVMFFIAny}, result)
+            )
+        end
     end
     
     check_call(ret)

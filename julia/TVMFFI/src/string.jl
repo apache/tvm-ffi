@@ -59,15 +59,18 @@ mutable struct TVMString
     end
     
     # Constructor from TVMFFIAny (internal use)
-    function TVMString(any::LibTVMFFI.TVMFFIAny)
+    # Note: Takes ownership without IncRef by default (C API returns new reference)
+    function TVMString(any::LibTVMFFI.TVMFFIAny; own::Bool=false)
         tvmstr = new(any)
         
         # Add finalizer for heap objects
         if any.type_index >= Int32(LibTVMFFI.kTVMFFIStaticObjectBegin)
-            # Need to increase ref count since we're taking ownership
             obj_ptr = reinterpret(LibTVMFFI.TVMFFIObjectHandle, any.data)
             if obj_ptr != C_NULL
-                LibTVMFFI.TVMFFIObjectIncRef(obj_ptr)
+                # Optionally increase ref count
+                if own
+                    LibTVMFFI.TVMFFIObjectIncRef(obj_ptr)
+                end
             end
             
             finalizer(tvmstr) do s
@@ -151,13 +154,17 @@ mutable struct TVMBytes
     end
     
     # Constructor from TVMFFIAny
-    function TVMBytes(any::LibTVMFFI.TVMFFIAny)
+    # Note: Takes ownership without IncRef by default (C API returns new reference)
+    function TVMBytes(any::LibTVMFFI.TVMFFIAny; own::Bool=false)
         tvmbytes = new(any)
         
         if any.type_index >= Int32(LibTVMFFI.kTVMFFIStaticObjectBegin)
             obj_ptr = reinterpret(LibTVMFFI.TVMFFIObjectHandle, any.data)
             if obj_ptr != C_NULL
-                LibTVMFFI.TVMFFIObjectIncRef(obj_ptr)
+                # Optionally increase ref count
+                if own
+                    LibTVMFFI.TVMFFIObjectIncRef(obj_ptr)
+                end
             end
             
             finalizer(tvmbytes) do b

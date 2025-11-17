@@ -119,15 +119,17 @@ if has_cuda
     println("\n5. Converting CUDA arrays to DLTensor...")
     
     # Unified interface: from_julia_array now handles GPU arrays automatically!
-    x_dltensor, x_shape, x_strides = from_julia_array(x_gpu)  # Auto-detects CUDA
-    y_dltensor, y_shape, y_strides = from_julia_array(y_gpu)  # Auto-detects CUDA
+    # Returns self-contained holders - memory-safe API
+    x_holder = from_julia_array(x_gpu)  # Auto-detects CUDA, returns GPUDLTensorHolder
+    y_holder = from_julia_array(y_gpu)  # Auto-detects CUDA
     
     println("✓ Created DLTensor views (auto-detected CUDA backend)")
     
     # Call the CUDA function
+    # Pass holders directly - they keep GPU arrays alive
     println("\n6. Calling add_one_cuda(x, y) on GPU...")
     try
-        add_one_cuda(x_dltensor, y_dltensor)
+        add_one_cuda(x_holder, y_holder)
         CUDA.synchronize()  # Wait for GPU to finish
         println("✓ CUDA function call succeeded!")
     catch e

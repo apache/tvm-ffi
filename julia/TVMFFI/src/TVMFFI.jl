@@ -42,7 +42,7 @@ module TVMFFI
 
 # Export core types
 export DLDevice, DLDataType, DLDeviceType, DLDataTypeCode
-export DLTensor
+export DLTensor, DLTensorHolder
 export TVMError, TVMErrorKind
 export TVMString, TVMBytes
 export TVMFunction
@@ -57,8 +57,9 @@ export get_global_func
 export to_julia_array, copy_to_julia, from_julia_array
 export cpu, cuda, opencl, vulkan, metal, rocm
 
-# Export GPU support functions
-export from_gpu_array, from_abstract_gpu_array
+# Export GPU support functions and types
+export GPUDLTensorHolder
+export from_gpu_array
 export supports_gpu_backend, list_available_gpu_backends
 export print_gpu_info, gpu_array_info
 

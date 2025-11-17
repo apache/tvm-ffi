@@ -56,12 +56,12 @@ my_func = func_getter(mod, "my_function", true)
 x = Float32[1, 2, 3, 4, 5]
 y = zeros(Float32, 5)
 
-# Convert to DLTensor
-x_dl, _, _ = from_julia_array(x)
-y_dl, _, _ = from_julia_array(y)
+# Convert to DLTensor holders (new safe API!)
+x_holder = from_julia_array(x)
+y_holder = from_julia_array(y)
 
-# Call TVM function
-my_func(x_dl, y_dl)
+# Call TVM function - pass holders directly
+my_func(x_holder, y_holder)
 
 # Check results
 println(y)  # Results from TVM!

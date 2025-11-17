@@ -77,17 +77,32 @@ Keep it simple:
 - Provide accessors for shape, dtype, device
 - Enable zero-copy conversion to/from Julia arrays when possible
 - Let Julia's GC handle cleanup via finalizers
+
+# Reference Counting
+Follows standard pattern: constructor with `own` parameter,
+finalizer always DecRefs.
 """
 mutable struct TVMTensor
     handle::LibTVMFFI.TVMFFIObjectHandle
     
-    function TVMTensor(handle::LibTVMFFI.TVMFFIObjectHandle)
+    """
+        TVMTensor(handle; own=true)
+    
+    Create a TVMTensor from a raw handle.
+    
+    # Arguments
+    - `handle`: The raw tensor handle
+    - `own`: If true, increment refcount (default). If false, take ownership without IncRef.
+    """
+    function TVMTensor(handle::LibTVMFFI.TVMFFIObjectHandle; own::Bool=true)
         if handle == C_NULL
             error("Cannot create TVMTensor from NULL handle")
         end
         
-        # Increase reference count
-        LibTVMFFI.TVMFFIObjectIncRef(handle)
+        # Optionally increase reference count
+        if own
+            LibTVMFFI.TVMFFIObjectIncRef(handle)
+        end
         
         tensor = new(handle)
         
@@ -365,56 +380,110 @@ function Base.summary(io::IO, tensor::TVMTensor)
 end
 
 """
-    from_julia_array(arr::Array{T}, device::DLDevice=cpu()) where T -> (Ref{DLTensor}, Vector, Vector)
+    DLTensorHolder{T}
 
-Create a DLTensor structure pointing to a Julia CPU array's data.
+Self-contained holder for DLTensor that owns all referenced data.
 
-# Warning
-This creates a view - the DLTensor shares memory with the Julia array.
-The Julia array must remain alive while the DLTensor is in use.
-The returned shape and stride vectors must also remain alive.
+This struct eliminates the memory safety footgun of the old three-tuple API.
+All pointers in the DLTensor remain valid as long as the holder is alive.
+
+# Fields
+- `tensor::DLTensor`: The DLPack tensor structure
+- `shape::Vector{Int64}`: Shape array (kept alive)
+- `strides::Vector{Int64}`: Strides array (kept alive)
+- `source::Array{T}`: Source array (kept alive to prevent GC)
+
+# Design Philosophy (Linus-style)
+Old API: return (Ref, vec1, vec2) - three things to keep track of
+New API: return single holder - one thing to keep track of
+Eliminate the special case of "remember to keep these vectors alive"
+"""
+mutable struct DLTensorHolder{T}
+    tensor::DLTensor
+    shape::Vector{Int64}
+    strides::Vector{Int64}
+    source::Array{T}
+    
+    function DLTensorHolder(arr::Array{T}, device::DLDevice=cpu()) where T
+        # Get shape
+        shape_tuple = size(arr)
+        ndim = length(shape_tuple)
+        shape_vec = collect(Int64, shape_tuple)
+        
+        # Calculate strides (Julia is column-major)
+        strides_vec = ones(Int64, ndim)
+        for i in 2:ndim
+            strides_vec[i] = strides_vec[i-1] * shape_vec[i-1]
+        end
+        
+        # Get dtype
+        dt = DLDataType(T)
+        
+        # Create DLTensor
+        tensor = DLTensor(
+            pointer(arr),           # data pointer
+            device,                 # device
+            Int32(ndim),           # ndim
+            dt,                    # dtype
+            pointer(shape_vec),    # shape
+            pointer(strides_vec),  # strides
+            UInt64(0)              # byte_offset
+        )
+        
+        return new{T}(tensor, shape_vec, strides_vec, arr)
+    end
+end
+
+"""
+    Base.Ref(holder::DLTensorHolder) -> Ref{DLTensor}
+
+Get a reference to the tensor for passing to C functions.
+The holder keeps all data alive.
+"""
+Base.Ref(holder::DLTensorHolder) = Ref(holder.tensor)
+
+"""
+    Base.unsafe_convert(::Type{Ptr{DLTensor}}, holder::DLTensorHolder)
+
+Convert holder to pointer for C calls.
+This is called automatically by ccall.
+"""
+function Base.unsafe_convert(::Type{Ptr{DLTensor}}, holder::DLTensorHolder)
+    # Get pointer to the tensor field within the holder
+    # The tensor is the first field, so we can get its address
+    return Ptr{DLTensor}(pointer_from_objref(holder))
+end
+
+"""
+    from_julia_array(arr::Array{T}, device::DLDevice=cpu()) where T -> DLTensorHolder{T}
+
+Create a self-contained DLTensor holder from a Julia CPU array.
+
+# New API (Safe)
+Returns a single holder object that owns all referenced data.
+As long as you keep the holder alive, all pointers remain valid.
 
 # Arguments
-- `arr`: Julia array (must be contiguous)
+- `arr`: Julia array
 - `device`: Device context (default: CPU)
 
 # Returns
-- `Ref{DLTensor}`: Reference to DLPack tensor structure
-- `Vector{Int64}`: Shape vector (must be kept alive)
-- `Vector{Int64}`: Strides vector (must be kept alive)
+- `DLTensorHolder{T}`: Self-contained holder (keep this alive!)
 
 # Example
 ```julia
 x = Float32[1, 2, 3, 4, 5]
-dltensor_ref, shape, strides = from_julia_array(x)
-# Use dltensor_ref for C calls
+holder = from_julia_array(x)
+# Use Ref(holder) for C calls
+func(Ref(holder))
+# holder keeps everything alive automatically
 ```
+
+# Design
+Eliminates the old three-tuple API footgun:
+- Old: dltensor, shape, strides = from_julia_array(x)  # Easy to forget shape/strides!
+- New: holder = from_julia_array(x)  # Single object, impossible to misuse
 """
 function from_julia_array(arr::Array{T}, device::DLDevice=cpu()) where T
-    # Get shape
-    shape_tuple = size(arr)
-    ndim = length(shape_tuple)
-    shape_vec = collect(Int64, shape_tuple)
-    
-    # Calculate strides (Julia is column-major, same as Fortran)
-    strides_vec = ones(Int64, ndim)
-    for i in 2:ndim
-        strides_vec[i] = strides_vec[i-1] * shape_vec[i-1]
-    end
-    
-    # Get dtype
-    dt = DLDataType(T)
-    
-    # Create DLTensor
-    dltensor = DLTensor(
-        pointer(arr),           # data pointer
-        device,                 # device
-        Int32(ndim),           # ndim
-        dt,                    # dtype
-        pointer(shape_vec),    # shape
-        pointer(strides_vec),  # strides
-        UInt64(0)              # byte_offset
-    )
-    
-    return Ref(dltensor), shape_vec, strides_vec  # Return vectors to keep them alive
+    return DLTensorHolder(arr, device)
 end

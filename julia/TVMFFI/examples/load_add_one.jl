@@ -102,17 +102,18 @@ y = zeros(Float32, 5)
 println("   Input (x):  ", x)
 println("   Output (y): ", y)
 
-# Convert Julia arrays to DLTensor structures
+# Convert Julia arrays to DLTensor holders (new safe API!)
 println("\n5. Converting arrays to DLTensor...")
-x_dltensor, x_shape, x_strides = from_julia_array(x)
-y_dltensor, y_shape, y_strides = from_julia_array(y)
+x_holder = from_julia_array(x)
+y_holder = from_julia_array(y)
 
-println("✓ Created DLTensor views of Julia arrays")
+println("✓ Created DLTensor holders (self-contained, memory-safe)")
 
 # Call the function!
+# Pass holders directly - they keep all data alive automatically
 println("\n6. Calling add_one_cpu(x, y)...")
 try
-    add_one_cpu(x_dltensor, y_dltensor)
+    add_one_cpu(x_holder, y_holder)
     println("✓ Function call succeeded!")
 catch e
     println("❌ Error calling function:")
