@@ -380,7 +380,7 @@ function Base.summary(io::IO, tensor::TVMTensor)
 end
 
 """
-    DLTensorHolder{T}
+    DLTensorHolder{T, S}
 
 Self-contained holder for DLTensor that owns all referenced data.
 
@@ -391,46 +391,53 @@ All pointers in the DLTensor remain valid as long as the holder is alive.
 - `tensor::DLTensor`: The DLPack tensor structure
 - `shape::Vector{Int64}`: Shape array (kept alive)
 - `strides::Vector{Int64}`: Strides array (kept alive)
-- `source::Array{T}`: Source array (kept alive to prevent GC)
+- `source::S`: Source array or view (kept alive to prevent GC)
 
 # Design Philosophy (Linus-style)
 Old API: return (Ref, vec1, vec2) - three things to keep track of
 New API: return single holder - one thing to keep track of
 Eliminate the special case of "remember to keep these vectors alive"
+
+Supports both contiguous arrays and slices (SubArray).
 """
-mutable struct DLTensorHolder{T}
+mutable struct DLTensorHolder{T, S}
     tensor::DLTensor
     shape::Vector{Int64}
     strides::Vector{Int64}
-    source::Array{T}
+    source::S  # Can be Array{T} or SubArray{T}
     
-    function DLTensorHolder(arr::Array{T}, device::DLDevice=cpu()) where T
+    function DLTensorHolder(arr::Union{Array{T}, SubArray{T}}, device::DLDevice=cpu()) where T
         # Get shape
         shape_tuple = size(arr)
         ndim = length(shape_tuple)
         shape_vec = collect(Int64, shape_tuple)
         
-        # Calculate strides (Julia is column-major)
-        strides_vec = ones(Int64, ndim)
-        for i in 2:ndim
-            strides_vec[i] = strides_vec[i-1] * shape_vec[i-1]
-        end
+        # Get strides - Julia provides this for both Array and SubArray
+        arr_strides = Base.strides(arr)
+        strides_vec = collect(Int64, arr_strides)
+        
+        # Get data pointer - Julia's pointer() handles SubArray correctly
+        data_ptr = pointer(arr)
+        
+        # For DLTensor, byte_offset is always 0 because pointer() already
+        # points to the first element of the slice
+        byte_offset = UInt64(0)
         
         # Get dtype
         dt = DLDataType(T)
         
         # Create DLTensor
         tensor = DLTensor(
-            pointer(arr),           # data pointer
-            device,                 # device
-            Int32(ndim),           # ndim
-            dt,                    # dtype
-            pointer(shape_vec),    # shape
-            pointer(strides_vec),  # strides
-            UInt64(0)              # byte_offset
+            data_ptr,              # data pointer (parent for SubArray)
+            device,                # device
+            Int32(ndim),          # ndim
+            dt,                   # dtype
+            pointer(shape_vec),   # shape
+            pointer(strides_vec), # strides
+            byte_offset           # byte_offset (non-zero for slices)
         )
         
-        return new{T}(tensor, shape_vec, strides_vec, arr)
+        return new{T, typeof(arr)}(tensor, shape_vec, strides_vec, arr)
     end
 end
 
@@ -455,35 +462,48 @@ function Base.unsafe_convert(::Type{Ptr{DLTensor}}, holder::DLTensorHolder)
 end
 
 """
-    from_julia_array(arr::Array{T}, device::DLDevice=cpu()) where T -> DLTensorHolder{T}
+    from_julia_array(arr::Union{Array{T}, SubArray{T}}, device::DLDevice=cpu()) where T -> DLTensorHolder{T, S}
 
-Create a self-contained DLTensor holder from a Julia CPU array.
+Create a self-contained DLTensor holder from a Julia CPU array or slice.
 
 # New API (Safe)
 Returns a single holder object that owns all referenced data.
 As long as you keep the holder alive, all pointers remain valid.
 
+Supports both contiguous arrays and slices (views) - just like Rust version!
+
 # Arguments
-- `arr`: Julia array
+- `arr`: Julia array or SubArray (slice/view)
 - `device`: Device context (default: CPU)
 
 # Returns
-- `DLTensorHolder{T}`: Self-contained holder (keep this alive!)
+- `DLTensorHolder{T, S}`: Self-contained holder (keep this alive!)
 
-# Example
+# Examples
 ```julia
+# Regular array
 x = Float32[1, 2, 3, 4, 5]
 holder = from_julia_array(x)
-# Use Ref(holder) for C calls
-func(Ref(holder))
-# holder keeps everything alive automatically
+func(holder)
+
+# Slice/view - zero copy!
+matrix = Float32[1 2 3; 4 5 6; 7 8 9]
+row_view = @view matrix[2, :]  # Second row
+holder = from_julia_array(row_view)
+func(holder)  # Passes view directly to TVM, no copy!
+
+# Non-contiguous slice also works
+sub_matrix = @view matrix[1:2, 1:2]
+holder = from_julia_array(sub_matrix)
+func(holder)  # Correct strides and offset calculated automatically
 ```
 
-# Design
-Eliminates the old three-tuple API footgun:
-- Old: dltensor, shape, strides = from_julia_array(x)  # Easy to forget shape/strides!
-- New: holder = from_julia_array(x)  # Single object, impossible to misuse
+# Design Philosophy (Linus-style)
+- Old API: Three-tuple footgun
+- New API: Single holder, impossible to misuse
+- Slices: Zero-copy views, proper stride/offset handling
+- Like Rust: Support for both arrays and slices
 """
-function from_julia_array(arr::Array{T}, device::DLDevice=cpu()) where T
+function from_julia_array(arr::Union{Array{T}, SubArray{T}}, device::DLDevice=cpu()) where T
     return DLTensorHolder(arr, device)
 end

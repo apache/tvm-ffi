@@ -65,6 +65,12 @@ my_func(x_holder, y_holder)
 
 # Check results
 println(y)  # Results from TVM!
+
+# NEW: Zero-copy slice support (like Rust!)
+matrix = Float32[1 2 3; 4 5 6; 7 8 9]
+row = @view matrix[2, :]           # Get second row
+holder = from_julia_array(row)     # Zero copy!
+my_func(holder)                    # Pass slice directly to TVM
 ```
 
 ## Directory Structure
@@ -126,7 +132,7 @@ include("TVMFFI/test/runtests.jl")
 
 ## Requirements
 
-- Julia 1.6 or later
+- Julia 1.10 or later
 - TVM FFI library (build from source in parent directory)
 - Library must be in system path or build directory
 

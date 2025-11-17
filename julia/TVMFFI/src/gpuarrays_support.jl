@@ -199,21 +199,27 @@ mutable struct GPUDLTensorHolder{T}
         ndim = length(shape_tuple)
         shape_vec = collect(Int64, shape_tuple)
         
-        # Calculate strides (Julia is column-major)
-        strides_vec = ones(Int64, ndim)
-        for i in 2:ndim
-            strides_vec[i] = strides_vec[i-1] * shape_vec[i-1]
-        end
+        # Get strides - Julia provides this for both regular arrays and SubArrays
+        # This correctly handles GPU slices just like CPU slices
+        arr_strides = Base.strides(arr)
+        strides_vec = collect(Int64, arr_strides)
+        
+        # Get data pointer - Julia's pointer() handles GPU SubArray correctly
+        data_ptr = pointer(arr)
+        
+        # For DLTensor, byte_offset is always 0 because pointer() already
+        # points to the first element of the slice (even for GPU arrays)
+        byte_offset = UInt64(0)
         
         # Create DLTensor
         tensor = DLTensor(
-            pointer(arr),           # GPU memory pointer
-            device,                 # Device context
-            Int32(ndim),           # Number of dimensions
-            dt,                    # Data type
-            pointer(shape_vec),    # Shape pointer
-            pointer(strides_vec),  # Strides pointer
-            UInt64(0)              # Byte offset
+            data_ptr,              # GPU memory pointer (handles slices)
+            device,                # Device context
+            Int32(ndim),          # Number of dimensions
+            dt,                   # Data type
+            pointer(shape_vec),   # Shape pointer
+            pointer(strides_vec), # Strides pointer (correct for slices!)
+            byte_offset           # Byte offset
         )
         
         return new{T}(tensor, shape_vec, strides_vec, arr)
