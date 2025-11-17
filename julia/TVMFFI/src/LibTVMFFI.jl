@@ -415,4 +415,3 @@ function TVMFFIFunctionGetCellPtr(obj::TVMFFIObjectHandle)
 end
 
 end # module LibTVMFFI
-

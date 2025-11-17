@@ -58,11 +58,11 @@ x_gpu = CUDA.CuArray(Float32[1, 2, 3])  # NVIDIA
 # x_gpu = AMDGPU.ROCArray(Float32[1, 2, 3])  # AMD
 # x_gpu = Metal.MtlArray(Float32[1, 2, 3])  # Apple
 
-# Generic conversion (detects backend automatically)
-x_dl = from_gpu_array(x_gpu)
+# Unified API - from_julia_array works for CPU and GPU!
+x_holder = from_julia_array(x_gpu)  # Auto-detects CUDA
 
 # Call TVM function (backend-agnostic)
-tvm_func(x_dl, y_dl)
+tvm_func(x_holder, y_holder)
 ```
 """
 
@@ -161,119 +161,8 @@ function detect_gpu_backend(arr)
     end
 end
 
-"""
-    GPUDLTensorHolder{T}
-
-GPU version of DLTensorHolder - self-contained holder for GPU arrays.
-"""
-mutable struct GPUDLTensorHolder{T}
-    tensor::DLTensor
-    shape::Vector{Int64}
-    strides::Vector{Int64}
-    source::T  # GPU array (CuArray, ROCArray, etc.)
-    
-    function GPUDLTensorHolder(arr::T; backend::Symbol=:auto, device_id::Int=-1) where T
-        # Auto-detect backend if not specified
-        if backend == :auto || device_id == -1
-            detected_backend, detected_device_id = detect_gpu_backend(arr)
-            if backend == :auto
-                backend = detected_backend
-            end
-            if device_id == -1
-                device_id = detected_device_id
-            end
-        end
-        
-        # Get DLDeviceType
-        dl_device_type = gpu_backend_to_dldevice(backend)
-        
-        # Create device
-        device = DLDevice(Int32(dl_device_type), Int32(device_id))
-        
-        # Get element type
-        elem_type = eltype(arr)
-        dt = DLDataType(elem_type)
-        
-        # Get shape
-        shape_tuple = size(arr)
-        ndim = length(shape_tuple)
-        shape_vec = collect(Int64, shape_tuple)
-        
-        # Get strides - Julia provides this for both regular arrays and SubArrays
-        # This correctly handles GPU slices just like CPU slices
-        arr_strides = Base.strides(arr)
-        strides_vec = collect(Int64, arr_strides)
-        
-        # Get data pointer - Julia's pointer() handles GPU SubArray correctly
-        data_ptr = pointer(arr)
-        
-        # For DLTensor, byte_offset is always 0 because pointer() already
-        # points to the first element of the slice (even for GPU arrays)
-        byte_offset = UInt64(0)
-        
-        # Create DLTensor
-        tensor = DLTensor(
-            data_ptr,              # GPU memory pointer (handles slices)
-            device,                # Device context
-            Int32(ndim),          # Number of dimensions
-            dt,                   # Data type
-            pointer(shape_vec),   # Shape pointer
-            pointer(strides_vec), # Strides pointer (correct for slices!)
-            byte_offset           # Byte offset
-        )
-        
-        return new{T}(tensor, shape_vec, strides_vec, arr)
-    end
-end
-
-# Allow Ref() on GPU holder too
-Base.Ref(holder::GPUDLTensorHolder) = Ref(holder.tensor)
-
-# Define unsafe_convert for GPU holder
-function Base.unsafe_convert(::Type{Ptr{DLTensor}}, holder::GPUDLTensorHolder)
-    # Get pointer to the tensor field within the holder
-    return Ptr{DLTensor}(pointer_from_objref(holder))
-end
-
-"""
-    from_gpu_array(arr; backend::Symbol=:auto, device_id::Int=-1) -> GPUDLTensorHolder
-
-Create a self-contained DLTensor holder from a GPU array (hardware-agnostic).
-
-This function works with any GPUArrays.jl-compatible backend:
-- CUDA.jl → CuArray
-- AMDGPU.jl → ROCArray
-- Metal.jl → MtlArray
-- oneAPI.jl → oneArray
-
-# Arguments
-- `arr`: GPU array
-- `backend`: GPU backend (auto-detected if :auto)
-- `device_id`: Device ID (auto-detected if -1)
-
-# Returns
-- `GPUDLTensorHolder`: Self-contained holder (keep this alive!)
-
-# Examples
-```julia
-using CUDA
-x = CUDA.CuArray(Float32[1, 2, 3, 4, 5])
-holder = from_gpu_array(x)
-# Automatically detects CUDA backend
-func(holder)  # Pass holder directly
-
-using AMDGPU
-x = AMDGPU.ROCArray(Float32[1, 2, 3, 4, 5])
-holder = from_gpu_array(x)
-# Automatically detects ROCm backend
-```
-
-# Design
-New safe API - single holder object instead of three-tuple.
-"""
-function from_gpu_array(arr; backend::Symbol=:auto, device_id::Int=-1)
-    return GPUDLTensorHolder(arr; backend=backend, device_id=device_id)
-end
+# Deleted from_gpu_array - it's redundant!
+# from_julia_array handles GPU arrays automatically.
 
 """
     supports_gpu_backend(backend::Symbol) -> Bool
@@ -400,43 +289,59 @@ function print_gpu_info()
     end
 end
 
-# Extend from_julia_array to handle GPU arrays via type dispatch
-# Note: We're in the TVMFFI module, so we can just add a new method
+# Extend from_julia_array to handle GPU arrays
 """
     from_julia_array(arr::AbstractArray)
 
-Extended method that handles both CPU and GPU arrays automatically.
+Extended method for GPU arrays - uses same DLTensorHolder as CPU!
 
-Type dispatch:
-- Array{T} → DLTensorHolder{T} (CPU)
-- CuArray/ROCArray/etc. → GPUDLTensorHolder (GPU)
+# Design Philosophy (Linus-style)
+ONE function, ONE type, ALL devices.
+- Auto-detect GPU backend from array type
+- Create appropriate device automatically
+- Return unified DLTensorHolder
 
-This is cleaner than runtime type checking.
+No from_gpu_array needed - it was a redundant special case!
+
+# Examples
+```julia
+using CUDA
+
+# CPU and GPU - same API!
+cpu_holder = from_julia_array(cpu_arr)     # Auto: CPU device
+gpu_holder = from_julia_array(gpu_arr)     # Auto: CUDA device
+
+# Both return DLTensorHolder{T, S}
+# Device info is in holder.tensor.device
+```
 """
-function from_julia_array(arr::AbstractArray)
-    # For non-Array types (GPU arrays), use GPU holder
-    # This assumes any non-Array is a GPU array
-    # More specific methods can be added for specific GPU types if needed
-    return GPUDLTensorHolder(arr)
-end
-
-# Extend to_tvm_any for GPU holder
-# Note: We're in the TVMFFI module, so we can just add a new method
-"""
-    to_tvm_any(holder::GPUDLTensorHolder)
-
-Convert GPU DLTensor holder to TVMFFIAny.
-"""
-function to_tvm_any(holder::GPUDLTensorHolder)
-    # Convert holder to DLTensor pointer
-    # Holder keeps GPU array alive, we just borrow the reference
-    # Use unsafe_convert which we defined for GPUDLTensorHolder
-    tensor_ptr = Base.unsafe_convert(Ptr{DLTensor}, holder)
-    LibTVMFFI.TVMFFIAny(
-        Int32(LibTVMFFI.kTVMFFIDLTensorPtr),
-        0,
-        reinterpret(UInt64, tensor_ptr)
+function from_julia_array(arr::S) where {S <: AbstractArray}
+    T = eltype(arr)
+    
+    # Auto-detect backend and create GPU device
+    backend, device_id = detect_gpu_backend(arr)
+    dl_device_type = gpu_backend_to_dldevice(backend)
+    device = DLDevice(Int32(dl_device_type), Int32(device_id))
+    
+    # Get shape and strides - same as CPU
+    shape_vec = collect(Int64, size(arr))
+    strides_vec = collect(Int64, Base.strides(arr))
+    
+    # Get dtype
+    dt = DLDataType(T)
+    
+    # Create DLTensor
+    tensor = DLTensor(
+        pointer(arr),
+        device,
+        Int32(length(shape_vec)),
+        dt,
+        pointer(shape_vec),
+        pointer(strides_vec),
+        UInt64(0)
     )
+    
+    return DLTensorHolder{T, S}(tensor, shape_vec, strides_vec, arr)
 end
 
 """

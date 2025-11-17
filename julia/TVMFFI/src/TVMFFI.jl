@@ -57,9 +57,8 @@ export get_global_func
 export to_julia_array, copy_to_julia, from_julia_array
 export cpu, cuda, opencl, vulkan, metal, rocm
 
-# Export GPU support functions and types
-export GPUDLTensorHolder
-export from_gpu_array
+# Export GPU support functions
+# Note: No from_gpu_array - from_julia_array handles everything!
 export supports_gpu_backend, list_available_gpu_backends
 export print_gpu_info, gpu_array_info
 
@@ -75,4 +74,3 @@ include("gpuarrays_support.jl")   # GPU abstraction (uses DLTensor, extends from
 include("function.jl")            # Uses DLTensor
 
 end # module
-
