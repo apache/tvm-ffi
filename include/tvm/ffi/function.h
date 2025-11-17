@@ -34,6 +34,7 @@
 #include <tvm/ffi/function_details.h>
 
 #include <functional>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
