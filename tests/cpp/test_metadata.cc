@@ -320,16 +320,6 @@ TEST(Schema, DLLExportedFuncMetadata) {
             R"({"type":"ffi.Function","args":[{"type":"int"},{"type":"testing.TestIntPair"}]})");
 }
 
-TEST(Schema, DLLExportedFuncConstness) {
-  String meta_str = CallMetadataFunc(__tvm_ffi__metadata_testing_dll_schema_input_const);
-  Map<String, Any> meta = json::Parse(meta_str).cast<Map<String, Any>>();
-  Array<Any> arg_const = meta["arg_const"].cast<Array<Any>>();
-  EXPECT_EQ(arg_const.size(), 3);
-  EXPECT_TRUE(arg_const[0].cast<bool>());
-  EXPECT_TRUE(arg_const[1].cast<bool>());
-  EXPECT_FALSE(arg_const[2].cast<bool>());
-}
-
 TEST(Schema, DLLExportedFuncDocumentation) {
   EXPECT_EQ(ParseMetadataToSchema(
                 CallMetadataFunc(__tvm_ffi__metadata_testing_dll_test_add_with_docstring)),

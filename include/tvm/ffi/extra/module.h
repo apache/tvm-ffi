@@ -91,7 +91,7 @@ class TVM_FFI_EXTRA_CXX_API ModuleObj : public Object {
    * Module mod = Module::LoadFromFile("lib.so");
    * Optional<String> metadata = mod->GetFunctionMetadata("my_func");
    * if (metadata.has_value()) {
-   *   // Parse JSON: {"type_schema": "...", "arg_const": [true, false, ...]}
+   *   // Parse JSON: {"type_schema": "..."}
    *   validate_signature(*metadata);
    * }
    * \endcode

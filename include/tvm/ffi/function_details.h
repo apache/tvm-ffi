@@ -253,41 +253,6 @@ struct TypeSchemaImpl {
   }
 };
 
-/*!
- * \brief Helper to detect const-ness of a type parameter.
- * Used for memory effect annotation in function metadata.
- */
-template <typename T>
-struct IsConstParam {
-  static constexpr bool value = std::is_const_v<std::remove_reference_t<T>>;
-};
-
-/*!
- * \brief Helper to generate arg_const array for function metadata.
- * Generates JSON array of boolean values indicating which args are const.
- */
-template <typename ArgTuple>
-struct ArgConstHelper {
-  template <size_t... I>
-  TVM_FFI_INLINE static void GenerateImpl(std::ostream& os, std::index_sequence<I...>) {
-    using TExpander = int[];
-    (void)TExpander{0, (GenerateArg<I>(os), 0)...};
-  }
-
-  template <size_t i>
-  TVM_FFI_INLINE static void GenerateArg(std::ostream& os) {
-    using Arg = std::tuple_element_t<i, ArgTuple>;
-    if constexpr (i != 0) {
-      os << ",";
-    }
-    os << (IsConstParam<Arg>::value ? "true" : "false");
-  }
-
-  TVM_FFI_INLINE static void Generate(std::ostream& os) {
-    GenerateImpl(os, std::make_index_sequence<std::tuple_size_v<ArgTuple>>{});
-  }
-};
-
 template <>
 struct TypeSchemaImpl<void> {
   static std::string v() {

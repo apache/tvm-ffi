@@ -296,12 +296,8 @@ TEST(Func, StaticLinkingMetadata) {
       Function::InvokeExternC(nullptr, __tvm_ffi__metadata_testing_add1).cast<String>();
   Map<String, Any> metadata = json::Parse(metadata_str).cast<Map<String, Any>>();
   EXPECT_TRUE(metadata.count("type_schema"));
-  EXPECT_TRUE(metadata.count("arg_const"));
   std::string type_schema_str = metadata["type_schema"].cast<String>();
   EXPECT_TRUE(type_schema_str.find("int") != std::string::npos);
-  Array<Any> arg_const = metadata["arg_const"].cast<Array<Any>>();
-  EXPECT_EQ(arg_const.size(), 1);
-  EXPECT_FALSE(arg_const[0].cast<bool>());
 }
 
 extern "C" TVM_FFI_DLL int TVMFFITestingDummyTarget();

@@ -300,7 +300,6 @@ signature validation without calling the function.
 The metadata contains:
 
 - **type_schema**: JSON string describing function signature (return type and argument types)
-- **arg_const**: Array of booleans indicating which parameters are const (for memory effect validation)
 
 ```cpp
 ffi::Module mod = ffi::Module::LoadFromFile("path/to/export_lib.so");
@@ -308,11 +307,11 @@ ffi::Module mod = ffi::Module::LoadFromFile("path/to/export_lib.so");
 // Get the function
 ffi::Function func = mod->GetFunction("add_one").value();
 
-// Query metadata (type schema and const-ness information)
+// Query metadata (type schema information)
 ffi::Optional<ffi::String> metadata = mod->GetFunctionMetadata("add_one");
 if (metadata.has_value()) {
   // Parse JSON metadata for validation
-  // Contains: {"type_schema": "...", "arg_const": [true, false, ...]}
+  // Contains: {"type_schema": "..."}
 }
 ```
 

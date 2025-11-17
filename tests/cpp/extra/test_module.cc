@@ -50,34 +50,15 @@ TEST(Module, GetFunctionMetadata) {
   String metadata_str = *metadata_opt;
   Map<String, Any> metadata = json::Parse(metadata_str).cast<Map<String, Any>>();
   EXPECT_TRUE(metadata.count("type_schema")) << "Should have type_schema field";
-  EXPECT_TRUE(metadata.count("arg_const")) << "Should have arg_const field";
 
   String type_schema_json = metadata["type_schema"].cast<String>();
   Map<String, Any> schema = json::Parse(type_schema_json).cast<Map<String, Any>>();
   EXPECT_EQ(schema["type"].cast<String>(), "ffi.Function");
 
-  Array<Any> arg_const = metadata["arg_const"].cast<Array<Any>>();
-  EXPECT_EQ(arg_const.size(), 1);
-  EXPECT_FALSE(arg_const[0].cast<bool>()) << "int by value should not be const";
-
   Optional<Function> func_opt = mod->GetFunction("testing_dll_schema_id_int");
   ASSERT_TRUE(func_opt.has_value()) << "Should be able to get the function";
   Function func = *func_opt;
   EXPECT_EQ(func(int64_t(42)).cast<int64_t>(), int64_t(42));
-}
-
-TEST(Module, GetFunctionMetadataConst) {
-  Module mod = Module::LoadFromFile(GetTestingLibPath());
-  Optional<String> metadata_opt = mod->GetFunctionMetadata("testing_dll_schema_input_const");
-  ASSERT_TRUE(metadata_opt.has_value());
-
-  Map<String, Any> metadata = json::Parse(*metadata_opt).cast<Map<String, Any>>();
-  Array<Any> arg_const = metadata["arg_const"].cast<Array<Any>>();
-
-  EXPECT_EQ(arg_const.size(), 3);
-  EXPECT_TRUE(arg_const[0].cast<bool>());
-  EXPECT_TRUE(arg_const[1].cast<bool>());
-  EXPECT_FALSE(arg_const[2].cast<bool>());
 }
 
 TEST(Module, GetFunctionDoc) {

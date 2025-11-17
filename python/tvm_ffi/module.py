@@ -55,7 +55,7 @@ class Module(core.Object):
         # Call exported function
         mod.func_name(*args)
 
-        # Query function metadata (type signature, const-ness)
+        # Query function metadata (type signature)
         metadata = mod.get_function_metadata("func_name")
 
         # Query function documentation (if available)
@@ -187,7 +187,7 @@ class Module(core.Object):
 
         This retrieves metadata for functions exported via c:macro:`TVM_FFI_DLL_EXPORT_TYPED_FUNC`
         and when c:macro:`TVM_FFI_DLL_EXPORT_INCLUDE_METADATA` is on, which includes type schema
-        and const-ness information.
+        information.
 
         Parameters
         ----------

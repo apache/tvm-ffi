@@ -359,9 +359,6 @@ int64_t test_int_pair_sum_wrapper(const TestIntPair& target) { return target.Sum
 // Documentation export
 int64_t test_add_with_docstring(int64_t a, int64_t b) { return a + b; }
 
-// Const-ness detection
-void schema_input_const(const Tensor& a, const Tensor& b, TensorView result) {}
-
 }  // namespace schema_test_impl
 
 // A class with a wide variety of field types and method signatures
@@ -598,9 +595,5 @@ TVM_FFI_DLL_EXPORT_TYPED_FUNC_WITH_DOC(testing_dll_test_add_with_docstring,
                                        "-------\n"
                                        "result : int\n"
                                        "    Sum of a and b");
-
-// Const-ness detection
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(testing_dll_schema_input_const,
-                              tvm::ffi::schema_test_impl::schema_input_const);
 
 extern "C" TVM_FFI_DLL_EXPORT int TVMFFITestingDummyTarget() { return 0; }
