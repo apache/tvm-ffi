@@ -18,70 +18,32 @@ under the License.
 =#
 
 """
-GPUArrays.jl Integration for Hardware-Agnostic GPU Support
+Hardware-Agnostic GPU Support
 
-GPUArrays.jl provides a unified interface for GPU programming that works across:
+Supports multiple GPU backends through type dispatch:
 - CUDA.jl (NVIDIA)
 - AMDGPU.jl (AMD ROCm)
 - Metal.jl (Apple)
 - oneAPI.jl (Intel)
 
-This module provides integration between TVMFFI and GPUArrays, enabling
-hardware-agnostic GPU tensor operations.
-
-# Architecture
-
-```
-                    TVMFFI.jl
-                        ↓
-                  GPUArrays.jl (abstract interface)
-                   ↙    ↓    ↘
-            CUDA.jl  AMDGPU.jl  Metal.jl
-               ↓        ↓         ↓
-            NVIDIA    AMD       Apple
-```
-
-# Design Philosophy (Linus-style)
-
-**Simple**: One interface, multiple backends
-**Direct**: Minimal abstraction, just type mapping
-**Practical**: Solve real problem (multi-vendor GPU support)
+No dependency on GPUArrays.jl - works directly with each backend.
 
 # Usage
 
 ```julia
 using TVMFFI
-using CUDA  # or AMDGPU, or Metal, or oneAPI
+using CUDA  # or AMDGPU, Metal, oneAPI
 
 # Works with any GPU backend!
-x_gpu = CUDA.CuArray(Float32[1, 2, 3])  # NVIDIA
-# x_gpu = AMDGPU.ROCArray(Float32[1, 2, 3])  # AMD
-# x_gpu = Metal.MtlArray(Float32[1, 2, 3])  # Apple
+x_gpu = CUDA.CuArray(Float32[1, 2, 3])
 
-# Unified API - from_julia_array works for CPU and GPU!
-x_holder = from_julia_array(x_gpu)  # Auto-detects CUDA
+# Unified API - from_julia_array auto-detects device
+x_holder = from_julia_array(x_gpu)
 
-# Call TVM function (backend-agnostic)
+# Call TVM function
 tvm_func(x_holder, y_holder)
 ```
 """
-
-# Check if GPUArrays is available
-const HAS_GPUARRAYS = Ref(false)
-
-function __init_gpuarrays__()
-    try
-        # Try to load GPUArrays
-        if isdefined(Main, :GPUArrays)
-            HAS_GPUARRAYS[] = true
-            @info "GPUArrays.jl integration enabled"
-            return true
-        end
-    catch e
-        @debug "GPUArrays.jl not available" exception=e
-    end
-    return false
-end
 
 """
     gpu_backend_to_dldevice(backend::Symbol) -> DLDeviceType
@@ -383,6 +345,3 @@ function gpu_array_info(arr)
         println("  Error getting info: ", e)
     end
 end
-
-# Initialize
-__init_gpuarrays__()
