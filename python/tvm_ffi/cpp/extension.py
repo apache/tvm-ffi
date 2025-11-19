@@ -40,7 +40,7 @@ def _hash_sources(
     cuda_source: str | None,
     cpp_files: Sequence[str] | None,
     cuda_files: Sequence[str] | None,
-    functions: Sequence[str] | Mapping[str, str | None],
+    functions: Sequence[str] | Mapping[str, str],
     extra_cflags: Sequence[str],
     extra_cuda_cflags: Sequence[str],
     extra_ldflags: Sequence[str],
@@ -57,15 +57,10 @@ def _hash_sources(
         for item in seq:
             m.update(item.encode("utf-8"))
 
-    def _hash_mapping(mapping: Mapping[str, str | None]) -> None:
+    def _hash_mapping(mapping: Mapping[str, str]) -> None:
         for key in sorted(mapping):
             m.update(key.encode("utf-8"))
-            value = mapping[key]
-            if value is None:
-                m.update(b"\x00")
-            else:
-                m.update(b"\x01")
-                m.update(value.encode("utf-8"))
+            m.update(mapping[key].encode("utf-8"))
 
     _maybe_hash_string(cpp_source)
     _maybe_hash_string(cuda_source)
@@ -358,7 +353,7 @@ def build_ninja(build_dir: str) -> None:
         raise RuntimeError("\n".join(msg))
 
 
-def _decorate_with_tvm_ffi(source: str, functions: Mapping[str, str | None]) -> str:
+def _decorate_with_tvm_ffi(source: str, functions: Mapping[str, str]) -> str:
     """Decorate the given source code with TVM FFI export macros."""
     sources = [
         "#include <tvm/ffi/container/tensor.h>",
@@ -465,7 +460,7 @@ def build_inline(
     *,
     cpp_sources: Sequence[str] | str | None = None,
     cuda_sources: Sequence[str] | str | None = None,
-    functions: Mapping[str, str | None] | Sequence[str] | str | None = None,
+    functions: Mapping[str, str] | Sequence[str] | str | None = None,
     extra_cflags: Sequence[str] | None = None,
     extra_cuda_cflags: Sequence[str] | None = None,
     extra_ldflags: Sequence[str] | None = None,
@@ -508,7 +503,7 @@ def build_inline(
     functions
         The functions in cpp_sources or cuda_source that will be exported to the tvm ffi module. When a mapping is
         given, the keys are the names of the exported functions, and the values are docstrings for the functions
-        (use None to skip documentation for specific functions). When a sequence or a single string is given, they are
+        (use an empty string to skip documentation for specific functions). When a sequence or a single string is given, they are
         the functions needed to be exported, and the docstrings are set to empty strings. A single function name can
         also be given as a string. When cpp_sources is given, the functions must be declared (not necessarily defined)
         in the cpp_sources. When cpp_sources is not given, the functions must be defined in the cuda_sources. If not
@@ -602,7 +597,7 @@ def build_inline(
 
     # add function registration code to sources
     if functions is None:
-        function_map: dict[str, str | None] = {}
+        function_map: dict[str, str] = {}
     elif isinstance(functions, str):
         function_map = {functions: ""}
     elif isinstance(functions, Mapping):
@@ -663,7 +658,7 @@ def load_inline(
     *,
     cpp_sources: Sequence[str] | str | None = None,
     cuda_sources: Sequence[str] | str | None = None,
-    functions: Mapping[str, str | None] | Sequence[str] | str | None = None,
+    functions: Mapping[str, str] | Sequence[str] | str | None = None,
     extra_cflags: Sequence[str] | None = None,
     extra_cuda_cflags: Sequence[str] | None = None,
     extra_ldflags: Sequence[str] | None = None,
@@ -703,10 +698,10 @@ def load_inline(
         The C++ source code. It can be a list of sources or a single source.
     cuda_sources: Sequence[str] | str, optional
         The CUDA source code. It can be a list of sources or a single source.
-    functions: Mapping[str, str | None] | Sequence[str] | str, optional
+    functions: Mapping[str, str] | Sequence[str] | str, optional
         The functions in cpp_sources or cuda_source that will be exported to the tvm ffi module. When a mapping is
         given, the keys are the names of the exported functions, and the values are docstrings for the functions
-        (use None to skip documentation for specific functions). When a sequence or a single string is given, they are
+        (use an empty string to skip documentation for specific functions). When a sequence or a single string is given, they are
         the functions needed to be exported, and the docstrings are set to empty strings. A single function name can
         also be given as a string. When cpp_sources is given, the functions must be declared (not necessarily defined)
         in the cpp_sources. When cpp_sources is not given, the functions must be defined in the cuda_sources. If not

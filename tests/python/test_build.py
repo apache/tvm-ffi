@@ -236,7 +236,7 @@ def test_build_inline_with_docstrings() -> None:
                 "result : int\n"
                 "    Sum of a and b"
             ),
-            "subtract": None,  # No documentation
+            "subtract": "",  # No documentation
             "divide": "Divides two floats. Returns a/b.",
         },
         extra_cflags=["-DTVM_FFI_DLL_EXPORT_INCLUDE_METADATA=1"],
