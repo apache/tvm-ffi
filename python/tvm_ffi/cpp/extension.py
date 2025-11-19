@@ -353,6 +353,21 @@ def build_ninja(build_dir: str) -> None:
         raise RuntimeError("\n".join(msg))
 
 
+def _escape_cpp_string_literal(s: str) -> str:
+    """Escape special characters for C++ string literals."""
+    return s.translate(
+        str.maketrans(
+            {
+                "\\": "\\\\",
+                '"': '\\"',
+                "\n": "\\n",
+                "\r": "\\r",
+                "\t": "\\t",
+            }
+        )
+    )
+
+
 def _decorate_with_tvm_ffi(source: str, functions: Mapping[str, str]) -> str:
     """Decorate the given source code with TVM FFI export macros."""
     sources = [
@@ -370,7 +385,7 @@ def _decorate_with_tvm_ffi(source: str, functions: Mapping[str, str]) -> str:
 
         if func_doc:
             # Escape the docstring for C++ string literal
-            escaped_doc = func_doc.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+            escaped_doc = _escape_cpp_string_literal(func_doc)
             sources.append(f'TVM_FFI_DLL_EXPORT_TYPED_FUNC_DOC({func_name}, "{escaped_doc}");')
 
     sources.append("")
