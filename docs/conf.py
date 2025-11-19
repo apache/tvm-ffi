@@ -465,6 +465,3 @@ html_extra_path = ["reference/rust/generated"] if build_rust_docs else []
 
 
 html_css_files = ["custom.css"]
-
-
-show_warning_types = True

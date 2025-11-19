@@ -19,7 +19,7 @@
 Kernel Library Guide
 ====================
 
-This guide serves as a quick start for shipping python version and machine learning(ML) framework agnostic kernel libraries with TVM FFI. With the help of TVM FFI, we can connect the kernel libraries to multiple ML framework, such as PyTorch, XLA, JAX, together with the minimal efforts.
+This guide serves as a quick start for shipping kernel libraries with TVM FFI. The shipped kernel libraries are of python version and ML framework agnostic. With the help of TVM FFI, we can connect the kernel libraries to multiple ML framework, such as PyTorch, XLA, JAX, together with the minimal efforts.
 
 Tensor
 ======
@@ -30,22 +30,24 @@ To be specific, in TVM FFI, two types of tensor constructs, :cpp:class:`~tvm::ff
 Tensor and TensorView
 ---------------------
 
-Though both :cpp:class:`~tvm::ffi::Tensor` and :cpp:class:`~tvm::ffi::TensorView` are designed to represent tensors from ML frameworks that interact with the TVM FFI ABI. They are backed by the `DLTensor` in DLPack in practice. The main difference is whether it is an owning tensor structure.
+Both :cpp:class:`~tvm::ffi::Tensor` and :cpp:class:`~tvm::ffi::TensorView` are designed to represent tensors from ML frameworks that interact with the TVM FFI ABI. They are backed by the `DLTensor` in DLPack in practice. The main difference is whether it is an owning tensor structure.
 
 :cpp:class:`tvm::ffi::Tensor`
- :cpp:class:`~tvm::ffi::Tensor` is a completely owning tensor with reference counting. It can be created and passed between C++ and Python side safely. When the counting reference goes to zero, its underlying deleter function will be called to free the tensor storage.
+ :cpp:class:`~tvm::ffi::Tensor` is a completely owning tensor with reference counting. It can be created on either C++ or Python side and passed between either side. And TVM FFI internally keeps a reference count to track lifetime of the tensors. When the reference count goes to zero, its underlying deleter function will be called to free the tensor storage.
 
 :cpp:class:`tvm::ffi::TensorView`
  :cpp:class:`~tvm::ffi::TensorView` is a non-owning view of an existing tensor, pointing to an existing tensor (e.g., a tensor allocated by PyTorch).
 
 It is **recommended** to use :cpp:class:`~tvm::ffi::TensorView` when possible, that helps us to support more cases, including cases where only view but not strong reference are passed, like XLA buffer.
-It is also more lightweight. However, since :cpp:class:`~tvm::ffi::TensorView` is a non-owning view, it is the user's responsibility to ensure the lifetime of underlying tensor data and attributes of the viewed tensor object.
+It is also more lightweight. However, since :cpp:class:`~tvm::ffi::TensorView` is a non-owning view, it is the user's responsibility to ensure the lifetime of underlying tensor.
 
 Tensor Attributes
 -----------------
 
 For the sake of convenience, :cpp:class:`~tvm::ffi::TensorView` and :cpp:class:`~tvm::ffi::Tensor` align the following attributes retrieval mehtods to :cpp:class:`at::Tensor` interface, to obtain tensor basic attributes and storage pointer:
 ``dim``, ``dtype``, ``sizes``, ``size``, ``strides``, ``stride``, ``numel``, ``data_ptr``, ``device``, ``is_contiguous``
+
+Please refer to the documentation of both tensor classes for their details. Here  highlight some non-primitive attributes:
 
 :c:struct:`DLDataType`
  The ``dtype`` of the tensor. It's represented by a struct with three fields: code, bits, and lanes, defined by DLPack protocol.
@@ -72,7 +74,7 @@ To better adapt to the ML framework, it is **recommended** to reuse the framewor
 * Benefit from the framework's native caching allocator or related allocation mechanism.
 * Help framework tracking memory usage and planning globally.
 
-For this case, TVM FFI provides :cpp:func:`tvm::ffi::Tensor::FromEnvAlloc`. It internally calls the framework tensor allocator. To determine which framework tensor allocator, TVM FFI infers it from the passed-in framework tensors. For example, when calling the kernel library at Python side, there is an input framework tensor if of type ``torch.Tensor``, TVM FFI will automatically bind the :cpp:func:`at::empty` as the current framework tensor allocator by ``TVMFFIEnvTensorAlloc``. And then the :cpp:func:`~tvm::ffi::Tensor::FromEnvAlloc` is calling the :cpp:class:`at::empty` actually:
+TVM FFI provides :cpp:func:`tvm::ffi::Tensor::FromEnvAlloc` to allocate a tensor with the framework tensor allocator. To determine which framework tensor allocator, TVM FFI infers it from the passed-in framework tensors. For example, when calling the kernel library at Python side, there is an input framework tensor if of type ``torch.Tensor``, TVM FFI will automatically bind the :cpp:func:`at::empty` as the current framework tensor allocator by ``TVMFFIEnvTensorAlloc``. And then the :cpp:func:`~tvm::ffi::Tensor::FromEnvAlloc` is calling the :cpp:class:`at::empty` actually:
 
 .. code-block:: c++
 
@@ -87,8 +89,7 @@ which is equivalent to:
 FromNDAlloc
 ^^^^^^^^^^^
 
-:cpp:func:`tvm::ffi::Tensor::FromNDAlloc` can be used to create a tensor with custom memory allocator. It's used by the kernel provider if they don't want to rely on the framework tensor allocator. Instead, they provide their own custom allocator and deleter for tensor allocation and free. However, the tensors allocated by ``FromNDAlloc`` only retain the function pointer to its custom deleter for deconstruction. The custom deletes are all owned by the kernel library still. So it is important to make sure the loaded kernel library, :py:class:`tvm_ffi.Module`, outlives the tensors allocated by ``FromNDAlloc``. Otherwise, the function pointers to the custom deleter will be invalid. Here a typical approach is to retain the loaded :py:class:`tvm_ffi.Module` globally or for the period of time. But ``FromEnvAlloc`` is free of this issue, which is more **recommended** in practice.
-
+:cpp:func:`tvm::ffi::Tensor::FromNDAlloc` can be used in linked runtime libraries and c++ applications, since these scenarios keep the library alive globally throughout the entire lifetime of the process. It is of simple use by providing a custom memory allocator and deleter for tensor allocation and free, rather than relying on the framework tensor allocator. However, the tensors allocated by ``FromNDAlloc`` only retain the function pointer to its custom deleter for deconstruction. The custom deletes are all owned by the kernel library still. So it is important to make sure the loaded kernel library, :py:class:`tvm_ffi.Module`, outlives the tensors allocated by ``FromNDAlloc``. Otherwise, the function pointers to the custom deleter will be invalid. Here a typical approach is to retain the loaded :py:class:`tvm_ffi.Module` globally or for the period of time.
 
 FromDLPack
 ^^^^^^^^^^
@@ -149,18 +150,18 @@ As we already have our kernel library wrapped with TVM FFI interface, our next a
 .. code-block:: c++
 
  void func(ffi::TensorView input, ffi::TensorView output);
- TVM_FFI_DLL_EXPORT_TYPED_FUNC(func, func);
+ TVM_FFI_DLL_EXPORT_TYPED_FUNC(func_name, func);
 
-And then we compile the sources into ``func.so``, or ``func.dylib`` for macOS, or ``func.dll`` for Windows. Finally, we can load and call our kernel functions at Python side as:
+And then we compile the sources into ``lib.so``, or ``lib.dylib`` for macOS, or ``lib.dll`` for Windows. Finally, we can load and call our kernel functions at Python side as:
 
 .. code-block:: python
 
- mod = tvm_ffi.load_module("func.so")
+ mod = tvm_ffi.load_module("lib.so")
  x = ...
  y = ...
- mod.func(x, y)
+ mod.func_name(x, y)
 
-``x`` and ``y`` here can be any ML framework tensors, such as ``torch.Tensor``, ``numpy.NDArray``, ``cupy.ndarray``, or other tensors as long as TVM FFI supports. TVM FFI detects the tensor types in arguments and converts them into :cpp:class:`~tvm::ffi::TensorView` automatically. So that we do not have to write the specific conversion codes per framework.
+``x`` and ``y`` here can be any ML framework tensors, such as ``torch.Tensor``, ``numpy.NDArray``, ``cupy.ndarray``, or other tensors as long as TVM FFI supports. TVM FFI detects the tensor types in arguments and converts them into :cpp:class:`~tvm::ffi::TensorView` or :cpp:class:`~tvm::ffi::Tensor` automatically. So that we do not have to write the specific conversion codes per framework.
 
 In constrast, if the kernel function returns :cpp:class:`~tvm::ffi::Tensor` instead of ``void`` in the example above. TVM FFI automatically converts the output :cpp:class:`~tvm::ffi::Tensor` to framework tensors also. The output framework is inferred from the input framework tensors. For example, if the input framework tensors are of ``torch.Tensor``, TVM FFI will convert the output tensor to ``torch.Tensor``. And if none of the input tensors are from ML framework, the output tensor will be the ``tvm_ffi.core.Tensor`` as fallback.
 

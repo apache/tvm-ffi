@@ -351,6 +351,11 @@ class Tensor : public ObjectRef {
   /*!
    * \brief Create a Tensor from a NDAllocator.
    *
+   * \note When building a kernel library, we always recommend use FromEnvAlloc when possible to
+   * allocate intermediate Tensors. When a loaded module returns an allocated tensor to the caller,
+   * we need to keep the module alive before the returned tensors get freed, because its
+   * deleter is defined within the module. FromNDAlloc can be used by C++ applications and runtimes
+   * to create Tensors.
    *
    * Example usage:
    * \code
