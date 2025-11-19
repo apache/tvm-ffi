@@ -225,11 +225,21 @@ TEST(Schema, DLLExportedFuncDocumentation) {
                 CallMetadataFunc(__tvm_ffi__metadata_testing_dll_test_add_with_docstring)),
             R"({"type":"ffi.Function","args":[{"type":"int"},{"type":"int"},{"type":"int"}]})");
   String doc = CallMetadataFunc(__tvm_ffi__doc_testing_dll_test_add_with_docstring);
-  EXPECT_GT(doc.length(), 0);
   std::string doc_str(doc);
-  EXPECT_TRUE(doc_str.find("Add two integers") != std::string::npos);
-  EXPECT_TRUE(doc_str.find("Parameters") != std::string::npos);
-  EXPECT_TRUE(doc_str.find("Returns") != std::string::npos);
+  EXPECT_EQ(doc_str,
+            R"(Add two integers and return the sum.
+
+Parameters
+----------
+a : int
+    First integer
+b : int
+    Second integer
+
+Returns
+-------
+result : int
+    Sum of a and b)");
 }
 
 }  // namespace

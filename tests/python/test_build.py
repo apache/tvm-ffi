@@ -204,6 +204,24 @@ def test_build_inline_with_metadata() -> None:  # noqa: PLR0915
 def test_build_inline_with_docstrings() -> None:
     """Test building functions with documentation using the functions dict."""
     # Keep module alive until all returned objects are destroyed
+    add_docstring = (
+        "Add two integers and return the sum.\n"
+        "\n"
+        "Parameters\n"
+        "----------\n"
+        "a : int\n"
+        "    First integer\n"
+        "b : int\n"
+        "    Second integer\n"
+        "\n"
+        "Returns\n"
+        "-------\n"
+        "result : int\n"
+        "    Sum of a and b"
+    )
+
+    divide_docstring = "Divides two floats. Returns a/b."
+
     mod: Module = tvm_ffi.cpp.load_inline(
         name="test_docs",
         cpp_sources=r"""
@@ -221,23 +239,9 @@ def test_build_inline_with_docstrings() -> None:
             }
         """,
         functions={
-            "add": (
-                "Add two integers and return the sum.\n"
-                "\n"
-                "Parameters\n"
-                "----------\n"
-                "a : int\n"
-                "    First integer\n"
-                "b : int\n"
-                "    Second integer\n"
-                "\n"
-                "Returns\n"
-                "-------\n"
-                "result : int\n"
-                "    Sum of a and b"
-            ),
+            "add": add_docstring,
             "subtract": "",  # No documentation
-            "divide": "Divides two floats. Returns a/b.",
+            "divide": divide_docstring,
         },
         extra_cflags=["-DTVM_FFI_DLL_EXPORT_INCLUDE_METADATA=1"],
     )
@@ -251,9 +255,7 @@ def test_build_inline_with_docstrings() -> None:
 
     doc = mod.get_function_doc("add")
     assert doc is not None, "add should have documentation"
-    assert "Add two integers" in doc
-    assert "Parameters" in doc
-    assert "Returns" in doc
+    assert doc == add_docstring
 
     # Test subtract function without documentation
     assert mod.subtract(10, 5) == 5
@@ -275,8 +277,7 @@ def test_build_inline_with_docstrings() -> None:
 
     doc = mod.get_function_doc("divide")
     assert doc is not None, "divide should have documentation"
-    assert "Divides two floats" in doc
-    assert "a/b" in doc
+    assert doc == divide_docstring
 
     # Explicitly cleanup all objects before module unload to avoid use-after-free
     del metadata, schema, doc, result, mod

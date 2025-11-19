@@ -353,16 +353,21 @@ def build_ninja(build_dir: str) -> None:
         raise RuntimeError("\n".join(msg))
 
 
-def _escape_cpp_string_literal(s: str) -> str:
-    """Escape special characters for C++ string literals."""
-    trans_map: dict[str, str | int | None] = {
+# Translation table for escaping C++ string literals
+_CPP_ESCAPE_TABLE = str.maketrans(
+    {
         "\\": "\\\\",
         '"': '\\"',
         "\n": "\\n",
         "\r": "\\r",
         "\t": "\\t",
     }
-    return s.translate(str.maketrans(trans_map))
+)
+
+
+def _escape_cpp_string_literal(s: str) -> str:
+    """Escape special characters for C++ string literals."""
+    return s.translate(_CPP_ESCAPE_TABLE)
 
 
 def _decorate_with_tvm_ffi(source: str, functions: Mapping[str, str]) -> str:

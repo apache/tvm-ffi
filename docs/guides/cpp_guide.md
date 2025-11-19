@@ -330,14 +330,14 @@ TVM_FFI_DLL_EXPORT_TYPED_FUNC(process_batch, ProcessBatch);
 // Export documentation separately (make sure TVM_FFI_DLL_EXPORT_INCLUDE_METADATA is set to 1)
 TVM_FFI_DLL_EXPORT_TYPED_FUNC_DOC(
     process_batch,
-    "Process a batch of inputs and write results to output tensor.\n"
-    "\n"
-    "Parameters\n"
-    "----------\n"
-    "input : TensorView\n"
-    "    Input tensor to process\n"
-    "output : TensorView\n"
-    "    Output tensor for results");
+    R"(Process a batch of inputs and write results to output tensor.
+
+Parameters
+----------
+input : TensorView
+    Input tensor to process
+output : TensorView
+    Output tensor for results)");
 
 // Query documentation
 ffi::Optional<ffi::String> doc = mod->GetFunctionDoc("process_batch");

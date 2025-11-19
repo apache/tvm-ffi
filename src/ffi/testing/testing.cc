@@ -525,18 +525,18 @@ TVM_FFI_DLL_EXPORT_TYPED_FUNC(testing_dll_schema_id_int, tvm::ffi::schema_test_i
 TVM_FFI_DLL_EXPORT_TYPED_FUNC(testing_dll_test_add_with_docstring,
                               tvm::ffi::schema_test_impl::test_add_with_docstring);
 TVM_FFI_DLL_EXPORT_TYPED_FUNC_DOC(testing_dll_test_add_with_docstring,
-                                  "Add two integers and return the sum.\n"
-                                  "\n"
-                                  "Parameters\n"
-                                  "----------\n"
-                                  "a : int\n"
-                                  "    First integer\n"
-                                  "b : int\n"
-                                  "    Second integer\n"
-                                  "\n"
-                                  "Returns\n"
-                                  "-------\n"
-                                  "result : int\n"
-                                  "    Sum of a and b");
+                                  R"(Add two integers and return the sum.
+
+Parameters
+----------
+a : int
+    First integer
+b : int
+    Second integer
+
+Returns
+-------
+result : int
+    Sum of a and b)");
 
 extern "C" TVM_FFI_DLL_EXPORT int TVMFFITestingDummyTarget() { return 0; }
