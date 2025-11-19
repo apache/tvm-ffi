@@ -366,14 +366,12 @@ def _decorate_with_tvm_ffi(source: str, functions: Mapping[str, str]) -> str:
     ]
 
     for func_name, func_doc in functions.items():
+        sources.append(f"TVM_FFI_DLL_EXPORT_TYPED_FUNC({func_name}, {func_name});")
+
         if func_doc:
             # Escape the docstring for C++ string literal
             escaped_doc = func_doc.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
-            sources.append(
-                f'TVM_FFI_DLL_EXPORT_TYPED_FUNC_WITH_DOC({func_name}, {func_name}, "{escaped_doc}");'
-            )
-        else:
-            sources.append(f"TVM_FFI_DLL_EXPORT_TYPED_FUNC({func_name}, {func_name});")
+            sources.append(f'TVM_FFI_DLL_EXPORT_TYPED_FUNC_DOC({func_name}, "{escaped_doc}");')
 
     sources.append("")
 

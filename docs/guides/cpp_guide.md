@@ -315,16 +315,21 @@ if (metadata.has_value()) {
 }
 ```
 
-For functions that need documentation, use the `TVM_FFI_DLL_EXPORT_TYPED_FUNC_DOC` variant:
+For functions that need documentation, use the `TVM_FFI_DLL_EXPORT_TYPED_FUNC_DOC` macro separately:
 
 ```cpp
+#define TVM_FFI_DLL_EXPORT_INCLUDE_METADATA 1
+
 void ProcessBatch(ffi::TensorView input, ffi::TensorView output) {
   // ... implementation
 }
 
+// Export the function
+TVM_FFI_DLL_EXPORT_TYPED_FUNC(process_batch, ProcessBatch);
+
+// Export documentation separately (make sure TVM_FFI_DLL_EXPORT_INCLUDE_METADATA is set to 1)
 TVM_FFI_DLL_EXPORT_TYPED_FUNC_DOC(
     process_batch,
-    ProcessBatch,
     "Process a batch of inputs and write results to output tensor.\n"
     "\n"
     "Parameters\n"

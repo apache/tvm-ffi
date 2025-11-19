@@ -236,8 +236,6 @@ class Module(core.Object):
         """Get documentation string for a function exported from the module.
 
         This retrieves documentation for functions exported via c:macro:`TVM_FFI_DLL_EXPORT_TYPED_FUNC_DOC`.
-        If the function was exported with c:macro:`TVM_FFI_DLL_EXPORT_TYPED_FUNC`, this function will
-        return None.
 
         Parameters
         ----------
