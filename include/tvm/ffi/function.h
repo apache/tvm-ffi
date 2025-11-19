@@ -981,15 +981,15 @@ inline int32_t TypeKeyToIndex(std::string_view type_key) {
  * \note The exported symbol name is `__tvm_ffi__doc_<ExportName>` (docstring getter function).
  *       This symbol is only exported when TVM_FFI_DLL_EXPORT_INCLUDE_METADATA is defined.
  */
- #if TVM_FFI_DLL_EXPORT_INCLUDE_METADATA
- #define TVM_FFI_DLL_EXPORT_TYPED_FUNC_DOC(ExportName, DocString)           \
-   static inline ::tvm::ffi::String __tvm_ffi_get_doc_##ExportName() {      \
-     return ::tvm::ffi::String(DocString);                                  \
-   }                                                                        \
-   TVM_FFI_DLL_EXPORT_TYPED_FUNC_IMPL_(_doc_##ExportName, __tvm_ffi_get_doc_##ExportName)
- #else
- #define TVM_FFI_DLL_EXPORT_TYPED_FUNC_DOC(ExportName, DocString)
- #endif
+#if TVM_FFI_DLL_EXPORT_INCLUDE_METADATA
+#define TVM_FFI_DLL_EXPORT_TYPED_FUNC_DOC(ExportName, DocString)      \
+  static inline ::tvm::ffi::String __tvm_ffi_get_doc_##ExportName() { \
+    return ::tvm::ffi::String(DocString);                             \
+  }                                                                   \
+  TVM_FFI_DLL_EXPORT_TYPED_FUNC_IMPL_(_doc_##ExportName, __tvm_ffi_get_doc_##ExportName)
+#else
+#define TVM_FFI_DLL_EXPORT_TYPED_FUNC_DOC(ExportName, DocString)
+#endif
 
 }  // namespace ffi
 }  // namespace tvm
