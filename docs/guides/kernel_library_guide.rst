@@ -38,8 +38,7 @@ Both :cpp:class:`~tvm::ffi::Tensor` and :cpp:class:`~tvm::ffi::TensorView` are d
 :cpp:class:`tvm::ffi::TensorView`
  :cpp:class:`~tvm::ffi::TensorView` is a non-owning view of an existing tensor, pointing to an existing tensor (e.g., a tensor allocated by PyTorch).
 
-It is **recommended** to use :cpp:class:`~tvm::ffi::TensorView` when possible, that helps us to support more cases, including cases where only view but not strong reference are passed, like XLA buffer.
-It is also more lightweight. However, since :cpp:class:`~tvm::ffi::TensorView` is a non-owning view, it is the user's responsibility to ensure the lifetime of underlying tensor.
+It is **recommended** to use :cpp:class:`~tvm::ffi::TensorView` when possible, that helps us to support more cases, including cases where only view but not strong reference are passed, like XLA buffer. It is also more lightweight. However, since :cpp:class:`~tvm::ffi::TensorView` is a non-owning view, it is the user's responsibility to ensure the lifetime of underlying tensor.
 
 Tensor Attributes
 -----------------
@@ -89,7 +88,11 @@ which is equivalent to:
 FromNDAlloc
 ^^^^^^^^^^^
 
-:cpp:func:`tvm::ffi::Tensor::FromNDAlloc` can be used in linked runtime libraries and c++ applications, since these scenarios keep the library alive globally throughout the entire lifetime of the process. It is of simple use by providing a custom memory allocator and deleter for tensor allocation and free, rather than relying on the framework tensor allocator. However, the tensors allocated by ``FromNDAlloc`` only retain the function pointer to its custom deleter for deconstruction. The custom deletes are all owned by the kernel library still. So it is important to make sure the loaded kernel library, :py:class:`tvm_ffi.Module`, outlives the tensors allocated by ``FromNDAlloc``. Otherwise, the function pointers to the custom deleter will be invalid. Here a typical approach is to retain the loaded :py:class:`tvm_ffi.Module` globally or for the period of time.
+:cpp:func:`tvm::ffi::Tensor::FromNDAlloc` can be used to create a tensor with custom memory allocator. It is of simple usage by providing a custom memory allocator and deleter for tensor allocation and free each, rather than relying on any framework tensor allocator.
+
+However, the tensors allocated by :cpp:func:`tvm::ffi::Tensor::FromNDAlloc` only retain the function pointer to its custom deleter for deconstruction. The custom deleters are all owned by the kernel library still. So it is important to make sure the loaded kernel library, :py:class:`tvm_ffi.Module`, outlives the tensors allocated by :cpp:func:`tvm::ffi::Tensor::FromNDAlloc`. Otherwise, the function pointers to the custom deleter will be invalid. Here a typical approach is to retain the loaded :py:class:`tvm_ffi.Module` globally or for the period of time.
+
+But in the scenarios of linked runtime libraries and c++ applications, the libraries alive globally throughout the entire lifetime of the process. So :cpp:func:`tvm::ffi::Tensor::FromNDAlloc` works well in these scenarios without the use-after-delete issue above. Otherwise, in general, :cpp:func:`tvm::ffi::Tensor::FromEnvAlloc` is free of this issue, which is more **recommended** in practice.
 
 FromDLPack
 ^^^^^^^^^^
