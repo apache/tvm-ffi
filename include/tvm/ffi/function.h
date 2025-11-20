@@ -888,6 +888,7 @@ inline int32_t TypeKeyToIndex(std::string_view type_key) {
     TVM_FFI_SAFE_CALL_END();                                                           \
   }                                                                                    \
   }
+/// \endcond
 
 /*!
  * \brief Export typed function as a SafeCallType symbol that follows the FFI ABI.
