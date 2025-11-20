@@ -43,7 +43,7 @@ It is **recommended** to use :cpp:class:`~tvm::ffi::TensorView` when possible, t
 Tensor Attributes
 -----------------
 
-For the sake of convenience, :cpp:class:`~tvm::ffi::TensorView` and :cpp:class:`~tvm::ffi::Tensor` align the following attributes retrieval mehtods to :cpp:class:`at::Tensor` interface, to obtain tensor basic attributes and storage pointer:
+For convenience, :cpp:class:`~tvm::ffi::TensorView` and :cpp:class:`~tvm::ffi::Tensor` align the following attributes retrieval mehtods to :cpp:class:`at::Tensor` interface, to obtain tensor basic attributes and storage pointer:
 ``dim``, ``dtype``, ``sizes``, ``size``, ``strides``, ``stride``, ``numel``, ``data_ptr``, ``device``, ``is_contiguous``
 
 Please refer to the documentation of both tensor classes for their details. Here  highlight some non-primitive attributes:
