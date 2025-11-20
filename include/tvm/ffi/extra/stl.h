@@ -24,8 +24,11 @@
  * which provides support for STL containers in C++ exported functions.
  *
  * Whenever possible, prefer using tvm/ffi/container/ implementations,
- * such as `tvm::ffi::Array` and `tvm::ffi::Tuple`, over STL containers
- * in exported functions for better performance and compatibility.
+ * such as `tvm::ffi::Array` and `tvm::ffi::Tuple`, over STL containers.
+ *
+ * Native ffi objects comes with stable data layout and can be directly accessed
+ * through compiled languages (Rust) and DSLs(via LLVM) with raw pointer access
+ * for better performance and compatibility.
  */
 #ifndef TVM_FFI_EXTRA_STL_H_
 #define TVM_FFI_EXTRA_STL_H_
