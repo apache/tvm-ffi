@@ -335,9 +335,9 @@ Variant<int64_t, String, Array<int64_t>> schema_variant_mix(
 }
 
 // Complex nested types
-Map<String, Array<int64_t>> schema_arr_map_opt(Array<Optional<int64_t>> arr,
+Map<String, Array<int64_t>> schema_arr_map_opt(const Array<Optional<int64_t>>& arr,
                                                Map<String, Array<int64_t>> mp,
-                                               Optional<String> os) {
+                                               const Optional<String>& os) {
   // no-op combine
   if (os.has_value()) {
     Array<int64_t> extra;

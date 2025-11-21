@@ -31,9 +31,12 @@
 
 // Forward declarations for exported FFI functions
 extern "C" {
+// NOLINTNEXTLINE(bugprone-reserved-identifier)
 int __tvm_ffi__metadata_testing_dll_schema_id_int(void*, const TVMFFIAny*, int32_t, TVMFFIAny*);
+// NOLINTNEXTLINE(bugprone-reserved-identifier)
 int __tvm_ffi__metadata_testing_dll_test_add_with_docstring(void*, const TVMFFIAny*, int32_t,
                                                             TVMFFIAny*);
+// NOLINTNEXTLINE(bugprone-reserved-identifier)
 int __tvm_ffi__doc_testing_dll_test_add_with_docstring(void*, const TVMFFIAny*, int32_t,
                                                        TVMFFIAny*);
 }
