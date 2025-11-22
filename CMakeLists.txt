@@ -208,6 +208,10 @@ option(TVM_FFI_BUILD_PYTHON_MODULE "Adding python module." OFF)
 if (TVM_FFI_BUILD_PYTHON_MODULE)
   # Helper function to build the cython module
   message(STATUS "Building cython module..")
+
+  # prefer virtualenv when searching for python
+  set(Python_FIND_VIRTUALENV FIRST) # cmake-lint: disable=C0103
+
   find_package(
     Python
     COMPONENTS Interpreter Development.Module Development.SABIModule

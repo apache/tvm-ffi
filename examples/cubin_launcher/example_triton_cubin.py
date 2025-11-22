@@ -1,0 +1,221 @@
+#!/usr/bin/env python3
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+"""Single-file Triton example: define kernel, compile to CUBIN, load via inline C++.
+
+This script:
+1. Embeds a minimal Triton kernel definition (elementwise square)
+2. Compiles it to a CUBIN using the Triton runtime API
+3. Defines C++ code inline using tvm_ffi.cpp.load_inline to load the CUBIN
+4. Launches the kernel through the TVM-FFI exported function pointer
+
+Notes:
+- Requires `triton` to be installed in the Python environment.
+
+"""
+
+from __future__ import annotations
+
+import sys
+import traceback
+from pathlib import Path
+
+import torch
+import triton  # type: ignore[import-not-found]
+import triton.language as tl  # type: ignore[import-not-found]
+from tvm_ffi import cpp
+
+
+def _compile_triton_to_cubin() -> tuple[bytes, str]:
+    """Define a Triton kernel in-process and compile it to a CUBIN file.
+
+    The kernel is named `square_kernel` and computes y[i] = x[i] * x[i].
+    Returns (cubin_bytes, ptx_source)
+    """
+
+    # Define the kernel dynamically
+    @triton.jit
+    def square_kernel(X_ptr, Y_ptr, n, BLOCK: tl.constexpr = 1024):  # noqa
+        pid = tl.program_id(0)
+        start = pid * BLOCK
+        offsets = start + tl.arange(0, BLOCK)
+        mask = offsets < n
+        x = tl.load(X_ptr + offsets, mask=mask, other=0.0)
+        y = x * x
+        tl.store(Y_ptr + offsets, y, mask=mask)
+
+    # Trigger kernel compilation by doing a dummy call
+    x_dummy = torch.ones(1024, dtype=torch.float32, device="cuda")
+    y_dummy = torch.empty(1024, dtype=torch.float32, device="cuda")
+    square_kernel[1, 1](x_dummy, y_dummy, 1024)
+
+    # Extract compiled CUBIN from the device cache
+    device_caches = square_kernel.device_caches
+    device_id = next(iter(device_caches.keys()))
+    cache_tuple = device_caches[device_id]
+    compiled_kernel = next(iter(cache_tuple[0].values()))
+
+    # Get CUBIN bytes and PTX source
+    cubin_bytes = compiled_kernel.kernel
+    ptx_source = (
+        compiled_kernel.asm.get("ptx", "")
+        if hasattr(compiled_kernel.asm, "get")
+        else str(compiled_kernel.asm)
+    )
+
+    return cubin_bytes, ptx_source
+
+
+def main() -> int:  # noqa: PLR0911,PLR0915
+    """Load and launch Triton kernel through TVM-FFI."""
+    print("Example: Triton (inline) -> CUBIN -> C++ (inline) -> TVM-FFI")
+    print("=" * 60)
+
+    if not torch.cuda.is_available():
+        print("[ERROR] CUDA is not available")
+        return 1
+
+    print(f"CUDA device: {torch.cuda.get_device_name(0)}")
+    print(f"PyTorch version: {torch.__version__}\n")
+
+    base = Path(__file__).resolve().parent
+    build_dir = base / "build"
+    build_dir.mkdir(parents=True, exist_ok=True)
+
+    # Compile Triton kernel to CUBIN
+    try:
+        print("Compiling Triton kernel to CUBIN...")
+        cubin_bytes, ptx_source = _compile_triton_to_cubin()
+        print(f"Compiled CUBIN: {len(cubin_bytes)} bytes")
+        print("\n" + "=" * 60)
+        print("PTX Source:")
+        print("=" * 60)
+        print(ptx_source)
+        print("=" * 60 + "\n")
+    except Exception as e:
+        print(f"[ERROR] Failed to compile Triton kernel: {e}")
+        traceback.print_exc()
+        return 2
+
+    # Write CUBIN to file
+    cubin_path = build_dir / "triton_square.cubin"
+    with cubin_path.open("wb") as f:
+        f.write(cubin_bytes)
+    print(f"Wrote CUBIN to: {cubin_path}\n")
+
+    # Define C++ code inline to load and launch the Triton kernel
+    cpp_code = """
+#include <tvm/ffi/container/tensor.h>
+#include <tvm/ffi/error.h>
+#include <tvm/ffi/extra/c_env_api.h>
+#include <tvm/ffi/extra/cubin_launcher.h>
+#include <tvm/ffi/function.h>
+#include <tvm/ffi/string.h>
+
+#include <memory>
+
+namespace triton_loader {
+
+static std::unique_ptr<tvm::ffi::CubinModule> g_module;
+static std::unique_ptr<tvm::ffi::CubinKernel> g_kernel;
+
+void LoadCubin(const tvm::ffi::String& path) {
+  g_module = std::make_unique<tvm::ffi::CubinModule>(path.c_str());
+  g_kernel = std::make_unique<tvm::ffi::CubinKernel>((*g_module)["square_kernel"]);
+}
+
+void LaunchSquare(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
+  TVM_FFI_CHECK(g_module != nullptr, RuntimeError)
+      << "CUBIN module not loaded. Call load_cubin first.";
+  TVM_FFI_CHECK(x.ndim() == 1, ValueError) << "Input must be 1D tensor";
+  TVM_FFI_CHECK(y.ndim() == 1, ValueError) << "Output must be 1D tensor";
+  TVM_FFI_CHECK(x.size(0) == y.size(0), ValueError) << "Sizes must match";
+
+  uint32_t n = static_cast<uint32_t>(x.size(0));
+  void* x_ptr = x.data_ptr();
+  void* y_ptr = y.data_ptr();
+  uint64_t dummy_ptr = 0;
+
+  // Workaround for Triton extra params: pass dummy addresses for unused parameters
+  void* args[] = {&x_ptr, &y_ptr, &n, &dummy_ptr, &dummy_ptr};
+
+  // Kernel was compiled with .reqntid 128, not 1024
+  tvm::ffi::dim3 grid((n + 127) / 128);
+  tvm::ffi::dim3 block(128);
+
+  DLDevice device = x.device();
+  CUstream stream = static_cast<CUstream>(TVMFFIEnvGetStream(device.device_type, device.device_id));
+
+  CUresult result = g_kernel->Launch(args, grid, block, stream);
+  TVM_FFI_CHECK_CUDA_DRIVER_ERROR(result);
+}
+
+TVM_FFI_DLL_EXPORT_TYPED_FUNC(load_cubin, triton_loader::LoadCubin);
+TVM_FFI_DLL_EXPORT_TYPED_FUNC(launch_square, triton_loader::LaunchSquare);
+
+}  // namespace triton_loader
+"""
+
+    print("Compiling C++ code with tvm_ffi.cpp.load_inline...")
+    try:
+        mod = cpp.load_inline(
+            "triton_loader", cuda_sources=cpp_code, extra_ldflags=["-lcuda", "-lcudart"]
+        )
+        print("Successfully compiled and loaded C++ code")
+    except Exception as e:
+        print(f"[ERROR] Failed to compile C++ code: {e}")
+        traceback.print_exc()
+        return 3
+
+    # Load cubin through the inline loader
+    try:
+        load_cubin_fn = mod["load_cubin"]
+    except Exception as e:
+        print(f"[ERROR] load_cubin function not found in module: {e}")
+        return 4
+
+    load_cubin_fn(str(cubin_path))
+    print(f"Loaded CUBIN into process: {cubin_path}\n")
+
+    # Get the launch function
+    try:
+        launch_fn = mod["launch_square"]
+    except Exception as e:
+        print(f"[ERROR] launch_square function not found in module: {e}")
+        return 5
+
+    # Test kernel: compute square
+    print("[Test] square kernel")
+    n = 4096
+    x = torch.arange(n, dtype=torch.float32, device="cuda") * 0.5
+    y = torch.empty(n, dtype=torch.float32, device="cuda")
+
+    print(f"  Input shape: {x.shape}, device: {x.device}")
+    launch_fn(x, y)
+
+    expected = x * x
+    if torch.allclose(y, expected):
+        print(f"  [PASS] Verified {n} elements correctly")
+        return 0
+    else:
+        print(f"  [FAIL] Verification failed, max error: {(y - expected).abs().max().item()}")
+        return 6
+
+
+if __name__ == "__main__":
+    sys.exit(main())
