@@ -33,6 +33,10 @@
 #define TVM_FFI_DLL_EXPORT_INCLUDE_METADATA 0
 #endif
 
+#if TVM_FFI_DLL_EXPORT_INCLUDE_METADATA
+#include <sstream>
+#endif  // TVM_FFI_DLL_EXPORT_INCLUDE_METADATA
+
 #include <tvm/ffi/any.h>
 #include <tvm/ffi/base_details.h>
 #include <tvm/ffi/c_api.h>
@@ -40,7 +44,9 @@
 #include <tvm/ffi/function_details.h>
 
 #include <functional>
+#include <optional>
 #include <string>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -165,20 +171,18 @@ class FunctionObjImpl : public FunctionObj {
 
   /*!
    * \brief Derived object class for constructing ffi::FunctionObj.
-   * \param callable The type-erased callable object (rvalue).
+   * \param args The arguments to construct TCallable
    */
-  explicit FunctionObjImpl(TCallable&& callable) : callable_(std::move(callable)) {
+  template <typename... Args>
+  explicit FunctionObjImpl(Args&&... args) : callable_(std::forward<Args>(args)...) {
     this->safe_call = SafeCall;
     this->cpp_call = reinterpret_cast<void*>(CppCall);
   }
-  /*!
-   * \brief Derived object class for constructing ffi::FunctionObj.
-   * \param callable The type-erased callable object (lvalue).
-   */
-  explicit FunctionObjImpl(const TCallable& callable) : callable_(callable) {
-    this->safe_call = SafeCall;
-    this->cpp_call = reinterpret_cast<void*>(CppCall);
-  }
+
+  FunctionObjImpl(const FunctionObjImpl&) = delete;
+  FunctionObjImpl& operator=(const FunctionObjImpl&) = delete;
+
+  TCallable& GetCallable() { return callable_; }
 
  private:
   // implementation of call
@@ -537,6 +541,18 @@ class Function : public ObjectRef {
           std::make_index_sequence<FuncInfo::num_args>{}, &name, callable, args, num_args, rv);
     };
     return FromPackedInternal(std::move(call_packed));
+  }
+
+  template <typename TCallable>
+  static auto FromOverloaded(TCallable&& callable, std::optional<std::string> name = std::nullopt)
+      -> std::tuple<Function, details::OverloadBase*> {
+    // We must make TCallable a value type (decay_t) that can hold the callable object
+    using ObjType = details::FunctionObjImpl<details::OverloadedFunction<std::decay_t<TCallable>>>;
+    Function func;
+    auto obj_ptr = make_object<ObjType>(std::forward<TCallable>(callable), std::move(name));
+    auto& call_ref = obj_ptr->GetCallable();
+    func.data_ = std::move(obj_ptr);
+    return {std::move(func), &call_ref};
   }
 
   /*!

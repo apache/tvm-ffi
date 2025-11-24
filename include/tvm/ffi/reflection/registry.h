@@ -28,6 +28,7 @@
 #include <tvm/ffi/container/map.h>
 #include <tvm/ffi/container/variant.h>
 #include <tvm/ffi/function.h>
+#include <tvm/ffi/function_details.h>
 #include <tvm/ffi/optional.h>
 #include <tvm/ffi/string.h>
 #include <tvm/ffi/type_traits.h>
@@ -36,6 +37,8 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <type_traits>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -92,7 +95,7 @@ class Metadata : public InfoTrait {
 
  private:
   friend class GlobalDef;
-  template <typename T>
+  template <typename T, bool AllowOverload>
   friend class ObjectDef;
   /*!
    * \brief Move metadata into a vector of key-value pairs.
@@ -270,51 +273,59 @@ class ReflectionDefBase {
     }
   }
 
-  template <typename Class, typename R, typename... Args>
-  TVM_FFI_INLINE static Function GetMethod(std::string name, R (Class::*func)(Args...)) {
-    static_assert(std::is_base_of_v<ObjectRef, Class> || std::is_base_of_v<Object, Class>,
-                  "Class must be derived from ObjectRef or Object");
-    if constexpr (std::is_base_of_v<ObjectRef, Class>) {
-      auto fwrap = [func](Class target, Args... params) -> R {
-        // call method pointer
-        return (target.*func)(std::forward<Args>(params)...);
-      };
-      return ffi::Function::FromTyped(fwrap, std::move(name));
-    }
-
-    if constexpr (std::is_base_of_v<Object, Class>) {
-      auto fwrap = [func](const Class* target, Args... params) -> R {
-        // call method pointer
-        return (const_cast<Class*>(target)->*func)(std::forward<Args>(params)...);
-      };
-      return ffi::Function::FromTyped(fwrap, std::move(name));
-    }
-  }
-
-  template <typename Class, typename R, typename... Args>
-  TVM_FFI_INLINE static Function GetMethod(std::string name, R (Class::*func)(Args...) const) {
-    static_assert(std::is_base_of_v<ObjectRef, Class> || std::is_base_of_v<Object, Class>,
-                  "Class must be derived from ObjectRef or Object");
-    if constexpr (std::is_base_of_v<ObjectRef, Class>) {
-      auto fwrap = [func](const Class& target, Args... params) -> R {
-        // call method pointer
-        return (target.*func)(std::forward<Args>(params)...);
-      };
-      return ffi::Function::FromTyped(fwrap, std::move(name));
-    }
-
-    if constexpr (std::is_base_of_v<Object, Class>) {
-      auto fwrap = [func](const Class* target, Args... params) -> R {
-        // call method pointer
-        return (target->*func)(std::forward<Args>(params)...);
-      };
-      return ffi::Function::FromTyped(fwrap, std::move(name));
-    }
+  template <typename Func>
+  TVM_FFI_INLINE static Function GetMethod(std::string name, Func&& func) {
+    return ffi::Function::FromTyped(WrapFunction(std::forward<Func>(func)), std::move(name));
   }
 
   template <typename Func>
-  TVM_FFI_INLINE static Function GetMethod(std::string name, Func&& func) {
-    return ffi::Function::FromTyped(std::forward<Func>(func), std::move(name));
+  TVM_FFI_INLINE static auto GetOverloadMethod(std::string name, Func&& func) {
+    return ffi::Function::FromOverloaded(WrapFunction(std::forward<Func>(func)), std::move(name));
+  }
+
+  template <typename Func>
+  TVM_FFI_INLINE static auto NewOverload(std::string name, Func&& func) {
+    return details::CreateNewOverload(WrapFunction(std::forward<Func>(func)), std::move(name));
+  }
+
+ private:
+  template <typename Func>
+  TVM_FFI_INLINE static Func&& WrapFunction(Func&& func) {
+    return std::forward<Func>(func);
+  }
+  template <typename Class, typename R, typename... Args>
+  TVM_FFI_INLINE static auto WrapFunction(R (Class::*func)(Args...)) {
+    static_assert(std::is_base_of_v<ObjectRef, Class> || std::is_base_of_v<Object, Class>,
+                  "Class must be derived from ObjectRef or Object");
+    if constexpr (std::is_base_of_v<ObjectRef, Class>) {
+      return [func](Class target, Args... params) -> R {
+        // call method pointer
+        return (target.*func)(std::forward<Args>(params)...);
+      };
+    }
+    if constexpr (std::is_base_of_v<Object, Class>) {
+      return [func](const Class* target, Args... params) -> R {
+        // call method pointer
+        return (const_cast<Class*>(target)->*func)(std::forward<Args>(params)...);
+      };
+    }
+  }
+  template <typename Class, typename R, typename... Args>
+  TVM_FFI_INLINE static auto WrapFunction(R (Class::*func)(Args...) const) {
+    static_assert(std::is_base_of_v<ObjectRef, Class> || std::is_base_of_v<Object, Class>,
+                  "Class must be derived from ObjectRef or Object");
+    if constexpr (std::is_base_of_v<ObjectRef, Class>) {
+      return [func](const Class& target, Args... params) -> R {
+        // call method pointer
+        return (target.*func)(std::forward<Args>(params)...);
+      };
+    }
+    if constexpr (std::is_base_of_v<Object, Class>) {
+      return [func](const Class* target, Args... params) -> R {
+        // call method pointer
+        return (target->*func)(std::forward<Args>(params)...);
+      };
+    }
   }
 };
 /// \endcond
@@ -436,7 +447,7 @@ class GlobalDef : public ReflectionDefBase {
 template <typename... Args>
 struct init {
   // Allow ObjectDef to access the execute function
-  template <typename Class>
+  template <typename Class, bool AllowOverload>
   friend class ObjectDef;
 
   /*!
@@ -466,7 +477,7 @@ struct init {
  * refl::ObjectDef<MyClass>().def_ro("my_field", &MyClass::my_field);
  * \endcode
  */
-template <typename Class>
+template <typename Class, bool AllowOverload = false>
 class ObjectDef : public ReflectionDefBase {
  public:
   /*!
@@ -643,8 +654,29 @@ class ObjectDef : public ReflectionDefBase {
     if (is_static) {
       info.flags |= kTVMFFIFieldFlagBitMaskIsStaticMethod;
     }
-    // obtain the method function
-    Function method = GetMethod(std::string(type_key_) + "." + name, std::forward<Func>(func));
+
+    Function method{nullptr};
+    auto method_name = std::string(type_key_) + "." + name;
+
+    if constexpr (AllowOverload) {
+      if (const auto overload_it = registered_fields_.find(name);
+          overload_it != registered_fields_.end()) {
+        // if overload method exists, register to existing overload function
+        details::OverloadBase* overload_ptr = overload_it->second;
+        return overload_ptr->Register(
+            NewOverload(std::move(method_name), std::forward<Func>(func)));
+      } else {
+        // first time registering overload method
+        auto [method_, overload_ptr] =
+            GetOverloadMethod(std::move(method_name), std::forward<Func>(func));
+        registered_fields_.try_emplace(name, overload_ptr);
+        method = std::move(method_);
+      }
+    } else {
+      // normal method registration
+      method = GetMethod(std::move(method_name), std::forward<Func>(func));
+    }
+
     info.method = AnyView(method).CopyToTVMFFIAny();
     info.metadata_.emplace_back("type_schema", FuncInfo::TypeSchema());
     // apply method info traits
@@ -654,8 +686,16 @@ class ObjectDef : public ReflectionDefBase {
     TVM_FFI_CHECK_SAFE_CALL(TVMFFITypeRegisterMethod(type_index_, &info));
   }
 
+  struct EmptyType {};
+
+  using OverloadMap =
+      std::conditional_t<AllowOverload, std::unordered_map<std::string, details::OverloadBase*>,
+                         EmptyType>;
+
   int32_t type_index_;
   const char* type_key_;
+  [[maybe_unused]]
+  OverloadMap registered_fields_;
   static constexpr const char* kInitMethodName = "__ffi_init__";
 };
 
