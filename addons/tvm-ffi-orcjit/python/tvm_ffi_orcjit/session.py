@@ -18,12 +18,10 @@
 
 from __future__ import annotations
 
-
 from tvm_ffi import Object, register_object
 
-from .dylib import DynamicLibrary
-
 from . import _ffi_api
+from .dylib import DynamicLibrary
 
 
 @register_object("orcjit.ExecutionSession")

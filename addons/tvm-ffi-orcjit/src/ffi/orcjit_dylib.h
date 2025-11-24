@@ -114,7 +114,7 @@ class ORCJITDynamicLibraryObj : public ModuleObj {
  */
 class ORCJITDynamicLibrary : public Module {
  public:
-  explicit ORCJITDynamicLibrary(const ObjectPtr<ORCJITDynamicLibraryObj>& ptr) : Module(ptr){};
+  explicit ORCJITDynamicLibrary(const ObjectPtr<ORCJITDynamicLibraryObj>& ptr) : Module(ptr) {};
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(ORCJITDynamicLibrary, Module,
                                                 ORCJITDynamicLibraryObj);
 };

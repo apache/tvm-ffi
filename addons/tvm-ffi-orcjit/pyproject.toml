@@ -64,7 +64,7 @@ sdist.include = [
   "/include/**/*.h",
   "/src/**/*.cc",
   "/src/**/*.cpp",
-  "/python/**/*.py"
+  "/python/**/*.py",
 ]
 
 [tool.scikit-build.cmake.define]
