@@ -27,10 +27,13 @@ import sys
 from collections.abc import Mapping, Sequence
 from contextlib import nullcontext
 from pathlib import Path
+from typing import Any
 
 from tvm_ffi.libinfo import find_dlpack_include_path, find_include_path, find_libtvm_ffi
 from tvm_ffi.module import Module, load_module
 from tvm_ffi.utils import FileLock
+
+from .nvrtc import create_embedded_cubin_objects
 
 IS_WINDOWS = sys.platform == "win32"
 
@@ -45,35 +48,47 @@ def _hash_sources(
     extra_cuda_cflags: Sequence[str],
     extra_ldflags: Sequence[str],
     extra_include_paths: Sequence[str],
+    embed_cubin: Mapping[str, bytes] | None = None,
 ) -> str:
     """Generate a unique hash for the given sources and functions."""
     m = hashlib.sha256()
 
-    def _maybe_hash_string(source: str | None) -> None:
-        if source is not None:
-            m.update(source.encode("utf-8"))
+    def _hash(obj: Any) -> None:
+        if obj is None:
+            m.update(b"None")
+        elif isinstance(obj, str):
+            m.update(b"str")
+            m.update(obj.encode("utf-8"))
+        elif isinstance(obj, bytes):
+            m.update(b"bytes")
+            m.update(obj)
+        elif isinstance(obj, Mapping):
+            m.update(b"Mapping")
+            for key, item in obj.items():
+                _hash(key)
+                _hash(item)
+        elif isinstance(obj, Sequence):
+            m.update(b"Sequence")
+            for item in obj:
+                _hash(item)
+        else:
+            raise ValueError(f"Unsupported type: {type(obj)}")
 
-    def _hash_sequence(seq: Sequence[str]) -> None:
-        for item in seq:
-            m.update(item.encode("utf-8"))
+    _hash(
+        (
+            cpp_source,
+            cuda_source,
+            cpp_files,
+            cuda_files,
+            functions,
+            extra_cflags,
+            extra_cuda_cflags,
+            extra_ldflags,
+            extra_include_paths,
+            embed_cubin,
+        )
+    )
 
-    def _hash_mapping(mapping: Mapping[str, str]) -> None:
-        for key in sorted(mapping):
-            m.update(key.encode("utf-8"))
-            m.update(mapping[key].encode("utf-8"))
-
-    _maybe_hash_string(cpp_source)
-    _maybe_hash_string(cuda_source)
-    _hash_sequence(sorted(cpp_files or []))
-    _hash_sequence(sorted(cuda_files or []))
-    if isinstance(functions, Mapping):
-        _hash_mapping(functions)
-    else:
-        _hash_sequence(sorted(functions))
-    _hash_sequence(extra_cflags)
-    _hash_sequence(extra_cuda_cflags)
-    _hash_sequence(extra_ldflags)
-    _hash_sequence(extra_include_paths)
     return m.hexdigest()[:16]
 
 
@@ -207,7 +222,7 @@ def _run_command_in_dev_prompt(
         ) from e
 
 
-def _generate_ninja_build(  # noqa: PLR0915
+def _generate_ninja_build(  # noqa: PLR0915, PLR0912
     name: str,
     with_cuda: bool,
     extra_cflags: Sequence[str],
@@ -216,6 +231,7 @@ def _generate_ninja_build(  # noqa: PLR0915
     extra_include_paths: Sequence[str],
     cpp_files: Sequence[str],
     cuda_files: Sequence[str],
+    extra_object_files: Sequence[str] | None = None,
 ) -> str:
     """Generate the content of build.ninja for building the module."""
     default_include_paths = [find_include_path(), find_dlpack_include_path()]
@@ -320,6 +336,11 @@ def _generate_ninja_build(  # noqa: PLR0915
         ninja.append("build {}: compile_cuda {}".format(obj_name, cuda_path.replace(":", "$:")))
         link_files.append(obj_name)
 
+    # Add extra object files (e.g., embedded CUBIN objects)
+    if extra_object_files:
+        for obj_path in extra_object_files:
+            link_files.append(obj_path.replace(":", "$:"))
+
     # Use appropriate extension based on platform
     ext = ".dll" if IS_WINDOWS else ".so"
     link_name = " ".join(link_files)
@@ -414,6 +435,7 @@ def _build_impl(
     extra_include_paths: Sequence[str] | None,
     build_directory: str | None,
     need_lock: bool = True,
+    embed_cubin: Mapping[str, bytes] | None = None,
 ) -> str:
     """Real implementation of build function."""
     # need to resolve the path to make it unique
@@ -441,11 +463,17 @@ def _build_impl(
             extra_cuda_cflags_list,
             extra_ldflags_list,
             extra_include_paths_list,
+            embed_cubin,
         )
         build_dir = Path(cache_dir).expanduser() / f"{name}_{source_hash}"
     else:
         build_dir = Path(build_directory).resolve()
     build_dir.mkdir(parents=True, exist_ok=True)
+
+    # Create embedded CUBIN object files if needed
+    extra_object_files: list[str] = []
+    if embed_cubin:
+        extra_object_files = create_embedded_cubin_objects(embed_cubin, build_dir)
 
     # generate build.ninja
     ninja_source = _generate_ninja_build(
@@ -457,6 +485,7 @@ def _build_impl(
         extra_include_paths=extra_include_paths_list,
         cpp_files=cpp_path_list,
         cuda_files=cuda_path_list,
+        extra_object_files=extra_object_files,
     )
 
     # may not hold lock when build_directory is specified, prevent deadlock
@@ -481,6 +510,7 @@ def build_inline(
     extra_ldflags: Sequence[str] | None = None,
     extra_include_paths: Sequence[str] | None = None,
     build_directory: str | None = None,
+    embed_cubin: Mapping[str, bytes] | None = None,
 ) -> str:
     """Compile and build a C++/CUDA module from inline source code.
 
@@ -547,6 +577,13 @@ def build_inline(
         The build directory. If not specified, a default tvm ffi cache directory will be used. By default, the
         cache directory is ``~/.cache/tvm-ffi``. You can also set the ``TVM_FFI_CACHE_DIR`` environment variable to
         specify the cache directory.
+
+    embed_cubin: Mapping[str, bytes], optional
+        A mapping from CUBIN module names to CUBIN binary data. TVM-FFI provides a macro `TVM_FFI_EMBED_CUBIN(name)` to embed
+        CUBIN data into the compiled shared library. The keys should match the names used in `TVM_FFI_EMBED_CUBIN(name)` calls
+        in the C++ source code. The values are the CUBIN binary data bytes. The embedded CUBIN kernels can be accessed by
+        the macro `TVM_FFI_EMBED_CUBIN_GET_KERNEL(name, kernel_name)` defined in the `tvm/ffi/extra/cuda/cubin_launcher.h` header.
+        See the `examples/cubin_launcher` directory for examples how to use cubin launcher to launch CUBIN kernels in TVM-FFI.
 
     Returns
     -------
@@ -640,6 +677,7 @@ def build_inline(
             extra_cuda_cflags_list,
             extra_ldflags_list,
             extra_include_paths_list,
+            embed_cubin,
         )
         build_dir = Path(cache_dir).expanduser() / f"{name}_{source_hash}"
     else:
@@ -665,6 +703,7 @@ def build_inline(
             extra_include_paths=extra_include_paths_list,
             build_directory=str(build_dir),
             need_lock=False,  # already hold the lock
+            embed_cubin=embed_cubin,
         )
 
 
@@ -679,6 +718,7 @@ def load_inline(
     extra_ldflags: Sequence[str] | None = None,
     extra_include_paths: Sequence[str] | None = None,
     build_directory: str | None = None,
+    embed_cubin: Mapping[str, bytes] | None = None,
 ) -> Module:
     """Compile, build and load a C++/CUDA module from inline source code.
 
@@ -746,6 +786,11 @@ def load_inline(
         cache directory is ``~/.cache/tvm-ffi``. You can also set the ``TVM_FFI_CACHE_DIR`` environment variable to
         specify the cache directory.
 
+    embed_cubin: Mapping[str, bytes], optional
+        A mapping from CUBIN module names to CUBIN binary data. When provided, the CUBIN data will be embedded
+        into the compiled shared library using objcopy, making it accessible via the TVM_FFI_EMBED_CUBIN macro.
+        The keys should match the names used in TVM_FFI_EMBED_CUBIN calls in the C++ source code.
+
     Returns
     -------
     mod: Module
@@ -802,6 +847,7 @@ def load_inline(
             extra_ldflags=extra_ldflags,
             extra_include_paths=extra_include_paths,
             build_directory=build_directory,
+            embed_cubin=embed_cubin,
         )
     )
 

@@ -51,15 +51,16 @@ add_custom_target(
 )
 
 # Step 2: Generate object file with embedded CUBIN data for linking This creates symbols:
-# __cubin_data, __cubin_size
+# __tvm_ffi__cubin_env, __tvm_ffi__cubin_env_end
 add_custom_command(
   OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/kernel_cubin_data.o
   COMMAND ${CMAKE_LINKER} -r -b binary -o ${CMAKE_CURRENT_BINARY_DIR}/kernel_cubin_data.o
           kernel.cubin
   COMMAND
     ${CMAKE_OBJCOPY} --rename-section .data=.rodata,alloc,load,readonly,data,contents --redefine-sym
-    _binary_kernel_cubin_start=__cubin_data --redefine-sym _binary_kernel_cubin_end=__cubin_data_end
-    --redefine-sym _binary_kernel_cubin_size=__cubin_size
+    _binary_kernel_cubin_start=__tvm_ffi__cubin_env --redefine-sym
+    _binary_kernel_cubin_end=__tvm_ffi__cubin_env_end --redefine-sym
+    _binary_kernel_cubin_size=__tvm_ffi__cubin_env_size
     ${CMAKE_CURRENT_BINARY_DIR}/kernel_cubin_data.o
   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
   DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/kernel.cubin

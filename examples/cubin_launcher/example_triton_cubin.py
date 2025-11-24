@@ -31,6 +31,7 @@ Notes:
 
 from __future__ import annotations
 
+import os
 import sys
 import traceback
 from pathlib import Path
@@ -81,7 +82,7 @@ def _compile_triton_to_cubin() -> tuple[bytes, str]:
     return cubin_bytes, ptx_source
 
 
-def main() -> int:  # noqa: PLR0911,PLR0915
+def main() -> int:  # noqa: PLR0915
     """Load and launch Triton kernel through TVM-FFI."""
     print("Example: Triton (inline) -> CUBIN -> C++ (inline) -> TVM-FFI")
     print("=" * 60)
@@ -112,36 +113,29 @@ def main() -> int:  # noqa: PLR0911,PLR0915
         traceback.print_exc()
         return 2
 
-    # Write CUBIN to file
+    # Write CUBIN to file (for reference)
     cubin_path = build_dir / "triton_square.cubin"
     with cubin_path.open("wb") as f:
         f.write(cubin_bytes)
     print(f"Wrote CUBIN to: {cubin_path}\n")
 
-    # Define C++ code inline to load and launch the Triton kernel
+    # Define C++ code inline to load and launch the Triton kernel using embedded CUBIN
     cpp_code = """
 #include <tvm/ffi/container/tensor.h>
 #include <tvm/ffi/error.h>
 #include <tvm/ffi/extra/c_env_api.h>
-#include <tvm/ffi/extra/cubin_launcher.h>
+#include <tvm/ffi/extra/cuda/cubin_launcher.h>
 #include <tvm/ffi/function.h>
-#include <tvm/ffi/string.h>
 
-#include <memory>
+// Embed CUBIN module with name "triton"
+TVM_FFI_EMBED_CUBIN(triton);
 
 namespace triton_loader {
 
-static std::unique_ptr<tvm::ffi::CubinModule> g_module;
-static std::unique_ptr<tvm::ffi::CubinKernel> g_kernel;
-
-void LoadCubin(const tvm::ffi::String& path) {
-  g_module = std::make_unique<tvm::ffi::CubinModule>(path.c_str());
-  g_kernel = std::make_unique<tvm::ffi::CubinKernel>((*g_module)["square_kernel"]);
-}
-
 void LaunchSquare(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
-  TVM_FFI_CHECK(g_module != nullptr, RuntimeError)
-      << "CUBIN module not loaded. Call load_cubin first.";
+  // Get kernel from embedded CUBIN (cached in static variable for efficiency)
+  static auto kernel = TVM_FFI_EMBED_CUBIN_GET_KERNEL(triton, "square_kernel");
+
   TVM_FFI_CHECK(x.ndim() == 1, ValueError) << "Input must be 1D tensor";
   TVM_FFI_CHECK(y.ndim() == 1, ValueError) << "Output must be 1D tensor";
   TVM_FFI_CHECK(x.size(0) == y.size(0), ValueError) << "Sizes must match";
@@ -161,43 +155,41 @@ void LaunchSquare(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
   DLDevice device = x.device();
   CUstream stream = static_cast<CUstream>(TVMFFIEnvGetStream(device.device_type, device.device_id));
 
-  CUresult result = g_kernel->Launch(args, grid, block, stream);
+  CUresult result = kernel.Launch(args, grid, block, stream);
   TVM_FFI_CHECK_CUDA_DRIVER_ERROR(result);
 }
 
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(load_cubin, triton_loader::LoadCubin);
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(launch_square, triton_loader::LaunchSquare);
-
 }  // namespace triton_loader
+
+TVM_FFI_DLL_EXPORT_TYPED_FUNC(launch_square, triton_loader::LaunchSquare);
 """
 
     print("Compiling C++ code with tvm_ffi.cpp.load_inline...")
     try:
+        # Find CUDA include path
+
+        cuda_home = os.environ.get("CUDA_HOME") or os.environ.get("CUDA_PATH") or "/usr/local/cuda"
+        cuda_include = f"{cuda_home}/include"
+
         mod = cpp.load_inline(
-            "triton_loader", cuda_sources=cpp_code, extra_ldflags=["-lcuda", "-lcudart"]
+            "triton_loader",
+            cpp_sources=cpp_code,
+            extra_ldflags=["-lcuda"],
+            extra_include_paths=[cuda_include],
+            embed_cubin={"triton": cubin_bytes},
         )
-        print("Successfully compiled and loaded C++ code")
+        print("Successfully compiled and loaded C++ code with embedded CUBIN")
     except Exception as e:
         print(f"[ERROR] Failed to compile C++ code: {e}")
         traceback.print_exc()
         return 3
-
-    # Load cubin through the inline loader
-    try:
-        load_cubin_fn = mod["load_cubin"]
-    except Exception as e:
-        print(f"[ERROR] load_cubin function not found in module: {e}")
-        return 4
-
-    load_cubin_fn(str(cubin_path))
-    print(f"Loaded CUBIN into process: {cubin_path}\n")
 
     # Get the launch function
     try:
         launch_fn = mod["launch_square"]
     except Exception as e:
         print(f"[ERROR] launch_square function not found in module: {e}")
-        return 5
+        return 4
 
     # Test kernel: compute square
     print("[Test] square kernel")
@@ -214,7 +206,7 @@ TVM_FFI_DLL_EXPORT_TYPED_FUNC(launch_square, triton_loader::LaunchSquare);
         return 0
     else:
         print(f"  [FAIL] Verification failed, max error: {(y - expected).abs().max().item()}")
-        return 6
+        return 5
 
 
 if __name__ == "__main__":

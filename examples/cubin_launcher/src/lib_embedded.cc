@@ -27,33 +27,12 @@
 #include <tvm/ffi/container/tensor.h>
 #include <tvm/ffi/error.h>
 #include <tvm/ffi/extra/c_env_api.h>
-#include <tvm/ffi/extra/cubin_launcher.h>
+#include <tvm/ffi/extra/cuda/cubin_launcher.h>
 #include <tvm/ffi/function.h>
 
-#include <cstdint>
-#include <memory>
-
-// External symbols for embedded CUBIN data (linked via objcopy)
-extern "C" const char __cubin_data[];
-extern "C" const char __cubin_data_end[];
-
-// Calculate size from the symbols
-static const uint64_t cubin_data_size =
-    reinterpret_cast<const char*>(&__cubin_data_end) - reinterpret_cast<const char*>(&__cubin_data);
-
-// Global CUBIN module and kernels (initialized on first use)
-static std::unique_ptr<tvm::ffi::CubinModule> g_cubin_module;
-static std::unique_ptr<tvm::ffi::CubinKernel> g_add_one_kernel;
-static std::unique_ptr<tvm::ffi::CubinKernel> g_mul_two_kernel;
-
-// Initialize the CUBIN module and kernels
-void InitializeCubinModule() {
-  if (g_cubin_module == nullptr) {
-    g_cubin_module = std::make_unique<tvm::ffi::CubinModule>(__cubin_data, cubin_data_size);
-    g_add_one_kernel = std::make_unique<tvm::ffi::CubinKernel>((*g_cubin_module)["add_one_cuda"]);
-    g_mul_two_kernel = std::make_unique<tvm::ffi::CubinKernel>((*g_cubin_module)["mul_two_cuda"]);
-  }
-}
+// Embed CUBIN module with name "env"
+// This creates the necessary symbols and singleton struct for accessing the embedded CUBIN
+TVM_FFI_EMBED_CUBIN(env);
 
 namespace cubin_embedded {
 
@@ -63,7 +42,8 @@ namespace cubin_embedded {
  * \param y Output tensor (float32, 1D, same shape as x)
  */
 void AddOne(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
-  InitializeCubinModule();
+  // Get kernel from embedded CUBIN (cached in static variable for efficiency)
+  static auto kernel = TVM_FFI_EMBED_CUBIN_GET_KERNEL(env, "add_one_cuda");
 
   TVM_FFI_CHECK(x.ndim() == 1, ValueError) << "Input must be 1D tensor";
   TVM_FFI_CHECK(y.ndim() == 1, ValueError) << "Output must be 1D tensor";
@@ -86,7 +66,7 @@ void AddOne(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
   CUstream stream = static_cast<CUstream>(TVMFFIEnvGetStream(device.device_type, device.device_id));
 
   // Launch kernel
-  CUresult result = g_add_one_kernel->Launch(args, grid, block, stream);
+  CUresult result = kernel.Launch(args, grid, block, stream);
   TVM_FFI_CHECK_CUDA_DRIVER_ERROR(result);
 }
 
@@ -96,7 +76,8 @@ void AddOne(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
  * \param y Output tensor (float32, 1D, same shape as x)
  */
 void MulTwo(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
-  InitializeCubinModule();
+  // Get kernel from embedded CUBIN (cached in static variable for efficiency)
+  static auto kernel = TVM_FFI_EMBED_CUBIN_GET_KERNEL(env, "mul_two_cuda");
 
   TVM_FFI_CHECK(x.ndim() == 1, ValueError) << "Input must be 1D tensor";
   TVM_FFI_CHECK(y.ndim() == 1, ValueError) << "Output must be 1D tensor";
@@ -119,7 +100,7 @@ void MulTwo(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
   CUstream stream = static_cast<CUstream>(TVMFFIEnvGetStream(device.device_type, device.device_id));
 
   // Launch kernel
-  CUresult result = g_mul_two_kernel->Launch(args, grid, block, stream);
+  CUresult result = kernel.Launch(args, grid, block, stream);
   TVM_FFI_CHECK_CUDA_DRIVER_ERROR(result);
 }
 
