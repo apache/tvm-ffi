@@ -17,7 +17,7 @@
  * under the License.
  */
 /*!
- * \file tvm/ffi/extra/cubin_launcher.h
+ * \file tvm/ffi/extra/cuda/cubin_launcher.h
  * \brief CUDA CUBIN launcher utility for loading and executing CUDA kernels.
  *
  * This header provides a lightweight C++ wrapper around CUDA Driver API
