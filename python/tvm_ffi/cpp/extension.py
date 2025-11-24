@@ -33,7 +33,7 @@ from tvm_ffi.libinfo import find_dlpack_include_path, find_include_path, find_li
 from tvm_ffi.module import Module, load_module
 from tvm_ffi.utils import FileLock
 
-from .nvrtc import create_embedded_cubin_objects
+from .nvrtc import _create_embedded_cubin_objects
 
 IS_WINDOWS = sys.platform == "win32"
 
@@ -473,7 +473,7 @@ def _build_impl(
     # Create embedded CUBIN object files if needed
     extra_object_files: list[str] = []
     if embed_cubin:
-        extra_object_files = create_embedded_cubin_objects(embed_cubin, build_dir)
+        extra_object_files = _create_embedded_cubin_objects(embed_cubin, build_dir)
 
     # generate build.ninja
     ninja_source = _generate_ninja_build(

@@ -174,7 +174,7 @@ def nvrtc_compile(  # noqa: PLR0912, PLR0915
     return cubin_buf
 
 
-def create_embedded_cubin_objects(embed_cubin: Mapping[str, bytes], build_dir: Path) -> list[str]:
+def _create_embedded_cubin_objects(embed_cubin: Mapping[str, bytes], build_dir: Path) -> list[str]:
     """Create object files from embedded CUBIN data.
 
     Background
