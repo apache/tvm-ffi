@@ -93,4 +93,18 @@ TEST(Shape, ShapeView) {
   EXPECT_EQ(view_from_init.Product(), 7 * 8 * 9);
 }
 
+TEST(Shape, DLTensor) {
+  int64_t shape_data[] = {1, 2, 3};
+  DLTensor dltensor;
+  dltensor.ndim = 3;
+  dltensor.shape = shape_data;
+
+  AnyView view_dl = &dltensor;
+  auto shape = view_dl.cast<Shape>();
+  EXPECT_EQ(shape.size(), 3);
+  EXPECT_EQ(shape[0], 1);
+  EXPECT_EQ(shape[1], 2);
+  EXPECT_EQ(shape[2], 3);
+}
+
 }  // namespace

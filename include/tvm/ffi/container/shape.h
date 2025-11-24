@@ -330,10 +330,16 @@ inline constexpr bool use_default_type_traits_v<Shape> = false;
 
 // Allow auto conversion from Array<int64_t> to Shape, but not from Shape to Array<int64_t>
 template <>
-struct TypeTraits<Shape> : public ObjectRefWithFallbackTraitsBase<Shape, Array<int64_t>> {
+struct TypeTraits<Shape> : public ObjectRefWithFallbackTraitsBase<Shape, Array<int64_t>, DLTensor*> {
   static constexpr int32_t field_static_type_index = TypeIndex::kTVMFFIShape;
+
   TVM_FFI_INLINE static Shape ConvertFallbackValue(Array<int64_t> src) {
     return Shape(std::move(src));
+  }
+
+  TVM_FFI_INLINE static Shape ConvertFallbackValue(DLTensor* src) {
+    std::vector<int64_t> shape_vec(src->shape, src->shape + src->ndim);
+    return Shape(Array<int64_t>(shape_vec));
   }
 };
 
