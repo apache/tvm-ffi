@@ -95,48 +95,41 @@ struct dim3 {
  *
  * This macro declares external symbols for embedded CUBIN data and creates
  * a singleton struct to manage the CubinModule instance. The CUBIN data
- * symbols should be named __tvm_ffi__cubin_<name> and __tvm_ffi__cubin_<name>_end,
+ * symbols should be named `__tvm_ffi__cubin_<name>` and `__tvm_ffi__cubin_<name>_end`,
  * typically created using objcopy and ld.
  *
- * ## Creating Embedded CUBIN Symbols with objcopy
- *
+ * \par Creating Embedded CUBIN Symbols
  * To embed a CUBIN file into your binary, follow these steps:
  *
- * ### Step 1: Compile CUDA kernel to CUBIN
+ * \par Step 1: Compile CUDA kernel to CUBIN
  * \code{.bash}
  * nvcc --cubin -arch=sm_75 kernel.cu -o kernel.cubin
  * \endcode
  *
- * ### Step 2: Convert CUBIN to object file with ld
+ * \par Step 2: Convert CUBIN to object file with ld
  * \code{.bash}
  * ld -r -b binary -o kernel_data.o kernel.cubin
  * \endcode
+ * This creates an object file with symbols: `_binary_kernel_cubin_start`,
+ * `_binary_kernel_cubin_end`, and `_binary_kernel_cubin_size`.
  *
- * This creates an object file with symbols based on the input filename:
- * - _binary_kernel_cubin_start
- * - _binary_kernel_cubin_end
- * - _binary_kernel_cubin_size
- *
- * ### Step 3: Rename symbols with objcopy
+ * \par Step 3: Rename symbols with objcopy
  * \code{.bash}
  * objcopy --rename-section .data=.rodata,alloc,load,readonly,data,contents \
  *         --redefine-sym _binary_kernel_cubin_start=__tvm_ffi__cubin_<name> \
  *         --redefine-sym _binary_kernel_cubin_end=__tvm_ffi__cubin_<name>_end \
  *         kernel_data.o
  * \endcode
- *
  * Replace `<name>` with your chosen identifier (e.g., "env", "my_kernels").
  *
- * ### Step 4: Link the object file with your library/executable
+ * \par Step 4: Link the object file with your library/executable
  * \code{.bash}
- * g++ -o mylib.so -shared mycode.cc kernel_data.o -Wl,-z,noexecstack
+ * g++ -o mylib.so -shared mycode.cc kernel_data.o -Wl,-z,noexecstack -lcuda
  * \endcode
- *
- * Note: The `-z,noexecstack` flag marks the stack as non-executable, which is
+ * \note The `-z,noexecstack` flag marks the stack as non-executable, which is
  * required for security as the embedded object file lacks a .note.GNU-stack section.
  *
- * ## CMake Example
- *
+ * \par CMake Example
  * \code{.cmake}
  * add_custom_command(OUTPUT kernel_data.o
  *   COMMAND ${CMAKE_LINKER} -r -b binary -o kernel_data.o kernel.cubin
@@ -148,11 +141,11 @@ struct dim3 {
  *   DEPENDS kernel.cubin)
  *
  * add_library(mylib SHARED mycode.cc kernel_data.o)
+ * target_link_libraries(mylib PRIVATE cuda)
  * target_link_options(mylib PRIVATE "LINKER:-z,noexecstack")
  * \endcode
  *
- * ## Usage in C++ Code
- *
+ * \par Usage in C++ Code
  * \code{.cpp}
  * // Declare the embedded CUBIN module (use the same name as in objcopy)
  * TVM_FFI_EMBED_CUBIN(env);
@@ -164,8 +157,23 @@ struct dim3 {
  * }
  * \endcode
  *
+ * \par Python Integration
+ * When using `tvm_ffi.cpp.load_inline()` with the `embed_cubin` parameter,
+ * the CUBIN data is automatically embedded and the symbols are created for you.
+ * \code{.py}
+ * mod = cpp.load_inline(
+ *     "my_module",
+ *     cuda_sources=cpp_code,
+ *     embed_cubin={"env": cubin_bytes}
+ * )
+ * \endcode
+ *
  * \param name The identifier for this embedded CUBIN module (must match the
- *             symbol names created with objcopy).
+ *             symbol names created with objcopy or the key in embed_cubin dict).
+ *
+ * \see TVM_FFI_EMBED_CUBIN_GET_KERNEL
+ * \see CubinModule
+ * \see CubinKernel
  */
 #define TVM_FFI_EMBED_CUBIN(name)                                                       \
   extern "C" const char __tvm_ffi__cubin_##name[];                                      \
@@ -186,18 +194,53 @@ struct dim3 {
  * \brief Macro to get a kernel from an embedded CUBIN module.
  *
  * This macro retrieves a kernel by name from a previously declared embedded
- * CUBIN module (using TVM_FFI_EMBED_CUBIN). The result is a CubinKernel object.
- * It's recommended to store the result in a static variable to avoid repeated
- * kernel lookups.
+ * CUBIN module (using TVM_FFI_EMBED_CUBIN). The result is a CubinKernel object
+ * that can be used to launch the kernel with specified parameters.
  *
- * Example usage:
- * \code
+ * \par Performance Tip
+ * It's recommended to store the result in a static variable to avoid repeated
+ * kernel lookups, which improves performance:
+ * \code{.cpp}
  * static auto kernel = TVM_FFI_EMBED_CUBIN_GET_KERNEL(my_kernels, "kernel_name");
  * \endcode
  *
- * \param name The identifier of the embedded CUBIN module.
- * \param kernel_name The name of the kernel function (as a string literal).
+ * \par Complete Example
+ * \code{.cpp}
+ * // Declare embedded CUBIN module
+ * TVM_FFI_EMBED_CUBIN(my_kernels);
+ *
+ * void LaunchKernel(tvm::ffi::TensorView input, tvm::ffi::TensorView output) {
+ *   // Get kernel (cached in static variable for efficiency)
+ *   static auto kernel = TVM_FFI_EMBED_CUBIN_GET_KERNEL(my_kernels, "add_one");
+ *
+ *   // Prepare kernel arguments
+ *   void* in_ptr = input.data_ptr();
+ *   void* out_ptr = output.data_ptr();
+ *   int64_t n = input.size(0);
+ *   void* args[] = {&in_ptr, &out_ptr, &n};
+ *
+ *   // Configure launch
+ *   tvm::ffi::dim3 grid((n + 255) / 256);
+ *   tvm::ffi::dim3 block(256);
+ *
+ *   // Get stream and launch
+ *   DLDevice device = input.device();
+ *   CUstream stream = static_cast<CUstream>(
+ *       TVMFFIEnvGetStream(device.device_type, device.device_id));
+ *
+ *   CUresult result = kernel.Launch(args, grid, block, stream);
+ *   TVM_FFI_CHECK_CUDA_DRIVER_ERROR(result);
+ * }
+ * \endcode
+ *
+ * \param name The identifier of the embedded CUBIN module (must match the name
+ *             used in TVM_FFI_EMBED_CUBIN).
+ * \param kernel_name The name of the kernel function as it appears in the CUBIN
+ *                    (typically the function name for `extern "C"` kernels).
  * \return A CubinKernel object for the specified kernel.
+ *
+ * \see TVM_FFI_EMBED_CUBIN
+ * \see CubinKernel::Launch
  */
 #define TVM_FFI_EMBED_CUBIN_GET_KERNEL(name, kernel_name) \
   (EmbedCubinModule_##name::Global()->mod[kernel_name])
@@ -208,9 +251,36 @@ class CubinKernel;
 /*!
  * \brief CUDA CUBIN module loader and manager.
  *
- * This class provides a RAII wrapper around CUDA driver API's library management.
- * It loads a CUBIN module from memory and manages the library handle.
- * Supports multi-GPU execution using CUDA primary contexts.
+ * This class provides a RAII wrapper around CUDA Driver API's library management.
+ * It loads a CUBIN module from memory and manages the library handle automatically.
+ * The library is unloaded when the CubinModule object is destroyed.
+ *
+ * \par Features
+ * - Load CUBIN from memory (embedded data or runtime-generated)
+ * - Automatic resource management (RAII pattern)
+ * - Multi-GPU execution using CUDA primary contexts
+ * - Retrieve multiple kernels from the same module
+ *
+ * \par Example Usage
+ * \code{.cpp}
+ * // Load CUBIN from memory
+ * tvm::ffi::Bytes cubin_data = ...;
+ * tvm::ffi::CubinModule module(cubin_data);
+ *
+ * // Get kernels by name
+ * tvm::ffi::CubinKernel kernel1 = module["add_one"];
+ * tvm::ffi::CubinKernel kernel2 = module.GetKernel("mul_two");
+ *
+ * // Launch kernels
+ * void* args[] = {...};
+ * tvm::ffi::dim3 grid(32), block(256);
+ * CUstream stream = ...;
+ * kernel1.Launch(args, grid, block, stream);
+ * \endcode
+ *
+ * \note This class is movable but not copyable.
+ * \see TVM_FFI_EMBED_CUBIN for embedding CUBIN at compile time
+ * \see CubinKernel for kernel launching
  */
 class CubinModule {
  public:
@@ -293,7 +363,32 @@ class CubinModule {
  * \brief CUDA kernel handle for launching kernels.
  *
  * This class represents a loaded CUDA kernel function and provides
- * methods to launch it with specified parameters and configuration.
+ * methods to launch it with specified grid/block dimensions, arguments,
+ * and stream configuration. Obtained from CubinModule by kernel name.
+ *
+ * \par Usage Pattern
+ * \code{.cpp}
+ * // Get kernel from module
+ * tvm::ffi::CubinKernel kernel = module["kernel_name"];
+ *
+ * // Prepare arguments (must be pointers to actual values)
+ * void* data_ptr = tensor.data_ptr();
+ * int64_t size = tensor.size(0);
+ * void* args[] = {&data_ptr, &size};
+ *
+ * // Configure launch dimensions
+ * tvm::ffi::dim3 grid(32);    // 32 blocks
+ * tvm::ffi::dim3 block(256);  // 256 threads per block
+ *
+ * // Launch on stream
+ * CUstream stream = ...;
+ * CUresult result = kernel.Launch(args, grid, block, stream);
+ * TVM_FFI_CHECK_CUDA_DRIVER_ERROR(result);
+ * \endcode
+ *
+ * \note This class is movable but not copyable.
+ * \see CubinModule for loading CUBIN and getting kernels
+ * \see dim3 for grid/block dimension specification
  */
 class CubinKernel {
  public:
@@ -313,14 +408,40 @@ class CubinKernel {
   /*!
    * \brief Launch the kernel with specified parameters.
    *
-   * This function launches the kernel on the current CUDA context/device.
+   * This function launches the kernel on the current CUDA context/device using
+   * the CUDA Driver API. The kernel executes asynchronously on the specified stream.
    *
-   * \param args Array of pointers to kernel arguments.
-   * \param grid Grid dimensions (number of blocks).
-   * \param block Block dimensions (threads per block).
-   * \param stream CUDA stream to launch the kernel on.
+   * \par Argument Preparation
+   * The `args` array must contain pointers to the actual argument values, not the
+   * values themselves. For example:
+   * \code{.cpp}
+   * void* data_ptr = tensor.data_ptr();
+   * int64_t size = 100;
+   * void* args[] = {&data_ptr, &size};  // Note: addresses of the variables
+   * \endcode
+   *
+   * \par Launch Configuration
+   * Grid and block dimensions determine the kernel's parallelism:
+   * - Grid: Number of thread blocks (can be 1D, 2D, or 3D)
+   * - Block: Number of threads per block (can be 1D, 2D, or 3D)
+   * - Total threads = grid.x * grid.y * grid.z * block.x * block.y * block.z
+   *
+   * \par Error Checking
+   * Always check the returned CUresult:
+   * \code{.cpp}
+   * CUresult result = kernel.Launch(args, grid, block, stream);
+   * TVM_FFI_CHECK_CUDA_DRIVER_ERROR(result);
+   * \endcode
+   *
+   * \param args Array of pointers to kernel arguments (must point to actual values).
+   * \param grid Grid dimensions (number of blocks in x, y, z).
+   * \param block Block dimensions (threads per block in x, y, z).
+   * \param stream CUDA stream to launch the kernel on (use 0 for default stream).
    * \param dyn_smem_bytes Dynamic shared memory size in bytes (default: 0).
-   * \return CUresult error code from cuLaunchKernel.
+   * \return CUresult error code from cuLaunchKernel (CUDA_SUCCESS on success).
+   *
+   * \note The kernel executes asynchronously. Use cudaStreamSynchronize() or
+   *       cudaDeviceSynchronize() to wait for completion if needed.
    */
   CUresult Launch(void** args, dim3 grid, dim3 block, CUstream stream,
                   uint32_t dyn_smem_bytes = 0) {

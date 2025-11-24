@@ -58,6 +58,7 @@ Table of Contents
    guides/cpp_guide.md
    guides/python_guide.md
    guides/rust_guide.md
+   guides/cubin_launcher.md
    guides/compiler_integration.md
    guides/build_from_source.md
    guides/kernel_library_guide.rst
