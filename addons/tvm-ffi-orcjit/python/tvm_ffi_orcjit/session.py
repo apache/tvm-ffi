@@ -56,4 +56,7 @@ class ExecutionSession(Object):
             A new DynamicLibrary instance.
 
         """
-        return _ffi_api.ExecutionSessionCreateDynamicLibrary(self, name)  # type: ignore
+        handle = _ffi_api.ExecutionSessionCreateDynamicLibrary(self, name)  # type: ignore
+        lib = DynamicLibrary.__new__(DynamicLibrary)
+        lib.__move_handle_from__(handle)
+        return lib

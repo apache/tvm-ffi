@@ -48,6 +48,14 @@ ORCJITDynamicLibraryObj::ORCJITDynamicLibraryObj(ObjectPtr<ORCJITExecutionSessio
                                                  llvm::orc::JITDylib* dylib, llvm::orc::LLJIT* jit,
                                                  String name)
     : session_(std::move(session)), dylib_(dylib), jit_(jit), name_(std::move(name)) {
+  if (void** ctx_addr = reinterpret_cast<void**>(GetSymbol(ffi::symbol::tvm_ffi_library_ctx))) {
+    *ctx_addr = this;
+  }
+  Module::VisitContextSymbols([this](const ffi::String& name, void* symbol) {
+    if (void** ctx_addr = reinterpret_cast<void**>(GetSymbol(ffi::symbol::tvm_ffi_library_ctx))) {
+      *ctx_addr = symbol;
+    }
+  });
   TVM_FFI_CHECK(dylib_ != nullptr, ValueError) << "JITDylib cannot be null";
   TVM_FFI_CHECK(jit_ != nullptr, ValueError) << "LLJIT cannot be null";
 }
@@ -91,16 +99,9 @@ void* ORCJITDynamicLibraryObj::GetSymbol(const String& name) {
   // Look up symbol using the full search order
   auto symbol_or_err =
       jit_->getExecutionSession().lookup(search_order, jit_->mangleAndIntern(name.c_str()));
-  if (!symbol_or_err) {
-    auto err = symbol_or_err.takeError();
-    std::string err_msg;
-    llvm::handleAllErrors(std::move(err),
-                          [&](const llvm::ErrorInfoBase& eib) { err_msg = eib.message(); });
-    TVM_FFI_THROW(ValueError) << "Failed to find symbol '" << name << "': " << err_msg;
-  }
 
   // Convert ExecutorAddr to pointer
-  return symbol_or_err->getAddress().toPtr<void*>();
+  return symbol_or_err ? symbol_or_err->getAddress().toPtr<void*>() : nullptr;
 }
 
 llvm::orc::JITDylib& ORCJITDynamicLibraryObj::GetJITDylib() {
@@ -116,7 +117,7 @@ Optional<Function> ORCJITDynamicLibraryObj::GetFunction(const String& name) {
     return Function::FromTyped([this](const Array<ORCJITDynamicLibrary>& libraries) {
       std::vector<llvm::orc::JITDylib*> libs;
       libs.reserve(libraries.size());
-      for (const auto& lib : libraries) {
+      for (const ORCJITDynamicLibrary& lib : libraries) {
         libs.push_back(&GetJITDylib());
       }
       SetLinkOrder(libs);
@@ -127,22 +128,17 @@ Optional<Function> ORCJITDynamicLibraryObj::GetFunction(const String& name) {
   std::string symbol_name = symbol::tvm_ffi_symbol_prefix + std::string(name);
 
   // Try to get the symbol - return NullOpt if not found
-  void* symbol = nullptr;
-  try {
-    symbol = GetSymbol(symbol_name);
-  } catch (const Error& e) {
-    // Symbol not found
-    return std::nullopt;
+  if (void* symbol = GetSymbol(symbol_name)) {
+    // Wrap C function pointer as tvm-ffi Function
+    TVMFFISafeCallType c_func = reinterpret_cast<TVMFFISafeCallType>(symbol);
+
+    return Function::FromPacked([c_func, name](PackedArgs args, Any* rv) {
+      TVM_FFI_ICHECK_LT(rv->type_index(), ffi::TypeIndex::kTVMFFIStaticObjectBegin);
+      TVM_FFI_CHECK_SAFE_CALL((*c_func)(nullptr, reinterpret_cast<const TVMFFIAny*>(args.data()),
+                                        args.size(), reinterpret_cast<TVMFFIAny*>(rv)));
+    });
   }
-
-  // Wrap C function pointer as tvm-ffi Function
-  auto c_func = reinterpret_cast<TVMFFISafeCallType>(symbol);
-
-  return Function::FromPacked([c_func, name](PackedArgs args, Any* rv) {
-    TVM_FFI_ICHECK_LT(rv->type_index(), ffi::TypeIndex::kTVMFFIStaticObjectBegin);
-    TVM_FFI_CHECK_SAFE_CALL((*c_func)(nullptr, reinterpret_cast<const TVMFFIAny*>(args.data()),
-                                      args.size(), reinterpret_cast<TVMFFIAny*>(rv)));
-  });
+  return std::nullopt;
 }
 
 //-------------------------------------

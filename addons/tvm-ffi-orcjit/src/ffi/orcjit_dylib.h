@@ -31,9 +31,6 @@
 #include <tvm/ffi/object.h>
 #include <tvm/ffi/string.h>
 
-#include <memory>
-#include <string>
-
 namespace tvm {
 namespace ffi {
 namespace orcjit {
