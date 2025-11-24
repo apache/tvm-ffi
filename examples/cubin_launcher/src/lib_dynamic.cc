@@ -32,9 +32,7 @@
 #include <tvm/ffi/string.h>
 
 #include <cstdint>
-#include <fstream>
 #include <memory>
-#include <vector>
 
 namespace cubin_dynamic {
 
@@ -44,25 +42,12 @@ static std::unique_ptr<tvm::ffi::CubinKernel> g_add_one_kernel;
 static std::unique_ptr<tvm::ffi::CubinKernel> g_mul_two_kernel;
 
 /*!
- * \brief Load CUBIN from file path.
- * \param path Path to the CUBIN file.
+ * \brief Set CUBIN module from binary data.
+ * \param cubin CUBIN binary data as Bytes object.
  */
-void LoadCubin(const tvm::ffi::String& path) {
-  // Read file into memory
-  std::ifstream file(std::string(path), std::ios::binary | std::ios::ate);
-  TVM_FFI_CHECK(file.is_open(), RuntimeError) << "Failed to open CUBIN file: " << path;
-
-  std::streamsize size = file.tellg();
-  file.seekg(0, std::ios::beg);
-
-  std::vector<char> cubin_data;  // Storage for CUBIN file data
-  cubin_data.resize(static_cast<size_t>(size));
-  TVM_FFI_CHECK(file.read(cubin_data.data(), size), RuntimeError)
-      << "Failed to read CUBIN file: " << path;
-
-  // Create Bytes object and module
-  tvm::ffi::Bytes cubin_bytes(cubin_data.data(), static_cast<size_t>(cubin_data.size()));
-  g_cubin_module = std::make_unique<tvm::ffi::CubinModule>(cubin_bytes);
+void SetCubin(const tvm::ffi::Bytes& cubin) {
+  // Load CUBIN module from memory
+  g_cubin_module = std::make_unique<tvm::ffi::CubinModule>(cubin);
   g_add_one_kernel = std::make_unique<tvm::ffi::CubinKernel>((*g_cubin_module)["add_one_cuda"]);
   g_mul_two_kernel = std::make_unique<tvm::ffi::CubinKernel>((*g_cubin_module)["mul_two_cuda"]);
 }
@@ -74,7 +59,7 @@ void LoadCubin(const tvm::ffi::String& path) {
  */
 void AddOne(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
   TVM_FFI_CHECK(g_cubin_module != nullptr, RuntimeError)
-      << "CUBIN module not loaded. Call load_cubin first.";
+      << "CUBIN module not loaded. Call set_cubin first.";
 
   TVM_FFI_CHECK(x.ndim() == 1, ValueError) << "Input must be 1D tensor";
   TVM_FFI_CHECK(y.ndim() == 1, ValueError) << "Output must be 1D tensor";
@@ -108,7 +93,7 @@ void AddOne(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
  */
 void MulTwo(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
   TVM_FFI_CHECK(g_cubin_module != nullptr, RuntimeError)
-      << "CUBIN module not loaded. Call load_cubin first.";
+      << "CUBIN module not loaded. Call set_cubin first.";
 
   TVM_FFI_CHECK(x.ndim() == 1, ValueError) << "Input must be 1D tensor";
   TVM_FFI_CHECK(y.ndim() == 1, ValueError) << "Output must be 1D tensor";
@@ -136,7 +121,7 @@ void MulTwo(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
 }
 
 // Export TVM-FFI functions
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(load_cubin, cubin_dynamic::LoadCubin);
+TVM_FFI_DLL_EXPORT_TYPED_FUNC(set_cubin, cubin_dynamic::SetCubin);
 TVM_FFI_DLL_EXPORT_TYPED_FUNC(add_one, cubin_dynamic::AddOne);
 TVM_FFI_DLL_EXPORT_TYPED_FUNC(mul_two, cubin_dynamic::MulTwo);
 

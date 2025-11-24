@@ -56,10 +56,10 @@ python examples/cubin_launcher/example_embedded_cubin.py
 
 ### 2. Dynamic CUBIN Loading (TVM-FFI Library)
 
-`example_file_cubin.py` - CUBIN loaded from file at runtime.
+`example_dynamic_cubin.py` - CUBIN data passed dynamically at runtime.
 
 ```bash
-python examples/cubin_launcher/example_file_cubin.py
+python examples/cubin_launcher/example_dynamic_cubin.py
 ```
 
 ### 3. Triton Kernel with Embedded CUBIN (Experimental)
@@ -123,8 +123,10 @@ mod = cpp.load_inline(
 - `include/tvm/ffi/extra/cubin_launcher.h` - Header-only C++ library with embedding macros
 - `python/tvm_ffi/cpp/nvrtc.py` - NVRTC compilation utilities
 - `src/lib_embedded.cc` - Embedded CUBIN example (lib_embedded.so)
-- `src/lib_dynamic.cc` - Dynamic loading example (lib_dynamic.so)
+- `src/lib_dynamic.cc` - Dynamic CUBIN loading example (lib_dynamic.so)
 - `src/kernel.cu` - CUDA kernels (add_one, mul_two)
+- `example_embedded_cubin.py` - Pre-compiled CUBIN embedded at build time
+- `example_dynamic_cubin.py` - CUBIN data passed dynamically at runtime
 - `example_triton_cubin.py` - Triton kernel with embedded CUBIN
 - `example_nvrtc_cubin.py` - NVRTC compilation with embedded CUBIN
 - `CMakeLists.txt` - Build configuration

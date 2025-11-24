@@ -17,8 +17,8 @@
 # under the License.
 """Example script for dynamic CUBIN loading.
 
-This example demonstrates using lib_dynamic.so which loads CUBIN data
-from a file at runtime.
+This example demonstrates using lib_dynamic.so which accepts CUBIN data
+dynamically at runtime.
 """
 
 import sys
@@ -47,11 +47,15 @@ def main() -> int:  # noqa: PLR0915
     mod = load_module(str(lib_path))
     print(f"Loaded library: {lib_path}")
 
-    # Load CUBIN file
+    # Read CUBIN file into memory
     cubin_path = Path(__file__).parent / "build" / "kernel.cubin"
-    load_cubin = mod["load_cubin"]
-    load_cubin(str(cubin_path))
-    print(f"Loaded CUBIN from: {cubin_path}")
+    cubin_bytes = cubin_path.read_bytes()
+    print(f"Read CUBIN from: {cubin_path} ({len(cubin_bytes)} bytes)")
+
+    # Set CUBIN data to the module
+    set_cubin = mod["set_cubin"]
+    set_cubin(cubin_bytes)
+    print("CUBIN module loaded successfully")
 
     # Get the kernel functions
     add_one = mod["add_one"]

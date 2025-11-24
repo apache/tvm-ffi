@@ -430,7 +430,7 @@ The CUBIN launcher works with various CUDA compilation tools:
 For complete working examples, see the `examples/cubin_launcher/` directory:
 
 - `example_embedded_cubin.py` - Pre-compiled CUBIN embedded at build time
-- `example_file_cubin.py` - CUBIN loaded from file at runtime
+- `example_dynamic_cubin.py` - CUBIN data passed dynamically at runtime
 - `example_nvrtc_cubin.py` - NVRTC runtime compilation
 - `example_triton_cubin.py` - Triton kernel compilation
 
