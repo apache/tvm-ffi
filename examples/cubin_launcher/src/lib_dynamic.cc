@@ -42,7 +42,6 @@ namespace cubin_dynamic {
 static std::unique_ptr<tvm::ffi::CubinModule> g_cubin_module;
 static std::unique_ptr<tvm::ffi::CubinKernel> g_add_one_kernel;
 static std::unique_ptr<tvm::ffi::CubinKernel> g_mul_two_kernel;
-static std::vector<char> g_cubin_data;  // Storage for CUBIN file data
 
 /*!
  * \brief Load CUBIN from file path.
@@ -56,12 +55,13 @@ void LoadCubin(const tvm::ffi::String& path) {
   std::streamsize size = file.tellg();
   file.seekg(0, std::ios::beg);
 
-  g_cubin_data.resize(static_cast<size_t>(size));
-  TVM_FFI_CHECK(file.read(g_cubin_data.data(), size), RuntimeError)
+  std::vector<char> cubin_data;  // Storage for CUBIN file data
+  cubin_data.resize(static_cast<size_t>(size));
+  TVM_FFI_CHECK(file.read(cubin_data.data(), size), RuntimeError)
       << "Failed to read CUBIN file: " << path;
 
   // Create Bytes object and module
-  tvm::ffi::Bytes cubin_bytes(g_cubin_data.data(), g_cubin_data.size());
+  tvm::ffi::Bytes cubin_bytes(cubin_data.data(), static_cast<size_t>(cubin_data.size()));
   g_cubin_module = std::make_unique<tvm::ffi::CubinModule>(cubin_bytes);
   g_add_one_kernel = std::make_unique<tvm::ffi::CubinKernel>((*g_cubin_module)["add_one_cuda"]);
   g_mul_two_kernel = std::make_unique<tvm::ffi::CubinKernel>((*g_cubin_module)["mul_two_cuda"]);

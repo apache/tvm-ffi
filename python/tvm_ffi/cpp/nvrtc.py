@@ -92,7 +92,7 @@ def nvrtc_compile(  # noqa: PLR0912, PLR0915
     if arch is None:
         try:
             # Initialize CUDA driver API
-            result = driver.cuInit(0)
+            (result,) = driver.cuInit(0)
             if result != driver.CUresult.CUDA_SUCCESS:
                 raise RuntimeError(f"Failed to initialize CUDA driver: {result}")
 

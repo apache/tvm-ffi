@@ -31,7 +31,6 @@ Notes:
 
 from __future__ import annotations
 
-import os
 import sys
 import traceback
 from pathlib import Path
@@ -42,11 +41,17 @@ import triton.language as tl  # type: ignore[import-not-found]
 from tvm_ffi import cpp
 
 
-def _compile_triton_to_cubin() -> tuple[bytes, str]:
+def generate_cubin(build_dir: Path) -> bytes:
     """Define a Triton kernel in-process and compile it to a CUBIN file.
 
     The kernel is named `square_kernel` and computes y[i] = x[i] * x[i].
-    Returns (cubin_bytes, ptx_source)
+
+    Args:
+        build_dir: Directory to write the CUBIN file to
+
+    Returns:
+        Compiled CUBIN bytes
+
     """
 
     # Define the kernel dynamically
@@ -71,70 +76,38 @@ def _compile_triton_to_cubin() -> tuple[bytes, str]:
     cache_tuple = device_caches[device_id]
     compiled_kernel = next(iter(cache_tuple[0].values()))
 
-    # Get CUBIN bytes and PTX source
+    # Get CUBIN bytes
     cubin_bytes = compiled_kernel.kernel
-    ptx_source = (
-        compiled_kernel.asm.get("ptx", "")
-        if hasattr(compiled_kernel.asm, "get")
-        else str(compiled_kernel.asm)
-    )
 
-    return cubin_bytes, ptx_source
+    return cubin_bytes
 
 
-def main() -> int:  # noqa: PLR0915
-    """Load and launch Triton kernel through TVM-FFI."""
-    print("Example: Triton (inline) -> CUBIN -> C++ (inline) -> TVM-FFI")
-    print("=" * 60)
+def use_cubin_kernel(cubin_bytes: bytes) -> int:
+    """Load and test Triton CUBIN kernel through TVM-FFI.
 
-    if not torch.cuda.is_available():
-        print("[ERROR] CUDA is not available")
-        return 1
+    Args:
+        cubin_bytes: Compiled CUBIN bytes
 
-    print(f"CUDA device: {torch.cuda.get_device_name(0)}")
-    print(f"PyTorch version: {torch.__version__}\n")
+    Returns:
+        0 on success, non-zero error code on failure
 
-    base = Path(__file__).resolve().parent
-    build_dir = base / "build"
-    build_dir.mkdir(parents=True, exist_ok=True)
-
-    # Compile Triton kernel to CUBIN
-    try:
-        print("Compiling Triton kernel to CUBIN...")
-        cubin_bytes, ptx_source = _compile_triton_to_cubin()
-        print(f"Compiled CUBIN: {len(cubin_bytes)} bytes")
-        print("\n" + "=" * 60)
-        print("PTX Source:")
-        print("=" * 60)
-        print(ptx_source)
-        print("=" * 60 + "\n")
-    except Exception as e:
-        print(f"[ERROR] Failed to compile Triton kernel: {e}")
-        traceback.print_exc()
-        return 2
-
-    # Write CUBIN to file (for reference)
-    cubin_path = build_dir / "triton_square.cubin"
-    with cubin_path.open("wb") as f:
-        f.write(cubin_bytes)
-    print(f"Wrote CUBIN to: {cubin_path}\n")
-
+    """
     # Define C++ code inline to load and launch the Triton kernel using embedded CUBIN
-    cpp_code = """
+    sources = """
 #include <tvm/ffi/container/tensor.h>
 #include <tvm/ffi/error.h>
 #include <tvm/ffi/extra/c_env_api.h>
 #include <tvm/ffi/extra/cuda/cubin_launcher.h>
 #include <tvm/ffi/function.h>
 
-// Embed CUBIN module with name "triton"
-TVM_FFI_EMBED_CUBIN(triton);
+// Embed CUBIN module with name "triton_cubin"
+TVM_FFI_EMBED_CUBIN(triton_cubin);
 
 namespace triton_loader {
 
 void LaunchSquare(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
   // Get kernel from embedded CUBIN (cached in static variable for efficiency)
-  static auto kernel = TVM_FFI_EMBED_CUBIN_GET_KERNEL(triton, "square_kernel");
+  static auto kernel = TVM_FFI_EMBED_CUBIN_GET_KERNEL(triton_cubin, "square_kernel");
 
   TVM_FFI_CHECK(x.ndim() == 1, ValueError) << "Input must be 1D tensor";
   TVM_FFI_CHECK(y.ndim() == 1, ValueError) << "Output must be 1D tensor";
@@ -164,32 +137,17 @@ void LaunchSquare(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
 TVM_FFI_DLL_EXPORT_TYPED_FUNC(launch_square, triton_loader::LaunchSquare);
 """
 
-    print("Compiling C++ code with tvm_ffi.cpp.load_inline...")
-    try:
-        # Find CUDA include path
-
-        cuda_home = os.environ.get("CUDA_HOME") or os.environ.get("CUDA_PATH") or "/usr/local/cuda"
-        cuda_include = f"{cuda_home}/include"
-
-        mod = cpp.load_inline(
-            "triton_loader",
-            cpp_sources=cpp_code,
-            extra_ldflags=["-lcuda"],
-            extra_include_paths=[cuda_include],
-            embed_cubin={"triton": cubin_bytes},
-        )
-        print("Successfully compiled and loaded C++ code with embedded CUBIN")
-    except Exception as e:
-        print(f"[ERROR] Failed to compile C++ code: {e}")
-        traceback.print_exc()
-        return 3
+    print("Compiling C++ sources with tvm_ffi.cpp.load_inline...")
+    # Find CUDA include path
+    mod = cpp.load_inline(
+        "triton_loader",
+        cuda_sources=sources,
+        embed_cubin={"triton_cubin": cubin_bytes},
+    )
+    print("Successfully compiled and loaded C++ sources with embedded CUBIN\n")
 
     # Get the launch function
-    try:
-        launch_fn = mod["launch_square"]
-    except Exception as e:
-        print(f"[ERROR] launch_square function not found in module: {e}")
-        return 4
+    launch_fn = mod["launch_square"]
 
     # Test kernel: compute square
     print("[Test] square kernel")
@@ -207,6 +165,41 @@ TVM_FFI_DLL_EXPORT_TYPED_FUNC(launch_square, triton_loader::LaunchSquare);
     else:
         print(f"  [FAIL] Verification failed, max error: {(y - expected).abs().max().item()}")
         return 5
+
+
+def main() -> int:
+    """Load and launch Triton kernel through TVM-FFI."""
+    print("Example: Triton (inline) -> CUBIN -> C++ (inline) -> TVM-FFI")
+    print("=" * 60)
+
+    if not torch.cuda.is_available():
+        print("[ERROR] CUDA is not available")
+        return 1
+
+    print(f"CUDA device: {torch.cuda.get_device_name(0)}")
+    print(f"PyTorch version: {torch.__version__}\n")
+
+    base = Path(__file__).resolve().parent
+    build_dir = base / "build"
+    build_dir.mkdir(parents=True, exist_ok=True)
+
+    # Compile Triton kernel to CUBIN
+    try:
+        print("Compiling Triton kernel to CUBIN...")
+        cubin_bytes = generate_cubin(build_dir)
+        print(f"Compiled CUBIN: {len(cubin_bytes)} bytes\n")
+    except Exception as e:
+        print(f"[ERROR] Failed to compile Triton kernel: {e}")
+        traceback.print_exc()
+        return 2
+
+    # Use CUBIN kernel
+    try:
+        return use_cubin_kernel(cubin_bytes)
+    except Exception as e:
+        print(f"[ERROR] Failed to use CUBIN kernel: {e}")
+        traceback.print_exc()
+        return 3
 
 
 if __name__ == "__main__":
