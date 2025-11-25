@@ -19,11 +19,26 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 from tvm_ffi.utils.embed_cubin import embed_cubin
+
+torch: ModuleType | None
+try:
+    import torch  # type: ignore[import-not-found,no-redef]
+except ImportError:
+    torch = None
+
+
+def _is_cuda_available() -> bool:
+    """Check if CUDA is available for testing."""
+    if torch is None:
+        return False
+    return torch.cuda.is_available()
 
 
 def _create_test_object_file(obj_path: Path) -> None:
@@ -112,6 +127,9 @@ def _check_symbols_in_object(obj_path: Path, expected_symbols: list[str]) -> boo
         return False
 
 
+@pytest.mark.skipif(sys.platform != "linux", reason="embed_cubin only supported on Linux")
+@pytest.mark.skipif(torch is None, reason="PyTorch not installed")
+@pytest.mark.skipif(not _is_cuda_available(), reason="CUDA not available")
 def test_embed_cubin_basic() -> None:
     """Test basic embed_cubin functionality."""
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -153,6 +171,9 @@ def test_embed_cubin_basic() -> None:
         )
 
 
+@pytest.mark.skipif(sys.platform != "linux", reason="embed_cubin only supported on Linux")
+@pytest.mark.skipif(torch is None, reason="PyTorch not installed")
+@pytest.mark.skipif(not _is_cuda_available(), reason="CUDA not available")
 def test_embed_cubin_different_names() -> None:
     """Test embedding CUBIN with different names."""
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -206,6 +227,9 @@ def test_embed_cubin_nonexistent_input() -> None:
             )
 
 
+@pytest.mark.skipif(sys.platform != "linux", reason="embed_cubin only supported on Linux")
+@pytest.mark.skipif(torch is None, reason="PyTorch not installed")
+@pytest.mark.skipif(not _is_cuda_available(), reason="CUDA not available")
 def test_embed_cubin_verbose_mode() -> None:
     """Test that verbose mode doesn't crash."""
     with tempfile.TemporaryDirectory() as temp_dir:
