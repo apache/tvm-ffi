@@ -280,17 +280,6 @@ class ReflectionDefBase {
   }
 
   template <typename Func>
-  TVM_FFI_INLINE static auto GetOverloadMethod(std::string name, Func&& func) {
-    return ffi::Function::FromOverloaded(WrapFunction(std::forward<Func>(func)), std::move(name));
-  }
-
-  template <typename Func>
-  TVM_FFI_INLINE static auto NewOverload(std::string name, Func&& func) {
-    return details::CreateNewOverload(WrapFunction(std::forward<Func>(func)), std::move(name));
-  }
-
- private:
-  template <typename Func>
   TVM_FFI_INLINE static Func&& WrapFunction(Func&& func) {
     return std::forward<Func>(func);
   }
