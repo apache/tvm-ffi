@@ -325,7 +325,7 @@ def _generate_ninja_build(  # noqa: PLR0915, PLR0912
 
             ninja.append("rule embed_cubin")
             ninja.append(
-                "  command = python -m tvm_ffi.utils.embed_cubin --output-obj $out --input-obj $in --cubin $cubin --name $name"
+                f"  command = {sys.executable} -m tvm_ffi.utils.embed_cubin --output-obj $out --input-obj $in --cubin $cubin --name $name"
             )
             ninja.append("")
 
