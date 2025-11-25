@@ -54,8 +54,9 @@ namespace reflection {
  * \endcode
  */
 template <typename Class>
-class OverloadObjectDef : public ReflectionDefBase {
+class OverloadObjectDef : private ObjectDef<Class> {
  public:
+  using Super = ObjectDef<Class>;
   /*!
    * \brief Constructor
    * \tparam ExtraArgs The extra arguments.
@@ -63,9 +64,7 @@ class OverloadObjectDef : public ReflectionDefBase {
    */
   template <typename... ExtraArgs>
   explicit OverloadObjectDef(ExtraArgs&&... extra_args)
-      : type_index_(Class::_GetOrAllocRuntimeTypeIndex()), type_key_(Class::_type_key) {
-    RegisterExtraInfo(std::forward<ExtraArgs>(extra_args)...);
-  }
+      : Super(std::forward<ExtraArgs>(extra_args)...) {}
 
   /*!
    * \brief Define a readonly field.
@@ -83,7 +82,8 @@ class OverloadObjectDef : public ReflectionDefBase {
   template <typename T, typename BaseClass, typename... Extra>
   TVM_FFI_INLINE OverloadObjectDef& def_ro(const char* name, T BaseClass::* field_ptr,
                                            Extra&&... extra) {
-    RegisterField(name, field_ptr, false, std::forward<Extra>(extra)...);
+    /// NOTE: we don't allow properties to be overloaded
+    Super::def_ro(name, field_ptr, std::forward<Extra>(extra)...);
     return *this;
   }
 
@@ -103,8 +103,8 @@ class OverloadObjectDef : public ReflectionDefBase {
   template <typename T, typename BaseClass, typename... Extra>
   TVM_FFI_INLINE OverloadObjectDef& def_rw(const char* name, T BaseClass::* field_ptr,
                                            Extra&&... extra) {
-    static_assert(Class::_type_mutable, "Only mutable classes are supported for writable fields");
-    RegisterField(name, field_ptr, true, std::forward<Extra>(extra)...);
+    /// NOTE: we don't allow properties to be overloaded
+    Super::def_rw(name, field_ptr, std::forward<Extra>(extra)...);
     return *this;
   }
 
@@ -174,6 +174,13 @@ class OverloadObjectDef : public ReflectionDefBase {
   }
 
  private:
+  using ReflectionDefBase::ApplyExtraInfoTrait;
+  using ReflectionDefBase::GetOverloadMethod;
+  using ReflectionDefBase::NewOverload;
+  using Super::kInitMethodName;
+  using Super::type_index_;
+  using Super::type_key_;
+
   template <typename... ExtraArgs>
   void RegisterExtraInfo(ExtraArgs&&... extra_args) {
     TVMFFITypeMetadata info;
@@ -182,9 +189,9 @@ class OverloadObjectDef : public ReflectionDefBase {
     info.creator = nullptr;
     info.doc = TVMFFIByteArray{nullptr, 0};
     if constexpr (std::is_default_constructible_v<Class>) {
-      info.creator = ObjectCreatorDefault<Class>;
+      info.creator = ReflectionDefBase::ObjectCreatorDefault<Class>;
     } else if constexpr (std::is_constructible_v<Class, UnsafeInit>) {
-      info.creator = ObjectCreatorUnsafeInit<Class>;
+      info.creator = ReflectionDefBase::ObjectCreatorUnsafeInit<Class>;
     }
     // apply extra info traits
     ((ApplyExtraInfoTrait(&info, std::forward<ExtraArgs>(extra_args)), ...));
@@ -207,8 +214,8 @@ class OverloadObjectDef : public ReflectionDefBase {
     if (writable) {
       info.flags |= kTVMFFIFieldFlagBitMaskWritable;
     }
-    info.getter = FieldGetter<T>;
-    info.setter = FieldSetter<T>;
+    info.getter = ReflectionDefBase::FieldGetter<T>;
+    info.setter = ReflectionDefBase::FieldSetter<T>;
     // initialize default value to nullptr
     info.default_value = AnyView(nullptr).CopyToTVMFFIAny();
     info.doc = TVMFFIByteArray{nullptr, 0};
@@ -256,10 +263,7 @@ class OverloadObjectDef : public ReflectionDefBase {
     TVM_FFI_CHECK_SAFE_CALL(TVMFFITypeRegisterMethod(type_index_, &info));
   }
 
-  int32_t type_index_;
-  const char* type_key_;
   std::unordered_map<std::string, details::OverloadBase*> registered_fields_;
-  static constexpr const char* kInitMethodName = "__ffi_init__";
 };
 
 }  // namespace reflection
