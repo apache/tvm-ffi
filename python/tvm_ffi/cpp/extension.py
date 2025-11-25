@@ -33,8 +33,6 @@ from tvm_ffi.libinfo import find_dlpack_include_path, find_include_path, find_li
 from tvm_ffi.module import Module, load_module
 from tvm_ffi.utils import FileLock
 
-from .nvrtc import _create_embedded_cubin_objects
-
 IS_WINDOWS = sys.platform == "win32"
 
 
@@ -231,7 +229,7 @@ def _generate_ninja_build(  # noqa: PLR0915, PLR0912
     extra_include_paths: Sequence[str],
     cpp_files: Sequence[str],
     cuda_files: Sequence[str],
-    extra_object_files: Sequence[str] | None = None,
+    embed_cubin: Mapping[str, bytes] | None = None,
 ) -> str:
     """Generate the content of build.ninja for building the module."""
     default_include_paths = [find_include_path(), find_dlpack_include_path()]
@@ -318,6 +316,19 @@ def _generate_ninja_build(  # noqa: PLR0915, PLR0912
         )
         ninja.append("")
 
+    # Add rules for object merging and cubin embedding (Unix only)
+    if not IS_WINDOWS:
+        if embed_cubin:
+            ninja.append("rule merge_objects")
+            ninja.append("  command = ld -r -o $out $in")
+            ninja.append("")
+
+            ninja.append("rule embed_cubin")
+            ninja.append(
+                "  command = python -m tvm_ffi.utils.embed_cubin --output-obj $out --input-obj $in --cubin $cubin --name $name"
+            )
+            ninja.append("")
+
     ninja.append("rule link")
     if IS_WINDOWS:
         ninja.append("  command = $cxx $in /link $ldflags /out:$out")
@@ -326,27 +337,54 @@ def _generate_ninja_build(  # noqa: PLR0915, PLR0912
     ninja.append("")
 
     # build targets
-    link_files: list[str] = []
+    obj_files: list[str] = []
     for i, cpp_path in enumerate(sorted(cpp_files)):
         obj_name = f"cpp_{i}.o"
         ninja.append("build {}: compile {}".format(obj_name, cpp_path.replace(":", "$:")))
-        link_files.append(obj_name)
+        obj_files.append(obj_name)
 
     for i, cuda_path in enumerate(sorted(cuda_files)):
         obj_name = f"cuda_{i}.o"
         ninja.append("build {}: compile_cuda {}".format(obj_name, cuda_path.replace(":", "$:")))
-        link_files.append(obj_name)
-
-    # Add extra object files (e.g., embedded CUBIN objects)
-    if extra_object_files:
-        for obj_path in extra_object_files:
-            link_files.append(obj_path.replace(":", "$:"))
+        obj_files.append(obj_name)
 
     # Use appropriate extension based on platform
     ext = ".dll" if IS_WINDOWS else ".so"
-    link_name = " ".join(link_files)
-    ninja.append(f"build {name}{ext}: link {link_name}")
-    ninja.append("")
+
+    # For Unix systems with embed_cubin, use a 3-step process:
+    # 1. Merge all object files into a unified object file
+    # 2. Embed each cubin into the unified object file (chain them)
+    # 3. Link the final object file into a shared library
+    if not IS_WINDOWS and embed_cubin:
+        # Step 1: Merge object files into unified.o
+        unified_obj = "unified.o"
+        obj_files_str = " ".join(obj_files)
+        ninja.append(f"build {unified_obj}: merge_objects {obj_files_str}")
+        ninja.append("")
+
+        # Step 2: Chain embed_cubin operations for each cubin
+        current_obj = unified_obj
+        for cubin_name in sorted(embed_cubin.keys()):
+            # Create next object file name
+            next_obj = f"unified_with_{cubin_name}.o"
+            cubin_file = f"{cubin_name}.cubin"
+
+            # Add ninja build rule
+            ninja.append(f"build {next_obj}: embed_cubin {current_obj}")
+            ninja.append(f"  cubin = {cubin_file}")
+            ninja.append(f"  name = {cubin_name}")
+            ninja.append("")
+
+            current_obj = next_obj
+
+        # Step 3: Link the final object file
+        ninja.append(f"build {name}{ext}: link {current_obj}")
+        ninja.append("")
+    else:
+        # Original behavior: directly link object files (for Windows or no cubin embedding)
+        link_files_str = " ".join(obj_files)
+        ninja.append(f"build {name}{ext}: link {link_files_str}")
+        ninja.append("")
 
     # default target
     ninja.append(f"default {name}{ext}")
@@ -471,10 +509,16 @@ def _build_impl(
         build_dir = Path(build_directory).resolve()
     build_dir.mkdir(parents=True, exist_ok=True)
 
-    # Create embedded CUBIN object files if needed
-    extra_object_files: list[str] = []
+    # CUBIN embedding is only supported on Unix systems
+    if embed_cubin and IS_WINDOWS:
+        raise NotImplementedError("CUBIN embedding is not yet supported on Windows")
+
+    # Write CUBIN files to build directory if needed (for Unix systems)
+    # These will be embedded using the embed_cubin utility during ninja build
     if embed_cubin:
-        extra_object_files = _create_embedded_cubin_objects(embed_cubin, build_dir)
+        for cubin_name, cubin_bytes in embed_cubin.items():
+            cubin_path = build_dir / f"{cubin_name}.cubin"
+            cubin_path.write_bytes(cubin_bytes)
 
     # generate build.ninja
     ninja_source = _generate_ninja_build(
@@ -486,7 +530,7 @@ def _build_impl(
         extra_include_paths=extra_include_paths_list,
         cpp_files=cpp_path_list,
         cuda_files=cuda_path_list,
-        extra_object_files=extra_object_files,
+        embed_cubin=embed_cubin,
     )
 
     # may not hold lock when build_directory is specified, prevent deadlock
