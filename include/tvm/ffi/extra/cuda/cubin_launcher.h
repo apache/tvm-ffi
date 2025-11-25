@@ -442,9 +442,6 @@ class CubinKernel {
    *
    * \param library The cudaLibrary_t handle.
    * \param name Name of the kernel function.
-   * \param dynamic_smem_max Maximum dynamic shared memory in bytes to set for this kernel.
-   *                           -1 (default) means maximum available dynamic shared memory
-   *                           (device max - static shared memory used by kernel).
    */
   CubinKernel(cudaLibrary_t library, const char* name) {
     TVM_FFI_CHECK_CUDA_ERROR(cudaLibraryGetKernel(&kernel_, library, name));
