@@ -669,6 +669,8 @@ class ObjectDef : public ReflectionDefBase {
     TVM_FFI_CHECK_SAFE_CALL(TVMFFITypeRegisterMethod(type_index_, &info));
   }
 
+ protected:
+  // These fields may be used in subclasses
   int32_t type_index_;
   const char* type_key_;
   static constexpr const char* kInitMethodName = "__ffi_init__";
