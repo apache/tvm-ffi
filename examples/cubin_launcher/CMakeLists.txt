@@ -18,6 +18,9 @@
 cmake_minimum_required(VERSION 3.20)
 project(cubin_launcher LANGUAGES CXX CUDA)
 
+# Prefer virtualenv when searching for python
+set(Python_FIND_VIRTUALENV FIRST)
+
 # Find tvm-ffi package
 find_package(
   Python
@@ -34,62 +37,45 @@ find_package(tvm_ffi CONFIG REQUIRED)
 # Find CUDA toolkit
 find_package(CUDAToolkit REQUIRED)
 
-# Step 1: Compile kernel.cu to CUBIN We use a custom command to compile directly to CUBIN with nvcc
-# Use -arch=native to automatically detect the GPU architecture
-add_custom_command(
-  OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/kernel.cubin
-  COMMAND ${CMAKE_CUDA_COMPILER} --cubin -arch=native ${CMAKE_CURRENT_SOURCE_DIR}/src/kernel.cu -o
-          ${CMAKE_CURRENT_BINARY_DIR}/kernel.cubin
-  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/kernel.cu
-  COMMENT "Compiling kernel.cu to CUBIN for native GPU architecture"
+# Step 1: Compile kernel.cu to CUBIN using tvm_ffi_generate_cubin utility Use -arch=native to
+# automatically detect the GPU architecture
+tvm_ffi_generate_cubin(
+  OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/kernel.cubin SOURCE src/kernel.cu ARCH native
 )
 
+# Create a target for lib_dynamic to depend on
 add_custom_target(
   generate_cubin ALL
   DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/kernel.cubin
   COMMENT "Generating CUBIN file"
 )
 
-# Step 2: Generate object file with embedded CUBIN data for linking This creates symbols:
+# Step 2: Embed CUBIN into the object file using tvm_ffi_embed_cubin utility This creates symbols:
 # __tvm_ffi__cubin_env, __tvm_ffi__cubin_env_end
-add_custom_command(
-  OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/kernel_cubin_data.o
-  COMMAND ${CMAKE_LINKER} -r -b binary -o ${CMAKE_CURRENT_BINARY_DIR}/kernel_cubin_data.o
-          kernel.cubin
-  COMMAND
-    ${CMAKE_OBJCOPY} --rename-section .data=.rodata,alloc,load,readonly,data,contents --redefine-sym
-    _binary_kernel_cubin_start=__tvm_ffi__cubin_env --redefine-sym
-    _binary_kernel_cubin_end=__tvm_ffi__cubin_env_end --redefine-sym
-    _binary_kernel_cubin_size=__tvm_ffi__cubin_env_size
-    ${CMAKE_CURRENT_BINARY_DIR}/kernel_cubin_data.o
-  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-  DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/kernel.cubin
-  COMMENT "Embedding CUBIN as object file"
-)
-
-add_custom_target(
-  embed_cubin
-  DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/kernel_cubin_data.o
-  COMMENT "Embedding CUBIN as object file"
+tvm_ffi_embed_cubin(
+  OUTPUT
+  ${CMAKE_CURRENT_BINARY_DIR}/lib_embedded_with_cubin.o
+  SOURCE
+  src/lib_embedded.cc
+  CUBIN
+  ${CMAKE_CURRENT_BINARY_DIR}/kernel.cubin
+  NAME
+  env
 )
 
 # Step 3: Build lib_embedded shared library (with embedded CUBIN)
-add_library(lib_embedded SHARED src/lib_embedded.cc ${CMAKE_CURRENT_BINARY_DIR}/kernel_cubin_data.o)
+add_library(lib_embedded SHARED ${CMAKE_CURRENT_BINARY_DIR}/lib_embedded_with_cubin.o)
 target_link_libraries(
   lib_embedded PRIVATE tvm_ffi_header tvm_ffi_shared CUDA::cuda_driver CUDA::cudart
 )
-add_dependencies(lib_embedded embed_cubin)
 set_target_properties(
   lib_embedded
   PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/"
              PREFIX ""
              SUFFIX ".so"
+             LINKER_LANGUAGE CXX
 )
-
-# Mark the embedded object file's stack as non-executable. This is necessary because the object file
-# created by 'ld -r -b binary' does not include a .note.GNU-stack section, which causes the linker
-# to warn about an executable stack. The -z,noexecstack flag ensures compatibility with security
-# policies and future linker versions that will enforce non-executable stacks by default.
+# Mark the embedded object file's stack as non-executable
 target_link_options(lib_embedded PRIVATE "LINKER:-z,noexecstack")
 
 # Step 4: Build lib_dynamic shared library (loads CUBIN from file)
