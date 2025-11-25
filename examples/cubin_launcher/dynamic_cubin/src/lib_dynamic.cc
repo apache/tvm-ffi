@@ -24,6 +24,7 @@
  * launch CUDA kernels.
  */
 
+// [example.begin]
 #include <tvm/ffi/container/tensor.h>
 #include <tvm/ffi/error.h>
 #include <tvm/ffi/extra/c_env_api.h>
@@ -126,3 +127,4 @@ TVM_FFI_DLL_EXPORT_TYPED_FUNC(add_one, cubin_dynamic::AddOne);
 TVM_FFI_DLL_EXPORT_TYPED_FUNC(mul_two, cubin_dynamic::MulTwo);
 
 }  // namespace cubin_dynamic
+// [example.end]

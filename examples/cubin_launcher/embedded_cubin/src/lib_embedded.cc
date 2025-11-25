@@ -24,6 +24,7 @@
  * embedded CUBIN data.
  */
 
+// [example.begin]
 #include <tvm/ffi/container/tensor.h>
 #include <tvm/ffi/error.h>
 #include <tvm/ffi/extra/c_env_api.h>
@@ -109,3 +110,4 @@ TVM_FFI_DLL_EXPORT_TYPED_FUNC(add_one, cubin_embedded::AddOne);
 TVM_FFI_DLL_EXPORT_TYPED_FUNC(mul_two, cubin_embedded::MulTwo);
 
 }  // namespace cubin_embedded
+// [example.end]

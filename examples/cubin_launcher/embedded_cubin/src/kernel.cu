@@ -23,6 +23,7 @@
 
 #include <cstdint>
 
+// [kernels.begin]
 /*!
  * \brief CUDA kernel that adds 1 to each element of an array.
  *
@@ -50,3 +51,4 @@ extern "C" __global__ void mul_two_cuda(const float* x, float* y, int64_t n) {
     y[idx] = x[idx] * 2.0f;
   }
 }
+// [kernels.end]

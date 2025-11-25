@@ -49,6 +49,7 @@ def generate_cubin() -> bytes:
         Compiled CUBIN bytes
 
     """
+    # [cuda_source.begin]
     # Define CUDA kernels
     cuda_source = """
 extern "C" __global__ void add_one(float* x, float* y, int n) {
@@ -70,6 +71,7 @@ extern "C" __global__ void mul_two(float* x, float* y, int n) {
     print("Compiling CUDA kernels to CUBIN using NVRTC...")
     cubin_bytes = nvrtc.nvrtc_compile(cuda_source, name="kernels.cu")
     print(f"Compiled CUBIN: {len(cubin_bytes)} bytes\n")
+    # [cuda_source.end]
 
     return cubin_bytes
 
@@ -88,6 +90,7 @@ def use_cubin_kernel(cubin_bytes: bytes) -> int:
         0 on success, non-zero error code on failure
 
     """
+    # [cpp_wrapper.begin]
     # Define C++ code inline to launch the CUDA kernels using embedded CUBIN
     sources = """
 #include <tvm/ffi/container/tensor.h>
@@ -172,6 +175,7 @@ TVM_FFI_DLL_EXPORT_TYPED_FUNC(mul_two, nvrtc_loader::MulTwo);
         embed_cubin={"nvrtc_cubin": cubin_bytes},
     )
     print("Successfully compiled and loaded C++ sources with embedded CUBIN\n")
+    # [cpp_wrapper.end]
 
     # Get the functions
     add_one_fn = mod["add_one"]

@@ -52,6 +52,7 @@ def generate_cubin() -> bytes:
 
     """
 
+    # [triton_kernel.begin]
     # Define the kernel dynamically
     @triton.jit
     def square_kernel(X_ptr, Y_ptr, n, BLOCK: tl.constexpr = 1024):  # noqa
@@ -76,6 +77,7 @@ def generate_cubin() -> bytes:
 
     # Get CUBIN bytes
     cubin_bytes = compiled_kernel.kernel
+    # [triton_kernel.end]
 
     return cubin_bytes
 
@@ -94,6 +96,7 @@ def use_cubin_kernel(cubin_bytes: bytes) -> int:
         0 on success, non-zero error code on failure
 
     """
+    # [cpp_wrapper.begin]
     # Define C++ code inline to load and launch the Triton kernel using embedded CUBIN
     sources = """
 #include <tvm/ffi/container/tensor.h>
@@ -147,6 +150,7 @@ TVM_FFI_DLL_EXPORT_TYPED_FUNC(launch_square, triton_loader::LaunchSquare);
         embed_cubin={"triton_cubin": cubin_bytes},
     )
     print("Successfully compiled and loaded C++ sources with embedded CUBIN\n")
+    # [cpp_wrapper.end]
 
     # Get the launch function
     launch_fn = mod["launch_square"]
