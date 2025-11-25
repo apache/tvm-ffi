@@ -34,10 +34,20 @@ using namespace tvm::ffi;
 struct TestOverloadObj : public Object {
   explicit TestOverloadObj(int32_t x) : type(Type::INT) {}
   explicit TestOverloadObj(float y) : type(Type::FLOAT) {}
-  bool holds_int(int x) { return this->type == Type::INT; }
-  bool holds_float(float y) { return this->type == Type::FLOAT; }
   static int add_one_int(int x) { return x + 1; }
   static float add_one_float(float x) { return x + 1.0f; }
+
+  template <typename T>
+  auto holds(T) {
+    if constexpr (std::is_same_v<T, int32_t>) {
+      return type == Type::INT;
+    } else if constexpr (std::is_same_v<T, float>) {
+      return type == Type::FLOAT;
+    } else {
+      static_assert(sizeof(T) == 0, "Unsupported type");
+    }
+  }
+
   enum class Type { INT, FLOAT } type;
   TVM_FFI_DECLARE_OBJECT_INFO("test.TestOverloadObj", TestOverloadObj, Object);
 };
@@ -47,8 +57,8 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   refl::OverloadObjectDef<TestOverloadObj>()
       .def(refl::init<int32_t>())
       .def(refl::init<float>())
-      .def("hold_same_type", &TestOverloadObj::holds_int)
-      .def("hold_same_type", &TestOverloadObj::holds_float)
+      .def("hold_same_type", &TestOverloadObj::holds<int32_t>)
+      .def("hold_same_type", &TestOverloadObj::holds<float>)
       .def_static("add_one_static", &TestOverloadObj::add_one_int)
       .def_static("add_one_static", &TestOverloadObj::add_one_float);
 }

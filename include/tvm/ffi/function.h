@@ -360,6 +360,19 @@ class Function : public ObjectRef {
     }
   }
 
+  template <typename TCallable, typename... Args>
+  static auto FromPackedInplace(Args&&... args) {
+    // We must ensure TCallable is a value type (decay_t) that can hold the callable object
+    static_assert(std::is_same_v<TCallable, std::decay_t<TCallable>>);
+    static_assert(std::is_invocable_v<TCallable, const AnyView*, int32_t, Any*>);
+    using ObjType = details::FunctionObjImpl<TCallable>;
+    Function func;
+    auto obj_ptr = make_object<ObjType>(std::forward<Args>(args)...);
+    auto* call_ptr = &obj_ptr->GetCallable();
+    func.data_ = std::move(obj_ptr);
+    return std::make_tuple(std::move(func), call_ptr);
+  }
+
   /*!
    * \brief Create ffi::Function from a C style callbacks.
    *
@@ -541,18 +554,6 @@ class Function : public ObjectRef {
           std::make_index_sequence<FuncInfo::num_args>{}, &name, callable, args, num_args, rv);
     };
     return FromPackedInternal(std::move(call_packed));
-  }
-
-  template <typename TCallable>
-  static auto FromOverloaded(TCallable&& callable, std::optional<std::string> name = std::nullopt)
-      -> std::tuple<Function, details::OverloadBase*> {
-    // We must make TCallable a value type (decay_t) that can hold the callable object
-    using ObjType = details::FunctionObjImpl<details::OverloadedFunction<std::decay_t<TCallable>>>;
-    Function func;
-    auto obj_ptr = make_object<ObjType>(std::forward<TCallable>(callable), std::move(name));
-    auto& call_ref = obj_ptr->GetCallable();
-    func.data_ = std::move(obj_ptr);
-    return {std::move(func), &call_ref};
   }
 
   /*!
