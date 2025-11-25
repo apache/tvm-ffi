@@ -32,6 +32,7 @@ Notes:
 
 from __future__ import annotations
 
+import platform
 import sys
 import time
 import traceback
@@ -42,6 +43,22 @@ import triton  # type: ignore[import-not-found]
 import triton.language as tl  # type: ignore[import-not-found]
 from tvm_ffi import cpp
 from tvm_ffi.module import Module
+
+
+def get_cpu_name() -> str:
+    """Get the name of the CPU."""
+    cpu_name = platform.processor()
+    if not cpu_name or cpu_name == "x86_64":
+        # Fallback: Try to read /proc/cpuinfo for better model string on Linux
+        try:
+            with open("/proc/cpuinfo") as f:  # noqa: PTH123
+                for line in f:
+                    if "model name" in line:
+                        cpu_name = line.strip().split(":", 1)[1].strip()
+                        break
+        except Exception:
+            cpu_name = "Unknown CPU"
+    return cpu_name
 
 
 # Define empty kernel at global scope
@@ -98,7 +115,6 @@ def benchmark_call(name: str, func: Callable, args: tuple, num_calls: int = 1000
     end_time = time.time()
 
     time_per_call = (end_time - start_time) / num_calls
-    print_speed(name, time_per_call)
     return time_per_call
 
 
@@ -225,19 +241,14 @@ def run_benchmark(cubin_bytes: bytes, num_calls: int = 10000) -> int:
     print("=" * 60)
 
     # Benchmark 1: Triton native launcher
-    print("\n[1] Triton Native Launcher")
-
     def triton_launch() -> None:
         empty_kernel[1,](a, b, c, n)
 
     triton_time = benchmark_call("Triton launch", triton_launch, (), num_calls)
 
     # Benchmark 2: TVM-FFI launcher
-    print("\n[2] TVM-FFI CUBIN Launcher")
-    print("  Loading CUBIN module...")
     mod = load_cubin_module(cubin_bytes)
     launch_fn = mod["launch_empty"]
-    print("  Module loaded successfully")
 
     def tvm_ffi_launch() -> None:
         launch_fn(a, b, c)
@@ -245,9 +256,6 @@ def run_benchmark(cubin_bytes: bytes, num_calls: int = 10000) -> int:
     tvm_ffi_time = benchmark_call("TVM-FFI launch", tvm_ffi_launch, (), num_calls)
 
     # Summary
-    print("\n" + "=" * 60)
-    print("SUMMARY")
-    print("=" * 60)
     print_speed("Triton launch", triton_time)
     print_speed("TVM-FFI launch", tvm_ffi_time)
     overhead_pct = ((tvm_ffi_time - triton_time) / triton_time) * 100
@@ -257,6 +265,7 @@ def run_benchmark(cubin_bytes: bytes, num_calls: int = 10000) -> int:
         print(f"  TVM-FFI is {triton_time / tvm_ffi_time:.2f}x faster")
     else:
         print(f"  Triton is {tvm_ffi_time / triton_time:.2f}x faster")
+    print("=" * 60)
 
     return 0
 
@@ -270,9 +279,10 @@ def main() -> int:
         print("[ERROR] CUDA is not available")
         return 1
 
-    print(f"CUDA device: {torch.cuda.get_device_name(0)}")
-    print(f"PyTorch version: {torch.__version__}")
-    print(f"Triton version: {triton.__version__}")
+    print(f"              CPU: {get_cpu_name()}")
+    print(f"      CUDA device: {torch.cuda.get_device_name(0)}")
+    print(f"  PyTorch version: {torch.__version__}")
+    print(f"   Triton version: {triton.__version__}")
 
     # Compile empty kernel to CUBIN
     try:

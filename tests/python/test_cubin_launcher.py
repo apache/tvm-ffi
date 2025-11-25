@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from types import ModuleType
@@ -32,6 +33,14 @@ except ImportError:
     torch = None
 
 import tvm_ffi.cpp
+
+
+# Check if CUDA is available
+def _is_cuda_available() -> bool:
+    """Check if CUDA is available for testing."""
+    if torch is None:
+        return False
+    return torch.cuda.is_available()
 
 
 def _compile_kernel_to_cubin() -> bytes:
@@ -76,13 +85,12 @@ def _compile_kernel_to_cubin() -> bytes:
         return cubin_file.read_bytes()
 
 
+@pytest.mark.skipif(sys.platform != "linux", reason="CUBIN launcher only supported on Linux")
 @pytest.mark.skipif(torch is None, reason="PyTorch not installed")
+@pytest.mark.skipif(not _is_cuda_available(), reason="CUDA not available")
 def test_cubin_launcher_add_one() -> None:
     """Test loading and launching add_one kernel from CUBIN."""
     assert torch is not None, "PyTorch is required for this test"
-
-    if not torch.cuda.is_available():
-        pytest.skip("CUDA is not available")
 
     cubin_bytes = _compile_kernel_to_cubin()
 
@@ -212,13 +220,12 @@ TVM_FFI_DLL_EXPORT_TYPED_FUNC(launch_mul_two, cubin_test::LaunchMulTwo);
         Path(cubin_path).unlink(missing_ok=True)
 
 
+@pytest.mark.skipif(sys.platform != "linux", reason="CUBIN launcher only supported on Linux")
 @pytest.mark.skipif(torch is None, reason="PyTorch not installed")
+@pytest.mark.skipif(not _is_cuda_available(), reason="CUDA not available")
 def test_cubin_launcher_chained() -> None:
     """Test chaining multiple kernel launches."""
     assert torch is not None, "PyTorch is required for this test"
-
-    if not torch.cuda.is_available():
-        pytest.skip("CUDA is not available")
 
     cubin_bytes = _compile_kernel_to_cubin()
 
