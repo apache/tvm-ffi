@@ -33,7 +33,6 @@ from __future__ import annotations
 
 import sys
 import traceback
-from pathlib import Path
 
 import torch
 import triton  # type: ignore[import-not-found]
@@ -41,15 +40,14 @@ import triton.language as tl  # type: ignore[import-not-found]
 from tvm_ffi import cpp
 
 
-def generate_cubin(build_dir: Path) -> bytes:
+def generate_cubin() -> bytes:
     """Define a Triton kernel in-process and compile it to a CUBIN file.
 
     The kernel is named `square_kernel` and computes y[i] = x[i] * x[i].
 
-    Args:
-        build_dir: Directory to write the CUBIN file to
-
-    Returns:
+    Returns
+    -------
+    bytes
         Compiled CUBIN bytes
 
     """
@@ -85,10 +83,14 @@ def generate_cubin(build_dir: Path) -> bytes:
 def use_cubin_kernel(cubin_bytes: bytes) -> int:
     """Load and test Triton CUBIN kernel through TVM-FFI.
 
-    Args:
-        cubin_bytes: Compiled CUBIN bytes
+    Parameters
+    ----------
+    cubin_bytes : bytes
+        Compiled CUBIN bytes
 
-    Returns:
+    Returns
+    -------
+    int:
         0 on success, non-zero error code on failure
 
     """
@@ -179,14 +181,10 @@ def main() -> int:
     print(f"CUDA device: {torch.cuda.get_device_name(0)}")
     print(f"PyTorch version: {torch.__version__}\n")
 
-    base = Path(__file__).resolve().parent
-    build_dir = base / "build"
-    build_dir.mkdir(parents=True, exist_ok=True)
-
     # Compile Triton kernel to CUBIN
     try:
         print("Compiling Triton kernel to CUBIN...")
-        cubin_bytes = generate_cubin(build_dir)
+        cubin_bytes = generate_cubin()
         print(f"Compiled CUBIN: {len(cubin_bytes)} bytes\n")
     except Exception as e:
         print(f"[ERROR] Failed to compile Triton kernel: {e}")

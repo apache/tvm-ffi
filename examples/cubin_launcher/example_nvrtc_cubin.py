@@ -32,20 +32,20 @@ from __future__ import annotations
 
 import sys
 import traceback
-from pathlib import Path
 
 import torch
 from tvm_ffi import cpp
 from tvm_ffi.cpp import nvrtc
 
 
-def generate_cubin(build_dir: Path) -> bytes:
-    """Generate CUBIN from CUDA source using NVRTC.
+def generate_cubin() -> bytes:
+    """Define CUDA kernels and compile them to a CUBIN file.
 
-    Args:
-        build_dir: Directory to write the CUBIN file to
+    The kernels are named `add_one` and `mul_two` and compute y[i] = x[i] + 1 and y[i] = x[i] * 2, respectively.
 
-    Returns:
+    Returns
+    -------
+    bytes
         Compiled CUBIN bytes
 
     """
@@ -74,13 +74,17 @@ extern "C" __global__ void mul_two(float* x, float* y, int n) {
     return cubin_bytes
 
 
-def use_cubin_kernels(cubin_bytes: bytes) -> int:
+def use_cubin_kernel(cubin_bytes: bytes) -> int:
     """Load and test CUBIN kernels through TVM-FFI.
 
-    Args:
-        cubin_bytes: Compiled CUBIN bytes
+    Parameters
+    ----------
+    cubin_bytes : bytes
+        Compiled CUBIN bytes
 
-    Returns:
+    Returns
+    -------
+    int:
         0 on success, non-zero error code on failure
 
     """
@@ -239,13 +243,9 @@ def main() -> int:
     print(f"CUDA device: {torch.cuda.get_device_name(0)}")
     print(f"PyTorch version: {torch.__version__}\n")
 
-    base = Path(__file__).resolve().parent
-    build_dir = base / "build"
-    build_dir.mkdir(parents=True, exist_ok=True)
-
     # Generate CUBIN
     try:
-        cubin_bytes = generate_cubin(build_dir)
+        cubin_bytes = generate_cubin()
     except Exception as e:
         print(f"[ERROR] Failed to compile CUDA kernels: {e}")
         traceback.print_exc()
@@ -253,7 +253,7 @@ def main() -> int:
 
     # Use CUBIN kernels
     try:
-        return use_cubin_kernels(cubin_bytes)
+        return use_cubin_kernel(cubin_bytes)
     except Exception as e:
         print(f"[ERROR] Failed to use CUBIN kernels: {e}")
         traceback.print_exc()
