@@ -52,20 +52,20 @@ def generate_cubin() -> bytes:
     # [cuda_source.begin]
     # Define CUDA kernels
     cuda_source = """
-extern "C" __global__ void add_one(float* x, float* y, int n) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < n) {
-        y[idx] = x[idx] + 1.0f;
+    extern "C" __global__ void add_one(float* x, float* y, int n) {
+        int idx = blockIdx.x * blockDim.x + threadIdx.x;
+        if (idx < n) {
+            y[idx] = x[idx] + 1.0f;
+        }
     }
-}
 
-extern "C" __global__ void mul_two(float* x, float* y, int n) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < n) {
-        y[idx] = x[idx] * 2.0f;
+    extern "C" __global__ void mul_two(float* x, float* y, int n) {
+        int idx = blockIdx.x * blockDim.x + threadIdx.x;
+        if (idx < n) {
+            y[idx] = x[idx] * 2.0f;
+        }
     }
-}
-"""
+    """
 
     # Compile CUDA source to CUBIN using NVRTC
     print("Compiling CUDA kernels to CUBIN using NVRTC...")
@@ -93,80 +93,80 @@ def use_cubin_kernel(cubin_bytes: bytes) -> int:
     # [cpp_wrapper.begin]
     # Define C++ code inline to launch the CUDA kernels using embedded CUBIN
     sources = """
-#include <tvm/ffi/container/tensor.h>
-#include <tvm/ffi/error.h>
-#include <tvm/ffi/extra/c_env_api.h>
-#include <tvm/ffi/extra/cuda/cubin_launcher.h>
-#include <tvm/ffi/function.h>
+    #include <tvm/ffi/container/tensor.h>
+    #include <tvm/ffi/error.h>
+    #include <tvm/ffi/extra/c_env_api.h>
+    #include <tvm/ffi/extra/cuda/cubin_launcher.h>
+    #include <tvm/ffi/function.h>
 
-// Embed CUBIN module with name "nvrtc_cubin"
-TVM_FFI_EMBED_CUBIN(nvrtc_cubin);
+    // Embed CUBIN module with name "nvrtc_cubin"
+    TVM_FFI_EMBED_CUBIN(nvrtc_cubin);
 
-namespace nvrtc_loader {
+    namespace nvrtc_loader {
 
-void AddOne(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
-  // Get kernel from embedded CUBIN (cached in static variable for efficiency)
-  static auto kernel = TVM_FFI_EMBED_CUBIN_GET_KERNEL(nvrtc_cubin, "add_one");
+    void AddOne(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
+    // Get kernel from embedded CUBIN (cached in static variable for efficiency)
+    static auto kernel = TVM_FFI_EMBED_CUBIN_GET_KERNEL(nvrtc_cubin, "add_one");
 
-  TVM_FFI_CHECK(x.ndim() == 1, ValueError) << "Input must be 1D tensor";
-  TVM_FFI_CHECK(y.ndim() == 1, ValueError) << "Output must be 1D tensor";
-  TVM_FFI_CHECK(x.size(0) == y.size(0), ValueError) << "Input and output must have same size";
+    TVM_FFI_CHECK(x.ndim() == 1, ValueError) << "Input must be 1D tensor";
+    TVM_FFI_CHECK(y.ndim() == 1, ValueError) << "Output must be 1D tensor";
+    TVM_FFI_CHECK(x.size(0) == y.size(0), ValueError) << "Input and output must have same size";
 
-  int64_t n = x.size(0);
-  void* x_ptr = x.data_ptr();
-  void* y_ptr = y.data_ptr();
+    int64_t n = x.size(0);
+    void* x_ptr = x.data_ptr();
+    void* y_ptr = y.data_ptr();
 
-  // Prepare kernel arguments
-  void* args[] = {reinterpret_cast<void*>(&x_ptr), reinterpret_cast<void*>(&y_ptr),
-                  reinterpret_cast<void*>(&n)};
+    // Prepare kernel arguments
+    void* args[] = {reinterpret_cast<void*>(&x_ptr), reinterpret_cast<void*>(&y_ptr),
+                    reinterpret_cast<void*>(&n)};
 
-  // Launch configuration
-  tvm::ffi::dim3 grid((n + 255) / 256);
-  tvm::ffi::dim3 block(256);
+    // Launch configuration
+    tvm::ffi::dim3 grid((n + 255) / 256);
+    tvm::ffi::dim3 block(256);
 
-  // Get CUDA stream
-  DLDevice device = x.device();
-  CUstream stream = static_cast<CUstream>(TVMFFIEnvGetStream(device.device_type, device.device_id));
+    // Get CUDA stream
+    DLDevice device = x.device();
+    CUstream stream = static_cast<CUstream>(TVMFFIEnvGetStream(device.device_type, device.device_id));
 
-  // Launch kernel
-  CUresult result = kernel.Launch(args, grid, block, stream);
-  TVM_FFI_CHECK_CUDA_DRIVER_ERROR(result);
-}
+    // Launch kernel
+    CUresult result = kernel.Launch(args, grid, block, stream);
+    TVM_FFI_CHECK_CUDA_DRIVER_ERROR(result);
+    }
 
-void MulTwo(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
-  // Get kernel from embedded CUBIN (cached in static variable for efficiency)
-  static auto kernel = TVM_FFI_EMBED_CUBIN_GET_KERNEL(nvrtc_cubin, "mul_two");
+    void MulTwo(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
+    // Get kernel from embedded CUBIN (cached in static variable for efficiency)
+    static auto kernel = TVM_FFI_EMBED_CUBIN_GET_KERNEL(nvrtc_cubin, "mul_two");
 
-  TVM_FFI_CHECK(x.ndim() == 1, ValueError) << "Input must be 1D tensor";
-  TVM_FFI_CHECK(y.ndim() == 1, ValueError) << "Output must be 1D tensor";
-  TVM_FFI_CHECK(x.size(0) == y.size(0), ValueError) << "Input and output must have same size";
+    TVM_FFI_CHECK(x.ndim() == 1, ValueError) << "Input must be 1D tensor";
+    TVM_FFI_CHECK(y.ndim() == 1, ValueError) << "Output must be 1D tensor";
+    TVM_FFI_CHECK(x.size(0) == y.size(0), ValueError) << "Input and output must have same size";
 
-  int64_t n = x.size(0);
-  void* x_ptr = x.data_ptr();
-  void* y_ptr = y.data_ptr();
+    int64_t n = x.size(0);
+    void* x_ptr = x.data_ptr();
+    void* y_ptr = y.data_ptr();
 
-  // Prepare kernel arguments
-  void* args[] = {reinterpret_cast<void*>(&x_ptr), reinterpret_cast<void*>(&y_ptr),
-                  reinterpret_cast<void*>(&n)};
+    // Prepare kernel arguments
+    void* args[] = {reinterpret_cast<void*>(&x_ptr), reinterpret_cast<void*>(&y_ptr),
+                    reinterpret_cast<void*>(&n)};
 
-  // Launch configuration
-  tvm::ffi::dim3 grid((n + 255) / 256);
-  tvm::ffi::dim3 block(256);
+    // Launch configuration
+    tvm::ffi::dim3 grid((n + 255) / 256);
+    tvm::ffi::dim3 block(256);
 
-  // Get CUDA stream
-  DLDevice device = x.device();
-  CUstream stream = static_cast<CUstream>(TVMFFIEnvGetStream(device.device_type, device.device_id));
+    // Get CUDA stream
+    DLDevice device = x.device();
+    CUstream stream = static_cast<CUstream>(TVMFFIEnvGetStream(device.device_type, device.device_id));
 
-  // Launch kernel
-  CUresult result = kernel.Launch(args, grid, block, stream);
-  TVM_FFI_CHECK_CUDA_DRIVER_ERROR(result);
-}
+    // Launch kernel
+    CUresult result = kernel.Launch(args, grid, block, stream);
+    TVM_FFI_CHECK_CUDA_DRIVER_ERROR(result);
+    }
 
-}  // namespace nvrtc_loader
+    }  // namespace nvrtc_loader
 
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(add_one, nvrtc_loader::AddOne);
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(mul_two, nvrtc_loader::MulTwo);
-"""
+    TVM_FFI_DLL_EXPORT_TYPED_FUNC(add_one, nvrtc_loader::AddOne);
+    TVM_FFI_DLL_EXPORT_TYPED_FUNC(mul_two, nvrtc_loader::MulTwo);
+    """
 
     print("Compiling C++ sources with tvm_ffi.cpp.load_inline...")
     mod = cpp.load_inline(

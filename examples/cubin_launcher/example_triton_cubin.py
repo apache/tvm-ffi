@@ -99,48 +99,48 @@ def use_cubin_kernel(cubin_bytes: bytes) -> int:
     # [cpp_wrapper.begin]
     # Define C++ code inline to load and launch the Triton kernel using embedded CUBIN
     sources = """
-#include <tvm/ffi/container/tensor.h>
-#include <tvm/ffi/error.h>
-#include <tvm/ffi/extra/c_env_api.h>
-#include <tvm/ffi/extra/cuda/cubin_launcher.h>
-#include <tvm/ffi/function.h>
+    #include <tvm/ffi/container/tensor.h>
+    #include <tvm/ffi/error.h>
+    #include <tvm/ffi/extra/c_env_api.h>
+    #include <tvm/ffi/extra/cuda/cubin_launcher.h>
+    #include <tvm/ffi/function.h>
 
-// Embed CUBIN module with name "triton_cubin"
-TVM_FFI_EMBED_CUBIN(triton_cubin);
+    // Embed CUBIN module with name "triton_cubin"
+    TVM_FFI_EMBED_CUBIN(triton_cubin);
 
-namespace triton_loader {
+    namespace triton_loader {
 
-void LaunchSquare(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
-  // Get kernel from embedded CUBIN (cached in static variable for efficiency)
-  static auto kernel = TVM_FFI_EMBED_CUBIN_GET_KERNEL(triton_cubin, "square_kernel");
+    void LaunchSquare(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
+    // Get kernel from embedded CUBIN (cached in static variable for efficiency)
+    static auto kernel = TVM_FFI_EMBED_CUBIN_GET_KERNEL(triton_cubin, "square_kernel");
 
-  TVM_FFI_CHECK(x.ndim() == 1, ValueError) << "Input must be 1D tensor";
-  TVM_FFI_CHECK(y.ndim() == 1, ValueError) << "Output must be 1D tensor";
-  TVM_FFI_CHECK(x.size(0) == y.size(0), ValueError) << "Sizes must match";
+    TVM_FFI_CHECK(x.ndim() == 1, ValueError) << "Input must be 1D tensor";
+    TVM_FFI_CHECK(y.ndim() == 1, ValueError) << "Output must be 1D tensor";
+    TVM_FFI_CHECK(x.size(0) == y.size(0), ValueError) << "Sizes must match";
 
-  uint32_t n = static_cast<uint32_t>(x.size(0));
-  void* x_ptr = x.data_ptr();
-  void* y_ptr = y.data_ptr();
-  uint64_t dummy_ptr = 0;
+    uint32_t n = static_cast<uint32_t>(x.size(0));
+    void* x_ptr = x.data_ptr();
+    void* y_ptr = y.data_ptr();
+    uint64_t dummy_ptr = 0;
 
-  // Workaround for Triton extra params: pass dummy addresses for unused parameters
-  void* args[] = {&x_ptr, &y_ptr, &n, &dummy_ptr, &dummy_ptr};
+    // Workaround for Triton extra params: pass dummy addresses for unused parameters
+    void* args[] = {&x_ptr, &y_ptr, &n, &dummy_ptr, &dummy_ptr};
 
-  // Kernel was compiled with .reqntid 128, not 1024
-  tvm::ffi::dim3 grid((n + 127) / 128);
-  tvm::ffi::dim3 block(128);
+    // Kernel was compiled with .reqntid 128, not 1024
+    tvm::ffi::dim3 grid((n + 127) / 128);
+    tvm::ffi::dim3 block(128);
 
-  DLDevice device = x.device();
-  CUstream stream = static_cast<CUstream>(TVMFFIEnvGetStream(device.device_type, device.device_id));
+    DLDevice device = x.device();
+    CUstream stream = static_cast<CUstream>(TVMFFIEnvGetStream(device.device_type, device.device_id));
 
-  CUresult result = kernel.Launch(args, grid, block, stream);
-  TVM_FFI_CHECK_CUDA_DRIVER_ERROR(result);
-}
+    CUresult result = kernel.Launch(args, grid, block, stream);
+    TVM_FFI_CHECK_CUDA_DRIVER_ERROR(result);
+    }
 
-}  // namespace triton_loader
+    }  // namespace triton_loader
 
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(launch_square, triton_loader::LaunchSquare);
-"""
+    TVM_FFI_DLL_EXPORT_TYPED_FUNC(launch_square, triton_loader::LaunchSquare);
+    """
 
     print("Compiling C++ sources with tvm_ffi.cpp.load_inline...")
     # Find CUDA include path
