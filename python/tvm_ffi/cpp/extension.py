@@ -270,7 +270,6 @@ def _generate_ninja_build(  # noqa: PLR0915, PLR0912
             default_ldflags += [
                 "-L{}".format(str(Path(_find_cuda_home()) / "lib64")),
                 "-lcudart",  # cuda runtime library
-                "-lcuda",  # cuda driver library
             ]
 
     cflags = default_cflags + [flag.strip() for flag in extra_cflags]

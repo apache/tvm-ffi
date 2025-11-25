@@ -95,73 +95,97 @@ struct dim3 {
  * symbols should be named `__tvm_ffi__cubin_<name>` and `__tvm_ffi__cubin_<name>_end`,
  * typically created using objcopy and ld.
  *
- * \par Creating Embedded CUBIN Symbols
- * To embed a CUBIN file into your binary, follow these steps:
+ * \par Creating Embedded CUBIN with TVM-FFI Utilities
+ * TVM-FFI provides utilities to simplify CUBIN embedding. You have two options:
  *
- * \par Step 1: Compile CUDA kernel to CUBIN
- * \code{.bash}
- * nvcc --cubin -arch=sm_75 kernel.cu -o kernel.cubin
- * \endcode
- *
- * \par Step 2: Convert CUBIN to object file with ld
- * \code{.bash}
- * ld -r -b binary -o kernel_data.o kernel.cubin
- * \endcode
- * This creates an object file with symbols: `_binary_kernel_cubin_start`,
- * `_binary_kernel_cubin_end`, and `_binary_kernel_cubin_size`.
- *
- * \par Step 3: Rename symbols with objcopy
- * \code{.bash}
- * objcopy --rename-section .data=.rodata,alloc,load,readonly,data,contents \
- *         --redefine-sym _binary_kernel_cubin_start=__tvm_ffi__cubin_<name> \
- *         --redefine-sym _binary_kernel_cubin_end=__tvm_ffi__cubin_<name>_end \
- *         kernel_data.o
- * \endcode
- * Replace `<name>` with your chosen identifier (e.g., "env", "my_kernels").
- *
- * \par Step 4: Link the object file with your library/executable
- * \code{.bash}
- * g++ -o mylib.so -shared mycode.cc kernel_data.o -Wl,-z,noexecstack -lcudart
- * \endcode
- * \note The `-z,noexecstack` flag marks the stack as non-executable, which is
- * required for security as the embedded object file lacks a .note.GNU-stack section.
- *
- * \par CMake Example
+ * \par Option 1: CMake Utility (Recommended)
+ * Use the `tvm_ffi_embed_cubin` CMake function:
  * \code{.cmake}
- * add_custom_command(OUTPUT kernel_data.o
- *   COMMAND ${CMAKE_LINKER} -r -b binary -o kernel_data.o kernel.cubin
- *   COMMAND ${CMAKE_OBJCOPY}
- *     --rename-section .data=.rodata,alloc,load,readonly,data,contents
- *     --redefine-sym _binary_kernel_cubin_start=__tvm_ffi__cubin_env
- *     --redefine-sym _binary_kernel_cubin_end=__tvm_ffi__cubin_env_end
- *     kernel_data.o
- *   DEPENDS kernel.cubin)
+ * # Find tvm_ffi package (provides tvm_ffi_embed_cubin utility)
+ * find_package(tvm_ffi CONFIG REQUIRED)
+ * find_package(CUDAToolkit REQUIRED)
  *
- * add_library(mylib SHARED mycode.cc kernel_data.o)
- * target_link_libraries(mylib PRIVATE cudart)
- * target_link_options(mylib PRIVATE "LINKER:-z,noexecstack")
+ * # Compile CUDA kernel to CUBIN
+ * tvm_ffi_generate_cubin(
+ *   OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/kernel.cubin
+ *   SOURCE src/kernel.cu
+ *   ARCH native  # or sm_75, sm_80, etc.
+ * )
+ *
+ * # Embed CUBIN into C++ object file
+ * tvm_ffi_embed_cubin(
+ *   OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/mycode_with_cubin.o
+ *   SOURCE src/mycode.cc
+ *   CUBIN ${CMAKE_CURRENT_BINARY_DIR}/kernel.cubin
+ *   NAME my_kernels  # Must match TVM_FFI_EMBED_CUBIN(my_kernels) in code
+ * )
+ *
+ * # Link into shared library
+ * add_library(mylib SHARED ${CMAKE_CURRENT_BINARY_DIR}/mycode_with_cubin.o)
+ * target_link_libraries(mylib PRIVATE tvm_ffi_header CUDA::cudart)
  * \endcode
+ *
+ * \par Option 2: Python Utility
+ * Use the `tvm_ffi.utils.embed_cubin` command-line tool:
+ * \code{.bash}
+ * # Step 1: Compile CUDA kernel to CUBIN
+ * nvcc --cubin -arch=sm_75 kernel.cu -o kernel.cubin
+ *
+ * # Step 2: Compile C++ source to object file
+ * g++ -c -fPIC -std=c++17 -I/path/to/tvm-ffi/include mycode.cc -o mycode.o
+ *
+ * # Step 3: Embed CUBIN using Python utility
+ * python -m tvm_ffi.utils.embed_cubin \
+ *     --output-obj mycode_with_cubin.o \
+ *     --input-obj mycode.o \
+ *     --cubin kernel.cubin \
+ *     --name my_kernels
+ *
+ * # Step 4: Link into shared library
+ * g++ -o mylib.so -shared mycode_with_cubin.o -lcudart
+ * \endcode
+ *
+ * The utilities automatically handle:
+ * - Symbol renaming to __tvm_ffi__cubin_<name> format
+ * - Adding .note.GNU-stack section for security
+ * - Symbol localization to prevent conflicts
  *
  * \par Usage in C++ Code
+ * In your C++ source file, use the embedded CUBIN:
  * \code{.cpp}
- * // Declare the embedded CUBIN module (use the same name as in objcopy)
- * TVM_FFI_EMBED_CUBIN(env);
+ * #include <tvm/ffi/extra/cuda/cubin_launcher.h>
+ *
+ * // Declare the embedded CUBIN module (name must match CMake NAME parameter)
+ * TVM_FFI_EMBED_CUBIN(my_kernels);
  *
  * void MyFunction() {
- *   // Get kernel from embedded CUBIN (cached in static variable)
- *   static auto kernel = TVM_FFI_EMBED_CUBIN_GET_KERNEL(env, "my_kernel");
+ *   // Get kernel from embedded CUBIN (cached in static variable for efficiency)
+ *   static auto kernel = TVM_FFI_EMBED_CUBIN_GET_KERNEL(my_kernels, "my_kernel");
  *   // Use kernel...
  * }
  * \endcode
  *
- * \par Python Integration
+ * \note CMake Setup: To use the utilities, add to your CMakeLists.txt:
+ * \code{.cmake}
+ * find_package(tvm_ffi CONFIG REQUIRED)  # Provides tvm_ffi_embed_cubin utility
+ * \endcode
+ *
+ * \par Option 3: Python Integration with load_inline
  * When using `tvm_ffi.cpp.load_inline()` with the `embed_cubin` parameter,
- * the CUBIN data is automatically embedded and the symbols are created for you.
+ * the CUBIN data is automatically embedded using the Python utility internally:
  * \code{.py}
+ * from tvm_ffi import cpp
+ * from tvm_ffi.cpp import nvrtc
+ *
+ * # Compile CUDA source to CUBIN
+ * cubin_bytes = nvrtc.nvrtc_compile(cuda_source)
+ *
+ * # Load with embedded CUBIN - automatically handles embedding
  * mod = cpp.load_inline(
  *     "my_module",
  *     cuda_sources=cpp_code,
- *     embed_cubin={"env": cubin_bytes}
+ *     embed_cubin={"my_kernels": cubin_bytes},
+ *     extra_ldflags=["-lcudart"]
  * )
  * \endcode
  *
@@ -172,19 +196,17 @@ struct dim3 {
  * \see CubinModule
  * \see CubinKernel
  */
-#define TVM_FFI_EMBED_CUBIN(name)                                                       \
-  extern "C" const char __tvm_ffi__cubin_##name[];                                      \
-  extern "C" const char __tvm_ffi__cubin_##name##_end[];                                \
-  namespace {                                                                           \
-  struct EmbedCubinModule_##name {                                                      \
-    tvm::ffi::CubinModule mod{tvm::ffi::Bytes(                                          \
-        __tvm_ffi__cubin_##name,                                                        \
-        static_cast<size_t>(__tvm_ffi__cubin_##name##_end - __tvm_ffi__cubin_##name))}; \
-    static EmbedCubinModule_##name* Global() {                                          \
-      static EmbedCubinModule_##name inst;                                              \
-      return &inst;                                                                     \
-    }                                                                                   \
-  };                                                                                    \
+#define TVM_FFI_EMBED_CUBIN(name)                        \
+  extern "C" const char __tvm_ffi__cubin_##name[];       \
+  extern "C" const char __tvm_ffi__cubin_##name##_end[]; \
+  namespace {                                            \
+  struct EmbedCubinModule_##name {                       \
+    tvm::ffi::CubinModule mod{__tvm_ffi__cubin_##name};  \
+    static EmbedCubinModule_##name* Global() {           \
+      static EmbedCubinModule_##name inst;               \
+      return &inst;                                      \
+    }                                                    \
+  };                                                     \
   } /* anonymous namespace */
 
 /*!
@@ -292,6 +314,20 @@ class CubinModule {
         cudaLibraryLoadData(&library_, bytes.data(), nullptr, nullptr, 0, nullptr, nullptr, 0));
   }
 
+  /*!
+   * \brief Load CUBIN module from raw memory buffer.
+   *
+   * \param code Pointer to CUBIN binary data.
+   * \note CUDA Runtime API automatically initializes on first use.
+   * \note This constructor is primarily used by TVM_FFI_EMBED_CUBIN macro.
+   * \note The code buffer must be null-terminated; size parameter is not required
+   *       as cudaLibraryLoadData can determine the size from the data itself.
+   */
+  explicit CubinModule(const char* code) {
+    TVM_FFI_CHECK_CUDA_ERROR(
+        cudaLibraryLoadData(&library_, code, nullptr, nullptr, 0, nullptr, nullptr, 0));
+  }
+
   /*! \brief Destructor unloads the library */
   ~CubinModule() {
     if (library_ != nullptr) {
@@ -396,6 +432,37 @@ class CubinKernel {
    */
   CubinKernel(cudaLibrary_t library, const char* name) {
     TVM_FFI_CHECK_CUDA_ERROR(cudaLibraryGetKernel(&kernel_, library, name));
+
+    // Set max dynamic shared memory for all devices during initialization
+    // This allows the kernel to use maximum available shared memory when needed
+    int device_count = 0;
+    cudaError_t err = cudaGetDeviceCount(&device_count);
+    if (err == cudaSuccess && device_count > 0) {
+      bool any_success = false;
+      for (int device_id = 0; device_id < device_count; ++device_id) {
+        // Query device's maximum shared memory per block
+        cudaDeviceProp prop;
+        err = cudaGetDeviceProperties(&prop, device_id);
+        if (err != cudaSuccess) {
+          continue;  // Skip this device if we can't get its properties
+        }
+
+        // Set the maximum dynamic shared memory size for this device
+        // This sets the cap but doesn't force allocation - actual size is controlled
+        // by the dyn_smem_bytes parameter in Launch()
+        err = cudaKernelSetAttributeForDevice(kernel_, cudaFuncAttributeMaxDynamicSharedMemorySize,
+                                              static_cast<int>(prop.sharedMemPerBlock), device_id);
+        if (err == cudaSuccess) {
+          any_success = true;
+        }
+        // Don't error out for individual device failures - user may only use some GPUs
+      }
+      // Only error out if setting failed for ALL devices
+      if (!any_success && device_count > 0) {
+        TVM_FFI_THROW(RuntimeError)
+            << "Failed to set dynamic shared memory attribute for any device";
+      }
+    }
   }
 
   /*! \brief Destructor (kernel handle doesn't need explicit cleanup) */
@@ -443,8 +510,9 @@ class CubinKernel {
                      uint32_t dyn_smem_bytes = 0) {
     // Cast cudaKernel_t to const void* for use with cudaLaunchKernel
     // The Runtime API accepts cudaKernel_t directly as a function pointer
-    return cudaLaunchKernel(reinterpret_cast<const void*>(kernel_), {grid.x, grid.y, grid.z},
-                            {block.x, block.y, block.z}, args, dyn_smem_bytes, stream);
+    auto kernel = reinterpret_cast<const void*>(kernel_);
+    return cudaLaunchKernel(kernel, {grid.x, grid.y, grid.z}, {block.x, block.y, block.z}, args,
+                            dyn_smem_bytes, stream);
   }
 
   /*! \brief Get the underlying cudaKernel_t handle */
