@@ -195,10 +195,10 @@ void LaunchEmpty(tvm::ffi::TensorView a, tvm::ffi::TensorView b, tvm::ffi::Tenso
   tvm::ffi::dim3 block(128);
 
   DLDevice device = a.device();
-  CUstream stream = static_cast<CUstream>(TVMFFIEnvGetStream(device.device_type, device.device_id));
+  cudaStream_t stream = static_cast<cudaStream_t>(TVMFFIEnvGetStream(device.device_type, device.device_id));
 
-  CUresult result = kernel.Launch(args, grid, block, stream);
-  TVM_FFI_CHECK_CUDA_DRIVER_ERROR(result);
+  cudaError_t result = kernel.Launch(args, grid, block, stream);
+  TVM_FFI_CHECK_CUDA_ERROR(result);
 }
 
 }  // namespace empty_loader
@@ -266,6 +266,10 @@ def run_benchmark(cubin_bytes: bytes, num_calls: int = 10000) -> int:
     else:
         print(f"  Triton is {tvm_ffi_time / triton_time:.2f}x faster")
     print("=" * 60)
+    print(
+        "Note: we did not check dtype/shape constraints in the benchmarks. \n"
+        "      Triton usually checks them in Python while TVM-FFI checks them in C++. \n"
+    )
 
     return 0
 

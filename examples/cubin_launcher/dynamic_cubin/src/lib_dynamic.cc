@@ -80,11 +80,12 @@ void AddOne(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
 
   // Get CUDA stream
   DLDevice device = x.device();
-  CUstream stream = static_cast<CUstream>(TVMFFIEnvGetStream(device.device_type, device.device_id));
+  cudaStream_t stream =
+      static_cast<cudaStream_t>(TVMFFIEnvGetStream(device.device_type, device.device_id));
 
   // Launch kernel
-  CUresult result = g_add_one_kernel->Launch(args, grid, block, stream);
-  TVM_FFI_CHECK_CUDA_DRIVER_ERROR(result);
+  cudaError_t result = g_add_one_kernel->Launch(args, grid, block, stream);
+  TVM_FFI_CHECK_CUDA_ERROR(result);
 }
 
 /*!
@@ -114,11 +115,12 @@ void MulTwo(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
 
   // Get CUDA stream
   DLDevice device = x.device();
-  CUstream stream = static_cast<CUstream>(TVMFFIEnvGetStream(device.device_type, device.device_id));
+  cudaStream_t stream =
+      static_cast<cudaStream_t>(TVMFFIEnvGetStream(device.device_type, device.device_id));
 
   // Launch kernel
-  CUresult result = g_mul_two_kernel->Launch(args, grid, block, stream);
-  TVM_FFI_CHECK_CUDA_DRIVER_ERROR(result);
+  cudaError_t result = g_mul_two_kernel->Launch(args, grid, block, stream);
+  TVM_FFI_CHECK_CUDA_ERROR(result);
 }
 
 // Export TVM-FFI functions

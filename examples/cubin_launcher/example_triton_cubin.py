@@ -131,10 +131,10 @@ def use_cubin_kernel(cubin_bytes: bytes) -> int:
     tvm::ffi::dim3 block(128);
 
     DLDevice device = x.device();
-    CUstream stream = static_cast<CUstream>(TVMFFIEnvGetStream(device.device_type, device.device_id));
+    cudaStream_t stream = static_cast<cudaStream_t>(TVMFFIEnvGetStream(device.device_type, device.device_id));
 
-    CUresult result = kernel.Launch(args, grid, block, stream);
-    TVM_FFI_CHECK_CUDA_DRIVER_ERROR(result);
+    cudaError_t result = kernel.Launch(args, grid, block, stream);
+    TVM_FFI_CHECK_CUDA_ERROR(result);
     }
 
     }  // namespace triton_loader

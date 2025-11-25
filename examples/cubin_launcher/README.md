@@ -19,16 +19,16 @@
 
 ## Overview
 
-Demonstrates loading and executing CUDA kernels from CUBIN files using TVM-FFI. The `cubin_launcher.h` header wraps CUDA Driver API to provide lightweight CUBIN module and kernel management.
+Demonstrates loading and executing CUDA kernels from CUBIN files using TVM-FFI. The `cubin_launcher.h` header wraps CUDA Runtime API to provide lightweight CUBIN module and kernel management.
 
 ## Techniques
 
-The implementation uses CUDA Driver API Library Management:
+The implementation uses CUDA Runtime API Library Management:
 
-- **`cuLibraryLoadData()`** - Load CUBIN from memory buffer
-- **`cuLibraryGetKernel()`** - Get kernel handle by name
-- **`cuKernelGetFunction()`** - Get function handle for current CUDA context
-- **`cuLaunchKernel()`** - Launch kernel with grid/block dimensions
+- **`cudaLibraryLoadData()`** - Load CUBIN from memory buffer
+- **`cudaLibraryGetKernel()`** - Get kernel handle by name
+- **`cudaKernelGetFunction()`** - Get function handle for current CUDA context
+- **`cudaLaunchKernel()`** - Launch kernel with grid/block dimensions
 
 Key features:
 
@@ -141,7 +141,7 @@ mod = cpp.load_inline(
     "my_module",
     cpp_sources=cpp_code,
     embed_cubin={"my_module": cubin_bytes},
-    extra_ldflags=["-lcuda"],
+    extra_ldflags=["-lcudart"],
 )
 ```
 

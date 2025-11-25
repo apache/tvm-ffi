@@ -52,9 +52,7 @@ add_custom_target(
 
 # Step 2: Build lib_dynamic shared library (loads CUBIN from file at runtime)
 add_library(lib_dynamic SHARED src/lib_dynamic.cc)
-target_link_libraries(
-  lib_dynamic PRIVATE tvm_ffi_header tvm_ffi_shared CUDA::cuda_driver CUDA::cudart
-)
+target_link_libraries(lib_dynamic PRIVATE tvm_ffi_header tvm_ffi_shared CUDA::cudart)
 add_dependencies(lib_dynamic generate_cubin)
 set_target_properties(
   lib_dynamic

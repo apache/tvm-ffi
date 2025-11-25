@@ -20,7 +20,7 @@
  * \file tvm/ffi/extra/cuda/cubin_launcher.h
  * \brief CUDA CUBIN launcher utility for loading and executing CUDA kernels.
  *
- * This header provides a lightweight C++ wrapper around CUDA Driver API
+ * This header provides a lightweight C++ wrapper around CUDA Runtime API
  * for loading CUBIN modules and launching kernels. It supports:
  * - Loading CUBIN from memory (embedded data)
  * - Multi-GPU execution using CUDA primary contexts
@@ -29,7 +29,7 @@
 #ifndef TVM_FFI_EXTRA_CUBIN_LAUNCHER_H_
 #define TVM_FFI_EXTRA_CUBIN_LAUNCHER_H_
 
-#include <cuda.h>
+#include <cuda_runtime.h>
 #include <tvm/ffi/error.h>
 #include <tvm/ffi/extra/c_env_api.h>
 #include <tvm/ffi/string.h>
@@ -41,24 +41,20 @@ namespace tvm {
 namespace ffi {
 
 /*!
- * \brief Macro for checking CUDA driver API errors.
+ * \brief Macro for checking CUDA runtime API errors.
  *
- * This macro checks the return value of CUDA driver API calls and throws
+ * This macro checks the return value of CUDA runtime API calls and throws
  * a RuntimeError with detailed error information if the call fails.
  *
- * \param stmt The CUDA driver API call to check.
+ * \param stmt The CUDA runtime API call to check.
  */
-#define TVM_FFI_CHECK_CUDA_DRIVER_ERROR(stmt)                                       \
+#define TVM_FFI_CHECK_CUDA_ERROR(stmt)                                              \
   do {                                                                              \
-    CUresult __err = (stmt);                                                        \
-    if (__err != CUDA_SUCCESS) {                                                    \
-      const char* __err_name = nullptr;                                             \
-      const char* __err_str = nullptr;                                              \
-      cuGetErrorName(__err, &__err_name);                                           \
-      cuGetErrorString(__err, &__err_str);                                          \
-      __err_name = __err_name ? __err_name : "UNKNOWN";                             \
-      __err_str = __err_str ? __err_str : "No description";                         \
-      TVM_FFI_THROW(RuntimeError) << "CUDA Driver Error: " << __err_name << " ("    \
+    cudaError_t __err = (stmt);                                                     \
+    if (__err != cudaSuccess) {                                                     \
+      const char* __err_name = cudaGetErrorName(__err);                             \
+      const char* __err_str = cudaGetErrorString(__err);                            \
+      TVM_FFI_THROW(RuntimeError) << "CUDA Runtime Error: " << __err_name << " ("   \
                                   << static_cast<int>(__err) << "): " << __err_str; \
     }                                                                               \
   } while (0)
@@ -66,8 +62,9 @@ namespace ffi {
 /*!
  * \brief A simple 3D dimension type for CUDA kernel launch configuration.
  *
- * This struct mimics the behavior of dim3 from CUDA Runtime API, but works
- * with the CUDA Driver API. It can be constructed from 1, 2, or 3 dimensions.
+ * This struct mimics the behavior of dim3 from CUDA Runtime API and provides
+ * a compatible interface for kernel launch configuration. It can be constructed
+ * from 1, 2, or 3 dimensions.
  */
 struct dim3 {
   /*! \brief X dimension (number of blocks in x-direction or threads in x-direction) */
@@ -124,7 +121,7 @@ struct dim3 {
  *
  * \par Step 4: Link the object file with your library/executable
  * \code{.bash}
- * g++ -o mylib.so -shared mycode.cc kernel_data.o -Wl,-z,noexecstack -lcuda
+ * g++ -o mylib.so -shared mycode.cc kernel_data.o -Wl,-z,noexecstack -lcudart
  * \endcode
  * \note The `-z,noexecstack` flag marks the stack as non-executable, which is
  * required for security as the embedded object file lacks a .note.GNU-stack section.
@@ -141,7 +138,7 @@ struct dim3 {
  *   DEPENDS kernel.cubin)
  *
  * add_library(mylib SHARED mycode.cc kernel_data.o)
- * target_link_libraries(mylib PRIVATE cuda)
+ * target_link_libraries(mylib PRIVATE cudart)
  * target_link_options(mylib PRIVATE "LINKER:-z,noexecstack")
  * \endcode
  *
@@ -225,11 +222,11 @@ struct dim3 {
  *
  *   // Get stream and launch
  *   DLDevice device = input.device();
- *   CUstream stream = static_cast<CUstream>(
+ *   cudaStream_t stream = static_cast<cudaStream_t>(
  *       TVMFFIEnvGetStream(device.device_type, device.device_id));
  *
- *   CUresult result = kernel.Launch(args, grid, block, stream);
- *   TVM_FFI_CHECK_CUDA_DRIVER_ERROR(result);
+ *   cudaError_t result = kernel.Launch(args, grid, block, stream);
+ *   TVM_FFI_CHECK_CUDA_ERROR(result);
  * }
  * \endcode
  *
@@ -251,7 +248,7 @@ class CubinKernel;
 /*!
  * \brief CUDA CUBIN module loader and manager.
  *
- * This class provides a RAII wrapper around CUDA Driver API's library management.
+ * This class provides a RAII wrapper around CUDA Runtime API's library management.
  * It loads a CUBIN module from memory and manages the library handle automatically.
  * The library is unloaded when the CubinModule object is destroyed.
  *
@@ -274,7 +271,7 @@ class CubinKernel;
  * // Launch kernels
  * void* args[] = {...};
  * tvm::ffi::dim3 grid(32), block(256);
- * CUstream stream = ...;
+ * cudaStream_t stream = ...;
  * kernel1.Launch(args, grid, block, stream);
  * \endcode
  *
@@ -288,18 +285,17 @@ class CubinModule {
    * \brief Load CUBIN module from memory.
    *
    * \param bytes CUBIN binary data as a Bytes object.
-   * \note Calls cuInit(0) to ensure CUDA is initialized.
+   * \note CUDA Runtime API automatically initializes on first use.
    */
   explicit CubinModule(const Bytes& bytes) {
-    TVM_FFI_CHECK_CUDA_DRIVER_ERROR(cuInit(0));
-    TVM_FFI_CHECK_CUDA_DRIVER_ERROR(
-        cuLibraryLoadData(&library_, bytes.data(), nullptr, nullptr, 0, nullptr, nullptr, 0));
+    TVM_FFI_CHECK_CUDA_ERROR(
+        cudaLibraryLoadData(&library_, bytes.data(), nullptr, nullptr, 0, nullptr, nullptr, 0));
   }
 
   /*! \brief Destructor unloads the library */
   ~CubinModule() {
     if (library_ != nullptr) {
-      cuLibraryUnload(library_);
+      cudaLibraryUnload(library_);
     }
   }
 
@@ -319,8 +315,8 @@ class CubinModule {
    */
   CubinKernel operator[](const char* name);
 
-  /*! \brief Get the underlying CUlibrary handle */
-  CUlibrary GetHandle() const { return library_; }
+  /*! \brief Get the underlying cudaLibrary_t handle */
+  cudaLibrary_t GetHandle() const { return library_; }
 
   // Non-copyable
   CubinModule(const CubinModule&) = delete;
@@ -347,7 +343,7 @@ class CubinModule {
   CubinModule& operator=(CubinModule&& other) noexcept {
     if (this != &other) {
       if (library_ != nullptr) {
-        cuLibraryUnload(library_);
+        cudaLibraryUnload(library_);
       }
       library_ = other.library_;
       other.library_ = nullptr;
@@ -356,7 +352,7 @@ class CubinModule {
   }
 
  private:
-  CUlibrary library_ = nullptr;
+  cudaLibrary_t library_ = nullptr;
 };
 
 /*!
@@ -381,9 +377,9 @@ class CubinModule {
  * tvm::ffi::dim3 block(256);  // 256 threads per block
  *
  * // Launch on stream
- * CUstream stream = ...;
- * CUresult result = kernel.Launch(args, grid, block, stream);
- * TVM_FFI_CHECK_CUDA_DRIVER_ERROR(result);
+ * cudaStream_t stream = ...;
+ * cudaError_t result = kernel.Launch(args, grid, block, stream);
+ * TVM_FFI_CHECK_CUDA_ERROR(result);
  * \endcode
  *
  * \note This class is movable but not copyable.
@@ -395,11 +391,11 @@ class CubinKernel {
   /*!
    * \brief Construct a CubinKernel from a library and kernel name.
    *
-   * \param library The CUlibrary handle.
+   * \param library The cudaLibrary_t handle.
    * \param name Name of the kernel function.
    */
-  CubinKernel(CUlibrary library, const char* name) {
-    TVM_FFI_CHECK_CUDA_DRIVER_ERROR(cuLibraryGetKernel(&kernel_, library, name));
+  CubinKernel(cudaLibrary_t library, const char* name) {
+    TVM_FFI_CHECK_CUDA_ERROR(cudaLibraryGetKernel(&kernel_, library, name));
   }
 
   /*! \brief Destructor (kernel handle doesn't need explicit cleanup) */
@@ -409,7 +405,7 @@ class CubinKernel {
    * \brief Launch the kernel with specified parameters.
    *
    * This function launches the kernel on the current CUDA context/device using
-   * the CUDA Driver API. The kernel executes asynchronously on the specified stream.
+   * the CUDA Runtime API. The kernel executes asynchronously on the specified stream.
    *
    * \par Argument Preparation
    * The `args` array must contain pointers to the actual argument values, not the
@@ -427,10 +423,10 @@ class CubinKernel {
    * - Total threads = grid.x * grid.y * grid.z * block.x * block.y * block.z
    *
    * \par Error Checking
-   * Always check the returned CUresult:
+   * Always check the returned cudaError_t:
    * \code{.cpp}
-   * CUresult result = kernel.Launch(args, grid, block, stream);
-   * TVM_FFI_CHECK_CUDA_DRIVER_ERROR(result);
+   * cudaError_t result = kernel.Launch(args, grid, block, stream);
+   * TVM_FFI_CHECK_CUDA_ERROR(result);
    * \endcode
    *
    * \param args Array of pointers to kernel arguments (must point to actual values).
@@ -438,26 +434,21 @@ class CubinKernel {
    * \param block Block dimensions (threads per block in x, y, z).
    * \param stream CUDA stream to launch the kernel on (use 0 for default stream).
    * \param dyn_smem_bytes Dynamic shared memory size in bytes (default: 0).
-   * \return CUresult error code from cuLaunchKernel (CUDA_SUCCESS on success).
+   * \return cudaError_t error code from cudaLaunchKernel (cudaSuccess on success).
    *
    * \note The kernel executes asynchronously. Use cudaStreamSynchronize() or
    *       cudaDeviceSynchronize() to wait for completion if needed.
    */
-  CUresult Launch(void** args, dim3 grid, dim3 block, CUstream stream,
-                  uint32_t dyn_smem_bytes = 0) {
-    CUfunction function;
-    // Get function handle for the current context from the kernel
-    CUresult result = cuKernelGetFunction(&function, kernel_);
-    if (result != CUDA_SUCCESS) {
-      return result;
-    }
-
-    return cuLaunchKernel(function, grid.x, grid.y, grid.z, block.x, block.y, block.z,
-                          dyn_smem_bytes, stream, args, nullptr);
+  cudaError_t Launch(void** args, dim3 grid, dim3 block, cudaStream_t stream,
+                     uint32_t dyn_smem_bytes = 0) {
+    // Cast cudaKernel_t to const void* for use with cudaLaunchKernel
+    // The Runtime API accepts cudaKernel_t directly as a function pointer
+    return cudaLaunchKernel(reinterpret_cast<const void*>(kernel_), {grid.x, grid.y, grid.z},
+                            {block.x, block.y, block.z}, args, dyn_smem_bytes, stream);
   }
 
-  /*! \brief Get the underlying CUkernel handle */
-  CUkernel GetHandle() const { return kernel_; }
+  /*! \brief Get the underlying cudaKernel_t handle */
+  cudaKernel_t GetHandle() const { return kernel_; }
 
   // Non-copyable
   CubinKernel(const CubinKernel&) = delete;
@@ -489,7 +480,7 @@ class CubinKernel {
   }
 
  private:
-  CUkernel kernel_ = nullptr;
+  cudaKernel_t kernel_ = nullptr;
 };
 
 // Implementation of CubinModule methods that return CubinKernel

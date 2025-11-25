@@ -126,7 +126,7 @@ endfunction ()
 #   )
 #
 #   add_library(lib_embedded SHARED ${CMAKE_CURRENT_BINARY_DIR}/lib_embedded_with_cubin.o)
-#   target_link_libraries(lib_embedded PRIVATE tvm_ffi_header CUDA::cuda_driver)
+#   target_link_libraries(lib_embedded PRIVATE tvm_ffi_header CUDA::cudart)
 #
 # Note: The .note.GNU-stack section is automatically added to mark the stack as
 #       non-executable, so you don't need to add linker options manually
@@ -183,8 +183,8 @@ function (tvm_ffi_embed_cubin)
   endforeach ()
 
   # Add CUDA include directories if CUDAToolkit is found
-  if (TARGET CUDA::cuda_driver)
-    get_target_property(CUDA_INCLUDES CUDA::cuda_driver INTERFACE_INCLUDE_DIRECTORIES)
+  if (TARGET CUDA::cudart)
+    get_target_property(CUDA_INCLUDES CUDA::cudart INTERFACE_INCLUDE_DIRECTORIES)
     foreach (inc_dir ${CUDA_INCLUDES})
       list(APPEND INCLUDE_FLAGS "-I${inc_dir}")
     endforeach ()

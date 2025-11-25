@@ -18,7 +18,7 @@
 CUBIN Launcher Guide
 ====================
 
-This guide demonstrates how to load and launch CUDA kernels from CUBIN (CUDA Binary) modules using TVM-FFI. The CUBIN launcher enables you to execute pre-compiled or runtime-compiled CUDA kernels efficiently through the CUDA Driver API.
+This guide demonstrates how to load and launch CUDA kernels from CUBIN (CUDA Binary) modules using TVM-FFI. The CUBIN launcher enables you to execute pre-compiled or runtime-compiled CUDA kernels efficiently through the CUDA Runtime API.
 
 Overview
 --------
@@ -130,7 +130,7 @@ The recommended approach in C++ is to embed CUBIN data directly into your shared
 - Kernel arguments must be pointers to the actual values (use ``&`` for addresses)
 - :cpp:type:`tvm::ffi::dim3` supports 1D, 2D, or 3D configurations: ``dim3(x)``, ``dim3(x, y)``, ``dim3(x, y, z)``
 - ``TVMFFIEnvGetStream`` retrieves the correct CUDA stream for the device
-- Always check kernel launch results with :c:macro:`TVM_FFI_CHECK_CUDA_DRIVER_ERROR`
+- Always check kernel launch results with :c:macro:`TVM_FFI_CHECK_CUDA_ERROR` (which checks CUDA Runtime API errors)
 
 Loading CUBIN at Runtime
 ~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -200,7 +200,7 @@ For more advanced use cases or non-CMake build systems, you can use the Python c
        --name my_kernels
 
    # Step 3: Link into final library
-   g++ -o mylib.so -shared mycode_with_cubin.o -lcuda
+   g++ -o mylib.so -shared mycode_with_cubin.o -lcudart
 
 **Python API:**
 
@@ -306,7 +306,7 @@ When writing the C++ wrapper, important considerations include:
 
 - **Stream Management**: Use ``TVMFFIEnvGetStream`` to get the correct CUDA stream for synchronization with DLPack tensors
 
-- **Error Checking**: Always use :c:macro:`TVM_FFI_CHECK_CUDA_DRIVER_ERROR` to validate CUDA Driver API results
+- **Error Checking**: Always use :c:macro:`TVM_FFI_CHECK_CUDA_ERROR` to validate CUDA Runtime API results
 
 Dynamic Shared Memory
 ~~~~~~~~~~~~~~~~~~~~~
@@ -317,7 +317,7 @@ To use dynamic shared memory, specify the size in the :cpp:func:`tvm::ffi::Cubin
 
    // Allocate 1KB of dynamic shared memory
    uint32_t shared_mem_bytes = 1024;
-   CUresult result = kernel.Launch(args, grid, block, stream, shared_mem_bytes);
+   cudaError_t result = kernel.Launch(args, grid, block, stream, shared_mem_bytes);
 
 Integration with Different Compilers
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -374,7 +374,7 @@ C++ Macros
 
 - :c:macro:`TVM_FFI_EMBED_CUBIN`: Declare embedded CUBIN module
 - :c:macro:`TVM_FFI_EMBED_CUBIN_GET_KERNEL`: Get kernel from embedded module
-- :c:macro:`TVM_FFI_CHECK_CUDA_DRIVER_ERROR`: Check CUDA Driver API result
+- :c:macro:`TVM_FFI_CHECK_CUDA_ERROR`: Check CUDA Runtime API result
 
 Python Functions
 ~~~~~~~~~~~~~~~~

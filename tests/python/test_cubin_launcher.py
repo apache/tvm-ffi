@@ -99,7 +99,7 @@ def test_cubin_launcher_add_one() -> None:
 #include <tvm/ffi/container/tensor.h>
 #include <tvm/ffi/error.h>
 #include <tvm/ffi/extra/c_env_api.h>
-#include <tvm/ffi/extra/cubin_launcher.h>
+#include <tvm/ffi/extra/cuda/cubin_launcher.h>
 #include <tvm/ffi/function.h>
 #include <tvm/ffi/string.h>
 
@@ -112,10 +112,9 @@ static std::unique_ptr<tvm::ffi::CubinModule> g_module;
 static std::unique_ptr<tvm::ffi::CubinKernel> g_kernel_add_one;
 static std::unique_ptr<tvm::ffi::CubinKernel> g_kernel_mul_two;
 
-void LoadCubinData(const tvm::ffi::String& data_b64) {
-  // For simplicity in testing, we pass raw bytes directly
-  // In production, you would decode base64 or read from file
-  g_module = std::make_unique<tvm::ffi::CubinModule>(data_b64.c_str());
+void LoadCubinData(const tvm::ffi::Bytes& cubin_data) {
+  // Load CUBIN from bytes
+  g_module = std::make_unique<tvm::ffi::CubinModule>(cubin_data);
   g_kernel_add_one = std::make_unique<tvm::ffi::CubinKernel>((*g_module)["add_one_cuda"]);
   g_kernel_mul_two = std::make_unique<tvm::ffi::CubinKernel>((*g_module)["mul_two_cuda"]);
 }
@@ -140,10 +139,10 @@ void LaunchAddOne(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
   tvm::ffi::dim3 block(1024);
 
   DLDevice device = x.device();
-  CUstream stream = static_cast<CUstream>(TVMFFIEnvGetStream(device.device_type, device.device_id));
+  cudaStream_t stream = static_cast<cudaStream_t>(TVMFFIEnvGetStream(device.device_type, device.device_id));
 
-  CUresult result = g_kernel_add_one->Launch(args, grid, block, stream);
-  TVM_FFI_CHECK_CUDA_DRIVER_ERROR(result);
+  cudaError_t result = g_kernel_add_one->Launch(args, grid, block, stream);
+  TVM_FFI_CHECK_CUDA_ERROR(result);
 }
 
 void LaunchMulTwo(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
@@ -166,10 +165,10 @@ void LaunchMulTwo(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
   tvm::ffi::dim3 block(1024);
 
   DLDevice device = x.device();
-  CUstream stream = static_cast<CUstream>(TVMFFIEnvGetStream(device.device_type, device.device_id));
+  cudaStream_t stream = static_cast<cudaStream_t>(TVMFFIEnvGetStream(device.device_type, device.device_id));
 
-  CUresult result = g_kernel_mul_two->Launch(args, grid, block, stream);
-  TVM_FFI_CHECK_CUDA_DRIVER_ERROR(result);
+  cudaError_t result = g_kernel_mul_two->Launch(args, grid, block, stream);
+  TVM_FFI_CHECK_CUDA_ERROR(result);
 }
 
 TVM_FFI_DLL_EXPORT_TYPED_FUNC(load_cubin_data, cubin_test::LoadCubinData);
@@ -179,45 +178,35 @@ TVM_FFI_DLL_EXPORT_TYPED_FUNC(launch_mul_two, cubin_test::LaunchMulTwo);
 }  // namespace cubin_test
 """
 
-    # Write CUBIN to a temporary file for load_inline to reference
-    with tempfile.NamedTemporaryFile(suffix=".cubin", delete=False) as f:
-        cubin_path = f.name
-        f.write(cubin_bytes)
+    # Compile and load the C++ code
+    mod = tvm_ffi.cpp.load_inline(
+        "cubin_test",
+        cuda_sources=cpp_code,
+        extra_ldflags=["-lcudart"],
+    )
 
-    try:
-        # Compile and load the C++ code
-        mod = tvm_ffi.cpp.load_inline(
-            "cubin_test",
-            cuda_sources=cpp_code,
-            extra_ldflags=["-lcuda", "-lcudart"],
-        )
+    # Load CUBIN from bytes
+    load_fn = mod["load_cubin_data"]
+    load_fn(cubin_bytes)
 
-        # Load CUBIN
-        load_fn = mod["load_cubin_data"]
-        load_fn(cubin_path)
+    # Test add_one kernel
+    launch_add_one = mod["launch_add_one"]
+    n = 256
+    x = torch.arange(n, dtype=torch.float32, device="cuda")
+    y = torch.empty(n, dtype=torch.float32, device="cuda")
 
-        # Test add_one kernel
-        launch_add_one = mod["launch_add_one"]
-        n = 256
-        x = torch.arange(n, dtype=torch.float32, device="cuda")
-        y = torch.empty(n, dtype=torch.float32, device="cuda")
+    launch_add_one(x, y)
+    expected = x + 1
+    torch.testing.assert_close(y, expected)
 
-        launch_add_one(x, y)
-        expected = x + 1
-        torch.testing.assert_close(y, expected)
+    # Test mul_two kernel
+    launch_mul_two = mod["launch_mul_two"]
+    x = torch.arange(n, dtype=torch.float32, device="cuda") * 0.5
+    y = torch.empty(n, dtype=torch.float32, device="cuda")
 
-        # Test mul_two kernel
-        launch_mul_two = mod["launch_mul_two"]
-        x = torch.arange(n, dtype=torch.float32, device="cuda") * 0.5
-        y = torch.empty(n, dtype=torch.float32, device="cuda")
-
-        launch_mul_two(x, y)
-        expected = x * 2
-        torch.testing.assert_close(y, expected)
-
-    finally:
-        # Clean up temporary file
-        Path(cubin_path).unlink(missing_ok=True)
+    launch_mul_two(x, y)
+    expected = x * 2
+    torch.testing.assert_close(y, expected)
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="CUBIN launcher only supported on Linux")
@@ -233,7 +222,7 @@ def test_cubin_launcher_chained() -> None:
 #include <tvm/ffi/container/tensor.h>
 #include <tvm/ffi/error.h>
 #include <tvm/ffi/extra/c_env_api.h>
-#include <tvm/ffi/extra/cubin_launcher.h>
+#include <tvm/ffi/extra/cuda/cubin_launcher.h>
 #include <tvm/ffi/function.h>
 
 #include <memory>
@@ -244,8 +233,9 @@ static std::unique_ptr<tvm::ffi::CubinModule> g_module;
 static std::unique_ptr<tvm::ffi::CubinKernel> g_kernel_add_one;
 static std::unique_ptr<tvm::ffi::CubinKernel> g_kernel_mul_two;
 
-void LoadCubinData(const tvm::ffi::String& cubin_path) {
-  g_module = std::make_unique<tvm::ffi::CubinModule>(cubin_path.c_str());
+void LoadCubinData(const tvm::ffi::Bytes& cubin_data) {
+  // Load CUBIN from bytes
+  g_module = std::make_unique<tvm::ffi::CubinModule>(cubin_data);
   g_kernel_add_one = std::make_unique<tvm::ffi::CubinKernel>((*g_module)["add_one_cuda"]);
   g_kernel_mul_two = std::make_unique<tvm::ffi::CubinKernel>((*g_module)["mul_two_cuda"]);
 }
@@ -263,7 +253,7 @@ void LaunchAddOne(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
   tvm::ffi::dim3 block(1024);
 
   DLDevice device = x.device();
-  CUstream stream = static_cast<CUstream>(TVMFFIEnvGetStream(device.device_type, device.device_id));
+  cudaStream_t stream = static_cast<cudaStream_t>(TVMFFIEnvGetStream(device.device_type, device.device_id));
   g_kernel_add_one->Launch(args, grid, block, stream);
 }
 
@@ -278,7 +268,7 @@ void LaunchMulTwo(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
   tvm::ffi::dim3 block(1024);
 
   DLDevice device = x.device();
-  CUstream stream = static_cast<CUstream>(TVMFFIEnvGetStream(device.device_type, device.device_id));
+  cudaStream_t stream = static_cast<cudaStream_t>(TVMFFIEnvGetStream(device.device_type, device.device_id));
   g_kernel_mul_two->Launch(args, grid, block, stream);
 }
 
@@ -289,34 +279,23 @@ TVM_FFI_DLL_EXPORT_TYPED_FUNC(launch_mul_two, cubin_test_chain::LaunchMulTwo);
 }  // namespace cubin_test_chain
 """
 
-    with tempfile.NamedTemporaryFile(suffix=".cubin", delete=False) as f:
-        cubin_path = f.name
-        f.write(cubin_bytes)
+    mod = tvm_ffi.cpp.load_inline("cubin_test_chain", cuda_sources=cpp_code)
 
-    try:
-        mod = tvm_ffi.cpp.load_inline(
-            "cubin_test_chain",
-            cuda_sources=cpp_code,
-            extra_ldflags=["-lcuda", "-lcudart"],
-        )
+    # Load CUBIN from bytes
+    load_fn = mod["load_cubin_data"]
+    load_fn(cubin_bytes)
 
-        load_fn = mod["load_cubin_data"]
-        load_fn(cubin_path)
+    launch_add_one = mod["launch_add_one"]
+    launch_mul_two = mod["launch_mul_two"]
 
-        launch_add_one = mod["launch_add_one"]
-        launch_mul_two = mod["launch_mul_two"]
+    # Test chained execution: (x + 1) * 2
+    n = 128
+    x = torch.full((n,), 5.0, dtype=torch.float32, device="cuda")
+    temp = torch.empty(n, dtype=torch.float32, device="cuda")
+    y = torch.empty(n, dtype=torch.float32, device="cuda")
 
-        # Test chained execution: (x + 1) * 2
-        n = 128
-        x = torch.full((n,), 5.0, dtype=torch.float32, device="cuda")
-        temp = torch.empty(n, dtype=torch.float32, device="cuda")
-        y = torch.empty(n, dtype=torch.float32, device="cuda")
+    launch_add_one(x, temp)  # temp = x + 1 = 6
+    launch_mul_two(temp, y)  # y = temp * 2 = 12
 
-        launch_add_one(x, temp)  # temp = x + 1 = 6
-        launch_mul_two(temp, y)  # y = temp * 2 = 12
-
-        expected = torch.full((n,), 12.0, dtype=torch.float32, device="cuda")
-        torch.testing.assert_close(y, expected)
-
-    finally:
-        Path(cubin_path).unlink(missing_ok=True)
+    expected = torch.full((n,), 12.0, dtype=torch.float32, device="cuda")
+    torch.testing.assert_close(y, expected)
