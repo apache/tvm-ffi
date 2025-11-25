@@ -256,7 +256,7 @@ For reference, here's how to manually embed CUBIN using objcopy and ld:
 
 .. code-block:: bash
 
-   g++ -o mylib.so -shared mycode.cc kernel_data.o -Wl,-z,noexecstack -lcuda
+   g++ -o mylib.so -shared mycode.cc kernel_data.o -Wl,-z,noexecstack -lcudart
 
 The symbol names must match the name used in :c:macro:`TVM_FFI_EMBED_CUBIN`.
 

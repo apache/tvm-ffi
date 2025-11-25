@@ -307,7 +307,6 @@ class CubinModule {
    * \brief Load CUBIN module from memory.
    *
    * \param bytes CUBIN binary data as a Bytes object.
-   * \note CUDA Runtime API automatically initializes on first use.
    */
   explicit CubinModule(const Bytes& bytes) {
     TVM_FFI_CHECK_CUDA_ERROR(
@@ -318,10 +317,7 @@ class CubinModule {
    * \brief Load CUBIN module from raw memory buffer.
    *
    * \param code Pointer to CUBIN binary data.
-   * \note CUDA Runtime API automatically initializes on first use.
-   * \note This constructor is primarily used by TVM_FFI_EMBED_CUBIN macro.
-   * \note The code buffer must be null-terminated; size parameter is not required
-   *       as cudaLibraryLoadData can determine the size from the data itself.
+   * \note The `code` buffer points to an ELF image.
    */
   explicit CubinModule(const char* code) {
     TVM_FFI_CHECK_CUDA_ERROR(
