@@ -339,12 +339,20 @@ class CubinModule {
    * \brief Get a kernel function from the module by name.
    *
    * \param name Name of the kernel function.
+   * \return CubinKernel object representing the loaded kernel.
+   */
+  CubinKernel GetKernel(const char* name);
+
+  /*!
+   * \brief Get a kernel function from the module by name with maximum dynamic shared memory.
+   *
+   * \param name Name of the kernel function.
    * \param dynamic_smem_max Maximum dynamic shared memory in bytes to set for this kernel.
    *                         -1 (default) means maximum available dynamic shared memory
    *                         (device max - static shared memory used by kernel).
    * \return CubinKernel object representing the loaded kernel.
    */
-  CubinKernel GetKernel(const char* name, int64_t dynamic_smem_max);
+  CubinKernel GetKernelWithMaxDynamicSharedMemory(const char* name, int64_t dynamic_smem_max);
 
   /*!
    * \brief Operator[] for convenient kernel access.
@@ -438,9 +446,8 @@ class CubinKernel {
    *                           -1 (default) means maximum available dynamic shared memory
    *                           (device max - static shared memory used by kernel).
    */
-  CubinKernel(cudaLibrary_t library, const char* name, int64_t dynamic_smem_max = -1) {
+  CubinKernel(cudaLibrary_t library, const char* name) {
     TVM_FFI_CHECK_CUDA_ERROR(cudaLibraryGetKernel(&kernel_, library, name));
-    SetMaxDynamicSharedMemory(dynamic_smem_max);
   }
 
   /*! \brief Destructor (kernel handle doesn't need explicit cleanup) */
@@ -594,14 +601,24 @@ class CubinKernel {
   }
 
   cudaKernel_t kernel_ = nullptr;
+
+  friend class CubinModule;
 };
 
 // Implementation of CubinModule methods that return CubinKernel
-inline CubinKernel CubinModule::GetKernel(const char* name, int64_t dynamic_smem_max = -1) {
-  return CubinKernel(library_, name, dynamic_smem_max);
+inline CubinKernel CubinModule::GetKernelWithMaxDynamicSharedMemory(const char* name,
+                                                                    int64_t dynamic_smem_max = -1) {
+  auto kernel = CubinKernel(library_, name);
+  kernel.SetMaxDynamicSharedMemory(dynamic_smem_max);
+  return kernel;
 }
 
-inline CubinKernel CubinModule::operator[](const char* name) { return GetKernel(name, -1); }
+inline CubinKernel CubinModule::GetKernel(const char* name) {
+  auto kernel = CubinKernel(library_, name);
+  return kernel;
+}
+
+inline CubinKernel CubinModule::operator[](const char* name) { return GetKernel(name); }
 
 }  // namespace ffi
 }  // namespace tvm

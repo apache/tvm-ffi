@@ -356,6 +356,7 @@ C++ Classes
 
   - :cpp:func:`tvm::ffi::CubinModule::CubinModule`: Load CUBIN from memory
   - :cpp:func:`tvm::ffi::CubinModule::GetKernel`: Get kernel by name
+  - :cpp:func:`tvm::ffi::CubinModule::GetKernelWithMaxDynamicSharedMemory`: Get kernel by name with maximum dynamic shared memory set
   - :cpp:func:`tvm::ffi::CubinModule::operator[]`: Convenient kernel access
 
 - :cpp:class:`tvm::ffi::CubinKernel`: Handle for launching kernels
