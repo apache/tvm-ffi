@@ -38,7 +38,6 @@
 #include <sstream>
 #include <string>
 #include <type_traits>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -95,8 +94,10 @@ class Metadata : public InfoTrait {
 
  private:
   friend class GlobalDef;
-  template <typename T, bool AllowOverload>
+  template <typename T>
   friend class ObjectDef;
+  template <typename T>
+  friend class OverloadObjectDef;
   /*!
    * \brief Move metadata into a vector of key-value pairs.
    * \param out The output vector.
@@ -447,8 +448,10 @@ class GlobalDef : public ReflectionDefBase {
 template <typename... Args>
 struct init {
   // Allow ObjectDef to access the execute function
-  template <typename Class, bool AllowOverload>
+  template <typename Class>
   friend class ObjectDef;
+  template <typename T>
+  friend class OverloadObjectDef;
 
   /*!
    * \brief Constructor
@@ -477,7 +480,7 @@ struct init {
  * refl::ObjectDef<MyClass>().def_ro("my_field", &MyClass::my_field);
  * \endcode
  */
-template <typename Class, bool AllowOverload = false>
+template <typename Class>
 class ObjectDef : public ReflectionDefBase {
  public:
   /*!
@@ -655,28 +658,8 @@ class ObjectDef : public ReflectionDefBase {
       info.flags |= kTVMFFIFieldFlagBitMaskIsStaticMethod;
     }
 
-    Function method{nullptr};
-    auto method_name = std::string(type_key_) + "." + name;
-
-    if constexpr (AllowOverload) {
-      if (const auto overload_it = registered_fields_.find(name);
-          overload_it != registered_fields_.end()) {
-        // if overload method exists, register to existing overload function
-        details::OverloadBase* overload_ptr = overload_it->second;
-        return overload_ptr->Register(
-            NewOverload(std::move(method_name), std::forward<Func>(func)));
-      } else {
-        // first time registering overload method
-        auto [method_, overload_ptr] =
-            GetOverloadMethod(std::move(method_name), std::forward<Func>(func));
-        registered_fields_.try_emplace(name, overload_ptr);
-        method = std::move(method_);
-      }
-    } else {
-      // normal method registration
-      method = GetMethod(std::move(method_name), std::forward<Func>(func));
-    }
-
+    // obtain the method function
+    Function method = GetMethod(std::string(type_key_) + "." + name, std::forward<Func>(func));
     info.method = AnyView(method).CopyToTVMFFIAny();
     info.metadata_.emplace_back("type_schema", FuncInfo::TypeSchema());
     // apply method info traits
@@ -686,16 +669,8 @@ class ObjectDef : public ReflectionDefBase {
     TVM_FFI_CHECK_SAFE_CALL(TVMFFITypeRegisterMethod(type_index_, &info));
   }
 
-  struct EmptyType {};
-
-  using OverloadMap =
-      std::conditional_t<AllowOverload, std::unordered_map<std::string, details::OverloadBase*>,
-                         EmptyType>;
-
   int32_t type_index_;
   const char* type_key_;
-  [[maybe_unused]]
-  OverloadMap registered_fields_;
   static constexpr const char* kInitMethodName = "__ffi_init__";
 };
 
