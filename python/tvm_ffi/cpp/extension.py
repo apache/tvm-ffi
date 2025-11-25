@@ -62,7 +62,8 @@ def _hash_sources(
             m.update(obj)
         elif isinstance(obj, Mapping):
             m.update(b"Mapping")
-            for key, item in obj.items():
+            for key in sorted(obj.keys()):
+                item = obj[key]
                 _hash(key)
                 _hash(item)
         elif isinstance(obj, Sequence):
@@ -76,8 +77,8 @@ def _hash_sources(
         (
             cpp_source,
             cuda_source,
-            cpp_files,
-            cuda_files,
+            sorted(cpp_files) if cpp_files is not None else None,
+            sorted(cuda_files) if cuda_files is not None else None,
             functions,
             extra_cflags,
             extra_cuda_cflags,

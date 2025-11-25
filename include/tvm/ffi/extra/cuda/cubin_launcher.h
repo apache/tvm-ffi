@@ -563,6 +563,9 @@ class CubinKernel {
       if (dynamic_smem_max == -1) {
         // Query the kernel's static shared memory usage
         cudaFuncAttributes func_attr;
+
+        // According to the documentation, we can use cudaFuncGetAttributes to get the attributes of
+        // cudaKernel_t returned by cudaLibraryGetKernel, just cast the kernel_ to const void*
         err = cudaFuncGetAttributes(&func_attr, reinterpret_cast<const void*>(kernel_));
         if (err != cudaSuccess) {
           continue;  // Skip this device if we can't get kernel attributes
