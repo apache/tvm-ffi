@@ -16,7 +16,7 @@
 # under the License.
 
 cmake_minimum_required(VERSION 3.20)
-project(cubin_launcher LANGUAGES CXX CUDA)
+project(dynamic_cubin_example LANGUAGES CXX CUDA)
 
 # Prefer virtualenv when searching for python
 set(Python_FIND_VIRTUALENV FIRST)
@@ -43,42 +43,14 @@ tvm_ffi_generate_cubin(
   OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/kernel.cubin SOURCE src/kernel.cu ARCH native
 )
 
-# Create a target for lib_dynamic to depend on
+# Create a target that depends on the CUBIN
 add_custom_target(
   generate_cubin ALL
   DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/kernel.cubin
   COMMENT "Generating CUBIN file"
 )
 
-# Step 2: Embed CUBIN into the object file using tvm_ffi_embed_cubin utility This creates symbols:
-# __tvm_ffi__cubin_env, __tvm_ffi__cubin_env_end
-tvm_ffi_embed_cubin(
-  OUTPUT
-  ${CMAKE_CURRENT_BINARY_DIR}/lib_embedded_with_cubin.o
-  SOURCE
-  src/lib_embedded.cc
-  CUBIN
-  ${CMAKE_CURRENT_BINARY_DIR}/kernel.cubin
-  NAME
-  env
-)
-
-# Step 3: Build lib_embedded shared library (with embedded CUBIN)
-add_library(lib_embedded SHARED ${CMAKE_CURRENT_BINARY_DIR}/lib_embedded_with_cubin.o)
-target_link_libraries(
-  lib_embedded PRIVATE tvm_ffi_header tvm_ffi_shared CUDA::cuda_driver CUDA::cudart
-)
-set_target_properties(
-  lib_embedded
-  PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/"
-             PREFIX ""
-             SUFFIX ".so"
-             LINKER_LANGUAGE CXX
-)
-# Mark the embedded object file's stack as non-executable
-target_link_options(lib_embedded PRIVATE "LINKER:-z,noexecstack")
-
-# Step 4: Build lib_dynamic shared library (loads CUBIN from file)
+# Step 2: Build lib_dynamic shared library (loads CUBIN from file at runtime)
 add_library(lib_dynamic SHARED src/lib_dynamic.cc)
 target_link_libraries(
   lib_dynamic PRIVATE tvm_ffi_header tvm_ffi_shared CUDA::cuda_driver CUDA::cudart

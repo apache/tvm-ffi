@@ -126,7 +126,9 @@ endfunction ()
 #
 #   add_library(lib_embedded SHARED ${CMAKE_CURRENT_BINARY_DIR}/lib_embedded_with_cubin.o)
 #   target_link_libraries(lib_embedded PRIVATE tvm_ffi_header CUDA::cuda_driver)
-#   target_link_options(lib_embedded PRIVATE "LINKER:-z,noexecstack")
+#
+# Note: The .note.GNU-stack section is automatically added to mark the stack as
+#       non-executable, so you don't need to add linker options manually
 # ~~~
 
 function (tvm_ffi_embed_cubin)
@@ -196,7 +198,8 @@ function (tvm_ffi_embed_cubin)
     VERBATIM
   )
 
-  # Step 2: Embed CUBIN into the object file using Python utility
+  # Step 2: Embed CUBIN into the object file using Python utility Note: The Python utility
+  # automatically adds .note.GNU-stack section
   add_custom_command(
     OUTPUT "${ARG_OUTPUT_ABS}"
     COMMAND ${Python_EXECUTABLE} -m tvm_ffi.utils.embed_cubin --output-obj "${ARG_OUTPUT_ABS}"

@@ -62,11 +62,12 @@ def embed_cubin(  # noqa: PLR0912, PLR0915
 
     The process involves:
     1. Creating an intermediate CUBIN object file using `ld -r -b binary`
-    2. Using `objcopy` to rename symbols to the format expected by TVM-FFI:
+    2. Adding `.note.GNU-stack` section to CUBIN object for security
+    3. Using `objcopy` to rename symbols to the format expected by TVM-FFI:
        - _binary_<filename>_start → __tvm_ffi__cubin_<name>
        - _binary_<filename>_end → __tvm_ffi__cubin_<name>_end
-    3. Using `ld -r` (relocatable link) to merge the CUBIN object with the input object
-    4. Creating the final combined output object file
+    4. Using `ld -r` (relocatable link) to merge the CUBIN object with the input object
+    5. Localizing the symbols to prevent conflicts when multiple object files use the same name
 
     Parameters
     ----------
@@ -129,7 +130,7 @@ def embed_cubin(  # noqa: PLR0912, PLR0915
         ld_binary_cmd = ["ld", "-r", "-b", "binary", "-o", str(cubin_obj), str(temp_cubin.name)]
 
         if verbose:
-            print("\n[Step 1/3] Creating CUBIN object file with ld")
+            print("\n[Step 1/4] Creating CUBIN object file with ld")
             print(f"Command: {' '.join(ld_binary_cmd)}")
             print(f"Working directory: {tmp_path}")
 
@@ -149,6 +150,38 @@ def embed_cubin(  # noqa: PLR0912, PLR0915
         if verbose and result.stderr:
             print(f"stderr: {result.stderr.decode('utf-8')}")
 
+        # Step 1.5: Add .note.GNU-stack section to CUBIN object for security
+        # This marks the stack as non-executable and prevents linker warnings
+        # We do this before renaming so the section is preserved in the final output
+        objcopy_stack_cmd = [
+            "objcopy",
+            "--add-section",
+            ".note.GNU-stack=/dev/null",
+            "--set-section-flags",
+            ".note.GNU-stack=noload,readonly",
+            str(cubin_obj),
+        ]
+
+        if verbose:
+            print("\n[Step 1.5/4] Adding .note.GNU-stack section to CUBIN object")
+            print(f"Command: {' '.join(objcopy_stack_cmd)}")
+
+        result = subprocess.run(objcopy_stack_cmd, capture_output=True, check=False)
+        if result.returncode != 0:
+            stderr = result.stderr.decode("utf-8")
+            stdout = result.stdout.decode("utf-8")
+            raise RuntimeError(
+                f"objcopy (add stack section) failed with status {result.returncode}\n"
+                f"Command: {' '.join(objcopy_stack_cmd)}\n"
+                f"stdout: {stdout}\n"
+                f"stderr: {stderr}"
+            )
+
+        if verbose and result.stdout:
+            print(f"stdout: {result.stdout.decode('utf-8')}")
+        if verbose and result.stderr:
+            print(f"stderr: {result.stderr.decode('utf-8')}")
+
         # Step 2: Rename symbols with objcopy
         # The ld command creates symbols like:
         #   _binary_embedded_<name>_cubin_start
@@ -156,6 +189,7 @@ def embed_cubin(  # noqa: PLR0912, PLR0915
         # We rename them to:
         #   __tvm_ffi__cubin_<name>
         #   __tvm_ffi__cubin_<name>_end
+        # Note: We don't localize yet - that happens after merging
         cubin_obj_renamed = tmp_path / f"cubin_{name}_renamed.o"
         objcopy_cmd = [
             "objcopy",
@@ -170,7 +204,7 @@ def embed_cubin(  # noqa: PLR0912, PLR0915
         ]
 
         if verbose:
-            print("\n[Step 2/3] Renaming CUBIN symbols with objcopy")
+            print("\n[Step 2/4] Renaming CUBIN symbols with objcopy")
             print(f"Command: {' '.join(objcopy_cmd)}")
 
         result = subprocess.run(objcopy_cmd, capture_output=True, check=False)
@@ -200,7 +234,7 @@ def embed_cubin(  # noqa: PLR0912, PLR0915
         ]
 
         if verbose:
-            print("\n[Step 3/3] Merging objects with ld (relocatable link)")
+            print("\n[Step 3/4] Merging objects with ld (relocatable link)")
             print(f"Command: {' '.join(ld_merge_cmd)}")
 
         result = subprocess.run(ld_merge_cmd, capture_output=True, check=False)
@@ -219,13 +253,45 @@ def embed_cubin(  # noqa: PLR0912, PLR0915
         if verbose and result.stderr:
             print(f"stderr: {result.stderr.decode('utf-8')}")
 
+        # Step 4: Localize CUBIN symbols to prevent conflicts across object files
+        # We do this after merging so the C++ code can reference the symbols during the link
+        objcopy_localize_cmd = [
+            "objcopy",
+            "--localize-symbol",
+            f"__tvm_ffi__cubin_{name}",
+            "--localize-symbol",
+            f"__tvm_ffi__cubin_{name}_end",
+            str(output_obj_path),
+        ]
+
+        if verbose:
+            print("\n[Step 4/4] Localizing CUBIN symbols")
+            print(f"Command: {' '.join(objcopy_localize_cmd)}")
+
+        result = subprocess.run(objcopy_localize_cmd, capture_output=True, check=False)
+        if result.returncode != 0:
+            stderr = result.stderr.decode("utf-8")
+            stdout = result.stdout.decode("utf-8")
+            raise RuntimeError(
+                f"objcopy (localize symbols) failed with status {result.returncode}\n"
+                f"Command: {' '.join(objcopy_localize_cmd)}\n"
+                f"stdout: {stdout}\n"
+                f"stderr: {stderr}"
+            )
+
+        if verbose and result.stdout:
+            print(f"stdout: {result.stdout.decode('utf-8')}")
+        if verbose and result.stderr:
+            print(f"stderr: {result.stderr.decode('utf-8')}")
+
     if verbose:
         print(f"\n✓ Successfully created combined object file: {output_obj_path}")
         print("  Contains:")
         print(f"    - Original code from {input_obj_path.name}")
-        print("    - Embedded CUBIN data with symbols:")
-        print(f"        __tvm_ffi__cubin_{name}")
-        print(f"        __tvm_ffi__cubin_{name}_end")
+        print("    - Embedded CUBIN data with local symbols:")
+        print(f"        __tvm_ffi__cubin_{name} (local)")
+        print(f"        __tvm_ffi__cubin_{name}_end (local)")
+        print("    - .note.GNU-stack section (non-executable stack)")
 
 
 def main() -> int:
