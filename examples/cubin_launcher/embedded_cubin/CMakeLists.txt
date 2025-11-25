@@ -19,7 +19,7 @@ cmake_minimum_required(VERSION 3.20)
 project(embedded_cubin_example LANGUAGES CXX CUDA)
 
 # Prefer virtualenv when searching for python
-set(Python_FIND_VIRTUALENV FIRST)
+set(Python_FIND_VIRTUALENV FIRST) # cmake-lint: disable=C0103
 
 # Find tvm-ffi package
 find_package(

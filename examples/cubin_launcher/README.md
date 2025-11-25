@@ -49,6 +49,7 @@ Demonstrates embedding CUBIN data directly into the shared library at build time
 **Location:** `embedded_cubin/`
 
 **Build and run:**
+
 ```bash
 cd examples/cubin_launcher/embedded_cubin
 mkdir build && cd build
@@ -59,6 +60,7 @@ python main.py
 ```
 
 **Key features:**
+
 - CUBIN is embedded at compile time using `ld` and `objcopy`
 - No separate CUBIN file needed at runtime
 - Symbols are localized to prevent conflicts
@@ -71,6 +73,7 @@ Demonstrates loading CUBIN data from a file at runtime using the CUDA Driver API
 **Location:** `dynamic_cubin/`
 
 **Build and run:**
+
 ```bash
 cd examples/cubin_launcher/dynamic_cubin
 mkdir build && cd build
@@ -81,6 +84,7 @@ python main.py
 ```
 
 **Key features:**
+
 - CUBIN loaded from file at runtime
 - More flexible - can swap CUBIN files
 - Useful for JIT-compiled kernels
@@ -144,25 +148,29 @@ mod = cpp.load_inline(
 ## Project Structure
 
 ### Core Files
+
 - `include/tvm/ffi/extra/cuda/cubin_launcher.h` - Header-only C++ library with CUBIN utilities
 - `python/tvm_ffi/utils/embed_cubin.py` - Python utility for embedding CUBIN into object files
 - `python/tvm_ffi/cpp/nvrtc.py` - NVRTC compilation utilities
 - `cmake/Utils/EmbedCubin.cmake` - CMake utilities (`tvm_ffi_generate_cubin`, `tvm_ffi_embed_cubin`)
 
-### Examples
+### Example Directories
 
 **`embedded_cubin/`** - CUBIN embedded at build time
+
 - `CMakeLists.txt` - Build configuration using `tvm_ffi_embed_cubin`
 - `main.py` - Python test script
 - `src/lib_embedded.cc` - C++ code using `TVM_FFI_EMBED_CUBIN` macro
 - `src/kernel.cu` - CUDA kernels (add_one, mul_two)
 
 **`dynamic_cubin/`** - CUBIN loaded at runtime
+
 - `CMakeLists.txt` - Build configuration using `tvm_ffi_generate_cubin`
 - `main.py` - Python test script
 - `src/lib_dynamic.cc` - C++ code using `CubinModule::GetKernel()`
 - `src/kernel.cu` - CUDA kernels (add_one, mul_two)
 
 **Additional Examples** (at root level)
+
 - `example_triton_cubin.py` - Triton kernel with embedded CUBIN
 - `example_nvrtc_cubin.py` - NVRTC compilation with embedded CUBIN

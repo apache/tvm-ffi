@@ -48,6 +48,7 @@
 #   )
 # ~~~
 
+# cmake-lint: disable=C0111,C0103
 function (tvm_ffi_generate_cubin)
   # Parse arguments
   set(options "")
@@ -131,6 +132,7 @@ endfunction ()
 #       non-executable, so you don't need to add linker options manually
 # ~~~
 
+# cmake-lint: disable=C0111,C0103
 function (tvm_ffi_embed_cubin)
   # Parse arguments
   set(options "")
