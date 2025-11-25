@@ -339,12 +339,17 @@ class CubinModule {
    * \brief Get a kernel function from the module by name.
    *
    * \param name Name of the kernel function.
+   * \param dynamic_smem_max Maximum dynamic shared memory in bytes to set for this kernel.
+   *                         -1 (default) means maximum available dynamic shared memory
+   *                         (device max - static shared memory used by kernel).
    * \return CubinKernel object representing the loaded kernel.
    */
-  CubinKernel GetKernel(const char* name);
+  CubinKernel GetKernel(const char* name, int64_t dynamic_smem_max);
 
   /*!
    * \brief Operator[] for convenient kernel access.
+   *
+   * It's equivalent to calling GetKernel(name, -1).
    *
    * \param name Name of the kernel function.
    * \return CubinKernel object representing the loaded kernel.
@@ -429,40 +434,13 @@ class CubinKernel {
    *
    * \param library The cudaLibrary_t handle.
    * \param name Name of the kernel function.
+   * \param dynamic_smem_max Maximum dynamic shared memory in bytes to set for this kernel.
+   *                           -1 (default) means maximum available dynamic shared memory
+   *                           (device max - static shared memory used by kernel).
    */
-  CubinKernel(cudaLibrary_t library, const char* name) {
+  CubinKernel(cudaLibrary_t library, const char* name, int64_t dynamic_smem_max = -1) {
     TVM_FFI_CHECK_CUDA_ERROR(cudaLibraryGetKernel(&kernel_, library, name));
-
-    // Set max dynamic shared memory for all devices during initialization
-    // This allows the kernel to use maximum available shared memory when needed
-    int device_count = 0;
-    cudaError_t err = cudaGetDeviceCount(&device_count);
-    if (err == cudaSuccess && device_count > 0) {
-      bool any_success = false;
-      for (int device_id = 0; device_id < device_count; ++device_id) {
-        // Query device's maximum shared memory per block
-        cudaDeviceProp prop;
-        err = cudaGetDeviceProperties(&prop, device_id);
-        if (err != cudaSuccess) {
-          continue;  // Skip this device if we can't get its properties
-        }
-
-        // Set the maximum dynamic shared memory size for this device
-        // This sets the cap but doesn't force allocation - actual size is controlled
-        // by the dyn_smem_bytes parameter in Launch()
-        err = cudaKernelSetAttributeForDevice(kernel_, cudaFuncAttributeMaxDynamicSharedMemorySize,
-                                              static_cast<int>(prop.sharedMemPerBlock), device_id);
-        if (err == cudaSuccess) {
-          any_success = true;
-        }
-        // Don't error out for individual device failures - user may only use some GPUs
-      }
-      // Only error out if setting failed for ALL devices
-      if (!any_success && device_count > 0) {
-        TVM_FFI_THROW(RuntimeError)
-            << "Failed to set dynamic shared memory attribute for any device";
-      }
-    }
+    SetMaxDynamicSharedMemory(dynamic_smem_max);
   }
 
   /*! \brief Destructor (kernel handle doesn't need explicit cleanup) */
@@ -548,13 +526,82 @@ class CubinKernel {
   }
 
  private:
+  /*!
+   * \brief Set maximum dynamic shared memory for this kernel across all devices.
+   *
+   * This method configures the maximum dynamic shared memory that can be allocated
+   * when launching this kernel. It must be called after the kernel is loaded.
+   *
+   * \param dynamic_smem_max Maximum dynamic shared memory in bytes to set.
+   *                         -1 (default) means maximum available dynamic shared memory,
+   *                         which is computed as (device max shared memory - static shared memory).
+   *                         For -1, the method queries the kernel's static shared memory usage
+   *                         and sets the attribute to the remaining available shared memory.
+   *
+   * \note This sets the maximum cap but doesn't force allocation. The actual dynamic
+   *       shared memory used is controlled by the dyn_smem_bytes parameter in Launch().
+   * \note This method attempts to set the attribute for all available devices and will
+   *       only throw an error if it fails for ALL devices.
+   */
+  void SetMaxDynamicSharedMemory(int64_t dynamic_smem_max = -1) {
+    int device_count = 0;
+    cudaError_t err = cudaGetDeviceCount(&device_count);
+    if (err != cudaSuccess || device_count == 0) {
+      return;  // No devices available, nothing to configure
+    }
+
+    bool any_success = false;
+    for (int device_id = 0; device_id < device_count; ++device_id) {
+      // Query device's maximum shared memory per block
+      cudaDeviceProp prop;
+      err = cudaGetDeviceProperties(&prop, device_id);
+      if (err != cudaSuccess) {
+        continue;  // Skip this device if we can't get its properties
+      }
+
+      int shared_mem_to_set;
+      if (dynamic_smem_max == -1) {
+        // Query the kernel's static shared memory usage
+        cudaFuncAttributes func_attr;
+        err = cudaFuncGetAttributes(&func_attr, reinterpret_cast<const void*>(kernel_));
+        if (err != cudaSuccess) {
+          continue;  // Skip this device if we can't get kernel attributes
+        }
+
+        // Calculate available dynamic shared memory:
+        // device max shared memory - static shared memory used by kernel
+        int64_t static_shared = static_cast<int64_t>(func_attr.sharedSizeBytes);
+        int64_t max_shared = static_cast<int64_t>(prop.sharedMemPerBlock);
+        int64_t available = max_shared - static_shared;
+        shared_mem_to_set = (available > 0) ? static_cast<int>(available) : 0;
+      } else {
+        shared_mem_to_set = static_cast<int>(dynamic_smem_max);
+      }
+
+      // Set the maximum dynamic shared memory size for this device
+      err = cudaKernelSetAttributeForDevice(kernel_, cudaFuncAttributeMaxDynamicSharedMemorySize,
+                                            shared_mem_to_set, device_id);
+      if (err == cudaSuccess) {
+        any_success = true;
+      }
+      // Don't error out for individual device failures - user may only use some GPUs
+    }
+
+    // Only error out if setting failed for ALL devices
+    if (!any_success && device_count > 0) {
+      TVM_FFI_THROW(RuntimeError) << "Failed to set dynamic shared memory attribute for any device";
+    }
+  }
+
   cudaKernel_t kernel_ = nullptr;
 };
 
 // Implementation of CubinModule methods that return CubinKernel
-inline CubinKernel CubinModule::GetKernel(const char* name) { return CubinKernel(library_, name); }
+inline CubinKernel CubinModule::GetKernel(const char* name, int64_t dynamic_smem_max = -1) {
+  return CubinKernel(library_, name, dynamic_smem_max);
+}
 
-inline CubinKernel CubinModule::operator[](const char* name) { return GetKernel(name); }
+inline CubinKernel CubinModule::operator[](const char* name) { return GetKernel(name, -1); }
 
 }  // namespace ffi
 }  // namespace tvm
