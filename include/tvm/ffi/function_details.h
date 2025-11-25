@@ -423,7 +423,7 @@ struct OverloadedFunction : TypedOverload<Callable> {
     // virtual calls cannot be inlined, so we fast check the num_args first
     // we also de-virtualize the fptr to reduce one more indirection
     for (const auto& [overload, fptr] : overloads_) {
-      if (overload->num_args_ == num_args) continue;
+      if (overload->num_args_ != num_args) continue;
       if (fptr(overload.get(), args, num_args, rv)) return;
     }
 
