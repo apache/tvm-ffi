@@ -553,10 +553,10 @@ class CubinKernel {
     bool any_success = false;
     for (int device_id = 0; device_id < device_count; ++device_id) {
       // Query device's maximum shared memory per block
-      cudaDeviceProp prop;
-      err = cudaGetDeviceProperties(&prop, device_id);
+      int max_shared_mem = 0;
+      err = cudaDeviceGetAttribute(&max_shared_mem, cudaDevAttrMaxSharedMemoryPerBlock, device_id);
       if (err != cudaSuccess) {
-        continue;  // Skip this device if we can't get its properties
+        continue;  // Skip this device if we can't get its attribute
       }
 
       int shared_mem_to_set;
@@ -571,7 +571,7 @@ class CubinKernel {
         // Calculate available dynamic shared memory:
         // device max shared memory - static shared memory used by kernel
         int64_t static_shared = static_cast<int64_t>(func_attr.sharedSizeBytes);
-        int64_t max_shared = static_cast<int64_t>(prop.sharedMemPerBlock);
+        int64_t max_shared = static_cast<int64_t>(max_shared_mem);
         int64_t available = max_shared - static_shared;
         shared_mem_to_set = (available > 0) ? static_cast<int>(available) : 0;
       } else {
