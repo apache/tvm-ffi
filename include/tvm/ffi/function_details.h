@@ -401,6 +401,7 @@ struct OverloadedFunction : TypedOverload<Callable> {
   using OverloadBase::name_ptr_;
   using TypedBase::GetTryCallPtr;
   using TypedBase::kNumArgs;
+  using TypedBase::kSeq;
   using TypedBase::TypedBase;  // constructors
   using typename OverloadBase::FnPtr;
   using typename TypedBase::Ret;
@@ -413,7 +414,7 @@ struct OverloadedFunction : TypedOverload<Callable> {
   void operator()(const AnyView* args, int32_t num_args, Any* rv) {
     // fast path: only add a little overhead when no overloads
     if (overloads_.size() == 0) {
-      return this->CallUnpackedImpl(args, num_args, rv);
+      return unpack_call<Ret>(kSeq, name_ptr_, f_, args, num_args, rv);
     }
 
     // this can be inlined by compiler, don't worry
@@ -433,14 +434,10 @@ struct OverloadedFunction : TypedOverload<Callable> {
 
  private:
   using TypedBase::f_;
-  void CallUnpackedImpl(const AnyView* args, int32_t num_args, Any* rv) {
-    unpack_call<Ret>(std::make_index_sequence<kNumArgs>{}, name_ptr_, f_, args, num_args, rv);
-  }
   std::vector<std::pair<std::unique_ptr<OverloadBase>, FnPtr>> overloads_;
 };
 
 }  // namespace details
-
 }  // namespace ffi
 }  // namespace tvm
 #endif  // TVM_FFI_FUNCTION_DETAILS_H_
