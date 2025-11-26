@@ -243,6 +243,9 @@ cmake-build-debug
 # Visual Studio Code
 .vscode
 
+# clangd language server
+.clangd
+
 # tmp file
 .nfs*
 

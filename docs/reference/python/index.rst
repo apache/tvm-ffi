@@ -115,6 +115,13 @@ C++ integration helpers for building and loading inline modules.
   cpp.load
   cpp.build
 
+NVRTC Utilities
+---------------
+.. autosummary::
+  :toctree: cpp/generated/
+
+  cpp.nvrtc.nvrtc_compile
+
 Misc
 ----
 .. autosummary::
