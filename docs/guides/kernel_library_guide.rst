@@ -145,6 +145,20 @@ Explicit Update
 
 Once the devices on which the stream contexts reside cannot be inferred from the tensors, the explicit update on stream context table is necessary. TVM FFI provides :py:func:`tvm_ffi.use_torch_stream` and :py:func:`tvm_ffi.use_raw_stream` for manual stream context update. However, it is **recommended** to use implicit update above, to reduce code complexity.
 
+Device Guard
+============
+
+When launching kernels, the kernel libraries may require a context on specific device. TVM FFI provides :cpp:class:`tvm::ffi::CUDADeviceGuard` to set the context device, similar to :cpp:class:`c10::cuda::CUDAGuard`. Once constructing a :cpp:class:`tvm::ffi::CUDADeviceGuard` with the device index, it stores the original device index from ``cudaGetDevice``, and set the current device to given device index, by ``cudaSetDevice``. Finally, when destructing :cpp:class:`tvm::ffi::CUDADeviceGuard`, the current device index reset to the stored original device index, still via ``cudaSetDevice``. Here is an example:
+
+.. code-block:: c++
+
+ void func(ffi::TensorView input, ...) {
+   // current device index is original device index
+   ffi::CUDADeviceGuard device_guard(input.device().device_id);
+   // current device index is input device index
+ }
+ // after calling func, the current device index reset to original device index
+
 Function Exporting
 ==================
 
