@@ -148,7 +148,7 @@ Once the devices on which the stream contexts reside cannot be inferred from the
 Device Guard
 ============
 
-When launching kernels, the kernel libraries may require a context on specific device. TVM FFI provides :cpp:class:`tvm::ffi::CUDADeviceGuard` to set the context device, similar to :cpp:class:`c10::cuda::CUDAGuard`. Once constructing a :cpp:class:`tvm::ffi::CUDADeviceGuard` with the device index, it stores the original device index from ``cudaGetDevice``, and set the current device to given device index, by ``cudaSetDevice``. Finally, when destructing :cpp:class:`tvm::ffi::CUDADeviceGuard`, the current device index reset to the stored original device index, still via ``cudaSetDevice``. Here is an example:
+When launching kernels, kernel libraries may require the current device context to be set for a specific device. TVM FFI provides the :cpp:class:`tvm::ffi::CUDADeviceGuard` class to manage this, similar to :cpp:class:`c10::cuda::CUDAGuard`. When a :cpp:class:`tvm::ffi::CUDADeviceGuard` object is constructed with a device index, it saves the original device index (retrieved using ``cudaGetDevice``) and sets the current device to the given index (using ``cudaSetDevice``). Upon destruction (e.g., when it goes out of scope), the guard restores the current device to the original device index, also using ``cudaSetDevice``. This RAII pattern ensures the device context is handled correctly. Here is an example:
 
 .. code-block:: c++
 
@@ -157,7 +157,8 @@ When launching kernels, the kernel libraries may require a context on specific d
    ffi::CUDADeviceGuard device_guard(input.device().device_id);
    // current device index is input device index
  }
- // after calling func, the current device index reset to original device index
+
+After ``func`` returns, the ``device_guard`` is destructed, and the original device index is restored.
 
 Function Exporting
 ==================
