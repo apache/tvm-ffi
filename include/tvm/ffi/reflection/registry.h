@@ -588,6 +588,9 @@ class ObjectDef : public ReflectionDefBase {
   }
 
  private:
+  template <typename T>
+  friend class OverloadObjectDef;
+
   template <typename... ExtraArgs>
   void RegisterExtraInfo(ExtraArgs&&... extra_args) {
     TVMFFITypeMetadata info;
@@ -658,8 +661,6 @@ class ObjectDef : public ReflectionDefBase {
     TVM_FFI_CHECK_SAFE_CALL(TVMFFITypeRegisterMethod(type_index_, &info));
   }
 
- protected:
-  // These fields may be used in subclasses
   int32_t type_index_;
   const char* type_key_;
   static constexpr const char* kInitMethodName = "__ffi_init__";
