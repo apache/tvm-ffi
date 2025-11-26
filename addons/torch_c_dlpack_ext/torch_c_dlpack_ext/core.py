@@ -46,7 +46,12 @@ def load_torch_c_dlpack_extension() -> None:
     func = lib.TorchDLPackExchangeAPIPtr
     func.restype = ctypes.c_uint64
     func.argtypes = []
-    setattr(torch.Tensor, "__c_dlpack_exchange_api__", func())
+    # note: we need to keep this behavior for a while
+    # to ensure backward compatibility with older versions dependencies
+    # that relies on the value being int.
+    # We will do eager upgrade to PyCapsule in the tvm-ffi side instead.
+    dlpack_exchange_api_ptr_as_int = func()
+    setattr(torch.Tensor, "__c_dlpack_exchange_api__", dlpack_exchange_api_ptr_as_int)
     return lib
 
 

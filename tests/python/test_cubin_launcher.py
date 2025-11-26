@@ -43,6 +43,20 @@ def _is_cuda_available() -> bool:
     return torch.cuda.is_available()
 
 
+def _is_cuda_version_greater_than_13() -> bool:
+    """Check if CUDA version is greater than 13.0."""
+    if torch is None or not torch.cuda.is_available():
+        return False
+    if torch.version.cuda is None:
+        return False
+    try:
+        # Parse version string into tuple of integers (e.g., "12.1" -> (12, 1))
+        version_parts = tuple(int(x) for x in torch.version.cuda.split("."))
+        return version_parts > (13, 0)
+    except (ValueError, TypeError, AttributeError):
+        return False
+
+
 def _compile_kernel_to_cubin() -> bytes:
     """Compile simple CUDA kernels to CUBIN.
 
@@ -88,6 +102,9 @@ def _compile_kernel_to_cubin() -> bytes:
 @pytest.mark.skipif(sys.platform != "linux", reason="CUBIN launcher only supported on Linux")
 @pytest.mark.skipif(torch is None, reason="PyTorch not installed")
 @pytest.mark.skipif(not _is_cuda_available(), reason="CUDA not available")
+@pytest.mark.skipif(
+    not _is_cuda_version_greater_than_13(), reason="CUDA version must be greater than 13.0"
+)
 def test_cubin_launcher_add_one() -> None:
     """Test loading and launching add_one kernel from CUBIN."""
     assert torch is not None, "PyTorch is required for this test"
@@ -212,6 +229,9 @@ TVM_FFI_DLL_EXPORT_TYPED_FUNC(launch_mul_two, cubin_test::LaunchMulTwo);
 @pytest.mark.skipif(sys.platform != "linux", reason="CUBIN launcher only supported on Linux")
 @pytest.mark.skipif(torch is None, reason="PyTorch not installed")
 @pytest.mark.skipif(not _is_cuda_available(), reason="CUDA not available")
+@pytest.mark.skipif(
+    not _is_cuda_version_greater_than_13(), reason="CUDA version must be greater than 13.0"
+)
 def test_cubin_launcher_chained() -> None:
     """Test chaining multiple kernel launches."""
     assert torch is not None, "PyTorch is required for this test"

@@ -677,6 +677,7 @@ cdef int TVMFFIPyArgSetterFloatProtocol_(
 cdef _DISPATCH_TYPE_KEEP_ALIVE = set()
 cdef _DISPATCH_TYPE_KEEP_ALIVE_LOCK = threading.Lock()
 
+
 cdef int TVMFFIPyArgSetterFactory_(PyObject* value, TVMFFIPyArgSetter* out) except -1:
     """
     Factory function that creates an argument setter for a given Python argument type.
@@ -728,8 +729,7 @@ cdef int TVMFFIPyArgSetterFactory_(PyObject* value, TVMFFIPyArgSetter* out) exce
         # This is checked on the CLASS, not the instance
         if hasattr(arg_class, "__c_dlpack_exchange_api__"):
             out.func = TVMFFIPyArgSetterDLPackExchangeAPI_
-            temp_ptr = arg_class.__c_dlpack_exchange_api__
-            out.c_dlpack_exchange_api = <const DLPackExchangeAPI*>(<long long>temp_ptr)
+            _get_dlpack_exchange_api(arg_class.__c_dlpack_exchange_api__, &(out.c_dlpack_exchange_api))
             return 0
     if hasattr(arg_class, "__cuda_stream__"):
         # cuda stream protocol
