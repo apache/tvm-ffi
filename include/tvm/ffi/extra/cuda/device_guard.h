@@ -17,14 +17,13 @@
  * under the License.
  */
 /*!
- * \file tvm/ffi/cuda/device_guard.h
+ * \file tvm/ffi/extra/cuda/device_guard.h
  * \brief Device guard structs.
  */
-#ifndef TVM_FFI_CUDA_DEVICE_GUARD_H_
-#define TVM_FFI_CUDA_DEVICE_GUARD_H_
+#ifndef TVM_FFI_EXTRA_CUDA_DEVICE_GUARD_H_
+#define TVM_FFI_EXTRA_CUDA_DEVICE_GUARD_H_
 
-#include <cuda_runtime_api.h>
-#include <tvm/ffi/error.h>
+#include <tvm/ffi/extra/cuda/base.h>
 
 namespace tvm {
 namespace ffi {
@@ -49,13 +48,10 @@ struct CUDADeviceGuard {
    * \param device_index The device index to guard.
    */
   explicit CUDADeviceGuard(int device_index) {
-    cudaError_t err;
     target_device_index_ = device_index;
-    err = cudaGetDevice(&original_device_index_);
-    TVM_FFI_ICHECK_EQ(err, cudaSuccess) << "cudaGetDevice failed: " << cudaGetErrorString(err);
+    TVM_FFI_CHECK_CUDA_ERROR(cudaGetDevice(&original_device_index_));
     if (target_device_index_ != original_device_index_) {
-      err = cudaSetDevice(device_index);
-      TVM_FFI_ICHECK_EQ(err, cudaSuccess) << "cudaSetDevice failed: " << cudaGetErrorString(err);
+      TVM_FFI_CHECK_CUDA_ERROR(cudaSetDevice(device_index));
     }
   }
 
@@ -64,8 +60,7 @@ struct CUDADeviceGuard {
    */
   ~CUDADeviceGuard() noexcept(false) {
     if (original_device_index_ != target_device_index_) {
-      cudaError_t err = cudaSetDevice(original_device_index_);
-      TVM_FFI_ICHECK_EQ(err, cudaSuccess) << "cudaSetDevice failed: " << cudaGetErrorString(err);
+      TVM_FFI_CHECK_CUDA_ERROR(cudaSetDevice(original_device_index_));
     }
   }
 
@@ -76,4 +71,4 @@ struct CUDADeviceGuard {
 
 }  // namespace ffi
 }  // namespace tvm
-#endif  // TVM_FFI_CUDA_DEVICE_GUARD_H_
+#endif  // TVM_FFI_EXTRA_CUDA_DEVICE_GUARD_H_
