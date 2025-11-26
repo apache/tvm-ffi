@@ -45,7 +45,7 @@ namespace ffi {
 struct CUDADeviceGuard {
   CUDADeviceGuard() = delete;
   /*!
-   * \brief Constructor from a device index, and backup the current device index.
+   * \brief Constructor from a device index, and store the original device index.
    * \param device_index The device index to guard.
    */
   explicit CUDADeviceGuard(int device_index) {
@@ -60,7 +60,7 @@ struct CUDADeviceGuard {
   }
 
   /*!
-   * \brief Destructor to set the current device index back to backup one.
+   * \brief Destructor to set the current device index back to original one if different.
    */
   ~CUDADeviceGuard() noexcept(false) {
     if (original_device_index_ != target_device_index_) {
