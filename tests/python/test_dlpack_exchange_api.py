@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import ctypes
 import sys
 
 import pytest
@@ -46,9 +47,22 @@ def test_dlpack_exchange_api() -> None:
     assert torch is not None
 
     assert hasattr(torch.Tensor, "__c_dlpack_exchange_api__")
-    api_ptr = torch.Tensor.__c_dlpack_exchange_api__
-    assert isinstance(api_ptr, int), "API pointer should be an integer"
-    assert api_ptr != 0, "API pointer should not be NULL"
+    api_attr = torch.Tensor.__c_dlpack_exchange_api__
+
+    # Handle both PyCapsule and integer types
+    if isinstance(api_attr, int):
+        # Direct integer pointer
+        api_ptr = api_attr
+        assert api_ptr != 0, "API pointer should not be NULL"
+    else:
+        # PyCapsule - extract the pointer as integer
+        pythonapi = ctypes.pythonapi
+        # Set restype to c_size_t to get integer directly (avoids c_void_p quirks)
+        pythonapi.PyCapsule_GetPointer.restype = ctypes.c_size_t
+        pythonapi.PyCapsule_GetPointer.argtypes = [ctypes.py_object, ctypes.c_char_p]
+        capsule_name = b"dlpack_exchange_api"
+        api_ptr = pythonapi.PyCapsule_GetPointer(api_attr, capsule_name)
+        assert api_ptr != 0, "API pointer from PyCapsule should not be NULL"
 
     tensor = torch.arange(24, dtype=torch.float32).reshape(2, 3, 4)
 

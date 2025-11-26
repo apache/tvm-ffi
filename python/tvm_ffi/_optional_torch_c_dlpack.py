@@ -44,6 +44,32 @@ from typing import Any
 logger = logging.getLogger(__name__)  # type: ignore
 
 
+def _create_dlpack_exchange_api_capsule(ptr_as_int: int) -> Any:
+    """Create a PyCapsule wrapping the DLPack exchange API pointer.
+
+    Parameters
+    ----------
+    ptr_as_int : int
+        The pointer to the DLPack exchange API as an integer.
+
+    Returns
+    -------
+    capsule : PyCapsule
+        A PyCapsule object wrapping the pointer with name "dlpack_exchange_api".
+
+    """
+    capsule_name = b"dlpack_exchange_api"
+    pythonapi = ctypes.pythonapi
+    pythonapi.PyCapsule_New.restype = ctypes.py_object
+    pythonapi.PyCapsule_New.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_char_p,
+        ctypes.c_void_p,
+    ]
+    capsule = pythonapi.PyCapsule_New(ctypes.c_void_p(ptr_as_int), capsule_name, None)
+    return capsule
+
+
 def load_torch_c_dlpack_extension() -> Any:  # noqa: PLR0912, PLR0915
     try:
         import torch  # noqa: PLC0415
@@ -61,6 +87,11 @@ def load_torch_c_dlpack_extension() -> Any:  # noqa: PLR0912, PLR0915
         import torch_c_dlpack_ext  # type: ignore  # noqa: PLC0415, F401
 
         if hasattr(torch.Tensor, "__c_dlpack_exchange_api__"):
+            if isinstance(torch.Tensor.__c_dlpack_exchange_api__, int):
+                # Brings up to speed with the new PyCapsule behavior
+                torch.Tensor.__c_dlpack_exchange_api__ = _create_dlpack_exchange_api_capsule(
+                    torch.Tensor.__c_dlpack_exchange_api__
+                )
             return None
     except ImportError:
         pass
@@ -118,9 +149,10 @@ def load_torch_c_dlpack_extension() -> Any:  # noqa: PLR0912, PLR0915
         func = lib.TorchDLPackExchangeAPIPtr
         func.restype = ctypes.c_uint64
         func.argtypes = []
-
+        # Create a PyCapsule from the pointer
+        capsule = _create_dlpack_exchange_api_capsule(func())
         # Set the DLPackExchangeAPI pointer on the class
-        setattr(torch.Tensor, "__c_dlpack_exchange_api__", func())
+        setattr(torch.Tensor, "__c_dlpack_exchange_api__", capsule)
 
         return lib
     except ImportError:

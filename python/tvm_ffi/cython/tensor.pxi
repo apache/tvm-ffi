@@ -30,6 +30,24 @@ cdef const char* _c_str_dltensor = "dltensor"
 cdef const char* _c_str_used_dltensor = "used_dltensor"
 cdef const char* _c_str_dltensor_versioned = "dltensor_versioned"
 cdef const char* _c_str_used_dltensor_versioned = "used_dltensor_versioned"
+cdef const char* _c_str_dlpack_exchange_api = "dlpack_exchange_api"
+
+
+cdef int _get_dlpack_exchange_api(
+    object dlpack_exchange_api_obj,
+    const DLPackExchangeAPI** out_ptr
+) except -1:
+    if isinstance(dlpack_exchange_api_obj, int):
+        out_ptr[0] = <const DLPackExchangeAPI*>(<long long>dlpack_exchange_api_obj)
+        return 0
+
+    if pycapsule.PyCapsule_IsValid(dlpack_exchange_api_obj, _c_str_dlpack_exchange_api):
+        out_ptr[0] = <const DLPackExchangeAPI*>pycapsule.PyCapsule_GetPointer(
+            dlpack_exchange_api_obj, _c_str_dlpack_exchange_api
+        )
+        return 0
+    raise ValueError("Expect a dlpack_exchange_api field")
+
 
 cdef void _c_dlpack_deleter(object pycaps):
     cdef DLManagedTensor* dltensor
