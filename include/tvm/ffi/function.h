@@ -360,6 +360,16 @@ class Function : public ObjectRef {
     }
   }
 
+  /*!
+   * \brief Constructing a packed function from a callable type
+   *        whose signature is consistent with `ffi::Function`.
+   *        It will create the Callable object with the given arguments,
+   *        and return the inplace constructed Function along with
+   *        the pointer to the callable object. The lifetime of the callable
+   *        object is managed by the returned Function.
+   * \param args The arguments to construct TCallable
+   * \return A tuple of (Function, TCallable*)
+   */
   template <typename TCallable, typename... Args>
   static auto FromPackedInplace(Args&&... args) {
     // We must ensure TCallable is a value type (decay_t) that can hold the callable object
