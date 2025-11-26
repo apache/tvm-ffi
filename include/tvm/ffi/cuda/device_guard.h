@@ -30,7 +30,9 @@ namespace tvm {
 namespace ffi {
 
 /*!
- * \brief CUDA Device Guard.
+ * \brief CUDA Device Guard. On construction, it calls `cudaGetDevice` to set the CUDA device to
+ * target index, and stores the original current device index. And on destruction, it sets the
+ * current CUDA device back to original device index.
  *
  * Example usage:
  * \code
@@ -48,9 +50,10 @@ struct CUDADeviceGuard {
    */
   explicit CUDADeviceGuard(int device_index) {
     cudaError_t err;
-    err = cudaGetDevice(&previous_device_index);
+    target_device_index_ = device_index;
+    err = cudaGetDevice(&original_device_index_);
     TVM_FFI_ICHECK_EQ(err, cudaSuccess) << "cudaGetDevice failed: " << cudaGetErrorString(err);
-    if (previous_device_index != device_index) {
+    if (target_device_index_ != original_device_index_) {
       err = cudaSetDevice(device_index);
       TVM_FFI_ICHECK_EQ(err, cudaSuccess) << "cudaSetDevice failed: " << cudaGetErrorString(err);
     }
@@ -59,13 +62,16 @@ struct CUDADeviceGuard {
   /*!
    * \brief Destructor to set the current device index back to backup one.
    */
-  ~CUDADeviceGuard() {
-    cudaError_t err = cudaSetDevice(previous_device_index);
-    TVM_FFI_ICHECK_EQ(err, cudaSuccess) << "cudaSetDevice failed: " << cudaGetErrorString(err);
+  ~CUDADeviceGuard() noexcept(false) {
+    if (original_device_index_ != target_device_index_) {
+      cudaError_t err = cudaSetDevice(original_device_index_);
+      TVM_FFI_ICHECK_EQ(err, cudaSuccess) << "cudaSetDevice failed: " << cudaGetErrorString(err);
+    }
   }
 
  private:
-  int previous_device_index;
+  int original_device_index_;
+  int target_device_index_;
 };
 
 }  // namespace ffi
