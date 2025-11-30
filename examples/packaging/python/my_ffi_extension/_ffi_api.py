@@ -13,22 +13,53 @@
 # "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations.
+"""FFI API bindings for my_ffi_extension."""
 
+# tvm-ffi-stubgen(begin): import-section
+# fmt: off
+# isort: off
+from __future__ import annotations
+from tvm_ffi import Object as _ffi_Object, init_ffi_api as _FFI_INIT_FUNC, register_object as _FFI_REG_OBJ
+from tvm_ffi.libinfo import load_lib_module as _FFI_LOAD_LIB
 from typing import TYPE_CHECKING
-
-import tvm_ffi
-
-# make sure lib is loaded first
-from .base import _LIB  # noqa: F401
-
-# this is a short cut to register all the global functions
-# prefixed by `my_ffi_extension.` to this module
-tvm_ffi.init_ffi_api("my_ffi_extension", __name__)
-
-
-# tvm-ffi-stubgen(begin): global/my_ffi_extension
 if TYPE_CHECKING:
-    # fmt: off
-    def raise_error(_0: str, /) -> None: ...
-    # fmt: on
+    from tvm_ffi import Object
+# isort: on
+# fmt: on
 # tvm-ffi-stubgen(end)
+# tvm-ffi-stubgen(import-object): tvm_ffi.libinfo.load_lib_module;False;_FFI_LOAD_LIB
+LIB = _FFI_LOAD_LIB("my-ffi-extension", "my_ffi_extension")
+# tvm-ffi-stubgen(begin): global/my_ffi_extension
+# fmt: off
+_FFI_INIT_FUNC("my_ffi_extension", __name__)
+if TYPE_CHECKING:
+    def raise_error(_0: str, /) -> None: ...
+# fmt: on
+# tvm-ffi-stubgen(end)
+# tvm-ffi-stubgen(import-object): tvm_ffi.register_object;False;_FFI_REG_OBJ
+# tvm-ffi-stubgen(import-object): ffi.Object;False;_ffi_Object
+@_FFI_REG_OBJ("my_ffi_extension.IntPair")
+class IntPair(_ffi_Object):
+    """FFI binding for `my_ffi_extension.IntPair`."""
+
+    # tvm-ffi-stubgen(begin): object/my_ffi_extension.IntPair
+    # fmt: off
+    a: int
+    b: int
+    if TYPE_CHECKING:
+        @staticmethod
+        def __c_ffi_init__(_0: int, _1: int, /) -> Object: ...
+        @staticmethod
+        def static_get_second(_0: IntPair, /) -> int: ...
+        def get_first(self, /) -> int: ...
+    # fmt: on
+    # tvm-ffi-stubgen(end)
+
+
+__all__ = [
+    # tvm-ffi-stubgen(begin): __all__
+    "LIB",
+    "IntPair",
+    "raise_error",
+    # tvm-ffi-stubgen(end)
+]

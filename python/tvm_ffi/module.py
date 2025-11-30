@@ -16,13 +16,14 @@
 # under the License.
 """Module related objects and functions."""
 
-# tvm-ffi-stubgen(begin): import
+# tvm-ffi-stubgen(begin): import-section
 # fmt: off
 # isort: off
 from __future__ import annotations
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Sequence
+    from typing import Any
 # isort: on
 # fmt: on
 # tvm-ffi-stubgen(end)

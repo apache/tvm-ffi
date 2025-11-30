@@ -17,24 +17,25 @@
 """Testing utilities."""
 
 # ruff: noqa: D102,D105
-# tvm-ffi-stubgen(begin): import
+# tvm-ffi-stubgen(begin): import-section
 # fmt: off
 # isort: off
 from __future__ import annotations
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
     from tvm_ffi import Device, Object, dtype
+    from typing import Any
 # isort: on
 # fmt: on
 # tvm-ffi-stubgen(end)
 
 from typing import ClassVar
 
-from . import _ffi_api
-from .core import Object
-from .dataclasses import c_class, field
-from .registry import get_global_func, register_object
+from .. import _ffi_api
+from ..core import Object
+from ..dataclasses import c_class, field
+from ..registry import get_global_func, register_object
 
 
 @register_object("testing.TestObjectBase")

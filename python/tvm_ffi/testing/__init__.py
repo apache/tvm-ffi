@@ -12,10 +12,20 @@
 # software distributed under the License is distributed on an
 # "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
 # KIND, either express or implied.  See the License for the
-# specific language governing permissions and limitations.
-# Base logic to load library for extension package
-"""Utilities to locate and load the example extension shared library."""
+# specific language governing permissions and limitations
+# under the License.
+"""Testing utilities."""
 
-import tvm_ffi
-
-_LIB = tvm_ffi.libinfo.load_lib_module("my-ffi-extension", "my_ffi_extension")
+from .testing import (
+    TestIntPair,
+    TestObjectBase,
+    TestObjectDerived,
+    _SchemaAllTypes,
+    _TestCxxClassBase,
+    _TestCxxClassDerived,
+    _TestCxxClassDerivedDerived,
+    _TestCxxInitSubset,
+    add_one,
+    create_object,
+    make_unregistered_object,
+)
