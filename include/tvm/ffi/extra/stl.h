@@ -122,7 +122,11 @@ struct TypeTraits<details::ListTemplate> : public details::STLTypeTrait {
     auto array = ArrayObj::Empty(static_cast<std::int64_t>(sizeof...(Is)));
     auto dst = array->MutableBegin();
     // increase size after each new to ensure exception safety
-    ((::new (dst++) Any(std::get<Is>(std::forward<Tuple>(src))), array->size_++), ...);
+    std::apply(
+        [&](auto&&... elems) {
+          ((::new (dst++) Any(std::forward<decltype(elems)>(elems)), array->size_++), ...);
+        },
+        std::forward<Tuple>(src));
     return array;
   }
 
@@ -265,9 +269,9 @@ struct TypeTraits<std::vector<T>> : public TypeTraits<details::ListTemplate> {
       auto array = CopyFromAnyImpl<ArrayObj>(src);
       auto begin = array->MutableBegin();
       auto result = Self{};
-      auto length = array->size_;
+      int64_t length = array->size_;
       result.reserve(length);
-      for (std::size_t i = 0; i < length; ++i) {
+      for (int64_t i = 0; i < length; ++i) {
         result.emplace_back(ConstructFromAny<T>(begin[i]));
       }
       return result;
