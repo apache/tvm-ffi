@@ -29,10 +29,12 @@ if TYPE_CHECKING:
 # fmt: on
 # tvm-ffi-stubgen(end)
 
-from . import registry
-
-# tvm-ffi-stubgen(begin): global/ffi
+# tvm-ffi-stubgen(begin): global/ffi@.registry
 # fmt: off
+# isort: off
+from .registry import init_ffi_api as _INIT
+_INIT("ffi", __name__)
+# isort: on
 if TYPE_CHECKING:
     def Array(*args: Any) -> Any: ...
     def ArrayGetItem(_0: Sequence[Any], _1: int, /) -> Any: ...
@@ -71,8 +73,6 @@ if TYPE_CHECKING:
     def ToJSONGraphString(_0: Any, _1: Any, /) -> str: ...
 # fmt: on
 # tvm-ffi-stubgen(end)
-
-registry.init_ffi_api("ffi", __name__)
 
 
 __all__ = [
