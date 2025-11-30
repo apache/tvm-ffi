@@ -31,15 +31,15 @@ from . import consts as C
 class CodeBlock:
     """A block of code to be generated in a stub file."""
 
-    kind: Literal["global", "object", "ty-map", "import", "__all__", None]
-    param: str
+    kind: Literal["global", "object", "ty-map", "import", "export", "__all__", None]
+    param: str | tuple[str, ...]
     lineno_start: int
     lineno_end: int | None
     lines: list[str]
 
     def __post_init__(self) -> None:
         """Validate the code block after initialization."""
-        assert self.kind in {"global", "object", "ty-map", "import", "__all__", None}
+        assert self.kind in {"global", "object", "ty-map", "import", "export", "__all__", None}
 
     @property
     def indent(self) -> int:
@@ -61,19 +61,27 @@ class CodeBlock:
                 lines=[],
             )
         assert line.startswith(C.STUB_BEGIN)
+        param: str | tuple[str, ...]
         stub = line[len(C.STUB_BEGIN) :].strip()
         if stub.startswith("global/"):
             kind = "global"
             param = stub[len("global/") :].strip()
+            if "@" in param:
+                param = tuple(param.split("@"))
+            else:
+                param = (param, "")
         elif stub.startswith("object/"):
             kind = "object"
             param = stub[len("object/") :].strip()
         elif stub.startswith("ty-map/"):
             kind = "ty-map"
             param = stub[len("ty-map/") :].strip()
-        elif stub.startswith("import"):
+        elif stub == "import":
             kind = "import"
             param = ""
+        elif stub.startswith("export/"):
+            kind = "export"
+            param = stub[len("export/") :].strip()
         elif stub == "__all__":
             kind = "__all__"
             param = ""
@@ -96,12 +104,14 @@ class FileInfo:
     lines: tuple[str, ...]
     code_blocks: list[CodeBlock]
 
-    def update(self, show_diff: bool, dry_run: bool) -> bool:
+    def update(self, verbose: bool, dry_run: bool) -> bool:
         """Update the file's lines based on the current code blocks and optionally show a diff."""
         new_lines = tuple(line for block in self.code_blocks for line in block.lines)
         if self.lines == new_lines:
+            if verbose:
+                print(f"{C.TERM_CYAN}-----> Unchanged{C.TERM_RESET}")
             return False
-        if show_diff:
+        if verbose:
             for line in difflib.unified_diff(self.lines, new_lines, lineterm=""):
                 # Skip placeholder headers when fromfile/tofile are unspecified
                 if line.startswith("---") or line.startswith("+++"):
@@ -126,11 +136,8 @@ class FileInfo:
         file = file.resolve()
         has_marker = False
         lines: list[str] = file.read_text(encoding="utf-8").splitlines()
-        for line_no, line in enumerate(lines, start=1):
+        for _, line in enumerate(lines, start=1):
             if line.strip().startswith(C.STUB_SKIP_FILE):
-                print(
-                    f"{C.TERM_YELLOW}[Skipped] skip-file marker found on line {line_no}: {file}{C.TERM_RESET}"
-                )
                 return None
             if line.strip().startswith(C.STUB_PREFIX):
                 has_marker = True
@@ -174,6 +181,12 @@ class FileInfo:
         if code is not None:
             raise ValueError("Unclosed stub block at end of file")
         return FileInfo(path=file, lines=tuple(lines), code_blocks=codes)
+
+    def reload(self) -> None:
+        """Reload the code blocks from disk while preserving original `lines`."""
+        source = FileInfo.from_file(self.path)
+        assert source is not None, f"File no longer exists or valid: {self.path}"
+        self.code_blocks = source.code_blocks
 
 
 def collect_files(paths: list[Path]) -> list[FileInfo]:

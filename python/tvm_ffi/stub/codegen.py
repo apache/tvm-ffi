@@ -26,22 +26,27 @@ from .utils import FuncInfo, ObjectInfo, Options
 
 
 def generate_global_funcs(
-    code: CodeBlock, global_funcs: list[FuncInfo], fn_ty_map: Callable[[str], str], opt: Options
+    code: CodeBlock,
+    global_funcs: list[FuncInfo],
+    fn_ty_map: Callable[[str], str],
+    opt: Options,
 ) -> None:
     """Generate function signatures for global functions."""
     assert len(code.lines) >= 2
     if not global_funcs:
         return
+    assert isinstance(code.param, tuple)
+    prefix, import_from = code.param
+    if not import_from:
+        import_from = "tvm_ffi"
     results: list[str] = [
         "# fmt: off",
+        "# isort: off",
+        f"from {import_from} import init_ffi_api as _INIT",
+        f'_INIT("{prefix}", __name__)',
+        "# isort: on",
         "if TYPE_CHECKING:",
-        *[
-            func.gen(
-                fn_ty_map,
-                indent=opt.indent,
-            )
-            for func in global_funcs
-        ],
+        *[func.gen(fn_ty_map, indent=opt.indent) for func in global_funcs],
         "# fmt: on",
     ]
     indent = " " * code.indent
@@ -55,6 +60,7 @@ def generate_global_funcs(
 def generate_object(code: CodeBlock, fn_ty_map: Callable[[str], str], opt: Options) -> None:
     """Generate a class definition for an object type."""
     assert len(code.lines) >= 2
+    assert isinstance(code.param, str)
     info = ObjectInfo.from_type_key(code.param)
     if info.methods:
         results = [
@@ -89,8 +95,6 @@ def generate_imports(code: CodeBlock, ty_used: set[str], opt: Options) -> None:
                 module = module.replace(mod_prefix, mod_replacement, 1)
                 break
         ty_collected.setdefault(module, []).append(name)
-    if not ty_collected:
-        return
 
     def _make_line(module: str, names: list[str], indent: int) -> str:
         names = ", ".join(sorted(set(names)))
@@ -135,3 +139,91 @@ def generate_all(code: CodeBlock, names: set[str], opt: Options) -> None:
         *[f'{indent}"{name}",' for name in sorted(names)],
         code.lines[-1],
     ]
+
+
+def generate_export(code: CodeBlock) -> None:
+    """Generate an `__all__` variable for the given names."""
+    assert len(code.lines) >= 2
+
+    mod = code.param
+    code.lines = [
+        code.lines[0],
+        "# fmt: off",
+        "# isort: off",
+        f"from .{mod} import *  # noqa: F403",
+        f"from .{mod} import __all__ as {mod}__all__",
+        'if "__all__" not in globals(): __all__ = []',
+        f"__all__.extend({mod}__all__)",
+        "# isort: on",
+        "# fmt: on",
+        code.lines[-1],
+    ]
+
+
+def generate_ffi_api(
+    code_blocks: list[CodeBlock],
+    module_name: str,
+    type_keys: list[str],
+) -> str:
+    """Generate the initial FFI API stub code for a given module."""
+    append = ""
+    if not code_blocks:
+        append += f"""\"\"\"FFI API bindings for {module_name}.\"\"\"
+"""
+    # Part 1. Imports
+    if not any(code.kind == "import" for code in code_blocks):
+        append += f"""
+{C.STUB_BEGIN} import
+{C.STUB_END}
+"""
+    # Part 2. Global functions
+    if not any(code.kind == "global" for code in code_blocks):
+        append += f"""
+{C.STUB_BEGIN} global/{module_name}
+{C.STUB_END}
+"""
+    # Part 3. __all__
+    if not any(code.kind == "all" for code in code_blocks):
+        append += f"""
+__all__ = [
+    {C.STUB_BEGIN} __all__
+    {C.STUB_END}
+]
+"""
+    # Part 4. Object types
+    if type_keys:
+        append += """
+
+# isort: off
+import tvm_ffi
+# isort: on
+
+"""
+    for type_key in sorted(type_keys):
+        type_cls_name = type_key.rsplit(".", 1)[-1]
+        append += f"""
+@tvm_ffi.register_object("{type_key}")
+class {type_cls_name}(tvm_ffi.Object):
+    \"\"\"FFI binding for `{type_key}`.\"\"\"
+
+    {C.STUB_BEGIN} object/{type_key}
+    {C.STUB_END}
+"""
+    return append
+
+
+def generate_init(
+    code_blocks: list[CodeBlock],
+    module_name: str,
+    submodule: str = "_ffi_api",
+) -> str:
+    """Generate the `__init__.py` file for the `tvm_ffi` package."""
+    code = f"""
+{C.STUB_BEGIN} export/{submodule}
+{C.STUB_END}
+"""
+    if not code_blocks:
+        return f"""\"\"\"Package {module_name}.\"\"\"\n""" + code
+    if not any(code.kind == "export" for code in code_blocks):
+        return code
+    return ""

@@ -31,10 +31,10 @@ if TYPE_CHECKING:
 
 from typing import ClassVar
 
-from . import _ffi_api
-from .core import Object
-from .dataclasses import c_class, field
-from .registry import get_global_func, register_object
+from .. import _ffi_api
+from ..core import Object
+from ..dataclasses import c_class, field
+from ..registry import get_global_func, register_object
 
 
 @register_object("testing.TestObjectBase")

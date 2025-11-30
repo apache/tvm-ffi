@@ -150,6 +150,11 @@ class Array(core.Object, Sequence[T]):
 
     """
 
+    # tvm-ffi-stubgen(begin): object/ffi.Array
+    # fmt: off
+    # fmt: on
+    # tvm-ffi-stubgen(end)
+
     def __init__(self, input_list: Iterable[T]) -> None:
         """Construct an Array from a Python sequence."""
         self.__init_handle_by_constructor__(_ffi_api.Array, *input_list)
@@ -290,6 +295,11 @@ class Map(core.Object, Mapping[K, V]):
     :py:func:`tvm_ffi.convert`
 
     """
+
+    # tvm-ffi-stubgen(begin): object/ffi.Map
+    # fmt: off
+    # fmt: on
+    # tvm-ffi-stubgen(end)
 
     def __init__(self, input_dict: Mapping[K, V]) -> None:
         """Construct a Map from a Python mapping."""
