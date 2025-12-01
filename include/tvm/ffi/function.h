@@ -182,7 +182,7 @@ class FunctionObjImpl : public FunctionObj {
   FunctionObjImpl(const FunctionObjImpl&) = delete;
   FunctionObjImpl& operator=(const FunctionObjImpl&) = delete;
 
-  TCallable& GetCallable() { return callable_; }
+  TCallable* GetCallable() { return &callable_; }
 
  private:
   // implementation of call
@@ -378,7 +378,7 @@ class Function : public ObjectRef {
     using ObjType = details::FunctionObjImpl<TCallable>;
     Function func;
     auto obj_ptr = make_object<ObjType>(std::forward<Args>(args)...);
-    auto* call_ptr = &obj_ptr->GetCallable();
+    auto* call_ptr = obj_ptr->GetCallable();
     func.data_ = std::move(obj_ptr);
     return std::make_tuple(std::move(func), call_ptr);
   }
