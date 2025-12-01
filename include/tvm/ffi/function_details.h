@@ -223,6 +223,7 @@ TVM_FFI_INLINE void unpack_call(std::index_sequence<Is...>, const std::string* o
     *rv = R(f(ArgValueWithContext<std::tuple_element_t<Is, PackedArgs>>{args, Is, optional_name,
                                                                         f_sig}...));
   }
+  // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks
 }
 
 /*!
