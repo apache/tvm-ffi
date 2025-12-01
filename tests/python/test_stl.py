@@ -14,7 +14,6 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-import gc
 import pathlib
 
 import pytest
@@ -31,23 +30,28 @@ def test_stl() -> None:
 
     mod: Module = tvm_ffi.load_module(output_lib_path)
 
-    assert list(mod.test_tuple([1, 2.5])) == [2.5, 1]
-    assert mod.test_vector(None) == None
-    assert list(mod.test_vector([[1, 2], [3, 4]])) == [3, 7]
-    assert mod.test_variant(1) == "int"
-    assert mod.test_variant(1.0) == "float"
-    assert list(mod.test_variant([1, 1.0])) == ["int", "float"]
-    assert dict(mod.test_map({"a": 1, "b": 2})) == {1: "a", 2: "b"}
-    assert dict(mod.test_map_2({"a": 1, "b": 2})) == {1: "a", 2: "b"}
-    assert mod.test_function(lambda: 0)() == 1
-    assert mod.test_function(lambda: 10)() == 11
+    def run_check(mod: Module) -> None:
+        # This sub function is needed to make sure all temp variables deallocated
+        # before module unload since some of these objects contains deleters in the library
+        # code. If the module is unloaded before the object is deleted, the deleter
+        # may call an invalid address.
+        assert list(mod.test_tuple([1, 2.5])) == [2.5, 1]
+        assert mod.test_vector(None) is None
+        assert list(mod.test_vector([[1, 2], [3, 4]])) == [3, 7]
+        assert mod.test_variant(1) == "int"
+        assert mod.test_variant(1.0) == "float"
+        assert list(mod.test_variant([1, 1.0])) == ["int", "float"]
+        assert dict(mod.test_map({"a": 1, "b": 2})) == {1: "a", 2: "b"}
+        assert dict(mod.test_map_2({"a": 1, "b": 2})) == {1: "a", 2: "b"}
+        assert mod.test_function(lambda: 0)() == 1
+        assert mod.test_function(lambda: 10)() == 11
 
-    with pytest.raises(TypeError):
-        mod.test_tuple([1.5, 2.5])
-    with pytest.raises(TypeError):
-        mod.test_function(lambda: 0)(100)
-    gc.collect()
-    del mod
+        with pytest.raises(TypeError):
+            mod.test_tuple([1.5, 2.5])
+        with pytest.raises(TypeError):
+            mod.test_function(lambda: 0)(100)
+
+    run_check(mod)
 
 
 if __name__ == "__main__":
