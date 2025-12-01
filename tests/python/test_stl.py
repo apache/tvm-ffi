@@ -14,6 +14,7 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+import gc
 import pathlib
 
 import pytest
@@ -45,6 +46,8 @@ def test_stl() -> None:
         mod.test_tuple([1.5, 2.5])
     with pytest.raises(TypeError):
         mod.test_function(lambda: 0)(100)
+    gc.collect()
+    del mod
 
 
 if __name__ == "__main__":
