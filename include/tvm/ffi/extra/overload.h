@@ -17,8 +17,8 @@
  * under the License.
  */
 /*!
- * \file tvm/ffi/reflection/registry.h
- * \brief Registry of reflection metadata.
+ * \file tvm/ffi/extra/overload.h
+ * \brief Registry of reflection metadata, supporting function overloading.
  */
 #ifndef TVM_FFI_EXTRA_OVERLOAD_H
 #define TVM_FFI_EXTRA_OVERLOAD_H
@@ -34,6 +34,9 @@
 #include <tvm/ffi/string.h>
 #include <tvm/ffi/type_traits.h>
 
+#include <cstddef>
+#include <cstdint>
+#include <sstream>
 #include <string>
 #include <type_traits>
 #include <unordered_map>
@@ -46,7 +49,7 @@ namespace details {
 
 struct OverloadBase {
  public:
-  // Try Call function pointer type
+  // Try Call function pointer type, return the fail index
   using FnPtr = bool (*)(OverloadBase*, const AnyView*, int32_t, Any*);
 
   explicit OverloadBase(int32_t num_args, std::optional<std::string> name)
@@ -56,16 +59,24 @@ struct OverloadBase {
 
   virtual void Register(std::unique_ptr<OverloadBase> overload) = 0;
   virtual FnPtr GetTryCallPtr() = 0;
+  virtual void GetMismatchMessage(std::ostringstream& os, const AnyView* args,
+                                  int32_t num_args) = 0;
 
   virtual ~OverloadBase() = default;
   OverloadBase(const OverloadBase&) = delete;
   OverloadBase& operator=(const OverloadBase&) = delete;
 
  public:
-  // helper args
+  static constexpr int32_t kAllMatched = -1;
+
+  // a fast cache for last matched arg index
+  // on 64-bit platform, this is packed in the same 8 byte with num_args_
+  int32_t last_mismatch_index_{kAllMatched};
+
+  // some constant helper args
   const int32_t num_args_;
   const std::string name_;
-  const std::string* const name_ptr_ = nullptr;
+  const std::string* const name_ptr_;
 };
 
 template <typename T>
@@ -122,7 +133,34 @@ struct TypedOverload : OverloadBase {
     };
   }
 
+  void GetMismatchMessage(std::ostringstream& os, const AnyView* args, int32_t num_args) final {
+    FGetFuncSignature f_sig = FuncInfo::Sig;
+    if (num_args != kNumArgs) {
+      os << "Mismatched number of arguments when calling: `" << name_ << " "
+         << (f_sig == nullptr ? "" : (*f_sig)()) << "`. Expected " << kNumArgs << " arguments";
+    } else {
+      GetMismatchMessageAux<0>(os, args, num_args);
+    }
+  }
+
  private:
+  template <std::size_t I>
+  void GetMismatchMessageAux(std::ostringstream& os, const AnyView* args, int32_t num_args) {
+    if constexpr (I < kNumArgs) {
+      if (this->last_mismatch_index_ == static_cast<int32_t>(I)) {
+        TVMFFIAny any_data = args[I].CopyToTVMFFIAny();
+        FGetFuncSignature f_sig = FuncInfo::Sig;
+        using Type = std::decay_t<std::tuple_element_t<I, PackedArgs>>;
+        os << "Mismatched type on argument #" << I << " when calling: `" << name_ << " "
+           << (f_sig == nullptr ? "" : (*f_sig)()) << "`. Expected `" << Type2Str<Type>::v()
+           << "` but got `" << TypeTraits<Type>::GetMismatchTypeInfo(&any_data) << '`';
+      } else {
+        GetMismatchMessageAux<I + 1>(os, args, num_args);
+      }
+    }
+    // end of recursion
+  }
+
   template <std::size_t... I>
   Ret CallAux(std::index_sequence<I...>, CaptureTuple& tuple) {
     /// NOTE: this works for T, const T, const T&, T&& argument types
@@ -146,7 +184,10 @@ struct TypedOverload : OverloadBase {
       return true;
     } else {
       capture = args[I].template try_cast<Type>();
-      return capture.has_value();
+      if (capture.has_value()) return true;
+      // slow path: record the last mismatch index
+      this->last_mismatch_index_ = static_cast<int32_t>(I);
+      return false;
     }
   }
 
@@ -194,12 +235,23 @@ struct OverloadedFunction : TypedOverload<Callable> {
       if (fptr(overload.get(), args, num_args, rv)) return;
     }
 
-    /// TODO: better error message
-    TVM_FFI_THROW(TypeError) << "No matching overload found when calling: `" << name_ << "` with "
-                             << num_args << " arguments.";
+    this->handle_overload_failure(args, num_args);
   }
 
  private:
+  void handle_overload_failure(const AnyView* args, int32_t num_args) {
+    std::ostringstream oss;
+    int32_t i = 0;
+    oss << "Overload #" << i++ << ": ";
+    this->GetMismatchMessage(oss, args, num_args);
+    for (const auto& [overload, _] : overloads_) {
+      oss << "\nOverload #" << i++ << ": ";
+      overload->GetMismatchMessage(oss, args, num_args);
+    }
+    TVM_FFI_THROW(TypeError) << "No matching overload found when calling: `" << name_ << "` with "
+                             << num_args << " arguments:\n"
+                             << std::move(oss).str();
+  }
   using TypedBase::f_;
   std::vector<std::pair<std::unique_ptr<OverloadBase>, FnPtr>> overloads_;
 };
