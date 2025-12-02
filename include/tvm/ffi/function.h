@@ -922,6 +922,8 @@ inline int32_t TypeKeyToIndex(std::string_view type_key) {
  * TVM_FFI_DLL_EXPORT_INCLUDE_METADATA is defined)
  */
 #if TVM_FFI_DLL_EXPORT_INCLUDE_METADATA
+// Implementation note: we specifically use TVMFFIStringFromByteArray
+// so the returned string metadata is allocated in the libtvm_ffi and long lived.
 #define TVM_FFI_DLL_EXPORT_TYPED_FUNC(ExportName, Function)                                      \
   TVM_FFI_DLL_EXPORT_TYPED_FUNC_IMPL_(ExportName, Function)                                      \
   extern "C" {                                                                                   \
@@ -932,8 +934,9 @@ inline int32_t TypeKeyToIndex(std::string_view type_key) {
     std::ostringstream os;                                                                       \
     os << R"({"type_schema":)"                                                                   \
        << ::tvm::ffi::EscapeString(::tvm::ffi::String(FuncInfo::TypeSchema())) << R"(})";        \
-    ::tvm::ffi::String str(os.str());                                                            \
-    ::tvm::ffi::TypeTraits<::tvm::ffi::String>::MoveToAny(std::move(str), result);               \
+    std::string data = os.str();                                                                 \
+    TVMFFIByteArray data_array{data.data(), data.size()};                                        \
+    return TVMFFIStringFromByteArray(&data_array, result);                                       \
     TVM_FFI_SAFE_CALL_END();                                                                     \
   }                                                                                              \
   }
@@ -983,13 +986,16 @@ inline int32_t TypeKeyToIndex(std::string_view type_key) {
  *       This symbol is only exported when TVM_FFI_DLL_EXPORT_INCLUDE_METADATA is defined.
  */
 #if TVM_FFI_DLL_EXPORT_INCLUDE_METADATA
+// Implementation note: we specifically use TVMFFIStringFromByteArray
+// so the returned string metadata is allocated in the libtvm_ffi and long lived.
 #define TVM_FFI_DLL_EXPORT_TYPED_FUNC_DOC(ExportName, DocString)                            \
   extern "C" {                                                                              \
   TVM_FFI_DLL_EXPORT int __tvm_ffi__doc_##ExportName(void* self, const TVMFFIAny* args,     \
                                                      int32_t num_args, TVMFFIAny* result) { \
     TVM_FFI_SAFE_CALL_BEGIN();                                                              \
-    ::tvm::ffi::String str(DocString);                                                      \
-    ::tvm::ffi::TypeTraits<::tvm::ffi::String>::MoveToAny(std::move(str), result);          \
+    std::string_view data(DocString);                                                       \
+    TVMFFIByteArray data_array{data.data(), data.size()};                                   \
+    return TVMFFIStringFromByteArray(&data_array, result);                                  \
     TVM_FFI_SAFE_CALL_END();                                                                \
   }                                                                                         \
   }
