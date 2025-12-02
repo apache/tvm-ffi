@@ -17,6 +17,7 @@
 
 cmake_minimum_required(VERSION 3.20)
 project(embedded_cubin_example LANGUAGES CXX CUDA)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Prefer virtualenv when searching for python
 set(Python_FIND_VIRTUALENV FIRST) # cmake-lint: disable=C0103
@@ -37,11 +38,9 @@ find_package(tvm_ffi CONFIG REQUIRED)
 # Find CUDA toolkit
 find_package(CUDAToolkit REQUIRED)
 
-# [cmake_example.begin] Step 1: Compile kernel.cu to CUBIN using tvm_ffi_generate_cubin utility Use
-# -arch=native to automatically detect the GPU architecture
-tvm_ffi_generate_cubin(
-  OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/kernel.cubin SOURCE src/kernel.cu ARCH native
-)
+# [cmake_example.begin] Step 1: Compile kernel.cu to CUBIN using add_tvm_ffi_cubin utility
+set(CMAKE_CUDA_ARCHITECTURES 75;80;86;89;90;100;120)
+add_tvm_ffi_fatbin(kernel_fatbin CUDA src/kernel.cu)
 
 # Step 2: Embed CUBIN into the object file using tvm_ffi_embed_cubin utility This creates symbols:
 # __tvm_ffi__cubin_env, __tvm_ffi__cubin_env_end (local)
@@ -51,14 +50,14 @@ tvm_ffi_embed_cubin(
   SOURCE
   src/lib_embedded.cc
   CUBIN
-  ${CMAKE_CURRENT_BINARY_DIR}/kernel.cubin
+  $<TARGET_OBJECTS:kernel_fatbin>
   NAME
   env
 )
 
 # Step 3: Build lib_embedded shared library (with embedded CUBIN)
 add_library(lib_embedded SHARED ${CMAKE_CURRENT_BINARY_DIR}/lib_embedded_with_cubin.o)
-target_link_libraries(lib_embedded PRIVATE tvm_ffi_header tvm_ffi_shared CUDA::cudart)
+target_link_libraries(lib_embedded PRIVATE tvm_ffi_header tvm_ffi_shared cuda)
 set_target_properties(
   lib_embedded
   PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/"

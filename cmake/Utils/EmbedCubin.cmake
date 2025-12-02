@@ -15,81 +15,55 @@
 # specific language governing permissions and limitations
 # under the License.
 
+set(CMAKE_CUDA_RUNTIME_LIBRARY None)
+
 # ~~~
-# tvm_ffi_generate_cubin(
-#   OUTPUT <output_cubin_file>
-#   SOURCE <cuda_source_file>
-#   [ARCH <architecture>]
-#   [OPTIONS <extra_nvcc_options>...]
-#   [DEPENDS <additional_dependencies>...]
-# )
+# add_tvm_ffi_cubin(<target_name> CUDA <source_files>...)
 #
-# Compiles a CUDA source file to CUBIN format using nvcc.
+# Creates an object library that compiles CUDA sources to CUBIN format.
+# This function uses CMake's native CUDA support and respects CMAKE_CUDA_ARCHITECTURES.
 #
 # Parameters:
-#   OUTPUT: Path to the output CUBIN file (e.g., kernel.cubin)
-#   SOURCE: Path to the CUDA source file (e.g., kernel.cu)
-#   ARCH: Target GPU architecture (default: native for auto-detection)
-#         Examples: sm_75, sm_80, sm_86, compute_80, native
-#   OPTIONS: Additional nvcc compiler options (e.g., -O3, --use_fast_math)
-#   DEPENDS: Optional additional dependencies
-#
-# The function will:
-#   1. Find the CUDA compiler (nvcc)
-#   2. Compile the SOURCE to CUBIN with specified architecture and options
-#   3. Create the output CUBIN file
+#   target_name: Name of the object library target
+#   CUDA: List of CUDA source files
 #
 # Example:
-#   tvm_ffi_generate_cubin(
-#     OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/kernel.cubin
-#     SOURCE src/kernel.cu
-#     ARCH native
-#     OPTIONS -O3 --use_fast_math
-#   )
+#   add_tvm_ffi_cubin(my_kernel_cubin CUDA kernel.cu)
 # ~~~
-
-# cmake-lint: disable=C0111,C0103
-function (tvm_ffi_generate_cubin)
-  # Parse arguments
-  set(options "")
-  set(oneValueArgs OUTPUT SOURCE ARCH)
-  set(multiValueArgs OPTIONS DEPENDS)
-  cmake_parse_arguments(ARG "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
-
-  # Validate required arguments
-  if (NOT ARG_OUTPUT)
-    message(FATAL_ERROR "tvm_ffi_generate_cubin: OUTPUT is required")
-  endif ()
-  if (NOT ARG_SOURCE)
-    message(FATAL_ERROR "tvm_ffi_generate_cubin: SOURCE is required")
+function (add_tvm_ffi_cubin target_name)
+  cmake_parse_arguments(ARG "" "" "CUDA" ${ARGN})
+  if (NOT ARG_CUDA)
+    message(FATAL_ERROR "add_tvm_ffi_cubin: CUDA sources are required")
   endif ()
 
-  # Default architecture to native if not specified
-  if (NOT ARG_ARCH)
-    set(ARG_ARCH "native")
+  add_library(${target_name} OBJECT ${ARG_CUDA})
+
+  set_target_properties(${target_name} PROPERTIES POSITION_INDEPENDENT_CODE ON)
+  target_compile_options(${target_name} PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--cubin>)
+endfunction ()
+
+# ~~~
+# add_tvm_ffi_fatbin(<target_name> CUDA <source_files>...)
+#
+# Creates an object library that compiles CUDA sources to FATBIN format.
+# This function uses CMake's native CUDA support and respects CMAKE_CUDA_ARCHITECTURES.
+#
+# Parameters:
+#   target_name: Name of the object library target
+#   CUDA: List of CUDA source files
+#
+# Example:
+#   add_tvm_ffi_fatbin(my_kernel_fatbin CUDA kernel.cu)
+# ~~~
+function (add_tvm_ffi_fatbin target_name)
+  cmake_parse_arguments(ARG "" "" "CUDA" ${ARGN})
+  if (NOT ARG_CUDA)
+    message(FATAL_ERROR "add_tvm_ffi_fatbin: CUDA sources are required")
   endif ()
 
-  # Ensure CUDA compiler is available
-  if (NOT CMAKE_CUDA_COMPILER)
-    message(
-      FATAL_ERROR
-        "tvm_ffi_generate_cubin: CMAKE_CUDA_COMPILER not found. Enable CUDA language in project()."
-    )
-  endif ()
-
-  # Get absolute paths
-  get_filename_component(ARG_SOURCE_ABS "${ARG_SOURCE}" ABSOLUTE)
-  get_filename_component(ARG_OUTPUT_ABS "${ARG_OUTPUT}" ABSOLUTE)
-
-  # Build nvcc command
-  add_custom_command(
-    OUTPUT "${ARG_OUTPUT_ABS}"
-    COMMAND ${CMAKE_CUDA_COMPILER} --cubin -arch=${ARG_ARCH} ${ARG_OPTIONS} "${ARG_SOURCE_ABS}" -o
-            "${ARG_OUTPUT_ABS}"
-    DEPENDS "${ARG_SOURCE_ABS}" ${ARG_DEPENDS}
-    COMMENT "Compiling ${ARG_SOURCE} to CUBIN (arch: ${ARG_ARCH})"
-    VERBATIM
-  )
+  add_library(${target_name} OBJECT ${ARG_CUDA})
+  set_target_properties(${target_name} PROPERTIES POSITION_INDEPENDENT_CODE ON)
+  target_compile_options(${target_name} PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--fatbin>)
 endfunction ()
 
 # ~~~
