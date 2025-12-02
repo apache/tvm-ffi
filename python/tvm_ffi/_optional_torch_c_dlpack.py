@@ -116,7 +116,7 @@ def load_torch_c_dlpack_extension() -> Any:  # noqa: PLR0912, PLR0915
         libname = f"libtorch_c_dlpack_addon_torch{major}{minor}-{device}{suffix}"
         lib_path = addon_output_dir / libname
         if not lib_path.exists():
-            logger.info("JIT-compiling torch-c-dlpack-ext to cache...")
+            logger.debug("JIT-compiling torch-c-dlpack-ext to cache...")
             build_script_path = (
                 Path(__file__).parent / "utils" / "_build_optional_torch_c_dlpack.py"
             )
