@@ -105,7 +105,7 @@ cdef inline int _from_dlpack_versioned(
 
 
 cdef inline int _from_dlpack_exchange_api(
-    object ext_tensor, DLPackExchangeAPI* exchange_api, int require_alignment,
+    object ext_tensor, const DLPackExchangeAPI* exchange_api, int require_alignment,
     int require_contiguous, TVMFFIObjectHandle* out
 ) except -1:
     cdef DLManagedTensorVersioned* temp_managed_tensor
@@ -131,12 +131,14 @@ cdef inline int _from_dlpack_universal(
     # as of most frameworks do not yet support v1.1
     # move to false as most frameworks get upgraded.
     cdef int favor_legacy_dlpack = True
+    cdef const DLPackExchangeAPI* exchange_api = NULL
 
     if hasattr(ext_tensor, "__c_dlpack_exchange_api__"):
         try:
+            _get_dlpack_exchange_api(ext_tensor.__c_dlpack_exchange_api__, &exchange_api)
             return _from_dlpack_exchange_api(
                 ext_tensor,
-                <DLPackExchangeAPI*><long long>(ext_tensor.__c_dlpack_exchange_api__),
+                exchange_api,
                 require_alignment,
                 require_contiguous,
                 out
