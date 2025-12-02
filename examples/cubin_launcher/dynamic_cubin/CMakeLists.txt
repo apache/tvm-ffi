@@ -37,16 +37,15 @@ find_package(tvm_ffi CONFIG REQUIRED)
 # Find CUDA toolkit
 find_package(CUDAToolkit REQUIRED)
 
-# Step 1: Compile kernel.cu to CUBIN using tvm_ffi_generate_cubin utility Use -arch=native to
-# automatically detect the GPU architecture
-tvm_ffi_generate_cubin(
-  OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/kernel.cubin SOURCE src/kernel.cu ARCH native
-)
+# [cmake_example.begin] Step 1: Compile kernel.cu to CUBIN using add_tvm_ffi_cubin utility Use
+# CMAKE_CUDA_ARCHITECTURES=native to automatically detect the GPU architecture
+set(CMAKE_CUDA_ARCHITECTURES native)
+add_tvm_ffi_cubin(kernel_cubin CUDA src/kernel.cu)
 
 # Create a target that depends on the CUBIN
 add_custom_target(
   generate_cubin ALL
-  DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/kernel.cubin
+  DEPENDS kernel_cubin
   COMMENT "Generating CUBIN file"
 )
 
