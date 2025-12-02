@@ -28,7 +28,7 @@ try:
 
     # Import tvm_ffi to load the DLPack exchange API extension
     # This sets torch.Tensor.__c_dlpack_exchange_api__
-    import tvm_ffi  # noqa: F401
+    import tvm_ffi
     from torch.utils import cpp_extension  # type: ignore
     from tvm_ffi import libinfo
 except ImportError:
@@ -220,6 +220,15 @@ def test_dlpack_exchange_api() -> None:
 
     # Run the comprehensive test
     mod.test_dlpack_api(tensor, api_ptr, torch.cuda.is_available())
+
+
+@pytest.mark.skipif(not _has_dlpack_api, reason="PyTorch DLPack Exchange API not available")
+def test_from_dlpack_torch() -> None:
+    # Covers from_dlpack to use fallback fastpath
+    tensor = torch.arange(24, dtype=torch.float32).reshape(2, 3, 4)
+    tensor_from_dlpack = tvm_ffi.from_dlpack(tensor)
+    assert tensor_from_dlpack.shape == tensor.shape
+    assert tensor_from_dlpack.dtype == tvm_ffi.float32
 
 
 if __name__ == "__main__":
