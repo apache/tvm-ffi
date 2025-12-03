@@ -234,10 +234,9 @@ def _generate_ninja_build(  # noqa: PLR0915, PLR0912
 ) -> str:
     """Generate the content of build.ninja for building the module."""
     default_include_paths = [find_include_path(), find_dlpack_include_path()]
-
-    tvm_ffi_lib = find_libtvm_ffi()
-    tvm_ffi_lib_path = str(Path(tvm_ffi_lib).parent)
-    tvm_ffi_lib_name = Path(tvm_ffi_lib).stem
+    tvm_ffi_lib = Path(find_libtvm_ffi())
+    tvm_ffi_lib_path = str(tvm_ffi_lib.parent)
+    tvm_ffi_lib_name = tvm_ffi_lib.stem
     if IS_WINDOWS:
         default_cflags = [
             "/std:c++17",

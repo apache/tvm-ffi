@@ -30,11 +30,13 @@ try:
 except ImportError:
     pass
 
-# base always go first to load the libtvm_ffi
-from . import base
+# Always load base libtvm_ffi before any other imports
 from . import libinfo
 
-# package init part
+LIB = libinfo.load_lib_ctypes("apache-tvm-ffi", "tvm_ffi", "RTLD_GLOBAL")
+
+
+# Enable package initialization
 from .registry import (
     register_object,
     register_global_func,
@@ -90,6 +92,7 @@ except ImportError:
     __version_tuple__ = (0, 0, 0, "dev0", "7d34eb8ab.d20250913")
 
 __all__ = [
+    "LIB",
     "Array",
     "DLDeviceType",
     "Device",
