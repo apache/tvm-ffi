@@ -39,7 +39,7 @@
 #include <cstring>
 
 // cudaKernelSetAttributeForDevice needs cuda >= 12.8
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ < 1280
+#if !defined(CUDART_VERSION) || CUDART_VERSION < 12080
 #error "file not supported for this cuda version"
 #endif
 
