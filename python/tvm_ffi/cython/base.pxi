@@ -364,10 +364,18 @@ cdef extern from "tvm_ffi_python_helpers.h":
         int* c_api_ret_code
     ) except -1
 
+    int TVMFFIPySetArgumentGenericDispatcher(
+        TVMFFIPyArgSetterFactory setter_factory,
+        TVMFFIPyCallContext* ctx,
+        PyObject* py_arg,
+        TVMFFIAny* out
+    ) except -1
+
     size_t TVMFFIPyGetDispatchMapSize() noexcept
 
     void TVMFFIPyPushTempFFIObject(TVMFFIPyCallContext* ctx, TVMFFIObjectHandle arg) noexcept
     void TVMFFIPyPushTempPyObject(TVMFFIPyCallContext* ctx, PyObject* arg) noexcept
+    void TVMFFIPyPushExtraTempPyObject(TVMFFIPyCallContext* ctx, PyObject* arg)
     # the predefined setters for common POD types
     int TVMFFIPyArgSetterFloat_(TVMFFIPyArgSetter*, TVMFFIPyCallContext*, PyObject* arg, TVMFFIAny* out) except -1
     int TVMFFIPyArgSetterInt_(TVMFFIPyArgSetter*, TVMFFIPyCallContext*, PyObject* arg, TVMFFIAny* out) except -1
