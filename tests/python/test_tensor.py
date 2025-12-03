@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 from types import ModuleType
+from typing import Any, NamedTuple
 
 import pytest
 
@@ -112,6 +113,28 @@ def test_tvm_ffi_tensor_compatible() -> None:
     fecho = tvm_ffi.get_global_func("testing.echo")
     z = fecho(y)
     assert z.__chandle__() == x.__chandle__()
+
+    class MyNamedTuple(NamedTuple):
+        a: MyTensor
+        b: int
+
+    args = MyNamedTuple(a=y, b=1)
+    z = fecho(args)
+    assert z[0].__chandle__() == x.__chandle__()
+    assert z[1] == 1
+
+    class MyCustom:
+        def __init__(self, a: MyTensor, b: int) -> None:
+            self.a = a
+            self.b = b
+
+        def __tvm_ffi_value__(self) -> Any:
+            """Implement __tvm_ffi_value__ protocol."""
+            return (self.a, self.b)
+
+    z = fecho(MyCustom(a=y, b=2))
+    assert z[0].__chandle__() == x.__chandle__()
+    assert z[1] == 2
 
 
 @pytest.mark.skipif(

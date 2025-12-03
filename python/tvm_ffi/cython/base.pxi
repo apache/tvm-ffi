@@ -364,6 +364,13 @@ cdef extern from "tvm_ffi_python_helpers.h":
         int* c_api_ret_code
     ) except -1
 
+    int TVMFFIPySetArgumentFFIValueProtocol(
+        TVMFFIPyArgSetterFactory setter_factory,
+        TVMFFIPyCallContext* ctx,
+        PyObject* py_arg,
+        TVMFFIAny* out
+    ) except -1
+
     size_t TVMFFIPyGetDispatchMapSize() noexcept
 
     void TVMFFIPyPushTempFFIObject(TVMFFIPyCallContext* ctx, TVMFFIObjectHandle arg) noexcept

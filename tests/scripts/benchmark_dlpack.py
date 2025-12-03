@@ -33,7 +33,7 @@ Summary of some takeaways:
 from __future__ import annotations
 
 import time
-from typing import Any, Callable
+from typing import Any, Callable, NamedTuple
 
 import numpy as np
 import torch
@@ -50,6 +50,14 @@ class TestFFITensor:
     def __tvm_ffi_object__(self) -> tvm_ffi.Tensor:
         """Implement __tvm_ffi_object__ protocol."""
         return self._tensor
+
+
+class TestNamedTuple(NamedTuple):
+    """Test FFI NamedTuple."""
+
+    x: torch.Tensor
+    y: torch.Tensor
+    z: torch.Tensor
 
 
 def print_speed(name: str, speed: float) -> None:
@@ -231,6 +239,20 @@ def bench_tvm_ffi_nop_autodlpack(name: str, x: Any, y: Any, z: Any, repeat: int)
     print_speed(name, speed)
 
 
+def bench_tvm_ffi_nop_autodlpack_tuple(name: str, args: TestNamedTuple, repeat: int) -> None:
+    """Measures overhead of running dlpack via auto convert by directly
+    take torch.Tensor as inputs.
+    """
+    nop = tvm_ffi.get_global_func("testing.nop")
+    nop(args)
+    start = time.time()
+    for i in range(repeat):
+        nop(args)
+    end = time.time()
+    speed = (end - start) / repeat
+    print_speed(name, speed)
+
+
 def tvm_ffi_nop_autodlpack_from_torch(
     repeat: int, device: str = "cpu", stream: bool = False
 ) -> None:
@@ -276,18 +298,16 @@ def tvm_ffi_nop_autodlpack_from_dltensor_test_wrapper(repeat: int, device: str) 
     )
 
 
-def tvm_ffi_nop_autodlpack_from_test_ffi_tensor(repeat: int, device: str) -> None:
+def tvm_ffi_nop_autodlpack_from_test_tensor_namedtuple(repeat: int, device: str) -> None:
     """Measures overhead of running dlpack via auto convert by directly
     take test wrapper as inputs. This effectively measure DLPack exchange in tvm ffi.
     """
-    x = tvm_ffi.from_dlpack(torch.arange(1, device=device))
-    y = tvm_ffi.from_dlpack(torch.arange(1, device=device))
-    z = tvm_ffi.from_dlpack(torch.arange(1, device=device))
-    x = TestFFITensor(x)
-    y = TestFFITensor(y)
-    z = TestFFITensor(z)
-    bench_tvm_ffi_nop_autodlpack(
-        f"tvm_ffi.nop.autodlpack(TestFFITensor[{device}])", x, y, z, repeat
+    x = torch.arange(1, device=device)
+    y = torch.arange(1, device=device)
+    z = torch.arange(1, device=device)
+    args = TestNamedTuple(x=x, y=y, z=z)
+    bench_tvm_ffi_nop_autodlpack_tuple(
+        f"tvm_ffi.nop.autodlpack(NamedTuple[{device}])", args, repeat
     )
 
 
@@ -414,8 +434,8 @@ def main() -> None:  # noqa: PLR0915
     tvm_ffi_nop_autodlpack_from_numpy(repeat)
     tvm_ffi_nop_autodlpack_from_dltensor_test_wrapper(repeat, "cpu")
     tvm_ffi_nop_autodlpack_from_dltensor_test_wrapper(repeat, "cuda")
-    tvm_ffi_nop_autodlpack_from_test_ffi_tensor(repeat, "cpu")
-    tvm_ffi_nop_autodlpack_from_test_ffi_tensor(repeat, "cuda")
+    tvm_ffi_nop_autodlpack_from_test_tensor_namedtuple(repeat, "cpu")
+    tvm_ffi_nop_autodlpack_from_test_tensor_namedtuple(repeat, "cuda")
     tvm_ffi_nop(repeat)
     print("-------------------------------")
     print("Benchmark x.__dlpack__ overhead")

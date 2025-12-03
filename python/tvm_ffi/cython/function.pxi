@@ -674,6 +674,19 @@ cdef int TVMFFIPyArgSetterFloatProtocol_(
     return 0
 
 
+cdef int TVMFFIPyArgSetterFFIValueProtocol_(
+    TVMFFIPyArgSetter* handle, TVMFFIPyCallContext* ctx,
+    PyObject* py_arg, TVMFFIAny* out
+) except -1:
+    """Setter for class with __tvm_ffi_value__() method"""
+    cdef object arg = <object>py_arg
+    cdef object ffi_value_py_obj = arg.__tvm_ffi_value__()
+    cdef PyObject* ffi_value_py_obj_ptr = <PyObject*>ffi_value_py_obj
+    return TVMFFIPySetArgumentFFIValueProtocol(
+        TVMFFIPyArgSetterFactory_, ctx, ffi_value_py_obj_ptr, out
+    )
+
+
 cdef _DISPATCH_TYPE_KEEP_ALIVE = set()
 cdef _DISPATCH_TYPE_KEEP_ALIVE_LOCK = threading.Lock()
 
@@ -823,6 +836,9 @@ cdef int TVMFFIPyArgSetterFactory_(PyObject* value, TVMFFIPyArgSetter* out) exce
         return 0
     if hasattr(arg_class, "__tvm_ffi_float__"):
         out.func = TVMFFIPyArgSetterFloatProtocol_
+        return 0
+    if hasattr(arg_class, "__tvm_ffi_value__"):
+        out.func = TVMFFIPyArgSetterFFIValueProtocol_
         return 0
     if isinstance(arg, Exception):
         out.func = TVMFFIPyArgSetterException_

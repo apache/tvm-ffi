@@ -68,6 +68,8 @@ struct TVMFFIPyCallContext {
   int num_temp_py_objects = 0;
   /*! \brief the DLPack exchange API, if any */
   const DLPackExchangeAPI* c_dlpack_exchange_api{nullptr};
+  /*! \brief the nestedness of __tvm_ffi_value__ protocol */
+  int nested_tvm_ffi_value_count = 0;
 };
 
 /*! \brief Argument setter for a given python argument. */
@@ -380,8 +382,8 @@ class TVMFFIPyCallManager {
     }
   }
 
-  int PyObjectToFFIAny(TVMFFIPyArgSetterFactory setter_factory, PyObject* py_arg, TVMFFIAny* out,
-                       int* c_api_ret_code) {
+  TVM_FFI_INLINE int PyObjectToFFIAny(TVMFFIPyArgSetterFactory setter_factory, PyObject* py_arg,
+                                      TVMFFIAny* out, int* c_api_ret_code) {
     try {
       CallStack ctx(this, 1);
       TVMFFIAny* c_arg = ctx.packed_args;
@@ -394,6 +396,49 @@ class TVMFFIPyCallManager {
       return -1;
     }
   }
+
+  /*!
+   * \brief Set an py_arg to out using the __tvm_ffi_value__ protocol.
+   * \param setter_factory The factory function to create the setter
+   * \param ctx The call context
+   * \param py_arg The python argument to be set
+   * \param out The output argument
+   * \return 0 on success, -1 on failure
+   */
+  TVM_FFI_INLINE int SetArgumentFFIValueProtocol(TVMFFIPyArgSetterFactory setter_factory,
+                                                 TVMFFIPyCallContext* ctx, PyObject* py_arg,
+                                                 TVMFFIAny* out) {
+    // RAII guard to ensure counter is decremented even if exceptions occur.
+    class NestedFFIValueCounterGuard {
+     public:
+      explicit NestedFFIValueCounterGuard(int* count) : count_(count) { ++(*count_); }
+      ~NestedFFIValueCounterGuard() { --(*count_); }
+
+     private:
+      int* count_;
+    };
+    NestedFFIValueCounterGuard guard(&(ctx->nested_tvm_ffi_value_count));
+
+    int ret_code = SetArgument(setter_factory, ctx, py_arg, out);
+    // retain the static object if the return value only if it is the outermost nested level
+    // NOTE: we still keep the invariance that each ArgSetter can have at most one temporary FFI
+    // object so it ensures that we won't overflow the temporary FFI object stack
+    // The counter mechanism is applied per TVMFFIPyCallContext
+    // so nested call into tuple conversion will be handled in another call context
+    if (ret_code == 0 && ctx->nested_tvm_ffi_value_count == 1 &&
+        out->type_index >= kTVMFFIStaticObjectBegin) {
+      if (TVMFFIObjectIncRef(out->v_ptr) != 0) {
+        PyErr_SetString(PyExc_RuntimeError, "Failed to retain temp object");
+        return -1;
+      }
+      // TVMFFIPyPushTempFFIObject(ctx, out->v_ptr);
+      // push the temporary FFI object to the call context
+      ctx->temp_ffi_objects[ctx->num_temp_ffi_objects++] = out->v_ptr;
+      return 0;
+    }
+    return ret_code;
+  }
+
   /*!
    * \brief Get the size of the dispatch map
    * \return The size of the dispatch map
@@ -401,13 +446,6 @@ class TVMFFIPyCallManager {
   size_t GetDispatchMapSize() const { return dispatch_map_.size(); }
 
  private:
-  TVMFFIPyCallManager() {
-    static constexpr size_t kDefaultDispatchCapacity = 32;
-    // keep it 4K as default stack size so it is page aligned
-    static constexpr size_t kDefaultStackSize = 4096;
-    dispatch_map_.reserve(kDefaultDispatchCapacity);
-    temp_stack_.resize(kDefaultStackSize / sizeof(TVMFFIAny));
-  }
   /*!
    * \brief Set an py_arg to out.
    * \param setter_factory The factory function to create the setter
@@ -443,6 +481,15 @@ class TVMFFIPyCallManager {
     }
     return 0;
   }
+
+  TVMFFIPyCallManager() {
+    static constexpr size_t kDefaultDispatchCapacity = 32;
+    // keep it 4K as default stack size so it is page aligned
+    static constexpr size_t kDefaultStackSize = 4096;
+    dispatch_map_.reserve(kDefaultDispatchCapacity);
+    temp_stack_.resize(kDefaultStackSize / sizeof(TVMFFIAny));
+  }
+
   // internal dispacher
   std::unordered_map<PyTypeObject*, TVMFFIPyArgSetter> dispatch_map_;
   // temp call stack
@@ -512,6 +559,22 @@ TVM_FFI_INLINE int TVMFFIPyCallFieldSetter(TVMFFIPyArgSetterFactory setter_facto
                                            PyObject* py_arg, int* c_api_ret_code) {
   return TVMFFIPyCallManager::ThreadLocal()->SetField(setter_factory, field_setter, field_ptr,
                                                       py_arg, c_api_ret_code);
+}
+
+/*!
+ * \brief Set an python argument to a FFI Any using the generic dispatcher in call manager
+ * \param setter_factory The factory function to create the setter
+ * \param ctx The call context
+ * \param py_arg_tvm_ffi_value The python argument to be set using the __tvm_ffi_value__ protocol
+ * \param out The output argument
+ * \return 0 on success, nonzero on failure
+ */
+TVM_FFI_INLINE int TVMFFIPySetArgumentFFIValueProtocol(TVMFFIPyArgSetterFactory setter_factory,
+                                                       TVMFFIPyCallContext* ctx,
+                                                       PyObject* py_arg_tvm_ffi_value,
+                                                       TVMFFIAny* out) {
+  return TVMFFIPyCallManager::ThreadLocal()->SetArgumentFFIValueProtocol(setter_factory, ctx,
+                                                                         py_arg_tvm_ffi_value, out);
 }
 
 /*!
