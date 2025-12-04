@@ -39,22 +39,31 @@ find_package(tvm_ffi CONFIG REQUIRED)
 add_library(test_funcs_obj OBJECT sources/test_funcs.cc)
 target_link_libraries(test_funcs_obj PRIVATE tvm_ffi_header)
 target_compile_options(test_funcs_obj PRIVATE -fPIC -O2)
-install(FILES $<TARGET_OBJECTS:test_funcs_obj>
-        DESTINATION ${CMAKE_CURRENT_SOURCE_DIR} RENAME test_funcs.o)
+install(
+  FILES $<TARGET_OBJECTS:test_funcs_obj>
+  DESTINATION ${CMAKE_CURRENT_SOURCE_DIR}
+  RENAME test_funcs.o
+)
 
 # Create object library for second set of test functions
 add_library(test_funcs2_obj OBJECT sources/test_funcs2.cc)
 target_link_libraries(test_funcs2_obj PRIVATE tvm_ffi_header)
 target_compile_options(test_funcs2_obj PRIVATE -fPIC -O2)
-install(FILES $<TARGET_OBJECTS:test_funcs2_obj>
-        DESTINATION ${CMAKE_CURRENT_SOURCE_DIR} RENAME test_funcs2.o)
+install(
+  FILES $<TARGET_OBJECTS:test_funcs2_obj>
+  DESTINATION ${CMAKE_CURRENT_SOURCE_DIR}
+  RENAME test_funcs2.o
+)
 
 # Create object library for conflicting test functions
 add_library(test_funcs_conflict_obj OBJECT sources/test_funcs_conflict.cc)
 target_link_libraries(test_funcs_conflict_obj PRIVATE tvm_ffi_header)
 target_compile_options(test_funcs_conflict_obj PRIVATE -fPIC -O2)
-install(FILES $<TARGET_OBJECTS:test_funcs_conflict_obj>
-        DESTINATION ${CMAKE_CURRENT_SOURCE_DIR} RENAME test_funcs_conflict.o)
+install(
+  FILES $<TARGET_OBJECTS:test_funcs_conflict_obj>
+  DESTINATION ${CMAKE_CURRENT_SOURCE_DIR}
+  RENAME test_funcs_conflict.o
+)
 
 
 find_package(CUDAToolkit)
@@ -65,6 +74,9 @@ if(CUDAToolkit_FOUND)
   add_library(test_funcs_cuda_obj OBJECT sources/test_funcs_cuda.cu)
   target_link_libraries(test_funcs_cuda_obj PRIVATE tvm_ffi_header)
   target_compile_options(test_funcs_cuda_obj PRIVATE -fPIC -O2)
-  install(FILES $<TARGET_OBJECTS:test_funcs_cuda_obj>
-    DESTINATION ${CMAKE_CURRENT_SOURCE_DIR} RENAME test_funcs_cuda.o)
+  install(
+    FILES $<TARGET_OBJECTS:test_funcs_cuda_obj>
+    DESTINATION ${CMAKE_CURRENT_SOURCE_DIR}
+    RENAME test_funcs_cuda.o
+  )
 endif()
