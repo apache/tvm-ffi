@@ -49,7 +49,7 @@ namespace details {
 
 struct OverloadBase {
  public:
-  // Try Call function pointer type, return the fail index
+  // Try Call function pointer type, return true if matched and called
   using FnPtr = bool (*)(OverloadBase*, const AnyView*, int32_t, Any*);
 
   explicit OverloadBase(int32_t num_args, std::optional<std::string> name)
