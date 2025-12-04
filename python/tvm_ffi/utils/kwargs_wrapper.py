@@ -24,7 +24,8 @@ from __future__ import annotations
 
 import functools
 import inspect
-from typing import Any, Callable
+import keyword
+from typing import Any, Callable, Iterable
 
 # Sentinel object for missing arguments
 MISSING = object()
@@ -51,6 +52,10 @@ def _validate_argument_names(names: list[str], arg_type: str) -> None:
             raise TypeError(
                 f"{arg_type} name must be a string, got {type(name).__name__}: {name!r}"
             )
+        if keyword.iskeyword(name):
+            raise ValueError(
+                f"Invalid {arg_type.lower()} name: {name!r} is a Python keyword and cannot be used as a parameter name"
+            )
         if not name.isidentifier():
             raise ValueError(
                 f"Invalid {arg_type.lower()} name: {name!r} is not a valid Python identifier"
@@ -58,61 +63,61 @@ def _validate_argument_names(names: list[str], arg_type: str) -> None:
 
 
 def _validate_wrapper_args(
-    args_names: list[str],
-    args_defaults: tuple,
-    kwargsonly_names: list[str],
-    kwargsonly_defaults: dict[str, Any],
+    arg_names: list[str],
+    arg_defaults: tuple,
+    kwonly_names: list[str],
+    kwonly_defaults: dict[str, Any],
     reserved_names: set[str],
 ) -> None:
     """Validate all input arguments for make_kwargs_wrapper.
 
     Parameters
     ----------
-    args_names
+    arg_names
         List of positional argument names.
-    args_defaults
+    arg_defaults
         Tuple of default values for positional arguments.
-    kwargsonly_names
+    kwonly_names
         List of keyword-only argument names.
-    kwargsonly_defaults
+    kwonly_defaults
         Dictionary of default values for keyword-only arguments.
     reserved_names
         Set of reserved internal names that cannot be used as argument names.
 
     """
-    # Validate args_names are valid Python identifiers and unique
-    _validate_argument_names(args_names, "Argument")
+    # Validate arg_names are valid Python identifiers and unique
+    _validate_argument_names(arg_names, "Argument")
 
-    # Validate args_defaults is a tuple
-    if not isinstance(args_defaults, tuple):
-        raise TypeError(f"args_defaults must be a tuple, got {type(args_defaults).__name__}")
+    # Validate arg_defaults is a tuple
+    if not isinstance(arg_defaults, tuple):
+        raise TypeError(f"arg_defaults must be a tuple, got {type(arg_defaults).__name__}")
 
-    # Validate args_defaults length doesn't exceed args_names length
-    if len(args_defaults) > len(args_names):
+    # Validate arg_defaults length doesn't exceed arg_names length
+    if len(arg_defaults) > len(arg_names):
         raise ValueError(
-            f"args_defaults has {len(args_defaults)} values but only "
-            f"{len(args_names)} positional arguments"
+            f"arg_defaults has {len(arg_defaults)} values but only "
+            f"{len(arg_names)} positional arguments"
         )
 
-    # Validate kwargsonly_names are valid identifiers and unique
-    _validate_argument_names(kwargsonly_names, "Keyword-only argument")
+    # Validate kwonly_names are valid identifiers and unique
+    _validate_argument_names(kwonly_names, "Keyword-only argument")
 
-    # Validate kwargsonly_defaults keys are in kwargsonly_names
-    kwargsonly_names_set = set(kwargsonly_names)
-    for key in kwargsonly_defaults:
-        if key not in kwargsonly_names_set:
+    # Validate kwonly_defaults keys are in kwonly_names
+    kwonly_names_set = set(kwonly_names)
+    for key in kwonly_defaults:
+        if key not in kwonly_names_set:
             raise ValueError(
-                f"Default provided for '{key}' which is not in kwargsonly_names: {kwargsonly_names}"
+                f"Default provided for '{key}' which is not in kwonly_names: {kwonly_names}"
             )
 
     # Validate no overlap between positional and keyword-only arguments
-    args_names_set = set(args_names)
-    overlap = args_names_set & kwargsonly_names_set
+    arg_names_set = set(arg_names)
+    overlap = arg_names_set & kwonly_names_set
     if overlap:
         raise ValueError(f"Arguments cannot be both positional and keyword-only: {overlap}")
 
     # Validate no conflict between user argument names and internal names
-    all_user_names = args_names_set | kwargsonly_names_set
+    all_user_names = arg_names_set | kwonly_names_set
     conflicts = all_user_names & reserved_names
     if conflicts:
         raise ValueError(
@@ -123,11 +128,11 @@ def _validate_wrapper_args(
 
 def make_kwargs_wrapper(
     target_func: Callable,
-    args_names: list[str],
-    args_defaults: tuple = (),
-    kwargsonly_names: list[str] | None = None,
-    kwargsonly_defaults: dict[str, Any] | None = None,
-    prototype_func: Callable | None = None,
+    arg_names: list[str],
+    arg_defaults: tuple = (),
+    kwonly_names: list[str] | None = None,
+    kwonly_defaults: dict[str, Any] | None = None,
+    prototype: Callable | None = None,
 ) -> Callable:
     """Create a wrapper with kwargs support for a function that only accepts positional arguments.
 
@@ -138,27 +143,27 @@ def make_kwargs_wrapper(
     target_func
         The underlying function to be called by the wrapper. This function must only
         accept positional arguments.
-    args_names
+    arg_names
         A list of ALL positional argument names in order. These define the positional
-        parameters that the wrapper will accept. Must not overlap with kwargsonly_names.
-    args_defaults
-        A tuple of default values for positional arguments, right-aligned to args_names
+        parameters that the wrapper will accept. Must not overlap with kwonly_names.
+    arg_defaults
+        A tuple of default values for positional arguments, right-aligned to arg_names
         (matching Python's __defaults__ behavior). The length of this tuple determines
         how many trailing arguments have defaults.
-        Example: (10, 20) with args_names=['a', 'b', 'c', 'd'] means c=10, d=20.
+        Example: (10, 20) with arg_names=['a', 'b', 'c', 'd'] means c=10, d=20.
         Empty tuple () means no defaults.
-    kwargsonly_names
+    kwonly_names
         A list of keyword-only argument names. These arguments can only be passed by name,
         not positionally, and appear after a '*' separator in the signature. Can include both
-        required and optional keyword-only arguments. Must not overlap with args_names.
+        required and optional keyword-only arguments. Must not overlap with arg_names.
         Example: ['debug', 'timeout'] creates wrapper(..., *, debug, timeout).
-    kwargsonly_defaults
+    kwonly_defaults
         Optional dictionary of default values for keyword-only arguments (matching Python's
-        __kwdefaults__ behavior). Keys must be a subset of kwargsonly_names. Keyword-only
+        __kwdefaults__ behavior). Keys must be a subset of kwonly_names. Keyword-only
         arguments not in this dict are required.
-        Example: {'timeout': 30} with kwargsonly_names=['debug', 'timeout'] means 'debug'
+        Example: {'timeout': 30} with kwonly_names=['debug', 'timeout'] means 'debug'
         is required and 'timeout' is optional.
-    prototype_func
+    prototype
         Optional prototype function to copy metadata (__name__, __doc__, __module__,
         __qualname__, __annotations__) from. If None, no metadata is copied.
 
@@ -175,26 +180,24 @@ def make_kwargs_wrapper(
 
     """
     # Normalize inputs
-    if kwargsonly_names is None:
-        kwargsonly_names = []
-    if kwargsonly_defaults is None:
-        kwargsonly_defaults = {}
+    if kwonly_names is None:
+        kwonly_names = []
+    if kwonly_defaults is None:
+        kwonly_defaults = {}
 
     # Internal variable names used in generated code to avoid user argument conflicts
     _INTERNAL_TARGET_FUNC = "__i_target_func"
     _INTERNAL_MISSING = "__i_MISSING"
-    _INTERNAL_DEFAULTS_DICT = "__i_args_defaults"
+    _INTERNAL_DEFAULTS_DICT = "__i_arg_defaults"
     _INTERNAL_NAMES = {_INTERNAL_TARGET_FUNC, _INTERNAL_MISSING, _INTERNAL_DEFAULTS_DICT}
 
     # Validate all input arguments
-    _validate_wrapper_args(
-        args_names, args_defaults, kwargsonly_names, kwargsonly_defaults, _INTERNAL_NAMES
-    )
+    _validate_wrapper_args(arg_names, arg_defaults, kwonly_names, kwonly_defaults, _INTERNAL_NAMES)
 
     # Build positional defaults dictionary (right-aligned)
-    # Example: args_names=["a","b","c","d"], args_defaults=(10,20) -> {"c":10, "d":20}
-    args_defaults_dict = (
-        dict(zip(args_names[-len(args_defaults) :], args_defaults)) if args_defaults else {}
+    # Example: arg_names=["a","b","c","d"], arg_defaults=(10,20) -> {"c":10, "d":20}
+    arg_defaults_dict = (
+        dict(zip(arg_names[-len(arg_defaults) :], arg_defaults)) if arg_defaults else {}
     )
 
     # Build wrapper signature and call arguments
@@ -236,19 +239,19 @@ def make_kwargs_wrapper(
             )
 
     # Handle positional arguments
-    for name in args_names:
-        if name in args_defaults_dict:
-            _add_param_with_default(name, args_defaults_dict[name])
+    for name in arg_names:
+        if name in arg_defaults_dict:
+            _add_param_with_default(name, arg_defaults_dict[name])
         else:
             arg_parts.append(name)
             call_parts.append(name)
 
     # Handle keyword-only arguments
-    if kwargsonly_names:
+    if kwonly_names:
         arg_parts.append("*")  # Separator for keyword-only args
-        for name in kwargsonly_names:
-            if name in kwargsonly_defaults:
-                _add_param_with_default(name, kwargsonly_defaults[name])
+        for name in kwonly_names:
+            if name in kwonly_defaults:
+                _add_param_with_default(name, kwonly_defaults[name])
             else:
                 # Required keyword-only arg (no default)
                 arg_parts.append(name)
@@ -276,9 +279,9 @@ def wrapper({arg_list}):
     exec(code_str, exec_globals, namespace)
     new_func = namespace["wrapper"]
 
-    # Copy metadata from prototype_func if provided
-    if prototype_func is not None:
-        functools.update_wrapper(new_func, prototype_func, updated=())
+    # Copy metadata from prototype if provided
+    if prototype is not None:
+        functools.update_wrapper(new_func, prototype, updated=())
 
     return new_func
 
@@ -286,7 +289,8 @@ def wrapper({arg_list}):
 def make_kwargs_wrapper_from_signature(
     target_func: Callable,
     signature: inspect.Signature,
-    prototype_func: Callable | None = None,
+    prototype: Callable | None = None,
+    exclude_arg_names: Iterable[str] | None = None,
 ) -> Callable:
     """Create a wrapper with kwargs support for a function that only accepts positional arguments.
 
@@ -300,9 +304,13 @@ def make_kwargs_wrapper_from_signature(
         The underlying function to be called by the wrapper.
     signature
         An inspect.Signature object describing the desired wrapper signature.
-    prototype_func
+    prototype
         Optional prototype function to copy metadata (__name__, __doc__, __module__,
         __qualname__, __annotations__) from. If None, no metadata is copied.
+    exclude_arg_names
+        Optional iterable of argument names to ignore when extracting parameters from the signature.
+        These arguments will not be included in the generated wrapper. If a name in this iterable
+        does not exist in the signature, it is silently ignored.
 
     Returns
     -------
@@ -314,16 +322,23 @@ def make_kwargs_wrapper_from_signature(
         If the signature contains *args or **kwargs.
 
     """
+    # Normalize exclude_arg_names to a set for efficient lookup
+    skip_set = set(exclude_arg_names) if exclude_arg_names is not None else set()
+
     # Extract positional and keyword-only parameters
-    args_names = []
-    args_defaults_list = []
-    kwargsonly_names = []
-    kwargsonly_defaults = {}
+    arg_names = []
+    arg_defaults_list = []
+    kwonly_names = []
+    kwonly_defaults = {}
 
     # Track when we start seeing defaults for positional args
     has_seen_positional_default = False
 
     for param_name, param in signature.parameters.items():
+        # Skip arguments that are in the skip list
+        if param_name in skip_set:
+            continue
+
         if param.kind == inspect.Parameter.VAR_POSITIONAL:
             raise ValueError("*args not supported in wrapper generation")
         elif param.kind == inspect.Parameter.VAR_KEYWORD:
@@ -332,10 +347,10 @@ def make_kwargs_wrapper_from_signature(
             inspect.Parameter.POSITIONAL_ONLY,
             inspect.Parameter.POSITIONAL_OR_KEYWORD,
         ):
-            args_names.append(param_name)
+            arg_names.append(param_name)
             if param.default is not inspect.Parameter.empty:
                 has_seen_positional_default = True
-                args_defaults_list.append(param.default)
+                arg_defaults_list.append(param.default)
             elif has_seen_positional_default:
                 # Required arg after optional arg (invalid in Python)
                 raise ValueError(
@@ -343,18 +358,18 @@ def make_kwargs_wrapper_from_signature(
                     f"parameters with defaults"
                 )
         elif param.kind == inspect.Parameter.KEYWORD_ONLY:
-            kwargsonly_names.append(param_name)
+            kwonly_names.append(param_name)
             if param.default is not inspect.Parameter.empty:
-                kwargsonly_defaults[param_name] = param.default
+                kwonly_defaults[param_name] = param.default
 
-    # Convert defaults list to tuple (right-aligned to args_names)
-    args_defaults = tuple(args_defaults_list)
+    # Convert defaults list to tuple (right-aligned to arg_names)
+    arg_defaults = tuple(arg_defaults_list)
 
     return make_kwargs_wrapper(
         target_func,
-        args_names,
-        args_defaults,
-        kwargsonly_names,
-        kwargsonly_defaults,
-        prototype_func,
+        arg_names,
+        arg_defaults,
+        kwonly_names,
+        kwonly_defaults,
+        prototype,
     )

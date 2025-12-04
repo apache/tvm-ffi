@@ -40,7 +40,7 @@ def benchmark_kwargs_wrapper(repeat: int = 1000000) -> None:
     z = 3
 
     # Create wrapper with two optional kwargs
-    wrapper = make_kwargs_wrapper(target_func, ["x", "y", "z"], args_defaults=(None, None))
+    wrapper = make_kwargs_wrapper(target_func, ["x", "y", "z"], arg_defaults=(None, None))
 
     # Benchmark 1: Direct call to target function (baseline)
     start = time.time()
