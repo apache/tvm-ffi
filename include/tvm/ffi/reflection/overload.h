@@ -17,7 +17,7 @@
  * under the License.
  */
 /*!
- * \file tvm/ffi/extra/overload.h
+ * \file tvm/ffi/reflection/overload.h
  * \brief Registry of reflection metadata, supporting function overloading.
  */
 #ifndef TVM_FFI_EXTRA_OVERLOAD_H
