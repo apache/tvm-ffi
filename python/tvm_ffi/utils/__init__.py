@@ -16,4 +16,5 @@
 # under the License.
 """Utilities used by the tvm_ffi Python package."""
 
+from . import kwargs_wrapper
 from .lockfile import FileLock
