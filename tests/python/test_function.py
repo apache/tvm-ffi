@@ -383,3 +383,22 @@ def test_integral_float_variants_passing() -> None:
     y = fecho(FloatProtocol(10))
     assert isinstance(y, float)
     assert y == 10
+
+
+def test_function_with_value_protocol() -> None:
+    class ValueProtocol:
+        def __init__(self, value: Any) -> None:
+            self.value = value
+
+        def __tvm_ffi_value__(self) -> Any:
+            return self.value
+
+    fecho = tvm_ffi.get_global_func("testing.echo")
+    assert fecho(ValueProtocol(10)) == 10
+    assert tuple(fecho(ValueProtocol([1, 2, 3]))) == (1, 2, 3)
+    assert tuple(fecho(ValueProtocol([1, 2, ValueProtocol(3)]))) == (1, 2, 3)
+    nested_value_protocol = ValueProtocol(ValueProtocol(ValueProtocol(10)))
+    assert fecho(nested_value_protocol) == 10
+
+    nested_value_protocol = ValueProtocol([ValueProtocol(1), ValueProtocol(2), ValueProtocol(3)])
+    assert tuple(fecho(nested_value_protocol)) == (1, 2, 3)

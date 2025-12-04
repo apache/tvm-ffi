@@ -139,6 +139,9 @@ def test_torch_graph() -> None:
     device_type = device.dlpack_device_type()
     graph = torch.cuda.CUDAGraph()
     stream = torch.cuda.Stream(device_id)
+    x = torch.zeros(1, device="cuda")
     with tvm_ffi.use_torch_stream(torch.cuda.graph(graph, stream=stream)):
         assert torch.cuda.current_stream() == stream
         mod.check_stream(device_type, device_id, stream.cuda_stream)
+        # avoid cuda graph no capture warning
+        x = x + 1

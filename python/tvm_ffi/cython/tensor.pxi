@@ -438,7 +438,7 @@ def _dltensor_test_wrapper_exchange_api_ptr():
 cdef class DLTensorTestWrapper:
     """Wrapper of a Tensor that exposes DLPack protocol, only for testing purpose.
     """
-    __c_dlpack_exchange_api__: int = _dltensor_test_wrapper_exchange_api_ptr()
+    __c_dlpack_exchange_api__ = _dltensor_test_wrapper_exchange_api_ptr()
 
     cdef Tensor tensor
     cdef dict __dict__
