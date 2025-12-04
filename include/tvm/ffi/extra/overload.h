@@ -235,11 +235,11 @@ struct OverloadedFunction : TypedOverload<Callable> {
       if (fptr(overload.get(), args, num_args, rv)) return;
     }
 
-    this->handle_overload_failure(args, num_args);
+    this->HandleOverloadFailure(args, num_args);
   }
 
  private:
-  void handle_overload_failure(const AnyView* args, int32_t num_args) {
+  void HandleOverloadFailure(const AnyView* args, int32_t num_args) {
     std::ostringstream oss;
     int32_t i = 0;
     oss << "Overload #" << i++ << ": ";
