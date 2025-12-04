@@ -36,19 +36,19 @@ def test_basic_wrapper() -> None:
     assert wrapper(1, b=2, c=3) == 6
 
     # Single default argument
-    wrapper = make_kwargs_wrapper(target, ["a", "b", "c"], args_defaults=(10,))
+    wrapper = make_kwargs_wrapper(target, ["a", "b", "c"], arg_defaults=(10,))
     assert wrapper(1, 2) == 13  # c=10
     assert wrapper(1, 2, 3) == 6  # c=3 explicit
     assert wrapper(1, 2, c=5) == 8  # c=5 via keyword
 
     # Multiple defaults (right-aligned)
-    wrapper = make_kwargs_wrapper(target, ["a", "b", "c"], args_defaults=(20, 30))
+    wrapper = make_kwargs_wrapper(target, ["a", "b", "c"], arg_defaults=(20, 30))
     assert wrapper(1) == 51  # b=20, c=30
     assert wrapper(1, 2) == 33  # b=2, c=30
     assert wrapper(1, 2, 3) == 6  # all explicit
 
     # All defaults
-    wrapper = make_kwargs_wrapper(target, ["a", "b", "c"], args_defaults=(1, 2, 3))
+    wrapper = make_kwargs_wrapper(target, ["a", "b", "c"], arg_defaults=(1, 2, 3))
     assert wrapper() == 6
     assert wrapper(10) == 15
     assert wrapper(10, 20, 30) == 60
@@ -62,7 +62,7 @@ def test_basic_wrapper() -> None:
             return self.base + a + b
 
     calc = Calculator(100)
-    wrapper = make_kwargs_wrapper(calc.add, ["a", "b"], args_defaults=(5,))
+    wrapper = make_kwargs_wrapper(calc.add, ["a", "b"], arg_defaults=(5,))
     assert wrapper(1) == 106
 
 
@@ -76,25 +76,25 @@ def test_keyword_only_arguments() -> None:
     wrapper = make_kwargs_wrapper(
         target,
         ["a", "b"],
-        args_defaults=(),
-        kwargsonly_names=["c", "d"],
-        kwargsonly_defaults={"c": 100, "d": 200},
+        arg_defaults=(),
+        kwonly_names=["c", "d"],
+        kwonly_defaults={"c": 100, "d": 200},
     )
     assert wrapper(1, 2) == 303  # c=100, d=200
     assert wrapper(1, 2, c=10) == 213  # d=200
     assert wrapper(1, 2, c=10, d=20) == 33
 
     wrapper = make_kwargs_wrapper(
-        target, ["a", "b"], args_defaults=(), kwargsonly_names=["c", "d"], kwargsonly_defaults={}
+        target, ["a", "b"], arg_defaults=(), kwonly_names=["c", "d"], kwonly_defaults={}
     )
     assert wrapper(1, 2, c=10, d=20) == 33  # c and d are required
 
     wrapper = make_kwargs_wrapper(
         target,
         ["a", "b"],
-        args_defaults=(),
-        kwargsonly_names=["c", "d"],
-        kwargsonly_defaults={"d": 100},
+        arg_defaults=(),
+        kwonly_names=["c", "d"],
+        kwonly_defaults={"d": 100},
     )
     assert wrapper(1, 2, c=10) == 113  # c required, d=100
     assert wrapper(1, 2, c=10, d=20) == 33  # both explicit
@@ -102,9 +102,9 @@ def test_keyword_only_arguments() -> None:
     wrapper = make_kwargs_wrapper(
         target,
         ["a", "b", "c"],
-        args_defaults=(10,),
-        kwargsonly_names=["d", "e"],
-        kwargsonly_defaults={"d": 20, "e": 30},
+        arg_defaults=(10,),
+        kwonly_names=["d", "e"],
+        kwonly_defaults={"d": 20, "e": 30},
     )
     assert wrapper(1, 2) == 63  # c=10, d=20, e=30
     assert wrapper(1, 2, 5, d=15) == 53  # c=5 explicit, e=30
@@ -120,7 +120,7 @@ def test_validation_errors() -> None:
 
     # Duplicate keyword-only argument names
     with pytest.raises(ValueError, match="Duplicate keyword-only argument names found"):
-        make_kwargs_wrapper(target, ["a"], kwargsonly_names=["b", "c", "b"])
+        make_kwargs_wrapper(target, ["a"], kwonly_names=["b", "c", "b"])
 
     # Invalid argument name types
     with pytest.raises(TypeError, match="Argument name must be a string"):
@@ -130,23 +130,27 @@ def test_validation_errors() -> None:
     with pytest.raises(ValueError, match="not a valid Python identifier"):
         make_kwargs_wrapper(target, ["a", "b-c"])
 
-    # args_defaults not a tuple
-    with pytest.raises(TypeError, match="args_defaults must be a tuple"):
-        make_kwargs_wrapper(target, ["a", "b"], args_defaults=[10])  # type: ignore[arg-type]
+    # Python keywords cannot be used as parameter names
+    with pytest.raises(
+        ValueError, match="is a Python keyword and cannot be used as a parameter name"
+    ):
+        make_kwargs_wrapper(target, ["a", "if"])
 
-    # args_defaults too long
-    with pytest.raises(ValueError, match=r"args_defaults has .* values but only"):
-        make_kwargs_wrapper(target, ["a"], args_defaults=(1, 2, 3))
+    # arg_defaults not a tuple
+    with pytest.raises(TypeError, match="arg_defaults must be a tuple"):
+        make_kwargs_wrapper(target, ["a", "b"], arg_defaults=[10])  # type: ignore[arg-type]
+
+    # arg_defaults too long
+    with pytest.raises(ValueError, match=r"arg_defaults has .* values but only"):
+        make_kwargs_wrapper(target, ["a"], arg_defaults=(1, 2, 3))
 
     # Overlap between positional and keyword-only
     with pytest.raises(ValueError, match="cannot be both positional and keyword-only"):
-        make_kwargs_wrapper(target, ["a", "b"], kwargsonly_names=["b"])
+        make_kwargs_wrapper(target, ["a", "b"], kwonly_names=["b"])
 
-    # kwargsonly_defaults key not in kwargsonly_names
-    with pytest.raises(ValueError, match="not in kwargsonly_names"):
-        make_kwargs_wrapper(
-            target, ["a", "b"], kwargsonly_names=["c"], kwargsonly_defaults={"d": 10}
-        )
+    # kwonly_defaults key not in kwonly_names
+    with pytest.raises(ValueError, match="not in kwonly_names"):
+        make_kwargs_wrapper(target, ["a", "b"], kwonly_names=["c"], kwonly_defaults={"d": 10})
 
     # Internal name conflict
     with pytest.raises(ValueError, match="conflict with internal names"):
@@ -160,12 +164,12 @@ def test_special_default_values() -> None:
         return (a, b, c)
 
     # None as default
-    wrapper = make_kwargs_wrapper(target, ["a", "b", "c"], args_defaults=(None, None))
+    wrapper = make_kwargs_wrapper(target, ["a", "b", "c"], arg_defaults=(None, None))
     assert wrapper(1) == (1, None, None)
 
     # Complex objects as defaults (verify object reference is preserved)
     default_list = [1, 2, 3]
-    wrapper = make_kwargs_wrapper(target, ["a", "b", "c"], args_defaults=(default_list, None))
+    wrapper = make_kwargs_wrapper(target, ["a", "b", "c"], arg_defaults=(default_list, None))
     result = wrapper(1)
     assert result[1] is default_list
 
@@ -184,7 +188,7 @@ def test_wrapper_with_signature() -> None:
     assert wrapper(1, 2, 3) == 26  # 1 + 2 + 3 + 20
     assert wrapper(1, 2, 3, 4) == 10  # 1 + 2 + 3 + 4
 
-    # Test metadata preservation when prototype_func is provided
+    # Test metadata preservation when prototype is provided
     wrapper_with_metadata = make_kwargs_wrapper_from_signature(target, sig, source_func)
     assert wrapper_with_metadata.__name__ == "source_func"
     assert wrapper_with_metadata.__doc__ == "Source function documentation."
@@ -218,6 +222,54 @@ def test_wrapper_with_signature() -> None:
     with pytest.raises(ValueError, match=r"\*\*kwargs not supported"):
         make_kwargs_wrapper_from_signature(target, inspect.signature(with_kwargs))
 
+    # Test exclude_arg_names - ignore certain arguments from the signature
+    def source_with_skip(a: Any, b: Any, c: int = 10, d: int = 20) -> None:
+        pass
+
+    wrapper = make_kwargs_wrapper_from_signature(
+        target, inspect.signature(source_with_skip), exclude_arg_names=["c"]
+    )
+    # c is ignored, so wrapper should only have a, b, d
+    assert wrapper(1, 2) == 23  # 1 + 2 + 20 (d=20)
+    assert wrapper(1, 2, d=5) == 8  # 1 + 2 + 5
+
+    # Test ignoring multiple arguments
+    wrapper = make_kwargs_wrapper_from_signature(
+        target, inspect.signature(source_with_skip), exclude_arg_names=["b", "d"]
+    )
+    # b and d are ignored, so wrapper should only have a, c
+    assert wrapper(1) == 11  # 1 + 10 (c=10)
+    assert wrapper(1, c=5) == 6  # 1 + 5
+
+    # Test ignoring keyword-only arguments
+    def source_kwonly_skip(a: Any, b: Any, *, c: int = 10, d: int = 20) -> None:
+        pass
+
+    wrapper = make_kwargs_wrapper_from_signature(
+        target, inspect.signature(source_kwonly_skip), exclude_arg_names=["c"]
+    )
+    # c is skipped, so wrapper should only have a, b, d
+    assert wrapper(1, 2) == 23  # 1 + 2 + 20 (d=20)
+    assert wrapper(1, 2, d=5) == 8  # 1 + 2 + 5
+
+    # Test excluding a non-existent argument (should be silently ignored)
+    wrapper = make_kwargs_wrapper_from_signature(
+        target, inspect.signature(source_with_skip), exclude_arg_names=["non_existent"]
+    )
+    # Should be the same as no exclusion
+    assert wrapper(1, 2) == 33  # 1 + 2 + 10 + 20
+    assert wrapper(1, 2, 3, 4) == 10  # 1 + 2 + 3 + 4
+
+    # Test excluding both existing and non-existent arguments
+    wrapper = make_kwargs_wrapper_from_signature(
+        target,
+        inspect.signature(source_with_skip),
+        exclude_arg_names=["c", "non_existent", "also_missing"],
+    )
+    # Only c should be excluded, non-existent names are ignored
+    assert wrapper(1, 2) == 23  # 1 + 2 + 20 (d=20, c excluded)
+    assert wrapper(1, 2, d=5) == 8  # 1 + 2 + 5
+
 
 def test_exception_propagation() -> None:
     """Test that exceptions from the target function are properly propagated."""
@@ -232,7 +284,7 @@ def test_exception_propagation() -> None:
         return a + b
 
     # Test with positional defaults
-    wrapper = make_kwargs_wrapper(raising_func, ["a", "b", "c"], args_defaults=(10, "valid"))
+    wrapper = make_kwargs_wrapper(raising_func, ["a", "b", "c"], arg_defaults=(10, "valid"))
     assert wrapper(5) == 15
 
     with pytest.raises(ValueError, match="a cannot be zero"):
@@ -245,8 +297,8 @@ def test_exception_propagation() -> None:
     wrapper_kwonly = make_kwargs_wrapper(
         raising_func,
         ["a"],
-        kwargsonly_names=["b", "c"],
-        kwargsonly_defaults={"b": 10, "c": "valid"},
+        kwonly_names=["b", "c"],
+        kwonly_defaults={"b": 10, "c": "valid"},
     )
     assert wrapper_kwonly(5) == 15
 
@@ -261,7 +313,7 @@ def test_exception_propagation() -> None:
 
 
 def test_metadata_preservation() -> None:
-    """Test that function metadata is preserved when prototype_func is provided."""
+    """Test that function metadata is preserved when prototype is provided."""
 
     def my_function(x: int, y: int = 10) -> int:
         """Document the function."""
@@ -269,9 +321,7 @@ def test_metadata_preservation() -> None:
 
     target = lambda *args: sum(args)
 
-    wrapper = make_kwargs_wrapper(
-        target, ["x", "y"], args_defaults=(10,), prototype_func=my_function
-    )
+    wrapper = make_kwargs_wrapper(target, ["x", "y"], arg_defaults=(10,), prototype=my_function)
     assert wrapper.__name__ == "my_function"
     assert wrapper.__doc__ == "Document the function."
     assert wrapper.__annotations__ == my_function.__annotations__
@@ -290,19 +340,19 @@ def test_optimized_default_types() -> None:
         return args
 
     # Test None default (should be optimized - directly embedded)
-    wrapper = make_kwargs_wrapper(target, ["a", "b", "c"], args_defaults=(None,))
+    wrapper = make_kwargs_wrapper(target, ["a", "b", "c"], arg_defaults=(None,))
     assert wrapper(1, 2) == (1, 2, None)
     assert wrapper(1, 2, 3) == (1, 2, 3)
     assert wrapper(1, 2, c=None) == (1, 2, None)
 
     # Test bool defaults (should be optimized - directly embedded)
-    wrapper = make_kwargs_wrapper(target, ["a", "flag", "debug"], args_defaults=(True, False))
+    wrapper = make_kwargs_wrapper(target, ["a", "flag", "debug"], arg_defaults=(True, False))
     assert wrapper(1) == (1, True, False)
     assert wrapper(1, False) == (1, False, False)
     assert wrapper(1, flag=False, debug=True) == (1, False, True)
 
     # Test str default (should use MISSING sentinel for safety)
-    wrapper = make_kwargs_wrapper(target, ["a", "b", "name"], args_defaults=("default",))
+    wrapper = make_kwargs_wrapper(target, ["a", "b", "name"], arg_defaults=("default",))
     assert wrapper(1, 2) == (1, 2, "default")
     assert wrapper(1, 2, "custom") == (1, 2, "custom")
     assert wrapper(1, 2, name="custom") == (1, 2, "custom")
@@ -311,8 +361,8 @@ def test_optimized_default_types() -> None:
     wrapper = make_kwargs_wrapper(
         target,
         ["a"],
-        kwargsonly_names=["b", "flag", "name"],
-        kwargsonly_defaults={"b": None, "flag": True, "name": "default"},
+        kwonly_names=["b", "flag", "name"],
+        kwonly_defaults={"b": None, "flag": True, "name": "default"},
     )
     assert wrapper(1) == (1, None, True, "default")
     assert wrapper(1, b=2) == (1, 2, True, "default")
