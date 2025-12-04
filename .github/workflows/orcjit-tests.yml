@@ -100,5 +100,5 @@ jobs:
         working-directory: addons/tvm-ffi-orcjit/examples/quick-start
         run: |
           cmake -B build
-          cmake --build build
+          cmake --build build --target install
           python run.py
