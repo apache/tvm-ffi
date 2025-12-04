@@ -89,7 +89,7 @@ jobs:
         working-directory: addons/tvm-ffi-orcjit/tests
         run: |
           cmake -B build
-          cmake --build build
+          cmake --build build --target install
 
       - name: Run tests
         working-directory: addons/tvm-ffi-orcjit
@@ -100,5 +100,5 @@ jobs:
         working-directory: addons/tvm-ffi-orcjit/examples/quick-start
         run: |
           cmake -B build
-          cmake --build build --target install
+          cmake --build build
           python run.py
