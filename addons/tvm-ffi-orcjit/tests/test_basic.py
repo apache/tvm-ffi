@@ -24,7 +24,7 @@ import pytest
 from tvm_ffi_orcjit import ExecutionSession
 
 
-def get_test_obj_file() -> Path:
+def get_test_obj_file(object_file: str) -> Path:
     """Get the path to the pre-built test object file.
 
     Returns
@@ -35,51 +35,7 @@ def get_test_obj_file() -> Path:
     """
     # The object file should be built by CMake and located in the tests directory
     test_dir = Path(__file__).parent
-    obj_file = test_dir / "test_funcs.o"
-
-    if not obj_file.exists():
-        raise FileNotFoundError(
-            f"Test object file not found: {obj_file}\n"
-            "Please build the test object file first:\n"
-            "  cd tests && cmake -B build && cmake --build build"
-        )
-
-    return obj_file
-
-
-def get_test_obj_file2() -> Path:
-    """Get the path to the second pre-built test object file.
-
-    Returns
-    -------
-    Path
-        Path to the test_funcs2.o object file.
-
-    """
-    test_dir = Path(__file__).parent
-    obj_file = test_dir / "test_funcs2.o"
-
-    if not obj_file.exists():
-        raise FileNotFoundError(
-            f"Test object file not found: {obj_file}\n"
-            "Please build the test object file first:\n"
-            "  cd tests && cmake -B build && cmake --build build"
-        )
-
-    return obj_file
-
-
-def get_test_obj_file_conflict() -> Path:
-    """Get the path to the conflicting test object file.
-
-    Returns
-    -------
-    Path
-        Path to the test_funcs_conflict.o object file.
-
-    """
-    test_dir = Path(__file__).parent
-    obj_file = test_dir / "test_funcs_conflict.o"
+    obj_file = test_dir / object_file
 
     if not obj_file.exists():
         raise FileNotFoundError(
@@ -107,7 +63,7 @@ def test_create_library() -> None:
 def test_load_and_execute_function() -> None:
     """Test loading an object file and executing a function."""
     # Get pre-built test object file
-    obj_file = get_test_obj_file()
+    obj_file = get_test_obj_file("test_funcs.o")
 
     # Create session and library
     session = ExecutionSession()
@@ -141,7 +97,7 @@ def test_multiple_libraries() -> None:
 def test_function_not_found() -> None:
     """Test that getting a non-existent function raises an error."""
     # Get pre-built test object file
-    obj_file = get_test_obj_file()
+    obj_file = get_test_obj_file("test_funcs.o")
 
     session = ExecutionSession()
     lib = session.create_library()
@@ -153,8 +109,8 @@ def test_function_not_found() -> None:
 
 def test_gradually_add_objects_to_same_library() -> None:
     """Test gradually adding multiple object files to the same library."""
-    obj_file1 = get_test_obj_file()
-    obj_file2 = get_test_obj_file2()
+    obj_file1 = get_test_obj_file("test_funcs.o")
+    obj_file2 = get_test_obj_file("test_funcs2.o")
 
     session = ExecutionSession()
     lib = session.create_library()
@@ -186,8 +142,8 @@ def test_gradually_add_objects_to_same_library() -> None:
 
 def test_two_separate_libraries() -> None:
     """Test creating two separate libraries each with its own object file."""
-    obj_file1 = get_test_obj_file()
-    obj_file2 = get_test_obj_file2()
+    obj_file1 = get_test_obj_file("test_funcs.o")
+    obj_file2 = get_test_obj_file("test_funcs2.o")
 
     session = ExecutionSession()
 
@@ -224,8 +180,8 @@ def test_two_separate_libraries() -> None:
 
 def test_symbol_conflict_same_library() -> None:
     """Test that adding objects with conflicting symbols to same library fails."""
-    obj_file1 = get_test_obj_file()
-    obj_file_conflict = get_test_obj_file_conflict()
+    obj_file1 = get_test_obj_file("test_funcs.o")
+    obj_file_conflict = get_test_obj_file("test_funcs_conflict.o")
 
     session = ExecutionSession()
     lib = session.create_library()
@@ -244,8 +200,8 @@ def test_symbol_conflict_same_library() -> None:
 
 def test_symbol_conflict_different_libraries() -> None:
     """Test that adding objects with conflicting symbols to different libraries works."""
-    obj_file1 = get_test_obj_file()
-    obj_file_conflict = get_test_obj_file_conflict()
+    obj_file1 = get_test_obj_file("test_funcs.o")
+    obj_file_conflict = get_test_obj_file("test_funcs_conflict.o")
 
     session = ExecutionSession()
 
@@ -274,5 +230,29 @@ def test_symbol_conflict_different_libraries() -> None:
     assert mul_func2(5, 6) == 60  # Conflict: (5 * 6) * 2
 
 
+def test_load_and_execute_cuda_function() -> None:
+    """Test loading an object file and executing a function."""
+    # Get pre-built test object file
+    obj_file = get_test_obj_file("test_funcs_cuda.o")
+
+    # Create session and library
+    session = ExecutionSession()
+    lib = session.create_library()
+
+    # Load object file
+    lib.add(str(obj_file))
+
+    # Get and call test_add function
+    add_func = lib.get_function("test_add")
+    result = add_func(10, 20)
+    assert result == 30
+
+    # Get and call test_multiply function
+    mul_func = lib.get_function("test_multiply")
+    result = mul_func(7, 6)
+    assert result == 42
+
+
 if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+    # pytest.main([__file__, "-v"])
+    test_load_and_execute_cuda_function()

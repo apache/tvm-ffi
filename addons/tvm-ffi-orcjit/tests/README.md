@@ -26,7 +26,7 @@ The tests require pre-built object files. To build them:
 ```bash
 cd tests
 cmake -B build
-cmake --build build
+cmake --build build --target install
 ```
 
 This will compile `sources/test_funcs.cc` and generate `test_funcs.o` in the tests directory.
