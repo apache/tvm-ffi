@@ -18,11 +18,11 @@
  */
 #include <gtest/gtest.h>
 #include <tvm/ffi/container/map.h>
-#include <tvm/ffi/extra/overload.h>
 #include <tvm/ffi/object.h>
 #include <tvm/ffi/reflection/access_path.h>
 #include <tvm/ffi/reflection/accessor.h>
 #include <tvm/ffi/reflection/creator.h>
+#include <tvm/ffi/reflection/overload.h>
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/ffi/string.h>
 
@@ -33,11 +33,12 @@ using namespace tvm::ffi;
 struct TestOverloadObj : public Object {
   explicit TestOverloadObj(int32_t x) : type(Type::INT) {}
   explicit TestOverloadObj(float y) : type(Type::FLOAT) {}
-  static int add_one_int(int x) { return x + 1; }
-  static float add_one_float(float x) { return x + 1.0f; }
+
+  static int AddOneInt(int x) { return x + 1; }
+  static float AddOneFloat(float x) { return x + 1.0f; }
 
   template <typename T>
-  auto holds(T) {
+  auto Holds(T) const {
     if constexpr (std::is_same_v<T, int32_t>) {
       return type == Type::INT;
     } else if constexpr (std::is_same_v<T, float>) {
@@ -56,10 +57,10 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   refl::OverloadObjectDef<TestOverloadObj>()
       .def(refl::init<int32_t>())
       .def(refl::init<float>())
-      .def("hold_same_type", &TestOverloadObj::holds<int32_t>)
-      .def("hold_same_type", &TestOverloadObj::holds<float>)
-      .def_static("add_one_static", &TestOverloadObj::add_one_int)
-      .def_static("add_one_static", &TestOverloadObj::add_one_float);
+      .def("hold_same_type", &TestOverloadObj::Holds<int32_t>)
+      .def("hold_same_type", &TestOverloadObj::Holds<float>)
+      .def_static("add_one_static", &TestOverloadObj::AddOneInt)
+      .def_static("add_one_static", &TestOverloadObj::AddOneFloat);
 }
 
 TEST(Reflection, CallOverloadedInitMethod) {
