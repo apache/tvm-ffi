@@ -65,10 +65,9 @@ install(
   RENAME test_funcs_conflict.o
 )
 
-
 find_package(CUDAToolkit)
 
-if(CUDAToolkit_FOUND)
+if (CUDAToolkit_FOUND)
   enable_language(CUDA)
   message(STATUS "CUDA found: ${CUDAToolkit_VERSION}")
   add_library(test_funcs_cuda_obj OBJECT sources/test_funcs_cuda.cu)
@@ -79,4 +78,4 @@ if(CUDAToolkit_FOUND)
     DESTINATION ${CMAKE_CURRENT_SOURCE_DIR}
     RENAME test_funcs_cuda.o
   )
-endif()
+endif ()
