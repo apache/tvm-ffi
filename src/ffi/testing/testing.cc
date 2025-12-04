@@ -17,6 +17,8 @@
  * under the License.
  */
 // This file is used for testing the FFI API.
+#define TVM_FFI_DLL_EXPORT_INCLUDE_METADATA 1
+
 #include <dlpack/dlpack.h>
 #include <tvm/ffi/any.h>
 #include <tvm/ffi/container/array.h>
@@ -284,6 +286,82 @@ TVM_FFI_STATIC_INIT_BLOCK() {
 namespace tvm {
 namespace ffi {
 
+// -----------------------------------------------------------------------------
+// Implementation functions for schema testing
+// -----------------------------------------------------------------------------
+namespace schema_test_impl {
+
+// Simple types
+int64_t schema_id_int(int64_t x) { return x; }
+double schema_id_float(double x) { return x; }
+bool schema_id_bool(bool x) { return x; }
+DLDevice schema_id_device(DLDevice d) { return d; }
+DLDataType schema_id_dtype(DLDataType dt) { return dt; }
+String schema_id_string(String s) { return s; }
+Bytes schema_id_bytes(Bytes b) { return b; }
+Function schema_id_func(Function f) { return f; }
+TypedFunction<void(int64_t, float, Function)> schema_id_func_typed(
+    TypedFunction<void(int64_t, float, Function)> f) {
+  return f;
+}
+Any schema_id_any(Any a) { return a; }
+ObjectRef schema_id_object(ObjectRef o) { return o; }
+DLTensor* schema_id_dltensor(DLTensor* t) { return t; }
+Tensor schema_id_tensor(Tensor t) { return t; }
+void schema_tensor_view_input(TensorView t) {}
+
+// Optional types
+Optional<int64_t> schema_id_opt_int(Optional<int64_t> o) { return o; }
+Optional<String> schema_id_opt_str(Optional<String> o) { return o; }
+Optional<ObjectRef> schema_id_opt_obj(Optional<ObjectRef> o) { return o; }
+
+// Array types
+Array<int64_t> schema_id_arr_int(Array<int64_t> arr) { return arr; }
+Array<String> schema_id_arr_str(Array<String> arr) { return arr; }
+Array<ObjectRef> schema_id_arr_obj(Array<ObjectRef> arr) { return arr; }
+const ArrayObj* schema_id_arr(const ArrayObj* arr) { return arr; }
+
+// Map types
+Map<String, int64_t> schema_id_map_str_int(Map<String, int64_t> m) { return m; }
+Map<String, String> schema_id_map_str_str(Map<String, String> m) { return m; }
+Map<String, ObjectRef> schema_id_map_str_obj(Map<String, ObjectRef> m) { return m; }
+const MapObj* schema_id_map(const MapObj* m) { return m; }
+
+// Variant types
+Variant<int64_t, String> schema_id_variant_int_str(Variant<int64_t, String> v) { return v; }
+Variant<int64_t, String, Array<int64_t>> schema_variant_mix(
+    Variant<int64_t, String, Array<int64_t>> v) {
+  return v;
+}
+
+// Complex nested types
+Map<String, Array<int64_t>> schema_arr_map_opt(const Array<Optional<int64_t>>& arr,
+                                               Map<String, Array<int64_t>> mp,
+                                               const Optional<String>& os) {
+  // no-op combine
+  if (os.has_value()) {
+    Array<int64_t> extra;
+    for (const auto& i : arr) {
+      if (i.has_value()) extra.push_back(i.value());
+    }
+    mp.Set(os.value(), extra);
+  }
+  return mp;
+}
+
+// Edge cases
+int64_t schema_no_args() { return 1; }
+void schema_no_return(int64_t x) {}
+void schema_no_args_no_return() {}
+
+// Member function pattern
+int64_t test_int_pair_sum_wrapper(const TestIntPair& target) { return target.Sum(); }
+
+// Documentation export
+int64_t test_add_with_docstring(int64_t a, int64_t b) { return a + b; }
+
+}  // namespace schema_test_impl
+
 // A class with a wide variety of field types and method signatures
 class SchemaAllTypesObj : public Object {
  public:
@@ -394,65 +472,71 @@ TVM_FFI_STATIC_INIT_BLOCK() {
 
   // Global typed functions to exercise RegisterFunc with various schemas
   refl::GlobalDef()
-      .def(
-          "testing.schema_id_int", [](int64_t x) { return x; },
-          refl::Metadata{{"bool_attr", true},  //
-                         {"int_attr", 1},      //
-                         {"str_attr", "hello"}})
-      .def("testing.schema_id_float", [](double x) { return x; })
-      .def("testing.schema_id_bool", [](bool x) { return x; })
-      .def("testing.schema_id_device", [](DLDevice d) { return d; })
-      .def("testing.schema_id_dtype", [](DLDataType dt) { return dt; })
-      .def("testing.schema_id_string", [](String s) { return s; })
-      .def("testing.schema_id_bytes", [](Bytes b) { return b; })
-      .def("testing.schema_id_func", [](Function f) -> Function { return f; })
-      .def("testing.schema_id_func_typed",
-           [](TypedFunction<void(int64_t, float, Function)> f)
-               -> TypedFunction<void(int64_t, float, Function)> { return f; })
-      .def("testing.schema_id_any", [](Any a) { return a; })
-      .def("testing.schema_id_object", [](ObjectRef o) { return o; })
-      .def("testing.schema_id_dltensor", [](DLTensor* t) { return t; })
-      .def("testing.schema_id_tensor", [](Tensor t) { return t; })
-      .def("testing.schema_tensor_view_input", [](TensorView t) -> void {})
-      .def("testing.schema_id_opt_int", [](Optional<int64_t> o) { return o; })
-      .def("testing.schema_id_opt_str", [](Optional<String> o) { return o; })
-      .def("testing.schema_id_opt_obj", [](Optional<ObjectRef> o) { return o; })
-      .def("testing.schema_id_arr_int", [](Array<int64_t> arr) { return arr; })
-      .def("testing.schema_id_arr_str", [](Array<String> arr) { return arr; })
-      .def("testing.schema_id_arr_obj", [](Array<ObjectRef> arr) { return arr; })
-      .def("testing.schema_id_arr", [](const ArrayObj* arr) { return arr; })
-      .def("testing.schema_id_map_str_int", [](Map<String, int64_t> m) { return m; })
-      .def("testing.schema_id_map_str_str", [](Map<String, String> m) { return m; })
-      .def("testing.schema_id_map_str_obj", [](Map<String, ObjectRef> m) { return m; })
-      .def("testing.schema_id_map", [](const MapObj* m) { return m; })
-      .def("testing.schema_id_variant_int_str", [](Variant<int64_t, String> v) { return v; })
+      .def("testing.schema_id_int", schema_test_impl::schema_id_int,
+           refl::Metadata{{"bool_attr", true},  //
+                          {"int_attr", 1},      //
+                          {"str_attr", "hello"}})
+      .def("testing.schema_id_float", schema_test_impl::schema_id_float)
+      .def("testing.schema_id_bool", schema_test_impl::schema_id_bool)
+      .def("testing.schema_id_device", schema_test_impl::schema_id_device)
+      .def("testing.schema_id_dtype", schema_test_impl::schema_id_dtype)
+      .def("testing.schema_id_string", schema_test_impl::schema_id_string)
+      .def("testing.schema_id_bytes", schema_test_impl::schema_id_bytes)
+      .def("testing.schema_id_func", schema_test_impl::schema_id_func)
+      .def("testing.schema_id_func_typed", schema_test_impl::schema_id_func_typed)
+      .def("testing.schema_id_any", schema_test_impl::schema_id_any)
+      .def("testing.schema_id_object", schema_test_impl::schema_id_object)
+      .def("testing.schema_id_dltensor", schema_test_impl::schema_id_dltensor)
+      .def("testing.schema_id_tensor", schema_test_impl::schema_id_tensor)
+      .def("testing.schema_tensor_view_input", schema_test_impl::schema_tensor_view_input)
+      .def("testing.schema_id_opt_int", schema_test_impl::schema_id_opt_int)
+      .def("testing.schema_id_opt_str", schema_test_impl::schema_id_opt_str)
+      .def("testing.schema_id_opt_obj", schema_test_impl::schema_id_opt_obj)
+      .def("testing.schema_id_arr_int", schema_test_impl::schema_id_arr_int)
+      .def("testing.schema_id_arr_str", schema_test_impl::schema_id_arr_str)
+      .def("testing.schema_id_arr_obj", schema_test_impl::schema_id_arr_obj)
+      .def("testing.schema_id_arr", schema_test_impl::schema_id_arr)
+      .def("testing.schema_id_map_str_int", schema_test_impl::schema_id_map_str_int)
+      .def("testing.schema_id_map_str_str", schema_test_impl::schema_id_map_str_str)
+      .def("testing.schema_id_map_str_obj", schema_test_impl::schema_id_map_str_obj)
+      .def("testing.schema_id_map", schema_test_impl::schema_id_map)
+      .def("testing.schema_id_variant_int_str", schema_test_impl::schema_id_variant_int_str)
       .def_packed("testing.schema_packed", [](PackedArgs args, Any* ret) {})
-      .def("testing.schema_arr_map_opt",
-           // NOLINTNEXTLINE(performance-unnecessary-value-param)
-           [](Array<Optional<int64_t>> arr, Map<String, Array<int64_t>> mp,
-              // NOLINTNEXTLINE(performance-unnecessary-value-param)
-              Optional<String> os) -> Map<String, Array<int64_t>> {
-             // no-op combine
-             if (os.has_value()) {
-               Array<int64_t> extra;
-               for (const auto& i : arr) {
-                 if (i.has_value()) extra.push_back(i.value());
-               }
-               mp.Set(os.value(), extra);
-             }
-             return mp;
-           })
-      .def(
-          "testing.schema_variant_mix",
-          [](Variant<int64_t, String, Array<int64_t>> v) { return v; }, "variant passthrough")
-      .def("testing.schema_no_args", []() { return 1; })
-      .def("testing.schema_no_return", [](int64_t x) {})
-      .def("testing.schema_no_args_no_return", []() {});
+      .def("testing.schema_arr_map_opt", schema_test_impl::schema_arr_map_opt)
+      .def("testing.schema_variant_mix", schema_test_impl::schema_variant_mix,
+           "variant passthrough")
+      .def("testing.schema_no_args", schema_test_impl::schema_no_args)
+      .def("testing.schema_no_return", schema_test_impl::schema_no_return)
+      .def("testing.schema_no_args_no_return", schema_test_impl::schema_no_args_no_return);
   TVMFFIEnvModRegisterSystemLibSymbol("__tvm_ffi_testing.add_one",
                                       reinterpret_cast<void*>(__add_one_c_symbol));
 }
 
 }  // namespace ffi
 }  // namespace tvm
+
+// -----------------------------------------------------------------------------
+// Exported symbols for metadata testing on DLL-exported functions
+// -----------------------------------------------------------------------------
+// We keep minimal DLL exports here to verify the export mechanism.
+TVM_FFI_DLL_EXPORT_TYPED_FUNC(testing_dll_schema_id_int, tvm::ffi::schema_test_impl::schema_id_int);
+
+// Documentation export
+TVM_FFI_DLL_EXPORT_TYPED_FUNC(testing_dll_test_add_with_docstring,
+                              tvm::ffi::schema_test_impl::test_add_with_docstring);
+TVM_FFI_DLL_EXPORT_TYPED_FUNC_DOC(testing_dll_test_add_with_docstring,
+                                  R"(Add two integers and return the sum.
+
+Parameters
+----------
+a : int
+    First integer
+b : int
+    Second integer
+
+Returns
+-------
+result : int
+    Sum of a and b)");
 
 extern "C" TVM_FFI_DLL_EXPORT int TVMFFITestingDummyTarget() { return 0; }

@@ -74,7 +74,9 @@ class TVM_FFI_EXTRA_CXX_API ModuleObj : public Object {
   /*!
    * \brief Get the docstring of the function, if available.
    * \param name The name of the function.
-   * \return The docstring of the function.
+   * \return The documentation string if available, nullopt otherwise.
+   *
+   * \sa GetFunctionMetadata, TVM_FFI_DLL_EXPORT_TYPED_FUNC_DOC
    */
   virtual Optional<String> GetFunctionDoc(const String& name) { return std::nullopt; }
   // Rationale: We separate the docstring from the metadata since docstrings
@@ -83,7 +85,18 @@ class TVM_FFI_EXTRA_CXX_API ModuleObj : public Object {
   /*!
    * \brief Get the metadata of the function, if available.
    * \param name The name of the function.
-   * \return The metadata stored in json string format.
+   * \return The metadata as JSON string if available, nullopt otherwise.
+   *
+   * \code
+   * Module mod = Module::LoadFromFile("lib.so");
+   * Optional<String> metadata = mod->GetFunctionMetadata("my_func");
+   * if (metadata.has_value()) {
+   *   // Parse JSON: {"type_schema": "..."}
+   *   validate_signature(*metadata);
+   * }
+   * \endcode
+   *
+   * \sa GetFunctionDoc, TVM_FFI_DLL_EXPORT_TYPED_FUNC
    */
   virtual Optional<String> GetFunctionMetadata(const String& name) { return std::nullopt; }
   /*!
@@ -142,15 +155,19 @@ class TVM_FFI_EXTRA_CXX_API ModuleObj : public Object {
   /*!
    * \brief Get the function docstring of the function if available.
    * \param name The name of the function.
-   * \param query_imports Whether to query imported modules.
-   * \return The function docstring of the function.
+   * \param query_imports Whether to also query modules imported by this module.
+   * \return The documentation string if available, nullopt otherwise.
+   *
+   * \sa GetFunctionMetadata
    */
   Optional<String> GetFunctionDoc(const String& name, bool query_imports);
   /*!
    * \brief Get the function metadata of the function if available.
    * \param name The name of the function.
-   * \param query_imports Whether to query imported modules.
-   * \return The function metadata of the function in json format.
+   * \param query_imports Whether to also query modules imported by this module.
+   * \return The metadata as JSON string if available, nullopt otherwise.
+   *
+   * \sa GetFunctionDoc
    */
   Optional<String> GetFunctionMetadata(const String& name, bool query_imports);
   /*!
@@ -275,6 +292,8 @@ constexpr const char* tvm_ffi_library_ctx = "__tvm_ffi__library_ctx";
 constexpr const char* tvm_ffi_library_bin = "__tvm_ffi__library_bin";
 /*! \brief Optional metadata prefix of a symbol. */
 constexpr const char* tvm_ffi_metadata_prefix = "__tvm_ffi__metadata_";
+/*! \brief Optional documentation prefix of a symbol. */
+constexpr const char* tvm_ffi_doc_prefix = "__tvm_ffi__doc_";
 }  // namespace symbol
 }  // namespace ffi
 }  // namespace tvm

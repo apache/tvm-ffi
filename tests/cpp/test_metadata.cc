@@ -29,10 +29,27 @@
 #include <tvm/ffi/reflection/accessor.h>
 #include <tvm/ffi/string.h>
 
+// Forward declarations for exported FFI functions
+extern "C" {
+// NOLINTNEXTLINE(bugprone-reserved-identifier)
+int __tvm_ffi__metadata_testing_dll_schema_id_int(void*, const TVMFFIAny*, int32_t, TVMFFIAny*);
+// NOLINTNEXTLINE(bugprone-reserved-identifier)
+int __tvm_ffi__metadata_testing_dll_test_add_with_docstring(void*, const TVMFFIAny*, int32_t,
+                                                            TVMFFIAny*);
+// NOLINTNEXTLINE(bugprone-reserved-identifier)
+int __tvm_ffi__doc_testing_dll_test_add_with_docstring(void*, const TVMFFIAny*, int32_t,
+                                                       TVMFFIAny*);
+}
+
 namespace {
 
 using namespace tvm::ffi;
 using namespace tvm::ffi::reflection;
+
+// Helper to call metadata FFI functions and return the String result
+static String CallMetadataFunc(int (*func)(void*, const TVMFFIAny*, int32_t, TVMFFIAny*)) {
+  return Function::InvokeExternC(nullptr, func).cast<String>();
+}
 
 static std::string ParseMetadataToSchema(const String& metadata) {
   return json::Parse(metadata)
@@ -198,6 +215,34 @@ TEST(Schema, MethodTypeSchemas) {
   EXPECT_EQ(
       method_schema("make_with"),
       R"({"type":"ffi.Function","args":[{"type":"testing.SchemaAllTypes"},{"type":"int"},{"type":"float"},{"type":"ffi.String"}]})");
+}
+
+TEST(Schema, DLLExportedFuncMetadata) {
+  // Minimal sanity check that DLL export metadata mechanism works.
+  EXPECT_EQ(ParseMetadataToSchema(CallMetadataFunc(__tvm_ffi__metadata_testing_dll_schema_id_int)),
+            R"({"type":"ffi.Function","args":[{"type":"int"},{"type":"int"}]})");
+}
+
+TEST(Schema, DLLExportedFuncDocumentation) {
+  EXPECT_EQ(ParseMetadataToSchema(
+                CallMetadataFunc(__tvm_ffi__metadata_testing_dll_test_add_with_docstring)),
+            R"({"type":"ffi.Function","args":[{"type":"int"},{"type":"int"},{"type":"int"}]})");
+  String doc = CallMetadataFunc(__tvm_ffi__doc_testing_dll_test_add_with_docstring);
+  std::string doc_str(doc);
+  EXPECT_EQ(doc_str,
+            R"(Add two integers and return the sum.
+
+Parameters
+----------
+a : int
+    First integer
+b : int
+    Second integer
+
+Returns
+-------
+result : int
+    Sum of a and b)");
 }
 
 }  // namespace

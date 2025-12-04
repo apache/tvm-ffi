@@ -58,6 +58,30 @@ class LibraryModuleObj final : public ModuleObj {
     return std::nullopt;
   }
 
+  Optional<String> GetFunctionMetadata(const String& name) final {
+    // Look for __tvm_ffi__metadata_<name> symbol
+    String metadata_symbol = symbol::tvm_ffi_metadata_prefix + name;
+    void* symbol = lib_->GetSymbol(metadata_symbol);
+    if (symbol != nullptr) {
+      using MetadataGetter = int (*)(void*, const TVMFFIAny*, int32_t, TVMFFIAny*);
+      auto metadata_getter = reinterpret_cast<MetadataGetter>(symbol);
+      return Function::InvokeExternC(nullptr, metadata_getter).cast<String>();
+    }
+    return std::nullopt;
+  }
+
+  Optional<String> GetFunctionDoc(const String& name) final {
+    // Look for __tvm_ffi__doc_<name> symbol
+    String doc_symbol = symbol::tvm_ffi_doc_prefix + name;
+    void* symbol = lib_->GetSymbol(doc_symbol);
+    if (symbol != nullptr) {
+      using DocGetter = int (*)(void*, const TVMFFIAny*, int32_t, TVMFFIAny*);
+      auto doc_getter = reinterpret_cast<DocGetter>(symbol);
+      return Function::InvokeExternC(nullptr, doc_getter).cast<String>();
+    }
+    return std::nullopt;
+  }
+
  private:
   ObjectPtr<Library> lib_;
 };

@@ -125,10 +125,12 @@ DLDataType getDLDataTypeForDLPackv1(const Tensor& t) {
     case ScalarType::Float8_e4m3fnuz:
       dtype.code = DLDataTypeCode::kDLFloat8_e4m3fnuz;
       break;
-#if TORCH_VERSION_MAJOR >= 2 && TORCH_VERSION_MINOR >= 8
+#if (TORCH_VERSION_MAJOR > 2) || (TORCH_VERSION_MAJOR == 2 && TORCH_VERSION_MINOR >= 7)
     case ScalarType::Float8_e8m0fnu:
       dtype.code = DLDataTypeCode::kDLFloat8_e8m0fnu;
       break;
+#endif
+#if (TORCH_VERSION_MAJOR > 2) || (TORCH_VERSION_MAJOR == 2 && TORCH_VERSION_MINOR >= 8)
     case ScalarType::Float4_e2m1fn_x2:
       dtype.code = DLDataTypeCode::kDLFloat4_e2m1fn;
       dtype.lanes = 2;
@@ -389,7 +391,7 @@ ScalarType toScalarTypeForDLPackv1(const DLDataType& dtype) {
           TORCH_CHECK(false, "Unsupported kDLFloat8_e4m3fnuz bits ", std::to_string(dtype.bits));
       }
       break;
-#if TORCH_VERSION_MAJOR >= 2 && TORCH_VERSION_MINOR >= 8
+#if (TORCH_VERSION_MAJOR > 2) || (TORCH_VERSION_MAJOR == 2 && TORCH_VERSION_MINOR >= 7)
     case DLDataTypeCode::kDLFloat8_e8m0fnu:
       switch (dtype.bits) {
         case 8:
@@ -399,6 +401,8 @@ ScalarType toScalarTypeForDLPackv1(const DLDataType& dtype) {
           TORCH_CHECK(false, "Unsupported kDLFloat8_e8m0fnu bits ", std::to_string(dtype.bits));
       }
       break;
+#endif
+#if (TORCH_VERSION_MAJOR > 2) || (TORCH_VERSION_MAJOR == 2 && TORCH_VERSION_MINOR >= 8)
     case DLDataTypeCode::kDLFloat4_e2m1fn:
       switch (dtype.bits) {
         case 4:

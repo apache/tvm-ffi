@@ -62,3 +62,4 @@ set_target_properties(
 )
 
 include(${CMAKE_CURRENT_LIST_DIR}/Utils/Library.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/Utils/EmbedCubin.cmake)

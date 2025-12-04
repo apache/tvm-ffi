@@ -16,6 +16,8 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+#define TVM_FFI_DLL_EXPORT_INCLUDE_METADATA 1
+
 #include "test_build.h"
 
 #include <tvm/ffi/container/tensor.h>
