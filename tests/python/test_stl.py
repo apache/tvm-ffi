@@ -53,6 +53,9 @@ def test_stl() -> None:
             mod.test_function(lambda: 0)(100)
 
     run_check(mod)
+    # Force garbage collection to ensure that all objects created from the
+    # module are destroyed before the module itself is unloaded. This
+    # prevents segfaults from calling destructors in an unloaded library.
     gc.collect()
     del mod
 
