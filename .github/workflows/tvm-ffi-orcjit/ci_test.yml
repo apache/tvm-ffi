@@ -1,0 +1,104 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+name: TVM-FFI-OrcJIT CI Tests
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+      - orcjit
+    paths:
+      - 'addons/tvm-ffi-orcjit/**'
+      - '.github/workflows/tvm-ffi-orcjit/ci_test.yml'
+  pull_request:
+    paths:
+      - 'addons/tvm-ffi-orcjit/**'
+      - '.github/workflows/tvm-ffi-orcjit/ci_test.yml'
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python-version: ['3.9', '3.10', '3.11', '3.12']
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install LLVM (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 18
+          sudo apt-get install -y llvm-18-dev clang-18
+          echo "CC=clang-18" >> $GITHUB_ENV
+          echo "CXX=clang++-18" >> $GITHUB_ENV
+
+      - name: Install LLVM (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install llvm@18
+          echo "LLVM_DIR=$(brew --prefix llvm@18)" >> $GITHUB_ENV
+          echo "CC=$(brew --prefix llvm@18)/bin/clang" >> $GITHUB_ENV
+          echo "CXX=$(brew --prefix llvm@18)/bin/clang++" >> $GITHUB_ENV
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Install tvm-ffi (core package)
+        run: |
+          uv pip install -e . --system
+
+      - name: Build and install tvm-ffi-orcjit
+        working-directory: addons/tvm-ffi-orcjit
+        run: |
+          uv pip install -e . --system
+
+      - name: Install test dependencies
+        run: |
+          uv pip install pytest --system
+
+      - name: Build test objects
+        working-directory: addons/tvm-ffi-orcjit/tests
+        run: |
+          cmake -B build
+          cmake --build build
+
+      - name: Run tests
+        working-directory: addons/tvm-ffi-orcjit
+        run: |
+          pytest tests/ -v
+
+      - name: Run example
+        working-directory: addons/tvm-ffi-orcjit/examples/quick-start
+        run: |
+          cmake -B build
+          cmake --build build
+          python run.py
