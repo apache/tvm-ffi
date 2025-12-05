@@ -133,9 +133,9 @@ cdef inline int _from_dlpack_universal(
     cdef int favor_legacy_dlpack = True
     cdef const DLPackExchangeAPI* exchange_api = NULL
 
-    if hasattr(ext_tensor, "__c_dlpack_exchange_api__"):
+    if hasattr(ext_tensor, "__dlpack_c_exchange_api__"):
         try:
-            _get_dlpack_exchange_api(ext_tensor.__c_dlpack_exchange_api__, &exchange_api)
+            _get_dlpack_exchange_api(ext_tensor.__dlpack_c_exchange_api__, &exchange_api)
             return _from_dlpack_exchange_api(
                 ext_tensor,
                 exchange_api,
@@ -405,7 +405,7 @@ cdef int _dltensor_test_wrapper_current_work_stream(
 # Module-level static DLPackExchangeAPI for DLTensorTestWrapper
 cdef DLPackExchangeAPI _dltensor_test_wrapper_static_api
 
-cdef const DLPackExchangeAPI* _dltensor_test_wrapper_get_exchange_api() noexcept:
+cdef DLPackExchangeAPI* _dltensor_test_wrapper_get_exchange_api() noexcept:
     """Get the static DLPackExchangeAPI instance for DLTensorTestWrapper."""
     global _dltensor_test_wrapper_static_api
 
@@ -430,15 +430,14 @@ cdef const DLPackExchangeAPI* _dltensor_test_wrapper_get_exchange_api() noexcept
     return &_dltensor_test_wrapper_static_api
 
 
-def _dltensor_test_wrapper_exchange_api_ptr():
-    """Return the pointer to the DLPackExchangeAPI struct as an integer."""
-    return <long long>_dltensor_test_wrapper_get_exchange_api()
-
-
 cdef class DLTensorTestWrapper:
     """Wrapper of a Tensor that exposes DLPack protocol, only for testing purpose.
     """
-    __c_dlpack_exchange_api__ = _dltensor_test_wrapper_exchange_api_ptr()
+    __dlpack_c_exchange_api__ = pycapsule.PyCapsule_New(
+        _dltensor_test_wrapper_get_exchange_api(),
+        b"dlpack_exchange_api",
+        NULL
+    )
 
     cdef Tensor tensor
     cdef dict __dict__

@@ -66,9 +66,11 @@ def build_wheel(
         # build wheel from sdist package, compile the torch c dlpack ext library locally.
         import torch  # noqa: PLC0415
 
-        if hasattr(torch.Tensor, "__c_dlpack_exchange_api__"):
+        if hasattr(torch.Tensor, "__dlpack_c_exchange_api__") or hasattr(
+            torch.Tensor, "__c_dlpack_exchange_api__"
+        ):
             print(
-                "torch.Tensor already has attribute __c_dlpack_exchange_api__. "
+                "torch.Tensor already has attribute __dlpack_c_exchange_api__. "
                 "No need to build any torch c dlpackc libs."
             )
         else:
