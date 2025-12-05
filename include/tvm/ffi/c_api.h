@@ -1127,6 +1127,44 @@ TVM_FFI_DLL int32_t TVMFFITypeGetOrAllocIndex(const TVMFFIByteArray* type_key,
  */
 TVM_FFI_DLL const TVMFFITypeInfo* TVMFFIGetTypeInfo(int32_t type_index);
 
+// ----------------------------------------------------------------------------
+// Static handle initialization and deinitialization API
+// ----------------------------------------------------------------------------
+/*!
+ * \brief Initialize a handle once in a thread-safe manner.
+ *
+ * This function checks if *handle_addr is nullptr,
+ * and if so, calls the initialization function
+ * and stores the result in *handle_addr.
+ *
+ * This function is thread-safe and is meant to be used by DSLs that,
+ * unlike C++, may not have static initialization support.
+ *
+ * \param handle_addr The address of the handle to be initialized.
+ * \param init_func The initialization function to be called once to create the result handle.
+ * \return 0 on success, nonzero on failure.
+ *
+ * \note If init_func encounters an error, it should call TVMFFIErrorSetRaisedFromCStr
+ *       to set the error and return nonzero, which will then be propagated to the
+ *       caller of TVMFFIHandleInitOnce.
+ */
+TVM_FFI_DLL int TVMFFIHandleInitOnce(void** handle_addr, int (*init_func)(void** result));
+
+/*!
+ * \brief Deinitialize a handle once in a thread-safe manner.
+ *
+ * This function checks if *handle_addr is not nullptr, and if so,
+ * calls the deinitialization function
+ * and sets *handle_addr to nullptr.
+ *
+ * This function is thread-safe and is meant to be used by DSLs that,
+ * unlike C++, may not have static deinitialization support.
+ *
+ * \param handle_addr The address of the handle to be deinitialized.
+ * \param deinit_func The deinitialization function to be called if *handle_addr is not nullptr.
+ * \return 0 on success, nonzero on failure.
+ */
+TVM_FFI_DLL int TVMFFIHandleDeinitOnce(void** handle_addr, int (*deinit_func)(void* handle));
 #ifdef __cplusplus
 }  // TVM_FFI_EXTERN_C
 #endif
