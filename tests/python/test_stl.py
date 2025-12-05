@@ -14,6 +14,7 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+import gc
 import pathlib
 
 import pytest
@@ -52,6 +53,11 @@ def test_stl() -> None:
             mod.test_function(lambda: 0)(100)
 
     run_check(mod)
+    # Force garbage collection to ensure that all objects created from the
+    # module are destroyed before the module itself is unloaded. This
+    # prevents segfaults from calling destructors in an unloaded library.
+    gc.collect()
+    del mod
 
 
 if __name__ == "__main__":
