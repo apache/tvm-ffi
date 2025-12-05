@@ -86,7 +86,7 @@ class TVMFFIPyCallContext {
   /*! \brief Detected stream, if any */
   void* stream = nullptr;
   /*! \brief the DLPack exchange API, if any */
-  const DLPackExchangeAPI* c_dlpack_exchange_api{nullptr};
+  const DLPackExchangeAPI* dlpack_c_exchange_api{nullptr};
   /*! \brief pointer to the call stack space */
   TVMFFIPyCallStack* call_stack = nullptr;
   /*! \brief the temporary arguments to be recycled */
@@ -174,7 +174,7 @@ struct TVMFFIPyArgSetter {
    * \brief Optional DLPackExchangeAPI struct pointer.
    * This is the new struct-based approach that bundles all DLPack exchange functions.
    */
-  const DLPackExchangeAPI* c_dlpack_exchange_api{nullptr};
+  const DLPackExchangeAPI* dlpack_c_exchange_api{nullptr};
   /*!
    * \brief Invoke the setter.
    * \param call_ctx The call context.
@@ -297,10 +297,10 @@ class TVMFFIPyCallManager {
         // setting failed, directly return
         if (c_api_ret_code[0] != 0) return 0;
       }
-      if (ctx.c_dlpack_exchange_api != nullptr &&
-          ctx.c_dlpack_exchange_api->managed_tensor_allocator != nullptr) {
+      if (ctx.dlpack_c_exchange_api != nullptr &&
+          ctx.dlpack_c_exchange_api->managed_tensor_allocator != nullptr) {
         c_api_ret_code[0] = TVMFFIEnvSetDLPackManagedTensorAllocator(
-            ctx.c_dlpack_exchange_api->managed_tensor_allocator, 0, &prev_tensor_allocator);
+            ctx.dlpack_c_exchange_api->managed_tensor_allocator, 0, &prev_tensor_allocator);
         if (c_api_ret_code[0] != 0) return 0;
       }
       // call the function
@@ -321,14 +321,14 @@ class TVMFFIPyCallManager {
           return -1;
         }
       }
-      if (ctx.c_dlpack_exchange_api != nullptr &&
-          prev_tensor_allocator != ctx.c_dlpack_exchange_api->managed_tensor_allocator) {
+      if (ctx.dlpack_c_exchange_api != nullptr &&
+          prev_tensor_allocator != ctx.dlpack_c_exchange_api->managed_tensor_allocator) {
         c_api_ret_code[0] =
             TVMFFIEnvSetDLPackManagedTensorAllocator(prev_tensor_allocator, 0, nullptr);
         if (c_api_ret_code[0] != 0) return 0;
       }
-      if (optional_out_ctx_dlpack_api != nullptr && ctx.c_dlpack_exchange_api != nullptr) {
-        *optional_out_ctx_dlpack_api = ctx.c_dlpack_exchange_api;
+      if (optional_out_ctx_dlpack_api != nullptr && ctx.dlpack_c_exchange_api != nullptr) {
+        *optional_out_ctx_dlpack_api = ctx.dlpack_c_exchange_api;
       }
       return 0;
     } catch (const std::exception& ex) {
@@ -380,8 +380,8 @@ class TVMFFIPyCallManager {
           parent_ctx->stream = ctx.stream;
         }
         // DLPack exchange API
-        if (parent_ctx->c_dlpack_exchange_api == nullptr) {
-          parent_ctx->c_dlpack_exchange_api = ctx.c_dlpack_exchange_api;
+        if (parent_ctx->dlpack_c_exchange_api == nullptr) {
+          parent_ctx->dlpack_c_exchange_api = ctx.dlpack_c_exchange_api;
         }
       }
       return 0;

@@ -322,11 +322,11 @@ cdef extern from "tvm_ffi_python_helpers.h":
         int device_type
         int device_id
         TVMFFIStreamHandle stream
-        const DLPackExchangeAPI* c_dlpack_exchange_api
+        const DLPackExchangeAPI* dlpack_c_exchange_api
 
     ctypedef struct TVMFFIPyArgSetter:
         int (*func)(TVMFFIPyArgSetter* handle, TVMFFIPyCallContext* ctx,  PyObject* py_arg, TVMFFIAny* out) except -1
-        const DLPackExchangeAPI* c_dlpack_exchange_api
+        const DLPackExchangeAPI* dlpack_c_exchange_api
 
     ctypedef int (*TVMFFIPyArgSetterFactory)(PyObject* value, TVMFFIPyArgSetter* out) except -1
     # The main call function

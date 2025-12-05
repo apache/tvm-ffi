@@ -19,14 +19,31 @@
 import ctypes
 import sys
 from pathlib import Path
+from typing import Any
 
 import torch
 from packaging.version import Version
 
 
+def _create_dlpack_exchange_api_capsule(ptr_as_int: int) -> Any:
+    """Create a PyCapsule wrapping the DLPack exchange API pointer."""
+    capsule_name = b"dlpack_exchange_api"
+    pythonapi = ctypes.pythonapi
+    pythonapi.PyCapsule_New.restype = ctypes.py_object
+    pythonapi.PyCapsule_New.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_char_p,
+        ctypes.c_void_p,
+    ]
+    capsule = pythonapi.PyCapsule_New(ctypes.c_void_p(ptr_as_int), capsule_name, None)
+    return capsule
+
+
 def load_torch_c_dlpack_extension() -> None:
     """Load the torch c dlpack extension based on torch version."""
-    if hasattr(torch.Tensor, "__c_dlpack_exchange_api__"):
+    if hasattr(torch.Tensor, "__dlpack_c_exchange_api__") or hasattr(
+        torch.Tensor, "__c_dlpack_exchange_api__"
+    ):
         return None
     version = Version(torch.__version__)
     if sys.platform.startswith("win32"):
@@ -52,6 +69,12 @@ def load_torch_c_dlpack_extension() -> None:
     # We will do eager upgrade to PyCapsule in the tvm-ffi side instead.
     dlpack_exchange_api_ptr_as_int = func()
     setattr(torch.Tensor, "__c_dlpack_exchange_api__", dlpack_exchange_api_ptr_as_int)
+    setattr(
+        torch.Tensor,
+        "__dlpack_c_exchange_api__",
+        _create_dlpack_exchange_api_capsule(dlpack_exchange_api_ptr_as_int),
+    )
+
     return lib
 
 

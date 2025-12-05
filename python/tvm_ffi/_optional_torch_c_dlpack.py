@@ -70,12 +70,31 @@ def _create_dlpack_exchange_api_capsule(ptr_as_int: int) -> Any:
     return capsule
 
 
+def _check_and_update_dlpack_c_exchange_api(tensor_cls: object) -> bool:
+    """Check if the DLPack exchange API is available and update the __dlpack_c_exchange_api__ attribute."""
+    if hasattr(tensor_cls, "__dlpack_c_exchange_api__"):
+        return True
+    # legacy path compactibility handling
+    if hasattr(tensor_cls, "__c_dlpack_exchange_api__"):
+        c_dlpack_attribute = tensor_cls.__c_dlpack_exchange_api__
+        if isinstance(c_dlpack_attribute, int):
+            setattr(
+                tensor_cls,
+                "__dlpack_c_exchange_api__",
+                _create_dlpack_exchange_api_capsule(c_dlpack_attribute),
+            )
+        else:
+            setattr(tensor_cls, "__dlpack_c_exchange_api__", c_dlpack_attribute)
+        return True
+    return False
+
+
 def load_torch_c_dlpack_extension() -> Any:  # noqa: PLR0912, PLR0915
     try:
         import torch  # noqa: PLC0415
 
-        if hasattr(torch.Tensor, "__c_dlpack_exchange_api__"):
-            # skip loading the extension if the __c_dlpack_exchange_api__
+        if _check_and_update_dlpack_c_exchange_api(torch.Tensor):
+            # skip loading the extension if the __dlpack_c_exchange_api__
             # attribute is already set so we don't have to do it in
             # newer version of PyTorch
             return None
@@ -86,12 +105,7 @@ def load_torch_c_dlpack_extension() -> Any:  # noqa: PLR0912, PLR0915
     try:
         import torch_c_dlpack_ext  # type: ignore  # noqa: PLC0415, F401
 
-        if hasattr(torch.Tensor, "__c_dlpack_exchange_api__"):
-            if isinstance(torch.Tensor.__c_dlpack_exchange_api__, int):
-                # Brings up to speed with the new PyCapsule behavior
-                torch.Tensor.__c_dlpack_exchange_api__ = _create_dlpack_exchange_api_capsule(
-                    torch.Tensor.__c_dlpack_exchange_api__
-                )
+        if _check_and_update_dlpack_c_exchange_api(torch.Tensor):
             return None
     except ImportError:
         pass
@@ -152,8 +166,7 @@ def load_torch_c_dlpack_extension() -> Any:  # noqa: PLR0912, PLR0915
         # Create a PyCapsule from the pointer
         capsule = _create_dlpack_exchange_api_capsule(func())
         # Set the DLPackExchangeAPI pointer on the class
-        setattr(torch.Tensor, "__c_dlpack_exchange_api__", capsule)
-
+        setattr(torch.Tensor, "__dlpack_c_exchange_api__", capsule)
         return lib
     except ImportError:
         pass
