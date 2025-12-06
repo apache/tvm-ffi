@@ -38,6 +38,11 @@
 #include <cstdint>
 #include <cstring>
 
+// cudaKernelSetAttributeForDevice needs cuda >= 12.8
+#if !defined(CUDART_VERSION) || CUDART_VERSION < 12080
+#error "file not supported for this cuda version"
+#endif
+
 namespace tvm {
 namespace ffi {
 
