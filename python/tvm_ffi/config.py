@@ -23,13 +23,10 @@ from pathlib import Path
 from . import libinfo
 
 
-def find_windows_implib() -> str:
-    """Find and return the Windows import library path for tvm_ffi.lib."""
-    libdir = Path(libinfo.find_libtvm_ffi()).parent
-    implib = libdir / "tvm_ffi.lib"
-    if not implib.is_file():
-        raise RuntimeError(f"Cannot find imp lib {implib}")
-    return str(implib)
+def _find_libdir() -> str:
+    """Find the library directory for tvm-ffi."""
+    libtvm_ffi = Path(libinfo.find_libtvm_ffi())
+    return str(libtvm_ffi.parent)
 
 
 def __main__() -> None:  # noqa: PLR0912
@@ -68,10 +65,10 @@ def __main__() -> None:  # noqa: PLR0912
     if args.cmakedir:
         print(libinfo.find_cmake_path())
     if args.libdir:
-        print(Path(libinfo.find_libtvm_ffi()).parent)
+        print(_find_libdir())
     if args.libfiles:
         if sys.platform.startswith("win32"):
-            print(find_windows_implib())
+            print(libinfo.find_windows_implib())
         else:
             print(libinfo.find_libtvm_ffi())
     if args.sourcedir:
@@ -88,12 +85,12 @@ def __main__() -> None:  # noqa: PLR0912
         print(f"-I{include_dir} -I{dlpack_include_dir}")
     if args.libs:
         if sys.platform.startswith("win32"):
-            print(find_windows_implib())
+            print(libinfo.find_windows_implib())
         else:
             print("-ltvm_ffi")
     if args.ldflags:
         if not sys.platform.startswith("win32"):
-            print(f"-L{Path(libinfo.find_libtvm_ffi()).parent}")
+            print(f"-L{_find_libdir()}")
 
 
 if __name__ == "__main__":
