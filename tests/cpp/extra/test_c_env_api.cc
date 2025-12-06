@@ -109,7 +109,7 @@ static int InitShouldNotBeCalled(void** handle_addr) {
 }
 
 static int DeinitSuccess(void* h) {
-  delete (int*)h;
+  delete static_cast<int*>(h);
   return 0;
 }
 
@@ -134,7 +134,7 @@ static int InitForDeinitError(void** handle_addr) {
 }
 
 static int DeinitWithError(void* h) {
-  delete (int*)h;
+  delete static_cast<int*>(h);
   TVMFFIErrorSetRaisedFromCStr("RuntimeError", "Deinitialization failed");
   return -1;
 }
@@ -155,14 +155,14 @@ TEST(CEnvAPI, TVMFFIHandleInitDeinitOnce) {
   int ret = TVMFFIHandleInitOnce(&handle, InitSuccess);
   EXPECT_EQ(ret, 0);
   EXPECT_NE(handle, nullptr);
-  EXPECT_EQ(*(int*)handle, 42);
+  EXPECT_EQ(*static_cast<int*>(handle), 42);
 
   // Test 2: Multiple init calls should not re-initialize (idempotent)
   void* original_handle = handle;
   ret = TVMFFIHandleInitOnce(&handle, InitShouldNotBeCalled);
   EXPECT_EQ(ret, 0);
-  EXPECT_EQ(handle, original_handle);  // Handle should remain unchanged
-  EXPECT_EQ(*(int*)handle, 42);        // Value should still be 42
+  EXPECT_EQ(handle, original_handle);         // Handle should remain unchanged
+  EXPECT_EQ(*static_cast<int*>(handle), 42);  // Value should still be 42
 
   // Test 3: Successful deinitialization
   ret = TVMFFIHandleDeinitOnce(&handle, DeinitSuccess);
@@ -201,7 +201,7 @@ TEST(CEnvAPI, TVMFFIHandleInitDeinitOnce) {
   ret = TVMFFIHandleInitOnce(&handle5, InitValue123);
   EXPECT_EQ(ret, 0);
   EXPECT_NE(handle5, nullptr);
-  EXPECT_EQ(*(int*)handle5, 123);
+  EXPECT_EQ(*static_cast<int*>(handle5), 123);
 
   ret = TVMFFIHandleDeinitOnce(&handle5, DeinitSuccess);
   EXPECT_EQ(ret, 0);
@@ -211,7 +211,7 @@ TEST(CEnvAPI, TVMFFIHandleInitDeinitOnce) {
   ret = TVMFFIHandleInitOnce(&handle5, InitValue456);
   EXPECT_EQ(ret, 0);
   EXPECT_NE(handle5, nullptr);
-  EXPECT_EQ(*(int*)handle5, 456);
+  EXPECT_EQ(*static_cast<int*>(handle5), 456);
 
   // Clean up
   ret = TVMFFIHandleDeinitOnce(&handle5, DeinitSuccess);
@@ -244,7 +244,7 @@ static int InitWithCounter(void** handle_addr) {
 }
 
 static int DeinitWithCounter(void* h) {
-  auto* counter = (ThreadSafeCounter*)h;
+  auto* counter = static_cast<ThreadSafeCounter*>(h);
   if (counter->deinit_count_ptr) {
     counter->deinit_count_ptr->fetch_add(1, std::memory_order_relaxed);
   }
@@ -260,6 +260,7 @@ TEST(CEnvAPI, TVMFFIHandleInitDeinitOnceMultithreaded) {
     void* handle = nullptr;
     const int num_threads = 4;
     std::vector<std::thread> threads;
+    threads.reserve(num_threads);
     std::vector<int> results(num_threads);
     std::mutex mtx;
     std::condition_variable cv;
@@ -284,7 +285,7 @@ TEST(CEnvAPI, TVMFFIHandleInitDeinitOnceMultithreaded) {
 
     // Signal all threads to start
     {
-      std::lock_guard<std::mutex> lock(mtx);
+      std::scoped_lock<std::mutex> lock(mtx);
       ready = true;
     }
     cv.notify_all();
@@ -301,7 +302,7 @@ TEST(CEnvAPI, TVMFFIHandleInitDeinitOnceMultithreaded) {
 
     // Handle should be initialized
     EXPECT_NE(handle, nullptr);
-    auto* counter = (ThreadSafeCounter*)handle;
+    auto* counter = static_cast<ThreadSafeCounter*>(handle);
     EXPECT_EQ(counter->value, 42);
 
     // Init should have been called exactly once
@@ -332,6 +333,7 @@ TEST(CEnvAPI, TVMFFIHandleInitDeinitOnceMultithreaded) {
 
     const int num_threads = 4;
     std::vector<std::thread> threads;
+    threads.reserve(num_threads);
     std::vector<int> results(num_threads);
     std::mutex mtx;
     std::condition_variable cv;
@@ -351,7 +353,7 @@ TEST(CEnvAPI, TVMFFIHandleInitDeinitOnceMultithreaded) {
 
     // Signal all threads to start
     {
-      std::lock_guard<std::mutex> lock(mtx);
+      std::scoped_lock<std::mutex> lock(mtx);
       ready = true;
     }
     cv.notify_all();
