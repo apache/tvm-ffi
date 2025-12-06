@@ -58,3 +58,15 @@ MOD_MAP = {
 FN_NAME_MAP = {
     "__ffi_init__": "__c_ffi_init__",
 }
+
+BUILTIN_TYPE_KEYS = {
+    "ffi.Bytes",
+    "ffi.Error",
+    "ffi.Function",
+    "ffi.Object",
+    "ffi.OpaquePyObject",
+    "ffi.SmallBytes",
+    "ffi.SmallStr",
+    "ffi.String",
+    "ffi.Tensor",
+}

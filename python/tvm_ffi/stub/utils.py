@@ -31,7 +31,9 @@ from . import consts as C
 class Options:
     """Command line options for stub generation."""
 
+    imports: list[str] = dataclasses.field(default_factory=list)
     dlls: list[str] = dataclasses.field(default_factory=list)
+    init_path: str = ""
     indent: int = 4
     files: list[str] = dataclasses.field(default_factory=list)
     verbose: bool = False
