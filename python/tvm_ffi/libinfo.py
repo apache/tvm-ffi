@@ -62,7 +62,7 @@ def find_source_path() -> str:
             _rel_top_directory(),
             _dev_top_directory(),
         ],
-        cond=lambda p: (p / "cmake").is_dir(),
+        cond=lambda p: (p / "src").is_dir(),
     ):
         return ret
     raise RuntimeError("Cannot find home path.")
