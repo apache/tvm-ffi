@@ -726,7 +726,7 @@ def get_torch_include_paths(build_with_cuda: bool) -> Sequence[str]:
             device_type="cuda" if build_with_cuda else "cpu"
         )
     else:
-        return torch.utils.cpp_extension.include_paths(cuda=build_with_cuda)
+        return torch.utils.cpp_extension.include_paths(cuda=build_with_cuda)  # type: ignore[call-arg]
 
 
 def main() -> None:  # noqa: PLR0912, PLR0915
