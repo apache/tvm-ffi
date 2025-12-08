@@ -80,10 +80,10 @@ DLDataType getDLDataTypeForDLPackv1(const Tensor& t) {
     case ScalarType::Int5:
     case ScalarType::Int6:
     case ScalarType::Int7:
+#endif
     case ScalarType::Char:
       dtype.code = DLDataTypeCode::kDLInt;
       break;
-#endif
     case ScalarType::Double:
       dtype.code = DLDataTypeCode::kDLFloat;
       break;
