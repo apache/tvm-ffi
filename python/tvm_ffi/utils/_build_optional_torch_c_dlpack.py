@@ -72,7 +72,7 @@ DLDataType getDLDataTypeForDLPackv1(const Tensor& t) {
     case ScalarType::UInt64:
       dtype.code = DLDataTypeCode::kDLUInt;
       break;
-#if TORCH_VERSION_MAJOR >= 2 && TORCH_VERSION_MINOR >= 6
+#if (TORCH_VERSION_MAJOR > 2) || (TORCH_VERSION_MAJOR == 2 && TORCH_VERSION_MINOR >= 6)
     case ScalarType::Int1:
     case ScalarType::Int2:
     case ScalarType::Int3:
@@ -82,24 +82,14 @@ DLDataType getDLDataTypeForDLPackv1(const Tensor& t) {
     case ScalarType::Int7:
 #endif
     case ScalarType::Char:
-      dtype.code = DLDataTypeCode::kDLInt;
-      break;
-    case ScalarType::Double:
-      dtype.code = DLDataTypeCode::kDLFloat;
-      break;
-    case ScalarType::Float:
-      dtype.code = DLDataTypeCode::kDLFloat;
-      break;
+    case ScalarType::Short:
     case ScalarType::Int:
-      dtype.code = DLDataTypeCode::kDLInt;
-      break;
     case ScalarType::Long:
       dtype.code = DLDataTypeCode::kDLInt;
       break;
-    case ScalarType::Short:
-      dtype.code = DLDataTypeCode::kDLInt;
-      break;
     case ScalarType::Half:
+    case ScalarType::Float:
+    case ScalarType::Double:
       dtype.code = DLDataTypeCode::kDLFloat;
       break;
     case ScalarType::Bool:
