@@ -121,6 +121,7 @@ class TracebackManager:
             The new traceback with the appended frame.
 
         """
+        # we manually delete frame to avoid reference cycle, making it faster to gc the locals inside the frame
         try:
             frame = self._create_frame(filename, lineno, func)
             return types.TracebackType(tb, frame, frame.f_lasti, lineno)
@@ -133,6 +134,7 @@ _TRACEBACK_MANAGER = TracebackManager()
 
 def _with_append_backtrace(py_error: BaseException, backtrace: str) -> BaseException:
     """Append the backtrace to the py_error and return it."""
+    # we manually delete py_error and tb to avoid reference cycle, making it faster to gc the locals inside the frame
     try:
         tb = py_error.__traceback__
         for filename, lineno, func in _parse_backtrace(backtrace):
