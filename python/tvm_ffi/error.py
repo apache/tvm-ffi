@@ -122,7 +122,7 @@ class TracebackManager:
 
         """
         # Magic hack to prevent a circular reference
-        def create(tb: types.TracebackType | None, frame: types.FrameType, lineno: int):
+        def create(tb: types.TracebackType | None, frame: types.FrameType, lineno: int) -> sys.TracebackType:
             return types.TracebackType(tb, frame, frame.f_lasti, lineno)
         return create(tb, self._create_frame(filename, lineno, func), lineno)
 
