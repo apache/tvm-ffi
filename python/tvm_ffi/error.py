@@ -121,8 +121,11 @@ class TracebackManager:
             The new traceback with the appended frame.
 
         """
-        frame = self._create_frame(filename, lineno, func)
-        return types.TracebackType(tb, frame, frame.f_lasti, lineno)
+        try:
+            frame = self._create_frame(filename, lineno, func)
+            return types.TracebackType(tb, frame, frame.f_lasti, lineno)
+        finally:
+            del frame
 
 
 _TRACEBACK_MANAGER = TracebackManager()
@@ -130,10 +133,13 @@ _TRACEBACK_MANAGER = TracebackManager()
 
 def _with_append_backtrace(py_error: BaseException, backtrace: str) -> BaseException:
     """Append the backtrace to the py_error and return it."""
-    tb = py_error.__traceback__
-    for filename, lineno, func in _parse_backtrace(backtrace):
-        tb = _TRACEBACK_MANAGER.append_traceback(tb, filename, lineno, func)
-    return py_error.with_traceback(tb)
+    try:
+        tb = py_error.__traceback__
+        for filename, lineno, func in _parse_backtrace(backtrace):
+            tb = _TRACEBACK_MANAGER.append_traceback(tb, filename, lineno, func)
+        return py_error.with_traceback(tb)
+    finally:
+        del py_error, tb
 
 
 def _traceback_to_backtrace_str(tb: types.TracebackType | None) -> str:
