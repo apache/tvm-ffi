@@ -121,12 +121,10 @@ class TracebackManager:
             The new traceback with the appended frame.
 
         """
-        # we manually delete frame to avoid reference cycle, making it faster to gc the locals inside the frame
-        try:
-            frame = self._create_frame(filename, lineno, func)
+        # Magic hack to prevent a circular reference
+        def create(tb, frame, lineno):
             return types.TracebackType(tb, frame, frame.f_lasti, lineno)
-        finally:
-            locals().pop("frame", None)
+        return create(tb, self._create_frame(filename, lineno, func), lineno)
 
 
 _TRACEBACK_MANAGER = TracebackManager()
