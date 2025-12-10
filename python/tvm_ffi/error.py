@@ -126,7 +126,7 @@ class TracebackManager:
             frame = self._create_frame(filename, lineno, func)
             return types.TracebackType(tb, frame, frame.f_lasti, lineno)
         finally:
-            del frame
+            locals().pop("frame", None)
 
 
 _TRACEBACK_MANAGER = TracebackManager()
