@@ -128,14 +128,14 @@ def test_error_no_cyclic_reference() -> None:
     try:
         wref = None
 
-        # We should create a class as a probe to detect gc
+        # We should create a class as a probe to detect gc activity
         # beacuse weakref doesn't support list, dict or other trivial types
         class SampleObject: ...
 
         # trigger a C++ side KeyError by accessing a non-existent key
         def trigger_cpp_side_error() -> None:
             try:
-                tmp_map = tvm_ffi.Map(dict())
+                tmp_map: tvm_ffi.Map = tvm_ffi.Map(dict())
                 tmp_map["a"]
             except KeyError:
                 pass
