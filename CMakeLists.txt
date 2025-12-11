@@ -20,7 +20,6 @@ cmake_minimum_required(VERSION 3.18)
 project(tvm_ffi LANGUAGES CXX C)
 
 option(TVM_FFI_USE_LIBBACKTRACE "Enable libbacktrace" ON)
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 option(TVM_FFI_USE_EXTRA_CXX_API "Enable extra CXX API in shared lib" ON)
 option(TVM_FFI_BACKTRACE_ON_SEGFAULT "Set signal handler to print backtrace on segfault" ON)
 

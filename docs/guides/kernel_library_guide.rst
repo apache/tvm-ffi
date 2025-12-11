@@ -91,7 +91,7 @@ or:
 
  at::Tensor tensor = at::empty_strided(...);
 
-based on if strided is provided.
+based on if strides are provided.
 
 FromNDAlloc
 ^^^^^^^^^^^

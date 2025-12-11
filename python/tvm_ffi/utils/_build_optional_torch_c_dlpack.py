@@ -546,7 +546,7 @@ struct TorchDLPackExchangeAPI : public DLPackExchangeAPI {
       at::Tensor tensor;
       if (prototype->strides != nullptr) {
         at::IntArrayRef stride(prototype->strides);
-        at::Tensor tensor = at::empty_strided(shape, stride, options);
+        tensor = at::empty_strided(shape, stride, options);
       } else {
         tensor = at::empty(shape, options);
       }
