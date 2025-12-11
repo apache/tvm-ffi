@@ -119,8 +119,7 @@ def test_error_traceback_update() -> None:
 
 def test_error_no_cyclic_reference() -> None:
     # This test case ensures that when an error is raised from C++ side,
-    # and is processed by tvm ffi error handling path,
-    # there is no cyclic reference that prevents garbage collection.
+    # there is no cyclic reference that slows down the garbage collection.
     # Please see `_with_append_backtrace` in error.py
 
     # temporarily disable gc
