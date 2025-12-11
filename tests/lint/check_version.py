@@ -157,10 +157,46 @@ def _check_rust(version_info: dict) -> list[str]:
     return errors
 
 
+def _check_torch_c_dlpack_ext(version_info: dict) -> list[str]:
+    errors: list[str] = []
+    path = Path("addons") / "torch_c_dlpack_ext" / "pyproject.toml"
+
+    if not path.exists():
+        errors.append(f"[torch_c_dlpack_ext] Missing expected pyproject.toml at {path}")
+        return errors
+
+    data = tomli.loads(path.read_text(encoding="utf-8"))
+    version = data.get("project", {}).get("version")
+
+    if version is None:
+        errors.append(f"[torch_c_dlpack_ext] {path}: Missing [project].version")
+        return errors
+
+    base = version_info["base_version"]
+    allowed: set[str] = {base}
+    pre = _map_pep440_pre_to_semver(version_info.get("pre"))
+    if pre:
+        allowed.add(f"{base}-{pre}")
+    allowed = sorted(allowed)
+
+    if version not in allowed:
+        errors.append(
+            f"[torch_c_dlpack_ext] {path}: version not compatible with project version. "
+            f"Allowed: {allowed}; got: {version}."
+        )
+
+    return errors
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Check version consistency across languages")
     parser.add_argument("--cpp", action="store_true", help="Check C++ version macros")
     parser.add_argument("--rust", action="store_true", help="Check Rust crate versions")
+    parser.add_argument(
+        "--torch-c-dlpack-ext",
+        action="store_true",
+        help="Check torch_c_dlpack_ext pyproject version",
+    )
     args = parser.parse_args()
     info = _version_info()
     print(
@@ -184,6 +220,8 @@ def main() -> int:
         errors += _check_cpp(info)
     if args.rust:
         errors += _check_rust(info)
+    if args.torch_c_dlpack_ext:
+        errors += _check_torch_c_dlpack_ext(info)
     if errors:
         print("\n".join(errors))
         return 1
