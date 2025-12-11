@@ -16,6 +16,8 @@
 # under the License.
 
 
+import gc
+import weakref
 from typing import NoReturn
 
 import pytest
@@ -113,3 +115,43 @@ def test_error_traceback_update() -> None:
         ffi_error2 = fecho(e)
         assert ffi_error1.backtrace.find("raise_cxx_error") != -1
         assert ffi_error2.backtrace.find("raise_cxx_error") != -1
+
+
+def test_error_no_cyclic_reference() -> None:
+    # This test case ensures that when an error is raised from C++ side,
+    # and is processed by tvm ffi error handling path,
+    # there is no cyclic reference that prevents garbage collection.
+    # Please see `_with_append_backtrace` in error.py
+
+    # temporarily disable gc
+    gc.disable()
+
+    try:
+        wref = None
+
+        # We should create a class as a probe to detect gc
+        # beacuse weakref doesn't support list, dict or other trivial types
+        class SampleObject: ...
+
+        # trigger a C++ side KeyError by accessing a non-existent key
+        def trigger_cpp_side_error() -> None:
+            try:
+                tmp_map = tvm_ffi.Map(dict())
+                tmp_map["a"]
+            except KeyError:
+                pass
+
+        def may_create_cyclic_reference() -> None:
+            nonlocal wref
+            obj = SampleObject()
+            wref = weakref.ref(obj)
+            trigger_cpp_side_error()
+
+        may_create_cyclic_reference()
+
+        # if the object is not collected, wref() will return the object
+        assert wref() is None, "Cyclic reference occurs inside error handling pipeline"
+
+    finally:
+        # re-enable gc whenever exception occurs
+        gc.enable()
