@@ -126,11 +126,11 @@ def test_error_no_cyclic_reference() -> None:
     gc.disable()
 
     try:
-        wref = None
-
         # We should create a class as a probe to detect gc activity
         # beacuse weakref doesn't support list, dict or other trivial types
         class SampleObject: ...
+
+        wref: weakref.ReferenceType[SampleObject] | None = None
 
         # trigger a C++ side KeyError by accessing a non-existent key
         def trigger_cpp_side_error() -> None:
