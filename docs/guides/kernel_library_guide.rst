@@ -85,6 +85,14 @@ which is equivalent to:
 
  at::Tensor tensor = at::empty(...);
 
+or:
+
+.. code-block:: c++
+
+ at::Tensor tensor = at::empty_strided(...);
+
+based on if strided is provided.
+
 FromNDAlloc
 ^^^^^^^^^^^
 

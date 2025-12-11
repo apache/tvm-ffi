@@ -543,7 +543,13 @@ struct TorchDLPackExchangeAPI : public DLPackExchangeAPI {
               .dtype(at::toScalarType(prototype->dtype))
               .device(at::getATenDeviceForDLPackv1(prototype->device.device_type,
                                                    prototype->device.device_id));
-      at::Tensor tensor = at::empty(shape, options);
+      at::Tensor tensor;
+      if (prototype->strides != nullptr) {
+        at::IntArrayRef stride(prototype->strides);
+        at::Tensor tensor = at::empty_strided(shape, stride, options);
+      } else {
+        tensor = at::empty(shape, options);
+      }
       *out = at::toDLPackImpl<DLManagedTensorVersioned>(tensor);
       return 0;
     } catch (const std::exception& e) {

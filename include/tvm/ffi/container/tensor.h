@@ -442,11 +442,42 @@ class Tensor : public ObjectRef {
    */
   static Tensor FromEnvAlloc(int (*env_alloc)(DLTensor*, TVMFFIObjectHandle*), ffi::ShapeView shape,
                              DLDataType dtype, DLDevice device) {
+    return FromEnvAlloc(env_alloc, shape, ShapeView(), dtype, device);
+  }
+  /*!
+   * \brief Create a Tensor from the TVMFFIEnvTensorAlloc API
+   *
+   * This function can be used together with TVMFFIEnvSetDLPackManagedTensorAllocator
+   * in the extra/c_env_api.h to create a Tensor from the thread-local environment allocator.
+   * We explicitly pass TVMFFIEnvTensorAlloc to maintain explicit dependency on extra/c_env_api.h
+   *
+   * \code
+   *
+   * ffi::Tensor tensor = ffi::Tensor::FromEnvAlloc(
+   *   TVMFFIEnvTensorAlloc, shape, strides, dtype, device
+   * );
+   *
+   * \endcode
+   *
+   * \param env_alloc TVMFFIEnvTensorAlloc function pointer.
+   * \param shape The shape of the Tensor.
+   * \param stride The stride of the Tensor.
+   * \param dtype The data type of the Tensor.
+   * \param device The device of the Tensor.
+   * \return The created Tensor.
+   *
+   * \sa TVMFFIEnvTensorAlloc
+   */
+  static Tensor FromEnvAlloc(int (*env_alloc)(DLTensor*, TVMFFIObjectHandle*), ffi::ShapeView shape,
+                             ffi::ShapeView stride, DLDataType dtype, DLDevice device) {
     TVMFFIObjectHandle out;
     DLTensor prototype{};
     prototype.device = device;
     prototype.dtype = dtype;
     prototype.shape = const_cast<int64_t*>(shape.data());
+    if (stride.size() > 0) {
+      prototype.strides = const_cast<int64_t*>(stride.data());
+    }
     prototype.ndim = static_cast<int>(shape.size());
     TVM_FFI_CHECK_SAFE_CALL(env_alloc(&prototype, &out));
     return Tensor(
