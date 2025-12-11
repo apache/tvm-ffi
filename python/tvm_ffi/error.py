@@ -122,7 +122,7 @@ class TracebackManager:
 
         """
 
-        # The `create` function is a hack to prevent append_traceback from holding its child frame
+        # This approach avoid binding self._create_frame to a writable local variable
         # please see the reference cycle diagram in _with_append_backtrace and pull request #327 for more details
         #
         # This hack prevent binding `self._create_frame` to a writable local variable
@@ -175,7 +175,7 @@ def _with_append_backtrace(py_error: BaseException, backtrace: str) -> BaseExcep
             tb = _TRACEBACK_MANAGER.append_traceback(tb, filename, lineno, func)
         return py_error.with_traceback(tb)
     finally:
-        # this is a hack to break reference cycle
+        # We explicitly break reference cycle here
         # when the try block has return statement, the finally body is executed
         # **after** the function returns (which is a special feature of try...finally)
         # after deleting, the py_error and tb are not held by the locals of this function
