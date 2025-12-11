@@ -374,6 +374,41 @@ class Module(core.Object):
         """
         _ffi_api.ModuleWriteToFile(self, file_name, fmt)
 
+    def close(self) -> None:
+        """Explicitly close the module if applicable, i.e., unload the dynamic library.
+
+        Notes
+        -----
+        This function is a no-op for modules that do not support unloading.
+        The destructor of modules will also call close() as long as the module is not
+        being kept alive via `set_keep_alive(True)`.
+
+        See Also
+        --------
+        :py:meth:`set_keep_alive`: Set whether to keep the module alive.
+
+        """
+        _ffi_api.ModuleClose(self)
+
+    def set_keep_alive(self, keep_alive: bool) -> None:
+        """For unloadable modules, if `keep_alive` is set to true, the module will not be unloaded in its destructor; otherwise, it will be unloaded when the module is destructed.
+
+        Parameters
+        ----------
+        keep_alive
+            Whether to keep the module alive.
+
+        Notes
+        -----
+        This function is a no-op for modules that do not support unloading.
+
+        See Also
+        --------
+        :py:meth:`close`: Explicitly close the module.
+
+        """
+        _ffi_api.ModuleSetKeepAlive(self, keep_alive)
+
 
 def system_lib(symbol_prefix: str = "") -> Module:
     """Get system-wide library module singleton with functions prefixed by ``__tvm_ffi_{symbol_prefix}``.
@@ -427,13 +462,18 @@ def system_lib(symbol_prefix: str = "") -> Module:
     return _ffi_api.SystemLib(symbol_prefix)
 
 
-def load_module(path: str | PathLike) -> Module:
+def load_module(path: str | PathLike, keep_alive: bool = True) -> Module:
     """Load module from file.
 
     Parameters
     ----------
     path
         The path to the module file.
+
+    keep_alive
+        Whether to keep the loaded module alive to prevent unloading. If True, the module will be
+        kept alive until the program exits, unless manually unloaded via `Module.close()`.
+        If False, the module may be unloaded when there are no more references to it.
 
     Returns
     -------
@@ -459,4 +499,7 @@ def load_module(path: str | PathLike) -> Module:
 
     """
     path = fspath(path)
-    return _ffi_api.ModuleLoadFromFile(path)
+    mod = _ffi_api.ModuleLoadFromFile(path)
+    if keep_alive:
+        mod.set_keep_alive(keep_alive)
+    return mod

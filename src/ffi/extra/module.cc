@@ -161,7 +161,9 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def_method("ffi.ModuleGetWriteFormats", &ModuleObj::GetWriteFormats)
       .def_method("ffi.ModuleWriteToFile", &ModuleObj::WriteToFile)
       .def_method("ffi.ModuleImportModule", &ModuleObj::ImportModule)
-      .def_method("ffi.ModuleClearImports", &ModuleObj::ClearImports);
+      .def_method("ffi.ModuleClearImports", &ModuleObj::ClearImports)
+      .def_method("ffi.ModuleClose", &ModuleObj::Close)
+      .def_method("ffi.ModuleSetKeepAlive", &ModuleObj::SetKeepAlive);
 }
 }  // namespace ffi
 }  // namespace tvm

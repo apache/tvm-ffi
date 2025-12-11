@@ -46,10 +46,18 @@ class DSOLibrary final : public Library {
  public:
   explicit DSOLibrary(const String& name) { Load(name); }
   ~DSOLibrary() final {
-    if (lib_handle_) Unload();
+    if (lib_handle_ && !keep_alive_) Unload();
   }
 
   void* GetSymbol(const String& name) final { return GetSymbol_(name.c_str()); }
+
+  void SetKeepAlive(bool keep_alive) final { keep_alive_ = keep_alive; }
+
+  void Close() final {
+    if (lib_handle_) {
+      Unload();
+    }
+  }
 
  private:
   // private system dependent implementation
@@ -64,6 +72,7 @@ class DSOLibrary final : public Library {
   // \brief Linux library handle
   void* lib_handle_{nullptr};
 #endif
+  bool keep_alive_{false};
 };
 
 #if defined(_WIN32)

@@ -14,7 +14,6 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-import gc
 import pathlib
 
 import numpy
@@ -196,10 +195,6 @@ def test_build_inline_with_metadata() -> None:  # noqa: PLR0915
     schema = TypeSchema.from_json_str(metadata["type_schema"])
     assert str(schema) == "Callable[[Tensor, Tensor], None]"
 
-    # Explicitly cleanup all objects before module unload to avoid use-after-free
-    del metadata, schema, result, x, y, mod
-    gc.collect()
-
 
 def test_build_inline_with_docstrings() -> None:
     """Test building functions with documentation using the functions dict."""
@@ -278,10 +273,6 @@ def test_build_inline_with_docstrings() -> None:
     doc = mod.get_function_doc("divide")
     assert doc is not None, "divide should have documentation"
     assert doc == divide_docstring
-
-    # Explicitly cleanup all objects before module unload to avoid use-after-free
-    del metadata, schema, doc, result, mod
-    gc.collect()
 
 
 def test_build_without_metadata() -> None:

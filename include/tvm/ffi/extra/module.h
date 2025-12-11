@@ -176,6 +176,22 @@ class TVM_FFI_EXTRA_CXX_API ModuleObj : public Object {
    * \note Note the signature is not part of the public API.
    */
   const Array<Any>& imports() const { return this->imports_; }
+  /*!
+   * \brief For unloadable libraries, if `keep_alive` is set to true, the library will not be
+   * unloaded in its destructor; otherwise, it will be unloaded when the library is destructed.
+   * \param keep_alive Whether to keep the library alive.
+   * \note This function is a no-op for libraries that do not support unloading.
+   * \sa Close
+   */
+  virtual void SetKeepAlive(bool keep_alive) {}
+  /*!
+   * \brief Explicitly close the library if applicable, i.e. unload the dynamic library.
+   * \note This function is a no-op for libraries that do not support unloading.
+   * \note The destructor of libraries will also call Close() as long as the library is not
+   * being kept alive via `SetKeepAlive(true)`.
+   * \sa SetKeepAlive
+   */
+  virtual void Close() {}
 
   struct InternalUnsafe;
 

@@ -59,6 +59,22 @@ class Library : public Object {
     String name_with_prefix = symbol::tvm_ffi_symbol_prefix + name;
     return GetSymbol(name_with_prefix);
   }
+  /*!
+   * \brief For unloadable libraries, if `keep_alive` is set to true, the library will not be
+   * unloaded in its destructor; otherwise, it will be unloaded when the library is destructed.
+   * \param keep_alive Whether to keep the library alive.
+   * \note This function is a no-op for libraries that do not support unloading.
+   * \sa Close
+   */
+  virtual void SetKeepAlive(bool keep_alive) {}
+  /*!
+   * \brief Explicitly close the library if applicable, i.e. unload the dynamic library.
+   * \note This function is a no-op for libraries that do not support unloading.
+   * \note The destructor of libraries will also call Close() as long as the library is not
+   * being kept alive via `SetKeepAlive(true)`.
+   * \sa SetKeepAlive
+   */
+  virtual void Close() {}
   // NOTE: we do not explicitly create an type index and type_key here for libary.
   // This is because we do not need dynamic type downcasting and only need to use the refcounting
 };

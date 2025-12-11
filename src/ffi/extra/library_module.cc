@@ -82,6 +82,9 @@ class LibraryModuleObj final : public ModuleObj {
     return std::nullopt;
   }
 
+  void SetKeepAlive(bool keep_alive) final { lib_->SetKeepAlive(keep_alive); }
+  void Close() final { lib_->Close(); }
+
  private:
   ObjectPtr<Library> lib_;
 };
@@ -96,7 +99,6 @@ Module LoadModuleFromBytes(const std::string& kind, const Bytes& bytes) {
   }
   return (*floader)(bytes).cast<Module>();
 }
-
 /*!
  * \brief Process libary binary to recover binary-serialized modules
  * \param library_bin The binary embedded in the library.
