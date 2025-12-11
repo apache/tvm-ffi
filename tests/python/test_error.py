@@ -138,7 +138,7 @@ def test_error_no_cyclic_reference() -> None:
             except KeyError:
                 pass
 
-        def may_create_cyclic_reference() -> weakref.ReferenceType[SampleObject]:
+        def may_create_cyclic_reference() -> weakref.ReferenceType:
             obj = SampleObject()
             trigger_cpp_side_error()
             return weakref.ref(obj)
