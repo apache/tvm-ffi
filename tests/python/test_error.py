@@ -18,7 +18,7 @@
 
 import gc
 import weakref
-from typing import NoReturn
+from typing import NoReturn, Union
 
 import pytest
 import tvm_ffi
@@ -130,7 +130,7 @@ def test_error_no_cyclic_reference() -> None:
         # beacuse weakref doesn't support list, dict or other trivial types
         class SampleObject: ...
 
-        wref: weakref.ReferenceType[SampleObject] | None = None
+        wref: Union[weakref.ReferenceType[SampleObject], None] = None
 
         # trigger a C++ side KeyError by accessing a non-existent key
         def trigger_cpp_side_error() -> None:
