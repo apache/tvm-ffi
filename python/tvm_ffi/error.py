@@ -169,8 +169,8 @@ def _with_append_backtrace(py_error: BaseException, backtrace: str) -> BaseExcep
     #     +-------------------+                              |
     #     | _get_frame        | <----------------------------+
     #     +-------------------+      (Cycle closes here)
+    tb = py_error.__traceback__
     try:
-        tb = py_error.__traceback__
         for filename, lineno, func in _parse_backtrace(backtrace):
             tb = _TRACEBACK_MANAGER.append_traceback(tb, filename, lineno, func)
         return py_error.with_traceback(tb)
@@ -178,7 +178,8 @@ def _with_append_backtrace(py_error: BaseException, backtrace: str) -> BaseExcep
         # this is a hack to break reference cycle
         # when the try block has return statement, the finally body is executed
         # **after** the function returns (which is a special feature of try...finally)
-        # so we can both use the py_error and tb in the function body freely, and delete them afterwards
+        # after deleting, the py_error and tb are not held by the locals of this function
+        # and the reference cycle above is resolved
         del py_error, tb
 
 
