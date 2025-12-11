@@ -121,9 +121,13 @@ class TracebackManager:
             The new traceback with the appended frame.
 
         """
+
         # Magic hack to prevent a circular reference
-        def create(tb: types.TracebackType | None, frame: types.FrameType, lineno: int) -> types.TracebackType:
+        def create(
+            tb: types.TracebackType | None, frame: types.FrameType, lineno: int
+        ) -> types.TracebackType:
             return types.TracebackType(tb, frame, frame.f_lasti, lineno)
+
         return create(tb, self._create_frame(filename, lineno, func), lineno)
 
 
