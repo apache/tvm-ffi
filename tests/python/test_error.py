@@ -18,7 +18,7 @@
 
 import gc
 import weakref
-from typing import NoReturn, Union
+from typing import NoReturn
 
 import pytest
 import tvm_ffi
@@ -130,8 +130,6 @@ def test_error_no_cyclic_reference() -> None:
         # beacuse weakref doesn't support list, dict or other trivial types
         class SampleObject: ...
 
-        wref: Union[weakref.ReferenceType[SampleObject], None] = None
-
         # trigger a C++ side KeyError by accessing a non-existent key
         def trigger_cpp_side_error() -> None:
             try:
@@ -143,10 +141,10 @@ def test_error_no_cyclic_reference() -> None:
         def may_create_cyclic_reference() -> None:
             nonlocal wref
             obj = SampleObject()
-            wref = weakref.ref(obj)
             trigger_cpp_side_error()
+            return weakref.ref(obj)
 
-        may_create_cyclic_reference()
+        wref = may_create_cyclic_reference()
 
         # if the object is not collected, wref() will return the object
         assert wref() is None, "Cyclic reference occurs inside error handling pipeline"
