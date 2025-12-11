@@ -121,8 +121,18 @@ class TracebackManager:
             The new traceback with the appended frame.
 
         """
-        frame = self._create_frame(filename, lineno, func)
-        return types.TracebackType(tb, frame, frame.f_lasti, lineno)
+
+        # This approach avoids binding the created frame object to a local variable
+        # in `append_traceback`, which would create a reference cycle. By using a
+        # nested function, the frame object is a temporary that is not held by
+        # the locals of `append_traceback`. See the diagram in `_with_append_backtrace`
+        # and PR #327 for more details.
+        def create(
+            tb: types.TracebackType | None, frame: types.FrameType, lineno: int
+        ) -> types.TracebackType:
+            return types.TracebackType(tb, frame, frame.f_lasti, lineno)
+
+        return create(tb, self._create_frame(filename, lineno, func), lineno)
 
 
 _TRACEBACK_MANAGER = TracebackManager()
@@ -130,10 +140,47 @@ _TRACEBACK_MANAGER = TracebackManager()
 
 def _with_append_backtrace(py_error: BaseException, backtrace: str) -> BaseException:
     """Append the backtrace to the py_error and return it."""
+    # We manually delete py_error and tb to avoid reference cycle, making it faster to gc the locals inside the frame
+    # please see pull request #327 for more details
+    #
+    # Memory Cycle Diagram:
+    #
+    #         [Stack Frames]                            [Heap Objects]
+    #     +-------------------+
+    #     | outside functions | -----------------------> [ Tensor ]
+    #     +-------------------+                   (Held by cycle, slow to free)
+    #             ^
+    #             | f_back
+    #     +-------------------+  locals      py_error
+    #     | py_error (this)   | -----+--------------> [ BaseException ]
+    #     +-------------------+      |                       |
+    #             ^                  |                       | (with_traceback)
+    #             | f_back           |                       v
+    #     +-------------------+      +--------------> [ Traceback Obj ]
+    #     | append_traceback  |                   tb         |
+    #     +-------------------+                              |
+    #             ^                                          |
+    #             | f_back                                   |
+    #     +-------------------+                              |
+    #     | _create_frame     |                              |
+    #     +-------------------+                              |
+    #             ^                                          |
+    #             | f_back                                   |
+    #     +-------------------+                              |
+    #     | _get_frame        | <----------------------------+
+    #     +-------------------+      (Cycle closes here)
     tb = py_error.__traceback__
-    for filename, lineno, func in _parse_backtrace(backtrace):
-        tb = _TRACEBACK_MANAGER.append_traceback(tb, filename, lineno, func)
-    return py_error.with_traceback(tb)
+    try:
+        for filename, lineno, func in _parse_backtrace(backtrace):
+            tb = _TRACEBACK_MANAGER.append_traceback(tb, filename, lineno, func)
+        return py_error.with_traceback(tb)
+    finally:
+        # We explicitly break the reference cycle here. The `finally` block is
+        # executed just before the function returns, after the `return` expression
+        # in the `try` block has been evaluated. Deleting `py_error` and `tb`
+        # here ensures they are not held by this function's frame's locals,
+        # which resolves the cycle.
+        del py_error, tb
 
 
 def _traceback_to_backtrace_str(tb: types.TracebackType | None) -> str:
