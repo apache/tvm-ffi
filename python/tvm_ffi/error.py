@@ -122,11 +122,11 @@ class TracebackManager:
 
         """
 
-        # This approach avoid binding self._create_frame to a writable local variable
-        # please see the reference cycle diagram in _with_append_backtrace and pull request #327 for more details
-        #
-        # This hack prevent binding `self._create_frame` to a writable local variable
-        # Thus, frame object is a temporary object that won't be held by the locals of append_traceback
+        # This approach avoids binding the created frame object to a local variable
+        # in `append_traceback`, which would create a reference cycle. By using a
+        # nested function, the frame object is a temporary that is not held by
+        # the locals of `append_traceback`. See the diagram in `_with_append_backtrace`
+        # and PR #327 for more details.
         def create(
             tb: types.TracebackType | None, frame: types.FrameType, lineno: int
         ) -> types.TracebackType:
