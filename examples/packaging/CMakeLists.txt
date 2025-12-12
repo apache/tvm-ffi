@@ -60,9 +60,6 @@ add_library(my_ffi_extension SHARED src/extension.cc)
 target_link_libraries(my_ffi_extension tvm_ffi_header)
 target_link_libraries(my_ffi_extension tvm_ffi_shared)
 
-# show as my_ffi_extension.so
-set_target_properties(my_ffi_extension PROPERTIES PREFIX "")
-
 if (TVM_FFI_EXT_SHIP_DEBUG_SYMBOLS)
   # ship debugging symbols for backtrace on macos
   tvm_ffi_add_prefix_map(my_ffi_extension ${CMAKE_CURRENT_SOURCE_DIR})
