@@ -22,6 +22,7 @@
 #include <tvm/ffi/function.h>
 #include <tvm/ffi/reflection/registry.h>
 
+#include <mutex>
 #include <unordered_set>
 #include <vector>
 
@@ -29,6 +30,33 @@
 
 namespace tvm {
 namespace ffi {
+
+/*!
+ * \brief Global modules, i.e. modules that are owned by the runtime and should not be unloaded.
+ * On the frontend, a module is added to the registry if `keep_alive=True` when `load_module` is
+ * called.
+ */
+class ModuleGlobals {
+ public:
+  void Add(const Module& m) {
+    std::scoped_lock<std::mutex> lock(mutex_);
+    modules_.Set(m, 1);
+  }
+
+  void Remove(const Module& m) {
+    std::scoped_lock<std::mutex> lock(mutex_);
+    modules_.erase(m);
+  }
+
+  static ModuleGlobals* Get() {
+    static ModuleGlobals instance;
+    return &instance;
+  }
+
+ private:
+  Map<Module, int> modules_;
+  std::mutex mutex_;
+};
 
 Optional<Function> ModuleObj::GetFunction(const String& name, bool query_imports) {
   if (auto opt_func = this->GetFunction(name)) {
@@ -161,7 +189,10 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def_method("ffi.ModuleGetWriteFormats", &ModuleObj::GetWriteFormats)
       .def_method("ffi.ModuleWriteToFile", &ModuleObj::WriteToFile)
       .def_method("ffi.ModuleImportModule", &ModuleObj::ImportModule)
-      .def_method("ffi.ModuleClearImports", &ModuleObj::ClearImports);
+      .def_method("ffi.ModuleClearImports", &ModuleObj::ClearImports)
+      .def_method("ffi.ModuleGlobalsAdd", [](const Module& mod) { ModuleGlobals::Get()->Add(mod); })
+      .def_method("ffi.ModuleGlobalsRemove",
+                  [](const Module& mod) { ModuleGlobals::Get()->Remove(mod); });
 }
 }  // namespace ffi
 }  // namespace tvm
