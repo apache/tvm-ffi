@@ -55,6 +55,11 @@ class MapForwardIterFunctor {
   ffi::MapObj::iterator end_;
 };
 
+ObjectRef GetMissingObject() {
+  static ObjectRef missing_obj(make_object<Object>());
+  return missing_obj;
+}
+
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef()
@@ -81,8 +86,17 @@ TVM_FFI_STATIC_INIT_BLOCK() {
            [](const ffi::MapObj* n, const Any& k) -> int64_t {
              return static_cast<int64_t>(n->count(k));
            })
-      .def("ffi.MapForwardIterFunctor", [](const ffi::MapObj* n) -> ffi::Function {
-        return ffi::Function::FromTyped(MapForwardIterFunctor(n->begin(), n->end()));
+      .def("ffi.MapForwardIterFunctor",
+           [](const ffi::MapObj* n) -> ffi::Function {
+             return ffi::Function::FromTyped(MapForwardIterFunctor(n->begin(), n->end()));
+           })
+      .def("ffi.MapGetMissingObject", GetMissingObject)
+      .def("ffi.MapGetItemOrMissing", [](const ffi::MapObj* n, const Any& k) -> Any {
+        try {
+          return n->at(k);
+        } catch (const tvm::ffi::Error& e) {
+          return GetMissingObject();
+        }
       });
 }
 }  // namespace ffi
