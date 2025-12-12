@@ -32,6 +32,7 @@
 
 #include <atomic>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -202,6 +203,19 @@ class TensorObjFromNDAlloc : public TensorObj {
     alloc_.AllocData(static_cast<DLTensor*>(this), std::forward<ExtraArgs>(extra_args)...);
   }
 
+  template <typename... ExtraArgs>
+  TensorObjFromNDAlloc(TNDAlloc alloc, const DLTensor& prototype, ExtraArgs&&... extra_args)
+      : alloc_(alloc) {
+    *static_cast<DLTensor*>(this) = prototype;
+    this->shape = reinterpret_cast<int64_t*>(reinterpret_cast<char*>(this) + sizeof(Self));
+    this->strides = this->shape + prototype.ndim;
+    TVM_FFI_ICHECK_NOTNULL(prototype.strides);
+    std::copy(prototype.shape, prototype.shape + prototype.ndim, this->shape);
+    std::copy(prototype.strides, prototype.strides + prototype.ndim, this->strides);
+    // call allocator to alloc data
+    alloc_.AllocData(static_cast<DLTensor*>(this), std::forward<ExtraArgs>(extra_args)...);
+  }
+
   ~TensorObjFromNDAlloc() { alloc_.FreeData(static_cast<DLTensor*>(this)); }
 
  private:
@@ -348,6 +362,40 @@ class Tensor : public ObjectRef {
    * \return True if the Tensor data is aligned to the given alignment, false otherwise.
    */
   bool IsAligned(size_t alignment) const { return tvm::ffi::IsAligned(*get(), alignment); }
+
+  /*!
+   * \brief Create a new Tensor as a strided view of the current Tensor.
+   * \param shape The shape of the new Tensor.
+   * \param strides The strides of the new Tensor.
+   * \param element_offset The element offset of the new Tensor in the unit of dtype elements.
+   * \return The new Tensor.
+   * \note element_offset is in the unit of dtype elements not bytes.
+   */
+  Tensor as_strided(ShapeView shape, ShapeView strides,
+                    std::optional<int64_t> element_offset = std::nullopt) const {
+    DLTensor prototype;
+    prototype = *static_cast<const DLTensor*>(get());
+    prototype.shape = const_cast<int64_t*>(shape.data());
+    prototype.ndim = static_cast<int>(shape.size());
+    prototype.strides = const_cast<int64_t*>(strides.data());
+    int64_t elem_offset_as_i64 = element_offset.value_or(0);
+
+    TVM_FFI_ICHECK_GE(elem_offset_as_i64, 0);
+    prototype.byte_offset += GetDataSize(static_cast<size_t>(elem_offset_as_i64), prototype.dtype);
+
+    if (prototype.byte_offset != 0 && IsDirectAddressDevice(prototype.device)) {
+      // If the device supports direct address, we can just add the byte offset to the data pointer.
+      prototype.data =
+          reinterpret_cast<void*>(reinterpret_cast<char*>(prototype.data) + prototype.byte_offset);
+      prototype.byte_offset = 0;
+    }
+
+    TVMFFIObjectHandle out;
+    Object* obj_handle = const_cast<TensorObj*>(get());
+    TVM_FFI_CHECK_SAFE_CALL(TVMFFITensorCreateUnsafeView(obj_handle, &prototype, &out));
+    return Tensor(
+        details::ObjectUnsafe::ObjectPtrFromOwned<TensorObj>(static_cast<TVMFFIObject*>(out)));
+  }
   /*!
    * \brief Create a Tensor from a NDAllocator.
    *
@@ -416,6 +464,41 @@ class Tensor : public ObjectRef {
     return Tensor(make_inplace_array_object<details::TensorObjFromNDAlloc<TNDAlloc>, int64_t>(
         num_extra_i64_at_tail, alloc, shape, dtype, device,
         std::forward<ExtraArgs>(extra_args)...));
+  }
+
+  /*!
+   * \brief A variant of FromNDAlloc that allows explicit passing a strides.
+   *
+   * \note This function needs to ensure that strides are well-defined
+   *       with respect to the allocated compact shape.
+   *
+   * \param alloc The NDAllocator.
+   * \param shape The shape of the Tensor.
+   * \param strides The strides of the Tensor.
+   * \param dtype The data type of the Tensor.
+   * \param device The device of the Tensor.
+   * \param extra_args Extra arguments to be forwarded to TNDAlloc.
+   * \return The created Tensor.
+   * \tparam TNDAlloc The type of the NDAllocator, impelments Alloc and Free.
+   * \tparam ExtraArgs Extra arguments to be passed to Alloc.
+   */
+  template <typename TNDAlloc, typename... ExtraArgs>
+  static Tensor FromNDAllocStrided(TNDAlloc alloc, ffi::ShapeView shape, ffi::ShapeView strides,
+                                   DLDataType dtype, DLDevice device, ExtraArgs&&... extra_args) {
+    TVM_FFI_CHECK(shape.size() == strides.size(), ValueError)
+        << "shape and strides must have the same size.";
+    // inplace alloc shape and strides after data structure (as a result why multiply 2)
+    size_t num_extra_i64_at_tail = shape.size() * 2;
+    DLTensor prototype;
+    prototype.data = nullptr;
+    prototype.device = device;
+    prototype.dtype = dtype;
+    prototype.shape = const_cast<int64_t*>(shape.data());
+    prototype.ndim = static_cast<int>(shape.size());
+    prototype.strides = const_cast<int64_t*>(strides.data());
+    prototype.byte_offset = 0;
+    return Tensor(make_inplace_array_object<details::TensorObjFromNDAlloc<TNDAlloc>, int64_t>(
+        num_extra_i64_at_tail, alloc, prototype, std::forward<ExtraArgs>(extra_args)...));
   }
   /*!
    * \brief Create a Tensor from the TVMFFIEnvTensorAlloc API
@@ -704,17 +787,54 @@ class TensorView {
    * \brief This functions redirects to ndim().
    * \return The number of dimensions in the Tensor.
    */
-  inline int32_t dim() { return ndim(); }
+  int32_t dim() const { return ndim(); }
   /*!
    * \brief This functions redirects to shape().
    * \return The shape of the Tensor.
    */
-  inline ShapeView sizes() const { return shape(); }
+  ShapeView sizes() const { return shape(); }
   /*!
    * \brief This functions redirects to IsContiguous().
    * \return True if the Tensor is contiguous, false otherwise.
    */
-  inline bool is_contiguous() const { return IsContiguous(); }
+  bool is_contiguous() const { return IsContiguous(); }
+  /*!
+   * \brief Create a new TensorView as a strided view of the current TensorView.
+   *
+   * Use this function with extreme caution. The user must ensure that the shape and strides
+   * arrays, as well as the data pointer, remain valid for the lifetime of the returned TensorView.
+   *
+   * One common anti-pattern is to create temporary shape/strides arrays and pass them in, but
+   * then deallocate the temporary arrays immediately after the call to as_strided, which
+   * causes the returned TensorView to point to invalid memory.
+   *
+   * \param shape The shape of the new TensorView.
+   * \param strides The strides of the new TensorView.
+   * \param element_offset The element offset of the new TensorView in units of dtype elements, not
+   * bytes.
+   * \return The new TensorView.
+   *
+   * \note The caller must ensure that the shape and strides arrays remain valid for the lifetime
+   *       of the returned TensorView.
+   */
+  TensorView as_strided(ShapeView shape, ShapeView strides,
+                        std::optional<int64_t> element_offset = std::nullopt) const {
+    DLTensor prototype = tensor_;
+    prototype.shape = const_cast<int64_t*>(shape.data());
+    prototype.ndim = static_cast<int>(shape.size());
+    prototype.strides = const_cast<int64_t*>(strides.data());
+    TVM_FFI_ICHECK_EQ(shape.size(), strides.size());
+    int64_t elem_offset_as_i64 = element_offset.value_or(0);
+    TVM_FFI_ICHECK_GE(elem_offset_as_i64, 0);
+    prototype.byte_offset += GetDataSize(static_cast<size_t>(elem_offset_as_i64), prototype.dtype);
+    if (prototype.byte_offset != 0 && IsDirectAddressDevice(prototype.device)) {
+      // If the device supports direct address, we can just add the byte offset to the data pointer.
+      prototype.data =
+          reinterpret_cast<void*>(reinterpret_cast<char*>(prototype.data) + prototype.byte_offset);
+      prototype.byte_offset = 0;
+    }
+    return TensorView(&prototype);
+  }
 
  private:
   DLTensor tensor_;

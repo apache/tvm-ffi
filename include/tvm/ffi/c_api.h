@@ -674,6 +674,20 @@ TVM_FFI_DLL int TVMFFITensorFromDLPackVersioned(DLManagedTensorVersioned* from,
  */
 TVM_FFI_DLL int TVMFFITensorToDLPackVersioned(TVMFFIObjectHandle from,
                                               DLManagedTensorVersioned** out);
+
+/*!
+ * \brief Create a Tensor view from source using metadata in the prototype while retaining the
+ * source tensor.
+ * \param source The source tensor whose data memory will be shared by the view.
+ * \param prototype The prototype DLTensor that contains the metadata for the view.
+ * \param out The output Tensor handle.
+ * \return 0 on success, nonzero on failure.
+ * \note This function is unsafe and the caller must ensure the prototype is valid and that
+ *       the prototype's data pointer points to memory owned by the source tensor. The callee
+ *       allocates shape and strides arrays in the output tensor and copies them from the prototype.
+ */
+TVM_FFI_DLL int TVMFFITensorCreateUnsafeView(TVMFFIObjectHandle source, const DLTensor* prototype,
+                                             TVMFFIObjectHandle* out);
 //---------------------------------------------------------------
 // Section: string/bytes support APIs.
 // These APIs are used to simplify the string/bytes construction
