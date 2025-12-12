@@ -23,7 +23,7 @@ from __future__ import annotations
 from typing import Any, Callable, TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
-    from tvm_ffi import Module
+    from tvm_ffi import Module, Object
     from tvm_ffi.access_path import AccessPath
 # isort: on
 # fmt: on
@@ -50,6 +50,8 @@ if TYPE_CHECKING:
     def MapCount(_0: Mapping[Any, Any], _1: Any, /) -> int: ...
     def MapForwardIterFunctor(_0: Mapping[Any, Any], /) -> Callable[..., Any]: ...
     def MapGetItem(_0: Mapping[Any, Any], _1: Any, /) -> Any: ...
+    def MapGetItemOrMissing(_0: Mapping[Any, Any], _1: Any, /) -> Any: ...
+    def MapGetMissingObject() -> Object: ...
     def MapSize(_0: Mapping[Any, Any], /) -> int: ...
     def ModuleClearImports(_0: Module, /) -> None: ...
     def ModuleGetFunction(_0: Module, _1: str, _2: bool, /) -> Callable[..., Any] | None: ...
@@ -95,6 +97,8 @@ __all__ = [
     "MapCount",
     "MapForwardIterFunctor",
     "MapGetItem",
+    "MapGetItemOrMissing",
+    "MapGetMissingObject",
     "MapSize",
     "ModuleClearImports",
     "ModuleGetFunction",

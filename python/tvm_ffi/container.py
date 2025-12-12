@@ -77,6 +77,8 @@ K = TypeVar("K")
 V = TypeVar("V")
 _DefaultT = TypeVar("_DefaultT")
 
+MISSING = _ffi_api.MapGetMissingObject()
+
 
 def getitem_helper(
     obj: Any,
@@ -254,12 +256,11 @@ class ItemsView(ItemsViewBase[K, V]):
         if not isinstance(item, tuple) or len(item) != 2:
             return False
         key, value = item
-        try:
-            existing_value = self._backend_map[key]
-        except KeyError:
+        actual_value = self._backend_map.get(key, MISSING)
+        if actual_value is MISSING:
             return False
-        else:
-            return existing_value == value
+        # TODO(@junrus): Is `__eq__` the right method to use here?
+        return actual_value == value
 
 
 @register_object("ffi.Map")
@@ -349,10 +350,10 @@ class Map(core.Object, Mapping[K, V]):
             The result value.
 
         """
-        try:
-            return self[key]
-        except KeyError:
+        ret = _ffi_api.MapGetItemOrMissing(self, key)
+        if MISSING.same_as(ret):
             return default
+        return ret
 
     def __repr__(self) -> str:
         """Return a string representation of the map."""
