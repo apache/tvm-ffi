@@ -427,13 +427,17 @@ def system_lib(symbol_prefix: str = "") -> Module:
     return _ffi_api.SystemLib(symbol_prefix)
 
 
-def load_module(path: str | PathLike) -> Module:
+def load_module(path: str | PathLike, keep_module_alive: bool = True) -> Module:
     """Load module from file.
 
     Parameters
     ----------
     path
         The path to the module file.
+
+    keep_module_alive
+        Whether to keep the module alive. If True, the module will be kept alive
+        for the duration of the program until libtvm_ffi.so is unloaded.
 
     Returns
     -------
@@ -459,4 +463,7 @@ def load_module(path: str | PathLike) -> Module:
 
     """
     path = fspath(path)
-    return _ffi_api.ModuleLoadFromFile(path)
+    mod = _ffi_api.ModuleLoadFromFile(path)
+    if keep_module_alive:
+        _ffi_api.ModuleGlobalsAdd(mod)
+    return mod
