@@ -213,7 +213,9 @@ TEST(Tensor, TensorViewAsStrided) {
 
   // Fill with sequential values: [0, 1, 2, 3, 4, 5]
   float* data = reinterpret_cast<float*>(tensor.data_ptr());
-  for (int64_t i = 0; i < tensor.numel(); ++i) {
+  size_t element_capacity = GetDataSize(tensor) / sizeof(float);
+  ASSERT_EQ(element_capacity, static_cast<size_t>(tensor.numel()));
+  for (size_t i = 0; i < element_capacity; ++i) {
     data[i] = static_cast<float>(i);
   }
 
@@ -292,7 +294,9 @@ TEST(Tensor, AsStrided) {
 
   // Fill with sequential values: [0, 1, 2, 3, 4, 5]
   float* data = reinterpret_cast<float*>(tensor.data_ptr());
-  for (int64_t i = 0; i < tensor.numel(); ++i) {
+  size_t element_capacity = GetDataSize(tensor) / sizeof(float);
+  ASSERT_EQ(element_capacity, static_cast<size_t>(tensor.numel()));
+  for (size_t i = 0; i < element_capacity; ++i) {
     data[i] = static_cast<float>(i);
   }
 

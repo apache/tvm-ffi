@@ -189,7 +189,7 @@ class TensorObjFromNDAlloc : public TensorObj {
   template <typename... ExtraArgs>
   TensorObjFromNDAlloc(TNDAlloc alloc, ffi::ShapeView shape, DLDataType dtype, DLDevice device,
                        ExtraArgs&&... extra_args)
-      : alloc_(alloc) {
+      : alloc_(std::move(alloc)) {
     this->device = device;
     this->ndim = static_cast<int>(shape.size());
     this->dtype = dtype;
@@ -205,7 +205,7 @@ class TensorObjFromNDAlloc : public TensorObj {
 
   template <typename... ExtraArgs>
   TensorObjFromNDAlloc(TNDAlloc alloc, const DLTensor& prototype, ExtraArgs&&... extra_args)
-      : alloc_(alloc) {
+      : alloc_(std::move(alloc)) {
     *static_cast<DLTensor*>(this) = prototype;
     this->shape = reinterpret_cast<int64_t*>(reinterpret_cast<char*>(this) + sizeof(Self));
     this->strides = this->shape + prototype.ndim;
