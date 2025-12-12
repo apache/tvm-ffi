@@ -27,7 +27,10 @@ import importlib.metadata as im
 import os
 import sys
 from pathlib import Path
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
+
+if TYPE_CHECKING:
+    from .module import Module
 
 
 def find_libtvm_ffi() -> str:
@@ -167,6 +170,36 @@ def load_lib_ctypes(package: str, target_name: str, mode: str) -> ctypes.CDLL:
     if sys.platform.startswith("win32"):
         os.add_dll_directory(str(lib_path.parent))
     return ctypes.CDLL(str(lib_path), getattr(ctypes, mode))
+
+
+def load_lib_module(package: str, target_name: str, keep_module_alive: bool = True) -> Module:
+    """Load the tvm_ffi shared library by searching likely paths.
+
+    Parameters
+    ----------
+    package
+        The package name where the library is expected to be found. For example,
+        ``"apache-tvm-ffi"`` is the package name of `tvm-ffi`.
+
+    target_name
+        Name of the CMake target, e.g., ``"tvm_ffi"``. It is used to derive the platform-specific
+        shared library name, e.g., ``"libtvm_ffi.so"`` on Linux, ``"tvm_ffi.dll"`` on Windows.
+
+    keep_module_alive
+        Whether to keep the loaded module alive to prevent it from being unloaded.
+
+    Returns
+    -------
+    The loaded shared library.
+
+    """
+    from .module import load_module  # noqa: PLC0415
+
+    lib_path: Path = _find_library_by_basename(package, target_name)
+    # The dll search path need to be added explicitly in windows
+    if sys.platform.startswith("win32"):
+        os.add_dll_directory(str(lib_path.parent))
+    return load_module(lib_path, keep_module_alive=keep_module_alive)
 
 
 def _find_library_by_basename(package: str, target_name: str) -> Path:  # noqa: PLR0912

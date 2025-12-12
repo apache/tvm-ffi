@@ -16,32 +16,6 @@
 # Base logic to load library for extension package
 """Utilities to locate and load the example extension shared library."""
 
-import sys
-from pathlib import Path
-
 import tvm_ffi
 
-
-def _load_lib() -> tvm_ffi.Module:
-    # first look at the directory of the current file
-    file_dir = Path(__file__).resolve().parent
-
-    path_candidates = [
-        file_dir,
-        file_dir / ".." / ".." / "build",
-    ]
-
-    if sys.platform.startswith("win32"):
-        lib_dll_name = "my_ffi_extension.dll"
-    elif sys.platform.startswith("darwin"):
-        lib_dll_name = "my_ffi_extension.dylib"
-    else:
-        lib_dll_name = "my_ffi_extension.so"
-    for candidate in path_candidates:
-        for path in Path(candidate).glob(lib_dll_name):
-            return tvm_ffi.load_module(str(path))
-
-    raise RuntimeError(f"Cannot find {lib_dll_name} in {path_candidates}")
-
-
-_LIB = _load_lib()
+_LIB = tvm_ffi.libinfo.load_lib_module("my-ffi-extension", "my_ffi_extension")
