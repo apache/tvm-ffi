@@ -60,3 +60,33 @@ jobs:
               --build-dir=build-pre-commit                    \
               --jobs=${{ steps.env_vars.outputs.cpu_count }}  \
               ./src/ ./include ./tests
+
+  build-wheels:
+    name: Build wheels
+    needs: [prepare]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: ubuntu-latest, arch: x86_64, linux_image: manylinux2014, build_sdist: "true"}
+          - {os: ubuntu-latest, arch: x86_64, linux_image: manylinux_2_28, build_sdist: "false"}
+          - {os: ubuntu-24.04-arm, arch: aarch64, linux_image: manylinux2014, build_sdist: "false"}
+          - {os: ubuntu-24.04-arm, arch: aarch64, linux_image: manylinux_2_28, build_sdist: "false"}
+          - {os: windows-latest, arch: AMD64, linux_image: "", build_sdist: "false"}
+          - {os: macos-14, arch: arm64, linux_image: "", build_sdist: "false"}
+
+    steps:
+      - name: Checkout repository (for local composite action)
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      - name: Build wheel
+        uses: ./.github/actions/build-wheel-for-publish
+        with:
+          os: ${{ matrix.os }}
+          arch: ${{ matrix.arch }}
+          linux_image: ${{ matrix.linux_image }}
+          checkout_ref: ${{ github.sha }}
+          build_sdist: ${{ matrix.build_sdist }}
