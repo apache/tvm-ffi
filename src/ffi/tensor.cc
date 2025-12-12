@@ -56,7 +56,8 @@ int TVMFFITensorCreateUnsafeView(TVMFFIObjectHandle source, const DLTensor* prot
 
   class ViewNDAlloc {
    public:
-    ViewNDAlloc(tvm::ffi::ObjectPtr<tvm::ffi::TensorObj> tensor) : tensor_(tensor) {}
+    explicit ViewNDAlloc(tvm::ffi::ObjectPtr<tvm::ffi::TensorObj> tensor)
+        : tensor_(std::move(tensor)) {}
     void AllocData(DLTensor* tensor, void* data_ptr) { tensor->data = data_ptr; }
     void FreeData(DLTensor* tensor) {}
 
@@ -65,7 +66,7 @@ int TVMFFITensorCreateUnsafeView(TVMFFIObjectHandle source, const DLTensor* prot
   };
 
   void* source_data_ptr = prototype->data;
-  size_t num_extra_i64_at_tail = prototype->ndim * 2;
+  size_t num_extra_i64_at_tail = static_cast<size_t>(prototype->ndim) * 2;
   ViewNDAlloc alloc(source_tensor);
   tvm::ffi::Tensor ret_tensor(
       tvm::ffi::make_inplace_array_object<tvm::ffi::details::TensorObjFromNDAlloc<ViewNDAlloc>,
