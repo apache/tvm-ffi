@@ -18,7 +18,6 @@
 name: mainline-only
 
 on:
-  pull_request:  # TODO(@junrus): delete this line before merging
   workflow_dispatch:
   push:
     branches:
