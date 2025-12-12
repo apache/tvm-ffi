@@ -227,10 +227,12 @@ def register_error(
 
         import tvm_ffi
 
+
         # Register a custom Python exception so tvm_ffi.Error maps to it
         @tvm_ffi.error.register_error
         class MyError(RuntimeError):
             pass
+
 
         # Convert a Python exception to an FFI Error and back
         ffi_err = tvm_ffi.convert(MyError("boom"))

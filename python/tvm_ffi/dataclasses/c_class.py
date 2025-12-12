@@ -103,12 +103,14 @@ def c_class(
 
         from tvm_ffi.dataclasses import c_class, field
 
+
         @c_class("example.MyClass")
         class MyClass:
             v_i64: int
             v_i32: int
             v_f64: float = field(default=0.0)
             v_f32: float = field(default_factory=lambda: 1.0)
+
 
         obj = MyClass(v_i64=4, v_i32=8)
         obj.v_f64 = 3.14  # transparently forwards to the underlying C++ object

@@ -96,6 +96,7 @@ def device(device_type: str | int | DLDeviceType, index: int | None = None) -> D
     .. code-block:: python
 
       import tvm_ffi
+
       assert tvm_ffi.device("cuda:0") == tvm_ffi.device("cuda", 0)
       assert tvm_ffi.device("cpu:0") == tvm_ffi.device("cpu", 0)
 

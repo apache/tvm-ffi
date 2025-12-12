@@ -661,9 +661,9 @@ def build_inline(
 
         # compile the cpp source code and load the module
         lib_path: str = tvm_ffi.cpp.build_inline(
-            name='hello',
+            name="hello",
             cpp_sources=cpp_source,
-            functions='add_one_cpu'
+            functions="add_one_cpu",
         )
 
         # load the module
@@ -876,9 +876,9 @@ def load_inline(  # noqa: PLR0913
 
         # compile the cpp source code and load the module
         mod: Module = tvm_ffi.cpp.load_inline(
-            name='hello',
+            name="hello",
             cpp_sources=cpp_source,
-            functions='add_one_cpu'
+            functions="add_one_cpu",
         )
 
         # use the function from the loaded module to perform
@@ -1017,8 +1017,8 @@ def build(
 
         # compile the cpp source file and get the library path
         lib_path: str = tvm_ffi.cpp.build(
-            name='my_ops',
-            cpp_files='my_ops.cpp'
+            name="my_ops",
+            cpp_files="my_ops.cpp",
         )
 
         # load the module
@@ -1165,8 +1165,8 @@ def load(
 
         # compile the cpp source file and load the module
         mod: Module = tvm_ffi.cpp.load(
-            name='my_ops',
-            cpp_files='my_ops.cpp'
+            name="my_ops",
+            cpp_files="my_ops.cpp",
         )
 
         # use the function from the loaded module

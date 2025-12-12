@@ -114,6 +114,7 @@ def field(
             v_i64: int
             v_i32: int = field(default=16)
 
+
         obj = PyBase(v_i64=4)
         obj.v_i32  # -> 16
 
