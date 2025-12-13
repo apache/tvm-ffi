@@ -35,7 +35,8 @@ def _identity_ty_map(name: str) -> str:
 
 def test_codeblock_from_begin_line_variants() -> None:
     cases = [
-        (f"{C.STUB_BEGIN} global/example", "global", "example"),
+        (f"{C.STUB_BEGIN} global/example", "global", ("example", "")),
+        (f"{C.STUB_BEGIN} global/example@.registry", "global", ("example", ".registry")),
         (f"{C.STUB_BEGIN} object/testing.TestObjectBase", "object", "testing.TestObjectBase"),
         (f"{C.STUB_BEGIN} ty-map/custom", "ty-map", "custom"),
         (f"{C.STUB_BEGIN} import", "import", ""),
@@ -93,7 +94,7 @@ def test_fileinfo_from_file_parses_blocks(tmp_path: Path) -> None:
     assert first.kind is None and first.lines == ["first = 1"]
 
     assert stub.kind == "global"
-    assert stub.param == "demo.func"
+    assert stub.param == ("demo.func", "")
     assert stub.lineno_start == 2
     assert stub.lineno_end == 4
     assert stub.lines == [
@@ -212,7 +213,7 @@ def test_objectinfo_gen_fields_and_methods() -> None:
 def test_generate_global_funcs_updates_block() -> None:
     code = CodeBlock(
         kind="global",
-        param="testing",
+        param=("testing", ""),
         lineno_start=1,
         lineno_end=2,
         lines=[f"{C.STUB_BEGIN} global/testing", C.STUB_END],
@@ -231,6 +232,10 @@ def test_generate_global_funcs_updates_block() -> None:
     assert code.lines == [
         f"{C.STUB_BEGIN} global/testing",
         "# fmt: off",
+        "# isort: off",
+        "from tvm_ffi import init_ffi_api as _INIT",
+        '_INIT("testing", __name__)',
+        "# isort: on",
         "if TYPE_CHECKING:",
         "  def add_one(_0: int, /) -> int: ...",
         "# fmt: on",
