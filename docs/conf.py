@@ -34,6 +34,10 @@ os.environ["TVM_FFI_BUILD_DOCS"] = "1"
 
 build_exhale = os.environ.get("BUILD_CPP_DOCS", "0") == "1"
 build_rust_docs = os.environ.get("BUILD_RUST_DOCS", "0") == "1"
+build_multiversion = (
+    os.environ.get("SPHINX_MULTIVERSION_NAME", None) is not None
+    or os.environ.get("SPHINX_MULTIVERSION_VERSION", None) is not None
+)
 
 # Auto-detect sphinx-autobuild: Check if sphinx-autobuild is in the execution path
 is_autobuild = any("sphinx-autobuild" in str(arg) for arg in sys.argv)
@@ -44,15 +48,33 @@ _RUST_DIR = _DOCS_DIR.parent / "rust"
 
 # -- General configuration ------------------------------------------------
 # Determine version without reading pyproject.toml
-# Always use setuptools_scm (assumed available in docs env)
-__version__ = setuptools_scm.get_version(root="..")
+# sphinx-multiversion builds from git archives (no .git), so allow a fallback
+# using the version name that the extension injects into the environment.
+
+
+def _get_version() -> str:
+    env_version = (
+        os.environ.get("SPHINX_MULTIVERSION_NAME")
+        or os.environ.get("SPHINX_MULTIVERSION_VERSION")
+        or os.environ.get("READTHEDOCS_VERSION")
+    )
+    if env_version:
+        return env_version
+
+    try:
+        return setuptools_scm.get_version(root="..", fallback_version="0.0.0")
+    except Exception:
+        return "0.0.0"
+
+
+__version__ = _get_version()
 
 project = "tvm-ffi"
-
 author = "Apache TVM FFI contributors"
-
 version = __version__
 release = __version__
+_github_ref = os.environ.get("SPHINX_MULTIVERSION_NAME", "main")
+_base_url = ("/" + os.environ.get("BASE_URL", "").strip("/") + "/").replace("//", "/")
 
 # -- Extensions and extension configurations --------------------------------
 
@@ -79,6 +101,8 @@ extensions = [
     "sphinxcontrib.mermaid",
 ]
 
+if build_multiversion:
+    extensions.append("sphinx_multiversion")
 if build_exhale:
     extensions.append("exhale")
 
@@ -189,6 +213,7 @@ def _build_rust_docs() -> None:
     if not build_rust_docs:
         return
 
+    (_DOCS_DIR / "reference" / "rust" / "generated").mkdir(parents=True, exist_ok=True)
     print("Building Rust documentation...")
     try:
         target_doc = _RUST_DIR / "target" / "doc"
@@ -214,10 +239,32 @@ def _build_rust_docs() -> None:
         print("Warning: cargo not found, skipping Rust documentation build")
 
 
-def _apply_config_overrides(_: object, config: object) -> None:
+def _override_version(app_or_config: sphinx.application.Sphinx | sphinx.config.Config) -> None:
+    global __version__, version, release  # noqa: PLW0603
+    if not build_multiversion:
+        return
+    if isinstance(app_or_config, sphinx.application.Sphinx):
+        config = app_or_config.config
+    elif isinstance(app_or_config, sphinx.config.Config):
+        config = app_or_config
+    else:
+        raise TypeError(f"Expected Sphinx app or config object, got {type(app_or_config)=}")
+    smv_ver = getattr(config, "smv_current_version", None)
+    if smv_ver:
+        config.version = version = smv_ver
+        config.release = release = smv_ver
+        __version__ = smv_ver
+
+
+def _apply_config_overrides(app: sphinx.application.Sphinx, config: sphinx.config.Config) -> None:
     """Apply runtime configuration overrides derived from environment variables."""
     config.build_exhale = build_exhale
     config.build_rust_docs = build_rust_docs
+    if build_exhale:
+        config.exhale_args["containmentFolder"] = str(
+            Path(app.srcdir) / "reference" / "cpp" / "generated"
+        )
+    _override_version(config)
 
 
 def _copy_rust_docs_to_output(app: sphinx.application.Sphinx, exception: Exception | None) -> None:
@@ -245,6 +292,7 @@ def setup(app: sphinx.application.Sphinx) -> None:
     _build_rust_docs()
     app.add_config_value("build_exhale", build_exhale, "env")
     app.add_config_value("build_rust_docs", build_rust_docs, "env")
+    app.connect("builder-inited", _override_version)
     app.connect("config-inited", _apply_config_overrides)
     app.connect("build-finished", _copy_rust_docs_to_output)
     app.connect("autodoc-skip-member", _filter_inherited_members)
@@ -450,11 +498,22 @@ html_theme_options = {
     "show_toc_level": 2,
     "extra_footer": footer_html(),
 }
+if build_multiversion:
+    html_theme_options.update(
+        {
+            "navbar_end": ["version-switcher", "navbar-icon-links"],
+            "switcher": {
+                "json_url": f"{_base_url}_static/versions.json",
+                "version_match": version,
+            },
+            "show_version_warning_banner": True,
+        }
+    )
 
 html_context = {
     "display_github": True,
     "github_user": "apache",
-    "github_version": "main",
+    "github_version": _github_ref,
     "conf_py_path": "/docs/",
 }
 
@@ -465,3 +524,10 @@ html_extra_path = ["reference/rust/generated"] if build_rust_docs else []
 
 
 html_css_files = ["custom.css"]
+
+# sphinx-multiversion configuration
+smv_tag_whitelist = r"^v\d+(?:\.\d+){0,2}(?:[-\.]?(?:rc|post)\d*)?$"
+smv_branch_whitelist = r"^main$"
+smv_remote_whitelist = r"^(origin|upstream)$"
+smv_released_pattern = r"^refs/tags/v\d+(?:\.\d+){0,2}(?:[-\.]?(?:rc|post)\d*)?$"
+smv_latest_version = "main"
