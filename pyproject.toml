@@ -83,6 +83,7 @@ docs = [
   "sphinx",
   "sphinx-autobuild",
   "sphinx-book-theme",
+  "sphinx-multiversion",
   "sphinx-copybutton",
   "sphinx-design",
   "sphinx-reredirects",
