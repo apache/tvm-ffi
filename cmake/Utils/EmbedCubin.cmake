@@ -66,6 +66,38 @@ function (add_tvm_ffi_fatbin target_name)
   target_compile_options(${target_name} PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--fatbin>)
 endfunction ()
 
+# function(add_tvm_ffi_header target)
+#   cmake_parse_arguments(ARG "" "BIN;OUTPUT" "" ${ARGN})
+#   if (NOT ARG_BIN)
+#     message(FATAL_ERROR "add_tvm_ffi_header: BIN (cubin/fatbin) is required")
+#   endif()
+#   get_filename_component(BIN_ABS "${ARG_BIN}" ABSOLUTE)
+#   if (NOT ARG_OUTPUT)
+#     string(REGEX REPLACE "\\.([Cc][Uu][Bb][Ii][Nn]|[Ff][Aa][Tt][Bb][Ii][Nn])$" ".h" OUTPUT_HEADER "${BIN_ABS}")
+#     if ("${OUTPUT_HEADER}" STREQUAL "${BIN_ABS}")
+#       set(OUTPUT_HEADER "${BIN_ABS}.h")
+#     endif()
+#   else()
+#     set(OUTPUT_HEADER "${ARG_OUTPUT}")
+#   endif()
+#   get_filename_component(OUT_DIR "${OUTPUT_HEADER}" DIRECTORY)
+#   file(MAKE_DIRECTORY "${OUT_DIR}")
+#   add_custom_command(
+#     OUTPUT "${OUTPUT_HEADER}"
+#     COMMAND bin2c -c
+#             "${BIN_ABS}" > "${OUTPUT_HEADER}"
+#     DEPENDS "${BIN_ABS}"
+#     COMMENT "Generating header from ${BIN_ABS} -> ${OUTPUT_HEADER}"
+#     VERBATIM
+#   )
+#   add_library("${target}" INTERFACE)
+#   target_include_directories("${target}" INTERFACE
+#     $<BUILD_INTERFACE:${OUT_DIR}>
+#   )
+#   add_custom_target("${target}_generate" DEPENDS "${OUTPUT_HEADER}")
+#   add_dependencies("${target}" "${target}_generate")
+# endfunction()
+
 # ~~~
 # tvm_ffi_embed_cubin(
 #   OUTPUT <output_object_file>

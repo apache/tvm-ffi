@@ -311,6 +311,17 @@ class CubinModule {
         cudaLibraryLoadData(&library_, code, nullptr, nullptr, 0, nullptr, nullptr, 0));
   }
 
+  /*!
+   * \brief Load CUBIN module from raw memory buffer.
+   *
+   * \param code Pointer to CUBIN binary data.
+   * \note The `code` buffer points to an ELF image.
+   */
+  explicit CubinModule(const unsigned char* code) {
+    TVM_FFI_CHECK_CUDA_ERROR(
+        cudaLibraryLoadData(&library_, code, nullptr, nullptr, 0, nullptr, nullptr, 0));
+  }
+
   /*! \brief Destructor unloads the library */
   ~CubinModule() {
     if (library_ != nullptr) {
