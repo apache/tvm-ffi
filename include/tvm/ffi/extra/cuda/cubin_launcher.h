@@ -29,19 +29,19 @@
 #ifndef TVM_FFI_EXTRA_CUDA_CUBIN_LAUNCHER_H_
 #define TVM_FFI_EXTRA_CUDA_CUBIN_LAUNCHER_H_
 
-#include <cuda_runtime.h>
 #include <tvm/ffi/error.h>
 #include <tvm/ffi/extra/c_env_api.h>
 #include <tvm/ffi/extra/cuda/base.h>
+#include <tvm/ffi/extra/cuda/unify_api.h>
 #include <tvm/ffi/string.h>
 
 #include <cstdint>
 #include <cstring>
 
-// cudaKernelSetAttributeForDevice needs cuda >= 12.8
-#if !defined(CUDART_VERSION) || CUDART_VERSION < 12080
-#error "file not supported for this cuda version"
-#endif
+// // cudaKernelSetAttributeForDevice needs cuda >= 12.8
+// #if !defined(CUDART_VERSION) || CUDART_VERSION < 12080
+// #error "file not supported for this cuda version"
+// #endif
 
 namespace tvm {
 namespace ffi {
@@ -296,8 +296,7 @@ class CubinModule {
    * \param bytes CUBIN binary data as a Bytes object.
    */
   explicit CubinModule(const Bytes& bytes) {
-    TVM_FFI_CHECK_CUDA_ERROR(
-        cudaLibraryLoadData(&library_, bytes.data(), nullptr, nullptr, 0, nullptr, nullptr, 0));
+    TVM_FFI_CHECK_CUDA_ERROR(load_image(&library_, bytes.data()));
   }
 
   /*!
@@ -306,10 +305,7 @@ class CubinModule {
    * \param code Pointer to CUBIN binary data.
    * \note The `code` buffer points to an ELF image.
    */
-  explicit CubinModule(const char* code) {
-    TVM_FFI_CHECK_CUDA_ERROR(
-        cudaLibraryLoadData(&library_, code, nullptr, nullptr, 0, nullptr, nullptr, 0));
-  }
+  explicit CubinModule(const char* code) { TVM_FFI_CHECK_CUDA_ERROR(load_image(&library_, code)); }
 
   /*!
    * \brief Load CUBIN module from raw memory buffer.
@@ -318,14 +314,13 @@ class CubinModule {
    * \note The `code` buffer points to an ELF image.
    */
   explicit CubinModule(const unsigned char* code) {
-    TVM_FFI_CHECK_CUDA_ERROR(
-        cudaLibraryLoadData(&library_, code, nullptr, nullptr, 0, nullptr, nullptr, 0));
+    TVM_FFI_CHECK_CUDA_ERROR(load_image(&library_, code));
   }
 
   /*! \brief Destructor unloads the library */
   ~CubinModule() {
     if (library_ != nullptr) {
-      cudaLibraryUnload(library_);
+      unload_library(library_);
     }
   }
 
@@ -359,7 +354,7 @@ class CubinModule {
   CubinKernel operator[](const char* name);
 
   /*! \brief Get the underlying cudaLibrary_t handle */
-  cudaLibrary_t GetHandle() const { return library_; }
+  LibraryHandle GetHandle() const { return library_; }
 
   // Non-copyable
   CubinModule(const CubinModule&) = delete;
@@ -386,7 +381,7 @@ class CubinModule {
   CubinModule& operator=(CubinModule&& other) noexcept {
     if (this != &other) {
       if (library_ != nullptr) {
-        cudaLibraryUnload(library_);
+        unload_library(library_);
       }
       library_ = other.library_;
       other.library_ = nullptr;
@@ -395,7 +390,7 @@ class CubinModule {
   }
 
  private:
-  cudaLibrary_t library_ = nullptr;
+  LibraryHandle library_ = nullptr;
 };
 
 /*!
@@ -437,8 +432,8 @@ class CubinKernel {
    * \param library The cudaLibrary_t handle.
    * \param name Name of the kernel function.
    */
-  CubinKernel(cudaLibrary_t library, const char* name) {
-    TVM_FFI_CHECK_CUDA_ERROR(cudaLibraryGetKernel(&kernel_, library, name));
+  CubinKernel(LibraryHandle library, const char* name) {
+    TVM_FFI_CHECK_CUDA_ERROR(load_function(&kernel_, library, name));
   }
 
   /*! \brief Destructor (kernel handle doesn't need explicit cleanup) */
@@ -482,17 +477,13 @@ class CubinKernel {
    * \note The kernel executes asynchronously. Use cudaStreamSynchronize() or
    *       cudaDeviceSynchronize() to wait for completion if needed.
    */
-  cudaError_t Launch(void** args, dim3 grid, dim3 block, cudaStream_t stream,
-                     uint32_t dyn_smem_bytes = 0) {
-    // Cast cudaKernel_t to const void* for use with cudaLaunchKernel
-    // The Runtime API accepts cudaKernel_t directly as a function pointer
-    auto kernel = reinterpret_cast<const void*>(kernel_);
-    return cudaLaunchKernel(kernel, {grid.x, grid.y, grid.z}, {block.x, block.y, block.z}, args,
-                            dyn_smem_bytes, stream);
+  ResultHandle Launch(void** args, dim3 grid, dim3 block, StreamHandle stream,
+                      uint32_t dyn_smem_bytes = 0) {
+    return launch_kernel(kernel_, args, grid, block, stream, dyn_smem_bytes);
   }
 
   /*! \brief Get the underlying cudaKernel_t handle */
-  cudaKernel_t GetHandle() const { return kernel_; }
+  StreamHandle GetHandle() const { return kernel_; }
 
   // Non-copyable
   CubinKernel(const CubinKernel&) = delete;
@@ -543,8 +534,8 @@ class CubinKernel {
    */
   void SetMaxDynamicSharedMemory(int64_t dynamic_smem_max = -1) {
     int device_count = 0;
-    cudaError_t err = cudaGetDeviceCount(&device_count);
-    if (err != cudaSuccess || device_count == 0) {
+    ResultHandle err = get_device_count(&device_count);
+    if (err != FFI_CUDA_SUCCESS || device_count == 0) {
       return;  // No devices available, nothing to configure
     }
 
@@ -552,8 +543,11 @@ class CubinKernel {
     for (int device_id = 0; device_id < device_count; ++device_id) {
       // Query device's maximum shared memory per block
       int max_shared_mem = 0;
-      err = cudaDeviceGetAttribute(&max_shared_mem, cudaDevAttrMaxSharedMemoryPerBlock, device_id);
-      if (err != cudaSuccess) {
+      err = get_device_attr(
+          &max_shared_mem,
+          /* CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK/cudaDevAttrMaxSharedMemoryPerBlock */
+          DeviceAttrHandle(8), idx_to_device(device_id));
+      if (err != FFI_CUDA_SUCCESS) {
         continue;  // Skip this device if we can't get its attribute
       }
 
@@ -594,7 +588,7 @@ class CubinKernel {
     }
   }
 
-  cudaKernel_t kernel_ = nullptr;
+  KernelHandle kernel_ = nullptr;
 
   friend class CubinModule;
 };

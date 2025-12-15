@@ -23,30 +23,24 @@
 #ifndef TVM_FFI_EXTRA_CUDA_BASE_H_
 #define TVM_FFI_EXTRA_CUDA_BASE_H_
 
-#include <cuda_runtime.h>
-#include <tvm/ffi/error.h>
+#include <tvm/ffi/extra/cuda/unify_api.h>
 
 namespace tvm {
 namespace ffi {
 
 /*!
- * \brief Macro for checking CUDA runtime API errors.
+ * \brief Macro for checking CUDA runtime/device API errors.
  *
  * This macro checks the return value of CUDA runtime API calls and throws
  * a RuntimeError with detailed error information if the call fails.
  *
- * \param stmt The CUDA runtime API call to check.
+ * \param stmt The CUDA runtime/device API call to check.
  */
-#define TVM_FFI_CHECK_CUDA_ERROR(stmt)                                              \
-  do {                                                                              \
-    cudaError_t __err = (stmt);                                                     \
-    if (__err != cudaSuccess) {                                                     \
-      const char* __err_name = cudaGetErrorName(__err);                             \
-      const char* __err_str = cudaGetErrorString(__err);                            \
-      TVM_FFI_THROW(RuntimeError) << "CUDA Runtime Error: " << __err_name << " ("   \
-                                  << static_cast<int>(__err) << "): " << __err_str; \
-    }                                                                               \
-  } while (0)
+#if TVM_FFI_CUDA_USE_DRIVER_API
+#define TVM_FFI_CHECK_CUDA_ERROR TVM_FFI_CHECK_DRIVER_CUDA_ERROR
+#else
+#define TVM_FFI_CHECK_CUDA_ERROR TVM_FFI_CHECK_RUNTIME_CUDA_ERROR
+#endif
 
 }  // namespace ffi
 }  // namespace tvm
