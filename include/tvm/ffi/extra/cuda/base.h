@@ -23,24 +23,36 @@
 #ifndef TVM_FFI_EXTRA_CUDA_BASE_H_
 #define TVM_FFI_EXTRA_CUDA_BASE_H_
 
-#include <tvm/ffi/extra/cuda/unify_api.h>
-
 namespace tvm {
 namespace ffi {
 
 /*!
- * \brief Macro for checking CUDA runtime/device API errors.
+ * \brief A simple 3D dimension type for CUDA kernel launch configuration.
  *
- * This macro checks the return value of CUDA runtime API calls and throws
- * a RuntimeError with detailed error information if the call fails.
- *
- * \param stmt The CUDA runtime/device API call to check.
+ * This struct mimics the behavior of dim3 from CUDA Runtime API and provides
+ * a compatible interface for kernel launch configuration. It can be constructed
+ * from 1, 2, or 3 dimensions.
  */
-#if TVM_FFI_CUDA_USE_DRIVER_API
-#define TVM_FFI_CHECK_CUDA_ERROR TVM_FFI_CHECK_DRIVER_CUDA_ERROR
-#else
-#define TVM_FFI_CHECK_CUDA_ERROR TVM_FFI_CHECK_RUNTIME_CUDA_ERROR
-#endif
+struct dim3 {
+  /*! \brief X dimension (number of blocks in x-direction or threads in x-direction) */
+  unsigned int x;
+  /*! \brief Y dimension (number of blocks in y-direction or threads in y-direction) */
+  unsigned int y;
+  /*! \brief Z dimension (number of blocks in z-direction or threads in z-direction) */
+  unsigned int z;
+
+  /*! \brief Default constructor initializes to (1, 1, 1) */
+  dim3() : x(1), y(1), z(1) {}
+
+  /*! \brief Construct with x dimension, y and z default to 1 */
+  explicit dim3(unsigned int x_) : x(x_), y(1), z(1) {}
+
+  /*! \brief Construct with x and y dimensions, z defaults to 1 */
+  dim3(unsigned int x_, unsigned int y_) : x(x_), y(y_), z(1) {}
+
+  /*! \brief Construct with all three dimensions */
+  dim3(unsigned int x_, unsigned int y_, unsigned int z_) : x(x_), y(y_), z(z_) {}
+};
 
 }  // namespace ffi
 }  // namespace tvm

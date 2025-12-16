@@ -23,6 +23,7 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <tvm/ffi/error.h>
+#include <tvm/ffi/extra/cuda/base.h>
 
 #include <filesystem>
 #include <string>
@@ -123,16 +124,53 @@ static DeviceHandle idx_to_device(int idx) {
 #endif
 }
 
-static ResultHandle launch_kernel(KernelHandle kernel, void** args, dim3 grid, dim3 block,
-                                  StreamHandle stream, uint32_t dyn_smem_bytes = 0) {
+static ResultHandle launch_kernel(KernelHandle kernel, void** args, tvm::ffi::dim3 grid,
+                                  tvm::ffi::dim3 block, StreamHandle stream,
+                                  uint32_t dyn_smem_bytes = 0) {
 #if TVM_FFI_CUDA_USE_DRIVER_API
   return cuLaunchKernel(kernel, grid.x, grid.y, grid.z, block.x, block.y, block.z, dyn_smem_bytes,
                         stream, args);
 #else
-  auto kernel = reinterpret_cast<const void*>(kernel_);
-  return cudaLaunchKernel(kernel, {grid.x, grid.y, grid.z}, {block.x, block.y, block.z}, args,
-                          dyn_smem_bytes, stream);
+  return cudaLaunchKernel(reinterpret_cast<const void*>(kernel), {grid.x, grid.y, grid.z},
+                          {block.x, block.y, block.z}, args, dyn_smem_bytes, stream);
 #endif
 }
+
+static ResultHandle get_func_shmem(KernelHandle kernel, int& out) {
+#if TVM_FFI_CUDA_USE_DRIVER_API
+  return cuFuncGetAttribute(out, CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES, kernel);
+#else
+  cudaFuncAttributes func_attr;
+  cudaError_t err = cudaFuncGetAttributes(&func_attr, kernel);
+  if (err == cudaSuccess) {
+    out = func_attr.sharedSizeBytes;
+  }
+  return err;
+#endif
+}
+
+static ResultHandle set_func_shmem(KernelHandle kernel, int shmem, DeviceHandle device) {
+#if TVM_FFI_CUDA_USE_DRIVER_API
+  return cuKernelSetAttribute(CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES, shmem, kernel,
+                              device);
+#else
+  return cudaKernelSetAttributeForDevice(kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, shmem,
+                                         device);
+#endif
+}
+
+/*!
+ * \brief Macro for checking CUDA runtime/device API errors.
+ *
+ * This macro checks the return value of CUDA runtime API calls and throws
+ * a RuntimeError with detailed error information if the call fails.
+ *
+ * \param stmt The CUDA runtime/device API call to check.
+ */
+#if TVM_FFI_CUDA_USE_DRIVER_API
+#define TVM_FFI_CHECK_CUDA_ERROR TVM_FFI_CHECK_DRIVER_CUDA_ERROR
+#else
+#define TVM_FFI_CHECK_CUDA_ERROR TVM_FFI_CHECK_RUNTIME_CUDA_ERROR
+#endif
 
 #endif

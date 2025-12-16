@@ -38,41 +38,8 @@
 #include <cstdint>
 #include <cstring>
 
-// // cudaKernelSetAttributeForDevice needs cuda >= 12.8
-// #if !defined(CUDART_VERSION) || CUDART_VERSION < 12080
-// #error "file not supported for this cuda version"
-// #endif
-
 namespace tvm {
 namespace ffi {
-
-/*!
- * \brief A simple 3D dimension type for CUDA kernel launch configuration.
- *
- * This struct mimics the behavior of dim3 from CUDA Runtime API and provides
- * a compatible interface for kernel launch configuration. It can be constructed
- * from 1, 2, or 3 dimensions.
- */
-struct dim3 {
-  /*! \brief X dimension (number of blocks in x-direction or threads in x-direction) */
-  unsigned int x;
-  /*! \brief Y dimension (number of blocks in y-direction or threads in y-direction) */
-  unsigned int y;
-  /*! \brief Z dimension (number of blocks in z-direction or threads in z-direction) */
-  unsigned int z;
-
-  /*! \brief Default constructor initializes to (1, 1, 1) */
-  dim3() : x(1), y(1), z(1) {}
-
-  /*! \brief Construct with x dimension, y and z default to 1 */
-  explicit dim3(unsigned int x_) : x(x_), y(1), z(1) {}
-
-  /*! \brief Construct with x and y dimensions, z defaults to 1 */
-  dim3(unsigned int x_, unsigned int y_) : x(x_), y(y_), z(1) {}
-
-  /*! \brief Construct with all three dimensions */
-  dim3(unsigned int x_, unsigned int y_, unsigned int z_) : x(x_), y(y_), z(z_) {}
-};
 
 /*!
  * \brief Macro to embed a CUBIN module with static initialization.
@@ -483,7 +450,7 @@ class CubinKernel {
   }
 
   /*! \brief Get the underlying cudaKernel_t handle */
-  StreamHandle GetHandle() const { return kernel_; }
+  KernelHandle GetHandle() const { return kernel_; }
 
   // Non-copyable
   CubinKernel(const CubinKernel&) = delete;
@@ -541,31 +508,27 @@ class CubinKernel {
 
     bool any_success = false;
     for (int device_id = 0; device_id < device_count; ++device_id) {
+      auto device = idx_to_device(device_id);
       // Query device's maximum shared memory per block
       int max_shared_mem = 0;
       err = get_device_attr(
           &max_shared_mem,
           /* CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK/cudaDevAttrMaxSharedMemoryPerBlock */
-          DeviceAttrHandle(8), idx_to_device(device_id));
+          DeviceAttrHandle(8), device);
       if (err != FFI_CUDA_SUCCESS) {
         continue;  // Skip this device if we can't get its attribute
       }
 
       int shared_mem_to_set;
       if (dynamic_smem_max == -1) {
-        // Query the kernel's static shared memory usage
-        cudaFuncAttributes func_attr;
-
-        // According to the documentation, we can use cudaFuncGetAttributes to get the attributes of
-        // cudaKernel_t returned by cudaLibraryGetKernel, just cast the kernel_ to const void*
-        err = cudaFuncGetAttributes(&func_attr, reinterpret_cast<const void*>(kernel_));
-        if (err != cudaSuccess) {
+        int static_shared;
+        err = get_func_shmem(kernel_, static_shared);
+        if (err != FFI_CUDA_SUCCESS) {
           continue;  // Skip this device if we can't get kernel attributes
         }
 
         // Calculate available dynamic shared memory:
         // device max shared memory - static shared memory used by kernel
-        int64_t static_shared = static_cast<int64_t>(func_attr.sharedSizeBytes);
         int64_t max_shared = static_cast<int64_t>(max_shared_mem);
         int64_t available = max_shared - static_shared;
         shared_mem_to_set = (available > 0) ? static_cast<int>(available) : 0;
@@ -574,9 +537,8 @@ class CubinKernel {
       }
 
       // Set the maximum dynamic shared memory size for this device
-      err = cudaKernelSetAttributeForDevice(kernel_, cudaFuncAttributeMaxDynamicSharedMemorySize,
-                                            shared_mem_to_set, device_id);
-      if (err == cudaSuccess) {
+      err = set_func_shmem(kernel_, shared_mem_to_set, device);
+      if (err == FFI_CUDA_SUCCESS) {
         any_success = true;
       }
       // Don't error out for individual device failures - user may only use some GPUs
