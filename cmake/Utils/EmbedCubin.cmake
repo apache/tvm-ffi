@@ -17,6 +17,39 @@
 
 set(CMAKE_CUDA_RUNTIME_LIBRARY None)
 
+# Copy utils for cmake < 3.27
+set(COPY_SCRIPT "${CMAKE_BINARY_DIR}/cuda_copy_utils.cmake")
+file(
+  WRITE ${COPY_SCRIPT}
+  "
+  # Arguments: OBJECTS (semicolon-separated list), OUT_DIR, EXT
+  string(REPLACE \"\\\"\" \"\" ext_strip \"\${EXT}\")
+  string(REPLACE \"\\\"\" \"\" out_dir_strip \"\${OUT_DIR}\")
+  foreach(obj_raw \${OBJECTS})
+    string(REPLACE \"\\\"\" \"\" obj \"\${obj_raw}\")
+
+    # Extract filename: /path/to/kernel.cu.o -> kernel
+    # Note: CMake objects are usually named source.cu.o, so we strip extensions twice.
+    get_filename_component(fname \${obj} NAME_WE)
+    get_filename_component(fname \${fname} NAME_WE)
+
+    # If OUT_DIR is provided, use it. Otherwise, use the object's directory.
+    if(NOT out_dir_strip STREQUAL \"\")
+       set(final_dir \"\${out_dir_strip}\")
+    else()
+       get_filename_component(final_dir \${obj} DIRECTORY)
+    endif()
+
+    message(\"Copying \${obj} -> \${final_dir}/\${fname}.\${ext_strip}\")
+    execute_process(
+      COMMAND \${CMAKE_COMMAND} -E copy_if_different
+      \"\${obj}\"
+      \"\${final_dir}/\${fname}.\${ext_strip}\"
+    )
+  endforeach()
+"
+)
+
 # ~~~
 # add_tvm_ffi_cubin(<target_name> CUDA <source_files>...)
 #
@@ -39,6 +72,15 @@ function (add_tvm_ffi_cubin target_name)
 
   add_library(${target_name} OBJECT ${ARG_CUDA})
   target_compile_options(${target_name} PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--cubin>)
+
+  add_custom_target(
+    ${target_name}_bin ALL
+    COMMAND ${CMAKE_COMMAND} -DOBJECTS="$<TARGET_OBJECTS:${target_name}>" -DOUT_DIR="" -DEXT="cubin"
+            -P "${COPY_SCRIPT}"
+    DEPENDS ${target_name}
+    COMMENT "Generating .cubin files for ${target_name}"
+    VERBATIM
+  )
 endfunction ()
 
 # ~~~
@@ -63,39 +105,29 @@ function (add_tvm_ffi_fatbin target_name)
 
   add_library(${target_name} OBJECT ${ARG_CUDA})
   target_compile_options(${target_name} PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--fatbin>)
+
+  add_custom_target(
+    ${target_name}_bin ALL
+    COMMAND ${CMAKE_COMMAND} -DOBJECTS="$<TARGET_OBJECTS:${target_name}>" -DOUT_DIR=""
+            -DEXT="fatbin" -P "${COPY_SCRIPT}"
+    DEPENDS ${target_name}
+    COMMENT "Generating .fatbin files for ${target_name}"
+    VERBATIM
+  )
 endfunction ()
 
-# function(add_tvm_ffi_header target)
-#   cmake_parse_arguments(ARG "" "BIN;OUTPUT" "" ${ARGN})
-#   if (NOT ARG_BIN)
-#     message(FATAL_ERROR "add_tvm_ffi_header: BIN (cubin/fatbin) is required")
-#   endif()
-#   get_filename_component(BIN_ABS "${ARG_BIN}" ABSOLUTE)
-#   if (NOT ARG_OUTPUT)
-#     string(REGEX REPLACE "\\.([Cc][Uu][Bb][Ii][Nn]|[Ff][Aa][Tt][Bb][Ii][Nn])$" ".h" OUTPUT_HEADER "${BIN_ABS}")
-#     if ("${OUTPUT_HEADER}" STREQUAL "${BIN_ABS}")
-#       set(OUTPUT_HEADER "${BIN_ABS}.h")
-#     endif()
-#   else()
-#     set(OUTPUT_HEADER "${ARG_OUTPUT}")
-#   endif()
-#   get_filename_component(OUT_DIR "${OUTPUT_HEADER}" DIRECTORY)
-#   file(MAKE_DIRECTORY "${OUT_DIR}")
-#   add_custom_command(
-#     OUTPUT "${OUTPUT_HEADER}"
-#     COMMAND bin2c -c
-#             "${BIN_ABS}" > "${OUTPUT_HEADER}"
-#     DEPENDS "${BIN_ABS}"
-#     COMMENT "Generating header from ${BIN_ABS} -> ${OUTPUT_HEADER}"
-#     VERBATIM
-#   )
-#   add_library("${target}" INTERFACE)
-#   target_include_directories("${target}" INTERFACE
-#     $<BUILD_INTERFACE:${OUT_DIR}>
-#   )
-#   add_custom_target("${target}_generate" DEPENDS "${OUTPUT_HEADER}")
-#   add_dependencies("${target}" "${target}_generate")
-# endfunction()
+# function(add_tvm_ffi_header target) cmake_parse_arguments(ARG "" "BIN;OUTPUT" "" ${ARGN}) if (NOT
+# ARG_BIN) message(FATAL_ERROR "add_tvm_ffi_header: BIN (cubin/fatbin) is required") endif()
+# get_filename_component(BIN_ABS "${ARG_BIN}" ABSOLUTE) if (NOT ARG_OUTPUT) string(REGEX REPLACE
+# "\\.([Cc][Uu][Bb][Ii][Nn]|[Ff][Aa][Tt][Bb][Ii][Nn])$" ".h" OUTPUT_HEADER "${BIN_ABS}") if
+# ("${OUTPUT_HEADER}" STREQUAL "${BIN_ABS}") set(OUTPUT_HEADER "${BIN_ABS}.h") endif() else()
+# set(OUTPUT_HEADER "${ARG_OUTPUT}") endif() get_filename_component(OUT_DIR "${OUTPUT_HEADER}"
+# DIRECTORY) file(MAKE_DIRECTORY "${OUT_DIR}") add_custom_command( OUTPUT "${OUTPUT_HEADER}" COMMAND
+# bin2c -c "${BIN_ABS}" > "${OUTPUT_HEADER}" DEPENDS "${BIN_ABS}" COMMENT "Generating header from
+# ${BIN_ABS} -> ${OUTPUT_HEADER}" VERBATIM ) add_library("${target}" INTERFACE)
+# target_include_directories("${target}" INTERFACE $<BUILD_INTERFACE:${OUT_DIR}> )
+# add_custom_target("${target}_generate" DEPENDS "${OUTPUT_HEADER}") add_dependencies("${target}"
+# "${target}_generate") endfunction()
 
 # ~~~
 # tvm_ffi_embed_cubin(

@@ -48,9 +48,7 @@ def main() -> int:  # noqa: PLR0915
     print(f"Loaded library: {lib_path}")
 
     # Read CUBIN file into memory
-    if not (cubin_path := Path(__file__).parent / "build" / "CMakeFiles/kernel_cubin.dir/src/kernel.cubin").exists():
-        # Workaround for cmake < 3.27
-        cubin_path = Path(__file__).parent / "build" / "CMakeFiles/kernel_cubin.dir/src/kernel.cu.o"
+    cubin_path = Path(__file__).parent / "build" / "CMakeFiles/kernel_cubin.dir/src/kernel.cubin"
     cubin_bytes = cubin_path.read_bytes()
     print(f"Read CUBIN from: {cubin_path} ({len(cubin_bytes)} bytes)")
 
