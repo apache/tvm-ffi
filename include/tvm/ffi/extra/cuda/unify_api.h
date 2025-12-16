@@ -36,8 +36,12 @@
 #define TVM_FFI_CUDA_USE_DRIVER_API 1
 #endif  // CUDART_VERSION >= 12080
 #else
-#if !(TVM_FFI_CUDA_USE_DRIVER_API) && !(CUDART_VERSION < 12080)
-#error "Runtime API only supported for CUDA >= 12.8"
+#if (!(TVM_FFI_CUDA_USE_DRIVER_API)) && (CUDART_VERSION < 12080)
+#define _STRINGIFY(x) #x
+#define STR(x) _STRINGIFY(x)
+static_assert(false,
+              "Runtime API only supported for CUDA >= 12.8, got CUDA Runtime version: " TOSTRING(
+                  CUDART_VERSION));
 #endif
 #endif
 
