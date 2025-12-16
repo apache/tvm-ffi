@@ -124,6 +124,8 @@ endfunction ()
 # can be loaded with `TVM_FFI_EMBED_CUBIN(library_name)`.
 # Can only have one object in target and one cubin/fatbin.
 #
+# The reason of this design is to integrate with cmake's workflow.
+#
 # Parameters:
 #   target_name: Name of the object library target
 #   library_name: Name of the kernel library
