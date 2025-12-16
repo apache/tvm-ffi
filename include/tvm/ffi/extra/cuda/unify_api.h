@@ -41,14 +41,12 @@
 #endif
 #endif
 
-#if TVM_FFI_CUDA_USE_DRIVER_API
+namespace tvm::ffi {
 
-#include <driver_types.h>
+#if TVM_FFI_CUDA_USE_DRIVER_API
 
 using StreamHandle = CUstream;
 using ResultHandle = CUresult;
-
-#define FFI_CUDA_SUCCESS CUDA_SUCCESS
 
 using LibraryHandle = CUlibrary;
 using KernelHandle = CUkernel;
@@ -57,6 +55,8 @@ using LaunchAttrHandle = CUlaunchAttribute;
 
 using DeviceAttrHandle = CUdevice_attribute;
 using DeviceHandle = CUdevice;
+
+#define FFI_CUDA_SUCCESS CUDA_SUCCESS
 
 #define load_function cuLibraryGetKernel
 #define get_device_count cuDeviceGetCount
@@ -68,8 +68,6 @@ using DeviceHandle = CUdevice;
 using StreamHandle = cudaStream_t;
 using ResultHandle = cudaError_t;
 
-#define FFI_CUDA_SUCCESS cudaSuccess
-
 using LibraryHandle = cudaLibrary_t;
 using KernelHandle = cudaKernel_t;
 using LaunchConfigHandle = cudaLaunchConfig_t;
@@ -77,6 +75,8 @@ using LaunchAttrHandle = cudaLaunchAttribute;
 
 using DeviceAttrHandle = cudaDeviceAttr;
 using DeviceHandle = int;
+
+#define FFI_CUDA_SUCCESS cudaSuccess
 
 #define load_function cudaLibraryGetKernel
 #define get_device_count cudaGetDeviceCount
@@ -175,5 +175,7 @@ static ResultHandle set_func_shmem(KernelHandle kernel, int shmem, DeviceHandle 
 #else
 #define TVM_FFI_CHECK_CUDA_ERROR TVM_FFI_CHECK_RUNTIME_CUDA_ERROR
 #endif
+
+}  // namespace tvm::ffi
 
 #endif
