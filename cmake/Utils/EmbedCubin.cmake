@@ -22,6 +22,7 @@ set(CMAKE_CUDA_RUNTIME_LIBRARY None)
 #
 # Creates an object library that compiles CUDA sources to CUBIN format.
 # This function uses CMake's native CUDA support and respects CMAKE_CUDA_ARCHITECTURES.
+# User can use `CUDA_CUBIN_COMPILATION` after cmake 3.27.
 #
 # Parameters:
 #   target_name: Name of the object library target
@@ -37,8 +38,6 @@ function (add_tvm_ffi_cubin target_name)
   endif ()
 
   add_library(${target_name} OBJECT ${ARG_CUDA})
-
-  set_target_properties(${target_name} PROPERTIES POSITION_INDEPENDENT_CODE ON)
   target_compile_options(${target_name} PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--cubin>)
 endfunction ()
 
@@ -47,6 +46,7 @@ endfunction ()
 #
 # Creates an object library that compiles CUDA sources to FATBIN format.
 # This function uses CMake's native CUDA support and respects CMAKE_CUDA_ARCHITECTURES.
+# User can use `CUDA_FATBIN_COMPILATION` after cmake 3.27.
 #
 # Parameters:
 #   target_name: Name of the object library target
@@ -62,7 +62,6 @@ function (add_tvm_ffi_fatbin target_name)
   endif ()
 
   add_library(${target_name} OBJECT ${ARG_CUDA})
-  set_target_properties(${target_name} PROPERTIES POSITION_INDEPENDENT_CODE ON)
   target_compile_options(${target_name} PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--fatbin>)
 endfunction ()
 
