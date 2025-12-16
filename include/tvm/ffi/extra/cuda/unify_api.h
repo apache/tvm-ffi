@@ -34,9 +34,11 @@
 #define TVM_FFI_CUDA_USE_DRIVER_API 0
 #else
 #define TVM_FFI_CUDA_USE_DRIVER_API 1
-#endif
-#else if !(TVM_FFI_CUDA_USE_DRIVER_API) && (CUDART_VERSION < 12080)
+#endif  // CUDART_VERSION >= 12080
+#else
+#if !(TVM_FFI_CUDA_USE_DRIVER_API) && !(CUDART_VERSION < 12080)
 #error "Runtime API only supported for CUDA >= 12.8"
+#endif
 #endif
 
 #if TVM_FFI_CUDA_USE_DRIVER_API
@@ -48,15 +50,15 @@ using ResultHandle = CUresult;
 
 #define FFI_CUDA_SUCCESS CUDA_SUCCESS
 
-using LibraryHandle = CUmodule;
-using KernelHandle = CUfunction;
+using LibraryHandle = CUlibrary;
+using KernelHandle = CUkernel;
 using LaunchConfigHandle = CUlaunchConfig;
 using LaunchAttrHandle = CUlaunchAttribute;
 
 using DeviceAttrHandle = CUdevice_attribute;
 using DeviceHandle = CUdevice;
 
-#define load_function cuModuleGetFunction
+#define load_function cuLibraryGetKernel
 #define get_device_count cuDeviceGetCount
 #define get_device_attr cuDeviceGetAttribute
 #define unload_library cuLibraryUnload
@@ -108,7 +110,7 @@ using DeviceHandle = int;
 
 static ResultHandle load_image(LibraryHandle* library, const void* image) {
 #if TVM_FFI_CUDA_USE_DRIVER_API
-  return cuModuleLoad(library, image);
+  return cuLibraryLoadData(library, image, nullptr, nullptr, 0, nullptr, nullptr, 0);
 #else
   return cudaLibraryLoadData(library, image, nullptr, nullptr, 0, nullptr, nullptr, 0);
 #endif
@@ -128,17 +130,18 @@ static ResultHandle launch_kernel(KernelHandle kernel, void** args, tvm::ffi::di
                                   tvm::ffi::dim3 block, StreamHandle stream,
                                   uint32_t dyn_smem_bytes = 0) {
 #if TVM_FFI_CUDA_USE_DRIVER_API
-  return cuLaunchKernel(kernel, grid.x, grid.y, grid.z, block.x, block.y, block.z, dyn_smem_bytes,
-                        stream, args);
+  return cuLaunchKernel(reinterpret_cast<CUfunction>(kernel), grid.x, grid.y, grid.z, block.x,
+                        block.y, block.z, dyn_smem_bytes, stream, args, nullptr);
 #else
   return cudaLaunchKernel(reinterpret_cast<const void*>(kernel), {grid.x, grid.y, grid.z},
                           {block.x, block.y, block.z}, args, dyn_smem_bytes, stream);
 #endif
 }
 
-static ResultHandle get_func_shmem(KernelHandle kernel, int& out) {
+static ResultHandle get_func_shmem(KernelHandle kernel, int& out, DeviceHandle device) {
 #if TVM_FFI_CUDA_USE_DRIVER_API
-  return cuFuncGetAttribute(out, CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES, kernel);
+  return cuKernelGetAttribute(&out, CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES, kernel,
+                              device);
 #else
   cudaFuncAttributes func_attr;
   cudaError_t err = cudaFuncGetAttributes(&func_attr, kernel);

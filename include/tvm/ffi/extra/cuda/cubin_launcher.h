@@ -522,7 +522,7 @@ class CubinKernel {
       int shared_mem_to_set;
       if (dynamic_smem_max == -1) {
         int static_shared;
-        err = get_func_shmem(kernel_, static_shared);
+        err = get_func_shmem(kernel_, static_shared, device);
         if (err != FFI_CUDA_SUCCESS) {
           continue;  // Skip this device if we can't get kernel attributes
         }
