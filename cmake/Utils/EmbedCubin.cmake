@@ -17,57 +17,58 @@
 
 set(CMAKE_CUDA_RUNTIME_LIBRARY None)
 
-# Copy utils for cmake < 3.27
+# We need this to simulate `CUDA_{CUBIN,FATBIN}_COMPILATION` in `add_tvm_ffi_{cubin,fatbin}`, to
+# copy `a.cu.o` to `a.cubin`/`a.fatbin`.
 set(COPY_SCRIPT "${CMAKE_BINARY_DIR}/cuda_copy_utils.cmake")
 file(
   WRITE ${COPY_SCRIPT}
   "
-  # Arguments: OBJECTS (semicolon-separated list), OUT_DIR, EXT
-  string(REPLACE \"\\\"\" \"\" ext_strip \"\${EXT}\")
-  string(REPLACE \"\\\"\" \"\" out_dir_strip \"\${OUT_DIR}\")
-  foreach(obj_raw \${OBJECTS})
-    string(REPLACE \"\\\"\" \"\" obj \"\${obj_raw}\")
+# Arguments: OBJECTS (semicolon-separated list), OUT_DIR, EXT
+string(REPLACE \"\\\"\" \"\" ext_strip \"\${EXT}\")
+string(REPLACE \"\\\"\" \"\" out_dir_strip \"\${OUT_DIR}\")
+foreach(obj_raw \${OBJECTS})
+  string(REPLACE \"\\\"\" \"\" obj \"\${obj_raw}\")
 
-    # Extract filename: /path/to/kernel.cu.o -> kernel
-    # Note: CMake objects are usually named source.cu.o, so we strip extensions twice.
-    get_filename_component(fname \${obj} NAME_WE)
-    get_filename_component(fname \${fname} NAME_WE)
+  # Extract filename: /path/to/kernel.cu.o -> kernel
+  # Note: CMake objects are usually named source.cu.o, so we strip extensions twice.
+  get_filename_component(fname \${obj} NAME_WE)
+  get_filename_component(fname \${fname} NAME_WE)
 
-    # If OUT_DIR is provided, use it. Otherwise, use the object's directory.
-    if(NOT out_dir_strip STREQUAL \"\")
-       set(final_dir \"\${out_dir_strip}\")
-    else()
-       get_filename_component(final_dir \${obj} DIRECTORY)
-    endif()
+  # If OUT_DIR is provided, use it. Otherwise, use the object's directory.
+  if(NOT out_dir_strip STREQUAL \"\")
+      set(final_dir \"\${out_dir_strip}\")
+  else()
+      get_filename_component(final_dir \${obj} DIRECTORY)
+  endif()
 
-    message(\"Copying \${obj} -> \${final_dir}/\${fname}.\${ext_strip}\")
-    execute_process(
-      COMMAND \${CMAKE_COMMAND} -E copy_if_different
-      \"\${obj}\"
-      \"\${final_dir}/\${fname}.\${ext_strip}\"
-    )
-  endforeach()
+  message(\"Copying \${obj} -> \${final_dir}/\${fname}.\${ext_strip}\")
+  execute_process(
+    COMMAND \${CMAKE_COMMAND} -E copy_if_different
+    \"\${obj}\"
+    \"\${final_dir}/\${fname}.\${ext_strip}\"
+  )
+endforeach()
 "
 )
 
 # ~~~
-# add_tvm_ffi_cubin(<target_name> CUDA <source_files>...)
+# add_tvm_ffi_cubin(<target_name> CUDA <source_file>)
 #
-# Creates an object library that compiles CUDA sources to CUBIN format.
+# Creates an object library that compiles CUDA source to CUBIN format.
 # This function uses CMake's native CUDA support and respects CMAKE_CUDA_ARCHITECTURES.
 # User can use `CUDA_CUBIN_COMPILATION` after cmake 3.27.
 #
 # Parameters:
 #   target_name: Name of the object library target
-#   CUDA: List of CUDA source files
+#   CUDA: One CUDA source file
 #
 # Example:
 #   add_tvm_ffi_cubin(my_kernel_cubin CUDA kernel.cu)
 # ~~~
 function (add_tvm_ffi_cubin target_name)
-  cmake_parse_arguments(ARG "" "" "CUDA" ${ARGN})
+  cmake_parse_arguments(ARG "" "CUDA" "" ${ARGN})
   if (NOT ARG_CUDA)
-    message(FATAL_ERROR "add_tvm_ffi_cubin: CUDA sources are required")
+    message(FATAL_ERROR "add_tvm_ffi_cubin: CUDA source is required")
   endif ()
 
   add_library(${target_name} OBJECT ${ARG_CUDA})
@@ -84,23 +85,23 @@ function (add_tvm_ffi_cubin target_name)
 endfunction ()
 
 # ~~~
-# add_tvm_ffi_fatbin(<target_name> CUDA <source_files>...)
+# add_tvm_ffi_fatbin(<target_name> CUDA <source_file>)
 #
-# Creates an object library that compiles CUDA sources to FATBIN format.
+# Creates an object library that compiles CUDA source to FATBIN format.
 # This function uses CMake's native CUDA support and respects CMAKE_CUDA_ARCHITECTURES.
 # User can use `CUDA_FATBIN_COMPILATION` after cmake 3.27.
 #
 # Parameters:
 #   target_name: Name of the object library target
-#   CUDA: List of CUDA source files
+#   CUDA: One CUDA source file
 #
 # Example:
-#   add_tvm_ffi_fatbin(my_kernel_fatbin CUDA kernel.cu)
+#   add_tvm_ffi_fatbin(my_kernel_cubin CUDA kernel.cu)
 # ~~~
 function (add_tvm_ffi_fatbin target_name)
-  cmake_parse_arguments(ARG "" "" "CUDA" ${ARGN})
+  cmake_parse_arguments(ARG "" "CUDA" "" ${ARGN})
   if (NOT ARG_CUDA)
-    message(FATAL_ERROR "add_tvm_ffi_fatbin: CUDA sources are required")
+    message(FATAL_ERROR "add_tvm_ffi_fatbin: CUDA source is required")
   endif ()
 
   add_library(${target_name} OBJECT ${ARG_CUDA})
@@ -108,8 +109,8 @@ function (add_tvm_ffi_fatbin target_name)
 
   add_custom_target(
     ${target_name}_bin ALL
-    COMMAND ${CMAKE_COMMAND} -DOBJECTS="$<TARGET_OBJECTS:${target_name}>" -DOUT_DIR=""
-            -DEXT="fatbin" -P "${COPY_SCRIPT}"
+    COMMAND ${CMAKE_COMMAND} -DOBJECTS="$<TARGET_OBJECTS:${target_name}>" -DOUT_DIR="" -DEXT="cubin"
+            -P "${COPY_SCRIPT}"
     DEPENDS ${target_name}
     COMMENT "Generating .fatbin files for ${target_name}"
     VERBATIM
@@ -118,6 +119,10 @@ endfunction ()
 
 # ~~~
 # tvm_ffi_embed_bin_into(<target_name> <library_name> BIN <cubin_or_fatbin>)
+#
+# Embed one cubin/fatbin into given target with specified library name,
+# can be loaded with `TVM_FFI_EMBED_CUBIN(library_name)`.
+# Can only have one object in target and one cubin/fatbin.
 #
 # Parameters:
 #   target_name: Name of the object library target

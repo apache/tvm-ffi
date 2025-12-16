@@ -21,7 +21,7 @@ project(dynamic_cubin_example LANGUAGES CXX CUDA)
 # Prefer virtualenv when searching for python
 set(Python_FIND_VIRTUALENV FIRST) # cmake-lint: disable=C0103
 
-set(TVM_FFI_CUBIN_LAUNCHER_USE_DRIVER_API
+set(CMAKE_TVM_FFI_CUBIN_LAUNCHER_USE_DRIVER_API
     OFF
     CACHE BOOL "Use driver API in cubin launcher"
 )
@@ -42,7 +42,9 @@ find_package(tvm_ffi CONFIG REQUIRED)
 # Find CUDA toolkit
 find_package(CUDAToolkit REQUIRED)
 
-# [cmake_example.begin] Step 1: Compile kernel.cu to CUBIN using add_tvm_ffi_cubin utility Use
+# [cmake_example.begin]
+
+# Step 1: Compile kernel.cu to CUBIN using add_tvm_ffi_cubin utility or CUDA_CUBIN_COMPILATION. Use
 # CMAKE_CUDA_ARCHITECTURES=native to automatically detect the GPU architecture
 set(CMAKE_CUDA_ARCHITECTURES native)
 if (CMAKE_VERSION VERSION_LESS "3.27.0")
@@ -56,12 +58,6 @@ endif ()
 add_library(lib_dynamic SHARED src/lib_dynamic.cc)
 include_directories(${CUDAToolkit_INCLUDE_DIRS})
 target_link_libraries(lib_dynamic PRIVATE tvm_ffi_header tvm_ffi_shared)
-if (TVM_FFI_CUBIN_LAUNCHER_USE_DRIVER_API)
-  add_compile_definitions(TVM_FFI_CUDA_USE_DRIVER_API=1)
-  target_link_libraries(lib_dynamic PRIVATE cuda)
-else ()
-  target_link_libraries(lib_dynamic PRIVATE CUDA::cudart)
-endif ()
 add_dependencies(lib_dynamic kernel_cubin)
 set_target_properties(
   lib_dynamic
@@ -69,3 +65,12 @@ set_target_properties(
              PREFIX ""
              SUFFIX ".so"
 )
+
+# Step 3: Link against CUDA Driver API or Runtime API based on config
+if (CMAKE_TVM_FFI_CUBIN_LAUNCHER_USE_DRIVER_API)
+  add_compile_definitions(TVM_FFI_CUDA_USE_DRIVER_API=1)
+  target_link_libraries(lib_dynamic PRIVATE cuda)
+else ()
+  target_link_libraries(lib_dynamic PRIVATE CUDA::cudart)
+endif ()
+# [cmake_example.end]

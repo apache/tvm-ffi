@@ -17,9 +17,8 @@
 
 cmake_minimum_required(VERSION 3.20)
 project(embedded_cubin_example LANGUAGES CXX CUDA)
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-set(TVM_FFI_CUBIN_LAUNCHER_USE_DRIVER_API
+set(CMAKE_TVM_FFI_CUBIN_LAUNCHER_USE_DRIVER_API
     OFF
     CACHE BOOL "Use driver API in cubin launcher"
 )
@@ -44,7 +43,9 @@ find_package(tvm_ffi CONFIG REQUIRED)
 find_package(CUDAToolkit REQUIRED)
 include_directories(${CUDAToolkit_INCLUDE_DIRS})
 
-# [cmake_example.begin] Step 1: Compile kernel.cu to CUBIN using add_tvm_ffi_cubin utility
+# [cmake_example.begin]
+
+# Step 1: Compile kernel.cu to FATBIN using add_tvm_ffi_fatbin utility or `CUDA_FATBIN_COMPILATION`
 set(CMAKE_CUDA_ARCHITECTURES 75;80;86;89;90;100;120)
 if (CMAKE_VERSION VERSION_LESS "3.27.0")
   add_tvm_ffi_fatbin(kernel_fatbin CUDA src/kernel.cu)
@@ -53,17 +54,21 @@ else ()
   set_target_properties(kernel_fatbin PROPERTY CUDA_FATBIN_COMPILATION ON)
 endif ()
 
+# Step 2: Build lib_embedded shared library
 add_library(lib_embedded SHARED src/lib_embedded.cc)
 target_link_libraries(lib_embedded PRIVATE tvm_ffi_header tvm_ffi_shared)
 set_target_properties(lib_embedded PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
-if (TVM_FFI_CUBIN_LAUNCHER_USE_DRIVER_API)
+# Step 3: Link against CUDA Driver API or Runtime API based on config
+if (CMAKE_TVM_FFI_CUBIN_LAUNCHER_USE_DRIVER_API)
   add_compile_definitions(TVM_FFI_CUDA_USE_DRIVER_API=1)
   target_link_libraries(lib_embedded PRIVATE cuda)
 else ()
   target_link_libraries(lib_embedded PRIVATE CUDA::cudart)
 endif ()
 
+# Step 4: Embed CUBIN into shared library just defined, using tvm_ffi_embed_cubin utility This
+# creates symbols: __tvm_ffi__cubin_env (local)
 tvm_ffi_embed_bin_into(lib_embedded env BIN "$<TARGET_OBJECTS:kernel_fatbin>")
 
 set_target_properties(
