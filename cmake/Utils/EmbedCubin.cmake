@@ -116,141 +116,49 @@ function (add_tvm_ffi_fatbin target_name)
   )
 endfunction ()
 
-# function(add_tvm_ffi_header target) cmake_parse_arguments(ARG "" "BIN;OUTPUT" "" ${ARGN}) if (NOT
-# ARG_BIN) message(FATAL_ERROR "add_tvm_ffi_header: BIN (cubin/fatbin) is required") endif()
-# get_filename_component(BIN_ABS "${ARG_BIN}" ABSOLUTE) if (NOT ARG_OUTPUT) string(REGEX REPLACE
-# "\\.([Cc][Uu][Bb][Ii][Nn]|[Ff][Aa][Tt][Bb][Ii][Nn])$" ".h" OUTPUT_HEADER "${BIN_ABS}") if
-# ("${OUTPUT_HEADER}" STREQUAL "${BIN_ABS}") set(OUTPUT_HEADER "${BIN_ABS}.h") endif() else()
-# set(OUTPUT_HEADER "${ARG_OUTPUT}") endif() get_filename_component(OUT_DIR "${OUTPUT_HEADER}"
-# DIRECTORY) file(MAKE_DIRECTORY "${OUT_DIR}") add_custom_command( OUTPUT "${OUTPUT_HEADER}" COMMAND
-# bin2c -c "${BIN_ABS}" > "${OUTPUT_HEADER}" DEPENDS "${BIN_ABS}" COMMENT "Generating header from
-# ${BIN_ABS} -> ${OUTPUT_HEADER}" VERBATIM ) add_library("${target}" INTERFACE)
-# target_include_directories("${target}" INTERFACE $<BUILD_INTERFACE:${OUT_DIR}> )
-# add_custom_target("${target}_generate" DEPENDS "${OUTPUT_HEADER}") add_dependencies("${target}"
-# "${target}_generate") endfunction()
-
 # ~~~
-# tvm_ffi_embed_cubin(
-#   OUTPUT <output_object_file>
-#   SOURCE <source_file>
-#   CUBIN <cubin_file>
-#   NAME <symbol_name>
-#   [DEPENDS <additional_dependencies>...]
-# )
-#
-# Compiles a C++ source file and embeds a CUBIN file into it, creating a
-# combined object file that can be linked into a shared library or executable.
+# tvm_ffi_embed_bin_into(<target_name> <library_name> BIN <cubin_or_fatbin>)
 #
 # Parameters:
-#   OUTPUT: Path to the output object file (e.g., lib_embedded_with_cubin.o)
-#   SOURCE: Path to the C++ source file that uses TVM_FFI_EMBED_CUBIN macro
-#   CUBIN: Path to the CUBIN file to embed (can be a file path or a custom target output)
-#   NAME: Name used in the TVM_FFI_EMBED_CUBIN macro (e.g., "env" for TVM_FFI_EMBED_CUBIN(env))
-#   DEPENDS: Optional additional dependencies (e.g., custom targets)
-#
-# The function will:
-#   1. Compile the SOURCE file to an intermediate object file
-#   2. Use the tvm_ffi.utils.embed_cubin Python utility to merge the object file
-#      with the CUBIN data
-#   3. Create symbols: __tvm_ffi__cubin_<NAME> and __tvm_ffi__cubin_<NAME>_end
+#   target_name: Name of the object library target
+#   library_name: Name of the kernel library
+#   BIN: CUBIN or FATBIN file
 #
 # Example:
-#   tvm_ffi_embed_cubin(
-#     OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/lib_embedded_with_cubin.o
-#     SOURCE src/lib_embedded.cc
-#     CUBIN ${CMAKE_CURRENT_BINARY_DIR}/kernel.cubin
-#     NAME env
-#   )
-#
-#   add_library(lib_embedded SHARED ${CMAKE_CURRENT_BINARY_DIR}/lib_embedded_with_cubin.o)
-#   target_link_libraries(lib_embedded PRIVATE tvm_ffi_header CUDA::cudart)
-#
-# Note: The .note.GNU-stack section is automatically added to mark the stack as
-#       non-executable, so you don't need to add linker options manually
+#   tvm_ffi_embed_bin_into(lib_embedded env BIN "$<TARGET_OBJECTS:kernel_fatbin>")
 # ~~~
+function (tvm_ffi_embed_bin_into target_name kernel_name)
+  cmake_parse_arguments(ARG "" "BIN;INTERMEDIATE_FILE" "" ${ARGN})
 
-# cmake-lint: disable=C0111,C0103
-function (tvm_ffi_embed_cubin)
-  # Parse arguments
-  set(options "")
-  set(oneValueArgs OUTPUT SOURCE CUBIN NAME)
-  set(multiValueArgs DEPENDS)
-  cmake_parse_arguments(ARG "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
-
-  # Validate required arguments
-  if (NOT ARG_OUTPUT)
-    message(FATAL_ERROR "tvm_ffi_embed_cubin: OUTPUT is required")
-  endif ()
-  if (NOT ARG_SOURCE)
-    message(FATAL_ERROR "tvm_ffi_embed_cubin: SOURCE is required")
-  endif ()
-  if (NOT ARG_CUBIN)
-    message(FATAL_ERROR "tvm_ffi_embed_cubin: CUBIN is required")
-  endif ()
-  if (NOT ARG_NAME)
-    message(FATAL_ERROR "tvm_ffi_embed_cubin: NAME is required")
+  if (NOT ARG_BIN)
+    message(FATAL_ERROR "tvm_ffi_embed_object: BIN is required")
   endif ()
 
-  # Ensure Python is found (prefer virtualenv)
-  if (NOT Python_EXECUTABLE)
-    set(Python_FIND_VIRTUALENV FIRST)
-    find_package(
-      Python
-      COMPONENTS Interpreter
-      REQUIRED
-    )
+  get_filename_component(LIB_ABS "$<TARGET_OBJECTS:${target_name}>" ABSOLUTE)
+  if (NOT INTERMEDIATE_FILE)
+    get_filename_component(OUTPUT_DIR_ABS "${LIB_ABS}" DIRECTORY)
+
+    set(final_output "${OUTPUT_DIR_ABS}/${kernel_name}_intermediate.o")
+  else ()
+    get_filename_component(final_output "${ARG_OUTPUT}" ABSOLUTE)
   endif ()
 
-  # Get absolute paths
-  get_filename_component(ARG_SOURCE_ABS "${ARG_SOURCE}" ABSOLUTE)
-  get_filename_component(ARG_OUTPUT_ABS "${ARG_OUTPUT}" ABSOLUTE)
-
-  # Generate intermediate object file path
-  get_filename_component(OUTPUT_DIR "${ARG_OUTPUT_ABS}" DIRECTORY)
-  get_filename_component(OUTPUT_NAME "${ARG_OUTPUT_ABS}" NAME_WE)
-  set(INTERMEDIATE_OBJ "${OUTPUT_DIR}/${OUTPUT_NAME}_intermediate.o")
-
-  # Get include directories from tvm_ffi_header
-  get_target_property(TVM_FFI_INCLUDES tvm_ffi_header INTERFACE_INCLUDE_DIRECTORIES)
-
-  # Convert list to -I flags
-  set(INCLUDE_FLAGS "")
-  foreach (inc_dir ${TVM_FFI_INCLUDES})
-    list(APPEND INCLUDE_FLAGS "-I${inc_dir}")
-  endforeach ()
-
-  # Add CUDA include directories if CUDAToolkit is found
-  if (TARGET CUDA::cudart)
-    get_target_property(CUDA_INCLUDES CUDA::cudart INTERFACE_INCLUDE_DIRECTORIES)
-    foreach (inc_dir ${CUDA_INCLUDES})
-      list(APPEND INCLUDE_FLAGS "-I${inc_dir}")
-    endforeach ()
-  endif ()
-
-  # Step 1: Compile source file to intermediate object file
   add_custom_command(
-    OUTPUT "${INTERMEDIATE_OBJ}"
-    COMMAND ${CMAKE_CXX_COMPILER} -c -fPIC -std=c++17 ${INCLUDE_FLAGS} "${ARG_SOURCE_ABS}" -o
-            "${INTERMEDIATE_OBJ}"
-    DEPENDS "${ARG_SOURCE_ABS}"
-    COMMENT "Compiling ${ARG_SOURCE} to intermediate object file"
-    VERBATIM
+    TARGET ${target_name}
+    PRE_LINK
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_OBJECTS:${target_name}>"
+            "${final_output}"
+    COMMENT "Moving $<TARGET_OBJECTS:${target_name}> -> ${final_output}"
   )
 
-  # Step 2: Embed CUBIN into the object file using Python utility Note: The Python utility
-  # automatically adds .note.GNU-stack section
   add_custom_command(
-    OUTPUT "${ARG_OUTPUT_ABS}"
-    COMMAND ${Python_EXECUTABLE} -m tvm_ffi.utils.embed_cubin --output-obj "${ARG_OUTPUT_ABS}"
-            --input-obj "${INTERMEDIATE_OBJ}" --cubin "${ARG_CUBIN}" --name "${ARG_NAME}"
-    DEPENDS "${INTERMEDIATE_OBJ}" "${ARG_CUBIN}" ${ARG_DEPENDS}
-    COMMENT "Embedding CUBIN into object file (name: ${ARG_NAME})"
+    TARGET ${target_name}
+    PRE_LINK
+    COMMAND
+      ${Python_EXECUTABLE} -m tvm_ffi.utils.embed_cubin --output-obj
+      "$<TARGET_OBJECTS:${target_name}>" --name "${kernel_name}" --input-obj "${FINAL_OUTPUT}"
+      --cubin "${ARG_BIN}" DEPENDS
+    COMMENT "Embedding CUBIN into object file (name: ${kernel_name})"
     VERBATIM
-  )
-
-  # Set a variable in parent scope so users can add dependencies
-  set(${ARG_NAME}_EMBEDDED_OBJ
-      "${ARG_OUTPUT_ABS}"
-      PARENT_SCOPE
   )
 endfunction ()
