@@ -33,18 +33,7 @@
 
 #include "kernel_fatbin.h"
 
-#define TVM_FFI_EMBED_CUBIN_v2(name, imageBytes) \
-  namespace {                                    \
-  struct EmbedCubinModule_##name {               \
-    tvm::ffi::CubinModule mod{imageBytes};       \
-    static EmbedCubinModule_##name* Global() {   \
-      static EmbedCubinModule_##name inst;       \
-      return &inst;                              \
-    }                                            \
-  };                                             \
-  } /* anonymous namespace */
-
-TVM_FFI_EMBED_CUBIN_v2(env, imageBytes);
+TVM_FFI_LOAD_LIBRARY_FROM_BYTES(env, imageBytes);
 
 namespace cubin_embedded {
 

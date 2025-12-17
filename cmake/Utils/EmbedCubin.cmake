@@ -111,7 +111,7 @@ function (add_tvm_ffi_fatbin target_name)
 
   add_custom_target(
     ${target_name}_bin ALL
-    COMMAND ${CMAKE_COMMAND} -DOBJECTS="$<TARGET_OBJECTS:${target_name}>" -DOUT_DIR="" -DEXT="cubin"
+    COMMAND ${CMAKE_COMMAND} -DOBJECTS="$<TARGET_OBJECTS:${target_name}>" -DOUT_DIR="" -DEXT="fatbin"
             -P "${COPY_SCRIPT}"
     DEPENDS ${target_name}
     COMMENT "Generating .fatbin files for ${target_name}"
@@ -147,12 +147,12 @@ function (tvm_ffi_embed_bin_into target_name kernel_name)
   endif ()
 
   get_filename_component(LIB_ABS "$<TARGET_OBJECTS:${target_name}>" ABSOLUTE)
-  if (NOT INTERMEDIATE_FILE)
+  if (NOT ARG_INTERMEDIATE_FILE)
     get_filename_component(OUTPUT_DIR_ABS "${LIB_ABS}" DIRECTORY)
 
     set(final_output "${OUTPUT_DIR_ABS}/${kernel_name}_intermediate.o")
   else ()
-    get_filename_component(final_output "${ARG_OUTPUT}" ABSOLUTE)
+    get_filename_component(final_output "${ARG_INTERMEDIATE_FILE}" ABSOLUTE)
   endif ()
 
   add_custom_command(
@@ -168,7 +168,7 @@ function (tvm_ffi_embed_bin_into target_name kernel_name)
     PRE_LINK
     COMMAND
       ${Python_EXECUTABLE} -m tvm_ffi.utils.embed_cubin --output-obj
-      "$<TARGET_OBJECTS:${target_name}>" --name "${kernel_name}" --input-obj "${FINAL_OUTPUT}"
+      "$<TARGET_OBJECTS:${target_name}>" --name "${kernel_name}" --input-obj "${final_output}"
       --cubin "${ARG_BIN}" DEPENDS
     COMMENT "Embedding CUBIN into object file (name: ${kernel_name})"
     VERBATIM
