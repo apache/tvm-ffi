@@ -39,9 +39,8 @@
 #if (!(TVM_FFI_CUBIN_LAUNCHER_USE_DRIVER_API)) && (CUDART_VERSION < 12080)
 #define _STRINGIFY(x) #x
 #define STR(x) _STRINGIFY(x)
-static_assert(false,
-              "Runtime API only supported for CUDA >= 12.8, got CUDA Runtime version: " STR(
-                  CUDART_VERSION));
+static_assert(false, "Runtime API only supported for CUDA >= 12.8, got CUDA Runtime version: " STR(
+                         CUDART_VERSION));
 #endif
 #endif
 

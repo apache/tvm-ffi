@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
+# Do not let cmake to link cudart.
 set(CMAKE_CUDA_RUNTIME_LIBRARY None)
 
 # We need this to simulate `CUDA_{CUBIN,FATBIN}_COMPILATION` in `add_tvm_ffi_{cubin,fatbin}`, to
@@ -111,8 +112,8 @@ function (add_tvm_ffi_fatbin target_name)
 
   add_custom_target(
     ${target_name}_bin ALL
-    COMMAND ${CMAKE_COMMAND} -DOBJECTS="$<TARGET_OBJECTS:${target_name}>" -DOUT_DIR="" -DEXT="fatbin"
-            -P "${COPY_SCRIPT}"
+    COMMAND ${CMAKE_COMMAND} -DOBJECTS="$<TARGET_OBJECTS:${target_name}>" -DOUT_DIR=""
+            -DEXT="fatbin" -P "${COPY_SCRIPT}"
     DEPENDS ${target_name}
     COMMENT "Generating .fatbin files for ${target_name}"
     VERBATIM
