@@ -295,3 +295,6 @@ _docs/
 .gdb_history
 
 build/
+
+*.cubin
+*.fatbin
