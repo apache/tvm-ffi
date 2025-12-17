@@ -18,7 +18,7 @@
 cmake_minimum_required(VERSION 3.27)
 project(embedded_cubin_example LANGUAGES CXX CUDA)
 
-set(CMAKE_CXX_STANDARD 26)
+set(CMAKE_CXX_STANDARD 17)
 
 set(CMAKE_TVM_FFI_CUBIN_LAUNCHER_USE_DRIVER_API
     OFF
@@ -53,16 +53,16 @@ add_library(kernel_fatbin OBJECT src/kernel.cu)
 set_target_properties(kernel_fatbin PROPERTIES CUDA_FATBIN_COMPILATION ON)
 
 add_custom_target(
-  kernel_fatbin.fatbin
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_OBJECTS:kernel_fatbin>"
-          "${CMAKE_CURRENT_SOURCE_DIR}/src/kernel_fatbin.fatbin"
+  kernel_fatbin.h
+  COMMAND bin2c -c "$<TARGET_OBJECTS:kernel_fatbin>" >
+          "${CMAKE_CURRENT_SOURCE_DIR}/src/kernel_fatbin.h"
   DEPENDS kernel_fatbin
-  COMMENT "Copy fatbin to source dir"
+  COMMENT "Run bin2c for ${kernel_fatbin}"
 )
 
 # Step 2: Build lib_embedded shared library
 add_library(lib_embedded SHARED src/lib_embedded.cc)
-add_dependencies(lib_embedded kernel_fatbin.fatbin)
+add_dependencies(lib_embedded kernel_fatbin.h)
 target_link_libraries(lib_embedded PRIVATE tvm_ffi_header tvm_ffi_shared)
 set_target_properties(lib_embedded PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
