@@ -167,7 +167,7 @@ namespace ffi {
  * \brief Macro to load a CUBIN module from a byte array.
  *
  * This macro creates a singleton struct to manage the CubinModule instance
- * initialized from a byte array (e.g. from #embed or bin2c output).
+ * initialized from a byte array (e.g. from `#embed <file>` or bin2c output).
  *
  * \par Usage Example
  * \code{.cpp}
