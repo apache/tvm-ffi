@@ -61,6 +61,12 @@ impl<T: ObjectRefCore> Debug for Array<T> {
     }
 }
 
+impl<T: ObjectRefCore> Default for Array<T> {
+    fn default() -> Self {
+        Self::new(vec![])
+    }
+}
+
 unsafe impl<T: ObjectRefCore> ObjectRefCore for Array<T> {
     type ContainerType = ArrayObj;
 
