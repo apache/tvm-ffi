@@ -1,3 +1,4 @@
+use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 
@@ -50,6 +51,14 @@ impl Drop for ArrayObj {
 pub struct Array<T: ObjectRefCore> {
     data: ObjectArc<ArrayObj>,
     _marker: PhantomData<T>,
+}
+
+impl<T: ObjectRefCore> Debug for Array<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let full_name = std::any::type_name::<T>();
+        let short_name = full_name.split("::").last().unwrap_or(full_name);
+        write!(f, "Array<{}>[{}]", short_name, self.len())
+    }
 }
 
 unsafe impl<T: ObjectRefCore> ObjectRefCore for Array<T> {
