@@ -88,6 +88,11 @@ void AddOne(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
   TVM_FFI_CHECK_CUDA_ERROR(result);
 }
 
+}  // namespace cubin_dynamic
+// [example.end]
+
+namespace cubin_dynamic {
+
 /*!
  * \brief Launch mul_two_cuda kernel on input tensor.
  * \param x Input tensor (float32, 1D)
@@ -129,4 +134,3 @@ TVM_FFI_DLL_EXPORT_TYPED_FUNC(add_one, cubin_dynamic::AddOne);
 TVM_FFI_DLL_EXPORT_TYPED_FUNC(mul_two, cubin_dynamic::MulTwo);
 
 }  // namespace cubin_dynamic
-// [example.end]

@@ -18,12 +18,30 @@
 CUBIN Launcher Guide
 ====================
 
-This guide demonstrates how to load and launch CUDA kernels from CUBIN (CUDA Binary) modules using TVM-FFI. The CUBIN launcher enables you to execute pre-compiled or runtime-compiled CUDA kernels efficiently through the CUDA Runtime API.
+This guide demonstrates how to load and launch CUDA kernels from CUBIN (CUDA Binary) modules using TVM-FFI. The CUBIN launcher enables you to execute pre-compiled or runtime-compiled CUDA kernels efficiently through the CUDA Runtime API or Driver API.
 
 Overview
 --------
 
-TVM-FFI provides utilities for loading and launching CUDA kernels from CUBIN modules. The implementation is in ``tvm/ffi/extra/cuda/cubin_launcher.h`` and provides:
+TVM-FFI provides utilities for loading and launching CUDA kernels from CUBIN modules. The implementation supports both **CUDA Runtime API** (default for CUDA >= 12.8) and **CUDA Driver API**.
+
+**Runtime API (CUDA >= 12.8):**
+
+- ``cudaLibraryLoadData()`` - Load CUBIN from memory buffer
+- ``cudaLibraryGetKernel()`` - Get kernel handle by name
+- ``cudaLaunchKernel()`` - Launch kernel with grid/block dimensions
+
+**Driver API:**
+
+- ``cuLibraryLoadData()`` - Load CUBIN from memory buffer
+- ``cuLibraryGetKernel()`` - Get kernel handle by name
+- ``cuLaunchKernel()`` - Launch kernel with grid/block dimensions
+
+**Customization:**
+
+By default, the implementation uses the Runtime API if compiled with CUDA >= 12.8, falling back to the Driver API for older versions. You can force the usage of the Driver API (or Runtime API) by defining the macro ``TVM_FFI_CUBIN_LAUNCHER_USE_DRIVER_API`` (set to ``1`` for Driver API, ``0`` for Runtime API) before including the header.
+
+The implementation is in ``tvm/ffi/extra/cuda/cubin_launcher.h`` and provides:
 
 - :cpp:class:`tvm::ffi::CubinModule`: RAII wrapper for loading CUBIN modules from memory
 - :cpp:class:`tvm::ffi::CubinKernel`: Handle for launching CUDA kernels with specified parameters
@@ -118,9 +136,13 @@ C++ Usage
 Embedding CUBIN at Compile Time
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The standard and most convenient way to embed CUBIN/FATBIN data in C++ is using the TVM-FFI build utilities. This method keeps your source code clean by linking the binary data as an object file.
+The most convenient way to embed CUBIN/FATBIN data in C++ is using the TVM-FFI build utilities. There are three main approaches:
 
-**Standard Approach: Build System Integration**
+1. **Object Linking (Standard)**: Use CMake utilities to compile and link the CUBIN data.
+2. **Header Inclusion (Portable)**: Convert CUBIN to a C header file using ``bin2c``.
+3. **C++ Embedding (Modern)**: Use C++23 ``#embed`` (or compiler extensions).
+
+**Method 1: Object Linking (Standard)**
 
 This approach uses CMake utilities to compile and link the CUBIN data. It works across all supported compilers and handles the low-level details of object file generation and symbol naming.
 
@@ -129,47 +151,23 @@ This approach uses CMake utilities to compile and link the CUBIN data. It works 
    :start-after: [example.begin]
    :end-before: [example.end]
 
-**Alternative Approaches (Manual Embedding)**
+**Method 2: Header Inclusion (Portable)**
 
-TVM-FFI is designed to be flexible. If you prefer to manage the binary data explicitly in your source code or have specific compiler requirements (like C++23), you can use the ``TVM_FFI_LOAD_LIBRARY_FROM_BYTES`` macro. These approaches require you to modify your source code to include the binary data.
+You can use tools like ``bin2c`` to generate a header file containing the byte array and include it.
 
-*Option A: Modern C++ Embedding (C++23 or Compiler Extensions)*
+.. literalinclude:: ../../examples/cubin_launcher/embedded_cubin/include_bin2c/src/lib_embedded.cc
+   :language: cpp
+   :start-after: [example.begin]
+   :end-before: [example.end]
+
+**Method 3: C++ Embedding (Modern)**
 
 Using C++23 ``#embed`` (or compiler extensions like ``#embed`` in Clang/GCC) allows you to include the binary data directly.
 
-.. code-block:: cpp
-
-   #include <tvm/ffi/extra/cuda/cubin_launcher.h>
-
-   // Define the image bytes using #embed
-   constexpr unsigned char image[]{
-   // clang >= 20 or gcc >= 14 or C++23
-   #embed "kernel.fatbin"
-   };
-
-   // Register the embedded CUBIN with a name ("env" in this case)
-   TVM_FFI_LOAD_LIBRARY_FROM_BYTES(env, image);
-
-   void MyFunction() {
-     // Get kernel from embedded CUBIN
-     static auto kernel = TVM_FFI_EMBED_CUBIN_GET_KERNEL(env, "my_kernel");
-     // ...
-   }
-
-*Option B: bin2c / Header Inclusion*
-
-You can also use tools like ``bin2c`` to generate a header file containing the byte array and include it.
-
-.. code-block:: cpp
-
-   #include <tvm/ffi/extra/cuda/cubin_launcher.h>
-
-   // Include generated header that defines 'image' array
-   // e.g. const unsigned char image[] = { ... };
-   #include "kernel_fatbin.h"
-
-   TVM_FFI_LOAD_LIBRARY_FROM_BYTES(env, image);
-   // ...
+.. literalinclude:: ../../examples/cubin_launcher/embedded_cubin/cpp_embed/src/lib_embedded.cc
+   :language: cpp
+   :start-after: [example.begin]
+   :end-before: [example.end]
 
 **Key Points:**
 

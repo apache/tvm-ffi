@@ -24,16 +24,17 @@
  * embedded CUBIN data.
  */
 
-// [example.begin]
 #include <tvm/ffi/container/tensor.h>
 #include <tvm/ffi/error.h>
 #include <tvm/ffi/extra/c_env_api.h>
 #include <tvm/ffi/extra/cuda/cubin_launcher.h>
 #include <tvm/ffi/function.h>
 
+// [example.begin]
 // Embed CUBIN module with name "env"
 // This creates the necessary symbols and singleton struct for accessing the embedded CUBIN
 TVM_FFI_EMBED_CUBIN(env);
+// [example.end]
 
 namespace cubin_embedded {
 
@@ -71,6 +72,10 @@ void AddOne(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
   tvm::ffi::ResultHandle result = kernel.Launch(args, grid, block, stream);
   TVM_FFI_CHECK_CUDA_ERROR(result);
 }
+
+}  // namespace cubin_embedded
+
+namespace cubin_embedded {
 
 /*!
  * \brief Launch mul_two_cuda kernel on input tensor.
@@ -112,4 +117,3 @@ TVM_FFI_DLL_EXPORT_TYPED_FUNC(add_one, cubin_embedded::AddOne);
 TVM_FFI_DLL_EXPORT_TYPED_FUNC(mul_two, cubin_embedded::MulTwo);
 
 }  // namespace cubin_embedded
-// [example.end]
