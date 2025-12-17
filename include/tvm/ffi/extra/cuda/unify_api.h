@@ -144,8 +144,7 @@ static ResultHandle launch_kernel(KernelHandle kernel, void** args, tvm::ffi::di
 
 static ResultHandle get_func_shmem(KernelHandle kernel, int& out, DeviceHandle device) {
 #if TVM_FFI_CUDA_USE_DRIVER_API
-  return cuKernelGetAttribute(&out, CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES, kernel,
-                              device);
+  return cuKernelGetAttribute(&out, CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES, kernel, device);
 #else
   cudaFuncAttributes func_attr;
   cudaError_t err = cudaFuncGetAttributes(&func_attr, kernel);

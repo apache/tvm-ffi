@@ -56,7 +56,8 @@ endforeach()
 #
 # Creates an object library that compiles CUDA source to CUBIN format.
 # This function uses CMake's native CUDA support and respects CMAKE_CUDA_ARCHITECTURES.
-# User can use `CUDA_CUBIN_COMPILATION` after cmake 3.27.
+# This is a compatibility util for cmake < 3.27, user can create
+# cmake target with `CUDA_CUBIN_COMPILATION` for cmake >= 3.27.
 #
 # Parameters:
 #   target_name: Name of the object library target
@@ -89,7 +90,8 @@ endfunction ()
 #
 # Creates an object library that compiles CUDA source to FATBIN format.
 # This function uses CMake's native CUDA support and respects CMAKE_CUDA_ARCHITECTURES.
-# User can use `CUDA_FATBIN_COMPILATION` after cmake 3.27.
+# This is a compatibility util for cmake < 3.27, user can create
+# cmake target with `CUDA_FATBIN_COMPILATION` for cmake >= 3.27.
 #
 # Parameters:
 #   target_name: Name of the object library target
@@ -118,7 +120,9 @@ function (add_tvm_ffi_fatbin target_name)
 endfunction ()
 
 # ~~~
-# tvm_ffi_embed_bin_into(<target_name> <library_name> BIN <cubin_or_fatbin>)
+# tvm_ffi_embed_bin_into(<target_name> <library_name>
+#                        BIN <cubin_or_fatbin>
+#                        INTERMEDIATE_FILE <intermediate_path>)
 #
 # Embed one cubin/fatbin into given target with specified library name,
 # can be loaded with `TVM_FFI_EMBED_CUBIN(library_name)`.
@@ -130,6 +134,7 @@ endfunction ()
 #   target_name: Name of the object library target
 #   library_name: Name of the kernel library
 #   BIN: CUBIN or FATBIN file
+#   INTERMEDIATE_FILE: Optional, location to copy original object file to.
 #
 # Example:
 #   tvm_ffi_embed_bin_into(lib_embedded env BIN "$<TARGET_OBJECTS:kernel_fatbin>")
