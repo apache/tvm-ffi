@@ -61,7 +61,7 @@ set_target_properties(lib_embedded PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 # Step 3: Link against CUDA Driver API or Runtime API based on config
 if (CMAKE_TVM_FFI_CUBIN_LAUNCHER_USE_DRIVER_API)
-  add_compile_definitions(TVM_FFI_CUDA_USE_DRIVER_API=1)
+  add_compile_definitions(TVM_FFI_CUBIN_LAUNCHER_USE_DRIVER_API=1)
   target_link_libraries(lib_embedded PRIVATE cuda)
 else ()
   target_link_libraries(lib_embedded PRIVATE CUDA::cudart)

@@ -28,15 +28,15 @@
 #include <filesystem>
 #include <string>
 
-#ifndef TVM_FFI_CUDA_USE_DRIVER_API
+#ifndef TVM_FFI_CUBIN_LAUNCHER_USE_DRIVER_API
 #if CUDART_VERSION >= 12080
 // Use Runtime API by default if possible
-#define TVM_FFI_CUDA_USE_DRIVER_API 0
+#define TVM_FFI_CUBIN_LAUNCHER_USE_DRIVER_API 0
 #else
-#define TVM_FFI_CUDA_USE_DRIVER_API 1
+#define TVM_FFI_CUBIN_LAUNCHER_USE_DRIVER_API 1
 #endif  // CUDART_VERSION >= 12080
 #else
-#if (!(TVM_FFI_CUDA_USE_DRIVER_API)) && (CUDART_VERSION < 12080)
+#if (!(TVM_FFI_CUBIN_LAUNCHER_USE_DRIVER_API)) && (CUDART_VERSION < 12080)
 #define _STRINGIFY(x) #x
 #define STR(x) _STRINGIFY(x)
 static_assert(false,
@@ -47,7 +47,7 @@ static_assert(false,
 
 namespace tvm::ffi {
 
-#if TVM_FFI_CUDA_USE_DRIVER_API
+#if TVM_FFI_CUBIN_LAUNCHER_USE_DRIVER_API
 
 using StreamHandle = CUstream;
 using ResultHandle = CUresult;
@@ -113,7 +113,7 @@ using DeviceHandle = int;
   } while (0)
 
 static ResultHandle load_image(LibraryHandle* library, const void* image) {
-#if TVM_FFI_CUDA_USE_DRIVER_API
+#if TVM_FFI_CUBIN_LAUNCHER_USE_DRIVER_API
   return cuLibraryLoadData(library, image, nullptr, nullptr, 0, nullptr, nullptr, 0);
 #else
   return cudaLibraryLoadData(library, image, nullptr, nullptr, 0, nullptr, nullptr, 0);
@@ -121,7 +121,7 @@ static ResultHandle load_image(LibraryHandle* library, const void* image) {
 }
 
 static DeviceHandle idx_to_device(int idx) {
-#if TVM_FFI_CUDA_USE_DRIVER_API
+#if TVM_FFI_CUBIN_LAUNCHER_USE_DRIVER_API
   CUdevice o;
   TVM_FFI_CHECK_DRIVER_CUDA_ERROR(cuDeviceGet(&o, idx));
   return o;
@@ -133,7 +133,7 @@ static DeviceHandle idx_to_device(int idx) {
 static ResultHandle launch_kernel(KernelHandle kernel, void** args, tvm::ffi::dim3 grid,
                                   tvm::ffi::dim3 block, StreamHandle stream,
                                   uint32_t dyn_smem_bytes = 0) {
-#if TVM_FFI_CUDA_USE_DRIVER_API
+#if TVM_FFI_CUBIN_LAUNCHER_USE_DRIVER_API
   return cuLaunchKernel(reinterpret_cast<CUfunction>(kernel), grid.x, grid.y, grid.z, block.x,
                         block.y, block.z, dyn_smem_bytes, stream, args, nullptr);
 #else
@@ -143,7 +143,7 @@ static ResultHandle launch_kernel(KernelHandle kernel, void** args, tvm::ffi::di
 }
 
 static ResultHandle get_func_shmem(KernelHandle kernel, int& out, DeviceHandle device) {
-#if TVM_FFI_CUDA_USE_DRIVER_API
+#if TVM_FFI_CUBIN_LAUNCHER_USE_DRIVER_API
   return cuKernelGetAttribute(&out, CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES, kernel, device);
 #else
   cudaFuncAttributes func_attr;
@@ -156,7 +156,7 @@ static ResultHandle get_func_shmem(KernelHandle kernel, int& out, DeviceHandle d
 }
 
 static ResultHandle set_func_shmem(KernelHandle kernel, int shmem, DeviceHandle device) {
-#if TVM_FFI_CUDA_USE_DRIVER_API
+#if TVM_FFI_CUBIN_LAUNCHER_USE_DRIVER_API
   return cuKernelSetAttribute(CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES, shmem, kernel,
                               device);
 #else
@@ -173,7 +173,7 @@ static ResultHandle set_func_shmem(KernelHandle kernel, int shmem, DeviceHandle 
  *
  * \param stmt The CUDA runtime/device API call to check.
  */
-#if TVM_FFI_CUDA_USE_DRIVER_API
+#if TVM_FFI_CUBIN_LAUNCHER_USE_DRIVER_API
 #define TVM_FFI_CHECK_CUDA_ERROR TVM_FFI_CHECK_DRIVER_CUDA_ERROR
 #else
 #define TVM_FFI_CHECK_CUDA_ERROR TVM_FFI_CHECK_RUNTIME_CUDA_ERROR
