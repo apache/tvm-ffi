@@ -54,11 +54,19 @@ else ()
   set_property(TARGET kernel_cubin PROPERTY CUDA_CUBIN_COMPILATION ON)
 endif ()
 
+add_custom_target(
+  kernel.cubin
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_OBJECTS:kernel_cubin>"
+          "${CMAKE_CURRENT_BINARY_DIR}/kernel.cubin"
+  DEPENDS kernel_cubin
+  COMMENT "Copy cubin to build dir"
+)
+
 # Step 2: Build lib_dynamic shared library (loads CUBIN from file at runtime)
 add_library(lib_dynamic SHARED src/lib_dynamic.cc)
 include_directories(${CUDAToolkit_INCLUDE_DIRS})
 target_link_libraries(lib_dynamic PRIVATE tvm_ffi_header tvm_ffi_shared)
-add_dependencies(lib_dynamic kernel_cubin)
+add_dependencies(lib_dynamic kernel.cubin)
 set_target_properties(
   lib_dynamic
   PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/"
