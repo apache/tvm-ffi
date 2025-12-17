@@ -29,6 +29,22 @@ unsafe impl ObjectCoreWithExtraItems for ArrayObj {
     }
 }
 
+impl Drop for ArrayObj {
+    fn drop(&mut self) {
+        if !self.data.is_null() {
+            unsafe {
+                let p = self.data as *mut TVMFFIAny;
+                for i in 0..self.size {
+                    let any = &mut *p.add(i as usize);
+                    if any.type_index >= TypeIndex::kTVMFFIStaticObjectBegin as i32 {
+                        crate::object::unsafe_::dec_ref(any.data_union.v_obj);
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[repr(C)]
 #[derive(Clone)]
 pub struct Array<T: ObjectRefCore> {
@@ -138,8 +154,25 @@ impl<T: ObjectRefCore> Array<T> {
         }
     }
 
+    /// Ensures this Array has unique ownership of the underlying data.
+    /// If shared, a new copy of the ArrayObj is created (Copy-on-Write).
+    fn ensure_unique(&mut self) {
+        let ref_cnt = unsafe {
+            crate::object::unsafe_::strong_count(ObjectArc::as_raw(&self.data) as *mut _)
+        };
+        // Only clone if there are other references to this ObjectArc
+        if ref_cnt > 1 {
+            // Create a new Array with the same items and same capacity
+            let items: Vec<T> = self.iter().collect();
+            let capacity = self.data.capacity as usize;
+            *self = Self::new_with_capacity(items, capacity);
+        }
+    }
+
     /// Appends an item. Triggers reallocation if the capacity is exceeded.
     pub fn push(&mut self, item: T) {
+        self.ensure_unique();
+
         let current_size = self.data.size as usize;
         let current_cap = self.data.capacity as usize;
 
@@ -169,9 +202,11 @@ impl<T: ObjectRefCore> Array<T> {
 
     /// Inserts an item at a specific index, shifting existing elements.
     pub fn insert(&mut self, index: usize, item: T) -> Result<(), crate::Error> {
+        self.ensure_unique();
+
         let current_size = self.data.size as usize;
         let current_cap = self.data.capacity as usize;
-        if index >= current_size {
+        if index > current_size {
             crate::bail!(crate::error::INDEX_ERROR, "Array insert index out of bound");
         }
 
@@ -213,6 +248,8 @@ impl<T: ObjectRefCore> Array<T> {
 
     /// Pops the last item. Returns None if empty.
     pub fn pop(&mut self) -> Option<T> {
+        self.ensure_unique();
+
         if self.is_empty() {
             return None;
         }
@@ -239,6 +276,8 @@ impl<T: ObjectRefCore> Array<T> {
 
     /// Removes an item at index, shifting subsequent elements left.
     pub fn remove(&mut self, index: usize) -> Result<T, crate::Error> {
+        self.ensure_unique();
+
         let current_size = self.data.size as usize;
         if index >= current_size {
             crate::bail!(crate::error::INDEX_ERROR, "Array remove index out of bound");
@@ -278,6 +317,8 @@ impl<T: ObjectRefCore> Array<T> {
 
     /// Clears the array and decrements ref-counts of all stored objects.
     pub fn clear(&mut self) {
+        self.ensure_unique();
+
         unsafe {
             let size = self.data.size as usize;
             let container = self.data.deref_mut();
@@ -336,21 +377,37 @@ impl<'a, T: ObjectRefCore> IntoIterator for &'a Array<T> {
 
 impl<T: ObjectRefCore> FromIterator<T> for Array<T> {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
-        let mut array = Self::new(vec![]);
-        array.extend(iter);
-        array
+        let items: Vec<T> = iter.into_iter().collect();
+        Self::new(items)
     }
 }
 
 // --- Any Type System Conversions ---
 
-unsafe impl<T: ObjectRefCore> AnyCompatible for Array<T> {
+unsafe impl<T> AnyCompatible for Array<T>
+where
+    T: ObjectRefCore + AnyCompatible + 'static,
+{
     fn type_str() -> String {
         "Array".into()
     }
 
     unsafe fn check_any_strict(data: &TVMFFIAny) -> bool {
-        data.type_index == TypeIndex::kTVMFFIArray as i32
+        if data.type_index != TypeIndex::kTVMFFIArray as i32 {
+            return false;
+        }
+        if std::any::TypeId::of::<T>() == std::any::TypeId::of::<Any>() {
+            return true;
+        }
+        let container = &*(data.data_union.v_obj as *const ArrayObj);
+        let base_ptr = container.data as *const TVMFFIAny;
+        for i in 0..container.size {
+            let elem_any = &*base_ptr.add(i as usize);
+            if !T::check_any_strict(elem_any) {
+                return false;
+            }
+        }
+        true
     }
 
     unsafe fn copy_to_any_view(src: &Self, data: &mut TVMFFIAny) {
@@ -376,15 +433,36 @@ unsafe impl<T: ObjectRefCore> AnyCompatible for Array<T> {
     }
 
     unsafe fn try_cast_from_any_view(data: &TVMFFIAny) -> Result<Self, ()> {
-        if Self::check_any_strict(data) {
-            Ok(Self::copy_from_any_view_after_check(data))
-        } else {
-            Err(())
+        if data.type_index != TypeIndex::kTVMFFIArray as i32 {
+            return Err(());
         }
+
+        // Fast path: if types match exactly, we can just copy the reference.
+        if Self::check_any_strict(data) {
+            return Ok(Self::copy_from_any_view_after_check(data));
+        }
+
+        // Slow path: try to convert element by element.
+        let container = &*(data.data_union.v_obj as *const ArrayObj);
+        let base_ptr = container.data as *const TVMFFIAny;
+        let mut new_items = Vec::with_capacity(container.size as usize);
+
+        for i in 0..container.size {
+            let elem_any = &*base_ptr.add(i as usize);
+            match T::try_cast_from_any_view(elem_any) {
+                Ok(converted) => new_items.push(converted),
+                Err(_) => return Err(()),
+            }
+        }
+
+        Ok(Array::new(new_items))
     }
 }
 
-impl<T: ObjectRefCore> TryFrom<Any> for Array<T> {
+impl<T> TryFrom<Any> for Array<T>
+where
+    T: ObjectRefCore + AnyCompatible + 'static,
+{
     type Error = crate::error::Error;
 
     fn try_from(value: Any) -> Result<Self, Self::Error> {
@@ -393,7 +471,10 @@ impl<T: ObjectRefCore> TryFrom<Any> for Array<T> {
     }
 }
 
-impl<'a, T: ObjectRefCore> TryFrom<AnyView<'a>> for Array<T> {
+impl<'a, T> TryFrom<AnyView<'a>> for Array<T>
+where
+    T: ObjectRefCore + AnyCompatible + 'static,
+{
     type Error = crate::error::Error;
 
     fn try_from(value: AnyView<'a>) -> Result<Self, Self::Error> {

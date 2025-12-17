@@ -93,6 +93,30 @@ fn test_array_extend_and_conversions() {
 }
 
 #[test]
+fn test_array_recursive_type_checking() {
+    // 1. Create an Array of Shapes
+    let shape_array = Array::new(vec![Shape::from(vec![1, 2]), Shape::from(vec![3])]);
+
+    // 2. Wrap it in Any
+    let any_val = Any::from(shape_array);
+
+    // 3. Try to convert Any (containing Shapes) into Array<Tensor>
+    // This should FAIL because T::check_any_strict (Tensor) will fail on Shape elements
+    let tensor_cast = Array::<Tensor>::try_from(any_val.clone());
+    assert!(
+        tensor_cast.is_err(),
+        "Should not be able to cast Array<Shape> to Array<Tensor>"
+    );
+
+    // 4. Verify valid cast works
+    let shape_cast = Array::<Shape>::try_from(any_val);
+    assert!(
+        shape_cast.is_ok(),
+        "Should be able to cast back to correct type"
+    );
+}
+
+#[test]
 fn test_array_parametric_heterogeneity() {
     // Verify Array works with different ObjectRefCore types
     let array = Array::new(vec![Shape::from(vec![1, 2, 3]), Shape::from(vec![10])]);
@@ -123,4 +147,18 @@ fn test_array_parametric_heterogeneity() {
         .unwrap(),
         4
     );
+}
+
+#[test]
+fn test_array_copy_on_write() {
+    let t1 = create_tensor(1.0, &[1]);
+    let a = Array::new(vec![t1]);
+    let mut b = a.clone();
+
+    // Mutating B should NOT affect A
+    b.push(create_tensor(2.0, &[1]));
+
+    assert_eq!(a.len(), 1);
+    assert_eq!(b.len(), 2);
+    assert_eq!(get_val(&a.get(0).unwrap()), 1.0);
 }
