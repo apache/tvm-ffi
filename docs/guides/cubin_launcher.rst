@@ -27,7 +27,8 @@ TVM-FFI provides utilities for loading and launching CUDA kernels from CUBIN mod
 
 - :cpp:class:`tvm::ffi::CubinModule`: RAII wrapper for loading CUBIN modules from memory
 - :cpp:class:`tvm::ffi::CubinKernel`: Handle for launching CUDA kernels with specified parameters
-- :c:macro:`TVM_FFI_EMBED_CUBIN`: Macro for embedding CUBIN data at compile time
+- :c:macro:`TVM_FFI_EMBED_CUBIN`: Macro for embedding CUBIN data at compile time (legacy / object-linking approach)
+- :c:macro:`TVM_FFI_LOAD_LIBRARY_FROM_BYTES`: Macro for loading CUBIN from byte arrays (modern / C++23 ``#embed`` approach)
 - :c:macro:`TVM_FFI_EMBED_CUBIN_GET_KERNEL`: Macro for retrieving kernels from embedded CUBIN
 
 The CUBIN launcher supports:
@@ -41,9 +42,9 @@ The CUBIN launcher supports:
 
 TVM-FFI provides convenient tools for embedding CUBIN data at build time:
 
-- **CMake utilities** (``cmake/Utils/EmbedCubin.cmake``): Functions for compiling CUDA to CUBIN and embedding it into C++ code
-- **Python utility** (``python -m tvm_ffi.utils.embed_cubin``): Command-line tool for embedding CUBIN into object files
-- **Python API** (:py:func:`tvm_ffi.cpp.load_inline`): Runtime embedding via ``embed_cubin`` parameter
+- **CMake utilities** (``cmake/Utils/EmbedCubin.cmake``): Functions for compiling CUDA to CUBIN/FATBIN and embedding it into C++ code or linking it.
+- **Python utility** (``python -m tvm_ffi.utils.embed_cubin``): Command-line tool for embedding CUBIN into object files.
+- **Python API** (:py:func:`tvm_ffi.cpp.load_inline`): Runtime embedding via ``embed_cubin`` parameter.
 
 Python Usage
 ------------
@@ -117,12 +118,58 @@ C++ Usage
 Embedding CUBIN at Compile Time
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The recommended approach in C++ is to embed CUBIN data directly into your shared library:
+The standard and most convenient way to embed CUBIN/FATBIN data in C++ is using the TVM-FFI build utilities. This method keeps your source code clean by linking the binary data as an object file.
 
-.. literalinclude:: ../../examples/cubin_launcher/embedded_cubin/src/lib_embedded.cc
+**Standard Approach: Build System Integration**
+
+This approach uses CMake utilities to compile and link the CUBIN data. It works across all supported compilers and handles the low-level details of object file generation and symbol naming.
+
+.. literalinclude:: ../../examples/cubin_launcher/embedded_cubin/embed_with_tvm_ffi/src/lib_embedded.cc
    :language: cpp
    :start-after: [example.begin]
    :end-before: [example.end]
+
+**Alternative Approaches (Manual Embedding)**
+
+TVM-FFI is designed to be flexible. If you prefer to manage the binary data explicitly in your source code or have specific compiler requirements (like C++23), you can use the ``TVM_FFI_LOAD_LIBRARY_FROM_BYTES`` macro. These approaches require you to modify your source code to include the binary data.
+
+*Option A: Modern C++ Embedding (C++23 or Compiler Extensions)*
+
+Using C++23 ``#embed`` (or compiler extensions like ``#embed`` in Clang/GCC) allows you to include the binary data directly.
+
+.. code-block:: cpp
+
+   #include <tvm/ffi/extra/cuda/cubin_launcher.h>
+
+   // Define the image bytes using #embed
+   constexpr unsigned char image[]{
+   // clang >= 20 or gcc >= 14 or C++23
+   #embed "kernel.fatbin"
+   };
+
+   // Register the embedded CUBIN with a name ("env" in this case)
+   TVM_FFI_LOAD_LIBRARY_FROM_BYTES(env, image);
+
+   void MyFunction() {
+     // Get kernel from embedded CUBIN
+     static auto kernel = TVM_FFI_EMBED_CUBIN_GET_KERNEL(env, "my_kernel");
+     // ...
+   }
+
+*Option B: bin2c / Header Inclusion*
+
+You can also use tools like ``bin2c`` to generate a header file containing the byte array and include it.
+
+.. code-block:: cpp
+
+   #include <tvm/ffi/extra/cuda/cubin_launcher.h>
+
+   // Include generated header that defines 'image' array
+   // e.g. const unsigned char image[] = { ... };
+   #include "kernel_fatbin.h"
+
+   TVM_FFI_LOAD_LIBRARY_FROM_BYTES(env, image);
+   // ...
 
 **Key Points:**
 
@@ -149,36 +196,28 @@ TVM-FFI provides CMake utility functions that simplify the CUBIN embedding proce
 
 **Using CMake Utilities:**
 
-.. literalinclude:: ../../examples/cubin_launcher/embedded_cubin/CMakeLists.txt
+.. literalinclude:: ../../examples/cubin_launcher/embedded_cubin/embed_with_tvm_ffi/CMakeLists.txt
    :language: cmake
    :start-after: [cmake_example.begin]
    :end-before: [cmake_example.end]
 
 **Available CMake Functions:**
 
-- ``tvm_ffi_generate_cubin()``: Compiles CUDA source to CUBIN using nvcc
+- ``add_tvm_ffi_cubin(<target> CUDA <source>)``:
+  Creates an object library that compiles CUDA source to CUBIN format.
+  This is a compatibility wrapper; for CMake >= 3.27, you can use standard ``CUDA_CUBIN_COMPILATION`` property.
 
-  - ``OUTPUT``: Path to output CUBIN file
-  - ``SOURCE``: Path to CUDA source file
-  - ``ARCH``: Target GPU architecture (default: ``native`` for auto-detection)
-  - ``OPTIONS``: Additional nvcc compiler options (optional)
-  - ``DEPENDS``: Additional dependencies (optional)
+- ``add_tvm_ffi_fatbin(<target> CUDA <source>)``:
+  Creates an object library that compiles CUDA source to FATBIN format.
+  This is a compatibility wrapper; for CMake >= 3.27, you can use standard ``CUDA_FATBIN_COMPILATION`` property.
 
-- ``tvm_ffi_embed_cubin()``: Compiles C++ source and embeds CUBIN data
+- ``tvm_ffi_embed_bin_into(<target> <name> BIN <bin_file>)``:
+  Embeds a CUBIN/FATBIN file into an existing object library target.
+  This works by linking the binary data into the target, allowing access via ``TVM_FFI_EMBED_CUBIN(<name>)``.
 
-  - ``OUTPUT``: Path to output combined object file
-  - ``SOURCE``: Path to C++ source file with ``TVM_FFI_EMBED_CUBIN`` macro
-  - ``CUBIN``: Path to CUBIN file to embed
-  - ``NAME``: Symbol name used in ``TVM_FFI_EMBED_CUBIN(name)`` macro
-  - ``DEPENDS``: Additional dependencies (optional)
-
-The utilities automatically handle:
-
-- Compiling C++ source to intermediate object file
-- Creating CUBIN symbols with proper naming
-- Merging object files using ``ld -r``
-- Adding ``.note.GNU-stack`` section for security
-- Localizing symbols to prevent conflicts
+  - ``target``: The target to embed into (must be an object library or have object files).
+  - ``name``: Symbol name to use (must match ``TVM_FFI_EMBED_CUBIN(name)``).
+  - ``BIN``: Path to the CUBIN/FATBIN file (e.g., from ``$<TARGET_OBJECTS:...>``).
 
 Embedding CUBIN with Python Utility
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -374,6 +413,7 @@ C++ Macros
 ~~~~~~~~~~
 
 - :c:macro:`TVM_FFI_EMBED_CUBIN`: Declare embedded CUBIN module
+- :c:macro:`TVM_FFI_LOAD_LIBRARY_FROM_BYTES`: Load CUBIN from byte array
 - :c:macro:`TVM_FFI_EMBED_CUBIN_GET_KERNEL`: Get kernel from embedded module
 - :c:macro:`TVM_FFI_CHECK_CUDA_ERROR`: Check CUDA Runtime API result
 
@@ -405,18 +445,6 @@ Python Utilities
 CMake Functions
 ~~~~~~~~~~~~~~~
 
-- ``tvm_ffi_generate_cubin()``: Compile CUDA source to CUBIN
-
-  - ``OUTPUT``: Path to output CUBIN file
-  - ``SOURCE``: Path to CUDA source file (.cu)
-  - ``ARCH``: Target architecture (default: ``native``)
-  - ``OPTIONS``: Additional nvcc compiler flags (optional)
-  - ``DEPENDS``: Additional dependencies (optional)
-
-- ``tvm_ffi_embed_cubin()``: Compile C++ source and embed CUBIN data
-
-  - ``OUTPUT``: Path to output combined object file
-  - ``SOURCE``: Path to C++ source file
-  - ``CUBIN``: Path to CUBIN file to embed
-  - ``NAME``: Symbol name matching ``TVM_FFI_EMBED_CUBIN(name)`` in source
-  - ``DEPENDS``: Additional dependencies (optional)
+- ``add_tvm_ffi_cubin(<target> CUDA <source>)``: Compile CUDA source to CUBIN
+- ``add_tvm_ffi_fatbin(<target> CUDA <source>)``: Compile CUDA source to FATBIN
+- ``tvm_ffi_embed_bin_into(<target> <name> BIN <bin_file>)``: Embed CUBIN/FATBIN into object target

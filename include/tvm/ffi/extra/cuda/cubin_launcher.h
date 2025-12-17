@@ -163,6 +163,18 @@ namespace ffi {
   };                                                     \
   } /* anonymous namespace */
 
+
+#define TVM_FFI_LOAD_LIBRARY_FROM_BYTES(name, imageBytes) \
+namespace {                                    \
+struct EmbedCubinModule_##name {               \
+  tvm::ffi::CubinModule mod{imageBytes};       \
+  static EmbedCubinModule_##name* Global() {   \
+    static EmbedCubinModule_##name inst;       \
+    return &inst;                              \
+  }                                            \
+};                                             \
+} /* anonymous namespace */
+
 /*!
  * \brief Macro to get a kernel from an embedded CUBIN module.
  *
