@@ -20,8 +20,8 @@ from __future__ import annotations
 import ctypes
 import pickle
 
-import pytest
 import numpy
+import pytest
 import torch
 import tvm_ffi
 from tvm_ffi import DLDeviceType

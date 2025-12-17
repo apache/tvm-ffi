@@ -151,7 +151,7 @@ cdef class Device:
             device_type = device_type_or_name
 
         if not isinstance(index, Integral):
-            if hasattr(index, 'item') and callable(index.item):
+            if hasattr(index, "item") and callable(index.item):
                 index = index.item()
             if not isinstance(index, Integral):
                 raise TypeError(f"Invalid device index: {index}")
