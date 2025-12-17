@@ -163,6 +163,25 @@ namespace ffi {
   };                                                     \
   } /* anonymous namespace */
 
+/*!
+ * \brief Macro to load a CUBIN module from a byte array.
+ *
+ * This macro creates a singleton struct to manage the CubinModule instance
+ * initialized from a byte array (e.g. from #embed or bin2c output).
+ *
+ * \par Usage Example
+ * \code{.cpp}
+ * constexpr unsigned char image[] = { ... };
+ * TVM_FFI_LOAD_LIBRARY_FROM_BYTES(my_kernels, image);
+ *
+ * void MyFunc() {
+ *   static auto kernel = TVM_FFI_EMBED_CUBIN_GET_KERNEL(my_kernels, "kernel_name");
+ * }
+ * \endcode
+ *
+ * \param name The identifier for this embedded CUBIN module.
+ * \param imageBytes The byte array containing the CUBIN/FATBIN data.
+ */
 #define TVM_FFI_LOAD_LIBRARY_FROM_BYTES(name, imageBytes) \
   namespace {                                             \
   struct EmbedCubinModule_##name {                        \
