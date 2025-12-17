@@ -21,6 +21,8 @@ import ctypes
 import pickle
 
 import pytest
+import numpy
+import torch
 import tvm_ffi
 from tvm_ffi import DLDeviceType
 
@@ -69,6 +71,9 @@ def test_device_dlpack_device_type(
         (DLDeviceType.kDLCUDA, 0, DLDeviceType.kDLCUDA, 0),
         ("cuda", 3, DLDeviceType.kDLCUDA, 3),
         (DLDeviceType.kDLMetal, 2, DLDeviceType.kDLMetal, 2),
+        # id from numpy or torch
+        ("cpu", numpy.int32(1), DLDeviceType.kDLCPU, 1),
+        ("cpu", torch.tensor(1, dtype=torch.int32), DLDeviceType.kDLCPU, 1),
     ],
 )
 def test_device_with_dev_id(
