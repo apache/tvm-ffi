@@ -209,12 +209,12 @@ TVM-FFI provides CMake utility functions that simplify the CUBIN embedding proce
   Creates an object library that compiles CUDA source to FATBIN format.
   This is a compatibility wrapper; for CMake >= 3.27, you can use standard ``CUDA_FATBIN_COMPILATION`` property.
 
-- ``tvm_ffi_embed_bin_into(<target> <name> BIN <bin_file>)``:
+- ``tvm_ffi_embed_bin_into(<target> SYMBOL <symbol> BIN <bin_file>)``:
   Embeds a CUBIN/FATBIN file into an existing object library target.
   This works by linking the binary data into the target, allowing access via ``TVM_FFI_EMBED_CUBIN(<name>)``.
 
   - ``target``: The target to embed into (must be an object library or have object files).
-  - ``name``: Symbol name to use (must match ``TVM_FFI_EMBED_CUBIN(name)``).
+  - ``symbol``: Symbol name to use (must match ``TVM_FFI_EMBED_CUBIN(symbol)``).
   - ``BIN``: Path to the CUBIN/FATBIN file (e.g., from ``$<TARGET_OBJECTS:...>``).
 
 Embedding CUBIN with Python Utility
@@ -445,4 +445,4 @@ CMake Functions
 
 - ``add_tvm_ffi_cubin(<target> CUDA <source>)``: Compile CUDA source to CUBIN
 - ``add_tvm_ffi_fatbin(<target> CUDA <source>)``: Compile CUDA source to FATBIN
-- ``tvm_ffi_embed_bin_into(<target> <name> BIN <bin_file>)``: Embed CUBIN/FATBIN into object target
+- ``tvm_ffi_embed_bin_into(<target> SYMBOL <symbol> BIN <bin_file>)``: Embed CUBIN/FATBIN into object target

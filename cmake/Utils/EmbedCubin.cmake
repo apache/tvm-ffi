@@ -121,30 +121,34 @@ function (add_tvm_ffi_fatbin target_name)
 endfunction ()
 
 # ~~~
-# tvm_ffi_embed_bin_into(<target_name> <library_name>
+# tvm_ffi_embed_bin_into(<target_name>
+#                        SYMBOL <symbol_name>
 #                        BIN <cubin_or_fatbin>
 #                        INTERMEDIATE_FILE <intermediate_path>)
 #
 # Embed one cubin/fatbin into given target with specified library name,
-# can be loaded with `TVM_FFI_EMBED_CUBIN(library_name)`.
+# can be loaded with `TVM_FFI_EMBED_CUBIN(symbol_name)`.
 # Can only have one object in target and one cubin/fatbin.
 #
 # The reason of this design is to integrate with cmake's workflow.
 #
 # Parameters:
 #   target_name: Name of the object library target
-#   library_name: Name of the kernel library
+#   symbol_name: Name of the symbol in TVM_FFI_EMBED_CUBIN macro.
 #   BIN: CUBIN or FATBIN file
 #   INTERMEDIATE_FILE: Optional, location to copy original object file to.
 #
 # Example:
-#   tvm_ffi_embed_bin_into(lib_embedded env BIN "$<TARGET_OBJECTS:kernel_fatbin>")
+#   tvm_ffi_embed_bin_into(lib_embedded SYMBOL env BIN "$<TARGET_OBJECTS:kernel_fatbin>")
 # ~~~
-function (tvm_ffi_embed_bin_into target_name kernel_name)
-  cmake_parse_arguments(ARG "" "BIN;INTERMEDIATE_FILE" "" ${ARGN})
+function (tvm_ffi_embed_bin_into target_name)
+  cmake_parse_arguments(ARG "" "SYMBOL;BIN;INTERMEDIATE_FILE" "" ${ARGN})
 
   if (NOT ARG_BIN)
     message(FATAL_ERROR "tvm_ffi_embed_object: BIN is required")
+  endif ()
+  if (NOT ARG_SYMBOL)
+    message(FATAL_ERROR "tvm_ffi_embed_object: SYMBOL is required")
   endif ()
 
   get_filename_component(LIB_ABS "$<TARGET_OBJECTS:${target_name}>" ABSOLUTE)
@@ -169,9 +173,9 @@ function (tvm_ffi_embed_bin_into target_name kernel_name)
     PRE_LINK
     COMMAND
       ${Python_EXECUTABLE} -m tvm_ffi.utils.embed_cubin --output-obj
-      "$<TARGET_OBJECTS:${target_name}>" --name "${kernel_name}" --input-obj "${final_output}"
+      "$<TARGET_OBJECTS:${target_name}>" --name "${ARG_SYMBOL}" --input-obj "${final_output}"
       --cubin "${ARG_BIN}" DEPENDS
-    COMMENT "Embedding CUBIN into object file (name: ${kernel_name})"
+    COMMENT "Embedding CUBIN into object file (name: ${ARG_SYMBOL})"
     VERBATIM
   )
 endfunction ()

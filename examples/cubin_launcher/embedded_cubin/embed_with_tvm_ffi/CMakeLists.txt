@@ -69,7 +69,7 @@ endif ()
 
 # Step 4: Embed CUBIN into shared library just defined, using tvm_ffi_embed_cubin utility This
 # creates symbols: __tvm_ffi__cubin_env (local)
-tvm_ffi_embed_bin_into(lib_embedded env BIN "$<TARGET_OBJECTS:kernel_fatbin>")
+tvm_ffi_embed_bin_into(lib_embedded SYMBOL env BIN "$<TARGET_OBJECTS:kernel_fatbin>")
 
 set_target_properties(
   lib_embedded
