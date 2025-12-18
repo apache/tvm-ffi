@@ -49,7 +49,7 @@ namespace tvm::ffi {
 #if TVM_FFI_CUBIN_LAUNCHER_USE_DRIVER_API
 
 using StreamHandle = CUstream;
-using ResultHandle = CUresult;
+using CUDAResultType = CUresult;
 
 using LibraryHandle = CUlibrary;
 using KernelHandle = CUkernel;
@@ -69,7 +69,7 @@ using DeviceHandle = CUdevice;
 #else
 
 using StreamHandle = cudaStream_t;
-using ResultHandle = cudaError_t;
+using CUDAResultType = cudaError_t;
 
 using LibraryHandle = cudaLibrary_t;
 using KernelHandle = cudaKernel_t;
@@ -111,7 +111,7 @@ using DeviceHandle = int;
     }                                                                          \
   } while (0)
 
-static ResultHandle load_image(LibraryHandle* library, const void* image) {
+static CUDAResultType load_image(LibraryHandle* library, const void* image) {
 #if TVM_FFI_CUBIN_LAUNCHER_USE_DRIVER_API
   return cuLibraryLoadData(library, image, nullptr, nullptr, 0, nullptr, nullptr, 0);
 #else
@@ -129,9 +129,9 @@ static DeviceHandle idx_to_device(int idx) {
 #endif
 }
 
-static ResultHandle launch_kernel(KernelHandle kernel, void** args, tvm::ffi::dim3 grid,
-                                  tvm::ffi::dim3 block, StreamHandle stream,
-                                  uint32_t dyn_smem_bytes = 0) {
+static CUDAResultType launch_kernel(KernelHandle kernel, void** args, tvm::ffi::dim3 grid,
+                                    tvm::ffi::dim3 block, StreamHandle stream,
+                                    uint32_t dyn_smem_bytes = 0) {
 #if TVM_FFI_CUBIN_LAUNCHER_USE_DRIVER_API
   return cuLaunchKernel(reinterpret_cast<CUfunction>(kernel), grid.x, grid.y, grid.z, block.x,
                         block.y, block.z, dyn_smem_bytes, stream, args, nullptr);
@@ -141,7 +141,7 @@ static ResultHandle launch_kernel(KernelHandle kernel, void** args, tvm::ffi::di
 #endif
 }
 
-static ResultHandle get_func_shmem(KernelHandle kernel, int& out, DeviceHandle device) {
+static CUDAResultType get_func_shmem(KernelHandle kernel, int& out, DeviceHandle device) {
 #if TVM_FFI_CUBIN_LAUNCHER_USE_DRIVER_API
   return cuKernelGetAttribute(&out, CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES, kernel, device);
 #else
@@ -154,7 +154,7 @@ static ResultHandle get_func_shmem(KernelHandle kernel, int& out, DeviceHandle d
 #endif
 }
 
-static ResultHandle set_func_shmem(KernelHandle kernel, int shmem, DeviceHandle device) {
+static CUDAResultType set_func_shmem(KernelHandle kernel, int shmem, DeviceHandle device) {
 #if TVM_FFI_CUBIN_LAUNCHER_USE_DRIVER_API
   return cuKernelSetAttribute(CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES, shmem, kernel,
                               device);

@@ -69,7 +69,7 @@ void AddOne(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
       static_cast<tvm::ffi::StreamHandle>(TVMFFIEnvGetStream(device.device_type, device.device_id));
 
   // Launch kernel
-  tvm::ffi::ResultHandle result = kernel.Launch(args, grid, block, stream);
+  tvm::ffi::CUDAResultType result = kernel.Launch(args, grid, block, stream);
   TVM_FFI_CHECK_CUDA_ERROR(result);
 }
 
@@ -108,7 +108,7 @@ void MulTwo(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
       static_cast<tvm::ffi::StreamHandle>(TVMFFIEnvGetStream(device.device_type, device.device_id));
 
   // Launch kernel
-  tvm::ffi::ResultHandle result = kernel.Launch(args, grid, block, stream);
+  tvm::ffi::CUDAResultType result = kernel.Launch(args, grid, block, stream);
   TVM_FFI_CHECK_CUDA_ERROR(result);
 }
 

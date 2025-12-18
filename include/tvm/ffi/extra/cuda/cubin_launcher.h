@@ -474,8 +474,8 @@ class CubinKernel {
    * \note The kernel executes asynchronously. Use cudaStreamSynchronize() or
    *       cudaDeviceSynchronize() to wait for completion if needed.
    */
-  ResultHandle Launch(void** args, dim3 grid, dim3 block, StreamHandle stream,
-                      uint32_t dyn_smem_bytes = 0) {
+  CUDAResultType Launch(void** args, dim3 grid, dim3 block, StreamHandle stream,
+                        uint32_t dyn_smem_bytes = 0) {
     return launch_kernel(kernel_, args, grid, block, stream, dyn_smem_bytes);
   }
 
@@ -531,7 +531,7 @@ class CubinKernel {
    */
   void SetMaxDynamicSharedMemory(int64_t dynamic_smem_max = -1) {
     int device_count = 0;
-    ResultHandle err = get_device_count(&device_count);
+    CUDAResultType err = get_device_count(&device_count);
     if (err != FFI_CUDA_SUCCESS || device_count == 0) {
       return;  // No devices available, nothing to configure
     }
