@@ -26,7 +26,7 @@ def run_add_one() -> None:
     """Invoke add_one from the extension and print the result."""
     x = torch.tensor([1, 2, 3, 4, 5], dtype=torch.float32)
     y = torch.empty_like(x)
-    my_ffi_extension.add_one(x, y)
+    my_ffi_extension.LIB.add_one(x, y)
     print(y)
 
 

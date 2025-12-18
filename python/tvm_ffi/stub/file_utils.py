@@ -20,9 +20,10 @@ from __future__ import annotations
 
 import dataclasses
 import difflib
+import os
 import traceback
 from pathlib import Path
-from typing import Callable, Generator, Iterable, Literal
+from typing import Callable, Generator, Iterable
 
 from . import consts as C
 
@@ -31,15 +32,24 @@ from . import consts as C
 class CodeBlock:
     """A block of code to be generated in a stub file."""
 
-    kind: Literal["global", "object", "ty-map", "import", "__all__", None]
-    param: str
+    kind: C.STUB_BLOCK_KINDS
+    param: str | tuple[str, ...]
     lineno_start: int
     lineno_end: int | None
     lines: list[str]
 
     def __post_init__(self) -> None:
         """Validate the code block after initialization."""
-        assert self.kind in {"global", "object", "ty-map", "import", "__all__", None}
+        assert self.kind in {
+            "global",
+            "object",
+            "ty-map",
+            "import-section",
+            "import-object",
+            "export",
+            "__all__",
+            None,
+        }
 
     @property
     def indent(self) -> int:
@@ -53,27 +63,48 @@ class CodeBlock:
     def from_begin_line(lineo: int, line: str) -> CodeBlock:
         """Parse a line to create a CodeBlock if it contains a stub begin marker."""
         if line.startswith(C.STUB_TY_MAP):
+            line = line[len(C.STUB_TY_MAP) :].strip()
             return CodeBlock(
                 kind="ty-map",
-                param=line[len(C.STUB_TY_MAP) :].strip(),
+                param=line,
+                lineno_start=lineo,
+                lineno_end=lineo,
+                lines=[],
+            )
+        elif line.startswith(C.STUB_IMPORT_OBJECT):
+            line = line[len(C.STUB_IMPORT_OBJECT) :].strip()
+            splits = [p.strip() for p in line.split(";")]
+            if len(splits) < 3:
+                splits += [""] * (3 - len(splits))
+            return CodeBlock(
+                kind="import-object",
+                param=tuple(splits),
                 lineno_start=lineo,
                 lineno_end=lineo,
                 lines=[],
             )
         assert line.startswith(C.STUB_BEGIN)
+        param: str | tuple[str, ...]
         stub = line[len(C.STUB_BEGIN) :].strip()
         if stub.startswith("global/"):
             kind = "global"
             param = stub[len("global/") :].strip()
+            if "@" in param:
+                param = tuple(param.split("@"))
+            else:
+                param = (param, "")
         elif stub.startswith("object/"):
             kind = "object"
             param = stub[len("object/") :].strip()
         elif stub.startswith("ty-map/"):
             kind = "ty-map"
             param = stub[len("ty-map/") :].strip()
-        elif stub.startswith("import"):
-            kind = "import"
+        elif stub == "import-section":
+            kind = "import-section"
             param = ""
+        elif stub.startswith("export/"):
+            kind = "export"
+            param = stub[len("export/") :].strip()
         elif stub == "__all__":
             kind = "__all__"
             param = ""
@@ -96,12 +127,14 @@ class FileInfo:
     lines: tuple[str, ...]
     code_blocks: list[CodeBlock]
 
-    def update(self, show_diff: bool, dry_run: bool) -> bool:
+    def update(self, verbose: bool, dry_run: bool) -> bool:
         """Update the file's lines based on the current code blocks and optionally show a diff."""
         new_lines = tuple(line for block in self.code_blocks for line in block.lines)
         if self.lines == new_lines:
+            if verbose:
+                print(f"{C.TERM_CYAN}-----> Unchanged{C.TERM_RESET}")
             return False
-        if show_diff:
+        if verbose:
             for line in difflib.unified_diff(self.lines, new_lines, lineterm=""):
                 # Skip placeholder headers when fromfile/tofile are unspecified
                 if line.startswith("---") or line.startswith("+++"):
@@ -120,21 +153,18 @@ class FileInfo:
         return True
 
     @staticmethod
-    def from_file(file: Path) -> FileInfo | None:  # noqa: PLR0912
+    def from_file(file: Path, include_empty: bool = False) -> FileInfo | None:  # noqa: PLR0912
         """Parse a file to extract code blocks based on stub markers."""
         assert file.is_file(), f"Expected a file, but got: {file}"
         file = file.resolve()
         has_marker = False
         lines: list[str] = file.read_text(encoding="utf-8").splitlines()
-        for line_no, line in enumerate(lines, start=1):
+        for _, line in enumerate(lines, start=1):
             if line.strip().startswith(C.STUB_SKIP_FILE):
-                print(
-                    f"{C.TERM_YELLOW}[Skipped] skip-file marker found on line {line_no}: {file}{C.TERM_RESET}"
-                )
                 return None
             if line.strip().startswith(C.STUB_PREFIX):
                 has_marker = True
-        if not has_marker:
+        if not has_marker and not include_empty:
             return None
         del has_marker
 
@@ -142,31 +172,46 @@ class FileInfo:
         code: CodeBlock | None = None
         for lineno, line in enumerate(lines, 1):
             clean_line = line.strip()
-            if clean_line.startswith(C.STUB_BEGIN):  # Process "# tvm-ffi-stubgen(begin)"
+            if clean_line.startswith(C.STUB_BEGIN):
+                # Process "# tvm-ffi-stubgen(begin)"
                 if code is not None:
                     raise ValueError(f"Nested stub not permitted at line {lineno}")
                 code = CodeBlock.from_begin_line(lineno, clean_line)
                 code.lineno_start = lineno
                 code.lines.append(line)
-            elif clean_line.startswith(C.STUB_END):  # Process "# tvm-ffi-stubgen(end)"
+            elif clean_line.startswith(C.STUB_END):
+                # Process "# tvm-ffi-stubgen(end)"
                 if code is None:
                     raise ValueError(f"Unmatched `{C.STUB_END}` found at line {lineno}")
                 code.lineno_end = lineno
                 code.lines.append(line)
                 codes.append(code)
                 code = None
-            elif clean_line.startswith(C.STUB_TY_MAP):  # Process "# tvm-ffi-stubgen(ty_map)"
+            elif clean_line.startswith(C.STUB_TY_MAP):
+                # Process "# tvm-ffi-stubgen(ty_map)"
                 ty_code = CodeBlock.from_begin_line(lineno, clean_line)
                 ty_code.lineno_end = lineno
                 ty_code.lines.append(line)
                 codes.append(ty_code)
                 del ty_code
+            elif clean_line.startswith(C.STUB_IMPORT_OBJECT):
+                # Process "# tvm-ffi-stubgen(import-object)"
+                imp_code = CodeBlock.from_begin_line(lineno, clean_line)
+                imp_code.lineno_end = lineno
+                imp_code.lines.append(line)
+                codes.append(imp_code)
+                del imp_code
             elif clean_line.startswith(C.STUB_PREFIX):
                 raise ValueError(f"Unknown stub type at line {lineno}: {clean_line}")
-            elif code is None:  # Process a plain line outside of any stub block
+            elif code is None:
+                # Process a plain line outside of any stub block
                 codes.append(
                     CodeBlock(
-                        kind=None, param="", lineno_start=lineno, lineno_end=lineno, lines=[line]
+                        kind=None,
+                        param="",
+                        lineno_start=lineno,
+                        lineno_end=lineno,
+                        lines=[line],
                     )
                 )
             else:  # Process a line inside a stub block
@@ -174,6 +219,12 @@ class FileInfo:
         if code is not None:
             raise ValueError("Unclosed stub block at end of file")
         return FileInfo(path=file, lines=tuple(lines), code_blocks=codes)
+
+    def reload(self) -> None:
+        """Reload the code blocks from disk while preserving original `lines`."""
+        source = FileInfo.from_file(self.path)
+        assert source is not None, f"File no longer exists or valid: {self.path}"
+        self.code_blocks = source.code_blocks
 
 
 def collect_files(paths: list[Path]) -> list[FileInfo]:
@@ -220,6 +271,8 @@ def path_walk(
     follow_symlinks: bool = False,
 ) -> Iterable[tuple[Path, list[str], list[str]]]:
     """Compat wrapper for Path.walk (3.12+) with a fallback for < 3.12."""
+    if not p.exists():
+        return
     # Python 3.12+ - just delegate to `Path.walk`
     if hasattr(p, "walk"):
         yield from p.walk(  # type: ignore[attr-defined]
@@ -229,8 +282,6 @@ def path_walk(
         )
         return
     # Python < 3.12 - use `os.walk``
-    import os  # noqa: PLC0415
-
     for root_str, dirnames, filenames in os.walk(
         p,
         topdown=top_down,
