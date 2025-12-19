@@ -123,8 +123,7 @@ endfunction ()
 # ~~~
 # tvm_ffi_embed_bin_into(<target_name>
 #                        SYMBOL <symbol_name>
-#                        BIN <cubin_or_fatbin>
-#                        INTERMEDIATE_FILE <intermediate_path>)
+#                        BIN <cubin_or_fatbin>)
 #
 # Embed one cubin/fatbin into given target with specified library name,
 # can be loaded with `TVM_FFI_EMBED_CUBIN(symbol_name)`.
@@ -136,13 +135,12 @@ endfunction ()
 #   target_name: Name of the object library target
 #   symbol_name: Name of the symbol in TVM_FFI_EMBED_CUBIN macro.
 #   BIN: CUBIN or FATBIN file
-#   INTERMEDIATE_FILE: Optional, location to copy original object file to.
 #
 # Example:
 #   tvm_ffi_embed_bin_into(lib_embedded SYMBOL env BIN "$<TARGET_OBJECTS:kernel_fatbin>")
 # ~~~
 function (tvm_ffi_embed_bin_into target_name)
-  cmake_parse_arguments(ARG "" "SYMBOL;BIN;INTERMEDIATE_FILE" "" ${ARGN})
+  cmake_parse_arguments(ARG "" "SYMBOL;BIN" "" ${ARGN})
 
   if (NOT ARG_BIN)
     message(FATAL_ERROR "tvm_ffi_embed_object: BIN is required")
@@ -152,20 +150,15 @@ function (tvm_ffi_embed_bin_into target_name)
   endif ()
 
   get_filename_component(LIB_ABS "$<TARGET_OBJECTS:${target_name}>" ABSOLUTE)
-  if (NOT ARG_INTERMEDIATE_FILE)
-    get_filename_component(OUTPUT_DIR_ABS "${LIB_ABS}" DIRECTORY)
-
-    set(final_output "${OUTPUT_DIR_ABS}/${kernel_name}_intermediate.o")
-  else ()
-    get_filename_component(final_output "${ARG_INTERMEDIATE_FILE}" ABSOLUTE)
-  endif ()
+  get_filename_component(OUTPUT_DIR_ABS "${LIB_ABS}" DIRECTORY)
+  set(intermediate_path "${OUTPUT_DIR_ABS}/${kernel_name}_intermediate.o")
 
   add_custom_command(
     TARGET ${target_name}
     PRE_LINK
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_OBJECTS:${target_name}>"
-            "${final_output}"
-    COMMENT "Moving $<TARGET_OBJECTS:${target_name}> -> ${final_output}"
+            "${intermediate_path}"
+    COMMENT "Moving $<TARGET_OBJECTS:${target_name}> -> ${intermediate_path}"
   )
 
   add_custom_command(
@@ -173,7 +166,7 @@ function (tvm_ffi_embed_bin_into target_name)
     PRE_LINK
     COMMAND
       ${Python_EXECUTABLE} -m tvm_ffi.utils.embed_cubin --output-obj
-      "$<TARGET_OBJECTS:${target_name}>" --name "${ARG_SYMBOL}" --input-obj "${final_output}"
+      "$<TARGET_OBJECTS:${target_name}>" --name "${ARG_SYMBOL}" --input-obj "${intermediate_path}"
       --cubin "${ARG_BIN}" DEPENDS
     COMMENT "Embedding CUBIN into object file (name: ${ARG_SYMBOL})"
     VERBATIM
