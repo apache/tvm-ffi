@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 # fmt: on
 # tvm-ffi-stubgen(end)
 # tvm-ffi-stubgen(import-object): tvm_ffi.libinfo.load_lib_module;False;_FFI_LOAD_LIB
-LIB = _FFI_LOAD_LIB("my-ffi-extension", "my_ffi_extension")
+LIB = _FFI_LOAD_LIB("my_ffi_extension", "my_ffi_extension")
 # tvm-ffi-stubgen(begin): global/my_ffi_extension
 # fmt: off
 _FFI_INIT_FUNC("my_ffi_extension", __name__)
