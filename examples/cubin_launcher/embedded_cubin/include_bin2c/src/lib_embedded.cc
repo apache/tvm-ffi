@@ -33,7 +33,7 @@
 #include "kernel_fatbin.h"
 
 // [example.begin]
-TVM_FFI_LOAD_LIBRARY_FROM_BYTES(env, imageBytes);
+TVM_FFI_EMBED_CUBIN_FROM_BYTES(env, imageBytes);
 // [example.end]
 
 namespace cubin_embedded {

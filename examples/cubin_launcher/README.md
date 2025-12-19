@@ -52,7 +52,7 @@ Key features:
 - TVM-FFI integration for tensor argument passing
 - **Macros:**
   - `TVM_FFI_EMBED_CUBIN`: Declare symbols for object-linked CUBIN
-  - `TVM_FFI_LOAD_LIBRARY_FROM_BYTES`: Load CUBIN from byte array (for `#embed`/`bin2c`)
+  - `TVM_FFI_EMBED_CUBIN_FROM_BYTES`: Load CUBIN from byte array (for `#embed`/`bin2c`)
   - `TVM_FFI_EMBED_CUBIN_GET_KERNEL`: Helper to retrieve kernels
 - **Python Integration:** `embed_cubin` parameter in `tvm_ffi.cpp.load_inline` for seamless CUBIN integration
 - **Runtime Compilation:** `tvm_ffi.cpp.nvrtc` module for runtime CUDA compilation

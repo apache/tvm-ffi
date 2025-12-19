@@ -36,7 +36,7 @@ constexpr unsigned char image[]{
 #embed "kernel_fatbin.fatbin"
 };
 
-TVM_FFI_LOAD_LIBRARY_FROM_BYTES(env, image);
+TVM_FFI_EMBED_CUBIN_FROM_BYTES(env, image);
 // [example.end]
 
 namespace cubin_embedded {

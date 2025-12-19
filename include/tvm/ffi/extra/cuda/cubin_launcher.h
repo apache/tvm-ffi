@@ -172,7 +172,7 @@ namespace ffi {
  * \par Usage Example
  * \code{.cpp}
  * constexpr unsigned char image[] = { ... };
- * TVM_FFI_LOAD_LIBRARY_FROM_BYTES(my_kernels, image);
+ * TVM_FFI_EMBED_CUBIN_FROM_BYTES(my_kernels, image);
  *
  * void MyFunc() {
  *   static auto kernel = TVM_FFI_EMBED_CUBIN_GET_KERNEL(my_kernels, "kernel_name");
@@ -182,15 +182,15 @@ namespace ffi {
  * \param name The identifier for this embedded CUBIN module.
  * \param imageBytes The byte array containing the CUBIN/FATBIN data.
  */
-#define TVM_FFI_LOAD_LIBRARY_FROM_BYTES(name, imageBytes) \
-  namespace {                                             \
-  struct EmbedCubinModule_##name {                        \
-    tvm::ffi::CubinModule mod{imageBytes};                \
-    static EmbedCubinModule_##name* Global() {            \
-      static EmbedCubinModule_##name inst;                \
-      return &inst;                                       \
-    }                                                     \
-  };                                                      \
+#define TVM_FFI_EMBED_CUBIN_FROM_BYTES(name, imageBytes) \
+  namespace {                                            \
+  struct EmbedCubinModule_##name {                       \
+    tvm::ffi::CubinModule mod{imageBytes};               \
+    static EmbedCubinModule_##name* Global() {           \
+      static EmbedCubinModule_##name inst;               \
+      return &inst;                                      \
+    }                                                    \
+  };                                                     \
   } /* anonymous namespace */
 
 /*!

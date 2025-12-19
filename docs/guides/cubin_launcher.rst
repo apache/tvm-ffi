@@ -46,7 +46,7 @@ The implementation is in ``tvm/ffi/extra/cuda/cubin_launcher.h`` and provides:
 - :cpp:class:`tvm::ffi::CubinModule`: RAII wrapper for loading CUBIN modules from memory
 - :cpp:class:`tvm::ffi::CubinKernel`: Handle for launching CUDA kernels with specified parameters
 - :c:macro:`TVM_FFI_EMBED_CUBIN`: Macro for embedding CUBIN data at compile time (legacy / object-linking approach)
-- :c:macro:`TVM_FFI_LOAD_LIBRARY_FROM_BYTES`: Macro for loading CUBIN from byte arrays (modern / C++23 ``#embed`` approach)
+- :c:macro:`TVM_FFI_EMBED_CUBIN_FROM_BYTES`: Macro for embedding CUBIN data from byte arrays (manual embedding approach)
 - :c:macro:`TVM_FFI_EMBED_CUBIN_GET_KERNEL`: Macro for retrieving kernels from embedded CUBIN
 
 The CUBIN launcher supports:
@@ -411,7 +411,7 @@ C++ Macros
 ~~~~~~~~~~
 
 - :c:macro:`TVM_FFI_EMBED_CUBIN`: Declare embedded CUBIN module
-- :c:macro:`TVM_FFI_LOAD_LIBRARY_FROM_BYTES`: Load CUBIN from byte array
+- :c:macro:`TVM_FFI_EMBED_CUBIN_FROM_BYTES`: Load CUBIN from byte array
 - :c:macro:`TVM_FFI_EMBED_CUBIN_GET_KERNEL`: Get kernel from embedded module
 - :c:macro:`TVM_FFI_CHECK_CUDA_ERROR`: Check CUDA Runtime API result
 
