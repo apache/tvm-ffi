@@ -29,6 +29,8 @@
 #ifndef TVM_FFI_EXTRA_CUDA_CUBIN_LAUNCHER_H_
 #define TVM_FFI_EXTRA_CUDA_CUBIN_LAUNCHER_H_
 
+#include <cuda.h>
+#include <cuda_runtime.h>
 #include <tvm/ffi/error.h>
 #include <tvm/ffi/extra/c_env_api.h>
 #include <tvm/ffi/extra/cuda/base.h>
