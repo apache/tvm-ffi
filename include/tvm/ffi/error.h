@@ -34,7 +34,6 @@
 #include <memory>
 #include <sstream>
 #include <string>
-#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -69,15 +68,13 @@ namespace ffi {
  *  and return a proper code to tell the frontend caller about
  *  this fact.
  *
- * \code
- *
+ * \code{.cpp}
  * void ExampleLongRunningFunction() {
  *   if (TVMFFIEnvCheckSignals() != 0) {
  *     throw ::tvm::ffi::EnvErrorAlreadySet();
  *   }
  *   // do work here
  * }
- *
  * \endcode
  */
 struct EnvErrorAlreadySet : public std::exception {};
@@ -295,12 +292,10 @@ class ErrorBuilder {
 /*!
  * \brief Helper macro to throw an error with backtrace and message
  *
- * \code
- *
- *   void ThrowError() {
- *     TVM_FFI_THROW(RuntimeError) << "error message";
- *   }
- *
+ * \code{.cpp}
+ * void ThrowError() {
+ *   TVM_FFI_THROW(RuntimeError) << "error message";
+ * }
  * \endcode
  */
 #define TVM_FFI_THROW(ErrorKind)                                                              \

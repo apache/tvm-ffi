@@ -40,7 +40,6 @@
 #include <tvm/ffi/function_details.h>
 
 #include <functional>
-#include <sstream>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -55,7 +54,7 @@ namespace ffi {
  * \brief Marks the beginning of the safe call that catches exception explicitly
  * \sa TVM_FFI_SAFE_CALL_END
  *
- * \code
+ * \code{.cpp}
  * int TVMFFICStyleFunction() {
  *   TVM_FFI_SAFE_CALL_BEGIN();
  *   // c++ code region here
@@ -90,7 +89,7 @@ namespace ffi {
  * \brief Macro to check a call to TVMFFISafeCallType and raise exception if error happens.
  * \param func The function to check.
  *
- * \code
+ * \code{.cpp}
  * // calls TVMFFIFunctionCall and raises exception if error happens
  * TVM_FFI_CHECK_SAFE_CALL(TVMFFITypeKeyToIndex(&type_key_arr, &type_index));
  * \endcode
@@ -545,18 +544,15 @@ class Function : public ObjectRef {
    *
    * This function can be useful to turn an existing exported symbol into a typed function.
    *
-   * \code
-   *
+   * \code{.cpp}
    * // An extern "C" function, matching TVMFFISafeCallType
    * extern "C" int __tvm_ffi_add(
    *   void* handle, const TVMFFIAny* args, int32_t num_args, TVMFFIAny*result
    * );
-   *
    * // redirect an existing symbol into a typed function
    * inline int add(int a, int b) {
    *   return tvm::ffi::Function::InvokeExternC(nullptr, __tvm_ffi_add, a, b).cast<int>();
    * }
-   *
    * \endcode
    *
    * \tparam Args The types of the arguments to the extern function.
@@ -583,13 +579,13 @@ class Function : public ObjectRef {
    * \param args Arguments to be passed.
    * \tparam Args arguments to be passed.
    *
-   * \code
-   *   // Example code on how to call packed function
-   *   void CallFFIFunction(tvm::ffi::Function f) {
-   *     // call like normal functions by pass in arguments
-   *     // return value is automatically converted back
-   *     int rvalue = f(1, 2.0);
-   *   }
+   * \code{.cpp}
+   * // Example code on how to call packed function
+   * void CallFFIFunction(tvm::ffi::Function f) {
+   *   // call like normal functions by pass in arguments
+   *   // return value is automatically converted back
+   *   int rvalue = f(1, 2.0);
+   * }
    * \endcode
    */
   template <typename... Args>
@@ -669,11 +665,9 @@ class TypedFunction;
  * We can construct a TypedFunction from a lambda function
  * with the same signature.
  *
- * \code
+ * \code{.cpp}
  *  // user defined lambda function.
- *  auto addone = [](int x)->int {
- *    return x + 1;
- *  };
+ *  auto addone = [](int x)->int { return x + 1; };
  *  // We can directly convert
  *  // lambda function to TypedFunction
  *  TypedFunction<int(int)> ftyped(addone);
@@ -703,7 +697,7 @@ class TypedFunction<R(Args...)> {
    * \brief construct from a lambda function with the same signature.
    *
    * Example usage:
-   * \code
+   * \code{.cpp}
    * auto typed_lambda = [](int x)->int { return x + 1; }
    * // construct from packed function
    * TypedFunction<int(int)> ftyped(typed_lambda, "add_one");
@@ -727,7 +721,7 @@ class TypedFunction<R(Args...)> {
    * version that takes a name for the lambda.
    *
    * Example usage:
-   * \code
+   * \code{.cpp}
    * auto typed_lambda = [](int x)->int { return x + 1; }
    * // construct from packed function
    * TypedFunction<int(int)> ftyped(typed_lambda);
@@ -748,7 +742,7 @@ class TypedFunction<R(Args...)> {
    * \brief copy assignment operator from typed lambda
    *
    * Example usage:
-   * \code
+   * \code{.cpp}
    * // construct from packed function
    * TypedFunction<int(int)> ftyped;
    * ftyped = [](int x) { return x + 1; }
@@ -901,15 +895,12 @@ inline int32_t TypeKeyToIndex(std::string_view type_key) {
  *
  * \sa ffi::TypedFunction, TVM_FFI_DLL_EXPORT_TYPED_FUNC_DOC
  *
- * \code
- *
+ * \code{.cpp}
  * int AddOne_(int x) {
  *   return x + 1;
  * }
- *
  * // Expose the function as "AddOne"
  * TVM_FFI_DLL_EXPORT_TYPED_FUNC(AddOne, AddOne_);
- *
  * // Expose the function as "SubOne"
  * TVM_FFI_DLL_EXPORT_TYPED_FUNC(SubOne, [](int x) {
  *   return x - 1;
@@ -957,8 +948,7 @@ inline int32_t TypeKeyToIndex(std::string_view type_key) {
  *
  * \sa ffi::TypedFunction, TVM_FFI_DLL_EXPORT_TYPED_FUNC
  *
- * \code
- *
+ * \code{.cpp}
  * int Add(int a, int b) {
  *   return a + b;
  * }
@@ -979,7 +969,6 @@ inline int32_t TypeKeyToIndex(std::string_view type_key) {
  * -------
  * result : int
  *     Sum of a and b)");
- *
  * \endcode
  *
  * \note The exported symbol name is `__tvm_ffi__doc_<ExportName>` (docstring getter function).

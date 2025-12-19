@@ -19,9 +19,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import tvm_ffi.stub.cli as stub_cli
 from tvm_ffi.core import TypeSchema
 from tvm_ffi.stub import consts as C
-from tvm_ffi.stub.cli import _stage_3
+from tvm_ffi.stub.cli import _stage_2, _stage_3
 from tvm_ffi.stub.codegen import (
     generate_all,
     generate_export,
@@ -604,3 +605,50 @@ def test_generate_ffi_api_with_objects_imports_parents() -> None:
         f"{C.STUB_IMPORT_OBJECT} {parent_key};False;_{parent_key.replace('.', '_')}"
     )
     assert parent_import_prompt in code
+
+
+def test_stage_2_filters_prefix_and_marks_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    prefixes: dict[str, list[FuncInfo]] = {"demo.sub": [], "demo": [], "other": []}
+    monkeypatch.setattr(stub_cli, "collect_type_keys", lambda: prefixes)
+    monkeypatch.setattr(stub_cli, "toposort_objects", lambda objs: [])
+
+    global_funcs = {
+        "demo.sub": [
+            FuncInfo.from_schema(
+                "demo.sub.add_one",
+                TypeSchema("Callable", (TypeSchema("int"), TypeSchema("int"))),
+            )
+        ],
+        "demo": [
+            FuncInfo.from_schema(
+                "demo.add_one",
+                TypeSchema("Callable", (TypeSchema("int"), TypeSchema("int"))),
+            )
+        ],
+        "other": [
+            FuncInfo.from_schema(
+                "other.add_one",
+                TypeSchema("Callable", (TypeSchema("int"), TypeSchema("int"))),
+            )
+        ],
+    }
+    _stage_2(
+        files=[],
+        ty_map=_default_ty_map(),
+        init_cfg=InitConfig(pkg="demo-pkg", shared_target="demo_shared", prefix="demo."),
+        init_path=tmp_path,
+        global_funcs=global_funcs,
+    )
+
+    root_api = tmp_path / "demo" / "_ffi_api.py"
+    sub_api = tmp_path / "demo" / "sub" / "_ffi_api.py"
+    other_api = tmp_path / "other" / "_ffi_api.py"
+    assert root_api.exists()
+    assert sub_api.exists()
+    assert not other_api.exists()
+    root_text = root_api.read_text(encoding="utf-8")
+    sub_text = sub_api.read_text(encoding="utf-8")
+    assert 'LIB = _FFI_LOAD_LIB("demo-pkg", "demo_shared")' in root_text
+    assert "LIB =" not in sub_text
