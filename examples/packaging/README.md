@@ -28,9 +28,11 @@ packaging as well.
 
 ## Install the wheel
 
+Use `uv pip` (the same tooling used in CI) to build and install the example wheel:
+
 ```bash
 cd examples/packaging
-pip install .
+uv pip install --reinstall --verbose .
 ```
 
 ### Note on build and auditwheel
@@ -44,15 +46,10 @@ After installing the `my_ffi_extension` example package, you can run the followi
 that invokes the `add_one` function exposed.
 
 ```bash
-python run_example.py add_one
+python run_example.py
 ```
 
-You can also run the following command to see how error is raised and propagated
-across the language boundaries.
-
-```bash
-python run_example.py raise_error
-```
+This runs three flows: calling `add_one`, demonstrating `raise_error` with a propagated traceback, and constructing/using the `IntPair` object.
 
 When possible, tvm_ffi will try to preserve backtrace across language boundary. You will see output like
 

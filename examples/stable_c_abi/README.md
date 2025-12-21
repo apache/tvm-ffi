@@ -19,7 +19,21 @@
 
 This directory contains all the source code for [tutorial](https://tvm.apache.org/ffi/get_started/stable_c_abi.html).
 
-## Compile and Distribute `add_one_cpu`
+## Run everything
+
+On Linux/macOS:
+
+```bash
+bash run_all.sh
+```
+
+On Windows:
+
+```batch
+run_all.bat
+```
+
+## Compile and Distribute `add_one_cpu` manually
 
 To compile the C Example:
 
@@ -28,7 +42,9 @@ cmake . -B build -DEXAMPLE_NAME="kernel" -DCMAKE_BUILD_TYPE=RelWithDebInfo
 cmake --build build --config RelWithDebInfo
 ```
 
-## Load the Distributed `add_one_cpu`
+This produces `build/add_one_cpu.so` (`.dll` on Windows).
+
+## Load the Distributed `add_one_cpu` manually
 
 To run library loading example in C:
 
@@ -37,3 +53,5 @@ cmake . -B build -DEXAMPLE_NAME="load" -DCMAKE_BUILD_TYPE=RelWithDebInfo
 cmake --build build --config RelWithDebInfo
 build/load
 ```
+
+The executable is emitted as `build/load` (`build/load.exe` on Windows).
