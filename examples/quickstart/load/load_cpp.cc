@@ -67,10 +67,12 @@ int main() {
   ffi::Tensor x = Alloc1DTensor({1, 2, 3, 4, 5});
   ffi::Tensor y = Alloc1DTensor({0, 0, 0, 0, 0});
   Run(x, y);
+  std::cout << "[ ";
   const float* y_data = static_cast<const float*>(y.data_ptr());
   for (int i = 0; i < 5; ++i) {
     std::cout << y_data[i] << " ";
   }
+  std::cout << "]" << std::endl;
   return 0;
 }
 // [aux.end]

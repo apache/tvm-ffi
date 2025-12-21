@@ -40,56 +40,56 @@ jobs:
           pr_base_ref: ${{ github.event.pull_request.base.ref || '' }}
           pr_head_sha: ${{ github.event.pull_request.head.sha || '' }}
 
-  # clang-tidy:
-  #   needs: [prepare]
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - uses: actions/checkout@v5
-  #       with:
-  #         submodules: recursive
-  #         fetch-depth: 0
-  #         fetch-tags: true
-  #     - name: Set up uv
-  #       uses: astral-sh/setup-uv@b75a909f75acd358c2196fb9a5f1299a9a8868a4  # v6.7.0
-  #     - uses: ./.github/actions/detect-env-vars
-  #       id: env_vars
-  #     - name: Run clang-tidy
-  #       run: |
-  #         uv run --no-project --with "clang-tidy==21.1.1"     \
-  #           python tests/lint/clang_tidy_precommit.py         \
-  #             --build-dir=build-pre-commit                    \
-  #             --jobs=${{ steps.env_vars.outputs.cpu_count }}  \
-  #             ./src/ ./include ./tests
+  clang-tidy:
+    needs: [prepare]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Set up uv
+        uses: astral-sh/setup-uv@b75a909f75acd358c2196fb9a5f1299a9a8868a4  # v6.7.0
+      - uses: ./.github/actions/detect-env-vars
+        id: env_vars
+      - name: Run clang-tidy
+        run: |
+          uv run --no-project --with "clang-tidy==21.1.1"     \
+            python tests/lint/clang_tidy_precommit.py         \
+              --build-dir=build-pre-commit                    \
+              --jobs=${{ steps.env_vars.outputs.cpu_count }}  \
+              ./src/ ./include ./tests
 
-  # build-wheels:
-  #   name: Build wheels
-  #   needs: [prepare]
-  #   runs-on: ${{ matrix.os }}
-  #   strategy:
-  #     fail-fast: false
-  #     matrix:
-  #       include:
-  #         - {os: ubuntu-latest, arch: x86_64, linux_image: manylinux2014, build_sdist: "true"}
-  #         - {os: ubuntu-latest, arch: x86_64, linux_image: manylinux_2_28, build_sdist: "false"}
-  #         - {os: ubuntu-24.04-arm, arch: aarch64, linux_image: manylinux2014, build_sdist: "false"}
-  #         - {os: ubuntu-24.04-arm, arch: aarch64, linux_image: manylinux_2_28, build_sdist: "false"}
-  #         - {os: windows-latest, arch: AMD64, linux_image: "", build_sdist: "false"}
-  #         - {os: macos-14, arch: arm64, linux_image: "", build_sdist: "false"}
+  build-wheels:
+    name: Build wheels
+    needs: [prepare]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: ubuntu-latest, arch: x86_64, linux_image: manylinux2014, build_sdist: "true"}
+          - {os: ubuntu-latest, arch: x86_64, linux_image: manylinux_2_28, build_sdist: "false"}
+          - {os: ubuntu-24.04-arm, arch: aarch64, linux_image: manylinux2014, build_sdist: "false"}
+          - {os: ubuntu-24.04-arm, arch: aarch64, linux_image: manylinux_2_28, build_sdist: "false"}
+          - {os: windows-latest, arch: AMD64, linux_image: "", build_sdist: "false"}
+          - {os: macos-14, arch: arm64, linux_image: "", build_sdist: "false"}
 
-  #   steps:
-  #     - name: Checkout repository (for local composite action)
-  #       uses: actions/checkout@v5
-  #       with:
-  #         fetch-depth: 1
+    steps:
+      - name: Checkout repository (for local composite action)
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
 
-  #     - name: Build wheel
-  #       uses: ./.github/actions/build-wheel-for-publish
-  #       with:
-  #         os: ${{ matrix.os }}
-  #         arch: ${{ matrix.arch }}
-  #         linux_image: ${{ matrix.linux_image }}
-  #         checkout_ref: ${{ github.sha }}
-  #         build_sdist: ${{ matrix.build_sdist }}
+      - name: Build wheel
+        uses: ./.github/actions/build-wheel-for-publish
+        with:
+          os: ${{ matrix.os }}
+          arch: ${{ matrix.arch }}
+          linux_image: ${{ matrix.linux_image }}
+          checkout_ref: ${{ github.sha }}
+          build_sdist: ${{ matrix.build_sdist }}
 
   examples:
     name: Run examples
