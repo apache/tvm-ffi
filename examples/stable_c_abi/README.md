@@ -42,7 +42,7 @@ cmake . -B build -DEXAMPLE_NAME="kernel" -DCMAKE_BUILD_TYPE=RelWithDebInfo
 cmake --build build --config RelWithDebInfo
 ```
 
-This produces `build/add_one_cpu.so` (`.dll` on Windows).
+This produces `build/add_one_cpu.so`.
 
 ## Load the Distributed `add_one_cpu` manually
 

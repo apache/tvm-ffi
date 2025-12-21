@@ -42,7 +42,7 @@ cmake . -B build -DEXAMPLE_NAME="compile_cpu" -DCMAKE_BUILD_TYPE=RelWithDebInfo
 cmake --build build --config RelWithDebInfo
 ```
 
-This produces `build/add_one_cpu.so` (`.dll` on Windows).
+This produces `build/add_one_cpu.so`.
 
 To compile CUDA Example (Linux with CUDA toolchain available):
 

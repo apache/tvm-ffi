@@ -26,8 +26,10 @@ cmake . -B build -DEXAMPLE_NAME="kernel" -DCMAKE_BUILD_TYPE=RelWithDebInfo
 cmake --build build --config RelWithDebInfo
 
 rem To compile `src/load.c` to executable `build/load`
+for /f "delims=" %%i in ('python -c "from tvm_ffi import libinfo; import pathlib; print(pathlib.Path(libinfo.find_libtvm_ffi()).parent)"') do set "TVM_FFI_LIBDIR=%%i"
+set "PATH=%TVM_FFI_LIBDIR%;%PATH%"
 cmake . -B build -DEXAMPLE_NAME="load" -DCMAKE_BUILD_TYPE=RelWithDebInfo
 cmake --build build --config RelWithDebInfo
-build\load
+build\load.exe
 
 endlocal
