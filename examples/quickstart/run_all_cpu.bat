@@ -29,6 +29,8 @@ rem To load and run `add_one_cpu.so` in NumPy
 python load\load_numpy.py
 
 rem To load and run `add_one_cpu.so` in C++
+for /f "delims=" %%i in ('python -c "from tvm_ffi import libinfo; import pathlib; print(pathlib.Path(libinfo.find_libtvm_ffi()).parent)"') do set "TVM_FFI_LIBDIR=%%i"
+set "PATH=%TVM_FFI_LIBDIR%;%PATH%"
 cmake . -B build -DEXAMPLE_NAME="load_cpp" -DCMAKE_BUILD_TYPE=RelWithDebInfo
 cmake --build build --config RelWithDebInfo
 build\load_cpp.exe
