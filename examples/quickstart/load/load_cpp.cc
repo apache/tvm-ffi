@@ -21,6 +21,8 @@
 #include <tvm/ffi/container/tensor.h>
 #include <tvm/ffi/extra/module.h>
 
+#include <ostream>
+
 namespace {
 namespace ffi = tvm::ffi;
 /*!
@@ -30,11 +32,15 @@ namespace ffi = tvm::ffi;
  */
 void Run(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
   // Load shared library `build/add_one_cpu.so`
+  std::cout << "Running Step 1" << std::endl;
   ffi::Module mod = ffi::Module::LoadFromFile("build/add_one_cpu.so");
   // Look up `add_one_cpu` function
+  std::cout << "Running Step 2" << std::endl;
   ffi::Function add_one_cpu = mod->GetFunction("add_one_cpu").value();
   // Call the function
+  std::cout << "Running Step 3" << std::endl;
   add_one_cpu(x, y);
+  std::cout << "Running Step 4" << std::endl;
 }
 }  // namespace
 // [main.end]
@@ -64,15 +70,20 @@ ffi::Tensor Alloc1DTensor(std::initializer_list<float> data) {
 }
 
 int main() {
+  std::cout << "Running Step A" << std::endl;
   ffi::Tensor x = Alloc1DTensor({1, 2, 3, 4, 5});
+  std::cout << "Running Step B" << std::endl;
   ffi::Tensor y = Alloc1DTensor({0, 0, 0, 0, 0});
+  std::cout << "Running Step C" << std::endl;
   Run(x, y);
+  std::cout << "Running Step D" << std::endl;
   std::cout << "[ ";
   const float* y_data = static_cast<const float*>(y.data_ptr());
   for (int i = 0; i < 5; ++i) {
     std::cout << y_data[i] << " ";
   }
   std::cout << "]" << std::endl;
+  std::cout << "Running Step E" << std::endl;
   return 0;
 }
 // [aux.end]
