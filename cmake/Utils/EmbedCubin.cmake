@@ -173,8 +173,18 @@ function (tvm_ffi_embed_cubin)
   get_filename_component(OUTPUT_NAME "${ARG_OUTPUT_ABS}" NAME_WE)
   set(INTERMEDIATE_OBJ "${OUTPUT_DIR}/${OUTPUT_NAME}_intermediate.o")
 
-  # Get include directories from tvm_ffi_header
-  get_target_property(TVM_FFI_INCLUDES tvm_ffi_header INTERFACE_INCLUDE_DIRECTORIES)
+  # Get include directories from tvm_ffi header target
+  if (TARGET tvm_ffi::header)
+    set(TVM_FFI_HEADER_TARGET tvm_ffi::header)
+  elseif (TARGET tvm_ffi_header)
+    set(TVM_FFI_HEADER_TARGET tvm_ffi_header)
+  else ()
+    message(
+      FATAL_ERROR
+        "tvm_ffi_embed_cubin: required target 'tvm_ffi::header' or 'tvm_ffi_header' does not exist."
+    )
+  endif ()
+  get_target_property(TVM_FFI_INCLUDES ${TVM_FFI_HEADER_TARGET} INTERFACE_INCLUDE_DIRECTORIES)
 
   # Convert list to -I flags
   set(INCLUDE_FLAGS "")

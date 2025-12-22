@@ -145,17 +145,18 @@ endfunction ()
 #   [STUB_INIT ON|OFF] [STUB_DIR <dir>] [STUB_PKG <pkg>] [STUB_PREFIX <prefix>]
 # )
 # Configure a target to integrate with TVM-FFI CMake utilities:
-#   - Optionally link against tvm_ffi_header and/or tvm_ffi_shared
+#   - Link against tvm_ffi::header and/or tvm_ffi::shared
 #   - Always apply tvm_ffi_add_prefix_map(target_name <current source dir>)
-#   - Optionally enable Apple dSYM generation via tvm_ffi_add_apple_dsymutil(target_name)
-#   - Optionally apply MSVC-specific flags via tvm_ffi_add_msvc_flags(target_name)
+#   - Enable Apple dSYM generation via tvm_ffi_add_apple_dsymutil(target_name)
+#   - Apply MSVC-specific flags via tvm_ffi_add_msvc_flags(target_name)
+#   - Add post-build step to generate Python stubs via tvm_ffi.stub.cli
 #
 # Parameters:
 #   target_name: Existing CMake target to modify (positional, required)
 #
 # Keyword parameters:
-#   LINK_SHARED:  Whether to link tvm_ffi_shared into the target (default: ON; ON/OFF-style)
-#   LINK_HEADER:  Whether to link tvm_ffi_header into the target (default: ON; ON/OFF-style)
+#   LINK_SHARED:  Whether to link tvm_ffi::shared into the target (default: ON; ON/OFF-style)
+#   LINK_HEADER:  Whether to link tvm_ffi::header into the target (default: ON; ON/OFF-style)
 #   DEBUG_SYMBOL: Whether to enable debug symbol post-processing hooks.
 #                 On Apple this calls tvm_ffi_add_apple_dsymutil(target_name) (default: ON; ON/OFF-style)
 #                 On non-Apple platforms this is currently a no-op unless you extend it. (default: ON)
@@ -257,24 +258,24 @@ function (tvm_ffi_configure_target target)
 
   # LINK_HEADER
   if (tvm_ffi_arg__LINK_HEADER)
-    if (TARGET tvm_ffi_header)
-      target_link_libraries("${target}" PRIVATE tvm_ffi_header)
+    if (TARGET tvm_ffi::header)
+      target_link_libraries("${target}" PRIVATE tvm_ffi::header)
     else ()
       message(
         FATAL_ERROR
-          "tvm_ffi_configure_target(${target}): LINK_HEADER requested but target 'tvm_ffi_header' does not exist."
+          "tvm_ffi_configure_target(${target}): LINK_HEADER requested but targets 'tvm_ffi::header' do not exist."
       )
     endif ()
   endif ()
 
   # LINK_SHARED
   if (tvm_ffi_arg__LINK_SHARED)
-    if (TARGET tvm_ffi_shared)
-      target_link_libraries("${target}" PRIVATE tvm_ffi_shared)
+    if (TARGET tvm_ffi::shared)
+      target_link_libraries("${target}" PRIVATE tvm_ffi::shared)
     else ()
       message(
         FATAL_ERROR
-          "tvm_ffi_configure_target(${target}): LINK_SHARED requested but target 'tvm_ffi_shared' does not exist."
+          "tvm_ffi_configure_target(${target}): LINK_SHARED requested but targets 'tvm_ffi::shared' do not exist."
       )
     endif ()
   endif ()

@@ -42,23 +42,22 @@ execute_process(
 
 message(STATUS "Finding libfiles ${tvm_ffi_LIB_FILES}")
 
-add_library(tvm_ffi_header INTERFACE)
-target_compile_features(tvm_ffi_header INTERFACE cxx_std_17)
-target_include_directories(tvm_ffi_header INTERFACE "${tvm_ffi_INCLUDE_DIR}")
-target_include_directories(tvm_ffi_header INTERFACE "${tvm_ffi_DLPACK_INCLUDE_DIR}")
+add_library(tvm_ffi::header INTERFACE IMPORTED)
+target_compile_features(tvm_ffi::header INTERFACE cxx_std_17)
+target_include_directories(tvm_ffi::header INTERFACE "${tvm_ffi_INCLUDE_DIR}")
+target_include_directories(tvm_ffi::header INTERFACE "${tvm_ffi_DLPACK_INCLUDE_DIR}")
 
-add_library(tvm_ffi_shared SHARED IMPORTED)
-target_compile_features(tvm_ffi_shared INTERFACE cxx_std_17)
+add_library(tvm_ffi::shared SHARED IMPORTED)
+target_compile_features(tvm_ffi::shared INTERFACE cxx_std_17)
 
 if (WIN32)
-  set_target_properties(tvm_ffi_shared PROPERTIES IMPORTED_IMPLIB "${tvm_ffi_LIB_FILES}")
+  set_target_properties(tvm_ffi::shared PROPERTIES IMPORTED_IMPLIB "${tvm_ffi_LIB_FILES}")
 else ()
-  set_target_properties(tvm_ffi_shared PROPERTIES IMPORTED_LOCATION "${tvm_ffi_LIB_FILES}")
+  set_target_properties(tvm_ffi::shared PROPERTIES IMPORTED_LOCATION "${tvm_ffi_LIB_FILES}")
 endif ()
-# cmake-lint: disable=C0307
 set_target_properties(
-  tvm_ffi_shared PROPERTIES INTERFACE_INCLUDE_DIRECTORIES
-                            "${tvm_ffi_INCLUDE_DIR};${tvm_ffi_DLPACK_INCLUDE_DIR}"
+  tvm_ffi::shared PROPERTIES INTERFACE_INCLUDE_DIRECTORIES
+                             "${tvm_ffi_INCLUDE_DIR};${tvm_ffi_DLPACK_INCLUDE_DIR}"
 )
 
 include(${CMAKE_CURRENT_LIST_DIR}/Utils/Library.cmake)

@@ -58,7 +58,7 @@ tvm_ffi_embed_cubin(
 
 # Step 3: Build lib_embedded shared library (with embedded CUBIN)
 add_library(lib_embedded SHARED ${CMAKE_CURRENT_BINARY_DIR}/lib_embedded_with_cubin.o)
-target_link_libraries(lib_embedded PRIVATE tvm_ffi_header tvm_ffi_shared CUDA::cudart)
+target_link_libraries(lib_embedded PRIVATE tvm_ffi::header tvm_ffi::shared CUDA::cudart)
 set_target_properties(
   lib_embedded
   PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/"

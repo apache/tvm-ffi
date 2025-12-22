@@ -132,7 +132,7 @@ TVM-FFI natively integrates with CMake via ``find_package`` as demonstrated belo
       execute_process(COMMAND "${Python_EXECUTABLE}" -m tvm_ffi.config --cmakedir OUTPUT_STRIP_TRAILING_WHITESPACE OUTPUT_VARIABLE tvm_ffi_ROOT)
       find_package(tvm_ffi CONFIG REQUIRED)
 
-      # Link C++ target to `tvm_ffi_header` and `tvm_ffi_shared`
+      # Link C++ target to `tvm_ffi::header` and `tvm_ffi::shared`
       add_library(add_one_cpu SHARED compile/add_one_cpu.cc)
       tvm_ffi_configure_target(add_one_cpu)
 
@@ -146,7 +146,7 @@ TVM-FFI natively integrates with CMake via ``find_package`` as demonstrated belo
       execute_process(COMMAND "${Python_EXECUTABLE}" -m tvm_ffi.config --cmakedir OUTPUT_STRIP_TRAILING_WHITESPACE OUTPUT_VARIABLE tvm_ffi_ROOT)
       find_package(tvm_ffi CONFIG REQUIRED)
 
-      # Link CUDA target to `tvm_ffi_header` and `tvm_ffi_shared`
+      # Link CUDA target to `tvm_ffi::header` and `tvm_ffi::shared`
       add_library(add_one_cuda SHARED compile/add_one_cuda.cu)
       tvm_ffi_configure_target(add_one_cuda)
 
