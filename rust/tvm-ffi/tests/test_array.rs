@@ -137,33 +137,29 @@ fn test_array_recursive_type_checking() {
 #[test]
 fn test_array_parametric_heterogeneity() {
     // Verify Array works with different ObjectRefCore types
-    let array = Array::new(vec![Shape::from(vec![1, 2, 3]), Shape::from(vec![10])]);
-    assert_eq!(array.get(0).unwrap().as_slice(), &[1, 2, 3]);
-    assert_eq!(array.get(1).unwrap().as_slice(), &[10]);
+    let shape_array = Array::new(vec![Shape::from(vec![1, 2, 3]), Shape::from(vec![10])]);
+    assert_eq!(shape_array.get(0).unwrap().as_slice(), &[1, 2, 3]);
+    assert_eq!(shape_array.get(1).unwrap().as_slice(), &[10]);
 
-    let array = Array::new(vec![
-        Function::get_global("testing.echo").unwrap(),
-        Function::get_global("testing.apply").unwrap(),
+    let function_array = Array::new(vec![
+        Function::get_global("ffi.String").unwrap(),
+        Function::get_global("ffi.Bytes").unwrap(),
     ]);
     assert_eq!(
         into_typed_fn!(
-            array.get(0).unwrap(),
-            Fn(&str) -> Result<String>
-        )("hello")
+            function_array.get(0).unwrap(),
+            Fn(String) -> Result<String>
+        )("hello".into())
         .unwrap(),
         "hello"
     );
     assert_eq!(
         into_typed_fn!(
-            array.get(1).unwrap(),
-            Fn(Function, i32) -> Result<i32>
-        )(
-            // add_one
-            Function::from_typed(|x: i32| -> Result<i32> { Ok(x + 1) }),
-            3
-        )
+            function_array.get(1).unwrap(),
+            Fn(Bytes) -> Result<Bytes>
+        )([1, 2, 3].into())
         .unwrap(),
-        4
+        &[1, 2, 3]
     );
 }
 
