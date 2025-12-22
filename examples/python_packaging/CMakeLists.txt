@@ -23,7 +23,9 @@ find_package(
   REQUIRED
 )
 find_package(tvm_ffi CONFIG REQUIRED)
+# [example.cmake.begin]
 add_library(my_ffi_extension SHARED src/extension.cc)
 tvm_ffi_configure_target(my_ffi_extension STUB_DIR "./python" STUB_INIT ON)
 install(TARGETS my_ffi_extension DESTINATION .)
-tvm_ffi_install(my_ffi_extension)
+tvm_ffi_install(my_ffi_extension DESTINATION .)
+# [example.cmake.end]

@@ -27,6 +27,23 @@ internals. We will cover three checkpoints:
 - Build Python wheel;
 - Automatic Python package generation tools.
 
+.. note::
+
+  All code used in this guide lives under
+  `examples/python_packaging <https://github.com/apache/tvm-ffi/tree/main/examples/python_packaging>`_.
+
+.. admonition:: Prerequisite
+   :class: hint
+
+   - Python: 3.9 or newer (for the ``tvm_ffi.config``/``tvm-ffi-config`` helpers)
+   - Compiler: C11-capable toolchain (GCC/Clang/MSVC)
+   - TVM-FFI installed via
+
+     .. code-block:: bash
+
+        pip install --reinstall --upgrade apache-tvm-ffi
+
+
 Export C++ to Python
 --------------------
 
@@ -53,13 +70,10 @@ C symbols are easier to call into.
     Macro :c:macro:`TVM_FFI_DLL_EXPORT_TYPED_FUNC` exports the function ``AddTwo`` as
     a C symbol ``__tvm_ffi_add_two`` inside the shared library.
 
-    .. code-block:: cpp
-
-      static int AddTwo(int x) {
-        return x + 2;
-      }
-
-      TVM_FFI_DLL_EXPORT_TYPED_FUNC(add_two, AddTwo);
+    .. literalinclude:: ../../examples/python_packaging/src/extension.cc
+      :language: cpp
+      :start-after: [tvm_ffi_abi.begin]
+      :end-before: [tvm_ffi_abi.end]
 
   .. group-tab:: Python (User)
 
@@ -97,17 +111,10 @@ It registry handles type translation, error handling, and metadata.
     C++ function ``AddOne`` is registered with name ``my_ffi_extension.add_one``
     in the global registry using :cpp:class:`tvm::ffi::reflection::GlobalDef`.
 
-    .. code-block:: cpp
-
-      static int AddOne(int x) {
-        return x + 1;
-      }
-
-      TVM_FFI_STATIC_INIT_BLOCK() {
-        namespace refl = tvm::ffi::reflection;
-        refl::GlobalDef()
-          .def("my_ffi_extension.add_one", AddOne);
-      }
+    .. literalinclude:: ../../examples/python_packaging/src/extension.cc
+      :language: cpp
+      :start-after: [global_function.begin]
+      :end-before: [global_function.end]
 
   .. group-tab:: Python (User)
 
@@ -166,33 +173,10 @@ makes it easy to expose:
     - a constructor, and
     - a method ``Sum`` that returns the sum of the two fields.
 
-    .. code-block:: cpp
-
-      class IntPairObj : public ffi::Object {
-       public:
-        int64_t a;
-        int64_t b;
-        IntPairObj(int64_t a, int64_t b) : a(a), b(b) {}
-
-        int64_t Sum() const {
-          return a + b;
-        }
-
-        TVM_FFI_DECLARE_OBJECT_INFO_FINAL(
-          /*type_key=*/"my_ffi_extension.IntPair",
-          /*class=*/IntPairObj,
-          /*parent_class=*/ffi::Object
-        );
-      };
-
-      TVM_FFI_STATIC_INIT_BLOCK() {
-        namespace refl = tvm::ffi::reflection;
-        refl::ObjectDef<IntPairObj>()
-          .def(refl::init<int64_t, int64_t>())
-          .def_rw("a", &IntPairObj::a, "the first field")
-          .def_rw("b", &IntPairObj::b, "the second field")
-          .def("sum", &IntPairObj::Sum, "IntPairObj::Sum() method");
-      }
+    .. literalinclude:: ../../examples/python_packaging/src/extension.cc
+      :language: cpp
+      :start-after: [object.begin]
+      :end-before: [object.end]
 
   .. group-tab:: Python (User)
 
@@ -238,15 +222,14 @@ CMake Target
 Assume the source tree contains ``src/extension.cc``. Create a ``CMakeLists.txt`` that
 creates a shared target ``my_ffi_extension`` and configures it against TVM-FFI.
 
-.. code-block:: cmake
-
-    add_library(my_ffi_extension SHARED src/extension.cc)
-    tvm_ffi_configure_target(my_ffi_extension STUB_DIR "./python")
-    install(TARGETS my_ffi_extension DESTINATION .)
-    tvm_ffi_install(my_ffi_extension DESTINATION .)
+.. literalinclude:: ../../examples/python_packaging/CMakeLists.txt
+  :language: cmake
+  :start-after: [example.cmake.begin]
+  :end-before: [example.cmake.end]
 
 Function ``tvm_ffi_configure_target`` sets up TVM-FFI include paths, link against TVM-FFI library,
-generates stubs under the specified directory, and optionally debug symbols.
+generates stubs under ``STUB_DIR``, and can scaffold stub files when ``STUB_INIT`` is
+enabled.
 
 Function ``tvm_ffi_install`` places necessary information, e.g. debug symbols in macOS, next to
 the shared library for proper packaging.
@@ -261,19 +244,10 @@ Define a :pep:`517` build backend in ``pyproject.toml``, with the following step
 - Specify the source directory of the package via ``wheel.packages``, and the installation
   destination via ``wheel.install-dir``.
 
-.. code-block:: toml
-
-   [build-system]
-   requires = ["scikit-build-core>=0.10.0", "apache-tvm-ffi"]
-   build-backend = "scikit_build_core.build"
-
-   [tool.scikit-build]
-   # The wheel is Python ABI-agnostic
-   wheel.py-api = "py3"
-   # The package contains the Python module at `python/my_ffi_extension`
-   wheel.packages = ["python/my_ffi_extension"]
-    # The install dir matches the import name
-   wheel.install-dir = "my_ffi_extension"
+.. literalinclude:: ../../examples/python_packaging/pyproject.toml
+  :language: toml
+  :start-after: [pyproject.build.begin]
+  :end-before: [pyproject.build.end]
 
 Once fully specified, scikit-build-core will invoke CMake and drive the extension building process.
 
