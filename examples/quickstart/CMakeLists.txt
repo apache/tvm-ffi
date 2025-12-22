@@ -22,6 +22,29 @@ option(EXAMPLE_NAME "Which example to build ('compile_cpu'/'compile_cuda'/'load_
 )
 message(STATUS "Building example: ${EXAMPLE_NAME}")
 
+# cmake-lint: disable=C0111
+function (set_flat_output_dirs target_name)
+  set(output_dir "${CMAKE_BINARY_DIR}")
+  # Ensure multi-config generators (e.g., MSVC) output to the same flat directory.
+  foreach (config IN ITEMS "" DEBUG RELEASE RELWITHDEBINFO MINSIZEREL)
+    if (config STREQUAL "")
+      set_property(TARGET ${target_name} PROPERTY RUNTIME_OUTPUT_DIRECTORY "${output_dir}")
+      set_property(TARGET ${target_name} PROPERTY LIBRARY_OUTPUT_DIRECTORY "${output_dir}")
+      set_property(TARGET ${target_name} PROPERTY ARCHIVE_OUTPUT_DIRECTORY "${output_dir}")
+    else ()
+      set_property(
+        TARGET ${target_name} PROPERTY RUNTIME_OUTPUT_DIRECTORY_${config} "${output_dir}"
+      )
+      set_property(
+        TARGET ${target_name} PROPERTY LIBRARY_OUTPUT_DIRECTORY_${config} "${output_dir}"
+      )
+      set_property(
+        TARGET ${target_name} PROPERTY ARCHIVE_OUTPUT_DIRECTORY_${config} "${output_dir}"
+      )
+    endif ()
+  endforeach ()
+endfunction ()
+
 # Run `tvm_ffi.config --cmakedir` to find tvm-ffi package
 find_package(
   Python
@@ -40,34 +63,21 @@ if (EXAMPLE_NAME STREQUAL "compile_cpu")
   add_library(add_one_cpu SHARED compile/add_one_cpu.cc)
   target_link_libraries(add_one_cpu PRIVATE tvm_ffi_header)
   target_link_libraries(add_one_cpu PRIVATE tvm_ffi_shared)
-  set_target_properties(
-    add_one_cpu
-    PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/"
-               PREFIX ""
-               SUFFIX ".so"
-  )
+  set_target_properties(add_one_cpu PROPERTIES PREFIX "" SUFFIX ".so")
+  set_flat_output_dirs(add_one_cpu)
 elseif (EXAMPLE_NAME STREQUAL "compile_cuda")
   # Example 2. CUDA `add_one`
   enable_language(CUDA)
   add_library(add_one_cuda SHARED compile/add_one_cuda.cu)
   target_link_libraries(add_one_cuda PRIVATE tvm_ffi_shared)
-  set_target_properties(
-    add_one_cuda
-    PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/"
-               PREFIX ""
-               SUFFIX ".so"
-  )
+  set_target_properties(add_one_cuda PROPERTIES PREFIX "" SUFFIX ".so")
+  set_flat_output_dirs(add_one_cuda)
 elseif (EXAMPLE_NAME STREQUAL "load_cpp")
   # Example 3. Load C++ shared library
   add_executable(load_cpp load/load_cpp.cc)
   target_link_libraries(load_cpp PRIVATE tvm_ffi_header)
   target_link_libraries(load_cpp PRIVATE tvm_ffi_shared)
-  set_target_properties(
-    load_cpp
-    PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/"
-               PREFIX ""
-               SUFFIX ""
-  )
+  set_flat_output_dirs(load_cpp)
 else ()
   message(FATAL_ERROR "Unknown EXAMPLE_NAME option: ${EXAMPLE_NAME}. "
                       "Expected: 'compile_cpu', 'compile_cuda', 'load_cpp'."

@@ -24,8 +24,8 @@
 // clang-format off
 // [example.begin]
 // File: src/add_one_cpu.cc
-TVM_FFI_DLL int __tvm_ffi_add_one_cpu(void* handle, const TVMFFIAny* args, int32_t num_args,
-                                      TVMFFIAny* result) {
+TVM_FFI_DLL_EXPORT int __tvm_ffi_add_one_cpu(void* handle, const TVMFFIAny* args,
+                                             int32_t num_args, TVMFFIAny* result) {
   // Step 1. Extract inputs from `Any`
   // Step 1.1. Extract `x := args[0]`
   DLTensor* x;
