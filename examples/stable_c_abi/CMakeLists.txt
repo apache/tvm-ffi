@@ -58,8 +58,7 @@ find_package(tvm_ffi CONFIG REQUIRED)
 if (EXAMPLE_NAME STREQUAL "kernel")
   # Example 1. `add_one_cpu` in C
   add_library(add_one_cpu SHARED src/add_one_cpu.c)
-  target_link_libraries(add_one_cpu PRIVATE tvm_ffi_header)
-  target_link_libraries(add_one_cpu PRIVATE tvm_ffi_shared)
+  target_link_libraries(add_one_cpu PRIVATE tvm_ffi::header tvm_ffi::shared)
   set_target_properties(
     add_one_cpu
     PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/"
@@ -73,8 +72,7 @@ if (EXAMPLE_NAME STREQUAL "kernel")
 elseif (EXAMPLE_NAME STREQUAL "load")
   # Example 2. Load `add_one_cpu` shared library in C
   add_executable(load src/load.c)
-  target_link_libraries(load PRIVATE tvm_ffi_header)
-  target_link_libraries(load PRIVATE tvm_ffi_shared)
+  target_link_libraries(load PRIVATE tvm_ffi::header tvm_ffi::shared)
   set_target_properties(
     load
     PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/"
