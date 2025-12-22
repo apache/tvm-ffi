@@ -144,6 +144,17 @@ It registry handles type translation, error handling, and metadata.
       def add_one(x: int) -> int: ...
 
 
+.. note::
+
+  Global functions can be retrieved via :py:func:`tvm_ffi.get_global_func` in Python, :cpp:func:`TVMFFIFunctionGetGlobal` in C,
+  or :cpp:func:`tvm::ffi::Function::GetGlobal` in C++.
+
+  .. code-block:: python
+
+    func = tvm_ffi.get_global_func("my_ffi_extension.add_one")
+    func(3)  # -> 4
+
+
 Class
 ~~~~~
 

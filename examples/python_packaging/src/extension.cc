@@ -39,6 +39,13 @@ TVM_FFI_DLL_EXPORT_TYPED_FUNC(add_two, AddTwo);
 // [global_function.begin]
 static int AddOne(int x) { return x + 1; }
 
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  refl::GlobalDef()  //
+      .def("my_ffi_extension.add_one", AddOne);
+}
+// [global_function.end]
+
 /*!
  * \brief Raise a runtime error to demonstrate error propagation.
  *
@@ -56,11 +63,9 @@ static void RaiseError(const ffi::String& msg) { TVM_FFI_THROW(RuntimeError) << 
 
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef()
-      .def("my_ffi_extension.add_one", AddOne)
+  refl::GlobalDef()  //
       .def("my_ffi_extension.raise_error", RaiseError);
 }
-// [global_function.end]
 
 // [object.begin]
 class IntPairObj : public ffi::Object {
