@@ -33,14 +33,19 @@ requires-python = ">=3.9"
 
 dependencies = ["apache-tvm-ffi"]
 
+# [pyproject.build.begin]
 [build-system]
 requires = ["scikit-build-core>=0.10.0", "apache-tvm-ffi"]
 build-backend = "scikit_build_core.build"
 
 [tool.scikit-build]
-# the wheel is abi agnostic
+# The wheel is Python ABI-agnostic
 wheel.py-api = "py3"
-minimum-version = "build-system.requires"
+# The package contains the Python module at `python/my_ffi_extension`
+wheel.packages = ["python/my_ffi_extension"]
+# The install dir matches the import name
+wheel.install-dir = "my_ffi_extension"
+# [pyproject.build.end]
 
 # Build configuration
 build-dir = "build"
@@ -52,7 +57,4 @@ cmake.build-type = "RelWithDebInfo"
 
 # Logging
 logging.level = "INFO"
-
-# Wheel configuration
-wheel.packages = ["python/my_ffi_extension"]
-wheel.install-dir = "my_ffi_extension"
+minimum-version = "build-system.requires"

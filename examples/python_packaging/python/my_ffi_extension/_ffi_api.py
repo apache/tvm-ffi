@@ -33,6 +33,7 @@ LIB = _FFI_LOAD_LIB("my_ffi_extension", "my_ffi_extension")
 # fmt: off
 _FFI_INIT_FUNC("my_ffi_extension", __name__)
 if TYPE_CHECKING:
+    def add_one(_0: int, /) -> int: ...
     def raise_error(_0: str, /) -> None: ...
 # fmt: on
 # tvm-ffi-stubgen(end)
@@ -49,9 +50,7 @@ class IntPair(_ffi_Object):
     if TYPE_CHECKING:
         @staticmethod
         def __c_ffi_init__(_0: int, _1: int, /) -> Object: ...
-        @staticmethod
-        def static_get_second(_0: IntPair, /) -> int: ...
-        def get_first(self, /) -> int: ...
+        def sum(self, /) -> int: ...
     # fmt: on
     # tvm-ffi-stubgen(end)
 
@@ -60,6 +59,7 @@ __all__ = [
     # tvm-ffi-stubgen(begin): __all__
     "LIB",
     "IntPair",
+    "add_one",
     "raise_error",
     # tvm-ffi-stubgen(end)
 ]

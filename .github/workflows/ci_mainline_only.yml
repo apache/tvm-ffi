@@ -163,25 +163,25 @@ jobs:
           cd examples\stable_c_abi
           call run_all.bat
 
-      - name: Run example/packaging [posix]
+      - name: Run example/python_packaging [posix]
         if: ${{ runner.os != 'Windows' }}
         env:
           CMAKE_BUILD_PARALLEL_LEVEL: ${{ steps.env_vars.outputs.cpu_count }}
         run: |
-          pushd examples/packaging
+          pushd examples/python_packaging
           # This directory will be auto-generated in `CMakeLists.txt` by setting `STUB_INIT ON`
           rm -rf python/my_ffi_extension
           uv pip install --verbose . --no-build-isolation
           python run_example.py
           popd
 
-      - name: Run example/packaging [windows]
+      - name: Run example/python_packaging [windows]
         if: ${{ runner.os == 'Windows' }}
         shell: pwsh
         env:
           CMAKE_BUILD_PARALLEL_LEVEL: ${{ steps.env_vars.outputs.cpu_count }}
         run: |
-          Set-Location examples/packaging
+          Set-Location examples/python_packaging
           Remove-Item -Recurse -Force python/my_ffi_extension
           uv pip install --verbose . --no-build-isolation
           python run_example.py
