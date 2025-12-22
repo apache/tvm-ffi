@@ -34,7 +34,7 @@ namespace ffi {
  * current CUDA device back to original device index.
  *
  * Example usage:
- * \code
+ * \code{.cpp}
  * void kernel(ffi::TensorView x) {
  *   ffi::CUDADeviceGuard guard(x.device().device_id);
  *   ...

@@ -141,14 +141,15 @@ def _stage_2(
     } | C.BUILTIN_TYPE_KEYS
 
     # Step 0. Generate missing `_ffi_api.py` and `__init__.py` under each prefix.
+    prefix_filter = init_cfg.prefix.strip()
+    if prefix_filter and not prefix_filter.endswith("."):
+        prefix_filter += "."
+    root_prefix = prefix_filter.rstrip(".")
     prefixes: dict[str, list[str]] = collect_type_keys()
     for prefix in global_funcs:
         prefixes.setdefault(prefix, [])
-
-    root_ffi_api_py = init_path / init_cfg.prefix.rstrip(".") / "_ffi_api.py"
     for prefix, obj_names in prefixes.items():
-        # TODO(@junrushao): control the prefix to generate stubs for
-        if prefix.startswith("testing") or prefix.startswith("ffi"):
+        if not (prefix == root_prefix or prefix.startswith(prefix_filter)):
             continue
         funcs = sorted(
             [] if prefix in defined_func_prefixes else global_funcs.get(prefix, []),
@@ -172,7 +173,7 @@ def _stage_2(
                     prefix,
                     object_infos,
                     init_cfg,
-                    is_root=root_ffi_api_py.samefile(target_path),
+                    is_root=prefix == root_prefix,
                 )
             )
         target_file.reload()
@@ -448,7 +449,7 @@ def _parse_args() -> Options:
         default="",
         help=(
             "Python package name to generate stubs for (e.g. apache-tvm-ffi). "
-            "Required together with --init-lib, --init-path, and --init-prefix."
+            "Required together with --init-lib and --init-prefix."
         ),
     )
     parser.add_argument(

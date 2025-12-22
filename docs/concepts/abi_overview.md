@@ -15,7 +15,7 @@
 <!--- specific language governing permissions and limitations -->
 <!--- under the License. -->
 
-# ABI Overview
+# ABI Specification
 
 This section provides an overview of the ABI convention of TVM FFI. The ABI
 is designed around the following key principles:

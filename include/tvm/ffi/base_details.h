@@ -92,10 +92,10 @@
 /// \cond Doxygen_Suppress
 #define TVM_FFI_STATIC_INIT_BLOCK_DEF_(FnName) __attribute__((constructor)) static void FnName()
 /// \endcond
-/*
+/*!
  * \brief Macro that defines a block that will be called during static initialization.
  *
- * \code
+ * \code{.cpp}
  * TVM_FFI_STATIC_INIT_BLOCK() {
  *   RegisterFunctions();
  * }

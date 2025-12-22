@@ -87,7 +87,7 @@ class TVM_FFI_EXTRA_CXX_API ModuleObj : public Object {
    * \param name The name of the function.
    * \return The metadata as JSON string if available, nullopt otherwise.
    *
-   * \code
+   * \code{.cpp}
    * Module mod = Module::LoadFromFile("lib.so");
    * Optional<String> metadata = mod->GetFunctionMetadata("my_func");
    * if (metadata.has_value()) {
@@ -208,7 +208,7 @@ class TVM_FFI_EXTRA_CXX_API ModuleObj : public Object {
  * When invoking a function on a ModuleObj, such as GetFunction,
  * use operator-> to get the ModuleObj pointer and invoke the member functions.
  *
- * \code
+ * \code{.cpp}
  * ffi::Module mod = ffi::Module::LoadFromFile("path/to/module.so");
  * ffi::Function func = mod->GetFunction(name);
  * \endcode
