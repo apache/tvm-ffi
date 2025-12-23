@@ -177,6 +177,7 @@ impl Any {
 
     #[inline]
     pub unsafe fn into_raw_ffi_any(this: Self) -> TVMFFIAny {
+        let this = std::mem::ManuallyDrop::new(this);
         this.data
     }
 
