@@ -34,7 +34,7 @@
 #include <tvm/ffi/error.h>
 #include <tvm/ffi/extra/c_env_api.h>
 #include <tvm/ffi/extra/cuda/base.h>
-#include <tvm/ffi/extra/cuda/unify_api.h>
+#include <tvm/ffi/extra/cuda/internal/unified_api.h>
 #include <tvm/ffi/string.h>
 
 #include <cstdint>
@@ -295,7 +295,7 @@ class CubinModule {
    * \param bytes CUBIN binary data as a Bytes object.
    */
   explicit CubinModule(const Bytes& bytes) {
-    TVM_FFI_CHECK_CUDA_ERROR(load_image(&library_, bytes.data()));
+    TVM_FFI_CHECK_CUDA_ERROR(cuda_api::LoadLibrary(&library_, bytes.data()));
   }
 
   /*!
@@ -304,7 +304,9 @@ class CubinModule {
    * \param code Pointer to CUBIN binary data.
    * \note The `code` buffer points to an ELF image.
    */
-  explicit CubinModule(const char* code) { TVM_FFI_CHECK_CUDA_ERROR(load_image(&library_, code)); }
+  explicit CubinModule(const char* code) {
+    TVM_FFI_CHECK_CUDA_ERROR(cuda_api::LoadLibrary(&library_, code));
+  }
 
   /*!
    * \brief Load CUBIN module from raw memory buffer.
@@ -313,13 +315,13 @@ class CubinModule {
    * \note The `code` buffer points to an ELF image.
    */
   explicit CubinModule(const unsigned char* code) {
-    TVM_FFI_CHECK_CUDA_ERROR(load_image(&library_, code));
+    TVM_FFI_CHECK_CUDA_ERROR(cuda_api::LoadLibrary(&library_, code));
   }
 
   /*! \brief Destructor unloads the library */
   ~CubinModule() {
     if (library_ != nullptr) {
-      unload_library(library_);
+      cuda_api::UnloadLibrary(library_);
     }
   }
 
@@ -353,7 +355,7 @@ class CubinModule {
   CubinKernel operator[](const char* name);
 
   /*! \brief Get the underlying cudaLibrary_t handle */
-  LibraryHandle GetHandle() const { return library_; }
+  cuda_api::LibraryHandle GetHandle() const { return library_; }
 
   // Non-copyable
   CubinModule(const CubinModule&) = delete;
@@ -380,7 +382,7 @@ class CubinModule {
   CubinModule& operator=(CubinModule&& other) noexcept {
     if (this != &other) {
       if (library_ != nullptr) {
-        unload_library(library_);
+        cuda_api::UnloadLibrary(library_);
       }
       library_ = other.library_;
       other.library_ = nullptr;
@@ -389,7 +391,7 @@ class CubinModule {
   }
 
  private:
-  LibraryHandle library_ = nullptr;
+  cuda_api::LibraryHandle library_ = nullptr;
 };
 
 /*!
@@ -431,8 +433,8 @@ class CubinKernel {
    * \param library The cudaLibrary_t handle.
    * \param name Name of the kernel function.
    */
-  CubinKernel(LibraryHandle library, const char* name) {
-    TVM_FFI_CHECK_CUDA_ERROR(load_function(&kernel_, library, name));
+  CubinKernel(cuda_api::LibraryHandle library, const char* name) {
+    TVM_FFI_CHECK_CUDA_ERROR(cuda_api::GetKernel(&kernel_, library, name));
   }
 
   /*! \brief Destructor (kernel handle doesn't need explicit cleanup) */
@@ -476,13 +478,13 @@ class CubinKernel {
    * \note The kernel executes asynchronously. Use cudaStreamSynchronize() or
    *       cudaDeviceSynchronize() to wait for completion if needed.
    */
-  CUDAResultType Launch(void** args, dim3 grid, dim3 block, StreamHandle stream,
-                        uint32_t dyn_smem_bytes = 0) {
-    return launch_kernel(kernel_, args, grid, block, stream, dyn_smem_bytes);
+  cuda_api::ResultType Launch(void** args, dim3 grid, dim3 block, cuda_api::StreamHandle stream,
+                              uint32_t dyn_smem_bytes = 0) {
+    return cuda_api::LaunchKernel(kernel_, args, grid, block, stream, dyn_smem_bytes);
   }
 
   /*! \brief Get the underlying cudaKernel_t handle */
-  KernelHandle GetHandle() const { return kernel_; }
+  cuda_api::KernelHandle GetHandle() const { return kernel_; }
 
   // Non-copyable
   CubinKernel(const CubinKernel&) = delete;
@@ -533,29 +535,29 @@ class CubinKernel {
    */
   void SetMaxDynamicSharedMemory(int64_t dynamic_smem_max = -1) {
     int device_count = 0;
-    CUDAResultType err = get_device_count(&device_count);
-    if (err != FFI_CUDA_SUCCESS || device_count == 0) {
+    cuda_api::ResultType err = cuda_api::GetDeviceCount(&device_count);
+    if (err != cuda_api::kSuccess || device_count == 0) {
       return;  // No devices available, nothing to configure
     }
 
     bool any_success = false;
     for (int device_id = 0; device_id < device_count; ++device_id) {
-      auto device = idx_to_device(device_id);
+      auto device = cuda_api::GetDeviceHandle(device_id);
       // Query device's maximum shared memory per block
       int max_shared_mem = 0;
-      err = get_device_attr(
+      err = cuda_api::GetDeviceAttribute(
           &max_shared_mem,
           /* CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK/cudaDevAttrMaxSharedMemoryPerBlock */
-          DeviceAttrHandle(8), device);
-      if (err != FFI_CUDA_SUCCESS) {
+          cuda_api::DeviceAttrType(8), device);
+      if (err != cuda_api::kSuccess) {
         continue;  // Skip this device if we can't get its attribute
       }
 
       int shared_mem_to_set;
       if (dynamic_smem_max == -1) {
         int static_shared;
-        err = get_func_shmem(kernel_, static_shared, device);
-        if (err != FFI_CUDA_SUCCESS) {
+        err = cuda_api::GetKernelSharedMem(kernel_, static_shared, device);
+        if (err != cuda_api::kSuccess) {
           continue;  // Skip this device if we can't get kernel attributes
         }
 
@@ -569,8 +571,8 @@ class CubinKernel {
       }
 
       // Set the maximum dynamic shared memory size for this device
-      err = set_func_shmem(kernel_, shared_mem_to_set, device);
-      if (err == FFI_CUDA_SUCCESS) {
+      err = cuda_api::SetKernelMaxDynamicSharedMem(kernel_, shared_mem_to_set, device);
+      if (err == cuda_api::kSuccess) {
         any_success = true;
       }
       // Don't error out for individual device failures - user may only use some GPUs
@@ -582,7 +584,7 @@ class CubinKernel {
     }
   }
 
-  KernelHandle kernel_ = nullptr;
+  cuda_api::KernelHandle kernel_ = nullptr;
 
   friend class CubinModule;
 };

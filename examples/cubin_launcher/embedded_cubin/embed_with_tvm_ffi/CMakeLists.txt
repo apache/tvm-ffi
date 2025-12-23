@@ -51,7 +51,7 @@ if (CMAKE_VERSION VERSION_LESS "3.27.0")
   add_tvm_ffi_fatbin(kernel_fatbin CUDA src/kernel.cu)
 else ()
   add_library(kernel_fatbin OBJECT src/kernel.cu)
-  set_target_properties(kernel_fatbin PROPERTY CUDA_FATBIN_COMPILATION ON)
+  set_target_properties(kernel_fatbin PROPERTIES CUDA_FATBIN_COMPILATION ON)
 endif ()
 
 # Step 2: Build lib_embedded shared library

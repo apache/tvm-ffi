@@ -141,7 +141,7 @@ function (tvm_ffi_embed_bin_into target_name)
     COMMAND
       ${Python_EXECUTABLE} -m tvm_ffi.utils.embed_cubin --output-obj
       "$<TARGET_OBJECTS:${target_name}>" --name "${ARG_SYMBOL}" --input-obj "${intermediate_path}"
-      --cubin "${ARG_BIN}" DEPENDS
+      --cubin "${ARG_BIN}"
     COMMENT "Embedding CUBIN into object file (name: ${ARG_SYMBOL})"
     VERBATIM
   )

@@ -80,11 +80,11 @@ void AddOne(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
 
   // Get CUDA stream
   DLDevice device = x.device();
-  tvm::ffi::StreamHandle stream =
-      static_cast<tvm::ffi::StreamHandle>(TVMFFIEnvGetStream(device.device_type, device.device_id));
+  tvm::ffi::cuda_api::StreamHandle stream = static_cast<tvm::ffi::cuda_api::StreamHandle>(
+      TVMFFIEnvGetStream(device.device_type, device.device_id));
 
   // Launch kernel
-  tvm::ffi::CUDAResultType result = g_add_one_kernel->Launch(args, grid, block, stream);
+  tvm::ffi::cuda_api::ResultType result = g_add_one_kernel->Launch(args, grid, block, stream);
   TVM_FFI_CHECK_CUDA_ERROR(result);
 }
 
@@ -120,11 +120,11 @@ void MulTwo(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
 
   // Get CUDA stream
   DLDevice device = x.device();
-  tvm::ffi::StreamHandle stream =
-      static_cast<tvm::ffi::StreamHandle>(TVMFFIEnvGetStream(device.device_type, device.device_id));
+  tvm::ffi::cuda_api::StreamHandle stream = static_cast<tvm::ffi::cuda_api::StreamHandle>(
+      TVMFFIEnvGetStream(device.device_type, device.device_id));
 
   // Launch kernel
-  tvm::ffi::CUDAResultType result = g_mul_two_kernel->Launch(args, grid, block, stream);
+  tvm::ffi::cuda_api::ResultType result = g_mul_two_kernel->Launch(args, grid, block, stream);
   TVM_FFI_CHECK_CUDA_ERROR(result);
 }
 
