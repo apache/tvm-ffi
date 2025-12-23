@@ -117,15 +117,13 @@ function (tvm_ffi_embed_bin_into target_name)
   cmake_parse_arguments(ARG "" "SYMBOL;BIN" "" ${ARGN})
 
   if (NOT ARG_BIN)
-    message(FATAL_ERROR "tvm_ffi_embed_object: BIN is required")
+    message(FATAL_ERROR "tvm_ffi_embed_bin_into: BIN is required")
   endif ()
   if (NOT ARG_SYMBOL)
-    message(FATAL_ERROR "tvm_ffi_embed_object: SYMBOL is required")
+    message(FATAL_ERROR "tvm_ffi_embed_bin_into: SYMBOL is required")
   endif ()
 
-  get_filename_component(LIB_ABS "$<TARGET_OBJECTS:${target_name}>" ABSOLUTE)
-  get_filename_component(OUTPUT_DIR_ABS "${LIB_ABS}" DIRECTORY)
-  set(intermediate_path "${OUTPUT_DIR_ABS}/${kernel_name}_intermediate.o")
+  set(intermediate_path "${CMAKE_CURRENT_BINARY_DIR}/${ARG_SYMBOL}_intermediate.o")
 
   add_custom_command(
     TARGET ${target_name}
