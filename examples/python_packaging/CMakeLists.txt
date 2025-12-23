@@ -12,23 +12,20 @@
 # software distributed under the License is distributed on an
 # "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
 # KIND, either express or implied.  See the License for the
-# specific language governing permissions and limitations.
+# specific language governing permissions and limitations
+# under the License.
+cmake_minimum_required(VERSION 3.18)
+project(my_ffi_extension)
 
-from typing import TYPE_CHECKING
-
-import tvm_ffi
-
-# make sure lib is loaded first
-from .base import _LIB  # noqa: F401
-
-# this is a short cut to register all the global functions
-# prefixed by `my_ffi_extension.` to this module
-tvm_ffi.init_ffi_api("my_ffi_extension", __name__)
-
-
-# tvm-ffi-stubgen(begin): global/my_ffi_extension
-if TYPE_CHECKING:
-    # fmt: off
-    def raise_error(_0: str, /) -> None: ...
-    # fmt: on
-# tvm-ffi-stubgen(end)
+find_package(
+  Python
+  COMPONENTS Interpreter
+  REQUIRED
+)
+find_package(tvm_ffi CONFIG REQUIRED)
+# [example.cmake.begin]
+add_library(my_ffi_extension SHARED src/extension.cc)
+tvm_ffi_configure_target(my_ffi_extension STUB_DIR "./python" STUB_INIT ON)
+install(TARGETS my_ffi_extension DESTINATION .)
+tvm_ffi_install(my_ffi_extension DESTINATION .)
+# [example.cmake.end]

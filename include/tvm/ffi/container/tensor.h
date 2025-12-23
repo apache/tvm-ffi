@@ -30,8 +30,6 @@
 #include <tvm/ffi/error.h>
 #include <tvm/ffi/type_traits.h>
 
-#include <atomic>
-#include <memory>
 #include <optional>
 #include <string>
 #include <utility>
@@ -406,7 +404,7 @@ class Tensor : public ObjectRef {
    * to create Tensors.
    *
    * Example usage:
-   * \code
+   * \code{.cpp}
    * // CPU Allocator
    * struct CPUNDAlloc {
    *   void AllocData(DLTensor* tensor) { tensor->data = malloc(ffi::GetDataSize(*tensor)); }
@@ -431,20 +429,20 @@ class Tensor : public ObjectRef {
    *   }
    * };
    *
-   *   // NVSHMEM Allocator
-   *   struct NVSHMEMNDAlloc {
-   *     void AllocData(DLTensor* tensor) {
-   *       size_t size = tvm::ffi::GetDataSize(*tensor);
-   *       tensor->data = nvshmem_malloc(size);
-   *       TVM_FFI_ICHECK_NE(tensor->data, nullptr) << "nvshmem_malloc failed. size: " << size;
-   *     }
-   *     void FreeData(DLTensor* tensor) { nvshmem_free(tensor->data); }
-   *   };
+   * // NVSHMEM Allocator
+   * struct NVSHMEMNDAlloc {
+   *   void AllocData(DLTensor* tensor) {
+   *     size_t size = tvm::ffi::GetDataSize(*tensor);
+   *     tensor->data = nvshmem_malloc(size);
+   *     TVM_FFI_ICHECK_NE(tensor->data, nullptr) << "nvshmem_malloc failed. size: " << size;
+   *   }
+   *   void FreeData(DLTensor* tensor) { nvshmem_free(tensor->data); }
+   * };
    *
-   *   // Allocator usage
-   *   ffi::Tensor cpu_tensor = ffi::Tensor::FromNDAlloc(CPUNDAlloc(), ...);
-   *   ffi::Tensor cuda_tensor = ffi::Tensor::FromNDAlloc(CUDANDAlloc(), ...);
-   *   ffi::Tensor nvshmem_tensor = ffi::Tensor::FromNDAlloc(NVSHMEMNDAlloc(), ...);
+   * // Allocator usage
+   * ffi::Tensor cpu_tensor = ffi::Tensor::FromNDAlloc(CPUNDAlloc(), ...);
+   * ffi::Tensor cuda_tensor = ffi::Tensor::FromNDAlloc(CUDANDAlloc(), ...);
+   * ffi::Tensor nvshmem_tensor = ffi::Tensor::FromNDAlloc(NVSHMEMNDAlloc(), ...);
    * \endcode
    *
    * \param alloc The NDAllocator.
@@ -507,12 +505,8 @@ class Tensor : public ObjectRef {
    * in the extra/c_env_api.h to create a Tensor from the thread-local environment allocator.
    * We explicitly pass TVMFFIEnvTensorAlloc to maintain explicit dependency on extra/c_env_api.h
    *
-   * \code
-   *
-   * ffi::Tensor tensor = ffi::Tensor::FromEnvAlloc(
-   *   TVMFFIEnvTensorAlloc, shape, dtype, device
-   * );
-   *
+   * \code{.cpp}
+   * ffi::Tensor tensor = ffi::Tensor::FromEnvAlloc(TVMFFIEnvTensorAlloc, shape, dtype, device);
    * \endcode
    *
    * \param env_alloc TVMFFIEnvTensorAlloc function pointer.

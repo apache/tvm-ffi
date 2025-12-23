@@ -25,18 +25,12 @@ or reading through the guides and concepts sections.
 Installation
 ------------
 
-To install via pip, run:
+To install TVM-FFI via pip or uv, run:
 
 .. code-block:: bash
 
    pip install apache-tvm-ffi
-
-We also recommend installing the optional package below for improved
-torch tensor conversion performance.
-
-.. code-block:: bash
-
-   pip install torch-c-dlpack-ext
+   pip install torch-c-dlpack-ext  # compatibility package for torch <= 2.9
 
 
 Table of Contents
@@ -53,16 +47,12 @@ Table of Contents
    :maxdepth: 1
    :caption: Guides
 
-   guides/python_packaging.md
-   guides/cpp_packaging.md
-   guides/cpp_guide.md
-   guides/python_guide.md
-   guides/rust_guide.md
-   guides/cubin_launcher.rst
-   guides/compiler_integration.md
-   guides/build_from_source.md
    guides/kernel_library_guide.rst
-
+   guides/compiler_integration.md
+   guides/cubin_launcher.rst
+   guides/python_lang_guide.md
+   guides/cpp_lang_guide.md
+   guides/rust_lang_guide.md
 
 .. toctree::
    :maxdepth: 1
@@ -70,6 +60,12 @@ Table of Contents
 
    concepts/abi_overview.md
 
+.. toctree::
+   :maxdepth: 1
+   :caption: Packaging
+
+   packaging/python_packaging.rst
+   packaging/cpp_packaging.md
 
 .. toctree::
    :maxdepth: 1
@@ -78,3 +74,9 @@ Table of Contents
    reference/python/index.rst
    reference/cpp/index.rst
    reference/rust/index.rst
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Developer Manual
+
+   dev/build_from_source.md

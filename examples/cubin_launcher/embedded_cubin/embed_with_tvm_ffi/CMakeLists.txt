@@ -56,7 +56,7 @@ endif ()
 
 # Step 2: Build lib_embedded shared library
 add_library(lib_embedded SHARED src/lib_embedded.cc)
-target_link_libraries(lib_embedded PRIVATE tvm_ffi_header tvm_ffi_shared)
+target_link_libraries(lib_embedded PRIVATE tvm_ffi::header tvm_ffi::shared)
 set_target_properties(lib_embedded PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 # Step 3: Link against CUDA Driver API or Runtime API based on config

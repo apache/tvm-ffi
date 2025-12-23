@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 from enum import IntEnum
+from numbers import Integral
 from typing import Any, Optional
 
 _CLASS_DEVICE = None
@@ -129,7 +130,7 @@ cdef class Device:
         "trn": DLDeviceType.kDLTrn,
     }
 
-    def __init__(self, device_type: str | int, index: Optional[int] = None) -> None:
+    def __init__(self, device_type: str | int, index: Optional[Integral] = None) -> None:
         device_type_or_name = device_type
         index = index if index is not None else 0
         if isinstance(device_type_or_name, str):
@@ -148,8 +149,12 @@ cdef class Device:
                     raise ValueError(f"Invalid device index: {parts[1]}")
         else:
             device_type = device_type_or_name
-        if not isinstance(index, int):
-            raise TypeError(f"Invalid device index: {index}")
+
+        if not isinstance(index, Integral):
+            if hasattr(index, "item") and callable(index.item):
+                index = index.item()
+            if not isinstance(index, Integral):
+                raise TypeError(f"Invalid device index: {index}")
         self.cdevice = TVMFFIDLDeviceFromIntPair(device_type, index)
 
     def __reduce__(self) -> Any:

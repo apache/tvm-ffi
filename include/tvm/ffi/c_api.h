@@ -802,7 +802,7 @@ typedef enum {
  *
  * The meta-data record comparison method in tree node and DAG node.
  *
- * \code
+ * \code{.cpp}
  * x = VarNode()
  * v0 = AddNode(x, 1)
  * v1 = AddNode(x, 1)

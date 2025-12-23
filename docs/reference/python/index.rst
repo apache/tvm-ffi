@@ -103,7 +103,7 @@ Stream Context
 
 
 C++ Extension
---------------
+-------------
 
 C++ integration helpers for building and loading inline modules.
 
@@ -114,6 +114,7 @@ C++ integration helpers for building and loading inline modules.
   cpp.build_inline
   cpp.load
   cpp.build
+  libinfo.load_lib_module
 
 NVRTC Utilities
 ---------------

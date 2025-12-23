@@ -90,3 +90,98 @@ jobs:
           linux_image: ${{ matrix.linux_image }}
           checkout_ref: ${{ github.sha }}
           build_sdist: ${{ matrix.build_sdist }}
+
+  examples:
+    name: Run examples
+    needs: [prepare]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: ubuntu-latest, python_version: "3.14"}
+          - {os: macos-14, python_version: "3.13"}
+          - {os: windows-latest, python_version: "3.12"}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@b75a909f75acd358c2196fb9a5f1299a9a8868a4  # v6.7.0
+        with:
+          python-version: ${{ matrix.python_version }}
+          activate-environment: true
+
+      - uses: ./.github/actions/detect-env-vars
+        id: env_vars
+
+      - name: Install dependencies for examples
+        env:
+          CMAKE_BUILD_PARALLEL_LEVEL: ${{ steps.env_vars.outputs.cpu_count }}
+        run: |
+          uv pip install --reinstall --verbose -e ".[torch]"
+          uv pip install --reinstall --verbose numpy scikit-build-core torch-c-dlpack-ext
+
+      - name: Run example/quickstart (CPU) [posix]
+        if: ${{ runner.os != 'Windows' }}
+        env:
+          CMAKE_BUILD_PARALLEL_LEVEL: ${{ steps.env_vars.outputs.cpu_count }}
+        run: |
+          pushd examples/quickstart
+          rm -rf build
+          bash run_all_cpu.sh
+          popd
+
+      - name: Run example/quickstart (CPU) [windows]
+        if: ${{ runner.os == 'Windows' }}
+        shell: cmd
+        env:
+          CMAKE_BUILD_PARALLEL_LEVEL: ${{ steps.env_vars.outputs.cpu_count }}
+        run: |
+          cd examples\quickstart
+          call run_all_cpu.bat
+
+      - name: Run example/stable_c_abi [posix]
+        if: ${{ runner.os != 'Windows' }}
+        env:
+          CMAKE_BUILD_PARALLEL_LEVEL: ${{ steps.env_vars.outputs.cpu_count }}
+        run: |
+          pushd examples/stable_c_abi
+          rm -rf build
+          bash run_all.sh
+          popd
+
+      - name: Run example/stable_c_abi [windows]
+        if: ${{ runner.os == 'Windows' }}
+        shell: cmd
+        env:
+          CMAKE_BUILD_PARALLEL_LEVEL: ${{ steps.env_vars.outputs.cpu_count }}
+        run: |
+          cd examples\stable_c_abi
+          call run_all.bat
+
+      - name: Run example/python_packaging [posix]
+        if: ${{ runner.os != 'Windows' }}
+        env:
+          CMAKE_BUILD_PARALLEL_LEVEL: ${{ steps.env_vars.outputs.cpu_count }}
+        run: |
+          pushd examples/python_packaging
+          # This directory will be auto-generated in `CMakeLists.txt` by setting `STUB_INIT ON`
+          rm -rf python/my_ffi_extension
+          uv pip install --verbose . --no-build-isolation
+          python run_example.py
+          popd
+
+      - name: Run example/python_packaging [windows]
+        if: ${{ runner.os == 'Windows' }}
+        shell: pwsh
+        env:
+          CMAKE_BUILD_PARALLEL_LEVEL: ${{ steps.env_vars.outputs.cpu_count }}
+        run: |
+          Set-Location examples/python_packaging
+          Remove-Item -Recurse -Force python/my_ffi_extension
+          uv pip install --verbose . --no-build-isolation
+          python run_example.py

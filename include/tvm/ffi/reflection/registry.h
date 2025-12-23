@@ -322,9 +322,9 @@ class ReflectionDefBase {
 /*!
  * \brief GlobalDef helper to register a global function.
  *
- * \code
- *  namespace refl = tvm::ffi::reflection;
- *  refl::GlobalDef().def("my_ffi_extension.my_function", MyFunction);
+ * \code{.cpp}
+ * namespace refl = tvm::ffi::reflection;
+ * refl::GlobalDef().def("my_ffi_extension.my_function", MyFunction);
  * \endcode
  */
 class GlobalDef : public ReflectionDefBase {
@@ -415,19 +415,20 @@ class GlobalDef : public ReflectionDefBase {
  * \tparam Args The argument types for the constructor.
  *
  * Example usage:
- * \code
- *   class ExampleObject : public Object {
- *    public:
- *      int64_t v_i64;
- *      int32_t v_i32;
  *
- *      ExampleObject(int64_t v_i64, int32_t v_i32) : v_i64(v_i64), v_i32(v_i32) {}
- *      TVM_FFI_DECLARE_OBJECT_INFO("example.ExampleObject", ExampleObject, Object);
- *   };
+ * \code{.cpp}
+ * class ExampleObject : public Object {
+ *  public:
+ *   int64_t v_i64;
+ *   int32_t v_i32;
  *
- *   // Register the constructor
- *   refl::ObjectDef<ExampleObject>()
- *      .def(refl::init<int64_t, int32_t>());
+ *   ExampleObject(int64_t v_i64, int32_t v_i32) : v_i64(v_i64), v_i32(v_i32) {}
+ *   TVM_FFI_DECLARE_OBJECT_INFO("example.ExampleObject", ExampleObject, Object);
+ * };
+ *
+ * // Register the constructor
+ * refl::ObjectDef<ExampleObject>()
+ *     .def(refl::init<int64_t, int32_t>());
  * \endcode
  *
  * \note The object type is automatically deduced from the `ObjectDef` context.
@@ -460,9 +461,9 @@ struct init {
  * \brief Helper to register Object's reflection metadata.
  * \tparam Class The class type.
  *
- * \code
- *  namespace refl = tvm::ffi::reflection;
- *  refl::ObjectDef<MyClass>().def_ro("my_field", &MyClass::my_field);
+ * \code{.cpp}
+ * namespace refl = tvm::ffi::reflection;
+ * refl::ObjectDef<MyClass>().def_ro("my_field", &MyClass::my_field);
  * \endcode
  */
 template <typename Class>
@@ -570,9 +571,10 @@ class ObjectDef : public ReflectionDefBase {
    * \return Reference to this `ObjectDef` for method chaining.
    *
    * Example:
-   * \code
-   *   refl::ObjectDef<MyObject>()
-   *       .def(refl::init<int64_t, std::string>(), "Constructor docstring");
+   *
+   * \code{.cpp}
+   * refl::ObjectDef<MyObject>()
+   *     .def(refl::init<int64_t, std::string>(), "Constructor docstring");
    * \endcode
    */
   template <typename... Args, typename... Extra>
@@ -662,11 +664,10 @@ class ObjectDef : public ReflectionDefBase {
  * \tparam Class The class type.
  * \tparam ExtraArgs The extra arguments.
  *
- * \code
- *  namespace refl = tvm::ffi::reflection;
- *  refl::TypeAttrDef<MyClass>().def("func_attr", MyFunc);
+ * \code{.cpp}
+ * namespace refl = tvm::ffi::reflection;
+ * refl::TypeAttrDef<MyClass>().def("func_attr", MyFunc);
  * \endcode
- *
  */
 template <typename Class, typename = std::enable_if_t<std::is_base_of_v<Object, Class>>>
 class TypeAttrDef : public ReflectionDefBase {

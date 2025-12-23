@@ -83,7 +83,7 @@ The class :cpp:class:`tvm::ffi::TensorView` allows zero-copy interop with tensor
 
 - NumPy, CuPy,
 - PyTorch, JAX, or
-- any array type that supports the standard `DLPack protocol <https://data-apis.org/array-api/2024.12/design_topics/data_interchange.html>`_.
+- any array type that supports the standard :external+data-api:doc:`DLPack protocol <design_topics/data_interchange>`.
 
 Finally, :cpp:func:`TVMFFIEnvGetStream` can be used in the CUDA code to launch a kernel on the caller's stream.
 
@@ -127,36 +127,34 @@ TVM-FFI natively integrates with CMake via ``find_package`` as demonstrated belo
 
     .. code-block:: cmake
 
-      # Run `tvm-ffi-config --cmakedir` to set `tvm_ffi_DIR`
+      # Run `tvm-ffi-config --cmakedir` to set `tvm_ffi_ROOT`
       find_package(Python COMPONENTS Interpreter REQUIRED)
       execute_process(COMMAND "${Python_EXECUTABLE}" -m tvm_ffi.config --cmakedir OUTPUT_STRIP_TRAILING_WHITESPACE OUTPUT_VARIABLE tvm_ffi_ROOT)
       find_package(tvm_ffi CONFIG REQUIRED)
 
-      # Link C++ target to `tvm_ffi_header` and `tvm_ffi_shared`
+      # Link C++ target to `tvm_ffi::header` and `tvm_ffi::shared`
       add_library(add_one_cpu SHARED compile/add_one_cpu.cc)
-      target_link_libraries(add_one_cpu PRIVATE tvm_ffi_header)
-      target_link_libraries(add_one_cpu PRIVATE tvm_ffi_shared)
+      tvm_ffi_configure_target(add_one_cpu)
 
   .. group-tab:: CUDA
 
     .. code-block:: cmake
 
       enable_language(CUDA)
-      # Run `tvm-ffi-config --cmakedir` to set `tvm_ffi_DIR`
+      # Run `tvm-ffi-config --cmakedir` to set `tvm_ffi_ROOT`
       find_package(Python COMPONENTS Interpreter REQUIRED)
       execute_process(COMMAND "${Python_EXECUTABLE}" -m tvm_ffi.config --cmakedir OUTPUT_STRIP_TRAILING_WHITESPACE OUTPUT_VARIABLE tvm_ffi_ROOT)
       find_package(tvm_ffi CONFIG REQUIRED)
 
-      # Link CUDA target to `tvm_ffi_header` and `tvm_ffi_shared`
+      # Link CUDA target to `tvm_ffi::header` and `tvm_ffi::shared`
       add_library(add_one_cuda SHARED compile/add_one_cuda.cu)
-      target_link_libraries(add_one_cuda PRIVATE tvm_ffi_header)
-      target_link_libraries(add_one_cuda PRIVATE tvm_ffi_shared)
+      tvm_ffi_configure_target(add_one_cuda)
 
 **Artifact.** The resulting ``add_one_cpu.so`` and ``add_one_cuda.so`` are minimal libraries that are agnostic to:
 
 - Python version/ABI. It is not compiled/linked with Python and depends only on TVM-FFI's stable C ABI;
 - Languages, including C++, Python, Rust or any other language that can interop with C ABI;
-- ML frameworks, such as PyTorch, JAX, NumPy, CuPy, or anything with standard `DLPack protocol <https://data-apis.org/array-api/2024.12/design_topics/data_interchange.html>`_.
+- ML frameworks, such as PyTorch, JAX, NumPy, CuPy, or anything with standard :external+data-api:doc:`DLPack protocol <design_topics/data_interchange>`.
 
 .. _sec-use-across-framework:
 
@@ -177,60 +175,66 @@ directly. This process is done zero-copy, without any boilerplate code, under ex
 
 We can then use these functions in the following ways:
 
-.. tab-set::
+.. _ship-to-pytorch:
 
-    .. tab-item:: PyTorch
+PyTorch
+~~~~~~~
 
-        .. literalinclude:: ../../examples/quickstart/load/load_pytorch.py
-          :language: python
-          :start-after: [example.begin]
-          :end-before: [example.end]
+.. literalinclude:: ../../examples/quickstart/load/load_pytorch.py
+  :language: python
+  :start-after: [example.begin]
+  :end-before: [example.end]
 
-    .. tab-item:: JAX
+.. _ship-to-jax:
 
-        Support via `nvidia/jax-tvm-ffi <https://github.com/nvidia/jax-tvm-ffi>`_. This can be installed via
+JAX
+~~~
 
-        .. code-block:: bash
+Support via `nvidia/jax-tvm-ffi <https://github.com/nvidia/jax-tvm-ffi>`_. This can be installed via
 
-          pip install jax-tvm-ffi
+.. code-block:: bash
 
-        After installation, ``add_one_cuda`` can be registered as a target to JAX's ``ffi_call``.
+  pip install jax-tvm-ffi
 
-        .. code-block:: python
+After installation, ``add_one_cuda`` can be registered as a target to JAX's ``ffi_call``.
 
-          # Step 1. Load `build/add_one_cuda.so`
-          import tvm_ffi
-          mod = tvm_ffi.load_module("build/add_one_cuda.so")
+.. code-block:: python
 
-          # Step 2. Register `mod.add_one_cuda` into JAX
-          import jax_tvm_ffi
-          jax_tvm_ffi.register_ffi_target("add_one", mod.add_one_cuda, platform="gpu")
+  # Step 1. Load `build/add_one_cuda.so`
+  import tvm_ffi
+  mod = tvm_ffi.load_module("build/add_one_cuda.so")
 
-          # Step 3. Run `mod.add_one_cuda` with JAX
-          import jax
-          import jax.numpy as jnp
-          jax_device, *_ = jax.devices("gpu")
-          x = jnp.array([1, 2, 3, 4, 5], dtype=jnp.float32, device=jax_device)
-          y = jax.ffi.ffi_call(
-              "add_one",  # name of the registered function
-              jax.ShapeDtypeStruct(x.shape, x.dtype),  # shape and dtype of the output
-              vmap_method="broadcast_all",
-          )(x)
-          print(y)
+  # Step 2. Register `mod.add_one_cuda` into JAX
+  import jax_tvm_ffi
+  jax_tvm_ffi.register_ffi_target("add_one", mod.add_one_cuda, platform="gpu")
 
-    .. tab-item:: NumPy
+  # Step 3. Run `mod.add_one_cuda` with JAX
+  import jax
+  import jax.numpy as jnp
+  jax_device, *_ = jax.devices("gpu")
+  x = jnp.array([1, 2, 3, 4, 5], dtype=jnp.float32, device=jax_device)
+  y = jax.ffi.ffi_call(
+    "add_one",  # name of the registered function
+    jax.ShapeDtypeStruct(x.shape, x.dtype),  # shape and dtype of the output
+    vmap_method="broadcast_all",
+  )(x)
+  print(y)
 
-        .. literalinclude:: ../../examples/quickstart/load/load_numpy.py
-          :language: python
-          :start-after: [example.begin]
-          :end-before: [example.end]
+.. _ship-to-numpy:
 
-    .. tab-item:: CuPy
+NumPy/CuPy
+~~~~~~~~~~
 
-        .. literalinclude:: ../../examples/quickstart/load/load_cupy.py
-          :language: python
-          :start-after: [example.begin]
-          :end-before: [example.end]
+.. literalinclude:: ../../examples/quickstart/load/load_numpy.py
+  :language: python
+  :start-after: [example.begin]
+  :end-before: [example.end]
+
+
+.. literalinclude:: ../../examples/quickstart/load/load_cupy.py
+  :language: python
+  :start-after: [example.begin]
+  :end-before: [example.end]
 
 
 Ship Across Languages
@@ -240,14 +244,16 @@ TVM-FFI's core loading mechanism is ABI stable and works across language boundar
 A single library can be loaded in every language TVM-FFI supports,
 without having to recompile different libraries targeting different ABIs or languages.
 
+.. _ship-to-python:
+
 Python
 ~~~~~~
 
 As shown in the :ref:`previous section<sec-use-across-framework>`, :py:func:`tvm_ffi.load_module` loads a language-
 and framework-independent ``add_one_cpu.so`` or ``add_one_cuda.so`` and can be used to incorporate it into all Python
-array frameworks that implement the standard `DLPack protocol <https://data-apis.org/array-api/2024.12/design_topics/data_interchange.html>`_.
+array frameworks that implement the standard :external+data-api:doc:`DLPack protocol <design_topics/data_interchange>`.
 
-.. _cpp_load:
+.. _ship-to-cpp:
 
 C++
 ~~~
@@ -301,6 +307,8 @@ Compile and run it with:
         return 0;
       }
 
+.. _ship-to-rust:
+
 Rust
 ~~~~
 
@@ -328,6 +336,15 @@ This procedure is identical to those in C++ and Python:
 Troubleshooting
 ---------------
 
-- ``OSError: cannot open shared object file``: Add an rpath (Linux/macOS) or ensure the DLL is on ``PATH`` (Windows). Example run-path: ``-Wl,-rpath,`tvm-ffi-config --libdir```.
+- ``OSError: cannot open shared object file``: Add an rpath (Linux/macOS) or ensure the DLL is on ``PATH`` (Windows). Example run-path: ``-Wl,-rpath,$(tvm-ffi-config --libdir)``.
 - ``undefined symbol: __tvm_ffi_add_one_cpu``: Ensure you used :c:macro:`TVM_FFI_DLL_EXPORT_TYPED_FUNC` and compiled with default symbol visibility (``-fvisibility=hidden`` is fine; the macro ensures export).
 - ``CUDA error: invalid device function``: Rebuild with the correct ``-arch=sm_XX`` for your GPU, or include multiple ``-gencode`` entries.
+
+
+Further Reading
+---------------
+
+- :doc:`Python Packaging <../packaging/python_packaging>` provides details on ABI-agnostic Python wheel building, as well as
+  exposing functions, classes and C symbols from TVM-FFI modules.
+- :doc:`Stable C ABI <stable_c_abi>` explains the ABI in depth and how it enables stability guarantee. Its C examples demonstrate
+  how to interoperate through the stable C ABI from both callee and caller sides.

@@ -195,10 +195,10 @@ def from_dlpack(
 
     Parameters
     ----------
-    ext_tensor : object
-        An object supporting `__dlpack__ <https://data-apis.org/array-api/latest/API_specification/generated/array_api.array.__dlpack__.html#array_api.array.__dlpack__>`_
-        and `__dlpack_device__ <https://data-apis.org/array-api/latest/API_specification/generated/array_api.array.__dlpack_device__.html#array_api.array.__dlpack_device__>`_.
-    require_alignment : int, optional
+    ext_tensor
+        An object supporting :py:meth:`__dlpack__ <array_api.array.__dlpack__>`
+        and :py:meth:`__dlpack_device__ <array_api.array.__dlpack_device__>`.
+    require_alignment
         If greater than zero, require the underlying data pointer to be
         aligned to this many bytes. Misaligned inputs raise
         :class:`ValueError`.
@@ -314,7 +314,7 @@ cdef class Tensor(Object):
             dltensor, _c_str_dltensor_versioned, <PyCapsule_Destructor>_c_dlpack_versioned_deleter)
 
     def __dlpack_device__(self) -> tuple[int, int]:
-        """Implement the standard `__dlpack_device__ <https://data-apis.org/array-api/latest/API_specification/generated/array_api.array.__dlpack_device__.html#array_api.array.__dlpack_device__>`_ protocol."""  # noqa: E501
+        """Implement the standard :py:meth:`__dlpack_device__ <array_api.array.__dlpack_device__>` protocol."""
         cdef int device_type = self.cdltensor.device.device_type
         cdef int device_id = self.cdltensor.device.device_id
         return (device_type, device_id)
@@ -327,7 +327,7 @@ cdef class Tensor(Object):
         dl_device: tuple[int, int] | None = None,
         copy: bool | None = None,
     ) -> object:
-        """Implement the standard `__dlpack__ <https://data-apis.org/array-api/latest/API_specification/generated/array_api.array.__dlpack__.html#array_api.array.__dlpack__>`_ protocol.
+        """Implement the standard :py:meth:`__dlpack__ <array_api.array.__dlpack__>` protocol.
 
         Parameters
         ----------
