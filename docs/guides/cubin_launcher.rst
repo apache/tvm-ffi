@@ -217,6 +217,14 @@ TVM-FFI provides CMake utility functions that simplify the CUBIN embedding proce
   - ``symbol``: Symbol name to use (must match ``TVM_FFI_EMBED_CUBIN(symbol)``).
   - ``BIN``: Path to the CUBIN/FATBIN file (e.g., from ``$<TARGET_OBJECTS:...>``).
 
+.. note::
+
+   When including ``cmake/Utils/EmbedCubin.cmake``, if ``CMAKE_CUDA_RUNTIME_LIBRARY`` is not set, it defaults to ``Shared``.
+   This prevents static linking of cudart, which requires an exact driver version match.
+   If you intend to use the Driver API only (e.g., via ``TVM_FFI_CUBIN_LAUNCHER_USE_DRIVER_API=1``),
+   you should explicitly set ``CMAKE_CUDA_RUNTIME_LIBRARY`` to ``None`` in your CMake configuration before including this utility to avoid linking against the CUDA runtime library.
+
+
 Embedding CUBIN with Python Utility
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

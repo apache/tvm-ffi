@@ -15,8 +15,14 @@
 # specific language governing permissions and limitations
 # under the License.
 
-# Do not let cmake to link cudart.
-set(CMAKE_CUDA_RUNTIME_LIBRARY None)
+# If CMAKE_CUDA_RUNTIME_LIBRARY is not set, we default it to Shared. This prevents static linking of
+# cudart which requires exact driver version match.
+if (NOT DEFINED CMAKE_CUDA_RUNTIME_LIBRARY)
+  set(CMAKE_CUDA_RUNTIME_LIBRARY Shared)
+  message(STATUS "CMAKE_CUDA_RUNTIME_LIBRARY not set, defaulting to Shared. "
+                 "If you want to use driver API only, set CMAKE_CUDA_RUNTIME_LIBRARY to None."
+  )
+endif ()
 
 set(OBJECT_COPY_UTIL "${CMAKE_CURRENT_LIST_DIR}/ObjectCopyUtil.cmake")
 
