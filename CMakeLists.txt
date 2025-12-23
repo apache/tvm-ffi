@@ -125,11 +125,11 @@ tvm_ffi_add_msvc_flags(tvm_ffi_objs)
 tvm_ffi_add_target_from_obj(tvm_ffi tvm_ffi_objs)
 
 target_link_libraries(tvm_ffi_shared PRIVATE Threads::Threads)
-target_link_libraries(tvm_ffi_static PRIVATE Threads::Threads)
+target_link_libraries(tvm_ffi_static INTERFACE Threads::Threads)
 
 if (TVM_FFI_USE_EXTRA_CXX_API AND CMAKE_DL_LIBS)
   target_link_libraries(tvm_ffi_shared PRIVATE ${CMAKE_DL_LIBS})
-  target_link_libraries(tvm_ffi_static PRIVATE ${CMAKE_DL_LIBS})
+  target_link_libraries(tvm_ffi_static INTERFACE ${CMAKE_DL_LIBS})
 endif ()
 
 if (TARGET libbacktrace)
