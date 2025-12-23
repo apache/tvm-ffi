@@ -41,6 +41,19 @@ TVM-FFI provides utilities for loading and launching CUDA kernels from CUBIN mod
 
 By default, the implementation uses the Runtime API if compiled with CUDA >= 12.8, falling back to the Driver API for older versions. You can force the usage of the Driver API (or Runtime API) by defining the macro ``TVM_FFI_CUBIN_LAUNCHER_USE_DRIVER_API`` (set to ``1`` for Driver API, ``0`` for Runtime API) before including the header.
 
+.. warning::
+
+   **CMAKE_CUDA_RUNTIME_LIBRARY and Driver API**
+
+   When using CMake, the default behavior (if ``CMAKE_CUDA_RUNTIME_LIBRARY`` is not set) is to link against the CUDA Runtime Library (``cudart``). TVM-FFI's CMake utility automatically defaults this variable to ``Shared`` if it is undefined. This introduces a dependency on the CUDA runtime version, requiring the system's driver to be compatible with that runtime version.
+
+   If you intend to use the Driver API only (e.g. by setting ``TVM_FFI_CUBIN_LAUNCHER_USE_DRIVER_API=1``) to avoid this runtime dependency:
+
+   1. You must explicitly set ``CMAKE_CUDA_RUNTIME_LIBRARY`` to ``None`` in your CMake configuration to prevent linking ``cudart``.
+   2. You must manually link your target against the CUDA Driver library (usually ``cuda`` on Linux/Windows or `CUDA::cuda_driver` provided by CMake's ``FindCUDAToolkit``).
+
+   This ensures your application relies solely on the widely compatible CUDA Driver API (``libcuda.so.1``).
+
 The implementation is in ``tvm/ffi/extra/cuda/cubin_launcher.h`` and provides:
 
 - :cpp:class:`tvm::ffi::CubinModule`: RAII wrapper for loading CUBIN modules from memory
@@ -175,7 +188,7 @@ Using C++23 ``#embed`` (or compiler extensions like ``#embed`` in Clang/GCC) all
 - Kernel arguments must be pointers to the actual values (use ``&`` for addresses)
 - :cpp:type:`tvm::ffi::dim3` supports 1D, 2D, or 3D configurations: ``dim3(x)``, ``dim3(x, y)``, ``dim3(x, y, z)``
 - ``TVMFFIEnvGetStream`` retrieves the correct CUDA stream for the device
-- Always check kernel launch results with :c:macro:`TVM_FFI_CHECK_CUDA_ERROR` (which checks CUDA Runtime API errors)
+- Always check kernel launch results with :c:macro:`TVM_FFI_CHECK_CUDA_ERROR` (which checks CUDA Runtime API or Driver API errors depending on configuration)
 
 Loading CUBIN at Runtime
 ~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -223,6 +236,7 @@ TVM-FFI provides CMake utility functions that simplify the CUBIN embedding proce
    This prevents static linking of cudart, which requires an exact driver version match.
    If you intend to use the Driver API only (e.g., via ``TVM_FFI_CUBIN_LAUNCHER_USE_DRIVER_API=1``),
    you should explicitly set ``CMAKE_CUDA_RUNTIME_LIBRARY`` to ``None`` in your CMake configuration before including this utility to avoid linking against the CUDA runtime library.
+   And link with CUDA Driver API.
 
 
 Embedding CUBIN with Python Utility
@@ -435,7 +449,7 @@ Python Utilities
 - ``python -m tvm_ffi.utils.embed_cubin``: Command-line utility to embed CUBIN into object files
 
   - ``--output-obj PATH``: Output combined object file path
-  - ``--input-obj PATH``: Input object file containing C++ code with ``TVM_FFI_EMBED_CUBIN``
+  - ``--input-obj PATH``: Input compiled object file containing C++ code with ``TVM_FFI_EMBED_CUBIN``
   - ``--cubin PATH``: Input CUBIN file to embed
   - ``--name NAME``: Symbol name matching ``TVM_FFI_EMBED_CUBIN(name)`` macro
   - ``--verbose``: Print detailed command output (optional)
