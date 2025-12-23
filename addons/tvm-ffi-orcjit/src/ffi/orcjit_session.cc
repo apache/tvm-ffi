@@ -59,7 +59,10 @@ ORCJITExecutionSessionObj::ORCJITExecutionSessionObj() : jit_(nullptr), dylib_co
 
 void ORCJITExecutionSessionObj::Initialize() {
   // Create LLJIT instance
-  auto jit_or_err = llvm::orc::LLJITBuilder().create();
+  auto jit_or_err = llvm::orc::LLJITBuilder()
+                        .setPlatformSetUp(llvm::orc::ExecutorNativePlatform(
+                            "/usr/lib/llvm-20/lib/clang/20/lib/linux/liborc_rt-x86_64.a"))
+                        .create();
   if (!jit_or_err) {
     auto err = jit_or_err.takeError();
     std::string err_msg;
@@ -92,7 +95,8 @@ ORCJITDynamicLibrary ORCJITExecutionSessionObj::CreateDynamicLibrary(const Strin
       << "DynamicLibrary with name '" << lib_name << "' already exists";
 
   // Create a new JITDylib
-  auto& jd = jit_->getExecutionSession().createBareJITDylib(lib_name.c_str());
+  // auto& jd = jit_->getExecutionSession().createBareJITDylib(lib_name.c_str());
+  auto& jd = jit_->getMainJITDylib();
 
   // Add process symbol resolver to make C/C++ stdlib available
   auto dlsg = llvm::orc::DynamicLibrarySearchGenerator::GetForCurrentProcess(

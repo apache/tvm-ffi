@@ -17,24 +17,7 @@
 
 #include <tvm/ffi/function.h>
 
-#include <cassert>
 #include <cstdio>
-
-void checkPtr(void* ptr) {
-  cudaPointerAttributes attr;
-  cudaError_t err = cudaPointerGetAttributes(&attr, ptr);
-
-  if (err != cudaSuccess) {
-    printf("Pointer check failed: %s\n", cudaGetErrorString(err));
-    return;
-  }
-
-  printf("Pointer is valid:\n");
-  printf("  type       : %d\n", attr.type);
-  printf("  device     : %d\n", attr.device);
-  printf("  devicePointer: %p\n", attr.devicePointer);
-  printf("  hostPointer  : %p\n", attr.hostPointer);
-}
 
 // Simple addition function
 __global__ void test_add_kernel(int* a, int* b, int* c) { *c = *a + *b; }
@@ -46,15 +29,10 @@ int test_add_impl(int a, int b) {
   cudaMalloc(&d_c, sizeof(int));
   cudaMemcpy(d_a, &a, sizeof(int), cudaMemcpyHostToDevice);
   cudaMemcpy(d_b, &b, sizeof(int), cudaMemcpyHostToDevice);
-  printf("ttt %p %p %p\n", d_a, d_b, d_c);
-  checkPtr(d_a);
-  checkPtr(d_b);
-  checkPtr(d_c);
   test_add_kernel<<<1, 1>>>(d_a, d_b, d_c);
   cudaError_t err = cudaGetLastError();
   if (err != cudaSuccess) printf("Kernel launch error: %s\n", cudaGetErrorString(err));
   cudaMemcpy(&c, d_c, sizeof(int), cudaMemcpyDeviceToHost);
-  printf("ggg %d %d %d", a, b, c);
   cudaFree(d_a);
   cudaFree(d_b);
   cudaFree(d_c);

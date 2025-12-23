@@ -129,6 +129,7 @@ Optional<Function> ORCJITDynamicLibraryObj::GetFunction(const String& name) {
 
   // Try to get the symbol - return NullOpt if not found
   if (void* symbol = GetSymbol(symbol_name)) {
+    cantFail(jit_->initialize(*dylib_));
     // Wrap C function pointer as tvm-ffi Function
     TVMFFISafeCallType c_func = reinterpret_cast<TVMFFISafeCallType>(symbol);
 
