@@ -274,6 +274,7 @@ namespace reflection {
 template <typename Class>
 class OverloadObjectDef : private ObjectDef<Class> {
  public:
+  /*! \brief The super class */
   using Super = ObjectDef<Class>;
   /*!
    * \brief Constructor
