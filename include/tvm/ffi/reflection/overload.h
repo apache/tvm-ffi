@@ -164,6 +164,7 @@ struct TypedOverload : OverloadBase {
   template <std::size_t... I>
   Ret CallAux(std::index_sequence<I...>, CaptureTuple& tuple) {
     /// NOTE: this works for T, const T, const T&, T&& argument types
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     return f_(static_cast<std::tuple_element_t<I, PackedArgs>>(std::move(*std::get<I>(tuple)))...);
   }
 
@@ -273,6 +274,7 @@ namespace reflection {
 template <typename Class>
 class OverloadObjectDef : private ObjectDef<Class> {
  public:
+  /*! \brief The super class */
   using Super = ObjectDef<Class>;
   /*!
    * \brief Constructor
