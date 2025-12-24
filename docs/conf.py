@@ -282,7 +282,9 @@ def _link_inherited_members(app, what, name, obj, options, lines) -> None:  # no
     # If it comes from builtins we already hide it; no link needed
     if base in _py_native_classes or getattr(base, "__module__", "") == "builtins":
         return
-    owner_fq = f"{base.__module__}.{base.__qualname__}".replace("tvm_ffi.core.", "tvm_ffi.")
+    owner_fq = f"{base.__module__}.{base.__qualname__}".replace(
+        "tvm_ffi.core.", "tvm_ffi."
+    ).replace(".CObject", ".Object")
     role = "attr" if what in {"attribute", "property"} else "meth"
     lines.clear()
     lines.append(
@@ -329,6 +331,9 @@ _autodoc_always_show = {
     "__ffi_init__",
     "__from_extern_c__",
     "__from_mlir_packed_safe_call__",
+    "_move",
+    "__move_handle_from__",
+    "__init_handle_by_constructor__",
 }
 # If a member method comes from one of these native types, hide it in the docs
 _py_native_classes: tuple[type, ...] = (

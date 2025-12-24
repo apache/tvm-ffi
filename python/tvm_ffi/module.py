@@ -113,6 +113,7 @@ class Module(core.Object):
     # tvm-ffi-stubgen(end)
 
     entry_name: ClassVar[str] = "main"  # constant for entry function name
+    __slots__ = ("_tvm_ffi_attr_cache",)
 
     @property
     def kind(self) -> str:
@@ -161,11 +162,18 @@ class Module(core.Object):
     def __getattr__(self, name: str) -> core.Function:
         """Accessor to allow getting functions as attributes."""
         try:
-            func = self.get_function(name)
-            self.__dict__[name] = func
-            return func
+            cache = object.__getattribute__(self, "_tvm_ffi_attr_cache")
         except AttributeError:
-            raise AttributeError(f"Module has no function '{name}'")
+            cache = {}
+            object.__setattr__(self, "_tvm_ffi_attr_cache", cache)
+        if name in cache:
+            return cache[name]
+        try:
+            func = self.get_function(name)
+        except AttributeError as exc:
+            raise AttributeError(f"Module has no function '{name}'") from exc
+        cache[name] = func
+        return func
 
     def get_function(self, name: str, query_imports: bool = False) -> core.Function:
         """Get function from the module.

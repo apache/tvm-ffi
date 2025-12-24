@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 import json
+from abc import ABCMeta
 from typing import Any
 
 
@@ -77,38 +78,13 @@ class ObjectRValueRef:
         self.obj = obj
 
 
-cdef class Object:
-    """Base class of all TVM FFI objects.
+cdef class CObject:
+    """Cython base class for TVM FFI objects.
 
-    This is the root Python type for objects backed by the TVM FFI
-    runtime. Each instance references a handle to a C++ runtime
-    object. Python subclasses typically correspond to C++ runtime
-    types and are registered via :py:meth:`tvm_ffi.register_object`.
-
-    Notes
-    -----
-    - Equality of two :py:class:`Object` instances uses underlying handle
-      identity unless an overridden implementation is provided on the
-      concrete type. Use :py:meth:`same_as` to check whether two
-      references point to the same underlying object.
-    - Most users interact with subclasses (e.g. :class:`Tensor`,
-      :class:`Function`) rather than :py:class:`Object` directly.
-
-    Examples
-    --------
-    Constructing objects is typically performed by Python wrappers that
-    call into registered constructors on the FFI side.
-
-    .. code-block:: python
-
-        import tvm_ffi.testing
-
-        # Acquire a testing object constructed through FFI
-        obj = tvm_ffi.testing.create_object("testing.TestObjectBase", v_i64=12)
-        assert isinstance(obj, tvm_ffi.Object)
-        assert obj.same_as(obj)
-
+    This extension type owns the low-level handle. Prefer subclassing
+    :class:`Object` in Python to enforce slots policy.
     """
+    __slots__ = ()
     cdef void* chandle
 
     def __cinit__(self):
@@ -163,29 +139,89 @@ cdef class Object:
     def __ne__(self, other: object) -> bool:
         return not self.__eq__(other)
 
+    def __hash__(self) -> int:
+        cdef uint64_t hash_value = <uint64_t>self.chandle
+        return hash_value
+
+    def same_as(self, other: object) -> bool:
+        return isinstance(other, CObject) and self.chandle == (<CObject>other).chandle
+
+    def __move_handle_from__(self, other: CObject) -> None:
+        self.chandle = (<CObject>other).chandle
+        (<CObject>other).chandle = NULL
+
     def __init_handle_by_constructor__(self, fconstructor: Any, *args: Any) -> None:
-        """Initialize the handle by calling constructor function.
-
-        Parameters
-        ----------
-        fconstructor : Function
-            Constructor function.
-
-        args: list of objects
-            The arguments to the constructor
-
-        Notes
-        -----
-        We have a special calling convention to call constructor functions.
-        So the return handle is directly set into the Node object
-        instead of creating a new Node.
-        """
         # avoid error raised during construction.
         self.chandle = NULL
         cdef void* chandle
         ConstructorCall(
-            (<Object>fconstructor).chandle, <PyObject*>args, &chandle, NULL)
+            (<CObject>fconstructor).chandle, <PyObject*>args, &chandle, NULL)
         self.chandle = chandle
+
+
+class _ObjectSlotsMeta(ABCMeta):
+    def __new__(mcls, name: str, bases: tuple[type, ...], ns: dict[str, Any], **kwargs: Any):
+        if "__slots__" not in ns:
+            ns["__slots__"] = ()
+        return super().__new__(mcls, name, bases, ns, **kwargs)
+
+    def __instancecheck__(cls, instance: Any) -> bool:
+        if isinstance(instance, CObject):
+            return True
+        return super().__instancecheck__(instance)
+
+    def __subclasscheck__(cls, subclass: type) -> bool:
+        try:
+            if issubclass(subclass, CObject):
+                return True
+        except TypeError:
+            pass
+        return super().__subclasscheck__(subclass)
+
+
+class Object(CObject, metaclass=_ObjectSlotsMeta):
+    """Base class of all TVM FFI objects.
+
+    This is the root Python type for objects backed by the TVM FFI
+    runtime. Each instance references a handle to a C++ runtime
+    object. Python subclasses typically correspond to C++ runtime
+    types and are registered via :py:meth:`tvm_ffi.register_object`.
+
+    Notes
+    -----
+    - Equality of two :py:class:`Object` instances uses underlying handle
+      identity unless an overridden implementation is provided on the
+      concrete type. Use :py:meth:`same_as` to check whether two
+      references point to the same underlying object.
+    - Subclasses that omit ``__slots__`` are treated as ``__slots__ = ()``.
+      ``__dict__`` entries are forbidden in ``__slots__``.
+    - Most users interact with subclasses (e.g. :class:`Tensor`,
+      :class:`Function`) rather than :py:class:`Object` directly.
+
+    Examples
+    --------
+    Constructing objects is typically performed by Python wrappers that
+    call into registered constructors on the FFI side.
+
+    .. code-block:: python
+
+        import tvm_ffi.testing
+
+        # Acquire a testing object constructed through FFI
+        obj = tvm_ffi.testing.create_object("testing.TestObjectBase", v_i64=12)
+        assert isinstance(obj, tvm_ffi.Object)
+        assert obj.same_as(obj)
+
+    Subclasses can declare explicit slots when needed.
+
+    .. code-block:: python
+
+        @tvm_ffi.register_object("my.MyObject")
+        class MyObject(tvm_ffi.Object):
+            __slots__ = ()
+
+    """
+    __slots__ = ()
 
     def __ffi_init__(self, *args: Any) -> None:
         """Initialize the instance using the ``__ffi_init__`` method registered on C++ side.
@@ -225,13 +261,7 @@ cdef class Object:
             assert not x.same_as(z)
 
         """
-        if not isinstance(other, Object):
-            return False
-        return self.chandle == (<Object>other).chandle
-
-    def __hash__(self) -> int:
-        cdef uint64_t hash_value = <uint64_t>self.chandle
-        return hash_value
+        return CObject.same_as(self, other)
 
     def _move(self) -> ObjectRValueRef:
         """Create an rvalue reference that transfers ownership.
@@ -253,17 +283,35 @@ cdef class Object:
         """
         return ObjectRValueRef(self)
 
-    def __move_handle_from__(self, other: Object) -> None:
+    def __move_handle_from__(self, other: CObject) -> None:
         """Steal the FFI handle from ``other``.
 
         Internal helper used by the runtime to implement move
         semantics. Users should prefer :py:meth:`_move`.
         """
-        self.chandle = (<Object>other).chandle
-        (<Object>other).chandle = NULL
+        CObject.__move_handle_from__(self, other)
+
+    def __init_handle_by_constructor__(self, fconstructor: Any, *args: Any) -> None:
+        """Initialize the handle by calling constructor function.
+
+        Parameters
+        ----------
+        fconstructor : Function
+            Constructor function.
+
+        args: list of objects
+            The arguments to the constructor
+
+        Notes
+        -----
+        We have a special calling convention to call constructor functions.
+        So the return handle is directly set into the Node object
+        instead of creating a new Node.
+        """
+        CObject.__init_handle_by_constructor__(self, fconstructor, *args)
 
 
-cdef class OpaquePyObject(Object):
+cdef class OpaquePyObject(CObject):
     """Wrapper that carries an arbitrary Python object across the FFI.
 
     The contained object is held with correct reference counting, and
@@ -274,6 +322,8 @@ cdef class OpaquePyObject(Object):
     ``OpaquePyObject`` is useful when a Python value must traverse the
     FFI boundary without conversion into a native FFI type.
     """
+    __slots__ = ()
+
     def pyobject(self) -> object:
         """Return the original Python object held by this wrapper."""
         cdef object obj
@@ -335,7 +385,7 @@ cdef inline str _type_index_to_key(int32_t tindex):
 
 cdef inline object make_ret_opaque_object(TVMFFIAny result):
     obj = OpaquePyObject.__new__(OpaquePyObject)
-    (<Object>obj).chandle = result.v_obj
+    (<CObject>obj).chandle = result.v_obj
     return obj.pyobject()
 
 cdef inline object make_fallback_cls_for_type_index(int32_t type_index):
@@ -352,30 +402,25 @@ cdef inline object make_fallback_cls_for_type_index(int32_t type_index):
 
     # Create `type_info.type_cls` now
     class cls(parent_type_info.type_cls):
-        pass
-    attrs = cls.__dict__.copy()
-    attrs.pop("__dict__", None)
-    attrs.pop("__weakref__", None)
-    attrs.update({
-        "__slots__": (),
-        "__tvm_ffi_type_info__": type_info,
-        "__name__": type_key.split(".")[-1],
-        "__qualname__": type_key,
-        "__module__": ".".join(type_key.split(".")[:-1]),
-        "__doc__": f"Auto-generated fallback class for {type_key}.\n"
-                   "This class is generated because the class is not registered.\n"
-                   "Please do not use this class directly, instead register the class\n"
-                   "using `register_object` decorator.",
-    })
+        __slots__ = ()
+
+    cls.__tvm_ffi_type_info__ = type_info
+    cls.__name__ = type_key.split(".")[-1]
+    cls.__qualname__ = type_key
+    cls.__module__ = ".".join(type_key.split(".")[:-1])
+    cls.__doc__ = (
+        f"Auto-generated fallback class for {type_key}.\n"
+        "This class is generated because the class is not registered.\n"
+        "Please do not use this class directly, instead register the class\n"
+        "using `register_object` decorator."
+    )
     for field in type_info.fields:
-        attrs[field.name] = field.as_property(cls)
+        setattr(cls, field.name, field.as_property(cls))
     for method in type_info.methods:
         name = method.name
         if name == "__ffi_init__":
             name = "__c_ffi_init__"
-        attrs[name] = method.as_callable(cls)
-    for name, val in attrs.items():
-        setattr(cls, name, val)
+        setattr(cls, name, method.as_callable(cls))
     # Update the registry
     type_info.type_cls = cls
     _update_registry(type_index, type_key, type_info, cls)
@@ -390,7 +435,7 @@ cdef inline object make_ret_object(TVMFFIAny result):
     if type_index < len(TYPE_INDEX_TO_CLS) and (cls := TYPE_INDEX_TO_CLS[type_index]) is not None:
         if issubclass(cls, PyNativeObject):
             obj = Object.__new__(Object)
-            (<Object>obj).chandle = result.v_obj
+            (<CObject>obj).chandle = result.v_obj
             return cls.__from_tvm_ffi_object__(cls, obj)
     else:
         # Slow path: object is not found in registered entry
@@ -398,7 +443,7 @@ cdef inline object make_ret_object(TVMFFIAny result):
         # For every unregistered class, this slow path will be triggered only once.
         cls = make_fallback_cls_for_type_index(type_index)
     obj = cls.__new__(cls)
-    (<Object>obj).chandle = result.v_obj
+    (<CObject>obj).chandle = result.v_obj
     return obj
 
 

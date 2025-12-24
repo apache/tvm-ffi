@@ -175,6 +175,38 @@ def test_unregistered_object_fallback() -> None:
 
 
 @pytest.mark.parametrize(
+    ("test_cls", "make_instance"),
+    [
+        (
+            tvm_ffi.testing.TestObjectBase,
+            lambda: tvm_ffi.testing.create_object("testing.TestObjectBase"),
+        ),
+        (
+            tvm_ffi.testing.TestIntPair,
+            lambda: tvm_ffi.testing.TestIntPair(1, 2),  # type: ignore[call-arg]
+        ),
+        (
+            tvm_ffi.testing.TestObjectDerived,
+            lambda: tvm_ffi.testing.create_object(
+                "testing.TestObjectDerived",
+                v_i64=20,
+                v_map=tvm_ffi.convert({"a": 1}),
+                v_array=tvm_ffi.convert([1, 2]),
+            ),
+        ),
+    ],
+)
+def test_object_subclass_slots(test_cls: type, make_instance: Any) -> None:
+    slots = test_cls.__dict__.get("__slots__")
+    assert slots == ()
+    assert "__dict__" not in test_cls.__dict__
+    assert "__weakref__" not in test_cls.__dict__
+    obj = make_instance()
+    with pytest.raises(AttributeError):
+        obj._tvm_ffi_test_attr = "nope"
+
+
+@pytest.mark.parametrize(
     "test_cls, type_key, parent_cls",
     [
         (tvm_ffi.Object, "ffi.Object", None),

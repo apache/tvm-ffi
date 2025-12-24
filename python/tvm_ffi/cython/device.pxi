@@ -91,6 +91,7 @@ cdef class Device:
         assert str(dev) == "cuda:0"
 
     """
+    __slots__ = ()
     cdef DLDevice cdevice
 
     _DEVICE_TYPE_TO_NAME = {
