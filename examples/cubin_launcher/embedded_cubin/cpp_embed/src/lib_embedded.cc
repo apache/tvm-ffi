@@ -24,16 +24,20 @@
  * embedded CUBIN data.
  */
 
-// [example.begin]
 #include <tvm/ffi/container/tensor.h>
 #include <tvm/ffi/error.h>
 #include <tvm/ffi/extra/c_env_api.h>
 #include <tvm/ffi/extra/cuda/cubin_launcher.h>
 #include <tvm/ffi/function.h>
 
-// Embed CUBIN module with name "env"
-// This creates the necessary symbols and singleton struct for accessing the embedded CUBIN
-TVM_FFI_EMBED_CUBIN(env);
+// [example.begin]
+constexpr unsigned char image[]{
+// clang >= 20 or gcc >= 14
+#embed "kernel_fatbin.fatbin"
+};
+
+TVM_FFI_EMBED_CUBIN_FROM_BYTES(env, image);
+// [example.end]
 
 namespace cubin_embedded {
 
@@ -64,13 +68,17 @@ void AddOne(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
 
   // Get CUDA stream
   DLDevice device = x.device();
-  cudaStream_t stream =
-      static_cast<cudaStream_t>(TVMFFIEnvGetStream(device.device_type, device.device_id));
+  tvm::ffi::cuda_api::StreamHandle stream = static_cast<tvm::ffi::cuda_api::StreamHandle>(
+      TVMFFIEnvGetStream(device.device_type, device.device_id));
 
   // Launch kernel
-  cudaError_t result = kernel.Launch(args, grid, block, stream);
+  tvm::ffi::cuda_api::ResultType result = kernel.Launch(args, grid, block, stream);
   TVM_FFI_CHECK_CUDA_ERROR(result);
 }
+
+}  // namespace cubin_embedded
+
+namespace cubin_embedded {
 
 /*!
  * \brief Launch mul_two_cuda kernel on input tensor.
@@ -99,11 +107,11 @@ void MulTwo(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
 
   // Get CUDA stream
   DLDevice device = x.device();
-  cudaStream_t stream =
-      static_cast<cudaStream_t>(TVMFFIEnvGetStream(device.device_type, device.device_id));
+  tvm::ffi::cuda_api::StreamHandle stream = static_cast<tvm::ffi::cuda_api::StreamHandle>(
+      TVMFFIEnvGetStream(device.device_type, device.device_id));
 
   // Launch kernel
-  cudaError_t result = kernel.Launch(args, grid, block, stream);
+  tvm::ffi::cuda_api::ResultType result = kernel.Launch(args, grid, block, stream);
   TVM_FFI_CHECK_CUDA_ERROR(result);
 }
 
@@ -112,4 +120,3 @@ TVM_FFI_DLL_EXPORT_TYPED_FUNC(add_one, cubin_embedded::AddOne);
 TVM_FFI_DLL_EXPORT_TYPED_FUNC(mul_two, cubin_embedded::MulTwo);
 
 }  // namespace cubin_embedded
-// [example.end]

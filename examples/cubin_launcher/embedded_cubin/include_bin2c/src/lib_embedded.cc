@@ -17,41 +17,26 @@
  * under the License.
  */
 /*!
- * \file examples/cubin_launcher/src/lib_dynamic.cc
- * \brief TVM-FFI library with dynamic CUBIN loading.
+ * \file examples/cubin_launcher/src/lib_embedded.cc
+ * \brief TVM-FFI library with embedded CUBIN kernels.
  *
- * This library exports TVM-FFI functions to load CUBIN from file and
- * launch CUDA kernels.
+ * This library exports TVM-FFI functions to launch CUDA kernels from
+ * embedded CUBIN data.
  */
 
-// [example.begin]
 #include <tvm/ffi/container/tensor.h>
 #include <tvm/ffi/error.h>
 #include <tvm/ffi/extra/c_env_api.h>
 #include <tvm/ffi/extra/cuda/cubin_launcher.h>
 #include <tvm/ffi/function.h>
-#include <tvm/ffi/string.h>
 
-#include <cstdint>
-#include <memory>
+#include "kernel_fatbin.h"
 
-namespace cubin_dynamic {
+// [example.begin]
+TVM_FFI_EMBED_CUBIN_FROM_BYTES(env, imageBytes);
+// [example.end]
 
-// Global CUBIN module and kernels (loaded dynamically)
-static std::unique_ptr<tvm::ffi::CubinModule> g_cubin_module;
-static std::unique_ptr<tvm::ffi::CubinKernel> g_add_one_kernel;
-static std::unique_ptr<tvm::ffi::CubinKernel> g_mul_two_kernel;
-
-/*!
- * \brief Set CUBIN module from binary data.
- * \param cubin CUBIN binary data as Bytes object.
- */
-void SetCubin(const tvm::ffi::Bytes& cubin) {
-  // Load CUBIN module from memory
-  g_cubin_module = std::make_unique<tvm::ffi::CubinModule>(cubin);
-  g_add_one_kernel = std::make_unique<tvm::ffi::CubinKernel>((*g_cubin_module)["add_one_cuda"]);
-  g_mul_two_kernel = std::make_unique<tvm::ffi::CubinKernel>((*g_cubin_module)["mul_two_cuda"]);
-}
+namespace cubin_embedded {
 
 /*!
  * \brief Launch add_one_cuda kernel on input tensor.
@@ -59,8 +44,8 @@ void SetCubin(const tvm::ffi::Bytes& cubin) {
  * \param y Output tensor (float32, 1D, same shape as x)
  */
 void AddOne(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
-  TVM_FFI_CHECK(g_cubin_module != nullptr, RuntimeError)
-      << "CUBIN module not loaded. Call set_cubin first.";
+  // Get kernel from embedded CUBIN (cached in static variable for efficiency)
+  static auto kernel = TVM_FFI_EMBED_CUBIN_GET_KERNEL(env, "add_one_cuda");
 
   TVM_FFI_CHECK(x.ndim() == 1, ValueError) << "Input must be 1D tensor";
   TVM_FFI_CHECK(y.ndim() == 1, ValueError) << "Output must be 1D tensor";
@@ -84,14 +69,13 @@ void AddOne(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
       TVMFFIEnvGetStream(device.device_type, device.device_id));
 
   // Launch kernel
-  tvm::ffi::cuda_api::ResultType result = g_add_one_kernel->Launch(args, grid, block, stream);
+  tvm::ffi::cuda_api::ResultType result = kernel.Launch(args, grid, block, stream);
   TVM_FFI_CHECK_CUDA_ERROR(result);
 }
 
-}  // namespace cubin_dynamic
-// [example.end]
+}  // namespace cubin_embedded
 
-namespace cubin_dynamic {
+namespace cubin_embedded {
 
 /*!
  * \brief Launch mul_two_cuda kernel on input tensor.
@@ -99,8 +83,8 @@ namespace cubin_dynamic {
  * \param y Output tensor (float32, 1D, same shape as x)
  */
 void MulTwo(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
-  TVM_FFI_CHECK(g_cubin_module != nullptr, RuntimeError)
-      << "CUBIN module not loaded. Call set_cubin first.";
+  // Get kernel from embedded CUBIN (cached in static variable for efficiency)
+  static auto kernel = TVM_FFI_EMBED_CUBIN_GET_KERNEL(env, "mul_two_cuda");
 
   TVM_FFI_CHECK(x.ndim() == 1, ValueError) << "Input must be 1D tensor";
   TVM_FFI_CHECK(y.ndim() == 1, ValueError) << "Output must be 1D tensor";
@@ -124,13 +108,12 @@ void MulTwo(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
       TVMFFIEnvGetStream(device.device_type, device.device_id));
 
   // Launch kernel
-  tvm::ffi::cuda_api::ResultType result = g_mul_two_kernel->Launch(args, grid, block, stream);
+  tvm::ffi::cuda_api::ResultType result = kernel.Launch(args, grid, block, stream);
   TVM_FFI_CHECK_CUDA_ERROR(result);
 }
 
 // Export TVM-FFI functions
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(set_cubin, cubin_dynamic::SetCubin);
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(add_one, cubin_dynamic::AddOne);
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(mul_two, cubin_dynamic::MulTwo);
+TVM_FFI_DLL_EXPORT_TYPED_FUNC(add_one, cubin_embedded::AddOne);
+TVM_FFI_DLL_EXPORT_TYPED_FUNC(mul_two, cubin_embedded::MulTwo);
 
-}  // namespace cubin_dynamic
+}  // namespace cubin_embedded
