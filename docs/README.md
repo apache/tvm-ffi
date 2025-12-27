@@ -95,6 +95,18 @@ BUILD_CPP_DOCS=1 BUILD_RUST_DOCS=1 uv run --group docs sphinx-autobuild docs doc
 BUILD_CPP_DOCS=1 BUILD_RUST_DOCS=1 uv run --group docs sphinx-build -M html docs docs/_build
 ```
 
+### Multi-version build (main + tags)
+
+Build the documentation for a fixed list of versions (currently `v0.1.6-rc0`, `v0.1.5`, `main`). The multi-version helper builds from git archives, sets a pretend version, and regenerates the switcher JSON automatically (edit `docs/run_sphinx_multiversion.py` to change the list):
+
+```bash
+BUILD_CPP_DOCS=1 BUILD_RUST_DOCS=1 uv run --group docs python docs/run_sphinx_multiversion.py --base-url "/"
+```
+
+If the site is hosted under a subpath (for example `https://tvm.apache.org/ffi/`), set `--base-url "/ffi"` in that invocation to keep the switcher JSON and root redirect pointing at the correct prefix.
+
+The JSON (`_static/versions.json`) is read by the book theme’s version switcher across every built version; the root `index.html` redirects to the preferred version.
+
 ## Cleanup
 
 Remove generated artifacts when they are no longer needed:
