@@ -62,7 +62,7 @@
 /*! \brief TVM FFI minor version. */
 #define TVM_FFI_VERSION_MINOR 1
 /*! \brief TVM FFI patch version. */
-#define TVM_FFI_VERSION_PATCH 7
+#define TVM_FFI_VERSION_PATCH 8
 // NOLINTEND(modernize-macro-to-enum)
 
 #ifdef __cplusplus
