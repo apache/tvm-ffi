@@ -80,3 +80,4 @@ Table of Contents
    :caption: Developer Manual
 
    dev/build_from_source.md
+   dev/release_process.rst
