@@ -20,9 +20,7 @@
  * \file extension.cc
  * \brief Example of a tvm-ffi based library that registers various functions.
  */
-#include <tvm/ffi/function.h>
-#include <tvm/ffi/object.h>
-#include <tvm/ffi/reflection/registry.h>
+#include <tvm/ffi/tvm_ffi.h>
 
 #include <cstdint>
 
