@@ -25,10 +25,10 @@ cdef class FieldGetter:
     cdef TVMFFIFieldGetter getter
     cdef int64_t offset
 
-    def __call__(self, Object obj):
+    def __call__(self, CObject obj):
         cdef TVMFFIAny result
         cdef int c_api_ret_code
-        cdef void* field_ptr = (<char*>(<Object>obj).chandle) + self.offset
+        cdef void* field_ptr = (<char*>(<CObject>obj).chandle) + self.offset
         result.type_index = kTVMFFINone
         result.v_int64 = 0
         c_api_ret_code = self.getter(field_ptr, &result)
@@ -41,9 +41,9 @@ cdef class FieldSetter:
     cdef TVMFFIFieldSetter setter
     cdef int64_t offset
 
-    def __call__(self, Object obj, value):
+    def __call__(self, CObject obj, value):
         cdef int c_api_ret_code
-        cdef void* field_ptr = (<char*>(<Object>obj).chandle) + self.offset
+        cdef void* field_ptr = (<char*>(<CObject>obj).chandle) + self.offset
         TVMFFIPyCallFieldSetter(
             TVMFFIPyArgSetterFactory_,
             self.setter,

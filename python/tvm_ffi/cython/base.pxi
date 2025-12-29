@@ -392,6 +392,7 @@ cdef extern from "tvm_ffi_python_helpers.h":
 
 
 cdef class ByteArrayArg:
+    __slots__ = ()
     cdef TVMFFIByteArray cdata
     cdef object py_data
 
