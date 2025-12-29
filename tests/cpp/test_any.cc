@@ -58,6 +58,20 @@ TEST(Any, Int) {
   view0 = v1;
   EXPECT_EQ(view0.CopyToTVMFFIAny().type_index, TypeIndex::kTVMFFIInt);
   EXPECT_EQ(view0.CopyToTVMFFIAny().v_int64, 2);
+
+  uint64_t v2 = static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) + 1;
+  EXPECT_THROW(
+      {
+        try {
+          view0 = v2;
+        } catch (const Error& error) {
+          EXPECT_EQ(error.kind(), "OverflowError");
+          std::string what = error.what();
+          EXPECT_NE(what.find("is too large to fit in int64_t"), std::string::npos);
+          throw;
+        }
+      },
+      ::tvm::ffi::Error);
 }
 
 TEST(Any, Enum) {
