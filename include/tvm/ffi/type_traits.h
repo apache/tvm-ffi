@@ -279,6 +279,13 @@ struct TypeTraits<Int, std::enable_if_t<std::is_integral_v<Int>>> : public TypeT
   static constexpr int32_t field_static_type_index = TypeIndex::kTVMFFIInt;
 
   TVM_FFI_INLINE static void CopyToAnyView(const Int& src, TVMFFIAny* result) {
+    if constexpr (std::is_unsigned_v<Int> && sizeof(Int) >= sizeof(int64_t)) {
+      if (src > static_cast<Int>(INT64_MAX)) {
+        TVM_FFI_THROW(OverflowError)
+            << "Integer value " << src << " is too large to fit in int64_t. "
+            << "Consider explicitly casting to int64_t first if this is intentional.";
+      }
+    }
     result->type_index = TypeIndex::kTVMFFIInt;
     result->zero_padding = 0;
     result->v_int64 = static_cast<int64_t>(src);
