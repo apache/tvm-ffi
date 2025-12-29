@@ -59,7 +59,7 @@ TEST(Any, Int) {
   EXPECT_EQ(view0.CopyToTVMFFIAny().type_index, TypeIndex::kTVMFFIInt);
   EXPECT_EQ(view0.CopyToTVMFFIAny().v_int64, 2);
 
-  uint64_t v2 = static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) + 1;
+  uint64_t v2 = static_cast<uint64_t>(INT64_MAX) + 1;
   EXPECT_THROW(
       {
         try {
