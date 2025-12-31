@@ -184,6 +184,8 @@ and hash TVMFFIAny in bytes for quick equality checks without going through
 type index switching.
 :::
 
+(object-storage-format)=
+
 ## Object Storage Format
 
 When TVMFFIAny points to a heap-allocated object (such as n-dimensional arrays),
