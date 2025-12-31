@@ -20,16 +20,16 @@ Quick Start
 
 .. note::
 
-  All the code in this tutorial can be found under `examples/quickstart <https://github.com/apache/tvm-ffi/tree/main/examples/quickstart>`_ in the repository.
+  All the code in this tutorial is under `examples/quickstart <https://github.com/apache/tvm-ffi/tree/main/examples/quickstart>`_ in the repository.
 
 This guide walks through shipping a minimal ``add_one`` function that computes
 ``y = x + 1`` in C++ and CUDA.
 TVM-FFI's Open ABI and FFI make it possible to **ship one library** for multiple frameworks and languages.
 We can build a single shared library that works across:
 
-- **ML frameworks**, e.g. PyTorch, JAX, NumPy, CuPy, etc., and
-- **Languages**, e.g. C++, Python, Rust, etc.,
-- **Python ABI versions**, e.g. ship one wheel to support all Python versions, including free-threaded ones.
+- **ML frameworks**, e.g. PyTorch, JAX, NumPy, CuPy, and others;
+- **Languages**, e.g. C++, Python, Rust, and others;
+- **Python ABI versions**, e.g. one wheel that supports all Python versions, including free-threaded ones.
 
 .. admonition:: Prerequisite
    :class: hint
@@ -39,7 +39,7 @@ We can build a single shared library that works across:
    - Compiler: C++17-capable toolchain (GCC/Clang/MSVC)
    - Optional ML frameworks for testing: NumPy, PyTorch, JAX, CuPy
    - CUDA: Any modern version (if you want to try the CUDA part)
-   - TVM-FFI installed via
+   - TVM-FFI installed via:
 
      .. code-block:: bash
 
@@ -52,7 +52,7 @@ Write a Simple ``add_one``
 Source Code
 ~~~~~~~~~~~
 
-Suppose we implement a C++ function ``AddOne`` that performs elementwise ``y = x + 1`` for a 1-D ``float32`` vector. The source code (C++, CUDA) is:
+Suppose we implement a C++ function ``AddOne`` that performs elementwise ``y = x + 1`` for a 1-D ``float32`` vector. The source code (C++ and CUDA) is:
 
 .. hint::
 
@@ -84,23 +84,23 @@ Suppose we implement a C++ function ``AddOne`` that performs elementwise ``y = x
 
 
 The macro :c:macro:`TVM_FFI_DLL_EXPORT_TYPED_FUNC` exports the C++ function ``AddOne``
-as a TVM FFI compatible symbol ``__tvm_ffi_add_one_cpu/cuda``. If :c:macro:`TVM_FFI_DLL_EXPORT_INCLUDE_METADATA` is set to 1,
+as a TVM-FFI-compatible symbol ``__tvm_ffi_add_one_cpu/cuda``. If :c:macro:`TVM_FFI_DLL_EXPORT_INCLUDE_METADATA` is set to 1,
 it also exports the function's metadata as a symbol ``__tvm_ffi__metadata_add_one_cpu/cuda`` for type checking and stub generation.
 
-The class :cpp:class:`tvm::ffi::TensorView` allows zero-copy interop with tensors from different ML frameworks:
+The class :cpp:class:`tvm::ffi::TensorView` enables zero-copy interop with tensors from different ML frameworks:
 
 - NumPy, CuPy,
 - PyTorch, JAX, or
 - any array type that supports the standard :external+data-api:doc:`DLPack protocol <design_topics/data_interchange>`.
 
-Finally, :cpp:func:`TVMFFIEnvGetStream` can be used in the CUDA code to launch a kernel on the caller's stream.
+Finally, :cpp:func:`TVMFFIEnvGetStream` can be used in the CUDA code to launch kernels on the caller's stream.
 
 .. _sec-cpp-compile-with-tvm-ffi:
 
 Compile with TVM-FFI
 ~~~~~~~~~~~~~~~~~~~~
 
-**Raw command.** We can use the following minimal commands to compile the source code:
+**Raw command.** Use the following minimal commands to compile the source code:
 
 .. tabs::
 
@@ -118,16 +118,16 @@ Compile with TVM-FFI
       :start-after: [cuda_compile.begin]
       :end-before: [cuda_compile.end]
 
-This step produces a shared library ``add_one_cpu.so`` and ``add_one_cuda.so`` that can be used across languages and frameworks.
+These steps produce shared libraries ``add_one_cpu.so`` and ``add_one_cuda.so`` that can be used across languages and frameworks.
 
 .. hint::
 
-   For a single-file C++/CUDA project, a convenient method :py:func:`tvm_ffi.cpp.load_inline`
-   is provided to minimize boilerplate code in compilation, linking, and loading.
+   For a single-file C++/CUDA project, :py:func:`tvm_ffi.cpp.load_inline`
+   minimizes boilerplate for compilation, linking, and loading.
 
 
 **CMake.** CMake is the preferred approach for building across platforms.
-TVM-FFI natively integrates with CMake via ``find_package`` as demonstrated below:
+TVM-FFI integrates with CMake via ``find_package`` as demonstrated below:
 
 .. tabs::
 
@@ -158,19 +158,19 @@ TVM-FFI natively integrates with CMake via ``find_package`` as demonstrated belo
       add_library(add_one_cuda SHARED compile/add_one_cuda.cu)
       tvm_ffi_configure_target(add_one_cuda)
 
-**Artifact.** The resulting ``add_one_cpu.so`` and ``add_one_cuda.so`` are minimal libraries that are agnostic to:
+**Artifact.** The resulting ``add_one_cpu.so`` and ``add_one_cuda.so`` are small libraries that are agnostic to:
 
-- Python version/ABI. It is not compiled/linked with Python and depends only on TVM-FFI's stable C ABI;
-- Languages, including C++, Python, Rust or any other language that can interop with C ABI;
-- ML frameworks, such as PyTorch, JAX, NumPy, CuPy, or anything with standard :external+data-api:doc:`DLPack protocol <design_topics/data_interchange>`.
+- Python version/ABI. They are not compiled or linked with Python and depend only on TVM-FFI's stable C ABI;
+- Languages, including C++, Python, Rust, or any other language that can interop with the C ABI;
+- ML frameworks, such as PyTorch, JAX, NumPy, CuPy, or any array library that implements the standard :external+data-api:doc:`DLPack protocol <design_topics/data_interchange>`.
 
 .. _sec-use-across-framework:
 
 Ship Across ML Frameworks
 -------------------------
 
-TVM-FFI's Python package provides :py:func:`tvm_ffi.load_module`, which can load either
-the ``add_one_cpu.so`` or ``add_one_cuda.so`` into :py:class:`tvm_ffi.Module`.
+TVM-FFI's Python package provides :py:func:`tvm_ffi.load_module` to load either
+``add_one_cpu.so`` or ``add_one_cuda.so`` into a :py:class:`tvm_ffi.Module`.
 
 .. code-block:: python
 
@@ -179,7 +179,7 @@ the ``add_one_cpu.so`` or ``add_one_cuda.so`` into :py:class:`tvm_ffi.Module`.
   func : tvm_ffi.Function = mod.add_one_cpu
 
 ``mod.add_one_cpu`` retrieves a callable :py:class:`tvm_ffi.Function` that accepts tensors from host frameworks
-directly. This process is done zero-copy, without any boilerplate code, under extremely low latency.
+directly. This is zero-copy, requires no boilerplate code, and adds very little overhead.
 
 We can then use these functions in the following ways:
 
@@ -198,13 +198,13 @@ PyTorch
 JAX
 ~~~
 
-Support via `nvidia/jax-tvm-ffi <https://github.com/nvidia/jax-tvm-ffi>`_. This can be installed via
+Support is provided via `nvidia/jax-tvm-ffi <https://github.com/nvidia/jax-tvm-ffi>`_. Install it with:
 
 .. code-block:: bash
 
   pip install jax-tvm-ffi
 
-After installation, ``add_one_cuda`` can be registered as a target to JAX's ``ffi_call``.
+After installation, ``add_one_cuda`` can be registered as a target for JAX's ``ffi_call``.
 
 .. code-block:: python
 
@@ -248,9 +248,9 @@ NumPy/CuPy
 Ship Across Languages
 ---------------------
 
-TVM-FFI's core loading mechanism is ABI stable and works across language boundaries.
-A single library can be loaded in every language TVM-FFI supports,
-without having to recompile different libraries targeting different ABIs or languages.
+TVM-FFI's core loading mechanism is ABI-stable and works across language boundaries.
+A single library can be loaded in any language TVM-FFI supports,
+without recompiling for different ABIs or languages.
 
 .. _ship-to-python:
 
@@ -258,8 +258,8 @@ Python
 ~~~~~~
 
 As shown in the :ref:`previous section<sec-use-across-framework>`, :py:func:`tvm_ffi.load_module` loads a language-
-and framework-independent ``add_one_cpu.so`` or ``add_one_cuda.so`` and can be used to incorporate it into all Python
-array frameworks that implement the standard :external+data-api:doc:`DLPack protocol <design_topics/data_interchange>`.
+and framework-independent ``add_one_cpu.so`` or ``add_one_cuda.so`` and can be used with any Python
+array framework that implements the standard :external+data-api:doc:`DLPack protocol <design_topics/data_interchange>`.
 
 .. _ship-to-cpp:
 
@@ -267,7 +267,7 @@ C++
 ~~~
 
 TVM-FFI's C++ API :cpp:func:`tvm::ffi::Module::LoadFromFile` loads ``add_one_cpu.so`` or ``add_one_cuda.so`` and
-can be used directly in C/C++ with no Python dependency.
+can be used directly from C/C++ without a Python dependency.
 
 .. literalinclude:: ../../examples/quickstart/load/load_cpp.cc
    :language: cpp
@@ -290,13 +290,13 @@ Compile and run it with:
 
 .. note::
 
-  Don't like loading shared libraries? Static linking is also supported.
+  Prefer not to load shared libraries? Static linking is also supported.
 
-  In such cases, we can use :cpp:func:`tvm::ffi::Function::FromExternC` to create a
+  In such cases, use :cpp:func:`tvm::ffi::Function::FromExternC` to create a
   :cpp:class:`tvm::ffi::Function` from the exported symbol, or directly use
   :cpp:func:`tvm::ffi::Function::InvokeExternC` to invoke the function.
 
-  This feature can be useful on iOS, or when the exported module is generated by another DSL compiler matching the ABI.
+  This feature can be useful on iOS, or when the exported module is generated by another DSL compiler targeting the ABI.
 
   .. code-block:: cpp
 
@@ -321,7 +321,7 @@ Rust
 
 TVM-FFI's Rust API ``tvm_ffi::Module::load_from_file`` loads ``add_one_cpu.so`` or ``add_one_cuda.so`` and
 then retrieves a function ``add_one_cpu`` or ``add_one_cuda`` from it.
-This procedure is identical to those in C++ and Python:
+This mirrors the C++ and Python flows:
 
 .. code-block:: rust
 
@@ -336,8 +336,8 @@ This procedure is identical to those in C++ and Python:
 
 .. hint::
 
-    We can also use the Rust API to target the TVM FFI ABI. This means we can use Rust to write the function
-    implementation and export to Python/C++ in the same fashion.
+    You can also use the Rust API to target the TVM-FFI ABI. This lets you write the function
+    implementation in Rust and export it to Python/C++ in the same way.
 
 
 Troubleshooting
@@ -351,7 +351,7 @@ Troubleshooting
 Further Reading
 ---------------
 
-- :doc:`Python Packaging <../packaging/python_packaging>` provides details on ABI-agnostic Python wheel building, as well as
-  exposing functions, classes and C symbols from TVM-FFI modules.
-- :doc:`Stable C ABI <stable_c_abi>` explains the ABI in depth and how it enables stability guarantee. Its C examples demonstrate
-  how to interoperate through the stable C ABI from both callee and caller sides.
+- :doc:`Python Packaging <../packaging/python_packaging>` provides details on ABI-agnostic Python wheel builds and on
+  exposing functions, classes, and C symbols from TVM-FFI modules.
+- :doc:`Stable C ABI <stable_c_abi>` explains the ABI in depth and the stability guarantees it enables. Its C examples demonstrate
+  how to interoperate through the stable C ABI from both the callee and caller sides.
