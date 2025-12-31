@@ -82,7 +82,7 @@ Configure Target
 
 The configure helper wires a target to TVM-FFI and provides sensible defaults.
 It links the TVM-FFI headers and shared library, and it configures debug symbol handling.
-Optionally, it runs the Python :ref:`stub generation <sec-subgen>` tool after
+Optionally, it runs the Python :ref:`stub generation <sec-stubgen>` tool after
 the build completes.
 
 .. code-block:: cmake
