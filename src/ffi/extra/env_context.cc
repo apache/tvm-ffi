@@ -65,7 +65,6 @@ class EnvContext {
   void SetDLPackManagedTensorAllocator(DLPackManagedTensorAllocator allocator,
                                        int write_to_global_context,
                                        DLPackManagedTensorAllocator* opt_out_original_allocator) {
-    dlpack_allocator_ = allocator;
     if (write_to_global_context != 0) {
       GlobalTensorAllocator() = allocator;
     }
