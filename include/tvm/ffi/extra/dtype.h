@@ -50,6 +50,8 @@ struct __hip_fp4x2_e2m1;
 
 namespace tvm_ffi {
 
+/// \cond Doxygen_Suppress
+
 template <typename T>
 struct dtype_trait {};
 
@@ -196,6 +198,8 @@ template <>
 struct dtype_trait<__hip_fp4x2_e2m1> {
   static constexpr DLDataType value = {DLDataTypeCode::kDLFloat4_e2m1fn, 4, 2};
 };
+
+/// \endcond
 
 }  // namespace tvm_ffi
 
