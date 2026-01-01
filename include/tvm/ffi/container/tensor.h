@@ -327,7 +327,8 @@ class Tensor : public ObjectRef {
     const TensorObj* ptr = get();
     int64_t adjusted_idx = idx >= 0 ? idx : (ptr->ndim + idx);
     if (adjusted_idx < 0 || adjusted_idx >= ptr->ndim) {
-      TVM_FFI_THROW(IndexError) << "Index " << idx << " out of bounds for tensor with " << ptr->ndim << " dimensions";
+      TVM_FFI_THROW(IndexError) << "Index " << idx << " out of bounds for tensor with " << ptr->ndim
+                                << " dimensions";
     }
     return ptr->shape[adjusted_idx];
   }
@@ -342,7 +343,8 @@ class Tensor : public ObjectRef {
     const TensorObj* ptr = get();
     int64_t adjusted_idx = idx >= 0 ? idx : (ptr->ndim + idx);
     if (adjusted_idx < 0 || adjusted_idx >= ptr->ndim) {
-      TVM_FFI_THROW(IndexError) << "Index " << idx << " out of bounds for tensor with " << ptr->ndim << " dimensions";
+      TVM_FFI_THROW(IndexError) << "Index " << idx << " out of bounds for tensor with " << ptr->ndim
+                                << " dimensions";
     }
     return ptr->strides[adjusted_idx];
   }
@@ -765,7 +767,8 @@ class TensorView {
   int64_t size(int64_t idx) const {
     int64_t adjusted_idx = idx >= 0 ? idx : (tensor_.ndim + idx);
     if (adjusted_idx < 0 || adjusted_idx >= tensor_.ndim) {
-      TVM_FFI_THROW(IndexError) << "Index " << idx << " out of bounds for tensor with " << tensor_.ndim << " dimensions";
+      TVM_FFI_THROW(IndexError) << "Index " << idx << " out of bounds for tensor with "
+                                << tensor_.ndim << " dimensions";
     }
     return tensor_.shape[adjusted_idx];
   }
@@ -779,7 +782,8 @@ class TensorView {
   int64_t stride(int64_t idx) const {
     int64_t adjusted_idx = idx >= 0 ? idx : (tensor_.ndim + idx);
     if (adjusted_idx < 0 || adjusted_idx >= tensor_.ndim) {
-      TVM_FFI_THROW(IndexError) << "Index " << idx << " out of bounds for tensor with " << tensor_.ndim << " dimensions";
+      TVM_FFI_THROW(IndexError) << "Index " << idx << " out of bounds for tensor with "
+                                << tensor_.ndim << " dimensions";
     }
     return tensor_.strides[adjusted_idx];
   }
