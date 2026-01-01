@@ -16,6 +16,7 @@
 # under the License.
 """C++ integration helpers for building and loading inline modules."""
 
+from .dtype import to_cpp_dtype
 from .extension import build, build_inline, load, load_inline
 
 __all__ = [
@@ -23,4 +24,5 @@ __all__ = [
     "build_inline",
     "load",
     "load_inline",
+    "to_cpp_dtype",
 ]
