@@ -325,7 +325,12 @@ class Tensor : public ObjectRef {
    */
   int64_t size(int64_t idx) const {
     const TensorObj* ptr = get();
-    return ptr->shape[idx >= 0 ? idx : (ptr->ndim + idx)];
+    int64_t adjusted_idx = idx >= 0 ? idx : (ptr->ndim + idx);
+    if (adjusted_idx < 0 || adjusted_idx >= ptr->ndim) {
+      TVM_FFI_THROW(IndexError) << "Index " << idx << " out of bounds for tensor with " << ptr->ndim
+                                << " dimensions";
+    }
+    return ptr->shape[adjusted_idx];
   }
 
   /*!
@@ -336,7 +341,12 @@ class Tensor : public ObjectRef {
    */
   int64_t stride(int64_t idx) const {
     const TensorObj* ptr = get();
-    return ptr->strides[idx >= 0 ? idx : (ptr->ndim + idx)];
+    int64_t adjusted_idx = idx >= 0 ? idx : (ptr->ndim + idx);
+    if (adjusted_idx < 0 || adjusted_idx >= ptr->ndim) {
+      TVM_FFI_THROW(IndexError) << "Index " << idx << " out of bounds for tensor with " << ptr->ndim
+                                << " dimensions";
+    }
+    return ptr->strides[adjusted_idx];
   }
 
   /*!
@@ -754,7 +764,14 @@ class TensorView {
    * \param idx The index of the size.
    * \return The size of the idx-th dimension.
    */
-  int64_t size(int64_t idx) const { return tensor_.shape[idx >= 0 ? idx : tensor_.ndim + idx]; }
+  int64_t size(int64_t idx) const {
+    int64_t adjusted_idx = idx >= 0 ? idx : (tensor_.ndim + idx);
+    if (adjusted_idx < 0 || adjusted_idx >= tensor_.ndim) {
+      TVM_FFI_THROW(IndexError) << "Index " << idx << " out of bounds for tensor with "
+                                << tensor_.ndim << " dimensions";
+    }
+    return tensor_.shape[adjusted_idx];
+  }
 
   /*!
    * \brief Get the stride of the idx-th dimension. If the idx is negative,
@@ -762,7 +779,14 @@ class TensorView {
    * \param idx The index of the stride.
    * \return The stride of the idx-th dimension.
    */
-  int64_t stride(int64_t idx) const { return tensor_.strides[idx >= 0 ? idx : tensor_.ndim + idx]; }
+  int64_t stride(int64_t idx) const {
+    int64_t adjusted_idx = idx >= 0 ? idx : (tensor_.ndim + idx);
+    if (adjusted_idx < 0 || adjusted_idx >= tensor_.ndim) {
+      TVM_FFI_THROW(IndexError) << "Index " << idx << " out of bounds for tensor with "
+                                << tensor_.ndim << " dimensions";
+    }
+    return tensor_.strides[adjusted_idx];
+  }
 
   /*!
    * \brief Get the byte offset of the Tensor.

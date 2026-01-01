@@ -365,4 +365,18 @@ TEST(Tensor, AsStrided) {
   EXPECT_EQ(offset_data2[0 * 3 + 0 * 1], 2.0f);  // Points to data[2]
 }
 
+TEST(Tensor, SizeStrideOutOfBounds) {
+  Tensor tensor = Empty({2, 3, 4}, DLDataType({kDLFloat, 32, 1}), DLDevice({kDLCPU, 0}));
+  EXPECT_THROW({ tensor.size(3); }, tvm::ffi::Error);
+  EXPECT_THROW({ tensor.size(-4); }, tvm::ffi::Error);
+  EXPECT_THROW({ tensor.stride(3); }, tvm::ffi::Error);
+  EXPECT_THROW({ tensor.stride(-4); }, tvm::ffi::Error);
+
+  TensorView tensor_view = tensor;
+  EXPECT_THROW({ tensor_view.size(3); }, tvm::ffi::Error);
+  EXPECT_THROW({ tensor_view.size(-4); }, tvm::ffi::Error);
+  EXPECT_THROW({ tensor_view.stride(3); }, tvm::ffi::Error);
+  EXPECT_THROW({ tensor_view.stride(-4); }, tvm::ffi::Error);
+}
+
 }  // namespace
