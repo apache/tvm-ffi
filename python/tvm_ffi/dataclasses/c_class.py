@@ -55,7 +55,7 @@ def c_class(
     The intent is to offer a familiar dataclass authoring experience while still
     exposing the underlying C++ object.  The ``type_key`` of the C++ class must
     match the string passed to :func:`c_class`, and inheritance relationships are
-    preserved—subclasses registered in C++ can subclass the Python proxy defined
+    preserved-subclasses registered in C++ can subclass the Python proxy defined
     for their parent.
 
     Parameters
