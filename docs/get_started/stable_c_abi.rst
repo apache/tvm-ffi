@@ -20,7 +20,7 @@ Stable C ABI
 
 .. note::
 
-  All code used in this guide lives under
+  All code used in this guide is under
   `examples/stable_c_abi <https://github.com/apache/tvm-ffi/tree/main/examples/stable_c_abi>`_.
 
 .. admonition:: Prerequisite
@@ -34,11 +34,10 @@ Stable C ABI
 
         pip install --reinstall --upgrade apache-tvm-ffi
 
-This guide introduces TVM-FFI's stable C ABI: a single, minimal and stable
-ABI that represents any cross-language calls, with DSL and ML compiler codegen
-in mind.
+This guide introduces TVM-FFI's stable C ABI: a single, minimal ABI that represents
+cross-language calls and is designed for DSL and ML compiler codegen.
 
-TVM-FFI builds on the following key idea:
+TVM-FFI is built around the following key idea:
 
 .. _tvm_ffi_c_abi:
 
@@ -56,19 +55,19 @@ TVM-FFI builds on the following key idea:
         TVMFFIAny*       result,  // output: *result
       );
 
-  where :cpp:class:`TVMFFIAny`, is a tagged union of all supported types, e.g. integers, floats, Tensors, strings, etc., and can be further extended to arbitrary user-defined types.
+  where :cpp:class:`TVMFFIAny` is a tagged union of all supported types, e.g. integers, floats, tensors, strings, and more, and can be extended to user-defined types.
 
-Built on top of this stable C ABI, TVM-FFI defines a common C ABI protocol for all functions, and further provides an extensible, performant, and ecosystem-friendly open solution for all.
+Built on top of this stable C ABI, TVM-FFI defines a common C ABI protocol for all functions and provides an extensible, performant, and ecosystem-friendly solution.
 
 The rest of this guide covers:
 
 - The stable C layout and calling convention of ``tvm_ffi_c_abi``;
-- C examples from both callee and caller side of this ABI.
+- C examples from both the callee and caller side of this ABI.
 
 Stable C Layout
 ---------------
 
-TVM-FFI's :ref:`C ABI <tvm_ffi_c_abi>` uses a stable layout for all the input and output arguments.
+TVM-FFI's :ref:`C ABI <tvm_ffi_c_abi>` uses a stable layout for all input and output arguments.
 
 Layout of :cpp:class:`TVMFFIAny`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -76,7 +75,7 @@ Layout of :cpp:class:`TVMFFIAny`
 :cpp:class:`TVMFFIAny` is a fixed-size (128-bit) tagged union that represents all supported types.
 
 - First 32 bits: type index indicating which value is stored (supports up to 2^32 types).
-- Next 32 bits: reserved (used for flags in rare cases, e.g. small-string optimization).
+- Next 32 bits: reserved (used for flags in rare cases, e.g., small-string optimization).
 - Last 64 bits: payload that is either a 64-bit integer, a 64-bit floating-point number, or a pointer to a heap-allocated object.
 
 .. figure:: https://raw.githubusercontent.com/tlc-pack/web-data/main/images/tvm-ffi/stable-c-abi-layout-any.svg
@@ -137,9 +136,9 @@ Stable ABI in C Code
   You can build and run the examples either with raw compiler commands or with CMake.
   Both approaches are demonstrated below.
 
-TVM FFI's :ref:`C ABI <tvm_ffi_c_abi>` is designed with DSL and ML compilers in mind. DSL codegen usually relies on MLIR, LLVM or low-level C as the compilation target, where no access to C++ features is available, and where stable C ABIs are preferred for simplicity and stability.
+TVM-FFI's :ref:`C ABI <tvm_ffi_c_abi>` is designed with DSL and ML compilers in mind. DSL codegen often targets MLIR, LLVM, or low-level C, where C++ features are unavailable and stable C ABIs are preferred for simplicity and stability.
 
-This section shows how to write C code that follows the stable C ABI. Specifically, we provide two examples:
+This section shows how to write C code that follows the stable C ABI using two examples:
 
 - Callee side: A CPU ``add_one_cpu`` kernel in C that is equivalent to the :ref:`C++ example <cpp_add_one_kernel>`.
 - Caller side: A loader and runner in C that invokes the kernel, a direct C translation of the :ref:`C++ example <ship-to-cpp>`.
@@ -149,11 +148,11 @@ The C code is minimal and dependency-free, so it can serve as a direct reference
 Callee: ``add_one_cpu`` Kernel
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Below is a minimal ``add_one_cpu`` kernel in C that follows the stable C ABI. It has three steps:
+Below is a minimal ``add_one_cpu`` kernel in C that follows the stable C ABI in three steps:
 
 - **Step 1**. Extract input ``x`` and output ``y`` as DLPack tensors;
 - **Step 2**. Implement the kernel ``y = x + 1`` on CPU with a simple for-loop;
-- **Step 3**. Set the output result to ``result``.
+- **Step 3**. Set the output result in ``result``.
 
 .. literalinclude:: ../../examples/stable_c_abi/src/add_one_cpu.c
    :language: c
@@ -188,7 +187,7 @@ Build it with either approach:
 **C vs. C++.** Compared to the :ref:`C++ example <cpp_add_one_kernel>`, there are a few key differences:
 
 - The explicit marshalling in **Step 1** is only needed in C. In C++, templates hide these details.
-- The C++ macro :c:macro:`TVM_FFI_DLL_EXPORT_TYPED_FUNC` (used to export ``add_one_cpu``) is not needed in C, because this example directly defines the exported C symbol ``__tvm_ffi_add_one_cpu``.
+- The C++ macro :c:macro:`TVM_FFI_DLL_EXPORT_TYPED_FUNC` (used to export ``add_one_cpu``) is not needed in C, since this example directly defines the exported C symbol ``__tvm_ffi_add_one_cpu``.
 
 .. hint::
 
@@ -200,7 +199,7 @@ Build it with either approach:
 Caller: Kernel Loader
 ~~~~~~~~~~~~~~~~~~~~~
 
-Next, a minimal C loader invokes the ``add_one_cpu`` kernel. It is functionally identical to the :ref:`C++ example <ship-to-cpp>` and performs:
+Next, a minimal C loader invokes the ``add_one_cpu`` kernel. It mirrors the :ref:`C++ example <ship-to-cpp>` and performs:
 
 - **Step 1**. Load the shared library ``build/add_one_cpu.so`` that contains the kernel;
 - **Step 2**. Get function ``add_one_cpu`` from the library;
@@ -238,7 +237,7 @@ Build and run the loader with either approach:
        cmake --build build --config RelWithDebInfo
        build/load
 
-To call a function via the stable C ABI in C, idiomatically:
+In C, the idiomatic steps to call a function via the stable C ABI are:
 
 - Convert input arguments to the :cpp:class:`TVMFFIAny` type;
 - Call the target function (e.g., ``add_one_cpu``) via :cpp:func:`TVMFFIFunctionCall`;
@@ -247,7 +246,7 @@ To call a function via the stable C ABI in C, idiomatically:
 What's Next
 -----------
 
-**ABI specification.** See the complete ABI specification in :doc:`../concepts/abi_overview`.
+**ABI specification.** See the full ABI specification in :doc:`../concepts/abi_overview`.
 
 **Convenient compiler target.** The stable C ABI is a simple, portable codegen target for DSL compilers. Emit C that follows this ABI to integrate with TVM-FFI and call the result from multiple languages and frameworks. See :doc:`../concepts/abi_overview`.
 
