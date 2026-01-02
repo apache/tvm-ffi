@@ -204,10 +204,6 @@ class Array(core.Object, Sequence[T]):
         """Return True if the array is equal to another array."""
         return _ffi_api.ArrayEqual(self, other)
 
-    def __ne__(self, other: object) -> bool:
-        """Return True if the array is not equal to another array."""
-        return not _ffi_api.ArrayEqual(self, other)
-
     def __hash__(self) -> int:
         """Return the hash of the array."""
         return _ffi_api.ArrayHash(self)
@@ -391,10 +387,6 @@ class Map(core.Object, Mapping[K, V]):
     def __eq__(self, other: object) -> bool:
         """Return True if the map is equal to another map."""
         return _ffi_api.MapEqual(self, other)
-
-    def __ne__(self, other: object) -> bool:
-        """Return True if the map is not equal to another map."""
-        return not _ffi_api.MapEqual(self, other)
 
     def __hash__(self) -> int:
         """Return the hash of the map."""
