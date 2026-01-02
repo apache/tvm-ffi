@@ -312,4 +312,35 @@ TEST(Array, Contains) {
   EXPECT_FALSE(f(str_arr, String("foo")).cast<bool>());
 }
 
+TEST(Array, NegativeIndexThrows) {
+  Array<int> arr = {1, 2, 3};
+  // Directly test ArrayObj methods, which are the ones modified in this PR.
+  // The Array<T> wrapper methods already had negative index checks.
+  ArrayObj* arr_obj = arr.GetArrayObj();
+
+  // Test ArrayObj::at (which calls operator[])
+  EXPECT_THROW(
+      {
+        try {
+          [[maybe_unused]] const auto& val = arr_obj->at(-1);
+        } catch (const Error& error) {
+          EXPECT_EQ(error.kind(), "IndexError");
+          throw;
+        }
+      },
+      ::tvm::ffi::Error);
+
+  // Test ArrayObj::SetItem
+  EXPECT_THROW(
+      {
+        try {
+          arr_obj->SetItem(-1, Any(42));
+        } catch (const Error& error) {
+          EXPECT_EQ(error.kind(), "IndexError");
+          throw;
+        }
+      },
+      ::tvm::ffi::Error);
+}
+
 }  // namespace

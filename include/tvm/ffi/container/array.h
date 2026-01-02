@@ -70,7 +70,7 @@ class ArrayObj : public Object, public details::InplaceArrayBase<ArrayObj, TVMFF
    * \return the i-th element.
    */
   const Any& operator[](int64_t i) const {
-    if (i >= size_) {
+    if (i < 0 || i >= size_) {
       TVM_FFI_THROW(IndexError) << "Index " << i << " out of bounds " << size_;
     }
     return static_cast<Any*>(data_)[i];
@@ -91,7 +91,7 @@ class ArrayObj : public Object, public details::InplaceArrayBase<ArrayObj, TVMFF
    * \param item The value to be set
    */
   void SetItem(int64_t i, Any item) {
-    if (i >= size_) {
+    if (i < 0 || i >= size_) {
       TVM_FFI_THROW(IndexError) << "Index " << i << " out of bounds " << size_;
     }
     static_cast<Any*>(data_)[i] = std::move(item);
