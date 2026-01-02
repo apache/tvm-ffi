@@ -294,50 +294,22 @@ TEST(Array, Upcast) {
 }
 
 TEST(Array, Contains) {
+  Function f = Function::GetGlobalRequired("ffi.ArrayContains");
+
   Array<int> arr = {1, 2, 3, 4, 5};
-  AnyEqual eq;
+  EXPECT_TRUE(f(arr, 3).cast<bool>());
+  EXPECT_TRUE(f(arr, 1).cast<bool>());
+  EXPECT_TRUE(f(arr, 5).cast<bool>());
+  EXPECT_FALSE(f(arr, 10).cast<bool>());
+  EXPECT_FALSE(f(arr, 0).cast<bool>());
 
-  // Test element is present
-  bool found = false;
-  for (const auto& elem : *arr.GetArrayObj()) {
-    if (eq(elem, Any(3))) {
-      found = true;
-      break;
-    }
-  }
-  EXPECT_TRUE(found);
-
-  // Test element is not present
-  found = false;
-  for (const auto& elem : *arr.GetArrayObj()) {
-    if (eq(elem, Any(10))) {
-      found = true;
-      break;
-    }
-  }
-  EXPECT_FALSE(found);
-
-  // Test empty array
   Array<int> empty_arr;
-  found = false;
-  for (const auto& elem : *empty_arr.GetArrayObj()) {
-    if (eq(elem, Any(1))) {
-      found = true;
-      break;
-    }
-  }
-  EXPECT_FALSE(found);
+  EXPECT_FALSE(f(empty_arr, 1).cast<bool>());
 
-  // Test with strings
   Array<String> str_arr = {String("hello"), String("world")};
-  found = false;
-  for (const auto& elem : *str_arr.GetArrayObj()) {
-    if (eq(elem, Any(String("world")))) {
-      found = true;
-      break;
-    }
-  }
-  EXPECT_TRUE(found);
+  EXPECT_TRUE(f(str_arr, String("hello")).cast<bool>());
+  EXPECT_TRUE(f(str_arr, String("world")).cast<bool>());
+  EXPECT_FALSE(f(str_arr, String("foo")).cast<bool>());
 }
 
 }  // namespace

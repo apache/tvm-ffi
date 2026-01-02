@@ -73,12 +73,8 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("ffi.ArrayContains",
            [](const ffi::ArrayObj* n, const Any& value) -> bool {
              AnyEqual eq;
-             for (const Any& elem : *n) {
-               if (eq(elem, value)) {
-                 return true;
-               }
-             }
-             return false;
+             return std::any_of(n->begin(), n->end(),
+                                [&](const Any& elem) { return eq(elem, value); });
            })
       .def_packed("ffi.Map",
                   [](ffi::PackedArgs args, Any* ret) {
