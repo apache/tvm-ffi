@@ -33,7 +33,7 @@ namespace ffi = tvm::ffi;
 // [tvm_ffi_abi.begin]
 static int AddTwo(int x) { return x + 2; }
 
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(add_two, AddTwo);
+TVM_FFI_DLL_EXPORT_TYPED_FUNC(add_two, AddTwo)
 // [tvm_ffi_abi.end]
 
 // [global_function.begin]

@@ -38,4 +38,4 @@ void add_one_cpu(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
   }
 }
 
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(add_one_cpu, add_one_cpu);
+TVM_FFI_DLL_EXPORT_TYPED_FUNC(add_one_cpu, add_one_cpu)
