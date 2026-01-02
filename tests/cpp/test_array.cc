@@ -19,6 +19,7 @@
 #include <gtest/gtest.h>
 #include <tvm/ffi/container/array.h>
 #include <tvm/ffi/function.h>
+#include <tvm/ffi/string.h>
 
 #include "./testing_object.h"
 
@@ -290,6 +291,53 @@ TEST(Array, Upcast) {
 
   static_assert(details::type_contains_v<Array<Any>, Array<int>>);
   static_assert(details::type_contains_v<Any, Array<float>>);
+}
+
+TEST(Array, Contains) {
+  Array<int> arr = {1, 2, 3, 4, 5};
+  AnyEqual eq;
+
+  // Test element is present
+  bool found = false;
+  for (const auto& elem : *arr.GetArrayObj()) {
+    if (eq(elem, Any(3))) {
+      found = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(found);
+
+  // Test element is not present
+  found = false;
+  for (const auto& elem : *arr.GetArrayObj()) {
+    if (eq(elem, Any(10))) {
+      found = true;
+      break;
+    }
+  }
+  EXPECT_FALSE(found);
+
+  // Test empty array
+  Array<int> empty_arr;
+  found = false;
+  for (const auto& elem : *empty_arr.GetArrayObj()) {
+    if (eq(elem, Any(1))) {
+      found = true;
+      break;
+    }
+  }
+  EXPECT_FALSE(found);
+
+  // Test with strings
+  Array<String> str_arr = {String("hello"), String("world")};
+  found = false;
+  for (const auto& elem : *str_arr.GetArrayObj()) {
+    if (eq(elem, Any(String("world")))) {
+      found = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(found);
 }
 
 }  // namespace
