@@ -188,6 +188,10 @@ class Array(core.Object, Sequence[T]):
             return type(self).__name__ + "(chandle=None)"
         return "[" + ", ".join([x.__repr__() for x in self]) + "]"
 
+    def __contains__(self, value: object) -> bool:
+        """Check if the array contains a value."""
+        return _ffi_api.ArrayContains(self, value)
+
     def __add__(self, other: Iterable[T]) -> Array[T]:
         """Concatenate two arrays."""
         return type(self)(itertools.chain(self, other))

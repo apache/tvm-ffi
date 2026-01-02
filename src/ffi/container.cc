@@ -70,6 +70,12 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("ffi.ArrayGetItem", [](const ffi::ArrayObj* n, int64_t i) -> Any { return n->at(i); })
       .def("ffi.ArraySize",
            [](const ffi::ArrayObj* n) -> int64_t { return static_cast<int64_t>(n->size()); })
+      .def("ffi.ArrayContains",
+           [](const ffi::ArrayObj* n, const Any& value) -> bool {
+             AnyEqual eq;
+             return std::any_of(n->begin(), n->end(),
+                                [&](const Any& elem) { return eq(elem, value); });
+           })
       .def_packed("ffi.Map",
                   [](ffi::PackedArgs args, Any* ret) {
                     TVM_FFI_ICHECK_EQ(args.size() % 2, 0);

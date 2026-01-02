@@ -19,6 +19,7 @@
 #include <gtest/gtest.h>
 #include <tvm/ffi/container/array.h>
 #include <tvm/ffi/function.h>
+#include <tvm/ffi/string.h>
 
 #include "./testing_object.h"
 
@@ -290,6 +291,25 @@ TEST(Array, Upcast) {
 
   static_assert(details::type_contains_v<Array<Any>, Array<int>>);
   static_assert(details::type_contains_v<Any, Array<float>>);
+}
+
+TEST(Array, Contains) {
+  Function f = Function::GetGlobalRequired("ffi.ArrayContains");
+
+  Array<int> arr = {1, 2, 3, 4, 5};
+  EXPECT_TRUE(f(arr, 3).cast<bool>());
+  EXPECT_TRUE(f(arr, 1).cast<bool>());
+  EXPECT_TRUE(f(arr, 5).cast<bool>());
+  EXPECT_FALSE(f(arr, 10).cast<bool>());
+  EXPECT_FALSE(f(arr, 0).cast<bool>());
+
+  Array<int> empty_arr;
+  EXPECT_FALSE(f(empty_arr, 1).cast<bool>());
+
+  Array<String> str_arr = {String("hello"), String("world")};
+  EXPECT_TRUE(f(str_arr, String("hello")).cast<bool>());
+  EXPECT_TRUE(f(str_arr, String("world")).cast<bool>());
+  EXPECT_FALSE(f(str_arr, String("foo")).cast<bool>());
 }
 
 }  // namespace
