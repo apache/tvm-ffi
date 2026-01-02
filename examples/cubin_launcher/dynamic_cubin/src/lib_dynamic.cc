@@ -129,8 +129,8 @@ void MulTwo(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
 }
 
 // Export TVM-FFI functions
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(set_cubin, cubin_dynamic::SetCubin);
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(add_one, cubin_dynamic::AddOne);
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(mul_two, cubin_dynamic::MulTwo);
+TVM_FFI_DLL_EXPORT_TYPED_FUNC(set_cubin, cubin_dynamic::SetCubin)
+TVM_FFI_DLL_EXPORT_TYPED_FUNC(add_one, cubin_dynamic::AddOne)
+TVM_FFI_DLL_EXPORT_TYPED_FUNC(mul_two, cubin_dynamic::MulTwo)
 
 }  // namespace cubin_dynamic
