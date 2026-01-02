@@ -145,7 +145,8 @@ struct TypedOverload : OverloadBase {
 
  private:
   template <std::size_t I>
-  void GetMismatchMessageAux(std::ostringstream& os, const AnyView* args, int32_t num_args) {
+  void GetMismatchMessageAux(std::ostringstream& os, const AnyView* args,
+                             [[maybe_unused]] int32_t num_args) {
     if constexpr (I < kNumArgs) {
       if (this->last_mismatch_index_ == static_cast<int32_t>(I)) {
         TVMFFIAny any_data = args[I].CopyToTVMFFIAny();

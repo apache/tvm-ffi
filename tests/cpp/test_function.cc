@@ -275,7 +275,7 @@ TEST(SetRaisedFromCStrParts, TypeError) {
 
 int testing_add1(int x) { return x + 1; }
 
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(testing_add1, testing_add1);
+TVM_FFI_DLL_EXPORT_TYPED_FUNC(testing_add1, testing_add1)
 
 TEST(Func, FromExternC) {
   // this is the function abi convention
