@@ -312,4 +312,29 @@ TEST(Array, Contains) {
   EXPECT_FALSE(f(str_arr, String("foo")).cast<bool>());
 }
 
+TEST(Array, NegativeIndexThrows) {
+  Array<int> arr = {1, 2, 3};
+  EXPECT_THROW(
+      {
+        try {
+          [[maybe_unused]] int val = arr[-1];
+        } catch (const Error& error) {
+          EXPECT_EQ(error.kind(), "IndexError");
+          throw;
+        }
+      },
+      ::tvm::ffi::Error);
+
+  EXPECT_THROW(
+      {
+        try {
+          arr.Set(-1, 42);
+        } catch (const Error& error) {
+          EXPECT_EQ(error.kind(), "IndexError");
+          throw;
+        }
+      },
+      ::tvm::ffi::Error);
+}
+
 }  // namespace
