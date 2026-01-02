@@ -227,3 +227,21 @@ def test_large_map_get() -> None:
 def test_array_contains(arr: list[Any], value: Any, expected: bool) -> None:
     a = tvm_ffi.convert(arr)
     assert (value in a) == expected
+
+
+@pytest.mark.parametrize(
+    "lhs, rhs, expected",
+    [
+        (tvm_ffi.Array([1, 2, 3]), tvm_ffi.Array([1, 2, 3]), True),
+        (tvm_ffi.Array([1, 2, 3]), tvm_ffi.Array([1, 2, 4]), False),
+        (tvm_ffi.Array([tvm_ffi.Array([1])]), tvm_ffi.Array([tvm_ffi.Array([1])]), True),
+        (tvm_ffi.Array([tvm_ffi.Array([1])]), tvm_ffi.Array([tvm_ffi.Array([2])]), False),
+        (tvm_ffi.Map({"a": 1, "b": 2}), tvm_ffi.Map({"a": 1, "b": 2}), True),
+        (tvm_ffi.Map({"a": 1, "b": 2}), tvm_ffi.Map({"a": 1, "b": 3}), False),
+    ],
+)
+def test_container_equality(lhs: Any, rhs: Any, expected: bool) -> None:
+    assert (lhs == rhs) == expected
+    assert (lhs != rhs) != expected
+    if expected:
+        assert hash(lhs) == hash(rhs)

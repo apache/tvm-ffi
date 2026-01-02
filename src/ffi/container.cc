@@ -22,6 +22,8 @@
  */
 #include <tvm/ffi/container/array.h>
 #include <tvm/ffi/container/map.h>
+#include <tvm/ffi/extra/structural_equal.h>
+#include <tvm/ffi/extra/structural_hash.h>
 #include <tvm/ffi/function.h>
 #include <tvm/ffi/reflection/registry.h>
 
@@ -72,10 +74,14 @@ TVM_FFI_STATIC_INIT_BLOCK() {
            [](const ffi::ArrayObj* n) -> int64_t { return static_cast<int64_t>(n->size()); })
       .def("ffi.ArrayContains",
            [](const ffi::ArrayObj* n, const Any& value) -> bool {
-             AnyEqual eq;
-             return std::any_of(n->begin(), n->end(),
-                                [&](const Any& elem) { return eq(elem, value); });
+             return std::any_of(n->begin(), n->end(), [&](const Any& elem) {
+               return StructuralEqual::Equal(elem, value);
+             });
            })
+      .def("ffi.ArrayEqual",
+           [](const Any& lhs, const Any& rhs) -> bool { return StructuralEqual::Equal(lhs, rhs); })
+      .def("ffi.ArrayHash",
+           [](const Any& n) -> int64_t { return static_cast<int64_t>(StructuralHash()(n)); })
       .def_packed("ffi.Map",
                   [](ffi::PackedArgs args, Any* ret) {
                     TVM_FFI_ICHECK_EQ(args.size() % 2, 0);
@@ -96,6 +102,10 @@ TVM_FFI_STATIC_INIT_BLOCK() {
            [](const ffi::MapObj* n) -> ffi::Function {
              return ffi::Function::FromTyped(MapForwardIterFunctor(n->begin(), n->end()));
            })
+      .def("ffi.MapEqual",
+           [](const Any& lhs, const Any& rhs) -> bool { return StructuralEqual::Equal(lhs, rhs); })
+      .def("ffi.MapHash",
+           [](const Any& n) -> int64_t { return static_cast<int64_t>(StructuralHash()(n)); })
       .def("ffi.MapGetMissingObject", GetMissingObject)
       .def("ffi.MapGetItemOrMissing", [](const ffi::MapObj* n, const Any& k) -> Any {
         try {

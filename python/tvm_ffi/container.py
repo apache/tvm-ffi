@@ -200,6 +200,18 @@ class Array(core.Object, Sequence[T]):
         """Concatenate two arrays."""
         return type(self)(itertools.chain(other, self))
 
+    def __eq__(self, other: object) -> bool:
+        """Return True if the array is equal to another array."""
+        return _ffi_api.ArrayEqual(self, other)
+
+    def __ne__(self, other: object) -> bool:
+        """Return True if the array is not equal to another array."""
+        return not _ffi_api.ArrayEqual(self, other)
+
+    def __hash__(self) -> int:
+        """Return the hash of the array."""
+        return _ffi_api.ArrayHash(self)
+
 
 class KeysView(KeysViewBase[K]):
     """Helper class to return keys view."""
@@ -375,3 +387,15 @@ class Map(core.Object, Mapping[K, V]):
         if self.__chandle__() == 0:
             return type(self).__name__ + "(chandle=None)"
         return "{" + ", ".join([f"{k.__repr__()}: {v.__repr__()}" for k, v in self.items()]) + "}"
+
+    def __eq__(self, other: object) -> bool:
+        """Return True if the map is equal to another map."""
+        return _ffi_api.MapEqual(self, other)
+
+    def __ne__(self, other: object) -> bool:
+        """Return True if the map is not equal to another map."""
+        return not _ffi_api.MapEqual(self, other)
+
+    def __hash__(self) -> int:
+        """Return the hash of the map."""
+        return _ffi_api.MapHash(self)
