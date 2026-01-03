@@ -19,9 +19,8 @@
 
 // [example.begin]
 // File: compile/add_one_cuda.cu
-#include <tvm/ffi/container/tensor.h>
 #include <tvm/ffi/extra/c_env_api.h>
-#include <tvm/ffi/function.h>
+#include <tvm/ffi/tvm_ffi.h>
 
 namespace tvm_ffi_example_cuda {
 

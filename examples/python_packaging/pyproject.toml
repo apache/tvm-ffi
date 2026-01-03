@@ -45,16 +45,13 @@ wheel.py-api = "py3"
 wheel.packages = ["python/my_ffi_extension"]
 # The install dir matches the import name
 wheel.install-dir = "my_ffi_extension"
-# [pyproject.build.end]
-
-# Build configuration
-build-dir = "build"
-build.verbose = true
-
-# CMake configuration
+# Build the extension in-place under "./build-wheel"
+build-dir = "build-wheel"
+# Specify minimum CMake version
 cmake.version = "CMakeLists.txt"
-cmake.build-type = "RelWithDebInfo"
-
-# Logging
-logging.level = "INFO"
-minimum-version = "build-system.requires"
+# Specify CMake build type
+cmake.build-type = "Release"
+# Pass custom CMake definitions
+[tool.scikit-build.cmake.define]
+CMAKE_EXPORT_COMPILE_COMMANDS = "ON"
+# [pyproject.build.end]

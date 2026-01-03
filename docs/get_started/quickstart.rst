@@ -54,6 +54,14 @@ Source Code
 
 Suppose we implement a C++ function ``AddOne`` that performs elementwise ``y = x + 1`` for a 1-D ``float32`` vector. The source code (C++, CUDA) is:
 
+.. hint::
+
+  Include the umbrella header to access all the core C++ APIs.
+
+  .. code-block:: cpp
+
+    #include <tvm/ffi/tvm_ffi.h>
+
 .. tabs::
 
   .. group-tab:: C++
@@ -62,7 +70,7 @@ Suppose we implement a C++ function ``AddOne`` that performs elementwise ``y = x
 
     .. literalinclude:: ../../examples/quickstart/compile/add_one_cpu.cc
       :language: cpp
-      :emphasize-lines: 8, 17
+      :emphasize-lines: 7, 16
       :start-after: [example.begin]
       :end-before: [example.end]
 
@@ -70,7 +78,7 @@ Suppose we implement a C++ function ``AddOne`` that performs elementwise ``y = x
 
     .. literalinclude:: ../../examples/quickstart/compile/add_one_cuda.cu
       :language: cpp
-      :emphasize-lines: 15, 22, 26
+      :emphasize-lines: 14, 21, 25
       :start-after: [example.begin]
       :end-before: [example.end]
 
@@ -166,9 +174,9 @@ the ``add_one_cpu.so`` or ``add_one_cuda.so`` into :py:class:`tvm_ffi.Module`.
 
 .. code-block:: python
 
-   import tvm_ffi
-   mod  : tvm_ffi.Module   = tvm_ffi.load_module("add_one_cpu.so")
-   func : tvm_ffi.Function = mod.add_one_cpu
+  import tvm_ffi
+  mod  : tvm_ffi.Module   = tvm_ffi.load_module("add_one_cpu.so")
+  func : tvm_ffi.Function = mod.add_one_cpu
 
 ``mod.add_one_cpu`` retrieves a callable :py:class:`tvm_ffi.Function` that accepts tensors from host frameworks
 directly. This process is done zero-copy, without any boilerplate code, under extremely low latency.
@@ -292,20 +300,19 @@ Compile and run it with:
 
   .. code-block:: cpp
 
-      // Linked with `add_one_cpu.o` or `add_one_cuda.o`
-      #include <tvm/ffi/function.h>
-      #include <tvm/ffi/container/tensor.h>
+    // Linked with `add_one_cpu.o` or `add_one_cuda.o`
+    #include <tvm/ffi/tvm_ffi.h>
 
-      // declare reference to the exported symbol
-      extern "C" int __tvm_ffi_add_one_cpu(void*, const TVMFFIAny*, int32_t, TVMFFIAny*);
+    // declare reference to the exported symbol
+    extern "C" int __tvm_ffi_add_one_cpu(void*, const TVMFFIAny*, int32_t, TVMFFIAny*);
 
-      namespace ffi = tvm::ffi;
+    namespace ffi = tvm::ffi;
 
-      int bundle_add_one(ffi::TensorView x, ffi::TensorView y) {
-        void* closure_handle = nullptr;
-        ffi::Function::InvokeExternC(closure_handle, __tvm_ffi_add_one_cpu, x, y);
-        return 0;
-      }
+    int bundle_add_one(ffi::TensorView x, ffi::TensorView y) {
+      void* closure_handle = nullptr;
+      ffi::Function::InvokeExternC(closure_handle, __tvm_ffi_add_one_cpu, x, y);
+      return 0;
+    }
 
 .. _ship-to-rust:
 
@@ -318,13 +325,13 @@ This procedure is identical to those in C++ and Python:
 
 .. code-block:: rust
 
-    fn run_add_one(x: &Tensor, y: &Tensor) -> Result<()> {
-        let module = tvm_ffi::Module::load_from_file("add_one_cpu.so")?;
-        let func = module.get_function("add_one_cpu")?;
-        let typed_fn = into_typed_fn!(func, Fn(&Tensor, &Tensor) -> Result<()>);
-        typed_fn(x, y)?;
-        Ok(())
-    }
+  fn run_add_one(x: &Tensor, y: &Tensor) -> Result<()> {
+    let module = tvm_ffi::Module::load_from_file("add_one_cpu.so")?;
+    let func = module.get_function("add_one_cpu")?;
+    let typed_fn = into_typed_fn!(func, Fn(&Tensor, &Tensor) -> Result<()>);
+    typed_fn(x, y)?;
+    Ok(())
+  }
 
 
 .. hint::

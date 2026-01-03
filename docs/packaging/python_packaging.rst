@@ -47,6 +47,12 @@ internals. We will cover three checkpoints:
 Export C++ to Python
 --------------------
 
+Include the umbrella header to access the core TVM-FFI C++ API.
+
+.. code-block:: cpp
+
+   #include <tvm/ffi/tvm_ffi.h>
+
 TVM-FFI offers three ways to expose code:
 
 - C symbols in TVM FFI ABI: Export code as plain C symbols. This is the recommended way for
