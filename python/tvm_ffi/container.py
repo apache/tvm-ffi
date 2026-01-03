@@ -192,6 +192,10 @@ class Array(core.Object, Sequence[T]):
         """Check if the array contains a value."""
         return _ffi_api.ArrayContains(self, value)
 
+    def __bool__(self) -> bool:
+        """Return True if the array is non-empty."""
+        return len(self) > 0
+
     def __add__(self, other: Iterable[T]) -> Array[T]:
         """Concatenate two arrays."""
         return type(self)(itertools.chain(self, other))
@@ -336,6 +340,10 @@ class Map(core.Object, Mapping[K, V]):
     def __len__(self) -> int:
         """Return the number of items in the map."""
         return _ffi_api.MapSize(self)
+
+    def __bool__(self) -> bool:
+        """Return True if the map is non-empty."""
+        return len(self) > 0
 
     def __iter__(self) -> Iterator[K]:
         """Iterate over the map's keys."""
