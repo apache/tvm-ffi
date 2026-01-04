@@ -309,6 +309,8 @@ we can safely exclude this dependency from the final wheel.
    # Windows
    delvewheel repair --exclude tvm_ffi.dll -w dist dist\\*.whl
 
+.. _sec-subgen:
+
 Stub Generation Tool
 --------------------
 
