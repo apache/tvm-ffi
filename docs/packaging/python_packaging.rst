@@ -18,10 +18,10 @@
 Python Packaging
 ================
 
-This guide walks through a small but complete workflow for packaging a TVM-FFI extension
+This guide walks through a small, complete workflow for packaging a TVM-FFI extension
 as a Python wheel. The goal is to help you wire up a simple extension, produce a wheel,
 and ship user-friendly typing annotations without needing to know every detail of TVM
-internals. We will cover three checkpoints:
+internals. We cover three checkpoints:
 
 - Export C++ to Python;
 - Build Python wheel;
@@ -29,7 +29,7 @@ internals. We will cover three checkpoints:
 
 .. note::
 
-  All code used in this guide lives under
+  All code used in this guide is under
   `examples/python_packaging <https://github.com/apache/tvm-ffi/tree/main/examples/python_packaging>`_.
 
 .. admonition:: Prerequisite
@@ -55,19 +55,19 @@ Include the umbrella header to access the core TVM-FFI C++ API.
 
 TVM-FFI offers three ways to expose code:
 
-- C symbols in TVM FFI ABI: Export code as plain C symbols. This is the recommended way for
-  most usecases as it keeps the boundary thin and works well with compiler codegen;
-- Functions: Reflect functions via the global registry;
-- Classes: Register C++ classes derived from :cpp:class:`tvm::ffi::Object` to Python dataclasses.
+- C symbols in the TVM-FFI ABI: export code as plain C symbols. This is the recommended way for
+  most use cases because it keeps the boundary thin and works well with compiler codegen;
+- Functions: expose functions via the global registry;
+- Classes: register C++ classes derived from :cpp:class:`tvm::ffi::Object` as Python dataclasses.
 
-Metadata is automatically captured and is later be turned into type hints for proper LSP help.
+Metadata is captured automatically and later turned into type hints for LSP support.
 
 TVM-FFI ABI (Recommended)
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 If you prefer to export plain C symbols, TVM-FFI provides helpers to make them accessible
-to Python. This option keeps the boundary thin and works well with LLVM compilers where
-C symbols are easier to call into.
+from Python. This option keeps the boundary thin and works well with LLVM-based compilers where
+C symbols are easier to call.
 
 .. tabs::
 
@@ -107,8 +107,8 @@ C symbols are easier to call into.
 Global Function
 ~~~~~~~~~~~~~~~
 
-This example registers a function into the global registry and then calls it from Python.
-It registry handles type translation, error handling, and metadata.
+This example registers a function in the global registry and then calls it from Python.
+The registry handles type translation, error handling, and metadata.
 
 .. tabs::
 
@@ -164,7 +164,7 @@ It registry handles type translation, error handling, and metadata.
 Class
 ~~~~~
 
-Any class derived from :cpp:class:`tvm::ffi::Object` can be registered, exported and
+Any class derived from :cpp:class:`tvm::ffi::Object` can be registered, exported, and
 instantiated from Python. The reflection helper :cpp:class:`tvm::ffi::reflection::ObjectDef`
 makes it easy to expose:
 
@@ -205,7 +205,7 @@ makes it easy to expose:
       import my_ffi_extension
 
       pair = my_ffi_extension.IntPair(1, 2)
-      pair.sum() # -> 3
+      pair.sum()  # -> 3
 
   .. group-tab:: Python (Generated)
 
@@ -227,11 +227,11 @@ makes it easy to expose:
 Build Python Wheel
 ------------------
 
-Once the C++ side is ready, TVM-FFI provides convenient helpers to build and ship
-ABI-agnostic Python extensions using any standard packaging tool.
+Once the C++ side is ready, TVM-FFI provides helpers to build and ship
+ABI-agnostic Python extensions using standard packaging tools.
 
 The flow below uses :external+scikit_build_core:doc:`scikit-build-core <index>`
-that drives CMake build, but the same ideas translate to setuptools or other :pep:`517` backends.
+to drive a CMake build, but the same ideas apply to setuptools or other :pep:`517` backends.
 
 CMake Target
 ~~~~~~~~~~~~
@@ -244,19 +244,19 @@ creates a shared target ``my_ffi_extension`` and configures it against TVM-FFI.
   :start-after: [example.cmake.begin]
   :end-before: [example.cmake.end]
 
-Function ``tvm_ffi_configure_target`` sets up TVM-FFI include paths, link against TVM-FFI library,
+Function ``tvm_ffi_configure_target`` sets up TVM-FFI include paths, links against the TVM-FFI library,
 generates stubs under ``STUB_DIR``, and can scaffold stub files when ``STUB_INIT`` is
 enabled.
 
-Function ``tvm_ffi_install`` places necessary information, e.g. debug symbols in macOS, next to
-the shared library for proper packaging.
+Function ``tvm_ffi_install`` places necessary information (e.g., debug symbols on macOS) next to
+the shared library for packaging.
 
 Python Build Backend
 ~~~~~~~~~~~~~~~~~~~~
 
-Define a :pep:`517` build backend in ``pyproject.toml``, with the following steps:
+Define a :pep:`517` build backend in ``pyproject.toml`` with the following steps:
 
-- Sepcfiy ``apache-tvm-ffi`` as a build requirement, so that CMake can find TVM-FFI;
+- Specify ``apache-tvm-ffi`` as a build requirement, so that CMake can find TVM-FFI;
 - Configure ``wheel.py-api`` that indicates a Python ABI-agnostic wheel;
 - Specify the source directory of the package via ``wheel.packages``, and the installation
   destination via ``wheel.install-dir``.
@@ -266,13 +266,13 @@ Define a :pep:`517` build backend in ``pyproject.toml``, with the following step
   :start-after: [pyproject.build.begin]
   :end-before: [pyproject.build.end]
 
-Once fully specified, scikit-build-core will invoke CMake and drive the extension building process.
+Once specified, scikit-build-core will invoke CMake and drive the extension build.
 
 
 Wheel Auditing
 ~~~~~~~~~~~~~~
 
-**Build wheels**. The wheel can be built using the standard workflows, e.g.:
+**Build wheels**. You can build wheels using standard workflows, for example:
 
 - `pip workflow <https://pip.pypa.io/en/stable/cli/pip_wheel/>`_ or `editable install <https://pip.pypa.io/en/stable/topics/local-project-installs/#editable-installs>`_
 
@@ -295,9 +295,9 @@ Wheel Auditing
 
   cibuildwheel --output-dir dist
 
-**Audit wheels**. In practice, an extra step is usually necessary to remove redundant
-and error-prone shared library dependencies. In our case, given ``libtvm_ffi.so``
-(or its respective platform variants) is guaranteed to be loaded by importing ``tvm_ffi``,
+**Audit wheels**. In practice, an extra step is usually needed to remove redundant
+and error-prone shared library dependencies. In our case, because ``libtvm_ffi.so``
+(or its platform variants) is guaranteed to be loaded by importing ``tvm_ffi``,
 we can safely exclude this dependency from the final wheel.
 
 .. code-block:: bash
@@ -322,11 +322,11 @@ corresponding Python code **inline** and **statically**.
 Inline Directives
 ~~~~~~~~~~~~~~~~~
 
-Similar to linter tools, ``tvm-ffi-stubgen`` uses special comments
+Like linter tools, ``tvm-ffi-stubgen`` uses special comments
 to identify what to generate and where to write generated code.
 
-**Directive 1 (Global functions)**. Example below shows an directive
-``global/${prefix}`` marking a type stub section of global functions.
+**Directive 1 (Global functions)**. The example below shows a directive
+``global/${prefix}`` that marks a type stub section for global functions.
 
 .. code-block:: python
 
@@ -340,10 +340,10 @@ to identify what to generate and where to write generated code.
 
 Running ``tvm-ffi-stubgen`` fills in the function stubs between the
 ``begin`` and ``end`` markers based on the loaded registry, and in this case
-introduces all the global functions named ``my_ext.arith.*``.
+adds all the global functions named ``my_ext.arith.*``.
 
-**Directive 2 (Classes)**. Example below shows an directive
-``object/${type_key}`` marking the fields and methods of a registered class.
+**Directive 2 (Classes)**. The example below shows a directive
+``object/${type_key}`` that marks the fields and methods of a registered class.
 
 .. code-block:: python
 
@@ -360,12 +360,12 @@ introduces all the global functions named ``my_ext.arith.*``.
 Directive-based Generation
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-After TVM-FFI extension is built as a shared library, say at
-``build/libmy_ffi_extension.so``
+After the TVM-FFI extension is built as a shared library, for example at
+``build/libmy_ffi_extension.so``:
 
 **Command line tool**. The command below generates stubs for
 the package located at ``python/my_ffi_extension``, updating
-all sections marked by the directives.
+all sections marked by directives.
 
 .. code-block:: bash
 
@@ -384,15 +384,14 @@ every time the target is built.
        STUB_DIR "python"
    )
 
-Inside the function, CMake manages to find proper ``--dlls`` arguments
+Inside the function, CMake derives the proper ``--dlls`` arguments
 via ``$<TARGET_FILE:${target}>``.
 
 Scaffold Missing Directives
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 **Command line tool**. Beyond updating existing directives, ``tvm-ffi-stubgen``
-can be used to scaffold missing directives if they are not yet present in the
-package with a few extra flags.
+can scaffold missing directives with a few extra flags.
 
 .. code-block:: bash
 
@@ -405,11 +404,11 @@ package with a few extra flags.
 
 - ``--init-pypkg <pypkg>``: Specifies the name of the Python package to initialize, e.g. ``apache-tvm-ffi``, ``my-ffi-extension``;
 - ``--init-lib <libtarget>``: Specifies the name of the CMake target (shared library) to load for reflection metadata;
-- ``--init-prefix <prefix>``: Specifies the registry prefix to include for stub generation, e.g. ``my_ffi_extension.``. If names of global functions or classes start with this prefix, they will be included in the generated stubs.
+- ``--init-prefix <prefix>``: Specifies the registry prefix to include for stub generation, e.g. ``my_ffi_extension.``. If global function or class names start with this prefix, they will be included in the generated stubs.
 
 **CMake Integration**. CMake function ``tvm_ffi_configure_target``
-also supports scaffolding missing directives via the extra options
-``STUB_INIT``, ``STUB_PKG``, and ``STUB_PREFIX``.
+also supports scaffolding missing directives via the ``STUB_INIT``, ``STUB_PKG``,
+and ``STUB_PREFIX`` options.
 
 .. code-block:: cmake
 
@@ -424,7 +423,7 @@ based on the target and package information already specified.
 Other Directives
 ~~~~~~~~~~~~~~~~
 
-All the supported directives are documented via:
+All supported directives are documented via:
 
 .. code-block:: bash
 
@@ -448,8 +447,8 @@ It includes:
        from typing import Any, Callable
    # tvm-ffi-stubgen(end)
 
-**Directive 4 (Export)**. It re-exports names defined in `_ffi_api.__all__` into the current file. Usually
-used in ``__init__.py`` to aggregate all exported names. Example:
+**Directive 4 (Export)**. It re-exports names defined in `_ffi_api.__all__` into the current file, usually
+in ``__init__.py`` to aggregate exported names. Example:
 
 .. code-block:: python
 
@@ -481,7 +480,7 @@ classes and functions, as well as ``LIB`` if present. It's usually placed at the
 
    # tvm-ffi-stubgen(ty-map): ffi.reflection.AccessStep -> ffi.access_path.AccessStep
 
-means the class with type key ``ffi.reflection.AccessStep``, is instead class ``ffi.access_path.AccessStep``
+means the class with type key ``ffi.reflection.AccessStep`` is mapped to ``ffi.access_path.AccessStep``
 in Python.
 
 **Directive 7 (Import object)**. It injects a custom import into generated code, optionally
