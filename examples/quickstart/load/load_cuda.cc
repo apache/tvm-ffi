@@ -18,8 +18,8 @@
  */
 // [main.begin]
 // File: load/load_cuda.cc
-#include <tvm/ffi/container/tensor.h>
 #include <tvm/ffi/extra/module.h>
+#include <tvm/ffi/tvm_ffi.h>
 
 namespace {
 namespace ffi = tvm::ffi;
