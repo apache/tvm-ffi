@@ -28,6 +28,7 @@
 #include <tvm/ffi/error.h>
 #include <tvm/ffi/object.h>
 
+#include <limits>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -280,7 +281,7 @@ struct TypeTraits<Int, std::enable_if_t<std::is_integral_v<Int>>> : public TypeT
 
   TVM_FFI_INLINE static void CopyToAnyView(const Int& src, TVMFFIAny* result) {
     if constexpr (std::is_unsigned_v<Int> && sizeof(Int) >= sizeof(int64_t)) {
-      if (src > static_cast<Int>(INT64_MAX)) {
+      if (src > static_cast<Int>(std::numeric_limits<int64_t>::max())) {
         TVM_FFI_THROW(OverflowError)
             << "Integer value " << src << " is too large to fit in int64_t. "
             << "Consider explicitly casting to int64_t first if this is intentional.";
