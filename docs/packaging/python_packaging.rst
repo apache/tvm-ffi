@@ -23,9 +23,9 @@ as a Python wheel. The goal is to help you wire up a simple extension, produce a
 and ship user-friendly typing annotations without needing to know every detail of TVM
 internals. We cover three checkpoints:
 
+- Build a Python wheel;
 - Export C++ to Python;
-- Build Python wheel;
-- Automatic Python package generation tools.
+- Generate Python package stubs.
 
 .. note::
 
@@ -44,6 +44,120 @@ internals. We cover three checkpoints:
         pip install --reinstall --upgrade apache-tvm-ffi
 
 
+Build Python Wheel
+------------------
+
+Start by defining the Python packaging and build wiring. TVM-FFI provides helpers to build and ship
+ABI-agnostic Python extensions using standard packaging tools. The steps below set up the build so
+you can plug in the C++ exports from the next section.
+
+The flow below uses :external+scikit_build_core:doc:`scikit-build-core <index>`
+to drive a CMake build, but the same ideas apply to setuptools or other :pep:`517` backends.
+
+CMake Target
+~~~~~~~~~~~~
+
+Assume the source tree contains ``src/extension.cc``. Create a ``CMakeLists.txt`` that
+creates a shared target ``my_ffi_extension`` and configures it against TVM-FFI.
+
+.. literalinclude:: ../../examples/python_packaging/CMakeLists.txt
+  :language: cmake
+  :start-after: [example.cmake.begin]
+  :end-before: [example.cmake.end]
+
+Function ``tvm_ffi_configure_target`` sets up TVM-FFI include paths and links against the TVM-FFI library.
+Additional options for stub generation are covered in :ref:`sec-stubgen`.
+
+Function ``tvm_ffi_install`` places necessary information (e.g., debug symbols on macOS) next to
+the shared library for packaging.
+
+Python Build Backend
+~~~~~~~~~~~~~~~~~~~~
+
+Define a :pep:`517` build backend in ``pyproject.toml`` with the following steps:
+
+- Specify ``apache-tvm-ffi`` as a build requirement, so that CMake can find TVM-FFI;
+- Configure ``wheel.py-api`` that indicates a Python ABI-agnostic wheel;
+- Specify the source directory of the package via ``wheel.packages``, and the installation
+  destination via ``wheel.install-dir``.
+
+.. literalinclude:: ../../examples/python_packaging/pyproject.toml
+  :language: toml
+  :start-after: [pyproject.build.begin]
+  :end-before: [pyproject.build.end]
+
+Once specified, scikit-build-core will invoke CMake and drive the extension build.
+
+
+Wheel Auditing
+~~~~~~~~~~~~~~
+
+**Build wheels**. You can build wheels using standard workflows, for example:
+
+- `pip workflow <https://pip.pypa.io/en/stable/cli/pip_wheel/>`_ or `editable install <https://pip.pypa.io/en/stable/topics/local-project-installs/#editable-installs>`_
+
+.. code-block:: bash
+
+  # editable install
+  pip install -e .
+  # standard wheel build
+  pip wheel -w dist .
+
+- `uv workflow <https://docs.astral.sh/uv/guides/package/>`_
+
+.. code-block:: bash
+
+  uv build --wheel --out-dir dist .
+
+- `cibuildwheel <https://cibuildwheel.pypa.io/>`_ for multi-platform build
+
+.. code-block:: bash
+
+  cibuildwheel --output-dir dist
+
+**Audit wheels**. In practice, an extra step is usually needed to remove redundant
+and error-prone shared library dependencies. In our case, because ``libtvm_ffi.so``
+(or its platform variants) is guaranteed to be loaded by importing ``tvm_ffi``,
+we can safely exclude this dependency from the final wheel.
+
+.. code-block:: bash
+
+   # Linux
+   auditwheel repair --exclude libtvm_ffi.so dist/*.whl
+   # macOS
+   delocate-wheel -w dist -v --exclude libtvm_ffi.dylib dist/*.whl
+   # Windows
+   delvewheel repair --exclude tvm_ffi.dll -w dist dist\\*.whl
+
+Load the Library
+~~~~~~~~~~~~~~~~
+
+Once the wheel is installed, use :py:func:`tvm_ffi.libinfo.load_lib_module` to load
+the shared library:
+
+.. code-block:: python
+
+   from tvm_ffi.libinfo import load_lib_module
+
+   LIB = load_lib_module(
+       package="my-ffi-extension",
+       target_name="my_ffi_extension",
+   )
+
+The parameters are:
+
+- ``package``: The Python package name as registered with pip (e.g., ``"my-ffi-extension"``
+  or ``"apache-tvm-ffi"``). This is the name in ``pyproject.toml``, **not** the import name
+  (e.g., ``tvm_ffi``). The function uses ``importlib.metadata.distribution(package)`` internally
+  to locate installed package files.
+
+- ``target_name``: The CMake target name (e.g., ``"my_ffi_extension"``). It is used to derive
+  the platform-specific shared library filename:
+
+  * Linux: ``lib{target_name}.so``
+  * macOS: ``lib{target_name}.dylib``
+  * Windows: ``{target_name}.dll``
+
 Export C++ to Python
 --------------------
 
@@ -60,7 +174,9 @@ TVM-FFI offers three ways to expose code:
 - Functions: expose functions via the global registry;
 - Classes: register C++ classes derived from :cpp:class:`tvm::ffi::Object` as Python dataclasses.
 
-Metadata is captured automatically and later turned into type hints for LSP support.
+Metadata is captured automatically and later turned into Python type hints for LSP support.
+The examples below show C++ code and its Python usage. The "Python (Generated)" tab
+shows code produced by the stub generation tool (see :ref:`sec-stubgen`).
 
 TVM-FFI ABI (Recommended)
 ~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -224,92 +340,7 @@ makes it easy to expose:
           def sum(self) -> int: ...
 
 
-Build Python Wheel
-------------------
-
-Once the C++ side is ready, TVM-FFI provides helpers to build and ship
-ABI-agnostic Python extensions using standard packaging tools.
-
-The flow below uses :external+scikit_build_core:doc:`scikit-build-core <index>`
-to drive a CMake build, but the same ideas apply to setuptools or other :pep:`517` backends.
-
-CMake Target
-~~~~~~~~~~~~
-
-Assume the source tree contains ``src/extension.cc``. Create a ``CMakeLists.txt`` that
-creates a shared target ``my_ffi_extension`` and configures it against TVM-FFI.
-
-.. literalinclude:: ../../examples/python_packaging/CMakeLists.txt
-  :language: cmake
-  :start-after: [example.cmake.begin]
-  :end-before: [example.cmake.end]
-
-Function ``tvm_ffi_configure_target`` sets up TVM-FFI include paths, links against the TVM-FFI library,
-generates stubs under ``STUB_DIR``, and can scaffold stub files when ``STUB_INIT`` is
-enabled.
-
-Function ``tvm_ffi_install`` places necessary information (e.g., debug symbols on macOS) next to
-the shared library for packaging.
-
-Python Build Backend
-~~~~~~~~~~~~~~~~~~~~
-
-Define a :pep:`517` build backend in ``pyproject.toml`` with the following steps:
-
-- Specify ``apache-tvm-ffi`` as a build requirement, so that CMake can find TVM-FFI;
-- Configure ``wheel.py-api`` that indicates a Python ABI-agnostic wheel;
-- Specify the source directory of the package via ``wheel.packages``, and the installation
-  destination via ``wheel.install-dir``.
-
-.. literalinclude:: ../../examples/python_packaging/pyproject.toml
-  :language: toml
-  :start-after: [pyproject.build.begin]
-  :end-before: [pyproject.build.end]
-
-Once specified, scikit-build-core will invoke CMake and drive the extension build.
-
-
-Wheel Auditing
-~~~~~~~~~~~~~~
-
-**Build wheels**. You can build wheels using standard workflows, for example:
-
-- `pip workflow <https://pip.pypa.io/en/stable/cli/pip_wheel/>`_ or `editable install <https://pip.pypa.io/en/stable/topics/local-project-installs/#editable-installs>`_
-
-.. code-block:: bash
-
-  # editable install
-  pip install -e .
-  # standard wheel build
-  pip wheel -w dist .
-
-- `uv workflow <https://docs.astral.sh/uv/guides/package/>`_
-
-.. code-block:: bash
-
-  uv build --wheel --out-dir dist .
-
-- `cibuildwheel <https://cibuildwheel.pypa.io/>`_ for multi-platform build
-
-.. code-block:: bash
-
-  cibuildwheel --output-dir dist
-
-**Audit wheels**. In practice, an extra step is usually needed to remove redundant
-and error-prone shared library dependencies. In our case, because ``libtvm_ffi.so``
-(or its platform variants) is guaranteed to be loaded by importing ``tvm_ffi``,
-we can safely exclude this dependency from the final wheel.
-
-.. code-block:: bash
-
-   # Linux
-   auditwheel repair --exclude libtvm_ffi.so dist/*.whl
-   # macOS
-   delocate-wheel -w dist -v --exclude libtvm_ffi.dylib dist/*.whl
-   # Windows
-   delvewheel repair --exclude tvm_ffi.dll -w dist dist\\*.whl
-
-.. _sec-subgen:
+.. _sec-stubgen:
 
 Stub Generation Tool
 --------------------
