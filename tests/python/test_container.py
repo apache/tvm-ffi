@@ -227,3 +227,31 @@ def test_large_map_get() -> None:
 def test_array_contains(arr: list[Any], value: Any, expected: bool) -> None:
     a = tvm_ffi.convert(arr)
     assert (value in a) == expected
+
+
+@pytest.mark.parametrize(
+    "arr, expected",
+    [
+        ([1, 2, 3], True),
+        ([1], True),
+        ([], False),
+        (["hello"], True),
+    ],
+)
+def test_array_bool(arr: list[Any], expected: bool) -> None:
+    a = tvm_ffi.Array(arr)
+    assert bool(a) is expected
+
+
+@pytest.mark.parametrize(
+    "mapping, expected",
+    [
+        ({"a": 1, "b": 2}, True),
+        ({"a": 1}, True),
+        ({}, False),
+        ({1: "one"}, True),
+    ],
+)
+def test_map_bool(mapping: dict[Any, Any], expected: bool) -> None:
+    m = tvm_ffi.Map(mapping)
+    assert bool(m) is expected
