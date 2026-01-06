@@ -63,6 +63,9 @@ def test_string_find_substr() -> None:
     assert s.find("o", 5) == 7
     assert s.find("notfound") == -1
     assert s.find("") == 0
+    assert s.find("", 5) == 5
+    assert s.find("", 11) == 11
+    assert s.find("", 20) == -1
 
     assert s[6:11] == "world"
     assert s[0:5] == "hello"

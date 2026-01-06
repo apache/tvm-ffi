@@ -611,11 +611,14 @@ class String {
     }
   }
 
+  /*! \brief Value returned by find() when no match is found */
+  static constexpr size_t npos = static_cast<size_t>(-1);
+
   /*!
    * \brief Find the first occurrence of a substring
    * \param str The substring to search for
    * \param pos The position at which to start the search
-   * \return The position of the first character of the first match, or size_t(-1) if not found
+   * \return The position of the first character of the first match, or npos if not found
    */
   size_t find(const String& str, size_t pos = 0) const { return find(str.data(), pos, str.size()); }
 
@@ -623,7 +626,7 @@ class String {
    * \brief Find the first occurrence of a substring
    * \param str The substring to search for
    * \param pos The position at which to start the search
-   * \return The position of the first character of the first match, or size_t(-1) if not found
+   * \return The position of the first character of the first match, or npos if not found
    */
   size_t find(const char* str, size_t pos = 0) const { return find(str, pos, std::strlen(str)); }
 
@@ -632,21 +635,10 @@ class String {
    * \param str The substring to search for
    * \param pos The position at which to start the search
    * \param count The length of the substring
-   * \return The position of the first character of the first match, or size_t(-1) if not found
+   * \return The position of the first character of the first match, or npos if not found
    */
   size_t find(const char* str, size_t pos, size_t count) const {
-    if (count == 0) return pos <= size() ? pos : size_t(-1);
-    if (pos >= size() || count > size() - pos) return size_t(-1);
-
-    const char* this_data = data();
-    size_t this_size = size();
-
-    for (size_t i = pos; i <= this_size - count; ++i) {
-      if (std::memcmp(this_data + i, str, count) == 0) {
-        return i;
-      }
-    }
-    return size_t(-1);
+    return std::string_view(data(), size()).find(std::string_view(str, count), pos);
   }
 
   /*!

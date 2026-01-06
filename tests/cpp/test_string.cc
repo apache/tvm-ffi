@@ -451,16 +451,17 @@ TEST(String, Find) {
   EXPECT_EQ(s.find("hello"), 0);
   EXPECT_EQ(s.find("o"), 4);
   EXPECT_EQ(s.find("o", 5), 7);
-  EXPECT_EQ(s.find("notfound"), size_t(-1));
+  EXPECT_EQ(s.find("notfound"), String::npos);
   EXPECT_EQ(s.find(""), 0);
   EXPECT_EQ(s.find("", 5), 5);
-  EXPECT_EQ(s.find("", 20), size_t(-1));
+  EXPECT_EQ(s.find("", 11), 11);
+  EXPECT_EQ(s.find("", 20), String::npos);
 
   String pattern{"world"};
   EXPECT_EQ(s.find(pattern), 6);
 
   String empty{""};
-  EXPECT_EQ(empty.find("x"), size_t(-1));
+  EXPECT_EQ(empty.find("x"), String::npos);
   EXPECT_EQ(empty.find(""), 0);
 }
 
