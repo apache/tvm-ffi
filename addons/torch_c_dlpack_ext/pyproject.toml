@@ -24,7 +24,7 @@ dependencies = ["torch"]
 
 authors = [{ name = "TVM FFI team" }]
 readme = "README.md"
-license = { text = "Apache 2.0" }
+license = { file = "LICENSE" }
 classifiers = [
   "License :: OSI Approved :: Apache Software License",
   "Development Status :: 4 - Beta",
@@ -43,7 +43,7 @@ include-package-data = true
 py-modules = ["build_backend"]
 
 [tool.setuptools.packages.find]
-include = ["torch_c_dlpack_ext*", "LICENSE", "NOTICE", "README.md"]
+include = ["torch_c_dlpack_ext*"]
 
 [tool.setuptools.package-data]
 torch_c_dlpack_ext = ["*.so", "*.dll", "*.dylib"]
