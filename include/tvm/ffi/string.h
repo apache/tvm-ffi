@@ -647,7 +647,7 @@ class String {
    * \param count The length of the substring (default: until end of string)
    * \return A string containing the substring
    */
-  String substr(size_t pos = 0, size_t count = size_t(-1)) const {
+  String substr(size_t pos = 0, size_t count = npos) const {
     if (pos > size()) {
       throw std::out_of_range("tvm::String substr index out of bounds");
     }
