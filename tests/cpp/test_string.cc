@@ -445,4 +445,40 @@ TEST(String, StdHash) {
   EXPECT_EQ(std::hash<Bytes>()(s3), std::hash<Bytes>()(s4));
 }
 
+TEST(String, Find) {
+  String s{"hello world"};
+  EXPECT_EQ(s.find("world"), 6);
+  EXPECT_EQ(s.find("hello"), 0);
+  EXPECT_EQ(s.find("o"), 4);
+  EXPECT_EQ(s.find("o", 5), 7);
+  EXPECT_EQ(s.find("notfound"), size_t(-1));
+  EXPECT_EQ(s.find(""), 0);
+  EXPECT_EQ(s.find("", 5), 5);
+  EXPECT_EQ(s.find("", 20), size_t(-1));
+
+  String pattern{"world"};
+  EXPECT_EQ(s.find(pattern), 6);
+
+  String empty{""};
+  EXPECT_EQ(empty.find("x"), size_t(-1));
+  EXPECT_EQ(empty.find(""), 0);
+}
+
+TEST(String, Substr) {
+  String s{"hello world"};
+  EXPECT_EQ(s.substr(0, 5), "hello");
+  EXPECT_EQ(s.substr(6, 5), "world");
+  EXPECT_EQ(s.substr(6), "world");
+  EXPECT_EQ(s.substr(0), "hello world");
+  EXPECT_EQ(s.substr(11), "");
+  EXPECT_EQ(s.substr(0, 0), "");
+
+  EXPECT_THROW(s.substr(12), std::out_of_range);
+  EXPECT_THROW(s.substr(100), std::out_of_range);
+
+  String empty{""};
+  EXPECT_EQ(empty.substr(0), "");
+  EXPECT_THROW(empty.substr(1), std::out_of_range);
+}
+
 }  // namespace

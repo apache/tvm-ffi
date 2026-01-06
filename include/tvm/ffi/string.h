@@ -612,6 +612,58 @@ class String {
   }
 
   /*!
+   * \brief Find the first occurrence of a substring
+   * \param str The substring to search for
+   * \param pos The position at which to start the search
+   * \return The position of the first character of the first match, or size_t(-1) if not found
+   */
+  size_t find(const String& str, size_t pos = 0) const { return find(str.data(), pos, str.size()); }
+
+  /*!
+   * \brief Find the first occurrence of a substring
+   * \param str The substring to search for
+   * \param pos The position at which to start the search
+   * \return The position of the first character of the first match, or size_t(-1) if not found
+   */
+  size_t find(const char* str, size_t pos = 0) const { return find(str, pos, std::strlen(str)); }
+
+  /*!
+   * \brief Find the first occurrence of a substring
+   * \param str The substring to search for
+   * \param pos The position at which to start the search
+   * \param count The length of the substring
+   * \return The position of the first character of the first match, or size_t(-1) if not found
+   */
+  size_t find(const char* str, size_t pos, size_t count) const {
+    if (count == 0) return pos <= size() ? pos : size_t(-1);
+    if (pos >= size() || count > size() - pos) return size_t(-1);
+
+    const char* this_data = data();
+    size_t this_size = size();
+
+    for (size_t i = pos; i <= this_size - count; ++i) {
+      if (std::memcmp(this_data + i, str, count) == 0) {
+        return i;
+      }
+    }
+    return size_t(-1);
+  }
+
+  /*!
+   * \brief Returns a substring [pos, pos+count)
+   * \param pos The position of the first character to include
+   * \param count The length of the substring (default: until end of string)
+   * \return A string containing the substring
+   */
+  String substr(size_t pos = 0, size_t count = size_t(-1)) const {
+    if (pos > size()) {
+      throw std::out_of_range("tvm::String substr index out of bounds");
+    }
+    size_t rcount = std::min(count, size() - pos);
+    return String(data() + pos, rcount);
+  }
+
+  /*!
    * \brief Convert String to an std::string object
    *
    * \return std::string

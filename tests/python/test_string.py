@@ -53,3 +53,18 @@ def test_bytes() -> None:
     b5 = pickle.loads(pickle.dumps(b))
     assert b5 == b"hello"
     assert isinstance(b5, tvm_ffi.core.Bytes)
+
+
+def test_string_find_substr() -> None:
+    s = tvm_ffi.core.String("hello world")
+    assert s.find("world") == 6
+    assert s.find("hello") == 0
+    assert s.find("o") == 4
+    assert s.find("o", 5) == 7
+    assert s.find("notfound") == -1
+    assert s.find("") == 0
+
+    assert s[6:11] == "world"
+    assert s[0:5] == "hello"
+    assert s[6:] == "world"
+    assert s[:5] == "hello"
