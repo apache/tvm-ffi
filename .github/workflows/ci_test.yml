@@ -33,6 +33,8 @@ jobs:
     outputs:
       should_skip_ci_commit: ${{ steps.detect.outputs.should_skip_ci_commit }}
       should_skip_ci_docs_only: ${{ steps.detect.outputs.should_skip_ci_docs_only }}
+      cpp_changed: ${{ steps.cpp_files.outputs.changed }}
+      cpp_files: ${{ steps.cpp_files.outputs.files }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -45,6 +47,13 @@ jobs:
           github_event_name: ${{ github.event_name }}
           pr_base_ref: ${{ github.event.pull_request.base.ref || '' }}
           pr_head_sha: ${{ github.event.pull_request.head.sha || '' }}
+      - name: Get changed C++ files
+        id: cpp_files
+        run: |
+          FILES=$(git diff --name-only --diff-filter=ACMR origin/${{ github.base_ref }}...HEAD -- \
+            '*.c' '*.cc' '*.cpp' '*.cxx' '*.h' '*.hpp' '*.hxx' | tr '\n' ' ')
+          echo "files=$FILES" >> $GITHUB_OUTPUT
+          [ -n "$FILES" ] && echo "changed=true" >> $GITHUB_OUTPUT || echo "changed=false" >> $GITHUB_OUTPUT
 
   lint:
     needs: [prepare]
@@ -58,6 +67,7 @@ jobs:
 
   clang-tidy:
     needs: [prepare]
+    if: needs.prepare.outputs.cpp_changed == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -77,7 +87,7 @@ jobs:
             python tests/lint/clang_tidy_precommit.py         \
               --build-dir=build-pre-commit                    \
               --jobs=${{ steps.env_vars.outputs.cpu_count }}  \
-              ./src/ ./include ./tests
+              ${{ needs.prepare.outputs.cpp_files }}
 
   doc:
     needs: [lint, prepare]
