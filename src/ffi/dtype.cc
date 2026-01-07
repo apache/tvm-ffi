@@ -211,12 +211,18 @@ inline DLDataType StringViewToDLDataType_(std::string_view str) {
   // Helper lambda to parse decimal digits from a bounded string_view
   // Returns the parsed value and updates ptr to point past the last digit
   auto parse_digits = [](const char*& ptr, const char* end) -> uint32_t {
-    uint32_t value = 0;
+    uint64_t value = 0;
+    const char* start_ptr = ptr;
     while (ptr < end && *ptr >= '0' && *ptr <= '9') {
       value = value * 10 + (*ptr - '0');
       ptr++;
     }
-    return value;
+    if (value > UINT32_MAX) {
+      TVM_FFI_THROW(ValueError) << "Integer value in dtype string '"
+                                << std::string_view(start_ptr, ptr - start_ptr)
+                                << "' is out of range for uint32_t";
+    }
+    return static_cast<uint32_t>(value);
   };
 
   auto parse_float = [&](const std::string_view& str, int offset, int code, int bits) {
@@ -226,7 +232,17 @@ inline DLDataType StringViewToDLDataType_(std::string_view str) {
     const char* endpt = scan;
     if (scan < str_end && *scan == 'x') {
       endpt = scan + 1;
-      dtype.lanes = static_cast<uint16_t>(parse_digits(endpt, str_end));
+      const char* digits_start = endpt;
+      uint32_t lanes_val = parse_digits(endpt, str_end);
+      if (endpt == digits_start || lanes_val == 0) {
+        TVM_FFI_THROW(ValueError) << "Invalid lanes specification in dtype '" << str
+                                  << "'. Lanes must be a positive integer.";
+      }
+      if (lanes_val > UINT16_MAX) {
+        TVM_FFI_THROW(ValueError) << "Lanes value " << lanes_val
+                                  << " is out of range for uint16_t in dtype '" << str << "'";
+      }
+      dtype.lanes = static_cast<uint16_t>(lanes_val);
       scan = endpt;
     }
     if (scan != str_end) {
@@ -308,7 +324,12 @@ inline DLDataType StringViewToDLDataType_(std::string_view str) {
   }
   // Parse bits manually to handle non-null-terminated string_view
   const char* xdelim = scan;
-  uint8_t bits = static_cast<uint8_t>(parse_digits(xdelim, str_end));
+  uint32_t bits_val = parse_digits(xdelim, str_end);
+  if (bits_val > UINT8_MAX) {
+    TVM_FFI_THROW(ValueError) << "Bits value " << bits_val << " is out of range for uint8_t in dtype '"
+                              << str << "'";
+  }
+  uint8_t bits = static_cast<uint8_t>(bits_val);
   if (bits != 0) dtype.bits = bits;
   int scalable_multiplier = 1;
   // Check bounds before dereferencing xdelim
@@ -320,7 +341,17 @@ inline DLDataType StringViewToDLDataType_(std::string_view str) {
   // Check bounds before dereferencing xdelim
   if (xdelim < str_end && *xdelim == 'x') {
     endpt = xdelim + 1;
-    dtype.lanes = static_cast<uint16_t>(scalable_multiplier * parse_digits(endpt, str_end));
+    const char* digits_start = endpt;
+    uint32_t lanes_val = parse_digits(endpt, str_end);
+    if (endpt == digits_start || lanes_val == 0) {
+      TVM_FFI_THROW(ValueError) << "Invalid lanes specification in dtype '" << str
+                                << "'. Lanes must be a positive integer.";
+    }
+    if (lanes_val > UINT16_MAX) {
+      TVM_FFI_THROW(ValueError) << "Lanes value " << lanes_val
+                                << " is out of range for uint16_t in dtype '" << str << "'";
+    }
+    dtype.lanes = static_cast<uint16_t>(scalable_multiplier * lanes_val);
   }
   if (endpt != str_end) {
     TVM_FFI_THROW(ValueError) << "unknown dtype `" << str << '`';
