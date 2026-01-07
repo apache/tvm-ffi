@@ -56,6 +56,29 @@ jobs:
           fetch-tags: true
       - uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd  # v3.0.1
 
+  clang-tidy:
+    needs: [prepare]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Set up uv
+        uses: astral-sh/setup-uv@b75a909f75acd358c2196fb9a5f1299a9a8868a4  # v6.7.0
+        with:
+          python-version: 3.13
+      - uses: ./.github/actions/detect-env-vars
+        id: env_vars
+      - name: Run clang-tidy
+        run: |
+          uv run --no-project --with "clang-tidy==21.1.1"     \
+            python tests/lint/clang_tidy_precommit.py         \
+              --build-dir=build-pre-commit                    \
+              --jobs=${{ steps.env_vars.outputs.cpu_count }}  \
+              ./src/ ./include ./tests
+
   doc:
     needs: [lint, prepare]
     runs-on: ubuntu-latest
