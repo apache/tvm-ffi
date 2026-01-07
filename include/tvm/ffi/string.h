@@ -656,6 +656,60 @@ class String {
   }
 
   /*!
+   * \brief Check if the string starts with a prefix
+   * \param prefix The prefix to check for
+   * \return true if the string starts with prefix, false otherwise
+   */
+  bool startswith(const String& prefix) const { return startswith(prefix.data(), prefix.size()); }
+
+  /*!
+   * \brief Check if the string starts with a prefix
+   * \param prefix The prefix to check for
+   * \return true if the string starts with prefix, false otherwise
+   */
+  bool startswith(const char* prefix) const { return startswith(prefix, std::strlen(prefix)); }
+
+  /*!
+   * \brief Check if the string starts with a prefix
+   * \param prefix The prefix to check for
+   * \param count The length of the prefix
+   * \return true if the string starts with prefix, false otherwise
+   */
+  bool startswith(const char* prefix, size_t count) const {
+    if (count > size()) {
+      return false;
+    }
+    return std::memcmp(data(), prefix, count) == 0;
+  }
+
+  /*!
+   * \brief Check if the string ends with a suffix
+   * \param suffix The suffix to check for
+   * \return true if the string ends with suffix, false otherwise
+   */
+  bool endswith(const String& suffix) const { return endswith(suffix.data(), suffix.size()); }
+
+  /*!
+   * \brief Check if the string ends with a suffix
+   * \param suffix The suffix to check for
+   * \return true if the string ends with suffix, false otherwise
+   */
+  bool endswith(const char* suffix) const { return endswith(suffix, std::strlen(suffix)); }
+
+  /*!
+   * \brief Check if the string ends with a suffix
+   * \param suffix The suffix to check for
+   * \param count The length of the suffix
+   * \return true if the string ends with suffix, false otherwise
+   */
+  bool endswith(const char* suffix, size_t count) const {
+    if (count > size()) {
+      return false;
+    }
+    return std::memcmp(data() + size() - count, suffix, count) == 0;
+  }
+
+  /*!
    * \brief Convert String to an std::string object
    *
    * \return std::string

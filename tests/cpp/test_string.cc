@@ -482,4 +482,44 @@ TEST(String, Substr) {
   EXPECT_THROW(empty.substr(1), std::out_of_range);
 }
 
+TEST(String, StartsWith) {
+  String s{"hello world"};
+  EXPECT_TRUE(s.startswith("hello"));
+  EXPECT_TRUE(s.startswith("h"));
+  EXPECT_TRUE(s.startswith(""));
+  EXPECT_TRUE(s.startswith(String{"hello"}));
+  EXPECT_FALSE(s.startswith("world"));
+  EXPECT_FALSE(s.startswith("Hello"));
+  EXPECT_FALSE(s.startswith("hello world extra"));
+
+  String empty{""};
+  EXPECT_TRUE(empty.startswith(""));
+  EXPECT_FALSE(empty.startswith("x"));
+
+  String single{"x"};
+  EXPECT_TRUE(single.startswith("x"));
+  EXPECT_TRUE(single.startswith(""));
+  EXPECT_FALSE(single.startswith("xy"));
+}
+
+TEST(String, EndsWith) {
+  String s{"hello world"};
+  EXPECT_TRUE(s.endswith("world"));
+  EXPECT_TRUE(s.endswith("d"));
+  EXPECT_TRUE(s.endswith(""));
+  EXPECT_TRUE(s.endswith(String{"world"}));
+  EXPECT_FALSE(s.endswith("hello"));
+  EXPECT_FALSE(s.endswith("World"));
+  EXPECT_FALSE(s.endswith("extra hello world"));
+
+  String empty{""};
+  EXPECT_TRUE(empty.endswith(""));
+  EXPECT_FALSE(empty.endswith("x"));
+
+  String single{"x"};
+  EXPECT_TRUE(single.endswith("x"));
+  EXPECT_TRUE(single.endswith(""));
+  EXPECT_FALSE(single.endswith("yx"));
+}
+
 }  // namespace
