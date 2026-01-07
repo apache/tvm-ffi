@@ -127,4 +127,76 @@ TEST(DataType, AnyConversionWithString) {
   EXPECT_EQ(opt_v1.value().bits, 16);
   EXPECT_EQ(opt_v1.value().lanes, 2);
 }
+
+TEST(DType, NonNullTerminatedStringView) {
+  // Simulate memory scenario similar to Electron where memory after string
+  // contains garbage data (digits from previous strings)
+  //
+  // We test by calling TVMFFIDataTypeFromString directly with TVMFFIByteArray
+  // to bypass String's automatic null-termination
+
+  // Helper lambda to test with raw byte array (no null terminator)
+  auto test_dtype_from_bytes = [](const char* data, size_t size) -> DLDataType {
+    TVMFFIByteArray byte_array{data, size};
+    DLDataType dtype;
+    int ret = TVMFFIDataTypeFromString(&byte_array, &dtype);
+    EXPECT_EQ(ret, 0) << "TVMFFIDataTypeFromString failed";
+    return dtype;
+  };
+
+  // Test 1: "float16" followed by digit garbage
+  char buffer1[] = "float16999888777";
+  DLDataType dtype1 = test_dtype_from_bytes(buffer1, 7);  // Only "float16"
+  EXPECT_EQ(dtype1.code, kDLFloat);
+  EXPECT_EQ(dtype1.bits, 16);  // Should be 16, not 16999888777!
+  EXPECT_EQ(dtype1.lanes, 1);
+
+  // Test 2: "int32" followed by "x4" from previous leftover
+  char buffer2[] = "int32x4extradata";
+  DLDataType dtype2 = test_dtype_from_bytes(buffer2, 5);  // Only "int32"
+  EXPECT_EQ(dtype2.code, kDLInt);
+  EXPECT_EQ(dtype2.bits, 32);  // Should be 32, not parse the 'x4'
+  EXPECT_EQ(dtype2.lanes, 1);  // Should be 1, not 4
+
+  // Test 3: "uint8" followed by more digits
+  char buffer3[] = "uint8192";
+  DLDataType dtype3 = test_dtype_from_bytes(buffer3, 5);  // Only "uint8"
+  EXPECT_EQ(dtype3.code, kDLUInt);
+  EXPECT_EQ(dtype3.bits, 8);  // Should be 8, not 8192
+  EXPECT_EQ(dtype3.lanes, 1);
+
+  // Test 4: "bfloat16" followed by "x2" garbage
+  char buffer4[] = "bfloat16x2garbage";
+  DLDataType dtype4 = test_dtype_from_bytes(buffer4, 8);  // Only "bfloat16"
+  EXPECT_EQ(dtype4.code, kDLBfloat);
+  EXPECT_EQ(dtype4.bits, 16);
+  EXPECT_EQ(dtype4.lanes, 1);  // Should be 1, not 2
+
+  // Test 5: "bfloat16x2" - lanes within bounds (should work)
+  DLDataType dtype5 = test_dtype_from_bytes(buffer4, 10);  // "bfloat16x2"
+  EXPECT_EQ(dtype5.code, kDLBfloat);
+  EXPECT_EQ(dtype5.bits, 16);
+  EXPECT_EQ(dtype5.lanes, 2);  // Should correctly parse x2
+
+  // Test 6: Truly non-null-terminated - overwrite null byte
+  char buffer6[] = "float64AAAAA";
+  buffer6[7] = 'X';  // Ensure no null terminator at position 7
+  DLDataType dtype6 = test_dtype_from_bytes(buffer6, 7);  // "float64"
+  EXPECT_EQ(dtype6.code, kDLFloat);
+  EXPECT_EQ(dtype6.bits, 64);
+  EXPECT_EQ(dtype6.lanes, 1);
+
+  // Test 7: "int8" followed by "x16" pattern
+  char buffer7[] = "int8x16leftovers";
+  DLDataType dtype7 = test_dtype_from_bytes(buffer7, 4);  // Only "int8"
+  EXPECT_EQ(dtype7.code, kDLInt);
+  EXPECT_EQ(dtype7.bits, 8);
+  EXPECT_EQ(dtype7.lanes, 1);  // Should be 1, not 16
+
+  // Test 8: With actual x specification that should parse
+  DLDataType dtype8 = test_dtype_from_bytes(buffer7, 7);  // "int8x16"
+  EXPECT_EQ(dtype8.code, kDLInt);
+  EXPECT_EQ(dtype8.bits, 8);
+  EXPECT_EQ(dtype8.lanes, 16);  // Should correctly parse x16
+}
 }  // namespace
