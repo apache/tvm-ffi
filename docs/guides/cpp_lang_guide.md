@@ -32,6 +32,11 @@ You can find runnable code of the examples under tests/cpp/test_example.cc.
 
 ## Any and AnyView
 
+```{seealso}
+For a deep dive into Any including memory layout, ownership semantics, and the type conversion
+machinery, see {doc}`../concepts/any`.
+```
+
 `Any` and `AnyView` are the foundation of tvm-ffi, providing
 ways to store values that are compatible with the ffi system.
 The following example shows how we can interact with Any and AnyView.
