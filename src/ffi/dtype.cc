@@ -206,17 +206,61 @@ inline DLDataType StringViewToDLDataType_(std::string_view str) {
   dtype.bits = 32;
   dtype.lanes = 1;
   const char* scan;
+  const char* str_end = str.data() + str.length();
+
+  // Helper lambda to parse decimal digits from a bounded string_view
+  // Returns the parsed value and updates *ptr to point past the last digit
+  auto parse_digits = [](const char** ptr, const char* end) -> uint32_t {
+    uint64_t value = 0;
+    const char* start_ptr = *ptr;
+    while (*ptr < end && **ptr >= '0' && **ptr <= '9') {
+      value = value * 10 + (**ptr - '0');
+      (*ptr)++;
+    }
+    if (value > UINT32_MAX) {
+      TVM_FFI_THROW(ValueError) << "Integer value in dtype string '"
+                                << std::string_view(start_ptr, *ptr - start_ptr)
+                                << "' is out of range for uint32_t";
+    }
+    return static_cast<uint32_t>(value);
+  };
+
+  // Helper lambda to parse lanes specification (e.g., "x16" or "xvscalex4")
+  // Returns the parsed lanes value and updates *ptr to point past the lanes specification
+  // Supports scalable vectors with the "xvscale" prefix (represented as negative lanes)
+  auto parse_lanes = [&](const char** ptr, const char* end, const std::string_view& dtype_str,
+                         bool allow_scalable = false) -> uint16_t {
+    int multiplier = 1;
+    // Check for "xvscale" prefix for scalable vectors
+    if (allow_scalable && (end - *ptr >= 7) && strncmp(*ptr, "xvscale", 7) == 0) {
+      multiplier = -1;
+      *ptr += 7;
+    }
+    if (*ptr >= end || **ptr != 'x') {
+      return 1;  // No lanes specification, default to 1
+    }
+    (*ptr)++;  // Skip 'x'
+    const char* digits_start = *ptr;
+    uint32_t lanes_val = parse_digits(ptr, end);
+    if (*ptr == digits_start || lanes_val == 0) {
+      TVM_FFI_THROW(ValueError) << "Invalid lanes specification in dtype '" << dtype_str
+                                << "'. Lanes must be a positive integer.";
+    }
+    if (lanes_val > UINT16_MAX) {
+      TVM_FFI_THROW(ValueError) << "Lanes value " << lanes_val
+                                << " is out of range for uint16_t in dtype '" << dtype_str << "'";
+    }
+    return static_cast<uint16_t>(multiplier * lanes_val);
+  };
 
   auto parse_float = [&](const std::string_view& str, int offset, int code, int bits) {
     dtype.code = static_cast<uint8_t>(code);
     dtype.bits = static_cast<uint8_t>(bits);
     scan = str.data() + offset;
-    char* endpt = nullptr;
-    if (*scan == 'x') {
-      dtype.lanes = static_cast<uint16_t>(strtoul(scan + 1, &endpt, 10));
-      scan = endpt;
-    }
-    if (scan != str.data() + str.length()) {
+    const char* endpt = scan;
+    dtype.lanes = parse_lanes(&endpt, str_end, str);
+    scan = endpt;
+    if (scan != str_end) {
       TVM_FFI_THROW(ValueError) << "unknown dtype `" << str << '`';
     }
     return dtype;
@@ -293,19 +337,18 @@ inline DLDataType StringViewToDLDataType_(std::string_view str) {
     scan = str.data();
     TVM_FFI_THROW(ValueError) << "unknown dtype `" << str << '`';
   }
-  char* xdelim;  // emulate sscanf("%ux%u", bits, lanes)
-  uint8_t bits = static_cast<uint8_t>(strtoul(scan, &xdelim, 10));
+  // Parse bits manually to handle non-null-terminated string_view
+  const char* xdelim = scan;
+  uint32_t bits_val = parse_digits(&xdelim, str_end);
+  if (bits_val > UINT8_MAX) {
+    TVM_FFI_THROW(ValueError) << "Bits value " << bits_val
+                              << " is out of range for uint8_t in dtype '" << str << "'";
+  }
+  uint8_t bits = static_cast<uint8_t>(bits_val);
   if (bits != 0) dtype.bits = bits;
-  int scalable_multiplier = 1;
-  if (strncmp(xdelim, "xvscale", 7) == 0) {
-    scalable_multiplier = -1;
-    xdelim += 7;
-  }
-  char* endpt = xdelim;
-  if (*xdelim == 'x') {
-    dtype.lanes = static_cast<uint16_t>(scalable_multiplier * strtoul(xdelim + 1, &endpt, 10));
-  }
-  if (endpt != str.data() + str.length()) {
+  const char* endpt = xdelim;
+  dtype.lanes = parse_lanes(&endpt, str_end, str, /*allow_scalable=*/true);
+  if (endpt != str_end) {
     TVM_FFI_THROW(ValueError) << "unknown dtype `" << str << '`';
   }
   return dtype;
