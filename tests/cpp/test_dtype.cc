@@ -180,7 +180,7 @@ TEST(DType, NonNullTerminatedStringView) {
 
   // Test 6: Truly non-null-terminated - overwrite null byte
   char buffer6[] = "float64AAAAA";
-  buffer6[7] = 'X';  // Ensure no null terminator at position 7
+  buffer6[7] = 'X';                                       // Ensure no null terminator at position 7
   DLDataType dtype6 = test_dtype_from_bytes(buffer6, 7);  // "float64"
   EXPECT_EQ(dtype6.code, kDLFloat);
   EXPECT_EQ(dtype6.bits, 64);
@@ -198,5 +198,19 @@ TEST(DType, NonNullTerminatedStringView) {
   EXPECT_EQ(dtype8.code, kDLInt);
   EXPECT_EQ(dtype8.bits, 8);
   EXPECT_EQ(dtype8.lanes, 16);  // Should correctly parse x16
+
+  // Test 9: Scalable vector - "int32xvscalex4"
+  char buffer9[] = "int32xvscalex4extra";
+  DLDataType dtype9 = test_dtype_from_bytes(buffer9, 14);  // "int32xvscalex4"
+  EXPECT_EQ(dtype9.code, kDLInt);
+  EXPECT_EQ(dtype9.bits, 32);
+  EXPECT_EQ(dtype9.lanes, static_cast<uint16_t>(-4));  // Scalable: -4
+
+  // Test 10: Scalable vector with garbage after
+  char buffer10[] = "float16xvscalex8999";
+  DLDataType dtype10 = test_dtype_from_bytes(buffer10, 16);  // "float16xvscalex8"
+  EXPECT_EQ(dtype10.code, kDLFloat);
+  EXPECT_EQ(dtype10.bits, 16);
+  EXPECT_EQ(dtype10.lanes, static_cast<uint16_t>(-8));  // Should be -8, not parse "999"
 }
 }  // namespace
