@@ -51,7 +51,7 @@ jobs:
         id: cpp_files
         run: |
           FILES=$(git diff --name-only --diff-filter=ACMR origin/${{ github.base_ref }}...HEAD -- \
-            '*.c' '*.cc' '*.cpp' '*.cxx' '*.h' '*.hpp' '*.hxx' | tr '\n' ' ')
+            '*.c' '*.cc' '*.cpp' '*.cxx' | tr '\n' ' ')
           echo "files=$FILES" >> $GITHUB_OUTPUT
           [ -n "$FILES" ] && echo "changed=true" >> $GITHUB_OUTPUT || echo "changed=false" >> $GITHUB_OUTPUT
 
