@@ -294,4 +294,31 @@ TEST(Reflection, AccessPath) {
   auto root_parent = root->GetParent();
   EXPECT_FALSE(root_parent.has_value());
 }
+
+struct TestObjWithAny : public Object {
+  Any value;
+  explicit TestObjWithAny(Any value) : value(std::move(value)) {}
+  [[maybe_unused]] static constexpr bool _type_mutable = true;
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("test.TestObjWithAny", TestObjWithAny, Object);
+};
+
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  refl::ObjectDef<TestObjWithAny>().def(refl::init<Any>()).def_ro("value", &TestObjWithAny::value);
+}
+
+TEST(Reflection, InitWithAny) {
+  Function init = reflection::GetMethod("test.TestObjWithAny", "__ffi_init__");
+  Any obj1 = init(42);
+  EXPECT_TRUE(obj1.as<TestObjWithAny>() != nullptr);
+  EXPECT_EQ(obj1.as<TestObjWithAny>()->value.cast<int>(), 42);
+
+  Any obj2 = init(3.14);
+  EXPECT_TRUE(obj2.as<TestObjWithAny>() != nullptr);
+  EXPECT_EQ(obj2.as<TestObjWithAny>()->value.cast<double>(), 3.14);
+
+  Any obj3 = init(String("hello"));
+  EXPECT_TRUE(obj3.as<TestObjWithAny>() != nullptr);
+  EXPECT_EQ(obj3.as<TestObjWithAny>()->value.cast<String>(), "hello");
+}
 }  // namespace
