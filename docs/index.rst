@@ -60,6 +60,7 @@ Table of Contents
 
    concepts/abi_overview.md
    concepts/any.rst
+   concepts/object_and_class.rst
    concepts/tensor.rst
 
 .. toctree::

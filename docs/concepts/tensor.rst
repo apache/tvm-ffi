@@ -143,7 +143,7 @@ C++ Allocation
 
 TVM-FFI is not a kernel library and is not linked to any specific device memory allocator or runtime.
 However, it provides standardized allocation entry points for kernel library developers by interfacing
-with the surrounding framework's allocator—for example, using PyTorch's allocator when running inside
+with the surrounding framework's allocator - for example, using PyTorch's allocator when running inside
 a PyTorch environment.
 
 **Env Allocator.** Use :cpp:func:`Tensor::FromEnvAlloc() <tvm::ffi::Tensor::FromEnvAlloc>` along with C API
@@ -484,7 +484,7 @@ Further Reading
 ---------------
 
 - :cpp:class:`TensorObj <tvm::ffi::TensorObj>` and :cpp:class:`Tensor <tvm::ffi::Tensor>` are part of the standard TVM-FFI object system.
-  See :ref:`Object System <object-storage-format>` for details on how TVM-FFI objects work.
+  See :doc:`object_and_class` for a comprehensive guide, or :ref:`Object Storage Format <object-storage-format>` for low-level layout details.
 - :cpp:class:`AnyView <tvm::ffi::AnyView>` and :cpp:class:`Any <tvm::ffi::Any>` are part of the stable C ABI.
   Tutorial :doc:`Stable C ABI<../get_started/stable_c_abi>` explains the ABI design at a high level,
   and :doc:`ABI Overview <abi_overview>` shares details on the design.
