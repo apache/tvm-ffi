@@ -484,42 +484,42 @@ TEST(String, Substr) {
 
 TEST(String, StartsWith) {
   String s{"hello world"};
-  EXPECT_TRUE(s.startswith("hello"));
-  EXPECT_TRUE(s.startswith("h"));
-  EXPECT_TRUE(s.startswith(""));
-  EXPECT_TRUE(s.startswith(String{"hello"}));
-  EXPECT_FALSE(s.startswith("world"));
-  EXPECT_FALSE(s.startswith("Hello"));
-  EXPECT_FALSE(s.startswith("hello world extra"));
+  EXPECT_TRUE(s.starts_with("hello"));
+  EXPECT_TRUE(s.starts_with("h"));
+  EXPECT_TRUE(s.starts_with(""));
+  EXPECT_TRUE(s.starts_with(String{"hello"}));
+  EXPECT_FALSE(s.starts_with("world"));
+  EXPECT_FALSE(s.starts_with("Hello"));
+  EXPECT_FALSE(s.starts_with("hello world extra"));
 
   String empty{""};
-  EXPECT_TRUE(empty.startswith(""));
-  EXPECT_FALSE(empty.startswith("x"));
+  EXPECT_TRUE(empty.starts_with(""));
+  EXPECT_FALSE(empty.starts_with("x"));
 
   String single{"x"};
-  EXPECT_TRUE(single.startswith("x"));
-  EXPECT_TRUE(single.startswith(""));
-  EXPECT_FALSE(single.startswith("xy"));
+  EXPECT_TRUE(single.starts_with("x"));
+  EXPECT_TRUE(single.starts_with(""));
+  EXPECT_FALSE(single.starts_with("xy"));
 }
 
 TEST(String, EndsWith) {
   String s{"hello world"};
-  EXPECT_TRUE(s.endswith("world"));
-  EXPECT_TRUE(s.endswith("d"));
-  EXPECT_TRUE(s.endswith(""));
-  EXPECT_TRUE(s.endswith(String{"world"}));
-  EXPECT_FALSE(s.endswith("hello"));
-  EXPECT_FALSE(s.endswith("World"));
-  EXPECT_FALSE(s.endswith("extra hello world"));
+  EXPECT_TRUE(s.ends_with("world"));
+  EXPECT_TRUE(s.ends_with("d"));
+  EXPECT_TRUE(s.ends_with(""));
+  EXPECT_TRUE(s.ends_with(String{"world"}));
+  EXPECT_FALSE(s.ends_with("hello"));
+  EXPECT_FALSE(s.ends_with("World"));
+  EXPECT_FALSE(s.ends_with("extra hello world"));
 
   String empty{""};
-  EXPECT_TRUE(empty.endswith(""));
-  EXPECT_FALSE(empty.endswith("x"));
+  EXPECT_TRUE(empty.ends_with(""));
+  EXPECT_FALSE(empty.ends_with("x"));
 
   String single{"x"};
-  EXPECT_TRUE(single.endswith("x"));
-  EXPECT_TRUE(single.endswith(""));
-  EXPECT_FALSE(single.endswith("yx"));
+  EXPECT_TRUE(single.ends_with("x"));
+  EXPECT_TRUE(single.ends_with(""));
+  EXPECT_FALSE(single.ends_with("yx"));
 }
 
 }  // namespace
