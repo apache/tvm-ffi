@@ -482,4 +482,50 @@ TEST(String, Substr) {
   EXPECT_THROW(empty.substr(1), std::out_of_range);
 }
 
+TEST(String, StartsWith) {
+  String s{"hello world"};
+  EXPECT_TRUE(s.starts_with("hello"));
+  EXPECT_TRUE(s.starts_with("h"));
+  EXPECT_TRUE(s.starts_with(""));
+  EXPECT_TRUE(s.starts_with(String{"hello"}));
+  EXPECT_TRUE(s.starts_with(std::string_view{"hello"}));
+  EXPECT_FALSE(s.starts_with("world"));
+  EXPECT_FALSE(s.starts_with("Hello"));
+  EXPECT_FALSE(s.starts_with("hello world extra"));
+  EXPECT_FALSE(s.starts_with(std::string_view{"world"}));
+
+  String empty{""};
+  EXPECT_TRUE(empty.starts_with(""));
+  EXPECT_TRUE(empty.starts_with(std::string_view{""}));
+  EXPECT_FALSE(empty.starts_with("x"));
+
+  String single{"x"};
+  EXPECT_TRUE(single.starts_with("x"));
+  EXPECT_TRUE(single.starts_with(""));
+  EXPECT_FALSE(single.starts_with("xy"));
+}
+
+TEST(String, EndsWith) {
+  String s{"hello world"};
+  EXPECT_TRUE(s.ends_with("world"));
+  EXPECT_TRUE(s.ends_with("d"));
+  EXPECT_TRUE(s.ends_with(""));
+  EXPECT_TRUE(s.ends_with(String{"world"}));
+  EXPECT_TRUE(s.ends_with(std::string_view{"world"}));
+  EXPECT_FALSE(s.ends_with("hello"));
+  EXPECT_FALSE(s.ends_with("World"));
+  EXPECT_FALSE(s.ends_with("extra hello world"));
+  EXPECT_FALSE(s.ends_with(std::string_view{"hello"}));
+
+  String empty{""};
+  EXPECT_TRUE(empty.ends_with(""));
+  EXPECT_TRUE(empty.ends_with(std::string_view{""}));
+  EXPECT_FALSE(empty.ends_with("x"));
+
+  String single{"x"};
+  EXPECT_TRUE(single.ends_with("x"));
+  EXPECT_TRUE(single.ends_with(""));
+  EXPECT_FALSE(single.ends_with("yx"));
+}
+
 }  // namespace
