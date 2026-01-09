@@ -310,15 +310,15 @@ TVM_FFI_STATIC_INIT_BLOCK() {
 TEST(Reflection, InitWithAny) {
   Function init = reflection::GetMethod("test.TestObjWithAny", "__ffi_init__");
   Any obj1 = init(42);
-  EXPECT_TRUE(obj1.as<TestObjWithAny>() != nullptr);
+  ASSERT_TRUE(obj1.as<TestObjWithAny>() != nullptr);
   EXPECT_EQ(obj1.as<TestObjWithAny>()->value.cast<int>(), 42);
 
   Any obj2 = init(3.14);
-  EXPECT_TRUE(obj2.as<TestObjWithAny>() != nullptr);
+  ASSERT_TRUE(obj2.as<TestObjWithAny>() != nullptr);
   EXPECT_EQ(obj2.as<TestObjWithAny>()->value.cast<double>(), 3.14);
 
   Any obj3 = init(String("hello"));
-  EXPECT_TRUE(obj3.as<TestObjWithAny>() != nullptr);
+  ASSERT_TRUE(obj3.as<TestObjWithAny>() != nullptr);
   EXPECT_EQ(obj3.as<TestObjWithAny>()->value.cast<String>(), "hello");
 }
 }  // namespace
