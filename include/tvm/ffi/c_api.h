@@ -394,6 +394,16 @@ typedef struct {
    */
   void (*update_backtrace)(TVMFFIObjectHandle self, const TVMFFIByteArray* backtrace,
                            int32_t update_mode);
+  /*!
+   * \brief Optional cause error chain that caused this error to be raised.
+   * \note This handle is owned by the ErrorCell.
+   */
+  TVMFFIObjectHandle cause_chain;
+  /*!
+   * \brief Optional extra context that can be used to record additional info about the error.
+   * \note This handle is owned by the ErrorCell.
+   */
+  TVMFFIObjectHandle extra_context;
 } TVMFFIErrorCell;
 
 /*!
@@ -630,6 +640,20 @@ TVM_FFI_DLL void TVMFFIErrorSetRaisedFromCStrParts(const char* kind, const char*
  */
 TVM_FFI_DLL int TVMFFIErrorCreate(const TVMFFIByteArray* kind, const TVMFFIByteArray* message,
                                   const TVMFFIByteArray* backtrace, TVMFFIObjectHandle* out);
+
+/*!
+ * \brief Create an initial error object with cause chain and extra context.
+ * \param kind The kind of the error.
+ * \param message The error message.
+ * \param backtrace The backtrace of the error.
+ * \param cause_chain The cause error chain that caused this error to be raised.
+ * \param extra_context The extra context that can be used to record additional information.
+ * \param out The output error object handle.
+ * \return 0 on success, nonzero on failure.
+ */
+TVM_FFI_DLL int TVMFFIErrorCreateWithCauseAndExtraContext(
+    const TVMFFIByteArray* kind, const TVMFFIByteArray* message, const TVMFFIByteArray* backtrace,
+    TVMFFIObjectHandle cause_chain, TVMFFIObjectHandle extra_context, TVMFFIObjectHandle* out);
 
 //------------------------------------------------------------
 // Section: DLPack support APIs
