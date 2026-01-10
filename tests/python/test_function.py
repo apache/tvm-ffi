@@ -153,6 +153,15 @@ def test_pyfunc_convert() -> None:
     assert fapply(add, 1, 3.3) == 4.3
 
 
+def test_pyfunc_init() -> None:
+    def add(a: int, b: int) -> int:
+        return a + b
+
+    fadd = tvm_ffi.Function(add)
+    assert isinstance(fadd, tvm_ffi.Function)
+    assert fadd(1, 2) == 3
+
+
 def test_global_func() -> None:
     @tvm_ffi.register_global_func("mytest.echo")
     def echo(x: Any) -> Any:
