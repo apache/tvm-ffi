@@ -307,6 +307,20 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   refl::ObjectDef<TestObjWithAny>().def(refl::init<Any>()).def_ro("value", &TestObjWithAny::value);
 }
 
+struct TestObjWithAnyView : public Object {
+  Any value;
+  explicit TestObjWithAnyView(AnyView value) : value(value) {}
+  [[maybe_unused]] static constexpr bool _type_mutable = true;
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("test.TestObjWithAnyView", TestObjWithAnyView, Object);
+};
+
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  refl::ObjectDef<TestObjWithAnyView>()
+      .def(refl::init<AnyView>())
+      .def_ro("value", &TestObjWithAnyView::value);
+}
+
 TEST(Reflection, InitWithAny) {
   Function init = reflection::GetMethod("test.TestObjWithAny", "__ffi_init__");
   Any obj1 = init(42);
@@ -320,5 +334,20 @@ TEST(Reflection, InitWithAny) {
   Any obj3 = init(String("hello"));
   ASSERT_TRUE(obj3.as<TestObjWithAny>() != nullptr);
   EXPECT_EQ(obj3.as<TestObjWithAny>()->value.cast<String>(), "hello");
+}
+
+TEST(Reflection, InitWithAnyView) {
+  Function init = reflection::GetMethod("test.TestObjWithAnyView", "__ffi_init__");
+  Any obj1 = init(42);
+  ASSERT_TRUE(obj1.as<TestObjWithAnyView>() != nullptr);
+  EXPECT_EQ(obj1.as<TestObjWithAnyView>()->value.cast<int>(), 42);
+
+  Any obj2 = init(3.14);
+  ASSERT_TRUE(obj2.as<TestObjWithAnyView>() != nullptr);
+  EXPECT_EQ(obj2.as<TestObjWithAnyView>()->value.cast<double>(), 3.14);
+
+  Any obj3 = init(String("hello"));
+  ASSERT_TRUE(obj3.as<TestObjWithAnyView>() != nullptr);
+  EXPECT_EQ(obj3.as<TestObjWithAnyView>()->value.cast<String>(), "hello");
 }
 }  // namespace
