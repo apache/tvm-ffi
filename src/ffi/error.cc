@@ -111,3 +111,35 @@ int TVMFFIErrorCreate(const TVMFFIByteArray* kind, const TVMFFIByteArray* messag
   }
   TVM_FFI_LOG_EXCEPTION_CALL_END(TVMFFIErrorCreate);
 }
+
+int TVMFFIErrorCreateWithCauseAndExtraContext(
+    const TVMFFIByteArray* kind, const TVMFFIByteArray* message, const TVMFFIByteArray* backtrace,
+    TVMFFIObjectHandle cause_chain, TVMFFIObjectHandle extra_context, TVMFFIObjectHandle* out) {
+  // log other errors to the logger
+  TVM_FFI_LOG_EXCEPTION_CALL_BEGIN();
+  try {
+    std::optional<tvm::ffi::Error> cause_chain_error;
+    if (cause_chain != nullptr) {
+      cause_chain_error = tvm::ffi::details::ObjectUnsafe::ObjectRefFromObjectPtr<tvm::ffi::Error>(
+          tvm::ffi::details::ObjectUnsafe::ObjectPtrFromUnowned<tvm::ffi::ErrorObj>(
+              static_cast<tvm::ffi::ErrorObj*>(cause_chain)));
+    }
+    std::optional<tvm::ffi::ObjectRef> extra_context_ref;
+    if (extra_context != nullptr) {
+      extra_context_ref =
+          tvm::ffi::details::ObjectUnsafe::ObjectRefFromObjectPtr<tvm::ffi::ObjectRef>(
+              tvm::ffi::details::ObjectUnsafe::ObjectPtrFromUnowned<tvm::ffi::Object>(
+                  static_cast<tvm::ffi::Object*>(extra_context)));
+    }
+
+    tvm::ffi::Error error(std::string(kind->data, kind->size),
+                          std::string(message->data, message->size),
+                          std::string(backtrace->data, backtrace->size),
+                          std::move(cause_chain_error), std::move(extra_context_ref));
+    *out = tvm::ffi::details::ObjectUnsafe::MoveObjectRefToTVMFFIObjectPtr(std::move(error));
+    return 0;
+  } catch (const std::bad_alloc& e) {
+    return -1;
+  }
+  TVM_FFI_LOG_EXCEPTION_CALL_END(TVMFFIErrorCreateWithCauseAndExtraContext);
+}
