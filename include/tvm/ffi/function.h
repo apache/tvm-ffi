@@ -637,6 +637,51 @@ class Function : public ObjectRef {
     static_cast<FunctionObj*>(data_.get())->CallPacked(args.data(), args.size(), result);
   }
 
+  /*!
+   * \brief Call the function and return Expected<T> for exception-free error handling.
+   * \tparam T The expected return type (default: Any).
+   * \param args The arguments to pass to the function.
+   * \return Expected<T> containing either the result or an error.
+   *
+   * This method provides exception-free calling by catching all exceptions
+   * and returning them as Error values in the Expected type.
+   *
+   * \code
+   * Function func = Function::GetGlobal("risky_function");
+   * Expected<int> result = func.CallExpected<int>(arg1, arg2);
+   * if (result.is_ok()) {
+   *   int value = result.value();
+   * } else {
+   *   Error err = result.error();
+   * }
+   * \endcode
+   */
+  template <typename T = Any, typename... Args>
+  TVM_FFI_INLINE Expected<T> CallExpected(Args&&... args) const {
+    constexpr size_t kNumArgs = sizeof...(Args);
+    AnyView args_pack[kNumArgs > 0 ? kNumArgs : 1];
+    PackedArgs::Fill(args_pack, std::forward<Args>(args)...);
+
+    Any result;
+    FunctionObj* func_obj = static_cast<FunctionObj*>(data_.get());
+
+    // Use safe_call path to catch exceptions
+    int ret_code = func_obj->safe_call(func_obj, reinterpret_cast<const TVMFFIAny*>(args_pack),
+                                       kNumArgs, reinterpret_cast<TVMFFIAny*>(&result));
+
+    if (ret_code == 0) {
+      // Success - cast result to T and return Ok
+      return Expected<T>::Ok(std::move(result).cast<T>());
+    } else if (ret_code == -2) {
+      // Environment error already set (e.g., Python KeyboardInterrupt)
+      // We still throw this since it's a signal, not a normal error
+      throw ::tvm::ffi::EnvErrorAlreadySet();
+    } else {
+      // Error occurred - retrieve from safe call context and return Err
+      return Expected<T>::Err(details::MoveFromSafeCallRaised());
+    }
+  }
+
   /*! \return Whether the packed function is nullptr */
   TVM_FFI_INLINE bool operator==(std::nullptr_t) const { return data_ == nullptr; }
   /*! \return Whether the packed function is not nullptr */
