@@ -308,6 +308,8 @@ C APIs are provided to manipulate the reference count of an object:
 - :cpp:func:`TVMFFIObjectDecRef` to decrease the strong reference count.
 
 
+.. _object-conversion-with-any:
+
 Conversion between :cpp:class:`~tvm::ffi::Any`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -473,6 +475,7 @@ Further Reading
 ---------------
 
 - :doc:`any`: How objects are stored in :cpp:class:`~tvm::ffi::Any` containers
+- :doc:`func_module`: Function objects and the global registry
 - :doc:`tensor`: Tensor objects and DLPack interoperability
 - :doc:`../packaging/python_packaging`: Packaging C++ objects for Python
 - :doc:`abi_overview`: Low-level ABI details for the object system

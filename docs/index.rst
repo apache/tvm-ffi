@@ -62,6 +62,7 @@ Table of Contents
    concepts/any.rst
    concepts/object_and_class.rst
    concepts/tensor.rst
+   concepts/func_module.rst
 
 .. toctree::
    :maxdepth: 1

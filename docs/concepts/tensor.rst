@@ -351,7 +351,7 @@ it does not include:
 Conversion between :cpp:class:`TVMFFIAny`
 -----------------------------------------
 
-At the stable C ABI boundary, TVM-FFI passes values using an "Any-like" carrier—either
+At the stable C ABI boundary, TVM-FFI passes values using an "Any-like" carrier - either
 :cpp:class:`Any <tvm::ffi::Any>` (owning) or :cpp:class:`AnyView <tvm::ffi::AnyView>` (non-owning).
 These are 128-bit tagged unions derived from :cpp:class:`TVMFFIAny` that contain:
 

@@ -432,6 +432,6 @@ Further Reading
 ---------------
 
 - **Object system**: :doc:`object_and_class` covers how TVM-FFI objects work, including reference counting and type checking
+- **Function system**: :doc:`func_module` covers function calling conventions and the global registry
 - **C examples**: :doc:`../get_started/stable_c_abi` demonstrates working with :cpp:class:`TVMFFIAny` directly in C
 - **Tensor conversions**: :doc:`tensor` covers how tensors flow through :cpp:class:`~tvm::ffi::Any` and :cpp:class:`~tvm::ffi::AnyView`
-- **Function calling**: :doc:`../guides/cpp_lang_guide` explains how functions use :cpp:class:`~tvm::ffi::Any` for arguments and returns
