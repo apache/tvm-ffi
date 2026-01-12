@@ -58,7 +58,7 @@ Table of Contents
    :maxdepth: 1
    :caption: Concepts
 
-   concepts/abi_overview.md
+   concepts/abi_overview.rst
    concepts/any.rst
    concepts/object_and_class.rst
    concepts/tensor.rst

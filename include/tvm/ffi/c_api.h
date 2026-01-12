@@ -81,6 +81,7 @@ typedef struct {
   uint32_t patch;
 } TVMFFIVersion;
 
+// [TVMFFITypeIndex.begin]
 #ifdef __cplusplus
 enum TVMFFITypeIndex : int32_t {
 #else
@@ -184,6 +185,7 @@ typedef enum {
 #else
 } TVMFFITypeIndex;
 #endif
+// [TVMFFITypeIndex.end]
 
 /*! \brief Handle to Object from C API's pov */
 typedef void* TVMFFIObjectHandle;
@@ -218,6 +220,7 @@ typedef enum {
 } TVMFFIObjectDeleterFlagBitMask;
 #endif
 
+// [TVMFFIObject.begin]
 /*!
  * \brief C-based type of all FFI object header that allocates on heap.
  */
@@ -268,7 +271,9 @@ typedef struct {
   };
 #endif
 } TVMFFIObject;
+// [TVMFFIObject.end]
 
+// [TVMFFIAny.begin]
 /*!
  * \brief C-based type of all on stack Any value.
  *
@@ -321,7 +326,9 @@ typedef struct {
   };
 #endif
 } TVMFFIAny;
+// [TVMFFIAny.end]
 
+// [TVMFFIByteArray.begin]
 /*!
  * \brief Byte array data structure used by String and Bytes.
  *
@@ -349,6 +356,7 @@ typedef struct {
   /*! \brief The size of the data. */
   size_t size;
 } TVMFFIShapeCell;
+// [TVMFFIByteArray.end]
 
 /*!
  * \brief Mode to update the backtrace of the error.
@@ -366,6 +374,7 @@ typedef enum {
 } TVMFFIBacktraceUpdateMode;
 #endif
 
+// [TVMFFIErrorCell.begin]
 /*!
  * \brief Error cell used in error object following header.
  */
@@ -405,7 +414,9 @@ typedef struct {
    */
   TVMFFIObjectHandle extra_context;
 } TVMFFIErrorCell;
+// [TVMFFIErrorCell.end]
 
+// [TVMFFISafeCallType.begin]
 /*!
  * \brief Type that defines C-style safe call convention
  *
@@ -441,7 +452,9 @@ typedef struct {
  */
 typedef int (*TVMFFISafeCallType)(void* handle, const TVMFFIAny* args, int32_t num_args,
                                   TVMFFIAny* result);
+// [TVMFFISafeCallType.end]
 
+// [TVMFFIFunctionCell.begin]
 /*!
  * \brief Object cell for function object following header.
  */
@@ -462,6 +475,7 @@ typedef struct {
    */
   void* cpp_call;
 } TVMFFIFunctionCell;
+// [TVMFFIFunctionCell.end]
 
 /*!
  * \brief Object cell for opaque object following header.

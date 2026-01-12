@@ -27,9 +27,7 @@ and :cpp:class:`tvm::ffi::ObjectRef`, which together form the foundation for:
 - **Reflection-based class exposure** across programming languages
 - **Serialization and deserialization** via reflection metadata
 
-This tutorial covers everything you need to know about defining, using, and extending
-TVM-FFI objects across languages.
-
+This tutorial covers defining, using, and extending TVM-FFI objects across languages.
 
 Glossary
 --------
@@ -253,106 +251,48 @@ and :cpp:func:`tvm::ffi::ObjectRef::get` to convert a managed reference to a raw
 ABI and Layout
 --------------
 
-Stable C Layout
-~~~~~~~~~~~~~~~
-
-All subclasses of :cpp:class:`tvm::ffi::Object` share a common 24-byte header (:cpp:class:`TVMFFIObject`):
-
-.. code-block:: cpp
-
-   typedef struct {
-     uint64_t combined_ref_count;  // Bytes 0-7: strong + weak ref counts
-     int32_t type_index;           // Bytes 8-11: runtime type identifier
-     uint32_t __padding;           // Bytes 12-15: alignment padding
-     void (*deleter)(void*, int);  // Bytes 16-23: destructor callback
-   } TVMFFIObject;
+**Stable C Layout**. All subclasses of :cpp:class:`tvm::ffi::Object` share a common 24-byte header (:cpp:class:`TVMFFIObject`)
+containing reference counts, type index, and a deleter callback.
+See :ref:`abi-object` for the C struct definition. :cpp:class:`tvm::ffi::ObjectRef` and :cpp:class:`tvm::ffi::ObjectPtr` are smart pointers
+equivalent to a single ``void*`` pointer.
 
 
-It is designed with the following components:
-
-- Reference counting and deleter callback, which are used to manage the lifetime of the object;
-- Type index, which is used to interact with type registration system for type checking and casting.
-
-:cpp:class:`tvm::ffi::ObjectRef` and :cpp:class:`tvm::ffi::ObjectPtr` are smart pointers whose
-layout is equivalent to:
-
-.. code-block:: cpp
-
-   struct { void* data; };
-
+.. _object-reference-counting:
 
 Reference Counting
 ~~~~~~~~~~~~~~~~~~
 
-**Deleter action**. When an object is managed by :cpp:class:`~tvm::ffi::ObjectRef`, the ``deleter`` callback is invoked:
+.. seealso::
+
+   :ref:`abi-object-ownership` for C code examples.
+
+**Intrusive reference counting**. The reference count is stored directly in the object header, not in a separate control block.
+This design reduces memory overhead and improves cache locality. The :cpp:member:`TVMFFIObject::combined_ref_count`
+field packs both strong (lower 32 bits) and weak (upper 32 bits) reference counts in a single 64-bit integer.
+
+C APIs are provided to manipulate the reference count:
+
+- :cpp:func:`TVMFFIObjectIncRef` to increase the strong reference count
+- :cpp:func:`TVMFFIObjectDecRef` to decrease the strong reference count
+
+**Deleter**. When an object is managed by :cpp:class:`~tvm::ffi::ObjectRef`, the ``deleter`` callback is invoked:
 
 - When strong reference count reaches zero: the object's destructor is called.
 - When weak reference count reaches zero: the memory is freed.
 
 The flags in :cpp:enum:`TVMFFIObjectDeleterFlagBitMask` indicate which action to perform.
 
-**Intrusive reference counting**. The reference count is stored directly in the object header, not in a separate control block.
-This design reduces memory overhead and improves cache locality. Specifically, the :cpp:member:`TVMFFIObject::combined_ref_count`
-field stores a 64-bit integer that packs both strong and weak reference counts:
-
-.. code-block:: cpp
-
-   // Strong ref count: lower 32 bits
-   uint32_t strong_ref_count = combined_ref_count & 0xFFFFFFFF;
-   // Weak ref count: upper 32 bits
-   uint32_t weak_ref_count = (combined_ref_count >> 32) & 0xFFFFFFFF;
-
-C APIs are provided to manipulate the reference count of an object:
-
-- :cpp:func:`TVMFFIObjectIncRef` to increase the strong reference count;
-- :cpp:func:`TVMFFIObjectDecRef` to decrease the strong reference count.
-
-
 .. _object-conversion-with-any:
 
-Conversion between :cpp:class:`~tvm::ffi::Any`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+**Conversion with Any**. At the stable C ABI boundary, TVM-FFI passes values using :cpp:class:`Any <tvm::ffi::Any>`
+(owning) or :cpp:class:`AnyView <tvm::ffi::AnyView>` (non-owning). Object handles are stored in the
+:cpp:member:`TVMFFIAny::v_obj` field with a type index >= :cpp:enumerator:`kTVMFFIStaticObjectBegin <TVMFFITypeIndex::kTVMFFIStaticObjectBegin>`.
 
-At the stable C ABI boundary, TVM-FFI passes values using :cpp:class:`Any <tvm::ffi::Any>` (owning)
-or :cpp:class:`AnyView <tvm::ffi::AnyView>` (non-owning). Object handles are stored in the
-:cpp:member:`TVMFFIAny::v_obj` field with a type index >= ``kTVMFFIStaticObjectBegin``.
+See :ref:`abi-object-ownership` for C code examples demonstrating:
 
-**Any/AnyView to Object**. Extract an object handle from :cpp:class:`TVMFFIAny`:
-
-.. code-block:: cpp
-
-   // Converts Any/AnyView to Object handle (non-owning)
-   int AnyToObjectPtr(const TVMFFIAny* value, TVMFFIObject** out) {
-     if (value->type_index >= kTVMFFIStaticObjectBegin) {
-       *out = (TVMFFIObject*)(value->v_obj);
-       return SUCCESS;
-     }
-     return FAILURE;  // Not an object type
-   }
-
-**Object to AnyView**. Store an object handle into non-owning :cpp:class:`AnyView <tvm::ffi::AnyView>`:
-
-.. code-block:: cpp
-
-   // Converts Object handle to AnyView (non-owning)
-   void ObjectToAnyView(TVMFFIObject* obj, int32_t type_index, TVMFFIAny* out) {
-     out->type_index = type_index;
-     out->zero_padding = 0;
-     out->v_obj = obj;
-   }
-
-**Object to Any**. Store an object handle into owning :cpp:class:`Any <tvm::ffi::Any>`.
-The function increments the reference count to take shared ownership.
-
-.. code-block:: cpp
-
-   // Converts Object handle to Any (owning, increments refcount)
-   void ObjectToAny(TVMFFIObject* obj, int32_t type_index, TVMFFIAny* out) {
-     ObjectToAnyView(obj, type_index, out);
-     TVMFFIObjectIncRef(obj);  // Take ownership
-   }
-
-Later, release ownership by calling :cpp:func:`TVMFFIObjectDecRef` on :cpp:member:`TVMFFIAny::v_obj`.
+- Extracting an object handle from :cpp:class:`TVMFFIAny`
+- Storing an object handle into :cpp:class:`~tvm::ffi::Any` or :cpp:class:`~tvm::ffi::AnyView`
+- Managing ownership via reference counting
 
 Object Type Registry
 --------------------
@@ -477,5 +417,5 @@ Further Reading
 - :doc:`any`: How objects are stored in :cpp:class:`~tvm::ffi::Any` containers
 - :doc:`func_module`: Function objects and the global registry
 - :doc:`tensor`: Tensor objects and DLPack interoperability
-- :doc:`../packaging/python_packaging`: Packaging C++ objects for Python
-- :doc:`abi_overview`: Low-level ABI details for the object system
+- :doc:`abi_overview`: Low-level C ABI details for the object system
+- :doc:`../packaging/python_packaging`: Packaging C++ objects for Python wheels
