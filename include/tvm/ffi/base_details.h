@@ -86,6 +86,7 @@
 #else
 #define TVM_FFI_FUNC_SIG __func__
 #endif
+/// \endcond
 
 /// \endcond
 
@@ -114,7 +115,16 @@
     return 0;                                          \
   }();                                                 \
   static void FnName()
-
+/// \endcond
+/*!
+ * \brief Macro that defines a block that will be called during static initialization.
+ *
+ * \code{.cpp}
+ * TVM_FFI_STATIC_INIT_BLOCK() {
+ *   RegisterFunctions();
+ * }
+ * \endcode
+ */
 #define TVM_FFI_STATIC_INIT_BLOCK()                                                       \
   TVM_FFI_STATIC_INIT_BLOCK_DEF_(TVM_FFI_STR_CONCAT(__TVMFFIStaticInitFunc, __COUNTER__), \
                                  TVM_FFI_STR_CONCAT(__TVMFFIStaticInitReg, __COUNTER__))
@@ -313,5 +323,4 @@ using TypeSchema = TypeSchemaImpl<std::remove_const_t<std::remove_reference_t<T>
 }  // namespace details
 }  // namespace ffi
 }  // namespace tvm
-/// \endcond
 #endif  // TVM_FFI_BASE_DETAILS_H_
