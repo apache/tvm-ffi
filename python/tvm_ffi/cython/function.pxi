@@ -889,27 +889,6 @@ cdef class Function(Object):
     def __cinit__(self) -> None:
         self.c_release_gil = _RELEASE_GIL_BY_DEFAULT
 
-    def __init__(self, func: Callable[..., Any]) -> None:
-        """Initialize a Function from a Python callable.
-
-        This constructor allows creating a `tvm_ffi.Function` directly
-        from a Python function or another `tvm_ffi.Function` instance.
-
-        Parameters
-        ----------
-        func : Callable[..., Any]
-            The Python callable to wrap.
-        """
-        cdef TVMFFIObjectHandle chandle = NULL
-        if not callable(func):
-            raise TypeError(f"func must be callable, got {type(func)}")
-        if isinstance(func, Function):
-            chandle = (<Object>func).chandle
-            TVMFFIObjectIncRef(chandle)
-        else:
-            _convert_to_ffi_func_handle(func, &chandle)
-        self.chandle = chandle
-
     property release_gil:
         """Whether calls release the Python GIL while executing."""
 
