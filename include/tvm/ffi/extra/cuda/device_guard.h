@@ -23,7 +23,7 @@
 #ifndef TVM_FFI_EXTRA_CUDA_DEVICE_GUARD_H_
 #define TVM_FFI_EXTRA_CUDA_DEVICE_GUARD_H_
 
-#include <tvm/ffi/extra/cuda/base.h>
+#include <tvm/ffi/extra/cuda/internal/unified_api.h>
 
 namespace tvm {
 namespace ffi {
