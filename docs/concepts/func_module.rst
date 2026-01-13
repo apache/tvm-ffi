@@ -218,6 +218,9 @@ specified by ``args`` and ``num_args``.
 **Output argument**. The output argument ``result`` is an owning :cpp:type:`tvm::ffi::Any`
 that the caller must zero-initialize before the call.
 
+.. important::
+   The caller must zero-initialize the output argument ``result`` before the call.
+
 **Return value**. The ABI returns an **error code** that indicates:
 
 - **Error code 0**: Success

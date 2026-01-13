@@ -274,10 +274,11 @@ The following C code obtains a :c:struct:`DLTensor` pointer from a :cpp:class:`~
 
 The :c:struct:`DLTensor` pointer provides access to shape, dtype, device, data pointer, and other tensor metadata.
 
-Construct Tensor from DLPack
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Construct Tensor
+~~~~~~~~~~~~~~~~
 
-The following C code constructs a :cpp:class:`~tvm::ffi::TensorObj` from a :c:struct:`DLManagedTensorVersioned`:
+**Zero-copy conversion.** The following C code constructs a :cpp:class:`~tvm::ffi::TensorObj` from a :c:struct:`DLManagedTensorVersioned`,
+which shares the underlying data buffer without allocating new memory.
 
 .. literalinclude:: ../../examples/abi_overview/example_code.c
   :language: c
@@ -287,6 +288,26 @@ The following C code constructs a :cpp:class:`~tvm::ffi::TensorObj` from a :c:st
 .. hint::
    TVM-FFI's Python API automatically wraps framework tensors (e.g., :py:class:`torch.Tensor`) as :cpp:class:`~tvm::ffi::TensorObj`,
    so manual conversion is typically unnecessary.
+
+**Allocate new memory.** Alternatively, if memory allocation is intended, the following C code constructs a :cpp:class:`~tvm::ffi::TensorObj` from a :c:struct:`DLTensor` pointer:
+
+.. literalinclude:: ../../examples/abi_overview/example_code.c
+  :language: c
+  :start-after: [Tensor_Alloc.begin]
+  :end-before: [Tensor_Alloc.end]
+
+The ``prototype`` contains the shape, dtype, device, and other tensor metadata that will be used to allocate the new tensor.
+And the allocator, by default, is the framework's (e.g., PyTorch) allocator, which is automatically set when importing the framework.
+
+To override or explicitly look up the allocator, use :cpp:func:`TVMFFIEnvSetDLPackManagedTensorAllocator` and :cpp:func:`TVMFFIEnvGetDLPackManagedTensorAllocator`.
+
+.. warning::
+   In kernel library usecases, it is usually not recommended to dynamically allocate tensors inside a kernel, and instead always pre-allocate outputs,
+   and pass them as :cpp:class:`~tvm::ffi::TensorView` parameters. This approach
+
+   - avoids memory fragmentation and performance pitfalls,
+   - prevents CUDA graph incompatibilities on GPU, and
+   - allows the outer framework to control allocation policy (pools, device strategies, etc.).
 
 Destruct Tensor
 ~~~~~~~~~~~~~~~
@@ -327,6 +348,9 @@ type-erased, and cross-language function calls, defined by :cpp:type:`TVMFFISafe
 - Return value: ``0`` for success; ``-1`` or ``-2`` for errors (see :ref:`sec:exception`)
 
 See :ref:`sec:function-calling-convention` for more details.
+
+.. important::
+   The caller must zero-initialize the output argument ``result`` before the call.
 
 **Memory layout.** The :cpp:class:`~tvm::ffi::FunctionObj` stores call pointers after the object header.
 

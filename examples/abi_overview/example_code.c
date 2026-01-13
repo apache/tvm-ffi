@@ -16,13 +16,26 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
-// NOLINTBEGIN(modernize-deprecated-headers,modernize-use-nullptr,clang-diagnostic-c99-extensions,clang-diagnostic-missing-field-initializers,clang-diagnostic-unused-but-set-variable,clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable,clang-diagnostic-deprecated)
+/*
+ * Example code for TVM-FFI ABI overview.
+ *
+ * Compilation command:
+ *
+ * ```bash
+ * gcc $(tvm-ffi-config --cflags)             \
+ *     $(tvm-ffi-config --ldflags)            \
+ *     $(tvm-ffi-config --libs)               \
+ *     -Wl,-rpath,$(tvm-ffi-config --libdir)  \
+ *     -o ./example_code
+ * ```
+ */
+// NOLINTBEGIN(modernize-deprecated-headers,modernize-use-nullptr)
 #include <assert.h>
 #include <dlpack/dlpack.h>
 #include <stdio.h>
 #include <string.h>
 #include <tvm/ffi/c_api.h>
+#include <tvm/ffi/extra/c_env_api.h>
 
 int IS_OWNING_ANY = 1;
 
@@ -164,14 +177,26 @@ DLTensor* Tensor_AccessDLTensor(TVMFFIObject* tensor) {
 TVMFFIObject* Tensor_FromDLPack(DLManagedTensorVersioned* from) {
   int err_code = 0;
   TVMFFIObject* out = NULL;
-  err_code = TVMFFITensorFromDLPackVersioned(from,                      // input DLPack tensor
-                                             /*require_alignment=*/0,   // no alignment requirement
-                                             /*require_contiguous=*/1,  // require contiguous tensor
-                                             (void**)(&out));
+  err_code = TVMFFITensorFromDLPackVersioned(  //
+      from,                                    // input DLPack tensor
+      /*require_alignment=*/0,                 // no alignment requirement
+      /*require_contiguous=*/1,                // require contiguous tensor
+      (void**)(&out));
   assert(err_code == 0);
   return out;
 }
 // [Tensor_FromDLPack.end]
+
+// [Tensor_Alloc.begin]
+TVMFFIObject* Tensor_Alloc(DLTensor* prototype) {
+  int err_code = 0;
+  TVMFFIObject* out = NULL;
+  assert(prototype->data == NULL);
+  err_code = TVMFFIEnvTensorAlloc(prototype, (void**)(&out));
+  assert(err_code == 0);
+  return out;
+}
+// [Tensor_Alloc.end]
 
 // [Tensor_ToDLPackVersioned.begin]
 DLManagedTensorVersioned* Tensor_ToDLPackVersioned(TVMFFIObject* tensor) {
@@ -263,5 +288,5 @@ int Error_RaiseException(void* handle, const TVMFFIAny* args, int32_t num_args, 
 }
 // [Error.RaiseException.end]
 
-// NOLINTEND(modernize-deprecated-headers,modernize-use-nullptr,clang-diagnostic-c99-extensions,clang-diagnostic-missing-field-initializers,clang-diagnostic-unused-but-set-variable,clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable,clang-diagnostic-deprecated)
+// NOLINTEND(modernize-deprecated-headers,modernize-use-nullptr)
 int main() { return 0; }
