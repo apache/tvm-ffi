@@ -66,7 +66,8 @@ class EnvContext {
                                        int write_to_global_context,
                                        DLPackManagedTensorAllocator* opt_out_original_allocator) {
     if (opt_out_original_allocator != nullptr) {
-      *opt_out_original_allocator = GetDLPackManagedTensorAllocator();
+      // only returns the cached local allocator and ignore global allocator
+      *opt_out_original_allocator = dlpack_allocator_;
     }
     if (write_to_global_context != 0) {
       GlobalTensorAllocator() = allocator;

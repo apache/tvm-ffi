@@ -18,7 +18,7 @@
 from __future__ import annotations
 
 from types import ModuleType
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, NoReturn
 
 import numpy.typing as npt
 import pytest
@@ -76,6 +76,20 @@ def test_tensor_auto_dlpack() -> None:
     assert y.shape == x.shape
     assert y.device == x.device
     np.testing.assert_equal(y.numpy(), x.numpy())
+
+
+@pytest.mark.skipif(torch is None, reason="Fast torch dlpack importer is not enabled")
+def test_tensor_auto_dlpack_with_error() -> None:
+    assert torch is not None
+    x = torch.arange(128)
+
+    def raise_torch_error(x: Any) -> NoReturn:
+        raise ValueError("error XYZ")
+
+    f = tvm_ffi.convert(raise_torch_error)
+    with pytest.raises(ValueError):
+        # pass in torch argment to trigger the error in set allocator path
+        f(x)
 
 
 def test_tensor_class_override() -> None:
