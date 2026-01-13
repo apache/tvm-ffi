@@ -74,7 +74,7 @@ using DeviceAttrType = CUdevice_attribute;
 constexpr ResultType kSuccess = CUDA_SUCCESS;
 
 // Driver API Functions
-#define _TVM_FFI_CUDA_FUNC(name) cu##name
+#define _TVM_FFI_CUDA_FUNC(name) cu##name  // NOLINT(bugprone-reserved-identifier)
 
 #else
 
