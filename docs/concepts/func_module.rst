@@ -15,20 +15,20 @@
     specific language governing permissions and limitations
     under the License.
 
-Function, Exception and Module
-==============================
+Function and Module
+===================
 
 TVM-FFI provides a unified and ABI-stable calling convention that enables
 cross-language function calls between C++, Python, Rust, and other languages.
 Functions are first-class :doc:`TVM-FFI objects <object_and_class>`.
 
-This tutorial covers everything you need to know about defining, registering,
-and calling TVM-FFI functions, their exception handling, and working with modules.
+This tutorial covers defining, registering, and calling TVM-FFI functions,
+exception handling, and working with modules.
 
 Glossary
 --------
 
-TVM-FFI ABI. :cpp:type:`TVMFFISafeCallType`
+TVM-FFI ABI, or "Packed Function". :cpp:type:`TVMFFISafeCallType`
   A stable C calling convention where every function is represented by a single signature,
   which enables type-erased, cross-language function calls.
   This calling convention is used across all TVM-FFI function calls at the ABI boundary.
@@ -190,17 +190,15 @@ to a :py:class:`tvm_ffi.Function` at the ABI boundary. The example below demonst
    print(func_add(1, 2))
 
 
-Exception ABI
--------------
+.. _sec:function:
 
-This section describes the exception handling contract in the TVM-FFI Stable C ABI.
-Exceptions are first-class citizens in TVM-FFI, and this section specifies:
+Function
+--------
 
-- How to properly throw exceptions from a TVM-FFI ABI function
-- How to check for and propagate exceptions from a TVM-FFI ABI function
+.. _sec:function-calling-convention:
 
-TVM-FFI C ABI
-~~~~~~~~~~~~~
+Calling Convention
+~~~~~~~~~~~~~~~~~~
 
 All TVM-FFI functions ultimately conform to the :cpp:type:`TVMFFISafeCallType` signature,
 which provides a stable C ABI for cross-language calls. The C calling convention is defined as:
@@ -220,147 +218,48 @@ specified by ``args`` and ``num_args``.
 **Output argument**. The output argument ``result`` is an owning :cpp:type:`tvm::ffi::Any`
 that the caller must zero-initialize before the call.
 
+.. important::
+   The caller must zero-initialize the output argument ``result`` before the call.
+
 **Return value**. The ABI returns an **error code** that indicates:
 
-- ``0``: Success
-- ``-1``: Error occurred, retrievable with :cpp:func:`TVMFFIErrorMoveFromRaised`
-- ``-2``: Very rare frontend error
+- **Error code 0**: Success
+- **Error code -1**: Error occurred, retrievable with :cpp:func:`TVMFFIErrorMoveFromRaised`
+- **Error code -2**: Very rare frontend error
 
 .. hint::
   See :doc:`Any <any>` for more details on the semantics of :cpp:type:`tvm::ffi::AnyView` and :cpp:type:`tvm::ffi::Any`.
 
-Retrieve Errors in C
-~~~~~~~~~~~~~~~~~~~~
+This design is called a **packed function**, because it "packs" all arguments into a single array of type-erased :cpp:type:`tvm::ffi::AnyView`,
+and further unifies calling convention across all languages without resorting to JIT compilation.
 
-When a TVM-FFI function returns a non-zero code, it indicates that an error occurred
-and a :cpp:class:`tvm::ffi::ErrorObj` is stored in thread-local storage (TLS).
-This section shows how to retrieve the error object and print the error message and backtrace.
+More specifically, this mechanism enables the following scenarios:
+
+- **Dynamic languages**. Well-optimized bindings are provided for, e.g. Python, to translate arguments into packed function format, and translate return value back to the host language.
+- **Static languages**. Metaprogramming techniques, such as C++ templates, are usually available to directly instantiate packed format on stack, saving the need for dynamic examination.
+- **Cross-language callbacks**. Language-agnostic :cpp:class:`tvm::ffi::Function` makes it easy to call between languages without depending on language-specific features such as GIL.
+
+**Performance Implications**. This approach is in practice highly efficient in machine learning workloads.
+
+- In Python/C++ calls, we can get to microsecond level overhead, which is generally similar to overhead for eager mode;
+- When both sides of calls are static languages, the overhead will go down to tens of nanoseconds.
 
 .. note::
+  Although we found it less necessary in practice, further link time optimization (LTO) is still theoretically possible
+  in scenarios where both sides are static languages with a known symbol and linked into a single binary.
+  In this case, the callee can be inlined into caller side and the stack argument memory can be passed into register passing.
 
-  An :cpp:class:`~tvm::ffi::ErrorObj` is a :cpp:class:`~tvm::ffi::Object` with a :cpp:class:`TVMFFIErrorCell` payload
-  as defined below:
-
-  .. code-block:: cpp
-
-    typedef struct {
-      TVMFFIByteArray kind;       // Error type (e.g., "ValueError")
-      TVMFFIByteArray message;    // Error message
-      TVMFFIByteArray backtrace;  // Stack trace (most-recent call first)
-      void (*update_backtrace)(...);  // Hook to append/replace backtrace
-    } TVMFFIErrorCell;
-
-**Print an Error**. The example code below shows how to print an error message and backtrace.
-
-.. code-block:: cpp
-
-   #include <tvm/ffi/c_api.h>
-
-   void PrintError(TVMFFIObject* err) {
-     TVMFFIErrorCell* cell = (TVMFFIErrorCell*)((char*)err + sizeof(TVMFFIObject));
-     fprintf(stderr, "%.*s: %.*s\n", (int)cell->kind.size, cell->kind.data, (int)cell->message.size, cell->message.data);
-     if (cell->backtrace.size) {
-       fprintf(stderr, "Backtrace:\n%.*s\n", (int)cell->backtrace.size, cell->backtrace.data);
-     }
-   }
-
-The payload of the error object is a :cpp:type:`TVMFFIErrorCell` structure
-containing the error kind, message, and backtrace. It can be accessed
-by skipping the :cpp:type:`TVMFFIObject` header using pointer arithmetic.
-
-**Retrieve the error object**. When the error code is ``-1``, the error object is stored in TLS
-and can be retrieved with :cpp:func:`TVMFFIErrorMoveFromRaised`.
-
-.. code-block:: cpp
-
-   void HandleReturnCode(int rc) {
-     TVMFFIObject* err = NULL;
-     if (rc == 0) {
-       // Success
-     } else if (rc == -1) {
-       // Move the raised error from TLS (clears TLS slot)
-       TVMFFIErrorMoveFromRaised(&err); // now `err` owns the error object
-       if (err != NULL) {
-         PrintError(err); // print the error
-         TVMFFIObjectDecRef(err);  // Release the error object
-       }
-     } else if (rc == -2) {
-       // Frontend (e.g., Python) already has an exception set.
-       // Do not fetch from TLS; consult the frontend's error mechanism.
-     }
-   }
-
-This function transfers ownership of the error object to the caller and clears the TLS slot.
-You must call :cpp:func:`TVMFFIObjectDecRef` to release the object when done to avoid memory leaks.
-
-**Rare frontend errors**. Error code ``-2`` is reserved for rare frontend errors. It is returned only
-when the C API :cpp:func:`TVMFFIEnvCheckSignals` returns non-zero during execution, indicating that
-the Python side has a pending signal requiring attention. In this case, the caller should not fetch
-the error object from TLS but instead consult the frontend's error mechanism to handle the exception.
-
-Raise Errors in C
-~~~~~~~~~~~~~~~~~
-
-As part of TVM-FFI's calling convention, returning ``-1`` indicates that an error occurred
-and the error object is stored in the TLS slot. The error object can contain arbitrary
-user-defined information, such as error messages, backtraces, or Python frame-local variables.
-
-.. hint::
-  Compiler code generation may use similar patterns to raise errors in generated code.
-
-The example below sets the TLS error and returns ``-1`` using :cpp:func:`TVMFFIErrorSetRaisedFromCStr`:
-
-.. code-block:: cpp
-
-   #include <tvm/ffi/c_api.h>
-
-   int __tvm_ffi_my_kernel(void* handle, const TVMFFIAny* args,
-                           int32_t num_args, TVMFFIAny* result) {
-     // Validate inputs
-     if (num_args < 2) {
-       TVMFFIErrorSetRaisedFromCStr("ValueError", "Expected at least 2 arguments");
-       return -1;
-     }
-     // ... kernel implementation ...
-     return 0;
-   }
-
-Alternatively, :cpp:func:`TVMFFIErrorSetRaisedFromCStrParts` accepts explicit string lengths,
-which is useful when the error kind and message are not null-terminated.
-
-**Propagating errors**. For chains of generated calls, simply propagate return codes—TLS carries
-the error details:
-
-.. code-block:: cpp
-
-   int outer_function(...) {
-     int err_code = 0;
-
-     err_code = inner_function(...);
-     if (err_code != 0) goto RAII;  // Propagate error; TLS has the details
-
-    RAII:
-     // clean up owned resources
-     return err_code;
-   }
-
-Function
---------
+.. _sec:function-layout:
 
 Layout and ABI
 ~~~~~~~~~~~~~~
 
 :cpp:class:`tvm::ffi::FunctionObj` stores two call pointers in :cpp:class:`TVMFFIFunctionCell`:
 
-.. code-block:: cpp
+- ``safe_call``: Used for cross-ABI function calls; intercepts exceptions and stores them in TLS.
+- ``cpp_call``: Used within the same DSO; exceptions are thrown directly for better performance.
 
-   typedef struct {
-     TVMFFISafeCallType safe_call;
-     void* cpp_call;
-   } TVMFFIFunctionCell;
-
-``safe_call`` is used for cross-ABI function calls: it intercepts exceptions and stores them in TLS.
-``cpp_call`` is used within the same DSO, where exceptions are thrown directly for better performance.
+See :ref:`abi-function` for the C struct definition.
 
 .. important::
 
@@ -407,40 +306,35 @@ calling convention.
   in :c:macro:`TVM_FFI_SAFE_CALL_BEGIN` / :c:macro:`TVM_FFI_SAFE_CALL_END` macros.
 
 
-C Registry APIs
-~~~~~~~~~~~~~~~
+Compiler developers commonly need to look up global functions in generated code.
+Use :cpp:func:`TVMFFIFunctionGetGlobal` to retrieve a function by name, then call it with :cpp:func:`TVMFFIFunctionCall`.
+See :ref:`abi-function` for C code examples.
 
-.. list-table::
-   :header-rows: 1
-   :widths: 40 60
+.. _sec:exception:
 
-   * - C API
-     - Description
-   * - :cpp:func:`TVMFFIFunctionGetGlobal`
-     - Get a function by name; returns an owning handle.
-   * - :cpp:func:`TVMFFIFunctionSetGlobal`
-     - Register a function in the global registry.
-   * - :cpp:func:`TVMFFIFunctionCall`
-     - Call a function with the given arguments.
+Exception
+~~~~~~~~~
 
-Compiler developers commonly need to look up global functions in generated code. Use
-:cpp:func:`TVMFFIFunctionGetGlobal` to retrieve a function by name, then call it with :cpp:func:`TVMFFIFunctionCall`.
-The example below demonstrates how to look up and call a global function in C:
+This section describes the exception handling contract in the TVM-FFI Stable C ABI.
+Exceptions are first-class citizens in TVM-FFI, and this section specifies:
 
-.. code-block:: cpp
+- How to properly throw exceptions from a TVM-FFI ABI function
+- How to check for and propagate exceptions from a TVM-FFI ABI function
 
-   int LookupAndCall(const char* global_function_name, const TVMFFIAny* args, int num_args, TVMFFIAny* result) {
-     TVMFFIObject* func = NULL;
-     int err_code;
-     if ((err_code = TVMFFIFunctionGetGlobal(global_function_name, &func)) != 0)
-       goto RAII;
-     if ((err_code = TVMFFIFunctionCall(func, args, num_args, result)) != 0)
-       goto RAII;
+When a TVM-FFI function returns a non-zero code, an error occurred.
+An :cpp:class:`~tvm::ffi::ErrorObj` is stored in thread-local storage (TLS) and can be retrieved
+with :cpp:func:`TVMFFIErrorMoveFromRaised`.
 
-    RAII: // clean up owned resources
-     if (func != NULL) TVMFFIObjectDecRef(func);
-     return err_code;
-   }
+- **Error code -1:** Retrieve the error from TLS, print it, and release via :cpp:func:`TVMFFIObjectDecRef`.
+- **Error code -2:** A rare frontend error; consult the frontend's error mechanism instead of TLS.
+
+To raise an error, use :cpp:func:`TVMFFIErrorSetRaisedFromCStr` to set the TLS error and return ``-1``.
+For chains of calls, simply propagate return codes - TLS carries the error details.
+
+See :ref:`abi-exception` for C code examples.
+
+
+.. _sec:module:
 
 Modules
 -------
@@ -560,5 +454,5 @@ Further Reading
 
 - :doc:`any`: How functions are stored in :cpp:class:`~tvm::ffi::Any` containers
 - :doc:`object_and_class`: The object system that backs :cpp:class:`~tvm::ffi::FunctionObj`
+- :doc:`abi_overview`: Low-level C ABI details for functions and exceptions
 - :doc:`../packaging/python_packaging`: Packaging functions for Python wheels
-- :doc:`abi_overview`: Low-level ABI details for the function calling convention

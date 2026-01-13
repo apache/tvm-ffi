@@ -93,7 +93,7 @@ Some of the key takeaways include:
 - Use return value for error handling, set error via {cpp:func}`TVMFFIErrorSetRaisedFromCStr`
   or {cpp:func}`TVMFFIErrorSetRaisedFromCStrParts`.
 
-You can also check out the [ABI overview](../concepts/abi_overview.md) for a more complete guide.
+You can also check out the [ABI overview](../concepts/abi_overview.rst) for a more complete guide.
 
 ## Graph Compilers
 
