@@ -234,7 +234,7 @@ namespace ffi {
  *       TVMFFIEnvGetStream(device.device_type, device.device_id));
  *
  *   cudaError_t result = kernel.Launch(args, grid, block, stream);
- *   TVM_FFI_CHECK_CUDA_ERROR(result);
+ *   TVM_FFI_CHECK_CUBIN_LAUNCHER_CUDA_ERROR(result);
  * }
  * \endcode
  *
@@ -295,7 +295,7 @@ class CubinModule {
    * \param bytes CUBIN binary data as a Bytes object.
    */
   explicit CubinModule(const Bytes& bytes) {
-    TVM_FFI_CHECK_CUDA_ERROR(cuda_api::LoadLibrary(&library_, bytes.data()));
+    TVM_FFI_CHECK_CUBIN_LAUNCHER_CUDA_ERROR(cuda_api::LoadLibrary(&library_, bytes.data()));
   }
 
   /*!
@@ -305,7 +305,7 @@ class CubinModule {
    * \note The `code` buffer points to an ELF image.
    */
   explicit CubinModule(const char* code) {
-    TVM_FFI_CHECK_CUDA_ERROR(cuda_api::LoadLibrary(&library_, code));
+    TVM_FFI_CHECK_CUBIN_LAUNCHER_CUDA_ERROR(cuda_api::LoadLibrary(&library_, code));
   }
 
   /*!
@@ -315,7 +315,7 @@ class CubinModule {
    * \note The `code` buffer points to an ELF image.
    */
   explicit CubinModule(const unsigned char* code) {
-    TVM_FFI_CHECK_CUDA_ERROR(cuda_api::LoadLibrary(&library_, code));
+    TVM_FFI_CHECK_CUBIN_LAUNCHER_CUDA_ERROR(cuda_api::LoadLibrary(&library_, code));
   }
 
   /*! \brief Destructor unloads the library */
@@ -418,7 +418,7 @@ class CubinModule {
  * // Launch on stream
  * cudaStream_t stream = ...;
  * cudaError_t result = kernel.Launch(args, grid, block, stream);
- * TVM_FFI_CHECK_CUDA_ERROR(result);
+ * TVM_FFI_CHECK_CUBIN_LAUNCHER_CUDA_ERROR(result);
  * \endcode
  *
  * \note This class is movable but not copyable.
@@ -434,7 +434,7 @@ class CubinKernel {
    * \param name Name of the kernel function.
    */
   CubinKernel(cuda_api::LibraryHandle library, const char* name) {
-    TVM_FFI_CHECK_CUDA_ERROR(cuda_api::GetKernel(&kernel_, library, name));
+    TVM_FFI_CHECK_CUBIN_LAUNCHER_CUDA_ERROR(cuda_api::GetKernel(&kernel_, library, name));
   }
 
   /*! \brief Destructor (kernel handle doesn't need explicit cleanup) */
@@ -464,8 +464,7 @@ class CubinKernel {
    * \par Error Checking
    * Always check the returned cudaError_t:
    * \code{.cpp}
-   * cudaError_t result = kernel.Launch(args, grid, block, stream);
-   * TVM_FFI_CHECK_CUDA_ERROR(result);
+   * TVM_FFI_CHECK_CUBIN_LAUNCHER_CUDA_ERROR(kernel.Launch(args, grid, block, stream));
    * \endcode
    *
    * \param args Array of pointers to kernel arguments (must point to actual values).

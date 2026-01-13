@@ -158,8 +158,8 @@ void LaunchAddOne(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
   DLDevice device = x.device();
   cudaStream_t stream = static_cast<cudaStream_t>(TVMFFIEnvGetStream(device.device_type, device.device_id));
 
-  cudaError_t result = g_kernel_add_one->Launch(args, grid, block, stream);
-  TVM_FFI_CHECK_CUDA_ERROR(result);
+  auto result = g_kernel_add_one->Launch(args, grid, block, stream);
+  TVM_FFI_CHECK_CUBIN_LAUNCHER_CUDA_ERROR(result);
 }
 
 void LaunchMulTwo(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
@@ -184,8 +184,8 @@ void LaunchMulTwo(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
   DLDevice device = x.device();
   cudaStream_t stream = static_cast<cudaStream_t>(TVMFFIEnvGetStream(device.device_type, device.device_id));
 
-  cudaError_t result = g_kernel_mul_two->Launch(args, grid, block, stream);
-  TVM_FFI_CHECK_CUDA_ERROR(result);
+  auto result = g_kernel_mul_two->Launch(args, grid, block, stream);
+  TVM_FFI_CHECK_CUBIN_LAUNCHER_CUDA_ERROR(result);
 }
 
 TVM_FFI_DLL_EXPORT_TYPED_FUNC(load_cubin_data, cubin_test::LoadCubinData);

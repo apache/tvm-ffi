@@ -376,7 +376,7 @@ To use dynamic shared memory, specify the size in the :cpp:func:`tvm::ffi::Cubin
 
    // Allocate 1KB of dynamic shared memory
    uint32_t shared_mem_bytes = 1024;
-   cudaError_t result = kernel.Launch(args, grid, block, stream, shared_mem_bytes);
+   TVM_FFI_CHECK_CUBIN_LAUNCHER_CUDA_ERROR(kernel.Launch(args, grid, block, stream, shared_mem_bytes));
 
 Integration with Different Compilers
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

@@ -85,7 +85,7 @@ void AddOne(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
 
   // Launch kernel
   tvm::ffi::cuda_api::ResultType result = g_add_one_kernel->Launch(args, grid, block, stream);
-  TVM_FFI_CHECK_CUDA_ERROR(result);
+  TVM_FFI_CHECK_CUBIN_LAUNCHER_CUDA_ERROR(result);
 }
 
 }  // namespace cubin_dynamic
@@ -125,7 +125,7 @@ void MulTwo(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
 
   // Launch kernel
   tvm::ffi::cuda_api::ResultType result = g_mul_two_kernel->Launch(args, grid, block, stream);
-  TVM_FFI_CHECK_CUDA_ERROR(result);
+  TVM_FFI_CHECK_CUBIN_LAUNCHER_CUDA_ERROR(result);
 }
 
 // Export TVM-FFI functions
