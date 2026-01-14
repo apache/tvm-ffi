@@ -32,6 +32,7 @@
 #include <cstring>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -84,6 +85,20 @@ struct EnvErrorAlreadySet : public std::exception {};
  */
 class ErrorObj : public Object, public TVMFFIErrorCell {
  public:
+  ErrorObj() {
+    this->cause_chain = nullptr;
+    this->extra_context = nullptr;
+  }
+
+  ~ErrorObj() {
+    if (this->cause_chain != nullptr) {
+      details::ObjectUnsafe::DecRefObjectHandle(this->cause_chain);
+    }
+    if (this->extra_context != nullptr) {
+      details::ObjectUnsafe::DecRefObjectHandle(this->extra_context);
+    }
+  }
+
   /// \cond Doxygen_Suppress
   static constexpr const int32_t _type_index = TypeIndex::kTVMFFIError;
   TVM_FFI_DECLARE_OBJECT_INFO_STATIC(StaticTypeKey::kTVMFFIError, ErrorObj, Object);
@@ -151,6 +166,29 @@ class Error : public ObjectRef, public std::exception {
    * \param kind The kind of the error.
    * \param message The message of the error.
    * \param backtrace The backtrace of the error.
+   * \param cause_chain The cause chain of the error.
+   * \param extra_context The extra context of the error.
+   */
+  Error(std::string kind, std::string message, std::string backtrace,
+        std::optional<Error> cause_chain, std::optional<ObjectRef> extra_context) {
+    ObjectPtr<ErrorObj> error_obj = make_object<details::ErrorObjFromStd>(
+        std::move(kind), std::move(message), std::move(backtrace));
+    if (cause_chain.has_value()) {
+      error_obj->cause_chain =
+          details::ObjectUnsafe::MoveObjectRefToTVMFFIObjectPtr(*std::move(cause_chain));
+    }
+    if (extra_context.has_value()) {
+      error_obj->extra_context =
+          details::ObjectUnsafe::MoveObjectRefToTVMFFIObjectPtr(*std::move(extra_context));
+    }
+    data_ = std::move(error_obj);
+  }
+
+  /*!
+   * \brief Constructor
+   * \param kind The kind of the error.
+   * \param message The message of the error.
+   * \param backtrace The backtrace of the error.
    */
   Error(std::string kind, std::string message, const TVMFFIByteArray* backtrace)
       : Error(std::move(kind), std::move(message), std::string(backtrace->data, backtrace->size)) {}
@@ -171,6 +209,37 @@ class Error : public ObjectRef, public std::exception {
   std::string message() const {
     ErrorObj* obj = static_cast<ErrorObj*>(data_.get());
     return std::string(obj->message.data, obj->message.size);
+  }
+
+  /*!
+
+   * \brief Get the cause chain of the error object.
+   * \return The cause chain of the error object.
+   */
+  std::optional<Error> cause_chain() const {
+    ErrorObj* obj = static_cast<ErrorObj*>(data_.get());
+    if (obj->cause_chain != nullptr) {
+      return details::ObjectUnsafe::ObjectRefFromObjectPtr<Error>(
+          details::ObjectUnsafe::ObjectPtrFromUnowned<ErrorObj>(
+              static_cast<Object*>(obj->cause_chain)));
+    } else {
+      return std::nullopt;
+    }
+  }
+
+  /*!
+   * \brief Get the extra context of the error object.
+   * \return The extra context of the error object.
+   */
+  std::optional<ObjectRef> extra_context() const {
+    ErrorObj* obj = static_cast<ErrorObj*>(data_.get());
+    if (obj->extra_context != nullptr) {
+      return details::ObjectUnsafe::ObjectRefFromObjectPtr<ObjectRef>(
+          details::ObjectUnsafe::ObjectPtrFromUnowned<Object>(
+              static_cast<Object*>(obj->extra_context)));
+    } else {
+      return std::nullopt;
+    }
   }
 
   /*!

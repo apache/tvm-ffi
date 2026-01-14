@@ -36,6 +36,8 @@
 namespace tvm {
 namespace ffi {
 
+class Any;
+
 /*!
  * \brief TypeTraits that specifies the conversion behavior from/to FFI Any.
  *

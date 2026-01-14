@@ -34,11 +34,7 @@ and minimal extensions for ownership management.
   they provide safer and more convenient abstractions over raw DLPack structs.
 
 
-This tutorial is organized as follows:
-
-* **Common Usage**: the most important tensor APIs, including allocation and stream handling.
-* **Tensor Classes**: what tensor types are provided and which one you should use.
-* **Conversion between TVMFFIAny**: how tensors flow across ABI boundaries.
+This tutorial covers common usage patterns, tensor classes, and how tensors flow across ABI boundaries.
 
 Glossary
 --------
@@ -143,7 +139,7 @@ C++ Allocation
 
 TVM-FFI is not a kernel library and is not linked to any specific device memory allocator or runtime.
 However, it provides standardized allocation entry points for kernel library developers by interfacing
-with the surrounding framework's allocator—for example, using PyTorch's allocator when running inside
+with the surrounding framework's allocator - for example, using PyTorch's allocator when running inside
 a PyTorch environment.
 
 **Env Allocator.** Use :cpp:func:`Tensor::FromEnvAlloc() <tvm::ffi::Tensor::FromEnvAlloc>` along with C API
@@ -351,142 +347,30 @@ it does not include:
 Conversion between :cpp:class:`TVMFFIAny`
 -----------------------------------------
 
-At the stable C ABI boundary, TVM-FFI passes values using an "Any-like" carrier—either
-:cpp:class:`Any <tvm::ffi::Any>` (owning) or :cpp:class:`AnyView <tvm::ffi::AnyView>` (non-owning).
-These are 128-bit tagged unions derived from :cpp:class:`TVMFFIAny` that contain:
+At the stable C ABI boundary, TVM-FFI passes values using :cpp:class:`Any <tvm::ffi::Any>` (owning)
+or :cpp:class:`AnyView <tvm::ffi::AnyView>` (non-owning). Tensors have two possible representations:
 
-* a :cpp:member:`type_index <TVMFFIAny::type_index>` that indicates the type of the payload, and
-* a union payload that may contain:
+* **Non-owning:** :c:struct:`DLTensor* <DLTensor>` with type index :cpp:enumerator:`TVMFFITypeIndex::kTVMFFIDLTensorPtr`
+* **Owning:** :cpp:class:`TensorObj* <tvm::ffi::TensorObj>` with type index :cpp:enumerator:`TVMFFITypeIndex::kTVMFFITensor`
 
-  * A1. Primitive values, such as integers, floats, enums, raw pointers, or
-  * A2. TVM-FFI object handles, which are reference-counted pointers.
-
-Specifically for tensors stored in :cpp:class:`Any <tvm::ffi::Any>` or :cpp:class:`AnyView <tvm::ffi::AnyView>`,
-there are two possible representations:
-
-* Non-owning views as A1 (primitive values), i.e. :c:struct:`DLTensor* <DLTensor>` whose type index is :cpp:enumerator:`TVMFFITypeIndex::kTVMFFIDLTensorPtr`.
-* Owning objects as A2 (TVM-FFI tensor object handles), i.e., :cpp:class:`TensorObj* <tvm::ffi::TensorObj>` whose type index is :cpp:enumerator:`TVMFFITypeIndex::kTVMFFITensor`.
-
-Therefore, when you see a tensor in :cpp:class:`Any <tvm::ffi::Any>` or :cpp:class:`AnyView <tvm::ffi::AnyView>`,
-first check its :cpp:member:`type_index <TVMFFIAny::type_index>` to determine whether it is a raw pointer or an object handle
-before converting it to the desired tensor type.
+When extracting a tensor from :cpp:class:`TVMFFIAny`, check the :cpp:member:`type_index <TVMFFIAny::type_index>`
+to determine the representation before conversion.
 
 .. important::
 
-  As a rule of thumb, an owning object can be converted to a non-owning view, but not vice versa.
+  An owning tensor can be converted to a non-owning view, but not vice versa.
 
-To Non-Owning Tensor
-~~~~~~~~~~~~~~~~~~~~
+See :ref:`abi-tensor` for C code examples demonstrating:
 
-This converts an owning :cpp:class:`Any <tvm::ffi::Any>` or non-owning :cpp:class:`AnyView <tvm::ffi::AnyView>` into a non-owning tensor.
-Two type indices can be converted to a non-owning tensor view:
-
-- :cpp:enumerator:`TVMFFITypeIndex::kTVMFFIDLTensorPtr`: the payload is a raw pointer :c:struct:`DLTensor* <DLTensor>`.
-- :cpp:enumerator:`TVMFFITypeIndex::kTVMFFITensor`: the payload is a TVM-FFI tensor object handle, from which you can extract the underlying :c:struct:`DLTensor` according to the layout defined in :ref:`Figure 1 <fig:layout-tensor>`.
-
-The snippets below are plain C (C99-compatible) and assume the TVM-FFI C ABI definitions from
-``tvm/ffi/c_api.h`` are available.
-
-.. code-block:: cpp
-
-    // Converts Any/AnyView to DLTensor*
-    int AnyToDLTensorView(const TVMFFIAny* value, DLTensor** out) {
-      if (value->type_index == kTVMFFIDLTensorPtr) {
-        *out = (DLTensor*)value->v_ptr;
-        return SUCCESS;
-      }
-      if (value->type_index == kTVMFFITensor) {
-        // See Figure 1 for layout of tvm::ffi::TensorObj
-        TVMFFIObject* obj = value->v_obj;
-        *out = (DLTensor*)((char*)obj + sizeof(TVMFFIObject));
-        return SUCCESS;
-      }
-      return FAILURE;
-    }
-
-:cpp:class:`TensorView <tvm::ffi::TensorView>` can be constructed directly from the returned :c:struct:`DLTensor* <DLTensor>`.
-
-To Owning Tensor
-~~~~~~~~~~~~~~~~
-
-This converts an owning :cpp:class:`Any <tvm::ffi::Any>` or non-owning :cpp:class:`AnyView <tvm::ffi::AnyView>` into an owning :cpp:class:`TensorObj <tvm::ffi::TensorObj>`. Only type index :cpp:enumerator:`TVMFFITypeIndex::kTVMFFITensor` can be converted to an owning tensor because it contains a TVM-FFI tensor object handle. The conversion involves incrementing the reference count to take ownership.
-
-.. code-block:: cpp
-
-    // Converts Any/AnyView to TensorObj*
-    int AnyToOwnedTensor(const TVMFFIAny* value, TVMFFIObjectHandle* out) {
-      if (value->type_index == kTVMFFITensor) {
-        *out = (TVMFFIObjectHandle)value->v_obj;
-        return SUCCESS;
-      }
-      return FAILURE;
-    }
-
-The caller can obtain shared ownership by calling :cpp:func:`TVMFFIObjectIncRef` on the returned handle,
-and later release it with :cpp:func:`TVMFFIObjectDecRef`.
-
-From Owning Tensor
-~~~~~~~~~~~~~~~~~~
-
-This converts an owning :cpp:class:`TensorObj <tvm::ffi::TensorObj>` to an owning :cpp:class:`Any <tvm::ffi::Any>` or non-owning :cpp:class:`AnyView <tvm::ffi::AnyView>`. It sets the type index to :cpp:enumerator:`TVMFFITypeIndex::kTVMFFITensor` and stores the tensor object handle in the payload.
-
-.. code-block:: cpp
-
-    // Converts TensorObj* to AnyView
-    int TensorToAnyView(TVMFFIObjectHandle tensor, TVMFFIAny* out_any_view) {
-      out_any_view->type_index = kTVMFFITensor;
-      out_any_view->zero_padding = 0;
-      out_any_view->v_obj = (TVMFFIObject*)tensor;
-      return SUCCESS;
-    }
-
-    // Converts TensorObj* to Any
-    int TensorToAny(TVMFFIObjectHandle tensor, TVMFFIAny* out_any) {
-      TVMFFIAny any_view;
-      int ret = TensorToAnyView(tensor, &any_view);
-      if (ret != SUCCESS) {
-        return ret;
-      }
-      TVMFFIObjectIncRef(tensor);
-      *out_any = any_view;
-      return SUCCESS;
-    }
-
-The C API :cpp:func:`TVMFFIObjectIncRef` obtains shared ownership of the tensor into `out_any`. Later, release it with
-:cpp:func:`TVMFFIObjectDecRef` on its :cpp:member:`TVMFFIAny::v_obj` field.
-
-From Non-Owning Tensor
-~~~~~~~~~~~~~~~~~~~~~~
-
-This converts a non-owning :cpp:class:`TensorView <tvm::ffi::TensorView>` to non-owning :cpp:class:`AnyView <tvm::ffi::AnyView>`.
-It sets the type index to :cpp:enumerator:`TVMFFITypeIndex::kTVMFFIDLTensorPtr` and stores a raw pointer to :c:struct:`DLTensor* <DLTensor>` in the payload.
-
-.. warning::
-
-  Non-owning :c:struct:`DLTensor` or :cpp:class:`TensorView <tvm::ffi::TensorView>` can be converted to non-owning :cpp:class:`AnyView <tvm::ffi::AnyView>`, but cannot be converted to owning :cpp:class:`Any <tvm::ffi::Any>`.
-
-.. code-block:: cpp
-
-    // Converts DLTensor* to AnyView
-    int DLTensorToAnyView(DLTensor* tensor, TVMFFIAny* out) {
-      out->type_index = kTVMFFIDLTensorPtr;
-      out->zero_padding = 0;
-      out->v_ptr = tensor;
-      return SUCCESS;
-    }
-
-    // Converts TensorView to AnyView
-    int TensorViewToAnyView(const tvm::ffi::TensorView& tensor_view, TVMFFIAny* out) {
-      return DLTensorToAnyView(tensor_view.GetDLTensorPtr(), out);
-    }
+- Extracting a :c:struct:`DLTensor` pointer from :cpp:class:`TVMFFIAny`
+- Constructing a :cpp:class:`~tvm::ffi::TensorObj` from DLPack
+- Exporting a :cpp:class:`~tvm::ffi::TensorObj` to DLPack
 
 Further Reading
 ---------------
 
-- :cpp:class:`TensorObj <tvm::ffi::TensorObj>` and :cpp:class:`Tensor <tvm::ffi::Tensor>` are part of the standard TVM-FFI object system.
-  See :ref:`Object System <object-storage-format>` for details on how TVM-FFI objects work.
-- :cpp:class:`AnyView <tvm::ffi::AnyView>` and :cpp:class:`Any <tvm::ffi::Any>` are part of the stable C ABI.
-  Tutorial :doc:`Stable C ABI<../get_started/stable_c_abi>` explains the ABI design at a high level,
-  and :doc:`ABI Overview <abi_overview>` shares details on the design.
-- DLPack specification can be found at :external+data-api:doc:`DLPack protocol <design_topics/data_interchange>`, and documentation at :external+dlpack:doc:`C API <c_api>` and :external+dlpack:doc:`Python API <python_spec>`.
-- Kernel library developers may also refer to :doc:`../guides/kernel_library_guide` and `FlashInfer <https://github.com/flashinfer-ai/flashinfer/>`_ for best practices on building high-performance kernel libraries with TVM-FFI.
+- :doc:`object_and_class`: The object system that backs :cpp:class:`~tvm::ffi::TensorObj`
+- :doc:`any`: How tensors are stored in :cpp:class:`~tvm::ffi::Any` containers
+- :doc:`abi_overview`: Low-level C ABI details for tensor conversion
+- :doc:`../guides/kernel_library_guide`: Best practices for building kernel libraries with TVM-FFI
+- :external+dlpack:doc:`DLPack C API <c_api>`: The underlying tensor interchange standard

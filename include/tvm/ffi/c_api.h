@@ -62,7 +62,7 @@
 /*! \brief TVM FFI minor version. */
 #define TVM_FFI_VERSION_MINOR 1
 /*! \brief TVM FFI patch version. */
-#define TVM_FFI_VERSION_PATCH 8
+#define TVM_FFI_VERSION_PATCH 9
 // NOLINTEND(modernize-macro-to-enum)
 
 #ifdef __cplusplus
@@ -81,6 +81,7 @@ typedef struct {
   uint32_t patch;
 } TVMFFIVersion;
 
+// [TVMFFITypeIndex.begin]
 #ifdef __cplusplus
 enum TVMFFITypeIndex : int32_t {
 #else
@@ -184,6 +185,7 @@ typedef enum {
 #else
 } TVMFFITypeIndex;
 #endif
+// [TVMFFITypeIndex.end]
 
 /*! \brief Handle to Object from C API's pov */
 typedef void* TVMFFIObjectHandle;
@@ -218,6 +220,7 @@ typedef enum {
 } TVMFFIObjectDeleterFlagBitMask;
 #endif
 
+// [TVMFFIObject.begin]
 /*!
  * \brief C-based type of all FFI object header that allocates on heap.
  */
@@ -268,7 +271,9 @@ typedef struct {
   };
 #endif
 } TVMFFIObject;
+// [TVMFFIObject.end]
 
+// [TVMFFIAny.begin]
 /*!
  * \brief C-based type of all on stack Any value.
  *
@@ -321,7 +326,9 @@ typedef struct {
   };
 #endif
 } TVMFFIAny;
+// [TVMFFIAny.end]
 
+// [TVMFFIByteArray.begin]
 /*!
  * \brief Byte array data structure used by String and Bytes.
  *
@@ -349,6 +356,7 @@ typedef struct {
   /*! \brief The size of the data. */
   size_t size;
 } TVMFFIShapeCell;
+// [TVMFFIByteArray.end]
 
 /*!
  * \brief Mode to update the backtrace of the error.
@@ -366,6 +374,7 @@ typedef enum {
 } TVMFFIBacktraceUpdateMode;
 #endif
 
+// [TVMFFIErrorCell.begin]
 /*!
  * \brief Error cell used in error object following header.
  */
@@ -394,8 +403,20 @@ typedef struct {
    */
   void (*update_backtrace)(TVMFFIObjectHandle self, const TVMFFIByteArray* backtrace,
                            int32_t update_mode);
+  /*!
+   * \brief Optional cause error chain that caused this error to be raised.
+   * \note This handle is owned by the ErrorCell.
+   */
+  TVMFFIObjectHandle cause_chain;
+  /*!
+   * \brief Optional extra context that can be used to record additional info about the error.
+   * \note This handle is owned by the ErrorCell.
+   */
+  TVMFFIObjectHandle extra_context;
 } TVMFFIErrorCell;
+// [TVMFFIErrorCell.end]
 
+// [TVMFFISafeCallType.begin]
 /*!
  * \brief Type that defines C-style safe call convention
  *
@@ -431,7 +452,9 @@ typedef struct {
  */
 typedef int (*TVMFFISafeCallType)(void* handle, const TVMFFIAny* args, int32_t num_args,
                                   TVMFFIAny* result);
+// [TVMFFISafeCallType.end]
 
+// [TVMFFIFunctionCell.begin]
 /*!
  * \brief Object cell for function object following header.
  */
@@ -452,6 +475,7 @@ typedef struct {
    */
   void* cpp_call;
 } TVMFFIFunctionCell;
+// [TVMFFIFunctionCell.end]
 
 /*!
  * \brief Object cell for opaque object following header.
@@ -630,6 +654,20 @@ TVM_FFI_DLL void TVMFFIErrorSetRaisedFromCStrParts(const char* kind, const char*
  */
 TVM_FFI_DLL int TVMFFIErrorCreate(const TVMFFIByteArray* kind, const TVMFFIByteArray* message,
                                   const TVMFFIByteArray* backtrace, TVMFFIObjectHandle* out);
+
+/*!
+ * \brief Create an initial error object with cause chain and extra context.
+ * \param kind The kind of the error.
+ * \param message The error message.
+ * \param backtrace The backtrace of the error.
+ * \param cause_chain The cause error chain that caused this error to be raised.
+ * \param extra_context The extra context that can be used to record additional information.
+ * \param out The output error object handle.
+ * \return 0 on success, nonzero on failure.
+ */
+TVM_FFI_DLL int TVMFFIErrorCreateWithCauseAndExtraContext(
+    const TVMFFIByteArray* kind, const TVMFFIByteArray* message, const TVMFFIByteArray* backtrace,
+    TVMFFIObjectHandle cause_chain, TVMFFIObjectHandle extra_context, TVMFFIObjectHandle* out);
 
 //------------------------------------------------------------
 // Section: DLPack support APIs

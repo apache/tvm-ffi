@@ -321,10 +321,16 @@ class TVMFFIPyCallManager {
           return -1;
         }
       }
+
       if (ctx.dlpack_c_exchange_api != nullptr &&
           prev_tensor_allocator != ctx.dlpack_c_exchange_api->managed_tensor_allocator) {
-        c_api_ret_code[0] =
-            TVMFFIEnvSetDLPackManagedTensorAllocator(prev_tensor_allocator, 0, nullptr);
+        // note: we cannot set the error value to c_api_ret_code[0] here because it
+        // will be overwritten by the error value from the function call
+        if (TVMFFIEnvSetDLPackManagedTensorAllocator(prev_tensor_allocator, 0, nullptr) != 0) {
+          PyErr_SetString(PyExc_RuntimeError, "Failed to recover DLPack managed tensor allocator");
+          return -1;
+        }
+        // return error after
         if (c_api_ret_code[0] != 0) return 0;
       }
       if (optional_out_ctx_dlpack_api != nullptr && ctx.dlpack_c_exchange_api != nullptr) {

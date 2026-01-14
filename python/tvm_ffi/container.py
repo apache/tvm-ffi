@@ -144,6 +144,10 @@ class Array(core.Object, Sequence[T]):
         a = tvm_ffi.Array([1, 2, 3])
         assert tuple(a) == (1, 2, 3)
 
+    Notes
+    -----
+    For structural equality and hashing, use ``structural_equal`` and ``structural_hash`` APIs.
+
     See Also
     --------
     :py:func:`tvm_ffi.convert`
@@ -297,6 +301,10 @@ class Map(core.Object, Mapping[K, V]):
         assert len(amap) == 2
         assert amap["a"] == 1
         assert amap["b"] == 2
+
+    Notes
+    -----
+    For structural equality and hashing, use ``structural_equal`` and ``structural_hash`` APIs.
 
     See Also
     --------

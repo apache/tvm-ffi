@@ -118,4 +118,15 @@ TEST(Error, TracebackMostRecentCallLast) {
   Error error("TypeError", "here", "test0\ntest1\ntest2\n");
   EXPECT_EQ(error.TracebackMostRecentCallLast(), "test2\ntest1\ntest0\n");
 }
+
+TEST(Error, CauseChain) {
+  Error original_error("TypeError", "here", "test0");
+  Error cause_chain("ValueError", "cause", "test1", original_error, std::nullopt);
+  auto opt_cause = cause_chain.cause_chain();
+  EXPECT_TRUE(opt_cause.has_value());
+  if (opt_cause.has_value()) {
+    EXPECT_EQ(opt_cause->kind(), "TypeError");
+  }
+  EXPECT_TRUE(!cause_chain.extra_context().has_value());
+}
 }  // namespace

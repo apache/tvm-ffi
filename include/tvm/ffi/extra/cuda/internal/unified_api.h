@@ -74,7 +74,7 @@ using DeviceAttrType = CUdevice_attribute;
 constexpr ResultType kSuccess = CUDA_SUCCESS;
 
 // Driver API Functions
-#define _TVM_FFI_CUDA_FUNC(name) cu##name
+#define _TVM_FFI_CUDA_FUNC(name) cu##name  // NOLINT(bugprone-reserved-identifier)
 
 #else
 
@@ -110,7 +110,9 @@ inline void GetErrorString(ResultType err, const char** name, const char** str) 
 #endif
 }
 
-#define TVM_FFI_CHECK_CUDA_ERROR(stmt)                                              \
+// this macro is only used to check cuda errors in cubin launcher where
+// we might switch between driver and runtime API.
+#define TVM_FFI_CHECK_CUBIN_LAUNCHER_CUDA_ERROR(stmt)                               \
   do {                                                                              \
     ::tvm::ffi::cuda_api::ResultType __err = (stmt);                                \
     if (__err != ::tvm::ffi::cuda_api::kSuccess) {                                  \
@@ -143,7 +145,7 @@ inline DeviceHandle GetDeviceHandle(int device_id) {
   CUdevice dev;
   // Note: We use CHECK here because this conversion usually shouldn't fail if ID is valid
   // and we need to return a value.
-  TVM_FFI_CHECK_CUDA_ERROR(cuDeviceGet(&dev, device_id));
+  TVM_FFI_CHECK_CUBIN_LAUNCHER_CUDA_ERROR(cuDeviceGet(&dev, device_id));
   return dev;
 #else
   return device_id;

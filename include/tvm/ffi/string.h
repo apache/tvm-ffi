@@ -656,6 +656,76 @@ class String {
   }
 
   /*!
+   * \brief Check if the string starts with a prefix
+   * \param prefix The prefix to check for
+   * \return true if the string starts with prefix, false otherwise
+   */
+  bool starts_with(const String& prefix) const { return starts_with(prefix.data(), prefix.size()); }
+
+  /*!
+   * \brief Check if the string starts with a prefix
+   * \param prefix The prefix to check for
+   * \return true if the string starts with prefix, false otherwise
+   */
+  bool starts_with(std::string_view prefix) const {
+    return starts_with(prefix.data(), prefix.size());
+  }
+
+  /*!
+   * \brief Check if the string starts with a prefix
+   * \param prefix The prefix to check for
+   * \return true if the string starts with prefix, false otherwise
+   */
+  bool starts_with(const char* prefix) const { return starts_with(prefix, std::strlen(prefix)); }
+
+  /*!
+   * \brief Check if the string starts with a prefix
+   * \param prefix The prefix to check for
+   * \param count The length of the prefix
+   * \return true if the string starts with prefix, false otherwise
+   */
+  bool starts_with(const char* prefix, size_t count) const {
+    if (count > size()) {
+      return false;
+    }
+    return std::memcmp(data(), prefix, count) == 0;
+  }
+
+  /*!
+   * \brief Check if the string ends with a suffix
+   * \param suffix The suffix to check for
+   * \return true if the string ends with suffix, false otherwise
+   */
+  bool ends_with(const String& suffix) const { return ends_with(suffix.data(), suffix.size()); }
+
+  /*!
+   * \brief Check if the string ends with a suffix
+   * \param suffix The suffix to check for
+   * \return true if the string ends with suffix, false otherwise
+   */
+  bool ends_with(std::string_view suffix) const { return ends_with(suffix.data(), suffix.size()); }
+
+  /*!
+   * \brief Check if the string ends with a suffix
+   * \param suffix The suffix to check for
+   * \return true if the string ends with suffix, false otherwise
+   */
+  bool ends_with(const char* suffix) const { return ends_with(suffix, std::strlen(suffix)); }
+
+  /*!
+   * \brief Check if the string ends with a suffix
+   * \param suffix The suffix to check for
+   * \param count The length of the suffix
+   * \return true if the string ends with suffix, false otherwise
+   */
+  bool ends_with(const char* suffix, size_t count) const {
+    if (count > size()) {
+      return false;
+    }
+    return std::memcmp(data() + size() - count, suffix, count) == 0;
+  }
+
+  /*!
    * \brief Convert String to an std::string object
    *
    * \return std::string

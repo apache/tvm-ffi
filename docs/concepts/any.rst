@@ -27,9 +27,7 @@ values of a wide variety of types, including primitives, objects, and strings.
 Unlike ``std::any``, it is designed for zero-copy inter-language exchange without RTTI,
 featuring a fixed 16-byte layout with built-in reference counting and ownership semantics.
 
-This tutorial covers everything you need to know about :cpp:class:`~tvm::ffi::Any` and :cpp:class:`~tvm::ffi::AnyView`:
-common usage patterns, ownership semantics, and memory layout.
-
+This tutorial covers common usage patterns, ownership semantics, and memory layout.
 
 Common Usage
 ------------
@@ -169,6 +167,8 @@ Compare with ``nullptr`` to check for ``None``:
    }
 
 
+.. _any-ownership:
+
 Ownership
 ---------
 
@@ -195,8 +195,8 @@ The core distinction between :cpp:class:`tvm::ffi::Any` and
      - Function inputs
      - Return values, storage
 
-Code Examples
-~~~~~~~~~~~~~~
+Examples
+~~~~~~~~
 
 :cpp:class:`~tvm::ffi::AnyView` is a lightweight, non-owning view. Copying it simply
 copies 16 bytes with no reference count updates, making it ideal for passing arguments without overhead:
@@ -245,25 +245,9 @@ Destruction Semantics in C
 
 In C, which lacks RAII, you must manually destroy :cpp:class:`~tvm::ffi::Any` objects
 by calling :cpp:func:`TVMFFIObjectDecRef` for heap-allocated objects.
+Destroying an :cpp:class:`~tvm::ffi::AnyView` is effectively a no-op - just clear its contents.
 
-.. code-block:: cpp
-
-   void destroy_any(TVMFFIAny* any) {
-     if (any->type_index >= kTVMFFIStaticObjectBegin) {
-       // Decrement the reference count of the heap-allocated object
-       TVMFFIObjectDecRef(any->v_obj);
-     }
-     *any = (TVMFFIAny){0};
-   }
-
-In contrast, destroying an :cpp:class:`~tvm::ffi::AnyView` is effectively a no-op - just clear its contents.
-
-.. code-block:: cpp
-
-   void destroy_any_view(TVMFFIAny* any_view) {
-     *any_view = (TVMFFIAny){0};
-   }
-
+See :ref:`abi-destruct-any` for C code examples.
 
 Layout
 ------
@@ -309,6 +293,8 @@ It is effectively a layout-stable 16-byte tagged union.
 
 * The first 4 bytes (:cpp:member:`TVMFFIAny::type_index`) serve as a tag identifying the stored type.
 * The last 8 bytes hold the actual value - either stored inline for atomic types (e.g., ``int64_t``, ``float64``, ``void*``) or as a pointer to a heap-allocated object.
+
+.. _any-atomic-types:
 
 Atomic Types
 ~~~~~~~~~~~~
@@ -371,6 +357,8 @@ Note that raw pointers like :c:struct:`DLTensor* <DLTensor>` and ``char*`` also 
 These pointers carry no ownership, so the caller must ensure the pointed-to data outlives
 the :cpp:class:`~tvm::ffi::AnyView` or :cpp:class:`~tvm::ffi::Any`.
 
+.. _any-heap-allocated-objects:
+
 Heap-Allocated Objects
 ~~~~~~~~~~~~~~~~~~~~~~
 
@@ -431,6 +419,7 @@ inline using **small string optimization**, avoiding heap allocation entirely:
 Further Reading
 ---------------
 
-- **C examples**: :doc:`../get_started/stable_c_abi` demonstrates working with :cpp:class:`TVMFFIAny` directly in C
-- **Tensor conversions**: :doc:`tensor` covers how tensors flow through :cpp:class:`~tvm::ffi::Any` and :cpp:class:`~tvm::ffi::AnyView`
-- **Function calling**: :doc:`../guides/cpp_lang_guide` explains how functions use :cpp:class:`~tvm::ffi::Any` for arguments and returns
+- :doc:`object_and_class`: How TVM-FFI objects work, including reference counting and type checking
+- :doc:`func_module`: Function calling conventions and the global registry
+- :doc:`tensor`: How tensors flow through :cpp:class:`~tvm::ffi::Any` and :cpp:class:`~tvm::ffi::AnyView`
+- :doc:`abi_overview`: Low-level C ABI details for working with :cpp:class:`TVMFFIAny` directly

@@ -21,9 +21,9 @@ project(tvm_ffi LANGUAGES CXX C)
 
 option(TVM_FFI_USE_LIBBACKTRACE "Enable libbacktrace" ON)
 option(TVM_FFI_USE_EXTRA_CXX_API "Enable extra CXX API in shared lib" ON)
+option(TVM_FFI_USE_THREADS "Link against threads in shared lib" ON)
+option(TVM_FFI_USE_DL_LIBS "Link against dl libs in shared lib" ON)
 option(TVM_FFI_BACKTRACE_ON_SEGFAULT "Set signal handler to print backtrace on segfault" ON)
-
-find_package(Threads REQUIRED)
 
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/Utils/DetectTargetTriple.cmake)
 
@@ -124,10 +124,16 @@ endif ()
 tvm_ffi_add_msvc_flags(tvm_ffi_objs)
 tvm_ffi_add_target_from_obj(tvm_ffi tvm_ffi_objs)
 
-target_link_libraries(tvm_ffi_shared PRIVATE Threads::Threads)
-target_link_libraries(tvm_ffi_static INTERFACE Threads::Threads)
+if (TVM_FFI_USE_THREADS)
+  find_package(Threads REQUIRED)
+  target_link_libraries(tvm_ffi_shared PRIVATE Threads::Threads)
+  target_link_libraries(tvm_ffi_static INTERFACE Threads::Threads)
+endif ()
 
-if (TVM_FFI_USE_EXTRA_CXX_API AND CMAKE_DL_LIBS)
+if (TVM_FFI_USE_EXTRA_CXX_API
+    AND CMAKE_DL_LIBS
+    AND TVM_FFI_USE_DL_LIBS
+)
   target_link_libraries(tvm_ffi_shared PRIVATE ${CMAKE_DL_LIBS})
   target_link_libraries(tvm_ffi_static INTERFACE ${CMAKE_DL_LIBS})
 endif ()
