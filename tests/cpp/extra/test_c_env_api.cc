@@ -59,6 +59,14 @@ int TestDLPackManagedTensorAllocatorError(DLTensor* prototype, DLManagedTensorVe
   return -1;
 }
 
+TEST(CEnvAPI, TVMFFIEnvSetDLPackManagedTensorAllocator) {
+  auto old_allocator = TVMFFIEnvGetDLPackManagedTensorAllocator();
+  DLPackManagedTensorAllocator pre_allocator;
+  TVMFFIEnvSetDLPackManagedTensorAllocator(TestDLPackManagedTensorAllocator, 0, &pre_allocator);
+  EXPECT_EQ(old_allocator, pre_allocator);
+  TVMFFIEnvSetDLPackManagedTensorAllocator(old_allocator, 0, nullptr);
+}
+
 TEST(CEnvAPI, TVMFFIEnvTensorAlloc) {
   auto old_allocator = TVMFFIEnvGetDLPackManagedTensorAllocator();
   TVMFFIEnvSetDLPackManagedTensorAllocator(TestDLPackManagedTensorAllocator, 0, nullptr);

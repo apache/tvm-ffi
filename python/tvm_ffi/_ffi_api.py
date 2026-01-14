@@ -16,27 +16,29 @@
 # under the License.
 """FFI API."""
 
-# tvm-ffi-stubgen(begin): import
+# tvm-ffi-stubgen(begin): import-section
 # fmt: off
 # isort: off
 from __future__ import annotations
-from typing import Any, Callable, TYPE_CHECKING
+from .registry import init_ffi_api as _FFI_INIT_FUNC
+from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
-    from tvm_ffi import Module
+    from tvm_ffi import Module, Object
     from tvm_ffi.access_path import AccessPath
+    from typing import Any, Callable
 # isort: on
 # fmt: on
 # tvm-ffi-stubgen(end)
 
-from . import registry
-
-# tvm-ffi-stubgen(begin): global/ffi
+# tvm-ffi-stubgen(begin): global/ffi@.registry
 # fmt: off
+_FFI_INIT_FUNC("ffi", __name__)
 if TYPE_CHECKING:
     def Array(*args: Any) -> Any: ...
     def ArrayGetItem(_0: Sequence[Any], _1: int, /) -> Any: ...
     def ArraySize(_0: Sequence[Any], /) -> int: ...
+    def ArrayContains(_0: Sequence[Any], _1: Any, /) -> bool: ...
     def Bytes(_0: bytes, /) -> bytes: ...
     def FromJSONGraph(_0: Any, /) -> Any: ...
     def FromJSONGraphString(_0: str, /) -> Any: ...
@@ -50,6 +52,8 @@ if TYPE_CHECKING:
     def MapCount(_0: Mapping[Any, Any], _1: Any, /) -> int: ...
     def MapForwardIterFunctor(_0: Mapping[Any, Any], /) -> Callable[..., Any]: ...
     def MapGetItem(_0: Mapping[Any, Any], _1: Any, /) -> Any: ...
+    def MapGetItemOrMissing(_0: Mapping[Any, Any], _1: Any, /) -> Any: ...
+    def MapGetMissingObject() -> Object: ...
     def MapSize(_0: Mapping[Any, Any], /) -> int: ...
     def ModuleClearImports(_0: Module, /) -> None: ...
     def ModuleGetFunction(_0: Module, _1: str, _2: bool, /) -> Callable[..., Any] | None: ...
@@ -58,6 +62,8 @@ if TYPE_CHECKING:
     def ModuleGetKind(_0: Module, /) -> str: ...
     def ModuleGetPropertyMask(_0: Module, /) -> int: ...
     def ModuleGetWriteFormats(_0: Module, /) -> Sequence[str]: ...
+    def ModuleGlobalsAdd(_0: Module, /) -> None: ...
+    def ModuleGlobalsRemove(_0: Module, /) -> None: ...
     def ModuleImplementsFunction(_0: Module, _1: str, _2: bool, /) -> bool: ...
     def ModuleImportModule(_0: Module, _1: Module, /) -> None: ...
     def ModuleInspectSource(_0: Module, _1: str, /) -> str: ...
@@ -72,12 +78,11 @@ if TYPE_CHECKING:
 # fmt: on
 # tvm-ffi-stubgen(end)
 
-registry.init_ffi_api("ffi", __name__)
-
 
 __all__ = [
     # tvm-ffi-stubgen(begin): __all__
     "Array",
+    "ArrayContains",
     "ArrayGetItem",
     "ArraySize",
     "Bytes",
@@ -93,6 +98,8 @@ __all__ = [
     "MapCount",
     "MapForwardIterFunctor",
     "MapGetItem",
+    "MapGetItemOrMissing",
+    "MapGetMissingObject",
     "MapSize",
     "ModuleClearImports",
     "ModuleGetFunction",
@@ -101,6 +108,8 @@ __all__ = [
     "ModuleGetKind",
     "ModuleGetPropertyMask",
     "ModuleGetWriteFormats",
+    "ModuleGlobalsAdd",
+    "ModuleGlobalsRemove",
     "ModuleImplementsFunction",
     "ModuleImportModule",
     "ModuleInspectSource",

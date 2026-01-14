@@ -47,7 +47,7 @@ namespace details {
  * \tparam ElemType The type of objects stored in the array right after
  * ArrayType.
  *
- * \code
+ * \code{.cpp}
  * // Example usage of the template to define a simple array wrapper
  * class ArrayObj : public tvm::ffi::details::InplaceArrayBase<ArrayObj, Elem> {
  * public:
@@ -72,7 +72,6 @@ namespace details {
  *   // Access the 0th element in the array.
  *   assert(ptr->operator[](0) == fields[0]);
  * }
- *
  * \endcode
  */
 template <typename ArrayType, typename ElemType>

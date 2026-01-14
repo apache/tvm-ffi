@@ -32,7 +32,7 @@ class Field:
     the ``Field`` instances, records the ``default_factory`` and later replaces
     the field with a property that forwards to the underlying C++ attribute.
 
-    Users should not instantiate ``Field`` directly—use :func:`field` instead,
+    Users should not instantiate ``Field`` directly - use :func:`field` instead,
     which guarantees that ``name`` and ``default_factory`` are populated in a
     way the decorator understands.
     """
@@ -113,6 +113,7 @@ def field(
         class PyBase:
             v_i64: int
             v_i32: int = field(default=16)
+
 
         obj = PyBase(v_i64=4)
         obj.v_i32  # -> 16

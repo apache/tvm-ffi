@@ -20,6 +20,7 @@ from __future__ import annotations
 from types import ModuleType
 from typing import Any, NamedTuple
 
+import numpy.typing as npt
 import pytest
 
 torch: ModuleType | None
@@ -33,7 +34,7 @@ import tvm_ffi
 
 
 def test_tensor_attributes() -> None:
-    data = np.zeros((10, 8, 4, 2), dtype="int16")
+    data: npt.NDArray[Any] = np.zeros((10, 8, 4, 2), dtype="int16")
     if not hasattr(data, "__dlpack__"):
         return
     x = tvm_ffi.from_dlpack(data)
@@ -84,7 +85,7 @@ def test_tensor_class_override() -> None:
     old_tensor = tvm_ffi.core._CLASS_TENSOR
     tvm_ffi.core._set_class_tensor(MyTensor)
 
-    data = np.zeros((10, 8, 4, 2), dtype="int16")
+    data: npt.NDArray[Any] = np.zeros((10, 8, 4, 2), dtype="int16")
     if not hasattr(data, "__dlpack__"):
         return
     x = tvm_ffi.from_dlpack(data)
@@ -105,7 +106,7 @@ def test_tvm_ffi_tensor_compatible() -> None:
             """Implement __tvm_ffi_object__ protocol."""
             return self._tensor
 
-    data = np.zeros((10, 8, 4, 2), dtype="int32")
+    data: npt.NDArray[Any] = np.zeros((10, 8, 4, 2), dtype="int32")
     if not hasattr(data, "__dlpack__"):
         return
     x = tvm_ffi.from_dlpack(data)
@@ -159,7 +160,7 @@ def test_optional_tensor_view() -> None:
         "testing.optional_tensor_view_has_value"
     )
     assert not optional_tensor_view_has_value(None)
-    x = np.zeros((128,), dtype="float32")
+    x: npt.NDArray[Any] = np.zeros((128,), dtype="float32")
     if not hasattr(x, "__dlpack__"):
         return
     assert optional_tensor_view_has_value(x)

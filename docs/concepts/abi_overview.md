@@ -184,6 +184,8 @@ and hash TVMFFIAny in bytes for quick equality checks without going through
 type index switching.
 :::
 
+(object-storage-format)=
+
 ## Object Storage Format
 
 When TVMFFIAny points to a heap-allocated object (such as n-dimensional arrays),
@@ -263,6 +265,11 @@ by calling `TVMFFITypeGetOrAllocIndex` with a unique
 values are unique by appending namespace prefix to the key.
 
 ## AnyView and Managed Any
+
+```{seealso}
+For a comprehensive tutorial on Any including ownership semantics, extraction methods,
+and common patterns, see {doc}`any`.
+```
 
 An `TVMFFIAny` can either be treated as a strongly managed value (corresponding to `ffi::Any` in C++),
 or an unmanaged value (corresponding to `ffi::AnyView` in C++).

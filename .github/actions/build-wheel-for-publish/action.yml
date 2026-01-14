@@ -1,0 +1,114 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+name: Build Wheel For Publish
+description: >
+  Build and test wheels (and optionally sdists) for a given OS/architecture/manylinux combination,
+  suitable for both validation and publish workflows.
+
+inputs:
+  os:
+    description: "Runner operating system (e.g., ubuntu-latest, macos-14, windows-latest)"
+    required: true
+  arch:
+    description: "Target architecture for cibuildwheel (e.g., x86_64, aarch64, arm64, AMD64)"
+    required: true
+  linux_image:
+    description: "Manylinux image tag to use on Linux runners (empty string for non-Linux runners)"
+    required: true
+  checkout_ref:
+    description: "Branch, tag, or SHA to check out before building"
+    required: true
+  build_wheels:
+    description: "Set to false to skip wheel builds (useful for sdist-only runs)"
+    default: "true"
+    required: false
+  build_sdist:
+    description: "Set to true to build a source distribution and run metadata checks"
+    default: "false"
+    required: false
+
+runs:
+  using: "composite"
+  steps:
+    # Special handling for macOS arm64 + python 3.8.
+    # Install Python 3.8 from `actions/setup-python`, which is an arm64 build.
+    - name: Install Python 3.8 for macOS arm64
+      if: runner.os == 'macOS' && inputs.arch == 'arm64'
+      uses: actions/setup-python@v5
+      with:
+        python-version: 3.8
+
+    - name: Set up uv
+      uses: astral-sh/setup-uv@b75a909f75acd358c2196fb9a5f1299a9a8868a4  # v6.7.0
+
+    - name: Check out source
+      uses: actions/checkout@v5
+      with:
+        ref: ${{ inputs.checkout_ref }}
+        submodules: recursive
+        fetch-depth: 0
+        fetch-tags: true
+
+    - uses: ./.github/actions/detect-env-vars
+      id: env_vars
+
+    - name: Print current commit
+      shell: bash
+      run: git log -1 --oneline
+
+    - name: Run cpp tests
+      if: runner.os != 'Windows'
+      env:
+        CMAKE_BUILD_PARALLEL_LEVEL: ${{ steps.env_vars.outputs.cpu_count }}
+      shell: bash
+      run: |
+        cmake . -B build_test -DTVM_FFI_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Debug
+        cmake --build build_test --clean-first --config Debug --target tvm_ffi_tests
+        ctest -V -C Debug --test-dir build_test --output-on-failure
+
+    - name: Run cpp tests[windows]
+      if: ${{ runner.os == 'Windows' }}
+      shell: cmd
+      env:
+        CMAKE_BUILD_PARALLEL_LEVEL: ${{ steps.env_vars.outputs.cpu_count }}
+      run: >
+        cmake . -B build_test -DTVM_FFI_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Debug &&
+        cmake --build build_test --clean-first --config Debug --target tvm_ffi_tests &&
+        ctest -V -C Debug --test-dir build_test --output-on-failure
+
+    - name: Build wheels
+      if: ${{ inputs.build_wheels == 'true' }}
+      uses: pypa/cibuildwheel@v3.1.4
+      env:
+        CIBW_ARCHS_MACOS: ${{ inputs.arch }}
+        CIBW_ARCHS_LINUX: ${{ inputs.arch }}
+        CIBW_ARCHS_WINDOWS: ${{ inputs.arch }}
+        CIBW_MANYLINUX_X86_64_IMAGE: ${{ inputs.linux_image }}
+        CIBW_MANYLINUX_AARCH64_IMAGE: ${{ inputs.linux_image }}
+        CIBW_BUILD_VERBOSITY: 1
+        CMAKE_BUILD_PARALLEL_LEVEL: ${{ steps.env_vars.outputs.cpu_count }}
+      with:
+        package-dir: .
+        output-dir: wheelhouse
+
+    - name: Build sdist
+      if: ${{ inputs.build_sdist == 'true' }}
+      shell: bash
+      run: |
+        pipx run build --sdist --outdir dist .
+        pipx run twine check dist/*

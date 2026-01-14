@@ -28,6 +28,7 @@
 #include <tvm/ffi/container/map.h>
 #include <tvm/ffi/container/variant.h>
 #include <tvm/ffi/function.h>
+#include <tvm/ffi/function_details.h>
 #include <tvm/ffi/optional.h>
 #include <tvm/ffi/string.h>
 #include <tvm/ffi/type_traits.h>
@@ -36,6 +37,7 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -94,6 +96,8 @@ class Metadata : public InfoTrait {
   friend class GlobalDef;
   template <typename T>
   friend class ObjectDef;
+  template <typename T>
+  friend class OverloadObjectDef;
   /*!
    * \brief Move metadata into a vector of key-value pairs.
    * \param out The output vector.
@@ -270,51 +274,48 @@ class ReflectionDefBase {
     }
   }
 
-  template <typename Class, typename R, typename... Args>
-  TVM_FFI_INLINE static Function GetMethod(std::string name, R (Class::*func)(Args...)) {
-    static_assert(std::is_base_of_v<ObjectRef, Class> || std::is_base_of_v<Object, Class>,
-                  "Class must be derived from ObjectRef or Object");
-    if constexpr (std::is_base_of_v<ObjectRef, Class>) {
-      auto fwrap = [func](Class target, Args... params) -> R {
-        // call method pointer
-        return (target.*func)(std::forward<Args>(params)...);
-      };
-      return ffi::Function::FromTyped(fwrap, std::move(name));
-    }
-
-    if constexpr (std::is_base_of_v<Object, Class>) {
-      auto fwrap = [func](const Class* target, Args... params) -> R {
-        // call method pointer
-        return (const_cast<Class*>(target)->*func)(std::forward<Args>(params)...);
-      };
-      return ffi::Function::FromTyped(fwrap, std::move(name));
-    }
-  }
-
-  template <typename Class, typename R, typename... Args>
-  TVM_FFI_INLINE static Function GetMethod(std::string name, R (Class::*func)(Args...) const) {
-    static_assert(std::is_base_of_v<ObjectRef, Class> || std::is_base_of_v<Object, Class>,
-                  "Class must be derived from ObjectRef or Object");
-    if constexpr (std::is_base_of_v<ObjectRef, Class>) {
-      auto fwrap = [func](const Class& target, Args... params) -> R {
-        // call method pointer
-        return (target.*func)(std::forward<Args>(params)...);
-      };
-      return ffi::Function::FromTyped(fwrap, std::move(name));
-    }
-
-    if constexpr (std::is_base_of_v<Object, Class>) {
-      auto fwrap = [func](const Class* target, Args... params) -> R {
-        // call method pointer
-        return (target->*func)(std::forward<Args>(params)...);
-      };
-      return ffi::Function::FromTyped(fwrap, std::move(name));
-    }
+  template <typename Func>
+  TVM_FFI_INLINE static Function GetMethod(std::string name, Func&& func) {
+    return ffi::Function::FromTyped(WrapFunction(std::forward<Func>(func)), std::move(name));
   }
 
   template <typename Func>
-  TVM_FFI_INLINE static Function GetMethod(std::string name, Func&& func) {
-    return ffi::Function::FromTyped(std::forward<Func>(func), std::move(name));
+  TVM_FFI_INLINE static Func&& WrapFunction(Func&& func) {
+    return std::forward<Func>(func);
+  }
+  template <typename Class, typename R, typename... Args>
+  TVM_FFI_INLINE static auto WrapFunction(R (Class::*func)(Args...)) {
+    static_assert(std::is_base_of_v<ObjectRef, Class> || std::is_base_of_v<Object, Class>,
+                  "Class must be derived from ObjectRef or Object");
+    if constexpr (std::is_base_of_v<ObjectRef, Class>) {
+      return [func](Class target, Args... params) -> R {
+        // call method pointer
+        return (target.*func)(std::forward<Args>(params)...);
+      };
+    }
+    if constexpr (std::is_base_of_v<Object, Class>) {
+      return [func](const Class* target, Args... params) -> R {
+        // call method pointer
+        return (const_cast<Class*>(target)->*func)(std::forward<Args>(params)...);
+      };
+    }
+  }
+  template <typename Class, typename R, typename... Args>
+  TVM_FFI_INLINE static auto WrapFunction(R (Class::*func)(Args...) const) {
+    static_assert(std::is_base_of_v<ObjectRef, Class> || std::is_base_of_v<Object, Class>,
+                  "Class must be derived from ObjectRef or Object");
+    if constexpr (std::is_base_of_v<ObjectRef, Class>) {
+      return [func](const Class& target, Args... params) -> R {
+        // call method pointer
+        return (target.*func)(std::forward<Args>(params)...);
+      };
+    }
+    if constexpr (std::is_base_of_v<Object, Class>) {
+      return [func](const Class* target, Args... params) -> R {
+        // call method pointer
+        return (target->*func)(std::forward<Args>(params)...);
+      };
+    }
   }
 };
 /// \endcond
@@ -322,9 +323,9 @@ class ReflectionDefBase {
 /*!
  * \brief GlobalDef helper to register a global function.
  *
- * \code
- *  namespace refl = tvm::ffi::reflection;
- *  refl::GlobalDef().def("my_ffi_extension.my_function", MyFunction);
+ * \code{.cpp}
+ * namespace refl = tvm::ffi::reflection;
+ * refl::GlobalDef().def("my_ffi_extension.my_function", MyFunction);
  * \endcode
  */
 class GlobalDef : public ReflectionDefBase {
@@ -415,19 +416,20 @@ class GlobalDef : public ReflectionDefBase {
  * \tparam Args The argument types for the constructor.
  *
  * Example usage:
- * \code
- *   class ExampleObject : public Object {
- *    public:
- *      int64_t v_i64;
- *      int32_t v_i32;
  *
- *      ExampleObject(int64_t v_i64, int32_t v_i32) : v_i64(v_i64), v_i32(v_i32) {}
- *      TVM_FFI_DECLARE_OBJECT_INFO("example.ExampleObject", ExampleObject, Object);
- *   };
+ * \code{.cpp}
+ * class ExampleObject : public Object {
+ *  public:
+ *   int64_t v_i64;
+ *   int32_t v_i32;
  *
- *   // Register the constructor
- *   refl::ObjectDef<ExampleObject>()
- *      .def(refl::init<int64_t, int32_t>());
+ *   ExampleObject(int64_t v_i64, int32_t v_i32) : v_i64(v_i64), v_i32(v_i32) {}
+ *   TVM_FFI_DECLARE_OBJECT_INFO("example.ExampleObject", ExampleObject, Object);
+ * };
+ *
+ * // Register the constructor
+ * refl::ObjectDef<ExampleObject>()
+ *     .def(refl::init<int64_t, int32_t>());
  * \endcode
  *
  * \note The object type is automatically deduced from the `ObjectDef` context.
@@ -437,6 +439,8 @@ struct init {
   // Allow ObjectDef to access the execute function
   template <typename Class>
   friend class ObjectDef;
+  template <typename T>
+  friend class OverloadObjectDef;
 
   /*!
    * \brief Constructor
@@ -460,9 +464,9 @@ struct init {
  * \brief Helper to register Object's reflection metadata.
  * \tparam Class The class type.
  *
- * \code
- *  namespace refl = tvm::ffi::reflection;
- *  refl::ObjectDef<MyClass>().def_ro("my_field", &MyClass::my_field);
+ * \code{.cpp}
+ * namespace refl = tvm::ffi::reflection;
+ * refl::ObjectDef<MyClass>().def_ro("my_field", &MyClass::my_field);
  * \endcode
  */
 template <typename Class>
@@ -570,9 +574,10 @@ class ObjectDef : public ReflectionDefBase {
    * \return Reference to this `ObjectDef` for method chaining.
    *
    * Example:
-   * \code
-   *   refl::ObjectDef<MyObject>()
-   *       .def(refl::init<int64_t, std::string>(), "Constructor docstring");
+   *
+   * \code{.cpp}
+   * refl::ObjectDef<MyObject>()
+   *     .def(refl::init<int64_t, std::string>(), "Constructor docstring");
    * \endcode
    */
   template <typename... Args, typename... Extra>
@@ -583,6 +588,9 @@ class ObjectDef : public ReflectionDefBase {
   }
 
  private:
+  template <typename T>
+  friend class OverloadObjectDef;
+
   template <typename... ExtraArgs>
   void RegisterExtraInfo(ExtraArgs&&... extra_args) {
     TVMFFITypeMetadata info;
@@ -641,6 +649,7 @@ class ObjectDef : public ReflectionDefBase {
     if (is_static) {
       info.flags |= kTVMFFIFieldFlagBitMaskIsStaticMethod;
     }
+
     // obtain the method function
     Function method = GetMethod(std::string(type_key_) + "." + name, std::forward<Func>(func));
     info.method = AnyView(method).CopyToTVMFFIAny();
@@ -662,11 +671,10 @@ class ObjectDef : public ReflectionDefBase {
  * \tparam Class The class type.
  * \tparam ExtraArgs The extra arguments.
  *
- * \code
- *  namespace refl = tvm::ffi::reflection;
- *  refl::TypeAttrDef<MyClass>().def("func_attr", MyFunc);
+ * \code{.cpp}
+ * namespace refl = tvm::ffi::reflection;
+ * refl::TypeAttrDef<MyClass>().def("func_attr", MyFunc);
  * \endcode
- *
  */
 template <typename Class, typename = std::enable_if_t<std::is_base_of_v<Object, Class>>>
 class TypeAttrDef : public ReflectionDefBase {

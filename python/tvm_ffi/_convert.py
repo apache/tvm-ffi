@@ -81,6 +81,7 @@ def convert(value: Any) -> Any:  # noqa: PLR0911,PLR0912
 
         # Array libraries that support DLPack export can be converted to Tensor
         import numpy as np
+
         x = tvm_ffi.convert(np.arange(4, dtype="int32"))
         assert isinstance(x, tvm_ffi.Tensor)
 

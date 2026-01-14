@@ -20,6 +20,28 @@ project(tvm_ffi_example LANGUAGES C)
 option(EXAMPLE_NAME "Which example to build ('kernel'/'load')" "kernel")
 message(STATUS "Building example: ${EXAMPLE_NAME}")
 
+# cmake-lint: disable=C0111
+function (set_flat_output_dirs target_name)
+  set(output_dir "${CMAKE_BINARY_DIR}")
+  foreach (config IN ITEMS "" DEBUG RELEASE RELWITHDEBINFO MINSIZEREL)
+    if (config STREQUAL "")
+      set_property(TARGET ${target_name} PROPERTY RUNTIME_OUTPUT_DIRECTORY "${output_dir}")
+      set_property(TARGET ${target_name} PROPERTY LIBRARY_OUTPUT_DIRECTORY "${output_dir}")
+      set_property(TARGET ${target_name} PROPERTY ARCHIVE_OUTPUT_DIRECTORY "${output_dir}")
+    else ()
+      set_property(
+        TARGET ${target_name} PROPERTY RUNTIME_OUTPUT_DIRECTORY_${config} "${output_dir}"
+      )
+      set_property(
+        TARGET ${target_name} PROPERTY LIBRARY_OUTPUT_DIRECTORY_${config} "${output_dir}"
+      )
+      set_property(
+        TARGET ${target_name} PROPERTY ARCHIVE_OUTPUT_DIRECTORY_${config} "${output_dir}"
+      )
+    endif ()
+  endforeach ()
+endfunction ()
+
 # Run `tvm_ffi.config --cmakedir` to find tvm-ffi package
 find_package(
   Python
@@ -36,8 +58,7 @@ find_package(tvm_ffi CONFIG REQUIRED)
 if (EXAMPLE_NAME STREQUAL "kernel")
   # Example 1. `add_one_cpu` in C
   add_library(add_one_cpu SHARED src/add_one_cpu.c)
-  target_link_libraries(add_one_cpu PRIVATE tvm_ffi_header)
-  target_link_libraries(add_one_cpu PRIVATE tvm_ffi_shared)
+  target_link_libraries(add_one_cpu PRIVATE tvm_ffi::header tvm_ffi::shared)
   set_target_properties(
     add_one_cpu
     PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/"
@@ -47,20 +68,20 @@ if (EXAMPLE_NAME STREQUAL "kernel")
                C_STANDARD_REQUIRED YES
                C_EXTENSIONS NO
   )
+  set_flat_output_dirs(add_one_cpu)
 elseif (EXAMPLE_NAME STREQUAL "load")
   # Example 2. Load `add_one_cpu` shared library in C
   add_executable(load src/load.c)
-  target_link_libraries(load PRIVATE tvm_ffi_header)
-  target_link_libraries(load PRIVATE tvm_ffi_shared)
+  target_link_libraries(load PRIVATE tvm_ffi::header tvm_ffi::shared)
   set_target_properties(
     load
     PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/"
                PREFIX ""
-               SUFFIX ""
                C_STANDARD 11
                C_STANDARD_REQUIRED YES
                C_EXTENSIONS NO
   )
+  set_flat_output_dirs(load)
 else ()
   message(FATAL_ERROR "Unknown EXAMPLE_NAME option: ${EXAMPLE_NAME}. "
                       "Expected: 'kernel' or 'load'."

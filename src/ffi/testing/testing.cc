@@ -519,7 +519,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
 // Exported symbols for metadata testing on DLL-exported functions
 // -----------------------------------------------------------------------------
 // We keep minimal DLL exports here to verify the export mechanism.
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(testing_dll_schema_id_int, tvm::ffi::schema_test_impl::schema_id_int);
+TVM_FFI_DLL_EXPORT_TYPED_FUNC(testing_dll_schema_id_int, tvm::ffi::schema_test_impl::schema_id_int)
 
 // Documentation export
 TVM_FFI_DLL_EXPORT_TYPED_FUNC(testing_dll_test_add_with_docstring,

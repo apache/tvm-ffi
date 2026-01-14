@@ -62,7 +62,7 @@
 /*! \brief TVM FFI minor version. */
 #define TVM_FFI_VERSION_MINOR 1
 /*! \brief TVM FFI patch version. */
-#define TVM_FFI_VERSION_PATCH 6
+#define TVM_FFI_VERSION_PATCH 8
 // NOLINTEND(modernize-macro-to-enum)
 
 #ifdef __cplusplus
@@ -674,6 +674,20 @@ TVM_FFI_DLL int TVMFFITensorFromDLPackVersioned(DLManagedTensorVersioned* from,
  */
 TVM_FFI_DLL int TVMFFITensorToDLPackVersioned(TVMFFIObjectHandle from,
                                               DLManagedTensorVersioned** out);
+
+/*!
+ * \brief Create a Tensor view from source using metadata in the prototype while retaining the
+ * source tensor.
+ * \param source The source tensor whose data memory will be shared by the view.
+ * \param prototype The prototype DLTensor that contains the metadata for the view.
+ * \param out The output Tensor handle.
+ * \return 0 on success, nonzero on failure.
+ * \note This function is unsafe and the caller must ensure the prototype is valid and that
+ *       the prototype's data pointer points to memory owned by the source tensor. The callee
+ *       allocates shape and strides arrays in the output tensor and copies them from the prototype.
+ */
+TVM_FFI_DLL int TVMFFITensorCreateUnsafeView(TVMFFIObjectHandle source, const DLTensor* prototype,
+                                             TVMFFIObjectHandle* out);
 //---------------------------------------------------------------
 // Section: string/bytes support APIs.
 // These APIs are used to simplify the string/bytes construction
@@ -788,7 +802,7 @@ typedef enum {
  *
  * The meta-data record comparison method in tree node and DAG node.
  *
- * \code
+ * \code{.cpp}
  * x = VarNode()
  * v0 = AddNode(x, 1)
  * v1 = AddNode(x, 1)

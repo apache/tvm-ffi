@@ -117,7 +117,14 @@ ALLOW_FILE_NAME = {
 }
 
 # List of specific files allowed in relpath to <proj_root>
-ALLOW_SPECIFIC_FILE = {"LICENSE", "NOTICE", "KEYS", "DISCLAIMER"}
+ALLOW_SPECIFIC_FILE = {
+    "LICENSE",
+    "NOTICE",
+    "KEYS",
+    "DISCLAIMER",
+    "addons/torch_c_dlpack_ext/LICENSE",
+    "addons/torch_c_dlpack_ext/NOTICE",
+}
 
 
 def filename_allowed(name: str) -> bool:

@@ -23,35 +23,56 @@ Demonstrates loading and executing CUDA kernels from CUBIN files using TVM-FFI. 
 
 ## Techniques
 
-The implementation uses CUDA Runtime API Library Management:
+The implementation supports both CUDA Runtime API (CUDA >= 12.8) and Driver API for Library Management.
+
+**Runtime API (CUDA >= 12.8):**
 
 - **`cudaLibraryLoadData()`** - Load CUBIN from memory buffer
 - **`cudaLibraryGetKernel()`** - Get kernel handle by name
-- **`cudaKernelGetFunction()`** - Get function handle for current CUDA context
 - **`cudaLaunchKernel()`** - Launch kernel with grid/block dimensions
+
+**Driver API:**
+
+- **`cuLibraryLoadData()`** - Load CUBIN from memory buffer
+- **`cuLibraryGetKernel()`** - Get kernel handle by name
+- **`cuLaunchKernel()`** - Launch kernel with grid/block dimensions
+
+**Customization:**
+
+By default, the implementation uses the Runtime API if compiled with CUDA >= 12.8, falling back to the Driver API for older versions. You can force the usage of the Driver API (or Runtime API) by defining the macro `TVM_FFI_CUBIN_LAUNCHER_USE_DRIVER_API` (set to `1` for Driver API, `0` for Runtime API) before including the header.
 
 Key features:
 
 - Multi-GPU support via CUDA primary contexts
 - RAII-based resource management (CubinModule, CubinKernel)
-- CUBIN embedding at compile time (via `ld` + `objcopy`)
+- CUBIN embedding at compile time
+  - Object linking (via `ld` + `objcopy`)
+  - Header inclusion (via `bin2c`)
+  - Modern C++ embedding (via `#embed`)
 - TVM-FFI integration for tensor argument passing
-- **New:** `TVM_FFI_EMBED_CUBIN` and `TVM_FFI_EMBED_CUBIN_GET_KERNEL` macros for easy CUBIN embedding
-- **New:** `embed_cubin` parameter in `tvm_ffi.cpp.load_inline` for seamless CUBIN integration
-- **New:** `tvm_ffi.cpp.nvrtc` module for runtime CUDA compilation
+- **Macros:**
+  - `TVM_FFI_EMBED_CUBIN`: Declare symbols for object-linked CUBIN
+  - `TVM_FFI_EMBED_CUBIN_FROM_BYTES`: Load CUBIN from byte array (for `#embed`/`bin2c`)
+  - `TVM_FFI_EMBED_CUBIN_GET_KERNEL`: Helper to retrieve kernels
+- **Python Integration:** `embed_cubin` parameter in `tvm_ffi.cpp.load_inline` for seamless CUBIN integration
+- **Runtime Compilation:** `tvm_ffi.cpp.nvrtc` module for runtime CUDA compilation
 
 ## Examples
 
 ### 1. Embedded CUBIN
 
-Demonstrates embedding CUBIN data directly into the shared library at build time using the `tvm_ffi_embed_cubin` CMake utility.
+The `embedded_cubin` directory contains three examples demonstrating different embedding techniques.
 
-**Location:** `embedded_cubin/`
+#### 1.1 Object Linking (Standard)
+
+Demonstrates embedding CUBIN data directly into the shared library at build time using the `tvm_ffi_embed_bin_into` CMake utility. This is the most robust method for CMake projects.
+
+**Location:** `embedded_cubin/embed_with_tvm_ffi/`
 
 **Build and run:**
 
 ```bash
-cd examples/cubin_launcher/embedded_cubin
+cd examples/cubin_launcher/embedded_cubin/embed_with_tvm_ffi
 mkdir build && cd build
 cmake ..
 make
@@ -59,12 +80,39 @@ cd ..
 python main.py
 ```
 
-**Key features:**
+#### 1.2 Header Inclusion (Portable)
 
-- CUBIN is embedded at compile time using `ld` and `objcopy`
-- No separate CUBIN file needed at runtime
-- Symbols are localized to prevent conflicts
-- `.note.GNU-stack` section automatically added for security
+Demonstrates converting the CUBIN to a C header file using `bin2c` and including it in the C++ source. This is highly portable and works with any compiler.
+
+**Location:** `embedded_cubin/include_bin2c/`
+
+**Build and run:**
+
+```bash
+cd examples/cubin_launcher/embedded_cubin/include_bin2c
+mkdir build && cd build
+cmake ..
+make
+cd ..
+python main.py
+```
+
+#### 1.3 C++ Embedding (Modern)
+
+Demonstrates using C++23 `#embed` (or compiler extensions in GCC/Clang) to directly include binary data. This is the cleanest approach for modern toolchains.
+
+**Location:** `embedded_cubin/cpp_embed/`
+
+**Build and run:**
+
+```bash
+cd examples/cubin_launcher/embedded_cubin/cpp_embed
+mkdir build && cd build
+cmake ..
+make
+cd ..
+python main.py
+```
 
 ### 2. Dynamic CUBIN Loading
 
@@ -152,23 +200,17 @@ mod = cpp.load_inline(
 - `include/tvm/ffi/extra/cuda/cubin_launcher.h` - Header-only C++ library with CUBIN utilities
 - `python/tvm_ffi/utils/embed_cubin.py` - Python utility for embedding CUBIN into object files
 - `python/tvm_ffi/cpp/nvrtc.py` - NVRTC compilation utilities
-- `cmake/Utils/EmbedCubin.cmake` - CMake utilities (`tvm_ffi_generate_cubin`, `tvm_ffi_embed_cubin`)
+- `cmake/Utils/EmbedCubin.cmake` - CMake utilities
 
 ### Example Directories
 
-**`embedded_cubin/`** - CUBIN embedded at build time
+**`embedded_cubin/`** - Different CUBIN embedding techniques:
 
-- `CMakeLists.txt` - Build configuration using `tvm_ffi_embed_cubin`
-- `main.py` - Python test script
-- `src/lib_embedded.cc` - C++ code using `TVM_FFI_EMBED_CUBIN` macro
-- `src/kernel.cu` - CUDA kernels (add_one, mul_two)
+- `embed_with_tvm_ffi/` - Standard object linking
+- `include_bin2c/` - Header inclusion
+- `cpp_embed/` - Modern C++ `#embed`
 
 **`dynamic_cubin/`** - CUBIN loaded at runtime
-
-- `CMakeLists.txt` - Build configuration using `tvm_ffi_generate_cubin`
-- `main.py` - Python test script
-- `src/lib_dynamic.cc` - C++ code using `CubinModule::GetKernel()`
-- `src/kernel.cu` - CUDA kernels (add_one, mul_two)
 
 **Additional Examples** (at root level)
 

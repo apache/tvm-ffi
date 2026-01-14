@@ -57,6 +57,11 @@ class Shape(tuple, PyNativeObject):
 
     _tvm_ffi_cached_object: Any
 
+    # tvm-ffi-stubgen(begin): object/ffi.Shape
+    # fmt: off
+    # fmt: on
+    # tvm-ffi-stubgen(end)
+
     def __new__(cls, content: tuple[int, ...]) -> Shape:
         if any(not isinstance(x, Integral) for x in content):
             raise ValueError("Shape must be a tuple of integers")
@@ -96,6 +101,7 @@ def device(device_type: str | int | DLDeviceType, index: int | None = None) -> D
     .. code-block:: python
 
       import tvm_ffi
+
       assert tvm_ffi.device("cuda:0") == tvm_ffi.device("cuda", 0)
       assert tvm_ffi.device("cpu:0") == tvm_ffi.device("cpu", 0)
 

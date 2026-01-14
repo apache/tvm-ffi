@@ -15,205 +15,132 @@
 # specific language governing permissions and limitations
 # under the License.
 
+# If CMAKE_CUDA_RUNTIME_LIBRARY is not set, we default it to Shared. This prevents static linking of
+# cudart which requires exact driver version match.
+if (NOT DEFINED CMAKE_CUDA_RUNTIME_LIBRARY)
+  set(CMAKE_CUDA_RUNTIME_LIBRARY Shared)
+  message(STATUS "CMAKE_CUDA_RUNTIME_LIBRARY not set, defaulting to Shared. "
+                 "If you want to use driver API only, set CMAKE_CUDA_RUNTIME_LIBRARY to None."
+  )
+endif ()
+
+set(OBJECT_COPY_UTIL "${CMAKE_CURRENT_LIST_DIR}/ObjectCopyUtil.cmake")
+
 # ~~~
-# tvm_ffi_generate_cubin(
-#   OUTPUT <output_cubin_file>
-#   SOURCE <cuda_source_file>
-#   [ARCH <architecture>]
-#   [OPTIONS <extra_nvcc_options>...]
-#   [DEPENDS <additional_dependencies>...]
-# )
+# add_tvm_ffi_cubin(<target_name> CUDA <source_file>)
 #
-# Compiles a CUDA source file to CUBIN format using nvcc.
+# Creates an object library that compiles CUDA source to CUBIN format.
+# This function uses CMake's native CUDA support and respects CMAKE_CUDA_ARCHITECTURES.
+# This is a compatibility util for cmake < 3.27, user can create
+# cmake target with `CUDA_CUBIN_COMPILATION` for cmake >= 3.27.
 #
 # Parameters:
-#   OUTPUT: Path to the output CUBIN file (e.g., kernel.cubin)
-#   SOURCE: Path to the CUDA source file (e.g., kernel.cu)
-#   ARCH: Target GPU architecture (default: native for auto-detection)
-#         Examples: sm_75, sm_80, sm_86, compute_80, native
-#   OPTIONS: Additional nvcc compiler options (e.g., -O3, --use_fast_math)
-#   DEPENDS: Optional additional dependencies
-#
-# The function will:
-#   1. Find the CUDA compiler (nvcc)
-#   2. Compile the SOURCE to CUBIN with specified architecture and options
-#   3. Create the output CUBIN file
+#   target_name: Name of the object library target
+#   CUDA: One CUDA source file
 #
 # Example:
-#   tvm_ffi_generate_cubin(
-#     OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/kernel.cubin
-#     SOURCE src/kernel.cu
-#     ARCH native
-#     OPTIONS -O3 --use_fast_math
-#   )
+#   add_tvm_ffi_cubin(my_kernel_cubin CUDA kernel.cu)
 # ~~~
-
-# cmake-lint: disable=C0111,C0103
-function (tvm_ffi_generate_cubin)
-  # Parse arguments
-  set(options "")
-  set(oneValueArgs OUTPUT SOURCE ARCH)
-  set(multiValueArgs OPTIONS DEPENDS)
-  cmake_parse_arguments(ARG "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
-
-  # Validate required arguments
-  if (NOT ARG_OUTPUT)
-    message(FATAL_ERROR "tvm_ffi_generate_cubin: OUTPUT is required")
-  endif ()
-  if (NOT ARG_SOURCE)
-    message(FATAL_ERROR "tvm_ffi_generate_cubin: SOURCE is required")
+function (add_tvm_ffi_cubin target_name)
+  cmake_parse_arguments(ARG "" "CUDA" "" ${ARGN})
+  if (NOT ARG_CUDA)
+    message(FATAL_ERROR "add_tvm_ffi_cubin: CUDA source is required")
   endif ()
 
-  # Default architecture to native if not specified
-  if (NOT ARG_ARCH)
-    set(ARG_ARCH "native")
-  endif ()
+  add_library(${target_name} OBJECT ${ARG_CUDA})
+  target_compile_options(${target_name} PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--cubin>)
 
-  # Ensure CUDA compiler is available
-  if (NOT CMAKE_CUDA_COMPILER)
-    message(
-      FATAL_ERROR
-        "tvm_ffi_generate_cubin: CMAKE_CUDA_COMPILER not found. Enable CUDA language in project()."
-    )
-  endif ()
-
-  # Get absolute paths
-  get_filename_component(ARG_SOURCE_ABS "${ARG_SOURCE}" ABSOLUTE)
-  get_filename_component(ARG_OUTPUT_ABS "${ARG_OUTPUT}" ABSOLUTE)
-
-  # Build nvcc command
-  add_custom_command(
-    OUTPUT "${ARG_OUTPUT_ABS}"
-    COMMAND ${CMAKE_CUDA_COMPILER} --cubin -arch=${ARG_ARCH} ${ARG_OPTIONS} "${ARG_SOURCE_ABS}" -o
-            "${ARG_OUTPUT_ABS}"
-    DEPENDS "${ARG_SOURCE_ABS}" ${ARG_DEPENDS}
-    COMMENT "Compiling ${ARG_SOURCE} to CUBIN (arch: ${ARG_ARCH})"
+  add_custom_target(
+    ${target_name}_bin ALL
+    COMMAND ${CMAKE_COMMAND} -DOBJECTS="$<TARGET_OBJECTS:${target_name}>" -DOUT_DIR="" -DEXT="cubin"
+            -P "${OBJECT_COPY_UTIL}"
+    DEPENDS ${target_name}
+    COMMENT "Generating .cubin files for ${target_name}"
     VERBATIM
   )
 endfunction ()
 
 # ~~~
-# tvm_ffi_embed_cubin(
-#   OUTPUT <output_object_file>
-#   SOURCE <source_file>
-#   CUBIN <cubin_file>
-#   NAME <symbol_name>
-#   [DEPENDS <additional_dependencies>...]
-# )
+# add_tvm_ffi_fatbin(<target_name> CUDA <source_file>)
 #
-# Compiles a C++ source file and embeds a CUBIN file into it, creating a
-# combined object file that can be linked into a shared library or executable.
+# Creates an object library that compiles CUDA source to FATBIN format.
+# This function uses CMake's native CUDA support and respects CMAKE_CUDA_ARCHITECTURES.
+# This is a compatibility util for cmake < 3.27, user can create
+# cmake target with `CUDA_FATBIN_COMPILATION` for cmake >= 3.27.
 #
 # Parameters:
-#   OUTPUT: Path to the output object file (e.g., lib_embedded_with_cubin.o)
-#   SOURCE: Path to the C++ source file that uses TVM_FFI_EMBED_CUBIN macro
-#   CUBIN: Path to the CUBIN file to embed (can be a file path or a custom target output)
-#   NAME: Name used in the TVM_FFI_EMBED_CUBIN macro (e.g., "env" for TVM_FFI_EMBED_CUBIN(env))
-#   DEPENDS: Optional additional dependencies (e.g., custom targets)
-#
-# The function will:
-#   1. Compile the SOURCE file to an intermediate object file
-#   2. Use the tvm_ffi.utils.embed_cubin Python utility to merge the object file
-#      with the CUBIN data
-#   3. Create symbols: __tvm_ffi__cubin_<NAME> and __tvm_ffi__cubin_<NAME>_end
+#   target_name: Name of the object library target
+#   CUDA: One CUDA source file
 #
 # Example:
-#   tvm_ffi_embed_cubin(
-#     OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/lib_embedded_with_cubin.o
-#     SOURCE src/lib_embedded.cc
-#     CUBIN ${CMAKE_CURRENT_BINARY_DIR}/kernel.cubin
-#     NAME env
-#   )
-#
-#   add_library(lib_embedded SHARED ${CMAKE_CURRENT_BINARY_DIR}/lib_embedded_with_cubin.o)
-#   target_link_libraries(lib_embedded PRIVATE tvm_ffi_header CUDA::cudart)
-#
-# Note: The .note.GNU-stack section is automatically added to mark the stack as
-#       non-executable, so you don't need to add linker options manually
+#   add_tvm_ffi_fatbin(my_kernel_cubin CUDA kernel.cu)
 # ~~~
-
-# cmake-lint: disable=C0111,C0103
-function (tvm_ffi_embed_cubin)
-  # Parse arguments
-  set(options "")
-  set(oneValueArgs OUTPUT SOURCE CUBIN NAME)
-  set(multiValueArgs DEPENDS)
-  cmake_parse_arguments(ARG "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
-
-  # Validate required arguments
-  if (NOT ARG_OUTPUT)
-    message(FATAL_ERROR "tvm_ffi_embed_cubin: OUTPUT is required")
-  endif ()
-  if (NOT ARG_SOURCE)
-    message(FATAL_ERROR "tvm_ffi_embed_cubin: SOURCE is required")
-  endif ()
-  if (NOT ARG_CUBIN)
-    message(FATAL_ERROR "tvm_ffi_embed_cubin: CUBIN is required")
-  endif ()
-  if (NOT ARG_NAME)
-    message(FATAL_ERROR "tvm_ffi_embed_cubin: NAME is required")
+function (add_tvm_ffi_fatbin target_name)
+  cmake_parse_arguments(ARG "" "CUDA" "" ${ARGN})
+  if (NOT ARG_CUDA)
+    message(FATAL_ERROR "add_tvm_ffi_fatbin: CUDA source is required")
   endif ()
 
-  # Ensure Python is found (prefer virtualenv)
-  if (NOT Python_EXECUTABLE)
-    set(Python_FIND_VIRTUALENV FIRST)
-    find_package(
-      Python
-      COMPONENTS Interpreter
-      REQUIRED
-    )
-  endif ()
+  add_library(${target_name} OBJECT ${ARG_CUDA})
+  target_compile_options(${target_name} PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--fatbin>)
 
-  # Get absolute paths
-  get_filename_component(ARG_SOURCE_ABS "${ARG_SOURCE}" ABSOLUTE)
-  get_filename_component(ARG_OUTPUT_ABS "${ARG_OUTPUT}" ABSOLUTE)
-
-  # Generate intermediate object file path
-  get_filename_component(OUTPUT_DIR "${ARG_OUTPUT_ABS}" DIRECTORY)
-  get_filename_component(OUTPUT_NAME "${ARG_OUTPUT_ABS}" NAME_WE)
-  set(INTERMEDIATE_OBJ "${OUTPUT_DIR}/${OUTPUT_NAME}_intermediate.o")
-
-  # Get include directories from tvm_ffi_header
-  get_target_property(TVM_FFI_INCLUDES tvm_ffi_header INTERFACE_INCLUDE_DIRECTORIES)
-
-  # Convert list to -I flags
-  set(INCLUDE_FLAGS "")
-  foreach (inc_dir ${TVM_FFI_INCLUDES})
-    list(APPEND INCLUDE_FLAGS "-I${inc_dir}")
-  endforeach ()
-
-  # Add CUDA include directories if CUDAToolkit is found
-  if (TARGET CUDA::cudart)
-    get_target_property(CUDA_INCLUDES CUDA::cudart INTERFACE_INCLUDE_DIRECTORIES)
-    foreach (inc_dir ${CUDA_INCLUDES})
-      list(APPEND INCLUDE_FLAGS "-I${inc_dir}")
-    endforeach ()
-  endif ()
-
-  # Step 1: Compile source file to intermediate object file
-  add_custom_command(
-    OUTPUT "${INTERMEDIATE_OBJ}"
-    COMMAND ${CMAKE_CXX_COMPILER} -c -fPIC -std=c++17 ${INCLUDE_FLAGS} "${ARG_SOURCE_ABS}" -o
-            "${INTERMEDIATE_OBJ}"
-    DEPENDS "${ARG_SOURCE_ABS}"
-    COMMENT "Compiling ${ARG_SOURCE} to intermediate object file"
+  add_custom_target(
+    ${target_name}_bin ALL
+    COMMAND ${CMAKE_COMMAND} -DOBJECTS="$<TARGET_OBJECTS:${target_name}>" -DOUT_DIR=""
+            -DEXT="fatbin" -P "${OBJECT_COPY_UTIL}"
+    DEPENDS ${target_name}
+    COMMENT "Generating .fatbin files for ${target_name}"
     VERBATIM
   )
+endfunction ()
 
-  # Step 2: Embed CUBIN into the object file using Python utility Note: The Python utility
-  # automatically adds .note.GNU-stack section
+# ~~~
+# tvm_ffi_embed_bin_into(<target_name>
+#                        SYMBOL <symbol_name>
+#                        BIN <cubin_or_fatbin>)
+#
+# Embed one cubin/fatbin into given target with specified library name,
+# can be loaded with `TVM_FFI_EMBED_CUBIN(symbol_name)`.
+# Can only have one object in target and one cubin/fatbin.
+#
+# The reason of this design is to integrate with cmake's workflow.
+#
+# Parameters:
+#   target_name: Name of the object library target
+#   symbol_name: Name of the symbol in TVM_FFI_EMBED_CUBIN macro.
+#   BIN: CUBIN or FATBIN file
+#
+# Example:
+#   tvm_ffi_embed_bin_into(lib_embedded SYMBOL env BIN "$<TARGET_OBJECTS:kernel_fatbin>")
+# ~~~
+function (tvm_ffi_embed_bin_into target_name)
+  cmake_parse_arguments(ARG "" "SYMBOL;BIN" "" ${ARGN})
+
+  if (NOT ARG_BIN)
+    message(FATAL_ERROR "tvm_ffi_embed_bin_into: BIN is required")
+  endif ()
+  if (NOT ARG_SYMBOL)
+    message(FATAL_ERROR "tvm_ffi_embed_bin_into: SYMBOL is required")
+  endif ()
+
+  set(intermediate_path "${CMAKE_CURRENT_BINARY_DIR}/${ARG_SYMBOL}_intermediate.o")
+
   add_custom_command(
-    OUTPUT "${ARG_OUTPUT_ABS}"
-    COMMAND ${Python_EXECUTABLE} -m tvm_ffi.utils.embed_cubin --output-obj "${ARG_OUTPUT_ABS}"
-            --input-obj "${INTERMEDIATE_OBJ}" --cubin "${ARG_CUBIN}" --name "${ARG_NAME}"
-    DEPENDS "${INTERMEDIATE_OBJ}" "${ARG_CUBIN}" ${ARG_DEPENDS}
-    COMMENT "Embedding CUBIN into object file (name: ${ARG_NAME})"
-    VERBATIM
+    TARGET ${target_name}
+    PRE_LINK
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_OBJECTS:${target_name}>"
+            "${intermediate_path}"
+    COMMENT "Moving $<TARGET_OBJECTS:${target_name}> -> ${intermediate_path}"
   )
 
-  # Set a variable in parent scope so users can add dependencies
-  set(${ARG_NAME}_EMBEDDED_OBJ
-      "${ARG_OUTPUT_ABS}"
-      PARENT_SCOPE
+  add_custom_command(
+    TARGET ${target_name}
+    PRE_LINK
+    COMMAND
+      ${Python_EXECUTABLE} -m tvm_ffi.utils.embed_cubin --output-obj
+      "$<TARGET_OBJECTS:${target_name}>" --name "${ARG_SYMBOL}" --input-obj "${intermediate_path}"
+      --cubin "${ARG_BIN}"
+    COMMENT "Embedding CUBIN into object file (name: ${ARG_SYMBOL})"
+    VERBATIM
   )
 endfunction ()

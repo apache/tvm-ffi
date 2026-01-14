@@ -50,7 +50,7 @@ repos:
         pass_filenames: false
         verbose: false
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v5.0.0
+    rev: v6.0.0
     hooks:
       - id: check-added-large-files
       - id: check-case-conflict
@@ -63,7 +63,7 @@ repos:
       - id: check-yaml
       - id: check-toml
   - repo: https://github.com/adrienverge/yamllint
-    rev: v1.35.1
+    rev: v1.37.1
     hooks:
       - id: yamllint
         args:
@@ -74,7 +74,7 @@ repos:
     hooks:
       - id: taplo-format
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.12.3
+    rev: v0.14.9
     hooks:
       - id: ruff-check
         types_or: [python, pyi, jupyter]
@@ -82,11 +82,11 @@ repos:
       - id: ruff-format
         types_or: [python, pyi, jupyter]
   - repo: https://github.com/pre-commit/mirrors-clang-format
-    rev: "v20.1.8"
+    rev: "v21.1.7"
     hooks:
       - id: clang-format
   - repo: https://github.com/MarcoGorelli/cython-lint
-    rev: v0.16.7
+    rev: v0.18.1
     hooks:
       - id: cython-lint
         args: [--max-line-length=120]
@@ -97,15 +97,15 @@ repos:
       - id: shfmt
         args: [--indent=2]
   - repo: https://github.com/shellcheck-py/shellcheck-py
-    rev: v0.10.0.1
+    rev: v0.11.0.1
     hooks:
       - id: shellcheck
   - repo: https://github.com/DavidAnson/markdownlint-cli2
-    rev: v0.14.0
+    rev: v0.20.0
     hooks:
       - id: markdownlint-cli2
   - repo: https://github.com/rstcheck/rstcheck
-    rev: v6.2.4
+    rev: v6.2.5
     hooks:
       - id: rstcheck
         additional_dependencies:
@@ -114,7 +114,7 @@ repos:
           - --config
           - docs/.rstcheck.cfg
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: "v1.18.2"
+    rev: "v1.19.0"
     hooks:
       - id: mypy
         name: mypy

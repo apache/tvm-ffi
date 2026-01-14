@@ -55,7 +55,7 @@ def c_class(
     The intent is to offer a familiar dataclass authoring experience while still
     exposing the underlying C++ object.  The ``type_key`` of the C++ class must
     match the string passed to :func:`c_class`, and inheritance relationships are
-    preserved—subclasses registered in C++ can subclass the Python proxy defined
+    preserved-subclasses registered in C++ can subclass the Python proxy defined
     for their parent.
 
     Parameters
@@ -103,12 +103,14 @@ def c_class(
 
         from tvm_ffi.dataclasses import c_class, field
 
+
         @c_class("example.MyClass")
         class MyClass:
             v_i64: int
             v_i32: int
             v_f64: float = field(default=0.0)
             v_f32: float = field(default_factory=lambda: 1.0)
+
 
         obj = MyClass(v_i64=4, v_i32=8)
         obj.v_f64 = 3.14  # transparently forwards to the underlying C++ object

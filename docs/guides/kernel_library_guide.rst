@@ -94,6 +94,14 @@ However, the tensors allocated by :cpp:func:`tvm::ffi::Tensor::FromNDAlloc` only
 
 But in the scenarios of linked runtime libraries and c++ applications, the libraries alive globally throughout the entire lifetime of the process. So :cpp:func:`tvm::ffi::Tensor::FromNDAlloc` works well in these scenarios without the use-after-delete issue above. Otherwise, in general, :cpp:func:`tvm::ffi::Tensor::FromEnvAlloc` is free of this issue, which is more **recommended** in practice.
 
+
+FromNDAllocStrided
+^^^^^^^^^^^^^^^^^^
+
+:cpp:func:`tvm::ffi::Tensor::FromNDAllocStrided` can be used to create a tensor with a custom memory allocator and strided layout (e.g. column major layout).
+Note that for tensor memory that will be returned from the kernel library to the caller, we instead recommend using :cpp:func:`tvm::ffi::Tensor::FromEnvAlloc`
+followed by :cpp:func:`tvm::ffi::Tensor::as_strided` to create a strided view of the tensor.
+
 FromDLPack
 ^^^^^^^^^^
 

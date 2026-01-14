@@ -19,6 +19,7 @@
 #include <gtest/gtest.h>
 #include <tvm/ffi/container/array.h>
 #include <tvm/ffi/function.h>
+#include <tvm/ffi/string.h>
 
 #include "./testing_object.h"
 
@@ -290,6 +291,56 @@ TEST(Array, Upcast) {
 
   static_assert(details::type_contains_v<Array<Any>, Array<int>>);
   static_assert(details::type_contains_v<Any, Array<float>>);
+}
+
+TEST(Array, Contains) {
+  Function f = Function::GetGlobalRequired("ffi.ArrayContains");
+
+  Array<int> arr = {1, 2, 3, 4, 5};
+  EXPECT_TRUE(f(arr, 3).cast<bool>());
+  EXPECT_TRUE(f(arr, 1).cast<bool>());
+  EXPECT_TRUE(f(arr, 5).cast<bool>());
+  EXPECT_FALSE(f(arr, 10).cast<bool>());
+  EXPECT_FALSE(f(arr, 0).cast<bool>());
+
+  Array<int> empty_arr;
+  EXPECT_FALSE(f(empty_arr, 1).cast<bool>());
+
+  Array<String> str_arr = {String("hello"), String("world")};
+  EXPECT_TRUE(f(str_arr, String("hello")).cast<bool>());
+  EXPECT_TRUE(f(str_arr, String("world")).cast<bool>());
+  EXPECT_FALSE(f(str_arr, String("foo")).cast<bool>());
+}
+
+TEST(Array, NegativeIndexThrows) {
+  Array<int> arr = {1, 2, 3};
+  // Directly test ArrayObj methods, which are the ones modified in this PR.
+  // The Array<T> wrapper methods already had negative index checks.
+  ArrayObj* arr_obj = arr.GetArrayObj();
+
+  // Test ArrayObj::at (which calls operator[])
+  EXPECT_THROW(
+      {
+        try {
+          [[maybe_unused]] const auto& val = arr_obj->at(-1);
+        } catch (const Error& error) {
+          EXPECT_EQ(error.kind(), "IndexError");
+          throw;
+        }
+      },
+      ::tvm::ffi::Error);
+
+  // Test ArrayObj::SetItem
+  EXPECT_THROW(
+      {
+        try {
+          arr_obj->SetItem(-1, Any(42));
+        } catch (const Error& error) {
+          EXPECT_EQ(error.kind(), "IndexError");
+          throw;
+        }
+      },
+      ::tvm::ffi::Error);
 }
 
 }  // namespace

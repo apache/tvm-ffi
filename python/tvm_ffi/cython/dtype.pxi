@@ -252,5 +252,5 @@ if numpy is not None:
         cdef DLDataType cdtype = NUMPY_DTYPE_TO_DL_DATA_TYPE[numpy_dtype]
         return make_dtype_from_dl_data_type(cdtype)
 else:
-    def _convert_torch_dtype_to_ffi_dtype(torch_dtype):
+    def _convert_numpy_dtype_to_ffi_dtype(numpy_dtype):
         raise ValueError("numpy not found")

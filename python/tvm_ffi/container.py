@@ -77,6 +77,8 @@ K = TypeVar("K")
 V = TypeVar("V")
 _DefaultT = TypeVar("_DefaultT")
 
+MISSING = _ffi_api.MapGetMissingObject()
+
 
 def getitem_helper(
     obj: Any,
@@ -148,6 +150,11 @@ class Array(core.Object, Sequence[T]):
 
     """
 
+    # tvm-ffi-stubgen(begin): object/ffi.Array
+    # fmt: off
+    # fmt: on
+    # tvm-ffi-stubgen(end)
+
     def __init__(self, input_list: Iterable[T]) -> None:
         """Construct an Array from a Python sequence."""
         self.__init_handle_by_constructor__(_ffi_api.Array, *input_list)
@@ -180,6 +187,14 @@ class Array(core.Object, Sequence[T]):
         if self.__chandle__() == 0:
             return type(self).__name__ + "(chandle=None)"
         return "[" + ", ".join([x.__repr__() for x in self]) + "]"
+
+    def __contains__(self, value: object) -> bool:
+        """Check if the array contains a value."""
+        return _ffi_api.ArrayContains(self, value)
+
+    def __bool__(self) -> bool:
+        """Return True if the array is non-empty."""
+        return len(self) > 0
 
     def __add__(self, other: Iterable[T]) -> Array[T]:
         """Concatenate two arrays."""
@@ -254,12 +269,11 @@ class ItemsView(ItemsViewBase[K, V]):
         if not isinstance(item, tuple) or len(item) != 2:
             return False
         key, value = item
-        try:
-            existing_value = self._backend_map[key]
-        except KeyError:
+        actual_value = self._backend_map.get(key, MISSING)
+        if actual_value is MISSING:
             return False
-        else:
-            return existing_value == value
+        # TODO(@junrus): Is `__eq__` the right method to use here?
+        return actual_value == value
 
 
 @register_object("ffi.Map")
@@ -289,6 +303,11 @@ class Map(core.Object, Mapping[K, V]):
     :py:func:`tvm_ffi.convert`
 
     """
+
+    # tvm-ffi-stubgen(begin): object/ffi.Map
+    # fmt: off
+    # fmt: on
+    # tvm-ffi-stubgen(end)
 
     def __init__(self, input_dict: Mapping[K, V]) -> None:
         """Construct a Map from a Python mapping."""
@@ -322,6 +341,10 @@ class Map(core.Object, Mapping[K, V]):
         """Return the number of items in the map."""
         return _ffi_api.MapSize(self)
 
+    def __bool__(self) -> bool:
+        """Return True if the map is non-empty."""
+        return len(self) > 0
+
     def __iter__(self) -> Iterator[K]:
         """Iterate over the map's keys."""
         return iter(self.keys())
@@ -349,10 +372,10 @@ class Map(core.Object, Mapping[K, V]):
             The result value.
 
         """
-        try:
-            return self[key]
-        except KeyError:
+        ret = _ffi_api.MapGetItemOrMissing(self, key)
+        if MISSING.same_as(ret):
             return default
+        return ret
 
     def __repr__(self) -> str:
         """Return a string representation of the map."""

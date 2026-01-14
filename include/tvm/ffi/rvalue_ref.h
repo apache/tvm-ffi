@@ -50,8 +50,7 @@ namespace ffi {
  * This design allows us to still leverage move semantics for parameters that
  * need copy on write scenarios (and requires an unique copy).
  *
- * \code
- *
+ * \code{.cpp}
  * void Example() {
  *   auto append = Function::FromTyped([](RValueRef<Array<int>> ref, int val) -> Array<int> {
  *     Array<int> arr = *std::move(ref);
@@ -65,7 +64,6 @@ namespace ffi {
  *   a = append(RvalueRef(std::move(a)), 3);
  *   assert(a.size() == 3);
  * }
- *
  * \endcode
  */
 template <typename TObjRef, typename = std::enable_if_t<std::is_base_of_v<ObjectRef, TObjRef>>>

@@ -17,14 +17,15 @@
 # pylint: disable=invalid-name
 """Access path classes."""
 
-# tvm-ffi-stubgen(begin): import
+# tvm-ffi-stubgen(begin): import-section
 # fmt: off
 # isort: off
 from __future__ import annotations
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from tvm_ffi import Object
+    from typing import Any
 # isort: on
 # fmt: on
 # tvm-ffi-stubgen(end)

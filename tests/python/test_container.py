@@ -14,6 +14,8 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+from __future__ import annotations
+
 import pickle
 import sys
 from typing import Any
@@ -206,3 +208,50 @@ def test_large_map_get() -> None:
     amap = tvm_ffi.convert({k: k**2 for k in range(100)})
     assert amap.get(101) is None
     assert amap.get(3) == 9
+
+
+@pytest.mark.parametrize(
+    "arr, value, expected",
+    [
+        ([1, 2, 3, 4, 5], 3, True),
+        ([1, 2, 3, 4, 5], 1, True),
+        ([1, 2, 3, 4, 5], 5, True),
+        ([1, 2, 3, 4, 5], 10, False),
+        ([1, 2, 3, 4, 5], 0, False),
+        ([], 1, False),
+        (["hello", "world"], "hello", True),
+        (["hello", "world"], "world", True),
+        (["hello", "world"], "foo", False),
+    ],
+)
+def test_array_contains(arr: list[Any], value: Any, expected: bool) -> None:
+    a = tvm_ffi.convert(arr)
+    assert (value in a) == expected
+
+
+@pytest.mark.parametrize(
+    "arr, expected",
+    [
+        ([1, 2, 3], True),
+        ([1], True),
+        ([], False),
+        (["hello"], True),
+    ],
+)
+def test_array_bool(arr: list[Any], expected: bool) -> None:
+    a = tvm_ffi.Array(arr)
+    assert bool(a) is expected
+
+
+@pytest.mark.parametrize(
+    "mapping, expected",
+    [
+        ({"a": 1, "b": 2}, True),
+        ({"a": 1}, True),
+        ({}, False),
+        ({1: "one"}, True),
+    ],
+)
+def test_map_bool(mapping: dict[Any, Any], expected: bool) -> None:
+    m = tvm_ffi.Map(mapping)
+    assert bool(m) is expected
