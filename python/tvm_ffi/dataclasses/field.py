@@ -37,7 +37,7 @@ class Field:
     way the decorator understands.
     """
 
-    __slots__ = ("default_factory", "init", "name")
+    __slots__ = ("default_factory", "init", "name", "repr")
 
     def __init__(
         self,
@@ -45,11 +45,13 @@ class Field:
         name: str | None = None,
         default_factory: Callable[[], _FieldValue] | _MISSING_TYPE = MISSING,
         init: bool = True,
+        repr: bool = True,
     ) -> None:
         """Do not call directly; use :func:`field` instead."""
         self.name = name
         self.default_factory = default_factory
         self.init = init
+        self.repr = repr
 
 
 def field(
@@ -57,6 +59,7 @@ def field(
     default: _FieldValue | _MISSING_TYPE = MISSING,  # type: ignore[assignment]
     default_factory: Callable[[], _FieldValue] | _MISSING_TYPE = MISSING,  # type: ignore[assignment]
     init: bool = True,
+    repr: bool = True,
 ) -> _FieldValue:
     """(Experimental) Declare a dataclass-style field on a :func:`c_class` proxy.
 
@@ -78,6 +81,9 @@ def field(
     init
         If ``True`` the field is included in the generated ``__init__``.
         If ``False`` the field is omitted from input arguments of ``__init__``.
+    repr
+        If ``True`` the field is included in the generated ``__repr__``.
+        If ``False`` the field is omitted from the ``__repr__`` output.
 
     Note
     ----
@@ -123,9 +129,11 @@ def field(
         raise ValueError("Cannot specify both `default` and `default_factory`")
     if not isinstance(init, bool):
         raise TypeError("`init` must be a bool")
+    if not isinstance(repr, bool):
+        raise TypeError("`repr` must be a bool")
     if default is not MISSING:
         default_factory = _make_default_factory(default)
-    ret = Field(default_factory=default_factory, init=init)
+    ret = Field(default_factory=default_factory, init=init, repr=repr)
     return cast(_FieldValue, ret)
 
 
