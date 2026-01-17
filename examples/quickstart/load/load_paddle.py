@@ -19,11 +19,9 @@
 # mypy: ignore-errors
 # [example.begin]
 # File: load/load_paddle.py
-# Step 1. Load `build/add_one_cuda.so`
 import tvm_ffi
 mod = tvm_ffi.load_module("build/add_one_cuda.so")
 
-# Step 2. Run `mod.add_one_cuda` with PaddlePaddle
 import paddle
 x = paddle.tensor([1, 2, 3, 4, 5], dtype=paddle.float32, device="cuda")
 y = paddle.empty_like(x)
