@@ -162,7 +162,7 @@ TVM-FFI integrates with CMake via ``find_package`` as demonstrated below:
 
 - Python version/ABI. They are not compiled or linked with Python and depend only on TVM-FFI's stable C ABI;
 - Languages, including C++, Python, Rust, or any other language that can interop with the C ABI;
-- ML frameworks, such as PyTorch, JAX, PaddlePaddle,NumPy, CuPy, or any array library that implements the standard :external+data-api:doc:`DLPack protocol <design_topics/data_interchange>`.
+- ML frameworks, such as PyTorch, JAX, PaddlePaddle, NumPy, CuPy, or any array library that implements the standard :external+data-api:doc:`DLPack protocol <design_topics/data_interchange>`.
 
 .. _sec-use-across-framework:
 
