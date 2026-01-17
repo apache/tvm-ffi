@@ -20,7 +20,7 @@ Tensor and DLPack
 
 At runtime, TVM-FFI often needs to accept tensors from many sources:
 
-* Frameworks (e.g. PyTorch, JAX) via :py:meth:`array_api.array.__dlpack__`;
+* Frameworks (e.g. PyTorch, JAX, PaddlePaddle) via :py:meth:`array_api.array.__dlpack__`;
 * C/C++ callers passing :c:struct:`DLTensor* <DLTensor>`;
 * Tensors allocated by a library but managed by TVM-FFI itself.
 
@@ -115,7 +115,7 @@ PyTorch Interop
 
 On the Python side, :py:class:`tvm_ffi.Tensor` is a managed n-dimensional array that:
 
-* can be created via :py:func:`tvm_ffi.from_dlpack(ext_tensor, ...) <tvm_ffi.from_dlpack>` to import tensors from external frameworks, e.g., :ref:`PyTorch <ship-to-pytorch>`, :ref:`JAX <ship-to-jax>`, :ref:`NumPy/CuPy <ship-to-numpy>`;
+* can be created via :py:func:`tvm_ffi.from_dlpack(ext_tensor, ...) <tvm_ffi.from_dlpack>` to import tensors from external frameworks, e.g., :ref:`PyTorch <ship-to-pytorch>`, :ref:`JAX <ship-to-jax>`, :ref:`PaddlePaddle <ship-to-paddle>`, :ref:`NumPy/CuPy <ship-to-numpy>`;
 * implements the DLPack protocol so it can be passed back to frameworks without copying, e.g., :py:func:`torch.from_dlpack`.
 
 The following example demonstrates a typical round-trip pattern:

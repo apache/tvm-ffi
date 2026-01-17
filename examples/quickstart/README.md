@@ -57,6 +57,7 @@ To run library loading examples across ML frameworks (requires CUDA for the CUDA
 
 ```bash
 python load/load_pytorch.py
+python load/load_paddle.py
 python load/load_numpy.py
 python load/load_cupy.py
 ```

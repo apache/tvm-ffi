@@ -24,7 +24,7 @@ yet flexible open convention with the following systems in mind:
 
 - **Kernel libraries** - ship one wheel to support multiple frameworks, Python versions, and different languages. [[FlashInfer](https://docs.flashinfer.ai/)]
 - **Kernel DSLs** - reusable open ABI for JIT and AOT kernel exposure frameworks and runtimes. [[TileLang](https://tilelang.com/)][[cuteDSL](https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_general/compile_with_tvm_ffi.html)]
-- **Frameworks and runtimes** - a uniform extension point for ABI-compliant libraries and DSLs. [[PyTorch](https://tvm.apache.org/ffi/get_started/quickstart.html#ship-to-pytorch)][[JAX](https://tvm.apache.org/ffi/get_started/quickstart.html#ship-to-jax)][[NumPy/CuPy](https://tvm.apache.org/ffi/get_started/quickstart.html#ship-to-numpy)]
+- **Frameworks and runtimes** - a uniform extension point for ABI-compliant libraries and DSLs. [[PyTorch](https://tvm.apache.org/ffi/get_started/quickstart.html#ship-to-pytorch)][[JAX](https://tvm.apache.org/ffi/get_started/quickstart.html#ship-to-jax)][[PaddlePaddle](https://tvm.apache.org/ffi/get_started/quickstart.html#ship-to-paddle)][[NumPy/CuPy](https://tvm.apache.org/ffi/get_started/quickstart.html#ship-to-numpy)]
 - **ML infrastructure** - out-of-box bindings and interop across languages. [[Python](https://tvm.apache.org/ffi/get_started/quickstart.html#ship-to-python)][[C++](https://tvm.apache.org/ffi/get_started/quickstart.html#ship-to-cpp)][[Rust](https://tvm.apache.org/ffi/get_started/quickstart.html#ship-to-rust)]
 - **Coding agents** - a unified mechanism for shipping generated code in production.
 

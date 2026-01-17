@@ -27,7 +27,7 @@ This guide walks through shipping a minimal ``add_one`` function that computes
 TVM-FFI's Open ABI and FFI make it possible to **ship one library** for multiple frameworks and languages.
 We can build a single shared library that works across:
 
-- **ML frameworks**, e.g. PyTorch, JAX, NumPy, CuPy, and others;
+- **ML frameworks**, e.g. PyTorch, JAX, PaddlePaddle, NumPy, CuPy, and others;
 - **Languages**, e.g. C++, Python, Rust, and others;
 - **Python ABI versions**, e.g. one wheel that supports all Python versions, including free-threaded ones.
 
@@ -37,7 +37,7 @@ We can build a single shared library that works across:
 
    - Python: 3.9 or newer
    - Compiler: C++17-capable toolchain (GCC/Clang/MSVC)
-   - Optional ML frameworks for testing: NumPy, PyTorch, JAX, CuPy
+   - Optional ML frameworks for testing: NumPy, PyTorch, JAX, CuPy, PaddlePaddle
    - CUDA: Any modern version (if you want to try the CUDA part)
    - TVM-FFI installed via:
 
@@ -90,7 +90,7 @@ it also exports the function's metadata as a symbol ``__tvm_ffi__metadata_add_on
 The class :cpp:class:`tvm::ffi::TensorView` enables zero-copy interop with tensors from different ML frameworks:
 
 - NumPy, CuPy,
-- PyTorch, JAX, or
+- PyTorch, JAX, PaddlePaddle, or
 - any array type that supports the standard :external+data-api:doc:`DLPack protocol <design_topics/data_interchange>`.
 
 Finally, :cpp:func:`TVMFFIEnvGetStream` can be used in the CUDA code to launch kernels on the caller's stream.
@@ -162,7 +162,7 @@ TVM-FFI integrates with CMake via ``find_package`` as demonstrated below:
 
 - Python version/ABI. They are not compiled or linked with Python and depend only on TVM-FFI's stable C ABI;
 - Languages, including C++, Python, Rust, or any other language that can interop with the C ABI;
-- ML frameworks, such as PyTorch, JAX, NumPy, CuPy, or any array library that implements the standard :external+data-api:doc:`DLPack protocol <design_topics/data_interchange>`.
+- ML frameworks, such as PyTorch, JAX, PaddlePaddle,NumPy, CuPy, or any array library that implements the standard :external+data-api:doc:`DLPack protocol <design_topics/data_interchange>`.
 
 .. _sec-use-across-framework:
 
@@ -227,6 +227,18 @@ After installation, ``add_one_cuda`` can be registered as a target for JAX's ``f
     vmap_method="broadcast_all",
   )(x)
   print(y)
+
+.. _ship-to-paddle:
+
+PaddlePaddle
+~~~~~~~~~~~~
+
+Since PaddlePaddle 3.3.0, full TVM FFI support is provided.
+
+.. literalinclude:: ../../examples/quickstart/load/load_paddle.py
+  :language: python
+  :start-after: [example.begin]
+  :end-before: [example.end]
 
 .. _ship-to-numpy:
 
