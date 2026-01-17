@@ -127,5 +127,5 @@ def test_cxx_class_repr_derived_derived() -> None:
     if "__repr__" in _TestCxxClassDerivedDerived.__dict__:
         assert "v_i64=123" in repr_str
         assert "v_i32=456" in repr_str
-        assert "v_str='hello'" in repr_str or "v_str=\"hello\"" in repr_str
+        assert "v_str='hello'" in repr_str or 'v_str="hello"' in repr_str
         assert "v_bool=True" in repr_str

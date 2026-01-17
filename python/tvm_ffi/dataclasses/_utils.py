@@ -131,13 +131,15 @@ def method_repr(type_cls: type, type_info: TypeInfo) -> Callable[..., str]:
         body_lines = [f"return f'{type_cls.__name__}()'"]
     else:
         # Build field representations
-        fields_str = ", ".join(f"{field_name}={{self.{field_name}!r}}" for field_name in repr_fields)
+        fields_str = ", ".join(
+            f"{field_name}={{self.{field_name}!r}}" for field_name in repr_fields
+        )
         body_lines = [f"return f'{type_cls.__name__}({fields_str})'"]
 
     source_lines = ["def __repr__(self) -> str:"]
     source_lines.extend(f"    {line}" for line in body_lines)
     source = "\n".join(source_lines)
-    
+
     # Note: Code generation in this case is guaranteed to be safe,
     # because the generated code does not contain any untrusted input.
     namespace: dict[str, Any] = {}
