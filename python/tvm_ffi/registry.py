@@ -275,7 +275,8 @@ def get_global_func_metadata(name: str) -> dict[str, Any]:
         Register a Python callable as a global FFI function.
 
     """
-    return json.loads(get_global_func("ffi.GetGlobalFuncMetadata")(name) or "{}")
+    metadata_json = get_global_func("ffi.GetGlobalFuncMetadata")(name)
+    return json.loads(metadata_json) if metadata_json else {}
 
 
 def init_ffi_api(namespace: str, target_module_name: str | None = None) -> None:
