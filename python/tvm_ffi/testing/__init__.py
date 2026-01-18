@@ -25,6 +25,7 @@ from .testing import (
     _TestCxxClassDerived,
     _TestCxxClassDerivedDerived,
     _TestCxxInitSubset,
+    _TestCxxKwOnly,
     add_one,
     create_object,
     make_unregistered_object,
