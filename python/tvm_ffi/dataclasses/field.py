@@ -18,8 +18,17 @@
 
 from __future__ import annotations
 
-from dataclasses import _MISSING_TYPE, KW_ONLY, MISSING  # type: ignore[attr-defined]
+from dataclasses import _MISSING_TYPE, MISSING
 from typing import Any, Callable, TypeVar, cast
+
+try:
+    from dataclasses import KW_ONLY  # type: ignore[attr-defined]
+except ImportError:
+    # Python < 3.10: define our own KW_ONLY sentinel
+    class _KW_ONLY_Sentinel:
+        __slots__ = ()
+
+    KW_ONLY = _KW_ONLY_Sentinel()
 
 _FieldValue = TypeVar("_FieldValue")
 _KW_ONLY_TYPE = type(KW_ONLY)
