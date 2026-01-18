@@ -178,3 +178,11 @@ class _TestCxxInitSubset:
     required_field: int
     optional_field: int = field(init=False)
     note: str = field(default_factory=lambda: "py-default", init=False)
+
+
+@c_class("testing.TestCxxKwOnly", kw_only=True)
+class _TestCxxKwOnly:
+    x: int
+    y: int
+    z: int
+    w: int = 100

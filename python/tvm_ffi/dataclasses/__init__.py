@@ -19,6 +19,6 @@
 from dataclasses import MISSING
 
 from .c_class import c_class
-from .field import Field, field
+from .field import KW_ONLY, Field, field
 
-__all__ = ["MISSING", "Field", "c_class", "field"]
+__all__ = ["KW_ONLY", "MISSING", "Field", "c_class", "field"]

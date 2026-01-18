@@ -15,12 +15,17 @@
 # specific language governing permissions and limitations
 # under the License.
 import inspect
+from dataclasses import MISSING
 
+import pytest
+from tvm_ffi.dataclasses import KW_ONLY, field
+from tvm_ffi.dataclasses.field import _KW_ONLY_TYPE, Field
 from tvm_ffi.testing import (
     _TestCxxClassBase,
     _TestCxxClassDerived,
     _TestCxxClassDerivedDerived,
     _TestCxxInitSubset,
+    _TestCxxKwOnly,
 )
 
 
@@ -129,3 +134,53 @@ def test_cxx_class_repr_derived_derived() -> None:
         assert "v_i32=456" in repr_str
         assert "v_str='hello'" in repr_str or 'v_str="hello"' in repr_str
         assert "v_bool=True" in repr_str
+
+
+def test_kw_only_class_level_signature() -> None:
+    sig = inspect.signature(_TestCxxKwOnly.__init__)
+    params = sig.parameters
+    assert params["x"].kind == inspect.Parameter.KEYWORD_ONLY
+    assert params["y"].kind == inspect.Parameter.KEYWORD_ONLY
+    assert params["z"].kind == inspect.Parameter.KEYWORD_ONLY
+    assert params["w"].kind == inspect.Parameter.KEYWORD_ONLY
+
+
+def test_kw_only_class_level_call() -> None:
+    obj = _TestCxxKwOnly(x=1, y=2, z=3, w=4)
+    assert obj.x == 1
+    assert obj.y == 2
+    assert obj.z == 3
+    assert obj.w == 4
+
+
+def test_kw_only_class_level_with_default() -> None:
+    obj = _TestCxxKwOnly(x=1, y=2, z=3)
+    assert obj.w == 100
+
+
+def test_kw_only_class_level_rejects_positional() -> None:
+    with pytest.raises(TypeError, match="positional"):
+        _TestCxxKwOnly(1, 2, 3, 4)  # type: ignore[misc]
+
+
+def test_field_kw_only_parameter() -> None:
+    f1: Field = field(kw_only=True)
+    assert isinstance(f1, Field)
+    assert f1.kw_only is True
+
+    f2: Field = field(kw_only=False)
+    assert f2.kw_only is False
+
+    f3: Field = field()
+    assert f3.kw_only is MISSING
+
+
+def test_field_kw_only_with_default() -> None:
+    f = field(default=42, kw_only=True)
+    assert isinstance(f, Field)
+    assert f.kw_only is True
+    assert f.default_factory() == 42
+
+
+def test_kw_only_sentinel_exists() -> None:
+    assert isinstance(KW_ONLY, _KW_ONLY_TYPE)
