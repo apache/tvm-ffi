@@ -58,14 +58,13 @@ def type_info_to_cls(
     def _add_method(name: str, func: Callable[..., Any]) -> None:
         if name == "__ffi_init__":
             name = "__c_ffi_init__"
-        if name in attrs:  # already defined
-            return
+        # Allow overriding methods (including from base classes like Object.__repr__)
+        # by always adding to attrs, which will be used when creating the new class
         func.__module__ = cls.__module__
         func.__name__ = name
         func.__qualname__ = f"{cls.__qualname__}.{name}"
         func.__doc__ = f"Method `{name}` of class `{cls.__qualname__}`"
         attrs[name] = func
-        setattr(cls, name, func)
 
     for name, method_impl in methods.items():
         if method_impl is not None:
@@ -98,6 +97,57 @@ def fill_dataclass_field(type_cls: type, type_field: TypeField) -> None:
     type_field.dataclass_field = rhs
 
 
+def _get_all_fields(type_info: TypeInfo) -> list[TypeField]:
+    """Collect all fields from the type hierarchy, from parents to children."""
+    fields: list[TypeField] = []
+    cur_type_info: TypeInfo | None = type_info
+    while cur_type_info is not None:
+        fields.extend(reversed(cur_type_info.fields))
+        cur_type_info = cur_type_info.parent_type_info
+    fields.reverse()
+    return fields
+
+
+def method_repr(type_cls: type, type_info: TypeInfo) -> Callable[..., str]:
+    """Generate a ``__repr__`` method for the dataclass.
+
+    The generated representation includes all fields with ``repr=True`` in
+    the format ``ClassName(field1=value1, field2=value2, ...)``.
+    """
+    # Step 0. Collect all fields from the type hierarchy
+    fields = _get_all_fields(type_info)
+
+    # Step 1. Filter fields that should appear in repr
+    repr_fields: list[str] = []
+    for field in fields:
+        assert field.name is not None
+        assert field.dataclass_field is not None
+        if field.dataclass_field.repr:
+            repr_fields.append(field.name)
+
+    # Step 2. Generate the repr method
+    if not repr_fields:
+        # No fields to show, return a simple class name representation
+        body_lines = [f"return f'{type_cls.__name__}()'"]
+    else:
+        # Build field representations
+        fields_str = ", ".join(
+            f"{field_name}={{self.{field_name}!r}}" for field_name in repr_fields
+        )
+        body_lines = [f"return f'{type_cls.__name__}({fields_str})'"]
+
+    source_lines = ["def __repr__(self) -> str:"]
+    source_lines.extend(f"    {line}" for line in body_lines)
+    source = "\n".join(source_lines)
+
+    # Note: Code generation in this case is guaranteed to be safe,
+    # because the generated code does not contain any untrusted input.
+    namespace: dict[str, Any] = {}
+    exec(source, {}, namespace)
+    __repr__ = namespace["__repr__"]
+    return __repr__
+
+
 def method_init(type_cls: type, type_info: TypeInfo) -> Callable[..., None]:
     """Generate an ``__init__`` that forwards to the FFI constructor.
 
@@ -105,12 +155,7 @@ def method_init(type_cls: type, type_info: TypeInfo) -> Callable[..., None]:
     reflected field list, supporting default values and ``__post_init__``.
     """
     # Step 0. Collect all fields from the type hierarchy
-    fields: list[TypeField] = []
-    cur_type_info: TypeInfo | None = type_info
-    while cur_type_info is not None:
-        fields.extend(reversed(cur_type_info.fields))
-        cur_type_info = cur_type_info.parent_type_info
-    fields.reverse()
+    fields = _get_all_fields(type_info)
     # sanity check
     for type_method in type_info.methods:
         if type_method.name == "__ffi_init__":

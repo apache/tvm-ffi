@@ -41,7 +41,7 @@ _InputClsType = TypeVar("_InputClsType")
 
 @dataclass_transform(field_specifiers=(field,))
 def c_class(
-    type_key: str, init: bool = True
+    type_key: str, init: bool = True, repr: bool = True
 ) -> Callable[[Type[_InputClsType]], Type[_InputClsType]]:  # noqa: UP006
     """(Experimental) Create a dataclass-like proxy for a C++ class registered with TVM FFI.
 
@@ -71,6 +71,10 @@ def c_class(
         signature.  The generated initializer calls the C++ ``__init__``
         function registered with ``ObjectDef`` and invokes ``__post_init__`` if
         it exists on the Python class.
+    repr
+        If ``True`` and the Python class does not define ``__repr__``, a
+        representation method is auto-generated that includes all fields with
+        ``repr=True``.
 
     Returns
     -------
@@ -118,8 +122,9 @@ def c_class(
     """
 
     def decorator(super_type_cls: Type[_InputClsType]) -> Type[_InputClsType]:  # noqa: UP006
-        nonlocal init
+        nonlocal init, repr
         init = init and "__init__" not in super_type_cls.__dict__
+        repr = repr and "__repr__" not in super_type_cls.__dict__
         # Step 1. Retrieve `type_info` from registry
         type_info: TypeInfo = _lookup_or_register_type_info_from_type_key(type_key)
         assert type_info.parent_type_info is not None
@@ -129,10 +134,11 @@ def c_class(
             _utils.fill_dataclass_field(super_type_cls, type_field)
         # Step 3. Create the proxy class with the fields as properties
         fn_init = _utils.method_init(super_type_cls, type_info) if init else None
+        fn_repr = _utils.method_repr(super_type_cls, type_info) if repr else None
         type_cls: Type[_InputClsType] = _utils.type_info_to_cls(  # noqa: UP006
             type_info=type_info,
             cls=super_type_cls,
-            methods={"__init__": fn_init},
+            methods={"__init__": fn_init, "__repr__": fn_repr},
         )
         _set_type_cls(type_info, type_cls)
         return type_cls
