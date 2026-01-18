@@ -14,6 +14,7 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+import copy
 import inspect
 from dataclasses import MISSING
 
@@ -184,3 +185,86 @@ def test_field_kw_only_with_default() -> None:
 
 def test_kw_only_sentinel_exists() -> None:
     assert isinstance(KW_ONLY, _KW_ONLY_TYPE)
+
+
+def test_cxx_class_copy() -> None:
+    obj = _TestCxxClassDerivedDerived(
+        v_i64=1, v_i32=2, v_f64=3.0, v_f32=4.0, v_str="hello", v_bool=True
+    )
+    obj_copy = copy.copy(obj)
+
+    assert obj_copy.v_i64 == 1
+    assert obj_copy.v_i32 == 2
+    assert obj_copy.v_f64 == 3.0
+    assert obj_copy.v_f32 == 4.0
+    assert obj_copy.v_str == "hello"
+    assert obj_copy.v_bool is True
+    assert obj is not obj_copy
+
+
+def test_cxx_class_deepcopy() -> None:
+    obj = _TestCxxClassDerivedDerived(
+        v_i64=1, v_i32=2, v_f64=3.0, v_f32=4.0, v_str="hello", v_bool=True
+    )
+    obj_copy = copy.deepcopy(obj)
+
+    assert obj_copy.v_i64 == 1
+    assert obj_copy.v_i32 == 2
+    assert obj_copy.v_f64 == 3.0
+    assert obj_copy.v_f32 == 4.0
+    assert obj_copy.v_str == "hello"
+    assert obj_copy.v_bool is True
+    assert obj is not obj_copy
+
+
+def test_cxx_class_replace() -> None:
+    obj = _TestCxxClassDerivedDerived(
+        v_i64=1, v_i32=2, v_f64=3.0, v_f32=4.0, v_str="hello", v_bool=True
+    )
+    obj_new = obj.__replace__(v_i64=100, v_str="world")  # type: ignore[attr-defined]
+
+    assert obj_new.v_i64 == 100
+    assert obj_new.v_i32 == 2
+    assert obj_new.v_f64 == 3.0
+    assert obj_new.v_f32 == 4.0
+    assert obj_new.v_str == "world"
+    assert obj_new.v_bool is True
+    assert obj is not obj_new
+
+
+def test_cxx_class_replace_invalid_field() -> None:
+    obj = _TestCxxClassDerived(v_i64=123, v_i32=456, v_f64=4.0, v_f32=8.0)
+
+    with pytest.raises(TypeError, match="unexpected keyword argument"):
+        obj.__replace__(nonexistent_field=42)  # type: ignore[attr-defined]
+
+
+def test_cxx_class_copy_init_false_field() -> None:
+    obj = _TestCxxInitSubset(required_field=42)
+    obj.optional_field = 100  # Modify the init=False field
+
+    obj_copy = copy.copy(obj)
+
+    assert obj_copy.required_field == 42
+    assert obj_copy.optional_field == 100
+    assert obj_copy.note == "py-default"
+    assert obj is not obj_copy
+
+
+def test_cxx_class_deepcopy_init_false_field() -> None:
+    obj = _TestCxxInitSubset(required_field=42)
+    obj.optional_field = 100  # Modify the init=False field
+
+    obj_copy = copy.deepcopy(obj)
+
+    assert obj_copy.required_field == 42
+    assert obj_copy.optional_field == 100
+    assert obj_copy.note == "py-default"
+    assert obj is not obj_copy
+
+
+def test_cxx_class_replace_rejects_init_false_field() -> None:
+    obj = _TestCxxInitSubset(required_field=42)
+
+    with pytest.raises(TypeError, match="unexpected keyword argument"):
+        obj.__replace__(optional_field=100)  # type: ignore[attr-defined]
