@@ -26,6 +26,7 @@
 #include <tvm/ffi/base_details.h>
 #include <tvm/ffi/c_api.h>
 
+#include <cstddef>
 #include <optional>
 #include <string>
 #include <type_traits>
@@ -1094,8 +1095,8 @@ struct ObjectUnsafe {
 
   template <typename Class>
   TVM_FFI_INLINE static int64_t GetObjectOffsetToSubclass() {
-    return (reinterpret_cast<int64_t>(&(static_cast<Class*>(nullptr)->header_)) -
-            reinterpret_cast<int64_t>(&(static_cast<Object*>(nullptr)->header_)));
+    return static_cast<int64_t>(offsetof(Class, header_)) -
+           static_cast<int64_t>(offsetof(Object, header_));
   }
 
   template <typename T>
