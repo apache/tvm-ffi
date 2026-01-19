@@ -754,7 +754,9 @@ class String {
   }
   void InitData(const char* data, size_t size) {
     char* dest_data = InitSpaceForSize(size);
-    std::memcpy(dest_data, data, size);
+    if (size > 0) {
+      std::memcpy(dest_data, data, size);
+    }
     dest_data[size] = '\0';
   }
   /*!
