@@ -258,10 +258,63 @@ TEST(Expected, ComplexExample) {
   EXPECT_EQ(result_err.error().message(), "Empty input");
 }
 
-// Test bad access throws
-TEST(Expected, BadAccessThrows) {
-  Expected<int> result = ExpectedErr<int>(Error("RuntimeError", "error", ""));
-  EXPECT_THROW({ result.value(); }, Error);
+// Test bad access throws the original error
+TEST(Expected, BadAccessThrowsOriginalError) {
+  Expected<int> result = ExpectedErr<int>(Error("CustomError", "original message", ""));
+  try {
+    result.value();
+    FAIL() << "Expected Error to be thrown";
+  } catch (const Error& e) {
+    // Verify the original error is preserved
+    EXPECT_EQ(e.kind(), "CustomError");
+    EXPECT_EQ(e.message(), "original message");
+  }
+}
+
+// Test error() throws RuntimeError on bad access
+TEST(Expected, ErrorBadAccessThrows) {
+  Expected<int> result = ExpectedOk(42);
+  EXPECT_THROW({ result.error(); }, Error);
+}
+
+// Test rvalue overload for value()
+TEST(Expected, RvalueValueAccess) {
+  auto get_expected = []() -> Expected<String> { return ExpectedOk(String("rvalue test")); };
+
+  // Call value() on rvalue
+  String val = get_expected().value();
+  EXPECT_EQ(val, "rvalue test");
+}
+
+// Test rvalue overload for error()
+TEST(Expected, RvalueErrorAccess) {
+  auto get_expected = []() -> Expected<int> {
+    return ExpectedErr<int>(Error("TestError", "rvalue error", ""));
+  };
+
+  // Call error() on rvalue
+  Error err = get_expected().error();
+  EXPECT_EQ(err.kind(), "TestError");
+  EXPECT_EQ(err.message(), "rvalue error");
+}
+
+// Test Expected<ObjectRef> with inheritance (Error is a subclass of ObjectRef)
+// This ensures is_ok() and is_err() work correctly for ObjectRef types
+TEST(Expected, ObjectRefInheritance) {
+  // Expected<ObjectRef> with an actual ObjectRef value
+  ObjectRef obj = TInt(100);
+  Expected<ObjectRef> result_ok = ExpectedOk<ObjectRef>(obj);
+
+  EXPECT_TRUE(result_ok.is_ok());
+  EXPECT_FALSE(result_ok.is_err());
+  EXPECT_TRUE(result_ok.value().defined());
+
+  // Expected<ObjectRef> with an error
+  Expected<ObjectRef> result_err = ExpectedErr<ObjectRef>(Error("TestError", "test", ""));
+
+  EXPECT_FALSE(result_err.is_ok());
+  EXPECT_TRUE(result_err.is_err());
+  EXPECT_EQ(result_err.error().kind(), "TestError");
 }
 
 // Test TryCastFromAnyView with incompatible type

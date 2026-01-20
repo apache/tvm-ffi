@@ -80,14 +80,15 @@ class Expected {
   /*!
    * \brief Check if the Expected contains a success value.
    * \return True if contains success value, false if contains error.
+   * \note Checks for Error first to handle cases where T is a base class of Error.
    */
-  TVM_FFI_INLINE bool is_ok() const { return data_.as<T>().has_value(); }
+  TVM_FFI_INLINE bool is_ok() const { return !data_.as<Error>().has_value(); }
 
   /*!
    * \brief Check if the Expected contains an error.
    * \return True if contains error, false if contains success value.
    */
-  TVM_FFI_INLINE bool is_err() const { return data_.as<Error>().has_value(); }
+  TVM_FFI_INLINE bool is_err() const { return !is_ok(); }
 
   /*!
    * \brief Alias for is_ok().
@@ -95,27 +96,26 @@ class Expected {
    */
   TVM_FFI_INLINE bool has_value() const { return is_ok(); }
 
-  /*!
-   * \brief Access the success value.
-   * \return The success value.
-   * \throws RuntimeError if the Expected contains an error.
-   */
-  TVM_FFI_INLINE T value() const {
-    if (is_err()) {
-      TVM_FFI_THROW(RuntimeError) << "Bad expected access: contains error";
-    }
+  /*! \brief Access the success value. Throws the contained error if is_err(). */
+  TVM_FFI_INLINE T value() const& {
+    if (is_err()) throw data_.cast<Error>();
     return data_.cast<T>();
   }
+  /*! \brief Access the success value (rvalue). Throws the contained error if is_err(). */
+  TVM_FFI_INLINE T value() && {
+    if (is_err()) throw std::move(data_).template cast<Error>();
+    return std::move(data_).template cast<T>();
+  }
 
-  /*!
-   * \brief Access the error value.
-   * \return The error value.
-   * \note Behavior is undefined if the Expected contains a success value.
-   *       Always check is_err() before calling this method.
-   */
-  TVM_FFI_INLINE Error error() const {
-    TVM_FFI_ICHECK(is_err()) << "Expected does not contain an error";
+  /*! \brief Access the error. Throws RuntimeError if is_ok(). */
+  TVM_FFI_INLINE Error error() const& {
+    if (!is_err()) TVM_FFI_THROW(RuntimeError) << "Bad expected access: contains value, not error";
     return data_.cast<Error>();
+  }
+  /*! \brief Access the error (rvalue). Throws RuntimeError if is_ok(). */
+  TVM_FFI_INLINE Error error() && {
+    if (!is_err()) TVM_FFI_THROW(RuntimeError) << "Bad expected access: contains value, not error";
+    return std::move(data_).template cast<Error>();
   }
 
   /*!
@@ -176,32 +176,20 @@ inline constexpr bool use_default_type_traits_v<Expected<T>> = false;
 template <typename T>
 struct TypeTraits<Expected<T>> : public TypeTraitsBase {
   TVM_FFI_INLINE static void CopyToAnyView(const Expected<T>& src, TVMFFIAny* result) {
-    // Extract value from src.data_ and copy it properly
     const TVMFFIAny* src_any = reinterpret_cast<const TVMFFIAny*>(&src.data_);
-
     if (TypeTraits<T>::CheckAnyStrict(src_any)) {
-      // It contains T, copy it out and move to result
-      T value = TypeTraits<T>::CopyFromAnyViewAfterCheck(src_any);
-      TypeTraits<T>::MoveToAny(std::move(value), result);
+      TypeTraits<T>::MoveToAny(TypeTraits<T>::CopyFromAnyViewAfterCheck(src_any), result);
     } else {
-      // It contains Error, copy it out and move to result
-      Error err = TypeTraits<Error>::CopyFromAnyViewAfterCheck(src_any);
-      TypeTraits<Error>::MoveToAny(std::move(err), result);
+      TypeTraits<Error>::MoveToAny(TypeTraits<Error>::CopyFromAnyViewAfterCheck(src_any), result);
     }
   }
 
   TVM_FFI_INLINE static void MoveToAny(Expected<T> src, TVMFFIAny* result) {
-    // Extract value from src.data_ and move it properly
     TVMFFIAny* src_any = reinterpret_cast<TVMFFIAny*>(&src.data_);
-
     if (TypeTraits<T>::CheckAnyStrict(src_any)) {
-      // It contains T, move it out and move to result
-      T value = TypeTraits<T>::MoveFromAnyAfterCheck(src_any);
-      TypeTraits<T>::MoveToAny(std::move(value), result);
+      TypeTraits<T>::MoveToAny(TypeTraits<T>::MoveFromAnyAfterCheck(src_any), result);
     } else {
-      // It contains Error, move it out and move to result
-      Error err = TypeTraits<Error>::MoveFromAnyAfterCheck(src_any);
-      TypeTraits<Error>::MoveToAny(std::move(err), result);
+      TypeTraits<Error>::MoveToAny(TypeTraits<Error>::MoveFromAnyAfterCheck(src_any), result);
     }
   }
 
@@ -212,30 +200,25 @@ struct TypeTraits<Expected<T>> : public TypeTraitsBase {
   TVM_FFI_INLINE static Expected<T> CopyFromAnyViewAfterCheck(const TVMFFIAny* src) {
     if (TypeTraits<T>::CheckAnyStrict(src)) {
       return Expected<T>::Ok(TypeTraits<T>::CopyFromAnyViewAfterCheck(src));
-    } else {
-      return Expected<T>::Err(TypeTraits<Error>::CopyFromAnyViewAfterCheck(src));
     }
+    return Expected<T>::Err(TypeTraits<Error>::CopyFromAnyViewAfterCheck(src));
   }
 
   TVM_FFI_INLINE static Expected<T> MoveFromAnyAfterCheck(TVMFFIAny* src) {
     if (TypeTraits<T>::CheckAnyStrict(src)) {
       return Expected<T>::Ok(TypeTraits<T>::MoveFromAnyAfterCheck(src));
-    } else {
-      return Expected<T>::Err(TypeTraits<Error>::MoveFromAnyAfterCheck(src));
     }
+    return Expected<T>::Err(TypeTraits<Error>::MoveFromAnyAfterCheck(src));
   }
 
   TVM_FFI_INLINE static std::optional<Expected<T>> TryCastFromAnyView(const TVMFFIAny* src) {
-    // Try to convert to T first
-    if (std::optional<T> opt = TypeTraits<T>::TryCastFromAnyView(src)) {
+    if (auto opt = TypeTraits<T>::TryCastFromAnyView(src)) {
       return Expected<T>::Ok(*std::move(opt));
     }
-    // Try to convert to Error
-    if (std::optional<Error> opt_err = TypeTraits<Error>::TryCastFromAnyView(src)) {
+    if (auto opt_err = TypeTraits<Error>::TryCastFromAnyView(src)) {
       return Expected<T>::Err(*std::move(opt_err));
     }
-    // Conversion failed - return explicit nullopt to indicate failure
-    return std::optional<Expected<T>>(std::nullopt);
+    return std::nullopt;
   }
 
   TVM_FFI_INLINE static std::string GetMismatchTypeInfo(const TVMFFIAny* src) {
