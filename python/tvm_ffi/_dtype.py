@@ -226,7 +226,9 @@ class dtype(str):
             # The type code is an integer following DLPack conventions
             assert isinstance(f32.type_code, int)
             # Consistent with constructing from an explicit (code, bits, lanes)
-            assert f32.type_code == tvm_ffi.dtype.from_dlpack_data_type((2, 32, 1)).type_code
+            assert (
+                f32.type_code == tvm_ffi.dtype.from_dlpack_data_type((2, 32, 1)).type_code
+            )
 
         See Also
         --------

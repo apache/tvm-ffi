@@ -22,10 +22,10 @@
 Apache TVM FFI is an open ABI and FFI for machine learning systems. It is a minimal, framework-agnostic,
 yet flexible open convention with the following systems in mind:
 
-- **Kernel libraries** - ship one wheel to support multiple frameworks, Python versions, and different languages.
-- **Kernel DSLs** - reusable open ABI for JIT and AOT kernel exposure frameworks and runtimes.
-- **Frameworks and runtimes** - a uniform extension point for ABI-compliant libraries and DSLs.
-- **ML infrastructure** - out-of-the-box bindings and interop for Python, C++, and Rust.
+- **Kernel libraries** - ship one wheel to support multiple frameworks, Python versions, and different languages. [[FlashInfer](https://docs.flashinfer.ai/)]
+- **Kernel DSLs** - reusable open ABI for JIT and AOT kernel exposure frameworks and runtimes. [[TileLang](https://tilelang.com/)][[cuteDSL](https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_general/compile_with_tvm_ffi.html)]
+- **Frameworks and runtimes** - a uniform extension point for ABI-compliant libraries and DSLs. [[PyTorch](https://tvm.apache.org/ffi/get_started/quickstart.html#ship-to-pytorch)][[JAX](https://tvm.apache.org/ffi/get_started/quickstart.html#ship-to-jax)][[PaddlePaddle](https://tvm.apache.org/ffi/get_started/quickstart.html#ship-to-paddle)][[NumPy/CuPy](https://tvm.apache.org/ffi/get_started/quickstart.html#ship-to-numpy)]
+- **ML infrastructure** - out-of-box bindings and interop across languages. [[Python](https://tvm.apache.org/ffi/get_started/quickstart.html#ship-to-python)][[C++](https://tvm.apache.org/ffi/get_started/quickstart.html#ship-to-cpp)][[Rust](https://tvm.apache.org/ffi/get_started/quickstart.html#ship-to-rust)]
 - **Coding agents** - a unified mechanism for shipping generated code in production.
 
 ## Features
@@ -36,6 +36,21 @@ yet flexible open convention with the following systems in mind:
 - **Multi-language support** out of the box: Python, C++, and Rust (with a path towards more languages).
 
 These enable broad **interoperability** across frameworks, libraries, DSLs, and agents; the ability to **ship one wheel** for multiple frameworks and Python versions (including free-threaded Python); and consistent infrastructure across environments.
+
+## Getting Started
+
+Install TVM-FFI with pip, uv or from source:
+
+```bash
+pip install apache-tvm-ffi
+pip install torch-c-dlpack-ext  # compatibility package for torch <= 2.9
+```
+
+Visit our [documentation](https://tvm.apache.org/ffi/) to learn more.
+
+- [Quick Start](https://tvm.apache.org/ffi/get_started/quickstart.html)
+- [Stable C ABI](https://tvm.apache.org/ffi/get_started/stable_c_abi.html)
+- [Python Packaging](https://tvm.apache.org/ffi/packaging/python_packaging.html)
 
 ## Status and Release Versioning
 

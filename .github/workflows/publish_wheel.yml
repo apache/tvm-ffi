@@ -18,12 +18,10 @@
 name: Publish wheel
 
 on:
-  schedule:
-    - cron: '0 9 * * *'  # every day at 9am UTC
   workflow_dispatch:
     inputs:
-      branch:
-        description: "Branch or tag to publish (manual run)"
+      tag:
+        description: "Tag to publish (manual run)"
         required: true
 
 jobs:
@@ -33,94 +31,41 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {os: ubuntu-latest, arch: x86_64, linux_image: manylinux2014}
-          - {os: ubuntu-latest, arch: x86_64, linux_image: manylinux_2_28}
-          - {os: ubuntu-24.04-arm, arch: aarch64, linux_image: manylinux2014}
-          - {os: ubuntu-24.04-arm, arch: aarch64, linux_image: manylinux_2_28}
-          - {os: windows-latest, arch: AMD64, linux_image: ""}
-          - {os: macos-14, arch: arm64, linux_image: ""}
+          - {os: ubuntu-latest, arch: x86_64, linux_image: manylinux2014, build_sdist: "true"}
+          - {os: ubuntu-latest, arch: x86_64, linux_image: manylinux_2_28, build_sdist: "false"}
+          - {os: ubuntu-24.04-arm, arch: aarch64, linux_image: manylinux2014, build_sdist: "false"}
+          - {os: ubuntu-24.04-arm, arch: aarch64, linux_image: manylinux_2_28, build_sdist: "false"}
+          - {os: windows-latest, arch: AMD64, linux_image: "", build_sdist: "false"}
+          - {os: macos-14, arch: arm64, linux_image: "", build_sdist: "false"}
 
     steps:
-      # Special handling for macOS arm64 + python 3.8.
-      # Install Python 3.8 from `actions/setup-python`, which is an arm64 build;
-      # N.B. Don't use `astral-sh/setup-uv` here as it provides an x86_64 build instead.
-      # See also: https://cibuildwheel.pypa.io/en/stable/faq/#macos-building-cpython-38-wheels-on-arm64
-      - uses: actions/setup-python@v5
+      - name: Checkout repository (for local composite action)
+        uses: actions/checkout@v5
         with:
-          python-version: 3.8
-        if: runner.os == 'macOS' && runner.arch == 'ARM64'
-      - uses: astral-sh/setup-uv@b75a909f75acd358c2196fb9a5f1299a9a8868a4
-        if: matrix.os != 'macOS' || matrix.arch != 'arm64'
+          fetch-depth: 1
 
-      - uses: actions/checkout@v5
+      - name: Build wheel
+        uses: ./.github/actions/build-wheel-for-publish
         with:
-          # Use the input only for manual runs; otherwise use the triggering ref
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.branch || github.ref }}
-          submodules: recursive
-          fetch-depth: 0
-          fetch-tags: true
-
-      - uses: ./.github/actions/detect-env-vars
-        id: env_vars
-
-      - name: Print current commit
-        run: git log -1 --oneline
-
-      - name: Run cpp tests
-        if: ${{ matrix.os != 'windows-latest' }}
-        env:
-          CMAKE_BUILD_PARALLEL_LEVEL: ${{ steps.env_vars.outputs.cpu_count }}
-        run: |
-          cmake . -B build_test -DTVM_FFI_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Debug
-          cmake --build build_test --clean-first --config Debug --target tvm_ffi_tests
-          ctest -V -C Debug --test-dir build_test --output-on-failure
-
-      - name: Build wheels
-        uses: pypa/cibuildwheel@v3.1.4
-        env:
-          CIBW_ARCHS_MACOS: ${{ matrix.arch }}
-          CIBW_ARCHS_LINUX: ${{ matrix.arch }}
-          CIBW_ARCHS_WINDOWS: ${{ matrix.arch }}
-          CIBW_MANYLINUX_X86_64_IMAGE: ${{ matrix.linux_image }}
-          CIBW_MANYLINUX_AARCH64_IMAGE: ${{ matrix.linux_image }}
-          CIBW_BUILD_VERBOSITY: 1
-          CMAKE_BUILD_PARALLEL_LEVEL: ${{ steps.env_vars.outputs.cpu_count }}
-
-        with:
-          package-dir: .
-          output-dir: wheelhouse
-
-      - uses: actions/upload-artifact@v4
+          os: ${{ matrix.os }}
+          arch: ${{ matrix.arch }}
+          linux_image: ${{ matrix.linux_image }}
+          checkout_ref: ${{ inputs.tag }}
+          build_sdist: ${{ matrix.build_sdist }}
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
         with:
           name: cibw-wheels-${{ matrix.os }}-${{ matrix.arch }}-${{ strategy.job-index }}
           path: ./wheelhouse/*.whl
-
-  build_sdist:
-    name: Build source distribution
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.branch || github.ref }}
-          submodules: recursive
-          fetch-depth: 0
-          fetch-tags: true
-
-      - uses: astral-sh/setup-uv@b75a909f75acd358c2196fb9a5f1299a9a8868a4  # v6.7.0
-
-      - name: Build sdist
-        run: pipx run build --sdist --outdir dist .
-
-      - name: Check metadata
-        run: pipx run twine check dist/*
-
-      - uses: actions/upload-artifact@v4
+      - name: Upload sdist
+        if: ${{ matrix.build_sdist == 'true' }}
+        uses: actions/upload-artifact@v4
         with:
           name: cibw-sdist
           path: dist/*.tar.gz
 
   upload_pypi:
-    needs: [build_wheels, build_sdist]
+    needs: [build_wheels]
     runs-on: ubuntu-latest
     environment: pypi
     permissions:

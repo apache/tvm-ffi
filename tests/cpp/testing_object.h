@@ -233,9 +233,8 @@ class TCustomFuncObj : public Object {
     return true;
   }
 
-  uint64_t SHash(uint64_t init_hash,
-                 ffi::TypedFunction<uint64_t(AnyView, uint64_t, bool)> hash) const {
-    uint64_t hash_value = init_hash;
+  int64_t SHash(int64_t init_hash, ffi::TypedFunction<int64_t(AnyView, int64_t, bool)> hash) const {
+    int64_t hash_value = init_hash;
     hash_value = hash(params, hash_value, true);
     hash_value = hash(body, hash_value, false);
     return hash_value;

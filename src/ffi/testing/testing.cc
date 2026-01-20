@@ -147,6 +147,19 @@ class TestCxxInitSubsetObj : public Object {
   TVM_FFI_DECLARE_OBJECT_INFO("testing.TestCxxInitSubset", TestCxxInitSubsetObj, Object);
 };
 
+class TestCxxKwOnly : public Object {
+ public:
+  int64_t x;
+  int64_t y;
+  int64_t z;
+  int64_t w;
+
+  TestCxxKwOnly(int64_t x, int64_t y, int64_t z, int64_t w) : x(x), y(y), z(z), w(w) {}
+
+  static constexpr bool _type_mutable = true;
+  TVM_FFI_DECLARE_OBJECT_INFO("testing.TestCxxKwOnly", TestCxxKwOnly, Object);
+};
+
 class TestUnregisteredBaseObject : public Object {
  public:
   int64_t v1;
@@ -228,6 +241,13 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def_rw("required_field", &TestCxxInitSubsetObj::required_field)
       .def_rw("optional_field", &TestCxxInitSubsetObj::optional_field)
       .def_rw("note", &TestCxxInitSubsetObj::note);
+
+  refl::ObjectDef<TestCxxKwOnly>()
+      .def(refl::init<int64_t, int64_t, int64_t, int64_t>())
+      .def_rw("x", &TestCxxKwOnly::x)
+      .def_rw("y", &TestCxxKwOnly::y)
+      .def_rw("z", &TestCxxKwOnly::z)
+      .def_rw("w", &TestCxxKwOnly::w);
 
   refl::ObjectDef<TestUnregisteredBaseObject>()
       .def(refl::init<int64_t>(), "Constructor of TestUnregisteredBaseObject")
@@ -519,7 +539,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
 // Exported symbols for metadata testing on DLL-exported functions
 // -----------------------------------------------------------------------------
 // We keep minimal DLL exports here to verify the export mechanism.
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(testing_dll_schema_id_int, tvm::ffi::schema_test_impl::schema_id_int);
+TVM_FFI_DLL_EXPORT_TYPED_FUNC(testing_dll_schema_id_int, tvm::ffi::schema_test_impl::schema_id_int)
 
 // Documentation export
 TVM_FFI_DLL_EXPORT_TYPED_FUNC(testing_dll_test_add_with_docstring,

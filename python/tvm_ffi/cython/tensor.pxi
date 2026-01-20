@@ -133,9 +133,9 @@ cdef inline int _from_dlpack_universal(
     cdef int favor_legacy_dlpack = True
     cdef const DLPackExchangeAPI* exchange_api = NULL
 
-    if hasattr(ext_tensor, "__c_dlpack_exchange_api__"):
+    if hasattr(ext_tensor, "__dlpack_c_exchange_api__"):
         try:
-            _get_dlpack_exchange_api(ext_tensor.__c_dlpack_exchange_api__, &exchange_api)
+            _get_dlpack_exchange_api(ext_tensor.__dlpack_c_exchange_api__, &exchange_api)
             return _from_dlpack_exchange_api(
                 ext_tensor,
                 exchange_api,
@@ -195,10 +195,10 @@ def from_dlpack(
 
     Parameters
     ----------
-    ext_tensor : object
-        An object supporting `__dlpack__ <https://data-apis.org/array-api/latest/API_specification/generated/array_api.array.__dlpack__.html#array_api.array.__dlpack__>`_
-        and `__dlpack_device__ <https://data-apis.org/array-api/latest/API_specification/generated/array_api.array.__dlpack_device__.html#array_api.array.__dlpack_device__>`_.
-    require_alignment : int, optional
+    ext_tensor
+        An object supporting :py:meth:`__dlpack__ <array_api.array.__dlpack__>`
+        and :py:meth:`__dlpack_device__ <array_api.array.__dlpack_device__>`.
+    require_alignment
         If greater than zero, require the underlying data pointer to be
         aligned to this many bytes. Misaligned inputs raise
         :class:`ValueError`.
@@ -314,7 +314,7 @@ cdef class Tensor(Object):
             dltensor, _c_str_dltensor_versioned, <PyCapsule_Destructor>_c_dlpack_versioned_deleter)
 
     def __dlpack_device__(self) -> tuple[int, int]:
-        """Implement the standard `__dlpack_device__ <https://data-apis.org/array-api/latest/API_specification/generated/array_api.array.__dlpack_device__.html#array_api.array.__dlpack_device__>`_ protocol."""  # noqa: E501
+        """Implement the standard :py:meth:`__dlpack_device__ <array_api.array.__dlpack_device__>` protocol."""
         cdef int device_type = self.cdltensor.device.device_type
         cdef int device_id = self.cdltensor.device.device_id
         return (device_type, device_id)
@@ -327,7 +327,7 @@ cdef class Tensor(Object):
         dl_device: tuple[int, int] | None = None,
         copy: bool | None = None,
     ) -> object:
-        """Implement the standard `__dlpack__ <https://data-apis.org/array-api/latest/API_specification/generated/array_api.array.__dlpack__.html#array_api.array.__dlpack__>`_ protocol.
+        """Implement the standard :py:meth:`__dlpack__ <array_api.array.__dlpack__>` protocol.
 
         Parameters
         ----------
@@ -405,7 +405,7 @@ cdef int _dltensor_test_wrapper_current_work_stream(
 # Module-level static DLPackExchangeAPI for DLTensorTestWrapper
 cdef DLPackExchangeAPI _dltensor_test_wrapper_static_api
 
-cdef const DLPackExchangeAPI* _dltensor_test_wrapper_get_exchange_api() noexcept:
+cdef DLPackExchangeAPI* _dltensor_test_wrapper_get_exchange_api() noexcept:
     """Get the static DLPackExchangeAPI instance for DLTensorTestWrapper."""
     global _dltensor_test_wrapper_static_api
 
@@ -430,15 +430,14 @@ cdef const DLPackExchangeAPI* _dltensor_test_wrapper_get_exchange_api() noexcept
     return &_dltensor_test_wrapper_static_api
 
 
-def _dltensor_test_wrapper_exchange_api_ptr():
-    """Return the pointer to the DLPackExchangeAPI struct as an integer."""
-    return <long long>_dltensor_test_wrapper_get_exchange_api()
-
-
 cdef class DLTensorTestWrapper:
     """Wrapper of a Tensor that exposes DLPack protocol, only for testing purpose.
     """
-    __c_dlpack_exchange_api__: int = _dltensor_test_wrapper_exchange_api_ptr()
+    __dlpack_c_exchange_api__ = pycapsule.PyCapsule_New(
+        _dltensor_test_wrapper_get_exchange_api(),
+        b"dlpack_exchange_api",
+        NULL
+    )
 
     cdef Tensor tensor
     cdef dict __dict__

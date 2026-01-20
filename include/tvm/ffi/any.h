@@ -517,12 +517,22 @@ struct Type2Str<const Any&> {
 };
 
 template <>
+struct Type2Str<Any&&> {
+  static std::string v() { return "Any"; }
+};
+
+template <>
 struct Type2Str<AnyView> {
   static std::string v() { return "AnyView"; }
 };
 
 template <>
 struct Type2Str<const AnyView&> {
+  static std::string v() { return "AnyView"; }
+};
+
+template <>
+struct Type2Str<AnyView&&> {
   static std::string v() { return "AnyView"; }
 };
 

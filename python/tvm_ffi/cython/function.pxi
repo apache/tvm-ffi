@@ -156,10 +156,10 @@ cdef int TVMFFIPyArgSetterDLPackExchangeAPI_(
     cdef DLManagedTensorVersioned* temp_managed_tensor
     cdef TVMFFIObjectHandle temp_chandle
     cdef void* current_stream = NULL
-    cdef const DLPackExchangeAPI* exchange_api = this.c_dlpack_exchange_api
+    cdef const DLPackExchangeAPI* exchange_api = this.dlpack_c_exchange_api
 
     # Set the exchange API in context
-    ctx.c_dlpack_exchange_api = exchange_api
+    ctx.dlpack_c_exchange_api = exchange_api
 
     # Convert PyObject to DLPack using the struct's function pointer
     if exchange_api.managed_tensor_from_py_object_no_sync(arg, &temp_managed_tensor) != 0:
@@ -239,7 +239,7 @@ cdef int TVMFFIPyArgSetterTorchFallback_(
     out.type_index = kTVMFFITensor
     out.v_ptr = (<Tensor>arg).chandle
     temp_dltensor = TVMFFITensorGetDLTensorPtr((<Tensor>arg).chandle)
-    ctx.c_dlpack_exchange_api = GetTorchFallbackExchangeAPI()
+    ctx.dlpack_c_exchange_api = GetTorchFallbackExchangeAPI()
     # record the stream and device for torch context
     if is_cuda and ctx.device_type == -1:
         ctx.device_type = temp_dltensor.device.device_type
@@ -674,6 +674,22 @@ cdef int TVMFFIPyArgSetterFloatProtocol_(
     return 0
 
 
+cdef int TVMFFIPyArgSetterFFIValueProtocol_(
+    TVMFFIPyArgSetter* handle, TVMFFIPyCallContext* ctx,
+    PyObject* py_arg, TVMFFIAny* out
+) except -1:
+    """Setter for class with __tvm_ffi_value__() method"""
+    cdef object arg = <object>py_arg
+    cdef object ffi_value_py_obj = arg.__tvm_ffi_value__()
+    cdef PyObject* ffi_value_py_obj_ptr = <PyObject*>ffi_value_py_obj
+    # keep alive the python object since this is a temporary object
+    # we must push to extra temp py objects stack to avoid overflow the temp py objects stack
+    TVMFFIPyPushExtraTempPyObject(ctx, ffi_value_py_obj_ptr)
+    return TVMFFIPySetArgumentGenericDispatcher(
+        TVMFFIPyArgSetterFactory_, ctx, ffi_value_py_obj_ptr, out
+    )
+
+
 cdef _DISPATCH_TYPE_KEEP_ALIVE = set()
 cdef _DISPATCH_TYPE_KEEP_ALIVE_LOCK = threading.Lock()
 
@@ -724,12 +740,12 @@ cdef int TVMFFIPyArgSetterFactory_(PyObject* value, TVMFFIPyArgSetter* out) exce
         # as a member variable
         out.func = TVMFFIPyArgSetterFFIObjectProtocol_
         return 0
-    if os.environ.get("TVM_FFI_SKIP_C_DLPACK_EXCHANGE_API", "0") != "1":
+    if os.environ.get("TVM_FFI_SKIP_DLPACK_C_EXCHANGE_API", "0") != "1":
         # Check for DLPackExchangeAPI struct (new approach)
         # This is checked on the CLASS, not the instance
-        if hasattr(arg_class, "__c_dlpack_exchange_api__"):
+        if hasattr(arg_class, "__dlpack_c_exchange_api__"):
             out.func = TVMFFIPyArgSetterDLPackExchangeAPI_
-            _get_dlpack_exchange_api(arg_class.__c_dlpack_exchange_api__, &(out.c_dlpack_exchange_api))
+            _get_dlpack_exchange_api(arg_class.__dlpack_c_exchange_api__, &(out.dlpack_c_exchange_api))
             return 0
     if hasattr(arg_class, "__cuda_stream__"):
         # cuda stream protocol
@@ -823,6 +839,9 @@ cdef int TVMFFIPyArgSetterFactory_(PyObject* value, TVMFFIPyArgSetter* out) exce
         return 0
     if hasattr(arg_class, "__tvm_ffi_float__"):
         out.func = TVMFFIPyArgSetterFloatProtocol_
+        return 0
+    if hasattr(arg_class, "__tvm_ffi_value__"):
+        out.func = TVMFFIPyArgSetterFFIValueProtocol_
         return 0
     if isinstance(arg, Exception):
         out.func = TVMFFIPyArgSetterException_

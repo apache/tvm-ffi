@@ -157,8 +157,10 @@ intersphinx_mapping = {
     "pillow": ("https://pillow.readthedocs.io/en/stable", None),
     "numpy": ("https://numpy.org/doc/stable", None),
     "torch": ("https://pytorch.org/docs/stable", None),
-    "torch-cpp": ("https://docs.pytorch.org/cppdocs/", None),
+    "torch-cpp": ("https://docs.pytorch.org/cppdocs", None),
     "dlpack": ("https://dmlc.github.io/dlpack/latest", None),
+    "data-api": ("https://data-apis.org/array-api/latest", None),
+    "scikit_build_core": ("https://scikit-build-core.readthedocs.io/en/stable/", None),
 }
 
 autosummary_generate = True  # actually create stub pages

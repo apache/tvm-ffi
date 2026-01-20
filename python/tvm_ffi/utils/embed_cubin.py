@@ -92,16 +92,25 @@ def embed_cubin(  # noqa: PLR0912, PLR0915
 
     Examples
     --------
-    >>> embed_cubin(
-    ...     Path("kernel.cubin"),
-    ...     Path("old.o"),
-    ...     Path("new.o"),
-    ...     "my_kernels"
-    ... )
+    In Python,
 
-    Then in C++ code (in the source that was compiled to old.o):
-    >>> TVM_FFI_EMBED_CUBIN(my_kernels);
-    >>> auto kernel = TVM_FFI_EMBED_CUBIN_GET_KERNEL(my_kernels, "kernel_name");
+    ```python
+    embed_cubin(
+        Path("kernel.cubin"),
+        Path("old.o"),
+        Path("new.o"),
+        "my_kernels",
+    )
+    ```
+
+    Then in C++ code,
+
+    ```C++
+    TVM_FFI_EMBED_CUBIN(my_kernels);
+    auto kernel = TVM_FFI_EMBED_CUBIN_GET_KERNEL(my_kernels, "kernel_name");
+    ```
+
+    (in the source that was compiled to old.o).
 
     """
     if not cubin_path.exists():

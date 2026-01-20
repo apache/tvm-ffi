@@ -17,10 +17,21 @@
 
 [project]
 name = "torch_c_dlpack_ext"
-version = "0.1.3"
+version = "0.1.5"
 requires-python = ">=3.9"
 description = "torch c dlpack ext"
 dependencies = ["torch"]
+
+authors = [{ name = "TVM FFI team" }]
+readme = "README.md"
+license = { file = "LICENSE" }
+classifiers = [
+  "License :: OSI Approved :: Apache Software License",
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Education",
+  "Intended Audience :: Science/Research",
+]
 
 [build-system]
 requires = ["setuptools>=61.0"]

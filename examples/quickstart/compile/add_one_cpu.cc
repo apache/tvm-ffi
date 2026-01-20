@@ -19,8 +19,7 @@
 
 // [example.begin]
 // File: compile/add_one_cpu.cc
-#include <tvm/ffi/container/tensor.h>
-#include <tvm/ffi/function.h>
+#include <tvm/ffi/tvm_ffi.h>
 
 namespace tvm_ffi_example_cpu {
 
@@ -34,6 +33,6 @@ void AddOne(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
   }
 }
 
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(add_one_cpu, tvm_ffi_example_cpu::AddOne);
+TVM_FFI_DLL_EXPORT_TYPED_FUNC(add_one_cpu, tvm_ffi_example_cpu::AddOne)
 }  // namespace tvm_ffi_example_cpu
 // [example.end]

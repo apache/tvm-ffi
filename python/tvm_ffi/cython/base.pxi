@@ -322,11 +322,11 @@ cdef extern from "tvm_ffi_python_helpers.h":
         int device_type
         int device_id
         TVMFFIStreamHandle stream
-        const DLPackExchangeAPI* c_dlpack_exchange_api
+        const DLPackExchangeAPI* dlpack_c_exchange_api
 
     ctypedef struct TVMFFIPyArgSetter:
         int (*func)(TVMFFIPyArgSetter* handle, TVMFFIPyCallContext* ctx,  PyObject* py_arg, TVMFFIAny* out) except -1
-        const DLPackExchangeAPI* c_dlpack_exchange_api
+        const DLPackExchangeAPI* dlpack_c_exchange_api
 
     ctypedef int (*TVMFFIPyArgSetterFactory)(PyObject* value, TVMFFIPyArgSetter* out) except -1
     # The main call function
@@ -364,10 +364,18 @@ cdef extern from "tvm_ffi_python_helpers.h":
         int* c_api_ret_code
     ) except -1
 
+    int TVMFFIPySetArgumentGenericDispatcher(
+        TVMFFIPyArgSetterFactory setter_factory,
+        TVMFFIPyCallContext* ctx,
+        PyObject* py_arg,
+        TVMFFIAny* out
+    ) except -1
+
     size_t TVMFFIPyGetDispatchMapSize() noexcept
 
     void TVMFFIPyPushTempFFIObject(TVMFFIPyCallContext* ctx, TVMFFIObjectHandle arg) noexcept
     void TVMFFIPyPushTempPyObject(TVMFFIPyCallContext* ctx, PyObject* arg) noexcept
+    void TVMFFIPyPushExtraTempPyObject(TVMFFIPyCallContext* ctx, PyObject* arg)
     # the predefined setters for common POD types
     int TVMFFIPyArgSetterFloat_(TVMFFIPyArgSetter*, TVMFFIPyCallContext*, PyObject* arg, TVMFFIAny* out) except -1
     int TVMFFIPyArgSetterInt_(TVMFFIPyArgSetter*, TVMFFIPyCallContext*, PyObject* arg, TVMFFIAny* out) except -1

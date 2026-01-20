@@ -40,6 +40,7 @@
 #include <exception>
 #include <iostream>
 #include <unordered_map>
+#include <vector>
 
 ///--------------------------------------------------------------------------------
 /// We deliberately designed the data structure and function to be C-style
@@ -47,9 +48,35 @@
 ///--------------------------------------------------------------------------------
 
 /*!
+ * \brief Thread-local call stack used by TVMFFIPyCallContext.
+ */
+class TVMFFIPyCallStack {
+ public:
+  /*! \brief The stack of arguments */
+  std::vector<TVMFFIAny> args_stack;
+  /*! \brief The top of the argument call stack currently */
+  int64_t args_stack_top = 0;
+  /*!
+   * \brief The stack of extra temporary Python objects that may not fit into
+   * one temp per argument budget, mainly used by value protocol.
+   */
+  std::vector<PyObject*> extra_temp_py_objects_stack;
+
+  /*! \brief Constructor to initialize the call stack */
+  TVMFFIPyCallStack() {
+    // keep it 4K as default stack size so it is page aligned
+    constexpr size_t kDefaultStackSize = 4096;
+    // fit everything roughly 4K stack
+    args_stack.resize(kDefaultStackSize / sizeof(TVMFFIAny));
+    extra_temp_py_objects_stack.reserve(16);
+  }
+};
+
+/*!
  * \brief Context for each ffi call to track the stream, device and temporary arguments.
  */
-struct TVMFFIPyCallContext {
+class TVMFFIPyCallContext {
+ public:
   /*! \brief The workspace for the packed arguments */
   TVMFFIAny* packed_args = nullptr;
   /*! \brief Detected device type, if any */
@@ -58,16 +85,77 @@ struct TVMFFIPyCallContext {
   int device_id = 0;
   /*! \brief Detected stream, if any */
   void* stream = nullptr;
+  /*! \brief the DLPack exchange API, if any */
+  const DLPackExchangeAPI* dlpack_c_exchange_api{nullptr};
+  /*! \brief pointer to the call stack space */
+  TVMFFIPyCallStack* call_stack = nullptr;
   /*! \brief the temporary arguments to be recycled */
   void** temp_ffi_objects = nullptr;
-  /*! \brief the number of temporary arguments */
-  int num_temp_ffi_objects = 0;
   /*! \brief the temporary arguments to be recycled */
   void** temp_py_objects = nullptr;
   /*! \brief the number of temporary arguments */
+  int num_temp_ffi_objects = 0;
+  /*! \brief the number of temporary arguments */
   int num_temp_py_objects = 0;
-  /*! \brief the DLPack exchange API, if any */
-  const DLPackExchangeAPI* c_dlpack_exchange_api{nullptr};
+
+  /*! \brief RAII guard constructor to create a TVMFFIPyCallContext */
+  TVMFFIPyCallContext(TVMFFIPyCallStack* call_stack, int64_t num_args) : call_stack(call_stack) {
+    // In most cases, it will try to allocate from temp_stack,
+    // then allocate from heap if the request goes beyond the stack size.
+    static_assert(sizeof(TVMFFIAny) >= (sizeof(void*) * 2));
+    static_assert(alignof(TVMFFIAny) % alignof(void*) == 0);
+    old_args_stack_top_ = call_stack->args_stack_top;
+    int64_t requested_count = num_args * 2;
+    TVMFFIAny* stack_head = call_stack->args_stack.data() + call_stack->args_stack_top;
+    if (call_stack->args_stack_top + requested_count >
+        static_cast<int64_t>(call_stack->args_stack.size())) {
+      // allocate from heap
+      heap_ptr_ = new TVMFFIAny[requested_count];
+      stack_head = heap_ptr_;
+    } else {
+      call_stack->args_stack_top += requested_count;
+    }
+    this->packed_args = stack_head;
+    // by default we co-locate the temporary arguments with packed arguments
+    // for better cache locality with one temp per argument budget.
+    this->temp_ffi_objects = reinterpret_cast<void**>(stack_head + num_args);
+    this->temp_py_objects = this->temp_ffi_objects + num_args;
+    this->old_extra_temp_py_objects_stack_top_ = call_stack->extra_temp_py_objects_stack.size();
+  }
+
+  ~TVMFFIPyCallContext() {
+    try {
+      // recycle the temporary arguments if any
+      for (int i = 0; i < this->num_temp_ffi_objects; ++i) {
+        TVMFFIObjectDecRef(this->temp_ffi_objects[i]);
+      }
+      for (int i = 0; i < this->num_temp_py_objects; ++i) {
+        Py_DecRef(static_cast<PyObject*>(this->temp_py_objects[i]));
+      }
+      for (size_t i = old_extra_temp_py_objects_stack_top_;
+           i < call_stack->extra_temp_py_objects_stack.size(); ++i) {
+        Py_DecRef(static_cast<PyObject*>(call_stack->extra_temp_py_objects_stack[i]));
+      }
+      call_stack->extra_temp_py_objects_stack.resize(old_extra_temp_py_objects_stack_top_);
+    } catch (const std::exception& ex) {
+      // very rare, catch c++ exception and set python error
+      PyErr_SetString(PyExc_RuntimeError, ex.what());
+    }
+    // now recycle the memory of the call stack
+    if (heap_ptr_ == nullptr) {
+      call_stack->args_stack_top = old_args_stack_top_;
+    } else {
+      delete[] heap_ptr_;
+    }
+  }
+
+ private:
+  /*! \brief the heap pointer */
+  TVMFFIAny* heap_ptr_ = nullptr;
+  /*! \brief the old stack top */
+  size_t old_args_stack_top_;
+  /*! \brief the begin index of the temporary Python objects stack */
+  size_t old_extra_temp_py_objects_stack_top_;
 };
 
 /*! \brief Argument setter for a given python argument. */
@@ -86,7 +174,7 @@ struct TVMFFIPyArgSetter {
    * \brief Optional DLPackExchangeAPI struct pointer.
    * This is the new struct-based approach that bundles all DLPack exchange functions.
    */
-  const DLPackExchangeAPI* c_dlpack_exchange_api{nullptr};
+  const DLPackExchangeAPI* dlpack_c_exchange_api{nullptr};
   /*!
    * \brief Invoke the setter.
    * \param call_ctx The call context.
@@ -174,66 +262,6 @@ class TVMFFIPyCallManager {
     return &inst;
   }
   /*!
-   * \brief auxiliary class that manages the call stack in RAII manner.
-   *
-   * In most cases, it will try to allocate from temp_stack,
-   * then allocate from heap if the request goes beyond the stack size.
-   */
-  class CallStack : public TVMFFIPyCallContext {
-   public:
-    CallStack(TVMFFIPyCallManager* manager, int64_t num_args) : manager_ptr_(manager) {
-      static_assert(sizeof(TVMFFIAny) >= (sizeof(void*) * 2));
-      static_assert(alignof(TVMFFIAny) % alignof(void*) == 0);
-      old_stack_top_ = manager->stack_top_;
-      int64_t requested_count = num_args * 2;
-      TVMFFIAny* stack_head = manager->temp_stack_.data() + manager->stack_top_;
-      if (manager->stack_top_ + requested_count >
-          static_cast<int64_t>(manager->temp_stack_.size())) {
-        // allocate from heap
-        heap_ptr_ = new TVMFFIAny[requested_count];
-        stack_head = heap_ptr_;
-      } else {
-        manager->stack_top_ += requested_count;
-      }
-      this->packed_args = stack_head;
-      this->temp_ffi_objects = reinterpret_cast<void**>(stack_head + num_args);
-      this->temp_py_objects = this->temp_ffi_objects + num_args;
-    }
-
-    ~CallStack() {
-      try {
-        // recycle the temporary arguments if any
-        for (int i = 0; i < this->num_temp_ffi_objects; ++i) {
-          TVMFFIObjectDecRef(this->temp_ffi_objects[i]);
-        }
-        for (int i = 0; i < this->num_temp_py_objects; ++i) {
-          Py_DecRef(static_cast<PyObject*>(this->temp_py_objects[i]));
-        }
-      } catch (const std::exception& ex) {
-        // very rare, catch c++ exception and set python error
-        PyErr_SetString(PyExc_RuntimeError, ex.what());
-      }
-      // now recycle the memory of the call stack
-      if (heap_ptr_ == nullptr) {
-        manager_ptr_->stack_top_ = old_stack_top_;
-      } else {
-        delete[] heap_ptr_;
-      }
-    }
-
-   private:
-    /*!
-     *\brief The manager of the call stack
-     * If stored on stack, must set it to point to parent.
-     */
-    TVMFFIPyCallManager* manager_ptr_ = nullptr;
-    /*! \brief The heap of the call stack */
-    TVMFFIAny* heap_ptr_ = nullptr;
-    /*! \brief The old stack size */
-    int64_t old_stack_top_ = 0;
-  };
-
-  /*!
    * \brief Call a function with a variable number of arguments
    * \param setter_factory The factory function to create the setter
    * \param func_handle The handle of the function to call
@@ -253,7 +281,7 @@ class TVMFFIPyCallManager {
     if (num_args == -1) return -1;
     try {
       // allocate a call stack
-      CallStack ctx(this, num_args);
+      TVMFFIPyCallContext ctx(&call_stack_, num_args);
       // Iterate over the arguments and set them
       for (int64_t i = 0; i < num_args; ++i) {
         PyObject* py_arg = PyTuple_GetItem(py_arg_tuple, i);
@@ -269,10 +297,10 @@ class TVMFFIPyCallManager {
         // setting failed, directly return
         if (c_api_ret_code[0] != 0) return 0;
       }
-      if (ctx.c_dlpack_exchange_api != nullptr &&
-          ctx.c_dlpack_exchange_api->managed_tensor_allocator != nullptr) {
+      if (ctx.dlpack_c_exchange_api != nullptr &&
+          ctx.dlpack_c_exchange_api->managed_tensor_allocator != nullptr) {
         c_api_ret_code[0] = TVMFFIEnvSetDLPackManagedTensorAllocator(
-            ctx.c_dlpack_exchange_api->managed_tensor_allocator, 0, &prev_tensor_allocator);
+            ctx.dlpack_c_exchange_api->managed_tensor_allocator, 0, &prev_tensor_allocator);
         if (c_api_ret_code[0] != 0) return 0;
       }
       // call the function
@@ -293,14 +321,20 @@ class TVMFFIPyCallManager {
           return -1;
         }
       }
-      if (ctx.c_dlpack_exchange_api != nullptr &&
-          prev_tensor_allocator != ctx.c_dlpack_exchange_api->managed_tensor_allocator) {
-        c_api_ret_code[0] =
-            TVMFFIEnvSetDLPackManagedTensorAllocator(prev_tensor_allocator, 0, nullptr);
+
+      if (ctx.dlpack_c_exchange_api != nullptr &&
+          prev_tensor_allocator != ctx.dlpack_c_exchange_api->managed_tensor_allocator) {
+        // note: we cannot set the error value to c_api_ret_code[0] here because it
+        // will be overwritten by the error value from the function call
+        if (TVMFFIEnvSetDLPackManagedTensorAllocator(prev_tensor_allocator, 0, nullptr) != 0) {
+          PyErr_SetString(PyExc_RuntimeError, "Failed to recover DLPack managed tensor allocator");
+          return -1;
+        }
+        // return error after
         if (c_api_ret_code[0] != 0) return 0;
       }
-      if (optional_out_ctx_dlpack_api != nullptr && ctx.c_dlpack_exchange_api != nullptr) {
-        *optional_out_ctx_dlpack_api = ctx.c_dlpack_exchange_api;
+      if (optional_out_ctx_dlpack_api != nullptr && ctx.dlpack_c_exchange_api != nullptr) {
+        *optional_out_ctx_dlpack_api = ctx.dlpack_c_exchange_api;
       }
       return 0;
     } catch (const std::exception& ex) {
@@ -335,7 +369,7 @@ class TVMFFIPyCallManager {
     if (num_args == -1) return -1;
     try {
       // allocate a call stack
-      CallStack ctx(this, num_args);
+      TVMFFIPyCallContext ctx(&call_stack_, num_args);
       // Iterate over the arguments and set them
       for (int64_t i = 0; i < num_args; ++i) {
         PyObject* py_arg = PyTuple_GetItem(py_arg_tuple, i);
@@ -352,8 +386,8 @@ class TVMFFIPyCallManager {
           parent_ctx->stream = ctx.stream;
         }
         // DLPack exchange API
-        if (parent_ctx->c_dlpack_exchange_api == nullptr) {
-          parent_ctx->c_dlpack_exchange_api = ctx.c_dlpack_exchange_api;
+        if (parent_ctx->dlpack_c_exchange_api == nullptr) {
+          parent_ctx->dlpack_c_exchange_api = ctx.dlpack_c_exchange_api;
         }
       }
       return 0;
@@ -368,7 +402,7 @@ class TVMFFIPyCallManager {
                               TVMFFIFieldSetter field_setter, void* field_ptr, PyObject* py_arg,
                               int* c_api_ret_code) {
     try {
-      CallStack ctx(this, 1);
+      TVMFFIPyCallContext ctx(&call_stack_, 1);
       TVMFFIAny* c_arg = ctx.packed_args;
       if (SetArgument(setter_factory, &ctx, py_arg, c_arg) != 0) return -1;
       c_api_ret_code[0] = (*field_setter)(field_ptr, c_arg);
@@ -380,10 +414,10 @@ class TVMFFIPyCallManager {
     }
   }
 
-  int PyObjectToFFIAny(TVMFFIPyArgSetterFactory setter_factory, PyObject* py_arg, TVMFFIAny* out,
-                       int* c_api_ret_code) {
+  TVM_FFI_INLINE int PyObjectToFFIAny(TVMFFIPyArgSetterFactory setter_factory, PyObject* py_arg,
+                                      TVMFFIAny* out, int* c_api_ret_code) {
     try {
-      CallStack ctx(this, 1);
+      TVMFFIPyCallContext ctx(&call_stack_, 1);
       TVMFFIAny* c_arg = ctx.packed_args;
       if (SetArgument(setter_factory, &ctx, py_arg, c_arg) != 0) return -1;
       c_api_ret_code[0] = TVMFFIAnyViewToOwnedAny(c_arg, out);
@@ -394,20 +428,7 @@ class TVMFFIPyCallManager {
       return -1;
     }
   }
-  /*!
-   * \brief Get the size of the dispatch map
-   * \return The size of the dispatch map
-   */
-  size_t GetDispatchMapSize() const { return dispatch_map_.size(); }
 
- private:
-  TVMFFIPyCallManager() {
-    static constexpr size_t kDefaultDispatchCapacity = 32;
-    // keep it 4K as default stack size so it is page aligned
-    static constexpr size_t kDefaultStackSize = 4096;
-    dispatch_map_.reserve(kDefaultDispatchCapacity);
-    temp_stack_.resize(kDefaultStackSize / sizeof(TVMFFIAny));
-  }
   /*!
    * \brief Set an py_arg to out.
    * \param setter_factory The factory function to create the setter
@@ -443,11 +464,23 @@ class TVMFFIPyCallManager {
     }
     return 0;
   }
+
+  /*!
+   * \brief Get the size of the dispatch map
+   * \return The size of the dispatch map
+   */
+  size_t GetDispatchMapSize() const { return dispatch_map_.size(); }
+
+ private:
+  TVMFFIPyCallManager() {
+    static constexpr size_t kDefaultDispatchCapacity = 32;
+    dispatch_map_.reserve(kDefaultDispatchCapacity);
+  }
+
   // internal dispacher
   std::unordered_map<PyTypeObject*, TVMFFIPyArgSetter> dispatch_map_;
-  // temp call stack
-  std::vector<TVMFFIAny> temp_stack_;
-  int64_t stack_top_ = 0;
+  // call stack
+  TVMFFIPyCallStack call_stack_;
 };
 
 /*!
@@ -515,6 +548,22 @@ TVM_FFI_INLINE int TVMFFIPyCallFieldSetter(TVMFFIPyArgSetterFactory setter_facto
 }
 
 /*!
+ * \brief Set an python argument to a FFI Any using the generic dispatcher in call manager
+ * \param setter_factory The factory function to create the setter
+ * \param ctx The call context
+ * \param py_arg_tvm_ffi_value The python argument to be set using the __tvm_ffi_value__ protocol
+ * \param out The output argument
+ * \return 0 on success, nonzero on failure
+ */
+TVM_FFI_INLINE int TVMFFIPySetArgumentGenericDispatcher(TVMFFIPyArgSetterFactory setter_factory,
+                                                        TVMFFIPyCallContext* ctx,
+                                                        PyObject* py_arg_tvm_ffi_value,
+                                                        TVMFFIAny* out) {
+  return TVMFFIPyCallManager::ThreadLocal()->SetArgument(setter_factory, ctx, py_arg_tvm_ffi_value,
+                                                         out);
+}
+
+/*!
  * \brief Convert a Python object to a FFI Any
  * \param setter_factory The factory function to create the setter
  * \param py_arg The python argument to be set
@@ -558,6 +607,17 @@ TVM_FFI_INLINE void TVMFFIPyPushTempPyObject(TVMFFIPyCallContext* ctx, PyObject*
   // so it ensures that we won't overflow the temporary Python object stack
   Py_IncRef(arg);
   ctx->temp_py_objects[ctx->num_temp_py_objects++] = arg;
+}
+
+/*!
+ * \brief Push Extra temporary Python object to the call context that may go beyond one temp per
+ *        argument budget, mainly used by value protocol.
+ * \param ctx The call context
+ * \param arg The Python object to push
+ */
+TVM_FFI_INLINE void TVMFFIPyPushExtraTempPyObject(TVMFFIPyCallContext* ctx, PyObject* arg) {
+  Py_IncRef(arg);
+  ctx->call_stack->extra_temp_py_objects_stack.emplace_back(arg);
 }
 
 //----------------------------------------------------------

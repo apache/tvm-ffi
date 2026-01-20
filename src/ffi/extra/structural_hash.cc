@@ -150,15 +150,19 @@ class StructuralHashHandler {
                 std::swap(allow_free_var, map_free_vars_);
                 uint64_t hash_value = HashAny(val);
                 std::swap(allow_free_var, map_free_vars_);
-                return details::StableHashCombine(init_hash, hash_value);
+                return static_cast<int64_t>(details::StableHashCombine(init_hash, hash_value));
               } else {
-                return details::StableHashCombine(init_hash, HashAny(val));
+                // we explicitly bitcast the result from `uint64_t` to `int64_t`.
+                // The range of `uint64_t` is too large to fit as `int64_t`, so if we don't bitcast,
+                // it will trigger an overflow error in `uint64_t` -> `Any` conversion.
+                return static_cast<int64_t>(details::StableHashCombine(init_hash, HashAny(val)));
               }
             });
       }
-      hash_value = custom_s_hash[type_info->type_index]
-                       .cast<ffi::Function>()(obj, hash_value, s_hash_callback_)
-                       .cast<uint64_t>();
+      hash_value =
+          custom_s_hash[type_info->type_index]
+              .cast<ffi::Function>()(obj, static_cast<int64_t>(hash_value), s_hash_callback_)
+              .cast<uint64_t>();
     }
 
     if (structural_eq_hash_kind == kTVMFFISEqHashKindFreeVar) {
@@ -311,9 +315,17 @@ uint64_t StructuralHash::Hash(const Any& value, bool map_free_vars, bool skip_te
   return handler.HashAny(value);
 }
 
+static int64_t FFIStructuralHash(const Any& value, bool map_free_vars, bool skip_tensor_content) {
+  uint64_t result = StructuralHash::Hash(value, map_free_vars, skip_tensor_content);
+  // we explicitly bitcast the result from `uint64_t` to `int64_t`.
+  // The range of `uint64_t` is too large to fit as `int64_t`, so if we don't bitcast,
+  // it will trigger an overflow error in `uint64_t` -> `Any` conversion.
+  return static_cast<int64_t>(result);
+}
+
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def("ffi.StructuralHash", StructuralHash::Hash);
+  refl::GlobalDef().def("ffi.StructuralHash", FFIStructuralHash);
   refl::EnsureTypeAttrColumn("__s_hash__");
 }
 

@@ -180,9 +180,6 @@ if torch is not None:
         torch.int64: DLDataType(0, 64, 1),
         torch.long: DLDataType(0, 64, 1),
         torch.uint8: DLDataType(1, 8, 1),
-        torch.uint16: DLDataType(1, 16, 1),
-        torch.uint32: DLDataType(1, 32, 1),
-        torch.uint64: DLDataType(1, 64, 1),
         torch.float16: DLDataType(2, 16, 1),
         torch.half: DLDataType(2, 16, 1),
         torch.float32: DLDataType(2, 32, 1),
@@ -191,15 +188,22 @@ if torch is not None:
         torch.double: DLDataType(2, 64, 1),
         torch.bfloat16: DLDataType(4, 16, 1),
         torch.bool: DLDataType(6, 8, 1),
-        torch.float8_e4m3fn: DLDataType(10, 8, 1),
-        torch.float8_e4m3fnuz: DLDataType(11, 8, 1),
-        torch.float8_e5m2: DLDataType(12, 8, 1),
-        torch.float8_e5m2fnuz: DLDataType(13, 8, 1),
     }
-    if hasattr(torch, "float8_e8m0fnu"):
-        TORCH_DTYPE_TO_DL_DATA_TYPE[torch.float8_e8m0fnu] = DLDataType(14, 8, 1)
-    if hasattr(torch, "float4_e2m1fn_x2"):
-        TORCH_DTYPE_TO_DL_DATA_TYPE[torch.float4_e2m1fn_x2] = DLDataType(17, 4, 2)
+
+    extra_types = [
+        ("uint16", DLDataType(1, 16, 1)),
+        ("uint32", DLDataType(1, 32, 1)),
+        ("uint64", DLDataType(1, 64, 1)),
+        ("float8_e4m3fn", DLDataType(10, 8, 1)),
+        ("float8_e4m3fnuz", DLDataType(11, 8, 1)),
+        ("float8_e5m2", DLDataType(12, 8, 1)),
+        ("float8_e5m2fnuz", DLDataType(13, 8, 1)),
+        ("float8_e8m0fnu", DLDataType(14, 8, 1)),
+        ("float4_e2m1fn_x2", DLDataType(17, 4, 2)),
+    ]
+    for attr_name, dl_dtype in extra_types:
+        if hasattr(torch, attr_name):
+            TORCH_DTYPE_TO_DL_DATA_TYPE[getattr(torch, attr_name)] = dl_dtype
 
     def _convert_torch_dtype_to_ffi_dtype(torch_dtype):
         cdef DLDataType dl_data_type = TORCH_DTYPE_TO_DL_DATA_TYPE[torch_dtype]
@@ -252,5 +256,5 @@ if numpy is not None:
         cdef DLDataType cdtype = NUMPY_DTYPE_TO_DL_DATA_TYPE[numpy_dtype]
         return make_dtype_from_dl_data_type(cdtype)
 else:
-    def _convert_torch_dtype_to_ffi_dtype(torch_dtype):
+    def _convert_numpy_dtype_to_ffi_dtype(numpy_dtype):
         raise ValueError("numpy not found")

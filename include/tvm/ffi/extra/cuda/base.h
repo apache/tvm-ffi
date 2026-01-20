@@ -48,6 +48,34 @@ namespace ffi {
     }                                                                               \
   } while (0)
 
+/*!
+ * \brief A simple 3D dimension type for CUDA kernel launch configuration.
+ *
+ * This struct mimics the behavior of dim3 from CUDA Runtime API and provides
+ * a compatible interface for kernel launch configuration. It can be constructed
+ * from 1, 2, or 3 dimensions.
+ */
+struct dim3 {
+  /*! \brief X dimension (number of blocks in x-direction or threads in x-direction) */
+  unsigned int x;
+  /*! \brief Y dimension (number of blocks in y-direction or threads in y-direction) */
+  unsigned int y;
+  /*! \brief Z dimension (number of blocks in z-direction or threads in z-direction) */
+  unsigned int z;
+
+  /*! \brief Default constructor initializes to (1, 1, 1) */
+  dim3() : x(1), y(1), z(1) {}
+
+  /*! \brief Construct with x dimension, y and z default to 1 */
+  explicit dim3(unsigned int x_) : x(x_), y(1), z(1) {}
+
+  /*! \brief Construct with x and y dimensions, z defaults to 1 */
+  dim3(unsigned int x_, unsigned int y_) : x(x_), y(y_), z(1) {}
+
+  /*! \brief Construct with all three dimensions */
+  dim3(unsigned int x_, unsigned int y_, unsigned int z_) : x(x_), y(y_), z(z_) {}
+};
+
 }  // namespace ffi
 }  // namespace tvm
 

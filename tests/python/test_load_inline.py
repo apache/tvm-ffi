@@ -213,8 +213,8 @@ def test_load_inline_cuda() -> None:
 @pytest.mark.skipif(torch is None, reason="Requires torch")
 def test_load_inline_with_env_tensor_allocator() -> None:
     assert torch is not None
-    if not hasattr(torch.Tensor, "__c_dlpack_exchange_api__"):
-        pytest.skip("Torch does not support __c_dlpack_exchange_api__")
+    if not hasattr(torch.Tensor, "__dlpack_c_exchange_api__"):
+        pytest.skip("Torch does not support __dlpack_c_exchange_api__")
     mod: Module = tvm_ffi.cpp.load_inline(
         name="hello",
         cpp_sources=r"""

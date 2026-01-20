@@ -445,4 +445,87 @@ TEST(String, StdHash) {
   EXPECT_EQ(std::hash<Bytes>()(s3), std::hash<Bytes>()(s4));
 }
 
+TEST(String, Find) {
+  String s{"hello world"};
+  EXPECT_EQ(s.find("world"), 6);
+  EXPECT_EQ(s.find("hello"), 0);
+  EXPECT_EQ(s.find("o"), 4);
+  EXPECT_EQ(s.find("o", 5), 7);
+  EXPECT_EQ(s.find("notfound"), String::npos);
+  EXPECT_EQ(s.find(""), 0);
+  EXPECT_EQ(s.find("", 5), 5);
+  EXPECT_EQ(s.find("", 11), 11);
+  EXPECT_EQ(s.find("", 20), String::npos);
+
+  String pattern{"world"};
+  EXPECT_EQ(s.find(pattern), 6);
+
+  String empty{""};
+  EXPECT_EQ(empty.find("x"), String::npos);
+  EXPECT_EQ(empty.find(""), 0);
+}
+
+TEST(String, Substr) {
+  String s{"hello world"};
+  EXPECT_EQ(s.substr(0, 5), "hello");
+  EXPECT_EQ(s.substr(6, 5), "world");
+  EXPECT_EQ(s.substr(6), "world");
+  EXPECT_EQ(s.substr(0), "hello world");
+  EXPECT_EQ(s.substr(11), "");
+  EXPECT_EQ(s.substr(0, 0), "");
+
+  EXPECT_THROW(s.substr(12), std::out_of_range);
+  EXPECT_THROW(s.substr(100), std::out_of_range);
+
+  String empty{""};
+  EXPECT_EQ(empty.substr(0), "");
+  EXPECT_THROW(empty.substr(1), std::out_of_range);
+}
+
+TEST(String, StartsWith) {
+  String s{"hello world"};
+  EXPECT_TRUE(s.starts_with("hello"));
+  EXPECT_TRUE(s.starts_with("h"));
+  EXPECT_TRUE(s.starts_with(""));
+  EXPECT_TRUE(s.starts_with(String{"hello"}));
+  EXPECT_TRUE(s.starts_with(std::string_view{"hello"}));
+  EXPECT_FALSE(s.starts_with("world"));
+  EXPECT_FALSE(s.starts_with("Hello"));
+  EXPECT_FALSE(s.starts_with("hello world extra"));
+  EXPECT_FALSE(s.starts_with(std::string_view{"world"}));
+
+  String empty{""};
+  EXPECT_TRUE(empty.starts_with(""));
+  EXPECT_TRUE(empty.starts_with(std::string_view{""}));
+  EXPECT_FALSE(empty.starts_with("x"));
+
+  String single{"x"};
+  EXPECT_TRUE(single.starts_with("x"));
+  EXPECT_TRUE(single.starts_with(""));
+  EXPECT_FALSE(single.starts_with("xy"));
+}
+
+TEST(String, EndsWith) {
+  String s{"hello world"};
+  EXPECT_TRUE(s.ends_with("world"));
+  EXPECT_TRUE(s.ends_with("d"));
+  EXPECT_TRUE(s.ends_with(""));
+  EXPECT_TRUE(s.ends_with(String{"world"}));
+  EXPECT_TRUE(s.ends_with(std::string_view{"world"}));
+  EXPECT_FALSE(s.ends_with("hello"));
+  EXPECT_FALSE(s.ends_with("World"));
+  EXPECT_FALSE(s.ends_with("extra hello world"));
+  EXPECT_FALSE(s.ends_with(std::string_view{"hello"}));
+
+  String empty{""};
+  EXPECT_TRUE(empty.ends_with(""));
+  EXPECT_TRUE(empty.ends_with(std::string_view{""}));
+  EXPECT_FALSE(empty.ends_with("x"));
+
+  String single{"x"};
+  EXPECT_TRUE(single.ends_with("x"));
+  EXPECT_TRUE(single.ends_with(""));
+  EXPECT_FALSE(single.ends_with("yx"));
+}
+
 }  // namespace

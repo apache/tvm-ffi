@@ -611,6 +611,120 @@ class String {
     }
   }
 
+  /*! \brief Value returned by find() when no match is found */
+  static constexpr size_t npos = static_cast<size_t>(-1);
+
+  /*!
+   * \brief Find the first occurrence of a substring
+   * \param str The substring to search for
+   * \param pos The position at which to start the search
+   * \return The position of the first character of the first match, or npos if not found
+   */
+  size_t find(const String& str, size_t pos = 0) const { return find(str.data(), pos, str.size()); }
+
+  /*!
+   * \brief Find the first occurrence of a substring
+   * \param str The substring to search for
+   * \param pos The position at which to start the search
+   * \return The position of the first character of the first match, or npos if not found
+   */
+  size_t find(const char* str, size_t pos = 0) const { return find(str, pos, std::strlen(str)); }
+
+  /*!
+   * \brief Find the first occurrence of a substring
+   * \param str The substring to search for
+   * \param pos The position at which to start the search
+   * \param count The length of the substring
+   * \return The position of the first character of the first match, or npos if not found
+   */
+  size_t find(const char* str, size_t pos, size_t count) const {
+    return std::string_view(data(), size()).find(std::string_view(str, count), pos);
+  }
+
+  /*!
+   * \brief Returns a substring [pos, pos+count)
+   * \param pos The position of the first character to include
+   * \param count The length of the substring (default: until end of string)
+   * \return A string containing the substring
+   */
+  String substr(size_t pos = 0, size_t count = npos) const {
+    if (pos > size()) {
+      throw std::out_of_range("tvm::String substr index out of bounds");
+    }
+    size_t rcount = std::min(count, size() - pos);
+    return String(data() + pos, rcount);
+  }
+
+  /*!
+   * \brief Check if the string starts with a prefix
+   * \param prefix The prefix to check for
+   * \return true if the string starts with prefix, false otherwise
+   */
+  bool starts_with(const String& prefix) const { return starts_with(prefix.data(), prefix.size()); }
+
+  /*!
+   * \brief Check if the string starts with a prefix
+   * \param prefix The prefix to check for
+   * \return true if the string starts with prefix, false otherwise
+   */
+  bool starts_with(std::string_view prefix) const {
+    return starts_with(prefix.data(), prefix.size());
+  }
+
+  /*!
+   * \brief Check if the string starts with a prefix
+   * \param prefix The prefix to check for
+   * \return true if the string starts with prefix, false otherwise
+   */
+  bool starts_with(const char* prefix) const { return starts_with(prefix, std::strlen(prefix)); }
+
+  /*!
+   * \brief Check if the string starts with a prefix
+   * \param prefix The prefix to check for
+   * \param count The length of the prefix
+   * \return true if the string starts with prefix, false otherwise
+   */
+  bool starts_with(const char* prefix, size_t count) const {
+    if (count > size()) {
+      return false;
+    }
+    return std::memcmp(data(), prefix, count) == 0;
+  }
+
+  /*!
+   * \brief Check if the string ends with a suffix
+   * \param suffix The suffix to check for
+   * \return true if the string ends with suffix, false otherwise
+   */
+  bool ends_with(const String& suffix) const { return ends_with(suffix.data(), suffix.size()); }
+
+  /*!
+   * \brief Check if the string ends with a suffix
+   * \param suffix The suffix to check for
+   * \return true if the string ends with suffix, false otherwise
+   */
+  bool ends_with(std::string_view suffix) const { return ends_with(suffix.data(), suffix.size()); }
+
+  /*!
+   * \brief Check if the string ends with a suffix
+   * \param suffix The suffix to check for
+   * \return true if the string ends with suffix, false otherwise
+   */
+  bool ends_with(const char* suffix) const { return ends_with(suffix, std::strlen(suffix)); }
+
+  /*!
+   * \brief Check if the string ends with a suffix
+   * \param suffix The suffix to check for
+   * \param count The length of the suffix
+   * \return true if the string ends with suffix, false otherwise
+   */
+  bool ends_with(const char* suffix, size_t count) const {
+    if (count > size()) {
+      return false;
+    }
+    return std::memcmp(data() + size() - count, suffix, count) == 0;
+  }
+
   /*!
    * \brief Convert String to an std::string object
    *

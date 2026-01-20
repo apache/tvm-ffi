@@ -16,13 +16,14 @@
 # under the License.
 """Module related objects and functions."""
 
-# tvm-ffi-stubgen(begin): import
+# tvm-ffi-stubgen(begin): import-section
 # fmt: off
 # isort: off
 from __future__ import annotations
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Sequence
+    from typing import Any
 # isort: on
 # fmt: on
 # tvm-ffi-stubgen(end)
@@ -92,12 +93,15 @@ class Module(core.Object):
             # ... do something with the tensor
             tensor = mod.func_create_and_return_tensor(x)
 
+
         def good_pattern(x):
             # Good: `tensor` is freed before `mod` goes out of scope
             mod = tvm_ffi.load_module("path/to/library.so")
+
             def run_some_tests():
                 tensor = mod.func_create_and_return_tensor(x)
                 # ... do something with the tensor
+
             run_some_tests()
 
     """
@@ -419,7 +423,9 @@ def system_lib(symbol_prefix: str = "") -> Module:
 
         import tvm_ffi
 
-        mod: tvm_ffi.Module = tvm_ffi.system_lib("testing.")  # symbols prefixed with `__tvm_ffi_testing.`
+        mod: tvm_ffi.Module = tvm_ffi.system_lib(
+            "testing."
+        )  # symbols prefixed with `__tvm_ffi_testing.`
         func: tvm_ffi.Function = mod["add_one"]  # looks up `__tvm_ffi_testing.add_one`
         assert func(10) == 11
 
@@ -427,13 +433,17 @@ def system_lib(symbol_prefix: str = "") -> Module:
     return _ffi_api.SystemLib(symbol_prefix)
 
 
-def load_module(path: str | PathLike) -> Module:
+def load_module(path: str | PathLike, keep_module_alive: bool = True) -> Module:
     """Load module from file.
 
     Parameters
     ----------
     path
         The path to the module file.
+
+    keep_module_alive
+        Whether to keep the module alive. If True, the module will be kept alive
+        for the duration of the program until libtvm_ffi.so is unloaded.
 
     Returns
     -------
@@ -459,4 +469,7 @@ def load_module(path: str | PathLike) -> Module:
 
     """
     path = fspath(path)
-    return _ffi_api.ModuleLoadFromFile(path)
+    mod = _ffi_api.ModuleLoadFromFile(path)
+    if keep_module_alive:
+        _ffi_api.ModuleGlobalsAdd(mod)
+    return mod

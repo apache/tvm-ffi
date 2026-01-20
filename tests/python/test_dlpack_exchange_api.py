@@ -27,15 +27,15 @@ try:
     import torch  # type: ignore[no-redef]
 
     # Import tvm_ffi to load the DLPack exchange API extension
-    # This sets torch.Tensor.__c_dlpack_exchange_api__
+    # This sets torch.Tensor.__dlpack_c_exchange_api__
     import tvm_ffi
     from torch.utils import cpp_extension  # type: ignore
     from tvm_ffi import libinfo
 except ImportError:
-    torch = None
+    torch = None  # type: ignore[assignment]
 
 # Check if DLPack Exchange API is available
-_has_dlpack_api = torch is not None and hasattr(torch.Tensor, "__c_dlpack_exchange_api__")
+_has_dlpack_api = torch is not None and hasattr(torch.Tensor, "__dlpack_c_exchange_api__")
 
 
 @pytest.mark.skipif(not _has_dlpack_api, reason="PyTorch DLPack Exchange API not available")
@@ -45,24 +45,16 @@ def test_dlpack_exchange_api() -> None:
         pytest.xfail("DLPack Exchange API test is known to fail on Windows platform")
 
     assert torch is not None
-
-    assert hasattr(torch.Tensor, "__c_dlpack_exchange_api__")
-    api_attr = torch.Tensor.__c_dlpack_exchange_api__
-
-    # Handle both PyCapsule and integer types
-    if isinstance(api_attr, int):
-        # Direct integer pointer
-        api_ptr = api_attr
-        assert api_ptr != 0, "API pointer should not be NULL"
-    else:
-        # PyCapsule - extract the pointer as integer
-        pythonapi = ctypes.pythonapi
-        # Set restype to c_size_t to get integer directly (avoids c_void_p quirks)
-        pythonapi.PyCapsule_GetPointer.restype = ctypes.c_size_t
-        pythonapi.PyCapsule_GetPointer.argtypes = [ctypes.py_object, ctypes.c_char_p]
-        capsule_name = b"dlpack_exchange_api"
-        api_ptr = pythonapi.PyCapsule_GetPointer(api_attr, capsule_name)
-        assert api_ptr != 0, "API pointer from PyCapsule should not be NULL"
+    assert hasattr(torch.Tensor, "__dlpack_c_exchange_api__")
+    api_attr = torch.Tensor.__dlpack_c_exchange_api__  # type: ignore[attr-defined]
+    # PyCapsule - extract the pointer as integer
+    pythonapi = ctypes.pythonapi
+    # Set restype to c_size_t to get integer directly (avoids c_void_p quirks)
+    pythonapi.PyCapsule_GetPointer.restype = ctypes.c_size_t
+    pythonapi.PyCapsule_GetPointer.argtypes = [ctypes.py_object, ctypes.c_char_p]
+    capsule_name = b"dlpack_exchange_api"
+    api_ptr = pythonapi.PyCapsule_GetPointer(api_attr, capsule_name)
+    assert api_ptr != 0, "API pointer from PyCapsule should not be NULL"
 
     tensor = torch.arange(24, dtype=torch.float32).reshape(2, 3, 4)
 

@@ -58,14 +58,13 @@ def type_info_to_cls(
     def _add_method(name: str, func: Callable[..., Any]) -> None:
         if name == "__ffi_init__":
             name = "__c_ffi_init__"
-        if name in attrs:  # already defined
-            return
+        # Allow overriding methods (including from base classes like Object.__repr__)
+        # by always adding to attrs, which will be used when creating the new class
         func.__module__ = cls.__module__
         func.__name__ = name
         func.__qualname__ = f"{cls.__qualname__}.{name}"
         func.__doc__ = f"Method `{name}` of class `{cls.__qualname__}`"
         attrs[name] = func
-        setattr(cls, name, func)
 
     for name, method_impl in methods.items():
         if method_impl is not None:
@@ -80,7 +79,13 @@ def type_info_to_cls(
     return cast(Type[_InputClsType], new_cls)
 
 
-def fill_dataclass_field(type_cls: type, type_field: TypeField) -> None:
+def fill_dataclass_field(
+    type_cls: type,
+    type_field: TypeField,
+    *,
+    class_kw_only: bool = False,
+    kw_only_from_sentinel: bool = False,
+) -> None:
     from .field import Field, field  # noqa: PLC0415
 
     field_name = type_field.name
@@ -95,55 +100,118 @@ def fill_dataclass_field(type_cls: type, type_field: TypeField) -> None:
         raise ValueError(f"Cannot recognize field: {type_field.name}: {rhs}")
     assert isinstance(rhs, Field)
     rhs.name = type_field.name
+
+    # Resolve kw_only: field-level > KW_ONLY sentinel > class-level
+    if rhs.kw_only is MISSING:
+        if kw_only_from_sentinel:
+            rhs.kw_only = True
+        else:
+            rhs.kw_only = class_kw_only
+
     type_field.dataclass_field = rhs
 
 
-def method_init(type_cls: type, type_info: TypeInfo) -> Callable[..., None]:
-    """Generate an ``__init__`` that forwards to the FFI constructor.
-
-    The generated initializer has a proper Python signature built from the
-    reflected field list, supporting default values and ``__post_init__``.
-    """
-    # Step 0. Collect all fields from the type hierarchy
+def _get_all_fields(type_info: TypeInfo) -> list[TypeField]:
+    """Collect all fields from the type hierarchy, from parents to children."""
     fields: list[TypeField] = []
     cur_type_info: TypeInfo | None = type_info
     while cur_type_info is not None:
         fields.extend(reversed(cur_type_info.fields))
         cur_type_info = cur_type_info.parent_type_info
     fields.reverse()
-    # sanity check
-    for type_method in type_info.methods:
-        if type_method.name == "__ffi_init__":
-            break
+    return fields
+
+
+def method_repr(type_cls: type, type_info: TypeInfo) -> Callable[..., str]:
+    """Generate a ``__repr__`` method for the dataclass.
+
+    The generated representation includes all fields with ``repr=True`` in
+    the format ``ClassName(field1=value1, field2=value2, ...)``.
+    """
+    # Step 0. Collect all fields from the type hierarchy
+    fields = _get_all_fields(type_info)
+
+    # Step 1. Filter fields that should appear in repr
+    repr_fields: list[str] = []
+    for field in fields:
+        assert field.name is not None
+        assert field.dataclass_field is not None
+        if field.dataclass_field.repr:
+            repr_fields.append(field.name)
+
+    # Step 2. Generate the repr method
+    if not repr_fields:
+        # No fields to show, return a simple class name representation
+        body_lines = [f"return f'{type_cls.__name__}()'"]
     else:
+        # Build field representations
+        fields_str = ", ".join(
+            f"{field_name}={{self.{field_name}!r}}" for field_name in repr_fields
+        )
+        body_lines = [f"return f'{type_cls.__name__}({fields_str})'"]
+
+    source_lines = ["def __repr__(self) -> str:"]
+    source_lines.extend(f"    {line}" for line in body_lines)
+    source = "\n".join(source_lines)
+
+    # Note: Code generation in this case is guaranteed to be safe,
+    # because the generated code does not contain any untrusted input.
+    namespace: dict[str, Any] = {}
+    exec(source, {}, namespace)
+    __repr__ = namespace["__repr__"]
+    return __repr__
+
+
+def method_init(_type_cls: type, type_info: TypeInfo) -> Callable[..., None]:
+    """Generate an ``__init__`` that forwards to the FFI constructor.
+
+    The generated initializer has a proper Python signature built from the
+    reflected field list, supporting default values, keyword-only args, and ``__post_init__``.
+    """
+    # Step 0. Collect all fields from the type hierarchy
+    fields = _get_all_fields(type_info)
+    # sanity check
+    if not any(m.name == "__ffi_init__" for m in type_info.methods):
         raise ValueError(f"Cannot find constructor method: `{type_info.type_key}.__ffi_init__`")
     # Step 1. Split args into sections and register default factories
-    args_no_defaults: list[str] = []
-    args_with_defaults: list[str] = []
+    pos_no_defaults: list[str] = []
+    pos_with_defaults: list[str] = []
+    kw_no_defaults: list[str] = []
+    kw_with_defaults: list[str] = []
     fields_with_defaults: list[tuple[str, bool]] = []
     ffi_arg_order: list[str] = []
-    exec_globals = {"MISSING": MISSING}
+    exec_globals: dict[str, Any] = {"MISSING": MISSING}
+
     for field in fields:
         assert field.name is not None
         assert field.dataclass_field is not None
         dataclass_field = field.dataclass_field
-        has_default_factory = (default_factory := dataclass_field.default_factory) is not MISSING
+        has_default = (default_factory := dataclass_field.default_factory) is not MISSING
+        is_kw_only = dataclass_field.kw_only is True
+
         if dataclass_field.init:
             ffi_arg_order.append(field.name)
-            if has_default_factory:
-                args_with_defaults.append(field.name)
+            if has_default:
+                (kw_with_defaults if is_kw_only else pos_with_defaults).append(field.name)
                 fields_with_defaults.append((field.name, True))
                 exec_globals[f"_default_factory_{field.name}"] = default_factory
             else:
-                args_no_defaults.append(field.name)
-        elif has_default_factory:
+                (kw_no_defaults if is_kw_only else pos_no_defaults).append(field.name)
+        elif has_default:
             ffi_arg_order.append(field.name)
             fields_with_defaults.append((field.name, False))
             exec_globals[f"_default_factory_{field.name}"] = default_factory
 
+    # Step 2. Build signature
     args: list[str] = ["self"]
-    args.extend(args_no_defaults)
-    args.extend(f"{name}=MISSING" for name in args_with_defaults)
+    args.extend(pos_no_defaults)
+    args.extend(f"{name}=MISSING" for name in pos_with_defaults)
+    if kw_no_defaults or kw_with_defaults:
+        args.append("*")
+        args.extend(kw_no_defaults)
+        args.extend(f"{name}=MISSING" for name in kw_with_defaults)
+
+    # Step 3. Build body
     body_lines: list[str] = []
     for field_name, is_init in fields_with_defaults:
         if is_init:
@@ -163,6 +231,7 @@ def method_init(type_cls: type, type_info: TypeInfo) -> Callable[..., None]:
             "    fn_post_init()",
         ]
     )
+
     source_lines = [f"def __init__({', '.join(args)}):"]
     source_lines.extend(f"    {line}" for line in body_lines)
     source_lines.append("    ...")

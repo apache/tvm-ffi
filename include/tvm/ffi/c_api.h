@@ -62,7 +62,7 @@
 /*! \brief TVM FFI minor version. */
 #define TVM_FFI_VERSION_MINOR 1
 /*! \brief TVM FFI patch version. */
-#define TVM_FFI_VERSION_PATCH 5
+#define TVM_FFI_VERSION_PATCH 9
 // NOLINTEND(modernize-macro-to-enum)
 
 #ifdef __cplusplus
@@ -81,6 +81,7 @@ typedef struct {
   uint32_t patch;
 } TVMFFIVersion;
 
+// [TVMFFITypeIndex.begin]
 #ifdef __cplusplus
 enum TVMFFITypeIndex : int32_t {
 #else
@@ -184,6 +185,7 @@ typedef enum {
 #else
 } TVMFFITypeIndex;
 #endif
+// [TVMFFITypeIndex.end]
 
 /*! \brief Handle to Object from C API's pov */
 typedef void* TVMFFIObjectHandle;
@@ -218,6 +220,7 @@ typedef enum {
 } TVMFFIObjectDeleterFlagBitMask;
 #endif
 
+// [TVMFFIObject.begin]
 /*!
  * \brief C-based type of all FFI object header that allocates on heap.
  */
@@ -268,7 +271,9 @@ typedef struct {
   };
 #endif
 } TVMFFIObject;
+// [TVMFFIObject.end]
 
+// [TVMFFIAny.begin]
 /*!
  * \brief C-based type of all on stack Any value.
  *
@@ -321,7 +326,9 @@ typedef struct {
   };
 #endif
 } TVMFFIAny;
+// [TVMFFIAny.end]
 
+// [TVMFFIByteArray.begin]
 /*!
  * \brief Byte array data structure used by String and Bytes.
  *
@@ -349,6 +356,7 @@ typedef struct {
   /*! \brief The size of the data. */
   size_t size;
 } TVMFFIShapeCell;
+// [TVMFFIByteArray.end]
 
 /*!
  * \brief Mode to update the backtrace of the error.
@@ -366,6 +374,7 @@ typedef enum {
 } TVMFFIBacktraceUpdateMode;
 #endif
 
+// [TVMFFIErrorCell.begin]
 /*!
  * \brief Error cell used in error object following header.
  */
@@ -394,8 +403,20 @@ typedef struct {
    */
   void (*update_backtrace)(TVMFFIObjectHandle self, const TVMFFIByteArray* backtrace,
                            int32_t update_mode);
+  /*!
+   * \brief Optional cause error chain that caused this error to be raised.
+   * \note This handle is owned by the ErrorCell.
+   */
+  TVMFFIObjectHandle cause_chain;
+  /*!
+   * \brief Optional extra context that can be used to record additional info about the error.
+   * \note This handle is owned by the ErrorCell.
+   */
+  TVMFFIObjectHandle extra_context;
 } TVMFFIErrorCell;
+// [TVMFFIErrorCell.end]
 
+// [TVMFFISafeCallType.begin]
 /*!
  * \brief Type that defines C-style safe call convention
  *
@@ -431,7 +452,9 @@ typedef struct {
  */
 typedef int (*TVMFFISafeCallType)(void* handle, const TVMFFIAny* args, int32_t num_args,
                                   TVMFFIAny* result);
+// [TVMFFISafeCallType.end]
 
+// [TVMFFIFunctionCell.begin]
 /*!
  * \brief Object cell for function object following header.
  */
@@ -452,6 +475,7 @@ typedef struct {
    */
   void* cpp_call;
 } TVMFFIFunctionCell;
+// [TVMFFIFunctionCell.end]
 
 /*!
  * \brief Object cell for opaque object following header.
@@ -631,6 +655,20 @@ TVM_FFI_DLL void TVMFFIErrorSetRaisedFromCStrParts(const char* kind, const char*
 TVM_FFI_DLL int TVMFFIErrorCreate(const TVMFFIByteArray* kind, const TVMFFIByteArray* message,
                                   const TVMFFIByteArray* backtrace, TVMFFIObjectHandle* out);
 
+/*!
+ * \brief Create an initial error object with cause chain and extra context.
+ * \param kind The kind of the error.
+ * \param message The error message.
+ * \param backtrace The backtrace of the error.
+ * \param cause_chain The cause error chain that caused this error to be raised.
+ * \param extra_context The extra context that can be used to record additional information.
+ * \param out The output error object handle.
+ * \return 0 on success, nonzero on failure.
+ */
+TVM_FFI_DLL int TVMFFIErrorCreateWithCauseAndExtraContext(
+    const TVMFFIByteArray* kind, const TVMFFIByteArray* message, const TVMFFIByteArray* backtrace,
+    TVMFFIObjectHandle cause_chain, TVMFFIObjectHandle extra_context, TVMFFIObjectHandle* out);
+
 //------------------------------------------------------------
 // Section: DLPack support APIs
 //------------------------------------------------------------
@@ -674,6 +712,20 @@ TVM_FFI_DLL int TVMFFITensorFromDLPackVersioned(DLManagedTensorVersioned* from,
  */
 TVM_FFI_DLL int TVMFFITensorToDLPackVersioned(TVMFFIObjectHandle from,
                                               DLManagedTensorVersioned** out);
+
+/*!
+ * \brief Create a Tensor view from source using metadata in the prototype while retaining the
+ * source tensor.
+ * \param source The source tensor whose data memory will be shared by the view.
+ * \param prototype The prototype DLTensor that contains the metadata for the view.
+ * \param out The output Tensor handle.
+ * \return 0 on success, nonzero on failure.
+ * \note This function is unsafe and the caller must ensure the prototype is valid and that
+ *       the prototype's data pointer points to memory owned by the source tensor. The callee
+ *       allocates shape and strides arrays in the output tensor and copies them from the prototype.
+ */
+TVM_FFI_DLL int TVMFFITensorCreateUnsafeView(TVMFFIObjectHandle source, const DLTensor* prototype,
+                                             TVMFFIObjectHandle* out);
 //---------------------------------------------------------------
 // Section: string/bytes support APIs.
 // These APIs are used to simplify the string/bytes construction
@@ -788,7 +840,7 @@ typedef enum {
  *
  * The meta-data record comparison method in tree node and DAG node.
  *
- * \code
+ * \code{.cpp}
  * x = VarNode()
  * v0 = AddNode(x, 1)
  * v1 = AddNode(x, 1)
@@ -1127,6 +1179,44 @@ TVM_FFI_DLL int32_t TVMFFITypeGetOrAllocIndex(const TVMFFIByteArray* type_key,
  */
 TVM_FFI_DLL const TVMFFITypeInfo* TVMFFIGetTypeInfo(int32_t type_index);
 
+// ----------------------------------------------------------------------------
+// Static handle initialization and deinitialization API
+// ----------------------------------------------------------------------------
+/*!
+ * \brief Initialize a handle once in a thread-safe manner.
+ *
+ * This function checks if *handle_addr is nullptr,
+ * and if so, calls the initialization function
+ * and stores the result in *handle_addr.
+ *
+ * This function is thread-safe and is meant to be used by DSLs that,
+ * unlike C++, may not have static initialization support.
+ *
+ * \param handle_addr The address of the handle to be initialized.
+ * \param init_func The initialization function to be called once to create the result handle.
+ * \return 0 on success, nonzero on failure.
+ *
+ * \note If init_func encounters an error, it should call TVMFFIErrorSetRaisedFromCStr
+ *       to set the error and return nonzero, which will then be propagated to the
+ *       caller of TVMFFIHandleInitOnce.
+ */
+TVM_FFI_DLL int TVMFFIHandleInitOnce(void** handle_addr, int (*init_func)(void** result));
+
+/*!
+ * \brief Deinitialize a handle once in a thread-safe manner.
+ *
+ * This function checks if *handle_addr is not nullptr, and if so,
+ * calls the deinitialization function
+ * and sets *handle_addr to nullptr.
+ *
+ * This function is thread-safe and is meant to be used by DSLs that,
+ * unlike C++, may not have static deinitialization support.
+ *
+ * \param handle_addr The address of the handle to be deinitialized.
+ * \param deinit_func The deinitialization function to be called if *handle_addr is not nullptr.
+ * \return 0 on success, nonzero on failure.
+ */
+TVM_FFI_DLL int TVMFFIHandleDeinitOnce(void** handle_addr, int (*deinit_func)(void* handle));
 #ifdef __cplusplus
 }  // TVM_FFI_EXTERN_C
 #endif

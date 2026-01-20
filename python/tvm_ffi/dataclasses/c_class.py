@@ -34,14 +34,14 @@ from typing_extensions import dataclass_transform
 
 from ..core import TypeField, TypeInfo, _lookup_or_register_type_info_from_type_key, _set_type_cls
 from . import _utils
-from .field import field
+from .field import KW_ONLY, field
 
 _InputClsType = TypeVar("_InputClsType")
 
 
-@dataclass_transform(field_specifiers=(field,))
+@dataclass_transform(field_specifiers=(field,), kw_only_default=False)
 def c_class(
-    type_key: str, init: bool = True
+    type_key: str, init: bool = True, kw_only: bool = False, repr: bool = True
 ) -> Callable[[Type[_InputClsType]], Type[_InputClsType]]:  # noqa: UP006
     """(Experimental) Create a dataclass-like proxy for a C++ class registered with TVM FFI.
 
@@ -55,7 +55,7 @@ def c_class(
     The intent is to offer a familiar dataclass authoring experience while still
     exposing the underlying C++ object.  The ``type_key`` of the C++ class must
     match the string passed to :func:`c_class`, and inheritance relationships are
-    preserved—subclasses registered in C++ can subclass the Python proxy defined
+    preserved-subclasses registered in C++ can subclass the Python proxy defined
     for their parent.
 
     Parameters
@@ -71,6 +71,16 @@ def c_class(
         signature.  The generated initializer calls the C++ ``__init__``
         function registered with ``ObjectDef`` and invokes ``__post_init__`` if
         it exists on the Python class.
+
+    kw_only
+        If ``True``, all fields become keyword-only parameters in the generated
+        ``__init__``. Individual fields can override this by setting
+        ``kw_only=False`` in :func:`field`. Additionally, a ``KW_ONLY`` sentinel
+        annotation can be used to mark all subsequent fields as keyword-only.
+    repr
+        If ``True`` and the Python class does not define ``__repr__``, a
+        representation method is auto-generated that includes all fields with
+        ``repr=True``.
 
     Returns
     -------
@@ -103,6 +113,7 @@ def c_class(
 
         from tvm_ffi.dataclasses import c_class, field
 
+
         @c_class("example.MyClass")
         class MyClass:
             v_i64: int
@@ -110,27 +121,36 @@ def c_class(
             v_f64: float = field(default=0.0)
             v_f32: float = field(default_factory=lambda: 1.0)
 
+
         obj = MyClass(v_i64=4, v_i32=8)
         obj.v_f64 = 3.14  # transparently forwards to the underlying C++ object
 
     """
 
     def decorator(super_type_cls: Type[_InputClsType]) -> Type[_InputClsType]:  # noqa: UP006
-        nonlocal init
+        nonlocal init, repr
         init = init and "__init__" not in super_type_cls.__dict__
+        repr = repr and "__repr__" not in super_type_cls.__dict__
         # Step 1. Retrieve `type_info` from registry
         type_info: TypeInfo = _lookup_or_register_type_info_from_type_key(type_key)
         assert type_info.parent_type_info is not None
         # Step 2. Reflect all the fields of the type
-        type_info.fields = _inspect_c_class_fields(super_type_cls, type_info)
-        for type_field in type_info.fields:
-            _utils.fill_dataclass_field(super_type_cls, type_field)
+        type_info.fields, kw_only_start_idx = _inspect_c_class_fields(super_type_cls, type_info)
+        for idx, type_field in enumerate(type_info.fields):
+            kw_only_from_sentinel = kw_only_start_idx is not None and idx >= kw_only_start_idx
+            _utils.fill_dataclass_field(
+                super_type_cls,
+                type_field,
+                class_kw_only=kw_only,
+                kw_only_from_sentinel=kw_only_from_sentinel,
+            )
         # Step 3. Create the proxy class with the fields as properties
         fn_init = _utils.method_init(super_type_cls, type_info) if init else None
+        fn_repr = _utils.method_repr(super_type_cls, type_info) if repr else None
         type_cls: Type[_InputClsType] = _utils.type_info_to_cls(  # noqa: UP006
             type_info=type_info,
             cls=super_type_cls,
-            methods={"__init__": fn_init},
+            methods={"__init__": fn_init, "__repr__": fn_repr},
         )
         _set_type_cls(type_info, type_cls)
         return type_cls
@@ -138,7 +158,9 @@ def c_class(
     return decorator
 
 
-def _inspect_c_class_fields(type_cls: type, type_info: TypeInfo) -> list[TypeField]:
+def _inspect_c_class_fields(
+    type_cls: type, type_info: TypeInfo
+) -> tuple[list[TypeField], int | None]:
     if sys.version_info >= (3, 9):
         type_hints_resolved = get_type_hints(type_cls, include_extras=True)
     else:
@@ -151,7 +173,24 @@ def _inspect_c_class_fields(type_cls: type, type_info: TypeInfo) -> list[TypeFie
             ClassVar,
             InitVar,
         ]
+        and type_hints_resolved[name] is not KW_ONLY
     }
+
+    # Detect KW_ONLY sentinel position
+    kw_only_start_idx: int | None = None
+    field_count = 0
+    for name in getattr(type_cls, "__annotations__", {}).keys():
+        resolved_type = type_hints_resolved.get(name)
+        if resolved_type is None:
+            continue
+        if get_origin(resolved_type) in [ClassVar, InitVar]:
+            continue
+        if resolved_type is KW_ONLY:
+            if kw_only_start_idx is not None:
+                raise ValueError(f"KW_ONLY may only be used once per class: {type_cls}")
+            kw_only_start_idx = field_count
+            continue
+        field_count += 1
     del type_hints_resolved
 
     type_fields_cxx: dict[str, TypeField] = {f.name: f for f in type_info.fields}
@@ -170,4 +209,4 @@ def _inspect_c_class_fields(type_cls: type, type_info: TypeInfo) -> list[TypeFie
         raise ValueError(
             f"Missing fields in `{type_cls}`: {extra_fields}. Defined in C++ but not in Python"
         )
-    return type_fields
+    return type_fields, kw_only_start_idx

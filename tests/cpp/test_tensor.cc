@@ -32,6 +32,11 @@ inline Tensor Empty(const Shape& shape, DLDataType dtype, DLDevice device) {
   return Tensor::FromNDAlloc(CPUNDAlloc(), shape, dtype, device);
 }
 
+inline Tensor EmptyStrided(const Shape& shape, const Shape& strides, DLDataType dtype,
+                           DLDevice device) {
+  return Tensor::FromNDAllocStrided(CPUNDAlloc(), shape, strides, dtype, device);
+}
+
 int TestEnvTensorAllocator(DLTensor* prototype, TVMFFIObjectHandle* out) {
   Shape shape(prototype->shape, prototype->shape + prototype->ndim);
   Tensor nd = Empty(shape, prototype->dtype, prototype->device);
@@ -74,6 +79,16 @@ TEST(Tensor, Basic) {
 
   EXPECT_EQ(nd.IsContiguous(), true);
   EXPECT_EQ(nd2.use_count(), 3);
+
+  Tensor nd3 = EmptyStrided({2, 3}, {1, 2}, DLDataType({kDLFloat, 32, 1}), DLDevice({kDLCPU, 0}));
+  Shape shape3 = nd3.shape();
+  Shape strides3 = nd3.strides();
+  EXPECT_EQ(shape3.size(), 2);
+  EXPECT_EQ(shape3[0], 2);
+  EXPECT_EQ(shape3[1], 3);
+  EXPECT_EQ(strides3.size(), 2);
+  EXPECT_EQ(strides3[0], 1);
+  EXPECT_EQ(strides3[1], 2);
 }
 
 TEST(Tensor, DLPack) {
@@ -190,6 +205,178 @@ TEST(Tensor, TensorView) {
   EXPECT_EQ(tensor_view2.dtype().code, kDLFloat);
   EXPECT_EQ(tensor_view2.dtype().bits, 32);
   EXPECT_EQ(tensor_view2.dtype().lanes, 1);
+}
+
+TEST(Tensor, TensorViewAsStrided) {
+  // Create a base tensor with shape [2, 3] = 6 elements
+  Tensor tensor = Empty({2, 3}, DLDataType({kDLFloat, 32, 1}), DLDevice({kDLCPU, 0}));
+
+  // Fill with sequential values: [0, 1, 2, 3, 4, 5]
+  float* data = reinterpret_cast<float*>(tensor.data_ptr());
+  size_t element_capacity = GetDataSize(tensor) / sizeof(float);
+  ASSERT_EQ(element_capacity, static_cast<size_t>(tensor.numel()));
+  for (size_t i = 0; i < element_capacity; ++i) {
+    data[i] = static_cast<float>(i);
+  }
+
+  TensorView tensor_view = tensor;
+  void* original_data_ptr = tensor_view.data_ptr();
+  EXPECT_EQ(tensor_view.byte_offset(), 0);
+
+  // Create a strided view with shape [3, 2] and custom strides
+  // Use local variables to ensure they stay in scope for the TensorView
+  Shape new_shape = {3, 2};
+  Shape new_strides = {1, 3};
+  TensorView strided_view = tensor_view.as_strided(new_shape, new_strides);
+
+  // Verify the view has correct shape and strides
+  EXPECT_EQ(strided_view.shape().size(), 2);
+  EXPECT_EQ(strided_view.shape()[0], 3);
+  EXPECT_EQ(strided_view.shape()[1], 2);
+  EXPECT_EQ(strided_view.strides().size(), 2);
+  EXPECT_EQ(strided_view.strides()[0], 1);
+  EXPECT_EQ(strided_view.strides()[1], 3);
+
+  // Verify the view shares the same underlying data pointer (no offset)
+  EXPECT_EQ(strided_view.data_ptr(), original_data_ptr);
+  EXPECT_EQ(strided_view.byte_offset(), 0);
+  EXPECT_EQ(strided_view.dtype(), tensor_view.dtype());
+
+  // Test with element_offset - for float32, 1 element = 4 bytes
+  Shape offset_shape = {2, 2};
+  Shape offset_strides = {3, 1};
+  int64_t element_offset = 1;
+  TensorView offset_view = tensor_view.as_strided(offset_shape, offset_strides, element_offset);
+
+  EXPECT_EQ(offset_view.shape().size(), 2);
+  EXPECT_EQ(offset_view.shape()[0], 2);
+  EXPECT_EQ(offset_view.shape()[1], 2);
+  EXPECT_EQ(offset_view.strides().size(), 2);
+  EXPECT_EQ(offset_view.strides()[0], 3);
+  EXPECT_EQ(offset_view.strides()[1], 1);
+
+  // For CPU (direct address device), byte_offset should be added to data pointer
+  // and byte_offset field should be 0
+  // element_offset=1 for float32 = 4 bytes
+  size_t expected_byte_offset =
+      GetDataSize(static_cast<size_t>(element_offset), DLDataType({kDLFloat, 32, 1}));
+  EXPECT_EQ(expected_byte_offset, 4);  // 1 element * 32 bits / 8 = 4 bytes
+
+  // The data pointer should be advanced by 4 bytes (1 float element)
+  void* expected_offset_ptr = reinterpret_cast<char*>(original_data_ptr) + expected_byte_offset;
+  EXPECT_EQ(offset_view.data_ptr(), expected_offset_ptr);
+  EXPECT_EQ(offset_view.byte_offset(), 0);  // Should be 0 for direct address devices
+
+  // Verify data access through the offset view
+  float* offset_data = reinterpret_cast<float*>(offset_view.data_ptr());
+  EXPECT_EQ(offset_data[0 * 3 + 0 * 1], 1.0f);  // Points to data[1]
+  EXPECT_EQ(offset_data[1 * 3 + 0 * 1], 4.0f);  // Points to data[4]
+
+  // Test with larger element_offset
+  int64_t element_offset2 = 2;
+  Shape offset_shape2 = {1, 2};
+  Shape offset_strides2 = {3, 1};
+  TensorView offset_view2 = tensor_view.as_strided(offset_shape2, offset_strides2, element_offset2);
+  size_t expected_byte_offset2 =
+      GetDataSize(static_cast<size_t>(element_offset2), DLDataType({kDLFloat, 32, 1}));
+  EXPECT_EQ(expected_byte_offset2, 8);  // 2 elements * 32 bits / 8 = 8 bytes
+  void* expected_offset_ptr2 = reinterpret_cast<char*>(original_data_ptr) + expected_byte_offset2;
+  EXPECT_EQ(offset_view2.data_ptr(), expected_offset_ptr2);
+  EXPECT_EQ(offset_view2.byte_offset(), 0);
+
+  float* offset_data2 = reinterpret_cast<float*>(offset_view2.data_ptr());
+  EXPECT_EQ(offset_data2[0 * 3 + 0 * 1], 2.0f);  // Points to data[2]
+}
+
+TEST(Tensor, AsStrided) {
+  // Create a base tensor with shape [2, 3] = 6 elements
+  Tensor tensor = Empty({2, 3}, DLDataType({kDLFloat, 32, 1}), DLDevice({kDLCPU, 0}));
+
+  // Fill with sequential values: [0, 1, 2, 3, 4, 5]
+  float* data = reinterpret_cast<float*>(tensor.data_ptr());
+  size_t element_capacity = GetDataSize(tensor) / sizeof(float);
+  ASSERT_EQ(element_capacity, static_cast<size_t>(tensor.numel()));
+  for (size_t i = 0; i < element_capacity; ++i) {
+    data[i] = static_cast<float>(i);
+  }
+
+  void* original_data_ptr = tensor.data_ptr();
+  EXPECT_EQ(tensor.byte_offset(), 0);
+
+  // Create a strided view with shape [3, 2] and custom strides
+  Shape new_shape = {3, 2};
+  Shape new_strides = {1, 3};
+  Tensor strided_view = tensor.as_strided(new_shape, new_strides);
+
+  // Verify the view has correct shape and strides
+  EXPECT_EQ(strided_view.shape().size(), 2);
+  EXPECT_EQ(strided_view.shape()[0], 3);
+  EXPECT_EQ(strided_view.shape()[1], 2);
+  EXPECT_EQ(strided_view.strides().size(), 2);
+  EXPECT_EQ(strided_view.strides()[0], 1);
+  EXPECT_EQ(strided_view.strides()[1], 3);
+
+  // Verify the view shares the same underlying data pointer (no offset)
+  EXPECT_EQ(strided_view.data_ptr(), original_data_ptr);
+  EXPECT_EQ(strided_view.byte_offset(), 0);
+  EXPECT_EQ(strided_view.dtype(), tensor.dtype());
+
+  // Test with element_offset - for float32, 1 element = 4 bytes
+  Shape offset_shape = {2, 2};
+  Shape offset_strides = {3, 1};
+  int64_t element_offset = 1;
+  Tensor offset_view = tensor.as_strided(offset_shape, offset_strides, element_offset);
+
+  EXPECT_EQ(offset_view.shape().size(), 2);
+  EXPECT_EQ(offset_view.shape()[0], 2);
+  EXPECT_EQ(offset_view.shape()[1], 2);
+  EXPECT_EQ(offset_view.strides().size(), 2);
+  EXPECT_EQ(offset_view.strides()[0], 3);
+  EXPECT_EQ(offset_view.strides()[1], 1);
+
+  // For CPU (direct address device), byte_offset should be added to data pointer
+  // and byte_offset field should be 0
+  // element_offset=1 for float32 = 4 bytes
+  size_t expected_byte_offset =
+      GetDataSize(static_cast<size_t>(element_offset), DLDataType({kDLFloat, 32, 1}));
+  EXPECT_EQ(expected_byte_offset, 4);  // 1 element * 32 bits / 8 = 4 bytes
+
+  // The data pointer should be advanced by 4 bytes (1 float element)
+  void* expected_offset_ptr = reinterpret_cast<char*>(original_data_ptr) + expected_byte_offset;
+  EXPECT_EQ(offset_view.data_ptr(), expected_offset_ptr);
+  EXPECT_EQ(offset_view.byte_offset(), 0);  // Should be 0 for direct address devices
+
+  // Verify data access through the offset view
+  float* offset_data = reinterpret_cast<float*>(offset_view.data_ptr());
+  EXPECT_EQ(offset_data[0 * 3 + 0 * 1], 1.0f);  // Points to data[1]
+  EXPECT_EQ(offset_data[1 * 3 + 0 * 1], 4.0f);  // Points to data[4]
+
+  // Test with larger element_offset
+  int64_t element_offset2 = 2;
+  Tensor offset_view2 = tensor.as_strided({1, 2}, {3, 1}, element_offset2);
+  size_t expected_byte_offset2 =
+      GetDataSize(static_cast<size_t>(element_offset2), DLDataType({kDLFloat, 32, 1}));
+  EXPECT_EQ(expected_byte_offset2, 8);  // 2 elements * 32 bits / 8 = 8 bytes
+  void* expected_offset_ptr2 = reinterpret_cast<char*>(original_data_ptr) + expected_byte_offset2;
+  EXPECT_EQ(offset_view2.data_ptr(), expected_offset_ptr2);
+  EXPECT_EQ(offset_view2.byte_offset(), 0);
+
+  float* offset_data2 = reinterpret_cast<float*>(offset_view2.data_ptr());
+  EXPECT_EQ(offset_data2[0 * 3 + 0 * 1], 2.0f);  // Points to data[2]
+}
+
+TEST(Tensor, SizeStrideOutOfBounds) {
+  Tensor tensor = Empty({2, 3, 4}, DLDataType({kDLFloat, 32, 1}), DLDevice({kDLCPU, 0}));
+  EXPECT_THROW({ tensor.size(3); }, tvm::ffi::Error);
+  EXPECT_THROW({ tensor.size(-4); }, tvm::ffi::Error);
+  EXPECT_THROW({ tensor.stride(3); }, tvm::ffi::Error);
+  EXPECT_THROW({ tensor.stride(-4); }, tvm::ffi::Error);
+
+  TensorView tensor_view = tensor;
+  EXPECT_THROW({ tensor_view.size(3); }, tvm::ffi::Error);
+  EXPECT_THROW({ tensor_view.size(-4); }, tvm::ffi::Error);
+  EXPECT_THROW({ tensor_view.stride(3); }, tvm::ffi::Error);
+  EXPECT_THROW({ tensor_view.stride(-4); }, tvm::ffi::Error);
 }
 
 }  // namespace

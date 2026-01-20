@@ -80,13 +80,18 @@ void AddOne(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
 
   // Get CUDA stream
   DLDevice device = x.device();
-  cudaStream_t stream =
-      static_cast<cudaStream_t>(TVMFFIEnvGetStream(device.device_type, device.device_id));
+  tvm::ffi::cuda_api::StreamHandle stream = static_cast<tvm::ffi::cuda_api::StreamHandle>(
+      TVMFFIEnvGetStream(device.device_type, device.device_id));
 
   // Launch kernel
-  cudaError_t result = g_add_one_kernel->Launch(args, grid, block, stream);
-  TVM_FFI_CHECK_CUDA_ERROR(result);
+  tvm::ffi::cuda_api::ResultType result = g_add_one_kernel->Launch(args, grid, block, stream);
+  TVM_FFI_CHECK_CUBIN_LAUNCHER_CUDA_ERROR(result);
 }
+
+}  // namespace cubin_dynamic
+// [example.end]
+
+namespace cubin_dynamic {
 
 /*!
  * \brief Launch mul_two_cuda kernel on input tensor.
@@ -115,18 +120,17 @@ void MulTwo(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
 
   // Get CUDA stream
   DLDevice device = x.device();
-  cudaStream_t stream =
-      static_cast<cudaStream_t>(TVMFFIEnvGetStream(device.device_type, device.device_id));
+  tvm::ffi::cuda_api::StreamHandle stream = static_cast<tvm::ffi::cuda_api::StreamHandle>(
+      TVMFFIEnvGetStream(device.device_type, device.device_id));
 
   // Launch kernel
-  cudaError_t result = g_mul_two_kernel->Launch(args, grid, block, stream);
-  TVM_FFI_CHECK_CUDA_ERROR(result);
+  tvm::ffi::cuda_api::ResultType result = g_mul_two_kernel->Launch(args, grid, block, stream);
+  TVM_FFI_CHECK_CUBIN_LAUNCHER_CUDA_ERROR(result);
 }
 
 // Export TVM-FFI functions
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(set_cubin, cubin_dynamic::SetCubin);
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(add_one, cubin_dynamic::AddOne);
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(mul_two, cubin_dynamic::MulTwo);
+TVM_FFI_DLL_EXPORT_TYPED_FUNC(set_cubin, cubin_dynamic::SetCubin)
+TVM_FFI_DLL_EXPORT_TYPED_FUNC(add_one, cubin_dynamic::AddOne)
+TVM_FFI_DLL_EXPORT_TYPED_FUNC(mul_two, cubin_dynamic::MulTwo)
 
 }  // namespace cubin_dynamic
-// [example.end]

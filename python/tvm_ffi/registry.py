@@ -112,10 +112,13 @@ def register_global_func(
 
         import tvm_ffi
 
+
         # we can use decorator to register a function
         @tvm_ffi.register_global_func("mytest.echo")
         def echo(x):
             return x
+
+
         # After registering, we can get the function by its name
         f = tvm_ffi.get_global_func("mytest.echo")
         assert f(1) == 1
@@ -177,9 +180,11 @@ def get_global_func(name: str, allow_missing: bool = False) -> core.Function | N
 
         import tvm_ffi
 
+
         @tvm_ffi.register_global_func("demo.echo")
         def echo(x):
             return x
+
 
         f = tvm_ffi.get_global_func("demo.echo")
         assert f(123) == 123
@@ -220,9 +225,11 @@ def remove_global_func(name: str) -> None:
 
         import tvm_ffi
 
+
         @tvm_ffi.register_global_func("my.temp")
         def temp():
             return 42
+
 
         assert tvm_ffi.get_global_func("my.temp", allow_missing=True) is not None
         tvm_ffi.remove_global_func("my.temp")

@@ -33,6 +33,8 @@ jobs:
     outputs:
       should_skip_ci_commit: ${{ steps.detect.outputs.should_skip_ci_commit }}
       should_skip_ci_docs_only: ${{ steps.detect.outputs.should_skip_ci_docs_only }}
+      cpp_changed: ${{ steps.cpp_files.outputs.changed }}
+      cpp_files: ${{ steps.cpp_files.outputs.files }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -45,6 +47,13 @@ jobs:
           github_event_name: ${{ github.event_name }}
           pr_base_ref: ${{ github.event.pull_request.base.ref || '' }}
           pr_head_sha: ${{ github.event.pull_request.head.sha || '' }}
+      - name: Get changed C++ files
+        id: cpp_files
+        run: |
+          FILES=$(git diff --name-only --diff-filter=ACMR origin/${{ github.base_ref }}...HEAD -- \
+            src/ tests/ | grep -E '\.(c|cc|cpp|cxx)$' | tr '\n' ' ')
+          echo "files=$FILES" >> $GITHUB_OUTPUT
+          [ -n "$FILES" ] && echo "changed=true" >> $GITHUB_OUTPUT || echo "changed=false" >> $GITHUB_OUTPUT
 
   lint:
     needs: [prepare]
@@ -55,6 +64,30 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
       - uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd  # v3.0.1
+
+  clang-tidy:
+    needs: [prepare]
+    if: needs.prepare.outputs.cpp_changed == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Set up uv
+        uses: astral-sh/setup-uv@b75a909f75acd358c2196fb9a5f1299a9a8868a4  # v6.7.0
+        with:
+          python-version: 3.13
+      - uses: ./.github/actions/detect-env-vars
+        id: env_vars
+      - name: Run clang-tidy
+        run: |
+          uv run --no-project --with "clang-tidy==21.1.1"     \
+            python tests/lint/clang_tidy_precommit.py         \
+              --build-dir=build-pre-commit                    \
+              --jobs=${{ steps.env_vars.outputs.cpu_count }}  \
+              ${{ needs.prepare.outputs.cpp_files }}
 
   doc:
     needs: [lint, prepare]

@@ -18,7 +18,9 @@
 from __future__ import annotations
 
 from types import ModuleType
+from typing import Any, NamedTuple, NoReturn
 
+import numpy.typing as npt
 import pytest
 
 torch: ModuleType | None
@@ -32,7 +34,7 @@ import tvm_ffi
 
 
 def test_tensor_attributes() -> None:
-    data = np.zeros((10, 8, 4, 2), dtype="int16")
+    data: npt.NDArray[Any] = np.zeros((10, 8, 4, 2), dtype="int16")
     if not hasattr(data, "__dlpack__"):
         return
     x = tvm_ffi.from_dlpack(data)
@@ -76,6 +78,20 @@ def test_tensor_auto_dlpack() -> None:
     np.testing.assert_equal(y.numpy(), x.numpy())
 
 
+@pytest.mark.skipif(torch is None, reason="Fast torch dlpack importer is not enabled")
+def test_tensor_auto_dlpack_with_error() -> None:
+    assert torch is not None
+    x = torch.arange(128)
+
+    def raise_torch_error(x: Any) -> NoReturn:
+        raise ValueError("error XYZ")
+
+    f = tvm_ffi.convert(raise_torch_error)
+    with pytest.raises(ValueError):
+        # pass in torch argment to trigger the error in set allocator path
+        f(x)
+
+
 def test_tensor_class_override() -> None:
     class MyTensor(tvm_ffi.Tensor):
         pass
@@ -83,7 +99,7 @@ def test_tensor_class_override() -> None:
     old_tensor = tvm_ffi.core._CLASS_TENSOR
     tvm_ffi.core._set_class_tensor(MyTensor)
 
-    data = np.zeros((10, 8, 4, 2), dtype="int16")
+    data: npt.NDArray[Any] = np.zeros((10, 8, 4, 2), dtype="int16")
     if not hasattr(data, "__dlpack__"):
         return
     x = tvm_ffi.from_dlpack(data)
@@ -104,7 +120,7 @@ def test_tvm_ffi_tensor_compatible() -> None:
             """Implement __tvm_ffi_object__ protocol."""
             return self._tensor
 
-    data = np.zeros((10, 8, 4, 2), dtype="int32")
+    data: npt.NDArray[Any] = np.zeros((10, 8, 4, 2), dtype="int32")
     if not hasattr(data, "__dlpack__"):
         return
     x = tvm_ffi.from_dlpack(data)
@@ -112,6 +128,28 @@ def test_tvm_ffi_tensor_compatible() -> None:
     fecho = tvm_ffi.get_global_func("testing.echo")
     z = fecho(y)
     assert z.__chandle__() == x.__chandle__()
+
+    class MyNamedTuple(NamedTuple):
+        a: MyTensor
+        b: int
+
+    args = MyNamedTuple(a=y, b=1)
+    z = fecho(args)
+    assert z[0].__chandle__() == x.__chandle__()
+    assert z[1] == 1
+
+    class MyCustom:
+        def __init__(self, a: MyTensor, b: int) -> None:
+            self.a = a
+            self.b = b
+
+        def __tvm_ffi_value__(self) -> Any:
+            """Implement __tvm_ffi_value__ protocol."""
+            return (self.a, self.b)
+
+    z = fecho(MyCustom(a=y, b=2))
+    assert z[0].__chandle__() == x.__chandle__()
+    assert z[1] == 2
 
 
 @pytest.mark.skipif(
@@ -136,7 +174,7 @@ def test_optional_tensor_view() -> None:
         "testing.optional_tensor_view_has_value"
     )
     assert not optional_tensor_view_has_value(None)
-    x = np.zeros((128,), dtype="float32")
+    x: npt.NDArray[Any] = np.zeros((128,), dtype="float32")
     if not hasattr(x, "__dlpack__"):
         return
     assert optional_tensor_view_has_value(x)

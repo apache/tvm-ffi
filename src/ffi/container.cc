@@ -55,6 +55,11 @@ class MapForwardIterFunctor {
   ffi::MapObj::iterator end_;
 };
 
+ObjectRef GetMissingObject() {
+  static ObjectRef missing_obj(make_object<Object>());
+  return missing_obj;
+}
+
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef()
@@ -65,6 +70,12 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("ffi.ArrayGetItem", [](const ffi::ArrayObj* n, int64_t i) -> Any { return n->at(i); })
       .def("ffi.ArraySize",
            [](const ffi::ArrayObj* n) -> int64_t { return static_cast<int64_t>(n->size()); })
+      .def("ffi.ArrayContains",
+           [](const ffi::ArrayObj* n, const Any& value) -> bool {
+             AnyEqual eq;
+             return std::any_of(n->begin(), n->end(),
+                                [&](const Any& elem) { return eq(elem, value); });
+           })
       .def_packed("ffi.Map",
                   [](ffi::PackedArgs args, Any* ret) {
                     TVM_FFI_ICHECK_EQ(args.size() % 2, 0);
@@ -81,8 +92,17 @@ TVM_FFI_STATIC_INIT_BLOCK() {
            [](const ffi::MapObj* n, const Any& k) -> int64_t {
              return static_cast<int64_t>(n->count(k));
            })
-      .def("ffi.MapForwardIterFunctor", [](const ffi::MapObj* n) -> ffi::Function {
-        return ffi::Function::FromTyped(MapForwardIterFunctor(n->begin(), n->end()));
+      .def("ffi.MapForwardIterFunctor",
+           [](const ffi::MapObj* n) -> ffi::Function {
+             return ffi::Function::FromTyped(MapForwardIterFunctor(n->begin(), n->end()));
+           })
+      .def("ffi.MapGetMissingObject", GetMissingObject)
+      .def("ffi.MapGetItemOrMissing", [](const ffi::MapObj* n, const Any& k) -> Any {
+        try {
+          return n->at(k);
+        } catch (const tvm::ffi::Error& e) {
+          return GetMissingObject();
+        }
       });
 }
 }  // namespace ffi

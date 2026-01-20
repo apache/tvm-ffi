@@ -22,20 +22,104 @@ import dataclasses
 from io import StringIO
 from typing import Callable
 
-from tvm_ffi.core import TypeSchema
+from tvm_ffi.core import TypeInfo, TypeSchema
 
 from . import consts as C
+
+
+@dataclasses.dataclass
+class InitConfig:
+    """Configuration for generating new stubs.
+
+    Examples
+    --------
+    If we are generating type stubs for Python package `my-ffi-extension`,
+    and the CMake target that generates the shared library is `my_ffi_extension_shared`,
+    then we can run the following command to generate the stubs:
+
+    --init-pypkg my-ffi-extension --init-lib my_ffi_extension_shared --init-prefix my_ffi_extension.
+
+    """
+
+    pkg: str
+    """Name of the Python package to generate stubs for, e.g. apache-tvm-ffi (instead of tvm_ffi)"""
+
+    shared_target: str
+    """Name of CMake target that generates the shared library, e.g. tvm_ffi_shared
+
+    This is used to determine the name of the shared library file.
+    - macOS: lib{shared_target}.dylib or lib{shared_target}.so
+    - Linux: lib{shared_target}.so
+    - Windows: {shared_target}.dll
+    """
+
+    prefix: str
+    """Only generate stubs for global function and objects with the given prefix, e.g. `tvm_ffi.`"""
 
 
 @dataclasses.dataclass
 class Options:
     """Command line options for stub generation."""
 
+    imports: list[str] = dataclasses.field(default_factory=list)
     dlls: list[str] = dataclasses.field(default_factory=list)
+    init: InitConfig | None = None
     indent: int = 4
     files: list[str] = dataclasses.field(default_factory=list)
     verbose: bool = False
     dry_run: bool = False
+
+
+@dataclasses.dataclass(frozen=True, eq=True)
+class ImportItem:
+    """An import statement item."""
+
+    mod: str
+    name: str
+    type_checking_only: bool = False
+    alias: str | None = None
+
+    def __init__(
+        self,
+        name: str,
+        type_checking_only: bool = False,
+        alias: str | None = None,
+    ) -> None:
+        """Initialize an `ImportItem` with the given module name and optional alias."""
+        if "." in name:
+            mod, name = name.rsplit(".", 1)
+            for mod_prefix, mod_replacement in C.MOD_MAP.items():
+                if mod.startswith(mod_prefix):
+                    mod = mod.replace(mod_prefix, mod_replacement, 1)
+                    break
+        else:
+            mod = ""
+        object.__setattr__(self, "mod", mod)
+        object.__setattr__(self, "name", name)
+        object.__setattr__(self, "type_checking_only", type_checking_only)
+        object.__setattr__(self, "alias", alias)
+
+    @property
+    def name_with_alias(self) -> str:
+        """Generate a string of the form `name as alias` if an alias is set, otherwise just `name`."""
+        return f"{self.name} as {self.alias}" if self.alias else self.name
+
+    @property
+    def full_name(self) -> str:
+        """Generate a string of the form `mod.name` or `name` if no module is set."""
+        return f"{self.mod}.{self.name}" if self.mod else self.name
+
+    def __repr__(self) -> str:
+        """Generate an import statement string for this item."""
+        return str(self)
+
+    def __str__(self) -> str:
+        """Generate an import statement string for this item."""
+        if self.mod:
+            ret = f"from {self.mod} import {self.name_with_alias}"
+        else:
+            ret = f"import {self.name_with_alias}"
+        return ret
 
 
 @dataclasses.dataclass(init=False)
@@ -58,17 +142,9 @@ class FuncInfo:
     is_member: bool
 
     @staticmethod
-    def from_global_name(name: str) -> FuncInfo:
-        """Construct a `FuncInfo` from a string name of this global function."""
-        from tvm_ffi.registry import get_global_func_metadata  # noqa: PLC0415
-
-        return FuncInfo(
-            schema=NamedTypeSchema(
-                name=name,
-                schema=TypeSchema.from_json_str(get_global_func_metadata(name)["type_schema"]),
-            ),
-            is_member=False,
-        )
+    def from_schema(name: str, schema: TypeSchema, *, is_member: bool = False) -> FuncInfo:
+        """Construct a `FuncInfo` from a name and its type schema."""
+        return FuncInfo(schema=NamedTypeSchema(name=name, schema=schema), is_member=is_member)
 
     def gen(self, ty_map: Callable[[str], str], indent: int) -> str:
         """Generate a function signature string for this function."""
@@ -108,13 +184,15 @@ class ObjectInfo:
 
     fields: list[NamedTypeSchema]
     methods: list[FuncInfo]
+    type_key: str | None = None
+    parent_type_key: str | None = None
 
     @staticmethod
-    def from_type_key(type_key: str) -> ObjectInfo:
-        """Construct an `ObjectInfo` from a type key."""
-        from tvm_ffi.core import _lookup_or_register_type_info_from_type_key  # noqa: PLC0415
-
-        type_info = _lookup_or_register_type_info_from_type_key(type_key)
+    def from_type_info(type_info: TypeInfo) -> ObjectInfo:
+        """Construct an `ObjectInfo` from a `TypeInfo` instance."""
+        parent_type_key: str | None = None
+        if type_info.parent_type_info is not None:
+            parent_type_key = type_info.parent_type_info.type_key
         return ObjectInfo(
             fields=[
                 NamedTypeSchema(
@@ -133,6 +211,8 @@ class ObjectInfo:
                 )
                 for method in type_info.methods
             ],
+            type_key=type_info.type_key,
+            parent_type_key=parent_type_key,
         )
 
     def gen_fields(self, ty_map: Callable[[str], str], indent: int) -> list[str]:

@@ -26,3 +26,6 @@ python load/load_pytorch.py
 
 # To load and run `add_one_cuda.so` in CuPy
 python load/load_cupy.py
+
+# To load and run `add_one_cuda.so` in PaddlePaddle
+python load/load_paddle.py
