@@ -20,6 +20,14 @@ project(embedded_cubin_example LANGUAGES CXX CUDA)
 
 set(CMAKE_CXX_STANDARD 26)
 
+# Check for `#embed` after setting C++ standard, otherwise compilers (e.g. GCC) won't define the
+# macro.
+include(CheckCXXSymbolExists)
+check_cxx_symbol_exists(__cpp_pp_embed "" HAVE_EMBED)
+if (NOT HAVE_EMBED)
+  message(FATAL_ERROR "Compiler does not support `#embed`")
+endif ()
+
 set(CMAKE_TVM_FFI_CUBIN_LAUNCHER_USE_DRIVER_API
     OFF
     CACHE BOOL "Use driver API in cubin launcher"
