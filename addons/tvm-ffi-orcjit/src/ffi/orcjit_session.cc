@@ -25,19 +25,14 @@
 #include "orcjit_session.h"
 
 #include <llvm/ExecutionEngine/Orc/LLJIT.h>
-#include <llvm/ExecutionEngine/Orc/RTDyldObjectLinkingLayer.h>
-#include <llvm/IR/GlobalVariable.h>
-#include <llvm/IR/IRBuilder.h>
-#include <llvm/IR/Module.h>
 #include <llvm/Support/Error.h>
 #include <llvm/Support/TargetSelect.h>
 #include <tvm/ffi/cast.h>
 #include <tvm/ffi/error.h>
 #include <tvm/ffi/reflection/registry.h>
 
-#include <sstream>
-
 #include "orcjit_dylib.h"
+#include "orcjit_utils.h"
 #include "tvm/ffi/object.h"
 
 namespace tvm {
@@ -55,27 +50,21 @@ struct LLVMInitializer {
 
 static LLVMInitializer llvm_initializer;
 
-ORCJITExecutionSessionObj::ORCJITExecutionSessionObj() : jit_(nullptr), dylib_counter_(0) {}
-
-void ORCJITExecutionSessionObj::Initialize() {
-  // Create LLJIT instance
-  auto jit_or_err = llvm::orc::LLJITBuilder()
-                        .setPlatformSetUp(llvm::orc::ExecutorNativePlatform(
-                            "/usr/lib/llvm-20/lib/clang/20/lib/linux/liborc_rt-x86_64.a"))
-                        .create();
-  if (!jit_or_err) {
-    auto err = jit_or_err.takeError();
-    std::string err_msg;
-    llvm::handleAllErrors(std::move(err),
-                          [&](const llvm::ErrorInfoBase& eib) { err_msg = eib.message(); });
-    TVM_FFI_THROW(InternalError) << "Failed to create LLJIT: " << err_msg;
+ORCJITExecutionSessionObj::ORCJITExecutionSessionObj(const std::string& orc_rt_path)
+    : jit_(nullptr) {
+  if (!orc_rt_path.empty()) {
+    jit_ = std::move(call_llvm(llvm::orc::LLJITBuilder()
+                                   .setPlatformSetUp(llvm::orc::ExecutorNativePlatform(orc_rt_path))
+                                   .create(),
+                               "Failed to create LLJIT with ORC runtime"));
+  } else {
+    jit_ = std::move(call_llvm(llvm::orc::LLJITBuilder().create(), "Failed to create LLJIT"));
+    auto jit_or_err = llvm::orc::LLJITBuilder().create();
   }
-  jit_ = std::move(*jit_or_err);
 }
 
-ORCJITExecutionSession::ORCJITExecutionSession() {
-  ObjectPtr<ORCJITExecutionSessionObj> obj = make_object<ORCJITExecutionSessionObj>();
-  obj->Initialize();
+ORCJITExecutionSession::ORCJITExecutionSession(const std::string& orc_rt_path) {
+  ObjectPtr<ORCJITExecutionSessionObj> obj = make_object<ORCJITExecutionSessionObj>(orc_rt_path);
   data_ = std::move(obj);
 }
 
@@ -94,50 +83,20 @@ ORCJITDynamicLibrary ORCJITExecutionSessionObj::CreateDynamicLibrary(const Strin
   TVM_FFI_CHECK(dylibs_.find(lib_name) == dylibs_.end(), ValueError)
       << "DynamicLibrary with name '" << lib_name << "' already exists";
 
-  // Create a new JITDylib
-  // auto& jd = jit_->getExecutionSession().createBareJITDylib(lib_name.c_str());
-  auto& jd = jit_->getMainJITDylib();
-
-  // Add process symbol resolver to make C/C++ stdlib available
-  auto dlsg = llvm::orc::DynamicLibrarySearchGenerator::GetForCurrentProcess(
-      jit_->getDataLayout().getGlobalPrefix());
-  if (!dlsg) {
-    TVM_FFI_THROW(InternalError) << "Failed to create process symbol resolver";
+  llvm::orc::JITDylib& jit_dylib =
+      call_llvm(jit_->getExecutionSession().createJITDylib(lib_name.c_str()));
+  jit_dylib.addToLinkOrder(jit_->getMainJITDylib());
+  if (auto* PlatformJD = jit_->getPlatformJITDylib().get()) {
+    jit_dylib.addToLinkOrder(*PlatformJD);
   }
-  jd.addGenerator(std::move(*dlsg));
+  std::unique_ptr<llvm::orc::DynamicLibrarySearchGenerator> generator =
+      call_llvm(llvm::orc::DynamicLibrarySearchGenerator::GetForCurrentProcess(
+                    jit_->getDataLayout().getGlobalPrefix()),
+                "Failed to create process symbol resolver");
+  jit_dylib.addGenerator(std::move(generator));
 
-  // Add __dso_handle by compiling a minimal LLVM IR module containing it.
-  // This ensures __dso_handle is allocated in JIT memory (within 2GB of code),
-  // avoiding "relocation out of range" errors with optimized code.
-  //
-  // We create an IR module with a global variable for __dso_handle, then compile
-  // it through the normal IR compilation path. JITLink will allocate it properly.
-  auto Ctx = std::make_unique<llvm::LLVMContext>();
-  auto M = std::make_unique<llvm::Module>("__dso_handle_module", *Ctx);
-  M->setDataLayout(jit_->getDataLayout());
-  M->setTargetTriple(jit_->getTargetTriple().str());
-
-  // Create a global variable: i8 __dso_handle = 0
-  auto* Int8Ty = llvm::Type::getInt8Ty(*Ctx);
-  auto* DsoHandle = new llvm::GlobalVariable(
-      *M, Int8Ty,
-      false,                              // not constant
-      llvm::GlobalValue::WeakAnyLinkage,  // Use weak linkage so multiple dylibs can define it
-      llvm::ConstantInt::get(Int8Ty, 0), "__dso_handle");
-  DsoHandle->setVisibility(llvm::GlobalValue::DefaultVisibility);
-
-  // Add the module to THIS specific JITDylib using the IR layer
-  auto& CompileLayer = jit_->getIRCompileLayer();
-  if (auto Err = CompileLayer.add(jd, llvm::orc::ThreadSafeModule(std::move(M), std::move(Ctx)))) {
-    std::string err_msg;
-    llvm::handleAllErrors(std::move(Err),
-                          [&](const llvm::ErrorInfoBase& eib) { err_msg = eib.message(); });
-    TVM_FFI_THROW(InternalError) << "Failed to add __dso_handle module: " << err_msg;
-  }
-
-  // Create the wrapper object
   auto dylib = ORCJITDynamicLibrary(make_object<ORCJITDynamicLibraryObj>(
-      GetObjectPtr<ORCJITExecutionSessionObj>(this), &jd, jit_.get(), lib_name));
+      GetObjectPtr<ORCJITExecutionSessionObj>(this), &jit_dylib, jit_.get(), lib_name));
 
   // Store for lifetime management
   dylibs_.insert({lib_name, dylib});

@@ -22,6 +22,11 @@ project(tvm_ffi_orcjit_tests)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# On ARM64, disable outline atomics to avoid needing compiler-rt symbols at JIT time
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
+  add_compile_options(-mno-outline-atomics)
+endif()
+
 # Run `python -m tvm_ffi.config --cmakedir` to find tvm-ffi package
 find_package(
   Python
@@ -37,7 +42,7 @@ find_package(tvm_ffi CONFIG REQUIRED)
 
 # Create object library for test functions
 add_library(test_funcs_obj OBJECT sources/test_funcs.cc)
-target_link_libraries(test_funcs_obj PRIVATE tvm_ffi_header)
+target_link_libraries(test_funcs_obj PRIVATE tvm_ffi::header)
 target_compile_options(test_funcs_obj PRIVATE -fPIC -O2)
 install(
   FILES $<TARGET_OBJECTS:test_funcs_obj>
@@ -47,7 +52,7 @@ install(
 
 # Create object library for second set of test functions
 add_library(test_funcs2_obj OBJECT sources/test_funcs2.cc)
-target_link_libraries(test_funcs2_obj PRIVATE tvm_ffi_header)
+target_link_libraries(test_funcs2_obj PRIVATE tvm_ffi::header)
 target_compile_options(test_funcs2_obj PRIVATE -fPIC -O2)
 install(
   FILES $<TARGET_OBJECTS:test_funcs2_obj>
@@ -57,7 +62,7 @@ install(
 
 # Create object library for conflicting test functions
 add_library(test_funcs_conflict_obj OBJECT sources/test_funcs_conflict.cc)
-target_link_libraries(test_funcs_conflict_obj PRIVATE tvm_ffi_header)
+target_link_libraries(test_funcs_conflict_obj PRIVATE tvm_ffi::header)
 target_compile_options(test_funcs_conflict_obj PRIVATE -fPIC -O2)
 install(
   FILES $<TARGET_OBJECTS:test_funcs_conflict_obj>
@@ -71,7 +76,7 @@ if (CUDAToolkit_FOUND)
   enable_language(CUDA)
   message(STATUS "CUDA found: ${CUDAToolkit_VERSION}")
   add_library(test_funcs_cuda_obj OBJECT sources/test_funcs_cuda.cu)
-  target_link_libraries(test_funcs_cuda_obj PRIVATE tvm_ffi_header)
+  target_link_libraries(test_funcs_cuda_obj PRIVATE tvm_ffi::header)
   target_compile_options(test_funcs_cuda_obj PRIVATE -fPIC -O2)
   install(
     FILES $<TARGET_OBJECTS:test_funcs_cuda_obj>

@@ -50,12 +50,7 @@ class ORCJITExecutionSessionObj : public Object {
   /*!
    * \brief Default constructor (for make_object)
    */
-  ORCJITExecutionSessionObj();
-
-  /*!
-   * \brief Initialize the LLJIT instance
-   */
-  void Initialize();
+  explicit ORCJITExecutionSessionObj(const std::string& orc_rt_path = "");
 
   /*!
    * \brief Create a new DynamicLibrary (JITDylib) in this session
@@ -101,8 +96,7 @@ class ORCJITExecutionSession : public ObjectRef {
    * \brief Create a new ExecutionSession
    * \return The created execution session instance
    */
-  ORCJITExecutionSession();
-
+  explicit ORCJITExecutionSession(const std::string& orc_rt_path = "");
   // Required: define object reference methods
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(ORCJITExecutionSession, ObjectRef,
                                                 ORCJITExecutionSessionObj);

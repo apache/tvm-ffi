@@ -56,7 +56,7 @@ target_include_directories(
   tvm_ffi_orcjit PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${LLVM_INCLUDE_DIRS}
 )
 
-target_link_libraries(tvm_ffi_orcjit PRIVATE tvm_ffi_header tvm_ffi_shared LLVM)
+target_link_libraries(tvm_ffi_orcjit PRIVATE tvm_ffi::header tvm_ffi::shared LLVM)
 
 # Compile definitions
 separate_arguments(LLVM_DEFINITIONS_LIST NATIVE_COMMAND ${LLVM_DEFINITIONS})

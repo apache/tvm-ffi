@@ -42,7 +42,7 @@ class ExecutionSession(Object):
 
     def __init__(self) -> None:
         """Initialize ExecutionSession from a handle."""
-        self.__init_handle_by_constructor__(_ffi_api.ExecutionSession)  # type: ignore
+        self.__init_handle_by_constructor__(_ffi_api.ExecutionSession, "/usr/lib/llvm-18/lib/clang/18/lib/linux/liborc_rt-aarch64.a")  # type: ignore
 
     def create_library(self, name: str = "") -> DynamicLibrary:
         """Create a new dynamic library associated with this execution session.

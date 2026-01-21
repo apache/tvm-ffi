@@ -38,6 +38,7 @@
 #include <tvm/ffi/reflection/registry.h>
 
 #include "orcjit_session.h"
+#include "orcjit_utils.h"
 #include "tvm/ffi/function.h"
 
 namespace tvm {
@@ -68,13 +69,7 @@ void ORCJITDynamicLibraryObj::AddObjectFile(const String& path) {
   }
 
   // Add object file to this JITDylib
-  auto err = jit_->addObjectFile(*dylib_, std::move(*buffer_or_err));
-  if (err) {
-    std::string err_msg;
-    llvm::handleAllErrors(std::move(err),
-                          [&](const llvm::ErrorInfoBase& eib) { err_msg = eib.message(); });
-    TVM_FFI_THROW(ValueError) << "Failed to add object file '" << path << "': " << err_msg;
-  }
+  call_llvm(jit_->addObjectFile(*dylib_, std::move(*buffer_or_err)), "Failed to add object file");
 }
 
 void ORCJITDynamicLibraryObj::SetLinkOrder(const std::vector<llvm::orc::JITDylib*>& dylibs) {
@@ -129,7 +124,6 @@ Optional<Function> ORCJITDynamicLibraryObj::GetFunction(const String& name) {
 
   // Try to get the symbol - return NullOpt if not found
   if (void* symbol = GetSymbol(symbol_name)) {
-    cantFail(jit_->initialize(*dylib_));
     // Wrap C function pointer as tvm-ffi Function
     TVMFFISafeCallType c_func = reinterpret_cast<TVMFFISafeCallType>(symbol);
 
@@ -156,7 +150,8 @@ static void RegisterOrcJITFunctions() {
   refl::ObjectDef<ORCJITExecutionSessionObj>();
 
   refl::GlobalDef()
-      .def("orcjit.ExecutionSession", []() { return ORCJITExecutionSession(); })
+      .def("orcjit.ExecutionSession",
+           [](const std::string& orc_rt_path) { return ORCJITExecutionSession(orc_rt_path); })
       .def("orcjit.ExecutionSessionCreateDynamicLibrary",
            [](const ORCJITExecutionSession& session, const String& name) -> Module {
              return session->CreateDynamicLibrary(name);

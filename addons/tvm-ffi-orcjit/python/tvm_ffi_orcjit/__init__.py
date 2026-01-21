@@ -46,6 +46,8 @@ else:
 
 # Load the orcjit extension library
 _LIB_PATH = [
+    Path(__file__).parent / "lib" / f"libtvm_ffi_orcjit.{_LIB_EXT}",
+    Path(__file__).parent / "build" / f"libtvm_ffi_orcjit.{_LIB_EXT}",
     Path(__file__).parent.parent.parent / "lib" / f"libtvm_ffi_orcjit.{_LIB_EXT}",
     Path(__file__).parent.parent.parent / "build" / f"libtvm_ffi_orcjit.{_LIB_EXT}",
 ]
