@@ -29,11 +29,11 @@
 #include <llvm/Support/TargetSelect.h>
 #include <tvm/ffi/cast.h>
 #include <tvm/ffi/error.h>
+#include <tvm/ffi/object.h>
 #include <tvm/ffi/reflection/registry.h>
 
 #include "orcjit_dylib.h"
 #include "orcjit_utils.h"
-#include "tvm/ffi/object.h"
 
 namespace tvm {
 namespace ffi {
@@ -79,10 +79,6 @@ ORCJITDynamicLibrary ORCJITExecutionSessionObj::CreateDynamicLibrary(const Strin
     lib_name = oss.str();
   }
 
-  // Check if library with this name already exists
-  TVM_FFI_CHECK(dylibs_.find(lib_name) == dylibs_.end(), ValueError)
-      << "DynamicLibrary with name '" << lib_name << "' already exists";
-
   llvm::orc::JITDylib& jit_dylib =
       call_llvm(jit_->getExecutionSession().createJITDylib(lib_name.c_str()));
   jit_dylib.addToLinkOrder(jit_->getMainJITDylib());
@@ -96,10 +92,7 @@ ORCJITDynamicLibrary ORCJITExecutionSessionObj::CreateDynamicLibrary(const Strin
   jit_dylib.addGenerator(std::move(generator));
 
   auto dylib = ORCJITDynamicLibrary(make_object<ORCJITDynamicLibraryObj>(
-      GetObjectPtr<ORCJITExecutionSessionObj>(this), &jit_dylib, jit_.get(), lib_name));
-
-  // Store for lifetime management
-  dylibs_.insert({lib_name, dylib});
+      GetRef<ORCJITExecutionSession>(this), &jit_dylib, jit_.get(), lib_name));
 
   return dylib;
 }

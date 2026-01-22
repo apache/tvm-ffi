@@ -24,18 +24,19 @@
 #ifndef TVM_FFI_ORCJIT_ORCJIT_DYLIB_H_
 #define TVM_FFI_ORCJIT_ORCJIT_DYLIB_H_
 
-#include <llvm/ExecutionEngine/Orc/Core.h>
 #include <llvm/ExecutionEngine/Orc/LLJIT.h>
 #include <tvm/ffi/container/array.h>
 #include <tvm/ffi/extra/module.h>
 #include <tvm/ffi/object.h>
 #include <tvm/ffi/string.h>
 
+#include "orcjit_session.h"
+
 namespace tvm {
 namespace ffi {
 namespace orcjit {
 
-class ORCJITExecutionSessionObj;
+class ORCJITExecutionSession;
 
 class ORCJITDynamicLibraryObj : public ModuleObj {
  public:
@@ -46,8 +47,10 @@ class ORCJITDynamicLibraryObj : public ModuleObj {
    * \param jit The LLJIT instance
    * \param name The library name
    */
-  ORCJITDynamicLibraryObj(ObjectPtr<ORCJITExecutionSessionObj> session, llvm::orc::JITDylib* dylib,
+  ORCJITDynamicLibraryObj(ORCJITExecutionSession session, llvm::orc::JITDylib* dylib,
                           llvm::orc::LLJIT* jit, String name);
+
+  ~ORCJITDynamicLibraryObj() { puts("ORCJITDynamicLibraryObj destructed"); };
 
   const char* kind() const final { return "orcjit"; }
 
@@ -89,7 +92,7 @@ class ORCJITDynamicLibraryObj : public ModuleObj {
   String GetName() const { return name_; }
 
   /*! \brief Parent execution session (for lifetime management) */
-  ObjectPtr<ORCJITExecutionSessionObj> session_;
+  ORCJITExecutionSession session_;
 
   /*! \brief The LLVM JITDylib */
   llvm::orc::JITDylib* dylib_;
@@ -114,7 +117,7 @@ class ORCJITDynamicLibraryObj : public ModuleObj {
  */
 class ORCJITDynamicLibrary : public Module {
  public:
-  explicit ORCJITDynamicLibrary(const ObjectPtr<ORCJITDynamicLibraryObj>& ptr) : Module(ptr) {};
+  explicit ORCJITDynamicLibrary(const ObjectPtr<ORCJITDynamicLibraryObj>& ptr) : Module(ptr){};
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(ORCJITDynamicLibrary, Module,
                                                 ORCJITDynamicLibraryObj);
 };

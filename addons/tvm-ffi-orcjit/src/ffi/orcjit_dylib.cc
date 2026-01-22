@@ -35,17 +35,17 @@
 #include <tvm/ffi/error.h>
 #include <tvm/ffi/extra/c_env_api.h>
 #include <tvm/ffi/extra/module.h>
+#include <tvm/ffi/function.h>
 #include <tvm/ffi/reflection/registry.h>
 
 #include "orcjit_session.h"
 #include "orcjit_utils.h"
-#include "tvm/ffi/function.h"
 
 namespace tvm {
 namespace ffi {
 namespace orcjit {
 
-ORCJITDynamicLibraryObj::ORCJITDynamicLibraryObj(ObjectPtr<ORCJITExecutionSessionObj> session,
+ORCJITDynamicLibraryObj::ORCJITDynamicLibraryObj(ORCJITExecutionSession session,
                                                  llvm::orc::JITDylib* dylib, llvm::orc::LLJIT* jit,
                                                  String name)
     : session_(std::move(session)), dylib_(dylib), jit_(jit), name_(std::move(name)) {

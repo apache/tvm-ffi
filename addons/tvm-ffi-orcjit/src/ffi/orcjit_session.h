@@ -28,9 +28,7 @@
 #include <tvm/ffi/object.h>
 #include <tvm/ffi/string.h>
 
-#include <memory>
 #include <string>
-#include <unordered_map>
 
 namespace tvm {
 namespace ffi {
@@ -51,6 +49,8 @@ class ORCJITExecutionSessionObj : public Object {
    * \brief Default constructor (for make_object)
    */
   explicit ORCJITExecutionSessionObj(const std::string& orc_rt_path = "");
+
+  ~ORCJITExecutionSessionObj() { puts("ORCJITExecutionSessionObj destructed"); };
 
   /*!
    * \brief Create a new DynamicLibrary (JITDylib) in this session
@@ -80,9 +80,6 @@ class ORCJITExecutionSessionObj : public Object {
 
   /*! \brief Counter for auto-generating library names */
   int dylib_counter_ = 0;
-
-  /*! \brief Map of created dynamic libraries for lifetime management */
-  std::unordered_map<std::string, ORCJITDynamicLibrary> dylibs_;
 };
 
 /*!
