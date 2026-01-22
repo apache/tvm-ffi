@@ -70,6 +70,16 @@ install(
   RENAME test_funcs_conflict.o
 )
 
+# Create object library for constructor/destructor test functions
+add_library(test_ctor_dtor_obj OBJECT sources/test_ctor_dtor.cc)
+target_link_libraries(test_ctor_dtor_obj PRIVATE tvm_ffi::header)
+target_compile_options(test_ctor_dtor_obj PRIVATE -fPIC -O2)
+install(
+  FILES $<TARGET_OBJECTS:test_ctor_dtor_obj>
+  DESTINATION ${CMAKE_CURRENT_SOURCE_DIR}
+  RENAME test_ctor_dtor.o
+)
+
 find_package(CUDAToolkit)
 
 if (CUDAToolkit_FOUND)

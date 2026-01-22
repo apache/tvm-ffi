@@ -21,6 +21,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import tvm_ffi
 from tvm_ffi_orcjit import ExecutionSession
 
 
@@ -256,6 +257,42 @@ def test_load_and_execute_cuda_function() -> None:
     assert result == 42
 
 
+def test_ctor_dtor() -> None:
+    """Test ctor and dtor when loading an object file."""
+    ctor_log = ""
+    dtor_log = ""
+
+    @tvm_ffi.register_global_func("append_ctor_log")
+    def _append_ctor_log(x: str) -> None:
+        nonlocal ctor_log
+        ctor_log += x
+
+    @tvm_ffi.register_global_func("append_dtor_log")
+    def _append_dtor_log(x: str) -> None:
+        nonlocal dtor_log
+        dtor_log += x
+
+    # Get pre-built test object file
+    obj_file = get_test_obj_file("test_ctor_dtor.o")
+
+    # Create session and library
+    session = ExecutionSession()
+    lib = session.create_library()
+
+    # Load object file
+    lib.add(str(obj_file))
+
+    assert (
+        ctor_log
+        == "<init_array.101><init_array.102><init_array.103><init_array><ctors.103><ctors.102><ctors.101><ctors>"
+    ), ctor_log
+    del session
+    assert (
+        dtor_log
+        == "<dtors><dtors.101><dtors.102><dtors.103><fini_array><fini_array.103><fini_array.102><fini_array.101>"
+    ), dtor_log
+
+
 if __name__ == "__main__":
     # pytest.main([__file__, "-v"])
-    test_load_and_execute_cuda_function()
+    test_ctor_dtor()
