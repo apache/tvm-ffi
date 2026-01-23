@@ -87,8 +87,8 @@ inline constexpr bool is_expected_v = is_expected<T>::value;
 
 // NOTE: return type can only support non-reference managed returns
 template <typename T>
-static constexpr bool RetSupported = (std::is_same_v<T, Any> || std::is_void_v<T> ||
-                                      TypeTraits<T>::convert_enabled || is_expected_v<T>);
+static constexpr bool RetSupported =
+    (std::is_same_v<T, Any> || std::is_void_v<T> || TypeTraits<T>::convert_enabled);
 
 template <typename R, typename... Args>
 struct FuncFunctorImpl {
@@ -241,9 +241,9 @@ TVM_FFI_INLINE void unpack_call(std::index_sequence<Is...>, const std::string* o
     R expected_result = f(ArgValueWithContext<std::tuple_element_t<Is, PackedArgs>>{
         args, Is, optional_name, f_sig}...);
     if (expected_result.is_ok()) {
-      *rv = expected_result.value();
+      *rv = std::move(expected_result).value();
     } else {
-      throw expected_result.error();
+      throw std::move(expected_result).error();
     }
   } else {
     *rv = R(f(ArgValueWithContext<std::tuple_element_t<Is, PackedArgs>>{args, Is, optional_name,

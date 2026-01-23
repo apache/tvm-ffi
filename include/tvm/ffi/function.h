@@ -670,8 +670,17 @@ class Function : public ObjectRef {
                                        kNumArgs, reinterpret_cast<TVMFFIAny*>(&result));
 
     if (ret_code == 0) {
-      // Success - cast result to T and return Ok
-      return Expected<T>::Ok(std::move(result).cast<T>());
+      if constexpr (std::is_same_v<T, Any>) {
+        return Expected<T>::Ok(std::move(result));
+      } else {
+        if (auto val = std::move(result).template as<T>()) {
+          return Expected<T>::Ok(std::move(*val));
+        } else {
+          return Expected<T>::Err(Error(
+              "TypeError",
+              "CallExpected: result type mismatch, expected " + TypeTraits<T>::TypeStr(), ""));
+        }
+      }
     } else if (ret_code == -2) {
       // Environment error already set (e.g., Python KeyboardInterrupt)
       // We still throw this since it's a signal, not a normal error
