@@ -26,7 +26,6 @@
 #include <tvm/ffi/base_details.h>
 #include <tvm/ffi/c_api.h>
 
-#include <cstddef>
 #include <optional>
 #include <string>
 #include <type_traits>
