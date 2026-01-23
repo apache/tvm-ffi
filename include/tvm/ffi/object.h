@@ -1095,8 +1095,8 @@ struct ObjectUnsafe {
 
   template <typename Class>
   TVM_FFI_INLINE static int64_t GetObjectOffsetToSubclass() {
-    return static_cast<int64_t>(offsetof(Class, header_)) -
-           static_cast<int64_t>(offsetof(Object, header_));
+    return static_cast<int64_t>(__builtin_offsetof(Class, header_)) -
+           static_cast<int64_t>(__builtin_offsetof(Object, header_));
   }
 
   template <typename T>
