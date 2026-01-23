@@ -160,11 +160,11 @@ TVM_FFI_INLINE Expected<T> ExpectedOk(T value) {
 
 /*!
  * \brief Helper function to create Expected::Err.
+ * \tparam T The success type (must be explicitly specified).
  * \param error The error value.
- * \return Expected<Any> containing the error.
- * \note Returns Expected<Any> to allow usage in contexts where T is inferred.
+ * \return Expected<T> containing the error.
  */
-template <typename T = Any>
+template <typename T>
 TVM_FFI_INLINE Expected<T> ExpectedErr(Error error) {
   return Expected<T>::Err(std::move(error));
 }
@@ -176,20 +176,18 @@ inline constexpr bool use_default_type_traits_v<Expected<T>> = false;
 template <typename T>
 struct TypeTraits<Expected<T>> : public TypeTraitsBase {
   TVM_FFI_INLINE static void CopyToAnyView(const Expected<T>& src, TVMFFIAny* result) {
-    const TVMFFIAny* src_any = reinterpret_cast<const TVMFFIAny*>(&src.data_);
-    if (TypeTraits<T>::CheckAnyStrict(src_any)) {
-      TypeTraits<T>::MoveToAny(TypeTraits<T>::CopyFromAnyViewAfterCheck(src_any), result);
+    if (src.is_err()) {
+      TypeTraits<Error>::CopyToAnyView(src.error(), result);
     } else {
-      TypeTraits<Error>::MoveToAny(TypeTraits<Error>::CopyFromAnyViewAfterCheck(src_any), result);
+      TypeTraits<T>::CopyToAnyView(src.value(), result);
     }
   }
 
   TVM_FFI_INLINE static void MoveToAny(Expected<T> src, TVMFFIAny* result) {
-    TVMFFIAny* src_any = reinterpret_cast<TVMFFIAny*>(&src.data_);
-    if (TypeTraits<T>::CheckAnyStrict(src_any)) {
-      TypeTraits<T>::MoveToAny(TypeTraits<T>::MoveFromAnyAfterCheck(src_any), result);
+    if (src.is_err()) {
+      TypeTraits<Error>::MoveToAny(std::move(src).error(), result);
     } else {
-      TypeTraits<Error>::MoveToAny(TypeTraits<Error>::MoveFromAnyAfterCheck(src_any), result);
+      TypeTraits<T>::MoveToAny(std::move(src).value(), result);
     }
   }
 
@@ -221,16 +219,13 @@ struct TypeTraits<Expected<T>> : public TypeTraitsBase {
     return std::nullopt;
   }
 
-  TVM_FFI_INLINE static std::string GetMismatchTypeInfo(const TVMFFIAny* src) {
-    return TypeTraitsBase::GetMismatchTypeInfo(src);
-  }
-
   TVM_FFI_INLINE static std::string TypeStr() {
     return "Expected<" + TypeTraits<T>::TypeStr() + ">";
   }
 
   TVM_FFI_INLINE static std::string TypeSchema() {
-    return R"({"type":"Expected","args":[)" + details::TypeSchema<T>::v() + "]}";
+    return R"({"type":"Expected","args":[)" + details::TypeSchema<T>::v() +
+           R"(,{"type":"ffi.Error"}]})";
   }
 };
 
