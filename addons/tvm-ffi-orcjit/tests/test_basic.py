@@ -259,18 +259,12 @@ def test_load_and_execute_cuda_function() -> None:
 
 def test_ctor_dtor() -> None:
     """Test ctor and dtor when loading an object file."""
-    ctor_log = ""
-    dtor_log = ""
+    log = ""
 
-    @tvm_ffi.register_global_func("append_ctor_log")
+    @tvm_ffi.register_global_func("append_log")
     def _append_ctor_log(x: str) -> None:
-        nonlocal ctor_log
-        ctor_log += x
-
-    @tvm_ffi.register_global_func("append_dtor_log")
-    def _append_dtor_log(x: str) -> None:
-        nonlocal dtor_log
-        dtor_log += x
+        nonlocal log
+        log += x
 
     # Get pre-built test object file
     obj_file = get_test_obj_file("test_ctor_dtor.o")
@@ -282,15 +276,13 @@ def test_ctor_dtor() -> None:
     # Load object file
     lib.add(str(obj_file))
 
-    assert (
-        ctor_log
-        == "<init_array.101><init_array.102><init_array.103><init_array><ctors.103><ctors.102><ctors.101><ctors>"
-    ), ctor_log
+    lib.get_function("main")()
     del lib
+    print(log)
     assert (
-        dtor_log
-        == "<dtors><dtors.101><dtors.102><dtors.103><fini_array><fini_array.103><fini_array.102><fini_array.101>"
-    ), dtor_log
+        log
+        == "<init_array.101><init_array.102><init_array.103><init_array><ctors.103><ctors.102><ctors.101><ctors><main><dtors><dtors.101><dtors.102><dtors.103><fini_array><fini_array.103><fini_array.102><fini_array.101>"
+    ), log
 
 
 if __name__ == "__main__":

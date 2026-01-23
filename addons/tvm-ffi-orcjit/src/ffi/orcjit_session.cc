@@ -50,6 +50,31 @@ struct LLVMInitializer {
 
 static LLVMInitializer llvm_initializer;
 
+class InitFiniPlugin : public llvm::orc::ObjectLinkingLayer::Plugin {
+  ORCJITExecutionSession session_;
+
+ public:
+  explicit InitFiniPlugin(ORCJITExecutionSession session) : session_(std::move(session)) {}
+
+  void modifyPassConfig(llvm::orc::MaterializationResponsibility& MR, llvm::jitlink::LinkGraph& G,
+                        llvm::jitlink::PassConfiguration& Config) override {
+    auto& jit_dylib = MR.getTargetJITDylib();
+    Config.PrePrunePasses.emplace_back(
+        [this, &jit_dylib](llvm::jitlink::LinkGraph& G) { return llvm::Error::success(); });
+  }
+
+  llvm::Error notifyFailed(llvm::orc::MaterializationResponsibility& MR) override {
+    return llvm::Error::success();
+  }
+
+  llvm::Error notifyRemovingResources(llvm::orc::JITDylib& JD, llvm::orc::ResourceKey K) override {
+    return llvm::Error::success();
+  }
+
+  void notifyTransferringResources(llvm::orc::JITDylib& JD, llvm::orc::ResourceKey DstKey,
+                                   llvm::orc::ResourceKey SrcKey) override {}
+};
+
 ORCJITExecutionSessionObj::ORCJITExecutionSessionObj(const std::string& orc_rt_path)
     : jit_(nullptr) {
   if (!orc_rt_path.empty()) {
@@ -59,8 +84,10 @@ ORCJITExecutionSessionObj::ORCJITExecutionSessionObj(const std::string& orc_rt_p
                                "Failed to create LLJIT with ORC runtime"));
   } else {
     jit_ = std::move(call_llvm(llvm::orc::LLJITBuilder().create(), "Failed to create LLJIT"));
-    auto jit_or_err = llvm::orc::LLJITBuilder().create();
   }
+  auto& objlayer = jit_->getObjLinkingLayer();
+  static_cast<llvm::orc::ObjectLinkingLayer&>(objlayer).addPlugin(
+      std::make_unique<InitFiniPlugin>(GetRef<ORCJITExecutionSession>(this)));
 }
 
 ORCJITExecutionSession::ORCJITExecutionSession(const std::string& orc_rt_path) {
@@ -105,6 +132,19 @@ llvm::orc::ExecutionSession& ORCJITExecutionSessionObj::GetLLVMExecutionSession(
 llvm::orc::LLJIT& ORCJITExecutionSessionObj::GetLLJIT() {
   TVM_FFI_CHECK(jit_ != nullptr, InternalError) << "ExecutionSession not initialized";
   return *jit_;
+}
+
+void ORCJITExecutionSessionObj::RunPendingInitializers(llvm::orc::JITDylib& jit_dylib) {
+  auto it = pending_initializers_.find(&jit_dylib);
+  if (it != pending_initializers_.end()) {
+    pending_initializers_.erase(it);
+  }
+}
+void ORCJITExecutionSessionObj::RunPendingDeinitializers(llvm::orc::JITDylib& jit_dylib) {
+  auto it = pending_initializers_.find(&jit_dylib);
+  if (it != pending_initializers_.end()) {
+    pending_initializers_.erase(it);
+  }
 }
 
 }  // namespace orcjit

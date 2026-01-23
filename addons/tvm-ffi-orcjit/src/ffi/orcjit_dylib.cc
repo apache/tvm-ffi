@@ -96,6 +96,8 @@ void* ORCJITDynamicLibraryObj::GetSymbol(const String& name) {
   auto symbol_or_err =
       jit_->getExecutionSession().lookup(search_order, jit_->mangleAndIntern(name.c_str()));
 
+  // Run initializers after possible first successful lookup, to ensure materialization has occurred
+  session_->RunPendingInitializers(GetJITDylib());
   // Convert ExecutorAddr to pointer
   return symbol_or_err ? symbol_or_err->getAddress().toPtr<void*>() : nullptr;
 }

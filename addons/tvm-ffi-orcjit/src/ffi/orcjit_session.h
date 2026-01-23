@@ -24,11 +24,14 @@
 #ifndef TVM_FFI_ORCJIT_ORCJIT_SESSION_H_
 #define TVM_FFI_ORCJIT_ORCJIT_SESSION_H_
 
+#include <llvm/ExecutionEngine/Orc/Core.h>
 #include <llvm/ExecutionEngine/Orc/LLJIT.h>
 #include <tvm/ffi/object.h>
 #include <tvm/ffi/string.h>
 
+#include <mutex>
 #include <string>
+#include <unordered_map>
 
 namespace tvm {
 namespace ffi {
@@ -49,8 +52,6 @@ class ORCJITExecutionSessionObj : public Object {
    * \brief Default constructor (for make_object)
    */
   explicit ORCJITExecutionSessionObj(const std::string& orc_rt_path = "");
-
-  ~ORCJITExecutionSessionObj() { puts("ORCJITExecutionSessionObj destructed"); };
 
   /*!
    * \brief Create a new DynamicLibrary (JITDylib) in this session
@@ -74,12 +75,23 @@ class ORCJITExecutionSessionObj : public Object {
   static constexpr bool _type_mutable = true;
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("orcjit.ExecutionSession", ORCJITExecutionSessionObj, Object);
 
+  void RunPendingInitializers(llvm::orc::JITDylib& jit_dylib);
+  void RunPendingDeinitializers(llvm::orc::JITDylib& jit_dylib);
+
+  void AddPendingInitializer(llvm::orc::JITDylib* jd, const std::string& symbol_name);
+  void AddPendingDeinitializer(llvm::orc::JITDylib* jd, const std::string& symbol_name);
+
  private:
   /*! \brief The LLVM ORC JIT instance */
   std::unique_ptr<llvm::orc::LLJIT> jit_;
 
   /*! \brief Counter for auto-generating library names */
   int dylib_counter_ = 0;
+
+  std::unordered_map<llvm::orc::JITDylib*, std::vector<std::string>> pending_initializers_;
+  std::mutex pending_initializers_mutex_;
+  std::unordered_map<llvm::orc::JITDylib*, std::vector<std::string>> pending_deinitializers_;
+  std::mutex pending_deinitializers_mutex_;
 };
 
 /*!
