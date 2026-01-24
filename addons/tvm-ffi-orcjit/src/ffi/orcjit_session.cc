@@ -120,7 +120,7 @@ class InitFiniPlugin : public llvm::orc::ObjectLinkingLayer::Plugin {
             for (auto& Edge : Block->edges()) {
               auto& Target = Edge.getTarget();
               if (Target.hasName()) {
-                session_->AddPendingInitializer(
+                session_->AddPendingDeinitializer(
                     &jit_dylib,
                     {Target.getName().str(),
                      has_priority
@@ -135,7 +135,7 @@ class InitFiniPlugin : public llvm::orc::ObjectLinkingLayer::Plugin {
             for (auto& Edge : Block->edges()) {
               auto& Target = Edge.getTarget();
               if (Target.hasName()) {
-                session_->AddPendingInitializer(
+                session_->AddPendingDeinitializer(
                     &jit_dylib, {Target.getName().str(),
                                  ORCJITExecutionSessionObj::InitFiniEntry::Section::kFini, 0});
               }
@@ -150,7 +150,7 @@ class InitFiniPlugin : public llvm::orc::ObjectLinkingLayer::Plugin {
             for (auto& Edge : Block->edges()) {
               auto& Target = Edge.getTarget();
               if (Target.hasName()) {
-                session_->AddPendingInitializer(
+                session_->AddPendingDeinitializer(
                     &jit_dylib,
                     {Target.getName().str(),
                      has_priority
@@ -260,11 +260,11 @@ void ORCJITExecutionSessionObj::RunPendingInitializers(llvm::orc::JITDylib& jit_
 }
 
 void ORCJITExecutionSessionObj::RunPendingDeinitializers(llvm::orc::JITDylib& jit_dylib) {
-  auto it = pending_initializers_.find(&jit_dylib);
-  if (it != pending_initializers_.end()) {
+  auto it = pending_deinitializers_.find(&jit_dylib);
+  if (it != pending_deinitializers_.end()) {
     llvm::sort(it->second, [&](InitFiniEntry& a, InitFiniEntry& b) {
-      return static_cast<int>(a.section) > static_cast<int>(b.section) ||
-             (a.section == b.section && a.priority > b.priority);
+      return static_cast<int>(a.section) < static_cast<int>(b.section) ||
+             (a.section == b.section && a.priority < b.priority);
     });
     llvm::orc::JITDylibSearchOrder search_order;
     search_order.emplace_back(&jit_dylib, llvm::orc::JITDylibLookupFlags::MatchAllSymbols);
@@ -275,7 +275,7 @@ void ORCJITExecutionSessionObj::RunPendingDeinitializers(llvm::orc::JITDylib& ji
       auto func = symbol.getAddress().toPtr<CtorDtor>();
       func();
     }
-    pending_initializers_.erase(it);
+    pending_deinitializers_.erase(it);
   }
 }
 
