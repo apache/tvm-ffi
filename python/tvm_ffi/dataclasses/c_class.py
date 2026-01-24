@@ -41,7 +41,12 @@ _InputClsType = TypeVar("_InputClsType")
 
 @dataclass_transform(field_specifiers=(field,), kw_only_default=False)
 def c_class(
-    type_key: str, init: bool = True, kw_only: bool = False, repr: bool = True
+    type_key: str,
+    init: bool = True,
+    kw_only: bool = False,
+    repr: bool = True,
+    eq: bool = True,
+    order: bool = False,
 ) -> Callable[[Type[_InputClsType]], Type[_InputClsType]]:  # noqa: UP006
     """(Experimental) Create a dataclass-like proxy for a C++ class registered with TVM FFI.
 
@@ -81,6 +86,12 @@ def c_class(
         If ``True`` and the Python class does not define ``__repr__``, a
         representation method is auto-generated that includes all fields with
         ``repr=True``.
+    eq
+        If ``True``, generate ``__eq__`` and ``__ne__`` methods that compare
+        all fields with ``compare=True``.
+    order
+        If ``True``, generate ``__lt__``, ``__le__``, ``__gt__``, and ``__ge__``
+        methods that compare all fields with ``compare=True``.
 
     Returns
     -------
@@ -128,9 +139,13 @@ def c_class(
     """
 
     def decorator(super_type_cls: Type[_InputClsType]) -> Type[_InputClsType]:  # noqa: UP006
-        nonlocal init, repr
+        nonlocal init, kw_only, repr, eq, order
         init = init and "__init__" not in super_type_cls.__dict__
         repr = repr and "__repr__" not in super_type_cls.__dict__
+        eq = eq and "__eq__" not in super_type_cls.__dict__
+        order = order and not any(
+            method in super_type_cls.__dict__ for method in ["__lt__", "__le__", "__gt__", "__ge__"]
+        )
         # Step 1. Retrieve `type_info` from registry
         type_info: TypeInfo = _lookup_or_register_type_info_from_type_key(type_key)
         assert type_info.parent_type_info is not None
@@ -147,10 +162,21 @@ def c_class(
         # Step 3. Create the proxy class with the fields as properties
         fn_init = _utils.method_init(super_type_cls, type_info) if init else None
         fn_repr = _utils.method_repr(super_type_cls, type_info) if repr else None
+        fn_eq = _utils.method_eq(super_type_cls, type_info) if eq else None
+        fn_ne = _utils.method_ne(super_type_cls, type_info) if eq else None
+        fn_order = _utils.method_order(super_type_cls, type_info) if order else None
+        methods = {
+            "__init__": fn_init,
+            "__repr__": fn_repr,
+            "__eq__": fn_eq,
+            "__ne__": fn_ne,
+        }
+        if fn_order:
+            methods.update(fn_order)
         type_cls: Type[_InputClsType] = _utils.type_info_to_cls(  # noqa: UP006
             type_info=type_info,
             cls=super_type_cls,
-            methods={"__init__": fn_init, "__repr__": fn_repr},
+            methods=methods,
         )
         _set_type_cls(type_info, type_cls)
         return type_cls
