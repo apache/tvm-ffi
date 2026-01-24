@@ -24,6 +24,7 @@
 
 #include "orcjit_session.h"
 
+#include <llvm-18/llvm/ADT/STLExtras.h>
 #include <llvm/ExecutionEngine/Orc/LLJIT.h>
 #include <llvm/Support/Error.h>
 #include <llvm/Support/TargetSelect.h>
@@ -59,8 +60,110 @@ class InitFiniPlugin : public llvm::orc::ObjectLinkingLayer::Plugin {
   void modifyPassConfig(llvm::orc::MaterializationResponsibility& MR, llvm::jitlink::LinkGraph& G,
                         llvm::jitlink::PassConfiguration& Config) override {
     auto& jit_dylib = MR.getTargetJITDylib();
-    Config.PrePrunePasses.emplace_back(
-        [this, &jit_dylib](llvm::jitlink::LinkGraph& G) { return llvm::Error::success(); });
+    Config.PrePrunePasses.emplace_back([this, &jit_dylib](llvm::jitlink::LinkGraph& G) {
+      for (auto& Sec : G.sections()) {
+        auto section_name = Sec.getName();
+        if (section_name.starts_with(".init_array")) {
+          int priority = 0;
+          bool has_priority = section_name.consume_front(".init_array.") &&
+                              !section_name.getAsInteger(10, priority);
+          for (auto* Block : Sec.blocks()) {
+            for (auto& Edge : Block->edges()) {
+              auto& Target = Edge.getTarget();
+              if (Target.hasName()) {
+                session_->AddPendingInitializer(
+                    &jit_dylib,
+                    {Target.getName().str(),
+                     has_priority
+                         ? ORCJITExecutionSessionObj::InitFiniEntry::Section::kInitArrayWithPriority
+                         : ORCJITExecutionSessionObj::InitFiniEntry::Section::kInitArray,
+                     priority});
+              }
+            }
+          }
+        } else if (section_name.starts_with(".init")) {
+          for (auto* Block : Sec.blocks()) {
+            for (auto& Edge : Block->edges()) {
+              auto& Target = Edge.getTarget();
+              if (Target.hasName()) {
+                session_->AddPendingInitializer(
+                    &jit_dylib, {Target.getName().str(),
+                                 ORCJITExecutionSessionObj::InitFiniEntry::Section::kInit, 0});
+              }
+            }
+          }
+        }
+        if (section_name.starts_with(".ctors")) {
+          int priority = 0;
+          bool has_priority =
+              section_name.consume_front(".ctors.") && !section_name.getAsInteger(10, priority);
+          for (auto* Block : Sec.blocks()) {
+            for (auto& Edge : Block->edges()) {
+              auto& Target = Edge.getTarget();
+              if (Target.hasName()) {
+                session_->AddPendingInitializer(
+                    &jit_dylib,
+                    {Target.getName().str(),
+                     has_priority
+                         ? ORCJITExecutionSessionObj::InitFiniEntry::Section::kCtorsWithPriority
+                         : ORCJITExecutionSessionObj::InitFiniEntry::Section::kCtors,
+                     -priority});
+              }
+            }
+          }
+        }
+        if (section_name.starts_with(".fini_array")) {
+          int priority = 0;
+          bool has_priority = section_name.consume_front(".fini_array.") &&
+                              !section_name.getAsInteger(10, priority);
+          for (auto* Block : Sec.blocks()) {
+            for (auto& Edge : Block->edges()) {
+              auto& Target = Edge.getTarget();
+              if (Target.hasName()) {
+                session_->AddPendingInitializer(
+                    &jit_dylib,
+                    {Target.getName().str(),
+                     has_priority
+                         ? ORCJITExecutionSessionObj::InitFiniEntry::Section::kFiniArrayWithPriority
+                         : ORCJITExecutionSessionObj::InitFiniEntry::Section::kFiniArray,
+                     -priority});
+              }
+            }
+          }
+        } else if (section_name.starts_with(".fini")) {
+          for (auto* Block : Sec.blocks()) {
+            for (auto& Edge : Block->edges()) {
+              auto& Target = Edge.getTarget();
+              if (Target.hasName()) {
+                session_->AddPendingInitializer(
+                    &jit_dylib, {Target.getName().str(),
+                                 ORCJITExecutionSessionObj::InitFiniEntry::Section::kFini, 0});
+              }
+            }
+          }
+        }
+        if (section_name.starts_with(".dtors")) {
+          int priority = 0;
+          bool has_priority =
+              section_name.consume_front(".dtors.") && !section_name.getAsInteger(10, priority);
+          for (auto* Block : Sec.blocks()) {
+            for (auto& Edge : Block->edges()) {
+              auto& Target = Edge.getTarget();
+              if (Target.hasName()) {
+                session_->AddPendingInitializer(
+                    &jit_dylib,
+                    {Target.getName().str(),
+                     has_priority
+                         ? ORCJITExecutionSessionObj::InitFiniEntry::Section::kDtorsWithPriority
+                         : ORCJITExecutionSessionObj::InitFiniEntry::Section::kDtors,
+                     priority});
+              }
+            }
+          }
+        }
+      }
+      return llvm::Error::success();
+    });
   }
 
   llvm::Error notifyFailed(llvm::orc::MaterializationResponsibility& MR) override {
@@ -134,16 +237,65 @@ llvm::orc::LLJIT& ORCJITExecutionSessionObj::GetLLJIT() {
   return *jit_;
 }
 
+using CtorDtor = void (*)();
+
 void ORCJITExecutionSessionObj::RunPendingInitializers(llvm::orc::JITDylib& jit_dylib) {
   auto it = pending_initializers_.find(&jit_dylib);
   if (it != pending_initializers_.end()) {
+    llvm::sort(it->second, [&](InitFiniEntry& a, InitFiniEntry& b) {
+      return static_cast<int>(a.section) < static_cast<int>(b.section) ||
+             (a.section == b.section && a.priority < b.priority);
+    });
+    llvm::orc::JITDylibSearchOrder search_order;
+    search_order.emplace_back(&jit_dylib, llvm::orc::JITDylibLookupFlags::MatchAllSymbols);
+    for (const auto& entry : it->second) {
+      auto symbol = call_llvm(
+          jit_->getExecutionSession().lookup(search_order, jit_->mangleAndIntern(entry.symbol)),
+          "Failed to lookup initializer symbol: " + entry.symbol);
+      auto func = symbol.getAddress().toPtr<CtorDtor>();
+      func();
+    }
     pending_initializers_.erase(it);
   }
 }
+
 void ORCJITExecutionSessionObj::RunPendingDeinitializers(llvm::orc::JITDylib& jit_dylib) {
   auto it = pending_initializers_.find(&jit_dylib);
   if (it != pending_initializers_.end()) {
+    llvm::sort(it->second, [&](InitFiniEntry& a, InitFiniEntry& b) {
+      return static_cast<int>(a.section) > static_cast<int>(b.section) ||
+             (a.section == b.section && a.priority > b.priority);
+    });
+    llvm::orc::JITDylibSearchOrder search_order;
+    search_order.emplace_back(&jit_dylib, llvm::orc::JITDylibLookupFlags::MatchAllSymbols);
+    for (const auto& entry : it->second) {
+      auto symbol = call_llvm(
+          jit_->getExecutionSession().lookup(search_order, jit_->mangleAndIntern(entry.symbol)),
+          "Failed to lookup deinitializer symbol: " + entry.symbol);
+      auto func = symbol.getAddress().toPtr<CtorDtor>();
+      func();
+    }
     pending_initializers_.erase(it);
+  }
+}
+
+void ORCJITExecutionSessionObj::AddPendingInitializer(llvm::orc::JITDylib* jit_dylib,
+                                                      const InitFiniEntry& entry) {
+  auto it = pending_initializers_.find(jit_dylib);
+  if (it == pending_initializers_.end()) {
+    pending_initializers_[jit_dylib] = std::vector<InitFiniEntry>(1, entry);
+  } else {
+    pending_initializers_[jit_dylib].push_back(entry);
+  }
+}
+
+void ORCJITExecutionSessionObj::AddPendingDeinitializer(llvm::orc::JITDylib* jit_dylib,
+                                                        const InitFiniEntry& entry) {
+  auto it = pending_deinitializers_.find(jit_dylib);
+  if (it == pending_deinitializers_.end()) {
+    pending_deinitializers_[jit_dylib] = std::vector<InitFiniEntry>(1, entry);
+  } else {
+    pending_deinitializers_[jit_dylib].push_back(entry);
   }
 }
 

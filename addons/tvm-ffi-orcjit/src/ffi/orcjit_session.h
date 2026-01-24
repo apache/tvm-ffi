@@ -75,11 +75,29 @@ class ORCJITExecutionSessionObj : public Object {
   static constexpr bool _type_mutable = true;
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("orcjit.ExecutionSession", ORCJITExecutionSessionObj, Object);
 
+  struct InitFiniEntry {
+    enum class Section {
+      kInitArrayWithPriority = 0,
+      kInitArray,
+      kInit,
+      kCtorsWithPriority,
+      kCtors,
+      kDtors,
+      kDtorsWithPriority,
+      kFini,
+      kFiniArray,
+      kFiniArrayWithPriority,
+    };
+    std::string symbol;
+    Section section;
+    int priority;
+  };
+
   void RunPendingInitializers(llvm::orc::JITDylib& jit_dylib);
   void RunPendingDeinitializers(llvm::orc::JITDylib& jit_dylib);
 
-  void AddPendingInitializer(llvm::orc::JITDylib* jd, const std::string& symbol_name);
-  void AddPendingDeinitializer(llvm::orc::JITDylib* jd, const std::string& symbol_name);
+  void AddPendingInitializer(llvm::orc::JITDylib* jd, const InitFiniEntry& entry);
+  void AddPendingDeinitializer(llvm::orc::JITDylib* jd, const InitFiniEntry& entry);
 
  private:
   /*! \brief The LLVM ORC JIT instance */
@@ -88,9 +106,9 @@ class ORCJITExecutionSessionObj : public Object {
   /*! \brief Counter for auto-generating library names */
   int dylib_counter_ = 0;
 
-  std::unordered_map<llvm::orc::JITDylib*, std::vector<std::string>> pending_initializers_;
+  std::unordered_map<llvm::orc::JITDylib*, std::vector<InitFiniEntry>> pending_initializers_;
   std::mutex pending_initializers_mutex_;
-  std::unordered_map<llvm::orc::JITDylib*, std::vector<std::string>> pending_deinitializers_;
+  std::unordered_map<llvm::orc::JITDylib*, std::vector<InitFiniEntry>> pending_deinitializers_;
   std::mutex pending_deinitializers_mutex_;
 };
 

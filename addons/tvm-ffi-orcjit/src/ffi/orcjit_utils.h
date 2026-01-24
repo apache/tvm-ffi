@@ -34,7 +34,7 @@ namespace tvm {
 namespace ffi {
 namespace orcjit {
 
-inline void call_llvm(llvm::Error err, const char* context_msg = "") {
+inline void call_llvm(llvm::Error err, const std::string& context_msg = "") {
   if (err) {
     std::string err_msg;
     llvm::handleAllErrors(std::move(err),
@@ -44,7 +44,7 @@ inline void call_llvm(llvm::Error err, const char* context_msg = "") {
 }
 
 template <typename T>
-inline T call_llvm(llvm::Expected<T> value_or_err, const char* context_msg = "") {
+inline T call_llvm(llvm::Expected<T> value_or_err, const std::string& context_msg = "") {
   if (value_or_err) return std::move(*value_or_err);
 
   std::string err_msg;
@@ -54,7 +54,7 @@ inline T call_llvm(llvm::Expected<T> value_or_err, const char* context_msg = "")
 }
 
 template <typename T>
-inline T& call_llvm(llvm::Expected<T&> value_or_err, const char* context_msg = "") {
+inline T& call_llvm(llvm::Expected<T&> value_or_err, const std::string& context_msg = "") {
   if (value_or_err) return *value_or_err;
 
   std::string err_msg;
