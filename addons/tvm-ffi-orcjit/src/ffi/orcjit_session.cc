@@ -24,7 +24,6 @@
 
 #include "orcjit_session.h"
 
-#include <llvm-18/llvm/ADT/STLExtras.h>
 #include <llvm/ExecutionEngine/Orc/LLJIT.h>
 #include <llvm/Support/Error.h>
 #include <llvm/Support/TargetSelect.h>
@@ -51,14 +50,6 @@ struct LLVMInitializer {
 
 static LLVMInitializer llvm_initializer;
 
-static void print(llvm::jitlink::Symbol& sym) {
-  std::cout << "Symbol: " << sym.getName().str() << " Address: " << sym.getAddress().getValue()
-            << " Size: " << sym.getSize() << " isCallable: " << sym.isCallable()
-            << " isLive: " << sym.isLive() << " isDefined: " << sym.isDefined()
-            << " isAbsolute: " << sym.isAbsolute() << " isExternal: " << sym.isExternal()
-            << std::endl;
-}
-
 class InitFiniPlugin : public llvm::orc::ObjectLinkingLayer::Plugin {
   ORCJITExecutionSession session_;
 
@@ -69,35 +60,18 @@ class InitFiniPlugin : public llvm::orc::ObjectLinkingLayer::Plugin {
                         llvm::jitlink::PassConfiguration& Config) override {
     auto& jit_dylib = MR.getTargetJITDylib();
     Config.PrePrunePasses.emplace_back([this, &jit_dylib](llvm::jitlink::LinkGraph& G) {
-      puts("pre prune\n\n\n");
-      for (auto& Sec : G.sections()) {
-        auto section_name = Sec.getName();
-        if (section_name.starts_with(".init") || section_name.starts_with(".fini") ||
-            section_name.starts_with(".ctors") || section_name.starts_with(".dtors")) {
-          std::cout << section_name.str() << "\n";
-          for (auto* Block : Sec.blocks()) {
-            for (auto& Edge : Block->edges()) {
-              auto& Target = Edge.getTarget();
-              print(Target);
-              Target.setLive(true);
-            }
-          }
-          puts("=======\n");
-        }
-      }
+      // Mark .fini and .dtors symbols as live for deinitializers
       for (auto& Sec : G.sections()) {
         auto section_name = Sec.getName();
         if (section_name.starts_with(".fini") || section_name.starts_with(".dtors")) {
           for (auto* Block : Sec.blocks()) {
-            // Mark all symbols in this block as live
             for (auto* Sym : G.defined_symbols()) {
               if (&Sym->getBlock() == Block) {
                 Sym->setLive(true);
               }
             }
             for (auto& Edge : Block->edges()) {
-              auto& Target = Edge.getTarget();
-              Target.setLive(true);
+              Edge.getTarget().setLive(true);
             }
           }
         }
@@ -105,22 +79,6 @@ class InitFiniPlugin : public llvm::orc::ObjectLinkingLayer::Plugin {
       return llvm::Error::success();
     });
     Config.PostFixupPasses.emplace_back([this, &jit_dylib](llvm::jitlink::LinkGraph& G) {
-      puts("post fixup\n\n\n");
-      for (auto& Sec : G.sections()) {
-        auto section_name = Sec.getName();
-        if (section_name.starts_with(".init") || section_name.starts_with(".fini") ||
-            section_name.starts_with(".ctors") || section_name.starts_with(".dtors")) {
-          std::cout << section_name.str() << "\n";
-          for (auto* Block : Sec.blocks()) {
-            for (auto& Edge : Block->edges()) {
-              auto& Target = Edge.getTarget();
-              print(Target);
-              Target.setLive(true);
-            }
-          }
-          puts("=======\n");
-        }
-      }
       for (auto& Sec : G.sections()) {
         auto section_name = Sec.getName();
         if (section_name.starts_with(".init_array")) {
@@ -158,12 +116,16 @@ class InitFiniPlugin : public llvm::orc::ObjectLinkingLayer::Plugin {
           bool has_priority =
               section_name.consume_front(".ctors.") && !section_name.getAsInteger(10, priority);
           for (auto* Block : Sec.blocks()) {
-            for (auto& Edge : Block->edges()) {
-              auto& Target = Edge.getTarget();
-              if (Target.isDefined()) {
+            // For .ctors, read function pointers directly from block content after fixup
+            auto Content = Block->getContent();
+            size_t PtrSize = G.getPointerSize();
+            for (size_t Offset = 0; Offset + PtrSize <= Content.size(); Offset += PtrSize) {
+              uint64_t FnAddr = 0;
+              memcpy(&FnAddr, Content.data() + Offset, PtrSize);
+              if (FnAddr != 0) {
                 session_->AddPendingInitializer(
                     &jit_dylib,
-                    {Target.getAddress(),
+                    {llvm::orc::ExecutorAddr(FnAddr),
                      has_priority
                          ? ORCJITExecutionSessionObj::InitFiniEntry::Section::kCtorsWithPriority
                          : ORCJITExecutionSessionObj::InitFiniEntry::Section::kCtors,
@@ -207,12 +169,16 @@ class InitFiniPlugin : public llvm::orc::ObjectLinkingLayer::Plugin {
           bool has_priority =
               section_name.consume_front(".dtors.") && !section_name.getAsInteger(10, priority);
           for (auto* Block : Sec.blocks()) {
-            for (auto& Edge : Block->edges()) {
-              auto& Target = Edge.getTarget();
-              if (Target.isDefined()) {
+            // For .dtors, read function pointers directly from block content after fixup
+            auto Content = Block->getContent();
+            size_t PtrSize = G.getPointerSize();
+            for (size_t Offset = 0; Offset + PtrSize <= Content.size(); Offset += PtrSize) {
+              uint64_t FnAddr = 0;
+              memcpy(&FnAddr, Content.data() + Offset, PtrSize);
+              if (FnAddr != 0) {
                 session_->AddPendingDeinitializer(
                     &jit_dylib,
-                    {Target.getAddress(),
+                    {llvm::orc::ExecutorAddr(FnAddr),
                      has_priority
                          ? ORCJITExecutionSessionObj::InitFiniEntry::Section::kDtorsWithPriority
                          : ORCJITExecutionSessionObj::InitFiniEntry::Section::kDtors,
