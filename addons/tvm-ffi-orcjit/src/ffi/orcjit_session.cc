@@ -51,6 +51,14 @@ struct LLVMInitializer {
 
 static LLVMInitializer llvm_initializer;
 
+static void print(llvm::jitlink::Symbol& sym) {
+  std::cout << "Symbol: " << sym.getName().str() << " Address: " << sym.getAddress().getValue()
+            << " Size: " << sym.getSize() << " isCallable: " << sym.isCallable()
+            << " isLive: " << sym.isLive() << " isDefined: " << sym.isDefined()
+            << " isAbsolute: " << sym.isAbsolute() << " isExternal: " << sym.isExternal()
+            << std::endl;
+}
+
 class InitFiniPlugin : public llvm::orc::ObjectLinkingLayer::Plugin {
   ORCJITExecutionSession session_;
 
@@ -61,6 +69,58 @@ class InitFiniPlugin : public llvm::orc::ObjectLinkingLayer::Plugin {
                         llvm::jitlink::PassConfiguration& Config) override {
     auto& jit_dylib = MR.getTargetJITDylib();
     Config.PrePrunePasses.emplace_back([this, &jit_dylib](llvm::jitlink::LinkGraph& G) {
+      puts("pre prune\n\n\n");
+      for (auto& Sec : G.sections()) {
+        auto section_name = Sec.getName();
+        if (section_name.starts_with(".init") || section_name.starts_with(".fini") ||
+            section_name.starts_with(".ctors") || section_name.starts_with(".dtors")) {
+          std::cout << section_name.str() << "\n";
+          for (auto* Block : Sec.blocks()) {
+            for (auto& Edge : Block->edges()) {
+              auto& Target = Edge.getTarget();
+              print(Target);
+              Target.setLive(true);
+            }
+          }
+          puts("=======\n");
+        }
+      }
+      for (auto& Sec : G.sections()) {
+        auto section_name = Sec.getName();
+        if (section_name.starts_with(".fini") || section_name.starts_with(".dtors")) {
+          for (auto* Block : Sec.blocks()) {
+            // Mark all symbols in this block as live
+            for (auto* Sym : G.defined_symbols()) {
+              if (&Sym->getBlock() == Block) {
+                Sym->setLive(true);
+              }
+            }
+            for (auto& Edge : Block->edges()) {
+              auto& Target = Edge.getTarget();
+              Target.setLive(true);
+            }
+          }
+        }
+      }
+      return llvm::Error::success();
+    });
+    Config.PostFixupPasses.emplace_back([this, &jit_dylib](llvm::jitlink::LinkGraph& G) {
+      puts("post fixup\n\n\n");
+      for (auto& Sec : G.sections()) {
+        auto section_name = Sec.getName();
+        if (section_name.starts_with(".init") || section_name.starts_with(".fini") ||
+            section_name.starts_with(".ctors") || section_name.starts_with(".dtors")) {
+          std::cout << section_name.str() << "\n";
+          for (auto* Block : Sec.blocks()) {
+            for (auto& Edge : Block->edges()) {
+              auto& Target = Edge.getTarget();
+              print(Target);
+              Target.setLive(true);
+            }
+          }
+          puts("=======\n");
+        }
+      }
       for (auto& Sec : G.sections()) {
         auto section_name = Sec.getName();
         if (section_name.starts_with(".init_array")) {
@@ -70,10 +130,10 @@ class InitFiniPlugin : public llvm::orc::ObjectLinkingLayer::Plugin {
           for (auto* Block : Sec.blocks()) {
             for (auto& Edge : Block->edges()) {
               auto& Target = Edge.getTarget();
-              if (Target.hasName()) {
+              if (Target.isDefined()) {
                 session_->AddPendingInitializer(
                     &jit_dylib,
-                    {Target.getName().str(),
+                    {Target.getAddress(),
                      has_priority
                          ? ORCJITExecutionSessionObj::InitFiniEntry::Section::kInitArrayWithPriority
                          : ORCJITExecutionSessionObj::InitFiniEntry::Section::kInitArray,
@@ -85,9 +145,9 @@ class InitFiniPlugin : public llvm::orc::ObjectLinkingLayer::Plugin {
           for (auto* Block : Sec.blocks()) {
             for (auto& Edge : Block->edges()) {
               auto& Target = Edge.getTarget();
-              if (Target.hasName()) {
+              if (Target.isDefined()) {
                 session_->AddPendingInitializer(
-                    &jit_dylib, {Target.getName().str(),
+                    &jit_dylib, {Target.getAddress(),
                                  ORCJITExecutionSessionObj::InitFiniEntry::Section::kInit, 0});
               }
             }
@@ -100,10 +160,10 @@ class InitFiniPlugin : public llvm::orc::ObjectLinkingLayer::Plugin {
           for (auto* Block : Sec.blocks()) {
             for (auto& Edge : Block->edges()) {
               auto& Target = Edge.getTarget();
-              if (Target.hasName()) {
+              if (Target.isDefined()) {
                 session_->AddPendingInitializer(
                     &jit_dylib,
-                    {Target.getName().str(),
+                    {Target.getAddress(),
                      has_priority
                          ? ORCJITExecutionSessionObj::InitFiniEntry::Section::kCtorsWithPriority
                          : ORCJITExecutionSessionObj::InitFiniEntry::Section::kCtors,
@@ -119,10 +179,10 @@ class InitFiniPlugin : public llvm::orc::ObjectLinkingLayer::Plugin {
           for (auto* Block : Sec.blocks()) {
             for (auto& Edge : Block->edges()) {
               auto& Target = Edge.getTarget();
-              if (Target.hasName()) {
+              if (Target.isDefined()) {
                 session_->AddPendingDeinitializer(
                     &jit_dylib,
-                    {Target.getName().str(),
+                    {Target.getAddress(),
                      has_priority
                          ? ORCJITExecutionSessionObj::InitFiniEntry::Section::kFiniArrayWithPriority
                          : ORCJITExecutionSessionObj::InitFiniEntry::Section::kFiniArray,
@@ -134,9 +194,9 @@ class InitFiniPlugin : public llvm::orc::ObjectLinkingLayer::Plugin {
           for (auto* Block : Sec.blocks()) {
             for (auto& Edge : Block->edges()) {
               auto& Target = Edge.getTarget();
-              if (Target.hasName()) {
+              if (Target.isDefined()) {
                 session_->AddPendingDeinitializer(
-                    &jit_dylib, {Target.getName().str(),
+                    &jit_dylib, {Target.getAddress(),
                                  ORCJITExecutionSessionObj::InitFiniEntry::Section::kFini, 0});
               }
             }
@@ -149,10 +209,10 @@ class InitFiniPlugin : public llvm::orc::ObjectLinkingLayer::Plugin {
           for (auto* Block : Sec.blocks()) {
             for (auto& Edge : Block->edges()) {
               auto& Target = Edge.getTarget();
-              if (Target.hasName()) {
+              if (Target.isDefined()) {
                 session_->AddPendingDeinitializer(
                     &jit_dylib,
-                    {Target.getName().str(),
+                    {Target.getAddress(),
                      has_priority
                          ? ORCJITExecutionSessionObj::InitFiniEntry::Section::kDtorsWithPriority
                          : ORCJITExecutionSessionObj::InitFiniEntry::Section::kDtors,
@@ -249,10 +309,7 @@ void ORCJITExecutionSessionObj::RunPendingInitializers(llvm::orc::JITDylib& jit_
     llvm::orc::JITDylibSearchOrder search_order;
     search_order.emplace_back(&jit_dylib, llvm::orc::JITDylibLookupFlags::MatchAllSymbols);
     for (const auto& entry : it->second) {
-      auto symbol = call_llvm(
-          jit_->getExecutionSession().lookup(search_order, jit_->mangleAndIntern(entry.symbol)),
-          "Failed to lookup initializer symbol: " + entry.symbol);
-      auto func = symbol.getAddress().toPtr<CtorDtor>();
+      auto func = entry.address.toPtr<CtorDtor>();
       func();
     }
     pending_initializers_.erase(it);
@@ -269,10 +326,7 @@ void ORCJITExecutionSessionObj::RunPendingDeinitializers(llvm::orc::JITDylib& ji
     llvm::orc::JITDylibSearchOrder search_order;
     search_order.emplace_back(&jit_dylib, llvm::orc::JITDylibLookupFlags::MatchAllSymbols);
     for (const auto& entry : it->second) {
-      auto symbol = call_llvm(
-          jit_->getExecutionSession().lookup(search_order, jit_->mangleAndIntern(entry.symbol)),
-          "Failed to lookup deinitializer symbol: " + entry.symbol);
-      auto func = symbol.getAddress().toPtr<CtorDtor>();
+      auto func = entry.address.toPtr<CtorDtor>();
       func();
     }
     pending_deinitializers_.erase(it);

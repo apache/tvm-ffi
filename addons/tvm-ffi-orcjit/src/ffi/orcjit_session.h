@@ -26,6 +26,7 @@
 
 #include <llvm/ExecutionEngine/Orc/Core.h>
 #include <llvm/ExecutionEngine/Orc/LLJIT.h>
+#include <llvm/ExecutionEngine/Orc/Shared/ExecutorAddress.h>
 #include <tvm/ffi/object.h>
 #include <tvm/ffi/string.h>
 
@@ -88,7 +89,7 @@ class ORCJITExecutionSessionObj : public Object {
       kFiniArray,
       kFiniArrayWithPriority,
     };
-    std::string symbol;
+    llvm::orc::ExecutorAddr address;
     Section section;
     int priority;
   };
