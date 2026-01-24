@@ -142,7 +142,8 @@ def c_class(
         nonlocal init, kw_only, repr, eq, order
         init = init and "__init__" not in super_type_cls.__dict__
         repr = repr and "__repr__" not in super_type_cls.__dict__
-        eq = eq and "__eq__" not in super_type_cls.__dict__
+        # Check both __eq__ and __ne__ to avoid overwriting user-defined methods
+        eq = eq and not ("__eq__" in super_type_cls.__dict__ or "__ne__" in super_type_cls.__dict__)
         order = order and not any(
             method in super_type_cls.__dict__ for method in ["__lt__", "__le__", "__gt__", "__ge__"]
         )

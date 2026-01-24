@@ -122,6 +122,21 @@ def _get_all_fields(type_info: TypeInfo) -> list[TypeField]:
     return fields
 
 
+def _get_compare_fields(type_info: TypeInfo) -> list[str]:
+    """Collect field names that should be included in comparisons.
+
+    Returns a list of field names (in hierarchy order) that have compare=True.
+    """
+    fields = _get_all_fields(type_info)
+    compare_fields: list[str] = []
+    for field in fields:
+        assert field.name is not None
+        assert field.dataclass_field is not None
+        if field.dataclass_field.compare:
+            compare_fields.append(field.name)
+    return compare_fields
+
+
 def method_repr(type_cls: type, type_info: TypeInfo) -> Callable[..., str]:
     """Generate a ``__repr__`` method for the dataclass.
 
@@ -166,32 +181,22 @@ def method_eq(type_cls: type, type_info: TypeInfo) -> Callable[..., bool]:
     """Generate an ``__eq__`` method that compares all fields with ``compare=True``.
 
     The generated method compares all fields with ``compare=True`` in the order
-    they appear in the type hierarchy.
+    they appear in the type hierarchy using tuple comparison.
     """
-    # Step 0. Collect all fields from the type hierarchy
-    fields = _get_all_fields(type_info)
+    compare_fields = _get_compare_fields(type_info)
 
-    # Step 1. Filter fields that should be compared
-    compare_fields: list[str] = []
-    for field in fields:
-        assert field.name is not None
-        assert field.dataclass_field is not None
-        if field.dataclass_field.compare:
-            compare_fields.append(field.name)
-
-    # Step 2. Generate the eq method
+    # Generate the eq method
     if not compare_fields:
         # No fields to compare, all instances are equal
         body_lines = ["return True"]
     else:
-        # Build field comparisons
-        comparisons = " and ".join(
-            f"self.{field_name} == other.{field_name}" for field_name in compare_fields
-        )
+        # Use tuple comparison for efficiency
+        self_tuple = f"({', '.join(f'self.{f}' for f in compare_fields)},)"
+        other_tuple = f"({', '.join(f'other.{f}' for f in compare_fields)},)"
         body_lines = [
             "if not isinstance(other, type(self)):",
             "    return NotImplemented",
-            f"return {comparisons}",
+            f"return {self_tuple} == {other_tuple}",
         ]
 
     source_lines = ["def __eq__(self, other: object) -> bool:"]
@@ -209,32 +214,22 @@ def method_eq(type_cls: type, type_info: TypeInfo) -> Callable[..., bool]:
 def method_ne(type_cls: type, type_info: TypeInfo) -> Callable[..., bool]:
     """Generate a ``__ne__`` method that compares all fields with ``compare=True``.
 
-    The generated method is the negation of ``__eq__``.
+    The generated method is the negation of ``__eq__`` using tuple comparison.
     """
-    # Step 0. Collect all fields from the type hierarchy
-    fields = _get_all_fields(type_info)
+    compare_fields = _get_compare_fields(type_info)
 
-    # Step 1. Filter fields that should be compared
-    compare_fields: list[str] = []
-    for field in fields:
-        assert field.name is not None
-        assert field.dataclass_field is not None
-        if field.dataclass_field.compare:
-            compare_fields.append(field.name)
-
-    # Step 2. Generate the ne method
+    # Generate the ne method
     if not compare_fields:
         # No fields to compare, all instances are equal, so ne always returns False
         body_lines = ["return False"]
     else:
-        # Build field comparisons
-        comparisons = " or ".join(
-            f"self.{field_name} != other.{field_name}" for field_name in compare_fields
-        )
+        # Use tuple comparison for efficiency
+        self_tuple = f"({', '.join(f'self.{f}' for f in compare_fields)},)"
+        other_tuple = f"({', '.join(f'other.{f}' for f in compare_fields)},)"
         body_lines = [
             "if not isinstance(other, type(self)):",
             "    return NotImplemented",
-            f"return {comparisons}",
+            f"return {self_tuple} != {other_tuple}",
         ]
 
     source_lines = ["def __ne__(self, other: object) -> bool:"]
@@ -253,36 +248,19 @@ def method_order(type_cls: type, type_info: TypeInfo) -> dict[str, Callable[...,
     """Generate ordering methods (``__lt__``, ``__le__``, ``__gt__``, ``__ge__``).
 
     The generated methods compare all fields with ``compare=True`` in the order
-    they appear in the type hierarchy, using lexicographic comparison.
+    they appear in the type hierarchy, using tuple comparison for efficiency.
     """
-    # Step 0. Collect all fields from the type hierarchy
-    fields = _get_all_fields(type_info)
+    compare_fields = _get_compare_fields(type_info)
 
-    # Step 1. Filter fields that should be compared
-    compare_fields: list[str] = []
-    for field in fields:
-        assert field.name is not None
-        assert field.dataclass_field is not None
-        if field.dataclass_field.compare:
-            compare_fields.append(field.name)
-
-    # Step 2. Generate lexicographic comparison logic
+    # Generate __lt__ using tuple comparison
     if not compare_fields:
         # No fields to compare, all instances are equal
         comparison_body = "False"
     else:
-        # Build lexicographic comparison: compare field by field
-        # For each field, check if all previous fields are equal and current field is less
-        comparison_parts: list[str] = []
-        for i, field_name in enumerate(compare_fields):
-            if i == 0:
-                # First field: just compare directly
-                comparison_parts.append(f"self.{field_name} < other.{field_name}")
-            else:
-                # Subsequent fields: all previous must be equal, then compare current
-                eq_checks = " and ".join(f"self.{f} == other.{f}" for f in compare_fields[:i])
-                comparison_parts.append(f"({eq_checks} and self.{field_name} < other.{field_name})")
-        comparison_body = " or ".join(comparison_parts)
+        # Use tuple comparison for lexicographic ordering
+        self_tuple = f"({', '.join(f'self.{f}' for f in compare_fields)},)"
+        other_tuple = f"({', '.join(f'other.{f}' for f in compare_fields)},)"
+        comparison_body = f"{self_tuple} < {other_tuple}"
 
     # Generate __lt__
     source_lines_lt = [
