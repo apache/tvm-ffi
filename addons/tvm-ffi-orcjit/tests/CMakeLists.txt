@@ -23,9 +23,9 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # On ARM64, disable outline atomics to avoid needing compiler-rt symbols at JIT time
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
+if (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
   add_compile_options(-mno-outline-atomics)
-endif()
+endif ()
 
 # Run `python -m tvm_ffi.config --cmakedir` to find tvm-ffi package
 find_package(
