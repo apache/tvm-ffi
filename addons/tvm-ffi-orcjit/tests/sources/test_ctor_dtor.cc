@@ -34,16 +34,17 @@ __attribute__((constructor(102))) void init_array_102() { PUTS_LOG("<init_array.
 __attribute__((constructor(103))) void init_array_103() { PUTS_LOG("<init_array.103>"); }
 
 static void ctors() { PUTS_LOG("<ctors>"); }
-__attribute__((section(".ctors"), used)) static ctor_t ctors_ptr = ctors;
-
+#if defined(__linux__)
 static void ctors_101() { PUTS_LOG("<ctors.101>"); }
-__attribute__((section(".ctors.101"), used)) static ctor_t ctors_1_ptr = ctors_101;
-
 static void ctors_102() { PUTS_LOG("<ctors.102>"); }
-__attribute__((section(".ctors.102"), used)) static ctor_t ctors_2_ptr = ctors_102;
-
 static void ctors_103() { PUTS_LOG("<ctors.103>"); }
+__attribute__((section(".ctors"), used)) static ctor_t ctors_ptr = ctors;
+__attribute__((section(".ctors.101"), used)) static ctor_t ctors_1_ptr = ctors_101;
+__attribute__((section(".ctors.102"), used)) static ctor_t ctors_2_ptr = ctors_102;
 __attribute__((section(".ctors.103"), used)) static ctor_t ctors_3_ptr = ctors_103;
+#elif defined(__APPLE__)
+__attribute__((section("__DATA,__mod_init_func"), used)) static ctor_t ctors_ptr = ctors;
+#endif
 
 __attribute__((destructor)) void fini_array() { PUTS_LOG("<fini_array>"); }
 
@@ -52,17 +53,19 @@ __attribute__((destructor(101))) void fini_array_101() { PUTS_LOG("<fini_array.1
 __attribute__((destructor(102))) void fini_array_102() { PUTS_LOG("<fini_array.102>"); }
 
 __attribute__((destructor(103))) void fini_array_103() { PUTS_LOG("<fini_array.103>"); }
+
 static void dtors() { PUTS_LOG("<dtors>"); }
-__attribute__((section(".dtors"), used)) static dtor_t dtors_ptr = dtors;
-
+#if defined(__linux__)
 static void dtors_101() { PUTS_LOG("<dtors.101>"); }
-__attribute__((section(".dtors.101"), used)) static dtor_t dtors_1_ptr = dtors_101;
-
 static void dtors_102() { PUTS_LOG("<dtors.102>"); }
-__attribute__((section(".dtors.102"), used)) static dtor_t dtors_2_ptr = dtors_102;
-
 static void dtors_103() { PUTS_LOG("<dtors.103>"); }
+__attribute__((section(".dtors"), used)) static dtor_t dtors_ptr = dtors;
+__attribute__((section(".dtors.101"), used)) static dtor_t dtors_1_ptr = dtors_101;
+__attribute__((section(".dtors.102"), used)) static dtor_t dtors_2_ptr = dtors_102;
 __attribute__((section(".dtors.103"), used)) static dtor_t dtors_3_ptr = dtors_103;
+#elif defined(__APPLE__)
+__attribute__((section("__DATA,__mod_term_func"), used)) static dtor_t dtors_ptr = dtors;
+#endif
 
 void main_impl() { PUTS_LOG("<main>"); }
 TVM_FFI_DLL_EXPORT_TYPED_FUNC(main, main_impl);

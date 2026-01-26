@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -278,10 +279,28 @@ def test_ctor_dtor() -> None:
 
     lib.get_function("main")()
     del lib
-    assert (
-        log
-        == "<init_array.101><init_array.102><init_array.103><init_array><ctors.103><ctors.102><ctors.101><ctors><main><dtors><dtors.101><dtors.102><dtors.103><fini_array><fini_array.103><fini_array.102><fini_array.101>"
-    ), log
+
+    if sys.platform == "linux":
+        expected_log = (
+            "<init_array.101><init_array.102><init_array.103><init_array>"
+            "<ctors.103><ctors.102><ctors.101><ctors>"
+            "<main>"
+            "<dtors><dtors.101><dtors.102><dtors.103>"
+            "<fini_array><fini_array.103><fini_array.102><fini_array.101>"
+        )
+    elif sys.platform == "darwin":
+        # macOS skips priority section-based ctors/dtors
+        expected_log = (
+            "<init_array.101><init_array.102><init_array.103><init_array>"
+            "<ctors>"
+            "<main>"
+            "<dtors>"
+            "<fini_array><fini_array.103><fini_array.102><fini_array.101>"
+        )
+    else:
+        pytest.skip(f"Unsupported platform: {sys.platform}")
+
+    assert log == expected_log, log
 
 
 if __name__ == "__main__":
