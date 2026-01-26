@@ -31,6 +31,7 @@
 #include <tvm/ffi/string.h>
 
 #include "orcjit_session.h"
+#include "orcjit_utils.h"
 
 namespace tvm {
 namespace ffi {
