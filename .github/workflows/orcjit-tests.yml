@@ -57,7 +57,6 @@ jobs:
           wget https://apt.llvm.org/llvm.sh
           chmod +x llvm.sh
           sudo ./llvm.sh 18
-          sudo apt-get install -y llvm-18-dev clang-18
           echo "CC=clang-18" >> $GITHUB_ENV
           echo "CXX=clang++-18" >> $GITHUB_ENV
 
@@ -68,6 +67,8 @@ jobs:
           echo "LLVM_DIR=$(brew --prefix llvm@18)" >> $GITHUB_ENV
           echo "CC=$(brew --prefix llvm@18)/bin/clang" >> $GITHUB_ENV
           echo "CXX=$(brew --prefix llvm@18)/bin/clang++" >> $GITHUB_ENV
+          which clang
+          clang -print-runtime-dir
 
       - name: Install uv
         uses: astral-sh/setup-uv@v6
