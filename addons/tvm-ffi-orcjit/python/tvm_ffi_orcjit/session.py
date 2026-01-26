@@ -36,6 +36,7 @@ def _find_orc_rt_library(clang_path: str = "clang") -> str | None:
     """
     arch = platform.machine()
     lib_pattern = f"liborc_rt-{arch}.a"
+    print(f"lib_pattern: {lib_pattern}")
 
     try:
         result = subprocess.run(
