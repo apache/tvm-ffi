@@ -89,6 +89,7 @@ class ORCJITExecutionSessionObj : public Object {
       kFiniArray,
       kFiniArrayWithPriority,
     };
+    llvm::StringRef name;
     llvm::orc::ExecutorAddr address;
     Section section;
     int priority;
