@@ -18,7 +18,6 @@
 
 from __future__ import annotations
 
-import platform
 import subprocess
 from pathlib import Path
 
@@ -34,10 +33,6 @@ def _find_orc_rt_library(clang_path: str = "clang") -> str | None:
     If the path returned by clang -print-runtime-dir does not exist,
     search recursively in the parent directory as a fallback.
     """
-    arch = platform.machine()
-    lib_pattern = f"liborc_rt-{arch}.a"
-    print(f"lib_pattern: {lib_pattern}")
-
     try:
         result = subprocess.run(
             [clang_path, "-print-runtime-dir"],
@@ -48,18 +43,14 @@ def _find_orc_rt_library(clang_path: str = "clang") -> str | None:
         runtime_dir = Path(result.stdout.strip())
 
         if runtime_dir.exists():
-            lib_path = runtime_dir / lib_pattern
-            if lib_path.exists():
-                return str(lib_path)
-            for lib_path in runtime_dir.glob(f"**/liborc_rt*{arch}*"):
+            for lib_path in runtime_dir.glob("liborc_rt*.a"):
                 return str(lib_path)
         else:
-            # Fallback: search recursively in parent directory
+            # For llvm-19 to llvm-21 on linux, the output runtime dir may be incorrect.
+            # Search in the parent directory as a fallback.
             search_dir = runtime_dir.parent
             if search_dir.exists():
-                for lib_path in search_dir.glob(f"**/{lib_pattern}"):
-                    return str(lib_path)
-                for lib_path in search_dir.glob(f"**/liborc_rt*{arch}*"):
+                for lib_path in search_dir.glob("**/liborc_rt*.a"):
                     return str(lib_path)
 
         return None
