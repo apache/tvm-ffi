@@ -17,7 +17,7 @@
 from typing import Any
 
 import pytest
-from tvm_ffi import get_global_func_metadata
+from tvm_ffi import get_global_func_metadata, register_global_func, remove_global_func
 from tvm_ffi.core import TypeInfo, TypeSchema, _lookup_type_attr
 from tvm_ffi.testing import _SchemaAllTypes
 
@@ -161,6 +161,16 @@ def test_metadata_global_func() -> None:
     assert metadata["bool_attr"] is True
     assert metadata["int_attr"] == 1
     assert metadata["str_attr"] == "hello"
+
+
+def test_metadata_empty_for_python_func() -> None:
+    @register_global_func("test.python_func_no_metadata")
+    def simple_func(x: int) -> int:
+        return x + 1
+
+    metadata = get_global_func_metadata("test.python_func_no_metadata")
+    assert metadata == {}
+    remove_global_func("test.python_func_no_metadata")
 
 
 def test_metadata_field() -> None:
