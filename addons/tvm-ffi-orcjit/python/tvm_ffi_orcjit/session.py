@@ -49,7 +49,7 @@ def _find_orc_rt_library(clang_path: str = "clang") -> str | None:
             for lib_path in runtime_dir.glob("liborc_rt*.a"):
                 return str(lib_path)
         else:
-            # For llvm-19 to llvm-21 on linux, the output runtime dir may be incorrect.
+            # For llvm-19, llvm-20, and llvm-21 on linux, the output runtime dir may be incorrect.
             # Search in the parent directory as a fallback.
             search_dir = runtime_dir.parent
             if search_dir.exists():

@@ -67,8 +67,8 @@ jobs:
           echo "LLVM_DIR=$(brew --prefix llvm@18)" >> $GITHUB_ENV
           echo "CC=$(brew --prefix llvm@18)/bin/clang" >> $GITHUB_ENV
           echo "CXX=$(brew --prefix llvm@18)/bin/clang++" >> $GITHUB_ENV
-          which clang
-          clang -print-runtime-dir
+          alias clang=$(brew --prefix llvm@18)/bin/clang
+          alias clang++=$(brew --prefix llvm@18)/bin/clang++
 
       - name: Install uv
         uses: astral-sh/setup-uv@v6
