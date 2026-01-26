@@ -53,6 +53,7 @@ struct LLVMInitializer {
 
 static LLVMInitializer llvm_initializer;
 
+#if defined(__linux__)
 #define ITERATE_SECTION_PER_EDGE(SECTION, BLOCK, EDGE, TARGET, ...) \
   for (auto* BLOCK : SECTION.blocks()) {                            \
     for (auto& EDGE : BLOCK->edges()) {                             \
@@ -203,6 +204,7 @@ class InitFiniPlugin : public llvm::orc::ObjectLinkingLayer::Plugin {
   void notifyTransferringResources(llvm::orc::JITDylib& JD, llvm::orc::ResourceKey DstKey,
                                    llvm::orc::ResourceKey SrcKey) override {}
 };
+#endif
 
 ORCJITExecutionSessionObj::ORCJITExecutionSessionObj(const std::string& orc_rt_path)
     : jit_(nullptr) {

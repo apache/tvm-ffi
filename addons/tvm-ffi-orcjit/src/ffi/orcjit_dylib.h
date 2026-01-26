@@ -54,7 +54,7 @@ class ORCJITDynamicLibraryObj : public ModuleObj {
 #if defined(__linux__)
     session_->RunPendingDeinitializers(GetJITDylib());
 #elif defined(__APPLE__)
-    jit_->deinitialize(*dylib_);
+    call_llvm(jit_->deinitialize(*dylib_), "Failed to deinitialize JITDylib");
 #endif
   };
 

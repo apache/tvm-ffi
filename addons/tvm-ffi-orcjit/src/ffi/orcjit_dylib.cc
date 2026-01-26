@@ -100,7 +100,7 @@ void* ORCJITDynamicLibraryObj::GetSymbol(const String& name) {
 #if defined(__linux__)
   session_->RunPendingInitializers(GetJITDylib());
 #elif defined(__APPLE__)
-  jit_->initialize(*dylib_);
+  call_llvm(jit_->initialize(*dylib_), "Failed to run initializers for JITDylib");
 #endif
   // Convert ExecutorAddr to pointer
   return symbol_or_err ? symbol_or_err->getAddress().toPtr<void*>() : nullptr;
