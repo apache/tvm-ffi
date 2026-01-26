@@ -50,7 +50,13 @@ class ORCJITDynamicLibraryObj : public ModuleObj {
   ORCJITDynamicLibraryObj(ORCJITExecutionSession session, llvm::orc::JITDylib* dylib,
                           llvm::orc::LLJIT* jit, String name);
 
-  ~ORCJITDynamicLibraryObj() { session_->RunPendingDeinitializers(GetJITDylib()); };
+  ~ORCJITDynamicLibraryObj() {
+#if defined(__linux__)
+    session_->RunPendingDeinitializers(GetJITDylib());
+#elif defined(__APPLE__)
+    jit_->deinitialize(*dylib_);
+#endif
+  };
 
   const char* kind() const final { return "orcjit"; }
 
@@ -117,7 +123,7 @@ class ORCJITDynamicLibraryObj : public ModuleObj {
  */
 class ORCJITDynamicLibrary : public Module {
  public:
-  explicit ORCJITDynamicLibrary(const ObjectPtr<ORCJITDynamicLibraryObj>& ptr) : Module(ptr) {};
+  explicit ORCJITDynamicLibrary(const ObjectPtr<ORCJITDynamicLibraryObj>& ptr) : Module(ptr){};
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(ORCJITDynamicLibrary, Module,
                                                 ORCJITDynamicLibraryObj);
 };

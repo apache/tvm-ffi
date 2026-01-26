@@ -94,24 +94,25 @@ class ORCJITExecutionSessionObj : public Object {
     Section section;
     int priority;
   };
-
+#if defined(__linux__)
   void RunPendingInitializers(llvm::orc::JITDylib& jit_dylib);
   void RunPendingDeinitializers(llvm::orc::JITDylib& jit_dylib);
 
   void AddPendingInitializer(llvm::orc::JITDylib* jd, const InitFiniEntry& entry);
   void AddPendingDeinitializer(llvm::orc::JITDylib* jd, const InitFiniEntry& entry);
-
+#endif
  private:
   /*! \brief The LLVM ORC JIT instance */
   std::unique_ptr<llvm::orc::LLJIT> jit_;
 
   /*! \brief Counter for auto-generating library names */
   int dylib_counter_ = 0;
-
+#if defined(__linux__)
   std::unordered_map<llvm::orc::JITDylib*, std::vector<InitFiniEntry>> pending_initializers_;
   std::mutex pending_initializers_mutex_;
   std::unordered_map<llvm::orc::JITDylib*, std::vector<InitFiniEntry>> pending_deinitializers_;
   std::mutex pending_deinitializers_mutex_;
+#endif
 };
 
 /*!

@@ -214,9 +214,11 @@ ORCJITExecutionSessionObj::ORCJITExecutionSessionObj(const std::string& orc_rt_p
   } else {
     jit_ = std::move(call_llvm(llvm::orc::LLJITBuilder().create(), "Failed to create LLJIT"));
   }
+#if defined(__linux__)
   auto& objlayer = jit_->getObjLinkingLayer();
   static_cast<llvm::orc::ObjectLinkingLayer&>(objlayer).addPlugin(
       std::make_unique<InitFiniPlugin>(GetRef<ORCJITExecutionSession>(this)));
+#endif
 }
 
 ORCJITExecutionSession::ORCJITExecutionSession(const std::string& orc_rt_path) {
@@ -262,7 +264,7 @@ llvm::orc::LLJIT& ORCJITExecutionSessionObj::GetLLJIT() {
   TVM_FFI_CHECK(jit_ != nullptr, InternalError) << "ExecutionSession not initialized";
   return *jit_;
 }
-
+#if defined(__linux__)
 using CtorDtor = void (*)();
 
 void ORCJITExecutionSessionObj::RunPendingInitializers(llvm::orc::JITDylib& jit_dylib) {
@@ -334,7 +336,7 @@ void ORCJITExecutionSessionObj::AddPendingDeinitializer(llvm::orc::JITDylib* jit
     pending_deinitializers_[jit_dylib].push_back(entry);
   }
 }
-
+#endif
 }  // namespace orcjit
 }  // namespace ffi
 }  // namespace tvm
