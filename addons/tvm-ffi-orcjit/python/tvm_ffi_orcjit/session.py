@@ -41,6 +41,9 @@ def _find_orc_rt_library(clang_path: str = "clang") -> str | None:
             check=True,
         )
         runtime_dir = Path(result.stdout.strip())
+        print(runtime_dir)
+        print(list(runtime_dir.glob("liborc_rt*.a")))
+        print(list(runtime_dir.parent.glob("**/liborc_rt*.a")))
 
         if runtime_dir.exists():
             for lib_path in runtime_dir.glob("liborc_rt*.a"):
