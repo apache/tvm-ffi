@@ -82,7 +82,7 @@ class InitFiniPlugin : public llvm::orc::ObjectLinkingLayer::Plugin {
             if (Target.hasName()) {
               session_->AddPendingInitializer(
                   &jit_dylib,
-                  {Target.getName(), llvm::orc::ExecutorAddr(0),
+                  {Target.getName().str(), llvm::orc::ExecutorAddr(0),
                    has_priority
                        ? ORCJITExecutionSessionObj::InitFiniEntry::Section::kInitArrayWithPriority
                        : ORCJITExecutionSessionObj::InitFiniEntry::Section::kInitArray,
@@ -93,7 +93,7 @@ class InitFiniPlugin : public llvm::orc::ObjectLinkingLayer::Plugin {
           ITERATE_SECTION_PER_EDGE(Section, Block, Edge, Target, {
             if (Target.hasName()) {
               session_->AddPendingInitializer(
-                  &jit_dylib, {Target.getName(), llvm::orc::ExecutorAddr(0),
+                  &jit_dylib, {Target.getName().str(), llvm::orc::ExecutorAddr(0),
                                ORCJITExecutionSessionObj::InitFiniEntry::Section::kInit, 0});
             }
           });
@@ -106,7 +106,7 @@ class InitFiniPlugin : public llvm::orc::ObjectLinkingLayer::Plugin {
             if (Target.hasName()) {
               session_->AddPendingDeinitializer(
                   &jit_dylib,
-                  {Target.getName(), llvm::orc::ExecutorAddr(0),
+                  {Target.getName().str(), llvm::orc::ExecutorAddr(0),
                    has_priority
                        ? ORCJITExecutionSessionObj::InitFiniEntry::Section::kFiniArrayWithPriority
                        : ORCJITExecutionSessionObj::InitFiniEntry::Section::kFiniArray,
@@ -117,7 +117,7 @@ class InitFiniPlugin : public llvm::orc::ObjectLinkingLayer::Plugin {
           ITERATE_SECTION_PER_EDGE(Section, Block, Edge, Target, {
             if (Target.hasName()) {
               session_->AddPendingDeinitializer(
-                  &jit_dylib, {Target.getName(), llvm::orc::ExecutorAddr(0),
+                  &jit_dylib, {Target.getName().str(), llvm::orc::ExecutorAddr(0),
                                ORCJITExecutionSessionObj::InitFiniEntry::Section::kFini, 0});
             }
           });
