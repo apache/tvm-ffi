@@ -238,13 +238,8 @@ TVM_FFI_INLINE void unpack_call(std::index_sequence<Is...>, const std::string* o
   if constexpr (std::is_same_v<R, void>) {
     f(ArgValueWithContext<std::tuple_element_t<Is, PackedArgs>>{args, Is, optional_name, f_sig}...);
   } else if constexpr (is_expected_v<R>) {
-    R expected_result = f(ArgValueWithContext<std::tuple_element_t<Is, PackedArgs>>{
-        args, Is, optional_name, f_sig}...);
-    if (expected_result.is_ok()) {
-      *rv = std::move(expected_result).value();
-    } else {
-      throw std::move(expected_result).error();
-    }
+    *rv = f(ArgValueWithContext<std::tuple_element_t<Is, PackedArgs>>{args, Is, optional_name,
+                                                                      f_sig}...);
   } else {
     *rv = R(f(ArgValueWithContext<std::tuple_element_t<Is, PackedArgs>>{args, Is, optional_name,
                                                                         f_sig}...));
