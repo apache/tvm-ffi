@@ -16,6 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-pub mod shape;
 /// Collection types
+pub mod array;
+pub mod shape;
 pub mod tensor;
