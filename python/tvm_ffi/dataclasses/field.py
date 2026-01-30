@@ -47,7 +47,7 @@ class Field:
     way the decorator understands.
     """
 
-    __slots__ = ("default_factory", "init", "kw_only", "name", "repr")
+    __slots__ = ("compare", "default_factory", "init", "kw_only", "name", "repr")
 
     def __init__(
         self,
@@ -57,6 +57,7 @@ class Field:
         init: bool = True,
         repr: bool = True,
         kw_only: bool | _MISSING_TYPE = MISSING,
+        compare: bool = True,
     ) -> None:
         """Do not call directly; use :func:`field` instead."""
         self.name = name
@@ -64,6 +65,7 @@ class Field:
         self.init = init
         self.repr = repr
         self.kw_only = kw_only
+        self.compare = compare
 
 
 def field(
@@ -73,6 +75,7 @@ def field(
     init: bool = True,
     repr: bool = True,
     kw_only: bool | _MISSING_TYPE = MISSING,  # type: ignore[assignment]
+    compare: bool = True,
 ) -> _FieldValue:
     """(Experimental) Declare a dataclass-style field on a :func:`c_class` proxy.
 
@@ -101,6 +104,9 @@ def field(
         If ``True``, the field is a keyword-only argument in ``__init__``.
         If ``MISSING``, inherits from the class-level ``kw_only`` setting or
         from a preceding ``KW_ONLY`` sentinel annotation.
+    compare
+        If ``True`` the field is included in equality and ordering comparisons.
+        If ``False`` the field is omitted from comparison methods.
 
     Note
     ----
@@ -162,9 +168,13 @@ def field(
         raise TypeError("`repr` must be a bool")
     if kw_only is not MISSING and not isinstance(kw_only, bool):
         raise TypeError(f"`kw_only` must be a bool, got {type(kw_only).__name__!r}")
+    if not isinstance(compare, bool):
+        raise TypeError("`compare` must be a bool")
     if default is not MISSING:
         default_factory = _make_default_factory(default)
-    ret = Field(default_factory=default_factory, init=init, repr=repr, kw_only=kw_only)
+    ret = Field(
+        default_factory=default_factory, init=init, repr=repr, kw_only=kw_only, compare=compare
+    )
     return cast(_FieldValue, ret)
 
 

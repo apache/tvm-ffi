@@ -122,6 +122,21 @@ def _get_all_fields(type_info: TypeInfo) -> list[TypeField]:
     return fields
 
 
+def _get_compare_fields(type_info: TypeInfo) -> list[str]:
+    """Collect field names that should be included in comparisons.
+
+    Returns a list of field names (in hierarchy order) that have compare=True.
+    """
+    fields = _get_all_fields(type_info)
+    compare_fields: list[str] = []
+    for field in fields:
+        assert field.name is not None
+        assert field.dataclass_field is not None
+        if field.dataclass_field.compare:
+            compare_fields.append(field.name)
+    return compare_fields
+
+
 def method_repr(type_cls: type, type_info: TypeInfo) -> Callable[..., str]:
     """Generate a ``__repr__`` method for the dataclass.
 
@@ -162,7 +177,148 @@ def method_repr(type_cls: type, type_info: TypeInfo) -> Callable[..., str]:
     return __repr__
 
 
-def method_init(_type_cls: type, type_info: TypeInfo) -> Callable[..., None]:
+def method_eq(type_cls: type, type_info: TypeInfo) -> Callable[..., bool]:
+    """Generate an ``__eq__`` method that compares all fields with ``compare=True``.
+
+    The generated method compares all fields with ``compare=True`` in the order
+    they appear in the type hierarchy using tuple comparison.
+    """
+    compare_fields = _get_compare_fields(type_info)
+
+    # Generate the eq method
+    if not compare_fields:
+        # No fields to compare, all instances are equal
+        body_lines = ["return True"]
+    else:
+        # Use tuple comparison for efficiency
+        self_tuple = f"({', '.join(f'self.{f}' for f in compare_fields)},)"
+        other_tuple = f"({', '.join(f'other.{f}' for f in compare_fields)},)"
+        body_lines = [
+            "if not isinstance(other, type(self)):",
+            "    return NotImplemented",
+            f"return {self_tuple} == {other_tuple}",
+        ]
+
+    source_lines = ["def __eq__(self, other: object) -> bool:"]
+    source_lines.extend(f"    {line}" for line in body_lines)
+    source = "\n".join(source_lines)
+
+    # Note: Code generation in this case is guaranteed to be safe,
+    # because the generated code does not contain any untrusted input.
+    namespace: dict[str, Any] = {}
+    exec(source, {}, namespace)
+    __eq__ = namespace["__eq__"]
+    return __eq__
+
+
+def method_ne(type_cls: type, type_info: TypeInfo) -> Callable[..., bool]:
+    """Generate a ``__ne__`` method that compares all fields with ``compare=True``.
+
+    The generated method is the negation of ``__eq__`` using tuple comparison.
+    """
+    compare_fields = _get_compare_fields(type_info)
+
+    # Generate the ne method
+    if not compare_fields:
+        # No fields to compare, all instances are equal, so ne always returns False
+        body_lines = ["return False"]
+    else:
+        # Use tuple comparison for efficiency
+        self_tuple = f"({', '.join(f'self.{f}' for f in compare_fields)},)"
+        other_tuple = f"({', '.join(f'other.{f}' for f in compare_fields)},)"
+        body_lines = [
+            "if not isinstance(other, type(self)):",
+            "    return NotImplemented",
+            f"return {self_tuple} != {other_tuple}",
+        ]
+
+    source_lines = ["def __ne__(self, other: object) -> bool:"]
+    source_lines.extend(f"    {line}" for line in body_lines)
+    source = "\n".join(source_lines)
+
+    # Note: Code generation in this case is guaranteed to be safe,
+    # because the generated code does not contain any untrusted input.
+    namespace: dict[str, Any] = {}
+    exec(source, {}, namespace)
+    __ne__ = namespace["__ne__"]
+    return __ne__
+
+
+def method_order(type_cls: type, type_info: TypeInfo) -> dict[str, Callable[..., bool]]:
+    """Generate ordering methods (``__lt__``, ``__le__``, ``__gt__``, ``__ge__``).
+
+    The generated methods compare all fields with ``compare=True`` in the order
+    they appear in the type hierarchy, using tuple comparison for efficiency.
+    """
+    compare_fields = _get_compare_fields(type_info)
+
+    # Generate __lt__ using tuple comparison
+    if not compare_fields:
+        # No fields to compare, all instances are equal
+        comparison_body = "False"
+    else:
+        # Use tuple comparison for lexicographic ordering
+        self_tuple = f"({', '.join(f'self.{f}' for f in compare_fields)},)"
+        other_tuple = f"({', '.join(f'other.{f}' for f in compare_fields)},)"
+        comparison_body = f"{self_tuple} < {other_tuple}"
+
+    # Generate __lt__
+    source_lines_lt = [
+        "def __lt__(self, other: object) -> bool:",
+        "    if not isinstance(other, type(self)):",
+        "        return NotImplemented",
+        f"    return {comparison_body}",
+    ]
+    source_lt = "\n".join(source_lines_lt)
+    namespace_lt: dict[str, Any] = {}
+    exec(source_lt, {}, namespace_lt)
+    __lt__ = namespace_lt["__lt__"]
+
+    # Generate __le__ (less than or equal)
+    source_lines_le = [
+        "def __le__(self, other: object) -> bool:",
+        "    if not isinstance(other, type(self)):",
+        "        return NotImplemented",
+        "    return self < other or self == other",
+    ]
+    source_le = "\n".join(source_lines_le)
+    namespace_le: dict[str, Any] = {}
+    exec(source_le, {}, namespace_le)
+    __le__ = namespace_le["__le__"]
+
+    # Generate __gt__ (greater than)
+    source_lines_gt = [
+        "def __gt__(self, other: object) -> bool:",
+        "    if not isinstance(other, type(self)):",
+        "        return NotImplemented",
+        "    return other < self",
+    ]
+    source_gt = "\n".join(source_lines_gt)
+    namespace_gt: dict[str, Any] = {}
+    exec(source_gt, {}, namespace_gt)
+    __gt__ = namespace_gt["__gt__"]
+
+    # Generate __ge__ (greater than or equal)
+    source_lines_ge = [
+        "def __ge__(self, other: object) -> bool:",
+        "    if not isinstance(other, type(self)):",
+        "        return NotImplemented",
+        "    return self > other or self == other",
+    ]
+    source_ge = "\n".join(source_lines_ge)
+    namespace_ge: dict[str, Any] = {}
+    exec(source_ge, {}, namespace_ge)
+    __ge__ = namespace_ge["__ge__"]
+
+    return {
+        "__lt__": __lt__,
+        "__le__": __le__,
+        "__gt__": __gt__,
+        "__ge__": __ge__,
+    }
+
+
+def method_init(type_cls: type, type_info: TypeInfo) -> Callable[..., None]:
     """Generate an ``__init__`` that forwards to the FFI constructor.
 
     The generated initializer has a proper Python signature built from the
