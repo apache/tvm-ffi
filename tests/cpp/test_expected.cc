@@ -33,9 +33,9 @@ namespace {
 using namespace tvm::ffi;
 using namespace tvm::ffi::testing;
 
-// Test basic construction with Ok
+// Test implicit construction from success value
 TEST(Expected, BasicOk) {
-  Expected<int> result = ExpectedOk(42);
+  Expected<int> result = 42;
 
   EXPECT_TRUE(result.is_ok());
   EXPECT_FALSE(result.is_err());
@@ -44,9 +44,9 @@ TEST(Expected, BasicOk) {
   EXPECT_EQ(result.value_or(0), 42);
 }
 
-// Test basic construction with Err
+// Test implicit construction from error
 TEST(Expected, BasicErr) {
-  Expected<int> result = ExpectedErr<int>(Error("RuntimeError", "test error", ""));
+  Expected<int> result = Error("RuntimeError", "test error", "");
 
   EXPECT_FALSE(result.is_ok());
   EXPECT_TRUE(result.is_err());
@@ -59,13 +59,13 @@ TEST(Expected, BasicErr) {
 
 // Test value_or with error
 TEST(Expected, ValueOrWithError) {
-  Expected<int> result = ExpectedErr<int>(Error("RuntimeError", "test error", ""));
+  Expected<int> result = Error("RuntimeError", "test error", "");
   EXPECT_EQ(result.value_or(99), 99);
 }
 
 // Test with ObjectRef types
 TEST(Expected, ObjectRefType) {
-  Expected<TInt> result = ExpectedOk(TInt(123));
+  Expected<TInt> result = TInt(123);
 
   EXPECT_TRUE(result.is_ok());
   EXPECT_EQ(result.value()->value, 123);
@@ -73,18 +73,18 @@ TEST(Expected, ObjectRefType) {
 
 // Test with String type
 TEST(Expected, StringType) {
-  Expected<String> result = ExpectedOk(String("hello"));
+  Expected<String> result = String("hello");
 
   EXPECT_TRUE(result.is_ok());
   EXPECT_EQ(result.value(), "hello");
 
-  Expected<String> err_result = ExpectedErr<String>(Error("ValueError", "bad string", ""));
+  Expected<String> err_result = Error("ValueError", "bad string", "");
   EXPECT_TRUE(err_result.is_err());
 }
 
 // Test TypeTraits conversion: Expected -> Any -> Expected
 TEST(Expected, TypeTraitsRoundtrip) {
-  Expected<int> original = ExpectedOk(42);
+  Expected<int> original = 42;
 
   // Convert to Any (should unwrap to int)
   Any any_value = original;
@@ -98,7 +98,7 @@ TEST(Expected, TypeTraitsRoundtrip) {
 
 // Test TypeTraits conversion with Error
 TEST(Expected, TypeTraitsErrorRoundtrip) {
-  Expected<int> original = ExpectedErr<int>(Error("TypeError", "conversion failed", ""));
+  Expected<int> original = Error("TypeError", "conversion failed", "");
 
   // Convert to Any (should unwrap to Error)
   Any any_value = original;
@@ -112,7 +112,7 @@ TEST(Expected, TypeTraitsErrorRoundtrip) {
 
 // Test move semantics
 TEST(Expected, MoveSemantics) {
-  Expected<String> result = ExpectedOk(String("test"));
+  Expected<String> result = String("test");
   EXPECT_TRUE(result.is_ok());
 
   String value = std::move(result).value();
@@ -156,9 +156,9 @@ TEST(Expected, CallExpectedThrowing) {
 TEST(Expected, LambdaDirectCall) {
   auto safe_divide = [](int a, int b) -> Expected<int> {
     if (b == 0) {
-      return ExpectedErr<int>(Error("ValueError", "Division by zero", ""));
+      return Error("ValueError", "Division by zero", "");
     }
-    return ExpectedOk(a / b);
+    return a / b;
   };
 
   // Direct call to lambda should work
@@ -179,9 +179,9 @@ TEST(Expected, LambdaDirectCall) {
 TEST(Expected, RegisterExpectedReturning) {
   auto safe_divide = [](int a, int b) -> Expected<int> {
     if (b == 0) {
-      return ExpectedErr<int>(Error("ValueError", "Division by zero", ""));
+      return Error("ValueError", "Division by zero", "");
     }
-    return ExpectedOk(a / b);
+    return a / b;
   };
 
   // Verify the FunctionInfo extracts Expected<int> as return type
@@ -214,13 +214,13 @@ TEST(Expected, RegisterExpectedReturning) {
 
 // Test Expected with Optional (nested types)
 TEST(Expected, NestedOptional) {
-  Expected<Optional<int>> result = ExpectedOk(Optional<int>(42));
+  Expected<Optional<int>> result = Optional<int>(42);
 
   EXPECT_TRUE(result.is_ok());
   EXPECT_TRUE(result.value().has_value());
   EXPECT_EQ(result.value().value(), 42);
 
-  Expected<Optional<int>> result_none = ExpectedOk(Optional<int>(std::nullopt));
+  Expected<Optional<int>> result_none = Optional<int>(std::nullopt);
   EXPECT_TRUE(result_none.is_ok());
   EXPECT_FALSE(result_none.value().has_value());
 }
@@ -228,7 +228,7 @@ TEST(Expected, NestedOptional) {
 // Test Expected with Array
 TEST(Expected, ArrayType) {
   Array<int> arr{1, 2, 3};
-  Expected<Array<int>> result = ExpectedOk(arr);
+  Expected<Array<int>> result = arr;
 
   EXPECT_TRUE(result.is_ok());
   EXPECT_EQ(result.value().size(), 3);
@@ -239,12 +239,12 @@ TEST(Expected, ArrayType) {
 TEST(Expected, ComplexExample) {
   auto parse_csv = [](const String& input) -> Expected<Array<String>> {
     if (input.size() == 0) {
-      return ExpectedErr<Array<String>>(Error("ValueError", "Empty input", ""));
+      return Error("ValueError", "Empty input", "");
     }
     // Simple split by comma
     Array<String> result;
     result.push_back(input);  // Simplified for test
-    return ExpectedOk(result);
+    return result;
   };
 
   Function::SetGlobal("test.parse_csv", Function::FromTyped(parse_csv));
@@ -260,7 +260,7 @@ TEST(Expected, ComplexExample) {
 
 // Test bad access throws the original error
 TEST(Expected, BadAccessThrowsOriginalError) {
-  Expected<int> result = ExpectedErr<int>(Error("CustomError", "original message", ""));
+  Expected<int> result = Error("CustomError", "original message", "");
   try {
     result.value();
     FAIL() << "Expected Error to be thrown";
@@ -273,13 +273,13 @@ TEST(Expected, BadAccessThrowsOriginalError) {
 
 // Test error() throws RuntimeError on bad access
 TEST(Expected, ErrorBadAccessThrows) {
-  Expected<int> result = ExpectedOk(42);
+  Expected<int> result = 42;
   EXPECT_THROW({ result.error(); }, Error);
 }
 
 // Test rvalue overload for value()
 TEST(Expected, RvalueValueAccess) {
-  auto get_expected = []() -> Expected<String> { return ExpectedOk(String("rvalue test")); };
+  auto get_expected = []() -> Expected<String> { return String("rvalue test"); };
 
   // Call value() on rvalue
   String val = get_expected().value();
@@ -288,9 +288,7 @@ TEST(Expected, RvalueValueAccess) {
 
 // Test rvalue overload for error()
 TEST(Expected, RvalueErrorAccess) {
-  auto get_expected = []() -> Expected<int> {
-    return ExpectedErr<int>(Error("TestError", "rvalue error", ""));
-  };
+  auto get_expected = []() -> Expected<int> { return Error("TestError", "rvalue error", ""); };
 
   // Call error() on rvalue
   Error err = get_expected().error();
@@ -303,14 +301,14 @@ TEST(Expected, RvalueErrorAccess) {
 TEST(Expected, ObjectRefInheritance) {
   // Expected<ObjectRef> with an actual ObjectRef value
   ObjectRef obj = TInt(100);
-  Expected<ObjectRef> result_ok = ExpectedOk<ObjectRef>(obj);
+  Expected<ObjectRef> result_ok(obj);
 
   EXPECT_TRUE(result_ok.is_ok());
   EXPECT_FALSE(result_ok.is_err());
   EXPECT_TRUE(result_ok.value().defined());
 
   // Expected<ObjectRef> with an error
-  Expected<ObjectRef> result_err = ExpectedErr<ObjectRef>(Error("TestError", "test", ""));
+  Expected<ObjectRef> result_err = Error("TestError", "test", "");
 
   EXPECT_FALSE(result_err.is_ok());
   EXPECT_TRUE(result_err.is_err());

@@ -671,19 +671,19 @@ class Function : public ObjectRef {
 
     if (ret_code == 0) {
       if constexpr (std::is_same_v<T, Any>) {
-        return Expected<T>::Ok(std::move(result));
+        return std::move(result);
       } else {
         // Check if result is Error (from Expected-returning function that returned Err)
         if (result.template as<Error>().has_value()) {
-          return Expected<T>::Err(std::move(result).template cast<Error>());
+          return std::move(result).template cast<Error>();
         }
         // Try to extract as T
         if (auto val = std::move(result).template as<T>()) {
-          return Expected<T>::Ok(std::move(*val));
+          return std::move(*val);
         }
-        return Expected<T>::Err(
-            Error("TypeError",
-                  "CallExpected: result type mismatch, expected " + TypeTraits<T>::TypeStr(), ""));
+        return Error("TypeError",
+                     "CallExpected: result type mismatch, expected " + TypeTraits<T>::TypeStr(),
+                     "");
       }
     } else if (ret_code == -2) {
       // Environment error already set (e.g., Python KeyboardInterrupt)
@@ -691,7 +691,7 @@ class Function : public ObjectRef {
       throw ::tvm::ffi::EnvErrorAlreadySet();
     } else {
       // Error occurred - retrieve from safe call context and return Err
-      return Expected<T>::Err(details::MoveFromSafeCallRaised());
+      return details::MoveFromSafeCallRaised();
     }
   }
 
