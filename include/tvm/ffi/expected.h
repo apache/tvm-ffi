@@ -67,13 +67,15 @@ class Expected {
    * \brief Implicit constructor from a success value.
    * \param value The success value.
    */
-  Expected(T value) : data_(Any(std::move(value))) {}  // NOLINT(runtime/explicit)
+  // NOLINTNEXTLINE(google-explicit-constructor,runtime/explicit)
+  Expected(T value) : data_(Any(std::move(value))) {}
 
   /*!
    * \brief Implicit constructor from an error.
    * \param error The error value.
    */
-  Expected(Error error) : data_(Any(std::move(error))) {}  // NOLINT(runtime/explicit)
+  // NOLINTNEXTLINE(google-explicit-constructor,runtime/explicit)
+  Expected(Error error) : data_(Any(std::move(error))) {}
 
   /*!
    * \brief Check if the Expected contains a success value.
