@@ -45,9 +45,9 @@ namespace ffi {
  * \code
  * Expected<int> divide(int a, int b) {
  *   if (b == 0) {
- *     return ExpectedErr(Error("ValueError", "Division by zero"));
+ *     return Error("ValueError", "Division by zero");
  *   }
- *   return ExpectedOk(a / b);
+ *   return a / b;
  * }
  *
  * Expected<int> result = divide(10, 2);
@@ -64,18 +64,16 @@ class Expected {
   static_assert(!std::is_same_v<T, Error>, "Expected<Error> is not allowed. Use Error directly.");
 
   /*!
-   * \brief Create an Expected with a success value.
+   * \brief Implicit constructor from a success value.
    * \param value The success value.
-   * \return Expected containing the success value.
    */
-  static Expected Ok(T value) { return Expected(Any(std::move(value))); }
+  Expected(T value) : data_(Any(std::move(value))) {}  // NOLINT(runtime/explicit)
 
   /*!
-   * \brief Create an Expected with an error.
+   * \brief Implicit constructor from an error.
    * \param error The error value.
-   * \return Expected containing the error.
    */
-  static Expected Err(Error error) { return Expected(Any(std::move(error))); }
+  Expected(Error error) : data_(Any(std::move(error))) {}  // NOLINT(runtime/explicit)
 
   /*!
    * \brief Check if the Expected contains a success value.
@@ -132,42 +130,8 @@ class Expected {
   }
 
  private:
-  friend struct TypeTraits<Expected<T>>;
-
-  /*!
-   * \brief Private constructor from Any.
-   * \param data The data containing either T or Error.
-   * \note This constructor is used by TypeTraits for conversion.
-   */
-  explicit Expected(Any data) : data_(std::move(data)) {
-    TVM_FFI_ICHECK(data_.as<T>().has_value() || data_.as<Error>().has_value())
-        << "Expected must contain either T or Error";
-  }
-
   Any data_;  // Holds either T or Error
 };
-
-/*!
- * \brief Helper function to create Expected::Ok with type deduction.
- * \tparam T The success type (deduced from argument).
- * \param value The success value.
- * \return Expected<T> containing the success value.
- */
-template <typename T>
-TVM_FFI_INLINE Expected<T> ExpectedOk(T value) {
-  return Expected<T>::Ok(std::move(value));
-}
-
-/*!
- * \brief Helper function to create Expected::Err.
- * \tparam T The success type (must be explicitly specified).
- * \param error The error value.
- * \return Expected<T> containing the error.
- */
-template <typename T>
-TVM_FFI_INLINE Expected<T> ExpectedErr(Error error) {
-  return Expected<T>::Err(std::move(error));
-}
 
 // TypeTraits specialization for Expected<T>
 template <typename T>
@@ -197,24 +161,24 @@ struct TypeTraits<Expected<T>> : public TypeTraitsBase {
 
   TVM_FFI_INLINE static Expected<T> CopyFromAnyViewAfterCheck(const TVMFFIAny* src) {
     if (TypeTraits<T>::CheckAnyStrict(src)) {
-      return Expected<T>::Ok(TypeTraits<T>::CopyFromAnyViewAfterCheck(src));
+      return TypeTraits<T>::CopyFromAnyViewAfterCheck(src);
     }
-    return Expected<T>::Err(TypeTraits<Error>::CopyFromAnyViewAfterCheck(src));
+    return TypeTraits<Error>::CopyFromAnyViewAfterCheck(src);
   }
 
   TVM_FFI_INLINE static Expected<T> MoveFromAnyAfterCheck(TVMFFIAny* src) {
     if (TypeTraits<T>::CheckAnyStrict(src)) {
-      return Expected<T>::Ok(TypeTraits<T>::MoveFromAnyAfterCheck(src));
+      return TypeTraits<T>::MoveFromAnyAfterCheck(src);
     }
-    return Expected<T>::Err(TypeTraits<Error>::MoveFromAnyAfterCheck(src));
+    return TypeTraits<Error>::MoveFromAnyAfterCheck(src);
   }
 
   TVM_FFI_INLINE static std::optional<Expected<T>> TryCastFromAnyView(const TVMFFIAny* src) {
     if (auto opt = TypeTraits<T>::TryCastFromAnyView(src)) {
-      return Expected<T>::Ok(*std::move(opt));
+      return Expected<T>(*std::move(opt));
     }
     if (auto opt_err = TypeTraits<Error>::TryCastFromAnyView(src)) {
-      return Expected<T>::Err(*std::move(opt_err));
+      return Expected<T>(*std::move(opt_err));
     }
     return std::nullopt;
   }
