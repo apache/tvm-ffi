@@ -37,8 +37,10 @@ namespace ffi {
  * \brief Wrapper to explicitly construct an Expected in the error state.
  */
 struct Unexpected {
+  /*! \brief Construct from an error. */
   // NOLINTNEXTLINE(google-explicit-constructor,runtime/explicit)
   Unexpected(Error error) : error_(std::move(error)) {}
+  /*! \brief The wrapped error. */
   Error error_;
 };
 
