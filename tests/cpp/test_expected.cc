@@ -57,6 +57,16 @@ TEST(Expected, BasicErr) {
   EXPECT_EQ(err.message(), "test error");
 }
 
+// Test explicit construction via Unexpected wrapper
+TEST(Expected, UnexpectedWrapper) {
+  Expected<int> result = Unexpected(Error("RuntimeError", "unexpected error", ""));
+
+  EXPECT_FALSE(result.is_ok());
+  EXPECT_TRUE(result.is_err());
+  EXPECT_EQ(result.error().kind(), "RuntimeError");
+  EXPECT_EQ(result.error().message(), "unexpected error");
+}
+
 // Test value_or with error
 TEST(Expected, ValueOrWithError) {
   Expected<int> result = Error("RuntimeError", "test error", "");
