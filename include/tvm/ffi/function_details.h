@@ -34,6 +34,11 @@
 
 namespace tvm {
 namespace ffi {
+
+// Forward declaration for Expected<T>
+template <typename T>
+class Expected;
+
 namespace details {
 
 template <typename ArgType>
@@ -66,6 +71,19 @@ static constexpr bool ArgSupported =
      (std::is_same_v<std::remove_const_t<std::remove_reference_t<T>>, Any> ||
       std::is_same_v<std::remove_const_t<std::remove_reference_t<T>>, AnyView> ||
       TypeTraitsNoCR<T>::convert_enabled));
+
+template <typename T>
+struct is_expected : std::false_type {
+  using value_type = void;
+};
+
+template <typename T>
+struct is_expected<Expected<T>> : std::true_type {
+  using value_type = T;
+};
+
+template <typename T>
+inline constexpr bool is_expected_v = is_expected<T>::value;
 
 // NOTE: return type can only support non-reference managed returns
 template <typename T>
@@ -219,6 +237,9 @@ TVM_FFI_INLINE void unpack_call(std::index_sequence<Is...>, const std::string* o
   // use index sequence to do recursive-less unpacking
   if constexpr (std::is_same_v<R, void>) {
     f(ArgValueWithContext<std::tuple_element_t<Is, PackedArgs>>{args, Is, optional_name, f_sig}...);
+  } else if constexpr (is_expected_v<R>) {
+    *rv = f(ArgValueWithContext<std::tuple_element_t<Is, PackedArgs>>{args, Is, optional_name,
+                                                                      f_sig}...);
   } else {
     *rv = R(f(ArgValueWithContext<std::tuple_element_t<Is, PackedArgs>>{args, Is, optional_name,
                                                                         f_sig}...));
