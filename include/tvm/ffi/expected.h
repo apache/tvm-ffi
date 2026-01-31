@@ -34,6 +34,15 @@ namespace tvm {
 namespace ffi {
 
 /*!
+ * \brief Wrapper to explicitly construct an Expected in the error state.
+ */
+struct Unexpected {
+  // NOLINTNEXTLINE(google-explicit-constructor,runtime/explicit)
+  Unexpected(Error error) : error_(std::move(error)) {}
+  Error error_;
+};
+
+/*!
  * \brief Expected<T> provides exception-free error handling for FFI functions.
  *
  * Expected<T> is similar to Rust's Result<T, Error> or C++23's std::expected.
@@ -76,6 +85,13 @@ class Expected {
    */
   // NOLINTNEXTLINE(google-explicit-constructor,runtime/explicit)
   Expected(Error error) : data_(Any(std::move(error))) {}
+
+  /*!
+   * \brief Implicit constructor from an Unexpected wrapper.
+   * \param unexpected The unexpected-wrapped error value.
+   */
+  // NOLINTNEXTLINE(google-explicit-constructor,runtime/explicit)
+  Expected(Unexpected unexpected) : data_(Any(std::move(unexpected.error_))) {}
 
   /*!
    * \brief Check if the Expected contains a success value.
