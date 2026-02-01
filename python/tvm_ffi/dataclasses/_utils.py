@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import copy as copy_module
 import functools
 from dataclasses import MISSING
 from typing import Any, Callable, Type, TypeVar, cast
@@ -120,6 +121,39 @@ def _get_all_fields(type_info: TypeInfo) -> list[TypeField]:
         cur_type_info = cur_type_info.parent_type_info
     fields.reverse()
     return fields
+
+
+def _classify_fields_for_copy(
+    type_info: TypeInfo,
+) -> tuple[list[str], list[str], list[str]]:
+    """Classify fields for copy/replace operations.
+
+    Returns:
+        Tuple of (ffi_arg_order, init_fields, non_init_fields):
+        - ffi_arg_order: Fields passed to FFI constructor
+        - init_fields: Fields with init=True (replaceable)
+        - non_init_fields: Fields with init=False
+
+    """
+    fields = _get_all_fields(type_info)
+    ffi_arg_order: list[str] = []
+    init_fields: list[str] = []
+    non_init_fields: list[str] = []
+
+    for field in fields:
+        assert field.name is not None
+        assert field.dataclass_field is not None
+        dataclass_field = field.dataclass_field
+
+        if dataclass_field.init:
+            init_fields.append(field.name)
+            ffi_arg_order.append(field.name)
+        elif dataclass_field.default_factory is not MISSING:
+            ffi_arg_order.append(field.name)
+        else:
+            non_init_fields.append(field.name)
+
+    return ffi_arg_order, init_fields, non_init_fields
 
 
 def method_repr(type_cls: type, type_info: TypeInfo) -> Callable[..., str]:
@@ -243,3 +277,92 @@ def method_init(_type_cls: type, type_info: TypeInfo) -> Callable[..., None]:
     exec(source, exec_globals, namespace)
     __init__ = namespace["__init__"]
     return __init__
+
+
+def method_copy(_type_cls: type, type_info: TypeInfo) -> Callable[..., Any]:
+    """Generate a ``__copy__`` method for the dataclass (shallow copy).
+
+    The generated method creates a shallow copy by calling the FFI constructor
+    directly with the current field values (bypassing custom Python __init__).
+    """
+    ffi_arg_order, _, non_init_fields = _classify_fields_for_copy(type_info)
+
+    body_lines: list[str] = []
+    if ffi_arg_order:
+        ffi_args = ", ".join(f"self.{name}" for name in ffi_arg_order)
+        body_lines.append(f"new_obj = type(self).__c_ffi_init__({ffi_args})")
+    else:
+        body_lines.append("new_obj = type(self).__c_ffi_init__()")
+    for name in non_init_fields:
+        body_lines.append(f"new_obj.{name} = self.{name}")
+    body_lines.append("return new_obj")
+
+    source_lines = ["def __copy__(self):"]
+    source_lines.extend(f"    {line}" for line in body_lines)
+    source = "\n".join(source_lines)
+
+    namespace: dict[str, Any] = {}
+    exec(source, {}, namespace)
+    return namespace["__copy__"]
+
+
+def method_deepcopy(_type_cls: type, type_info: TypeInfo) -> Callable[..., Any]:
+    """Generate a ``__deepcopy__`` method for the dataclass.
+
+    The generated method creates a deep copy using copy.deepcopy for field values,
+    handling circular references via the memo dictionary.
+    """
+    ffi_arg_order, _, non_init_fields = _classify_fields_for_copy(type_info)
+
+    body_lines: list[str] = []
+    if ffi_arg_order:
+        ffi_args = ", ".join(f"_copy_deepcopy(self.{name}, memo)" for name in ffi_arg_order)
+        body_lines.append(f"new_obj = type(self).__c_ffi_init__({ffi_args})")
+    else:
+        body_lines.append("new_obj = type(self).__c_ffi_init__()")
+    body_lines.append("memo[id(self)] = new_obj")
+    for name in non_init_fields:
+        body_lines.append(f"new_obj.{name} = _copy_deepcopy(self.{name}, memo)")
+    body_lines.append("return new_obj")
+
+    source_lines = ["def __deepcopy__(self, memo):"]
+    source_lines.extend(f"    {line}" for line in body_lines)
+    source = "\n".join(source_lines)
+
+    exec_globals: dict[str, Any] = {"_copy_deepcopy": copy_module.deepcopy}
+    namespace: dict[str, Any] = {}
+    exec(source, exec_globals, namespace)
+    return namespace["__deepcopy__"]
+
+
+def method_replace(_type_cls: type, type_info: TypeInfo) -> Callable[..., Any]:
+    """Generate a ``__replace__`` method for the dataclass.
+
+    The generated method returns a new instance with specified fields replaced.
+    Only fields with init=True can be changed. Fields with init=False are copied unchanged.
+    """
+    ffi_arg_order, init_fields, non_init_fields = _classify_fields_for_copy(type_info)
+
+    body_lines: list[str] = []
+    body_lines.append("for key in changes:")
+    body_lines.append("    if key not in _valid_fields:")
+    body_lines.append(
+        "        raise TypeError(f\"__replace__() got an unexpected keyword argument '{key}'\")"
+    )
+    if ffi_arg_order:
+        ffi_args = ", ".join(f"changes.get('{name}', self.{name})" for name in ffi_arg_order)
+        body_lines.append(f"new_obj = type(self).__c_ffi_init__({ffi_args})")
+    else:
+        body_lines.append("new_obj = type(self).__c_ffi_init__()")
+    for name in non_init_fields:
+        body_lines.append(f"new_obj.{name} = self.{name}")
+    body_lines.append("return new_obj")
+
+    source_lines = ["def __replace__(self, **changes):"]
+    source_lines.extend(f"    {line}" for line in body_lines)
+    source = "\n".join(source_lines)
+
+    exec_globals: dict[str, Any] = {"_valid_fields": frozenset(init_fields)}
+    namespace: dict[str, Any] = {}
+    exec(source, exec_globals, namespace)
+    return namespace["__replace__"]

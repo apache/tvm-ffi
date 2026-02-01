@@ -147,10 +147,28 @@ def c_class(
         # Step 3. Create the proxy class with the fields as properties
         fn_init = _utils.method_init(super_type_cls, type_info) if init else None
         fn_repr = _utils.method_repr(super_type_cls, type_info) if repr else None
+
+        # Generate copy methods unless user has defined them
+        fn_copy = None
+        fn_deepcopy = None
+        fn_replace = None
+        if "__copy__" not in super_type_cls.__dict__:
+            fn_copy = _utils.method_copy(super_type_cls, type_info)
+        if "__deepcopy__" not in super_type_cls.__dict__:
+            fn_deepcopy = _utils.method_deepcopy(super_type_cls, type_info)
+        if "__replace__" not in super_type_cls.__dict__:
+            fn_replace = _utils.method_replace(super_type_cls, type_info)
+
         type_cls: Type[_InputClsType] = _utils.type_info_to_cls(  # noqa: UP006
             type_info=type_info,
             cls=super_type_cls,
-            methods={"__init__": fn_init, "__repr__": fn_repr},
+            methods={
+                "__init__": fn_init,
+                "__repr__": fn_repr,
+                "__copy__": fn_copy,
+                "__deepcopy__": fn_deepcopy,
+                "__replace__": fn_replace,
+            },
         )
         _set_type_cls(type_info, type_cls)
         return type_cls
