@@ -206,8 +206,8 @@ Traceback (most recent call last):
 File "example.py", line 7, in <module>
   test_raise_error("ValueError", "message")
   ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
-File "python/tvm_ffi/cython/function.pxi", line 325, in core.Function.__call__
-  raise move_from_last_error().py_error()
+File "python/tvm_ffi/cython/function.pxi", line 927, in tvm_ffi.core.Function.__call__
+  raise error.py_error()
   ^^^
 File "src/ffi/extra/testing.cc", line 60, in void tvm::ffi::TestRaiseError(tvm::ffi::String, tvm::ffi::String)
   throw ffi::Error(kind, msg, TVMFFITraceback(__FILE__, __LINE__, TVM_FFI_FUNC_SIG, 0));

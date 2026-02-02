@@ -153,7 +153,11 @@ cdef inline int CHECK_CALL(int ret) except -2:
     """Check the return code of the C API function call"""
     if ret == 0:
         return 0
-    # -2 brings exception
+    # backward compact with error already set case
+    # TODO(tqchen): remove after we move beyond a few versions.
     if ret == -2:
         raise raise_existing_error()
-    raise move_from_last_error().py_error()
+    error = move_from_last_error()
+    if error.kind == "EnvErrorAlreadySet":
+        raise raise_existing_error()
+    raise error.py_error()

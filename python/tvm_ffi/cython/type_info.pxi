@@ -55,9 +55,16 @@ cdef class FieldSetter:
         # directly inline here to simplify backtrace
         if c_api_ret_code == 0:
             return
-        elif c_api_ret_code == -2:
-            raise_existing_error()
-        raise move_from_last_error().py_error()
+        # backward compact with error already set case
+        # TODO(tqchen): remove after we move beyond a few versions.
+        if c_api_ret_code == -2:
+            raise raise_existing_error()
+        # epecial handle env error already set
+        error = move_from_last_error()
+        if error.kind == "EnvErrorAlreadySet":
+            raise raise_existing_error()
+        raise error.py_error()
+
 
 _TYPE_SCHEMA_ORIGIN_CONVERTER = {
     # A few Python-native types

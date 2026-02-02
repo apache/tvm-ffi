@@ -225,7 +225,6 @@ that the caller must zero-initialize before the call.
 
 - **Error code 0**: Success
 - **Error code -1**: Error occurred, retrievable with :cpp:func:`TVMFFIErrorMoveFromRaised`
-- **Error code -2**: Very rare frontend error
 
 .. hint::
   See :doc:`Any <any>` for more details on the semantics of :cpp:type:`tvm::ffi::AnyView` and :cpp:type:`tvm::ffi::Any`.
@@ -326,10 +325,18 @@ An :cpp:class:`~tvm::ffi::ErrorObj` is stored in thread-local storage (TLS) and 
 with :cpp:func:`TVMFFIErrorMoveFromRaised`.
 
 - **Error code -1:** Retrieve the error from TLS, print it, and release via :cpp:func:`TVMFFIObjectDecRef`.
-- **Error code -2:** A rare frontend error; consult the frontend's error mechanism instead of TLS.
 
 To raise an error, use :cpp:func:`TVMFFIErrorSetRaisedFromCStr` to set the TLS error and return ``-1``.
 For chains of calls, simply propagate return codes - TLS carries the error details.
+
+
+.. note::
+
+  In the very rare case, the error kind can be ``EnvErrorAlreadySet``,
+  which indicates that an error has already been set in the frontend environment.
+  In this case, the caller (python binding) should raise the error stored in the
+  frontend environment. This is handled by the our python package so
+  you generally do not need to handle this case explicitly.
 
 See :ref:`abi-exception` for C code examples.
 

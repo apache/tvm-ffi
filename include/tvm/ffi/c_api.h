@@ -436,7 +436,6 @@ typedef struct {
  *  Possible return error of the API functions:
  *  * 0: success
  *  * -1: error happens, can be retrieved by TVMFFIErrorMoveFromRaised
- *  * -2: a frontend error occurred and recorded in the frontend.
  *
  * \note We decided to leverage TVMFFIErrorMoveFromRaised and TVMFFIErrorSetRaised
  *  for C function error propagation. This design choice, while
