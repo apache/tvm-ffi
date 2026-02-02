@@ -35,14 +35,34 @@ namespace ffi {
 
 /*!
  * \brief Wrapper to explicitly construct an Expected in the error state.
+ * \tparam E The error type, must derive from Error.
  */
-struct Unexpected {
-  /*! \brief Construct from an error. */
-  // NOLINTNEXTLINE(google-explicit-constructor,runtime/explicit)
-  Unexpected(Error error) : error_(std::move(error)) {}
-  /*! \brief The wrapped error. */
-  Error error_;
+template <typename E = Error>
+class Unexpected {
+  static_assert(std::is_base_of_v<Error, std::remove_cv_t<E>>,
+                "Unexpected<E> requires E to be Error or a subclass of Error.");
+
+ public:
+  /*! \brief Construct from an error value. */
+  explicit Unexpected(E error) : error_(std::move(error)) {}
+
+  /*! \brief Access the stored error. */
+  const E& error() const& noexcept { return error_; }
+  /*! \brief Access the stored error. */
+  E& error() & noexcept { return error_; }
+  /*! \brief Access the stored error (rvalue). */
+  const E&& error() const&& noexcept { return std::move(error_); }
+  /*! \brief Access the stored error (rvalue). */
+  E&& error() && noexcept { return std::move(error_); }
+
+ private:
+  E error_;
 };
+
+#ifndef TVM_FFI_DOXYGEN_MODE
+template <typename E>
+Unexpected(E) -> Unexpected<E>;
+#endif
 
 /*!
  * \brief Expected<T> provides exception-free error handling for FFI functions.
@@ -88,12 +108,10 @@ class Expected {
   // NOLINTNEXTLINE(google-explicit-constructor,runtime/explicit)
   Expected(Error error) : data_(Any(std::move(error))) {}
 
-  /*!
-   * \brief Implicit constructor from an Unexpected wrapper.
-   * \param unexpected The unexpected-wrapped error value.
-   */
+  /*! \brief Implicit constructor from an Unexpected wrapper. */
+  template <typename E, typename = std::enable_if_t<std::is_base_of_v<Error, std::remove_cv_t<E>>>>
   // NOLINTNEXTLINE(google-explicit-constructor,runtime/explicit)
-  Expected(Unexpected unexpected) : data_(Any(std::move(unexpected.error_))) {}
+  Expected(Unexpected<E> unexpected) : data_(Any(Error(std::move(unexpected).error()))) {}
 
   /*!
    * \brief Check if the Expected contains a success value.

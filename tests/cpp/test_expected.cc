@@ -67,6 +67,18 @@ TEST(Expected, UnexpectedWrapper) {
   EXPECT_EQ(result.error().message(), "unexpected error");
 }
 
+// Test Unexpected deduction guide and error() accessor
+TEST(Expected, UnexpectedAPI) {
+  auto u = Unexpected(Error("TypeError", "type mismatch", ""));
+  static_assert(std::is_same_v<decltype(u), Unexpected<Error>>);
+
+  EXPECT_EQ(u.error().kind(), "TypeError");
+  EXPECT_EQ(u.error().message(), "type mismatch");
+
+  Error moved_err = std::move(u).error();
+  EXPECT_EQ(moved_err.kind(), "TypeError");
+}
+
 // Test value_or with error
 TEST(Expected, ValueOrWithError) {
   Expected<int> result = Error("RuntimeError", "test error", "");
