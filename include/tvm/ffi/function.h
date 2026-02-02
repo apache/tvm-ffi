@@ -678,11 +678,12 @@ class Function : public ObjectRef {
           return std::move(result).template cast<Error>();
         }
         // Try to extract as T
-        if (auto val = std::move(result).template as<T>()) {
+        if (auto val = result.template try_cast<T>()) {
           return std::move(*val);
         }
         return Error("TypeError",
-                     "CallExpected: result type mismatch, expected " + TypeTraits<T>::TypeStr(),
+                     "CallExpected: result type mismatch, expected " + TypeTraits<T>::TypeStr() +
+                         ", but got " + result.GetTypeKey(),
                      "");
       }
     } else if (ret_code == -2) {
