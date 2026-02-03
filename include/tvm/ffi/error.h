@@ -61,26 +61,6 @@ namespace tvm {
 namespace ffi {
 
 /*!
- * \brief Error already set in frontend env.
- *
- *  This error can be thrown by EnvCheckSignals to indicate
- *  that there is an error set in the frontend environment(e.g.
- *  python interpreter). The TVM FFI should catch this error
- *  and return a proper code to tell the frontend caller about
- *  this fact.
- *
- * \code{.cpp}
- * void ExampleLongRunningFunction() {
- *   if (TVMFFIEnvCheckSignals() != 0) {
- *     throw ::tvm::ffi::EnvErrorAlreadySet();
- *   }
- *   // do work here
- * }
- * \endcode
- */
-struct EnvErrorAlreadySet : public std::exception {};
-
-/*!
  * \brief Error object class.
  */
 class ErrorObj : public Object, public TVMFFIErrorCell {
@@ -316,6 +296,24 @@ class Error : public ObjectRef, public std::exception {
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(Error, ObjectRef, ErrorObj);
   /// \endcond
 };
+
+/*!
+ * \brief Error object for EnvErrorAlreadySet
+ *
+ *  This error can be thrown by EnvCheckSignals to indicate
+ *  that there is an error set in the frontend environment(e.g.
+ *  python interpreter).
+ *
+ * \code{.cpp}
+ * void ExampleLongRunningFunction() {
+ *   if (TVMFFIEnvCheckSignals() != 0) {
+ *     throw ::tvm::ffi::EnvErrorAlreadySet();
+ *   }
+ *   // do work here
+ * }
+ * \endcode
+ */
+inline Error EnvErrorAlreadySet() { return Error("EnvErrorAlreadySet", "", ""); }
 
 namespace details {
 

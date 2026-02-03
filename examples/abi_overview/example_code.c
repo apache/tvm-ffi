@@ -273,10 +273,6 @@ void Error_HandleReturnCode(int rc) {
       // IMPORTANT: Release the error object, or gets memory leaks
       TVMFFIObjectDecRef(err);
     }
-  } else if (rc == -2) {
-    // Frontend (e.g., Python) already has an exception set.
-    // Do not fetch from TLS; consult the frontend's error mechanism.
-    return;
   }
 }
 // [Error.HandleReturnCode.end]
