@@ -237,9 +237,6 @@ TVM_FFI_INLINE void unpack_call(std::index_sequence<Is...>, const std::string* o
   // use index sequence to do recursive-less unpacking
   if constexpr (std::is_same_v<R, void>) {
     f(ArgValueWithContext<std::tuple_element_t<Is, PackedArgs>>{args, Is, optional_name, f_sig}...);
-  } else if constexpr (is_expected_v<R>) {
-    *rv = f(ArgValueWithContext<std::tuple_element_t<Is, PackedArgs>>{args, Is, optional_name,
-                                                                      f_sig}...);
   } else {
     *rv = R(f(ArgValueWithContext<std::tuple_element_t<Is, PackedArgs>>{args, Is, optional_name,
                                                                         f_sig}...));

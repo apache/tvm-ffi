@@ -41,6 +41,7 @@
 #include <tvm/ffi/base_details.h>
 #include <tvm/ffi/c_api.h>
 #include <tvm/ffi/error.h>
+#include <tvm/ffi/expected.h>
 #include <tvm/ffi/function_details.h>
 
 #include <functional>
@@ -673,26 +674,20 @@ class Function : public ObjectRef {
       if constexpr (std::is_same_v<T, Any>) {
         return std::move(result);
       } else {
-        // Check if result is Error (from Expected-returning function that returned Err)
-        if (result.template as<Error>().has_value()) {
-          return std::move(result).template cast<Error>();
-        }
-        // Try to extract as T
+        // Try T first (fast path), then Error
         if (auto val = result.template try_cast<T>()) {
-          return std::move(*val);
+          return *std::move(val);
         }
-        return Error("TypeError",
-                     "CallExpected: result type mismatch, expected " + TypeTraits<T>::TypeStr() +
-                         ", but got " + result.GetTypeKey(),
-                     "");
+        if (auto err = result.template try_cast<Error>()) {
+          return Unexpected(std::move(*err));
+        }
+        return Unexpected(Error("TypeError",
+                                "CallExpected: result type mismatch, expected " +
+                                    TypeTraits<T>::TypeStr() + ", but got " + result.GetTypeKey(),
+                                ""));
       }
-    } else if (ret_code == -2) {
-      // Environment error already set (e.g., Python KeyboardInterrupt)
-      // We still throw this since it's a signal, not a normal error
-      throw ::tvm::ffi::EnvErrorAlreadySet();
     } else {
-      // Error occurred - retrieve from safe call context and return Err
-      return details::MoveFromSafeCallRaised();
+      return Unexpected(details::MoveFromSafeCallRaised());
     }
   }
 
