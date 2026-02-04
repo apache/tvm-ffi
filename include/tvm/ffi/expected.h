@@ -111,7 +111,7 @@ class Expected {
   /*! \brief Implicit constructor from an Unexpected wrapper. */
   template <typename E, typename = std::enable_if_t<std::is_base_of_v<Error, std::remove_cv_t<E>>>>
   // NOLINTNEXTLINE(google-explicit-constructor,runtime/explicit)
-  Expected(Unexpected<E> unexpected) : data_(Any(Error(std::move(unexpected).error()))) {}
+  Expected(Unexpected<E> unexpected) : data_(Any(std::move(unexpected).error())) {}
 
   /*!
    * \brief Check if the Expected contains a success value.
