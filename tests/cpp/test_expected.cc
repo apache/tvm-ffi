@@ -210,8 +210,6 @@ TEST(Expected, RegisterExpectedReturning) {
   using FuncInfo = tvm::ffi::details::FunctionInfo<decltype(safe_divide)>;
   static_assert(std::is_same_v<FuncInfo::RetType, Expected<int>>,
                 "Return type should be Expected<int>");
-  static_assert(tvm::ffi::details::is_expected_v<FuncInfo::RetType>,
-                "RetType should be detected as Expected");
 
   Function::SetGlobal("test.safe_divide3", Function::FromTyped(safe_divide));
 

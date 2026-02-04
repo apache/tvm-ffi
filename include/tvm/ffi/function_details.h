@@ -82,9 +82,6 @@ struct is_expected<Expected<T>> : std::true_type {
   using value_type = T;
 };
 
-template <typename T>
-inline constexpr bool is_expected_v = is_expected<T>::value;
-
 // NOTE: return type can only support non-reference managed returns
 template <typename T>
 static constexpr bool RetSupported =
