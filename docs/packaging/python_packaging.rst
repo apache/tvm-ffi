@@ -340,106 +340,14 @@ makes it easy to expose:
           def sum(self) -> int: ...
 
 
-.. _sec-stubgen:
+Stub Generation
+---------------
 
-Stub Generation Tool
---------------------
+TVM-FFI provides a stub generation tool ``tvm-ffi-stubgen`` that creates Python type hints
+from C++ reflection metadata. The tool integrates with CMake and can generate complete
+stub files automatically, or update existing files using special directive comments.
 
-TVM-FFI comes with a command-line tool ``tvm-ffi-stubgen`` that automates
-the generation of type stubs for both global functions and classes.
-It turns reflection metadata into proper Python type hints, and generates
-corresponding Python code **inline** and **statically**.
-
-Inline Directives
-~~~~~~~~~~~~~~~~~
-
-Like linter tools, ``tvm-ffi-stubgen`` uses special comments
-to identify what to generate and where to write generated code.
-
-**Directive 1 (Global functions)**. The example below shows a directive
-``global/${prefix}`` that marks a type stub section for global functions.
-
-.. code-block:: python
-
-   # tvm-ffi-stubgen(begin): global/my_ext.arith
-   tvm_ffi.init_ffi_api("my_ext.arith", __name__)
-   if TYPE_CHECKING:
-     def add_one(_0: int, /) -> int: ...
-     def add_two(_0: int, /) -> int: ...
-     def add_three(_0: int, /) -> int: ...
-   # tvm-ffi-stubgen(end)
-
-Running ``tvm-ffi-stubgen`` fills in the function stubs between the
-``begin`` and ``end`` markers based on the loaded registry, and in this case
-adds all the global functions named ``my_ext.arith.*``.
-
-**Directive 2 (Classes)**. The example below shows a directive
-``object/${type_key}`` that marks the fields and methods of a registered class.
-
-.. code-block:: python
-
-   @tvm_ffi.register_object("my_ffi_extension.IntPair")
-   class IntPair(_ffi_Object):
-     # tvm-ffi-stubgen(begin): object/my_ffi_extension.IntPair
-     a: int
-     b: int
-     if TYPE_CHECKING:
-       def __init__(self, a: int, b: int) -> None: ...
-       def sum(self) -> int: ...
-     # tvm-ffi-stubgen(end)
-
-Directive-based Generation
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-After the TVM-FFI extension is built as a shared library, for example at
-``build/libmy_ffi_extension.so``:
-
-**Command line tool**. The command below generates stubs for
-the package located at ``python/my_ffi_extension``, updating
-all sections marked by directives.
-
-.. code-block:: bash
-
-   tvm-ffi-stubgen                          \
-     python/my_ffi_extension                \
-     --dlls build/libmy_ffi_extension.so    \
-
-
-**CMake Integration**. CMake function ``tvm_ffi_configure_target``
-is integrated with this command and can be used to keep stubs up to date
-every time the target is built.
-
-.. code-block:: cmake
-
-   tvm_ffi_configure_target(my_ffi_extension
-       STUB_DIR "python"
-   )
-
-Inside the function, CMake derives the proper ``--dlls`` arguments
-via ``$<TARGET_FILE:${target}>``.
-
-Scaffold Missing Directives
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-**Command line tool**. Beyond updating existing directives, ``tvm-ffi-stubgen``
-can scaffold missing directives with a few extra flags.
-
-.. code-block:: bash
-
-   tvm-ffi-stubgen                          \
-     python/my_ffi_extension                \
-     --dlls build/libmy_ffi_extension.so    \
-     --init-pypkg my-ffi-extension          \
-     --init-lib my_ffi_extension            \
-     --init-prefix "my_ffi_extension."      \
-
-- ``--init-pypkg <pypkg>``: Specifies the name of the Python package to initialize, e.g. ``apache-tvm-ffi``, ``my-ffi-extension``;
-- ``--init-lib <libtarget>``: Specifies the name of the CMake target (shared library) to load for reflection metadata;
-- ``--init-prefix <prefix>``: Specifies the registry prefix to include for stub generation, e.g. ``my_ffi_extension.``. If global function or class names start with this prefix, they will be included in the generated stubs.
-
-**CMake Integration**. CMake function ``tvm_ffi_configure_target``
-also supports scaffolding missing directives via the ``STUB_INIT``, ``STUB_PKG``,
-and ``STUB_PREFIX`` options.
+For most projects, enable automatic stub generation in CMake:
 
 .. code-block:: cmake
 
@@ -448,82 +356,10 @@ and ``STUB_PREFIX`` options.
        STUB_INIT ON
    )
 
-The ``STUB_INIT`` option instructs CMake to scaffold missing directives
-based on the target and package information already specified.
+This generates ``_ffi_api.py`` and ``__init__.py`` files with proper type hints for all
+registered global functions and classes.
 
-Other Directives
-~~~~~~~~~~~~~~~~
+.. seealso::
 
-All supported directives are documented via:
-
-.. code-block:: bash
-
-   tvm-ffi-stubgen --help
-
-
-It includes:
-
-**Directive 3 (Import section)**. It populates all the imported names used by generated stubs. Example:
-
-.. code-block:: python
-
-   # tvm-ffi-stubgen(begin): import-section
-   from __future__ import annotations
-   from ..registry import init_ffi_api as _FFI_INIT_FUNC
-   from typing import TYPE_CHECKING
-   if TYPE_CHECKING:
-       from collections.abc import Mapping, Sequence
-       from tvm_ffi import Device, Object, Tensor, dtype
-       from tvm_ffi.testing import TestIntPair
-       from typing import Any, Callable
-   # tvm-ffi-stubgen(end)
-
-**Directive 4 (Export)**. It re-exports names defined in `_ffi_api.__all__` into the current file, usually
-in ``__init__.py`` to aggregate exported names. Example:
-
-.. code-block:: python
-
-   # tvm-ffi-stubgen(begin): export/_ffi_api
-   from ._ffi_api import *  # noqa: F403
-   from ._ffi_api import __all__ as _ffi_api__all__
-   if "__all__" not in globals():
-       __all__ = []
-   __all__.extend(_ffi_api__all__)
-   # tvm-ffi-stubgen(end)
-
-**Directive 5 (__all__)**. It populates the ``__all__`` variable with all generated
-classes and functions, as well as ``LIB`` if present. It's usually placed at the end of
-``_ffi_api.py``. Example:
-
-.. code-block:: python
-
-   __all__ = [
-       # tvm-ffi-stubgen(begin): __all__
-       "LIB",
-       "IntPair",
-       "raise_error",
-       # tvm-ffi-stubgen(end)
-   ]
-
-**Directive 6 (ty-map)**. It maps the type key of a class to Python types used in generation. Example:
-
-.. code-block:: python
-
-   # tvm-ffi-stubgen(ty-map): ffi.reflection.AccessStep -> ffi.access_path.AccessStep
-
-means the class with type key ``ffi.reflection.AccessStep`` is mapped to ``ffi.access_path.AccessStep``
-in Python.
-
-**Directive 7 (Import object)**. It injects a custom import into generated code, optionally
-TYPE_CHECKING-only. Example:
-
-
-.. code-block:: python
-
-   # tvm-ffi-stubgen(import-object): ffi.Object;False;_ffi_Object
-
-imports ``ffi.Object`` as ``_ffi_Object`` for use in generated code,
-where the second field ``False`` indicates the import is not TYPE_CHECKING-only.
-
-**Directive 8 (Skip file)**. It prevents the stub generation tool from modifying the file.
-This is useful when the file contains custom code that should not be altered.
+   :doc:`stubgen` for the complete stub generation guide, including directive-based
+   customization and command-line usage.
