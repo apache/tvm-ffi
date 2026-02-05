@@ -63,6 +63,7 @@ Table of Contents
    concepts/object_and_class.rst
    concepts/tensor.rst
    concepts/func_module.rst
+   concepts/exception_handling.rst
 
 .. toctree::
    :maxdepth: 1

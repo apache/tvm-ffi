@@ -68,7 +68,8 @@ Kernel Signatures
 ~~~~~~~~~~~~~~~~~
 
 A typical kernel implementation accepts :cpp:class:`TensorView <tvm::ffi::TensorView>` parameters,
-validates metadata (dtype, shape, device), and then accesses the data pointer for computation:
+validates metadata (dtype, shape, device), and then accesses the data pointer for computation.
+Use :c:macro:`TVM_FFI_THROW` to report validation errors (see :doc:`exception_handling`):
 
 .. code-block:: cpp
 
@@ -89,7 +90,7 @@ validates metadata (dtype, shape, device), and then accesses the data pointer fo
 On the C++ side, the following APIs are available to query a tensor's metadata:
 
  :cpp:func:`TensorView::shape() <tvm::ffi::TensorView::shape>` and :cpp:func:`Tensor::shape() <tvm::ffi::Tensor::shape>`
-  shape array
+  Shape array. For kernels exported as TVM-FFI functions, see :doc:`func_module`.
 
  :cpp:func:`TensorView::dtype() <tvm::ffi::TensorView::dtype>` and :cpp:func:`Tensor::dtype() <tvm::ffi::Tensor::dtype>`
   element data type
@@ -276,8 +277,8 @@ Similarly, TVM-FFI defines two main tensor types in C++:
 
 *Owning* object, :cpp:class:`tvm::ffi::TensorObj` and :cpp:class:`tvm::ffi::Tensor`
  :cpp:class:`Tensor <tvm::ffi::Tensor>`, similar to ``std::shared_ptr<TensorObj>``, is the managed class to hold heap-allocated
- :cpp:class:`TensorObj <tvm::ffi::TensorObj>`. Once the reference count drops to zero, the cleanup logic deallocates the descriptor
- and releases ownership of the underlying data buffer.
+ :cpp:class:`TensorObj <tvm::ffi::TensorObj>`. Once the reference count drops to zero (see :ref:`object-reference-counting`),
+ the cleanup logic deallocates the descriptor and releases ownership of the underlying data buffer.
 
 
 .. note::
@@ -371,6 +372,8 @@ Further Reading
 
 - :doc:`object_and_class`: The object system that backs :cpp:class:`~tvm::ffi::TensorObj`
 - :doc:`any`: How tensors are stored in :cpp:class:`~tvm::ffi::Any` containers
+- :doc:`func_module`: How tensors are passed through TVM-FFI function calls
+- :doc:`exception_handling`: Throwing errors during tensor validation
 - :doc:`abi_overview`: Low-level C ABI details for tensor conversion
 - :doc:`../guides/kernel_library_guide`: Best practices for building kernel libraries with TVM-FFI
 - :external+dlpack:doc:`DLPack C API <c_api>`: The underlying tensor interchange standard

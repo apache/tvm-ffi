@@ -59,7 +59,8 @@ recognized by the FFI system. It enables type-erased value passing across langua
 
 **Ownership.** :cpp:class:`TVMFFIAny` struct can represent either an owning or a borrowing reference.
 These two ownership patterns are formalized by the C++ wrapper classes :cpp:class:`~tvm::ffi::Any` and :cpp:class:`~tvm::ffi::AnyView`,
-which have identical memory layouts but different :ref:`ownership semantics <any-ownership>`:
+which have identical memory layouts but different :ref:`ownership semantics <any-ownership>`.
+See :doc:`any` for high-level C++ usage patterns:
 
 - **Owning:** :cpp:class:`tvm::ffi::Any` - reference-counted, manages object lifetime
 - **Borrowing:** :cpp:class:`tvm::ffi::AnyView` - non-owning view, caller must ensure validity
@@ -176,7 +177,8 @@ All TVM-FFI objects share these characteristics:
 - Type index >= :cpp:enumerator:`kTVMFFIStaticObjectBegin <TVMFFITypeIndex::kTVMFFIStaticObjectBegin>`
 
 **Dynamic Type System.** Classes can be registered at runtime via :cpp:func:`TVMFFITypeGetOrAllocIndex`,
-with support for single inheritance. See :ref:`type-checking-and-casting` for usage details.
+with support for single inheritance. See :doc:`object_and_class` for the full object system
+and :ref:`type-checking-and-casting` for usage details.
 
 A small **static section** between :cpp:enumerator:`kTVMFFIStaticObjectBegin <TVMFFITypeIndex::kTVMFFIStaticObjectBegin>`
 and :cpp:enumerator:`kTVMFFIDynObjectBegin <TVMFFITypeIndex::kTVMFFIDynObjectBegin>`
@@ -345,7 +347,7 @@ type-erased, and cross-language function calls, defined by :cpp:type:`TVMFFISafe
 - ``handle`` (``void*``): Optional resource handle passed to the callee; typically ``NULL`` for exported symbols
 - ``args`` (``TVMFFIAny*``) and ``num_args`` (``int``): Array of non-owning :cpp:class:`~tvm::ffi::AnyView` input arguments
 - ``result`` (``TVMFFIAny*``): Owning :cpp:class:`~tvm::ffi::Any` output value
-- Return value: ``0`` for success; ``-1`` or ``-2`` for errors (see :ref:`sec:exception`)
+- Return value: ``0`` for success; ``-1`` for errors (see :doc:`exception_handling` and :ref:`sec-exception`)
 
 See :ref:`sec:function-calling-convention` for more details.
 
@@ -418,7 +420,7 @@ Exception
 
 .. seealso::
 
-   :ref:`sec:exception` for detailed exception handling patterns.
+   :doc:`exception_handling` for detailed exception handling patterns.
 
 Exceptions are a central part of TVM-FFI's ABI and calling convention.
 When errors occur, they are stored as objects with a :cpp:class:`TVMFFIErrorCell` payload.
@@ -449,10 +451,6 @@ Retrieve it with :cpp:func:`TVMFFIErrorMoveFromRaised`, which returns a :cpp:cla
 
 This function transfers ownership to the caller and clears the TLS slot.
 Call :cpp:func:`TVMFFIObjectDecRef` when done to avoid memory leaks.
-
-**Frontend errors (-2).** Error code ``-2`` is reserved for frontend errors.
-It is returned when :cpp:func:`TVMFFIEnvCheckSignals` detects a pending Python signal.
-In this case, do not retrieve the error from TLS; instead, consult the frontend's error mechanism.
 
 .. admonition:: Print Error Message
   :class: hint
@@ -547,5 +545,6 @@ Further Reading
 - :doc:`any`: High-level C++ usage of :cpp:class:`~tvm::ffi::Any` and :cpp:class:`~tvm::ffi::AnyView`
 - :doc:`object_and_class`: The object system and reflection
 - :doc:`tensor`: Tensor classes and DLPack interoperability
-- :doc:`func_module`: Functions, exceptions, and modules
+- :doc:`func_module`: Functions and modules
+- :doc:`exception_handling`: Exception handling across language boundaries
 - :doc:`../get_started/stable_c_abi`: Quick introduction to the stable C ABI

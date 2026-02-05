@@ -35,7 +35,7 @@ TVM-FFI ABI, or "Packed Function". :cpp:type:`TVMFFISafeCallType`
   See :ref:`Stable C ABI <tvm_ffi_c_abi>` for a quick introduction.
 
 TVM-FFI Function. :py:class:`tvm_ffi.Function`, :cpp:class:`tvm::ffi::FunctionObj`, :cpp:class:`tvm::ffi::Function`
-  A reference-counted function object and its managed reference, which wraps any callable,
+  A reference-counted :doc:`function object <object_and_class>` and its managed reference, which wraps any callable,
   including language-agnostic functions and lambdas (C++, Python, Rust, etc.),
   member functions, external C symbols, and other callable objects,
   all sharing the same calling convention.
@@ -212,8 +212,8 @@ which provides a stable C ABI for cross-language calls. The C calling convention
      TVMFFIAny* result       // Output argument (owning, zero-initialized)
    );
 
-**Input arguments**. The input arguments are passed as an array of :cpp:class:`tvm::ffi::AnyView` values,
-specified by ``args`` and ``num_args``.
+**Input arguments**. The input arguments are passed as an array of :cpp:class:`tvm::ffi::AnyView` values
+(see :ref:`any-ownership` for ownership semantics), specified by ``args`` and ``num_args``.
 
 **Output argument**. The output argument ``result`` is an owning :cpp:type:`tvm::ffi::Any`
 that the caller must zero-initialize before the call.
@@ -269,76 +269,15 @@ See :ref:`abi-function` for the C struct definition.
 conversion rules as any other TVM-FFI object. See :ref:`Object Conversion with Any <object-conversion-with-any>` for details.
 
 
-Throw and Catch Errors
-~~~~~~~~~~~~~~~~~~~~~~
+Exception Handling
+~~~~~~~~~~~~~~~~~~
 
-TVM-FFI gracefully handles exceptions across language boundaries without requiring manual
-error code management.
-
-.. important::
-  Stack traces from all languages are properly preserved and concatenated in the TVM-FFI Stable C ABI.
-
-**Python**. In Python, raise native :py:class:`Exception <Exception>` instances or derived classes.
-TVM-FFI catches these at the ABI boundary and converts them to :cpp:class:`tvm::ffi::Error` objects.
-When C++ code calls into Python and a Python exception occurs, it propagates back to C++ as a
-:cpp:class:`tvm::ffi::Error`, which C++ code can handle appropriately.
-
-**C++**. In C++, use :cpp:class:`tvm::ffi::Error` or the :c:macro:`TVM_FFI_THROW` macro:
-
-.. code-block:: cpp
-
-   #include <tvm/ffi/error.h>
-
-   void ThrowError(int x) {
-     if (x < 0) {
-       TVM_FFI_THROW(ValueError) << "x must be non-negative, got " << x;
-     }
-   }
-
-The :c:macro:`TVM_FFI_THROW` macro captures the current file name, line number, stack trace,
-and error message, then constructs a :cpp:class:`tvm::ffi::Error` object. At the ABI boundary,
-this error is stored in TLS and the function returns ``-1`` per the :cpp:type:`TVMFFISafeCallType`
-calling convention.
-
-.. hint::
-  A detailed implementation of such graceful handling behavior can be found
-  in :c:macro:`TVM_FFI_SAFE_CALL_BEGIN` / :c:macro:`TVM_FFI_SAFE_CALL_END` macros.
-
+See :doc:`exception_handling` for details on throwing, catching, and propagating exceptions
+across language boundaries.
 
 Compiler developers commonly need to look up global functions in generated code.
 Use :cpp:func:`TVMFFIFunctionGetGlobal` to retrieve a function by name, then call it with :cpp:func:`TVMFFIFunctionCall`.
 See :ref:`abi-function` for C code examples.
-
-.. _sec:exception:
-
-Exception
-~~~~~~~~~
-
-This section describes the exception handling contract in the TVM-FFI Stable C ABI.
-Exceptions are first-class citizens in TVM-FFI, and this section specifies:
-
-- How to properly throw exceptions from a TVM-FFI ABI function
-- How to check for and propagate exceptions from a TVM-FFI ABI function
-
-When a TVM-FFI function returns a non-zero code, an error occurred.
-An :cpp:class:`~tvm::ffi::ErrorObj` is stored in thread-local storage (TLS) and can be retrieved
-with :cpp:func:`TVMFFIErrorMoveFromRaised`.
-
-- **Error code -1:** Retrieve the error from TLS, print it, and release via :cpp:func:`TVMFFIObjectDecRef`.
-
-To raise an error, use :cpp:func:`TVMFFIErrorSetRaisedFromCStr` to set the TLS error and return ``-1``.
-For chains of calls, simply propagate return codes - TLS carries the error details.
-
-
-.. note::
-
-  In the very rare case, the error kind can be ``EnvErrorAlreadySet``,
-  which indicates that an error has already been set in the frontend environment.
-  In this case, the caller (python binding) should raise the error stored in the
-  frontend environment. This is handled by the our python package so
-  you generally do not need to handle this case explicitly.
-
-See :ref:`abi-exception` for C code examples.
 
 
 .. _sec:module:
@@ -459,6 +398,7 @@ a symbol during static initialization:
 Further Reading
 ---------------
 
+- :doc:`exception_handling`: Throwing, catching, and propagating exceptions across language boundaries
 - :doc:`any`: How functions are stored in :cpp:class:`~tvm::ffi::Any` containers
 - :doc:`object_and_class`: The object system that backs :cpp:class:`~tvm::ffi::FunctionObj`
 - :doc:`abi_overview`: Low-level C ABI details for functions and exceptions

@@ -103,7 +103,8 @@ and :cpp:class:`~tvm::ffi::AnyView`, each with different levels of strictness:
 
 .. dropdown:: Example of :cpp:func:`cast\<T\>() <tvm::ffi::Any::cast>`
 
-  :cpp:func:`cast\<T\>() <tvm::ffi::Any::cast>` is the workhorse. It returns the value or throws:
+  :cpp:func:`cast\<T\>() <tvm::ffi::Any::cast>` is the workhorse. It returns the value or throws
+  a :cpp:class:`tvm::ffi::Error` (see :doc:`exception_handling`):
 
   .. code-block:: cpp
 
@@ -206,7 +207,8 @@ copies 16 bytes with no reference count updates, making it ideal for passing arg
    void process(ffi::AnyView value) {}
 
 :cpp:class:`~tvm::ffi::Any` is an owning container. Copying an :cpp:class:`~tvm::ffi::Any` that holds an object
-increments the reference count; destroying it decrements the count:
+increments the reference count; destroying it decrements the count
+(see :ref:`object-reference-counting` for details on how reference counting works):
 
 .. code-block:: cpp
 
@@ -362,6 +364,10 @@ the :cpp:class:`~tvm::ffi::AnyView` or :cpp:class:`~tvm::ffi::Any`.
 Heap-Allocated Objects
 ~~~~~~~~~~~~~~~~~~~~~~
 
+TVM-FFI objects are heap-allocated, reference-counted containers that inherit from :cpp:class:`tvm::ffi::Object`.
+See :doc:`object_and_class` for details on the object system, and :ref:`object-reference-counting` for
+how reference counting works.
+
 .. list-table:: Figure 3. Common TVM-FFI object types stored as pointers in :cpp:member:`TVMFFIAny::v_obj`.
    :header-rows: 1
    :widths: 40 40 30
@@ -422,4 +428,5 @@ Further Reading
 - :doc:`object_and_class`: How TVM-FFI objects work, including reference counting and type checking
 - :doc:`func_module`: Function calling conventions and the global registry
 - :doc:`tensor`: How tensors flow through :cpp:class:`~tvm::ffi::Any` and :cpp:class:`~tvm::ffi::AnyView`
+- :doc:`exception_handling`: How :cpp:func:`~tvm::ffi::Any::cast` throws exceptions on type mismatch
 - :doc:`abi_overview`: Low-level C ABI details for working with :cpp:class:`TVMFFIAny` directly
