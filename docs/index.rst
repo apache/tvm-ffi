@@ -72,7 +72,6 @@ Table of Contents
    packaging/python_packaging.rst
    packaging/stubgen.rst
    packaging/cpp_tooling.rst
-   packaging/cpp_packaging.md
 
 .. toctree::
    :maxdepth: 1
