@@ -47,7 +47,7 @@ TERM_BLUE = "\033[34m"
 TERM_MAGENTA = "\033[35m"
 TERM_CYAN = "\033[36m"
 TERM_WHITE = "\033[37m"
-DOC_URL = "https://tvm.apache.org/ffi/packaging/python_packaging.html#stub-generation-tool"
+DOC_URL = "https://tvm.apache.org/ffi/packaging/stubgen.html"
 
 DEFAULT_SOURCE_EXTS = {".py", ".pyi"}
 TY_MAP_DEFAULTS = {
