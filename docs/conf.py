@@ -34,6 +34,7 @@ os.environ["TVM_FFI_BUILD_DOCS"] = "1"
 
 build_exhale = os.environ.get("BUILD_CPP_DOCS", "0") == "1"
 build_rust_docs = os.environ.get("BUILD_RUST_DOCS", "0") == "1"
+build_version = os.environ.get("TVM_FFI_DOCS_VERSION", None)
 
 # Auto-detect sphinx-autobuild: Check if sphinx-autobuild is in the execution path
 is_autobuild = any("sphinx-autobuild" in str(arg) for arg in sys.argv)
@@ -44,15 +45,27 @@ _RUST_DIR = _DOCS_DIR.parent / "rust"
 
 # -- General configuration ------------------------------------------------
 # Determine version without reading pyproject.toml
-# Always use setuptools_scm (assumed available in docs env)
-__version__ = setuptools_scm.get_version(root="..")
+# Multi-version builds run from git archives (no .git), so allow a fallback
+# using the version name provided via environment variables.
+
+
+def _get_version() -> str:
+    if build_version:
+        return build_version
+    try:
+        return setuptools_scm.get_version(root="..", fallback_version="0.0.0")
+    except Exception:
+        return "0.0.0"
+
+
+__version__ = _get_version()
 
 project = "tvm-ffi"
-
 author = "Apache TVM FFI contributors"
-
 version = __version__
 release = __version__
+_github_ref = build_version or "main"
+_base_url = ("/" + os.environ.get("BASE_URL", "").strip("/") + "/").replace("//", "/")
 
 # -- Extensions and extension configurations --------------------------------
 
@@ -191,6 +204,7 @@ def _build_rust_docs() -> None:
     if not build_rust_docs:
         return
 
+    (_DOCS_DIR / "reference" / "rust" / "generated").mkdir(parents=True, exist_ok=True)
     print("Building Rust documentation...")
     try:
         target_doc = _RUST_DIR / "target" / "doc"
@@ -216,10 +230,14 @@ def _build_rust_docs() -> None:
         print("Warning: cargo not found, skipping Rust documentation build")
 
 
-def _apply_config_overrides(_: object, config: object) -> None:
+def _apply_config_overrides(app: sphinx.application.Sphinx, config: sphinx.config.Config) -> None:
     """Apply runtime configuration overrides derived from environment variables."""
     config.build_exhale = build_exhale
     config.build_rust_docs = build_rust_docs
+    if build_exhale:
+        config.exhale_args["containmentFolder"] = str(
+            Path(app.srcdir) / "reference" / "cpp" / "generated"
+        )
 
 
 def _copy_rust_docs_to_output(app: sphinx.application.Sphinx, exception: Exception | None) -> None:
@@ -452,11 +470,22 @@ html_theme_options = {
     "show_toc_level": 2,
     "extra_footer": footer_html(),
 }
+if build_version:  # multi-version build, enable version switcher to navbar
+    html_theme_options.update(
+        {
+            "navbar_end": ["version-switcher", "navbar-icon-links"],
+            "switcher": {
+                "json_url": f"{_base_url}_static/versions.json",
+                "version_match": version,
+            },
+            "show_version_warning_banner": True,
+        }
+    )
 
 html_context = {
     "display_github": True,
     "github_user": "apache",
-    "github_version": "main",
+    "github_version": _github_ref,
     "conf_py_path": "/docs/",
 }
 
