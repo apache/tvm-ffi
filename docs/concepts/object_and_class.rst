@@ -44,7 +44,8 @@ Glossary
 
 Type index and type key
   Type index is an integer that uniquely identifies each object type.
-  Built-in types have statically assigned indices defined in :cpp:enum:`TVMFFITypeIndex`,
+  Built-in types have statically assigned indices defined in :cpp:enum:`TVMFFITypeIndex`
+  (see :ref:`any-atomic-types` and :ref:`any-heap-allocated-objects` for the complete list),
   while user-defined types receive indices at startup when first accessed.
   Type key is a unique string identifier (e.g., ``"my_ext.MyClass"``) that names an object type.
   It is used for registration, serialization, and cross-language mapping.
@@ -193,7 +194,9 @@ for runtime type checking:
      return false;
    }
 
-**Type casting**. Use :cpp:func:`ObjectRef::as\<T\>() <tvm::ffi::ObjectRef::as>` for safe downcasting:
+**Type casting**. Use :cpp:func:`ObjectRef::as\<T\>() <tvm::ffi::ObjectRef::as>` for safe downcasting.
+For strict conversion that throws on mismatch, use :cpp:func:`~tvm::ffi::Any::cast`
+(see :doc:`exception_handling` for error handling details):
 
 .. code-block:: cpp
 
@@ -417,5 +420,6 @@ Further Reading
 - :doc:`any`: How objects are stored in :cpp:class:`~tvm::ffi::Any` containers
 - :doc:`func_module`: Function objects and the global registry
 - :doc:`tensor`: Tensor objects and DLPack interoperability
+- :doc:`exception_handling`: Error objects and cross-language exception propagation
 - :doc:`abi_overview`: Low-level C ABI details for the object system
 - :doc:`../packaging/python_packaging`: Packaging C++ objects for Python wheels
