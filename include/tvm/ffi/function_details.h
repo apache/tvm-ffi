@@ -72,16 +72,6 @@ static constexpr bool ArgSupported =
       std::is_same_v<std::remove_const_t<std::remove_reference_t<T>>, AnyView> ||
       TypeTraitsNoCR<T>::convert_enabled));
 
-template <typename T>
-struct is_expected : std::false_type {
-  using value_type = void;
-};
-
-template <typename T>
-struct is_expected<Expected<T>> : std::true_type {
-  using value_type = T;
-};
-
 // NOTE: return type can only support non-reference managed returns
 template <typename T>
 static constexpr bool RetSupported =
