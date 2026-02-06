@@ -15,180 +15,334 @@
 .. specific language governing permissions and limitations
 .. under the License.
 
-====================
 Kernel Library Guide
 ====================
 
-This guide serves as a quick start for shipping kernel libraries with TVM FFI. The shipped kernel libraries are of python version and ML framework agnostic. With the help of TVM FFI, we can connect the kernel libraries to multiple ML framework, such as PyTorch, XLA, JAX, together with the minimal efforts.
+This guide covers shipping C++/CUDA kernel libraries with TVM-FFI. The resulting
+libraries are agnostic to Python version and ML framework — a single ``.so`` works
+with PyTorch, JAX, PaddlePaddle, NumPy, and more.
 
-Tensor
-======
+.. seealso::
 
-Almost all kernel libraries are about tensor computation and manipulation. For better adaptation to different ML frameworks, TVM FFI provides a minimal set of data structures to represent tensors from ML frameworks, including the tensor basic attributes and storage pointer.
-To be specific, in TVM FFI, two types of tensor constructs, :cpp:class:`~tvm::ffi::Tensor` and :cpp:class:`~tvm::ffi::TensorView`, can be used to represent a tensor from ML frameworks.
-
-Tensor and TensorView
----------------------
-
-Both :cpp:class:`~tvm::ffi::Tensor` and :cpp:class:`~tvm::ffi::TensorView` are designed to represent tensors from ML frameworks that interact with the TVM FFI ABI. They are backed by the `DLTensor` in DLPack in practice. The main difference is whether it is an owning tensor structure.
-
-:cpp:class:`tvm::ffi::Tensor`
- :cpp:class:`~tvm::ffi::Tensor` is a completely owning tensor with reference counting. It can be created on either C++ or Python side and passed between either side. And TVM FFI internally keeps a reference count to track lifetime of the tensors. When the reference count goes to zero, its underlying deleter function will be called to free the tensor storage.
-
-:cpp:class:`tvm::ffi::TensorView`
- :cpp:class:`~tvm::ffi::TensorView` is a non-owning view of an existing tensor, pointing to an existing tensor (e.g., a tensor allocated by PyTorch).
-
-It is **recommended** to use :cpp:class:`~tvm::ffi::TensorView` when possible, that helps us to support more cases, including cases where only view but not strong reference are passed, like XLA buffer. It is also more lightweight. However, since :cpp:class:`~tvm::ffi::TensorView` is a non-owning view, it is the user's responsibility to ensure the lifetime of underlying tensor.
-
-Tensor Attributes
------------------
-
-For convenience, :cpp:class:`~tvm::ffi::TensorView` and :cpp:class:`~tvm::ffi::Tensor` align the following attributes retrieval mehtods to :cpp:class:`at::Tensor` interface, to obtain tensor basic attributes and storage pointer:
-``dim``, ``dtype``, ``sizes``, ``size``, ``strides``, ``stride``, ``numel``, ``data_ptr``, ``device``, ``is_contiguous``
-
-Please refer to the documentation of both tensor classes for their details. Here  highlight some non-primitive attributes:
-
-:c:struct:`DLDataType`
- The ``dtype`` of the tensor. It's represented by a struct with three fields: code, bits, and lanes, defined by DLPack protocol.
-
-:c:struct:`DLDevice`
- The ``device`` where the tensor is stored. It is represented by a struct with two fields: device_type and device_id, defined by DLPack protocol.
-
-:cpp:class:`tvm::ffi::ShapeView`
- The ``sizes`` and ``strides`` attributes retrieval are returned as :cpp:class:`~tvm::ffi::ShapeView`. It is an iterate-able data structure storing the shapes or strides data as ``int64_t`` array.
-
-Tensor Allocation
------------------
-
-TVM FFI provides several methods to create or allocate tensors at C++ runtime. Generally, there are two types of tensor creation methods:
-
-* Allocate a tensor with new storage from scratch, i.e. :cpp:func:`~tvm::ffi::Tensor::FromEnvAlloc` and :cpp:func:`~tvm::ffi::Tensor::FromNDAlloc`. By this types of methods, the shapes, strides, data types, devices and other attributes are required for the allocation.
-* Create a tensor with existing storage following DLPack protocol, i.e. :cpp:func:`~tvm::ffi::Tensor::FromDLPack` and :cpp:func:`~tvm::ffi::Tensor::FromDLPackVersioned`. By this types of methods, the shapes, data types, devices and other attributes can be inferred from the DLPack attributes.
-
-FromEnvAlloc
-^^^^^^^^^^^^
-
-To better adapt to the ML framework, it is **recommended** to reuse the framework tensor allocator anyway, instead of directly allocating the tensors via CUDA runtime API, like ``cudaMalloc``. Since reusing the framework tensor allocator:
-
-* Benefit from the framework's native caching allocator or related allocation mechanism.
-* Help framework tracking memory usage and planning globally.
-
-TVM FFI provides :cpp:func:`tvm::ffi::Tensor::FromEnvAlloc` to allocate a tensor with the framework tensor allocator. To determine which framework tensor allocator, TVM FFI infers it from the passed-in framework tensors. For example, when calling the kernel library at Python side, there is an input framework tensor if of type ``torch.Tensor``, TVM FFI will automatically bind the :cpp:func:`at::empty` as the current framework tensor allocator by ``TVMFFIEnvTensorAlloc``. And then the :cpp:func:`~tvm::ffi::Tensor::FromEnvAlloc` is calling the :cpp:class:`at::empty` actually:
-
-.. code-block:: c++
-
- ffi::Tensor tensor = ffi::Tensor::FromEnvAlloc(TVMFFIEnvTensorAlloc, ...);
-
-which is equivalent to:
-
-.. code-block:: c++
-
- at::Tensor tensor = at::empty(...);
-
-FromNDAlloc
-^^^^^^^^^^^
-
-:cpp:func:`tvm::ffi::Tensor::FromNDAlloc` can be used to create a tensor with custom memory allocator. It is of simple usage by providing a custom memory allocator and deleter for tensor allocation and free each, rather than relying on any framework tensor allocator.
-
-However, the tensors allocated by :cpp:func:`tvm::ffi::Tensor::FromNDAlloc` only retain the function pointer to its custom deleter for deconstruction. The custom deleters are all owned by the kernel library still. So it is important to make sure the loaded kernel library, :py:class:`tvm_ffi.Module`, outlives the tensors allocated by :cpp:func:`tvm::ffi::Tensor::FromNDAlloc`. Otherwise, the function pointers to the custom deleter will be invalid. Here a typical approach is to retain the loaded :py:class:`tvm_ffi.Module` globally or for the period of time.
-
-But in the scenarios of linked runtime libraries and c++ applications, the libraries alive globally throughout the entire lifetime of the process. So :cpp:func:`tvm::ffi::Tensor::FromNDAlloc` works well in these scenarios without the use-after-delete issue above. Otherwise, in general, :cpp:func:`tvm::ffi::Tensor::FromEnvAlloc` is free of this issue, which is more **recommended** in practice.
+   - :doc:`../get_started/quickstart`: End-to-end walkthrough of a simpler ``add_one`` kernel
+   - :doc:`../packaging/cpp_tooling`: Build toolchain, CMake integration, and library distribution
+   - All example code in this guide is under
+     `examples/kernel_library/ <https://github.com/apache/tvm-ffi/tree/main/examples/kernel_library>`_.
+   - Production examples:
+     `FlashInfer <https://github.com/flashinfer-ai/flashinfer>`_ ships CUDA kernels via TVM-FFI.
 
 
-FromNDAllocStrided
-^^^^^^^^^^^^^^^^^^
+Anatomy of a Kernel Function
+-----------------------------
 
-:cpp:func:`tvm::ffi::Tensor::FromNDAllocStrided` can be used to create a tensor with a custom memory allocator and strided layout (e.g. column major layout).
-Note that for tensor memory that will be returned from the kernel library to the caller, we instead recommend using :cpp:func:`tvm::ffi::Tensor::FromEnvAlloc`
-followed by :cpp:func:`tvm::ffi::Tensor::as_strided` to create a strided view of the tensor.
+Every TVM-FFI CUDA kernel follows the same sequence:
 
-FromDLPack
-^^^^^^^^^^
+1. **Validate** inputs (device, dtype, shape, contiguity)
+2. **Set device guard** to match the tensor's device
+3. **Acquire stream** from the host framework
+4. **Dispatch** on dtype and **launch** the kernel
 
-:cpp:func:`tvm::ffi::Tensor::FromDLPack` enables creating :cpp:class:`~tvm::ffi::Tensor` from ``DLManagedTensor*``, working with ``ToDLPack`` for DLPack C Tensor Object ``DLTensor`` exchange protocol. Both are used for DLPack pre V1.0 API. It is used for wrapping the existing framework tensor to :cpp:class:`~tvm::ffi::Tensor`.
+Here is a complete ``Scale`` kernel that computes ``y = x * factor``:
 
-FromDLPackVersioned
-^^^^^^^^^^^^^^^^^^^
+.. literalinclude:: ../../examples/kernel_library/scale_kernel.cu
+   :language: cpp
+   :start-after: [function.begin]
+   :end-before: [function.end]
 
-:cpp:func:`tvm::ffi::Tensor::FromDLPackVersioned` enables creating :cpp:class:`~tvm::ffi::Tensor` from ``DLManagedTensorVersioned*``, working with ``ToDLPackVersioned`` for DLPack C Tensor Object ``DLTensor`` exchange protocol. Both are used for DLPack post V1.0 API. It is used for wrapping the existing framework tensor to :cpp:class:`~tvm::ffi::Tensor` too.
+The CUDA kernel itself is a standard ``__global__`` function:
 
-Stream
-======
+.. literalinclude:: ../../examples/kernel_library/scale_kernel.cu
+   :language: cpp
+   :start-after: [cuda_kernel.begin]
+   :end-before: [cuda_kernel.end]
 
-Besides of tensors, stream context is another key concept in kernel library, especially for kernel execution. And the kernel library should be able to obtain the current stream context from ML framework via TVM FFI.
+The following subsections break down each step.
 
-Stream Obtaining
-----------------
 
-In practice, TVM FFI maintains a stream context table per device type and index. And kernel libraries can obtain the current stream context on specific device by :cpp:func:`TVMFFIEnvGetStream`. Here is an example:
+Input Validation
+~~~~~~~~~~~~~~~~
 
-.. code-block:: c++
+Kernel functions should validate inputs early and fail with clear error messages.
+A common pattern is to define reusable ``CHECK_*`` macros on top of
+:c:macro:`TVM_FFI_CHECK` (see :doc:`../concepts/exception_handling`):
 
- void func(ffi::TensorView input, ...) {
-   ffi::DLDevice device = input.device();
-   cudaStream_t stream = reinterpret_cast<cudaStream_t>(TVMFFIEnvGetStream(device.device_type, device.device_id));
- }
+.. literalinclude:: ../../examples/kernel_library/tvm_ffi_utils.h
+   :language: cpp
+   :start-after: [check_macros.begin]
+   :end-before: [check_macros.end]
 
-which is equivalent to:
+For **user-facing errors** (bad arguments, unsupported dtypes, shape mismatches),
+use :c:macro:`TVM_FFI_THROW` or :c:macro:`TVM_FFI_CHECK` with a specific error kind
+so that callers receive an actionable message:
 
-.. code-block:: c++
+.. code-block:: cpp
 
- void func(at::Tensor input, ...) {
-   c10::Device = input.device();
-   cudaStream_t stream = reinterpret_cast<cudaStream_t>(c10::cuda::getCurrentCUDAStream(device.index()).stream());
- }
+   TVM_FFI_THROW(TypeError) << "Unsupported dtype: " << input.dtype();
+   TVM_FFI_CHECK(input.numel() > 0, ValueError) << "input must be non-empty";
+   TVM_FFI_CHECK(input.numel() == output.numel(), ValueError) << "size mismatch";
 
-Stream Update
--------------
+For **internal invariants** that indicate bugs in the kernel itself, use
+:c:macro:`TVM_FFI_ICHECK`:
 
-Corresponding to :cpp:func:`TVMFFIEnvGetStream`, TVM FFI updates the stream context table via interface :cpp:func:`TVMFFIEnvSetStream`. But the updating methods can be implicit and explicit.
+.. code-block:: cpp
 
-Implicit Update
-^^^^^^^^^^^^^^^
+   TVM_FFI_ICHECK_GE(n, 0) << "element count must be non-negative";
 
-Similar to the tensor allocation :ref:`guides/kernel_library_guide:FromNDAlloc`, TVM FFI does the implicit update on stream context table as well. When converting the framework tensors as mentioned above, TVM FFI automatically updates the stream context table, by the device on which the converted framework tensors. For example, if there is an framework tensor as ``torch.Tensor(device="cuda:3")``, TVM FFI would automatically update the current stream of cuda device 3 to torch current context stream. So nothing for the kernel library to do with the stream context updaing, as long as the tensors from ML framework covers all the devices on which the stream contexts reside.
 
-Explicit Update
-^^^^^^^^^^^^^^^
+Device Guard and Stream
+~~~~~~~~~~~~~~~~~~~~~~~
 
-Once the devices on which the stream contexts reside cannot be inferred from the tensors, the explicit update on stream context table is necessary. TVM FFI provides :py:func:`tvm_ffi.use_torch_stream` and :py:func:`tvm_ffi.use_raw_stream` for manual stream context update. However, it is **recommended** to use implicit update above, to reduce code complexity.
+Before launching a CUDA kernel, two things must happen:
 
-Device Guard
-============
+1. **Set the CUDA device** to match the tensor's device. :cpp:class:`tvm::ffi::CUDADeviceGuard`
+   is an RAII guard that calls ``cudaSetDevice`` on construction and restores the
+   original device on destruction.
 
-When launching kernels, kernel libraries may require the current device context to be set for a specific device. TVM FFI provides the :cpp:class:`tvm::ffi::CUDADeviceGuard` class to manage this, similar to :cpp:class:`c10::cuda::CUDAGuard`. When a :cpp:class:`tvm::ffi::CUDADeviceGuard` object is constructed with a device index, it saves the original device index (retrieved using ``cudaGetDevice``) and sets the current device to the given index (using ``cudaSetDevice``). Upon destruction (e.g., when it goes out of scope), the guard restores the current device to the original device index, also using ``cudaSetDevice``. This RAII pattern ensures the device context is handled correctly. Here is an example:
+2. **Acquire the stream** from the host framework via :cpp:func:`TVMFFIEnvGetStream`.
+   When Python code calls a kernel with PyTorch tensors, TVM-FFI automatically
+   captures PyTorch's current stream for the tensor's device.
 
-.. code-block:: c++
+A small helper keeps this concise:
 
- void func(ffi::TensorView input, ...) {
-   // current device index is original device index
-   ffi::CUDADeviceGuard device_guard(input.device().device_id);
-   // current device index is input device index
- }
+.. literalinclude:: ../../examples/kernel_library/tvm_ffi_utils.h
+   :language: cpp
+   :start-after: [get_stream.begin]
+   :end-before: [get_stream.end]
 
-After ``func`` returns, the ``device_guard`` is destructed, and the original device index is restored.
+Every kernel function then follows the same two-line pattern:
 
-Function Exporting
-==================
+.. code-block:: cpp
 
-As we already have our kernel library wrapped with TVM FFI interface, our next and final step is exporting kernel library to Python side. TVM FFI provides macro :c:macro:`TVM_FFI_DLL_EXPORT_TYPED_FUNC` for exporting the kernel functions to the output library files. So that at Python side, it is possible to load the library files and call the kernel functions directly. For example, we export our kernels as:
+   ffi::CUDADeviceGuard guard(input.device().device_id);
+   cudaStream_t stream = get_cuda_stream(input.device());
 
-.. code-block:: c++
+See :doc:`../concepts/tensor` for details on stream handling and automatic stream
+context updates.
 
- void func(ffi::TensorView input, ffi::TensorView output);
- TVM_FFI_DLL_EXPORT_TYPED_FUNC(func_name, func);
 
-And then we compile the sources into ``lib.so``, or ``lib.dylib`` for macOS, or ``lib.dll`` for Windows. Finally, we can load and call our kernel functions at Python side as:
+Dtype Dispatch
+~~~~~~~~~~~~~~
+
+Kernels typically support multiple dtypes. Dispatch on :c:struct:`DLDataType` at
+runtime while instantiating templates at compile time:
+
+.. code-block:: cpp
+
+   constexpr DLDataType dl_float32 = DLDataType{kDLFloat, 32, 1};
+   constexpr DLDataType dl_float16 = DLDataType{kDLFloat, 16, 1};
+
+   if (input.dtype() == dl_float32) {
+     ScaleKernel<<<blocks, threads, 0, stream>>>(
+         static_cast<float*>(output.data_ptr()), ...);
+   } else if (input.dtype() == dl_float16) {
+     ScaleKernel<<<blocks, threads, 0, stream>>>(
+         static_cast<half*>(output.data_ptr()), ...);
+   } else {
+     TVM_FFI_THROW(TypeError) << "Unsupported dtype: " << input.dtype();
+   }
+
+For libraries that support many dtypes, define dispatch macros
+(see `FlashInfer's tvm_ffi_utils.h <https://github.com/flashinfer-ai/flashinfer/blob/main/csrc/tvm_ffi_utils.h>`_
+for a production example).
+
+
+Export and Load
+---------------
+
+Export and Build
+~~~~~~~~~~~~~~~~
+
+**Export.** Use :c:macro:`TVM_FFI_DLL_EXPORT_TYPED_FUNC` to create a C symbol
+that follows the :doc:`TVM-FFI calling convention <../concepts/func_module>`:
+
+.. literalinclude:: ../../examples/kernel_library/scale_kernel.cu
+   :language: cpp
+   :start-after: [export.begin]
+   :end-before: [export.end]
+
+This creates a symbol ``__tvm_ffi_scale`` in the shared library.
+
+**Build.** Compile the kernel into a shared library using GCC/NVCC or CMake
+(see :doc:`../packaging/cpp_tooling` for full details):
+
+.. code-block:: bash
+
+   nvcc -shared -O3 scale_kernel.cu -o build/scale_kernel.so \
+       -Xcompiler -fPIC,-fvisibility=hidden \
+       $(tvm-ffi-config --cxxflags) \
+       $(tvm-ffi-config --ldflags) \
+       $(tvm-ffi-config --libs)
+
+**Optional arguments.** Wrap any argument type with :cpp:class:`tvm::ffi::Optional`
+to accept ``None`` from the Python side:
+
+.. code-block:: cpp
+
+   void MyKernel(TensorView output, TensorView input,
+                 Optional<TensorView> bias, Optional<double> scale) {
+     if (bias.has_value()) {
+       // use bias.value().data_ptr()
+     }
+     double s = scale.value_or(1.0);
+   }
 
 .. code-block:: python
 
- mod = tvm_ffi.load_module("lib.so")
- x = ...
- y = ...
- mod.func_name(x, y)
+   mod.my_kernel(y, x, None, None)         # no bias, default scale
+   mod.my_kernel(y, x, bias_tensor, 2.0)   # with bias and scale
 
-``x`` and ``y`` here can be any ML framework tensors, such as ``torch.Tensor``, ``numpy.NDArray``, ``cupy.ndarray``, or other tensors as long as TVM FFI supports. TVM FFI detects the tensor types in arguments and converts them into :cpp:class:`~tvm::ffi::TensorView` or :cpp:class:`~tvm::ffi::Tensor` automatically. So that we do not have to write the specific conversion codes per framework.
 
-In constrast, if the kernel function returns :cpp:class:`~tvm::ffi::Tensor` instead of ``void`` in the example above. TVM FFI automatically converts the output :cpp:class:`~tvm::ffi::Tensor` to framework tensors also. The output framework is inferred from the input framework tensors. For example, if the input framework tensors are of ``torch.Tensor``, TVM FFI will convert the output tensor to ``torch.Tensor``. And if none of the input tensors are from ML framework, the output tensor will be the ``tvm_ffi.core.Tensor`` as fallback.
+Load from Python
+~~~~~~~~~~~~~~~~
 
-Actually, it is **recommended** to pre-allocated input and output tensors from framework at Python side alreadly. So that the return type of kernel functions at C++ side should be ``void`` always.
+Use :py:func:`tvm_ffi.load_module` to load the library and call its functions.
+PyTorch tensors (and other framework tensors) are automatically converted to
+:cpp:class:`~tvm::ffi::TensorView` at the ABI boundary:
+
+.. literalinclude:: ../../examples/kernel_library/load_scale.py
+   :language: python
+   :start-after: [load_and_call.begin]
+   :end-before: [load_and_call.end]
+
+See :doc:`../get_started/quickstart` for examples with JAX, PaddlePaddle,
+NumPy, CuPy, Rust, and pure C++.
+
+
+Tensor Handling
+---------------
+
+TensorView vs Tensor
+~~~~~~~~~~~~~~~~~~~~
+
+TVM-FFI provides two tensor types (see :doc:`../concepts/tensor` for full details):
+
+:cpp:class:`~tvm::ffi::TensorView` *(non-owning)*
+  A lightweight view of an existing tensor. **Use this for kernel parameters.**
+  It adds no reference count overhead and works with all framework tensors.
+
+:cpp:class:`~tvm::ffi::Tensor` *(owning)*
+  A reference-counted tensor that manages its own lifetime. Use this only when
+  you need to **allocate and return** a tensor from C++.
+
+.. important::
+
+   Prefer :cpp:class:`~tvm::ffi::TensorView` in kernel signatures. It is more
+   lightweight, supports more use cases (including XLA buffers that only provide
+   views), and avoids unnecessary reference counting.
+
+
+Tensor Metadata
+~~~~~~~~~~~~~~~
+
+Both :cpp:class:`~tvm::ffi::TensorView` and :cpp:class:`~tvm::ffi::Tensor` expose
+identical metadata accessors. These are the methods kernel code uses most:
+validating inputs, computing launch parameters, and accessing data pointers.
+
+**Shape and elements.**
+:cpp:func:`~tvm::ffi::TensorView::ndim` returns the number of dimensions,
+:cpp:func:`~tvm::ffi::TensorView::shape` returns the full shape as a
+:cpp:class:`~tvm::ffi::ShapeView` (a lightweight ``span``-like view of
+``int64_t``), and :cpp:func:`~tvm::ffi::TensorView::size` returns the size of a
+single dimension (supports negative indexing, e.g. ``size(-1)`` for the last
+dimension). :cpp:func:`~tvm::ffi::TensorView::numel` returns the total element
+count — use it for computing grid dimensions:
+
+.. code-block:: cpp
+
+   int64_t n = input.numel();
+   int threads = 256;
+   int blocks = (n + threads - 1) / threads;
+
+**Dtype.** :cpp:func:`~tvm::ffi::TensorView::dtype` returns a :c:struct:`DLDataType`
+with three fields: ``code`` (e.g. ``kDLFloat``, ``kDLBfloat``), ``bits``
+(e.g. 16, 32), and ``lanes`` (almost always 1). Compare it against predefined
+constants to dispatch on dtype:
+
+.. code-block:: cpp
+
+   constexpr DLDataType dl_float32 = DLDataType{kDLFloat, 32, 1};
+   if (input.dtype() == dl_float32) { ... }
+
+**Device.** :cpp:func:`~tvm::ffi::TensorView::device` returns a :c:struct:`DLDevice`
+with ``device_type`` (e.g. ``kDLCUDA``) and ``device_id``. Use these for
+validation and to set the device guard:
+
+.. code-block:: cpp
+
+   TVM_FFI_ICHECK_EQ(input.device().device_type, kDLCUDA);
+   ffi::CUDADeviceGuard guard(input.device().device_id);
+
+**Data pointer.** :cpp:func:`~tvm::ffi::TensorView::data_ptr` returns ``void*``;
+cast it to the appropriate typed pointer before passing it to a kernel:
+
+.. code-block:: cpp
+
+   auto* out = static_cast<float*>(output.data_ptr());
+   auto* in  = static_cast<float*>(input.data_ptr());
+
+**Strides and contiguity.**
+:cpp:func:`~tvm::ffi::TensorView::strides` returns the stride array as a
+:cpp:class:`~tvm::ffi::ShapeView`, and
+:cpp:func:`~tvm::ffi::TensorView::stride` returns a single dimension's stride.
+:cpp:func:`~tvm::ffi::TensorView::IsContiguous` checks whether the tensor is
+contiguous in memory. Most kernels require contiguous inputs — the
+``CHECK_CONTIGUOUS`` macro shown above enforces this at the top of each function.
+
+.. tip::
+
+   The API is designed to be familiar to PyTorch developers.
+   ``dim()``, ``sizes()``, ``size(i)``, ``stride(i)``, and ``is_contiguous()``
+   are all available as aliases of their TVM-FFI counterparts.
+   See :doc:`../concepts/tensor` for the full API reference.
+
+
+Tensor Allocation
+~~~~~~~~~~~~~~~~~
+
+**Always pre-allocate output tensors on the Python side** and pass them into the
+kernel as :cpp:class:`~tvm::ffi::TensorView` parameters. Allocating tensors
+inside a kernel function is almost never the right choice:
+
+- it causes **memory fragmentation** from repeated small allocations,
+- it **breaks CUDA graph capture**, which requires deterministic memory addresses, and
+- it **bypasses the framework's allocator** (caching pools, device placement, memory planning).
+
+The pre-allocation pattern is straightforward:
+
+.. code-block:: python
+
+   # Python: pre-allocate output
+   y = torch.empty_like(x)
+   mod.scale(y, x, 2.0)
+
+.. code-block:: cpp
+
+   // C++: kernel writes into pre-allocated output
+   void Scale(TensorView output, TensorView input, double factor);
+
+If C++-side allocation is truly unavoidable — for example, when the output shape
+is data-dependent and cannot be determined before the kernel runs — use
+:cpp:func:`tvm::ffi::Tensor::FromEnvAlloc` to at least reuse the host
+framework's allocator (e.g., ``torch.empty`` under PyTorch):
+
+.. literalinclude:: ../../examples/kernel_library/tvm_ffi_utils.h
+   :language: cpp
+   :start-after: [alloc_tensor.begin]
+   :end-before: [alloc_tensor.end]
+
+For custom allocators (e.g., ``cudaMalloc``/``cudaFree``), use
+:cpp:func:`tvm::ffi::Tensor::FromNDAlloc`. Note that the kernel library must
+outlive any tensors allocated this way, since the custom deleter lives in the
+library. See :doc:`../concepts/tensor` for details.
+
+
+Further Reading
+---------------
+
+- :doc:`../get_started/quickstart`: End-to-end walkthrough shipping ``add_one`` across frameworks and languages
+- :doc:`../packaging/cpp_tooling`: Build toolchain, CMake integration, GCC/NVCC flags, and library distribution
+- :doc:`../packaging/python_packaging`: Packaging kernel libraries as Python wheels
+- :doc:`../concepts/tensor`: Tensor classes, DLPack interop, stream handling, and allocation APIs
+- :doc:`../concepts/func_module`: Function calling convention, modules, and the global registry
+- :doc:`../concepts/exception_handling`: Error handling across language boundaries
+- :doc:`../concepts/abi_overview`: Low-level C ABI details

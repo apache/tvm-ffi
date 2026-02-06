@@ -87,11 +87,9 @@
 #define TVM_FFI_FUNC_SIG __func__
 #endif
 
-#if defined(__GNUC__)
-// gcc and clang and attribute constructor
-/// \cond Doxygen_Suppress
-#define TVM_FFI_STATIC_INIT_BLOCK_DEF_(FnName) __attribute__((constructor)) static void FnName()
 /// \endcond
+
+#if defined(TVM_FFI_DOXYGEN_MODE)
 /*!
  * \brief Macro that defines a block that will be called during static initialization.
  *
@@ -101,12 +99,14 @@
  * }
  * \endcode
  */
+#define TVM_FFI_STATIC_INIT_BLOCK()
+#elif defined(__GNUC__)
+// gcc and clang: attribute constructor
+#define TVM_FFI_STATIC_INIT_BLOCK_DEF_(FnName) __attribute__((constructor)) static void FnName()
 #define TVM_FFI_STATIC_INIT_BLOCK() \
   TVM_FFI_STATIC_INIT_BLOCK_DEF_(TVM_FFI_STR_CONCAT(__TVMFFIStaticInitFunc, __COUNTER__))
-
 #else
-/// \cond Doxygen_Suppress
-// for other compilers, use the variable trick
+// other compilers: use the variable trick
 #define TVM_FFI_STATIC_INIT_BLOCK_DEF_(FnName, RegVar) \
   static void FnName();                                \
   [[maybe_unused]] static inline int RegVar = []() {   \
@@ -118,9 +118,9 @@
 #define TVM_FFI_STATIC_INIT_BLOCK()                                                       \
   TVM_FFI_STATIC_INIT_BLOCK_DEF_(TVM_FFI_STR_CONCAT(__TVMFFIStaticInitFunc, __COUNTER__), \
                                  TVM_FFI_STR_CONCAT(__TVMFFIStaticInitReg, __COUNTER__))
-/// \endcond
 #endif
 
+/// \cond Doxygen_Suppress
 /*
  * \brief Define the default copy/move constructor and assign operator
  * \param TypeName The class typename.
