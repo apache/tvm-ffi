@@ -34,6 +34,11 @@
 
 namespace tvm {
 namespace ffi {
+
+// Forward declaration for Expected<T>
+template <typename T>
+class Expected;
+
 namespace details {
 
 template <typename ArgType>

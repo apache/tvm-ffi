@@ -41,6 +41,7 @@
 #include <tvm/ffi/base_details.h>
 #include <tvm/ffi/c_api.h>
 #include <tvm/ffi/error.h>
+#include <tvm/ffi/expected.h>
 #include <tvm/ffi/function_details.h>
 
 #include <functional>
@@ -635,6 +636,59 @@ class Function : public ObjectRef {
    */
   TVM_FFI_INLINE void CallPacked(PackedArgs args, Any* result) const {
     static_cast<FunctionObj*>(data_.get())->CallPacked(args.data(), args.size(), result);
+  }
+
+  /*!
+   * \brief Call the function and return Expected<T> for exception-free error handling.
+   * \tparam T The expected return type (default: Any).
+   * \param args The arguments to pass to the function.
+   * \return Expected<T> containing either the result or an error.
+   *
+   * This method provides exception-free calling by catching all exceptions
+   * and returning them as Error values in the Expected type.
+   *
+   * \code
+   * Function func = Function::GetGlobal("risky_function");
+   * Expected<int> result = func.CallExpected<int>(arg1, arg2);
+   * if (result.is_ok()) {
+   *   int value = result.value();
+   * } else {
+   *   Error err = result.error();
+   * }
+   * \endcode
+   */
+  template <typename T = Any, typename... Args>
+  TVM_FFI_INLINE Expected<T> CallExpected(Args&&... args) const {
+    constexpr size_t kNumArgs = sizeof...(Args);
+    AnyView args_pack[kNumArgs > 0 ? kNumArgs : 1];
+    PackedArgs::Fill(args_pack, std::forward<Args>(args)...);
+
+    Any result;
+    FunctionObj* func_obj = static_cast<FunctionObj*>(data_.get());
+
+    // Use safe_call path to catch exceptions
+    int ret_code = func_obj->safe_call(func_obj, reinterpret_cast<const TVMFFIAny*>(args_pack),
+                                       kNumArgs, reinterpret_cast<TVMFFIAny*>(&result));
+
+    if (ret_code == 0) {
+      if constexpr (std::is_same_v<T, Any>) {
+        return std::move(result);
+      } else {
+        // Try T first (fast path), then Error
+        if (auto val = result.template try_cast<T>()) {
+          return *std::move(val);
+        }
+        if (auto err = result.template try_cast<Error>()) {
+          return Unexpected(std::move(*err));
+        }
+        return Unexpected(Error("TypeError",
+                                "CallExpected: result type mismatch, expected " +
+                                    TypeTraits<T>::TypeStr() + ", but got " + result.GetTypeKey(),
+                                ""));
+      }
+    } else {
+      return Unexpected(details::MoveFromSafeCallRaised());
+    }
   }
 
   /*! \return Whether the packed function is nullptr */
