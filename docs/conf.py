@@ -92,11 +92,8 @@ PREDEFINED             += TVM_FFI_DLL= TVM_FFI_DLL_EXPORT= TVM_FFI_INLINE= \
                           TVM_FFI_EXTRA_CXX_API= TVM_FFI_WEAK= TVM_FFI_DOXYGEN_MODE \
                           __cplusplus=201703
 EXCLUDE_SYMBOLS        += *details*  *TypeTraits* std \
-                         *use_default_type_traits_v* *is_optional_type_v* *operator* \
-                         TVM_FFI_LOG_EXCEPTION_CALL_BEGIN TVM_FFI_LOG_EXCEPTION_CALL_END \
-                         TVM_FFI_CLEAR_PTR_PADDING_IN_FFI_ANY TVM_FFI_STATIC_INIT_BLOCK \
-                         TVM_FFI_STATIC_INIT_BLOCK_DEF_ TVM_FFI_DEFINE_DEFAULT_COPY_MOVE_AND_ASSIGN
-EXCLUDE_PATTERNS       += *details.h *internal*
+                         *use_default_type_traits_v* *is_optional_type_v* *operator*
+EXCLUDE_PATTERNS       += */function_details.h */container_details.h
 ENABLE_PREPROCESSING   = YES
 MACRO_EXPANSION        = YES
 WARNINGS               = YES
