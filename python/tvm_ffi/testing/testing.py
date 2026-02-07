@@ -158,7 +158,7 @@ class _TestCxxClassBase:
     not_field_2: ClassVar[int] = 2
 
     def __init__(self, v_i64: int, v_i32: int) -> None:
-        self.__ffi_init__(v_i64 + 1, v_i32 + 2)  # type: ignore[attr-defined]
+        self.__ffi_init__(v_i64 + 1, v_i32 + 2)  # ty: ignore[unresolved-attribute]
 
 
 @c_class("testing.TestCxxClassDerived")
@@ -170,7 +170,7 @@ class _TestCxxClassDerived(_TestCxxClassBase):
 @c_class("testing.TestCxxClassDerivedDerived")
 class _TestCxxClassDerivedDerived(_TestCxxClassDerived):
     v_str: str = field(default_factory=lambda: "default")
-    v_bool: bool  # type: ignore[misc]  # Suppress: Attributes without a default cannot follow attributes with one
+    v_bool: bool  # ty: ignore[dataclass-field-order]  # Required field after fields with defaults
 
 
 @c_class("testing.TestCxxInitSubset")

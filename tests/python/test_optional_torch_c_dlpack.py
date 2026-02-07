@@ -25,7 +25,7 @@ import pytest
 try:
     import torch
 except ImportError:
-    torch = None  # type: ignore[assignment]
+    torch = None
 
 
 import tvm_ffi
@@ -35,6 +35,7 @@ IS_WINDOWS = sys.platform.startswith("win")
 
 @pytest.mark.skipif(torch is None, reason="torch is not installed")
 def test_build_torch_c_dlpack_extension() -> None:
+    assert torch is not None
     build_script = Path(tvm_ffi.__file__).parent / "utils" / "_build_optional_torch_c_dlpack.py"
     args = [
         sys.executable,

@@ -35,7 +35,7 @@ def test_make_object() -> None:
 
 
 def test_make_object_via_init() -> None:
-    obj0 = tvm_ffi.testing.TestIntPair(1, 2)  # type: ignore[call-arg]
+    obj0 = tvm_ffi.testing.TestIntPair(1, 2)  # ty: ignore[too-many-positional-arguments]
     assert obj0.a == 1
     assert obj0.b == 2
 
@@ -43,13 +43,13 @@ def test_make_object_via_init() -> None:
 def test_method() -> None:
     obj0 = tvm_ffi.testing.create_object("testing.TestObjectBase", v_i64=12)
     assert isinstance(obj0, tvm_ffi.testing.TestObjectBase)
-    assert obj0.add_i64(1) == 13  # type: ignore[attr-defined]
-    assert type(obj0).add_i64.__doc__ == "add_i64 method"  # type: ignore[attr-defined]
-    assert type(obj0).v_i64.__doc__ == "i64 field"  # type: ignore[attr-defined]
+    assert obj0.add_i64(1) == 13
+    assert type(obj0).add_i64.__doc__ == "add_i64 method"
+    assert type(obj0).v_i64.__doc__ == "i64 field"
 
 
 def test_attribute() -> None:
-    obj = tvm_ffi.testing.TestIntPair(3, 4)  # type: ignore[call-arg]
+    obj = tvm_ffi.testing.TestIntPair(3, 4)  # ty: ignore[too-many-positional-arguments]
     assert obj.a == 3
     assert obj.b == 4
     assert type(obj).a.__doc__ == "Field `a`"
@@ -76,10 +76,10 @@ def test_setter() -> None:
     assert obj0.v_str == "world"
 
     with pytest.raises(TypeError):
-        obj0.v_str = 1  # type: ignore[assignment]
+        obj0.v_str = 1  # ty: ignore[invalid-assignment]
 
     with pytest.raises(TypeError):
-        obj0.v_i64 = "hello"  # type: ignore[assignment]
+        obj0.v_i64 = "hello"  # ty: ignore[invalid-assignment]
 
 
 def test_derived_object() -> None:
@@ -93,8 +93,8 @@ def test_derived_object() -> None:
         "testing.TestObjectDerived", v_i64=20, v_map=v_map, v_array=v_array
     )
     assert isinstance(obj0, tvm_ffi.testing.TestObjectDerived)
-    assert obj0.v_map.same_as(v_map)  # type: ignore[attr-defined]
-    assert obj0.v_array.same_as(v_array)  # type: ignore[attr-defined]
+    assert obj0.v_map.same_as(v_map)  # ty: ignore[unresolved-attribute]
+    assert obj0.v_array.same_as(v_array)  # ty: ignore[unresolved-attribute]
     assert obj0.v_i64 == 20
     assert obj0.v_f64 == 10.0
     assert obj0.v_str == "hello"
@@ -129,7 +129,7 @@ def test_opaque_object() -> None:
 def test_opaque_type_error() -> None:
     obj0 = MyObject("hello")
     with pytest.raises(TypeError) as e:
-        tvm_ffi.testing.add_one(obj0)  # type: ignore[arg-type]
+        tvm_ffi.testing.add_one(obj0)  # ty: ignore[invalid-argument-type]
     assert (
         "Mismatched type on argument #0 when calling: `testing.add_one(0: int) -> int`. Expected `int` but got `ffi.OpaquePyObject`"
         in str(e.value)
@@ -154,18 +154,18 @@ def test_object_protocol() -> None:
 
 def test_unregistered_object_fallback() -> None:
     def _check_type(x: Any) -> None:
-        type_info: TypeInfo = type(x).__tvm_ffi_type_info__  # type: ignore[attr-defined]
+        type_info: TypeInfo = type(x).__tvm_ffi_type_info__
         assert type_info.type_key == "testing.TestUnregisteredObject"
         assert x.v1 == 41
         assert x.v2 == 42
-        assert x.get_v1_plus_one() == 42  # type: ignore[attr-defined]
-        assert x.get_v2_plus_two() == 44  # type: ignore[attr-defined]
+        assert x.get_v1_plus_one() == 42
+        assert x.get_v2_plus_two() == 44
         assert type(x).__name__ == "TestUnregisteredObject"
         assert type(x).__module__ == "testing"
         assert type(x).__qualname__ == "testing.TestUnregisteredObject"
-        assert "Auto-generated fallback class" in type(x).__doc__  # type: ignore[operator]
-        assert "Get (v1 + 1) from TestUnregisteredBaseObject" in type(x).get_v1_plus_one.__doc__  # type: ignore[attr-defined]
-        assert "Get (v2 + 2) from TestUnregisteredObject" in type(x).get_v2_plus_two.__doc__  # type: ignore[attr-defined]
+        assert "Auto-generated fallback class" in type(x).__doc__
+        assert "Get (v1 + 1) from TestUnregisteredBaseObject" in type(x).get_v1_plus_one.__doc__
+        assert "Get (v2 + 2) from TestUnregisteredObject" in type(x).get_v2_plus_two.__doc__
 
     obj = tvm_ffi.testing.make_unregistered_object()
     _check_type(obj)

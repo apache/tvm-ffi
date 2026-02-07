@@ -79,7 +79,7 @@ def nvrtc_compile(  # noqa: PLR0912, PLR0915
 
     """
     try:
-        from cuda.bindings import driver, nvrtc  # type: ignore[import-not-found]  # noqa: PLC0415
+        from cuda.bindings import driver, nvrtc  # noqa: PLC0415
     except ImportError as e:
         raise RuntimeError(
             "CUDA bindings not available. Install with: pip install cuda-python"

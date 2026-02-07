@@ -18,21 +18,19 @@
 from __future__ import annotations
 
 import ctypes
-from types import ModuleType
 
 import pytest
 import tvm_ffi
 import tvm_ffi.cpp
 
-torch: ModuleType | None
 try:
-    import torch  # type: ignore[no-redef]
+    import torch
 except ImportError:
     torch = None
 
 
 try:
-    from cuda.bindings import driver as cuda_driver  # type: ignore[import-not-found]
+    from cuda.bindings import driver as cuda_driver
 except ImportError:
     cuda_driver = None
 

@@ -169,7 +169,7 @@ class Array(core.Object, Sequence[T]):
     @overload
     def __getitem__(self, idx: slice, /) -> list[T]: ...
 
-    def __getitem__(self, idx: SupportsIndex | slice, /) -> T | list[T]:
+    def __getitem__(self, idx: SupportsIndex | slice, /) -> T | list[T]:  # ty: ignore[invalid-method-override]
         """Return one element or a list for a slice."""
         length = len(self)
         result = getitem_helper(self, _ffi_api.ArrayGetItem, length, idx)
@@ -227,7 +227,7 @@ class KeysView(KeysViewBase[K]):
             if not functor(2):
                 break
 
-    def __contains__(self, k: object) -> bool:
+    def __contains__(self, k: object) -> bool:  # ty: ignore[invalid-method-override]
         return k in self._backend_map
 
 
@@ -273,7 +273,7 @@ class ItemsView(ItemsViewBase[K, V]):
         if not isinstance(item, tuple) or len(item) != 2:
             return False
         key, value = item
-        actual_value = self._backend_map.get(key, MISSING)
+        actual_value = self._backend_map.get(key, MISSING)  # ty: ignore[invalid-argument-type]
         if actual_value is MISSING:
             return False
         # TODO(@junrus): Is `__eq__` the right method to use here?

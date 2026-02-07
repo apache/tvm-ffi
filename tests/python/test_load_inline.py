@@ -17,14 +17,11 @@
 
 from __future__ import annotations
 
-from types import ModuleType
-
 import numpy
 import pytest
 
-torch: ModuleType | None
 try:
-    import torch  # type: ignore[no-redef]
+    import torch
 except ImportError:
     torch = None
 
@@ -251,6 +248,7 @@ def test_load_inline_with_env_tensor_allocator() -> None:
         When a module returns an object, the object deleter address is part of the
         loaded library. We need to keep the module loaded until the object is deleted.
         """
+        assert torch is not None
         x_cpu = torch.asarray([1, 2, 3, 4, 5], dtype=torch.float32, device="cpu")
         # test support for nested container passing
         y_cpu = mod.return_add_one({"x": [x_cpu]})
@@ -353,6 +351,7 @@ def test_cuda_memory_alloc_noleak() -> None:
 
     def run_check() -> None:
         """Must run in a separate function to ensure deletion happens before mod unloads."""
+        assert torch is not None
         x = torch.arange(1024 * 1024, dtype=torch.float32, device="cuda")
         current_allocated = torch.cuda.memory_allocated()
         repeat = 8

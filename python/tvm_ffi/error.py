@@ -76,9 +76,9 @@ class TracebackManager:
         tree = ast.parse("_getframe()", filename=filename, mode="eval")
         for node in ast.walk(tree):
             if hasattr(node, "col_offset"):
-                node.col_offset = 0
+                node.col_offset = 0  # ty: ignore[invalid-assignment]
             if hasattr(node, "end_col_offset"):
-                node.end_col_offset = 0
+                node.end_col_offset = 0  # ty: ignore[invalid-assignment]
         # call into get frame, bt changes the context
         code_object = compile(tree, filename, "eval")
         # replace the function name and line number
@@ -240,7 +240,7 @@ def register_error(
         assert isinstance(py_err, MyError)
 
     """
-    if callable(name_or_cls):
+    if isinstance(name_or_cls, type):
         cls = name_or_cls
         name_or_cls = cls.__name__
 

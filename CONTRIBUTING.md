@@ -77,7 +77,7 @@ The pre-commit configuration includes checks for:
 - **License headers**: Ensures all files have proper Apache Software Foundation headers
 - **Code formatting**: Runs clang-format (C++), ruff (Python), shfmt (Shell scripts)
 - **Linting**: Runs clang-tidy, ruff, shellcheck, markdownlint, yamllint, and more
-- **Type checking**: Runs mypy for Python type annotations
+- **Type checking**: Runs ty for Python type annotations
 - **File quality**: Checks for trailing whitespace, file sizes, merge conflicts, etc.
 
 ### Troubleshooting

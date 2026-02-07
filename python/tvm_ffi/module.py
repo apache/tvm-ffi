@@ -129,7 +129,7 @@ class Module(core.Object):
             The module
 
         """
-        return self.imports_  # type: ignore[return-value]
+        return self.imports_  # ty: ignore[invalid-return-type]
 
     def implements_function(self, name: str, query_imports: bool = False) -> bool:
         """Return True if the module defines a global function.

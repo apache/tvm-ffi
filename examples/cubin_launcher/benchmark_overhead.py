@@ -39,8 +39,8 @@ import traceback
 from typing import Callable
 
 import torch
-import triton  # type: ignore[import-not-found]
-import triton.language as tl  # type: ignore[import-not-found]
+import triton
+import triton.language as tl
 from tvm_ffi import cpp
 from tvm_ffi.module import Module
 

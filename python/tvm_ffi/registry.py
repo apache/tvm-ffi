@@ -134,9 +134,9 @@ def register_global_func(
     :py:func:`tvm_ffi.remove_global_func`
 
     """
-    if callable(func_name):
+    if not isinstance(func_name, str):
         f = func_name
-        func_name = f.__name__
+        func_name = f.__name__  # ty: ignore[unresolved-attribute]
 
     if not isinstance(func_name, str):
         raise ValueError("expect string function name")
