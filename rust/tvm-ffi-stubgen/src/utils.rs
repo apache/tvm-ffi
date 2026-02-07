@@ -29,7 +29,10 @@ pub(crate) fn normalize_prefix(prefix: &str) -> String {
     }
 }
 
-pub(crate) fn ensure_out_dir(out_dir: &Path, overwrite: bool) -> Result<(), Box<dyn std::error::Error>> {
+pub(crate) fn ensure_out_dir(
+    out_dir: &Path,
+    overwrite: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
     if out_dir.exists() {
         let mut has_entries = false;
         for entry in fs::read_dir(out_dir)? {
@@ -63,7 +66,10 @@ pub(crate) fn relative_path(from: &Path, to: &Path) -> PathBuf {
     let from_components: Vec<_> = from.components().collect();
     let to_components: Vec<_> = to.components().collect();
     let mut i = 0;
-    while i < from_components.len() && i < to_components.len() && from_components[i] == to_components[i] {
+    while i < from_components.len()
+        && i < to_components.len()
+        && from_components[i] == to_components[i]
+    {
         i += 1;
     }
     let mut out = PathBuf::new();

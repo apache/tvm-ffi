@@ -19,11 +19,11 @@ use libloading::Library;
 use std::path::PathBuf;
 use std::sync::LazyLock;
 use tvm_ffi::function_internal::{ArgIntoRef, IntoArgHolder};
-use tvm_ffi::{Any, Error, Function, Result as FfiResult, String as FfiString, TYPE_ERROR};
 use tvm_ffi::tvm_ffi_sys::{
     TVMFFIAny, TVMFFIByteArray, TVMFFIGetTypeInfo, TVMFFIObjectHandle, TVMFFITypeIndex,
     TVMFFITypeInfo, TVMFFITypeKeyToIndex,
 };
+use tvm_ffi::{Any, Error, Function, Result as FfiResult, String as FfiString, TYPE_ERROR};
 
 #[repr(C)]
 #[derive(Debug)]
@@ -41,7 +41,9 @@ impl Clone for Array {
         unsafe {
             TVMFFIObjectIncRef(self.handle);
         }
-        Self { handle: self.handle }
+        Self {
+            handle: self.handle,
+        }
     }
 }
 
@@ -101,7 +103,7 @@ impl ArgIntoRef for Array {
     }
 }
 
-impl<'a> ArgIntoRef for &'a Array {
+impl ArgIntoRef for &Array {
     type Target = Array;
     fn to_ref(&self) -> &Self::Target {
         self

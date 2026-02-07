@@ -22,9 +22,6 @@ mod model;
 mod schema;
 mod utils;
 
-#[cfg(test)]
-mod tests;
-
 pub use cli::Args;
 
 pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {

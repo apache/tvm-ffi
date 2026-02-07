@@ -19,7 +19,10 @@ use clap::Parser;
 use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
-#[command(name = "tvm-ffi-stubgen", about = "Generate Rust stubs from tvm-ffi metadata")]
+#[command(
+    name = "tvm-ffi-stubgen",
+    about = "Generate Rust stubs from tvm-ffi metadata"
+)]
 pub struct Args {
     #[arg(value_name = "OUT_DIR")]
     pub out_dir: PathBuf,

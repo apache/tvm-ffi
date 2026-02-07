@@ -79,9 +79,8 @@ pub(crate) fn build_type_entries(
         let mut methods = Vec::new();
         if let Some(info) = ffi::get_type_info(key) {
             if info.num_methods > 0 && !info.methods.is_null() {
-                let method_slice = unsafe {
-                    std::slice::from_raw_parts(info.methods, info.num_methods as usize)
-                };
+                let method_slice =
+                    unsafe { std::slice::from_raw_parts(info.methods, info.num_methods as usize) };
                 for method in method_slice {
                     let method_name = match ffi::byte_array_to_string_opt(&method.name) {
                         Some(name) => name,
@@ -94,7 +93,8 @@ pub(crate) fn build_type_entries(
                         .as_deref()
                         .and_then(extract_type_schema)
                         .and_then(|s| parse_type_schema(&s));
-                    let sig = build_method_sig(schema.as_ref(), type_map, Some(key.as_str()), is_static);
+                    let sig =
+                        build_method_sig(schema.as_ref(), type_map, Some(key.as_str()), is_static);
                     let full_name = format!("{}.{}", key, method_name);
                     methods.push(MethodGen {
                         full_name,
@@ -354,12 +354,7 @@ fn render_function(out: &mut String, func: &FunctionGen, indent: usize) {
             indent_str, func.rust_name
         )
         .ok();
-        writeln!(
-            out,
-            "{}    let func = &*{};",
-            indent_str, static_name
-        )
-        .ok();
+        writeln!(out, "{}    let func = &*{};", indent_str, static_name).ok();
         writeln!(
             out,
             "{}    let views: Vec<AnyView<'_>> = args.iter().map(AnyView::from).collect();",
@@ -375,18 +370,10 @@ fn render_function(out: &mut String, func: &FunctionGen, indent: usize) {
     writeln!(
         out,
         "{}pub fn {}({}) -> Result<{}> {{",
-        indent_str,
-        func.rust_name,
-        args,
-        func.sig.ret.name
+        indent_str, func.rust_name, args, func.sig.ret.name
     )
     .ok();
-    writeln!(
-        out,
-        "{}    let func = &*{};",
-        indent_str, static_name
-    )
-    .ok();
+    writeln!(out, "{}    let func = &*{};", indent_str, static_name).ok();
     writeln!(
         out,
         "{}    let typed = tvm_ffi::into_typed_fn!(func.clone(), Fn({}) -> Result<{}>);",
@@ -433,7 +420,12 @@ fn render_type(out: &mut String, ty: &TypeGen, indent: usize) {
     writeln!(out, "{}    }}", indent_str).ok();
     writeln!(out, "{}}}\n", indent_str).ok();
 
-    writeln!(out, "{}impl From<ObjectRef> for {} {{", indent_str, ty.rust_name).ok();
+    writeln!(
+        out,
+        "{}impl From<ObjectRef> for {} {{",
+        indent_str, ty.rust_name
+    )
+    .ok();
     writeln!(
         out,
         "{}    fn from(inner: ObjectRef) -> Self {{",
@@ -478,12 +470,7 @@ fn render_method(out: &mut String, ty: &TypeGen, method: &MethodGen, indent: usi
                 indent_str, method.rust_name
             )
             .ok();
-            writeln!(
-                out,
-                "{}    let func = &*{};",
-                indent_str, static_name
-            )
-            .ok();
+            writeln!(out, "{}    let func = &*{};", indent_str, static_name).ok();
             writeln!(
                 out,
                 "{}    let views: Vec<AnyView<'_>> = args.iter().map(AnyView::from).collect();",
@@ -500,19 +487,19 @@ fn render_method(out: &mut String, ty: &TypeGen, method: &MethodGen, indent: usi
             indent_str, method.rust_name
         )
         .ok();
-        writeln!(
-            out,
-            "{}    let func = &*{};",
-            indent_str, static_name
-        )
-        .ok();
+        writeln!(out, "{}    let func = &*{};", indent_str, static_name).ok();
         writeln!(
             out,
             "{}    let mut views: Vec<AnyView<'_>> = Vec::with_capacity(args.len() + 1);",
             indent_str
         )
         .ok();
-        writeln!(out, "{}    views.push(AnyView::from(self.as_object_ref()));", indent_str).ok();
+        writeln!(
+            out,
+            "{}    views.push(AnyView::from(self.as_object_ref()));",
+            indent_str
+        )
+        .ok();
         writeln!(
             out,
             "{}    views.extend(args.iter().map(AnyView::from));",
@@ -535,34 +522,37 @@ fn render_method(out: &mut String, ty: &TypeGen, method: &MethodGen, indent: usi
     writeln!(
         out,
         "{}pub fn {} -> Result<{}> {{",
-        indent_str,
-        signature,
-        method.sig.ret.name
+        indent_str, signature, method.sig.ret.name
     )
     .ok();
-    writeln!(
-        out,
-        "{}    let func = &*{};",
-        indent_str, static_name
-    )
-    .ok();
+    writeln!(out, "{}    let func = &*{};", indent_str, static_name).ok();
     let type_list = if method.is_static {
         render_type_list(&method.sig.args)
     } else {
         let mut types = vec!["tvm_ffi::object::ObjectRef".to_string()];
-        types.extend(method.sig.args.iter().map(|arg| arg.typed_name().to_string()));
+        types.extend(
+            method
+                .sig
+                .args
+                .iter()
+                .map(|arg| arg.typed_name().to_string()),
+        );
         types.join(", ")
     };
     writeln!(
         out,
         "{}    let typed = tvm_ffi::into_typed_fn!(func.clone(), Fn({}) -> Result<{}>);",
-        indent_str,
-        type_list,
-        method.sig.ret.name
+        indent_str, type_list, method.sig.ret.name
     )
     .ok();
     let call_expr = format!("typed({})", render_method_call_args(method));
-    writeln!(out, "{}    {}", indent_str, method.sig.ret.wrap_return(&call_expr)).ok();
+    writeln!(
+        out,
+        "{}    {}",
+        indent_str,
+        method.sig.ret.wrap_return(&call_expr)
+    )
+    .ok();
     writeln!(out, "{}}}", indent_str).ok();
 }
 
@@ -575,7 +565,10 @@ fn render_args(args: &[RustType]) -> String {
 }
 
 fn render_type_list(args: &[RustType]) -> String {
-    args.iter().map(|arg| arg.typed_name().to_string()).collect::<Vec<_>>().join(", ")
+    args.iter()
+        .map(|arg| arg.typed_name().to_string())
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn render_call_args_typed(args: &[RustType]) -> String {
@@ -618,13 +611,11 @@ fn sanitize_ident(name: &str, style: IdentStyle) -> String {
     let mut prev_underscore = false;
     for (i, ch) in name.chars().enumerate() {
         let mut c = ch;
-        if style == IdentStyle::Module {
-            if ch.is_ascii_uppercase() {
-                if i > 0 && !prev_underscore {
-                    out.push('_');
-                }
-                c = ch.to_ascii_lowercase();
+        if style == IdentStyle::Module && ch.is_ascii_uppercase() {
+            if i > 0 && !prev_underscore {
+                out.push('_');
             }
+            c = ch.to_ascii_lowercase();
         }
         if c.is_ascii_alphanumeric() || c == '_' {
             out.push(c);
@@ -641,10 +632,10 @@ fn sanitize_ident(name: &str, style: IdentStyle) -> String {
         out.insert(0, '_');
     }
     const KEYWORDS: &[&str] = &[
-        "as", "break", "const", "continue", "crate", "else", "enum", "extern", "false",
-        "fn", "for", "if", "impl", "in", "let", "loop", "match", "mod", "move", "mut",
-        "pub", "ref", "return", "self", "Self", "static", "struct", "super", "trait",
-        "true", "type", "unsafe", "use", "where", "while", "async", "await", "dyn",
+        "as", "break", "const", "continue", "crate", "else", "enum", "extern", "false", "fn",
+        "for", "if", "impl", "in", "let", "loop", "match", "mod", "move", "mut", "pub", "ref",
+        "return", "self", "Self", "static", "struct", "super", "trait", "true", "type", "unsafe",
+        "use", "where", "while", "async", "await", "dyn",
     ];
     if KEYWORDS.contains(&out.as_str()) {
         out.push('_');
