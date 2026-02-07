@@ -234,13 +234,11 @@ fn insert_type(root: &mut ModuleNode, mods: &[String], ty: TypeGen) {
 }
 
 fn split_name(full_name: &str, prefix: &str) -> (Vec<String>, String) {
-    let mut remainder = full_name;
-    if !prefix.is_empty() && remainder.starts_with(prefix) {
-        remainder = &remainder[prefix.len()..];
-    } else if !prefix.is_empty() && remainder.starts_with(prefix.trim_end_matches('.')) {
-        remainder = &remainder[prefix.trim_end_matches('.').len()..];
-        remainder = remainder.trim_start_matches('.');
-    }
+    let remainder = if prefix.is_empty() {
+        full_name
+    } else {
+        full_name.strip_prefix(prefix).unwrap_or(full_name)
+    };
     let parts: Vec<&str> = remainder.split('.').filter(|p| !p.is_empty()).collect();
     if parts.is_empty() {
         return (Vec::new(), "ffi".to_string());
