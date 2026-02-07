@@ -109,6 +109,11 @@ def load_torch_c_dlpack_extension() -> Any:  # noqa: PLR0912, PLR0915
             return None
     except ImportError:
         pass
+    except AttributeError:
+        # When torch_c_dlpack_ext and torch have different ABI
+        # `ctypes.CDLL` will raise an `AttributeError`.
+        # Keep trying JIT
+        pass
 
     try:
         # check whether a JIT shared library is built in cache

@@ -21,6 +21,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from contextlib import suppress
 from pathlib import Path
 
 from setuptools import build_meta as orig
@@ -62,10 +63,12 @@ def build_wheel(
     metadata_directory: orig.StrPath | None = None,
 ) -> str:
     """Build wheel."""
-    if not _is_lib_prebuilt():
-        # build wheel from sdist package, compile the torch c dlpack ext library locally.
+    torch = None
+    with suppress(ModuleNotFoundError):
         import torch  # noqa: PLC0415
 
+    if torch is not None and not _is_lib_prebuilt():
+        # build wheel from sdist package, compile the torch c dlpack ext library locally.
         if hasattr(torch.Tensor, "__dlpack_c_exchange_api__") or hasattr(
             torch.Tensor, "__c_dlpack_exchange_api__"
         ):
