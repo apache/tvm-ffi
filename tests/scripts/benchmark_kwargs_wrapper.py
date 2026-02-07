@@ -28,7 +28,7 @@ def print_speed(name: str, speed: float) -> None:
     print(f"{name:<60} {speed} sec/call")
 
 
-def target_func(*args: Any) -> None:  # type: ignore[no-untyped-def]
+def target_func(*args: Any) -> None:
     pass
 
 

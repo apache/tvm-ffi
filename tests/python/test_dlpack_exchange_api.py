@@ -24,15 +24,15 @@ import sys
 import pytest
 
 try:
-    import torch  # type: ignore[no-redef]
+    import torch
 
     # Import tvm_ffi to load the DLPack exchange API extension
     # This sets torch.Tensor.__dlpack_c_exchange_api__
     import tvm_ffi
-    from torch.utils import cpp_extension  # type: ignore
+    from torch.utils import cpp_extension
     from tvm_ffi import libinfo
 except ImportError:
-    torch = None  # type: ignore[assignment]
+    torch = None
 
 # Check if DLPack Exchange API is available
 _has_dlpack_api = torch is not None and hasattr(torch.Tensor, "__dlpack_c_exchange_api__")
@@ -46,7 +46,7 @@ def test_dlpack_exchange_api() -> None:
 
     assert torch is not None
     assert hasattr(torch.Tensor, "__dlpack_c_exchange_api__")
-    api_attr = torch.Tensor.__dlpack_c_exchange_api__  # type: ignore[attr-defined]
+    api_attr = torch.Tensor.__dlpack_c_exchange_api__
     # PyCapsule - extract the pointer as integer
     pythonapi = ctypes.pythonapi
     # Set restype to c_size_t to get integer directly (avoids c_void_p quirks)
@@ -217,6 +217,7 @@ def test_dlpack_exchange_api() -> None:
 @pytest.mark.skipif(not _has_dlpack_api, reason="PyTorch DLPack Exchange API not available")
 def test_from_dlpack_torch() -> None:
     # Covers from_dlpack to use fallback fastpath
+    assert torch is not None
     tensor = torch.arange(24, dtype=torch.float32).reshape(2, 3, 4)
     tensor_from_dlpack = tvm_ffi.from_dlpack(tensor)
     assert tensor_from_dlpack.shape == tensor.shape

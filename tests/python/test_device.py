@@ -95,7 +95,7 @@ def test_deive_type_error(dev_type: str, dev_id: int | None) -> None:
 
 def test_deive_id_error() -> None:
     with pytest.raises(TypeError):
-        tvm_ffi.device("cpu", "?")  # type: ignore[arg-type]
+        tvm_ffi.device("cpu", "?")  # ty: ignore[invalid-argument-type]
 
 
 def test_device_pickle() -> None:

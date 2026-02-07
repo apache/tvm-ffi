@@ -73,8 +73,8 @@ class Shape(tuple, PyNativeObject):
     def __from_tvm_ffi_object__(cls, obj: Any) -> Shape:
         """Construct from a given tvm object."""
         content = _shape_obj_get_py_tuple(obj)
-        val: Shape = tuple.__new__(cls, content)  # type: ignore[arg-type]
-        val._tvm_ffi_cached_object = obj  # type: ignore[attr-defined]
+        val: Shape = tuple.__new__(cls, content)  # ty: ignore[invalid-argument-type]
+        val._tvm_ffi_cached_object = obj
         return val
 
 

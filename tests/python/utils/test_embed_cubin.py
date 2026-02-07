@@ -22,14 +22,12 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from types import ModuleType
 
 import pytest
 from tvm_ffi.utils.embed_cubin import embed_cubin
 
-torch: ModuleType | None
 try:
-    import torch  # type: ignore[import-not-found,no-redef]
+    import torch
 except ImportError:
     torch = None
 

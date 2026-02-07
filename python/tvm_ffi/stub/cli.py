@@ -133,10 +133,10 @@ def _stage_2(
         return ret
 
     # Step 0. Find out functions and classes already defined on files.
-    defined_func_prefixes: set[str] = {  # type: ignore[union-attr]
+    defined_func_prefixes: set[str] = {
         code.param[0] for file in files for code in file.code_blocks if code.kind == "global"
     }
-    defined_objs: set[str] = {  # type: ignore[assignment]
+    defined_objs: set[str] = {  # ty: ignore[invalid-assignment]
         code.param for file in files for code in file.code_blocks if code.kind == "object"
     } | C.BUILTIN_TYPE_KEYS
 
@@ -198,7 +198,7 @@ def _stage_3(  # noqa: PLR0912
     # Stage 1. Collect `tvm-ffi-stubgen(import-object): ...`
     for code in file.code_blocks:
         if code.kind == "import-object":
-            name, type_checking_only, alias = code.param  # type: ignore[misc]
+            name, type_checking_only, alias = code.param
             imports.append(
                 ImportItem(
                     name,

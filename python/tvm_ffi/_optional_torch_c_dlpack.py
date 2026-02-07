@@ -41,7 +41,7 @@ import warnings
 from pathlib import Path
 from typing import Any
 
-logger = logging.getLogger(__name__)  # type: ignore
+logger = logging.getLogger(__name__)
 
 
 def _create_dlpack_exchange_api_capsule(ptr_as_int: int) -> Any:
@@ -103,7 +103,7 @@ def load_torch_c_dlpack_extension() -> Any:  # noqa: PLR0912, PLR0915
 
     """Load the torch c dlpack extension."""
     try:
-        import torch_c_dlpack_ext  # type: ignore  # noqa: PLC0415, F401
+        import torch_c_dlpack_ext  # noqa: PLC0415, F401
 
         if _check_and_update_dlpack_c_exchange_api(torch.Tensor):
             return None

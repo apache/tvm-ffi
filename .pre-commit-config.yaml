@@ -113,18 +113,14 @@ repos:
         args:
           - --config
           - docs/.rstcheck.cfg
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: "v1.19.0"
+  - repo: local
     hooks:
-      - id: mypy
-        name: mypy
+      - id: ty
+        name: ty check
+        entry: uvx ty check
+        language: system
         pass_filenames: false
-        args: []
-        additional_dependencies:
-          - numpy>=1.22
-          - ml-dtypes>=0.1
-          - pytest
-          - typing-extensions>=4.5
+        types: [python]
   - repo: https://github.com/cheshirekow/cmake-format-precommit
     rev: v0.6.13
     hooks:

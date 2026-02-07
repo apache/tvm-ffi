@@ -50,10 +50,10 @@ def test_bad_constructor_init_state() -> None:
     proper repr code
     """
     with pytest.raises(TypeError):
-        tvm_ffi.Array(1)  # type: ignore[arg-type]
+        tvm_ffi.Array(1)  # ty: ignore[invalid-argument-type]
 
     with pytest.raises(AttributeError):
-        tvm_ffi.Map(1)  # type: ignore[arg-type]
+        tvm_ffi.Map(1)  # ty: ignore[invalid-argument-type]
 
 
 def test_array_of_array_map() -> None:
@@ -198,7 +198,7 @@ def test_array_concat(
     b: Sequence[int],
     c_expected: Sequence[int],
 ) -> None:
-    c_actual = a + b  # type: ignore[operator]
+    c_actual = a + b  # ty: ignore[unsupported-operator]
     assert type(c_actual) is type(c_expected)
     assert len(c_actual) == len(c_expected)
     assert tuple(c_actual) == tuple(c_expected)

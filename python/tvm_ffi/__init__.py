@@ -26,7 +26,7 @@
 # 2. Python 3.12
 # 3. torch 2.9.0
 try:
-    import torch  # type: ignore
+    import torch
 except ImportError:
     pass
 
@@ -86,7 +86,7 @@ from ._dtype import (
 )
 
 try:
-    from ._version import __version__, __version_tuple__  # type: ignore[import-not-found]
+    from ._version import __version__, __version_tuple__
 except ImportError:
     __version__ = "0.0.0.dev0"
     __version_tuple__ = (0, 0, 0, "dev0", "7d34eb8ab.d20250913")

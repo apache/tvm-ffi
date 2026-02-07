@@ -111,7 +111,7 @@ class CodeBlock:
         else:
             raise ValueError(f"Unknown stub type `{stub}` at line {lineo}")
         return CodeBlock(
-            kind=kind,  # type: ignore[arg-type]
+            kind=kind,
             param=param,
             lineno_start=lineo,
             lineno_end=None,
@@ -275,7 +275,7 @@ def path_walk(
         return
     # Python 3.12+ - just delegate to `Path.walk`
     if hasattr(p, "walk"):
-        yield from p.walk(  # type: ignore[attr-defined]
+        yield from p.walk(  # ty: ignore[call-non-callable]
             top_down=top_down,
             on_error=on_error,
             follow_symlinks=follow_symlinks,

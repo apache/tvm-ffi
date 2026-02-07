@@ -124,7 +124,7 @@ def test_validation_errors() -> None:
 
     # Invalid argument name types
     with pytest.raises(TypeError, match="Argument name must be a string"):
-        make_kwargs_wrapper(target, ["a", 123])  # type: ignore[list-item]
+        make_kwargs_wrapper(target, ["a", 123])  # ty: ignore[invalid-argument-type]
 
     # Invalid Python identifiers
     with pytest.raises(ValueError, match="not a valid Python identifier"):
@@ -138,7 +138,7 @@ def test_validation_errors() -> None:
 
     # arg_defaults not a tuple
     with pytest.raises(TypeError, match="arg_defaults must be a tuple"):
-        make_kwargs_wrapper(target, ["a", "b"], arg_defaults=[10])  # type: ignore[arg-type]
+        make_kwargs_wrapper(target, ["a", "b"], arg_defaults=[10])  # ty: ignore[invalid-argument-type]
 
     # arg_defaults too long
     with pytest.raises(ValueError, match=r"arg_defaults has .* values but only"):
@@ -190,7 +190,7 @@ def test_wrapper_with_signature() -> None:
 
     # Test metadata preservation when prototype is provided
     wrapper_with_metadata = make_kwargs_wrapper_from_signature(target, sig, source_func)
-    assert wrapper_with_metadata.__name__ == "source_func"
+    assert wrapper_with_metadata.__name__ == "source_func"  # ty: ignore[unresolved-attribute]
     assert wrapper_with_metadata.__doc__ == "Source function documentation."
 
     # With keyword-only arguments
@@ -322,7 +322,7 @@ def test_metadata_preservation() -> None:
     target = lambda *args: sum(args)
 
     wrapper = make_kwargs_wrapper(target, ["x", "y"], arg_defaults=(10,), prototype=my_function)
-    assert wrapper.__name__ == "my_function"
+    assert wrapper.__name__ == "my_function"  # ty: ignore[unresolved-attribute]
     assert wrapper.__doc__ == "Document the function."
     assert wrapper.__annotations__ == my_function.__annotations__
     assert wrapper(5) == 15

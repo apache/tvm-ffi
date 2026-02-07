@@ -54,7 +54,7 @@ test = [
 [dependency-groups]
 dev = [
   "ruff",
-  "mypy",
+  "ty",
   "clang-format",
   "clang-tidy",
   "ipdb",
@@ -255,28 +255,33 @@ environment = { MACOSX_DEPLOYMENT_TARGET = "10.14" }
 [tool.cibuildwheel.windows]
 archs = ["AMD64"]
 
-[tool.mypy]
-python_version = "3.9"
-show_error_codes = true
-mypy_path = ["python", "examples", "tests/python"]
-files = ["python/tvm_ffi", "examples", "tests/python"]
-namespace_packages = true
-explicit_package_bases = true
-allow_redefinition = true
-exclude = '''(?x)(
-  ^\.venv/|
-  ^build/|
-  ^dist/|
-  ^\.mypy_cache/
-)'''
+[tool.ty.environment]
+python-version = "3.9"
+python = ".venv"
+extra-paths = ["python", "examples", "tests/python"]
 
-[[tool.mypy.overrides]]
-module = ["torch", "torch.*", "my_ffi_extension", "my_ffi_extension.*"]
-ignore_missing_imports = true
+[tool.ty.src]
+include = ["python/tvm_ffi/**", "examples/**", "tests/python/**"]
+exclude = [".venv/**", "build/**", "dist/**"]
 
-[[tool.mypy.overrides]]
-module = "_pytest.*"
-follow_imports = "skip"
+[tool.ty.analysis]
+allowed-unresolved-imports = [
+  "torch",
+  "torch.*",
+  "torch.utils.*",
+  "my_ffi_extension",
+  "my_ffi_extension.*",
+  "_pytest.*",
+  "cupy",
+  "cupy.*",
+  "paddle",
+  "paddle.*",
+  "triton",
+  "triton.*",
+  "cuda.bindings",
+  "cuda.bindings.*",
+  "torch_c_dlpack_ext",
+]
 
 [tool.uv.dependency-groups]
 docs = { requires-python = ">=3.13" }

@@ -61,8 +61,8 @@ def type_info_to_cls(
         # Allow overriding methods (including from base classes like Object.__repr__)
         # by always adding to attrs, which will be used when creating the new class
         func.__module__ = cls.__module__
-        func.__name__ = name
-        func.__qualname__ = f"{cls.__qualname__}.{name}"
+        func.__name__ = name  # ty: ignore[unresolved-attribute]
+        func.__qualname__ = f"{cls.__qualname__}.{name}"  # ty: ignore[unresolved-attribute]
         func.__doc__ = f"Method `{name}` of class `{cls.__qualname__}`"
         attrs[name] = func
 
@@ -75,7 +75,7 @@ def type_info_to_cls(
     # Step 4. Create the new class
     new_cls = type(cls.__name__, cls_bases, attrs)
     new_cls.__module__ = cls.__module__
-    new_cls = functools.wraps(cls, updated=())(new_cls)  # type: ignore
+    new_cls = functools.wraps(cls, updated=())(new_cls)
     return cast(Type[_InputClsType], new_cls)
 
 

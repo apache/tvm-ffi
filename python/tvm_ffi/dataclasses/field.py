@@ -22,7 +22,7 @@ from dataclasses import _MISSING_TYPE, MISSING
 from typing import Any, Callable, TypeVar, cast
 
 try:
-    from dataclasses import KW_ONLY  # type: ignore[attr-defined]
+    from dataclasses import KW_ONLY  # ty: ignore[unresolved-import]
 except ImportError:
     # Python < 3.10: define our own KW_ONLY sentinel
     class _KW_ONLY_Sentinel:
@@ -68,11 +68,11 @@ class Field:
 
 def field(
     *,
-    default: _FieldValue | _MISSING_TYPE = MISSING,  # type: ignore[assignment]
-    default_factory: Callable[[], _FieldValue] | _MISSING_TYPE = MISSING,  # type: ignore[assignment]
+    default: _FieldValue | _MISSING_TYPE = MISSING,
+    default_factory: Callable[[], _FieldValue] | _MISSING_TYPE = MISSING,
     init: bool = True,
     repr: bool = True,
-    kw_only: bool | _MISSING_TYPE = MISSING,  # type: ignore[assignment]
+    kw_only: bool | _MISSING_TYPE = MISSING,
 ) -> _FieldValue:
     """(Experimental) Declare a dataclass-style field on a :func:`c_class` proxy.
 

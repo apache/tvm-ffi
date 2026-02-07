@@ -69,7 +69,7 @@ def test_cxx_class_derived_derived() -> None:
 
 
 def test_cxx_class_derived_derived_default() -> None:
-    obj = _TestCxxClassDerivedDerived(123, 456, 4, True)  # type: ignore[call-arg,misc]
+    obj = _TestCxxClassDerivedDerived(123, 456, 4, True)  # ty: ignore[missing-argument]
     assert obj.v_i64 == 123
     assert obj.v_i32 == 456
     assert isinstance(obj.v_f64, float) and obj.v_f64 == 4
@@ -94,7 +94,7 @@ def test_cxx_class_init_subset_defaults() -> None:
 
 
 def test_cxx_class_init_subset_positional() -> None:
-    obj = _TestCxxInitSubset(7)  # type: ignore[call-arg]
+    obj = _TestCxxInitSubset(7)
     assert obj.required_field == 7
     assert obj.optional_field == -1
     obj.optional_field = 11
@@ -160,7 +160,7 @@ def test_kw_only_class_level_with_default() -> None:
 
 def test_kw_only_class_level_rejects_positional() -> None:
     with pytest.raises(TypeError, match="positional"):
-        _TestCxxKwOnly(1, 2, 3, 4)  # type: ignore[misc]
+        _TestCxxKwOnly(1, 2, 3, 4)  # ty: ignore[missing-argument, too-many-positional-arguments]
 
 
 def test_field_kw_only_parameter() -> None:

@@ -232,7 +232,7 @@ def _find_library_by_basename(package: str, target_name: str) -> Path:  # noqa: 
         lib_dll_names = (f"lib{target_name}.so",)
 
     # Use `importlib.metadata` is the most reliable way to find package data files
-    dist: im.PathDistribution = im.distribution(package)  # type: ignore[assignment]
+    dist: im.PathDistribution = im.distribution(package)  # ty: ignore[invalid-assignment]
     record = dist.read_text("RECORD") or ""
     for line in record.splitlines():
         partial_path, *_ = line.split(",")
