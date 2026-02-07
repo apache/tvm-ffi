@@ -348,6 +348,12 @@ fn render_function(out: &mut String, func: &FunctionGen, indent: usize) {
     if func.sig.packed {
         writeln!(
             out,
+            "{}#[allow(non_snake_case)]",
+            indent_str
+        )
+        .ok();
+        writeln!(
+            out,
             "{}pub fn {}(args: &[Any]) -> Result<Any> {{",
             indent_str, func.rust_name
         )
@@ -365,6 +371,12 @@ fn render_function(out: &mut String, func: &FunctionGen, indent: usize) {
         return;
     }
     let args = render_args(&func.sig.args);
+    writeln!(
+        out,
+        "{}#[allow(non_snake_case)]",
+        indent_str
+    )
+    .ok();
     writeln!(
         out,
         "{}pub fn {}({}) -> Result<{}> {{",
