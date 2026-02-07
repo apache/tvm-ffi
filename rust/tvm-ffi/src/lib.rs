@@ -16,6 +16,17 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+// TODO: incrementally migrate unsafe fn bodies to use explicit unsafe blocks
+#![allow(unsafe_op_in_unsafe_fn)]
+#![allow(
+    clippy::mut_from_ref,
+    clippy::not_unsafe_ptr_arg_deref,
+    clippy::missing_safety_doc,
+    clippy::new_without_default,
+    clippy::len_without_is_empty,
+    clippy::result_unit_err
+)]
+
 pub mod any;
 pub mod collections;
 pub mod derive;
@@ -27,23 +38,27 @@ pub mod function;
 pub mod function_internal;
 pub mod macros;
 pub mod object;
+pub mod object_wrapper;
 pub mod string;
+pub mod subtyping;
 pub mod type_traits;
 pub use tvm_ffi_sys;
 
-pub use crate::any::{Any, AnyView};
+pub use crate::any::{Any, AnyValue, AnyView};
 pub use crate::collections::array::Array;
+pub use crate::collections::map::Map;
 pub use crate::collections::shape::Shape;
 pub use crate::collections::tensor::{CPUNDAlloc, NDAllocator, Tensor};
 pub use crate::device::{current_stream, with_stream};
 pub use crate::dtype::DLDataTypeExt;
-pub use crate::error::{Error, ErrorKind, Result};
 pub use crate::error::{
     ATTRIBUTE_ERROR, INDEX_ERROR, KEY_ERROR, RUNTIME_ERROR, TYPE_ERROR, VALUE_ERROR,
 };
+pub use crate::error::{Error, ErrorKind, Result};
 pub use crate::extra::module::Module;
 pub use crate::function::Function;
 pub use crate::object::{Object, ObjectArc, ObjectCore, ObjectCoreWithExtraItems, ObjectRefCore};
+pub use crate::object_wrapper::ObjectWrapper;
 pub use crate::string::{Bytes, String};
 pub use crate::type_traits::AnyCompatible;
 

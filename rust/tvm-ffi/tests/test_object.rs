@@ -16,8 +16,8 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use tvm_ffi::*;
 
 // must have repr(C) for the object header stays in the same position

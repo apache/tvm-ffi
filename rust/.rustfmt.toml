@@ -15,7 +15,6 @@
 # specific language governing permissions and limitations
 # under the License.
 
-[workspace]
-members = ["tvm-ffi", "tvm-ffi-sys", "tvm-ffi-macros", "tvm-ffi-stubgen"]
-
-resolver = "2"
+edition = "2021"
+max_width = 100
+use_small_heuristics = "Default"
