@@ -47,6 +47,7 @@ Table of Contents
    :maxdepth: 1
    :caption: Guides
 
+   guides/export_func_cls.rst
    guides/kernel_library_guide.rst
    guides/compiler_integration.md
    guides/cubin_launcher.rst

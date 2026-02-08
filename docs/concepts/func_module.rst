@@ -395,6 +395,42 @@ a symbol during static initialization:
    program lifetime. For dynamic loading with the ability to unload, use shared library modules instead.
 
 
+.. _sec:custom-modules:
+
+Custom Modules
+~~~~~~~~~~~~~~
+
+While the standard shared library and system library modules cover most use
+cases, some scenarios require a **custom module** that wraps a platform-specific
+driver API — for example, using ``cuModuleLoad`` to load generated PTX code and
+expose each kernel as a :cpp:class:`tvm::ffi::Function`.
+
+To create a custom module, subclass :cpp:class:`tvm::ffi::ModuleObj` and
+implement the following:
+
+- :cpp:func:`~tvm::ffi::ModuleObj::kind` — return a unique string identifying
+  the module type (e.g., ``"cuda"``).
+- :cpp:func:`~tvm::ffi::ModuleObj::GetPropertyMask` — return a bitmask
+  indicating the module's capabilities:
+
+  - ``ffi::Module::kRunnable`` if the module can execute functions.
+  - ``ffi::Module::kBinarySerializable`` if the module supports
+    serialization to and from bytes.
+
+- :cpp:func:`~tvm::ffi::ModuleObj::GetFunction` — look up a function by name
+  within the module.
+- If the module is serializable, override
+  :cpp:func:`~tvm::ffi::ModuleObj::SaveToBytes` and register a global function
+  ``ffi.Module.load_from_bytes.<kind>`` so the module can be reconstructed from
+  its serialized form.
+
+.. seealso::
+
+   :ref:`Embedded Binary Data <export-embedded-binary-data>` in the export guide describes
+   the ``__tvm_ffi__library_bin`` binary layout used to serialize composite
+   modules that contain custom sub-modules.
+
+
 Further Reading
 ---------------
 

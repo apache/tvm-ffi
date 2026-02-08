@@ -127,6 +127,19 @@ Stability and Interoperability
 
 **Cross-framework.** TVM-FFI uses standard data structures such as :external+data-api:doc:`DLPack tensors <design_topics/data_interchange>` to represent arrays, so compiled functions can be used from any array framework that implements the DLPack protocol (NumPy, PyTorch, TensorFlow, CuPy, JAX, PaddlePaddle, and others).
 
+.. seealso::
+
+   - :doc:`../concepts/any`: Full guide on ``Any`` type semantics, ownership, and
+     conversions.
+   - :doc:`../concepts/func_module`: Function and module concepts, including the
+     :ref:`calling convention <sec:function-calling-convention>` and
+     :ref:`module system <sec:module>`.
+   - :doc:`../concepts/tensor`: Tensor representation and DLPack interop.
+   - :doc:`../concepts/object_and_class`: Object system, type hierarchy, and
+     reference counting.
+   - :doc:`../concepts/abi_overview`: Complete low-level ABI specification for all
+     TVM-FFI types.
+
 
 Stable ABI in C Code
 --------------------
@@ -183,6 +196,14 @@ Build it with either approach:
 - Symbol naming: define the exported symbol name as ``__tvm_ffi_{func_name}``;
 - Type checking: check input types via :cpp:member:`TVMFFIAny::type_index`, then marshal inputs from :cpp:class:`TVMFFIAny` to the desired types;
 - Error handling: return 0 on success, or a non-zero code on failure. When an error occurs, set an error message via :cpp:func:`TVMFFIErrorSetRaisedFromCStr` or :cpp:func:`TVMFFIErrorSetRaisedFromCStrParts`.
+
+.. seealso::
+
+   - :ref:`sec-exception-handling` for full details on exception propagation across language boundaries.
+   - :doc:`../guides/export_func_cls`: Export C symbols, global functions, and
+     classes from C++ with higher-level macros and reflection helpers.
+   - :doc:`../guides/compiler_integration`: Integrating DSL compilers, graph
+     compilers, and runtime state management with TVM-FFI.
 
 **C vs. C++.** Compared to the :ref:`C++ example <cpp_add_one_kernel>`, there are a few key differences:
 
@@ -250,4 +271,14 @@ What's Next
 
 **Convenient compiler target.** The stable C ABI is a simple, portable codegen target for DSL compilers. Emit C that follows this ABI to integrate with TVM-FFI and call the result from multiple languages and frameworks. See :doc:`../concepts/abi_overview`.
 
-**Rich and extensible type system.** TVM-FFI supports a rich set of types in the stable C ABI: primitive types (integers, floats), DLPack tensors, strings, built-in reference-counted objects (functions, arrays, maps), and user-defined reference-counted objects. See :doc:`../guides/cpp_lang_guide`.
+**Rich and extensible type system.** TVM-FFI supports a rich set of types in the stable C ABI: primitive types (integers, floats), DLPack tensors, strings, built-in reference-counted objects (functions, arrays, maps), and user-defined reference-counted objects. See :doc:`../concepts/object_and_class`.
+
+**Export higher-level APIs.** Beyond C symbols, TVM-FFI provides global function registration and class reflection for structured cross-language APIs. See :doc:`../guides/export_func_cls`.
+
+**Ship kernels.** For production-grade CUDA kernel patterns including validation, device guard, stream handling, and dtype dispatch, see :doc:`../guides/kernel_library_guide`.
+
+**Package and distribute.** Package extensions as Python wheels with type stubs:
+
+- :doc:`../packaging/python_packaging`: ABI-agnostic Python wheel builds.
+- :doc:`../packaging/cpp_tooling`: Build toolchain, CMake integration, and library distribution.
+- :doc:`../packaging/stubgen`: Generating Python type stubs from C++ metadata.

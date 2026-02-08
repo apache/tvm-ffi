@@ -169,38 +169,8 @@ common states like **streams** and **memory allocators** through environment fun
 allowing kernels to access these without managing their own. However, for any unique state required by your compiler,
 the global function registration approach is the most suitable method.
 
-## Advanced: Custom Modules
-
-While the standard dynamic library module is sufficient for many use cases,
-sometimes it may be helpful to package a custom runtime module that wraps over a driver API.
-For example, using `cuModuleLoad` explicitly to load generated PTX code and expose it as an {cpp:class}`tvm::ffi::Function`.
-The {cpp:class}`tvm::ffi::ModuleObj` interface provides a way to support this need.
-Generally, the steps include subclassing the {cpp:class}`tvm::ffi::ModuleObj`:
-
-- Provide a specific {cpp:func}`tvm::ffi::ModuleObj::kind` string to identify the module type
-- Override {cpp:func}`tvm::ffi::ModuleObj::GetPropertyMask` to indicate:
-  - The module is `ffi::Module::kRunnable` (executable)
-  - If binary serialization is supported, also add `ffi::Module::kBinarySerializable`
-- Override {cpp:func}`tvm::ffi::ModuleObj::GetFunction` to specify how functions loaded
-- Register binary serialization/deserialization {cpp:func}`tvm::ffi::ModuleObj::SaveToBytes` and register a global
-  function `ffi.Module.load_from_bytes.<kind>`
-
-### Enable Export and Loading
-
-We also support export and loading of modules that import custom modules.
-We allow libraries to embed a binary symbol `__tvm_ffi__library_bin` in the following binary layout:
-
-- `<nbytes : u64> <import_tree> <key0: str> [val0: bytes] <key1: str> [val1: bytes] ...`
-- `nbytes` indicates the total number of bytes following the nbytes header
-- `<import_tree>` uses CSR sparse array format: `<indptr: vec<u64>> <child_indices: vec<u64>>`
-  to store child indices of each node (each node is a Module instance)
-- `<key>` stores the module kind, or can be `_lib`:
-  - `_lib` indicates the module corresponds to the dynamic library itself
-  - For other cases, `val: bytes` contains the serialized bytes from the custom module
-- Both `bytes` and `str` are serialized as `<size: u64> <content>`
-
-This information allows us to deserialize the custom modules by calling `ffi.Module.load_from_bytes.<kind>` and then reconstruct
-the overall import relations from `<import_tree>` and return the final composed modules back to the user.
-As long as the compiler generates the `__tvm_ffi__library_bin` in the above format, {py:func}`tvm_ffi.load_module` will correctly
-handle the loading and recover the original module. Note that we will need the custom module class definition to be available
-during loading, either by importing another runtime DLL, or embedding it in the generated library.
+```{seealso}
+For creating custom runtime modules that wrap platform-specific driver APIs
+(e.g., ``cuModuleLoad`` for PTX), see {ref}`sec:custom-modules` in
+{doc}`../concepts/func_module`.
+```
