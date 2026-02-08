@@ -139,10 +139,10 @@ is:
 
 - ``nbytes``: total byte count following this header.
 - ``import_tree``: a CSR sparse array
-  (``<indptr: vec<u64>> <child_indices: vec<u64>>``) encoding the parent–child
+  (``<indptr: vec<u64>> <child_indices: vec<u64>>``) encoding the parent-child
   relationships among module nodes.
 - Each ``key`` is a module kind string, or the special value ``_lib`` for the
-  host dynamic library itself. For non-\ ``_lib`` entries, ``val`` contains the
+  host dynamic library itself. For entries other than ``_lib``, ``val`` contains the
   serialized bytes of the custom sub-module.
 - Both ``str`` and ``bytes`` values are length-prefixed: ``<size: u64> <content>``.
 

@@ -103,9 +103,4 @@ Key Classes
 Full API Index
 --------------
 
-.. ifconfig:: build_exhale
-
-   .. toctree::
-      :maxdepth: 2
-
-      generated/index
+`Browse the full API index <generated/index.html>`__

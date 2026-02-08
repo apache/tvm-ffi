@@ -186,5 +186,6 @@ registered global functions and classes.
 
 .. seealso::
 
-   :doc:`stubgen` for the complete stub generation guide, including directive-based
-   customization and command-line usage.
+   - :doc:`stubgen`: Complete stub generation guide, including directive-based
+     customization and command-line usage.
+   - :doc:`../dev/ci_cd`: Reproducing wheel builds locally with cibuildwheel.

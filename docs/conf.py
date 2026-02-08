@@ -241,6 +241,14 @@ def _copy_rust_docs_to_output(app: sphinx.application.Sphinx, exception: Excepti
         )
 
 
+def _mark_exhale_root_orphan(
+    app: sphinx.application.Sphinx, docname: str, source: list[str]
+) -> None:
+    """Prepend :orphan: to exhale-generated root so it stays out of the sidebar."""
+    if docname == "reference/cpp/generated/index":
+        source[0] = ":orphan:\n\n" + source[0]
+
+
 def setup(app: sphinx.application.Sphinx) -> None:
     """Register custom Sphinx configuration values."""
     _prepare_stub_files()
@@ -248,6 +256,7 @@ def setup(app: sphinx.application.Sphinx) -> None:
     app.add_config_value("build_exhale", build_exhale, "env")
     app.add_config_value("build_rust_docs", build_rust_docs, "env")
     app.connect("config-inited", _apply_config_overrides)
+    app.connect("source-read", _mark_exhale_root_orphan)
     app.connect("build-finished", _copy_rust_docs_to_output)
     app.connect("autodoc-skip-member", _filter_inherited_members)
     app.connect("autodoc-process-docstring", _link_inherited_members)

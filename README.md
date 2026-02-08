@@ -46,12 +46,6 @@ pip install apache-tvm-ffi
 pip install torch-c-dlpack-ext  # compatibility package for torch <= 2.9
 ```
 
-Visit our [documentation](https://tvm.apache.org/ffi/) to learn more.
-
-- [Quick Start](https://tvm.apache.org/ffi/get_started/quickstart.html)
-- [Stable C ABI](https://tvm.apache.org/ffi/get_started/stable_c_abi.html)
-- [Python Packaging](https://tvm.apache.org/ffi/packaging/python_packaging.html)
-
 ## Status and Release Versioning
 
 **C ABI stability** is our top priority.
@@ -64,3 +58,38 @@ Releases during the RFC stage will be `0.X.Y`, where bumps in `X` indicate C ABI
 and `Y` indicates other changes. We anticipate the RFC stage will last for three months, then we will start following
 [Semantic Versioning](https://packaging.python.org/en/latest/discussions/versioning/)
 (`major.minor.patch`) going forward.
+
+## Documentation
+
+Our [documentation site](https://tvm.apache.org/ffi/) includes:
+
+### Get Started
+
+- [Quick Start](https://tvm.apache.org/ffi/get_started/quickstart.html)
+- [Stable C ABI](https://tvm.apache.org/ffi/get_started/stable_c_abi.html)
+
+### Guides
+
+- [Export Functions & Classes](https://tvm.apache.org/ffi/guides/export_func_cls.html)
+- [Kernel Library Guide](https://tvm.apache.org/ffi/guides/kernel_library_guide.html)
+
+### Concepts
+
+- [ABI Overview](https://tvm.apache.org/ffi/concepts/abi_overview.html)
+- [Any](https://tvm.apache.org/ffi/concepts/any.html)
+- [Object & Class](https://tvm.apache.org/ffi/concepts/object_and_class.html)
+- [Tensor](https://tvm.apache.org/ffi/concepts/tensor.html)
+- [Function & Module](https://tvm.apache.org/ffi/concepts/func_module.html)
+- [Exception Handling](https://tvm.apache.org/ffi/concepts/exception_handling.html)
+
+### Packaging
+
+- [Python Packaging](https://tvm.apache.org/ffi/packaging/python_packaging.html)
+- [Stub Generation](https://tvm.apache.org/ffi/packaging/stubgen.html)
+- [C++ Tooling](https://tvm.apache.org/ffi/packaging/cpp_tooling.html)
+
+### Developer Manual
+
+- [Build from Source](https://tvm.apache.org/ffi/dev/source_build.html)
+- [Reproduce CI/CD](https://tvm.apache.org/ffi/dev/ci_cd.html)
+- [Release Process](https://tvm.apache.org/ffi/dev/release_process.html)
