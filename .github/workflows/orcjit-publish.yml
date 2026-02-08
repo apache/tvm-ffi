@@ -1,0 +1,164 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+name: Publish TVM-FFI-OrcJIT
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: "Branch or tag to publish (manual run)"
+        required: true
+        default: "main"
+      pypi_repository:
+        description: "PyPI repository (pypi or testpypi)"
+        required: true
+        default: "testpypi"
+        type: choice
+        options:
+          - pypi
+          - testpypi
+
+jobs:
+  build_wheels:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: ubuntu-latest, arch: x86_64, linux_image: manylinux2014}
+          - {os: ubuntu-latest, arch: x86_64, linux_image: manylinux_2_28}
+          - {os: ubuntu-24.04-arm, arch: aarch64, linux_image: manylinux2014}
+          - {os: ubuntu-24.04-arm, arch: aarch64, linux_image: manylinux_2_28}
+          - {os: macos-14, arch: arm64, linux_image: ""}
+
+    steps:
+      # Special handling for macOS arm64 + python 3.8/3.9
+      - uses: actions/setup-python@v5
+        with:
+          python-version: 3.9
+        if: runner.os == 'macOS' && runner.arch == 'ARM64'
+
+      - uses: astral-sh/setup-uv@v6
+        if: matrix.os != 'macos-14'
+
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.branch }}
+          submodules: recursive
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Print current commit
+        run: git log -1 --oneline
+
+      - name: Install LLVM (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 18
+          sudo apt-get install -y llvm-18-dev
+
+      - name: Install LLVM (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install llvm@18
+          echo "LLVM_DIR=$(brew --prefix llvm@18)" >> $GITHUB_ENV
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v3.1.4
+        env:
+          CIBW_ARCHS_MACOS: ${{ matrix.arch }}
+          CIBW_ARCHS_LINUX: ${{ matrix.arch }}
+          CIBW_MANYLINUX_X86_64_IMAGE: ${{ matrix.linux_image }}
+          CIBW_MANYLINUX_AARCH64_IMAGE: ${{ matrix.linux_image }}
+          CIBW_BUILD_VERBOSITY: 1
+          CIBW_BUILD: cp39-* cp310-* cp311-* cp312-*
+          CIBW_SKIP: "*-musllinux_*"
+          # Install LLVM in the manylinux container
+          CIBW_BEFORE_ALL_LINUX: |
+            yum install -y wget
+            wget https://github.com/llvm/llvm-project/releases/download/llvmorg-18.1.8/clang+llvm-18.1.8-x86_64-linux-gnu-ubuntu-18.04.tar.xz
+            tar -xf clang+llvm-18.1.8-x86_64-linux-gnu-ubuntu-18.04.tar.xz
+            export PATH="$PWD/clang+llvm-18.1.8-x86_64-linux-gnu-ubuntu-18.04/bin:$PATH"
+            export LLVM_DIR="$PWD/clang+llvm-18.1.8-x86_64-linux-gnu-ubuntu-18.04"
+          # Placeholder: may need to install tvm-ffi first
+          CIBW_BEFORE_BUILD: |
+            pip install apache-tvm-ffi || echo "apache-tvm-ffi not yet published"
+
+        with:
+          package-dir: addons/tvm-ffi-orcjit
+          output-dir: wheelhouse
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cibw-wheels-${{ matrix.os }}-${{ matrix.arch }}-${{ strategy.job-index }}
+          path: ./wheelhouse/*.whl
+
+  build_sdist:
+    name: Build source distribution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.branch }}
+          submodules: recursive
+          fetch-depth: 0
+          fetch-tags: true
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Build sdist
+        working-directory: addons/tvm-ffi-orcjit
+        run: pipx run build --sdist --outdir dist .
+
+      - name: Check metadata
+        working-directory: addons/tvm-ffi-orcjit
+        run: pipx run twine check dist/*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cibw-sdist
+          path: addons/tvm-ffi-orcjit/dist/*.tar.gz
+
+  upload_pypi:
+    needs: [build_wheels, build_sdist]
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          # unpacks all CIBW artifacts into dist/
+          pattern: cibw-*
+          path: dist
+          merge-multiple: true
+
+      - name: Generate artifact attestation for sdist and wheels
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: dist/*
+
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          attestations: true
+          verbose: true
+          repository-url: ${{ inputs.pypi_repository == 'testpypi' && 'https://test.pypi.org/legacy/' || '' }}
