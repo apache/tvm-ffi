@@ -139,17 +139,11 @@ where
         if self.remaining == 0 {
             return None;
         }
-        let key_any = self
-            .functor
-            .call_tuple_with_len::<1, _>((0i64,))
-            .ok()?;
+        let key_any = self.functor.call_tuple_with_len::<1, _>((0i64,)).ok()?;
         let key_temp: TryFromTemp<K> = TryFromTemp::try_from(key_any).ok()?;
         let key = TryFromTemp::into_value(key_temp);
 
-        let value_any = self
-            .functor
-            .call_tuple_with_len::<1, _>((1i64,))
-            .ok()?;
+        let value_any = self.functor.call_tuple_with_len::<1, _>((1i64,)).ok()?;
         let value_temp: TryFromTemp<V> = TryFromTemp::try_from(value_any).ok()?;
         let value = TryFromTemp::into_value(value_temp);
         let _ = self.functor.call_tuple_with_len::<1, _>((2i64,));

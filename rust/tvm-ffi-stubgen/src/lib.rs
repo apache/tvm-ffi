@@ -22,9 +22,9 @@ mod model;
 mod schema;
 mod utils;
 
+use crate::schema::{collect_type_keys, extract_type_schema, parse_type_schema};
 pub use cli::Args;
 use std::collections::{BTreeSet, HashSet};
-use crate::schema::{collect_type_keys, extract_type_schema, parse_type_schema};
 
 pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     let prefix = utils::normalize_prefix(&args.init_prefix);

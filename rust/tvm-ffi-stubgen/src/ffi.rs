@@ -17,10 +17,10 @@
 
 use libloading::Library;
 use std::path::PathBuf;
-use tvm_ffi::Array;
 use tvm_ffi::tvm_ffi_sys::{
     TVMFFIByteArray, TVMFFIGetTypeInfo, TVMFFITypeInfo, TVMFFITypeKeyToIndex,
 };
+use tvm_ffi::Array;
 use tvm_ffi::{Function, Result as FfiResult, String as FfiString};
 
 pub(crate) fn load_dlls(paths: &[PathBuf]) -> Result<Vec<Library>, Box<dyn std::error::Error>> {
