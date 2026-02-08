@@ -22,6 +22,7 @@ use crate::schema::{extract_type_schema, parse_type_schema, TypeSchema};
 use crate::utils;
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
+use toml::value::Table;
 
 const METHOD_FLAG_STATIC: i64 = 1 << 2;
 
@@ -300,19 +301,34 @@ pub(crate) fn render_cargo_toml(
         Some(path) => path.clone(),
         None => utils::default_tvm_ffi_path()?,
     };
-    let rel_path = utils::relative_path(&args.out_dir, &tvm_ffi_path);
-    let mut out = String::new();
-    writeln!(
-        &mut out,
-        "[package]\nname = \"{}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
-        args.init_crate
-    )?;
-    writeln!(
-        &mut out,
-        "[dependencies]\ntvm-ffi = {{ path = \"{}\" }}\n",
-        rel_path.display()
-    )?;
-    Ok(out)
+    let tvm_ffi_path = tvm_ffi_path.canonicalize().unwrap_or_else(|_| tvm_ffi_path);
+    let tvm_ffi_path_str = tvm_ffi_path.to_string_lossy().to_string();
+
+    let mut package = Table::new();
+    package.insert(
+        "name".to_string(),
+        toml::Value::String(args.init_crate.clone()),
+    );
+    package.insert(
+        "version".to_string(),
+        toml::Value::String("0.1.0".to_string()),
+    );
+    package.insert(
+        "edition".to_string(),
+        toml::Value::String("2021".to_string()),
+    );
+
+    let mut tvm_ffi = Table::new();
+    tvm_ffi.insert("path".to_string(), toml::Value::String(tvm_ffi_path_str));
+
+    let mut dependencies = Table::new();
+    dependencies.insert("tvm-ffi".to_string(), toml::Value::Table(tvm_ffi));
+
+    let mut doc = Table::new();
+    doc.insert("package".to_string(), toml::Value::Table(package));
+    doc.insert("dependencies".to_string(), toml::Value::Table(dependencies));
+
+    Ok(toml::to_string(&toml::Value::Table(doc))?)
 }
 
 pub(crate) fn render_lib_rs() -> String {
