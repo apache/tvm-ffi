@@ -361,7 +361,6 @@ crate::impl_try_from_any!(
     crate::string::String,
     crate::string::Bytes,
     crate::object::ObjectRef,
-    crate::any::AnyValue,
     tvm_ffi_sys::dlpack::DLDataType,
     tvm_ffi_sys::dlpack::DLDevice,
 );
