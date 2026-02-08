@@ -272,6 +272,7 @@ Further Reading
 ---------------
 
 - :doc:`../get_started/quickstart`: End-to-end walkthrough building and shipping a C++/CUDA kernel
+- :doc:`../dev/source_build`: Building TVM-FFI from source with CMake flags
 - :doc:`stubgen`: Generating Python type stubs from C++ reflection metadata
 - :doc:`python_packaging`: Packaging shared libraries as Python wheels
 - :doc:`../concepts/func_module`: Defining and exporting TVM-FFI functions

@@ -116,6 +116,7 @@ trigger the docs release.
 **Step 2.1.** Conclude voting results: `<https://github.com/apache/tvm-ffi/issues/new>`__. (`Example <https://github.com/apache/tvm-ffi/issues/366>`__)
 
 **Step 2.2.** Publish PyPI wheel: `<https://github.com/apache/tvm-ffi/actions/workflows/publish_wheel.yml>`__.
+(See :doc:`ci_cd` for how wheels are built with cibuildwheel.)
 
 **Step 2.3.** Update documentation to latest: `<https://github.com/apache/tvm-site/actions/workflows/publish_tvm_ffi_docs.yml>`__.
 

@@ -86,5 +86,7 @@ Table of Contents
    :maxdepth: 1
    :caption: Developer Manual
 
-   dev/build_from_source.md
+   dev/source_build.rst
+   dev/doc_build.rst
+   dev/ci_cd.rst
    dev/release_process.rst
