@@ -37,6 +37,13 @@ pub struct Any {
     data: TVMFFIAny,
 }
 
+/// Managed Any wrapper that participates in typed signatures.
+#[repr(transparent)]
+#[derive(Clone)]
+pub struct AnyValue {
+    inner: Any,
+}
+
 //---------------------
 // AnyView
 //---------------------
@@ -144,6 +151,11 @@ impl Any {
     pub fn type_index(&self) -> i32 {
         self.data.type_index
     }
+
+    #[inline]
+    pub(crate) fn as_raw_ffi_any(&self) -> TVMFFIAny {
+        self.data
+    }
     /// Try to query if stored typed in Any exactly matches the type T
     ///
     /// This function is fast in the case of failure and can be used to check
@@ -197,6 +209,26 @@ impl Any {
                 None
             }
         }
+    }
+}
+
+impl AnyValue {
+    pub fn new(value: Any) -> Self {
+        Self { inner: value }
+    }
+
+    pub fn as_any(&self) -> &Any {
+        &self.inner
+    }
+
+    pub fn into_any(self) -> Any {
+        self.inner
+    }
+}
+
+impl From<Any> for AnyValue {
+    fn from(value: Any) -> Self {
+        Self { inner: value }
     }
 }
 
@@ -329,6 +361,7 @@ crate::impl_try_from_any!(
     crate::string::String,
     crate::string::Bytes,
     crate::object::ObjectRef,
+    crate::any::AnyValue,
     tvm_ffi_sys::dlpack::DLDataType,
     tvm_ffi_sys::dlpack::DLDevice,
 );

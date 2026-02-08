@@ -229,7 +229,7 @@ fn rust_type_for_schema(
             }
             _ => RustType::unsupported("tvm_ffi::Any"),
         },
-        "Any" | "ffi.Any" => RustType::supported("tvm_ffi::Any"),
+        "Any" | "ffi.Any" => RustType::supported("tvm_ffi::AnyValue"),
         "Union" | "Variant" | "tuple" | "list" | "dict" => RustType::unsupported("tvm_ffi::Any"),
         other => match type_map.get(other) {
             Some(path) => RustType::object_wrapper(path),
@@ -355,13 +355,23 @@ pub(crate) fn render_types_rs(root: &ModuleNode) -> String {
     let mut out = String::new();
     out.push_str("use std::sync::LazyLock;\n");
     out.push_str("use tvm_ffi::object::ObjectRef;\n");
-    out.push_str("use tvm_ffi::{Any, AnyView, Function, Result};\n\n");
+    out.push_str("use tvm_ffi::{Any, AnyView, Result};\n\n");
     render_type_module(&mut out, root, 0);
     out
 }
 
 fn render_function_module(out: &mut String, node: &ModuleNode, indent: usize) {
     let indent_str = " ".repeat(indent);
+    if indent > 0 {
+        writeln!(out, "{}use std::sync::LazyLock;", indent_str).ok();
+        writeln!(
+            out,
+            "{}use tvm_ffi::{{Any, AnyView, Function, Result}};",
+            indent_str
+        )
+        .ok();
+        writeln!(out).ok();
+    }
     for func in &node.functions {
         render_function(out, func, indent);
     }
@@ -374,6 +384,12 @@ fn render_function_module(out: &mut String, node: &ModuleNode, indent: usize) {
 
 fn render_type_module(out: &mut String, node: &ModuleNode, indent: usize) {
     let indent_str = " ".repeat(indent);
+    if indent > 0 {
+        writeln!(out, "{}use std::sync::LazyLock;", indent_str).ok();
+        writeln!(out, "{}use tvm_ffi::object::ObjectRef;", indent_str).ok();
+        writeln!(out, "{}use tvm_ffi::{{Any, AnyView, Result}};", indent_str).ok();
+        writeln!(out).ok();
+    }
     for ty in &node.types {
         render_type(out, ty, indent);
     }
@@ -500,7 +516,7 @@ fn render_method_static(out: &mut String, ty: &TypeGen, method: &MethodGen, inde
     let static_name = static_ident("METHOD", &format!("{}::{}", ty.type_key, method.rust_name));
     writeln!(
         out,
-        "{}static {}: LazyLock<Function> = LazyLock::new(|| Function::get_global(\"{}\").expect(\"missing method\"));",
+        "{}static {}: LazyLock<tvm_ffi::Function> = LazyLock::new(|| tvm_ffi::Function::get_global(\"{}\").expect(\"missing method\"));",
         indent_str, static_name, method.full_name
     )
     .ok();
@@ -590,7 +606,9 @@ fn render_method(out: &mut String, ty: &TypeGen, method: &MethodGen, indent: usi
     writeln!(
         out,
         "{}    let typed = tvm_ffi::into_typed_fn!(func.clone(), Fn({}) -> Result<{}>);",
-        indent_str, type_list, method.sig.ret.name
+        indent_str,
+        type_list,
+        method.sig.ret.typed_name()
     )
     .ok();
     let call_expr = format!("typed({})", render_method_call_args(method));

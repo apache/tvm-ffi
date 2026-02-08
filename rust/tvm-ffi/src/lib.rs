@@ -31,7 +31,7 @@ pub mod string;
 pub mod type_traits;
 pub use tvm_ffi_sys;
 
-pub use crate::any::{Any, AnyView};
+pub use crate::any::{Any, AnyValue, AnyView};
 pub use crate::collections::array::Array;
 pub use crate::collections::map::Map;
 pub use crate::collections::shape::Shape;

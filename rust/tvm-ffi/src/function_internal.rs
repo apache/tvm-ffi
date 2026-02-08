@@ -107,6 +107,65 @@ impl IntoArgHolder for &[u8] {
     }
 }
 
+impl IntoArgHolder for crate::object::ObjectRef {
+    type Target = crate::object::ObjectRef;
+    fn into_arg_holder(self) -> Self::Target {
+        self
+    }
+}
+
+impl IntoArgHolder for crate::any::AnyValue {
+    type Target = crate::any::AnyValue;
+    fn into_arg_holder(self) -> Self::Target {
+        self
+    }
+}
+
+impl IntoArgHolder for crate::DLDevice {
+    type Target = crate::DLDevice;
+    fn into_arg_holder(self) -> Self::Target {
+        self
+    }
+}
+
+impl IntoArgHolder for crate::DLDataType {
+    type Target = crate::DLDataType;
+    fn into_arg_holder(self) -> Self::Target {
+        self
+    }
+}
+
+impl<T> IntoArgHolder for crate::Array<T>
+where
+    T: crate::AnyCompatible + Clone + 'static,
+{
+    type Target = crate::Array<T>;
+    fn into_arg_holder(self) -> Self::Target {
+        self
+    }
+}
+
+impl<K, V> IntoArgHolder for crate::Map<K, V>
+where
+    K: crate::AnyCompatible + Clone + 'static,
+    V: crate::AnyCompatible + Clone + 'static,
+{
+    type Target = crate::Map<K, V>;
+    fn into_arg_holder(self) -> Self::Target {
+        self
+    }
+}
+
+impl<T> IntoArgHolder for Option<T>
+where
+    T: IntoArgHolder,
+{
+    type Target = Option<T::Target>;
+    fn into_arg_holder(self) -> Self::Target {
+        self.map(IntoArgHolder::into_arg_holder)
+    }
+}
+
 // helper trait to implement IntoArgHolderTuple to apply into_arg_holder to each element
 pub trait IntoArgHolderTuple {
     type Target;
@@ -151,6 +210,65 @@ pub trait ArgIntoRef {
 crate::impl_arg_into_ref!(
     bool, i8, i16, i32, i64, isize, u8, u16, u32, u64, usize, f32, f64, String, Bytes
 );
+
+impl ArgIntoRef for crate::object::ObjectRef {
+    type Target = crate::object::ObjectRef;
+    fn to_ref(&self) -> &Self::Target {
+        self
+    }
+}
+
+impl ArgIntoRef for crate::any::AnyValue {
+    type Target = crate::any::AnyValue;
+    fn to_ref(&self) -> &Self::Target {
+        self
+    }
+}
+
+impl ArgIntoRef for crate::DLDevice {
+    type Target = crate::DLDevice;
+    fn to_ref(&self) -> &Self::Target {
+        self
+    }
+}
+
+impl ArgIntoRef for crate::DLDataType {
+    type Target = crate::DLDataType;
+    fn to_ref(&self) -> &Self::Target {
+        self
+    }
+}
+
+impl<T> ArgIntoRef for Option<T>
+where
+    T: AnyCompatible,
+{
+    type Target = Option<T>;
+    fn to_ref(&self) -> &Self::Target {
+        self
+    }
+}
+
+impl<T> ArgIntoRef for crate::Array<T>
+where
+    T: AnyCompatible + Clone,
+{
+    type Target = crate::Array<T>;
+    fn to_ref(&self) -> &Self::Target {
+        self
+    }
+}
+
+impl<K, V> ArgIntoRef for crate::Map<K, V>
+where
+    K: AnyCompatible + Clone,
+    V: AnyCompatible + Clone,
+{
+    type Target = crate::Map<K, V>;
+    fn to_ref(&self) -> &Self::Target {
+        self
+    }
+}
 
 //-----------------------------------------------------------
 // TupleAsPackedArgs
