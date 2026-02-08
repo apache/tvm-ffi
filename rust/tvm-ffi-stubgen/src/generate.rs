@@ -333,29 +333,91 @@ pub(crate) fn render_cargo_toml(
 
 pub(crate) fn render_lib_rs() -> String {
     let mut out = String::new();
-    out.push_str("pub mod functions;\n");
-    out.push_str("pub mod types;\n\n");
-    out.push_str("pub use functions::*;\n");
-    out.push_str("pub use types::*;\n\n");
-    out.push_str("pub fn load_library(path: &str) -> tvm_ffi::Result<tvm_ffi::Module> {\n");
-    out.push_str("    tvm_ffi::Module::load_from_file(path)\n");
-    out.push_str("}\n");
+    out.push_str(
+        r#"pub mod functions;
+pub mod types;
+
+pub use functions::*;
+pub use types::*;
+
+pub fn load_library(path: &str) -> tvm_ffi::Result<tvm_ffi::Module> {
+    tvm_ffi::Module::load_from_file(path)
+}
+"#,
+    );
+    out
+}
+
+pub(crate) fn render_build_rs() -> String {
+    let mut out = String::new();
+    out.push_str(
+        r#"use std::env;
+use std::process::Command;
+
+fn update_ld_library_path(lib_dir: &str) {
+    let os_env_var = match env::var("CARGO_CFG_TARGET_OS").as_deref() {
+        Ok("windows") => "PATH",
+        Ok("macos") => "DYLD_LIBRARY_PATH",
+        Ok("linux") => "LD_LIBRARY_PATH",
+        _ => "",
+    };
+    if os_env_var.is_empty() {
+        return;
+    }
+    let current_val = env::var(os_env_var).unwrap_or_else(|_| String::new());
+    let separator = if os_env_var == "PATH" { ";" } else { ":" };
+    let new_ld_path = if current_val.is_empty() {
+        lib_dir.to_string()
+    } else {
+        format!("{}{}{}", current_val, separator, lib_dir)
+    };
+    println!("cargo:rustc-env={}={}", os_env_var, new_ld_path);
+}
+
+fn main() {
+    let output = Command::new("tvm-ffi-config")
+        .arg("--libdir")
+        .output()
+        .expect("Failed to run tvm-ffi-config");
+    if !output.status.success() {
+        panic!("tvm-ffi-config --libdir failed");
+    }
+    let lib_dir = String::from_utf8(output.stdout)
+        .expect("Invalid UTF-8 output from tvm-ffi-config")
+        .trim()
+        .to_string();
+    if lib_dir.is_empty() {
+        panic!("tvm-ffi-config returned empty library path");
+    }
+    println!("cargo:rustc-link-search=native={}", lib_dir);
+    println!("cargo:rustc-link-lib=dylib=tvm_ffi");
+    update_ld_library_path(&lib_dir);
+}
+"#,
+    );
     out
 }
 
 pub(crate) fn render_functions_rs(root: &ModuleNode) -> String {
     let mut out = String::new();
-    out.push_str("use std::sync::LazyLock;\n");
-    out.push_str("use tvm_ffi::{Any, AnyView, Function, Result};\n\n");
+    out.push_str(
+        r#"use std::sync::LazyLock;
+use tvm_ffi::{Any, AnyView, Function, Result};
+
+"#,
+    );
     render_function_module(&mut out, root, 0);
     out
 }
 
 pub(crate) fn render_types_rs(root: &ModuleNode) -> String {
     let mut out = String::new();
-    out.push_str("use std::sync::LazyLock;\n");
-    out.push_str("use tvm_ffi::object::ObjectRef;\n");
-    out.push_str("use tvm_ffi::{Any, AnyView, Result};\n\n");
+    out.push_str(
+        r#"use std::sync::LazyLock;
+use tvm_ffi::{Any, AnyView, Result};
+
+"#,
+    );
     render_type_module(&mut out, root, 0);
     out
 }
@@ -386,7 +448,6 @@ fn render_type_module(out: &mut String, node: &ModuleNode, indent: usize) {
     let indent_str = " ".repeat(indent);
     if indent > 0 {
         writeln!(out, "{}use std::sync::LazyLock;", indent_str).ok();
-        writeln!(out, "{}use tvm_ffi::object::ObjectRef;", indent_str).ok();
         writeln!(out, "{}use tvm_ffi::{{Any, AnyView, Result}};", indent_str).ok();
         writeln!(out).ok();
     }
@@ -443,7 +504,7 @@ fn render_function(out: &mut String, func: &FunctionGen, indent: usize) {
         "{}    let typed = tvm_ffi::into_typed_fn!(func.clone(), Fn({}) -> Result<{}>);",
         indent_str,
         render_type_list(&func.sig.args),
-        func.sig.ret.typed_name()
+        func.sig.ret.typed_ret_name()
     )
     .ok();
     let call_expr = format!("typed({})", render_call_args_typed(&func.sig.args));
@@ -451,7 +512,9 @@ fn render_function(out: &mut String, func: &FunctionGen, indent: usize) {
         out,
         "{}    {}",
         indent_str,
-        func.sig.ret.wrap_return(&call_expr)
+        func.sig
+            .ret
+            .wrap_typed_return(&call_expr, func.sig.ret.typed_ret_name())
     )
     .ok();
     writeln!(out, "{}}}", indent_str).ok();
@@ -460,45 +523,12 @@ fn render_function(out: &mut String, func: &FunctionGen, indent: usize) {
 
 fn render_type(out: &mut String, ty: &TypeGen, indent: usize) {
     let indent_str = " ".repeat(indent);
-    writeln!(out, "{}#[derive(Clone)]", indent_str).ok();
-    writeln!(out, "{}pub struct {} {{", indent_str, ty.rust_name).ok();
-    writeln!(out, "{}    inner: ObjectRef,", indent_str).ok();
-    writeln!(out, "{}}}\n", indent_str).ok();
-
-    writeln!(out, "{}impl {} {{", indent_str, ty.rust_name).ok();
     writeln!(
         out,
-        "{}    pub fn from_object(inner: ObjectRef) -> Self {{",
-        indent_str
+        "{}tvm_ffi::define_object_wrapper!({}, \"{}\");\n",
+        indent_str, ty.rust_name, ty.type_key
     )
     .ok();
-    writeln!(out, "{}        Self {{ inner }}", indent_str).ok();
-    writeln!(out, "{}    }}", indent_str).ok();
-    writeln!(
-        out,
-        "{}    pub fn as_object_ref(&self) -> &ObjectRef {{",
-        indent_str
-    )
-    .ok();
-    writeln!(out, "{}        &self.inner", indent_str).ok();
-    writeln!(out, "{}    }}", indent_str).ok();
-    writeln!(out, "{}}}\n", indent_str).ok();
-
-    writeln!(
-        out,
-        "{}impl From<ObjectRef> for {} {{",
-        indent_str, ty.rust_name
-    )
-    .ok();
-    writeln!(
-        out,
-        "{}    fn from(inner: ObjectRef) -> Self {{",
-        indent_str
-    )
-    .ok();
-    writeln!(out, "{}        Self {{ inner }}", indent_str).ok();
-    writeln!(out, "{}    }}", indent_str).ok();
-    writeln!(out, "{}}}\n", indent_str).ok();
 
     for method in &ty.methods {
         render_method_static(out, ty, method, indent);
@@ -599,7 +629,7 @@ fn render_method(out: &mut String, ty: &TypeGen, method: &MethodGen, indent: usi
                 .sig
                 .args
                 .iter()
-                .map(|arg| arg.typed_name().to_string()),
+                .map(|arg| arg.typed_arg_name().to_string()),
         );
         types.join(", ")
     };
@@ -608,7 +638,7 @@ fn render_method(out: &mut String, ty: &TypeGen, method: &MethodGen, indent: usi
         "{}    let typed = tvm_ffi::into_typed_fn!(func.clone(), Fn({}) -> Result<{}>);",
         indent_str,
         type_list,
-        method.sig.ret.typed_name()
+        method.sig.ret.typed_ret_name()
     )
     .ok();
     let call_expr = format!("typed({})", render_method_call_args(method));
@@ -616,7 +646,10 @@ fn render_method(out: &mut String, ty: &TypeGen, method: &MethodGen, indent: usi
         out,
         "{}    {}",
         indent_str,
-        method.sig.ret.wrap_return(&call_expr)
+        method
+            .sig
+            .ret
+            .wrap_typed_return(&call_expr, method.sig.ret.typed_ret_name())
     )
     .ok();
     writeln!(out, "{}}}", indent_str).ok();
@@ -632,7 +665,7 @@ fn render_args(args: &[RustType]) -> String {
 
 fn render_type_list(args: &[RustType]) -> String {
     args.iter()
-        .map(|arg| arg.typed_name().to_string())
+        .map(|arg| arg.typed_arg_name().to_string())
         .collect::<Vec<_>>()
         .join(", ")
 }

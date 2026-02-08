@@ -238,6 +238,58 @@ macro_rules! impl_arg_into_ref {
     }
 }
 
+/// Define a stubgen-oriented object wrapper type.
+///
+/// This macro is intended for code emitted by the Rust stub generator.
+/// It is not meant as a general-purpose user-facing API.
+#[macro_export]
+macro_rules! define_object_wrapper {
+    ($name:ident, $type_key:expr) => {
+        #[derive(Clone)]
+        pub struct $name {
+            inner: $crate::object::ObjectRef,
+        }
+
+        impl $name {
+            pub fn from_object(inner: $crate::object::ObjectRef) -> Self {
+                Self { inner }
+            }
+
+            pub fn as_object_ref(&self) -> &$crate::object::ObjectRef {
+                &self.inner
+            }
+
+            pub fn into_object_ref(self) -> $crate::object::ObjectRef {
+                self.inner
+            }
+        }
+
+        impl From<$crate::object::ObjectRef> for $name {
+            fn from(inner: $crate::object::ObjectRef) -> Self {
+                Self::from_object(inner)
+            }
+        }
+
+        impl $crate::object_wrapper::ObjectWrapper for $name {
+            const TYPE_KEY: &'static str = $type_key;
+
+            fn from_object(inner: $crate::object::ObjectRef) -> Self {
+                Self::from_object(inner)
+            }
+
+            fn as_object_ref(&self) -> &$crate::object::ObjectRef {
+                self.as_object_ref()
+            }
+
+            fn into_object_ref(self) -> $crate::object::ObjectRef {
+                self.into_object_ref()
+            }
+        }
+
+        $crate::impl_try_from_any!($name);
+    };
+}
+
 // ----------------------------------------------------------------------------
 // Macros for function definitions
 // ----------------------------------------------------------------------------

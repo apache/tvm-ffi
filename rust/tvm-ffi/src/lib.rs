@@ -27,6 +27,7 @@ pub mod function;
 pub mod function_internal;
 pub mod macros;
 pub mod object;
+pub mod object_wrapper;
 pub mod string;
 pub mod type_traits;
 pub use tvm_ffi_sys;
@@ -45,6 +46,7 @@ pub use crate::error::{
 pub use crate::extra::module::Module;
 pub use crate::function::Function;
 pub use crate::object::{Object, ObjectArc, ObjectCore, ObjectCoreWithExtraItems, ObjectRefCore};
+pub use crate::object_wrapper::ObjectWrapper;
 pub use crate::string::{Bytes, String};
 pub use crate::type_traits::AnyCompatible;
 

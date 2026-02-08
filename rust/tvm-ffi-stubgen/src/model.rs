@@ -111,10 +111,17 @@ impl RustType {
         }
     }
 
-    pub(crate) fn typed_name(&self) -> &str {
+    pub(crate) fn typed_arg_name(&self) -> &str {
         match self.kind {
             RustTypeKind::Plain => &self.name,
             RustTypeKind::ObjectWrapper => "tvm_ffi::object::ObjectRef",
+        }
+    }
+
+    pub(crate) fn typed_ret_name(&self) -> &str {
+        match self.kind {
+            RustTypeKind::Plain => &self.name,
+            RustTypeKind::ObjectWrapper => &self.name,
         }
     }
 
@@ -125,14 +132,18 @@ impl RustType {
         }
     }
 
-    pub(crate) fn wrap_return(&self, expr: &str) -> String {
+    pub(crate) fn wrap_typed_return(&self, expr: &str, typed_ret_name: &str) -> String {
         match self.kind {
             RustTypeKind::Plain => expr.to_string(),
             RustTypeKind::ObjectWrapper => {
-                if self.name == "Self" {
-                    format!("{}.map(Self::from)", expr)
+                if typed_ret_name == "tvm_ffi::object::ObjectRef" {
+                    if self.name == "Self" {
+                        format!("{}.map(Self::from)", expr)
+                    } else {
+                        format!("{}.map({}::from)", expr, self.name)
+                    }
                 } else {
-                    format!("{}.map({}::from)", expr, self.name)
+                    expr.to_string()
                 }
             }
         }

@@ -169,9 +169,27 @@ pub fn derive_object_ref(input: proc_macro::TokenStream) -> TokenStream {
             unsafe fn check_any_strict(data: & #tvm_ffi_crate::tvm_ffi_sys::TVMFFIAny) -> bool {
                 type ContainerType = <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>
                     ::ContainerType;
-                let type_index =
+                let target_index =
                     <ContainerType as #tvm_ffi_crate::object::ObjectCore>::type_index();
-                data.type_index == type_index as i32
+                if data.type_index == target_index as i32 {
+                    return true;
+                }
+                let info = #tvm_ffi_crate::tvm_ffi_sys::TVMFFIGetTypeInfo(data.type_index);
+                if info.is_null() {
+                    return false;
+                }
+                let info = &*info;
+                let ancestors = info.type_acenstors;
+                if ancestors.is_null() {
+                    return false;
+                }
+                for depth in 0..info.type_depth {
+                    let ancestor = *ancestors.add(depth as usize);
+                    if !ancestor.is_null() && (*ancestor).type_index == target_index {
+                        return true;
+                    }
+                }
+                false
             }
 
             unsafe fn copy_from_any_view_after_check(
@@ -223,11 +241,7 @@ pub fn derive_object_ref(input: proc_macro::TokenStream) -> TokenStream {
             unsafe fn try_cast_from_any_view(
                 data: & #tvm_ffi_crate::tvm_ffi_sys::TVMFFIAny
             ) -> Result<Self, ()> {
-                type ContainerType = <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>
-                    ::ContainerType;
-                let type_index =
-                    <ContainerType as #tvm_ffi_crate::object::ObjectCore>::type_index();
-                if data.type_index == type_index as i32 {
+                if Self::check_any_strict(data) {
                     Ok(Self::copy_from_any_view_after_check(data))
                 } else {
                     Err(())
