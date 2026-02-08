@@ -132,13 +132,7 @@ def generate_cubin() -> bytes:
     a_dummy = torch.empty(n, dtype=torch.float32, device="cuda")
     b_dummy = torch.empty(n, dtype=torch.float32, device="cuda")
     c_dummy = torch.empty(n, dtype=torch.float32, device="cuda")
-    empty_kernel[1,](a_dummy, b_dummy, c_dummy, n)
-
-    # Extract compiled CUBIN from the device cache
-    device_caches = empty_kernel.device_caches
-    device_id = next(iter(device_caches.keys()))
-    cache_tuple = device_caches[device_id]
-    compiled_kernel = next(iter(cache_tuple[0].values()))
+    compiled_kernel = empty_kernel[1,](a_dummy, b_dummy, c_dummy, n)
 
     # Get CUBIN bytes
     cubin_bytes = compiled_kernel.kernel
