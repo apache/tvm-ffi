@@ -178,30 +178,62 @@ fn rust_type_for_schema(
         "bool" => RustType::supported("bool"),
         "int" => RustType::supported("i64"),
         "float" => RustType::supported("f64"),
-        "Device" => RustType::unsupported("tvm_ffi::Any"),
-        "DataType" => RustType::unsupported("tvm_ffi::Any"),
+        "Device" => RustType::supported("tvm_ffi::DLDevice"),
+        "DataType" => RustType::supported("tvm_ffi::DLDataType"),
         "ffi.String" | "std::string" | "const char*" | "ffi.SmallStr" => {
             RustType::supported("tvm_ffi::String")
         }
         "ffi.Bytes" | "TVMFFIByteArray*" | "ffi.SmallBytes" => {
             RustType::supported("tvm_ffi::Bytes")
         }
-        "ffi.Function" => RustType::unsupported("tvm_ffi::Any"),
-        "ffi.Object" => RustType::unsupported("tvm_ffi::Any"),
-        "ffi.Tensor" | "DLTensor*" => RustType::unsupported("tvm_ffi::Any"),
-        "ffi.Shape" => RustType::unsupported("tvm_ffi::Any"),
-        "ffi.Module" => RustType::unsupported("tvm_ffi::Any"),
-        "Optional" => RustType::unsupported("tvm_ffi::Any"),
-        "Union" | "Variant" | "tuple" | "list" | "dict" | "ffi.Array" | "ffi.Map" | "Any" => {
-            RustType::unsupported("tvm_ffi::Any")
-        }
-        other => {
-            if let Some(_path) = type_map.get(other) {
-                RustType::unsupported("tvm_ffi::Any")
-            } else {
-                RustType::unsupported("tvm_ffi::Any")
+        "ffi.Function" => RustType::supported("tvm_ffi::Function"),
+        "ffi.Object" => RustType::supported("tvm_ffi::object::ObjectRef"),
+        "ffi.Tensor" | "DLTensor*" => RustType::supported("tvm_ffi::Tensor"),
+        "ffi.Shape" => RustType::supported("tvm_ffi::Shape"),
+        "ffi.Module" => RustType::supported("tvm_ffi::Module"),
+        "Optional" => match schema.args.as_slice() {
+            [inner] => {
+                let inner_ty = rust_type_for_schema(inner, type_map, _self_type_key);
+                if inner_ty.supported {
+                    RustType::supported(&format!("Option<{}>", inner_ty.name))
+                } else {
+                    RustType::unsupported("tvm_ffi::Any")
+                }
             }
-        }
+            _ => RustType::unsupported("tvm_ffi::Any"),
+        },
+        "ffi.Array" => match schema.args.as_slice() {
+            [inner] => {
+                let inner_ty = rust_type_for_schema(inner, type_map, _self_type_key);
+                if inner_ty.supported {
+                    RustType::supported(&format!("tvm_ffi::Array<{}>", inner_ty.name))
+                } else {
+                    RustType::unsupported("tvm_ffi::Any")
+                }
+            }
+            _ => RustType::unsupported("tvm_ffi::Any"),
+        },
+        "ffi.Map" => match schema.args.as_slice() {
+            [key, value] => {
+                let key_ty = rust_type_for_schema(key, type_map, _self_type_key);
+                let value_ty = rust_type_for_schema(value, type_map, _self_type_key);
+                if key_ty.supported && value_ty.supported {
+                    RustType::supported(&format!(
+                        "tvm_ffi::Map<{}, {}>",
+                        key_ty.name, value_ty.name
+                    ))
+                } else {
+                    RustType::unsupported("tvm_ffi::Any")
+                }
+            }
+            _ => RustType::unsupported("tvm_ffi::Any"),
+        },
+        "Any" | "ffi.Any" => RustType::supported("tvm_ffi::Any"),
+        "Union" | "Variant" | "tuple" | "list" | "dict" => RustType::unsupported("tvm_ffi::Any"),
+        other => match type_map.get(other) {
+            Some(path) => RustType::object_wrapper(path),
+            None => RustType::unsupported("tvm_ffi::Any"),
+        },
     }
 }
 

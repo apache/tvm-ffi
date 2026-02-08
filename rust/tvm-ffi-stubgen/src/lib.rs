@@ -23,6 +23,8 @@ mod schema;
 mod utils;
 
 pub use cli::Args;
+use std::collections::{BTreeSet, HashSet};
+use crate::schema::{collect_type_keys, extract_type_schema, parse_type_schema};
 
 pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     let prefix = utils::normalize_prefix(&args.init_prefix);
@@ -40,10 +42,29 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         .collect();
 
     let type_keys = ffi::list_registered_type_keys()?;
-    let filtered_types: Vec<String> = type_keys
-        .into_iter()
+    let type_key_set: HashSet<String> = type_keys.iter().cloned().collect();
+    let mut filtered_types: Vec<String> = type_keys
+        .iter()
         .filter(|name| name.starts_with(&prefix))
+        .cloned()
         .collect();
+
+    let mut referenced_types: BTreeSet<String> = BTreeSet::new();
+    for full_name in &filtered_funcs {
+        let metadata = ffi::get_global_func_metadata(full_name)?;
+        let schema = metadata
+            .and_then(|meta| extract_type_schema(&meta))
+            .and_then(|schema| parse_type_schema(&schema));
+        if let Some(schema) = schema {
+            collect_type_keys(&schema, &type_key_set, &mut referenced_types);
+        }
+    }
+
+    for ty in referenced_types {
+        if !filtered_types.contains(&ty) {
+            filtered_types.push(ty);
+        }
+    }
 
     let type_map = generate::build_type_map(&filtered_types, &prefix);
     let functions = generate::build_function_entries(&filtered_funcs, &type_map, &prefix)?;

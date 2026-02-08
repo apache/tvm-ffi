@@ -16,6 +16,7 @@
 // under the License.
 
 use serde::Deserialize;
+use std::collections::{BTreeSet, HashSet};
 
 #[derive(Debug, Clone)]
 pub(crate) struct TypeSchema {
@@ -42,6 +43,19 @@ pub(crate) fn extract_type_schema(metadata: &str) -> Option<String> {
 pub(crate) fn parse_type_schema(schema: &str) -> Option<TypeSchema> {
     let json: TypeSchemaJson = serde_json::from_str(schema).ok()?;
     Some(parse_type_schema_json(&json))
+}
+
+pub(crate) fn collect_type_keys(
+    schema: &TypeSchema,
+    known: &HashSet<String>,
+    out: &mut BTreeSet<String>,
+) {
+    if known.contains(&schema.origin) {
+        out.insert(schema.origin.clone());
+    }
+    for arg in &schema.args {
+        collect_type_keys(arg, known, out);
+    }
 }
 
 fn parse_type_schema_json(json: &TypeSchemaJson) -> TypeSchema {
