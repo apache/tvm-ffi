@@ -312,7 +312,7 @@ macro_rules! tvm_ffi_dll_export_typed_func {
 /// Since the ffi mechanism requires us to pass arguments by reference.
 ///
 /// # Supported Argument Counts
-/// This macro supports functions with 0 to 8 arguments.
+/// This macro supports functions with 0 to 12 arguments.
 ///-----------------------------------------------------------
 #[macro_export]
 macro_rules! into_typed_fn {
@@ -393,6 +393,89 @@ macro_rules! into_typed_fn {
             use $crate::function_internal::IntoArgHolderTuple;
             let tuple_args = (a0, a1, a2, a3, a4, a5, a6, a7).into_arg_holder_tuple();
             Ok(_f.call_tuple_with_len::<8, _>(tuple_args)?.try_into()?)
+        }
+    }};
+    // Case for 9 arguments
+    ($f:expr, $trait:ident($t0:ty, $t1:ty, $t2:ty, $t3:ty, $t4:ty, $t5:ty, $t6:ty, $t7:ty, $t8:ty)
+        -> $ret_ty:ty) => {{
+        let _f = $f;
+        move |a0: $t0,
+              a1: $t1,
+              a2: $t2,
+              a3: $t3,
+              a4: $t4,
+              a5: $t5,
+              a6: $t6,
+              a7: $t7,
+              a8: $t8|
+              -> $ret_ty {
+            use $crate::function_internal::IntoArgHolderTuple;
+            let tuple_args = (a0, a1, a2, a3, a4, a5, a6, a7, a8).into_arg_holder_tuple();
+            Ok(_f.call_tuple_with_len::<9, _>(tuple_args)?.try_into()?)
+        }
+    }};
+    // Case for 10 arguments
+    ($f:expr, $trait:ident($t0:ty, $t1:ty, $t2:ty, $t3:ty, $t4:ty, $t5:ty, $t6:ty, $t7:ty, $t8:ty, $t9:ty)
+        -> $ret_ty:ty) => {{
+        let _f = $f;
+        move |a0: $t0,
+              a1: $t1,
+              a2: $t2,
+              a3: $t3,
+              a4: $t4,
+              a5: $t5,
+              a6: $t6,
+              a7: $t7,
+              a8: $t8,
+              a9: $t9|
+              -> $ret_ty {
+            use $crate::function_internal::IntoArgHolderTuple;
+            let tuple_args = (a0, a1, a2, a3, a4, a5, a6, a7, a8, a9).into_arg_holder_tuple();
+            Ok(_f.call_tuple_with_len::<10, _>(tuple_args)?.try_into()?)
+        }
+    }};
+    // Case for 11 arguments
+    ($f:expr, $trait:ident($t0:ty, $t1:ty, $t2:ty, $t3:ty, $t4:ty, $t5:ty, $t6:ty, $t7:ty, $t8:ty, $t9:ty, $t10:ty)
+        -> $ret_ty:ty) => {{
+        let _f = $f;
+        move |a0: $t0,
+              a1: $t1,
+              a2: $t2,
+              a3: $t3,
+              a4: $t4,
+              a5: $t5,
+              a6: $t6,
+              a7: $t7,
+              a8: $t8,
+              a9: $t9,
+              a10: $t10|
+              -> $ret_ty {
+            use $crate::function_internal::IntoArgHolderTuple;
+            let tuple_args = (a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10).into_arg_holder_tuple();
+            Ok(_f.call_tuple_with_len::<11, _>(tuple_args)?.try_into()?)
+        }
+    }};
+    // Case for 12 arguments
+    ($f:expr, $trait:ident($t0:ty, $t1:ty, $t2:ty, $t3:ty, $t4:ty, $t5:ty, $t6:ty, $t7:ty, $t8:ty, $t9:ty, $t10:ty, $t11:ty)
+        -> $ret_ty:ty) => {{
+        let _f = $f;
+        move |a0: $t0,
+              a1: $t1,
+              a2: $t2,
+              a3: $t3,
+              a4: $t4,
+              a5: $t5,
+              a6: $t6,
+              a7: $t7,
+              a8: $t8,
+              a9: $t9,
+              a10: $t10,
+              a11: $t11|
+              -> $ret_ty {
+            use $crate::function_internal::IntoArgHolderTuple;
+            let tuple_args =
+                (a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11).into_arg_holder_tuple();
+            Ok(_f.call_tuple_with_len::<12, _>(tuple_args)?.try_into()?)
         }
     }};
 }

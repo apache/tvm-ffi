@@ -77,7 +77,7 @@ impl FunctionSig {
     }
 
     pub(crate) fn from_types(args: Vec<RustType>, ret: RustType) -> Self {
-        let typed = args.iter().all(|arg| arg.supported) && ret.supported;
+        let typed = args.len() <= 12 && args.iter().all(|arg| arg.supported) && ret.supported;
         Self {
             args,
             ret,
