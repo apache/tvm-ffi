@@ -232,6 +232,15 @@ impl From<Any> for AnyValue {
     }
 }
 
+impl<'a> TryFrom<AnyView<'a>> for AnyValue {
+    type Error = crate::error::Error;
+
+    fn try_from(value: AnyView<'a>) -> Result<Self, Self::Error> {
+        Ok(AnyValue::from(Any::from(value)))
+    }
+}
+
+
 impl Default for Any {
     fn default() -> Self {
         Self::new()

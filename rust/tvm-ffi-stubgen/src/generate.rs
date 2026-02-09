@@ -17,7 +17,7 @@
 
 use crate::cli::Args;
 use crate::ffi;
-use crate::model::{FunctionGen, FunctionSig, MethodGen, ModuleNode, RustType, TypeGen};
+use crate::model::{FieldGen, FunctionGen, FunctionSig, MethodGen, ModuleNode, RustType, TypeGen};
 use crate::schema::{extract_type_schema, parse_type_schema, TypeSchema};
 use crate::utils;
 use std::collections::BTreeMap;
@@ -78,6 +78,7 @@ pub(crate) fn build_type_entries(
         let (mods, name) = split_name(key, prefix);
         let rust_name = sanitize_ident(&name, IdentStyle::Type);
         let mut methods = Vec::new();
+        let mut fields = Vec::new();
         if let Some(info) = ffi::get_type_info(key) {
             if info.num_methods > 0 && !info.methods.is_null() {
                 let method_slice =
@@ -105,6 +106,31 @@ pub(crate) fn build_type_entries(
                     });
                 }
             }
+            if info.num_fields > 0 && !info.fields.is_null() {
+                let field_slice =
+                    unsafe { std::slice::from_raw_parts(info.fields, info.num_fields as usize) };
+                for field in field_slice {
+                    let field_name = match ffi::byte_array_to_string_opt(&field.name) {
+                        Some(name) => name,
+                        None => continue,
+                    };
+                    let rust_field_name = sanitize_ident(&field_name, IdentStyle::Function);
+                    let meta = ffi::byte_array_to_string_opt(&field.metadata);
+                    let schema = meta
+                        .as_deref()
+                        .and_then(extract_type_schema)
+                        .and_then(|s| parse_type_schema(&s));
+                    let ty = match schema.as_ref() {
+                        Some(schema) => rust_type_for_schema(schema, type_map, Some(key.as_str())),
+                        None => RustType::unsupported("tvm_ffi::Any"),
+                    };
+                    fields.push(FieldGen {
+                        name: field_name,
+                        rust_name: rust_field_name,
+                        ty,
+                    });
+                }
+            }
         }
         out.push((
             mods,
@@ -112,6 +138,7 @@ pub(crate) fn build_type_entries(
                 type_key: key.clone(),
                 rust_name,
                 methods,
+                fields,
             },
         ));
     }
@@ -530,15 +557,59 @@ fn render_type(out: &mut String, ty: &TypeGen, indent: usize) {
     )
     .ok();
 
+    for field in &ty.fields {
+        render_field_static(out, ty, field, indent);
+    }
     for method in &ty.methods {
         render_method_static(out, ty, method, indent);
     }
 
     writeln!(out, "{}impl {} {{", indent_str, ty.rust_name).ok();
+    for field in &ty.fields {
+        render_field(out, ty, field, indent + 4);
+    }
     for method in &ty.methods {
         render_method(out, ty, method, indent + 4);
     }
     writeln!(out, "{}}}\n", indent_str).ok();
+}
+
+fn render_field_static(out: &mut String, ty: &TypeGen, field: &FieldGen, indent: usize) {
+    let indent_str = " ".repeat(indent);
+    let static_name = static_ident("FIELD", &format!("{}::{}", ty.type_key, field.name));
+    writeln!(
+        out,
+        "{}static {}: LazyLock<tvm_ffi::object_wrapper::FieldGetter<{}>> = LazyLock::new(|| tvm_ffi::object_wrapper::FieldGetter::new(\"{}\", \"{}\").expect(\"missing field\"));",
+        indent_str, static_name, field.ty.name, ty.type_key, field.name
+    )
+    .ok();
+}
+
+fn render_field(out: &mut String, ty: &TypeGen, field: &FieldGen, indent: usize) {
+    let indent_str = " ".repeat(indent);
+    let static_name = static_ident("FIELD", &format!("{}::{}", ty.type_key, field.name));
+    writeln!(
+        out,
+        "{}pub fn {}(&self) -> Result<{}> {{",
+        indent_str, field.rust_name, field.ty.name
+    )
+    .ok();
+    if field.ty.name == "tvm_ffi::Any" {
+        writeln!(
+            out,
+            "{}    {}.get_any(self.as_object_ref())",
+            indent_str, static_name
+        )
+        .ok();
+    } else {
+        writeln!(
+            out,
+            "{}    {}.get(self.as_object_ref())",
+            indent_str, static_name
+        )
+        .ok();
+    }
+    writeln!(out, "{}}}", indent_str).ok();
 }
 
 fn render_method_static(out: &mut String, ty: &TypeGen, method: &MethodGen, indent: usize) {

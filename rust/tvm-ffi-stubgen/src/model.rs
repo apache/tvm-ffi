@@ -53,10 +53,18 @@ pub(crate) struct MethodGen {
 }
 
 #[derive(Debug, Clone)]
+pub(crate) struct FieldGen {
+    pub(crate) name: String,
+    pub(crate) rust_name: String,
+    pub(crate) ty: RustType,
+}
+
+#[derive(Debug, Clone)]
 pub(crate) struct TypeGen {
     pub(crate) type_key: String,
     pub(crate) rust_name: String,
     pub(crate) methods: Vec<MethodGen>,
+    pub(crate) fields: Vec<FieldGen>,
 }
 
 #[derive(Debug, Default)]

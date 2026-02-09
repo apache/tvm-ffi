@@ -166,6 +166,17 @@ where
     }
 }
 
+impl<T> IntoArgHolder for T
+where
+    T: crate::object_wrapper::ObjectWrapper,
+{
+    type Target = T;
+    fn into_arg_holder(self) -> Self::Target {
+        self
+    }
+}
+
+
 // helper trait to implement IntoArgHolderTuple to apply into_arg_holder to each element
 pub trait IntoArgHolderTuple {
     type Target;

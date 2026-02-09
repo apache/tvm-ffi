@@ -17,10 +17,13 @@
  * under the License.
  */
 
+use crate::any::Any;
 use crate::object::{Object, ObjectArc, ObjectRef, ObjectRefCore};
 use crate::type_traits::AnyCompatible;
+use std::marker::PhantomData;
 use tvm_ffi_sys::{
-    TVMFFIAny, TVMFFIByteArray, TVMFFIGetTypeInfo, TVMFFIObject, TVMFFITypeKeyToIndex,
+    TVMFFIAny, TVMFFIByteArray, TVMFFIFieldGetter, TVMFFIGetTypeInfo, TVMFFIObject,
+    TVMFFITypeKeyToIndex,
 };
 
 /// Runtime support for stubgen-generated object wrappers.
@@ -32,6 +35,129 @@ pub trait ObjectWrapper: Clone {
     fn from_object(inner: ObjectRef) -> Self;
     fn as_object_ref(&self) -> &ObjectRef;
     fn into_object_ref(self) -> ObjectRef;
+}
+
+struct FieldGetterInner {
+    offset: usize,
+    getter: TVMFFIFieldGetter,
+}
+
+impl FieldGetterInner {
+    fn get_any(&self, obj: &ObjectRef) -> crate::Result<Any> {
+        unsafe {
+            let arc = <ObjectRef as ObjectRefCore>::data(obj);
+            let raw = ObjectArc::as_raw(arc) as *mut TVMFFIObject;
+            if raw.is_null() {
+                crate::bail!(crate::error::ATTRIBUTE_ERROR, "Null object for field access");
+            }
+            let field_ptr = (raw as *mut u8).add(self.offset) as *mut std::ffi::c_void;
+            let mut out = TVMFFIAny::new();
+            crate::check_safe_call!((self.getter)(field_ptr, &mut out))?;
+            Ok(Any::from_raw_ffi_any(out))
+        }
+    }
+}
+
+pub struct FieldGetter<T> {
+    inner: FieldGetterInner,
+    _marker: PhantomData<T>,
+}
+
+// FieldGetter stores only reflection metadata, not values of T.
+// It is safe to share across threads regardless of T's Send/Sync.
+unsafe impl<T> Send for FieldGetter<T> {}
+unsafe impl<T> Sync for FieldGetter<T> {}
+
+impl<T> FieldGetter<T> {
+    pub fn new(type_key: &'static str, field_name: &'static str) -> crate::Result<Self> {
+        let inner = resolve_field_by_type_key(type_key, field_name)?;
+        Ok(Self {
+            inner,
+            _marker: PhantomData,
+        })
+    }
+
+    pub fn get_any(&self, obj: &ObjectRef) -> crate::Result<Any> {
+        self.inner.get_any(obj)
+    }
+}
+
+impl<T> FieldGetter<T>
+where
+    T: TryFrom<Any>,
+    T::Error: Into<crate::Error>,
+{
+    pub fn get(&self, obj: &ObjectRef) -> crate::Result<T> {
+        self.inner.get_any(obj)?.try_into().map_err(Into::into)
+    }
+}
+
+fn resolve_field_by_type_key(
+    type_key: &'static str,
+    field_name: &'static str,
+) -> crate::Result<FieldGetterInner> {
+    unsafe {
+        let key = TVMFFIByteArray::from_str(type_key);
+        let mut type_index = 0i32;
+        crate::check_safe_call!(TVMFFITypeKeyToIndex(&key, &mut type_index))?;
+        resolve_field_by_type_index(type_index, field_name)
+    }
+}
+
+fn resolve_field_by_type_index(
+    type_index: i32,
+    field_name: &'static str,
+) -> crate::Result<FieldGetterInner> {
+    unsafe {
+        let info = TVMFFIGetTypeInfo(type_index);
+        if info.is_null() {
+            crate::bail!(
+                crate::error::ATTRIBUTE_ERROR,
+                "Type info missing for field {}",
+                field_name
+            );
+        }
+        let info = &*info;
+        if info.fields.is_null() || info.num_fields <= 0 {
+            crate::bail!(
+                crate::error::ATTRIBUTE_ERROR,
+                "Type {} has no fields",
+                info.type_key.as_str()
+            );
+        }
+        let fields = std::slice::from_raw_parts(info.fields, info.num_fields as usize);
+        for field in fields {
+            if field.name.as_str() != field_name {
+                continue;
+            }
+            let getter = match field.getter {
+                Some(getter) => getter,
+                None => {
+                    crate::bail!(
+                        crate::error::ATTRIBUTE_ERROR,
+                        "Field {} has no getter",
+                        field_name
+                    );
+                }
+            };
+            if field.offset < 0 {
+                crate::bail!(
+                    crate::error::ATTRIBUTE_ERROR,
+                    "Field {} has invalid offset",
+                    field_name
+                );
+            }
+            return Ok(FieldGetterInner {
+                offset: field.offset as usize,
+                getter,
+            });
+        }
+        crate::bail!(
+            crate::error::ATTRIBUTE_ERROR,
+            "Field {} not found",
+            field_name
+        );
+    }
 }
 
 fn type_index_for_key(type_key: &'static str) -> Option<i32> {
