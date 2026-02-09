@@ -59,25 +59,3 @@ pub(crate) fn default_tvm_ffi_path() -> Result<PathBuf, Box<dyn std::error::Erro
     }
     Err("unable to locate tvm-ffi path (use --tvm-ffi-path)".into())
 }
-
-pub(crate) fn relative_path(from: &Path, to: &Path) -> PathBuf {
-    let from = from.canonicalize().unwrap_or_else(|_| from.to_path_buf());
-    let to = to.canonicalize().unwrap_or_else(|_| to.to_path_buf());
-    let from_components: Vec<_> = from.components().collect();
-    let to_components: Vec<_> = to.components().collect();
-    let mut i = 0;
-    while i < from_components.len()
-        && i < to_components.len()
-        && from_components[i] == to_components[i]
-    {
-        i += 1;
-    }
-    let mut out = PathBuf::new();
-    for _ in i..from_components.len() {
-        out.push("..");
-    }
-    for comp in &to_components[i..] {
-        out.push(comp.as_os_str());
-    }
-    out
-}

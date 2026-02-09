@@ -33,9 +33,9 @@ pub(crate) fn build_type_map(type_keys: &[String], prefix: &str) -> BTreeMap<Str
         let rust_name = sanitize_ident(&name, IdentStyle::Type);
         let module_path = module_path(&mods);
         let path = if module_path.is_empty() {
-            format!("crate::types::{}", rust_name)
+            format!("crate::{}", rust_name)
         } else {
-            format!("crate::types::{}::{}", module_path, rust_name)
+            format!("crate::{}::{}", module_path, rust_name)
         };
         map.insert(key.clone(), path);
     }
@@ -358,15 +358,19 @@ pub(crate) fn render_cargo_toml(
     Ok(toml::to_string(&toml::Value::Table(doc))?)
 }
 
-pub(crate) fn render_lib_rs() -> String {
+pub(crate) fn render_lib_rs(functions_root: &ModuleNode, types_root: &ModuleNode) -> String {
     let mut out = String::new();
     out.push_str(
-        r#"pub mod functions;
-pub mod types;
+        r#"pub mod _tvm_ffi_stubgen_detail {
+    pub mod functions;
+    pub mod types;
+}
 
-pub use functions::*;
-pub use types::*;
-
+"#,
+    );
+    render_facade_module(&mut out, Some(functions_root), Some(types_root), &[], 0, true);
+    out.push_str(
+        r#"
 pub fn load_library(path: &str) -> tvm_ffi::Result<tvm_ffi::Module> {
     tvm_ffi::Module::load_from_file(path)
 }
@@ -428,7 +432,10 @@ fn main() {
 pub(crate) fn render_functions_rs(root: &ModuleNode) -> String {
     let mut out = String::new();
     out.push_str(
-        r#"use std::sync::LazyLock;
+        r#"#![allow(unused_imports)]
+#![allow(non_snake_case, nonstandard_style)]
+
+use std::sync::LazyLock;
 use tvm_ffi::{Any, AnyView, Function, Result};
 
 "#,
@@ -440,13 +447,79 @@ use tvm_ffi::{Any, AnyView, Function, Result};
 pub(crate) fn render_types_rs(root: &ModuleNode) -> String {
     let mut out = String::new();
     out.push_str(
-        r#"use std::sync::LazyLock;
+        r#"#![allow(unused_imports)]
+#![allow(non_snake_case, nonstandard_style)]
+
+use std::sync::LazyLock;
 use tvm_ffi::{Any, AnyView, Result};
 
 "#,
     );
     render_type_module(&mut out, root, 0);
     out
+}
+
+fn render_facade_module(
+    out: &mut String,
+    functions: Option<&ModuleNode>,
+    types: Option<&ModuleNode>,
+    path: &[String],
+    indent: usize,
+    is_root: bool,
+) {
+    let indent_str = " ".repeat(indent);
+    if !is_root {
+        let name = path.last().expect("module path missing");
+        writeln!(out, "{}pub mod {} {{", indent_str, name).ok();
+    }
+
+    let current_indent = if is_root { indent_str.clone() } else { " ".repeat(indent + 4) };
+    let module_path = if path.is_empty() {
+        String::new()
+    } else {
+        format!("::{}", path.join("::"))
+    };
+
+    if let Some(node) = functions {
+        for func in &node.functions {
+            writeln!(
+                out,
+                "{}pub use crate::_tvm_ffi_stubgen_detail::functions{}::{};",
+                current_indent, module_path, func.rust_name
+            )
+            .ok();
+        }
+    }
+    if let Some(node) = types {
+        for ty in &node.types {
+            writeln!(
+                out,
+                "{}pub use crate::_tvm_ffi_stubgen_detail::types{}::{};",
+                current_indent, module_path, ty.rust_name
+            )
+            .ok();
+        }
+    }
+
+    let mut child_names = std::collections::BTreeSet::new();
+    if let Some(node) = functions {
+        child_names.extend(node.children.keys().cloned());
+    }
+    if let Some(node) = types {
+        child_names.extend(node.children.keys().cloned());
+    }
+
+    for child in child_names {
+        let mut child_path = path.to_vec();
+        child_path.push(child.clone());
+        let func_child = functions.and_then(|node| node.children.get(&child));
+        let type_child = types.and_then(|node| node.children.get(&child));
+        render_facade_module(out, func_child, type_child, &child_path, indent + 4, false);
+    }
+
+    if !is_root {
+        writeln!(out, "{}}}", indent_str).ok();
+    }
 }
 
 fn render_function_module(out: &mut String, node: &ModuleNode, indent: usize) {
@@ -498,7 +571,6 @@ fn render_function(out: &mut String, func: &FunctionGen, indent: usize) {
     )
     .ok();
     if func.sig.packed {
-        writeln!(out, "{}#[allow(non_snake_case)]", indent_str).ok();
         writeln!(
             out,
             "{}pub fn {}(args: &[Any]) -> Result<Any> {{",
@@ -518,7 +590,6 @@ fn render_function(out: &mut String, func: &FunctionGen, indent: usize) {
         return;
     }
     let args = render_args(&func.sig.args);
-    writeln!(out, "{}#[allow(non_snake_case)]", indent_str).ok();
     writeln!(
         out,
         "{}pub fn {}({}) -> Result<{}> {{",

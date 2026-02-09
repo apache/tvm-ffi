@@ -74,18 +74,19 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     let types_root = generate::build_type_modules(types, &prefix);
 
     let cargo_toml = generate::render_cargo_toml(&args, &type_map)?;
-    let lib_rs = generate::render_lib_rs();
+    let lib_rs = generate::render_lib_rs(&functions_root, &types_root);
     let functions_rs = generate::render_functions_rs(&functions_root);
     let types_rs = generate::render_types_rs(&types_root);
     let build_rs = generate::render_build_rs();
 
     let src_dir = args.out_dir.join("src");
-    std::fs::create_dir_all(&src_dir)?;
+    let detail_dir = src_dir.join("_tvm_ffi_stubgen_detail");
+    std::fs::create_dir_all(&detail_dir)?;
     std::fs::write(args.out_dir.join("Cargo.toml"), cargo_toml)?;
     std::fs::write(args.out_dir.join("build.rs"), build_rs)?;
     std::fs::write(src_dir.join("lib.rs"), lib_rs)?;
-    std::fs::write(src_dir.join("functions.rs"), functions_rs)?;
-    std::fs::write(src_dir.join("types.rs"), types_rs)?;
+    std::fs::write(detail_dir.join("functions.rs"), functions_rs)?;
+    std::fs::write(detail_dir.join("types.rs"), types_rs)?;
 
     Ok(())
 }
