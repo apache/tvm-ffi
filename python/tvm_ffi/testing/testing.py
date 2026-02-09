@@ -81,6 +81,13 @@ class TestObjectDerived(TestObjectBase):
     # tvm-ffi-stubgen(end)
 
 
+@register_object("testing.TestNonCopyable")
+class TestNonCopyable(Object):
+    """Test object with deleted copy constructor."""
+
+    value: int
+
+
 @register_object("testing.SchemaAllTypes")
 class _SchemaAllTypes:
     # tvm-ffi-stubgen(ty-map): testing.SchemaAllTypes -> testing._SchemaAllTypes

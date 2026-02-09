@@ -161,6 +161,26 @@ class TestCxxKwOnly : public Object {
   TVM_FFI_DECLARE_OBJECT_INFO("testing.TestCxxKwOnly", TestCxxKwOnly, Object);
 };
 
+class TestDeepCopyEdgesObj : public Object {
+ public:
+  Any v_any;
+  ObjectRef v_obj;
+
+  static constexpr bool _type_mutable = true;
+  TVM_FFI_DECLARE_OBJECT_INFO("testing.TestDeepCopyEdges", TestDeepCopyEdgesObj, Object);
+};
+
+class TestNonCopyable : public Object {
+ public:
+  int64_t value;
+
+  explicit TestNonCopyable(int64_t value) : value(value) {}
+  TestNonCopyable(const TestNonCopyable&) = delete;
+  TestNonCopyable& operator=(const TestNonCopyable&) = delete;
+
+  TVM_FFI_DECLARE_OBJECT_INFO("testing.TestNonCopyable", TestNonCopyable, Object);
+};
+
 class TestUnregisteredBaseObject : public Object {
  public:
   int64_t v1;
@@ -219,8 +239,8 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("add_i64", &TestObjectBase::AddI64, "add_i64 method");
 
   refl::ObjectDef<TestObjectDerived>()
-      .def_ro("v_map", &TestObjectDerived::v_map)
-      .def_ro("v_array", &TestObjectDerived::v_array);
+      .def_rw("v_map", &TestObjectDerived::v_map)
+      .def_rw("v_array", &TestObjectDerived::v_array);
 
   refl::ObjectDef<TestCxxClassBase>()
       .def(refl::init<int64_t, int32_t>())
@@ -249,6 +269,14 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def_rw("y", &TestCxxKwOnly::y)
       .def_rw("z", &TestCxxKwOnly::z)
       .def_rw("w", &TestCxxKwOnly::w);
+
+  refl::ObjectDef<TestDeepCopyEdgesObj>()
+      .def_rw("v_any", &TestDeepCopyEdgesObj::v_any)
+      .def_rw("v_obj", &TestDeepCopyEdgesObj::v_obj);
+
+  refl::ObjectDef<TestNonCopyable>()
+      .def(refl::init<int64_t>())
+      .def_ro("value", &TestNonCopyable::value);
 
   refl::ObjectDef<TestUnregisteredBaseObject>()
       .def(refl::init<int64_t>(), "Constructor of TestUnregisteredBaseObject")

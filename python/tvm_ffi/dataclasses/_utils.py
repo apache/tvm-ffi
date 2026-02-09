@@ -55,22 +55,27 @@ def type_info_to_cls(
         attrs[field.name] = field.as_property(cls)
 
     # Step 3. Add methods
-    def _add_method(name: str, func: Callable[..., Any]) -> None:
-        if name == "__ffi_init__":
-            name = "__c_ffi_init__"
-        # Allow overriding methods (including from base classes like Object.__repr__)
-        # by always adding to attrs, which will be used when creating the new class
-        func.__module__ = cls.__module__
-        func.__name__ = name  # ty: ignore[unresolved-attribute]
-        func.__qualname__ = f"{cls.__qualname__}.{name}"  # ty: ignore[unresolved-attribute]
-        func.__doc__ = f"Method `{name}` of class `{cls.__qualname__}`"
-        attrs[name] = func
-
     for name, method_impl in methods.items():
         if method_impl is not None:
-            _add_method(name, method_impl)
+            method_impl.__module__ = cls.__module__
+            method_impl.__name__ = name  # ty: ignore[unresolved-attribute]
+            method_impl.__qualname__ = f"{cls.__qualname__}.{name}"  # ty: ignore[unresolved-attribute]
+            method_impl.__doc__ = f"Method `{name}` of class `{cls.__qualname__}`"
+            attrs[name] = method_impl
     for method in type_info.methods:
-        _add_method(method.name, method.func)
+        name = method.name
+        if name == "__ffi_init__":
+            name = "__c_ffi_init__"
+        # as_callable wraps instance methods so `self` is passed to the C++ function,
+        # and wraps static methods with staticmethod(); it also sets __module__,
+        # __name__, __qualname__, and __doc__ so we insert directly into attrs.
+        func = method.as_callable(cls)
+        if name != method.name:
+            # Rename was applied (e.g. __ffi_init__ -> __c_ffi_init__)
+            inner = func.__func__ if isinstance(func, staticmethod) else func
+            inner.__name__ = name  # ty: ignore[invalid-assignment]
+            inner.__qualname__ = f"{cls.__qualname__}.{name}"  # ty: ignore[invalid-assignment]
+        attrs[name] = func
 
     # Step 4. Create the new class
     new_cls = type(cls.__name__, cls_bases, attrs)

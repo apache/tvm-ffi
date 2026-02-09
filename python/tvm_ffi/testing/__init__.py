@@ -19,6 +19,7 @@
 from ._ffi_api import *  # noqa: F403
 from .testing import (
     TestIntPair,
+    TestNonCopyable,
     TestObjectBase,
     TestObjectDerived,
     _SchemaAllTypes,

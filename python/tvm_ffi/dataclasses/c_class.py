@@ -153,6 +153,11 @@ def c_class(
             methods={"__init__": fn_init, "__repr__": fn_repr},
         )
         _set_type_cls(type_info, type_cls)
+        # Step 4. Set up __copy__, __deepcopy__, __replace__
+        from ..registry import _setup_copy_methods  # noqa: PLC0415
+
+        has_shallow_copy = any(m.name == "__ffi_shallow_copy__" for m in type_info.methods)
+        _setup_copy_methods(type_cls, has_shallow_copy)
         return type_cls
 
     return decorator
