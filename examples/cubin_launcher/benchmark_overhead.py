@@ -63,7 +63,7 @@ def get_cpu_name() -> str:
 
 # Define empty kernel at global scope
 @triton.jit
-def empty_kernel(A_ptr, B_ptr, C_ptr, n, BLOCK: tl.constexpr = 128):  # noqa
+def empty_kernel(A_ptr, B_ptr, C_ptr, n, BLOCK: tl.constexpr = 128):  # noqa  # ty: ignore[invalid-parameter-default]
     """Empty kernel that does nothing - for measuring pure launch overhead."""
     pass
 

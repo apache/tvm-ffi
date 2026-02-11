@@ -28,7 +28,7 @@ from . import _dtype, container, core
 try:
     import torch
 except ImportError:
-    torch = None
+    torch = None  # ty: ignore[invalid-assignment]
 
 numpy: ModuleType | None = None
 try:

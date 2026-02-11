@@ -39,31 +39,26 @@ Homepage = "https://github.com/apache/tvm-ffi"
 GitHub = "https://github.com/apache/tvm-ffi"
 
 [project.optional-dependencies]
-# setup tools is needed by torch jit for best perf
-torch = ["torch", "setuptools", "ninja"]
 cpp = ["ninja"]
-# note pytorch does not yet ship with 3.14t
-test = [
-  "pytest",
-  "numpy",
-  "ninja",
-  "torch; python_version < '3.14'",
-  "setuptools",
-]
 
 [dependency-groups]
+torch = [
+  "torch; python_version < '3.14'", # pytorch does not yet ship with 3.14t
+  "setuptools",                     # setuptools is needed by torch jit for best perf
+  "ninja",
+  "numpy",
+  "ml_dtypes",
+]
+test = [{ include-group = "torch" }, "pytest"]
 dev = [
+  { include-group = "test" },
+  "pre-commit",
   "ruff",
-  "ty",
+  "ty==0.0.15",
   "clang-format",
   "clang-tidy",
   "ipdb",
   "ipython",
-  "ninja",
-  "pre-commit",
-  "pytest",
-  "numpy",
-  "ml_dtypes",
   "cython>=3.0",
   "cmake",
   "scikit-build-core",
@@ -257,12 +252,14 @@ archs = ["AMD64"]
 
 [tool.ty.environment]
 python-version = "3.9"
-python = ".venv"
 extra-paths = ["python", "examples", "tests/python"]
 
 [tool.ty.src]
 include = ["python/tvm_ffi/**", "examples/**", "tests/python/**"]
 exclude = [".venv/**", "build/**", "dist/**"]
+
+[tool.ty.rules]
+unused-ignore-comment = "ignore"
 
 [tool.ty.analysis]
 allowed-unresolved-imports = [

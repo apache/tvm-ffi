@@ -29,7 +29,7 @@ from tvm_ffi.utils.embed_cubin import embed_cubin
 try:
     import torch
 except ImportError:
-    torch = None
+    torch = None  # ty: ignore[invalid-assignment]
 
 
 def _is_cuda_available() -> bool:

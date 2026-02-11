@@ -26,7 +26,7 @@ import tvm_ffi.cpp
 try:
     import torch
 except ImportError:
-    torch = None
+    torch = None  # ty: ignore[invalid-assignment]
 
 
 try:

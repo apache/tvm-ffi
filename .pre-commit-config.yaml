@@ -62,6 +62,26 @@ repos:
       - id: trailing-whitespace
       - id: check-yaml
       - id: check-toml
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.9
+    hooks:
+      - id: ruff-check
+        types_or: [python, pyi, jupyter]
+        args: [--fix]
+      - id: ruff-format
+        types_or: [python, pyi, jupyter]
+  - repo: local
+    hooks:
+      - id: ty
+        name: ty check
+        entry: uvx ty@0.0.15 check --error-on-warning
+        language: system
+        pass_filenames: false
+        types: [python]
+  - repo: https://github.com/pre-commit/mirrors-clang-format
+    rev: "v21.1.7"
+    hooks:
+      - id: clang-format
   - repo: https://github.com/adrienverge/yamllint
     rev: v1.37.1
     hooks:
@@ -73,18 +93,6 @@ repos:
     rev: v0.9.3
     hooks:
       - id: taplo-format
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.14.9
-    hooks:
-      - id: ruff-check
-        types_or: [python, pyi, jupyter]
-        args: [--fix]
-      - id: ruff-format
-        types_or: [python, pyi, jupyter]
-  - repo: https://github.com/pre-commit/mirrors-clang-format
-    rev: "v21.1.7"
-    hooks:
-      - id: clang-format
   - repo: https://github.com/MarcoGorelli/cython-lint
     rev: v0.18.1
     hooks:
@@ -113,14 +121,6 @@ repos:
         args:
           - --config
           - docs/.rstcheck.cfg
-  - repo: local
-    hooks:
-      - id: ty
-        name: ty check
-        entry: uvx ty check
-        language: system
-        pass_filenames: false
-        types: [python]
   - repo: https://github.com/cheshirekow/cmake-format-precommit
     rev: v0.6.13
     hooks:

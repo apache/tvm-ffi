@@ -122,7 +122,7 @@ jobs:
         env:
           CMAKE_BUILD_PARALLEL_LEVEL: ${{ steps.env_vars.outputs.cpu_count }}
         run: |
-          uv pip install --reinstall --verbose -e ".[torch]"
+          uv pip install --reinstall --verbose --group torch -e .
           uv pip install --reinstall --verbose numpy scikit-build-core torch-c-dlpack-ext
 
       - name: Run example/quickstart (CPU) [posix]
