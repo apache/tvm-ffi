@@ -154,6 +154,23 @@ def _get_cuda_target() -> str:
             major, minor = compute_cap.split(".")
             return f"-gencode=arch=compute_{major}{minor},code=sm_{major}{minor}"
         except Exception:
+            try:
+                # For old drivers, there is no compute_cap, but we can use the GPU name to determine the architecture.
+                status = subprocess.run(
+                    args=["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+                    capture_output=True,
+                    check=True,
+                )
+                gpu_name = status.stdout.decode("utf-8").strip().split("\n")[0]
+                if "A100" in gpu_name:
+                    major, minor = "8", "0"
+                elif "A10" in gpu_name:
+                    major, minor = "8", "6"
+                else:
+                    raise Exception(f"Unsupported GPU: {gpu_name}")
+                return f"-gencode=arch=compute_{major}{minor},code=sm_{major}{minor}"
+            except Exception:
+                pass
             # fallback to a reasonable default
             return "-gencode=arch=compute_70,code=sm_70"
 
