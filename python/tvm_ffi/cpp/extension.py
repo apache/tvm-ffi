@@ -156,20 +156,23 @@ def _get_cuda_target() -> str:
         except Exception:
             try:
                 # For old drivers, there is no compute_cap, but we can use the GPU name to determine the architecture.
+                ampere_arch_map = {
+                    "A100": ("8", "0"),
+                    "A10": ("8", "6"),
+                }
                 status = subprocess.run(
                     args=["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
                     capture_output=True,
                     check=True,
+                    text=True,
                 )
-                gpu_name = status.stdout.decode("utf-8").strip().split("\n")[0]
-                if "A100" in gpu_name:
-                    major, minor = "8", "0"
-                elif "A10" in gpu_name:
-                    major, minor = "8", "6"
-                else:
-                    raise Exception(f"Unsupported GPU: {gpu_name}")
-                return f"-gencode=arch=compute_{major}{minor},code=sm_{major}{minor}"
-            except Exception:
+                gpu_name = status.stdout.strip().split("\n")[0]
+                for gpu_key, (major, minor) in ampere_arch_map.items():
+                    if gpu_key in gpu_name:
+                        return f"-gencode=arch=compute_{major}{minor},code=sm_{major}{minor}"
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                # If nvidia-smi fails or the GPU is not in our map,
+                # we proceed to the default fallback.
                 pass
             # fallback to a reasonable default
             return "-gencode=arch=compute_70,code=sm_70"
