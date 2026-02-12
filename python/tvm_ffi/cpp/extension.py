@@ -171,11 +171,10 @@ def _get_cuda_target() -> str:
                     if gpu_key in gpu_name:
                         return f"-gencode=arch=compute_{major}{minor},code=sm_{major}{minor}"
             except (subprocess.CalledProcessError, FileNotFoundError):
-                # If nvidia-smi fails or the GPU is not in our map,
-                # we proceed to the default fallback.
                 pass
-            # fallback to a reasonable default
-            return "-gencode=arch=compute_70,code=sm_70"
+            raise RuntimeError(
+                "Could not detect CUDA compute_cap automatically. Please set TVM_FFI_CUDA_ARCH_LIST environment variable."
+            )
 
 
 def _run_command_in_dev_prompt(
