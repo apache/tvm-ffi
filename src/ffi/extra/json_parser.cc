@@ -131,7 +131,9 @@ class JSONParserContext {
         ++cur_;
         return true;
       }
-      if (*cur_ < ' ' || *cur_ == '\\') {
+      // Use uint8_t: on platforms where char is signed, raw UTF-8 bytes (>= 0x80)
+      // would be negative and incorrectly treated as control characters.
+      if (*reinterpret_cast<const uint8_t*>(cur_) < ' ' || *cur_ == '\\') {
         // fallback to full string handling
         return this->NextStringWithFullHandling(out, start_pos);
       }
@@ -341,7 +343,9 @@ class JSONParserContext {
     // copy over the prefix that was already parsed
     std::string out_str(start_pos + 1, cur_ - start_pos - 1);
     while (cur_ != end_) {
-      if (*cur_ < ' ') {
+      // Use uint8_t: on platforms where char is signed, raw UTF-8 bytes (>= 0x80)
+      // would be negative and incorrectly treated as control characters.
+      if (*reinterpret_cast<const uint8_t*>(cur_) < ' ') {
         this->SetErrorInvalidControlCharacter();
         return false;
       }
