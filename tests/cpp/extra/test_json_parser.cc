@@ -290,6 +290,12 @@ TEST(JSONParser, UnicodeEdgeCases) {
             u8"\U0001F600\U0001F601");
 }
 
+TEST(JSONParser, RawUTF8Bytes) {
+  // Regression test: raw UTF-8 bytes (>= 0x80) must not be rejected as control characters.
+  // This failed when the parser used signed char comparison: *cur_ < ' '
+  EXPECT_EQ(json::Parse("\"\xE4\xB8\xAD\xE6\x96\x87\"").cast<String>(), "\xE4\xB8\xAD\xE6\x96\x87");
+}
+
 TEST(JSONParser, LargeInputs) {
   // Test large array
   std::string large_array = "[";
