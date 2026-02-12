@@ -23,7 +23,7 @@ import pytest
 try:
     import torch
 except ImportError:
-    torch = None
+    torch = None  # ty: ignore[invalid-assignment]
 
 import tvm_ffi.cpp
 from tvm_ffi.module import Module

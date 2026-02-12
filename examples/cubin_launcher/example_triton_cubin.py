@@ -55,7 +55,7 @@ def generate_cubin() -> bytes:
     # [triton_kernel.begin]
     # Define the kernel dynamically
     @triton.jit
-    def square_kernel(X_ptr, Y_ptr, n, BLOCK: tl.constexpr = 1024):  # noqa
+    def square_kernel(X_ptr, Y_ptr, n, BLOCK: tl.constexpr = 1024):  # noqa  # ty: ignore[invalid-parameter-default]
         pid = tl.program_id(0)
         start = pid * BLOCK
         offsets = start + tl.arange(0, BLOCK)

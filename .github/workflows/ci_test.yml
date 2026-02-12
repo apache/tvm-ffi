@@ -182,7 +182,7 @@ jobs:
         env:
           CMAKE_BUILD_PARALLEL_LEVEL: ${{ steps.env_vars.outputs.cpu_count }}
         run: |
-          uv pip install --reinstall --verbose -e ".[test]"
+          uv pip install --reinstall --verbose --group test -e .
       - name: Run python tests
         if: ${{ matrix.os != 'windows-latest' }}
         run: |

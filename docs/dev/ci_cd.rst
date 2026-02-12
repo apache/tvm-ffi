@@ -135,7 +135,7 @@ Reproduce locally with:
 .. code-block:: bash
 
    # Install the project in editable mode with test dependencies
-   uv pip install --reinstall --verbose -e ".[test]"
+   uv pip install --reinstall --verbose --group test -e .
 
    # Run the full test suite
    uv run pytest -vvs tests/python
@@ -156,7 +156,7 @@ This tests all workspace members (``tvm-ffi``, ``tvm-ffi-sys``,
 .. note::
 
    CI runs Rust tests only after the Python package is installed (
-   ``uv pip install -e ".[test]"``), because the Rust FFI bindings link
+   ``uv pip install --group test -e .``), because the Rust FFI bindings link
    against the built shared library. Make sure the Python package is
    installed before running ``cargo test``.
 

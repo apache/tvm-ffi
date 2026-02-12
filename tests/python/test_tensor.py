@@ -25,7 +25,7 @@ import pytest
 try:
     import torch
 except ImportError:
-    torch = None
+    torch = None  # ty: ignore[invalid-assignment]
 
 import numpy as np
 import tvm_ffi

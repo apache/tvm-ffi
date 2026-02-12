@@ -32,7 +32,7 @@ try:
     from torch.utils import cpp_extension
     from tvm_ffi import libinfo
 except ImportError:
-    torch = None
+    torch = None  # ty: ignore[invalid-assignment]
 
 # Check if DLPack Exchange API is available
 _has_dlpack_api = torch is not None and hasattr(torch.Tensor, "__dlpack_c_exchange_api__")
