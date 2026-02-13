@@ -154,8 +154,27 @@ def _get_cuda_target() -> str:
             major, minor = compute_cap.split(".")
             return f"-gencode=arch=compute_{major}{minor},code=sm_{major}{minor}"
         except Exception:
-            # fallback to a reasonable default
-            return "-gencode=arch=compute_70,code=sm_70"
+            try:
+                # For old drivers, there is no compute_cap, but we can use the GPU name to determine the architecture.
+                ampere_arch_map = {
+                    "A100": ("8", "0"),
+                    "A10": ("8", "6"),
+                }
+                status = subprocess.run(
+                    args=["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+                    capture_output=True,
+                    check=True,
+                    text=True,
+                )
+                gpu_name = status.stdout.strip().split("\n")[0]
+                for gpu_key, (major, minor) in ampere_arch_map.items():
+                    if gpu_key in gpu_name:
+                        return f"-gencode=arch=compute_{major}{minor},code=sm_{major}{minor}"
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                pass
+            raise RuntimeError(
+                "Could not detect CUDA compute_cap automatically. Please set TVM_FFI_CUDA_ARCH_LIST environment variable."
+            )
 
 
 def _run_command_in_dev_prompt(
