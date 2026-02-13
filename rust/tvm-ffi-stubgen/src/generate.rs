@@ -368,7 +368,14 @@ pub(crate) fn render_lib_rs(functions_root: &ModuleNode, types_root: &ModuleNode
 
 "#,
     );
-    render_facade_module(&mut out, Some(functions_root), Some(types_root), &[], 0, true);
+    render_facade_module(
+        &mut out,
+        Some(functions_root),
+        Some(types_root),
+        &[],
+        0,
+        true,
+    );
     out.push_str(
         r#"
 pub fn load_library(path: &str) -> tvm_ffi::Result<tvm_ffi::Module> {
@@ -473,7 +480,11 @@ fn render_facade_module(
         writeln!(out, "{}pub mod {} {{", indent_str, name).ok();
     }
 
-    let current_indent = if is_root { indent_str.clone() } else { " ".repeat(indent + 4) };
+    let current_indent = if is_root {
+        indent_str.clone()
+    } else {
+        " ".repeat(indent + 4)
+    };
     let module_path = if path.is_empty() {
         String::new()
     } else {

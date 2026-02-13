@@ -47,7 +47,10 @@ fn stubgen_tvm_ffi_testing() {
     run(args).expect("stubgen run");
 
     let cargo_toml = out_dir.join("Cargo.toml");
-    let functions_rs = out_dir.join("src").join("functions.rs");
+    let functions_rs = out_dir
+        .join("src")
+        .join("_tvm_ffi_stubgen_detail")
+        .join("functions.rs");
     assert!(cargo_toml.exists(), "Cargo.toml not generated");
     assert!(functions_rs.exists(), "functions.rs not generated");
 
