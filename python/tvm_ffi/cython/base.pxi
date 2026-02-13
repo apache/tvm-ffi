@@ -151,6 +151,7 @@ cdef extern from "tvm/ffi/c_api.h":
         kTVMFFIMap = 72
         kTVMFFIModule = 73
         kTVMFFIOpaquePyObject = 74
+        kTVMFFIList = 75
 
     ctypedef void* TVMFFIObjectHandle
 

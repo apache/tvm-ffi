@@ -198,7 +198,7 @@ class Tuple : public ObjectRef {
     ObjectPtr<ArrayObj> p = ArrayObj::Empty(sizeof...(Types));
     Any* itr = p->MutableBegin();
     // increase size after each new to ensure exception safety
-    ((new (itr++) Any(Types()), p->size_++), ...);
+    ((new (itr++) Any(Types()), p->TVMFFISeqCell::size++), ...);
     return p;
   }
 
@@ -207,7 +207,7 @@ class Tuple : public ObjectRef {
     ObjectPtr<ArrayObj> p = ArrayObj::Empty(sizeof...(Types));
     Any* itr = p->MutableBegin();
     // increase size after each new to ensure exception safety
-    ((new (itr++) Any(Types(std::forward<UTypes>(args))), p->size_++), ...);
+    ((new (itr++) Any(Types(std::forward<UTypes>(args))), p->TVMFFISeqCell::size++), ...);
     return p;
   }
 
@@ -220,7 +220,7 @@ class Tuple : public ObjectRef {
       // increase size after each new to ensure exception safety
       for (size_t i = 0; i < sizeof...(Types); ++i) {
         new (itr++) Any(*read++);
-        p->size_++;
+        p->TVMFFISeqCell::size++;
       }
       data_ = std::move(p);
     }

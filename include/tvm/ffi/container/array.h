@@ -28,6 +28,7 @@
 
 #include <tvm/ffi/any.h>
 #include <tvm/ffi/container/container_details.h>
+#include <tvm/ffi/container/seq_base.h>
 #include <tvm/ffi/memory.h>
 #include <tvm/ffi/object.h>
 #include <tvm/ffi/optional.h>
@@ -42,61 +43,18 @@ namespace tvm {
 namespace ffi {
 
 /*! \brief Array node content in array */
-class ArrayObj : public Object, public details::InplaceArrayBase<ArrayObj, TVMFFIAny> {
+class ArrayObj : public SeqBaseObj, public details::InplaceArrayBase<ArrayObj, TVMFFIAny> {
+  // InplaceArrayBase<ArrayObj, TVMFFIAny>'s destructor is compiled out because TVMFFIAny is
+  // trivial. SeqBaseObj::~SeqBaseObj() handles element destruction. Changing the ElemType to a
+  // non-trivial type would cause double-destruction.
+  static_assert(std::is_trivially_destructible_v<TVMFFIAny>,
+                "InplaceArrayBase<ArrayObj, TVMFFIAny> must use a trivially destructible "
+                "element type to avoid double-destruction with SeqBaseObj::~SeqBaseObj()");
+
  public:
-  ~ArrayObj() {
-    Any* begin = MutableBegin();
-    for (int64_t i = 0; i < size_; ++i) {
-      (begin + i)->Any::~Any();
-    }
-    if (data_deleter_ != nullptr) {
-      data_deleter_(data_);
-    }
-  }
-
-  /*! \return The size of the array */
-  size_t size() const { return this->size_; }
-
-  /*!
-   * \brief Read i-th element from array.
-   * \param i The index
-   * \return the i-th element.
-   */
-  const Any& at(int64_t i) const { return this->operator[](i); }
-
-  /*!
-   * \brief Read i-th element from array.
-   * \param i The index
-   * \return the i-th element.
-   */
-  const Any& operator[](int64_t i) const {
-    if (i < 0 || i >= size_) {
-      TVM_FFI_THROW(IndexError) << "Index " << i << " out of bounds " << size_;
-    }
-    return static_cast<Any*>(data_)[i];
-  }
-
-  /*! \return begin constant iterator */
-  const Any* begin() const { return static_cast<Any*>(data_); }
-
-  /*! \return end constant iterator */
-  const Any* end() const { return begin() + size_; }
-
-  /*! \brief Release reference to all the elements */
-  void clear() { ShrinkBy(size_); }
-
-  /*!
-   * \brief Set i-th element of the array in-place
-   * \param i The index
-   * \param item The value to be set
-   */
-  void SetItem(int64_t i, Any item) {
-    if (i < 0 || i >= size_) {
-      TVM_FFI_THROW(IndexError) << "Index " << i << " out of bounds " << size_;
-    }
-    static_cast<Any*>(data_)[i] = std::move(item);
-  }
-
+  // Bring SeqBaseObj names into ArrayObj scope to hide InplaceArrayBase's versions
+  using SeqBaseObj::operator[];
+  using SeqBaseObj::EmplaceInit;
   /*!
    * \brief Constructs a container and copy from another
    * \param cap The capacity of the container
@@ -104,7 +62,7 @@ class ArrayObj : public Object, public details::InplaceArrayBase<ArrayObj, TVMFF
    * \return Ref-counted ArrayObj requested
    */
   static ObjectPtr<ArrayObj> CopyFrom(int64_t cap, ArrayObj* from) {
-    int64_t size = from->size_;
+    int64_t size = from->TVMFFISeqCell::size;
     if (size > cap) {
       TVM_FFI_THROW(ValueError) << "Not enough capacity";
     }
@@ -112,7 +70,7 @@ class ArrayObj : public Object, public details::InplaceArrayBase<ArrayObj, TVMFF
     Any* write = p->MutableBegin();
     Any* read = from->MutableBegin();
     // To ensure exception safety, size is only incremented after the initialization succeeds
-    for (int64_t& i = p->size_ = 0; i < size; ++i) {
+    for (int64_t& i = p->TVMFFISeqCell::size = 0; i < size; ++i) {
       new (write++) Any(*read++);
     }
     return p;
@@ -125,7 +83,7 @@ class ArrayObj : public Object, public details::InplaceArrayBase<ArrayObj, TVMFF
    * \return Ref-counted ArrayObj requested
    */
   static ObjectPtr<ArrayObj> MoveFrom(int64_t cap, ArrayObj* from) {
-    int64_t size = from->size_;
+    int64_t size = from->TVMFFISeqCell::size;
     if (size > cap) {
       TVM_FFI_THROW(RuntimeError) << "Not enough capacity";
     }
@@ -133,10 +91,10 @@ class ArrayObj : public Object, public details::InplaceArrayBase<ArrayObj, TVMFF
     Any* write = p->MutableBegin();
     Any* read = from->MutableBegin();
     // To ensure exception safety, size is only incremented after the initialization succeeds
-    for (int64_t& i = p->size_ = 0; i < size; ++i) {
+    for (int64_t& i = p->TVMFFISeqCell::size = 0; i < size; ++i) {
       new (write++) Any(std::move(*read++));
     }
-    from->size_ = 0;
+    from->TVMFFISeqCell::size = 0;
     return p;
   }
 
@@ -149,7 +107,7 @@ class ArrayObj : public Object, public details::InplaceArrayBase<ArrayObj, TVMFF
   static ObjectPtr<ArrayObj> CreateRepeated(int64_t n, const Any& val) {
     ObjectPtr<ArrayObj> p = ArrayObj::Empty(n);
     Any* itr = p->MutableBegin();
-    for (int64_t& i = p->size_ = 0; i < n; ++i) {
+    for (int64_t& i = p->TVMFFISeqCell::size = 0; i < n; ++i) {
       new (itr++) Any(val);
     }
     return p;
@@ -163,24 +121,7 @@ class ArrayObj : public Object, public details::InplaceArrayBase<ArrayObj, TVMFF
 
  private:
   /*! \return Size of initialized memory, used by InplaceArrayBase. */
-  size_t GetSize() const { return this->size_; }
-
-  /*! \return begin mutable iterator */
-  Any* MutableBegin() const { return static_cast<Any*>(this->data_); }
-
-  /*! \return end mutable iterator */
-  Any* MutableEnd() const { return MutableBegin() + size_; }
-
-  /*!
-   * \brief Emplace a new element at the back of the array
-   * \param idx The index of the element.
-   * \param args The arguments to construct the new element
-   */
-  template <typename... Args>
-  void EmplaceInit(size_t idx, Args&&... args) {
-    Any* itr = MutableBegin() + idx;
-    new (itr) Any(std::forward<Args>(args)...);
-  }
+  size_t GetSize() const { return TVMFFISeqCell::size; }
 
   /*!
    * \brief Create an ArrayObj with the given capacity.
@@ -189,9 +130,10 @@ class ArrayObj : public Object, public details::InplaceArrayBase<ArrayObj, TVMFF
    */
   static ObjectPtr<ArrayObj> Empty(int64_t n = kInitSize) {
     ObjectPtr<ArrayObj> p = make_inplace_array_object<ArrayObj, Any>(n);
-    p->capacity_ = n;
-    p->size_ = 0;
-    p->data_ = p->AddressOf(0);
+    p->TVMFFISeqCell::capacity = n;
+    p->TVMFFISeqCell::size = 0;
+    p->data = p->AddressOf(0);
+    p->data_deleter = nullptr;
     return p;
   }
 
@@ -212,79 +154,6 @@ class ArrayObj : public Object, public details::InplaceArrayBase<ArrayObj, TVMFF
     }
     return this;
   }
-
-  /*!
-   * \brief Move elements from right to left, requires src_begin > dst
-   * \param dst Destination
-   * \param src_begin The start point of copy (inclusive)
-   * \param src_end The end point of copy (exclusive)
-   * \return Self
-   */
-  ArrayObj* MoveElementsLeft(int64_t dst, int64_t src_begin, int64_t src_end) {
-    Any* from = MutableBegin() + src_begin;
-    Any* to = MutableBegin() + dst;
-    while (src_begin++ != src_end) {
-      *to++ = std::move(*from++);
-    }
-    return this;
-  }
-
-  /*!
-   * \brief Move elements from left to right, requires src_begin < dst
-   * \param dst Destination
-   * \param src_begin The start point of move (inclusive)
-   * \param src_end The end point of move (exclusive)
-   * \return Self
-   */
-  ArrayObj* MoveElementsRight(int64_t dst, int64_t src_begin, int64_t src_end) {
-    Any* from = MutableBegin() + src_end;
-    Any* to = MutableBegin() + (src_end - src_begin + dst);
-    while (src_begin++ != src_end) {
-      *--to = std::move(*--from);
-    }
-    return this;
-  }
-
-  /*!
-   * \brief Enlarges the size of the array
-   * \param delta Size enlarged, should be positive
-   * \param val Default value
-   * \return Self
-   */
-  ArrayObj* EnlargeBy(int64_t delta, const Any& val = Any()) {
-    Any* itr = MutableEnd();
-    while (delta-- > 0) {
-      new (itr++) Any(val);
-      ++size_;
-    }
-    return this;
-  }
-
-  /*!
-   * \brief Shrinks the size of the array
-   * \param delta Size shrinked, should be positive
-   * \return Self
-   */
-  ArrayObj* ShrinkBy(int64_t delta) {
-    Any* itr = MutableEnd();
-    while (delta-- > 0) {
-      (--itr)->Any::~Any();
-      --size_;
-    }
-    return this;
-  }
-
-  /*! \brief Data pointer to the first element of the array */
-  void* data_;
-  /*! \brief Number of elements used */
-  int64_t size_;
-  /*! \brief Number of elements allocated */
-  int64_t capacity_;
-  /*!
-   * \brief Optional data deleter when data is allocated separately
-   *        and its deletion is not managed by ArrayObj::deleter_.
-   */
-  void (*data_deleter_)(void*) = nullptr;
 
   /*! \brief Initial size of ArrayObj */
   static constexpr int64_t kInitSize = 4;
@@ -520,48 +389,45 @@ class Array : public ObjectRef {
    * \param i The index
    * \return the i-th element.
    */
-  const T operator[](int64_t i) const {
+  T operator[](int64_t i) const {
     ArrayObj* p = GetArrayObj();
     if (p == nullptr) {
       TVM_FFI_THROW(IndexError) << "cannot index a null array";
     }
-    if (i < 0 || i >= p->size_) {
-      TVM_FFI_THROW(IndexError) << "indexing " << i << " on an array of size " << p->size_;
-    }
-    return details::AnyUnsafe::CopyFromAnyViewAfterCheck<T>(*(p->begin() + i));
+    return details::AnyUnsafe::CopyFromAnyViewAfterCheck<T>(p->at(i));
   }
 
   /*! \return The size of the array */
   size_t size() const {
     ArrayObj* p = GetArrayObj();
-    return p == nullptr ? 0 : GetArrayObj()->size_;
+    return p == nullptr ? 0 : p->size();
   }
 
   /*! \return The capacity of the array */
   size_t capacity() const {
     ArrayObj* p = GetArrayObj();
-    return p == nullptr ? 0 : GetArrayObj()->capacity_;
+    return p == nullptr ? 0 : p->SeqBaseObj::capacity();
   }
 
   /*! \return Whether array is empty */
   bool empty() const { return size() == 0; }
 
   /*! \return The first element of the array */
-  const T front() const {
+  T front() const {
     ArrayObj* p = GetArrayObj();
-    if (p == nullptr || p->size_ == 0) {
-      TVM_FFI_THROW(IndexError) << "cannot index a empty array";
+    if (p == nullptr) {
+      TVM_FFI_THROW(IndexError) << "cannot index a null array";
     }
-    return details::AnyUnsafe::CopyFromAnyViewAfterCheck<T>(*(p->begin()));
+    return details::AnyUnsafe::CopyFromAnyViewAfterCheck<T>(p->front());
   }
 
   /*! \return The last element of the array */
-  const T back() const {
+  T back() const {
     ArrayObj* p = GetArrayObj();
-    if (p == nullptr || p->size_ == 0) {
-      TVM_FFI_THROW(IndexError) << "cannot index a empty array";
+    if (p == nullptr) {
+      TVM_FFI_THROW(IndexError) << "cannot index a null array";
     }
-    return details::AnyUnsafe::CopyFromAnyViewAfterCheck<T>(*(p->end() - 1));
+    return details::AnyUnsafe::CopyFromAnyViewAfterCheck<T>(p->back());
   }
 
  public:
@@ -572,7 +438,7 @@ class Array : public ObjectRef {
    */
   void push_back(const T& item) {
     ArrayObj* p = CopyOnWrite(1);
-    p->EmplaceInit(p->size_++, item);
+    p->EmplaceInit(p->TVMFFISeqCell::size++, item);
   }
 
   /*!
@@ -582,7 +448,7 @@ class Array : public ObjectRef {
   template <typename... Args>
   void emplace_back(Args&&... args) {
     ArrayObj* p = CopyOnWrite(1);
-    p->EmplaceInit(p->size_++, std::forward<Args>(args)...);
+    p->EmplaceInit(p->TVMFFISeqCell::size++, std::forward<Args>(args)...);
   }
 
   /*!
@@ -595,12 +461,7 @@ class Array : public ObjectRef {
       TVM_FFI_THROW(RuntimeError) << "cannot insert a null array";
     }
     int64_t idx = std::distance(begin(), position);
-    int64_t size = GetArrayObj()->size_;
-    auto addr = CopyOnWrite(1)                               //
-                    ->EnlargeBy(1)                           //
-                    ->MoveElementsRight(idx + 1, idx, size)  //
-                    ->MutableBegin();
-    new (addr + idx) Any(val);
+    CopyOnWrite(1)->insert(idx, Any(val));
   }
 
   /*!
@@ -613,20 +474,13 @@ class Array : public ObjectRef {
   void insert(iterator position, IterType first, IterType last) {
     static_assert(is_valid_iterator_v<T, IterType>,
                   "IterType cannot be inserted into a tvm::Array<T>");
-
-    if (first == last) {
-      return;
-    }
+    if (first == last) return;
     if (data_ == nullptr) {
       TVM_FFI_THROW(RuntimeError) << "cannot insert a null array";
     }
     int64_t idx = std::distance(begin(), position);
-    int64_t size = GetArrayObj()->size_;
     int64_t numel = std::distance(first, last);
-    CopyOnWrite(numel)
-        ->EnlargeBy(numel)
-        ->MoveElementsRight(idx + numel, idx, size)
-        ->InitRange(idx, first, last);
+    CopyOnWrite(numel)->insert(idx, first, last);
   }
 
   /*! \brief Remove the last item of the list */
@@ -634,11 +488,7 @@ class Array : public ObjectRef {
     if (data_ == nullptr) {
       TVM_FFI_THROW(RuntimeError) << "cannot pop_back a null array";
     }
-    int64_t size = GetArrayObj()->size_;
-    if (size == 0) {
-      TVM_FFI_THROW(RuntimeError) << "cannot pop_back an empty array";
-    }
-    CopyOnWrite()->ShrinkBy(1);
+    CopyOnWrite()->pop_back();
   }
 
   /*!
@@ -649,15 +499,8 @@ class Array : public ObjectRef {
     if (data_ == nullptr) {
       TVM_FFI_THROW(RuntimeError) << "cannot erase a null array";
     }
-    int64_t st = std::distance(begin(), position);
-    int64_t size = GetArrayObj()->size_;
-    if (st < 0 || st >= size) {
-      TVM_FFI_THROW(RuntimeError) << "cannot erase at index " << st << ", because Array size is "
-                                  << size;
-    }
-    CopyOnWrite()                             //
-        ->MoveElementsLeft(st, st + 1, size)  //
-        ->ShrinkBy(1);
+    int64_t idx = std::distance(begin(), position);
+    CopyOnWrite()->erase(idx);
   }
 
   /*!
@@ -666,25 +509,13 @@ class Array : public ObjectRef {
    * \param last The end iterator of the range
    */
   void erase(iterator first, iterator last) {
-    if (first == last) {
-      return;
-    }
+    if (first == last) return;
     if (data_ == nullptr) {
       TVM_FFI_THROW(RuntimeError) << "cannot erase a null array";
     }
-    int64_t size = GetArrayObj()->size_;
     int64_t st = std::distance(begin(), first);
     int64_t ed = std::distance(begin(), last);
-    if (st >= ed) {
-      TVM_FFI_THROW(IndexError) << "cannot erase array in range [" << st << ", " << ed << ")";
-    }
-    if (st < 0 || st > size || ed < 0 || ed > size) {
-      TVM_FFI_THROW(IndexError) << "cannot erase array in range [" << st << ", " << ed << ")"
-                                << ", because array size is " << size;
-    }
-    CopyOnWrite()                         //
-        ->MoveElementsLeft(st, ed, size)  //
-        ->ShrinkBy(ed - st);
+    CopyOnWrite()->erase(st, ed);
   }
 
   /*!
@@ -699,11 +530,11 @@ class Array : public ObjectRef {
       SwitchContainer(n);
       return;
     }
-    int64_t size = GetArrayObj()->size_;
-    if (size < n) {
-      CopyOnWrite(n - size)->EnlargeBy(n - size);
-    } else if (size > n) {
-      CopyOnWrite()->ShrinkBy(size - n);
+    int64_t cur_size = GetArrayObj()->TVMFFISeqCell::size;
+    if (cur_size < n) {
+      CopyOnWrite(n - cur_size)->resize(n);
+    } else if (cur_size > n) {
+      CopyOnWrite()->resize(n);
     }
   }
 
@@ -712,7 +543,7 @@ class Array : public ObjectRef {
    * \param n lower bound of the capacity
    */
   void reserve(int64_t n) {
-    if (data_ == nullptr || n > GetArrayObj()->capacity_) {
+    if (data_ == nullptr || n > static_cast<int64_t>(GetArrayObj()->SeqBaseObj::capacity())) {
       SwitchContainer(n);
     }
   }
@@ -764,13 +595,7 @@ class Array : public ObjectRef {
    * \param i The index
    * \param value The value to be setted.
    */
-  void Set(int64_t i, T value) {
-    ArrayObj* p = this->CopyOnWrite();
-    if (i < 0 || i >= p->size_) {
-      TVM_FFI_THROW(IndexError) << "indexing " << i << " on an array of size " << p->size_;
-    }
-    *(p->MutableBegin() + i) = std::move(value);
-  }
+  void Set(int64_t i, T value) { CopyOnWrite()->SetItem(i, std::move(value)); }
 
   /*! \return The underlying ArrayObj */
   ArrayObj* GetArrayObj() const { return static_cast<ArrayObj*>(data_.get()); }
@@ -823,7 +648,7 @@ class Array : public ObjectRef {
       TVM_FFI_THROW(ValueError) << "cannot construct an Array of negative size";
     }
     ArrayObj* p = GetArrayObj();
-    if (p != nullptr && data_.unique() && p->capacity_ >= cap) {
+    if (p != nullptr && data_.unique() && p->TVMFFISeqCell::capacity >= cap) {
       // do not have to make new space
       p->clear();
     } else {
@@ -833,7 +658,7 @@ class Array : public ObjectRef {
     }
     // To ensure exception safety, size is only incremented after the initialization succeeds
     Any* itr = p->MutableBegin();
-    for (int64_t& i = p->size_ = 0; i < cap; ++i, ++first, ++itr) {
+    for (int64_t& i = p->TVMFFISeqCell::size = 0; i < cap; ++i, ++first, ++itr) {
       new (itr) Any(*first);
     }
   }
@@ -885,11 +710,11 @@ class Array : public ObjectRef {
       const int64_t kInitSize = ArrayObj::kInitSize;
       return SwitchContainer(std::max(kInitSize, reserve_extra));
     }
-    if (p->capacity_ >= p->size_ + reserve_extra) {
+    if (p->TVMFFISeqCell::capacity >= p->TVMFFISeqCell::size + reserve_extra) {
       return CopyOnWrite();
     }
-    int64_t cap = p->capacity_ * ArrayObj::kIncFactor;
-    cap = std::max(cap, p->size_ + reserve_extra);
+    int64_t cap = p->TVMFFISeqCell::capacity * ArrayObj::kIncFactor;
+    cap = std::max(cap, p->TVMFFISeqCell::size + reserve_extra);
     return SwitchContainer(cap);
   }
 
@@ -1065,79 +890,16 @@ template <typename T>
 inline constexpr bool use_default_type_traits_v<Array<T>> = false;
 
 template <typename T>
-struct TypeTraits<Array<T>> : public ObjectRefTypeTraitsBase<Array<T>> {
+struct TypeTraits<Array<T>> : public SeqTypeTraitsBase<TypeTraits<Array<T>>, Array<T>, T> {
   static constexpr int32_t field_static_type_index = TypeIndex::kTVMFFIArray;
-  using ObjectRefTypeTraitsBase<Array<T>>::CopyFromAnyViewAfterCheck;
+  static constexpr int32_t kPrimaryTypeIndex = TypeIndex::kTVMFFIArray;
+  static constexpr int32_t kOtherTypeIndex = TypeIndex::kTVMFFIList;
+  static constexpr const char* kTypeName = "Array";
+  static constexpr const char* kStaticTypeKey = StaticTypeKey::kTVMFFIArray;
 
-  TVM_FFI_INLINE static std::string GetMismatchTypeInfo(const TVMFFIAny* src) {
-    if (src->type_index != TypeIndex::kTVMFFIArray) {
-      return TypeTraitsBase::GetMismatchTypeInfo(src);
-    }
-    if constexpr (!std::is_same_v<T, Any>) {
-      const ArrayObj* n = reinterpret_cast<const ArrayObj*>(src->v_obj);
-      for (size_t i = 0; i < n->size(); i++) {
-        const Any& any_v = (*n)[static_cast<int64_t>(i)];
-        // CheckAnyStrict is cheaper than try_cast<T>
-        if (details::AnyUnsafe::CheckAnyStrict<T>(any_v)) continue;
-        // try see if p is convertible to T
-        if (any_v.try_cast<T>()) continue;
-        // now report the accurate mismatch information
-        return "Array[index " + std::to_string(i) + ": " +
-               details::AnyUnsafe::GetMismatchTypeInfo<T>(any_v) + "]";
-      }
-    }
-    TVM_FFI_THROW(InternalError) << "Cannot reach here";
-    TVM_FFI_UNREACHABLE();
-  }
-
-  TVM_FFI_INLINE static bool CheckAnyStrict(const TVMFFIAny* src) {
-    if (src->type_index != TypeIndex::kTVMFFIArray) return false;
-    if constexpr (std::is_same_v<T, Any>) {
-      return true;
-    } else {
-      const ArrayObj* n = reinterpret_cast<const ArrayObj*>(src->v_obj);
-      for (const Any& any_v : *n) {
-        if (!details::AnyUnsafe::CheckAnyStrict<T>(any_v)) return false;
-      }
-      return true;
-    }
-  }
-
-  TVM_FFI_INLINE static std::optional<Array<T>> TryCastFromAnyView(const TVMFFIAny* src) {
-    // try to run conversion.
-    if (src->type_index != TypeIndex::kTVMFFIArray) return std::nullopt;
-    if constexpr (!std::is_same_v<T, Any>) {
-      const ArrayObj* n = reinterpret_cast<const ArrayObj*>(src->v_obj);
-      bool storage_check = [&]() {
-        for (const Any& any_v : *n) {
-          if (!details::AnyUnsafe::CheckAnyStrict<T>(any_v)) return false;
-        }
-        return true;
-      }();
-      // fast path, if storage check passes, we can return the array directly.
-      if (storage_check) {
-        return CopyFromAnyViewAfterCheck(src);
-      }
-      // slow path, try to run a conversion to Array<T>
-      Array<T> result;
-      result.reserve(n->size());
-      for (const Any& any_v : *n) {
-        if (auto opt_v = any_v.try_cast<T>()) {
-          result.push_back(*std::move(opt_v));
-        } else {
-          return std::nullopt;
-        }
-      }
-      return result;
-    } else {
-      return CopyFromAnyViewAfterCheck(src);
-    }
-  }
-
-  TVM_FFI_INLINE static std::string TypeStr() { return "Array<" + details::Type2Str<T>::v() + ">"; }
   TVM_FFI_INLINE static std::string TypeSchema() {
     std::ostringstream oss;
-    oss << R"({"type":")" << StaticTypeKey::kTVMFFIArray << R"(","args":[)";
+    oss << R"({"type":")" << kStaticTypeKey << R"(","args":[)";
     oss << details::TypeSchema<T>::v();
     oss << "]}";
     return oss.str();
@@ -1151,4 +913,5 @@ inline constexpr bool type_contains_v<Array<T>, Array<U>> = type_contains_v<T, U
 
 }  // namespace ffi
 }  // namespace tvm
+
 #endif  // TVM_FFI_CONTAINER_ARRAY_H_

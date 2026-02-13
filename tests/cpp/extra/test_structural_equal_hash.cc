@@ -19,6 +19,7 @@
  */
 #include <gtest/gtest.h>
 #include <tvm/ffi/container/array.h>
+#include <tvm/ffi/container/list.h>
 #include <tvm/ffi/container/map.h>
 #include <tvm/ffi/extra/structural_equal.h>
 #include <tvm/ffi/extra/structural_hash.h>
@@ -173,6 +174,46 @@ TEST(StructuralEqualHash, CustomTreeNode) {
                            refl::AccessPath::Root()->Attr("body")->ArrayItem(1));
   EXPECT_TRUE(diff_fa_fc.has_value());
   EXPECT_TRUE(StructuralEqual()(diff_fa_fc, expected_diff_fa_fc));
+}
+
+TEST(StructuralEqualHash, List) {
+  List<int> a = {1, 2, 3};
+  List<int> b = {1, 2, 3};
+  EXPECT_TRUE(StructuralEqual()(a, b));
+  EXPECT_EQ(StructuralHash()(a), StructuralHash()(b));
+
+  List<int> c = {1, 3};
+  EXPECT_FALSE(StructuralEqual()(a, c));
+  EXPECT_NE(StructuralHash()(a), StructuralHash()(c));
+}
+
+TEST(StructuralEqualHash, ListVsArrayDifferentType) {
+  Array<int> arr = {1, 2, 3};
+  List<int> lst = {1, 2, 3};
+  // Different type_index => not equal
+  EXPECT_FALSE(StructuralEqual()(arr, lst));
+  // Different type_key_hash => different hash (very likely)
+  EXPECT_NE(StructuralHash()(arr), StructuralHash()(lst));
+}
+
+TEST(StructuralEqualHash, DISABLED_ListCycleDetection) {
+  List<Any> lst;
+  lst.push_back(42);
+  lst.push_back(lst);  // creates a cycle
+  EXPECT_ANY_THROW(StructuralHash()(lst));
+  EXPECT_ANY_THROW(StructuralEqual()(lst, lst));
+}
+
+TEST(StructuralEqualHash, ArraySelfInsertProducesSnapshot) {
+  Array<Any> arr;
+  arr.push_back(arr);
+
+  Array<Any> snapshot = arr[0].cast<Array<Any>>();
+  EXPECT_TRUE(snapshot.empty());
+  EXPECT_FALSE(snapshot.same_as(arr));
+
+  EXPECT_TRUE(StructuralEqual()(arr, arr));
+  EXPECT_EQ(StructuralHash()(arr), StructuralHash()(arr));
 }
 
 }  // namespace

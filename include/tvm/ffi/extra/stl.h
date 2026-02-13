@@ -36,7 +36,9 @@
 #include <tvm/ffi/base_details.h>
 #include <tvm/ffi/c_api.h>
 #include <tvm/ffi/container/array.h>
+#include <tvm/ffi/container/list.h>
 #include <tvm/ffi/container/map.h>
+#include <tvm/ffi/container/seq_base.h>
 #include <tvm/ffi/error.h>
 #include <tvm/ffi/object.h>
 #include <tvm/ffi/type_traits.h>
@@ -124,7 +126,8 @@ struct TypeTraits<details::ListTemplate> : public details::STLTypeTrait {
     // increase size after each new to ensure exception safety
     std::apply(
         [&](auto&&... elems) {
-          ((::new (dst++) Any(std::forward<decltype(elems)>(elems)), array->size_++), ...);
+          ((::new (dst++) Any(std::forward<decltype(elems)>(elems)), array->TVMFFISeqCell::size++),
+           ...);
         },
         std::forward<Tuple>(src));
     return array;
@@ -137,7 +140,7 @@ struct TypeTraits<details::ListTemplate> : public details::STLTypeTrait {
     // increase size after each new to ensure exception safety
     for (std::size_t i = 0; i < size; ++i) {
       ::new (dst++) Any(*(src++));
-      array->size_++;
+      array->TVMFFISeqCell::size++;
     }
     return array;
   }
@@ -206,7 +209,7 @@ struct TypeTraits<std::array<T, Nm>> : public TypeTraits<details::ListTemplate> 
   TVM_FFI_INLINE static bool CheckAnyFast(const TVMFFIAny* src) {
     if (src->type_index != TypeIndex::kTVMFFIArray) return false;
     const ArrayObj& n = *reinterpret_cast<const ArrayObj*>(src->v_obj);
-    return n.size_ == Nm;
+    return n.TVMFFISeqCell::size == Nm;
   }
 
  public:
@@ -251,7 +254,7 @@ struct TypeTraits<std::vector<T>> : public TypeTraits<details::ListTemplate> {
   using Self = std::vector<T>;
 
   TVM_FFI_INLINE static bool CheckAnyFast(const TVMFFIAny* src) {
-    return src->type_index == TypeIndex::kTVMFFIArray;
+    return src->type_index == TypeIndex::kTVMFFIArray || src->type_index == TypeIndex::kTVMFFIList;
   }
 
  public:
@@ -266,13 +269,12 @@ struct TypeTraits<std::vector<T>> : public TypeTraits<details::ListTemplate> {
   TVM_FFI_INLINE static std::optional<Self> TryCastFromAnyView(const TVMFFIAny* src) {
     if (!CheckAnyFast(src)) return std::nullopt;
     try {
-      auto array = CopyFromAnyImpl<ArrayObj>(src);
-      auto begin = array->MutableBegin();
+      const SeqBaseObj* seq = reinterpret_cast<const SeqBaseObj*>(src->v_obj);
       auto result = Self{};
-      int64_t length = array->size_;
+      int64_t length = static_cast<int64_t>(seq->size());
       result.reserve(length);
       for (int64_t i = 0; i < length; ++i) {
-        result.emplace_back(ConstructFromAny<T>(begin[i]));
+        result.emplace_back(ConstructFromAny<T>(seq->at(i)));
       }
       return result;
     } catch (const details::STLTypeMismatch&) {
@@ -466,7 +468,7 @@ struct TypeTraits<std::tuple<Args...>> : public TypeTraits<details::ListTemplate
   TVM_FFI_INLINE static bool CheckAnyFast(const TVMFFIAny* src) {
     if (src->type_index != TypeIndex::kTVMFFIArray) return false;
     const ArrayObj& n = *reinterpret_cast<const ArrayObj*>(src->v_obj);
-    return n.size_ == Nm;
+    return n.TVMFFISeqCell::size == Nm;
   }
 
   template <std::size_t... Is>
@@ -488,8 +490,8 @@ struct TypeTraits<std::tuple<Args...>> : public TypeTraits<details::ListTemplate
   TVM_FFI_INLINE static bool CheckAnyStrict(const TVMFFIAny* src) {
     if (src->type_index != TypeIndex::kTVMFFIArray) return false;
     const ArrayObj& n = *reinterpret_cast<const ArrayObj*>(src->v_obj);
-    // check static length first
-    if (n.size_ != Nm) return false;
+    // check static size first
+    if (n.TVMFFISeqCell::size != Nm) return false;
     // then check element type
     return CheckSubTypeAux(std::make_index_sequence<Nm>{}, n);
   }

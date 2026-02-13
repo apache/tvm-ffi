@@ -22,6 +22,7 @@
  * \brief Structural equal implementation.
  */
 #include <tvm/ffi/container/array.h>
+#include <tvm/ffi/container/list.h>
 #include <tvm/ffi/container/map.h>
 #include <tvm/ffi/container/shape.h>
 #include <tvm/ffi/container/tensor.h>
@@ -77,6 +78,9 @@ class StructuralHashHandler {
       }
       case TypeIndex::kTVMFFIArray: {
         return HashArray(AnyUnsafe::MoveFromAnyAfterCheck<Array<Any>>(std::move(src)));
+      }
+      case TypeIndex::kTVMFFIList: {
+        return HashList(AnyUnsafe::MoveFromAnyAfterCheck<List<Any>>(std::move(src)));
       }
       case TypeIndex::kTVMFFIMap: {
         return HashMap(AnyUnsafe::MoveFromAnyAfterCheck<Map<Any, Any>>(std::move(src)));
@@ -185,9 +189,16 @@ class StructuralHashHandler {
   }
 
   // NOLINTNEXTLINE(performance-unnecessary-value-param)
-  uint64_t HashArray(Array<Any> arr) {
-    uint64_t hash_value = details::StableHashCombine(arr->GetTypeKeyHash(), arr.size());
-    for (const auto& elem : arr) {
+  uint64_t HashArray(Array<Any> arr) { return HashSequence(std::move(arr)); }
+
+  // NOLINTNEXTLINE(performance-unnecessary-value-param)
+  uint64_t HashList(List<Any> list) { return HashSequence(std::move(list)); }
+
+  template <typename SeqType>
+  // NOLINTNEXTLINE(performance-unnecessary-value-param)
+  uint64_t HashSequence(SeqType seq) {
+    uint64_t hash_value = details::StableHashCombine(seq->GetTypeKeyHash(), seq.size());
+    for (const auto& elem : seq) {
       hash_value = details::StableHashCombine(hash_value, HashAny(elem));
     }
     return hash_value;

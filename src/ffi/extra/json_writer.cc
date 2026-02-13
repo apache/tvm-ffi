@@ -23,6 +23,7 @@
  */
 #include <tvm/ffi/any.h>
 #include <tvm/ffi/container/array.h>
+#include <tvm/ffi/container/list.h>
 #include <tvm/ffi/container/map.h>
 #include <tvm/ffi/error.h>
 #include <tvm/ffi/extra/json.h>
@@ -34,6 +35,7 @@
 #include <cstdint>
 #include <limits>
 #include <string>
+#include <unordered_set>
 #include <utility>
 
 namespace tvm {
@@ -125,6 +127,10 @@ class JSONWriter {
         WriteArray(details::AnyUnsafe::CopyFromAnyViewAfterCheck<json::Array>(value));
         break;
       }
+      case TypeIndex::kTVMFFIList: {
+        WriteList(details::AnyUnsafe::CopyFromAnyViewAfterCheck<ffi::List<Any>>(value));
+        break;
+      }
       case TypeIndex::kTVMFFIMap: {
         WriteObject(details::AnyUnsafe::CopyFromAnyViewAfterCheck<json::Object>(value));
         break;
@@ -184,7 +190,20 @@ class JSONWriter {
     std::copy(escaped.data(), escaped.data() + escaped.size(), out_iter_);
   }
 
-  void WriteArray(const json::Array& value) {
+  void WriteArray(const json::Array& value) { WriteSequence(value); }
+
+  void WriteList(const ffi::List<Any>& value) {
+    const void* ptr = static_cast<const void*>(value.get());
+    if (active_lists_.count(ptr)) {
+      TVM_FFI_THROW(ValueError) << "Cycle detected: List contains itself";
+    }
+    active_lists_.insert(ptr);
+    WriteSequence(value);
+    active_lists_.erase(ptr);
+  }
+
+  template <typename SeqType>
+  void WriteSequence(const SeqType& value) {
     *out_iter_++ = '[';
     if (indent_ != 0) {
       total_indent_ += indent_;
@@ -248,6 +267,7 @@ class JSONWriter {
   int total_indent_ = 0;
   std::string result_;
   std::back_insert_iterator<std::string> out_iter_;
+  std::unordered_set<const void*> active_lists_;
 };
 
 String Stringify(const json::Value& value, Optional<int> indent) {

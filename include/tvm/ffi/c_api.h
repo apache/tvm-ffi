@@ -173,6 +173,8 @@ typedef enum {
    * \sa TVMFFIObjectCreateOpaque
    */
   kTVMFFIOpaquePyObject = 74,
+  /*! \brief List object. */
+  kTVMFFIList = 75,
   //----------------------------------------------------------------
   // more complex objects
   //----------------------------------------------------------------
@@ -346,6 +348,7 @@ typedef struct {
   /*! \brief The size of the data. */
   size_t size;
 } TVMFFIByteArray;
+// [TVMFFIByteArray.end]
 
 /*!
  * \brief Shape cell used in shape object following header.
@@ -356,7 +359,41 @@ typedef struct {
   /*! \brief The size of the data. */
   size_t size;
 } TVMFFIShapeCell;
-// [TVMFFIByteArray.end]
+
+// [TVMFFISeqCell.begin]
+/*!
+ * \brief Sequence cell used by sequence-like containers.
+ *
+ * ArrayObj and ListObj both inherit from this cell.
+ */
+#ifdef __cplusplus
+struct TVMFFISeqCell {
+#else
+typedef struct {
+#endif
+  /*! \brief Data pointer to the first element of the sequence. */
+  void* data;
+  /*! \brief Number of elements used. */
+  int64_t size;
+  /*! \brief Number of elements allocated. */
+  int64_t capacity;
+  /*!
+   * \brief Optional deleter for the data buffer.
+   *
+   *  When non-null, data was allocated separately from the object
+   *  (e.g. ListObj heap buffer) and data_deleter is called to free it.
+   *
+   *  When nullptr, data lives inside the object allocation itself
+   *  (e.g. ArrayObj inplace storage via make_inplace_array_object)
+   *  and is freed together with the object.
+   */
+  void (*data_deleter)(void*);
+#ifdef __cplusplus
+};
+#else
+} TVMFFISeqCell;
+#endif
+// [TVMFFISeqCell.end]
 
 /*!
  * \brief Mode to update the backtrace of the error.

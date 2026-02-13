@@ -22,6 +22,7 @@
  * \brief Structural equal implementation.
  */
 #include <tvm/ffi/container/array.h>
+#include <tvm/ffi/container/list.h>
 #include <tvm/ffi/container/map.h>
 #include <tvm/ffi/container/shape.h>
 #include <tvm/ffi/container/tensor.h>
@@ -31,6 +32,7 @@
 
 #include <cmath>
 #include <unordered_map>
+#include <utility>
 
 namespace tvm {
 namespace ffi {
@@ -102,6 +104,10 @@ class StructEqualHandler {
       case TypeIndex::kTVMFFIArray: {
         return CompareArray(AnyUnsafe::MoveFromAnyAfterCheck<Array<Any>>(std::move(lhs)),
                             AnyUnsafe::MoveFromAnyAfterCheck<Array<Any>>(std::move(rhs)));
+      }
+      case TypeIndex::kTVMFFIList: {
+        return CompareList(AnyUnsafe::MoveFromAnyAfterCheck<List<Any>>(std::move(lhs)),
+                           AnyUnsafe::MoveFromAnyAfterCheck<List<Any>>(std::move(rhs)));
       }
       case TypeIndex::kTVMFFIMap: {
         return CompareMap(AnyUnsafe::MoveFromAnyAfterCheck<Map<Any, Any>>(std::move(lhs)),
@@ -302,6 +308,17 @@ class StructEqualHandler {
 
   // NOLINTNEXTLINE(performance-unnecessary-value-param)
   bool CompareArray(ffi::Array<Any> lhs, ffi::Array<Any> rhs) {
+    return CompareSequence(std::move(lhs), std::move(rhs));
+  }
+
+  // NOLINTNEXTLINE(performance-unnecessary-value-param)
+  bool CompareList(ffi::List<Any> lhs, ffi::List<Any> rhs) {
+    return CompareSequence(std::move(lhs), std::move(rhs));
+  }
+
+  template <typename SeqType>
+  // NOLINTNEXTLINE(performance-unnecessary-value-param)
+  bool CompareSequence(SeqType lhs, SeqType rhs) {
     if (lhs.size() != rhs.size()) {
       // fast path, size mismatch, and there is no path tracing
       // return false since we don't need informative error message

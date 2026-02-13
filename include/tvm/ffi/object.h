@@ -110,6 +110,8 @@ struct StaticTypeKey {
   static constexpr const char* kTVMFFIFunction = "ffi.Function";
   /*! \brief The type key for Array */
   static constexpr const char* kTVMFFIArray = "ffi.Array";
+  /*! \brief The type key for List */
+  static constexpr const char* kTVMFFIList = "ffi.List";
   /*! \brief The type key for Map */
   static constexpr const char* kTVMFFIMap = "ffi.Map";
   /*! \brief The type key for Module */

@@ -18,6 +18,7 @@
  */
 #include <gtest/gtest.h>
 #include <tvm/ffi/container/array.h>
+#include <tvm/ffi/container/list.h>
 #include <tvm/ffi/container/map.h>
 #include <tvm/ffi/container/shape.h>
 #include <tvm/ffi/dtype.h>
@@ -352,6 +353,46 @@ TEST(Serialization, AttachMetadata) {
                    {"metadata", metadata}};
   EXPECT_TRUE(StructuralEqual()(ToJSONGraph(value, metadata), expected));
   EXPECT_TRUE(StructuralEqual()(FromJSONGraph(expected), value));
+}
+
+TEST(Serialization, ListBasic) {
+  // Test empty list
+  List<Any> empty_list;
+  json::Object expected_empty = json::Object{
+      {"root_index", 0},
+      {"nodes", json::Array{json::Object{{"type", "ffi.List"}, {"data", json::Array{}}}}}};
+  EXPECT_TRUE(StructuralEqual()(ToJSONGraph(empty_list), expected_empty));
+  EXPECT_TRUE(StructuralEqual()(FromJSONGraph(expected_empty), empty_list));
+
+  // Test single element list
+  List<Any> single_list;
+  single_list.push_back(Any(42));
+  json::Object expected_single =
+      json::Object{{"root_index", 1},
+                   {"nodes", json::Array{
+                                 json::Object{{"type", "int"}, {"data", static_cast<int64_t>(42)}},
+                                 json::Object{{"type", "ffi.List"}, {"data", json::Array{0}}},
+                             }}};
+  EXPECT_TRUE(StructuralEqual()(ToJSONGraph(single_list), expected_single));
+  EXPECT_TRUE(StructuralEqual()(FromJSONGraph(expected_single), single_list));
+}
+
+TEST(Serialization, ListRoundTrip) {
+  // Test roundtrip for nested list
+  List<Any> nested;
+  nested.push_back(1);
+  nested.push_back(String("hello"));
+  nested.push_back(true);
+  json::Value serialized = ToJSONGraph(nested);
+  Any deserialized = FromJSONGraph(serialized);
+  EXPECT_TRUE(StructuralEqual()(deserialized, nested));
+}
+
+TEST(Serialization, DISABLED_ListCycleDetection) {
+  List<Any> lst;
+  lst.push_back(42);
+  lst.push_back(lst);  // creates a cycle via shared mutable reference
+  EXPECT_ANY_THROW(ToJSONGraph(lst));
 }
 
 TEST(Serialization, ShuffleNodeOrder) {

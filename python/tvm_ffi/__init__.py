@@ -51,7 +51,7 @@ from ._convert import convert
 from .error import register_error
 from ._tensor import Device, device, DLDeviceType
 from ._tensor import from_dlpack, Tensor, Shape
-from .container import Array, Map
+from .container import Array, List, Map
 from .module import Module, system_lib, load_module
 from .stream import StreamContext, get_raw_stream, use_raw_stream, use_torch_stream
 from . import serialization
@@ -97,6 +97,7 @@ __all__ = [
     "DLDeviceType",
     "Device",
     "Function",
+    "List",
     "Map",
     "Module",
     "Object",
