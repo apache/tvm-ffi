@@ -73,6 +73,7 @@ _TYPE_SCHEMA_ORIGIN_CONVERTER = {
     "Tuple": "tuple",
     "ffi.Function": "Callable",
     "ffi.Array": "list",
+    "ffi.List": "list",
     "ffi.Map": "dict",
     "ffi.OpaquePyObject": "Any",
     "ffi.Object": "Object",

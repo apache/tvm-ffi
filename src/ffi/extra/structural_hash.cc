@@ -22,6 +22,7 @@
  * \brief Structural equal implementation.
  */
 #include <tvm/ffi/container/array.h>
+#include <tvm/ffi/container/list.h>
 #include <tvm/ffi/container/map.h>
 #include <tvm/ffi/container/shape.h>
 #include <tvm/ffi/container/tensor.h>
@@ -33,6 +34,7 @@
 #include <cmath>
 #include <limits>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 namespace tvm {
@@ -77,6 +79,9 @@ class StructuralHashHandler {
       }
       case TypeIndex::kTVMFFIArray: {
         return HashArray(AnyUnsafe::MoveFromAnyAfterCheck<Array<Any>>(std::move(src)));
+      }
+      case TypeIndex::kTVMFFIList: {
+        return HashList(AnyUnsafe::MoveFromAnyAfterCheck<List<Any>>(std::move(src)));
       }
       case TypeIndex::kTVMFFIMap: {
         return HashMap(AnyUnsafe::MoveFromAnyAfterCheck<Map<Any, Any>>(std::move(src)));
@@ -185,11 +190,25 @@ class StructuralHashHandler {
   }
 
   // NOLINTNEXTLINE(performance-unnecessary-value-param)
-  uint64_t HashArray(Array<Any> arr) {
-    uint64_t hash_value = details::StableHashCombine(arr->GetTypeKeyHash(), arr.size());
-    for (const auto& elem : arr) {
+  uint64_t HashArray(Array<Any> arr) { return HashSequence(std::move(arr)); }
+
+  // NOLINTNEXTLINE(performance-unnecessary-value-param)
+  uint64_t HashList(List<Any> list) { return HashSequence(std::move(list)); }
+
+  template <typename SeqType>
+  // NOLINTNEXTLINE(performance-unnecessary-value-param)
+  uint64_t HashSequence(SeqType seq) {
+    const Object* obj_ptr = seq.get();
+    if (active_sequences_.count(obj_ptr)) {
+      TVM_FFI_THROW(ValueError) << "Cycle detected during StructuralHash: a "
+                                << obj_ptr->GetTypeKey() << " contains itself";
+    }
+    active_sequences_.insert(obj_ptr);
+    uint64_t hash_value = details::StableHashCombine(seq->GetTypeKeyHash(), seq.size());
+    for (const auto& elem : seq) {
       hash_value = details::StableHashCombine(hash_value, HashAny(elem));
     }
+    active_sequences_.erase(obj_ptr);
     return hash_value;
   }
 
@@ -306,6 +325,8 @@ class StructuralHashHandler {
   ffi::Function s_hash_callback_ = nullptr;
   // map from lhs to rhs
   std::unordered_map<ObjectRef, uint64_t, ObjectPtrHash, ObjectPtrEqual> hash_memo_;
+  // track active sequence nodes for cycle detection
+  std::unordered_set<const Object*> active_sequences_;
 };
 
 uint64_t StructuralHash::Hash(const Any& value, bool map_free_vars, bool skip_tensor_content) {

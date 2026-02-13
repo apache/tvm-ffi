@@ -16,6 +16,7 @@
 # under the License.
 """Testing utilities."""
 
+from ._ffi_api import *  # noqa: F403
 from .testing import (
     TestIntPair,
     TestObjectBase,

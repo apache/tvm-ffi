@@ -189,6 +189,7 @@ def test_unregistered_object_fallback() -> None:
         (tvm_ffi.core.Bytes, "ffi.Bytes", tvm_ffi.Object),
         (tvm_ffi.Tensor, "ffi.Tensor", tvm_ffi.Object),
         (tvm_ffi.Array, "ffi.Array", tvm_ffi.Object),
+        (tvm_ffi.List, "ffi.List", tvm_ffi.Object),
         (tvm_ffi.Map, "ffi.Map", tvm_ffi.Object),
         (tvm_ffi.access_path.AccessStep, "ffi.reflection.AccessStep", tvm_ffi.Object),
         (tvm_ffi.access_path.AccessPath, "ffi.reflection.AccessPath", tvm_ffi.Object),

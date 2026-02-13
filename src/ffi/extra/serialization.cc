@@ -23,6 +23,7 @@
  */
 #include <tvm/ffi/any.h>
 #include <tvm/ffi/container/array.h>
+#include <tvm/ffi/container/list.h>
 #include <tvm/ffi/container/map.h>
 #include <tvm/ffi/container/shape.h>
 #include <tvm/ffi/dtype.h>
@@ -32,6 +33,9 @@
 #include <tvm/ffi/reflection/accessor.h>
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/ffi/string.h>
+
+#include <unordered_map>
+#include <unordered_set>
 
 namespace tvm {
 namespace ffi {
@@ -111,7 +115,19 @@ class ObjectGraphSerializer {
       case TypeIndex::kTVMFFIArray: {
         Array<Any> array = details::AnyUnsafe::CopyFromAnyViewAfterCheck<Array<Any>>(value);
         node.Set("type", ffi::StaticTypeKey::kTVMFFIArray);
-        node.Set("data", CreateArrayData(array));
+        node.Set("data", CreateSequenceData(array));
+        break;
+      }
+      case TypeIndex::kTVMFFIList: {
+        List<Any> list = details::AnyUnsafe::CopyFromAnyViewAfterCheck<List<Any>>(value);
+        node.Set("type", ffi::StaticTypeKey::kTVMFFIList);
+        const void* list_ptr = static_cast<const void*>(list.get());
+        if (!active_lists_.insert(list_ptr).second) {
+          TVM_FFI_THROW(ValueError)
+              << "Cycle detected during serialization: a List contains itself";
+        }
+        node.Set("data", CreateSequenceData(list));
+        active_lists_.erase(list_ptr);
         break;
       }
       case TypeIndex::kTVMFFIMap: {
@@ -139,11 +155,12 @@ class ObjectGraphSerializer {
     }
     int64_t node_index = static_cast<int64_t>(nodes_.size());
     nodes_.push_back(node);
-    node_index_map_.Set(value, node_index);
+    node_index_map_.emplace(value, node_index);
     return node_index;
   }
 
-  json::Array CreateArrayData(const Array<Any>& value) {
+  template <typename SeqType>
+  json::Array CreateSequenceData(const SeqType& value) {
     json::Array data;
     data.reserve(static_cast<int64_t>(value.size()));
     for (const Any& item : value) {
@@ -220,9 +237,11 @@ class ObjectGraphSerializer {
   }
 
   // maps the original value to the index of the node in the nodes_ array
-  Map<Any, int64_t> node_index_map_;
+  std::unordered_map<Any, int64_t, AnyHash, AnyEqual> node_index_map_;
   // records nodes that are serialized
   json::Array nodes_;
+  // tracks List nodes currently being serialized (for cycle detection)
+  std::unordered_set<const void*> active_lists_;
 };
 
 json::Value ToJSONGraph(const Any& value, const Any& metadata) {
@@ -246,7 +265,7 @@ class ObjectGraphDeserializer {
       return decoded_nodes_[node_index];
     }
     // now decode the node
-    Any value = DecodeNode(nodes_[node_index].cast<json::Object>());
+    Any value = DecodeNode(node_index, nodes_[node_index].cast<json::Object>());
     decoded_nodes_[node_index] = value;
     if (value == nullptr) {
       decoded_null_index_ = node_index;
@@ -255,7 +274,7 @@ class ObjectGraphDeserializer {
   }
 
  private:
-  Any DecodeNode(const json::Object& node) {
+  Any DecodeNode(int64_t node_index, const json::Object& node) {
     String type_key = node["type"].cast<String>();
     TVMFFIByteArray type_key_arr{type_key.data(), type_key.length()};
     int32_t type_index;
@@ -291,7 +310,10 @@ class ObjectGraphDeserializer {
         return DecodeMapData(node["data"].cast<json::Array>());
       }
       case TypeIndex::kTVMFFIArray: {
-        return DecodeArrayData(node["data"].cast<json::Array>());
+        return DecodeSequenceData<Array<Any>>(node["data"].cast<json::Array>());
+      }
+      case TypeIndex::kTVMFFIList: {
+        return DecodeSequenceData<List<Any>>(node["data"].cast<json::Array>());
       }
       case TypeIndex::kTVMFFIShape: {
         Array<int64_t> data = node["data"].cast<Array<int64_t>>();
@@ -303,13 +325,14 @@ class ObjectGraphDeserializer {
     }
   }
 
-  Array<Any> DecodeArrayData(const json::Array& data) {
-    Array<Any> array;
-    array.reserve(static_cast<int64_t>(data.size()));
+  template <typename SeqType>
+  SeqType DecodeSequenceData(const json::Array& data) {
+    SeqType sequence;
+    sequence.reserve(static_cast<int64_t>(data.size()));
     for (const auto& elem : data) {
-      array.push_back(GetOrDecodeNode(elem.cast<int64_t>()));
+      sequence.push_back(GetOrDecodeNode(elem.cast<int64_t>()));
     }
-    return array;
+    return sequence;
   }
 
   Map<Any, Any> DecodeMapData(const json::Array& data) {

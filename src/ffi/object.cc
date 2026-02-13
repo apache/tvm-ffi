@@ -363,6 +363,7 @@ class TypeTable {
     ReserveDepthOneObjectTypeIndex(StaticTypeKey::kTVMFFIShape, TypeIndex::kTVMFFIShape);
     ReserveDepthOneObjectTypeIndex(StaticTypeKey::kTVMFFITensor, TypeIndex::kTVMFFITensor);
     ReserveDepthOneObjectTypeIndex(StaticTypeKey::kTVMFFIArray, TypeIndex::kTVMFFIArray);
+    ReserveDepthOneObjectTypeIndex(StaticTypeKey::kTVMFFIList, TypeIndex::kTVMFFIList);
     ReserveDepthOneObjectTypeIndex(StaticTypeKey::kTVMFFIMap, TypeIndex::kTVMFFIMap);
     ReserveDepthOneObjectTypeIndex(StaticTypeKey::kTVMFFIModule, TypeIndex::kTVMFFIModule);
     ReserveDepthOneObjectTypeIndex(StaticTypeKey::kTVMFFIOpaquePyObject,

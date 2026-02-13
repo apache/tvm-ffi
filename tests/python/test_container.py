@@ -22,6 +22,7 @@ from typing import Any
 
 import pytest
 import tvm_ffi
+from tvm_ffi import testing
 
 if sys.version_info >= (3, 9):
     # PEP 585 generics
@@ -51,6 +52,9 @@ def test_bad_constructor_init_state() -> None:
     """
     with pytest.raises(TypeError):
         tvm_ffi.Array(1)  # ty: ignore[invalid-argument-type]
+
+    with pytest.raises(TypeError):
+        tvm_ffi.List(1)  # ty: ignore[invalid-argument-type]
 
     with pytest.raises(AttributeError):
         tvm_ffi.Map(1)  # ty: ignore[invalid-argument-type]
@@ -255,3 +259,243 @@ def test_array_bool(arr: list[Any], expected: bool) -> None:
 def test_map_bool(mapping: dict[Any, Any], expected: bool) -> None:
     m = tvm_ffi.Map(mapping)
     assert bool(m) is expected
+
+
+def test_list_basic() -> None:
+    lst = tvm_ffi.List([1, 2, 3])
+    assert isinstance(lst, tvm_ffi.List)
+    assert len(lst) == 3
+    assert tuple(lst) == (1, 2, 3)
+    assert lst[0] == 1
+    assert lst[-1] == 3
+    assert lst[:] == [1, 2, 3]
+    assert lst[::-1] == [3, 2, 1]
+
+
+def test_list_mutation_methods() -> None:
+    lst = tvm_ffi.List([1, 2, 3])
+    lst.append(4)
+    assert tuple(lst) == (1, 2, 3, 4)
+    lst.insert(2, 9)
+    assert tuple(lst) == (1, 2, 9, 3, 4)
+    value = lst.pop()
+    assert value == 4
+    assert tuple(lst) == (1, 2, 9, 3)
+    value = lst.pop(1)
+    assert value == 2
+    assert tuple(lst) == (1, 9, 3)
+    lst.extend([5, 6])
+    assert tuple(lst) == (1, 9, 3, 5, 6)
+    lst.clear()
+    assert tuple(lst) == ()
+    assert len(lst) == 0
+
+
+def test_list_setitem_and_delitem() -> None:
+    lst = tvm_ffi.List([0, 1, 2, 3, 4, 5])
+    lst[1] = 10
+    lst[-1] = 60
+    assert tuple(lst) == (0, 10, 2, 3, 4, 60)
+
+    del lst[2]
+    assert tuple(lst) == (0, 10, 3, 4, 60)
+    del lst[-1]
+    assert tuple(lst) == (0, 10, 3, 4)
+
+
+def test_list_slice_assignment_and_delete() -> None:
+    lst = tvm_ffi.List([0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
+
+    lst[2:6] = [20, 21]
+    assert tuple(lst) == (0, 1, 20, 21, 6, 7, 8, 9)
+
+    lst[3:3] = [30, 31]
+    assert tuple(lst) == (0, 1, 20, 30, 31, 21, 6, 7, 8, 9)
+
+    lst[1:9:2] = [101, 102, 103, 104]
+    assert tuple(lst) == (0, 101, 20, 102, 31, 103, 6, 104, 8, 9)
+
+    with pytest.raises(ValueError):
+        lst[0:6:2] = [1, 2]
+
+    del lst[1:8:2]
+    assert tuple(lst) == (0, 20, 31, 6, 8, 9)
+
+    del lst[2:2]
+    assert tuple(lst) == (0, 20, 31, 6, 8, 9)
+
+    del lst[1:4]
+    assert tuple(lst) == (0, 8, 9)
+
+
+def test_list_slice_edge_cases() -> None:
+    lst = tvm_ffi.List([0, 1, 2, 3, 4])
+    lst[3:1] = [9]
+    assert tuple(lst) == (0, 1, 2, 9, 3, 4)
+
+    lst = tvm_ffi.List([0, 1, 2, 3])
+    del lst[3:1]
+    assert tuple(lst) == (0, 1, 2, 3)
+
+    lst = tvm_ffi.List([0, 1, 2, 3, 4, 5])
+    del lst[5:1:-1]
+    assert tuple(lst) == (0, 1)
+
+    lst = tvm_ffi.List([0, 1, 2, 3])
+    del lst[::-1]
+    assert tuple(lst) == ()
+
+
+def test_list_contains_bool_repr_and_concat() -> None:
+    lst = tvm_ffi.List([1, 2, 3])
+    assert 2 in lst
+    assert 5 not in lst
+    assert bool(lst) is True
+    assert str(lst) == "[1, 2, 3]"
+    assert tuple(lst.__add__([4, 5])) == (1, 2, 3, 4, 5)
+    assert tuple(lst.__radd__([0])) == (0, 1, 2, 3)
+
+    empty = tvm_ffi.List()
+    assert bool(empty) is False
+    assert str(empty) == "[]"
+
+
+def test_list_insert_index_normalization() -> None:
+    lst = tvm_ffi.List([1, 2, 3])
+    lst.insert(-100, 0)
+    assert tuple(lst) == (0, 1, 2, 3)
+    lst.insert(100, 4)
+    assert tuple(lst) == (0, 1, 2, 3, 4)
+
+
+def test_list_error_cases() -> None:
+    lst = tvm_ffi.List([1, 2, 3])
+
+    with pytest.raises(IndexError):
+        _ = lst[3]
+    with pytest.raises(IndexError):
+        _ = lst[-4]
+    with pytest.raises(IndexError):
+        lst[3] = 0
+    with pytest.raises(IndexError):
+        del lst[3]
+
+    with pytest.raises(IndexError):
+        tvm_ffi.List().pop()
+
+
+def test_list_pickle_roundtrip() -> None:
+    lst = tvm_ffi.List([1, "a", {"k": 2}])
+    restored = pickle.loads(pickle.dumps(lst))
+    assert isinstance(restored, tvm_ffi.List)
+    assert restored[0] == 1
+    assert restored[1] == "a"
+    assert isinstance(restored[2], tvm_ffi.Map)
+    assert restored[2]["k"] == 2
+
+
+def test_list_reverse() -> None:
+    lst = tvm_ffi.List([3, 1, 2])
+    lst.reverse()
+    assert tuple(lst) == (2, 1, 3)
+
+    empty = tvm_ffi.List()
+    empty.reverse()
+    assert tuple(empty) == ()
+
+    single = tvm_ffi.List([42])
+    single.reverse()
+    assert tuple(single) == (42,)
+
+
+def test_list_self_aliasing_slice_assignment() -> None:
+    lst = tvm_ffi.List([0, 1, 2, 3, 4])
+    lst[1:3] = lst
+    assert tuple(lst) == (0, 0, 1, 2, 3, 4, 3, 4)
+
+
+def test_list_is_mutable_and_shared() -> None:
+    lst = tvm_ffi.List([1, 2])
+    alias = lst
+    alias.append(3)
+    alias[0] = 10
+    assert tuple(lst) == (10, 2, 3)
+
+
+# ---------------------------------------------------------------------------
+# Cross-conversion tests: Array <-> List via SeqTypeTraitsBase
+# ---------------------------------------------------------------------------
+def test_seq_cross_conv_list_to_array_int() -> None:
+    """List<int> passed to a function expecting Array<int> (new behavior)."""
+    lst = tvm_ffi.List([10, 20, 30])
+    result = testing.schema_id_arr_int(lst)
+    assert isinstance(result, tvm_ffi.Array)
+    assert list(result) == [10, 20, 30]
+
+
+def test_seq_cross_conv_array_to_list_int() -> None:
+    """Array<int> passed to a function expecting List<int>."""
+    arr = tvm_ffi.Array([10, 20, 30])
+    result = testing.schema_id_list_int(arr)
+    assert isinstance(result, tvm_ffi.List)
+    assert list(result) == [10, 20, 30]
+
+
+def test_seq_cross_conv_list_to_array_str() -> None:
+    """List<String> passed to a function expecting Array<String>."""
+    lst = tvm_ffi.List(["a", "b", "c"])
+    result = testing.schema_id_arr_str(lst)
+    assert isinstance(result, tvm_ffi.Array)
+    assert list(result) == ["a", "b", "c"]
+
+
+def test_seq_cross_conv_array_to_list_str() -> None:
+    """Array<String> passed to a function expecting List<String>."""
+    arr = tvm_ffi.Array(["a", "b", "c"])
+    result = testing.schema_id_list_str(arr)
+    assert isinstance(result, tvm_ffi.List)
+    assert list(result) == ["a", "b", "c"]
+
+
+def test_seq_cross_conv_empty_list_to_array() -> None:
+    """Empty List passed to a function expecting Array<int>."""
+    lst = tvm_ffi.List([])
+    result = testing.schema_id_arr_int(lst)
+    assert isinstance(result, tvm_ffi.Array)
+    assert len(result) == 0
+
+
+def test_seq_cross_conv_empty_array_to_list() -> None:
+    """Empty Array passed to a function expecting List<int>."""
+    arr = tvm_ffi.Array([])
+    result = testing.schema_id_list_int(arr)
+    assert isinstance(result, tvm_ffi.List)
+    assert len(result) == 0
+
+
+def test_seq_cross_conv_python_list_to_array() -> None:
+    """Plain Python list passed to Array<int> function."""
+    result = testing.schema_id_arr_int([1, 2, 3])
+    assert isinstance(result, tvm_ffi.Array)
+    assert list(result) == [1, 2, 3]
+
+
+def test_seq_cross_conv_python_list_to_list() -> None:
+    """Plain Python list passed to List<int> function."""
+    result = testing.schema_id_list_int([1, 2, 3])
+    assert isinstance(result, tvm_ffi.List)
+    assert list(result) == [1, 2, 3]
+
+
+def test_seq_cross_conv_incompatible_list_to_array() -> None:
+    """List with incompatible element types should fail when cast to Array<int>."""
+    lst = tvm_ffi.List(["not", "ints"])
+    with pytest.raises(TypeError):
+        testing.schema_id_arr_int(lst)  # type: ignore[arg-type]
+
+
+def test_seq_cross_conv_incompatible_array_to_list() -> None:
+    """Array with incompatible element types should fail when cast to List<int>."""
+    arr = tvm_ffi.Array(["not", "ints"])
+    with pytest.raises(TypeError):
+        testing.schema_id_list_int(arr)  # type: ignore[arg-type]

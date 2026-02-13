@@ -21,6 +21,7 @@
  * \file src/ffi/container.cc
  */
 #include <tvm/ffi/container/array.h>
+#include <tvm/ffi/container/list.h>
 #include <tvm/ffi/container/map.h>
 #include <tvm/ffi/function.h>
 #include <tvm/ffi/reflection/registry.h>
@@ -76,6 +77,62 @@ TVM_FFI_STATIC_INIT_BLOCK() {
              return std::any_of(n->begin(), n->end(),
                                 [&](const Any& elem) { return eq(elem, value); });
            })
+      .def_packed("ffi.List",
+                  [](ffi::PackedArgs args, Any* ret) {
+                    *ret = List<Any>(args.data(), args.data() + args.size());
+                  })
+      .def("ffi.ListGetItem", [](const ffi::ListObj* n, int64_t i) -> Any { return n->at(i); })
+      .def("ffi.ListSetItem",
+           [](ffi::List<Any> n, int64_t i, Any value) -> void { n.Set(i, std::move(value)); })
+      .def("ffi.ListSize",
+           [](const ffi::ListObj* n) -> int64_t { return static_cast<int64_t>(n->size()); })
+      .def("ffi.ListContains",
+           [](const ffi::ListObj* n, const Any& value) -> bool {
+             AnyEqual eq;
+             return std::any_of(n->begin(), n->end(),
+                                [&](const Any& elem) { return eq(elem, value); });
+           })
+      .def("ffi.ListAppend", [](ffi::List<Any> n, const Any& value) -> void { n.push_back(value); })
+      .def("ffi.ListInsert",
+           [](ffi::List<Any> n, int64_t i, const Any& value) -> void {
+             n.insert(n.begin() + i, value);
+           })
+      .def("ffi.ListPop",
+           [](const ffi::List<Any>& n, int64_t i) -> Any {
+             ffi::ListObj* obj = n.GetListObj();
+             Any value = obj->at(i);
+             obj->erase(i);
+             return value;
+           })
+      .def("ffi.ListErase",
+           [](const ffi::List<Any>& n, int64_t i) -> void { n.GetListObj()->erase(i); })
+      .def("ffi.ListEraseRange",
+           [](const ffi::List<Any>& n, int64_t start, int64_t stop) -> void {
+             n.GetListObj()->erase(start, stop);
+           })
+      .def("ffi.ListReplaceSlice",
+           [](ffi::List<Any> n, int64_t start, int64_t stop,
+              const ffi::List<Any>& replacement) -> void {
+             // Snapshot replacement before erasing in case n and replacement alias the same object.
+             ffi::List<Any> rep_copy = n.same_as(replacement)
+                                           ? ffi::List<Any>(replacement.begin(), replacement.end())
+                                           : replacement;
+             n.GetListObj()->erase(start, stop);
+             if (rep_copy.empty()) {
+               return;
+             }
+             const ffi::ListObj* replacement_obj = rep_copy.GetListObj();
+             TVM_FFI_ICHECK(replacement_obj != nullptr);
+             n.insert(n.begin() + start, replacement_obj->begin(), replacement_obj->end());
+           })
+      .def("ffi.ListReverse",
+           [](const ffi::List<Any>& n) -> void {
+             ffi::ListObj* obj = n.GetListObj();
+             if (obj != nullptr) {
+               obj->SeqBaseObj::Reverse();
+             }
+           })
+      .def("ffi.ListClear", [](ffi::List<Any> n) -> void { n.clear(); })
       .def_packed("ffi.Map",
                   [](ffi::PackedArgs args, Any* ret) {
                     TVM_FFI_ICHECK_EQ(args.size() % 2, 0);

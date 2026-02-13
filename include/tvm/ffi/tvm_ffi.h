@@ -33,6 +33,7 @@
 #include <tvm/ffi/cast.h>
 #include <tvm/ffi/container/array.h>
 #include <tvm/ffi/container/container_details.h>
+#include <tvm/ffi/container/list.h>
 #include <tvm/ffi/container/map.h>
 #include <tvm/ffi/container/shape.h>
 #include <tvm/ffi/container/tensor.h>
