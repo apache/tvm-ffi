@@ -34,7 +34,6 @@
 #include <cmath>
 #include <limits>
 #include <unordered_map>
-#include <unordered_set>
 #include <utility>
 
 namespace tvm {
@@ -198,17 +197,10 @@ class StructuralHashHandler {
   template <typename SeqType>
   // NOLINTNEXTLINE(performance-unnecessary-value-param)
   uint64_t HashSequence(SeqType seq) {
-    const Object* obj_ptr = seq.get();
-    if (active_sequences_.count(obj_ptr)) {
-      TVM_FFI_THROW(ValueError) << "Cycle detected during StructuralHash: a "
-                                << obj_ptr->GetTypeKey() << " contains itself";
-    }
-    active_sequences_.insert(obj_ptr);
     uint64_t hash_value = details::StableHashCombine(seq->GetTypeKeyHash(), seq.size());
     for (const auto& elem : seq) {
       hash_value = details::StableHashCombine(hash_value, HashAny(elem));
     }
-    active_sequences_.erase(obj_ptr);
     return hash_value;
   }
 
@@ -325,8 +317,6 @@ class StructuralHashHandler {
   ffi::Function s_hash_callback_ = nullptr;
   // map from lhs to rhs
   std::unordered_map<ObjectRef, uint64_t, ObjectPtrHash, ObjectPtrEqual> hash_memo_;
-  // track active sequence nodes for cycle detection
-  std::unordered_set<const Object*> active_sequences_;
 };
 
 uint64_t StructuralHash::Hash(const Any& value, bool map_free_vars, bool skip_tensor_content) {

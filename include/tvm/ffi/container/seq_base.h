@@ -266,6 +266,14 @@ class SeqBaseObj : public Object, protected TVMFFISeqCell {
   /// \endcond
 };
 
+/*!
+ * \brief CRTP base for sequence type-traits (Array, List).
+ *
+ * \tparam Derived Must expose:
+ *   - `static constexpr int32_t kPrimaryTypeIndex` — the canonical FFI type index
+ *   - `static constexpr int32_t kOtherTypeIndex`   — an alternative accepted type index
+ *   - `static constexpr const char* kTypeName`      — human-readable name for diagnostics
+ */
 template <typename Derived, typename SeqRef, typename T>
 struct SeqTypeTraitsBase : public ObjectRefTypeTraitsBase<SeqRef> {
   using Base = ObjectRefTypeTraitsBase<SeqRef>;

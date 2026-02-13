@@ -32,7 +32,6 @@
 
 #include <cmath>
 #include <unordered_map>
-#include <unordered_set>
 #include <utility>
 
 namespace tvm {
@@ -320,22 +319,6 @@ class StructEqualHandler {
   template <typename SeqType>
   // NOLINTNEXTLINE(performance-unnecessary-value-param)
   bool CompareSequence(SeqType lhs, SeqType rhs) {
-    const Object* lhs_ptr = lhs.get();
-    const Object* rhs_ptr = rhs.get();
-    auto pair = std::make_pair(lhs_ptr, rhs_ptr);
-    if (active_sequence_pairs_.count(pair)) {
-      TVM_FFI_THROW(ValueError) << "Cycle detected during StructuralEqual: a "
-                                << lhs_ptr->GetTypeKey() << " contains itself";
-    }
-    active_sequence_pairs_.insert(pair);
-    bool result = CompareSequenceImpl(std::move(lhs), std::move(rhs));
-    active_sequence_pairs_.erase(pair);
-    return result;
-  }
-
-  template <typename SeqType>
-  // NOLINTNEXTLINE(performance-unnecessary-value-param)
-  bool CompareSequenceImpl(SeqType lhs, SeqType rhs) {
     if (lhs.size() != rhs.size()) {
       // fast path, size mismatch, and there is no path tracing
       // return false since we don't need informative error message
@@ -437,17 +420,6 @@ class StructEqualHandler {
   std::unordered_map<ObjectRef, ObjectRef, ObjectPtrHash, ObjectPtrEqual> equal_map_lhs_;
   // map from rhs to lhs
   std::unordered_map<ObjectRef, ObjectRef, ObjectPtrHash, ObjectPtrEqual> equal_map_rhs_;
-
-  // track active sequence (lhs, rhs) pairs for cycle detection
-  struct PointerPairHash {
-    size_t operator()(const std::pair<const Object*, const Object*>& p) const {
-      auto h1 = std::hash<const void*>()(p.first);
-      auto h2 = std::hash<const void*>()(p.second);
-      return h1 ^ (h2 * 0x9e3779b97f4a7c15ULL + 0x9e3779b9 + (h1 << 6) + (h1 >> 2));
-    }
-  };
-  std::unordered_set<std::pair<const Object*, const Object*>, PointerPairHash>
-      active_sequence_pairs_;
 };
 
 bool StructuralEqual::Equal(const Any& lhs, const Any& rhs, bool map_free_vars,

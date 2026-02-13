@@ -70,6 +70,10 @@ class ListObj : public SeqBaseObj {
   /*!
    * \brief Ensure the list has at least n slots.
    * \param n The lower bound of required capacity.
+   *
+   * \note Leak-safety: Any's move constructor is noexcept, so the
+   *       move loop below cannot throw and leave the buffer in a
+   *       partially-constructed state.
    */
   void Reserve(int64_t n) {
     if (n <= TVMFFISeqCell::capacity) {
