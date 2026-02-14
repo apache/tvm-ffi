@@ -59,7 +59,8 @@ pub(crate) fn check_repr_c(
     }
 
     let parent_type_key = if info.type_depth > 0 && !info.type_acenstors.is_null() {
-        let ancestor_ptr = unsafe { *info.type_acenstors.add(0) };
+        // Direct parent is ancestor[type_depth - 1]; ancestor[0] is the root.
+        let ancestor_ptr = unsafe { *info.type_acenstors.add((info.type_depth - 1) as usize) };
         if ancestor_ptr.is_null() {
             return None;
         }
@@ -168,7 +169,7 @@ fn repr_c_field_type(
 ) -> Option<(String, bool)> {
     let schema = schema?;
     match schema.origin.as_str() {
-        "Any" => Some(("tvm_ffi::AnyValue".to_string(), false)),
+        "Any" | "ffi.Any" => Some(("tvm_ffi::AnyValue".to_string(), false)),
         "bool" => Some(("bool".to_string(), true)),
         "int" => match field_size {
             1 => Some(("i8".to_string(), true)),
