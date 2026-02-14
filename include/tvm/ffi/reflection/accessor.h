@@ -200,6 +200,28 @@ inline Function GetMethod(std::string_view type_key, const char* method_name) {
 }
 
 /*!
+ * \brief Set a field to its default value, calling the factory if applicable.
+ *
+ * When kTVMFFIFieldFlagBitMaskDefaultFromFactory is set, extracts the
+ * Function from default_value_or_factory, calls it with no arguments,
+ * and uses the result. Otherwise, passes default_value_or_factory directly
+ * to the setter.
+ *
+ * \param field_info The field info (must have kTVMFFIFieldFlagBitMaskHasDefault set).
+ * \param field_addr The address of the field in the object.
+ */
+inline void SetFieldToDefault(const TVMFFIFieldInfo* field_info, void* field_addr) {
+  if (field_info->flags & kTVMFFIFieldFlagBitMaskDefaultFromFactory) {
+    Function factory =
+        AnyView::CopyFromTVMFFIAny(field_info->default_value_or_factory).cast<Function>();
+    Any default_val = factory();
+    field_info->setter(field_addr, reinterpret_cast<const TVMFFIAny*>(&default_val));
+  } else {
+    field_info->setter(field_addr, &(field_info->default_value_or_factory));
+  }
+}
+
+/*!
  * \brief Visit each field info of the type info and run callback.
  *
  * \tparam Callback The callback function type.

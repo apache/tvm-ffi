@@ -152,12 +152,41 @@ class DefaultValue : public InfoTrait {
    * \param info The field info.
    */
   TVM_FFI_INLINE void Apply(TVMFFIFieldInfo* info) const {
-    info->default_value = AnyView(value_).CopyToTVMFFIAny();
+    info->default_value_or_factory = AnyView(value_).CopyToTVMFFIAny();
     info->flags |= kTVMFFIFieldFlagBitMaskHasDefault;
   }
 
  private:
   Any value_;
+};
+
+/*!
+ * \brief Trait that can be used to set field default factory.
+ *
+ * A default factory is a callable () -> Any that is invoked each time
+ * a default value is needed, producing a fresh value. This is important
+ * for mutable defaults (e.g., Array, Map) to avoid aliasing.
+ */
+class DefaultFactory : public InfoTrait {
+ public:
+  /*!
+   * \brief Constructor
+   * \param factory The factory function to be called to produce default values.
+   */
+  explicit DefaultFactory(Function factory) : factory_(std::move(factory)) {}
+
+  /*!
+   * \brief Apply the default factory to the field info
+   * \param info The field info.
+   */
+  TVM_FFI_INLINE void Apply(TVMFFIFieldInfo* info) const {
+    info->default_value_or_factory = AnyView(factory_).CopyToTVMFFIAny();
+    info->flags |= kTVMFFIFieldFlagBitMaskHasDefault;
+    info->flags |= kTVMFFIFieldFlagBitMaskDefaultFromFactory;
+  }
+
+ private:
+  Function factory_;
 };
 
 /*!
@@ -653,7 +682,7 @@ class ObjectDef : public ReflectionDefBase {
     info.getter = FieldGetter<T>;
     info.setter = FieldSetter<T>;
     // initialize default value to nullptr
-    info.default_value = AnyView(nullptr).CopyToTVMFFIAny();
+    info.default_value_or_factory = AnyView(nullptr).CopyToTVMFFIAny();
     info.doc = TVMFFIByteArray{nullptr, 0};
     info.metadata_.emplace_back("type_schema", details::TypeSchema<T>::v());
     // apply field info traits

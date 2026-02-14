@@ -396,7 +396,7 @@ class ObjectGraphDeserializer {
         Any field_value = decode_field_value(field_info, data_object[field_name]);
         field_info->setter(field_addr, reinterpret_cast<const TVMFFIAny*>(&field_value));
       } else if (field_info->flags & kTVMFFIFieldFlagBitMaskHasDefault) {
-        field_info->setter(field_addr, &(field_info->default_value));
+        reflection::SetFieldToDefault(field_info, field_addr);
       } else {
         TVM_FFI_THROW(TypeError) << "Required field `"
                                  << String(field_info->name.data, field_info->name.size)

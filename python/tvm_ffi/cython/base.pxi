@@ -203,6 +203,7 @@ cdef extern from "tvm/ffi/c_api.h":
         kTVMFFIFieldFlagBitMaskWritable = 1 << 0
         kTVMFFIFieldFlagBitMaskHasDefault = 1 << 1
         kTVMFFIFieldFlagBitMaskIsStaticMethod = 1 << 2
+        kTVMFFIFieldFlagBitMaskDefaultFromFactory = 1 << 5
 
     ctypedef int (*TVMFFIFieldGetter)(void* field, TVMFFIAny* result) noexcept
     ctypedef int (*TVMFFIFieldSetter)(void* field, const TVMFFIAny* value) noexcept
@@ -218,7 +219,7 @@ cdef extern from "tvm/ffi/c_api.h":
         int64_t offset
         TVMFFIFieldGetter getter
         TVMFFIFieldSetter setter
-        TVMFFIAny default_value
+        TVMFFIAny default_value_or_factory
         int32_t field_static_type_index
 
     ctypedef struct TVMFFIMethodInfo:
