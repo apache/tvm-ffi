@@ -460,6 +460,12 @@ struct init {
   }
 };
 
+/*! \brief Well-known type attribute names used by the reflection system. */
+namespace type_attr {
+inline constexpr const char* kInit = "__ffi_init__";
+inline constexpr const char* kShallowCopy = "__ffi_shallow_copy__";
+}  // namespace type_attr
+
 /*!
  * \brief Helper to register Object's reflection metadata.
  * \tparam Class The class type.
@@ -481,6 +487,7 @@ class ObjectDef : public ReflectionDefBase {
   explicit ObjectDef(ExtraArgs&&... extra_args)
       : type_index_(Class::_GetOrAllocRuntimeTypeIndex()), type_key_(Class::_type_key) {
     RegisterExtraInfo(std::forward<ExtraArgs>(extra_args)...);
+    AutoRegisterCopy();
   }
 
   /*!
@@ -591,6 +598,25 @@ class ObjectDef : public ReflectionDefBase {
   template <typename T>
   friend class OverloadObjectDef;
 
+  /*! \brief Shallow-copy \p self via the C++ copy constructor. */
+  static ObjectRef ShallowCopy(const Class* self) {
+    return ObjectRef(ffi::make_object<Class>(*self));
+  }
+
+  void AutoRegisterCopy() {
+    if constexpr (std::is_copy_constructible_v<Class>) {
+      // Register __ffi_shallow_copy__ as an instance method
+      RegisterMethod(type_attr::kShallowCopy, false, &ObjectDef::ShallowCopy);
+      // Also register as a type attribute for generic deep copy lookup
+      Function copy_fn = GetMethod(std::string(type_key_) + "." + type_attr::kShallowCopy,
+                                   &ObjectDef::ShallowCopy);
+      TVMFFIByteArray attr_name = {type_attr::kShallowCopy,
+                                   std::char_traits<char>::length(type_attr::kShallowCopy)};
+      TVMFFIAny attr_value = AnyView(copy_fn).CopyToTVMFFIAny();
+      TVM_FFI_CHECK_SAFE_CALL(TVMFFITypeRegisterAttr(type_index_, &attr_name, &attr_value));
+    }
+  }
+
   template <typename... ExtraArgs>
   void RegisterExtraInfo(ExtraArgs&&... extra_args) {
     TVMFFITypeMetadata info;
@@ -663,7 +689,7 @@ class ObjectDef : public ReflectionDefBase {
 
   int32_t type_index_;
   const char* type_key_;
-  static constexpr const char* kInitMethodName = "__ffi_init__";
+  static constexpr const char* kInitMethodName = type_attr::kInit;
 };
 
 /*!

@@ -77,6 +77,7 @@ set(_tvm_ffi_extra_objs_sources
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/extra/json_parser.cc"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/extra/json_writer.cc"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/extra/serialization.cc"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/extra/deep_copy.cc"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/extra/reflection_extra.cc"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/extra/module.cc"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/extra/library_module.cc"
