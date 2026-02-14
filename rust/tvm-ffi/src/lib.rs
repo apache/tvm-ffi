@@ -29,6 +29,7 @@ pub mod macros;
 pub mod object;
 pub mod object_wrapper;
 pub mod string;
+pub mod subtyping;
 pub mod type_traits;
 pub use tvm_ffi_sys;
 

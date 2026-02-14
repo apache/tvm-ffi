@@ -58,7 +58,7 @@ pub fn derive_object(input: proc_macro::TokenStream) -> TokenStream {
                                 &type_key_arg, &mut tindex
                             );
                             if ret != 0 {
-                                proc_macro_error::abort!("Failed to get type index for type key: {}", #type_key);
+                                panic!("Failed to get type index for type key: {}", #type_key);
                             }
                             tindex
                         }
@@ -266,17 +266,13 @@ pub fn derive_object_ref(input: proc_macro::TokenStream) -> TokenStream {
                 ) -> Self {
                     type ContainerType = <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>
                         ::ContainerType;
-                    let data_ptr = data.data_union.v_obj;
-                    // need to increase ref because original weak ptr
-                    // do not own the code
-                    #tvm_ffi_crate::object::unsafe_::inc_ref(
-                        data_ptr as *mut  #tvm_ffi_crate::tvm_ffi_sys::TVMFFIObject
-                    );
-                    Self {
-                        data : #tvm_ffi_crate::object::ObjectArc::from_raw(
-                            data_ptr as *mut ContainerType
-                        )
-                    }
+                    // Delegate to ObjectRef to handle reference counting
+                    let obj_ref = <#tvm_ffi_crate::object::ObjectRef as #tvm_ffi_crate::type_traits::AnyCompatible>::copy_from_any_view_after_check(data);
+                    // Use public unsafe API to do pointer cast
+                    let arc = <#tvm_ffi_crate::object::ObjectRef as #tvm_ffi_crate::object::ObjectRefCore>::into_data(obj_ref);
+                    let raw = #tvm_ffi_crate::object::ObjectArc::into_raw(arc);
+                    let typed = #tvm_ffi_crate::object::ObjectArc::from_raw(raw as *const ContainerType);
+                    Self { data: typed }
                 }
 
                 unsafe fn move_to_any(

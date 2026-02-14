@@ -17,7 +17,10 @@
 
 use crate::cli::Args;
 use crate::ffi;
-use crate::model::{FieldGen, FunctionGen, FunctionSig, MethodGen, ModuleNode, RustType, TypeGen};
+use crate::model::{
+    FieldGen, FunctionGen, FunctionSig, GetterSpec, MethodGen, ModuleNode, RustType, TypeGen,
+};
+use crate::repr_c;
 use crate::schema::{extract_type_schema, parse_type_schema, TypeSchema};
 use crate::utils;
 use std::collections::BTreeMap;
@@ -79,7 +82,10 @@ pub(crate) fn build_type_entries(
         let rust_name = sanitize_ident(&name, IdentStyle::Type);
         let mut methods = Vec::new();
         let mut fields = Vec::new();
+        let mut type_depth = 0i32;
+        let repr_c_info = repr_c::check_repr_c(key, type_map);
         if let Some(info) = ffi::get_type_info(key) {
+            type_depth = info.type_depth;
             if info.num_methods > 0 && !info.methods.is_null() {
                 let method_slice =
                     unsafe { std::slice::from_raw_parts(info.methods, info.num_methods as usize) };
@@ -136,13 +142,100 @@ pub(crate) fn build_type_entries(
             mods,
             TypeGen {
                 type_key: key.clone(),
-                rust_name,
+                rust_name: rust_name.clone(),
                 methods,
                 fields,
+                type_depth,
+                repr_c_info: repr_c_info.clone(),
+                getter_specs: Vec::new(),
+                ancestor_chain: Vec::new(),
             },
         ));
     }
+    // Second pass: fill getter_specs and ancestor_chain for repr_c types in dependency order (base before derived).
+    let mut type_key_to_idx: BTreeMap<String, usize> = BTreeMap::new();
+    for (idx, (_, ty)) in out.iter().enumerate() {
+        type_key_to_idx.insert(ty.type_key.clone(), idx);
+    }
+    let mut order: Vec<usize> = (0..out.len()).collect();
+    order.sort_by_key(|&i| out[i].1.type_depth);
+    for &idx in &order {
+        let (_, ref ty) = out[idx];
+        let repr_c_info = match &ty.repr_c_info {
+            Some(r) => r,
+            None => continue,
+        };
+        let parent_specs: Vec<GetterSpec> =
+            if let Some(ref parent_key) = repr_c_info.parent_type_key {
+                let parent_idx = *type_key_to_idx.get(parent_key).unwrap_or(&idx);
+                out[parent_idx].1.getter_specs.clone()
+            } else {
+                Vec::new()
+            };
+        let getter_specs = build_getter_specs(&ty.type_key, &ty.repr_c_info, &parent_specs);
+
+        // Build ancestor chain: [DirectParent, Grandparent, ..., ObjectRef]
+        let ancestor_chain = if let Some(ref parent_key) = repr_c_info.parent_type_key {
+            if parent_key == "ffi.Object" {
+                vec!["tvm_ffi::object::ObjectRef".to_string()]
+            } else if let Some(parent_rust) = type_map.get(parent_key) {
+                let parent_idx = *type_key_to_idx.get(parent_key).unwrap_or(&idx);
+                let mut chain = vec![parent_rust.clone()];
+                // Inherit parent's ancestors
+                chain.extend(out[parent_idx].1.ancestor_chain.clone());
+                chain
+            } else {
+                vec!["tvm_ffi::object::ObjectRef".to_string()]
+            }
+        } else {
+            vec!["tvm_ffi::object::ObjectRef".to_string()]
+        };
+
+        out[idx].1.getter_specs = getter_specs;
+        out[idx].1.ancestor_chain = ancestor_chain;
+    }
     Ok(out)
+}
+
+fn build_getter_specs(
+    _type_key: &str,
+    repr_c_info: &Option<repr_c::ReprCInfo>,
+    parent_specs: &[GetterSpec],
+) -> Vec<GetterSpec> {
+    let info = match repr_c_info {
+        Some(i) => i,
+        None => return Vec::new(),
+    };
+    let mut specs = Vec::new();
+    for parent in parent_specs {
+        let access_expr = if parent.access_expr.starts_with("self.data.") {
+            format!(
+                "self.data.parent.{}",
+                &parent.access_expr["self.data.".len()..]
+            )
+        } else {
+            parent.access_expr.clone()
+        };
+        specs.push(GetterSpec {
+            method_name: parent.method_name.clone(),
+            access_expr,
+            ret_type: parent.ret_type.clone(),
+        });
+    }
+    for f in &info.direct_fields {
+        let method_name = format!("get_{}", f.rust_name);
+        let access_expr = if f.is_pod {
+            format!("self.data.{}", f.rust_name)
+        } else {
+            format!("self.data.{}.clone()", f.rust_name)
+        };
+        specs.push(GetterSpec {
+            method_name,
+            access_expr,
+            ret_type: f.rust_type.clone(),
+        });
+    }
+    specs
 }
 
 pub(crate) fn build_function_modules(
@@ -451,18 +544,18 @@ use tvm_ffi::{Any, AnyView, Function, Result};
     out
 }
 
-pub(crate) fn render_types_rs(root: &ModuleNode) -> String {
+pub(crate) fn render_types_rs(root: &ModuleNode, type_map: &BTreeMap<String, String>) -> String {
     let mut out = String::new();
     out.push_str(
         r#"#![allow(unused_imports)]
 #![allow(non_snake_case, nonstandard_style)]
 
 use std::sync::LazyLock;
-use tvm_ffi::{Any, AnyView, Result};
+use tvm_ffi::{Any, AnyView, ObjectArc, Result};
 
 "#,
     );
-    render_type_module(&mut out, root, 0);
+    render_type_module(&mut out, root, 0, type_map);
     out
 }
 
@@ -503,6 +596,10 @@ fn render_facade_module(
     }
     if let Some(node) = types {
         for ty in &node.types {
+            // Skip built-in types that are not generated
+            if is_builtin_type(&ty.type_key) {
+                continue;
+            }
             writeln!(
                 out,
                 "{}pub use crate::_tvm_ffi_stubgen_detail::types{}::{};",
@@ -555,7 +652,12 @@ fn render_function_module(out: &mut String, node: &ModuleNode, indent: usize) {
     }
 }
 
-fn render_type_module(out: &mut String, node: &ModuleNode, indent: usize) {
+fn render_type_module(
+    out: &mut String,
+    node: &ModuleNode,
+    indent: usize,
+    type_map: &BTreeMap<String, String>,
+) {
     let indent_str = " ".repeat(indent);
     if indent > 0 {
         writeln!(out, "{}use std::sync::LazyLock;", indent_str).ok();
@@ -563,11 +665,11 @@ fn render_type_module(out: &mut String, node: &ModuleNode, indent: usize) {
         writeln!(out).ok();
     }
     for ty in &node.types {
-        render_type(out, ty, indent);
+        render_type(out, ty, indent, type_map);
     }
     for child in node.children.values() {
         writeln!(out, "{}pub mod {} {{", indent_str, child.name).ok();
-        render_type_module(out, child, indent + 4);
+        render_type_module(out, child, indent + 4, type_map);
         writeln!(out, "{}}}", indent_str).ok();
     }
 }
@@ -630,7 +732,159 @@ fn render_function(out: &mut String, func: &FunctionGen, indent: usize) {
     writeln!(out).ok();
 }
 
-fn render_type(out: &mut String, ty: &TypeGen, indent: usize) {
+fn type_key_to_short_rust_name(type_map: &BTreeMap<String, String>, type_key: &str) -> String {
+    type_map
+        .get(type_key)
+        .and_then(|path| path.split("::").last().map(String::from))
+        .unwrap_or_else(|| type_key.to_string())
+}
+
+fn render_type(out: &mut String, ty: &TypeGen, indent: usize, type_map: &BTreeMap<String, String>) {
+    // Filter out built-in types that are already provided by tvm-ffi
+    if is_builtin_type(&ty.type_key) {
+        return;
+    }
+
+    let _indent_str = " ".repeat(indent);
+    if let Some(ref info) = ty.repr_c_info {
+        render_repr_c_type(out, ty, info, indent, type_map);
+        return;
+    }
+    render_fallback_type(out, ty, indent);
+}
+
+fn is_builtin_type(type_key: &str) -> bool {
+    // Filter ffi.* primitive types and aliases that are provided by tvm-ffi
+    matches!(
+        type_key,
+        "ffi.Object"
+            | "ffi.String"
+            | "ffi.Function"
+            | "ffi.Module"
+            | "ffi.Tensor"
+            | "ffi.Shape"
+            | "ffi.Array"
+            | "ffi.Map"
+            | "ffi.Bytes"
+            | "ffi.SmallStr"
+            | "ffi.SmallBytes"
+            | "DLTensor*"
+            | "DataType"
+            | "Device"
+            | "bool"
+            | "int"
+            | "float"
+    )
+}
+
+fn render_repr_c_type(
+    out: &mut String,
+    ty: &TypeGen,
+    info: &repr_c::ReprCInfo,
+    indent: usize,
+    _type_map: &BTreeMap<String, String>,
+) {
+    let indent_str = " ".repeat(indent);
+    let obj_name = format!("{}Obj", ty.rust_name);
+
+    // Determine parent type for *Obj struct
+    let parent_ty = match &info.parent_type_key {
+        None => "tvm_ffi::object::Object".to_string(),
+        Some(parent_key) if parent_key == "ffi.Object" => "tvm_ffi::object::Object".to_string(),
+        Some(parent_key) => {
+            // Use the type from type_map to get the full Rust path
+            let parent_rust = _type_map
+                .get(parent_key)
+                .map(|s| s.clone())
+                .unwrap_or_else(|| format!("{}Obj", sanitize_ident(parent_key, IdentStyle::Type)));
+            // Extract just the type name and append "Obj"
+            if let Some(last) = parent_rust.split("::").last() {
+                format!("{}Obj", last)
+            } else {
+                format!("{}Obj", sanitize_ident(parent_key, IdentStyle::Type))
+            }
+        }
+    };
+
+    // Generate *Obj struct with #[repr(C)]
+    writeln!(out, "{}#[repr(C)]", indent_str).ok();
+    writeln!(out, "{}#[derive(tvm_ffi::derive::Object)]", indent_str).ok();
+    writeln!(out, "{}#[type_key = \"{}\"]", indent_str, ty.type_key).ok();
+    writeln!(out, "{}pub struct {} {{", indent_str, obj_name).ok();
+    writeln!(out, "{}    parent: {},", indent_str, parent_ty).ok();
+    for f in &info.direct_fields {
+        writeln!(out, "{}    {}: {},", indent_str, f.rust_name, f.rust_type).ok();
+    }
+    writeln!(out, "{}}}\n", indent_str).ok();
+
+    // Generate *Ref wrapper with #[repr(C)]
+    writeln!(out, "{}#[repr(C)]", indent_str).ok();
+    writeln!(
+        out,
+        "{}#[derive(tvm_ffi::derive::ObjectRef, Clone)]",
+        indent_str
+    )
+    .ok();
+    writeln!(out, "{}pub struct {} {{", indent_str, ty.rust_name).ok();
+    writeln!(
+        out,
+        "{}    data: tvm_ffi::object::ObjectArc<{}>,",
+        indent_str, obj_name
+    )
+    .ok();
+    writeln!(out, "{}}}\n", indent_str).ok();
+
+    // Generate impl_object_hierarchy! macro call
+    if !ty.ancestor_chain.is_empty() {
+        write!(
+            out,
+            "{}tvm_ffi::impl_object_hierarchy!({}:",
+            indent_str, ty.rust_name
+        )
+        .ok();
+        for (i, ancestor) in ty.ancestor_chain.iter().enumerate() {
+            if i == 0 {
+                write!(out, " {}", ancestor).ok();
+            } else {
+                write!(out, ", {}", ancestor).ok();
+            }
+        }
+        writeln!(out, ");").ok();
+        writeln!(out).ok();
+    }
+
+    // Generate getter methods for direct fields only
+    writeln!(out, "{}impl {} {{", indent_str, ty.rust_name).ok();
+    for f in &info.direct_fields {
+        let method_name = format!("get_{}", f.rust_name);
+        let access_expr = if f.is_pod {
+            format!("self.data.{}", f.rust_name)
+        } else {
+            format!("self.data.{}.clone()", f.rust_name)
+        };
+        writeln!(
+            out,
+            "{}    pub fn {}(&self) -> {} {{",
+            indent_str, method_name, f.rust_type
+        )
+        .ok();
+        writeln!(out, "{}        {}", indent_str, access_expr).ok();
+        writeln!(out, "{}    }}", indent_str).ok();
+    }
+    writeln!(out, "{}}}\n", indent_str).ok();
+
+    // Generate method statics and impls
+    for method in &ty.methods {
+        render_method_static(out, ty, method, indent);
+    }
+    writeln!(out, "{}impl {} {{", indent_str, ty.rust_name).ok();
+    for method in &ty.methods {
+        render_method(out, ty, method, indent + 4);
+    }
+    writeln!(out, "{}}}\n", indent_str).ok();
+}
+
+fn render_fallback_type(out: &mut String, ty: &TypeGen, indent: usize) {
     let indent_str = " ".repeat(indent);
     writeln!(
         out,
@@ -741,12 +995,23 @@ fn render_method(out: &mut String, ty: &TypeGen, method: &MethodGen, indent: usi
             indent_str
         )
         .ok();
-        writeln!(
-            out,
-            "{}    views.push(AnyView::from(self.as_object_ref()));",
-            indent_str
-        )
-        .ok();
+        // For repr(C) types, use deref coercion to upcast to ObjectRef
+        // For ObjectWrapper types, use the as_object_ref() method
+        if ty.repr_c_info.is_some() {
+            writeln!(
+                out,
+                "{}    views.push(AnyView::from(self as &tvm_ffi::object::ObjectRef));",
+                indent_str
+            )
+            .ok();
+        } else {
+            writeln!(
+                out,
+                "{}    views.push(AnyView::from(self.as_object_ref()));",
+                indent_str
+            )
+            .ok();
+        }
         writeln!(
             out,
             "{}    views.extend(args.iter().map(AnyView::from));",

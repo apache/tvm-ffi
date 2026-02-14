@@ -240,7 +240,6 @@ impl<'a> TryFrom<AnyView<'a>> for AnyValue {
     }
 }
 
-
 impl Default for Any {
     fn default() -> Self {
         Self::new()

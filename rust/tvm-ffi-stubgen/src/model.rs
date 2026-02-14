@@ -59,12 +59,32 @@ pub(crate) struct FieldGen {
     pub(crate) ty: RustType,
 }
 
+/// Spec for a single get_* method on a repr(C) Ref type.
+#[derive(Debug, Clone)]
+pub(crate) struct GetterSpec {
+    /// Method name, e.g. "get_first"
+    pub(crate) method_name: String,
+    /// Expression to produce the value, e.g. "self.data.first.clone()"
+    pub(crate) access_expr: String,
+    /// Return type, e.g. "Shape" or "i64"
+    pub(crate) ret_type: String,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct TypeGen {
     pub(crate) type_key: String,
     pub(crate) rust_name: String,
     pub(crate) methods: Vec<MethodGen>,
     pub(crate) fields: Vec<FieldGen>,
+    /// Depth in inheritance hierarchy (0 = Object, 1 = direct subclass of Object, ...).
+    pub(crate) type_depth: i32,
+    /// If Some, type passes check_repr_c and we generate repr(C) *Obj + *Ref.
+    pub(crate) repr_c_info: Option<crate::repr_c::ReprCInfo>,
+    /// Getter specs for repr_c types (get_* methods). Empty for non-repr_c.
+    pub(crate) getter_specs: Vec<GetterSpec>,
+    /// Ancestor chain for repr_c types: [DirectParent, Grandparent, ..., ObjectRef].
+    /// Empty for non-repr_c or types without proper hierarchy info.
+    pub(crate) ancestor_chain: Vec<String>,
 }
 
 #[derive(Debug, Default)]
@@ -136,7 +156,10 @@ impl RustType {
     pub(crate) fn call_expr(&self, arg_name: &str) -> String {
         match self.kind {
             RustTypeKind::Plain => arg_name.to_string(),
-            RustTypeKind::ObjectWrapper => format!("{}.as_object_ref().clone()", arg_name),
+            RustTypeKind::ObjectWrapper => {
+                // Use Into<ObjectRef> trait for upcast
+                format!("{}.into()", arg_name)
+            }
         }
     }
 

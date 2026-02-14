@@ -290,6 +290,68 @@ macro_rules! define_object_wrapper {
     };
 }
 
+/// Implement object hierarchy relationships (Deref, From, TryFrom).
+///
+/// This macro is intended for code emitted by the Rust stub generator to
+/// establish parent-child relationships in the object hierarchy.
+///
+/// # Syntax
+/// ```ignore
+/// impl_object_hierarchy!(Self: DirectParent, Grandparent, ..., ObjectRef);
+/// ```
+///
+/// # Generated implementations
+/// - `Deref<Target = DirectParent>` for ergonomic field access
+/// - `From<Self> for DirectParent` (and all ancestors) for upcasts
+/// - `TryFrom<Ancestor> for Self` for downcasts
+///
+/// # Example
+/// ```ignore
+/// // Given: Node -> BaseExpr -> Expr -> ObjectRef
+/// impl_object_hierarchy!(Node: BaseExpr, Expr, ObjectRef);
+/// ```
+#[macro_export]
+macro_rules! impl_object_hierarchy {
+    ($self_ty:ty: $direct_parent:ty $(, $ancestor:ty)* $(,)?) => {
+        // Implement Deref to the direct parent for ergonomic access
+        impl std::ops::Deref for $self_ty {
+            type Target = $direct_parent;
+
+            fn deref(&self) -> &Self::Target {
+                // Safety: All ObjectRef types are repr(C) with a single pointer field (ObjectArc<T>).
+                // Self and DirectParent have identical memory layout.
+                // This is a zero-cost, lifetime-preserving reference cast.
+                unsafe { &*(self as *const $self_ty as *const $direct_parent) }
+            }
+        }
+
+        // Implement From<Self> for DirectParent (upcast)
+        impl From<$self_ty> for $direct_parent {
+            fn from(value: $self_ty) -> Self {
+                $crate::subtyping::upcast(value)
+            }
+        }
+
+        // Implement From<Self> for each ancestor (transitive upcast)
+        $(
+            impl From<$self_ty> for $ancestor {
+                fn from(value: $self_ty) -> Self {
+                    $crate::subtyping::upcast(value)
+                }
+            }
+
+            // Implement TryFrom<Ancestor> for Self (downcast)
+            impl TryFrom<$ancestor> for $self_ty {
+                type Error = $ancestor;
+
+                fn try_from(value: $ancestor) -> Result<Self, Self::Error> {
+                    $crate::subtyping::try_downcast(value)
+                }
+            }
+        )*
+    };
+}
+
 // ----------------------------------------------------------------------------
 // Macros for function definitions
 // ----------------------------------------------------------------------------

@@ -48,7 +48,10 @@ impl FieldGetterInner {
             let arc = <ObjectRef as ObjectRefCore>::data(obj);
             let raw = ObjectArc::as_raw(arc) as *mut TVMFFIObject;
             if raw.is_null() {
-                crate::bail!(crate::error::ATTRIBUTE_ERROR, "Null object for field access");
+                crate::bail!(
+                    crate::error::ATTRIBUTE_ERROR,
+                    "Null object for field access"
+                );
             }
             let field_ptr = (raw as *mut u8).add(self.offset) as *mut std::ffi::c_void;
             let mut out = TVMFFIAny::new();
@@ -171,28 +174,6 @@ fn type_index_for_key(type_key: &'static str) -> Option<i32> {
     }
 }
 
-unsafe fn is_instance_type(type_index: i32, target_index: i32) -> bool {
-    if type_index == target_index {
-        return true;
-    }
-    let info = TVMFFIGetTypeInfo(type_index);
-    if info.is_null() {
-        return false;
-    }
-    let info = &*info;
-    let ancestors = info.type_acenstors;
-    if ancestors.is_null() {
-        return false;
-    }
-    for depth in 0..info.type_depth {
-        let ancestor = *ancestors.add(depth as usize);
-        if !ancestor.is_null() && (*ancestor).type_index == target_index {
-            return true;
-        }
-    }
-    false
-}
-
 unsafe impl<T: ObjectWrapper> AnyCompatible for T {
     fn type_str() -> String {
         T::TYPE_KEY.to_string()
@@ -220,7 +201,7 @@ unsafe impl<T: ObjectWrapper> AnyCompatible for T {
         let Some(target_index) = type_index_for_key(T::TYPE_KEY) else {
             return false;
         };
-        is_instance_type(data.type_index, target_index)
+        crate::subtyping::is_instance_of(data.type_index, target_index)
     }
 
     unsafe fn copy_from_any_view_after_check(data: &TVMFFIAny) -> Self {

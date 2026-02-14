@@ -19,6 +19,7 @@ mod cli;
 mod ffi;
 mod generate;
 mod model;
+mod repr_c;
 mod schema;
 mod utils;
 
@@ -76,7 +77,7 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     let cargo_toml = generate::render_cargo_toml(&args, &type_map)?;
     let lib_rs = generate::render_lib_rs(&functions_root, &types_root);
     let functions_rs = generate::render_functions_rs(&functions_root);
-    let types_rs = generate::render_types_rs(&types_root);
+    let types_rs = generate::render_types_rs(&types_root, &type_map);
     let build_rs = generate::render_build_rs();
 
     let src_dir = args.out_dir.join("src");
