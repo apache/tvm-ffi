@@ -131,7 +131,7 @@ cdef int TVMFFIPyArgSetterTensor_(
     TVMFFIPyArgSetter* handle, TVMFFIPyCallContext* ctx,
     PyObject* arg, TVMFFIAny* out
 ) except -1:
-    if (<Object>arg).chandle != NULL:
+    if (<CObject>arg).chandle != NULL:
         out.type_index = kTVMFFITensor
         out.v_ptr = (<Tensor>arg).chandle
     else:
@@ -144,8 +144,8 @@ cdef int TVMFFIPyArgSetterObject_(
     TVMFFIPyArgSetter* handle, TVMFFIPyCallContext* ctx,
     PyObject* arg, TVMFFIAny* out
 ) except -1:
-    out.type_index = TVMFFIObjectGetTypeIndex((<Object>arg).chandle)
-    out.v_ptr = (<Object>arg).chandle
+    out.type_index = TVMFFIObjectGetTypeIndex((<CObject>arg).chandle)
+    out.v_ptr = (<CObject>arg).chandle
     return 0
 
 
@@ -312,7 +312,7 @@ cdef int TVMFFIPyArgSetterFFIObjectProtocol_(
     """Setter for objects that implement the `__tvm_ffi_object__` protocol."""
     cdef object arg = <object>py_arg
     cdef TVMFFIObjectHandle temp_chandle
-    cdef Object obj = arg.__tvm_ffi_object__()
+    cdef CObject obj = arg.__tvm_ffi_object__()
     cdef long ref_count = Py_REFCNT(obj)
     temp_chandle = obj.chandle
     out.type_index = TVMFFIObjectGetTypeIndex(temp_chandle)
@@ -418,8 +418,8 @@ cdef int TVMFFIPyArgSetterPyNativeObjectStr_(
     # need to check if the arg is a large string returned from ffi
     if arg._tvm_ffi_cached_object is not None:
         arg = arg._tvm_ffi_cached_object
-        out.type_index = TVMFFIObjectGetTypeIndex((<Object>arg).chandle)
-        out.v_ptr = (<Object>arg).chandle
+        out.type_index = TVMFFIObjectGetTypeIndex((<CObject>arg).chandle)
+        out.v_ptr = (<CObject>arg).chandle
         return 0
     return TVMFFIPyArgSetterStr_(handle, ctx, py_arg, out)
 
@@ -457,8 +457,8 @@ cdef int TVMFFIPyArgSetterPyNativeObjectBytes_(
     # need to check if the arg is a large bytes returned from ffi
     if arg._tvm_ffi_cached_object is not None:
         arg = arg._tvm_ffi_cached_object
-        out.type_index = TVMFFIObjectGetTypeIndex((<Object>arg).chandle)
-        out.v_ptr = (<Object>arg).chandle
+        out.type_index = TVMFFIObjectGetTypeIndex((<CObject>arg).chandle)
+        out.v_ptr = (<CObject>arg).chandle
         return 0
     return TVMFFIPyArgSetterBytes_(handle, ctx, py_arg, out)
 
@@ -473,8 +473,8 @@ cdef int TVMFFIPyArgSetterPyNativeObjectGeneral_(
         raise ValueError(f"_tvm_ffi_cached_object is None for {type(arg)}")
     assert arg._tvm_ffi_cached_object is not None
     arg = arg._tvm_ffi_cached_object
-    out.type_index = TVMFFIObjectGetTypeIndex((<Object>arg).chandle)
-    out.v_ptr = (<Object>arg).chandle
+    out.type_index = TVMFFIObjectGetTypeIndex((<CObject>arg).chandle)
+    out.v_ptr = (<CObject>arg).chandle
     return 0
 
 
@@ -507,7 +507,7 @@ cdef int TVMFFIPyArgSetterObjectRValueRef_(
     """Setter for ObjectRValueRef"""
     cdef object arg = <object>py_arg
     out.type_index = kTVMFFIObjectRValueRef
-    out.v_ptr = &((<Object>(arg.obj)).chandle)
+    out.v_ptr = &((<CObject>(arg.obj)).chandle)
     return 0
 
 
@@ -532,8 +532,8 @@ cdef int TVMFFIPyArgSetterException_(
     """Setter for Exception"""
     cdef object arg = <object>py_arg
     arg = _convert_to_ffi_error(arg)
-    out.type_index = TVMFFIObjectGetTypeIndex((<Object>arg).chandle)
-    out.v_ptr = (<Object>arg).chandle
+    out.type_index = TVMFFIObjectGetTypeIndex((<CObject>arg).chandle)
+    out.v_ptr = (<CObject>arg).chandle
     TVMFFIPyPushTempPyObject(ctx, <PyObject*>arg)
     return 0
 
@@ -595,8 +595,8 @@ cdef int TVMFFIPyArgSetterObjectConvertible_(
     # recursively construct a new map
     cdef object arg = <object>py_arg
     arg = arg.asobject()
-    out.type_index = TVMFFIObjectGetTypeIndex((<Object>arg).chandle)
-    out.v_ptr = (<Object>arg).chandle
+    out.type_index = TVMFFIObjectGetTypeIndex((<CObject>arg).chandle)
+    out.v_ptr = (<CObject>arg).chandle
     TVMFFIPyPushTempPyObject(ctx, <PyObject*>arg)
 
 
@@ -727,7 +727,7 @@ cdef int TVMFFIPyArgSetterFactory_(PyObject* value, TVMFFIPyArgSetter* out) exce
     if isinstance(arg, Tensor):
         out.func = TVMFFIPyArgSetterTensor_
         return 0
-    if isinstance(arg, Object):
+    if isinstance(arg, CObject):
         out.func = TVMFFIPyArgSetterObject_
         return 0
     if isinstance(arg, ObjectRValueRef):
@@ -857,7 +857,7 @@ cdef int TVMFFIPyArgSetterFactory_(PyObject* value, TVMFFIPyArgSetter* out) exce
 # ---------------------------------------------------------------------------------------------
 # Implementation of function calling
 # ---------------------------------------------------------------------------------------------
-cdef class Function(Object):
+cdef class Function(CObject):
     """Callable wrapper around a TVM FFI function.
 
     Instances are obtained by converting Python callables with
@@ -908,7 +908,7 @@ cdef class Function(Object):
         result.v_int64 = 0
         TVMFFIPyFuncCall(
             TVMFFIPyArgSetterFactory_,
-            (<Object>self).chandle, <PyObject*>args,
+            (<CObject>self).chandle, <PyObject*>args,
             &result,
             &c_api_ret_code,
             self.release_gil,
@@ -978,7 +978,7 @@ cdef class Function(Object):
 
         CHECK_CALL(ret_code)
         func = Function.__new__(Function)
-        (<Object>func).chandle = chandle
+        (<CObject>func).chandle = chandle
         return func
 
     @staticmethod
@@ -1032,7 +1032,7 @@ cdef class Function(Object):
             TVMFFIPyMLIRPackedSafeCallDeleter(mlir_packed_safe_call)
         CHECK_CALL(ret_code)
         func = Function.__new__(Function)
-        (<Object>func).chandle = chandle
+        (<CObject>func).chandle = chandle
         return func
 
 
@@ -1045,7 +1045,7 @@ def _register_global_func(name: str, pyfunc: Callable[..., Any] | Function, over
     if not isinstance(pyfunc, Function):
         pyfunc = _convert_to_ffi_func(pyfunc)
 
-    CHECK_CALL(TVMFFIFunctionSetGlobal(name_arg.cptr(), (<Object>pyfunc).chandle, ioverride))
+    CHECK_CALL(TVMFFIFunctionSetGlobal(name_arg.cptr(), (<CObject>pyfunc).chandle, ioverride))
     return pyfunc
 
 
@@ -1056,7 +1056,7 @@ def _get_global_func(name: str, allow_missing: bool):
     CHECK_CALL(TVMFFIFunctionGetGlobal(name_arg.cptr(), &chandle))
     if chandle != NULL:
         ret = Function.__new__(Function)
-        (<Object>ret).chandle = chandle
+        (<CObject>ret).chandle = chandle
         return ret
 
     if allow_missing:
@@ -1111,7 +1111,7 @@ def _convert_to_ffi_func(object pyfunc: Callable[..., Any]) -> Function:
     cdef TVMFFIObjectHandle chandle
     _convert_to_ffi_func_handle(pyfunc, &chandle)
     ret = Function.__new__(Function)
-    (<Object>ret).chandle = chandle
+    (<CObject>ret).chandle = chandle
     return ret
 
 
@@ -1133,7 +1133,7 @@ def _convert_to_opaque_object(object pyobject: Any) -> OpaquePyObject:
     cdef TVMFFIObjectHandle chandle
     _convert_to_opaque_object_handle(pyobject, &chandle)
     ret = OpaquePyObject.__new__(OpaquePyObject)
-    (<Object>ret).chandle = chandle
+    (<CObject>ret).chandle = chandle
     return ret
 
 
