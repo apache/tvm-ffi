@@ -27,12 +27,15 @@ pub mod function;
 pub mod function_internal;
 pub mod macros;
 pub mod object;
+pub mod object_wrapper;
 pub mod string;
+pub mod subtyping;
 pub mod type_traits;
 pub use tvm_ffi_sys;
 
-pub use crate::any::{Any, AnyView};
+pub use crate::any::{Any, AnyValue, AnyView};
 pub use crate::collections::array::Array;
+pub use crate::collections::map::Map;
 pub use crate::collections::shape::Shape;
 pub use crate::collections::tensor::{CPUNDAlloc, NDAllocator, Tensor};
 pub use crate::device::{current_stream, with_stream};
@@ -44,6 +47,7 @@ pub use crate::error::{
 pub use crate::extra::module::Module;
 pub use crate::function::Function;
 pub use crate::object::{Object, ObjectArc, ObjectCore, ObjectCoreWithExtraItems, ObjectRefCore};
+pub use crate::object_wrapper::ObjectWrapper;
 pub use crate::string::{Bytes, String};
 pub use crate::type_traits::AnyCompatible;
 
