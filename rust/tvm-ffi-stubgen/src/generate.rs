@@ -756,13 +756,6 @@ fn render_function(out: &mut String, func: &FunctionGen, indent: usize) {
     writeln!(out).ok();
 }
 
-fn type_key_to_short_rust_name(type_map: &BTreeMap<String, String>, type_key: &str) -> String {
-    type_map
-        .get(type_key)
-        .and_then(|path| path.split("::").last().map(String::from))
-        .unwrap_or_else(|| type_key.to_string())
-}
-
 fn render_type(out: &mut String, ty: &TypeGen, indent: usize, type_map: &BTreeMap<String, String>) {
     // Filter out built-in types that are already provided by tvm-ffi
     if is_builtin_type(&ty.type_key) {

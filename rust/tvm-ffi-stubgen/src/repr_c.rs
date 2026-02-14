@@ -27,8 +27,6 @@ use std::collections::BTreeMap;
 pub(crate) struct ReprCInfo {
     /// Type key of the immediate parent (Object or a subclass). None for root types.
     pub(crate) parent_type_key: Option<String>,
-    /// Total size of the struct in bytes.
-    pub(crate) total_size: i32,
     /// Direct fields of this type only (not inherited), sorted by offset.
     /// For codegen: first field of *Obj is parent (or Object), then these.
     pub(crate) direct_fields: Vec<ReprCField>,
@@ -36,7 +34,6 @@ pub(crate) struct ReprCInfo {
 
 #[derive(Debug, Clone)]
 pub(crate) struct ReprCField {
-    pub(crate) name: String,
     pub(crate) rust_name: String,
     pub(crate) offset: i64,
     pub(crate) size: i64,
@@ -101,7 +98,6 @@ pub(crate) fn check_repr_c(
                 repr_c_field_type(schema.as_ref(), type_map, type_key, field.size)?;
             direct_fields.push(ReprCField {
                 rust_name: sanitize_ident(&name, IdentStyle::Function),
-                name,
                 offset: field.offset,
                 size: field.size,
                 alignment: field.alignment,
@@ -136,7 +132,6 @@ pub(crate) fn check_repr_c(
 
     Some(ReprCInfo {
         parent_type_key,
-        total_size,
         direct_fields,
     })
 }
