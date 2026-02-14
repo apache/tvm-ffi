@@ -71,6 +71,7 @@ Table of Contents
 
    packaging/python_packaging.rst
    packaging/stubgen.rst
+   packaging/rust_stubgen.md
    packaging/cpp_tooling.rst
 
 .. toctree::

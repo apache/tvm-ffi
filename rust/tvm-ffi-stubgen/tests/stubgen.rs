@@ -117,8 +117,27 @@ fn write_integration_test(
     let tests_dir = out_dir.join("tests");
     fs::create_dir_all(&tests_dir)?;
     let test_body = format!(
-        "use tvm_ffi_testing_stub::add_one;\n\n#[test]\nfn add_one_roundtrip() {{\n    let lib_path = \"{}\";\n    tvm_ffi::Module::load_from_file(lib_path).expect(\"load tvm_ffi_testing\");\n    let value = add_one(1).expect(\"call add_one\");\n    assert_eq!(value, 2);\n}}\n",
-        testing_lib.display()
+        r#"use tvm_ffi_testing_stub as stub;
+
+#[test]
+fn generated_usage_roundtrip() {{
+    let lib_path = "{lib_path}";
+    stub::load_library(lib_path).expect("load tvm_ffi_testing");
+
+    let value = stub::add_one(1).expect("call add_one");
+    assert_eq!(value, 2);
+
+    let _out = stub::echo(&[tvm_ffi::Any::from(1_i64)]).expect("call echo");
+
+    let obj = stub::make_unregistered_object().expect("create unregistered object");
+    let count = stub::object_use_count(obj.clone()).expect("query object use count");
+    assert!(count >= 1);
+
+    // Fallback wrapper can be constructed from ObjectRef directly.
+    let _wrapped: stub::TestUnregisteredObject = obj.into();
+}}
+"#,
+        lib_path = testing_lib.display()
     );
     fs::write(tests_dir.join("integration.rs"), test_body)?;
     Ok(())
