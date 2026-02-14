@@ -122,8 +122,9 @@ pub(crate) fn check_repr_c(
 
     let mut pos = parent_total_size;
     for f in &direct_fields {
-        // Allow alignment padding before fields, but no overlap
-        if f.offset < pos {
+        // Only allow alignment padding (field must start at aligned position)
+        let aligned_pos = align_up(pos, f.alignment);
+        if f.offset != aligned_pos {
             return None;
         }
         pos = f.offset + f.size;
@@ -150,6 +151,14 @@ fn total_size_from_info(info: &tvm_ffi::tvm_ffi_sys::TVMFFITypeInfo) -> Option<i
     Some(meta.total_size)
 }
 
+/// Align `value` up to the next multiple of `alignment`.
+fn align_up(value: i64, alignment: i64) -> i64 {
+    if alignment <= 0 {
+        return value;
+    }
+    (value + alignment - 1) / alignment * alignment
+}
+
 /// Map schema to (rust_type_name, is_pod). None if not repr_c compatible.
 fn repr_c_field_type(
     schema: Option<&TypeSchema>,
@@ -159,6 +168,7 @@ fn repr_c_field_type(
 ) -> Option<(String, bool)> {
     let schema = schema?;
     match schema.origin.as_str() {
+        "Any" => Some(("tvm_ffi::AnyValue".to_string(), false)),
         "bool" => Some(("bool".to_string(), true)),
         "int" => match field_size {
             1 => Some(("i8".to_string(), true)),

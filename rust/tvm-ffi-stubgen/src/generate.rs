@@ -567,6 +567,25 @@ fn render_facade_module(
     indent: usize,
     is_root: bool,
 ) {
+    // Check if this module has any actual content
+    let has_functions = functions.map_or(false, |node| !node.functions.is_empty());
+    let has_types = types.map_or(false, |node| {
+        node.types.iter().any(|ty| !is_builtin_type(&ty.type_key))
+    });
+
+    let mut child_names = std::collections::BTreeSet::new();
+    if let Some(node) = functions {
+        child_names.extend(node.children.keys().cloned());
+    }
+    if let Some(node) = types {
+        child_names.extend(node.children.keys().cloned());
+    }
+
+    // Skip rendering if the module is empty and has no children
+    if !is_root && !has_functions && !has_types && child_names.is_empty() {
+        return;
+    }
+
     let indent_str = " ".repeat(indent);
     if !is_root {
         let name = path.last().expect("module path missing");
@@ -607,14 +626,6 @@ fn render_facade_module(
             )
             .ok();
         }
-    }
-
-    let mut child_names = std::collections::BTreeSet::new();
-    if let Some(node) = functions {
-        child_names.extend(node.children.keys().cloned());
-    }
-    if let Some(node) = types {
-        child_names.extend(node.children.keys().cloned());
     }
 
     for child in child_names {
@@ -774,6 +785,7 @@ fn is_builtin_type(type_key: &str) -> bool {
             | "bool"
             | "int"
             | "float"
+            | "None"
     )
 }
 

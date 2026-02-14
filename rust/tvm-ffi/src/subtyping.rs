@@ -29,6 +29,7 @@ use tvm_ffi_sys::TVMFFIGetTypeInfo;
 ///
 /// # Safety
 /// This function accesses the type info table via FFI and follows ancestor pointers.
+#[doc(hidden)]
 pub unsafe fn is_instance_of(type_index: i32, target_index: i32) -> bool {
     if type_index == target_index {
         return true;
@@ -59,9 +60,10 @@ pub unsafe fn is_instance_of(type_index: i32, target_index: i32) -> bool {
 /// * `From` - The source type (subtype)
 /// * `To` - The target type (supertype)
 ///
-/// # Safety
-/// The caller must ensure that `To` is a valid supertype of `From`.
-/// This is typically enforced by the `impl_object_hierarchy!` macro.
+/// # Internal Implementation Detail
+/// This function is public for macro expansion but should not be called directly.
+/// Use `From::from()` or `.into()` for upcasting instead.
+#[doc(hidden)]
 pub fn upcast<From: ObjectRefCore, To: ObjectRefCore>(value: From) -> To {
     unsafe {
         let arc = <From as ObjectRefCore>::into_data(value);
@@ -83,8 +85,10 @@ pub fn upcast<From: ObjectRefCore, To: ObjectRefCore>(value: From) -> To {
 /// * `Ok(To)` - If the runtime type check succeeds
 /// * `Err(From)` - If the runtime type check fails, returns the original value
 ///
-/// # Safety
-/// This function performs runtime type checking using the TVM FFI type system.
+/// # Internal Implementation Detail
+/// This function is public for macro expansion but should not be called directly.
+/// Use `TryFrom::try_from()` or `.try_into()` for downcasting instead.
+#[doc(hidden)]
 pub fn try_downcast<From: ObjectRefCore, To: ObjectRefCore>(value: From) -> Result<To, From> {
     unsafe {
         let arc = <From as ObjectRefCore>::data(&value);

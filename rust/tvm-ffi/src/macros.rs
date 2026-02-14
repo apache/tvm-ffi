@@ -270,6 +270,12 @@ macro_rules! define_object_wrapper {
             }
         }
 
+        impl From<$name> for $crate::object::ObjectRef {
+            fn from(wrapper: $name) -> Self {
+                wrapper.into_object_ref()
+            }
+        }
+
         impl $crate::object_wrapper::ObjectWrapper for $name {
             const TYPE_KEY: &'static str = $type_key;
 
@@ -329,6 +335,15 @@ macro_rules! impl_object_hierarchy {
         impl From<$self_ty> for $direct_parent {
             fn from(value: $self_ty) -> Self {
                 $crate::subtyping::upcast(value)
+            }
+        }
+
+        // Implement TryFrom<DirectParent> for Self (downcast)
+        impl TryFrom<$direct_parent> for $self_ty {
+            type Error = $direct_parent;
+
+            fn try_from(value: $direct_parent) -> Result<Self, Self::Error> {
+                $crate::subtyping::try_downcast(value)
             }
         }
 
