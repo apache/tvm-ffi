@@ -75,6 +75,21 @@ For non-repr(C)-compatible types:
 - `define_object_wrapper!(Type, "type.key")`
 - field access via `FieldGetter<T>`
 
+### Object Method Lookup Path
+
+Object methods (including `__ffi_init__`) are generated from type reflection metadata,
+not from global function registry names:
+
+- generated code calls `tvm_ffi::object_wrapper::resolve_type_method(type_key, method_name)`
+- runtime lookup path is `TVMFFITypeKeyToIndex -> TVMFFIGetTypeInfo -> methods[]`
+- the `method` entry is converted from `AnyView` to owned `Any`, then to `ffi.Function`
+
+Global wrappers under `functions.rs` still use `Function::get_global`, but type methods in
+`types.rs` no longer assume `<type>.<method>` is globally registered.
+
+For constructor-like methods (`__ffi_init__`), stubgen emits `new(...)` directly as the public
+Rust API (or `ffi_init` only when a user-defined `new` method already exists).
+
 ## Object Model and Inheritance
 
 repr(C) object inheritance is modeled by composition and deref chain:

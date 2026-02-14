@@ -89,12 +89,26 @@ pub(crate) fn build_type_entries(
             if info.num_methods > 0 && !info.methods.is_null() {
                 let method_slice =
                     unsafe { std::slice::from_raw_parts(info.methods, info.num_methods as usize) };
+                let has_user_new = method_slice.iter().any(|method| {
+                    matches!(
+                        ffi::byte_array_to_string_opt(&method.name).as_deref(),
+                        Some("new")
+                    )
+                });
                 for method in method_slice {
                     let method_name = match ffi::byte_array_to_string_opt(&method.name) {
                         Some(name) => name,
                         None => continue,
                     };
-                    let rust_method_name = map_method_name(&method_name);
+                    let rust_method_name = if method_name == "__ffi_init__" {
+                        if has_user_new {
+                            "ffi_init".to_string()
+                        } else {
+                            "new".to_string()
+                        }
+                    } else {
+                        map_method_name(&method_name)
+                    };
                     let is_static = (method.flags & METHOD_FLAG_STATIC) != 0;
                     let meta = ffi::byte_array_to_string_opt(&method.metadata);
                     let schema = meta
@@ -103,9 +117,8 @@ pub(crate) fn build_type_entries(
                         .and_then(|s| parse_type_schema(&s));
                     let sig =
                         build_method_sig(schema.as_ref(), type_map, Some(key.as_str()), is_static);
-                    let full_name = format!("{}.{}", key, method_name);
                     methods.push(MethodGen {
-                        full_name,
+                        source_name: method_name,
                         rust_name: rust_method_name,
                         sig,
                         is_static,
@@ -965,8 +978,8 @@ fn render_method_static(out: &mut String, ty: &TypeGen, method: &MethodGen, inde
     let static_name = static_ident("METHOD", &format!("{}::{}", ty.type_key, method.rust_name));
     writeln!(
         out,
-        "{}static {}: LazyLock<tvm_ffi::Function> = LazyLock::new(|| tvm_ffi::Function::get_global(\"{}\").expect(\"missing method\"));",
-        indent_str, static_name, method.full_name
+        "{}static {}: LazyLock<tvm_ffi::Function> = LazyLock::new(|| tvm_ffi::object_wrapper::resolve_type_method(\"{}\", \"{}\").expect(\"missing type method\"));",
+        indent_str, static_name, ty.type_key, method.source_name
     )
     .ok();
 }
@@ -1122,9 +1135,6 @@ fn render_method_call_args(method: &MethodGen) -> String {
 }
 
 fn map_method_name(name: &str) -> String {
-    if name == "__ffi_init__" {
-        return "c_ffi_init".to_string();
-    }
     sanitize_ident(name, IdentStyle::Function)
 }
 

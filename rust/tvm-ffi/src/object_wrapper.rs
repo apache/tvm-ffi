@@ -22,8 +22,8 @@ use crate::object::{Object, ObjectArc, ObjectRef, ObjectRefCore};
 use crate::type_traits::AnyCompatible;
 use std::marker::PhantomData;
 use tvm_ffi_sys::{
-    TVMFFIAny, TVMFFIByteArray, TVMFFIFieldGetter, TVMFFIGetTypeInfo, TVMFFIObject,
-    TVMFFITypeKeyToIndex,
+    TVMFFIAny, TVMFFIAnyViewToOwnedAny, TVMFFIByteArray, TVMFFIFieldGetter, TVMFFIGetTypeInfo,
+    TVMFFIObject, TVMFFITypeKeyToIndex,
 };
 
 /// Runtime support for stubgen-generated object wrappers.
@@ -35,6 +35,20 @@ pub trait ObjectWrapper: Clone {
     fn from_object(inner: ObjectRef) -> Self;
     fn as_object_ref(&self) -> &ObjectRef;
     fn into_object_ref(self) -> ObjectRef;
+}
+
+/// Resolve an object type method from runtime reflection metadata.
+///
+/// Unlike `Function::get_global`, this lookup walks `TVMFFITypeInfo.methods`
+/// for the given type key and converts the method entry to a callable
+/// `ffi.Function`.
+pub fn resolve_type_method(type_key: &str, method_name: &str) -> crate::Result<crate::Function> {
+    unsafe {
+        let key = TVMFFIByteArray::from_str(type_key);
+        let mut type_index = 0i32;
+        crate::check_safe_call!(TVMFFITypeKeyToIndex(&key, &mut type_index))?;
+        resolve_type_method_by_type_index(type_index, type_key, method_name)
+    }
 }
 
 struct FieldGetterInner {
@@ -104,6 +118,56 @@ fn resolve_field_by_type_key(
         let mut type_index = 0i32;
         crate::check_safe_call!(TVMFFITypeKeyToIndex(&key, &mut type_index))?;
         resolve_field_by_type_index(type_index, field_name)
+    }
+}
+
+fn resolve_type_method_by_type_index(
+    type_index: i32,
+    type_key: &str,
+    method_name: &str,
+) -> crate::Result<crate::Function> {
+    unsafe {
+        let info = TVMFFIGetTypeInfo(type_index);
+        if info.is_null() {
+            crate::bail!(
+                crate::error::ATTRIBUTE_ERROR,
+                "Type info missing for type {}",
+                type_key
+            );
+        }
+        let info = &*info;
+        if info.methods.is_null() || info.num_methods <= 0 {
+            crate::bail!(
+                crate::error::ATTRIBUTE_ERROR,
+                "Type {} has no methods",
+                type_key
+            );
+        }
+        let methods = std::slice::from_raw_parts(info.methods, info.num_methods as usize);
+        for method in methods {
+            if method.name.as_str() != method_name {
+                continue;
+            }
+            let mut owned = TVMFFIAny::new();
+            crate::check_safe_call!(TVMFFIAnyViewToOwnedAny(&method.method, &mut owned))?;
+            let method_any = Any::from_raw_ffi_any(owned);
+            return method_any.try_into().map_err(|_err: crate::Error| {
+                crate::Error::new(
+                    crate::TYPE_ERROR,
+                    &format!(
+                        "Method {}.{} is not callable as ffi.Function",
+                        type_key, method_name
+                    ),
+                    "",
+                )
+            });
+        }
+        crate::bail!(
+            crate::error::ATTRIBUTE_ERROR,
+            "Method {}.{} not found in reflection metadata",
+            type_key,
+            method_name
+        );
     }
 }
 

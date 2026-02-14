@@ -51,11 +51,33 @@ fn stubgen_tvm_ffi_testing() {
         .join("src")
         .join("_tvm_ffi_stubgen_detail")
         .join("functions.rs");
+    let types_rs = out_dir
+        .join("src")
+        .join("_tvm_ffi_stubgen_detail")
+        .join("types.rs");
     assert!(cargo_toml.exists(), "Cargo.toml not generated");
     assert!(functions_rs.exists(), "functions.rs not generated");
+    assert!(types_rs.exists(), "types.rs not generated");
 
     let functions_body = fs::read_to_string(functions_rs).expect("read functions.rs");
+    let types_body = fs::read_to_string(types_rs).expect("read types.rs");
     assert!(functions_body.contains("add_one"), "missing add_one stub");
+    assert!(
+        types_body.contains("resolve_type_method"),
+        "type method wrappers should resolve from type metadata"
+    );
+    assert!(
+        types_body.contains("pub fn new("),
+        "constructor `new` should be generated when available"
+    );
+    assert!(
+        !types_body.contains("c_ffi_init"),
+        "legacy constructor name c_ffi_init should not be generated"
+    );
+    assert!(
+        !types_body.contains("Function::get_global(\"testing.TestIntPair.__ffi_init__\")"),
+        "type methods should not use global lookup path"
+    );
 
     write_integration_test(&out_dir, &testing_lib).expect("write integration test");
     run_generated_tests(&out_dir, &lib_dir).expect("run generated tests");
@@ -128,6 +150,27 @@ fn generated_usage_roundtrip() {{
     assert_eq!(value, 2);
 
     let _out = stub::echo(&[tvm_ffi::Any::from(1_i64)]).expect("call echo");
+
+    // Constructor + instance method should resolve from type metadata.
+    let pair_obj = stub::TestIntPair::new(3, 4).expect("construct TestIntPair");
+    let pair: stub::TestIntPair = pair_obj
+        .try_into()
+        .unwrap_or_else(|_| panic!("object -> TestIntPair downcast failed"));
+    let sum_any = pair.sum(&[]).expect("call TestIntPair.sum");
+    let sum: i64 = sum_any.try_into().expect("sum any -> i64");
+    assert_eq!(sum, 7);
+
+    // Verify upcast/downcast roundtrip on Cxx inheritance chain.
+    let derived_obj = stub::TestCxxClassDerived::new(11, 7, 3.5, 1.25)
+        .expect("construct TestCxxClassDerived");
+    let _derived: stub::TestCxxClassDerived = derived_obj.clone().into();
+    let base: stub::TestCxxClassBase = derived_obj.clone().into();
+    let base_obj: tvm_ffi::object::ObjectRef = base.clone().into();
+    let roundtrip: stub::TestCxxClassDerived = base_obj.into();
+    assert_eq!(base.v_i64().expect("base.v_i64"), 11);
+    assert_eq!(base.v_i32().expect("base.v_i32"), 7);
+    assert!((roundtrip.v_f64().expect("derived.v_f64") - 3.5).abs() < 1e-9);
+    assert!((roundtrip.v_f32().expect("derived.v_f32") - 1.25).abs() < 1e-6);
 
     let obj = stub::make_unregistered_object().expect("create unregistered object");
     let count = stub::object_use_count(obj.clone()).expect("query object use count");

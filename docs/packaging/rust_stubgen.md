@@ -77,6 +77,25 @@ fn main() -> tvm_ffi::Result<()> {
     // Call a function via packed interface for dynamic signature
     let _out = stub::echo(&[tvm_ffi::Any::from(1_i64)])?;
 
+    // Object constructor/method wrappers are resolved from type metadata.
+    let pair_obj = stub::TestIntPair::new(3, 4)?;
+    let pair: stub::TestIntPair = pair_obj
+        .try_into()
+        .map_err(|_| tvm_ffi::Error::new(tvm_ffi::TYPE_ERROR, "downcast failed", ""))?;
+    let sum_any = pair.sum(&[])?;
+    let sum: i64 = sum_any.try_into()?;
+    assert_eq!(sum, 7);
+
+    // Cxx inheritance sample: construct derived, view as base, then convert back.
+    let derived_obj = stub::TestCxxClassDerived::new(11, 7, 3.5, 1.25)?;
+    let base: stub::TestCxxClassBase = derived_obj.clone().into();
+    let base_obj: tvm_ffi::object::ObjectRef = base.clone().into();
+    let derived_again: stub::TestCxxClassDerived = base_obj.into();
+    assert_eq!(base.v_i64()?, 11);
+    assert_eq!(base.v_i32()?, 7);
+    assert!((derived_again.v_f64()? - 3.5).abs() < 1e-9);
+    assert!((derived_again.v_f32()? - 1.25).abs() < 1e-6);
+
     // Use object-returning wrappers and ObjectRef-based APIs
     let obj = stub::make_unregistered_object()?;
     let count = stub::object_use_count(obj.clone())?;
@@ -91,6 +110,7 @@ fn main() -> tvm_ffi::Result<()> {
 
 - Load the library once before using the APIs.
 - Generated functions support typed signatures when possible and fall back to `Any` for dynamic calling.
+- Generated object method wrappers (including constructor `new`) are resolved via type metadata rather than global function lookup.
 - Generated object-returning wrappers integrate with `ObjectRef` APIs and wrapper conversions.
 
 

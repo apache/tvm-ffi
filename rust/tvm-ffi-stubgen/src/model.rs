@@ -46,7 +46,7 @@ pub(crate) struct FunctionGen {
 
 #[derive(Debug, Clone)]
 pub(crate) struct MethodGen {
-    pub(crate) full_name: String,
+    pub(crate) source_name: String,
     pub(crate) rust_name: String,
     pub(crate) sig: FunctionSig,
     pub(crate) is_static: bool,
