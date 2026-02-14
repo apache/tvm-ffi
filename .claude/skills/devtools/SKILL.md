@@ -178,7 +178,7 @@ uv run python -c "import tvm_ffi; print(tvm_ffi.__version__)"
 Install with test dependencies, then run pytest:
 
 ```bash
-uv pip install --reinstall --verbose --group test -e .
+uv pip install --force-reinstall --verbose --group test -e .
 uv run pytest -vvs tests/python
 ```
 
