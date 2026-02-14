@@ -135,11 +135,11 @@ ctest -V -C Debug --test-dir build_test --output-on-failure
 
 | Option                           | Default | Description                                  |
 |----------------------------------|---------|----------------------------------------------|
-| `TVM_FFI_BUILD_TESTS`           | `OFF`   | Enable C++ test targets                      |
-| `TVM_FFI_ATTACH_DEBUG_SYMBOLS`  | `OFF`   | Attach debug symbols in release mode         |
-| `TVM_FFI_USE_LIBBACKTRACE`      | `ON`    | Enable libbacktrace                          |
-| `TVM_FFI_USE_EXTRA_CXX_API`     | `ON`    | Enable extra C++ API in shared lib           |
-| `TVM_FFI_BACKTRACE_ON_SEGFAULT` | `ON`    | Print backtrace on segfault                  |
+| `TVM_FFI_BUILD_TESTS`            | `OFF`   | Enable C++ test targets                      |
+| `TVM_FFI_ATTACH_DEBUG_SYMBOLS`   | `OFF`   | Attach debug symbols in release mode         |
+| `TVM_FFI_USE_LIBBACKTRACE`       | `ON`    | Enable libbacktrace                          |
+| `TVM_FFI_USE_EXTRA_CXX_API`      | `ON`    | Enable extra C++ API in shared lib           |
+| `TVM_FFI_BACKTRACE_ON_SEGFAULT`  | `ON`    | Print backtrace on segfault                  |
 | `CMAKE_EXPORT_COMPILE_COMMANDS`  | `OFF`   | Generate `compile_commands.json` for clangd  |
 
 > On Windows, run from a **Developer Command Prompt for VS** or ensure the MSVC toolchain is on your `PATH`.
