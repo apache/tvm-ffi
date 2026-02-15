@@ -116,6 +116,12 @@ cdef class Object:
         # case of error before chandle is set
         self.chandle = NULL
 
+    def __init__(self):
+        raise TypeError(
+            f"Cannot directly create {type(self).__name__} instance. "
+            f"Use FFI constructors or register the class with @register_object."
+        )
+
     def __dealloc__(self):
         if self.chandle != NULL:
             CHECK_CALL(TVMFFIObjectDecRef(self.chandle))
