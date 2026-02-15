@@ -153,14 +153,15 @@ TVM_FFI_STATIC_INIT_BLOCK() {
            [](const ffi::MapObj* n) -> ffi::Function {
              return ffi::Function::FromTyped(MapForwardIterFunctor(n->begin(), n->end()));
            })
-      .def("ffi.MapGetMissingObject", GetMissingObject)
-      .def("ffi.MapGetItemOrMissing", [](const ffi::MapObj* n, const Any& k) -> Any {
-        try {
-          return n->at(k);
-        } catch (const tvm::ffi::Error& e) {
-          return GetMissingObject();
-        }
-      });
+      .def("ffi.MapGetItemOrMissing",
+           [](const ffi::MapObj* n, const Any& k) -> Any {
+             try {
+               return n->at(k);
+             } catch (const tvm::ffi::Error& e) {
+               return GetMissingObject();
+             }
+           })
+      .def("ffi.GetInvalidObject", []() -> ObjectRef { return GetMissingObject(); });
 }
 }  // namespace ffi
 }  // namespace tvm

@@ -24,6 +24,7 @@ from enum import IntEnum
 from typing import Any, Callable
 
 # Public module-level variables referenced by Python code
+MISSING: Object
 ERROR_NAME_TO_TYPE: dict[str, type]
 ERROR_TYPE_TO_NAME: dict[type, str]
 

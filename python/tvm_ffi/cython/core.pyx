@@ -38,3 +38,6 @@ include "./tensor.pxi"
 _register_object_by_index(kTVMFFITensor, Tensor)
 include "./function.pxi"
 _register_object_by_index(kTVMFFIFunction, Function)
+
+# Global invalid/missing object singleton
+MISSING = _get_global_func("ffi.GetInvalidObject", False)()

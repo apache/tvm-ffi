@@ -79,7 +79,7 @@ K = TypeVar("K")
 V = TypeVar("V")
 _DefaultT = TypeVar("_DefaultT")
 
-MISSING = _ffi_api.MapGetMissingObject()
+from .core import MISSING
 
 
 def getitem_helper(
