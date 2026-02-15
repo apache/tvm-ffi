@@ -23,6 +23,8 @@ from typing import Any
 import pytest
 import tvm_ffi
 from tvm_ffi import testing
+from tvm_ffi.container import MISSING as CONTAINER_MISSING
+from tvm_ffi.core import MISSING
 
 if sys.version_info >= (3, 9):
     # PEP 585 generics
@@ -499,3 +501,16 @@ def test_seq_cross_conv_incompatible_array_to_list() -> None:
     arr = tvm_ffi.Array(["not", "ints"])
     with pytest.raises(TypeError):
         testing.schema_id_list_int(arr)  # type: ignore[arg-type]
+
+
+def test_missing_object() -> None:
+    """Test that MISSING is a valid singleton and works with Map.get()."""
+    # MISSING should be an Object instance
+    assert isinstance(MISSING, tvm_ffi.Object)
+    # MISSING should be the same object across imports
+    assert MISSING.same_as(CONTAINER_MISSING)
+    # Map.get() should use MISSING internally
+    m = tvm_ffi.Map({"a": 1})
+    assert m.get("a") == 1
+    assert m.get("b") is None
+    assert m.get("b", 42) == 42
