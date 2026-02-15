@@ -41,7 +41,7 @@ _InputClsType = TypeVar("_InputClsType")
 
 @dataclass_transform(field_specifiers=(field,), kw_only_default=False)
 def c_class(
-    type_key: str, init: bool = True, kw_only: bool = False, repr: bool = True
+    type_key: str, init: bool = True, kw_only: bool = False
 ) -> Callable[[Type[_InputClsType]], Type[_InputClsType]]:  # noqa: UP006
     """(Experimental) Create a dataclass-like proxy for a C++ class registered with TVM FFI.
 
@@ -77,10 +77,6 @@ def c_class(
         ``__init__``. Individual fields can override this by setting
         ``kw_only=False`` in :func:`field`. Additionally, a ``KW_ONLY`` sentinel
         annotation can be used to mark all subsequent fields as keyword-only.
-    repr
-        If ``True`` and the Python class does not define ``__repr__``, a
-        representation method is auto-generated that includes all fields with
-        ``repr=True``.
 
     Returns
     -------
@@ -128,9 +124,8 @@ def c_class(
     """
 
     def decorator(super_type_cls: Type[_InputClsType]) -> Type[_InputClsType]:  # noqa: UP006
-        nonlocal init, repr
+        nonlocal init
         init = init and "__init__" not in super_type_cls.__dict__
-        repr = repr and "__repr__" not in super_type_cls.__dict__
         # Step 1. Retrieve `type_info` from registry
         type_info: TypeInfo = _lookup_or_register_type_info_from_type_key(type_key)
         assert type_info.parent_type_info is not None
@@ -146,11 +141,10 @@ def c_class(
             )
         # Step 3. Create the proxy class with the fields as properties
         fn_init = _utils.method_init(super_type_cls, type_info) if init else None
-        fn_repr = _utils.method_repr(super_type_cls, type_info) if repr else None
         type_cls: Type[_InputClsType] = _utils.type_info_to_cls(  # noqa: UP006
             type_info=type_info,
             cls=super_type_cls,
-            methods={"__init__": fn_init, "__repr__": fn_repr},
+            methods={"__init__": fn_init},
         )
         _set_type_cls(type_info, type_cls)
         # Step 4. Set up __copy__, __deepcopy__, __replace__

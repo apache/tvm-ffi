@@ -26,8 +26,22 @@ def _set_class_object(cls):
     _CLASS_OBJECT = cls
 
 
+_REPR_PRINT = None
+_REPR_PRINT_LOADED = False
+
+
 def __object_repr__(obj: "Object") -> str:
-    """Object repr function that can be overridden by assigning to it"""
+    """Object repr function using ffi.ReprPrint when available."""
+    global _REPR_PRINT, _REPR_PRINT_LOADED
+    if not _REPR_PRINT_LOADED:
+        _REPR_PRINT_LOADED = True
+        _REPR_PRINT = _get_global_func("ffi.ReprPrint", False)
+    if _REPR_PRINT is not None:
+        try:
+            return str(_REPR_PRINT(obj))
+        except Exception:  # noqa: BLE001
+            # Silently fall back: __repr__ must never raise.
+            pass
     return type(obj).__name__ + "(" + str(obj.__ctypes_handle__().value) + ")"
 
 

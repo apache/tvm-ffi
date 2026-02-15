@@ -47,7 +47,7 @@ class Field:
     way the decorator understands.
     """
 
-    __slots__ = ("default_factory", "init", "kw_only", "name", "repr")
+    __slots__ = ("default_factory", "init", "kw_only", "name")
 
     def __init__(
         self,
@@ -55,14 +55,12 @@ class Field:
         name: str | None = None,
         default_factory: Callable[[], _FieldValue] | _MISSING_TYPE = MISSING,
         init: bool = True,
-        repr: bool = True,
         kw_only: bool | _MISSING_TYPE = MISSING,
     ) -> None:
         """Do not call directly; use :func:`field` instead."""
         self.name = name
         self.default_factory = default_factory
         self.init = init
-        self.repr = repr
         self.kw_only = kw_only
 
 
@@ -71,7 +69,6 @@ def field(
     default: _FieldValue | _MISSING_TYPE = MISSING,
     default_factory: Callable[[], _FieldValue] | _MISSING_TYPE = MISSING,
     init: bool = True,
-    repr: bool = True,
     kw_only: bool | _MISSING_TYPE = MISSING,
 ) -> _FieldValue:
     """(Experimental) Declare a dataclass-style field on a :func:`c_class` proxy.
@@ -94,9 +91,6 @@ def field(
     init
         If ``True`` the field is included in the generated ``__init__``.
         If ``False`` the field is omitted from input arguments of ``__init__``.
-    repr
-        If ``True`` the field is included in the generated ``__repr__``.
-        If ``False`` the field is omitted from the ``__repr__`` output.
     kw_only
         If ``True``, the field is a keyword-only argument in ``__init__``.
         If ``MISSING``, inherits from the class-level ``kw_only`` setting or
@@ -158,13 +152,11 @@ def field(
         raise ValueError("Cannot specify both `default` and `default_factory`")
     if not isinstance(init, bool):
         raise TypeError("`init` must be a bool")
-    if not isinstance(repr, bool):
-        raise TypeError("`repr` must be a bool")
     if kw_only is not MISSING and not isinstance(kw_only, bool):
         raise TypeError(f"`kw_only` must be a bool, got {type(kw_only).__name__!r}")
     if default is not MISSING:
         default_factory = _make_default_factory(default)
-    ret = Field(default_factory=default_factory, init=init, repr=repr, kw_only=kw_only)
+    ret = Field(default_factory=default_factory, init=init, kw_only=kw_only)
     return cast(_FieldValue, ret)
 
 
