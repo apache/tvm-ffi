@@ -105,7 +105,6 @@ class AccessPath(Object):
 
     def __init__(self) -> None:
         """Disallow direct construction; use `AccessPath.root()` instead."""
-        super().__init__()
         raise ValueError(
             "AccessPath can't be initialized directly. "
             "Use AccessPath.root() to create a path to the root object"
