@@ -63,6 +63,8 @@ ObjectRef GetMissingObject() {
 
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
+  refl::EnsureTypeAttrColumn("__any_hash__");
+  refl::EnsureTypeAttrColumn("__any_equal__");
   refl::GlobalDef()
       .def_packed("ffi.Array",
                   [](ffi::PackedArgs args, Any* ret) {

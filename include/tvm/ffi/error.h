@@ -317,6 +317,25 @@ inline Error EnvErrorAlreadySet() { return Error("EnvErrorAlreadySet", "", ""); 
 
 namespace details {
 
+/*!
+ * \brief Move the last raised safe-call error from TLS.
+ * \return The raised error object.
+ */
+TVM_FFI_INLINE Error MoveFromSafeCallRaised() {
+  TVMFFIObjectHandle handle;
+  TVMFFIErrorMoveFromRaised(&handle);
+  return details::ObjectUnsafe::ObjectRefFromObjectPtr<Error>(
+      details::ObjectUnsafe::ObjectPtrFromOwned<Object>(static_cast<TVMFFIObject*>(handle)));
+}
+
+/*!
+ * \brief Set a raised safe-call error into TLS.
+ * \param error The error to be raised.
+ */
+TVM_FFI_INLINE void SetSafeCallRaised(const Error& error) {
+  TVMFFIErrorSetRaised(details::ObjectUnsafe::TVMFFIObjectPtrFromObjectRef(error));
+}
+
 class ErrorBuilder {
  public:
   explicit ErrorBuilder(std::string kind, std::string backtrace, bool log_before_throw)
