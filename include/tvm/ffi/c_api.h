@@ -861,6 +861,15 @@ typedef enum {
    * This is an optional meta-data for structural eq/hash.
    */
   kTVMFFIFieldFlagBitMaskSEqHashDef = 1 << 4,
+  /*!
+   * \brief The default_value_or_factory is a callable factory function () -> Any.
+   *
+   * When this flag is set along with kTVMFFIFieldFlagBitMaskHasDefault,
+   * the default_value_or_factory field contains a Function that should be
+   * called with no arguments to produce the default value, rather than
+   * being used directly as the default value.
+   */
+  kTVMFFIFieldFlagBitMaskDefaultFromFactory = 1 << 5,
 #ifdef __cplusplus
 };
 #else
@@ -960,10 +969,15 @@ typedef struct {
    */
   TVMFFIFieldSetter setter;
   /*!
-   * \brief The default value of the field, this field hold AnyView,
-   *        valid when flags set kTVMFFIFieldFlagBitMaskHasDefault
+   * \brief The default value or default factory of the field.
+   *
+   * When flags has kTVMFFIFieldFlagBitMaskHasDefault set:
+   * - If kTVMFFIFieldFlagBitMaskDefaultFromFactory is NOT set,
+   *   this holds the static default value as AnyView.
+   * - If kTVMFFIFieldFlagBitMaskDefaultFromFactory IS set,
+   *   this holds a Function (() -> Any) that produces the default.
    */
-  TVMFFIAny default_value;
+  TVMFFIAny default_value_or_factory;
   /*!
    * \brief Records the static type kind of the field.
    *

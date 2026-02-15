@@ -211,10 +211,11 @@ class TypeTable {
     field_data.doc = this->CopyString(info->doc);
     field_data.metadata = this->CopyString(info->metadata);
     if (info->flags & kTVMFFIFieldFlagBitMaskHasDefault) {
-      field_data.default_value =
-          this->CopyAny(AnyView::CopyFromTVMFFIAny(info->default_value)).CopyToTVMFFIAny();
+      field_data.default_value_or_factory =
+          this->CopyAny(AnyView::CopyFromTVMFFIAny(info->default_value_or_factory))
+              .CopyToTVMFFIAny();
     } else {
-      field_data.default_value = AnyView(nullptr).CopyToTVMFFIAny();
+      field_data.default_value_or_factory = AnyView(nullptr).CopyToTVMFFIAny();
     }
     entry->type_fields_data.push_back(field_data);
     // refresh ptr as the data can change

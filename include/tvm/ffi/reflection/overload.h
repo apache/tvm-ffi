@@ -449,7 +449,7 @@ class OverloadObjectDef : private ObjectDef<Class> {
     info.getter = ReflectionDefBase::FieldGetter<T>;
     info.setter = ReflectionDefBase::FieldSetter<T>;
     // initialize default value to nullptr
-    info.default_value = AnyView(nullptr).CopyToTVMFFIAny();
+    info.default_value_or_factory = AnyView(nullptr).CopyToTVMFFIAny();
     info.doc = TVMFFIByteArray{nullptr, 0};
     info.metadata_.emplace_back("type_schema", details::TypeSchema<T>::v());
     // apply field info traits

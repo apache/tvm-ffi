@@ -286,9 +286,11 @@ pub struct TVMFFIFieldInfo {
     /// The setter to access the field
     /// The setter is set even if the field is readonly for serialization
     pub setter: Option<TVMFFIFieldSetter>,
-    /// The default value of the field, this field hold AnyView,
-    /// valid when flags set kTVMFFIFieldFlagBitMaskHasDefault
-    pub default_value: TVMFFIAny,
+    /// The default value or factory of the field, this field holds AnyView.
+    /// Valid when flags set kTVMFFIFieldFlagBitMaskHasDefault.
+    /// When kTVMFFIFieldFlagBitMaskDefaultFromFactory is also set,
+    /// this is a callable factory function () -> Any.
+    pub default_value_or_factory: TVMFFIAny,
     /// Records the static type kind of the field
     pub field_static_type_index: i32,
 }

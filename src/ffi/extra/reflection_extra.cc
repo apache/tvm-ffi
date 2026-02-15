@@ -22,6 +22,7 @@
  * \brief Extra reflection registrations. *
  */
 #include <tvm/ffi/reflection/access_path.h>
+#include <tvm/ffi/reflection/accessor.h>
 #include <tvm/ffi/reflection/registry.h>
 
 namespace tvm {
@@ -78,7 +79,7 @@ void MakeObjectFromPackedArgs(ffi::PackedArgs args, Any* ret) {
         field_info->setter(field_addr, reinterpret_cast<const TVMFFIAny*>(&field_value));
         keys_found[arg_index] = true;
       } else if (field_info->flags & kTVMFFIFieldFlagBitMaskHasDefault) {
-        field_info->setter(field_addr, &(field_info->default_value));
+        reflection::SetFieldToDefault(field_info, field_addr);
       } else {
         TVM_FFI_THROW(TypeError) << "Required field `"
                                  << String(field_info->name.data, field_info->name.size)
