@@ -20,6 +20,7 @@
 #ifndef TVM_FFI_TESTING_OBJECT_H_
 #define TVM_FFI_TESTING_OBJECT_H_
 
+#include <tvm/ffi/any.h>
 #include <tvm/ffi/container/array.h>
 #include <tvm/ffi/container/map.h>
 #include <tvm/ffi/memory.h>
@@ -74,6 +75,14 @@ class TInt : public TNumber {
 
   static TInt StaticAdd(TInt lhs, TInt rhs) { return TInt(lhs->value + rhs->value); }
 
+  static int64_t CustomAnyHash(const Any& src) {
+    return static_cast<int64_t>(src.cast<TInt>()->value + 1024);
+  }
+
+  static bool CustomAnyEqual(const Any& lhs, const Any& rhs) {
+    return lhs.cast<TInt>()->value == rhs.cast<TInt>()->value;
+  }
+
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(TInt, TNumber, TIntObj);
 };
 
@@ -85,7 +94,9 @@ inline void TIntObj::RegisterReflection() {
   // define extra type attributes
   refl::TypeAttrDef<TIntObj>()
       .def("test.GetValue", &TIntObj::GetValue)
-      .attr("test.size", sizeof(TIntObj));
+      .attr("test.size", sizeof(TIntObj))
+      .attr("__any_hash__", reinterpret_cast<void*>(&TInt::CustomAnyHash))
+      .attr("__any_equal__", reinterpret_cast<void*>(&TInt::CustomAnyEqual));
   // custom json serialization
   refl::TypeAttrDef<TIntObj>()
       .def("__data_to_json__",
@@ -105,14 +116,7 @@ class TFloatObj : public TNumberObj {
 
   double Add(double other) const { return value + other; }
 
-  static void RegisterReflection() {
-    namespace refl = tvm::ffi::reflection;
-    refl::ObjectDef<TFloatObj>()
-        .def_ro("value", &TFloatObj::value, "float value field", refl::DefaultValue(10.0))
-        .def("sub",
-             [](const TFloatObj* self, double other) -> double { return self->value - other; })
-        .def("add", &TFloatObj::Add, "add method");
-  }
+  static void RegisterReflection();
 
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("test.Float", TFloatObj, TNumberObj);
 };
@@ -121,8 +125,28 @@ class TFloat : public TNumber {
  public:
   explicit TFloat(double value) { data_ = make_object<TFloatObj>(value); }
 
+  static uint64_t CustomAnyHash(const Any& src) {
+    double value = src.cast<TFloat>()->value;
+    return static_cast<int64_t>(value * 10 + 2048);
+  }
+
+  static bool CustomAnyEqual(const Any& lhs, const Any& rhs) {
+    return lhs.cast<TFloat>()->value == rhs.cast<TFloat>()->value;
+  }
+
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(TFloat, TNumber, TFloatObj);
 };
+
+inline void TFloatObj::RegisterReflection() {
+  namespace refl = tvm::ffi::reflection;
+  refl::ObjectDef<TFloatObj>()
+      .def_ro("value", &TFloatObj::value, "float value field", refl::DefaultValue(10.0))
+      .def("sub", [](const TFloatObj* self, double other) -> double { return self->value - other; })
+      .def("add", &TFloatObj::Add, "add method");
+  refl::TypeAttrDef<TFloatObj>()
+      .def("__any_hash__", &TFloat::CustomAnyHash)
+      .def("__any_equal__", &TFloat::CustomAnyEqual);
+}
 
 class TPrimExprObj : public Object {
  public:

@@ -428,4 +428,34 @@ TEST(Any, AnyEqualHash) {
   EXPECT_EQ(AnyHash()(c), AnyHash()(d));
 }
 
+TEST(Any, CustomAnyHash) {
+  // Covers the OpaquePtr custom hash branch.
+  Any int_src = TInt(7);
+  uint64_t int_expected = details::StableHashCombine(
+      int_src.type_index(), static_cast<uint64_t>(TInt::CustomAnyHash(int_src)));
+  EXPECT_EQ(AnyHash()(int_src), int_expected);
+
+  // Covers the ffi.Function custom hash branch.
+  Any float_src = TFloat(3.5);
+  uint64_t float_expected = details::StableHashCombine(
+      float_src.type_index(), static_cast<uint64_t>(TFloat::CustomAnyHash(float_src)));
+  EXPECT_EQ(AnyHash()(float_src), float_expected);
+}
+
+TEST(Any, CustomAnyEqual) {
+  // Covers the OpaquePtr custom equal branch.
+  Any int_lhs = TInt(7);
+  Any int_rhs = TInt(7);
+  Any int_diff = TInt(8);
+  EXPECT_TRUE(AnyEqual()(int_lhs, int_rhs));
+  EXPECT_FALSE(AnyEqual()(int_lhs, int_diff));
+
+  // Covers the ffi.Function custom equal branch.
+  Any float_lhs = TFloat(3.5);
+  Any float_rhs = TFloat(3.5);
+  Any float_diff = TFloat(4.5);
+  EXPECT_TRUE(AnyEqual()(float_lhs, float_rhs));
+  EXPECT_FALSE(AnyEqual()(float_lhs, float_diff));
+}
+
 }  // namespace
