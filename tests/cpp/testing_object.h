@@ -23,6 +23,7 @@
 #include <tvm/ffi/any.h>
 #include <tvm/ffi/container/array.h>
 #include <tvm/ffi/container/map.h>
+#include <tvm/ffi/dtype.h>
 #include <tvm/ffi/memory.h>
 #include <tvm/ffi/object.h>
 #include <tvm/ffi/reflection/registry.h>
@@ -286,6 +287,101 @@ class TCustomFunc : public ObjectRef {
   }
 
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(TCustomFunc, ObjectRef, TCustomFuncObj);
+};
+
+// Test object with all POD field types to exercise serialization of every field kind.
+class TAllFieldsObj : public Object {
+ public:
+  bool v_bool;
+  int64_t v_int;
+  double v_float;
+  DLDataType v_dtype;
+  DLDevice v_device;
+  String v_str;
+  Optional<String> v_opt_str;
+  Array<Any> v_array;
+  Map<String, Any> v_map;
+
+  TAllFieldsObj(bool v_bool, int64_t v_int, double v_float, DLDataType v_dtype, DLDevice v_device,
+                String v_str, Optional<String> v_opt_str, Array<Any> v_array,
+                Map<String, Any> v_map)
+      : v_bool(v_bool),
+        v_int(v_int),
+        v_float(v_float),
+        v_dtype(v_dtype),
+        v_device(v_device),
+        v_str(v_str),
+        v_opt_str(v_opt_str),
+        v_array(v_array),
+        v_map(v_map) {}
+  explicit TAllFieldsObj(UnsafeInit) {}
+
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<TAllFieldsObj>()
+        .def_ro("v_bool", &TAllFieldsObj::v_bool)
+        .def_ro("v_int", &TAllFieldsObj::v_int)
+        .def_ro("v_float", &TAllFieldsObj::v_float)
+        .def_ro("v_dtype", &TAllFieldsObj::v_dtype)
+        .def_ro("v_device", &TAllFieldsObj::v_device)
+        .def_ro("v_str", &TAllFieldsObj::v_str)
+        .def_ro("v_opt_str", &TAllFieldsObj::v_opt_str)
+        .def_ro("v_array", &TAllFieldsObj::v_array)
+        .def_ro("v_map", &TAllFieldsObj::v_map);
+  }
+
+  static constexpr TVMFFISEqHashKind _type_s_eq_hash_kind = kTVMFFISEqHashKindTreeNode;
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("test.AllFields", TAllFieldsObj, Object);
+};
+
+class TAllFields : public ObjectRef {
+ public:
+  explicit TAllFields(bool v_bool, int64_t v_int, double v_float, DLDataType v_dtype,
+                      DLDevice v_device, String v_str, Optional<String> v_opt_str,
+                      Array<Any> v_array, Map<String, Any> v_map) {
+    data_ = make_object<TAllFieldsObj>(v_bool, v_int, v_float, v_dtype, v_device, v_str, v_opt_str,
+                                       v_array, v_map);
+  }
+
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(TAllFields, ObjectRef, TAllFieldsObj);
+};
+
+// Test object with fields that have default values to test deserialization with missing fields
+class TWithDefaultsObj : public Object {
+ public:
+  int64_t required_val;
+  int64_t default_int;
+  String default_str;
+  bool default_bool;
+
+  TWithDefaultsObj(int64_t required_val, int64_t default_int, String default_str, bool default_bool)
+      : required_val(required_val),
+        default_int(default_int),
+        default_str(default_str),
+        default_bool(default_bool) {}
+  explicit TWithDefaultsObj(UnsafeInit) {}
+
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<TWithDefaultsObj>()
+        .def_ro("required_val", &TWithDefaultsObj::required_val)
+        .def_ro("default_int", &TWithDefaultsObj::default_int, refl::DefaultValue(42))
+        .def_ro("default_str", &TWithDefaultsObj::default_str, refl::DefaultValue("default"))
+        .def_ro("default_bool", &TWithDefaultsObj::default_bool, refl::DefaultValue(true));
+  }
+
+  static constexpr TVMFFISEqHashKind _type_s_eq_hash_kind = kTVMFFISEqHashKindTreeNode;
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("test.WithDefaults", TWithDefaultsObj, Object);
+};
+
+class TWithDefaults : public ObjectRef {
+ public:
+  explicit TWithDefaults(int64_t required_val, int64_t default_int = 42,
+                         String default_str = "default", bool default_bool = true) {
+    data_ = make_object<TWithDefaultsObj>(required_val, default_int, default_str, default_bool);
+  }
+
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(TWithDefaults, ObjectRef, TWithDefaultsObj);
 };
 
 }  // namespace testing

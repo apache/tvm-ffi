@@ -979,23 +979,28 @@ typedef struct {
    */
   TVMFFIAny default_value_or_factory;
   /*!
-   * \brief Records the static type kind of the field.
+   * \brief The compile-time static type index of the field.
    *
-   * Possible values:
+   * This reflects the type declared at compile time, which is only trustworthy
+   * for statically-inferrable types. It does NOT necessarily match the runtime
+   * type. For example, a field declared as `Any` will have
+   * `field_static_type_index == kTVMFFIAny` even if it holds an `int` at runtime,
+   * and `Array<Any>` will report `kTVMFFIArray` even though the elements may be
+   * `Array<int>` at runtime.
    *
-   * - TVMFFITypeIndex::kTVMFFIObject for general objects.
-   *   The value is nullable when kTVMFFIObject is chosen.
-   * - Static object type kinds such as Map, Dict, String
-   * - POD type index, note it does not give information about storage size of the field.
-   * - TVMFFITypeIndex::kTVMFFIAny if we don't have specialized info
-   *   about the field.
+   * \warning Do NOT use this field to determine the actual type of a value at
+   * runtime. It is purely a compile-time hint derived from the C++ field
+   * declaration. The actual runtime type must be obtained from the value's
+   * own `type_index`.
    *
-   * When the value is a type index of Object type, the field is storaged as an ObjectRef.
+   * \warning When the static type is a generic container (e.g. `Array<Any>`),
+   * this field only tells you it is an Array — it says nothing about the
+   * element types actually stored inside. Similarly, `kTVMFFIObject` only
+   * means "some ObjectRef" without any subtype information.
    *
-   * \note This information maybe helpful in designing serializer.
-   * As it helps to narrow down the field type so we don't have to
-   * print type_key for cases like POD types.
-   * It also helps to provide opportunities to enable short-cut getter to ObjectRef fields.
+   * \note This is used by the serializer to inline POD field values directly
+   * (avoiding node-graph overhead for None, Bool, Int, Float, DataType),
+   * while routing other types through the node graph.
    */
   int32_t field_static_type_index;
 } TVMFFIFieldInfo;
