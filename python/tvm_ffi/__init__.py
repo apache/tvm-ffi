@@ -54,9 +54,16 @@ from ._tensor import from_dlpack, Tensor, Shape
 from .container import Array, List, Map
 from .module import Module, system_lib, load_module
 from .stream import StreamContext, get_raw_stream, use_raw_stream, use_torch_stream
+from .structural import (
+    StructuralKey,
+    get_first_structural_mismatch,
+    structural_equal,
+    structural_hash,
+)
 from . import serialization
 from . import access_path
 from . import dataclasses
+from . import structural
 from . import cpp
 
 # optional module to speedup dlpack conversion
@@ -104,6 +111,7 @@ __all__ = [
     "ObjectConvertible",
     "Shape",
     "StreamContext",
+    "StructuralKey",
     "Tensor",
     "__version__",
     "__version_tuple__",
@@ -114,6 +122,7 @@ __all__ = [
     "device",
     "dtype",
     "from_dlpack",
+    "get_first_structural_mismatch",
     "get_global_func",
     "get_global_func_metadata",
     "get_raw_stream",
@@ -124,6 +133,9 @@ __all__ = [
     "register_object",
     "remove_global_func",
     "serialization",
+    "structural",
+    "structural_equal",
+    "structural_hash",
     "system_lib",
     "use_raw_stream",
     "use_torch_stream",
