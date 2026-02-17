@@ -248,6 +248,7 @@ if (TVM_FFI_BUILD_PYTHON_MODULE)
       ${CMAKE_CURRENT_SOURCE_DIR}/python/tvm_ffi/cython/tensor.pxi
       ${CMAKE_CURRENT_SOURCE_DIR}/python/tvm_ffi/cython/object.pxi
       ${CMAKE_CURRENT_SOURCE_DIR}/python/tvm_ffi/cython/string.pxi
+      ${CMAKE_CURRENT_SOURCE_DIR}/python/tvm_ffi/cython/type_converter.pxi
   )
   # Run a Python script to check for free-threaded build
   execute_process(
