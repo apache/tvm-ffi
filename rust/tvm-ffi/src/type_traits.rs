@@ -16,8 +16,9 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+use crate::any::{Any, AnyValue};
 use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
-use tvm_ffi_sys::{TVMFFIAny, TVMFFIGetTypeInfo};
+use tvm_ffi_sys::{TVMFFIAny, TVMFFIAnyViewToOwnedAny, TVMFFIGetTypeInfo};
 
 //-----------------------------------------------------
 // AnyCompatible
@@ -195,6 +196,41 @@ unsafe impl<T: AnyCompatible> AnyCompatible for Option<T> {
         } else {
             T::try_cast_from_any_view(data).map(Some)
         }
+    }
+}
+
+/// AnyCompatible for AnyValue
+unsafe impl AnyCompatible for AnyValue {
+    fn type_str() -> String {
+        "Any".to_string()
+    }
+
+    unsafe fn copy_to_any_view(src: &Self, data: &mut TVMFFIAny) {
+        *data = src.as_any().as_raw_ffi_any();
+    }
+
+    unsafe fn move_to_any(src: Self, data: &mut TVMFFIAny) {
+        *data = Any::into_raw_ffi_any(src.into_any());
+    }
+
+    unsafe fn check_any_strict(_data: &TVMFFIAny) -> bool {
+        true
+    }
+
+    unsafe fn copy_from_any_view_after_check(data: &TVMFFIAny) -> Self {
+        let mut owned = TVMFFIAny::new();
+        crate::check_safe_call!(TVMFFIAnyViewToOwnedAny(data, &mut owned)).unwrap();
+        AnyValue::from(Any::from_raw_ffi_any(owned))
+    }
+
+    unsafe fn move_from_any_after_check(data: &mut TVMFFIAny) -> Self {
+        let raw = *data;
+        *data = TVMFFIAny::new();
+        AnyValue::from(Any::from_raw_ffi_any(raw))
+    }
+
+    unsafe fn try_cast_from_any_view(data: &TVMFFIAny) -> Result<Self, ()> {
+        Ok(Self::copy_from_any_view_after_check(data))
     }
 }
 

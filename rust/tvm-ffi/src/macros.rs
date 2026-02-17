@@ -238,6 +238,135 @@ macro_rules! impl_arg_into_ref {
     }
 }
 
+/// Define a stubgen-oriented object wrapper type.
+///
+/// This macro is intended for code emitted by the Rust stub generator.
+/// It is not meant as a general-purpose user-facing API.
+#[macro_export]
+macro_rules! define_object_wrapper {
+    ($name:ident, $type_key:expr) => {
+        #[derive(Clone)]
+        pub struct $name {
+            inner: $crate::object::ObjectRef,
+        }
+
+        impl $name {
+            pub fn from_object(inner: $crate::object::ObjectRef) -> Self {
+                Self { inner }
+            }
+
+            pub fn as_object_ref(&self) -> &$crate::object::ObjectRef {
+                &self.inner
+            }
+
+            pub fn into_object_ref(self) -> $crate::object::ObjectRef {
+                self.inner
+            }
+        }
+
+        impl From<$crate::object::ObjectRef> for $name {
+            fn from(inner: $crate::object::ObjectRef) -> Self {
+                Self::from_object(inner)
+            }
+        }
+
+        impl From<$name> for $crate::object::ObjectRef {
+            fn from(wrapper: $name) -> Self {
+                wrapper.into_object_ref()
+            }
+        }
+
+        impl $crate::object_wrapper::ObjectWrapper for $name {
+            const TYPE_KEY: &'static str = $type_key;
+
+            fn from_object(inner: $crate::object::ObjectRef) -> Self {
+                Self::from_object(inner)
+            }
+
+            fn as_object_ref(&self) -> &$crate::object::ObjectRef {
+                self.as_object_ref()
+            }
+
+            fn into_object_ref(self) -> $crate::object::ObjectRef {
+                self.into_object_ref()
+            }
+        }
+
+        $crate::impl_try_from_any!($name);
+    };
+}
+
+/// Implement object hierarchy relationships (Deref, From, TryFrom).
+///
+/// This macro is intended for code emitted by the Rust stub generator to
+/// establish parent-child relationships in the object hierarchy.
+///
+/// # Syntax
+/// ```ignore
+/// impl_object_hierarchy!(Self: DirectParent, Grandparent, ..., ObjectRef);
+/// ```
+///
+/// # Generated implementations
+/// - `Deref<Target = DirectParent>` for ergonomic field access
+/// - `From<Self> for DirectParent` (and all ancestors) for upcasts
+/// - `TryFrom<Ancestor> for Self` for downcasts
+///
+/// # Example
+/// ```ignore
+/// // Given: Node -> BaseExpr -> Expr -> ObjectRef
+/// impl_object_hierarchy!(Node: BaseExpr, Expr, ObjectRef);
+/// ```
+#[macro_export]
+macro_rules! impl_object_hierarchy {
+    ($self_ty:ty: $direct_parent:ty $(, $ancestor:ty)* $(,)?) => {
+        // Implement Deref to the direct parent for ergonomic access
+        impl std::ops::Deref for $self_ty {
+            type Target = $direct_parent;
+
+            fn deref(&self) -> &Self::Target {
+                // Safety: All ObjectRef types are repr(C) with a single pointer field (ObjectArc<T>).
+                // Self and DirectParent have identical memory layout.
+                // This is a zero-cost, lifetime-preserving reference cast.
+                unsafe { &*(self as *const $self_ty as *const $direct_parent) }
+            }
+        }
+
+        // Implement From<Self> for DirectParent (upcast)
+        impl From<$self_ty> for $direct_parent {
+            fn from(value: $self_ty) -> Self {
+                $crate::subtyping::upcast(value)
+            }
+        }
+
+        // Implement TryFrom<DirectParent> for Self (downcast)
+        impl TryFrom<$direct_parent> for $self_ty {
+            type Error = $direct_parent;
+
+            fn try_from(value: $direct_parent) -> Result<Self, Self::Error> {
+                $crate::subtyping::try_downcast(value)
+            }
+        }
+
+        // Implement From<Self> for each ancestor (transitive upcast)
+        $(
+            impl From<$self_ty> for $ancestor {
+                fn from(value: $self_ty) -> Self {
+                    $crate::subtyping::upcast(value)
+                }
+            }
+
+            // Implement TryFrom<Ancestor> for Self (downcast)
+            impl TryFrom<$ancestor> for $self_ty {
+                type Error = $ancestor;
+
+                fn try_from(value: $ancestor) -> Result<Self, Self::Error> {
+                    $crate::subtyping::try_downcast(value)
+                }
+            }
+        )*
+    };
+}
+
 // ----------------------------------------------------------------------------
 // Macros for function definitions
 // ----------------------------------------------------------------------------
@@ -312,7 +441,7 @@ macro_rules! tvm_ffi_dll_export_typed_func {
 /// Since the ffi mechanism requires us to pass arguments by reference.
 ///
 /// # Supported Argument Counts
-/// This macro supports functions with 0 to 8 arguments.
+/// This macro supports functions with 0 to 12 arguments.
 ///-----------------------------------------------------------
 #[macro_export]
 macro_rules! into_typed_fn {
@@ -393,6 +522,89 @@ macro_rules! into_typed_fn {
             use $crate::function_internal::IntoArgHolderTuple;
             let tuple_args = (a0, a1, a2, a3, a4, a5, a6, a7).into_arg_holder_tuple();
             Ok(_f.call_tuple_with_len::<8, _>(tuple_args)?.try_into()?)
+        }
+    }};
+    // Case for 9 arguments
+    ($f:expr, $trait:ident($t0:ty, $t1:ty, $t2:ty, $t3:ty, $t4:ty, $t5:ty, $t6:ty, $t7:ty, $t8:ty)
+        -> $ret_ty:ty) => {{
+        let _f = $f;
+        move |a0: $t0,
+              a1: $t1,
+              a2: $t2,
+              a3: $t3,
+              a4: $t4,
+              a5: $t5,
+              a6: $t6,
+              a7: $t7,
+              a8: $t8|
+              -> $ret_ty {
+            use $crate::function_internal::IntoArgHolderTuple;
+            let tuple_args = (a0, a1, a2, a3, a4, a5, a6, a7, a8).into_arg_holder_tuple();
+            Ok(_f.call_tuple_with_len::<9, _>(tuple_args)?.try_into()?)
+        }
+    }};
+    // Case for 10 arguments
+    ($f:expr, $trait:ident($t0:ty, $t1:ty, $t2:ty, $t3:ty, $t4:ty, $t5:ty, $t6:ty, $t7:ty, $t8:ty, $t9:ty)
+        -> $ret_ty:ty) => {{
+        let _f = $f;
+        move |a0: $t0,
+              a1: $t1,
+              a2: $t2,
+              a3: $t3,
+              a4: $t4,
+              a5: $t5,
+              a6: $t6,
+              a7: $t7,
+              a8: $t8,
+              a9: $t9|
+              -> $ret_ty {
+            use $crate::function_internal::IntoArgHolderTuple;
+            let tuple_args = (a0, a1, a2, a3, a4, a5, a6, a7, a8, a9).into_arg_holder_tuple();
+            Ok(_f.call_tuple_with_len::<10, _>(tuple_args)?.try_into()?)
+        }
+    }};
+    // Case for 11 arguments
+    ($f:expr, $trait:ident($t0:ty, $t1:ty, $t2:ty, $t3:ty, $t4:ty, $t5:ty, $t6:ty, $t7:ty, $t8:ty, $t9:ty, $t10:ty)
+        -> $ret_ty:ty) => {{
+        let _f = $f;
+        move |a0: $t0,
+              a1: $t1,
+              a2: $t2,
+              a3: $t3,
+              a4: $t4,
+              a5: $t5,
+              a6: $t6,
+              a7: $t7,
+              a8: $t8,
+              a9: $t9,
+              a10: $t10|
+              -> $ret_ty {
+            use $crate::function_internal::IntoArgHolderTuple;
+            let tuple_args = (a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10).into_arg_holder_tuple();
+            Ok(_f.call_tuple_with_len::<11, _>(tuple_args)?.try_into()?)
+        }
+    }};
+    // Case for 12 arguments
+    ($f:expr, $trait:ident($t0:ty, $t1:ty, $t2:ty, $t3:ty, $t4:ty, $t5:ty, $t6:ty, $t7:ty, $t8:ty, $t9:ty, $t10:ty, $t11:ty)
+        -> $ret_ty:ty) => {{
+        let _f = $f;
+        move |a0: $t0,
+              a1: $t1,
+              a2: $t2,
+              a3: $t3,
+              a4: $t4,
+              a5: $t5,
+              a6: $t6,
+              a7: $t7,
+              a8: $t8,
+              a9: $t9,
+              a10: $t10,
+              a11: $t11|
+              -> $ret_ty {
+            use $crate::function_internal::IntoArgHolderTuple;
+            let tuple_args =
+                (a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11).into_arg_holder_tuple();
+            Ok(_f.call_tuple_with_len::<12, _>(tuple_args)?.try_into()?)
         }
     }};
 }

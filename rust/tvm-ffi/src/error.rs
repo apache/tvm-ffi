@@ -18,6 +18,7 @@
  */
 use crate::derive::{Object, ObjectRef};
 use crate::object::{Object, ObjectArc};
+use std::convert::Infallible;
 use std::ffi::c_void;
 use tvm_ffi_sys::TVMFFIBacktraceUpdateMode::kTVMFFIBacktraceUpdateModeAppend;
 use tvm_ffi_sys::{
@@ -62,6 +63,12 @@ pub struct ErrorObj {
 #[derive(Clone, ObjectRef)]
 pub struct Error {
     data: ObjectArc<ErrorObj>,
+}
+
+impl From<Infallible> for Error {
+    fn from(value: Infallible) -> Self {
+        match value {}
+    }
 }
 
 /// Default result that uses Error as the error type

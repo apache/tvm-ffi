@@ -58,7 +58,7 @@ pub fn derive_object(input: proc_macro::TokenStream) -> TokenStream {
                                 &type_key_arg, &mut tindex
                             );
                             if ret != 0 {
-                                proc_macro_error::abort!("Failed to get type index for type key: {}", #type_key);
+                                panic!("Failed to get type index for type key: {}", #type_key);
                             }
                             tindex
                         }
@@ -124,6 +124,198 @@ pub fn derive_object_ref(input: proc_macro::TokenStream) -> TokenStream {
     }
     .expect("First field must be `data: ObjectArc<T>`");
 
+    let is_object_ref = struct_name == syn::Ident::new("ObjectRef", struct_name.span());
+
+    let any_compatible_tokens = if is_object_ref {
+        quote! {
+            // implement AnyCompatible for #struct_name
+            unsafe impl #tvm_ffi_crate::type_traits::AnyCompatible for #struct_name {
+                fn type_str() -> String {
+                    type ContainerType = <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>
+                        ::ContainerType;
+                    <ContainerType as #tvm_ffi_crate::object::ObjectCore>::TYPE_KEY.into()
+                }
+
+                unsafe fn copy_to_any_view(
+                    src: &Self,
+                    data: &mut  #tvm_ffi_crate::tvm_ffi_sys::TVMFFIAny
+                ) {
+                    type ContainerType = <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>
+                        ::ContainerType;
+                    let data_ptr = #tvm_ffi_crate::object::ObjectArc::<ContainerType>::as_raw(
+                        &src.data
+                    ) as *mut #tvm_ffi_crate::tvm_ffi_sys::TVMFFIObject;
+                    data.type_index = (*data_ptr).type_index;
+                    data.small_str_len = 0;
+                    data.data_union.v_obj = data_ptr;
+                }
+
+                unsafe fn check_any_strict(data: & #tvm_ffi_crate::tvm_ffi_sys::TVMFFIAny) -> bool {
+                    data.type_index >= #tvm_ffi_crate::TypeIndex::kTVMFFIStaticObjectBegin as i32
+                }
+
+                unsafe fn copy_from_any_view_after_check(
+                    data: & #tvm_ffi_crate::tvm_ffi_sys::TVMFFIAny
+                ) -> Self {
+                    type ContainerType = <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>
+                        ::ContainerType;
+                    let data_ptr = data.data_union.v_obj;
+                    // need to increase ref because original weak ptr
+                    // do not own the code
+                    #tvm_ffi_crate::object::unsafe_::inc_ref(
+                        data_ptr as *mut  #tvm_ffi_crate::tvm_ffi_sys::TVMFFIObject
+                    );
+                    Self {
+                        data : #tvm_ffi_crate::object::ObjectArc::from_raw(
+                            data_ptr as *mut ContainerType
+                        )
+                    }
+                }
+
+                unsafe fn move_to_any(
+                    src: Self,
+                    data: &mut  #tvm_ffi_crate::tvm_ffi_sys::TVMFFIAny
+                ) {
+                    type ContainerType = <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>
+                        ::ContainerType;
+                    let data_ptr = #tvm_ffi_crate::object::ObjectArc::into_raw(
+                        src.data
+                    ) as *mut #tvm_ffi_crate::tvm_ffi_sys::TVMFFIObject;
+                    data.type_index = (*data_ptr).type_index;
+                    data.small_str_len = 0;
+                    data.data_union.v_obj = data_ptr;
+                }
+
+                unsafe fn move_from_any_after_check(
+                    data: &mut  #tvm_ffi_crate::tvm_ffi_sys::TVMFFIAny
+                ) -> Self {
+                    type ContainerType = <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>
+                        ::ContainerType;
+                    let data_ptr = data.data_union.v_obj as *mut ContainerType;
+                    Self {
+                        data : #tvm_ffi_crate::object::ObjectArc::<ContainerType>::from_raw(data_ptr)
+                    }
+                }
+
+                unsafe fn try_cast_from_any_view(
+                    data: & #tvm_ffi_crate::tvm_ffi_sys::TVMFFIAny
+                ) -> Result<Self, ()> {
+                    if Self::check_any_strict(data) {
+                        Ok(Self::copy_from_any_view_after_check(data))
+                    } else {
+                        Err(())
+                    }
+                }
+            }
+        }
+    } else {
+        quote! {
+            // implement AnyCompatible for #struct_name
+            unsafe impl #tvm_ffi_crate::type_traits::AnyCompatible for #struct_name {
+                fn type_str() -> String {
+                    type ContainerType = <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>
+                        ::ContainerType;
+                    <ContainerType as #tvm_ffi_crate::object::ObjectCore>::TYPE_KEY.into()
+                }
+
+                unsafe fn copy_to_any_view(
+                    src: &Self,
+                    data: &mut  #tvm_ffi_crate::tvm_ffi_sys::TVMFFIAny
+                ) {
+                    type ContainerType = <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>
+                        ::ContainerType;
+                    let type_index =
+                        <ContainerType as #tvm_ffi_crate::object::ObjectCore>::type_index();
+                    data.type_index = type_index as i32;
+                    data.small_str_len = 0;
+                    let data_ptr = #tvm_ffi_crate::object::ObjectArc::<ContainerType>::as_raw(
+                        &src.data
+                    );
+                    data.data_union.v_obj =
+                        data_ptr as *mut ContainerType as *mut  #tvm_ffi_crate::tvm_ffi_sys::TVMFFIObject;
+                }
+
+                unsafe fn check_any_strict(data: & #tvm_ffi_crate::tvm_ffi_sys::TVMFFIAny) -> bool {
+                    type ContainerType = <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>
+                        ::ContainerType;
+                    let target_index =
+                        <ContainerType as #tvm_ffi_crate::object::ObjectCore>::type_index();
+                    if data.type_index == target_index as i32 {
+                        return true;
+                    }
+                    let info = #tvm_ffi_crate::tvm_ffi_sys::TVMFFIGetTypeInfo(data.type_index);
+                    if info.is_null() {
+                        return false;
+                    }
+                    let info = &*info;
+                    let ancestors = info.type_acenstors;
+                    if ancestors.is_null() {
+                        return false;
+                    }
+                    for depth in 0..info.type_depth {
+                        let ancestor = *ancestors.add(depth as usize);
+                        if !ancestor.is_null() && (*ancestor).type_index == target_index {
+                            return true;
+                        }
+                    }
+                    false
+                }
+
+                unsafe fn copy_from_any_view_after_check(
+                    data: & #tvm_ffi_crate::tvm_ffi_sys::TVMFFIAny
+                ) -> Self {
+                    type ContainerType = <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>
+                        ::ContainerType;
+                    // Delegate to ObjectRef to handle reference counting
+                    let obj_ref = <#tvm_ffi_crate::object::ObjectRef as #tvm_ffi_crate::type_traits::AnyCompatible>::copy_from_any_view_after_check(data);
+                    // Use public unsafe API to do pointer cast
+                    let arc = <#tvm_ffi_crate::object::ObjectRef as #tvm_ffi_crate::object::ObjectRefCore>::into_data(obj_ref);
+                    let raw = #tvm_ffi_crate::object::ObjectArc::into_raw(arc);
+                    let typed = #tvm_ffi_crate::object::ObjectArc::from_raw(raw as *const ContainerType);
+                    Self { data: typed }
+                }
+
+                unsafe fn move_to_any(
+                    src: Self,
+                    data: &mut  #tvm_ffi_crate::tvm_ffi_sys::TVMFFIAny
+                ) {
+                    type ContainerType = <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>
+                        ::ContainerType;
+                    let type_index =
+                        <ContainerType as #tvm_ffi_crate::object::ObjectCore>::type_index();
+                    data.type_index = type_index as i32;
+                    data.small_str_len = 0;
+                    let data_ptr = #tvm_ffi_crate::object::ObjectArc::into_raw(
+                        src.data
+                    );
+                    data.data_union.v_obj =
+                        data_ptr as *mut ContainerType as *mut  #tvm_ffi_crate::tvm_ffi_sys::TVMFFIObject;
+                }
+
+                unsafe fn move_from_any_after_check(
+                    data: &mut  #tvm_ffi_crate::tvm_ffi_sys::TVMFFIAny
+                ) -> Self {
+                    type ContainerType = <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>
+                        ::ContainerType;
+                    let data_ptr = data.data_union.v_obj as *mut ContainerType;
+                    Self {
+                        data : #tvm_ffi_crate::object::ObjectArc::<ContainerType>::from_raw(data_ptr)
+                    }
+                }
+
+                unsafe fn try_cast_from_any_view(
+                    data: & #tvm_ffi_crate::tvm_ffi_sys::TVMFFIAny
+                ) -> Result<Self, ()> {
+                    if Self::check_any_strict(data) {
+                        Ok(Self::copy_from_any_view_after_check(data))
+                    } else {
+                        Err(())
+                    }
+                }
+            }
+        }
+    };
+
     let mut expanded = quote! {
         unsafe impl #tvm_ffi_crate::object::ObjectRefCore for #struct_name {
             type ContainerType = <#data_ty as std::ops::Deref>::Target;
@@ -141,99 +333,7 @@ pub fn derive_object_ref(input: proc_macro::TokenStream) -> TokenStream {
             }
         }
 
-        // implement AnyCompatible for #struct_name
-        unsafe impl #tvm_ffi_crate::type_traits::AnyCompatible for #struct_name {
-            fn type_str() -> String {
-                type ContainerType = <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>
-                    ::ContainerType;
-                <ContainerType as #tvm_ffi_crate::object::ObjectCore>::TYPE_KEY.into()
-            }
-
-            unsafe fn copy_to_any_view(
-                src: &Self,
-                data: &mut  #tvm_ffi_crate::tvm_ffi_sys::TVMFFIAny
-            ) {
-                type ContainerType = <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>
-                    ::ContainerType;
-                let type_index =
-                    <ContainerType as #tvm_ffi_crate::object::ObjectCore>::type_index();
-                data.type_index = type_index as i32;
-                data.small_str_len = 0;
-                let data_ptr = #tvm_ffi_crate::object::ObjectArc::<ContainerType>::as_raw(
-                    &src.data
-                );
-                data.data_union.v_obj =
-                    data_ptr as *mut ContainerType as *mut  #tvm_ffi_crate::tvm_ffi_sys::TVMFFIObject;
-            }
-
-            unsafe fn check_any_strict(data: & #tvm_ffi_crate::tvm_ffi_sys::TVMFFIAny) -> bool {
-                type ContainerType = <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>
-                    ::ContainerType;
-                let type_index =
-                    <ContainerType as #tvm_ffi_crate::object::ObjectCore>::type_index();
-                data.type_index == type_index as i32
-            }
-
-            unsafe fn copy_from_any_view_after_check(
-                data: & #tvm_ffi_crate::tvm_ffi_sys::TVMFFIAny
-            ) -> Self {
-                type ContainerType = <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>
-                    ::ContainerType;
-                let data_ptr = data.data_union.v_obj;
-                // need to increase ref because original weak ptr
-                // do not own the code
-                #tvm_ffi_crate::object::unsafe_::inc_ref(
-                    data_ptr as *mut  #tvm_ffi_crate::tvm_ffi_sys::TVMFFIObject
-                );
-                Self {
-                    data : #tvm_ffi_crate::object::ObjectArc::from_raw(
-                        data_ptr as *mut ContainerType
-                    )
-                }
-            }
-
-            unsafe fn move_to_any(
-                src: Self,
-                data: &mut  #tvm_ffi_crate::tvm_ffi_sys::TVMFFIAny
-            ) {
-                type ContainerType = <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>
-                    ::ContainerType;
-                let type_index =
-                    <ContainerType as #tvm_ffi_crate::object::ObjectCore>::type_index();
-                data.type_index = type_index as i32;
-                data.small_str_len = 0;
-                let data_ptr = #tvm_ffi_crate::object::ObjectArc::into_raw(
-                    src.data
-                );
-                data.data_union.v_obj =
-                    data_ptr as *mut ContainerType as *mut  #tvm_ffi_crate::tvm_ffi_sys::TVMFFIObject;
-            }
-
-            unsafe fn move_from_any_after_check(
-                data: &mut  #tvm_ffi_crate::tvm_ffi_sys::TVMFFIAny
-            ) -> Self {
-                type ContainerType = <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>
-                    ::ContainerType;
-                let data_ptr = data.data_union.v_obj as *mut ContainerType;
-                Self {
-                    data : #tvm_ffi_crate::object::ObjectArc::<ContainerType>::from_raw(data_ptr)
-                }
-            }
-
-            unsafe fn try_cast_from_any_view(
-                data: & #tvm_ffi_crate::tvm_ffi_sys::TVMFFIAny
-            ) -> Result<Self, ()> {
-                type ContainerType = <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>
-                    ::ContainerType;
-                let type_index =
-                    <ContainerType as #tvm_ffi_crate::object::ObjectCore>::type_index();
-                if data.type_index == type_index as i32 {
-                    Ok(Self::copy_from_any_view_after_check(data))
-                } else {
-                    Err(())
-                }
-            }
-        }
+        #any_compatible_tokens
     };
     // skip ObjectRef since it can create circular dependency with any.rs
     if struct_name != "ObjectRef" {
