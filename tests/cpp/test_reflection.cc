@@ -62,6 +62,8 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   TVarObj::RegisterReflection();
   TFuncObj::RegisterReflection();
   TCustomFuncObj::RegisterReflection();
+  TAllFieldsObj::RegisterReflection();
+  TWithDefaultsObj::RegisterReflection();
 
   refl::ObjectDef<TestObjA>()
       .def(refl::init<int64_t, int64_t>())

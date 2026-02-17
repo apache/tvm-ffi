@@ -291,7 +291,7 @@ pub struct TVMFFIFieldInfo {
     /// When kTVMFFIFieldFlagBitMaskDefaultFromFactory is also set,
     /// this is a callable factory function () -> Any.
     pub default_value_or_factory: TVMFFIAny,
-    /// Records the static type kind of the field
+    /// Records the compile-time static type kind of the field.
     pub field_static_type_index: i32,
 }
 
