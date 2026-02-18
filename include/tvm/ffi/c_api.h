@@ -870,6 +870,13 @@ typedef enum {
    * being used directly as the default value.
    */
   kTVMFFIFieldFlagBitMaskDefaultFromFactory = 1 << 5,
+  /*!
+   * \brief The field is excluded from repr output.
+   *
+   * When set, the field will not appear in the generic reflection-based repr.
+   * By default this flag is off (meaning the field is included in repr).
+   */
+  kTVMFFIFieldFlagBitMaskReprOff = 1 << 6,
 #ifdef __cplusplus
 };
 #else

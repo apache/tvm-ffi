@@ -197,7 +197,7 @@ class Array(core.Object, Sequence[T]):
         # exception safety handling for chandle=None
         if self.__chandle__() == 0:
             return type(self).__name__ + "(chandle=None)"
-        return "[" + ", ".join([x.__repr__() for x in self]) + "]"
+        return str(core.__object_repr__(self))  # ty: ignore[unresolved-attribute]
 
     def __contains__(self, value: object) -> bool:
         """Check if the array contains a value."""
@@ -343,7 +343,7 @@ class List(core.Object, MutableSequence[T]):
         """Return a string representation of the list."""
         if self.__chandle__() == 0:
             return type(self).__name__ + "(chandle=None)"
-        return "[" + ", ".join([x.__repr__() for x in self]) + "]"
+        return str(core.__object_repr__(self))  # ty: ignore[unresolved-attribute]
 
     def __contains__(self, value: object) -> bool:
         """Check if the list contains a value."""
@@ -543,4 +543,4 @@ class Map(core.Object, Mapping[K, V]):
         # exception safety handling for chandle=None
         if self.__chandle__() == 0:
             return type(self).__name__ + "(chandle=None)"
-        return "{" + ", ".join([f"{k.__repr__()}: {v.__repr__()}" for k, v in self.items()]) + "}"
+        return str(core.__object_repr__(self))  # ty: ignore[unresolved-attribute]

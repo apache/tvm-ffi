@@ -130,18 +130,18 @@ def test_key_not_found() -> None:
 
 def test_repr() -> None:
     a = tvm_ffi.convert([1, 2, 3])
-    assert str(a) == "[1, 2, 3]"
+    assert str(a) == "(1, 2, 3)"
     amap = tvm_ffi.convert({3: 2, 4: 3})
     assert str(amap) == "{3: 2, 4: 3}"
 
     smap = tvm_ffi.convert({"a": 1, "b": 2})
-    assert str(smap) == "{'a': 1, 'b': 2}"
+    assert str(smap) == '{"a": 1, "b": 2}'
 
 
 def test_serialization() -> None:
     a = tvm_ffi.convert([1, 2, 3])
     b = pickle.loads(pickle.dumps(a))
-    assert str(b) == "[1, 2, 3]"
+    assert str(b) == "(1, 2, 3)"
 
 
 @pytest.mark.parametrize(

@@ -244,8 +244,8 @@ TVM_FFI_STATIC_INIT_BLOCK() {
 
   refl::ObjectDef<TestCxxClassBase>()
       .def(refl::init<int64_t, int32_t>())
-      .def_rw("v_i64", &TestCxxClassBase::v_i64)
-      .def_rw("v_i32", &TestCxxClassBase::v_i32);
+      .def_rw("v_i64", &TestCxxClassBase::v_i64, refl::Repr(false))
+      .def_rw("v_i32", &TestCxxClassBase::v_i32, refl::Repr(false));
 
   refl::ObjectDef<TestCxxClassDerived>()
       .def(refl::init<int64_t, int32_t, double, float>())

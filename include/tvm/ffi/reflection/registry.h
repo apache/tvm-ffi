@@ -224,6 +224,33 @@ class AttachFieldFlag : public InfoTrait {
 };
 
 /*!
+ * \brief Trait that controls whether a field appears in repr output.
+ *
+ * By default, all fields appear in repr. Use `Repr(false)` to exclude a field.
+ */
+class Repr : public InfoTrait {
+ public:
+  /*!
+   * \brief Constructor.
+   * \param show Whether the field should appear in repr output.
+   */
+  explicit Repr(bool show) : show_(show) {}
+
+  /*!
+   * \brief Apply the repr flag to the field info.
+   * \param info The field info.
+   */
+  TVM_FFI_INLINE void Apply(TVMFFIFieldInfo* info) const {
+    if (!show_) {
+      info->flags |= kTVMFFIFieldFlagBitMaskReprOff;
+    }
+  }
+
+ private:
+  bool show_;
+};
+
+/*!
  * \brief Get the byte offset of a class member field.
  *
  * \tparam The original class.
@@ -493,6 +520,7 @@ struct init {
 namespace type_attr {
 inline constexpr const char* kInit = "__ffi_init__";
 inline constexpr const char* kShallowCopy = "__ffi_shallow_copy__";
+inline constexpr const char* kRepr = "__ffi_repr__";
 }  // namespace type_attr
 
 /*!
