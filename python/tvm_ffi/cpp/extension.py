@@ -376,7 +376,7 @@ def _generate_ninja_build(  # noqa: PLR0915, PLR0912
         ]
     else:
         default_cflags = ["-std=c++17", "-fPIC", "-O2"]
-        default_cuda_cflags = ["-std=c++17", "-fPIC", "-O2"]
+        default_cuda_cflags = ["-std=c++17", "-O2"]
         default_ldflags = ["-shared", f"-L{tvm_ffi_lib_path}", "-ltvm_ffi"]
 
         if with_hip:
@@ -389,7 +389,7 @@ def _generate_ninja_build(  # noqa: PLR0915, PLR0912
                 "-lamdhip64",
             ]
         if with_cuda:
-            default_cuda_cflags = ["-Xcompiler", *default_cuda_cflags]
+            default_cuda_cflags = ["-Xcompiler", "-fPIC", *default_cuda_cflags]
             default_cuda_cflags += [_get_cuda_target()]
             default_ldflags += [
                 "-L{}".format(str(Path(_find_cuda_home()) / "lib64")),
