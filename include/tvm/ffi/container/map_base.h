@@ -196,6 +196,15 @@ class MapBaseObj : public Object {
   uint64_t state_marker;
 #endif  // TVM_FFI_DEBUG_WITH_ABI_CHANGE
   /*!
+   * \brief Inplace switch the storage contents to the other map
+   *
+   * The other map will be consumed after this operation
+   * The current content will be reset after this operation
+   *
+   * \param other The other map
+   */
+  inline void InplaceSwitchTo(ObjectPtr<Object>&& other);
+  /*!
    * \brief Create an empty container
    * \return The object created
    */
@@ -683,6 +692,35 @@ class DenseMapBaseObj : public MapBaseObj {
     ReleaseMemory();
   }
   /*!
+   * \brief Inplace switch the storage contents to the other map
+   *
+   * The other map will be consumed after this operation
+   * The current content will be reset after this operation
+   *
+   * \param other The other map
+   */
+  void InplaceSwitchTo(ObjectPtr<Object>&& other) {
+    this->Reset();
+    MapBaseObj* other_map = static_cast<MapBaseObj*>(other.get());
+    // to simplify implementation, inplace switch from another dense map
+    // since all current switch usecases are pushing elements to map
+    // so we don't need to handle small -> dense switch
+    TVM_FFI_ICHECK(!other_map->IsSmallMap());
+    DenseMapBaseObj* other_dense_map = static_cast<DenseMapBaseObj*>(other_map);
+    DenseMapBaseObj* this_dense_map = this;
+    this_dense_map->size_ = other_dense_map->size_;
+    this_dense_map->slots_ = other_dense_map->slots_;
+    this_dense_map->data_ = other_dense_map->data_;
+    this_dense_map->data_deleter_ = other_dense_map->data_deleter_;
+    this_dense_map->fib_shift_ = other_dense_map->fib_shift_;
+    this_dense_map->iter_list_head_ = other_dense_map->iter_list_head_;
+    this_dense_map->iter_list_tail_ = other_dense_map->iter_list_tail_;
+    other_dense_map->data_ = nullptr;
+    other_dense_map->data_deleter_ = nullptr;
+    other_dense_map->size_ = 0;
+    other_dense_map->slots_ = 0;
+  }
+  /*!
    * \brief Release the memory acquired by the container without deleting its entries stored inside
    */
   void ReleaseMemory() {
@@ -1064,7 +1102,17 @@ class SmallMapBaseObj : public MapBaseObj {
    */
   uint64_t NumSlots() const { return slots_ & ~kSmallTagMask; }
 
-  ~SmallMapBaseObj() { this->Reset(); }
+  ~SmallMapBaseObj() {
+    // in destructor, need to check if the map was inplace switched to a dense map.
+    MapBaseObj* base_map = static_cast<MapBaseObj*>(this);
+    if (base_map->IsSmallMap()) {
+      this->Reset();
+    } else {
+      // this map was inplace switched to a dense map.
+      DenseMapBaseObj* this_dense_map = static_cast<DenseMapBaseObj*>(base_map);
+      this_dense_map->Reset();
+    }
+  }
   /*!
    * \brief clear all entries
    */
@@ -1153,6 +1201,69 @@ class SmallMapBaseObj : public MapBaseObj {
     }
   }
   /*!
+   * \brief Inplace deleter from data
+   * \param data The data
+   */
+  static void InplaceSmallMapDeleterFromData(void* data) {
+    details::ObjectUnsafe::ObjectPtrFromOwned<SmallMapBaseObj>(
+        reinterpret_cast<Object*>(reinterpret_cast<char*>(data) - sizeof(SmallMapBaseObj)))
+        .reset();
+  }
+  /*!
+   * \brief Inplace switch the storage contents to the other map
+   *
+   * The other map will be consumed after this operation
+   * The current content will be reset after this operation
+   *
+   * \param other The other map
+   */
+  void InplaceSwitchTo(ObjectPtr<Object>&& other) {
+    // invariant this map have not been inplace switched to a dense map
+    TVM_FFI_ICHECK(this->IsSmallMap());
+    this->Reset();
+    MapBaseObj* other_map = static_cast<MapBaseObj*>(other.get());
+    if (other_map->IsSmallMap()) {
+      SmallMapBaseObj* other_small_map = static_cast<SmallMapBaseObj*>(other_map);
+      SmallMapBaseObj* this_small_map = this;
+      this_small_map->size_ = other_small_map->size_;
+      this_small_map->slots_ = other_small_map->slots_;
+      this_small_map->data_ = other_small_map->data_;
+      if (other_small_map->data_deleter_ != nullptr) {
+        this_small_map->data_deleter_ = other_small_map->data_deleter_;
+        other_small_map->data_deleter_ = nullptr;
+      } else {
+        // we switch to the inplace deleter from the data
+        this_small_map->data_deleter_ = InplaceSmallMapDeleterFromData;
+        // move out other from the ptr so the deletion can only be triggered
+        // via InplaceSmallMapDeleterFromData
+        details::ObjectUnsafe::MoveObjectPtrToTVMFFIObjectPtr(std::move(other));
+      }
+      other_small_map->data_ = nullptr;
+      other_small_map->size_ = 0;
+      other_small_map->slots_ = 0;
+    } else {
+      // Reinterpret this SmallMapBaseObj's memory as DenseMapBaseObj to write fields at the
+      // correct offsets. This is raw memory manipulation: SmallMapBaseObj's allocation is
+      // guaranteed large enough (see static_assert in Empty()), and all member access
+      // compiles to fixed-offset stores with no virtual dispatch involved.
+      // The destructor will also cross check and apply the correct deletion.
+      // As a result, we can inplace switch the container storage to dense map
+      DenseMapBaseObj* other_dense_map = static_cast<DenseMapBaseObj*>(other_map);
+      DenseMapBaseObj* this_dense_map = reinterpret_cast<DenseMapBaseObj*>(this);
+      this_dense_map->size_ = other_dense_map->size_;
+      this_dense_map->slots_ = other_dense_map->slots_;
+      this_dense_map->data_ = other_dense_map->data_;
+      this_dense_map->data_deleter_ = other_dense_map->data_deleter_;
+      this_dense_map->fib_shift_ = other_dense_map->fib_shift_;
+      this_dense_map->iter_list_head_ = other_dense_map->iter_list_head_;
+      this_dense_map->iter_list_tail_ = other_dense_map->iter_list_tail_;
+      other_dense_map->data_ = nullptr;
+      other_dense_map->data_deleter_ = nullptr;
+      other_dense_map->size_ = 0;
+      other_dense_map->slots_ = 0;
+    }
+  }
+  /*!
    * \brief Remove a position in SmallMapBaseObj
    * \param index The position to be removed
    */
@@ -1184,6 +1295,12 @@ class SmallMapBaseObj : public MapBaseObj {
    */
   template <typename MapObjType>
   static ObjectPtr<Object> Empty(uint64_t n = kInitSize) {
+    // We always allocate a SmallMapObj to be large enough so it can inplace switch to DenseMapObj
+    static_assert(alignof(SmallMapBaseObj) % alignof(KVType) == 0);
+    static_assert(sizeof(SmallMapBaseObj) + kInitSize * sizeof(KVType) >= sizeof(DenseMapBaseObj));
+    n = std::max(n, static_cast<uint64_t>(kInitSize));
+    // allocate a SmallMapBaseObj with enough space to inplace store n elements and switch to
+    // DenseMapBaseObj
     ObjectPtr<SmallMapBaseObj> p = ffi::make_inplace_array_object<SmallMapBaseObj, KVType>(n);
     // data_ is after the SmallMapBaseObj header
     p->data_ = reinterpret_cast<char*>(p.get()) + sizeof(SmallMapBaseObj);
@@ -1355,6 +1472,10 @@ inline void MapBaseObj::erase(const MapBaseObj::iterator& position) {
 
 inline void MapBaseObj::clear() {
   TVM_FFI_DISPATCH_MAP(this, p, { p->clear(); });
+}
+
+inline void MapBaseObj::InplaceSwitchTo(ObjectPtr<Object>&& other) {
+  TVM_FFI_DISPATCH_MAP(this, p, { p->InplaceSwitchTo(std::move(other)); });
 }
 /// \endcond
 
