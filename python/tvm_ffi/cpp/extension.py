@@ -381,7 +381,7 @@ def _generate_ninja_build(  # noqa: PLR0915, PLR0912
 
         if with_hip:
             rocm_home = _find_rocm_home()
-            default_cuda_cflags += ["-D__HIP_PLATFORM_AMD__=1", "-fno-gpu-rdc"]
+            default_cuda_cflags += ["-fPIC", "-D__HIP_PLATFORM_AMD__=1", "-fno-gpu-rdc"]
             default_cuda_cflags += _get_rocm_target()
             default_include_paths.append(str(Path(rocm_home) / "include"))
             default_ldflags += [
