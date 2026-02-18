@@ -176,13 +176,13 @@ struct TypeTraits<details::MapTemplate> : public details::STLTypeTrait {
  protected:
   template <typename MapType>
   TVM_FFI_INLINE static ObjectPtr<Object> CopyToMap(const MapType& src) {
-    return MapObj::CreateFromRange(std::begin(src), std::end(src));
+    return MapObj::CreateFromRange<MapObj>(std::begin(src), std::end(src));
   }
 
   template <typename MapType>
   TVM_FFI_INLINE static ObjectPtr<Object> MoveToMap(MapType&& src) {
-    return MapObj::CreateFromRange(std::make_move_iterator(std::begin(src)),
-                                   std::make_move_iterator(std::end(src)));
+    return MapObj::CreateFromRange<MapObj>(std::make_move_iterator(std::begin(src)),
+                                           std::make_move_iterator(std::end(src)));
   }
 
   template <typename MapType, bool CanReserve>

@@ -31,11 +31,24 @@
 #include <tvm/ffi/object.h>
 #include <tvm/ffi/optional.h>
 
-#include <type_traits>
 #include <unordered_map>
 
 namespace tvm {
 namespace ffi {
+
+/*! \brief Map object */
+class MapObj : public MapBaseObj {
+ public:
+  /// \cond Doxygen_Suppress
+  static constexpr const int32_t _type_index = TypeIndex::kTVMFFIMap;
+  static const constexpr bool _type_final = true;
+  TVM_FFI_DECLARE_OBJECT_INFO_STATIC(StaticTypeKey::kTVMFFIMap, MapObj, Object);
+  /// \endcond
+
+ protected:
+  template <typename, typename, typename>
+  friend class Map;
+};
 
 /*!
  * \brief Map container of NodeRef->NodeRef in DSL graph.
@@ -64,7 +77,7 @@ class Map : public ObjectRef {
   /*!
    * \brief default constructor
    */
-  Map() { data_ = MapObj::Empty(); }
+  Map() { data_ = MapObj::Empty<MapObj>(); }
   /*!
    * \brief move constructor
    * \param other source
@@ -159,14 +172,14 @@ class Map : public ObjectRef {
    */
   template <typename IterType>
   Map(IterType begin, IterType end) {
-    data_ = MapObj::CreateFromRange(begin, end);
+    data_ = MapObj::CreateFromRange<MapObj>(begin, end);
   }
   /*!
    * \brief constructor from initializer list
    * \param init The initalizer list
    */
   Map(std::initializer_list<std::pair<K, V>> init) {
-    data_ = MapObj::CreateFromRange(init.begin(), init.end());
+    data_ = MapObj::CreateFromRange<MapObj>(init.begin(), init.end());
   }
   /*!
    * \brief constructor from unordered_map
@@ -174,7 +187,7 @@ class Map : public ObjectRef {
    */
   template <typename Hash, typename Equal>
   Map(const std::unordered_map<K, V, Hash, Equal>& init) {  // NOLINT(*)
-    data_ = MapObj::CreateFromRange(init.begin(), init.end());
+    data_ = MapObj::CreateFromRange<MapObj>(init.begin(), init.end());
   }
   /*!
    * \brief Read element from map.
@@ -206,7 +219,7 @@ class Map : public ObjectRef {
   void clear() {
     MapObj* n = GetMapObj();
     if (n != nullptr) {
-      data_ = MapObj::Empty();
+      data_ = MapObj::Empty<MapObj>();
     }
   }
   /*!
@@ -216,7 +229,7 @@ class Map : public ObjectRef {
    */
   void Set(const K& key, const V& value) {
     CopyOnWrite();
-    MapObj::InsertMaybeReHash(MapObj::KVType(key, value), &data_);
+    MapObj::InsertMaybeReHash<MapObj>(MapObj::KVType(key, value), &data_);
   }
   /*! \return begin iterator */
   iterator begin() const { return iterator(GetMapObj()->begin()); }
@@ -249,9 +262,9 @@ class Map : public ObjectRef {
    */
   MapObj* CopyOnWrite() {
     if (data_.get() == nullptr) {
-      data_ = MapObj::Empty();
+      data_ = MapObj::Empty<MapObj>();
     } else if (!data_.unique()) {
-      data_ = MapObj::CopyFrom(GetMapObj());
+      data_ = MapObj::CopyFrom<MapObj>(GetMapObj());
     }
     return GetMapObj();
   }

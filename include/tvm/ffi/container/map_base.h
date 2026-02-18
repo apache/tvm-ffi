@@ -30,6 +30,7 @@
 #include <tvm/ffi/object.h>
 #include <tvm/ffi/optional.h>
 
+#include <algorithm>
 #include <limits>
 #include <string>
 #include <type_traits>
@@ -47,8 +48,13 @@ namespace ffi {
 #endif  // TVM_FFI_DEBUG_WITH_ABI_CHANGE
 /// \endcond
 
-/*! \brief Shared content of all specializations of hash map */
-class MapObj : public Object {
+/*!
+ * \brief Shared content of all specializations of hash map
+ *
+ * MapBaseObj is transparent to the FFI type system (no type index),
+ * following the same pattern as BytesObjBase.
+ */
+class MapBaseObj : public Object {
  public:
   /*! \brief Type of the keys in the hash map */
   using key_type = Any;
@@ -69,14 +75,8 @@ class MapObj : public Object {
   static_assert(std::is_standard_layout_v<KVType>, "KVType is not standard layout");
   static_assert(sizeof(KVType) == 32, "sizeof(KVType) incorrect");
 
-  /// \cond Doxygen_Suppress
-  static constexpr const int32_t _type_index = TypeIndex::kTVMFFIMap;
-  static const constexpr bool _type_final = true;
-  TVM_FFI_DECLARE_OBJECT_INFO_STATIC(StaticTypeKey::kTVMFFIMap, MapObj, Object);
-  /// \endcond
-
   /*!
-   * \brief Number of elements in the MapObj
+   * \brief Number of elements in the MapBaseObj
    * \return The result
    */
   size_t size() const { return size_; }
@@ -118,6 +118,11 @@ class MapObj : public Object {
    * \param key The indexing key
    */
   void erase(const key_type& key) { erase(find(key)); }
+
+  /*!
+   * \brief clear all entries
+   */
+  void clear();
 
   /// \cond Doxygen_Suppress
   class iterator {
@@ -170,52 +175,59 @@ class MapObj : public Object {
 #if TVM_FFI_DEBUG_WITH_ABI_CHANGE
     uint64_t state_marker;
     /*! \brief Construct by value */
-    iterator(uint64_t index, const MapObj* self)
+    iterator(uint64_t index, const MapBaseObj* self)
         : state_marker(self->state_marker), index(index), self(self) {}
 
 #else
-    iterator(uint64_t index, const MapObj* self) : index(index), self(self) {}
+    iterator(uint64_t index, const MapBaseObj* self) : index(index), self(self) {}
 #endif  // TVM_FFI_DEBUG_WITH_ABI_CHANGE
     /*! \brief The position on the array */
     uint64_t index;
     /*! \brief The container it points to */
-    const MapObj* self;
+    const MapBaseObj* self;
 
-    friend class DenseMapObj;
-    friend class SmallMapObj;
+    friend class DenseMapBaseObj;
+    friend class SmallMapBaseObj;
   };
   /// \endcond
-  /*!
-   * \brief Create an empty container
-   * \return The object created
-   */
-  static inline ObjectPtr<MapObj> Empty();
 
  protected:
 #if TVM_FFI_DEBUG_WITH_ABI_CHANGE
   uint64_t state_marker;
 #endif  // TVM_FFI_DEBUG_WITH_ABI_CHANGE
   /*!
+   * \brief Create an empty container
+   * \return The object created
+   */
+  template <typename MapObjType>
+  static inline ObjectPtr<Object> Empty();
+  /*!
    * \brief Create the map using contents from the given iterators.
    * \param first Begin of iterator
    * \param last End of iterator
+   * \tparam MapObjType The type of map object
    * \tparam IterType The type of iterator
    * \return ObjectPtr to the map created
    */
-  template <typename IterType>
+  template <typename MapObjType, typename IterType>
   static inline ObjectPtr<Object> CreateFromRange(IterType first, IterType last);
   /*!
    * \brief InsertMaybeReHash an entry into the given hash map
    * \param kv The entry to be inserted
    * \param map The pointer to the map, can be changed if re-hashing happens
+   * \tparam MapObjType The type of map object
    */
+  template <typename MapObjType>
   static inline void InsertMaybeReHash(KVType&& kv, ObjectPtr<Object>* map);
   /*!
-   * \brief Create an empty container with elements copying from another SmallMapObj
+   * \brief Create an empty container with elements copying from another SmallMapBaseObj
    * \param from The source container
+   * \tparam MapObjType The type of map object
    * \return The object created
    */
-  static inline ObjectPtr<MapObj> CopyFrom(MapObj* from);
+  template <typename MapObjType>
+  static inline ObjectPtr<Object> CopyFrom(MapBaseObj* from);
+
   /*!
    * \brief data pointer to the data region of the map.
    * \note For immutable inplace small map we do not need data_,
@@ -238,12 +250,12 @@ class MapObj : public Object {
   bool IsSmallMap() const { return (slots_ & kSmallTagMask) != 0ull; }
   /*!
    * \brief Optional data deleter when data is allocated separately
-   *        and its deletion is not managed by MapObj::deleter_.
+   *        and its deletion is not managed by MapBaseObj::deleter_.
    */
   void (*data_deleter_)(void*) = nullptr;
   // Reference class
-  template <typename, typename, typename>
-  friend class Map;
+  friend class SmallMapBaseObj;
+  friend class DenseMapBaseObj;
 
   template <typename, typename>
   friend struct TypeTraits;
@@ -254,7 +266,7 @@ class MapObj : public Object {
  *
  * A. Overview
  *
- * DenseMapObj did several improvements over traditional separate chaining hash,
+ * DenseMapBaseObj did several improvements over traditional separate chaining hash,
  * in terms of cache locality, memory footprints and data organization.
  *
  * A1. Implicit linked list. For better cache locality, instead of using linked list
@@ -307,7 +319,7 @@ class MapObj : public Object {
  * [2] https://programmingpraxis.com/2018/06/19/fibonacci-hash/
  * [3] https://fgiesen.wordpress.com/2015/02/22/triangular-numbers-mod-2n/
  */
-class DenseMapObj : public MapObj {
+class DenseMapBaseObj : public MapBaseObj {
  private:
   /*! \brief The number of elements in a memory block */
   static constexpr int kBlockCap = 16;
@@ -346,7 +358,7 @@ class DenseMapObj : public MapObj {
   static void BlockDeleter(void* data) { delete[] static_cast<Block*>(data); }
 
  public:
-  using MapObj::iterator;
+  using MapBaseObj::iterator;
 
   /*!
    * \brief Return the number of usable slots for Dense layout (MSB clear => identity).
@@ -355,9 +367,9 @@ class DenseMapObj : public MapObj {
   uint64_t NumSlots() const { return slots_; }
 
   /*!
-   * \brief Destroy the DenseMapObj
+   * \brief Destroy the DenseMapBaseObj
    */
-  ~DenseMapObj() { this->Reset(); }
+  ~DenseMapBaseObj() { this->Reset(); }
   /*! \return The number of elements of the key */
   size_t count(const key_type& key) const { return !Search(key).IsNone(); }
   /*!
@@ -395,6 +407,27 @@ class DenseMapObj : public MapObj {
   iterator begin() const { return iterator(iter_list_head_, this); }
   /*! \return end iterator */
   iterator end() const { return iterator(kInvalidIndex, this); }
+
+  /*!
+   * \brief clear all entries
+   */
+  void clear() {
+    uint64_t n_blocks = CalcNumBlocks(this->NumSlots());
+    for (uint64_t bi = 0; bi < n_blocks; ++bi) {
+      uint8_t* meta_ptr = GetBlock(bi)->bytes;
+      ItemType* data_ptr = reinterpret_cast<ItemType*>(GetBlock(bi)->bytes + kBlockCap);
+      for (int j = 0; j < kBlockCap; ++j, ++meta_ptr, ++data_ptr) {
+        uint8_t& meta = *meta_ptr;
+        if (meta != kProtectedSlot && meta != kEmptySlot) {
+          meta = kEmptySlot;
+          data_ptr->ItemType::~ItemType();
+        }
+      }
+    }
+    size_ = 0;
+    iter_list_head_ = kInvalidIndex;
+    iter_list_tail_ = kInvalidIndex;
+  }
 
  private:
   Block* GetBlock(size_t index) const { return static_cast<Block*>(data_) + index; }
@@ -646,21 +679,11 @@ class DenseMapObj : public MapObj {
   }
   /*! \brief Clear the container to empty, release all entries and memory acquired */
   void Reset() {
-    uint64_t n_blocks = CalcNumBlocks(this->NumSlots());
-    for (uint64_t bi = 0; bi < n_blocks; ++bi) {
-      uint8_t* meta_ptr = GetBlock(bi)->bytes;
-      ItemType* data_ptr = reinterpret_cast<ItemType*>(GetBlock(bi)->bytes + kBlockCap);
-      for (int j = 0; j < kBlockCap; ++j, ++meta_ptr, ++data_ptr) {
-        uint8_t& meta = *meta_ptr;
-        if (meta != kProtectedSlot && meta != kEmptySlot) {
-          meta = kEmptySlot;
-          data_ptr->ItemType::~ItemType();
-        }
-      }
-    }
+    clear();
     ReleaseMemory();
   }
-  /*! \brief Release the memory acquired by the container without deleting its entries stored inside
+  /*!
+   * \brief Release the memory acquired by the container without deleting its entries stored inside
    */
   void ReleaseMemory() {
     if (data_ != nullptr) {
@@ -677,12 +700,14 @@ class DenseMapObj : public MapObj {
    * \brief Create an empty container
    * \param fib_shift The fib shift provided
    * \param n_slots Number of slots required, should be power-of-two
+   * \tparam MapObjType The type of map object
    * \return The object created
    */
-  static ObjectPtr<DenseMapObj> Empty(uint32_t fib_shift, uint64_t n_slots) {
+  template <typename MapObjType>
+  static ObjectPtr<Object> Empty(uint32_t fib_shift, uint64_t n_slots) {
     // Ensure even slot count (power-of-two expected by callers; this guard
     // makes the method robust if a non-even value slips through).
-    ObjectPtr<DenseMapObj> p = make_object<DenseMapObj>();
+    ObjectPtr<DenseMapBaseObj> p = make_object<DenseMapBaseObj>();
     uint64_t n_blocks = CalcNumBlocks(n_slots);
     Block* block = new Block[n_blocks];
     p->data_ = block;
@@ -695,18 +720,25 @@ class DenseMapObj : public MapObj {
     p->fib_shift_ = fib_shift;
     p->iter_list_head_ = kInvalidIndex;
     p->iter_list_tail_ = kInvalidIndex;
+    // manually set the type index to specialized subclass
+    // data layout is ensured to be the same except for the type index
+    static_assert(std::is_base_of_v<MapBaseObj, MapObjType>);
+    static_assert(sizeof(MapObjType) == sizeof(MapBaseObj));
+    p->header_.type_index = MapObjType::RuntimeTypeIndex();
     for (uint64_t i = 0; i < n_blocks; ++i, ++block) {
       std::fill(block->bytes, block->bytes + kBlockCap, kEmptySlot);
     }
     return p;
   }
   /*!
-   * \brief Create an empty container with elements copying from another DenseMapObj
+   * \brief Create an empty container with elements copying from another DenseMapBaseObj
    * \param from The source container
+   * \tparam MapObjType The type of map object
    * \return The object created
    */
-  static ObjectPtr<DenseMapObj> CopyFrom(DenseMapObj* from) {
-    ObjectPtr<DenseMapObj> p = make_object<DenseMapObj>();
+  template <typename MapObjType>
+  static ObjectPtr<Object> CopyFrom(DenseMapBaseObj* from) {
+    ObjectPtr<DenseMapBaseObj> p = make_object<DenseMapBaseObj>();
     uint64_t n_blocks = CalcNumBlocks(from->NumSlots());
     p->data_ = new Block[n_blocks];
     // assign block deleter so even if we take re-alloc data
@@ -718,6 +750,11 @@ class DenseMapObj : public MapObj {
     p->fib_shift_ = from->fib_shift_;
     p->iter_list_head_ = from->iter_list_head_;
     p->iter_list_tail_ = from->iter_list_tail_;
+    // manually set the type index to specialized subclass
+    // data layout is ensured to be the same except for the type index
+    static_assert(std::is_base_of_v<MapBaseObj, MapObjType>);
+    static_assert(sizeof(MapObjType) == sizeof(MapBaseObj));
+    p->header_.type_index = MapObjType::RuntimeTypeIndex();
     for (uint64_t bi = 0; bi < n_blocks; ++bi) {
       uint8_t* meta_ptr_from = from->GetBlock(bi)->bytes;
       ItemType* data_ptr_from = reinterpret_cast<ItemType*>(from->GetBlock(bi)->bytes + kBlockCap);
@@ -739,8 +776,9 @@ class DenseMapObj : public MapObj {
    * \param kv The entry to be inserted
    * \param map The pointer to the map, can be changed if re-hashing happens
    */
+  template <typename MapObjType>
   static void InsertMaybeReHash(KVType&& kv, ObjectPtr<Object>* map) {
-    DenseMapObj* map_node = static_cast<DenseMapObj*>(map->get());
+    DenseMapBaseObj* map_node = static_cast<DenseMapBaseObj*>(map->get());
     ListNode iter;
     // Try to insert. If succeed, we simply return
     if (map_node->TryInsert(kv.first, &iter)) {
@@ -751,14 +789,14 @@ class DenseMapObj : public MapObj {
     }
     TVM_FFI_ICHECK(!map_node->IsSmallMap());
     // Otherwise, start rehash
-    ObjectPtr<Object> p = Empty(map_node->fib_shift_ - 1, map_node->NumSlots() * 2);
+    ObjectPtr<Object> p = Empty<MapObjType>(map_node->fib_shift_ - 1, map_node->NumSlots() * 2);
 
     // need to insert in the same order as the original map
     for (uint64_t index = map_node->iter_list_head_; index != kInvalidIndex;) {
       ListNode node(index, map_node);
       // now try move src_data into the new map, note that src may still not
       // be fully consumed into the call, but destructor will be called.
-      InsertMaybeReHash(std::move(node.Data()), &p);
+      InsertMaybeReHash<MapObjType>(std::move(node.Data()), &p);
       // Important, needs to explicit call destructor in case move did remove
       // node's internal item
       index = node.Item().next;
@@ -769,7 +807,7 @@ class DenseMapObj : public MapObj {
       // Remove this call will cause memory leak very likely.
       node.DestructData();
     }
-    InsertMaybeReHash(std::move(kv), &p);
+    InsertMaybeReHash<MapObjType>(std::move(kv), &p);
     map_node->ReleaseMemory();
     *map = p;
   }
@@ -862,7 +900,7 @@ class DenseMapObj : public MapObj {
     /*! \brief Construct None */
     ListNode() : index(0), block(nullptr) {}
     /*! \brief Construct from position */
-    ListNode(uint64_t index, const DenseMapObj* self)
+    ListNode(uint64_t index, const DenseMapBaseObj* self)
         : index(index), block(self->GetBlock(index / kBlockCap)) {}
     /*! \brief Metadata on the entry */
     uint8_t& Meta() const { return *(block->bytes + index % kBlockCap); }
@@ -912,7 +950,7 @@ class DenseMapObj : public MapObj {
     /*! \brief If the entry has next entry on the linked list */
     bool HasNext() const { return NextProbeLocation(Meta() & 0b01111111) != 0; }
     /*! \brief Move the entry to the next entry on the linked list */
-    bool MoveToNext(const DenseMapObj* self, uint8_t meta) {
+    bool MoveToNext(const DenseMapBaseObj* self, uint8_t meta) {
       uint64_t offset = NextProbeLocation(meta & 0b01111111);
       if (offset == 0) {
         index = 0;
@@ -926,9 +964,9 @@ class DenseMapObj : public MapObj {
       return true;
     }
     /*! \brief Move the entry to the next entry on the linked list */
-    bool MoveToNext(const DenseMapObj* self) { return MoveToNext(self, Meta()); }
+    bool MoveToNext(const DenseMapBaseObj* self) { return MoveToNext(self, Meta()); }
     /*! \brief Get the previous entry on the linked list */
-    ListNode FindPrev(const DenseMapObj* self) const {
+    ListNode FindPrev(const DenseMapBaseObj* self) const {
       // start from the head of the linked list, which must exist
       ListNode next = self->IndexFromHash(AnyHash()(Key()));
       // `prev` is always the previous item of `next`
@@ -938,7 +976,7 @@ class DenseMapObj : public MapObj {
       return prev;
     }
     /*! \brief Get the next empty jump */
-    bool GetNextEmpty(const DenseMapObj* self, uint8_t* jump, ListNode* result) const {
+    bool GetNextEmpty(const DenseMapBaseObj* self, uint8_t* jump, ListNode* result) const {
       for (uint8_t idx = 1; idx < kNumJumpDists; ++idx) {
         // the probing will go to next position and round back to stay within the
         // correct range of the slots
@@ -995,7 +1033,8 @@ class DenseMapObj : public MapObj {
     /* clang-format on */
     return kNextProbeLocation[index];
   }
-  friend class MapObj;
+  friend class MapBaseObj;
+  friend class SmallMapBaseObj;
 
  private:
   /*!
@@ -1009,15 +1048,14 @@ class DenseMapObj : public MapObj {
 };
 
 /*! \brief A specialization of small-sized hash map */
-class SmallMapObj : public MapObj,
-                    public details::InplaceArrayBase<SmallMapObj, MapObj::KVRawStorageType> {
+class SmallMapBaseObj : public MapBaseObj {
  private:
   static constexpr uint64_t kInitSize = 2;
   static constexpr uint64_t kMaxSize = 4;
 
  public:
-  using MapObj::iterator;
-  using MapObj::KVType;
+  using MapBaseObj::iterator;
+  using MapBaseObj::KVType;
 
   // Return the number of usable slots for Small layout (mask off tag).
   /*!
@@ -1026,7 +1064,11 @@ class SmallMapObj : public MapObj,
    */
   uint64_t NumSlots() const { return slots_ & ~kSmallTagMask; }
 
-  ~SmallMapObj() {
+  ~SmallMapBaseObj() { this->Reset(); }
+  /*!
+   * \brief clear all entries
+   */
+  void clear() {
     KVType* begin = static_cast<KVType*>(data_);
     for (uint64_t index = 0; index < size_; ++index) {
       // call destructor to destroy the item in `begin + index`
@@ -1035,12 +1077,10 @@ class SmallMapObj : public MapObj,
       (begin + index)->first.Any::~Any();
       (begin + index)->second.Any::~Any();
     }
-    if (data_deleter_ != nullptr) {
-      data_deleter_(data_);
-    }
+    size_ = 0;
   }
   /*!
-   * \brief Count the number of times a key exists in the SmallMapObj
+   * \brief Count the number of times a key exists in the SmallMapBaseObj
    * \param key The indexing key
    * \return The result, 0 or 1
    */
@@ -1099,8 +1139,21 @@ class SmallMapObj : public MapObj,
    * \param n The number of slots
    */
   void SetSlotsAndSmallLayoutTag(uint64_t n) { slots_ = (n & ~kSmallTagMask) | kSmallTagMask; }
+  /*
+   * \brief Reset original small Storage so it can be ready for switch.
+   */
+  void Reset() {
+    this->clear();
+    if (data_deleter_ != nullptr) {
+      data_deleter_(data_);
+      // after deletion we have zero slots
+      slots_ = 0;
+      data_ = nullptr;
+      data_deleter_ = nullptr;
+    }
+  }
   /*!
-   * \brief Remove a position in SmallMapObj
+   * \brief Remove a position in SmallMapBaseObj
    * \param index The position to be removed
    */
   void Erase(const uint64_t index) {
@@ -1127,13 +1180,20 @@ class SmallMapObj : public MapObj,
    * \brief Create an empty container
    * \param n Number of empty slots
    * \return The object created
+   * \tparam MapObjType The type of map object
    */
-  static ObjectPtr<SmallMapObj> Empty(uint64_t n = kInitSize) {
-    using ::tvm::ffi::make_inplace_array_object;
-    ObjectPtr<SmallMapObj> p = make_inplace_array_object<SmallMapObj, KVType>(n);
-    p->data_ = p->AddressOf(0);
+  template <typename MapObjType>
+  static ObjectPtr<Object> Empty(uint64_t n = kInitSize) {
+    ObjectPtr<SmallMapBaseObj> p = ffi::make_inplace_array_object<SmallMapBaseObj, KVType>(n);
+    // data_ is after the SmallMapBaseObj header
+    p->data_ = reinterpret_cast<char*>(p.get()) + sizeof(SmallMapBaseObj);
     p->size_ = 0;
     p->SetSlotsAndSmallLayoutTag(n);
+    // manually set the type index to specialized subclass
+    // data layout is ensured to be the same except for the type index
+    static_assert(std::is_base_of_v<MapBaseObj, MapObjType>);
+    static_assert(sizeof(MapObjType) == sizeof(MapBaseObj));
+    p->header_.type_index = MapObjType::RuntimeTypeIndex();
     return p;
   }
   /*!
@@ -1141,35 +1201,39 @@ class SmallMapObj : public MapObj,
    * \param n Number of empty slots
    * \param first begin of iterator
    * \param last end of iterator
+   * \tparam MapObjType The type of map object
    * \tparam IterType The type of iterator
    * \return The object created
    */
-  template <typename IterType>
-  static ObjectPtr<SmallMapObj> CreateFromRange(uint64_t n, IterType first, IterType last) {
-    ObjectPtr<SmallMapObj> p = Empty(n);
-    KVType* ptr = static_cast<KVType*>(p->data_);
-    for (; first != last; ++first, ++p->size_) {
+  template <typename MapObjType, typename IterType>
+  static ObjectPtr<Object> CreateFromRange(uint64_t n, IterType first, IterType last) {
+    ObjectPtr<Object> p = Empty<MapObjType>(n);
+    SmallMapBaseObj* small_map_base_obj = static_cast<SmallMapBaseObj*>(p.get());
+    KVType* ptr = static_cast<KVType*>(small_map_base_obj->data_);
+    for (; first != last; ++first, ++small_map_base_obj->size_) {
       new (ptr++) KVType(*first);
     }
     return p;
   }
   /*!
-   * \brief Create an empty container with elements copying from another SmallMapObj
+   * \brief Create an empty container with elements copying from another SmallMapBaseObj
    * \param from The source container
    * \return The object created
    */
-  static ObjectPtr<SmallMapObj> CopyFrom(SmallMapObj* from) {
+  template <typename MapObjType>
+  static ObjectPtr<Object> CopyFrom(SmallMapBaseObj* from) {
     KVType* first = static_cast<KVType*>(from->data_);
     KVType* last = first + from->size_;
-    return CreateFromRange(from->size_, first, last);
+    return CreateFromRange<MapObjType>(from->size_, first, last);
   }
   /*!
    * \brief InsertMaybeReHash an entry into the given hash map
    * \param kv The entry to be inserted
    * \param map The pointer to the map, can be changed if re-hashing happens
    */
+  template <typename MapObjType>
   static void InsertMaybeReHash(KVType&& kv, ObjectPtr<Object>* map) {
-    SmallMapObj* map_node = static_cast<SmallMapObj*>(map->get());
+    SmallMapBaseObj* map_node = static_cast<SmallMapBaseObj*>(map->get());
     iterator itr = map_node->find(kv.first);
     if (itr.index < map_node->size_) {
       itr->second = kv.second;
@@ -1184,8 +1248,9 @@ class SmallMapObj : public MapObj,
     uint64_t next_size = std::max(map_node->NumSlots() * 2, kInitSize);
     next_size = std::min(next_size, kMaxSize);
     TVM_FFI_ICHECK_GT(next_size, map_node->NumSlots());
-    ObjectPtr<Object> new_map = CreateFromRange(next_size, map_node->begin(), map_node->end());
-    InsertMaybeReHash(std::move(kv), &new_map);
+    ObjectPtr<Object> new_map =
+        CreateFromRange<MapObjType>(next_size, map_node->begin(), map_node->end());
+    InsertMaybeReHash<MapObjType>(std::move(kv), &new_map);
     *map = std::move(new_map);
   }
   /*!
@@ -1206,20 +1271,17 @@ class SmallMapObj : public MapObj,
    * \return The result
    */
   KVType* DeRefItr(uint64_t index) const { return static_cast<KVType*>(data_) + index; }
-  /*! \brief A size function used by InplaceArrayBase */
-  uint64_t GetSize() const { return size_; }
 
  protected:
-  friend class MapObj;
-  friend class DenseMapObj;
-  friend class details::InplaceArrayBase<SmallMapObj, MapObj::KVType>;
+  friend class MapBaseObj;
+  friend class DenseMapBaseObj;
 };
 
 /// \cond
 #define TVM_FFI_DISPATCH_MAP(base, var, body)   \
   {                                             \
-    using TSmall = SmallMapObj*;                \
-    using TDense = DenseMapObj*;                \
+    using TSmall = SmallMapBaseObj*;            \
+    using TDense = DenseMapBaseObj*;            \
     if ((base)->IsSmallMap()) {                 \
       TSmall var = static_cast<TSmall>((base)); \
       body;                                     \
@@ -1231,8 +1293,8 @@ class SmallMapObj : public MapObj,
 
 #define TVM_FFI_DISPATCH_MAP_CONST(base, var, body) \
   {                                                 \
-    using TSmall = const SmallMapObj*;              \
-    using TDense = const DenseMapObj*;              \
+    using TSmall = const SmallMapBaseObj*;          \
+    using TDense = const DenseMapBaseObj*;          \
     if ((base)->IsSmallMap()) {                     \
       TSmall var = static_cast<TSmall>((base));     \
       body;                                         \
@@ -1242,12 +1304,12 @@ class SmallMapObj : public MapObj,
     }                                               \
   }
 
-inline MapObj::iterator::pointer MapObj::iterator::operator->() const {
+inline MapBaseObj::iterator::pointer MapBaseObj::iterator::operator->() const {
   TVM_FFI_MAP_FAIL_IF_CHANGED()
   TVM_FFI_DISPATCH_MAP_CONST(self, p, { return p->DeRefItr(index); });
 }
 
-inline MapObj::iterator& MapObj::iterator::operator++() {
+inline MapBaseObj::iterator& MapBaseObj::iterator::operator++() {
   TVM_FFI_MAP_FAIL_IF_CHANGED()
   TVM_FFI_DISPATCH_MAP_CONST(self, p, {
     index = p->IncItr(index);
@@ -1255,7 +1317,7 @@ inline MapObj::iterator& MapObj::iterator::operator++() {
   });
 }
 
-inline MapObj::iterator& MapObj::iterator::operator--() {
+inline MapBaseObj::iterator& MapBaseObj::iterator::operator--() {
   TVM_FFI_MAP_FAIL_IF_CHANGED()
   TVM_FFI_DISPATCH_MAP_CONST(self, p, {
     index = p->DecItr(index);
@@ -1263,111 +1325,120 @@ inline MapObj::iterator& MapObj::iterator::operator--() {
   });
 }
 
-inline size_t MapObj::count(const key_type& key) const {
+inline size_t MapBaseObj::count(const key_type& key) const {
   TVM_FFI_DISPATCH_MAP_CONST(this, p, { return p->count(key); });
 }
 
-inline const MapObj::mapped_type& MapObj::at(const MapObj::key_type& key) const {
+inline const MapBaseObj::mapped_type& MapBaseObj::at(const MapBaseObj::key_type& key) const {
   TVM_FFI_DISPATCH_MAP_CONST(this, p, { return p->at(key); });
 }
 
-inline MapObj::mapped_type& MapObj::at(const MapObj::key_type& key) {
+inline MapBaseObj::mapped_type& MapBaseObj::at(const MapBaseObj::key_type& key) {
   TVM_FFI_DISPATCH_MAP(this, p, { return p->at(key); });
 }
 
-inline MapObj::iterator MapObj::begin() const {
+inline MapBaseObj::iterator MapBaseObj::begin() const {
   TVM_FFI_DISPATCH_MAP_CONST(this, p, { return p->begin(); });
 }
 
-inline MapObj::iterator MapObj::end() const {
+inline MapBaseObj::iterator MapBaseObj::end() const {
   TVM_FFI_DISPATCH_MAP_CONST(this, p, { return p->end(); });
 }
 
-inline MapObj::iterator MapObj::find(const MapObj::key_type& key) const {
+inline MapBaseObj::iterator MapBaseObj::find(const MapBaseObj::key_type& key) const {
   TVM_FFI_DISPATCH_MAP_CONST(this, p, { return p->find(key); });
 }
 
-inline void MapObj::erase(const MapObj::iterator& position) {
-  TVM_FFI_DISPATCH_MAP(this, p, { return p->erase(position); });
+inline void MapBaseObj::erase(const MapBaseObj::iterator& position) {
+  TVM_FFI_DISPATCH_MAP(this, p, { p->erase(position); });
+}
+
+inline void MapBaseObj::clear() {
+  TVM_FFI_DISPATCH_MAP(this, p, { p->clear(); });
 }
 /// \endcond
 
 #undef TVM_FFI_DISPATCH_MAP
 #undef TVM_FFI_DISPATCH_MAP_CONST
 
-inline ObjectPtr<MapObj> MapObj::Empty() { return SmallMapObj::Empty(); }
+template <typename MapObjType>
+inline ObjectPtr<Object> MapBaseObj::Empty() {
+  return SmallMapBaseObj::Empty<MapObjType>();
+}
 
-inline ObjectPtr<MapObj> MapObj::CopyFrom(MapObj* from) {
+template <typename MapObjType>
+inline ObjectPtr<Object> MapBaseObj::CopyFrom(MapBaseObj* from) {
   if (from->IsSmallMap()) {
-    return SmallMapObj::CopyFrom(static_cast<SmallMapObj*>(from));
+    return SmallMapBaseObj::CopyFrom<MapObjType>(static_cast<SmallMapBaseObj*>(from));
   } else {
-    return DenseMapObj::CopyFrom(static_cast<DenseMapObj*>(from));
+    return DenseMapBaseObj::CopyFrom<MapObjType>(static_cast<DenseMapBaseObj*>(from));
   }
 }
 
-template <typename IterType>
-inline ObjectPtr<Object> MapObj::CreateFromRange(IterType first, IterType last) {
+template <typename MapObjType, typename IterType>
+inline ObjectPtr<Object> MapBaseObj::CreateFromRange(IterType first, IterType last) {
   int64_t _cap = std::distance(first, last);
   if (_cap < 0) {
-    return SmallMapObj::Empty();
+    return SmallMapBaseObj::Empty<MapObjType>();
   }
   uint64_t cap = static_cast<uint64_t>(_cap);
-  if (cap < SmallMapObj::kMaxSize) {
+  if (cap < SmallMapBaseObj::kMaxSize) {
     if (cap < 2) {
-      return SmallMapObj::CreateFromRange(cap, first, last);
+      return SmallMapBaseObj::CreateFromRange<MapObjType>(cap, first, last);
     }
     // need to insert to avoid duplicate keys
-    ObjectPtr<Object> obj = SmallMapObj::Empty(cap);
+    ObjectPtr<Object> obj = SmallMapBaseObj::Empty<MapObjType>(cap);
     for (; first != last; ++first) {
       KVType kv(*first);
-      SmallMapObj::InsertMaybeReHash(std::move(kv), &obj);
+      SmallMapBaseObj::InsertMaybeReHash<MapObjType>(std::move(kv), &obj);
     }
     return obj;
   } else {
     uint32_t fib_shift;
     uint64_t n_slots;
-    DenseMapObj::CalcTableSize(cap, &fib_shift, &n_slots);
-    ObjectPtr<Object> obj = DenseMapObj::Empty(fib_shift, n_slots);
+    DenseMapBaseObj::CalcTableSize(cap, &fib_shift, &n_slots);
+    ObjectPtr<Object> obj = DenseMapBaseObj::Empty<MapObjType>(fib_shift, n_slots);
     for (; first != last; ++first) {
       KVType kv(*first);
-      DenseMapObj::InsertMaybeReHash(std::move(kv), &obj);
+      DenseMapBaseObj::InsertMaybeReHash<MapObjType>(std::move(kv), &obj);
     }
     return obj;
   }
 }
 
-inline void MapObj::InsertMaybeReHash(KVType&& kv, ObjectPtr<Object>* map) {
-  MapObj* base = static_cast<MapObj*>(map->get());
+template <typename MapObjType>
+inline void MapBaseObj::InsertMaybeReHash(KVType&& kv, ObjectPtr<Object>* map) {
+  MapBaseObj* base = static_cast<MapBaseObj*>(map->get());
 #if TVM_FFI_DEBUG_WITH_ABI_CHANGE
   base->state_marker++;
 #endif  // TVM_FFI_DEBUG_WITH_ABI_CHANGE
   if (base->IsSmallMap()) {
-    SmallMapObj* sm = static_cast<SmallMapObj*>(base);
-    if (sm->NumSlots() < SmallMapObj::kMaxSize) {
-      SmallMapObj::InsertMaybeReHash(std::move(kv), map);
-    } else if (sm->NumSlots() == SmallMapObj::kMaxSize) {
+    SmallMapBaseObj* sm = static_cast<SmallMapBaseObj*>(base);
+    if (sm->NumSlots() < SmallMapBaseObj::kMaxSize) {
+      SmallMapBaseObj::InsertMaybeReHash<MapObjType>(std::move(kv), map);
+    } else if (sm->NumSlots() == SmallMapBaseObj::kMaxSize) {
       if (base->size_ < sm->NumSlots()) {
-        SmallMapObj::InsertMaybeReHash(std::move(kv), map);
+        SmallMapBaseObj::InsertMaybeReHash<MapObjType>(std::move(kv), map);
       } else {
-        ObjectPtr<Object> new_map = MapObj::CreateFromRange(base->begin(), base->end());
-        DenseMapObj::InsertMaybeReHash(std::move(kv), &new_map);
+        ObjectPtr<Object> new_map =
+            MapBaseObj::CreateFromRange<MapObjType>(base->begin(), base->end());
+        DenseMapBaseObj::InsertMaybeReHash<MapObjType>(std::move(kv), &new_map);
         *map = std::move(new_map);
       }
     }
   } else {
-    DenseMapObj::InsertMaybeReHash(std::move(kv), map);
+    DenseMapBaseObj::InsertMaybeReHash<MapObjType>(std::move(kv), map);
   }
 }
 
 /// \cond Doxygen_Suppress
 /*!
- * \brief Specialize make_object<MapObj> to be deleted for make_object<DenseMapObj> and
- * make_object<SmallMapObj> only.
+ * \brief Specialize make_object<MapBaseObj> to be deleted for make_object<DenseMapBaseObj> and
+ * make_object<SmallMapBaseObj> only.
  */
 template <>
-inline ObjectPtr<MapObj> make_object<>() = delete;
+inline ObjectPtr<MapBaseObj> make_object<>() = delete;
 /// \endcond
-
 }  // namespace ffi
 }  // namespace tvm
 #endif  // TVM_FFI_CONTAINER_MAP_BASE_H_
