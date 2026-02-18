@@ -43,18 +43,8 @@ namespace tvm {
 namespace ffi {
 
 /*! \brief Array node content in array */
-class ArrayObj : public SeqBaseObj, public details::InplaceArrayBase<ArrayObj, TVMFFIAny> {
-  // InplaceArrayBase<ArrayObj, TVMFFIAny>'s destructor is compiled out because TVMFFIAny is
-  // trivial. SeqBaseObj::~SeqBaseObj() handles element destruction. Changing the ElemType to a
-  // non-trivial type would cause double-destruction.
-  static_assert(std::is_trivially_destructible_v<TVMFFIAny>,
-                "InplaceArrayBase<ArrayObj, TVMFFIAny> must use a trivially destructible "
-                "element type to avoid double-destruction with SeqBaseObj::~SeqBaseObj()");
-
+class ArrayObj : public SeqBaseObj {
  public:
-  // Bring SeqBaseObj names into ArrayObj scope to hide InplaceArrayBase's versions
-  using SeqBaseObj::operator[];
-  using SeqBaseObj::EmplaceInit;
   /*!
    * \brief Constructs a container and copy from another
    * \param cap The capacity of the container
@@ -132,7 +122,7 @@ class ArrayObj : public SeqBaseObj, public details::InplaceArrayBase<ArrayObj, T
     ObjectPtr<ArrayObj> p = make_inplace_array_object<ArrayObj, Any>(n);
     p->TVMFFISeqCell::capacity = n;
     p->TVMFFISeqCell::size = 0;
-    p->data = p->AddressOf(0);
+    p->data = reinterpret_cast<char*>(p.get()) + sizeof(ArrayObj);
     p->data_deleter = nullptr;
     return p;
   }
@@ -160,9 +150,6 @@ class ArrayObj : public SeqBaseObj, public details::InplaceArrayBase<ArrayObj, T
 
   /*! \brief Expansion factor of the Array */
   static constexpr int64_t kIncFactor = 2;
-
-  // CRTP parent class
-  friend InplaceArrayBase<ArrayObj, Any>;
 
   // Reference class
   template <typename, typename>
