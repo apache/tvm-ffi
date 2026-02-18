@@ -1126,6 +1126,7 @@ def build(
     backend
         The GPU backend to use. It can be "cuda" or "hip".
         If not specified, the backend will be automatically determined based on the available GPU and the provided source code.
+
     Returns
     -------
     lib_path: str
@@ -1275,6 +1276,7 @@ def load(
     backend
         The GPU backend to use. It can be "cuda" or "hip".
         If not specified, the backend will be automatically determined based on the available GPU and the provided source code.
+
     Returns
     -------
     mod: Module
