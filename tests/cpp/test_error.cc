@@ -107,6 +107,87 @@ TEST(CheckError, PassingCondition) {
   EXPECT_NO_THROW(TVM_FFI_CHECK(5 < 10, IndexError));
 }
 
+// Helper: expect that a throwing statement throws Error with the given kind and
+// a message containing the expected substring.
+#define EXPECT_CHECK_ERROR(stmt, expected_kind, expected_substr)      \
+  {                                                                   \
+    bool caught = false;                                              \
+    try {                                                             \
+      stmt;                                                           \
+    } catch (const ::tvm::ffi::Error& e) {                            \
+      caught = true;                                                  \
+      EXPECT_EQ(e.kind(), expected_kind);                             \
+      EXPECT_NE(e.message().find(expected_substr), std::string::npos) \
+          << "message: " << e.message();                              \
+    }                                                                 \
+    EXPECT_TRUE(caught) << "Expected " #stmt " to throw";             \
+  }
+
+TEST(CheckError, CheckBinaryOps) {
+  // EQ: pass and fail
+  TVM_FFI_CHECK_EQ(3, 3, ValueError);
+  EXPECT_CHECK_ERROR(TVM_FFI_CHECK_EQ(3, 5, ValueError), "ValueError", "3 vs. 5");
+  // NE: pass and fail
+  TVM_FFI_CHECK_NE(3, 4, ValueError);
+  EXPECT_CHECK_ERROR(TVM_FFI_CHECK_NE(3, 3, ValueError), "ValueError", "3 vs. 3");
+  // LT: pass and fail
+  TVM_FFI_CHECK_LT(3, 4, IndexError);
+  EXPECT_CHECK_ERROR(TVM_FFI_CHECK_LT(5, 3, IndexError), "IndexError", "5 vs. 3");
+  // GT: pass and fail
+  TVM_FFI_CHECK_GT(4, 3, IndexError);
+  EXPECT_CHECK_ERROR(TVM_FFI_CHECK_GT(3, 5, IndexError), "IndexError", "3 vs. 5");
+  // LE: pass and fail
+  TVM_FFI_CHECK_LE(3, 3, TypeError);
+  TVM_FFI_CHECK_LE(2, 3, TypeError);
+  EXPECT_CHECK_ERROR(TVM_FFI_CHECK_LE(5, 3, TypeError), "TypeError", "5 vs. 3");
+  // GE: pass and fail
+  TVM_FFI_CHECK_GE(4, 3, TypeError);
+  TVM_FFI_CHECK_GE(3, 3, TypeError);
+  EXPECT_CHECK_ERROR(TVM_FFI_CHECK_GE(2, 5, TypeError), "TypeError", "2 vs. 5");
+  // NOTNULL: pass and fail
+  int x = 42;
+  int* p = &x;
+  EXPECT_EQ(TVM_FFI_CHECK_NOTNULL(p, ValueError), p);
+  int* q = nullptr;
+  EXPECT_CHECK_ERROR((void)TVM_FFI_CHECK_NOTNULL(q, ValueError), "ValueError", "Check not null");
+}
+
+TEST(CheckError, DCheck) {
+#ifdef NDEBUG
+  // Release: failing conditions are no-ops.
+  TVM_FFI_DCHECK(false);
+  TVM_FFI_DCHECK_EQ(1, 2);
+  TVM_FFI_DCHECK_NE(1, 1);
+  TVM_FFI_DCHECK_LT(5, 3);
+  TVM_FFI_DCHECK_GT(3, 5);
+  TVM_FFI_DCHECK_LE(5, 3);
+  TVM_FFI_DCHECK_GE(3, 5);
+  int* q = nullptr;
+  int* r = TVM_FFI_DCHECK_NOTNULL(q);
+  EXPECT_EQ(r, nullptr);
+#else
+  // Debug: passing conditions succeed.
+  TVM_FFI_DCHECK(true);
+  TVM_FFI_DCHECK_EQ(3, 3);
+  TVM_FFI_DCHECK_NE(3, 4);
+  TVM_FFI_DCHECK_LT(3, 4);
+  TVM_FFI_DCHECK_GT(4, 3);
+  TVM_FFI_DCHECK_LE(3, 3);
+  TVM_FFI_DCHECK_GE(4, 3);
+  int x = 42;
+  int* p = &x;
+  EXPECT_EQ(TVM_FFI_DCHECK_NOTNULL(p), p);
+  // Debug: failing conditions throw InternalError.
+  EXPECT_CHECK_ERROR(TVM_FFI_DCHECK(false), "InternalError", "Check failed");
+  EXPECT_CHECK_ERROR(TVM_FFI_DCHECK_EQ(1, 2), "InternalError", "1 vs. 2");
+  EXPECT_CHECK_ERROR(TVM_FFI_DCHECK_NE(1, 1), "InternalError", "1 vs. 1");
+  EXPECT_CHECK_ERROR(TVM_FFI_DCHECK_LT(5, 3), "InternalError", "5 vs. 3");
+  EXPECT_CHECK_ERROR(TVM_FFI_DCHECK_GT(3, 5), "InternalError", "3 vs. 5");
+  EXPECT_CHECK_ERROR(TVM_FFI_DCHECK_LE(5, 3), "InternalError", "5 vs. 3");
+  EXPECT_CHECK_ERROR(TVM_FFI_DCHECK_GE(3, 5), "InternalError", "3 vs. 5");
+#endif
+}
+
 TEST(Error, AnyConvert) {
   Any any = Error("TypeError", "here", "test0");
   Optional<Error> opt_err = any.as<Error>();

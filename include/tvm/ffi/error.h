@@ -450,27 +450,60 @@ TVM_FFI_CHECK_FUNC(_NE, !=)
 #endif
 }  // namespace details
 
-#define TVM_FFI_ICHECK_BINARY_OP(name, op, x, y)                                              \
-  if (auto __tvm_ffi_log_err = /* NOLINT(bugprone-reserved-identifier) */                     \
-      ::tvm::ffi::details::LogCheck##name(x, y))                                              \
-  TVM_FFI_THROW(InternalError) << "Check failed: " << #x " " #op " " #y << *__tvm_ffi_log_err \
-                               << ": "
-
-#define TVM_FFI_ICHECK(x) \
-  if (!(x)) TVM_FFI_THROW(InternalError) << "Check failed: (" #x << ") is false: "
+#define TVM_FFI_CHECK_BINARY_OP(name, op, x, y, ErrorKind)                \
+  if (auto __tvm_ffi_log_err = /* NOLINT(bugprone-reserved-identifier) */ \
+      ::tvm::ffi::details::LogCheck##name(x, y))                          \
+  TVM_FFI_THROW(ErrorKind) << "Check failed: " << #x " " #op " " #y << *__tvm_ffi_log_err << ": "
 
 #define TVM_FFI_CHECK(cond, ErrorKind) \
   if (!(cond)) TVM_FFI_THROW(ErrorKind) << "Check failed: (" #cond << ") is false: "
 
-#define TVM_FFI_ICHECK_LT(x, y) TVM_FFI_ICHECK_BINARY_OP(_LT, <, x, y)
-#define TVM_FFI_ICHECK_GT(x, y) TVM_FFI_ICHECK_BINARY_OP(_GT, >, x, y)
-#define TVM_FFI_ICHECK_LE(x, y) TVM_FFI_ICHECK_BINARY_OP(_LE, <=, x, y)
-#define TVM_FFI_ICHECK_GE(x, y) TVM_FFI_ICHECK_BINARY_OP(_GE, >=, x, y)
-#define TVM_FFI_ICHECK_EQ(x, y) TVM_FFI_ICHECK_BINARY_OP(_EQ, ==, x, y)
-#define TVM_FFI_ICHECK_NE(x, y) TVM_FFI_ICHECK_BINARY_OP(_NE, !=, x, y)
-#define TVM_FFI_ICHECK_NOTNULL(x)                                                 \
-  ((x) == nullptr ? TVM_FFI_THROW(InternalError) << "Check not null: " #x << ' ', \
+#define TVM_FFI_CHECK_LT(x, y, ErrorKind) TVM_FFI_CHECK_BINARY_OP(_LT, <, x, y, ErrorKind)
+#define TVM_FFI_CHECK_GT(x, y, ErrorKind) TVM_FFI_CHECK_BINARY_OP(_GT, >, x, y, ErrorKind)
+#define TVM_FFI_CHECK_LE(x, y, ErrorKind) TVM_FFI_CHECK_BINARY_OP(_LE, <=, x, y, ErrorKind)
+#define TVM_FFI_CHECK_GE(x, y, ErrorKind) TVM_FFI_CHECK_BINARY_OP(_GE, >=, x, y, ErrorKind)
+#define TVM_FFI_CHECK_EQ(x, y, ErrorKind) TVM_FFI_CHECK_BINARY_OP(_EQ, ==, x, y, ErrorKind)
+#define TVM_FFI_CHECK_NE(x, y, ErrorKind) TVM_FFI_CHECK_BINARY_OP(_NE, !=, x, y, ErrorKind)
+#define TVM_FFI_CHECK_NOTNULL(x, ErrorKind)                                   \
+  ((x) == nullptr ? TVM_FFI_THROW(ErrorKind) << "Check not null: " #x << ' ', \
    (x)            : (x))  // NOLINT(*)
+
+#define TVM_FFI_ICHECK(x) TVM_FFI_CHECK(x, InternalError)
+#define TVM_FFI_ICHECK_LT(x, y) TVM_FFI_CHECK_LT(x, y, InternalError)
+#define TVM_FFI_ICHECK_GT(x, y) TVM_FFI_CHECK_GT(x, y, InternalError)
+#define TVM_FFI_ICHECK_LE(x, y) TVM_FFI_CHECK_LE(x, y, InternalError)
+#define TVM_FFI_ICHECK_GE(x, y) TVM_FFI_CHECK_GE(x, y, InternalError)
+#define TVM_FFI_ICHECK_EQ(x, y) TVM_FFI_CHECK_EQ(x, y, InternalError)
+#define TVM_FFI_ICHECK_NE(x, y) TVM_FFI_CHECK_NE(x, y, InternalError)
+#define TVM_FFI_ICHECK_NOTNULL(x) TVM_FFI_CHECK_NOTNULL(x, InternalError)
+
+// Debug checks: same as ICHECK but stripped when NDEBUG is defined (release builds).
+#ifndef NDEBUG
+#define TVM_FFI_DCHECK(x) TVM_FFI_ICHECK(x)
+#define TVM_FFI_DCHECK_LT(x, y) TVM_FFI_ICHECK_LT(x, y)
+#define TVM_FFI_DCHECK_GT(x, y) TVM_FFI_ICHECK_GT(x, y)
+#define TVM_FFI_DCHECK_LE(x, y) TVM_FFI_ICHECK_LE(x, y)
+#define TVM_FFI_DCHECK_GE(x, y) TVM_FFI_ICHECK_GE(x, y)
+#define TVM_FFI_DCHECK_EQ(x, y) TVM_FFI_ICHECK_EQ(x, y)
+#define TVM_FFI_DCHECK_NE(x, y) TVM_FFI_ICHECK_NE(x, y)
+#define TVM_FFI_DCHECK_NOTNULL(x) TVM_FFI_ICHECK_NOTNULL(x)
+#else
+#define TVM_FFI_DCHECK(x) \
+  while (false) TVM_FFI_ICHECK(x)
+#define TVM_FFI_DCHECK_LT(x, y) \
+  while (false) TVM_FFI_ICHECK_LT(x, y)
+#define TVM_FFI_DCHECK_GT(x, y) \
+  while (false) TVM_FFI_ICHECK_GT(x, y)
+#define TVM_FFI_DCHECK_LE(x, y) \
+  while (false) TVM_FFI_ICHECK_LE(x, y)
+#define TVM_FFI_DCHECK_GE(x, y) \
+  while (false) TVM_FFI_ICHECK_GE(x, y)
+#define TVM_FFI_DCHECK_EQ(x, y) \
+  while (false) TVM_FFI_ICHECK_EQ(x, y)
+#define TVM_FFI_DCHECK_NE(x, y) \
+  while (false) TVM_FFI_ICHECK_NE(x, y)
+#define TVM_FFI_DCHECK_NOTNULL(x) (x)
+#endif  // NDEBUG
 }  // namespace ffi
 }  // namespace tvm
 #endif  // TVM_FFI_ERROR_H_
