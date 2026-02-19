@@ -60,6 +60,8 @@ def _replace_list_dict(ty: str) -> str:
         ("testing.schema_id_map_str_str", "Callable[[dict[str, str]], dict[str, str]]"),
         ("testing.schema_id_map_str_obj", "Callable[[dict[str, Object]], dict[str, Object]]"),
         ("testing.schema_id_map", "Callable[[dict[Any, Any]], dict[Any, Any]]"),
+        ("testing.schema_id_dict_str_int", "Callable[[dict[str, int]], dict[str, int]]"),
+        ("testing.schema_id_dict_str_str", "Callable[[dict[str, str]], dict[str, str]]"),
         ("testing.schema_id_variant_int_str", "Callable[[int | str], int | str]"),
         ("testing.schema_packed", "Callable[..., Any]"),
         (

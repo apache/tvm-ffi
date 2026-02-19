@@ -42,6 +42,7 @@ if sys.version_info >= (3, 9):
         Iterable,
         Iterator,
         Mapping,
+        MutableMapping,
         MutableSequence,
         Sequence,
     )
@@ -61,6 +62,7 @@ else:  # Python 3.8
         Iterable,
         Iterator,
         Mapping,
+        MutableMapping,
         MutableSequence,
         Sequence,
     )
@@ -71,7 +73,7 @@ else:  # Python 3.8
         ValuesView as ValuesViewBase,
     )
 
-__all__ = ["Array", "List", "Map"]
+__all__ = ["Array", "Dict", "List", "Map"]
 
 
 T = TypeVar("T")
@@ -365,15 +367,20 @@ class List(core.Object, MutableSequence[T]):
 class KeysView(KeysViewBase[K]):
     """Helper class to return keys view."""
 
-    def __init__(self, backend_map: Map[K, V]) -> None:
+    def __init__(
+        self,
+        backend_map: Map[K, V] | Dict[K, V],
+        iter_functor_getter: Callable[..., Callable[[int], Any]] | None = None,
+    ) -> None:
         self._backend_map = backend_map
+        self._iter_functor_getter = iter_functor_getter or _ffi_api.MapForwardIterFunctor
 
     def __len__(self) -> int:
         return len(self._backend_map)
 
     def __iter__(self) -> Iterator[K]:
         size = len(self._backend_map)
-        functor: Callable[[int], Any] = _ffi_api.MapForwardIterFunctor(self._backend_map)
+        functor: Callable[[int], Any] = self._iter_functor_getter(self._backend_map)
         for _ in range(size):
             key = cast(K, functor(0))
             yield key
@@ -387,15 +394,20 @@ class KeysView(KeysViewBase[K]):
 class ValuesView(ValuesViewBase[V]):
     """Helper class to return values view."""
 
-    def __init__(self, backend_map: Map[K, V]) -> None:
+    def __init__(
+        self,
+        backend_map: Map[K, V] | Dict[K, V],
+        iter_functor_getter: Callable[..., Callable[[int], Any]] | None = None,
+    ) -> None:
         self._backend_map = backend_map
+        self._iter_functor_getter = iter_functor_getter or _ffi_api.MapForwardIterFunctor
 
     def __len__(self) -> int:
         return len(self._backend_map)
 
     def __iter__(self) -> Iterator[V]:
         size = len(self._backend_map)
-        functor: Callable[[int], Any] = _ffi_api.MapForwardIterFunctor(self._backend_map)
+        functor: Callable[[int], Any] = self._iter_functor_getter(self._backend_map)
         for _ in range(size):
             value = cast(V, functor(1))
             yield value
@@ -406,15 +418,20 @@ class ValuesView(ValuesViewBase[V]):
 class ItemsView(ItemsViewBase[K, V]):
     """Helper class to return items view."""
 
-    def __init__(self, backend_map: Map[K, V]) -> None:
+    def __init__(
+        self,
+        backend_map: Map[K, V] | Dict[K, V],
+        iter_functor_getter: Callable[..., Callable[[int], Any]] | None = None,
+    ) -> None:
         self._backend_map = backend_map
+        self._iter_functor_getter = iter_functor_getter or _ffi_api.MapForwardIterFunctor
 
     def __len__(self) -> int:
         return len(self._backend_map)
 
     def __iter__(self) -> Iterator[tuple[K, V]]:
         size = len(self._backend_map)
-        functor: Callable[[int], Any] = _ffi_api.MapForwardIterFunctor(self._backend_map)
+        functor: Callable[[int], Any] = self._iter_functor_getter(self._backend_map)
         for _ in range(size):
             key = cast(K, functor(0))
             value = cast(V, functor(1))
@@ -541,6 +558,123 @@ class Map(core.Object, Mapping[K, V]):
     def __repr__(self) -> str:
         """Return a string representation of the map."""
         # exception safety handling for chandle=None
+        if self.__chandle__() == 0:
+            return type(self).__name__ + "(chandle=None)"
+        return str(core.__object_repr__(self))  # ty: ignore[unresolved-attribute]
+
+
+@register_object("ffi.Dict")
+class Dict(core.Object, MutableMapping[K, V]):
+    """Mutable dictionary container with shared reference semantics.
+
+    Unlike :class:`Map`, ``Dict`` does NOT implement copy-on-write.
+    Mutations happen directly on the underlying shared object.
+    All Python references sharing the same ``Dict`` see mutations immediately.
+
+    Parameters
+    ----------
+    input_dict
+        The dictionary of values to be stored.
+
+    Examples
+    --------
+    .. code-block:: python
+
+        import tvm_ffi
+
+        d = tvm_ffi.Dict({"a": 1, "b": 2})
+        d["c"] = 3
+        assert len(d) == 3
+
+    """
+
+    def __init__(self, input_dict: Mapping[K, V] | None = None) -> None:
+        """Construct a Dict from a Python mapping."""
+        list_kvs: list[Any] = []
+        if input_dict is not None:
+            for k, v in input_dict.items():
+                list_kvs.append(k)
+                list_kvs.append(v)
+        self.__init_handle_by_constructor__(_ffi_api.Dict, *list_kvs)
+
+    def __getitem__(self, k: K) -> V:
+        """Return the value for key `k` or raise KeyError."""
+        return cast(V, _ffi_api.DictGetItem(self, k))
+
+    def __setitem__(self, k: K, v: V) -> None:
+        """Set the value for key `k`."""
+        _ffi_api.DictSetItem(self, k, v)
+
+    def __delitem__(self, k: K) -> None:
+        """Delete the entry for key `k`."""
+        if _ffi_api.DictCount(self, k) == 0:
+            raise KeyError(k)
+        _ffi_api.DictErase(self, k)
+
+    def __contains__(self, k: object) -> bool:
+        """Return True if the dict contains key `k`."""
+        return _ffi_api.DictCount(self, k) != 0
+
+    def __len__(self) -> int:
+        """Return the number of items in the dict."""
+        return _ffi_api.DictSize(self)
+
+    def __bool__(self) -> bool:
+        """Return True if the dict is non-empty."""
+        return len(self) > 0
+
+    def __iter__(self) -> Iterator[K]:
+        """Iterate over the dict's keys."""
+        return iter(self.keys())
+
+    def keys(self) -> KeysView[K]:
+        """Return a dynamic view of the dict's keys."""
+        return KeysView(self, _ffi_api.DictForwardIterFunctor)
+
+    def values(self) -> ValuesView[V]:
+        """Return a dynamic view of the dict's values."""
+        return ValuesView(self, _ffi_api.DictForwardIterFunctor)
+
+    def items(self) -> ItemsView[K, V]:
+        """Get the items from the dict."""
+        return ItemsView(self, _ffi_api.DictForwardIterFunctor)
+
+    @overload
+    def get(self, key: K) -> V | None: ...
+
+    @overload
+    def get(self, key: K, default: V | _DefaultT) -> V | _DefaultT: ...
+
+    def get(self, key: K, default: V | _DefaultT | None = None) -> V | _DefaultT | None:
+        """Get an element with a default value."""
+        ret = _ffi_api.DictGetItemOrMissing(self, key)
+        if MISSING.same_as(ret):
+            return default
+        return ret
+
+    def pop(self, key: K, *args: V | _DefaultT) -> V | _DefaultT:
+        """Remove and return value for key, or default if not present."""
+        if len(args) > 1:
+            raise TypeError(f"pop expected at most 2 arguments, got {1 + len(args)}")
+        ret = _ffi_api.DictGetItemOrMissing(self, key)
+        if MISSING.same_as(ret):
+            if args:
+                return args[0]
+            raise KeyError(key)
+        _ffi_api.DictErase(self, key)
+        return cast(V, ret)
+
+    def clear(self) -> None:
+        """Remove all elements from the dict."""
+        _ffi_api.DictClear(self)
+
+    def update(self, other: Mapping[K, V]) -> None:  # type: ignore[override]
+        """Update the dict from a mapping."""
+        for k, v in other.items():
+            self[k] = v
+
+    def __repr__(self) -> str:
+        """Return a string representation of the dict."""
         if self.__chandle__() == 0:
             return type(self).__name__ + "(chandle=None)"
         return str(core.__object_repr__(self))  # ty: ignore[unresolved-attribute]

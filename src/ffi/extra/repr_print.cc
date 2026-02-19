@@ -23,6 +23,7 @@
  */
 #include <tvm/ffi/any.h>
 #include <tvm/ffi/container/array.h>
+#include <tvm/ffi/container/dict.h>
 #include <tvm/ffi/container/list.h>
 #include <tvm/ffi/container/map.h>
 #include <tvm/ffi/container/shape.h>
@@ -225,8 +226,9 @@ class ReprPrinter {
       // Generic reflection-based repr
       result = GenericRepr(obj);
     }
-    // For Array/List: append address if env var is set
+    // For containers: append address if env var is set
     if (show_addr_ && (ti == TypeIndex::kTVMFFIArray || ti == TypeIndex::kTVMFFIList ||
+                       ti == TypeIndex::kTVMFFIMap || ti == TypeIndex::kTVMFFIDict ||
                        ti == TypeIndex::kTVMFFITensor)) {
       result += "@" + AddressStr(obj);
     }
@@ -335,7 +337,7 @@ String ReprList(const ListObj* obj, const Function& fn_repr) {
   return String(os.str());
 }
 
-String ReprMap(const MapObj* obj, const Function& fn_repr) {
+String ReprMapBase(const MapBaseObj* obj, const Function& fn_repr) {
   std::ostringstream os;
   os << "{";
   bool first = true;
@@ -348,6 +350,14 @@ String ReprMap(const MapObj* obj, const Function& fn_repr) {
   }
   os << "}";
   return String(os.str());
+}
+
+String ReprDict(const DictObj* obj, const Function& fn_repr) {
+  return ReprMapBase(static_cast<const MapBaseObj*>(obj), fn_repr);
+}
+
+String ReprMap(const MapObj* obj, const Function& fn_repr) {
+  return ReprMapBase(static_cast<const MapBaseObj*>(obj), fn_repr);
 }
 
 /*!
@@ -381,6 +391,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   RegisterBuiltinRepr(TypeIndex::kTVMFFIArray, ReprArray);
   RegisterBuiltinRepr(TypeIndex::kTVMFFIList, ReprList);
   RegisterBuiltinRepr(TypeIndex::kTVMFFIMap, ReprMap);
+  RegisterBuiltinRepr(TypeIndex::kTVMFFIDict, ReprDict);
   // Register global function
   refl::GlobalDef().def("ffi.ReprPrint",
                         [](const Any& value) -> String { return ReprPrint(value); });

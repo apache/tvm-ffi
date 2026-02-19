@@ -19,6 +19,7 @@
  */
 #include <gtest/gtest.h>
 #include <tvm/ffi/container/array.h>
+#include <tvm/ffi/container/dict.h>
 #include <tvm/ffi/container/list.h>
 #include <tvm/ffi/container/map.h>
 #include <tvm/ffi/extra/structural_equal.h>
@@ -116,6 +117,58 @@ TEST(StructuralEqualHash, NestedMapArray) {
   auto diff_d_a = StructuralEqual::GetFirstMismatch(d, a);
   auto expected_diff_d_a = refl::AccessPathPair(refl::AccessPath::Root()->MapItemMissing("b"),
                                                 refl::AccessPath::Root()->MapItem("b"));
+}
+
+TEST(StructuralEqualHash, Dict) {
+  // same dict but different insertion order
+  Dict<String, int> a = {{"a", 1}, {"b", 2}, {"c", 3}};
+  Dict<String, int> b = {{"b", 2}, {"c", 3}, {"a", 1}};
+  EXPECT_TRUE(StructuralEqual()(a, b));
+  EXPECT_EQ(StructuralHash()(a), StructuralHash()(b));
+
+  Dict<String, int> c = {{"a", 1}, {"b", 2}, {"c", 4}};
+  EXPECT_FALSE(StructuralEqual()(a, c));
+  EXPECT_NE(StructuralHash()(a), StructuralHash()(c));
+
+  auto diff_a_c = StructuralEqual::GetFirstMismatch(a, c);
+  auto expected_diff_a_c = refl::AccessPathPair(refl::AccessPath::Root()->MapItem("c"),
+                                                refl::AccessPath::Root()->MapItem("c"));
+  EXPECT_TRUE(diff_a_c.has_value());
+  EXPECT_TRUE(StructuralEqual()(diff_a_c, expected_diff_a_c));
+}
+
+TEST(StructuralEqualHash, NestedDictArray) {
+  Dict<String, Array<Any>> a = {{"a", {1, 2, 3}}, {"b", {4, "hello", 6}}};
+  Dict<String, Array<Any>> b = {{"a", {1, 2, 3}}, {"b", {4, "hello", 6}}};
+  EXPECT_TRUE(StructuralEqual()(a, b));
+  EXPECT_EQ(StructuralHash()(a), StructuralHash()(b));
+
+  Dict<String, Array<Any>> c = {{"a", {1, 2, 3}}, {"b", {4, "world", 6}}};
+  EXPECT_FALSE(StructuralEqual()(a, c));
+  EXPECT_NE(StructuralHash()(a), StructuralHash()(c));
+
+  auto diff_a_c = StructuralEqual::GetFirstMismatch(a, c);
+  auto expected_diff_a_c =
+      refl::AccessPathPair(refl::AccessPath::Root()->MapItem("b")->ArrayItem(1),
+                           refl::AccessPath::Root()->MapItem("b")->ArrayItem(1));
+  EXPECT_TRUE(diff_a_c.has_value());
+  EXPECT_TRUE(StructuralEqual()(diff_a_c, expected_diff_a_c));
+
+  Dict<String, Array<Any>> d = {{"a", {1, 2, 3}}};
+  auto diff_a_d = StructuralEqual::GetFirstMismatch(a, d);
+  auto expected_diff_a_d = refl::AccessPathPair(refl::AccessPath::Root()->MapItem("b"),
+                                                refl::AccessPath::Root()->MapItemMissing("b"));
+  EXPECT_TRUE(diff_a_d.has_value());
+  EXPECT_TRUE(StructuralEqual()(diff_a_d, expected_diff_a_d));
+}
+
+TEST(StructuralEqualHash, DictVsMapDifferentType) {
+  Map<String, int> m = {{"a", 1}, {"b", 2}};
+  Dict<String, int> d = {{"a", 1}, {"b", 2}};
+  // Different type_index => not equal
+  EXPECT_FALSE(StructuralEqual()(m, d));
+  // Different type_key_hash => different hash (very likely)
+  EXPECT_NE(StructuralHash()(m), StructuralHash()(d));
 }
 
 TEST(StructuralEqualHash, FreeVar) {

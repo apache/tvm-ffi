@@ -22,6 +22,7 @@
 #include <dlpack/dlpack.h>
 #include <tvm/ffi/any.h>
 #include <tvm/ffi/container/array.h>
+#include <tvm/ffi/container/dict.h>
 #include <tvm/ffi/container/list.h>
 #include <tvm/ffi/container/map.h>
 #include <tvm/ffi/container/tensor.h>
@@ -388,6 +389,10 @@ List<int64_t> schema_id_list_int(List<int64_t> lst) { return lst; }
 List<String> schema_id_list_str(List<String> lst) { return lst; }
 List<ObjectRef> schema_id_list_obj(List<ObjectRef> lst) { return lst; }
 
+// Dict types
+Dict<String, int64_t> schema_id_dict_str_int(Dict<String, int64_t> d) { return d; }
+Dict<String, String> schema_id_dict_str_str(Dict<String, String> d) { return d; }
+
 // Complex nested types
 Map<String, Array<int64_t>> schema_arr_map_opt(const Array<Optional<int64_t>>& arr,
                                                Map<String, Array<int64_t>> mp,
@@ -557,6 +562,8 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("testing.schema_id_map_str_str", schema_test_impl::schema_id_map_str_str)
       .def("testing.schema_id_map_str_obj", schema_test_impl::schema_id_map_str_obj)
       .def("testing.schema_id_map", schema_test_impl::schema_id_map)
+      .def("testing.schema_id_dict_str_int", schema_test_impl::schema_id_dict_str_int)
+      .def("testing.schema_id_dict_str_str", schema_test_impl::schema_id_dict_str_str)
       .def("testing.schema_id_variant_int_str", schema_test_impl::schema_id_variant_int_str)
       .def_packed("testing.schema_packed", [](PackedArgs args, Any* ret) {})
       .def("testing.schema_arr_map_opt", schema_test_impl::schema_arr_map_opt)

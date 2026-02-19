@@ -23,6 +23,7 @@
  */
 #include <tvm/ffi/any.h>
 #include <tvm/ffi/container/array.h>
+#include <tvm/ffi/container/dict.h>
 #include <tvm/ffi/container/list.h>
 #include <tvm/ffi/container/map.h>
 #include <tvm/ffi/container/shape.h>
@@ -133,7 +134,19 @@ class ObjectGraphSerializer {
       case TypeIndex::kTVMFFIMap: {
         Map<Any, Any> map = details::AnyUnsafe::CopyFromAnyViewAfterCheck<Map<Any, Any>>(value);
         node.Set("type", ffi::StaticTypeKey::kTVMFFIMap);
-        node.Set("data", CreateMapData(map));
+        node.Set("data", CreateMapBaseData(static_cast<const MapBaseObj*>(map.get())));
+        break;
+      }
+      case TypeIndex::kTVMFFIDict: {
+        Dict<Any, Any> dict = details::AnyUnsafe::CopyFromAnyViewAfterCheck<Dict<Any, Any>>(value);
+        node.Set("type", ffi::StaticTypeKey::kTVMFFIDict);
+        const void* dict_ptr = static_cast<const void*>(dict.get());
+        if (!active_lists_.insert(dict_ptr).second) {
+          TVM_FFI_THROW(ValueError)
+              << "Cycle detected during serialization: a Dict contains itself";
+        }
+        node.Set("data", CreateMapBaseData(static_cast<const MapBaseObj*>(dict.get())));
+        active_lists_.erase(dict_ptr);
         break;
       }
       case TypeIndex::kTVMFFIShape: {
@@ -169,12 +182,12 @@ class ObjectGraphSerializer {
     return data;
   }
 
-  json::Array CreateMapData(const Map<Any, Any>& value) {
+  json::Array CreateMapBaseData(const MapBaseObj* value) {
     json::Array data;
-    data.reserve(static_cast<int64_t>(value.size()) * 2);
-    for (const auto& [key, value] : value) {
+    data.reserve(static_cast<int64_t>(value->size()) * 2);
+    for (const auto& [key, val] : *value) {
       data.push_back(GetOrCreateNodeIndex(key));
-      data.push_back(GetOrCreateNodeIndex(value));
+      data.push_back(GetOrCreateNodeIndex(val));
     }
     return data;
   }
@@ -307,7 +320,10 @@ class ObjectGraphDeserializer {
         return Base64Decode(node["data"].cast<String>());
       }
       case TypeIndex::kTVMFFIMap: {
-        return DecodeMapData(node["data"].cast<json::Array>());
+        return DecodeMapLikeData<Map<Any, Any>>(node["data"].cast<json::Array>());
+      }
+      case TypeIndex::kTVMFFIDict: {
+        return DecodeMapLikeData<Dict<Any, Any>>(node["data"].cast<json::Array>());
       }
       case TypeIndex::kTVMFFIArray: {
         return DecodeSequenceData<Array<Any>>(node["data"].cast<json::Array>());
@@ -335,15 +351,16 @@ class ObjectGraphDeserializer {
     return sequence;
   }
 
-  Map<Any, Any> DecodeMapData(const json::Array& data) {
-    Map<Any, Any> map;
+  template <typename MapType>
+  MapType DecodeMapLikeData(const json::Array& data) {
+    MapType result;
     const int64_t n = static_cast<int64_t>(data.size());
     for (int64_t i = 0; i < n; i += 2) {
       int64_t key_index = data[i].cast<int64_t>();
       int64_t value_index = data[i + 1].cast<int64_t>();
-      map.Set(GetOrDecodeNode(key_index), GetOrDecodeNode(value_index));
+      result.Set(GetOrDecodeNode(key_index), GetOrDecodeNode(value_index));
     }
-    return map;
+    return result;
   }
 
   Any DecodeObjectData(int32_t type_index, const json::Value& data) {

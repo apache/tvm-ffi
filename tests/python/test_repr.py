@@ -124,6 +124,39 @@ def test_repr_map_empty() -> None:
     assert ReprPrint(tvm_ffi.Map({})) == "{}"
 
 
+# ---------- Dict ----------
+
+
+def test_repr_dict() -> None:
+    """Test repr of FFI Dict."""
+    assert ReprPrint(tvm_ffi.Dict({"key": "value"})) == '{"key": "value"}'
+
+
+def test_repr_dict_empty() -> None:
+    """Test repr of empty Dict."""
+    assert ReprPrint(tvm_ffi.Dict({})) == "{}"
+
+
+def test_repr_dict_int_keys() -> None:
+    """Test repr of Dict with integer keys."""
+    d = tvm_ffi.Dict({1: 2, 3: 4})
+    result = ReprPrint(d)
+    # Dict iteration order is hash-dependent; match either ordering.
+    _check(result, r"(?:\{1: 2, 3: 4\}|\{3: 4, 1: 2\})")
+
+
+def test_repr_dict_with_array_values() -> None:
+    """Test repr of Dict with Array values."""
+    assert ReprPrint(tvm_ffi.Dict({1: tvm_ffi.Array([10, 20])})) == "{1: (10, 20)}"
+
+
+def test_repr_dict_with_object_values() -> None:
+    """Test repr of Dict with object values."""
+    pair = tvm_ffi.testing.create_object("testing.TestIntPair", a=1, b=2)
+    d = tvm_ffi.Dict({"obj": pair})
+    assert ReprPrint(d) == '{"obj": testing.TestIntPair(a=1, b=2)}'
+
+
 # ---------- Tensor ----------
 
 
@@ -527,6 +560,13 @@ def test_repr_with_addr_list(monkeypatch: pytest.MonkeyPatch) -> None:
     _check(ReprPrint(lst), rf"\[10, 20\]@{A}")
 
 
+def test_repr_with_addr_dict(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test that Dict shows address suffix when TVM_FFI_REPR_WITH_ADDR is set."""
+    monkeypatch.setenv("TVM_FFI_REPR_WITH_ADDR", "1")
+    d = tvm_ffi.Dict({"a": 1})
+    _check(ReprPrint(d), rf'\{{"a": 1\}}@{A}')
+
+
 def test_repr_with_addr_dag(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test DAG with addresses: both occurrences show full form with same address."""
     monkeypatch.setenv("TVM_FFI_REPR_WITH_ADDR", "1")
@@ -556,7 +596,7 @@ def test_repr_with_addr_cycle(monkeypatch: pytest.MonkeyPatch) -> None:
     _check(
         result,
         rf"testing\.TestObjectDerived@(?P<obj>{A})\("
-        rf'v_i64=1, v_f64=0, v_str="", v_map=\{{\}}, '
+        rf'v_i64=1, v_f64=0, v_str="", v_map=\{{\}}@{A}, '
         rf"v_array=\(\.\.\.@(?P=obj),\)@{A}"
         rf"\)",
     )

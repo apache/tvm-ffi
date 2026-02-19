@@ -24,6 +24,7 @@ import pytest
 
 try:
     import torch
+    import torch.version
 except ImportError:
     torch = None  # ty: ignore[invalid-assignment]
 

@@ -63,6 +63,7 @@ ROCM_DTYPE_MAP = {
 def _determine_backend_once() -> Literal["cpu", "cuda", "rocm"]:
     try:
         import torch  # noqa: PLC0415
+        import torch.version  # noqa: PLC0415
 
         if torch.cuda.is_available():
             if torch.version.cuda is not None:

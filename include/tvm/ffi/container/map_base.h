@@ -266,6 +266,9 @@ class MapBaseObj : public Object {
   friend class SmallMapBaseObj;
   friend class DenseMapBaseObj;
 
+  template <typename, typename, typename>
+  friend class Dict;
+
   template <typename, typename>
   friend struct TypeTraits;
 };
@@ -1560,6 +1563,119 @@ inline void MapBaseObj::InsertMaybeReHash(KVType&& kv, ObjectPtr<Object>* map) {
 template <>
 inline ObjectPtr<MapBaseObj> make_object<>() = delete;
 /// \endcond
+/*!
+ * \brief CRTP base for map type-traits (Map, Dict).
+ *
+ * \tparam Derived Must expose:
+ *   - `static constexpr int32_t kPrimaryTypeIndex` — the canonical FFI type index
+ *   - `static constexpr int32_t kOtherTypeIndex`   — an alternative accepted type index
+ *   - `static constexpr const char* kTypeName`      — human-readable name for diagnostics
+ */
+template <typename Derived, typename MapRef, typename K, typename V>
+struct MapTypeTraitsBase : public ObjectRefTypeTraitsBase<MapRef> {
+  using Base = ObjectRefTypeTraitsBase<MapRef>;
+  using Base::CopyFromAnyViewAfterCheck;
+
+  TVM_FFI_INLINE static bool CheckAnyStrict(const TVMFFIAny* src) {
+    if (src->type_index != Derived::kPrimaryTypeIndex) return false;
+    if constexpr (std::is_same_v<K, Any> && std::is_same_v<V, Any>) {
+      return true;
+    } else {
+      const MapBaseObj* n = reinterpret_cast<const MapBaseObj*>(src->v_obj);
+      for (const auto& kv : *n) {
+        if constexpr (!std::is_same_v<K, Any>) {
+          if (!details::AnyUnsafe::CheckAnyStrict<K>(kv.first)) return false;
+        }
+        if constexpr (!std::is_same_v<V, Any>) {
+          if (!details::AnyUnsafe::CheckAnyStrict<V>(kv.second)) return false;
+        }
+      }
+      return true;
+    }
+  }
+
+  TVM_FFI_INLINE static std::string GetMismatchTypeInfo(const TVMFFIAny* src) {
+    if (src->type_index != Derived::kPrimaryTypeIndex &&
+        src->type_index != Derived::kOtherTypeIndex) {
+      return TypeTraitsBase::GetMismatchTypeInfo(src);
+    }
+    if constexpr (!std::is_same_v<K, Any> || !std::is_same_v<V, Any>) {
+      const MapBaseObj* n = reinterpret_cast<const MapBaseObj*>(src->v_obj);
+      for (const auto& kv : *n) {
+        if constexpr (!std::is_same_v<K, Any>) {
+          if (!details::AnyUnsafe::CheckAnyStrict<K>(kv.first) &&
+              !kv.first.try_cast<K>().has_value()) {
+            return std::string(Derived::kTypeName) + "[some key is " +
+                   details::AnyUnsafe::GetMismatchTypeInfo<K>(kv.first) + ", V]";
+          }
+        }
+        if constexpr (!std::is_same_v<V, Any>) {
+          if (!details::AnyUnsafe::CheckAnyStrict<V>(kv.second) &&
+              !kv.second.try_cast<V>().has_value()) {
+            return std::string(Derived::kTypeName) + "[K, some value is " +
+                   details::AnyUnsafe::GetMismatchTypeInfo<V>(kv.second) + "]";
+          }
+        }
+      }
+    }
+    TVM_FFI_THROW(InternalError) << "Cannot reach here";
+    TVM_FFI_UNREACHABLE();
+  }
+
+  TVM_FFI_INLINE static std::optional<MapRef> TryCastFromAnyView(const TVMFFIAny* src) {
+    if (src->type_index != Derived::kPrimaryTypeIndex &&
+        src->type_index != Derived::kOtherTypeIndex) {
+      return std::nullopt;
+    }
+    const MapBaseObj* n = reinterpret_cast<const MapBaseObj*>(src->v_obj);
+    if constexpr (!std::is_same_v<K, Any> || !std::is_same_v<V, Any>) {
+      bool storage_check = [&]() {
+        for (const auto& kv : *n) {
+          if constexpr (!std::is_same_v<K, Any>) {
+            if (!details::AnyUnsafe::CheckAnyStrict<K>(kv.first)) return false;
+          }
+          if constexpr (!std::is_same_v<V, Any>) {
+            if (!details::AnyUnsafe::CheckAnyStrict<V>(kv.second)) return false;
+          }
+        }
+        return true;
+      }();
+      // fast path: if storage check passes and type is primary, return directly.
+      if (storage_check && src->type_index == Derived::kPrimaryTypeIndex) {
+        return CopyFromAnyViewAfterCheck(src);
+      }
+      // slow path: create a new map and convert each key-value pair.
+      MapRef ret;
+      for (const auto& kv : *n) {
+        auto k = kv.first.try_cast<K>();
+        auto v = kv.second.try_cast<V>();
+        if (!k.has_value() || !v.has_value()) return std::nullopt;
+        ret.Set(*std::move(k), *std::move(v));
+      }
+      return ret;
+    } else {
+      if (src->type_index == Derived::kPrimaryTypeIndex) {
+        return CopyFromAnyViewAfterCheck(src);
+      }
+      // cross-type conversion for Any,Any: create new MapRef, copy all entries.
+      MapRef ret;
+      for (const auto& kv : *n) {
+        ret.Set(kv.first, kv.second);
+      }
+      return ret;
+    }
+  }
+
+  TVM_FFI_INLINE static std::string TypeStr() {
+    return std::string(Derived::kTypeName) + "<" + details::Type2Str<K>::v() + ", " +
+           details::Type2Str<V>::v() + ">";
+  }
+
+ private:
+  MapTypeTraitsBase() = default;
+  friend Derived;
+};
+
 }  // namespace ffi
 }  // namespace tvm
 #endif  // TVM_FFI_CONTAINER_MAP_BASE_H_
