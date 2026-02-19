@@ -514,3 +514,222 @@ def test_missing_object() -> None:
     assert m.get("a") == 1
     assert m.get("b") is None
     assert m.get("b", 42) == 42
+
+
+# ---------------------------------------------------------------------------
+# Dict tests
+# ---------------------------------------------------------------------------
+def test_dict_basic() -> None:
+    d = tvm_ffi.Dict({"a": 1, "b": 2})
+    assert len(d) == 2
+    assert "a" in d
+    assert d["a"] == 1
+    assert d["b"] == 2
+    assert "c" not in d
+
+
+def test_dict_setitem_delitem() -> None:
+    d = tvm_ffi.Dict({"a": 1})
+    d["b"] = 2
+    assert len(d) == 2
+    assert d["b"] == 2
+    del d["a"]
+    assert len(d) == 1
+    assert "a" not in d
+    with pytest.raises(KeyError):
+        del d["nonexistent"]
+
+
+def test_dict_shared_mutation() -> None:
+    d1 = tvm_ffi.Dict({"a": 1})
+    d2 = d1  # alias, same underlying object
+    d1["b"] = 2
+    assert d2["b"] == 2
+    assert len(d2) == 2
+
+
+def test_dict_keys_values_items() -> None:
+    d = tvm_ffi.Dict({"x": 10, "y": 20})
+    keys = set(d.keys())
+    assert keys == {"x", "y"}
+    values = set(d.values())
+    assert values == {10, 20}
+    items = set(d.items())
+    assert items == {("x", 10), ("y", 20)}
+
+
+def test_dict_get_with_default() -> None:
+    d = tvm_ffi.Dict({"a": 1})
+    assert d.get("a") == 1
+    assert d.get("b") is None
+    assert d.get("b", 42) == 42
+
+
+def test_dict_pop() -> None:
+    d = tvm_ffi.Dict({"a": 1, "b": 2})
+    val = d.pop("a")
+    assert val == 1
+    assert len(d) == 1
+    # pop with default
+    val2 = d.pop("nonexistent", 99)
+    assert val2 == 99
+    # pop missing without default
+    with pytest.raises(KeyError):
+        d.pop("nonexistent")
+
+
+def test_dict_clear() -> None:
+    d = tvm_ffi.Dict({"a": 1, "b": 2})
+    d.clear()
+    assert len(d) == 0
+
+
+def test_dict_update() -> None:
+    d = tvm_ffi.Dict({"a": 1})
+    d.update({"b": 2, "c": 3})
+    assert len(d) == 3
+    assert d["b"] == 2
+
+
+def test_dict_iteration() -> None:
+    d = tvm_ffi.Dict({"a": 1, "b": 2})
+    keys = list(d)
+    assert set(keys) == {"a", "b"}
+
+
+def test_dict_iteration_many_entries() -> None:
+    """Regression: ensure iterator visits ALL entries, not just the first."""
+    entries = {f"key_{i}": i for i in range(10)}
+    d = tvm_ffi.Dict(entries)
+    # keys
+    keys_list = list(d.keys())
+    assert len(keys_list) == 10
+    assert set(keys_list) == set(entries.keys())
+    # values
+    values_list = list(d.values())
+    assert len(values_list) == 10
+    assert set(values_list) == set(entries.values())
+    # items
+    items_list = list(d.items())
+    assert len(items_list) == 10
+    assert set(items_list) == set(entries.items())
+    # direct iteration (keys)
+    iter_keys = list(d)
+    assert len(iter_keys) == 10
+    assert set(iter_keys) == set(entries.keys())
+
+
+def test_dict_iteration_after_mutation() -> None:
+    """Regression: iteration after insert/delete visits correct elements."""
+    d = tvm_ffi.Dict({"a": 1, "b": 2, "c": 3})
+    d["d"] = 4
+    del d["b"]
+    # should have a, c, d
+    keys = list(d.keys())
+    assert len(keys) == 3
+    assert set(keys) == {"a", "c", "d"}
+    values = list(d.values())
+    assert len(values) == 3
+    assert set(values) == {1, 3, 4}
+    items = list(d.items())
+    assert len(items) == 3
+    assert set(items) == {("a", 1), ("c", 3), ("d", 4)}
+
+
+def test_dict_repr() -> None:
+    d = tvm_ffi.Dict({"a": 1})
+    r = repr(d)
+    assert isinstance(r, str)
+    # repr should look dict-like
+    assert ":" in r
+
+
+def test_dict_bool() -> None:
+    assert not tvm_ffi.Dict()
+    assert tvm_ffi.Dict({"a": 1})
+
+
+def test_dict_empty_init() -> None:
+    d = tvm_ffi.Dict()
+    assert len(d) == 0
+    d["a"] = 1
+    assert d["a"] == 1
+
+
+def test_dict_pickle_roundtrip() -> None:
+    d = tvm_ffi.Dict({"a": 1, "b": 2})
+    data = pickle.dumps(d)
+    d2 = pickle.loads(data)
+    assert isinstance(d2, tvm_ffi.Dict)
+    assert len(d2) == 2
+    assert d2["a"] == 1
+    assert d2["b"] == 2
+
+
+# ---------------------------------------------------------------------------
+# Map <-> Dict cross-conversion tests
+# ---------------------------------------------------------------------------
+
+
+def test_map_cross_conv_dict_to_map_str_int() -> None:
+    """Dict<String, int> passed to a function expecting Map<String, int>."""
+    d = tvm_ffi.Dict({"a": 1, "b": 2})
+    result = testing.schema_id_map_str_int(d)
+    assert isinstance(result, tvm_ffi.Map)
+    assert dict(result.items()) == {"a": 1, "b": 2}
+
+
+def test_map_cross_conv_map_to_dict_str_int() -> None:
+    """Map<String, int> passed to a function expecting Dict<String, int>."""
+    m = tvm_ffi.Map({"a": 1, "b": 2})
+    result = testing.schema_id_dict_str_int(m)
+    assert isinstance(result, tvm_ffi.Dict)
+    assert result["a"] == 1
+    assert result["b"] == 2
+
+
+def test_map_cross_conv_dict_to_map_str_str() -> None:
+    """Dict<String, String> passed to a function expecting Map<String, String>."""
+    d = tvm_ffi.Dict({"x": "hello", "y": "world"})
+    result = testing.schema_id_map_str_str(d)
+    assert isinstance(result, tvm_ffi.Map)
+    assert dict(result.items()) == {"x": "hello", "y": "world"}
+
+
+def test_map_cross_conv_map_to_dict_str_str() -> None:
+    """Map<String, String> passed to a function expecting Dict<String, String>."""
+    m = tvm_ffi.Map({"x": "hello", "y": "world"})
+    result = testing.schema_id_dict_str_str(m)
+    assert isinstance(result, tvm_ffi.Dict)
+    assert result["x"] == "hello"
+    assert result["y"] == "world"
+
+
+def test_map_cross_conv_empty_dict_to_map() -> None:
+    """Empty Dict passed to a function expecting Map<String, int>."""
+    d = tvm_ffi.Dict({})
+    result = testing.schema_id_map_str_int(d)
+    assert isinstance(result, tvm_ffi.Map)
+    assert len(result) == 0
+
+
+def test_map_cross_conv_empty_map_to_dict() -> None:
+    """Empty Map passed to a function expecting Dict<String, int>."""
+    m = tvm_ffi.Map({})
+    result = testing.schema_id_dict_str_int(m)
+    assert isinstance(result, tvm_ffi.Dict)
+    assert len(result) == 0
+
+
+def test_map_cross_conv_incompatible_dict_to_map() -> None:
+    """Dict with incompatible value types should fail when cast to Map<String, int>."""
+    d = tvm_ffi.Dict({"a": "not_int", "b": "still_not_int"})
+    with pytest.raises(TypeError):
+        testing.schema_id_map_str_int(d)  # type: ignore[arg-type]
+
+
+def test_map_cross_conv_incompatible_map_to_dict() -> None:
+    """Map with incompatible value types should fail when cast to Dict<String, int>."""
+    m = tvm_ffi.Map({"a": "not_int", "b": "still_not_int"})
+    with pytest.raises(TypeError):
+        testing.schema_id_dict_str_int(m)  # type: ignore[arg-type]

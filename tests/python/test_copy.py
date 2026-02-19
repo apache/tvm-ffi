@@ -238,6 +238,16 @@ class TestDeepCopy:
         assert not m["key"].same_as(m_deep["key"])
         assert m_deep["key"].a == 3
 
+    def test_dict_root(self) -> None:
+        """Deepcopy with a bare Dict as root should create a new dict."""
+        inner = tvm_ffi.testing.TestIntPair(3, 4)  # ty: ignore[too-many-positional-arguments]
+        d = tvm_ffi.Dict({"key": inner})
+        d_deep = copy.deepcopy(d)
+        assert not d.same_as(d_deep)
+        # inner object is deep-copied
+        assert not d["key"].same_as(d_deep["key"])
+        assert d_deep["key"].a == 3
+
     def test_auto_deepcopy_for_cxx_class(self) -> None:
         # _TestCxxClassBase is copy-constructible, so deepcopy is auto-enabled
         # Note: _TestCxxClassBase.__init__ adds 1 to v_i64 and 2 to v_i32
@@ -466,6 +476,36 @@ class TestDeepCopyBranches:
         assert not m.same_as(m_deep)
         assert len(m_deep) == 0
 
+    # --- Resolve(): dict with various key/value types ---
+
+    def test_dict_primitive_keys_and_values(self) -> None:
+        d = tvm_ffi.Dict({"a": 1, "b": 2, "c": 3})
+        d_deep = copy.deepcopy(d)
+        assert not d.same_as(d_deep)
+        assert d_deep["a"] == 1
+        assert d_deep["b"] == 2
+        assert d_deep["c"] == 3
+
+    def test_dict_with_container_values(self) -> None:
+        inner_arr = tvm_ffi.convert([1, 2])
+        d = tvm_ffi.Dict({"arr": inner_arr})
+        d_deep = copy.deepcopy(d)
+        assert not d["arr"].same_as(d_deep["arr"])
+        assert list(d_deep["arr"]) == [1, 2]
+
+    def test_dict_with_none_values(self) -> None:
+        d = tvm_ffi.Dict({"a": None, "b": 1})
+        d_deep = copy.deepcopy(d)
+        assert not d.same_as(d_deep)
+        assert d_deep["a"] is None
+        assert d_deep["b"] == 1
+
+    def test_dict_empty(self) -> None:
+        d = tvm_ffi.Dict({})
+        d_deep = copy.deepcopy(d)
+        assert not d.same_as(d_deep)
+        assert len(d_deep) == 0
+
     # --- Resolve(): copy_map_ hit (shared references across containers) ---
 
     def test_shared_array_identity_in_outer_array(self) -> None:
@@ -479,6 +519,13 @@ class TestDeepCopyBranches:
 
     def test_shared_map_identity_in_outer_array(self) -> None:
         shared = tvm_ffi.convert({"x": 1})
+        outer = tvm_ffi.convert([shared, shared])
+        outer_deep = copy.deepcopy(outer)
+        assert outer_deep[0].same_as(outer_deep[1])
+        assert not outer[0].same_as(outer_deep[0])
+
+    def test_shared_dict_identity_in_outer_array(self) -> None:
+        shared = tvm_ffi.Dict({"x": 1})
         outer = tvm_ffi.convert([shared, shared])
         outer_deep = copy.deepcopy(outer)
         assert outer_deep[0].same_as(outer_deep[1])

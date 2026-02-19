@@ -23,6 +23,7 @@
  */
 #include <tvm/ffi/any.h>
 #include <tvm/ffi/container/array.h>
+#include <tvm/ffi/container/dict.h>
 #include <tvm/ffi/container/list.h>
 #include <tvm/ffi/container/map.h>
 #include <tvm/ffi/container/shape.h>
@@ -114,6 +115,18 @@ class ObjectDeepCopier {
       }
       copy_map_[obj] = new_map;
       return new_map;
+    }
+    if (ti == TypeIndex::kTVMFFIDict) {
+      // Dict is mutable, so cyclic self-references are possible.
+      // Register the empty copy in copy_map_ before resolving children
+      // so that back-references resolve to the same new Dict.
+      const DictObj* orig = value.as<DictObj>();
+      Dict<Any, Any> new_dict;
+      copy_map_[obj] = new_dict;
+      for (const auto& [k, v] : *orig) {
+        new_dict.Set(Resolve(k), Resolve(v));
+      }
+      return new_dict;
     }
     // General object: shallow-copy, register, and queue for field resolution.
     const TVMFFITypeInfo* type_info = TVMFFIGetTypeInfo(ti);

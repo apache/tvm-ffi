@@ -55,7 +55,7 @@ def _assert_any_equal(a: Any, b: Any) -> None:
         assert len(a) == len(b)
         for x, y in zip(a, b):
             _assert_any_equal(x, y)
-    elif isinstance(b, tvm_ffi.Map):
+    elif isinstance(b, (tvm_ffi.Map, tvm_ffi.Dict)):
         assert len(a) == len(b)
         for k in b:
             _assert_any_equal(a[k], b[k])
@@ -329,6 +329,54 @@ class TestMap:
         assert list(result["nums"]) == [10, 20]
 
 
+class TestDict:
+    """Roundtrip tests for ffi.Dict containers."""
+
+    def test_empty(self) -> None:
+        """Empty dict roundtrips correctly."""
+        d = tvm_ffi.Dict({})
+        _assert_roundtrip_eq(d)
+
+    def test_single_entry(self) -> None:
+        """Single-entry dict roundtrips correctly."""
+        d = tvm_ffi.Dict({"key": 42})
+        result = _roundtrip(d)
+        assert len(result) == 1
+        assert result["key"] == 42
+
+    def test_multiple_entries(self) -> None:
+        """Multi-entry dict roundtrips correctly."""
+        d = tvm_ffi.Dict({"a": 1, "b": 2, "c": 3})
+        result = _roundtrip(d)
+        assert len(result) == 3
+        assert result["a"] == 1
+        assert result["b"] == 2
+        assert result["c"] == 3
+
+    def test_mixed_value_types(self) -> None:
+        """Dict with mixed value types roundtrips correctly."""
+        d = tvm_ffi.Dict({"int": 42, "str": "hello", "bool": True, "none": None})
+        result = _roundtrip(d)
+        assert result["int"] == 42
+        assert result["str"] == "hello"
+        assert result["bool"] is True
+        assert result["none"] is None
+
+    def test_nested_dict(self) -> None:
+        """Nested dicts roundtrip correctly."""
+        inner = tvm_ffi.Dict({"x": 1})
+        outer = tvm_ffi.Dict({"inner": inner})
+        result = _roundtrip(outer)
+        assert result["inner"]["x"] == 1
+
+    def test_dict_with_array_value(self) -> None:
+        """Dict with array values roundtrips correctly."""
+        arr = tvm_ffi.convert([10, 20])
+        d = tvm_ffi.Dict({"nums": arr})
+        result = _roundtrip(d)
+        assert list(result["nums"]) == [10, 20]
+
+
 class TestShape:
     """Roundtrip tests for ffi.Shape containers."""
 
@@ -444,6 +492,16 @@ class TestJSONStructure:
         parsed = json.loads(s)
         root = parsed["nodes"][parsed["root_index"]]
         assert root["type"] == "ffi.Map"
+        assert isinstance(root["data"], list)
+        # key-value pairs flattened: [key_idx, val_idx]
+        assert len(root["data"]) == 2
+
+    def test_dict_json_structure(self) -> None:
+        """Dict data contains flattened key-value node index pairs."""
+        s = to_json_graph_str(tvm_ffi.Dict({"a": 1}))
+        parsed = json.loads(s)
+        root = parsed["nodes"][parsed["root_index"]]
+        assert root["type"] == "ffi.Dict"
         assert isinstance(root["data"], list)
         # key-value pairs flattened: [key_idx, val_idx]
         assert len(root["data"]) == 2

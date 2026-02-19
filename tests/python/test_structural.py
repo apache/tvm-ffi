@@ -59,6 +59,27 @@ def test_structural_key_in_map() -> None:
     assert m[k3] == 3
 
 
+def test_structural_equal_dict() -> None:
+    d1 = tvm_ffi.Dict({"a": 1, "b": 2, "c": 3})
+    d2 = tvm_ffi.Dict({"c": 3, "b": 2, "a": 1})
+    d3 = tvm_ffi.Dict({"a": 1, "b": 2, "c": 4})
+
+    assert tvm_ffi.structural_equal(d1, d2)
+    assert tvm_ffi.structural_hash(d1) == tvm_ffi.structural_hash(d2)
+    assert not tvm_ffi.structural_equal(d1, d3)
+    assert tvm_ffi.structural_hash(d1) != tvm_ffi.structural_hash(d3)
+    assert tvm_ffi.get_first_structural_mismatch(d1, d2) is None
+    assert tvm_ffi.get_first_structural_mismatch(d1, d3) is not None
+
+
+def test_structural_dict_vs_map_different_type() -> None:
+    m = tvm_ffi.Map({"a": 1, "b": 2})
+    d = tvm_ffi.Dict({"a": 1, "b": 2})
+    # Different type_index => not structurally equal
+    assert not tvm_ffi.structural_equal(m, d)
+    assert tvm_ffi.structural_hash(m) != tvm_ffi.structural_hash(d)
+
+
 def test_structural_key_in_python_dict() -> None:
     k1 = tvm_ffi.StructuralKey({"name": ["a", "b"], "ver": [1]})
     k2 = tvm_ffi.StructuralKey({"ver": [1], "name": ["a", "b"]})

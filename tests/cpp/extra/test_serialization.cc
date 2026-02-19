@@ -18,6 +18,7 @@
  */
 #include <gtest/gtest.h>
 #include <tvm/ffi/container/array.h>
+#include <tvm/ffi/container/dict.h>
 #include <tvm/ffi/container/list.h>
 #include <tvm/ffi/container/map.h>
 #include <tvm/ffi/container/shape.h>
@@ -273,6 +274,77 @@ TEST(Serialization, Maps) {
                 }}};
   EXPECT_TRUE(StructuralEqual()(ToJSONGraph(duplicated_map), expected_duplicated));
   EXPECT_TRUE(StructuralEqual()(FromJSONGraph(expected_duplicated), duplicated_map));
+}
+
+TEST(Serialization, Dicts) {
+  // Test empty dict
+  Dict<String, Any> empty_dict;
+  json::Object expected_empty = json::Object{
+      {"root_index", 0},
+      {"nodes", json::Array{json::Object{{"type", "ffi.Dict"}, {"data", json::Array{}}}}}};
+  EXPECT_TRUE(StructuralEqual()(ToJSONGraph(empty_dict), expected_empty));
+  EXPECT_TRUE(StructuralEqual()(FromJSONGraph(expected_empty), empty_dict));
+
+  // Test single element dict
+  Dict<String, Any> single_dict{{"key", 42}};
+  json::Object expected_single = json::Object{
+      {"root_index", 2},
+      {"nodes", json::Array{json::Object{{"type", "ffi.String"}, {"data", String("key")}},
+                            json::Object{{"type", "int"}, {"data", 42}},
+                            json::Object{{"type", "ffi.Dict"}, {"data", json::Array{0, 1}}}}}};
+  EXPECT_TRUE(StructuralEqual()(ToJSONGraph(single_dict), expected_single));
+  EXPECT_TRUE(StructuralEqual()(FromJSONGraph(expected_single), single_dict));
+
+  // Test duplicated element dict
+  Dict<String, Any> duplicated_dict{{"b", 42}, {"a", 42}};
+  json::Object expected_duplicated = json::Object{
+      {"root_index", 3},
+      {"nodes", json::Array{
+                    json::Object{{"type", "ffi.String"}, {"data", "b"}},
+                    json::Object{{"type", "int"}, {"data", 42}},
+                    json::Object{{"type", "ffi.String"}, {"data", "a"}},
+                    json::Object{{"type", "ffi.Dict"}, {"data", json::Array{0, 1, 2, 1}}},
+                }}};
+  EXPECT_TRUE(StructuralEqual()(ToJSONGraph(duplicated_dict), expected_duplicated));
+  EXPECT_TRUE(StructuralEqual()(FromJSONGraph(expected_duplicated), duplicated_dict));
+}
+
+TEST(Serialization, DictWithIntKeys) {
+  Dict<Any, Any> dict;
+  dict.Set(static_cast<int64_t>(1), String("one"));
+  dict.Set(static_cast<int64_t>(2), String("two"));
+
+  json::Value serialized = ToJSONGraph(dict);
+  Any deserialized = FromJSONGraph(serialized);
+  Dict<Any, Any> result = deserialized.cast<Dict<Any, Any>>();
+  EXPECT_EQ(result.size(), 2);
+  EXPECT_EQ(std::string(result[1].cast<String>()), "one");
+  EXPECT_EQ(std::string(result[2].cast<String>()), "two");
+}
+
+TEST(Serialization, DictWithArrayValues) {
+  Array<Any> arr;
+  arr.push_back(10);
+  arr.push_back(20);
+  Dict<String, Any> dict{{"nums", arr}};
+
+  json::Value serialized = ToJSONGraph(dict);
+  Any deserialized = FromJSONGraph(serialized);
+  Dict<String, Any> result = deserialized.cast<Dict<String, Any>>();
+  Array<Any> result_arr = result["nums"].cast<Array<Any>>();
+  EXPECT_EQ(result_arr.size(), 2);
+  EXPECT_EQ(result_arr[0].cast<int64_t>(), 10);
+  EXPECT_EQ(result_arr[1].cast<int64_t>(), 20);
+}
+
+TEST(Serialization, DictOfObjects) {
+  TVar x("x");
+  Dict<String, Any> dict{{"var", x}};
+
+  json::Value serialized = ToJSONGraph(dict);
+  Any deserialized = FromJSONGraph(serialized);
+  Dict<String, Any> result = deserialized.cast<Dict<String, Any>>();
+  EXPECT_EQ(std::string(result["var"].cast<TVar>()->name), "x");
 }
 
 TEST(Serialization, Shapes) {

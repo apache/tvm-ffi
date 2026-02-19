@@ -353,7 +353,7 @@ def _add_class_attrs(type_cls: type, type_info: TypeInfo) -> type:
             setattr(type_cls, "__init__", getattr(type_cls, "__ffi_init__"))
         elif not issubclass(type_cls, core.PyNativeObject):
             setattr(type_cls, "__init__", __init__invalid)
-    is_container = type_info.type_key in ("ffi.Array", "ffi.Map")
+    is_container = type_info.type_key in ("ffi.Array", "ffi.Map", "ffi.List", "ffi.Dict")
     _setup_copy_methods(type_cls, has_shallow_copy, is_container=is_container)
     return type_cls
 

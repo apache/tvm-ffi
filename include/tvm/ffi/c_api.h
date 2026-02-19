@@ -175,6 +175,8 @@ typedef enum {
   kTVMFFIOpaquePyObject = 74,
   /*! \brief List object. */
   kTVMFFIList = 75,
+  /*! \brief Dict object. */
+  kTVMFFIDict = 76,
   //----------------------------------------------------------------
   // more complex objects
   //----------------------------------------------------------------

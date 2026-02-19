@@ -22,6 +22,7 @@
  * \brief Structural equal implementation.
  */
 #include <tvm/ffi/container/array.h>
+#include <tvm/ffi/container/dict.h>
 #include <tvm/ffi/container/list.h>
 #include <tvm/ffi/container/map.h>
 #include <tvm/ffi/container/shape.h>
@@ -112,6 +113,10 @@ class StructEqualHandler {
       case TypeIndex::kTVMFFIMap: {
         return CompareMap(AnyUnsafe::MoveFromAnyAfterCheck<Map<Any, Any>>(std::move(lhs)),
                           AnyUnsafe::MoveFromAnyAfterCheck<Map<Any, Any>>(std::move(rhs)));
+      }
+      case TypeIndex::kTVMFFIDict: {
+        return CompareMap(AnyUnsafe::MoveFromAnyAfterCheck<Dict<Any, Any>>(std::move(lhs)),
+                          AnyUnsafe::MoveFromAnyAfterCheck<Dict<Any, Any>>(std::move(rhs)));
       }
       case TypeIndex::kTVMFFIShape: {
         return CompareShape(AnyUnsafe::MoveFromAnyAfterCheck<Shape>(std::move(lhs)),
@@ -261,8 +266,8 @@ class StructEqualHandler {
     }
   }
 
-  // NOLINTNEXTLINE(performance-unnecessary-value-param)
-  bool CompareMap(Map<Any, Any> lhs, Map<Any, Any> rhs) {
+  template <typename MapType>
+  bool CompareMap(const MapType& lhs, const MapType& rhs) {
     if (lhs.size() != rhs.size()) {
       // size mismatch, and there is no path tracing
       // return false since we don't need informative error message

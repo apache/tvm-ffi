@@ -196,6 +196,15 @@ class MapBaseObj : public Object {
   uint64_t state_marker;
 #endif  // TVM_FFI_DEBUG_WITH_ABI_CHANGE
   /*!
+   * \brief Inplace switch the storage contents to the other map
+   *
+   * The other map will be consumed after this operation
+   * The current content will be reset after this operation
+   *
+   * \param other The other map
+   */
+  inline void InplaceSwitchTo(ObjectPtr<Object>&& other);
+  /*!
    * \brief Create an empty container
    * \return The object created
    */
@@ -214,11 +223,12 @@ class MapBaseObj : public Object {
   /*!
    * \brief InsertMaybeReHash an entry into the given hash map
    * \param kv The entry to be inserted
-   * \param map The pointer to the map, can be changed if re-hashing happens
+   * \param map The reference to the map container
    * \tparam MapObjType The type of map object
+   * \return A new container if re-hashing happens, nullptr otherwise
    */
   template <typename MapObjType>
-  static inline void InsertMaybeReHash(KVType&& kv, ObjectPtr<Object>* map);
+  static inline ObjectPtr<Object> InsertMaybeReHash(KVType&& kv, const ObjectPtr<Object>& map);
   /*!
    * \brief Create an empty container with elements copying from another SmallMapBaseObj
    * \param from The source container
@@ -256,6 +266,9 @@ class MapBaseObj : public Object {
   // Reference class
   friend class SmallMapBaseObj;
   friend class DenseMapBaseObj;
+
+  template <typename, typename, typename>
+  friend class Dict;
 
   template <typename, typename>
   friend struct TypeTraits;
@@ -683,6 +696,35 @@ class DenseMapBaseObj : public MapBaseObj {
     ReleaseMemory();
   }
   /*!
+   * \brief Inplace switch the storage contents to the other map
+   *
+   * The other map will be consumed after this operation
+   * The current content will be reset after this operation
+   *
+   * \param other The other map
+   */
+  void InplaceSwitchTo(ObjectPtr<Object>&& other) {
+    this->Reset();
+    MapBaseObj* other_map = static_cast<MapBaseObj*>(other.get());
+    // to simplify implementation, inplace switch from another dense map
+    // since all current switch usecases are pushing elements to map
+    // so we don't need to handle small -> dense switch
+    TVM_FFI_ICHECK(!other_map->IsSmallMap());
+    DenseMapBaseObj* other_dense_map = static_cast<DenseMapBaseObj*>(other_map);
+    DenseMapBaseObj* this_dense_map = this;
+    this_dense_map->size_ = other_dense_map->size_;
+    this_dense_map->slots_ = other_dense_map->slots_;
+    this_dense_map->data_ = other_dense_map->data_;
+    this_dense_map->data_deleter_ = other_dense_map->data_deleter_;
+    this_dense_map->fib_shift_ = other_dense_map->fib_shift_;
+    this_dense_map->iter_list_head_ = other_dense_map->iter_list_head_;
+    this_dense_map->iter_list_tail_ = other_dense_map->iter_list_tail_;
+    other_dense_map->data_ = nullptr;
+    other_dense_map->data_deleter_ = nullptr;
+    other_dense_map->size_ = 0;
+    other_dense_map->slots_ = 0;
+  }
+  /*!
    * \brief Release the memory acquired by the container without deleting its entries stored inside
    */
   void ReleaseMemory() {
@@ -777,15 +819,15 @@ class DenseMapBaseObj : public MapBaseObj {
    * \param map The pointer to the map, can be changed if re-hashing happens
    */
   template <typename MapObjType>
-  static void InsertMaybeReHash(KVType&& kv, ObjectPtr<Object>* map) {
-    DenseMapBaseObj* map_node = static_cast<DenseMapBaseObj*>(map->get());
+  static ObjectPtr<Object> InsertMaybeReHash(KVType&& kv, const ObjectPtr<Object>& map) {
+    DenseMapBaseObj* map_node = static_cast<DenseMapBaseObj*>(map.get());
     ListNode iter;
     // Try to insert. If succeed, we simply return
     if (map_node->TryInsert(kv.first, &iter)) {
       iter.Val() = std::move(kv.second);
       // update the iter list relation
       map_node->IterListPushBack(iter);
-      return;
+      return ObjectPtr<Object>(nullptr);
     }
     TVM_FFI_ICHECK(!map_node->IsSmallMap());
     // Otherwise, start rehash
@@ -796,7 +838,8 @@ class DenseMapBaseObj : public MapBaseObj {
       ListNode node(index, map_node);
       // now try move src_data into the new map, note that src may still not
       // be fully consumed into the call, but destructor will be called.
-      InsertMaybeReHash<MapObjType>(std::move(node.Data()), &p);
+      ObjectPtr<Object> rehashed = InsertMaybeReHash<MapObjType>(std::move(node.Data()), p);
+      if (rehashed != nullptr) p = std::move(rehashed);
       // Important, needs to explicit call destructor in case move did remove
       // node's internal item
       index = node.Item().next;
@@ -807,9 +850,12 @@ class DenseMapBaseObj : public MapBaseObj {
       // Remove this call will cause memory leak very likely.
       node.DestructData();
     }
-    InsertMaybeReHash<MapObjType>(std::move(kv), &p);
+    {
+      ObjectPtr<Object> rehashed = InsertMaybeReHash<MapObjType>(std::move(kv), p);
+      if (rehashed != nullptr) p = std::move(rehashed);
+    }
     map_node->ReleaseMemory();
-    *map = p;
+    return p;
   }
   /*!
    * \brief Check whether the hash table is full
@@ -1064,7 +1110,17 @@ class SmallMapBaseObj : public MapBaseObj {
    */
   uint64_t NumSlots() const { return slots_ & ~kSmallTagMask; }
 
-  ~SmallMapBaseObj() { this->Reset(); }
+  ~SmallMapBaseObj() {
+    // in destructor, need to check if the map was inplace switched to a dense map.
+    MapBaseObj* base_map = static_cast<MapBaseObj*>(this);
+    if (base_map->IsSmallMap()) {
+      this->Reset();
+    } else {
+      // this map was inplace switched to a dense map.
+      DenseMapBaseObj* this_dense_map = static_cast<DenseMapBaseObj*>(base_map);
+      this_dense_map->Reset();
+    }
+  }
   /*!
    * \brief clear all entries
    */
@@ -1153,6 +1209,69 @@ class SmallMapBaseObj : public MapBaseObj {
     }
   }
   /*!
+   * \brief Inplace deleter from data
+   * \param data The data
+   */
+  static void InplaceSmallMapDeleterFromData(void* data) {
+    details::ObjectUnsafe::ObjectPtrFromOwned<SmallMapBaseObj>(
+        reinterpret_cast<Object*>(reinterpret_cast<char*>(data) - sizeof(SmallMapBaseObj)))
+        .reset();
+  }
+  /*!
+   * \brief Inplace switch the storage contents to the other map
+   *
+   * The other map will be consumed after this operation
+   * The current content will be reset after this operation
+   *
+   * \param other The other map
+   */
+  void InplaceSwitchTo(ObjectPtr<Object>&& other) {
+    // invariant this map have not been inplace switched to a dense map
+    TVM_FFI_ICHECK(this->IsSmallMap());
+    this->Reset();
+    MapBaseObj* other_map = static_cast<MapBaseObj*>(other.get());
+    if (other_map->IsSmallMap()) {
+      SmallMapBaseObj* other_small_map = static_cast<SmallMapBaseObj*>(other_map);
+      SmallMapBaseObj* this_small_map = this;
+      this_small_map->size_ = other_small_map->size_;
+      this_small_map->slots_ = other_small_map->slots_;
+      this_small_map->data_ = other_small_map->data_;
+      if (other_small_map->data_deleter_ != nullptr) {
+        this_small_map->data_deleter_ = other_small_map->data_deleter_;
+        other_small_map->data_deleter_ = nullptr;
+      } else {
+        // we switch to the inplace deleter from the data
+        this_small_map->data_deleter_ = InplaceSmallMapDeleterFromData;
+        // move out other from the ptr so the deletion can only be triggered
+        // via InplaceSmallMapDeleterFromData
+        details::ObjectUnsafe::MoveObjectPtrToTVMFFIObjectPtr(std::move(other));
+      }
+      other_small_map->data_ = nullptr;
+      other_small_map->size_ = 0;
+      other_small_map->slots_ = 0;
+    } else {
+      // Reinterpret this SmallMapBaseObj's memory as DenseMapBaseObj to write fields at the
+      // correct offsets. This is raw memory manipulation: SmallMapBaseObj's allocation is
+      // guaranteed large enough (see static_assert in Empty()), and all member access
+      // compiles to fixed-offset stores with no virtual dispatch involved.
+      // The destructor will also cross check and apply the correct deletion.
+      // As a result, we can inplace switch the container storage to dense map
+      DenseMapBaseObj* other_dense_map = static_cast<DenseMapBaseObj*>(other_map);
+      DenseMapBaseObj* this_dense_map = reinterpret_cast<DenseMapBaseObj*>(this);
+      this_dense_map->size_ = other_dense_map->size_;
+      this_dense_map->slots_ = other_dense_map->slots_;
+      this_dense_map->data_ = other_dense_map->data_;
+      this_dense_map->data_deleter_ = other_dense_map->data_deleter_;
+      this_dense_map->fib_shift_ = other_dense_map->fib_shift_;
+      this_dense_map->iter_list_head_ = other_dense_map->iter_list_head_;
+      this_dense_map->iter_list_tail_ = other_dense_map->iter_list_tail_;
+      other_dense_map->data_ = nullptr;
+      other_dense_map->data_deleter_ = nullptr;
+      other_dense_map->size_ = 0;
+      other_dense_map->slots_ = 0;
+    }
+  }
+  /*!
    * \brief Remove a position in SmallMapBaseObj
    * \param index The position to be removed
    */
@@ -1184,6 +1303,12 @@ class SmallMapBaseObj : public MapBaseObj {
    */
   template <typename MapObjType>
   static ObjectPtr<Object> Empty(uint64_t n = kInitSize) {
+    // We always allocate a SmallMapObj to be large enough so it can inplace switch to DenseMapObj
+    static_assert(alignof(SmallMapBaseObj) % alignof(KVType) == 0);
+    static_assert(sizeof(SmallMapBaseObj) + kInitSize * sizeof(KVType) >= sizeof(DenseMapBaseObj));
+    n = std::max(n, static_cast<uint64_t>(kInitSize));
+    // allocate a SmallMapBaseObj with enough space to inplace store n elements and switch to
+    // DenseMapBaseObj
     ObjectPtr<SmallMapBaseObj> p = ffi::make_inplace_array_object<SmallMapBaseObj, KVType>(n);
     // data_ is after the SmallMapBaseObj header
     p->data_ = reinterpret_cast<char*>(p.get()) + sizeof(SmallMapBaseObj);
@@ -1232,26 +1357,27 @@ class SmallMapBaseObj : public MapBaseObj {
    * \param map The pointer to the map, can be changed if re-hashing happens
    */
   template <typename MapObjType>
-  static void InsertMaybeReHash(KVType&& kv, ObjectPtr<Object>* map) {
-    SmallMapBaseObj* map_node = static_cast<SmallMapBaseObj*>(map->get());
+  static ObjectPtr<Object> InsertMaybeReHash(KVType&& kv, const ObjectPtr<Object>& map) {
+    SmallMapBaseObj* map_node = static_cast<SmallMapBaseObj*>(map.get());
     iterator itr = map_node->find(kv.first);
     if (itr.index < map_node->size_) {
       itr->second = kv.second;
-      return;
+      return ObjectPtr<Object>(nullptr);
     }
     if (map_node->size_ < map_node->NumSlots()) {
       KVType* ptr = static_cast<KVType*>(map_node->data_) + map_node->size_;
       new (ptr) KVType(std::move(kv));
       ++map_node->size_;
-      return;
+      return ObjectPtr<Object>(nullptr);
     }
     uint64_t next_size = std::max(map_node->NumSlots() * 2, kInitSize);
     next_size = std::min(next_size, kMaxSize);
     TVM_FFI_ICHECK_GT(next_size, map_node->NumSlots());
     ObjectPtr<Object> new_map =
         CreateFromRange<MapObjType>(next_size, map_node->begin(), map_node->end());
-    InsertMaybeReHash<MapObjType>(std::move(kv), &new_map);
-    *map = std::move(new_map);
+    ObjectPtr<Object> rehashed = InsertMaybeReHash<MapObjType>(std::move(kv), new_map);
+    if (rehashed != nullptr) new_map = std::move(rehashed);
+    return new_map;
   }
   /*!
    * \brief Increment the pointer
@@ -1356,6 +1482,10 @@ inline void MapBaseObj::erase(const MapBaseObj::iterator& position) {
 inline void MapBaseObj::clear() {
   TVM_FFI_DISPATCH_MAP(this, p, { p->clear(); });
 }
+
+inline void MapBaseObj::InplaceSwitchTo(ObjectPtr<Object>&& other) {
+  TVM_FFI_DISPATCH_MAP(this, p, { p->InplaceSwitchTo(std::move(other)); });
+}
 /// \endcond
 
 #undef TVM_FFI_DISPATCH_MAP
@@ -1390,7 +1520,9 @@ inline ObjectPtr<Object> MapBaseObj::CreateFromRange(IterType first, IterType la
     ObjectPtr<Object> obj = SmallMapBaseObj::Empty<MapObjType>(cap);
     for (; first != last; ++first) {
       KVType kv(*first);
-      SmallMapBaseObj::InsertMaybeReHash<MapObjType>(std::move(kv), &obj);
+      ObjectPtr<Object> rehashed =
+          SmallMapBaseObj::InsertMaybeReHash<MapObjType>(std::move(kv), obj);
+      if (rehashed != nullptr) obj = std::move(rehashed);
     }
     return obj;
   } else {
@@ -1400,35 +1532,40 @@ inline ObjectPtr<Object> MapBaseObj::CreateFromRange(IterType first, IterType la
     ObjectPtr<Object> obj = DenseMapBaseObj::Empty<MapObjType>(fib_shift, n_slots);
     for (; first != last; ++first) {
       KVType kv(*first);
-      DenseMapBaseObj::InsertMaybeReHash<MapObjType>(std::move(kv), &obj);
+      ObjectPtr<Object> rehashed =
+          DenseMapBaseObj::InsertMaybeReHash<MapObjType>(std::move(kv), obj);
+      if (rehashed != nullptr) obj = std::move(rehashed);
     }
     return obj;
   }
 }
 
 template <typename MapObjType>
-inline void MapBaseObj::InsertMaybeReHash(KVType&& kv, ObjectPtr<Object>* map) {
-  MapBaseObj* base = static_cast<MapBaseObj*>(map->get());
+inline ObjectPtr<Object> MapBaseObj::InsertMaybeReHash(KVType&& kv, const ObjectPtr<Object>& map) {
+  MapBaseObj* base = static_cast<MapBaseObj*>(map.get());
 #if TVM_FFI_DEBUG_WITH_ABI_CHANGE
   base->state_marker++;
 #endif  // TVM_FFI_DEBUG_WITH_ABI_CHANGE
   if (base->IsSmallMap()) {
     SmallMapBaseObj* sm = static_cast<SmallMapBaseObj*>(base);
     if (sm->NumSlots() < SmallMapBaseObj::kMaxSize) {
-      SmallMapBaseObj::InsertMaybeReHash<MapObjType>(std::move(kv), map);
+      return SmallMapBaseObj::InsertMaybeReHash<MapObjType>(std::move(kv), map);
     } else if (sm->NumSlots() == SmallMapBaseObj::kMaxSize) {
       if (base->size_ < sm->NumSlots()) {
-        SmallMapBaseObj::InsertMaybeReHash<MapObjType>(std::move(kv), map);
+        return SmallMapBaseObj::InsertMaybeReHash<MapObjType>(std::move(kv), map);
       } else {
         ObjectPtr<Object> new_map =
             MapBaseObj::CreateFromRange<MapObjType>(base->begin(), base->end());
-        DenseMapBaseObj::InsertMaybeReHash<MapObjType>(std::move(kv), &new_map);
-        *map = std::move(new_map);
+        ObjectPtr<Object> rehashed =
+            DenseMapBaseObj::InsertMaybeReHash<MapObjType>(std::move(kv), new_map);
+        if (rehashed != nullptr) new_map = std::move(rehashed);
+        return new_map;
       }
     }
   } else {
-    DenseMapBaseObj::InsertMaybeReHash<MapObjType>(std::move(kv), map);
+    return DenseMapBaseObj::InsertMaybeReHash<MapObjType>(std::move(kv), map);
   }
+  return ObjectPtr<Object>(nullptr);
 }
 
 /// \cond Doxygen_Suppress
@@ -1439,6 +1576,119 @@ inline void MapBaseObj::InsertMaybeReHash(KVType&& kv, ObjectPtr<Object>* map) {
 template <>
 inline ObjectPtr<MapBaseObj> make_object<>() = delete;
 /// \endcond
+/*!
+ * \brief CRTP base for map type-traits (Map, Dict).
+ *
+ * \tparam Derived Must expose:
+ *   - `static constexpr int32_t kPrimaryTypeIndex` — the canonical FFI type index
+ *   - `static constexpr int32_t kOtherTypeIndex`   — an alternative accepted type index
+ *   - `static constexpr const char* kTypeName`      — human-readable name for diagnostics
+ */
+template <typename Derived, typename MapRef, typename K, typename V>
+struct MapTypeTraitsBase : public ObjectRefTypeTraitsBase<MapRef> {
+  using Base = ObjectRefTypeTraitsBase<MapRef>;
+  using Base::CopyFromAnyViewAfterCheck;
+
+  TVM_FFI_INLINE static bool CheckAnyStrict(const TVMFFIAny* src) {
+    if (src->type_index != Derived::kPrimaryTypeIndex) return false;
+    if constexpr (std::is_same_v<K, Any> && std::is_same_v<V, Any>) {
+      return true;
+    } else {
+      const MapBaseObj* n = reinterpret_cast<const MapBaseObj*>(src->v_obj);
+      for (const auto& kv : *n) {
+        if constexpr (!std::is_same_v<K, Any>) {
+          if (!details::AnyUnsafe::CheckAnyStrict<K>(kv.first)) return false;
+        }
+        if constexpr (!std::is_same_v<V, Any>) {
+          if (!details::AnyUnsafe::CheckAnyStrict<V>(kv.second)) return false;
+        }
+      }
+      return true;
+    }
+  }
+
+  TVM_FFI_INLINE static std::string GetMismatchTypeInfo(const TVMFFIAny* src) {
+    if (src->type_index != Derived::kPrimaryTypeIndex &&
+        src->type_index != Derived::kOtherTypeIndex) {
+      return TypeTraitsBase::GetMismatchTypeInfo(src);
+    }
+    if constexpr (!std::is_same_v<K, Any> || !std::is_same_v<V, Any>) {
+      const MapBaseObj* n = reinterpret_cast<const MapBaseObj*>(src->v_obj);
+      for (const auto& kv : *n) {
+        if constexpr (!std::is_same_v<K, Any>) {
+          if (!details::AnyUnsafe::CheckAnyStrict<K>(kv.first) &&
+              !kv.first.try_cast<K>().has_value()) {
+            return std::string(Derived::kTypeName) + "[some key is " +
+                   details::AnyUnsafe::GetMismatchTypeInfo<K>(kv.first) + ", V]";
+          }
+        }
+        if constexpr (!std::is_same_v<V, Any>) {
+          if (!details::AnyUnsafe::CheckAnyStrict<V>(kv.second) &&
+              !kv.second.try_cast<V>().has_value()) {
+            return std::string(Derived::kTypeName) + "[K, some value is " +
+                   details::AnyUnsafe::GetMismatchTypeInfo<V>(kv.second) + "]";
+          }
+        }
+      }
+    }
+    TVM_FFI_THROW(InternalError) << "Cannot reach here";
+    TVM_FFI_UNREACHABLE();
+  }
+
+  TVM_FFI_INLINE static std::optional<MapRef> TryCastFromAnyView(const TVMFFIAny* src) {
+    if (src->type_index != Derived::kPrimaryTypeIndex &&
+        src->type_index != Derived::kOtherTypeIndex) {
+      return std::nullopt;
+    }
+    const MapBaseObj* n = reinterpret_cast<const MapBaseObj*>(src->v_obj);
+    if constexpr (!std::is_same_v<K, Any> || !std::is_same_v<V, Any>) {
+      bool storage_check = [&]() {
+        for (const auto& kv : *n) {
+          if constexpr (!std::is_same_v<K, Any>) {
+            if (!details::AnyUnsafe::CheckAnyStrict<K>(kv.first)) return false;
+          }
+          if constexpr (!std::is_same_v<V, Any>) {
+            if (!details::AnyUnsafe::CheckAnyStrict<V>(kv.second)) return false;
+          }
+        }
+        return true;
+      }();
+      // fast path: if storage check passes and type is primary, return directly.
+      if (storage_check && src->type_index == Derived::kPrimaryTypeIndex) {
+        return CopyFromAnyViewAfterCheck(src);
+      }
+      // slow path: create a new map and convert each key-value pair.
+      MapRef ret;
+      for (const auto& kv : *n) {
+        auto k = kv.first.try_cast<K>();
+        auto v = kv.second.try_cast<V>();
+        if (!k.has_value() || !v.has_value()) return std::nullopt;
+        ret.Set(*std::move(k), *std::move(v));
+      }
+      return ret;
+    } else {
+      if (src->type_index == Derived::kPrimaryTypeIndex) {
+        return CopyFromAnyViewAfterCheck(src);
+      }
+      // cross-type conversion for Any,Any: create new MapRef, copy all entries.
+      MapRef ret;
+      for (const auto& kv : *n) {
+        ret.Set(kv.first, kv.second);
+      }
+      return ret;
+    }
+  }
+
+  TVM_FFI_INLINE static std::string TypeStr() {
+    return std::string(Derived::kTypeName) + "<" + details::Type2Str<K>::v() + ", " +
+           details::Type2Str<V>::v() + ">";
+  }
+
+ private:
+  MapTypeTraitsBase() = default;
+  friend Derived;
+};
+
 }  // namespace ffi
 }  // namespace tvm
 #endif  // TVM_FFI_CONTAINER_MAP_BASE_H_

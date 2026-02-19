@@ -21,6 +21,7 @@
  * \file src/ffi/container.cc
  */
 #include <tvm/ffi/container/array.h>
+#include <tvm/ffi/container/dict.h>
 #include <tvm/ffi/container/list.h>
 #include <tvm/ffi/container/map.h>
 #include <tvm/ffi/function.h>
@@ -163,7 +164,38 @@ TVM_FFI_STATIC_INIT_BLOCK() {
                return GetMissingObject();
              }
            })
-      .def("ffi.GetInvalidObject", []() -> ObjectRef { return GetMissingObject(); });
+      .def("ffi.GetInvalidObject", []() -> ObjectRef { return GetMissingObject(); })
+      .def_packed("ffi.Dict",
+                  [](ffi::PackedArgs args, Any* ret) {
+                    TVM_FFI_ICHECK_EQ(args.size() % 2, 0);
+                    Dict<Any, Any> data;
+                    for (int i = 0; i < args.size(); i += 2) {
+                      data.Set(args[i], args[i + 1]);
+                    }
+                    *ret = data;
+                  })
+      .def("ffi.DictSize",
+           [](const ffi::DictObj* n) -> int64_t { return static_cast<int64_t>(n->size()); })
+      .def("ffi.DictGetItem", [](const ffi::DictObj* n, const Any& k) -> Any { return n->at(k); })
+      .def("ffi.DictSetItem",
+           [](ffi::Dict<Any, Any> d, const Any& k, const Any& v) -> void { d.Set(k, v); })
+      .def("ffi.DictCount",
+           [](const ffi::DictObj* n, const Any& k) -> int64_t {
+             return static_cast<int64_t>(n->count(k));
+           })
+      .def("ffi.DictErase", [](ffi::Dict<Any, Any> d, const Any& k) -> void { d.erase(k); })
+      .def("ffi.DictClear", [](ffi::Dict<Any, Any> d) -> void { d.clear(); })
+      .def("ffi.DictForwardIterFunctor",
+           [](const ffi::DictObj* n) -> ffi::Function {
+             return ffi::Function::FromTyped(MapForwardIterFunctor(n->begin(), n->end()));
+           })
+      .def("ffi.DictGetItemOrMissing", [](const ffi::DictObj* n, const Any& k) -> Any {
+        try {
+          return n->at(k);
+        } catch (const tvm::ffi::Error& e) {
+          return GetMissingObject();
+        }
+      });
 }
 }  // namespace ffi
 }  // namespace tvm
