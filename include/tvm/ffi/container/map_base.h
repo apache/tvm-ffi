@@ -223,11 +223,12 @@ class MapBaseObj : public Object {
   /*!
    * \brief InsertMaybeReHash an entry into the given hash map
    * \param kv The entry to be inserted
-   * \param map The pointer to the map, can be changed if re-hashing happens
+   * \param map The reference to the map container
    * \tparam MapObjType The type of map object
+   * \return A new container if re-hashing happens, nullptr otherwise
    */
   template <typename MapObjType>
-  static inline void InsertMaybeReHash(KVType&& kv, ObjectPtr<Object>* map);
+  static inline ObjectPtr<Object> InsertMaybeReHash(KVType&& kv, const ObjectPtr<Object>& map);
   /*!
    * \brief Create an empty container with elements copying from another SmallMapBaseObj
    * \param from The source container
@@ -818,15 +819,15 @@ class DenseMapBaseObj : public MapBaseObj {
    * \param map The pointer to the map, can be changed if re-hashing happens
    */
   template <typename MapObjType>
-  static void InsertMaybeReHash(KVType&& kv, ObjectPtr<Object>* map) {
-    DenseMapBaseObj* map_node = static_cast<DenseMapBaseObj*>(map->get());
+  static ObjectPtr<Object> InsertMaybeReHash(KVType&& kv, const ObjectPtr<Object>& map) {
+    DenseMapBaseObj* map_node = static_cast<DenseMapBaseObj*>(map.get());
     ListNode iter;
     // Try to insert. If succeed, we simply return
     if (map_node->TryInsert(kv.first, &iter)) {
       iter.Val() = std::move(kv.second);
       // update the iter list relation
       map_node->IterListPushBack(iter);
-      return;
+      return ObjectPtr<Object>(nullptr);
     }
     TVM_FFI_ICHECK(!map_node->IsSmallMap());
     // Otherwise, start rehash
@@ -837,7 +838,8 @@ class DenseMapBaseObj : public MapBaseObj {
       ListNode node(index, map_node);
       // now try move src_data into the new map, note that src may still not
       // be fully consumed into the call, but destructor will be called.
-      InsertMaybeReHash<MapObjType>(std::move(node.Data()), &p);
+      ObjectPtr<Object> rehashed = InsertMaybeReHash<MapObjType>(std::move(node.Data()), p);
+      if (rehashed != nullptr) p = std::move(rehashed);
       // Important, needs to explicit call destructor in case move did remove
       // node's internal item
       index = node.Item().next;
@@ -848,9 +850,12 @@ class DenseMapBaseObj : public MapBaseObj {
       // Remove this call will cause memory leak very likely.
       node.DestructData();
     }
-    InsertMaybeReHash<MapObjType>(std::move(kv), &p);
+    {
+      ObjectPtr<Object> rehashed = InsertMaybeReHash<MapObjType>(std::move(kv), p);
+      if (rehashed != nullptr) p = std::move(rehashed);
+    }
     map_node->ReleaseMemory();
-    *map = p;
+    return p;
   }
   /*!
    * \brief Check whether the hash table is full
@@ -1352,26 +1357,27 @@ class SmallMapBaseObj : public MapBaseObj {
    * \param map The pointer to the map, can be changed if re-hashing happens
    */
   template <typename MapObjType>
-  static void InsertMaybeReHash(KVType&& kv, ObjectPtr<Object>* map) {
-    SmallMapBaseObj* map_node = static_cast<SmallMapBaseObj*>(map->get());
+  static ObjectPtr<Object> InsertMaybeReHash(KVType&& kv, const ObjectPtr<Object>& map) {
+    SmallMapBaseObj* map_node = static_cast<SmallMapBaseObj*>(map.get());
     iterator itr = map_node->find(kv.first);
     if (itr.index < map_node->size_) {
       itr->second = kv.second;
-      return;
+      return ObjectPtr<Object>(nullptr);
     }
     if (map_node->size_ < map_node->NumSlots()) {
       KVType* ptr = static_cast<KVType*>(map_node->data_) + map_node->size_;
       new (ptr) KVType(std::move(kv));
       ++map_node->size_;
-      return;
+      return ObjectPtr<Object>(nullptr);
     }
     uint64_t next_size = std::max(map_node->NumSlots() * 2, kInitSize);
     next_size = std::min(next_size, kMaxSize);
     TVM_FFI_ICHECK_GT(next_size, map_node->NumSlots());
     ObjectPtr<Object> new_map =
         CreateFromRange<MapObjType>(next_size, map_node->begin(), map_node->end());
-    InsertMaybeReHash<MapObjType>(std::move(kv), &new_map);
-    *map = std::move(new_map);
+    ObjectPtr<Object> rehashed = InsertMaybeReHash<MapObjType>(std::move(kv), new_map);
+    if (rehashed != nullptr) new_map = std::move(rehashed);
+    return new_map;
   }
   /*!
    * \brief Increment the pointer
@@ -1514,7 +1520,9 @@ inline ObjectPtr<Object> MapBaseObj::CreateFromRange(IterType first, IterType la
     ObjectPtr<Object> obj = SmallMapBaseObj::Empty<MapObjType>(cap);
     for (; first != last; ++first) {
       KVType kv(*first);
-      SmallMapBaseObj::InsertMaybeReHash<MapObjType>(std::move(kv), &obj);
+      ObjectPtr<Object> rehashed =
+          SmallMapBaseObj::InsertMaybeReHash<MapObjType>(std::move(kv), obj);
+      if (rehashed != nullptr) obj = std::move(rehashed);
     }
     return obj;
   } else {
@@ -1524,35 +1532,40 @@ inline ObjectPtr<Object> MapBaseObj::CreateFromRange(IterType first, IterType la
     ObjectPtr<Object> obj = DenseMapBaseObj::Empty<MapObjType>(fib_shift, n_slots);
     for (; first != last; ++first) {
       KVType kv(*first);
-      DenseMapBaseObj::InsertMaybeReHash<MapObjType>(std::move(kv), &obj);
+      ObjectPtr<Object> rehashed =
+          DenseMapBaseObj::InsertMaybeReHash<MapObjType>(std::move(kv), obj);
+      if (rehashed != nullptr) obj = std::move(rehashed);
     }
     return obj;
   }
 }
 
 template <typename MapObjType>
-inline void MapBaseObj::InsertMaybeReHash(KVType&& kv, ObjectPtr<Object>* map) {
-  MapBaseObj* base = static_cast<MapBaseObj*>(map->get());
+inline ObjectPtr<Object> MapBaseObj::InsertMaybeReHash(KVType&& kv, const ObjectPtr<Object>& map) {
+  MapBaseObj* base = static_cast<MapBaseObj*>(map.get());
 #if TVM_FFI_DEBUG_WITH_ABI_CHANGE
   base->state_marker++;
 #endif  // TVM_FFI_DEBUG_WITH_ABI_CHANGE
   if (base->IsSmallMap()) {
     SmallMapBaseObj* sm = static_cast<SmallMapBaseObj*>(base);
     if (sm->NumSlots() < SmallMapBaseObj::kMaxSize) {
-      SmallMapBaseObj::InsertMaybeReHash<MapObjType>(std::move(kv), map);
+      return SmallMapBaseObj::InsertMaybeReHash<MapObjType>(std::move(kv), map);
     } else if (sm->NumSlots() == SmallMapBaseObj::kMaxSize) {
       if (base->size_ < sm->NumSlots()) {
-        SmallMapBaseObj::InsertMaybeReHash<MapObjType>(std::move(kv), map);
+        return SmallMapBaseObj::InsertMaybeReHash<MapObjType>(std::move(kv), map);
       } else {
         ObjectPtr<Object> new_map =
             MapBaseObj::CreateFromRange<MapObjType>(base->begin(), base->end());
-        DenseMapBaseObj::InsertMaybeReHash<MapObjType>(std::move(kv), &new_map);
-        *map = std::move(new_map);
+        ObjectPtr<Object> rehashed =
+            DenseMapBaseObj::InsertMaybeReHash<MapObjType>(std::move(kv), new_map);
+        if (rehashed != nullptr) new_map = std::move(rehashed);
+        return new_map;
       }
     }
   } else {
-    DenseMapBaseObj::InsertMaybeReHash<MapObjType>(std::move(kv), map);
+    return DenseMapBaseObj::InsertMaybeReHash<MapObjType>(std::move(kv), map);
   }
+  return ObjectPtr<Object>(nullptr);
 }
 
 /// \cond Doxygen_Suppress

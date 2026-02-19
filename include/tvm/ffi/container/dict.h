@@ -199,7 +199,7 @@ class Dict : public ObjectRef {
    * \param key The key
    * \return the corresponding element.
    */
-  const V at(const K& key) const {
+  V at(const K& key) const {
     return details::AnyUnsafe::CopyFromAnyViewAfterCheck<V>(GetDictObj()->at(key));
   }
   /*!
@@ -207,7 +207,7 @@ class Dict : public ObjectRef {
    * \param key The key
    * \return the corresponding element.
    */
-  const V operator[](const K& key) const { return this->at(key); }
+  V operator[](const K& key) const { return this->at(key); }
   /*! \return The size of the dict */
   size_t size() const {
     DictObj* n = GetDictObj();
@@ -234,13 +234,10 @@ class Dict : public ObjectRef {
    */
   void Set(const K& key, const V& value) {
     EnsureDictObj();
-    // Bump refcount so InsertMaybeReHash can allocate a new container
-    // without destroying the current one.
-    ObjectPtr<Object> container = data_;
-    MapBaseObj::InsertMaybeReHash<DictObj>(DictObj::KVType(key, value), &container);
-    if (container.get() != data_.get()) {
-      // A rehash happened — inplace-switch to keep the ObjectPtr stable.
-      static_cast<MapBaseObj*>(data_.get())->InplaceSwitchTo(std::move(container));
+    ObjectPtr<Object> new_container =
+        MapBaseObj::InsertMaybeReHash<DictObj>(DictObj::KVType(key, value), data_);
+    if (new_container != nullptr) {
+      static_cast<MapBaseObj*>(data_.get())->InplaceSwitchTo(std::move(new_container));
     }
   }
   /*! \return begin iterator */

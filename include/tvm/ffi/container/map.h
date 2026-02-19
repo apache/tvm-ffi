@@ -229,7 +229,11 @@ class Map : public ObjectRef {
    */
   void Set(const K& key, const V& value) {
     CopyOnWrite();
-    MapObj::InsertMaybeReHash<MapObj>(MapObj::KVType(key, value), &data_);
+    ObjectPtr<Object> new_data =
+        MapObj::InsertMaybeReHash<MapObj>(MapObj::KVType(key, value), data_);
+    if (new_data != nullptr) {
+      data_ = std::move(new_data);
+    }
   }
   /*! \return begin iterator */
   iterator begin() const { return iterator(GetMapObj()->begin()); }
