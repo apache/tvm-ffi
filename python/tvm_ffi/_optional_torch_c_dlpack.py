@@ -94,7 +94,8 @@ def load_torch_c_dlpack_extension() -> Any:  # noqa: PLR0912, PLR0915
         import torch  # noqa: PLC0415
         import torch.version  # noqa: PLC0415
 
-        if _check_and_update_dlpack_c_exchange_api(torch.Tensor):
+        prefer_rocm_override = bool(torch.cuda.is_available() and torch.version.hip is not None)
+        if _check_and_update_dlpack_c_exchange_api(torch.Tensor) and not prefer_rocm_override:
             # skip loading the extension if the __dlpack_c_exchange_api__
             # attribute is already set so we don't have to do it in
             # newer version of PyTorch
@@ -106,7 +107,7 @@ def load_torch_c_dlpack_extension() -> Any:  # noqa: PLR0912, PLR0915
     try:
         import torch_c_dlpack_ext  # noqa: PLC0415, F401
 
-        if _check_and_update_dlpack_c_exchange_api(torch.Tensor):
+        if _check_and_update_dlpack_c_exchange_api(torch.Tensor) and not prefer_rocm_override:
             return None
     except ImportError:
         pass
