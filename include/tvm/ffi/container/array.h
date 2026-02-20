@@ -376,7 +376,7 @@ class Array : public ObjectRef {
    * \param i The index
    * \return the i-th element.
    */
-  T operator[](int64_t i) const {
+  const T operator[](int64_t i) const {
     ArrayObj* p = GetArrayObj();
     if (p == nullptr) {
       TVM_FFI_THROW(IndexError) << "cannot index a null array";
