@@ -61,6 +61,7 @@ Table of Contents
 
    concepts/abi_overview.rst
    concepts/any.rst
+   concepts/containers.rst
    concepts/object_and_class.rst
    concepts/tensor.rst
    concepts/func_module.rst

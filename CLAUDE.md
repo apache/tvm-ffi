@@ -54,6 +54,18 @@ uv pip install --force-reinstall --verbose -e .
 C++/Cython changes always require re-running this command. Pure Python changes
 are reflected immediately.
 
+### Update Python stubs
+
+After building (or after C++/Cython reflection changes), regenerate inline type stubs:
+
+```bash
+uv run tvm-ffi-stubgen python
+```
+
+This updates inline stub blocks (between `tvm-ffi-stubgen(begin)` / `tvm-ffi-stubgen(end)`
+markers) inside `.py` files with type annotations derived from the C++ reflection
+registry (field types, method signatures, global function schemas).
+
 ### C++-only build
 
 ```bash

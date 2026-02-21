@@ -205,6 +205,8 @@ class StructuralKey(Object):
     # fmt: off
     key: Any
     hash_i64: int
+    if TYPE_CHECKING:
+        def __ffi_shallow_copy__(self, /) -> Object: ...
     # fmt: on
     # tvm-ffi-stubgen(end)
 

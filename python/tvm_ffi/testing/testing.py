@@ -16,7 +16,7 @@
 # under the License.
 """Testing utilities."""
 
-# ruff: noqa: D102,D105
+# ruff: noqa: D102
 # tvm-ffi-stubgen(begin): import-section
 # fmt: off
 # isort: off
@@ -48,6 +48,7 @@ class TestObjectBase(Object):
     v_f64: float
     v_str: str
     if TYPE_CHECKING:
+        def __ffi_shallow_copy__(self, /) -> Object: ...
         def add_i64(self, _1: int, /) -> int: ...
     # fmt: on
     # tvm-ffi-stubgen(end)
@@ -62,6 +63,7 @@ class TestIntPair(Object):
     a: int
     b: int
     if TYPE_CHECKING:
+        def __ffi_shallow_copy__(self, /) -> Object: ...
         @staticmethod
         def __c_ffi_init__(_0: int, _1: int, /) -> Object: ...
         def sum(self, /) -> int: ...
@@ -77,6 +79,8 @@ class TestObjectDerived(TestObjectBase):
     # fmt: off
     v_map: Mapping[Any, Any]
     v_array: Sequence[Any]
+    if TYPE_CHECKING:
+        def __ffi_shallow_copy__(self, /) -> Object: ...
     # fmt: on
     # tvm-ffi-stubgen(end)
 
@@ -109,6 +113,7 @@ class _SchemaAllTypes:
     v_variant: str | Sequence[int] | Mapping[str, int]
     v_opt_arr_variant: Sequence[int | str] | None
     if TYPE_CHECKING:
+        def __ffi_shallow_copy__(self, /) -> Object: ...
         def add_int(self, _1: int, /) -> int: ...
         def append_int(self, _1: Sequence[int], _2: int, /) -> Sequence[int]: ...
         def maybe_concat(self, _1: str | None, _2: str | None, /) -> str | None: ...
