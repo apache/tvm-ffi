@@ -1,0 +1,24 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "docs",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": [
+        "run",
+        "--group",
+        "docs",
+        "sphinx-autobuild",
+        "docs",
+        "docs/_build/html",
+        "--ignore",
+        "docs/reference/cpp/generated"
+      ],
+      "port": 8000,
+      "env": {
+        "BUILD_CPP_DOCS": "1",
+        "BUILD_RUST_DOCS": "1"
+      }
+    }
+  ]
+}
