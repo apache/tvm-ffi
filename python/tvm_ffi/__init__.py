@@ -46,7 +46,7 @@ from .registry import (
     init_ffi_api,
 )
 from ._dtype import dtype
-from .core import Object, ObjectConvertible, Function
+from .core import Object, ObjectConvertible, Function, create_type_converter
 from ._convert import convert
 from .error import register_error
 from ._tensor import Device, device, DLDeviceType
@@ -119,6 +119,7 @@ __all__ = [
     "access_path",
     "convert",
     "cpp",
+    "create_type_converter",
     "dataclasses",
     "device",
     "dtype",
