@@ -232,6 +232,67 @@ def test_objectinfo_gen_fields_and_methods() -> None:
     ]
 
 
+def test_type_schema_container_origins() -> None:
+    """Test that Array/List/Map/Dict origins are distinct and validated correctly."""
+    # Array and List: 0 or 1 arg, default to (Any,)
+    for origin in ("Array", "List"):
+        s = TypeSchema(origin)
+        assert s.args == (TypeSchema("Any"),), f"{origin} should default to (Any,)"
+        s = TypeSchema(origin, (TypeSchema("int"),))
+        assert s.repr() == f"{origin}[int]"
+
+    # Map and Dict: 0 or 2 args, default to (Any, Any)
+    for origin in ("Map", "Dict"):
+        s = TypeSchema(origin)
+        assert s.args == (TypeSchema("Any"), TypeSchema("Any")), (
+            f"{origin} should default to (Any, Any)"
+        )
+        s = TypeSchema(origin, (TypeSchema("str"), TypeSchema("float")))
+        assert s.repr() == f"{origin}[str, float]"
+
+    # from_json_str round-trip through _TYPE_SCHEMA_ORIGIN_CONVERTER
+    s = TypeSchema.from_json_str('{"type":"ffi.Array","args":[{"type":"int"}]}')
+    assert s.origin == "Array"
+    assert s.repr() == "Array[int]"
+
+    s = TypeSchema.from_json_str('{"type":"ffi.List","args":[{"type":"str"}]}')
+    assert s.origin == "List"
+    assert s.repr() == "List[str]"
+
+    s = TypeSchema.from_json_str('{"type":"ffi.Map","args":[{"type":"str"},{"type":"int"}]}')
+    assert s.origin == "Map"
+    assert s.repr() == "Map[str, int]"
+
+    s = TypeSchema.from_json_str('{"type":"ffi.Dict","args":[{"type":"str"},{"type":"float"}]}')
+    assert s.origin == "Dict"
+    assert s.repr() == "Dict[str, float]"
+
+    # Backward compat: "list" and "dict" origins still work
+    s = TypeSchema("list", (TypeSchema("int"),))
+    assert s.repr() == "list[int]"
+    s = TypeSchema("dict", (TypeSchema("str"), TypeSchema("int")))
+    assert s.repr() == "dict[str, int]"
+
+
+def test_objectinfo_gen_fields_container_types() -> None:
+    """Test that ObjectInfo fields render distinct container annotations."""
+    info = ObjectInfo(
+        fields=[
+            NamedTypeSchema("arr", TypeSchema("Array", (TypeSchema("int"),))),
+            NamedTypeSchema("lst", TypeSchema("List", (TypeSchema("str"),))),
+            NamedTypeSchema("mp", TypeSchema("Map", (TypeSchema("str"), TypeSchema("int")))),
+            NamedTypeSchema("dt", TypeSchema("Dict", (TypeSchema("str"), TypeSchema("float")))),
+        ],
+        methods=[],
+    )
+    assert info.gen_fields(_type_suffix, indent=0) == [
+        "arr: Sequence[int]",
+        "lst: MutableSequence[str]",
+        "mp: Mapping[str, int]",
+        "dt: MutableMapping[str, float]",
+    ]
+
+
 def test_generate_global_funcs_updates_block() -> None:
     code = CodeBlock(
         kind="global",
@@ -301,6 +362,35 @@ def test_generate_global_funcs_respects_custom_import_from() -> None:
     imports: list[ImportItem] = []
     generate_global_funcs(code, funcs, _default_ty_map(), imports, Options(indent=0))
     assert ImportItem("custom.mod.init_ffi_api", alias="_FFI_INIT_FUNC") in imports
+
+
+def test_generate_global_funcs_aliases_colliding_type() -> None:
+    """When a function name matches a type name, the type import gets an alias."""
+    code = CodeBlock(
+        kind="global",
+        param=("demo", "mockpkg"),
+        lineno_start=1,
+        lineno_end=2,
+        lines=[f"{C.STUB_BEGIN} global/demo@mockpkg", C.STUB_END],
+    )
+    # Function "demo.Foo" returns type "demo.Foo" — name collision
+    funcs = [
+        FuncInfo(
+            schema=NamedTypeSchema(
+                "demo.Foo",
+                TypeSchema("Callable", (TypeSchema("demo.Foo"), TypeSchema("Any"))),
+            ),
+            is_member=False,
+        )
+    ]
+    ty_map = _default_ty_map()
+    ty_map["demo.Foo"] = "somepkg.Foo"
+    imports: list[ImportItem] = []
+    generate_global_funcs(code, funcs, ty_map, imports, Options(indent=4))
+    # The type import should use an alias to avoid shadowing the function
+    assert ImportItem("somepkg.Foo", type_checking_only=True, alias="_Foo") in imports
+    # The function annotation should use the alias
+    assert any("-> _Foo:" in line for line in code.lines)
 
 
 def test_generate_object_fields_only_block() -> None:

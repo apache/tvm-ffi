@@ -197,6 +197,7 @@ select = [
 ignore = [
   "PLR2004", # pylint: magic-value-comparison
   "ANN401",  # flake8-annotations: any-type
+  "D105",    # pydocstyle: undocumented-magic-method
   "D203",    # pydocstyle: incorrect-blank-line-before-class
   "D213",    # pydocstyle: multi-line-summary-second-line
 ]

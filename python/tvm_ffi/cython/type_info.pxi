@@ -72,10 +72,10 @@ _TYPE_SCHEMA_ORIGIN_CONVERTER = {
     "Optional": "Optional",
     "Tuple": "tuple",
     "ffi.Function": "Callable",
-    "ffi.Array": "list",
-    "ffi.List": "list",
-    "ffi.Map": "dict",
-    "ffi.Dict": "dict",
+    "ffi.Array": "Array",
+    "ffi.List": "List",
+    "ffi.Map": "Map",
+    "ffi.Dict": "Dict",
     "ffi.OpaquePyObject": "Any",
     "ffi.Object": "Object",
     "ffi.Tensor": "Tensor",
@@ -113,12 +113,12 @@ class TypeSchema:
             assert len(args) >= 2, "Union must have at least two arguments"
         elif origin == "Optional":
             assert len(args) == 1, "Optional must have exactly one argument"
-        elif origin == "list":
-            assert len(args) in (0, 1), "list must have 0 or 1 argument"
+        elif origin in ("list", "Array", "List"):
+            assert len(args) in (0, 1), f"{origin} must have 0 or 1 argument"
             if args == ():
                 self.args = (TypeSchema("Any"),)
-        elif origin == "dict":
-            assert len(args) in (0, 2), "dict must have 0 or 2 arguments"
+        elif origin in ("dict", "Map", "Dict"):
+            assert len(args) in (0, 2), f"{origin} must have 0 or 2 arguments"
             if args == ():
                 self.args = (TypeSchema("Any"), TypeSchema("Any"))
         elif origin == "tuple":
@@ -149,8 +149,8 @@ class TypeSchema:
         ----------
         ty_map : Callable[[str], str], optional
             A mapping function applied to the schema origin name before
-            rendering (e.g. map ``"list" -> "Sequence"`` and
-            ``"dict" -> "Mapping"``). If ``None``, the raw origin is used.
+            rendering (e.g. map ``"Array" -> "Array"`` and
+            ``"Map" -> "Map"``). If ``None``, the raw origin is used.
 
         Returns
         -------
@@ -173,12 +173,12 @@ class TypeSchema:
             s = TypeSchema("Callable", (TypeSchema("int"), TypeSchema("str")))
             assert s.repr() == "Callable[[str], int]"
 
-            # Custom mapping to stdlib typing collections
-            def _map(t: str) -> str:
-                return {"list": "Sequence", "dict": "Mapping"}.get(t, t)
+            # Container types from C++ FFI schemas
+            s = TypeSchema.from_json_str('{"type":"ffi.Map","args":[{"type":"str"},{"type":"int"}]}')
+            assert s.repr() == "Map[str, int]"
 
-            s = TypeSchema.from_json_str('{"type":"dict","args":[{"type":"str"},{"type":"int"}]}')
-            assert s.repr(_map) == "Mapping[str, int]"
+            s = TypeSchema.from_json_str('{"type":"ffi.Array","args":[{"type":"int"}]}')
+            assert s.repr() == "Array[int]"
 
         """
         if ty_map is None:

@@ -69,7 +69,7 @@ Use :cpp:class:`~tvm::ffi::Any` for return values to transfer ownership to the c
 Container Storage
 ~~~~~~~~~~~~~~~~~
 
-:cpp:class:`~tvm::ffi::Any` can be stored in containers like :cpp:class:`~tvm::ffi::Map` and :cpp:class:`~tvm::ffi::Array`:
+:cpp:class:`~tvm::ffi::Any` can be stored in containers like :cpp:class:`~tvm::ffi::Array`, :cpp:class:`~tvm::ffi::List`, :cpp:class:`~tvm::ffi::Map`, and :cpp:class:`~tvm::ffi::Dict` (see :doc:`containers` for details):
 
 .. code-block:: cpp
 
@@ -393,9 +393,15 @@ how reference counting works.
    * - :cpp:class:`ModuleObj* <tvm::ffi::ModuleObj>`
      - :cpp:enumerator:`kTVMFFIModule <TVMFFITypeIndex::kTVMFFIModule>` = 73
      - :cpp:member:`~TVMFFIAny::v_obj`
+   * - :cpp:class:`ListObj* <tvm::ffi::ListObj>`
+     - :cpp:enumerator:`kTVMFFIList <TVMFFITypeIndex::kTVMFFIList>` = 75
+     - :cpp:member:`~TVMFFIAny::v_obj`
+   * - :cpp:class:`DictObj* <tvm::ffi::DictObj>`
+     - :cpp:enumerator:`kTVMFFIDict <TVMFFITypeIndex::kTVMFFIDict>` = 76
+     - :cpp:member:`~TVMFFIAny::v_obj`
 
 
-Heap-allocated objects - :cpp:class:`~tvm::ffi::String`, :cpp:class:`~tvm::ffi::Function`, :cpp:class:`~tvm::ffi::Tensor`, :cpp:class:`~tvm::ffi::Array`, :cpp:class:`~tvm::ffi::Map`, and custom types - are
+Heap-allocated objects - :cpp:class:`~tvm::ffi::String`, :cpp:class:`~tvm::ffi::Function`, :cpp:class:`~tvm::ffi::Tensor`, :cpp:class:`~tvm::ffi::Array`, :cpp:class:`~tvm::ffi::List`, :cpp:class:`~tvm::ffi::Map`, :cpp:class:`~tvm::ffi::Dict`, and custom types - are
 stored as pointers to reference-counted :cpp:class:`TVMFFIObject` headers:
 
 .. code-block:: cpp

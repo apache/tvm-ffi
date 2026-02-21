@@ -486,7 +486,16 @@ will happen automatically.
 ## Container Types
 
 To enable effective passing and storing of collections of values that are compatible with tvm-ffi,
-we provide several built-in container types.
+we provide several built-in container types. See [Containers](../concepts/containers.rst) for a
+conceptual overview.
+
+| Type | Header | Mutability | Semantics |
+| ------ | -------- | ------------ | ----------- |
+| `Array<T>` | `container/array.h` | Immutable (copy-on-write) | Homogeneous sequence |
+| `List<T>` | `container/list.h` | Mutable (shared reference) | Homogeneous sequence |
+| `Tuple<Ts...>` | `container/tuple.h` | Immutable (copy-on-write) | Heterogeneous fixed-size sequence |
+| `Map<K,V>` | `container/map.h` | Immutable (copy-on-write) | Homogeneous key-value mapping |
+| `Dict<K,V>` | `container/dict.h` | Mutable (shared reference) | Homogeneous key-value mapping |
 
 ### Array
 
@@ -528,6 +537,44 @@ being passed into the Function.
 
 **Performance note:** Repeatedly converting Any to `Array<T>` can incur repeated
 checking overhead at each element. Consider using `Array<Any>` to defer checking or only run conversion once.
+
+### List
+
+`List<T>` provides a mutable sequence container with shared reference semantics.
+Unlike `Array`, mutations happen directly on the underlying shared `ListObj` --
+there is no copy-on-write. All handles sharing the same `ListObj` see mutations
+immediately.
+
+```cpp
+#include <tvm/ffi/container/list.h>
+
+void ExampleList() {
+  namespace ffi = tvm::ffi;
+  ffi::List<int> numbers = {1, 2, 3};
+  // EXPECT_EQ is used here for demonstration purposes (testing framework)
+  EXPECT_EQ(numbers.size(), 3);
+  EXPECT_EQ(numbers[0], 1);
+
+  // Mutate in-place
+  numbers.push_back(4);
+  EXPECT_EQ(numbers.size(), 4);
+  numbers.Set(0, 10);
+  EXPECT_EQ(numbers[0], 10);
+
+  // Shared reference semantics: both handles see the mutation
+  ffi::List<int> alias = numbers;
+  alias.push_back(5);
+  EXPECT_EQ(numbers.size(), 5);
+}
+```
+
+Under the hood, `List` is backed by a reference-counted `ListObj` that stores
+a collection of Any values. Like `Array`, conversion from Any to `List<T>` will result in
+runtime checks of elements.
+
+**When to use List vs Array:** Use `Array<T>` when you need an immutable snapshot
+(e.g., passing a collection through FFI boundaries where the receiver should not
+mutate). Use `List<T>` when you need to build up or modify a collection in place.
 
 ### Tuple
 
@@ -584,6 +631,43 @@ being passed into the Function.
 
 **Performance note:** Repeatedly converting Any to `Map<K, V>` can incur repeated
 checking overhead at each element. Consider using `Map<Any, Any>` to defer checking or only run conversion once.
+
+### Dict
+
+`Dict<K, V>` provides a mutable key-value mapping with shared reference semantics.
+Unlike `Map`, mutations happen directly on the underlying shared `DictObj`.
+All handles sharing the same `DictObj` see mutations immediately.
+
+```cpp
+#include <tvm/ffi/container/dict.h>
+
+void ExampleDict() {
+  namespace ffi = tvm::ffi;
+  ffi::Dict<ffi::String, int> scores = {{"Alice", 100}, {"Bob", 95}};
+  // EXPECT_EQ is used here for demonstration purposes (testing framework)
+  EXPECT_EQ(scores.size(), 2);
+  EXPECT_EQ(scores.at("Alice"), 100);
+
+  // Mutate in-place
+  scores.Set("Charlie", 88);
+  EXPECT_EQ(scores.size(), 3);
+
+  // Shared reference semantics: both handles see the mutation
+  ffi::Dict<ffi::String, int> alias = scores;
+  alias.Set("Dave", 92);
+  EXPECT_EQ(scores.size(), 4);
+
+  // Erase
+  scores.erase("Bob");
+  EXPECT_EQ(scores.size(), 3);
+}
+```
+
+Under the hood, `Dict` is backed by a reference-counted `DictObj` that stores
+a collection of Any key-value pairs. Like `Map`, the `Dict` preserves insertion order.
+
+**When to use Dict vs Map:** Use `Map<K, V>` when you need an immutable snapshot
+with copy-on-write semantics. Use `Dict<K, V>` when you need mutable in-place operations.
 
 ### Optional
 

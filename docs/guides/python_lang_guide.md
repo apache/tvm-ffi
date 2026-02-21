@@ -112,19 +112,55 @@ assert tvm_ffi.get_global_func("example.add_one")(1) == 2
 
 ## Container Types
 
+TVM FFI provides five container types that split into **immutable** (copy-on-write) and
+**mutable** (shared reference) variants. See the [Containers concept page](../concepts/containers.rst) for a
+detailed overview.
+
+| Type | Mutability | Python ABC | Semantics |
+| ------ | ----------- | ------------ | ----------- |
+| {py:class}`tvm_ffi.Array` | Immutable | `Sequence[T]` | Homogeneous sequence (copy-on-write) |
+| {py:class}`tvm_ffi.List` | Mutable | `MutableSequence[T]` | Homogeneous sequence (shared reference) |
+| {py:class}`tvm_ffi.Map` | Immutable | `Mapping[K, V]` | Homogeneous mapping (copy-on-write) |
+| {py:class}`tvm_ffi.Dict` | Mutable | `MutableMapping[K, V]` | Homogeneous mapping (shared reference) |
+
+### Array (immutable sequence)
+
 When an FFI function takes arguments from lists/tuples, they will be converted into {py:class}`tvm_ffi.Array`.
+Arrays are **read-only** from Python -- they support indexing and iteration but not mutation.
 
 ```python
 import tvm_ffi
 
-# Lists become Arrays
+# Python lists become Arrays
 arr = tvm_ffi.convert([1, 2, 3, 4])
 assert isinstance(arr, tvm_ffi.Array)
 assert len(arr) == 4
 assert arr[0] == 1
+# arr[0] = 10  # TypeError: Array does not support item assignment
 ```
 
-Dictionaries will be converted to {py:class}`tvm_ffi.Map`
+### List (mutable sequence)
+
+{py:class}`tvm_ffi.List` is a mutable sequence with shared-reference semantics.
+All handles sharing the same underlying `ListObj` see mutations immediately.
+
+```python
+import tvm_ffi
+
+lst = tvm_ffi.List([1, 2, 3])
+assert len(lst) == 3
+
+# Mutate in-place
+lst.append(4)
+assert len(lst) == 4
+lst[0] = 10
+assert lst[0] == 10
+```
+
+### Map (immutable mapping)
+
+Dictionaries will be converted to {py:class}`tvm_ffi.Map`.
+Maps are **read-only** from Python -- they support key lookup and iteration but not mutation.
 
 ```python
 import tvm_ffi
@@ -134,10 +170,39 @@ assert isinstance(map_obj, tvm_ffi.Map)
 assert len(map_obj) == 2
 assert map_obj["a"] == 1
 assert map_obj["b"] == 2
+# map_obj["c"] = 3  # TypeError: Map does not support item assignment
 ```
 
-When container values are returned from FFI functions, they are also stored in these
-types respectively.
+### Dict (mutable mapping)
+
+{py:class}`tvm_ffi.Dict` is a mutable mapping with shared-reference semantics.
+All handles sharing the same underlying `DictObj` see mutations immediately.
+
+```python
+import tvm_ffi
+
+d = tvm_ffi.Dict({"a": 1, "b": 2})
+d["c"] = 3
+assert len(d) == 3
+del d["a"]
+assert len(d) == 2
+```
+
+### Tuple conversion
+
+When a Python tuple is passed to an FFI function, it is converted to {py:class}`tvm_ffi.Array`
+(the same backing type). The C++ `Tuple<Ts...>` template provides compile-time
+heterogeneous type safety, but on the Python side both lists and tuples map to `Array`.
+
+```python
+import tvm_ffi
+
+t = tvm_ffi.convert((1, "hello", 3.14))
+assert isinstance(t, tvm_ffi.Array)
+```
+
+When container values are returned from FFI functions, they are stored in the
+corresponding container type (Array, List, Map, or Dict).
 
 ## Inline Module
 

@@ -22,10 +22,12 @@ from tvm_ffi.core import TypeInfo, TypeSchema, _lookup_type_attr
 from tvm_ffi.testing import _SchemaAllTypes
 
 
-def _replace_list_dict(ty: str) -> str:
+def _replace_container_types(ty: str) -> str:
     return {
-        "list": "Sequence",
-        "dict": "Mapping",
+        "Array": "Sequence",
+        "List": "MutableSequence",
+        "Map": "Mapping",
+        "Dict": "MutableMapping",
     }.get(ty, ty)
 
 
@@ -52,23 +54,26 @@ def _replace_list_dict(ty: str) -> str:
         ("testing.schema_id_opt_int", "Callable[[int | None], int | None]"),
         ("testing.schema_id_opt_str", "Callable[[str | None], str | None]"),
         ("testing.schema_id_opt_obj", "Callable[[Object | None], Object | None]"),
-        ("testing.schema_id_arr_int", "Callable[[list[int]], list[int]]"),
-        ("testing.schema_id_arr_str", "Callable[[list[str]], list[str]]"),
-        ("testing.schema_id_arr_obj", "Callable[[list[Object]], list[Object]]"),
-        ("testing.schema_id_arr", "Callable[[list[Any]], list[Any]]"),
-        ("testing.schema_id_map_str_int", "Callable[[dict[str, int]], dict[str, int]]"),
-        ("testing.schema_id_map_str_str", "Callable[[dict[str, str]], dict[str, str]]"),
-        ("testing.schema_id_map_str_obj", "Callable[[dict[str, Object]], dict[str, Object]]"),
-        ("testing.schema_id_map", "Callable[[dict[Any, Any]], dict[Any, Any]]"),
-        ("testing.schema_id_dict_str_int", "Callable[[dict[str, int]], dict[str, int]]"),
-        ("testing.schema_id_dict_str_str", "Callable[[dict[str, str]], dict[str, str]]"),
+        ("testing.schema_id_arr_int", "Callable[[Array[int]], Array[int]]"),
+        ("testing.schema_id_arr_str", "Callable[[Array[str]], Array[str]]"),
+        ("testing.schema_id_arr_obj", "Callable[[Array[Object]], Array[Object]]"),
+        ("testing.schema_id_arr", "Callable[[Array[Any]], Array[Any]]"),
+        ("testing.schema_id_map_str_int", "Callable[[Map[str, int]], Map[str, int]]"),
+        ("testing.schema_id_map_str_str", "Callable[[Map[str, str]], Map[str, str]]"),
+        ("testing.schema_id_map_str_obj", "Callable[[Map[str, Object]], Map[str, Object]]"),
+        ("testing.schema_id_map", "Callable[[Map[Any, Any]], Map[Any, Any]]"),
+        ("testing.schema_id_dict_str_int", "Callable[[Dict[str, int]], Dict[str, int]]"),
+        ("testing.schema_id_dict_str_str", "Callable[[Dict[str, str]], Dict[str, str]]"),
         ("testing.schema_id_variant_int_str", "Callable[[int | str], int | str]"),
         ("testing.schema_packed", "Callable[..., Any]"),
         (
             "testing.schema_arr_map_opt",
-            "Callable[[list[int | None], dict[str, list[int]], str | None], dict[str, list[int]]]",
+            "Callable[[Array[int | None], Map[str, Array[int]], str | None], Map[str, Array[int]]]",
         ),
-        ("testing.schema_variant_mix", "Callable[[int | str | list[int]], int | str | list[int]]"),
+        (
+            "testing.schema_variant_mix",
+            "Callable[[int | str | Array[int]], int | str | Array[int]]",
+        ),
         ("testing.schema_no_args", "Callable[[], int]"),
         ("testing.schema_no_return", "Callable[[int], None]"),
         ("testing.schema_no_args_no_return", "Callable[[], None]"),
@@ -78,12 +83,11 @@ def test_schema_global_func(func_name: str, expected: str) -> None:
     metadata: dict[str, Any] = get_global_func_metadata(func_name)
     actual: TypeSchema = TypeSchema.from_json_str(metadata["type_schema"])
     assert str(actual) == expected, f"{func_name}: {actual}"
-    assert actual.repr(_replace_list_dict) == expected.replace(
-        "list",
-        "Sequence",
-    ).replace(
-        "dict",
-        "Mapping",
+    assert actual.repr(_replace_container_types) == (
+        expected.replace("Array", "Sequence")
+        .replace("List", "MutableSequence")
+        .replace("Map", "Mapping")
+        .replace("Dict", "MutableMapping")
     )
 
 
@@ -99,12 +103,12 @@ def test_schema_global_func(func_name: str, expected: str) -> None:
         ("v_bytes", "bytes"),
         ("v_opt_int", "int | None"),
         ("v_opt_str", "str | None"),
-        ("v_arr_int", "list[int]"),
-        ("v_arr_str", "list[str]"),
-        ("v_map_str_int", "dict[str, int]"),
-        ("v_map_str_arr_int", "dict[str, list[int]]"),
-        ("v_variant", "str | list[int] | dict[str, int]"),
-        ("v_opt_arr_variant", "list[int | str] | None"),
+        ("v_arr_int", "Array[int]"),
+        ("v_arr_str", "Array[str]"),
+        ("v_map_str_int", "Map[str, int]"),
+        ("v_map_str_arr_int", "Map[str, Array[int]]"),
+        ("v_variant", "str | Array[int] | Map[str, int]"),
+        ("v_opt_arr_variant", "Array[int | str] | None"),
     ],
 )
 def test_schema_field(field_name: str, expected: str) -> None:
@@ -113,12 +117,11 @@ def test_schema_field(field_name: str, expected: str) -> None:
         if field.name == field_name:
             actual: TypeSchema = TypeSchema.from_json_str(field.metadata["type_schema"])
             assert str(actual) == expected, f"{field_name}: {actual}"
-            assert actual.repr(_replace_list_dict) == expected.replace(
-                "list",
-                "Sequence",
-            ).replace(
-                "dict",
-                "Mapping",
+            assert actual.repr(_replace_container_types) == (
+                expected.replace("Array", "Sequence")
+                .replace("List", "MutableSequence")
+                .replace("Map", "Mapping")
+                .replace("Dict", "MutableMapping")
             )
             break
     else:
@@ -129,11 +132,11 @@ def test_schema_field(field_name: str, expected: str) -> None:
     "method_name,expected",
     [
         ("add_int", "Callable[[testing.SchemaAllTypes, int], int]"),
-        ("append_int", "Callable[[testing.SchemaAllTypes, list[int], int], list[int]]"),
+        ("append_int", "Callable[[testing.SchemaAllTypes, Array[int], int], Array[int]]"),
         ("maybe_concat", "Callable[[testing.SchemaAllTypes, str | None, str | None], str | None]"),
         (
             "merge_map",
-            "Callable[[testing.SchemaAllTypes, dict[str, list[int]], dict[str, list[int]]], dict[str, list[int]]]",
+            "Callable[[testing.SchemaAllTypes, Map[str, Array[int]], Map[str, Array[int]]], Map[str, Array[int]]]",
         ),
         ("make_with", "Callable[[int, float, str], testing.SchemaAllTypes]"),
     ],
@@ -144,12 +147,11 @@ def test_schema_member_method(method_name: str, expected: str) -> None:
         if method.name == method_name:
             actual: TypeSchema = TypeSchema.from_json_str(method.metadata["type_schema"])
             assert str(actual) == expected, f"{method_name}: {actual}"
-            assert actual.repr(_replace_list_dict) == expected.replace(
-                "list",
-                "Sequence",
-            ).replace(
-                "dict",
-                "Mapping",
+            assert actual.repr(_replace_container_types) == (
+                expected.replace("Array", "Sequence")
+                .replace("List", "MutableSequence")
+                .replace("Map", "Mapping")
+                .replace("Dict", "MutableMapping")
             )
             break
     else:

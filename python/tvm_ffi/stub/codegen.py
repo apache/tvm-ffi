@@ -26,14 +26,22 @@ from .utils import FuncInfo, ImportItem, InitConfig, ObjectInfo, Options
 
 
 def _type_suffix_and_record(
-    ty_map: dict[str, str], imports: list[ImportItem]
+    ty_map: dict[str, str],
+    imports: list[ImportItem],
+    func_names: set[str] | None = None,
 ) -> Callable[[str], str]:
     def _run(name: str) -> str:
         nonlocal ty_map, imports
         name = ty_map.get(name, name)
+        suffix = name.rsplit(".", 1)[-1]
         if "." in name:
-            imports.append(ImportItem(name, type_checking_only=True, alias=None))
-        return name.rsplit(".", 1)[-1]
+            alias = None
+            if func_names and suffix in func_names:
+                alias = f"_{suffix}"
+            imports.append(ImportItem(name, type_checking_only=True, alias=alias))
+            if alias:
+                return alias
+        return suffix
 
     return _run
 
@@ -69,7 +77,8 @@ def generate_global_funcs(
             ),
         ]
     )
-    fn_ty_map = _type_suffix_and_record(ty_map, imports)
+    func_names = {f.schema.name.rsplit(".", 1)[-1] for f in global_funcs}
+    fn_ty_map = _type_suffix_and_record(ty_map, imports, func_names=func_names)
     results: list[str] = [
         "# fmt: off",
         f'_FFI_INIT_FUNC("{prefix}", __name__)',
@@ -98,7 +107,8 @@ def generate_object(
     """
     assert len(code.lines) >= 2
     info = obj_info
-    fn_ty_map = _type_suffix_and_record(ty_map, imports)
+    method_names = {m.schema.name.rsplit(".", 1)[-1] for m in info.methods}
+    fn_ty_map = _type_suffix_and_record(ty_map, imports, func_names=method_names)
     if info.methods:
         imports.append(
             ImportItem(
