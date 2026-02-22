@@ -136,6 +136,33 @@ def test_opaque_type_error() -> None:
     )
 
 
+def test_object_direct_init_disabled() -> None:
+    """Object() and unregistered subclasses must not silently create NULL-handle objects."""
+    # Base Object class
+    with pytest.raises(TypeError, match="Cannot directly create Object instance"):
+        tvm_ffi.Object()
+
+    # Unregistered subclass without __init__
+    class UnregisteredObj(tvm_ffi.Object):
+        pass
+
+    with pytest.raises(TypeError, match="Cannot directly create UnregisteredObj instance"):
+        UnregisteredObj()
+
+    # Registered class without __c_ffi_init__ should still raise
+    with pytest.raises(RuntimeError, match="__init__ method of this class is not implemented"):
+        tvm_ffi.testing.TestObjectBase()
+
+    # Registered class with __c_ffi_init__ should work fine
+    pair = tvm_ffi.testing.TestIntPair(3, 4)  # ty: ignore[too-many-positional-arguments]
+    assert pair.a == 3 and pair.b == 4
+
+    # FFI-returned objects should work fine
+    obj = tvm_ffi.testing.create_object("testing.TestObjectBase", v_i64=7)
+    assert obj.__chandle__() != 0
+    assert obj.v_i64 == 7  # ty: ignore[unresolved-attribute]
+
+
 def test_object_protocol() -> None:
     class CompactObject:
         def __init__(self, backend_obj: Any) -> None:
