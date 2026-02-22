@@ -27,7 +27,7 @@ _WITH_APPEND_BACKTRACE: Optional[Callable[[BaseException, str], BaseException]] 
 _TRACEBACK_TO_BACKTRACE_STR: Optional[Callable[[types.TracebackType | None], str]] = None
 
 
-cdef class Error(Object):
+cdef class Error(CObject):
     """Base class for FFI errors.
 
     An :class:`Error` is a lightweight wrapper around a concrete Python
@@ -43,6 +43,7 @@ cdef class Error(Object):
     Do not directly raise this object. Instead, use :py:meth:`py_error`
     to convert it to a Python exception and raise that.
     """
+    __slots__ = ()
 
     def __init__(self, kind: str, message: str, backtrace: str):
         """Construct an error wrapper.
@@ -66,7 +67,7 @@ cdef class Error(Object):
         )
         if ret != 0:
             raise MemoryError("Failed to create error object")
-        (<Object>self).chandle = out
+        (<CObject>self).chandle = out
 
     def update_backtrace(self, backtrace: str) -> None:
         """Replace the stored backtrace string with ``backtrace``.
@@ -107,7 +108,7 @@ cdef class Error(Object):
 cdef inline Error move_from_last_error():
     # raise last error
     error = Error.__new__(Error)
-    TVMFFIErrorMoveFromRaised(&(<Object>error).chandle)
+    TVMFFIErrorMoveFromRaised(&(<CObject>error).chandle)
     return error
 
 
