@@ -249,7 +249,8 @@ cdef extern from "tvm/ffi/c_api.h":
 
     ctypedef struct TVMFFITypeAttrColumn:
         const TVMFFIAny* data
-        size_t size
+        int32_t size
+        int32_t begin_index
 
     int TVMFFIObjectDecRef(TVMFFIObjectHandle obj) nogil
     int TVMFFIObjectIncRef(TVMFFIObjectHandle obj) nogil

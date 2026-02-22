@@ -1070,20 +1070,42 @@ typedef struct {
 } TVMFFITypeMetadata;
 
 /*!
- * \brief Column array that stores extra attributes about types
+ * \brief One column of a type–attribute table: extra attributes keyed by runtime type index.
  *
- * The attributes stored in a column array that can be looked up by type index.
- * Note that the TypeAttr behaves like type_traits so column[T] so not contain
- * attributes from base classes.
+ * TypeAttr is designed to support an open set of possible attributes that can be
+ * registered and queried across different downstream use cases.
  *
- * \note
+ * Conceptually, TypeAttr is a dynamic variant of TypeTraits as seen in C++/Rust.
+ * It behaves like c++ type_traits, so column[T] does not contain attributes from base classes.
+ *
+ * Typical use cases for TypeAttr include:
+ * - Storing extra magic trait functions that can customize behaviors like hash/eq/repr.
+ * - Storing extra metadata about type data structures (e.g., mutability) and properties of
+ *   op/operator structures that can be used by compiler transformations (e.g., passes).
+ *
+ * This column covers type indices in the range [begin_index, begin_index + size).
+ * For a given type_index, the corresponding entry is data[type_index - begin_index]
+ * when begin_index <= type_index < begin_index + size; otherwise the entry is
+ * not present (treat as None/null).
+ *
  * \sa TVMFFIRegisterTypeAttr
  */
 typedef struct {
-  /*! \brief The data of the column. */
+  /*! \brief The data of the column, indexed by (type_index - begin_index). */
   const TVMFFIAny* data;
-  /*! \brief The size of the column. */
-  size_t size;
+  /*!
+   * \brief The number of elements in the data array.
+   *
+   * The column covers type indices in the range [begin_index, begin_index + size).
+   * For a given type_index, the corresponding entry is data[type_index - begin_index]
+   * when begin_index <= type_index < begin_index + size.
+   */
+  int32_t size;
+  /*!
+   * \brief The starting type index of the column data.
+   * A value of 0 means the data array starts at type_index 0.
+   */
+  int32_t begin_index;
 } TVMFFITypeAttrColumn;
 
 /*!

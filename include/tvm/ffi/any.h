@@ -626,12 +626,14 @@ struct AnyHash {
     } else {
       if (src.data_.type_index >= TypeIndex::kTVMFFIStaticObjectBegin) {
         static const TVMFFITypeAttrColumn* custom_hash_column = GetAnyHashTypeAttrColumn();
-        if (custom_hash_column != nullptr &&
-            static_cast<size_t>(src.data_.type_index) < custom_hash_column->size) {
-          const TVMFFIAny& custom_any_hash = custom_hash_column->data[src.data_.type_index];
-          if (custom_any_hash.type_index != TypeIndex::kTVMFFINone) {
-            return details::StableHashCombine(src.data_.type_index,
-                                              CallCustomAnyHash(custom_any_hash, src));
+        if (custom_hash_column != nullptr) {
+          int32_t offset = src.data_.type_index - custom_hash_column->begin_index;
+          if (offset >= 0 && offset < custom_hash_column->size) {
+            const TVMFFIAny& custom_any_hash = custom_hash_column->data[offset];
+            if (custom_any_hash.type_index != TypeIndex::kTVMFFINone) {
+              return details::StableHashCombine(src.data_.type_index,
+                                                CallCustomAnyHash(custom_any_hash, src));
+            }
           }
         }
       }
@@ -724,11 +726,13 @@ struct AnyEqual {
       }
       if (lhs.data_.type_index >= TypeIndex::kTVMFFIStaticObjectBegin) {
         static const TVMFFITypeAttrColumn* custom_equal_column = GetAnyEqualTypeAttrColumn();
-        if (custom_equal_column != nullptr &&
-            static_cast<size_t>(lhs.data_.type_index) < custom_equal_column->size) {
-          const TVMFFIAny& custom_any_equal = custom_equal_column->data[lhs.data_.type_index];
-          if (custom_any_equal.type_index != TypeIndex::kTVMFFINone) {
-            return CallCustomAnyEqual(custom_any_equal, lhs, rhs);
+        if (custom_equal_column != nullptr) {
+          int32_t offset = lhs.data_.type_index - custom_equal_column->begin_index;
+          if (offset >= 0 && offset < custom_equal_column->size) {
+            const TVMFFIAny& custom_any_equal = custom_equal_column->data[offset];
+            if (custom_any_equal.type_index != TypeIndex::kTVMFFINone) {
+              return CallCustomAnyEqual(custom_any_equal, lhs, rhs);
+            }
           }
         }
       }

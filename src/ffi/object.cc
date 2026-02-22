@@ -263,17 +263,29 @@ class TypeTable {
       column_index = (*it).second;
     }
     TypeAttrColumnData* column = type_attr_columns_[column_index].get();
-    if (column->data_.size() < static_cast<size_t>(type_index) + 1) {
-      column->data_.resize(static_cast<size_t>(type_index) + 1, Any(nullptr));
-      column->data = reinterpret_cast<const TVMFFIAny*>(column->data_.data());
-      column->size = column->data_.size();
+    if (type_index == kTVMFFINone) {
+      // Sentinel: just ensure the column exists without registering a value.
+      if (column->data_.empty()) {
+        column->data = reinterpret_cast<const TVMFFIAny*>(column->data_.data());
+        column->size = 0;
+        column->begin_index = 0;
+      }
+      return;
     }
-    if (type_index == kTVMFFINone) return;
-    if (column->data_[type_index] != nullptr) {
+    // TODO(1.0): set begin_index to first registered type_index for sparse column storage
+    // For now, begin_index is always 0 (resize from index 0).
+    if (static_cast<size_t>(type_index) >= column->data_.size()) {
+      // Extend back from index 0.
+      column->data_.resize(static_cast<size_t>(type_index) + 1, Any(nullptr));
+    }
+    column->data = reinterpret_cast<const TVMFFIAny*>(column->data_.data());
+    column->size = static_cast<int32_t>(column->data_.size());
+    column->begin_index = 0;
+    if (column->data_[type_index - column->begin_index] != nullptr) {
       TVM_FFI_THROW(RuntimeError) << "Type attribute `" << name_str << "` is already set for type `"
                                   << TypeIndexToTypeKey(type_index) << "`";
     }
-    column->data_[type_index] = value_view;
+    column->data_[type_index - column->begin_index] = value_view;
   }
   const TVMFFITypeAttrColumn* GetTypeAttrColumn(const TVMFFIByteArray* name) {
     String name_str(*name);

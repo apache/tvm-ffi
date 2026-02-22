@@ -179,6 +179,24 @@ TEST(Reflection, TypeAttrColumn) {
   EXPECT_EQ(size_attr[TIntObj::RuntimeTypeIndex()].cast<int>(), sizeof(TIntObj));
 }
 
+TEST(Reflection, TypeAttrColumnBeginIndex) {
+  // Get the column and verify begin_index
+  TVMFFIByteArray attr_name = {"test.size", std::char_traits<char>::length("test.size")};
+  const TVMFFITypeAttrColumn* column = TVMFFIGetTypeAttrColumn(&attr_name);
+  ASSERT_NE(column, nullptr);
+  // begin_index should be >= 0
+  EXPECT_GE(column->begin_index, 0);
+  // size should cover the range from begin_index
+  EXPECT_GT(column->size, 0);
+  // verify that lookup of a type_index below begin_index returns None
+  reflection::TypeAttrColumn size_attr("test.size");
+  AnyView result = size_attr[0];  // index 0 is kTVMFFINone, unlikely to have this attr
+  (void)result;  // suppress unused variable warning; we only verify no crash occurs
+  // The result may or may not be None depending on begin_index; the key is no crash.
+  // verify the known registered entry still works
+  EXPECT_EQ(size_attr[TIntObj::RuntimeTypeIndex()].cast<int>(), sizeof(TIntObj));
+}
+
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def_method("testing.Int_GetValue", &TIntObj::GetValue);

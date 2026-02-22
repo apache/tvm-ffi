@@ -339,10 +339,15 @@ pub struct TVMFFITypeMetadata {
 /// attributes from base classes.
 #[repr(C)]
 pub struct TVMFFITypeAttrColumn {
-    /// The data of the column
+    /// The data of the column, indexed by (type_index - begin_index).
     pub data: *const TVMFFIAny,
-    /// The size of the column
-    pub size: usize,
+    /// The number of elements in the data array.
+    /// The column covers type indices [begin_index, begin_index + size).
+    pub size: i32,
+    /// The starting type index of the column data.
+    /// Lookup: if begin_index <= type_index < begin_index + size,
+    /// the entry is data[(type_index - begin_index) as usize].
+    pub begin_index: i32,
 }
 
 /// Runtime type information for object type checking

@@ -154,12 +154,12 @@ class TypeAttrColumn {
    * \return The type attribute column.
    */
   AnyView operator[](int32_t type_index) const {
-    size_t tindex = static_cast<size_t>(type_index);
-    if (tindex >= column_->size) {
+    int32_t offset = type_index - column_->begin_index;
+    if (offset < 0 || offset >= column_->size) {
       return AnyView();
     }
     const AnyView* any_view_data = reinterpret_cast<const AnyView*>(column_->data);
-    return any_view_data[tindex];
+    return any_view_data[offset];
   }
 
  private:
