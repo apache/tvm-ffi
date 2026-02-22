@@ -230,8 +230,8 @@ def from_dlpack(
 
 
 # helper class for shape handling
-def _shape_obj_get_py_tuple(obj: "Object") -> tuple[int, ...]:
-    cdef TVMFFIShapeCell* shape = TVMFFIShapeGetCellPtr((<Object>obj).chandle)
+def _shape_obj_get_py_tuple(obj: "CObject") -> tuple[int, ...]:
+    cdef TVMFFIShapeCell* shape = TVMFFIShapeGetCellPtr((<CObject>obj).chandle)
     return tuple(shape.data[i] for i in range(shape.size))
 
 
@@ -247,7 +247,7 @@ def _make_strides_from_shape(tuple shape: tuple[int, ...]) -> tuple[int, ...]:
     return tuple(reversed(strides))
 
 
-cdef class Tensor(Object):
+cdef class Tensor(CObject):
     """Managed n-dimensional array compatible with DLPack.
 
     It provides zero-copy interoperability with array libraries
@@ -268,6 +268,7 @@ cdef class Tensor(Object):
         np.testing.assert_equal(np.from_dlpack(x), np.arange(6, dtype="int32"))
 
     """
+    __slots__ = ()
     cdef DLTensor* cdltensor
 
     @property
@@ -433,6 +434,7 @@ cdef DLPackExchangeAPI* _dltensor_test_wrapper_get_exchange_api() noexcept:
 cdef class DLTensorTestWrapper:
     """Wrapper of a Tensor that exposes DLPack protocol, only for testing purpose.
     """
+    __slots__ = ()
     __dlpack_c_exchange_api__ = pycapsule.PyCapsule_New(
         _dltensor_test_wrapper_get_exchange_api(),
         b"dlpack_exchange_api",
@@ -465,7 +467,7 @@ cdef inline object make_ret_dltensor(TVMFFIAny result):
     cdef DLTensor* dltensor
     dltensor = <DLTensor*>result.v_ptr
     tensor = _CLASS_TENSOR.__new__(_CLASS_TENSOR)
-    (<Object>tensor).chandle = NULL
+    (<CObject>tensor).chandle = NULL
     (<Tensor>tensor).cdltensor = dltensor
     return tensor
 
@@ -497,7 +499,7 @@ cdef inline object make_tensor_from_chandle(
                 pass
     # default return the tensor
     tensor = _CLASS_TENSOR.__new__(_CLASS_TENSOR)
-    (<Object>tensor).chandle = chandle
+    (<CObject>tensor).chandle = chandle
     (<Tensor>tensor).cdltensor = TVMFFITensorGetDLTensorPtr(chandle)
     return tensor
 
