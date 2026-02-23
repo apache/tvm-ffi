@@ -33,6 +33,7 @@
 #include <tvm/ffi/reflection/registry.h>
 
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace tvm {
@@ -59,6 +60,9 @@ class ObjectDeepCopier {
     for (size_t i = 0; i < resolve_queue_.size(); ++i) {
       ResolveFields(resolve_queue_[i]);
     }
+    if (has_deferred_) {
+      FixupDeferredReferences();
+    }
     return result;
   }
 
@@ -72,6 +76,14 @@ class ObjectDeepCopier {
     if (auto it = copy_map_.find(obj); it != copy_map_.end()) {
       return it->second;
     }
+    // If this object is currently being built (in-progress immutable container),
+    // return the original as a placeholder.  A fixup pass will replace these
+    // stale references inside mutable containers (List/Dict) after all copies
+    // are fully constructed.
+    if (in_progress_.count(obj)) {
+      has_deferred_ = true;
+      return value;
+    }
     int32_t ti = obj->type_index();
     // Strings, bytes, and shapes are immutable — return as-is.
     if (ti == TypeIndex::kTVMFFIStr || ti == TypeIndex::kTVMFFIBytes ||
@@ -79,16 +91,17 @@ class ObjectDeepCopier {
       return value;
     }
     if (ti == TypeIndex::kTVMFFIArray) {
-      // NOTE: The new array is registered in copy_map_ only after all elements
-      // are resolved.  This means a cyclic self-reference (array containing
-      // itself) would not preserve pointer equality.  This is acceptable
-      // because Array is immutable and such cycles cannot be constructed.
+      // Array is immutable (COW), so we cannot register early — COW would
+      // create a new internal object on push_back when refcount > 1.
+      // Instead, mark in-progress and fix up deferred back-references later.
+      in_progress_.insert(obj);
       const ArrayObj* orig = value.as<ArrayObj>();
       Array<Any> new_arr;
       new_arr.reserve(static_cast<int64_t>(orig->size()));
       for (const Any& elem : *orig) {
         new_arr.push_back(Resolve(elem));
       }
+      in_progress_.erase(obj);
       copy_map_[obj] = new_arr;
       return new_arr;
     }
@@ -106,13 +119,14 @@ class ObjectDeepCopier {
       return new_list;
     }
     if (ti == TypeIndex::kTVMFFIMap) {
-      // NOTE: Same as Array above — Map is immutable, so cyclic
-      // self-references cannot occur and late registration is safe.
+      // Map is immutable (COW), same treatment as Array above.
+      in_progress_.insert(obj);
       const MapObj* orig = value.as<MapObj>();
       Map<Any, Any> new_map;
       for (const auto& [k, v] : *orig) {
         new_map.Set(Resolve(k), Resolve(v));
       }
+      in_progress_.erase(obj);
       copy_map_[obj] = new_map;
       return new_map;
     }
@@ -155,9 +169,66 @@ class ObjectDeepCopier {
     });
   }
 
+  /*!
+   * \brief Replace stale original-object references inside mutable containers.
+   *
+   * When an immutable container (Array/Map) is in-progress and a mutable child
+   * (List/Dict) references it back, the original is stored as a placeholder.
+   * After all copies are built, this pass replaces those placeholders with
+   * the actual copies from copy_map_.
+   */
+  void FixupDeferredReferences() {
+    for (auto& [orig_ptr, copy_any] : copy_map_) {
+      const Object* copy_obj = copy_any.as<Object>();
+      if (!copy_obj) continue;
+      int32_t ti = copy_obj->type_index();
+      if (ti == TypeIndex::kTVMFFIList) {
+        FixupList(copy_any);
+      } else if (ti == TypeIndex::kTVMFFIDict) {
+        FixupDict(copy_any);
+      }
+    }
+  }
+
+  void FixupList(const Any& list_any) {
+    List<Any> list = list_any.cast<List<Any>>();
+    int64_t n = static_cast<int64_t>(list.size());
+    for (int64_t i = 0; i < n; ++i) {
+      const Any& elem = list[i];
+      if (elem.type_index() < TypeIndex::kTVMFFIStaticObjectBegin) continue;
+      const Object* elem_obj = elem.as<Object>();
+      if (!elem_obj) continue;
+      auto it = copy_map_.find(elem_obj);
+      if (it != copy_map_.end()) {
+        list.Set(i, it->second);
+      }
+    }
+  }
+
+  void FixupDict(const Any& dict_any) {
+    Dict<Any, Any> dict = dict_any.cast<Dict<Any, Any>>();
+    const DictObj* dict_obj = dict_any.as<DictObj>();
+    // Collect value fixups (safe to apply in-place since keys don't change).
+    std::vector<std::pair<Any, Any>> fixups;
+    for (const auto& [k, v] : *dict_obj) {
+      if (v.type_index() < TypeIndex::kTVMFFIStaticObjectBegin) continue;
+      const Object* v_obj = v.as<Object>();
+      if (!v_obj) continue;
+      auto it = copy_map_.find(v_obj);
+      if (it != copy_map_.end()) {
+        fixups.emplace_back(k, it->second);
+      }
+    }
+    for (auto& [key, new_val] : fixups) {
+      dict.Set(key, new_val);
+    }
+  }
+
   reflection::TypeAttrColumn* column_;
   std::unordered_map<const Object*, Any> copy_map_;
   std::vector<const Object*> resolve_queue_;
+  std::unordered_set<const Object*> in_progress_;
+  bool has_deferred_ = false;
 };
 
 Any DeepCopy(const Any& value) {
