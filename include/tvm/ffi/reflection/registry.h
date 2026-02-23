@@ -251,6 +251,34 @@ class Repr : public InfoTrait {
 };
 
 /*!
+ * \brief InfoTrait to control whether a field participates in recursive comparison.
+ *
+ * Usage: `refl::Compare(false)` marks a field to be excluded from
+ * RecursiveEq/RecursiveLt/etc.
+ */
+class Compare : public InfoTrait {
+ public:
+  /*!
+   * \brief Constructor.
+   * \param include Whether the field should participate in comparison.
+   */
+  explicit Compare(bool include) : include_(include) {}
+
+  /*!
+   * \brief Apply the compare flag to the field info.
+   * \param info The field info.
+   */
+  TVM_FFI_INLINE void Apply(TVMFFIFieldInfo* info) const {
+    if (!include_) {
+      info->flags |= kTVMFFIFieldFlagBitMaskCompareOff;
+    }
+  }
+
+ private:
+  bool include_;
+};
+
+/*!
  * \brief Get the byte offset of a class member field.
  *
  * \tparam The original class.

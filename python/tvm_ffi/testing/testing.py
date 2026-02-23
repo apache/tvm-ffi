@@ -58,6 +58,8 @@ class TestObjectBase(Object):
 class TestIntPair(Object):
     """Test Int Pair."""
 
+    __test__ = False
+
     # tvm-ffi-stubgen(begin): object/testing.TestIntPair
     # fmt: off
     a: int
@@ -160,6 +162,17 @@ def make_unregistered_object() -> Object:
 def add_one(x: int) -> int:
     """Add one to the input integer."""
     return get_global_func("testing.add_one")(x)
+
+
+@register_object("testing.TestCompare")
+class TestCompare(Object):
+    """Test object with Compare(false) on ignored_field."""
+
+    __test__ = False
+
+    key: int
+    name: str
+    ignored_field: int
 
 
 @c_class("testing.TestCxxClassBase")

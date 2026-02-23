@@ -201,6 +201,24 @@ class TestUnregisteredObject : public TestUnregisteredBaseObject {
                               TestUnregisteredBaseObject);
 };
 
+class TestCompareObj : public Object {
+ public:
+  int64_t key;
+  String name;
+  int64_t ignored_field;
+
+  TestCompareObj() = default;
+  TestCompareObj(int64_t key, String name, int64_t ignored_field)
+      : key(key), name(std::move(name)), ignored_field(ignored_field) {}
+
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("testing.TestCompare", TestCompareObj, Object);
+};
+
+class TestCompare : public ObjectRef {
+ public:
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(TestCompare, ObjectRef, TestCompareObj);
+};
+
 // NOLINTNEXTLINE(performance-unnecessary-value-param)
 TVM_FFI_NO_INLINE void TestRaiseError(String kind, String msg) {
   // keep name and no liner for testing backtrace
@@ -291,6 +309,12 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def_ro("v2", &TestUnregisteredObject::v2)
       .def("get_v2_plus_two", &TestUnregisteredObject::GetV2PlusTwo,
            "Get (v2 + 2) from TestUnregisteredObject");
+
+  refl::ObjectDef<TestCompareObj>()
+      .def(refl::init<int64_t, String, int64_t>())
+      .def_ro("key", &TestCompareObj::key)
+      .def_ro("name", &TestCompareObj::name)
+      .def_ro("ignored_field", &TestCompareObj::ignored_field, refl::Compare(false));
 
   refl::GlobalDef()
       .def("testing.test_raise_error", TestRaiseError)
