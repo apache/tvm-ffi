@@ -887,6 +887,14 @@ typedef enum {
    * By default this flag is off (meaning the field is included in comparison).
    */
   kTVMFFIFieldFlagBitMaskCompareOff = 1 << 7,
+  /*!
+   * \brief The field is excluded from recursive hashing.
+   *
+   * When set, the field will not participate in generic reflection-based
+   * recursive hashing (RecursiveHash).
+   * By default this flag is off (meaning the field is included in hashing).
+   */
+  kTVMFFIFieldFlagBitMaskHashOff = 1 << 8,
 #ifdef __cplusplus
 };
 #else

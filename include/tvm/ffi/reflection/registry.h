@@ -279,6 +279,34 @@ class Compare : public InfoTrait {
 };
 
 /*!
+ * \brief InfoTrait to control whether a field participates in recursive hashing.
+ *
+ * Usage: `refl::Hash(false)` marks a field to be excluded from
+ * RecursiveHash.
+ */
+class Hash : public InfoTrait {
+ public:
+  /*!
+   * \brief Constructor.
+   * \param include Whether the field should participate in hashing.
+   */
+  explicit Hash(bool include) : include_(include) {}
+
+  /*!
+   * \brief Apply the hash flag to the field info.
+   * \param info The field info.
+   */
+  TVM_FFI_INLINE void Apply(TVMFFIFieldInfo* info) const {
+    if (!include_) {
+      info->flags |= kTVMFFIFieldFlagBitMaskHashOff;
+    }
+  }
+
+ private:
+  bool include_;
+};
+
+/*!
  * \brief Get the byte offset of a class member field.
  *
  * \tparam The original class.

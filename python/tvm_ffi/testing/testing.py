@@ -175,6 +175,17 @@ class TestCompare(Object):
     ignored_field: int
 
 
+@register_object("testing.TestHash")
+class TestHash(Object):
+    """Test object with Hash(false) on hash_ignored."""
+
+    __test__ = False
+
+    key: int
+    name: str
+    hash_ignored: int
+
+
 @c_class("testing.TestCxxClassBase")
 class _TestCxxClassBase:
     v_i64: int

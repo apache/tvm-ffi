@@ -19,6 +19,7 @@
 from ._ffi_api import *  # noqa: F403
 from .testing import (
     TestCompare,
+    TestHash,
     TestIntPair,
     TestNonCopyable,
     TestObjectBase,

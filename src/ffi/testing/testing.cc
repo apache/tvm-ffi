@@ -219,6 +219,24 @@ class TestCompare : public ObjectRef {
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(TestCompare, ObjectRef, TestCompareObj);
 };
 
+class TestHashObj : public Object {
+ public:
+  int64_t key;
+  String name;
+  int64_t hash_ignored;
+
+  TestHashObj() = default;
+  TestHashObj(int64_t key, String name, int64_t hash_ignored)
+      : key(key), name(std::move(name)), hash_ignored(hash_ignored) {}
+
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("testing.TestHash", TestHashObj, Object);
+};
+
+class TestHash : public ObjectRef {
+ public:
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(TestHash, ObjectRef, TestHashObj);
+};
+
 // NOLINTNEXTLINE(performance-unnecessary-value-param)
 TVM_FFI_NO_INLINE void TestRaiseError(String kind, String msg) {
   // keep name and no liner for testing backtrace
@@ -315,6 +333,12 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def_ro("key", &TestCompareObj::key)
       .def_ro("name", &TestCompareObj::name)
       .def_ro("ignored_field", &TestCompareObj::ignored_field, refl::Compare(false));
+
+  refl::ObjectDef<TestHashObj>()
+      .def(refl::init<int64_t, String, int64_t>())
+      .def_ro("key", &TestHashObj::key)
+      .def_ro("name", &TestHashObj::name)
+      .def_ro("hash_ignored", &TestHashObj::hash_ignored, refl::Hash(false));
 
   refl::GlobalDef()
       .def("testing.test_raise_error", TestRaiseError)
