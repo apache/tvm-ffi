@@ -19,12 +19,7 @@
 from __future__ import annotations
 
 import math
-import os
 import struct
-import subprocess
-import sys
-import textwrap
-from pathlib import Path
 
 import pytest
 import tvm_ffi
@@ -43,24 +38,6 @@ def _make_nan_from_payload(payload: int) -> float:
     """Create a quiet NaN with a deterministic payload."""
     bits = 0x7FF8000000000000 | (payload & 0x0007FFFFFFFFFFFF)
     return struct.unpack(">d", struct.pack(">Q", bits))[0]
-
-
-def _run_recursive_compare_subprocess(
-    code: str, timeout: float = 5.0
-) -> subprocess.CompletedProcess[str]:
-    """Run recursive-compare code in a subprocess for crash/hang isolation."""
-    env = os.environ.copy()
-    repo_python = Path(__file__).resolve().parents[2] / "python"
-    existing = env.get("PYTHONPATH")
-    env["PYTHONPATH"] = f"{repo_python}{os.pathsep}{existing}" if existing else str(repo_python)
-    return subprocess.run(
-        [sys.executable, "-c", code],
-        check=False,
-        capture_output=True,
-        env=env,
-        text=True,
-        timeout=timeout,
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -1126,62 +1103,22 @@ def test_cyclic_list_same_pointer_eq() -> None:
 
 def test_cyclic_list_raises() -> None:
     """Two distinct cyclic lists hit the depth guard and raise ValueError."""
-    code = textwrap.dedent(
-        """
-        import tvm_ffi
-        from tvm_ffi._ffi_api import RecursiveEq
-
-        a = tvm_ffi.List()
-        b = tvm_ffi.List()
-        a.append(a)
-        b.append(b)
-        try:
-            RecursiveEq(a, b)
-            print("NO_ERROR")
-        except ValueError:
-            print("VALUE_ERROR")
-        """
-    )
-    try:
-        result = _run_recursive_compare_subprocess(code, timeout=3.0)
-    except subprocess.TimeoutExpired as exc:
-        pytest.fail(f"RecursiveEq on cyclic lists timed out: {exc}")
-    assert result.returncode == 0, (
-        f"subprocess failed.\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
-    )
-    assert "VALUE_ERROR" in result.stdout, (
-        f"Expected ValueError for cyclic list.\nstdout:\n{result.stdout}"
-    )
+    a = tvm_ffi.List()
+    b = tvm_ffi.List()
+    a.append(a)
+    b.append(b)
+    with pytest.raises(ValueError):
+        RecursiveEq(a, b)
 
 
 def test_cyclic_dict_raises() -> None:
     """Two distinct cyclic dicts hit the depth guard and raise ValueError."""
-    code = textwrap.dedent(
-        """
-        import tvm_ffi
-        from tvm_ffi._ffi_api import RecursiveEq
-
-        a = tvm_ffi.Dict()
-        b = tvm_ffi.Dict()
-        a["self"] = a
-        b["self"] = b
-        try:
-            RecursiveEq(a, b)
-            print("NO_ERROR")
-        except ValueError:
-            print("VALUE_ERROR")
-        """
-    )
-    try:
-        result = _run_recursive_compare_subprocess(code, timeout=3.0)
-    except subprocess.TimeoutExpired as exc:
-        pytest.fail(f"RecursiveEq on cyclic dicts timed out: {exc}")
-    assert result.returncode == 0, (
-        f"subprocess failed.\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
-    )
-    assert "VALUE_ERROR" in result.stdout, (
-        f"Expected ValueError for cyclic dict.\nstdout:\n{result.stdout}"
-    )
+    a = tvm_ffi.Dict()
+    b = tvm_ffi.Dict()
+    a["self"] = a
+    b["self"] = b
+    with pytest.raises(ValueError):
+        RecursiveEq(a, b)
 
 
 # ---------------------------------------------------------------------------
