@@ -32,12 +32,15 @@
 #include <tvm/ffi/error.h>
 #include <tvm/ffi/reflection/accessor.h>
 #include <tvm/ffi/reflection/registry.h>
+#include <tvm/ffi/string.h>
 
 #include <cstdlib>
 #include <iomanip>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace tvm {
 namespace ffi {
@@ -77,6 +80,10 @@ const char* DeviceTypeName(int device_type) {
       return "webgpu";
     case kDLHexagon:
       return "hexagon";
+    case kDLMAIA:
+      return "maia";
+    case kDLTrn:
+      return "trn";
     default:
       return "unknown";
   }
@@ -177,7 +184,8 @@ class ReprPrinter {
     }
     if (ti == TypeIndex::kTVMFFISmallStr) {
       String s = value.cast<String>();
-      return "\"" + std::string(s.data(), s.size()) + "\"";
+      String escaped = EscapeString(s);
+      return std::string(escaped.data(), escaped.size());
     }
     if (ti == TypeIndex::kTVMFFISmallBytes) {
       Bytes b = value.cast<Bytes>();
@@ -253,12 +261,15 @@ class ReprPrinter {
     std::ostringstream fields;
     bool first = true;
     bool has_fields = false;
+    std::unordered_set<std::string_view> seen_names;
     reflection::ForEachFieldInfo(type_info, [&](const TVMFFIFieldInfo* finfo) {
       if (finfo->flags & kTVMFFIFieldFlagBitMaskReprOff) return;
+      std::string_view name(finfo->name.data, finfo->name.size);
+      if (!seen_names.insert(name).second) return;  // skip duplicate inherited field
       has_fields = true;
       if (!first) fields << ", ";
       first = false;
-      fields << std::string_view(finfo->name.data, finfo->name.size) << "=";
+      fields << name << "=";
       reflection::FieldGetter getter(finfo);
       Any fv = getter(obj);
       fields << ReprOfAny(fv);
@@ -276,9 +287,7 @@ class ReprPrinter {
 // ---------- Built-in __ffi_repr__ functions ----------
 
 String ReprString(const details::StringObj* obj, const Function& fn_repr) {
-  std::ostringstream os;
-  os << "\"" << std::string_view(obj->data, obj->size) << "\"";
-  return String(os.str());
+  return EscapeString(String(obj->data, obj->size));
 }
 
 String ReprBytes(const details::BytesObj* obj, const Function& fn_repr) {
