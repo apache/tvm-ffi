@@ -162,6 +162,75 @@ class TestCxxKwOnly : public Object {
   TVM_FFI_DECLARE_OBJECT_INFO("testing.TestCxxKwOnly", TestCxxKwOnly, Object);
 };
 
+// Test: auto-generated __ffi_init__ with Init(false) and KwOnly(true) per-field.
+// No explicit refl::init<>() — the auto-init is generated in ObjectDef's destructor.
+class TestCxxAutoInitObj : public Object {
+ public:
+  int64_t a;  ///< init=True, positional (default)
+  int64_t b;  ///< init=False, has default
+  int64_t c;  ///< init=True, kw_only
+  int64_t d;  ///< init=True, positional, has default
+
+  static constexpr bool _type_mutable = true;
+  TVM_FFI_DECLARE_OBJECT_INFO("testing.TestCxxAutoInit", TestCxxAutoInitObj, Object);
+};
+
+// Test: auto-generated init with all fields init=True (no Init/KwOnly traits).
+class TestCxxAutoInitSimpleObj : public Object {
+ public:
+  int64_t x;
+  int64_t y;
+
+  static constexpr bool _type_mutable = true;
+  TVM_FFI_DECLARE_OBJECT_INFO("testing.TestCxxAutoInitSimple", TestCxxAutoInitSimpleObj, Object);
+};
+
+// Test: auto-generated init with all fields excluded from init.
+class TestCxxAutoInitAllInitOffObj : public Object {
+ public:
+  int64_t x = 7;     ///< init=False, has reflection default
+  int64_t y = 0;     ///< init=False, has reflection default
+  int64_t z = 1234;  ///< init=False, no reflection default (creator default is kept)
+
+  static constexpr bool _type_mutable = true;
+  TVM_FFI_DECLARE_OBJECT_INFO("testing.TestCxxAutoInitAllInitOff", TestCxxAutoInitAllInitOffObj,
+                              Object);
+};
+
+// Test: mixed positional + kw_only + defaults + init=False field.
+class TestCxxAutoInitKwOnlyDefaultsObj : public Object {
+ public:
+  int64_t p_required;  ///< init=True, positional, required
+  int64_t p_default;   ///< init=True, positional, default=11
+  int64_t k_required;  ///< init=True, kw_only, required
+  int64_t k_default;   ///< init=True, kw_only, default=22
+  int64_t hidden;      ///< init=False, default=33
+
+  static constexpr bool _type_mutable = true;
+  TVM_FFI_DECLARE_OBJECT_INFO("testing.TestCxxAutoInitKwOnlyDefaults",
+                              TestCxxAutoInitKwOnlyDefaultsObj, Object);
+};
+
+// Test: inheritance + auto-generated init.
+class TestCxxAutoInitParentObj : public Object {
+ public:
+  int64_t parent_required;
+  int64_t parent_default;
+
+  static constexpr bool _type_mutable = true;
+  static constexpr uint32_t _type_child_slots = 1;
+  TVM_FFI_DECLARE_OBJECT_INFO("testing.TestCxxAutoInitParent", TestCxxAutoInitParentObj, Object);
+};
+
+class TestCxxAutoInitChildObj : public TestCxxAutoInitParentObj {
+ public:
+  int64_t child_required;
+  int64_t child_kw_only;
+
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("testing.TestCxxAutoInitChild", TestCxxAutoInitChildObj,
+                                    TestCxxAutoInitParentObj);
+};
+
 class TestDeepCopyEdgesObj : public Object {
  public:
   Any v_any;
@@ -306,6 +375,43 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def_rw("y", &TestCxxKwOnly::y)
       .def_rw("z", &TestCxxKwOnly::z)
       .def_rw("w", &TestCxxKwOnly::w);
+
+  // No refl::init<>() — auto-generates __ffi_init__ in ObjectDef destructor.
+  refl::ObjectDef<TestCxxAutoInitObj>()
+      .def_rw("a", &TestCxxAutoInitObj::a)
+      .def_rw("b", &TestCxxAutoInitObj::b, refl::Init(false), refl::DefaultValue(int64_t{42}))
+      .def_rw("c", &TestCxxAutoInitObj::c, refl::KwOnly(true))
+      .def_rw("d", &TestCxxAutoInitObj::d, refl::DefaultValue(int64_t{99}));
+
+  refl::ObjectDef<TestCxxAutoInitSimpleObj>()
+      .def_rw("x", &TestCxxAutoInitSimpleObj::x)
+      .def_rw("y", &TestCxxAutoInitSimpleObj::y);
+
+  refl::ObjectDef<TestCxxAutoInitAllInitOffObj>()
+      .def_rw("x", &TestCxxAutoInitAllInitOffObj::x, refl::Init(false),
+              refl::DefaultValue(int64_t{7}))
+      .def_rw("y", &TestCxxAutoInitAllInitOffObj::y, refl::Init(false),
+              refl::DefaultValue(int64_t{9}))
+      .def_rw("z", &TestCxxAutoInitAllInitOffObj::z, refl::Init(false));
+
+  refl::ObjectDef<TestCxxAutoInitKwOnlyDefaultsObj>()
+      .def_rw("p_required", &TestCxxAutoInitKwOnlyDefaultsObj::p_required)
+      .def_rw("p_default", &TestCxxAutoInitKwOnlyDefaultsObj::p_default,
+              refl::DefaultValue(int64_t{11}))
+      .def_rw("k_required", &TestCxxAutoInitKwOnlyDefaultsObj::k_required, refl::KwOnly(true))
+      .def_rw("k_default", &TestCxxAutoInitKwOnlyDefaultsObj::k_default, refl::KwOnly(true),
+              refl::DefaultValue(int64_t{22}))
+      .def_rw("hidden", &TestCxxAutoInitKwOnlyDefaultsObj::hidden, refl::Init(false),
+              refl::DefaultValue(int64_t{33}));
+
+  refl::ObjectDef<TestCxxAutoInitParentObj>()
+      .def_rw("parent_required", &TestCxxAutoInitParentObj::parent_required)
+      .def_rw("parent_default", &TestCxxAutoInitParentObj::parent_default,
+              refl::DefaultValue(int64_t{5}));
+
+  refl::ObjectDef<TestCxxAutoInitChildObj>()
+      .def_rw("child_required", &TestCxxAutoInitChildObj::child_required)
+      .def_rw("child_kw_only", &TestCxxAutoInitChildObj::child_kw_only, refl::KwOnly(true));
 
   refl::ObjectDef<TestDeepCopyEdgesObj>()
       .def_rw("v_any", &TestDeepCopyEdgesObj::v_any)

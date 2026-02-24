@@ -62,6 +62,11 @@ ObjectRef GetMissingObject() {
   return missing_obj;
 }
 
+ObjectRef GetKwargsObject() {
+  static ObjectRef kwargs_obj(make_object<Object>());
+  return kwargs_obj;
+}
+
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::EnsureTypeAttrColumn("__any_hash__");
@@ -165,6 +170,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
              }
            })
       .def("ffi.GetInvalidObject", []() -> ObjectRef { return GetMissingObject(); })
+      .def("ffi.GetKwargsObject", []() -> ObjectRef { return GetKwargsObject(); })
       .def_packed("ffi.Dict",
                   [](ffi::PackedArgs args, Any* ret) {
                     TVM_FFI_ICHECK_EQ(args.size() % 2, 0);

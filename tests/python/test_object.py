@@ -149,9 +149,11 @@ def test_object_direct_init_disabled() -> None:
     with pytest.raises(TypeError, match="Cannot directly create UnregisteredObj instance"):
         UnregisteredObj()
 
-    # Registered class without __c_ffi_init__ should still raise
-    with pytest.raises(RuntimeError, match="__init__ method of this class is not implemented"):
-        tvm_ffi.testing.TestObjectBase()
+    # Registered class with auto-generated __ffi_init__ (all fields have defaults)
+    obj = tvm_ffi.testing.TestObjectBase()
+    assert obj.v_i64 == 10
+    assert obj.v_f64 == 10.0
+    assert obj.v_str == "hello"
 
     # Registered class with __c_ffi_init__ should work fine
     pair = tvm_ffi.testing.TestIntPair(3, 4)  # ty: ignore[too-many-positional-arguments]

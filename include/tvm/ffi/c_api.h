@@ -895,6 +895,24 @@ typedef enum {
    * By default this flag is off (meaning the field is included in hashing).
    */
   kTVMFFIFieldFlagBitMaskHashOff = 1 << 8,
+  /*!
+   * \brief The field is excluded from auto-generated ``__ffi_init__``.
+   *
+   * When set, the field will not appear as a parameter of the reflection-based
+   * auto-generated constructor.  The field must either have a default value
+   * or be initialized by the creator (default constructor / UnsafeInit).
+   * By default this flag is off (meaning the field is included in init).
+   */
+  kTVMFFIFieldFlagBitMaskInitOff = 1 << 9,
+  /*!
+   * \brief The field is keyword-only in the auto-generated ``__ffi_init__``.
+   *
+   * When set, the field can only be provided via the KWARGS calling convention
+   * (not as a positional argument) in the auto-generated constructor.
+   * This flag is only meaningful when kTVMFFIFieldFlagBitMaskInitOff is *not* set.
+   * By default this flag is off (meaning the field accepts positional arguments).
+   */
+  kTVMFFIFieldFlagBitMaskKwOnly = 1 << 10,
 #ifdef __cplusplus
 };
 #else

@@ -30,6 +30,7 @@
 #include <tvm/ffi/function.h>
 #include <tvm/ffi/function_details.h>
 #include <tvm/ffi/optional.h>
+#include <tvm/ffi/reflection/auto_init.h>
 #include <tvm/ffi/string.h>
 #include <tvm/ffi/type_traits.h>
 
@@ -307,6 +308,63 @@ class Hash : public InfoTrait {
 };
 
 /*!
+ * \brief InfoTrait to control whether a field participates in the auto-generated init.
+ *
+ * Usage: `refl::Init(false)` marks a field to be excluded from the auto-generated
+ * ``__ffi_init__`` constructor.  When excluded, the field must have a default value
+ * or be initialized by the creator.
+ */
+class Init : public InfoTrait {
+ public:
+  /*!
+   * \brief Constructor.
+   * \param include Whether the field should be included in the auto-generated init.
+   */
+  explicit Init(bool include) : include_(include) {}
+
+  /*!
+   * \brief Apply the init flag to the field info.
+   * \param info The field info.
+   */
+  TVM_FFI_INLINE void Apply(TVMFFIFieldInfo* info) const {
+    if (!include_) {
+      info->flags |= kTVMFFIFieldFlagBitMaskInitOff;
+    }
+  }
+
+ private:
+  bool include_;
+};
+
+/*!
+ * \brief InfoTrait to mark a field as keyword-only in the auto-generated init.
+ *
+ * Usage: `refl::KwOnly(true)` marks a field so it can only be provided via
+ * the KWARGS calling convention in the auto-generated ``__ffi_init__``.
+ */
+class KwOnly : public InfoTrait {
+ public:
+  /*!
+   * \brief Constructor.
+   * \param kw_only Whether the field is keyword-only.
+   */
+  explicit KwOnly(bool kw_only) : kw_only_(kw_only) {}
+
+  /*!
+   * \brief Apply the kw_only flag to the field info.
+   * \param info The field info.
+   */
+  TVM_FFI_INLINE void Apply(TVMFFIFieldInfo* info) const {
+    if (kw_only_) {
+      info->flags |= kTVMFFIFieldFlagBitMaskKwOnly;
+    }
+  }
+
+ private:
+  bool kw_only_;
+};
+
+/*!
  * \brief Get the byte offset of a class member field.
  *
  * \tparam The original class.
@@ -574,8 +632,11 @@ struct init {
 
 /*! \brief Well-known type attribute names used by the reflection system. */
 namespace type_attr {
+/*! \brief Method name for the auto-generated packed constructor. */
 inline constexpr const char* kInit = "__ffi_init__";
+/*! \brief Method name for the shallow-copy factory. */
 inline constexpr const char* kShallowCopy = "__ffi_shallow_copy__";
+/*! \brief Method name for the string representation. */
 inline constexpr const char* kRepr = "__ffi_repr__";
 }  // namespace type_attr
 
@@ -601,6 +662,26 @@ class ObjectDef : public ReflectionDefBase {
       : type_index_(Class::_GetOrAllocRuntimeTypeIndex()), type_key_(Class::_type_key) {
     RegisterExtraInfo(std::forward<ExtraArgs>(extra_args)...);
     AutoRegisterCopy();
+  }
+
+  /*! \brief Non-copyable / non-movable. */
+  ObjectDef(const ObjectDef&) = delete;
+  ObjectDef& operator=(const ObjectDef&) = delete;
+  ObjectDef(ObjectDef&&) = delete;
+  ObjectDef& operator=(ObjectDef&&) = delete;
+
+  /*!
+   * \brief Destructor.  When no explicit ``refl::init<>`` was registered,
+   * auto-generates a packed ``__ffi_init__`` from the reflected fields.
+   */
+  ~ObjectDef() noexcept(false) {
+    if (!has_explicit_init_) {
+      // Only auto-register if the type has a default creator.
+      const TVMFFITypeInfo* info = TVMFFIGetTypeInfo(type_index_);
+      if (info->metadata != nullptr && info->metadata->creator != nullptr) {
+        AutoRegisterInit();
+      }
+    }
   }
 
   /*!
@@ -702,6 +783,7 @@ class ObjectDef : public ReflectionDefBase {
    */
   template <typename... Args, typename... Extra>
   TVM_FFI_INLINE ObjectDef& def([[maybe_unused]] init<Args...> init_func, Extra&&... extra) {
+    has_explicit_init_ = true;
     RegisterMethod(kInitMethodName, true, &init<Args...>::template execute<Class>,
                    std::forward<Extra>(extra)...);
     return *this;
@@ -800,8 +882,24 @@ class ObjectDef : public ReflectionDefBase {
     TVM_FFI_CHECK_SAFE_CALL(TVMFFITypeRegisterMethod(type_index_, &info));
   }
 
+  /*! \brief Register the auto-generated packed ``__ffi_init__``. */
+  void AutoRegisterInit() {
+    Function auto_init_fn = MakeAutoInit(type_index_);
+    MethodInfoBuilder info;
+    info.name = TVMFFIByteArray{kInitMethodName, std::char_traits<char>::length(kInitMethodName)};
+    info.doc = TVMFFIByteArray{nullptr, 0};
+    info.flags = kTVMFFIFieldFlagBitMaskIsStaticMethod;
+    info.method = AnyView(auto_init_fn).CopyToTVMFFIAny();
+    info.metadata_.emplace_back("type_schema", details::TypeSchemaImpl<Function>::v());
+    info.metadata_.emplace_back("auto_init", true);
+    std::string metadata_str = Metadata::ToJSON(info.metadata_);
+    info.metadata = TVMFFIByteArray{metadata_str.c_str(), metadata_str.size()};
+    TVM_FFI_CHECK_SAFE_CALL(TVMFFITypeRegisterMethod(type_index_, &info));
+  }
+
   int32_t type_index_;
   const char* type_key_;
+  bool has_explicit_init_{false};
   static constexpr const char* kInitMethodName = type_attr::kInit;
 };
 

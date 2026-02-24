@@ -388,6 +388,7 @@ class OverloadObjectDef : private ObjectDef<Class> {
   template <typename... Args, typename... Extra>
   TVM_FFI_INLINE OverloadObjectDef& def([[maybe_unused]] init<Args...> init_func,
                                         Extra&&... extra) {
+    this->has_explicit_init_ = true;
     RegisterMethod(kInitMethodName, true, &init<Args...>::template execute<Class>,
                    std::forward<Extra>(extra)...);
     return *this;

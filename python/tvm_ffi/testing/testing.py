@@ -222,3 +222,69 @@ class _TestCxxKwOnly:
     y: int
     z: int
     w: int = 100
+
+
+@register_object("testing.TestCxxAutoInit")
+class _TestCxxAutoInit(Object):
+    """Test object with Init(false) on b and KwOnly(true) on c."""
+
+    __test__ = False
+
+    a: int
+    b: int
+    c: int
+    d: int
+
+
+@register_object("testing.TestCxxAutoInitSimple")
+class _TestCxxAutoInitSimple(Object):
+    """Test object with all fields positional (no Init/KwOnly traits)."""
+
+    __test__ = False
+
+    x: int
+    y: int
+
+
+@register_object("testing.TestCxxAutoInitAllInitOff")
+class _TestCxxAutoInitAllInitOff(Object):
+    """Test object with all fields excluded from auto-init (Init(false))."""
+
+    __test__ = False
+
+    x: int
+    y: int
+    z: int
+
+
+@register_object("testing.TestCxxAutoInitKwOnlyDefaults")
+class _TestCxxAutoInitKwOnlyDefaults(Object):
+    """Test object with mixed positional/kw-only/default/init=False fields."""
+
+    __test__ = False
+
+    p_required: int
+    p_default: int
+    k_required: int
+    k_default: int
+    hidden: int
+
+
+@register_object("testing.TestCxxAutoInitParent")
+class _TestCxxAutoInitParent(Object):
+    """Parent object for inheritance auto-init tests."""
+
+    __test__ = False
+
+    parent_required: int
+    parent_default: int
+
+
+@register_object("testing.TestCxxAutoInitChild")
+class _TestCxxAutoInitChild(_TestCxxAutoInitParent):
+    """Child object for inheritance auto-init tests."""
+
+    __test__ = False
+
+    child_required: int
+    child_kw_only: int
