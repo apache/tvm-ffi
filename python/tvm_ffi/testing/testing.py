@@ -186,6 +186,36 @@ class TestHash(Object):
     hash_ignored: int
 
 
+@register_object("testing.TestCustomHash")
+class TestCustomHash(Object):
+    """Test object with custom __ffi_hash__ hook (hashes only key)."""
+
+    __test__ = False
+
+    key: int
+    label: str
+
+
+@register_object("testing.TestCustomCompare")
+class TestCustomCompare(Object):
+    """Test object with custom __ffi_eq__/__ffi_compare__ hooks (compares only key)."""
+
+    __test__ = False
+
+    key: int
+    label: str
+
+
+@register_object("testing.TestEqWithoutHash")
+class TestEqWithoutHash(Object):
+    """Test object with __ffi_eq__ but no __ffi_hash__ (exercises hash guard)."""
+
+    __test__ = False
+
+    key: int
+    label: str
+
+
 @c_class("testing.TestCxxClassBase")
 class _TestCxxClassBase:
     v_i64: int

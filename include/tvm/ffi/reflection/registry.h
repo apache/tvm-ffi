@@ -638,6 +638,12 @@ inline constexpr const char* kInit = "__ffi_init__";
 inline constexpr const char* kShallowCopy = "__ffi_shallow_copy__";
 /*! \brief Method name for the string representation. */
 inline constexpr const char* kRepr = "__ffi_repr__";
+/*! \brief Type attribute for custom recursive hash. */
+inline constexpr const char* kHash = "__ffi_hash__";
+/*! \brief Type attribute for custom recursive equality. */
+inline constexpr const char* kEq = "__ffi_eq__";
+/*! \brief Type attribute for custom recursive three-way comparison. */
+inline constexpr const char* kCompare = "__ffi_compare__";
 }  // namespace type_attr
 
 /*!

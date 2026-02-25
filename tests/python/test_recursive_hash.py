@@ -21,6 +21,7 @@ from __future__ import annotations
 import math
 import struct
 import time
+from collections.abc import Callable
 
 import numpy as np
 import pytest
@@ -29,6 +30,9 @@ import tvm_ffi.testing
 from tvm_ffi._ffi_api import RecursiveEq, RecursiveHash
 from tvm_ffi.testing import (
     TestCompare,
+    TestCustomCompare,
+    TestCustomHash,
+    TestEqWithoutHash,
     TestHash,
     TestIntPair,
     _TestCxxClassDerived,
@@ -804,9 +808,9 @@ def test_depth_127_nested_arrays_allowed() -> None:
     RecursiveHash(_make_nested_singleton_array(127))
 
 
-def test_depth_128_nested_arrays_raises() -> None:
-    with pytest.raises(ValueError, match="maximum recursion depth"):
-        RecursiveHash(_make_nested_singleton_array(128))
+def test_depth_1000_nested_arrays_works() -> None:
+    """Deep graphs now succeed thanks to iterative (heap-based) stack."""
+    RecursiveHash(_make_nested_singleton_array(1000))
 
 
 # ---------------------------------------------------------------------------
@@ -875,3 +879,175 @@ def test_shared_dag_hash_scaling_not_exponential() -> None:
 
     # With memoization this ratio should stay close to 1x; 1.6x leaves buffer for noise.
     assert t19 <= t18 * 1.6, f"Unexpected super-linear scaling: d18={t18:.6f}s d19={t19:.6f}s"
+
+
+# ---------------------------------------------------------------------------
+# Custom __ffi_hash__ hook: TestCustomHash
+# ---------------------------------------------------------------------------
+
+
+def test_custom_hash_ignores_label() -> None:
+    """TestCustomHash hashes only `key`, ignoring `label`."""
+    a = TestCustomHash(42, "alpha")  # ty: ignore[too-many-positional-arguments]
+    b = TestCustomHash(42, "beta")  # ty: ignore[too-many-positional-arguments]
+    assert RecursiveHash(a) == RecursiveHash(b)
+
+
+def test_custom_hash_different_key() -> None:
+    a = TestCustomHash(1, "same")  # ty: ignore[too-many-positional-arguments]
+    b = TestCustomHash(2, "same")  # ty: ignore[too-many-positional-arguments]
+    assert RecursiveHash(a) != RecursiveHash(b)
+
+
+def test_custom_hash_in_container() -> None:
+    """Custom-hooked objects inside an Array."""
+    a = tvm_ffi.Array(
+        [
+            TestCustomHash(1, "x"),  # ty: ignore[too-many-positional-arguments]
+            TestCustomHash(2, "y"),  # ty: ignore[too-many-positional-arguments]
+        ]
+    )
+    b = tvm_ffi.Array(
+        [
+            TestCustomHash(1, "different"),  # ty: ignore[too-many-positional-arguments]
+            TestCustomHash(2, "labels"),  # ty: ignore[too-many-positional-arguments]
+        ]
+    )
+    assert RecursiveHash(a) == RecursiveHash(b)
+
+
+def test_custom_hash_consistency_with_eq() -> None:
+    """RecursiveEq(a,b) => RecursiveHash(a)==RecursiveHash(b) for TestCustomCompare."""
+    a = TestCustomCompare(42, "alpha")  # ty: ignore[too-many-positional-arguments]
+    b = TestCustomCompare(42, "beta")  # ty: ignore[too-many-positional-arguments]
+    assert RecursiveEq(a, b)
+    assert RecursiveHash(a) == RecursiveHash(b)
+
+
+# ---------------------------------------------------------------------------
+# Failing regression tests for Eq=>Hash invariant
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("key", [-7, -1, 0, 1, 7, 1024])
+@pytest.mark.parametrize("lhs_label,rhs_label", [("alpha", "beta"), ("x", "y"), ("foo", "bar")])
+def test_custom_compare_eq_implies_hash_same_direct(
+    key: int, lhs_label: str, rhs_label: str
+) -> None:
+    lhs = TestCustomCompare(key, lhs_label)  # ty: ignore[too-many-positional-arguments]
+    rhs = TestCustomCompare(key, rhs_label)  # ty: ignore[too-many-positional-arguments]
+    assert RecursiveEq(lhs, rhs)
+    assert RecursiveHash(lhs) == RecursiveHash(rhs)
+
+
+@pytest.mark.parametrize("key", [-3, -1, 0, 2, 11])
+@pytest.mark.parametrize(
+    "wrap",
+    [
+        lambda obj: tvm_ffi.Array([obj]),
+        lambda obj: tvm_ffi.List([obj]),
+        lambda obj: tvm_ffi.Array([0, obj, 1]),
+        lambda obj: tvm_ffi.List([0, obj, 1]),
+        lambda obj: tvm_ffi.Map({"k": obj}),
+        lambda obj: tvm_ffi.Dict({"k": obj}),
+        lambda obj: tvm_ffi.Array([tvm_ffi.Array([obj])]),
+        lambda obj: tvm_ffi.List([tvm_ffi.List([obj])]),
+    ],
+)
+def test_custom_compare_eq_implies_hash_same_in_wrappers(
+    key: int, wrap: Callable[[object], object]
+) -> None:
+    lhs_obj = TestCustomCompare(key, "left")  # ty: ignore[too-many-positional-arguments]
+    rhs_obj = TestCustomCompare(key, "right")  # ty: ignore[too-many-positional-arguments]
+    lhs = wrap(lhs_obj)
+    rhs = wrap(rhs_obj)
+    assert RecursiveEq(lhs, rhs)
+    assert RecursiveHash(lhs) == RecursiveHash(rhs)
+
+
+# ---------------------------------------------------------------------------
+# Guard: __ffi_eq__ without __ffi_hash__ must raise in RecursiveHash
+# ---------------------------------------------------------------------------
+
+
+def test_eq_without_hash_raises() -> None:
+    """RecursiveHash rejects types that define __ffi_eq__ but not __ffi_hash__."""
+    obj = TestEqWithoutHash(1, "hello")  # ty: ignore[too-many-positional-arguments]
+    with pytest.raises(ValueError, match="__ffi_eq__ or __ffi_compare__ but not __ffi_hash__"):
+        RecursiveHash(obj)
+
+
+def test_eq_without_hash_inside_container_raises() -> None:
+    """The guard also triggers when the object is nested inside a container."""
+    obj = TestEqWithoutHash(1, "hello")  # ty: ignore[too-many-positional-arguments]
+    arr = tvm_ffi.Array([obj])
+    with pytest.raises(ValueError, match="__ffi_eq__ or __ffi_compare__ but not __ffi_hash__"):
+        RecursiveHash(arr)
+
+
+def _make_list_cycle_root_single_node_two_fields() -> object:
+    node = tvm_ffi.List()
+    node.append(node)
+    node.append(node)
+    return node
+
+
+def _make_list_cycle_root_two_nodes_two_fields(edges: tuple[int, int, int, int]) -> object:
+    node0 = tvm_ffi.List()
+    node1 = tvm_ffi.List()
+    node0.append(node0 if edges[0] == 0 else node1)
+    node0.append(node0 if edges[1] == 0 else node1)
+    node1.append(node0 if edges[2] == 0 else node1)
+    node1.append(node0 if edges[3] == 0 else node1)
+    return node0
+
+
+def _make_dict_cycle_root_single_node_two_fields() -> object:
+    node = tvm_ffi.Dict()
+    node["x"] = node
+    node["y"] = node
+    return node
+
+
+def _make_dict_cycle_root_two_nodes_two_fields(edges: tuple[int, int, int, int]) -> object:
+    node0 = tvm_ffi.Dict()
+    node1 = tvm_ffi.Dict()
+    node0["x"] = node0 if edges[0] == 0 else node1
+    node0["y"] = node0 if edges[1] == 0 else node1
+    node1["x"] = node0 if edges[2] == 0 else node1
+    node1["y"] = node0 if edges[3] == 0 else node1
+    return node0
+
+
+_CYCLE_MISMATCH_EDGE_PATTERNS = [
+    (0, 1, 0, 0),
+    (0, 1, 0, 1),
+    (0, 1, 1, 0),
+    (0, 1, 1, 1),
+    (1, 0, 0, 0),
+    (1, 0, 0, 1),
+    (1, 0, 1, 0),
+    (1, 0, 1, 1),
+    (1, 1, 0, 0),
+    (1, 1, 0, 1),
+    (1, 1, 1, 0),
+    (1, 1, 1, 1),
+]
+
+
+@pytest.mark.parametrize("edges", _CYCLE_MISMATCH_EDGE_PATTERNS)
+def test_list_cycle_eq_raises_for_distinct_structures(edges: tuple[int, int, int, int]) -> None:
+    """RecursiveEq raises ValueError on distinct cyclic structures (Eq=>Hash invariant)."""
+    lhs = _make_list_cycle_root_single_node_two_fields()
+    rhs = _make_list_cycle_root_two_nodes_two_fields(edges)
+    with pytest.raises(ValueError, match="cyclic reference"):
+        RecursiveEq(lhs, rhs)
+
+
+@pytest.mark.parametrize("edges", _CYCLE_MISMATCH_EDGE_PATTERNS)
+def test_dict_cycle_eq_raises_for_distinct_structures(edges: tuple[int, int, int, int]) -> None:
+    """RecursiveEq raises ValueError on distinct cyclic structures (Eq=>Hash invariant)."""
+    lhs = _make_dict_cycle_root_single_node_two_fields()
+    rhs = _make_dict_cycle_root_two_nodes_two_fields(edges)
+    with pytest.raises(ValueError, match="cyclic reference"):
+        RecursiveEq(lhs, rhs)

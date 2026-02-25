@@ -306,6 +306,56 @@ class TestHash : public ObjectRef {
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(TestHash, ObjectRef, TestHashObj);
 };
 
+class TestCustomHashObj : public Object {
+ public:
+  int64_t key;
+  String label;
+
+  TestCustomHashObj() = default;
+  TestCustomHashObj(int64_t key, String label) : key(key), label(std::move(label)) {}
+
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("testing.TestCustomHash", TestCustomHashObj, Object);
+};
+
+class TestCustomHash : public ObjectRef {
+ public:
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(TestCustomHash, ObjectRef, TestCustomHashObj);
+};
+
+class TestCustomCompareObj : public Object {
+ public:
+  int64_t key;
+  String label;
+
+  TestCustomCompareObj() = default;
+  TestCustomCompareObj(int64_t key, String label) : key(key), label(std::move(label)) {}
+
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("testing.TestCustomCompare", TestCustomCompareObj, Object);
+};
+
+class TestCustomCompare : public ObjectRef {
+ public:
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(TestCustomCompare, ObjectRef, TestCustomCompareObj);
+};
+
+// Test object with __ffi_eq__ but deliberately no __ffi_hash__.
+// Used to verify the RecursiveHash guard that rejects eq-without-hash types.
+class TestEqWithoutHashObj : public Object {
+ public:
+  int64_t key;
+  String label;
+
+  TestEqWithoutHashObj() = default;
+  TestEqWithoutHashObj(int64_t key, String label) : key(key), label(std::move(label)) {}
+
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("testing.TestEqWithoutHash", TestEqWithoutHashObj, Object);
+};
+
+class TestEqWithoutHash : public ObjectRef {
+ public:
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(TestEqWithoutHash, ObjectRef, TestEqWithoutHashObj);
+};
+
 // NOLINTNEXTLINE(performance-unnecessary-value-param)
 TVM_FFI_NO_INLINE void TestRaiseError(String kind, String msg) {
   // keep name and no liner for testing backtrace
@@ -445,6 +495,21 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def_ro("key", &TestHashObj::key)
       .def_ro("name", &TestHashObj::name)
       .def_ro("hash_ignored", &TestHashObj::hash_ignored, refl::Hash(false));
+
+  refl::ObjectDef<TestCustomHashObj>()
+      .def(refl::init<int64_t, String>())
+      .def_ro("key", &TestCustomHashObj::key)
+      .def_ro("label", &TestCustomHashObj::label);
+
+  refl::ObjectDef<TestCustomCompareObj>()
+      .def(refl::init<int64_t, String>())
+      .def_ro("key", &TestCustomCompareObj::key)
+      .def_ro("label", &TestCustomCompareObj::label);
+
+  refl::ObjectDef<TestEqWithoutHashObj>()
+      .def(refl::init<int64_t, String>())
+      .def_ro("key", &TestEqWithoutHashObj::key)
+      .def_ro("label", &TestEqWithoutHashObj::label);
 
   refl::GlobalDef()
       .def("testing.test_raise_error", TestRaiseError)
@@ -728,6 +793,47 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("testing.schema_no_args_no_return", schema_test_impl::schema_no_args_no_return);
   TVMFFIEnvModRegisterSystemLibSymbol("__tvm_ffi_testing.add_one",
                                       reinterpret_cast<void*>(__add_one_c_symbol));
+}
+
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  // Register __ffi_hash__ for TestCustomHash: only hashes `key`, ignores `label`.
+  refl::TypeAttrDef<TestCustomHashObj>().def(
+      refl::type_attr::kHash, [](const Object* self, const Function& fn_hash) -> int64_t {
+        auto* obj = static_cast<const TestCustomHashObj*>(self);
+        return fn_hash(AnyView(obj->key)).cast<int64_t>();
+      });
+  // Register __ffi_hash__ for TestCustomCompare: only hashes `key`, consistent with eq/compare.
+  refl::TypeAttrDef<TestCustomCompareObj>().def(
+      refl::type_attr::kHash, [](const Object* self, const Function& fn_hash) -> int64_t {
+        auto* obj = static_cast<const TestCustomCompareObj*>(self);
+        return fn_hash(AnyView(obj->key)).cast<int64_t>();
+      });
+  // Register __ffi_eq__ for TestCustomCompare: compares only `key`.
+  refl::TypeAttrDef<TestCustomCompareObj>().def(
+      refl::type_attr::kEq,
+      [](const Object* lhs, const Object* rhs, const Function& fn_eq) -> bool {
+        auto* a = static_cast<const TestCustomCompareObj*>(lhs);
+        auto* b = static_cast<const TestCustomCompareObj*>(rhs);
+        return fn_eq(AnyView(a->key), AnyView(b->key)).cast<bool>();
+      });
+  // Register __ffi_compare__ for TestCustomCompare: three-way ordering on `key`.
+  refl::TypeAttrDef<TestCustomCompareObj>().def(
+      refl::type_attr::kCompare,
+      [](const Object* lhs, const Object* rhs, const Function& fn_cmp) -> int32_t {
+        auto* a = static_cast<const TestCustomCompareObj*>(lhs);
+        auto* b = static_cast<const TestCustomCompareObj*>(rhs);
+        return fn_cmp(AnyView(a->key), AnyView(b->key)).cast<int32_t>();
+      });
+  // Register __ffi_eq__ for TestEqWithoutHash: deliberately no __ffi_hash__.
+  // This exercises the RecursiveHash guard that rejects eq-without-hash types.
+  refl::TypeAttrDef<TestEqWithoutHashObj>().def(
+      refl::type_attr::kEq,
+      [](const Object* lhs, const Object* rhs, const Function& fn_eq) -> bool {
+        auto* a = static_cast<const TestEqWithoutHashObj*>(lhs);
+        auto* b = static_cast<const TestEqWithoutHashObj*>(rhs);
+        return fn_eq(AnyView(a->key), AnyView(b->key)).cast<bool>();
+      });
 }
 
 }  // namespace ffi

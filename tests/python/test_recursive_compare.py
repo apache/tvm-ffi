@@ -27,6 +27,8 @@ import tvm_ffi.testing
 from tvm_ffi._ffi_api import RecursiveEq, RecursiveGe, RecursiveGt, RecursiveLe, RecursiveLt
 from tvm_ffi.testing import (
     TestCompare,
+    TestCustomCompare,
+    TestEqWithoutHash,
     TestIntPair,
     _TestCxxClassDerived,
     _TestCxxClassDerivedDerived,
@@ -1102,22 +1104,22 @@ def test_cyclic_list_same_pointer_eq() -> None:
 
 
 def test_cyclic_list_raises() -> None:
-    """Two distinct cyclic lists hit the depth guard and raise ValueError."""
+    """Two distinct cyclic lists raise ValueError (cycles cannot satisfy Eq=>Hash)."""
     a = tvm_ffi.List()
     b = tvm_ffi.List()
     a.append(a)
     b.append(b)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="cyclic reference"):
         RecursiveEq(a, b)
 
 
 def test_cyclic_dict_raises() -> None:
-    """Two distinct cyclic dicts hit the depth guard and raise ValueError."""
+    """Two distinct cyclic dicts raise ValueError (cycles cannot satisfy Eq=>Hash)."""
     a = tvm_ffi.Dict()
     b = tvm_ffi.Dict()
     a["self"] = a
     b["self"] = b
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="cyclic reference"):
         RecursiveEq(a, b)
 
 
@@ -1148,3 +1150,107 @@ def test_ordering_laws_on_int_pairs() -> None:
             assert eq_ab == (le_ab and ge_ab), (
                 f"Consistency violated for ({a},{b}): Eq={eq_ab}, Le={le_ab}, Ge={ge_ab}"
             )
+
+
+# ---------------------------------------------------------------------------
+# Deep nesting (iterative stack handles depth > 128)
+# ---------------------------------------------------------------------------
+
+
+def _make_nested_singleton_array(depth: int) -> object:
+    value: object = 0
+    for _ in range(depth):
+        value = tvm_ffi.Array([value])
+    return value
+
+
+def test_depth_1000_nested_eq() -> None:
+    """Deep nested arrays compare correctly with iterative stack."""
+    a = _make_nested_singleton_array(1000)
+    b = _make_nested_singleton_array(1000)
+    assert RecursiveEq(a, b)
+
+
+# ---------------------------------------------------------------------------
+# Custom __ffi_eq__ / __ffi_compare__ hooks: TestCustomCompare
+# ---------------------------------------------------------------------------
+
+
+def test_custom_eq_ignores_label() -> None:
+    """TestCustomCompare.__ffi_eq__ compares only `key`, ignoring `label`."""
+    a = TestCustomCompare(42, "alpha")  # ty: ignore[too-many-positional-arguments]
+    b = TestCustomCompare(42, "beta")  # ty: ignore[too-many-positional-arguments]
+    assert RecursiveEq(a, b)
+
+
+def test_custom_eq_different_key() -> None:
+    a = TestCustomCompare(1, "same")  # ty: ignore[too-many-positional-arguments]
+    b = TestCustomCompare(2, "same")  # ty: ignore[too-many-positional-arguments]
+    assert not RecursiveEq(a, b)
+
+
+def test_custom_compare_ordering() -> None:
+    """Ordering uses __ffi_compare__ hook (key only)."""
+    a = TestCustomCompare(1, "zzz")  # ty: ignore[too-many-positional-arguments]
+    b = TestCustomCompare(2, "aaa")  # ty: ignore[too-many-positional-arguments]
+    assert RecursiveLt(a, b)
+    assert not RecursiveLt(b, a)
+
+
+def test_custom_eq_in_container() -> None:
+    """Custom-hooked objects inside an Array."""
+    a = tvm_ffi.Array(
+        [
+            TestCustomCompare(1, "x"),  # ty: ignore[too-many-positional-arguments]
+            TestCustomCompare(2, "y"),  # ty: ignore[too-many-positional-arguments]
+        ]
+    )
+    b = tvm_ffi.Array(
+        [
+            TestCustomCompare(1, "different"),  # ty: ignore[too-many-positional-arguments]
+            TestCustomCompare(2, "labels"),  # ty: ignore[too-many-positional-arguments]
+        ]
+    )
+    assert RecursiveEq(a, b)
+
+
+# ---------------------------------------------------------------------------
+# __ffi_eq__-only types: eq and ordering may diverge (no __ffi_compare__)
+# ---------------------------------------------------------------------------
+
+
+def test_eq_only_type_eq_uses_hook() -> None:
+    """__ffi_eq__-only type: RecursiveEq uses the hook (compares only key)."""
+    a = TestEqWithoutHash(42, "alpha")  # ty: ignore[too-many-positional-arguments]
+    b = TestEqWithoutHash(42, "beta")  # ty: ignore[too-many-positional-arguments]
+    assert RecursiveEq(a, b)
+
+
+def test_eq_only_type_ordering_uses_reflection() -> None:
+    """__ffi_eq__-only type: ordering falls back to field-by-field reflection.
+
+    Without __ffi_compare__, ordering sees the differing `label` field even
+    though __ffi_eq__ ignores it.  This is expected — register __ffi_compare__
+    for consistent ordering semantics.
+    """
+    a = TestEqWithoutHash(42, "alpha")  # ty: ignore[too-many-positional-arguments]
+    b = TestEqWithoutHash(42, "beta")  # ty: ignore[too-many-positional-arguments]
+    # Eq says equal (hook), but ordering sees label difference (reflection)
+    assert RecursiveEq(a, b)
+    assert RecursiveLt(a, b)  # "alpha" < "beta"
+
+
+# ---------------------------------------------------------------------------
+# __ffi_compare__-equipped types: ordering consistency guaranteed
+# ---------------------------------------------------------------------------
+
+
+def test_custom_compare_ordering_consistency() -> None:
+    """TestCustomCompare has __ffi_compare__: Eq(a,b) implies not Lt/Gt and both Le/Ge."""
+    a = TestCustomCompare(42, "alpha")  # ty: ignore[too-many-positional-arguments]
+    b = TestCustomCompare(42, "beta")  # ty: ignore[too-many-positional-arguments]
+    assert RecursiveEq(a, b)
+    assert not RecursiveLt(a, b)
+    assert not RecursiveGt(a, b)
+    assert RecursiveLe(a, b)
+    assert RecursiveGe(a, b)
