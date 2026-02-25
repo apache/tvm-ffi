@@ -103,7 +103,8 @@ inline size_t GetDataSize(size_t numel, DLDataType dtype) {
     return numel;
   }
   // for other sub-byte types, packing is preferred
-  return (numel * dtype.bits * dtype.lanes + 7) / 8;
+  // Use uint64_t to avoid overflow on 32-bit platforms (WASM) for large allocations.
+  return static_cast<size_t>((static_cast<uint64_t>(numel) * dtype.bits * dtype.lanes + 7) / 8);
 }
 
 /*!
