@@ -68,7 +68,6 @@ set(_tvm_ffi_objs_sources
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/tensor.cc"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/dtype.cc"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/container.cc"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/auto_init.cc"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/init_once.cc"
 )
 
@@ -78,10 +77,7 @@ set(_tvm_ffi_extra_objs_sources
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/extra/json_parser.cc"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/extra/json_writer.cc"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/extra/serialization.cc"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/extra/deep_copy.cc"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/extra/repr_print.cc"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/extra/recursive_compare.cc"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/extra/recursive_hash.cc"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/extra/dataclass.cc"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/extra/reflection_extra.cc"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/extra/module.cc"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/extra/library_module.cc"

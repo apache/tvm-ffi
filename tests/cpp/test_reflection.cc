@@ -331,9 +331,9 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::ObjectDef<TestObjWithFactory>()
       .def_ro("items", &TestObjWithFactory::items,
-              refl::DefaultFactory(
+              refl::default_factory(
                   Function::FromTyped([]() -> Array<ObjectRef> { return Array<ObjectRef>(); })))
-      .def_ro("count", &TestObjWithFactory::count, refl::DefaultValue(static_cast<int64_t>(0)));
+      .def_ro("count", &TestObjWithFactory::count, refl::default_(static_cast<int64_t>(0)));
 }
 
 struct TestObjWithAny : public Object {
@@ -439,7 +439,7 @@ TEST(Reflection, DefaultFactoryNotCalledWhenProvided) {
 }
 
 // ---------------------------------------------------------------------------
-// Tests for auto-generated __ffi_init__ with Init(false) / KwOnly(true)
+// Tests for auto-generated __ffi_init__ with init(false) / KwOnly(true)
 // ---------------------------------------------------------------------------
 
 struct TestAutoInitObj : public Object {
@@ -457,9 +457,9 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   // No refl::init<>() — auto-generates __ffi_init__
   refl::ObjectDef<TestAutoInitObj>()
       .def_rw("a", &TestAutoInitObj::a)
-      .def_rw("b", &TestAutoInitObj::b, refl::Init(false), refl::DefaultValue(int64_t{42}))
-      .def_rw("c", &TestAutoInitObj::c, refl::KwOnly(true))
-      .def_rw("d", &TestAutoInitObj::d, refl::DefaultValue(int64_t{99}));
+      .def_rw("b", &TestAutoInitObj::b, refl::init(false), refl::default_(int64_t{42}))
+      .def_rw("c", &TestAutoInitObj::c, refl::kw_only(true))
+      .def_rw("d", &TestAutoInitObj::d, refl::default_(int64_t{99}));
 }
 
 TEST(Reflection, AutoInitPositional) {

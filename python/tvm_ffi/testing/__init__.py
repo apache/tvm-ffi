@@ -39,6 +39,7 @@ from .testing import (
     _TestCxxClassDerivedDerived,
     _TestCxxInitSubset,
     _TestCxxKwOnly,
+    _TestCxxNoAutoInit,
     add_one,
     create_object,
     make_unregistered_object,

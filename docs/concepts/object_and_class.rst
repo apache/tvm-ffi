@@ -393,7 +393,7 @@ to register reflection metadata for object type ``T``:
    refl::ObjectDef<MyObjectObj>()
        .def_rw("value", &MyObjectObj::value,
                "The numeric value",                    // docstring
-               refl::DefaultValue(0),                  // default value
+               refl::default_(0),                       // default value
                refl::Metadata{{"min", 0}, {"max", 100}})  // custom metadata
        .def("add_to_value", &MyObjectObj::AddToValue,
             "Add a value to the object's value field");

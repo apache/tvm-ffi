@@ -30,7 +30,6 @@
 #include <tvm/ffi/function.h>
 #include <tvm/ffi/function_details.h>
 #include <tvm/ffi/optional.h>
-#include <tvm/ffi/reflection/auto_init.h>
 #include <tvm/ffi/string.h>
 #include <tvm/ffi/type_traits.h>
 
@@ -161,6 +160,11 @@ class DefaultValue : public InfoTrait {
   Any value_;
 };
 
+/*! \brief Lowercase alias for DefaultValue, mirrors Python ``default``. */
+class default_ : public DefaultValue {
+  using DefaultValue::DefaultValue;
+};
+
 /*!
  * \brief Trait that can be used to set field default factory.
  *
@@ -188,6 +192,11 @@ class DefaultFactory : public InfoTrait {
 
  private:
   Function factory_;
+};
+
+/*! \brief Lowercase alias for DefaultFactory, mirrors Python ``default_factory``. */
+class default_factory : public DefaultFactory {
+  using DefaultFactory::DefaultFactory;
 };
 
 /*!
@@ -227,15 +236,15 @@ class AttachFieldFlag : public InfoTrait {
 /*!
  * \brief Trait that controls whether a field appears in repr output.
  *
- * By default, all fields appear in repr. Use `Repr(false)` to exclude a field.
+ * By default, all fields appear in repr. Use `repr(false)` to exclude a field.
  */
-class Repr : public InfoTrait {
+class repr : public InfoTrait {
  public:
   /*!
    * \brief Constructor.
    * \param show Whether the field should appear in repr output.
    */
-  explicit Repr(bool show) : show_(show) {}
+  explicit repr(bool show) : show_(show) {}
 
   /*!
    * \brief Apply the repr flag to the field info.
@@ -254,16 +263,16 @@ class Repr : public InfoTrait {
 /*!
  * \brief InfoTrait to control whether a field participates in recursive comparison.
  *
- * Usage: `refl::Compare(false)` marks a field to be excluded from
+ * Usage: `refl::compare(false)` marks a field to be excluded from
  * RecursiveEq/RecursiveLt/etc.
  */
-class Compare : public InfoTrait {
+class compare : public InfoTrait {
  public:
   /*!
    * \brief Constructor.
    * \param include Whether the field should participate in comparison.
    */
-  explicit Compare(bool include) : include_(include) {}
+  explicit compare(bool include) : include_(include) {}
 
   /*!
    * \brief Apply the compare flag to the field info.
@@ -282,16 +291,16 @@ class Compare : public InfoTrait {
 /*!
  * \brief InfoTrait to control whether a field participates in recursive hashing.
  *
- * Usage: `refl::Hash(false)` marks a field to be excluded from
+ * Usage: `refl::hash(false)` marks a field to be excluded from
  * RecursiveHash.
  */
-class Hash : public InfoTrait {
+class hash : public InfoTrait {
  public:
   /*!
    * \brief Constructor.
    * \param include Whether the field should participate in hashing.
    */
-  explicit Hash(bool include) : include_(include) {}
+  explicit hash(bool include) : include_(include) {}
 
   /*!
    * \brief Apply the hash flag to the field info.
@@ -307,48 +316,23 @@ class Hash : public InfoTrait {
   bool include_;
 };
 
-/*!
- * \brief InfoTrait to control whether a field participates in the auto-generated init.
- *
- * Usage: `refl::Init(false)` marks a field to be excluded from the auto-generated
- * ``__ffi_init__`` constructor.  When excluded, the field must have a default value
- * or be initialized by the creator.
- */
-class Init : public InfoTrait {
- public:
-  /*!
-   * \brief Constructor.
-   * \param include Whether the field should be included in the auto-generated init.
-   */
-  explicit Init(bool include) : include_(include) {}
-
-  /*!
-   * \brief Apply the init flag to the field info.
-   * \param info The field info.
-   */
-  TVM_FFI_INLINE void Apply(TVMFFIFieldInfo* info) const {
-    if (!include_) {
-      info->flags |= kTVMFFIFieldFlagBitMaskInitOff;
-    }
-  }
-
- private:
-  bool include_;
-};
+// Forward-declare `init` so that the deduction guide can reference it.
+template <typename... Args>
+struct init;
 
 /*!
  * \brief InfoTrait to mark a field as keyword-only in the auto-generated init.
  *
- * Usage: `refl::KwOnly(true)` marks a field so it can only be provided via
+ * Usage: `refl::kw_only(true)` marks a field so it can only be provided via
  * the KWARGS calling convention in the auto-generated ``__ffi_init__``.
  */
-class KwOnly : public InfoTrait {
+class kw_only : public InfoTrait {
  public:
   /*!
    * \brief Constructor.
-   * \param kw_only Whether the field is keyword-only.
+   * \param is_kw_only Whether the field is keyword-only.
    */
-  explicit KwOnly(bool kw_only) : kw_only_(kw_only) {}
+  explicit kw_only(bool is_kw_only) : kw_only_(is_kw_only) {}
 
   /*!
    * \brief Apply the kw_only flag to the field info.
@@ -578,31 +562,36 @@ class GlobalDef : public ReflectionDefBase {
 };
 
 /*!
- * \brief Helper class to register a constructor method for object types.
- *
- * This helper is used with `ObjectDef::def()` to register an `__init__` method
- * that constructs an object instance with the specified argument types.
+ * \brief Helper class to register a constructor method for object types,
+ * and (in its zero-argument specialization) an InfoTrait to control
+ * whether a field participates in the auto-generated init.
  *
  * \tparam Args The argument types for the constructor.
  *
- * Example usage:
+ * When used with one or more template arguments, ``init<Args...>`` is passed
+ * to ``ObjectDef::def()`` to register an ``__init__`` method that constructs
+ * an object with the specified argument types:
  *
  * \code{.cpp}
- * class ExampleObject : public Object {
- *  public:
- *   int64_t v_i64;
- *   int32_t v_i32;
- *
- *   ExampleObject(int64_t v_i64, int32_t v_i32) : v_i64(v_i64), v_i32(v_i32) {}
- *   TVM_FFI_DECLARE_OBJECT_INFO("example.ExampleObject", ExampleObject, Object);
- * };
- *
- * // Register the constructor
  * refl::ObjectDef<ExampleObject>()
  *     .def(refl::init<int64_t, int32_t>());
  * \endcode
  *
- * \note The object type is automatically deduced from the `ObjectDef` context.
+ * When used without template arguments (via CTAD), ``init(false)`` marks a
+ * field to be excluded from the auto-generated ``__ffi_init__`` constructor,
+ * or suppresses auto-init entirely when passed to ``ObjectDef``'s constructor:
+ *
+ * \code{.cpp}
+ * // Per-field opt-out:
+ * refl::ObjectDef<Foo>()
+ *     .def_rw("hidden", &Foo::hidden, refl::init(false), refl::default_(42));
+ *
+ * // Class-level opt-out:
+ * refl::ObjectDef<Bar>(refl::init(false))
+ *     .def_rw("x", &Bar::x);
+ * \endcode
+ *
+ * \note The object type is automatically deduced from the ``ObjectDef`` context.
  */
 template <typename... Args>
 struct init {
@@ -629,6 +618,62 @@ struct init {
     return ObjectRef(ffi::make_object<Class>(std::forward<Args>(args)...));
   }
 };
+
+/*!
+ * \brief Specialization of ``init`` for zero template arguments.
+ *
+ * This specialization doubles as an ``InfoTrait`` that controls whether a field
+ * participates in the auto-generated ``__ffi_init__``.
+ *
+ * - ``init(false)`` as a field trait: excludes the field from the auto-generated init.
+ * - ``init(false)`` as an ``ObjectDef`` constructor argument: suppresses auto-init entirely.
+ * - ``init<>()`` passed to ``ObjectDef::def()``: registers a zero-argument constructor.
+ */
+template <>
+struct init<> : public InfoTrait {
+  // Allow ObjectDef to access the execute function and include_ flag.
+  template <typename Class>
+  friend class ObjectDef;
+  template <typename T>
+  friend class OverloadObjectDef;
+
+  /*!
+   * \brief Default constructor (for zero-argument constructor registration).
+   */
+  constexpr init() noexcept = default;
+
+  /*!
+   * \brief Constructor for field/class-level init control.
+   * \param include Whether the field should be included in the auto-generated init.
+   */
+  explicit init(bool include) : include_(include) {}
+
+  /*!
+   * \brief Apply the init flag to the field info.
+   * \param info The field info.
+   */
+  TVM_FFI_INLINE void Apply(TVMFFIFieldInfo* info) const {
+    if (!include_) {
+      info->flags |= kTVMFFIFieldFlagBitMaskInitOff;
+    }
+  }
+
+ private:
+  bool include_ = true;
+
+  /*!
+   * \brief Execute the zero-argument constructor.
+   * \tparam Class The class type.
+   * \return The constructed object wrapped in an `ObjectRef`.
+   */
+  template <typename Class>
+  static inline ObjectRef execute() {
+    return ObjectRef(ffi::make_object<Class>());
+  }
+};
+
+/*! \brief CTAD deduction guide: ``init(false)`` deduces to ``init<>``. */
+init(bool) -> init<>;
 
 /*! \brief Well-known type attribute names used by the reflection system. */
 namespace type_attr {
@@ -666,6 +711,7 @@ class ObjectDef : public ReflectionDefBase {
   template <typename... ExtraArgs>
   explicit ObjectDef(ExtraArgs&&... extra_args)
       : type_index_(Class::_GetOrAllocRuntimeTypeIndex()), type_key_(Class::_type_key) {
+    (MaybeSuppressAutoInit(extra_args), ...);
     RegisterExtraInfo(std::forward<ExtraArgs>(extra_args)...);
     AutoRegisterCopy();
   }
@@ -799,6 +845,16 @@ class ObjectDef : public ReflectionDefBase {
   template <typename T>
   friend class OverloadObjectDef;
 
+  /*! \brief If \p value is init(false), suppress auto-generated __ffi_init__. */
+  template <typename T>
+  void MaybeSuppressAutoInit(const T& value) {
+    if constexpr (std::is_same_v<std::decay_t<T>, init<>>) {
+      if (!value.include_) {
+        has_explicit_init_ = true;
+      }
+    }
+  }
+
   /*! \brief Shallow-copy \p self via the C++ copy constructor. */
   static ObjectRef ShallowCopy(const Class* self) {
     return ObjectRef(ffi::make_object<Class>(*self));
@@ -889,19 +945,7 @@ class ObjectDef : public ReflectionDefBase {
   }
 
   /*! \brief Register the auto-generated packed ``__ffi_init__``. */
-  void AutoRegisterInit() {
-    Function auto_init_fn = MakeAutoInit(type_index_);
-    MethodInfoBuilder info;
-    info.name = TVMFFIByteArray{kInitMethodName, std::char_traits<char>::length(kInitMethodName)};
-    info.doc = TVMFFIByteArray{nullptr, 0};
-    info.flags = kTVMFFIFieldFlagBitMaskIsStaticMethod;
-    info.method = AnyView(auto_init_fn).CopyToTVMFFIAny();
-    info.metadata_.emplace_back("type_schema", details::TypeSchemaImpl<Function>::v());
-    info.metadata_.emplace_back("auto_init", true);
-    std::string metadata_str = Metadata::ToJSON(info.metadata_);
-    info.metadata = TVMFFIByteArray{metadata_str.c_str(), metadata_str.size()};
-    TVM_FFI_CHECK_SAFE_CALL(TVMFFITypeRegisterMethod(type_index_, &info));
-  }
+  void AutoRegisterInit() { TVM_FFI_CHECK_SAFE_CALL(TVMFFITypeInfoAddInit(type_index_)); }
 
   int32_t type_index_;
   const char* type_key_;

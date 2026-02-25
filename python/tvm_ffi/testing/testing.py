@@ -256,7 +256,7 @@ class _TestCxxKwOnly:
 
 @register_object("testing.TestCxxAutoInit")
 class _TestCxxAutoInit(Object):
-    """Test object with Init(false) on b and KwOnly(true) on c."""
+    """Test object with init(false) on b and KwOnly(true) on c."""
 
     __test__ = False
 
@@ -268,7 +268,7 @@ class _TestCxxAutoInit(Object):
 
 @register_object("testing.TestCxxAutoInitSimple")
 class _TestCxxAutoInitSimple(Object):
-    """Test object with all fields positional (no Init/KwOnly traits)."""
+    """Test object with all fields positional (no init/KwOnly traits)."""
 
     __test__ = False
 
@@ -278,7 +278,7 @@ class _TestCxxAutoInitSimple(Object):
 
 @register_object("testing.TestCxxAutoInitAllInitOff")
 class _TestCxxAutoInitAllInitOff(Object):
-    """Test object with all fields excluded from auto-init (Init(false))."""
+    """Test object with all fields excluded from auto-init (init(false))."""
 
     __test__ = False
 
@@ -298,6 +298,16 @@ class _TestCxxAutoInitKwOnlyDefaults(Object):
     k_required: int
     k_default: int
     hidden: int
+
+
+@register_object("testing.TestCxxNoAutoInit")
+class _TestCxxNoAutoInit(Object):
+    """Test object with init(false) at class level — no __ffi_init__ generated."""
+
+    __test__ = False
+
+    x: int
+    y: int
 
 
 @register_object("testing.TestCxxAutoInitParent")

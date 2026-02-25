@@ -339,7 +339,7 @@ class TestDeepCopy:
 
 
 # --------------------------------------------------------------------------- #
-#  Deep copy branch coverage (C++ deep_copy.cc)
+#  Deep copy branch coverage (C++ dataclass.cc)
 # --------------------------------------------------------------------------- #
 _deep_copy = tvm_ffi.get_global_func("ffi.DeepCopy")
 
@@ -773,6 +773,34 @@ class TestDeepCopyBranches:
         assert isinstance(deep_key, tvm_ffi.Dict)
         assert deep_key["self"].same_as(deep_map)
 
+    def test_cycle_array_root_dict_contains_root_as_key(self) -> None:
+        """Array root with Dict child using the root as key should fix key to copied root."""
+        d = tvm_ffi.Dict()
+        root = tvm_ffi.Array([d])
+        d[root] = 1
+
+        deep_root = copy.deepcopy(root)
+        deep_dict = deep_root[0]
+        deep_key = next(iter(deep_dict.keys()))
+
+        assert not root.same_as(deep_root)
+        assert deep_key.same_as(deep_root)
+        assert not deep_key.same_as(root)
+
+    def test_cycle_map_root_dict_contains_root_as_key(self) -> None:
+        """Map root with Dict child using the root as key should fix key to copied root."""
+        d = tvm_ffi.Dict()
+        root = tvm_ffi.Map({"d": d})
+        d[root] = 1
+
+        deep_root = copy.deepcopy(root)
+        deep_dict = deep_root["d"]
+        deep_key = next(iter(deep_dict.keys()))
+
+        assert not root.same_as(deep_root)
+        assert deep_key.same_as(deep_root)
+        assert not deep_key.same_as(root)
+
     # --- Python deepcopy protocol consistency for immutable Shape ---
 
     def test_shape_root_python_deepcopy_matches_ffi_deepcopy(self) -> None:
@@ -791,6 +819,73 @@ class TestDeepCopyBranches:
         copied = copy.deepcopy(payload)
         assert copied[0] == s
         assert copied[1]["shape"] == s  # ty: ignore[invalid-argument-type]
+
+    # --- Cycle fixup: immutable container → reflected object back-reference ---
+
+    def test_cycle_array_root_object_backreference(self) -> None:
+        """Array A → Object X, X.v_array = A.  Deep copy from A."""
+        obj = tvm_ffi.testing.create_object(
+            "testing.TestObjectDerived",
+            v_i64=42,
+            v_map=tvm_ffi.Map({}),
+            v_array=tvm_ffi.Array([]),
+        )
+        arr = tvm_ffi.Array([obj])
+        obj.v_array = arr  # ty: ignore[unresolved-attribute]
+
+        arr_deep = _deep_copy(arr)
+
+        assert not arr.same_as(arr_deep)
+        obj_deep = arr_deep[0]
+        assert not obj.same_as(obj_deep)
+        assert obj_deep.v_i64 == 42
+        assert not obj_deep.v_array.same_as(arr)
+        assert obj_deep.v_array.same_as(arr_deep)
+
+    def test_cycle_map_root_object_backreference(self) -> None:
+        """Map M → Object X, X.v_map = M.  Deep copy from M."""
+        obj = tvm_ffi.testing.create_object(
+            "testing.TestObjectDerived",
+            v_i64=7,
+            v_map=tvm_ffi.Map({}),
+            v_array=tvm_ffi.Array([]),
+        )
+        m = tvm_ffi.Map({"key": obj})
+        obj.v_map = m  # ty: ignore[unresolved-attribute]
+
+        m_deep = _deep_copy(m)
+
+        assert not m.same_as(m_deep)
+        obj_deep = m_deep["key"]
+        assert not obj.same_as(obj_deep)
+        assert obj_deep.v_i64 == 7
+        assert not obj_deep.v_map.same_as(m)
+        assert obj_deep.v_map.same_as(m_deep)
+
+    def test_cycle_nested_array_object_array(self) -> None:
+        """Array → Object → Array → Object → back to root Array."""
+        inner = tvm_ffi.testing.create_object(
+            "testing.TestObjectDerived",
+            v_i64=1,
+            v_map=tvm_ffi.Map({}),
+            v_array=tvm_ffi.Array([]),
+        )
+        outer = tvm_ffi.testing.create_object(
+            "testing.TestObjectDerived",
+            v_i64=2,
+            v_map=tvm_ffi.Map({}),
+            v_array=tvm_ffi.Array([inner]),
+        )
+        root_arr = tvm_ffi.Array([outer])
+        inner.v_array = root_arr  # ty: ignore[unresolved-attribute]
+
+        root_deep = _deep_copy(root_arr)
+
+        assert not root_arr.same_as(root_deep)
+        outer_deep = root_deep[0]
+        inner_deep = outer_deep.v_array[0]
+        assert not inner_deep.v_array.same_as(root_arr)
+        assert inner_deep.v_array.same_as(root_deep)
 
 
 # --------------------------------------------------------------------------- #

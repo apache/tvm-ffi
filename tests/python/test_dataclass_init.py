@@ -43,6 +43,7 @@ from tvm_ffi.testing import (
     _TestCxxAutoInitKwOnlyDefaults,
     _TestCxxAutoInitParent,
     _TestCxxAutoInitSimple,
+    _TestCxxNoAutoInit,
 )
 
 
@@ -875,3 +876,26 @@ class TestAutoInitLowLevelKwOnlyDefaults:
         assert obj.k_required == 30
         assert obj.k_default == 40
         assert obj.hidden == 33
+
+
+class TestClassLevelInitFalse:
+    """init(false) passed to ObjectDef constructor suppresses __ffi_init__."""
+
+    def test_no_ffi_init_method(self) -> None:
+        type_info = getattr(_TestCxxNoAutoInit, "__tvm_ffi_type_info__")
+        method_names = [m.name for m in type_info.methods]
+        assert "__ffi_init__" not in method_names
+
+    def test_has_fields(self) -> None:
+        type_info = getattr(_TestCxxNoAutoInit, "__tvm_ffi_type_info__")
+        field_names = [f.name for f in type_info.fields]
+        assert field_names == ["x", "y"]
+
+    def test_direct_construction_raises(self) -> None:
+        with pytest.raises(RuntimeError, match="not implemented"):
+            _TestCxxNoAutoInit(1, 2)  # ty: ignore[too-many-positional-arguments]
+
+    def test_has_shallow_copy(self) -> None:
+        type_info = getattr(_TestCxxNoAutoInit, "__tvm_ffi_type_info__")
+        method_names = [m.name for m in type_info.methods]
+        assert "__ffi_shallow_copy__" in method_names
