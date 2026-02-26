@@ -200,19 +200,17 @@ inline ResultType SetKernelMaxDynamicSharedMem(KernelHandle kernel, int shmem,
  * \return Result code.
  */
 inline ResultType LaunchKernelEx(KernelHandle kernel, void** args, const LaunchConfig& config) {
-  // The underlying CUDA APIs take a pointer to config but do not modify it
-  auto* mutable_config = const_cast<LaunchConfig*>(&config);
 #if TVM_FFI_CUBIN_LAUNCHER_USE_DRIVER_API
-  return cuLaunchKernelEx(mutable_config, reinterpret_cast<CUfunction>(kernel), args, nullptr);
+  return cuLaunchKernelEx(&config, reinterpret_cast<CUfunction>(kernel), args, nullptr);
 #else
-  return cudaLaunchKernelExC(mutable_config, reinterpret_cast<const void*>(kernel), args);
+  return cudaLaunchKernelExC(&config, reinterpret_cast<const void*>(kernel), args);
 #endif
 }
 
 /*!
  * \brief Construct a launch configuration with optional cluster dimensions.
  *
- * \param kernel The kernel handle (used for setting shared memory attribute).
+ * \param kernel The kernel handle.
  * \param stream The CUDA stream.
  * \param smem_size Dynamic shared memory size in bytes.
  * \param grid Grid dimensions.
@@ -220,23 +218,12 @@ inline ResultType LaunchKernelEx(KernelHandle kernel, void** args, const LaunchC
  * \param cluster_dim Cluster dimension (1 = no clustering, >1 enables cluster launch).
  * \param[out] config The launch configuration to populate.
  * \param[out] attr Storage for a launch attribute (must outlive the launch call).
- * \return Result code from setting shared memory attribute, or kSuccess.
+ * \return kSuccess.
  */
-inline ResultType ConstructLaunchConfig(KernelHandle kernel, StreamHandle stream, int smem_size,
-                                        tvm::ffi::dim3 grid, tvm::ffi::dim3 block, int cluster_dim,
+inline ResultType ConstructLaunchConfig(KernelHandle kernel, StreamHandle stream,
+                                        uint32_t smem_size, tvm::ffi::dim3 grid,
+                                        tvm::ffi::dim3 block, int cluster_dim,
                                         LaunchConfig& config, LaunchAttrType& attr) {
-  ResultType err = kSuccess;
-  if (smem_size > 0) {
-#if TVM_FFI_CUBIN_LAUNCHER_USE_DRIVER_API
-    err = cuFuncSetAttribute(reinterpret_cast<CUfunction>(kernel),
-                             CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES, smem_size);
-#else
-    err = cudaFuncSetAttribute(reinterpret_cast<const void*>(kernel),
-                               cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size);
-#endif
-    if (err != kSuccess) return err;
-  }
-
 #if TVM_FFI_CUBIN_LAUNCHER_USE_DRIVER_API
   config.gridDimX = grid.x;
   config.gridDimY = grid.y;
