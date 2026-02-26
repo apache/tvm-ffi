@@ -27,23 +27,19 @@ def _set_class_object(cls):
     _CLASS_OBJECT = cls
 
 
-_REPR_PRINT = None
-_REPR_PRINT_LOADED = False
+def object_repr(obj: "CObject") -> str:
+    """Return a human-readable repr of *obj* via ``ffi.ReprPrint``.
 
-
-def __object_repr__(obj: "Object") -> str:
-    """Object repr function using ffi.ReprPrint when available."""
-    global _REPR_PRINT, _REPR_PRINT_LOADED
-    if not _REPR_PRINT_LOADED:
-        _REPR_PRINT_LOADED = True
-        _REPR_PRINT = _get_global_func("ffi.ReprPrint", False)
-    if _REPR_PRINT is not None:
-        try:
-            return str(_REPR_PRINT(obj))
-        except Exception:  # noqa: BLE001
-            # Silently fall back: __repr__ must never raise.
-            pass
-    return type(obj).__name__ + "(" + str(obj.__ctypes_handle__().value) + ")"
+    Falls back to ``TypeName(handle)`` if ``ReprPrint`` is unavailable.
+    """
+    if (<CObject>obj).chandle == NULL:
+        return type(obj).__name__ + "(chandle=None)"
+    try:
+        from tvm_ffi._ffi_api import ReprPrint
+        return str(ReprPrint(obj))
+    except Exception:  # noqa: BLE001
+        # Silently fall back: repr must never raise.
+        return type(obj).__name__ + "(" + str(obj.__chandle__()) + ")"
 
 
 def _new_object(cls):
@@ -148,10 +144,7 @@ cdef class CObject:
             self.chandle = NULL
 
     def __repr__(self) -> str:
-        # exception safety handling for chandle=None
-        if self.chandle == NULL:
-            return type(self).__name__ + "(chandle=None)"
-        return str(__object_repr__(self))
+        return object_repr(self)
 
     def __eq__(self, other: object) -> bool:
         return self.same_as(other)

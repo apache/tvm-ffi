@@ -297,7 +297,7 @@ class _TestCxxClassBase(Object):
         self.__ffi_init__(v_i64 + 1, v_i32 + 2)
 
 
-@c_class("testing.TestCxxClassDerived", order=True, unsafe_hash=True)
+@c_class("testing.TestCxxClassDerived", eq=True, order=True, unsafe_hash=True)
 class _TestCxxClassDerived(_TestCxxClassBase):
     # tvm-ffi-stubgen(ty-map): testing.TestCxxClassDerived -> testing._TestCxxClassDerived
     # tvm-ffi-stubgen(begin): object/testing.TestCxxClassDerived

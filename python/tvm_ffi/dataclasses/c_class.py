@@ -26,12 +26,13 @@ from typing_extensions import dataclass_transform
 _T = TypeVar("_T", bound=type)
 
 
-@dataclass_transform(eq_default=True, order_default=False)
+@dataclass_transform(eq_default=False, order_default=False)
 def c_class(
     type_key: str,
     *,
     init: bool = True,
-    eq: bool = True,
+    repr: bool = True,
+    eq: bool = False,
     order: bool = False,
     unsafe_hash: bool = False,
     slots: bool = True,
@@ -47,6 +48,8 @@ def c_class(
         The reflection key that identifies the C++ type in the FFI registry.
     init
         If True, install ``__init__`` from C++ reflection metadata.
+    repr
+        If True, install ``__repr__`` from C++ reflection metadata.
     eq
         If True, install ``__eq__`` and ``__ne__``.
     order
@@ -89,7 +92,9 @@ def c_class(
                     f"`class {cls.__name__}(Object, slots=False)`."
                 )
         cls = register_object(type_key)(cls)
-        _install_dataclass_dunders(cls, init=init, eq=eq, order=order, unsafe_hash=unsafe_hash)
+        _install_dataclass_dunders(
+            cls, init=init, repr=repr, eq=eq, order=order, unsafe_hash=unsafe_hash
+        )
         return cls
 
     return decorator
