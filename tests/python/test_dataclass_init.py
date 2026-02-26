@@ -47,12 +47,6 @@ from tvm_ffi.testing import (
 )
 
 
-def _field_metadata(type_cls: type) -> dict[str, dict[str, Any]]:
-    return {
-        field.name: field.metadata for field in getattr(type_cls, "__tvm_ffi_type_info__").fields
-    }
-
-
 def _field_map(type_cls: type) -> dict[str, Any]:
     return {field.name: field for field in getattr(type_cls, "__tvm_ffi_type_info__").fields}
 
@@ -194,35 +188,35 @@ class TestAutoInitSignature:
 
 class TestAutoInitConstruction:
     def test_auto_init_minimal_required(self) -> None:
-        obj = _TestCxxAutoInit(1, c=3)  # ty: ignore[too-many-positional-arguments, unknown-argument]
+        obj = _TestCxxAutoInit(1, c=3)
         assert obj.a == 1
         assert obj.b == 42
         assert obj.c == 3
         assert obj.d == 99
 
     def test_auto_init_all_keyword_arguments(self) -> None:
-        obj = _TestCxxAutoInit(a=10, c=30, d=20)  # ty: ignore[unknown-argument]
+        obj = _TestCxxAutoInit(a=10, c=30, d=20)
         assert obj.a == 10
         assert obj.b == 42
         assert obj.c == 30
         assert obj.d == 20
 
     def test_auto_init_keyword_order_irrelevant(self) -> None:
-        obj = _TestCxxAutoInit(c=7, d=8, a=9)  # ty: ignore[unknown-argument]
+        obj = _TestCxxAutoInit(c=7, d=8, a=9)
         assert obj.a == 9
         assert obj.c == 7
         assert obj.d == 8
         assert obj.b == 42
 
     def test_auto_init_second_positional_maps_to_d(self) -> None:
-        obj = _TestCxxAutoInit(1, 2, c=3)  # ty: ignore[too-many-positional-arguments, unknown-argument]
+        obj = _TestCxxAutoInit(1, 2, c=3)
         assert obj.a == 1
         assert obj.d == 2
         assert obj.c == 3
         assert obj.b == 42
 
     def test_mutate_fields_after_construction(self) -> None:
-        obj = _TestCxxAutoInit(1, c=2)  # ty: ignore[too-many-positional-arguments, unknown-argument]
+        obj = _TestCxxAutoInit(1, c=2)
         obj.b = 100
         obj.c = 999
         assert obj.b == 100
@@ -232,39 +226,39 @@ class TestAutoInitConstruction:
 class TestAutoInitErrors:
     def test_missing_required_positional(self) -> None:
         with pytest.raises(TypeError):
-            _TestCxxAutoInit(c=3)  # ty: ignore[unknown-argument]
+            _TestCxxAutoInit(c=3)  # ty: ignore[missing-argument]
 
     def test_missing_required_kw_only(self) -> None:
         with pytest.raises(TypeError):
-            _TestCxxAutoInit(1)  # ty: ignore[too-many-positional-arguments]
+            _TestCxxAutoInit(1)  # ty: ignore[missing-argument]
 
     def test_kw_only_rejects_positional(self) -> None:
         with pytest.raises(TypeError):
-            _TestCxxAutoInit(1, 2, 3)  # ty: ignore[too-many-positional-arguments]
+            _TestCxxAutoInit(1, 2, 3)  # ty: ignore[missing-argument, too-many-positional-arguments]
 
     def test_duplicate_argument_detection(self) -> None:
         with pytest.raises(TypeError):
-            _TestCxxAutoInit(1, 2, c=3, d=4)  # ty: ignore[too-many-positional-arguments, unknown-argument]
+            _TestCxxAutoInit(1, 2, c=3, d=4)  # ty: ignore[parameter-already-assigned]
 
     def test_unexpected_keyword(self) -> None:
         with pytest.raises(TypeError):
-            _TestCxxAutoInit(1, c=2, nope=3)  # ty: ignore[too-many-positional-arguments, unknown-argument]
+            _TestCxxAutoInit(1, c=2, nope=3)  # ty: ignore[unknown-argument]
 
     def test_init_false_field_rejected_in_python_init(self) -> None:
         with pytest.raises(TypeError):
-            _TestCxxAutoInit(1, b=2, c=3)  # ty: ignore[too-many-positional-arguments, unknown-argument]
+            _TestCxxAutoInit(1, b=2, c=3)  # ty: ignore[unknown-argument]
 
     def test_type_mismatch_for_required_positional(self) -> None:
         with pytest.raises(TypeError):
-            _TestCxxAutoInit("x", c=2)  # ty: ignore[too-many-positional-arguments, unknown-argument]
+            _TestCxxAutoInit("x", c=2)  # ty: ignore[invalid-argument-type]
 
     def test_type_mismatch_for_kw_only(self) -> None:
         with pytest.raises(TypeError):
-            _TestCxxAutoInit(1, c="x")  # ty: ignore[too-many-positional-arguments, unknown-argument]
+            _TestCxxAutoInit(1, c="x")  # ty: ignore[invalid-argument-type]
 
     def test_type_mismatch_for_defaultable_positional(self) -> None:
         with pytest.raises(TypeError):
-            _TestCxxAutoInit(1, d="x", c=3)  # ty: ignore[too-many-positional-arguments, unknown-argument]
+            _TestCxxAutoInit(1, d="x", c=3)  # ty: ignore[invalid-argument-type]
 
     def test_init_false_field_rejected_via_dict_unpacking(self) -> None:
         """B is init=False, rejected even when passed via **dict."""
@@ -274,23 +268,23 @@ class TestAutoInitErrors:
     def test_positional_and_keyword_same_field(self) -> None:
         """Providing a field both positionally and as keyword should error."""
         with pytest.raises(TypeError):
-            _TestCxxAutoInit(1, a=2, c=3)  # ty: ignore[too-many-positional-arguments, unknown-argument]
+            _TestCxxAutoInit(1, a=2, c=3)  # ty: ignore[parameter-already-assigned]
 
     def test_none_for_required_integer_field(self) -> None:
         """Passing None where an int64_t is expected should raise TypeError."""
         with pytest.raises(TypeError):
-            _TestCxxAutoInitSimple(None, 1)  # ty: ignore[too-many-positional-arguments]
+            _TestCxxAutoInitSimple(None, 1)  # ty: ignore[invalid-argument-type]
 
     def test_none_for_keyword_integer_field(self) -> None:
         """Passing None as keyword where int64_t is expected."""
         with pytest.raises(TypeError):
-            _TestCxxAutoInitSimple(x=None, y=1)  # ty: ignore[unknown-argument]
+            _TestCxxAutoInitSimple(x=None, y=1)  # ty: ignore[invalid-argument-type]
 
 
 class TestAutoInitLowLevelFfiInit:
     def test_low_level_kwargs_protocol(self) -> None:
         obj = _TestCxxAutoInit.__new__(_TestCxxAutoInit)
-        obj.__ffi_init__(core.KWARGS, "a", 1, "c", 3)  # ty: ignore[unresolved-attribute]
+        obj.__ffi_init__(core.KWARGS, "a", 1, "c", 3)
         assert obj.a == 1
         assert obj.b == 42
         assert obj.c == 3
@@ -299,42 +293,42 @@ class TestAutoInitLowLevelFfiInit:
     def test_low_level_kwargs_even_pairs_required(self) -> None:
         obj = _TestCxxAutoInit.__new__(_TestCxxAutoInit)
         with pytest.raises(TypeError):
-            obj.__ffi_init__(core.KWARGS, "a", 1, "c")  # ty: ignore[unresolved-attribute]
+            obj.__ffi_init__(core.KWARGS, "a", 1, "c")
 
     def test_low_level_kwargs_duplicate_name(self) -> None:
         obj = _TestCxxAutoInit.__new__(_TestCxxAutoInit)
         with pytest.raises(TypeError):
-            obj.__ffi_init__(core.KWARGS, "a", 1, "a", 2, "c", 3)  # ty: ignore[unresolved-attribute]
+            obj.__ffi_init__(core.KWARGS, "a", 1, "a", 2, "c", 3)
 
     def test_low_level_kwargs_unknown_name(self) -> None:
         obj = _TestCxxAutoInit.__new__(_TestCxxAutoInit)
         with pytest.raises(TypeError):
-            obj.__ffi_init__(core.KWARGS, "a", 1, "unknown", 2, "c", 3)  # ty: ignore[unresolved-attribute]
+            obj.__ffi_init__(core.KWARGS, "a", 1, "unknown", 2, "c", 3)
 
     def test_low_level_kwargs_key_must_be_string(self) -> None:
         obj = _TestCxxAutoInit.__new__(_TestCxxAutoInit)
         with pytest.raises(TypeError):
-            obj.__ffi_init__(core.KWARGS, 1, 2, "a", 3, "c", 4)  # ty: ignore[unresolved-attribute]
+            obj.__ffi_init__(core.KWARGS, 1, 2, "a", 3, "c", 4)
 
     def test_low_level_positional_too_many(self) -> None:
         obj = _TestCxxAutoInit.__new__(_TestCxxAutoInit)
         with pytest.raises(TypeError):
-            obj.__ffi_init__(1, 2, 3, 4)  # ty: ignore[unresolved-attribute]
+            obj.__ffi_init__(1, 2, 3, 4)
 
     def test_low_level_missing_required(self) -> None:
         obj = _TestCxxAutoInit.__new__(_TestCxxAutoInit)
         with pytest.raises(TypeError):
-            obj.__ffi_init__(1)  # ty: ignore[unresolved-attribute]
+            obj.__ffi_init__(1)
 
     def test_low_level_kw_only_field_rejected_positionally(self) -> None:
         obj = _TestCxxAutoInit.__new__(_TestCxxAutoInit)
         with pytest.raises(TypeError):
-            obj.__ffi_init__(1, 2)  # ty: ignore[unresolved-attribute]
+            obj.__ffi_init__(1, 2)
 
     def test_low_level_init_false_field_rejected(self) -> None:
         obj = _TestCxxAutoInit.__new__(_TestCxxAutoInit)
         with pytest.raises(TypeError):
-            obj.__ffi_init__(core.KWARGS, "a", 1, "b", 2, "c", 3)  # ty: ignore[unresolved-attribute]
+            obj.__ffi_init__(core.KWARGS, "a", 1, "b", 2, "c", 3)
 
     def test_low_level_kwargs_all_init_fields_explicit(self) -> None:
         """Providing all init=True fields via KWARGS."""
@@ -415,23 +409,23 @@ class TestAutoInitLowLevelFfiInit:
 
 class TestAutoInitSimple:
     def test_simple_positional(self) -> None:
-        obj = _TestCxxAutoInitSimple(10, 20)  # ty: ignore[too-many-positional-arguments]
+        obj = _TestCxxAutoInitSimple(10, 20)
         assert obj.x == 10
         assert obj.y == 20
 
     def test_simple_keyword(self) -> None:
-        obj = _TestCxxAutoInitSimple(x=10, y=20)  # ty: ignore[unknown-argument]
+        obj = _TestCxxAutoInitSimple(x=10, y=20)
         assert obj.x == 10
         assert obj.y == 20
 
     def test_simple_mixed(self) -> None:
-        obj = _TestCxxAutoInitSimple(10, y=20)  # ty: ignore[too-many-positional-arguments, unknown-argument]
+        obj = _TestCxxAutoInitSimple(10, y=20)
         assert obj.x == 10
         assert obj.y == 20
 
     def test_simple_missing_required(self) -> None:
         with pytest.raises(TypeError):
-            _TestCxxAutoInitSimple(x=10)  # ty: ignore[unknown-argument]
+            _TestCxxAutoInitSimple(x=10)  # ty: ignore[missing-argument]
 
     def test_simple_too_many_positional(self) -> None:
         with pytest.raises(TypeError):
@@ -443,37 +437,37 @@ class TestAutoInitSimple:
 
     def test_simple_low_level_kwargs(self) -> None:
         obj = _TestCxxAutoInitSimple.__new__(_TestCxxAutoInitSimple)
-        obj.__ffi_init__(core.KWARGS, "x", 10, "y", 20)  # ty: ignore[unresolved-attribute]
+        obj.__ffi_init__(core.KWARGS, "x", 10, "y", 20)
         assert obj.x == 10
         assert obj.y == 20
 
     def test_zero_values(self) -> None:
-        obj = _TestCxxAutoInitSimple(0, 0)  # ty: ignore[too-many-positional-arguments]
+        obj = _TestCxxAutoInitSimple(0, 0)
         assert obj.x == 0
         assert obj.y == 0
 
     def test_negative_values(self) -> None:
-        obj = _TestCxxAutoInitSimple(-1, -9999999)  # ty: ignore[too-many-positional-arguments]
+        obj = _TestCxxAutoInitSimple(-1, -9999999)
         assert obj.x == -1
         assert obj.y == -9999999
 
     def test_large_values(self) -> None:
         large = 2**62
-        obj = _TestCxxAutoInitSimple(large, -large)  # ty: ignore[too-many-positional-arguments]
+        obj = _TestCxxAutoInitSimple(large, -large)
         assert obj.x == large
         assert obj.y == -large
 
     def test_float_for_integer_field(self) -> None:
         """Passing float where int64_t is expected - should truncate or error."""
         try:
-            obj = _TestCxxAutoInitSimple(1.5, 2)  # ty: ignore[too-many-positional-arguments]
+            obj = _TestCxxAutoInitSimple(1.5, 2)  # ty: ignore[invalid-argument-type]
             assert isinstance(obj.x, int)
         except TypeError:
             pass  # Also acceptable
 
     def test_bool_for_integer_field(self) -> None:
         """Booleans are valid ints in Python but should work correctly."""
-        obj = _TestCxxAutoInitSimple(True, False)  # ty: ignore[too-many-positional-arguments]
+        obj = _TestCxxAutoInitSimple(True, False)
         assert obj.x == 1
         assert obj.y == 0
 
@@ -495,7 +489,7 @@ class TestAutoInitAllInitOff:
 
     def test_low_level_empty_init(self) -> None:
         obj = _TestCxxAutoInitAllInitOff.__new__(_TestCxxAutoInitAllInitOff)
-        obj.__ffi_init__()  # ty: ignore[unresolved-attribute]
+        obj.__ffi_init__()
         assert obj.x == 7
         assert obj.y == 9
         assert obj.z == 1234
@@ -520,7 +514,7 @@ class TestAutoInitAllInitOff:
 
 class TestAutoInitKwOnlyDefaults:
     def test_minimal_required(self) -> None:
-        obj = _TestCxxAutoInitKwOnlyDefaults(1, k_required=2)  # ty: ignore[too-many-positional-arguments, unknown-argument]
+        obj = _TestCxxAutoInitKwOnlyDefaults(1, k_required=2)
         assert obj.p_required == 1
         assert obj.p_default == 11
         assert obj.k_required == 2
@@ -528,7 +522,7 @@ class TestAutoInitKwOnlyDefaults:
         assert obj.hidden == 33
 
     def test_override_defaults(self) -> None:
-        obj = _TestCxxAutoInitKwOnlyDefaults(p_required=1, p_default=4, k_required=5, k_default=6)  # ty: ignore[unknown-argument]
+        obj = _TestCxxAutoInitKwOnlyDefaults(p_required=1, p_default=4, k_required=5, k_default=6)
         assert obj.p_required == 1
         assert obj.p_default == 4
         assert obj.k_required == 5
@@ -537,27 +531,27 @@ class TestAutoInitKwOnlyDefaults:
 
     def test_missing_required_positional(self) -> None:
         with pytest.raises(TypeError):
-            _TestCxxAutoInitKwOnlyDefaults(k_required=2)  # ty: ignore[unknown-argument]
+            _TestCxxAutoInitKwOnlyDefaults(k_required=2)  # ty: ignore[missing-argument]
 
     def test_missing_required_kw_only(self) -> None:
         with pytest.raises(TypeError):
-            _TestCxxAutoInitKwOnlyDefaults(1)  # ty: ignore[too-many-positional-arguments]
+            _TestCxxAutoInitKwOnlyDefaults(1)  # ty: ignore[missing-argument]
 
     def test_kw_only_rejects_positional(self) -> None:
         with pytest.raises(TypeError):
-            _TestCxxAutoInitKwOnlyDefaults(1, 2, 3)  # ty: ignore[too-many-positional-arguments]
+            _TestCxxAutoInitKwOnlyDefaults(1, 2, 3)  # ty: ignore[missing-argument, too-many-positional-arguments]
 
     def test_hidden_init_false_field_not_accepted(self) -> None:
         with pytest.raises(TypeError):
-            _TestCxxAutoInitKwOnlyDefaults(1, k_required=2, hidden=4)  # ty: ignore[too-many-positional-arguments, unknown-argument]
+            _TestCxxAutoInitKwOnlyDefaults(1, k_required=2, hidden=4)  # ty: ignore[unknown-argument]
 
     def test_type_mismatch(self) -> None:
         with pytest.raises(TypeError):
-            _TestCxxAutoInitKwOnlyDefaults("x", k_required=2)  # ty: ignore[too-many-positional-arguments, unknown-argument]
+            _TestCxxAutoInitKwOnlyDefaults("x", k_required=2)  # ty: ignore[invalid-argument-type]
 
     def test_low_level_kwargs_call(self) -> None:
         obj = _TestCxxAutoInitKwOnlyDefaults.__new__(_TestCxxAutoInitKwOnlyDefaults)
-        obj.__ffi_init__(core.KWARGS, "p_required", 1, "k_required", 2)  # ty: ignore[unresolved-attribute]
+        obj.__ffi_init__(core.KWARGS, "p_required", 1, "k_required", 2)
         assert obj.p_required == 1
         assert obj.p_default == 11
         assert obj.k_required == 2
@@ -567,7 +561,7 @@ class TestAutoInitKwOnlyDefaults:
     def test_kw_only_via_dict_unpacking(self) -> None:
         """Verify kw_only fields work via **dict."""
         kwargs = {"k_required": 100, "k_default": 200}
-        obj = _TestCxxAutoInitKwOnlyDefaults(1, **kwargs)  # ty: ignore[too-many-positional-arguments]
+        obj = _TestCxxAutoInitKwOnlyDefaults(1, **kwargs)
         assert obj.p_required == 1
         assert obj.p_default == 11  # default
         assert obj.k_required == 100
@@ -577,22 +571,22 @@ class TestAutoInitKwOnlyDefaults:
 
 class TestAutoInitInheritance:
     def test_parent_constructor(self) -> None:
-        obj = _TestCxxAutoInitParent(10)  # ty: ignore[too-many-positional-arguments]
+        obj = _TestCxxAutoInitParent(10)
         assert obj.parent_required == 10
         assert obj.parent_default == 5
 
     def test_parent_all_keyword(self) -> None:
-        obj = _TestCxxAutoInitParent(parent_required=10, parent_default=20)  # ty: ignore[unknown-argument]
+        obj = _TestCxxAutoInitParent(parent_required=10, parent_default=20)
         assert obj.parent_required == 10
         assert obj.parent_default == 20
 
     def test_parent_positional_then_keyword(self) -> None:
-        obj = _TestCxxAutoInitParent(10, parent_default=20)  # ty: ignore[too-many-positional-arguments, unknown-argument]
+        obj = _TestCxxAutoInitParent(10, parent_default=20)
         assert obj.parent_required == 10
         assert obj.parent_default == 20
 
     def test_child_constructor_uses_parent_and_child_fields(self) -> None:
-        obj = _TestCxxAutoInitChild(parent_required=1, child_required=2, child_kw_only=3)  # ty: ignore[unknown-argument]
+        obj = _TestCxxAutoInitChild(parent_required=1, child_required=2, child_kw_only=3)
         assert obj.parent_required == 1
         assert obj.parent_default == 5
         assert obj.child_required == 2
@@ -600,7 +594,7 @@ class TestAutoInitInheritance:
 
     def test_child_all_keyword_with_parent_default_override(self) -> None:
         # fmt: off
-        obj = _TestCxxAutoInitChild(parent_required=1, child_required=2, parent_default=99, child_kw_only=3)  # ty: ignore[unknown-argument]
+        obj = _TestCxxAutoInitChild(parent_required=1, child_required=2, parent_default=99, child_kw_only=3)
         # fmt: on
         assert obj.parent_required == 1
         assert obj.child_required == 2
@@ -609,7 +603,7 @@ class TestAutoInitInheritance:
 
     def test_child_missing_parent_required(self) -> None:
         with pytest.raises(TypeError):
-            _TestCxxAutoInitChild(child_required=2, child_kw_only=3)  # ty: ignore[unknown-argument]
+            _TestCxxAutoInitChild(child_required=2, child_kw_only=3)  # ty: ignore[missing-argument]
 
     def test_child_two_positional_args_routes_correctly(self) -> None:
         """Calling Child(1, 2, child_kw_only=3) should set parent_required=1, child_required=2.
@@ -618,7 +612,7 @@ class TestAutoInitInheritance:
           (self, parent_required, child_required, parent_default=..., *, child_kw_only)
         So positional arg 0 = parent_required, positional arg 1 = child_required.
         """
-        obj = _TestCxxAutoInitChild(1, 2, child_kw_only=3)  # ty: ignore[too-many-positional-arguments, unknown-argument]
+        obj = _TestCxxAutoInitChild(1, 2, child_kw_only=3)
         assert obj.parent_required == 1
         assert obj.child_required == 2
         assert obj.parent_default == 5  # should use the default
@@ -629,7 +623,7 @@ class TestAutoInitInheritance:
 
         Python signature order: parent_required=1, child_required=2, parent_default=3
         """
-        obj = _TestCxxAutoInitChild(1, 2, 3, child_kw_only=4)  # ty: ignore[too-many-positional-arguments, unknown-argument]
+        obj = _TestCxxAutoInitChild(1, 2, 3, child_kw_only=4)
         assert obj.parent_required == 1
         assert obj.child_required == 2
         assert obj.parent_default == 3
@@ -637,7 +631,7 @@ class TestAutoInitInheritance:
 
     def test_child_one_positional_rest_keyword(self) -> None:
         """Mix of positional and keyword to verify correct mapping."""
-        obj = _TestCxxAutoInitChild(10, child_required=20, parent_default=30, child_kw_only=40)  # ty: ignore[too-many-positional-arguments, unknown-argument]
+        obj = _TestCxxAutoInitChild(10, child_required=20, parent_default=30, child_kw_only=40)
         assert obj.parent_required == 10
         assert obj.child_required == 20
         assert obj.parent_default == 30
@@ -648,14 +642,14 @@ class TestAutoInitCopyBehavior:
     """Test copy/deepcopy/replace interplay with auto-init objects."""
 
     def test_shallow_copy(self) -> None:
-        obj = _TestCxxAutoInitSimple(10, 20)  # ty: ignore[too-many-positional-arguments]
+        obj = _TestCxxAutoInitSimple(10, 20)
         obj_copy = copy.copy(obj)
         assert obj_copy.x == 10
         assert obj_copy.y == 20
         assert not obj.same_as(obj_copy)
 
     def test_deepcopy(self) -> None:
-        obj = _TestCxxAutoInitSimple(10, 20)  # ty: ignore[too-many-positional-arguments]
+        obj = _TestCxxAutoInitSimple(10, 20)
         obj_copy = copy.deepcopy(obj)
         assert obj_copy.x == 10
         assert obj_copy.y == 20
@@ -663,7 +657,7 @@ class TestAutoInitCopyBehavior:
 
     @pytest.mark.skipif(sys.version_info < (3, 13), reason="copy.replace requires Python 3.13+")
     def test_replace(self) -> None:
-        obj = _TestCxxAutoInit(1, c=3)  # ty: ignore[too-many-positional-arguments, unknown-argument]
+        obj = _TestCxxAutoInit(1, c=3)
         replaced = copy.replace(obj, a=100, c=300)  # type: ignore[attr-defined]
         assert replaced.a == 100
         assert replaced.b == 42
@@ -672,7 +666,7 @@ class TestAutoInitCopyBehavior:
 
     def test_copy_preserves_init_false_field(self) -> None:
         """After construction, mutating the init=False field and copying."""
-        obj = _TestCxxAutoInit(1, c=3)  # ty: ignore[too-many-positional-arguments, unknown-argument]
+        obj = _TestCxxAutoInit(1, c=3)
         assert obj.b == 42
         obj.b = 999
         assert obj.b == 999
@@ -681,7 +675,7 @@ class TestAutoInitCopyBehavior:
 
     def test_copy_preserves_default_override(self) -> None:
         """Override a default field, then copy should preserve the override."""
-        obj = _TestCxxAutoInit(1, c=3, d=55)  # ty: ignore[too-many-positional-arguments, unknown-argument]
+        obj = _TestCxxAutoInit(1, c=3, d=55)
         obj_copy = copy.copy(obj)
         assert obj_copy.d == 55
 
@@ -699,7 +693,7 @@ class TestAutoInitCopyBehavior:
 
     @pytest.mark.skipif(sys.version_info < (3, 13), reason="copy.replace requires Python 3.13+")
     def test_replace_kw_only_defaults(self) -> None:
-        obj = _TestCxxAutoInitKwOnlyDefaults(1, k_required=2)  # ty: ignore[too-many-positional-arguments, unknown-argument]
+        obj = _TestCxxAutoInitKwOnlyDefaults(1, k_required=2)
         replaced = copy.replace(obj, k_required=99, p_default=88)  # type: ignore[attr-defined]
         assert replaced.p_required == 1
         assert replaced.p_default == 88
@@ -713,7 +707,7 @@ class TestAutoInitReinitialization:
 
     def test_reinit_changes_handle(self) -> None:
         """Calling __ffi_init__ again should create a new underlying object."""
-        obj = _TestCxxAutoInit(1, c=3)  # ty: ignore[too-many-positional-arguments, unknown-argument]
+        obj = _TestCxxAutoInit(1, c=3)
         original_handle = obj.__chandle__()
         assert obj.a == 1
 
@@ -724,7 +718,7 @@ class TestAutoInitReinitialization:
 
     def test_reinit_resets_init_false_field(self) -> None:
         """Re-initialization should reset init=False fields to defaults."""
-        obj = _TestCxxAutoInit(1, c=3)  # ty: ignore[too-many-positional-arguments, unknown-argument]
+        obj = _TestCxxAutoInit(1, c=3)
         obj.b = 999
         assert obj.b == 999
 
@@ -736,12 +730,12 @@ class TestAutoInitTypeChecks:
     """Verify isinstance relationships for auto-init objects."""
 
     def test_parent_isinstance(self) -> None:
-        obj = _TestCxxAutoInitParent(1)  # ty: ignore[too-many-positional-arguments]
+        obj = _TestCxxAutoInitParent(1)
         assert isinstance(obj, _TestCxxAutoInitParent)
         assert isinstance(obj, core.Object)
 
     def test_child_isinstance_parent(self) -> None:
-        obj = _TestCxxAutoInitChild(parent_required=1, child_required=2, child_kw_only=3)  # ty: ignore[unknown-argument]
+        obj = _TestCxxAutoInitChild(parent_required=1, child_required=2, child_kw_only=3)
         assert isinstance(obj, _TestCxxAutoInitChild)
         assert isinstance(obj, _TestCxxAutoInitParent)
         assert isinstance(obj, core.Object)
@@ -752,7 +746,7 @@ class TestAutoInitTypeChecks:
         This is a pre-existing design choice in the TVM FFI type system, not a bug
         introduced by the auto-init feature.
         """
-        obj = _TestCxxAutoInitParent(1)  # ty: ignore[too-many-positional-arguments]
+        obj = _TestCxxAutoInitParent(1)
         # _ObjectSlotsMeta.__instancecheck__ returns True for any CObject
         assert isinstance(obj, _TestCxxAutoInitChild)
 
@@ -761,15 +755,15 @@ class TestAutoInitInstanceIsolation:
     """Verify that multiple instances don't share mutable state."""
 
     def test_separate_instances_are_independent(self) -> None:
-        a = _TestCxxAutoInitSimple(1, 2)  # ty: ignore[too-many-positional-arguments]
-        b = _TestCxxAutoInitSimple(3, 4)  # ty: ignore[too-many-positional-arguments]
+        a = _TestCxxAutoInitSimple(1, 2)
+        b = _TestCxxAutoInitSimple(3, 4)
         assert a.x == 1
         assert b.x == 3
         assert not a.same_as(b)
 
     def test_mutating_one_instance_doesnt_affect_another(self) -> None:
-        a = _TestCxxAutoInit(1, c=3)  # ty: ignore[too-many-positional-arguments, unknown-argument]
-        b = _TestCxxAutoInit(1, c=3)  # ty: ignore[too-many-positional-arguments, unknown-argument]
+        a = _TestCxxAutoInit(1, c=3)
+        b = _TestCxxAutoInit(1, c=3)
         assert a.b == 42
         assert b.b == 42
         a.b = 999
@@ -788,7 +782,7 @@ class TestAutoInitReinitInitOffNoDefault:
 
     def test_reinit_init_false_with_default_resets(self) -> None:
         """Fields b (init=False, default=42) should reset to default on reinit."""
-        obj = _TestCxxAutoInit(1, c=3)  # ty: ignore[too-many-positional-arguments, unknown-argument]
+        obj = _TestCxxAutoInit(1, c=3)
         obj.b = 999
         obj.__ffi_init__(core.KWARGS, "a", 2, "c", 4)
         assert obj.b == 42
@@ -814,32 +808,32 @@ class TestAutoInitErrorMessages:
     def test_missing_child_required_names_correct_field(self) -> None:
         """When child_required is missing, error should mention 'child_required'."""
         with pytest.raises(TypeError, match="child_required"):
-            _TestCxxAutoInitChild(parent_required=1, child_kw_only=3)  # ty: ignore[unknown-argument]
+            _TestCxxAutoInitChild(parent_required=1, child_kw_only=3)  # ty: ignore[missing-argument]
 
     def test_missing_parent_required_names_correct_field(self) -> None:
         """When parent_required is missing, error should mention 'parent_required'."""
         with pytest.raises(TypeError, match="parent_required"):
-            _TestCxxAutoInitChild(child_required=2, child_kw_only=3)  # ty: ignore[unknown-argument]
+            _TestCxxAutoInitChild(child_required=2, child_kw_only=3)  # ty: ignore[missing-argument]
 
     def test_missing_kw_only_names_correct_field(self) -> None:
         """When child_kw_only is missing, error should mention 'child_kw_only'."""
         with pytest.raises(TypeError, match="child_kw_only"):
-            _TestCxxAutoInitChild(parent_required=1, child_required=2)  # ty: ignore[unknown-argument]
+            _TestCxxAutoInitChild(parent_required=1, child_required=2)  # ty: ignore[missing-argument]
 
     def test_too_many_positional_error_message(self) -> None:
         """Error for too many positional args should mention the correct count."""
         with pytest.raises(TypeError, match="3 positional"):
-            _TestCxxAutoInitChild(1, 2, 3, 4, child_kw_only=5)  # ty: ignore[too-many-positional-arguments, unknown-argument]
+            _TestCxxAutoInitChild(1, 2, 3, 4, child_kw_only=5)  # ty: ignore[too-many-positional-arguments]
 
     def test_unexpected_keyword_error_message(self) -> None:
         """Error for unknown keyword should mention the keyword name."""
         with pytest.raises(TypeError, match="bogus"):
-            _TestCxxAutoInit(1, c=2, bogus=3)  # ty: ignore[too-many-positional-arguments, unknown-argument]
+            _TestCxxAutoInit(1, c=2, bogus=3)  # ty: ignore[unknown-argument]
 
     def test_duplicate_arg_error_message(self) -> None:
         """Error for duplicate argument should mention the field name."""
         with pytest.raises(TypeError, match=r"multiple values.*a"):
-            _TestCxxAutoInit(1, c=2, a=3)  # ty: ignore[too-many-positional-arguments, unknown-argument]
+            _TestCxxAutoInit(1, c=2, a=3)  # ty: ignore[parameter-already-assigned]
 
 
 class TestAutoInitLowLevelKwOnlyDefaults:
@@ -892,7 +886,7 @@ class TestClassLevelInitFalse:
         assert field_names == ["x", "y"]
 
     def test_direct_construction_raises(self) -> None:
-        with pytest.raises(RuntimeError, match="not implemented"):
+        with pytest.raises(TypeError, match="cannot be constructed directly"):
             _TestCxxNoAutoInit(1, 2)  # ty: ignore[too-many-positional-arguments]
 
     def test_has_shallow_copy(self) -> None:

@@ -18,7 +18,6 @@
 
 from __future__ import annotations
 
-import functools
 import inspect
 import json
 import sys
@@ -42,6 +41,16 @@ def register_object(type_key: str | None = None) -> Callable[[_T], _T]:
     type_key
         The type key of the node. It requires ``type_key`` to be registered already
         on the C++ side. If not specified, the class name will be used.
+
+    Notes
+    -----
+    All :class:`Object` subclasses get ``__slots__ = ()`` by default via the
+    metaclass, preventing per-instance ``__dict__``.  To opt out and allow
+    arbitrary instance attributes, pass ``slots=False`` in the class header::
+
+        @tvm_ffi.register_object("test.MyObject")
+        class MyObject(Object, slots=False):
+            pass
 
     Examples
     --------
@@ -419,15 +428,11 @@ def _add_class_attrs(type_cls: type, type_info: TypeInfo) -> type:
         name = field.name
         if not hasattr(type_cls, name):  # skip already defined attributes
             setattr(type_cls, name, field.as_property(type_cls))
-    has_c_init = False
-    is_auto_init = False
     has_shallow_copy = False
     for method in type_info.methods:
         name = method.name
         if name == "__ffi_init__":
             name = "__c_ffi_init__"
-            has_c_init = True
-            is_auto_init = bool(method.metadata.get("auto_init", False))
         if name == "__ffi_shallow_copy__":
             has_shallow_copy = True
             # Always override: shallow copy is type-specific and must not be inherited
@@ -437,14 +442,6 @@ def _add_class_attrs(type_cls: type, type_info: TypeInfo) -> type:
             setattr(type_cls, name, method.as_callable(type_cls))
         elif not hasattr(type_cls, name):
             setattr(type_cls, name, method.as_callable(type_cls))
-    if "__init__" not in type_cls.__dict__:
-        if has_c_init and is_auto_init:
-            init_fn = _make_init(type_cls, type_info)
-            setattr(type_cls, "__init__", init_fn)
-        elif has_c_init:
-            setattr(type_cls, "__init__", getattr(type_cls, "__ffi_init__"))
-        elif not issubclass(type_cls, core.PyNativeObject):
-            setattr(type_cls, "__init__", __init__invalid)
     is_container = type_info.type_key in (
         "ffi.Array",
         "ffi.Map",
@@ -481,21 +478,14 @@ def _setup_copy_methods(
             setattr(type_cls, "__replace__", _replace_unsupported)
 
 
-def __init__invalid(self: Any, *args: Any, **kwargs: Any) -> None:
-    raise RuntimeError("The __init__ method of this class is not implemented.")
-
-
 def _copy_supported(self: Any) -> Any:
     return self.__ffi_shallow_copy__()
 
 
 def _deepcopy_supported(self: Any, memo: Any = None) -> Any:
-    return _get_deep_copy_func()(self)
+    from . import _ffi_api  # noqa: PLC0415
 
-
-@functools.lru_cache(maxsize=1)
-def _get_deep_copy_func() -> core.Function:
-    return get_global_func("ffi.DeepCopy")
+    return _ffi_api.DeepCopy(self)
 
 
 def _replace_supported(self: Any, **kwargs: Any) -> Any:
@@ -526,6 +516,146 @@ def _replace_unsupported(self: Any, **kwargs: Any) -> Any:
         f"Type `{type(self).__name__}` does not support replace. "
         f"The underlying C++ type is not copy-constructible."
     )
+
+
+def _install_init(cls: type, *, enabled: bool) -> None:
+    """Install ``__init__`` from C++ reflection metadata, or a guard.
+
+    When *enabled* is True, installs a proper ``__init__`` that delegates to
+    the C++ ``__ffi_init__``.  When *enabled* is False (or True but no
+    ``__ffi_init__`` exists), installs a guard that raises ``TypeError``
+    with an actionable message.
+    """
+    if "__init__" in cls.__dict__:
+        return
+    type_info: TypeInfo | None = getattr(cls, "__tvm_ffi_type_info__", None)
+    if type_info is None:
+        return
+    if enabled:
+        has_c_init = False
+        is_auto_init = False
+        for method in type_info.methods:
+            if method.name == "__ffi_init__":
+                has_c_init = True
+                is_auto_init = bool(method.metadata.get("auto_init", False))
+                break
+        if has_c_init and is_auto_init:
+            setattr(cls, "__init__", _make_init(cls, type_info))
+            return
+        if has_c_init:
+            setattr(cls, "__init__", getattr(cls, "__ffi_init__"))
+            return
+        msg = (
+            f"`{cls.__name__}` (C++ type `{type_info.type_key}`) has no __ffi_init__ "
+            f"registered. Either add `refl::init()` to its C++ ObjectDef, "
+            f"or pass `init=False` to @c_class."
+        )
+    else:
+        msg = (
+            f"`{cls.__name__}` cannot be constructed directly. "
+            f"Define a custom __init__ or use a factory method."
+        )
+
+    def __init__(self: Any, *args: Any, **kwargs: Any) -> None:
+        raise TypeError(msg)
+
+    __init__.__qualname__ = f"{cls.__qualname__}.__init__"
+    __init__.__module__ = cls.__module__
+    setattr(cls, "__init__", __init__)
+
+
+def _install_dataclass_dunders(
+    cls: type,
+    *,
+    init: bool = True,
+    eq: bool = True,
+    order: bool = False,
+    unsafe_hash: bool = False,
+) -> None:
+    """Install structural dunder methods on *cls*.
+
+    Each dunder delegates to the corresponding C++ recursive structural
+    operation.  If the user already defined a dunder in the class body
+    (i.e. it exists in ``cls.__dict__``), it is left untouched.
+
+    Parameters
+    ----------
+    cls
+        The class to install dunders on.
+    init
+        If True, install ``__init__`` from C++ reflection metadata.
+    eq
+        If True, install ``__eq__`` and ``__ne__``.
+    order
+        If True, install ``__lt__``, ``__le__``, ``__gt__``, ``__ge__``.
+    unsafe_hash
+        If True, install ``__hash__``.
+
+    """
+    _install_init(cls, enabled=init)
+
+    from . import _ffi_api  # noqa: PLC0415
+
+    dunders: dict[str, Any] = {}
+
+    if eq:
+        recursive_eq = _ffi_api.RecursiveEq
+
+        def __eq__(self: Any, other: Any) -> bool:
+            if not isinstance(other, type(self)) and not isinstance(self, type(other)):
+                return NotImplemented
+            return recursive_eq(self, other)
+
+        def __ne__(self: Any, other: Any) -> bool:
+            if not isinstance(other, type(self)) and not isinstance(self, type(other)):
+                return NotImplemented
+            return not recursive_eq(self, other)
+
+        dunders["__eq__"] = __eq__
+        dunders["__ne__"] = __ne__
+
+    if unsafe_hash:
+        recursive_hash = _ffi_api.RecursiveHash
+
+        def __hash__(self: Any) -> int:
+            return recursive_hash(self) & 0xFFFFFFFFFFFFFFFF
+
+        dunders["__hash__"] = __hash__
+
+    if order:
+        recursive_lt = _ffi_api.RecursiveLt
+        recursive_le = _ffi_api.RecursiveLe
+        recursive_gt = _ffi_api.RecursiveGt
+        recursive_ge = _ffi_api.RecursiveGe
+
+        def __lt__(self: Any, other: Any) -> bool:
+            if not isinstance(other, type(self)) and not isinstance(self, type(other)):
+                return NotImplemented
+            return recursive_lt(self, other)
+
+        def __le__(self: Any, other: Any) -> bool:
+            if not isinstance(other, type(self)) and not isinstance(self, type(other)):
+                return NotImplemented
+            return recursive_le(self, other)
+
+        def __gt__(self: Any, other: Any) -> bool:
+            if not isinstance(other, type(self)) and not isinstance(self, type(other)):
+                return NotImplemented
+            return recursive_gt(self, other)
+
+        def __ge__(self: Any, other: Any) -> bool:
+            if not isinstance(other, type(self)) and not isinstance(self, type(other)):
+                return NotImplemented
+            return recursive_ge(self, other)
+
+        dunders["__lt__"] = __lt__
+        dunders["__le__"] = __le__
+        dunders["__gt__"] = __gt__
+        dunders["__ge__"] = __ge__
+
+    for name, impl in dunders.items():
+        if name not in cls.__dict__:
+            setattr(cls, name, impl)
 
 
 def get_registered_type_keys() -> Sequence[str]:

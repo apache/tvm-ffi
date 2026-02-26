@@ -108,7 +108,7 @@ void MakeObjectFromPackedArgs(ffi::PackedArgs args, Any* ret) {
 inline void AccessStepRegisterReflection() {
   // register access step reflection here since it is only needed for bindings
   namespace refl = tvm::ffi::reflection;
-  refl::ObjectDef<AccessStepObj>()
+  refl::ObjectDef<AccessStepObj>(refl::init(false))
       .def_ro("kind", &AccessStepObj::kind)
       .def_ro("key", &AccessStepObj::key);
 }
@@ -116,7 +116,7 @@ inline void AccessStepRegisterReflection() {
 inline void AccessPathRegisterReflection() {
   // register access path reflection here since it is only needed for bindings
   namespace refl = tvm::ffi::reflection;
-  refl::ObjectDef<AccessPathObj>()
+  refl::ObjectDef<AccessPathObj>(refl::init(false))
       .def_ro("parent", &AccessPathObj::parent)
       .def_ro("step", &AccessPathObj::step)
       .def_ro("depth", &AccessPathObj::depth)

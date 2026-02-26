@@ -180,10 +180,13 @@ cdef class CObject:
 
 
 class _ObjectSlotsMeta(ABCMeta):
-    def __new__(mcls, name: str, bases: tuple[type, ...], ns: dict[str, Any], **kwargs: Any):
-        if "__slots__" not in ns:
+    def __new__(mcls, name: str, bases: tuple[type, ...], ns: dict[str, Any], *, slots: bool = True, **kwargs: Any):
+        if slots and "__slots__" not in ns:
             ns["__slots__"] = ()
         return super().__new__(mcls, name, bases, ns, **kwargs)
+
+    def __init__(cls, name: str, bases: tuple[type, ...], ns: dict[str, Any], *, slots: bool = True, **kwargs: Any):
+        super().__init__(name, bases, ns, **kwargs)
 
     def __instancecheck__(cls, instance: Any) -> bool:
         if isinstance(instance, CObject):

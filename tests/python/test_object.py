@@ -212,7 +212,7 @@ def test_unregistered_object_fallback() -> None:
         ),
         (
             tvm_ffi.testing.TestIntPair,
-            lambda: tvm_ffi.testing.TestIntPair(1, 2),  # type: ignore[call-arg]
+            lambda: tvm_ffi.testing.TestIntPair(1, 2),
         ),
         (
             tvm_ffi.testing.TestObjectDerived,

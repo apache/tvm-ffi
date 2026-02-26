@@ -103,10 +103,8 @@ class TestObjectDerived : public TestObjectBase {
 
 class TestCxxClassBase : public Object {
  public:
-  int64_t v_i64;
-  int32_t v_i32;
-
-  TestCxxClassBase(int64_t v_i64, int32_t v_i32) : v_i64(v_i64), v_i32(v_i32) {}
+  int64_t v_i64 = 0;
+  int32_t v_i32 = 0;
 
   static constexpr bool _type_mutable = true;
   TVM_FFI_DECLARE_OBJECT_INFO("testing.TestCxxClassBase", TestCxxClassBase, Object);
@@ -114,11 +112,8 @@ class TestCxxClassBase : public Object {
 
 class TestCxxClassDerived : public TestCxxClassBase {
  public:
-  double v_f64;
-  float v_f32;
-
-  TestCxxClassDerived(int64_t v_i64, int32_t v_i32, double v_f64, float v_f32)
-      : TestCxxClassBase(v_i64, v_i32), v_f64(v_f64), v_f32(v_f32) {}
+  double v_f64 = 0.0;
+  float v_f32 = 0.0f;
 
   TVM_FFI_DECLARE_OBJECT_INFO("testing.TestCxxClassDerived", TestCxxClassDerived, TestCxxClassBase);
 };
@@ -126,11 +121,7 @@ class TestCxxClassDerived : public TestCxxClassBase {
 class TestCxxClassDerivedDerived : public TestCxxClassDerived {
  public:
   String v_str;
-  bool v_bool;
-
-  TestCxxClassDerivedDerived(int64_t v_i64, int32_t v_i32, double v_f64, float v_f32, String v_str,
-                             bool v_bool)
-      : TestCxxClassDerived(v_i64, v_i32, v_f64, v_f32), v_str(std::move(v_str)), v_bool(v_bool) {}
+  bool v_bool = false;
 
   TVM_FFI_DECLARE_OBJECT_INFO("testing.TestCxxClassDerivedDerived", TestCxxClassDerivedDerived,
                               TestCxxClassDerived);
@@ -138,12 +129,9 @@ class TestCxxClassDerivedDerived : public TestCxxClassDerived {
 
 class TestCxxInitSubsetObj : public Object {
  public:
-  int64_t required_field;
+  int64_t required_field = 0;
   int64_t optional_field = -1;
   String note;
-
-  explicit TestCxxInitSubsetObj(int64_t value, String note)
-      : required_field(value), note(std::move(note)) {}
 
   static constexpr bool _type_mutable = true;
   TVM_FFI_DECLARE_OBJECT_INFO("testing.TestCxxInitSubset", TestCxxInitSubsetObj, Object);
@@ -151,12 +139,10 @@ class TestCxxInitSubsetObj : public Object {
 
 class TestCxxKwOnly : public Object {
  public:
-  int64_t x;
-  int64_t y;
-  int64_t z;
-  int64_t w;
-
-  TestCxxKwOnly(int64_t x, int64_t y, int64_t z, int64_t w) : x(x), y(y), z(z), w(w) {}
+  int64_t x = 0;
+  int64_t y = 0;
+  int64_t z = 0;
+  int64_t w = 0;
 
   static constexpr bool _type_mutable = true;
   TVM_FFI_DECLARE_OBJECT_INFO("testing.TestCxxKwOnly", TestCxxKwOnly, Object);
@@ -409,32 +395,29 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def_rw("v_array", &TestObjectDerived::v_array);
 
   refl::ObjectDef<TestCxxClassBase>()
-      .def(refl::init<int64_t, int32_t>())
       .def_rw("v_i64", &TestCxxClassBase::v_i64, refl::repr(false))
       .def_rw("v_i32", &TestCxxClassBase::v_i32, refl::repr(false));
 
   refl::ObjectDef<TestCxxClassDerived>()
-      .def(refl::init<int64_t, int32_t, double, float>())
       .def_rw("v_f64", &TestCxxClassDerived::v_f64)
-      .def_rw("v_f32", &TestCxxClassDerived::v_f32);
+      .def_rw("v_f32", &TestCxxClassDerived::v_f32, refl::default_(float{8.0f}));
 
   refl::ObjectDef<TestCxxClassDerivedDerived>()
-      .def(refl::init<int64_t, int32_t, double, float, String, bool>())
-      .def_rw("v_str", &TestCxxClassDerivedDerived::v_str)
+      .def_rw("v_str", &TestCxxClassDerivedDerived::v_str, refl::default_(String("default")))
       .def_rw("v_bool", &TestCxxClassDerivedDerived::v_bool);
 
   refl::ObjectDef<TestCxxInitSubsetObj>()
-      .def(refl::init<int64_t, String>())
       .def_rw("required_field", &TestCxxInitSubsetObj::required_field)
-      .def_rw("optional_field", &TestCxxInitSubsetObj::optional_field)
-      .def_rw("note", &TestCxxInitSubsetObj::note);
+      .def_rw("optional_field", &TestCxxInitSubsetObj::optional_field, refl::init(false),
+              refl::default_(int64_t{-1}))
+      .def_rw("note", &TestCxxInitSubsetObj::note, refl::init(false),
+              refl::default_(String("default")));
 
   refl::ObjectDef<TestCxxKwOnly>()
-      .def(refl::init<int64_t, int64_t, int64_t, int64_t>())
-      .def_rw("x", &TestCxxKwOnly::x)
-      .def_rw("y", &TestCxxKwOnly::y)
-      .def_rw("z", &TestCxxKwOnly::z)
-      .def_rw("w", &TestCxxKwOnly::w);
+      .def_rw("x", &TestCxxKwOnly::x, refl::kw_only(true))
+      .def_rw("y", &TestCxxKwOnly::y, refl::kw_only(true))
+      .def_rw("z", &TestCxxKwOnly::z, refl::kw_only(true))
+      .def_rw("w", &TestCxxKwOnly::w, refl::kw_only(true), refl::default_(int64_t{100}));
 
   // No refl::init<>() — auto-generates __ffi_init__ in ObjectDef destructor.
   refl::ObjectDef<TestCxxAutoInitObj>()

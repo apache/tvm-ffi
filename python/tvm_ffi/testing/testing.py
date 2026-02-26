@@ -34,11 +34,11 @@ from typing import ClassVar
 
 from .. import _ffi_api
 from ..core import Object
-from ..dataclasses import c_class, field
-from ..registry import get_global_func, register_object
+from ..dataclasses import c_class
+from ..registry import get_global_func
 
 
-@register_object("testing.TestObjectBase")
+@c_class("testing.TestObjectBase")
 class TestObjectBase(Object):
     """Test object base class."""
 
@@ -48,13 +48,16 @@ class TestObjectBase(Object):
     v_f64: float
     v_str: str
     if TYPE_CHECKING:
+        def __init__(self, v_i64: int = ..., v_f64: float = ..., v_str: str = ...) -> None: ...
         def __ffi_shallow_copy__(self, /) -> Object: ...
         def add_i64(self, _1: int, /) -> int: ...
+        @staticmethod
+        def __c_ffi_init__(*args: Any) -> Any: ...
     # fmt: on
     # tvm-ffi-stubgen(end)
 
 
-@register_object("testing.TestIntPair")
+@c_class("testing.TestIntPair")
 class TestIntPair(Object):
     """Test Int Pair."""
 
@@ -65,6 +68,7 @@ class TestIntPair(Object):
     a: int
     b: int
     if TYPE_CHECKING:
+        def __init__(self, _0: int, _1: int, /) -> None: ...
         def __ffi_shallow_copy__(self, /) -> Object: ...
         @staticmethod
         def __c_ffi_init__(_0: int, _1: int, /) -> Object: ...
@@ -73,7 +77,7 @@ class TestIntPair(Object):
     # tvm-ffi-stubgen(end)
 
 
-@register_object("testing.TestObjectDerived")
+@c_class("testing.TestObjectDerived")
 class TestObjectDerived(TestObjectBase):
     """Test object derived class."""
 
@@ -82,19 +86,30 @@ class TestObjectDerived(TestObjectBase):
     v_map: Mapping[Any, Any]
     v_array: Sequence[Any]
     if TYPE_CHECKING:
+        def __init__(self, v_map: Mapping[Any, Any], v_array: Sequence[Any], v_i64: int = ..., v_f64: float = ..., v_str: str = ...) -> None: ...
         def __ffi_shallow_copy__(self, /) -> Object: ...
+        @staticmethod
+        def __c_ffi_init__(*args: Any) -> Any: ...
     # fmt: on
     # tvm-ffi-stubgen(end)
 
 
-@register_object("testing.TestNonCopyable")
+@c_class("testing.TestNonCopyable")
 class TestNonCopyable(Object):
     """Test object with deleted copy constructor."""
 
+    # tvm-ffi-stubgen(begin): object/testing.TestNonCopyable
+    # fmt: off
     value: int
+    if TYPE_CHECKING:
+        def __init__(self, _0: int, /) -> None: ...
+        @staticmethod
+        def __c_ffi_init__(_0: int, /) -> Object: ...
+    # fmt: on
+    # tvm-ffi-stubgen(end)
 
 
-@register_object("testing.SchemaAllTypes")
+@c_class("testing.SchemaAllTypes")
 class _SchemaAllTypes:
     # tvm-ffi-stubgen(ty-map): testing.SchemaAllTypes -> testing._SchemaAllTypes
     # tvm-ffi-stubgen(begin): object/testing.SchemaAllTypes
@@ -164,167 +179,329 @@ def add_one(x: int) -> int:
     return get_global_func("testing.add_one")(x)
 
 
-@register_object("testing.TestCompare")
+@c_class("testing.TestCompare")
 class TestCompare(Object):
     """Test object with Compare(false) on ignored_field."""
 
     __test__ = False
 
+    # tvm-ffi-stubgen(begin): object/testing.TestCompare
+    # fmt: off
     key: int
     name: str
     ignored_field: int
+    if TYPE_CHECKING:
+        def __init__(self, _0: int, _1: str, _2: int, /) -> None: ...
+        def __ffi_shallow_copy__(self, /) -> Object: ...
+        @staticmethod
+        def __c_ffi_init__(_0: int, _1: str, _2: int, /) -> Object: ...
+    # fmt: on
+    # tvm-ffi-stubgen(end)
 
 
-@register_object("testing.TestHash")
+@c_class("testing.TestHash")
 class TestHash(Object):
     """Test object with Hash(false) on hash_ignored."""
 
     __test__ = False
 
+    # tvm-ffi-stubgen(begin): object/testing.TestHash
+    # fmt: off
     key: int
     name: str
     hash_ignored: int
+    if TYPE_CHECKING:
+        def __init__(self, _0: int, _1: str, _2: int, /) -> None: ...
+        def __ffi_shallow_copy__(self, /) -> Object: ...
+        @staticmethod
+        def __c_ffi_init__(_0: int, _1: str, _2: int, /) -> Object: ...
+    # fmt: on
+    # tvm-ffi-stubgen(end)
 
 
-@register_object("testing.TestCustomHash")
+@c_class("testing.TestCustomHash")
 class TestCustomHash(Object):
     """Test object with custom __ffi_hash__ hook (hashes only key)."""
 
     __test__ = False
 
+    # tvm-ffi-stubgen(begin): object/testing.TestCustomHash
+    # fmt: off
     key: int
     label: str
+    if TYPE_CHECKING:
+        def __init__(self, _0: int, _1: str, /) -> None: ...
+        def __ffi_shallow_copy__(self, /) -> Object: ...
+        @staticmethod
+        def __c_ffi_init__(_0: int, _1: str, /) -> Object: ...
+    # fmt: on
+    # tvm-ffi-stubgen(end)
 
 
-@register_object("testing.TestCustomCompare")
+@c_class("testing.TestCustomCompare")
 class TestCustomCompare(Object):
     """Test object with custom __ffi_eq__/__ffi_compare__ hooks (compares only key)."""
 
     __test__ = False
 
+    # tvm-ffi-stubgen(begin): object/testing.TestCustomCompare
+    # fmt: off
     key: int
     label: str
+    if TYPE_CHECKING:
+        def __init__(self, _0: int, _1: str, /) -> None: ...
+        def __ffi_shallow_copy__(self, /) -> Object: ...
+        @staticmethod
+        def __c_ffi_init__(_0: int, _1: str, /) -> Object: ...
+    # fmt: on
+    # tvm-ffi-stubgen(end)
 
 
-@register_object("testing.TestEqWithoutHash")
+@c_class("testing.TestEqWithoutHash")
 class TestEqWithoutHash(Object):
     """Test object with __ffi_eq__ but no __ffi_hash__ (exercises hash guard)."""
 
     __test__ = False
 
+    # tvm-ffi-stubgen(begin): object/testing.TestEqWithoutHash
+    # fmt: off
     key: int
     label: str
+    if TYPE_CHECKING:
+        def __init__(self, _0: int, _1: str, /) -> None: ...
+        def __ffi_shallow_copy__(self, /) -> Object: ...
+        @staticmethod
+        def __c_ffi_init__(_0: int, _1: str, /) -> Object: ...
+    # fmt: on
+    # tvm-ffi-stubgen(end)
 
 
 @c_class("testing.TestCxxClassBase")
-class _TestCxxClassBase:
+class _TestCxxClassBase(Object):
+    # tvm-ffi-stubgen(ty-map): testing.TestCxxClassBase -> testing._TestCxxClassBase
+    # tvm-ffi-stubgen(begin): object/testing.TestCxxClassBase
+    # fmt: off
     v_i64: int
     v_i32: int
+    if TYPE_CHECKING:
+        def __init__(self, v_i64: int, v_i32: int) -> None: ...
+        def __ffi_shallow_copy__(self, /) -> Object: ...
+        @staticmethod
+        def __c_ffi_init__(*args: Any) -> Any: ...
+    # fmt: on
+    # tvm-ffi-stubgen(end)
     not_field_1 = 1
     not_field_2: ClassVar[int] = 2
 
     def __init__(self, v_i64: int, v_i32: int) -> None:
-        self.__ffi_init__(v_i64 + 1, v_i32 + 2)  # ty: ignore[unresolved-attribute]
+        self.__ffi_init__(v_i64 + 1, v_i32 + 2)
 
 
-@c_class("testing.TestCxxClassDerived")
+@c_class("testing.TestCxxClassDerived", order=True, unsafe_hash=True)
 class _TestCxxClassDerived(_TestCxxClassBase):
+    # tvm-ffi-stubgen(ty-map): testing.TestCxxClassDerived -> testing._TestCxxClassDerived
+    # tvm-ffi-stubgen(begin): object/testing.TestCxxClassDerived
+    # fmt: off
     v_f64: float
-    v_f32: float = 8
+    v_f32: float
+    if TYPE_CHECKING:
+        def __init__(self, v_i64: int, v_i32: int, v_f64: float, v_f32: float = ...) -> None: ...
+        def __ffi_shallow_copy__(self, /) -> Object: ...
+        @staticmethod
+        def __c_ffi_init__(*args: Any) -> Any: ...
+    # fmt: on
+    # tvm-ffi-stubgen(end)
 
 
 @c_class("testing.TestCxxClassDerivedDerived")
 class _TestCxxClassDerivedDerived(_TestCxxClassDerived):
-    v_str: str = field(default_factory=lambda: "default")
-    v_bool: bool  # ty: ignore[dataclass-field-order]  # Required field after fields with defaults
+    # tvm-ffi-stubgen(ty-map): testing.TestCxxClassDerivedDerived -> testing._TestCxxClassDerivedDerived
+    # tvm-ffi-stubgen(begin): object/testing.TestCxxClassDerivedDerived
+    # fmt: off
+    v_str: str
+    v_bool: bool
+    if TYPE_CHECKING:
+        def __init__(self, v_i64: int, v_i32: int, v_f64: float, v_bool: bool, v_f32: float = ..., v_str: str = ...) -> None: ...
+        def __ffi_shallow_copy__(self, /) -> Object: ...
+        @staticmethod
+        def __c_ffi_init__(*args: Any) -> Any: ...
+    # fmt: on
+    # tvm-ffi-stubgen(end)
 
 
 @c_class("testing.TestCxxInitSubset")
-class _TestCxxInitSubset:
+class _TestCxxInitSubset(Object):
+    # tvm-ffi-stubgen(ty-map): testing.TestCxxInitSubset -> testing._TestCxxInitSubset
+    # tvm-ffi-stubgen(begin): object/testing.TestCxxInitSubset
+    # fmt: off
     required_field: int
-    optional_field: int = field(init=False)
-    note: str = field(default_factory=lambda: "py-default", init=False)
+    optional_field: int
+    note: str
+    if TYPE_CHECKING:
+        def __init__(self, required_field: int) -> None: ...
+        def __ffi_shallow_copy__(self, /) -> Object: ...
+        @staticmethod
+        def __c_ffi_init__(*args: Any) -> Any: ...
+    # fmt: on
+    # tvm-ffi-stubgen(end)
 
 
-@c_class("testing.TestCxxKwOnly", kw_only=True)
-class _TestCxxKwOnly:
+@c_class("testing.TestCxxKwOnly")
+class _TestCxxKwOnly(Object):
+    # tvm-ffi-stubgen(ty-map): testing.TestCxxKwOnly -> testing._TestCxxKwOnly
+    # tvm-ffi-stubgen(begin): object/testing.TestCxxKwOnly
+    # fmt: off
     x: int
     y: int
     z: int
-    w: int = 100
+    w: int
+    if TYPE_CHECKING:
+        def __init__(self, *, x: int, y: int, z: int, w: int = ...) -> None: ...
+        def __ffi_shallow_copy__(self, /) -> Object: ...
+        @staticmethod
+        def __c_ffi_init__(*args: Any) -> Any: ...
+    # fmt: on
+    # tvm-ffi-stubgen(end)
 
 
-@register_object("testing.TestCxxAutoInit")
+@c_class("testing.TestCxxAutoInit")
 class _TestCxxAutoInit(Object):
     """Test object with init(false) on b and KwOnly(true) on c."""
 
     __test__ = False
 
+    # tvm-ffi-stubgen(ty-map): testing.TestCxxAutoInit -> testing._TestCxxAutoInit
+    # tvm-ffi-stubgen(begin): object/testing.TestCxxAutoInit
+    # fmt: off
     a: int
     b: int
     c: int
     d: int
+    if TYPE_CHECKING:
+        def __init__(self, a: int, d: int = ..., *, c: int) -> None: ...
+        def __ffi_shallow_copy__(self, /) -> Object: ...
+        @staticmethod
+        def __c_ffi_init__(*args: Any) -> Any: ...
+    # fmt: on
+    # tvm-ffi-stubgen(end)
 
 
-@register_object("testing.TestCxxAutoInitSimple")
+@c_class("testing.TestCxxAutoInitSimple")
 class _TestCxxAutoInitSimple(Object):
     """Test object with all fields positional (no init/KwOnly traits)."""
 
     __test__ = False
 
+    # tvm-ffi-stubgen(ty-map): testing.TestCxxAutoInitSimple -> testing._TestCxxAutoInitSimple
+    # tvm-ffi-stubgen(begin): object/testing.TestCxxAutoInitSimple
+    # fmt: off
     x: int
     y: int
+    if TYPE_CHECKING:
+        def __init__(self, x: int, y: int) -> None: ...
+        def __ffi_shallow_copy__(self, /) -> Object: ...
+        @staticmethod
+        def __c_ffi_init__(*args: Any) -> Any: ...
+    # fmt: on
+    # tvm-ffi-stubgen(end)
 
 
-@register_object("testing.TestCxxAutoInitAllInitOff")
+@c_class("testing.TestCxxAutoInitAllInitOff")
 class _TestCxxAutoInitAllInitOff(Object):
     """Test object with all fields excluded from auto-init (init(false))."""
 
     __test__ = False
 
+    # tvm-ffi-stubgen(ty-map): testing.TestCxxAutoInitAllInitOff -> testing._TestCxxAutoInitAllInitOff
+    # tvm-ffi-stubgen(begin): object/testing.TestCxxAutoInitAllInitOff
+    # fmt: off
     x: int
     y: int
     z: int
+    if TYPE_CHECKING:
+        def __init__(self) -> None: ...
+        def __ffi_shallow_copy__(self, /) -> Object: ...
+        @staticmethod
+        def __c_ffi_init__(*args: Any) -> Any: ...
+    # fmt: on
+    # tvm-ffi-stubgen(end)
 
 
-@register_object("testing.TestCxxAutoInitKwOnlyDefaults")
+@c_class("testing.TestCxxAutoInitKwOnlyDefaults")
 class _TestCxxAutoInitKwOnlyDefaults(Object):
     """Test object with mixed positional/kw-only/default/init=False fields."""
 
     __test__ = False
 
+    # tvm-ffi-stubgen(ty-map): testing.TestCxxAutoInitKwOnlyDefaults -> testing._TestCxxAutoInitKwOnlyDefaults
+    # tvm-ffi-stubgen(begin): object/testing.TestCxxAutoInitKwOnlyDefaults
+    # fmt: off
     p_required: int
     p_default: int
     k_required: int
     k_default: int
     hidden: int
+    if TYPE_CHECKING:
+        def __init__(self, p_required: int, p_default: int = ..., *, k_required: int, k_default: int = ...) -> None: ...
+        def __ffi_shallow_copy__(self, /) -> Object: ...
+        @staticmethod
+        def __c_ffi_init__(*args: Any) -> Any: ...
+    # fmt: on
+    # tvm-ffi-stubgen(end)
 
 
-@register_object("testing.TestCxxNoAutoInit")
+@c_class("testing.TestCxxNoAutoInit", init=False)
 class _TestCxxNoAutoInit(Object):
     """Test object with init(false) at class level — no __ffi_init__ generated."""
 
     __test__ = False
 
+    # tvm-ffi-stubgen(ty-map): testing.TestCxxNoAutoInit -> testing._TestCxxNoAutoInit
+    # tvm-ffi-stubgen(begin): object/testing.TestCxxNoAutoInit
+    # fmt: off
     x: int
     y: int
+    if TYPE_CHECKING:
+        def __ffi_shallow_copy__(self, /) -> Object: ...
+    # fmt: on
+    # tvm-ffi-stubgen(end)
 
 
-@register_object("testing.TestCxxAutoInitParent")
+@c_class("testing.TestCxxAutoInitParent")
 class _TestCxxAutoInitParent(Object):
     """Parent object for inheritance auto-init tests."""
 
     __test__ = False
 
+    # tvm-ffi-stubgen(ty-map): testing.TestCxxAutoInitParent -> testing._TestCxxAutoInitParent
+    # tvm-ffi-stubgen(begin): object/testing.TestCxxAutoInitParent
+    # fmt: off
     parent_required: int
     parent_default: int
+    if TYPE_CHECKING:
+        def __init__(self, parent_required: int, parent_default: int = ...) -> None: ...
+        def __ffi_shallow_copy__(self, /) -> Object: ...
+        @staticmethod
+        def __c_ffi_init__(*args: Any) -> Any: ...
+    # fmt: on
+    # tvm-ffi-stubgen(end)
 
 
-@register_object("testing.TestCxxAutoInitChild")
+@c_class("testing.TestCxxAutoInitChild")
 class _TestCxxAutoInitChild(_TestCxxAutoInitParent):
     """Child object for inheritance auto-init tests."""
 
     __test__ = False
 
+    # tvm-ffi-stubgen(ty-map): testing.TestCxxAutoInitChild -> testing._TestCxxAutoInitChild
+    # tvm-ffi-stubgen(begin): object/testing.TestCxxAutoInitChild
+    # fmt: off
     child_required: int
     child_kw_only: int
+    if TYPE_CHECKING:
+        def __init__(self, parent_required: int, child_required: int, parent_default: int = ..., *, child_kw_only: int) -> None: ...
+        def __ffi_shallow_copy__(self, /) -> Object: ...
+        @staticmethod
+        def __c_ffi_init__(*args: Any) -> Any: ...
+    # fmt: on
+    # tvm-ffi-stubgen(end)
