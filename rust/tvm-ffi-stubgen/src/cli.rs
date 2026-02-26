@@ -28,8 +28,8 @@ pub struct Args {
     pub out_dir: PathBuf,
     #[arg(long = "dlls", value_delimiter = ';', num_args = 1..)]
     pub dlls: Vec<PathBuf>,
-    #[arg(long = "init-prefix")]
-    pub init_prefix: String,
+    #[arg(long = "init-prefix", num_args = 1..)]
+    pub init_prefix: Vec<String>,
     #[arg(long = "init-crate")]
     pub init_crate: String,
     #[arg(long = "tvm-ffi-path")]

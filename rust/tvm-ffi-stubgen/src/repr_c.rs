@@ -63,6 +63,9 @@ pub(crate) fn check_repr_c(
         }
         let parent_info = unsafe { &*ancestor_ptr };
         let key = ffi::byte_array_to_string_opt(&parent_info.type_key)?;
+        if key != "ffi.Object" && !type_map.contains_key(&key) {
+            return None;
+        }
         if !check_repr_c(&key, type_map).is_some() {
             return None;
         }
@@ -236,9 +239,9 @@ fn sanitize_ident(name: &str, style: IdentStyle) -> String {
     }
     const KEYWORDS: &[&str] = &[
         "as", "break", "const", "continue", "crate", "else", "enum", "extern", "false", "fn",
-        "for", "if", "in", "let", "loop", "match", "move", "mut", "pub", "ref", "return", "self",
-        "Self", "static", "struct", "super", "trait", "true", "type", "unsafe", "use", "where",
-        "while", "async", "await", "dyn",
+        "for", "if", "impl", "in", "let", "loop", "match", "mod", "move", "mut", "pub", "ref",
+        "return", "self", "Self", "static", "struct", "super", "trait", "true", "type", "unsafe",
+        "use", "where", "while", "async", "await", "dyn",
     ];
     if KEYWORDS.contains(&out.as_str()) {
         out.push('_');

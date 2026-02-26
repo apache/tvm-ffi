@@ -28,25 +28,40 @@ pub use cli::Args;
 use std::collections::{BTreeSet, HashSet};
 
 pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
-    let prefix = utils::normalize_prefix(&args.init_prefix);
+    if args.init_prefix.is_empty() {
+        return Err("--init-prefix is required".into());
+    }
     if args.dlls.is_empty() {
         return Err("--dlls is required".into());
     }
     utils::ensure_out_dir(&args.out_dir, args.overwrite)?;
+
+    let prefixes: Vec<String> = args
+        .init_prefix
+        .iter()
+        .map(|p| utils::normalize_prefix(p))
+        .collect();
+    // Single prefix: strip it so items land at crate root (backward compat).
+    // Multiple prefixes: don't strip; each prefix becomes a top-level module.
+    let effective_prefix = if prefixes.len() == 1 {
+        prefixes[0].clone()
+    } else {
+        String::new()
+    };
 
     let _loaded_libs = ffi::load_dlls(&args.dlls)?;
 
     let global_funcs = ffi::list_global_function_names()?;
     let filtered_funcs: Vec<String> = global_funcs
         .into_iter()
-        .filter(|name| name.starts_with(&prefix))
+        .filter(|name| prefixes.iter().any(|p| name.starts_with(p)))
         .collect();
 
     let type_keys = ffi::list_registered_type_keys()?;
     let type_key_set: HashSet<String> = type_keys.iter().cloned().collect();
     let mut filtered_types: Vec<String> = type_keys
         .iter()
-        .filter(|name| name.starts_with(&prefix))
+        .filter(|name| prefixes.iter().any(|p| name.starts_with(p)))
         .cloned()
         .collect();
 
@@ -67,12 +82,13 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    let type_map = generate::build_type_map(&filtered_types, &prefix);
-    let functions = generate::build_function_entries(&filtered_funcs, &type_map, &prefix)?;
-    let types = generate::build_type_entries(&filtered_types, &type_map, &prefix)?;
+    let type_map = generate::build_type_map(&filtered_types, &effective_prefix);
+    let functions =
+        generate::build_function_entries(&filtered_funcs, &type_map, &effective_prefix)?;
+    let types = generate::build_type_entries(&filtered_types, &type_map, &effective_prefix)?;
 
-    let functions_root = generate::build_function_modules(functions, &prefix);
-    let types_root = generate::build_type_modules(types, &prefix);
+    let functions_root = generate::build_function_modules(functions, &effective_prefix);
+    let types_root = generate::build_type_modules(types, &effective_prefix);
 
     let cargo_toml = generate::render_cargo_toml(&args, &type_map)?;
     let lib_rs = generate::render_lib_rs(&functions_root, &types_root);

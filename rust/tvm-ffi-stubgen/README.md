@@ -168,6 +168,28 @@ Representative mappings include:
 - `ffi.Array<T>` -> `tvm_ffi::Array<T>`
 - `ffi.Map<K,V>` -> `tvm_ffi::Map<K, V>`
 
+## Multi-Prefix Generation
+
+`--init-prefix` accepts multiple values. Behavior depends on the count:
+
+- **Single prefix** (e.g. `--init-prefix testing`): the prefix is stripped and items land
+  at the crate root. This is the default backward-compatible mode.
+- **Multiple prefixes** (e.g. `--init-prefix tl --init-prefix ir --init-prefix tir`):
+  no prefix is stripped; each prefix naturally becomes a top-level module.
+
+Example with multiple prefixes:
+
+```
+tl.KernelLaunch     → crate::tl::KernelLaunch
+ir.Span             → crate::ir::Span
+tir.BufferLoad      → crate::tir::BufferLoad
+script.ir_builder.* → crate::script::ir_builder::*
+```
+
+This allows a single generated crate to cover multiple namespaces. Cross-namespace
+`repr(C)` inheritance (e.g. `tir.PrimFunc` extending `ir.BaseFunc`) resolves within
+the crate without workarounds.
+
 ## Safety and Fallback Strategy
 
 Generated user-facing code is intended to remain safe Rust.

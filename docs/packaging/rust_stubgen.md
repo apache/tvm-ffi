@@ -38,11 +38,28 @@ cargo run -p tvm-ffi-stubgen -- <OUT_DIR> \
 ### Arguments
 
 - `OUT_DIR`: positional output directory
-- `--dlls`: one or more dynamic libraries for reflection metadata
-- `--init-prefix`: registry prefix filter (functions/types to include)
+- `--dlls`: one or more dynamic libraries for reflection metadata (`;`-separated)
+- `--init-prefix`: registry prefix filter (repeatable; see multi-prefix below)
 - `--init-crate`: generated crate name
 - `--tvm-ffi-path`: optional local path override for `tvm-ffi`
 - `--overwrite`: overwrite non-empty output directory
+
+### Multi-Prefix Mode
+
+`--init-prefix` can be specified multiple times to generate a single crate covering
+several namespaces:
+
+```bash
+cargo run -p tvm-ffi-stubgen -- <OUT_DIR> \
+  --dlls "libtilelang_module.so;libtvm.so" \
+  --init-prefix tl --init-prefix ir --init-prefix tir --init-prefix script \
+  --init-crate tilelang-ffi \
+  --overwrite
+```
+
+With a single prefix the prefix is stripped and items land at the crate root.
+With multiple prefixes no stripping occurs; each prefix becomes a top-level module
+(`crate::tl::*`, `crate::ir::*`, etc.).
 
 ## Generated Output Layout
 

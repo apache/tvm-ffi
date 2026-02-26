@@ -685,7 +685,12 @@ fn render_type_module(
     let indent_str = " ".repeat(indent);
     if indent > 0 {
         writeln!(out, "{}use std::sync::LazyLock;", indent_str).ok();
-        writeln!(out, "{}use tvm_ffi::{{Any, AnyView, Result}};", indent_str).ok();
+        writeln!(
+            out,
+            "{}use tvm_ffi::{{Any, AnyView, ObjectArc, Result}};",
+            indent_str
+        )
+        .ok();
         writeln!(out).ok();
     }
     for ty in &node.types {
@@ -805,22 +810,20 @@ fn render_repr_c_type(
     let indent_str = " ".repeat(indent);
     let obj_name = format!("{}Obj", ty.rust_name);
 
-    // Determine parent type for *Obj struct
+    // Determine parent type for *Obj struct using absolute path into
+    // the types module so cross-module references resolve correctly.
     let parent_ty = match &info.parent_type_key {
         None => "tvm_ffi::object::Object".to_string(),
         Some(parent_key) if parent_key == "ffi.Object" => "tvm_ffi::object::Object".to_string(),
         Some(parent_key) => {
-            // Use the type from type_map to get the full Rust path
             let parent_rust = _type_map
                 .get(parent_key)
                 .map(|s| s.clone())
                 .unwrap_or_else(|| format!("{}Obj", sanitize_ident(parent_key, IdentStyle::Type)));
-            // Extract just the type name and append "Obj"
-            if let Some(last) = parent_rust.split("::").last() {
-                format!("{}Obj", last)
-            } else {
-                format!("{}Obj", sanitize_ident(parent_key, IdentStyle::Type))
-            }
+            // Convert crate path to absolute path inside types module and append Obj
+            let types_path =
+                parent_rust.replacen("crate::", "crate::_tvm_ffi_stubgen_detail::types::", 1);
+            format!("{}Obj", types_path)
         }
     };
 
@@ -871,7 +874,7 @@ fn render_repr_c_type(
         writeln!(out).ok();
     }
 
-    // Generate getter methods for direct fields only
+    // Generate getter methods for direct fields
     writeln!(out, "{}impl {} {{", indent_str, ty.rust_name).ok();
     for f in &info.direct_fields {
         let method_name = format!("get_{}", f.rust_name);
