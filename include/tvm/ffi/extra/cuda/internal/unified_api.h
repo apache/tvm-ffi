@@ -188,6 +188,93 @@ inline ResultType SetKernelMaxDynamicSharedMem(KernelHandle kernel, int shmem,
 #endif
 }
 
+/*!
+ * \brief Launch a kernel using the extended launch API with launch attributes.
+ *
+ * This enables features like cluster dimensions (SM90+) that require
+ * cuLaunchKernelEx / cudaLaunchKernelExC.
+ *
+ * \param kernel The kernel handle.
+ * \param args Array of pointers to kernel arguments.
+ * \param config The launch configuration (grid, block, smem, stream, attributes).
+ * \return Result code.
+ */
+inline ResultType LaunchKernelEx(KernelHandle kernel, void** args, const LaunchConfig& config) {
+  // The underlying CUDA APIs take a pointer to config but do not modify it
+  auto* mutable_config = const_cast<LaunchConfig*>(&config);
+#if TVM_FFI_CUBIN_LAUNCHER_USE_DRIVER_API
+  return cuLaunchKernelEx(mutable_config, reinterpret_cast<CUfunction>(kernel), args, nullptr);
+#else
+  return cudaLaunchKernelExC(mutable_config, reinterpret_cast<const void*>(kernel), args);
+#endif
+}
+
+/*!
+ * \brief Construct a launch configuration with optional cluster dimensions.
+ *
+ * \param kernel The kernel handle (used for setting shared memory attribute).
+ * \param stream The CUDA stream.
+ * \param smem_size Dynamic shared memory size in bytes.
+ * \param grid Grid dimensions.
+ * \param block Block dimensions.
+ * \param cluster_dim Cluster dimension (1 = no clustering, >1 enables cluster launch).
+ * \param[out] config The launch configuration to populate.
+ * \param[out] attr Storage for a launch attribute (must outlive the launch call).
+ * \return Result code from setting shared memory attribute, or kSuccess.
+ */
+inline ResultType ConstructLaunchConfig(KernelHandle kernel, StreamHandle stream, int smem_size,
+                                        tvm::ffi::dim3 grid, tvm::ffi::dim3 block, int cluster_dim,
+                                        LaunchConfig& config, LaunchAttrType& attr) {
+  ResultType err = kSuccess;
+  if (smem_size > 0) {
+#if TVM_FFI_CUBIN_LAUNCHER_USE_DRIVER_API
+    err = cuFuncSetAttribute(reinterpret_cast<CUfunction>(kernel),
+                             CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES, smem_size);
+#else
+    err = cudaFuncSetAttribute(reinterpret_cast<const void*>(kernel),
+                               cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size);
+#endif
+    if (err != kSuccess) return err;
+  }
+
+#if TVM_FFI_CUBIN_LAUNCHER_USE_DRIVER_API
+  config.gridDimX = grid.x;
+  config.gridDimY = grid.y;
+  config.gridDimZ = grid.z;
+  config.blockDimX = block.x;
+  config.blockDimY = block.y;
+  config.blockDimZ = block.z;
+  config.sharedMemBytes = smem_size;
+  config.hStream = stream;
+  config.numAttrs = 0;
+  config.attrs = nullptr;
+
+  if (cluster_dim > 1) {
+    attr.id = CU_LAUNCH_ATTRIBUTE_CLUSTER_DIMENSION;
+    attr.value.clusterDim.x = static_cast<unsigned>(cluster_dim);
+    attr.value.clusterDim.y = 1;
+    attr.value.clusterDim.z = 1;
+    config.attrs = &attr;
+    config.numAttrs = 1;
+  }
+#else
+  config.gridDim = {grid.x, grid.y, grid.z};
+  config.blockDim = {block.x, block.y, block.z};
+  config.dynamicSmemBytes = smem_size;
+  config.stream = stream;
+  config.numAttrs = 0;
+  config.attrs = nullptr;
+
+  if (cluster_dim > 1) {
+    attr.id = cudaLaunchAttributeClusterDimension;
+    attr.val.clusterDim = {static_cast<unsigned>(cluster_dim), 1, 1};
+    config.attrs = &attr;
+    config.numAttrs = 1;
+  }
+#endif
+  return kSuccess;
+}
+
 // Additional wrappers for device operations used in CubinLauncher
 inline ResultType GetDeviceCount(int* count) {
 #if TVM_FFI_CUBIN_LAUNCHER_USE_DRIVER_API

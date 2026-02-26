@@ -482,6 +482,20 @@ class CubinKernel {
     return cuda_api::LaunchKernel(kernel_, args, grid, block, stream, dyn_smem_bytes);
   }
 
+  /*!
+   * \brief Launch the kernel using extended launch API with a pre-built config.
+   *
+   * This enables features like cluster dimensions (SM90+) that require
+   * cuLaunchKernelEx / cudaLaunchKernelExC.
+   *
+   * \param args Array of pointers to kernel arguments.
+   * \param config The launch configuration (populated by ConstructLaunchConfig).
+   * \return Result code.
+   */
+  cuda_api::ResultType LaunchEx(void** args, const cuda_api::LaunchConfig& config) {
+    return cuda_api::LaunchKernelEx(kernel_, args, config);
+  }
+
   /*! \brief Get the underlying cudaKernel_t handle */
   cuda_api::KernelHandle GetHandle() const { return kernel_; }
 
