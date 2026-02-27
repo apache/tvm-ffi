@@ -1311,7 +1311,11 @@ class RecursiveComparer : public ObjectGraphDFS<RecursiveComparer, CompareFrame,
     }
     auto pair = std::make_pair(lhs_obj, rhs_obj);
     if (on_stack_.count(pair)) {
-      TVM_FFI_THROW(ValueError) << "RecursiveCompare: cyclic reference detected";
+      if (eq_only_) {
+        *out = 0;
+        return true;
+      }
+      TVM_FFI_THROW(ValueError) << "RecursiveCompare: cyclic reference detected in ordering";
     }
     if (lti >= TypeIndex::kTVMFFIStaticObjectEnd) {
       return TryCustomHook(lhs_obj, rhs_obj, out);

@@ -17,6 +17,9 @@
 
 import numpy as np
 import tvm_ffi
+import tvm_ffi.testing
+
+_recursive_eq = tvm_ffi.get_global_func("ffi.RecursiveEq")
 
 
 def test_structural_key_basic() -> None:
@@ -111,3 +114,47 @@ def test_structural_key_tensor_content_policy() -> None:
 
     data = {k1: "a", k2: "b"}
     assert len(data) == 2
+
+
+# ---------- RecursiveEq cycle tests ----------
+
+
+def test_recursive_eq_self_referencing_cycle() -> None:
+    """RecursiveEq should return True for structurally equivalent cycles."""
+    v_map = tvm_ffi.Map({})
+    obj = tvm_ffi.testing.create_object(
+        "testing.TestObjectDerived",
+        v_i64=1,
+        v_f64=0.0,
+        v_str="",
+        v_map=v_map,
+        v_array=tvm_ffi.Array([]),
+    )
+    obj.v_array = tvm_ffi.Array([obj])  # type: ignore[unresolved-attribute]
+    # Self-referencing object compared to itself — identity short-circuits.
+    assert _recursive_eq(obj, obj)
+
+
+def test_recursive_eq_mutual_cycle() -> None:
+    """RecursiveEq should return True for two distinct but structurally equivalent cyclic graphs."""
+    v_map = tvm_ffi.Map({})
+
+    def make_cyclic(v_i64: int) -> object:
+        o = tvm_ffi.testing.create_object(
+            "testing.TestObjectDerived",
+            v_i64=v_i64,
+            v_f64=0.0,
+            v_str="x",
+            v_map=v_map,
+            v_array=tvm_ffi.Array([]),
+        )
+        o.v_array = tvm_ffi.Array([o])  # type: ignore[unresolved-attribute]
+        return o
+
+    a = make_cyclic(42)
+    b = make_cyclic(42)
+    # Two distinct objects with identical structure and self-referencing cycles.
+    assert _recursive_eq(a, b)
+    # Different content should not be equal.
+    c = make_cyclic(99)
+    assert not _recursive_eq(a, c)
