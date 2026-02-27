@@ -147,6 +147,43 @@ class TestEqWithoutHash(Object):
     # tvm-ffi-stubgen(end)
 
 
+@register_object("testing.TestHash")
+class TestHash(Object):
+    """Test object with Hash(false) on hash_ignored."""
+
+    __test__ = False
+
+    # tvm-ffi-stubgen(begin): object/testing.TestHash
+    # fmt: off
+    key: int
+    name: str
+    hash_ignored: int
+    if TYPE_CHECKING:
+        def __ffi_shallow_copy__(self, /) -> Object: ...
+        @staticmethod
+        def __c_ffi_init__(_0: int, _1: str, _2: int, /) -> Object: ...
+    # fmt: on
+    # tvm-ffi-stubgen(end)
+
+
+@register_object("testing.TestCustomHash")
+class TestCustomHash(Object):
+    """Test object with custom __ffi_hash__ hook (hashes only key)."""
+
+    __test__ = False
+
+    # tvm-ffi-stubgen(begin): object/testing.TestCustomHash
+    # fmt: off
+    key: int
+    label: str
+    if TYPE_CHECKING:
+        def __ffi_shallow_copy__(self, /) -> Object: ...
+        @staticmethod
+        def __c_ffi_init__(_0: int, _1: str, /) -> Object: ...
+    # fmt: on
+    # tvm-ffi-stubgen(end)
+
+
 @register_object("testing.SchemaAllTypes")
 class _SchemaAllTypes:
     # tvm-ffi-stubgen(ty-map): testing.SchemaAllTypes -> testing._SchemaAllTypes
