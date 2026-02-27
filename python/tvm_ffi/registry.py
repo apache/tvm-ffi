@@ -42,6 +42,16 @@ def register_object(type_key: str | None = None) -> Callable[[_T], _T]:
         The type key of the node. It requires ``type_key`` to be registered already
         on the C++ side. If not specified, the class name will be used.
 
+    Notes
+    -----
+    All :class:`Object` subclasses get ``__slots__ = ()`` by default via the
+    metaclass, preventing per-instance ``__dict__``.  To opt out and allow
+    arbitrary instance attributes, pass ``slots=False`` in the class header::
+
+        @tvm_ffi.register_object("test.MyObject")
+        class MyObject(Object, slots=False):
+            pass
+
     Examples
     --------
     The following code registers MyObject using type key "test.MyObject", if the
@@ -334,7 +344,14 @@ __SENTINEL = object()
 
 
 def _make_init(type_cls: type, type_info: TypeInfo) -> Callable[..., None]:
-    """Build a Python ``__init__`` that delegates to the C++ auto-generated ``__ffi_init__``."""
+    """Build a Python ``__init__`` that delegates to the C++ auto-generated ``__ffi_init__``.
+
+    Reads per-field ``c_init``, ``c_kw_only``, and ``c_has_default`` from the
+    TypeField bitmask fields and produces a function with matching Python
+    signature.  The ``__init__`` body is a trivial adapter — all validation
+    (too many positional, duplicates, missing required, kw_only enforcement,
+    unknown kwargs) is handled by C++.
+    """
     sig = _make_init_signature(type_info)
     kwargs_obj = core.KWARGS
 
@@ -353,7 +370,12 @@ def _make_init(type_cls: type, type_info: TypeInfo) -> Callable[..., None]:
 
 
 def _make_init_signature(type_info: TypeInfo) -> inspect.Signature:
-    """Build an ``inspect.Signature`` from reflection field metadata."""
+    """Build an ``inspect.Signature`` from reflection field metadata.
+
+    Walks the parent chain (parent-first) to collect all ``init=True`` fields,
+    reorders required-before-optional within each group, and returns a
+    Signature for introspection.
+    """
     positional: list[tuple[str, bool]] = []  # (name, has_default)
     kw_only: list[tuple[str, bool]] = []  # (name, has_default)
 
@@ -456,48 +478,6 @@ def _setup_copy_methods(
             setattr(type_cls, "__replace__", _replace_unsupported)
 
 
-def _install_init(cls: type, *, enabled: bool) -> None:
-    """Install ``__init__`` from C++ reflection metadata, or a guard."""
-    if "__init__" in cls.__dict__:
-        return
-    type_info: TypeInfo | None = getattr(cls, "__tvm_ffi_type_info__", None)
-    if type_info is None:
-        return
-    if enabled:
-        has_c_init = False
-        is_auto_init = False
-        for method in type_info.methods:
-            if method.name == "__ffi_init__":
-                has_c_init = True
-                is_auto_init = bool(method.metadata.get("auto_init", False))
-                break
-        if has_c_init and is_auto_init:
-            setattr(cls, "__init__", _make_init(cls, type_info))
-            return
-        if has_c_init:
-            setattr(cls, "__init__", getattr(cls, "__ffi_init__"))
-            return
-        if issubclass(cls, core.PyNativeObject):
-            return
-        msg = (
-            f"`{cls.__name__}` (C++ type `{type_info.type_key}`) has no __ffi_init__ "
-            f"registered. Either add `refl::init()` to its C++ ObjectDef, "
-            f"or pass `init=False` to @c_class."
-        )
-    else:
-        msg = (
-            f"`{cls.__name__}` cannot be constructed directly. "
-            f"Define a custom __init__ or use a factory method."
-        )
-
-    def __init__(self: Any, *args: Any, **kwargs: Any) -> None:
-        raise TypeError(msg)
-
-    __init__.__qualname__ = f"{cls.__qualname__}.__init__"
-    __init__.__module__ = cls.__module__
-    setattr(cls, "__init__", __init__)
-
-
 def _copy_supported(self: Any) -> Any:
     return self.__ffi_shallow_copy__()
 
@@ -536,6 +516,52 @@ def _replace_unsupported(self: Any, **kwargs: Any) -> Any:
         f"Type `{type(self).__name__}` does not support replace. "
         f"The underlying C++ type is not copy-constructible."
     )
+
+
+def _install_init(cls: type, *, enabled: bool) -> None:
+    """Install ``__init__`` from C++ reflection metadata, or a guard.
+
+    When *enabled* is True, installs a proper ``__init__`` that delegates to
+    the C++ ``__ffi_init__``.  When *enabled* is False (or True but no
+    ``__ffi_init__`` exists), installs a guard that raises ``TypeError``
+    with an actionable message.
+    """
+    if "__init__" in cls.__dict__:
+        return
+    type_info: TypeInfo | None = getattr(cls, "__tvm_ffi_type_info__", None)
+    if type_info is None:
+        return
+    if enabled:
+        has_c_init = False
+        is_auto_init = False
+        for method in type_info.methods:
+            if method.name == "__ffi_init__":
+                has_c_init = True
+                is_auto_init = bool(method.metadata.get("auto_init", False))
+                break
+        if has_c_init and is_auto_init:
+            setattr(cls, "__init__", _make_init(cls, type_info))
+            return
+        if has_c_init:
+            setattr(cls, "__init__", getattr(cls, "__ffi_init__"))
+            return
+        msg = (
+            f"`{cls.__name__}` (C++ type `{type_info.type_key}`) has no __ffi_init__ "
+            f"registered. Either add `refl::init()` to its C++ ObjectDef, "
+            f"or pass `init=False` to @c_class."
+        )
+    else:
+        msg = (
+            f"`{cls.__name__}` cannot be constructed directly. "
+            f"Define a custom __init__ or use a factory method."
+        )
+
+    def __init__(self: Any, *args: Any, **kwargs: Any) -> None:
+        raise TypeError(msg)
+
+    __init__.__qualname__ = f"{cls.__qualname__}.__init__"
+    __init__.__module__ = cls.__module__
+    setattr(cls, "__init__", __init__)
 
 
 def _install_dataclass_dunders(

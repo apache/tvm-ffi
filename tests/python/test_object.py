@@ -149,6 +149,12 @@ def test_object_direct_init_disabled() -> None:
     with pytest.raises(TypeError, match="Cannot directly create UnregisteredObj instance"):
         UnregisteredObj()
 
+    # Registered class with auto-generated __ffi_init__ (all fields have defaults)
+    obj = tvm_ffi.testing.TestObjectBase()
+    assert obj.v_i64 == 10
+    assert obj.v_f64 == 10.0
+    assert obj.v_str == "hello"
+
     # Registered class with __c_ffi_init__ should work fine
     pair = tvm_ffi.testing.TestIntPair(3, 4)  # ty: ignore[too-many-positional-arguments]
     assert pair.a == 3 and pair.b == 4
@@ -206,7 +212,7 @@ def test_unregistered_object_fallback() -> None:
         ),
         (
             tvm_ffi.testing.TestIntPair,
-            lambda: tvm_ffi.testing.TestIntPair(1, 2),  # ty: ignore[too-many-positional-arguments]
+            lambda: tvm_ffi.testing.TestIntPair(1, 2),
         ),
         (
             tvm_ffi.testing.TestObjectDerived,

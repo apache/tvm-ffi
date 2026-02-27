@@ -14,7 +14,7 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-"""C++ FFI classes registered via ``c_class`` decorator."""
+"""C++ FFI classes with structural comparison and hashing."""
 
 from .c_class import c_class
 
