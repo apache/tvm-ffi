@@ -231,6 +231,93 @@ TVM_FFI_DLL_EXPORT_TYPED_FUNC(launch_mul_two, cubin_test::LaunchMulTwo);
 @pytest.mark.skipif(
     not _is_cuda_version_greater_than_13(), reason="CUDA version must be greater than 13.0"
 )
+def test_cubin_launcher_launch_ex() -> None:
+    """Test LaunchEx with ConstructLaunchConfig (no clustering)."""
+    assert torch is not None, "PyTorch is required for this test"
+
+    cubin_bytes = _compile_kernel_to_cubin()
+
+    cpp_code = """
+#include <tvm/ffi/container/tensor.h>
+#include <tvm/ffi/error.h>
+#include <tvm/ffi/extra/c_env_api.h>
+#include <tvm/ffi/extra/cuda/cubin_launcher.h>
+#include <tvm/ffi/function.h>
+
+#include <memory>
+
+namespace cubin_test_launch_ex {
+
+static std::unique_ptr<tvm::ffi::CubinModule> g_module;
+static std::unique_ptr<tvm::ffi::CubinKernel> g_kernel_add_one;
+
+void LoadCubinData(const tvm::ffi::Bytes& cubin_data) {
+  g_module = std::make_unique<tvm::ffi::CubinModule>(cubin_data);
+  g_kernel_add_one = std::make_unique<tvm::ffi::CubinKernel>((*g_module)["add_one_cuda"]);
+}
+
+void LaunchAddOneEx(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
+  TVM_FFI_CHECK(g_module != nullptr, RuntimeError) << "CUBIN module not loaded";
+  TVM_FFI_CHECK(x.ndim() == 1, ValueError) << "Input must be 1D tensor";
+  TVM_FFI_CHECK(y.ndim() == 1, ValueError) << "Output must be 1D tensor";
+  TVM_FFI_CHECK(x.size(0) == y.size(0), ValueError) << "Sizes must match";
+
+  int64_t n = x.size(0);
+  void* x_ptr = x.data_ptr();
+  void* y_ptr = y.data_ptr();
+
+  void* args[] = {&x_ptr, &y_ptr, &n};
+
+  tvm::ffi::dim3 grid((n + 1023) / 1024);
+  tvm::ffi::dim3 block(1024);
+
+  DLDevice device = x.device();
+  auto stream = static_cast<tvm::ffi::cuda_api::StreamHandle>(
+      TVMFFIEnvGetStream(device.device_type, device.device_id));
+
+  // Use ConstructLaunchConfig + LaunchEx (cluster_dim=1 means no clustering)
+  tvm::ffi::cuda_api::LaunchConfig config;
+  tvm::ffi::cuda_api::LaunchAttrType attr;
+  auto err = tvm::ffi::cuda_api::ConstructLaunchConfig(
+      g_kernel_add_one->GetHandle(), stream, /*smem_size=*/0,
+      grid, block, /*cluster_dim=*/1, config, attr);
+  TVM_FFI_CHECK_CUBIN_LAUNCHER_CUDA_ERROR(err);
+
+  auto result = g_kernel_add_one->LaunchEx(args, config);
+  TVM_FFI_CHECK_CUBIN_LAUNCHER_CUDA_ERROR(result);
+}
+
+TVM_FFI_DLL_EXPORT_TYPED_FUNC(load_cubin_data, cubin_test_launch_ex::LoadCubinData);
+TVM_FFI_DLL_EXPORT_TYPED_FUNC(launch_add_one_ex, cubin_test_launch_ex::LaunchAddOneEx);
+
+}  // namespace cubin_test_launch_ex
+"""
+
+    mod = tvm_ffi.cpp.load_inline(
+        "cubin_test_launch_ex",
+        cuda_sources=cpp_code,
+        extra_ldflags=["-lcudart"],
+    )
+
+    load_fn = mod["load_cubin_data"]
+    load_fn(cubin_bytes)
+
+    launch_add_one_ex = mod["launch_add_one_ex"]
+    n = 256
+    x = torch.arange(n, dtype=torch.float32, device="cuda")
+    y = torch.empty(n, dtype=torch.float32, device="cuda")
+
+    launch_add_one_ex(x, y)
+    expected = x + 1
+    torch.testing.assert_close(y, expected)
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="CUBIN launcher only supported on Linux")
+@pytest.mark.skipif(torch is None, reason="PyTorch not installed")
+@pytest.mark.skipif(not _is_cuda_available(), reason="CUDA not available")
+@pytest.mark.skipif(
+    not _is_cuda_version_greater_than_13(), reason="CUDA version must be greater than 13.0"
+)
 def test_cubin_launcher_chained() -> None:
     """Test chaining multiple kernel launches."""
     assert torch is not None, "PyTorch is required for this test"
