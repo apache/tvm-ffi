@@ -136,6 +136,17 @@ def test_opaque_type_error() -> None:
     )
 
 
+def test_object_init() -> None:
+    # Registered class with __c_ffi_init__ should work fine
+    pair = tvm_ffi.testing.TestIntPair(3, 4)  # ty: ignore[too-many-positional-arguments]
+    assert pair.a == 3 and pair.b == 4
+
+    # FFI-returned objects should work fine
+    obj = tvm_ffi.testing.create_object("testing.TestObjectBase", v_i64=7)
+    assert obj.__chandle__() != 0
+    assert obj.v_i64 == 7  # ty: ignore[unresolved-attribute]
+
+
 def test_object_protocol() -> None:
     class CompactObject:
         def __init__(self, backend_obj: Any) -> None:
@@ -172,6 +183,38 @@ def test_unregistered_object_fallback() -> None:
     for _ in range(5):
         obj = tvm_ffi.testing.make_unregistered_object()
         _check_type(obj)
+
+
+@pytest.mark.parametrize(
+    ("test_cls", "make_instance"),
+    [
+        (
+            tvm_ffi.testing.TestObjectBase,
+            lambda: tvm_ffi.testing.create_object("testing.TestObjectBase"),
+        ),
+        (
+            tvm_ffi.testing.TestIntPair,
+            lambda: tvm_ffi.testing.TestIntPair(1, 2),  # ty: ignore[too-many-positional-arguments]
+        ),
+        (
+            tvm_ffi.testing.TestObjectDerived,
+            lambda: tvm_ffi.testing.create_object(
+                "testing.TestObjectDerived",
+                v_i64=20,
+                v_map=tvm_ffi.convert({"a": 1}),
+                v_array=tvm_ffi.convert([1, 2]),
+            ),
+        ),
+    ],
+)
+def test_object_subclass_slots(test_cls: type, make_instance: Any) -> None:
+    slots = test_cls.__dict__.get("__slots__")
+    assert slots == ()
+    assert "__dict__" not in test_cls.__dict__
+    assert "__weakref__" not in test_cls.__dict__
+    obj = make_instance()
+    with pytest.raises(AttributeError):
+        obj._tvm_ffi_test_attr = "nope"
 
 
 @pytest.mark.parametrize(

@@ -113,6 +113,7 @@ class Module(core.Object):
     # tvm-ffi-stubgen(end)
 
     entry_name: ClassVar[str] = "main"  # constant for entry function name
+    __slots__ = ("__dict__",)
 
     @property
     def kind(self) -> str:
@@ -162,10 +163,10 @@ class Module(core.Object):
         """Accessor to allow getting functions as attributes."""
         try:
             func = self.get_function(name)
-            self.__dict__[name] = func
-            return func
-        except AttributeError:
-            raise AttributeError(f"Module has no function '{name}'")
+        except AttributeError as exc:
+            raise AttributeError(f"Module has no function '{name}'") from exc
+        setattr(self, name, func)
+        return func
 
     def get_function(self, name: str, query_imports: bool = False) -> core.Function:
         """Get function from the module.

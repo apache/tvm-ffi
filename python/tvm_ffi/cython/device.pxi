@@ -61,7 +61,8 @@ class DLDeviceType(IntEnum):
     kDLOneAPI = 14
     kDLWebGPU = 15
     kDLHexagon = 16
-    kDLTrn = 17
+    kDLMAIA = 17
+    kDLTrn = 18
 
 
 cdef class Device:
@@ -91,6 +92,7 @@ cdef class Device:
         assert str(dev) == "cuda:0"
 
     """
+    __slots__ = ()
     cdef DLDevice cdevice
 
     _DEVICE_TYPE_TO_NAME = {
@@ -108,6 +110,7 @@ cdef class Device:
       DLDeviceType.kDLOneAPI: "oneapi",
       DLDeviceType.kDLWebGPU: "webgpu",
       DLDeviceType.kDLHexagon: "hexagon",
+      DLDeviceType.kDLMAIA: "maia",
       DLDeviceType.kDLTrn: "trn",
     }
 
@@ -127,6 +130,7 @@ cdef class Device:
         "ext_dev": DLDeviceType.kDLExtDev,
         "hexagon": DLDeviceType.kDLHexagon,
         "webgpu": DLDeviceType.kDLWebGPU,
+        "maia": DLDeviceType.kDLMAIA,
         "trn": DLDeviceType.kDLTrn,
     }
 

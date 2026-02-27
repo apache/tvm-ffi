@@ -19,12 +19,12 @@
 # helper class for string/bytes handling
 
 cdef inline str _string_obj_get_py_str(obj):
-    cdef TVMFFIByteArray* bytes = TVMFFIBytesGetByteArrayPtr((<Object>obj).chandle)
+    cdef TVMFFIByteArray* bytes = TVMFFIBytesGetByteArrayPtr((<CObject>obj).chandle)
     return bytearray_to_str(bytes)
 
 
 cdef inline bytes _bytes_obj_get_py_bytes(obj):
-    cdef TVMFFIByteArray* bytes = TVMFFIBytesGetByteArrayPtr((<Object>obj).chandle)
+    cdef TVMFFIByteArray* bytes = TVMFFIBytesGetByteArrayPtr((<CObject>obj).chandle)
     return bytearray_to_bytes(bytes)
 
 
