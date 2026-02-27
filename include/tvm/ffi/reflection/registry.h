@@ -162,7 +162,7 @@ class DefaultValue : public InfoTrait {
 };
 
 /*! \brief Lowercase alias for DefaultValue, mirrors Python ``default``. */
-class default_ : public DefaultValue {
+class default_value : public DefaultValue {
   using DefaultValue::DefaultValue;
 };
 
@@ -585,7 +585,7 @@ class GlobalDef : public ReflectionDefBase {
  * \code{.cpp}
  * // Per-field opt-out:
  * refl::ObjectDef<Foo>()
- *     .def_rw("hidden", &Foo::hidden, refl::init(false), refl::default_(42));
+ *     .def_rw("hidden", &Foo::hidden, refl::init(false), refl::default_value(42));
  *
  * // Class-level opt-out:
  * refl::ObjectDef<Bar>(refl::init(false))
@@ -674,7 +674,9 @@ struct init<> : public InfoTrait {
 };
 
 /*! \brief CTAD deduction guide: ``init(false)`` deduces to ``init<>``. */
+#if !defined(TVM_FFI_DOXYGEN_MODE)
 init(bool) -> init<>;
+#endif
 
 /*! \brief Well-known type attribute names used by the reflection system. */
 namespace type_attr {

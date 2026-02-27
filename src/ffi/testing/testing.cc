@@ -385,9 +385,9 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
 
   refl::ObjectDef<TestObjectBase>()
-      .def_rw("v_i64", &TestObjectBase::v_i64, refl::default_(10), "i64 field")
-      .def_ro("v_f64", &TestObjectBase::v_f64, refl::default_(10.0))
-      .def_rw("v_str", &TestObjectBase::v_str, refl::default_("hello"))
+      .def_rw("v_i64", &TestObjectBase::v_i64, refl::default_value(10), "i64 field")
+      .def_ro("v_f64", &TestObjectBase::v_f64, refl::default_value(10.0))
+      .def_rw("v_str", &TestObjectBase::v_str, refl::default_value("hello"))
       .def("add_i64", &TestObjectBase::AddI64, "add_i64 method");
 
   refl::ObjectDef<TestObjectDerived>()
@@ -400,55 +400,57 @@ TVM_FFI_STATIC_INIT_BLOCK() {
 
   refl::ObjectDef<TestCxxClassDerived>()
       .def_rw("v_f64", &TestCxxClassDerived::v_f64)
-      .def_rw("v_f32", &TestCxxClassDerived::v_f32, refl::default_(float{8.0f}));
+      .def_rw("v_f32", &TestCxxClassDerived::v_f32, refl::default_value(float{8.0f}));
 
   refl::ObjectDef<TestCxxClassDerivedDerived>()
-      .def_rw("v_str", &TestCxxClassDerivedDerived::v_str, refl::default_(String("default")))
+      .def_rw("v_str", &TestCxxClassDerivedDerived::v_str, refl::default_value(String("default")))
       .def_rw("v_bool", &TestCxxClassDerivedDerived::v_bool);
 
   refl::ObjectDef<TestCxxInitSubsetObj>()
       .def_rw("required_field", &TestCxxInitSubsetObj::required_field)
       .def_rw("optional_field", &TestCxxInitSubsetObj::optional_field, refl::init(false),
-              refl::default_(int64_t{-1}))
+              refl::default_value(int64_t{-1}))
       .def_rw("note", &TestCxxInitSubsetObj::note, refl::init(false),
-              refl::default_(String("default")));
+              refl::default_value(String("default")));
 
   refl::ObjectDef<TestCxxKwOnly>()
       .def_rw("x", &TestCxxKwOnly::x, refl::kw_only(true))
       .def_rw("y", &TestCxxKwOnly::y, refl::kw_only(true))
       .def_rw("z", &TestCxxKwOnly::z, refl::kw_only(true))
-      .def_rw("w", &TestCxxKwOnly::w, refl::kw_only(true), refl::default_(int64_t{100}));
+      .def_rw("w", &TestCxxKwOnly::w, refl::kw_only(true), refl::default_value(int64_t{100}));
 
   // No refl::init<>() — auto-generates __ffi_init__ in ObjectDef destructor.
   refl::ObjectDef<TestCxxAutoInitObj>()
       .def_rw("a", &TestCxxAutoInitObj::a)
-      .def_rw("b", &TestCxxAutoInitObj::b, refl::init(false), refl::default_(int64_t{42}))
+      .def_rw("b", &TestCxxAutoInitObj::b, refl::init(false), refl::default_value(int64_t{42}))
       .def_rw("c", &TestCxxAutoInitObj::c, refl::kw_only(true))
-      .def_rw("d", &TestCxxAutoInitObj::d, refl::default_(int64_t{99}));
+      .def_rw("d", &TestCxxAutoInitObj::d, refl::default_value(int64_t{99}));
 
   refl::ObjectDef<TestCxxAutoInitSimpleObj>()
       .def_rw("x", &TestCxxAutoInitSimpleObj::x)
       .def_rw("y", &TestCxxAutoInitSimpleObj::y);
 
   refl::ObjectDef<TestCxxAutoInitAllInitOffObj>()
-      .def_rw("x", &TestCxxAutoInitAllInitOffObj::x, refl::init(false), refl::default_(int64_t{7}))
-      .def_rw("y", &TestCxxAutoInitAllInitOffObj::y, refl::init(false), refl::default_(int64_t{9}))
+      .def_rw("x", &TestCxxAutoInitAllInitOffObj::x, refl::init(false),
+              refl::default_value(int64_t{7}))
+      .def_rw("y", &TestCxxAutoInitAllInitOffObj::y, refl::init(false),
+              refl::default_value(int64_t{9}))
       .def_rw("z", &TestCxxAutoInitAllInitOffObj::z, refl::init(false));
 
   refl::ObjectDef<TestCxxAutoInitKwOnlyDefaultsObj>()
       .def_rw("p_required", &TestCxxAutoInitKwOnlyDefaultsObj::p_required)
       .def_rw("p_default", &TestCxxAutoInitKwOnlyDefaultsObj::p_default,
-              refl::default_(int64_t{11}))
+              refl::default_value(int64_t{11}))
       .def_rw("k_required", &TestCxxAutoInitKwOnlyDefaultsObj::k_required, refl::kw_only(true))
       .def_rw("k_default", &TestCxxAutoInitKwOnlyDefaultsObj::k_default, refl::kw_only(true),
-              refl::default_(int64_t{22}))
+              refl::default_value(int64_t{22}))
       .def_rw("hidden", &TestCxxAutoInitKwOnlyDefaultsObj::hidden, refl::init(false),
-              refl::default_(int64_t{33}));
+              refl::default_value(int64_t{33}));
 
   refl::ObjectDef<TestCxxAutoInitParentObj>()
       .def_rw("parent_required", &TestCxxAutoInitParentObj::parent_required)
       .def_rw("parent_default", &TestCxxAutoInitParentObj::parent_default,
-              refl::default_(int64_t{5}));
+              refl::default_value(int64_t{5}));
 
   refl::ObjectDef<TestCxxAutoInitChildObj>()
       .def_rw("child_required", &TestCxxAutoInitChildObj::child_required)
@@ -713,11 +715,11 @@ TVM_FFI_STATIC_INIT_BLOCK() {
               refl::Metadata{{"bool_attr", true},  //
                              {"int_attr", 1},      //
                              {"str_attr", "hello"}})
-      .def_rw("v_int", &SchemaAllTypesObj::v_int, refl::default_(0), "int field")
-      .def_rw("v_float", &SchemaAllTypesObj::v_float, refl::default_(0.0), "float field")
+      .def_rw("v_int", &SchemaAllTypesObj::v_int, refl::default_value(0), "int field")
+      .def_rw("v_float", &SchemaAllTypesObj::v_float, refl::default_value(0.0), "float field")
       .def_rw("v_device", &SchemaAllTypesObj::v_device, "device field")
       .def_rw("v_dtype", &SchemaAllTypesObj::v_dtype, "dtype field")
-      .def_rw("v_string", &SchemaAllTypesObj::v_string, refl::default_("s"), "string field")
+      .def_rw("v_string", &SchemaAllTypesObj::v_string, refl::default_value("s"), "string field")
       .def_rw("v_bytes", &SchemaAllTypesObj::v_bytes, "bytes field")
       .def_rw("v_opt_int", &SchemaAllTypesObj::v_opt_int, "optional int")
       .def_rw("v_opt_str", &SchemaAllTypesObj::v_opt_str, "optional str")
