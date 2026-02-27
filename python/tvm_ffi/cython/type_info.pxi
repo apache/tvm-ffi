@@ -216,6 +216,9 @@ class TypeField:
     metadata: dict[str, Any]
     getter: FieldGetter
     setter: FieldSetter
+    c_init: bool = True
+    c_kw_only: bool = False
+    c_has_default: bool = False
     dataclass_field: Any = None
 
     def __post_init__(self):

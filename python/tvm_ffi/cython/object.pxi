@@ -508,6 +508,9 @@ cdef _type_info_create_from_type_key(object type_cls, str type_key):
                 metadata=metadata_obj,
                 getter=getter,
                 setter=setter,
+                c_init=(field.flags & kTVMFFIFieldFlagBitMaskInitOff) == 0,
+                c_kw_only=(field.flags & kTVMFFIFieldFlagBitMaskKwOnly) != 0,
+                c_has_default=(field.flags & kTVMFFIFieldFlagBitMaskHasDefault) != 0,
             )
         )
 
