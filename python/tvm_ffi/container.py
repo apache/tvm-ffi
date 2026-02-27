@@ -194,13 +194,6 @@ class Array(core.Object, Sequence[T]):
         for i in range(length):
             yield self[i]
 
-    def __repr__(self) -> str:
-        """Return a string representation of the array."""
-        # exception safety handling for chandle=None
-        if self.__chandle__() == 0:
-            return type(self).__name__ + "(chandle=None)"
-        return str(core.__object_repr__(self))  # ty: ignore[unresolved-attribute]
-
     def __contains__(self, value: object) -> bool:
         """Check if the array contains a value."""
         return _ffi_api.ArrayContains(self, value)
@@ -340,12 +333,6 @@ class List(core.Object, MutableSequence[T]):
         length = len(self)
         for i in range(length):
             yield cast(T, _ffi_api.ListGetItem(self, i))
-
-    def __repr__(self) -> str:
-        """Return a string representation of the list."""
-        if self.__chandle__() == 0:
-            return type(self).__name__ + "(chandle=None)"
-        return str(core.__object_repr__(self))  # ty: ignore[unresolved-attribute]
 
     def __contains__(self, value: object) -> bool:
         """Check if the list contains a value."""
@@ -555,13 +542,6 @@ class Map(core.Object, Mapping[K, V]):
             return default
         return ret
 
-    def __repr__(self) -> str:
-        """Return a string representation of the map."""
-        # exception safety handling for chandle=None
-        if self.__chandle__() == 0:
-            return type(self).__name__ + "(chandle=None)"
-        return str(core.__object_repr__(self))  # ty: ignore[unresolved-attribute]
-
 
 @register_object("ffi.Dict")
 class Dict(core.Object, MutableMapping[K, V]):
@@ -672,9 +652,3 @@ class Dict(core.Object, MutableMapping[K, V]):
         """Update the dict from a mapping."""
         for k, v in other.items():
             self[k] = v
-
-    def __repr__(self) -> str:
-        """Return a string representation of the dict."""
-        if self.__chandle__() == 0:
-            return type(self).__name__ + "(chandle=None)"
-        return str(core.__object_repr__(self))  # ty: ignore[unresolved-attribute]

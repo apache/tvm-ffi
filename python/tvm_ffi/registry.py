@@ -18,7 +18,6 @@
 
 from __future__ import annotations
 
-import functools
 import json
 import sys
 from typing import Any, Callable, Literal, Sequence, TypeVar, overload
@@ -356,7 +355,13 @@ def _add_class_attrs(type_cls: type, type_info: TypeInfo) -> type:
             setattr(type_cls, "__init__", getattr(type_cls, "__ffi_init__"))
         elif not issubclass(type_cls, core.PyNativeObject):
             setattr(type_cls, "__init__", __init__invalid)
-    is_container = type_info.type_key in ("ffi.Array", "ffi.Map", "ffi.List", "ffi.Dict")
+    is_container = type_info.type_key in (
+        "ffi.Array",
+        "ffi.Map",
+        "ffi.List",
+        "ffi.Dict",
+        "ffi.Shape",
+    )
     _setup_copy_methods(type_cls, has_shallow_copy, is_container=is_container)
     return type_cls
 
@@ -395,12 +400,9 @@ def _copy_supported(self: Any) -> Any:
 
 
 def _deepcopy_supported(self: Any, memo: Any = None) -> Any:
-    return _get_deep_copy_func()(self)
+    from . import _ffi_api  # noqa: PLC0415
 
-
-@functools.lru_cache(maxsize=1)
-def _get_deep_copy_func() -> core.Function:
-    return get_global_func("ffi.DeepCopy")
+    return _ffi_api.DeepCopy(self)
 
 
 def _replace_supported(self: Any, **kwargs: Any) -> Any:

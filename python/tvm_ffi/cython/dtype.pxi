@@ -79,6 +79,7 @@ cdef class DataType:
         assert str(d) == "int32"
 
     """
+    __slots__ = ()
     cdef DLDataType cdtype
 
     def __init__(self, dtype_str: str) -> None:
