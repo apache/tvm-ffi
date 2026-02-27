@@ -253,7 +253,7 @@ and instantiated from Python. The reflection helper
   :cpp:func:`ObjectDef::def <tvm::ffi::reflection::ObjectDef::def>`,
   static via
   :cpp:func:`ObjectDef::def_static <tvm::ffi::reflection::ObjectDef::def_static>`
-- **Constructors** via :cpp:class:`tvm::ffi::reflection::init`
+- **Constructors** via ``init<Args...>()``
 
 
 Register in C++
