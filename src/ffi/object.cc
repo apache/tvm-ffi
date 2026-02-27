@@ -20,18 +20,27 @@
  * \file src/ffi/object.cc
  * \brief Registry to record dynamic types
  */
+#include <tvm/ffi/any.h>
 #include <tvm/ffi/c_api.h>
 #include <tvm/ffi/container/array.h>
 #include <tvm/ffi/container/map.h>
 #include <tvm/ffi/error.h>
 #include <tvm/ffi/function.h>
 #include <tvm/ffi/memory.h>
+#include <tvm/ffi/object.h>
+#include <tvm/ffi/reflection/accessor.h>
+#include <tvm/ffi/reflection/init.h>
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/ffi/string.h>
 
+#include <algorithm>
 #include <memory>
+#include <string_view>
+#include <unordered_map>
 #include <utility>
 #include <vector>
+
+#include "object_internal.h"
 
 namespace tvm {
 namespace ffi {
@@ -455,6 +464,16 @@ class OpaqueObjectImpl : public Object, public TVMFFIOpaqueObjectCell {
   void (*deleter_)(void* handle);
 };
 
+ObjectRef GetMissingObject() {
+  static ObjectRef missing_obj(make_object<Object>());
+  return missing_obj;
+}
+
+ObjectRef GetKwargsObject() {
+  static ObjectRef kwargs_obj(make_object<Object>());
+  return kwargs_obj;
+}
+
 }  // namespace ffi
 }  // namespace tvm
 
@@ -568,8 +587,11 @@ namespace {
 TVM_FFI_STATIC_INIT_BLOCK() {
   using namespace tvm::ffi;
   namespace refl = tvm::ffi::reflection;
-  refl::GlobalDef().def_method("ffi.GetRegisteredTypeKeys", []() -> Array<String> {
-    return tvm::ffi::TypeTable::Global()->GetRegisteredTypeKeys();
-  });
+  refl::GlobalDef()
+      .def_method(
+          "ffi.GetRegisteredTypeKeys",
+          []() -> Array<String> { return tvm::ffi::TypeTable::Global()->GetRegisteredTypeKeys(); })
+      .def("ffi.GetInvalidObject", GetMissingObject)
+      .def("ffi.GetKwargsObject", GetKwargsObject);
 }
 }  // namespace

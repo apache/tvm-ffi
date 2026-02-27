@@ -141,7 +141,7 @@ class TFloat : public TNumber {
 inline void TFloatObj::RegisterReflection() {
   namespace refl = tvm::ffi::reflection;
   refl::ObjectDef<TFloatObj>()
-      .def_ro("value", &TFloatObj::value, "float value field", refl::DefaultValue(10.0))
+      .def_ro("value", &TFloatObj::value, "float value field", refl::default_(10.0))
       .def("sub", [](const TFloatObj* self, double other) -> double { return self->value - other; })
       .def("add", &TFloatObj::Add, "add method");
   refl::TypeAttrDef<TFloatObj>()
@@ -159,8 +159,8 @@ class TPrimExprObj : public Object {
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
     refl::ObjectDef<TPrimExprObj>()
-        .def_rw("dtype", &TPrimExprObj::dtype, "dtype field", refl::DefaultValue("float"))
-        .def_ro("value", &TPrimExprObj::value, "value field", refl::DefaultValue(0))
+        .def_rw("dtype", &TPrimExprObj::dtype, "dtype field", refl::default_("float"))
+        .def_ro("value", &TPrimExprObj::value, "value field", refl::default_(0))
         .def("sub", [](TPrimExprObj* self, double other) -> double {
           // this is ok because TPrimExprObj is declared asmutable
           return self->value - other;
@@ -365,9 +365,9 @@ class TWithDefaultsObj : public Object {
     namespace refl = tvm::ffi::reflection;
     refl::ObjectDef<TWithDefaultsObj>()
         .def_ro("required_val", &TWithDefaultsObj::required_val)
-        .def_ro("default_int", &TWithDefaultsObj::default_int, refl::DefaultValue(42))
-        .def_ro("default_str", &TWithDefaultsObj::default_str, refl::DefaultValue("default"))
-        .def_ro("default_bool", &TWithDefaultsObj::default_bool, refl::DefaultValue(true));
+        .def_ro("default_int", &TWithDefaultsObj::default_int, refl::default_(42))
+        .def_ro("default_str", &TWithDefaultsObj::default_str, refl::default_("default"))
+        .def_ro("default_bool", &TWithDefaultsObj::default_bool, refl::default_(true));
   }
 
   static constexpr TVMFFISEqHashKind _type_s_eq_hash_kind = kTVMFFISEqHashKindTreeNode;
