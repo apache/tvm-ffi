@@ -685,6 +685,208 @@ class TestDeepCopyBranches:
         assert not pair.same_as(deep_pair)
         assert deep_pair.a == 5
 
+    # --- Cycle preservation with immutable root containers ---
+
+    def test_cycle_list_root_map_backref_preserved(self) -> None:
+        """Control case: List root with Map back-reference should preserve cycle."""
+        root_list = tvm_ffi.List()
+        m = tvm_ffi.Map({"list": root_list})
+        root_list.append(m)
+
+        deep_list = copy.deepcopy(root_list)
+        assert not root_list.same_as(deep_list)
+        assert deep_list[0]["list"].same_as(deep_list)
+
+    def test_cycle_map_root_list_backref_preserved(self) -> None:
+        """Map root with List child pointing back should preserve cycle to root copy."""
+        l = tvm_ffi.List()
+        m = tvm_ffi.Map({"list": l})
+        l.append(m)
+
+        deep_map = copy.deepcopy(m)
+        assert not m.same_as(deep_map)
+        assert not l.same_as(deep_map["list"])
+        assert deep_map["list"][0].same_as(deep_map)
+
+    def test_cycle_array_root_list_backref_preserved(self) -> None:
+        """Array root with List child pointing back should preserve cycle to root copy."""
+        l = tvm_ffi.List()
+        a = tvm_ffi.Array([l])
+        l.append(a)
+
+        deep_arr = copy.deepcopy(a)
+        assert not a.same_as(deep_arr)
+        assert not l.same_as(deep_arr[0])
+        assert deep_arr[0][0].same_as(deep_arr)
+
+    def test_cycle_array_root_dict_backref_preserved(self) -> None:
+        """Array root with Dict child pointing back should preserve cycle to root copy."""
+        d = tvm_ffi.Dict()
+        a = tvm_ffi.Array([d])
+        d["self"] = a
+
+        deep_arr = copy.deepcopy(a)
+        assert not a.same_as(deep_arr)
+        assert not d.same_as(deep_arr[0])
+        assert deep_arr[0]["self"].same_as(deep_arr)
+
+    def test_cycle_map_root_dict_backref_preserved(self) -> None:
+        """Map root with Dict child pointing back should preserve cycle to root copy."""
+        d = tvm_ffi.Dict()
+        m = tvm_ffi.Map({"dict": d})
+        d["self"] = m
+
+        deep_map = copy.deepcopy(m)
+        assert not m.same_as(deep_map)
+        assert not d.same_as(deep_map["dict"])
+        assert deep_map["dict"]["self"].same_as(deep_map)
+
+    def test_cycle_map_root_backref_identity_not_duplicated(self) -> None:
+        """Back-references in a map-root cycle should point to the root copied map."""
+        shared_list = tvm_ffi.List()
+        m = tvm_ffi.Map({"l1": shared_list, "l2": shared_list})
+        shared_list.append(m)
+
+        deep_map = copy.deepcopy(m)
+        assert deep_map["l1"].same_as(deep_map["l2"])
+        assert deep_map["l1"][0].same_as(deep_map)
+
+    def test_cycle_map_root_list_key_backref_preserved(self) -> None:
+        """Map-root cycles through keys should preserve back-reference to copied root."""
+        key_list = tvm_ffi.List()
+        m = tvm_ffi.Map({key_list: 1})
+        key_list.append(m)
+
+        deep_map = copy.deepcopy(m)
+        deep_key = next(iter(deep_map.keys()))
+        assert isinstance(deep_key, tvm_ffi.List)
+        assert deep_key[0].same_as(deep_map)
+
+    def test_cycle_map_root_dict_key_backref_preserved(self) -> None:
+        """Map-root cycles through Dict keys should preserve back-reference to copied root."""
+        key_dict = tvm_ffi.Dict()
+        m = tvm_ffi.Map({key_dict: 1})
+        key_dict["self"] = m
+
+        deep_map = copy.deepcopy(m)
+        deep_key = next(iter(deep_map.keys()))
+        assert isinstance(deep_key, tvm_ffi.Dict)
+        assert deep_key["self"].same_as(deep_map)
+
+    def test_cycle_array_root_dict_contains_root_as_key(self) -> None:
+        """Array root with Dict child using the root as key should fix key to copied root."""
+        d = tvm_ffi.Dict()
+        root = tvm_ffi.Array([d])
+        d[root] = 1
+
+        deep_root = copy.deepcopy(root)
+        deep_dict = deep_root[0]
+        deep_key = next(iter(deep_dict.keys()))
+
+        assert not root.same_as(deep_root)
+        assert deep_key.same_as(deep_root)
+        assert not deep_key.same_as(root)
+
+    def test_cycle_map_root_dict_contains_root_as_key(self) -> None:
+        """Map root with Dict child using the root as key should fix key to copied root."""
+        d = tvm_ffi.Dict()
+        root = tvm_ffi.Map({"d": d})
+        d[root] = 1
+
+        deep_root = copy.deepcopy(root)
+        deep_dict = deep_root["d"]
+        deep_key = next(iter(deep_dict.keys()))
+
+        assert not root.same_as(deep_root)
+        assert deep_key.same_as(deep_root)
+        assert not deep_key.same_as(root)
+
+    # --- Python deepcopy protocol consistency for immutable Shape ---
+
+    def test_shape_root_python_deepcopy_matches_ffi_deepcopy(self) -> None:
+        """copy.deepcopy(Shape) should be consistent with ffi.DeepCopy."""
+        deep_copy_fn = tvm_ffi.get_global_func("ffi.DeepCopy")
+        s = tvm_ffi.Shape((2, 3, 4))
+        ffi_copied = deep_copy_fn(s)
+        py_copied = copy.deepcopy(s)
+        assert py_copied == ffi_copied
+        assert isinstance(py_copied, type(s))
+
+    def test_shape_inside_python_container_deepcopy(self) -> None:
+        """Python container deepcopy should handle Shape payloads."""
+        s = tvm_ffi.Shape((1, 2))
+        payload = [s, {"shape": s}]
+        copied = copy.deepcopy(payload)
+        assert copied[0] == s
+        assert copied[1]["shape"] == s  # ty: ignore[invalid-argument-type]
+
+    # --- Cycle fixup: immutable container → reflected object back-reference ---
+
+    def test_cycle_array_root_object_backreference(self) -> None:
+        """Array A → Object X, X.v_array = A.  Deep copy from A."""
+        obj = tvm_ffi.testing.create_object(
+            "testing.TestObjectDerived",
+            v_i64=42,
+            v_map=tvm_ffi.Map({}),
+            v_array=tvm_ffi.Array([]),
+        )
+        arr = tvm_ffi.Array([obj])
+        obj.v_array = arr  # ty: ignore[unresolved-attribute]
+
+        arr_deep = _deep_copy(arr)
+
+        assert not arr.same_as(arr_deep)
+        obj_deep = arr_deep[0]
+        assert not obj.same_as(obj_deep)
+        assert obj_deep.v_i64 == 42
+        assert not obj_deep.v_array.same_as(arr)
+        assert obj_deep.v_array.same_as(arr_deep)
+
+    def test_cycle_map_root_object_backreference(self) -> None:
+        """Map M → Object X, X.v_map = M.  Deep copy from M."""
+        obj = tvm_ffi.testing.create_object(
+            "testing.TestObjectDerived",
+            v_i64=7,
+            v_map=tvm_ffi.Map({}),
+            v_array=tvm_ffi.Array([]),
+        )
+        m = tvm_ffi.Map({"key": obj})
+        obj.v_map = m  # ty: ignore[unresolved-attribute]
+
+        m_deep = _deep_copy(m)
+
+        assert not m.same_as(m_deep)
+        obj_deep = m_deep["key"]
+        assert not obj.same_as(obj_deep)
+        assert obj_deep.v_i64 == 7
+        assert not obj_deep.v_map.same_as(m)
+        assert obj_deep.v_map.same_as(m_deep)
+
+    def test_cycle_nested_array_object_array(self) -> None:
+        """Array → Object → Array → Object → back to root Array."""
+        inner = tvm_ffi.testing.create_object(
+            "testing.TestObjectDerived",
+            v_i64=1,
+            v_map=tvm_ffi.Map({}),
+            v_array=tvm_ffi.Array([]),
+        )
+        outer = tvm_ffi.testing.create_object(
+            "testing.TestObjectDerived",
+            v_i64=2,
+            v_map=tvm_ffi.Map({}),
+            v_array=tvm_ffi.Array([inner]),
+        )
+        root_arr = tvm_ffi.Array([outer])
+        inner.v_array = root_arr  # ty: ignore[unresolved-attribute]
+
+        root_deep = _deep_copy(root_arr)
+
+        assert not root_arr.same_as(root_deep)
+        outer_deep = root_deep[0]
+        inner_deep = outer_deep.v_array[0]
+        assert not inner_deep.v_array.same_as(root_arr)
+        assert inner_deep.v_array.same_as(root_deep)
+
 
 # --------------------------------------------------------------------------- #
 #  __replace__

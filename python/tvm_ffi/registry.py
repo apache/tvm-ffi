@@ -63,8 +63,8 @@ def register_object(type_key: str | None = None) -> Callable[[_T], _T]:
                 return cls
             raise ValueError(f"Cannot find object type index for {object_name}")
         info = core._register_object_by_index(type_index, cls)
-        setattr(cls, "__tvm_ffi_type_info__", info)
         _add_class_attrs(type_cls=cls, type_info=info)
+        setattr(cls, "__tvm_ffi_type_info__", info)
         return cls
 
     if isinstance(type_key, str):
@@ -420,7 +420,6 @@ def _add_class_attrs(type_cls: type, type_info: TypeInfo) -> type:
             setattr(type_cls, name, method.as_callable(type_cls))
         elif not hasattr(type_cls, name):
             setattr(type_cls, name, method.as_callable(type_cls))
-    _install_init(type_cls, enabled=True)
     is_container = type_info.type_key in (
         "ffi.Array",
         "ffi.Map",
@@ -537,6 +536,108 @@ def _replace_unsupported(self: Any, **kwargs: Any) -> Any:
         f"Type `{type(self).__name__}` does not support replace. "
         f"The underlying C++ type is not copy-constructible."
     )
+
+
+def _install_dataclass_dunders(
+    cls: type,
+    *,
+    init: bool,
+    repr: bool,
+    eq: bool,
+    order: bool,
+    unsafe_hash: bool,
+) -> None:
+    """Install structural dunder methods on *cls*.
+
+    Each dunder delegates to the corresponding C++ recursive structural
+    operation.  If the user already defined a dunder in the class body
+    (i.e. it exists in ``cls.__dict__``), it is left untouched.
+
+    Parameters
+    ----------
+    cls
+        The class to install dunders on.
+    init
+        If True, install ``__init__`` from C++ reflection metadata.
+    repr
+        If True, install :func:`~tvm_ffi.core.object_repr` as ``__repr__``.
+    eq
+        If True, install ``__eq__`` and ``__ne__``.
+    order
+        If True, install ``__lt__``, ``__le__``, ``__gt__``, ``__ge__``.
+    unsafe_hash
+        If True, install ``__hash__``.
+
+    """
+    _install_init(cls, enabled=init)
+
+    if repr and "__repr__" not in cls.__dict__:
+        from .core import object_repr  # noqa: PLC0415
+
+        cls.__repr__ = object_repr  # type: ignore[attr-defined]
+
+    from . import _ffi_api  # noqa: PLC0415
+
+    dunders: dict[str, Any] = {}
+
+    if eq:
+        recursive_eq = _ffi_api.RecursiveEq
+
+        def __eq__(self: Any, other: Any) -> bool:
+            if not isinstance(other, type(self)) and not isinstance(self, type(other)):
+                return NotImplemented
+            return recursive_eq(self, other)
+
+        def __ne__(self: Any, other: Any) -> bool:
+            if not isinstance(other, type(self)) and not isinstance(self, type(other)):
+                return NotImplemented
+            return not recursive_eq(self, other)
+
+        dunders["__eq__"] = __eq__
+        dunders["__ne__"] = __ne__
+
+    if unsafe_hash:
+        recursive_hash = _ffi_api.RecursiveHash
+
+        def __hash__(self: Any) -> int:
+            return recursive_hash(self) & 0xFFFFFFFFFFFFFFFF
+
+        dunders["__hash__"] = __hash__
+
+    if order:
+        recursive_lt = _ffi_api.RecursiveLt
+        recursive_le = _ffi_api.RecursiveLe
+        recursive_gt = _ffi_api.RecursiveGt
+        recursive_ge = _ffi_api.RecursiveGe
+
+        def __lt__(self: Any, other: Any) -> bool:
+            if not isinstance(other, type(self)) and not isinstance(self, type(other)):
+                return NotImplemented
+            return recursive_lt(self, other)
+
+        def __le__(self: Any, other: Any) -> bool:
+            if not isinstance(other, type(self)) and not isinstance(self, type(other)):
+                return NotImplemented
+            return recursive_le(self, other)
+
+        def __gt__(self: Any, other: Any) -> bool:
+            if not isinstance(other, type(self)) and not isinstance(self, type(other)):
+                return NotImplemented
+            return recursive_gt(self, other)
+
+        def __ge__(self: Any, other: Any) -> bool:
+            if not isinstance(other, type(self)) and not isinstance(self, type(other)):
+                return NotImplemented
+            return recursive_ge(self, other)
+
+        dunders["__lt__"] = __lt__
+        dunders["__le__"] = __le__
+        dunders["__gt__"] = __gt__
+        dunders["__ge__"] = __ge__
+
+    for name, impl in dunders.items():
+        if name not in cls.__dict__:
+            setattr(cls, name, impl)
 
 
 def get_registered_type_keys() -> Sequence[str]:

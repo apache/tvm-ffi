@@ -35,10 +35,10 @@ from typing import ClassVar
 from .. import _ffi_api
 from ..core import Object
 from ..dataclasses import c_class
-from ..registry import get_global_func, register_object
+from ..registry import get_global_func
 
 
-@register_object("testing.TestObjectBase")
+@c_class("testing.TestObjectBase")
 class TestObjectBase(Object):
     """Test object base class."""
 
@@ -54,9 +54,11 @@ class TestObjectBase(Object):
     # tvm-ffi-stubgen(end)
 
 
-@register_object("testing.TestIntPair")
+@c_class("testing.TestIntPair")
 class TestIntPair(Object):
     """Test Int Pair."""
+
+    __test__ = False
 
     # tvm-ffi-stubgen(begin): object/testing.TestIntPair
     # fmt: off
@@ -71,7 +73,7 @@ class TestIntPair(Object):
     # tvm-ffi-stubgen(end)
 
 
-@register_object("testing.TestObjectDerived")
+@c_class("testing.TestObjectDerived")
 class TestObjectDerived(TestObjectBase):
     """Test object derived class."""
 
@@ -85,14 +87,14 @@ class TestObjectDerived(TestObjectBase):
     # tvm-ffi-stubgen(end)
 
 
-@register_object("testing.TestNonCopyable")
+@c_class("testing.TestNonCopyable")
 class TestNonCopyable(Object):
     """Test object with deleted copy constructor."""
 
     value: int
 
 
-@register_object("testing.TestCompare")
+@c_class("testing.TestCompare")
 class TestCompare(Object):
     """Test object with Compare(false) on ignored_field."""
 
@@ -111,7 +113,7 @@ class TestCompare(Object):
     # tvm-ffi-stubgen(end)
 
 
-@register_object("testing.TestCustomCompare")
+@c_class("testing.TestCustomCompare")
 class TestCustomCompare(Object):
     """Test object with custom __ffi_eq__/__ffi_compare__ hooks (compares only key)."""
 
@@ -129,7 +131,7 @@ class TestCustomCompare(Object):
     # tvm-ffi-stubgen(end)
 
 
-@register_object("testing.TestEqWithoutHash")
+@c_class("testing.TestEqWithoutHash")
 class TestEqWithoutHash(Object):
     """Test object with __ffi_eq__ but no __ffi_hash__ (exercises hash guard)."""
 
@@ -147,7 +149,7 @@ class TestEqWithoutHash(Object):
     # tvm-ffi-stubgen(end)
 
 
-@register_object("testing.TestHash")
+@c_class("testing.TestHash")
 class TestHash(Object):
     """Test object with Hash(false) on hash_ignored."""
 
@@ -166,7 +168,7 @@ class TestHash(Object):
     # tvm-ffi-stubgen(end)
 
 
-@register_object("testing.TestCustomHash")
+@c_class("testing.TestCustomHash")
 class TestCustomHash(Object):
     """Test object with custom __ffi_hash__ hook (hashes only key)."""
 
@@ -184,7 +186,7 @@ class TestCustomHash(Object):
     # tvm-ffi-stubgen(end)
 
 
-@register_object("testing.SchemaAllTypes")
+@c_class("testing.SchemaAllTypes")
 class _SchemaAllTypes:
     # tvm-ffi-stubgen(ty-map): testing.SchemaAllTypes -> testing._SchemaAllTypes
     # tvm-ffi-stubgen(begin): object/testing.SchemaAllTypes
@@ -265,16 +267,30 @@ class _TestCxxClassBase(Object):
         self.__ffi_init__(v_i64 + 1, v_i32 + 2)
 
 
-@c_class("testing.TestCxxClassDerived")
+@c_class("testing.TestCxxClassDerived", eq=True, order=True, unsafe_hash=True)
 class _TestCxxClassDerived(_TestCxxClassBase):
     v_f64: float
     v_f32: float
+    if TYPE_CHECKING:
+
+        def __init__(self, v_i64: int, v_i32: int, v_f64: float, v_f32: float = ...) -> None: ...
 
 
 @c_class("testing.TestCxxClassDerivedDerived")
 class _TestCxxClassDerivedDerived(_TestCxxClassDerived):
     v_str: str
     v_bool: bool
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            v_i64: int,
+            v_i32: int,
+            v_f64: float,
+            v_bool: bool,
+            v_f32: float = ...,
+            v_str: str = ...,
+        ) -> None: ...
 
 
 @c_class("testing.TestCxxInitSubset")
@@ -282,6 +298,9 @@ class _TestCxxInitSubset(Object):
     required_field: int
     optional_field: int
     note: str
+    if TYPE_CHECKING:
+
+        def __init__(self, required_field: int) -> None: ...
 
 
 @c_class("testing.TestCxxKwOnly")
@@ -290,9 +309,12 @@ class _TestCxxKwOnly(Object):
     y: int
     z: int
     w: int
+    if TYPE_CHECKING:
+
+        def __init__(self, *, x: int, y: int, z: int, w: int = ...) -> None: ...
 
 
-@register_object("testing.TestCxxAutoInit")
+@c_class("testing.TestCxxAutoInit")
 class _TestCxxAutoInit(Object):
     """Test object with init(false) on b and KwOnly(true) on c."""
 
@@ -307,7 +329,7 @@ class _TestCxxAutoInit(Object):
         def __init__(self, a: int, d: int = ..., *, c: int) -> None: ...
 
 
-@register_object("testing.TestCxxAutoInitSimple")
+@c_class("testing.TestCxxAutoInitSimple")
 class _TestCxxAutoInitSimple(Object):
     """Test object with all fields positional (no init/KwOnly traits)."""
 
@@ -320,7 +342,7 @@ class _TestCxxAutoInitSimple(Object):
         def __init__(self, x: int, y: int) -> None: ...
 
 
-@register_object("testing.TestCxxAutoInitAllInitOff")
+@c_class("testing.TestCxxAutoInitAllInitOff")
 class _TestCxxAutoInitAllInitOff(Object):
     """Test object with all fields excluded from auto-init (init(false))."""
 
@@ -334,7 +356,7 @@ class _TestCxxAutoInitAllInitOff(Object):
         def __init__(self) -> None: ...
 
 
-@register_object("testing.TestCxxAutoInitKwOnlyDefaults")
+@c_class("testing.TestCxxAutoInitKwOnlyDefaults")
 class _TestCxxAutoInitKwOnlyDefaults(Object):
     """Test object with mixed positional/kw-only/default/init=False fields."""
 
@@ -352,7 +374,7 @@ class _TestCxxAutoInitKwOnlyDefaults(Object):
         ) -> None: ...
 
 
-@register_object("testing.TestCxxNoAutoInit")
+@c_class("testing.TestCxxNoAutoInit", init=False)
 class _TestCxxNoAutoInit(Object):
     """Test object with init(false) at class level — no __ffi_init__ generated."""
 
@@ -362,7 +384,7 @@ class _TestCxxNoAutoInit(Object):
     y: int
 
 
-@register_object("testing.TestCxxAutoInitParent")
+@c_class("testing.TestCxxAutoInitParent")
 class _TestCxxAutoInitParent(Object):
     """Parent object for inheritance auto-init tests."""
 
@@ -375,7 +397,7 @@ class _TestCxxAutoInitParent(Object):
         def __init__(self, parent_required: int, parent_default: int = ...) -> None: ...
 
 
-@register_object("testing.TestCxxAutoInitChild")
+@c_class("testing.TestCxxAutoInitChild")
 class _TestCxxAutoInitChild(_TestCxxAutoInitParent):
     """Child object for inheritance auto-init tests."""
 
