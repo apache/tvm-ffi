@@ -1,4 +1,3 @@
-
 /*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
@@ -26,6 +25,8 @@
 #include <tvm/ffi/container/map.h>
 #include <tvm/ffi/function.h>
 #include <tvm/ffi/reflection/registry.h>
+
+#include "object_internal.h"
 
 namespace tvm {
 namespace ffi {
@@ -56,11 +57,6 @@ class MapForwardIterFunctor {
   mutable ffi::MapObj::iterator iter_;
   ffi::MapObj::iterator end_;
 };
-
-ObjectRef GetMissingObject() {
-  static ObjectRef missing_obj(make_object<Object>());
-  return missing_obj;
-}
 
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
@@ -164,7 +160,6 @@ TVM_FFI_STATIC_INIT_BLOCK() {
                return GetMissingObject();
              }
            })
-      .def("ffi.GetInvalidObject", []() -> ObjectRef { return GetMissingObject(); })
       .def_packed("ffi.Dict",
                   [](ffi::PackedArgs args, Any* ret) {
                     TVM_FFI_ICHECK_EQ(args.size() % 2, 0);

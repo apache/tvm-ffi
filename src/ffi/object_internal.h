@@ -17,32 +17,24 @@
  * under the License.
  */
 /*!
- * \file tvm/ffi/extra/deep_copy.h
- * \brief Reflection-based object copy utilities
+ * \file object_internal.h
+ * \brief Internal declarations for object sentinel helpers.
  */
-#ifndef TVM_FFI_EXTRA_DEEP_COPY_H_
-#define TVM_FFI_EXTRA_DEEP_COPY_H_
+#ifndef TVM_FFI_OBJECT_INTERNAL_H_
+#define TVM_FFI_OBJECT_INTERNAL_H_
 
-#include <tvm/ffi/any.h>
-#include <tvm/ffi/extra/base.h>
+#include <tvm/ffi/object.h>
 
 namespace tvm {
 namespace ffi {
 
-/**
- * \brief Deep copy an ffi::Any value.
- *
- * Recursively copies the value and all reachable objects in its object graph.
- * Copy-constructible types with `ObjectDef` registration automatically support deep copy.
- * Primitive types, strings, and bytes are returned as-is (they are immutable).
- * Arrays, Lists, and Maps are recursively deep copied.
- * Objects without copy support cause a runtime error.
- *
- * \param value The value to deep copy.
- * \return The deep copied value.
- */
-TVM_FFI_EXTRA_CXX_API Any DeepCopy(const Any& value);
+/*! \brief Return the singleton "missing" sentinel object. */
+ObjectRef GetMissingObject();
+
+/*! \brief Return the singleton KWARGS sentinel object. */
+ObjectRef GetKwargsObject();
 
 }  // namespace ffi
 }  // namespace tvm
-#endif  // TVM_FFI_EXTRA_DEEP_COPY_H_
+
+#endif  // TVM_FFI_OBJECT_INTERNAL_H_

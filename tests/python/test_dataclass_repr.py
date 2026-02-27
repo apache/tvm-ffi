@@ -16,6 +16,7 @@
 # under the License.
 """Tests for __ffi_repr__ / ffi.ReprPrint."""
 
+import ast
 import re
 
 import numpy as np
@@ -191,6 +192,7 @@ def test_repr_user_object_all_fields() -> None:
 
 def test_repr_user_object_repr_off() -> None:
     """Test repr of object with Repr(false) fields excluded."""
+    # Positional order: required first (v_i64, v_i32, v_f64), then optional (v_f32)
     obj = tvm_ffi.testing._TestCxxClassDerived(1, 2, 3.5, 4.5)  # ty: ignore[too-many-positional-arguments]
     assert ReprPrint(obj) == "testing.TestCxxClassDerived(v_f64=3.5, v_f32=4.5)"
 
@@ -390,7 +392,8 @@ def test_repr_map_with_object_values() -> None:
 
 def test_repr_derived_derived_shows_all_own_fields() -> None:
     """TestCxxClassDerivedDerived should show v_f64, v_f32, v_str, v_bool (not v_i64, v_i32)."""
-    obj = tvm_ffi.testing._TestCxxClassDerivedDerived(1, 2, 3.0, 4.0, "test", True)  # ty: ignore[too-many-positional-arguments]
+    # Positional order: required (v_i64, v_i32, v_f64, v_bool), then optional (v_f32, v_str)
+    obj = tvm_ffi.testing._TestCxxClassDerivedDerived(1, 2, 3.0, True, 4.0, "test")  # ty: ignore[too-many-positional-arguments]
     assert (
         ReprPrint(obj)
         == 'testing.TestCxxClassDerivedDerived(v_f64=3, v_f32=4, v_str="test", v_bool=True)'
@@ -613,6 +616,54 @@ def test_repr_with_addr_no_fields(monkeypatch: pytest.MonkeyPatch) -> None:
     # TestCxxClassBase has v_i64 and v_i32, both with Repr(false)
     obj = tvm_ffi.testing._TestCxxClassBase(v_i64=1, v_i32=2)
     _check(ReprPrint(obj), rf"testing\.TestCxxClassBase@{A}")
+
+
+# ---------- Additional corner cases (fail-first) ----------
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        'a"b',
+        "a\\b",
+        "\\",
+        '"',
+        "a\nb",
+        "a\rb",
+        "\x1b",
+        "a\x00b",
+    ],
+)
+def test_repr_string_literal_roundtrip_special_chars(value: str) -> None:
+    """String repr should be parseable and round-trip through ast.literal_eval."""
+    assert ast.literal_eval(ReprPrint(value)) == value
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (tvm_ffi.Array(['a"b']), ('a"b',)),
+        (tvm_ffi.List(["a\\b"]), ["a\\b"]),
+        (tvm_ffi.Array(["\\"]), ("\\",)),
+        (tvm_ffi.Dict({"k": "a\nb"}), {"k": "a\nb"}),
+        (tvm_ffi.Map({"k": "a\x00b"}), {"k": "a\x00b"}),
+    ],
+)
+def test_repr_container_literal_roundtrip_special_strings(value: object, expected: object) -> None:
+    """Container repr with string payloads should remain parseable literals."""
+    assert ast.literal_eval(ReprPrint(value)) == expected
+
+
+def test_repr_device_trn_name() -> None:
+    """DLDeviceType.kDLTrn should print as trn:<id>, not unknown:<id>."""
+    assert ReprPrint(tvm_ffi.Device("trn", 0)) == "trn:0"
+
+
+def test_repr_unregistered_object_no_duplicate_field_names() -> None:
+    """Inherited fields should not appear twice in generic repr."""
+    obj = tvm_ffi.testing.make_unregistered_object()
+    result = ReprPrint(obj)
+    assert result.count("v1=") == 1
 
 
 if __name__ == "__main__":
