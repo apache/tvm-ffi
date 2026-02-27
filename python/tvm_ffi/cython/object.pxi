@@ -203,9 +203,10 @@ class Object(CObject, metaclass=_ObjectSlotsMeta):
       identity unless an overridden implementation is provided on the
       concrete type. Use :py:meth:`same_as` to check whether two
       references point to the same underlying object.
-    - Subclasses that omit ``__slots__`` are treated as ``__slots__ = ()``.
-      Subclasses that need per-instance dynamic attributes can opt in with
-      ``__slots__ = ("__dict__",)``.
+    - Subclasses that omit ``__slots__`` get ``__slots__ = ()`` injected
+      automatically by the metaclass.  Pass ``slots=False`` in the class
+      header (e.g. ``class Foo(Object, slots=False)``) to suppress this
+      and allow a per-instance ``__dict__``.
     - Most users interact with subclasses (e.g. :class:`Tensor`,
       :class:`Function`) rather than :py:class:`Object` directly.
 

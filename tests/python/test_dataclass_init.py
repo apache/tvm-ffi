@@ -886,7 +886,7 @@ class TestClassLevelInitFalse:
         assert field_names == ["x", "y"]
 
     def test_direct_construction_raises(self) -> None:
-        with pytest.raises(TypeError):
+        with pytest.raises(TypeError, match="cannot be constructed directly"):
             _TestCxxNoAutoInit(1, 2)  # ty: ignore[too-many-positional-arguments]
 
     def test_has_shallow_copy(self) -> None:
