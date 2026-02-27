@@ -30,6 +30,7 @@
 #include <tvm/ffi/function.h>
 #include <tvm/ffi/function_details.h>
 #include <tvm/ffi/optional.h>
+#include <tvm/ffi/reflection/init.h>
 #include <tvm/ffi/string.h>
 #include <tvm/ffi/type_traits.h>
 
@@ -945,7 +946,7 @@ class ObjectDef : public ReflectionDefBase {
   }
 
   /*! \brief Register the auto-generated packed ``__ffi_init__``. */
-  void AutoRegisterInit() { TVM_FFI_CHECK_SAFE_CALL(TVMFFITypeInfoAddInit(type_index_)); }
+  void AutoRegisterInit() { RegisterAutoInit(type_index_); }
 
   int32_t type_index_;
   const char* type_key_;

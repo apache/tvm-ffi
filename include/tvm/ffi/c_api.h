@@ -1238,18 +1238,6 @@ TVM_FFI_DLL int TVMFFITypeRegisterAttr(int32_t type_index, const TVMFFIByteArray
  */
 TVM_FFI_DLL const TVMFFITypeAttrColumn* TVMFFIGetTypeAttrColumn(const TVMFFIByteArray* attr_name);
 
-/*!
- * \brief Auto-generate and register a packed ``__ffi_init__`` method for the given type.
- *
- * The generated init creates an instance via the type's creator, binds positional
- * (and optionally keyword) arguments to ``init=True`` fields, fills defaults for
- * unbound fields, and registers the result as the type's ``__ffi_init__`` method.
- *
- * \param type_index The runtime type index.
- * \return 0 on success, nonzero on failure.
- */
-TVM_FFI_DLL int TVMFFITypeInfoAddInit(int32_t type_index);
-
 //------------------------------------------------------------
 // Section: Backend noexcept functions for internal use
 //

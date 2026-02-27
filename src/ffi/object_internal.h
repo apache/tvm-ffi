@@ -30,6 +30,7 @@ namespace ffi {
 
 /*! \brief Return the singleton "missing" sentinel object. */
 ObjectRef GetMissingObject();
+
 /*! \brief Return the singleton KWARGS sentinel object. */
 ObjectRef GetKwargsObject();
 

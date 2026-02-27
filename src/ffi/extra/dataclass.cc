@@ -33,6 +33,7 @@
 #include <tvm/ffi/error.h>
 #include <tvm/ffi/extra/dataclass.h>
 #include <tvm/ffi/reflection/accessor.h>
+#include <tvm/ffi/reflection/init.h>
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/ffi/string.h>
 
@@ -1718,6 +1719,8 @@ bool RecursiveGe(const Any& lhs, const Any& rhs) {
 
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
+  // MakeInit
+  refl::GlobalDef().def("ffi.MakeInit", refl::MakeInit);
   // Deep copy
   refl::EnsureTypeAttrColumn(refl::type_attr::kShallowCopy);
   refl::GlobalDef().def("ffi.DeepCopy", DeepCopy);
