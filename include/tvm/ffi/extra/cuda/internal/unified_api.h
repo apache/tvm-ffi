@@ -222,8 +222,8 @@ inline ResultType LaunchKernelEx(KernelHandle kernel, void** args, const LaunchC
  */
 inline ResultType ConstructLaunchConfig(KernelHandle kernel, StreamHandle stream,
                                         uint32_t smem_size, tvm::ffi::dim3 grid,
-                                        tvm::ffi::dim3 block, int cluster_dim,
-                                        LaunchConfig& config, LaunchAttrType& attr) {
+                                        tvm::ffi::dim3 block, int cluster_dim, LaunchConfig& config,
+                                        LaunchAttrType& attr) {
 #if TVM_FFI_CUBIN_LAUNCHER_USE_DRIVER_API
   config.gridDimX = grid.x;
   config.gridDimY = grid.y;
