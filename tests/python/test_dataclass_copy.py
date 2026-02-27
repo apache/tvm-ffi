@@ -345,7 +345,7 @@ _deep_copy = tvm_ffi.get_global_func("ffi.DeepCopy")
 
 
 class TestDeepCopyBranches:
-    """Branch-coverage tests targeting every code path in dataclass.cc."""
+    """Branch-coverage tests targeting every code path in deep_copy.cc."""
 
     # --- Run(): primitive passthrough (type_index < kStaticObjectBegin) ---
 

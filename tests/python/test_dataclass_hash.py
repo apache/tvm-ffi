@@ -437,23 +437,43 @@ def test_map_with_array_values_hash() -> None:
 
 
 def test_inherited_fields_hash_equal() -> None:
-    a = _TestCxxClassDerived(10, 20, 1.5, 2.5)
-    b = _TestCxxClassDerived(10, 20, 1.5, 2.5)
+    a = _TestCxxClassDerived(v_i64=10, v_i32=20, v_f64=1.5, v_f32=2.5)
+    b = _TestCxxClassDerived(v_i64=10, v_i32=20, v_f64=1.5, v_f32=2.5)
     assert RecursiveHash(a) == RecursiveHash(b)
 
 
 def test_inherited_fields_differ_in_base_hash() -> None:
-    a = _TestCxxClassDerived(10, 20, 1.5, 2.5)
-    b = _TestCxxClassDerived(99, 20, 1.5, 2.5)
+    a = _TestCxxClassDerived(v_i64=10, v_i32=20, v_f64=1.5, v_f32=2.5)
+    b = _TestCxxClassDerived(v_i64=99, v_i32=20, v_f64=1.5, v_f32=2.5)
     assert RecursiveHash(a) != RecursiveHash(b)
 
 
 def test_three_level_inheritance_hash() -> None:
-    # Positional order: required (v_i64, v_i32, v_f64, v_bool), then optional (v_f32, v_str)
-    a = _TestCxxClassDerivedDerived(1, 2, 3.0, True, 4.0, "hi")
-    b = _TestCxxClassDerivedDerived(1, 2, 3.0, True, 4.0, "hi")
+    a = _TestCxxClassDerivedDerived(
+        v_i64=1,
+        v_i32=2,
+        v_f64=3.0,
+        v_f32=4.0,
+        v_str="hi",
+        v_bool=True,
+    )
+    b = _TestCxxClassDerivedDerived(
+        v_i64=1,
+        v_i32=2,
+        v_f64=3.0,
+        v_f32=4.0,
+        v_str="hi",
+        v_bool=True,
+    )
     assert RecursiveHash(a) == RecursiveHash(b)
-    c = _TestCxxClassDerivedDerived(1, 2, 3.0, False, 4.0, "hi")
+    c = _TestCxxClassDerivedDerived(
+        v_i64=1,
+        v_i32=2,
+        v_f64=3.0,
+        v_f32=4.0,
+        v_str="hi",
+        v_bool=False,
+    )
     assert RecursiveHash(a) != RecursiveHash(c)
 
 
