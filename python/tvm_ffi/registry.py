@@ -346,6 +346,9 @@ def _add_class_attrs(type_cls: type, type_info: TypeInfo) -> type:
             has_shallow_copy = True
             # Always override: shallow copy is type-specific and must not be inherited
             setattr(type_cls, name, method.as_callable(type_cls))
+        elif name == "__c_ffi_init__":
+            # Always override: each type has its own constructor signature
+            setattr(type_cls, name, method.as_callable(type_cls))
         elif not hasattr(type_cls, name):
             setattr(type_cls, name, method.as_callable(type_cls))
     if "__init__" not in type_cls.__dict__:

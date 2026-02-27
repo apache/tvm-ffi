@@ -34,7 +34,7 @@ from typing import ClassVar
 
 from .. import _ffi_api
 from ..core import Object
-from ..dataclasses import c_class, field
+from ..dataclasses import c_class
 from ..registry import get_global_func, register_object
 
 
@@ -163,38 +163,38 @@ def add_one(x: int) -> int:
 
 
 @c_class("testing.TestCxxClassBase")
-class _TestCxxClassBase:
+class _TestCxxClassBase(Object):
     v_i64: int
     v_i32: int
     not_field_1 = 1
     not_field_2: ClassVar[int] = 2
 
     def __init__(self, v_i64: int, v_i32: int) -> None:
-        self.__ffi_init__(v_i64 + 1, v_i32 + 2)  # ty: ignore[unresolved-attribute]
+        self.__ffi_init__(v_i64 + 1, v_i32 + 2)
 
 
 @c_class("testing.TestCxxClassDerived")
 class _TestCxxClassDerived(_TestCxxClassBase):
     v_f64: float
-    v_f32: float = 8
+    v_f32: float
 
 
 @c_class("testing.TestCxxClassDerivedDerived")
 class _TestCxxClassDerivedDerived(_TestCxxClassDerived):
-    v_str: str = field(default_factory=lambda: "default")
-    v_bool: bool  # ty: ignore[dataclass-field-order]  # Required field after fields with defaults
+    v_str: str
+    v_bool: bool
 
 
 @c_class("testing.TestCxxInitSubset")
-class _TestCxxInitSubset:
+class _TestCxxInitSubset(Object):
     required_field: int
-    optional_field: int = field(init=False)
-    note: str = field(default_factory=lambda: "py-default", init=False)
+    optional_field: int
+    note: str
 
 
-@c_class("testing.TestCxxKwOnly", kw_only=True)
-class _TestCxxKwOnly:
+@c_class("testing.TestCxxKwOnly")
+class _TestCxxKwOnly(Object):
     x: int
     y: int
     z: int
-    w: int = 100
+    w: int

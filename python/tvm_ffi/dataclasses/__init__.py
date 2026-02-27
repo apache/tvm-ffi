@@ -14,11 +14,8 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-"""Experimental FFI interface that exposes C++ classes to Python in dataclass syntax."""
-
-from dataclasses import MISSING
+"""C++ FFI classes registered via ``c_class`` decorator."""
 
 from .c_class import c_class
-from .field import KW_ONLY, Field, field
 
-__all__ = ["KW_ONLY", "MISSING", "Field", "c_class", "field"]
+__all__ = ["c_class"]
