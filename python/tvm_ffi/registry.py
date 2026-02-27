@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import sys
 from typing import Any, Callable, Literal, Sequence, TypeVar, overload
@@ -62,8 +63,8 @@ def register_object(type_key: str | None = None) -> Callable[[_T], _T]:
                 return cls
             raise ValueError(f"Cannot find object type index for {object_name}")
         info = core._register_object_by_index(type_index, cls)
-        _add_class_attrs(type_cls=cls, type_info=info)
         setattr(cls, "__tvm_ffi_type_info__", info)
+        _add_class_attrs(type_cls=cls, type_info=info)
         return cls
 
     if isinstance(type_key, str):
@@ -329,32 +330,97 @@ def init_ffi_api(namespace: str, target_module_name: str | None = None) -> None:
         setattr(target_module, fname, f)
 
 
+__SENTINEL = object()
+
+
+def _make_init(type_cls: type, type_info: TypeInfo) -> Callable[..., None]:
+    """Build a Python ``__init__`` that delegates to the C++ auto-generated ``__ffi_init__``."""
+    sig = _make_init_signature(type_info)
+    kwargs_obj = core.KWARGS
+
+    def __init__(self: Any, *args: Any, **kwargs: Any) -> None:
+        ffi_args: list[Any] = list(args)
+        ffi_args.append(kwargs_obj)
+        for key, val in kwargs.items():
+            ffi_args.append(key)
+            ffi_args.append(val)
+        self.__ffi_init__(*ffi_args)
+
+    __init__.__signature__ = sig  # ty: ignore[unresolved-attribute]
+    __init__.__qualname__ = f"{type_cls.__qualname__}.__init__"
+    __init__.__module__ = type_cls.__module__
+    return __init__
+
+
+def _make_init_signature(type_info: TypeInfo) -> inspect.Signature:
+    """Build an ``inspect.Signature`` from reflection field metadata."""
+    positional: list[tuple[str, bool]] = []  # (name, has_default)
+    kw_only: list[tuple[str, bool]] = []  # (name, has_default)
+
+    # Walk the parent chain to collect all fields (parent-first order).
+    all_fields: list[Any] = []
+    ti: TypeInfo | None = type_info
+    chain: list[TypeInfo] = []
+    while ti is not None:
+        chain.append(ti)
+        ti = ti.parent_type_info
+    for ancestor_info in reversed(chain):
+        all_fields.extend(ancestor_info.fields)
+
+    for field in all_fields:
+        if not field.c_init:
+            continue
+        if field.c_kw_only:
+            kw_only.append((field.name, field.c_has_default))
+        else:
+            positional.append((field.name, field.c_has_default))
+
+    # Required params must come before optional ones within each group.
+    pos_required = [(n, d) for n, d in positional if not d]
+    pos_default = [(n, d) for n, d in positional if d]
+    kw_required = [(n, d) for n, d in kw_only if not d]
+    kw_default = [(n, d) for n, d in kw_only if d]
+
+    params: list[inspect.Parameter] = []
+    params.append(inspect.Parameter("self", inspect.Parameter.POSITIONAL_OR_KEYWORD))
+
+    for name, _has_default in pos_required:
+        params.append(inspect.Parameter(name, inspect.Parameter.POSITIONAL_OR_KEYWORD))
+
+    for name, _has_default in pos_default:
+        params.append(
+            inspect.Parameter(name, inspect.Parameter.POSITIONAL_OR_KEYWORD, default=__SENTINEL)
+        )
+
+    for name, _has_default in kw_required:
+        params.append(inspect.Parameter(name, inspect.Parameter.KEYWORD_ONLY))
+
+    for name, _has_default in kw_default:
+        params.append(inspect.Parameter(name, inspect.Parameter.KEYWORD_ONLY, default=__SENTINEL))
+
+    return inspect.Signature(params)
+
+
 def _add_class_attrs(type_cls: type, type_info: TypeInfo) -> type:
     for field in type_info.fields:
         name = field.name
         if not hasattr(type_cls, name):  # skip already defined attributes
             setattr(type_cls, name, field.as_property(type_cls))
-    has_c_init = False
     has_shallow_copy = False
     for method in type_info.methods:
         name = method.name
         if name == "__ffi_init__":
             name = "__c_ffi_init__"
-            has_c_init = True
         if name == "__ffi_shallow_copy__":
             has_shallow_copy = True
             # Always override: shallow copy is type-specific and must not be inherited
             setattr(type_cls, name, method.as_callable(type_cls))
         elif name == "__c_ffi_init__":
-            # Always override: each type has its own constructor signature
+            # Always override: init is type-specific and must not be inherited
             setattr(type_cls, name, method.as_callable(type_cls))
         elif not hasattr(type_cls, name):
             setattr(type_cls, name, method.as_callable(type_cls))
-    if "__init__" not in type_cls.__dict__:
-        if has_c_init:
-            setattr(type_cls, "__init__", getattr(type_cls, "__ffi_init__"))
-        elif not issubclass(type_cls, core.PyNativeObject):
-            setattr(type_cls, "__init__", __init__invalid)
+    _install_init(type_cls, enabled=True)
     is_container = type_info.type_key in (
         "ffi.Array",
         "ffi.Map",
@@ -391,8 +457,46 @@ def _setup_copy_methods(
             setattr(type_cls, "__replace__", _replace_unsupported)
 
 
-def __init__invalid(self: Any, *args: Any, **kwargs: Any) -> None:
-    raise RuntimeError("The __init__ method of this class is not implemented.")
+def _install_init(cls: type, *, enabled: bool) -> None:
+    """Install ``__init__`` from C++ reflection metadata, or a guard."""
+    if "__init__" in cls.__dict__:
+        return
+    type_info: TypeInfo | None = getattr(cls, "__tvm_ffi_type_info__", None)
+    if type_info is None:
+        return
+    if enabled:
+        has_c_init = False
+        is_auto_init = False
+        for method in type_info.methods:
+            if method.name == "__ffi_init__":
+                has_c_init = True
+                is_auto_init = bool(method.metadata.get("auto_init", False))
+                break
+        if has_c_init and is_auto_init:
+            setattr(cls, "__init__", _make_init(cls, type_info))
+            return
+        if has_c_init:
+            setattr(cls, "__init__", getattr(cls, "__ffi_init__"))
+            return
+        if issubclass(cls, core.PyNativeObject):
+            return
+        msg = (
+            f"`{cls.__name__}` (C++ type `{type_info.type_key}`) has no __ffi_init__ "
+            f"registered. Either add `refl::init()` to its C++ ObjectDef, "
+            f"or pass `init=False` to @c_class."
+        )
+    else:
+        msg = (
+            f"`{cls.__name__}` cannot be constructed directly. "
+            f"Define a custom __init__ or use a factory method."
+        )
+
+    def __init__(self: Any, *args: Any, **kwargs: Any) -> None:
+        raise TypeError(msg)
+
+    __init__.__qualname__ = f"{cls.__qualname__}.__init__"
+    __init__.__module__ = cls.__module__
+    setattr(cls, "__init__", __init__)
 
 
 def _copy_supported(self: Any) -> Any:

@@ -205,6 +205,8 @@ cdef extern from "tvm/ffi/c_api.h":
         kTVMFFIFieldFlagBitMaskHasDefault = 1 << 1
         kTVMFFIFieldFlagBitMaskIsStaticMethod = 1 << 2
         kTVMFFIFieldFlagBitMaskDefaultFromFactory = 1 << 5
+        kTVMFFIFieldFlagBitMaskInitOff = 1 << 9
+        kTVMFFIFieldFlagBitMaskKwOnly = 1 << 10
 
     ctypedef int (*TVMFFIFieldGetter)(void* field, TVMFFIAny* result) noexcept
     ctypedef int (*TVMFFIFieldSetter)(void* field, const TVMFFIAny* value) noexcept

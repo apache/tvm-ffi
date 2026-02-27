@@ -41,3 +41,6 @@ _register_object_by_index(kTVMFFIFunction, Function)
 
 # Global invalid/missing object singleton
 MISSING = _get_global_func("ffi.GetInvalidObject", False)()
+
+# Global kwargs sentinel used by auto-generated __ffi_init__
+KWARGS = _get_global_func("ffi.GetKwargsObject", False)()
