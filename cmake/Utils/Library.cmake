@@ -84,6 +84,7 @@ endfunction ()
 # ~~~
 function (tvm_ffi_add_target_from_obj target_name obj_target_name)
   add_library(${target_name}_static STATIC $<TARGET_OBJECTS:${obj_target_name}>)
+  add_library(${target_name}::static ALIAS ${target_name}_static)
   set_target_properties(
     ${target_name}_static
     PROPERTIES OUTPUT_NAME "${target_name}_static"
@@ -92,6 +93,7 @@ function (tvm_ffi_add_target_from_obj target_name obj_target_name)
                RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
   )
   add_library(${target_name}_shared SHARED $<TARGET_OBJECTS:${obj_target_name}>)
+  add_library(${target_name}::shared ALIAS ${target_name}_shared)
   set_target_properties(
     ${target_name}_shared
     PROPERTIES OUTPUT_NAME "${target_name}"

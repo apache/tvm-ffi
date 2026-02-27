@@ -38,6 +38,7 @@ include(${CMAKE_CURRENT_LIST_DIR}/cmake/Utils/Library.cmake)
 # they can be used in cases where user do not want to link into the library in cases like deferred
 # linking
 add_library(tvm_ffi_header INTERFACE)
+add_library(tvm_ffi::header ALIAS tvm_ffi_header)
 target_compile_features(tvm_ffi_header INTERFACE cxx_std_17)
 
 if (CMAKE_CXX_BYTE_ORDER STREQUAL "BIG_ENDIAN")
