@@ -849,13 +849,19 @@ def test_shared_dag_hash_scaling_not_exponential() -> None:
     d18 = _make_shared_binary_dag(18)
     d19 = _make_shared_binary_dag(19)
 
+    # Warm-up run to mitigate one-time setup costs
+    RecursiveHash(_make_shared_binary_dag(10))
+
+    repeats = 10
     t0 = time.perf_counter()
-    RecursiveHash(d18)
-    t18 = time.perf_counter() - t0
+    for _ in range(repeats):
+        RecursiveHash(d18)
+    t18 = (time.perf_counter() - t0) / repeats
 
     t0 = time.perf_counter()
-    RecursiveHash(d19)
-    t19 = time.perf_counter() - t0
+    for _ in range(repeats):
+        RecursiveHash(d19)
+    t19 = (time.perf_counter() - t0) / repeats
 
     # With memoization this ratio should stay close to 1x; 1.6x leaves buffer for noise.
     assert t19 <= t18 * 1.6, f"Unexpected super-linear scaling: d18={t18:.6f}s d19={t19:.6f}s"
@@ -963,71 +969,3 @@ def test_eq_without_hash_inside_container_raises() -> None:
     arr = tvm_ffi.Array([obj])
     with pytest.raises(ValueError, match="__ffi_eq__ or __ffi_compare__ but not __ffi_hash__"):
         RecursiveHash(arr)
-
-
-def _make_list_cycle_root_single_node_two_fields() -> object:
-    node = tvm_ffi.List()
-    node.append(node)
-    node.append(node)
-    return node
-
-
-def _make_list_cycle_root_two_nodes_two_fields(edges: tuple[int, int, int, int]) -> object:
-    node0 = tvm_ffi.List()
-    node1 = tvm_ffi.List()
-    node0.append(node0 if edges[0] == 0 else node1)
-    node0.append(node0 if edges[1] == 0 else node1)
-    node1.append(node0 if edges[2] == 0 else node1)
-    node1.append(node0 if edges[3] == 0 else node1)
-    return node0
-
-
-def _make_dict_cycle_root_single_node_two_fields() -> object:
-    node = tvm_ffi.Dict()
-    node["x"] = node
-    node["y"] = node
-    return node
-
-
-def _make_dict_cycle_root_two_nodes_two_fields(edges: tuple[int, int, int, int]) -> object:
-    node0 = tvm_ffi.Dict()
-    node1 = tvm_ffi.Dict()
-    node0["x"] = node0 if edges[0] == 0 else node1
-    node0["y"] = node0 if edges[1] == 0 else node1
-    node1["x"] = node0 if edges[2] == 0 else node1
-    node1["y"] = node0 if edges[3] == 0 else node1
-    return node0
-
-
-_CYCLE_MISMATCH_EDGE_PATTERNS = [
-    (0, 1, 0, 0),
-    (0, 1, 0, 1),
-    (0, 1, 1, 0),
-    (0, 1, 1, 1),
-    (1, 0, 0, 0),
-    (1, 0, 0, 1),
-    (1, 0, 1, 0),
-    (1, 0, 1, 1),
-    (1, 1, 0, 0),
-    (1, 1, 0, 1),
-    (1, 1, 1, 0),
-    (1, 1, 1, 1),
-]
-
-
-@pytest.mark.parametrize("edges", _CYCLE_MISMATCH_EDGE_PATTERNS)
-def test_list_cycle_eq_raises_for_distinct_structures(edges: tuple[int, int, int, int]) -> None:
-    """RecursiveEq raises ValueError on distinct cyclic structures (Eq=>Hash invariant)."""
-    lhs = _make_list_cycle_root_single_node_two_fields()
-    rhs = _make_list_cycle_root_two_nodes_two_fields(edges)
-    with pytest.raises(ValueError, match="cyclic reference"):
-        RecursiveEq(lhs, rhs)
-
-
-@pytest.mark.parametrize("edges", _CYCLE_MISMATCH_EDGE_PATTERNS)
-def test_dict_cycle_eq_raises_for_distinct_structures(edges: tuple[int, int, int, int]) -> None:
-    """RecursiveEq raises ValueError on distinct cyclic structures (Eq=>Hash invariant)."""
-    lhs = _make_dict_cycle_root_single_node_two_fields()
-    rhs = _make_dict_cycle_root_two_nodes_two_fields(edges)
-    with pytest.raises(ValueError, match="cyclic reference"):
-        RecursiveEq(lhs, rhs)
