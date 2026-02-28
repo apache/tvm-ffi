@@ -30,12 +30,10 @@ def _is_config_mode() -> bool:
     # sys.orig_argv is available only after python 3.10
     if hasattr(sys, "orig_argv"):
         # Use orig_argv because Python strips the `tvm_ffi.config` from sys.argv when using -m.
-        try:
-            index = sys.orig_argv.index("-m")
-        except ValueError:
-            return False
-        if index + 1 < len(sys.orig_argv) and sys.orig_argv[index + 1] == "tvm_ffi.config":
-            return True
+        argv = sys.orig_argv
+        for i, arg in enumerate(argv):
+            if arg == "-m" and i + 1 < len(argv) and argv[i + 1] == "tvm_ffi.config":
+                return True
     return False
 
 
