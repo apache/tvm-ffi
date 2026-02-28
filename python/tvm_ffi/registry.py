@@ -410,13 +410,11 @@ def _add_class_attrs(type_cls: type, type_info: TypeInfo) -> type:
     for method in type_info.methods:
         name = method.name
         if name == "__ffi_init__":
-            name = "__c_ffi_init__"
-        if name == "__ffi_shallow_copy__":
+            # Always override: init is type-specific and must not be inherited
+            setattr(type_cls, "__c_ffi_init__", method.as_callable(type_cls))
+        elif name == "__ffi_shallow_copy__":
             has_shallow_copy = True
             # Always override: shallow copy is type-specific and must not be inherited
-            setattr(type_cls, name, method.as_callable(type_cls))
-        elif name == "__c_ffi_init__":
-            # Always override: init is type-specific and must not be inherited
             setattr(type_cls, name, method.as_callable(type_cls))
         elif not hasattr(type_cls, name):
             setattr(type_cls, name, method.as_callable(type_cls))
@@ -465,18 +463,12 @@ def _install_init(cls: type, *, enabled: bool) -> None:
     if type_info is None:
         return
     if enabled:
-        has_c_init = False
-        is_auto_init = False
-        for method in type_info.methods:
-            if method.name == "__ffi_init__":
-                has_c_init = True
-                is_auto_init = bool(method.metadata.get("auto_init", False))
-                break
-        if has_c_init and is_auto_init:
-            setattr(cls, "__init__", _make_init(cls, type_info))
-            return
-        if has_c_init:
-            setattr(cls, "__init__", getattr(cls, "__ffi_init__"))
+        ffi_init_method = next((m for m in type_info.methods if m.name == "__ffi_init__"), None)
+        if ffi_init_method is not None:
+            if ffi_init_method.metadata.get("auto_init", False):
+                setattr(cls, "__init__", _make_init(cls, type_info))
+            else:
+                setattr(cls, "__init__", getattr(cls, "__ffi_init__"))
             return
         if issubclass(cls, core.PyNativeObject):
             return

@@ -28,9 +28,10 @@ if TYPE_CHECKING:
 # fmt: on
 # tvm-ffi-stubgen(end)
 import json
+from collections.abc import Sequence
 from enum import IntEnum
 from os import PathLike, fspath
-from typing import ClassVar, cast
+from typing import Any, ClassVar, cast
 
 from . import _ffi_api, core
 from .registry import register_object
