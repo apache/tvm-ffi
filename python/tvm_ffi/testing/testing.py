@@ -92,6 +92,61 @@ class TestNonCopyable(Object):
     value: int
 
 
+@register_object("testing.TestCompare")
+class TestCompare(Object):
+    """Test object with Compare(false) on ignored_field."""
+
+    __test__ = False
+
+    # tvm-ffi-stubgen(begin): object/testing.TestCompare
+    # fmt: off
+    key: int
+    name: str
+    ignored_field: int
+    if TYPE_CHECKING:
+        def __ffi_shallow_copy__(self, /) -> Object: ...
+        @staticmethod
+        def __c_ffi_init__(_0: int, _1: str, _2: int, /) -> Object: ...
+    # fmt: on
+    # tvm-ffi-stubgen(end)
+
+
+@register_object("testing.TestCustomCompare")
+class TestCustomCompare(Object):
+    """Test object with custom __ffi_eq__/__ffi_compare__ hooks (compares only key)."""
+
+    __test__ = False
+
+    # tvm-ffi-stubgen(begin): object/testing.TestCustomCompare
+    # fmt: off
+    key: int
+    label: str
+    if TYPE_CHECKING:
+        def __ffi_shallow_copy__(self, /) -> Object: ...
+        @staticmethod
+        def __c_ffi_init__(_0: int, _1: str, /) -> Object: ...
+    # fmt: on
+    # tvm-ffi-stubgen(end)
+
+
+@register_object("testing.TestEqWithoutHash")
+class TestEqWithoutHash(Object):
+    """Test object with __ffi_eq__ but no __ffi_hash__ (exercises hash guard)."""
+
+    __test__ = False
+
+    # tvm-ffi-stubgen(begin): object/testing.TestEqWithoutHash
+    # fmt: off
+    key: int
+    label: str
+    if TYPE_CHECKING:
+        def __ffi_shallow_copy__(self, /) -> Object: ...
+        @staticmethod
+        def __c_ffi_init__(_0: int, _1: str, /) -> Object: ...
+    # fmt: on
+    # tvm-ffi-stubgen(end)
+
+
 @register_object("testing.SchemaAllTypes")
 class _SchemaAllTypes:
     # tvm-ffi-stubgen(ty-map): testing.SchemaAllTypes -> testing._SchemaAllTypes
