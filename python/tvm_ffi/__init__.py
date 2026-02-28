@@ -19,78 +19,100 @@
 # order matters here so we need to skip isort here
 # isort: skip_file
 
-# HACK: try importing torch first, to avoid a potential
-# symbol conflict when both torch and tvm_ffi are imported.
-# This conflict can be reproduced in a very narrow scenario:
-# 1. GitHub action on Windows X64
-# 2. Python 3.12
-# 3. torch 2.9.0
-try:
-    import torch
-except ImportError:
-    pass
-
-# Always load base libtvm_ffi before any other imports
-from . import libinfo
-
-LIB = libinfo.load_lib_ctypes("apache-tvm-ffi", "tvm_ffi", "RTLD_GLOBAL")
+import sys
+from typing import TYPE_CHECKING
 
 
-# Enable package initialization
-from .registry import (
-    register_object,
-    register_global_func,
-    get_global_func,
-    get_global_func_metadata,
-    remove_global_func,
-    init_ffi_api,
-)
-from ._dtype import dtype
-from .core import Object, ObjectConvertible, Function
-from ._convert import convert
-from .error import register_error
-from ._tensor import Device, device, DLDeviceType
-from ._tensor import from_dlpack, Tensor, Shape
-from .container import Array, Dict, List, Map
-from .module import Module, system_lib, load_module
-from .stream import StreamContext, get_raw_stream, use_raw_stream, use_torch_stream
-from .structural import (
-    StructuralKey,
-    get_first_structural_mismatch,
-    structural_equal,
-    structural_hash,
-)
-from . import serialization
-from . import access_path
-from . import dataclasses
-from . import structural
-from . import cpp
+def _is_config_mode() -> bool:
+    """Check user is invoking the config CLI entry."""
+    if sys.argv[0].endswith("tvm-ffi-config"):
+        return True
+    # sys.orig_argv is available only after python 3.10
+    if hasattr(sys, "orig_argv"):
+        # Use orig_argv because Python strips the `tvm_ffi.config` from sys.argv when using -m.
+        try:
+            index = sys.orig_argv.index("-m")
+        except ValueError:
+            return False
+        if index + 1 < len(sys.orig_argv) and sys.orig_argv[index + 1] == "tvm_ffi.config":
+            return True
+    return False
 
-# optional module to speedup dlpack conversion
-from . import _optional_torch_c_dlpack
 
-# import the dtype literals
-from ._dtype import (
-    bool,
-    int8,
-    int16,
-    int32,
-    int64,
-    uint8,
-    uint16,
-    uint32,
-    uint64,
-    float64,
-    float32,
-    float16,
-    bfloat16,
-    float8_e4m3fn,
-    float8_e4m3fnuz,
-    float8_e5m2,
-    float8_e5m2fnuz,
-    float8_e8m0fnu,
-    float4_e2m1fnx2,
-)
+if TYPE_CHECKING or not _is_config_mode():
+    # Skip eager imports in CLI mode to avoid import
+    # overhead in tvm-ffi-config command
+    # HACK: try importing torch first, to avoid a potential
+    # symbol conflict when both torch and tvm_ffi are imported.
+    # This conflict can be reproduced in a very narrow scenario:
+    # 1. GitHub action on Windows X64
+    # 2. Python 3.12
+    # 3. torch 2.9.0
+    try:
+        import torch
+    except ImportError:
+        pass
+
+    # Always load base libtvm_ffi before any other imports
+    from . import libinfo
+
+    LIB = libinfo.load_lib_ctypes("apache-tvm-ffi", "tvm_ffi", "RTLD_GLOBAL")
+
+    # Enable package initialization
+    from .registry import (
+        register_object,
+        register_global_func,
+        get_global_func,
+        get_global_func_metadata,
+        remove_global_func,
+        init_ffi_api,
+    )
+    from ._dtype import dtype
+    from .core import Object, ObjectConvertible, Function
+    from ._convert import convert
+    from .error import register_error
+    from ._tensor import Device, device, DLDeviceType
+    from ._tensor import from_dlpack, Tensor, Shape
+    from .container import Array, Dict, List, Map
+    from .module import Module, system_lib, load_module
+    from .stream import StreamContext, get_raw_stream, use_raw_stream, use_torch_stream
+    from .structural import (
+        StructuralKey,
+        get_first_structural_mismatch,
+        structural_equal,
+        structural_hash,
+    )
+    from . import serialization
+    from . import access_path
+    from . import dataclasses
+    from . import structural
+    from . import cpp
+
+    # optional module to speedup dlpack conversion
+    from . import _optional_torch_c_dlpack
+
+    # import the dtype literals
+    from ._dtype import (
+        bool,
+        int8,
+        int16,
+        int32,
+        int64,
+        uint8,
+        uint16,
+        uint32,
+        uint64,
+        float64,
+        float32,
+        float16,
+        bfloat16,
+        float8_e4m3fn,
+        float8_e4m3fnuz,
+        float8_e5m2,
+        float8_e5m2fnuz,
+        float8_e8m0fnu,
+        float4_e2m1fnx2,
+    )
 
 try:
     from ._version import __version__, __version_tuple__
