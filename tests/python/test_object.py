@@ -153,6 +153,26 @@ def test_object_init() -> None:
     assert obj.v_i64 == 7  # ty: ignore[unresolved-attribute]
 
 
+def test_register_object_wires_init() -> None:
+    """Regression: register_object must wire __init__ from __ffi_init__.
+
+    Without _install_init in register_object, calling TestIntPair(1, 2)
+    falls through to object.__init__ which silently ignores args on
+    Cython extension types (CObject has custom tp_new).  The result is
+    chandle = NULL.  Any subsequent field access dereferences
+    chandle + offset → segfault.
+    """
+    # Construction must produce a live handle, not NULL.
+    pair = tvm_ffi.testing.TestIntPair(3, 7)
+    assert pair.__chandle__() != 0
+    assert pair.a == 3
+    assert pair.b == 7
+
+    # __new__ alone must NOT produce a usable object (chandle stays NULL).
+    bare = tvm_ffi.testing.TestIntPair.__new__(tvm_ffi.testing.TestIntPair)
+    assert bare.__chandle__() == 0
+
+
 def test_object_protocol() -> None:
     class CompactObject:
         def __init__(self, backend_obj: Any) -> None:
