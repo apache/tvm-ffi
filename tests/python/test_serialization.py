@@ -406,7 +406,7 @@ class TestObjectSerialization:
 
     def test_int_pair_roundtrip(self) -> None:
         """TestIntPair has refl::init and POD int64 fields."""
-        pair = tvm_ffi.testing.TestIntPair(3, 7)  # ty: ignore[too-many-positional-arguments]
+        pair = tvm_ffi.testing.TestIntPair(3, 7)
         s = to_json_graph_str(pair)
         result = from_json_graph_str(s)
         assert result.a == 3
@@ -414,21 +414,21 @@ class TestObjectSerialization:
 
     def test_int_pair_zero_values(self) -> None:
         """TestIntPair with zero values roundtrips correctly."""
-        pair = tvm_ffi.testing.TestIntPair(0, 0)  # ty: ignore[too-many-positional-arguments]
+        pair = tvm_ffi.testing.TestIntPair(0, 0)
         result = _roundtrip(pair)
         assert result.a == 0
         assert result.b == 0
 
     def test_int_pair_negative_values(self) -> None:
         """TestIntPair with negative values roundtrips correctly."""
-        pair = tvm_ffi.testing.TestIntPair(-100, -200)  # ty: ignore[too-many-positional-arguments]
+        pair = tvm_ffi.testing.TestIntPair(-100, -200)
         result = _roundtrip(pair)
         assert result.a == -100
         assert result.b == -200
 
     def test_int_pair_large_values(self) -> None:
         """TestIntPair with large values roundtrips correctly."""
-        pair = tvm_ffi.testing.TestIntPair(10**15, -(10**15))  # ty: ignore[too-many-positional-arguments]
+        pair = tvm_ffi.testing.TestIntPair(10**15, -(10**15))
         result = _roundtrip(pair)
         assert result.a == 10**15
         assert result.b == -(10**15)
@@ -516,7 +516,7 @@ class TestJSONStructure:
 
     def test_object_pod_fields_are_inlined(self) -> None:
         """POD fields (int, bool, float) are inlined directly via field_static_type_index."""
-        pair = tvm_ffi.testing.TestIntPair(3, 7)  # ty: ignore[too-many-positional-arguments]
+        pair = tvm_ffi.testing.TestIntPair(3, 7)
         s = to_json_graph_str(pair)
         parsed = json.loads(s)
         root = parsed["nodes"][parsed["root_index"]]

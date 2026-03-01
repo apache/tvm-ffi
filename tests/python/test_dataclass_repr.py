@@ -193,7 +193,7 @@ def test_repr_user_object_all_fields() -> None:
 def test_repr_user_object_repr_off() -> None:
     """Test repr of object with Repr(false) fields excluded."""
     # Positional order: required first (v_i64, v_i32, v_f64), then optional (v_f32)
-    obj = tvm_ffi.testing._TestCxxClassDerived(1, 2, 3.5, 4.5)  # ty: ignore[too-many-positional-arguments]
+    obj = tvm_ffi.testing._TestCxxClassDerived(1, 2, 3.5, 4.5)
     assert ReprPrint(obj) == "testing.TestCxxClassDerived(v_f64=3.5, v_f32=4.5)"
 
 
@@ -393,7 +393,7 @@ def test_repr_map_with_object_values() -> None:
 def test_repr_derived_derived_shows_all_own_fields() -> None:
     """TestCxxClassDerivedDerived should show v_f64, v_f32, v_str, v_bool (not v_i64, v_i32)."""
     # Positional order: required (v_i64, v_i32, v_f64, v_bool), then optional (v_f32, v_str)
-    obj = tvm_ffi.testing._TestCxxClassDerivedDerived(1, 2, 3.0, True, 4.0, "test")  # ty: ignore[too-many-positional-arguments]
+    obj = tvm_ffi.testing._TestCxxClassDerivedDerived(1, 2, 3.0, True, 4.0, "test")
     assert (
         ReprPrint(obj)
         == 'testing.TestCxxClassDerivedDerived(v_f64=3, v_f32=4, v_str="test", v_bool=True)'

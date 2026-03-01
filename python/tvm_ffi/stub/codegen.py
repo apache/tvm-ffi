@@ -109,7 +109,8 @@ def generate_object(
     info = obj_info
     method_names = {m.schema.name.rsplit(".", 1)[-1] for m in info.methods}
     fn_ty_map = _type_suffix_and_record(ty_map, imports, func_names=method_names)
-    if info.methods:
+    init_lines = info.gen_init(fn_ty_map, indent=opt.indent)
+    if info.methods or init_lines:
         imports.append(
             ImportItem(
                 "typing.TYPE_CHECKING",
@@ -120,6 +121,7 @@ def generate_object(
             "# fmt: off",
             *info.gen_fields(fn_ty_map, indent=0),
             "if TYPE_CHECKING:",
+            *init_lines,
             *info.gen_methods(fn_ty_map, indent=opt.indent),
             "# fmt: on",
         ]

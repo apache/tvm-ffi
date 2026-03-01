@@ -33,13 +33,13 @@ class TestShallowCopy:
     """Tests for copy.copy() / __copy__."""
 
     def test_basic_fields(self) -> None:
-        pair = tvm_ffi.testing.TestIntPair(1, 2)  # ty: ignore[too-many-positional-arguments]
+        pair = tvm_ffi.testing.TestIntPair(1, 2)
         pair_copy = copy.copy(pair)
         assert pair_copy.a == 1
         assert pair_copy.b == 2
 
     def test_creates_new_object(self) -> None:
-        pair = tvm_ffi.testing.TestIntPair(3, 7)  # ty: ignore[too-many-positional-arguments]
+        pair = tvm_ffi.testing.TestIntPair(3, 7)
         pair_copy = copy.copy(pair)
         assert not pair.same_as(pair_copy)
 
@@ -83,10 +83,10 @@ class TestShallowCopy:
         obj_copy = copy.copy(obj)
         assert obj_copy.v_i64 == 2
         assert obj_copy.v_i32 == 4
-        assert not obj.same_as(obj_copy)  # ty: ignore[unresolved-attribute]
+        assert not obj.same_as(obj_copy)
 
     def test_non_copyable_type_raises(self) -> None:
-        obj = tvm_ffi.testing.TestNonCopyable(42)  # ty: ignore[too-many-positional-arguments]
+        obj = tvm_ffi.testing.TestNonCopyable(42)
         with pytest.raises(TypeError, match="does not support copy"):
             copy.copy(obj)
 
@@ -98,14 +98,14 @@ class TestDeepCopy:
     """Tests for copy.deepcopy() / __deepcopy__."""
 
     def test_basic_fields(self) -> None:
-        pair = tvm_ffi.testing.TestIntPair(5, 10)  # ty: ignore[too-many-positional-arguments]
+        pair = tvm_ffi.testing.TestIntPair(5, 10)
         pair_deep = copy.deepcopy(pair)
         assert pair_deep.a == 5
         assert pair_deep.b == 10
         assert not pair.same_as(pair_deep)
 
     def test_nested_objects_are_copied(self) -> None:
-        inner = tvm_ffi.testing.TestIntPair(1, 2)  # ty: ignore[too-many-positional-arguments]
+        inner = tvm_ffi.testing.TestIntPair(1, 2)
         v_array = tvm_ffi.convert([inner])
         v_map = tvm_ffi.convert({"x": "y"})
         obj = tvm_ffi.testing.create_object(
@@ -125,7 +125,7 @@ class TestDeepCopy:
 
     def test_shared_references_preserved(self) -> None:
         """Two array slots pointing to the same object should still share after deepcopy."""
-        shared = tvm_ffi.testing.TestIntPair(7, 8)  # ty: ignore[too-many-positional-arguments]
+        shared = tvm_ffi.testing.TestIntPair(7, 8)
         v_array = tvm_ffi.convert([shared, shared])
         v_map = tvm_ffi.convert({"a": "b"})
         obj = tvm_ffi.testing.create_object(
@@ -217,7 +217,7 @@ class TestDeepCopy:
 
     def test_array_root(self) -> None:
         """Deepcopy with a bare Array as root should create a new array."""
-        inner = tvm_ffi.testing.TestIntPair(1, 2)  # ty: ignore[too-many-positional-arguments]
+        inner = tvm_ffi.testing.TestIntPair(1, 2)
         arr = tvm_ffi.convert([inner, "hello", 42])
         arr_deep = copy.deepcopy(arr)
         assert not arr.same_as(arr_deep)
@@ -230,7 +230,7 @@ class TestDeepCopy:
 
     def test_map_root(self) -> None:
         """Deepcopy with a bare Map as root should create a new map."""
-        inner = tvm_ffi.testing.TestIntPair(3, 4)  # ty: ignore[too-many-positional-arguments]
+        inner = tvm_ffi.testing.TestIntPair(3, 4)
         m = tvm_ffi.convert({"key": inner})
         m_deep = copy.deepcopy(m)
         assert not m.same_as(m_deep)
@@ -240,7 +240,7 @@ class TestDeepCopy:
 
     def test_dict_root(self) -> None:
         """Deepcopy with a bare Dict as root should create a new dict."""
-        inner = tvm_ffi.testing.TestIntPair(3, 4)  # ty: ignore[too-many-positional-arguments]
+        inner = tvm_ffi.testing.TestIntPair(3, 4)
         d = tvm_ffi.Dict({"key": inner})
         d_deep = copy.deepcopy(d)
         assert not d.same_as(d_deep)
@@ -255,10 +255,10 @@ class TestDeepCopy:
         obj_deep = copy.deepcopy(obj)
         assert obj_deep.v_i64 == 2
         assert obj_deep.v_i32 == 4
-        assert not obj.same_as(obj_deep)  # ty: ignore[unresolved-attribute]
+        assert not obj.same_as(obj_deep)
 
     def test_non_copyable_type_raises(self) -> None:
-        obj = tvm_ffi.testing.TestNonCopyable(42)  # ty: ignore[too-many-positional-arguments]
+        obj = tvm_ffi.testing.TestNonCopyable(42)
         with pytest.raises(TypeError, match="does not support deepcopy"):
             copy.deepcopy(obj)
 
@@ -281,7 +281,7 @@ class TestDeepCopy:
 
     def test_any_field_with_object(self) -> None:
         """Any-typed field containing an object must be recursively copied."""
-        inner = tvm_ffi.testing.TestIntPair(3, 4)  # ty: ignore[too-many-positional-arguments]
+        inner = tvm_ffi.testing.TestIntPair(3, 4)
         obj = tvm_ffi.testing.create_object("testing.TestDeepCopyEdges", v_any=inner, v_obj=inner)
         obj_deep = copy.deepcopy(obj)
         assert not obj.same_as(obj_deep)
@@ -330,7 +330,7 @@ class TestDeepCopy:
 
     def test_any_field_sharing_preserved(self) -> None:
         """Shared references through Any and ObjectRef fields are preserved."""
-        shared = tvm_ffi.testing.TestIntPair(5, 6)  # ty: ignore[too-many-positional-arguments]
+        shared = tvm_ffi.testing.TestIntPair(5, 6)
         obj = tvm_ffi.testing.create_object("testing.TestDeepCopyEdges", v_any=shared, v_obj=shared)
         obj_deep = copy.deepcopy(obj)
         # Both fields should point to the same copied object
@@ -339,7 +339,7 @@ class TestDeepCopy:
 
 
 # --------------------------------------------------------------------------- #
-#  Deep copy branch coverage (C++ deep_copy.cc)
+#  Deep copy branch coverage (C++ dataclass.cc)
 # --------------------------------------------------------------------------- #
 _deep_copy = tvm_ffi.get_global_func("ffi.DeepCopy")
 
@@ -401,7 +401,7 @@ class TestDeepCopyBranches:
 
     def test_array_mixed_with_objects_and_containers(self) -> None:
         """Array with int, str, None, object, nested array, nested map."""
-        inner_obj = tvm_ffi.testing.TestIntPair(1, 2)  # ty: ignore[too-many-positional-arguments]
+        inner_obj = tvm_ffi.testing.TestIntPair(1, 2)
         inner_arr = tvm_ffi.convert([10, 20])
         inner_map = tvm_ffi.convert({"k": "v"})
         arr = tvm_ffi.convert([42, "hello", None, inner_obj, inner_arr, inner_map])
@@ -533,7 +533,7 @@ class TestDeepCopyBranches:
 
     def test_shared_object_across_array_and_map(self) -> None:
         """Same object referenced from both v_array and v_map."""
-        pair = tvm_ffi.testing.TestIntPair(7, 8)  # ty: ignore[too-many-positional-arguments]
+        pair = tvm_ffi.testing.TestIntPair(7, 8)
         v_array = tvm_ffi.convert([pair])
         v_map = tvm_ffi.convert({"p": pair})
         obj = tvm_ffi.testing.create_object(
@@ -644,13 +644,13 @@ class TestDeepCopyBranches:
         assert m_deep["k"].v_i32 == 4
 
     def test_non_copyable_type_in_array(self) -> None:
-        obj = tvm_ffi.testing.TestNonCopyable(1)  # ty: ignore[too-many-positional-arguments]
+        obj = tvm_ffi.testing.TestNonCopyable(1)
         arr = tvm_ffi.convert([obj])
         with pytest.raises(RuntimeError, match="not copy-constructible"):
             copy.deepcopy(arr)
 
     def test_non_copyable_type_in_map_value(self) -> None:
-        obj = tvm_ffi.testing.TestNonCopyable(1)  # ty: ignore[too-many-positional-arguments]
+        obj = tvm_ffi.testing.TestNonCopyable(1)
         m = tvm_ffi.convert({"k": obj})
         with pytest.raises(RuntimeError, match="not copy-constructible"):
             copy.deepcopy(m)
@@ -659,7 +659,7 @@ class TestDeepCopyBranches:
 
     def test_deeply_nested_containers(self) -> None:
         """Array > Map > Array > object — all levels resolved."""
-        pair = tvm_ffi.testing.TestIntPair(9, 10)  # ty: ignore[too-many-positional-arguments]
+        pair = tvm_ffi.testing.TestIntPair(9, 10)
         inner_arr = tvm_ffi.convert([pair])
         inner_map = tvm_ffi.convert({"items": inner_arr})
         outer = tvm_ffi.convert([inner_map])
@@ -671,7 +671,7 @@ class TestDeepCopyBranches:
 
     def test_object_with_deeply_nested_field(self) -> None:
         """Object whose array field contains a map containing an object."""
-        pair = tvm_ffi.testing.TestIntPair(5, 6)  # ty: ignore[too-many-positional-arguments]
+        pair = tvm_ffi.testing.TestIntPair(5, 6)
         inner_map = tvm_ffi.convert({"pair": pair})
         v_array = tvm_ffi.convert([inner_map])
         obj = tvm_ffi.testing.create_object(
@@ -920,7 +920,7 @@ class TestReplace:
         assert obj.v_i64 == 5  # ty: ignore[unresolved-attribute]
 
     def test_replace_readonly_field_raises(self) -> None:
-        pair = tvm_ffi.testing.TestIntPair(3, 4)  # ty: ignore[too-many-positional-arguments]
+        pair = tvm_ffi.testing.TestIntPair(3, 4)
         with pytest.raises(AttributeError):
             pair.__replace__(a=10)  # ty: ignore[unresolved-attribute]
 
@@ -931,9 +931,9 @@ class TestReplace:
         obj2 = obj.__replace__(v_i64=99)  # ty: ignore[unresolved-attribute]
         assert obj2.v_i64 == 99
         assert obj2.v_i32 == 4
-        assert not obj.same_as(obj2)  # ty: ignore[unresolved-attribute]
+        assert not obj.same_as(obj2)
 
     def test_non_copyable_type_raises(self) -> None:
-        obj = tvm_ffi.testing.TestNonCopyable(42)  # ty: ignore[too-many-positional-arguments]
+        obj = tvm_ffi.testing.TestNonCopyable(42)
         with pytest.raises(TypeError, match="does not support replace"):
             obj.__replace__()  # ty: ignore[unresolved-attribute]

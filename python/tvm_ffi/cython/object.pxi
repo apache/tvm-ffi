@@ -204,9 +204,8 @@ class Object(CObject, metaclass=_ObjectSlotsMeta):
       concrete type. Use :py:meth:`same_as` to check whether two
       references point to the same underlying object.
     - Subclasses that omit ``__slots__`` get ``__slots__ = ()`` injected
-      automatically by the metaclass.  Pass ``slots=False`` in the class
-      header (e.g. ``class Foo(Object, slots=False)``) to suppress this
-      and allow a per-instance ``__dict__``.
+      automatically by the metaclass.  To allow a per-instance ``__dict__``,
+      declare ``__slots__ = ("__dict__",)`` explicitly in the class body.
     - Most users interact with subclasses (e.g. :class:`Tensor`,
       :class:`Function`) rather than :py:class:`Object` directly.
 

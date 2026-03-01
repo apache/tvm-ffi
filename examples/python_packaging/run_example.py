@@ -45,7 +45,7 @@ def run_raise_error() -> None:
 def run_int_pair() -> None:
     """Invoke IntPair from the extension to demonstrate object handling."""
     print("=========== Example 4: IntPair ===========")
-    pair = my_ffi_extension.IntPair(1, 2)
+    pair = my_ffi_extension.IntPair(1, 2)  # ty: ignore[too-many-positional-arguments]
     print(f"a={pair.a}")
     print(f"b={pair.b}")
     print(f"sum={pair.sum()}")

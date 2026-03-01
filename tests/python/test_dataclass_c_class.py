@@ -123,30 +123,30 @@ def test_c_class_ordering() -> None:
     """c_class installs ordering operators."""
     small = _TestCxxClassDerived(0, 0, 0.0, 0.0)
     big = _TestCxxClassDerived(100, 100, 100.0, 100.0)
-    assert small < big  # ty: ignore[unsupported-operator]
-    assert small <= big  # ty: ignore[unsupported-operator]
-    assert big > small  # ty: ignore[unsupported-operator]
-    assert big >= small  # ty: ignore[unsupported-operator]
-    assert not (big < small)  # ty: ignore[unsupported-operator]
-    assert not (small > big)  # ty: ignore[unsupported-operator]
+    assert small < big
+    assert small <= big
+    assert big > small
+    assert big >= small
+    assert not (big < small)
+    assert not (small > big)
 
 
 def test_c_class_ordering_reflexive() -> None:
     """<= and >= are reflexive."""
     a = _TestCxxClassDerived(1, 2, 3.0, 4.0)
     b = a  # alias, same object
-    assert a <= b  # ty: ignore[unsupported-operator]
-    assert a >= b  # ty: ignore[unsupported-operator]
+    assert a <= b
+    assert a >= b
 
 
 def test_c_class_ordering_antisymmetric() -> None:
     """If a < b then not b < a."""
     a = _TestCxxClassDerived(0, 0, 0.0, 0.0)
     b = _TestCxxClassDerived(100, 100, 100.0, 100.0)
-    if a < b:  # ty: ignore[unsupported-operator]
-        assert not (b < a)  # ty: ignore[unsupported-operator]
+    if a < b:
+        assert not (b < a)
     else:
-        assert not (a < b)  # ty: ignore[unsupported-operator]
+        assert not (a < b)
 
 
 # ---------------------------------------------------------------------------

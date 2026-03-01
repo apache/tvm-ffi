@@ -42,6 +42,17 @@ def register_object(type_key: str | None = None) -> Callable[[_T], _T]:
         The type key of the node. It requires ``type_key`` to be registered already
         on the C++ side. If not specified, the class name will be used.
 
+    Notes
+    -----
+    All :class:`Object` subclasses get ``__slots__ = ()`` by default via the
+    metaclass, preventing per-instance ``__dict__``.  To opt out and allow
+    arbitrary instance attributes, declare ``__slots__ = ("__dict__",)``
+    explicitly in the class body::
+
+        @tvm_ffi.register_object("test.MyObject")
+        class MyObject(Object):
+            __slots__ = ("__dict__",)
+
     Examples
     --------
     The following code registers MyObject using type key "test.MyObject", if the
@@ -65,6 +76,7 @@ def register_object(type_key: str | None = None) -> Callable[[_T], _T]:
         info = core._register_object_by_index(type_index, cls)
         _add_class_attrs(type_cls=cls, type_info=info)
         setattr(cls, "__tvm_ffi_type_info__", info)
+        _install_init(cls, enabled=True)
         return cls
 
     if isinstance(type_key, str):
@@ -334,7 +346,14 @@ __SENTINEL = object()
 
 
 def _make_init(type_cls: type, type_info: TypeInfo) -> Callable[..., None]:
-    """Build a Python ``__init__`` that delegates to the C++ auto-generated ``__ffi_init__``."""
+    """Build a Python ``__init__`` that delegates to the C++ auto-generated ``__ffi_init__``.
+
+    Reads per-field ``c_init``, ``c_kw_only``, and ``c_has_default`` from the
+    TypeField bitmask fields and produces a function with matching Python
+    signature.  The ``__init__`` body is a trivial adapter — all validation
+    (too many positional, duplicates, missing required, kw_only enforcement,
+    unknown kwargs) is handled by C++.
+    """
     sig = _make_init_signature(type_info)
     kwargs_obj = core.KWARGS
 
@@ -353,7 +372,12 @@ def _make_init(type_cls: type, type_info: TypeInfo) -> Callable[..., None]:
 
 
 def _make_init_signature(type_info: TypeInfo) -> inspect.Signature:
-    """Build an ``inspect.Signature`` from reflection field metadata."""
+    """Build an ``inspect.Signature`` from reflection field metadata.
+
+    Walks the parent chain (parent-first) to collect all ``init=True`` fields,
+    reorders required-before-optional within each group, and returns a
+    Signature for introspection.
+    """
     positional: list[tuple[str, bool]] = []  # (name, has_default)
     kw_only: list[tuple[str, bool]] = []  # (name, has_default)
 
@@ -480,19 +504,11 @@ def _install_init(cls: type, *, enabled: bool) -> None:
                 setattr(cls, "__init__", _make_init(cls, type_info))
             else:
                 setattr(cls, "__init__", getattr(cls, "__ffi_init__"))
-            return
-        if issubclass(cls, core.PyNativeObject):
-            return
-        msg = (
-            f"`{cls.__name__}` (C++ type `{type_info.type_key}`) has no __ffi_init__ "
-            f"registered. Either add `refl::init()` to its C++ ObjectDef, "
-            f"or pass `init=False` to @c_class."
-        )
-    else:
-        msg = (
-            f"`{cls.__name__}` cannot be constructed directly. "
-            f"Define a custom __init__ or use a factory method."
-        )
+        return
+    msg = (
+        f"`{cls.__name__}` cannot be constructed directly. "
+        f"Define a custom __init__ or use a factory method."
+    )
 
     def __init__(self: Any, *args: Any, **kwargs: Any) -> None:
         raise TypeError(msg)

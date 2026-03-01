@@ -326,14 +326,14 @@ def test_dict_hash_different() -> None:
 
 
 def test_reflected_obj_hash_equal() -> None:
-    a = TestIntPair(1, 2)  # ty: ignore[too-many-positional-arguments]
-    b = TestIntPair(1, 2)  # ty: ignore[too-many-positional-arguments]
+    a = TestIntPair(1, 2)
+    b = TestIntPair(1, 2)
     assert RecursiveHash(a) == RecursiveHash(b)
 
 
 def test_reflected_obj_hash_different() -> None:
-    a = TestIntPair(1, 2)  # ty: ignore[too-many-positional-arguments]
-    c = TestIntPair(1, 3)  # ty: ignore[too-many-positional-arguments]
+    a = TestIntPair(1, 2)
+    c = TestIntPair(1, 3)
     assert RecursiveHash(a) != RecursiveHash(c)
 
 
@@ -344,20 +344,20 @@ def test_reflected_obj_hash_different() -> None:
 
 def test_hash_off_ignored_field() -> None:
     """hash_ignored is excluded from hashing via Hash(false)."""
-    a = TestHash(1, "x", 100)  # ty: ignore[too-many-positional-arguments]
-    b = TestHash(1, "x", 999)  # ty: ignore[too-many-positional-arguments]
+    a = TestHash(1, "x", 100)
+    b = TestHash(1, "x", 999)
     assert RecursiveHash(a) == RecursiveHash(b)
 
 
 def test_hash_off_key_differs() -> None:
-    a = TestHash(1, "x", 100)  # ty: ignore[too-many-positional-arguments]
-    b = TestHash(2, "x", 100)  # ty: ignore[too-many-positional-arguments]
+    a = TestHash(1, "x", 100)
+    b = TestHash(2, "x", 100)
     assert RecursiveHash(a) != RecursiveHash(b)
 
 
 def test_hash_off_name_differs() -> None:
-    a = TestHash(1, "a", 100)  # ty: ignore[too-many-positional-arguments]
-    b = TestHash(1, "b", 100)  # ty: ignore[too-many-positional-arguments]
+    a = TestHash(1, "a", 100)
+    b = TestHash(1, "b", 100)
     assert RecursiveHash(a) != RecursiveHash(b)
 
 
@@ -368,8 +368,8 @@ def test_hash_off_name_differs() -> None:
 
 def test_compare_off_implies_hash_off() -> None:
     """Fields with Compare(false) are also excluded from hashing."""
-    a = TestCompare(1, "x", 100)  # ty: ignore[too-many-positional-arguments]
-    b = TestCompare(1, "x", 999)  # ty: ignore[too-many-positional-arguments]
+    a = TestCompare(1, "x", 100)
+    b = TestCompare(1, "x", 999)
     assert RecursiveHash(a) == RecursiveHash(b)
 
 
@@ -379,7 +379,7 @@ def test_compare_off_implies_hash_off() -> None:
 
 
 def test_same_pointer_hash() -> None:
-    x = TestIntPair(42, 99)  # ty: ignore[too-many-positional-arguments]
+    x = TestIntPair(42, 99)
     assert RecursiveHash(x) == RecursiveHash(x)
 
 
@@ -437,23 +437,22 @@ def test_map_with_array_values_hash() -> None:
 
 
 def test_inherited_fields_hash_equal() -> None:
-    a = _TestCxxClassDerived(10, 20, 1.5, 2.5)  # ty: ignore[too-many-positional-arguments]
-    b = _TestCxxClassDerived(10, 20, 1.5, 2.5)  # ty: ignore[too-many-positional-arguments]
+    a = _TestCxxClassDerived(10, 20, 1.5, 2.5)
+    b = _TestCxxClassDerived(10, 20, 1.5, 2.5)
     assert RecursiveHash(a) == RecursiveHash(b)
 
 
 def test_inherited_fields_differ_in_base_hash() -> None:
-    a = _TestCxxClassDerived(10, 20, 1.5, 2.5)  # ty: ignore[too-many-positional-arguments]
-    b = _TestCxxClassDerived(99, 20, 1.5, 2.5)  # ty: ignore[too-many-positional-arguments]
+    a = _TestCxxClassDerived(10, 20, 1.5, 2.5)
+    b = _TestCxxClassDerived(99, 20, 1.5, 2.5)
     assert RecursiveHash(a) != RecursiveHash(b)
 
 
 def test_three_level_inheritance_hash() -> None:
-    # Positional order: required (v_i64, v_i32, v_f64, v_bool), then optional (v_f32, v_str)
-    a = _TestCxxClassDerivedDerived(1, 2, 3.0, True, 4.0, "hi")  # ty: ignore[too-many-positional-arguments]
-    b = _TestCxxClassDerivedDerived(1, 2, 3.0, True, 4.0, "hi")  # ty: ignore[too-many-positional-arguments]
+    a = _TestCxxClassDerivedDerived(1, 2, 3.0, True, 4.0, "hi")
+    b = _TestCxxClassDerivedDerived(1, 2, 3.0, True, 4.0, "hi")
     assert RecursiveHash(a) == RecursiveHash(b)
-    c = _TestCxxClassDerivedDerived(1, 2, 3.0, False, 4.0, "hi")  # ty: ignore[too-many-positional-arguments]
+    c = _TestCxxClassDerivedDerived(1, 2, 3.0, False, 4.0, "hi")
     assert RecursiveHash(a) != RecursiveHash(c)
 
 
@@ -616,34 +615,34 @@ def test_consistency_containers() -> None:
 
 def test_consistency_reflected_objects() -> None:
     """Verify hash consistency for reflected objects."""
-    a = TestIntPair(1, 2)  # ty: ignore[too-many-positional-arguments]
-    b = TestIntPair(1, 2)  # ty: ignore[too-many-positional-arguments]
+    a = TestIntPair(1, 2)
+    b = TestIntPair(1, 2)
     assert RecursiveEq(a, b)
     assert RecursiveHash(a) == RecursiveHash(b)
 
 
 def test_consistency_compare_off() -> None:
     """Fields excluded from comparison are also excluded from hash."""
-    a = TestCompare(1, "x", 100)  # ty: ignore[too-many-positional-arguments]
-    b = TestCompare(1, "x", 999)  # ty: ignore[too-many-positional-arguments]
+    a = TestCompare(1, "x", 100)
+    b = TestCompare(1, "x", 999)
     assert RecursiveEq(a, b)
     assert RecursiveHash(a) == RecursiveHash(b)
 
 
 def test_consistency_hash_off() -> None:
     """Fields excluded from hashing produce same hash when they differ."""
-    a = TestHash(1, "x", 100)  # ty: ignore[too-many-positional-arguments]
-    b = TestHash(1, "x", 999)  # ty: ignore[too-many-positional-arguments]
+    a = TestHash(1, "x", 100)
+    b = TestHash(1, "x", 999)
     assert RecursiveHash(a) == RecursiveHash(b)
 
 
 def test_consistency_law_on_int_pairs() -> None:
     """Verify: RecursiveEq(a, b) => RecursiveHash(a) == RecursiveHash(b)."""
     values = [
-        TestIntPair(0, 0),  # ty: ignore[too-many-positional-arguments]
-        TestIntPair(0, 1),  # ty: ignore[too-many-positional-arguments]
-        TestIntPair(1, 0),  # ty: ignore[too-many-positional-arguments]
-        TestIntPair(1, 1),  # ty: ignore[too-many-positional-arguments]
+        TestIntPair(0, 0),
+        TestIntPair(0, 1),
+        TestIntPair(1, 0),
+        TestIntPair(1, 1),
     ]
     for a in values:
         for b in values:
@@ -666,12 +665,12 @@ def _make_nested_singleton_array(depth: int) -> object:
 
 
 def test_aliasing_consistency_array_of_reflected_objects() -> None:
-    shared = TestIntPair(11, 22)  # ty: ignore[too-many-positional-arguments]
+    shared = TestIntPair(11, 22)
     aliased = tvm_ffi.Array([shared, shared])
     duplicated = tvm_ffi.Array(
         [
-            TestIntPair(11, 22),  # ty: ignore[too-many-positional-arguments]
-            TestIntPair(11, 22),  # ty: ignore[too-many-positional-arguments]
+            TestIntPair(11, 22),
+            TestIntPair(11, 22),
         ]
     )
     assert RecursiveEq(aliased, duplicated)
@@ -679,12 +678,12 @@ def test_aliasing_consistency_array_of_reflected_objects() -> None:
 
 
 def test_aliasing_consistency_list_of_reflected_objects() -> None:
-    shared = TestIntPair(13, 26)  # ty: ignore[too-many-positional-arguments]
+    shared = TestIntPair(13, 26)
     aliased = tvm_ffi.List([shared, shared])
     duplicated = tvm_ffi.List(
         [
-            TestIntPair(13, 26),  # ty: ignore[too-many-positional-arguments]
-            TestIntPair(13, 26),  # ty: ignore[too-many-positional-arguments]
+            TestIntPair(13, 26),
+            TestIntPair(13, 26),
         ]
     )
     assert RecursiveEq(aliased, duplicated)
@@ -716,12 +715,12 @@ def test_aliasing_consistency_shape_objects() -> None:
 
 
 def test_aliasing_consistency_map_shared_values() -> None:
-    shared = TestIntPair(31, 41)  # ty: ignore[too-many-positional-arguments]
+    shared = TestIntPair(31, 41)
     aliased = tvm_ffi.Map({"x": shared, "y": shared})
     duplicated = tvm_ffi.Map(
         {
-            "x": TestIntPair(31, 41),  # ty: ignore[too-many-positional-arguments]
-            "y": TestIntPair(31, 41),  # ty: ignore[too-many-positional-arguments]
+            "x": TestIntPair(31, 41),
+            "y": TestIntPair(31, 41),
         }
     )
     assert RecursiveEq(aliased, duplicated)
@@ -737,7 +736,7 @@ def test_aliasing_consistency_dict_shared_values() -> None:
 
 
 def test_aliasing_consistency_reflected_object_fields() -> None:
-    shared = TestIntPair(5, 6)  # ty: ignore[too-many-positional-arguments]
+    shared = TestIntPair(5, 6)
     aliased = create_object(
         "testing.TestObjectDerived",
         v_i64=1,
@@ -751,8 +750,8 @@ def test_aliasing_consistency_reflected_object_fields() -> None:
         v_i64=1,
         v_f64=2.0,
         v_str="shared",
-        v_map=tvm_ffi.Map({"k": TestIntPair(5, 6)}),  # ty: ignore[too-many-positional-arguments]
-        v_array=tvm_ffi.Array([TestIntPair(5, 6)]),  # ty: ignore[too-many-positional-arguments]
+        v_map=tvm_ffi.Map({"k": TestIntPair(5, 6)}),
+        v_array=tvm_ffi.Array([TestIntPair(5, 6)]),
     )
     assert RecursiveEq(aliased, duplicated)
     assert RecursiveHash(aliased) == RecursiveHash(duplicated)
@@ -764,7 +763,7 @@ def test_aliasing_consistency_reflected_object_fields() -> None:
 
 
 def test_map_hash_order_independent_with_shared_values() -> None:
-    shared = TestIntPair(1, 2)  # ty: ignore[too-many-positional-arguments]
+    shared = TestIntPair(1, 2)
     a = tvm_ffi.Map({"a": shared, "b": shared, "c": shared})
     b = tvm_ffi.Map({"b": shared, "a": shared, "c": shared})
     assert RecursiveEq(a, b)
@@ -874,14 +873,14 @@ def test_shared_dag_hash_scaling_not_exponential() -> None:
 
 def test_custom_hash_ignores_label() -> None:
     """TestCustomHash hashes only `key`, ignoring `label`."""
-    a = TestCustomHash(42, "alpha")  # ty: ignore[too-many-positional-arguments]
-    b = TestCustomHash(42, "beta")  # ty: ignore[too-many-positional-arguments]
+    a = TestCustomHash(42, "alpha")
+    b = TestCustomHash(42, "beta")
     assert RecursiveHash(a) == RecursiveHash(b)
 
 
 def test_custom_hash_different_key() -> None:
-    a = TestCustomHash(1, "same")  # ty: ignore[too-many-positional-arguments]
-    b = TestCustomHash(2, "same")  # ty: ignore[too-many-positional-arguments]
+    a = TestCustomHash(1, "same")
+    b = TestCustomHash(2, "same")
     assert RecursiveHash(a) != RecursiveHash(b)
 
 
@@ -889,14 +888,14 @@ def test_custom_hash_in_container() -> None:
     """Custom-hooked objects inside an Array."""
     a = tvm_ffi.Array(
         [
-            TestCustomHash(1, "x"),  # ty: ignore[too-many-positional-arguments]
-            TestCustomHash(2, "y"),  # ty: ignore[too-many-positional-arguments]
+            TestCustomHash(1, "x"),
+            TestCustomHash(2, "y"),
         ]
     )
     b = tvm_ffi.Array(
         [
-            TestCustomHash(1, "different"),  # ty: ignore[too-many-positional-arguments]
-            TestCustomHash(2, "labels"),  # ty: ignore[too-many-positional-arguments]
+            TestCustomHash(1, "different"),
+            TestCustomHash(2, "labels"),
         ]
     )
     assert RecursiveHash(a) == RecursiveHash(b)
@@ -904,8 +903,8 @@ def test_custom_hash_in_container() -> None:
 
 def test_custom_hash_consistency_with_eq() -> None:
     """RecursiveEq(a,b) => RecursiveHash(a)==RecursiveHash(b) for TestCustomCompare."""
-    a = TestCustomCompare(42, "alpha")  # ty: ignore[too-many-positional-arguments]
-    b = TestCustomCompare(42, "beta")  # ty: ignore[too-many-positional-arguments]
+    a = TestCustomCompare(42, "alpha")
+    b = TestCustomCompare(42, "beta")
     assert RecursiveEq(a, b)
     assert RecursiveHash(a) == RecursiveHash(b)
 
@@ -920,8 +919,8 @@ def test_custom_hash_consistency_with_eq() -> None:
 def test_custom_compare_eq_implies_hash_same_direct(
     key: int, lhs_label: str, rhs_label: str
 ) -> None:
-    lhs = TestCustomCompare(key, lhs_label)  # ty: ignore[too-many-positional-arguments]
-    rhs = TestCustomCompare(key, rhs_label)  # ty: ignore[too-many-positional-arguments]
+    lhs = TestCustomCompare(key, lhs_label)
+    rhs = TestCustomCompare(key, rhs_label)
     assert RecursiveEq(lhs, rhs)
     assert RecursiveHash(lhs) == RecursiveHash(rhs)
 
@@ -943,8 +942,8 @@ def test_custom_compare_eq_implies_hash_same_direct(
 def test_custom_compare_eq_implies_hash_same_in_wrappers(
     key: int, wrap: Callable[[object], object]
 ) -> None:
-    lhs_obj = TestCustomCompare(key, "left")  # ty: ignore[too-many-positional-arguments]
-    rhs_obj = TestCustomCompare(key, "right")  # ty: ignore[too-many-positional-arguments]
+    lhs_obj = TestCustomCompare(key, "left")
+    rhs_obj = TestCustomCompare(key, "right")
     lhs = wrap(lhs_obj)
     rhs = wrap(rhs_obj)
     assert RecursiveEq(lhs, rhs)
@@ -958,14 +957,14 @@ def test_custom_compare_eq_implies_hash_same_in_wrappers(
 
 def test_eq_without_hash_raises() -> None:
     """RecursiveHash rejects types that define __ffi_eq__ but not __ffi_hash__."""
-    obj = TestEqWithoutHash(1, "hello")  # ty: ignore[too-many-positional-arguments]
+    obj = TestEqWithoutHash(1, "hello")
     with pytest.raises(ValueError, match="__ffi_eq__ or __ffi_compare__ but not __ffi_hash__"):
         RecursiveHash(obj)
 
 
 def test_eq_without_hash_inside_container_raises() -> None:
     """The guard also triggers when the object is nested inside a container."""
-    obj = TestEqWithoutHash(1, "hello")  # ty: ignore[too-many-positional-arguments]
+    obj = TestEqWithoutHash(1, "hello")
     arr = tvm_ffi.Array([obj])
     with pytest.raises(ValueError, match="__ffi_eq__ or __ffi_compare__ but not __ffi_hash__"):
         RecursiveHash(arr)

@@ -448,17 +448,17 @@ def test_equal_dicts_under_ordering() -> None:
 
 
 def test_reflected_obj_eq() -> None:
-    a = TestIntPair(1, 2)  # ty: ignore[too-many-positional-arguments]
-    b = TestIntPair(1, 2)  # ty: ignore[too-many-positional-arguments]
-    c = TestIntPair(1, 3)  # ty: ignore[too-many-positional-arguments]
+    a = TestIntPair(1, 2)
+    b = TestIntPair(1, 2)
+    c = TestIntPair(1, 3)
     assert RecursiveEq(a, b)
     assert not RecursiveEq(a, c)
 
 
 def test_reflected_obj_ordering() -> None:
-    a = TestIntPair(1, 2)  # ty: ignore[too-many-positional-arguments]
-    b = TestIntPair(1, 3)  # ty: ignore[too-many-positional-arguments]
-    c = TestIntPair(2, 0)  # ty: ignore[too-many-positional-arguments]
+    a = TestIntPair(1, 2)
+    b = TestIntPair(1, 3)
+    c = TestIntPair(2, 0)
     assert RecursiveLt(a, b)  # first field equal, second: 2 < 3
     assert RecursiveLt(a, c)  # first field: 1 < 2
 
@@ -470,21 +470,21 @@ def test_reflected_obj_ordering() -> None:
 
 def test_compare_off_ignored_field() -> None:
     """ignored_field is excluded from comparison via Compare(false)."""
-    a = TestCompare(1, "x", 100)  # ty: ignore[too-many-positional-arguments]
-    b = TestCompare(1, "x", 999)  # ty: ignore[too-many-positional-arguments]
+    a = TestCompare(1, "x", 100)
+    b = TestCompare(1, "x", 999)
     assert RecursiveEq(a, b)
 
 
 def test_compare_off_key_differs() -> None:
-    a = TestCompare(1, "x", 100)  # ty: ignore[too-many-positional-arguments]
-    b = TestCompare(2, "x", 100)  # ty: ignore[too-many-positional-arguments]
+    a = TestCompare(1, "x", 100)
+    b = TestCompare(2, "x", 100)
     assert not RecursiveEq(a, b)
     assert RecursiveLt(a, b)
 
 
 def test_compare_off_name_differs() -> None:
-    a = TestCompare(1, "a", 100)  # ty: ignore[too-many-positional-arguments]
-    b = TestCompare(1, "b", 100)  # ty: ignore[too-many-positional-arguments]
+    a = TestCompare(1, "a", 100)
+    b = TestCompare(1, "b", 100)
     assert not RecursiveEq(a, b)
     assert RecursiveLt(a, b)
 
@@ -495,7 +495,7 @@ def test_compare_off_name_differs() -> None:
 
 
 def test_same_pointer() -> None:
-    x = TestIntPair(42, 99)  # ty: ignore[too-many-positional-arguments]
+    x = TestIntPair(42, 99)
     assert RecursiveEq(x, x)
 
 
@@ -506,14 +506,14 @@ def test_same_pointer() -> None:
 
 def test_different_obj_types_eq() -> None:
     """RecursiveEq returns False for different object types."""
-    a = TestIntPair(1, 2)  # ty: ignore[too-many-positional-arguments]
-    b = TestCompare(1, "x", 0)  # ty: ignore[too-many-positional-arguments]
+    a = TestIntPair(1, 2)
+    b = TestCompare(1, "x", 0)
     assert not RecursiveEq(a, b)
 
 
 def test_different_obj_types_ordering_raises() -> None:
-    a = TestIntPair(1, 2)  # ty: ignore[too-many-positional-arguments]
-    b = TestCompare(1, "x", 0)  # ty: ignore[too-many-positional-arguments]
+    a = TestIntPair(1, 2)
+    b = TestCompare(1, "x", 0)
     with pytest.raises(TypeError):
         RecursiveLt(a, b)
 
@@ -524,20 +524,20 @@ def test_different_obj_types_ordering_raises() -> None:
 
 
 def test_nested_objects_in_array() -> None:
-    a1 = TestIntPair(1, 2)  # ty: ignore[too-many-positional-arguments]
-    a2 = TestIntPair(3, 4)  # ty: ignore[too-many-positional-arguments]
-    b1 = TestIntPair(1, 2)  # ty: ignore[too-many-positional-arguments]
-    b2 = TestIntPair(3, 4)  # ty: ignore[too-many-positional-arguments]
+    a1 = TestIntPair(1, 2)
+    a2 = TestIntPair(3, 4)
+    b1 = TestIntPair(1, 2)
+    b2 = TestIntPair(3, 4)
     arr_a = tvm_ffi.Array([a1, a2])
     arr_b = tvm_ffi.Array([b1, b2])
     assert RecursiveEq(arr_a, arr_b)
 
 
 def test_nested_objects_in_array_differ() -> None:
-    a1 = TestIntPair(1, 2)  # ty: ignore[too-many-positional-arguments]
-    a2 = TestIntPair(3, 4)  # ty: ignore[too-many-positional-arguments]
-    b1 = TestIntPair(1, 2)  # ty: ignore[too-many-positional-arguments]
-    b2 = TestIntPair(3, 5)  # ty: ignore[too-many-positional-arguments]
+    a1 = TestIntPair(1, 2)
+    a2 = TestIntPair(3, 4)
+    b1 = TestIntPair(1, 2)
+    b2 = TestIntPair(3, 5)
     arr_a = tvm_ffi.Array([a1, a2])
     arr_b = tvm_ffi.Array([b1, b2])
     assert not RecursiveEq(arr_a, arr_b)
@@ -736,8 +736,8 @@ def test_object_array_of_objects() -> None:
         v_map=tvm_ffi.Map({}),
         v_array=tvm_ffi.Array(
             [
-                TestIntPair(1, 2),  # ty: ignore[too-many-positional-arguments]
-                TestIntPair(3, 4),  # ty: ignore[too-many-positional-arguments]
+                TestIntPair(1, 2),
+                TestIntPair(3, 4),
             ]
         ),
     )
@@ -749,8 +749,8 @@ def test_object_array_of_objects() -> None:
         v_map=tvm_ffi.Map({}),
         v_array=tvm_ffi.Array(
             [
-                TestIntPair(1, 2),  # ty: ignore[too-many-positional-arguments]
-                TestIntPair(3, 4),  # ty: ignore[too-many-positional-arguments]
+                TestIntPair(1, 2),
+                TestIntPair(3, 4),
             ]
         ),
     )
@@ -766,8 +766,8 @@ def test_object_array_of_objects_differ() -> None:
         v_map=tvm_ffi.Map({}),
         v_array=tvm_ffi.Array(
             [
-                TestIntPair(1, 2),  # ty: ignore[too-many-positional-arguments]
-                TestIntPair(3, 4),  # ty: ignore[too-many-positional-arguments]
+                TestIntPair(1, 2),
+                TestIntPair(3, 4),
             ]
         ),
     )
@@ -779,8 +779,8 @@ def test_object_array_of_objects_differ() -> None:
         v_map=tvm_ffi.Map({}),
         v_array=tvm_ffi.Array(
             [
-                TestIntPair(1, 2),  # ty: ignore[too-many-positional-arguments]
-                TestIntPair(3, 5),  # ty: ignore[too-many-positional-arguments]
+                TestIntPair(1, 2),
+                TestIntPair(3, 5),
             ]
         ),
     )
@@ -796,7 +796,7 @@ def test_object_map_with_object_values() -> None:
         v_str="",
         v_map=tvm_ffi.Map(
             {
-                "x": TestIntPair(1, 2),  # ty: ignore[too-many-positional-arguments]
+                "x": TestIntPair(1, 2),
             }
         ),
         v_array=tvm_ffi.Array([]),
@@ -808,7 +808,7 @@ def test_object_map_with_object_values() -> None:
         v_str="",
         v_map=tvm_ffi.Map(
             {
-                "x": TestIntPair(1, 2),  # ty: ignore[too-many-positional-arguments]
+                "x": TestIntPair(1, 2),
             }
         ),
         v_array=tvm_ffi.Array([]),
@@ -859,24 +859,24 @@ def test_deep_object_in_object() -> None:
 
 
 def test_inherited_fields_eq() -> None:
-    a = _TestCxxClassDerived(10, 20, 1.5, 2.5)  # ty: ignore[too-many-positional-arguments]
-    b = _TestCxxClassDerived(10, 20, 1.5, 2.5)  # ty: ignore[too-many-positional-arguments]
+    a = _TestCxxClassDerived(10, 20, 1.5, 2.5)
+    b = _TestCxxClassDerived(10, 20, 1.5, 2.5)
     assert RecursiveEq(a, b)
 
 
 def test_inherited_fields_differ_in_base() -> None:
-    a = _TestCxxClassDerived(10, 20, 1.5, 2.5)  # ty: ignore[too-many-positional-arguments]
-    b = _TestCxxClassDerived(99, 20, 1.5, 2.5)  # ty: ignore[too-many-positional-arguments]
+    a = _TestCxxClassDerived(10, 20, 1.5, 2.5)
+    b = _TestCxxClassDerived(99, 20, 1.5, 2.5)
     assert not RecursiveEq(a, b)
     assert RecursiveLt(a, b)
 
 
 def test_three_level_inheritance_eq_and_differ() -> None:
     # Positional order: required (v_i64, v_i32, v_f64, v_bool), then optional (v_f32, v_str)
-    a = _TestCxxClassDerivedDerived(1, 2, 3.0, True, 4.0, "hi")  # ty: ignore[too-many-positional-arguments]
-    b = _TestCxxClassDerivedDerived(1, 2, 3.0, True, 4.0, "hi")  # ty: ignore[too-many-positional-arguments]
+    a = _TestCxxClassDerivedDerived(1, 2, 3.0, True, 4.0, "hi")
+    b = _TestCxxClassDerivedDerived(1, 2, 3.0, True, 4.0, "hi")
     assert RecursiveEq(a, b)
-    c = _TestCxxClassDerivedDerived(1, 2, 3.0, False, 4.0, "hi")  # ty: ignore[too-many-positional-arguments]
+    c = _TestCxxClassDerivedDerived(1, 2, 3.0, False, 4.0, "hi")
     assert not RecursiveEq(a, c)
 
 
@@ -888,14 +888,14 @@ def test_three_level_inheritance_eq_and_differ() -> None:
 def test_compare_off_inside_array() -> None:
     a = tvm_ffi.Array(
         [
-            TestCompare(1, "x", 100),  # ty: ignore[too-many-positional-arguments]
-            TestCompare(2, "y", 200),  # ty: ignore[too-many-positional-arguments]
+            TestCompare(1, "x", 100),
+            TestCompare(2, "y", 200),
         ]
     )
     b = tvm_ffi.Array(
         [
-            TestCompare(1, "x", 999),  # ty: ignore[too-many-positional-arguments]
-            TestCompare(2, "y", 888),  # ty: ignore[too-many-positional-arguments]
+            TestCompare(1, "x", 999),
+            TestCompare(2, "y", 888),
         ]
     )
     assert RecursiveEq(a, b)
@@ -911,7 +911,7 @@ def test_compare_off_inside_nested_object() -> None:
         v_map=tvm_ffi.Map({}),
         v_array=tvm_ffi.Array(
             [
-                TestCompare(1, "n", 100),  # ty: ignore[too-many-positional-arguments]
+                TestCompare(1, "n", 100),
             ]
         ),
     )
@@ -923,7 +923,7 @@ def test_compare_off_inside_nested_object() -> None:
         v_map=tvm_ffi.Map({}),
         v_array=tvm_ffi.Array(
             [
-                TestCompare(1, "n", 999),  # ty: ignore[too-many-positional-arguments]
+                TestCompare(1, "n", 999),
             ]
         ),
     )
@@ -982,17 +982,17 @@ def test_map_with_array_values_eq() -> None:
 def test_dict_with_object_values_eq() -> None:
     a = tvm_ffi.Dict(
         {
-            "k": TestIntPair(1, 2),  # ty: ignore[too-many-positional-arguments]
+            "k": TestIntPair(1, 2),
         }
     )
     b = tvm_ffi.Dict(
         {
-            "k": TestIntPair(1, 2),  # ty: ignore[too-many-positional-arguments]
+            "k": TestIntPair(1, 2),
         }
     )
     c = tvm_ffi.Dict(
         {
-            "k": TestIntPair(1, 3),  # ty: ignore[too-many-positional-arguments]
+            "k": TestIntPair(1, 3),
         }
     )
     assert RecursiveEq(a, b)
@@ -1137,10 +1137,10 @@ def test_cyclic_dict_ordering_raises() -> None:
 def test_ordering_laws_on_int_pairs() -> None:
     """Verify ordering laws (trichotomy, antisymmetry, transitivity) on TestIntPair."""
     values = [
-        TestIntPair(0, 0),  # ty: ignore[too-many-positional-arguments]
-        TestIntPair(0, 1),  # ty: ignore[too-many-positional-arguments]
-        TestIntPair(1, 0),  # ty: ignore[too-many-positional-arguments]
-        TestIntPair(1, 1),  # ty: ignore[too-many-positional-arguments]
+        TestIntPair(0, 0),
+        TestIntPair(0, 1),
+        TestIntPair(1, 0),
+        TestIntPair(1, 1),
     ]
     for a in values:
         for b in values:
@@ -1194,21 +1194,21 @@ def test_depth_1000_nested_eq() -> None:
 
 def test_custom_eq_ignores_label() -> None:
     """TestCustomCompare.__ffi_eq__ compares only `key`, ignoring `label`."""
-    a = TestCustomCompare(42, "alpha")  # ty: ignore[too-many-positional-arguments]
-    b = TestCustomCompare(42, "beta")  # ty: ignore[too-many-positional-arguments]
+    a = TestCustomCompare(42, "alpha")
+    b = TestCustomCompare(42, "beta")
     assert RecursiveEq(a, b)
 
 
 def test_custom_eq_different_key() -> None:
-    a = TestCustomCompare(1, "same")  # ty: ignore[too-many-positional-arguments]
-    b = TestCustomCompare(2, "same")  # ty: ignore[too-many-positional-arguments]
+    a = TestCustomCompare(1, "same")
+    b = TestCustomCompare(2, "same")
     assert not RecursiveEq(a, b)
 
 
 def test_custom_compare_ordering() -> None:
     """Ordering uses __ffi_compare__ hook (key only)."""
-    a = TestCustomCompare(1, "zzz")  # ty: ignore[too-many-positional-arguments]
-    b = TestCustomCompare(2, "aaa")  # ty: ignore[too-many-positional-arguments]
+    a = TestCustomCompare(1, "zzz")
+    b = TestCustomCompare(2, "aaa")
     assert RecursiveLt(a, b)
     assert not RecursiveLt(b, a)
 
@@ -1217,14 +1217,14 @@ def test_custom_eq_in_container() -> None:
     """Custom-hooked objects inside an Array."""
     a = tvm_ffi.Array(
         [
-            TestCustomCompare(1, "x"),  # ty: ignore[too-many-positional-arguments]
-            TestCustomCompare(2, "y"),  # ty: ignore[too-many-positional-arguments]
+            TestCustomCompare(1, "x"),
+            TestCustomCompare(2, "y"),
         ]
     )
     b = tvm_ffi.Array(
         [
-            TestCustomCompare(1, "different"),  # ty: ignore[too-many-positional-arguments]
-            TestCustomCompare(2, "labels"),  # ty: ignore[too-many-positional-arguments]
+            TestCustomCompare(1, "different"),
+            TestCustomCompare(2, "labels"),
         ]
     )
     assert RecursiveEq(a, b)
@@ -1237,8 +1237,8 @@ def test_custom_eq_in_container() -> None:
 
 def test_eq_only_type_eq_uses_hook() -> None:
     """__ffi_eq__-only type: RecursiveEq uses the hook (compares only key)."""
-    a = TestEqWithoutHash(42, "alpha")  # ty: ignore[too-many-positional-arguments]
-    b = TestEqWithoutHash(42, "beta")  # ty: ignore[too-many-positional-arguments]
+    a = TestEqWithoutHash(42, "alpha")
+    b = TestEqWithoutHash(42, "beta")
     assert RecursiveEq(a, b)
 
 
@@ -1249,8 +1249,8 @@ def test_eq_only_type_ordering_uses_reflection() -> None:
     though __ffi_eq__ ignores it.  This is expected — register __ffi_compare__
     for consistent ordering semantics.
     """
-    a = TestEqWithoutHash(42, "alpha")  # ty: ignore[too-many-positional-arguments]
-    b = TestEqWithoutHash(42, "beta")  # ty: ignore[too-many-positional-arguments]
+    a = TestEqWithoutHash(42, "alpha")
+    b = TestEqWithoutHash(42, "beta")
     # Eq says equal (hook), but ordering sees label difference (reflection)
     assert RecursiveEq(a, b)
     assert RecursiveLt(a, b)  # "alpha" < "beta"
@@ -1263,8 +1263,8 @@ def test_eq_only_type_ordering_uses_reflection() -> None:
 
 def test_custom_compare_ordering_consistency() -> None:
     """TestCustomCompare has __ffi_compare__: Eq(a,b) implies not Lt/Gt and both Le/Ge."""
-    a = TestCustomCompare(42, "alpha")  # ty: ignore[too-many-positional-arguments]
-    b = TestCustomCompare(42, "beta")  # ty: ignore[too-many-positional-arguments]
+    a = TestCustomCompare(42, "alpha")
+    b = TestCustomCompare(42, "beta")
     assert RecursiveEq(a, b)
     assert not RecursiveLt(a, b)
     assert not RecursiveGt(a, b)

@@ -20,11 +20,18 @@ from __future__ import annotations
 
 import dataclasses
 from io import StringIO
-from typing import Callable
+from typing import Any, Callable
 
 from tvm_ffi.core import TypeInfo, TypeSchema
 
 from . import consts as C
+
+
+def _parse_type_schema(raw: str | dict[str, Any]) -> TypeSchema:
+    """Parse a type schema from either a JSON string or an already-parsed dict."""
+    if isinstance(raw, dict):
+        return TypeSchema.from_json_obj(raw)
+    return TypeSchema.from_json_str(raw)
 
 
 @dataclasses.dataclass
@@ -179,6 +186,16 @@ class FuncInfo:
 
 
 @dataclasses.dataclass
+class InitFieldInfo:
+    """A field that participates in the auto-generated ``__init__``."""
+
+    name: str
+    schema: NamedTypeSchema
+    kw_only: bool
+    has_default: bool
+
+
+@dataclasses.dataclass
 class ObjectInfo:
     """Information of an object type, including its fields and methods."""
 
@@ -186,6 +203,9 @@ class ObjectInfo:
     methods: list[FuncInfo]
     type_key: str | None = None
     parent_type_key: str | None = None
+    init_fields: list[InitFieldInfo] = dataclasses.field(default_factory=list)
+    has_auto_init: bool = False
+    has_c_init: bool = False
 
     @staticmethod
     def from_type_info(type_info: TypeInfo) -> ObjectInfo:
@@ -193,11 +213,45 @@ class ObjectInfo:
         parent_type_key: str | None = None
         if type_info.parent_type_info is not None:
             parent_type_key = type_info.parent_type_info.type_key
+
+        # Detect auto_init / c_init from __ffi_init__ method metadata.
+        has_auto_init = False
+        has_c_init = False
+        for method in type_info.methods:
+            if method.name == "__ffi_init__":
+                has_c_init = True
+                has_auto_init = bool(method.metadata.get("auto_init", False))
+                break
+
+        # Walk parent chain (parent-first) to collect all init-eligible fields.
+        init_fields: list[InitFieldInfo] = []
+        if has_auto_init:
+            ti: TypeInfo | None = type_info
+            chain: list[TypeInfo] = []
+            while ti is not None:
+                chain.append(ti)
+                ti = ti.parent_type_info
+            for ancestor_info in reversed(chain):
+                for field in ancestor_info.fields:
+                    if not field.c_init:
+                        continue
+                    init_fields.append(
+                        InitFieldInfo(
+                            name=field.name,
+                            schema=NamedTypeSchema(
+                                name=field.name,
+                                schema=_parse_type_schema(field.metadata["type_schema"]),
+                            ),
+                            kw_only=field.c_kw_only,
+                            has_default=field.c_has_default,
+                        )
+                    )
+
         return ObjectInfo(
             fields=[
                 NamedTypeSchema(
                     name=field.name,
-                    schema=TypeSchema.from_json_str(field.metadata["type_schema"]),
+                    schema=_parse_type_schema(field.metadata["type_schema"]),
                 )
                 for field in type_info.fields
             ],
@@ -205,7 +259,7 @@ class ObjectInfo:
                 FuncInfo(
                     schema=NamedTypeSchema(
                         name=C.FN_NAME_MAP.get(method.name, method.name),
-                        schema=TypeSchema.from_json_str(method.metadata["type_schema"]),
+                        schema=_parse_type_schema(method.metadata["type_schema"]),
                     ),
                     is_member=not method.is_static,
                 )
@@ -213,6 +267,9 @@ class ObjectInfo:
             ],
             type_key=type_info.type_key,
             parent_type_key=parent_type_key,
+            init_fields=init_fields,
+            has_auto_init=has_auto_init,
+            has_c_init=has_c_init,
         )
 
     def gen_fields(self, ty_map: Callable[[str], str], indent: int) -> list[str]:
@@ -229,3 +286,59 @@ class ObjectInfo:
                 ret.append(f"{indent_str}@staticmethod")
             ret.append(method.gen(ty_map, indent))
         return ret
+
+    def gen_init(self, ty_map: Callable[[str], str], indent: int) -> list[str]:
+        """Generate an ``__init__`` stub from reflection metadata."""
+        if self.has_auto_init:
+            return self._gen_auto_init(ty_map, indent)
+        if self.has_c_init:
+            return self._gen_c_init(ty_map, indent)
+        return []
+
+    def _gen_auto_init(self, ty_map: Callable[[str], str], indent: int) -> list[str]:
+        """Generate ``__init__`` for auto-init types (KWARGS protocol)."""
+        indent_str = " " * indent
+        positional = [f for f in self.init_fields if not f.kw_only]
+        kw_only = [f for f in self.init_fields if f.kw_only]
+
+        pos_required = [f for f in positional if not f.has_default]
+        pos_default = [f for f in positional if f.has_default]
+        kw_required = [f for f in kw_only if not f.has_default]
+        kw_default = [f for f in kw_only if f.has_default]
+
+        parts: list[str] = []
+        for f in pos_required:
+            parts.append(f"{f.name}: {f.schema.repr(ty_map)}")
+        for f in pos_default:
+            parts.append(f"{f.name}: {f.schema.repr(ty_map)} = ...")
+        if kw_required or kw_default:
+            parts.append("*")
+            for f in kw_required:
+                parts.append(f"{f.name}: {f.schema.repr(ty_map)}")
+            for f in kw_default:
+                parts.append(f"{f.name}: {f.schema.repr(ty_map)} = ...")
+
+        params = ", ".join(parts)
+        if params:
+            return [f"{indent_str}def __init__(self, {params}) -> None: ..."]
+        return [f"{indent_str}def __init__(self) -> None: ..."]
+
+    def _gen_c_init(self, ty_map: Callable[[str], str], indent: int) -> list[str]:
+        """Generate ``__init__`` for non-auto-init types (from ``__c_ffi_init__``)."""
+        indent_str = " " * indent
+        for method in self.methods:
+            func_name = method.schema.name.rsplit(".", 1)[-1]
+            if func_name != "__c_ffi_init__":
+                continue
+            schema = method.schema
+            if schema.origin != "Callable" or not schema.args:
+                break
+            arg_types = schema.args[1:]  # skip return type (args[0])
+            parts: list[str] = []
+            for i, arg in enumerate(arg_types):
+                parts.append(f"_{i}: {arg.repr(ty_map)}")
+            params = ", ".join(parts)
+            if params:
+                return [f"{indent_str}def __init__(self, {params}, /) -> None: ..."]
+            return [f"{indent_str}def __init__(self) -> None: ..."]
+        return []

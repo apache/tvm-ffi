@@ -252,6 +252,9 @@ class TypeField:
     metadata: dict[str, Any]
     getter: Any
     setter: Any
+    c_init: bool
+    c_kw_only: bool
+    c_has_default: bool
     dataclass_field: Any | None
 
     def as_property(self, cls: type) -> property: ...
@@ -269,6 +272,7 @@ class TypeInfo:
     type_cls: type | None
     type_index: int
     type_key: str
+    type_ancestors: list[int]
     fields: list[TypeField]
     methods: list[TypeMethod]
     parent_type_info: TypeInfo | None
