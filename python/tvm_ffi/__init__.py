@@ -111,7 +111,14 @@ if TYPE_CHECKING or not _is_config_mode():
         float8_e8m0fnu,
         float4_e2m1fnx2,
     )
+elif sys.platform.startswith("win32"):
+    # On Windows, load the library even in config CLI mode so the DLL search path
+    # is set correctly (needed in some cases when test still loads cython extensions).
+    from . import libinfo
 
+    LIB = libinfo.load_lib_ctypes("apache-tvm-ffi", "tvm_ffi", "RTLD_GLOBAL")
+
+# normal version imports
 try:
     from ._version import __version__, __version_tuple__
 except ImportError:
