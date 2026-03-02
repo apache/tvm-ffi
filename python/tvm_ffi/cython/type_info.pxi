@@ -16,6 +16,7 @@
 # under the License.
 import dataclasses
 import json
+from functools import cached_property
 from typing import Optional, Any
 from io import StringIO
 
@@ -76,6 +77,8 @@ _TYPE_SCHEMA_ORIGIN_CONVERTER = {
     "ffi.List": "List",
     "ffi.Map": "Map",
     "ffi.Dict": "Dict",
+    # OpaquePyObject accepts any Python value at the FFI boundary (the C++
+    # side wraps it opaquely), so mapping to "Any" is semantically correct.
     "ffi.OpaquePyObject": "Any",
     "ffi.Object": "Object",
     "ffi.Tensor": "Tensor",
@@ -92,7 +95,54 @@ _TYPE_SCHEMA_ORIGIN_CONVERTER = {
     "ffi.SmallStr": "str",
     "ffi.String": "str",
     "DataType": "dtype",
+    # C++ STL types (emitted by TypeTraits in include/tvm/ffi/extra/stl.h)
+    "std::vector": "Array",
+    "std::optional": "Optional",
+    "std::variant": "Union",
+    "std::tuple": "tuple",
+    "std::map": "Map",
+    "std::unordered_map": "Map",
+    "std::function": "Callable",
+    # Rvalue reference (C++ move semantics).  Python has no move semantics,
+    # so the checker treats it as a plain Object reference.
+    "ObjectRValueRef": "Object",
 }
+
+# Sentinel for structural types (Optional, Union) that have no single type_index
+_ORIGIN_TYPE_INDEX_STRUCTURAL = -2
+# Sentinel for unknown/unresolved origins
+_ORIGIN_TYPE_INDEX_UNKNOWN = -3
+
+# Map origin string -> type_index for known types
+_ORIGIN_TO_TYPE_INDEX = {
+    "None": kTVMFFINone,
+    "int": kTVMFFIInt,
+    "bool": kTVMFFIBool,
+    "float": kTVMFFIFloat,
+    "str": kTVMFFIStr,
+    "bytes": kTVMFFIBytes,
+    "Device": kTVMFFIDevice,
+    "dtype": kTVMFFIDataType,
+    "ctypes.c_void_p": kTVMFFIOpaquePtr,
+    "Tensor": kTVMFFITensor,
+    "Object": kTVMFFIObject,
+    "Callable": kTVMFFIFunction,
+    "Array": kTVMFFIArray,
+    "List": kTVMFFIList,
+    "Map": kTVMFFIMap,
+    "Dict": kTVMFFIDict,
+    "Any": kTVMFFIAny,
+}
+
+# Reverse map: type_index -> origin string
+_TYPE_INDEX_TO_ORIGIN = {v: k for k, v in _ORIGIN_TO_TYPE_INDEX.items()}
+# Low-level type indices that alias canonical origins
+_TYPE_INDEX_TO_ORIGIN[kTVMFFIDLTensorPtr] = "Tensor"
+_TYPE_INDEX_TO_ORIGIN[kTVMFFIRawStr] = "str"
+_TYPE_INDEX_TO_ORIGIN[kTVMFFIByteArrayPtr] = "bytes"
+_TYPE_INDEX_TO_ORIGIN[kTVMFFISmallStr] = "str"
+_TYPE_INDEX_TO_ORIGIN[kTVMFFISmallBytes] = "bytes"
+_TYPE_INDEX_TO_ORIGIN[kTVMFFIObjectRValueRef] = "Object"
 
 
 @dataclasses.dataclass(repr=False)
@@ -105,42 +155,171 @@ class TypeSchema:
     """
     origin: str
     args: tuple[TypeSchema, ...] = ()
+    origin_type_index: int = dataclasses.field(default=_ORIGIN_TYPE_INDEX_UNKNOWN, repr=False)
 
     def __post_init__(self):
         origin = self.origin
         args = self.args
         if origin == "Union":
-            assert len(args) >= 2, "Union must have at least two arguments"
+            if len(args) < 2:
+                raise ValueError("Union must have at least two arguments")
         elif origin == "Optional":
-            assert len(args) == 1, "Optional must have exactly one argument"
+            if len(args) != 1:
+                raise ValueError("Optional must have exactly one argument")
         elif origin in ("list", "Array", "List"):
-            assert len(args) in (0, 1), f"{origin} must have 0 or 1 argument"
+            if len(args) not in (0, 1):
+                raise ValueError(f"{origin} must have 0 or 1 argument")
             if args == ():
                 self.args = (TypeSchema("Any"),)
         elif origin in ("dict", "Map", "Dict"):
-            assert len(args) in (0, 2), f"{origin} must have 0 or 2 arguments"
+            if len(args) not in (0, 2):
+                raise ValueError(f"{origin} must have 0 or 2 arguments")
             if args == ():
                 self.args = (TypeSchema("Any"), TypeSchema("Any"))
         elif origin == "tuple":
             pass  # tuple can have arbitrary number of arguments
+        # Compute origin_type_index if not already set
+        if self.origin_type_index == _ORIGIN_TYPE_INDEX_UNKNOWN:
+            if origin in ("Optional", "Union"):
+                self.origin_type_index = _ORIGIN_TYPE_INDEX_STRUCTURAL
+            elif origin in _ORIGIN_TO_TYPE_INDEX:
+                self.origin_type_index = _ORIGIN_TO_TYPE_INDEX[origin]
+            else:
+                # Try to resolve as a registered object type key
+                tindex = _object_type_key_to_index(origin)
+                if tindex is not None:
+                    self.origin_type_index = tindex
+
+    @cached_property
+    def _converter(self):
+        """Lazily build the type converter on first use.
+
+        Deferred construction ensures all object types are registered
+        by the time the converter is built. Raises TypeError for
+        unresolvable origins.
+        """
+        return _build_converter(self)
 
     def __repr__(self) -> str:
         return self.repr(ty_map=None)
 
     @staticmethod
     def from_json_obj(obj: dict[str, Any]) -> "TypeSchema":
-        """Construct a :class:`TypeSchema` from a parsed JSON object."""
-        assert isinstance(obj, dict) and "type" in obj, obj
+        """Construct a :class:`TypeSchema` from a parsed JSON object.
+
+        Non-dict elements in the ``"args"`` list (e.g., numeric lengths
+        emitted by ``std::array`` TypeTraits) are silently skipped.
+        """
+        if not isinstance(obj, dict) or "type" not in obj:
+            raise TypeError(
+                f"expected schema dict with 'type' key, got {type(obj).__name__}"
+            )
         origin = obj["type"]
         origin = _TYPE_SCHEMA_ORIGIN_CONVERTER.get(origin, origin)
-        args = obj.get("args", ())
-        args = tuple(TypeSchema.from_json_obj(a) for a in args)
+        raw_args = obj.get("args", ())
+        if not isinstance(raw_args, (list, tuple)):
+            raw_args = ()
+        args = tuple(
+            TypeSchema.from_json_obj(a) for a in raw_args
+            if isinstance(a, dict)
+        )
         return TypeSchema(origin, args)
 
     @staticmethod
     def from_json_str(s: str) -> "TypeSchema":
         """Construct a :class:`TypeSchema` from a JSON string."""
         return TypeSchema.from_json_obj(json.loads(s))
+
+    @staticmethod
+    def from_type_index(type_index: int, args: "tuple[TypeSchema, ...]" = ()) -> "TypeSchema":
+        """Construct a :class:`TypeSchema` from a type_index and optional args.
+
+        Parameters
+        ----------
+        type_index : int
+            A valid TVM FFI type index (e.g., ``kTVMFFIInt``, ``kTVMFFIArray``,
+            or an object type index from ``_object_type_key_to_index``).
+            Passing an unregistered index triggers a fatal C++ assertion;
+            callers must ensure the index was obtained from the type registry.
+        args : tuple[TypeSchema, ...], optional
+            Type arguments for parameterized types (e.g., element type for Array).
+
+        Returns
+        -------
+        TypeSchema
+            A new schema with the origin resolved from the type index.
+        """
+        origin = _TYPE_INDEX_TO_ORIGIN.get(type_index, None)
+        if origin is None:
+            origin = _type_index_to_key(type_index)
+        return TypeSchema(origin, args, origin_type_index=type_index)
+
+    def check_value(self, value: object) -> None:
+        """Validate that *value* is compatible with this type schema.
+
+        Parameters
+        ----------
+        value : object
+            The Python value to check.
+
+        Raises
+        ------
+        TypeError
+            If the value is not compatible with the schema, with a
+            human-readable error message describing the mismatch.
+        """
+        # _type_schema_check_value is defined in type_check.pxi
+        _type_schema_check_value(self, value)
+
+    def try_check_value(self, value: object) -> "Optional[str]":
+        """Check if *value* is compatible with this type schema.
+
+        Returns
+        -------
+        str or None
+            ``None`` if the value is compatible, or an error message
+            string describing the mismatch.
+        """
+        # _type_schema_try_check_value is defined in type_check.pxi
+        return _type_schema_try_check_value(self, value)
+
+    def convert(self, value: object) -> object:
+        """Convert *value* according to this type schema.
+
+        Applies the same implicit conversions as the C++ FFI
+        ``TypeTraits<T>::TryCastFromAnyView`` rules.  For example,
+        ``TypeSchema("float").convert(42)`` returns ``42.0``.
+
+        Parameters
+        ----------
+        value : object
+            The Python value to convert.
+
+        Returns
+        -------
+        object
+            The converted value.
+
+        Raises
+        ------
+        TypeError
+            If the value cannot be converted to this schema's type.
+        """
+        # _type_schema_convert is defined in type_check.pxi
+        return _type_schema_convert(self, value)
+
+    def try_convert(self, value: object) -> "tuple[bool, object]":
+        """Try to convert *value* according to this type schema.
+
+        Returns
+        -------
+        tuple[bool, object]
+            A ``(success, result)`` pair.  On success, ``result`` is the
+            converted value (which may be ``None`` for e.g. ``Optional``).
+            On failure, ``result`` is an error message string.
+        """
+        # _type_schema_try_convert is defined in type_check.pxi
+        return _type_schema_try_convert(self, value)
 
     def repr(self, ty_map: "Optional[Callable[[str], str]]" = None) -> str:
         """Render a human-readable representation of this schema.
