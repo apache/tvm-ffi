@@ -26,8 +26,12 @@ use tvm_ffi_sys::{TVMFFIEnvGetStream, TVMFFIEnvSetStream, TVMFFIStreamHandle};
 pub fn current_stream(device: &DLDevice) -> TVMFFIStreamHandle {
     unsafe { TVMFFIEnvGetStream(device.device_type as i32, device.device_id) }
 }
-/// call f with the stream set to the given stream
-pub fn with_stream<T>(
+/// Call `f` with the device stream temporarily set to `stream`.
+///
+/// # Safety
+///
+/// `stream` must be a valid stream handle for the given device, or null.
+pub unsafe fn with_stream<T>(
     device: &DLDevice,
     stream: TVMFFIStreamHandle,
     f: impl FnOnce() -> Result<T>,

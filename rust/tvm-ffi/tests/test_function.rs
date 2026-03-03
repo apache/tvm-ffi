@@ -138,7 +138,9 @@ tvm_ffi_dll_export_typed_func!(testing_add_one, testing_add_one);
 
 #[test]
 fn test_function_from_extern_c() {
-    let add_one = Function::from_extern_c(std::ptr::null_mut(), __tvm_ffi_testing_add_one, None);
+    // SAFETY: null handle is valid for testing_add_one which doesn't use the handle.
+    let add_one =
+        unsafe { Function::from_extern_c(std::ptr::null_mut(), __tvm_ffi_testing_add_one, None) };
     let typed_add_one = into_typed_fn!(add_one, Fn(i32) -> Result<i32>);
     assert_eq!(typed_add_one(1).unwrap(), 2);
 }
@@ -184,8 +186,10 @@ tvm_ffi_dll_export_typed_func!(test_add_one_tensor, test_add_one_tensor);
 
 #[test]
 fn test_function_call_tensor_fn() {
-    let add_one =
-        Function::from_extern_c(std::ptr::null_mut(), __tvm_ffi_test_add_one_tensor, None);
+    // SAFETY: null handle is valid for test_add_one_tensor which doesn't use the handle.
+    let add_one = unsafe {
+        Function::from_extern_c(std::ptr::null_mut(), __tvm_ffi_test_add_one_tensor, None)
+    };
     let typed_add_one = into_typed_fn!(add_one, Fn(&Tensor, &Tensor) -> Result<()>);
     let x_data: &[f32] = &[0.0, 1.0, 2.0, 3.0];
     let x = Tensor::from_slice(x_data, &[2, 2]).unwrap();

@@ -250,7 +250,12 @@ impl Function {
         Self::from_packed(closure)
     }
 
-    pub fn from_extern_c(
+    /// # Safety
+    ///
+    /// `handle` must be a valid pointer (or null) that is compatible with
+    /// `safe_call` and `deleter`. The caller must ensure the handle outlives
+    /// the returned `Function` (or that `deleter` properly frees it).
+    pub unsafe fn from_extern_c(
         handle: *mut std::ffi::c_void,
         safe_call: TVMFFISafeCallType,
         deleter: Option<unsafe extern "C" fn(*mut std::ffi::c_void)>,

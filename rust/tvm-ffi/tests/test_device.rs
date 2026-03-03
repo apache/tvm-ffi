@@ -22,10 +22,13 @@ use tvm_ffi::*;
 fn test_device_stream() {
     let device = DLDevice::new(DLDeviceType::kDLCPU, 0);
     let dummy_stream = 2 as TVMFFIStreamHandle;
-    with_stream(&device, dummy_stream, || {
-        assert_eq!(current_stream(&device), dummy_stream);
-        Ok(())
-    })
+    // SAFETY: dummy_stream is a test value; CPU device accepts any stream handle.
+    unsafe {
+        with_stream(&device, dummy_stream, || {
+            assert_eq!(current_stream(&device), dummy_stream);
+            Ok(())
+        })
+    }
     .unwrap();
     assert_eq!(current_stream(&device), std::ptr::null_mut());
 }

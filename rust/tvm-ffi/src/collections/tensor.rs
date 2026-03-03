@@ -158,7 +158,11 @@ impl Tensor {
     ///
     /// # Returns
     /// * `Result<&mut [T]>` - The data as a mutable slice
-    pub fn data_as_slice_mut<T: AsDLDataType>(&self) -> Result<&mut [T]> {
+    /// Returns the tensor data as a mutable slice.
+    ///
+    /// Note: if the `Tensor` has been cloned (via `ObjectArc`), the caller
+    /// must ensure no other clone is concurrently reading the data.
+    pub fn data_as_slice_mut<T: AsDLDataType>(&mut self) -> Result<&mut [T]> {
         let dtype = T::DL_DATA_TYPE;
         if self.dtype() != dtype {
             crate::bail!(
@@ -303,7 +307,7 @@ impl Tensor {
     pub fn from_slice<T: AsDLDataType>(slice: &[T], shape: &[i64]) -> Result<Self> {
         let dtype = T::DL_DATA_TYPE;
         let device = DLDevice::new(DLDeviceType::kDLCPU, 0);
-        let tensor = Tensor::from_nd_alloc(CPUNDAlloc {}, shape, dtype, device);
+        let mut tensor = Tensor::from_nd_alloc(CPUNDAlloc {}, shape, dtype, device);
         if tensor.numel() != slice.len() {
             crate::bail!(crate::error::VALUE_ERROR, "Slice length mismatch");
         }
