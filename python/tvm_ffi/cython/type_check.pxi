@@ -569,6 +569,54 @@ cdef object _dispatch_optional(object conv_obj, object value):
     return _type_convert_dispatch_with_fallback(<_TypeConverter>conv.subs[0], value)
 
 
+cdef object _container_mod = None
+
+cdef inline object _get_container_mod():
+    """Lazy import of tvm_ffi.container (avoids circular import at module init)."""
+    global _container_mod
+    if _container_mod is None:
+        from tvm_ffi import container as _mod
+        _container_mod = _mod
+    return _container_mod
+
+
+cdef inline object _wrap_array(object result, object value):
+    """Wrap *result* as ffi.Array if it isn't already the right type."""
+    if result is value and isinstance(value, CObject):
+        obj_tindex = TVMFFIObjectGetTypeIndex((<CObject>value).chandle)
+        if _is_object_instance(obj_tindex, kTVMFFIArray):
+            return value
+    return _get_container_mod().Array(result)
+
+
+cdef inline object _wrap_list(object result, object value):
+    """Wrap *result* as ffi.List if it isn't already the right type."""
+    if result is value and isinstance(value, CObject):
+        obj_tindex = TVMFFIObjectGetTypeIndex((<CObject>value).chandle)
+        if _is_object_instance(obj_tindex, kTVMFFIList):
+            return value
+    return _get_container_mod().List(result)
+
+
+cdef inline object _wrap_map(object result, object value):
+    """Wrap *result* as ffi.Map if it isn't already the right type."""
+    if result is value and isinstance(value, CObject):
+        obj_tindex = TVMFFIObjectGetTypeIndex((<CObject>value).chandle)
+        if _is_object_instance(obj_tindex, kTVMFFIMap):
+            return value
+    return _get_container_mod().Map(result)
+
+
+cdef inline object _wrap_dict(object result, object value):
+    """Wrap *result* as ffi.Dict if it isn't already the right type."""
+    if result is value and isinstance(value, CObject):
+        obj_tindex = TVMFFIObjectGetTypeIndex((<CObject>value).chandle)
+        if _is_object_instance(obj_tindex, kTVMFFIDict):
+            return value
+    cdef object mod = _get_container_mod()
+    return mod.Dict(result)
+
+
 cdef object _dispatch_array(object conv_obj, object value):
     """Dispatch for Array[T]. Accepts Array or List CObjects (cross-type)."""
     cdef _TypeConverter conv = <_TypeConverter>conv_obj
@@ -580,9 +628,14 @@ cdef object _dispatch_array(object conv_obj, object value):
             return _ConvertError(f"expected Array, got {_type_index_to_key(obj_tindex)}")
     elif not isinstance(value, (list, tuple)):
         return _ConvertError(f"expected Array, got {_tc_describe_value_type(value)}")
+    cdef object result
     if conv.subs is not None:
-        return _dispatch_convert_elems(value, <_TypeConverter>conv.subs[0])
-    return value
+        result = _dispatch_convert_elems(value, <_TypeConverter>conv.subs[0])
+    else:
+        result = value
+    if isinstance(result, _ConvertError):
+        return result
+    return _wrap_array(result, value)
 
 
 cdef object _dispatch_list(object conv_obj, object value):
@@ -596,9 +649,14 @@ cdef object _dispatch_list(object conv_obj, object value):
             return _ConvertError(f"expected List, got {_type_index_to_key(obj_tindex)}")
     elif not isinstance(value, (list, tuple)):
         return _ConvertError(f"expected List, got {_tc_describe_value_type(value)}")
+    cdef object result
     if conv.subs is not None:
-        return _dispatch_convert_elems(value, <_TypeConverter>conv.subs[0])
-    return value
+        result = _dispatch_convert_elems(value, <_TypeConverter>conv.subs[0])
+    else:
+        result = value
+    if isinstance(result, _ConvertError):
+        return result
+    return _wrap_list(result, value)
 
 
 cdef object _dispatch_map(object conv_obj, object value):
@@ -612,13 +670,18 @@ cdef object _dispatch_map(object conv_obj, object value):
             return _ConvertError(f"expected Map, got {_type_index_to_key(obj_tindex)}")
     elif not isinstance(value, dict):
         return _ConvertError(f"expected Map, got {_tc_describe_value_type(value)}")
+    cdef object result
     if conv.subs is not None:
-        return _dispatch_convert_mapping(
+        result = _dispatch_convert_mapping(
             value,
             <_TypeConverter>conv.subs[0],
             <_TypeConverter>conv.subs[1],
         )
-    return value
+    else:
+        result = value
+    if isinstance(result, _ConvertError):
+        return result
+    return _wrap_map(result, value)
 
 
 cdef object _dispatch_dict(object conv_obj, object value):
@@ -632,13 +695,18 @@ cdef object _dispatch_dict(object conv_obj, object value):
             return _ConvertError(f"expected Dict, got {_type_index_to_key(obj_tindex)}")
     elif not isinstance(value, dict):
         return _ConvertError(f"expected Dict, got {_tc_describe_value_type(value)}")
+    cdef object result
     if conv.subs is not None:
-        return _dispatch_convert_mapping(
+        result = _dispatch_convert_mapping(
             value,
             <_TypeConverter>conv.subs[0],
             <_TypeConverter>conv.subs[1],
         )
-    return value
+    else:
+        result = value
+    if isinstance(result, _ConvertError):
+        return result
+    return _wrap_dict(result, value)
 
 
 cdef object _dispatch_union(object conv_obj, object value):
@@ -986,24 +1054,8 @@ def _type_schema_check_value(schema, value):
         raise TypeError(f"type check failed for {schema!r}: {result.message}")
 
 
-def _type_schema_try_check_value(schema, value):
-    """Return None on success or an error message string on failure.
-
-    Never raises — all exceptions (including lazy converter build
-    failures and custom ``__int__``/``__float__`` errors) are caught
-    and returned as error message strings.
-    """
-    try:
-        result = _type_convert_impl(schema, value)
-    except Exception as e:
-        return str(e)
-    if isinstance(result, _ConvertError):
-        return result.message
-    return None
-
-
 def _type_schema_convert(schema, value):
-    """Convert *value* or raise TypeError."""
+    """Convert *value* and return a :class:`CAny`, or raise TypeError."""
     try:
         result = _type_convert_impl(schema, value)
     except RecursionError:
@@ -1013,20 +1065,4 @@ def _type_schema_convert(schema, value):
         ) from None
     if isinstance(result, _ConvertError):
         raise TypeError(f"type conversion failed for {schema!r}: {result.message}")
-    return result
-
-
-def _type_schema_try_convert(schema, value):
-    """Return (True, converted) or (False, error_message).
-
-    Never raises — all exceptions (including lazy converter build
-    failures and custom ``__int__``/``__float__`` errors) are caught
-    and returned as ``(False, error_message)``.
-    """
-    try:
-        result = _type_convert_impl(schema, value)
-    except Exception as e:
-        return (False, str(e))
-    if isinstance(result, _ConvertError):
-        return (False, result.message)
-    return (True, result)
+    return CAny(result)

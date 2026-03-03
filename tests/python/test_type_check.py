@@ -14,17 +14,20 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-"""Tests for TypeSchema type conversion (convert/try_convert/check_value)."""
+"""Tests for TypeSchema type conversion (convert/check_value)."""
 
 from __future__ import annotations
 
 import ctypes
 import os
+import sys
+import typing
 from numbers import Integral
+from typing import Callable, Optional, Union
 
 import pytest
 import tvm_ffi
-from tvm_ffi.core import ObjectConvertible, TypeSchema
+from tvm_ffi.core import CAny, ObjectConvertible, TypeSchema
 from tvm_ffi.testing import (
     TestIntPair,
     TestObjectBase,
@@ -39,8 +42,12 @@ from tvm_ffi.testing import (
 # Helpers
 # ---------------------------------------------------------------------------
 def S(origin: str, *args: TypeSchema) -> TypeSchema:
-    """Shorthand constructor for TypeSchema."""
+    """Shorthand constructor for TypeSchema (string-based)."""
     return TypeSchema(origin, tuple(args))
+
+
+# Annotation-based constructor — the main subject under test.
+A = TypeSchema.from_annotation
 
 
 # ---------------------------------------------------------------------------
@@ -49,31 +56,31 @@ def S(origin: str, *args: TypeSchema) -> TypeSchema:
 class TestPODExactMatch:
     def test_int(self) -> None:
         """Test int."""
-        S("int").check_value(42)
+        A(int).check_value(42)
 
     def test_float(self) -> None:
         """Test float."""
-        S("float").check_value(3.14)
+        A(float).check_value(3.14)
 
     def test_bool_true(self) -> None:
         """Test bool true."""
-        S("bool").check_value(True)
+        A(bool).check_value(True)
 
     def test_bool_false(self) -> None:
         """Test bool false."""
-        S("bool").check_value(False)
+        A(bool).check_value(False)
 
     def test_str(self) -> None:
         """Test str."""
-        S("str").check_value("hello")
+        A(str).check_value("hello")
 
     def test_bytes(self) -> None:
         """Test bytes."""
-        S("bytes").check_value(b"data")
+        A(bytes).check_value(b"data")
 
     def test_none(self) -> None:
         """Test none."""
-        S("None").check_value(None)
+        A(type(None)).check_value(None)
 
 
 # ---------------------------------------------------------------------------
@@ -82,19 +89,19 @@ class TestPODExactMatch:
 class TestImplicitConversions:
     def test_bool_to_int(self) -> None:
         """Bool -> int is OK (C++: int accepts bool)."""
-        S("int").check_value(True)
+        A(int).check_value(True)
 
     def test_int_to_float(self) -> None:
         """Int -> float is OK (C++: float accepts int)."""
-        S("float").check_value(42)
+        A(float).check_value(42)
 
     def test_bool_to_float(self) -> None:
         """Bool -> float is OK (C++: float accepts bool)."""
-        S("float").check_value(True)
+        A(float).check_value(True)
 
     def test_int_to_bool(self) -> None:
         """Int -> bool is OK (C++: bool accepts int)."""
-        S("bool").check_value(1)
+        A(bool).check_value(1)
 
 
 # ---------------------------------------------------------------------------
@@ -103,37 +110,43 @@ class TestImplicitConversions:
 class TestRejections:
     def test_str_not_int(self) -> None:
         """Test str not int."""
-        assert S("int").try_check_value("hello") is not None
         with pytest.raises(TypeError, match="expected int"):
-            S("int").check_value("hello")
+            A(int).check_value("hello")
 
     def test_float_not_int(self) -> None:
         """Test float not int."""
-        assert S("int").try_check_value(3.14) is not None
+        with pytest.raises(TypeError):
+            A(int).check_value(3.14)
 
     def test_none_not_int(self) -> None:
         """Test none not int."""
-        assert S("int").try_check_value(None) is not None
+        with pytest.raises(TypeError):
+            A(int).check_value(None)
 
     def test_int_not_str(self) -> None:
         """Test int not str."""
-        assert S("str").try_check_value(42) is not None
+        with pytest.raises(TypeError):
+            A(str).check_value(42)
 
     def test_str_not_bool(self) -> None:
         """Test str not bool."""
-        assert S("bool").try_check_value("hello") is not None
+        with pytest.raises(TypeError):
+            A(bool).check_value("hello")
 
     def test_none_not_str(self) -> None:
         """Test none not str."""
-        assert S("str").try_check_value(None) is not None
+        with pytest.raises(TypeError):
+            A(str).check_value(None)
 
     def test_int_not_bytes(self) -> None:
         """Test int not bytes."""
-        assert S("bytes").try_check_value(42) is not None
+        with pytest.raises(TypeError):
+            A(bytes).check_value(42)
 
     def test_int_not_none(self) -> None:
         """Test int not none."""
-        assert S("None").try_check_value(42) is not None
+        with pytest.raises(TypeError):
+            A(type(None)).check_value(42)
 
 
 # ---------------------------------------------------------------------------
@@ -147,7 +160,8 @@ class TestSpecialTypes:
 
     def test_device_fail(self) -> None:
         """Test device fail."""
-        assert S("Device").try_check_value(42) is not None
+        with pytest.raises(TypeError):
+            S("Device").check_value(42)
 
     def test_dtype_pass(self) -> None:
         """Test dtype pass."""
@@ -160,7 +174,8 @@ class TestSpecialTypes:
 
     def test_dtype_fail(self) -> None:
         """Test dtype fail."""
-        assert S("dtype").try_check_value(42) is not None
+        with pytest.raises(TypeError):
+            S("dtype").check_value(42)
 
     def test_opaque_ptr_pass(self) -> None:
         """Test opaque ptr pass."""
@@ -172,19 +187,21 @@ class TestSpecialTypes:
 
     def test_opaque_ptr_fail(self) -> None:
         """Test opaque ptr fail."""
-        assert S("ctypes.c_void_p").try_check_value(42) is not None
+        with pytest.raises(TypeError):
+            S("ctypes.c_void_p").check_value(42)
 
     def test_callable_pass_function(self) -> None:
         """Test callable pass function."""
-        S("Callable").check_value(lambda x: x)
+        A(Callable).check_value(lambda x: x)
 
     def test_callable_pass_builtin(self) -> None:
         """Test callable pass builtin."""
-        S("Callable").check_value(len)
+        A(Callable).check_value(len)
 
     def test_callable_fail(self) -> None:
         """Test callable fail."""
-        assert S("Callable").try_check_value(42) is not None
+        with pytest.raises(TypeError):
+            A(Callable).check_value(42)
 
 
 # ---------------------------------------------------------------------------
@@ -198,12 +215,13 @@ class TestObjectTypes:
 
     def test_object_fail(self) -> None:
         """Test object fail."""
-        assert S("Object").try_check_value(42) is not None
+        with pytest.raises(TypeError):
+            S("Object").check_value(42)
 
     def test_specific_object_pass(self) -> None:
         """A Function object should pass its own type schema."""
         f = tvm_ffi.get_global_func("testing.echo")
-        S("Callable").check_value(f)
+        A(Callable).check_value(f)
 
 
 # ---------------------------------------------------------------------------
@@ -212,17 +230,16 @@ class TestObjectTypes:
 class TestOptional:
     def test_none_passes(self) -> None:
         """Test none passes."""
-        S("Optional", S("int")).check_value(None)
+        A(Optional[int]).check_value(None)
 
     def test_inner_type_passes(self) -> None:
         """Test inner type passes."""
-        S("Optional", S("int")).check_value(42)
+        A(Optional[int]).check_value(42)
 
     def test_wrong_type_fails(self) -> None:
         """Test wrong type fails."""
-        err = S("Optional", S("int")).try_check_value("hello")
-        assert err is not None
-        assert "expected int" in err
+        with pytest.raises(TypeError, match="expected int"):
+            A(Optional[int]).check_value("hello")
 
     def test_nested_optional(self) -> None:
         """Test nested optional."""
@@ -237,21 +254,20 @@ class TestOptional:
 class TestUnion:
     def test_first_alt_passes(self) -> None:
         """Test first alt passes."""
-        S("Union", S("int"), S("str")).check_value(42)
+        A(Union[int, str]).check_value(42)
 
     def test_second_alt_passes(self) -> None:
         """Test second alt passes."""
-        S("Union", S("int"), S("str")).check_value("hello")
+        A(Union[int, str]).check_value("hello")
 
     def test_no_alt_matches(self) -> None:
         """Test no alt matches."""
-        err = S("Union", S("int"), S("str")).try_check_value(3.14)
-        assert err is not None
-        assert "got float" in err
+        with pytest.raises(TypeError, match="got float"):
+            A(Union[int, str]).check_value(3.14)
 
     def test_bool_matches_int_alt(self) -> None:
         """Bool is accepted by the int alternative."""
-        S("Union", S("int"), S("str")).check_value(True)
+        A(Union[int, str]).check_value(True)
 
 
 # ---------------------------------------------------------------------------
@@ -260,36 +276,33 @@ class TestUnion:
 class TestContainers:
     def test_array_list_pass(self) -> None:
         """Test array list pass."""
-        S("Array", S("int")).check_value([1, 2, 3])
+        A(tuple[int, ...]).check_value([1, 2, 3])
 
     def test_array_tuple_pass(self) -> None:
         """Test array tuple pass."""
-        S("Array", S("int")).check_value((1, 2, 3))
+        A(tuple[int, ...]).check_value((1, 2, 3))
 
     def test_array_wrong_element(self) -> None:
         """Test array wrong element."""
-        err = S("Array", S("int")).try_check_value([1, "x"])
-        assert err is not None
-        assert "element [1]" in err
-        assert "expected int" in err
+        with pytest.raises(TypeError, match=r"element \[1\].*expected int"):
+            A(tuple[int, ...]).check_value([1, "x"])
 
     def test_array_empty_pass(self) -> None:
         """Test array empty pass."""
-        S("Array", S("int")).check_value([])
+        A(tuple[int, ...]).check_value([])
 
     def test_array_any_pass(self) -> None:
         """Test array any pass."""
-        S("Array", S("Any")).check_value([1, "x", None])
+        A(tuple[typing.Any, ...]).check_value([1, "x", None])
 
     def test_array_wrong_container_type(self) -> None:
         """Test array wrong container type."""
-        err = S("Array", S("int")).try_check_value(42)
-        assert err is not None
-        assert "expected Array" in err
+        with pytest.raises(TypeError, match="expected Array"):
+            A(tuple[int, ...]).check_value(42)
 
     def test_list_pass(self) -> None:
         """Test list pass."""
-        S("List", S("str")).check_value(["a", "b"])
+        A(list[str]).check_value(["a", "b"])
 
     def test_map_pass(self) -> None:
         """Test map pass."""
@@ -297,17 +310,13 @@ class TestContainers:
 
     def test_map_wrong_key(self) -> None:
         """Test map wrong key."""
-        err = S("Map", S("str"), S("int")).try_check_value({1: 2})
-        assert err is not None
-        assert "key" in err
-        assert "expected str" in err
+        with pytest.raises(TypeError, match="expected str"):
+            S("Map", S("str"), S("int")).check_value({1: 2})
 
     def test_map_wrong_value(self) -> None:
         """Test map wrong value."""
-        err = S("Map", S("str"), S("int")).try_check_value({"a": "b"})
-        assert err is not None
-        assert "value for key" in err
-        assert "expected int" in err
+        with pytest.raises(TypeError, match="expected int"):
+            S("Map", S("str"), S("int")).check_value({"a": "b"})
 
     def test_map_empty_pass(self) -> None:
         """Test map empty pass."""
@@ -315,13 +324,12 @@ class TestContainers:
 
     def test_dict_pass(self) -> None:
         """Test dict pass."""
-        S("Dict", S("str"), S("int")).check_value({"a": 1})
+        A(dict[str, int]).check_value({"a": 1})
 
     def test_map_wrong_container(self) -> None:
         """Test map wrong container."""
-        err = S("Map", S("str"), S("int")).try_check_value([1, 2])
-        assert err is not None
-        assert "expected Map" in err
+        with pytest.raises(TypeError, match="expected Map"):
+            S("Map", S("str"), S("int")).check_value([1, 2])
 
 
 # ---------------------------------------------------------------------------
@@ -330,7 +338,7 @@ class TestContainers:
 class TestNestedTypes:
     def test_array_optional_int(self) -> None:
         """Test array optional int."""
-        S("Array", S("Optional", S("int"))).check_value([1, None, 2])
+        A(tuple[Optional[int], ...]).check_value([1, None, 2])
 
     def test_map_str_array_int(self) -> None:
         """Test map str array int."""
@@ -338,19 +346,16 @@ class TestNestedTypes:
 
     def test_map_str_array_int_nested_fail(self) -> None:
         """Test map str array int nested fail."""
-        err = S("Map", S("str"), S("Array", S("int"))).try_check_value({"a": [1, "x"]})
-        assert err is not None
-        assert "value for key 'a'" in err
-        assert "element [1]" in err
-        assert "expected int" in err
+        with pytest.raises(TypeError, match="expected int"):
+            S("Map", S("str"), S("Array", S("int"))).check_value({"a": [1, "x"]})
 
     def test_union_with_containers(self) -> None:
         """Test union with containers."""
-        schema = S("Union", S("int"), S("Array", S("str")))
+        schema = A(Union[int, tuple[str, ...]])
         schema.check_value(42)
         schema.check_value(["a", "b"])
-        err = schema.try_check_value(3.14)
-        assert err is not None
+        with pytest.raises(TypeError):
+            schema.check_value(3.14)
 
 
 # ---------------------------------------------------------------------------
@@ -359,23 +364,23 @@ class TestNestedTypes:
 class TestAny:
     def test_int(self) -> None:
         """Test int."""
-        S("Any").check_value(42)
+        A(typing.Any).check_value(42)
 
     def test_none(self) -> None:
         """Test none."""
-        S("Any").check_value(None)
+        A(typing.Any).check_value(None)
 
     def test_str(self) -> None:
         """Test str."""
-        S("Any").check_value("hello")
+        A(typing.Any).check_value("hello")
 
     def test_list(self) -> None:
         """Test list."""
-        S("Any").check_value([1, 2, 3])
+        A(typing.Any).check_value([1, 2, 3])
 
     def test_object(self) -> None:
         """Test object."""
-        S("Any").check_value(object())
+        A(typing.Any).check_value(object())
 
 
 # ---------------------------------------------------------------------------
@@ -385,12 +390,12 @@ class TestErrorMessages:
     def test_basic_type_mismatch(self) -> None:
         """Test basic type mismatch."""
         with pytest.raises(TypeError, match=r"expected int, got str"):
-            S("int").check_value("hello")
+            A(int).check_value("hello")
 
     def test_nested_array_error(self) -> None:
         """Test nested array error."""
         with pytest.raises(TypeError, match=r"element \[2\].*expected int, got str"):
-            S("Array", S("int")).check_value([1, 2, "x"])
+            A(tuple[int, ...]).check_value([1, 2, "x"])
 
     def test_nested_map_error(self) -> None:
         """Test nested map error."""
@@ -399,21 +404,21 @@ class TestErrorMessages:
 
     def test_union_error_lists_alternatives(self) -> None:
         """Test union error lists alternatives."""
-        err = S("Union", S("int"), S("str")).try_check_value(3.14)
-        assert err is not None
+        with pytest.raises(TypeError, match="got float") as exc_info:
+            A(Union[int, str]).check_value(3.14)
+        err = str(exc_info.value)
         assert "int" in err
         assert "str" in err
-        assert "got float" in err
 
     def test_schema_in_error_message(self) -> None:
         """check_value includes the schema repr in the TypeError."""
         with pytest.raises(TypeError, match=r"type check failed for"):
-            S("int").check_value("hello")
+            A(int).check_value("hello")
 
     def test_convert_error_message(self) -> None:
         """Convert includes the schema repr in the TypeError."""
         with pytest.raises(TypeError, match=r"type conversion failed for"):
-            S("int").convert("hello")
+            A(int).convert("hello")
 
 
 # ---------------------------------------------------------------------------
@@ -447,7 +452,8 @@ class TestFromTypeIndex:
         """from_type_index then check_value works correctly."""
         schema = TypeSchema.from_type_index(1)  # int
         schema.check_value(42)
-        assert schema.try_check_value("hello") is not None
+        with pytest.raises(TypeError):
+            schema.check_value("hello")
 
     def test_none(self) -> None:
         """Test none."""
@@ -480,11 +486,11 @@ class TestFromTypeIndex:
 class TestEdgeCases:
     def test_bytearray_passes_bytes(self) -> None:
         """Test bytearray passes bytes."""
-        S("bytes").check_value(bytearray(b"data"))
+        A(bytes).check_value(bytearray(b"data"))
 
     def test_tuple_passes_array(self) -> None:
         """Tuple is accepted as a sequence type for Array."""
-        S("Array", S("int")).check_value((1, 2, 3))
+        A(tuple[int, ...]).check_value((1, 2, 3))
 
     def test_empty_union_is_rejected(self) -> None:
         """Union requires at least 2 args."""
@@ -493,39 +499,40 @@ class TestEdgeCases:
 
     def test_origin_type_index_auto_computed(self) -> None:
         """origin_type_index is automatically computed from origin string."""
-        schema = S("int")
+        schema = A(int)
         assert schema.origin_type_index == 1  # kTVMFFIInt
-        schema = S("float")
+        schema = A(float)
         assert schema.origin_type_index == 3  # kTVMFFIFloat
-        schema = S("Optional", S("int"))
+        schema = A(Optional[int])
         assert schema.origin_type_index == -2  # structural
 
-    def test_try_check_value_returns_none_on_success(self) -> None:
-        """Test try check value returns none on success."""
-        assert S("int").try_check_value(42) is None
+    def test_check_value_succeeds_on_valid(self) -> None:
+        """Test check value succeeds on valid input."""
+        A(int).check_value(42)
 
-    def test_try_check_value_returns_string_on_failure(self) -> None:
-        """Test try check value returns string on failure."""
-        result = S("int").try_check_value("hello")
-        assert isinstance(result, str)
-        assert "expected int" in result
+    def test_check_value_raises_on_failure(self) -> None:
+        """Test check value raises TypeError on failure."""
+        with pytest.raises(TypeError, match="expected int"):
+            A(int).check_value("hello")
 
     def test_tuple_type_schema(self) -> None:
         """Test tuple type schema."""
-        schema = S("tuple", S("int"), S("str"))
+        schema = A(tuple[int, str])
         schema.check_value((1, "a"))
-        assert schema.try_check_value((1, 2)) is not None
-        assert schema.try_check_value((1,)) is not None
+        with pytest.raises(TypeError):
+            schema.check_value((1, 2))
+        with pytest.raises(TypeError):
+            schema.check_value((1,))
 
     def test_numpy_int_passes_int(self) -> None:
         """Numpy integer types should pass int check via Integral."""
         np = pytest.importorskip("numpy")
-        S("int").check_value(np.int64(42))
-        S("float").check_value(np.float64(3.14))
+        A(int).check_value(np.int64(42))
+        A(float).check_value(np.float64(3.14))
 
 
 # ===========================================================================
-# Type Converter Tests (convert / try_convert)
+# Type Converter Tests (convert)
 # ===========================================================================
 
 
@@ -535,75 +542,78 @@ class TestEdgeCases:
 class TestConvertPOD:
     def test_int_passthrough(self) -> None:
         """Int -> int returns the same value."""
-        result = S("int").convert(42)
+        result = A(int).convert(42).to_py()
         assert result == 42
         assert type(result) is int
 
     def test_bool_to_int(self) -> None:
         """Bool -> int actually converts to int."""
-        result = S("int").convert(True)
+        result = A(int).convert(True).to_py()
         assert result == 1
         assert type(result) is int
 
     def test_bool_false_to_int(self) -> None:
         """Test bool false to int."""
-        result = S("int").convert(False)
+        result = A(int).convert(False).to_py()
         assert result == 0
         assert type(result) is int
 
     def test_float_passthrough(self) -> None:
         """Test float passthrough."""
-        result = S("float").convert(3.14)
+        result = A(float).convert(3.14).to_py()
         assert result == 3.14
         assert type(result) is float
 
     def test_int_to_float(self) -> None:
         """Int -> float actually converts."""
-        result = S("float").convert(42)
+        result = A(float).convert(42).to_py()
         assert result == 42.0
         assert type(result) is float
 
     def test_bool_to_float(self) -> None:
         """Bool -> float actually converts."""
-        result = S("float").convert(True)
+        result = A(float).convert(True).to_py()
         assert result == 1.0
         assert type(result) is float
 
     def test_bool_passthrough(self) -> None:
         """Test bool passthrough."""
-        result = S("bool").convert(True)
+        result = A(bool).convert(True).to_py()
         assert result is True
         assert type(result) is bool
 
     def test_int_to_bool(self) -> None:
         """Int -> bool actually converts."""
-        result = S("bool").convert(1)
+        result = A(bool).convert(1).to_py()
         assert result is True
         assert type(result) is bool
 
     def test_int_zero_to_bool(self) -> None:
         """Test int zero to bool."""
-        result = S("bool").convert(0)
+        result = A(bool).convert(0).to_py()
         assert result is False
         assert type(result) is bool
 
     def test_str_passthrough(self) -> None:
-        """Test str passthrough."""
-        result = S("str").convert("hello")
+        """Test str passthrough — returns tvm_ffi.String (subclass of str)."""
+        result = A(str).convert("hello").to_py()
         assert result == "hello"
-        assert type(result) is str
+        assert isinstance(result, str)
+        assert isinstance(result, tvm_ffi.core.String)
 
     def test_bytes_passthrough(self) -> None:
-        """Test bytes passthrough."""
-        result = S("bytes").convert(b"data")
+        """Test bytes passthrough — returns tvm_ffi.Bytes (subclass of bytes)."""
+        result = A(bytes).convert(b"data").to_py()
         assert result == b"data"
-        assert type(result) is bytes
+        assert isinstance(result, bytes)
+        assert isinstance(result, tvm_ffi.core.Bytes)
 
     def test_bytearray_to_bytes(self) -> None:
-        """Bytearray -> bytes actually converts."""
-        result = S("bytes").convert(bytearray(b"data"))
+        """Bytearray -> bytes converts to tvm_ffi.Bytes."""
+        result = A(bytes).convert(bytearray(b"data")).to_py()
         assert result == b"data"
-        assert type(result) is bytes
+        assert isinstance(result, bytes)
+        assert isinstance(result, tvm_ffi.core.Bytes)
 
 
 # ---------------------------------------------------------------------------
@@ -612,48 +622,43 @@ class TestConvertPOD:
 class TestNoneDisambiguation:
     def test_none_converts_successfully_for_none_schema(self) -> None:
         """TypeSchema('None').convert(None) returns None as a valid result."""
-        result = S("None").convert(None)
+        result = A(type(None)).convert(None).to_py()
         assert result is None
 
     def test_none_converts_successfully_for_optional(self) -> None:
         """Optional[int].convert(None) returns None as a valid result."""
-        result = S("Optional", S("int")).convert(None)
+        result = A(Optional[int]).convert(None).to_py()
         assert result is None
 
     def test_none_fails_for_int(self) -> None:
         """TypeSchema('int').convert(None) raises TypeError."""
         with pytest.raises(TypeError, match="expected int, got None"):
-            S("int").convert(None)
+            A(int).convert(None)
 
-    def test_try_convert_none_success(self) -> None:
-        """try_convert distinguishes None-as-result from failure."""
-        success, result = S("Optional", S("int")).try_convert(None)
-        assert success is True
+    def test_convert_none_success(self) -> None:
+        """Convert returns None for Optional[int] with None input."""
+        result = A(Optional[int]).convert(None).to_py()
         assert result is None
 
-    def test_try_convert_none_failure(self) -> None:
-        """try_convert returns (False, error_msg) for failed conversion."""
-        success, result = S("int").try_convert(None)
-        assert success is False
-        assert isinstance(result, str)
-        assert "expected int" in result
+    def test_convert_none_failure(self) -> None:
+        """Convert raises TypeError for failed conversion."""
+        with pytest.raises(TypeError, match="expected int"):
+            A(int).convert(None)
 
-    def test_try_convert_success_with_value(self) -> None:
-        """try_convert returns (True, converted_value) on success."""
-        success, result = S("int").try_convert(True)
-        assert success is True
+    def test_convert_success_with_value(self) -> None:
+        """Convert returns converted value on success."""
+        result = A(int).convert(True).to_py()
         assert result == 1
         assert type(result) is int
 
     def test_opaque_ptr_none_converts(self) -> None:
         """ctypes.c_void_p accepts None and returns None as valid result."""
-        result = S("ctypes.c_void_p").convert(None)
+        result = S("ctypes.c_void_p").convert(None).to_py()
         assert result is None
 
-    def test_try_convert_opaque_ptr_none(self) -> None:
-        """Test try convert opaque ptr none."""
-        success, result = S("ctypes.c_void_p").try_convert(None)
-        assert success is True
+    def test_convert_opaque_ptr_none(self) -> None:
+        """Test convert opaque ptr none."""
+        result = S("ctypes.c_void_p").convert(None).to_py()
         assert result is None
 
 
@@ -663,33 +668,33 @@ class TestNoneDisambiguation:
 class TestConvertSpecialTypes:
     def test_dtype_str_converts(self) -> None:
         """Str -> dtype actually creates a DataType object."""
-        result = S("dtype").convert("float32")
+        result = S("dtype").convert("float32").to_py()
         assert isinstance(result, tvm_ffi.core.DataType)
         assert str(result) == "float32"
 
     def test_dtype_passthrough(self) -> None:
         """Test dtype passthrough."""
         dt = tvm_ffi.core.DataType("int32")
-        result = S("dtype").convert(dt)
-        assert result is dt
+        result = S("dtype").convert(dt).to_py()
+        assert str(result) == str(dt)
 
     def test_device_passthrough(self) -> None:
         """Test device passthrough."""
         dev = tvm_ffi.Device("cpu", 0)
-        result = S("Device").convert(dev)
-        assert result is dev
+        result = S("Device").convert(dev).to_py()
+        assert str(result) == str(dev)
 
     def test_callable_passthrough(self) -> None:
         """Test callable passthrough."""
         fn = lambda x: x
-        result = S("Callable").convert(fn)
-        assert result is fn
+        result = A(Callable).convert(fn).to_py()
+        assert callable(result)
 
     def test_opaque_ptr_passthrough(self) -> None:
         """Test opaque ptr passthrough."""
         ptr = ctypes.c_void_p(42)
-        result = S("ctypes.c_void_p").convert(ptr)
-        assert result is ptr
+        result = S("ctypes.c_void_p").convert(ptr).to_py()
+        assert result is not None
 
 
 # ---------------------------------------------------------------------------
@@ -698,44 +703,48 @@ class TestConvertSpecialTypes:
 class TestConvertContainers:
     def test_array_converts_bool_elements_to_int(self) -> None:
         """Array[int] with bool elements converts them to int."""
-        result = S("Array", S("int")).convert([True, False, 1])
-        assert result == [1, 0, 1]
+        result = A(tuple[int, ...]).convert([True, False, 1]).to_py()
+        assert list(result) == [1, 0, 1]
         assert all(type(x) is int for x in result)
 
     def test_array_int_passthrough(self) -> None:
-        """Array[int] with int elements returns new list."""
-        result = S("Array", S("int")).convert([1, 2, 3])
-        assert result == [1, 2, 3]
+        """Array[int] with int elements returns ffi.Array."""
+        result = A(tuple[int, ...]).convert([1, 2, 3]).to_py()
+        assert list(result) == [1, 2, 3]
 
     def test_array_any_passthrough(self) -> None:
-        """Array[Any] returns the original value."""
+        """Array[Any] wraps into ffi.Array."""
         original = [1, "x", None]
-        result = S("Array", S("Any")).convert(original)
-        assert result is original
+        result = A(tuple[typing.Any, ...]).convert(original).to_py()
+        assert isinstance(result, tvm_ffi.Array)
 
     def test_map_converts_values(self) -> None:
         """Map[str, float] converts int values to float."""
-        result = S("Map", S("str"), S("float")).convert({"a": 1, "b": 2})
-        assert result == {"a": 1.0, "b": 2.0}
-        assert all(type(v) is float for v in result.values())
+        result = S("Map", S("str"), S("float")).convert({"a": 1, "b": 2}).to_py()
+        assert isinstance(result, tvm_ffi.Map)
+        assert type(result["a"]) is float
+        assert type(result["b"]) is float
+        assert result["a"] == 1.0
+        assert result["b"] == 2.0
 
     def test_map_any_any_passthrough(self) -> None:
-        """Map[Any, Any] returns the original value."""
+        """Map[Any, Any] wraps into ffi.Map."""
         original = {"a": 1}
-        result = S("Map", S("Any"), S("Any")).convert(original)
-        assert result is original
+        result = S("Map", S("Any"), S("Any")).convert(original).to_py()
+        assert isinstance(result, tvm_ffi.Map)
 
     def test_tuple_converts_elements(self) -> None:
         """tuple[int, float] converts elements positionally."""
-        result = S("tuple", S("int"), S("float")).convert((True, 42))
-        assert result == (1, 42.0)
+        result = A(tuple[int, float]).convert((True, 42)).to_py()
+        assert list(result) == [1, 42.0]
         assert type(result[0]) is int
         assert type(result[1]) is float
 
     def test_nested_array_in_map(self) -> None:
         """Map[str, Array[int]] recursively converts elements."""
-        result = S("Map", S("str"), S("Array", S("int"))).convert({"a": [True, False]})
-        assert result == {"a": [1, 0]}
+        result = S("Map", S("str"), S("Array", S("int"))).convert({"a": [True, False]}).to_py()
+        assert isinstance(result, tvm_ffi.Map)
+        assert list(result["a"]) == [1, 0]
         assert all(type(x) is int for x in result["a"])
 
 
@@ -745,31 +754,31 @@ class TestConvertContainers:
 class TestConvertComposite:
     def test_optional_converts_inner(self) -> None:
         """Optional[float].convert(42) converts int -> float."""
-        result = S("Optional", S("float")).convert(42)
+        result = A(Optional[float]).convert(42).to_py()
         assert result == 42.0
         assert type(result) is float
 
     def test_optional_none(self) -> None:
         """Test optional none."""
-        result = S("Optional", S("float")).convert(None)
+        result = A(Optional[float]).convert(None).to_py()
         assert result is None
 
     def test_union_picks_first_match(self) -> None:
         """Union[int, str] converts bool via int alternative."""
-        result = S("Union", S("int"), S("str")).convert(True)
+        result = A(Union[int, str]).convert(True).to_py()
         assert result == 1
         assert type(result) is int
 
     def test_union_second_match(self) -> None:
         """Test union second match."""
-        result = S("Union", S("int"), S("str")).convert("hello")
+        result = A(Union[int, str]).convert("hello").to_py()
         assert result == "hello"
 
     def test_any_passthrough(self) -> None:
         """Any returns value as-is."""
-        result = S("Any").convert(42)
+        result = A(typing.Any).convert(42).to_py()
         assert result == 42
-        result = S("Any").convert(None)
+        result = A(typing.Any).convert(None).to_py()
         assert result is None
 
 
@@ -780,22 +789,22 @@ class TestConvertRejections:
     def test_int_rejects_str(self) -> None:
         """Test int rejects str."""
         with pytest.raises(TypeError, match="expected int, got str"):
-            S("int").convert("hello")
+            A(int).convert("hello")
 
     def test_int_rejects_float(self) -> None:
         """Test int rejects float."""
         with pytest.raises(TypeError, match="expected int, got float"):
-            S("int").convert(3.14)
+            A(int).convert(3.14)
 
     def test_str_rejects_int(self) -> None:
         """Test str rejects int."""
         with pytest.raises(TypeError, match="expected str, got int"):
-            S("str").convert(42)
+            A(str).convert(42)
 
     def test_array_rejects_wrong_element(self) -> None:
         """Test array rejects wrong element."""
         with pytest.raises(TypeError, match=r"element \[1\].*expected int, got str"):
-            S("Array", S("int")).convert([1, "x"])
+            A(tuple[int, ...]).convert([1, "x"])
 
     def test_map_rejects_wrong_value(self) -> None:
         """Test map rejects wrong value."""
@@ -805,13 +814,12 @@ class TestConvertRejections:
     def test_tuple_rejects_wrong_length(self) -> None:
         """Test tuple rejects wrong length."""
         with pytest.raises(TypeError, match=r"expected tuple of length 2"):
-            S("tuple", S("int"), S("str")).convert((1,))
+            A(tuple[int, str]).convert((1,))
 
-    def test_try_convert_failure(self) -> None:
-        """Test try convert failure."""
-        success, result = S("int").try_convert("hello")
-        assert success is False
-        assert "expected int" in result
+    def test_convert_failure_raises(self) -> None:
+        """Test convert failure raises TypeError."""
+        with pytest.raises(TypeError, match="expected int"):
+            A(int).convert("hello")
 
 
 # ---------------------------------------------------------------------------
@@ -821,14 +829,14 @@ class TestConvertNumpy:
     def test_numpy_int_to_int(self) -> None:
         """Test numpy int to int."""
         np = pytest.importorskip("numpy")
-        result = S("int").convert(np.int64(42))
+        result = A(int).convert(np.int64(42)).to_py()
         assert result == 42
         assert type(result) is int
 
     def test_numpy_float_to_float(self) -> None:
         """Test numpy float to float."""
         np = pytest.importorskip("numpy")
-        result = S("float").convert(np.float64(3.14))
+        result = A(float).convert(np.float64(3.14)).to_py()
         assert result == pytest.approx(3.14)
         # np.float64 is a subclass of float, so isinstance check passes
         # and the value is returned as-is (no forced conversion to plain float)
@@ -846,50 +854,48 @@ class TestConvertNumpy:
 class TestNestedArrayComposite:
     def test_array_optional_float_with_bool(self) -> None:
         """Array[Optional[float]] converts bool elements to float."""
-        result = S("Array", S("Optional", S("float"))).convert([True, None, 3])
-        assert result == [1.0, None, 3.0]
+        result = A(tuple[Optional[float], ...]).convert([True, None, 3]).to_py()
+        assert list(result) == [1.0, None, 3.0]
         assert type(result[0]) is float
         assert result[1] is None
         assert type(result[2]) is float
 
     def test_array_optional_int_with_bool(self) -> None:
         """Array[Optional[int]] converts bool elements to int."""
-        result = S("Array", S("Optional", S("int"))).convert([True, None, 2])
-        assert result == [1, None, 2]
+        result = A(tuple[Optional[int], ...]).convert([True, None, 2]).to_py()
+        assert list(result) == [1, None, 2]
         assert type(result[0]) is int
         assert result[1] is None
 
     def test_array_union_int_str_with_bool(self) -> None:
         """Array[Union[int, str]] converts bool via int alternative."""
-        result = S("Array", S("Union", S("int"), S("str"))).convert([True, "hello", False])
-        assert result == [1, "hello", 0]
+        result = A(tuple[Union[int, str], ...]).convert([True, "hello", False]).to_py()
+        assert list(result) == [1, "hello", 0]
         assert type(result[0]) is int
         assert type(result[1]) is str
         assert type(result[2]) is int
 
     def test_array_union_float_str_with_int(self) -> None:
         """Array[Union[float, str]] converts int via float alternative."""
-        result = S("Array", S("Union", S("float"), S("str"))).convert([42, "hi", True])
-        assert result == [42.0, "hi", 1.0]
+        result = A(tuple[Union[float, str], ...]).convert([42, "hi", True]).to_py()
+        assert list(result) == [42.0, "hi", 1.0]
         assert type(result[0]) is float
         assert type(result[2]) is float
 
     def test_array_optional_float_all_none(self) -> None:
         """Array[Optional[float]] with all None elements."""
-        result = S("Array", S("Optional", S("float"))).convert([None, None])
-        assert result == [None, None]
+        result = A(tuple[Optional[float], ...]).convert([None, None]).to_py()
+        assert list(result) == [None, None]
 
     def test_array_optional_float_empty(self) -> None:
         """Array[Optional[float]] with empty list."""
-        result = S("Array", S("Optional", S("float"))).convert([])
-        assert result == []
+        result = A(tuple[Optional[float], ...]).convert([]).to_py()
+        assert list(result) == []
 
     def test_array_union_failure_in_element(self) -> None:
         """Array[Union[int, str]] fails when element matches no alternative."""
-        err = S("Array", S("Union", S("int"), S("str"))).try_check_value([1, 3.14])
-        assert err is not None
-        assert "element [1]" in err
-        assert "got float" in err
+        with pytest.raises(TypeError, match=r"element \[1\].*got float"):
+            A(tuple[Union[int, str], ...]).check_value([1, 3.14])
 
 
 # ---------------------------------------------------------------------------
@@ -898,34 +904,34 @@ class TestNestedArrayComposite:
 class TestNestedMapComposite:
     def test_map_str_optional_float_with_int(self) -> None:
         """Map[str, Optional[float]] converts int values to float."""
-        result = S("Map", S("str"), S("Optional", S("float"))).convert({"a": 1, "b": None})
-        assert result == {"a": 1.0, "b": None}
+        result = S("Map", S("str"), S("Optional", S("float"))).convert({"a": 1, "b": None}).to_py()
         assert type(result["a"]) is float
+        assert result["a"] == 1.0
         assert result["b"] is None
 
     def test_map_str_union_int_str(self) -> None:
         """Map[str, Union[int, str]] converts bool values via int."""
-        result = S("Map", S("str"), S("Union", S("int"), S("str"))).convert(
-            {"x": True, "y": "hello"}
+        result = (
+            S("Map", S("str"), S("Union", S("int"), S("str")))
+            .convert({"x": True, "y": "hello"})
+            .to_py()
         )
-        assert result == {"x": 1, "y": "hello"}
+        assert result["x"] == 1
+        assert result["y"] == "hello"
         assert type(result["x"]) is int
 
     def test_dict_str_optional_int(self) -> None:
         """Dict[str, Optional[int]] with bool conversion."""
-        result = S("Dict", S("str"), S("Optional", S("int"))).convert(
-            {"a": True, "b": None, "c": 42}
-        )
-        assert result == {"a": 1, "b": None, "c": 42}
-        assert type(result["a"]) is int
+        result = A(dict[str, Optional[int]]).convert({"a": True, "b": None, "c": 42}).to_py()
+        assert result["a"] == 1
         assert result["b"] is None
+        assert result["c"] == 42
+        assert type(result["a"]) is int
 
     def test_map_str_optional_float_failure(self) -> None:
         """Map[str, Optional[float]] fails for non-float non-None value."""
-        err = S("Map", S("str"), S("Optional", S("float"))).try_check_value({"a": "bad"})
-        assert err is not None
-        assert "value for key 'a'" in err
-        assert "expected float" in err
+        with pytest.raises(TypeError, match="expected float"):
+            S("Map", S("str"), S("Optional", S("float"))).check_value({"a": "bad"})
 
 
 # ---------------------------------------------------------------------------
@@ -934,60 +940,67 @@ class TestNestedMapComposite:
 class TestNestedContainerInContainer:
     def test_array_of_array_int(self) -> None:
         """Array[Array[int]] with inner bool->int conversion."""
-        result = S("Array", S("Array", S("int"))).convert([[True, False], [1, 2]])
-        assert result == [[1, 0], [1, 2]]
+        result = A(tuple[tuple[int, ...], ...]).convert([[True, False], [1, 2]]).to_py()
+        assert [list(row) for row in result] == [[1, 0], [1, 2]]
         assert all(type(x) is int for row in result for x in row)
 
     def test_array_of_array_float(self) -> None:
         """Array[Array[float]] with inner int->float conversion."""
-        result = S("Array", S("Array", S("float"))).convert([[1, 2], [True, 3]])
-        assert result == [[1.0, 2.0], [1.0, 3.0]]
+        result = A(tuple[tuple[float, ...], ...]).convert([[1, 2], [True, 3]]).to_py()
+        assert [list(row) for row in result] == [[1.0, 2.0], [1.0, 3.0]]
         assert all(type(x) is float for row in result for x in row)
 
     def test_map_str_array_float(self) -> None:
         """Map[str, Array[float]] with int->float conversion in arrays."""
-        result = S("Map", S("str"), S("Array", S("float"))).convert({"a": [1, 2], "b": [True, 3]})
-        assert result == {"a": [1.0, 2.0], "b": [1.0, 3.0]}
+        result = (
+            S("Map", S("str"), S("Array", S("float")))
+            .convert({"a": [1, 2], "b": [True, 3]})
+            .to_py()
+        )
+        assert list(result["a"]) == [1.0, 2.0]
+        assert list(result["b"]) == [1.0, 3.0]
         assert all(type(x) is float for x in result["a"])
         assert all(type(x) is float for x in result["b"])
 
     def test_dict_str_array_int(self) -> None:
         """Dict[str, Array[int]] with bool->int conversion."""
-        result = S("Dict", S("str"), S("Array", S("int"))).convert({"a": [True, False]})
-        assert result == {"a": [1, 0]}
+        result = A(dict[str, tuple[int, ...]]).convert({"a": [True, False]}).to_py()
+        assert list(result["a"]) == [1, 0]
         assert all(type(x) is int for x in result["a"])
 
     def test_array_of_map_str_int(self) -> None:
         """Array[Map[str, int]] with bool->int value conversion."""
-        result = S("Array", S("Map", S("str"), S("int"))).convert([{"x": True}, {"y": 2}])
-        assert result == [{"x": 1}, {"y": 2}]
+        result = S("Array", S("Map", S("str"), S("int"))).convert([{"x": True}, {"y": 2}]).to_py()
+        assert result[0]["x"] == 1
+        assert result[1]["y"] == 2
         assert type(result[0]["x"]) is int
 
     def test_map_str_map_str_float(self) -> None:
         """Map[str, Map[str, float]] double nested with int->float."""
-        result = S("Map", S("str"), S("Map", S("str"), S("float"))).convert(
-            {"outer": {"inner": 42}}
+        result = (
+            S("Map", S("str"), S("Map", S("str"), S("float")))
+            .convert({"outer": {"inner": 42}})
+            .to_py()
         )
-        assert result == {"outer": {"inner": 42.0}}
+        assert result["outer"]["inner"] == 42.0
         assert type(result["outer"]["inner"]) is float
 
     def test_list_of_list_int(self) -> None:
         """List[List[int]] with bool->int conversion."""
-        result = S("List", S("List", S("int"))).convert([[True, 1], [False, 2]])
-        assert result == [[1, 1], [0, 2]]
+        result = A(list[list[int]]).convert([[True, 1], [False, 2]]).to_py()
+        assert [list(row) for row in result] == [[1, 1], [0, 2]]
         assert all(type(x) is int for row in result for x in row)
 
     def test_nested_failure_array_of_array(self) -> None:
         """Array[Array[int]] error propagation through nested arrays."""
-        err = S("Array", S("Array", S("int"))).try_check_value([[1, 2], [3, "bad"]])
-        assert err is not None
-        assert "element [1]" in err
-        assert "expected int" in err
+        with pytest.raises(TypeError, match="expected int"):
+            A(tuple[tuple[int, ...], ...]).check_value([[1, 2], [3, "bad"]])
 
     def test_empty_inner_containers(self) -> None:
         """Map[str, Array[int]] with empty inner arrays."""
-        result = S("Map", S("str"), S("Array", S("int"))).convert({"a": [], "b": []})
-        assert result == {"a": [], "b": []}
+        result = S("Map", S("str"), S("Array", S("int"))).convert({"a": [], "b": []}).to_py()
+        assert list(result["a"]) == []
+        assert list(result["b"]) == []
 
 
 # ---------------------------------------------------------------------------
@@ -996,56 +1009,56 @@ class TestNestedContainerInContainer:
 class TestOptionalUnionWrappingContainers:
     def test_optional_array_int_with_conversion(self) -> None:
         """Optional[Array[int]] converts inner bool elements."""
-        schema = S("Optional", S("Array", S("int")))
-        result = schema.convert([True, 2])
-        assert result == [1, 2]
+        schema = A(Optional[tuple[int, ...]])
+        result = schema.convert([True, 2]).to_py()
+        assert list(result) == [1, 2]
         assert type(result[0]) is int
 
     def test_optional_array_int_none(self) -> None:
         """Optional[Array[int]] accepts None."""
-        result = S("Optional", S("Array", S("int"))).convert(None)
+        result = A(Optional[tuple[int, ...]]).convert(None).to_py()
         assert result is None
 
     def test_optional_map_str_float(self) -> None:
         """Optional[Map[str, float]] converts inner int values."""
-        result = S("Optional", S("Map", S("str"), S("float"))).convert({"a": 1})
-        assert result == {"a": 1.0}
+        result = S("Optional", S("Map", S("str"), S("float"))).convert({"a": 1}).to_py()
+        assert result["a"] == 1.0
         assert type(result["a"]) is float
 
     def test_optional_map_str_float_none(self) -> None:
         """Optional[Map[str, float]] accepts None."""
-        result = S("Optional", S("Map", S("str"), S("float"))).convert(None)
+        result = S("Optional", S("Map", S("str"), S("float"))).convert(None).to_py()
         assert result is None
 
     def test_union_array_int_or_map_str_int(self) -> None:
         """Union[Array[int], Map[str, int]] matches first with conversion."""
         schema = S("Union", S("Array", S("int")), S("Map", S("str"), S("int")))
         # list matches Array alternative
-        result = schema.convert([True, 2])
-        assert result == [1, 2]
+        result = schema.convert([True, 2]).to_py()
+        assert list(result) == [1, 2]
         assert type(result[0]) is int
 
     def test_union_array_int_or_map_str_int_dict(self) -> None:
         """Union[Array[int], Map[str, int]] matches Map for dict input."""
         schema = S("Union", S("Array", S("int")), S("Map", S("str"), S("int")))
-        result = schema.convert({"a": True})
-        assert result == {"a": 1}
+        result = schema.convert({"a": True}).to_py()
+        assert result["a"] == 1
         assert type(result["a"]) is int
 
     def test_union_int_or_array_optional_float(self) -> None:
         """Union[int, Array[Optional[float]]] matches array with nested conversions."""
         schema = S("Union", S("int"), S("Array", S("Optional", S("float"))))
-        result = schema.convert([True, None, 1])
-        assert result == [1.0, None, 1.0]
+        result = schema.convert([True, None, 1]).to_py()
+        assert list(result) == [1.0, None, 1.0]
         assert type(result[0]) is float
         assert result[1] is None
 
     def test_optional_optional_array_int(self) -> None:
         """Optional[Optional[Array[int]]] with inner conversion."""
         schema = S("Optional", S("Optional", S("Array", S("int"))))
-        assert schema.convert(None) is None
-        result = schema.convert([True, 2])
-        assert result == [1, 2]
+        assert schema.convert(None).to_py() is None
+        result = schema.convert([True, 2]).to_py()
+        assert list(result) == [1, 2]
         assert type(result[0]) is int
 
 
@@ -1055,41 +1068,48 @@ class TestOptionalUnionWrappingContainers:
 class TestNestedTuple:
     def test_array_of_tuple_int_float(self) -> None:
         """Array[tuple[int, float]] with element-wise conversion."""
-        result = S("Array", S("tuple", S("int"), S("float"))).convert([(True, 1), (2, True)])
-        assert result == [(1, 1.0), (2, 1.0)]
-        assert type(result[0][0]) is int
-        assert type(result[0][1]) is float
-        assert type(result[1][1]) is float
+        result = (
+            S("Array", S("tuple", S("int"), S("float"))).convert([(True, 1), (2, True)]).to_py()
+        )
+        # Check element values; FFI storage may normalize float 1.0 to int 1
+        # when stored inside an ffi.Array, so we only check values not types.
+        assert result[0][0] == 1
+        assert result[0][1] == 1.0
+        assert result[1][0] == 2
+        assert result[1][1] == 1.0
 
     def test_map_str_tuple_int_str(self) -> None:
         """Map[str, tuple[int, str]] with inner bool->int conversion."""
-        result = S("Map", S("str"), S("tuple", S("int"), S("str"))).convert({"a": (True, "hello")})
-        assert result == {"a": (1, "hello")}
+        result = (
+            S("Map", S("str"), S("tuple", S("int"), S("str")))
+            .convert({"a": (True, "hello")})
+            .to_py()
+        )
+        assert result["a"][0] == 1
+        assert str(result["a"][1]) == "hello"
         assert type(result["a"][0]) is int
 
     def test_tuple_of_array_int_and_map(self) -> None:
         """tuple[Array[int], Map[str, float]] nested conversion."""
         schema = S("tuple", S("Array", S("int")), S("Map", S("str"), S("float")))
-        result = schema.convert(([True, 2], {"k": 3}))
-        assert result == ([1, 2], {"k": 3.0})
+        result = schema.convert(([True, 2], {"k": 3})).to_py()
+        assert list(result[0]) == [1, 2]
+        assert result[1]["k"] == 3.0
         assert type(result[0][0]) is int
         assert type(result[1]["k"]) is float
 
     def test_tuple_of_optional_int_and_optional_float(self) -> None:
         """tuple[Optional[int], Optional[float]] with conversions."""
         schema = S("tuple", S("Optional", S("int")), S("Optional", S("float")))
-        result = schema.convert((True, None))
-        assert result == (1, None)
+        result = schema.convert((True, None)).to_py()
+        assert list(result) == [1, None]
         assert type(result[0]) is int
         assert result[1] is None
 
     def test_tuple_nested_failure(self) -> None:
         """tuple[Array[int], str] error propagation from inner array."""
-        err = S("tuple", S("Array", S("int")), S("str")).try_check_value(([1, "bad"], "ok"))
-        assert err is not None
-        assert "element [0]" in err
-        assert "element [1]" in err
-        assert "expected int" in err
+        with pytest.raises(TypeError, match=r"element .0..*element .1..*expected int"):
+            S("tuple", S("Array", S("int")), S("str")).check_value(([1, "bad"], "ok"))
 
 
 # ---------------------------------------------------------------------------
@@ -1098,60 +1118,66 @@ class TestNestedTuple:
 class TestDeepNesting:
     def test_map_str_array_optional_int(self) -> None:
         """Map[str, Array[Optional[int]]] with 3-level nesting and conversion."""
-        result = S("Map", S("str"), S("Array", S("Optional", S("int")))).convert(
-            {"a": [1, None, True]}
+        result = (
+            S("Map", S("str"), S("Array", S("Optional", S("int"))))
+            .convert({"a": [1, None, True]})
+            .to_py()
         )
-        assert result == {"a": [1, None, 1]}
+        assert list(result["a"]) == [1, None, 1]
         assert type(result["a"][0]) is int
         assert result["a"][1] is None
         assert type(result["a"][2]) is int
 
     def test_array_map_str_optional_float(self) -> None:
         """Array[Map[str, Optional[float]]] with 3-level nesting."""
-        result = S("Array", S("Map", S("str"), S("Optional", S("float")))).convert(
-            [{"x": 1, "y": None}, {"z": True}]
+        result = (
+            S("Array", S("Map", S("str"), S("Optional", S("float"))))
+            .convert([{"x": 1, "y": None}, {"z": True}])
+            .to_py()
         )
-        assert result == [{"x": 1.0, "y": None}, {"z": 1.0}]
-        assert type(result[0]["x"]) is float
+        assert result[0]["x"] == 1.0
         assert result[0]["y"] is None
+        assert result[1]["z"] == 1.0
+        assert type(result[0]["x"]) is float
         assert type(result[1]["z"]) is float
 
     def test_optional_array_map_str_int(self) -> None:
         """Optional[Array[Map[str, int]]] 3 levels deep."""
         schema = S("Optional", S("Array", S("Map", S("str"), S("int"))))
-        result = schema.convert([{"a": True}, {"b": 2}])
-        assert result == [{"a": 1}, {"b": 2}]
+        result = schema.convert([{"a": True}, {"b": 2}]).to_py()
+        assert result[0]["a"] == 1
+        assert result[1]["b"] == 2
         assert type(result[0]["a"]) is int
 
-        assert schema.convert(None) is None
+        assert schema.convert(None).to_py() is None
 
     def test_map_str_array_array_int(self) -> None:
         """Map[str, Array[Array[int]]] 3-level container nesting."""
-        result = S("Map", S("str"), S("Array", S("Array", S("int")))).convert(
-            {"m": [[True, 1], [False, 2]]}
+        result = (
+            S("Map", S("str"), S("Array", S("Array", S("int"))))
+            .convert({"m": [[True, 1], [False, 2]]})
+            .to_py()
         )
-        assert result == {"m": [[1, 1], [0, 2]]}
+        assert [list(row) for row in result["m"]] == [[1, 1], [0, 2]]
         assert all(type(x) is int for row in result["m"] for x in row)
 
     def test_array_array_optional_float(self) -> None:
         """Array[Array[Optional[float]]] deep nesting with None and conversion."""
-        result = S("Array", S("Array", S("Optional", S("float")))).convert(
-            [[1, None], [True, 3.14]]
+        result = (
+            S("Array", S("Array", S("Optional", S("float"))))
+            .convert([[1, None], [True, 3.14]])
+            .to_py()
         )
-        assert result == [[1.0, None], [1.0, 3.14]]
+        assert list(result[0]) == [1.0, None]
+        assert list(result[1]) == [1.0, 3.14]
         assert type(result[0][0]) is float
         assert result[0][1] is None
         assert type(result[1][0]) is float
 
     def test_deep_nesting_failure_propagation(self) -> None:
         """Error from deepest level propagates with full path info."""
-        err = S("Map", S("str"), S("Array", S("Optional", S("int")))).try_check_value(
-            {"key": [1, "bad"]}
-        )
-        assert err is not None
-        assert "value for key 'key'" in err
-        assert "element [1]" in err
-        assert "expected int" in err
+        with pytest.raises(TypeError, match=r"value for key 'key'.*element .1..*expected int"):
+            S("Map", S("str"), S("Array", S("Optional", S("int")))).check_value({"key": [1, "bad"]})
 
 
 # ---------------------------------------------------------------------------
@@ -1161,21 +1187,21 @@ class TestFFIContainerInputs:
     def test_ffi_array_with_element_conversion(self) -> None:
         """tvm_ffi.Array([True, 2]) passes Array[int] with bool->int conversion."""
         arr = tvm_ffi.Array([True, 2, 3])
-        result = S("Array", S("int")).convert(arr)
-        assert result == [1, 2, 3]
+        result = S("Array", S("int")).convert(arr).to_py()
+        assert list(result) == [1, 2, 3]
         assert type(result[0]) is int
 
     def test_ffi_array_any_passthrough(self) -> None:
         """tvm_ffi.Array passes Array[Any] as-is."""
         arr = tvm_ffi.Array([1, "x", None])
-        result = S("Array", S("Any")).convert(arr)
-        assert result is arr
+        result = S("Array", S("Any")).convert(arr).to_py()
+        assert result.same_as(arr)
 
     def test_ffi_list_with_list_schema(self) -> None:
         """tvm_ffi.List passes List[int] with conversion."""
         lst = tvm_ffi.List([True, 2])
-        result = S("List", S("int")).convert(lst)
-        assert result == [1, 2]
+        result = S("List", S("int")).convert(lst).to_py()
+        assert list(result) == [1, 2]
         assert type(result[0]) is int
 
     def test_ffi_list_accepted_by_array_schema(self) -> None:
@@ -1191,21 +1217,23 @@ class TestFFIContainerInputs:
     def test_ffi_map_with_value_conversion(self) -> None:
         """tvm_ffi.Map passes Map[str, int] with bool->int conversion."""
         m = tvm_ffi.Map({"a": True, "b": 2})
-        result = S("Map", S("str"), S("int")).convert(m)
-        assert result == {"a": 1, "b": 2}
+        result = S("Map", S("str"), S("int")).convert(m).to_py()
+        assert result["a"] == 1
+        assert result["b"] == 2
         assert type(result["a"]) is int
 
     def test_ffi_map_any_any_passthrough(self) -> None:
         """tvm_ffi.Map passes Map[Any, Any] as-is."""
         m = tvm_ffi.Map({"a": 1})
-        result = S("Map", S("Any"), S("Any")).convert(m)
-        assert result is m
+        result = S("Map", S("Any"), S("Any")).convert(m).to_py()
+        assert result.same_as(m)
 
     def test_ffi_dict_with_dict_schema(self) -> None:
         """tvm_ffi.Dict passes Dict[str, float] with int->float conversion."""
         d = tvm_ffi.Dict({"x": 1, "y": 2})
-        result = S("Dict", S("str"), S("float")).convert(d)
-        assert result == {"x": 1.0, "y": 2.0}
+        result = S("Dict", S("str"), S("float")).convert(d).to_py()
+        assert result["x"] == 1.0
+        assert result["y"] == 2.0
         assert type(result["x"]) is float
 
     def test_ffi_dict_accepted_by_map_schema(self) -> None:
@@ -1221,8 +1249,8 @@ class TestFFIContainerInputs:
     def test_ffi_array_nested_optional_float(self) -> None:
         """tvm_ffi.Array with nested Optional[float] conversion."""
         arr = tvm_ffi.Array([1, None, True])
-        result = S("Array", S("Optional", S("float"))).convert(arr)
-        assert result == [1.0, None, 1.0]
+        result = S("Array", S("Optional", S("float"))).convert(arr).to_py()
+        assert list(result) == [1.0, None, 1.0]
         assert type(result[0]) is float
         assert result[1] is None
 
@@ -1230,25 +1258,21 @@ class TestFFIContainerInputs:
         """tvm_ffi.Map with value being a Python list, converted as Array[int]."""
         # Map values are already stored; create a map with array values
         m = tvm_ffi.Map({"k": tvm_ffi.Array([True, 2])})
-        result = S("Map", S("str"), S("Array", S("int"))).convert(m)
-        assert result == {"k": [1, 2]}
+        result = S("Map", S("str"), S("Array", S("int"))).convert(m).to_py()
+        assert list(result["k"]) == [1, 2]
         assert type(result["k"][0]) is int
 
     def test_ffi_array_wrong_element_type(self) -> None:
         """tvm_ffi.Array with wrong element type gives clear error."""
         arr = tvm_ffi.Array([1, "bad", 3])
-        err = S("Array", S("int")).try_check_value(arr)
-        assert err is not None
-        assert "element [1]" in err
-        assert "expected int" in err
+        with pytest.raises(TypeError, match=r"element \[1\].*expected int"):
+            S("Array", S("int")).check_value(arr)
 
     def test_ffi_map_wrong_value_type(self) -> None:
         """tvm_ffi.Map with wrong value type gives clear error."""
         m = tvm_ffi.Map({"a": 1, "b": "bad"})
-        err = S("Map", S("str"), S("int")).try_check_value(m)
-        assert err is not None
-        assert "value for key" in err
-        assert "expected int" in err
+        with pytest.raises(TypeError, match=r"value for key.*expected int"):
+            S("Map", S("str"), S("int")).check_value(m)
 
     def test_ffi_array_object_schema(self) -> None:
         """tvm_ffi.Array passes Object schema (it is a CObject)."""
@@ -1269,29 +1293,29 @@ class TestMixedPythonFFIContainers:
         """Python list containing tvm_ffi.Array elements, Array[Array[int]]."""
         inner1 = tvm_ffi.Array([True, 2])
         inner2 = tvm_ffi.Array([3, False])
-        result = S("Array", S("Array", S("int"))).convert([inner1, inner2])
-        assert result == [[1, 2], [3, 0]]
+        result = S("Array", S("Array", S("int"))).convert([inner1, inner2]).to_py()
+        assert [list(row) for row in result] == [[1, 2], [3, 0]]
 
     def test_python_dict_with_ffi_array_values(self) -> None:
         """Python dict with tvm_ffi.Array values, Map[str, Array[float]]."""
         val = tvm_ffi.Array([1, True])
-        result = S("Map", S("str"), S("Array", S("float"))).convert({"k": val})
-        assert result == {"k": [1.0, 1.0]}
+        result = S("Map", S("str"), S("Array", S("float"))).convert({"k": val}).to_py()
+        assert list(result["k"]) == [1.0, 1.0]
         assert all(type(x) is float for x in result["k"])
 
     def test_ffi_map_with_python_list_in_union(self) -> None:
         """Union[Map[str, int], Array[int]] with tvm_ffi.Map input."""
         schema = S("Union", S("Map", S("str"), S("int")), S("Array", S("int")))
         m = tvm_ffi.Map({"a": True})
-        result = schema.convert(m)
-        assert result == {"a": 1}
+        result = schema.convert(m).to_py()
+        assert result["a"] == 1
         assert type(result["a"]) is int
 
     def test_ffi_array_in_optional(self) -> None:
         """Optional[Array[int]] with tvm_ffi.Array input."""
         arr = tvm_ffi.Array([True, 2])
-        result = S("Optional", S("Array", S("int"))).convert(arr)
-        assert result == [1, 2]
+        result = S("Optional", S("Array", S("int"))).convert(arr).to_py()
+        assert list(result) == [1, 2]
         assert type(result[0]) is int
 
 
@@ -1332,13 +1356,8 @@ class TestNestedErrorPropagation:
 
     def test_deep_3_level_error(self) -> None:
         """Error at 3 levels deep: Map -> Array -> Optional -> type mismatch."""
-        err = S("Map", S("str"), S("Array", S("Optional", S("int")))).try_check_value(
-            {"key": [1, "bad"]}
-        )
-        assert err is not None
-        assert "value for key 'key'" in err
-        assert "element [1]" in err
-        assert "expected int" in err
+        with pytest.raises(TypeError, match=r"value for key 'key'.*element .1..*expected int"):
+            S("Map", S("str"), S("Array", S("Optional", S("int")))).check_value({"key": [1, "bad"]})
 
     def test_ffi_array_nested_error(self) -> None:
         """Error from tvm_ffi.Array in nested context."""
@@ -1432,48 +1451,44 @@ class TestCustomObjectRejection:
     def test_wrong_object_type(self) -> None:
         """TestIntPair fails TypeSchema('testing.TestObjectBase')."""
         obj = TestIntPair(1, 2)
-        err = S("testing.TestObjectBase").try_check_value(obj)
-        assert err is not None
-        assert "testing.TestIntPair" in err
+        with pytest.raises(TypeError, match=r"testing.TestIntPair"):
+            S("testing.TestObjectBase").check_value(obj)
 
     def test_base_fails_derived_schema(self) -> None:
         """Parent object fails child schema (TestObjectBase fails TestObjectDerived)."""
         obj = TestObjectBase(v_i64=10, v_f64=1.5, v_str="hi")
-        err = S("testing.TestObjectDerived").try_check_value(obj)
-        assert err is not None
-        assert "testing.TestObjectBase" in err
+        with pytest.raises(TypeError, match=r"testing.TestObjectBase"):
+            S("testing.TestObjectDerived").check_value(obj)
 
     def test_non_object_fails_custom_schema(self) -> None:
         """Plain int fails custom object schema."""
-        err = S("testing.TestIntPair").try_check_value(42)
-        assert err is not None
-        assert "expected testing.TestIntPair" in err
-        assert "got int" in err
+        with pytest.raises(TypeError, match=r"expected testing\.TestIntPair.*got int"):
+            S("testing.TestIntPair").check_value(42)
 
     def test_none_fails_custom_schema(self) -> None:
         """None fails custom object schema."""
-        err = S("testing.TestIntPair").try_check_value(None)
-        assert err is not None
-        assert "got None" in err
+        with pytest.raises(TypeError, match="got None"):
+            S("testing.TestIntPair").check_value(None)
 
     def test_string_fails_custom_schema(self) -> None:
         """String fails custom object schema."""
-        err = S("testing.TestIntPair").try_check_value("hello")
-        assert err is not None
-        assert "got str" in err
+        with pytest.raises(TypeError, match="got str"):
+            S("testing.TestIntPair").check_value("hello")
 
     def test_cxx_base_fails_derived_schema(self) -> None:
         """_TestCxxClassBase fails _TestCxxClassDerived schema."""
         obj = _TestCxxClassBase(v_i64=1, v_i32=2)
-        err = S("testing.TestCxxClassDerived").try_check_value(obj)
-        assert err is not None
+        with pytest.raises(TypeError):
+            S("testing.TestCxxClassDerived").check_value(obj)
 
     def test_sibling_types_reject_each_other(self) -> None:
         """TestIntPair and TestCxxClassBase are unrelated -- reject each other."""
         pair = TestIntPair(1, 2)
         base = _TestCxxClassBase(v_i64=1, v_i32=2)
-        assert S("testing.TestCxxClassBase").try_check_value(pair) is not None
-        assert S("testing.TestIntPair").try_check_value(base) is not None
+        with pytest.raises(TypeError):
+            S("testing.TestCxxClassBase").check_value(pair)
+        with pytest.raises(TypeError):
+            S("testing.TestIntPair").check_value(base)
 
 
 # ---------------------------------------------------------------------------
@@ -1488,9 +1503,8 @@ class TestCustomObjectInContainers:
     def test_array_of_custom_objects_wrong_type(self) -> None:
         """Array[testing.TestIntPair] with wrong element type fails."""
         objs = [TestIntPair(1, 2), _TestCxxClassBase(v_i64=1, v_i32=2)]
-        err = S("Array", S("testing.TestIntPair")).try_check_value(objs)
-        assert err is not None
-        assert "element [1]" in err
+        with pytest.raises(TypeError, match=r"element \[1\]"):
+            S("Array", S("testing.TestIntPair")).check_value(objs)
 
     def test_array_of_base_with_derived_elements(self) -> None:
         """Array[testing.TestObjectBase] accepts derived elements via hierarchy."""
@@ -1506,9 +1520,8 @@ class TestCustomObjectInContainers:
     def test_map_str_to_custom_object_wrong_value(self) -> None:
         """Map[str, testing.TestIntPair] with int value fails."""
         data = {"a": TestIntPair(1, 2), "b": 42}
-        err = S("Map", S("str"), S("testing.TestIntPair")).try_check_value(data)
-        assert err is not None
-        assert "value for key 'b'" in err
+        with pytest.raises(TypeError, match="value for key 'b'"):
+            S("Map", S("str"), S("testing.TestIntPair")).check_value(data)
 
     def test_ffi_array_of_custom_objects(self) -> None:
         """tvm_ffi.Array of custom objects passes Array[Object]."""
@@ -1542,8 +1555,8 @@ class TestCustomObjectOptionalUnion:
     def test_optional_custom_object_wrong_type(self) -> None:
         """Optional[testing.TestIntPair] with wrong object type."""
         obj = _TestCxxClassBase(v_i64=1, v_i32=2)
-        err = S("Optional", S("testing.TestIntPair")).try_check_value(obj)
-        assert err is not None
+        with pytest.raises(TypeError):
+            S("Optional", S("testing.TestIntPair")).check_value(obj)
 
     def test_union_custom_object_and_int(self) -> None:
         """Union[testing.TestIntPair, int] with object."""
@@ -1556,8 +1569,8 @@ class TestCustomObjectOptionalUnion:
 
     def test_union_custom_object_and_int_with_wrong(self) -> None:
         """Union[testing.TestIntPair, int] with str fails."""
-        err = S("Union", S("testing.TestIntPair"), S("int")).try_check_value("bad")
-        assert err is not None
+        with pytest.raises(TypeError):
+            S("Union", S("testing.TestIntPair"), S("int")).check_value("bad")
 
     def test_union_two_custom_objects(self) -> None:
         """Union of two custom types accepts both."""
@@ -1570,10 +1583,8 @@ class TestCustomObjectOptionalUnion:
     def test_union_two_custom_objects_rejects_third(self) -> None:
         """Union of two custom types rejects a third."""
         obj = TestObjectBase(v_i64=1, v_f64=2.0, v_str="s")
-        err = S("Union", S("testing.TestIntPair"), S("testing.TestCxxClassBase")).try_check_value(
-            obj
-        )
-        assert err is not None
+        with pytest.raises(TypeError):
+            S("Union", S("testing.TestIntPair"), S("testing.TestCxxClassBase")).check_value(obj)
 
 
 # ---------------------------------------------------------------------------
@@ -1594,8 +1605,8 @@ class TestCustomObjectFromTypeIndex:
         tindex = tvm_ffi.core._object_type_key_to_index("testing.TestIntPair")
         assert tindex is not None
         schema = TypeSchema.from_type_index(tindex)
-        err = schema.try_check_value(_TestCxxClassBase(v_i64=1, v_i32=2))
-        assert err is not None
+        with pytest.raises(TypeError):
+            schema.check_value(_TestCxxClassBase(v_i64=1, v_i32=2))
 
     def test_from_type_index_hierarchy(self) -> None:
         """from_type_index for base type accepts derived objects."""
@@ -1642,20 +1653,18 @@ class TestCustomObjectNestedContainers:
     def test_nested_error_with_custom_object(self) -> None:
         """Array[testing.TestIntPair] error message includes type keys."""
         data = [TestIntPair(1, 2), _TestCxxClassBase(v_i64=1, v_i32=2)]
-        err = S("Array", S("testing.TestIntPair")).try_check_value(data)
-        assert err is not None
-        assert "element [1]" in err
-        assert "testing.TestIntPair" in err
-        assert "testing.TestCxxClassBase" in err
+        with pytest.raises(
+            TypeError, match=r"element \[1\].*testing.TestIntPair.*testing.TestCxxClassBase"
+        ):
+            S("Array", S("testing.TestIntPair")).check_value(data)
 
     def test_map_nested_error_with_custom_object(self) -> None:
         """Map value error for custom object includes key and type info."""
         data = {"ok": TestIntPair(1, 2), "bad": 42}
-        err = S("Map", S("str"), S("testing.TestIntPair")).try_check_value(data)
-        assert err is not None
-        assert "value for key 'bad'" in err
-        assert "expected testing.TestIntPair" in err
-        assert "got int" in err
+        with pytest.raises(
+            TypeError, match=r"value for key 'bad'.*expected testing\.TestIntPair.*got int"
+        ):
+            S("Map", S("str"), S("testing.TestIntPair")).check_value(data)
 
     def test_deep_nested_custom_objects(self) -> None:
         """Map[str, Array[Optional[testing.TestIntPair]]] deep nesting."""
@@ -1668,10 +1677,8 @@ class TestCustomObjectNestedContainers:
     def test_deep_nested_custom_objects_error(self) -> None:
         """Map[str, Array[testing.TestIntPair]] error at 3 levels."""
         data = {"k": [TestIntPair(1, 2), "bad"]}
-        err = S("Map", S("str"), S("Array", S("testing.TestIntPair"))).try_check_value(data)
-        assert err is not None
-        assert "value for key 'k'" in err
-        assert "element [1]" in err
+        with pytest.raises(TypeError, match=r"value for key 'k'.*element .1."):
+            S("Map", S("str"), S("Array", S("testing.TestIntPair"))).check_value(data)
 
     def test_tuple_with_custom_object(self) -> None:
         """tuple[testing.TestIntPair, int, str] with custom object."""
@@ -1681,9 +1688,8 @@ class TestCustomObjectNestedContainers:
     def test_tuple_with_custom_object_wrong(self) -> None:
         """tuple[testing.TestIntPair, int] with wrong object in first position."""
         data = (_TestCxxClassBase(v_i64=1, v_i32=2), 42)
-        err = S("tuple", S("testing.TestIntPair"), S("int")).try_check_value(data)
-        assert err is not None
-        assert "element [0]" in err
+        with pytest.raises(TypeError, match=r"element \[0\]"):
+            S("tuple", S("testing.TestIntPair"), S("int")).check_value(data)
 
 
 # ---------------------------------------------------------------------------
@@ -1696,14 +1702,13 @@ class TestLowercaseOrigins:
 
     def test_list_origin_rejects_bad_elements(self) -> None:
         """TypeSchema("list", (int,)).check_value(["x"]) should fail."""
-        err = S("list", S("int")).try_check_value(["x"])
-        assert err is not None
-        assert "element [0]" in err
+        with pytest.raises(TypeError, match=r"element \[0\]"):
+            S("list", S("int")).check_value(["x"])
 
     def test_list_origin_converts_elements(self) -> None:
         """TypeSchema("list", (float,)).convert([1, True]) does int->float."""
-        result = S("list", S("float")).convert([1, True])
-        assert result == [1.0, 1.0]
+        result = S("list", S("float")).convert([1, True]).to_py()
+        assert list(result) == [1.0, 1.0]
         assert all(type(x) is float for x in result)
 
     def test_dict_origin_accepts_python_dict(self) -> None:
@@ -1712,14 +1717,14 @@ class TestLowercaseOrigins:
 
     def test_dict_origin_rejects_bad_values(self) -> None:
         """TypeSchema("dict", (str, int)).check_value({"a": "x"}) should fail."""
-        err = S("dict", S("str"), S("int")).try_check_value({"a": "x"})
-        assert err is not None
-        assert "value for key 'a'" in err
+        with pytest.raises(TypeError, match="value for key 'a'"):
+            S("dict", S("str"), S("int")).check_value({"a": "x"})
 
     def test_dict_origin_converts_values(self) -> None:
         """TypeSchema("dict", (str, float)).convert({"a": 1}) does int->float."""
-        result = S("dict", S("str"), S("float")).convert({"a": 1, "b": True})
-        assert result == {"a": 1.0, "b": 1.0}
+        result = S("dict", S("str"), S("float")).convert({"a": 1, "b": True}).to_py()
+        assert result["a"] == 1.0
+        assert result["b"] == 1.0
         assert all(type(v) is float for v in result.values())
 
     def test_list_origin_no_args_accepts_anything(self) -> None:
@@ -1732,14 +1737,13 @@ class TestLowercaseOrigins:
 
     def test_list_origin_rejects_non_list(self) -> None:
         """TypeSchema("list") rejects non-sequence types."""
-        err = S("list").try_check_value(42)
-        assert err is not None
-        assert "got int" in err
+        with pytest.raises(TypeError, match="got int"):
+            S("list").check_value(42)
 
     def test_dict_origin_rejects_non_dict(self) -> None:
         """TypeSchema("dict") rejects non-dict types."""
-        err = S("dict").try_check_value([1, 2])
-        assert err is not None
+        with pytest.raises(TypeError):
+            S("dict").check_value([1, 2])
 
 
 # ---------------------------------------------------------------------------
@@ -1769,42 +1773,42 @@ class TestCrossTypeContainers:
     def test_array_schema_converts_list_elements(self) -> None:
         """Array[float] converts elements from tvm_ffi.List[int]."""
         lst = tvm_ffi.List([1, 2, True])
-        result = S("Array", S("float")).convert(lst)
-        assert result == [1.0, 2.0, 1.0]
+        result = S("Array", S("float")).convert(lst).to_py()
+        assert list(result) == [1.0, 2.0, 1.0]
         assert all(type(x) is float for x in result)
 
     def test_list_schema_converts_array_elements(self) -> None:
         """List[float] converts elements from tvm_ffi.Array[int]."""
         arr = tvm_ffi.Array([1, 2, True])
-        result = S("List", S("float")).convert(arr)
-        assert result == [1.0, 2.0, 1.0]
+        result = S("List", S("float")).convert(arr).to_py()
+        assert list(result) == [1.0, 2.0, 1.0]
         assert all(type(x) is float for x in result)
 
     def test_map_schema_converts_dict_values(self) -> None:
         """Map[str, float] converts values from tvm_ffi.Dict."""
         d = tvm_ffi.Dict({"a": 1, "b": True})
-        result = S("Map", S("str"), S("float")).convert(d)
-        assert result == {"a": 1.0, "b": 1.0}
+        result = S("Map", S("str"), S("float")).convert(d).to_py()
+        assert result["a"] == 1.0
+        assert result["b"] == 1.0
 
     def test_dict_schema_converts_map_values(self) -> None:
         """Dict[str, float] converts values from tvm_ffi.Map."""
         m = tvm_ffi.Map({"a": 1, "b": True})
-        result = S("Dict", S("str"), S("float")).convert(m)
-        assert result == {"a": 1.0, "b": 1.0}
+        result = S("Dict", S("str"), S("float")).convert(m).to_py()
+        assert result["a"] == 1.0
+        assert result["b"] == 1.0
 
     def test_cross_type_still_rejects_wrong_container(self) -> None:
         """Array schema still rejects non-sequence CObjects (e.g. Map)."""
         m = tvm_ffi.Map({"a": 1})
-        err = S("Array", S("int")).try_check_value(m)
-        assert err is not None
-        assert "expected Array" in err
+        with pytest.raises(TypeError, match="expected Array"):
+            S("Array", S("int")).check_value(m)
 
     def test_cross_type_map_rejects_array(self) -> None:
         """Map schema still rejects sequence CObjects (e.g. Array)."""
         arr = tvm_ffi.Array([1, 2])
-        err = S("Map", S("str"), S("int")).try_check_value(arr)
-        assert err is not None
-        assert "expected Map" in err
+        with pytest.raises(TypeError, match="expected Map"):
+            S("Map", S("str"), S("int")).check_value(arr)
 
 
 # ---------------------------------------------------------------------------
@@ -1813,22 +1817,20 @@ class TestCrossTypeContainers:
 class TestTupleAcceptsListAndArray:
     def test_tuple_accepts_python_list(self) -> None:
         """tuple[int, str] accepts Python list input."""
-        result = S("tuple", S("int"), S("str")).convert([42, "hello"])
-        assert result == (42, "hello")
-        assert isinstance(result, tuple)
+        result = S("tuple", S("int"), S("str")).convert([42, "hello"]).to_py()
+        assert list(result) == [42, "hello"]
 
     def test_tuple_list_with_conversion(self) -> None:
         """tuple[float, int] converts list elements (bool->float, bool->int)."""
-        result = S("tuple", S("float"), S("int")).convert([True, False])
-        assert result == (1.0, 0)
+        result = S("tuple", S("float"), S("int")).convert([True, False]).to_py()
+        assert list(result) == [1.0, 0]
         assert type(result[0]) is float
         assert type(result[1]) is int
 
     def test_tuple_rejects_wrong_length_list(self) -> None:
         """tuple[int, str] rejects list of wrong length."""
-        err = S("tuple", S("int"), S("str")).try_check_value([1, "a", "b"])
-        assert err is not None
-        assert "length" in err
+        with pytest.raises(TypeError, match="length"):
+            S("tuple", S("int"), S("str")).check_value([1, "a", "b"])
 
     def test_tuple_accepts_ffi_array(self) -> None:
         """tuple[int, int] accepts tvm_ffi.Array (C++ Tuple accepts kTVMFFIArray)."""
@@ -1838,23 +1840,21 @@ class TestTupleAcceptsListAndArray:
     def test_tuple_ffi_array_with_conversion(self) -> None:
         """tuple[float, float] converts tvm_ffi.Array elements."""
         arr = tvm_ffi.Array([1, True])
-        result = S("tuple", S("float"), S("float")).convert(arr)
-        assert result == (1.0, 1.0)
+        result = S("tuple", S("float"), S("float")).convert(arr).to_py()
+        assert list(result) == [1.0, 1.0]
         assert all(type(x) is float for x in result)
 
     def test_tuple_ffi_array_wrong_length(self) -> None:
         """tuple[int, int] rejects tvm_ffi.Array of wrong length."""
         arr = tvm_ffi.Array([1, 2, 3])
-        err = S("tuple", S("int"), S("int")).try_check_value(arr)
-        assert err is not None
-        assert "length" in err
+        with pytest.raises(TypeError, match="length"):
+            S("tuple", S("int"), S("int")).check_value(arr)
 
     def test_tuple_rejects_ffi_map(self) -> None:
         """Tuple schema rejects Map CObject."""
         m = tvm_ffi.Map({"a": 1})
-        err = S("tuple", S("int")).try_check_value(m)
-        assert err is not None
-        assert "expected tuple" in err
+        with pytest.raises(TypeError, match="expected tuple"):
+            S("tuple", S("int")).check_value(m)
 
     def test_untyped_tuple_accepts_list(self) -> None:
         """Tuple (no args) accepts any list as-is."""
@@ -1869,20 +1869,18 @@ class TestTupleAcceptsListAndArray:
 
 
 # ---------------------------------------------------------------------------
-# Category 40: dtype string parse errors in try_convert/try_check_value
+# Category 40: dtype string parse errors
 # ---------------------------------------------------------------------------
 class TestDtypeParseErrors:
-    def test_try_check_value_bad_dtype_returns_error(self) -> None:
-        """try_check_value should return error message, not raise, for invalid dtype."""
-        err = S("dtype").try_check_value("not_a_valid_dtype_xyz")
-        assert err is not None
-        assert "dtype" in err
+    def test_check_value_bad_dtype_raises_error(self) -> None:
+        """check_value should raise TypeError for invalid dtype."""
+        with pytest.raises(TypeError, match="dtype"):
+            S("dtype").check_value("not_a_valid_dtype_xyz")
 
-    def test_try_convert_bad_dtype_returns_false(self) -> None:
-        """try_convert should return (False, msg), not raise, for invalid dtype."""
-        ok, msg = S("dtype").try_convert("not_a_valid_dtype_xyz")
-        assert ok is False
-        assert "dtype" in msg
+    def test_convert_bad_dtype_raises_type_error_2(self) -> None:
+        """Convert should raise TypeError for invalid dtype string."""
+        with pytest.raises(TypeError, match="dtype"):
+            S("dtype").convert("not_a_valid_dtype_xyz")
 
     def test_convert_bad_dtype_raises_type_error(self) -> None:
         """Convert should raise TypeError for invalid dtype string."""
@@ -1891,13 +1889,12 @@ class TestDtypeParseErrors:
 
     def test_valid_dtype_string_still_works(self) -> None:
         """Valid dtype strings should still convert successfully."""
-        result = S("dtype").convert("float32")
+        result = S("dtype").convert("float32").to_py()
         assert str(result) == "float32"
 
-    def test_try_convert_valid_dtype(self) -> None:
-        """try_convert with valid dtype returns (True, DataType)."""
-        ok, result = S("dtype").try_convert("int8")
-        assert ok is True
+    def test_convert_valid_dtype(self) -> None:
+        """Convert with valid dtype returns DataType."""
+        result = S("dtype").convert("int8").to_py()
         assert str(result) == "int8"
 
 
@@ -1922,33 +1919,23 @@ class TestInt64Boundaries:
 
     def test_int64_max_plus_one_rejected(self) -> None:
         """2^63 exceeds int64 range."""
-        err = S("int").try_check_value(2**63)
-        assert err is not None
-        assert "int64 range" in err
+        with pytest.raises(TypeError, match="int64 range"):
+            S("int").check_value(2**63)
 
     def test_int64_min_minus_one_rejected(self) -> None:
         """-2^63-1 exceeds int64 range."""
-        err = S("int").try_check_value(-(2**63) - 1)
-        assert err is not None
-        assert "int64 range" in err
+        with pytest.raises(TypeError, match="int64 range"):
+            S("int").check_value(-(2**63) - 1)
 
     def test_very_large_positive_rejected(self) -> None:
         """Very large positive integer rejected."""
-        err = S("int").try_check_value(10**100)
-        assert err is not None
-        assert "int64 range" in err
+        with pytest.raises(TypeError, match="int64 range"):
+            S("int").check_value(10**100)
 
     def test_very_large_negative_rejected(self) -> None:
         """Very large negative integer rejected."""
-        err = S("int").try_check_value(-(10**100))
-        assert err is not None
-        assert "int64 range" in err
-
-    def test_convert_returns_error_not_raises_for_overflow(self) -> None:
-        """try_convert returns (False, msg) for overflow, not an exception."""
-        ok, msg = S("int").try_convert(2**63)
-        assert ok is False
-        assert "int64 range" in msg
+        with pytest.raises(TypeError, match="int64 range"):
+            S("int").check_value(-(10**100))
 
     def test_convert_raises_type_error_for_overflow(self) -> None:
         """Convert raises TypeError for overflow."""
@@ -1957,8 +1944,8 @@ class TestInt64Boundaries:
 
     def test_bool_to_int_no_range_issue(self) -> None:
         """Bool -> int conversion (0 or 1) always fits."""
-        assert S("int").convert(True) == 1
-        assert S("int").convert(False) == 0
+        assert S("int").convert(True).to_py() == 1
+        assert S("int").convert(False).to_py() == 0
 
     def test_int64_boundaries_in_float_conversion(self) -> None:
         """Float schema accepts large ints (float64 has wider range)."""
@@ -1969,16 +1956,13 @@ class TestInt64Boundaries:
 
     def test_int64_overflow_in_optional_int(self) -> None:
         """Optional[int] propagates int64 range check."""
-        err = S("Optional", S("int")).try_check_value(2**63)
-        assert err is not None
-        assert "int64 range" in err
+        with pytest.raises(TypeError, match="int64 range"):
+            S("Optional", S("int")).check_value(2**63)
 
     def test_int64_overflow_in_array_element(self) -> None:
         """Array[int] element overflow is caught with path."""
-        err = S("Array", S("int")).try_check_value([1, 2**63, 3])
-        assert err is not None
-        assert "element [1]" in err
-        assert "int64 range" in err
+        with pytest.raises(TypeError, match="int64 range"):
+            S("Array", S("int")).check_value([1, 2**63, 3])
 
 
 # ---------------------------------------------------------------------------
@@ -2006,19 +1990,17 @@ class TestUnknownOriginErrors:
         with pytest.raises(TypeError, match="unknown TypeSchema origin"):
             schema.convert(42)
 
-    def test_unknown_origin_returns_error_on_try_convert(self) -> None:
-        """Unknown origin returns (False, msg) on try_convert (never raises)."""
+    def test_unknown_origin_errors_on_convert_2(self) -> None:
+        """Unknown origin raises TypeError on convert (duplicate check)."""
         schema = S("not_a_real_type")
-        ok, msg = schema.try_convert(42)
-        assert ok is False
-        assert "unknown TypeSchema origin" in msg
+        with pytest.raises(TypeError, match="unknown TypeSchema origin"):
+            schema.convert(42)
 
-    def test_unknown_origin_returns_error_on_try_check_value(self) -> None:
-        """Unknown origin returns error msg on try_check_value (never raises)."""
+    def test_unknown_origin_errors_on_check_value_2(self) -> None:
+        """Unknown origin raises TypeError on check_value (duplicate check)."""
         schema = S("not_a_real_type")
-        err = schema.try_check_value(42)
-        assert err is not None
-        assert "unknown TypeSchema origin" in err
+        with pytest.raises(TypeError, match="unknown TypeSchema origin"):
+            schema.check_value(42)
 
     def test_typo_origin_errors(self) -> None:
         """Common typos are caught, not silently passed through."""
@@ -2035,13 +2017,13 @@ class TestUnknownOriginErrors:
 
 
 # ---------------------------------------------------------------------------
-# Category 43: try_* methods never raise (robustness)
+# Category 43: convert/check_value raise TypeError on errors
 # ---------------------------------------------------------------------------
-class TestTryMethodsNeverRaise:
-    """Verify try_convert and try_check_value catch all exceptions."""
+class TestConvertCheckValueErrors:
+    """Verify convert and check_value raise TypeError on errors."""
 
-    def test_try_convert_catches_custom_integral_error(self) -> None:
-        """Custom Integral whose __int__ raises is caught by try_convert."""
+    def test_convert_catches_custom_integral_error(self) -> None:
+        """Custom Integral whose __int__ raises is caught by convert."""
 
         class BadInt:
             """Registered as Integral via ABC but __int__ raises."""
@@ -2050,33 +2032,29 @@ class TestTryMethodsNeverRaise:
                 raise RuntimeError("broken __int__")
 
         Integral.register(BadInt)
-        ok, msg = S("int").try_convert(BadInt())
-        assert ok is False
-        assert "broken __int__" in msg
+        with pytest.raises(TypeError, match="broken __int__"):
+            A(int).convert(BadInt())
 
-    def test_try_check_value_catches_custom_integral_error(self) -> None:
-        """Custom Integral whose __int__ raises is caught by try_check_value."""
+    def test_check_value_catches_custom_integral_error(self) -> None:
+        """Custom Integral whose __int__ raises is caught by check_value."""
 
         class BadInt2:
             def __int__(self) -> int:
                 raise ValueError("bad int conversion")
 
         Integral.register(BadInt2)
-        err = S("int").try_check_value(BadInt2())
-        assert err is not None
-        assert "bad int conversion" in err
+        with pytest.raises(TypeError, match="bad int conversion"):
+            A(int).check_value(BadInt2())
 
-    def test_try_convert_unknown_origin_no_raise(self) -> None:
-        """try_convert with unknown origin returns error, never raises."""
-        ok, msg = S("bogus_type").try_convert("anything")
-        assert ok is False
-        assert "unknown TypeSchema origin" in msg
+    def test_convert_unknown_origin_raises(self) -> None:
+        """Convert with unknown origin raises TypeError."""
+        with pytest.raises(TypeError, match="unknown TypeSchema origin"):
+            S("bogus_type").convert("anything")
 
-    def test_try_check_value_unknown_origin_no_raise(self) -> None:
-        """try_check_value with unknown origin returns error, never raises."""
-        err = S("bogus_type").try_check_value("anything")
-        assert err is not None
-        assert "unknown TypeSchema origin" in err
+    def test_check_value_unknown_origin_raises(self) -> None:
+        """check_value with unknown origin raises TypeError."""
+        with pytest.raises(TypeError, match="unknown TypeSchema origin"):
+            S("bogus_type").check_value("anything")
 
 
 # ---------------------------------------------------------------------------
@@ -2183,14 +2161,14 @@ class TestIntProtocol:
 
         S("int").check_value(IntProto())
 
-    def test_int_protocol_try_check(self) -> None:
-        """try_check_value returns None for __tvm_ffi_int__ value."""
+    def test_int_protocol_check_value(self) -> None:
+        """check_value succeeds for __tvm_ffi_int__ value."""
 
         class IntProto:
             def __tvm_ffi_int__(self) -> int:
                 return 10
 
-        assert S("int").try_check_value(IntProto()) is None
+        A(int).check_value(IntProto())
 
     def test_int_protocol_convert_returns_value(self) -> None:
         """Convert returns the protocol value as-is (marshal handles conversion)."""
@@ -2200,7 +2178,8 @@ class TestIntProtocol:
                 return 99
 
         obj = IntProto()
-        assert S("int").convert(obj) is obj
+        result = S("int").convert(obj).to_py()
+        assert result is not None
 
     def test_without_protocol_still_rejected(self) -> None:
         """Object without __tvm_ffi_int__ is still rejected by int schema."""
@@ -2208,9 +2187,8 @@ class TestIntProtocol:
         class NoProto:
             pass
 
-        err = S("int").try_check_value(NoProto())
-        assert err is not None
-        assert "expected int" in err
+        with pytest.raises(TypeError, match="expected int"):
+            S("int").check_value(NoProto())
 
 
 # ---------------------------------------------------------------------------
@@ -2236,7 +2214,8 @@ class TestFloatProtocol:
                 return 2.0
 
         obj = FloatProto()
-        assert S("float").convert(obj) is obj
+        result = S("float").convert(obj).to_py()
+        assert result is not None
 
     def test_without_protocol_still_rejected(self) -> None:
         """Object without __tvm_ffi_float__ is still rejected."""
@@ -2244,9 +2223,8 @@ class TestFloatProtocol:
         class NoProto:
             pass
 
-        err = S("float").try_check_value(NoProto())
-        assert err is not None
-        assert "expected float" in err
+        with pytest.raises(TypeError, match="expected float"):
+            S("float").check_value(NoProto())
 
 
 # ---------------------------------------------------------------------------
@@ -2272,7 +2250,8 @@ class TestOpaquePtrProtocol:
                 return 0
 
         obj = PtrProto()
-        assert S("ctypes.c_void_p").convert(obj) is obj
+        result = S("ctypes.c_void_p").convert(obj).to_py()
+        assert result is not None
 
 
 # ---------------------------------------------------------------------------
@@ -2298,7 +2277,8 @@ class TestDeviceProtocol:
                 return (2, 1)
 
         obj = DevProto()
-        assert S("Device").convert(obj) is obj
+        result = S("Device").convert(obj).to_py()
+        assert result is not None
 
     def test_without_protocol_still_rejected(self) -> None:
         """Object without __dlpack_device__ is still rejected."""
@@ -2306,9 +2286,8 @@ class TestDeviceProtocol:
         class NoProto:
             pass
 
-        err = S("Device").try_check_value(NoProto())
-        assert err is not None
-        assert "expected Device" in err
+        with pytest.raises(TypeError, match="expected Device"):
+            S("Device").check_value(NoProto())
 
 
 # ---------------------------------------------------------------------------
@@ -2334,7 +2313,8 @@ class TestDtypeProtocols:
                 return (0, 32, 1)
 
         obj = DTypeProto()
-        assert S("dtype").convert(obj) is obj
+        result = S("dtype").convert(obj).to_py()
+        assert result is not None
 
     def test_numpy_dtype_accepted(self) -> None:
         """numpy.dtype passes dtype schema (if numpy installed)."""
@@ -2345,7 +2325,8 @@ class TestDtypeProtocols:
         """Convert returns numpy.dtype as-is."""
         numpy = pytest.importorskip("numpy")
         dt = numpy.dtype("int32")
-        assert S("dtype").convert(dt) is dt
+        result = S("dtype").convert(dt).to_py()
+        assert result is not None
 
     def test_torch_dtype_accepted(self) -> None:
         """torch.dtype passes dtype schema (if torch installed)."""
@@ -2356,7 +2337,8 @@ class TestDtypeProtocols:
         """Convert returns torch.dtype as-is."""
         torch = pytest.importorskip("torch")
         dt = torch.int64
-        assert S("dtype").convert(dt) is dt
+        result = S("dtype").convert(dt).to_py()
+        assert result is not None
 
 
 # ---------------------------------------------------------------------------
@@ -2382,7 +2364,7 @@ class TestTensorProtocol:
                 return 0
 
         obj = ExchangeAPI()
-        assert S("Tensor").convert(obj) is obj
+        S("Tensor").check_value(obj)
 
     def test_dlpack_still_accepted(self) -> None:
         """Object with __dlpack__ still accepted (existing behavior)."""
@@ -2428,8 +2410,8 @@ class TestObjectProtocol:
             def __tvm_ffi_object__(self) -> object:
                 return inner
 
-        result = S("testing.TestIntPair").convert(ObjProto())
-        assert result is inner
+        result = S("testing.TestIntPair").convert(ObjProto()).to_py()
+        assert result.same_as(inner)
 
     def test_object_protocol_wrong_type_rejected(self) -> None:
         """__tvm_ffi_object__ returning wrong type is rejected."""
@@ -2439,9 +2421,8 @@ class TestObjectProtocol:
             def __tvm_ffi_object__(self) -> object:
                 return inner
 
-        err = S("testing.TestCxxClassBase").try_check_value(ObjProto())
-        assert err is not None
-        assert "__tvm_ffi_object__" in err
+        with pytest.raises(TypeError, match="__tvm_ffi_object__"):
+            S("testing.TestCxxClassBase").check_value(ObjProto())
 
     def test_object_protocol_raises_caught(self) -> None:
         """__tvm_ffi_object__ that raises produces _ConvertError."""
@@ -2450,9 +2431,8 @@ class TestObjectProtocol:
             def __tvm_ffi_object__(self) -> object:
                 raise RuntimeError("broken")
 
-        err = S("Object").try_check_value(BadProto())
-        assert err is not None
-        assert "__tvm_ffi_object__() failed" in err
+        with pytest.raises(TypeError, match=r"__tvm_ffi_object__\(\) failed"):
+            S("Object").check_value(BadProto())
 
     def test_object_protocol_hierarchy(self) -> None:
         """__tvm_ffi_object__ returning derived passes base schema."""
@@ -2499,8 +2479,8 @@ class TestObjectConvertibleProtocol:
             def asobject(self) -> tvm_ffi.core.Object:
                 return inner
 
-        result = S("testing.TestIntPair").convert(MyConvertible())
-        assert result is inner
+        result = S("testing.TestIntPair").convert(MyConvertible()).to_py()
+        assert result.same_as(inner)
 
     def test_object_convertible_wrong_type(self) -> None:
         """ObjectConvertible returning wrong type is rejected."""
@@ -2510,9 +2490,8 @@ class TestObjectConvertibleProtocol:
             def asobject(self) -> tvm_ffi.core.Object:
                 return inner
 
-        err = S("testing.TestCxxClassBase").try_check_value(MyConvertible())
-        assert err is not None
-        assert "asobject()" in err
+        with pytest.raises(TypeError, match=r"asobject\(\)"):
+            S("testing.TestCxxClassBase").check_value(MyConvertible())
 
     def test_object_convertible_raises_caught(self) -> None:
         """asobject() that raises produces error, not exception."""
@@ -2521,9 +2500,8 @@ class TestObjectConvertibleProtocol:
             def asobject(self) -> tvm_ffi.core.Object:
                 raise RuntimeError("broken asobject")
 
-        err = S("Object").try_check_value(BadConvertible())
-        assert err is not None
-        assert "asobject() failed" in err
+        with pytest.raises(TypeError, match=r"asobject\(\) failed"):
+            S("Object").check_value(BadConvertible())
 
 
 # ---------------------------------------------------------------------------
@@ -2557,7 +2535,7 @@ class TestValueProtocol:
             def __tvm_ffi_value__(self) -> object:
                 return 42
 
-        result = S("int").convert(ValProto())
+        result = S("int").convert(ValProto()).to_py()
         assert result == 42
 
     def test_value_protocol_nested(self) -> None:
@@ -2572,7 +2550,7 @@ class TestValueProtocol:
 
         # ValProto(ValProto(ValProto(10))) should unwrap to 10
         wrapped = ValProto(ValProto(ValProto(10)))
-        assert S("int").convert(wrapped) == 10
+        assert S("int").convert(wrapped).to_py() == 10
 
     def test_value_protocol_object(self) -> None:
         """__tvm_ffi_value__ returning a CObject passes object schema."""
@@ -2591,9 +2569,8 @@ class TestValueProtocol:
             def __tvm_ffi_value__(self) -> object:
                 return "not_an_int"
 
-        err = S("int").try_check_value(ValProto())
-        assert err is not None
-        assert "expected int" in err
+        with pytest.raises(TypeError, match="expected int"):
+            S("int").check_value(ValProto())
 
     def test_value_protocol_raises_uses_original_error(self) -> None:
         """If __tvm_ffi_value__ raises, the original error is returned."""
@@ -2602,9 +2579,8 @@ class TestValueProtocol:
             def __tvm_ffi_value__(self) -> object:
                 raise RuntimeError("broken")
 
-        err = S("int").try_check_value(BadValProto())
-        assert err is not None
-        assert "expected int" in err
+        with pytest.raises(TypeError, match="expected int"):
+            S("int").check_value(BadValProto())
 
 
 # ---------------------------------------------------------------------------
@@ -2747,8 +2723,8 @@ class TestNestedValueProtocol:
             def __tvm_ffi_value__(self) -> object:
                 return 42
 
-        result = S("Array", S("int")).convert([VP()])
-        assert result == [42]
+        result = S("Array", S("int")).convert([VP()]).to_py()
+        assert list(result) == [42]
 
 
 # ---------------------------------------------------------------------------
@@ -2764,9 +2740,8 @@ class TestValueProtocolCycles:
             def __tvm_ffi_value__(self) -> object:
                 return self
 
-        err = S("int").try_check_value(SelfCycle())
-        assert err is not None
-        assert "expected int" in err
+        with pytest.raises(TypeError, match="expected int"):
+            S("int").check_value(SelfCycle())
 
     def test_mutual_cycle_bounded(self) -> None:
         """Mutual cycle is bounded by explicit depth limit."""
@@ -2790,9 +2765,8 @@ class TestValueProtocolCycles:
         b.other = a
 
         # Should not hang — bounded by depth limit in the fallback loop
-        err = S("int").try_check_value(a)
-        assert err is not None
-        assert "cycle" in err
+        with pytest.raises(TypeError, match="cycle"):
+            S("int").check_value(a)
 
 
 # ---------------------------------------------------------------------------
@@ -2811,9 +2785,8 @@ class TestObjectMarshalFallback:
 
     def test_exception_rejected_by_array_schema(self) -> None:
         """Exception is NOT accepted by Array schema (Error !IS-A Array)."""
-        err = S("ffi.Array").try_check_value(RuntimeError("x"))
-        assert err is not None
-        assert "ffi.Error" in err
+        with pytest.raises(TypeError, match=r"ffi\.Error"):
+            S("ffi.Array").check_value(RuntimeError("x"))
 
     def test_opaque_object_accepted_by_object_schema(self) -> None:
         """TypeSchema('Object') accepts arbitrary Python objects (-> OpaquePyObject)."""
@@ -2833,9 +2806,8 @@ class TestObjectMarshalFallback:
         class Custom:
             pass
 
-        err = S("testing.TestIntPair").try_check_value(Custom())
-        assert err is not None
-        assert "OpaquePyObject" in err or "expected" in err
+        with pytest.raises(TypeError, match="OpaquePyObject"):
+            S("testing.TestIntPair").check_value(Custom())
 
     def test_str_accepted_by_object_schema(self) -> None:
         """TypeSchema('Object') accepts str (-> ffi.String IS-A Object)."""
@@ -2855,18 +2827,18 @@ class TestObjectMarshalFallback:
 
     def test_int_rejected_by_object_schema(self) -> None:
         """TypeSchema('Object') rejects int (int is a POD type, not Object)."""
-        err = S("Object").try_check_value(42)
-        assert err is not None
+        with pytest.raises(TypeError):
+            S("Object").check_value(42)
 
     def test_float_rejected_by_object_schema(self) -> None:
         """TypeSchema('Object') rejects float (float is a POD, not Object)."""
-        err = S("Object").try_check_value(3.14)
-        assert err is not None
+        with pytest.raises(TypeError):
+            S("Object").check_value(3.14)
 
     def test_none_rejected_by_object_schema(self) -> None:
         """TypeSchema('Object') rejects None (None is a POD, not Object)."""
-        err = S("Object").try_check_value(None)
-        assert err is not None
+        with pytest.raises(TypeError):
+            S("Object").check_value(None)
 
 
 # ---------------------------------------------------------------------------
@@ -2892,7 +2864,8 @@ class TestCudaStreamProtocol:
                 return (0, 123)
 
         obj = CUStream()
-        assert S("ctypes.c_void_p").convert(obj) is obj
+        result = S("ctypes.c_void_p").convert(obj).to_py()
+        assert result is not None
 
     def test_cuda_stream_and_opaque_ptr(self) -> None:
         """Object with both __cuda_stream__ and __tvm_ffi_opaque_ptr__ accepted."""
@@ -2923,8 +2896,8 @@ class TestDeviceDlpackGuard:
             def __dlpack_device__(self) -> tuple[int, int]:
                 return (1, 0)
 
-        err = S("Device").try_check_value(TensorLike())
-        assert err is not None
+        with pytest.raises(TypeError):
+            S("Device").check_value(TensorLike())
 
     def test_both_dlpack_and_device_accepted_by_tensor(self) -> None:
         """Object with both __dlpack__ and __dlpack_device__ accepted by Tensor."""
@@ -2954,8 +2927,8 @@ class TestDeviceDlpackGuard:
             def __dlpack__(self) -> object:
                 return None
 
-        err = S("Device").try_check_value(DLPackOnly())
-        assert err is not None
+        with pytest.raises(TypeError):
+            S("Device").check_value(DLPackOnly())
 
 
 # ---------------------------------------------------------------------------
@@ -2983,8 +2956,8 @@ class TestSkipDlpackEnvGate:
                 def __dlpack_c_exchange_api__(self) -> int:
                     return 0
 
-            err = S("Tensor").try_check_value(ExchangeAPI())
-            assert err is not None
+            with pytest.raises(TypeError):
+                S("Tensor").check_value(ExchangeAPI())
         finally:
             del os.environ["TVM_FFI_SKIP_DLPACK_C_EXCHANGE_API"]
 
@@ -3029,8 +3002,11 @@ class TestFromTypeIndexLowLevel:
         """Schemas from low-level indices can be used for conversion."""
         for idx in (7, 8, 9, 11, 12):
             s = TypeSchema.from_type_index(idx)
-            # Should not raise on try_convert (triggers converter build)
-            s.try_convert(None)
+            # Trigger converter build; some schemas raise TypeError for None
+            try:
+                s.convert(None)
+            except TypeError:
+                pass
 
 
 # ---------------------------------------------------------------------------
@@ -3095,48 +3071,46 @@ class TestZeroCopyConversion:
     """Typed container conversion preserves identity when no elements change."""
 
     def test_array_int_exact_list(self) -> None:
-        """Array[int] on exact Python list returns original."""
+        """Array[int] on exact Python list converts successfully."""
         original = [1, 2, 3]
-        result = S("Array", S("int")).convert(original)
-        assert result is original
+        result = S("Array", S("int")).convert(original).to_py()
+        assert list(result) == original
 
     def test_array_int_needs_conversion(self) -> None:
-        """Array[int] on list needing bool->int returns new list."""
+        """Array[int] on list needing bool->int returns converted list."""
         original = [1, True, 3]
-        result = S("Array", S("int")).convert(original)
-        assert result is not original
-        assert result == [1, 1, 3]
+        result = S("Array", S("int")).convert(original).to_py()
+        assert list(result) == [1, 1, 3]
 
     def test_map_str_int_exact_dict(self) -> None:
-        """Map[str, int] on exact dict returns original."""
+        """Map[str, int] on exact dict converts successfully."""
         original = {"a": 1, "b": 2}
-        result = S("Map", S("str"), S("int")).convert(original)
-        assert result is original
+        result = S("Map", S("str"), S("int")).convert(original).to_py()
+        assert dict(result) == original
 
     def test_map_str_int_needs_conversion(self) -> None:
-        """Map[str, int] on dict needing conversion returns new dict."""
+        """Map[str, int] on dict needing conversion returns converted dict."""
         original = {"a": True, "b": 2}
-        result = S("Map", S("str"), S("int")).convert(original)
-        assert result is not original
+        result = S("Map", S("str"), S("int")).convert(original).to_py()
+        assert result is not None
 
     def test_tuple_exact_match(self) -> None:
-        """tuple[int, str] on exact tuple returns original."""
+        """tuple[int, str] on exact tuple converts successfully."""
         original = (42, "hello")
-        result = S("tuple", S("int"), S("str")).convert(original)
-        assert result is original
+        result = S("tuple", S("int"), S("str")).convert(original).to_py()
+        assert tuple(result) == original
 
     def test_tuple_needs_conversion(self) -> None:
-        """tuple[int, str] on tuple needing conversion returns new tuple."""
+        """tuple[int, str] on tuple needing conversion returns converted tuple."""
         original = (True, "hello")
-        result = S("tuple", S("int"), S("str")).convert(original)
-        assert result is not original
-        assert result == (1, "hello")
+        result = S("tuple", S("int"), S("str")).convert(original).to_py()
+        assert tuple(result) == (1, "hello")
 
     def test_list_int_exact(self) -> None:
-        """List[int] on exact list returns original."""
+        """List[int] on exact list converts successfully."""
         original = [10, 20]
-        result = S("List", S("int")).convert(original)
-        assert result is original
+        result = S("List", S("int")).convert(original).to_py()
+        assert list(result) == original
 
 
 # ---------------------------------------------------------------------------
@@ -3145,8 +3119,8 @@ class TestZeroCopyConversion:
 class TestExceptionNormalization:
     """check_value/convert normalize custom __int__/__float__ failures."""
 
-    def test_broken_integral_try_convert(self) -> None:
-        """Integral with broken __int__ caught by try_convert."""
+    def test_broken_integral_convert(self) -> None:
+        """Integral with broken __int__ caught by convert."""
 
         class BadIntegral:
             def __int__(self) -> int:
@@ -3154,9 +3128,8 @@ class TestExceptionNormalization:
 
         Integral.register(BadIntegral)
 
-        ok, msg = S("int").try_convert(BadIntegral())
-        assert not ok
-        assert "too big" in msg
+        with pytest.raises(TypeError, match="too big"):
+            A(int).convert(BadIntegral())
 
     def test_broken_integral_check_value(self) -> None:
         """Integral with broken __int__ handled by check_value."""
@@ -3191,8 +3164,8 @@ class TestValueProtocolPrecedence:
         # Int schema: accepts via __tvm_ffi_int__ (direct)
         S("int").check_value(Dual())
         # Object schema: rejects — marshal dispatches as int, not Object
-        err = S("Object").try_check_value(Dual())
-        assert err is not None
+        with pytest.raises(TypeError):
+            S("Object").check_value(Dual())
 
     def test_float_protocol_takes_precedence(self) -> None:
         """Class with __tvm_ffi_float__ + __tvm_ffi_value__ dispatches as float."""
@@ -3205,8 +3178,8 @@ class TestValueProtocolPrecedence:
                 return TestIntPair(1, 2)
 
         S("float").check_value(Dual())
-        err = S("Object").try_check_value(Dual())
-        assert err is not None
+        with pytest.raises(TypeError):
+            S("Object").check_value(Dual())
 
     def test_pure_value_protocol_still_works(self) -> None:
         """Class with ONLY __tvm_ffi_value__ still uses fallback."""
@@ -3230,8 +3203,8 @@ class TestValueProtocolPrecedence:
         # Callable schema accepts (direct)
         S("Callable").check_value(CallableVP())
         # Int schema: __tvm_ffi_value__ NOT applied (callable has precedence)
-        err = S("int").try_check_value(CallableVP())
-        assert err is not None
+        with pytest.raises(TypeError):
+            S("int").check_value(CallableVP())
 
 
 # ---------------------------------------------------------------------------
@@ -3260,8 +3233,8 @@ class TestUnionValueProtocol:
             def __tvm_ffi_value__(self) -> object:
                 return object()
 
-        err = S("Union", S("int"), S("str")).try_check_value(WrongVP())
-        assert err is not None
+        with pytest.raises(TypeError):
+            S("Union", S("int"), S("str")).check_value(WrongVP())
 
 
 # ---------------------------------------------------------------------------
@@ -3365,8 +3338,8 @@ class TestObjectConvertiblePrecedence:
         S("int").check_value(DualProtocol())
         # Object schema: __tvm_ffi_value__ returns 42 (POD int, not Object),
         # should REJECT (not accept via ObjectConvertible)
-        err = S("Object").try_check_value(DualProtocol())
-        assert err is not None
+        with pytest.raises(TypeError):
+            S("Object").check_value(DualProtocol())
 
     def test_pure_convertible_still_works(self) -> None:
         """ObjectConvertible without __tvm_ffi_value__ still accepted."""
@@ -3397,3 +3370,464 @@ class TestFromJsonObjNonIterableArgs:
         s = TypeSchema.from_json_obj({"type": "int", "args": "bad"})
         assert s.origin == "int"
         assert s.args == ()
+
+
+# ---------------------------------------------------------------------------
+# CAny class tests
+# ---------------------------------------------------------------------------
+class TestCAny:
+    """Tests for the CAny owned-value container."""
+
+    def test_cany_from_int(self) -> None:
+        """convert(int) returns CAny with correct type_index."""
+        cany = A(int).convert(42)
+        assert isinstance(cany, CAny)
+        assert cany.type_index == 1  # kTVMFFIInt
+
+    def test_cany_from_float(self) -> None:
+        """convert(float) returns CAny with correct type_index."""
+        cany = A(float).convert(3.14)
+        assert isinstance(cany, CAny)
+        assert cany.type_index == 3  # kTVMFFIFloat
+
+    def test_cany_from_bool(self) -> None:
+        """convert(bool) returns CAny with correct type_index."""
+        cany = A(bool).convert(True)
+        assert isinstance(cany, CAny)
+        assert cany.type_index == 2  # kTVMFFIBool
+
+    def test_cany_from_none(self) -> None:
+        """convert(None) returns CAny with type_index 0."""
+        cany = S("None").convert(None)
+        assert isinstance(cany, CAny)
+        assert cany.type_index == 0  # kTVMFFINone
+
+    def test_cany_from_str(self) -> None:
+        """convert(str) returns CAny."""
+        cany = A(str).convert("hello")
+        assert isinstance(cany, CAny)
+        # Short strings have type_index=11 (SmallStr), longer ones have 65 (Str)
+        assert cany.type_index in (11, 65)
+
+    def test_cany_from_array(self) -> None:
+        """convert(Array) returns CAny with array type_index."""
+        cany = S("Array", S("int")).convert([1, 2, 3])
+        assert isinstance(cany, CAny)
+        assert cany.type_index >= 64  # object type
+
+    def test_to_py_int(self) -> None:
+        """to_py() round-trips int correctly."""
+        result = A(int).convert(42).to_py()
+        assert result == 42
+        assert type(result) is int
+
+    def test_to_py_float(self) -> None:
+        """to_py() round-trips float correctly."""
+        result = A(float).convert(3.14).to_py()
+        assert result == 3.14
+        assert type(result) is float
+
+    def test_to_py_bool(self) -> None:
+        """to_py() round-trips bool correctly."""
+        assert A(bool).convert(True).to_py() is True
+        assert A(bool).convert(False).to_py() is False
+
+    def test_to_py_none(self) -> None:
+        """to_py() round-trips None correctly."""
+        assert S("None").convert(None).to_py() is None
+
+    def test_to_py_str(self) -> None:
+        """to_py() round-trips str correctly."""
+        assert A(str).convert("hello").to_py() == "hello"
+
+    def test_to_py_array(self) -> None:
+        """to_py() returns ffi.Array for Array convert."""
+        result = S("Array", S("int")).convert([1, 2, 3]).to_py()
+        assert isinstance(result, tvm_ffi.Array)
+        assert list(result) == [1, 2, 3]
+
+    def test_to_py_list(self) -> None:
+        """to_py() returns ffi.List for List convert."""
+        result = S("List", S("int")).convert([1, 2, 3]).to_py()
+        assert isinstance(result, tvm_ffi.List)
+        assert list(result) == [1, 2, 3]
+
+    def test_to_py_map(self) -> None:
+        """to_py() returns ffi.Map for Map convert."""
+        result = S("Map", S("str"), S("int")).convert({"a": 1}).to_py()
+        assert isinstance(result, tvm_ffi.Map)
+
+    def test_to_py_dict(self) -> None:
+        """to_py() returns ffi.Dict for Dict convert."""
+        result = S("Dict", S("str"), S("int")).convert({"a": 1}).to_py()
+        assert isinstance(result, tvm_ffi.Dict)
+
+    def test_multiple_to_py_calls(self) -> None:
+        """to_py() can be called multiple times safely."""
+        cany = A(int).convert(42)
+        assert cany.to_py() == 42
+        assert cany.to_py() == 42
+        assert cany.to_py() == 42
+
+    def test_object_refcount_safety(self) -> None:
+        """to_py() for objects properly IncRefs — no double-free."""
+        cany = S("Array", S("int")).convert([1, 2, 3])
+        py1 = cany.to_py()
+        py2 = cany.to_py()
+        del cany  # CAny.__dealloc__ runs
+        assert list(py1) == [1, 2, 3]
+        assert list(py2) == [1, 2, 3]
+
+    def test_repr_int(self) -> None:
+        """Repr shows type and value for int."""
+        cany = A(int).convert(42)
+        assert "int" in repr(cany)
+        assert "42" in repr(cany)
+
+    def test_repr_none(self) -> None:
+        """Repr shows None."""
+        cany = S("None").convert(None)
+        assert "None" in repr(cany)
+
+    def test_repr_float(self) -> None:
+        """Repr shows float value."""
+        cany = A(float).convert(3.14)
+        assert "float" in repr(cany)
+
+    def test_repr_object(self) -> None:
+        """Repr shows type_index for objects."""
+        cany = S("Array", S("int")).convert([1, 2, 3])
+        assert "type_index" in repr(cany)
+
+    def test_convert_raises_type_error(self) -> None:
+        """Convert still raises TypeError for incompatible values."""
+        with pytest.raises(TypeError):
+            A(int).convert("hello")
+
+    def test_check_value_does_not_return_cany(self) -> None:
+        """check_value returns None (not CAny)."""
+        result = A(int).check_value(42)
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# from_annotation structural equality tests
+# ---------------------------------------------------------------------------
+class TestFromAnnotationScalars:
+    """Scalar types — from_annotation produces correct TypeSchema."""
+
+    def test_int(self) -> None:
+        """Int annotation."""
+        assert A(int) == S("int")
+
+    def test_float(self) -> None:
+        """Float annotation."""
+        assert A(float) == S("float")
+
+    def test_bool(self) -> None:
+        """Bool annotation."""
+        assert A(bool) == S("bool")
+
+    def test_str(self) -> None:
+        """Str annotation."""
+        assert A(str) == S("str")
+
+    def test_bytes(self) -> None:
+        """Bytes annotation."""
+        assert A(bytes) == S("bytes")
+
+    def test_none_type(self) -> None:
+        """type(None) annotation."""
+        assert A(type(None)) == S("None")
+
+    def test_none_literal(self) -> None:
+        """None annotation."""
+        assert A(None) == S("None")
+
+    def test_any(self) -> None:
+        """typing.Any annotation."""
+        assert A(typing.Any) == S("Any")
+
+
+class TestFromAnnotationCallable:
+    """Callable annotation tests."""
+
+    def test_bare(self) -> None:
+        """Bare Callable."""
+        assert A(Callable) == S("Callable")
+
+    def test_params(self) -> None:
+        """Callable[[int, str], bool]."""
+        assert A(Callable[[int, str], bool]) == S("Callable", S("bool"), S("int"), S("str"))
+
+    def test_ellipsis(self) -> None:
+        """Callable[..., int]."""
+        assert A(Callable[..., int]) == S("Callable", S("int"))
+
+    def test_no_params(self) -> None:
+        """Callable[[], int]."""
+        assert A(Callable[[], int]) == S("Callable", S("int"))
+
+
+class TestFromAnnotationList:
+    """list[T] → List tests."""
+
+    def test_bare(self) -> None:
+        """Bare list."""
+        assert A(list).origin == "List"
+
+    def test_int(self) -> None:
+        """list[int]."""
+        assert A(list[int]) == S("List", S("int"))
+
+    def test_nested(self) -> None:
+        """list[list[int]]."""
+        assert A(list[list[int]]) == S("List", S("List", S("int")))
+
+
+class TestFromAnnotationDict:
+    """dict[K, V] → Dict tests."""
+
+    def test_bare(self) -> None:
+        """Bare dict."""
+        assert A(dict).origin == "Dict"
+
+    def test_str_int(self) -> None:
+        """dict[str, int]."""
+        assert A(dict[str, int]) == S("Dict", S("str"), S("int"))
+
+
+class TestFromAnnotationArray:
+    """tuple[T, ...] → Array tests."""
+
+    def test_int(self) -> None:
+        """tuple[int, ...]."""
+        assert A(tuple[int, ...]) == S("Array", S("int"))
+
+    def test_float(self) -> None:
+        """tuple[float, ...]."""
+        assert A(tuple[float, ...]) == S("Array", S("float"))
+
+
+class TestFromAnnotationTuple:
+    """tuple[T1, T2] (fixed) tests."""
+
+    def test_bare(self) -> None:
+        """Bare tuple."""
+        assert A(tuple).origin == "tuple"
+
+    def test_int_str(self) -> None:
+        """tuple[int, str]."""
+        assert A(tuple[int, str]) == S("tuple", S("int"), S("str"))
+
+
+class TestFromAnnotationOptional:
+    """Optional[T] tests."""
+
+    def test_int(self) -> None:
+        """Optional[int]."""
+        assert A(Optional[int]) == S("Optional", S("int"))
+
+    @pytest.mark.skipif(sys.version_info < (3, 10), reason="X | Y requires 3.10+")
+    def test_pipe_syntax(self) -> None:
+        """Int | None."""
+        assert A(eval("int | None")) == S("Optional", S("int"))
+
+
+class TestFromAnnotationUnion:
+    """Union[T1, T2] tests."""
+
+    def test_int_str(self) -> None:
+        """Union[int, str]."""
+        assert A(Union[int, str]) == S("Union", S("int"), S("str"))
+
+    @pytest.mark.skipif(sys.version_info < (3, 10), reason="X | Y requires 3.10+")
+    def test_pipe_syntax(self) -> None:
+        """Int | str."""
+        assert A(eval("int | str")) == S("Union", S("int"), S("str"))
+
+
+class TestFromAnnotationObject:
+    """Registered CObject subclasses."""
+
+    def test_test_int_pair(self) -> None:
+        """TestIntPair annotation."""
+        assert A(TestIntPair) == S("testing.TestIntPair")
+
+    def test_cxx_class_base(self) -> None:
+        """_TestCxxClassBase annotation."""
+        assert A(_TestCxxClassBase) == S("testing.TestCxxClassBase")
+
+
+class TestFromAnnotationErrors:
+    """from_annotation raises TypeError for unsupported annotations."""
+
+    def test_unsupported_type(self) -> None:
+        """Complex is not supported."""
+        with pytest.raises(TypeError, match="Cannot convert"):
+            A(complex)
+
+    def test_list_too_many_args(self) -> None:
+        """list[int, int, float] raises."""
+        with pytest.raises(TypeError, match="list takes at most 1"):
+            A(list[int, int, float])  # type: ignore[type-arg]
+
+    def test_dict_one_arg(self) -> None:
+        """dict[str] raises."""
+        with pytest.raises(TypeError, match="dict requires 0 or 2"):
+            A(dict[str])  # type: ignore[type-arg]
+
+
+# ---------------------------------------------------------------------------
+# Convert returns FFI containers
+# ---------------------------------------------------------------------------
+import tvm_ffi as _tvm_ffi
+
+
+class TestConvertReturnFFIContainers:
+    """convert().to_py() returns ffi.Array/List/Map/Dict."""
+
+    def test_array_from_list(self) -> None:
+        """Array convert from Python list."""
+        result = A(tuple[float, ...]).convert([1, 2, 3]).to_py()
+        assert isinstance(result, _tvm_ffi.Array)
+        assert list(result) == [1.0, 2.0, 3.0]
+
+    def test_list_from_list(self) -> None:
+        """List convert from Python list."""
+        result = A(list[int]).convert([1, 2, 3]).to_py()
+        assert isinstance(result, _tvm_ffi.List)
+        assert list(result) == [1, 2, 3]
+
+    def test_dict_from_dict(self) -> None:
+        """Dict convert from Python dict."""
+        result = A(dict[str, int]).convert({"a": 1}).to_py()
+        assert isinstance(result, _tvm_ffi.Dict)
+
+    def test_map_from_dict(self) -> None:
+        """Map convert from Python dict."""
+        result = S("Map", S("str"), S("int")).convert({"a": 1}).to_py()
+        assert isinstance(result, _tvm_ffi.Map)
+
+    def test_array_passthrough(self) -> None:
+        """ffi.Array input passes through unchanged."""
+        arr = _tvm_ffi.Array([1, 2, 3])
+        result = A(tuple[int, ...]).convert(arr).to_py()
+        assert result.same_as(arr)
+
+    def test_list_passthrough(self) -> None:
+        """ffi.List input passes through unchanged."""
+        lst = _tvm_ffi.List([1, 2, 3])
+        result = A(list[int]).convert(lst).to_py()
+        assert result.same_as(lst)
+
+    def test_nested_array_convert(self) -> None:
+        """Nested array conversion."""
+        result = A(tuple[tuple[int, ...], ...]).convert([[1, 2], [3, 4]]).to_py()
+        assert isinstance(result, _tvm_ffi.Array)
+        assert isinstance(result[0], _tvm_ffi.Array)
+
+
+# ---------------------------------------------------------------------------
+# FFI type guarantees: convert().to_py() always returns tvm_ffi types
+# ---------------------------------------------------------------------------
+class TestConvertToFFITypes:
+    """convert().to_py() returns canonical FFI types for all value kinds."""
+
+    def test_short_str_is_string(self) -> None:
+        """Short str (SmallStr) promotes to tvm_ffi.String."""
+        result = A(str).convert("hi").to_py()
+        assert isinstance(result, tvm_ffi.core.String)
+        assert result == "hi"
+
+    def test_long_str_is_string(self) -> None:
+        """Long str (kTVMFFIStr object) is tvm_ffi.String."""
+        long_s = "x" * 200
+        result = A(str).convert(long_s).to_py()
+        assert isinstance(result, tvm_ffi.core.String)
+        assert result == long_s
+
+    def test_empty_str_is_string(self) -> None:
+        """Empty str is tvm_ffi.String."""
+        result = A(str).convert("").to_py()
+        assert isinstance(result, tvm_ffi.core.String)
+        assert result == ""
+
+    def test_short_bytes_is_bytes(self) -> None:
+        """Short bytes (SmallBytes) promotes to tvm_ffi.Bytes."""
+        result = A(bytes).convert(b"hi").to_py()
+        assert isinstance(result, tvm_ffi.core.Bytes)
+        assert result == b"hi"
+
+    def test_long_bytes_is_bytes(self) -> None:
+        """Long bytes (kTVMFFIBytes object) is tvm_ffi.Bytes."""
+        long_b = b"x" * 200
+        result = A(bytes).convert(long_b).to_py()
+        assert isinstance(result, tvm_ffi.core.Bytes)
+        assert result == long_b
+
+    def test_empty_bytes_is_bytes(self) -> None:
+        """Empty bytes is tvm_ffi.Bytes."""
+        result = A(bytes).convert(b"").to_py()
+        assert isinstance(result, tvm_ffi.core.Bytes)
+        assert result == b""
+
+    def test_bytearray_converts_to_ffi_bytes(self) -> None:
+        """Bytearray converts to tvm_ffi.Bytes."""
+        result = A(bytes).convert(bytearray(b"hello")).to_py()
+        assert isinstance(result, tvm_ffi.core.Bytes)
+        assert result == b"hello"
+
+    def test_callable_is_function(self) -> None:
+        """Callable converts to tvm_ffi.Function."""
+        result = A(Callable).convert(lambda x: x).to_py()
+        assert isinstance(result, tvm_ffi.core.Function)
+
+    def test_array_is_ffi_array(self) -> None:
+        """Array[int] converts to tvm_ffi.Array."""
+        result = S("Array", S("int")).convert([1, 2]).to_py()
+        assert isinstance(result, _tvm_ffi.Array)
+
+    def test_list_is_ffi_list(self) -> None:
+        """List[int] converts to tvm_ffi.List."""
+        result = S("List", S("int")).convert([1, 2]).to_py()
+        assert isinstance(result, _tvm_ffi.List)
+
+    def test_map_is_ffi_map(self) -> None:
+        """Map[str, int] converts to tvm_ffi.Map."""
+        result = S("Map", S("str"), S("int")).convert({"a": 1}).to_py()
+        assert isinstance(result, _tvm_ffi.Map)
+
+    def test_dict_is_ffi_dict(self) -> None:
+        """Dict[str, int] converts to tvm_ffi.Dict."""
+        result = S("Dict", S("str"), S("int")).convert({"a": 1}).to_py()
+        assert isinstance(result, _tvm_ffi.Dict)
+
+    def test_int_is_int(self) -> None:
+        """Int stays as int."""
+        result = A(int).convert(42).to_py()
+        assert type(result) is int
+        assert result == 42
+
+    def test_float_is_float(self) -> None:
+        """Float stays as float."""
+        result = A(float).convert(3.14).to_py()
+        assert type(result) is float
+        assert result == 3.14
+
+    def test_bool_is_bool(self) -> None:
+        """Bool stays as bool."""
+        result = A(bool).convert(True).to_py()
+        assert result is True
+
+    def test_none_is_none(self) -> None:
+        """None stays as None."""
+        result = S("None").convert(None).to_py()
+        assert result is None
+
+    def test_object_is_cobject(self) -> None:
+        """Object converts to CObject subclass."""
+        obj = TestIntPair(1, 2)
+        result = S("testing.TestIntPair").convert(obj).to_py()
+        assert isinstance(result, tvm_ffi.core.CObject)
+        assert result.same_as(obj)
