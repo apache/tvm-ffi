@@ -740,15 +740,10 @@ class TestAutoInitTypeChecks:
         assert isinstance(obj, _TestCxxAutoInitParent)
         assert isinstance(obj, core.Object)
 
-    def test_parent_isinstance_child_due_to_metaclass(self) -> None:
-        """Due to _ObjectSlotsMeta, any CObject passes isinstance for any FFI class.
-
-        This is a pre-existing design choice in the TVM FFI type system, not a bug
-        introduced by the auto-init feature.
-        """
+    def test_parent_not_isinstance_child(self) -> None:
+        """A parent object should not pass isinstance check for a child class."""
         obj = _TestCxxAutoInitParent(1)
-        # _ObjectSlotsMeta.__instancecheck__ returns True for any CObject
-        assert isinstance(obj, _TestCxxAutoInitChild)
+        assert not isinstance(obj, _TestCxxAutoInitChild)
 
 
 class TestAutoInitInstanceIsolation:

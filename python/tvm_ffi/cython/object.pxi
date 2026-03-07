@@ -175,19 +175,6 @@ class _ObjectSlotsMeta(ABCMeta):
     def __init__(cls, name: str, bases: tuple[type, ...], ns: dict[str, Any], **kwargs: Any):
         super().__init__(name, bases, ns, **kwargs)
 
-    def __instancecheck__(cls, instance: Any) -> bool:
-        if isinstance(instance, CObject):
-            return True
-        return super().__instancecheck__(instance)
-
-    def __subclasscheck__(cls, subclass: type) -> bool:
-        try:
-            if issubclass(subclass, CObject):
-                return True
-        except TypeError:
-            pass
-        return super().__subclasscheck__(subclass)
-
 
 class Object(CObject, metaclass=_ObjectSlotsMeta):
     """Base class of all TVM FFI objects.
