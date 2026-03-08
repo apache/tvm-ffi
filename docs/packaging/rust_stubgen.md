@@ -43,6 +43,11 @@ cargo run -p tvm-ffi-stubgen -- <OUT_DIR> \
 - `--init-crate`: generated crate name
 - `--tvm-ffi-path`: optional local path override for `tvm-ffi`
 - `--overwrite`: overwrite non-empty output directory
+- `--no-format`: skip the post-generation `cargo fmt` pass
+
+By default, `tvm-ffi-stubgen` runs `cargo fmt` on the generated crate after emitting
+`Cargo.toml`, `build.rs`, and Rust sources. Use `--no-format` only when you need to inspect
+the raw generated text before formatting or when debugging generator output itself.
 
 ### Multi-Prefix Mode
 

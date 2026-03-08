@@ -28,6 +28,9 @@ Stubgen emits a public facade (`src/lib.rs`) plus detail modules:
 - `src/_tvm_ffi_stubgen_detail/functions.rs`
 - `src/_tvm_ffi_stubgen_detail/types.rs`
 
+By default the generator runs `cargo fmt` on the emitted crate after writing these files.
+Pass `--no-format` to keep the raw generated text when debugging formatting-sensitive output.
+
 ### Function Wrappers
 
 #### Typed wrapper path

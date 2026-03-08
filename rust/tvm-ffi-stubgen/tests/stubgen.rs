@@ -38,10 +38,11 @@ fn stubgen_tvm_ffi_testing() {
     let args = Args {
         out_dir: out_dir.clone(),
         dlls: vec![testing_lib.clone()],
-        init_prefix: "testing".to_string(),
+        init_prefix: vec!["testing".to_string()],
         init_crate: "tvm_ffi_testing_stub".to_string(),
         tvm_ffi_path: None,
         overwrite: true,
+        no_format: false,
     };
 
     run(args).expect("stubgen run");

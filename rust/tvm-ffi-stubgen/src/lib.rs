@@ -26,6 +26,29 @@ mod utils;
 use crate::schema::{collect_type_keys, extract_type_schema, parse_type_schema};
 pub use cli::Args;
 use std::collections::{BTreeSet, HashSet};
+use std::process::Command;
+
+fn format_generated_crate(out_dir: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
+    let manifest_path = out_dir.join("Cargo.toml");
+    let output = Command::new("cargo")
+        .arg("fmt")
+        .arg("--manifest-path")
+        .arg(&manifest_path)
+        .current_dir(out_dir)
+        .output()?;
+    if output.status.success() {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    Err(format!(
+        "cargo fmt failed for generated crate {}.\nstdout:\n{}\nstderr:\n{}",
+        manifest_path.display(),
+        stdout.trim(),
+        stderr.trim()
+    )
+    .into())
+}
 
 pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     if args.init_prefix.is_empty() {
@@ -104,6 +127,9 @@ pub fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     std::fs::write(src_dir.join("lib.rs"), lib_rs)?;
     std::fs::write(detail_dir.join("functions.rs"), functions_rs)?;
     std::fs::write(detail_dir.join("types.rs"), types_rs)?;
+    if !args.no_format {
+        format_generated_crate(&args.out_dir)?;
+    }
 
     Ok(())
 }

@@ -451,7 +451,7 @@ macro_rules! into_typed_fn {
         move || -> $ret_ty { Ok(_f.call_tuple_with_len::<0, _>(())?.try_into()?) }
     }};
     // Case for 1 argument
-    ($f:expr, $trait:ident($t0:ty) -> $ret_ty:ty) => {{
+    ($f:expr, $trait:ident($t0:ty $(,)?) -> $ret_ty:ty) => {{
         let _f = $f;
         move |a0: $t0| -> $ret_ty {
             use $crate::function_internal::IntoArgHolderTuple;
@@ -460,7 +460,7 @@ macro_rules! into_typed_fn {
         }
     }};
     // Case for 2 arguments
-    ($f:expr, $trait:ident($t0:ty, $t1:ty) -> $ret_ty:ty) => {{
+    ($f:expr, $trait:ident($t0:ty, $t1:ty $(,)?) -> $ret_ty:ty) => {{
         let _f = $f;
         move |a0: $t0, a1: $t1| -> $ret_ty {
             use $crate::function_internal::IntoArgHolderTuple;
@@ -469,7 +469,7 @@ macro_rules! into_typed_fn {
         }
     }};
     // Case for 3 arguments
-    ($f:expr, $trait:ident($t0:ty, $t1:ty, $t2:ty) -> $ret_ty:ty) => {{
+    ($f:expr, $trait:ident($t0:ty, $t1:ty, $t2:ty $(,)?) -> $ret_ty:ty) => {{
         let _f = $f;
         move |a0: $t0, a1: $t1, a2: $t2| -> $ret_ty {
             use $crate::function_internal::IntoArgHolderTuple;
@@ -478,7 +478,7 @@ macro_rules! into_typed_fn {
         }
     }};
     // Case for 4 arguments
-    ($f:expr, $trait:ident($t0:ty, $t1:ty, $t2:ty, $t3:ty) -> $ret_ty:ty) => {{
+    ($f:expr, $trait:ident($t0:ty, $t1:ty, $t2:ty, $t3:ty $(,)?) -> $ret_ty:ty) => {{
         let _f = $f;
         move |a0: $t0, a1: $t1, a2: $t2, a3: $t3| -> $ret_ty {
             use $crate::function_internal::IntoArgHolderTuple;
@@ -487,7 +487,7 @@ macro_rules! into_typed_fn {
         }
     }};
     // Case for 5 arguments
-    ($f:expr, $trait:ident($t0:ty, $t1:ty, $t2:ty, $t3:ty, $t4:ty) -> $ret_ty:ty) => {{
+    ($f:expr, $trait:ident($t0:ty, $t1:ty, $t2:ty, $t3:ty, $t4:ty $(,)?) -> $ret_ty:ty) => {{
         let _f = $f;
         move |a0: $t0, a1: $t1, a2: $t2, a3: $t3, a4: $t4| -> $ret_ty {
             use $crate::function_internal::IntoArgHolderTuple;
@@ -496,7 +496,7 @@ macro_rules! into_typed_fn {
         }
     }};
     // Case for 6 arguments
-    ($f:expr, $trait:ident($t0:ty, $t1:ty, $t2:ty, $t3:ty, $t4:ty, $t5:ty) -> $ret_ty:ty) => {{
+    ($f:expr, $trait:ident($t0:ty, $t1:ty, $t2:ty, $t3:ty, $t4:ty, $t5:ty $(,)?) -> $ret_ty:ty) => {{
         let _f = $f;
         move |a0: $t0, a1: $t1, a2: $t2, a3: $t3, a4: $t4, a5: $t5| -> $ret_ty {
             use $crate::function_internal::IntoArgHolderTuple;
@@ -505,7 +505,7 @@ macro_rules! into_typed_fn {
         }
     }};
     // Case for 7 arguments
-    ($f:expr, $trait:ident($t0:ty, $t1:ty, $t2:ty, $t3:ty, $t4:ty, $t5:ty, $t6:ty)
+    ($f:expr, $trait:ident($t0:ty, $t1:ty, $t2:ty, $t3:ty, $t4:ty, $t5:ty, $t6:ty $(,)?)
         -> $ret_ty:ty) => {{
         let _f = $f;
         move |a0: $t0, a1: $t1, a2: $t2, a3: $t3, a4: $t4, a5: $t5, a6: $t6| -> $ret_ty {
@@ -515,7 +515,7 @@ macro_rules! into_typed_fn {
         }
     }};
     // Case for 8 arguments
-    ($f:expr, $trait:ident($t0:ty, $t1:ty, $t2:ty, $t3:ty, $t4:ty, $t5:ty, $t6:ty, $t7:ty)
+    ($f:expr, $trait:ident($t0:ty, $t1:ty, $t2:ty, $t3:ty, $t4:ty, $t5:ty, $t6:ty, $t7:ty $(,)?)
         -> $ret_ty:ty) => {{
         let _f = $f;
         move |a0: $t0, a1: $t1, a2: $t2, a3: $t3, a4: $t4, a5: $t5, a6: $t6, a7: $t7| -> $ret_ty {
@@ -525,7 +525,7 @@ macro_rules! into_typed_fn {
         }
     }};
     // Case for 9 arguments
-    ($f:expr, $trait:ident($t0:ty, $t1:ty, $t2:ty, $t3:ty, $t4:ty, $t5:ty, $t6:ty, $t7:ty, $t8:ty)
+    ($f:expr, $trait:ident($t0:ty, $t1:ty, $t2:ty, $t3:ty, $t4:ty, $t5:ty, $t6:ty, $t7:ty, $t8:ty $(,)?)
         -> $ret_ty:ty) => {{
         let _f = $f;
         move |a0: $t0,
@@ -544,7 +544,7 @@ macro_rules! into_typed_fn {
         }
     }};
     // Case for 10 arguments
-    ($f:expr, $trait:ident($t0:ty, $t1:ty, $t2:ty, $t3:ty, $t4:ty, $t5:ty, $t6:ty, $t7:ty, $t8:ty, $t9:ty)
+    ($f:expr, $trait:ident($t0:ty, $t1:ty, $t2:ty, $t3:ty, $t4:ty, $t5:ty, $t6:ty, $t7:ty, $t8:ty, $t9:ty $(,)?)
         -> $ret_ty:ty) => {{
         let _f = $f;
         move |a0: $t0,
@@ -564,7 +564,7 @@ macro_rules! into_typed_fn {
         }
     }};
     // Case for 11 arguments
-    ($f:expr, $trait:ident($t0:ty, $t1:ty, $t2:ty, $t3:ty, $t4:ty, $t5:ty, $t6:ty, $t7:ty, $t8:ty, $t9:ty, $t10:ty)
+    ($f:expr, $trait:ident($t0:ty, $t1:ty, $t2:ty, $t3:ty, $t4:ty, $t5:ty, $t6:ty, $t7:ty, $t8:ty, $t9:ty, $t10:ty $(,)?)
         -> $ret_ty:ty) => {{
         let _f = $f;
         move |a0: $t0,
@@ -585,7 +585,7 @@ macro_rules! into_typed_fn {
         }
     }};
     // Case for 12 arguments
-    ($f:expr, $trait:ident($t0:ty, $t1:ty, $t2:ty, $t3:ty, $t4:ty, $t5:ty, $t6:ty, $t7:ty, $t8:ty, $t9:ty, $t10:ty, $t11:ty)
+    ($f:expr, $trait:ident($t0:ty, $t1:ty, $t2:ty, $t3:ty, $t4:ty, $t5:ty, $t6:ty, $t7:ty, $t8:ty, $t9:ty, $t10:ty, $t11:ty $(,)?)
         -> $ret_ty:ty) => {{
         let _f = $f;
         move |a0: $t0,

@@ -36,4 +36,6 @@ pub struct Args {
     pub tvm_ffi_path: Option<PathBuf>,
     #[arg(long = "overwrite")]
     pub overwrite: bool,
+    #[arg(long = "no-format")]
+    pub no_format: bool,
 }
