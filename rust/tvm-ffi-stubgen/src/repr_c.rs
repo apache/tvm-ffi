@@ -36,6 +36,24 @@ pub(crate) struct ReprCInfo {
     pub(crate) parent_type_key: Option<String>,
     /// Ordered layout entries (fields and gaps) covering [parent_total_size .. total_size).
     pub(crate) layout: Vec<LayoutEntry>,
+    /// Fields registered in this type's ObjectDef that are NOT part of the repr(C) struct
+    /// layout.  Two causes: (1) offset < parent_total_size — the field occupies a slot
+    /// within the parent's address range; (2) schema not mappable — the field's type
+    /// cannot be expressed as a repr(C) Rust type.  All such fields can still be read at
+    /// runtime via FieldGetter.
+    pub(crate) non_layout_fields: Vec<NonLayoutField>,
+}
+
+/// A registered field that does not appear in the repr(C) struct layout.
+#[derive(Debug, Clone)]
+pub(crate) struct NonLayoutField {
+    /// Original C++ field name (used as the FieldGetter key).
+    pub(crate) name: String,
+    /// Sanitized Rust identifier (used as the getter method name suffix).
+    pub(crate) rust_name: String,
+    /// Mapped Rust type string, or None if the schema could not be mapped.
+    /// When None, the generated getter returns `tvm_ffi::Any` via get_any().
+    pub(crate) rust_type: Option<String>,
 }
 
 /// A single entry in the repr(C) struct body after the parent.
@@ -151,7 +169,10 @@ pub(crate) fn check_repr_c(
     );
 
     // Collect and sort fields that belong to this type (offset >= parent_total_size).
+    // Any registered field that cannot become a direct struct member is tracked in
+    // non_layout_fields so it can be exposed via a FieldGetter accessor.
     let mut typed_fields: Vec<ReprCField> = Vec::new();
+    let mut non_layout_fields: Vec<NonLayoutField> = Vec::new();
     if info.num_fields > 0 && !info.fields.is_null() {
         let field_slice =
             unsafe { std::slice::from_raw_parts(info.fields, info.num_fields as usize) };
@@ -163,14 +184,29 @@ pub(crate) fn check_repr_c(
                     return None;
                 }
             };
-            // Skip inherited fields (registered by parent's ObjectDef)
+            // Fields whose offset falls inside the parent type's address range cannot be
+            // part of the repr(C) struct layout (they occupy a slot the parent owns).
             if field.offset < parent_total_size {
+                let rust_type = if field.offset >= 0 && field.size >= 0 {
+                    let meta = ffi::byte_array_to_string_opt(&field.metadata);
+                    let schema = meta
+                        .as_deref()
+                        .and_then(extract_type_schema)
+                        .and_then(|s| parse_type_schema(&s));
+                    repr_c_field_type(schema.as_ref(), type_map, type_key, field.size)
+                        .map(|(ty, _)| ty)
+                } else {
+                    None
+                };
                 trace!(
-                    "{}:   field '{}' at offset={} belongs to parent, skipping",
-                    type_key,
-                    name,
-                    field.offset
+                    "{}:   field '{}' at offset={} is in parent range → non-layout (rust_type={:?})",
+                    type_key, name, field.offset, rust_type
                 );
+                non_layout_fields.push(NonLayoutField {
+                    name: name.clone(),
+                    rust_name: sanitize_ident(&name),
+                    rust_type,
+                });
                 continue;
             }
             trace!(
@@ -199,10 +235,17 @@ pub(crate) fn check_repr_c(
             let (rust_type, is_pod) = match mapped {
                 Some(v) => v,
                 None => {
+                    // Schema not mappable: cannot be a struct field, but still accessible
+                    // at runtime via FieldGetter with an untyped (Any) return.
                     debug!(
-                        "{}: field '{}' type not mappable, will be covered by gap (schema_origin={:?})",
+                        "{}: field '{}' type not mappable, covered by gap + non-layout FieldGetter (schema_origin={:?})",
                         type_key, name, schema.as_ref().map(|s| &s.origin)
                     );
+                    non_layout_fields.push(NonLayoutField {
+                        name: name.clone(),
+                        rust_name: sanitize_ident(&name),
+                        rust_type: None,
+                    });
                     continue;
                 }
             };
@@ -292,6 +335,7 @@ pub(crate) fn check_repr_c(
     Some(ReprCInfo {
         parent_type_key,
         layout,
+        non_layout_fields,
     })
 }
 

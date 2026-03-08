@@ -832,7 +832,12 @@ fn render_repr_c_type(
     writeln!(out, "{}#[derive(tvm_ffi::derive::Object)]", indent_str).ok();
     writeln!(out, "{}#[type_key = \"{}\"]", indent_str, ty.type_key).ok();
     writeln!(out, "{}pub struct {} {{", indent_str, obj_name).ok();
-    writeln!(out, "{}    __tvm_ffi_object_parent: {},", indent_str, parent_ty).ok();
+    writeln!(
+        out,
+        "{}    __tvm_ffi_object_parent: {},",
+        indent_str, parent_ty
+    )
+    .ok();
     for entry in &info.layout {
         match entry {
             repr_c::LayoutEntry::Field(f) => {
@@ -901,6 +906,35 @@ fn render_repr_c_type(
     }
     writeln!(out, "{}}}\n", indent_str).ok();
 
+    // Generate FieldGetter statics for non-layout fields.
+    // Each entry is a registered ObjectDef field that couldn't become a direct struct
+    // member (parent-range offset or unmappable schema).
+    for nlf in &info.non_layout_fields {
+        let static_name = static_ident("FIELD", &format!("{}::{}", ty.type_key, nlf.name));
+        // Use the concrete mapped type when available; fall back to tvm_ffi::Any so the
+        // static can still be constructed (get_any() has no type constraints).
+        let static_ty = nlf.rust_type.as_deref().unwrap_or("tvm_ffi::Any");
+        writeln!(
+            out,
+            "{}static {}: std::sync::LazyLock<tvm_ffi::object_wrapper::FieldGetter<{}>> = std::sync::LazyLock::new(|| {{",
+            indent_str, static_name, static_ty
+        )
+        .ok();
+        writeln!(
+            out,
+            "{}    tvm_ffi::object_wrapper::FieldGetter::new(\"{}\", \"{}\")",
+            indent_str, ty.type_key, nlf.name
+        )
+        .ok();
+        writeln!(
+            out,
+            "{}        .expect(\"non-layout field {} must be registered in TVM reflection\")",
+            indent_str, nlf.name
+        )
+        .ok();
+        writeln!(out, "{}}});", indent_str).ok();
+    }
+
     // Generate method statics and impls
     for method in &ty.methods {
         render_method_static(out, ty, method, indent);
@@ -908,6 +942,45 @@ fn render_repr_c_type(
     writeln!(out, "{}impl {} {{", indent_str, ty.rust_name).ok();
     for method in &ty.methods {
         render_method(out, ty, method, indent + 4);
+    }
+    // Generate FieldGetter accessor methods for non-layout fields.
+    // Interface matches direct struct-field getters: `get_*` naming, infallible return.
+    // Typed fields (mappable schema) return the concrete type via get().
+    // Untyped fields (unmappable schema) return tvm_ffi::Any via get_any().
+    for nlf in &info.non_layout_fields {
+        let static_name = static_ident("FIELD", &format!("{}::{}", ty.type_key, nlf.name));
+        let method_name = format!("get_{}", nlf.rust_name);
+        let (return_type, call_expr) = if let Some(rt) = &nlf.rust_type {
+            (
+                rt.as_str(),
+                format!(
+                    "{}.get(&__obj).expect(\"non-layout field {} should be accessible\")",
+                    static_name, nlf.name
+                ),
+            )
+        } else {
+            (
+                "tvm_ffi::Any",
+                format!(
+                    "{}.get_any(&__obj).expect(\"non-layout field {} should be accessible\")",
+                    static_name, nlf.name
+                ),
+            )
+        };
+        writeln!(
+            out,
+            "{}    pub fn {}(&self) -> {} {{",
+            indent_str, method_name, return_type
+        )
+        .ok();
+        writeln!(
+            out,
+            "{}        let __obj: tvm_ffi::object::ObjectRef = self.clone().into();",
+            indent_str
+        )
+        .ok();
+        writeln!(out, "{}        {}", indent_str, call_expr).ok();
+        writeln!(out, "{}    }}", indent_str).ok();
     }
     writeln!(out, "{}}}\n", indent_str).ok();
 }
