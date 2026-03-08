@@ -53,9 +53,9 @@ pub fn echo(args: &[Any]) -> Result<Any> { ... }
 
 #### repr(C) path (preferred)
 
-For layout-compatible object types:
+For types with known `total_size`:
 
-- `#[repr(C)] <Type>Obj`
+- `#[repr(C)] <Type>Obj` with typed fields and `[u8; N]` gaps
 - `#[derive(ObjectRef, Clone)] <Type>`
 - `impl_object_hierarchy!(...)`
 - direct-field `get_` accessors
@@ -64,16 +64,20 @@ Example shape:
 
 ```rust
 #[repr(C)]
-pub struct TestObjectDerivedObj {
-    parent: TestObjectBaseObj,
-    v_map: tvm_ffi::Map<tvm_ffi::AnyValue, tvm_ffi::AnyValue>,
-    v_array: tvm_ffi::Array<tvm_ffi::AnyValue>,
+pub struct PrimExprObj {
+    parent: BaseExprObj,
+    dtype: tvm_ffi::DLDataType,
+    _gap0: [u8; 4],  // C++ tail padding
 }
 ```
 
+Gaps cover C++ tail padding, vtable pointers, and fields whose type schema
+is not mappable to Rust.  This allows the vast majority of types to use
+repr(C) layout even when metadata is incomplete.
+
 #### fallback wrapper path
 
-For non-repr(C)-compatible types:
+For types without `total_size` metadata (no `ObjectDef` registered):
 
 - `define_object_wrapper!(Type, "type.key")`
 - field access via `FieldGetter<T>`
@@ -152,16 +156,23 @@ This avoids custom cast traits and keeps compile-time type constraints explicit.
 
 ## repr(C) Decision Rules
 
-`check_repr_c` gates repr(C) generation.
+`check_repr_c` gates repr(C) generation using a **gap-filling** strategy.
 
-### Required metadata checks
+### Hard requirements (cause fallback to `define_object_wrapper!`)
 
-- `total_size > 0`
-- valid field `offset/size/alignment`
-- field order and no overlap
-- aligned placement (`field.offset == align_up(pos, alignment)`)
-- parent boundary matches first direct field offset
-- parent type is also repr(C)-compatible
+- Type must have `total_size > 0` (i.e. `ObjectDef` was called for it)
+- No overlapping fields
+
+### Soft handling (does NOT cause fallback)
+
+- **Tail padding / vtable / unregistered fields**: byte ranges between registered
+  fields (or between the last field and `total_size`) are emitted as `[u8; N]` gap
+  members in the `#[repr(C)]` struct.
+- **Parent type not in type_map or not repr(C)-compatible**: the parent region is
+  treated as a gap after the `Object` header. The struct uses `tvm_ffi::object::Object`
+  as the parent field and gap-fills the bytes between Object and the first known field.
+- **Field type schema not mappable to Rust**: the field is skipped in the struct layout
+  (covered by a gap) but still accessible via runtime `FieldGetter` if needed.
 
 ### Schema mapping rules
 
@@ -169,7 +180,10 @@ Representative mappings include:
 
 - `Any` / `ffi.Any` -> `tvm_ffi::AnyValue`
 - `ffi.Array<T>` -> `tvm_ffi::Array<T>`
+- `ffi.Array` (no args) -> `tvm_ffi::Array<tvm_ffi::object::ObjectRef>`
 - `ffi.Map<K,V>` -> `tvm_ffi::Map<K, V>`
+- `Optional<T>` -> `Option<T>`
+- `Optional` (no args) -> `Option<tvm_ffi::object::ObjectRef>`
 
 ## Multi-Prefix Generation
 
@@ -205,7 +219,16 @@ Generated user-facing code is intended to remain safe Rust.
 ### Built-in filtering and fallback
 
 - built-in `ffi.*` primitives are not re-generated as wrapper types
-- unsupported/non-layout-compatible object types fall back to `define_object_wrapper!`
+- only types without `total_size` metadata fall back to `define_object_wrapper!`
+- types with incomplete field schemas or unmappable parents still get repr(C) layout
+  via gap-filling
+
+### Logging
+
+Stubgen uses the `log` crate. Set `RUST_LOG` to control verbosity:
+
+- `RUST_LOG=debug` — shows repr(C) pass/fail decisions and field mapping failures
+- `RUST_LOG=trace` — additionally shows per-field offset/size/schema details
 
 ## Related User Guide
 
