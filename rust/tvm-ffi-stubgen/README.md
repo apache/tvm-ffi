@@ -12,6 +12,7 @@ This document is design-oriented and focuses on generated interface forms and im
 - [Subtyping and Cast Rules](#subtyping-and-cast-rules)
 - [repr(C) Decision Rules](#reprc-decision-rules)
 - [Safety and Fallback Strategy](#safety-and-fallback-strategy)
+- [TODO](#todo)
 - [Related User Guide](#related-user-guide)
 
 ## Document Scope
@@ -65,7 +66,7 @@ Example shape:
 ```rust
 #[repr(C)]
 pub struct PrimExprObj {
-    parent: BaseExprObj,
+    __tvm_ffi_object_parent: BaseExprObj,
     dtype: tvm_ffi::DLDataType,
     _gap0: [u8; 4],  // C++ tail padding
 }
@@ -108,7 +109,7 @@ Derived object stores parent object as first field:
 ```rust
 #[repr(C)]
 pub struct DerivedObj {
-    parent: BaseObj,
+    __tvm_ffi_object_parent: BaseObj,
     extra: i64,
 }
 ```
@@ -229,6 +230,55 @@ Stubgen uses the `log` crate. Set `RUST_LOG` to control verbosity:
 
 - `RUST_LOG=debug` — shows repr(C) pass/fail decisions and field mapping failures
 - `RUST_LOG=trace` — additionally shows per-field offset/size/schema details
+
+## TODO
+
+Known gaps and design issues that remain open.
+
+### Ancestor chain is truncated when direct parent is not repr(C)-mappable
+
+When `check_repr_c` cannot map the direct parent type, `repr_c.rs` falls back to
+`tvm_ffi::object::Object` as the layout parent and fills the missing bytes with a gap.
+However, the second pass in `generate.rs` that builds `ancestor_chain` only propagates
+through types whose `parent_type_key` is set in `ReprCInfo`; when it is `None` the chain
+collapses to `[tvm_ffi::object::ObjectRef]`.
+
+Consequence: if the C++ hierarchy is `Object → A (mappable) → B (not mappable) → C`,
+the generated code for `C` emits
+
+```rust
+tvm_ffi::impl_object_hierarchy!(C: tvm_ffi::object::ObjectRef);
+```
+
+instead of
+
+```rust
+tvm_ffi::impl_object_hierarchy!(C: A, tvm_ffi::object::ObjectRef);
+```
+
+This means `From<C> for A` and `TryFrom<A> for C` are not generated, and getters
+inherited from `A` are inaccessible via deref on `C` even though the layout is correct.
+
+The ancestor chain logic should be derived from the runtime type ancestry table
+(`TVMFFIGetTypeInfo → type_acenstors`) independently of layout mappability, so that
+upcast/downcast correctness is preserved regardless of whether every intermediate type
+has a usable repr(C) layout.
+
+### Common interface between fallback and repr(C) paths
+
+`define_object_wrapper!` types and repr(C) types currently expose different API surfaces:
+
+- repr(C) types: `Deref` chain, `From`/`TryFrom`, direct `get_*` accessors
+- fallback types: `from_object` / `as_object_ref` / `into_object_ref`, runtime `FieldGetter`
+
+Code that depends on a given type must know which generation path was used, and that
+path can change between stubgen versions as reflection metadata improves.  A type that
+was a thin wrapper in version N may become a repr(C) type in version N+1, silently
+breaking downstream call sites that relied on `from_object` or `as_object_ref`.
+
+A stable, version-independent interface layer is needed so that user code does not need
+to distinguish between the two paths, and so that crates built against one stubgen
+version remain source-compatible with crates built against a later one.
 
 ## Related User Guide
 

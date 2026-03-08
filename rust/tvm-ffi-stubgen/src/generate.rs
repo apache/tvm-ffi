@@ -223,7 +223,7 @@ fn build_getter_specs(
     for parent in parent_specs {
         let access_expr = if parent.access_expr.starts_with("self.data.") {
             format!(
-                "self.data.parent.{}",
+                "self.data.__tvm_ffi_object_parent.{}",
                 &parent.access_expr["self.data.".len()..]
             )
         } else {
@@ -832,7 +832,7 @@ fn render_repr_c_type(
     writeln!(out, "{}#[derive(tvm_ffi::derive::Object)]", indent_str).ok();
     writeln!(out, "{}#[type_key = \"{}\"]", indent_str, ty.type_key).ok();
     writeln!(out, "{}pub struct {} {{", indent_str, obj_name).ok();
-    writeln!(out, "{}    parent: {},", indent_str, parent_ty).ok();
+    writeln!(out, "{}    __tvm_ffi_object_parent: {},", indent_str, parent_ty).ok();
     for entry in &info.layout {
         match entry {
             repr_c::LayoutEntry::Field(f) => {
