@@ -124,26 +124,81 @@ Ref wrappers use `impl_object_hierarchy!` to establish:
 
 ## Field Accessor Style
 
-Getter generation follows a single style:
+All getter variants share a unified calling convention so callers do not need
+to know which code path was used:
 
 - name prefix is always `get_`
-- only direct fields of current type generate getters
-- inherited getters are available via deref auto-coercion
+- return is infallible (panics internally rather than returning `Result`)
+- only fields of the current type are generated; inherited getters are available
+  via deref auto-coercion
 
-### Return type rules
+### Direct struct field getters (repr(C) layout path)
 
-- POD field -> return by value
-- object/container field -> clone and return user-facing type
+Fields that map cleanly to the repr(C) struct body are accessed by direct
+memory reference:
 
-Example:
+- POD field → return by value
+- object/container field → clone and return
 
 ```rust
-impl TestObjectDerived {
-    pub fn get_v_map(&self) -> tvm_ffi::Map<tvm_ffi::AnyValue, tvm_ffi::AnyValue> {
-        self.data.v_map.clone()
+impl PrimExpr {
+    pub fn get_dtype(&self) -> tvm_ffi::DLDataType {
+        self.data.dtype          // POD: copy
+    }
+}
+impl ForFrame {
+    pub fn get_doms(&self) -> tvm_ffi::Array<crate::ir::Range> {
+        self.data.doms.clone()   // object: clone
     }
 }
 ```
+
+### Non-layout field getters (FieldGetter runtime path)
+
+Some registered ObjectDef fields cannot be placed in the repr(C) struct body:
+
+1. **Parent-range fields** — offset falls inside the parent type's address
+   range. Example: `ForFrame.vars` at offset 56 is within `TIRFrame`'s 0..64
+   range. These are fields the child type "fills into" a gap slot of the parent.
+2. **Schema-unmappable fields** — the field's type schema has no Rust
+   representation in the current type_map.
+
+For both cases stubgen generates a `LazyLock<FieldGetter<T>>` static and a
+matching `get_xxx` method with the **same signature** as a direct getter:
+
+- typed (schema mappable): `pub fn get_xxx(&self) -> T` via `FieldGetter::get()`
+- untyped (schema unmappable): `pub fn get_xxx(&self) -> tvm_ffi::Any` via `get_any()`
+
+```rust
+// auto-generated: parent-range field, typed
+static FIELD_FORFRAME__VARS: LazyLock<FieldGetter<Array<crate::tir::Var>>> = ...;
+impl ForFrame {
+    pub fn get_vars(&self) -> tvm_ffi::Array<crate::tir::Var> {
+        let __obj: tvm_ffi::object::ObjectRef = self.clone().into();
+        FIELD_FORFRAME__VARS.get(&__obj).expect("...")
+    }
+}
+```
+
+Callers use `frame.get_vars()` exactly as they would `frame.get_doms()`, with
+no awareness of the access mechanism.
+
+### Debugging non-layout fields
+
+To inspect what fields TVM has registered for a type (including those not in
+the struct layout), use the reflection API at runtime:
+
+```rust
+// example: inspect ForFrame field offsets and schemas
+let info = unsafe { tvm_ffi_sys::TVMFFIGetTypeInfo(type_index) };
+for i in 0..info.num_fields {
+    let f = &(*info.fields)[i];
+    println!("name={:?} offset={} schema={:?}", f.name, f.offset, f.metadata);
+}
+```
+
+Alternatively, set `RUST_LOG=trace` when running stubgen to see all field
+offset and schema decisions in the log output.
 
 ## Subtyping and Cast Rules
 
@@ -172,8 +227,16 @@ This avoids custom cast traits and keeps compile-time type constraints explicit.
 - **Parent type not in type_map or not repr(C)-compatible**: the parent region is
   treated as a gap after the `Object` header. The struct uses `tvm_ffi::object::Object`
   as the parent field and gap-fills the bytes between Object and the first known field.
-- **Field type schema not mappable to Rust**: the field is skipped in the struct layout
-  (covered by a gap) but still accessible via runtime `FieldGetter` if needed.
+- **Parent-range fields** (registered by this type but `offset < parent_total_size`):
+  cannot be placed in the struct body. Tracked in `non_layout_fields`; a FieldGetter
+  static and `get_*` accessor are emitted instead.  These fields physically reside
+  in a gap slot of the parent type that the child fills with its own data.
+- **Field type schema not mappable to Rust**: the field becomes a gap in the struct
+  body. Also tracked in `non_layout_fields` and exposed via `get_*` returning
+  `tvm_ffi::Any` (using `FieldGetter::get_any()`).
+
+In all non-layout cases the emitted `get_*` method has the same naming and
+infallible-return signature as a direct struct-field getter.
 
 ### Schema mapping rules
 
@@ -268,7 +331,8 @@ has a usable repr(C) layout.
 
 `define_object_wrapper!` types and repr(C) types currently expose different API surfaces:
 
-- repr(C) types: `Deref` chain, `From`/`TryFrom`, direct `get_*` accessors
+- repr(C) types: `Deref` chain, `From`/`TryFrom`, direct `get_*` accessors,
+  `get_*` FieldGetter accessors for non-layout fields
 - fallback types: `from_object` / `as_object_ref` / `into_object_ref`, runtime `FieldGetter`
 
 Code that depends on a given type must know which generation path was used, and that
@@ -279,6 +343,18 @@ breaking downstream call sites that relied on `from_object` or `as_object_ref`.
 A stable, version-independent interface layer is needed so that user code does not need
 to distinguish between the two paths, and so that crates built against one stubgen
 version remain source-compatible with crates built against a later one.
+
+### Parent-range field layout override
+
+When a child type registers a field at an offset within the parent's address range
+(e.g. `ForFrame.vars` at offset 56 inside `TIRFrame`'s 0..64 gap), the field is
+currently excluded from the repr(C) struct body and exposed only via `FieldGetter`.
+This is correct for access but sub-optimal: the child field is physically in a gap
+slot that the parent never uses, so it could safely be placed in the struct layout.
+
+Fix: inspect the parent's layout for the specific offset. If the parent has a
+`[u8; N]` gap entry covering that offset, allow the child's field to override it
+directly in the struct rather than routing through FieldGetter.
 
 ## Related User Guide
 
