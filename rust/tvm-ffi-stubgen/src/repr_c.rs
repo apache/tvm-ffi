@@ -95,7 +95,11 @@ pub(crate) fn check_repr_c(
     };
     trace!(
         "{}: total_size={}, type_depth={}, num_fields={}, num_methods={}",
-        type_key, total_size, info.type_depth, info.num_fields, info.num_methods
+        type_key,
+        total_size,
+        info.type_depth,
+        info.num_fields,
+        info.num_methods
     );
 
     // Resolve parent.
@@ -106,35 +110,45 @@ pub(crate) fn check_repr_c(
         let oi = ffi::get_type_info("ffi.Object")?;
         total_size_from_info(oi)? as i64
     };
-    let (parent_type_key, parent_total_size) = if info.type_depth > 0 && !info.type_acenstors.is_null() {
-        let ancestor_ptr = unsafe { *info.type_acenstors.add((info.type_depth - 1) as usize) };
-        let direct_parent_key = if !ancestor_ptr.is_null() {
-            let pi = unsafe { &*ancestor_ptr };
-            ffi::byte_array_to_string_opt(&pi.type_key)
+    let (parent_type_key, parent_total_size) =
+        if info.type_depth > 0 && !info.type_acenstors.is_null() {
+            let ancestor_ptr = unsafe { *info.type_acenstors.add((info.type_depth - 1) as usize) };
+            let direct_parent_key = if !ancestor_ptr.is_null() {
+                let pi = unsafe { &*ancestor_ptr };
+                ffi::byte_array_to_string_opt(&pi.type_key)
+            } else {
+                None
+            };
+            match direct_parent_key {
+                Some(ref key) if key == "ffi.Object" => (None, obj_size),
+                Some(ref key)
+                    if type_map.contains_key(key) && check_repr_c(key, type_map).is_some() =>
+                {
+                    let pi = ffi::get_type_info(key)?;
+                    let ps = total_size_from_info(pi)? as i64;
+                    trace!("{}: parent='{}' (typed, size={})", type_key, key, ps);
+                    (Some(key.clone()), ps)
+                }
+                Some(ref key) => {
+                    // Parent exists but not mappable — use Object as parent, gap covers the rest.
+                    trace!(
+                        "{}: parent='{}' not mappable, falling back to Object",
+                        type_key,
+                        key
+                    );
+                    (None, obj_size)
+                }
+                None => (None, obj_size),
+            }
         } else {
-            None
+            (None, obj_size)
         };
-        match direct_parent_key {
-            Some(ref key) if key == "ffi.Object" => {
-                (None, obj_size)
-            }
-            Some(ref key) if type_map.contains_key(key) && check_repr_c(key, type_map).is_some() => {
-                let pi = ffi::get_type_info(key)?;
-                let ps = total_size_from_info(pi)? as i64;
-                trace!("{}: parent='{}' (typed, size={})", type_key, key, ps);
-                (Some(key.clone()), ps)
-            }
-            Some(ref key) => {
-                // Parent exists but not mappable — use Object as parent, gap covers the rest.
-                trace!("{}: parent='{}' not mappable, falling back to Object", type_key, key);
-                (None, obj_size)
-            }
-            None => (None, obj_size),
-        }
-    } else {
-        (None, obj_size)
-    };
-    trace!("{}: parent={:?}, parent_total_size={}", type_key, parent_type_key, parent_total_size);
+    trace!(
+        "{}: parent={:?}, parent_total_size={}",
+        type_key,
+        parent_type_key,
+        parent_total_size
+    );
 
     // Collect and sort fields that belong to this type (offset >= parent_total_size).
     let mut typed_fields: Vec<ReprCField> = Vec::new();
@@ -151,12 +165,20 @@ pub(crate) fn check_repr_c(
             };
             // Skip inherited fields (registered by parent's ObjectDef)
             if field.offset < parent_total_size {
-                trace!("{}:   field '{}' at offset={} belongs to parent, skipping", type_key, name, field.offset);
+                trace!(
+                    "{}:   field '{}' at offset={} belongs to parent, skipping",
+                    type_key,
+                    name,
+                    field.offset
+                );
                 continue;
             }
             trace!(
                 "{}:   field '{}': offset={}, size={}",
-                type_key, name, field.offset, field.size
+                type_key,
+                name,
+                field.offset,
+                field.size
             );
             if field.offset < 0 || field.size < 0 {
                 debug!("{}: field '{}' has invalid offset/size", type_key, name);
@@ -169,7 +191,9 @@ pub(crate) fn check_repr_c(
                 .and_then(|s| parse_type_schema(&s));
             trace!(
                 "{}:   field '{}' schema origin={:?}",
-                type_key, name, schema.as_ref().map(|s| &s.origin)
+                type_key,
+                name,
+                schema.as_ref().map(|s| &s.origin)
             );
             let mapped = repr_c_field_type(schema.as_ref(), type_map, type_key, field.size);
             let (rust_type, is_pod) = match mapped {
@@ -182,7 +206,13 @@ pub(crate) fn check_repr_c(
                     continue;
                 }
             };
-            trace!("{}:   field '{}' -> rust_type='{}', is_pod={}", type_key, name, rust_type, is_pod);
+            trace!(
+                "{}:   field '{}' -> rust_type='{}', is_pod={}",
+                type_key,
+                name,
+                rust_type,
+                is_pod
+            );
             typed_fields.push(ReprCField {
                 rust_name: sanitize_ident(&name),
                 offset: field.offset,
@@ -202,7 +232,13 @@ pub(crate) fn check_repr_c(
     for f in &typed_fields {
         if f.offset > pos {
             let gap_size = f.offset - pos;
-            trace!("{}:   gap at {}..{} ({} bytes)", type_key, pos, f.offset, gap_size);
+            trace!(
+                "{}:   gap at {}..{} ({} bytes)",
+                type_key,
+                pos,
+                f.offset,
+                gap_size
+            );
             layout.push(LayoutEntry::Gap {
                 name: format!("_gap{}", gap_idx),
                 size: gap_size,
@@ -212,7 +248,10 @@ pub(crate) fn check_repr_c(
         }
         if f.offset < pos {
             // Overlapping fields — shouldn't happen, bail out.
-            debug!("{}: field '{}' at offset={} overlaps pos={}", type_key, f.rust_name, f.offset, pos);
+            debug!(
+                "{}: field '{}' at offset={} overlaps pos={}",
+                type_key, f.rust_name, f.offset, pos
+            );
             return None;
         }
         layout.push(LayoutEntry::Field(f.clone()));
@@ -221,13 +260,22 @@ pub(crate) fn check_repr_c(
     // Trailing gap (tail padding, or fields after last registered one)
     if pos < total_size {
         let gap_size = total_size - pos;
-        trace!("{}:   trailing gap at {}..{} ({} bytes)", type_key, pos, total_size, gap_size);
+        trace!(
+            "{}:   trailing gap at {}..{} ({} bytes)",
+            type_key,
+            pos,
+            total_size,
+            gap_size
+        );
         layout.push(LayoutEntry::Gap {
             name: format!("_gap{}", gap_idx),
             size: gap_size,
         });
     } else if pos > total_size {
-        debug!("{}: fields exceed total_size (pos={} > total_size={})", type_key, pos, total_size);
+        debug!(
+            "{}: fields exceed total_size (pos={} > total_size={})",
+            type_key, pos, total_size
+        );
         return None;
     }
 
@@ -235,7 +283,10 @@ pub(crate) fn check_repr_c(
         "{}: repr_c OK ({} fields, {} gaps, {} layout entries)",
         type_key,
         typed_fields.len(),
-        layout.iter().filter(|e| matches!(e, LayoutEntry::Gap { .. })).count(),
+        layout
+            .iter()
+            .filter(|e| matches!(e, LayoutEntry::Gap { .. }))
+            .count(),
         layout.len()
     );
     Some(ReprCInfo {
@@ -301,7 +352,10 @@ fn repr_c_field_type(
                     repr_c_field_type(Some(inner), type_map, _self_type_key, field_size)?;
                 Some((format!("tvm_ffi::Array<{}>", inner_ty), false))
             }
-            [] => Some(("tvm_ffi::Array<tvm_ffi::object::ObjectRef>".to_string(), false)),
+            [] => Some((
+                "tvm_ffi::Array<tvm_ffi::object::ObjectRef>".to_string(),
+                false,
+            )),
             _ => None,
         },
         "ffi.Map" => match schema.args.as_slice() {
