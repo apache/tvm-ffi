@@ -17,9 +17,16 @@
 
 //! Validation that a type has a compact C-compatible layout (check_repr_c)
 //! and extraction of field layout for repr(C) code generation.
+//!
+//! The strategy is gap-filling: given the parent struct size and the registered
+//! field offsets/sizes, any byte range not covered by a known field is emitted
+//! as a `[u8; N]` padding member.  This handles C++ tail padding, vtable
+//! pointers, and unregistered fields uniformly without requiring alignment
+//! inference.
 
 use crate::ffi;
 use crate::schema::{extract_type_schema, parse_type_schema, TypeSchema};
+use log::{debug, trace};
 use std::collections::BTreeMap;
 
 /// Result of check_repr_c: type passes and we have full layout for codegen.
@@ -27,9 +34,17 @@ use std::collections::BTreeMap;
 pub(crate) struct ReprCInfo {
     /// Type key of the immediate parent (Object or a subclass). None for root types.
     pub(crate) parent_type_key: Option<String>,
-    /// Direct fields of this type only (not inherited), sorted by offset.
-    /// For codegen: first field of *Obj is parent (or Object), then these.
-    pub(crate) direct_fields: Vec<ReprCField>,
+    /// Ordered layout entries (fields and gaps) covering [parent_total_size .. total_size).
+    pub(crate) layout: Vec<LayoutEntry>,
+}
+
+/// A single entry in the repr(C) struct body after the parent.
+#[derive(Debug, Clone)]
+pub(crate) enum LayoutEntry {
+    /// A known, typed field.
+    Field(ReprCField),
+    /// An opaque gap (padding, vtable pointer, or unregistered field).
+    Gap { name: String, size: i64 },
 }
 
 #[derive(Debug, Clone)]
@@ -37,59 +52,114 @@ pub(crate) struct ReprCField {
     pub(crate) rust_name: String,
     pub(crate) offset: i64,
     pub(crate) size: i64,
-    pub(crate) alignment: i64,
     /// Rust type name for the field (e.g. "i64", "Shape").
     pub(crate) rust_type: String,
-    /// True if Copy type (getter returns value); false if Ref (getter returns Ref and clone).
+    /// True if Copy type (getter returns value); false if Ref (getter returns clone).
     pub(crate) is_pod: bool,
 }
 
-/// Returns ReprCInfo if the type passes check_repr_c; None otherwise.
+impl ReprCInfo {
+    /// Iterate only the typed fields (skipping gaps).
+    pub(crate) fn fields(&self) -> impl Iterator<Item = &ReprCField> {
+        self.layout.iter().filter_map(|e| match e {
+            LayoutEntry::Field(f) => Some(f),
+            LayoutEntry::Gap { .. } => None,
+        })
+    }
+}
+
+/// Returns ReprCInfo if the type can be laid out as repr(C); None otherwise.
+///
+/// Failure reasons (all logged at DEBUG level):
+/// - No type info registered at all
+/// - Metadata missing or total_size unknown
+/// - Parent type not in type_map or parent itself fails
+/// - A field's type schema cannot be mapped to a Rust type
 pub(crate) fn check_repr_c(
     type_key: &str,
     type_map: &BTreeMap<String, String>,
 ) -> Option<ReprCInfo> {
-    let info = ffi::get_type_info(type_key)?;
-    let total_size = total_size_from_info(info)?;
-    if total_size <= 0 {
-        return None;
-    }
+    let info = match ffi::get_type_info(type_key) {
+        Some(i) => i,
+        None => {
+            debug!("{}: no type info registered", type_key);
+            return None;
+        }
+    };
+    let total_size = match total_size_from_info(info) {
+        Some(s) if s > 0 => s as i64,
+        _ => {
+            debug!("{}: metadata missing or total_size <= 0", type_key);
+            return None;
+        }
+    };
+    trace!(
+        "{}: total_size={}, type_depth={}, num_fields={}, num_methods={}",
+        type_key, total_size, info.type_depth, info.num_fields, info.num_methods
+    );
 
-    let parent_type_key = if info.type_depth > 0 && !info.type_acenstors.is_null() {
-        // Direct parent is ancestor[type_depth - 1]; ancestor[0] is the root.
+    // Resolve parent.
+    // If the direct parent is in type_map and passes check_repr_c, we use it as
+    // the typed parent field.  Otherwise we fall back to ffi.Object as the parent
+    // and let gap-filling cover the bytes between Object and our first field.
+    let obj_size = {
+        let oi = ffi::get_type_info("ffi.Object")?;
+        total_size_from_info(oi)? as i64
+    };
+    let (parent_type_key, parent_total_size) = if info.type_depth > 0 && !info.type_acenstors.is_null() {
         let ancestor_ptr = unsafe { *info.type_acenstors.add((info.type_depth - 1) as usize) };
-        if ancestor_ptr.is_null() {
-            return None;
+        let direct_parent_key = if !ancestor_ptr.is_null() {
+            let pi = unsafe { &*ancestor_ptr };
+            ffi::byte_array_to_string_opt(&pi.type_key)
+        } else {
+            None
+        };
+        match direct_parent_key {
+            Some(ref key) if key == "ffi.Object" => {
+                (None, obj_size)
+            }
+            Some(ref key) if type_map.contains_key(key) && check_repr_c(key, type_map).is_some() => {
+                let pi = ffi::get_type_info(key)?;
+                let ps = total_size_from_info(pi)? as i64;
+                trace!("{}: parent='{}' (typed, size={})", type_key, key, ps);
+                (Some(key.clone()), ps)
+            }
+            Some(ref key) => {
+                // Parent exists but not mappable — use Object as parent, gap covers the rest.
+                trace!("{}: parent='{}' not mappable, falling back to Object", type_key, key);
+                (None, obj_size)
+            }
+            None => (None, obj_size),
         }
-        let parent_info = unsafe { &*ancestor_ptr };
-        let key = ffi::byte_array_to_string_opt(&parent_info.type_key)?;
-        if key != "ffi.Object" && !type_map.contains_key(&key) {
-            return None;
-        }
-        if !check_repr_c(&key, type_map).is_some() {
-            return None;
-        }
-        Some(key)
     } else {
-        None
+        (None, obj_size)
     };
+    trace!("{}: parent={:?}, parent_total_size={}", type_key, parent_type_key, parent_total_size);
 
-    let parent_total_size: i64 = if let Some(ref parent_key) = parent_type_key {
-        let parent_info = ffi::get_type_info(parent_key)?;
-        total_size_from_info(parent_info)? as i64
-    } else {
-        // Root type: first field starts after Object header. Use Object's registered size.
-        let obj_info = ffi::get_type_info("ffi.Object")?;
-        total_size_from_info(obj_info)? as i64
-    };
-
-    let mut direct_fields: Vec<ReprCField> = Vec::new();
+    // Collect and sort fields that belong to this type (offset >= parent_total_size).
+    let mut typed_fields: Vec<ReprCField> = Vec::new();
     if info.num_fields > 0 && !info.fields.is_null() {
         let field_slice =
             unsafe { std::slice::from_raw_parts(info.fields, info.num_fields as usize) };
         for field in field_slice {
-            let name = ffi::byte_array_to_string_opt(&field.name)?;
-            if field.offset < 0 || field.size < 0 || field.alignment <= 0 {
+            let name = match ffi::byte_array_to_string_opt(&field.name) {
+                Some(n) => n,
+                None => {
+                    debug!("{}: a field name is unreadable", type_key);
+                    return None;
+                }
+            };
+            // Skip inherited fields (registered by parent's ObjectDef)
+            if field.offset < parent_total_size {
+                trace!("{}:   field '{}' at offset={} belongs to parent, skipping", type_key, name, field.offset);
+                continue;
+            }
+            trace!(
+                "{}:   field '{}': offset={}, size={}",
+                type_key, name, field.offset, field.size
+            );
+            if field.offset < 0 || field.size < 0 {
+                debug!("{}: field '{}' has invalid offset/size", type_key, name);
                 return None;
             }
             let meta = ffi::byte_array_to_string_opt(&field.metadata);
@@ -97,45 +167,80 @@ pub(crate) fn check_repr_c(
                 .as_deref()
                 .and_then(extract_type_schema)
                 .and_then(|s| parse_type_schema(&s));
-            let (rust_type, is_pod) =
-                repr_c_field_type(schema.as_ref(), type_map, type_key, field.size)?;
-            direct_fields.push(ReprCField {
-                rust_name: sanitize_ident(&name, IdentStyle::Function),
+            trace!(
+                "{}:   field '{}' schema origin={:?}",
+                type_key, name, schema.as_ref().map(|s| &s.origin)
+            );
+            let mapped = repr_c_field_type(schema.as_ref(), type_map, type_key, field.size);
+            let (rust_type, is_pod) = match mapped {
+                Some(v) => v,
+                None => {
+                    debug!(
+                        "{}: field '{}' type not mappable, will be covered by gap (schema_origin={:?})",
+                        type_key, name, schema.as_ref().map(|s| &s.origin)
+                    );
+                    continue;
+                }
+            };
+            trace!("{}:   field '{}' -> rust_type='{}', is_pod={}", type_key, name, rust_type, is_pod);
+            typed_fields.push(ReprCField {
+                rust_name: sanitize_ident(&name),
                 offset: field.offset,
                 size: field.size,
-                alignment: field.alignment,
                 rust_type,
                 is_pod,
             });
         }
     }
+    typed_fields.sort_by_key(|f| f.offset);
 
-    direct_fields.sort_by_key(|f| f.offset);
-
-    let first_offset = direct_fields
-        .first()
-        .map(|f| f.offset)
-        .unwrap_or(parent_total_size);
-    if first_offset != parent_total_size {
-        return None;
-    }
-
+    // Build layout by walking [parent_total_size .. total_size) and inserting
+    // gaps wherever there is no registered field.
+    let mut layout = Vec::new();
     let mut pos = parent_total_size;
-    for f in &direct_fields {
-        // Only allow alignment padding (field must start at aligned position)
-        let aligned_pos = align_up(pos, f.alignment);
-        if f.offset != aligned_pos {
+    let mut gap_idx = 0usize;
+    for f in &typed_fields {
+        if f.offset > pos {
+            let gap_size = f.offset - pos;
+            trace!("{}:   gap at {}..{} ({} bytes)", type_key, pos, f.offset, gap_size);
+            layout.push(LayoutEntry::Gap {
+                name: format!("_gap{}", gap_idx),
+                size: gap_size,
+            });
+            gap_idx += 1;
+            pos = f.offset;
+        }
+        if f.offset < pos {
+            // Overlapping fields — shouldn't happen, bail out.
+            debug!("{}: field '{}' at offset={} overlaps pos={}", type_key, f.rust_name, f.offset, pos);
             return None;
         }
+        layout.push(LayoutEntry::Field(f.clone()));
         pos = f.offset + f.size;
     }
-    if pos != total_size as i64 {
+    // Trailing gap (tail padding, or fields after last registered one)
+    if pos < total_size {
+        let gap_size = total_size - pos;
+        trace!("{}:   trailing gap at {}..{} ({} bytes)", type_key, pos, total_size, gap_size);
+        layout.push(LayoutEntry::Gap {
+            name: format!("_gap{}", gap_idx),
+            size: gap_size,
+        });
+    } else if pos > total_size {
+        debug!("{}: fields exceed total_size (pos={} > total_size={})", type_key, pos, total_size);
         return None;
     }
 
+    debug!(
+        "{}: repr_c OK ({} fields, {} gaps, {} layout entries)",
+        type_key,
+        typed_fields.len(),
+        layout.iter().filter(|e| matches!(e, LayoutEntry::Gap { .. })).count(),
+        layout.len()
+    );
     Some(ReprCInfo {
         parent_type_key,
-        direct_fields,
+        layout,
     })
 }
 
@@ -148,14 +253,6 @@ fn total_size_from_info(info: &tvm_ffi::tvm_ffi_sys::TVMFFITypeInfo) -> Option<i
         return None;
     }
     Some(meta.total_size)
-}
-
-/// Align `value` up to the next multiple of `alignment`.
-fn align_up(value: i64, alignment: i64) -> i64 {
-    if alignment <= 0 {
-        return value;
-    }
-    (value + alignment - 1) / alignment * alignment
 }
 
 /// Map schema to (rust_type_name, is_pod). None if not repr_c compatible.
@@ -174,12 +271,12 @@ fn repr_c_field_type(
             2 => Some(("i16".to_string(), true)),
             4 => Some(("i32".to_string(), true)),
             8 => Some(("i64".to_string(), true)),
-            _ => None, // Unsupported int size
+            _ => None,
         },
         "float" => match field_size {
             4 => Some(("f32".to_string(), true)),
             8 => Some(("f64".to_string(), true)),
-            _ => None, // Unsupported float size
+            _ => None,
         },
         "Device" => Some(("tvm_ffi::DLDevice".to_string(), true)),
         "DataType" => Some(("tvm_ffi::DLDataType".to_string(), true)),
@@ -195,6 +292,7 @@ fn repr_c_field_type(
         "Optional" => match schema.args.as_slice() {
             [inner] => repr_c_field_type(Some(inner), type_map, _self_type_key, field_size)
                 .map(|(inner_ty, pod)| (format!("Option<{}>", inner_ty), pod)),
+            [] => Some(("Option<tvm_ffi::object::ObjectRef>".to_string(), false)),
             _ => None,
         },
         "ffi.Array" => match schema.args.as_slice() {
@@ -203,6 +301,7 @@ fn repr_c_field_type(
                     repr_c_field_type(Some(inner), type_map, _self_type_key, field_size)?;
                 Some((format!("tvm_ffi::Array<{}>", inner_ty), false))
             }
+            [] => Some(("tvm_ffi::Array<tvm_ffi::object::ObjectRef>".to_string(), false)),
             _ => None,
         },
         "ffi.Map" => match schema.args.as_slice() {
@@ -217,12 +316,7 @@ fn repr_c_field_type(
     }
 }
 
-#[derive(Clone, Copy)]
-enum IdentStyle {
-    Function,
-}
-
-fn sanitize_ident(name: &str, style: IdentStyle) -> String {
+fn sanitize_ident(name: &str) -> String {
     let mut out = String::new();
     for ch in name.chars() {
         if ch.is_ascii_alphanumeric() || ch == '_' {
@@ -246,7 +340,5 @@ fn sanitize_ident(name: &str, style: IdentStyle) -> String {
     if KEYWORDS.contains(&out.as_str()) {
         out.push('_');
     }
-    match style {
-        IdentStyle::Function => out,
-    }
+    out
 }

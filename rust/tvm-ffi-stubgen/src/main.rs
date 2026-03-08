@@ -19,6 +19,7 @@ use clap::Parser;
 use tvm_ffi_stubgen::{run, Args};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    env_logger::init();
     let args = Args::parse();
     run(args)
 }

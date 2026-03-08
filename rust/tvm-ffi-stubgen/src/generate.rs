@@ -235,7 +235,7 @@ fn build_getter_specs(
             ret_type: parent.ret_type.clone(),
         });
     }
-    for f in &info.direct_fields {
+    for f in info.fields() {
         let method_name = format!("get_{}", f.rust_name);
         let access_expr = if f.is_pod {
             format!("self.data.{}", f.rust_name)
@@ -833,8 +833,15 @@ fn render_repr_c_type(
     writeln!(out, "{}#[type_key = \"{}\"]", indent_str, ty.type_key).ok();
     writeln!(out, "{}pub struct {} {{", indent_str, obj_name).ok();
     writeln!(out, "{}    parent: {},", indent_str, parent_ty).ok();
-    for f in &info.direct_fields {
-        writeln!(out, "{}    {}: {},", indent_str, f.rust_name, f.rust_type).ok();
+    for entry in &info.layout {
+        match entry {
+            repr_c::LayoutEntry::Field(f) => {
+                writeln!(out, "{}    {}: {},", indent_str, f.rust_name, f.rust_type).ok();
+            }
+            repr_c::LayoutEntry::Gap { name, size } => {
+                writeln!(out, "{}    {}: [u8; {}],", indent_str, name, size).ok();
+            }
+        }
     }
     writeln!(out, "{}}}\n", indent_str).ok();
 
@@ -874,9 +881,9 @@ fn render_repr_c_type(
         writeln!(out).ok();
     }
 
-    // Generate getter methods for direct fields
+    // Generate getter methods for typed fields
     writeln!(out, "{}impl {} {{", indent_str, ty.rust_name).ok();
-    for f in &info.direct_fields {
+    for f in info.fields() {
         let method_name = format!("get_{}", f.rust_name);
         let access_expr = if f.is_pod {
             format!("self.data.{}", f.rust_name)
