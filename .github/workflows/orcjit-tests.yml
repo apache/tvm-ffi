@@ -58,17 +58,17 @@ jobs:
       #     echo "CC=$(brew --prefix llvm@18)/bin/clang" >> $GITHUB_ENV
       #     echo "CXX=$(brew --prefix llvm@18)/bin/clang++" >> $GITHUB_ENV
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v6
+      # - name: Install uv
+      #   uses: astral-sh/setup-uv@v6
 
       - name: Build and install tvm-ffi-orcjit
         working-directory: addons/tvm-ffi-orcjit
         run: |
-          uv pip install -e . --system
+          pip install -e -v .
 
       - name: Install test dependencies
         run: |
-          uv pip install pytest --system
+          pip install pytest
 
       - name: Build test object files
         working-directory: addons/tvm-ffi-orcjit/tests
