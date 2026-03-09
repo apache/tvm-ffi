@@ -37,7 +37,7 @@ find_package(tvm_ffi CONFIG REQUIRED)
 
 # Create object library (not a shared library, just object files)
 add_library(add_obj OBJECT add.cc)
-target_link_libraries(add_obj PRIVATE tvm_ffi_header)
+target_link_libraries(add_obj PRIVATE tvm_ffi::header)
 
 # Set compiler flags
 target_compile_options(add_obj PRIVATE -fPIC -O2)

@@ -19,17 +19,6 @@ name: TVM-FFI-OrcJIT CI Tests
 
 on:
   push:
-    branches:
-      - main
-      - dev
-      - orcjit
-    paths:
-      - 'addons/tvm-ffi-orcjit/**'
-      - '.github/workflows/tvm-ffi-orcjit/ci_test.yml'
-  pull_request:
-    paths:
-      - 'addons/tvm-ffi-orcjit/**'
-      - '.github/workflows/tvm-ffi-orcjit/ci_test.yml'
   workflow_dispatch:
 
 jobs:
@@ -38,7 +27,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest]
         python-version: ['3.9']
 
     steps:
