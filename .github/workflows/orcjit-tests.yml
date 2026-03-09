@@ -64,7 +64,7 @@ jobs:
       - name: Build and install tvm-ffi-orcjit
         working-directory: addons/tvm-ffi-orcjit
         run: |
-          pip install -e -v .
+          pip install -e .
 
       - name: Install test dependencies
         run: |
