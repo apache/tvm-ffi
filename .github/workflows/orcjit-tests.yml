@@ -45,25 +45,21 @@ jobs:
         run: |
           wget https://apt.llvm.org/llvm.sh
           chmod +x llvm.sh
-          sudo ./llvm.sh 18
-          sudo apt-get install -y llvm-18-dev clang-18
-          echo "CC=clang-18" >> $GITHUB_ENV
-          echo "CXX=clang++-18" >> $GITHUB_ENV
+          sudo ./llvm.sh 20
+          sudo apt-get install -y llvm-20-dev clang-20
+          echo "CC=clang-20" >> $GITHUB_ENV
+          echo "CXX=clang++-20" >> $GITHUB_ENV
 
-      - name: Install LLVM (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          brew install llvm@18
-          echo "LLVM_DIR=$(brew --prefix llvm@18)" >> $GITHUB_ENV
-          echo "CC=$(brew --prefix llvm@18)/bin/clang" >> $GITHUB_ENV
-          echo "CXX=$(brew --prefix llvm@18)/bin/clang++" >> $GITHUB_ENV
+      # - name: Install LLVM (macOS)
+      #   if: runner.os == 'macOS'
+      #   run: |
+      #     brew install llvm@18
+      #     echo "LLVM_DIR=$(brew --prefix llvm@18)" >> $GITHUB_ENV
+      #     echo "CC=$(brew --prefix llvm@18)/bin/clang" >> $GITHUB_ENV
+      #     echo "CXX=$(brew --prefix llvm@18)/bin/clang++" >> $GITHUB_ENV
 
       - name: Install uv
         uses: astral-sh/setup-uv@v6
-
-      - name: Install tvm-ffi (core package)
-        run: |
-          uv pip install -e . --system
 
       - name: Build and install tvm-ffi-orcjit
         working-directory: addons/tvm-ffi-orcjit

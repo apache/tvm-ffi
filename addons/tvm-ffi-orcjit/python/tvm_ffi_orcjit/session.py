@@ -28,7 +28,7 @@ from . import _ffi_api
 from .dylib import DynamicLibrary
 
 
-def _find_orc_rt_library(clang_path: str = "clang") -> str | None:
+def _find_orc_rt_library(clang_path: str = "clang-20") -> str | None:
     """Find the liborc_rt library using clang -print-runtime-dir.
 
     If the path returned by clang -print-runtime-dir does not exist,
