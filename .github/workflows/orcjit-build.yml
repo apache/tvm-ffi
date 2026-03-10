@@ -47,6 +47,7 @@ jobs:
           CIBW_BUILD: ${{ matrix.build }}
           CIBW_ARCHS_LINUX: ${{ matrix.arch }}
           CIBW_BUILD_VERBOSITY: 1
+          CIBW_BEFORE_ALL_LINUX: bash {project}/addons/tvm-ffi-orcjit/tools/install_llvm.sh
 
       - uses: actions/upload-artifact@v4
         with:

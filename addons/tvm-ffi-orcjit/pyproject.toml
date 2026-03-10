@@ -72,7 +72,6 @@ CMAKE_EXPORT_COMPILE_COMMANDS = "ON"
 [tool.cibuildwheel]
 build = "cp310-* cp311-* cp312-* cp313-*"
 skip = "*-win32 *-manylinux_i686 *-musllinux*"
-before-all = "bash {project}/tools/install_llvm.sh"
 environment = { LLVM_VERSION = "22.1.0", CMAKE_PREFIX_PATH = "/opt/llvm", LLVM_CONFIG_PATH = "/opt/llvm/bin/llvm-config", CLANG_PATH = "/opt/llvm/bin/clang" }
 repair-wheel-command = "auditwheel repair --exclude libtvm_ffi.so -w {dest_dir} {wheel}"
 
