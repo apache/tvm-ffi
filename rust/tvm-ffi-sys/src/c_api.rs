@@ -283,9 +283,15 @@ pub struct TVMFFIFieldInfo {
     pub offset: i64,
     /// The getter to access the field
     pub getter: Option<TVMFFIFieldGetter>,
-    /// The setter to access the field
-    /// The setter is set even if the field is readonly for serialization
-    pub setter: Option<TVMFFIFieldSetter>,
+    /// The setter to access the field.
+    ///
+    /// When kTVMFFIFieldFlagBitSetterIsFunctionObj is NOT set (default),
+    /// this is a TVMFFIFieldSetter function pointer cast to *mut c_void.
+    /// When kTVMFFIFieldFlagBitSetterIsFunctionObj IS set,
+    /// this is a TVMFFIObjectHandle pointing to a FunctionObj.
+    ///
+    /// The setter is set even if the field is readonly for serialization.
+    pub setter: *mut c_void,
     /// The default value or factory of the field, this field holds AnyView.
     /// Valid when flags set kTVMFFIFieldFlagBitMaskHasDefault.
     /// When kTVMFFIFieldFlagBitMaskDefaultFromFactory is also set,

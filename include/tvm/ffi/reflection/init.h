@@ -25,6 +25,7 @@
 
 #include <tvm/ffi/any.h>
 #include <tvm/ffi/c_api.h>
+#include <tvm/ffi/cast.h>
 #include <tvm/ffi/function.h>
 #include <tvm/ffi/function_details.h>
 #include <tvm/ffi/object.h>
@@ -41,6 +42,20 @@
 namespace tvm {
 namespace ffi {
 namespace reflection {
+
+namespace details {
+
+template <typename TObjectRef>
+TObjectRef CastFromAny(AnyView input) {
+  TVMFFIAny input_pod = input.CopyToTVMFFIAny();
+  if (auto opt = TypeTraits<TObjectRef>::TryCastFromAnyView(&input_pod)) {
+    return *std::move(opt);
+  }
+  TVM_FFI_THROW(TypeError) << "Cannot cast from `" << TypeIndexToTypeKey(input_pod.type_index)
+                           << "` to `" << TypeTraits<TObjectRef>::TypeStr() << "`";
+}
+
+}  // namespace details
 
 /*!
  * \brief Create a packed ``__ffi_init__`` constructor for the given type.
@@ -69,10 +84,8 @@ inline Function MakeInit(int32_t type_index) {
   };
   // ---- Pre-compute field analysis (once per type) -------------------------
   const TVMFFITypeInfo* type_info = TVMFFIGetTypeInfo(type_index);
-  TVM_FFI_ICHECK(type_info->metadata != nullptr)
-      << "Type `" << TypeIndexToTypeKey(type_index) << "` has no reflection metadata";
-  TVM_FFI_ICHECK(type_info->metadata->creator != nullptr)
-      << "Type `" << TypeIndexToTypeKey(type_index) << "` has no creator";
+  TVM_FFI_ICHECK(HasCreator(type_info)) << "Type `" << TypeIndexToTypeKey(type_index)
+                                        << "` has no creator or __ffi_new__ for __ffi_init__";
 
   auto info = std::make_shared<AutoInitInfo>();
   info->type_key = std::string_view(type_info->type_key.data, type_info->type_key.size);
@@ -101,16 +114,11 @@ inline Function MakeInit(int32_t type_index) {
   // Eagerly resolve the KWARGS sentinel via global function registry.
   ObjectRef kwargs_sentinel =
       Function::GetGlobalRequired("ffi.GetKwargsObject")().cast<ObjectRef>();
-  // Cache pointers for the lambda (avoid repeated lookups).
-  TVMFFIObjectCreator creator = type_info->metadata->creator;
 
   return Function::FromPacked(
-      [info, kwargs_sentinel, creator](PackedArgs args, Any* rv) {
-        // ---- 1. Create object via creator ------------------------------------
-        TVMFFIObjectHandle handle;
-        TVM_FFI_CHECK_SAFE_CALL(creator(&handle));
-        ObjectPtr<Object> obj_ptr =
-            details::ObjectUnsafe::ObjectPtrFromOwned<Object>(static_cast<TVMFFIObject*>(handle));
+      [info, kwargs_sentinel, type_info](PackedArgs args, Any* rv) {
+        // ---- 1. Create object via CreateEmptyObject --------------------------
+        ObjectPtr<Object> obj_ptr = CreateEmptyObject(type_info);
 
         // ---- 2. Find KWARGS sentinel position --------------------------------
         int kwargs_pos = -1;
@@ -128,7 +136,7 @@ inline Function MakeInit(int32_t type_index) {
 
         auto set_field = [&](size_t fi, const TVMFFIAny* value) {
           void* addr = reinterpret_cast<char*>(obj_ptr.get()) + info->all_fields[fi].info->offset;
-          TVM_FFI_CHECK_SAFE_CALL(info->all_fields[fi].info->setter(addr, value));
+          TVM_FFI_CHECK_SAFE_CALL(CallFieldSetter(info->all_fields[fi].info, addr, value));
           field_set[fi] = true;
         };
 
@@ -219,7 +227,7 @@ inline void RegisterAutoInit(int32_t type_index) {
   info.flags = kTVMFFIFieldFlagBitMaskIsStaticMethod;
   info.method = AnyView(auto_init_fn).CopyToTVMFFIAny();
   static const std::string kMetadata =
-      "{\"type_schema\":" + std::string(details::TypeSchemaImpl<Function>::v()) +
+      "{\"type_schema\":" + std::string(::tvm::ffi::details::TypeSchemaImpl<Function>::v()) +
       ",\"auto_init\":true}";
   info.metadata = TVMFFIByteArray{kMetadata.c_str(), kMetadata.size()};
   TVM_FFI_CHECK_SAFE_CALL(TVMFFITypeRegisterMethod(type_index, &info));

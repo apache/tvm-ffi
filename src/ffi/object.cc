@@ -23,7 +23,10 @@
 #include <tvm/ffi/any.h>
 #include <tvm/ffi/c_api.h>
 #include <tvm/ffi/container/array.h>
+#include <tvm/ffi/container/dict.h>
+#include <tvm/ffi/container/list.h>
 #include <tvm/ffi/container/map.h>
+#include <tvm/ffi/container/tensor.h>
 #include <tvm/ffi/error.h>
 #include <tvm/ffi/function.h>
 #include <tvm/ffi/memory.h>
@@ -78,6 +81,16 @@ class TypeTable {
     int32_t allocated_slots;
     /*! \brief Whether child can overflow. */
     bool child_slots_can_overflow{true};
+
+    ~Entry() {
+      // Release FunctionObj setter handles that were IncRef'd during RegisterTypeField.
+      for (TVMFFIFieldInfo& field : type_fields_data) {
+        if ((field.flags & kTVMFFIFieldFlagBitSetterIsFunctionObj) && field.setter != nullptr) {
+          TVMFFIObjectDecRef(static_cast<TVMFFIObjectHandle>(field.setter));
+          field.setter = nullptr;
+        }
+      }
+    }
 
     Entry(int32_t type_index, int32_t type_depth, String type_key, int32_t num_slots,
           bool child_slots_can_overflow, const Entry* parent) {
@@ -216,6 +229,12 @@ class TypeTable {
   void RegisterTypeField(int32_t type_index, const TVMFFIFieldInfo* info) {
     Entry* entry = GetTypeEntry(type_index);
     TVMFFIFieldInfo field_data = *info;
+    // IncRef FunctionObj setter so it stays alive in the type table
+    if (field_data.flags & kTVMFFIFieldFlagBitSetterIsFunctionObj) {
+      if (field_data.setter != nullptr) {
+        TVMFFIObjectIncRef(static_cast<TVMFFIObjectHandle>(field_data.setter));
+      }
+    }
     field_data.name = this->CopyString(info->name);
     field_data.doc = this->CopyString(info->doc);
     field_data.metadata = this->CopyString(info->metadata);
@@ -359,6 +378,7 @@ class TypeTable {
                               -1);
     TVMFFITypeMetadata info;
     info.total_size = sizeof(Object);
+    info.structural_eq_hash_kind = kTVMFFISEqHashKindUnsupported;
     info.creator = nullptr;
     info.doc = TVMFFIByteArray{nullptr, 0};
     RegisterTypeMetadata(Object::_type_index, &info);
@@ -587,6 +607,20 @@ namespace {
 TVM_FFI_STATIC_INIT_BLOCK() {
   using namespace tvm::ffi;
   namespace refl = tvm::ffi::reflection;
+  refl::RegisterConvertTypeAttr<ObjectRef>(TypeIndex::kTVMFFIObject, StaticTypeKey::kTVMFFIObject);
+  refl::RegisterConvertTypeAttr<String>(TypeIndex::kTVMFFIStr, StaticTypeKey::kTVMFFIStr);
+  refl::RegisterConvertTypeAttr<Bytes>(TypeIndex::kTVMFFIBytes, StaticTypeKey::kTVMFFIBytes);
+  refl::RegisterConvertTypeAttr<Error>(TypeIndex::kTVMFFIError, StaticTypeKey::kTVMFFIError);
+  refl::RegisterConvertTypeAttr<Function>(TypeIndex::kTVMFFIFunction,
+                                          StaticTypeKey::kTVMFFIFunction);
+  refl::RegisterConvertTypeAttr<Shape>(TypeIndex::kTVMFFIShape, StaticTypeKey::kTVMFFIShape);
+  refl::RegisterConvertTypeAttr<Tensor>(TypeIndex::kTVMFFITensor, StaticTypeKey::kTVMFFITensor);
+  refl::RegisterConvertTypeAttr<Array<Any>>(TypeIndex::kTVMFFIArray, StaticTypeKey::kTVMFFIArray);
+  refl::RegisterConvertTypeAttr<Map<Any, Any>>(TypeIndex::kTVMFFIMap, StaticTypeKey::kTVMFFIMap);
+  // Skipped: TypeIndex::kTVMFFIModule
+  // Skipped: TypeIndex::kTVMFFIOpaquePyObject
+  refl::RegisterConvertTypeAttr<List<Any>>(TypeIndex::kTVMFFIList, StaticTypeKey::kTVMFFIList);
+  refl::RegisterConvertTypeAttr<Dict<Any, Any>>(TypeIndex::kTVMFFIDict, StaticTypeKey::kTVMFFIDict);
   refl::GlobalDef()
       .def_method(
           "ffi.GetRegisteredTypeKeys",

@@ -1066,6 +1066,66 @@ inline int32_t TypeKeyToIndex(std::string_view type_key) {
 #else
 #define TVM_FFI_DLL_EXPORT_TYPED_FUNC_DOC(ExportName, DocString)
 #endif
+
+/*!
+ * \brief Create an empty object via the type's native creator or ``__ffi_new__`` type attr.
+ *
+ * Falls back to the ``__ffi_new__`` type attribute (used by Python-defined types)
+ * when the native ``metadata->creator`` is NULL.
+ *
+ * \param type_info The type info for the object to create.
+ * \return An owned ObjectPtr to the newly allocated (zero-initialized) object.
+ * \throws RuntimeError if neither creator nor __ffi_new__ is available.
+ */
+inline ObjectPtr<Object> CreateEmptyObject(const TVMFFITypeInfo* type_info) {
+  // Fast path: native C++ creator
+  if (type_info->metadata != nullptr && type_info->metadata->creator != nullptr) {
+    TVMFFIObjectHandle handle;
+    TVM_FFI_CHECK_SAFE_CALL(type_info->metadata->creator(&handle));
+    return details::ObjectUnsafe::ObjectPtrFromOwned<Object>(static_cast<TVMFFIObject*>(handle));
+  }
+  // Fallback: __ffi_new__ type attr (Python-defined types)
+  constexpr TVMFFIByteArray kFFINewAttrName = {"__ffi_new__", 11};
+  const TVMFFITypeAttrColumn* column = TVMFFIGetTypeAttrColumn(&kFFINewAttrName);
+  if (column != nullptr) {
+    int32_t offset = type_info->type_index - column->begin_index;
+    if (offset >= 0 && offset < column->size) {
+      AnyView attr_view = AnyView::CopyFromTVMFFIAny(column->data[offset]);
+      if (auto opt_func = attr_view.try_cast<Function>()) {
+        ObjectRef obj_ref = (*opt_func)().cast<ObjectRef>();
+        return details::ObjectUnsafe::ObjectPtrFromObjectRef<Object>(std::move(obj_ref));
+      }
+    }
+  }
+  TVM_FFI_THROW(RuntimeError) << "Type `" << TypeIndexToTypeKey(type_info->type_index)
+                              << "` does not support reflection creation"
+                              << " (no native creator or __ffi_new__ type attr)";
+}
+
+/*!
+ * \brief Check whether a type supports reflection creation.
+ *
+ * Returns true if the type has a native creator or a ``__ffi_new__`` type attr.
+ *
+ * \param type_info The type info to check.
+ * \return true if CreateEmptyObject would succeed.
+ */
+inline bool HasCreator(const TVMFFITypeInfo* type_info) {
+  if (type_info->metadata != nullptr && type_info->metadata->creator != nullptr) {
+    return true;
+  }
+  constexpr TVMFFIByteArray kFFINewAttrName = {"__ffi_new__", 11};
+  const TVMFFITypeAttrColumn* column = TVMFFIGetTypeAttrColumn(&kFFINewAttrName);
+  if (column != nullptr) {
+    int32_t offset = type_info->type_index - column->begin_index;
+    if (offset >= 0 && offset < column->size &&
+        column->data[offset].type_index >= kTVMFFIStaticObjectBegin) {
+      return true;
+    }
+  }
+  return false;
+}
+
 }  // namespace ffi
 }  // namespace tvm
 #endif  // TVM_FFI_FUNCTION_H_

@@ -195,6 +195,8 @@ cdef extern from "tvm/ffi/c_api.h":
         void (*update_backtrace)(
             TVMFFIObjectHandle self, const TVMFFIByteArray* backtrace, int32_t update_mode
         )
+        TVMFFIObjectHandle cause_chain
+        TVMFFIObjectHandle extra_context
 
     ctypedef int (*TVMFFISafeCallType)(
         void* handle, const TVMFFIAny* args, int32_t num_args,
@@ -204,9 +206,15 @@ cdef extern from "tvm/ffi/c_api.h":
         kTVMFFIFieldFlagBitMaskWritable = 1 << 0
         kTVMFFIFieldFlagBitMaskHasDefault = 1 << 1
         kTVMFFIFieldFlagBitMaskIsStaticMethod = 1 << 2
+        kTVMFFIFieldFlagBitMaskSEqHashIgnore = 1 << 3
+        kTVMFFIFieldFlagBitMaskSEqHashDef = 1 << 4
         kTVMFFIFieldFlagBitMaskDefaultFromFactory = 1 << 5
+        kTVMFFIFieldFlagBitMaskReprOff = 1 << 6
+        kTVMFFIFieldFlagBitMaskCompareOff = 1 << 7
+        kTVMFFIFieldFlagBitMaskHashOff = 1 << 8
         kTVMFFIFieldFlagBitMaskInitOff = 1 << 9
         kTVMFFIFieldFlagBitMaskKwOnly = 1 << 10
+        kTVMFFIFieldFlagBitSetterIsFunctionObj = 1 << 11
 
     ctypedef int (*TVMFFIFieldGetter)(void* field, TVMFFIAny* result) noexcept
     ctypedef int (*TVMFFIFieldSetter)(void* field, const TVMFFIAny* value) noexcept
@@ -221,7 +229,7 @@ cdef extern from "tvm/ffi/c_api.h":
         int64_t alignment
         int64_t offset
         TVMFFIFieldGetter getter
-        TVMFFIFieldSetter setter
+        void* setter
         TVMFFIAny default_value_or_factory
         int32_t field_static_type_index
 
@@ -232,10 +240,19 @@ cdef extern from "tvm/ffi/c_api.h":
         int64_t flags
         TVMFFIAny method
 
+    cdef enum TVMFFISEqHashKind:
+        kTVMFFISEqHashKindUnsupported = 0
+        kTVMFFISEqHashKindTreeNode = 1
+        kTVMFFISEqHashKindFreeVar = 2
+        kTVMFFISEqHashKindDAGNode = 3
+        kTVMFFISEqHashKindConstTreeNode = 4
+        kTVMFFISEqHashKindUniqueInstance = 5
+
     ctypedef struct TVMFFITypeMetadata:
         TVMFFIByteArray doc
         TVMFFIObjectCreator creator
-        int64_t total_size
+        int32_t total_size
+        TVMFFISEqHashKind structural_eq_hash_kind
 
     ctypedef struct TVMFFITypeInfo:
         int32_t type_index
@@ -297,6 +314,20 @@ cdef extern from "tvm/ffi/c_api.h":
     DLDevice TVMFFIDLDeviceFromIntPair(int32_t device_type, int32_t device_id) nogil
     const TVMFFITypeAttrColumn* TVMFFIGetTypeAttrColumn(const TVMFFIByteArray* attr_name) nogil
 
+    int32_t TVMFFITypeGetOrAllocIndex(
+        const TVMFFIByteArray* type_key,
+        int32_t static_type_index,
+        int32_t type_depth,
+        int32_t num_child_slots,
+        int32_t child_slots_can_overflow,
+        int32_t parent_type_index
+    ) nogil
+    int TVMFFITypeRegisterField(int32_t type_index, const TVMFFIFieldInfo* info) nogil
+    int TVMFFITypeRegisterMetadata(int32_t type_index, const TVMFFITypeMetadata* metadata) nogil
+    int TVMFFITypeRegisterAttr(int32_t type_index, const TVMFFIByteArray* attr_name,
+                               const TVMFFIAny* attr_value) nogil
+    void TVMFFIErrorSetRaisedFromCStr(const char* kind, const char* message) nogil
+
 cdef extern from "tvm/ffi/extra/c_env_api.h":
     ctypedef void* TVMFFIStreamHandle
 
@@ -357,7 +388,8 @@ cdef extern from "tvm_ffi_python_helpers.h":
 
     int TVMFFIPyCallFieldSetter(
         TVMFFIPyArgSetterFactory setter_factory,
-        TVMFFIFieldSetter field_setter,
+        void* field_setter,
+        int64_t field_flags,
         void* field_ptr,
         PyObject* py_arg,
         int* c_api_ret_code

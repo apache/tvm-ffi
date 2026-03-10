@@ -42,15 +42,7 @@ void MakeObjectFromPackedArgs(ffi::PackedArgs args, Any* ret) {
 
   TVM_FFI_ICHECK(args.size() % 2 == 1);
   const TVMFFITypeInfo* type_info = TVMFFIGetTypeInfo(type_index);
-
-  if (type_info->metadata == nullptr || type_info->metadata->creator == nullptr) {
-    TVM_FFI_THROW(RuntimeError) << "Type `" << TypeIndexToTypeKey(type_index)
-                                << "` does not support reflection creation";
-  }
-  TVMFFIObjectHandle handle;
-  TVM_FFI_CHECK_SAFE_CALL(type_info->metadata->creator(&handle));
-  ObjectPtr<Object> ptr =
-      details::ObjectUnsafe::ObjectPtrFromOwned<Object>(static_cast<TVMFFIObject*>(handle));
+  ObjectPtr<Object> ptr = CreateEmptyObject(type_info);
 
   std::vector<String> keys;
   std::vector<bool> keys_found;
@@ -77,7 +69,8 @@ void MakeObjectFromPackedArgs(ffi::PackedArgs args, Any* ret) {
       void* field_addr = reinterpret_cast<char*>(ptr.get()) + field_info->offset;
       if (arg_index < keys.size()) {
         AnyView field_value = args[static_cast<int>(arg_index * 2 + 2)];
-        field_info->setter(field_addr, reinterpret_cast<const TVMFFIAny*>(&field_value));
+        reflection::CallFieldSetter(field_info, field_addr,
+                                    reinterpret_cast<const TVMFFIAny*>(&field_value));
         keys_found[arg_index] = true;
       } else if (field_info->flags & kTVMFFIFieldFlagBitMaskHasDefault) {
         reflection::SetFieldToDefault(field_info, field_addr);

@@ -371,15 +371,7 @@ class ObjectGraphDeserializer {
     }
     // otherwise, we go over the fields and create the data.
     const TVMFFITypeInfo* type_info = TVMFFIGetTypeInfo(type_index);
-    if (type_info->metadata == nullptr || type_info->metadata->creator == nullptr) {
-      TVM_FFI_THROW(RuntimeError) << "Type `" << TypeIndexToTypeKey(type_index)
-                                  << "` does not support default constructor"
-                                  << ", so ToJSONGraph is not supported for this type";
-    }
-    TVMFFIObjectHandle handle;
-    TVM_FFI_CHECK_SAFE_CALL(type_info->metadata->creator(&handle));
-    ObjectPtr<Object> ptr =
-        details::ObjectUnsafe::ObjectPtrFromOwned<Object>(static_cast<TVMFFIObject*>(handle));
+    ObjectPtr<Object> ptr = CreateEmptyObject(type_info);
 
     auto decode_field_value = [&](const TVMFFIFieldInfo* field_info,
                                   const json::Value& data) -> Any {
@@ -411,7 +403,8 @@ class ObjectGraphDeserializer {
       void* field_addr = reinterpret_cast<char*>(ptr.get()) + field_info->offset;
       if (data_object.count(field_name) != 0) {
         Any field_value = decode_field_value(field_info, data_object[field_name]);
-        field_info->setter(field_addr, reinterpret_cast<const TVMFFIAny*>(&field_value));
+        reflection::CallFieldSetter(field_info, field_addr,
+                                    reinterpret_cast<const TVMFFIAny*>(&field_value));
       } else if (field_info->flags & kTVMFFIFieldFlagBitMaskHasDefault) {
         reflection::SetFieldToDefault(field_info, field_addr);
       } else {

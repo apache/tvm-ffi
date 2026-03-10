@@ -404,14 +404,15 @@ class OverloadObjectDef : private ObjectDef<Class> {
   template <typename Func>
   static auto GetOverloadMethod(std::string name, Func&& func) {
     using WrapFn = decltype(WrapFunction(std::forward<Func>(func)));
-    using OverloadFn = details::OverloadedFunction<std::decay_t<WrapFn>>;
+    using OverloadFn = ::tvm::ffi::details::OverloadedFunction<std::decay_t<WrapFn>>;
     return ffi::Function::FromPackedInplace<OverloadFn>(WrapFunction(std::forward<Func>(func)),
                                                         std::move(name));
   }
 
   template <typename Func>
   static auto NewOverload(std::string name, Func&& func) {
-    return details::CreateNewOverload(WrapFunction(std::forward<Func>(func)), std::move(name));
+    return ::tvm::ffi::details::CreateNewOverload(WrapFunction(std::forward<Func>(func)),
+                                                  std::move(name));
   }
 
   template <typename... ExtraArgs>
@@ -448,11 +449,11 @@ class OverloadObjectDef : private ObjectDef<Class> {
       info.flags |= kTVMFFIFieldFlagBitMaskWritable;
     }
     info.getter = ReflectionDefBase::FieldGetter<T>;
-    info.setter = ReflectionDefBase::FieldSetter<T>;
+    info.setter = reinterpret_cast<void*>(ReflectionDefBase::FieldSetter<T>);
     // initialize default value to nullptr
     info.default_value_or_factory = AnyView(nullptr).CopyToTVMFFIAny();
     info.doc = TVMFFIByteArray{nullptr, 0};
-    info.metadata_.emplace_back("type_schema", details::TypeSchema<T>::v());
+    info.metadata_.emplace_back("type_schema", ::tvm::ffi::details::TypeSchema<T>::v());
     // apply field info traits
     ((ApplyFieldInfoTrait(&info, std::forward<ExtraArgs>(extra_args)), ...));
     // call register
@@ -464,7 +465,7 @@ class OverloadObjectDef : private ObjectDef<Class> {
   // register a method
   template <typename Func, typename... Extra>
   void RegisterMethod(const char* name, bool is_static, Func&& func, Extra&&... extra) {
-    using FuncInfo = details::FunctionInfo<std::decay_t<Func>>;
+    using FuncInfo = ::tvm::ffi::details::FunctionInfo<std::decay_t<Func>>;
     MethodInfoBuilder info;
     info.name = TVMFFIByteArray{name, std::char_traits<char>::length(name)};
     info.doc = TVMFFIByteArray{nullptr, 0};
@@ -478,7 +479,7 @@ class OverloadObjectDef : private ObjectDef<Class> {
     // if an overload method exists, register to existing overload function
     if (const auto overload_it = registered_fields_.find(name);
         overload_it != registered_fields_.end()) {
-      details::OverloadBase* overload_ptr = overload_it->second;
+      ::tvm::ffi::details::OverloadBase* overload_ptr = overload_it->second;
       return overload_ptr->Register(NewOverload(std::move(method_name), std::forward<Func>(func)));
     }
 
@@ -496,7 +497,7 @@ class OverloadObjectDef : private ObjectDef<Class> {
     TVM_FFI_CHECK_SAFE_CALL(TVMFFITypeRegisterMethod(type_index_, &info));
   }
 
-  std::unordered_map<std::string, details::OverloadBase*> registered_fields_;
+  std::unordered_map<std::string, ::tvm::ffi::details::OverloadBase*> registered_fields_;
 };
 
 }  // namespace reflection

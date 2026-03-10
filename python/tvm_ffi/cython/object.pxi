@@ -488,6 +488,7 @@ cdef _type_info_create_from_type_key(object type_cls, str type_key):
         setter = FieldSetter.__new__(FieldSetter)
         (<FieldSetter>setter).setter = field.setter
         (<FieldSetter>setter).offset = field.offset
+        (<FieldSetter>setter).flags = field.flags
         metadata_obj = json.loads(bytearray_to_str(&field.metadata)) if field.metadata.size != 0 else {}
         fields.append(
             TypeField(
@@ -572,6 +573,94 @@ def _lookup_or_register_type_info_from_type_key(type_key: str) -> TypeInfo:
     return info
 
 
+def _register_py_class(parent_type_info, str type_key, object type_cls):
+    """Register a new Python-defined TVM-FFI type.
+
+    Allocates a dynamic type index for *type_key* as a child of
+    *parent_type_info* and registers it in the global type tables.
+
+    Parameters
+    ----------
+    parent_type_info : TypeInfo
+        The parent type's TypeInfo (e.g., Object's TypeInfo).
+    type_key : str
+        The unique type key string for the new type.
+    type_cls : type
+        The Python class to associate with this type.
+
+    Returns
+    -------
+    TypeInfo
+        The newly created TypeInfo with ``fields=None`` (pending registration).
+
+    Raises
+    ------
+    ValueError
+        If *type_key* is already registered.
+    """
+    # Reject duplicate type keys
+    if type_key in TYPE_KEY_TO_INFO:
+        raise ValueError(
+            f"Type key '{type_key}' is already registered"
+        )
+
+    cdef int32_t parent_type_index = parent_type_info.type_index
+    cdef int32_t parent_type_depth = len(parent_type_info.type_ancestors)
+    cdef int32_t type_depth = parent_type_depth + 1
+    cdef ByteArrayArg type_key_arg = ByteArrayArg(c_str(type_key))
+    cdef int32_t type_index
+
+    # Allocate a new type index
+    # static_type_index=-1 means dynamic allocation
+    # num_child_slots=0, child_slots_can_overflow=1
+    type_index = TVMFFITypeGetOrAllocIndex(
+        type_key_arg.cptr(),
+        -1,           # static_type_index (dynamic)
+        type_depth,
+        0,            # num_child_slots
+        1,            # child_slots_can_overflow
+        parent_type_index,
+    )
+
+    # Build ancestors list
+    cdef list ancestors = list(parent_type_info.type_ancestors)
+    ancestors.append(parent_type_index)
+
+    # Create TypeInfo with fields=None (pending _register_fields call)
+    cdef object info = TypeInfo(
+        type_cls=type_cls,
+        type_index=type_index,
+        type_key=type_key,
+        type_ancestors=ancestors,
+        fields=None,
+        methods=[],
+        parent_type_info=parent_type_info,
+    )
+
+    _update_registry(type_index, type_key, info, type_cls)
+    return info
+
+
+def _rollback_py_class(object type_info):
+    """Roll back a ``_register_py_class`` call from the Python-level registry.
+
+    Called by ``@py_class`` when phase-2 (field validation) fails, so
+    the type key can be reused after the user fixes the error.  The
+    C-level type index is permanently consumed (cannot be reclaimed),
+    but the Python dicts are cleaned up so that a retry does not hit
+    "already registered".
+    """
+    cdef int32_t idx = type_info.type_index
+    cdef str key = type_info.type_key
+    cdef object cls = type_info.type_cls
+    TYPE_KEY_TO_INFO.pop(key, None)
+    if cls is not None:
+        TYPE_CLS_TO_INFO.pop(cls, None)
+    if 0 <= idx < len(TYPE_INDEX_TO_INFO):
+        TYPE_INDEX_TO_INFO[idx] = None
+        TYPE_INDEX_TO_CLS[idx] = None
+
+
 def _lookup_type_attr(type_index: int32_t, attr_key: str) -> Any:
     cdef ByteArrayArg attr_key_bytes = ByteArrayArg(c_str(attr_key))
     cdef const TVMFFITypeAttrColumn* column = TVMFFIGetTypeAttrColumn(&attr_key_bytes.cdata)
@@ -582,7 +671,8 @@ def _lookup_type_attr(type_index: int32_t, attr_key: str) -> Any:
     offset = type_index - column.begin_index
     if offset < 0 or offset >= column.size:
         return None
-    return make_ret(column.data[offset])
+    CHECK_CALL(TVMFFIAnyViewToOwnedAny(&(column.data[offset]), &data))
+    return make_ret(data)
 
 
 def _type_cls_to_type_info(type_cls: type) -> TypeInfo | None:
@@ -595,3 +685,114 @@ cdef dict TYPE_CLS_TO_INFO = {}
 cdef dict TYPE_KEY_TO_INFO = {}
 
 _set_class_object(Object)
+
+
+# ---------------------------------------------------------------------------
+# CAny: Owned TVMFFIAny value container
+# ---------------------------------------------------------------------------
+cdef class CAny:
+    """Owned :c:type:`TVMFFIAny` value container.
+
+    Holds sole ownership of the underlying value.  For object types
+    (``type_index >= kTVMFFIStaticObjectBegin``), the reference is
+    properly ref-counted and released in ``__dealloc__``.
+
+    Use :meth:`to_py` to recover the Python object.
+    """
+
+    cdef TVMFFIAny cdata
+
+    def __cinit__(self):
+        """Initialize the contained value to ``None``."""
+        self.cdata.type_index = kTVMFFINone
+        self.cdata.v_int64 = 0
+
+    def __init__(self, value=None):
+        """Pack a Python value into an owned :c:type:`TVMFFIAny`.
+
+        Uses ``TVMFFIPyPyObjectToFFIAny`` to produce a non-owning AnyView,
+        then ``TVMFFIAnyViewToOwnedAny`` to convert to an owned Any.
+
+        Parameters
+        ----------
+        value : object, optional
+            The Python value to pack.  When ``None`` (the default), the
+            container stays in the ``kTVMFFINone`` state set by ``__cinit__``.
+        """
+        if value is None:
+            return
+        cdef TVMFFIAny temp
+        cdef int c_api_ret_code
+        temp.type_index = kTVMFFINone
+        temp.v_int64 = 0
+        TVMFFIPyPyObjectToFFIAny(
+            TVMFFIPyArgSetterFactory_,
+            <PyObject*>value,
+            &temp,
+            &c_api_ret_code
+        )
+        CHECK_CALL(c_api_ret_code)
+        CHECK_CALL(TVMFFIAnyViewToOwnedAny(&temp, &self.cdata))
+
+    def __dealloc__(self):
+        """Release owned object reference, if any."""
+        if self.cdata.type_index >= kTVMFFIStaticObjectBegin:
+            if self.cdata.v_obj != NULL:
+                CHECK_CALL(TVMFFIObjectDecRef(<TVMFFIObjectHandle>self.cdata.v_obj))
+                self.cdata.v_obj = NULL
+
+    @property
+    def type_index(self) -> int:
+        """The TVM FFI type index of the contained value."""
+        return self.cdata.type_index
+
+    def to_py(self) -> object:
+        """Convert the contained value to a Python object.
+
+        For non-object types (int, float, bool, None, etc.), returns
+        the corresponding Python scalar.  For object types
+        (``type_index >= kTVMFFIStaticObjectBegin``), returns the
+        appropriate :class:`CObject` subclass (e.g. ``Array``, ``List``,
+        ``String``, ``Function``).
+
+        Short strings and bytes (stored inline as ``SmallStr``/``SmallBytes``)
+        are promoted to :class:`String` / :class:`Bytes` to guarantee
+        that every value in the TVM FFI type system round-trips as its
+        canonical FFI type.
+
+        Safe to call multiple times — each call produces an
+        independent Python object with its own reference.
+
+        Returns
+        -------
+        object
+            The Python representation of the contained value.
+        """
+        cdef TVMFFIAny copy = self.cdata
+        if copy.type_index >= kTVMFFIStaticObjectBegin:
+            if copy.v_obj != NULL:
+                TVMFFIObjectIncRef(<TVMFFIObjectHandle>copy.v_obj)
+        cdef object result = make_ret(copy)
+        # Promote inline SmallStr/SmallBytes to their FFI wrapper types
+        # so that convert().to_py() always yields tvm_ffi.String / tvm_ffi.Bytes.
+        if copy.type_index == kTVMFFISmallStr:
+            return String(result)
+        if copy.type_index == kTVMFFISmallBytes:
+            return Bytes(result)
+        return result
+
+    def __repr__(self) -> str:
+        """Return a developer-friendly representation."""
+        cdef int32_t ti = self.cdata.type_index
+        if ti == kTVMFFINone:
+            return "CAny(None)"
+        elif ti == kTVMFFIInt:
+            return f"CAny(int={self.cdata.v_int64})"
+        elif ti == kTVMFFIFloat:
+            return f"CAny(float={self.cdata.v_float64})"
+        elif ti == kTVMFFIBool:
+            return f"CAny(bool={bool(self.cdata.v_int64)})"
+        elif ti >= kTVMFFIStaticObjectBegin:
+            return f"CAny(object, type_index={ti})"
+        else:
+            return f"CAny(type_index={ti})"

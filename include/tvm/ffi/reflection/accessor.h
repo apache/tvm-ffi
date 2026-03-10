@@ -53,6 +53,37 @@ inline const TVMFFIFieldInfo* GetFieldInfo(std::string_view type_key, const char
 }
 
 /*!
+ * \brief Call the field setter, dispatching between function pointer and FunctionObj.
+ *
+ * When kTVMFFIFieldFlagBitSetterIsFunctionObj is off, invokes the setter as a
+ * TVMFFIFieldSetter function pointer.  When on, calls via TVMFFIFunctionCall
+ * with arguments (field_addr as OpaquePtr, value).
+ *
+ * \param field_info The field info containing the setter.
+ * \param field_addr The address of the field in the object.
+ * \param value The value to set (as a TVMFFIAny pointer).
+ * \return 0 on success, nonzero on failure.
+ */
+inline int CallFieldSetter(const TVMFFIFieldInfo* field_info, void* field_addr,
+                           const TVMFFIAny* value) {
+  if (!(field_info->flags & kTVMFFIFieldFlagBitSetterIsFunctionObj)) {
+    auto setter = reinterpret_cast<TVMFFIFieldSetter>(field_info->setter);
+    return setter(field_addr, value);
+  } else {
+    TVMFFIAny args[2];
+    args[0].type_index = kTVMFFIOpaquePtr;
+    args[0].zero_padding = 0;
+    args[0].v_ptr = field_addr;
+    args[1] = *value;
+    TVMFFIAny result;
+    result.type_index = kTVMFFINone;
+    result.v_int64 = 0;
+    return TVMFFIFunctionCall(static_cast<TVMFFIObjectHandle>(field_info->setter), args, 2,
+                              &result);
+  }
+}
+
+/*!
  * \brief helper wrapper class to obtain a getter.
  */
 class FieldGetter {
@@ -118,8 +149,8 @@ class FieldSetter {
    */
   void operator()(const Object* obj_ptr, AnyView value) const {
     const void* addr = reinterpret_cast<const char*>(obj_ptr) + field_info_->offset;
-    TVM_FFI_CHECK_SAFE_CALL(
-        field_info_->setter(const_cast<void*>(addr), reinterpret_cast<const TVMFFIAny*>(&value)));
+    TVM_FFI_CHECK_SAFE_CALL(CallFieldSetter(field_info_, const_cast<void*>(addr),
+                                            reinterpret_cast<const TVMFFIAny*>(&value)));
   }
 
   void operator()(const ObjectPtr<Object>& obj_ptr, AnyView value) const {
@@ -215,9 +246,9 @@ inline void SetFieldToDefault(const TVMFFIFieldInfo* field_info, void* field_add
     Function factory =
         AnyView::CopyFromTVMFFIAny(field_info->default_value_or_factory).cast<Function>();
     Any default_val = factory();
-    field_info->setter(field_addr, reinterpret_cast<const TVMFFIAny*>(&default_val));
+    CallFieldSetter(field_info, field_addr, reinterpret_cast<const TVMFFIAny*>(&default_val));
   } else {
-    field_info->setter(field_addr, &(field_info->default_value_or_factory));
+    CallFieldSetter(field_info, field_addr, &(field_info->default_value_or_factory));
   }
 }
 

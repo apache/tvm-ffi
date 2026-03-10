@@ -356,16 +356,30 @@ def _make_init(type_cls: type, type_info: TypeInfo) -> Callable[..., None]:
     """
     sig = _make_init_signature(type_info)
     kwargs_obj = core.KWARGS
+    has_post_init = hasattr(type_cls, "__post_init__")
 
-    def __init__(self: Any, *args: Any, **kwargs: Any) -> None:
-        ffi_args: list[Any] = list(args)
-        ffi_args.append(kwargs_obj)
-        for key, val in kwargs.items():
-            ffi_args.append(key)
-            ffi_args.append(val)
-        self.__ffi_init__(*ffi_args)
+    if has_post_init:
 
-    __init__.__signature__ = sig  # ty: ignore[unresolved-attribute]
+        def __init__(self: Any, *args: Any, **kwargs: Any) -> None:
+            ffi_args: list[Any] = list(args)
+            ffi_args.append(kwargs_obj)
+            for key, val in kwargs.items():
+                ffi_args.append(key)
+                ffi_args.append(val)
+            self.__ffi_init__(*ffi_args)
+            self.__post_init__()
+
+    else:
+
+        def __init__(self: Any, *args: Any, **kwargs: Any) -> None:
+            ffi_args: list[Any] = list(args)
+            ffi_args.append(kwargs_obj)
+            for key, val in kwargs.items():
+                ffi_args.append(key)
+                ffi_args.append(val)
+            self.__ffi_init__(*ffi_args)
+
+    __init__.__signature__ = sig  # ty: ignore[invalid-assignment]
     __init__.__qualname__ = f"{type_cls.__qualname__}.__init__"
     __init__.__module__ = type_cls.__module__
     return __init__
@@ -666,7 +680,19 @@ def _install_dataclass_dunders(
         dunders["__gt__"] = __gt__
         dunders["__ge__"] = __ge__
 
+    # Install dunders respecting user-defined overrides.
+    # Semantic families (__eq__/__ne__, __lt__/__le__/__gt__/__ge__) are
+    # treated as a unit: if the user defines any member, the whole family
+    # is skipped so generated and user-defined methods don't disagree.
+    _eq_family = {"__eq__", "__ne__"}
+    _order_family = {"__lt__", "__le__", "__gt__", "__ge__"}
+    skip_eq = bool(_eq_family & set(cls.__dict__))
+    skip_order = bool(_order_family & set(cls.__dict__))
     for name, impl in dunders.items():
+        if name in _eq_family and skip_eq:
+            continue
+        if name in _order_family and skip_order:
+            continue
         if name not in cls.__dict__:
             setattr(cls, name, impl)
 
