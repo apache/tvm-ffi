@@ -23,13 +23,72 @@
 #ifndef TVM_FFI_REFLECTION_CREATOR_H_
 #define TVM_FFI_REFLECTION_CREATOR_H_
 
-#include <tvm/ffi/any.h>
 #include <tvm/ffi/container/map.h>
+#include <tvm/ffi/function.h>
 #include <tvm/ffi/reflection/accessor.h>
 #include <tvm/ffi/string.h>
 
 namespace tvm {
 namespace ffi {
+/*!
+ * \brief Create an empty object via the type's native creator or ``__ffi_new__`` type attr.
+ *
+ * Falls back to the ``__ffi_new__`` type attribute (used by Python-defined types)
+ * when the native ``metadata->creator`` is NULL.
+ *
+ * \param type_info The type info for the object to create.
+ * \return An owned ObjectPtr to the newly allocated (zero-initialized) object.
+ * \throws RuntimeError if neither creator nor __ffi_new__ is available.
+ */
+inline ObjectPtr<Object> CreateEmptyObject(const TVMFFITypeInfo* type_info) {
+  // Fast path: native C++ creator
+  if (type_info->metadata != nullptr && type_info->metadata->creator != nullptr) {
+    TVMFFIObjectHandle handle;
+    TVM_FFI_CHECK_SAFE_CALL(type_info->metadata->creator(&handle));
+    return details::ObjectUnsafe::ObjectPtrFromOwned<Object>(static_cast<TVMFFIObject*>(handle));
+  }
+  // Fallback: __ffi_new__ type attr (Python-defined types)
+  constexpr TVMFFIByteArray kFFINewAttrName = {"__ffi_new__", 11};
+  const TVMFFITypeAttrColumn* column = TVMFFIGetTypeAttrColumn(&kFFINewAttrName);
+  if (column != nullptr) {
+    int32_t offset = type_info->type_index - column->begin_index;
+    if (offset >= 0 && offset < column->size) {
+      AnyView attr_view = AnyView::CopyFromTVMFFIAny(column->data[offset]);
+      if (auto opt_func = attr_view.try_cast<Function>()) {
+        ObjectRef obj_ref = (*opt_func)().cast<ObjectRef>();
+        return details::ObjectUnsafe::ObjectPtrFromObjectRef<Object>(std::move(obj_ref));
+      }
+    }
+  }
+  TVM_FFI_THROW(RuntimeError) << "Type `" << TypeIndexToTypeKey(type_info->type_index)
+                              << "` does not support reflection creation"
+                              << " (no native creator or __ffi_new__ type attr)";
+}
+
+/*!
+ * \brief Check whether a type supports reflection creation.
+ *
+ * Returns true if the type has a native creator or a ``__ffi_new__`` type attr.
+ *
+ * \param type_info The type info to check.
+ * \return true if CreateEmptyObject would succeed.
+ */
+inline bool HasCreator(const TVMFFITypeInfo* type_info) {
+  if (type_info->metadata != nullptr && type_info->metadata->creator != nullptr) {
+    return true;
+  }
+  constexpr TVMFFIByteArray kFFINewAttrName = {"__ffi_new__", 11};
+  const TVMFFITypeAttrColumn* column = TVMFFIGetTypeAttrColumn(&kFFINewAttrName);
+  if (column != nullptr) {
+    int32_t offset = type_info->type_index - column->begin_index;
+    if (offset >= 0 && offset < column->size &&
+        column->data[offset].type_index == TypeIndex::kTVMFFIFunction) {
+      return true;
+    }
+  }
+  return false;
+}
+
 namespace reflection {
 /*!
  * \brief helper wrapper class of TVMFFITypeInfo to create object based on reflection.
@@ -48,13 +107,8 @@ class ObjectCreator {
    * \param type_info The type info.
    */
   explicit ObjectCreator(const TVMFFITypeInfo* type_info) : type_info_(type_info) {
-    int32_t type_index = type_info->type_index;
-    if (type_info->metadata == nullptr) {
-      TVM_FFI_THROW(RuntimeError) << "Type `" << TypeIndexToTypeKey(type_index)
-                                  << "` does not have reflection registered";
-    }
-    if (type_info->metadata->creator == nullptr) {
-      TVM_FFI_THROW(RuntimeError) << "Type `" << TypeIndexToTypeKey(type_index)
+    if (!HasCreator(type_info)) {
+      TVM_FFI_THROW(RuntimeError) << "Type `" << TypeIndexToTypeKey(type_info->type_index)
                                   << "` does not support default constructor, "
                                   << "as a result cannot be created via reflection";
     }
@@ -66,10 +120,7 @@ class ObjectCreator {
    * \return The created object.
    */
   Any operator()(const Map<String, Any>& fields) const {
-    TVMFFIObjectHandle handle;
-    TVM_FFI_CHECK_SAFE_CALL(type_info_->metadata->creator(&handle));
-    ObjectPtr<Object> ptr =
-        details::ObjectUnsafe::ObjectPtrFromOwned<Object>(static_cast<TVMFFIObject*>(handle));
+    ObjectPtr<Object> ptr = CreateEmptyObject(type_info_);
     size_t match_field_count = 0;
     ForEachFieldInfo(type_info_, [&](const TVMFFIFieldInfo* field_info) {
       String field_name(field_info->name);
