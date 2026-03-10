@@ -73,7 +73,7 @@ CMAKE_EXPORT_COMPILE_COMMANDS = "ON"
 build = "cp310-* cp311-* cp312-* cp313-*"
 skip = "*-win32 *-manylinux_i686 *-musllinux*"
 environment = { LLVM_VERSION = "22.1.0", CMAKE_PREFIX_PATH = "/opt/llvm", LLVM_CONFIG_PATH = "/opt/llvm/bin/llvm-config", CLANG_PATH = "/opt/llvm/bin/clang", CC = "/opt/llvm/bin/clang", CXX = "/opt/llvm/bin/clang++" }
-repair-wheel-command = "unzip -o {wheel} -d /tmp/whl && objdump -T /tmp/whl/tvm_ffi_orcjit/lib/libtvm_ffi_orcjit.so | grep -E 'GLIBC_2\\.(2[89]|[3-9][0-9])' | sort -t@ -k2 && auditwheel repair --exclude libtvm_ffi.so --plat manylinux_2_35_x86_64 -w {dest_dir} {wheel}"
+repair-wheel-command = "auditwheel repair --exclude libtvm_ffi.so --plat manylinux_2_35_x86_64 -w {dest_dir} {wheel}"
 
 [tool.cibuildwheel.macos]
 repair-wheel-command = "delocate-wheel --exclude libtvm_ffi.dylib -w {dest_dir} -v {wheel}"
