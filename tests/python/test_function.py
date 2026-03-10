@@ -153,6 +153,38 @@ def test_pyfunc_convert() -> None:
     assert fapply(add, 1, 3.3) == 4.3
 
 
+def test_pyfunc_init() -> None:
+    def add(a: int, b: int) -> int:
+        return a + b
+
+    # Test creating from a Python callable
+    fadd = tvm_ffi.Function(add)
+    assert isinstance(fadd, tvm_ffi.Function)
+    assert fadd(1, 2) == 3
+
+    # Test creating from an existing tvm_ffi.Function
+    fadd2 = tvm_ffi.Function(fadd)
+    assert isinstance(fadd2, tvm_ffi.Function)
+    assert fadd2(3, 4) == 7
+    assert fadd.same_as(fadd2)
+
+    # Test creating from a moved-from function raises ValueError
+    f_source = tvm_ffi.Function(add)
+    f_dest = tvm_ffi.Function.__new__(tvm_ffi.Function)
+    f_dest.__move_handle_from__(f_source)
+    with pytest.raises(ValueError, match="Cannot initialize from a moved-from Function object"):
+        tvm_ffi.Function(f_source)
+
+    # Test creating without arguments (backward compat: null handle)
+    f_empty = tvm_ffi.Function()
+    assert isinstance(f_empty, tvm_ffi.Function)
+    assert f_empty.__chandle__() == 0
+
+    # Test creating from a non-callable raises TypeError
+    with pytest.raises(TypeError):
+        tvm_ffi.Function(123)  # ty: ignore[invalid-argument-type]
+
+
 def test_global_func() -> None:
     @tvm_ffi.register_global_func("mytest.echo")
     def echo(x: Any) -> Any:
