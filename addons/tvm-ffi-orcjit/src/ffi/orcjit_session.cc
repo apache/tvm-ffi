@@ -24,8 +24,10 @@
 
 #include "orcjit_session.h"
 
+#include <llvm/ExecutionEngine/Orc/AbsoluteSymbols.h>
 #include <llvm/ExecutionEngine/Orc/LLJIT.h>
 #include <llvm/ExecutionEngine/Orc/Shared/ExecutorAddress.h>
+#include <llvm/ExecutionEngine/Orc/Shared/ExecutorSymbolDef.h>
 #include <llvm/Support/Error.h>
 #include <llvm/Support/TargetSelect.h>
 #include <tvm/ffi/cast.h>
@@ -41,6 +43,22 @@
 namespace tvm {
 namespace ffi {
 namespace orcjit {
+
+// Global registry mapping dso_handle pointers to their owning session.
+// The platform's __dso_handle for each JITDylib resolves to the JITDylib* address,
+// so dso values passed to __cxa_atexit are JITDylib pointers.
+static std::mutex g_dso_session_mutex;
+static std::unordered_map<void*, ORCJITExecutionSessionObj*> g_dso_to_session;
+
+extern "C" int orcjit_cxa_atexit(void (*f)(void*), void* arg, void* dso) {
+  std::lock_guard<std::mutex> lock(g_dso_session_mutex);
+  auto it = g_dso_to_session.find(dso);
+  if (it != g_dso_to_session.end()) {
+    it->second->RegisterCxaAtExit(f, arg, dso);
+    return 0;
+  }
+  return 0;
+}
 
 // Initialize LLVM native target (only once)
 struct LLVMInitializer {
@@ -241,6 +259,22 @@ ORCJITDynamicLibrary ORCJITExecutionSessionObj::CreateDynamicLibrary(const Strin
   if (auto* PlatformJD = jit_->getPlatformJITDylib().get()) {
     jit_dylib.addToLinkOrder(*PlatformJD);
   }
+
+  // The platform defines __dso_handle = ExecutorAddr::fromPtr(&jit_dylib),
+  // so the dso value passed to __cxa_atexit will be the JITDylib pointer.
+  // Register it in our global map so orcjit_cxa_atexit can find the session.
+  RegisterDsoHandle(reinterpret_cast<void*>(&jit_dylib));
+
+  // Define __cxa_atexit as our custom implementation so static destructors are
+  // tracked per-dylib and run at dylib teardown, not at process exit.
+  llvm::orc::SymbolMap cxa_sym;
+  auto& es = jit_->getExecutionSession();
+  cxa_sym[es.intern("__cxa_atexit")] = llvm::orc::ExecutorSymbolDef(
+      llvm::orc::ExecutorAddr::fromPtr(&orcjit_cxa_atexit),
+      llvm::JITSymbolFlags::Exported | llvm::JITSymbolFlags::Callable);
+  call_llvm(jit_dylib.define(llvm::orc::absoluteSymbols(std::move(cxa_sym))),
+            "Failed to define __cxa_atexit absolute symbol");
+
   std::unique_ptr<llvm::orc::DynamicLibrarySearchGenerator> generator =
       call_llvm(llvm::orc::DynamicLibrarySearchGenerator::GetForCurrentProcess(
                     jit_->getDataLayout().getGlobalPrefix()),
@@ -333,6 +367,38 @@ void ORCJITExecutionSessionObj::AddPendingDeinitializer(llvm::orc::JITDylib* jit
   } else {
     pending_deinitializers_[jit_dylib].push_back(entry);
   }
+}
+
+void ORCJITExecutionSessionObj::RegisterCxaAtExit(void (*destructor)(void*), void* arg,
+                                                   void* dso_handle) {
+  std::lock_guard<std::mutex> lock(cxa_atexit_mutex_);
+  cxa_atexit_handlers_[dso_handle].push_back({destructor, arg});
+}
+
+void ORCJITExecutionSessionObj::RunCxaFinalize(void* dso_handle) {
+  std::vector<CxaAtExitEntry> handlers;
+  {
+    std::lock_guard<std::mutex> lock(cxa_atexit_mutex_);
+    auto it = cxa_atexit_handlers_.find(dso_handle);
+    if (it != cxa_atexit_handlers_.end()) {
+      handlers = std::move(it->second);
+      cxa_atexit_handlers_.erase(it);
+    }
+  }
+  // Run in reverse (LIFO) order
+  for (auto it = handlers.rbegin(); it != handlers.rend(); ++it) {
+    it->destructor(it->arg);
+  }
+}
+
+void ORCJITExecutionSessionObj::RegisterDsoHandle(void* dso_handle) {
+  std::lock_guard<std::mutex> lock(g_dso_session_mutex);
+  g_dso_to_session[dso_handle] = this;
+}
+
+void ORCJITExecutionSessionObj::UnregisterDsoHandle(void* dso_handle) {
+  std::lock_guard<std::mutex> lock(g_dso_session_mutex);
+  g_dso_to_session.erase(dso_handle);
 }
 
 }  // namespace orcjit

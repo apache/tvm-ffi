@@ -38,7 +38,7 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Build wheels
+      - name: Build and test wheels
         uses: pypa/cibuildwheel@v3.1.4
         with:
           package-dir: addons/tvm-ffi-orcjit
@@ -48,6 +48,19 @@ jobs:
           CIBW_ARCHS_LINUX: ${{ matrix.arch }}
           CIBW_BUILD_VERBOSITY: 1
           CIBW_BEFORE_ALL_LINUX: bash {project}/addons/tvm-ffi-orcjit/tools/install_llvm.sh
+          CIBW_TEST_REQUIRES: pytest
+          CIBW_BEFORE_TEST_LINUX: >-
+            cd {project}/addons/tvm-ffi-orcjit/tests &&
+            cmake -B build -DCMAKE_CXX_COMPILER=/opt/llvm/bin/clang++ &&
+            cmake --build build &&
+            cmake --install build &&
+            cd {project}/addons/tvm-ffi-orcjit/examples/quick-start &&
+            cmake -B build -DCMAKE_CXX_COMPILER=/opt/llvm/bin/clang++ &&
+            cmake --build build
+          CIBW_TEST_COMMAND: >-
+            pytest {project}/addons/tvm-ffi-orcjit/tests -v &&
+            cd {project}/addons/tvm-ffi-orcjit/examples/quick-start &&
+            python run.py
 
       - uses: actions/upload-artifact@v4
         with:

@@ -81,10 +81,17 @@ def main() -> int:
     result = concat("Hello, ", "World!")
     print(f"concat('Hello, ', 'World!') = '{result}'")
     assert result == "Hello, World!", f"Expected 'Hello, World!', got '{result}'"
+    # Release the returned String object before JIT module is destroyed
+    del result
 
     print("\n" + "=" * 50)
     print("✓ All tests passed successfully!")
     print("=" * 50)
+
+    # Cleanup: release references in correct order (functions, lib, session)
+    del add, multiply, fibonacci, concat
+    del lib
+    del session
 
     return 0
 

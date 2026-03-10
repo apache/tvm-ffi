@@ -38,12 +38,17 @@
 #include <tvm/ffi/function.h>
 #include <tvm/ffi/reflection/registry.h>
 
+#include <set>
+
 #include "orcjit_session.h"
 #include "orcjit_utils.h"
 
 namespace tvm {
 namespace ffi {
 namespace orcjit {
+
+static std::mutex g_warned_functions_mutex;
+static std::set<std::string> g_warned_functions;
 
 ORCJITDynamicLibraryObj::ORCJITDynamicLibraryObj(ORCJITExecutionSession session,
                                                  llvm::orc::JITDylib* dylib, llvm::orc::LLJIT* jit,
@@ -59,6 +64,15 @@ ORCJITDynamicLibraryObj::ORCJITDynamicLibraryObj(ORCJITExecutionSession session,
   });
   TVM_FFI_CHECK(dylib_ != nullptr, ValueError) << "JITDylib cannot be null";
   TVM_FFI_CHECK(jit_ != nullptr, ValueError) << "LLJIT cannot be null";
+}
+
+ORCJITDynamicLibraryObj::~ORCJITDynamicLibraryObj() {
+  // Run __cxa_atexit handlers BEFORE deinitializers free JIT memory.
+  // The platform's __dso_handle resolves to the JITDylib pointer address.
+  void* dso_key = reinterpret_cast<void*>(dylib_);
+  session_->RunCxaFinalize(dso_key);
+  session_->RunPendingDeinitializers(GetJITDylib());
+  session_->UnregisterDsoHandle(dso_key);
 }
 
 void ORCJITDynamicLibraryObj::AddObjectFile(const String& path) {
@@ -134,6 +148,17 @@ Optional<Function> ORCJITDynamicLibraryObj::GetFunction(const String& name) {
       TVM_FFI_ICHECK_LT(rv->type_index(), ffi::TypeIndex::kTVMFFIStaticObjectBegin);
       TVM_FFI_CHECK_SAFE_CALL((*c_func)(nullptr, reinterpret_cast<const TVMFFIAny*>(args.data()),
                                         args.size(), reinterpret_cast<TVMFFIAny*>(rv)));
+      if (rv->type_index() >= ffi::TypeIndex::kTVMFFIStaticObjectBegin) {
+        std::lock_guard<std::mutex> lock(g_warned_functions_mutex);
+        std::string key(name);
+        if (g_warned_functions.find(key) == g_warned_functions.end()) {
+          g_warned_functions.insert(key);
+          fprintf(stderr,
+                  "[orcjit] warning: function '%s' returned a reference-counted object. "
+                  "Ensure the object is released before the JIT module is destroyed.\n",
+                  key.c_str());
+        }
+      }
     });
   }
   return std::nullopt;

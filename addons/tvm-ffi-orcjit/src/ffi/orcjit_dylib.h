@@ -50,7 +50,7 @@ class ORCJITDynamicLibraryObj : public ModuleObj {
   ORCJITDynamicLibraryObj(ORCJITExecutionSession session, llvm::orc::JITDylib* dylib,
                           llvm::orc::LLJIT* jit, String name);
 
-  ~ORCJITDynamicLibraryObj() { session_->RunPendingDeinitializers(GetJITDylib()); };
+  ~ORCJITDynamicLibraryObj();
 
   const char* kind() const final { return "orcjit"; }
 

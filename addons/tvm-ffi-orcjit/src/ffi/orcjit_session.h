@@ -101,6 +101,16 @@ class ORCJITExecutionSessionObj : public Object {
   void AddPendingInitializer(llvm::orc::JITDylib* jd, const InitFiniEntry& entry);
   void AddPendingDeinitializer(llvm::orc::JITDylib* jd, const InitFiniEntry& entry);
 
+  struct CxaAtExitEntry {
+    void (*destructor)(void*);
+    void* arg;
+  };
+
+  void RegisterCxaAtExit(void (*destructor)(void*), void* arg, void* dso_handle);
+  void RunCxaFinalize(void* dso_handle);
+  void RegisterDsoHandle(void* dso_handle);
+  void UnregisterDsoHandle(void* dso_handle);
+
  private:
   /*! \brief The LLVM ORC JIT instance */
   std::unique_ptr<llvm::orc::LLJIT> jit_;
@@ -112,6 +122,9 @@ class ORCJITExecutionSessionObj : public Object {
   std::mutex pending_initializers_mutex_;
   std::unordered_map<llvm::orc::JITDylib*, std::vector<InitFiniEntry>> pending_deinitializers_;
   std::mutex pending_deinitializers_mutex_;
+
+  std::unordered_map<void*, std::vector<CxaAtExitEntry>> cxa_atexit_handlers_;
+  std::mutex cxa_atexit_mutex_;
 };
 
 /*!
