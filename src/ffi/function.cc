@@ -229,11 +229,18 @@ TVM_FFI_STATIC_INIT_BLOCK() {
            })
       .def("ffi.String", [](tvm::ffi::String val) -> tvm::ffi::String { return val; })
       .def("ffi.Bytes", [](tvm::ffi::Bytes val) -> tvm::ffi::Bytes { return val; })
-      .def("ffi.GetGlobalFuncMetadata", [](const tvm::ffi::String& name) -> tvm::ffi::String {
-        const auto* f = tvm::ffi::GlobalFunctionTable::Global()->Get(name);
-        if (f == nullptr) {
-          TVM_FFI_THROW(RuntimeError) << "Global Function is not found: " << name;
-        }
-        return f->metadata_data;
-      });
+      .def("ffi.GetGlobalFuncMetadata",
+           [](const tvm::ffi::String& name) -> tvm::ffi::String {
+             const auto* f = tvm::ffi::GlobalFunctionTable::Global()->Get(name);
+             if (f == nullptr) {
+               TVM_FFI_THROW(RuntimeError) << "Global Function is not found: " << name;
+             }
+             return f->metadata_data;
+           })
+      .def("ffi.FunctionFromExternC",
+           [](void* self, void* safe_call, void* deleter) -> tvm::ffi::Function {
+             return tvm::ffi::Function::FromExternC(self,
+                                                    reinterpret_cast<TVMFFISafeCallType>(safe_call),
+                                                    reinterpret_cast<void (*)(void*)>(deleter));
+           });
 }
