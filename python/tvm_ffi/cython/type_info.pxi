@@ -205,6 +205,16 @@ class TypeSchema:
                 if tindex is not None:
                     self.origin_type_index = tindex
 
+    @cached_property
+    def _converter(self):
+        """Lazily build the type converter on first use.
+
+        Deferred construction ensures all object types are registered
+        by the time the converter is built. Raises TypeError for
+        unresolvable origins.
+        """
+        return _build_converter(self)
+
     def __repr__(self) -> str:
         return self.repr(ty_map=None)
 
@@ -411,6 +421,63 @@ class TypeSchema:
         raise TypeError(
             f"Cannot convert {annotation!r} to TypeSchema"
         )
+
+    def check_value(self, value: object) -> None:
+        """Validate that *value* is compatible with this type schema.
+
+        Parameters
+        ----------
+        value : object
+            The Python value to check.
+
+        Raises
+        ------
+        TypeError
+            If the value is not compatible with the schema, with a
+            human-readable error message describing the mismatch.
+        """
+        try:
+            _type_convert_impl(self._converter, value)
+        except RecursionError:
+            raise TypeError(
+                f"type check failed for {self!r}: "
+                f"infinite __tvm_ffi_value__ cycle detected"
+            ) from None
+        except _ConvertError as err:
+            raise TypeError(f"type check failed for {self!r}: {err.message}") from None
+
+    def convert(self, value: object) -> "CAny":
+        """Convert *value* according to this type schema, returning a :class:`CAny`.
+
+        Applies the same implicit conversions as the C++ FFI
+        ``TypeTraits<T>::TryCastFromAnyView`` rules.  The result is
+        always a :class:`CAny` instance that owns the converted value.
+        Use ``result.to_py()`` to recover the Python object.
+
+        Parameters
+        ----------
+        value : object
+            The Python value to convert.
+
+        Returns
+        -------
+        CAny
+            The converted value wrapped in a CAny.
+
+        Raises
+        ------
+        TypeError
+            If the value cannot be converted to this schema's type.
+        """
+        try:
+            return _type_convert_impl(self._converter, value)
+        except RecursionError:
+            raise TypeError(
+                f"type conversion failed for {self!r}: "
+                f"infinite __tvm_ffi_value__ cycle detected"
+            ) from None
+        except _ConvertError as err:
+            raise TypeError(f"type conversion failed for {self!r}: {err.message}") from None
 
     def repr(self, ty_map: "Optional[Callable[[str], str]]" = None) -> str:
         """Render a human-readable representation of this schema.
