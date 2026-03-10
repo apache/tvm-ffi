@@ -25,6 +25,7 @@
 
 #include <tvm/ffi/any.h>
 #include <tvm/ffi/c_api.h>
+#include <tvm/ffi/cast.h>
 #include <tvm/ffi/function.h>
 #include <tvm/ffi/function_details.h>
 #include <tvm/ffi/object.h>
@@ -41,6 +42,20 @@
 namespace tvm {
 namespace ffi {
 namespace reflection {
+
+namespace details {
+
+template <typename TObjectRef>
+TObjectRef CastFromAny(AnyView input) {
+  TVMFFIAny input_pod = input.CopyToTVMFFIAny();
+  if (auto opt = TypeTraits<TObjectRef>::TryCastFromAnyView(&input_pod)) {
+    return *std::move(opt);
+  }
+  TVM_FFI_THROW(TypeError) << "Cannot cast from `" << TypeIndexToTypeKey(input_pod.type_index)
+                           << "` to `" << TypeTraits<TObjectRef>::TypeStr() << "`";
+}
+
+}  // namespace details
 
 /*!
  * \brief Create a packed ``__ffi_init__`` constructor for the given type.

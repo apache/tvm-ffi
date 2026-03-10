@@ -23,7 +23,10 @@
 #include <tvm/ffi/any.h>
 #include <tvm/ffi/c_api.h>
 #include <tvm/ffi/container/array.h>
+#include <tvm/ffi/container/dict.h>
+#include <tvm/ffi/container/list.h>
 #include <tvm/ffi/container/map.h>
+#include <tvm/ffi/container/tensor.h>
 #include <tvm/ffi/error.h>
 #include <tvm/ffi/function.h>
 #include <tvm/ffi/memory.h>
@@ -375,6 +378,7 @@ class TypeTable {
                               -1);
     TVMFFITypeMetadata info;
     info.total_size = sizeof(Object);
+    info.structural_eq_hash_kind = kTVMFFISEqHashKindUnsupported;
     info.creator = nullptr;
     info.doc = TVMFFIByteArray{nullptr, 0};
     RegisterTypeMetadata(Object::_type_index, &info);
@@ -603,6 +607,20 @@ namespace {
 TVM_FFI_STATIC_INIT_BLOCK() {
   using namespace tvm::ffi;
   namespace refl = tvm::ffi::reflection;
+  refl::RegisterConvertTypeAttr<ObjectRef>(TypeIndex::kTVMFFIObject, StaticTypeKey::kTVMFFIObject);
+  refl::RegisterConvertTypeAttr<String>(TypeIndex::kTVMFFIStr, StaticTypeKey::kTVMFFIStr);
+  refl::RegisterConvertTypeAttr<Bytes>(TypeIndex::kTVMFFIBytes, StaticTypeKey::kTVMFFIBytes);
+  refl::RegisterConvertTypeAttr<Error>(TypeIndex::kTVMFFIError, StaticTypeKey::kTVMFFIError);
+  refl::RegisterConvertTypeAttr<Function>(TypeIndex::kTVMFFIFunction,
+                                          StaticTypeKey::kTVMFFIFunction);
+  refl::RegisterConvertTypeAttr<Shape>(TypeIndex::kTVMFFIShape, StaticTypeKey::kTVMFFIShape);
+  refl::RegisterConvertTypeAttr<Tensor>(TypeIndex::kTVMFFITensor, StaticTypeKey::kTVMFFITensor);
+  refl::RegisterConvertTypeAttr<Array<Any>>(TypeIndex::kTVMFFIArray, StaticTypeKey::kTVMFFIArray);
+  refl::RegisterConvertTypeAttr<Map<Any, Any>>(TypeIndex::kTVMFFIMap, StaticTypeKey::kTVMFFIMap);
+  // Skipped: TypeIndex::kTVMFFIModule
+  // Skipped: TypeIndex::kTVMFFIOpaquePyObject
+  refl::RegisterConvertTypeAttr<List<Any>>(TypeIndex::kTVMFFIList, StaticTypeKey::kTVMFFIList);
+  refl::RegisterConvertTypeAttr<Dict<Any, Any>>(TypeIndex::kTVMFFIDict, StaticTypeKey::kTVMFFIDict);
   refl::GlobalDef()
       .def_method(
           "ffi.GetRegisteredTypeKeys",
