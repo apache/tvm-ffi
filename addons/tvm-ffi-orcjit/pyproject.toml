@@ -75,5 +75,9 @@ skip = "*-win32 *-manylinux_i686 *-musllinux*"
 environment = { LLVM_VERSION = "22.1.0", CMAKE_PREFIX_PATH = "/opt/llvm", LLVM_CONFIG_PATH = "/opt/llvm/bin/llvm-config", CLANG_PATH = "/opt/llvm/bin/clang" }
 repair-wheel-command = "auditwheel repair --exclude libtvm_ffi.so -w {dest_dir} {wheel}"
 
+[tool.cibuildwheel.linux]
+manylinux-x86_64-image = "manylinux_2_35"
+manylinux-aarch64-image = "manylinux_2_35"
+
 [tool.cibuildwheel.macos]
 repair-wheel-command = "delocate-wheel --exclude libtvm_ffi.dylib -w {dest_dir} -v {wheel}"
