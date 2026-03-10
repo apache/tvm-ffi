@@ -704,6 +704,297 @@ class TypeInfo:
                     end = f_end
         return (end + 7) & ~7  # align to 8 bytes
 
+    def _register_fields(self, fields):
+        """Register Field descriptors and set up __ffi_new__/__ffi_init__.
+
+        Delegates to the module-level _register_fields function,
+        stores the resulting list[TypeField] on self.fields,
+        then reads back methods registered by C++ via _register_methods.
+
+        Can only be called once (fields must be None beforehand).
+        """
+        assert self.fields is None, (
+            f"_register_fields already called for {self.type_key!r}"
+        )
+        self.fields = _register_fields(self, fields)
+        self._register_methods()
+
+    def _register_methods(self):
+        """Read methods from the C type table into self.methods.
+
+        Called after C++ registers __ffi_init__, __ffi_shallow_copy__, etc.
+        """
+        cdef const TVMFFITypeInfo* c_info = TVMFFIGetTypeInfo(self.type_index)
+        cdef const TVMFFIMethodInfo* mi
+        self.methods = []
+        for i in range(c_info.num_methods):
+            mi = &(c_info.methods[i])
+            self.methods.append(TypeMethod(
+                name=bytearray_to_str(&mi.name),
+                doc=bytearray_to_str(&mi.doc) if mi.doc.size != 0 else None,
+                func=_get_method_from_method_info(mi),
+                is_static=(mi.flags & kTVMFFIFieldFlagBitMaskIsStaticMethod) != 0,
+                metadata=json.loads(bytearray_to_str(&mi.metadata)) if mi.metadata.size != 0 else {},
+            ))
+
+
+# ---------------------------------------------------------------------------
+# Python-defined type field registration helpers
+# ---------------------------------------------------------------------------
+
+# Native layout for each TypeSchema origin: (size, alignment, field_static_type_index)
+_ORIGIN_NATIVE_LAYOUT = {
+    "int": (8, 8, kTVMFFIInt),
+    "float": (8, 8, kTVMFFIFloat),
+    "bool": (1, 1, kTVMFFIBool),
+    "ctypes.c_void_p": (8, 8, kTVMFFIOpaquePtr),
+    "dtype": (4, 2, kTVMFFIDataType),
+    "Device": (8, 4, kTVMFFIDevice),
+    "Any": (16, 8, -1),  # kTVMFFIAny = -1
+    # str/bytes can be SmallStr/SmallBytes (inline, not ObjectRef),
+    # so store as Any (16 bytes) to handle both inline and heap variants.
+    "str": (16, 8, -1),
+    "bytes": (16, 8, -1),
+    # Optional/Union can hold any type including inline scalars
+    "Optional": (16, 8, -1),
+    "Union": (16, 8, -1),
+}
+
+cdef _register_one_field(
+    int32_t type_index,
+    object py_field,
+    int64_t offset,
+    int64_t size,
+    int64_t alignment,
+    int32_t field_type_index,
+    TVMFFIFieldGetter getter,
+    CObject setter_fn,
+):
+    """Build a TVMFFIFieldInfo and register it for the given type."""
+    cdef TVMFFIFieldInfo info
+    cdef int c_api_ret_code
+
+    # --- name ---
+    name_bytes = c_str(py_field.name)
+    cdef ByteArrayArg name_arg = ByteArrayArg(name_bytes)
+    info.name = name_arg.cdata
+
+    # --- doc ---
+    cdef ByteArrayArg doc_arg
+    if py_field.doc is not None:
+        doc_bytes = c_str(py_field.doc)
+        doc_arg = ByteArrayArg(doc_bytes)
+        info.doc = doc_arg.cdata
+    else:
+        info.doc.data = NULL
+        info.doc.size = 0
+
+    # --- metadata (JSON with type_schema) ---
+    metadata_str = json.dumps({"type_schema": py_field.ty.to_json()})
+    metadata_bytes = c_str(metadata_str)
+    cdef ByteArrayArg metadata_arg = ByteArrayArg(metadata_bytes)
+    info.metadata = metadata_arg.cdata
+
+    # --- flags ---
+    cdef int64_t flags = kTVMFFIFieldFlagBitMaskWritable | kTVMFFIFieldFlagBitSetterIsFunctionObj
+    if py_field.default is not MISSING or py_field.default_factory is not MISSING:
+        flags |= kTVMFFIFieldFlagBitMaskHasDefault
+    if py_field.default_factory is not MISSING:
+        flags |= kTVMFFIFieldFlagBitMaskDefaultFromFactory
+    if not py_field.init:
+        flags |= kTVMFFIFieldFlagBitMaskInitOff
+    if not py_field.repr:
+        flags |= kTVMFFIFieldFlagBitMaskReprOff
+    if not py_field.hash:
+        flags |= kTVMFFIFieldFlagBitMaskHashOff
+    if not py_field.compare:
+        flags |= kTVMFFIFieldFlagBitMaskCompareOff
+    if py_field.kw_only:
+        flags |= kTVMFFIFieldFlagBitMaskKwOnly
+    info.flags = flags
+
+    # --- native layout ---
+    info.size = size
+    info.alignment = alignment
+    info.offset = offset
+
+    # --- getter / setter ---
+    info.getter = getter
+    info.setter = <void*>setter_fn.chandle
+
+    # --- default value ---
+    cdef TVMFFIAny default_any
+    default_any.type_index = kTVMFFINone
+    default_any.v_int64 = 0
+    # Determine which Python object (if any) to store as the default.
+    # No memory leak: TVMFFIAny is a POD struct; TVMFFITypeRegisterField
+    # copies the bytes into the type table, which owns the reference.
+    cdef object default_obj = MISSING
+    if py_field.default is not MISSING:
+        default_obj = py_field.default
+    elif py_field.default_factory is not MISSING:
+        default_obj = py_field.default_factory
+    if default_obj is not MISSING:
+        TVMFFIPyPyObjectToFFIAny(
+            TVMFFIPyArgSetterFactory_,
+            <PyObject*>default_obj,
+            &default_any,
+            &c_api_ret_code
+        )
+        CHECK_CALL(c_api_ret_code)
+    info.default_value_or_factory = default_any
+
+    # --- field_static_type_index ---
+    info.field_static_type_index = field_type_index
+
+    CHECK_CALL(TVMFFITypeRegisterField(type_index, &info))
+
+
+cdef int _f_type_convert(void* type_converter, const TVMFFIAny* value, TVMFFIAny* result) noexcept with gil:
+    """C callback for type conversion, called from C++ MakeFieldSetter.
+
+    Parameters
+    ----------
+    type_converter : void*
+        A PyObject* pointing to a _TypeConverter instance (borrowed reference).
+    value : const TVMFFIAny*
+        The packed value to convert (borrowed from the caller).
+    result : TVMFFIAny*
+        Output: the converted value (caller takes ownership).
+
+    Returns 0 on success, -1 on error (error stored in TLS via set_last_ffi_error).
+    """
+    cdef TVMFFIAny temp
+    cdef _TypeConverter conv
+    cdef CAny cany
+    try:
+        # Unpack the packed AnyView to a Python object.
+        # We must IncRef if it's an object, because make_ret takes ownership.
+        temp = value[0]
+        if temp.type_index >= kTVMFFIStaticObjectBegin:
+            if temp.v_obj != NULL:
+                TVMFFIObjectIncRef(<TVMFFIObjectHandle>temp.v_obj)
+        py_value = make_ret(temp)
+        # Dispatch directly through the C-level converter
+        conv = <_TypeConverter>type_converter
+        cany = _type_convert_impl(conv, py_value)
+        # Transfer ownership from CAny to result (zero cany to prevent double-free)
+        result[0] = cany.cdata
+        cany.cdata.type_index = kTVMFFINone
+        cany.cdata.v_int64 = 0
+        return 0
+    except Exception as err:
+        set_last_ffi_error(err)
+        return -1
+
+
+def _register_fields(type_info, fields):
+    """Register Field descriptors for a Python-defined type and set up __ffi_new__/__ffi_init__.
+
+    For each Field:
+    1. Computes native layout (size, alignment, offset)
+    2. Obtains a C getter function pointer
+    3. Creates a FunctionObj setter with type conversion
+    4. Registers via TVMFFITypeRegisterField
+
+    After all fields, registers __ffi_new__ (object allocator) and
+    __ffi_init__ (auto-generated constructor).
+
+    Parameters
+    ----------
+    type_info : TypeInfo
+        The TypeInfo of the type being defined.
+    fields : list[Field]
+        The Field descriptors to register.
+
+    Returns
+    -------
+    list[TypeField]
+        The registered field descriptors.
+    """
+    cdef int32_t type_index = type_info.type_index
+    # Start field offsets AFTER all parent fields (not at fixed offset 24).
+    # This is critical for inheritance: child fields must not overlap parent memory.
+    cdef int64_t current_offset = type_info.parent_type_info.total_size
+    cdef int64_t size, alignment
+    cdef int32_t field_type_index
+    cdef TVMFFIFieldGetter getter
+    cdef FieldGetter fgetter
+    cdef FieldSetter fsetter
+
+    # Get global functions
+    _get_field_getter = _get_global_func("ffi.GetFieldGetter", False)
+    _make_field_setter = _get_global_func("ffi.MakeFieldSetter", False)
+    _make_ffi_new = _get_global_func("ffi.MakeFFINew", False)
+    _register_auto_init = _get_global_func("ffi.RegisterAutoInit", False)
+
+    cdef list type_fields = []
+
+    for py_field in fields:
+        # 1. Get layout
+        layout = _ORIGIN_NATIVE_LAYOUT.get(py_field.ty.origin, (8, 8, kTVMFFIObject))
+        size = layout[0]
+        alignment = layout[1]
+        field_type_index = layout[2]
+
+        # 2. Compute offset (align up)
+        current_offset = (current_offset + alignment - 1) & ~(alignment - 1)
+        field_offset = current_offset
+        current_offset += size
+
+        # 3. Get getter (C function pointer) and setter (FunctionObj).
+        # Pointers are transported as int64_t through the FFI boundary.
+        getter = <TVMFFIFieldGetter><int64_t>_get_field_getter(field_type_index)
+        setter_fn = <CObject>_make_field_setter(
+            field_type_index,
+            <int64_t><void*>py_field.ty._converter,
+            <int64_t>&_f_type_convert,
+        )
+
+        # 4. Register field in the C type table
+        _register_one_field(
+            type_index, py_field, field_offset, size, alignment,
+            field_type_index, getter, setter_fn,
+        )
+
+        # 5. Build the Python-side TypeField descriptor
+        fgetter = FieldGetter.__new__(FieldGetter)
+        fgetter.getter = getter
+        fgetter.offset = field_offset
+        fsetter = FieldSetter.__new__(FieldSetter)
+        fsetter.setter = <void*>setter_fn.chandle
+        fsetter.offset = field_offset
+        fsetter.flags = <int64_t>(kTVMFFIFieldFlagBitMaskWritable | kTVMFFIFieldFlagBitSetterIsFunctionObj)
+        type_fields.append(
+            TypeField(
+                name=py_field.name,
+                doc=py_field.doc,
+                size=size,
+                offset=field_offset,
+                frozen=False,
+                metadata={"type_schema": py_field.ty.to_json()},
+                getter=fgetter,
+                setter=fsetter,
+                ty=py_field.ty,
+                c_init=py_field.init,
+                c_kw_only=py_field.kw_only,
+                c_has_default=(py_field.default is not MISSING or py_field.default_factory is not MISSING),
+            )
+        )
+
+    # Align total size to 8 bytes
+    cdef int64_t total_size = (current_offset + 7) & ~7
+    if total_size < sizeof(TVMFFIObject):
+        total_size = sizeof(TVMFFIObject)
+
+    # 7. Register __ffi_new__ + deleter
+    _make_ffi_new(type_index, total_size)
+
+    # 8. Register __ffi_init__ (auto-generated constructor)
+    _register_auto_init(type_index)
+
+    return type_fields
+
 
 def _member_method_wrapper(method_func: Callable[..., Any]) -> Callable[..., Any]:
     def wrapper(self: Any, *args: Any) -> Any:

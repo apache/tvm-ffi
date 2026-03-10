@@ -573,6 +573,94 @@ def _lookup_or_register_type_info_from_type_key(type_key: str) -> TypeInfo:
     return info
 
 
+def _register_py_class(parent_type_info, str type_key, object type_cls):
+    """Register a new Python-defined TVM-FFI type.
+
+    Allocates a dynamic type index for *type_key* as a child of
+    *parent_type_info* and registers it in the global type tables.
+
+    Parameters
+    ----------
+    parent_type_info : TypeInfo
+        The parent type's TypeInfo (e.g., Object's TypeInfo).
+    type_key : str
+        The unique type key string for the new type.
+    type_cls : type
+        The Python class to associate with this type.
+
+    Returns
+    -------
+    TypeInfo
+        The newly created TypeInfo with ``fields=None`` (pending registration).
+
+    Raises
+    ------
+    ValueError
+        If *type_key* is already registered.
+    """
+    # Reject duplicate type keys
+    if type_key in TYPE_KEY_TO_INFO:
+        raise ValueError(
+            f"Type key '{type_key}' is already registered"
+        )
+
+    cdef int32_t parent_type_index = parent_type_info.type_index
+    cdef int32_t parent_type_depth = len(parent_type_info.type_ancestors)
+    cdef int32_t type_depth = parent_type_depth + 1
+    cdef ByteArrayArg type_key_arg = ByteArrayArg(c_str(type_key))
+    cdef int32_t type_index
+
+    # Allocate a new type index
+    # static_type_index=-1 means dynamic allocation
+    # num_child_slots=0, child_slots_can_overflow=1
+    type_index = TVMFFITypeGetOrAllocIndex(
+        type_key_arg.cptr(),
+        -1,           # static_type_index (dynamic)
+        type_depth,
+        0,            # num_child_slots
+        1,            # child_slots_can_overflow
+        parent_type_index,
+    )
+
+    # Build ancestors list
+    cdef list ancestors = list(parent_type_info.type_ancestors)
+    ancestors.append(parent_type_index)
+
+    # Create TypeInfo with fields=None (pending _register_fields call)
+    cdef object info = TypeInfo(
+        type_cls=type_cls,
+        type_index=type_index,
+        type_key=type_key,
+        type_ancestors=ancestors,
+        fields=None,
+        methods=[],
+        parent_type_info=parent_type_info,
+    )
+
+    _update_registry(type_index, type_key, info, type_cls)
+    return info
+
+
+def _rollback_py_class(object type_info):
+    """Roll back a ``_register_py_class`` call from the Python-level registry.
+
+    Called by ``@py_class`` when phase-2 (field validation) fails, so
+    the type key can be reused after the user fixes the error.  The
+    C-level type index is permanently consumed (cannot be reclaimed),
+    but the Python dicts are cleaned up so that a retry does not hit
+    "already registered".
+    """
+    cdef int32_t idx = type_info.type_index
+    cdef str key = type_info.type_key
+    cdef object cls = type_info.type_cls
+    TYPE_KEY_TO_INFO.pop(key, None)
+    if cls is not None:
+        TYPE_CLS_TO_INFO.pop(cls, None)
+    if 0 <= idx < len(TYPE_INDEX_TO_INFO):
+        TYPE_INDEX_TO_INFO[idx] = None
+        TYPE_INDEX_TO_CLS[idx] = None
+
+
 def _lookup_type_attr(type_index: int32_t, attr_key: str) -> Any:
     cdef ByteArrayArg attr_key_bytes = ByteArrayArg(c_str(attr_key))
     cdef const TVMFFITypeAttrColumn* column = TVMFFIGetTypeAttrColumn(&attr_key_bytes.cdata)
