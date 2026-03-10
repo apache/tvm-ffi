@@ -51,11 +51,11 @@ jobs:
           CIBW_TEST_REQUIRES: pytest
           CIBW_BEFORE_TEST_LINUX: >-
             cd {project}/addons/tvm-ffi-orcjit/tests &&
-            cmake -B build -DCMAKE_CXX_COMPILER=/opt/llvm/bin/clang++ &&
+            cmake -B build -DCMAKE_CXX_COMPILER=/opt/llvm/bin/clang++ -DPython_EXECUTABLE=$(which python) &&
             cmake --build build &&
             cmake --install build &&
             cd {project}/addons/tvm-ffi-orcjit/examples/quick-start &&
-            cmake -B build -DCMAKE_CXX_COMPILER=/opt/llvm/bin/clang++ &&
+            cmake -B build -DCMAKE_CXX_COMPILER=/opt/llvm/bin/clang++ -DPython_EXECUTABLE=$(which python) &&
             cmake --build build
           CIBW_TEST_COMMAND: >-
             pytest {project}/addons/tvm-ffi-orcjit/tests -v &&
