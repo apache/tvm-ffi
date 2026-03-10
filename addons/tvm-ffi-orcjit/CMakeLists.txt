@@ -83,8 +83,8 @@ separate_arguments(_llvm_static_ldflags_list NATIVE_COMMAND "${_llvm_static_ldfl
 cmake_path(GET LLVM_DIR PARENT_PATH _llvm_prefix)
 cmake_path(GET _llvm_prefix PARENT_PATH _llvm_prefix)
 cmake_path(GET _llvm_prefix PARENT_PATH _llvm_prefix)
-find_library(ZLIB_STATIC NAMES libz.a HINTS "${_llvm_prefix}/lib" /usr/lib64 REQUIRED)
-find_library(ZSTD_STATIC NAMES libzstd.a HINTS "${_llvm_prefix}/lib" /usr/lib64 REQUIRED)
+find_library(ZLIB_STATIC NAMES libz.a HINTS "${_llvm_prefix}/lib" REQUIRED)
+find_library(ZSTD_STATIC NAMES libzstd.a HINTS "${_llvm_prefix}/lib" "${_llvm_prefix}/lib64" REQUIRED)
 message(STATUS "Static zlib: ${ZLIB_STATIC}")
 message(STATUS "Static zstd: ${ZSTD_STATIC}")
 
