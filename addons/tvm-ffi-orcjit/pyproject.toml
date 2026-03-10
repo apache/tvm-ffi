@@ -24,7 +24,7 @@ name = "tvm-ffi-orcjit"
 version = "0.1.0"
 description = "Load TVM-FFI exported object files using LLVM ORC JIT v2"
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
 authors = [{ name = "TVM-FFI OrcJIT Contributors" }]
 keywords = ["tvm-ffi", "llvm", "jit", "orcjit"]
@@ -33,10 +33,10 @@ classifiers = [
   "Intended Audience :: Developers",
   "License :: OSI Approved :: Apache Software License",
   "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.8",
-  "Programming Language :: Python :: 3.9",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
   "Programming Language :: C++",
 ]
 dependencies = ["apache-tvm-ffi>=0.1.0"]
@@ -46,7 +46,6 @@ Homepage = "https://github.com/apache/tvm-ffi"
 Repository = "https://github.com/apache/tvm-ffi"
 
 [tool.scikit-build]
-cmake.version = "CMakeLists.txt"
 cmake.build-type = "Release"
 wheel.py-api = "py3"
 build-dir = "build"
@@ -55,17 +54,27 @@ editable.rebuild = false
 editable.verbose = true
 wheel.packages = ["python/tvm_ffi_orcjit"]
 wheel.install-dir = "tvm_ffi_orcjit"
-# Don't set install-dir, let it use the default python/ directory
 sdist.include = [
   "/README.md",
   "/LICENSE",
   "/pyproject.toml",
   "/CMakeLists.txt",
-  "/include/**/*.h",
+  "/src/**/*.h",
   "/src/**/*.cc",
   "/src/**/*.cpp",
   "/python/**/*.py",
+  "/tools/*.sh",
 ]
 
 [tool.scikit-build.cmake.define]
 CMAKE_EXPORT_COMPILE_COMMANDS = "ON"
+
+[tool.cibuildwheel]
+build = "cp310-* cp311-* cp312-* cp313-*"
+skip = "*-win32 *-manylinux_i686 *-musllinux*"
+before-all = "bash tools/install_llvm.sh"
+environment = { LLVM_VERSION = "22.1.0", CMAKE_PREFIX_PATH = "/opt/llvm", LLVM_CONFIG_PATH = "/opt/llvm/bin/llvm-config", CLANG_PATH = "/opt/llvm/bin/clang" }
+repair-wheel-command = "auditwheel repair --exclude libtvm_ffi.so -w {dest_dir} {wheel}"
+
+[tool.cibuildwheel.macos]
+repair-wheel-command = "delocate-wheel --exclude libtvm_ffi.dylib -w {dest_dir} -v {wheel}"

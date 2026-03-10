@@ -18,52 +18,17 @@
 
 from __future__ import annotations
 
-import platform
-import subprocess
-from pathlib import Path
-
 from tvm_ffi import Object, register_object
 
-from . import _ffi_api
+from . import _ffi_api, _lib_dir
 from .dylib import DynamicLibrary
 
 
-def _find_orc_rt_library(clang_path: str = "clang-20") -> str | None:
-    """Find the liborc_rt library using clang -print-runtime-dir.
-
-    If the path returned by clang -print-runtime-dir does not exist,
-    search recursively in the parent directory as a fallback.
-    """
-    arch = platform.machine()
-    lib_pattern = f"liborc_rt-{arch}.a"
-
-    try:
-        result = subprocess.run(
-            [clang_path, "-print-runtime-dir"],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        runtime_dir = Path(result.stdout.strip())
-
-        if runtime_dir.exists():
-            lib_path = runtime_dir / lib_pattern
-            if lib_path.exists():
-                return str(lib_path)
-            for lib_path in runtime_dir.glob(f"**/liborc_rt*{arch}*"):
-                return str(lib_path)
-        else:
-            # Fallback: search recursively in parent directory
-            search_dir = runtime_dir.parent
-            if search_dir.exists():
-                for lib_path in search_dir.glob(f"**/{lib_pattern}"):
-                    return str(lib_path)
-                for lib_path in search_dir.glob(f"**/liborc_rt*{arch}*"):
-                    return str(lib_path)
-
-        return None
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        return None
+def _find_orc_rt_library() -> str | None:
+    """Find the bundled liborc_rt library in the same directory as the .so."""
+    for lib_path in _lib_dir.glob("liborc_rt*.a"):
+        return str(lib_path)
+    return None
 
 
 @register_object("orcjit.ExecutionSession")
@@ -94,9 +59,8 @@ class ExecutionSession(Object):
             orc_rt_path = _find_orc_rt_library()
             if orc_rt_path is None:
                 raise RuntimeError(
-                    "Could not find liborc_rt library. "
-                    "Please ensure clang is installed and accessible, "
-                    "or provide the path explicitly."
+                    "Could not find bundled liborc_rt library. "
+                    "Please reinstall the package or provide the path explicitly."
                 )
         self.__init_handle_by_constructor__(_ffi_api.ExecutionSession, orc_rt_path)  # type: ignore
 

@@ -45,18 +45,18 @@ else:
     _LIB_EXT = "so"
 
 # Load the orcjit extension library
+# - lib/: normal install (wheel)
+# - ../../build/: editable install (cmake build output relative to python/tvm_ffi_orcjit/)
 _LIB_PATH = [
     Path(__file__).parent / "lib" / f"libtvm_ffi_orcjit.{_LIB_EXT}",
-    Path(__file__).parent / "build" / f"libtvm_ffi_orcjit.{_LIB_EXT}",
-    Path(__file__).parent.parent.parent / "lib" / f"libtvm_ffi_orcjit.{_LIB_EXT}",
     Path(__file__).parent.parent.parent / "build" / f"libtvm_ffi_orcjit.{_LIB_EXT}",
 ]
-_lib_path_str = None
+_lib_dir = None
 for path in _LIB_PATH:
     if path.exists():
         _ = load_module(str(path))
-        _lib_path_str = str(path)
-if _lib_path_str is None:
+        _lib_dir = path.parent
+if _lib_dir is None:
     raise RuntimeError(
         f"Could not find libtvm_ffi_orcjit.{_LIB_EXT}. "
         f"Searched in {_LIB_PATH} and site-packages. "
@@ -67,7 +67,7 @@ if _lib_path_str is None:
 # This is needed because static initializers may not run when loaded via dlopen
 try:
     # Load the library with ctypes and call the initialization function
-    c_lib = ctypes.CDLL(_lib_path_str, mode=ctypes.RTLD_GLOBAL)
+    c_lib = ctypes.CDLL(str(_lib_dir / f"libtvm_ffi_orcjit.{_LIB_EXT}"), mode=ctypes.RTLD_GLOBAL)
     init_func = c_lib.TVMFFIOrcJITInitialize
     init_func.restype = None
     init_func()
