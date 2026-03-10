@@ -72,24 +72,20 @@ execute_process(
   OUTPUT_STRIP_TRAILING_WHITESPACE
   OUTPUT_VARIABLE _llvm_static_ldflags
 )
-execute_process(
-  COMMAND ${LLVM_CONFIG_EXE} --link-static --system-libs
-  OUTPUT_STRIP_TRAILING_WHITESPACE
-  OUTPUT_VARIABLE _llvm_system_libs
-)
 
 message(STATUS "LLVM static libs: ${_llvm_static_libs}")
 message(STATUS "LLVM static ldflags: ${_llvm_static_ldflags}")
-message(STATUS "LLVM system libs: ${_llvm_system_libs}")
 
 separate_arguments(_llvm_static_libs_list NATIVE_COMMAND "${_llvm_static_libs}")
 separate_arguments(_llvm_static_ldflags_list NATIVE_COMMAND "${_llvm_static_ldflags}")
-separate_arguments(_llvm_system_libs_list NATIVE_COMMAND "${_llvm_system_libs}")
 
+# Note: we intentionally skip `llvm-config --system-libs` (e.g. -lxml2 -lz -lzstd).
+# Since the output is a shared library, these system dependencies are resolved by the
+# dynamic linker at load time and do not need to be explicitly linked at build time.
 target_link_libraries(
   tvm_ffi_orcjit
   PRIVATE tvm_ffi::header tvm_ffi::shared ${_llvm_static_ldflags_list}
-          ${_llvm_static_libs_list} ${_llvm_system_libs_list}
+          ${_llvm_static_libs_list}
 )
 
 # ---- Find and bundle liborc_rt ----

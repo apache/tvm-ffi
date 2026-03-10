@@ -20,8 +20,7 @@ esac
 curl -Ls "https://micro.mamba.pm/api/micromamba/${PLATFORM}/latest" \
   | tar -xvj -C /usr/local bin/micromamba
 
-# Create environment with LLVM and its system library dependencies
+# Create environment with LLVM
 /usr/local/bin/micromamba create -p "${PREFIX}" -c conda-forge \
   "llvmdev=${LLVM_VERSION}" "clangdev=${LLVM_VERSION}" "compiler-rt=${LLVM_VERSION}" \
-  libxml2 zlib zstd \
   -y
