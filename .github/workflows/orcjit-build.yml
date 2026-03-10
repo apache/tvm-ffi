@@ -50,6 +50,7 @@ jobs:
           CIBW_BEFORE_ALL_LINUX: bash {project}/addons/tvm-ffi-orcjit/tools/install_llvm.sh
           CIBW_TEST_REQUIRES: pytest
           CIBW_BEFORE_TEST_LINUX: >-
+            uv pip install apache-tvm-ffi &&
             cd {project}/addons/tvm-ffi-orcjit/tests &&
             cmake -B build -DCMAKE_CXX_COMPILER=/opt/llvm/bin/clang++ -DPython_EXECUTABLE=$(which python) &&
             cmake --build build &&
