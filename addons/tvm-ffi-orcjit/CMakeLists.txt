@@ -72,21 +72,31 @@ execute_process(
   OUTPUT_STRIP_TRAILING_WHITESPACE
   OUTPUT_VARIABLE _llvm_static_ldflags
 )
-
 message(STATUS "LLVM static libs: ${_llvm_static_libs}")
 message(STATUS "LLVM static ldflags: ${_llvm_static_ldflags}")
 
 separate_arguments(_llvm_static_libs_list NATIVE_COMMAND "${_llvm_static_libs}")
 separate_arguments(_llvm_static_ldflags_list NATIVE_COMMAND "${_llvm_static_ldflags}")
 
-# Note: we intentionally skip `llvm-config --system-libs` (e.g. -lxml2 -lz -lzstd).
-# Since the output is a shared library, these system dependencies are resolved by the
-# dynamic linker at load time and do not need to be explicitly linked at build time.
+# Find static zlib and zstd to avoid runtime dependencies on target systems.
+# This enables manylinux_2_28 compatibility.
+cmake_path(GET LLVM_DIR PARENT_PATH _llvm_prefix)
+cmake_path(GET _llvm_prefix PARENT_PATH _llvm_prefix)
+cmake_path(GET _llvm_prefix PARENT_PATH _llvm_prefix)
+find_library(ZLIB_STATIC NAMES libz.a HINTS "${_llvm_prefix}/lib" REQUIRED)
+find_library(ZSTD_STATIC NAMES libzstd.a HINTS "${_llvm_prefix}/lib" REQUIRED)
+message(STATUS "Static zlib: ${ZLIB_STATIC}")
+message(STATUS "Static zstd: ${ZSTD_STATIC}")
+
 target_link_libraries(
   tvm_ffi_orcjit
   PRIVATE tvm_ffi::header tvm_ffi::shared ${_llvm_static_ldflags_list}
-          ${_llvm_static_libs_list}
+          ${_llvm_static_libs_list} ${ZLIB_STATIC} ${ZSTD_STATIC}
 )
+
+# Statically link libstdc++ and libgcc to avoid GLIBCXX version requirements
+# on the target system, enabling manylinux_2_28 support.
+target_link_options(tvm_ffi_orcjit PRIVATE -static-libstdc++ -static-libgcc)
 
 # ---- Find and bundle liborc_rt ----
 # Allow overriding via env: CLANG_PATH
