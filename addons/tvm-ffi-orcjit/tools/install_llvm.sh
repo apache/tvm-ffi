@@ -21,7 +21,7 @@ curl -Ls "https://micro.mamba.pm/api/micromamba/${PLATFORM}/latest" \
   | tar -xvj -C /usr/local bin/micromamba
 
 # Install static zlib and zstd for static linking (AlmaLinux 9 / manylinux_2_34)
-dnf install -y zlib-static libzstd-devel
+dnf install -y zlib-static libzstd-static
 
 # Create environment with LLVM
 /usr/local/bin/micromamba create -p "${PREFIX}" -c conda-forge \
