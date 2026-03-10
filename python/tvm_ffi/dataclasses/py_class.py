@@ -1,0 +1,459 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+"""The ``py_class`` decorator: Python-defined FFI classes with dataclass semantics."""
+
+from __future__ import annotations
+
+import sys
+import typing
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any, ClassVar, TypeVar
+
+from typing_extensions import dataclass_transform
+
+from .. import core
+from ..core import MISSING, TypeSchema
+from ..registry import _add_class_attrs, _install_dataclass_dunders
+from .field import KW_ONLY, Field, field
+
+_T = TypeVar("_T", bound=type)
+
+
+# ---------------------------------------------------------------------------
+# Module-level state
+# ---------------------------------------------------------------------------
+#
+# Registration happens in two phases:
+#
+#   Phase 1 (_phase1_register_type)
+#       Allocates a C-level type index and inserts the class into the
+#       global type registry.  This must happen early so that self-
+#       referential and mutually-referential annotations can resolve
+#       the class via ``TypeSchema.from_annotation()``.  Phase 1 always
+#       succeeds (or raises immediately for non-Object parents).
+#
+#   Phase 2 (_phase2_register_fields)
+#       Resolves string annotations via ``typing.get_type_hints``,
+#       converts them to ``TypeSchema`` / ``Field`` objects, validates
+#       field ordering, registers fields with the Cython layer, and
+#       installs ``__init__``, ``__repr__``, ``__eq__``, etc.
+#
+#       If ``get_type_hints`` raises ``NameError`` (forward reference
+#       not yet defined), the class is added to ``_PENDING_CLASSES``
+#       and retried after each successful phase-2.  If phase-2 fails
+#       for any other reason, ``_rollback_registration`` undoes phase-1
+#       so the type key can be reused.
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _PendingClass:
+    """Bookkeeping for a class whose annotations couldn't be resolved yet."""
+
+    cls: type
+    type_info: Any  # core.TypeInfo
+    globalns: dict[str, Any]
+    params: dict[str, Any]
+
+
+#: Classes whose phase-2 (field registration) was deferred because
+#: ``typing.get_type_hints`` raised ``NameError`` on an unresolved
+#: forward reference.  Retried after each successful phase-2 via
+#: :func:`_flush_pending`.
+_PENDING_CLASSES: list[_PendingClass] = []
+
+#: Per-module mapping of ``class.__name__ → class`` for every
+#: ``@py_class``-decorated type.  Used as *localns* when resolving
+#: annotations so that mutual references between classes in the same
+#: module work even before the second class is assigned to the module
+#: variable by Python.
+_PY_CLASS_BY_MODULE: dict[str, dict[str, type]] = {}
+
+
+# ---------------------------------------------------------------------------
+# Phase 1: type registration
+# ---------------------------------------------------------------------------
+
+
+def _phase1_register_type(cls: type, type_key: str | None) -> Any:
+    """Phase 1: allocate type index and register the type (always succeeds)."""
+    parent_info: core.TypeInfo | None = None
+    for base in cls.__bases__:
+        parent_info = core._type_cls_to_type_info(base)
+        if parent_info is not None:
+            break
+    if parent_info is None:
+        raise TypeError(
+            f"{cls.__name__} must inherit from a registered FFI Object type (e.g. tvm_ffi.Object)"
+        )
+    if type_key is None:
+        type_key = f"{cls.__module__}.{cls.__qualname__}"
+    info = core._register_py_class(parent_info, type_key, cls)
+    setattr(cls, "__tvm_ffi_type_info__", info)
+    # Register in resolution namespace so sibling classes can find us
+    _PY_CLASS_BY_MODULE.setdefault(cls.__module__, {})[cls.__name__] = cls
+    return info
+
+
+def _rollback_registration(cls: type, type_info: Any) -> None:
+    """Undo :func:`_phase1_register_type` after a phase-2 failure.
+
+    The C-level type index is permanently consumed (cannot be reclaimed),
+    but the Python-level registry dicts are cleaned up so a retry with
+    the same type key does not hit "already registered".
+    """
+    # Remove from the Cython-level registry dicts (TYPE_KEY_TO_INFO,
+    # TYPE_CLS_TO_INFO, TYPE_INDEX_TO_INFO, TYPE_INDEX_TO_CLS).
+    core._rollback_py_class(type_info)  # ty: ignore[unresolved-attribute]
+    # Remove from our own module-level resolution namespace.
+    _PY_CLASS_BY_MODULE.get(cls.__module__, {}).pop(cls.__name__, None)
+    try:
+        delattr(cls, "__tvm_ffi_type_info__")
+    except AttributeError:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# Phase 2: annotation resolution, field registration, dunder installation
+# ---------------------------------------------------------------------------
+
+
+def _collect_own_fields(
+    cls: type,
+    hints: dict[str, Any],
+    decorator_kw_only: bool,
+) -> list[Field]:
+    """Parse own annotations into :class:`Field` objects.
+
+    - Skips ``ClassVar`` annotations.
+    - Handles ``KW_ONLY`` sentinel.
+    - Extracts ``Field`` metadata from class attributes (set via :func:`field`).
+    - Handles bare defaults (non-``Field`` values).
+    - Converts resolved types to ``TypeSchema``.
+    - Resolves ``hash=None`` to follow ``compare``.
+    """
+    fields: list[Field] = []
+    kw_only_active = decorator_kw_only
+    own_annotations: dict[str, str] = getattr(cls, "__annotations__", {})
+
+    for name in own_annotations:
+        resolved_type = hints.get(name)
+        # Skip ClassVar
+        if (
+            resolved_type is None
+            or resolved_type is ClassVar
+            or typing.get_origin(resolved_type) is ClassVar
+        ):
+            continue
+
+        # KW_ONLY sentinel
+        if resolved_type is KW_ONLY:
+            kw_only_active = True
+            if name in cls.__dict__:
+                try:
+                    delattr(cls, name)
+                except AttributeError:
+                    pass
+            continue
+
+        # Extract Field from class dict (inline of _pop_field_from_class)
+        class_val = cls.__dict__.get(name, MISSING)
+        if isinstance(class_val, Field):
+            f = class_val
+        elif class_val is not MISSING:
+            f = field(default=class_val)
+        else:
+            f = field()
+        if class_val is not MISSING:
+            try:
+                delattr(cls, name)
+            except AttributeError:
+                pass
+
+        # Fill in name and ty (set by the decorator, not the user)
+        f.name = name
+        f.ty = TypeSchema.from_annotation(resolved_type)
+
+        # Resolve kw_only: None means "inherit from decorator"
+        if f.kw_only is None:
+            f.kw_only = kw_only_active
+
+        # Resolve hash=None → follow compare (native dataclass semantics)
+        if f.hash is None:
+            f.hash = f.compare
+
+        fields.append(f)
+
+    return fields
+
+
+def _phase2_register_fields(
+    cls: type,
+    type_info: Any,
+    globalns: dict[str, Any],
+    params: dict[str, Any],
+) -> bool:
+    """Phase 2: resolve annotations, register fields, install dunders.
+
+    Returns True on success, False if forward references are unresolved.
+    """
+    # Resolve string annotations to types; return False (defer) on NameError.
+    localns = dict(_PY_CLASS_BY_MODULE.get(cls.__module__, {}))
+    localns[cls.__name__] = cls
+    try:
+        kwargs: dict[str, Any] = {"globalns": globalns, "localns": localns}
+        if sys.version_info >= (3, 11):
+            kwargs["include_extras"] = True
+        hints = typing.get_type_hints(cls, **kwargs)
+    except (NameError, AttributeError):
+        return False
+
+    own_fields = _collect_own_fields(cls, hints, params["kw_only"])
+
+    type_info._register_fields(own_fields)
+    _add_class_attrs(cls, type_info)
+
+    # Remove deferred __init__ and restore user-defined __init__ if saved
+    if "_py_class_deferred_init" in cls.__dict__:
+        # Always remove the deferred wrapper
+        if "__init__" in cls.__dict__:
+            delattr(cls, "__init__")
+        try:
+            delattr(cls, "_py_class_deferred_init")
+        except AttributeError:
+            pass
+        # Restore user-defined __init__ if it was saved
+        user_init = cls.__dict__.get("_py_class_user_init")
+        if user_init is not None:
+            cls.__init__ = user_init
+            delattr(cls, "_py_class_user_init")
+
+    _install_dataclass_dunders(
+        cls,
+        init=params["init"],
+        repr=params["repr"],
+        eq=params["eq"],
+        order=params["order"],
+        unsafe_hash=params["unsafe_hash"],
+    )
+    return True
+
+
+# ---------------------------------------------------------------------------
+# Deferred resolution (when phase 2 cannot run at decoration time)
+# ---------------------------------------------------------------------------
+
+
+def _flush_pending() -> None:
+    """Retry all pending classes.  Called after each successful phase 2."""
+    changed = True
+    while changed:
+        changed = False
+        remaining: list[_PendingClass] = []
+        for entry in _PENDING_CLASSES:
+            if _phase2_register_fields(entry.cls, entry.type_info, entry.globalns, entry.params):
+                changed = True
+            else:
+                remaining.append(entry)
+        _PENDING_CLASSES[:] = remaining
+
+
+def _raise_unresolved_forward_reference(cls: type, globalns: dict[str, Any]) -> None:
+    """Raise :class:`TypeError` listing the annotations that cannot be resolved."""
+    localns = dict(_PY_CLASS_BY_MODULE.get(cls.__module__, {}))
+    localns[cls.__name__] = cls
+    unresolved: list[str] = []
+    for name, ann_str in getattr(cls, "__annotations__", {}).items():
+        if isinstance(ann_str, str):
+            try:
+                eval(ann_str, globalns, localns)
+            except NameError:
+                unresolved.append(f"{name}: {ann_str}")
+    raise TypeError(
+        f"Cannot instantiate {cls.__name__}: unresolved forward references: {unresolved}"
+    )
+
+
+def _make_temporary_init(
+    cls: type, type_info: Any, globalns: dict[str, Any], params: dict[str, Any]
+) -> Callable[[...], None]:
+    def __init__(self: Any, *args: Any, **kwargs: Any) -> None:
+        if type_info.fields is None:
+            try:
+                if not _phase2_register_fields(cls, type_info, globalns, params):
+                    _raise_unresolved_forward_reference(cls, globalns)
+                _flush_pending()
+            except Exception:
+                # Remove from pending list and roll back so the type key can be reused.
+                _PENDING_CLASSES[:] = [p for p in _PENDING_CLASSES if p.cls is not cls]
+                _rollback_registration(cls, type_info)
+                raise
+        # cls.__init__ has been replaced by the real init (or restored user init)
+        cls.__init__(self, *args, **kwargs)
+
+    __init__.__qualname__ = f"{cls.__qualname__}.__init__"
+    __init__.__module__ = cls.__module__
+    return __init__
+
+
+def _install_deferred_init(
+    cls: type,
+    type_info: Any,
+    globalns: dict[str, Any],
+    params: dict[str, Any],
+) -> None:
+    """Install a temporary ``__init__`` that completes registration on first call.
+
+    Preserves a user-defined ``__init__`` if present in *cls.__dict__*;
+    it is restored by :func:`_phase2_register_fields` after registration
+    completes so that ``_install_dataclass_dunders`` sees it and skips
+    auto-generation.
+    """
+    # Save user-defined __init__ before overwriting
+    user_init = cls.__dict__.get("__init__")
+    if user_init is not None:
+        cls._py_class_user_init = user_init  # type: ignore[attr-defined]
+
+    cls.__init__ = _make_temporary_init(cls, type_info, globalns, params)  # type: ignore[assignment]
+    cls._py_class_deferred_init = True  # type: ignore[attr-defined]
+
+
+# ---------------------------------------------------------------------------
+# Main decorator
+# ---------------------------------------------------------------------------
+
+
+@dataclass_transform(
+    eq_default=False,
+    order_default=False,
+    field_specifiers=(field, Field),
+)
+def py_class(
+    cls_or_type_key: type | str | None = None,
+    /,
+    *,
+    type_key: str | None = None,
+    init: bool = True,
+    repr: bool = True,
+    eq: bool = False,
+    order: bool = False,
+    unsafe_hash: bool = False,
+    kw_only: bool = False,
+    slots: bool = True,
+) -> Callable[[_T], _T] | _T:
+    """Register a Python-defined FFI class with dataclass-style semantics.
+
+    Can be used as:
+
+    .. code-block:: python
+
+        @py_class  # bare decorator
+        class Point(Object):
+            x: float
+            y: float
+
+
+        @py_class("my.Point")  # with explicit type_key
+        class Point(Object): ...
+
+
+        @py_class(eq=True, order=True)  # with options
+        class Point(Object): ...
+
+
+        @py_class("my.Point", eq=True)  # both
+        class Point(Object): ...
+
+    Parameters
+    ----------
+    cls_or_type_key
+        When a string, used as the FFI type key.  When a type (bare
+        decorator usage), the class to decorate.
+    type_key
+        Explicit FFI type key.  Auto-generated from
+        ``{module}.{qualname}`` when omitted.
+    init
+        If True (default), generate ``__init__`` from field annotations.
+    repr
+        If True (default), generate ``__repr__``.
+    eq
+        If True, generate ``__eq__`` and ``__ne__``.
+    order
+        If True, generate ``__lt__``, ``__le__``, ``__gt__``, ``__ge__``.
+        Requires ``eq=True``.
+    unsafe_hash
+        If True, generate ``__hash__`` (unsafe for mutable objects).
+    kw_only
+        If True, all fields are keyword-only in ``__init__`` by default.
+    slots
+        Accepted for ``dataclass_transform`` compatibility.  Object
+        subclasses always use ``__slots__ = ()`` via the metaclass.
+
+    Returns
+    -------
+    Callable | type
+        A class decorator, or the decorated class (bare usage).
+
+    """
+    if order and not eq:
+        raise ValueError("order=True requires eq=True")
+
+    effective_type_key = type_key
+    params: dict[str, Any] = {
+        "init": init,
+        "repr": repr,
+        "eq": eq,
+        "order": order,
+        "unsafe_hash": unsafe_hash,
+        "kw_only": kw_only,
+    }
+
+    def decorator(cls: _T) -> _T:
+        nonlocal effective_type_key
+        globalns = getattr(sys.modules.get(cls.__module__, None), "__dict__", {})
+
+        info = _phase1_register_type(cls, effective_type_key)
+
+        try:
+            if _phase2_register_fields(cls, info, globalns, params):
+                _flush_pending()
+            else:
+                _PENDING_CLASSES.append(_PendingClass(cls, info, globalns, params))
+                _install_deferred_init(cls, info, globalns, params)
+        except Exception:
+            # Phase-2 failed (bad annotation, field ordering, etc.).
+            # Roll back phase-1 so the type key can be reused after
+            # the user fixes the error.
+            _rollback_registration(cls, info)
+            raise
+
+        return cls
+
+    # Handle different calling conventions:
+    #   @py_class                → cls_or_type_key is the class
+    #   @py_class("key")         → cls_or_type_key is a string
+    #   @py_class()              → cls_or_type_key is None
+    #   @py_class(eq=True)       → cls_or_type_key is None
+    if cls_or_type_key is None:
+        return decorator
+    if isinstance(cls_or_type_key, str):
+        effective_type_key = cls_or_type_key
+        return decorator
+    if isinstance(cls_or_type_key, type):
+        return decorator(cls_or_type_key)
+    raise TypeError(f"py_class: expected str or type, got {type(cls_or_type_key)}")
