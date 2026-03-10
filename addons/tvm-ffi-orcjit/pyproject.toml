@@ -76,8 +76,8 @@ environment = { LLVM_VERSION = "22.1.0", CMAKE_PREFIX_PATH = "/opt/llvm", LLVM_C
 repair-wheel-command = "auditwheel repair --exclude libtvm_ffi.so -w {dest_dir} {wheel}"
 
 [tool.cibuildwheel.linux]
-manylinux-x86_64-image = "manylinux_2_35"
-manylinux-aarch64-image = "manylinux_2_35"
+manylinux-x86_64-image = "quay.io/pypa/manylinux_2_35_x86_64"
+manylinux-aarch64-image = "quay.io/pypa/manylinux_2_35_aarch64"
 
 [tool.cibuildwheel.macos]
 repair-wheel-command = "delocate-wheel --exclude libtvm_ffi.dylib -w {dest_dir} -v {wheel}"
