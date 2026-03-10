@@ -69,10 +69,8 @@ inline Function MakeInit(int32_t type_index) {
   };
   // ---- Pre-compute field analysis (once per type) -------------------------
   const TVMFFITypeInfo* type_info = TVMFFIGetTypeInfo(type_index);
-  TVM_FFI_ICHECK(type_info->metadata != nullptr)
-      << "Type `" << TypeIndexToTypeKey(type_index) << "` has no reflection metadata";
-  TVM_FFI_ICHECK(type_info->metadata->creator != nullptr)
-      << "Type `" << TypeIndexToTypeKey(type_index) << "` has no creator";
+  TVM_FFI_ICHECK(HasCreator(type_info)) << "Type `" << TypeIndexToTypeKey(type_index)
+                                        << "` has no creator or __ffi_new__ for __ffi_init__";
 
   auto info = std::make_shared<AutoInitInfo>();
   info->type_key = std::string_view(type_info->type_key.data, type_info->type_key.size);
@@ -101,16 +99,11 @@ inline Function MakeInit(int32_t type_index) {
   // Eagerly resolve the KWARGS sentinel via global function registry.
   ObjectRef kwargs_sentinel =
       Function::GetGlobalRequired("ffi.GetKwargsObject")().cast<ObjectRef>();
-  // Cache pointers for the lambda (avoid repeated lookups).
-  TVMFFIObjectCreator creator = type_info->metadata->creator;
 
   return Function::FromPacked(
-      [info, kwargs_sentinel, creator](PackedArgs args, Any* rv) {
-        // ---- 1. Create object via creator ------------------------------------
-        TVMFFIObjectHandle handle;
-        TVM_FFI_CHECK_SAFE_CALL(creator(&handle));
-        ObjectPtr<Object> obj_ptr =
-            details::ObjectUnsafe::ObjectPtrFromOwned<Object>(static_cast<TVMFFIObject*>(handle));
+      [info, kwargs_sentinel, type_info](PackedArgs args, Any* rv) {
+        // ---- 1. Create object via CreateEmptyObject --------------------------
+        ObjectPtr<Object> obj_ptr = CreateEmptyObject(type_info);
 
         // ---- 2. Find KWARGS sentinel position --------------------------------
         int kwargs_pos = -1;
