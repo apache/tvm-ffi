@@ -79,6 +79,16 @@ class TypeTable {
     /*! \brief Whether child can overflow. */
     bool child_slots_can_overflow{true};
 
+    ~Entry() {
+      // Release FunctionObj setter handles that were IncRef'd during RegisterTypeField.
+      for (TVMFFIFieldInfo& field : type_fields_data) {
+        if ((field.flags & kTVMFFIFieldFlagBitSetterIsFunctionObj) && field.setter != nullptr) {
+          TVMFFIObjectDecRef(static_cast<TVMFFIObjectHandle>(field.setter));
+          field.setter = nullptr;
+        }
+      }
+    }
+
     Entry(int32_t type_index, int32_t type_depth, String type_key, int32_t num_slots,
           bool child_slots_can_overflow, const Entry* parent) {
       // setup fields in the class
@@ -216,6 +226,12 @@ class TypeTable {
   void RegisterTypeField(int32_t type_index, const TVMFFIFieldInfo* info) {
     Entry* entry = GetTypeEntry(type_index);
     TVMFFIFieldInfo field_data = *info;
+    // IncRef FunctionObj setter so it stays alive in the type table
+    if (field_data.flags & kTVMFFIFieldFlagBitSetterIsFunctionObj) {
+      if (field_data.setter != nullptr) {
+        TVMFFIObjectIncRef(static_cast<TVMFFIObjectHandle>(field_data.setter));
+      }
+    }
     field_data.name = this->CopyString(info->name);
     field_data.doc = this->CopyString(info->doc);
     field_data.metadata = this->CopyString(info->metadata);

@@ -448,7 +448,7 @@ class OverloadObjectDef : private ObjectDef<Class> {
       info.flags |= kTVMFFIFieldFlagBitMaskWritable;
     }
     info.getter = ReflectionDefBase::FieldGetter<T>;
-    info.setter = ReflectionDefBase::FieldSetter<T>;
+    info.setter = reinterpret_cast<void*>(ReflectionDefBase::FieldSetter<T>);
     // initialize default value to nullptr
     info.default_value_or_factory = AnyView(nullptr).CopyToTVMFFIAny();
     info.doc = TVMFFIByteArray{nullptr, 0};

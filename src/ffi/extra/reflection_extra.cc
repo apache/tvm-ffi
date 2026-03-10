@@ -77,7 +77,8 @@ void MakeObjectFromPackedArgs(ffi::PackedArgs args, Any* ret) {
       void* field_addr = reinterpret_cast<char*>(ptr.get()) + field_info->offset;
       if (arg_index < keys.size()) {
         AnyView field_value = args[static_cast<int>(arg_index * 2 + 2)];
-        field_info->setter(field_addr, reinterpret_cast<const TVMFFIAny*>(&field_value));
+        reflection::CallFieldSetter(field_info, field_addr,
+                                    reinterpret_cast<const TVMFFIAny*>(&field_value));
         keys_found[arg_index] = true;
       } else if (field_info->flags & kTVMFFIFieldFlagBitMaskHasDefault) {
         reflection::SetFieldToDefault(field_info, field_addr);

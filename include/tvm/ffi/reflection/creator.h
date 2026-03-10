@@ -76,7 +76,7 @@ class ObjectCreator {
       void* field_addr = reinterpret_cast<char*>(ptr.get()) + field_info->offset;
       if (fields.count(field_name) != 0) {
         Any field_value = fields[field_name];
-        field_info->setter(field_addr, reinterpret_cast<const TVMFFIAny*>(&field_value));
+        CallFieldSetter(field_info, field_addr, reinterpret_cast<const TVMFFIAny*>(&field_value));
         ++match_field_count;
       } else if (field_info->flags & kTVMFFIFieldFlagBitMaskHasDefault) {
         SetFieldToDefault(field_info, field_addr);

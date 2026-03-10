@@ -411,7 +411,8 @@ class ObjectGraphDeserializer {
       void* field_addr = reinterpret_cast<char*>(ptr.get()) + field_info->offset;
       if (data_object.count(field_name) != 0) {
         Any field_value = decode_field_value(field_info, data_object[field_name]);
-        field_info->setter(field_addr, reinterpret_cast<const TVMFFIAny*>(&field_value));
+        reflection::CallFieldSetter(field_info, field_addr,
+                                    reinterpret_cast<const TVMFFIAny*>(&field_value));
       } else if (field_info->flags & kTVMFFIFieldFlagBitMaskHasDefault) {
         reflection::SetFieldToDefault(field_info, field_addr);
       } else {

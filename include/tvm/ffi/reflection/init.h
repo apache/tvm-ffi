@@ -128,7 +128,7 @@ inline Function MakeInit(int32_t type_index) {
 
         auto set_field = [&](size_t fi, const TVMFFIAny* value) {
           void* addr = reinterpret_cast<char*>(obj_ptr.get()) + info->all_fields[fi].info->offset;
-          TVM_FFI_CHECK_SAFE_CALL(info->all_fields[fi].info->setter(addr, value));
+          TVM_FFI_CHECK_SAFE_CALL(CallFieldSetter(info->all_fields[fi].info, addr, value));
           field_set[fi] = true;
         };
 
