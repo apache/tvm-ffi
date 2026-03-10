@@ -398,14 +398,26 @@ class TVMFFIPyCallManager {
     }
   }
 
-  TVM_FFI_INLINE int SetField(TVMFFIPyArgSetterFactory setter_factory,
-                              TVMFFIFieldSetter field_setter, void* field_ptr, PyObject* py_arg,
+  TVM_FFI_INLINE int SetField(TVMFFIPyArgSetterFactory setter_factory, void* field_setter,
+                              int64_t field_flags, void* field_ptr, PyObject* py_arg,
                               int* c_api_ret_code) {
     try {
       TVMFFIPyCallContext ctx(&call_stack_, 1);
       TVMFFIAny* c_arg = ctx.packed_args;
       if (SetArgument(setter_factory, &ctx, py_arg, c_arg) != 0) return -1;
-      c_api_ret_code[0] = (*field_setter)(field_ptr, c_arg);
+      if (!(field_flags & kTVMFFIFieldFlagBitSetterIsFunctionObj)) {
+        auto setter = reinterpret_cast<TVMFFIFieldSetter>(field_setter);
+        c_api_ret_code[0] = (*setter)(field_ptr, c_arg);
+      } else {
+        TVMFFIAny args[2]{};
+        args[0].type_index = kTVMFFIOpaquePtr;
+        args[0].v_ptr = field_ptr;
+        args[1] = *c_arg;
+        TVMFFIAny result{};
+        result.type_index = kTVMFFINone;
+        c_api_ret_code[0] =
+            TVMFFIFunctionCall(static_cast<TVMFFIObjectHandle>(field_setter), args, 2, &result);
+      }
       return 0;
     } catch (const std::exception& ex) {
       // very rare, catch c++ exception and set python error
@@ -534,17 +546,18 @@ TVM_FFI_INLINE int TVMFFIPyConstructorCall(TVMFFIPyArgSetterFactory setter_facto
 /*!
  * \brief Set a field of a FFI object
  * \param setter_factory The factory function to create the setter
- * \param field_setter The field setter function
+ * \param field_setter The field setter (function pointer or FunctionObj handle)
+ * \param field_flags The field flags (to dispatch between function pointer and FunctionObj)
  * \param field_ptr The pointer to the field
  * \param py_arg The python argument to be set
  * \param c_api_ret_code The return code of the function
  * \return 0 on success, nonzero on failure
  */
 TVM_FFI_INLINE int TVMFFIPyCallFieldSetter(TVMFFIPyArgSetterFactory setter_factory,
-                                           TVMFFIFieldSetter field_setter, void* field_ptr,
+                                           void* field_setter, int64_t field_flags, void* field_ptr,
                                            PyObject* py_arg, int* c_api_ret_code) {
-  return TVMFFIPyCallManager::ThreadLocal()->SetField(setter_factory, field_setter, field_ptr,
-                                                      py_arg, c_api_ret_code);
+  return TVMFFIPyCallManager::ThreadLocal()->SetField(setter_factory, field_setter, field_flags,
+                                                      field_ptr, py_arg, c_api_ret_code);
 }
 
 /*!

@@ -216,6 +216,15 @@ class TypeTable {
   void RegisterTypeField(int32_t type_index, const TVMFFIFieldInfo* info) {
     Entry* entry = GetTypeEntry(type_index);
     TVMFFIFieldInfo field_data = *info;
+    // Retain FunctionObj setter via any_pool_ so it outlives the Entry.
+    if ((field_data.flags & kTVMFFIFieldFlagBitSetterIsFunctionObj) &&
+        field_data.setter != nullptr) {
+      TVMFFIAny setter_ref;
+      setter_ref.type_index = kTVMFFIFunction;
+      setter_ref.zero_padding = 0;
+      setter_ref.v_obj = static_cast<TVMFFIObject*>(field_data.setter);
+      any_pool_.emplace_back(AnyView::CopyFromTVMFFIAny(setter_ref));
+    }
     field_data.name = this->CopyString(info->name);
     field_data.doc = this->CopyString(info->doc);
     field_data.metadata = this->CopyString(info->metadata);

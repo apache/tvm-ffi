@@ -488,6 +488,7 @@ cdef _type_info_create_from_type_key(object type_cls, str type_key):
         setter = FieldSetter.__new__(FieldSetter)
         (<FieldSetter>setter).setter = field.setter
         (<FieldSetter>setter).offset = field.offset
+        (<FieldSetter>setter).flags = field.flags
         metadata_obj = json.loads(bytearray_to_str(&field.metadata)) if field.metadata.size != 0 else {}
         fields.append(
             TypeField(

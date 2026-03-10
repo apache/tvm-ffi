@@ -913,6 +913,15 @@ typedef enum {
    * By default this flag is off (meaning the field accepts positional arguments).
    */
   kTVMFFIFieldFlagBitMaskKwOnly = 1 << 10,
+  /*!
+   * \brief The setter field is a TVMFFIObjectHandle pointing to a FunctionObj.
+   *
+   * When this flag is set, the ``setter`` member of TVMFFIFieldInfo is not a
+   * TVMFFIFieldSetter function pointer but instead a TVMFFIObjectHandle
+   * pointing to a FunctionObj.  The FunctionObj is called with two arguments:
+   * ``(field_addr_as_OpaquePtr, value_as_AnyView)``.
+   */
+  kTVMFFIFieldFlagBitSetterIsFunctionObj = 1 << 11,
 #ifdef __cplusplus
 };
 #else
@@ -1008,9 +1017,15 @@ typedef struct {
   TVMFFIFieldGetter getter;
   /*!
    * \brief The setter to access the field.
+   *
+   * When kTVMFFIFieldFlagBitSetterIsFunctionObj is NOT set (default),
+   * this is a TVMFFIFieldSetter function pointer (cast to void*).
+   * When kTVMFFIFieldFlagBitSetterIsFunctionObj IS set,
+   * this is a TVMFFIObjectHandle pointing to a FunctionObj.
+   *
    * \note The setter is set even if the field is readonly for serialization.
    */
-  TVMFFIFieldSetter setter;
+  void* setter;
   /*!
    * \brief The default value or default factory of the field.
    *

@@ -911,7 +911,7 @@ class ObjectDef : public ReflectionDefBase {
       info.flags |= kTVMFFIFieldFlagBitMaskWritable;
     }
     info.getter = FieldGetter<T>;
-    info.setter = FieldSetter<T>;
+    info.setter = reinterpret_cast<void*>(FieldSetter<T>);
     // initialize default value to nullptr
     info.default_value_or_factory = AnyView(nullptr).CopyToTVMFFIAny();
     info.doc = TVMFFIByteArray{nullptr, 0};
