@@ -219,7 +219,7 @@ inline void RegisterAutoInit(int32_t type_index) {
   info.flags = kTVMFFIFieldFlagBitMaskIsStaticMethod;
   info.method = AnyView(auto_init_fn).CopyToTVMFFIAny();
   static const std::string kMetadata =
-      "{\"type_schema\":" + std::string(details::TypeSchemaImpl<Function>::v()) +
+      "{\"type_schema\":" + std::string(::tvm::ffi::details::TypeSchemaImpl<Function>::v()) +
       ",\"auto_init\":true}";
   info.metadata = TVMFFIByteArray{kMetadata.c_str(), kMetadata.size()};
   TVM_FFI_CHECK_SAFE_CALL(TVMFFITypeRegisterMethod(type_index, &info));
