@@ -20,9 +20,10 @@ esac
 curl -Ls "https://micro.mamba.pm/api/micromamba/${PLATFORM}/latest" \
   | tar -xvj -C /usr/local bin/micromamba
 
+# Install static zlib and zstd for static linking
+yum install -y zlib-static libzstd-devel
+
 # Create environment with LLVM
-# zlib provides libz.a; libzstd-static provides libzstd.a (needed for static linking)
 /usr/local/bin/micromamba create -p "${PREFIX}" -c conda-forge \
   "llvmdev=${LLVM_VERSION}" "clangdev=${LLVM_VERSION}" "compiler-rt=${LLVM_VERSION}" \
-  zlib libzstd-static \
   -y
