@@ -67,12 +67,14 @@ ORCJITDynamicLibraryObj::ORCJITDynamicLibraryObj(ORCJITExecutionSession session,
 }
 
 ORCJITDynamicLibraryObj::~ORCJITDynamicLibraryObj() {
-  // Run __cxa_atexit handlers BEFORE deinitializers free JIT memory.
-  // The platform's __dso_handle resolves to the JITDylib pointer address.
-  void* dso_key = reinterpret_cast<void*>(dylib_);
-  session_->RunCxaFinalize(dso_key);
+  // LLJIT::deinitialize runs __lljit_run_atexits (drains __cxa_atexit handlers)
+  // followed by any __orc_deinit_func.* functions for the JITDylib.
+  // This works because host symbols come via the ProcessSymbols JITDylib in the
+  // link order, so PlatformJD's __cxa_atexit interposer takes precedence.
+  if (auto err = jit_->deinitialize(*dylib_)) {
+    llvm::consumeError(std::move(err));
+  }
   session_->RunPendingDeinitializers(GetJITDylib());
-  session_->UnregisterDsoHandle(dso_key);
 }
 
 void ORCJITDynamicLibraryObj::AddObjectFile(const String& path) {

@@ -44,22 +44,6 @@ namespace tvm {
 namespace ffi {
 namespace orcjit {
 
-// Global registry mapping dso_handle pointers to their owning session.
-// The platform's __dso_handle for each JITDylib resolves to the JITDylib* address,
-// so dso values passed to __cxa_atexit are JITDylib pointers.
-static std::mutex g_dso_session_mutex;
-static std::unordered_map<void*, ORCJITExecutionSessionObj*> g_dso_to_session;
-
-extern "C" int orcjit_cxa_atexit(void (*f)(void*), void* arg, void* dso) {
-  std::lock_guard<std::mutex> lock(g_dso_session_mutex);
-  auto it = g_dso_to_session.find(dso);
-  if (it != g_dso_to_session.end()) {
-    it->second->RegisterCxaAtExit(f, arg, dso);
-    return 0;
-  }
-  return 0;
-}
-
 // Initialize LLVM native target (only once)
 struct LLVMInitializer {
   LLVMInitializer() {
@@ -255,31 +239,14 @@ ORCJITDynamicLibrary ORCJITExecutionSessionObj::CreateDynamicLibrary(const Strin
 
   llvm::orc::JITDylib& jit_dylib =
       call_llvm(jit_->getExecutionSession().createJITDylib(lib_name.c_str()));
-  jit_dylib.addToLinkOrder(jit_->getMainJITDylib());
-  if (auto* PlatformJD = jit_->getPlatformJITDylib().get()) {
-    jit_dylib.addToLinkOrder(*PlatformJD);
+  // Use the LLJIT's default link order (Main → Platform → ProcessSymbols).
+  // This provides host process symbols via the ProcessSymbols JITDylib's generator,
+  // while ensuring the platform's __cxa_atexit interposer (in PlatformJD) takes
+  // precedence — so __cxa_atexit handlers are managed by the platform and can be
+  // drained per-JITDylib via __lljit_run_atexits at teardown.
+  for (auto& kv : jit_->defaultLinkOrder()) {
+    jit_dylib.addToLinkOrder(*kv.first, kv.second);
   }
-
-  // The platform defines __dso_handle = ExecutorAddr::fromPtr(&jit_dylib),
-  // so the dso value passed to __cxa_atexit will be the JITDylib pointer.
-  // Register it in our global map so orcjit_cxa_atexit can find the session.
-  RegisterDsoHandle(reinterpret_cast<void*>(&jit_dylib));
-
-  // Define __cxa_atexit as our custom implementation so static destructors are
-  // tracked per-dylib and run at dylib teardown, not at process exit.
-  llvm::orc::SymbolMap cxa_sym;
-  auto& es = jit_->getExecutionSession();
-  cxa_sym[es.intern("__cxa_atexit")] = llvm::orc::ExecutorSymbolDef(
-      llvm::orc::ExecutorAddr::fromPtr(&orcjit_cxa_atexit),
-      llvm::JITSymbolFlags::Exported | llvm::JITSymbolFlags::Callable);
-  call_llvm(jit_dylib.define(llvm::orc::absoluteSymbols(std::move(cxa_sym))),
-            "Failed to define __cxa_atexit absolute symbol");
-
-  std::unique_ptr<llvm::orc::DynamicLibrarySearchGenerator> generator =
-      call_llvm(llvm::orc::DynamicLibrarySearchGenerator::GetForCurrentProcess(
-                    jit_->getDataLayout().getGlobalPrefix()),
-                "Failed to create process symbol resolver");
-  jit_dylib.addGenerator(std::move(generator));
 
   auto dylib = ORCJITDynamicLibrary(make_object<ORCJITDynamicLibraryObj>(
       GetRef<ORCJITExecutionSession>(this), &jit_dylib, jit_.get(), lib_name));
@@ -367,38 +334,6 @@ void ORCJITExecutionSessionObj::AddPendingDeinitializer(llvm::orc::JITDylib* jit
   } else {
     pending_deinitializers_[jit_dylib].push_back(entry);
   }
-}
-
-void ORCJITExecutionSessionObj::RegisterCxaAtExit(void (*destructor)(void*), void* arg,
-                                                   void* dso_handle) {
-  std::lock_guard<std::mutex> lock(cxa_atexit_mutex_);
-  cxa_atexit_handlers_[dso_handle].push_back({destructor, arg});
-}
-
-void ORCJITExecutionSessionObj::RunCxaFinalize(void* dso_handle) {
-  std::vector<CxaAtExitEntry> handlers;
-  {
-    std::lock_guard<std::mutex> lock(cxa_atexit_mutex_);
-    auto it = cxa_atexit_handlers_.find(dso_handle);
-    if (it != cxa_atexit_handlers_.end()) {
-      handlers = std::move(it->second);
-      cxa_atexit_handlers_.erase(it);
-    }
-  }
-  // Run in reverse (LIFO) order
-  for (auto it = handlers.rbegin(); it != handlers.rend(); ++it) {
-    it->destructor(it->arg);
-  }
-}
-
-void ORCJITExecutionSessionObj::RegisterDsoHandle(void* dso_handle) {
-  std::lock_guard<std::mutex> lock(g_dso_session_mutex);
-  g_dso_to_session[dso_handle] = this;
-}
-
-void ORCJITExecutionSessionObj::UnregisterDsoHandle(void* dso_handle) {
-  std::lock_guard<std::mutex> lock(g_dso_session_mutex);
-  g_dso_to_session.erase(dso_handle);
 }
 
 }  // namespace orcjit
