@@ -55,14 +55,6 @@ struct LLVMInitializer {
 
 static LLVMInitializer llvm_initializer;
 
-#define ITERATE_SECTION_PER_EDGE(SECTION, BLOCK, EDGE, TARGET, ...) \
-  for (auto* BLOCK : SECTION.blocks()) {                            \
-    for (auto& EDGE : BLOCK->edges()) {                             \
-      auto& TARGET = EDGE.getTarget();                              \
-      __VA_ARGS__                                                   \
-    }                                                               \
-  }
-
 class InitFiniPlugin : public llvm::orc::ObjectLinkingLayer::Plugin {
   ORCJITExecutionSession session_;
 
@@ -72,60 +64,13 @@ class InitFiniPlugin : public llvm::orc::ObjectLinkingLayer::Plugin {
   void modifyPassConfig(llvm::orc::MaterializationResponsibility& MR, llvm::jitlink::LinkGraph& G,
                         llvm::jitlink::PassConfiguration& Config) override {
     auto& jit_dylib = MR.getTargetJITDylib();
-    Config.PrePrunePasses.emplace_back([this, &jit_dylib](llvm::jitlink::LinkGraph& G) {
-      // Mark .fini and .dtors symbols as live for deinitializers
+    // Mark all init/fini section blocks and their edge targets as live
+    // so they survive dead-stripping.
+    Config.PrePrunePasses.emplace_back([](llvm::jitlink::LinkGraph& G) {
       for (auto& Section : G.sections()) {
         auto section_name = Section.getName();
-        if (section_name.starts_with(".init_array")) {
-          int priority = 0;
-          bool has_priority = section_name.consume_front(".init_array.") &&
-                              !section_name.getAsInteger(10, priority);
-          ITERATE_SECTION_PER_EDGE(Section, Block, Edge, Target, {
-            if (Target.hasName()) {
-              session_->AddPendingInitializer(
-                  &jit_dylib,
-                  {(*Target.getName()).str(), llvm::orc::ExecutorAddr(0),
-                   has_priority
-                       ? ORCJITExecutionSessionObj::InitFiniEntry::Section::kInitArrayWithPriority
-                       : ORCJITExecutionSessionObj::InitFiniEntry::Section::kInitArray,
-                   priority});
-            }
-          });
-        } else if (section_name.starts_with(".init")) {
-          ITERATE_SECTION_PER_EDGE(Section, Block, Edge, Target, {
-            if (Target.hasName()) {
-              session_->AddPendingInitializer(
-                  &jit_dylib, {(*Target.getName()).str(), llvm::orc::ExecutorAddr(0),
-                               ORCJITExecutionSessionObj::InitFiniEntry::Section::kInit, 0});
-            }
-          });
-        }
-        if (section_name.starts_with(".fini_array")) {
-          int priority = 0;
-          bool has_priority = section_name.consume_front(".fini_array.") &&
-                              !section_name.getAsInteger(10, priority);
-          ITERATE_SECTION_PER_EDGE(Section, Block, Edge, Target, {
-            if (Target.hasName()) {
-              session_->AddPendingDeinitializer(
-                  &jit_dylib,
-                  {(*Target.getName()).str(), llvm::orc::ExecutorAddr(0),
-                   has_priority
-                       ? ORCJITExecutionSessionObj::InitFiniEntry::Section::kFiniArrayWithPriority
-                       : ORCJITExecutionSessionObj::InitFiniEntry::Section::kFiniArray,
-                   -priority});
-            }
-          });
-        } else if (section_name.starts_with(".fini")) {
-          ITERATE_SECTION_PER_EDGE(Section, Block, Edge, Target, {
-            if (Target.hasName()) {
-              session_->AddPendingDeinitializer(
-                  &jit_dylib, {(*Target.getName()).str(), llvm::orc::ExecutorAddr(0),
-                               ORCJITExecutionSessionObj::InitFiniEntry::Section::kFini, 0});
-            }
-          });
-        }
-
-        if (section_name.starts_with(".dtors")) {
+        if (section_name.starts_with(".init_array") || section_name.starts_with(".fini_array") ||
+            section_name.starts_with(".ctors") || section_name.starts_with(".dtors")) {
           for (auto* Block : Section.blocks()) {
             for (auto* Sym : G.defined_symbols()) {
               if (&Sym->getBlock() == Block) {
@@ -140,51 +85,59 @@ class InitFiniPlugin : public llvm::orc::ObjectLinkingLayer::Plugin {
       }
       return llvm::Error::success();
     });
+    // After fixups, read resolved function pointers from all init/fini data sections.
     Config.PostFixupPasses.emplace_back([this, &jit_dylib](llvm::jitlink::LinkGraph& G) {
+      using Entry = ORCJITExecutionSessionObj::InitFiniEntry;
       for (auto& Sec : G.sections()) {
         auto section_name = Sec.getName();
-        if (section_name.starts_with(".ctors")) {
-          int priority = 0;
-          bool has_priority =
-              section_name.consume_front(".ctors.") && !section_name.getAsInteger(10, priority);
-          for (auto* Block : Sec.blocks()) {
-            // For .ctors, read function pointers directly from block content after fixup
-            auto Content = Block->getContent();
-            size_t PtrSize = G.getPointerSize();
-            for (size_t Offset = 0; Offset + PtrSize <= Content.size(); Offset += PtrSize) {
-              uint64_t FnAddr = 0;
-              memcpy(&FnAddr, Content.data() + Offset, PtrSize);
-              if (FnAddr != 0) {
-                session_->AddPendingInitializer(
-                    &jit_dylib,
-                    {"", llvm::orc::ExecutorAddr(FnAddr),
-                     has_priority
-                         ? ORCJITExecutionSessionObj::InitFiniEntry::Section::kCtorsWithPriority
-                         : ORCJITExecutionSessionObj::InitFiniEntry::Section::kCtors,
-                     -priority});
-              }
-            }
+        bool is_init_array = section_name.starts_with(".init_array");
+        bool is_ctors = section_name.starts_with(".ctors");
+        bool is_fini_array = section_name.starts_with(".fini_array");
+        bool is_dtors = section_name.starts_with(".dtors");
+        if (!is_init_array && !is_ctors && !is_fini_array && !is_dtors) continue;
+
+        int priority = 0;
+        Entry::Section sec;
+        bool is_init;
+        if (is_init_array) {
+          if (section_name.consume_front(".init_array.")) {
+            section_name.getAsInteger(10, priority);
           }
+          sec = Entry::Section::kInitArray;
+          is_init = true;
+        } else if (is_ctors) {
+          if (section_name.consume_front(".ctors.") && !section_name.getAsInteger(10, priority)) {
+            priority = -priority;
+          }
+          sec = Entry::Section::kCtors;
+          is_init = true;
+        } else if (is_fini_array) {
+          if (section_name.consume_front(".fini_array.") &&
+              !section_name.getAsInteger(10, priority)) {
+            priority = -priority;
+          }
+          sec = Entry::Section::kFiniArray;
+          is_init = false;
+        } else {
+          if (section_name.consume_front(".dtors.")) {
+            section_name.getAsInteger(10, priority);
+          }
+          sec = Entry::Section::kDtors;
+          is_init = false;
         }
-        if (section_name.starts_with(".dtors")) {
-          int priority = 0;
-          bool has_priority =
-              section_name.consume_front(".dtors.") && !section_name.getAsInteger(10, priority);
-          for (auto* Block : Sec.blocks()) {
-            // For .dtors, read function pointers directly from block content after fixup
-            auto Content = Block->getContent();
-            size_t PtrSize = G.getPointerSize();
-            for (size_t Offset = 0; Offset + PtrSize <= Content.size(); Offset += PtrSize) {
-              uint64_t FnAddr = 0;
-              memcpy(&FnAddr, Content.data() + Offset, PtrSize);
-              if (FnAddr != 0) {
-                session_->AddPendingDeinitializer(
-                    &jit_dylib,
-                    {"", llvm::orc::ExecutorAddr(FnAddr),
-                     has_priority
-                         ? ORCJITExecutionSessionObj::InitFiniEntry::Section::kDtorsWithPriority
-                         : ORCJITExecutionSessionObj::InitFiniEntry::Section::kDtors,
-                     priority});
+
+        for (auto* Block : Sec.blocks()) {
+          auto Content = Block->getContent();
+          size_t PtrSize = G.getPointerSize();
+          for (size_t Offset = 0; Offset + PtrSize <= Content.size(); Offset += PtrSize) {
+            uint64_t FnAddr = 0;
+            memcpy(&FnAddr, Content.data() + Offset, PtrSize);
+            if (FnAddr != 0) {
+              Entry entry{llvm::orc::ExecutorAddr(FnAddr), sec, priority};
+              if (is_init) {
+                session_->AddPendingInitializer(&jit_dylib, entry);
+              } else {
+                session_->AddPendingDeinitializer(&jit_dylib, entry);
               }
             }
           }
@@ -269,23 +222,12 @@ using CtorDtor = void (*)();
 void ORCJITExecutionSessionObj::RunPendingInitializers(llvm::orc::JITDylib& jit_dylib) {
   auto it = pending_initializers_.find(&jit_dylib);
   if (it != pending_initializers_.end()) {
-    llvm::sort(it->second, [&](InitFiniEntry& a, InitFiniEntry& b) {
-      return static_cast<int>(a.section) < static_cast<int>(b.section) ||
-             (a.section == b.section && a.priority < b.priority);
+    llvm::sort(it->second, [](const InitFiniEntry& a, const InitFiniEntry& b) {
+      if (a.section != b.section) return static_cast<int>(a.section) < static_cast<int>(b.section);
+      return a.priority < b.priority;
     });
-    llvm::orc::JITDylibSearchOrder search_order;
-    search_order.emplace_back(&jit_dylib, llvm::orc::JITDylibLookupFlags::MatchAllSymbols);
     for (const auto& entry : it->second) {
-      if (!entry.name.empty()) {
-        // Look up symbol using the full search order
-        auto symbol = call_llvm(
-            jit_->getExecutionSession().lookup(search_order, jit_->mangleAndIntern(entry.name)));
-        auto func = symbol.getAddress().toPtr<CtorDtor>();
-        func();
-      } else {
-        auto func = entry.address.toPtr<CtorDtor>();
-        func();
-      }
+      entry.address.toPtr<CtorDtor>()();
     }
     pending_initializers_.erase(it);
   }
@@ -294,23 +236,12 @@ void ORCJITExecutionSessionObj::RunPendingInitializers(llvm::orc::JITDylib& jit_
 void ORCJITExecutionSessionObj::RunPendingDeinitializers(llvm::orc::JITDylib& jit_dylib) {
   auto it = pending_deinitializers_.find(&jit_dylib);
   if (it != pending_deinitializers_.end()) {
-    llvm::sort(it->second, [&](InitFiniEntry& a, InitFiniEntry& b) {
-      return static_cast<int>(a.section) < static_cast<int>(b.section) ||
-             (a.section == b.section && a.priority < b.priority);
+    llvm::sort(it->second, [](const InitFiniEntry& a, const InitFiniEntry& b) {
+      if (a.section != b.section) return static_cast<int>(a.section) < static_cast<int>(b.section);
+      return a.priority < b.priority;
     });
-    llvm::orc::JITDylibSearchOrder search_order;
-    search_order.emplace_back(&jit_dylib, llvm::orc::JITDylibLookupFlags::MatchAllSymbols);
     for (const auto& entry : it->second) {
-      if (!entry.name.empty()) {
-        // Look up symbol using the full search order
-        auto symbol = call_llvm(
-            jit_->getExecutionSession().lookup(search_order, jit_->mangleAndIntern(entry.name)));
-        auto func = symbol.getAddress().toPtr<CtorDtor>();
-        func();
-      } else {
-        auto func = entry.address.toPtr<CtorDtor>();
-        func();
-      }
+      entry.address.toPtr<CtorDtor>()();
     }
     pending_deinitializers_.erase(it);
   }
@@ -318,22 +249,12 @@ void ORCJITExecutionSessionObj::RunPendingDeinitializers(llvm::orc::JITDylib& ji
 
 void ORCJITExecutionSessionObj::AddPendingInitializer(llvm::orc::JITDylib* jit_dylib,
                                                       const InitFiniEntry& entry) {
-  auto it = pending_initializers_.find(jit_dylib);
-  if (it == pending_initializers_.end()) {
-    pending_initializers_[jit_dylib] = std::vector<InitFiniEntry>(1, entry);
-  } else {
-    pending_initializers_[jit_dylib].push_back(entry);
-  }
+  pending_initializers_[jit_dylib].push_back(entry);
 }
 
 void ORCJITExecutionSessionObj::AddPendingDeinitializer(llvm::orc::JITDylib* jit_dylib,
                                                         const InitFiniEntry& entry) {
-  auto it = pending_deinitializers_.find(jit_dylib);
-  if (it == pending_deinitializers_.end()) {
-    pending_deinitializers_[jit_dylib] = std::vector<InitFiniEntry>(1, entry);
-  } else {
-    pending_deinitializers_[jit_dylib].push_back(entry);
-  }
+  pending_deinitializers_[jit_dylib].push_back(entry);
 }
 
 }  // namespace orcjit

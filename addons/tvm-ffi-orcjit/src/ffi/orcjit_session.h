@@ -30,7 +30,6 @@
 #include <tvm/ffi/object.h>
 #include <tvm/ffi/string.h>
 
-#include <mutex>
 #include <string>
 #include <unordered_map>
 
@@ -78,18 +77,11 @@ class ORCJITExecutionSessionObj : public Object {
 
   struct InitFiniEntry {
     enum class Section {
-      kInitArrayWithPriority = 0,
-      kInitArray,
-      kInit,
-      kCtorsWithPriority,
-      kCtors,
-      kDtors,
-      kDtorsWithPriority,
-      kFini,
-      kFiniArray,
-      kFiniArrayWithPriority,
+      kInitArray = 0,
+      kCtors = 1,
+      kDtors = 2,
+      kFiniArray = 3,
     };
-    std::string name;
     llvm::orc::ExecutorAddr address;
     Section section;
     int priority;
@@ -109,9 +101,7 @@ class ORCJITExecutionSessionObj : public Object {
   int dylib_counter_ = 0;
 
   std::unordered_map<llvm::orc::JITDylib*, std::vector<InitFiniEntry>> pending_initializers_;
-  std::mutex pending_initializers_mutex_;
   std::unordered_map<llvm::orc::JITDylib*, std::vector<InitFiniEntry>> pending_deinitializers_;
-  std::mutex pending_deinitializers_mutex_;
 
 };
 
