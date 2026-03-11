@@ -38,17 +38,12 @@
 #include <tvm/ffi/function.h>
 #include <tvm/ffi/reflection/registry.h>
 
-#include <set>
-
 #include "orcjit_session.h"
 #include "orcjit_utils.h"
 
 namespace tvm {
 namespace ffi {
 namespace orcjit {
-
-static std::mutex g_warned_functions_mutex;
-static std::set<std::string> g_warned_functions;
 
 ORCJITDynamicLibraryObj::ORCJITDynamicLibraryObj(ORCJITExecutionSession session,
                                                  llvm::orc::JITDylib* dylib, llvm::orc::LLJIT* jit,
@@ -145,21 +140,10 @@ Optional<Function> ORCJITDynamicLibraryObj::GetFunction(const String& name) {
     // Wrap C function pointer as tvm-ffi Function
     TVMFFISafeCallType c_func = reinterpret_cast<TVMFFISafeCallType>(symbol);
 
-    return Function::FromPacked([c_func, name](PackedArgs args, Any* rv) {
+    return Function::FromPacked([c_func](PackedArgs args, Any* rv) {
       TVM_FFI_ICHECK_LT(rv->type_index(), ffi::TypeIndex::kTVMFFIStaticObjectBegin);
       TVM_FFI_CHECK_SAFE_CALL((*c_func)(nullptr, reinterpret_cast<const TVMFFIAny*>(args.data()),
                                         args.size(), reinterpret_cast<TVMFFIAny*>(rv)));
-      if (rv->type_index() >= ffi::TypeIndex::kTVMFFIStaticObjectBegin) {
-        std::lock_guard<std::mutex> lock(g_warned_functions_mutex);
-        std::string key(name);
-        if (g_warned_functions.find(key) == g_warned_functions.end()) {
-          g_warned_functions.insert(key);
-          fprintf(stderr,
-                  "[orcjit] warning: function '%s' returned a reference-counted object. "
-                  "Ensure the object is released before the JIT module is destroyed.\n",
-                  key.c_str());
-        }
-      }
     });
   }
   return std::nullopt;
