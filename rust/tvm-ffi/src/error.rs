@@ -18,6 +18,7 @@
  */
 use crate::derive::{Object, ObjectRef};
 use crate::object::{Object, ObjectArc};
+use std::convert::Infallible;
 use std::ffi::c_void;
 use tvm_ffi_sys::TVMFFIBacktraceUpdateMode::kTVMFFIBacktraceUpdateModeAppend;
 use tvm_ffi_sys::{
@@ -62,6 +63,12 @@ pub struct ErrorObj {
 #[derive(Clone, ObjectRef)]
 pub struct Error {
     data: ObjectArc<ErrorObj>,
+}
+
+impl From<Infallible> for Error {
+    fn from(value: Infallible) -> Self {
+        match value {}
+    }
 }
 
 /// Default result that uses Error as the error type
@@ -118,7 +125,7 @@ impl Error {
     /// # Returns
     /// The kind of the error
     pub fn kind(&self) -> ErrorKind<'_> {
-        ErrorKind(&self.data.cell.kind.as_str())
+        ErrorKind(self.data.cell.kind.as_str())
     }
 
     /// Get the message of the error
@@ -179,7 +186,7 @@ impl Error {
             let mut new_backtrace = String::new();
             new_backtrace.push_str(this.backtrace());
             new_backtrace.push_str(backtrace);
-            return Error::new(this.kind(), this.message(), &new_backtrace);
+            Error::new(this.kind(), this.message(), &new_backtrace)
         }
     }
 }

@@ -22,7 +22,7 @@ use std::sync::atomic::AtomicU64;
 use crate::derive::ObjectRef;
 pub use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
 /// Object related ABI handling
-use tvm_ffi_sys::{TVMFFIObject, COMBINED_REF_COUNT_BOTH_ONE};
+use tvm_ffi_sys::{COMBINED_REF_COUNT_BOTH_ONE, TVMFFIObject};
 
 /// Object type is by default the TVMFFIObject
 #[repr(C)]
@@ -60,7 +60,6 @@ pub unsafe trait ObjectCore: Sized + 'static {
     ///
     /// # Returns
     /// * `&mut TVMFFIObject` - The object header
-    /// \return The object header
     unsafe fn object_header_mut(this: &mut Self) -> &mut TVMFFIObject;
 }
 
@@ -119,7 +118,7 @@ pub(crate) mod unsafe_ {
     };
 
     use std::ffi::c_void;
-    use std::sync::atomic::{fence, Ordering};
+    use std::sync::atomic::{Ordering, fence};
     use tvm_ffi_sys::TVMFFIObject;
     use tvm_ffi_sys::TVMFFIObjectDeleterFlagBitMask::{
         kTVMFFIObjectDeleterFlagBitMaskBoth, kTVMFFIObjectDeleterFlagBitMaskStrong,
@@ -307,7 +306,7 @@ impl<T: ObjectCore> ObjectArc<T> {
             );
             // move into the object arc ptr
             Self {
-                ptr: std::ptr::NonNull::new_unchecked(ptr as *mut T),
+                ptr: std::ptr::NonNull::new_unchecked(ptr),
                 _phantom: std::marker::PhantomData,
             }
         }
@@ -345,7 +344,7 @@ impl<T: ObjectCore> ObjectArc<T> {
             );
             // move into the object arc ptr
             Self {
-                ptr: std::ptr::NonNull::new_unchecked(ptr as *mut T),
+                ptr: std::ptr::NonNull::new_unchecked(ptr),
                 _phantom: std::marker::PhantomData,
             }
         }
@@ -358,7 +357,6 @@ impl<T: ObjectCore> ObjectArc<T> {
     ///
     /// # Returns
     /// * `ObjectArc<T>` - The ObjectArc
-    /// \return The ObjectArc
     #[inline]
     pub unsafe fn from_raw(ptr: *const T) -> Self {
         Self {
@@ -389,7 +387,6 @@ impl<T: ObjectCore> ObjectArc<T> {
     ///
     /// # Returns
     /// * `*const T` - The raw pointer
-    /// \return The raw pointer
     #[inline]
     pub unsafe fn as_raw(this: &Self) -> *const T {
         this.ptr.as_ptr() as *const T
