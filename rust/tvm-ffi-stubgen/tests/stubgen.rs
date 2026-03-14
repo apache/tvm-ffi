@@ -19,7 +19,7 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use tvm_ffi_stubgen::{run, Args};
+use tvm_ffi_stubgen::{Args, run};
 
 #[test]
 fn stubgen_tvm_ffi_testing() {

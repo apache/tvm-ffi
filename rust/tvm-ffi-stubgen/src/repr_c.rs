@@ -25,7 +25,7 @@
 //! inference.
 
 use crate::ffi;
-use crate::schema::{extract_type_schema, parse_type_schema, TypeSchema};
+use crate::schema::{TypeSchema, extract_type_schema, parse_type_schema};
 use log::{debug, trace};
 use std::collections::BTreeMap;
 
@@ -113,11 +113,7 @@ pub(crate) fn check_repr_c(
     };
     trace!(
         "{}: total_size={}, type_depth={}, num_fields={}, num_methods={}",
-        type_key,
-        total_size,
-        info.type_depth,
-        info.num_fields,
-        info.num_methods
+        type_key, total_size, info.type_depth, info.num_fields, info.num_methods
     );
 
     // Resolve parent.
@@ -151,8 +147,7 @@ pub(crate) fn check_repr_c(
                     // Parent exists but not mappable — use Object as parent, gap covers the rest.
                     trace!(
                         "{}: parent='{}' not mappable, falling back to Object",
-                        type_key,
-                        key
+                        type_key, key
                     );
                     (None, obj_size)
                 }
@@ -163,9 +158,7 @@ pub(crate) fn check_repr_c(
         };
     trace!(
         "{}: parent={:?}, parent_total_size={}",
-        type_key,
-        parent_type_key,
-        parent_total_size
+        type_key, parent_type_key, parent_total_size
     );
 
     // Collect and sort fields that belong to this type (offset >= parent_total_size).
@@ -211,10 +204,7 @@ pub(crate) fn check_repr_c(
             }
             trace!(
                 "{}:   field '{}': offset={}, size={}",
-                type_key,
-                name,
-                field.offset,
-                field.size
+                type_key, name, field.offset, field.size
             );
             if field.offset < 0 || field.size < 0 {
                 debug!("{}: field '{}' has invalid offset/size", type_key, name);
@@ -239,7 +229,9 @@ pub(crate) fn check_repr_c(
                     // at runtime via FieldGetter with an untyped (Any) return.
                     debug!(
                         "{}: field '{}' type not mappable, covered by gap + non-layout FieldGetter (schema_origin={:?})",
-                        type_key, name, schema.as_ref().map(|s| &s.origin)
+                        type_key,
+                        name,
+                        schema.as_ref().map(|s| &s.origin)
                     );
                     non_layout_fields.push(NonLayoutField {
                         name: name.clone(),
@@ -251,10 +243,7 @@ pub(crate) fn check_repr_c(
             };
             trace!(
                 "{}:   field '{}' -> rust_type='{}', is_pod={}",
-                type_key,
-                name,
-                rust_type,
-                is_pod
+                type_key, name, rust_type, is_pod
             );
             typed_fields.push(ReprCField {
                 rust_name: sanitize_ident(&name),
@@ -277,10 +266,7 @@ pub(crate) fn check_repr_c(
             let gap_size = f.offset - pos;
             trace!(
                 "{}:   gap at {}..{} ({} bytes)",
-                type_key,
-                pos,
-                f.offset,
-                gap_size
+                type_key, pos, f.offset, gap_size
             );
             layout.push(LayoutEntry::Gap {
                 name: format!("_gap{}", gap_idx),
@@ -305,10 +291,7 @@ pub(crate) fn check_repr_c(
         let gap_size = total_size - pos;
         trace!(
             "{}:   trailing gap at {}..{} ({} bytes)",
-            type_key,
-            pos,
-            total_size,
-            gap_size
+            type_key, pos, total_size, gap_size
         );
         layout.push(LayoutEntry::Gap {
             name: format!("_gap{}", gap_idx),

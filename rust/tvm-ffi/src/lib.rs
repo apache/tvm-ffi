@@ -16,6 +16,17 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+// TODO: incrementally migrate unsafe fn bodies to use explicit unsafe blocks
+#![allow(unsafe_op_in_unsafe_fn)]
+#![allow(
+    clippy::mut_from_ref,
+    clippy::not_unsafe_ptr_arg_deref,
+    clippy::missing_safety_doc,
+    clippy::new_without_default,
+    clippy::len_without_is_empty,
+    clippy::result_unit_err
+)]
+
 pub mod any;
 pub mod collections;
 pub mod derive;
@@ -40,10 +51,10 @@ pub use crate::collections::shape::Shape;
 pub use crate::collections::tensor::{CPUNDAlloc, NDAllocator, Tensor};
 pub use crate::device::{current_stream, with_stream};
 pub use crate::dtype::DLDataTypeExt;
-pub use crate::error::{Error, ErrorKind, Result};
 pub use crate::error::{
     ATTRIBUTE_ERROR, INDEX_ERROR, KEY_ERROR, RUNTIME_ERROR, TYPE_ERROR, VALUE_ERROR,
 };
+pub use crate::error::{Error, ErrorKind, Result};
 pub use crate::extra::module::Module;
 pub use crate::function::Function;
 pub use crate::object::{Object, ObjectArc, ObjectCore, ObjectCoreWithExtraItems, ObjectRefCore};

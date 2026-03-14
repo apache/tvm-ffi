@@ -231,11 +231,7 @@ fn type_index_for_key(type_key: &'static str) -> Option<i32> {
     let key = unsafe { TVMFFIByteArray::from_str(type_key) };
     let mut index = 0i32;
     let code = unsafe { TVMFFITypeKeyToIndex(&key, &mut index) };
-    if code == 0 {
-        Some(index)
-    } else {
-        None
-    }
+    if code == 0 { Some(index) } else { None }
 }
 
 unsafe impl<T: ObjectWrapper> AnyCompatible for T {
@@ -269,7 +265,7 @@ unsafe impl<T: ObjectWrapper> AnyCompatible for T {
     }
 
     unsafe fn copy_from_any_view_after_check(data: &TVMFFIAny) -> Self {
-        let ptr = data.data_union.v_obj as *mut TVMFFIObject;
+        let ptr = data.data_union.v_obj;
         crate::object::unsafe_::inc_ref(ptr);
         let arc = ObjectArc::from_raw(ptr as *mut Object);
         let obj = <ObjectRef as ObjectRefCore>::from_data(arc);
@@ -277,7 +273,7 @@ unsafe impl<T: ObjectWrapper> AnyCompatible for T {
     }
 
     unsafe fn move_from_any_after_check(data: &mut TVMFFIAny) -> Self {
-        let ptr = data.data_union.v_obj as *mut TVMFFIObject;
+        let ptr = data.data_union.v_obj;
         let arc = ObjectArc::from_raw(ptr as *mut Object);
         data.type_index = crate::TypeIndex::kTVMFFINone as i32;
         data.data_union.v_int64 = 0;

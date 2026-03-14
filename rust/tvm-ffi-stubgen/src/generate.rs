@@ -21,7 +21,7 @@ use crate::model::{
     FieldGen, FunctionGen, FunctionSig, GetterSpec, MethodGen, ModuleNode, RustType, TypeGen,
 };
 use crate::repr_c;
-use crate::schema::{extract_type_schema, parse_type_schema, TypeSchema};
+use crate::schema::{TypeSchema, extract_type_schema, parse_type_schema};
 use crate::utils;
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -434,7 +434,7 @@ pub(crate) fn render_cargo_toml(
         Some(path) => path.clone(),
         None => utils::default_tvm_ffi_path()?,
     };
-    let tvm_ffi_path = tvm_ffi_path.canonicalize().unwrap_or_else(|_| tvm_ffi_path);
+    let tvm_ffi_path = tvm_ffi_path.canonicalize().unwrap_or(tvm_ffi_path);
     let tvm_ffi_path_str = tvm_ffi_path.to_string_lossy().to_string();
 
     let mut package = Table::new();
@@ -448,7 +448,7 @@ pub(crate) fn render_cargo_toml(
     );
     package.insert(
         "edition".to_string(),
-        toml::Value::String("2021".to_string()),
+        toml::Value::String("2024".to_string()),
     );
 
     let mut tvm_ffi = Table::new();
@@ -467,7 +467,16 @@ pub(crate) fn render_cargo_toml(
 pub(crate) fn render_lib_rs(functions_root: &ModuleNode, types_root: &ModuleNode) -> String {
     let mut out = String::new();
     out.push_str(
-        r#"pub mod _tvm_ffi_stubgen_detail {
+        r#"#![allow(
+    clippy::needless_question_mark,
+    clippy::too_many_arguments,
+    clippy::enum_variant_names,
+    clippy::manual_div_ceil,
+    clippy::just_underscores_and_digits,
+    non_snake_case
+)]
+
+pub mod _tvm_ffi_stubgen_detail {
     pub mod functions;
     pub mod types;
 }
@@ -581,10 +590,9 @@ fn render_facade_module(
     is_root: bool,
 ) {
     // Check if this module has any actual content
-    let has_functions = functions.map_or(false, |node| !node.functions.is_empty());
-    let has_types = types.map_or(false, |node| {
-        node.types.iter().any(|ty| !is_builtin_type(&ty.type_key))
-    });
+    let has_functions = functions.is_some_and(|node| !node.functions.is_empty());
+    let has_types =
+        types.is_some_and(|node| node.types.iter().any(|ty| !is_builtin_type(&ty.type_key)));
 
     let mut child_names = std::collections::BTreeSet::new();
     if let Some(node) = functions {
@@ -818,7 +826,7 @@ fn render_repr_c_type(
         Some(parent_key) => {
             let parent_rust = _type_map
                 .get(parent_key)
-                .map(|s| s.clone())
+                .cloned()
                 .unwrap_or_else(|| format!("{}Obj", sanitize_ident(parent_key, IdentStyle::Type)));
             // Convert crate path to absolute path inside types module and append Obj
             let types_path =

@@ -125,7 +125,7 @@ impl Error {
     /// # Returns
     /// The kind of the error
     pub fn kind(&self) -> ErrorKind<'_> {
-        ErrorKind(&self.data.cell.kind.as_str())
+        ErrorKind(self.data.cell.kind.as_str())
     }
 
     /// Get the message of the error
@@ -186,7 +186,7 @@ impl Error {
             let mut new_backtrace = String::new();
             new_backtrace.push_str(this.backtrace());
             new_backtrace.push_str(backtrace);
-            return Error::new(this.kind(), this.message(), &new_backtrace);
+            Error::new(this.kind(), this.message(), &new_backtrace)
         }
     }
 }

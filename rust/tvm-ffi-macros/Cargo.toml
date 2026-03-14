@@ -20,7 +20,8 @@ name = "tvm-ffi-macros"
 description = "Procedural macro crate for tvm-ffi"
 
 version = "0.1.0-alpha.0"
-edition = "2021"
+edition = "2024"
+rust-version = "1.85"
 license = "Apache-2.0"
 
 
@@ -30,5 +31,4 @@ proc-macro = true
 [dependencies]
 proc-macro2 = "^1.0"
 quote = "^1.0"
-syn = { version = "1.0.48", features = ["full", "parsing", "extra-traits"] }
-proc-macro-error = "^1.0"
+syn = { version = "^2.0", features = ["full"] }

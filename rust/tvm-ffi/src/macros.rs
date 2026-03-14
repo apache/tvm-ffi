@@ -47,6 +47,7 @@ macro_rules! function_name {
 ///
 /// # Returns
 /// * `Result<(), Error>` - The result of the safe call
+///
 /// Macro to check safe calls and automatically update traceback with file/line info
 ///
 /// Usage: check_safe_call!(function(args))?;
@@ -102,7 +103,7 @@ macro_rules! bail {
 macro_rules! ensure {
     ($cond:expr, $error_kind:expr, $fmt:expr $(, $args:expr)* $(,)?) => {{
         if !$cond {
-            crate::bail!($error_kind, $fmt $(, $args)*);
+            $crate::bail!($error_kind, $fmt $(, $args)*);
         }
     }};
 }

@@ -16,6 +16,8 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+#![allow(clippy::new_without_default)]
+#![allow(clippy::missing_safety_doc)]
 pub mod c_api;
 pub mod c_env_api;
 pub mod dlpack;

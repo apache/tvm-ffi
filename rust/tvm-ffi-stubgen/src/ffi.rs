@@ -17,10 +17,10 @@
 
 use libloading::Library;
 use std::path::PathBuf;
+use tvm_ffi::Array;
 use tvm_ffi::tvm_ffi_sys::{
     TVMFFIByteArray, TVMFFIGetTypeInfo, TVMFFITypeInfo, TVMFFITypeKeyToIndex,
 };
-use tvm_ffi::Array;
 use tvm_ffi::{Function, Result as FfiResult, String as FfiString};
 
 pub(crate) fn load_dlls(paths: &[PathBuf]) -> Result<Vec<Library>, Box<dyn std::error::Error>> {
@@ -66,11 +66,7 @@ pub(crate) fn get_type_info(type_key: &str) -> Option<&'static TVMFFITypeInfo> {
             return None;
         }
         let info = TVMFFIGetTypeInfo(tindex);
-        if info.is_null() {
-            None
-        } else {
-            Some(&*info)
-        }
+        if info.is_null() { None } else { Some(&*info) }
     }
 }
 

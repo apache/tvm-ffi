@@ -184,6 +184,7 @@ pub trait IntoArgHolderTuple {
 
 macro_rules! impl_into_arg_holder_tuple {
     ( $($T:ident),* ; $($idx:tt),* ) => {
+        #[allow(clippy::unused_unit)]
         impl<$($T),*> $crate::function_internal::IntoArgHolderTuple for ($($T,)*)
         where
             $($T: IntoArgHolder),* {

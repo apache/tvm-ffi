@@ -16,7 +16,7 @@
 // under the License.
 
 use clap::Parser;
-use tvm_ffi_stubgen::{run, Args};
+use tvm_ffi_stubgen::{Args, run};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();

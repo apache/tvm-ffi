@@ -101,9 +101,9 @@ impl<'a, T: AnyCompatible> From<&'a T> for AnyView<'a> {
     fn from(value: &'a T) -> Self {
         unsafe {
             let mut data = TVMFFIAny::new();
-            T::copy_to_any_view(&value, &mut data);
+            T::copy_to_any_view(value, &mut data);
             Self {
-                data: data,
+                data,
                 _phantom: std::marker::PhantomData,
             }
         }

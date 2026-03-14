@@ -151,7 +151,7 @@ unsafe impl<T: AnyCompatible> AnyCompatible for Option<T> {
     }
 
     unsafe fn copy_to_any_view(src: &Self, data: &mut TVMFFIAny) {
-        if let Some(ref value) = src {
+        if let Some(value) = src {
             T::copy_to_any_view(value, data);
         } else {
             data.type_index = TypeIndex::kTVMFFINone as i32;
@@ -171,7 +171,7 @@ unsafe impl<T: AnyCompatible> AnyCompatible for Option<T> {
     }
 
     unsafe fn check_any_strict(data: &TVMFFIAny) -> bool {
-        return T::check_any_strict(data) || data.type_index == TypeIndex::kTVMFFINone as i32;
+        T::check_any_strict(data) || data.type_index == TypeIndex::kTVMFFINone as i32
     }
 
     unsafe fn copy_from_any_view_after_check(data: &TVMFFIAny) -> Self {
@@ -348,16 +348,12 @@ unsafe impl AnyCompatible for () {
     }
 
     unsafe fn check_any_strict(data: &TVMFFIAny) -> bool {
-        return data.type_index == TypeIndex::kTVMFFINone as i32;
+        data.type_index == TypeIndex::kTVMFFINone as i32
     }
 
-    unsafe fn copy_from_any_view_after_check(_data: &TVMFFIAny) -> Self {
-        ()
-    }
+    unsafe fn copy_from_any_view_after_check(_data: &TVMFFIAny) -> Self {}
 
-    unsafe fn move_from_any_after_check(_data: &mut TVMFFIAny) -> Self {
-        ()
-    }
+    unsafe fn move_from_any_after_check(_data: &mut TVMFFIAny) -> Self {}
 
     unsafe fn try_cast_from_any_view(data: &TVMFFIAny) -> Result<Self, ()> {
         if data.type_index == TypeIndex::kTVMFFINone as i32 {
