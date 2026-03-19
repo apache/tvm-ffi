@@ -43,6 +43,27 @@ namespace tvm {
 namespace ffi {
 namespace reflection {
 
+namespace details {
+
+/*!
+ * \brief Convert an AnyView to a specific reflected object type.
+ *
+ * \tparam TObjectRef The object reference type to convert to.
+ * \param input The AnyView to convert.
+ * \return The converted object.
+ */
+template <typename TObjectRef>
+TObjectRef FFIConvertFromAnyViewToObjectRef(AnyView input) {
+  TVMFFIAny input_pod = input.CopyToTVMFFIAny();
+  if (auto opt = TypeTraits<TObjectRef>::TryCastFromAnyView(&input_pod)) {
+    return *std::move(opt);
+  }
+  TVM_FFI_THROW(TypeError) << "Cannot cast from `" << TypeIndexToTypeKey(input_pod.type_index)
+                           << "` to `" << TypeTraits<TObjectRef>::TypeStr() << "`";
+}
+
+}  // namespace details
+
 /*!
  * \brief Create a packed ``__ffi_init__`` constructor for the given type.
  *

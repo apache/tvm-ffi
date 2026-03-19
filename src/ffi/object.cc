@@ -23,7 +23,10 @@
 #include <tvm/ffi/any.h>
 #include <tvm/ffi/c_api.h>
 #include <tvm/ffi/container/array.h>
+#include <tvm/ffi/container/dict.h>
+#include <tvm/ffi/container/list.h>
 #include <tvm/ffi/container/map.h>
+#include <tvm/ffi/container/tensor.h>
 #include <tvm/ffi/error.h>
 #include <tvm/ffi/function.h>
 #include <tvm/ffi/memory.h>
@@ -33,10 +36,7 @@
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/ffi/string.h>
 
-#include <algorithm>
 #include <memory>
-#include <string_view>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -368,6 +368,7 @@ class TypeTable {
                               -1);
     TVMFFITypeMetadata info;
     info.total_size = sizeof(Object);
+    info.structural_eq_hash_kind = kTVMFFISEqHashKindUnsupported;
     info.creator = nullptr;
     info.doc = TVMFFIByteArray{nullptr, 0};
     RegisterTypeMetadata(Object::_type_index, &info);
@@ -596,6 +597,30 @@ namespace {
 TVM_FFI_STATIC_INIT_BLOCK() {
   using namespace tvm::ffi;
   namespace refl = tvm::ffi::reflection;
+  refl::TypeAttrDef<Object>().def(refl::type_attr::kConvert,
+                                  &refl::details::FFIConvertFromAnyViewToObjectRef<ObjectRef>);
+  refl::TypeAttrDef<details::StringObj>().def(
+      refl::type_attr::kConvert, &refl::details::FFIConvertFromAnyViewToObjectRef<String>);
+  refl::TypeAttrDef<details::BytesObj>().def(
+      refl::type_attr::kConvert, &refl::details::FFIConvertFromAnyViewToObjectRef<Bytes>);
+  refl::TypeAttrDef<ErrorObj>().def(refl::type_attr::kConvert,
+                                    &refl::details::FFIConvertFromAnyViewToObjectRef<Error>);
+  refl::TypeAttrDef<FunctionObj>().def(refl::type_attr::kConvert,
+                                       &refl::details::FFIConvertFromAnyViewToObjectRef<Function>);
+  refl::TypeAttrDef<ShapeObj>().def(refl::type_attr::kConvert,
+                                    &refl::details::FFIConvertFromAnyViewToObjectRef<Shape>);
+  refl::TypeAttrDef<TensorObj>().def(refl::type_attr::kConvert,
+                                     &refl::details::FFIConvertFromAnyViewToObjectRef<Tensor>);
+  refl::TypeAttrDef<ArrayObj>().def(refl::type_attr::kConvert,
+                                    &refl::details::FFIConvertFromAnyViewToObjectRef<Array<Any>>);
+  refl::TypeAttrDef<MapObj>().def(refl::type_attr::kConvert,
+                                  &refl::details::FFIConvertFromAnyViewToObjectRef<Map<Any, Any>>);
+  // Skipped: TypeIndex::kTVMFFIModule
+  // Skipped: TypeIndex::kTVMFFIOpaquePyObject
+  refl::TypeAttrDef<ListObj>().def(refl::type_attr::kConvert,
+                                   &refl::details::FFIConvertFromAnyViewToObjectRef<List<Any>>);
+  refl::TypeAttrDef<DictObj>().def(
+      refl::type_attr::kConvert, &refl::details::FFIConvertFromAnyViewToObjectRef<Dict<Any, Any>>);
   refl::GlobalDef()
       .def_method(
           "ffi.GetRegisteredTypeKeys",

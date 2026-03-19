@@ -693,6 +693,8 @@ inline constexpr const char* kHash = "__ffi_hash__";
 inline constexpr const char* kEq = "__ffi_eq__";
 /*! \brief Type attribute for custom recursive three-way comparison. */
 inline constexpr const char* kCompare = "__ffi_compare__";
+/*! \brief Type attribute for converting AnyView to a specific reflected object type. */
+inline constexpr const char* kConvert = "__ffi_convert__";
 }  // namespace type_attr
 
 /*!

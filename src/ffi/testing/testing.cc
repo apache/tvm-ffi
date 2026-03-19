@@ -76,6 +76,8 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def_ro("a", &TestIntPairObj::a, "Field `a`")
       .def_ro("b", &TestIntPairObj::b, "Field `b`")
       .def("sum", &TestIntPair::Sum, "Method to compute sum of a and b");
+  refl::TypeAttrDef<TestIntPairObj>().def(
+      refl::type_attr::kConvert, &refl::details::FFIConvertFromAnyViewToObjectRef<TestIntPair>);
 }
 
 class TestObjectBase : public Object {
