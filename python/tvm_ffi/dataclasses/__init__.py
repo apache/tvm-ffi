@@ -14,8 +14,10 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-"""C++ FFI classes with structural comparison and hashing."""
+"""FFI dataclass decorators: ``c_class`` for C++-backed types, ``py_class`` for Python-defined types."""
 
 from .c_class import c_class
+from .field import KW_ONLY, Field, field
+from .py_class import py_class
 
-__all__ = ["c_class"]
+__all__ = ["KW_ONLY", "Field", "c_class", "field", "py_class"]

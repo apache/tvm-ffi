@@ -83,7 +83,7 @@ jobs:
           path: tvm-ffi
       - uses: Jimver/cuda-toolkit@6008063726ffe3309d1b22e413d9e88fed91a2f2
         id: cuda-toolkit
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098  # v7.3.1
       - name: build wheels
         env:
           CUDA_HOME: ${{steps.cuda-toolkit.outputs.CUDA_PATH}}
@@ -109,7 +109,7 @@ jobs:
           fetch-depth: 0
           submodules: recursive
           path: tvm-ffi
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098  # v7.3.1
       - name: build torch libs and wheels
         working-directory: ./tvm-ffi
         run: |
@@ -128,7 +128,7 @@ jobs:
           fetch-depth: 0
           submodules: recursive
           path: tvm-ffi
-      - uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098  # v7.3.1
         with:
           python-version: "3.12"
           activate-environment: true
