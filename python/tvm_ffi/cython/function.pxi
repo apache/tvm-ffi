@@ -889,6 +889,32 @@ cdef class Function(CObject):
     def __cinit__(self) -> None:
         self.c_release_gil = _RELEASE_GIL_BY_DEFAULT
 
+    def __init__(self, func: Optional[Callable[..., Any]] = None) -> None:
+        """Initialize a Function from a Python callable.
+
+        This constructor allows creating a `tvm_ffi.Function` directly
+        from a Python function or another `tvm_ffi.Function` instance.
+
+        Parameters
+        ----------
+        func : Optional[Callable[..., Any]]
+            The Python callable to wrap. When ``None`` (the default),
+            the object is left in its default state with a null handle.
+        """
+        if func is None:
+            return
+        cdef TVMFFIObjectHandle chandle = NULL
+        if isinstance(func, Function):
+            chandle = (<CObject>func).chandle
+            if chandle == NULL:
+                raise ValueError("Cannot initialize from a moved-from Function object.")
+            TVMFFIObjectIncRef(chandle)
+        elif callable(func):
+            _convert_to_ffi_func_handle(func, &chandle)
+        else:
+            raise TypeError(f"func must be callable, got {type(func)}")
+        self.chandle = chandle
+
     property release_gil:
         """Whether calls release the Python GIL while executing."""
 
