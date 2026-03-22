@@ -4497,3 +4497,65 @@ class TestMultiTypeCopy:
         assert not obj.dict_str_int.same_as(obj2.dict_str_int)  # ty:ignore[unresolved-attribute]
         assert tuple(obj2.list_int) == (1, 2, 3)
         assert obj2.dict_str_int["a"] == 1
+# ---------------------------------------------------------------------------
+# _collect_py_methods allowlist and method introspection
+# ---------------------------------------------------------------------------
+
+
+class TestPyMethodAllowlist:
+    """Only names in ``_FFI_RECOGNIZED_METHODS`` are collected by ``_collect_py_methods``."""
+
+    def test_system_methods_not_in_allowlist(self) -> None:
+        from tvm_ffi.dataclasses.py_class import _collect_py_methods  # noqa: PLC0415
+
+        @py_class(_unique_key("Allow"))
+        class Allow(core.Object):
+            x: int
+
+            def __ffi_init__(self, x: int) -> None:  # ty: ignore[invalid-method-override]
+                pass
+
+            def __ffi_shallow_copy__(self) -> None:
+                pass
+
+            def __ffi_repr__(self, fn_repr: Any) -> str:
+                return "repr"
+
+        collected = _collect_py_methods(Allow)
+        assert collected is not None
+        names = {name for name, _, _ in collected}
+        assert "__ffi_repr__" in names
+        assert "__ffi_init__" not in names
+        assert "__ffi_shallow_copy__" not in names
+
+    def test_arbitrary_ffi_dunder_not_collected(self) -> None:
+        from tvm_ffi.dataclasses.py_class import _collect_py_methods  # noqa: PLC0415
+
+        @py_class(_unique_key("Arb"))
+        class Arb(core.Object):
+            x: int
+
+            def __ffi_custom_op__(self, y: int) -> int:
+                return self.x + y
+
+        collected = _collect_py_methods(Arb)
+        assert collected is None
+
+
+class TestPyMethodIntrospection:
+    """Registered __ffi_* methods appear in ``TypeInfo.methods``."""
+
+    def test_ffi_repr_in_methods(self) -> None:
+        @py_class(_unique_key("IntrRepr"))
+        class IntrRepr(core.Object):
+            x: int
+
+            def __ffi_repr__(self, fn_repr: Any) -> str:
+                return "repr"
+
+        info = getattr(IntrRepr, "__tvm_ffi_type_info__")
+        names = {m.name for m in info.methods}
+        assert "__ffi_repr__" in names
+        # system methods still present
+        assert "__ffi_init__" in names
+        assert "__ffi_shallow_copy__" in names

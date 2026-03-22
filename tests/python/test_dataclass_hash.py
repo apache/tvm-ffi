@@ -968,3 +968,41 @@ def test_eq_without_hash_inside_container_raises() -> None:
     arr = tvm_ffi.Array([obj])
     with pytest.raises(ValueError, match="__ffi_eq__ or __ffi_compare__ but not __ffi_hash__"):
         RecursiveHash(arr)
+
+
+# ---------------------------------------------------------------------------
+# Custom __ffi_hash__ hook via @py_class
+# ---------------------------------------------------------------------------
+import itertools as _itertools_hash
+from typing import Any as _Any_hash
+from typing import Callable as _Callable_hash
+
+from tvm_ffi.core import Object as _Object_hash
+from tvm_ffi.dataclasses import py_class as _py_class_hash
+
+_counter_hash = _itertools_hash.count()
+
+
+def _unique_key_hash(base: str) -> str:
+    return f"testing.hash_pc.{base}_{next(_counter_hash)}"
+
+
+@_py_class_hash(_unique_key_hash("PyCustomHash"))
+class _PyCustomHash(_Object_hash):
+    key: int
+    label: str
+
+    def __ffi_hash__(self, fn_hash: _Callable_hash[..., _Any_hash]) -> int:
+        return fn_hash(self.key)
+
+
+def test_py_class_custom_hash_ignores_label() -> None:
+    a = _PyCustomHash(42, "alpha")
+    b = _PyCustomHash(42, "beta")
+    assert RecursiveHash(a) == RecursiveHash(b)
+
+
+def test_py_class_custom_hash_different_key() -> None:
+    a = _PyCustomHash(1, "same")
+    b = _PyCustomHash(2, "same")
+    assert RecursiveHash(a) != RecursiveHash(b)

@@ -1270,3 +1270,81 @@ def test_custom_compare_ordering_consistency() -> None:
     assert not RecursiveGt(a, b)
     assert RecursiveLe(a, b)
     assert RecursiveGe(a, b)
+
+
+# ---------------------------------------------------------------------------
+# Custom __ffi_eq__ / __ffi_compare__ hooks via @py_class
+# ---------------------------------------------------------------------------
+import itertools as _itertools_cmp
+from typing import Any as _Any_cmp
+from typing import Callable as _Callable_cmp
+
+from tvm_ffi._ffi_api import RecursiveHash as _RecursiveHash_cmp
+from tvm_ffi.core import Object as _Object_cmp
+from tvm_ffi.dataclasses import py_class as _py_class_cmp
+
+_counter_cmp = _itertools_cmp.count()
+
+
+def _unique_key_cmp(base: str) -> str:
+    return f"testing.cmp_pc.{base}_{next(_counter_cmp)}"
+
+
+@_py_class_cmp(_unique_key_cmp("PyEqHash"))
+class _PyEqHash(_Object_cmp):
+    key: int
+    label: str
+
+    def __ffi_hash__(self, fn_hash: _Callable_cmp[..., _Any_cmp]) -> int:
+        return fn_hash(self.key)
+
+    def __ffi_eq__(self, other: _PyEqHash, fn_eq: _Callable_cmp[..., _Any_cmp]) -> bool:
+        return fn_eq(self.key, other.key)
+
+
+@_py_class_cmp(_unique_key_cmp("PyCmp"))
+class _PyCmp(_Object_cmp):
+    key: int
+    label: str
+
+    def __ffi_hash__(self, fn_hash: _Callable_cmp[..., _Any_cmp]) -> int:
+        return fn_hash(self.key)
+
+    def __ffi_eq__(self, other: _PyCmp, fn_eq: _Callable_cmp[..., _Any_cmp]) -> bool:
+        return fn_eq(self.key, other.key)
+
+    def __ffi_compare__(self, other: _PyCmp, fn_cmp: _Callable_cmp[..., _Any_cmp]) -> int:
+        return fn_cmp(self.key, other.key)
+
+
+def test_py_class_custom_eq_ignores_label() -> None:
+    assert RecursiveEq(_PyEqHash(42, "alpha"), _PyEqHash(42, "beta"))
+
+
+def test_py_class_custom_eq_different_key() -> None:
+    assert not RecursiveEq(_PyEqHash(1, "same"), _PyEqHash(2, "same"))
+
+
+def test_py_class_custom_eq_hash_consistency() -> None:
+    a, b = _PyEqHash(42, "alpha"), _PyEqHash(42, "beta")
+    assert RecursiveEq(a, b)
+    assert _RecursiveHash_cmp(a) == _RecursiveHash_cmp(b)
+
+
+def test_py_class_custom_compare_ordering() -> None:
+    a = _PyCmp(1, "zzz")
+    b = _PyCmp(2, "aaa")
+    assert RecursiveLt(a, b)
+    assert RecursiveLe(a, b)
+    assert not RecursiveGt(a, b)
+    assert not RecursiveGe(a, b)
+
+
+def test_py_class_custom_compare_equal_keys() -> None:
+    a = _PyCmp(42, "alpha")
+    b = _PyCmp(42, "beta")
+    assert RecursiveEq(a, b)
+    assert RecursiveLe(a, b)
+    assert RecursiveGe(a, b)
+    assert not RecursiveLt(a, b)
+    assert not RecursiveGt(a, b)

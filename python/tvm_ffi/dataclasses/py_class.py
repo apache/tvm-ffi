@@ -202,6 +202,30 @@ def _collect_own_fields(
     return fields
 
 
+def _collect_py_methods(cls: type) -> list[tuple[str, Any, bool]] | None:
+    """Extract recognized FFI dunder methods from the class body.
+
+    Only names listed in :data:`_FFI_RECOGNIZED_METHODS` are collected.
+
+    Returns a list of ``(name, func, is_static)`` tuples, or ``None``
+    if no eligible methods were found.
+    """
+    methods: list[tuple[str, Any, bool]] = []
+    for name, value in cls.__dict__.items():
+        if name not in _FFI_RECOGNIZED_METHODS:
+            continue
+        if isinstance(value, staticmethod):
+            func = value.__func__
+            is_static = True
+        elif callable(value):
+            func = value
+            is_static = False
+        else:
+            continue
+        methods.append((name, func, is_static))
+    return methods if methods else None
+
+
 def _phase2_register_fields(
     cls: type,
     type_info: Any,
@@ -224,10 +248,13 @@ def _phase2_register_fields(
         return False
 
     own_fields = _collect_own_fields(cls, hints, params["kw_only"])
+    py_methods = _collect_py_methods(cls)
 
     # Register fields and type-level structural eq/hash kind with the C layer.
     structure_kind = _STRUCTURE_KIND_MAP.get(params.get("structure"))
     type_info._register_fields(own_fields, structure_kind)
+    # Register user-defined dunder methods and read back system-generated ones.
+    type_info._register_py_methods(py_methods)
     _add_class_attrs(cls, type_info)
 
     # Remove deferred __init__ and restore user-defined __init__ if saved
@@ -349,6 +376,28 @@ _STRUCTURE_KIND_MAP: dict[str | None, int] = {
     "const-tree": 4,  # kTVMFFISEqHashKindConstTreeNode
     "singleton": 5,  # kTVMFFISEqHashKindUniqueInstance
 }
+
+#: Allowlist of dunder method names that ``@py_class`` will auto-register
+#: as both TypeMethod (for reflection) and TypeAttr (for C++ dispatch).
+#:
+#: Only names in this set are collected from the class body.
+#: System-managed names (``__ffi_init__``, ``__ffi_shallow_copy__``, etc.)
+#: are intentionally absent because the C++ runtime generates them.
+_FFI_RECOGNIZED_METHODS: frozenset[str] = frozenset(
+    {
+        # Recursive operations (RecursiveHash, RecursiveEq, RecursiveCompare, ReprPrint)
+        "__ffi_repr__",
+        "__ffi_hash__",
+        "__ffi_eq__",
+        "__ffi_compare__",
+        # Structural equality/hashing (StructuralEqual, StructuralHash)
+        "__s_equal__",
+        "__s_hash__",
+        # Serialization (ToJSONGraph, FromJSONGraph)
+        "__data_to_json__",
+        "__data_from_json__",
+    }
+)
 
 
 @dataclass_transform(
