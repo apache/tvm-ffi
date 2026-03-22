@@ -704,7 +704,7 @@ class TypeInfo:
                     end = f_end
         return (end + 7) & ~7  # align to 8 bytes
 
-    def _register_fields(self, fields):
+    def _register_fields(self, fields, structure_kind=None):
         """Register Field descriptors and set up __ffi_new__/__ffi_init__.
 
         Delegates to the module-level _register_fields function,
@@ -712,11 +712,19 @@ class TypeInfo:
         then reads back methods registered by C++ via _register_methods.
 
         Can only be called once (fields must be None beforehand).
+
+        Parameters
+        ----------
+        fields : list[Field]
+            The Field descriptors to register.
+        structure_kind : int | None
+            The structural equality/hashing kind (``TVMFFISEqHashKind`` integer).
+            ``None`` or ``0`` means unsupported (no metadata registered).
         """
         assert self.fields is None, (
             f"_register_fields already called for {self.type_key!r}"
         )
-        self.fields = _register_fields(self, fields)
+        self.fields = _register_fields(self, fields, structure_kind)
         self._register_methods()
 
     def _register_methods(self):
@@ -811,6 +819,12 @@ cdef _register_one_field(
         flags |= kTVMFFIFieldFlagBitMaskCompareOff
     if py_field.kw_only:
         flags |= kTVMFFIFieldFlagBitMaskKwOnly
+    # Structural equality/hashing field annotations
+    cdef object field_structure = getattr(py_field, "structure", None)
+    if field_structure == "ignore":
+        flags |= kTVMFFIFieldFlagBitMaskSEqHashIgnore
+    elif field_structure == "def":
+        flags |= kTVMFFIFieldFlagBitMaskSEqHashDef
     info.flags = flags
 
     # --- native layout ---
@@ -888,7 +902,7 @@ cdef int _f_type_convert(void* type_converter, const TVMFFIAny* value, TVMFFIAny
         return -1
 
 
-def _register_fields(type_info, fields):
+def _register_fields(type_info, fields, structure_kind=None):
     """Register Field descriptors for a Python-defined type and set up __ffi_new__/__ffi_init__.
 
     For each Field:
@@ -897,8 +911,9 @@ def _register_fields(type_info, fields):
     3. Creates a FunctionObj setter with type conversion
     4. Registers via TVMFFITypeRegisterField
 
-    After all fields, registers __ffi_new__ (object allocator) and
-    __ffi_init__ (auto-generated constructor).
+    After all fields, registers __ffi_new__ (object allocator),
+    __ffi_init__ (auto-generated constructor), and optionally
+    type metadata (structural_eq_hash_kind).
 
     Parameters
     ----------
@@ -906,6 +921,9 @@ def _register_fields(type_info, fields):
         The TypeInfo of the type being defined.
     fields : list[Field]
         The Field descriptors to register.
+    structure_kind : int | None
+        The structural equality/hashing kind (``TVMFFISEqHashKind`` integer).
+        ``None`` or ``0`` means unsupported (no metadata registered).
 
     Returns
     -------
@@ -990,10 +1008,25 @@ def _register_fields(type_info, fields):
     # 7. Register __ffi_new__ + deleter
     _make_ffi_new(type_index, total_size)
 
-    # 8. Register __ffi_init__ (auto-generated constructor)
+    # 8. Register type metadata (structural_eq_hash_kind) if specified.
+    if structure_kind is not None and structure_kind != 0:
+        _register_type_metadata(type_index, total_size, structure_kind)
+
+    # 9. Register __ffi_init__ (auto-generated constructor)
     _register_auto_init(type_index)
 
     return type_fields
+
+
+cdef _register_type_metadata(int32_t type_index, int32_t total_size, int structure_kind):
+    """Register TVMFFITypeMetadata for the given type with structural eq/hash kind."""
+    cdef TVMFFITypeMetadata metadata
+    metadata.doc.data = NULL
+    metadata.doc.size = 0
+    metadata.creator = NULL
+    metadata.total_size = total_size
+    metadata.structural_eq_hash_kind = <TVMFFISEqHashKind>structure_kind
+    CHECK_CALL(TVMFFITypeRegisterMetadata(type_index, &metadata))
 
 
 def _member_method_wrapper(method_func: Callable[..., Any]) -> Callable[..., Any]:

@@ -16,6 +16,8 @@
 # under the License.
 """Tests for __ffi_repr__ / ffi.ReprPrint."""
 
+from __future__ import annotations
+
 import ast
 import re
 
@@ -664,6 +666,66 @@ def test_repr_unregistered_object_no_duplicate_field_names() -> None:
     obj = tvm_ffi.testing.make_unregistered_object()
     result = ReprPrint(obj)
     assert result.count("v1=") == 1
+
+
+# --------------------------------------------------------------------------- #
+#  @py_class repr
+# --------------------------------------------------------------------------- #
+
+import itertools as _itertools_repr
+from typing import Optional as _Optional_repr
+
+from tvm_ffi.core import Object as _Object_repr
+from tvm_ffi.dataclasses import py_class as _py_class_repr
+
+_counter_repr = _itertools_repr.count()
+
+
+def _unique_key_repr(base: str) -> str:
+    return f"testing.repr_pc.{base}_{next(_counter_repr)}"
+
+
+def test_repr_py_class_base() -> None:
+    """Repr of a simple @py_class contains field names and values."""
+
+    @_py_class_repr(_unique_key_repr("ReprBase"))
+    class ReprBase(_Object_repr):
+        a: int
+        b: str
+
+    r = repr(ReprBase(a=1, b="hello"))
+    assert "a=1" in r or "a: 1" in r
+    assert "hello" in r
+
+
+def test_repr_py_class_derived() -> None:
+    """Repr of a derived @py_class shows all fields including parent."""
+
+    @_py_class_repr(_unique_key_repr("ReprP"))
+    class ReprP(_Object_repr):
+        base_a: int
+        base_b: str
+
+    @_py_class_repr(_unique_key_repr("ReprD"))
+    class ReprD(ReprP):
+        derived_a: float
+        derived_b: _Optional_repr[str]  # noqa: UP045
+
+    r = repr(ReprD(base_a=1, base_b="b", derived_a=2.0, derived_b="c"))
+    assert "1" in r
+    assert "2" in r
+
+
+def test_repr_py_class_in_array() -> None:
+    """@py_class objects inside Array have proper repr."""
+
+    @_py_class_repr(_unique_key_repr("ReprInArr"))
+    class ReprInArr(_Object_repr):
+        x: int
+
+    r = repr(tvm_ffi.Array([ReprInArr(x=1), ReprInArr(x=2)]))
+    assert "1" in r
+    assert "2" in r
 
 
 if __name__ == "__main__":

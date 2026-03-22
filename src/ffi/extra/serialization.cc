@@ -201,10 +201,10 @@ class ObjectGraphSerializer {
     }
     // NOTE: invariant: lhs and rhs are already the same type
     const TVMFFITypeInfo* type_info = TVMFFIGetTypeInfo(value.type_index());
-    if (type_info->metadata == nullptr) {
-      TVM_FFI_THROW(TypeError) << "Type metadata is not set for type `"
-                               << String(type_info->type_key)
-                               << "`, so ToJSONGraph is not supported for this type";
+    if (!HasCreator(type_info)) {
+      TVM_FFI_THROW(TypeError) << "Type `" << String(type_info->type_key)
+                               << "` does not support ToJSONGraph "
+                               << "(no native creator or __ffi_new__ type attr)";
     }
     const Object* obj = value.cast<const Object*>();
     json::Object data;

@@ -225,7 +225,9 @@ def _phase2_register_fields(
 
     own_fields = _collect_own_fields(cls, hints, params["kw_only"])
 
-    type_info._register_fields(own_fields)
+    # Register fields and type-level structural eq/hash kind with the C layer.
+    structure_kind = _STRUCTURE_KIND_MAP.get(params.get("structure"))
+    type_info._register_fields(own_fields, structure_kind)
     _add_class_attrs(cls, type_info)
 
     # Remove deferred __init__ and restore user-defined __init__ if saved
@@ -338,6 +340,17 @@ def _install_deferred_init(
 # ---------------------------------------------------------------------------
 
 
+#: Mapping from Python string names to C-level ``TVMFFISEqHashKind`` enum values.
+_STRUCTURE_KIND_MAP: dict[str | None, int] = {
+    None: 0,  # kTVMFFISEqHashKindUnsupported (default; no metadata registered)
+    "tree": 1,  # kTVMFFISEqHashKindTreeNode
+    "var": 2,  # kTVMFFISEqHashKindFreeVar
+    "dag": 3,  # kTVMFFISEqHashKindDAGNode
+    "const-tree": 4,  # kTVMFFISEqHashKindConstTreeNode
+    "singleton": 5,  # kTVMFFISEqHashKindUniqueInstance
+}
+
+
 @dataclass_transform(
     eq_default=False,
     order_default=False,
@@ -354,6 +367,7 @@ def py_class(
     order: bool = False,
     unsafe_hash: bool = False,
     kw_only: bool = False,
+    structure: str | None = None,
     slots: bool = True,
 ) -> Callable[[_T], _T] | _T:
     """Register a Python-defined FFI class with dataclass-style semantics.
@@ -379,6 +393,12 @@ def py_class(
         @py_class("my.Point", eq=True)  # both
         class Point(Object): ...
 
+
+        @py_class(structure="tree")  # structural eq/hash kind
+        class MyNode(Object):
+            value: int
+            span: Object = field(structure="ignore")
+
     Parameters
     ----------
     cls_or_type_key
@@ -400,6 +420,21 @@ def py_class(
         If True, generate ``__hash__`` (unsafe for mutable objects).
     kw_only
         If True, all fields are keyword-only in ``__init__`` by default.
+    structure
+        Structural equality/hashing kind for this type.  Controls how
+        instances participate in ``StructuralEqual`` and ``StructuralHash``.
+        Valid values are:
+
+        - ``None`` (default): structural comparison is not supported.
+        - ``"tree"``: content-based comparison, the safe default for
+          most IR nodes.
+        - ``"var"``: compared by binding position, for variable types.
+        - ``"dag"``: content + sharing-aware comparison, for dataflow
+          graph nodes.
+        - ``"const-tree"``: like ``"tree"`` with a pointer-equality
+          fast path (only safe for types with no transitive ``"var"``
+          children).
+        - ``"singleton"``: pointer equality only, for singleton types.
     slots
         Accepted for ``dataclass_transform`` compatibility.  Object
         subclasses always use ``__slots__ = ()`` via the metaclass.
@@ -412,6 +447,12 @@ def py_class(
     """
     if order and not eq:
         raise ValueError("order=True requires eq=True")
+    if structure not in _STRUCTURE_KIND_MAP:
+        raise ValueError(
+            f"structure must be one of "
+            f"{sorted(k for k in _STRUCTURE_KIND_MAP if k is not None)}"
+            f" or None, got {structure!r}"
+        )
 
     effective_type_key = type_key
     params: dict[str, Any] = {
@@ -421,6 +462,7 @@ def py_class(
         "order": order,
         "unsafe_hash": unsafe_hash,
         "kw_only": kw_only,
+        "structure": structure,
     }
 
     def decorator(cls: _T) -> _T:

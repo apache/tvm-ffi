@@ -14,16 +14,31 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-# ruff: noqa: D102
+# ruff: noqa: D102, UP006, UP045
 """Tests for __copy__, __deepcopy__, and __replace__ on FFI objects."""
 
 from __future__ import annotations
 
 import copy
+import itertools
+import pickle
+import sys
+from typing import Dict, List, Optional
 
 import pytest
 import tvm_ffi
 import tvm_ffi.testing
+from tvm_ffi._ffi_api import DeepCopy
+from tvm_ffi.core import Object
+from tvm_ffi.dataclasses import py_class
+
+_needs_310 = pytest.mark.skipif(sys.version_info < (3, 10), reason="X | Y syntax requires 3.10+")
+
+_counter_pc = itertools.count()
+
+
+def _unique_key_pc(base: str) -> str:
+    return f"testing.copy_pc.{base}_{next(_counter_pc)}"
 
 
 # --------------------------------------------------------------------------- #
@@ -937,3 +952,268 @@ class TestReplace:
         obj = tvm_ffi.testing.TestNonCopyable(42)
         with pytest.raises(TypeError, match="does not support replace"):
             obj.__replace__()  # ty: ignore[unresolved-attribute]
+
+
+# --------------------------------------------------------------------------- #
+#  @py_class copy/deepcopy with rich field types
+# --------------------------------------------------------------------------- #
+class TestPyClassCopyRichFields:
+    """copy.copy / copy.deepcopy with container and optional fields on @py_class."""
+
+    def test_shallow_copy_containers(self) -> None:
+        @py_class(_unique_key_pc("SCCont"))
+        class SCCont(Object):
+            x: int
+            items: List[int]
+            data: Dict[str, int]
+
+        obj = SCCont(x=42, items=[1, 2, 3], data={"a": 1})
+        obj2 = copy.copy(obj)
+        assert obj2.x == 42
+        assert len(obj2.items) == 3
+        assert obj2.data["a"] == 1
+        assert obj.items.same_as(obj2.items)  # ty:ignore[unresolved-attribute]
+        assert obj.data.same_as(obj2.data)  # ty:ignore[unresolved-attribute]
+
+    def test_deep_copy_containers(self) -> None:
+        @py_class(_unique_key_pc("DCCont"))
+        class DCCont(Object):
+            x: int
+            items: List[int]
+            data: Dict[str, int]
+
+        obj = DCCont(x=42, items=[1, 2, 3], data={"a": 1})
+        obj2 = copy.deepcopy(obj)
+        assert obj2.x == 42
+        assert len(obj2.items) == 3
+        assert obj2.data["a"] == 1
+        assert not obj.items.same_as(obj2.items)  # ty:ignore[unresolved-attribute]
+        assert not obj.data.same_as(obj2.data)  # ty:ignore[unresolved-attribute]
+
+    def test_shallow_copy_nested_containers(self) -> None:
+        @py_class(_unique_key_pc("SCNest"))
+        class SCNest(Object):
+            matrix: List[List[int]]
+
+        obj = SCNest(matrix=[[1, 2], [3, 4]])
+        obj2 = copy.copy(obj)
+        assert obj.matrix.same_as(obj2.matrix)  # ty:ignore[unresolved-attribute]
+
+    def test_deep_copy_nested_containers(self) -> None:
+        @py_class(_unique_key_pc("DCNest"))
+        class DCNest(Object):
+            matrix: List[List[int]]
+
+        obj = DCNest(matrix=[[1, 2], [3, 4]])
+        obj2 = copy.deepcopy(obj)
+        assert obj2.matrix[0][0] == 1
+        assert obj2.matrix[1][1] == 4
+        assert not obj.matrix.same_as(obj2.matrix)  # ty:ignore[unresolved-attribute]
+
+    def test_deep_copy_mutation_independent(self) -> None:
+        @py_class(_unique_key_pc("DCMutInd"))
+        class DCMutInd(Object):
+            x: int
+            items: List[int]
+
+        obj = DCMutInd(x=1, items=[10, 20])
+        obj2 = copy.deepcopy(obj)
+        obj2.x = 99
+        assert obj.x == 1
+        obj2.items[0] = 999
+        assert obj.items[0] == 10
+
+    def test_shallow_copy_optional_fields(self) -> None:
+        @py_class(_unique_key_pc("SCOpt"))
+        class SCOpt(Object):
+            x: Optional[int]
+            items: Optional[List[int]]
+
+        obj = SCOpt(x=42, items=[1, 2])
+        obj2 = copy.copy(obj)
+        assert obj2.x == 42
+        assert len(obj2.items) == 2  # ty:ignore[invalid-argument-type]
+
+    def test_deep_copy_with_none_optional(self) -> None:
+        @py_class(_unique_key_pc("DCOptNone"))
+        class DCOptNone(Object):
+            x: Optional[int]
+            items: Optional[List[int]]
+
+        obj = DCOptNone(x=None, items=None)
+        obj2 = copy.deepcopy(obj)
+        assert obj2.x is None
+        assert obj2.items is None
+
+    def test_replace_with_containers(self) -> None:
+        @py_class(_unique_key_pc("ReplCont"))
+        class ReplCont(Object):
+            x: int
+            items: List[int]
+
+        obj = ReplCont(x=1, items=[1, 2, 3])
+        obj2 = obj.__replace__(x=99)  # ty:ignore[unresolved-attribute]
+        assert obj2.x == 99
+        assert tuple(obj2.items) == (1, 2, 3)
+        assert obj.x == 1
+
+
+# --------------------------------------------------------------------------- #
+#  DeepCopy FFI with @py_class containers
+# --------------------------------------------------------------------------- #
+class TestPyClassDeepCopyContainers:
+    """DeepCopy FFI function with @py_class container fields."""
+
+    def test_deep_copy_list_field(self) -> None:
+        @py_class(_unique_key_pc("DCList"))
+        class DCList(Object):
+            items: List[int]
+
+        obj = DCList(items=[1, 2, 3])
+        obj2 = DeepCopy(obj)
+        assert tuple(obj2.items) == (1, 2, 3)
+        assert not obj.items.same_as(obj2.items)  # ty:ignore[unresolved-attribute]
+
+    def test_deep_copy_dict_field(self) -> None:
+        @py_class(_unique_key_pc("DCDict"))
+        class DCDict(Object):
+            data: Dict[str, int]
+
+        obj = DCDict(data={"a": 1, "b": 2})
+        obj2 = DeepCopy(obj)
+        assert obj2.data["a"] == 1
+        assert not obj.data.same_as(obj2.data)  # ty:ignore[unresolved-attribute]
+
+    def test_deep_copy_nested(self) -> None:
+        @py_class(_unique_key_pc("DCNested"))
+        class DCNested(Object):
+            matrix: List[List[int]]
+
+        obj = DCNested(matrix=[[1, 2], [3, 4]])
+        obj2 = DeepCopy(obj)
+        assert obj2.matrix[0][0] == 1
+        assert not obj.matrix.same_as(obj2.matrix)  # ty:ignore[unresolved-attribute]
+
+    def test_deep_copy_optional_none(self) -> None:
+        @py_class(_unique_key_pc("DCOptN"))
+        class DCOptN(Object):
+            items: Optional[List[int]]
+
+        obj = DCOptN(items=None)
+        assert DeepCopy(obj).items is None
+
+    def test_deep_copy_optional_value(self) -> None:
+        @py_class(_unique_key_pc("DCOptV"))
+        class DCOptV(Object):
+            items: Optional[List[int]]
+
+        obj = DCOptV(items=[1, 2, 3])
+        obj2 = DeepCopy(obj)
+        assert tuple(obj2.items) == (1, 2, 3)
+        assert not obj.items.same_as(obj2.items)  # ty:ignore[unresolved-attribute]
+
+
+# --------------------------------------------------------------------------- #
+#  Copy of @py_class with custom __init__
+# --------------------------------------------------------------------------- #
+class TestPyClassCopyCustomInit:
+    """Copy of @py_class with init=False and custom __init__."""
+
+    def _make_cls(self) -> type:
+        @py_class(_unique_key_pc("CopyCI"), init=False)
+        class CopyCI(Object):
+            a: int
+            b: str
+
+            def __init__(self, *, b: str, a: int) -> None:
+                self.__ffi_init__(a, b)
+
+        return CopyCI
+
+    def test_shallow_copy_custom_init(self) -> None:
+        CopyCI = self._make_cls()
+        src = CopyCI(a=1, b="hello")
+        dst = copy.copy(src)
+        assert not src.same_as(dst)
+        assert dst.a == 1
+        assert dst.b == "hello"
+
+    def test_deep_copy_custom_init(self) -> None:
+        CopyCI = self._make_cls()
+        src = CopyCI(a=1, b="hello")
+        dst = copy.deepcopy(src)
+        assert not src.same_as(dst)
+        assert dst.a == 1
+        assert dst.b == "hello"
+
+
+# --------------------------------------------------------------------------- #
+#  Pickle roundtrip for @py_class
+# --------------------------------------------------------------------------- #
+
+# Pickle requires classes to be importable at module level.
+
+
+@py_class(_unique_key_pc("PickleBasic"))
+class _PickleBasic(Object):
+    a: int
+    b: float
+    c: str
+    d: bool
+
+
+@py_class(_unique_key_pc("PickleOptV"))
+class _PickleOptV(Object):
+    a: Optional[int]
+    b: Optional[str]
+
+
+@py_class(_unique_key_pc("PickleCont"))
+class _PickleCont(Object):
+    items: List[int]
+    data: Dict[str, int]
+
+
+@py_class(_unique_key_pc("PickleCI"), init=False)
+class _PickleCI(Object):
+    a: int
+    b: str
+
+    def __init__(self, *, b: str, a: int) -> None:
+        self.__ffi_init__(a, b)
+
+
+class TestPyClassPickleRoundtrip:
+    """Pickle serialization/deserialization for @py_class objects."""
+
+    def test_pickle_basic_fields(self) -> None:
+        obj = _PickleBasic(a=1, b=2.0, c="hello", d=True)
+        obj2 = pickle.loads(pickle.dumps(obj))
+        assert obj2.a == 1
+        assert obj2.b == 2.0
+        assert obj2.c == "hello"
+        assert obj2.d is True
+
+    def test_pickle_optional_with_values(self) -> None:
+        obj = _PickleOptV(a=42, b="world")
+        obj2 = pickle.loads(pickle.dumps(obj))
+        assert obj2.a == 42
+        assert obj2.b == "world"
+
+    def test_pickle_optional_with_none(self) -> None:
+        obj = _PickleOptV(a=None, b=None)
+        obj2 = pickle.loads(pickle.dumps(obj))
+        assert obj2.a is None
+        assert obj2.b is None
+
+    def test_pickle_container_fields(self) -> None:
+        obj = _PickleCont(items=[1, 2, 3], data={"a": 1, "b": 2})
+        obj2 = pickle.loads(pickle.dumps(obj))
+        assert tuple(obj2.items) == (1, 2, 3)
+        assert obj2.data["a"] == 1
+
+    def test_pickle_custom_init(self) -> None:
+        obj = _PickleCI(a=1, b="hello")
+        obj2 = pickle.loads(pickle.dumps(obj))
+        assert obj2.a == 1
+        assert obj2.b == "hello"

@@ -67,6 +67,7 @@ Table of Contents
    concepts/tensor.rst
    concepts/func_module.rst
    concepts/exception_handling.rst
+   concepts/structural_eq_hash.rst
 
 .. toctree::
    :maxdepth: 1

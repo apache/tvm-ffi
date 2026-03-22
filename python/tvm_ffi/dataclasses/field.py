@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Callable
-from typing import Any
+from typing import Any, ClassVar
 
 from ..core import MISSING, TypeSchema
 
@@ -70,6 +70,17 @@ class Field:
     kw_only : bool | None
         Whether this field is keyword-only in ``__init__``.
         ``None`` means "inherit from the decorator-level *kw_only* flag".
+    structure : str | None
+        Structural equality/hashing annotation for this field.  Valid
+        values are:
+
+        - ``None`` (default): the field participates normally in
+          structural comparison and hashing.
+        - ``"ignore"``: the field is excluded from structural equality
+          and hashing entirely (e.g. source spans, caches).
+        - ``"def"``: the field is a **definition region** that introduces
+          new variable bindings.  Free variables encountered inside this
+          field are mapped by position, enabling alpha-equivalence.
     doc : str | None
         Optional docstring for the field.
 
@@ -85,6 +96,7 @@ class Field:
         "kw_only",
         "name",
         "repr",
+        "structure",
         "ty",
     )
     name: str | None
@@ -96,9 +108,13 @@ class Field:
     hash: bool | None
     compare: bool
     kw_only: bool | None
+    structure: str | None
     doc: str | None
 
-    def __init__(
+    #: Valid values for the *structure* parameter.
+    _VALID_STRUCTURE_VALUES: ClassVar[frozenset[str | None]] = frozenset({None, "ignore", "def"})
+
+    def __init__(  # noqa: PLR0913
         self,
         name: str | None = None,
         ty: TypeSchema | None = None,
@@ -110,6 +126,7 @@ class Field:
         hash: bool | None = True,
         compare: bool = False,
         kw_only: bool | None = False,
+        structure: str | None = None,
         doc: str | None = None,
     ) -> None:
         # MISSING means "parameter not provided".
@@ -122,6 +139,11 @@ class Field:
                 raise TypeError(
                     f"default_factory must be a callable, got {type(default_factory).__name__}"
                 )
+        if structure not in Field._VALID_STRUCTURE_VALUES:
+            raise ValueError(
+                f"structure must be one of {sorted(Field._VALID_STRUCTURE_VALUES, key=str)}, "
+                f"got {structure!r}"
+            )
         self.name = name
         self.ty = ty
         self.default = default
@@ -131,6 +153,7 @@ class Field:
         self.hash = hash
         self.compare = compare
         self.kw_only = kw_only
+        self.structure = structure
         self.doc = doc
 
 
@@ -143,6 +166,7 @@ def field(
     hash: bool | None = None,
     compare: bool = True,
     kw_only: bool | None = None,
+    structure: str | None = None,
     doc: str | None = None,
 ) -> Any:
     """Customize a field in a ``@py_class``-decorated class.
@@ -174,6 +198,11 @@ def field(
     kw_only
         Whether this field is keyword-only in ``__init__``.
         ``None`` means "inherit from the decorator-level ``kw_only`` flag".
+    structure
+        Structural equality/hashing annotation. ``None`` (default) means
+        the field participates normally. ``"ignore"`` excludes the field
+        from structural comparison and hashing. ``"def"`` marks the field
+        as a definition region for variable binding.
     doc
         Optional docstring for the field.
 
@@ -191,6 +220,13 @@ def field(
             x: float
             y: float = field(default=0.0, repr=False)
 
+
+        @py_class(structure="tree")
+        class MyFunc(Object):
+            params: Array = field(structure="def")
+            body: Expr
+            span: Object = field(structure="ignore")
+
     """
     return Field(
         default=default,
@@ -200,5 +236,6 @@ def field(
         hash=hash,
         compare=compare,
         kw_only=kw_only,
+        structure=structure,
         doc=doc,
     )

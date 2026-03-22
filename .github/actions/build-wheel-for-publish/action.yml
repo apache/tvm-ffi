@@ -54,7 +54,7 @@ runs:
         python-version: 3.8
 
     - name: Set up uv
-      uses: astral-sh/setup-uv@b75a909f75acd358c2196fb9a5f1299a9a8868a4  # v6.7.0
+      uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098  # v7.3.1
 
     - name: Check out source
       uses: actions/checkout@v5
@@ -93,7 +93,7 @@ runs:
 
     - name: Build wheels
       if: ${{ inputs.build_wheels == 'true' }}
-      uses: pypa/cibuildwheel@v3.1.4
+      uses: pypa/cibuildwheel@298ed2fb2c105540f5ed055e8a6ad78d82dd3a7e  # v3.3.1
       env:
         CIBW_ARCHS_MACOS: ${{ inputs.arch }}
         CIBW_ARCHS_LINUX: ${{ inputs.arch }}

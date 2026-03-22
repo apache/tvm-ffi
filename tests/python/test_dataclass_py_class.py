@@ -16,7 +16,7 @@
 # under the License.
 """Tests for Python-defined TVM-FFI types: ``@py_class`` decorator and low-level Field API."""
 
-# ruff: noqa: D102, PLR0124, PLW1641
+# ruff: noqa: D102, PLR0124, PLW1641, UP006, UP045
 from __future__ import annotations
 
 import copy
@@ -25,7 +25,7 @@ import inspect
 import itertools
 import math
 import sys
-from typing import ClassVar
+from typing import Any, ClassVar, Dict, List, Optional
 
 import pytest
 import tvm_ffi
@@ -67,7 +67,7 @@ def _unique_key_ff(base: str) -> str:
 
 def _make_type(
     name: str,
-    fields: list[Field],
+    fields: List[Field],
     *,
     parent: type = core.Object,
     eq: bool = False,
@@ -198,7 +198,7 @@ class TestFieldParsing:
     def test_optional_field(self) -> None:
         @py_class(_unique_key("OptFld"))
         class OptFld(Object):
-            x: int | None
+            x: Optional[int]
 
         obj = OptFld(x=42)
         assert obj.x == 42
@@ -1135,7 +1135,7 @@ class TestInitReorderingAdversarial:
 
     def test_post_init_sees_reordered_fields(self) -> None:
         """__post_init__ sees correct values even when __init__ reorders fields."""
-        seen: dict[str, int] = {}
+        seen: Dict[str, int] = {}
 
         @py_class(_unique_key("PostReorder"))
         class PostReorder(Object):
@@ -2778,7 +2778,7 @@ class TestMutualReferences:
         info = core._register_py_class(parent_info, _unique_key_ff(name), cls)
         return cls, info
 
-    def _finalize(self, cls: type, info: core.TypeInfo, fields: list[Field]) -> None:
+    def _finalize(self, cls: type, info: core.TypeInfo, fields: List[Field]) -> None:
         """Register fields and install class attrs (phase 2 of two-phase)."""
         info._register_fields(fields)
         setattr(cls, "__tvm_ffi_type_info__", info)
@@ -3531,3 +3531,969 @@ class TestFFIGlobalFunctions:
 
     def test_make_new_removed(self) -> None:
         assert tvm_ffi.get_global_func("ffi.MakeNew", allow_missing=True) is None
+
+
+# ###########################################################################
+#  22. Container field annotations
+# ###########################################################################
+class TestContainerFieldAnnotations:
+    """Container field annotations: List[T], Dict[K,V], nested."""
+
+    def test_list_int_field(self) -> None:
+        @py_class(_unique_key("ListInt"))
+        class ListInt(Object):
+            items: List[int]
+
+        obj = ListInt(items=[1, 2, 3])
+        assert len(obj.items) == 3
+        assert obj.items[0] == 1
+        assert obj.items[2] == 3
+
+    def test_list_int_from_tuple(self) -> None:
+        @py_class(_unique_key("ListIntTup"))
+        class ListIntTup(Object):
+            items: List[int]
+
+        obj = ListIntTup(items=(10, 20, 30))  # ty:ignore[invalid-argument-type]
+        assert len(obj.items) == 3
+        assert obj.items[1] == 20
+
+    def test_dict_str_int_field(self) -> None:
+        @py_class(_unique_key("DictStrInt"))
+        class DictStrInt(Object):
+            mapping: Dict[str, int]
+
+        obj = DictStrInt(mapping={"a": 1, "b": 2})
+        assert len(obj.mapping) == 2
+        assert obj.mapping["a"] == 1
+        assert obj.mapping["b"] == 2
+
+    def test_list_list_int_field(self) -> None:
+        @py_class(_unique_key("ListListInt"))
+        class ListListInt(Object):
+            matrix: List[List[int]]
+
+        obj = ListListInt(matrix=[[1, 2, 3], [4, 5, 6]])
+        assert len(obj.matrix) == 2
+        assert len(obj.matrix[0]) == 3
+        assert obj.matrix[0][0] == 1
+        assert obj.matrix[1][2] == 6
+
+    def test_dict_str_list_int_field(self) -> None:
+        @py_class(_unique_key("DictStrListInt"))
+        class DictStrListInt(Object):
+            data: Dict[str, List[int]]
+
+        obj = DictStrListInt(data={"x": [1, 2, 3], "y": [4, 5, 6]})
+        assert len(obj.data) == 2
+        assert tuple(obj.data["x"]) == (1, 2, 3)
+        assert tuple(obj.data["y"]) == (4, 5, 6)
+
+    def test_container_field_set(self) -> None:
+        @py_class(_unique_key("ContSet"))
+        class ContSet(Object):
+            items: List[int]
+
+        obj = ContSet(items=[1, 2])
+        assert tuple(obj.items) == (1, 2)
+        obj.items = [3, 4, 5]
+        assert len(obj.items) == 3
+        assert obj.items[0] == 3
+
+    def test_dict_field_set(self) -> None:
+        @py_class(_unique_key("DictSet"))
+        class DictSet(Object):
+            mapping: Dict[str, int]
+
+        obj = DictSet(mapping={"a": 1})
+        obj.mapping = {"b": 2, "c": 3}
+        assert len(obj.mapping) == 2
+        assert obj.mapping["b"] == 2
+
+    def test_container_shared_reference(self) -> None:
+        @py_class(_unique_key("ContShare"))
+        class ContShare(Object):
+            a: List[int]
+            b: List[int]
+
+        obj = ContShare(a=[1, 2], b=[1, 2])
+        assert tuple(obj.a) == tuple(obj.b)
+
+    def test_untyped_list_field(self) -> None:
+        @py_class(_unique_key("UList"))
+        class UList(Object):
+            items: list
+
+        obj = UList(items=[1, "two", 3.0])
+        assert len(obj.items) == 3
+        assert obj.items[0] == 1
+        assert obj.items[1] == "two"
+
+    def test_untyped_dict_field(self) -> None:
+        @py_class(_unique_key("UDict"))
+        class UDict(Object):
+            data: dict
+
+        obj = UDict(data={"a": 1, "b": "two"})
+        assert len(obj.data) == 2
+
+
+# ###########################################################################
+#  23. Optional container fields
+# ###########################################################################
+class TestOptionalContainerFields:
+    """Optional[List[T]], Optional[Dict[K,V]] via @py_class."""
+
+    @_needs_310
+    def test_optional_list_int(self) -> None:
+        @py_class(_unique_key("OptListInt"))
+        class OptListInt(Object):
+            items: Optional[List[int]]
+
+        obj = OptListInt(items=[1, 2, 3])
+        assert len(obj.items) == 3  # ty:ignore[invalid-argument-type]
+        obj.items = None
+        assert obj.items is None
+        obj.items = [4, 5]
+        assert len(obj.items) == 2
+
+    @_needs_310
+    def test_optional_dict_str_int(self) -> None:
+        @py_class(_unique_key("OptDictStrInt"))
+        class OptDictStrInt(Object):
+            data: Optional[Dict[str, int]]
+
+        obj = OptDictStrInt(data={"a": 1})
+        assert obj.data["a"] == 1  # ty:ignore[not-subscriptable]
+        obj.data = None
+        assert obj.data is None
+        obj.data = {"b": 2}
+        assert obj.data["b"] == 2
+
+    @_needs_310
+    def test_optional_list_list_int(self) -> None:
+        @py_class(_unique_key("OptLLI"))
+        class OptLLI(Object):
+            matrix: Optional[List[List[int]]]
+
+        obj = OptLLI(matrix=[[1, 2], [3, 4]])
+        assert obj.matrix[0][0] == 1  # ty:ignore[not-subscriptable]
+        obj.matrix = None
+        assert obj.matrix is None
+
+    @_needs_310
+    def test_optional_dict_str_list_int(self) -> None:
+        @py_class(_unique_key("OptDSLI"))
+        class OptDSLI(Object):
+            data: Optional[Dict[str, List[int]]]
+
+        obj = OptDSLI(data={"x": [1, 2, 3]})
+        assert tuple(obj.data["x"]) == (1, 2, 3)  # ty:ignore[not-subscriptable]
+        obj.data = None
+        assert obj.data is None
+
+    def test_optional_list_with_typing_optional(self) -> None:
+        @py_class(_unique_key("OptListTyping"))
+        class OptListTyping(Object):
+            items: Optional[List[int]]
+
+        obj = OptListTyping(items=[1, 2, 3])
+        assert len(obj.items) == 3  # ty:ignore[invalid-argument-type]
+        obj.items = None
+        assert obj.items is None
+
+    def test_optional_dict_with_typing_optional(self) -> None:
+        @py_class(_unique_key("OptDictTyping"))
+        class OptDictTyping(Object):
+            data: Optional[Dict[str, int]]
+
+        obj = OptDictTyping(data={"a": 1})
+        assert obj.data["a"] == 1  # ty:ignore[not-subscriptable]
+        obj.data = None
+        assert obj.data is None
+
+
+# ###########################################################################
+#  24. Callable / Function fields
+# ###########################################################################
+class TestFunctionField:
+    """Function/Callable field via @py_class decorator."""
+
+    def test_function_field(self) -> None:
+        @py_class(_unique_key("FuncFld"))
+        class FuncFld(Object):
+            func: tvm_ffi.Function
+
+        fn = tvm_ffi.convert(lambda x: x + 1)
+        obj = FuncFld(func=fn)
+        assert obj.func(1) == 2
+
+    def test_function_field_set(self) -> None:
+        @py_class(_unique_key("FuncSet"))
+        class FuncSet(Object):
+            func: tvm_ffi.Function
+
+        fn1 = tvm_ffi.convert(lambda x: x + 1)
+        fn2 = tvm_ffi.convert(lambda x: x + 2)
+        obj = FuncSet(func=fn1)
+        assert obj.func(1) == 2
+        obj.func = fn2
+        assert obj.func(1) == 3
+
+    @_needs_310
+    def test_optional_function_field(self) -> None:
+        @py_class(_unique_key("OptFunc"))
+        class OptFunc(Object):
+            func: Optional[tvm_ffi.Function]
+
+        obj = OptFunc(func=None)
+        assert obj.func is None
+        obj.func = tvm_ffi.convert(lambda x: x * 2)
+        assert obj.func(3) == 6
+        obj.func = None
+        assert obj.func is None
+
+
+# ###########################################################################
+#  25. Any-typed fields (decorator level)
+# ###########################################################################
+class TestAnyFieldDecorator:
+    """Any-typed field via @py_class decorator."""
+
+    def test_any_holds_int(self) -> None:
+        @py_class(_unique_key("AnyI"))
+        class AnyI(Object):
+            val: Any
+
+        assert AnyI(val=42).val == 42
+
+    def test_any_holds_str(self) -> None:
+        @py_class(_unique_key("AnyS"))
+        class AnyS(Object):
+            val: Any
+
+        assert AnyS(val="hello").val == "hello"
+
+    def test_any_holds_none(self) -> None:
+        @py_class(_unique_key("AnyN"))
+        class AnyN(Object):
+            val: Any = None
+
+        assert AnyN().val is None
+
+    def test_any_holds_list(self) -> None:
+        @py_class(_unique_key("AnyL"))
+        class AnyL(Object):
+            val: Any
+
+        assert len(AnyL(val=[1, 2, 3]).val) == 3
+
+    def test_any_type_change(self) -> None:
+        @py_class(_unique_key("AnyChg"))
+        class AnyChg(Object):
+            val: Any = None
+
+        obj = AnyChg()
+        assert obj.val is None
+        obj.val = 42
+        assert obj.val == 42
+        obj.val = "hello"
+        assert obj.val == "hello"
+        obj.val = tvm_ffi.Array([1, 2])
+        assert len(obj.val) == 2
+        obj.val = None
+        assert obj.val is None
+
+
+# ###########################################################################
+#  26. Post-init field mutation
+# ###########################################################################
+class TestPostInitMutation:
+    """__post_init__ that mutates field values."""
+
+    def test_post_init_mutates_str(self) -> None:
+        @py_class(_unique_key("PostMut"))
+        class PostMut(Object):
+            a: int
+            b: str
+
+            def __post_init__(self) -> None:
+                self.b = self.b.upper()
+
+        obj = PostMut(a=1, b="hello")
+        assert obj.a == 1
+        assert obj.b == "HELLO"
+
+    def test_post_init_computes_derived(self) -> None:
+        @py_class(_unique_key("PostDeriv"))
+        class PostDeriv(Object):
+            x: int
+            doubled: int = 0
+
+            def __post_init__(self) -> None:
+                self.doubled = self.x * 2
+
+        assert PostDeriv(x=5).doubled == 10
+
+
+# ###########################################################################
+#  27. Custom __init__ with init=False
+# ###########################################################################
+class TestCustomInitFalse:
+    """Custom __init__ with init=False and reordered parameters."""
+
+    def test_custom_init_reordered_params(self) -> None:
+        @py_class(_unique_key("CustomOrd"), init=False)
+        class CustomOrd(Object):
+            a: int
+            b: float
+            c: str
+            d: bool
+
+            def __init__(self, b: float, c: str, a: int, d: bool) -> None:
+                self.__ffi_init__(a, b, c, d)
+
+        obj = CustomOrd(b=2.0, c="3", a=1, d=True)
+        assert obj.a == 1
+        assert obj.b == 2.0
+        assert obj.c == "3"
+        assert obj.d is True
+
+    def test_custom_init_keyword_only(self) -> None:
+        @py_class(_unique_key("CustomKW"), init=False)
+        class CustomKW(Object):
+            a: int
+            b: str
+
+            def __init__(self, *, b: str, a: int) -> None:
+                self.__ffi_init__(a, b)
+
+        obj = CustomKW(a=1, b="hello")
+        assert obj.a == 1
+        assert obj.b == "hello"
+
+
+# ###########################################################################
+#  28. Inheritance with defaults and containers
+# ###########################################################################
+class TestInheritanceWithDefaults:
+    """Inheritance with default values and container fields."""
+
+    def test_base_with_default_factory(self) -> None:
+        @py_class(_unique_key("BaseDef"))
+        class BaseDef(Object):
+            a: int
+            b: List[int] = field(default_factory=list)
+
+        obj = BaseDef(a=42)
+        assert obj.a == 42
+        assert len(obj.b) == 0
+
+    def test_derived_adds_optional_fields(self) -> None:
+        @py_class(_unique_key("BaseD"))
+        class BaseD(Object):
+            a: int
+            b: List[int] = field(default_factory=list)
+
+        @py_class(_unique_key("DerivedD"))
+        class DerivedD(BaseD):
+            c: Optional[int] = None
+            d: Optional[str] = "default"
+
+        obj = DerivedD(a=12)
+        assert obj.a == 12
+        assert len(obj.b) == 0
+        assert obj.c is None
+        assert obj.d == "default"
+
+    def test_derived_interleaved_required_optional(self) -> None:
+        @py_class(_unique_key("BaseIL"))
+        class BaseIL(Object):
+            a: int
+            b: List[int] = field(default_factory=list)
+
+        @py_class(_unique_key("DerivedIL"))
+        class DerivedIL(BaseIL):
+            c: int
+            d: Optional[str] = "default"
+
+        obj = DerivedIL(a=1, c=2)
+        assert obj.a == 1
+        assert len(obj.b) == 0
+        assert obj.c == 2
+        assert obj.d == "default"
+
+    def test_three_level_with_defaults(self) -> None:
+        @py_class(_unique_key("L1D"))
+        class L1D(Object):
+            a: int
+
+        @py_class(_unique_key("L2D"))
+        class L2D(L1D):
+            b: Optional[int] = None
+            c: Optional[str] = "hello"
+
+        @py_class(_unique_key("L3D"))
+        class L3D(L2D):
+            d: str
+
+        obj = L3D(a=1, d="world")
+        assert obj.a == 1
+        assert obj.b is None
+        assert obj.c == "hello"
+        assert obj.d == "world"
+
+    def test_derived_with_container_init(self) -> None:
+        @py_class(_unique_key("BaseC"))
+        class BaseC(Object):
+            items: List[int]
+
+        @py_class(_unique_key("DerivedC"))
+        class DerivedC(BaseC):
+            name: str
+
+        obj = DerivedC(items=[1, 2, 3], name="test")
+        assert len(obj.items) == 3
+        assert obj.name == "test"
+
+
+# ###########################################################################
+#  29. Decorator-level type validation
+# ###########################################################################
+class TestFieldTypeValidation:
+    """Type validation on set for @py_class fields."""
+
+    def test_set_int_to_str_raises(self) -> None:
+        @py_class(_unique_key("ValInt"))
+        class ValInt(Object):
+            x: int
+
+        obj = ValInt(x=1)
+        with pytest.raises((TypeError, RuntimeError)):
+            obj.x = "not_an_int"  # ty:ignore[invalid-assignment]
+
+    def test_set_str_to_int_raises(self) -> None:
+        @py_class(_unique_key("ValStr"))
+        class ValStr(Object):
+            x: str
+
+        obj = ValStr(x="hello")
+        with pytest.raises((TypeError, RuntimeError)):
+            obj.x = 42  # ty:ignore[invalid-assignment]
+
+    def test_set_bool_to_str_raises(self) -> None:
+        @py_class(_unique_key("ValBool"))
+        class ValBool(Object):
+            x: bool
+
+        obj = ValBool(x=True)
+        with pytest.raises((TypeError, RuntimeError)):
+            obj.x = "not_a_bool"  # ty:ignore[invalid-assignment]
+
+    def test_set_list_to_wrong_type_raises(self) -> None:
+        @py_class(_unique_key("ValList"))
+        class ValList(Object):
+            items: List[int]
+
+        obj = ValList(items=[1, 2])
+        with pytest.raises((TypeError, RuntimeError)):
+            obj.items = "not_a_list"  # ty:ignore[invalid-assignment]
+
+    def test_set_dict_to_wrong_type_raises(self) -> None:
+        @py_class(_unique_key("ValDict"))
+        class ValDict(Object):
+            data: Dict[str, int]
+
+        obj = ValDict(data={"a": 1})
+        with pytest.raises((TypeError, RuntimeError)):
+            obj.data = "not_a_dict"  # ty:ignore[invalid-assignment]
+
+
+# ###########################################################################
+#  30. Three-level inheritance with containers
+# ###########################################################################
+class TestDerivedDerivedContainers:
+    """Three-level inheritance with container fields and init reordering."""
+
+    def test_three_level_with_container_and_defaults(self) -> None:
+        @py_class(_unique_key("DD_L1"))
+        class L1(Object):
+            a: int
+            b: List[int] = field(default_factory=list)
+
+        @py_class(_unique_key("DD_L2"))
+        class L2(L1):
+            c: Optional[int] = None
+            d: Optional[str] = "hello"
+
+        @py_class(_unique_key("DD_L3"))
+        class L3(L2):
+            e: str
+
+        obj = L3(a=1, e="world", b=[1, 2])
+        assert obj.a == 1
+        assert tuple(obj.b) == (1, 2)
+        assert obj.c is None
+        assert obj.d == "hello"
+        assert obj.e == "world"
+
+    def test_three_level_positional_call(self) -> None:
+        @py_class(_unique_key("DD2_L1"))
+        class L1(Object):
+            a: int
+
+        @py_class(_unique_key("DD2_L2"))
+        class L2(L1):
+            b: List[int] = field(default_factory=list)
+
+        @py_class(_unique_key("DD2_L3"))
+        class L3(L2):
+            c: str
+
+        obj = L3(a=1, c="x")
+        assert obj.a == 1
+        assert len(obj.b) == 0
+        assert obj.c == "x"
+
+
+# ###########################################################################
+#  31. Container field mutation and type rejection
+# ###########################################################################
+class TestContainerFieldMutation:
+    """Container field set, mutation, and type rejection."""
+
+    def test_untyped_list_mutation(self) -> None:
+        obj = _make_multi_type_obj()
+        assert len(obj.list_any) == 3
+        assert obj.list_any[0] == 1
+        obj.list_any = [4, 3.0, "two"]
+        assert len(obj.list_any) == 3
+        assert obj.list_any[0] == 4
+        assert obj.list_any[2] == "two"
+
+    def test_untyped_dict_mutation(self) -> None:
+        obj = _make_multi_type_obj()
+        assert len(obj.dict_any) == 2
+        obj.dict_any = {"4": 4, "3": "two", "2": 3.0}
+        assert len(obj.dict_any) == 3
+        assert obj.dict_any["4"] == 4
+        assert obj.dict_any["3"] == "two"
+
+    def test_list_any_type_rejection(self) -> None:
+        @py_class(_unique_key("LAReject"))
+        class LAReject(Object):
+            items: List[Any]
+
+        obj = LAReject(items=[1, 2])
+        with pytest.raises((TypeError, RuntimeError)):
+            obj.items = "wrong"  # ty:ignore[invalid-assignment]
+
+    def test_list_list_int_type_rejection(self) -> None:
+        @py_class(_unique_key("LLReject"))
+        class LLReject(Object):
+            matrix: List[List[int]]
+
+        obj = LLReject(matrix=[[1, 2]])
+        with pytest.raises((TypeError, RuntimeError)):
+            obj.matrix = [4, 3, 2, 1]  # ty:ignore[invalid-assignment]
+        with pytest.raises((TypeError, RuntimeError)):
+            obj.matrix = None  # ty:ignore[invalid-assignment]
+        assert len(obj.matrix) == 1
+
+    def test_dict_any_any_type_rejection(self) -> None:
+        @py_class(_unique_key("DAAReject"))
+        class DAAReject(Object):
+            data: Dict[Any, Any]
+
+        obj = DAAReject(data={1: 2})
+        with pytest.raises((TypeError, RuntimeError)):
+            obj.data = "wrong"  # ty:ignore[invalid-assignment]
+        with pytest.raises((TypeError, RuntimeError)):
+            obj.data = 42  # ty:ignore[invalid-assignment]
+        with pytest.raises((TypeError, RuntimeError)):
+            obj.data = None  # ty:ignore[invalid-assignment]
+
+    def test_dict_str_any_type_rejection(self) -> None:
+        @py_class(_unique_key("DSAReject"))
+        class DSAReject(Object):
+            data: Dict[str, Any]
+
+        obj = DSAReject(data={"a": 1})
+        with pytest.raises((TypeError, RuntimeError)):
+            obj.data = "wrong"  # ty:ignore[invalid-assignment]
+        with pytest.raises((TypeError, RuntimeError)):
+            obj.data = 42  # ty:ignore[invalid-assignment]
+        with pytest.raises((TypeError, RuntimeError)):
+            obj.data = None  # ty:ignore[invalid-assignment]
+        with pytest.raises((TypeError, RuntimeError)):
+            obj.data = {4: 4, 3.0: 3}  # ty:ignore[invalid-assignment]
+
+    def test_dict_str_list_int_type_rejection(self) -> None:
+        @py_class(_unique_key("DSLReject"))
+        class DSLReject(Object):
+            data: Dict[str, List[int]]
+
+        obj = DSLReject(data={"a": [1, 2]})
+        with pytest.raises((TypeError, RuntimeError)):
+            obj.data = "wrong"  # ty:ignore[invalid-assignment]
+        with pytest.raises((TypeError, RuntimeError)):
+            obj.data = 42  # ty:ignore[invalid-assignment]
+        with pytest.raises((TypeError, RuntimeError)):
+            obj.data = None  # ty:ignore[invalid-assignment]
+        with pytest.raises((TypeError, RuntimeError)):
+            obj.data = {"a": 1, "b": [2]}  # ty:ignore[invalid-assignment]
+
+
+# ###########################################################################
+#  32. Optional field set/unset cycles with type rejection
+# ###########################################################################
+class TestOptionalFieldCycles:
+    """Optional field set → None → set-back cycles with type rejection."""
+
+    def test_opt_func_type_rejection(self) -> None:
+        @py_class(_unique_key("OptFuncR"))
+        class OptFuncR(Object):
+            func: Optional[tvm_ffi.Function]
+
+        obj = OptFuncR(func=None)
+        assert obj.func is None
+        obj.func = tvm_ffi.convert(lambda x: x + 2)
+        assert obj.func(1) == 3
+        obj.func = None
+        assert obj.func is None
+        with pytest.raises((TypeError, RuntimeError)):
+            obj.func = "wrong"  # ty:ignore[invalid-assignment]
+        with pytest.raises((TypeError, RuntimeError)):
+            obj.func = 42  # ty:ignore[invalid-assignment]
+
+    def test_opt_ulist_cycle(self) -> None:
+        @py_class(_unique_key("OptUListC"))
+        class OptUListC(Object):
+            items: Optional[list]
+
+        obj = OptUListC(items=None)
+        assert obj.items is None
+        obj.items = [4, 3.0, "two"]
+        assert len(obj.items) == 3
+        assert obj.items[0] == 4
+        with pytest.raises((TypeError, RuntimeError)):
+            obj.items = "wrong"  # ty:ignore[invalid-assignment]
+        with pytest.raises((TypeError, RuntimeError)):
+            obj.items = 42  # ty:ignore[invalid-assignment]
+        obj.items = None
+        assert obj.items is None
+
+    def test_opt_udict_cycle(self) -> None:
+        @py_class(_unique_key("OptUDictC"))
+        class OptUDictC(Object):
+            data: Optional[dict]
+
+        obj = OptUDictC(data=None)
+        assert obj.data is None
+        obj.data = {"4": 4, "3": "two"}
+        assert len(obj.data) == 2
+        with pytest.raises((TypeError, RuntimeError)):
+            obj.data = "wrong"  # ty:ignore[invalid-assignment]
+        with pytest.raises((TypeError, RuntimeError)):
+            obj.data = 42  # ty:ignore[invalid-assignment]
+        obj.data = None
+        assert obj.data is None
+
+    def test_opt_list_any_cycle(self) -> None:
+        @py_class(_unique_key("OptLAC"))
+        class OptLAC(Object):
+            items: Optional[List[Any]]
+
+        obj = OptLAC(items=[1, 2.0, "three"])
+        assert len(obj.items) == 3  # ty:ignore[invalid-argument-type]
+        obj.items = [4, 3.0, "two"]
+        assert obj.items[0] == 4
+        with pytest.raises((TypeError, RuntimeError)):
+            obj.items = "wrong"  # ty:ignore[invalid-assignment]
+        with pytest.raises((TypeError, RuntimeError)):
+            obj.items = 42  # ty:ignore[invalid-assignment]
+        obj.items = None
+        assert obj.items is None
+
+    def test_opt_list_list_int_cycle(self) -> None:
+        @py_class(_unique_key("OptLLIC"))
+        class OptLLIC(Object):
+            matrix: Optional[List[List[int]]]
+
+        obj = OptLLIC(matrix=[[1, 2, 3], [4, 5, 6]])
+        assert tuple(obj.matrix[0]) == (1, 2, 3)  # ty:ignore[not-subscriptable]
+        obj.matrix = [[4, 3, 2]]
+        assert len(obj.matrix) == 1
+        with pytest.raises((TypeError, RuntimeError)):
+            obj.matrix = "wrong"  # ty:ignore[invalid-assignment]
+        with pytest.raises((TypeError, RuntimeError)):
+            obj.matrix = [1, 2, 3]  # ty:ignore[invalid-assignment]
+        obj.matrix = None
+        assert obj.matrix is None
+
+    def test_opt_dict_any_any_cycle(self) -> None:
+        @py_class(_unique_key("OptDAAC"))
+        class OptDAAC(Object):
+            data: Optional[Dict[Any, Any]]
+
+        obj = OptDAAC(data=None)
+        assert obj.data is None
+        obj.data = {4: 4, "three": "two"}
+        assert len(obj.data) == 2
+        with pytest.raises((TypeError, RuntimeError)):
+            obj.data = "wrong"  # ty:ignore[invalid-assignment]
+        with pytest.raises((TypeError, RuntimeError)):
+            obj.data = 42  # ty:ignore[invalid-assignment]
+        obj.data = None
+        assert obj.data is None
+
+    def test_opt_dict_str_any_cycle(self) -> None:
+        @py_class(_unique_key("OptDSAC"))
+        class OptDSAC(Object):
+            data: Optional[Dict[str, Any]]
+
+        obj = OptDSAC(data={"a": 1})
+        assert obj.data["a"] == 1  # ty:ignore[not-subscriptable]
+        obj.data = {}
+        assert len(obj.data) == 0
+        with pytest.raises((TypeError, RuntimeError)):
+            obj.data = "wrong"  # ty:ignore[invalid-assignment]
+        with pytest.raises((TypeError, RuntimeError)):
+            obj.data = 42  # ty:ignore[invalid-assignment]
+        obj.data = None
+        assert obj.data is None
+
+    def test_opt_dict_any_str_cycle(self) -> None:
+        @py_class(_unique_key("OptDASC"))
+        class OptDASC(Object):
+            data: Optional[Dict[Any, str]]
+
+        obj = OptDASC(data={1: "a", "two": "b"})
+        assert obj.data[1] == "a"  # ty:ignore[not-subscriptable]
+        obj.data = {4: "4", "three": "two"}
+        assert len(obj.data) == 2
+        with pytest.raises((TypeError, RuntimeError)):
+            obj.data = "wrong"  # ty:ignore[invalid-assignment]
+        with pytest.raises((TypeError, RuntimeError)):
+            obj.data = 42  # ty:ignore[invalid-assignment]
+        obj.data = None
+        assert obj.data is None
+
+    def test_opt_dict_str_list_int_cycle(self) -> None:
+        @py_class(_unique_key("OptDSLIC"))
+        class OptDSLIC(Object):
+            data: Optional[Dict[str, List[int]]]
+
+        obj = OptDSLIC(data={"1": [1, 2, 3], "2": [4, 5, 6]})
+        assert tuple(obj.data["1"]) == (1, 2, 3)  # ty:ignore[not-subscriptable]
+        obj.data = {"a": [7, 8]}
+        assert tuple(obj.data["a"]) == (7, 8)
+        with pytest.raises((TypeError, RuntimeError)):
+            obj.data = "wrong"  # ty:ignore[invalid-assignment]
+        with pytest.raises((TypeError, RuntimeError)):
+            obj.data = 42  # ty:ignore[invalid-assignment]
+        obj.data = None
+        assert obj.data is None
+
+
+# ###########################################################################
+#  33. Multi-type field class
+# ###########################################################################
+@py_class(_unique_key("MultiType"))
+class _PyClassMultiType(Object):
+    """@py_class with many field types for cross-cutting field tests."""
+
+    bool_: bool
+    i64: int
+    f64: float
+    str_: str
+    any_val: Any
+    list_int: List[int]
+    list_any: list
+    dict_str_int: Dict[str, int]
+    dict_any: dict
+    list_list_int: List[List[int]]
+    dict_str_list_int: Dict[str, List[int]]
+    opt_bool: Optional[bool]
+    opt_int: Optional[int]
+    opt_float: Optional[float]
+    opt_str: Optional[str]
+    opt_list_int: Optional[List[int]]
+    opt_dict_str_int: Optional[Dict[str, int]]
+
+
+def _make_multi_type_obj() -> _PyClassMultiType:
+    return _PyClassMultiType(
+        bool_=False,
+        i64=64,
+        f64=2.5,
+        str_="world",
+        any_val="hello",
+        list_int=[1, 2, 3],
+        list_any=[1, "two", 3.0],
+        dict_str_int={"a": 1, "b": 2},
+        dict_any={"x": 1, "y": "two"},
+        list_list_int=[[1, 2, 3], [4, 5, 6]],
+        dict_str_list_int={"p": [1, 2], "q": [3, 4]},
+        opt_bool=True,
+        opt_int=-64,
+        opt_float=None,
+        opt_str=None,
+        opt_list_int=[10, 20],
+        opt_dict_str_int=None,
+    )
+
+
+class TestMultiTypeFieldOps:
+    """Per-field get/set/validation on a many-field @py_class type."""
+
+    def test_bool_field(self) -> None:
+        obj = _make_multi_type_obj()
+        assert obj.bool_ is False
+        obj.bool_ = True
+        assert obj.bool_ is True
+        with pytest.raises((TypeError, RuntimeError)):
+            obj.bool_ = "not_a_bool"  # ty:ignore[invalid-assignment]
+
+    def test_int_field(self) -> None:
+        obj = _make_multi_type_obj()
+        assert obj.i64 == 64
+        obj.i64 = -128
+        assert obj.i64 == -128
+        with pytest.raises((TypeError, RuntimeError)):
+            obj.i64 = "wrong"  # ty:ignore[invalid-assignment]
+
+    def test_float_field(self) -> None:
+        obj = _make_multi_type_obj()
+        assert abs(obj.f64 - 2.5) < 1e-10
+        obj.f64 = 5.0
+        assert abs(obj.f64 - 5.0) < 1e-10
+        with pytest.raises((TypeError, RuntimeError)):
+            obj.f64 = "wrong"  # ty:ignore[invalid-assignment]
+
+    def test_str_field(self) -> None:
+        obj = _make_multi_type_obj()
+        assert obj.str_ == "world"
+        obj.str_ = "hello"
+        assert obj.str_ == "hello"
+
+    def test_any_field(self) -> None:
+        obj = _make_multi_type_obj()
+        assert obj.any_val == "hello"
+        obj.any_val = 42
+        assert obj.any_val == 42
+        obj.any_val = [1, 2]
+        assert len(obj.any_val) == 2
+
+    def test_list_int_field(self) -> None:
+        obj = _make_multi_type_obj()
+        assert tuple(obj.list_int) == (1, 2, 3)
+        obj.list_int = [4, 5]
+        assert len(obj.list_int) == 2
+        with pytest.raises((TypeError, RuntimeError)):
+            obj.list_int = "wrong"  # ty:ignore[invalid-assignment]
+
+    def test_untyped_list_field(self) -> None:
+        obj = _make_multi_type_obj()
+        assert len(obj.list_any) == 3
+        assert obj.list_any[0] == 1
+        assert obj.list_any[1] == "two"
+        obj.list_any = [4, 3.0, "new"]
+        assert len(obj.list_any) == 3
+
+    def test_dict_str_int_field(self) -> None:
+        obj = _make_multi_type_obj()
+        assert obj.dict_str_int["a"] == 1
+        obj.dict_str_int = {"c": 3}
+        assert obj.dict_str_int["c"] == 3
+        with pytest.raises((TypeError, RuntimeError)):
+            obj.dict_str_int = "wrong"  # ty:ignore[invalid-assignment]
+
+    def test_untyped_dict_field(self) -> None:
+        obj = _make_multi_type_obj()
+        assert len(obj.dict_any) == 2
+        obj.dict_any = {"new": 42}
+        assert obj.dict_any["new"] == 42
+
+    def test_nested_list_field(self) -> None:
+        obj = _make_multi_type_obj()
+        assert tuple(obj.list_list_int[0]) == (1, 2, 3)
+        assert tuple(obj.list_list_int[1]) == (4, 5, 6)
+
+    def test_nested_dict_field(self) -> None:
+        obj = _make_multi_type_obj()
+        assert tuple(obj.dict_str_list_int["p"]) == (1, 2)
+        assert tuple(obj.dict_str_list_int["q"]) == (3, 4)
+
+    def test_optional_bool(self) -> None:
+        obj = _make_multi_type_obj()
+        assert obj.opt_bool is True
+        obj.opt_bool = False
+        assert obj.opt_bool is False
+        obj.opt_bool = None
+        assert obj.opt_bool is None
+
+    def test_optional_int(self) -> None:
+        obj = _make_multi_type_obj()
+        assert obj.opt_int == -64
+        obj.opt_int = None
+        assert obj.opt_int is None
+        obj.opt_int = 128
+        assert obj.opt_int == 128
+
+    def test_optional_float(self) -> None:
+        obj = _make_multi_type_obj()
+        assert obj.opt_float is None
+        obj.opt_float = 1.5
+        assert abs(obj.opt_float - 1.5) < 1e-10
+        obj.opt_float = None
+        assert obj.opt_float is None
+
+    def test_optional_str(self) -> None:
+        obj = _make_multi_type_obj()
+        assert obj.opt_str is None
+        obj.opt_str = "hello"
+        assert obj.opt_str == "hello"
+        obj.opt_str = None
+        assert obj.opt_str is None
+
+    def test_optional_list_int(self) -> None:
+        obj = _make_multi_type_obj()
+        assert tuple(obj.opt_list_int) == (10, 20)  # ty:ignore[invalid-argument-type]
+        obj.opt_list_int = None
+        assert obj.opt_list_int is None
+        obj.opt_list_int = [30]
+        assert len(obj.opt_list_int) == 1
+
+    def test_optional_dict_str_int(self) -> None:
+        obj = _make_multi_type_obj()
+        assert obj.opt_dict_str_int is None
+        obj.opt_dict_str_int = {"z": 99}
+        assert obj.opt_dict_str_int["z"] == 99
+        obj.opt_dict_str_int = None
+        assert obj.opt_dict_str_int is None
+
+
+class TestMultiTypeCopy:
+    """Copy with the comprehensive multi-type class."""
+
+    def test_shallow_copy_comprehensive(self) -> None:
+        obj = _make_multi_type_obj()
+        obj2 = copy.copy(obj)
+        assert obj2.bool_ == obj.bool_
+        assert obj2.i64 == obj.i64
+        assert obj2.f64 == obj.f64
+        assert obj2.str_ == obj.str_
+        assert obj2.any_val == obj.any_val
+        assert obj.list_int.same_as(obj2.list_int)  # ty:ignore[unresolved-attribute]
+        assert obj.dict_str_int.same_as(obj2.dict_str_int)  # ty:ignore[unresolved-attribute]
+
+    def test_deep_copy_comprehensive(self) -> None:
+        obj = _make_multi_type_obj()
+        obj2 = copy.deepcopy(obj)
+        assert obj2.bool_ == obj.bool_
+        assert obj2.i64 == obj.i64
+        assert not obj.list_int.same_as(obj2.list_int)  # ty:ignore[unresolved-attribute]
+        assert not obj.dict_str_int.same_as(obj2.dict_str_int)  # ty:ignore[unresolved-attribute]
+        assert tuple(obj2.list_int) == (1, 2, 3)
+        assert obj2.dict_str_int["a"] == 1
