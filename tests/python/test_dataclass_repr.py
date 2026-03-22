@@ -728,5 +728,46 @@ def test_repr_py_class_in_array() -> None:
     assert "2" in r
 
 
+# ---------------------------------------------------------------------------
+# Custom __ffi_repr__ hook via @py_class
+# ---------------------------------------------------------------------------
+from typing import Any as _Any_repr
+from typing import Callable as _Callable_repr
+
+
+def test_py_class_custom_ffi_repr() -> None:
+    """ReprPrint dispatches the user-defined __ffi_repr__ hook."""
+
+    @_py_class_repr(_unique_key_repr("CRepr"))
+    class CRepr(_Object_repr):
+        value: int
+
+        def __ffi_repr__(self, fn_repr: _Callable_repr[..., _Any_repr]) -> str:
+            return f"<CRepr:{self.value}>"
+
+    assert ReprPrint(CRepr(42)) == "<CRepr:42>"
+    assert ReprPrint(CRepr(999)) == "<CRepr:999>"
+
+
+def test_py_class_ffi_repr_with_fields_and_copy() -> None:
+    """Fields work normally and copy preserves __ffi_repr__ behaviour."""
+    import copy as _copy_repr  # noqa: PLC0415
+
+    @_py_class_repr(_unique_key_repr("FnR"))
+    class FnR(_Object_repr):
+        a: int
+        b: str
+
+        def __ffi_repr__(self, fn_repr: _Callable_repr[..., _Any_repr]) -> str:
+            return f"FnR({self.a}, {self.b!r})"
+
+    obj = FnR(10, "hi")
+    assert obj.a == 10
+    assert obj.b == "hi"
+    assert ReprPrint(obj) == "FnR(10, 'hi')"
+    obj2 = _copy_repr.copy(obj)
+    assert ReprPrint(obj2) == "FnR(10, 'hi')"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

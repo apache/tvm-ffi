@@ -323,6 +323,7 @@ cdef extern from "tvm/ffi/c_api.h":
         int32_t parent_type_index
     ) nogil
     int TVMFFITypeRegisterField(int32_t type_index, const TVMFFIFieldInfo* info) nogil
+    int TVMFFITypeRegisterMethod(int32_t type_index, const TVMFFIMethodInfo* info) nogil
     int TVMFFITypeRegisterMetadata(int32_t type_index, const TVMFFITypeMetadata* metadata) nogil
     int TVMFFITypeRegisterAttr(int32_t type_index, const TVMFFIByteArray* attr_name,
                                const TVMFFIAny* attr_value) nogil
