@@ -18,7 +18,7 @@
 
 Mirrors the C++ tests in tests/cpp/extra/test_structural_equal_hash.cc,
 porting the object-level tests (FreeVar, FuncDefAndIgnoreField, etc.)
-to Python using ``@py_class(structure=...)`` and ``field(structure=...)``.
+to Python using ``@py_class(structural_eq=...)`` and ``field(structural_eq=...)``.
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ from tvm_ffi.dataclasses import field, py_class
 # ---------------------------------------------------------------------------
 
 
-@py_class("testing.py.Var", structure="var")
+@py_class("testing.py.Var", structural_eq="var")
 class TVar(tvm_ffi.Object):
     """Variable node — compared by binding position, not by name.
 
@@ -42,17 +42,17 @@ class TVar(tvm_ffi.Object):
       name field has SEqHashIgnore
     """
 
-    name: str = field(structure="ignore")
+    name: str = field(structural_eq="ignore")
 
 
-@py_class("testing.py.Int", structure="tree")
+@py_class("testing.py.Int", structural_eq="tree")
 class TInt(tvm_ffi.Object):
     """Simple integer literal node."""
 
     value: int
 
 
-@py_class("testing.py.Func", structure="tree")
+@py_class("testing.py.Func", structural_eq="tree")
 class TFunc(tvm_ffi.Object):
     """Function node with definition region and ignored comment.
 
@@ -61,19 +61,19 @@ class TFunc(tvm_ffi.Object):
       comment has SEqHashIgnore
     """
 
-    params: list = field(structure="def")
+    params: list = field(structural_eq="def")
     body: list
-    comment: str = field(structure="ignore", default="")
+    comment: str = field(structural_eq="ignore", default="")
 
 
-@py_class("testing.py.Expr", structure="tree")
+@py_class("testing.py.Expr", structural_eq="tree")
 class TExpr(tvm_ffi.Object):
     """A simple expression node for tree-comparison tests."""
 
     value: int
 
 
-@py_class("testing.py.Metadata", structure="const-tree")
+@py_class("testing.py.Metadata", structural_eq="const-tree")
 class TMetadata(tvm_ffi.Object):
     """Immutable metadata node — pointer shortcut is safe (no var children)."""
 
@@ -81,7 +81,7 @@ class TMetadata(tvm_ffi.Object):
     version: int
 
 
-@py_class("testing.py.Binding", structure="dag")
+@py_class("testing.py.Binding", structural_eq="dag")
 class TBinding(tvm_ffi.Object):
     """Binding node — sharing structure is semantically meaningful."""
 
@@ -95,7 +95,7 @@ class TBinding(tvm_ffi.Object):
 
 
 class TestFreeVar:
-    """Test structure="var" kind (C++ kTVMFFISEqHashKindFreeVar)."""
+    """Test structural_eq="var" kind (C++ kTVMFFISEqHashKindFreeVar)."""
 
     def test_free_var_equal_with_mapping(self) -> None:
         """Two different vars are equal when map_free_vars=True."""
@@ -127,7 +127,7 @@ class TestFreeVar:
         assert structural_equal(x, x)
 
     def test_free_var_name_ignored(self) -> None:
-        """The name field is structure="ignore", so it doesn't affect comparison."""
+        """The name field is structural_eq="ignore", so it doesn't affect comparison."""
         a = TVar("different_name_a")
         b = TVar("different_name_b")
         # Names differ, but with mapping they are still equal
@@ -140,7 +140,7 @@ class TestFreeVar:
 
 
 class TestFuncDefAndIgnore:
-    """Test structure="def" and structure="ignore" on fields."""
+    """Test structural_eq="def" and structural_eq="ignore" on fields."""
 
     def test_alpha_equivalent_functions(self) -> None:
         """fun(x){1, x} with comment_a == fun(y){1, y} with comment_b."""
@@ -217,7 +217,7 @@ class TestFuncDefAndIgnore:
 
 
 class TestTreeNode:
-    """Test structure="tree" kind."""
+    """Test structural_eq="tree" kind."""
 
     def test_equal_content(self) -> None:
         """Two tree nodes with identical content are structurally equal."""
@@ -249,7 +249,7 @@ class TestTreeNode:
 
 
 class TestConstTreeNode:
-    """Test structure="const-tree" kind."""
+    """Test structural_eq="const-tree" kind."""
 
     def test_equal_content(self) -> None:
         """Two const-tree nodes with identical content are structurally equal."""
@@ -276,7 +276,7 @@ class TestConstTreeNode:
 
 
 class TestDAGNode:
-    """Test structure="dag" kind."""
+    """Test structural_eq="dag" kind."""
 
     def test_same_dag_shape(self) -> None:
         """Two DAGs with the same sharing shape are equal."""
@@ -319,10 +319,10 @@ class TestDAGNode:
 
 
 class TestUnsupported:
-    """Test that types without structure= raise on structural comparison."""
+    """Test that types without structural_eq= raise on structural comparison."""
 
     def test_unsupported_raises_on_hash(self) -> None:
-        """Structural hashing raises TypeError for types without structure=."""
+        """Structural hashing raises TypeError for types without structural_eq=."""
 
         @py_class("testing.py.Plain")
         class Plain(tvm_ffi.Object):
@@ -332,7 +332,7 @@ class TestUnsupported:
             structural_hash(Plain(x=1))
 
     def test_unsupported_raises_on_equal(self) -> None:
-        """Structural equality raises TypeError for types without structure=."""
+        """Structural equality raises TypeError for types without structural_eq=."""
 
         @py_class("testing.py.Plain2")
         class Plain2(tvm_ffi.Object):
@@ -348,14 +348,14 @@ class TestUnsupported:
 
 
 class TestValidation:
-    """Test that invalid structure= values are rejected."""
+    """Test that invalid structural_eq= values are rejected."""
 
     def test_invalid_type_structure(self) -> None:
-        """Invalid type-level structure= value raises ValueError."""
-        with pytest.raises(ValueError, match="structure"):
-            py_class(structure="invalid")
+        """Invalid type-level structural_eq= value raises ValueError."""
+        with pytest.raises(ValueError, match="structural_eq"):
+            py_class(structural_eq="invalid")
 
     def test_invalid_field_structure(self) -> None:
-        """Invalid field-level structure= value raises ValueError."""
-        with pytest.raises(ValueError, match="structure"):
-            field(structure="bad_value")
+        """Invalid field-level structural_eq= value raises ValueError."""
+        with pytest.raises(ValueError, match="structural_eq"):
+            field(structural_eq="bad_value")

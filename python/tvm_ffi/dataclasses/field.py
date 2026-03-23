@@ -70,7 +70,7 @@ class Field:
     kw_only : bool | None
         Whether this field is keyword-only in ``__init__``.
         ``None`` means "inherit from the decorator-level *kw_only* flag".
-    structure : str | None
+    structural_eq : str | None
         Structural equality/hashing annotation for this field.  Valid
         values are:
 
@@ -96,7 +96,7 @@ class Field:
         "kw_only",
         "name",
         "repr",
-        "structure",
+        "structural_eq",
         "ty",
     )
     name: str | None
@@ -108,11 +108,13 @@ class Field:
     hash: bool | None
     compare: bool
     kw_only: bool | None
-    structure: str | None
+    structural_eq: str | None
     doc: str | None
 
-    #: Valid values for the *structure* parameter.
-    _VALID_STRUCTURE_VALUES: ClassVar[frozenset[str | None]] = frozenset({None, "ignore", "def"})
+    #: Valid values for the *structural_eq* parameter.
+    _VALID_STRUCTURAL_EQ_VALUES: ClassVar[frozenset[str | None]] = frozenset(
+        {None, "ignore", "def"}
+    )
 
     def __init__(  # noqa: PLR0913
         self,
@@ -126,7 +128,7 @@ class Field:
         hash: bool | None = True,
         compare: bool = False,
         kw_only: bool | None = False,
-        structure: str | None = None,
+        structural_eq: str | None = None,
         doc: str | None = None,
     ) -> None:
         # MISSING means "parameter not provided".
@@ -139,10 +141,11 @@ class Field:
                 raise TypeError(
                     f"default_factory must be a callable, got {type(default_factory).__name__}"
                 )
-        if structure not in Field._VALID_STRUCTURE_VALUES:
+        if structural_eq not in Field._VALID_STRUCTURAL_EQ_VALUES:
             raise ValueError(
-                f"structure must be one of {sorted(Field._VALID_STRUCTURE_VALUES, key=str)}, "
-                f"got {structure!r}"
+                f"structural_eq must be one of "
+                f"{sorted(Field._VALID_STRUCTURAL_EQ_VALUES, key=str)}, "
+                f"got {structural_eq!r}"
             )
         self.name = name
         self.ty = ty
@@ -153,7 +156,7 @@ class Field:
         self.hash = hash
         self.compare = compare
         self.kw_only = kw_only
-        self.structure = structure
+        self.structural_eq = structural_eq
         self.doc = doc
 
 
@@ -166,7 +169,7 @@ def field(
     hash: bool | None = None,
     compare: bool = True,
     kw_only: bool | None = None,
-    structure: str | None = None,
+    structural_eq: str | None = None,
     doc: str | None = None,
 ) -> Any:
     """Customize a field in a ``@py_class``-decorated class.
@@ -198,7 +201,7 @@ def field(
     kw_only
         Whether this field is keyword-only in ``__init__``.
         ``None`` means "inherit from the decorator-level ``kw_only`` flag".
-    structure
+    structural_eq
         Structural equality/hashing annotation. ``None`` (default) means
         the field participates normally. ``"ignore"`` excludes the field
         from structural comparison and hashing. ``"def"`` marks the field
@@ -221,11 +224,11 @@ def field(
             y: float = field(default=0.0, repr=False)
 
 
-        @py_class(structure="tree")
+        @py_class(structural_eq="tree")
         class MyFunc(Object):
-            params: Array = field(structure="def")
+            params: Array = field(structural_eq="def")
             body: Expr
-            span: Object = field(structure="ignore")
+            span: Object = field(structural_eq="ignore")
 
     """
     return Field(
@@ -236,6 +239,6 @@ def field(
         hash=hash,
         compare=compare,
         kw_only=kw_only,
-        structure=structure,
+        structural_eq=structural_eq,
         doc=doc,
     )

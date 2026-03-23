@@ -838,7 +838,7 @@ cdef _register_one_field(
     if py_field.kw_only:
         flags |= kTVMFFIFieldFlagBitMaskKwOnly
     # Structural equality/hashing field annotations
-    cdef object field_structure = getattr(py_field, "structure", None)
+    cdef object field_structure = getattr(py_field, "structural_eq", None)
     if field_structure == "ignore":
         flags |= kTVMFFIFieldFlagBitMaskSEqHashIgnore
     elif field_structure == "def":

@@ -25,9 +25,9 @@ fields — rather than by pointer identity.
 The behavior is controlled by two layers of annotation on
 :func:`~tvm_ffi.dataclasses.py_class`:
 
-1. **Type-level** ``structure=`` — what *role* does this type play in the
+1. **Type-level** ``structural_eq=`` — what *role* does this type play in the
    IR graph?
-2. **Field-level** ``structure=`` on :func:`~tvm_ffi.dataclasses.field` —
+2. **Field-level** ``structural_eq=`` on :func:`~tvm_ffi.dataclasses.field` —
    should this field be skipped, or does it introduce new variable bindings?
 
 This document explains what each annotation means, when to use it, and how
@@ -37,12 +37,12 @@ they compose.
 Type-Level Annotation
 ---------------------
 
-The ``structure`` parameter on ``@py_class`` declares how instances of the
+The ``structural_eq`` parameter on ``@py_class`` declares how instances of the
 type participate in structural equality and hashing:
 
 .. code-block:: python
 
-   @py_class(structure="tree")
+   @py_class(structural_eq="tree")
    class Expr(Object):
        ...
 
@@ -53,7 +53,7 @@ Quick reference
    :header-rows: 1
    :widths: 18 37 45
 
-   * - ``structure=``
+   * - ``structural_eq=``
      - Meaning
      - Use when...
    * - ``"tree"``
@@ -81,7 +81,7 @@ Quick reference
 
 .. code-block:: python
 
-   @py_class(structure="tree")
+   @py_class(structural_eq="tree")
    class Add(Object):
        lhs: Expr
        rhs: Expr
@@ -149,7 +149,7 @@ If sharing needs to matter, use ``"dag"`` instead.
 
 .. code-block:: python
 
-   @py_class(structure="const-tree")
+   @py_class(structural_eq="const-tree")
    class DeviceMesh(Object):
        shape: list[int]
        device_ids: list[int]
@@ -222,7 +222,7 @@ is recorded:
 
 .. code-block:: python
 
-   @py_class(structure="dag")
+   @py_class(structural_eq="dag")
    class Binding(Object):
        var: Var
        value: Expr
@@ -335,7 +335,7 @@ Full comparison: ``"tree"`` vs ``"dag"``
 
 .. code-block:: python
 
-   @py_class(structure="var")
+   @py_class(structural_eq="var")
    class Var(Object):
        name: str
 
@@ -358,8 +358,8 @@ binding position and are used in the same way.
 How it works: definition regions
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-``"var"`` works together with ``field(structure="def")`` (see
-:ref:`field-annotations`). A field marked ``structure="def"`` is a
+``"var"`` works together with ``field(structural_eq="def")`` (see
+:ref:`field-annotations`). A field marked ``structural_eq="def"`` is a
 **definition region** — it's where new variable bindings are introduced.
 
 - **Inside a definition region**: encountering two different variables
@@ -376,7 +376,7 @@ The following diagram traces the comparison of two alpha-equivalent functions:
        participant L as lhs: fun x → x + 1
        participant R as rhs: fun y → y + 1
 
-       Note over C: Field "params" has structure="def"
+       Note over C: Field "params" has structural_eq="def"
        C->>L: get params → [x]
        C->>R: get params → [y]
        Note over C: Enter definition region
@@ -475,7 +475,7 @@ enclosing function:
 
 .. code-block:: python
 
-   @py_class(structure="singleton")
+   @py_class(structural_eq="singleton")
    class Op(Object):
        name: str
 
@@ -499,18 +499,18 @@ unequal; same pointer is always equal.
 Field-Level Annotations
 -----------------------
 
-The ``structure`` parameter on :func:`~tvm_ffi.dataclasses.field` controls
+The ``structural_eq`` parameter on :func:`~tvm_ffi.dataclasses.field` controls
 how structural equality/hashing treats that specific field.
 
-``structure="ignore"`` — Exclude a field
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+``structural_eq="ignore"`` — Exclude a field
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
-   @py_class(structure="tree")
+   @py_class(structural_eq="tree")
    class MyNode(Object):
        value: int
-       span: str = field(structure="ignore")
+       span: str = field(structural_eq="ignore")
 
 **Meaning**: "This field is not part of the node's structural identity.
 Skip it during comparison and hashing."
@@ -523,14 +523,14 @@ Use for:
   redundant to compare.
 - **Debug annotations** — names, comments, metadata for human consumption.
 
-``structure="def"`` — Definition region
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+``structural_eq="def"`` — Definition region
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
-   @py_class(structure="tree")
+   @py_class(structural_eq="tree")
    class Lambda(Object):
-       params: list[Var] = field(structure="def")
+       params: list[Var] = field(structural_eq="def")
        body: Expr
 
 **Meaning**: "This field introduces new variable bindings. When comparing
@@ -538,7 +538,7 @@ or hashing this field, allow new variable correspondences to be
 established."
 
 This is the counterpart to ``"var"``. A ``"var"`` type says "I am a
-variable"; ``structure="def"`` says "this field is where variables are
+variable"; ``structural_eq="def"`` says "this field is where variables are
 defined." Together they enable alpha-equivalence: comparing functions up
 to consistent variable renaming.
 
@@ -636,14 +636,14 @@ When defining a new type:
 
    graph TD
        Start["New @py_class type"] --> Q1{"Singleton?<br/>(one instance per<br/>logical identity)"}
-       Q1 -->|Yes| UI["structure=&quot;singleton&quot;"]
+       Q1 -->|Yes| UI["structural_eq=&quot;singleton&quot;"]
        Q1 -->|No| Q2{"Represents a<br/>variable binding?"}
-       Q2 -->|Yes| FV["structure=&quot;var&quot;"]
+       Q2 -->|Yes| FV["structural_eq=&quot;var&quot;"]
        Q2 -->|No| Q3{"Pointer sharing<br/>semantically<br/>meaningful?"}
-       Q3 -->|Yes| DN["structure=&quot;dag&quot;"]
+       Q3 -->|Yes| DN["structural_eq=&quot;dag&quot;"]
        Q3 -->|No| Q4{"Immutable AND<br/>no transitive<br/>var children?"}
-       Q4 -->|Yes| CTN["structure=&quot;const-tree&quot;"]
-       Q4 -->|No| TN["structure=&quot;tree&quot;"]
+       Q4 -->|Yes| CTN["structural_eq=&quot;const-tree&quot;"]
+       Q4 -->|No| TN["structural_eq=&quot;tree&quot;"]
 
        style UI fill:#e2e3e5
        style FV fill:#fff3cd
@@ -657,9 +657,9 @@ For fields:
 
    graph TD
        Start["field() parameter"] --> Q1{"Irrelevant to<br/>structural identity?<br/>(span, cache, debug)"}
-       Q1 -->|Yes| IGN["structure=&quot;ignore&quot;"]
+       Q1 -->|Yes| IGN["structural_eq=&quot;ignore&quot;"]
        Q1 -->|No| Q2{"Introduces new<br/>variable bindings?"}
-       Q2 -->|Yes| DEF["structure=&quot;def&quot;"]
+       Q2 -->|Yes| DEF["structural_eq=&quot;def&quot;"]
        Q2 -->|No| NONE["No flag needed"]
 
        style IGN fill:#f8d7da
@@ -675,17 +675,17 @@ source location:
 
 .. code-block:: python
 
-   @py_class(structure="tree")
+   @py_class(structural_eq="tree")
    class Lambda(Object):
-       params: list[Var] = field(structure="def")
+       params: list[Var] = field(structural_eq="def")
        body: Expr
-       span: str = field(structure="ignore", default="")
+       span: str = field(structural_eq="ignore", default="")
 
-   @py_class(structure="var")
+   @py_class(structural_eq="var")
    class Var(Object):
        name: str
 
-   @py_class(structure="singleton")
+   @py_class(structural_eq="singleton")
    class Op(Object):
        name: str
 
@@ -697,9 +697,9 @@ With these annotations, alpha-equivalent functions are structurally equal:
    fun [x] → x + 1       (span="a.py:1")
    fun [y] → y + 1       (span="b.py:5")
 
-   #  - params has structure="def" → x maps to y
+   #  - params has structural_eq="def" → x maps to y
    #  - body uses that mapping → (x + 1) ≅ (y + 1)
-   #  - span has structure="ignore" → locations don't matter
+   #  - span has structural_eq="ignore" → locations don't matter
 
 And in Python:
 

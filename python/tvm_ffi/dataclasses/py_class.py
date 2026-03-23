@@ -251,7 +251,7 @@ def _phase2_register_fields(
     py_methods = _collect_py_methods(cls)
 
     # Register fields and type-level structural eq/hash kind with the C layer.
-    structure_kind = _STRUCTURE_KIND_MAP.get(params.get("structure"))
+    structure_kind = _STRUCTURE_KIND_MAP.get(params.get("structural_eq"))
     type_info._register_fields(own_fields, structure_kind)
     # Register user-defined dunder methods and read back system-generated ones.
     type_info._register_py_methods(py_methods)
@@ -416,7 +416,7 @@ def py_class(
     order: bool = False,
     unsafe_hash: bool = False,
     kw_only: bool = False,
-    structure: str | None = None,
+    structural_eq: str | None = None,
     slots: bool = True,
 ) -> Callable[[_T], _T] | _T:
     """Register a Python-defined FFI class with dataclass-style semantics.
@@ -443,10 +443,10 @@ def py_class(
         class Point(Object): ...
 
 
-        @py_class(structure="tree")  # structural eq/hash kind
+        @py_class(structural_eq="tree")  # structural eq/hash kind
         class MyNode(Object):
             value: int
-            span: Object = field(structure="ignore")
+            span: Object = field(structural_eq="ignore")
 
     Parameters
     ----------
@@ -469,7 +469,7 @@ def py_class(
         If True, generate ``__hash__`` (unsafe for mutable objects).
     kw_only
         If True, all fields are keyword-only in ``__init__`` by default.
-    structure
+    structural_eq
         Structural equality/hashing kind for this type.  Controls how
         instances participate in ``StructuralEqual`` and ``StructuralHash``.
         Valid values are:
@@ -496,11 +496,11 @@ def py_class(
     """
     if order and not eq:
         raise ValueError("order=True requires eq=True")
-    if structure not in _STRUCTURE_KIND_MAP:
+    if structural_eq not in _STRUCTURE_KIND_MAP:
         raise ValueError(
-            f"structure must be one of "
+            f"structural_eq must be one of "
             f"{sorted(k for k in _STRUCTURE_KIND_MAP if k is not None)}"
-            f" or None, got {structure!r}"
+            f" or None, got {structural_eq!r}"
         )
 
     effective_type_key = type_key
@@ -511,7 +511,7 @@ def py_class(
         "order": order,
         "unsafe_hash": unsafe_hash,
         "kw_only": kw_only,
-        "structure": structure,
+        "structural_eq": structural_eq,
     }
 
     def decorator(cls: _T) -> _T:
