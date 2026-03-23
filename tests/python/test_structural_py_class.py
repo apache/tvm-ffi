@@ -24,7 +24,7 @@ to Python using ``@py_class(structural_eq=...)`` and ``field(structural_eq=...)`
 from __future__ import annotations
 
 import pytest
-import tvm_ffi
+import tvm_ffi as ffi
 from tvm_ffi import get_first_structural_mismatch, structural_equal, structural_hash
 from tvm_ffi.dataclasses import field, py_class
 
@@ -34,7 +34,7 @@ from tvm_ffi.dataclasses import field, py_class
 
 
 @py_class("testing.py.Var", structural_eq="var")
-class TVar(tvm_ffi.Object):
+class TVar(ffi.Object):
     """Variable node — compared by binding position, not by name.
 
     Mirrors C++ TVarObj with:
@@ -46,14 +46,14 @@ class TVar(tvm_ffi.Object):
 
 
 @py_class("testing.py.Int", structural_eq="tree")
-class TInt(tvm_ffi.Object):
+class TInt(ffi.Object):
     """Simple integer literal node."""
 
     value: int
 
 
 @py_class("testing.py.Func", structural_eq="tree")
-class TFunc(tvm_ffi.Object):
+class TFunc(ffi.Object):
     """Function node with definition region and ignored comment.
 
     Mirrors C++ TFuncObj with:
@@ -67,14 +67,14 @@ class TFunc(tvm_ffi.Object):
 
 
 @py_class("testing.py.Expr", structural_eq="tree")
-class TExpr(tvm_ffi.Object):
+class TExpr(ffi.Object):
     """A simple expression node for tree-comparison tests."""
 
     value: int
 
 
 @py_class("testing.py.Metadata", structural_eq="const-tree")
-class TMetadata(tvm_ffi.Object):
+class TMetadata(ffi.Object):
     """Immutable metadata node — pointer shortcut is safe (no var children)."""
 
     tag: str
@@ -82,7 +82,7 @@ class TMetadata(tvm_ffi.Object):
 
 
 @py_class("testing.py.Binding", structural_eq="dag")
-class TBinding(tvm_ffi.Object):
+class TBinding(ffi.Object):
     """Binding node — sharing structure is semantically meaningful."""
 
     name: str
@@ -237,8 +237,8 @@ class TestTreeNode:
         """Under "tree", sharing doesn't affect equality."""
         s = TExpr(value=10)
         # Two arrays referencing the same object vs two copies
-        shared = tvm_ffi.Array([s, s])
-        copies = tvm_ffi.Array([TExpr(value=10), TExpr(value=10)])
+        shared = ffi.Array([s, s])
+        copies = ffi.Array([TExpr(value=10), TExpr(value=10)])
         assert structural_equal(shared, copies)
         assert structural_hash(shared) == structural_hash(copies)
 
@@ -282,8 +282,8 @@ class TestDAGNode:
         """Two DAGs with the same sharing shape are equal."""
         s1 = TBinding(name="s", value=1)
         s2 = TBinding(name="s", value=1)
-        dag1 = tvm_ffi.Array([s1, s1])  # shared
-        dag2 = tvm_ffi.Array([s2, s2])  # shared (same shape)
+        dag1 = ffi.Array([s1, s1])  # shared
+        dag2 = ffi.Array([s2, s2])  # shared (same shape)
         assert structural_equal(dag1, dag2)
 
     def test_dag_vs_tree_not_equal(self) -> None:
@@ -291,8 +291,8 @@ class TestDAGNode:
         shared = TBinding(name="s", value=1)
         copy1 = TBinding(name="s", value=1)
         copy2 = TBinding(name="s", value=1)
-        dag = tvm_ffi.Array([shared, shared])
-        tree = tvm_ffi.Array([copy1, copy2])
+        dag = ffi.Array([shared, shared])
+        tree = ffi.Array([copy1, copy2])
         assert not structural_equal(dag, tree)
 
     def test_dag_vs_tree_hash_differs(self) -> None:
@@ -300,16 +300,16 @@ class TestDAGNode:
         shared = TBinding(name="s", value=1)
         copy1 = TBinding(name="s", value=1)
         copy2 = TBinding(name="s", value=1)
-        dag = tvm_ffi.Array([shared, shared])
-        tree = tvm_ffi.Array([copy1, copy2])
+        dag = ffi.Array([shared, shared])
+        tree = ffi.Array([copy1, copy2])
         assert structural_hash(dag) != structural_hash(tree)
 
     def test_reverse_bijection(self) -> None:
         """(a, b) vs (a, a) where a ≅ b — reverse map detects inconsistency."""
         a = TBinding(name="a", value=1)
         b = TBinding(name="b", value=1)  # same content as a
-        lhs = tvm_ffi.Array([a, b])
-        rhs = tvm_ffi.Array([a, a])  # note: same object twice
+        lhs = ffi.Array([a, b])
+        rhs = ffi.Array([a, a])  # note: same object twice
         assert not structural_equal(lhs, rhs)
 
 
@@ -325,7 +325,7 @@ class TestUnsupported:
         """Structural hashing raises TypeError for types without structural_eq=."""
 
         @py_class("testing.py.Plain")
-        class Plain(tvm_ffi.Object):
+        class Plain(ffi.Object):
             x: int
 
         with pytest.raises(TypeError):
@@ -335,7 +335,7 @@ class TestUnsupported:
         """Structural equality raises TypeError for types without structural_eq=."""
 
         @py_class("testing.py.Plain2")
-        class Plain2(tvm_ffi.Object):
+        class Plain2(ffi.Object):
             x: int
 
         with pytest.raises(TypeError):

@@ -20,14 +20,14 @@ from typing import Any
 
 import numpy as np
 import pytest
-import tvm_ffi
+import tvm_ffi as ffi
 from packaging.version import Version
 
 
 def test_dtype() -> None:
-    float32 = tvm_ffi.dtype("float32")
+    float32 = ffi.dtype("float32")
     assert float32.__repr__() == "dtype('float32')"
-    assert type(float32) == tvm_ffi.dtype
+    assert type(float32) == ffi.dtype
     x = np.array([1, 2, 3], dtype=float32)
     assert x.dtype == float32
 
@@ -45,14 +45,14 @@ def test_dtype() -> None:
     ],
 )
 def test_dtype_itemsize(dtype_str: str, expected_size: int) -> None:
-    dtype = tvm_ffi.dtype(dtype_str)
+    dtype = ffi.dtype(dtype_str)
     assert dtype.itemsize == expected_size
 
 
 @pytest.mark.parametrize("dtype_str", ["int32xvscalex4"])
 def test_dtype_itemmize_error(dtype_str: str) -> None:
     with pytest.raises(ValueError):
-        tvm_ffi.dtype(dtype_str).itemsize
+        ffi.dtype(dtype_str).itemsize
 
 
 @pytest.mark.parametrize(
@@ -68,7 +68,7 @@ def test_dtype_itemmize_error(dtype_str: str) -> None:
     ],
 )
 def test_dtype_pickle(dtype_str: str) -> None:
-    dtype = tvm_ffi.dtype(dtype_str)
+    dtype = ffi.dtype(dtype_str)
     dtype_pickled = pickle.loads(pickle.dumps(dtype))
     assert dtype_pickled.type_code == dtype.type_code
     assert dtype_pickled.bits == dtype.bits
@@ -77,24 +77,24 @@ def test_dtype_pickle(dtype_str: str) -> None:
 
 @pytest.mark.parametrize("dtype_str", ["float32", "bool"])
 def test_dtype_with_lanes(dtype_str: str) -> None:
-    dtype = tvm_ffi.dtype(dtype_str)
+    dtype = ffi.dtype(dtype_str)
     dtype_with_lanes = dtype.with_lanes(4)
     assert dtype_with_lanes.type_code == dtype.type_code
     assert dtype_with_lanes.bits == dtype.bits
     assert dtype_with_lanes.lanes == 4
 
 
-_fecho = tvm_ffi.get_global_func("testing.echo")
+_fecho = ffi.get_global_func("testing.echo")
 
 
 def _check_dtype(dtype: Any, code: int, bits: int, lanes: int) -> None:
     echo_dtype = _fecho(dtype)
-    assert isinstance(echo_dtype, tvm_ffi.dtype)
+    assert isinstance(echo_dtype, ffi.dtype)
     assert echo_dtype.type_code == code
     assert echo_dtype.bits == bits
     assert echo_dtype.lanes == lanes
-    converted_dtype = tvm_ffi.convert(dtype)
-    assert isinstance(converted_dtype, tvm_ffi.dtype)
+    converted_dtype = ffi.convert(dtype)
+    assert isinstance(converted_dtype, ffi.dtype)
     assert converted_dtype.type_code == code
     assert converted_dtype.bits == bits
     assert converted_dtype.lanes == lanes
@@ -169,36 +169,36 @@ def test_ml_dtypes_dtype_conversion() -> None:
 
 
 def test_builtin_dtype_conversion() -> None:
-    _check_dtype(tvm_ffi.bool, 6, 8, 1)
-    _check_dtype(tvm_ffi.int8, 0, 8, 1)
-    _check_dtype(tvm_ffi.int16, 0, 16, 1)
-    _check_dtype(tvm_ffi.int32, 0, 32, 1)
-    _check_dtype(tvm_ffi.int64, 0, 64, 1)
-    _check_dtype(tvm_ffi.uint8, 1, 8, 1)
-    _check_dtype(tvm_ffi.uint16, 1, 16, 1)
-    _check_dtype(tvm_ffi.uint32, 1, 32, 1)
-    _check_dtype(tvm_ffi.uint64, 1, 64, 1)
-    _check_dtype(tvm_ffi.float16, 2, 16, 1)
-    _check_dtype(tvm_ffi.float32, 2, 32, 1)
-    _check_dtype(tvm_ffi.float64, 2, 64, 1)
-    _check_dtype(tvm_ffi.bfloat16, 4, 16, 1)
-    _check_dtype(tvm_ffi.float8_e4m3fn, 10, 8, 1)
-    _check_dtype(tvm_ffi.float8_e4m3fnuz, 11, 8, 1)
-    _check_dtype(tvm_ffi.float8_e5m2, 12, 8, 1)
-    _check_dtype(tvm_ffi.float8_e5m2fnuz, 13, 8, 1)
-    _check_dtype(tvm_ffi.float8_e8m0fnu, 14, 8, 1)
-    _check_dtype(tvm_ffi.float4_e2m1fnx2, 17, 4, 2)
+    _check_dtype(ffi.bool, 6, 8, 1)
+    _check_dtype(ffi.int8, 0, 8, 1)
+    _check_dtype(ffi.int16, 0, 16, 1)
+    _check_dtype(ffi.int32, 0, 32, 1)
+    _check_dtype(ffi.int64, 0, 64, 1)
+    _check_dtype(ffi.uint8, 1, 8, 1)
+    _check_dtype(ffi.uint16, 1, 16, 1)
+    _check_dtype(ffi.uint32, 1, 32, 1)
+    _check_dtype(ffi.uint64, 1, 64, 1)
+    _check_dtype(ffi.float16, 2, 16, 1)
+    _check_dtype(ffi.float32, 2, 32, 1)
+    _check_dtype(ffi.float64, 2, 64, 1)
+    _check_dtype(ffi.bfloat16, 4, 16, 1)
+    _check_dtype(ffi.float8_e4m3fn, 10, 8, 1)
+    _check_dtype(ffi.float8_e4m3fnuz, 11, 8, 1)
+    _check_dtype(ffi.float8_e5m2, 12, 8, 1)
+    _check_dtype(ffi.float8_e5m2fnuz, 13, 8, 1)
+    _check_dtype(ffi.float8_e8m0fnu, 14, 8, 1)
+    _check_dtype(ffi.float4_e2m1fnx2, 17, 4, 2)
 
 
 def test_dtype_from_dlpack_data_type() -> None:
-    dtype = tvm_ffi.dtype.from_dlpack_data_type((0, 8, 1))
+    dtype = ffi.dtype.from_dlpack_data_type((0, 8, 1))
     assert dtype.type_code == 0
     assert dtype.bits == 8
     assert dtype.lanes == 1
 
 
 def test_dtype_bool() -> None:
-    dtype = tvm_ffi.dtype("bool")
+    dtype = ffi.dtype("bool")
     assert dtype.type_code == 6
     assert dtype.bits == 8
     assert dtype.lanes == 1

@@ -17,33 +17,33 @@
 # testcases appearing in example docstrings
 from typing import Any
 
-import tvm_ffi
+import tvm_ffi as ffi
 
 
 def test_register_global_func() -> None:
     # we can use decorator to register a function
-    @tvm_ffi.register_global_func("example.echo")
+    @ffi.register_global_func("example.echo")
     def echo(x: Any) -> Any:
         return x
 
     # After registering, we can get the function by its name
-    f = tvm_ffi.get_global_func("example.echo")
+    f = ffi.get_global_func("example.echo")
     assert f(1) == 1
     # we can also directly register a function
-    tvm_ffi.register_global_func("example.add_one", lambda x: x + 1)
-    f = tvm_ffi.get_global_func("example.add_one")
+    ffi.register_global_func("example.add_one", lambda x: x + 1)
+    f = ffi.get_global_func("example.add_one")
     assert f(1) == 2
 
 
 def test_array() -> None:
-    a = tvm_ffi.convert([1, 2, 3])
-    assert isinstance(a, tvm_ffi.Array)
+    a = ffi.convert([1, 2, 3])
+    assert isinstance(a, ffi.Array)
     assert len(a) == 3
 
 
 def test_map() -> None:
-    amap = tvm_ffi.convert({"a": 1, "b": 2})
-    assert isinstance(amap, tvm_ffi.Map)
+    amap = ffi.convert({"a": 1, "b": 2})
+    assert isinstance(amap, ffi.Map)
     assert len(amap) == 2
     assert amap["a"] == 1
     assert amap["b"] == 2

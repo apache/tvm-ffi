@@ -25,7 +25,7 @@ from collections.abc import Callable
 
 import numpy as np
 import pytest
-import tvm_ffi
+import tvm_ffi as ffi
 import tvm_ffi.testing
 from tvm_ffi._ffi_api import RecursiveEq, RecursiveHash
 from tvm_ffi.testing import (
@@ -112,8 +112,8 @@ def test_nan_payloads_hash_equal() -> None:
 def test_nan_payloads_in_nested_array_hash() -> None:
     nan1 = _make_nan_from_payload(0xA5)
     nan2 = _make_nan_from_payload(0x5A)
-    a = tvm_ffi.Array([1.0, nan1, 2.0])
-    b = tvm_ffi.Array([1.0, nan2, 2.0])
+    a = ffi.Array([1.0, nan1, 2.0])
+    b = ffi.Array([1.0, nan2, 2.0])
     assert RecursiveHash(a) == RecursiveHash(b)
 
 
@@ -195,11 +195,11 @@ def test_none_vs_other_hash() -> None:
 
 
 def test_dtype_hash_equal() -> None:
-    assert RecursiveHash(tvm_ffi.dtype("float32")) == RecursiveHash(tvm_ffi.dtype("float32"))
+    assert RecursiveHash(ffi.dtype("float32")) == RecursiveHash(ffi.dtype("float32"))
 
 
 def test_dtype_hash_different() -> None:
-    assert RecursiveHash(tvm_ffi.dtype("float32")) != RecursiveHash(tvm_ffi.dtype("float16"))
+    assert RecursiveHash(ffi.dtype("float32")) != RecursiveHash(ffi.dtype("float16"))
 
 
 # ---------------------------------------------------------------------------
@@ -208,11 +208,11 @@ def test_dtype_hash_different() -> None:
 
 
 def test_device_hash_equal() -> None:
-    assert RecursiveHash(tvm_ffi.Device("cpu", 0)) == RecursiveHash(tvm_ffi.Device("cpu", 0))
+    assert RecursiveHash(ffi.Device("cpu", 0)) == RecursiveHash(ffi.Device("cpu", 0))
 
 
 def test_device_hash_different() -> None:
-    assert RecursiveHash(tvm_ffi.Device("cpu", 0)) != RecursiveHash(tvm_ffi.Device("cpu", 1))
+    assert RecursiveHash(ffi.Device("cpu", 0)) != RecursiveHash(ffi.Device("cpu", 1))
 
 
 # ---------------------------------------------------------------------------
@@ -221,26 +221,26 @@ def test_device_hash_different() -> None:
 
 
 def test_array_hash_equal() -> None:
-    a = tvm_ffi.Array([1, 2, 3])
-    b = tvm_ffi.Array([1, 2, 3])
+    a = ffi.Array([1, 2, 3])
+    b = ffi.Array([1, 2, 3])
     assert RecursiveHash(a) == RecursiveHash(b)
 
 
 def test_array_hash_different() -> None:
-    a = tvm_ffi.Array([1, 2, 3])
-    c = tvm_ffi.Array([1, 2, 4])
+    a = ffi.Array([1, 2, 3])
+    c = ffi.Array([1, 2, 4])
     assert RecursiveHash(a) != RecursiveHash(c)
 
 
 def test_array_empty_hash() -> None:
-    empty1 = tvm_ffi.Array([])
-    empty2 = tvm_ffi.Array([])
+    empty1 = ffi.Array([])
+    empty2 = ffi.Array([])
     assert RecursiveHash(empty1) == RecursiveHash(empty2)
 
 
 def test_array_different_length_hash() -> None:
-    a = tvm_ffi.Array([1, 2])
-    b = tvm_ffi.Array([1, 2, 3])
+    a = ffi.Array([1, 2])
+    b = ffi.Array([1, 2, 3])
     assert RecursiveHash(a) != RecursiveHash(b)
 
 
@@ -250,14 +250,14 @@ def test_array_different_length_hash() -> None:
 
 
 def test_list_hash_equal() -> None:
-    a = tvm_ffi.List([1, 2, 3])
-    b = tvm_ffi.List([1, 2, 3])
+    a = ffi.List([1, 2, 3])
+    b = ffi.List([1, 2, 3])
     assert RecursiveHash(a) == RecursiveHash(b)
 
 
 def test_list_hash_different() -> None:
-    a = tvm_ffi.List([1, 2, 3])
-    c = tvm_ffi.List([1, 2, 4])
+    a = ffi.List([1, 2, 3])
+    c = ffi.List([1, 2, 4])
     assert RecursiveHash(a) != RecursiveHash(c)
 
 
@@ -267,14 +267,14 @@ def test_list_hash_different() -> None:
 
 
 def test_shape_hash_equal() -> None:
-    a = tvm_ffi.Shape((2, 3, 4))
-    b = tvm_ffi.Shape((2, 3, 4))
+    a = ffi.Shape((2, 3, 4))
+    b = ffi.Shape((2, 3, 4))
     assert RecursiveHash(a) == RecursiveHash(b)
 
 
 def test_shape_hash_different() -> None:
-    a = tvm_ffi.Shape((2, 3, 4))
-    c = tvm_ffi.Shape((2, 3, 5))
+    a = ffi.Shape((2, 3, 4))
+    c = ffi.Shape((2, 3, 5))
     assert RecursiveHash(a) != RecursiveHash(c)
 
 
@@ -284,39 +284,39 @@ def test_shape_hash_different() -> None:
 
 
 def test_map_hash_equal() -> None:
-    a = tvm_ffi.Map({"x": 1, "y": 2})
-    b = tvm_ffi.Map({"x": 1, "y": 2})
+    a = ffi.Map({"x": 1, "y": 2})
+    b = ffi.Map({"x": 1, "y": 2})
     assert RecursiveHash(a) == RecursiveHash(b)
 
 
 def test_map_hash_different_values() -> None:
-    a = tvm_ffi.Map({"x": 1, "y": 2})
-    c = tvm_ffi.Map({"x": 1, "y": 3})
+    a = ffi.Map({"x": 1, "y": 2})
+    c = ffi.Map({"x": 1, "y": 3})
     assert RecursiveHash(a) != RecursiveHash(c)
 
 
 def test_map_hash_different_size() -> None:
-    a = tvm_ffi.Map({"x": 1})
-    b = tvm_ffi.Map({"x": 1, "y": 2})
+    a = ffi.Map({"x": 1})
+    b = ffi.Map({"x": 1, "y": 2})
     assert RecursiveHash(a) != RecursiveHash(b)
 
 
 def test_map_hash_order_independent() -> None:
     """Map hash should be the same regardless of insertion order."""
-    a = tvm_ffi.Map({"x": 1, "y": 2, "z": 3})
-    b = tvm_ffi.Map({"z": 3, "x": 1, "y": 2})
+    a = ffi.Map({"x": 1, "y": 2, "z": 3})
+    b = ffi.Map({"z": 3, "x": 1, "y": 2})
     assert RecursiveHash(a) == RecursiveHash(b)
 
 
 def test_dict_hash_equal() -> None:
-    a = tvm_ffi.Dict({"x": 1, "y": 2})
-    b = tvm_ffi.Dict({"x": 1, "y": 2})
+    a = ffi.Dict({"x": 1, "y": 2})
+    b = ffi.Dict({"x": 1, "y": 2})
     assert RecursiveHash(a) == RecursiveHash(b)
 
 
 def test_dict_hash_different() -> None:
-    a = tvm_ffi.Dict({"x": 1})
-    b = tvm_ffi.Dict({"x": 2})
+    a = ffi.Dict({"x": 1})
+    b = ffi.Dict({"x": 2})
     assert RecursiveHash(a) != RecursiveHash(b)
 
 
@@ -400,33 +400,33 @@ def test_different_types_hash() -> None:
 
 
 def test_array_of_arrays_hash() -> None:
-    a = tvm_ffi.Array([tvm_ffi.Array([1, 2]), tvm_ffi.Array([3, 4])])
-    b = tvm_ffi.Array([tvm_ffi.Array([1, 2]), tvm_ffi.Array([3, 4])])
-    c = tvm_ffi.Array([tvm_ffi.Array([1, 2]), tvm_ffi.Array([3, 5])])
+    a = ffi.Array([ffi.Array([1, 2]), ffi.Array([3, 4])])
+    b = ffi.Array([ffi.Array([1, 2]), ffi.Array([3, 4])])
+    c = ffi.Array([ffi.Array([1, 2]), ffi.Array([3, 5])])
     assert RecursiveHash(a) == RecursiveHash(b)
     assert RecursiveHash(a) != RecursiveHash(c)
 
 
 def test_list_of_lists_hash() -> None:
-    a = tvm_ffi.List([tvm_ffi.List([1, 2]), tvm_ffi.List([3])])
-    b = tvm_ffi.List([tvm_ffi.List([1, 2]), tvm_ffi.List([3])])
-    c = tvm_ffi.List([tvm_ffi.List([1, 2]), tvm_ffi.List([4])])
+    a = ffi.List([ffi.List([1, 2]), ffi.List([3])])
+    b = ffi.List([ffi.List([1, 2]), ffi.List([3])])
+    c = ffi.List([ffi.List([1, 2]), ffi.List([4])])
     assert RecursiveHash(a) == RecursiveHash(b)
     assert RecursiveHash(a) != RecursiveHash(c)
 
 
 def test_three_level_nested_hash() -> None:
-    a = tvm_ffi.Array([tvm_ffi.Array([tvm_ffi.Array([1])])])
-    b = tvm_ffi.Array([tvm_ffi.Array([tvm_ffi.Array([1])])])
-    c = tvm_ffi.Array([tvm_ffi.Array([tvm_ffi.Array([2])])])
+    a = ffi.Array([ffi.Array([ffi.Array([1])])])
+    b = ffi.Array([ffi.Array([ffi.Array([1])])])
+    c = ffi.Array([ffi.Array([ffi.Array([2])])])
     assert RecursiveHash(a) == RecursiveHash(b)
     assert RecursiveHash(a) != RecursiveHash(c)
 
 
 def test_map_with_array_values_hash() -> None:
-    a = tvm_ffi.Map({"k": tvm_ffi.Array([1, 2])})
-    b = tvm_ffi.Map({"k": tvm_ffi.Array([1, 2])})
-    c = tvm_ffi.Map({"k": tvm_ffi.Array([1, 3])})
+    a = ffi.Map({"k": ffi.Array([1, 2])})
+    b = ffi.Map({"k": ffi.Array([1, 2])})
+    c = ffi.Map({"k": ffi.Array([1, 3])})
     assert RecursiveHash(a) == RecursiveHash(b)
     assert RecursiveHash(a) != RecursiveHash(c)
 
@@ -467,16 +467,16 @@ def test_object_with_array_field_hash() -> None:
         v_i64=1,
         v_f64=2.0,
         v_str="s",
-        v_map=tvm_ffi.Map({}),
-        v_array=tvm_ffi.Array([10, 20, 30]),
+        v_map=ffi.Map({}),
+        v_array=ffi.Array([10, 20, 30]),
     )
     b = create_object(
         "testing.TestObjectDerived",
         v_i64=1,
         v_f64=2.0,
         v_str="s",
-        v_map=tvm_ffi.Map({}),
-        v_array=tvm_ffi.Array([10, 20, 30]),
+        v_map=ffi.Map({}),
+        v_array=ffi.Array([10, 20, 30]),
     )
     assert RecursiveHash(a) == RecursiveHash(b)
 
@@ -487,16 +487,16 @@ def test_object_with_array_field_differ_hash() -> None:
         v_i64=1,
         v_f64=2.0,
         v_str="s",
-        v_map=tvm_ffi.Map({}),
-        v_array=tvm_ffi.Array([10, 20]),
+        v_map=ffi.Map({}),
+        v_array=ffi.Array([10, 20]),
     )
     b = create_object(
         "testing.TestObjectDerived",
         v_i64=1,
         v_f64=2.0,
         v_str="s",
-        v_map=tvm_ffi.Map({}),
-        v_array=tvm_ffi.Array([10, 21]),
+        v_map=ffi.Map({}),
+        v_array=ffi.Array([10, 21]),
     )
     assert RecursiveHash(a) != RecursiveHash(b)
 
@@ -507,14 +507,14 @@ def test_object_with_array_field_differ_hash() -> None:
 
 
 def test_array_vs_list_different_hash() -> None:
-    arr = tvm_ffi.Array([1, 2])
-    lst = tvm_ffi.List([1, 2])
+    arr = ffi.Array([1, 2])
+    lst = ffi.List([1, 2])
     assert RecursiveHash(arr) != RecursiveHash(lst)
 
 
 def test_map_vs_dict_different_hash() -> None:
-    m = tvm_ffi.Map({"k": 1})
-    d = tvm_ffi.Dict({"k": 1})
+    m = ffi.Map({"k": 1})
+    d = ffi.Dict({"k": 1})
     assert RecursiveHash(m) != RecursiveHash(d)
 
 
@@ -524,9 +524,9 @@ def test_map_vs_dict_different_hash() -> None:
 
 
 def test_array_with_none_elements_hash() -> None:
-    a = tvm_ffi.Array([None, 1, None])
-    b = tvm_ffi.Array([None, 1, None])
-    c = tvm_ffi.Array([None, 2, None])
+    a = ffi.Array([None, 1, None])
+    b = ffi.Array([None, 1, None])
+    c = ffi.Array([None, 2, None])
     assert RecursiveHash(a) == RecursiveHash(b)
     assert RecursiveHash(a) != RecursiveHash(c)
 
@@ -538,7 +538,7 @@ def test_array_with_none_elements_hash() -> None:
 
 def test_cyclic_list_same_pointer_hash() -> None:
     """Same cyclic list hashed with itself succeeds (pointer identity short-circuit)."""
-    lst = tvm_ffi.List()
+    lst = ffi.List()
     lst.append(lst)
     # Should not raise; same pointer returns a deterministic hash
     h = RecursiveHash(lst)
@@ -547,9 +547,9 @@ def test_cyclic_list_same_pointer_hash() -> None:
 
 def test_cyclic_list_handled() -> None:
     """Distinct cyclic lists are handled gracefully via on-stack cycle detection."""
-    a = tvm_ffi.List()
+    a = ffi.List()
     a.append(a)
-    b = tvm_ffi.List()
+    b = ffi.List()
     b.append(b)
     h_a = RecursiveHash(a)
     h_b = RecursiveHash(b)
@@ -558,7 +558,7 @@ def test_cyclic_list_handled() -> None:
 
 def test_cyclic_dict_handled() -> None:
     """Cyclic dict is handled gracefully via on-stack cycle detection."""
-    d = tvm_ffi.Dict()
+    d = ffi.Dict()
     d["self"] = d
     h = RecursiveHash(d)
     assert h == RecursiveHash(d)
@@ -602,11 +602,11 @@ def test_consistency_signed_zero() -> None:
 def test_consistency_containers() -> None:
     """Verify hash consistency for containers."""
     pairs = [
-        (tvm_ffi.Array([1, 2, 3]), tvm_ffi.Array([1, 2, 3])),
-        (tvm_ffi.List([1, 2, 3]), tvm_ffi.List([1, 2, 3])),
-        (tvm_ffi.Shape((2, 3, 4)), tvm_ffi.Shape((2, 3, 4))),
-        (tvm_ffi.Map({"x": 1, "y": 2}), tvm_ffi.Map({"x": 1, "y": 2})),
-        (tvm_ffi.Dict({"x": 1, "y": 2}), tvm_ffi.Dict({"x": 1, "y": 2})),
+        (ffi.Array([1, 2, 3]), ffi.Array([1, 2, 3])),
+        (ffi.List([1, 2, 3]), ffi.List([1, 2, 3])),
+        (ffi.Shape((2, 3, 4)), ffi.Shape((2, 3, 4))),
+        (ffi.Map({"x": 1, "y": 2}), ffi.Map({"x": 1, "y": 2})),
+        (ffi.Dict({"x": 1, "y": 2}), ffi.Dict({"x": 1, "y": 2})),
     ]
     for a, b in pairs:
         assert RecursiveEq(a, b), f"Expected RecursiveEq for {a!r} and {b!r}"
@@ -655,7 +655,7 @@ def test_consistency_law_on_int_pairs() -> None:
 def _make_nested_singleton_array(depth: int) -> object:
     value: object = 0
     for _ in range(depth):
-        value = tvm_ffi.Array([value])
+        value = ffi.Array([value])
     return value
 
 
@@ -666,8 +666,8 @@ def _make_nested_singleton_array(depth: int) -> object:
 
 def test_aliasing_consistency_array_of_reflected_objects() -> None:
     shared = TestIntPair(11, 22)
-    aliased = tvm_ffi.Array([shared, shared])
-    duplicated = tvm_ffi.Array(
+    aliased = ffi.Array([shared, shared])
+    duplicated = ffi.Array(
         [
             TestIntPair(11, 22),
             TestIntPair(11, 22),
@@ -679,8 +679,8 @@ def test_aliasing_consistency_array_of_reflected_objects() -> None:
 
 def test_aliasing_consistency_list_of_reflected_objects() -> None:
     shared = TestIntPair(13, 26)
-    aliased = tvm_ffi.List([shared, shared])
-    duplicated = tvm_ffi.List(
+    aliased = ffi.List([shared, shared])
+    duplicated = ffi.List(
         [
             TestIntPair(13, 26),
             TestIntPair(13, 26),
@@ -691,33 +691,33 @@ def test_aliasing_consistency_list_of_reflected_objects() -> None:
 
 
 def test_aliasing_consistency_array_of_arrays() -> None:
-    shared = tvm_ffi.Array([1, 2, 3])
-    aliased = tvm_ffi.Array([shared, shared])
-    duplicated = tvm_ffi.Array([tvm_ffi.Array([1, 2, 3]), tvm_ffi.Array([1, 2, 3])])
+    shared = ffi.Array([1, 2, 3])
+    aliased = ffi.Array([shared, shared])
+    duplicated = ffi.Array([ffi.Array([1, 2, 3]), ffi.Array([1, 2, 3])])
     assert RecursiveEq(aliased, duplicated)
     assert RecursiveHash(aliased) == RecursiveHash(duplicated)
 
 
 def test_aliasing_consistency_list_of_lists() -> None:
-    shared = tvm_ffi.List([1, 2, 3])
-    aliased = tvm_ffi.List([shared, shared])
-    duplicated = tvm_ffi.List([tvm_ffi.List([1, 2, 3]), tvm_ffi.List([1, 2, 3])])
+    shared = ffi.List([1, 2, 3])
+    aliased = ffi.List([shared, shared])
+    duplicated = ffi.List([ffi.List([1, 2, 3]), ffi.List([1, 2, 3])])
     assert RecursiveEq(aliased, duplicated)
     assert RecursiveHash(aliased) == RecursiveHash(duplicated)
 
 
 def test_aliasing_consistency_shape_objects() -> None:
-    shared = tvm_ffi.Shape((3, 4))
-    aliased = tvm_ffi.Array([shared, shared])
-    duplicated = tvm_ffi.Array([tvm_ffi.Shape((3, 4)), tvm_ffi.Shape((3, 4))])
+    shared = ffi.Shape((3, 4))
+    aliased = ffi.Array([shared, shared])
+    duplicated = ffi.Array([ffi.Shape((3, 4)), ffi.Shape((3, 4))])
     assert RecursiveEq(aliased, duplicated)
     assert RecursiveHash(aliased) == RecursiveHash(duplicated)
 
 
 def test_aliasing_consistency_map_shared_values() -> None:
     shared = TestIntPair(31, 41)
-    aliased = tvm_ffi.Map({"x": shared, "y": shared})
-    duplicated = tvm_ffi.Map(
+    aliased = ffi.Map({"x": shared, "y": shared})
+    duplicated = ffi.Map(
         {
             "x": TestIntPair(31, 41),
             "y": TestIntPair(31, 41),
@@ -728,9 +728,9 @@ def test_aliasing_consistency_map_shared_values() -> None:
 
 
 def test_aliasing_consistency_dict_shared_values() -> None:
-    shared = tvm_ffi.Array([7, 8, 9])
-    aliased = tvm_ffi.Dict({"x": shared, "y": shared})
-    duplicated = tvm_ffi.Dict({"x": tvm_ffi.Array([7, 8, 9]), "y": tvm_ffi.Array([7, 8, 9])})
+    shared = ffi.Array([7, 8, 9])
+    aliased = ffi.Dict({"x": shared, "y": shared})
+    duplicated = ffi.Dict({"x": ffi.Array([7, 8, 9]), "y": ffi.Array([7, 8, 9])})
     assert RecursiveEq(aliased, duplicated)
     assert RecursiveHash(aliased) == RecursiveHash(duplicated)
 
@@ -742,16 +742,16 @@ def test_aliasing_consistency_reflected_object_fields() -> None:
         v_i64=1,
         v_f64=2.0,
         v_str="shared",
-        v_map=tvm_ffi.Map({"k": shared}),
-        v_array=tvm_ffi.Array([shared]),
+        v_map=ffi.Map({"k": shared}),
+        v_array=ffi.Array([shared]),
     )
     duplicated = create_object(
         "testing.TestObjectDerived",
         v_i64=1,
         v_f64=2.0,
         v_str="shared",
-        v_map=tvm_ffi.Map({"k": TestIntPair(5, 6)}),
-        v_array=tvm_ffi.Array([TestIntPair(5, 6)]),
+        v_map=ffi.Map({"k": TestIntPair(5, 6)}),
+        v_array=ffi.Array([TestIntPair(5, 6)]),
     )
     assert RecursiveEq(aliased, duplicated)
     assert RecursiveHash(aliased) == RecursiveHash(duplicated)
@@ -764,16 +764,16 @@ def test_aliasing_consistency_reflected_object_fields() -> None:
 
 def test_map_hash_order_independent_with_shared_values() -> None:
     shared = TestIntPair(1, 2)
-    a = tvm_ffi.Map({"a": shared, "b": shared, "c": shared})
-    b = tvm_ffi.Map({"b": shared, "a": shared, "c": shared})
+    a = ffi.Map({"a": shared, "b": shared, "c": shared})
+    b = ffi.Map({"b": shared, "a": shared, "c": shared})
     assert RecursiveEq(a, b)
     assert RecursiveHash(a) == RecursiveHash(b)
 
 
 def test_dict_hash_order_independent_with_shared_values() -> None:
-    shared = tvm_ffi.Array([1, 2])
-    a = tvm_ffi.Dict({"a": shared, "b": shared, "c": shared})
-    b = tvm_ffi.Dict({"b": shared, "a": shared, "c": shared})
+    shared = ffi.Array([1, 2])
+    a = ffi.Dict({"a": shared, "b": shared, "c": shared})
+    b = ffi.Dict({"b": shared, "a": shared, "c": shared})
     assert RecursiveEq(a, b)
     assert RecursiveHash(a) == RecursiveHash(b)
 
@@ -799,16 +799,16 @@ def test_depth_1000_nested_arrays_works() -> None:
 
 def test_map_hash_collision_swap_values() -> None:
     """Swapping values across two keys should not trivially collide."""
-    a = tvm_ffi.Map({"a": 0, "b": 1})
-    b = tvm_ffi.Map({"a": 1, "b": 0})
+    a = ffi.Map({"a": 0, "b": 1})
+    b = ffi.Map({"a": 1, "b": 0})
     assert not RecursiveEq(a, b)
     assert RecursiveHash(a) != RecursiveHash(b)
 
 
 def test_array_hash_collision_small_int_pairs() -> None:
     """Distinct short arrays should not have obvious low-domain collisions."""
-    a = tvm_ffi.Array([1, 2])
-    b = tvm_ffi.Array([2, 61])
+    a = ffi.Array([1, 2])
+    b = ffi.Array([2, 61])
     assert not RecursiveEq(a, b)
     assert RecursiveHash(a) != RecursiveHash(b)
 
@@ -818,8 +818,8 @@ def test_function_hash_consistent_with_eq() -> None:
 
     Hash must be consistent: RecursiveEq(a, b) => RecursiveHash(a) == RecursiveHash(b).
     """
-    f_add_one = tvm_ffi.get_global_func("testing.add_one")
-    f_nop = tvm_ffi.get_global_func("testing.nop")
+    f_add_one = ffi.get_global_func("testing.add_one")
+    f_nop = ffi.get_global_func("testing.nop")
     assert RecursiveEq(f_add_one, f_nop)
     assert RecursiveHash(f_add_one) == RecursiveHash(f_nop)
 
@@ -829,8 +829,8 @@ def test_tensor_hash_consistent_with_eq() -> None:
 
     Hash must be consistent: RecursiveEq(a, b) => RecursiveHash(a) == RecursiveHash(b).
     """
-    t1 = tvm_ffi.from_dlpack(np.array([1, 2], dtype="int32"))
-    t2 = tvm_ffi.from_dlpack(np.array([[9, 8, 7]], dtype="int64"))
+    t1 = ffi.from_dlpack(np.array([1, 2], dtype="int32"))
+    t2 = ffi.from_dlpack(np.array([[9, 8, 7]], dtype="int64"))
     assert RecursiveEq(t1, t2)
     assert RecursiveHash(t1) == RecursiveHash(t2)
 
@@ -839,7 +839,7 @@ def _make_shared_binary_dag(depth: int) -> object:
     node: object = 1
     for _ in range(depth):
         # Two edges point to the same child object (DAG with heavy sharing).
-        node = tvm_ffi.Array([node, node])
+        node = ffi.Array([node, node])
     return node
 
 
@@ -886,13 +886,13 @@ def test_custom_hash_different_key() -> None:
 
 def test_custom_hash_in_container() -> None:
     """Custom-hooked objects inside an Array."""
-    a = tvm_ffi.Array(
+    a = ffi.Array(
         [
             TestCustomHash(1, "x"),
             TestCustomHash(2, "y"),
         ]
     )
-    b = tvm_ffi.Array(
+    b = ffi.Array(
         [
             TestCustomHash(1, "different"),
             TestCustomHash(2, "labels"),
@@ -929,14 +929,14 @@ def test_custom_compare_eq_implies_hash_same_direct(
 @pytest.mark.parametrize(
     "wrap",
     [
-        lambda obj: tvm_ffi.Array([obj]),
-        lambda obj: tvm_ffi.List([obj]),
-        lambda obj: tvm_ffi.Array([0, obj, 1]),
-        lambda obj: tvm_ffi.List([0, obj, 1]),
-        lambda obj: tvm_ffi.Map({"k": obj}),
-        lambda obj: tvm_ffi.Dict({"k": obj}),
-        lambda obj: tvm_ffi.Array([tvm_ffi.Array([obj])]),
-        lambda obj: tvm_ffi.List([tvm_ffi.List([obj])]),
+        lambda obj: ffi.Array([obj]),
+        lambda obj: ffi.List([obj]),
+        lambda obj: ffi.Array([0, obj, 1]),
+        lambda obj: ffi.List([0, obj, 1]),
+        lambda obj: ffi.Map({"k": obj}),
+        lambda obj: ffi.Dict({"k": obj}),
+        lambda obj: ffi.Array([ffi.Array([obj])]),
+        lambda obj: ffi.List([ffi.List([obj])]),
     ],
 )
 def test_custom_compare_eq_implies_hash_same_in_wrappers(
@@ -965,7 +965,7 @@ def test_eq_without_hash_raises() -> None:
 def test_eq_without_hash_inside_container_raises() -> None:
     """The guard also triggers when the object is nested inside a container."""
     obj = TestEqWithoutHash(1, "hello")
-    arr = tvm_ffi.Array([obj])
+    arr = ffi.Array([obj])
     with pytest.raises(ValueError, match="__ffi_eq__ or __ffi_compare__ but not __ffi_hash__"):
         RecursiveHash(arr)
 

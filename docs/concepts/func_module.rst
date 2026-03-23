@@ -69,9 +69,9 @@ which can then be loaded and called via :py:func:`tvm_ffi.load_module`:
 
 .. code-block:: python
 
-   import tvm_ffi
+   import tvm_ffi as ffi
 
-   mod = tvm_ffi.load_module("path/to/library.so")
+   mod = ffi.load_module("path/to/library.so")
    result = mod.add_two(40)  # -> 42
 
 **System library**. For symbols bundled in the same executable, use :cpp:func:`TVMFFIEnvModRegisterSystemLibSymbol`
@@ -105,9 +105,9 @@ In Python, use the decorator :py:func:`tvm_ffi.register_global_func` to register
 
 .. code-block:: python
 
-   import tvm_ffi
+   import tvm_ffi as ffi
 
-   @tvm_ffi.register_global_func("my_ext.add_one")
+   @ffi.register_global_func("my_ext.add_one")
    def add_one(x: int) -> int:
        return x + 1
 
@@ -117,10 +117,10 @@ In Python, use :py:func:`tvm_ffi.get_global_func` to retrieve a global function:
 
 .. code-block:: python
 
-   import tvm_ffi
+   import tvm_ffi as ffi
 
    # Get a function from the global registry
-   add_one = tvm_ffi.get_global_func("my_ext.add_one")
+   add_one = ffi.get_global_func("my_ext.add_one")
    result = add_one(41)  # -> 42
 
 In C++, use :cpp:func:`tvm::ffi::Function::GetGlobal` or :cpp:func:`tvm::ffi::Function::GetGlobalRequired`
@@ -161,19 +161,19 @@ to a :py:class:`tvm_ffi.Function` at the ABI boundary. The example below demonst
 
 .. code-block:: python
 
-   import tvm_ffi
+   import tvm_ffi as ffi
 
-   @tvm_ffi.register_global_func("my_ext.bind")
+   @ffi.register_global_func("my_ext.bind")
    def bind(func, x):
-     assert isinstance(func, tvm_ffi.Function)
-     return lambda *args: func(x, *args)  # converted to `tvm_ffi.Function`
+     assert isinstance(func, ffi.Function)
+     return lambda *args: func(x, *args)  # converted to `ffi.Function`
 
    def add_x_y(x, y):
      return x + y
 
-   func_bind = tvm_ffi.get_global_func("my_ext.bind")
+   func_bind = ffi.get_global_func("my_ext.bind")
    add_y = func_bind(add_x_y, 1)  # bind x = 1
-   assert isinstance(add_y, tvm_ffi.Function)
+   assert isinstance(add_y, ffi.Function)
    print(add_y(2))  # -> 3
 
 
@@ -181,12 +181,12 @@ to a :py:class:`tvm_ffi.Function` at the ABI boundary. The example below demonst
 
 .. code-block:: python
 
-   import tvm_ffi
+   import tvm_ffi as ffi
 
    def add(x, y):
      return x + y
 
-   func_add = tvm_ffi.convert(add)
+   func_add = ffi.convert(add)
    print(func_add(1, 2))
 
 
@@ -311,10 +311,10 @@ a function as a C symbol that follows the TVM-FFI ABI:
 
 .. code-block:: python
 
-   import tvm_ffi
+   import tvm_ffi as ffi
 
    # Load the shared library
-   mod = tvm_ffi.load_module("path/to/library.so")
+   mod = ffi.load_module("path/to/library.so")
 
    # Access functions by name
    result = mod.add_two(40)  # -> 42
@@ -328,10 +328,11 @@ C++/CUDA source files and loads them as a module in one step:
 
 .. code-block:: python
 
+   import tvm_ffi as ffi
    import tvm_ffi.cpp
 
    # Compile and load in one step
-   mod = tvm_ffi.cpp.load(
+   mod = ffi.cpp.load(
        name="my_ops",
        cpp_files="my_ops.cpp",
    )
@@ -379,11 +380,11 @@ a symbol during static initialization:
 
 .. code-block:: python
 
-   import tvm_ffi
+   import tvm_ffi as ffi
 
    # Get system library with symbol prefix "my_prefix."
    # This looks up symbols prefixed with `__tvm_ffi_my_prefix.`
-   mod = tvm_ffi.system_lib("my_prefix.")
+   mod = ffi.system_lib("my_prefix.")
 
    # Call the registered function
    func = mod.add_one  # looks up `__tvm_ffi_my_prefix.add_one`

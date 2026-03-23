@@ -25,12 +25,13 @@ try:
 except ImportError:
     torch = None  # ty: ignore[invalid-assignment]
 
+import tvm_ffi as ffi
 import tvm_ffi.cpp
 from tvm_ffi.module import Module
 
 
 def test_load_inline_cpp() -> None:
-    mod: Module = tvm_ffi.cpp.load_inline(
+    mod: Module = ffi.cpp.load_inline(
         name="hello",
         cpp_sources=r"""
             void add_one_cpu(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
@@ -56,7 +57,7 @@ def test_load_inline_cpp() -> None:
 
 
 def test_load_inline_cpp_with_docstrings() -> None:
-    mod: Module = tvm_ffi.cpp.load_inline(
+    mod: Module = ffi.cpp.load_inline(
         name="hello",
         cpp_sources=r"""
             void add_one_cpu(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
@@ -82,7 +83,7 @@ def test_load_inline_cpp_with_docstrings() -> None:
 
 
 def test_load_inline_cpp_multiple_sources() -> None:
-    mod: Module = tvm_ffi.cpp.load_inline(
+    mod: Module = ffi.cpp.load_inline(
         name="hello",
         cpp_sources=[
             r"""
@@ -124,7 +125,7 @@ def test_load_inline_cpp_multiple_sources() -> None:
 
 
 def test_load_inline_cpp_build_dir() -> None:
-    mod: Module = tvm_ffi.cpp.load_inline(
+    mod: Module = ffi.cpp.load_inline(
         name="hello",
         cpp_sources=r"""
             void add_one_cpu(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
@@ -154,7 +155,7 @@ def test_load_inline_cpp_build_dir() -> None:
     torch is None or not torch.cuda.is_available(), reason="Requires torch and CUDA"
 )
 def test_load_inline_cuda() -> None:
-    mod: Module = tvm_ffi.cpp.load_inline(
+    mod: Module = ffi.cpp.load_inline(
         name="hello",
         cuda_sources=r"""
             __global__ void AddOneKernel(float* x, float* y, int n) {
@@ -212,7 +213,7 @@ def test_load_inline_with_env_tensor_allocator() -> None:
     assert torch is not None
     if not hasattr(torch.Tensor, "__dlpack_c_exchange_api__"):
         pytest.skip("Torch does not support __dlpack_c_exchange_api__")
-    mod: Module = tvm_ffi.cpp.load_inline(
+    mod: Module = ffi.cpp.load_inline(
         name="hello",
         cpp_sources=r"""
             #include <tvm/ffi/container/tensor.h>
@@ -265,7 +266,7 @@ def test_load_inline_with_env_tensor_allocator() -> None:
 )
 def test_load_inline_both() -> None:
     assert torch is not None
-    mod: Module = tvm_ffi.cpp.load_inline(
+    mod: Module = ffi.cpp.load_inline(
         name="hello",
         cpp_sources=r"""
             void add_one_cpu(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
@@ -332,7 +333,7 @@ def test_load_inline_both() -> None:
 )
 def test_cuda_memory_alloc_noleak() -> None:
     assert torch is not None
-    mod = tvm_ffi.cpp.load_inline(
+    mod = ffi.cpp.load_inline(
         name="hello",
         cuda_sources=r"""
             #include <tvm/ffi/function.h>

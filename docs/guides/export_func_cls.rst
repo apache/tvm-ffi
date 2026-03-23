@@ -113,9 +113,9 @@ functions by name:
 
 .. code-block:: python
 
-   import tvm_ffi
+   import tvm_ffi as ffi
 
-   mod = tvm_ffi.load_module("path/to/library.so")
+   mod = ffi.load_module("path/to/library.so")
    result = mod.add_two(40)  # -> 42
 
 .. seealso::
@@ -208,9 +208,9 @@ Register and Retrieve in Python
 
 .. code-block:: python
 
-   import tvm_ffi
+   import tvm_ffi as ffi
 
-   @tvm_ffi.register_global_func("my_ffi_extension.add_one")
+   @ffi.register_global_func("my_ffi_extension.add_one")
    def add_one(x: int) -> int:
        return x + 1
 
@@ -219,9 +219,9 @@ name:
 
 .. code-block:: python
 
-   import tvm_ffi
+   import tvm_ffi as ffi
 
-   add_one = tvm_ffi.get_global_func("my_ffi_extension.add_one")
+   add_one = ffi.get_global_func("my_ffi_extension.add_one")
    result = add_one(3)  # -> 4
 
 .. seealso::

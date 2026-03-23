@@ -225,17 +225,17 @@ def register_error(
     --------
     .. code-block:: python
 
-        import tvm_ffi
+        import tvm_ffi as ffi
 
 
-        # Register a custom Python exception so tvm_ffi.Error maps to it
-        @tvm_ffi.error.register_error
+        # Register a custom Python exception so ffi.Error maps to it
+        @ffi.error.register_error
         class MyError(RuntimeError):
             pass
 
 
         # Convert a Python exception to an FFI Error and back
-        ffi_err = tvm_ffi.convert(MyError("boom"))
+        ffi_err = ffi.convert(MyError("boom"))
         py_err = ffi_err.py_error()
         assert isinstance(py_err, MyError)
 

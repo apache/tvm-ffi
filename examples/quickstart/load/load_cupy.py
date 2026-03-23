@@ -19,8 +19,8 @@
 # mypy: ignore-errors
 # [example.begin]
 # File: load/load_cupy.py
-import tvm_ffi
-mod = tvm_ffi.load_module("build/add_one_cuda.so")
+import tvm_ffi as ffi
+mod = ffi.load_module("build/add_one_cuda.so")
 
 import cupy as cp
 x = cp.array([1, 2, 3, 4, 5], dtype=cp.float32)

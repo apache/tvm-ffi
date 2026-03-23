@@ -22,7 +22,7 @@ import math
 import struct
 
 import pytest
-import tvm_ffi
+import tvm_ffi as ffi
 import tvm_ffi.testing
 from tvm_ffi._ffi_api import RecursiveEq, RecursiveGe, RecursiveGt, RecursiveLe, RecursiveLt
 from tvm_ffi.testing import (
@@ -149,8 +149,8 @@ def test_nan_payloads_eq() -> None:
 def test_nan_payloads_in_nested_array() -> None:
     nan1 = _make_nan_from_payload(0xA5)
     nan2 = _make_nan_from_payload(0x5A)
-    a = tvm_ffi.Array([1.0, nan1, 2.0])
-    b = tvm_ffi.Array([1.0, nan2, 2.0])
+    a = ffi.Array([1.0, nan1, 2.0])
+    b = ffi.Array([1.0, nan2, 2.0])
     assert RecursiveEq(a, b)
     with pytest.raises(TypeError):
         RecursiveLt(a, b)
@@ -283,14 +283,14 @@ def test_type_mismatch_ordering_raises() -> None:
 
 
 def test_dtype_eq() -> None:
-    assert RecursiveEq(tvm_ffi.dtype("float32"), tvm_ffi.dtype("float32"))
-    assert not RecursiveEq(tvm_ffi.dtype("float32"), tvm_ffi.dtype("float16"))
+    assert RecursiveEq(ffi.dtype("float32"), ffi.dtype("float32"))
+    assert not RecursiveEq(ffi.dtype("float32"), ffi.dtype("float16"))
 
 
 def test_dtype_ordering() -> None:
     # float32 code=2 bits=32, float16 code=2 bits=16 -> float16 < float32
-    assert RecursiveLt(tvm_ffi.dtype("float16"), tvm_ffi.dtype("float32"))
-    assert not RecursiveLt(tvm_ffi.dtype("float32"), tvm_ffi.dtype("float16"))
+    assert RecursiveLt(ffi.dtype("float16"), ffi.dtype("float32"))
+    assert not RecursiveLt(ffi.dtype("float32"), ffi.dtype("float16"))
 
 
 # ---------------------------------------------------------------------------
@@ -299,13 +299,13 @@ def test_dtype_ordering() -> None:
 
 
 def test_device_eq() -> None:
-    assert RecursiveEq(tvm_ffi.Device("cpu", 0), tvm_ffi.Device("cpu", 0))
-    assert not RecursiveEq(tvm_ffi.Device("cpu", 0), tvm_ffi.Device("cpu", 1))
+    assert RecursiveEq(ffi.Device("cpu", 0), ffi.Device("cpu", 0))
+    assert not RecursiveEq(ffi.Device("cpu", 0), ffi.Device("cpu", 1))
 
 
 def test_device_ordering() -> None:
-    assert RecursiveLt(tvm_ffi.Device("cpu", 0), tvm_ffi.Device("cpu", 1))
-    assert RecursiveLt(tvm_ffi.Device("cpu", 0), tvm_ffi.Device("cuda", 0))
+    assert RecursiveLt(ffi.Device("cpu", 0), ffi.Device("cpu", 1))
+    assert RecursiveLt(ffi.Device("cpu", 0), ffi.Device("cuda", 0))
 
 
 # ---------------------------------------------------------------------------
@@ -314,25 +314,25 @@ def test_device_ordering() -> None:
 
 
 def test_array_eq() -> None:
-    a = tvm_ffi.Array([1, 2, 3])
-    b = tvm_ffi.Array([1, 2, 3])
-    c = tvm_ffi.Array([1, 2, 4])
+    a = ffi.Array([1, 2, 3])
+    b = ffi.Array([1, 2, 3])
+    c = ffi.Array([1, 2, 4])
     assert RecursiveEq(a, b)
     assert not RecursiveEq(a, c)
 
 
 def test_array_ordering() -> None:
-    a = tvm_ffi.Array([1, 2, 3])
-    b = tvm_ffi.Array([1, 2, 4])
-    c = tvm_ffi.Array([1, 2, 3, 0])
+    a = ffi.Array([1, 2, 3])
+    b = ffi.Array([1, 2, 4])
+    c = ffi.Array([1, 2, 3, 0])
     assert RecursiveLt(a, b)
     assert RecursiveLt(a, c)  # shorter < longer when prefix matches
     assert not RecursiveLt(b, a)
 
 
 def test_array_empty() -> None:
-    empty = tvm_ffi.Array([])
-    one = tvm_ffi.Array([1])
+    empty = ffi.Array([])
+    one = ffi.Array([1])
     assert RecursiveEq(empty, empty)
     assert RecursiveLt(empty, one)
 
@@ -343,16 +343,16 @@ def test_array_empty() -> None:
 
 
 def test_list_eq() -> None:
-    a = tvm_ffi.List([1, 2, 3])
-    b = tvm_ffi.List([1, 2, 3])
-    c = tvm_ffi.List([1, 2, 4])
+    a = ffi.List([1, 2, 3])
+    b = ffi.List([1, 2, 3])
+    c = ffi.List([1, 2, 4])
     assert RecursiveEq(a, b)
     assert not RecursiveEq(a, c)
 
 
 def test_list_ordering() -> None:
-    a = tvm_ffi.List([1, 2])
-    b = tvm_ffi.List([1, 3])
+    a = ffi.List([1, 2])
+    b = ffi.List([1, 3])
     assert RecursiveLt(a, b)
 
 
@@ -362,17 +362,17 @@ def test_list_ordering() -> None:
 
 
 def test_shape_eq() -> None:
-    a = tvm_ffi.Shape((2, 3, 4))
-    b = tvm_ffi.Shape((2, 3, 4))
-    c = tvm_ffi.Shape((2, 3, 5))
+    a = ffi.Shape((2, 3, 4))
+    b = ffi.Shape((2, 3, 4))
+    c = ffi.Shape((2, 3, 5))
     assert RecursiveEq(a, b)
     assert not RecursiveEq(a, c)
 
 
 def test_shape_ordering() -> None:
-    a = tvm_ffi.Shape((2, 3, 4))
-    b = tvm_ffi.Shape((2, 3, 5))
-    c = tvm_ffi.Shape((2, 3, 4, 0))
+    a = ffi.Shape((2, 3, 4))
+    b = ffi.Shape((2, 3, 5))
+    c = ffi.Shape((2, 3, 4, 0))
     assert RecursiveLt(a, b)
     assert RecursiveLt(a, c)
 
@@ -383,29 +383,29 @@ def test_shape_ordering() -> None:
 
 
 def test_map_eq() -> None:
-    a = tvm_ffi.Map({"x": 1, "y": 2})
-    b = tvm_ffi.Map({"x": 1, "y": 2})
-    c = tvm_ffi.Map({"x": 1, "y": 3})
+    a = ffi.Map({"x": 1, "y": 2})
+    b = ffi.Map({"x": 1, "y": 2})
+    c = ffi.Map({"x": 1, "y": 3})
     assert RecursiveEq(a, b)
     assert not RecursiveEq(a, c)
 
 
 def test_map_different_size() -> None:
-    a = tvm_ffi.Map({"x": 1})
-    b = tvm_ffi.Map({"x": 1, "y": 2})
+    a = ffi.Map({"x": 1})
+    b = ffi.Map({"x": 1, "y": 2})
     assert not RecursiveEq(a, b)
 
 
 def test_map_ordering_raises() -> None:
-    a = tvm_ffi.Map({"x": 1})
-    b = tvm_ffi.Map({"x": 2})
+    a = ffi.Map({"x": 1})
+    b = ffi.Map({"x": 2})
     with pytest.raises(TypeError):
         RecursiveLt(a, b)
 
 
 def test_map_same_size_different_keys() -> None:
-    a = tvm_ffi.Map({"x": 1})
-    b = tvm_ffi.Map({"y": 1})
+    a = ffi.Map({"x": 1})
+    b = ffi.Map({"y": 1})
     assert not RecursiveEq(a, b)
     with pytest.raises(TypeError):
         RecursiveLt(a, b)
@@ -413,8 +413,8 @@ def test_map_same_size_different_keys() -> None:
 
 def test_equal_maps_under_ordering() -> None:
     """Two separate but equal maps pass Le/Ge without raising TypeError."""
-    a = tvm_ffi.Map({"x": 1, "y": 2})
-    b = tvm_ffi.Map({"x": 1, "y": 2})
+    a = ffi.Map({"x": 1, "y": 2})
+    b = ffi.Map({"x": 1, "y": 2})
     assert RecursiveLe(a, b)
     assert RecursiveGe(a, b)
     assert not RecursiveLt(a, b)
@@ -422,22 +422,22 @@ def test_equal_maps_under_ordering() -> None:
 
 
 def test_dict_eq() -> None:
-    a = tvm_ffi.Dict({"x": 1, "y": 2})
-    b = tvm_ffi.Dict({"x": 1, "y": 2})
+    a = ffi.Dict({"x": 1, "y": 2})
+    b = ffi.Dict({"x": 1, "y": 2})
     assert RecursiveEq(a, b)
 
 
 def test_dict_ordering_raises() -> None:
-    a = tvm_ffi.Dict({"x": 1})
-    b = tvm_ffi.Dict({"x": 2})
+    a = ffi.Dict({"x": 1})
+    b = ffi.Dict({"x": 2})
     with pytest.raises(TypeError):
         RecursiveLt(a, b)
 
 
 def test_equal_dicts_under_ordering() -> None:
     """Two separate but equal dicts pass Le/Ge without raising TypeError."""
-    a = tvm_ffi.Dict({"x": 1, "y": 2})
-    b = tvm_ffi.Dict({"x": 1, "y": 2})
+    a = ffi.Dict({"x": 1, "y": 2})
+    b = ffi.Dict({"x": 1, "y": 2})
     assert RecursiveLe(a, b)
     assert RecursiveGe(a, b)
 
@@ -528,8 +528,8 @@ def test_nested_objects_in_array() -> None:
     a2 = TestIntPair(3, 4)
     b1 = TestIntPair(1, 2)
     b2 = TestIntPair(3, 4)
-    arr_a = tvm_ffi.Array([a1, a2])
-    arr_b = tvm_ffi.Array([b1, b2])
+    arr_a = ffi.Array([a1, a2])
+    arr_b = ffi.Array([b1, b2])
     assert RecursiveEq(arr_a, arr_b)
 
 
@@ -538,8 +538,8 @@ def test_nested_objects_in_array_differ() -> None:
     a2 = TestIntPair(3, 4)
     b1 = TestIntPair(1, 2)
     b2 = TestIntPair(3, 5)
-    arr_a = tvm_ffi.Array([a1, a2])
-    arr_b = tvm_ffi.Array([b1, b2])
+    arr_a = ffi.Array([a1, a2])
+    arr_b = ffi.Array([b1, b2])
     assert not RecursiveEq(arr_a, arr_b)
     assert RecursiveLt(arr_a, arr_b)
 
@@ -567,48 +567,48 @@ def test_le_ge_gt() -> None:
 
 
 def test_array_of_arrays_eq() -> None:
-    a = tvm_ffi.Array([tvm_ffi.Array([1, 2]), tvm_ffi.Array([3, 4])])
-    b = tvm_ffi.Array([tvm_ffi.Array([1, 2]), tvm_ffi.Array([3, 4])])
-    c = tvm_ffi.Array([tvm_ffi.Array([1, 2]), tvm_ffi.Array([3, 5])])
+    a = ffi.Array([ffi.Array([1, 2]), ffi.Array([3, 4])])
+    b = ffi.Array([ffi.Array([1, 2]), ffi.Array([3, 4])])
+    c = ffi.Array([ffi.Array([1, 2]), ffi.Array([3, 5])])
     assert RecursiveEq(a, b)
     assert not RecursiveEq(a, c)
 
 
 def test_array_of_arrays_ordering() -> None:
-    a = tvm_ffi.Array([tvm_ffi.Array([1, 2]), tvm_ffi.Array([3, 4])])
-    b = tvm_ffi.Array([tvm_ffi.Array([1, 2]), tvm_ffi.Array([3, 5])])
+    a = ffi.Array([ffi.Array([1, 2]), ffi.Array([3, 4])])
+    b = ffi.Array([ffi.Array([1, 2]), ffi.Array([3, 5])])
     assert RecursiveLt(a, b)  # differ at depth-2: 4 < 5
     assert not RecursiveLt(b, a)
 
 
 def test_list_of_lists_eq() -> None:
-    a = tvm_ffi.List([tvm_ffi.List([1, 2]), tvm_ffi.List([3])])
-    b = tvm_ffi.List([tvm_ffi.List([1, 2]), tvm_ffi.List([3])])
-    c = tvm_ffi.List([tvm_ffi.List([1, 2]), tvm_ffi.List([4])])
+    a = ffi.List([ffi.List([1, 2]), ffi.List([3])])
+    b = ffi.List([ffi.List([1, 2]), ffi.List([3])])
+    c = ffi.List([ffi.List([1, 2]), ffi.List([4])])
     assert RecursiveEq(a, b)
     assert not RecursiveEq(a, c)
 
 
 def test_array_of_shapes() -> None:
-    a = tvm_ffi.Array([tvm_ffi.Shape((1, 2)), tvm_ffi.Shape((3, 4))])
-    b = tvm_ffi.Array([tvm_ffi.Shape((1, 2)), tvm_ffi.Shape((3, 4))])
-    c = tvm_ffi.Array([tvm_ffi.Shape((1, 2)), tvm_ffi.Shape((3, 5))])
+    a = ffi.Array([ffi.Shape((1, 2)), ffi.Shape((3, 4))])
+    b = ffi.Array([ffi.Shape((1, 2)), ffi.Shape((3, 4))])
+    c = ffi.Array([ffi.Shape((1, 2)), ffi.Shape((3, 5))])
     assert RecursiveEq(a, b)
     assert not RecursiveEq(a, c)
     assert RecursiveLt(a, c)
 
 
 def test_array_of_arrays_different_inner_lengths() -> None:
-    a = tvm_ffi.Array([tvm_ffi.Array([1, 2])])
-    b = tvm_ffi.Array([tvm_ffi.Array([1, 2, 3])])
+    a = ffi.Array([ffi.Array([1, 2])])
+    b = ffi.Array([ffi.Array([1, 2, 3])])
     assert not RecursiveEq(a, b)
     assert RecursiveLt(a, b)  # inner [1,2] < [1,2,3]
 
 
 def test_three_level_nested_containers() -> None:
-    a = tvm_ffi.Array([tvm_ffi.Array([tvm_ffi.Array([1])])])
-    b = tvm_ffi.Array([tvm_ffi.Array([tvm_ffi.Array([1])])])
-    c = tvm_ffi.Array([tvm_ffi.Array([tvm_ffi.Array([2])])])
+    a = ffi.Array([ffi.Array([ffi.Array([1])])])
+    b = ffi.Array([ffi.Array([ffi.Array([1])])])
+    c = ffi.Array([ffi.Array([ffi.Array([2])])])
     assert RecursiveEq(a, b)
     assert not RecursiveEq(a, c)
     assert RecursiveLt(a, c)
@@ -625,16 +625,16 @@ def test_object_with_array_field_eq() -> None:
         v_i64=1,
         v_f64=2.0,
         v_str="s",
-        v_map=tvm_ffi.Map({}),
-        v_array=tvm_ffi.Array([10, 20, 30]),
+        v_map=ffi.Map({}),
+        v_array=ffi.Array([10, 20, 30]),
     )
     b = create_object(
         "testing.TestObjectDerived",
         v_i64=1,
         v_f64=2.0,
         v_str="s",
-        v_map=tvm_ffi.Map({}),
-        v_array=tvm_ffi.Array([10, 20, 30]),
+        v_map=ffi.Map({}),
+        v_array=ffi.Array([10, 20, 30]),
     )
     assert RecursiveEq(a, b)
 
@@ -645,16 +645,16 @@ def test_object_with_array_field_differ() -> None:
         v_i64=1,
         v_f64=2.0,
         v_str="s",
-        v_map=tvm_ffi.Map({}),
-        v_array=tvm_ffi.Array([10, 20]),
+        v_map=ffi.Map({}),
+        v_array=ffi.Array([10, 20]),
     )
     b = create_object(
         "testing.TestObjectDerived",
         v_i64=1,
         v_f64=2.0,
         v_str="s",
-        v_map=tvm_ffi.Map({}),
-        v_array=tvm_ffi.Array([10, 21]),
+        v_map=ffi.Map({}),
+        v_array=ffi.Array([10, 21]),
     )
     assert not RecursiveEq(a, b)
     assert RecursiveLt(a, b)
@@ -666,16 +666,16 @@ def test_object_with_map_field_eq() -> None:
         v_i64=1,
         v_f64=2.0,
         v_str="s",
-        v_map=tvm_ffi.Map({"a": 1, "b": 2}),
-        v_array=tvm_ffi.Array([]),
+        v_map=ffi.Map({"a": 1, "b": 2}),
+        v_array=ffi.Array([]),
     )
     b = create_object(
         "testing.TestObjectDerived",
         v_i64=1,
         v_f64=2.0,
         v_str="s",
-        v_map=tvm_ffi.Map({"a": 1, "b": 2}),
-        v_array=tvm_ffi.Array([]),
+        v_map=ffi.Map({"a": 1, "b": 2}),
+        v_array=ffi.Array([]),
     )
     assert RecursiveEq(a, b)
 
@@ -686,16 +686,16 @@ def test_object_with_map_field_differ() -> None:
         v_i64=1,
         v_f64=2.0,
         v_str="s",
-        v_map=tvm_ffi.Map({"a": 1}),
-        v_array=tvm_ffi.Array([]),
+        v_map=ffi.Map({"a": 1}),
+        v_array=ffi.Array([]),
     )
     b = create_object(
         "testing.TestObjectDerived",
         v_i64=1,
         v_f64=2.0,
         v_str="s",
-        v_map=tvm_ffi.Map({"a": 2}),
-        v_array=tvm_ffi.Array([]),
+        v_map=ffi.Map({"a": 2}),
+        v_array=ffi.Array([]),
     )
     assert not RecursiveEq(a, b)
 
@@ -707,16 +707,16 @@ def test_object_primitive_field_differ_short_circuits() -> None:
         v_i64=1,
         v_f64=2.0,
         v_str="s",
-        v_map=tvm_ffi.Map({"k": 1}),
-        v_array=tvm_ffi.Array([1]),
+        v_map=ffi.Map({"k": 1}),
+        v_array=ffi.Array([1]),
     )
     b = create_object(
         "testing.TestObjectDerived",
         v_i64=2,
         v_f64=2.0,
         v_str="s",
-        v_map=tvm_ffi.Map({"k": 1}),
-        v_array=tvm_ffi.Array([1]),
+        v_map=ffi.Map({"k": 1}),
+        v_array=ffi.Array([1]),
     )
     assert not RecursiveEq(a, b)
     assert RecursiveLt(a, b)  # ordering uses v_i64: 1 < 2
@@ -733,8 +733,8 @@ def test_object_array_of_objects() -> None:
         v_i64=0,
         v_f64=0.0,
         v_str="",
-        v_map=tvm_ffi.Map({}),
-        v_array=tvm_ffi.Array(
+        v_map=ffi.Map({}),
+        v_array=ffi.Array(
             [
                 TestIntPair(1, 2),
                 TestIntPair(3, 4),
@@ -746,8 +746,8 @@ def test_object_array_of_objects() -> None:
         v_i64=0,
         v_f64=0.0,
         v_str="",
-        v_map=tvm_ffi.Map({}),
-        v_array=tvm_ffi.Array(
+        v_map=ffi.Map({}),
+        v_array=ffi.Array(
             [
                 TestIntPair(1, 2),
                 TestIntPair(3, 4),
@@ -763,8 +763,8 @@ def test_object_array_of_objects_differ() -> None:
         v_i64=0,
         v_f64=0.0,
         v_str="",
-        v_map=tvm_ffi.Map({}),
-        v_array=tvm_ffi.Array(
+        v_map=ffi.Map({}),
+        v_array=ffi.Array(
             [
                 TestIntPair(1, 2),
                 TestIntPair(3, 4),
@@ -776,8 +776,8 @@ def test_object_array_of_objects_differ() -> None:
         v_i64=0,
         v_f64=0.0,
         v_str="",
-        v_map=tvm_ffi.Map({}),
-        v_array=tvm_ffi.Array(
+        v_map=ffi.Map({}),
+        v_array=ffi.Array(
             [
                 TestIntPair(1, 2),
                 TestIntPair(3, 5),
@@ -794,24 +794,24 @@ def test_object_map_with_object_values() -> None:
         v_i64=0,
         v_f64=0.0,
         v_str="",
-        v_map=tvm_ffi.Map(
+        v_map=ffi.Map(
             {
                 "x": TestIntPair(1, 2),
             }
         ),
-        v_array=tvm_ffi.Array([]),
+        v_array=ffi.Array([]),
     )
     b = create_object(
         "testing.TestObjectDerived",
         v_i64=0,
         v_f64=0.0,
         v_str="",
-        v_map=tvm_ffi.Map(
+        v_map=ffi.Map(
             {
                 "x": TestIntPair(1, 2),
             }
         ),
-        v_array=tvm_ffi.Array([]),
+        v_array=ffi.Array([]),
     )
     assert RecursiveEq(a, b)
 
@@ -823,32 +823,32 @@ def test_deep_object_in_object() -> None:
         v_i64=1,
         v_f64=1.0,
         v_str="inner",
-        v_map=tvm_ffi.Map({}),
-        v_array=tvm_ffi.Array([42]),
+        v_map=ffi.Map({}),
+        v_array=ffi.Array([42]),
     )
     a = create_object(
         "testing.TestObjectDerived",
         v_i64=0,
         v_f64=0.0,
         v_str="outer",
-        v_map=tvm_ffi.Map({}),
-        v_array=tvm_ffi.Array([inner_a]),
+        v_map=ffi.Map({}),
+        v_array=ffi.Array([inner_a]),
     )
     inner_b = create_object(
         "testing.TestObjectDerived",
         v_i64=1,
         v_f64=1.0,
         v_str="inner",
-        v_map=tvm_ffi.Map({}),
-        v_array=tvm_ffi.Array([42]),
+        v_map=ffi.Map({}),
+        v_array=ffi.Array([42]),
     )
     b = create_object(
         "testing.TestObjectDerived",
         v_i64=0,
         v_f64=0.0,
         v_str="outer",
-        v_map=tvm_ffi.Map({}),
-        v_array=tvm_ffi.Array([inner_b]),
+        v_map=ffi.Map({}),
+        v_array=ffi.Array([inner_b]),
     )
     assert RecursiveEq(a, b)
 
@@ -886,13 +886,13 @@ def test_three_level_inheritance_eq_and_differ() -> None:
 
 
 def test_compare_off_inside_array() -> None:
-    a = tvm_ffi.Array(
+    a = ffi.Array(
         [
             TestCompare(1, "x", 100),
             TestCompare(2, "y", 200),
         ]
     )
-    b = tvm_ffi.Array(
+    b = ffi.Array(
         [
             TestCompare(1, "x", 999),
             TestCompare(2, "y", 888),
@@ -908,8 +908,8 @@ def test_compare_off_inside_nested_object() -> None:
         v_i64=0,
         v_f64=0.0,
         v_str="",
-        v_map=tvm_ffi.Map({}),
-        v_array=tvm_ffi.Array(
+        v_map=ffi.Map({}),
+        v_array=ffi.Array(
             [
                 TestCompare(1, "n", 100),
             ]
@@ -920,8 +920,8 @@ def test_compare_off_inside_nested_object() -> None:
         v_i64=0,
         v_f64=0.0,
         v_str="",
-        v_map=tvm_ffi.Map({}),
-        v_array=tvm_ffi.Array(
+        v_map=ffi.Map({}),
+        v_array=ffi.Array(
             [
                 TestCompare(1, "n", 999),
             ]
@@ -942,25 +942,25 @@ def test_object_with_short_vs_long_string_field() -> None:
         v_i64=0,
         v_f64=0.0,
         v_str="hi",
-        v_map=tvm_ffi.Map({}),
-        v_array=tvm_ffi.Array([]),
+        v_map=ffi.Map({}),
+        v_array=ffi.Array([]),
     )
     b = create_object(
         "testing.TestObjectDerived",
         v_i64=0,
         v_f64=0.0,
         v_str="a_very_long_string",
-        v_map=tvm_ffi.Map({}),
-        v_array=tvm_ffi.Array([]),
+        v_map=ffi.Map({}),
+        v_array=ffi.Array([]),
     )
     assert not RecursiveEq(a, b)
 
 
 def test_array_of_mixed_length_strings() -> None:
     """Array mixing SmallStr (<=7 bytes) and Str (>7 bytes)."""
-    a = tvm_ffi.Array(["hi", "a_very_long_string", "ok"])
-    b = tvm_ffi.Array(["hi", "a_very_long_string", "ok"])
-    c = tvm_ffi.Array(["hi", "a_very_long_string", "zz"])
+    a = ffi.Array(["hi", "a_very_long_string", "ok"])
+    b = ffi.Array(["hi", "a_very_long_string", "ok"])
+    c = ffi.Array(["hi", "a_very_long_string", "zz"])
     assert RecursiveEq(a, b)
     assert not RecursiveEq(a, c)
     assert RecursiveLt(a, c)
@@ -972,25 +972,25 @@ def test_array_of_mixed_length_strings() -> None:
 
 
 def test_map_with_array_values_eq() -> None:
-    a = tvm_ffi.Map({"k": tvm_ffi.Array([1, 2])})
-    b = tvm_ffi.Map({"k": tvm_ffi.Array([1, 2])})
-    c = tvm_ffi.Map({"k": tvm_ffi.Array([1, 3])})
+    a = ffi.Map({"k": ffi.Array([1, 2])})
+    b = ffi.Map({"k": ffi.Array([1, 2])})
+    c = ffi.Map({"k": ffi.Array([1, 3])})
     assert RecursiveEq(a, b)
     assert not RecursiveEq(a, c)
 
 
 def test_dict_with_object_values_eq() -> None:
-    a = tvm_ffi.Dict(
+    a = ffi.Dict(
         {
             "k": TestIntPair(1, 2),
         }
     )
-    b = tvm_ffi.Dict(
+    b = ffi.Dict(
         {
             "k": TestIntPair(1, 2),
         }
     )
-    c = tvm_ffi.Dict(
+    c = ffi.Dict(
         {
             "k": TestIntPair(1, 3),
         }
@@ -1005,9 +1005,9 @@ def test_dict_with_object_values_eq() -> None:
 
 
 def test_array_with_none_elements() -> None:
-    a = tvm_ffi.Array([None, 1, None])
-    b = tvm_ffi.Array([None, 1, None])
-    c = tvm_ffi.Array([None, 2, None])
+    a = ffi.Array([None, 1, None])
+    b = ffi.Array([None, 1, None])
+    c = ffi.Array([None, 2, None])
     assert RecursiveEq(a, b)
     assert not RecursiveEq(a, c)
     assert RecursiveLt(a, c)  # element 1: 1 < 2
@@ -1019,16 +1019,16 @@ def test_object_with_none_in_array_field() -> None:
         v_i64=0,
         v_f64=0.0,
         v_str="",
-        v_map=tvm_ffi.Map({}),
-        v_array=tvm_ffi.Array([None, 1]),
+        v_map=ffi.Map({}),
+        v_array=ffi.Array([None, 1]),
     )
     b = create_object(
         "testing.TestObjectDerived",
         v_i64=0,
         v_f64=0.0,
         v_str="",
-        v_map=tvm_ffi.Map({}),
-        v_array=tvm_ffi.Array([None, 1]),
+        v_map=ffi.Map({}),
+        v_array=ffi.Array([None, 1]),
     )
     assert RecursiveEq(a, b)
 
@@ -1039,16 +1039,16 @@ def test_object_with_none_in_array_field() -> None:
 
 
 def test_array_list_type_mismatch() -> None:
-    arr = tvm_ffi.Array([1, 2])
-    lst = tvm_ffi.List([1, 2])
+    arr = ffi.Array([1, 2])
+    lst = ffi.List([1, 2])
     assert not RecursiveEq(arr, lst)
     with pytest.raises(TypeError):
         RecursiveLt(arr, lst)
 
 
 def test_map_dict_type_mismatch() -> None:
-    m = tvm_ffi.Map({"k": 1})
-    d = tvm_ffi.Dict({"k": 1})
+    m = ffi.Map({"k": 1})
+    d = ffi.Dict({"k": 1})
     assert not RecursiveEq(m, d)
     with pytest.raises(TypeError):
         RecursiveLt(m, d)
@@ -1060,14 +1060,14 @@ def test_function_objects_compare_equal() -> None:
     This is by design: reflection-based comparison only considers reflected fields,
     and Function has none.
     """
-    f_add_one = tvm_ffi.get_global_func("testing.add_one")
-    f_nop = tvm_ffi.get_global_func("testing.nop")
+    f_add_one = ffi.get_global_func("testing.add_one")
+    f_nop = ffi.get_global_func("testing.nop")
     assert RecursiveEq(f_add_one, f_nop)
 
 
 def test_function_same_pointer_eq() -> None:
     """Same function object compared with itself returns True via pointer identity."""
-    f = tvm_ffi.get_global_func("testing.add_one")
+    f = ffi.get_global_func("testing.add_one")
     assert RecursiveEq(f, f)
 
 
@@ -1078,7 +1078,7 @@ def test_function_same_pointer_eq() -> None:
 
 def test_cyclic_list_same_pointer_eq() -> None:
     """Same cyclic list compared with itself returns True via pointer identity."""
-    lst = tvm_ffi.List()
+    lst = ffi.List()
     lst.append(lst)
     assert RecursiveEq(lst, lst)
 
@@ -1089,8 +1089,8 @@ def test_cyclic_list_eq_returns_true() -> None:
     In eq-only mode, the cycle detector treats a re-encountered (lhs, rhs) pair
     as equal, allowing the recursion to terminate.
     """
-    a = tvm_ffi.List()
-    b = tvm_ffi.List()
+    a = ffi.List()
+    b = ffi.List()
     a.append(a)
     b.append(b)
     assert RecursiveEq(a, b)
@@ -1098,8 +1098,8 @@ def test_cyclic_list_eq_returns_true() -> None:
 
 def test_cyclic_list_ordering_raises() -> None:
     """Ordering two distinct cyclic lists raises ValueError."""
-    a = tvm_ffi.List()
-    b = tvm_ffi.List()
+    a = ffi.List()
+    b = ffi.List()
     a.append(a)
     b.append(b)
     with pytest.raises(ValueError, match="cyclic reference"):
@@ -1112,8 +1112,8 @@ def test_cyclic_dict_eq_returns_true() -> None:
     In eq-only mode, the cycle detector treats a re-encountered (lhs, rhs) pair
     as equal, allowing the recursion to terminate.
     """
-    a = tvm_ffi.Dict()
-    b = tvm_ffi.Dict()
+    a = ffi.Dict()
+    b = ffi.Dict()
     a["self"] = a
     b["self"] = b
     assert RecursiveEq(a, b)
@@ -1121,8 +1121,8 @@ def test_cyclic_dict_eq_returns_true() -> None:
 
 def test_cyclic_dict_ordering_raises() -> None:
     """Ordering two distinct cyclic dicts raises ValueError."""
-    a = tvm_ffi.Dict()
-    b = tvm_ffi.Dict()
+    a = ffi.Dict()
+    b = ffi.Dict()
     a["self"] = a
     b["self"] = b
     with pytest.raises(ValueError, match="cyclic reference"):
@@ -1176,7 +1176,7 @@ def test_ordering_laws_on_int_pairs() -> None:
 def _make_nested_singleton_array(depth: int) -> object:
     value: object = 0
     for _ in range(depth):
-        value = tvm_ffi.Array([value])
+        value = ffi.Array([value])
     return value
 
 
@@ -1215,13 +1215,13 @@ def test_custom_compare_ordering() -> None:
 
 def test_custom_eq_in_container() -> None:
     """Custom-hooked objects inside an Array."""
-    a = tvm_ffi.Array(
+    a = ffi.Array(
         [
             TestCustomCompare(1, "x"),
             TestCustomCompare(2, "y"),
         ]
     )
-    b = tvm_ffi.Array(
+    b = ffi.Array(
         [
             TestCustomCompare(1, "different"),
             TestCustomCompare(2, "labels"),

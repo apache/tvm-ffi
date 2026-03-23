@@ -21,7 +21,7 @@ import weakref
 from typing import NoReturn
 
 import pytest
-import tvm_ffi
+import tvm_ffi as ffi
 
 
 def test_parse_backtrace() -> None:
@@ -29,14 +29,14 @@ def test_parse_backtrace() -> None:
     File "test.py", line 1, in <module>
     File "test.py", line 3, in run_test
     """
-    parsed = tvm_ffi.error._parse_backtrace(backtrace)
+    parsed = ffi.error._parse_backtrace(backtrace)
     assert len(parsed) == 2
     assert parsed[0] == ("test.py", 1, "<module>")
     assert parsed[1] == ("test.py", 3, "run_test")
 
 
 def test_error_from_cxx() -> None:
-    test_raise_error = tvm_ffi.get_global_func("testing.test_raise_error")
+    test_raise_error = ffi.get_global_func("testing.test_raise_error")
 
     try:
         test_raise_error("ValueError", "error XYZ")
@@ -45,20 +45,20 @@ def test_error_from_cxx() -> None:
         assert e.__tvm_ffi_error__.message == "error XYZ"  # ty: ignore[unresolved-attribute]
         assert e.__tvm_ffi_error__.backtrace.find("TestRaiseError") != -1  # ty: ignore[unresolved-attribute]
 
-    fapply = tvm_ffi.convert(lambda f, *args: f(*args))
+    fapply = ffi.convert(lambda f, *args: f(*args))
 
     with pytest.raises(TypeError):
         fapply(test_raise_error, "TypeError", "error XYZ")
 
     # wrong number of arguments
     with pytest.raises(TypeError):
-        tvm_ffi.convert(lambda x: x)()
+        ffi.convert(lambda x: x)()
 
 
 def test_error_from_nested_pyfunc() -> None:
-    fapply = tvm_ffi.convert(lambda f, *args: f(*args))
-    cxx_test_raise_error = tvm_ffi.get_global_func("testing.test_raise_error")
-    cxx_test_apply = tvm_ffi.get_global_func("testing.apply")
+    fapply = ffi.convert(lambda f, *args: f(*args))
+    cxx_test_raise_error = ffi.get_global_func("testing.test_raise_error")
+    cxx_test_apply = ffi.get_global_func("testing.apply")
 
     record_object = []
 
@@ -92,7 +92,7 @@ def test_error_from_nested_pyfunc() -> None:
 
 
 def test_error_traceback_update() -> None:
-    fecho = tvm_ffi.get_global_func("testing.echo")
+    fecho = ffi.get_global_func("testing.echo")
 
     def raise_error() -> NoReturn:
         raise ValueError("error XYZ")
@@ -100,18 +100,18 @@ def test_error_traceback_update() -> None:
     try:
         raise_error()
     except ValueError as e:
-        ffi_error = tvm_ffi.convert(e)
+        ffi_error = ffi.convert(e)
         assert ffi_error.backtrace.find("raise_error") != -1
 
     def raise_cxx_error() -> None:
-        cxx_test_raise_error = tvm_ffi.get_global_func("testing.test_raise_error")
+        cxx_test_raise_error = ffi.get_global_func("testing.test_raise_error")
         cxx_test_raise_error("ValueError", "error XYZ")
 
     try:
         raise_cxx_error()
     except ValueError as e:
         assert e.__tvm_ffi_error__.backtrace.find("raise_cxx_error") == -1  # ty: ignore[unresolved-attribute]
-        ffi_error1 = tvm_ffi.convert(e)
+        ffi_error1 = ffi.convert(e)
         ffi_error2 = fecho(e)
         assert ffi_error1.backtrace.find("raise_cxx_error") != -1
         assert ffi_error2.backtrace.find("raise_cxx_error") != -1
@@ -133,7 +133,7 @@ def test_error_no_cyclic_reference() -> None:
         # trigger a C++ side KeyError by accessing a non-existent key
         def trigger_cpp_side_error() -> None:
             try:
-                tmp_map: tvm_ffi.Map = tvm_ffi.Map(dict())
+                tmp_map: ffi.Map = ffi.Map(dict())
                 tmp_map["a"]
             except KeyError:
                 pass

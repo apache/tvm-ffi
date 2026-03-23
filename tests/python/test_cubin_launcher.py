@@ -31,6 +31,7 @@ try:
 except ImportError:
     torch = None  # ty: ignore[invalid-assignment]
 
+import tvm_ffi as ffi
 import tvm_ffi.cpp
 
 
@@ -195,7 +196,7 @@ TVM_FFI_DLL_EXPORT_TYPED_FUNC(launch_mul_two, cubin_test::LaunchMulTwo);
 """
 
     # Compile and load the C++ code
-    mod = tvm_ffi.cpp.load_inline(
+    mod = ffi.cpp.load_inline(
         "cubin_test",
         cuda_sources=cpp_code,
         extra_ldflags=["-lcudart"],
@@ -293,7 +294,7 @@ TVM_FFI_DLL_EXPORT_TYPED_FUNC(launch_add_one_ex, cubin_test_launch_ex::LaunchAdd
 }  // namespace cubin_test_launch_ex
 """
 
-    mod = tvm_ffi.cpp.load_inline(
+    mod = ffi.cpp.load_inline(
         "cubin_test_launch_ex",
         cuda_sources=cpp_code,
         extra_ldflags=["-lcudart"],
@@ -385,7 +386,7 @@ TVM_FFI_DLL_EXPORT_TYPED_FUNC(launch_mul_two, cubin_test_chain::LaunchMulTwo);
 }  // namespace cubin_test_chain
 """
 
-    mod = tvm_ffi.cpp.load_inline("cubin_test_chain", cuda_sources=cpp_code)
+    mod = ffi.cpp.load_inline("cubin_test_chain", cuda_sources=cpp_code)
 
     # Load CUBIN from bytes
     load_fn = mod["load_cubin_data"]

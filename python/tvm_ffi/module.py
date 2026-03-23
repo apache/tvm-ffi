@@ -55,10 +55,10 @@ class Module(core.Object):
     --------
     .. code-block:: python
 
-        import tvm_ffi
+        import tvm_ffi as ffi
 
         # Load the module from a shared library
-        mod = tvm_ffi.load_module("path/to/library.so")
+        mod = ffi.load_module("path/to/library.so")
 
         # Call exported function
         mod.func_name(*args)
@@ -90,14 +90,14 @@ class Module(core.Object):
 
         def bad_pattern(x):
             # Bad: unload order of `tensor` and `mod` is not guaranteed
-            mod = tvm_ffi.load_module("path/to/library.so")
+            mod = ffi.load_module("path/to/library.so")
             # ... do something with the tensor
             tensor = mod.func_create_and_return_tensor(x)
 
 
         def good_pattern(x):
             # Good: `tensor` is freed before `mod` goes out of scope
-            mod = tvm_ffi.load_module("path/to/library.so")
+            mod = ffi.load_module("path/to/library.so")
 
             def run_some_tests():
                 tensor = mod.func_create_and_return_tensor(x)
@@ -218,11 +218,11 @@ class Module(core.Object):
         --------
         .. code-block:: python
 
-            import tvm_ffi
+            import tvm_ffi as ffi
             from tvm_ffi.core import TypeSchema
             import json
 
-            mod = tvm_ffi.load_module("add_one_cpu.so")
+            mod = ffi.load_module("add_one_cpu.so")
             metadata = mod.get_function_metadata("add_one_cpu")
             schema = TypeSchema.from_json_str(metadata["type_schema"])
             print(schema)  # Shows function signature
@@ -260,9 +260,9 @@ class Module(core.Object):
         --------
         .. code-block:: python
 
-            import tvm_ffi
+            import tvm_ffi as ffi
 
-            mod = tvm_ffi.load_module("mylib.so")
+            mod = ffi.load_module("mylib.so")
             doc = mod.get_function_doc("process_batch")
             if doc:
                 print(doc)
@@ -423,12 +423,12 @@ def system_lib(symbol_prefix: str = "") -> Module:
 
     .. code-block:: python
 
-        import tvm_ffi
+        import tvm_ffi as ffi
 
-        mod: tvm_ffi.Module = tvm_ffi.system_lib(
+        mod: ffi.Module = ffi.system_lib(
             "testing."
         )  # symbols prefixed with `__tvm_ffi_testing.`
-        func: tvm_ffi.Function = mod["add_one"]  # looks up `__tvm_ffi_testing.add_one`
+        func: ffi.Function = mod["add_one"]  # looks up `__tvm_ffi_testing.add_one`
         assert func(10) == 11
 
     """
@@ -455,13 +455,13 @@ def load_module(path: str | PathLike, keep_module_alive: bool = True) -> Module:
     --------
     .. code-block:: python
 
-        import tvm_ffi
+        import tvm_ffi as ffi
         from pathlib import Path
 
         # Works with string paths
-        mod = tvm_ffi.load_module("path/to/module.so")
+        mod = ffi.load_module("path/to/module.so")
         # Also works with pathlib.Path objects
-        mod = tvm_ffi.load_module(Path("path/to/module.so"))
+        mod = ffi.load_module(Path("path/to/module.so"))
 
         mod.func_name(*args)
 

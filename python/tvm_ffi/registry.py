@@ -49,7 +49,7 @@ def register_object(type_key: str | None = None) -> Callable[[_T], _T]:
     arbitrary instance attributes, declare ``__slots__ = ("__dict__",)``
     explicitly in the class body::
 
-        @tvm_ffi.register_object("test.MyObject")
+        @ffi.register_object("test.MyObject")
         class MyObject(Object):
             __slots__ = ("__dict__",)
 
@@ -60,7 +60,7 @@ def register_object(type_key: str | None = None) -> Callable[[_T], _T]:
 
     .. code-block:: python
 
-      @tvm_ffi.register_object("test.MyObject")
+      @ffi.register_object("test.MyObject")
       class MyObject(Object):
           pass
 
@@ -123,22 +123,22 @@ def register_global_func(
     --------
     .. code-block:: python
 
-        import tvm_ffi
+        import tvm_ffi as ffi
 
 
         # we can use decorator to register a function
-        @tvm_ffi.register_global_func("mytest.echo")
+        @ffi.register_global_func("mytest.echo")
         def echo(x):
             return x
 
 
         # After registering, we can get the function by its name
-        f = tvm_ffi.get_global_func("mytest.echo")
+        f = ffi.get_global_func("mytest.echo")
         assert f(1) == 1
 
         # we can also directly register a function
-        tvm_ffi.register_global_func("mytest.add_one", lambda x: x + 1)
-        f = tvm_ffi.get_global_func("mytest.add_one")
+        ffi.register_global_func("mytest.add_one", lambda x: x + 1)
+        f = ffi.get_global_func("mytest.add_one")
         assert f(1) == 2
 
     See Also
@@ -191,15 +191,15 @@ def get_global_func(name: str, allow_missing: bool = False) -> core.Function | N
     --------
     .. code-block:: python
 
-        import tvm_ffi
+        import tvm_ffi as ffi
 
 
-        @tvm_ffi.register_global_func("demo.echo")
+        @ffi.register_global_func("demo.echo")
         def echo(x):
             return x
 
 
-        f = tvm_ffi.get_global_func("demo.echo")
+        f = ffi.get_global_func("demo.echo")
         assert f(123) == 123
 
     See Also
@@ -236,17 +236,17 @@ def remove_global_func(name: str) -> None:
     --------
     .. code-block:: python
 
-        import tvm_ffi
+        import tvm_ffi as ffi
 
 
-        @tvm_ffi.register_global_func("my.temp")
+        @ffi.register_global_func("my.temp")
         def temp():
             return 42
 
 
-        assert tvm_ffi.get_global_func("my.temp", allow_missing=True) is not None
-        tvm_ffi.remove_global_func("my.temp")
-        assert tvm_ffi.get_global_func("my.temp", allow_missing=True) is None
+        assert ffi.get_global_func("my.temp", allow_missing=True) is not None
+        ffi.remove_global_func("my.temp")
+        assert ffi.get_global_func("my.temp", allow_missing=True) is None
 
     See Also
     --------
@@ -275,9 +275,9 @@ def get_global_func_metadata(name: str) -> dict[str, Any]:
     --------
     .. code-block:: python
 
-        import tvm_ffi
+        import tvm_ffi as ffi
 
-        meta = tvm_ffi.get_global_func_metadata("testing.add_one")
+        meta = ffi.get_global_func_metadata("testing.add_one")
         print(meta)
 
     See Also
@@ -315,9 +315,9 @@ def init_ffi_api(namespace: str, target_module_name: str | None = None) -> None:
     .. code-block:: python
 
         # _ffi_api.py
-        import tvm_ffi
+        import tvm_ffi as ffi
 
-        tvm_ffi.init_ffi_api("mypackage", __name__)
+        ffi.init_ffi_api("mypackage", __name__)
 
     """
     target_module_name = target_module_name if target_module_name else namespace

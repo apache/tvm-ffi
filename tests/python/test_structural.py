@@ -16,25 +16,25 @@
 # under the License.
 
 import numpy as np
-import tvm_ffi
+import tvm_ffi as ffi
 import tvm_ffi.testing
 
-_recursive_eq = tvm_ffi.get_global_func("ffi.RecursiveEq")
+_recursive_eq = ffi.get_global_func("ffi.RecursiveEq")
 
 
 def test_structural_key_basic() -> None:
-    k1 = tvm_ffi.StructuralKey({"a": [1, 2], "b": [3, {"c": 4}]})
-    k2 = tvm_ffi.StructuralKey({"b": [3, {"c": 4}], "a": [1, 2]})
-    k3 = tvm_ffi.StructuralKey({"a": [1, 2], "b": [3, {"c": 5}]})
+    k1 = ffi.StructuralKey({"a": [1, 2], "b": [3, {"c": 4}]})
+    k2 = ffi.StructuralKey({"b": [3, {"c": 4}], "a": [1, 2]})
+    k3 = ffi.StructuralKey({"a": [1, 2], "b": [3, {"c": 5}]})
 
-    assert tvm_ffi.structural_hash(k1.key) == k1.__hash__()
-    assert tvm_ffi.structural_hash(k2.key) == k2.__hash__()
+    assert ffi.structural_hash(k1.key) == k1.__hash__()
+    assert ffi.structural_hash(k2.key) == k2.__hash__()
 
     assert k1 == k2
     assert k1 != k3
     assert hash(k1) == hash(k2)
-    assert tvm_ffi.structural_equal(k1.key, k2.key)
-    assert not tvm_ffi.structural_equal(k1.key, k3.key)
+    assert ffi.structural_equal(k1.key, k2.key)
+    assert not ffi.structural_equal(k1.key, k3.key)
 
 
 def test_structural_helpers() -> None:
@@ -42,20 +42,20 @@ def test_structural_helpers() -> None:
     rhs = {"meta": {"tag": "x"}, "items": [1, 2, {"k": 3}]}
     other = {"items": [1, 2, {"k": 4}], "meta": {"tag": "x"}}
 
-    assert tvm_ffi.structural_equal(lhs, rhs)
-    assert not tvm_ffi.structural_equal(lhs, other)
-    assert tvm_ffi.structural_hash(lhs) == tvm_ffi.structural_hash(rhs)
-    assert tvm_ffi.structural_hash(lhs) != tvm_ffi.structural_hash(other)
-    assert tvm_ffi.get_first_structural_mismatch(lhs, rhs) is None
-    assert tvm_ffi.get_first_structural_mismatch(lhs, other) is not None
+    assert ffi.structural_equal(lhs, rhs)
+    assert not ffi.structural_equal(lhs, other)
+    assert ffi.structural_hash(lhs) == ffi.structural_hash(rhs)
+    assert ffi.structural_hash(lhs) != ffi.structural_hash(other)
+    assert ffi.get_first_structural_mismatch(lhs, rhs) is None
+    assert ffi.get_first_structural_mismatch(lhs, other) is not None
 
 
 def test_structural_key_in_map() -> None:
-    k1 = tvm_ffi.StructuralKey({"x": [1, 2], "y": [3]})
-    k2 = tvm_ffi.StructuralKey({"y": [3], "x": [1, 2]})
-    k3 = tvm_ffi.StructuralKey({"x": [1, 2], "y": [5]})
+    k1 = ffi.StructuralKey({"x": [1, 2], "y": [3]})
+    k2 = ffi.StructuralKey({"y": [3], "x": [1, 2]})
+    k3 = ffi.StructuralKey({"x": [1, 2], "y": [5]})
 
-    m = tvm_ffi.Map({k1: 1, k2: 2, k3: 3})
+    m = ffi.Map({k1: 1, k2: 2, k3: 3})
     assert len(m) == 2
     assert m[k1] == 2
     assert m[k2] == 2
@@ -63,30 +63,30 @@ def test_structural_key_in_map() -> None:
 
 
 def test_structural_equal_dict() -> None:
-    d1 = tvm_ffi.Dict({"a": 1, "b": 2, "c": 3})
-    d2 = tvm_ffi.Dict({"c": 3, "b": 2, "a": 1})
-    d3 = tvm_ffi.Dict({"a": 1, "b": 2, "c": 4})
+    d1 = ffi.Dict({"a": 1, "b": 2, "c": 3})
+    d2 = ffi.Dict({"c": 3, "b": 2, "a": 1})
+    d3 = ffi.Dict({"a": 1, "b": 2, "c": 4})
 
-    assert tvm_ffi.structural_equal(d1, d2)
-    assert tvm_ffi.structural_hash(d1) == tvm_ffi.structural_hash(d2)
-    assert not tvm_ffi.structural_equal(d1, d3)
-    assert tvm_ffi.structural_hash(d1) != tvm_ffi.structural_hash(d3)
-    assert tvm_ffi.get_first_structural_mismatch(d1, d2) is None
-    assert tvm_ffi.get_first_structural_mismatch(d1, d3) is not None
+    assert ffi.structural_equal(d1, d2)
+    assert ffi.structural_hash(d1) == ffi.structural_hash(d2)
+    assert not ffi.structural_equal(d1, d3)
+    assert ffi.structural_hash(d1) != ffi.structural_hash(d3)
+    assert ffi.get_first_structural_mismatch(d1, d2) is None
+    assert ffi.get_first_structural_mismatch(d1, d3) is not None
 
 
 def test_structural_dict_vs_map_different_type() -> None:
-    m = tvm_ffi.Map({"a": 1, "b": 2})
-    d = tvm_ffi.Dict({"a": 1, "b": 2})
+    m = ffi.Map({"a": 1, "b": 2})
+    d = ffi.Dict({"a": 1, "b": 2})
     # Different type_index => not structurally equal
-    assert not tvm_ffi.structural_equal(m, d)
-    assert tvm_ffi.structural_hash(m) != tvm_ffi.structural_hash(d)
+    assert not ffi.structural_equal(m, d)
+    assert ffi.structural_hash(m) != ffi.structural_hash(d)
 
 
 def test_structural_key_in_python_dict() -> None:
-    k1 = tvm_ffi.StructuralKey({"name": ["a", "b"], "ver": [1]})
-    k2 = tvm_ffi.StructuralKey({"ver": [1], "name": ["a", "b"]})
-    k3 = tvm_ffi.StructuralKey({"name": ["a", "c"], "ver": [1]})
+    k1 = ffi.StructuralKey({"name": ["a", "b"], "ver": [1]})
+    k2 = ffi.StructuralKey({"ver": [1], "name": ["a", "b"]})
+    k3 = ffi.StructuralKey({"name": ["a", "c"], "ver": [1]})
 
     data = {k1: "a", k3: "b"}
     assert data[k2] == "a"
@@ -99,17 +99,17 @@ def test_structural_key_tensor_content_policy() -> None:
     if not hasattr(t1_np, "__dlpack__"):
         return
 
-    t1 = tvm_ffi.from_dlpack(t1_np)
-    t2 = tvm_ffi.from_dlpack(t2_np)
+    t1 = ffi.from_dlpack(t1_np)
+    t2 = ffi.from_dlpack(t2_np)
 
     # Default policy compares tensor content.
-    assert not tvm_ffi.structural_equal(t1, t2)
+    assert not ffi.structural_equal(t1, t2)
     # Optional policy can ignore tensor content.
-    assert tvm_ffi.structural_equal(t1, t2, skip_tensor_content=True)
+    assert ffi.structural_equal(t1, t2, skip_tensor_content=True)
 
     # StructuralKey should follow default structural policy.
-    k1 = tvm_ffi.StructuralKey(t1)
-    k2 = tvm_ffi.StructuralKey(t2)
+    k1 = ffi.StructuralKey(t1)
+    k2 = ffi.StructuralKey(t2)
     assert k1 != k2
 
     data = {k1: "a", k2: "b"}
@@ -121,34 +121,34 @@ def test_structural_key_tensor_content_policy() -> None:
 
 def test_recursive_eq_self_referencing_cycle() -> None:
     """RecursiveEq should return True for structurally equivalent cycles."""
-    v_map = tvm_ffi.Map({})
-    obj = tvm_ffi.testing.create_object(
+    v_map = ffi.Map({})
+    obj = ffi.testing.create_object(
         "testing.TestObjectDerived",
         v_i64=1,
         v_f64=0.0,
         v_str="",
         v_map=v_map,
-        v_array=tvm_ffi.Array([]),
+        v_array=ffi.Array([]),
     )
-    obj.v_array = tvm_ffi.Array([obj])  # type: ignore[unresolved-attribute]
+    obj.v_array = ffi.Array([obj])  # type: ignore[unresolved-attribute]
     # Self-referencing object compared to itself — identity short-circuits.
     assert _recursive_eq(obj, obj)
 
 
 def test_recursive_eq_mutual_cycle() -> None:
     """RecursiveEq should return True for two distinct but structurally equivalent cyclic graphs."""
-    v_map = tvm_ffi.Map({})
+    v_map = ffi.Map({})
 
     def make_cyclic(v_i64: int) -> object:
-        o = tvm_ffi.testing.create_object(
+        o = ffi.testing.create_object(
             "testing.TestObjectDerived",
             v_i64=v_i64,
             v_f64=0.0,
             v_str="x",
             v_map=v_map,
-            v_array=tvm_ffi.Array([]),
+            v_array=ffi.Array([]),
         )
-        o.v_array = tvm_ffi.Array([o])  # type: ignore[unresolved-attribute]
+        o.v_array = ffi.Array([o])  # type: ignore[unresolved-attribute]
         return o
 
     a = make_cyclic(42)

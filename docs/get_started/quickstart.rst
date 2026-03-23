@@ -190,9 +190,9 @@ TVM-FFI's Python package provides :py:func:`tvm_ffi.load_module` to load either
 
 .. code-block:: python
 
-  import tvm_ffi
-  mod  : tvm_ffi.Module   = tvm_ffi.load_module("add_one_cpu.so")
-  func : tvm_ffi.Function = mod.add_one_cpu
+  import tvm_ffi as ffi
+  mod  : ffi.Module   = ffi.load_module("add_one_cpu.so")
+  func : ffi.Function = mod.add_one_cpu
 
 ``mod.add_one_cpu`` retrieves a callable :py:class:`tvm_ffi.Function` that accepts tensors from host frameworks
 directly. This is zero-copy, requires no boilerplate code, and adds very little overhead.
@@ -231,8 +231,8 @@ After installation, ``add_one_cuda`` can be registered as a target for JAX's ``f
 .. code-block:: python
 
   # Step 1. Load `build/add_one_cuda.so`
-  import tvm_ffi
-  mod = tvm_ffi.load_module("build/add_one_cuda.so")
+  import tvm_ffi as ffi
+  mod = ffi.load_module("build/add_one_cuda.so")
 
   # Step 2. Register `mod.add_one_cuda` into JAX
   import jax_tvm_ffi

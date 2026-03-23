@@ -65,10 +65,10 @@ packed ``__ffi_init__`` from the reflected fields:
 
 .. code-block:: python
 
-   import tvm_ffi
+   import tvm_ffi as ffi
 
-   @tvm_ffi.register_object("my_ext.Point")
-   class Point(tvm_ffi.Object):
+   @ffi.register_object("my_ext.Point")
+   class Point(ffi.Object):
        x: int
        y: int
        label: str
@@ -378,7 +378,7 @@ by the framework for recursing into child values.
 Python ``c_class`` Decorator
 -----------------------------
 
-On the Python side, ``tvm_ffi.dataclasses.c_class`` provides equivalent
+On the Python side, ``ffi.dataclasses.c_class`` provides equivalent
 functionality to Python's ``@dataclass`` for C++-backed objects:
 
 .. code-block:: python
@@ -386,7 +386,7 @@ functionality to Python's ``@dataclass`` for C++-backed objects:
    from tvm_ffi.dataclasses import c_class
 
    @c_class("my_ext.Point")
-   class Point(tvm_ffi.Object):
+   class Point(ffi.Object):
        x: int
        y: int
        label: str
@@ -402,7 +402,7 @@ The decorator:
 
 .. note::
 
-   ``@tvm_ffi.register_object`` can also be used, which delegates to
+   ``@ffi.register_object`` can also be used, which delegates to
    ``c_class`` internally for objects with reflected fields.
 
 

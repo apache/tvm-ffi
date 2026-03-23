@@ -63,10 +63,10 @@ class dtype(str):
     --------
     .. code-block:: python
 
-        import tvm_ffi
+        import tvm_ffi as ffi
 
         # Create from string
-        f32 = tvm_ffi.dtype("float32")
+        f32 = ffi.dtype("float32")
         assert f32.bits == 32
         assert f32.itemsize == 4
 
@@ -75,7 +75,7 @@ class dtype(str):
         assert v4f32 == "float32x4"
 
         # Round-trip from a DLPack (code, bits, lanes) triple
-        f16 = tvm_ffi.dtype.from_dlpack_data_type((2, 16, 1))
+        f16 = ffi.dtype.from_dlpack_data_type((2, 16, 1))
         assert f16 == "float16"
 
     Note
@@ -114,11 +114,11 @@ class dtype(str):
         --------
         .. code-block:: python
 
-            import tvm_ffi
+            import tvm_ffi as ffi
 
             # Create float16 and int8 directly from DLPack triples
-            f16 = tvm_ffi.dtype.from_dlpack_data_type((2, 16, 1))
-            i8 = tvm_ffi.dtype.from_dlpack_data_type((0, 8, 1))
+            f16 = ffi.dtype.from_dlpack_data_type((2, 16, 1))
+            i8 = ffi.dtype.from_dlpack_data_type((0, 8, 1))
             assert f16 == "float16"
             assert i8 == "int8"
 
@@ -160,9 +160,9 @@ class dtype(str):
         --------
         .. code-block:: python
 
-            import tvm_ffi
+            import tvm_ffi as ffi
 
-            f32 = tvm_ffi.dtype("float32")
+            f32 = ffi.dtype("float32")
             v4f32 = f32.with_lanes(4)
             assert v4f32 == "float32x4"
             assert v4f32.bits == f32.bits and v4f32.lanes == 4
@@ -195,10 +195,10 @@ class dtype(str):
         --------
         .. code-block:: python
 
-            import tvm_ffi
+            import tvm_ffi as ffi
 
-            assert tvm_ffi.dtype("float32").itemsize == 4
-            assert tvm_ffi.dtype("float32").with_lanes(4).itemsize == 16
+            assert ffi.dtype("float32").itemsize == 4
+            assert ffi.dtype("float32").with_lanes(4).itemsize == 16
 
         See Also
         --------
@@ -220,15 +220,13 @@ class dtype(str):
         --------
         .. code-block:: python
 
-            import tvm_ffi
+            import tvm_ffi as ffi
 
-            f32 = tvm_ffi.dtype("float32")
+            f32 = ffi.dtype("float32")
             # The type code is an integer following DLPack conventions
             assert isinstance(f32.type_code, int)
             # Consistent with constructing from an explicit (code, bits, lanes)
-            assert (
-                f32.type_code == tvm_ffi.dtype.from_dlpack_data_type((2, 32, 1)).type_code
-            )
+            assert f32.type_code == ffi.dtype.from_dlpack_data_type((2, 32, 1)).type_code
 
         See Also
         --------
@@ -246,10 +244,10 @@ class dtype(str):
         --------
         .. code-block:: python
 
-            import tvm_ffi
+            import tvm_ffi as ffi
 
-            assert tvm_ffi.dtype("int8").bits == 8
-            v4f32 = tvm_ffi.dtype("float32").with_lanes(4)
+            assert ffi.dtype("int8").bits == 8
+            v4f32 = ffi.dtype("float32").with_lanes(4)
             assert v4f32.bits == 32  # per-lane bit width
 
         See Also
@@ -273,10 +271,10 @@ class dtype(str):
         --------
         .. code-block:: python
 
-            import tvm_ffi
+            import tvm_ffi as ffi
 
-            assert tvm_ffi.dtype("float32").lanes == 1
-            assert tvm_ffi.dtype("float32").with_lanes(4).lanes == 4
+            assert ffi.dtype("float32").lanes == 1
+            assert ffi.dtype("float32").with_lanes(4).lanes == 4
 
         See Also
         --------

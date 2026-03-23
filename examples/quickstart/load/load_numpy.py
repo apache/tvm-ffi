@@ -19,8 +19,8 @@
 # mypy: ignore-errors
 # [example.begin]
 # File: load/load_numpy.py
-import tvm_ffi
-mod = tvm_ffi.load_module("build/add_one_cpu.so")
+import tvm_ffi as ffi
+mod = ffi.load_module("build/add_one_cpu.so")
 
 import numpy as np
 x = np.array([1, 2, 3, 4, 5], dtype=np.float32)

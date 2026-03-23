@@ -33,11 +33,11 @@ You can follow the [quickstart guide](../get_started/quickstart.rst) for details
 library `build/add_one_cpu.so`. Let's walk through the load and run example again for NumPy
 
 ```python
-import tvm_ffi
+import tvm_ffi as ffi
 import numpy as np
 
 # Load the compiled module
-mod = tvm_ffi.load_module("build/add_one_cpu.so")
+mod = ffi.load_module("build/add_one_cpu.so")
 
 # Create input and output arrays
 x = np.array([1, 2, 3, 4, 5], dtype=np.float32)
@@ -56,11 +56,11 @@ the exported functions. You can access the functions by their names.
 
 ```python
 import numpy as np
-import tvm_ffi
+import tvm_ffi as ffi
 
 # Demonstrate DLPack conversion between NumPy and TVM FFI
 np_data = np.array([1, 2, 3, 4], dtype=np.float32)
-tvm_array = tvm_ffi.from_dlpack(np_data)
+tvm_array = ffi.from_dlpack(np_data)
 # Convert back to NumPy
 np_result = np.from_dlpack(tvm_array)
 ```
@@ -75,11 +75,11 @@ and automatically convert them to {py:class}`tvm_ffi.Tensor`.
 You can retrieve globally registered functions via {py:func}`tvm_ffi.get_global_func`.
 
 ```python
-import tvm_ffi
+import tvm_ffi as ffi
 
 # testing.echo is defined and registered in C++
 # [](ffi::Any x) { return x; }
-fecho = tvm_ffi.get_global_func("testing.echo")
+fecho = ffi.get_global_func("testing.echo")
 assert fecho(1) == 1
 ```
 
@@ -88,11 +88,11 @@ Under the hood, {py:func}`tvm_ffi.convert` is called to convert the Python funct
 {py:class}`tvm_ffi.Function`.
 
 ```python
-import tvm_ffi
+import tvm_ffi as ffi
 
 # testing.apply is registered in C++
 # [](ffi::Function f, ffi::Any val) { return f(x); }
-fapply = tvm_ffi.get_global_func("testing.apply")
+fapply = ffi.get_global_func("testing.apply")
 # invoke fapply with lambda callback as f
 assert fapply(lambda x: x + 1, 1) == 2
 ```
@@ -101,13 +101,13 @@ This is a very powerful pattern that allows us to inject Python callbacks into t
 You can also register a Python callback as a global function.
 
 ```python
-import tvm_ffi
+import tvm_ffi as ffi
 
-@tvm_ffi.register_global_func("example.add_one")
+@ffi.register_global_func("example.add_one")
 def add_one(a):
     return a + 1
 
-assert tvm_ffi.get_global_func("example.add_one")(1) == 2
+assert ffi.get_global_func("example.add_one")(1) == 2
 ```
 
 ## Container Types
@@ -129,11 +129,11 @@ When an FFI function takes arguments from lists/tuples, they will be converted i
 Arrays are **read-only** from Python -- they support indexing and iteration but not mutation.
 
 ```python
-import tvm_ffi
+import tvm_ffi as ffi
 
 # Python lists become Arrays
-arr = tvm_ffi.convert([1, 2, 3, 4])
-assert isinstance(arr, tvm_ffi.Array)
+arr = ffi.convert([1, 2, 3, 4])
+assert isinstance(arr, ffi.Array)
 assert len(arr) == 4
 assert arr[0] == 1
 # arr[0] = 10  # TypeError: Array does not support item assignment
@@ -145,9 +145,9 @@ assert arr[0] == 1
 All handles sharing the same underlying `ListObj` see mutations immediately.
 
 ```python
-import tvm_ffi
+import tvm_ffi as ffi
 
-lst = tvm_ffi.List([1, 2, 3])
+lst = ffi.List([1, 2, 3])
 assert len(lst) == 3
 
 # Mutate in-place
@@ -163,10 +163,10 @@ Dictionaries will be converted to {py:class}`tvm_ffi.Map`.
 Maps are **read-only** from Python -- they support key lookup and iteration but not mutation.
 
 ```python
-import tvm_ffi
+import tvm_ffi as ffi
 
-map_obj = tvm_ffi.convert({"a": 1, "b": 2})
-assert isinstance(map_obj, tvm_ffi.Map)
+map_obj = ffi.convert({"a": 1, "b": 2})
+assert isinstance(map_obj, ffi.Map)
 assert len(map_obj) == 2
 assert map_obj["a"] == 1
 assert map_obj["b"] == 2
@@ -179,9 +179,9 @@ assert map_obj["b"] == 2
 All handles sharing the same underlying `DictObj` see mutations immediately.
 
 ```python
-import tvm_ffi
+import tvm_ffi as ffi
 
-d = tvm_ffi.Dict({"a": 1, "b": 2})
+d = ffi.Dict({"a": 1, "b": 2})
 d["c"] = 3
 assert len(d) == 3
 del d["a"]
@@ -195,10 +195,10 @@ When a Python tuple is passed to an FFI function, it is converted to {py:class}`
 heterogeneous type safety, but on the Python side both lists and tuples map to `Array`.
 
 ```python
-import tvm_ffi
+import tvm_ffi as ffi
 
-t = tvm_ffi.convert((1, "hello", 3.14))
-assert isinstance(t, tvm_ffi.Array)
+t = ffi.convert((1, "hello", 3.14))
+assert isinstance(t, ffi.Array)
 ```
 
 When container values are returned from FFI functions, they are stored in the
@@ -211,6 +211,7 @@ on the fly. For example, we can define a simple kernel that adds one to each ele
 
 ```python
 import torch
+import tvm_ffi as ffi
 from tvm_ffi import Module
 import tvm_ffi.cpp
 
@@ -231,7 +232,7 @@ cpp_source = '''
 '''
 
 # compile the cpp source code and load the module
-mod: Module = tvm_ffi.cpp.load_inline(
+mod: Module = ffi.cpp.load_inline(
     name='hello', cpp_sources=cpp_source, functions='add_one_cpu'
 )
 
@@ -255,11 +256,11 @@ An FFI function may raise an error. In such cases, the Python package will autom
 translate the error to the corresponding error kind in Python
 
 ```python
-import tvm_ffi
+import tvm_ffi as ffi
 
 # defined in C++
 # [](String kind, String msg) { throw Error(kind, msg, backtrace); }
-test_raise_error = tvm_ffi.get_global_func("testing.test_raise_error")
+test_raise_error = ffi.get_global_func("testing.test_raise_error")
 
 test_raise_error("ValueError", "message")
 ```
@@ -271,7 +272,7 @@ Traceback (most recent call last):
 File "example.py", line 7, in <module>
   test_raise_error("ValueError", "message")
   ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
-File "python/tvm_ffi/cython/function.pxi", line 927, in tvm_ffi.core.Function.__call__
+File "python/tvm_ffi/cython/function.pxi", line 927, in ffi.core.Function.__call__
   raise error.py_error()
   ^^^
 File "src/ffi/extra/testing.cc", line 60, in void tvm::ffi::TestRaiseError(tvm::ffi::String, tvm::ffi::String)
@@ -329,11 +330,11 @@ TVM_FFI_STATIC_INIT_BLOCK() {
 You can then create wrapper classes for objects that are in the library as follows:
 
 ```python
-import tvm_ffi
+import tvm_ffi as ffi
 
 # Register the class
-@tvm_ffi.register_object("testing.TestIntPair")
-class TestIntPair(tvm_ffi.Object):
+@ffi.register_object("testing.TestIntPair")
+class TestIntPair(ffi.Object):
     def __init__(self, a, b):
         # This is a special method to call an FFI function whose return
         # value exactly initializes the object handle of the object

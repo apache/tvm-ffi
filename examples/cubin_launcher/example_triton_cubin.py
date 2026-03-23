@@ -21,7 +21,7 @@
 This script:
 1. Embeds a minimal Triton kernel definition (elementwise square)
 2. Compiles it to a CUBIN using the Triton runtime API
-3. Defines C++ code inline using tvm_ffi.cpp.load_inline to load the CUBIN
+3. Defines C++ code inline using ffi.cpp.load_inline to load the CUBIN
 4. Launches the kernel through the TVM-FFI exported function pointer
 
 Notes:

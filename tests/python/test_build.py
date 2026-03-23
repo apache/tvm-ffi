@@ -18,7 +18,7 @@ import pathlib
 
 import numpy
 import pytest
-import tvm_ffi
+import tvm_ffi as ffi
 import tvm_ffi.cpp
 from tvm_ffi.core import TypeSchema
 from tvm_ffi.module import Module
@@ -26,12 +26,12 @@ from tvm_ffi.module import Module
 
 def test_build_cpp() -> None:
     cpp_path = pathlib.Path(__file__).parent.resolve() / "test_build.cc"
-    output_lib_path = tvm_ffi.cpp.build(
+    output_lib_path = ffi.cpp.build(
         name="hello",
         cpp_files=[str(cpp_path)],
     )
 
-    mod: Module = tvm_ffi.load_module(output_lib_path)
+    mod: Module = ffi.load_module(output_lib_path)
 
     metadata = mod.get_function_metadata("add_one_cpu")
     assert metadata is not None, "add_one_cpu should have metadata"
@@ -50,7 +50,7 @@ def test_build_cpp() -> None:
 def test_build_inline_with_metadata() -> None:  # noqa: PLR0915
     """Test functions with various input and output types."""
     # Keep module alive until all returned objects are destroyed
-    mod: Module = tvm_ffi.cpp.load_inline(
+    mod: Module = ffi.cpp.load_inline(
         name="test_io_types",
         cpp_sources=r"""
             // int input -> int output
@@ -217,7 +217,7 @@ def test_build_inline_with_docstrings() -> None:
 
     divide_docstring = "Divides two floats. Returns a/b."
 
-    mod: Module = tvm_ffi.cpp.load_inline(
+    mod: Module = ffi.cpp.load_inline(
         name="test_docs",
         cpp_sources=r"""
             int add(int a, int b) {
@@ -277,7 +277,7 @@ def test_build_inline_with_docstrings() -> None:
 
 def test_build_without_metadata() -> None:
     """Test building without metadata export."""
-    mod: Module = tvm_ffi.cpp.load_inline(
+    mod: Module = ffi.cpp.load_inline(
         name="test_no_meta",
         cpp_sources=r"""
             // Note: NOT defining TVM_FFI_DLL_EXPORT_INCLUDE_METADATA

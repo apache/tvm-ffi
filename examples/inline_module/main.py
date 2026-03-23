@@ -17,13 +17,14 @@
 """Example: Build and run an inline C++/CUDA tvm-ffi module."""
 
 import torch
+import tvm_ffi as ffi
 import tvm_ffi.cpp
 from tvm_ffi.module import Module
 
 
 def main() -> None:
     """Build, load, and run inline CPU/CUDA functions."""
-    mod: Module = tvm_ffi.cpp.load_inline(
+    mod: Module = ffi.cpp.load_inline(
         name="hello",
         cpp_sources=r"""
             void add_one_cpu(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {

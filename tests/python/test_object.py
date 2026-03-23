@@ -20,36 +20,36 @@ import sys
 from typing import Any, Sequence
 
 import pytest
-import tvm_ffi
+import tvm_ffi as ffi
 import tvm_ffi.testing
 from tvm_ffi.core import TypeInfo
 
 
 def test_make_object() -> None:
     # with default values
-    obj0 = tvm_ffi.testing.create_object("testing.TestObjectBase")
-    assert isinstance(obj0, tvm_ffi.testing.TestObjectBase)
+    obj0 = ffi.testing.create_object("testing.TestObjectBase")
+    assert isinstance(obj0, ffi.testing.TestObjectBase)
     assert obj0.v_i64 == 10
     assert obj0.v_f64 == 10.0
     assert obj0.v_str == "hello"
 
 
 def test_make_object_via_init() -> None:
-    obj0 = tvm_ffi.testing.TestIntPair(1, 2)
+    obj0 = ffi.testing.TestIntPair(1, 2)
     assert obj0.a == 1
     assert obj0.b == 2
 
 
 def test_method() -> None:
-    obj0 = tvm_ffi.testing.create_object("testing.TestObjectBase", v_i64=12)
-    assert isinstance(obj0, tvm_ffi.testing.TestObjectBase)
+    obj0 = ffi.testing.create_object("testing.TestObjectBase", v_i64=12)
+    assert isinstance(obj0, ffi.testing.TestObjectBase)
     assert obj0.add_i64(1) == 13
     assert type(obj0).add_i64.__doc__ == "add_i64 method"
     assert type(obj0).v_i64.__doc__ == "i64 field"
 
 
 def test_attribute() -> None:
-    obj = tvm_ffi.testing.TestIntPair(3, 4)
+    obj = ffi.testing.TestIntPair(3, 4)
     assert obj.a == 3
     assert obj.b == 4
     assert type(obj).a.__doc__ == "Field `a`"
@@ -67,8 +67,8 @@ def test_attribute_no_doc() -> None:
 
 def test_setter() -> None:
     # test setter
-    obj0 = tvm_ffi.testing.create_object("testing.TestObjectBase", v_i64=10, v_str="hello")
-    assert isinstance(obj0, tvm_ffi.testing.TestObjectBase)
+    obj0 = ffi.testing.create_object("testing.TestObjectBase", v_i64=10, v_str="hello")
+    assert isinstance(obj0, ffi.testing.TestObjectBase)
     assert obj0.v_i64 == 10
     obj0.v_i64 = 11
     assert obj0.v_i64 == 11
@@ -84,15 +84,15 @@ def test_setter() -> None:
 
 def test_derived_object() -> None:
     with pytest.raises(TypeError):
-        obj0 = tvm_ffi.testing.create_object("testing.TestObjectDerived")
+        obj0 = ffi.testing.create_object("testing.TestObjectDerived")
 
-    v_map = tvm_ffi.convert({"a": 1})
-    v_array = tvm_ffi.convert([1, 2, 3])
+    v_map = ffi.convert({"a": 1})
+    v_array = ffi.convert([1, 2, 3])
 
-    obj0 = tvm_ffi.testing.create_object(
+    obj0 = ffi.testing.create_object(
         "testing.TestObjectDerived", v_i64=20, v_map=v_map, v_array=v_array
     )
-    assert isinstance(obj0, tvm_ffi.testing.TestObjectDerived)
+    assert isinstance(obj0, ffi.testing.TestObjectDerived)
     assert obj0.v_map.same_as(v_map)  # ty: ignore[unresolved-attribute]
     assert obj0.v_array.same_as(v_array)  # ty: ignore[unresolved-attribute]
     assert obj0.v_i64 == 20
@@ -111,12 +111,12 @@ class MyObject:
 def test_opaque_object() -> None:
     obj0 = MyObject("hello")
     base_count = sys.getrefcount(obj0)
-    ref_count = tvm_ffi.get_global_func("testing.object_use_count")
+    ref_count = ffi.get_global_func("testing.object_use_count")
     assert sys.getrefcount(obj0) == base_count
-    obj0_converted = tvm_ffi.convert(obj0)
+    obj0_converted = ffi.convert(obj0)
     assert ref_count(obj0_converted) == 1
     assert sys.getrefcount(obj0) == base_count + 1
-    assert isinstance(obj0_converted, tvm_ffi.core.OpaquePyObject)
+    assert isinstance(obj0_converted, ffi.core.OpaquePyObject)
     obj0_cpy = obj0_converted.pyobject()
     assert obj0_cpy is obj0
     assert sys.getrefcount(obj0) == base_count + 2
@@ -129,7 +129,7 @@ def test_opaque_object() -> None:
 def test_opaque_type_error() -> None:
     obj0 = MyObject("hello")
     with pytest.raises(TypeError) as e:
-        tvm_ffi.testing.add_one(obj0)  # ty: ignore[invalid-argument-type]
+        ffi.testing.add_one(obj0)  # ty: ignore[invalid-argument-type]
     assert (
         "Mismatched type on argument #0 when calling: `testing.add_one(0: int) -> int`. Expected `int` but got `ffi.OpaquePyObject`"
         in str(e.value)
@@ -138,17 +138,17 @@ def test_opaque_type_error() -> None:
 
 def test_object_init() -> None:
     # Registered class with auto-generated __ffi_init__ (all fields have defaults)
-    obj = tvm_ffi.testing.TestObjectBase()
+    obj = ffi.testing.TestObjectBase()
     assert obj.v_i64 == 10
     assert obj.v_f64 == 10.0
     assert obj.v_str == "hello"
 
     # Registered class with __c_ffi_init__ should work fine
-    pair = tvm_ffi.testing.TestIntPair(3, 4)
+    pair = ffi.testing.TestIntPair(3, 4)
     assert pair.a == 3 and pair.b == 4
 
     # FFI-returned objects should work fine
-    obj = tvm_ffi.testing.create_object("testing.TestObjectBase", v_i64=7)
+    obj = ffi.testing.create_object("testing.TestObjectBase", v_i64=7)
     assert obj.__chandle__() != 0
     assert obj.v_i64 == 7  # ty: ignore[unresolved-attribute]
 
@@ -163,13 +163,13 @@ def test_register_object_wires_init() -> None:
     chandle + offset → segfault.
     """
     # Construction must produce a live handle, not NULL.
-    pair = tvm_ffi.testing.TestIntPair(3, 7)
+    pair = ffi.testing.TestIntPair(3, 7)
     assert pair.__chandle__() != 0
     assert pair.a == 3
     assert pair.b == 7
 
     # __new__ alone must NOT produce a usable object (chandle stays NULL).
-    bare = tvm_ffi.testing.TestIntPair.__new__(tvm_ffi.testing.TestIntPair)
+    bare = ffi.testing.TestIntPair.__new__(ffi.testing.TestIntPair)
     assert bare.__chandle__() == 0
 
 
@@ -181,10 +181,10 @@ def test_object_protocol() -> None:
         def __tvm_ffi_object__(self) -> Any:
             return self.backend_obj
 
-    x = tvm_ffi.convert([])
-    assert isinstance(x, tvm_ffi.Object)
+    x = ffi.convert([])
+    assert isinstance(x, ffi.Object)
     x_compact = CompactObject(x)
-    test_echo = tvm_ffi.get_global_func("testing.echo")
+    test_echo = ffi.get_global_func("testing.echo")
     y = test_echo(x_compact)
     assert y.__chandle__() == x.__chandle__()
 
@@ -204,10 +204,10 @@ def test_unregistered_object_fallback() -> None:
         assert "Get (v1 + 1) from TestUnregisteredBaseObject" in type(x).get_v1_plus_one.__doc__
         assert "Get (v2 + 2) from TestUnregisteredObject" in type(x).get_v2_plus_two.__doc__
 
-    obj = tvm_ffi.testing.make_unregistered_object()
+    obj = ffi.testing.make_unregistered_object()
     _check_type(obj)
     for _ in range(5):
-        obj = tvm_ffi.testing.make_unregistered_object()
+        obj = ffi.testing.make_unregistered_object()
         _check_type(obj)
 
 
@@ -215,20 +215,20 @@ def test_unregistered_object_fallback() -> None:
     ("test_cls", "make_instance"),
     [
         (
-            tvm_ffi.testing.TestObjectBase,
-            lambda: tvm_ffi.testing.create_object("testing.TestObjectBase"),
+            ffi.testing.TestObjectBase,
+            lambda: ffi.testing.create_object("testing.TestObjectBase"),
         ),
         (
-            tvm_ffi.testing.TestIntPair,
-            lambda: tvm_ffi.testing.TestIntPair(1, 2),
+            ffi.testing.TestIntPair,
+            lambda: ffi.testing.TestIntPair(1, 2),
         ),
         (
-            tvm_ffi.testing.TestObjectDerived,
-            lambda: tvm_ffi.testing.create_object(
+            ffi.testing.TestObjectDerived,
+            lambda: ffi.testing.create_object(
                 "testing.TestObjectDerived",
                 v_i64=20,
-                v_map=tvm_ffi.convert({"a": 1}),
-                v_array=tvm_ffi.convert([1, 2]),
+                v_map=ffi.convert({"a": 1}),
+                v_array=ffi.convert([1, 2]),
             ),
         ),
     ],
@@ -246,46 +246,46 @@ def test_object_subclass_slots(test_cls: type, make_instance: Any) -> None:
 @pytest.mark.parametrize(
     "test_cls, type_key, parent_cls",
     [
-        (tvm_ffi.Object, "ffi.Object", None),
-        (tvm_ffi.Tensor, "ffi.Tensor", tvm_ffi.Object),
-        (tvm_ffi.core.DataType, "DataType", None),
-        (tvm_ffi.Device, "Device", None),
-        (tvm_ffi.Shape, "ffi.Shape", tvm_ffi.Object),
-        (tvm_ffi.Module, "ffi.Module", tvm_ffi.Object),
-        (tvm_ffi.Function, "ffi.Function", tvm_ffi.Object),
-        (tvm_ffi.core.Error, "ffi.Error", tvm_ffi.Object),
-        (tvm_ffi.core.String, "ffi.String", tvm_ffi.Object),
-        (tvm_ffi.core.Bytes, "ffi.Bytes", tvm_ffi.Object),
-        (tvm_ffi.Tensor, "ffi.Tensor", tvm_ffi.Object),
-        (tvm_ffi.Array, "ffi.Array", tvm_ffi.Object),
-        (tvm_ffi.List, "ffi.List", tvm_ffi.Object),
-        (tvm_ffi.Map, "ffi.Map", tvm_ffi.Object),
-        (tvm_ffi.access_path.AccessStep, "ffi.reflection.AccessStep", tvm_ffi.Object),
-        (tvm_ffi.access_path.AccessPath, "ffi.reflection.AccessPath", tvm_ffi.Object),
-        (tvm_ffi.testing.TestIntPair, "testing.TestIntPair", tvm_ffi.Object),
-        (tvm_ffi.testing.TestObjectBase, "testing.TestObjectBase", tvm_ffi.Object),
+        (ffi.Object, "ffi.Object", None),
+        (ffi.Tensor, "ffi.Tensor", ffi.Object),
+        (ffi.core.DataType, "DataType", None),
+        (ffi.Device, "Device", None),
+        (ffi.Shape, "ffi.Shape", ffi.Object),
+        (ffi.Module, "ffi.Module", ffi.Object),
+        (ffi.Function, "ffi.Function", ffi.Object),
+        (ffi.core.Error, "ffi.Error", ffi.Object),
+        (ffi.core.String, "ffi.String", ffi.Object),
+        (ffi.core.Bytes, "ffi.Bytes", ffi.Object),
+        (ffi.Tensor, "ffi.Tensor", ffi.Object),
+        (ffi.Array, "ffi.Array", ffi.Object),
+        (ffi.List, "ffi.List", ffi.Object),
+        (ffi.Map, "ffi.Map", ffi.Object),
+        (ffi.access_path.AccessStep, "ffi.reflection.AccessStep", ffi.Object),
+        (ffi.access_path.AccessPath, "ffi.reflection.AccessPath", ffi.Object),
+        (ffi.testing.TestIntPair, "testing.TestIntPair", ffi.Object),
+        (ffi.testing.TestObjectBase, "testing.TestObjectBase", ffi.Object),
         (
-            tvm_ffi.testing.TestObjectDerived,
+            ffi.testing.TestObjectDerived,
             "testing.TestObjectDerived",
-            tvm_ffi.testing.TestObjectBase,
+            ffi.testing.TestObjectBase,
         ),
-        (tvm_ffi.testing._TestCxxClassBase, "testing.TestCxxClassBase", tvm_ffi.Object),
+        (ffi.testing._TestCxxClassBase, "testing.TestCxxClassBase", ffi.Object),
         (
-            tvm_ffi.testing._TestCxxClassDerived,
+            ffi.testing._TestCxxClassDerived,
             "testing.TestCxxClassDerived",
-            tvm_ffi.testing._TestCxxClassBase,
+            ffi.testing._TestCxxClassBase,
         ),
         (
-            tvm_ffi.testing._TestCxxClassDerivedDerived,
+            ffi.testing._TestCxxClassDerivedDerived,
             "testing.TestCxxClassDerivedDerived",
-            tvm_ffi.testing._TestCxxClassDerived,
+            ffi.testing._TestCxxClassDerived,
         ),
-        (tvm_ffi.testing._TestCxxInitSubset, "testing.TestCxxInitSubset", tvm_ffi.Object),
-        (tvm_ffi.testing._SchemaAllTypes, "testing.SchemaAllTypes", tvm_ffi.Object),
+        (ffi.testing._TestCxxInitSubset, "testing.TestCxxInitSubset", ffi.Object),
+        (ffi.testing._SchemaAllTypes, "testing.SchemaAllTypes", ffi.Object),
     ],
 )
 def test_type_info_attachment(test_cls: type, type_key: str, parent_cls: type | None) -> None:
-    type_info = tvm_ffi.core._type_cls_to_type_info(test_cls)
+    type_info = ffi.core._type_cls_to_type_info(test_cls)
     assert type_info is not None
     assert type_info.type_cls is test_cls
     assert type_info.type_key == type_key, (
@@ -301,7 +301,7 @@ def test_type_info_attachment(test_cls: type, type_key: str, parent_cls: type | 
 
 
 def test_get_registered_type_keys() -> None:
-    keys = tvm_ffi.registry.get_registered_type_keys()
+    keys = ffi.registry.get_registered_type_keys()
     assert isinstance(keys, Sequence)
     assert all(isinstance(k, str) for k in keys)
     keys = set(keys)
@@ -345,123 +345,123 @@ class TestIsinstanceIssubclass:
 
     def test_map_not_isinstance_array(self) -> None:
         """Map instance should not pass isinstance check for Array."""
-        m = tvm_ffi.Map({"a": 1})
-        assert not isinstance(m, tvm_ffi.Array)
+        m = ffi.Map({"a": 1})
+        assert not isinstance(m, ffi.Array)
 
     def test_array_not_isinstance_map(self) -> None:
         """Array instance should not pass isinstance check for Map."""
-        a = tvm_ffi.Array([1, 2])
-        assert not isinstance(a, tvm_ffi.Map)
+        a = ffi.Array([1, 2])
+        assert not isinstance(a, ffi.Map)
 
     def test_list_not_isinstance_dict(self) -> None:
         """List instance should not pass isinstance check for Dict."""
-        lst = tvm_ffi.List([1, 2])
-        assert not isinstance(lst, tvm_ffi.Dict)
+        lst = ffi.List([1, 2])
+        assert not isinstance(lst, ffi.Dict)
 
     def test_dict_not_isinstance_list(self) -> None:
         """Dict instance should not pass isinstance check for List."""
-        d = tvm_ffi.Dict({"k": 1})
-        assert not isinstance(d, tvm_ffi.List)
+        d = ffi.Dict({"k": 1})
+        assert not isinstance(d, ffi.List)
 
     def test_array_not_isinstance_list(self) -> None:
         """Array instance should not pass isinstance check for List."""
-        a = tvm_ffi.Array([1])
-        assert not isinstance(a, tvm_ffi.List)
+        a = ffi.Array([1])
+        assert not isinstance(a, ffi.List)
 
     def test_map_not_isinstance_dict(self) -> None:
         """Map instance should not pass isinstance check for Dict."""
-        m = tvm_ffi.Map({"a": 1})
-        assert not isinstance(m, tvm_ffi.Dict)
+        m = ffi.Map({"a": 1})
+        assert not isinstance(m, ffi.Dict)
 
     # -- containers: positive isinstance ------------------------------------
 
     def test_array_isinstance_object(self) -> None:
         """Array instance should pass isinstance check for Object."""
-        a = tvm_ffi.Array([1])
-        assert isinstance(a, tvm_ffi.Object)
+        a = ffi.Array([1])
+        assert isinstance(a, ffi.Object)
 
     def test_map_isinstance_object(self) -> None:
         """Map instance should pass isinstance check for Object."""
-        m = tvm_ffi.Map({"a": 1})
-        assert isinstance(m, tvm_ffi.Object)
+        m = ffi.Map({"a": 1})
+        assert isinstance(m, ffi.Object)
 
     def test_list_isinstance_object(self) -> None:
         """List instance should pass isinstance check for Object."""
-        lst = tvm_ffi.List([1])
-        assert isinstance(lst, tvm_ffi.Object)
+        lst = ffi.List([1])
+        assert isinstance(lst, ffi.Object)
 
     def test_dict_isinstance_object(self) -> None:
         """Dict instance should pass isinstance check for Object."""
-        d = tvm_ffi.Dict({"k": 1})
-        assert isinstance(d, tvm_ffi.Object)
+        d = ffi.Dict({"k": 1})
+        assert isinstance(d, ffi.Object)
 
     # -- registered user types: parent / child ------------------------------
 
     def test_derived_isinstance_base(self) -> None:
         """Derived object should pass isinstance check for its base class."""
-        obj = tvm_ffi.testing.TestObjectDerived(
+        obj = ffi.testing.TestObjectDerived(
             v_map={"a": 1},
             v_array=[1],
         )
-        assert isinstance(obj, tvm_ffi.testing.TestObjectBase)
-        assert isinstance(obj, tvm_ffi.Object)
+        assert isinstance(obj, ffi.testing.TestObjectBase)
+        assert isinstance(obj, ffi.Object)
 
     def test_base_not_isinstance_derived(self) -> None:
         """Base object should not pass isinstance check for a derived class."""
-        obj = tvm_ffi.testing.TestObjectBase()
-        assert not isinstance(obj, tvm_ffi.testing.TestObjectDerived)
+        obj = ffi.testing.TestObjectBase()
+        assert not isinstance(obj, ffi.testing.TestObjectDerived)
 
     def test_derived_isinstance_own_class(self) -> None:
         """Derived object should pass isinstance check for its own class."""
-        obj = tvm_ffi.testing.TestObjectDerived(
+        obj = ffi.testing.TestObjectDerived(
             v_map={"a": 1},
             v_array=[1],
         )
-        assert isinstance(obj, tvm_ffi.testing.TestObjectDerived)
+        assert isinstance(obj, ffi.testing.TestObjectDerived)
 
     # -- cross-hierarchy: user object vs container --------------------------
 
     def test_user_object_not_isinstance_array(self) -> None:
         """User-defined object should not pass isinstance check for Array."""
-        obj = tvm_ffi.testing.TestObjectBase()
-        assert not isinstance(obj, tvm_ffi.Array)
+        obj = ffi.testing.TestObjectBase()
+        assert not isinstance(obj, ffi.Array)
 
     def test_array_not_isinstance_user_object(self) -> None:
         """Array should not pass isinstance check for a user-defined type."""
-        a = tvm_ffi.Array([1])
-        assert not isinstance(a, tvm_ffi.testing.TestObjectBase)
+        a = ffi.Array([1])
+        assert not isinstance(a, ffi.testing.TestObjectBase)
 
     # -- issubclass mirrors isinstance --------------------------------------
 
     def test_issubclass_derived_base(self) -> None:
         """Derived class should be a subclass of its base."""
-        assert issubclass(tvm_ffi.testing.TestObjectDerived, tvm_ffi.testing.TestObjectBase)
+        assert issubclass(ffi.testing.TestObjectDerived, ffi.testing.TestObjectBase)
 
     def test_issubclass_base_not_derived(self) -> None:
         """Base class should not be a subclass of its derived class."""
-        assert not issubclass(tvm_ffi.testing.TestObjectBase, tvm_ffi.testing.TestObjectDerived)
+        assert not issubclass(ffi.testing.TestObjectBase, ffi.testing.TestObjectDerived)
 
     def test_issubclass_array_not_map(self) -> None:
         """Array should not be a subclass of Map."""
-        assert not issubclass(tvm_ffi.Array, tvm_ffi.Map)
+        assert not issubclass(ffi.Array, ffi.Map)
 
     def test_issubclass_map_not_array(self) -> None:
         """Map should not be a subclass of Array."""
-        assert not issubclass(tvm_ffi.Map, tvm_ffi.Array)
+        assert not issubclass(ffi.Map, ffi.Array)
 
     def test_issubclass_all_containers_are_object(self) -> None:
         """All container types should be subclasses of Object."""
-        for cls in (tvm_ffi.Array, tvm_ffi.List, tvm_ffi.Map, tvm_ffi.Dict):
-            assert issubclass(cls, tvm_ffi.Object)
+        for cls in (ffi.Array, ffi.List, ffi.Map, ffi.Dict):
+            assert issubclass(cls, ffi.Object)
 
     def test_issubclass_user_type_is_object(self) -> None:
         """User-defined types should be subclasses of Object."""
-        assert issubclass(tvm_ffi.testing.TestObjectBase, tvm_ffi.Object)
-        assert issubclass(tvm_ffi.testing.TestObjectDerived, tvm_ffi.Object)
+        assert issubclass(ffi.testing.TestObjectBase, ffi.Object)
+        assert issubclass(ffi.testing.TestObjectDerived, ffi.Object)
 
     def test_issubclass_sibling_containers(self) -> None:
         """Sibling container types should not be subclasses of each other."""
-        assert not issubclass(tvm_ffi.List, tvm_ffi.Array)
-        assert not issubclass(tvm_ffi.Dict, tvm_ffi.Map)
-        assert not issubclass(tvm_ffi.Array, tvm_ffi.List)
-        assert not issubclass(tvm_ffi.Map, tvm_ffi.Dict)
+        assert not issubclass(ffi.List, ffi.Array)
+        assert not issubclass(ffi.Dict, ffi.Map)
+        assert not issubclass(ffi.Array, ffi.List)
+        assert not issubclass(ffi.Map, ffi.Dict)

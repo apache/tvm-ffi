@@ -48,9 +48,9 @@ class Shape(tuple, PyNativeObject):
     .. code-block:: python
 
         import numpy as np
-        import tvm_ffi
+        import tvm_ffi as ffi
 
-        x = tvm_ffi.from_dlpack(np.arange(6, dtype="int32").reshape(2, 3))
+        x = ffi.from_dlpack(np.arange(6, dtype="int32").reshape(2, 3))
         assert x.shape == (2, 3)
 
     """
@@ -91,7 +91,7 @@ def device(device_type: str | int | DLDeviceType, index: int | None = None) -> D
 
     Returns
     -------
-    device: tvm_ffi.Device
+    device: ffi.Device
 
     Examples
     --------
@@ -100,10 +100,10 @@ def device(device_type: str | int | DLDeviceType, index: int | None = None) -> D
 
     .. code-block:: python
 
-      import tvm_ffi
+      import tvm_ffi as ffi
 
-      assert tvm_ffi.device("cuda:0") == tvm_ffi.device("cuda", 0)
-      assert tvm_ffi.device("cpu:0") == tvm_ffi.device("cpu", 0)
+      assert ffi.device("cuda:0") == ffi.device("cuda", 0)
+      assert ffi.device("cpu:0") == ffi.device("cpu", 0)
 
     """
     # must refer to core._CLASS_DEVICE so we pick up override here

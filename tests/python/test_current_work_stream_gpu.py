@@ -23,7 +23,7 @@ import pytest
 
 try:
     import torch
-    import tvm_ffi  # noqa: F401
+    import tvm_ffi as ffi  # noqa: F401
     from torch.utils import cpp_extension
     from tvm_ffi import libinfo
 except ImportError:

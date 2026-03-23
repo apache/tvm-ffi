@@ -115,11 +115,11 @@ try:
         .. code-block:: python
 
             s = torch.cuda.Stream()
-            with tvm_ffi.use_torch_stream(torch.cuda.stream(s)):
+            with ffi.use_torch_stream(torch.cuda.stream(s)):
                 ...
 
             g = torch.cuda.CUDAGraph()
-            with tvm_ffi.use_torch_stream(torch.cuda.graph(g)):
+            with ffi.use_torch_stream(torch.cuda.graph(g)):
                 ...
 
         Note
@@ -160,12 +160,12 @@ def use_raw_stream(device: core.Device, stream: int | c_void_p) -> StreamContext
 
     .. code-block:: python
 
-        import tvm_ffi
+        import tvm_ffi as ffi
 
-        dev = tvm_ffi.device("cpu:0")
-        with tvm_ffi.use_raw_stream(dev, 0):
+        dev = ffi.device("cpu:0")
+        with ffi.use_raw_stream(dev, 0):
             # Within the context, the current stream for this device is set
-            assert tvm_ffi.get_raw_stream(dev) == 0
+            assert ffi.get_raw_stream(dev) == 0
 
     See Also
     --------
@@ -200,12 +200,12 @@ def get_raw_stream(device: core.Device) -> int:
     --------
     .. code-block:: python
 
-        import tvm_ffi
+        import tvm_ffi as ffi
 
-        dev = tvm_ffi.device("cpu:0")
+        dev = ffi.device("cpu:0")
         # Default stream is implementation-defined; set it explicitly
-        with tvm_ffi.use_raw_stream(dev, 0):
-            assert tvm_ffi.get_raw_stream(dev) == 0
+        with ffi.use_raw_stream(dev, 0):
+            assert ffi.get_raw_stream(dev) == 0
 
     See Also
     --------

@@ -75,7 +75,7 @@ def nvrtc_compile(  # noqa: PLR0912, PLR0915
         '''
 
         cubin_bytes = nvrtc.nvrtc_compile(cuda_source)
-        # Use cubin_bytes with tvm_ffi.cpp.load_inline and embed_cubin parameter
+        # Use cubin_bytes with ffi.cpp.load_inline and embed_cubin parameter
 
     """
     try:

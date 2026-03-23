@@ -123,11 +123,11 @@ The following example demonstrates a typical round-trip pattern:
 
 .. code-block:: python
 
-   import tvm_ffi
+   import tvm_ffi as ffi
    import torch
 
    x_torch = torch.randn(1024, device="cuda")
-   x_tvm_ffi = tvm_ffi.from_dlpack(x_torch, require_contiguous=True)
+   x_tvm_ffi = ffi.from_dlpack(x_torch, require_contiguous=True)
    x_torch_again = torch.from_dlpack(x_tvm_ffi)
 
 In this example, :py:func:`tvm_ffi.from_dlpack` creates ``x_tvm_ffi``, which views the same memory as ``x_torch``.

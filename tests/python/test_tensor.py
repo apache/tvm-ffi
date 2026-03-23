@@ -29,45 +29,45 @@ except ImportError:
     torch = None  # ty: ignore[invalid-assignment]
 
 import numpy as np
-import tvm_ffi
+import tvm_ffi as ffi
 
 
 def test_tensor_attributes() -> None:
     data: npt.NDArray[Any] = np.zeros((10, 8, 4, 2), dtype="int16")
     if not hasattr(data, "__dlpack__"):
         return
-    x = tvm_ffi.from_dlpack(data)
-    assert isinstance(x, tvm_ffi.Tensor)
+    x = ffi.from_dlpack(data)
+    assert isinstance(x, ffi.Tensor)
     assert x.shape == (10, 8, 4, 2)
     assert x.strides == (64, 8, 2, 1)
-    assert x.dtype == tvm_ffi.dtype("int16")
-    assert x.device.dlpack_device_type() == tvm_ffi.DLDeviceType.kDLCPU
+    assert x.dtype == ffi.dtype("int16")
+    assert x.device.dlpack_device_type() == ffi.DLDeviceType.kDLCPU
     assert x.device.index == 0
     x2 = np.from_dlpack(x)
     np.testing.assert_equal(x2, data)
 
 
 def test_shape_object() -> None:
-    shape = tvm_ffi.Shape((10, 8, 4, 2))
-    assert isinstance(shape, tvm_ffi.Shape)
+    shape = ffi.Shape((10, 8, 4, 2))
+    assert isinstance(shape, ffi.Shape)
     assert shape == (10, 8, 4, 2)
 
-    fecho = tvm_ffi.convert(lambda x: x)
-    shape2: tvm_ffi.Shape = fecho(shape)
+    fecho = ffi.convert(lambda x: x)
+    shape2: ffi.Shape = fecho(shape)
     assert shape2._tvm_ffi_cached_object.same_as(shape._tvm_ffi_cached_object)
-    assert isinstance(shape2, tvm_ffi.Shape)
+    assert isinstance(shape2, ffi.Shape)
     assert isinstance(shape2, tuple)
 
-    shape3: tvm_ffi.Shape = tvm_ffi.convert(shape)
+    shape3: ffi.Shape = ffi.convert(shape)
     assert shape3._tvm_ffi_cached_object.same_as(shape._tvm_ffi_cached_object)
-    assert isinstance(shape3, tvm_ffi.Shape)
+    assert isinstance(shape3, ffi.Shape)
 
 
 @pytest.mark.skipif(torch is None, reason="Fast torch dlpack importer is not enabled")
 def test_tensor_auto_dlpack() -> None:
     assert torch is not None
     x = torch.arange(128)
-    fecho = tvm_ffi.get_global_func("testing.echo")
+    fecho = ffi.get_global_func("testing.echo")
     y = fecho(x)
     assert isinstance(y, torch.Tensor)
     assert y.data_ptr() == x.data_ptr()
@@ -85,46 +85,46 @@ def test_tensor_auto_dlpack_with_error() -> None:
     def raise_torch_error(x: Any) -> NoReturn:
         raise ValueError("error XYZ")
 
-    f = tvm_ffi.convert(raise_torch_error)
+    f = ffi.convert(raise_torch_error)
     with pytest.raises(ValueError):
         # pass in torch argment to trigger the error in set allocator path
         f(x)
 
 
 def test_tensor_class_override() -> None:
-    class MyTensor(tvm_ffi.Tensor):
+    class MyTensor(ffi.Tensor):
         pass
 
-    old_tensor = tvm_ffi.core._CLASS_TENSOR
-    tvm_ffi.core._set_class_tensor(MyTensor)
+    old_tensor = ffi.core._CLASS_TENSOR
+    ffi.core._set_class_tensor(MyTensor)
 
     data: npt.NDArray[Any] = np.zeros((10, 8, 4, 2), dtype="int16")
     if not hasattr(data, "__dlpack__"):
         return
-    x = tvm_ffi.from_dlpack(data)
+    x = ffi.from_dlpack(data)
 
-    fecho = tvm_ffi.get_global_func("testing.echo")
+    fecho = ffi.get_global_func("testing.echo")
     y = fecho(x)
     assert isinstance(y, MyTensor)
-    tvm_ffi.core._set_class_tensor(old_tensor)
+    ffi.core._set_class_tensor(old_tensor)
 
 
 def test_tvm_ffi_tensor_compatible() -> None:
     class MyTensor:
-        def __init__(self, tensor: tvm_ffi.Tensor) -> None:
+        def __init__(self, tensor: ffi.Tensor) -> None:
             """Initialize the MyTensor."""
             self._tensor = tensor
 
-        def __tvm_ffi_object__(self) -> tvm_ffi.Tensor:
+        def __tvm_ffi_object__(self) -> ffi.Tensor:
             """Implement __tvm_ffi_object__ protocol."""
             return self._tensor
 
     data: npt.NDArray[Any] = np.zeros((10, 8, 4, 2), dtype="int32")
     if not hasattr(data, "__dlpack__"):
         return
-    x = tvm_ffi.from_dlpack(data)
+    x = ffi.from_dlpack(data)
     y = MyTensor(x)
-    fecho = tvm_ffi.get_global_func("testing.echo")
+    fecho = ffi.get_global_func("testing.echo")
     z = fecho(y)
     assert z.__chandle__() == x.__chandle__()
 
@@ -158,20 +158,18 @@ def test_tvm_ffi_tensor_compatible() -> None:
 def test_tensor_from_pytorch_rocm() -> None:
     assert torch is not None
 
-    @tvm_ffi.register_global_func("testing.check_device", override=True)
-    def _check_device(x: tvm_ffi.Tensor) -> str:
+    @ffi.register_global_func("testing.check_device", override=True)
+    def _check_device(x: ffi.Tensor) -> str:
         return x.device.type
 
     # PyTorch uses device name "cuda" to represent ROCm device
     x = torch.randn(128, device="cuda")
-    device_type = tvm_ffi.get_global_func("testing.check_device")(x)
+    device_type = ffi.get_global_func("testing.check_device")(x)
     assert device_type == "rocm"
 
 
 def test_optional_tensor_view() -> None:
-    optional_tensor_view_has_value = tvm_ffi.get_global_func(
-        "testing.optional_tensor_view_has_value"
-    )
+    optional_tensor_view_has_value = ffi.get_global_func("testing.optional_tensor_view_has_value")
     assert not optional_tensor_view_has_value(None)
     x: npt.NDArray[Any] = np.zeros((128,), dtype="float32")
     if not hasattr(x, "__dlpack__"):

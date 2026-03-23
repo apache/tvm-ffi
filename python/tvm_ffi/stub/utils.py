@@ -61,7 +61,7 @@ class InitConfig:
     """
 
     prefix: str
-    """Only generate stubs for global function and objects with the given prefix, e.g. `tvm_ffi.`"""
+    """Only generate stubs for global function and objects with the given prefix, e.g. `ffi.`"""
 
 
 @dataclasses.dataclass

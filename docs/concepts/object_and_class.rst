@@ -149,11 +149,11 @@ to register an object's constructor, fields, and methods.
 
 .. code-block:: python
 
-   import tvm_ffi
+   import tvm_ffi as ffi
    from typing import TYPE_CHECKING
 
-   @tvm_ffi.register_object("my_ext.MyObject")
-   class MyObject(tvm_ffi.Object):
+   @ffi.register_object("my_ext.MyObject")
+   class MyObject(ffi.Object):
        # tvm-ffi-stubgen(begin): object/my_ext.MyObject
        value: int
        name: str

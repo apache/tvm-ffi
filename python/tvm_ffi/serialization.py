@@ -52,11 +52,11 @@ def to_json_graph_str(obj: Any, metadata: dict[str, Any] | None = None) -> str:
     --------
     .. code-block:: python
 
-        import tvm_ffi
+        import tvm_ffi as ffi
 
-        a = tvm_ffi.convert([1, 2, 3])
-        s = tvm_ffi.serialization.to_json_graph_str(a)
-        b = tvm_ffi.serialization.from_json_graph_str(s)
+        a = ffi.convert([1, 2, 3])
+        s = ffi.serialization.to_json_graph_str(a)
+        b = ffi.serialization.from_json_graph_str(s)
         assert list(b) == [1, 2, 3]
 
     """

@@ -22,7 +22,7 @@ import json
 from typing import Any, Callable
 
 import pytest
-import tvm_ffi
+import tvm_ffi as ffi
 import tvm_ffi.testing
 from tvm_ffi.serialization import from_json_graph_str, to_json_graph_str
 
@@ -51,15 +51,15 @@ def _assert_roundtrip_eq(obj: Any, cmp: Callable[..., Any] | None = None) -> Non
 
 def _assert_any_equal(a: Any, b: Any) -> None:
     """Recursively compare two tvm_ffi values for equality."""
-    if isinstance(b, tvm_ffi.Array):
+    if isinstance(b, ffi.Array):
         assert len(a) == len(b)
         for x, y in zip(a, b):
             _assert_any_equal(x, y)
-    elif isinstance(b, (tvm_ffi.Map, tvm_ffi.Dict)):
+    elif isinstance(b, (ffi.Map, ffi.Dict)):
         assert len(a) == len(b)
         for k in b:
             _assert_any_equal(a[k], b[k])
-    elif isinstance(b, tvm_ffi.Shape):
+    elif isinstance(b, ffi.Shape):
         assert list(a) == list(b)
     elif isinstance(b, str):
         # tvm_ffi String inherits from str
@@ -157,23 +157,23 @@ class TestString:
 
     def test_empty(self) -> None:
         """Empty string roundtrips correctly."""
-        _assert_roundtrip_eq(tvm_ffi.convert(""))
+        _assert_roundtrip_eq(ffi.convert(""))
 
     def test_short(self) -> None:
         """Short string roundtrips correctly."""
-        _assert_roundtrip_eq(tvm_ffi.convert("hello"))
+        _assert_roundtrip_eq(ffi.convert("hello"))
 
     def test_long(self) -> None:
         """Long string roundtrips correctly."""
-        _assert_roundtrip_eq(tvm_ffi.convert("x" * 1000))
+        _assert_roundtrip_eq(ffi.convert("x" * 1000))
 
     def test_special_chars(self) -> None:
         """String with special characters roundtrips correctly."""
-        _assert_roundtrip_eq(tvm_ffi.convert('hello\nworld\t"quotes"'))
+        _assert_roundtrip_eq(ffi.convert('hello\nworld\t"quotes"'))
 
     def test_unicode(self) -> None:
         """Unicode string roundtrips correctly."""
-        _assert_roundtrip_eq(tvm_ffi.convert("hello 世界"))
+        _assert_roundtrip_eq(ffi.convert("hello 世界"))
 
 
 # ---------------------------------------------------------------------------
@@ -184,25 +184,25 @@ class TestDataType:
 
     def test_int32(self) -> None:
         """int32 dtype roundtrips correctly."""
-        s = to_json_graph_str(tvm_ffi.dtype("int32"))
+        s = to_json_graph_str(ffi.dtype("int32"))
         result = from_json_graph_str(s)
         assert str(result) == "int32"
 
     def test_float64(self) -> None:
         """float64 dtype roundtrips correctly."""
-        s = to_json_graph_str(tvm_ffi.dtype("float64"))
+        s = to_json_graph_str(ffi.dtype("float64"))
         result = from_json_graph_str(s)
         assert str(result) == "float64"
 
     def test_bool(self) -> None:
         """Bool dtype roundtrips correctly."""
-        s = to_json_graph_str(tvm_ffi.dtype("bool"))
+        s = to_json_graph_str(ffi.dtype("bool"))
         result = from_json_graph_str(s)
         assert str(result) == "bool"
 
     def test_vector(self) -> None:
         """Vector dtype roundtrips correctly."""
-        s = to_json_graph_str(tvm_ffi.dtype("float32x4"))
+        s = to_json_graph_str(ffi.dtype("float32x4"))
         result = from_json_graph_str(s)
         assert str(result) == "float32x4"
 
@@ -215,16 +215,16 @@ class TestDevice:
 
     def test_cpu(self) -> None:
         """CPU device roundtrips correctly."""
-        s = to_json_graph_str(tvm_ffi.Device("cpu", 0))
+        s = to_json_graph_str(ffi.Device("cpu", 0))
         result = from_json_graph_str(s)
-        assert result.dlpack_device_type() == tvm_ffi.Device("cpu", 0).dlpack_device_type()
+        assert result.dlpack_device_type() == ffi.Device("cpu", 0).dlpack_device_type()
         assert result.index == 0
 
     def test_cuda(self) -> None:
         """CUDA device roundtrips correctly."""
-        s = to_json_graph_str(tvm_ffi.Device("cuda", 1))
+        s = to_json_graph_str(ffi.Device("cuda", 1))
         result = from_json_graph_str(s)
-        assert result.dlpack_device_type() == tvm_ffi.Device("cuda", 1).dlpack_device_type()
+        assert result.dlpack_device_type() == ffi.Device("cuda", 1).dlpack_device_type()
         assert result.index == 1
 
 
@@ -236,26 +236,26 @@ class TestArray:
 
     def test_empty(self) -> None:
         """Empty array roundtrips correctly."""
-        arr = tvm_ffi.convert([])
+        arr = ffi.convert([])
         _assert_roundtrip_eq(arr)
 
     def test_single_element(self) -> None:
         """Single-element array roundtrips correctly."""
-        arr = tvm_ffi.convert([42])
+        arr = ffi.convert([42])
         result = _roundtrip(arr)
         assert len(result) == 1
         assert result[0] == 42
 
     def test_multiple_elements(self) -> None:
         """Multi-element array roundtrips correctly."""
-        arr = tvm_ffi.convert([1, 2, 3])
+        arr = ffi.convert([1, 2, 3])
         result = _roundtrip(arr)
         assert len(result) == 3
         assert list(result) == [1, 2, 3]
 
     def test_mixed_types(self) -> None:
         """Array with mixed types roundtrips correctly."""
-        arr = tvm_ffi.convert([42, "hello", True, None])
+        arr = ffi.convert([42, "hello", True, None])
         result = _roundtrip(arr)
         assert len(result) == 4
         assert result[0] == 42
@@ -265,9 +265,9 @@ class TestArray:
 
     def test_nested_arrays(self) -> None:
         """Nested arrays roundtrip correctly."""
-        inner1 = tvm_ffi.convert([1, 2])
-        inner2 = tvm_ffi.convert([3])
-        outer = tvm_ffi.convert([inner1, inner2])
+        inner1 = ffi.convert([1, 2])
+        inner2 = ffi.convert([3])
+        outer = ffi.convert([inner1, inner2])
         result = _roundtrip(outer)
         assert len(result) == 2
         assert list(result[0]) == [1, 2]
@@ -275,7 +275,7 @@ class TestArray:
 
     def test_duplicated_elements(self) -> None:
         """Array with duplicated elements roundtrips correctly."""
-        arr = tvm_ffi.convert([42, 42, 42])
+        arr = ffi.convert([42, 42, 42])
         result = _roundtrip(arr)
         assert len(result) == 3
         assert all(x == 42 for x in result)
@@ -286,19 +286,19 @@ class TestMap:
 
     def test_empty(self) -> None:
         """Empty map roundtrips correctly."""
-        m = tvm_ffi.convert({})
+        m = ffi.convert({})
         _assert_roundtrip_eq(m)
 
     def test_single_entry(self) -> None:
         """Single-entry map roundtrips correctly."""
-        m = tvm_ffi.convert({"key": 42})
+        m = ffi.convert({"key": 42})
         result = _roundtrip(m)
         assert len(result) == 1
         assert result["key"] == 42
 
     def test_multiple_entries(self) -> None:
         """Multi-entry map roundtrips correctly."""
-        m = tvm_ffi.convert({"a": 1, "b": 2, "c": 3})
+        m = ffi.convert({"a": 1, "b": 2, "c": 3})
         result = _roundtrip(m)
         assert len(result) == 3
         assert result["a"] == 1
@@ -307,7 +307,7 @@ class TestMap:
 
     def test_mixed_value_types(self) -> None:
         """Map with mixed value types roundtrips correctly."""
-        m = tvm_ffi.convert({"int": 42, "str": "hello", "bool": True, "none": None})
+        m = ffi.convert({"int": 42, "str": "hello", "bool": True, "none": None})
         result = _roundtrip(m)
         assert result["int"] == 42
         assert result["str"] == "hello"
@@ -316,15 +316,15 @@ class TestMap:
 
     def test_nested_map(self) -> None:
         """Nested maps roundtrip correctly."""
-        inner = tvm_ffi.convert({"x": 1})
-        outer = tvm_ffi.convert({"inner": inner})
+        inner = ffi.convert({"x": 1})
+        outer = ffi.convert({"inner": inner})
         result = _roundtrip(outer)
         assert result["inner"]["x"] == 1
 
     def test_map_with_array_value(self) -> None:
         """Map with array values roundtrips correctly."""
-        arr = tvm_ffi.convert([10, 20])
-        m = tvm_ffi.convert({"nums": arr})
+        arr = ffi.convert([10, 20])
+        m = ffi.convert({"nums": arr})
         result = _roundtrip(m)
         assert list(result["nums"]) == [10, 20]
 
@@ -334,19 +334,19 @@ class TestDict:
 
     def test_empty(self) -> None:
         """Empty dict roundtrips correctly."""
-        d = tvm_ffi.Dict({})
+        d = ffi.Dict({})
         _assert_roundtrip_eq(d)
 
     def test_single_entry(self) -> None:
         """Single-entry dict roundtrips correctly."""
-        d = tvm_ffi.Dict({"key": 42})
+        d = ffi.Dict({"key": 42})
         result = _roundtrip(d)
         assert len(result) == 1
         assert result["key"] == 42
 
     def test_multiple_entries(self) -> None:
         """Multi-entry dict roundtrips correctly."""
-        d = tvm_ffi.Dict({"a": 1, "b": 2, "c": 3})
+        d = ffi.Dict({"a": 1, "b": 2, "c": 3})
         result = _roundtrip(d)
         assert len(result) == 3
         assert result["a"] == 1
@@ -355,7 +355,7 @@ class TestDict:
 
     def test_mixed_value_types(self) -> None:
         """Dict with mixed value types roundtrips correctly."""
-        d = tvm_ffi.Dict({"int": 42, "str": "hello", "bool": True, "none": None})
+        d = ffi.Dict({"int": 42, "str": "hello", "bool": True, "none": None})
         result = _roundtrip(d)
         assert result["int"] == 42
         assert result["str"] == "hello"
@@ -364,15 +364,15 @@ class TestDict:
 
     def test_nested_dict(self) -> None:
         """Nested dicts roundtrip correctly."""
-        inner = tvm_ffi.Dict({"x": 1})
-        outer = tvm_ffi.Dict({"inner": inner})
+        inner = ffi.Dict({"x": 1})
+        outer = ffi.Dict({"inner": inner})
         result = _roundtrip(outer)
         assert result["inner"]["x"] == 1
 
     def test_dict_with_array_value(self) -> None:
         """Dict with array values roundtrips correctly."""
-        arr = tvm_ffi.convert([10, 20])
-        d = tvm_ffi.Dict({"nums": arr})
+        arr = ffi.convert([10, 20])
+        d = ffi.Dict({"nums": arr})
         result = _roundtrip(d)
         assert list(result["nums"]) == [10, 20]
 
@@ -382,18 +382,18 @@ class TestShape:
 
     def test_empty(self) -> None:
         """Empty shape roundtrips correctly."""
-        shape = tvm_ffi.Shape(())
+        shape = ffi.Shape(())
         _assert_roundtrip_eq(shape)
 
     def test_1d(self) -> None:
         """1D shape roundtrips correctly."""
-        shape = tvm_ffi.Shape((10,))
+        shape = ffi.Shape((10,))
         result = _roundtrip(shape)
         assert list(result) == [10]
 
     def test_nd(self) -> None:
         """N-D shape roundtrips correctly."""
-        shape = tvm_ffi.Shape((1, 2, 3, 4))
+        shape = ffi.Shape((1, 2, 3, 4))
         result = _roundtrip(shape)
         assert list(result) == [1, 2, 3, 4]
 
@@ -406,7 +406,7 @@ class TestObjectSerialization:
 
     def test_int_pair_roundtrip(self) -> None:
         """TestIntPair has refl::init and POD int64 fields."""
-        pair = tvm_ffi.testing.TestIntPair(3, 7)
+        pair = ffi.testing.TestIntPair(3, 7)
         s = to_json_graph_str(pair)
         result = from_json_graph_str(s)
         assert result.a == 3
@@ -414,21 +414,21 @@ class TestObjectSerialization:
 
     def test_int_pair_zero_values(self) -> None:
         """TestIntPair with zero values roundtrips correctly."""
-        pair = tvm_ffi.testing.TestIntPair(0, 0)
+        pair = ffi.testing.TestIntPair(0, 0)
         result = _roundtrip(pair)
         assert result.a == 0
         assert result.b == 0
 
     def test_int_pair_negative_values(self) -> None:
         """TestIntPair with negative values roundtrips correctly."""
-        pair = tvm_ffi.testing.TestIntPair(-100, -200)
+        pair = ffi.testing.TestIntPair(-100, -200)
         result = _roundtrip(pair)
         assert result.a == -100
         assert result.b == -200
 
     def test_int_pair_large_values(self) -> None:
         """TestIntPair with large values roundtrips correctly."""
-        pair = tvm_ffi.testing.TestIntPair(10**15, -(10**15))
+        pair = ffi.testing.TestIntPair(10**15, -(10**15))
         result = _roundtrip(pair)
         assert result.a == 10**15
         assert result.b == -(10**15)
@@ -471,14 +471,14 @@ class TestJSONStructure:
 
     def test_string_json_structure(self) -> None:
         """String produces a node with type 'ffi.String'."""
-        s = to_json_graph_str(tvm_ffi.convert("hello"))
+        s = to_json_graph_str(ffi.convert("hello"))
         parsed = json.loads(s)
         assert parsed["nodes"][parsed["root_index"]]["type"] == "ffi.String"
         assert parsed["nodes"][parsed["root_index"]]["data"] == "hello"
 
     def test_array_json_structure(self) -> None:
         """Array data contains node index references."""
-        s = to_json_graph_str(tvm_ffi.convert([1, 2]))
+        s = to_json_graph_str(ffi.convert([1, 2]))
         parsed = json.loads(s)
         root = parsed["nodes"][parsed["root_index"]]
         assert root["type"] == "ffi.Array"
@@ -488,7 +488,7 @@ class TestJSONStructure:
 
     def test_map_json_structure(self) -> None:
         """Map data contains flattened key-value node index pairs."""
-        s = to_json_graph_str(tvm_ffi.convert({"a": 1}))
+        s = to_json_graph_str(ffi.convert({"a": 1}))
         parsed = json.loads(s)
         root = parsed["nodes"][parsed["root_index"]]
         assert root["type"] == "ffi.Map"
@@ -498,7 +498,7 @@ class TestJSONStructure:
 
     def test_dict_json_structure(self) -> None:
         """Dict data contains flattened key-value node index pairs."""
-        s = to_json_graph_str(tvm_ffi.Dict({"a": 1}))
+        s = to_json_graph_str(ffi.Dict({"a": 1}))
         parsed = json.loads(s)
         root = parsed["nodes"][parsed["root_index"]]
         assert root["type"] == "ffi.Dict"
@@ -508,7 +508,7 @@ class TestJSONStructure:
 
     def test_node_dedup(self) -> None:
         """Duplicate values should share the same node index."""
-        s = to_json_graph_str(tvm_ffi.convert([42, 42, 42]))
+        s = to_json_graph_str(ffi.convert([42, 42, 42]))
         parsed = json.loads(s)
         root = parsed["nodes"][parsed["root_index"]]
         # all three elements should reference the same node
@@ -516,7 +516,7 @@ class TestJSONStructure:
 
     def test_object_pod_fields_are_inlined(self) -> None:
         """POD fields (int, bool, float) are inlined directly via field_static_type_index."""
-        pair = tvm_ffi.testing.TestIntPair(3, 7)
+        pair = ffi.testing.TestIntPair(3, 7)
         s = to_json_graph_str(pair)
         parsed = json.loads(s)
         root = parsed["nodes"][parsed["root_index"]]

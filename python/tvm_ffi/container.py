@@ -148,9 +148,9 @@ class Array(core.Object, Sequence[T]):
     --------
     .. code-block:: python
 
-        import tvm_ffi
+        import tvm_ffi as ffi
 
-        a = tvm_ffi.Array([1, 2, 3])
+        a = ffi.Array([1, 2, 3])
         assert tuple(a) == (1, 2, 3)
 
     Notes
@@ -452,9 +452,9 @@ class Map(core.Object, Mapping[K, V]):
     --------
     .. code-block:: python
 
-        import tvm_ffi
+        import tvm_ffi as ffi
 
-        amap = tvm_ffi.Map({"a": 1, "b": 2})
+        amap = ffi.Map({"a": 1, "b": 2})
         assert len(amap) == 2
         assert amap["a"] == 1
         assert amap["b"] == 2
@@ -560,9 +560,9 @@ class Dict(core.Object, MutableMapping[K, V]):
     --------
     .. code-block:: python
 
-        import tvm_ffi
+        import tvm_ffi as ffi
 
-        d = tvm_ffi.Dict({"a": 1, "b": 2})
+        d = ffi.Dict({"a": 1, "b": 2})
         d["c"] = 3
         assert len(d) == 3
 

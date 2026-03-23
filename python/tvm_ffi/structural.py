@@ -69,10 +69,10 @@ def structural_equal(
     --------
     .. code-block:: python
 
-        import tvm_ffi
+        import tvm_ffi as ffi
 
-        assert tvm_ffi.structural_equal([1, 2, 3], [1, 2, 3])
-        assert not tvm_ffi.structural_equal([1, 2, 3], [1, 2, 4])
+        assert ffi.structural_equal([1, 2, 3], [1, 2, 3])
+        assert not ffi.structural_equal([1, 2, 3], [1, 2, 4])
 
     See Also
     --------
@@ -114,10 +114,10 @@ def structural_hash(
     --------
     .. code-block:: python
 
-        import tvm_ffi
+        import tvm_ffi as ffi
 
-        h0 = tvm_ffi.structural_hash([1, 2, 3])
-        h1 = tvm_ffi.structural_hash([1, 2, 3])
+        h0 = ffi.structural_hash([1, 2, 3])
+        h1 = ffi.structural_hash([1, 2, 3])
         assert h0 == h1
 
     Notes
@@ -174,11 +174,11 @@ class StructuralKey(Object):
 
     .. code-block:: python
 
-        import tvm_ffi
+        import tvm_ffi as ffi
 
-        k0 = tvm_ffi.StructuralKey([1, 2, 3])
-        k1 = tvm_ffi.StructuralKey([1, 2, 3])
-        k2 = tvm_ffi.StructuralKey([1, 2, 4])
+        k0 = ffi.StructuralKey([1, 2, 3])
+        k1 = ffi.StructuralKey([1, 2, 3])
+        k2 = ffi.StructuralKey([1, 2, 4])
 
         d = {k0: "value-a", k2: "value-b"}
         assert d[k1] == "value-a"  # k1 matches k0 structurally
@@ -188,7 +188,7 @@ class StructuralKey(Object):
 
     .. code-block:: python
 
-        m = tvm_ffi.Map({k0: 1, k1: 2})
+        m = ffi.Map({k0: 1, k1: 2})
         assert len(m) == 1
         assert m[k0] == 2
 

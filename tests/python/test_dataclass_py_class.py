@@ -28,7 +28,7 @@ import sys
 from typing import Any, ClassVar, Dict, List, Optional
 
 import pytest
-import tvm_ffi
+import tvm_ffi as ffi
 from tvm_ffi import core
 from tvm_ffi._ffi_api import DeepCopy, RecursiveEq, RecursiveHash, ReprPrint
 from tvm_ffi.core import MISSING, Object, TypeInfo, TypeSchema, _to_py_class_value
@@ -1695,7 +1695,7 @@ class TestGetterSetter:
             ],
         )
         obj = Cls(arr=[1])
-        obj.arr = tvm_ffi.Array([4, 5, 6])
+        obj.arr = ffi.Array([4, 5, 6])
         assert len(obj.arr) == 3
         assert obj.arr[0] == 4
 
@@ -1717,7 +1717,7 @@ class TestObjectRefFields:
                 ),
             ],
         )
-        obj = Cls(arr=tvm_ffi.Array([1, 2, 3]))
+        obj = Cls(arr=ffi.Array([1, 2, 3]))
         assert len(obj.arr) == 3
         assert obj.arr[0] == 1
         assert obj.arr[2] == 3
@@ -1882,7 +1882,7 @@ class TestOptionalFields:
         )
         obj = Cls()
         assert obj.ref is None
-        obj.ref = tvm_ffi.Array([1])
+        obj.ref = ffi.Array([1])
         assert len(obj.ref) == 1
         obj.ref = None
         assert obj.ref is None
@@ -1977,7 +1977,7 @@ class TestAnyField:
             "AnyObj",
             [Field(name="val", ty=TypeSchema("Any"), default=None)],
         )
-        arr = tvm_ffi.Array([1, 2])
+        arr = ffi.Array([1, 2])
         assert len(Cls(val=arr).val) == 2
 
     def test_any_type_change(self) -> None:
@@ -1992,7 +1992,7 @@ class TestAnyField:
         assert obj.val == "hello"
         obj.val = None
         assert obj.val is None
-        obj.val = tvm_ffi.Array([1])
+        obj.val = ffi.Array([1])
         assert len(obj.val) == 1
 
 
@@ -2009,7 +2009,7 @@ class TestDefaultFactory:
                 Field(
                     name="data",
                     ty=TypeSchema("Array", (TypeSchema("int"),)),
-                    default_factory=lambda: tvm_ffi.Array([]),
+                    default_factory=lambda: ffi.Array([]),
                 ),
             ],
         )
@@ -2024,7 +2024,7 @@ class TestDefaultFactory:
                 Field(
                     name="items",
                     ty=TypeSchema("Array", (TypeSchema("int"),)),
-                    default_factory=lambda: tvm_ffi.Array([1, 2, 3]),
+                    default_factory=lambda: ffi.Array([1, 2, 3]),
                 ),
             ],
         )
@@ -3001,7 +3001,7 @@ class TestDeepCopy:
                 ),
             ],
         )
-        obj = Cls(items=tvm_ffi.Array([1, 2, 3]))
+        obj = Cls(items=ffi.Array([1, 2, 3]))
         obj_copy = DeepCopy(obj)
         assert not obj.items.same_as(obj_copy.items)
         assert len(obj_copy.items) == 3
@@ -3044,7 +3044,7 @@ class TestMemoryLifetime:
                 ),
             ],
         )
-        arr = tvm_ffi.Array([1, 2, 3])
+        arr = ffi.Array([1, 2, 3])
         obj = Cls(arr=arr)
         del arr
         gc.collect()
@@ -3061,7 +3061,7 @@ class TestMemoryLifetime:
                 ),
             ],
         )
-        shared = tvm_ffi.Array([10, 20])
+        shared = ffi.Array([10, 20])
         a = Cls(arr=shared)
         b = Cls(arr=shared)
         del a
@@ -3208,7 +3208,7 @@ class TestTypeConversionErrors:
                 ),
             ],
         )
-        obj = Cls(child=tvm_ffi.Array([1]))
+        obj = Cls(child=ffi.Array([1]))
         with pytest.raises((TypeError, RuntimeError)):
             obj.child = None
 
@@ -3241,7 +3241,7 @@ class TestTypeConversionErrors:
         )
         obj = Cls()
         assert obj.child is None
-        obj.child = tvm_ffi.Array([1, 2])
+        obj.child = ffi.Array([1, 2])
         assert len(obj.child) == 2
         obj.child = None
         assert obj.child is None
@@ -3405,7 +3405,7 @@ class TestSetterGetterCornerCases:
         )
         obj = Cls(arr=[0])
         for i in range(50):
-            obj.arr = tvm_ffi.Array([i])
+            obj.arr = ffi.Array([i])
         assert obj.arr[0] == 49
 
     # --- Nested object fields ---
@@ -3501,7 +3501,7 @@ class TestSetterGetterCornerCases:
         obj.f = -2.0
         obj.b = False
         obj.s = "bye"
-        obj.arr = tvm_ffi.Array([30])
+        obj.arr = ffi.Array([30])
         obj.opt = 42
         assert obj.i == -1
         assert obj.f == pytest.approx(-2.0)
@@ -3518,19 +3518,19 @@ class TestFFIGlobalFunctions:
     """Low-level FFI global function registration checks."""
 
     def test_make_ffi_new_exists(self) -> None:
-        assert tvm_ffi.get_global_func("ffi.MakeFFINew", allow_missing=True) is not None
+        assert ffi.get_global_func("ffi.MakeFFINew", allow_missing=True) is not None
 
     def test_register_auto_init_exists(self) -> None:
-        assert tvm_ffi.get_global_func("ffi.RegisterAutoInit", allow_missing=True) is not None
+        assert ffi.get_global_func("ffi.RegisterAutoInit", allow_missing=True) is not None
 
     def test_get_field_getter_exists(self) -> None:
-        assert tvm_ffi.get_global_func("ffi.GetFieldGetter", allow_missing=True) is not None
+        assert ffi.get_global_func("ffi.GetFieldGetter", allow_missing=True) is not None
 
     def test_make_field_setter_exists(self) -> None:
-        assert tvm_ffi.get_global_func("ffi.MakeFieldSetter", allow_missing=True) is not None
+        assert ffi.get_global_func("ffi.MakeFieldSetter", allow_missing=True) is not None
 
     def test_make_new_removed(self) -> None:
-        assert tvm_ffi.get_global_func("ffi.MakeNew", allow_missing=True) is None
+        assert ffi.get_global_func("ffi.MakeNew", allow_missing=True) is None
 
 
 # ###########################################################################
@@ -3722,19 +3722,19 @@ class TestFunctionField:
     def test_function_field(self) -> None:
         @py_class(_unique_key("FuncFld"))
         class FuncFld(Object):
-            func: tvm_ffi.Function
+            func: ffi.Function
 
-        fn = tvm_ffi.convert(lambda x: x + 1)
+        fn = ffi.convert(lambda x: x + 1)
         obj = FuncFld(func=fn)
         assert obj.func(1) == 2
 
     def test_function_field_set(self) -> None:
         @py_class(_unique_key("FuncSet"))
         class FuncSet(Object):
-            func: tvm_ffi.Function
+            func: ffi.Function
 
-        fn1 = tvm_ffi.convert(lambda x: x + 1)
-        fn2 = tvm_ffi.convert(lambda x: x + 2)
+        fn1 = ffi.convert(lambda x: x + 1)
+        fn2 = ffi.convert(lambda x: x + 2)
         obj = FuncSet(func=fn1)
         assert obj.func(1) == 2
         obj.func = fn2
@@ -3744,11 +3744,11 @@ class TestFunctionField:
     def test_optional_function_field(self) -> None:
         @py_class(_unique_key("OptFunc"))
         class OptFunc(Object):
-            func: Optional[tvm_ffi.Function]
+            func: Optional[ffi.Function]
 
         obj = OptFunc(func=None)
         assert obj.func is None
-        obj.func = tvm_ffi.convert(lambda x: x * 2)
+        obj.func = ffi.convert(lambda x: x * 2)
         assert obj.func(3) == 6
         obj.func = None
         assert obj.func is None
@@ -3799,7 +3799,7 @@ class TestAnyFieldDecorator:
         assert obj.val == 42
         obj.val = "hello"
         assert obj.val == "hello"
-        obj.val = tvm_ffi.Array([1, 2])
+        obj.val = ffi.Array([1, 2])
         assert len(obj.val) == 2
         obj.val = None
         assert obj.val is None
@@ -4153,11 +4153,11 @@ class TestOptionalFieldCycles:
     def test_opt_func_type_rejection(self) -> None:
         @py_class(_unique_key("OptFuncR"))
         class OptFuncR(Object):
-            func: Optional[tvm_ffi.Function]
+            func: Optional[ffi.Function]
 
         obj = OptFuncR(func=None)
         assert obj.func is None
-        obj.func = tvm_ffi.convert(lambda x: x + 2)
+        obj.func = ffi.convert(lambda x: x + 2)
         assert obj.func(1) == 3
         obj.func = None
         assert obj.func is None

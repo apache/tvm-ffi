@@ -20,7 +20,7 @@
 
 This example demonstrates:
 1. Compiling CUDA C++ source code to CUBIN using NVRTC
-2. Embedding the CUBIN into a C++ module using tvm_ffi.cpp.load_inline
+2. Embedding the CUBIN into a C++ module using ffi.cpp.load_inline
 3. Launching the kernel through TVM-FFI
 
 Notes:

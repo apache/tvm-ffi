@@ -16,12 +16,13 @@
 # under the License.
 import numpy
 import pytest
+import tvm_ffi as ffi
 import tvm_ffi.cpp
 from tvm_ffi.module import Module
 
 
 def test_build_inline_cpp() -> None:
-    output_lib_path = tvm_ffi.cpp.build_inline(
+    output_lib_path = ffi.cpp.build_inline(
         name="hello",
         cpp_sources=r"""
             void add_one_cpu(tvm::ffi::TensorView x, tvm::ffi::TensorView y) {
@@ -40,7 +41,7 @@ def test_build_inline_cpp() -> None:
         functions=["add_one_cpu"],
     )
 
-    mod: Module = tvm_ffi.load_module(output_lib_path)
+    mod: Module = ffi.load_module(output_lib_path)
 
     x = numpy.array([1, 2, 3, 4, 5], dtype=numpy.float32)
     y = numpy.empty_like(x)

@@ -17,15 +17,15 @@
 
 import pickle
 
-import tvm_ffi
+import tvm_ffi as ffi
 
 
 def test_string() -> None:
-    fecho = tvm_ffi.get_global_func("testing.echo")
-    s = tvm_ffi.core.String("hello")
+    fecho = ffi.get_global_func("testing.echo")
+    s = ffi.core.String("hello")
     s2 = fecho(s)
     assert s2 == "hello"
-    s3 = tvm_ffi.convert("hello")
+    s3 = ffi.convert("hello")
     assert isinstance(s3, str)
 
     x = "hello long string"
@@ -36,27 +36,27 @@ def test_string() -> None:
 
 
 def test_bytes() -> None:
-    fecho = tvm_ffi.get_global_func("testing.echo")
-    b = tvm_ffi.core.Bytes(b"hello")
-    assert isinstance(b, tvm_ffi.core.Bytes)
+    fecho = ffi.get_global_func("testing.echo")
+    b = ffi.core.Bytes(b"hello")
+    assert isinstance(b, ffi.core.Bytes)
     b2 = fecho(b)
     assert b2 == b"hello"
 
-    b3 = tvm_ffi.convert(b"hello")
-    assert isinstance(b3, tvm_ffi.core.Bytes)
+    b3 = ffi.convert(b"hello")
+    assert isinstance(b3, ffi.core.Bytes)
     assert isinstance(b3, bytes)
 
-    b4 = tvm_ffi.convert(bytearray(b"hello"))
-    assert isinstance(b4, tvm_ffi.core.Bytes)
+    b4 = ffi.convert(bytearray(b"hello"))
+    assert isinstance(b4, ffi.core.Bytes)
     assert isinstance(b4, bytes)
 
     b5 = pickle.loads(pickle.dumps(b))
     assert b5 == b"hello"
-    assert isinstance(b5, tvm_ffi.core.Bytes)
+    assert isinstance(b5, ffi.core.Bytes)
 
 
 def test_string_find_substr() -> None:
-    s = tvm_ffi.core.String("hello world")
+    s = ffi.core.String("hello world")
     assert s.find("world") == 6
     assert s.find("hello") == 0
     assert s.find("o") == 4

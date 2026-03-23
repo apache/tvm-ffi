@@ -20,7 +20,7 @@ from __future__ import annotations
 import ctypes
 
 import pytest
-import tvm_ffi
+import tvm_ffi as ffi
 import tvm_ffi.cpp
 
 try:
@@ -38,7 +38,7 @@ except ImportError:
 @pytest.mark.skipif(cuda_driver is None, reason="Requires cuda-python")
 def test_cuda_driver_stream() -> None:
     assert cuda_driver is not None
-    echo = tvm_ffi.get_global_func("testing.echo")
+    echo = ffi.get_global_func("testing.echo")
     stream = cuda_driver.CUstream(0)
     y = echo(stream)
     assert y is not None
@@ -47,8 +47,8 @@ def test_cuda_driver_stream() -> None:
     assert z.value == 1
 
 
-def gen_check_stream_mod() -> tvm_ffi.Module:
-    return tvm_ffi.cpp.load_inline(
+def gen_check_stream_mod() -> ffi.Module:
+    return ffi.cpp.load_inline(
         name="check_stream",
         cpp_sources="""
         void check_stream(int device_type, int device_id, uint64_t stream) {
@@ -62,19 +62,19 @@ def gen_check_stream_mod() -> tvm_ffi.Module:
 
 def test_raw_stream() -> None:
     mod = gen_check_stream_mod()
-    device = tvm_ffi.device("cuda:0")
+    device = ffi.device("cuda:0")
     stream_1 = 123456789
     stream_2 = 987654321
-    with tvm_ffi.use_raw_stream(device, stream_1):
+    with ffi.use_raw_stream(device, stream_1):
         mod.check_stream(device.dlpack_device_type(), device.index, stream_1)
-        assert tvm_ffi.get_raw_stream(device) == stream_1
+        assert ffi.get_raw_stream(device) == stream_1
 
-        with tvm_ffi.use_raw_stream(device, stream_2):
+        with ffi.use_raw_stream(device, stream_2):
             mod.check_stream(device.dlpack_device_type(), device.index, stream_2)
-            assert tvm_ffi.get_raw_stream(device) == stream_2
+            assert ffi.get_raw_stream(device) == stream_2
 
         mod.check_stream(device.dlpack_device_type(), device.index, stream_1)
-        assert tvm_ffi.get_raw_stream(device) == stream_1
+        assert ffi.get_raw_stream(device) == stream_1
 
 
 @pytest.mark.skipif(
@@ -84,15 +84,15 @@ def test_torch_stream() -> None:
     assert torch is not None
     mod = gen_check_stream_mod()
     device_id = torch.cuda.current_device()
-    device = tvm_ffi.device("cuda", device_id)
+    device = ffi.device("cuda", device_id)
     device_type = device.dlpack_device_type()
     stream_1 = torch.cuda.Stream(device_id)
     stream_2 = torch.cuda.Stream(device_id)
-    with tvm_ffi.use_torch_stream(torch.cuda.stream(stream_1)):
+    with ffi.use_torch_stream(torch.cuda.stream(stream_1)):
         assert torch.cuda.current_stream() == stream_1
         mod.check_stream(device_type, device_id, stream_1.cuda_stream)
 
-        with tvm_ffi.use_torch_stream(torch.cuda.stream(stream_2)):
+        with ffi.use_torch_stream(torch.cuda.stream(stream_2)):
             assert torch.cuda.current_stream() == stream_2
             mod.check_stream(device_type, device_id, stream_2.cuda_stream)
 
@@ -107,22 +107,22 @@ def test_torch_current_stream() -> None:
     assert torch is not None
     mod = gen_check_stream_mod()
     device_id = torch.cuda.current_device()
-    device = tvm_ffi.device("cuda", device_id)
+    device = ffi.device("cuda", device_id)
     device_type = device.dlpack_device_type()
     stream_1 = torch.cuda.Stream(device_id)
     stream_2 = torch.cuda.Stream(device_id)
     with torch.cuda.stream(stream_1):
         assert torch.cuda.current_stream() == stream_1
-        with tvm_ffi.use_torch_stream():
+        with ffi.use_torch_stream():
             mod.check_stream(device_type, device_id, stream_1.cuda_stream)
 
         with torch.cuda.stream(stream_2):
             assert torch.cuda.current_stream() == stream_2
-            with tvm_ffi.use_torch_stream():
+            with ffi.use_torch_stream():
                 mod.check_stream(device_type, device_id, stream_2.cuda_stream)
 
         assert torch.cuda.current_stream() == stream_1
-        with tvm_ffi.use_torch_stream():
+        with ffi.use_torch_stream():
             mod.check_stream(device_type, device_id, stream_1.cuda_stream)
 
 
@@ -133,12 +133,12 @@ def test_torch_graph() -> None:
     assert torch is not None
     mod = gen_check_stream_mod()
     device_id = torch.cuda.current_device()
-    device = tvm_ffi.device("cuda", device_id)
+    device = ffi.device("cuda", device_id)
     device_type = device.dlpack_device_type()
     graph = torch.cuda.CUDAGraph()
     stream = torch.cuda.Stream(device_id)
     x = torch.zeros(1, device="cuda")
-    with tvm_ffi.use_torch_stream(torch.cuda.graph(graph, stream=stream)):
+    with ffi.use_torch_stream(torch.cuda.graph(graph, stream=stream)):
         assert torch.cuda.current_stream() == stream
         mod.check_stream(device_type, device_id, stream.cuda_stream)
         # avoid cuda graph no capture warning

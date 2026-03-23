@@ -29,7 +29,7 @@ except ImportError:
     torch = None  # ty: ignore[invalid-assignment]
 
 
-import tvm_ffi
+import tvm_ffi as ffi
 
 IS_WINDOWS = sys.platform.startswith("win")
 
@@ -37,7 +37,7 @@ IS_WINDOWS = sys.platform.startswith("win")
 @pytest.mark.skipif(torch is None, reason="torch is not installed")
 def test_build_torch_c_dlpack_extension() -> None:
     assert torch is not None
-    build_script = Path(tvm_ffi.__file__).parent / "utils" / "_build_optional_torch_c_dlpack.py"
+    build_script = Path(ffi.__file__).parent / "utils" / "_build_optional_torch_c_dlpack.py"
     args = [
         sys.executable,
         str(build_script),
@@ -69,7 +69,7 @@ def test_build_torch_c_dlpack_extension() -> None:
 
 @pytest.mark.skipif(torch is None, reason="torch is not installed")
 def test_parallel_build() -> None:
-    build_script = Path(tvm_ffi.__file__).parent / "utils" / "_build_optional_torch_c_dlpack.py"
+    build_script = Path(ffi.__file__).parent / "utils" / "_build_optional_torch_c_dlpack.py"
     num_processes = 4
     output_dir = "./output-dir-parallel"
     libname = "libtorch_c_dlpack_addon_test.so"

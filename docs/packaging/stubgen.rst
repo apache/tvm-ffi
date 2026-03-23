@@ -73,8 +73,8 @@ and regenerates the content within those blocks:
 
   .. code-block:: python
 
-     @tvm_ffi.register_object("my_ffi_extension.IntPair")
-     class IntPair(tvm_ffi.Object):
+     @ffi.register_object("my_ffi_extension.IntPair")
+     class IntPair(ffi.Object):
          # tvm-ffi-stubgen(begin): object/my_ffi_extension.IntPair
          a: int
          b: int
@@ -89,7 +89,7 @@ and regenerates the content within those blocks:
   .. code-block:: python
 
      # tvm-ffi-stubgen(begin): global/my_ffi_extension
-     tvm_ffi.init_ffi_api("my_ffi_extension", __name__)
+     ffi.init_ffi_api("my_ffi_extension", __name__)
      if TYPE_CHECKING:
          def add_one(_0: int, /) -> int: ...
          def raise_error(_0: str, /) -> None: ...
@@ -117,7 +117,7 @@ STUB_PKG (default: ``SKBUILD_PROJECT_NAME`` or CMake target name)
 
    .. code-block:: python
 
-      LIB = tvm_ffi.libinfo.load_lib_module("<STUB_PKG>", "<cmake-target-name>")
+      LIB = ffi.libinfo.load_lib_module("<STUB_PKG>", "<cmake-target-name>")
 
    This uses :py:func:`tvm_ffi.libinfo.load_lib_module` to load the shared library.
 
@@ -141,7 +141,7 @@ STUB_PREFIX (default: ``<STUB_PKG>.``)
 
      .. code-block:: python
 
-        @tvm_ffi.register_object("<STUB_PREFIX>IntPair")
+        @ffi.register_object("<STUB_PREFIX>IntPair")
         class IntPair(_ffi_Object):
             # tvm-ffi-stubgen(begin): object/<STUB_PREFIX>IntPair
             a: int
@@ -299,7 +299,7 @@ When you run the tool, it:
 
       # tvm-ffi-stubgen(begin): global/my_ext.arith
       # fmt: off
-      tvm_ffi.init_ffi_api("my_ext.arith", __name__)
+      ffi.init_ffi_api("my_ext.arith", __name__)
       if TYPE_CHECKING:
           def add_one(_0: int, /) -> int: ...
           def add_two(_0: int, /) -> int: ...
@@ -308,11 +308,11 @@ When you run the tool, it:
 
 ``object/<type_key>`` - Object Types
    Marks a section for class field and method stubs. Place inside a class definition
-   decorated with ``@tvm_ffi.register_object``.
+   decorated with ``@ffi.register_object``.
 
    .. code-block:: python
 
-      @tvm_ffi.register_object("my_ffi_extension.IntPair")
+      @ffi.register_object("my_ffi_extension.IntPair")
       class IntPair(_ffi_Object):
           # tvm-ffi-stubgen(begin): object/my_ffi_extension.IntPair
           # fmt: off

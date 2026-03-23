@@ -58,31 +58,31 @@ def convert(value: Any) -> Any:  # noqa: PLR0911,PLR0912
     --------
     .. code-block:: python
 
-        import tvm_ffi
+        import tvm_ffi as ffi
 
-        # Lists and tuples become tvm_ffi.Array
-        a = tvm_ffi.convert([1, 2, 3])
-        assert isinstance(a, tvm_ffi.Array)
+        # Lists and tuples become ffi.Array
+        a = ffi.convert([1, 2, 3])
+        assert isinstance(a, ffi.Array)
 
-        # Dicts become tvm_ffi.Map
-        m = tvm_ffi.convert({"a": 1, "b": 2})
-        assert isinstance(m, tvm_ffi.Map)
+        # Dicts become ffi.Map
+        m = ffi.convert({"a": 1, "b": 2})
+        assert isinstance(m, ffi.Map)
 
         # Strings and bytes become zero-copy FFI-aware types
-        s = tvm_ffi.convert("hello")
-        b = tvm_ffi.convert(b"bytes")
-        assert isinstance(s, tvm_ffi.core.String)
-        assert isinstance(b, tvm_ffi.core.Bytes)
+        s = ffi.convert("hello")
+        b = ffi.convert(b"bytes")
+        assert isinstance(s, ffi.core.String)
+        assert isinstance(b, ffi.core.Bytes)
 
-        # Callables are wrapped as tvm_ffi.Function
-        f = tvm_ffi.convert(lambda x: x + 1)
-        assert isinstance(f, tvm_ffi.Function)
+        # Callables are wrapped as ffi.Function
+        f = ffi.convert(lambda x: x + 1)
+        assert isinstance(f, ffi.Function)
 
         # Array libraries that support DLPack export can be converted to Tensor
         import numpy as np
 
-        x = tvm_ffi.convert(np.arange(4, dtype="int32"))
-        assert isinstance(x, tvm_ffi.Tensor)
+        x = ffi.convert(np.arange(4, dtype="int32"))
+        assert isinstance(x, ffi.Tensor)
 
     Note
     ----

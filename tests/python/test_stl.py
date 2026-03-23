@@ -17,18 +17,19 @@
 import pathlib
 
 import pytest
+import tvm_ffi as ffi
 import tvm_ffi.cpp
 from tvm_ffi.module import Module
 
 
 def test_stl() -> None:
     cpp_path = pathlib.Path(__file__).parent.resolve() / "cpp_src" / "test_stl.cc"
-    output_lib_path = tvm_ffi.cpp.build(
+    output_lib_path = ffi.cpp.build(
         name="test_stl",
         cpp_files=[str(cpp_path)],
     )
 
-    mod: Module = tvm_ffi.load_module(output_lib_path)
+    mod: Module = ffi.load_module(output_lib_path)
 
     assert list(mod.test_tuple([1, 2.5])) == [2.5, 1]
     assert mod.test_vector(None) is None

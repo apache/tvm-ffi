@@ -22,21 +22,21 @@ import pickle
 
 import numpy
 import pytest
-import tvm_ffi
+import tvm_ffi as ffi
 from tvm_ffi import DLDeviceType
 
 
 def test_device() -> None:
-    device = tvm_ffi.Device("cuda", 0)
-    assert device.dlpack_device_type() == tvm_ffi.DLDeviceType.kDLCUDA
+    device = ffi.Device("cuda", 0)
+    assert device.dlpack_device_type() == ffi.DLDeviceType.kDLCUDA
     assert device.index == 0
     assert str(device) == "cuda:0"
     assert device.__repr__() == "device(type='cuda', index=0)"
 
 
 def test_device_from_str() -> None:
-    device = tvm_ffi.device("ext_dev:0")
-    assert device.dlpack_device_type() == tvm_ffi.DLDeviceType.kDLExtDev
+    device = ffi.device("ext_dev:0")
+    assert device.dlpack_device_type() == ffi.DLDeviceType.kDLExtDev
     assert device.index == 0
     assert str(device) == "ext_dev:0"
     assert device.__repr__() == "device(type='ext_dev', index=0)"
@@ -57,7 +57,7 @@ def test_device_dlpack_device_type(
     expected_device_type: DLDeviceType,
     expect_device_id: int,
 ) -> None:
-    dev = tvm_ffi.device(dev_str)
+    dev = ffi.device(dev_str)
     assert dev.dlpack_device_type() == expected_device_type
     assert dev.index == expect_device_id
 
@@ -82,7 +82,7 @@ def test_device_with_dev_id(
     expected_device_type: DLDeviceType,
     expect_device_id: int,
 ) -> None:
-    dev = tvm_ffi.device(dev_type, dev_id)
+    dev = ffi.device(dev_type, dev_id)
     assert dev.dlpack_device_type() == expected_device_type
     assert dev.index == expect_device_id
 
@@ -90,31 +90,31 @@ def test_device_with_dev_id(
 @pytest.mark.parametrize("dev_type, dev_id", [("cpu:0:0", None), ("cpu:?", None), ("cpu:", None)])
 def test_deive_type_error(dev_type: str, dev_id: int | None) -> None:
     with pytest.raises(ValueError):
-        tvm_ffi.device(dev_type, dev_id)
+        ffi.device(dev_type, dev_id)
 
 
 def test_deive_id_error() -> None:
     with pytest.raises(TypeError):
-        tvm_ffi.device("cpu", "?")  # ty: ignore[invalid-argument-type]
+        ffi.device("cpu", "?")  # ty: ignore[invalid-argument-type]
 
 
 def test_device_pickle() -> None:
-    device = tvm_ffi.device("cuda", 0)
+    device = ffi.device("cuda", 0)
     device_pickled = pickle.loads(pickle.dumps(device))
     assert device_pickled.dlpack_device_type() == device.dlpack_device_type()
     assert device_pickled.index == device.index
 
 
 def test_device_class_override() -> None:
-    class MyDevice(tvm_ffi.Device):
+    class MyDevice(ffi.Device):
         pass
 
-    old_device = tvm_ffi.core._CLASS_DEVICE
-    tvm_ffi.core._set_class_device(MyDevice)
+    old_device = ffi.core._CLASS_DEVICE
+    ffi.core._set_class_device(MyDevice)
 
-    device = tvm_ffi.device("cuda", 0)
+    device = ffi.device("cuda", 0)
     assert isinstance(device, MyDevice)
-    tvm_ffi.core._set_class_device(old_device)
+    ffi.core._set_class_device(old_device)
 
 
 def test_cuda_stream_handling() -> None:
@@ -126,7 +126,7 @@ def test_cuda_stream_handling() -> None:
             return ("cuda", self.stream)
 
     stream = MyDummyStream(1)
-    echo = tvm_ffi.get_global_func("testing.echo")
+    echo = ffi.get_global_func("testing.echo")
     y = echo(stream)
     assert isinstance(y, ctypes.c_void_p)
     assert y.value == 1

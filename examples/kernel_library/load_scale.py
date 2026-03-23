@@ -18,10 +18,10 @@
 
 # [load_and_call.begin]
 import torch
-import tvm_ffi
+import tvm_ffi as ffi
 
 # Load the compiled shared library
-mod = tvm_ffi.load_module("build/scale_kernel.so")
+mod = ffi.load_module("build/scale_kernel.so")
 
 # Pre-allocate input and output tensors in PyTorch
 x = torch.randn(1024, device="cuda", dtype=torch.float32)

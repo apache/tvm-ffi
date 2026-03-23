@@ -20,8 +20,8 @@
 # [example.begin]
 # File: load/load_pytorch.py
 # Step 1. Load `build/add_one_cuda.so`
-import tvm_ffi
-mod = tvm_ffi.load_module("build/add_one_cuda.so")
+import tvm_ffi as ffi
+mod = ffi.load_module("build/add_one_cuda.so")
 
 # Step 2. Run `mod.add_one_cuda` with PyTorch
 import torch

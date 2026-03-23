@@ -28,7 +28,7 @@ try:
 
     # Import tvm_ffi to load the DLPack exchange API extension
     # This sets torch.Tensor.__dlpack_c_exchange_api__
-    import tvm_ffi
+    import tvm_ffi as ffi
     from torch.utils import cpp_extension
     from tvm_ffi import libinfo
 except ImportError:
@@ -219,9 +219,9 @@ def test_from_dlpack_torch() -> None:
     # Covers from_dlpack to use fallback fastpath
     assert torch is not None
     tensor = torch.arange(24, dtype=torch.float32).reshape(2, 3, 4)
-    tensor_from_dlpack = tvm_ffi.from_dlpack(tensor)
+    tensor_from_dlpack = ffi.from_dlpack(tensor)
     assert tensor_from_dlpack.shape == tensor.shape
-    assert tensor_from_dlpack.dtype == tvm_ffi.float32
+    assert tensor_from_dlpack.dtype == ffi.float32
 
 
 if __name__ == "__main__":

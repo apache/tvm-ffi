@@ -797,14 +797,14 @@ def build_inline(  # noqa: PLR0913
         '''
 
         # compile the cpp source code and load the module
-        lib_path: str = tvm_ffi.cpp.build_inline(
+        lib_path: str = ffi.cpp.build_inline(
             name="hello",
             cpp_sources=cpp_source,
             functions="add_one_cpu",
         )
 
         # load the module
-        mod: Module = tvm_ffi.load_module(lib_path)
+        mod: Module = ffi.load_module(lib_path)
 
         # use the function from the loaded module to perform
         x = torch.tensor([1, 2, 3, 4, 5], dtype=torch.float32)
@@ -1018,7 +1018,7 @@ def load_inline(  # noqa: PLR0913
         '''
 
         # compile the cpp source code and load the module
-        mod: Module = tvm_ffi.cpp.load_inline(
+        mod: Module = ffi.cpp.load_inline(
             name="hello",
             cpp_sources=cpp_source,
             functions="add_one_cpu",
@@ -1165,13 +1165,13 @@ def build(
         # ```
 
         # compile the cpp source file and get the library path
-        lib_path: str = tvm_ffi.cpp.build(
+        lib_path: str = ffi.cpp.build(
             name="my_ops",
             cpp_files="my_ops.cpp",
         )
 
         # load the module
-        mod: Module = tvm_ffi.load_module(lib_path)
+        mod: Module = ffi.load_module(lib_path)
 
         # use the function from the loaded module
         x = torch.tensor([1, 2, 3, 4, 5], dtype=torch.float32)
@@ -1319,7 +1319,7 @@ def load(
         # ```
 
         # compile the cpp source file and load the module
-        mod: Module = tvm_ffi.cpp.load(
+        mod: Module = ffi.cpp.load(
             name="my_ops",
             cpp_files="my_ops.cpp",
         )
