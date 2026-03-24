@@ -164,6 +164,7 @@ target_link_libraries(tvm_ffi_static PUBLIC tvm_ffi_header)
 # `tvm_ffi_testing` won't be inlcuded in `libtvm_ffi` and contains functions that are registered
 # only for testing purposes
 target_sources(tvm_ffi_testing PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/testing/testing.cc")
+target_compile_definitions(tvm_ffi_testing PRIVATE TVM_FFI_DLL_EXPORT_INCLUDE_METADATA=1)
 target_compile_features(tvm_ffi_testing PRIVATE cxx_std_17)
 set_target_properties(
   tvm_ffi_testing
