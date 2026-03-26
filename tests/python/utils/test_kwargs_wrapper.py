@@ -16,6 +16,7 @@
 # under the License.
 from __future__ import annotations
 
+import dataclasses
 import inspect
 from typing import Any
 
@@ -369,3 +370,84 @@ def test_optimized_default_types() -> None:
     assert wrapper(1, flag=False) == (1, None, False, "default")
     assert wrapper(1, name="custom") == (1, None, True, "custom")
     assert wrapper(1, b=2, flag=False, name="test") == (1, 2, False, "test")
+
+
+def test_map_dataclass_to_tuple() -> None:
+    """Test that dataclass arguments are converted to tuples via dataclasses.astuple."""
+
+    @dataclasses.dataclass
+    class Config:
+        x: int
+        y: int
+
+    @dataclasses.dataclass
+    class Nested:
+        value: int
+        cfg: Config
+
+    def target(*args: Any) -> tuple[Any, ...]:
+        return args
+
+    # Basic: one dataclass arg converted to tuple
+    wrapper = make_kwargs_wrapper(target, ["a", "cfg"], map_dataclass_to_tuple=["cfg"])
+    result = wrapper(1, Config(x=10, y=20))
+    assert result == (1, (10, 20))
+
+    # Dataclass passed as keyword argument
+    result = wrapper(a=1, cfg=Config(x=3, y=4))
+    assert result == (1, (3, 4))
+
+    # Multiple dataclass args
+    wrapper = make_kwargs_wrapper(target, ["a", "b"], map_dataclass_to_tuple=["a", "b"])
+    result = wrapper(Config(x=1, y=2), Config(x=3, y=4))
+    assert result == ((1, 2), (3, 4))
+
+    # Nested dataclass (astuple recurses)
+    wrapper = make_kwargs_wrapper(target, ["a", "nested"], map_dataclass_to_tuple=["nested"])
+    result = wrapper(1, Nested(value=5, cfg=Config(x=10, y=20)))
+    assert result == (1, (5, (10, 20)))
+
+    # Mixed: some args converted, others not
+    wrapper = make_kwargs_wrapper(target, ["a", "cfg", "b"], map_dataclass_to_tuple=["cfg"])
+    result = wrapper(1, Config(x=10, y=20), 3)
+    assert result == (1, (10, 20), 3)
+
+    # With defaults: dataclass arg has a default
+    default_cfg = Config(x=0, y=0)
+    wrapper = make_kwargs_wrapper(
+        target, ["a", "cfg"], arg_defaults=(default_cfg,), map_dataclass_to_tuple=["cfg"]
+    )
+    result = wrapper(1)
+    assert result == (1, (0, 0))
+    result = wrapper(1, Config(x=5, y=6))
+    assert result == (1, (5, 6))
+
+    # With keyword-only dataclass arg
+    wrapper = make_kwargs_wrapper(
+        target,
+        ["a"],
+        kwonly_names=["cfg"],
+        kwonly_defaults={"cfg": Config(x=0, y=0)},
+        map_dataclass_to_tuple=["cfg"],
+    )
+    result = wrapper(1)
+    assert result == (1, (0, 0))
+    result = wrapper(1, cfg=Config(x=7, y=8))
+    assert result == (1, (7, 8))
+
+    # Empty list: no conversion
+    wrapper = make_kwargs_wrapper(target, ["a", "b"], map_dataclass_to_tuple=[])
+    cfg = Config(x=1, y=2)
+    result = wrapper(1, cfg)
+    assert result == (1, cfg)
+    assert result[1] is cfg  # not converted
+
+    # Works with make_kwargs_wrapper_from_signature
+    def source_func(a: int, cfg: Config) -> None:
+        pass
+
+    wrapper = make_kwargs_wrapper_from_signature(
+        target, inspect.signature(source_func), map_dataclass_to_tuple=["cfg"]
+    )
+    result = wrapper(1, Config(x=10, y=20))
+    assert result == (1, (10, 20))
