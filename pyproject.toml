@@ -260,7 +260,7 @@ extra-paths = ["python", "examples", "tests/python"]
 
 [tool.ty.src]
 include = ["python/tvm_ffi/**", "examples/**", "tests/python/**"]
-exclude = [".venv/**", "build/**", "dist/**"]
+exclude = [".venv/**", "build/**", "dist/**", "**/testdata/**"]
 
 [tool.ty.rules]
 unused-ignore-comment = "ignore"

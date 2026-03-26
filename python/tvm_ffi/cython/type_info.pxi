@@ -745,6 +745,17 @@ class TypeInfo:
             _register_py_methods(self.type_index, py_methods)
         self._read_back_methods()
 
+    def _register_py_attrs(self, py_attrs=None):
+        """Register class-level attributes as TypeAttr only (not TypeMethod).
+
+        Parameters
+        ----------
+        py_attrs : list[tuple[str, Any]] | None
+            Each entry is ``(name, value)``.
+        """
+        if py_attrs:
+            _register_py_attrs(self.type_index, py_attrs)
+
     def _read_back_methods(self):
         """Read methods from the C type table into self.methods.
 
@@ -1107,6 +1118,48 @@ cdef _register_py_methods(int32_t type_index, list py_methods):
         finally:
             if func_any.type_index >= kTVMFFIStaticObjectBegin and func_any.v_obj != NULL:
                 TVMFFIObjectDecRef(<TVMFFIObjectHandle>func_any.v_obj)
+
+
+cdef _register_py_attrs(int32_t type_index, list py_attrs):
+    """Register class-level attributes as TypeAttr only (no TypeMethod).
+
+    Parameters
+    ----------
+    type_index : int
+        The runtime type index of the type.
+    py_attrs : list[tuple[str, Any]]
+        Each entry is ``(name, value)``.
+    """
+    cdef TVMFFIAny val_any
+    cdef TVMFFIAny sentinel_any
+    cdef int c_api_ret_code
+    cdef ByteArrayArg name_arg
+
+    sentinel_any.type_index = kTVMFFINone
+    sentinel_any.v_int64 = 0
+
+    for name, value in py_attrs:
+        val_any.type_index = kTVMFFINone
+        val_any.v_int64 = 0
+        try:
+            name_arg = ByteArrayArg(c_str(name))
+
+            # Convert Python object -> TVMFFIAny
+            TVMFFIPyPyObjectToFFIAny(
+                TVMFFIPyArgSetterFactory_,
+                <PyObject*>value,
+                &val_any,
+                &c_api_ret_code,
+            )
+            CHECK_CALL(c_api_ret_code)
+
+            # Ensure type-attr column exists (sentinel: kTVMFFINone)
+            CHECK_CALL(TVMFFITypeRegisterAttr(kTVMFFINone, &name_arg.cdata, &sentinel_any))
+            # Register as TypeAttr
+            CHECK_CALL(TVMFFITypeRegisterAttr(type_index, &name_arg.cdata, &val_any))
+        finally:
+            if val_any.type_index >= kTVMFFIStaticObjectBegin and val_any.v_obj != NULL:
+                TVMFFIObjectDecRef(<TVMFFIObjectHandle>val_any.v_obj)
 
 
 def _member_method_wrapper(method_func: Callable[..., Any]) -> Callable[..., Any]:

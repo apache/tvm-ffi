@@ -63,6 +63,7 @@ inline ObjectPtr<Object> CreateEmptyObject(const TVMFFITypeInfo* type_info) {
   TVM_FFI_THROW(RuntimeError) << "Type `" << TypeIndexToTypeKey(type_info->type_index)
                               << "` does not support reflection creation"
                               << " (no native creator or __ffi_new__ type attr)";
+  TVM_FFI_UNREACHABLE();
 }
 
 /*!

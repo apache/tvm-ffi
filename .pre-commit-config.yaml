@@ -108,10 +108,6 @@ repos:
     rev: v0.11.0.1
     hooks:
       - id: shellcheck
-  - repo: https://github.com/DavidAnson/markdownlint-cli2
-    rev: v0.20.0
-    hooks:
-      - id: markdownlint-cli2
   - repo: https://github.com/rstcheck/rstcheck
     rev: v6.2.5
     hooks:

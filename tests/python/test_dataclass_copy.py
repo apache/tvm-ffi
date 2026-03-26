@@ -22,7 +22,6 @@ from __future__ import annotations
 import copy
 import itertools
 import pickle
-import sys
 from typing import Dict, List, Optional
 
 import pytest
@@ -31,8 +30,6 @@ import tvm_ffi.testing
 from tvm_ffi._ffi_api import DeepCopy
 from tvm_ffi.core import Object
 from tvm_ffi.dataclasses import py_class
-
-_needs_310 = pytest.mark.skipif(sys.version_info < (3, 10), reason="X | Y syntax requires 3.10+")
 
 _counter_pc = itertools.count()
 
