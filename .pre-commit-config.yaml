@@ -89,10 +89,6 @@ repos:
         args:
           - --config-file
           - .yamllint.yaml
-  - repo: https://github.com/ComPWA/taplo-pre-commit
-    rev: v0.9.3
-    hooks:
-      - id: taplo-format
   - repo: https://github.com/MarcoGorelli/cython-lint
     rev: v0.18.1
     hooks:
@@ -108,10 +104,6 @@ repos:
     rev: v0.11.0.1
     hooks:
       - id: shellcheck
-  - repo: https://github.com/DavidAnson/markdownlint-cli2
-    rev: v0.20.0
-    hooks:
-      - id: markdownlint-cli2
   - repo: https://github.com/rstcheck/rstcheck
     rev: v6.2.5
     hooks:

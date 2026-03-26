@@ -575,6 +575,12 @@ _FFI_TYPE_ATTR_NAMES: frozenset[str] = frozenset(
         "__s_hash__",
         "__data_to_json__",
         "__data_from_json__",
+        # IR printing (text printer dispatch)
+        "__ffi_text_print__",
+        # Per-trait print dispatch
+        "__ffi_traits_print__",
+        # IR semantic traits (non-callable object, registered as TypeAttr)
+        "__ffi_ir_traits__",
     }
 )
 
