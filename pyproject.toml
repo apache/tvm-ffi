@@ -75,7 +75,9 @@ docs = [
   "nbconvert",
   "nbsphinx",
   "nbstripout",
-  "sphinx",
+  # TODO: unpin when sphinx-toolbox fixes `from sphinx.ext.autodoc import logger` (removed in Sphinx 9)
+  # Blocked by: sphinx-toolbox/utils.py imports logger from sphinx.ext.autodoc (broken as of v4.1.2)
+  "sphinx<9",
   "sphinx-autobuild",
   "sphinx-book-theme",
   "sphinx-copybutton",
