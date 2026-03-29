@@ -62,6 +62,135 @@ cdef inline object make_ret_small_bytes(TVMFFIAny result):
     return bytearray_to_bytes(&bytes)
 
 
+cdef inline object _convert_seq_to_list(
+    TVMFFIObjectHandle chandle,
+    int32_t type_index,
+    const DLPackExchangeAPI* c_ctx_dlpack_api
+):
+    """Convert Array/List to Python list, recursively converting tensors."""
+    cdef TVMFFIObjectHandle size_func_handle
+    cdef TVMFFIObjectHandle getitem_func_handle
+    if type_index == kTVMFFIArray:
+        size_func_handle = (<CObject>_FFI_ARRAY_SIZE).chandle
+        getitem_func_handle = (<CObject>_FFI_ARRAY_GET_ITEM).chandle
+    else:
+        size_func_handle = (<CObject>_FFI_LIST_SIZE).chandle
+        getitem_func_handle = (<CObject>_FFI_LIST_GET_ITEM).chandle
+
+    cdef TVMFFIAny size_args[1]
+    cdef TVMFFIAny size_result
+    cdef TVMFFIAny getitem_args[2]
+    cdef TVMFFIAny elem_result
+    cdef list result = []
+    cdef int64_t i
+    cdef int64_t n
+    try:
+        # Get size
+        size_args[0].type_index = type_index
+        size_args[0].v_obj = <TVMFFIObject*>chandle
+        size_result.type_index = kTVMFFINone
+        size_result.v_int64 = 0
+        CHECK_CALL(TVMFFIFunctionCall(size_func_handle, size_args, 1, &size_result))
+        n = size_result.v_int64
+
+        if n == 0:
+            return result
+
+        # Get each element and convert
+        getitem_args[0].type_index = type_index
+        getitem_args[0].v_obj = <TVMFFIObject*>chandle
+        for i in range(n):
+            getitem_args[1].type_index = kTVMFFIInt
+            getitem_args[1].v_int64 = i
+            elem_result.type_index = kTVMFFINone
+            elem_result.v_int64 = 0
+            CHECK_CALL(TVMFFIFunctionCall(getitem_func_handle, getitem_args, 2, &elem_result))
+            result.append(make_ret(elem_result, c_ctx_dlpack_api))
+    finally:
+        # Always release the container reference, even on exception
+        TVMFFIObjectDecRef(chandle)
+    return result
+
+
+cdef inline object _convert_map_to_dict(
+    TVMFFIObjectHandle chandle,
+    int32_t type_index,
+    const DLPackExchangeAPI* c_ctx_dlpack_api
+):
+    """Convert Map/Dict to Python dict, recursively converting tensors."""
+    cdef TVMFFIObjectHandle size_func_handle
+    cdef TVMFFIObjectHandle iter_func_handle
+    if type_index == kTVMFFIMap:
+        size_func_handle = (<CObject>_FFI_MAP_SIZE).chandle
+        iter_func_handle = (<CObject>_FFI_MAP_FORWARD_ITER).chandle
+    else:
+        size_func_handle = (<CObject>_FFI_DICT_SIZE).chandle
+        iter_func_handle = (<CObject>_FFI_DICT_FORWARD_ITER).chandle
+
+    cdef TVMFFIAny size_args[1]
+    cdef TVMFFIAny size_result
+    cdef TVMFFIAny iter_args[1]
+    cdef TVMFFIAny iter_result
+    cdef TVMFFIObjectHandle iter_handle = NULL
+    cdef TVMFFIAny cmd[1]
+    cdef TVMFFIAny key_result
+    cdef TVMFFIAny val_result
+    cdef TVMFFIAny advance_result
+    cdef dict result = {}
+    cdef int64_t i
+    cdef int64_t n
+    try:
+        # Get size
+        size_args[0].type_index = type_index
+        size_args[0].v_obj = <TVMFFIObject*>chandle
+        size_result.type_index = kTVMFFINone
+        size_result.v_int64 = 0
+        CHECK_CALL(TVMFFIFunctionCall(size_func_handle, size_args, 1, &size_result))
+        n = size_result.v_int64
+
+        if n == 0:
+            return result
+
+        # Get forward iterator functor
+        iter_args[0].type_index = type_index
+        iter_args[0].v_obj = <TVMFFIObject*>chandle
+        iter_result.type_index = kTVMFFINone
+        iter_result.v_int64 = 0
+        CHECK_CALL(TVMFFIFunctionCall(iter_func_handle, iter_args, 1, &iter_result))
+        iter_handle = <TVMFFIObjectHandle>iter_result.v_obj
+
+        for i in range(n):
+            # Get key
+            cmd[0].type_index = kTVMFFIInt
+            cmd[0].v_int64 = 0
+            key_result.type_index = kTVMFFINone
+            key_result.v_int64 = 0
+            CHECK_CALL(TVMFFIFunctionCall(iter_handle, cmd, 1, &key_result))
+            key = make_ret(key_result, c_ctx_dlpack_api)
+
+            # Get value
+            cmd[0].v_int64 = 1
+            val_result.type_index = kTVMFFINone
+            val_result.v_int64 = 0
+            CHECK_CALL(TVMFFIFunctionCall(iter_handle, cmd, 1, &val_result))
+            val = make_ret(val_result, c_ctx_dlpack_api)
+
+            result[key] = val
+
+            # Skipped after the last entry since we have no more reads to do.
+            if i < n - 1:
+                cmd[0].v_int64 = 2
+                advance_result.type_index = kTVMFFINone
+                advance_result.v_int64 = 0
+                CHECK_CALL(TVMFFIFunctionCall(iter_handle, cmd, 1, &advance_result))
+    finally:
+        # Always release iterator (if acquired) and container references
+        if iter_handle != NULL:
+            TVMFFIObjectDecRef(iter_handle)
+        TVMFFIObjectDecRef(chandle)
+    return result
+
+
 cdef inline object make_ret(TVMFFIAny result, const DLPackExchangeAPI* c_ctx_dlpack_api = NULL):
     """convert result to return value."""
     cdef int32_t type_index
@@ -72,6 +201,13 @@ cdef inline object make_ret(TVMFFIAny result, const DLPackExchangeAPI* c_ctx_dlp
     elif type_index == kTVMFFIOpaquePyObject:
         return make_ret_opaque_object(result)
     elif type_index >= kTVMFFIStaticObjectBegin:
+        if c_ctx_dlpack_api != NULL:
+            if type_index == kTVMFFIArray or type_index == kTVMFFIList:
+                return _convert_seq_to_list(
+                    <TVMFFIObjectHandle>result.v_obj, type_index, c_ctx_dlpack_api)
+            elif type_index == kTVMFFIMap or type_index == kTVMFFIDict:
+                return _convert_map_to_dict(
+                    <TVMFFIObjectHandle>result.v_obj, type_index, c_ctx_dlpack_api)
         return make_ret_object(result)
     # the following code should be optimized to switch case
     if type_index == kTVMFFINone:
@@ -1147,3 +1283,11 @@ cdef Function _OBJECT_FROM_JSON_GRAPH_STR = _get_global_func("ffi.FromJSONGraphS
 cdef Function _OBJECT_TO_JSON_GRAPH_STR = _get_global_func("ffi.ToJSONGraphString", True)
 cdef Function _CONSTRUCTOR_ARRAY = _get_global_func("ffi.Array", True)
 cdef Function _CONSTRUCTOR_MAP = _get_global_func("ffi.Map", True)
+cdef Function _FFI_ARRAY_GET_ITEM = _get_global_func("ffi.ArrayGetItem", True)
+cdef Function _FFI_ARRAY_SIZE = _get_global_func("ffi.ArraySize", True)
+cdef Function _FFI_LIST_GET_ITEM = _get_global_func("ffi.ListGetItem", True)
+cdef Function _FFI_LIST_SIZE = _get_global_func("ffi.ListSize", True)
+cdef Function _FFI_MAP_SIZE = _get_global_func("ffi.MapSize", True)
+cdef Function _FFI_MAP_FORWARD_ITER = _get_global_func("ffi.MapForwardIterFunctor", True)
+cdef Function _FFI_DICT_SIZE = _get_global_func("ffi.DictSize", True)
+cdef Function _FFI_DICT_FORWARD_ITER = _get_global_func("ffi.DictForwardIterFunctor", True)
