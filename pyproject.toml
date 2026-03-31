@@ -60,7 +60,7 @@ dev = [
   "ipdb",
   "ipython",
   "cython>=3.0",
-  "cmake",
+  "cmake!=4.3.1",
   "scikit-build-core",
   "tomli",
   "setuptools-scm",
