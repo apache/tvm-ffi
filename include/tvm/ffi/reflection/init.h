@@ -62,6 +62,15 @@ TObjectRef FFIConvertFromAnyViewToObjectRef(AnyView input) {
                            << "` to `" << TypeTraits<TObjectRef>::TypeStr() << "`";
 }
 
+/*!
+ * \brief Return the lazily initialized KWARGS sentinel object.
+ */
+inline const ObjectRef& GetKwargsSentinel() {
+  static ObjectRef kwargs_sentinel =
+      Function::GetGlobalRequired("ffi.GetKwargsObject")().cast<ObjectRef>();
+  return kwargs_sentinel;
+}
+
 }  // namespace details
 
 /*!
@@ -118,12 +127,9 @@ inline Function MakeInit(int32_t type_index) {
   std::stable_partition(info->pos_indices.begin(), info->pos_indices.end(),
                         [&](size_t idx) { return !info->all_fields[idx].has_default; });
 
-  // Eagerly resolve the KWARGS sentinel via global function registry.
-  ObjectRef kwargs_sentinel =
-      Function::GetGlobalRequired("ffi.GetKwargsObject")().cast<ObjectRef>();
-
   return Function::FromPacked(
-      [info, kwargs_sentinel, type_info](PackedArgs args, Any* rv) {
+      [info, type_info](PackedArgs args, Any* rv) {
+        const ObjectRef& kwargs_sentinel = details::GetKwargsSentinel();
         // ---- 1. Create object via CreateEmptyObject --------------------------
         ObjectPtr<Object> obj_ptr = CreateEmptyObject(type_info);
 
