@@ -62,15 +62,52 @@ cdef inline object make_ret_small_bytes(TVMFFIAny result):
     return bytearray_to_bytes(&bytes)
 
 
-cdef inline void _scan_container_for_stream(
+cdef inline bint _check_elem_for_stream(
+    TVMFFIAny* elem_result,
+    const DLPackExchangeAPI* api,
+    TVMFFIPyCallContext* ctx
+) noexcept:
+    """Check a single element for non-CPU tensor; set stream if found.
+
+    Returns True if a non-CPU tensor was found and stream was set.
+    Releases the element ref (for object types) in all cases.
+    """
+    cdef DLTensor* dltensor
+    cdef void* stream = NULL
+    cdef int32_t ti = elem_result.type_index
+
+    if ti == kTVMFFITensor:
+        dltensor = TVMFFITensorGetDLTensorPtr(<TVMFFIObjectHandle>elem_result.v_obj)
+        if dltensor.device.device_type != kDLCPU:
+            ctx.device_type = dltensor.device.device_type
+            ctx.device_id = dltensor.device.device_id
+            api.current_work_stream(
+                dltensor.device.device_type,
+                dltensor.device.device_id,
+                &stream)
+            ctx.stream = <TVMFFIStreamHandle>stream
+            TVMFFIObjectDecRef(<TVMFFIObjectHandle>elem_result.v_obj)
+            return True
+        TVMFFIObjectDecRef(<TVMFFIObjectHandle>elem_result.v_obj)
+    elif (ti == kTVMFFIArray or ti == kTVMFFIList
+          or ti == kTVMFFIMap or ti == kTVMFFIDict):
+        _scan_container_for_stream(
+            <TVMFFIObjectHandle>elem_result.v_obj, ti, api, ctx)
+        TVMFFIObjectDecRef(<TVMFFIObjectHandle>elem_result.v_obj)
+        if ctx.device_type != -1:
+            return True
+    elif ti >= kTVMFFIStaticObjectBegin:
+        TVMFFIObjectDecRef(<TVMFFIObjectHandle>elem_result.v_obj)
+    return False
+
+
+cdef inline void _scan_seq_for_stream(
     TVMFFIObjectHandle chandle,
     int32_t type_index,
     const DLPackExchangeAPI* api,
     TVMFFIPyCallContext* ctx
 ) noexcept:
-    """Scan a container for the first non-CPU tensor to set stream context.
-    Only scans Array and List; Map/Dict are skipped (values require iterator).
-    """
+    """Scan an Array or List for the first non-CPU tensor."""
     cdef TVMFFIObjectHandle size_func_handle
     cdef TVMFFIObjectHandle getitem_func_handle
     cdef TVMFFIAny size_args[1]
@@ -78,19 +115,14 @@ cdef inline void _scan_container_for_stream(
     cdef TVMFFIAny getitem_args[2]
     cdef TVMFFIAny elem_result
     cdef int64_t n, i
-    cdef DLTensor* dltensor
-    cdef void* stream = NULL
 
     if type_index == kTVMFFIArray:
         size_func_handle = (<CObject>_FFI_ARRAY_SIZE).chandle
         getitem_func_handle = (<CObject>_FFI_ARRAY_GET_ITEM).chandle
-    elif type_index == kTVMFFIList:
+    else:
         size_func_handle = (<CObject>_FFI_LIST_SIZE).chandle
         getitem_func_handle = (<CObject>_FFI_LIST_GET_ITEM).chandle
-    else:
-        return
 
-    # Get container size
     size_args[0].type_index = type_index
     size_args[0].v_obj = <TVMFFIObject*>chandle
     size_result.type_index = kTVMFFINone
@@ -112,24 +144,94 @@ cdef inline void _scan_container_for_stream(
         elem_result.v_int64 = 0
         if TVMFFIFunctionCall(getitem_func_handle, getitem_args, 2, &elem_result) != 0:
             return
+        if _check_elem_for_stream(&elem_result, api, ctx):
+            return
 
-        if elem_result.type_index == kTVMFFITensor:
-            dltensor = TVMFFITensorGetDLTensorPtr(<TVMFFIObjectHandle>elem_result.v_obj)
-            if dltensor.device.device_type != kDLCPU:
-                # Query stream while tensor is still alive (before DecRef)
-                ctx.device_type = dltensor.device.device_type
-                ctx.device_id = dltensor.device.device_id
-                api.current_work_stream(
-                    dltensor.device.device_type,
-                    dltensor.device.device_id,
-                    &stream)
-                ctx.stream = <TVMFFIStreamHandle>stream
-                TVMFFIObjectDecRef(<TVMFFIObjectHandle>elem_result.v_obj)
+
+cdef inline void _scan_map_for_stream(
+    TVMFFIObjectHandle chandle,
+    int32_t type_index,
+    const DLPackExchangeAPI* api,
+    TVMFFIPyCallContext* ctx
+) noexcept:
+    """Scan a Map or Dict's values for the first non-CPU tensor."""
+    cdef TVMFFIObjectHandle size_func_handle
+    cdef TVMFFIObjectHandle iter_func_handle
+    cdef TVMFFIAny size_args[1]
+    cdef TVMFFIAny size_result
+    cdef TVMFFIAny iter_args[1]
+    cdef TVMFFIAny iter_result
+    cdef TVMFFIObjectHandle iter_handle = NULL
+    cdef TVMFFIAny cmd[1]
+    cdef TVMFFIAny val_result
+    cdef TVMFFIAny advance_result
+    cdef int64_t n, i
+
+    if type_index == kTVMFFIMap:
+        size_func_handle = (<CObject>_FFI_MAP_SIZE).chandle
+        iter_func_handle = (<CObject>_FFI_MAP_FORWARD_ITER).chandle
+    else:
+        size_func_handle = (<CObject>_FFI_DICT_SIZE).chandle
+        iter_func_handle = (<CObject>_FFI_DICT_FORWARD_ITER).chandle
+
+    size_args[0].type_index = type_index
+    size_args[0].v_obj = <TVMFFIObject*>chandle
+    size_result.type_index = kTVMFFINone
+    size_result.v_int64 = 0
+    if TVMFFIFunctionCall(size_func_handle, size_args, 1, &size_result) != 0:
+        return
+
+    n = size_result.v_int64
+    if n == 0:
+        return
+
+    # Get forward iterator
+    iter_args[0].type_index = type_index
+    iter_args[0].v_obj = <TVMFFIObject*>chandle
+    iter_result.type_index = kTVMFFINone
+    iter_result.v_int64 = 0
+    if TVMFFIFunctionCall(iter_func_handle, iter_args, 1, &iter_result) != 0:
+        return
+    iter_handle = <TVMFFIObjectHandle>iter_result.v_obj
+
+    for i in range(n):
+        # Get value (command=1)
+        cmd[0].type_index = kTVMFFIInt
+        cmd[0].v_int64 = 1
+        val_result.type_index = kTVMFFINone
+        val_result.v_int64 = 0
+        if TVMFFIFunctionCall(iter_handle, cmd, 1, &val_result) != 0:
+            TVMFFIObjectDecRef(iter_handle)
+            return
+        if _check_elem_for_stream(&val_result, api, ctx):
+            TVMFFIObjectDecRef(iter_handle)
+            return
+        # Advance (command=2), skip after last entry
+        if i < n - 1:
+            cmd[0].v_int64 = 2
+            advance_result.type_index = kTVMFFINone
+            advance_result.v_int64 = 0
+            if TVMFFIFunctionCall(iter_handle, cmd, 1, &advance_result) != 0:
+                TVMFFIObjectDecRef(iter_handle)
                 return
-            TVMFFIObjectDecRef(<TVMFFIObjectHandle>elem_result.v_obj)
-        elif elem_result.type_index >= kTVMFFIStaticObjectBegin:
-            TVMFFIObjectDecRef(<TVMFFIObjectHandle>elem_result.v_obj)
-        # Primitive types (int, float, str, etc.) have no ref to release
+
+    TVMFFIObjectDecRef(iter_handle)
+
+
+cdef inline void _scan_container_for_stream(
+    TVMFFIObjectHandle chandle,
+    int32_t type_index,
+    const DLPackExchangeAPI* api,
+    TVMFFIPyCallContext* ctx
+) noexcept:
+    """Scan a container for the first non-CPU tensor to set stream context.
+
+    Best-effort: silently returns on any FFI error (equivalent to no stream set).
+    """
+    if type_index == kTVMFFIArray or type_index == kTVMFFIList:
+        _scan_seq_for_stream(chandle, type_index, api, ctx)
+    elif type_index == kTVMFFIMap or type_index == kTVMFFIDict:
+        _scan_map_for_stream(chandle, type_index, api, ctx)
 
 
 cdef inline object make_ret(TVMFFIAny result, const DLPackExchangeAPI* c_ctx_dlpack_api = NULL):
@@ -1247,3 +1349,7 @@ cdef Function _FFI_ARRAY_GET_ITEM = _get_global_func("ffi.ArrayGetItem", True)
 cdef Function _FFI_ARRAY_SIZE = _get_global_func("ffi.ArraySize", True)
 cdef Function _FFI_LIST_GET_ITEM = _get_global_func("ffi.ListGetItem", True)
 cdef Function _FFI_LIST_SIZE = _get_global_func("ffi.ListSize", True)
+cdef Function _FFI_MAP_SIZE = _get_global_func("ffi.MapSize", True)
+cdef Function _FFI_MAP_FORWARD_ITER = _get_global_func("ffi.MapForwardIterFunctor", True)
+cdef Function _FFI_DICT_SIZE = _get_global_func("ffi.DictSize", True)
+cdef Function _FFI_DICT_FORWARD_ITER = _get_global_func("ffi.DictForwardIterFunctor", True)

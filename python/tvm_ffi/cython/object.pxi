@@ -173,6 +173,21 @@ cdef class CContainerBase(CObject):
     returned container can automatically convert ``ffi.Tensor`` to
     the framework tensor type (e.g. ``torch.Tensor``).
     """
+    # Raw pointer to the DLPack exchange API struct.  Not ref-counted.
+    #
+    # Lifetime safety: the two sources of this pointer are both
+    # effectively process-lifetime:
+    #
+    # 1. __dlpack_c_exchange_api__ (e.g. torch.Tensor) — points to a
+    #    static struct in the framework's C++ runtime.  The source
+    #    type is kept alive by _DISPATCH_TYPE_KEEP_ALIVE (set in
+    #    TVMFFIPyArgSetterFactory_), which prevents module unloading.
+    #
+    # 2. GetTorchFallbackExchangeAPI() — returns the address of a
+    #    module-level Cython static; lives for the entire process.
+    #
+    # The DLPack spec also mandates that DLPackExchangeAPI* must stay
+    # alive throughout the lifetime of the process (dlpack.h line 600).
     cdef const DLPackExchangeAPI* _dlpack_exchange_api
 
     def __cinit__(self):
