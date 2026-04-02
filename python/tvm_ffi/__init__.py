@@ -66,7 +66,7 @@ if TYPE_CHECKING or not _is_config_mode():
         init_ffi_api,
     )
     from ._dtype import dtype
-    from .core import Object, ObjectConvertible, Function, CAny
+    from .core import Object, ObjectConvertible, Function, CAny, CContainerBase
     from ._convert import convert
     from .error import register_error
     from ._tensor import Device, device, DLDeviceType

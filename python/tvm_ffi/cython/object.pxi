@@ -166,6 +166,19 @@ cdef class CObject:
         self.chandle = chandle
 
 
+cdef class CContainerBase(CObject):
+    """Cython base for container types that support lazy DLPack conversion.
+
+    Stores a ``DLPackExchangeAPI*`` tag so that element access on a
+    returned container can automatically convert ``ffi.Tensor`` to
+    the framework tensor type (e.g. ``torch.Tensor``).
+    """
+    cdef const DLPackExchangeAPI* _dlpack_exchange_api
+
+    def __cinit__(self):
+        self._dlpack_exchange_api = NULL
+
+
 class _ObjectSlotsMeta(ABCMeta):
     def __new__(mcls, name: str, bases: tuple[type, ...], ns: dict[str, Any], **kwargs: Any):
         if "__slots__" not in ns:
