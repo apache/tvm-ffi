@@ -49,31 +49,19 @@ bool FindFirstNonCPUDevice(const Any& elem, DLDevice* out) {
       }
       break;
     }
-    case TypeIndex::kTVMFFIArray: {
-      const auto* arr = elem.as<ArrayObj>();
-      for (auto it = arr->begin(); it != arr->end(); ++it) {
-        if (FindFirstNonCPUDevice(*it, out)) return true;
-      }
-      break;
-    }
+    case TypeIndex::kTVMFFIArray:
     case TypeIndex::kTVMFFIList: {
-      const auto* lst = elem.as<ListObj>();
-      for (auto it = lst->begin(); it != lst->end(); ++it) {
-        if (FindFirstNonCPUDevice(*it, out)) return true;
+      const auto* seq = elem.as<SeqBaseObj>();
+      for (const auto& it : *seq) {
+        if (FindFirstNonCPUDevice(it, out)) return true;
       }
       break;
     }
-    case TypeIndex::kTVMFFIMap: {
-      const auto* map = elem.as<MapObj>();
-      for (auto it = map->begin(); it != map->end(); ++it) {
-        if (FindFirstNonCPUDevice((*it).second, out)) return true;
-      }
-      break;
-    }
+    case TypeIndex::kTVMFFIMap:
     case TypeIndex::kTVMFFIDict: {
-      const auto* dict = elem.as<DictObj>();
-      for (auto it = dict->begin(); it != dict->end(); ++it) {
-        if (FindFirstNonCPUDevice((*it).second, out)) return true;
+      const auto* map = elem.as<MapBaseObj>();
+      for (const auto& it : *map) {
+        if (FindFirstNonCPUDevice(it.second, out)) return true;
       }
       break;
     }

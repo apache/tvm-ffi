@@ -178,7 +178,7 @@ cdef int TVMFFIPyArgSetterContainerObject_(
             CHECK_CALL(TVMFFIFunctionCall(
                 (<CObject>_FFI_CONTAINER_FIND_FIRST_NON_CPU_DEVICE).chandle,
                 scan_args, 1, &scan_result))
-            if scan_result.v_device.device_type != kDLCPU:
+            if scan_result.type_index == kTVMFFIDevice and scan_result.v_device.device_type != kDLCPU:
                 ctx.device_type = scan_result.v_device.device_type
                 ctx.device_id = scan_result.v_device.device_id
                 api.current_work_stream(
