@@ -60,7 +60,7 @@ dev = [
   "ipdb",
   "ipython",
   "cython>=3.0",
-  "cmake!=4.3.1",
+  "cmake",
   "scikit-build-core",
   "tomli",
   "setuptools-scm",
@@ -283,6 +283,9 @@ allowed-unresolved-imports = [
   "cuda.bindings.*",
   "torch_c_dlpack_ext",
 ]
+
+[tool.uv]
+exclude-newer = "30 days"
 
 [tool.uv.dependency-groups]
 docs = { requires-python = ">=3.13" }
