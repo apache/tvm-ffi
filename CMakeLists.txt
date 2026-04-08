@@ -86,8 +86,6 @@ set(_tvm_ffi_extra_objs_sources
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/extra/library_module_dynamic_lib.cc"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/extra/env_context.cc"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/extra/env_c_api.cc"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/extra/pyast_printer.cc"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/extra/pyast_trait_print.cc"
 )
 if (TVM_FFI_USE_EXTRA_CXX_API)
   list(APPEND _tvm_ffi_objs_sources ${_tvm_ffi_extra_objs_sources})
@@ -152,8 +150,6 @@ if (MSVC)
   target_link_libraries(tvm_ffi_objs PRIVATE DbgHelp.lib)
   target_link_libraries(tvm_ffi_shared PRIVATE DbgHelp.lib)
   target_link_libraries(tvm_ffi_static PRIVATE DbgHelp.lib)
-  # /bigobj: printer.cc exceeds default section limit
-  target_compile_options(tvm_ffi_objs PRIVATE /bigobj)
   # produce pdb file
   target_link_options(tvm_ffi_shared PRIVATE /DEBUG)
 endif ()

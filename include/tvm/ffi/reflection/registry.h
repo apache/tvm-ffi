@@ -800,24 +800,6 @@ class ObjectDef : public ReflectionDefBase {
   }
 
   /*!
-   * \brief Register an IR semantic trait (__ffi_ir_traits__) for this type.
-   * \tparam TraitType The trait object type (e.g. ir::traits::BinOpObj).
-   * \tparam Args Constructor argument types.
-   * \param args Arguments forwarded to make_object<TraitType>(...).
-   * \return Reference to this ObjectDef for chaining.
-   */
-  template <typename TraitType, typename... Args>
-  ObjectDef& def_ir_traits(Args&&... args) {
-    static const char kName[] = "__ffi_ir_traits__";
-    TVMFFIByteArray name_arr = {kName, sizeof(kName) - 1};
-    ObjectRef trait(make_object<TraitType>(std::forward<Args>(args)...));
-    Any val(std::move(trait));
-    TVMFFIAny* raw = reinterpret_cast<TVMFFIAny*>(&val);
-    TVM_FFI_CHECK_SAFE_CALL(TVMFFITypeRegisterAttr(type_index_, &name_arr, raw));
-    return *this;
-  }
-
-  /*!
    * \brief Define a static method.
    *
    * \tparam Func The function type.

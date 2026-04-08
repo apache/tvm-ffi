@@ -290,12 +290,7 @@ struct TypeTraits<Int, std::enable_if_t<std::is_integral_v<Int>>> : public TypeT
     }
     result->type_index = TypeIndex::kTVMFFIInt;
     result->zero_padding = 0;
-    // Cast through unsigned char for signed char to avoid bugprone-signed-char-misuse
-    if constexpr (std::is_same_v<std::remove_cv_t<Int>, signed char>) {
-      result->v_int64 = static_cast<int64_t>(static_cast<unsigned char>(src));
-    } else {
-      result->v_int64 = static_cast<int64_t>(src);
-    }
+    result->v_int64 = static_cast<int64_t>(src);
   }
 
   TVM_FFI_INLINE static void MoveToAny(Int src, TVMFFIAny* result) { CopyToAnyView(src, result); }

@@ -60,7 +60,6 @@ TObjectRef FFIConvertFromAnyViewToObjectRef(AnyView input) {
   }
   TVM_FFI_THROW(TypeError) << "Cannot cast from `" << TypeIndexToTypeKey(input_pod.type_index)
                            << "` to `" << TypeTraits<TObjectRef>::TypeStr() << "`";
-  TVM_FFI_UNREACHABLE();
 }
 
 /*!

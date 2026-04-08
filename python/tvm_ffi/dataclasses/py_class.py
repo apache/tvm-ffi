@@ -226,23 +226,6 @@ def _collect_py_methods(cls: type) -> list[tuple[str, Any, bool]] | None:
     return methods if methods else None
 
 
-#: Class-level attributes that ``@py_class`` registers as TypeAttr
-#: (via ``TVMFFITypeRegisterAttr``) but NOT as TypeMethod.
-_FFI_RECOGNIZED_ATTRS: frozenset[str] = frozenset({"__ffi_ir_traits__"})
-
-
-def _collect_py_attrs(cls: type) -> list[tuple[str, Any]] | None:
-    """Extract recognized FFI class attributes (non-methods).
-
-    Returns a list of ``(name, value)`` tuples, or ``None`` if empty.
-    """
-    attrs: list[tuple[str, Any]] = []
-    for name in _FFI_RECOGNIZED_ATTRS:
-        if name in cls.__dict__:
-            attrs.append((name, cls.__dict__[name]))
-    return attrs if attrs else None
-
-
 def _phase2_register_fields(
     cls: type,
     type_info: Any,
@@ -266,15 +249,12 @@ def _phase2_register_fields(
 
     own_fields = _collect_own_fields(cls, hints, params["kw_only"])
     py_methods = _collect_py_methods(cls)
-    py_attrs = _collect_py_attrs(cls)
 
     # Register fields and type-level structural eq/hash kind with the C layer.
     structure_kind = _STRUCTURE_KIND_MAP.get(params.get("structural_eq"))
     type_info._register_fields(own_fields, structure_kind)
     # Register user-defined dunder methods and read back system-generated ones.
     type_info._register_py_methods(py_methods)
-    # Register recognized class-level attributes as TypeAttr.
-    type_info._register_py_attrs(py_attrs)
     _add_class_attrs(cls, type_info)
 
     # Remove deferred __init__ and restore user-defined __init__ if saved
@@ -416,8 +396,6 @@ _FFI_RECOGNIZED_METHODS: frozenset[str] = frozenset(
         # Serialization (ToJSONGraph, FromJSONGraph)
         "__data_to_json__",
         "__data_from_json__",
-        # IR printing (text printer dispatch)
-        "__ffi_text_print__",
     }
 )
 

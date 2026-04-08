@@ -40,6 +40,9 @@ from tvm_ffi.core import (
 # Python 3.9+ supports list[int], dict[str, int], tuple[int, ...] at runtime.
 # On 3.8, these raise TypeError("'type' object is not subscriptable").
 _PY39 = sys.version_info >= (3, 9)
+requires_py39 = pytest.mark.skipif(
+    not _PY39, reason="builtin generic subscripts require Python 3.9+"
+)
 from tvm_ffi.testing import (
     TestIntPair,
     TestObjectBase,
@@ -48,7 +51,6 @@ from tvm_ffi.testing import (
     _TestCxxClassDerived,
     _TestCxxClassDerivedDerived,
 )
-from tvm_ffi.testing.testing import requires_py39, requires_py310
 
 
 # ---------------------------------------------------------------------------
@@ -4297,7 +4299,7 @@ class TestFromAnnotationOptional:
         """Union[int, None] normalizes to Optional[int]."""
         assert A(Union[int, None]) == S("Optional", S("int"))
 
-    @requires_py310
+    @pytest.mark.skipif(sys.version_info < (3, 10), reason="X | Y requires 3.10+")
     def test_pipe_syntax(self) -> None:
         """Int | None."""
         assert A(eval("int | None")) == S("Optional", S("int"))
@@ -4314,7 +4316,7 @@ class TestFromAnnotationUnion:
         """Nested unions flatten to a single Union schema."""
         assert A(Union[int, Union[str, float]]) == S("Union", S("int"), S("str"), S("float"))
 
-    @requires_py310
+    @pytest.mark.skipif(sys.version_info < (3, 10), reason="X | Y requires 3.10+")
     def test_pipe_syntax(self) -> None:
         """Int | str."""
         assert A(eval("int | str")) == S("Union", S("int"), S("str"))

@@ -24,6 +24,7 @@ import gc
 import inspect
 import itertools
 import math
+import sys
 from typing import Any, ClassVar, Dict, List, Optional
 
 import pytest
@@ -34,7 +35,8 @@ from tvm_ffi.core import MISSING, Object, TypeInfo, TypeSchema, _to_py_class_val
 from tvm_ffi.dataclasses import KW_ONLY, Field, field, py_class
 from tvm_ffi.registry import _add_class_attrs, _install_dataclass_dunders
 from tvm_ffi.testing import TestObjectBase as _TestObjectBase
-from tvm_ffi.testing.testing import requires_py310 as _needs_310
+
+_needs_310 = pytest.mark.skipif(sys.version_info < (3, 10), reason="X | Y syntax requires 3.10+")
 
 # ---------------------------------------------------------------------------
 # Unique type key generator (avoids collisions across tests)
