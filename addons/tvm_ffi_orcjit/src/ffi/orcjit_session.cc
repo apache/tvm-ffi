@@ -464,16 +464,14 @@ class DLLImportDefinitionGenerator : public llvm::orc::DefinitionGenerator {
  */
 class GOTPCRELXFixPlugin : public llvm::orc::ObjectLinkingLayer::Plugin {
  public:
-  void modifyPassConfig(llvm::orc::MaterializationResponsibility& MR,
-                        llvm::jitlink::LinkGraph& G,
+  void modifyPassConfig(llvm::orc::MaterializationResponsibility& MR, llvm::jitlink::LinkGraph& G,
                         llvm::jitlink::PassConfiguration& Config) override {
     Config.PreFixupPasses.emplace_back(fixBrokenGOTPCRELXRelaxation);
   }
   llvm::Error notifyFailed(llvm::orc::MaterializationResponsibility& MR) override {
     return llvm::Error::success();
   }
-  llvm::Error notifyRemovingResources(llvm::orc::JITDylib& JD,
-                                      llvm::orc::ResourceKey K) override {
+  llvm::Error notifyRemovingResources(llvm::orc::JITDylib& JD, llvm::orc::ResourceKey K) override {
     return llvm::Error::success();
   }
   void notifyTransferringResources(llvm::orc::JITDylib& JD, llvm::orc::ResourceKey DstKey,
