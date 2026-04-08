@@ -31,8 +31,11 @@
 #include <tvm/ffi/string.h>
 
 #include <atomic>
+#include <memory>
 #include <string>
 #include <unordered_map>
+
+#include "orcjit_arena_mm.h"
 
 namespace tvm {
 namespace ffi {
@@ -52,7 +55,8 @@ class ORCJITExecutionSessionObj : public Object {
   /*!
    * \brief Default constructor (for make_object)
    */
-  explicit ORCJITExecutionSessionObj(const std::string& orc_rt_path = "");
+  explicit ORCJITExecutionSessionObj(const std::string& orc_rt_path = "",
+                                     int64_t arena_size_bytes = 0);
 
   /*!
    * \brief Create a new DynamicLibrary (JITDylib) in this session
@@ -95,6 +99,8 @@ class ORCJITExecutionSessionObj : public Object {
   void AddPendingDeinitializer(llvm::orc::JITDylib* jd, const InitFiniEntry& entry);
 
  private:
+  /*! \brief Arena memory manager — must be declared before jit_ for destruction order */
+  std::unique_ptr<ArenaJITLinkMemoryManager> arena_mm_;
   /*! \brief The LLVM ORC JIT instance */
   std::unique_ptr<llvm::orc::LLJIT> jit_;
 
@@ -116,7 +122,8 @@ class ORCJITExecutionSession : public ObjectRef {
    * \brief Create a new ExecutionSession
    * \return The created execution session instance
    */
-  explicit ORCJITExecutionSession(const std::string& orc_rt_path = "");
+  explicit ORCJITExecutionSession(const std::string& orc_rt_path = "",
+                                  int64_t arena_size_bytes = 0);
   // Required: define object reference methods
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(ORCJITExecutionSession, ObjectRef,
                                                 ORCJITExecutionSessionObj);

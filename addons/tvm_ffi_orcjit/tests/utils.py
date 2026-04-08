@@ -183,6 +183,17 @@ def build_test_objects(out_dir: Path | None = None) -> Path:
                 c_outdir=out_dir / "c-gcc",
                 cc_outdir=out_dir / "cc-gcc",
             )
+            # PIE variant: -fpie forces R_X86_64_PC32 for hidden-visibility
+            # externals like __dso_handle (instead of GOTPCRELX with -fPIC).
+            # Used to reproduce __dso_handle Delta32 overflow on x86_64.
+            _build_variant(
+                "GCC (PIE)",
+                cc=None,
+                cxx="g++",
+                extra_cflags=[*extra, "-fpie"],
+                c_outdir=out_dir / "c-gcc-pie",
+                cc_outdir=out_dir / "cc-gcc-pie",
+            )
         if system == "Darwin" and Path("/usr/bin/clang").exists():
             _build_variant(
                 "Apple Clang",

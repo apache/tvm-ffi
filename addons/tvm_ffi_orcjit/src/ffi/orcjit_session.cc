@@ -24,6 +24,7 @@
 
 #include "orcjit_session.h"
 
+#include <llvm/ADT/DenseMap.h>
 #include <llvm/ExecutionEngine/JITLink/JITLink.h>
 #include <llvm/ExecutionEngine/JITLink/x86_64.h>
 #include <llvm/ExecutionEngine/Orc/AbsoluteSymbols.h>
@@ -34,6 +35,7 @@
 #include <llvm/ExecutionEngine/Orc/Shared/ExecutorSymbolDef.h>
 #include <llvm/Support/DynamicLibrary.h>
 #include <llvm/Support/Error.h>
+#include <llvm/Support/Process.h>
 #include <llvm/Support/TargetSelect.h>
 #include <llvm/TargetParser/SubtargetFeature.h>
 #include <tvm/ffi/cast.h>
@@ -43,6 +45,8 @@
 
 #include <cstddef>
 #include <cstring>
+
+#include "orcjit_arena_mm.h"
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -441,26 +445,188 @@ class DLLImportDefinitionGenerator : public llvm::orc::DefinitionGenerator {
 };
 #endif  // _WIN32
 
-ORCJITExecutionSessionObj::ORCJITExecutionSessionObj(const std::string& orc_rt_path)
+#if defined(__linux__) && (defined(__x86_64__) || defined(_M_X64))
+/*! \brief Fix LLVM JITLink GOTPCRELX relaxation bug (x86_64).
+ *
+ * optimizeGOTAndStubAccesses() relaxes `call *foo@GOTPCREL(%rip)` (ff 15)
+ * to `addr32 call foo` (67 e8) and sets the edge to Pointer32 (absolute
+ * 32-bit).  But `call rel32` is always PC-relative — the CPU computes
+ * target = RIP + imm32, not target = imm32.  The Pointer32 fixup writes
+ * the absolute address, producing a wrong displacement.
+ *
+ * This only manifests when external symbols resolve to low addresses
+ * (< 4 GB, e.g. PLT entries in a non-PIE executable) while JIT code is
+ * at high addresses (the arena at 0x7f...).  The optimization fires
+ * because isUInt<32>(target) is true, but the resulting fixup is wrong.
+ *
+ * The PreFixupPass reverts broken relaxations back to indirect calls
+ * through the GOT.  See orcjit_arena_mm.h for full context.
+ */
+class GOTPCRELXFixPlugin : public llvm::orc::ObjectLinkingLayer::Plugin {
+ public:
+  void modifyPassConfig(llvm::orc::MaterializationResponsibility& MR,
+                        llvm::jitlink::LinkGraph& G,
+                        llvm::jitlink::PassConfiguration& Config) override {
+    Config.PreFixupPasses.emplace_back(fixBrokenGOTPCRELXRelaxation);
+  }
+  llvm::Error notifyFailed(llvm::orc::MaterializationResponsibility& MR) override {
+    return llvm::Error::success();
+  }
+  llvm::Error notifyRemovingResources(llvm::orc::JITDylib& JD,
+                                      llvm::orc::ResourceKey K) override {
+    return llvm::Error::success();
+  }
+  void notifyTransferringResources(llvm::orc::JITDylib& JD, llvm::orc::ResourceKey DstKey,
+                                   llvm::orc::ResourceKey SrcKey) override {}
+
+ private:
+  /*! \brief Correct broken GOTPCRELX relaxations produced by
+   *         optimizeGOTAndStubAccesses().
+   *
+   * Strategy:
+   *  1. Build target-symbol → GOT-entry-symbol map (O(B+S) up front).
+   *  2. For every Pointer32 edge whose preceding bytes are 67 e8
+   *     (relaxed call) or e9 (relaxed jmp):
+   *     - If the target is reachable via a signed 32-bit PC-relative
+   *       displacement, change the edge to BranchPCRel32.
+   *     - Otherwise revert the relaxation: restore the original
+   *       indirect-call/jmp opcode bytes (ff 15 / ff 25), retarget
+   *       the edge to the GOT entry, and use PCRel32 with addend 0
+   *       (JITLink normalises GOTPCRELX addends to 0).
+   */
+  static llvm::Error fixBrokenGOTPCRELXRelaxation(llvm::jitlink::LinkGraph& G) {
+    using namespace llvm::jitlink;
+    // Build block → first symbol at offset 0 (for GOT entry symbol lookup).
+    llvm::DenseMap<Block*, Symbol*> BlockToSym;
+    for (auto* Sym : G.defined_symbols()) {
+      if (Sym->getOffset() == 0 && !BlockToSym.count(&Sym->getBlock())) {
+        BlockToSym[&Sym->getBlock()] = Sym;
+      }
+    }
+
+    // Build target symbol → GOT entry symbol map.
+    // GOT entries are pointer-sized blocks with exactly one Pointer64 edge.
+    llvm::DenseMap<Symbol*, Symbol*> SymToGOTSym;
+    for (auto* B : G.blocks()) {
+      if (B->getSize() != G.getPointerSize()) continue;
+      if (B->edges_size() != 1) continue;
+      auto& E = *B->edges().begin();
+      if (E.getKind() == x86_64::Pointer64) {
+        auto It = BlockToSym.find(B);
+        if (It != BlockToSym.end()) {
+          SymToGOTSym[&E.getTarget()] = It->second;
+        }
+      }
+    }
+
+    for (auto* B : G.blocks()) {
+      for (auto& E : B->edges()) {
+        if (E.getKind() != x86_64::Pointer32) continue;
+        if (E.getOffset() < 2) continue;
+
+        auto MutableContent = B->getMutableContent(G);
+        auto* FixupData = reinterpret_cast<uint8_t*>(MutableContent.data()) + E.getOffset();
+        uint8_t Prev2 = FixupData[-2];
+        uint8_t Prev1 = FixupData[-1];
+
+        bool isRelaxedCall = (Prev2 == 0x67 && Prev1 == 0xe8);
+        bool isRelaxedJmp = (Prev1 == 0xe9);
+        if (!isRelaxedCall && !isRelaxedJmp) continue;
+
+        // Check if PC-relative displacement would fit.
+        auto TargetAddr = E.getTarget().getAddress();
+        auto FixupAddr = B->getFixupAddress(E);
+        int64_t Displacement = TargetAddr.getValue() - (FixupAddr.getValue() + 4) + E.getAddend();
+        if (llvm::isInt<32>(Displacement)) {
+          E.setKind(x86_64::BranchPCRel32);
+          continue;
+        }
+
+        // Distance doesn't fit — revert to indirect call/jmp through GOT.
+        auto It = SymToGOTSym.find(&E.getTarget());
+        if (It == SymToGOTSym.end()) {
+          return llvm::make_error<llvm::StringError>(
+              "Cannot revert GOTPCRELX relaxation: no GOT entry for " +
+                  (E.getTarget().hasName() ? std::string(*E.getTarget().getName())
+                                           : std::string("<anon>")),
+              llvm::inconvertibleErrorCode());
+        }
+
+        Symbol* GOTSym = It->second;
+        if (isRelaxedCall) {
+          // Restore: 67 e8 → ff 15 (call *[rip+disp32])
+          FixupData[-2] = 0xff;
+          FixupData[-1] = 0x15;
+        } else {
+          // Restore: e9 XX XX XX XX 90 → ff 25 XX XX XX XX
+          FixupData[-1] = 0xff;
+          FixupData[0] = 0x25;
+          // For jmp, the optimization shifted offset by -1; shift back.
+          E.setOffset(E.getOffset() + 1);
+        }
+        E.setKind(x86_64::PCRel32);
+        E.setTarget(*GOTSym);
+        E.setAddend(0);
+      }
+    }
+    return llvm::Error::success();
+  }
+};
+#endif  // __linux__ && __x86_64__
+
+ORCJITExecutionSessionObj::ORCJITExecutionSessionObj(const std::string& orc_rt_path,
+                                                     int64_t arena_size_bytes)
     : jit_(nullptr) {
-  // Helper: force JITLink's ObjectLinkingLayer on platforms where
-  // the default RTDyldObjectLinkingLayer won't work.
+  // Create arena memory manager — pre-reserves contiguous VA region so all
+  // JIT allocations stay within PC-relative relocation range (±2GB x86_64,
+  // ±4GB AArch64).  Eliminates scattered-mmap relocation overflow (LLVM #173269).
   //
-  // macOS: MachOPlatform (via ExecutorNativePlatform) requires ObjectLinkingLayer.
+  // arena_size_bytes: 0 = arch default (4GB x86_64, 8GB AArch64, with fallback),
+  //                   >0 = custom size, <0 = disable arena.
   //
-  // Windows: LLJIT defaults to RTDyldObjectLinkingLayer for COFF x86_64
-  // (see LLJIT.cpp, LLJITBuilderState::prepareForConstruction). We need
-  // ObjectLinkingLayer because:
-  //   1. Our InitFiniPlugin inherits ObjectLinkingLayer::Plugin — RTDyld has
-  //      no plugin API, so the static_cast<ObjectLinkingLayer&> would crash.
-  //   2. We skip the ORC runtime on Windows (COFFPlatform requires MSVC CRT
-  //      symbols like _CxxThrowException, RTTI vtables, iostream objects that
-  //      are not resolvable in the JIT), so we handle .CRT$XC*/.CRT$XT*
-  //      init/fini sections ourselves via the plugin.
+  // The default is strictly larger than the relocation limit so the arena is
+  // never the bottleneck — JITLink's own overflow check fires first, matching
+  // dlopen/ld.so semantics.  The constructor halves capacity on mmap failure
+  // (RLIMIT_AS, containers) down to 256 MB.
   //
-  // Linux: LLJIT already defaults to ObjectLinkingLayer for ELF, no override needed.
-  auto setup_builder = [](llvm::orc::LLJITBuilder& builder) {
-#if defined(__APPLE__) || defined(_WIN32)
+  // LLJIT auto-configures ObjectLinkingLayer (JITLink) on x86_64 and aarch64
+  // Linux (see LLJITBuilderState::prepareForConstruction).  We override
+  // the layer creator to pass our arena MM.  macOS/Windows are excluded:
+  // macOS MachOPlatform teardown crashes with the arena; Windows needs
+  // further testing.
+#ifdef __linux__
+  if (arena_size_bytes >= 0) {
+    auto page_size = llvm::sys::Process::getPageSizeEstimate();
+    size_t capacity;
+    if (arena_size_bytes > 0) {
+      capacity = static_cast<size_t>(arena_size_bytes);
+    } else {
+#if defined(__aarch64__)
+      capacity = ArenaJITLinkMemoryManager::kDefaultArenaCapacity_AArch64;
+#else
+      capacity = ArenaJITLinkMemoryManager::kDefaultArenaCapacity_x86_64;
+#endif
+    }
+    arena_mm_ = std::make_unique<ArenaJITLinkMemoryManager>(page_size, capacity);
+  }
+#endif
+
+  auto setup_builder = [this](llvm::orc::LLJITBuilder& builder) {
+#ifdef __linux__
+    if (arena_mm_) {
+      builder.setObjectLinkingLayerCreator(
+          [this](llvm::orc::ExecutionSession& ES)
+              -> llvm::Expected<std::unique_ptr<llvm::orc::ObjectLayer>> {
+            auto OLL = std::make_unique<llvm::orc::ObjectLinkingLayer>(ES, *arena_mm_);
+#if defined(__x86_64__) || defined(_M_X64)
+            OLL->addPlugin(std::make_unique<GOTPCRELXFixPlugin>());
+#endif
+            return OLL;
+          });
+    }  // if (arena_mm_)
+#elif defined(__APPLE__) || defined(_WIN32)
+    // macOS: MachOPlatform (via ExecutorNativePlatform) requires ObjectLinkingLayer.
+    // Windows: need ObjectLinkingLayer for InitFiniPlugin and DLLImportDefinitionGenerator.
     builder.setObjectLinkingLayerCreator(
         [](llvm::orc::ExecutionSession& ES)
             -> llvm::Expected<std::unique_ptr<llvm::orc::ObjectLayer>> {
@@ -608,8 +774,10 @@ ORCJITExecutionSessionObj::ORCJITExecutionSessionObj(const std::string& orc_rt_p
 #endif
 }
 
-ORCJITExecutionSession::ORCJITExecutionSession(const std::string& orc_rt_path) {
-  ObjectPtr<ORCJITExecutionSessionObj> obj = make_object<ORCJITExecutionSessionObj>(orc_rt_path);
+ORCJITExecutionSession::ORCJITExecutionSession(const std::string& orc_rt_path,
+                                               int64_t arena_size_bytes) {
+  ObjectPtr<ORCJITExecutionSessionObj> obj =
+      make_object<ORCJITExecutionSessionObj>(orc_rt_path, arena_size_bytes);
   data_ = std::move(obj);
 }
 
