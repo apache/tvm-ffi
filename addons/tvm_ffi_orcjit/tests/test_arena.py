@@ -71,7 +71,7 @@ Test structure
 6. **Delta32 overflow** (test 6): ``-fpie`` GCC objects + 3 GB VA
    blocker.  With arena → PASSES; without arena → Delta32 overflow.
 
-All tests use a small arena (16 MB) and 256 MB–3 GB VA blockers — safe
+All tests use a small arena (16 MB) and 256 MB-3 GB VA blockers -- safe
 for CI containers.
 """
 
@@ -562,7 +562,7 @@ def test_dso_handle_delta32_overflow_without_arena(variant: str) -> None:
     session = ExecutionSession(arena_size=-1)  # arena disabled
     lib1 = session.create_library("lib1")
     lib1.add(obj(f"{variant}/test_addr"))
-    addr1 = lib1.get_function("code_address")()
+    lib1.get_function("code_address")()
 
     maps_after = _parse_maps()
     new_maps = _find_new_mappings(maps_before, maps_after)
