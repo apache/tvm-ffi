@@ -23,6 +23,7 @@
 #include <tvm/ffi/container/dict.h>
 #include <tvm/ffi/container/list.h>
 #include <tvm/ffi/container/map.h>
+#include <tvm/ffi/container/tensor.h>
 #include <tvm/ffi/function.h>
 #include <tvm/ffi/reflection/registry.h>
 
@@ -30,6 +31,46 @@
 
 namespace tvm {
 namespace ffi {
+
+namespace {
+/*!
+ * \brief Recursively scan an Any element for the first non-CPU tensor device.
+ * \param elem The element to inspect.
+ * \param out Output device; written only when a non-CPU tensor is found.
+ * \return true if a non-CPU tensor was found.
+ */
+bool FindFirstNonCPUDevice(const Any& elem, DLDevice* out) {
+  switch (elem.type_index()) {
+    case TypeIndex::kTVMFFITensor: {
+      const auto* tensor = elem.as<TensorObj>();
+      if (tensor->device.device_type != kDLCPU) {
+        *out = tensor->device;
+        return true;
+      }
+      break;
+    }
+    case TypeIndex::kTVMFFIArray:
+    case TypeIndex::kTVMFFIList: {
+      const auto* seq = elem.as<SeqBaseObj>();
+      for (const auto& it : *seq) {
+        if (FindFirstNonCPUDevice(it, out)) return true;
+      }
+      break;
+    }
+    case TypeIndex::kTVMFFIMap:
+    case TypeIndex::kTVMFFIDict: {
+      const auto* map = elem.as<MapBaseObj>();
+      for (const auto& it : *map) {
+        if (FindFirstNonCPUDevice(it.second, out)) return true;
+      }
+      break;
+    }
+    default:
+      break;
+  }
+  return false;
+}
+}  // namespace
 
 // Favor struct outside function scope as MSVC may have bug for in fn scope struct.
 class MapForwardIterFunctor {
@@ -184,12 +225,18 @@ TVM_FFI_STATIC_INIT_BLOCK() {
            [](const ffi::DictObj* n) -> ffi::Function {
              return ffi::Function::FromTyped(MapForwardIterFunctor(n->begin(), n->end()));
            })
-      .def("ffi.DictGetItemOrMissing", [](const ffi::DictObj* n, const Any& k) -> Any {
-        try {
-          return n->at(k);
-        } catch (const tvm::ffi::Error& e) {
-          return GetMissingObject();
-        }
+      .def("ffi.DictGetItemOrMissing",
+           [](const ffi::DictObj* n, const Any& k) -> Any {
+             try {
+               return n->at(k);
+             } catch (const tvm::ffi::Error& e) {
+               return GetMissingObject();
+             }
+           })
+      .def("ffi.ContainerFindFirstNonCPUDevice", [](const Any& container) -> DLDevice {
+        DLDevice result{kDLCPU, 0};
+        FindFirstNonCPUDevice(container, &result);
+        return result;
       });
 }
 }  // namespace ffi

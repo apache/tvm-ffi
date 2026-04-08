@@ -134,7 +134,7 @@ def normalize_index(length: int, idx: SupportsIndex) -> int:
 
 
 @register_object("ffi.Array")
-class Array(core.Object, Sequence[T]):
+class Array(core.CContainerBase, core.Object, Sequence[T]):
     """Array container that represents a sequence of values in the FFI.
 
     :py:func:`tvm_ffi.convert` will map python list/tuple to this class.
@@ -212,7 +212,7 @@ class Array(core.Object, Sequence[T]):
 
 
 @register_object("ffi.List")
-class List(core.Object, MutableSequence[T]):
+class List(core.CContainerBase, core.Object, MutableSequence[T]):
     """Mutable list container that represents a mutable sequence in the FFI."""
 
     # tvm-ffi-stubgen(begin): object/ffi.List
@@ -438,7 +438,7 @@ class ItemsView(ItemsViewBase[K, V]):
 
 
 @register_object("ffi.Map")
-class Map(core.Object, Mapping[K, V]):
+class Map(core.CContainerBase, core.Object, Mapping[K, V]):
     """Map container.
 
     :py:func:`tvm_ffi.convert` will map python dict to this class.
@@ -544,7 +544,7 @@ class Map(core.Object, Mapping[K, V]):
 
 
 @register_object("ffi.Dict")
-class Dict(core.Object, MutableMapping[K, V]):
+class Dict(core.CContainerBase, core.Object, MutableMapping[K, V]):
     """Mutable dictionary container with shared reference semantics.
 
     Unlike :class:`Map`, ``Dict`` does NOT implement copy-on-write.

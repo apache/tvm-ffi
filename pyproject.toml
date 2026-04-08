@@ -284,6 +284,9 @@ allowed-unresolved-imports = [
   "torch_c_dlpack_ext",
 ]
 
+[tool.uv]
+exclude-newer = "14 days"
+
 [tool.uv.dependency-groups]
 docs = { requires-python = ">=3.13" }
 

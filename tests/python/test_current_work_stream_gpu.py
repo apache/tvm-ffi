@@ -44,7 +44,7 @@ else:
 @pytest.mark.skipif(not _HAS_DLPACK_EXCHANGE_API, reason="Requires __dlpack_c_exchange_api__")
 def test_current_work_stream_matches_torch_stream() -> None:
     assert torch is not None
-    api_attr = torch.Tensor.__dlpack_c_exchange_api__
+    api_attr = torch.Tensor.__dlpack_c_exchange_api__  # ty: ignore[unresolved-attribute]
 
     pythonapi = ctypes.pythonapi
     pythonapi.PyCapsule_GetPointer.restype = ctypes.c_size_t

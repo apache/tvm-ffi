@@ -72,7 +72,10 @@ cdef inline object make_ret(TVMFFIAny result, const DLPackExchangeAPI* c_ctx_dlp
     elif type_index == kTVMFFIOpaquePyObject:
         return make_ret_opaque_object(result)
     elif type_index >= kTVMFFIStaticObjectBegin:
-        return make_ret_object(result)
+        obj = make_ret_object(result)
+        if c_ctx_dlpack_api != NULL and isinstance(obj, CContainerBase):
+            (<CContainerBase>obj)._dlpack_exchange_api = c_ctx_dlpack_api
+        return obj
     # the following code should be optimized to switch case
     if type_index == kTVMFFINone:
         return None
@@ -146,6 +149,43 @@ cdef int TVMFFIPyArgSetterObject_(
 ) except -1:
     out.type_index = TVMFFIObjectGetTypeIndex((<CObject>arg).chandle)
     out.v_ptr = (<CObject>arg).chandle
+    return 0
+
+
+cdef int TVMFFIPyArgSetterContainerObject_(
+    TVMFFIPyArgSetter* handle, TVMFFIPyCallContext* ctx,
+    PyObject* arg, TVMFFIAny* out
+) except -1:
+    """Setter for container objects (Array, List, Map, Dict).
+
+    Propagates DLPack exchange API tag and scans for stream context.
+    """
+    cdef TVMFFIAny scan_args[1]
+    cdef TVMFFIAny scan_result
+    cdef void* stream = NULL
+    out.type_index = TVMFFIObjectGetTypeIndex((<CObject>arg).chandle)
+    out.v_ptr = (<CObject>arg).chandle
+    cdef const DLPackExchangeAPI* api = (<CContainerBase>arg)._dlpack_exchange_api
+    if api != NULL:
+        if ctx.dlpack_c_exchange_api == NULL:
+            ctx.dlpack_c_exchange_api = api
+        if ctx.device_type == -1 and api.current_work_stream != NULL:
+            # Call C++ to find the first non-CPU tensor device in one shot.
+            scan_args[0].type_index = out.type_index
+            scan_args[0].v_obj = <TVMFFIObject*>(<CObject>arg).chandle
+            scan_result.type_index = kTVMFFINone
+            scan_result.v_int64 = 0
+            CHECK_CALL(TVMFFIFunctionCall(
+                (<CObject>_FFI_CONTAINER_FIND_FIRST_NON_CPU_DEVICE).chandle,
+                scan_args, 1, &scan_result))
+            if scan_result.type_index == kTVMFFIDevice and scan_result.v_device.device_type != kDLCPU:
+                ctx.device_type = scan_result.v_device.device_type
+                ctx.device_id = scan_result.v_device.device_id
+                api.current_work_stream(
+                    scan_result.v_device.device_type,
+                    scan_result.v_device.device_id,
+                    &stream)
+                ctx.stream = <TVMFFIStreamHandle>stream
     return 0
 
 
@@ -727,6 +767,9 @@ cdef int TVMFFIPyArgSetterFactory_(PyObject* value, TVMFFIPyArgSetter* out) exce
     if isinstance(arg, Tensor):
         out.func = TVMFFIPyArgSetterTensor_
         return 0
+    if isinstance(arg, CContainerBase):
+        out.func = TVMFFIPyArgSetterContainerObject_
+        return 0
     if isinstance(arg, CObject):
         out.func = TVMFFIPyArgSetterObject_
         return 0
@@ -1147,3 +1190,5 @@ cdef Function _OBJECT_FROM_JSON_GRAPH_STR = _get_global_func("ffi.FromJSONGraphS
 cdef Function _OBJECT_TO_JSON_GRAPH_STR = _get_global_func("ffi.ToJSONGraphString", True)
 cdef Function _CONSTRUCTOR_ARRAY = _get_global_func("ffi.Array", True)
 cdef Function _CONSTRUCTOR_MAP = _get_global_func("ffi.Map", True)
+cdef Function _FFI_CONTAINER_FIND_FIRST_NON_CPU_DEVICE = _get_global_func(
+    "ffi.ContainerFindFirstNonCPUDevice", True)

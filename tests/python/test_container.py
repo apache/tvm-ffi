@@ -493,14 +493,14 @@ def test_seq_cross_conv_incompatible_list_to_array() -> None:
     """List with incompatible element types should fail when cast to Array<int>."""
     lst = tvm_ffi.List(["not", "ints"])
     with pytest.raises(TypeError):
-        testing.schema_id_arr_int(lst)  # type: ignore[arg-type]
+        testing.schema_id_arr_int(lst)  # type: ignore[invalid-argument-type]
 
 
 def test_seq_cross_conv_incompatible_array_to_list() -> None:
     """Array with incompatible element types should fail when cast to List<int>."""
     arr = tvm_ffi.Array(["not", "ints"])
     with pytest.raises(TypeError):
-        testing.schema_id_list_int(arr)  # type: ignore[arg-type]
+        testing.schema_id_list_int(arr)  # type: ignore[invalid-argument-type]
 
 
 def test_missing_object() -> None:
@@ -725,11 +725,11 @@ def test_map_cross_conv_incompatible_dict_to_map() -> None:
     """Dict with incompatible value types should fail when cast to Map<String, int>."""
     d = tvm_ffi.Dict({"a": "not_int", "b": "still_not_int"})
     with pytest.raises(TypeError):
-        testing.schema_id_map_str_int(d)  # type: ignore[arg-type]
+        testing.schema_id_map_str_int(d)  # type: ignore[invalid-argument-type]
 
 
 def test_map_cross_conv_incompatible_map_to_dict() -> None:
     """Map with incompatible value types should fail when cast to Dict<String, int>."""
     m = tvm_ffi.Map({"a": "not_int", "b": "still_not_int"})
     with pytest.raises(TypeError):
-        testing.schema_id_dict_str_int(m)  # type: ignore[arg-type]
+        testing.schema_id_dict_str_int(m)  # type: ignore[invalid-argument-type]

@@ -542,7 +542,53 @@ TVM_FFI_STATIC_INIT_BLOCK() {
            })
       .def("testing.optional_tensor_view_has_value",
            [](const Optional<TensorView>& t) { return t.has_value(); })
-      .def_method("testing.TestIntPairSum", &TestIntPair::Sum, "Get sum of the pair");
+      .def_method("testing.TestIntPairSum", &TestIntPair::Sum, "Get sum of the pair")
+      // Container-with-tensor test helpers for DLPack container conversion
+      // NOLINTBEGIN(performance-unnecessary-value-param)
+      .def("testing.make_array_with_tensor", [](Tensor t) -> Array<Any> { return {std::move(t)}; })
+      .def("testing.make_array_with_mixed",
+           [](Tensor t, int64_t x) -> Array<Any> { return {std::move(t), x, String("hello")}; })
+      .def("testing.make_nested_array_with_tensor",
+           [](const Tensor& t) -> Array<Any> {
+             Array<Any> inner{t, 42};
+             return {std::move(inner), t};
+           })
+      .def("testing.make_list_with_tensor",
+           [](Tensor t, int64_t x) -> List<Any> {
+             List<Any> result;
+             result.push_back(std::move(t));
+             result.push_back(x);
+             return result;
+           })
+      .def("testing.make_map_with_tensor",
+           [](Tensor t) -> Map<String, Any> {
+             Map<String, Any> result;
+             result.Set("tensor", std::move(t));
+             result.Set("value", 42);
+             result.Set("name", String("test"));
+             return result;
+           })
+      .def("testing.make_dict_with_tensor",
+           [](Tensor t) -> Dict<String, Any> {
+             Dict<String, Any> result;
+             result.Set("tensor", std::move(t));
+             result.Set("value", 42);
+             return result;
+           })
+      .def("testing.make_empty_array_with_tensor_input",
+           [](const Tensor& t) -> Array<Any> { return Array<Any>(); })
+      .def("testing.make_nested_map_with_tensor",
+           [](const Tensor& t1, Tensor t2) -> Map<String, Any> {
+             Array<Any> arr{t1, std::move(t2)};
+             Map<String, Any> inner;
+             inner.Set("t", t1);
+             Map<String, Any> result;
+             result.Set("array", std::move(arr));
+             result.Set("map", std::move(inner));
+             result.Set("scalar", 99);
+             return result;
+           });
+  // NOLINTEND(performance-unnecessary-value-param)
 }
 
 }  // namespace ffi
