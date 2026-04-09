@@ -21,6 +21,7 @@ from __future__ import annotations
 import inspect
 import json
 import sys
+import warnings
 from typing import Any, Callable, Literal, Sequence, TypeVar, overload
 
 from . import core
@@ -465,6 +466,30 @@ def _add_class_attrs(type_cls: type, type_info: TypeInfo) -> type:
     )
     _setup_copy_methods(type_cls, has_shallow_copy, is_container=is_container)
     return type_cls
+
+
+def _warn_missing_field_annotations(cls: type, type_info: TypeInfo, *, stacklevel: int) -> None:
+    """Emit a warning if any C++ reflected fields lack Python annotations on *cls*.
+
+    Only checks fields owned by *type_info* (not inherited from parents).
+    Only checks annotations defined directly on *cls* (``cls.__dict__``),
+    so parent annotations do not suppress warnings for child-level fields.
+    """
+    reflected_names = {field.name for field in type_info.fields}
+    if not reflected_names:
+        return
+    own_annotations = cls.__dict__.get("__annotations__", {})
+    missing = sorted(reflected_names - set(own_annotations))
+    if missing:
+        missing_str = ", ".join(missing)
+        warnings.warn(
+            f"@c_class({type_info.type_key!r}): class `{cls.__qualname__}` does not "
+            f"annotate the following reflected field(s): {missing_str}. "
+            f"Add type annotations (e.g. `field_name: type`) to the class body "
+            f"for IDE support and documentation.",
+            UserWarning,
+            stacklevel=stacklevel,
+        )
 
 
 def _setup_copy_methods(

@@ -19,8 +19,11 @@
 from __future__ import annotations
 
 import inspect
+import warnings
 
 import pytest
+from tvm_ffi.core import TypeInfo
+from tvm_ffi.registry import _warn_missing_field_annotations
 from tvm_ffi.testing import (
     _TestCxxClassBase,
     _TestCxxClassDerived,
@@ -317,3 +320,80 @@ def test_c_class_unequal_objects_in_set() -> None:
     """Distinct objects are separate entries in a set."""
     objs = {_TestCxxClassDerived(i, i, float(i), float(i)) for i in range(5)}
     assert len(objs) == 5
+
+
+# ---------------------------------------------------------------------------
+# 12. Field annotation warnings
+# ---------------------------------------------------------------------------
+
+
+def test_c_class_warns_on_missing_field_annotations() -> None:
+    """@c_class warns when reflected fields lack Python annotations."""
+    type_info: TypeInfo = getattr(_TestCxxClassBase, "__tvm_ffi_type_info__")
+    field_names = {f.name for f in type_info.fields}
+    assert field_names  # sanity: there are reflected fields
+
+    # A class with no annotations should trigger a warning
+    DummyCls = type("DummyCls", (), {})
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        _warn_missing_field_annotations(DummyCls, type_info, stacklevel=2)
+    assert len(w) == 1
+    assert "does not annotate" in str(w[0].message)
+    for name in field_names:
+        assert name in str(w[0].message)
+
+
+def test_c_class_no_warning_when_all_fields_annotated() -> None:
+    """@c_class does not warn when all reflected fields are annotated."""
+    type_info: TypeInfo = getattr(_TestCxxClassBase, "__tvm_ffi_type_info__")
+
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        _warn_missing_field_annotations(_TestCxxClassBase, type_info, stacklevel=2)
+    assert len(w) == 0
+
+
+def test_c_class_warns_only_for_missing_annotations() -> None:
+    """Warning lists only the missing fields, not the annotated ones."""
+    type_info: TypeInfo = getattr(_TestCxxClassBase, "__tvm_ffi_type_info__")
+    field_names = sorted(f.name for f in type_info.fields)
+    assert len(field_names) >= 2  # need at least 2 fields for this test
+
+    # Annotate only the first field, leave the rest unannotated
+    PartialCls = type("PartialCls", (), {"__annotations__": {field_names[0]: int}})
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        _warn_missing_field_annotations(PartialCls, type_info, stacklevel=2)
+    assert len(w) == 1
+    msg = str(w[0].message)
+    # The annotated field should NOT appear in the warning
+    assert field_names[0] not in msg
+    # The unannotated fields should appear
+    for name in field_names[1:]:
+        assert name in msg
+
+
+def test_c_class_warns_only_own_fields_not_inherited() -> None:
+    """Warning only checks own fields, not parent fields."""
+    # _TestCxxClassDerived's type_info.fields contains only its own fields
+    # (v_f64, v_f32), not parent fields (v_i64, v_i32).
+    derived_type_info: TypeInfo = getattr(_TestCxxClassDerived, "__tvm_ffi_type_info__")
+    own_field_names = {f.name for f in derived_type_info.fields}
+    assert own_field_names  # sanity
+
+    # A class with no annotations: warning should mention only own fields
+    DummyCls = type("DummyCls", (), {})
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        _warn_missing_field_annotations(DummyCls, derived_type_info, stacklevel=2)
+    assert len(w) == 1
+    msg = str(w[0].message)
+    for name in own_field_names:
+        assert name in msg
+    # Parent fields should NOT appear in the warning
+    parent_type_info = derived_type_info.parent_type_info
+    if parent_type_info is not None:
+        parent_field_names = {f.name for f in parent_type_info.fields}
+        for name in parent_field_names:
+            assert name not in msg

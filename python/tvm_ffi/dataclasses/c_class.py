@@ -104,10 +104,17 @@ def c_class(
         installing structural dunders.
 
     """
-    from ..registry import _install_dataclass_dunders, register_object  # noqa: PLC0415
+    from ..registry import (  # noqa: PLC0415
+        _install_dataclass_dunders,
+        _warn_missing_field_annotations,
+        register_object,
+    )
 
     def decorator(cls: _T) -> _T:
         cls = register_object(type_key)(cls)
+        type_info = getattr(cls, "__tvm_ffi_type_info__", None)
+        if type_info is not None:
+            _warn_missing_field_annotations(cls, type_info, stacklevel=2)
         _install_dataclass_dunders(
             cls, init=init, repr=repr, eq=eq, order=order, unsafe_hash=unsafe_hash
         )
