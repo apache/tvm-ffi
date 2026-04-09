@@ -1180,6 +1180,26 @@ def _convert_to_opaque_object(object pyobject: Any) -> OpaquePyObject:
     return ret
 
 
+cdef extern from *:
+    """
+    static void TVMFFITestingCallDeleterWithoutThreadState(void* py_obj) {
+      PyThreadState* thread_state = PyEval_SaveThread();
+      TVMFFIPyObjectDeleter(py_obj);
+      PyEval_RestoreThread(thread_state);
+    }
+    """
+    void TVMFFITestingCallDeleterWithoutThreadState(void* py_obj)
+
+
+def _testing_drop_last_ref_without_thread_state() -> None:
+    """Drop the last Python ref from a detached-thread-state region."""
+    cdef object pyobject = {}
+    cdef PyObject* py_obj = <PyObject*>pyobject
+    Py_INCREF(pyobject)
+    pyobject = None
+    TVMFFITestingCallDeleterWithoutThreadState(<void*>py_obj)
+
+
 def _print_debug_info() -> None:
     """Get the size of the dispatch map"""
     cdef size_t size = TVMFFIPyGetDispatchMapSize()
