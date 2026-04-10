@@ -346,7 +346,7 @@ def init_ffi_api(namespace: str, target_module_name: str | None = None) -> None:
 __SENTINEL = object()
 
 
-@functools.cache
+@functools.lru_cache(maxsize=None)
 def _new_empty() -> Any:
     return core._get_global_func("ffi.NewEmpty", False)
 
@@ -546,14 +546,12 @@ def _install_init(cls: type, *, enabled: bool) -> None:
             # None for Any/ObjectRef fields, 0 for scalars).
             user_init = cls.__dict__["__init__"]
 
+            @functools.wraps(user_init)
             def __init__(self: Any, *args: Any, **kwargs: Any) -> None:
                 actual_type_info = type(self).__tvm_ffi_type_info__
                 _ffi_alloc_empty(self, actual_type_info.type_index)
                 user_init(self, *args, **kwargs)
 
-            __init__.__qualname__ = user_init.__qualname__
-            __init__.__module__ = getattr(user_init, "__module__", None)  # type: ignore[assignment]
-            __init__.__wrapped__ = user_init  # type: ignore[assignment]
             setattr(cls, "__init__", __init__)
         return
     type_info: TypeInfo | None = getattr(cls, "__tvm_ffi_type_info__", None)
