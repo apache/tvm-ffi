@@ -1979,6 +1979,11 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   refl::GlobalDef().def("ffi.MakeFieldSetter", MakeFieldSetter);
   refl::GlobalDef().def("ffi.MakeFFINew", MakeFFINew);
   refl::GlobalDef().def("ffi.RegisterAutoInit", refl::RegisterAutoInit);
+  // Create an empty (zero-initialized) object by type index.
+  // Used by Python super().__init__() in @py_class(init=False) subclasses.
+  refl::GlobalDef().def("ffi.NewEmpty", [](int32_t type_index) -> ObjectRef {
+    return ObjectRef(CreateEmptyObject(TVMFFIGetTypeInfo(type_index)));
+  });
   // Deep copy
   refl::EnsureTypeAttrColumn(refl::type_attr::kShallowCopy);
   refl::GlobalDef().def("ffi.DeepCopy", DeepCopy);

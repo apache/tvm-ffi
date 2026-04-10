@@ -4561,3 +4561,282 @@ class TestPyMethodIntrospection:
         # system methods still present
         assert "__ffi_init__" in names
         assert "__ffi_shallow_copy__" in names
+
+
+# ---------------------------------------------------------------------------
+# super().__init__() support for @py_class(init=False) subclasses
+# ---------------------------------------------------------------------------
+class TestSuperInitPattern:
+    """Regression tests for using ``super().__init__()`` + field assignment
+    in ``@py_class(init=False)`` custom ``__init__`` methods.
+
+    Previously, ``super().__init__()`` would dispatch to the parent's
+    auto-generated ``__init__`` which called ``self.__ffi_init__()`` with
+    the **child** type's C++ constructor (requiring field arguments that
+    weren't provided), causing a crash.
+    """
+
+    def test_basic_super_init_with_field_setters(self) -> None:
+        """The original crash scenario: init=False with super().__init__() and field setters."""
+
+        @py_class(_unique_key("SIBase"))
+        class SIBase(Object):
+            pass
+
+        @py_class(_unique_key("SIChild"), init=False)
+        class SIChild(SIBase):
+            x: int
+            y: str
+
+            def __init__(self, x: int, y: str) -> None:
+                super().__init__()
+                self.x = x
+                self.y = y
+
+        obj = SIChild(42, "hello")
+        assert obj.x == 42
+        assert obj.y == "hello"
+
+    def test_super_init_deep_hierarchy(self) -> None:
+        """super().__init__() through multiple levels of py_class inheritance."""
+
+        @py_class(_unique_key("SIDH_Node"))
+        class Node(Object):
+            pass
+
+        @py_class(_unique_key("SIDH_BaseType"))
+        class BaseType(Node):
+            pass
+
+        @py_class(_unique_key("SIDH_PtrType"), init=False)
+        class PtrType(BaseType):
+            base_type: Any
+            specifiers: list
+            use_bracket: bool
+
+            def __init__(
+                self,
+                base_type: Any,
+                specifiers: Optional[list] = None,
+                use_bracket: bool = False,
+            ) -> None:
+                super().__init__()
+                self.base_type = base_type
+                self.specifiers = list(specifiers) if specifiers else []
+                self.use_bracket = use_bracket
+
+        void_p = PtrType("void")
+        assert void_p.base_type == "void"
+        assert list(void_p.specifiers) == []
+        assert void_p.use_bracket is False
+
+        int_p = PtrType("int", ["const", "volatile"], True)
+        assert int_p.base_type == "int"
+        assert list(int_p.specifiers) == ["const", "volatile"]
+        assert int_p.use_bracket is True
+
+    def test_super_init_with_defaults_from_calloc(self) -> None:
+        """Fields not set after super().__init__() should be zero-initialized."""
+
+        @py_class(_unique_key("SIDef"))
+        class SIDefBase(Object):
+            pass
+
+        @py_class(_unique_key("SIDef_Child"), init=False)
+        class SIDefChild(SIDefBase):
+            a: int
+            b: float
+            c: bool
+            d: Any
+
+            def __init__(self) -> None:
+                super().__init__()
+                # Don't set any fields — they should be zero/None from calloc
+
+        obj = SIDefChild()
+        assert obj.a == 0
+        assert obj.b == 0.0
+        assert obj.c is False
+        assert obj.d is None
+
+    def test_super_init_intermediate_custom_init(self) -> None:
+        """Chained super().__init__() through an intermediate init=False class."""
+
+        @py_class(_unique_key("SIChain_A"))
+        class A(Object):
+            pass
+
+        @py_class(_unique_key("SIChain_B"), init=False)
+        class B(A):
+            x: int
+
+            def __init__(self, x: int) -> None:
+                super().__init__()
+                self.x = x
+
+        @py_class(_unique_key("SIChain_C"), init=False)
+        class C(B):
+            y: str
+
+            def __init__(self, x: int, y: str) -> None:
+                super().__init__(x)
+                self.y = y
+
+        obj = C(10, "world")
+        assert obj.x == 10
+        assert obj.y == "world"
+
+    def test_super_init_intermediate_auto_init(self) -> None:
+        """super().__init__() where the intermediate parent has init=True (auto-generated)."""
+
+        @py_class(_unique_key("SIAI_Mid"))
+        class Mid(Object):
+            a: int
+
+        @py_class(_unique_key("SIAI_Leaf"), init=False)
+        class Leaf(Mid):
+            b: str
+
+            def __init__(self, a: int, b: str) -> None:
+                super().__init__()
+                self.a = a
+                self.b = b
+
+        obj = Leaf(5, "hi")
+        assert obj.a == 5
+        assert obj.b == "hi"
+
+    def test_normal_init_unaffected(self) -> None:
+        """Normal init=True construction must still work correctly."""
+
+        @py_class(_unique_key("SINorm"))
+        class SINorm(Object):
+            x: int
+            y: str
+
+        obj = SINorm(1, "a")
+        assert obj.x == 1
+        assert obj.y == "a"
+
+    def test_non_pyclass_subclass_no_args_errors(self) -> None:
+        """A non-py_class subclass calling parent init with no args should still error
+        for required fields (not silently create an empty object)."""
+
+        @py_class(_unique_key("SINonPC"))
+        class SINonPC(Object):
+            x: int
+
+        class Plain(SINonPC):
+            pass
+
+        with pytest.raises(TypeError):
+            Plain()
+
+    def test_super_init_isinstance(self) -> None:
+        """Objects created via super().__init__() pattern have correct isinstance."""
+
+        @py_class(_unique_key("SIInst_B"))
+        class Base(Object):
+            pass
+
+        @py_class(_unique_key("SIInst_C"), init=False)
+        class Child(Base):
+            val: int
+
+            def __init__(self, val: int) -> None:
+                super().__init__()
+                self.val = val
+
+        obj = Child(99)
+        assert isinstance(obj, Child)
+        assert isinstance(obj, Base)
+        assert isinstance(obj, Object)
+
+    def test_super_init_field_overwrite(self) -> None:
+        """Fields can be overwritten multiple times after super().__init__()."""
+
+        @py_class(_unique_key("SIOverwrite_B"))
+        class Base(Object):
+            pass
+
+        @py_class(_unique_key("SIOverwrite_C"), init=False)
+        class Child(Base):
+            x: int
+
+            def __init__(self, x: int) -> None:
+                super().__init__()
+                self.x = 0
+                self.x = x
+
+        obj = Child(42)
+        assert obj.x == 42
+
+    def test_super_init_copy_deepcopy(self) -> None:
+        """copy/deepcopy work on objects created via the super().__init__() pattern."""
+
+        @py_class(_unique_key("SICopyBase"))
+        class SICopyBase(Object):
+            pass
+
+        @py_class(_unique_key("SICopy"), init=False)
+        class SICopy(SICopyBase):
+            x: int
+            y: str
+
+            def __init__(self, x: int, y: str) -> None:
+                super().__init__()
+                self.x = x
+                self.y = y
+
+        obj = SICopy(42, "hello")
+        obj2 = copy.copy(obj)
+        assert obj2.x == 42
+        assert obj2.y == "hello"
+        assert not obj.same_as(obj2)
+
+        obj3 = copy.deepcopy(obj)
+        assert obj3.x == 42
+        assert obj3.y == "hello"
+        assert not obj.same_as(obj3)
+
+    def test_super_init_direct_from_object(self) -> None:
+        """super().__init__() works when inheriting directly from Object (no intermediate)."""
+
+        @py_class(_unique_key("SIDirect"), init=False)
+        class SIDirect(Object):
+            x: int
+            y: str
+
+            def __init__(self, x: int, y: str) -> None:
+                super().__init__()
+                self.x = x
+                self.y = y
+
+        obj = SIDirect(10, "direct")
+        assert obj.x == 10
+        assert obj.y == "direct"
+        assert isinstance(obj, Object)
+
+    def test_super_init_direct_from_object_copy(self) -> None:
+        """copy/deepcopy work for init=False classes inheriting directly from Object."""
+
+        @py_class(_unique_key("SIDirectCopy"), init=False)
+        class SIDirectCopy(Object):
+            x: int
+            y: str
+
+            def __init__(self, x: int, y: str) -> None:
+                super().__init__()
+                self.x = x
+                self.y = y
+
+        obj = SIDirectCopy(42, "hello")
+        obj2 = copy.copy(obj)
+        assert obj2.x == 42
+        assert obj2.y == "hello"
+        assert not obj.same_as(obj2)
+
+        obj3 = copy.deepcopy(obj)
+        assert obj3.x == 42
+        assert obj3.y == "hello"
+        assert not obj.same_as(obj3)
