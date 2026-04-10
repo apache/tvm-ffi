@@ -4698,7 +4698,7 @@ class TestSuperInitPattern:
             b: str
 
             def __init__(self, a: int, b: str) -> None:
-                super().__init__()
+                super().__init__()  # type: ignore[missing-argument]
                 self.a = a
                 self.b = b
 
@@ -4720,7 +4720,8 @@ class TestSuperInitPattern:
 
     def test_non_pyclass_subclass_no_args_errors(self) -> None:
         """A non-py_class subclass calling parent init with no args should still error
-        for required fields (not silently create an empty object)."""
+        for required fields (not silently create an empty object).
+        """
 
         @py_class(_unique_key("SINonPC"))
         class SINonPC(Object):
@@ -4730,7 +4731,7 @@ class TestSuperInitPattern:
             pass
 
         with pytest.raises(TypeError):
-            Plain()
+            Plain()  # type: ignore[missing-argument]
 
     def test_super_init_isinstance(self) -> None:
         """Objects created via super().__init__() pattern have correct isinstance."""
