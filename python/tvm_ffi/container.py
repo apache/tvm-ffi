@@ -210,6 +210,23 @@ class Array(core.Object, Sequence[T]):
         """Concatenate two arrays."""
         return type(self)(itertools.chain(other, self))
 
+    def __eq__(self, other: object) -> bool:
+        """Element-wise equality comparison."""
+        if isinstance(other, (Array, list, tuple)):
+            if len(self) != len(other):
+                return False
+            return all(
+                (a == b)
+                if not (isinstance(a, core.CObject) and isinstance(b, core.CObject))
+                else a.same_as(b) or a == b
+                for a, b in zip(self, other)
+            )
+        return NotImplemented
+
+    def __hash__(self) -> int:
+        """Hash based on handle identity (consistent with Object)."""
+        return core.CObject.__hash__(self)
+
 
 @register_object("ffi.List")
 class List(core.Object, MutableSequence[T]):
@@ -513,6 +530,23 @@ class Map(core.Object, Mapping[K, V]):
     def __iter__(self) -> Iterator[K]:
         """Iterate over the map's keys."""
         return iter(self.keys())
+
+    def __eq__(self, other: object) -> bool:
+        """Element-wise equality comparison."""
+        if isinstance(other, Mapping):
+            if len(self) != len(other):
+                return False
+            for key in self:
+                if key not in other:
+                    return False
+                if self[key] != other[key]:  # ty: ignore[invalid-argument-type]
+                    return False
+            return True
+        return NotImplemented
+
+    def __hash__(self) -> int:
+        """Hash based on handle identity (consistent with Object)."""
+        return core.CObject.__hash__(self)
 
     @overload
     def get(self, key: K) -> V | None: ...

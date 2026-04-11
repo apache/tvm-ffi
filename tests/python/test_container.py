@@ -733,3 +733,76 @@ def test_map_cross_conv_incompatible_map_to_dict() -> None:
     m = tvm_ffi.Map({"a": "not_int", "b": "still_not_int"})
     with pytest.raises(TypeError):
         testing.schema_id_dict_str_int(m)  # type: ignore[arg-type]
+
+
+class TestBug9ArrayEquality:
+    """Regression test for Bug #9: Array/Map equality should be element-wise."""
+
+    def test_array_equal_same_elements(self) -> None:
+        """Two Arrays with identical int elements should be equal."""
+        a1 = tvm_ffi.Array([1, 2, 3])
+        a2 = tvm_ffi.Array([1, 2, 3])
+        assert a1 == a2
+
+    def test_array_not_equal_different_elements(self) -> None:
+        """Arrays with different elements should not be equal."""
+        a1 = tvm_ffi.Array([1, 2, 3])
+        a2 = tvm_ffi.Array([1, 2, 4])
+        assert a1 != a2
+
+    def test_array_not_equal_different_length(self) -> None:
+        """Arrays of different length should not be equal."""
+        a1 = tvm_ffi.Array([1, 2])
+        a2 = tvm_ffi.Array([1, 2, 3])
+        assert a1 != a2
+
+    def test_array_equal_to_tuple(self) -> None:
+        """Array should compare equal to a tuple with the same elements."""
+        a = tvm_ffi.Array([1, 2, 3])
+        assert a == (1, 2, 3)
+
+    def test_array_equal_to_list(self) -> None:
+        """Array should compare equal to a list with the same elements."""
+        a = tvm_ffi.Array([1, 2, 3])
+        assert a == [1, 2, 3]
+
+    def test_array_equal_empty(self) -> None:
+        """Two empty Arrays should be equal."""
+        a1 = tvm_ffi.Array([])
+        a2 = tvm_ffi.Array([])
+        assert a1 == a2
+
+    def test_array_equal_strings(self) -> None:
+        """Two Arrays with identical string elements should be equal."""
+        a1 = tvm_ffi.Array(["hello", "world"])
+        a2 = tvm_ffi.Array(["hello", "world"])
+        assert a1 == a2
+
+    def test_array_hashable(self) -> None:
+        """Array must remain hashable after adding __eq__."""
+        a = tvm_ffi.Array([1, 2, 3])
+        # Should not raise TypeError
+        h = hash(a)
+        assert isinstance(h, int)
+
+    def test_array_not_equal_to_unrelated(self) -> None:
+        """Array compared with an incompatible type should not be equal."""
+        a = tvm_ffi.Array([1, 2, 3])
+        assert not (a == "hello")
+
+    def test_map_equal_same_entries(self) -> None:
+        """Two Maps with identical entries should be equal."""
+        m1 = tvm_ffi.Map({"a": 1, "b": 2})
+        m2 = tvm_ffi.Map({"a": 1, "b": 2})
+        assert m1 == m2
+
+    def test_map_not_equal_different_values(self) -> None:
+        """Maps with different values for the same key should not be equal."""
+        m1 = tvm_ffi.Map({"a": 1})
+        m2 = tvm_ffi.Map({"a": 2})
+        assert m1 != m2
+
+    def test_map_equal_to_dict(self) -> None:
+        """Map should compare equal to a dict with the same entries."""
+        m = tvm_ffi.Map({"x": 10})
+        assert m == {"x": 10}
