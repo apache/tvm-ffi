@@ -273,4 +273,6 @@ class TypeInfo:
     methods: list[TypeMethod]
     parent_type_info: TypeInfo | None
 
+    @property
+    def total_size(self) -> int: ...
     def prototype_py(self) -> str: ...

@@ -296,6 +296,30 @@ class TypeInfo:
         # ensure parent is registered
         self.parent_type_info = _lookup_or_register_type_info_from_type_key(parent_type_key)
 
+    @property
+    def total_size(self) -> int:
+        """Total object size in bytes (header + all fields).
+
+        For native C++ types with metadata, returns metadata.total_size.
+        For Python-defined types, computes from field layout including
+        parent fields (critical for multi-level inheritance where an
+        intermediate class has no own fields).
+        """
+        cdef const TVMFFITypeInfo* c_info = TVMFFIGetTypeInfo(self.type_index)
+        if c_info != NULL and c_info.metadata != NULL:
+            return c_info.metadata.total_size
+        cdef int64_t end = sizeof(TVMFFIObject)
+        if self.fields:
+            for f in self.fields:
+                f_end = f.offset + f.size
+                if f_end > end:
+                    end = f_end
+        if self.parent_type_info is not None:
+            parent_size = self.parent_type_info.total_size
+            if parent_size > end:
+                end = parent_size
+        return (end + 7) & ~7  # align to 8 bytes
+
 
 def _member_method_wrapper(method_func: Callable[..., Any]) -> Callable[..., Any]:
     def wrapper(self: Any, *args: Any) -> Any:
