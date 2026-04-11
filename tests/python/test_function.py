@@ -402,3 +402,82 @@ def test_function_with_value_protocol() -> None:
 
     nested_value_protocol = ValueProtocol([ValueProtocol(1), ValueProtocol(2), ValueProtocol(3)])
     assert tuple(fecho(nested_value_protocol)) == (1, 2, 3)
+
+
+# ---------------------------------------------------------------------------
+# Callable class instances must preserve identity (Bug #4)
+# ---------------------------------------------------------------------------
+
+
+class TestCallableObjectPreservation:
+    """Regression tests: callable class instances (classes with __call__) passed
+    through FFI must be preserved as OpaquePyObject, not silently converted to
+    tvm_ffi.Function which would lose their attributes and identity.
+    """
+
+    def test_callable_class_preserves_attributes(self) -> None:
+        """A class with __call__ round-tripped through echo keeps its attributes."""
+
+        class MyCallable:
+            def __init__(self, name: str) -> None:
+                self.name = name
+
+            def __call__(self) -> int:
+                return 42
+
+        fecho = tvm_ffi.get_global_func("testing.echo")
+        original = MyCallable("test_obj")
+        retrieved = fecho(original)
+        assert hasattr(retrieved, "name"), "Callable object lost its attributes"
+        assert retrieved.name == "test_obj"
+        assert callable(retrieved)
+        assert retrieved() == 42
+
+    def test_callable_class_preserves_identity(self) -> None:
+        """A callable instance round-tripped through echo is the same object."""
+
+        class MyCallable:
+            def __call__(self) -> int:
+                return 1
+
+        fecho = tvm_ffi.get_global_func("testing.echo")
+        original = MyCallable()
+        retrieved = fecho(original)
+        assert retrieved is original
+
+    def test_plain_function_still_converts_to_function(self) -> None:
+        """Regular functions should still be converted to Function."""
+
+        def my_func(x: int) -> int:
+            return x + 1
+
+        fecho = tvm_ffi.get_global_func("testing.echo")
+        retrieved = fecho(my_func)
+        assert isinstance(retrieved, tvm_ffi.Function)
+        assert retrieved(1) == 2
+
+    def test_lambda_still_converts_to_function(self) -> None:
+        """Lambdas should still be converted to Function."""
+        fecho = tvm_ffi.get_global_func("testing.echo")
+        retrieved = fecho(lambda x: x + 1)
+        assert isinstance(retrieved, tvm_ffi.Function)
+        assert retrieved(1) == 2
+
+    def test_callable_with_state(self) -> None:
+        """Callable with mutable state preserves state through FFI round-trip."""
+
+        class Counter:
+            def __init__(self) -> None:
+                self.count = 0
+
+            def __call__(self) -> int:
+                self.count += 1
+                return self.count
+
+        fecho = tvm_ffi.get_global_func("testing.echo")
+        counter = Counter()
+        counter()  # count=1
+        counter()  # count=2
+        retrieved = fecho(counter)
+        assert retrieved.count == 2
+        assert retrieved() == 3  # should continue from 3

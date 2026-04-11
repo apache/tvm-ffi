@@ -17,6 +17,7 @@
 import ctypes
 import threading
 import os
+import types as _types
 from numbers import Integral, Real
 from typing import Any, Callable
 
@@ -816,7 +817,18 @@ cdef int TVMFFIPyArgSetterFactory_(PyObject* value, TVMFFIPyArgSetter* out) exce
     if hasattr(arg_class, "__tvm_ffi_opaque_ptr__"):
         out.func = TVMFFIPyArgSetterFFIOpaquePtrCompatible_
         return 0
-    if callable(arg):
+    if callable(arg) and isinstance(
+        arg,
+        (
+            _types.FunctionType,
+            _types.BuiltinFunctionType,
+            _types.MethodType,
+            _types.BuiltinMethodType,
+            _types.LambdaType,
+            type,
+            Function,
+        ),
+    ):
         out.func = TVMFFIPyArgSetterCallable_
         return 0
     if torch is not None and isinstance(arg, torch.dtype):
