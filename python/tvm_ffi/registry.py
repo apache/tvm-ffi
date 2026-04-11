@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import functools
 import inspect
 import json
 import sys
@@ -454,6 +455,24 @@ def _setup_copy_methods(
             setattr(type_cls, "__replace__", _replace_unsupported)
 
 
+def _ffi_alloc_empty(obj: Any) -> None:
+    """Allocate an empty (zero-initialized) C++ object for *obj* if not yet allocated.
+
+    This is used to pre-allocate the C++ backing object before a user-defined
+    ``__init__`` runs, so that C-level field descriptors can safely be used
+    (e.g. ``self.field = value``) without a segfault from a NULL handle.
+
+    No-op if the object already has a valid handle.
+    """
+    if obj.__chandle__() != 0:
+        return
+    from . import _ffi_api  # noqa: PLC0415
+
+    actual_type_info = type(obj).__tvm_ffi_type_info__
+    empty = _ffi_api.NewEmpty(actual_type_info.type_index)
+    obj.__move_handle_from__(empty)
+
+
 def _install_init(cls: type, *, enabled: bool) -> None:
     """Install ``__init__`` from C++ reflection metadata, or a guard.
 
@@ -466,9 +485,21 @@ def _install_init(cls: type, *, enabled: bool) -> None:
 
     When *enabled* is False, installs a guard that raises ``TypeError``
     on construction.  Skipped entirely if the class body already defines
-    ``__init__``.
+    ``__init__``.  However, when *enabled* is False and the user defines
+    ``__init__``, the method is wrapped to pre-allocate the C++ object
+    so that field descriptors do not segfault on a NULL handle.
     """
     if "__init__" in cls.__dict__:
+        if not enabled:
+            # User defined __init__ with init=False: wrap to pre-allocate.
+            user_init = cls.__dict__["__init__"]
+
+            @functools.wraps(user_init)
+            def __init__(self: Any, *args: Any, **kwargs: Any) -> None:
+                _ffi_alloc_empty(self)
+                user_init(self, *args, **kwargs)
+
+            setattr(cls, "__init__", __init__)
         return
     type_info: TypeInfo | None = getattr(cls, "__tvm_ffi_type_info__", None)
     if type_info is None:

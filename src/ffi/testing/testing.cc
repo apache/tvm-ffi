@@ -227,6 +227,66 @@ class TestCxxNoAutoInitObj : public Object {
   TVM_FFI_DECLARE_OBJECT_INFO("testing.TestCxxNoAutoInit", TestCxxNoAutoInitObj, Object);
 };
 
+// Test: init(false) with a String field — for init=False + custom __init__ regression.
+class TestCxxNoAutoInitStrObj : public Object {
+ public:
+  String name;
+
+  static constexpr bool _type_mutable = true;
+  TVM_FFI_DECLARE_OBJECT_INFO("testing.TestCxxNoAutoInitStr", TestCxxNoAutoInitStrObj, Object);
+};
+
+// Test: init(false) child of auto-init parent — for super().__init__() regression.
+class TestCxxNoAutoInitChildObj : public TestCxxAutoInitParentObj {
+ public:
+  int64_t child_val;
+
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("testing.TestCxxNoAutoInitChild", TestCxxNoAutoInitChildObj,
+                                    TestCxxAutoInitParentObj);
+};
+
+// Bug #2 regression: init(false) types used with custom __init__ in Python.
+class TestB2VarObj : public Object {
+ public:
+  String name;
+
+  static constexpr bool _type_mutable = true;
+  TVM_FFI_DECLARE_OBJECT_INFO("testing.TestB2Var", TestB2VarObj, Object);
+};
+
+class TestB2PairObj : public Object {
+ public:
+  int64_t first;
+  int64_t second;
+
+  static constexpr bool _type_mutable = true;
+  TVM_FFI_DECLARE_OBJECT_INFO("testing.TestB2Pair", TestB2PairObj, Object);
+};
+
+class TestB2BaseObj : public Object {
+ public:
+  int64_t x;
+
+  static constexpr bool _type_mutable = true;
+  static constexpr uint32_t _type_child_slots = 1;
+  TVM_FFI_DECLARE_OBJECT_INFO("testing.TestB2Base", TestB2BaseObj, Object);
+};
+
+class TestB2ChildObj : public TestB2BaseObj {
+ public:
+  int64_t y;
+
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("testing.TestB2Child", TestB2ChildObj, TestB2BaseObj);
+};
+
+class TestB2EmptyInitObj : public Object {
+ public:
+  int64_t val;
+
+  static constexpr bool _type_mutable = true;
+  TVM_FFI_DECLARE_OBJECT_INFO("testing.TestB2EmptyInit", TestB2EmptyInitObj, Object);
+};
+
 class TestDeepCopyEdgesObj : public Object {
  public:
   Any v_any;
@@ -460,6 +520,27 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   refl::ObjectDef<TestCxxNoAutoInitObj>(refl::init(false))
       .def_rw("x", &TestCxxNoAutoInitObj::x)
       .def_rw("y", &TestCxxNoAutoInitObj::y);
+
+  // init(false) with a String field — for init=False + custom __init__ regression.
+  refl::ObjectDef<TestCxxNoAutoInitStrObj>(refl::init(false))
+      .def_rw("name", &TestCxxNoAutoInitStrObj::name);
+
+  // init(false) child of auto-init parent — for super().__init__() regression.
+  refl::ObjectDef<TestCxxNoAutoInitChildObj>(refl::init(false))
+      .def_rw("child_val", &TestCxxNoAutoInitChildObj::child_val);
+
+  // Bug #2 regression: init(false) types used with custom __init__ in Python.
+  refl::ObjectDef<TestB2VarObj>(refl::init(false)).def_rw("name", &TestB2VarObj::name);
+
+  refl::ObjectDef<TestB2PairObj>(refl::init(false))
+      .def_rw("first", &TestB2PairObj::first)
+      .def_rw("second", &TestB2PairObj::second);
+
+  refl::ObjectDef<TestB2BaseObj>().def_rw("x", &TestB2BaseObj::x);
+
+  refl::ObjectDef<TestB2ChildObj>(refl::init(false)).def_rw("y", &TestB2ChildObj::y);
+
+  refl::ObjectDef<TestB2EmptyInitObj>(refl::init(false)).def_rw("val", &TestB2EmptyInitObj::val);
 
   refl::ObjectDef<TestDeepCopyEdgesObj>()
       .def_rw("v_any", &TestDeepCopyEdgesObj::v_any)

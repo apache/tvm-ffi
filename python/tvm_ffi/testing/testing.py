@@ -384,6 +384,15 @@ class _TestCxxNoAutoInit(Object):
     y: int
 
 
+@c_class("testing.TestCxxNoAutoInitStr", init=False)
+class _TestCxxNoAutoInitStr(Object):
+    """Test object with init(false) and a String field."""
+
+    __test__ = False
+
+    name: str
+
+
 @c_class("testing.TestCxxAutoInitParent")
 class _TestCxxAutoInitParent(Object):
     """Parent object for inheritance auto-init tests."""
@@ -415,3 +424,12 @@ class _TestCxxAutoInitChild(_TestCxxAutoInitParent):
             *,
             child_kw_only: int,
         ) -> None: ...
+
+
+@c_class("testing.TestCxxNoAutoInitChild", init=False)
+class _TestCxxNoAutoInitChild(_TestCxxAutoInitParent):
+    """Test child object with init(false) — for super().__init__() regression."""
+
+    __test__ = False
+
+    child_val: int

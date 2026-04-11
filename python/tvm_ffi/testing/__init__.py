@@ -40,6 +40,8 @@ from .testing import (
     _TestCxxInitSubset,
     _TestCxxKwOnly,
     _TestCxxNoAutoInit,
+    _TestCxxNoAutoInitChild,
+    _TestCxxNoAutoInitStr,
     add_one,
     create_object,
     make_unregistered_object,
