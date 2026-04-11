@@ -58,12 +58,20 @@ def _extra_cflags() -> list[str]:
     return []
 
 
+def _extra_cuda_cflags() -> list[str]:
+    machine = platform.machine()
+    if machine in ("aarch64", "arm64"):
+        return ["-Xcompiler", "-mno-outline-atomics"]
+    return []
+
+
 def _build_objects(
     src_dir: Path,
     out_dir: Path,
     *,
     ext_glob: str,
     extra_cflags: list[str],
+    extra_cuda_cflags: list[str] | None = None,
 ) -> None:
     """Compile all sources in *src_dir* to object files in *out_dir*."""
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -78,6 +86,7 @@ def _build_objects(
             sources=[str(src)],
             output=f"{src.stem}.o",
             extra_cflags=extra_cflags,
+            extra_cuda_cflags=extra_cuda_cflags or [],
             build_directory=str(build_dir),
         )
         shutil.copy2(obj_path, dest)
@@ -238,6 +247,12 @@ def build_test_objects(out_dir: Path | None = None) -> Path:
 
     # CUDA (platform-independent, uses nvcc)
     if shutil.which("nvcc"):
-        _build_objects(SOURCES_CUDA, out_dir / "cuda", ext_glob="*.cu", extra_cflags=[])
+        _build_objects(
+            SOURCES_CUDA,
+            out_dir / "cuda",
+            ext_glob="*.cu",
+            extra_cflags=[],
+            extra_cuda_cflags=_extra_cuda_cflags(),
+        )
 
     return out_dir
