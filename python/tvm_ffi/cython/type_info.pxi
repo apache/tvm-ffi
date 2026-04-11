@@ -696,12 +696,12 @@ class TypeInfo:
         cdef const TVMFFITypeInfo* c_info = TVMFFIGetTypeInfo(self.type_index)
         if c_info != NULL and c_info.metadata != NULL:
             return c_info.metadata.total_size
-        cdef int64_t end = sizeof(TVMFFIObject)
-        if self.fields:
-            for f in self.fields:
-                f_end = f.offset + f.size
-                if f_end > end:
-                    end = f_end
+        if self.parent_type_info is None:
+            raise ValueError(f"Cannot find parent type of {type(self)}")
+        cdef int64_t end = self.parent_type_info.total_size
+        assert end >= sizeof(TVMFFIObject)
+        for f in self.fields:
+            end = max(end, f.offset + f.size)
         return (end + 7) & ~7  # align to 8 bytes
 
     def _register_fields(self, fields, structure_kind=None):

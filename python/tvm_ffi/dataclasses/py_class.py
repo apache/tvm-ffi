@@ -149,7 +149,7 @@ def _collect_own_fields(
     """
     fields: list[Field] = []
     kw_only_active = decorator_kw_only
-    own_annotations: dict[str, str] = getattr(cls, "__annotations__", {})
+    own_annotations: dict[str, str] = cls.__dict__.get("__annotations__", {})
 
     for name in own_annotations:
         resolved_type = hints.get(name)

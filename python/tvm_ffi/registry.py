@@ -431,13 +431,20 @@ def _make_init_signature(type_info: TypeInfo) -> inspect.Signature:
 
     # Walk the parent chain to collect all fields (parent-first order).
     all_fields: list[Any] = []
+    seen_names: set[str] = set()
     ti: TypeInfo | None = type_info
     chain: list[TypeInfo] = []
     while ti is not None:
         chain.append(ti)
         ti = ti.parent_type_info
     for ancestor_info in reversed(chain):
-        all_fields.extend(ancestor_info.fields)
+        for f in ancestor_info.fields:
+            if f.name in seen_names:
+                raise ValueError(
+                    f"duplicate field name {f.name!r} in type hierarchy of {type_info.type_key!r}"
+                )
+            seen_names.add(f.name)
+            all_fields.append(f)
 
     for field in all_fields:
         if not field.c_init:

@@ -2763,6 +2763,134 @@ class TestFieldInheritance:
         obj_copy.c = 99
         assert obj.c == 3
 
+    # -- Regression: empty intermediate parent must propagate total_size -----
+
+    def test_empty_intermediate_parent_offsets(self) -> None:
+        """GrandParent(x,y) -> Parent(no fields) -> Child(a,b): no overlap."""
+        GP = _make_type(
+            "OffGP",
+            [
+                Field(name="x", ty=TypeSchema("int"), default=MISSING),
+                Field(name="y", ty=TypeSchema("int"), default=MISSING),
+            ],
+        )
+        P = _make_type("OffP", [], parent=GP)
+        C = _make_type(
+            "OffC",
+            [
+                Field(name="a", ty=TypeSchema("int"), default=MISSING),
+                Field(name="b", ty=TypeSchema("int"), default=MISSING),
+            ],
+            parent=P,
+        )
+        obj = C(x=10, y=20, a=30, b=40)
+        assert obj.x == 10
+        assert obj.y == 20
+        assert obj.a == 30
+        assert obj.b == 40
+
+    def test_empty_intermediate_parent_total_size(self) -> None:
+        """Parent with no own fields inherits total_size from its parent."""
+        GP = _make_type(
+            "OffGP2",
+            [
+                Field(name="x", ty=TypeSchema("int"), default=MISSING),
+                Field(name="y", ty=TypeSchema("int"), default=MISSING),
+            ],
+        )
+        P = _make_type("OffP2", [], parent=GP)
+        gp_info = getattr(GP, "__tvm_ffi_type_info__")
+        p_info = getattr(P, "__tvm_ffi_type_info__")
+        assert p_info.total_size >= gp_info.total_size
+
+    def test_empty_intermediate_child_offsets_non_overlapping(self) -> None:
+        """Child field offsets must start at or after Parent.total_size."""
+        GP = _make_type(
+            "OffGP3",
+            [
+                Field(name="x", ty=TypeSchema("int"), default=MISSING),
+                Field(name="y", ty=TypeSchema("int"), default=MISSING),
+            ],
+        )
+        P = _make_type("OffP3", [], parent=GP)
+        C = _make_type(
+            "OffC3",
+            [Field(name="a", ty=TypeSchema("int"), default=MISSING)],
+            parent=P,
+        )
+        p_info = getattr(P, "__tvm_ffi_type_info__")
+        c_info = getattr(C, "__tvm_ffi_type_info__")
+        assert c_info.fields[0].offset >= p_info.total_size
+
+    def test_two_empty_intermediate_parents(self) -> None:
+        """GP(x) -> Mid1() -> Mid2() -> Leaf(a): offsets propagated through two empty layers."""
+        GP = _make_type(
+            "OffGP4",
+            [Field(name="x", ty=TypeSchema("int"), default=MISSING)],
+        )
+        Mid1 = _make_type("OffMid1", [], parent=GP)
+        Mid2 = _make_type("OffMid2", [], parent=Mid1)
+        Leaf = _make_type(
+            "OffLeaf",
+            [Field(name="a", ty=TypeSchema("int"), default=MISSING)],
+            parent=Mid2,
+        )
+        obj = Leaf(x=1, a=2)
+        assert obj.x == 1
+        assert obj.a == 2
+        gp_info = getattr(GP, "__tvm_ffi_type_info__")
+        leaf_info = getattr(Leaf, "__tvm_ffi_type_info__")
+        assert leaf_info.fields[0].offset >= gp_info.total_size
+
+    def test_empty_intermediate_mutation_no_aliasing(self) -> None:
+        """Mutating Child.a must not corrupt GrandParent.x through an empty parent."""
+        GP = _make_type(
+            "OffGP5",
+            [
+                Field(name="x", ty=TypeSchema("int"), default=MISSING),
+                Field(name="y", ty=TypeSchema("int"), default=MISSING),
+            ],
+        )
+        P = _make_type("OffP5", [], parent=GP)
+        C = _make_type(
+            "OffC5",
+            [
+                Field(name="a", ty=TypeSchema("int"), default=MISSING),
+                Field(name="b", ty=TypeSchema("int"), default=MISSING),
+            ],
+            parent=P,
+        )
+        obj = C(x=10, y=20, a=30, b=40)
+        obj.a = 99
+        assert obj.x == 10
+        assert obj.y == 20
+        obj.x = 77
+        assert obj.a == 99
+        assert obj.b == 40
+
+    def test_empty_intermediate_py_class_decorator(self) -> None:
+        """Same bug via @py_class (the high-level API)."""
+
+        @py_class(_unique_key("OffDecGP"))
+        class GP(Object):
+            x: int = 0
+            y: int = 0
+
+        @py_class(_unique_key("OffDecP"))
+        class P(GP):
+            pass
+
+        @py_class(_unique_key("OffDecC"))
+        class C(P):
+            a: int = 0
+            b: int = 0
+
+        obj = C(x=10, y=20, a=30, b=40)
+        assert obj.x == 10
+        assert obj.y == 20
+        assert obj.a == 30
+        assert obj.b == 40
+
 
 # ###########################################################################
 #  15. Mutual / Self References
