@@ -29,6 +29,24 @@ from .core import TypeInfo
 # whether we simplify skip unknown objects regtistration
 _SKIP_UNKNOWN_OBJECTS = False
 
+# Lazily cached reference to ffi.ObjectCreateEmpty (resolved on first use).
+_OBJECT_CREATE_EMPTY: Callable[..., Any] | None = None
+
+
+def _ffi_alloc_empty(type_index: int) -> Any:
+    """Allocate an empty (default-initialized) C++ object by *type_index*.
+
+    Calls ``ffi.ObjectCreateEmpty`` which invokes the type's registered
+    creator (the C++ default constructor).  Unlike
+    ``MakeObjectFromPackedArgs`` this does NOT validate required fields,
+    so it is safe to call before the user's ``__init__`` has had a chance
+    to set field values.
+    """
+    global _OBJECT_CREATE_EMPTY  # noqa: PLW0603
+    if _OBJECT_CREATE_EMPTY is None:
+        _OBJECT_CREATE_EMPTY = get_global_func("ffi.ObjectCreateEmpty")
+    return _OBJECT_CREATE_EMPTY(type_index)
+
 
 _T = TypeVar("_T", bound=type)
 
@@ -454,7 +472,7 @@ def _setup_copy_methods(
             setattr(type_cls, "__replace__", _replace_unsupported)
 
 
-def _install_init(cls: type, *, enabled: bool) -> None:
+def _install_init(cls: type, *, enabled: bool, pre_alloc: bool = False) -> None:
     """Install ``__init__`` from C++ reflection metadata, or a guard.
 
     When *enabled* is True, looks for a ``__ffi_init__`` method in the
@@ -467,8 +485,37 @@ def _install_init(cls: type, *, enabled: bool) -> None:
     When *enabled* is False, installs a guard that raises ``TypeError``
     on construction.  Skipped entirely if the class body already defines
     ``__init__``.
+
+    When *pre_alloc* is True and the class defines its own ``__init__``,
+    wrap it to pre-allocate a C++ object via
+    ``ffi.ObjectCreateEmpty`` before the user's code runs.  This
+    ensures field setters always find a valid handle.
     """
     if "__init__" in cls.__dict__:
+        if not enabled or pre_alloc:
+            # Wrap user's __init__ to ensure a C++ object is allocated.
+            # Pre-allocate the C++ object *before* the user's code runs so
+            # that field setters (which dereference chandle + offset) never
+            # hit a NULL handle.
+            #
+            # If the user's __init__ also calls __ffi_init__ (or
+            # __init_handle_by_constructor__), the pre-allocated handle is
+            # replaced.  We keep the pre-alloc object alive in a local so
+            # its __dealloc__ properly frees the handle when it goes out
+            # of scope -- unless the user init moved it to self, in which
+            # case self owns it and the local's chandle is already NULL.
+            user_init = cls.__dict__["__init__"]
+
+            import functools  # noqa: PLC0415
+
+            @functools.wraps(user_init)
+            def __init__(self: Any, *args: Any, **kwargs: Any) -> None:
+                actual_type_info = type(self).__tvm_ffi_type_info__
+                _pre_alloc_guard = _ffi_alloc_empty(actual_type_info.type_index)
+                self.__move_handle_from__(_pre_alloc_guard)
+                user_init(self, *args, **kwargs)
+
+            setattr(cls, "__init__", __init__)
         return
     type_info: TypeInfo | None = getattr(cls, "__tvm_ffi_type_info__", None)
     if type_info is None:
@@ -550,6 +597,7 @@ def _install_dataclass_dunders(
     eq: bool,
     order: bool,
     unsafe_hash: bool,
+    pre_alloc: bool = False,
 ) -> None:
     """Install structural dunder methods on *cls*.
 
@@ -578,9 +626,13 @@ def _install_dataclass_dunders(
         ``NotImplemented`` for unrelated types.
     unsafe_hash
         If True, install ``__hash__`` using ``RecursiveHash``.
+    pre_alloc
+        If True, wrap user-defined ``__init__`` to pre-allocate a C++
+        object before the user's code runs.  Used by ``@c_class`` to
+        ensure field setters never hit a NULL handle.
 
     """
-    _install_init(cls, enabled=init)
+    _install_init(cls, enabled=init, pre_alloc=pre_alloc)
 
     if repr and "__repr__" not in cls.__dict__:
         from .core import object_repr  # noqa: PLC0415

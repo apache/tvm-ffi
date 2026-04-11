@@ -164,6 +164,26 @@ inline void StructuralKeyRegisterReflection() {
       .attr("__any_equal__", reinterpret_cast<void*>(&StructuralKeyEqual));
 }
 
+/*! \brief Create an empty (default-initialized) object by type index.
+ *
+ * Unlike MakeObjectFromPackedArgs this does NOT validate required fields.
+ * It simply calls the registered creator, which runs the C++ default
+ * constructor (scalars are 0, ObjectRef fields are null, etc.).
+ * Used by the Python pre-allocation wrapper to ensure a valid chandle
+ * before user-defined __init__ runs.
+ */
+ObjectRef ObjectCreateEmpty(int32_t type_index) {
+  const TVMFFITypeInfo* type_info = TVMFFIGetTypeInfo(type_index);
+  if (type_info->metadata == nullptr || type_info->metadata->creator == nullptr) {
+    TVM_FFI_THROW(RuntimeError) << "Type `" << TypeIndexToTypeKey(type_index)
+                                << "` does not support default construction";
+  }
+  TVMFFIObjectHandle handle;
+  TVM_FFI_CHECK_SAFE_CALL(type_info->metadata->creator(&handle));
+  return ObjectRef(
+      details::ObjectUnsafe::ObjectPtrFromOwned<Object>(static_cast<TVMFFIObject*>(handle)));
+}
+
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   AccessStepRegisterReflection();
@@ -172,6 +192,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
 
   refl::GlobalDef()
       .def_packed("ffi.MakeObjectFromPackedArgs", MakeObjectFromPackedArgs)
+      .def("ffi.ObjectCreateEmpty", ObjectCreateEmpty)
       .def("ffi.StructuralKey", [](Any key) { return StructuralKey(std::move(key)); })
       .def("ffi.StructuralKeyEqual", StructuralKeyEqual);
 }

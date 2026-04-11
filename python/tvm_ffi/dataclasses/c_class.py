@@ -109,7 +109,7 @@ def c_class(
     def decorator(cls: _T) -> _T:
         cls = register_object(type_key)(cls)
         _install_dataclass_dunders(
-            cls, init=init, repr=repr, eq=eq, order=order, unsafe_hash=unsafe_hash
+            cls, init=init, repr=repr, eq=eq, order=order, unsafe_hash=unsafe_hash, pre_alloc=True
         )
         return cls
 

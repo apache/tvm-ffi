@@ -236,6 +236,39 @@ class TestDeepCopyEdgesObj : public Object {
   TVM_FFI_DECLARE_OBJECT_INFO("testing.TestDeepCopyEdges", TestDeepCopyEdgesObj, Object);
 };
 
+// Bug 6 regression: types used to verify that pre-allocation wrapping works
+// when a @c_class defines a custom __init__ without calling __ffi_init__.
+class TestBug6NodeObj : public Object {
+ public:
+  static constexpr bool _type_mutable = true;
+  static constexpr uint32_t _type_child_slots = 1;
+  TVM_FFI_DECLARE_OBJECT_INFO("testing.TestBug6Node", TestBug6NodeObj, Object);
+};
+
+class TestBug6ContainerObj : public Object {
+ public:
+  Any val;
+
+  static constexpr bool _type_mutable = true;
+  TVM_FFI_DECLARE_OBJECT_INFO("testing.TestBug6Container", TestBug6ContainerObj, Object);
+};
+
+class TestBug6HybridObj : public Object {
+ public:
+  int64_t x = 0;
+
+  static constexpr bool _type_mutable = true;
+  TVM_FFI_DECLARE_OBJECT_INFO("testing.TestBug6Hybrid", TestBug6HybridObj, Object);
+};
+
+class TestBug6PreallocObj : public Object {
+ public:
+  String name;
+
+  static constexpr bool _type_mutable = true;
+  TVM_FFI_DECLARE_OBJECT_INFO("testing.TestBug6Prealloc", TestBug6PreallocObj, Object);
+};
+
 class TestNonCopyable : public Object {
  public:
   int64_t value;
@@ -464,6 +497,12 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   refl::ObjectDef<TestDeepCopyEdgesObj>()
       .def_rw("v_any", &TestDeepCopyEdgesObj::v_any)
       .def_rw("v_obj", &TestDeepCopyEdgesObj::v_obj);
+
+  // Bug 6 regression test types
+  refl::ObjectDef<TestBug6NodeObj>();
+  refl::ObjectDef<TestBug6ContainerObj>().def_rw("val", &TestBug6ContainerObj::val);
+  refl::ObjectDef<TestBug6HybridObj>().def_rw("x", &TestBug6HybridObj::x);
+  refl::ObjectDef<TestBug6PreallocObj>().def_rw("name", &TestBug6PreallocObj::name);
 
   refl::ObjectDef<TestNonCopyable>()
       .def(refl::init<int64_t>())
