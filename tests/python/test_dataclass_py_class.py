@@ -4841,3 +4841,67 @@ class TestSuperInitPattern:
         assert obj3.x == 42
         assert obj3.y == "hello"
         assert not obj.same_as(obj3)
+
+
+class TestDtypeDeviceFields:
+    """Regression: @py_class should accept tvm_ffi.dtype and tvm_ffi.Device as field types."""
+
+    def test_dtype_field(self) -> None:
+        @py_class(_unique_key("DtypeField"))
+        class DtypeHolder(Object):
+            dt: tvm_ffi.dtype
+
+        obj = DtypeHolder(dt=tvm_ffi.dtype("float32"))
+        assert obj.dt == "float32"
+        assert isinstance(obj.dt, tvm_ffi.dtype)
+
+    def test_dtype_field_setter(self) -> None:
+        @py_class(_unique_key("DtypeFieldSet"))
+        class DtypeHolder2(Object):
+            dt: tvm_ffi.dtype
+
+        obj = DtypeHolder2(dt=tvm_ffi.dtype("float32"))
+        obj.dt = tvm_ffi.dtype("int8")
+        assert obj.dt == "int8"
+
+    def test_device_field(self) -> None:
+        @py_class(_unique_key("DeviceField"))
+        class DeviceHolder(Object):
+            dev: tvm_ffi.Device
+
+        dev = tvm_ffi.device("cpu", 0)
+        obj = DeviceHolder(dev=dev)
+        assert obj.dev == dev
+
+    def test_dtype_device_together(self) -> None:
+        @py_class(_unique_key("DtypeDeviceTogether"))
+        class DtypeDeviceHolder(Object):
+            dt: tvm_ffi.dtype
+            dev: tvm_ffi.Device
+            name: str
+
+        dev = tvm_ffi.device("cpu", 0)
+        obj = DtypeDeviceHolder(dt=tvm_ffi.dtype("float16"), dev=dev, name="test")
+        assert obj.dt == "float16"
+        assert obj.dev == dev
+        assert obj.name == "test"
+
+    def test_optional_dtype_field(self) -> None:
+        @py_class(_unique_key("OptDtype"))
+        class OptDtype(Object):
+            dt: Optional[tvm_ffi.dtype] = None
+
+        obj_none = OptDtype()
+        assert obj_none.dt is None
+        obj_val = OptDtype(dt=tvm_ffi.dtype("bfloat16"))
+        assert obj_val.dt == "bfloat16"
+
+    def test_optional_device_field(self) -> None:
+        @py_class(_unique_key("OptDevice"))
+        class OptDevice(Object):
+            dev: Optional[tvm_ffi.Device] = None
+
+        obj_none = OptDevice()
+        assert obj_none.dev is None
+        obj_val = OptDevice(dev=tvm_ffi.device("cpu", 0))
+        assert obj_val.dev == tvm_ffi.device("cpu", 0)

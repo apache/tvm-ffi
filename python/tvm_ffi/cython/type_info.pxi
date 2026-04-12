@@ -404,9 +404,9 @@ class TypeSchema:
                 return TypeSchema("bytes")
 
         # --- Non-CObject cdef classes with known origins ---
-        if annotation is DataType:
+        if annotation is DataType or (_CLASS_DTYPE is not None and annotation is _CLASS_DTYPE):
             return TypeSchema("dtype")
-        if annotation is Device:
+        if annotation is Device or (_CLASS_DEVICE is not None and annotation is _CLASS_DEVICE):
             return TypeSchema("Device")
 
         # --- ctypes.c_void_p ---
