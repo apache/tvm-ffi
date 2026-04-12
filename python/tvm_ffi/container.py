@@ -168,6 +168,9 @@ class Array(core.CContainerBase, core.Object, Sequence[T]):
     # fmt: on
     # tvm-ffi-stubgen(end)
 
+    def __deepcopy__(self, memo: Any = None) -> Any:
+        return _ffi_api.DeepCopy(self)
+
     def __init__(self, input_list: Iterable[T]) -> None:
         """Construct an Array from a Python sequence."""
         self.__init_handle_by_constructor__(_ffi_api.Array, *input_list)
@@ -219,6 +222,9 @@ class List(core.CContainerBase, core.Object, MutableSequence[T]):
     # fmt: off
     # fmt: on
     # tvm-ffi-stubgen(end)
+
+    def __deepcopy__(self, memo: Any = None) -> Any:
+        return _ffi_api.DeepCopy(self)
 
     def __init__(self, input_list: Iterable[T] = ()) -> None:
         """Construct a List from a Python sequence."""
@@ -474,6 +480,9 @@ class Map(core.CContainerBase, core.Object, Mapping[K, V]):
     # fmt: on
     # tvm-ffi-stubgen(end)
 
+    def __deepcopy__(self, memo: Any = None) -> Any:
+        return _ffi_api.DeepCopy(self)
+
     def __init__(self, input_dict: Mapping[K, V]) -> None:
         """Construct a Map from a Python mapping."""
         list_kvs: list[Any] = []
@@ -567,6 +576,9 @@ class Dict(core.CContainerBase, core.Object, MutableMapping[K, V]):
         assert len(d) == 3
 
     """
+
+    def __deepcopy__(self, memo: Any = None) -> Any:
+        return _ffi_api.DeepCopy(self)
 
     def __init__(self, input_dict: Mapping[K, V] | None = None) -> None:
         """Construct a Dict from a Python mapping."""

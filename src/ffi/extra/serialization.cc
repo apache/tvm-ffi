@@ -195,7 +195,8 @@ class ObjectGraphSerializer {
   // create the data for the object, if the type has a custom data to json function,
   // use it. otherwise, we go over the fields and create the data.
   json::Value CreateObjectData(const Any& value) {
-    static reflection::TypeAttrColumn data_to_json = reflection::TypeAttrColumn("__data_to_json__");
+    static reflection::TypeAttrColumn data_to_json =
+        reflection::TypeAttrColumn(reflection::type_attr::kDataToJson);
     if (data_to_json[value.type_index()] != nullptr) {
       return data_to_json[value.type_index()].cast<Function>()(value);
     }
@@ -365,7 +366,7 @@ class ObjectGraphDeserializer {
 
   Any DecodeObjectData(int32_t type_index, const json::Value& data) {
     static reflection::TypeAttrColumn data_from_json =
-        reflection::TypeAttrColumn("__data_from_json__");
+        reflection::TypeAttrColumn(reflection::type_attr::kDataFromJson);
     if (data_from_json[type_index] != nullptr) {
       return data_from_json[type_index].cast<Function>()(data);
     }
@@ -457,8 +458,8 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("ffi.ToJSONGraphString", ToJSONGraphString)
       .def("ffi.FromJSONGraph", FromJSONGraph)
       .def("ffi.FromJSONGraphString", FromJSONGraphString);
-  refl::EnsureTypeAttrColumn("__data_to_json__");
-  refl::EnsureTypeAttrColumn("__data_from_json__");
+  refl::EnsureTypeAttrColumn(refl::type_attr::kDataToJson);
+  refl::EnsureTypeAttrColumn(refl::type_attr::kDataFromJson);
 }
 
 }  // namespace ffi

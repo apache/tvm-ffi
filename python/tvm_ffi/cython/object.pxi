@@ -258,16 +258,6 @@ class Object(CObject, metaclass=_ObjectSlotsMeta):
     """
     __slots__ = ()
 
-    def __ffi_init__(self, *args: Any) -> None:
-        """Initialize the instance using the ``__ffi_init__`` method registered on C++ side.
-
-        Parameters
-        ----------
-        args: list of objects
-            The arguments to the constructor
-        """
-        self.__init_handle_by_constructor__(type(self).__c_ffi_init__, *args)
-
     def same_as(self, other: object) -> bool:
         """Return ``True`` if both references point to the same object.
 
@@ -452,10 +442,7 @@ cdef inline object make_fallback_cls_for_type_index(int32_t type_index):
     for field in type_info.fields:
         setattr(cls, field.name, field.as_property(cls))
     for method in type_info.methods:
-        name = method.name
-        if name == "__ffi_init__":
-            name = "__c_ffi_init__"
-        setattr(cls, name, method.as_callable(cls))
+        setattr(cls, method.name, method.as_callable(cls))
     # Update the registry
     type_info.type_cls = cls
     _update_registry(type_index, type_key, type_info, cls)

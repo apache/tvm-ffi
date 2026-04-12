@@ -274,7 +274,7 @@ class TestDeepCopy:
 
     def test_non_copyable_type_raises(self) -> None:
         obj = tvm_ffi.testing.TestNonCopyable(42)
-        with pytest.raises(TypeError, match="does not support deepcopy"):
+        with pytest.raises((TypeError, RuntimeError), match="not copy-constructible"):
             copy.deepcopy(obj)
 
     def test_long_string_in_array(self) -> None:
@@ -950,7 +950,7 @@ class TestReplace:
 
     def test_non_copyable_type_raises(self) -> None:
         obj = tvm_ffi.testing.TestNonCopyable(42)
-        with pytest.raises(TypeError, match="does not support replace"):
+        with pytest.raises(TypeError, match="does not support copy"):
             obj.__replace__()  # ty: ignore[unresolved-attribute]
 
 
@@ -1126,7 +1126,8 @@ class TestPyClassCopyCustomInit:
             b: str
 
             def __init__(self, *, b: str, a: int) -> None:
-                self.__ffi_init__(a, b)
+                self.a = a
+                self.b = b
 
         return CopyCI
 
@@ -1180,7 +1181,8 @@ class _PickleCI(Object):
     b: str
 
     def __init__(self, *, b: str, a: int) -> None:
-        self.__ffi_init__(a, b)
+        self.a = a
+        self.b = b
 
 
 class TestPyClassPickleRoundtrip:

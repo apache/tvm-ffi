@@ -727,22 +727,26 @@ class TypeInfo:
         self.fields = _register_fields(self, fields, structure_kind)
         self._read_back_methods()
 
-    def _register_py_methods(self, py_methods=None):
-        """Register user-defined dunder methods and re-read the method table.
+    def _register_py_methods(self, py_methods=None, type_attr_names=frozenset()):
+        """Register user-defined dunder hooks and re-read the method table.
 
-        When *py_methods* is non-empty, each entry is registered as both
-        TypeMethod and TypeAttr via the C API.  Regardless, the full
-        method list is always re-read from the C type table so that
-        system-generated methods (``__ffi_init__``, ``__ffi_shallow_copy__``)
-        are picked up.
+        Each entry whose name is in *type_attr_names* is registered as a
+        TypeAttrColumn entry (for C++ dispatch); all other entries are
+        registered as TypeMethod (for reflection introspection).
+
+        Regardless, the full method list is always re-read from the C
+        type table so that system-generated methods (``__ffi_init__``,
+        ``__ffi_shallow_copy__``) are picked up.
 
         Parameters
         ----------
         py_methods : list[tuple[str, callable, bool]] | None
             Each entry is ``(name, func, is_static)``.
+        type_attr_names : frozenset[str]
+            Names to register as TypeAttrColumn instead of TypeMethod.
         """
         if py_methods:
-            _register_py_methods(self.type_index, py_methods)
+            _register_py_methods(self.type_index, py_methods, type_attr_names)
         self._read_back_methods()
 
     def _read_back_methods(self):
@@ -957,15 +961,7 @@ def _register_fields(type_info, fields, structure_kind=None):
     cdef TVMFFIFieldGetter getter
     cdef FieldGetter fgetter
     cdef FieldSetter fsetter
-
-    # Get global functions
-    _get_field_getter = _get_global_func("ffi.GetFieldGetter", False)
-    _make_field_setter = _get_global_func("ffi.MakeFieldSetter", False)
-    _make_ffi_new = _get_global_func("ffi.MakeFFINew", False)
-    _register_auto_init = _get_global_func("ffi.RegisterAutoInit", False)
-
     cdef list type_fields = []
-
     for py_field in fields:
         # 1. Get layout
         layout = _ORIGIN_NATIVE_LAYOUT.get(py_field.ty.origin, (8, 8, kTVMFFIObject))
@@ -980,8 +976,8 @@ def _register_fields(type_info, fields, structure_kind=None):
 
         # 3. Get getter (C function pointer) and setter (FunctionObj).
         # Pointers are transported as int64_t through the FFI boundary.
-        getter = <TVMFFIFieldGetter><int64_t>_get_field_getter(field_type_index)
-        setter_fn = <CObject>_make_field_setter(
+        getter = <TVMFFIFieldGetter><int64_t>_MAKE_FILED_GETTER(field_type_index)
+        setter_fn = <CObject>_MAKE_FIELD_SETTER(
             field_type_index,
             <int64_t><void*>py_field.ty._converter,
             <int64_t>&_f_type_convert,
@@ -1023,15 +1019,12 @@ def _register_fields(type_info, fields, structure_kind=None):
     if total_size < sizeof(TVMFFIObject):
         total_size = sizeof(TVMFFIObject)
 
-    # 7. Register __ffi_new__ + deleter
-    _make_ffi_new(type_index, total_size)
+    # 7. Register __ffi_new__, __ffi_shallow_copy__, __ffi_init__ TypeAttrColumns
+    _PYCLS_REGISTER(type_index, total_size)
 
     # 8. Register type metadata (structural_eq_hash_kind) if specified.
     if structure_kind is not None and structure_kind != 0:
         _register_type_metadata(type_index, total_size, structure_kind)
-
-    # 9. Register __ffi_init__ (auto-generated constructor)
-    _register_auto_init(type_index)
 
     return type_fields
 
@@ -1047,16 +1040,15 @@ cdef _register_type_metadata(int32_t type_index, int32_t total_size, int structu
     CHECK_CALL(TVMFFITypeRegisterMetadata(type_index, &metadata))
 
 
-cdef _register_py_methods(int32_t type_index, list py_methods):
-    """Register user-defined dunder methods as both TypeMethod and TypeAttr.
+cdef _register_py_methods(int32_t type_index, list py_methods, frozenset type_attr_names):
+    """Register user-defined methods as TypeAttrColumn or TypeMethod.
 
-    For each method in *py_methods*:
+    For each entry in *py_methods*:
     1. Convert the Python callable to a ``TVMFFIAny`` (``ffi::Function``).
-    2. Call ``TVMFFITypeRegisterMethod`` so the method appears in the
-       type's reflection metadata (``TypeInfo.methods``).
-    3. Ensure the type-attribute column exists (sentinel call with
-       ``type_index = kTVMFFINone``), then call ``TVMFFITypeRegisterAttr``
-       so the C++ runtime dispatch can find the hook.
+    2. If the name is in *type_attr_names*, register as TypeAttrColumn
+       (for C++ dispatch via ``TypeAttrColumn``).
+    3. Otherwise, register as TypeMethod (for reflection introspection
+       via ``TypeInfo.methods``).
 
     Parameters
     ----------
@@ -1064,6 +1056,8 @@ cdef _register_py_methods(int32_t type_index, list py_methods):
         The runtime type index of the type.
     py_methods : list[tuple[str, callable, bool]]
         Each entry is ``(name, func, is_static)``.
+    type_attr_names : frozenset[str]
+        Names to register as TypeAttrColumn instead of TypeMethod.
     """
     cdef TVMFFIMethodInfo method_info
     cdef TVMFFIAny func_any
@@ -1090,20 +1084,20 @@ cdef _register_py_methods(int32_t type_index, list py_methods):
             )
             CHECK_CALL(c_api_ret_code)
 
-            # 1. Register as TypeMethod
-            method_info.name = name_arg.cdata
-            method_info.doc.data = NULL
-            method_info.doc.size = 0
-            method_info.flags = kTVMFFIFieldFlagBitMaskIsStaticMethod if is_static else 0
-            method_info.method = func_any
-            method_info.metadata.data = NULL
-            method_info.metadata.size = 0
-            CHECK_CALL(TVMFFITypeRegisterMethod(type_index, &method_info))
-
-            # 2. Ensure type-attr column exists (sentinel: kTVMFFINone)
-            CHECK_CALL(TVMFFITypeRegisterAttr(kTVMFFINone, &name_arg.cdata, &sentinel_any))
-            # 3. Register as TypeAttr
-            CHECK_CALL(TVMFFITypeRegisterAttr(type_index, &name_arg.cdata, &func_any))
+            if name in type_attr_names:
+                # Register as TypeAttrColumn (for C++ dispatch)
+                CHECK_CALL(TVMFFITypeRegisterAttr(kTVMFFINone, &name_arg.cdata, &sentinel_any))
+                CHECK_CALL(TVMFFITypeRegisterAttr(type_index, &name_arg.cdata, &func_any))
+            else:
+                # Register as TypeMethod (for reflection introspection)
+                method_info.name = name_arg.cdata
+                method_info.doc.data = NULL
+                method_info.doc.size = 0
+                method_info.flags = kTVMFFIFieldFlagBitMaskIsStaticMethod if is_static else 0
+                method_info.method = func_any
+                method_info.metadata.data = NULL
+                method_info.metadata.size = 0
+                CHECK_CALL(TVMFFITypeRegisterMethod(type_index, &method_info))
         finally:
             if func_any.type_index >= kTVMFFIStaticObjectBegin and func_any.v_obj != NULL:
                 TVMFFIObjectDecRef(<TVMFFIObjectHandle>func_any.v_obj)

@@ -1210,5 +1210,9 @@ cdef Function _OBJECT_FROM_JSON_GRAPH_STR = _get_global_func("ffi.FromJSONGraphS
 cdef Function _OBJECT_TO_JSON_GRAPH_STR = _get_global_func("ffi.ToJSONGraphString", True)
 cdef Function _CONSTRUCTOR_ARRAY = _get_global_func("ffi.Array", True)
 cdef Function _CONSTRUCTOR_MAP = _get_global_func("ffi.Map", True)
-cdef Function _FFI_CONTAINER_FIND_FIRST_NON_CPU_DEVICE = _get_global_func(
-    "ffi.ContainerFindFirstNonCPUDevice", True)
+cdef Function _FFI_CONTAINER_FIND_FIRST_NON_CPU_DEVICE = _get_global_func("ffi.ContainerFindFirstNonCPUDevice", True)
+cdef Function _MAKE_FILED_GETTER = _get_global_func("ffi.MakeFieldGetter", True)
+cdef Function _MAKE_FIELD_SETTER = _get_global_func("ffi.MakeFieldSetter", True)
+cdef Function _PYCLS_REGISTER = _get_global_func("ffi._PyClassRegisterTypeAttrColumns", True)
+MISSING = _get_global_func("ffi.GetInvalidObject", False)()
+KWARGS = _get_global_func("ffi.GetKwargsObject", False)()

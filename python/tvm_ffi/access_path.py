@@ -55,8 +55,6 @@ class AccessStep(Object):
     # fmt: off
     kind: int
     key: Any
-    if TYPE_CHECKING:
-        def __ffi_shallow_copy__(self, /) -> Object: ...
     # fmt: on
     # tvm-ffi-stubgen(end)
 
@@ -90,7 +88,6 @@ class AccessPath(Object):
     step: AccessStep | None
     depth: int
     if TYPE_CHECKING:
-        def __ffi_shallow_copy__(self, /) -> Object: ...
         @staticmethod
         def _root() -> AccessPath: ...
         def _extend(self, _1: AccessStep, /) -> AccessPath: ...

@@ -127,7 +127,8 @@ class StructuralHashHandler {
       return it->second;
     }
 
-    static reflection::TypeAttrColumn custom_s_hash = reflection::TypeAttrColumn("__s_hash__");
+    static reflection::TypeAttrColumn custom_s_hash =
+        reflection::TypeAttrColumn(reflection::type_attr::kSHash);
 
     // compute the hash value
     uint64_t hash_value = obj->GetTypeKeyHash();
@@ -346,7 +347,7 @@ static int64_t FFIStructuralHash(const Any& value, bool map_free_vars, bool skip
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def("ffi.StructuralHash", FFIStructuralHash);
-  refl::EnsureTypeAttrColumn("__s_hash__");
+  refl::EnsureTypeAttrColumn(refl::type_attr::kSHash);
 }
 
 }  // namespace ffi

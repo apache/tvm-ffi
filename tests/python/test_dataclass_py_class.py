@@ -30,10 +30,11 @@ from typing import Any, ClassVar, Dict, List, Optional
 import pytest
 import tvm_ffi
 from tvm_ffi import core
+from tvm_ffi._dunder import _install_dataclass_dunders
 from tvm_ffi._ffi_api import DeepCopy, RecursiveEq, RecursiveHash, ReprPrint
 from tvm_ffi.core import MISSING, Object, TypeInfo, TypeSchema, _to_py_class_value
 from tvm_ffi.dataclasses import KW_ONLY, Field, field, py_class
-from tvm_ffi.registry import _add_class_attrs, _install_dataclass_dunders
+from tvm_ffi.registry import _add_class_attrs
 from tvm_ffi.testing import TestObjectBase as _TestObjectBase
 
 _needs_310 = pytest.mark.skipif(sys.version_info < (3, 10), reason="X | Y syntax requires 3.10+")
@@ -390,7 +391,7 @@ class TestInit:
             a: int
 
             def __init__(self, val: int) -> None:
-                self.__ffi_init__(val)
+                self.a = val
 
         obj = UserInit(42)
         assert obj.a == 42
@@ -925,7 +926,8 @@ class TestDeferredInitPreservation:
             ref: DefUILate | None
 
             def __init__(self, value: int) -> None:
-                self.__ffi_init__(value, None)
+                self.value = value
+                self.ref = None
 
         @py_class(_unique_key("DefUILate"))
         class DefUILate(Object):
@@ -946,7 +948,8 @@ class TestDeferredInitPreservation:
             ref: DefNoInitLate | None
 
             def __init__(self, v: int) -> None:
-                self.__ffi_init__(v, None)
+                self.value = v
+                self.ref = None
 
         @py_class(_unique_key("DefNoInitLate"))
         class DefNoInitLate(Object):
@@ -1382,7 +1385,8 @@ class TestFieldRegistration:
             [Field(name="x", ty=TypeSchema("int"), default=MISSING)],
         )
         info = getattr(cls, "__tvm_ffi_type_info__")
-        assert "__ffi_init__" in [m.name for m in info.methods]
+        ffi_init = core._lookup_type_attr(info.type_index, "__ffi_init__")
+        assert ffi_init is not None
 
     def test_field_metadata_repr_flag(self) -> None:
         cls = _make_type(
@@ -3645,14 +3649,14 @@ class TestSetterGetterCornerCases:
 class TestFFIGlobalFunctions:
     """Low-level FFI global function registration checks."""
 
-    def test_make_ffi_new_exists(self) -> None:
-        assert tvm_ffi.get_global_func("ffi.MakeFFINew", allow_missing=True) is not None
-
-    def test_register_auto_init_exists(self) -> None:
-        assert tvm_ffi.get_global_func("ffi.RegisterAutoInit", allow_missing=True) is not None
+    def test_py_class_register_type_attr_columns_exists(self) -> None:
+        assert (
+            tvm_ffi.get_global_func("ffi._PyClassRegisterTypeAttrColumns", allow_missing=True)
+            is not None
+        )
 
     def test_get_field_getter_exists(self) -> None:
-        assert tvm_ffi.get_global_func("ffi.GetFieldGetter", allow_missing=True) is not None
+        assert tvm_ffi.get_global_func("ffi.MakeFieldGetter", allow_missing=True) is not None
 
     def test_make_field_setter_exists(self) -> None:
         assert tvm_ffi.get_global_func("ffi.MakeFieldSetter", allow_missing=True) is not None
@@ -3979,7 +3983,10 @@ class TestCustomInitFalse:
             d: bool
 
             def __init__(self, b: float, c: str, a: int, d: bool) -> None:
-                self.__ffi_init__(a, b, c, d)
+                self.a = a
+                self.b = b
+                self.c = c
+                self.d = d
 
         obj = CustomOrd(b=2.0, c="3", a=1, d=True)
         assert obj.a == 1
@@ -3994,7 +4001,8 @@ class TestCustomInitFalse:
             b: str
 
             def __init__(self, *, b: str, a: int) -> None:
-                self.__ffi_init__(a, b)
+                self.a = a
+                self.b = b
 
         obj = CustomKW(a=1, b="hello")
         assert obj.a == 1
@@ -4673,9 +4681,9 @@ class TestPyMethodAllowlist:
 
 
 class TestPyMethodIntrospection:
-    """Registered __ffi_* methods appear in ``TypeInfo.methods``."""
+    """Registered __ffi_* hooks appear in TypeAttrColumn (not TypeMethod)."""
 
-    def test_ffi_repr_in_methods(self) -> None:
+    def test_ffi_repr_in_type_attr(self) -> None:
         @py_class(_unique_key("IntrRepr"))
         class IntrRepr(core.Object):
             x: int
@@ -4684,11 +4692,14 @@ class TestPyMethodIntrospection:
                 return "repr"
 
         info = getattr(IntrRepr, "__tvm_ffi_type_info__")
-        names = {m.name for m in info.methods}
-        assert "__ffi_repr__" in names
-        # system methods still present
-        assert "__ffi_init__" in names
-        assert "__ffi_shallow_copy__" in names
+        # User-defined hooks are registered as TypeAttrColumn, not TypeMethod
+        repr_attr = core._lookup_type_attr(info.type_index, "__ffi_repr__")
+        assert repr_attr is not None
+        # System-generated hooks are also TypeAttrColumn only
+        ffi_init = core._lookup_type_attr(info.type_index, "__ffi_init__")
+        assert ffi_init is not None
+        ffi_copy = core._lookup_type_attr(info.type_index, "__ffi_shallow_copy__")
+        assert ffi_copy is not None
 
 
 # ---------------------------------------------------------------------------
@@ -4815,7 +4826,7 @@ class TestSuperInitPattern:
         assert obj.y == "world"
 
     def test_super_init_intermediate_auto_init(self) -> None:
-        """super().__init__() where the intermediate parent has init=True (auto-generated)."""
+        """py_class init=False: no need to call super().__init__(), just set fields directly."""
 
         @py_class(_unique_key("SIAI_Mid"))
         class Mid(Object):
@@ -4826,7 +4837,8 @@ class TestSuperInitPattern:
             b: str
 
             def __init__(self, a: int, b: str) -> None:
-                super().__init__()  # type: ignore[missing-argument]
+                # For py_class, __new__ already allocated via __ffi_new__.
+                # No need to call super().__init__() — just set fields directly.
                 self.a = a
                 self.b = b
 
@@ -5033,3 +5045,123 @@ class TestDtypeDeviceFields:
         assert obj_none.dev is None
         obj_val = OptDevice(dev=tvm_ffi.device("cpu", 0))
         assert obj_val.dev == tvm_ffi.device("cpu", 0)
+
+
+# ###########################################################################
+#  kw_only regression tests (py_class via __ffi_init_inplace__)
+# ###########################################################################
+
+
+class TestPyClassKwOnlyRegression:
+    """Regression tests ensuring kw_only enforcement via C++ __ffi_init_inplace__."""
+
+    def test_missing_kw_only_error_says_keyword_only(self) -> None:
+        """Missing required kw_only field produces 'keyword-only' in the error."""
+
+        @py_class(_unique_key("KwOnlyErr"))
+        class KwOnlyErr(Object):
+            x: int
+            _: KW_ONLY
+            y: int
+
+        with pytest.raises(TypeError, match="keyword-only"):
+            KwOnlyErr(1)  # ty: ignore[missing-argument]
+
+    def test_missing_positional_error_not_keyword_only(self) -> None:
+        """Missing required positional field does NOT say 'keyword-only'."""
+
+        @py_class(_unique_key("PosErr"))
+        class PosErr(Object):
+            x: int
+            _: KW_ONLY
+            y: int
+
+        with pytest.raises(TypeError, match="missing required argument") as exc_info:
+            PosErr(y=1)  # ty: ignore[missing-argument]
+        assert "keyword-only" not in str(exc_info.value)
+
+    def test_kw_only_with_default(self) -> None:
+        """kw_only field with default can be omitted."""
+
+        @py_class(_unique_key("KwOnlyDef"))
+        class KwOnlyDef(Object):
+            x: int
+            _: KW_ONLY
+            y: int = 42
+
+        obj = KwOnlyDef(1)  # ty: ignore[missing-argument]
+        assert obj.x == 1
+        assert obj.y == 42
+
+    def test_kw_only_rejects_positional(self) -> None:
+        """kw_only fields cannot be passed positionally."""
+
+        @py_class(_unique_key("KwOnlyReject"))
+        class KwOnlyReject(Object):
+            x: int
+            _: KW_ONLY
+            y: int
+
+        with pytest.raises(TypeError):
+            KwOnlyReject(1, 2)  # ty: ignore[missing-argument, invalid-argument-type]
+
+    def test_kw_only_all_fields(self) -> None:
+        """All fields kw_only via decorator kwarg."""
+
+        @py_class(_unique_key("AllKw"), kw_only=True)
+        class AllKw(Object):
+            a: int
+            b: int = 10
+
+        obj = AllKw(a=1)
+        assert obj.a == 1
+        assert obj.b == 10
+        with pytest.raises(TypeError):
+            AllKw(1)  # ty: ignore[missing-argument, too-many-positional-arguments]
+
+    def test_kw_only_field_override_false(self) -> None:
+        """kw_only=False on a field after KW_ONLY sentinel makes it positional."""
+
+        @py_class(_unique_key("KwOverride2"))
+        class KwOverride2(Object):
+            _: KW_ONLY
+            a: int
+            b: int = field(kw_only=False)
+
+        obj = KwOverride2(42, a=1)  # ty: ignore[missing-argument, invalid-argument-type]
+        assert obj.b == 42
+        assert obj.a == 1
+
+    def test_decorator_kw_only_with_override(self) -> None:
+        """Decorator-level kw_only with field-level override."""
+
+        @py_class(_unique_key("DecKwOverride"), kw_only=True)
+        class DecKwOverride(Object):
+            a: int = field(kw_only=False)
+            b: int
+
+        obj = DecKwOverride(1, b=2)  # ty: ignore[missing-argument, too-many-positional-arguments]
+        assert obj.a == 1
+        assert obj.b == 2
+
+    def test_kw_only_inheritance(self) -> None:
+        """kw_only enforcement works through inheritance."""
+
+        @py_class(_unique_key("KwParent"))
+        class KwParent(Object):
+            x: int
+
+        @py_class(_unique_key("KwChild"))
+        class KwChild(KwParent):
+            _: KW_ONLY
+            y: int
+
+        obj = KwChild(1, y=2)  # ty: ignore[missing-argument]
+        assert obj.x == 1
+        assert obj.y == 2
+
+        with pytest.raises(TypeError):
+            KwChild(1, 2)  # ty: ignore[missing-argument, invalid-argument-type]
+
+        with pytest.raises(TypeError, match="keyword-only"):
+            KwChild(1)  # ty: ignore[missing-argument]

@@ -29,11 +29,9 @@
 #include <tvm/ffi/container/map.h>
 #include <tvm/ffi/container/shape.h>
 #include <tvm/ffi/container/tensor.h>
-#include <tvm/ffi/dtype.h>
-#include <tvm/ffi/error.h>
 #include <tvm/ffi/extra/dataclass.h>
 #include <tvm/ffi/reflection/accessor.h>
-#include <tvm/ffi/reflection/init.h>
+#include <tvm/ffi/reflection/creator.h>
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/ffi/string.h>
 
@@ -43,6 +41,7 @@
 #include <cstring>
 #include <iomanip>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -54,6 +53,8 @@
 
 namespace tvm {
 namespace ffi {
+
+namespace refl = ::tvm::ffi::reflection;
 
 // ============================================================================
 // Shared utilities, CRTP base, and all operation classes
@@ -218,9 +219,9 @@ class ObjectGraphDFS {
         frame.kind = FrameBase::kObject;
         const TVMFFITypeInfo* type_info = TVMFFIGetTypeInfo(ti);
         uint32_t skip = self().GetFieldSkipMask();
-        reflection::ForEachFieldInfo(type_info, [&](const TVMFFIFieldInfo* finfo) {
+        refl::ForEachFieldInfo(type_info, [&](const TVMFFIFieldInfo* finfo) {
           if (finfo->flags & skip) return;
-          reflection::FieldGetter getter(finfo);
+          refl::FieldGetter getter(finfo);
           frame.children.push_back(getter(obj));
           frame.field_infos.push_back(finfo);
         });
@@ -269,7 +270,7 @@ struct CopyFrame : FrameBase {
  */
 class ObjectDeepCopier : public ObjectGraphDFS<ObjectDeepCopier, CopyFrame, Any> {
  public:
-  explicit ObjectDeepCopier(reflection::TypeAttrColumn* column) : column_(column) {}
+  explicit ObjectDeepCopier(refl::TypeAttrColumn* column) : column_(column) {}
 
   Any Run(const Any& value) {
     if (value.type_index() < TypeIndex::kTVMFFIStaticObjectBegin) return value;
@@ -371,7 +372,7 @@ class ObjectDeepCopier : public ObjectGraphDFS<ObjectDeepCopier, CopyFrame, Any>
         // Reflected object: set field if changed
         const Any& original = f.children[f.feed_idx];
         if (!original.same_as(resolved)) {
-          reflection::FieldSetter setter(f.field_infos[f.feed_idx]);
+          refl::FieldSetter setter(f.field_infos[f.feed_idx]);
           setter(f.copy.as<Object>(), resolved);
         }
         f.feed_idx++;
@@ -413,7 +414,7 @@ class ObjectDeepCopier : public ObjectGraphDFS<ObjectDeepCopier, CopyFrame, Any>
   Any OnTerminate(Any r) { return r; }
 
  private:
-  reflection::TypeAttrColumn* column_;
+  refl::TypeAttrColumn* column_;
   std::unordered_map<const Object*, Any> copy_map_;
   std::unordered_set<const Object*> in_progress_;
   bool has_deferred_ = false;
@@ -522,15 +523,15 @@ class ObjectDeepCopier : public ObjectGraphDFS<ObjectDeepCopier, CopyFrame, Any>
 
   void FixupObject(const Object* copy_obj, int32_t ti) {
     const TVMFFITypeInfo* type_info = TVMFFIGetTypeInfo(ti);
-    reflection::ForEachFieldInfo(type_info, [&](const TVMFFIFieldInfo* finfo) {
-      reflection::FieldGetter getter(finfo);
+    refl::ForEachFieldInfo(type_info, [&](const TVMFFIFieldInfo* finfo) {
+      refl::FieldGetter getter(finfo);
       Any field_val = getter(copy_obj);
       if (field_val.type_index() < TypeIndex::kTVMFFIStaticObjectBegin) return;
       const Object* field_obj = field_val.as<Object>();
       if (!field_obj) return;
       auto it = copy_map_.find(field_obj);
       if (it != copy_map_.end() && !it->second.same_as(field_val)) {
-        reflection::FieldSetter setter(finfo);
+        refl::FieldSetter setter(finfo);
         setter(copy_obj, it->second);
       }
     });
@@ -848,7 +849,7 @@ class ReprPrinter : public ObjectGraphDFS<ReprPrinter, ReprFrame, std::string> {
       return true;
     }
     // Custom __ffi_repr__ hook
-    static reflection::TypeAttrColumn repr_column(reflection::type_attr::kRepr);
+    static refl::TypeAttrColumn repr_column(refl::type_attr::kRepr);
     AnyView custom_repr = repr_column[ti];
     if (custom_repr != nullptr) {
       state_[obj] = State::kInProgress;
@@ -1044,7 +1045,7 @@ class RecursiveHasher : public ObjectGraphDFS<RecursiveHasher, HashFrame, uint64
       return true;
     }
     // Check for custom __ffi_hash__ hook
-    static reflection::TypeAttrColumn hash_column(reflection::type_attr::kHash);
+    static refl::TypeAttrColumn hash_column(refl::type_attr::kHash);
     AnyView custom = hash_column[obj->type_index()];
     if (custom != nullptr) {
       on_stack_.insert(obj);
@@ -1060,8 +1061,8 @@ class RecursiveHasher : public ObjectGraphDFS<RecursiveHasher, HashFrame, uint64
     // For reflected types (not built-in containers), error if the type has
     // __ffi_eq__ or __ffi_compare__ but no __ffi_hash__.
     if (ti >= TypeIndex::kTVMFFIStaticObjectEnd) {
-      static reflection::TypeAttrColumn eq_column(reflection::type_attr::kEq);
-      static reflection::TypeAttrColumn cmp_column(reflection::type_attr::kCompare);
+      static refl::TypeAttrColumn eq_column(refl::type_attr::kEq);
+      static refl::TypeAttrColumn cmp_column(refl::type_attr::kCompare);
       if (eq_column[obj->type_index()] != nullptr || cmp_column[obj->type_index()] != nullptr) {
         const TVMFFITypeInfo* info = TVMFFIGetTypeInfo(ti);
         TVM_FFI_THROW(ValueError)
@@ -1337,8 +1338,8 @@ class RecursiveComparer : public ObjectGraphDFS<RecursiveComparer, CompareFrame,
                                << String(lhs_info->type_key) << " vs "
                                << String(rhs_info->type_key);
     }
-    static reflection::TypeAttrColumn eq_column(reflection::type_attr::kEq);
-    static reflection::TypeAttrColumn cmp_column(reflection::type_attr::kCompare);
+    static refl::TypeAttrColumn eq_column(refl::type_attr::kEq);
+    static refl::TypeAttrColumn cmp_column(refl::type_attr::kCompare);
     int32_t ti = lhs_obj->type_index();
     AnyView custom_eq = eq_column[ti];
     AnyView custom_cmp = cmp_column[ti];
@@ -1486,9 +1487,9 @@ class RecursiveComparer : public ObjectGraphDFS<RecursiveComparer, CompareFrame,
     frame.kind = CompareFrame::kObject;
     frame.lhs_obj = lhs;
     frame.rhs_obj = rhs;
-    reflection::ForEachFieldInfo(type_info, [&](const TVMFFIFieldInfo* finfo) {
+    refl::ForEachFieldInfo(type_info, [&](const TVMFFIFieldInfo* finfo) {
       if (finfo->flags & kTVMFFIFieldFlagBitMaskCompareOff) return;
-      reflection::FieldGetter getter(finfo);
+      refl::FieldGetter getter(finfo);
       frame.children.emplace_back(getter(lhs), getter(rhs));
     });
     this->stack_.push_back(std::move(frame));
@@ -1675,7 +1676,7 @@ void PyClassDeleter(void* self_void, int flags) {
   TVMFFIObject* self = static_cast<TVMFFIObject*>(self_void);
   if (flags & kTVMFFIObjectDeleterFlagBitMaskStrong) {
     const TVMFFITypeInfo* type_info = TVMFFIGetTypeInfo(self->type_index);
-    reflection::ForEachFieldInfo(type_info, [&](const TVMFFIFieldInfo* finfo) {
+    refl::ForEachFieldInfo(type_info, [&](const TVMFFIFieldInfo* finfo) {
       void* field_addr = reinterpret_cast<char*>(self) + finfo->offset;
       int32_t ti = finfo->field_static_type_index;
       if (ti == TypeIndex::kTVMFFIAny) {
@@ -1825,22 +1826,207 @@ Function MakeFieldSetter(int32_t field_type_index, int64_t type_converter_int,
   });
 }
 
+// ============================================================================
+// Shared helpers for MakeInit / MakeInitInplace
+// ============================================================================
+
 /*!
- * \brief Register a ``__ffi_new__`` type attribute for a Python-defined type.
- *
- * Creates a factory Function that allocates zero-initialized memory of the
- * given size, sets up the TVMFFIObject header (type_index, ref counts,
- * deleter), and returns an ObjectRef.  Also registers this factory as the
- * ``__ffi_new__`` type attribute so that ``CreateEmptyObject`` can find it.
- *
- * \param type_index The type index of the Python-defined type.
- * \param total_size The total object size in bytes (header + fields).
+ * \brief Return the lazily initialized KWARGS sentinel object.
  */
-void MakeFFINew(int32_t type_index, int32_t total_size) {
-  // Pre-compute type_info pointer (stable for the process lifetime).
-  // Used by the shallow-copy lambda below; new_fn doesn't need it since
-  // calloc zero-initialization suffices (no placement construction needed).
+const ObjectRef& GetKwargsSentinel() {
+  static ObjectRef kwargs_sentinel =
+      Function::GetGlobalRequired("ffi.GetKwargsObject")().cast<ObjectRef>();
+  return kwargs_sentinel;
+}
+
+/*! \brief Pre-computed field analysis for auto-generated init. */
+struct AutoInitInfo {
+  struct Entry {
+    const TVMFFIFieldInfo* info;
+    bool init;
+    bool kw_only;
+    bool has_default;
+  };
+  std::vector<Entry> all_fields;
+  std::vector<size_t> init_indices;
+  std::vector<size_t> pos_indices;
+  std::unordered_map<std::string_view, size_t> name_to_index;
+  std::string_view type_key;
+};
+
+/*!
+ * \brief Build AutoInitInfo by analysing reflected fields for a type.
+ */
+std::shared_ptr<AutoInitInfo> BuildAutoInitInfo(int32_t type_index) {
   const TVMFFITypeInfo* type_info = TVMFFIGetTypeInfo(type_index);
+  auto info = std::make_shared<AutoInitInfo>();
+  info->type_key = std::string_view(type_info->type_key.data, type_info->type_key.size);
+
+  refl::ForEachFieldInfo(type_info, [&](const TVMFFIFieldInfo* fi) {
+    bool is_init = (fi->flags & kTVMFFIFieldFlagBitMaskInitOff) == 0;
+    bool is_kw = (fi->flags & kTVMFFIFieldFlagBitMaskKwOnly) != 0;
+    bool has_def = (fi->flags & kTVMFFIFieldFlagBitMaskHasDefault) != 0;
+    info->all_fields.push_back({fi, is_init, is_kw, has_def});
+    size_t idx = info->all_fields.size() - 1;
+    if (is_init) {
+      info->init_indices.push_back(idx);
+      info->name_to_index[std::string_view(fi->name.data, fi->name.size)] = idx;
+      if (!is_kw) {
+        info->pos_indices.push_back(idx);
+      }
+    }
+  });
+  // Required fields come before optional ones in positional list.
+  std::stable_partition(info->pos_indices.begin(), info->pos_indices.end(),
+                        [&](size_t idx) { return !info->all_fields[idx].has_default; });
+  return info;
+}
+
+/*!
+ * \brief Bind packed arguments to fields on an existing object.
+ *
+ * Handles both positional-only and KWARGS calling conventions, sets fields
+ * via ``CallFieldSetter``, fills defaults for unbound fields, and raises
+ * ``TypeError`` for missing required arguments (with ``keyword-only``
+ * distinction when applicable).
+ */
+void BindFieldArgs(Object* obj, const AutoInitInfo& info, const TVMFFIAny* raw_args, int num_args) {
+  const ObjectRef& kwargs_sentinel = GetKwargsSentinel();
+  std::vector<bool> field_set(info.all_fields.size(), false);
+
+  auto set_field = [&](size_t fi, const TVMFFIAny* value) {
+    void* addr = reinterpret_cast<char*>(obj) + info.all_fields[fi].info->offset;
+    TVM_FFI_CHECK_SAFE_CALL(refl::CallFieldSetter(info.all_fields[fi].info, addr, value));
+    field_set[fi] = true;
+  };
+
+  // ---- 1. Find KWARGS sentinel position ------------------------------------
+  int kwargs_pos = -1;
+  for (int i = 0; i < num_args; ++i) {
+    auto opt = AnyView::CopyFromTVMFFIAny(raw_args[i]).as<ObjectRef>();
+    if (opt.has_value() && opt.value().same_as(kwargs_sentinel)) {
+      kwargs_pos = i;
+      break;
+    }
+  }
+
+  // ---- 2. Bind arguments to fields -----------------------------------------
+  if (kwargs_pos >= 0) {
+    // --- 2a. KWARGS mode ----------------------------------------------------
+    int pos_arg = 0;
+    for (size_t fi : info.pos_indices) {
+      if (pos_arg < kwargs_pos) {
+        set_field(fi, &raw_args[pos_arg]);
+        ++pos_arg;
+      }
+    }
+    if (pos_arg < kwargs_pos) {
+      TVM_FFI_THROW(TypeError) << info.type_key << ".__ffi_init__() takes at most "
+                               << info.pos_indices.size() << " positional argument(s), but "
+                               << kwargs_pos << " were given";
+    }
+    int kv_count = num_args - kwargs_pos - 1;
+    if (kv_count % 2 != 0) {
+      TVM_FFI_THROW(TypeError)
+          << info.type_key
+          << ".__ffi_init__() KWARGS requires an even number of key-value arguments";
+    }
+    for (int i = kwargs_pos + 1; i < num_args; i += 2) {
+      String key = AnyView::CopyFromTVMFFIAny(raw_args[i]).cast<String>();
+      std::string_view key_sv(key.data(), key.size());
+      auto it = info.name_to_index.find(key_sv);
+      if (it == info.name_to_index.end()) {
+        TVM_FFI_THROW(TypeError) << info.type_key
+                                 << ".__ffi_init__() got an unexpected keyword argument '" << key
+                                 << "'";
+      }
+      size_t idx = it->second;
+      if (field_set[idx]) {
+        TVM_FFI_THROW(TypeError) << info.type_key << ".__ffi_init__() got multiple values "
+                                 << "for argument '" << key << "'";
+      }
+      set_field(idx, &raw_args[i + 1]);
+    }
+  } else {
+    // --- 2b. Positional-only mode -------------------------------------------
+    if (static_cast<size_t>(num_args) > info.pos_indices.size()) {
+      TVM_FFI_THROW(TypeError) << info.type_key << ".__ffi_init__() takes at most "
+                               << info.pos_indices.size() << " positional argument(s), but "
+                               << num_args << " were given";
+    }
+    for (int i = 0; i < num_args; ++i) {
+      set_field(info.pos_indices[i], &raw_args[i]);
+    }
+  }
+
+  // ---- 3. Fill defaults and check required fields --------------------------
+  for (size_t fi = 0; fi < info.all_fields.size(); ++fi) {
+    if (field_set[fi]) continue;
+    if (info.all_fields[fi].has_default) {
+      void* addr = reinterpret_cast<char*>(obj) + info.all_fields[fi].info->offset;
+      refl::SetFieldToDefault(info.all_fields[fi].info, addr);
+    } else if (info.all_fields[fi].init) {
+      auto fname = std::string_view(info.all_fields[fi].info->name.data,
+                                    info.all_fields[fi].info->name.size);
+      if (info.all_fields[fi].kw_only) {
+        TVM_FFI_THROW(TypeError) << info.type_key
+                                 << ".__ffi_init__() missing required keyword-only argument: '"
+                                 << fname << "'";
+      } else {
+        TVM_FFI_THROW(TypeError) << info.type_key << ".__ffi_init__() missing required argument: '"
+                                 << fname << "'";
+      }
+    }
+    // init=False without default: leave at creator default.
+  }
+}
+
+Function MakeInit(int32_t type_index) {
+  auto info = BuildAutoInitInfo(type_index);
+  const TVMFFITypeInfo* type_info = TVMFFIGetTypeInfo(type_index);
+  return Function::FromPacked([info, type_info](PackedArgs args, Any* rv) {
+    ObjectPtr<Object> obj_ptr = CreateEmptyObject(type_info);
+    const auto raw_args = reinterpret_cast<const TVMFFIAny*>(args.data());
+    BindFieldArgs(obj_ptr.get(), *info, raw_args, args.size());
+    *rv = ObjectRef(obj_ptr);
+  });
+}
+
+Function MakeInitInplace(int32_t type_index) {
+  auto info = BuildAutoInitInfo(type_index);
+  return Function::FromPacked([info](PackedArgs args, Any* rv) {
+    TVM_FFI_ICHECK(args.size() >= 1)
+        << "__ffi_init_inplace__ requires at least one argument (self)";
+    ObjectRef self = args[0].cast<ObjectRef>();
+    Object* obj = const_cast<Object*>(self.get());
+    const auto raw_args = reinterpret_cast<const TVMFFIAny*>(args.data());
+    BindFieldArgs(obj, *info, raw_args + 1, args.size() - 1);
+  });
+}
+
+void RegisterFFIInit(int32_t type_index) {
+  namespace refl = ::tvm::ffi::reflection;
+  Function auto_init_fn = MakeInit(type_index);
+  TVMFFIByteArray attr_name = refl::AsByteArray(refl::type_attr::kInit);
+  TVMFFIAny attr_value = AnyView(auto_init_fn).CopyToTVMFFIAny();
+  TVM_FFI_CHECK_SAFE_CALL(TVMFFITypeRegisterAttr(type_index, &attr_name, &attr_value));
+
+  Function init_inplace_fn = MakeInitInplace(type_index);
+  TVMFFIByteArray ip_attr_name = refl::AsByteArray(refl::type_attr::kInitInplace);
+  TVMFFIAny ip_attr_value = AnyView(init_inplace_fn).CopyToTVMFFIAny();
+  TVM_FFI_CHECK_SAFE_CALL(TVMFFITypeRegisterAttr(type_index, &ip_attr_name, &ip_attr_value));
+}
+
+/*!
+ * \brief Combined registration for Python-defined types:
+ * ``__ffi_init__``, ``__ffi_init_inplace__``, ``__ffi_new__``, ``__ffi_shallow_copy__``
+ */
+void PyClassRegisterTypeAttrColumns(int32_t type_index, int32_t total_size) {
+  namespace refl = ::tvm::ffi::reflection;
+  const TVMFFITypeInfo* type_info = TVMFFIGetTypeInfo(type_index);
+  // Step 1. Register `__ffi_init__` and `__ffi_init_inplace__`
+  RegisterFFIInit(type_index);
+  // Step 2. Register `__ffi_new__`
   Function new_fn = Function::FromTyped([type_index, total_size]() -> ObjectRef {
     void* obj_ptr = std::calloc(1, static_cast<size_t>(total_size));
     if (!obj_ptr) {
@@ -1859,14 +2045,10 @@ void MakeFFINew(int32_t type_index, int32_t total_size) {
     Object* obj = reinterpret_cast<Object*>(obj_ptr);
     return ObjectRef(details::ObjectUnsafe::ObjectPtrFromOwned<Object>(obj));
   });
-  // Register as __ffi_new__ type attribute
-  reflection::EnsureTypeAttrColumn("__ffi_new__");
-  TVMFFIByteArray attr_name = {"__ffi_new__", 11};
+  TVMFFIByteArray attr_name = refl::AsByteArray(refl::type_attr::kNew);
   TVMFFIAny attr_value = AnyView(new_fn).CopyToTVMFFIAny();
   TVM_FFI_CHECK_SAFE_CALL(TVMFFITypeRegisterAttr(type_index, &attr_name, &attr_value));
-  // Register __ffi_shallow_copy__ for deep-copy support.
-  // The shallow copy allocates a new object and copies all fields by value
-  // (IncRef-ing any ObjectRef/Any fields).
+  // Step 3. Register `__ffi_shallow_copy__`
   Function copy_fn =
       Function::FromTyped([type_index, total_size, type_info](const Object* src) -> ObjectRef {
         void* obj_ptr = std::calloc(1, static_cast<size_t>(total_size));
@@ -1877,7 +2059,7 @@ void MakeFFINew(int32_t type_index, int32_t total_size) {
         ffi_obj->type_index = type_index;
         ffi_obj->combined_ref_count = details::kCombinedRefCountBothOne;
         ffi_obj->deleter = PyClassDeleter;
-        reflection::ForEachFieldInfo(type_info, [&](const TVMFFIFieldInfo* finfo) {
+        refl::ForEachFieldInfo(type_info, [&](const TVMFFIFieldInfo* finfo) {
           void* dst = reinterpret_cast<char*>(obj_ptr) + finfo->offset;
           const void* field_src = reinterpret_cast<const char*>(src) + finfo->offset;
           int32_t ti = finfo->field_static_type_index;
@@ -1893,21 +2075,9 @@ void MakeFFINew(int32_t type_index, int32_t total_size) {
         Object* obj = reinterpret_cast<Object*>(obj_ptr);
         return ObjectRef(details::ObjectUnsafe::ObjectPtrFromOwned<Object>(obj));
       });
-  // Register as type attribute for generic deep copy lookup
-  reflection::EnsureTypeAttrColumn(reflection::type_attr::kShallowCopy);
-  TVMFFIByteArray copy_attr_name = {
-      reflection::type_attr::kShallowCopy,
-      std::char_traits<char>::length(reflection::type_attr::kShallowCopy)};
+  TVMFFIByteArray copy_attr_name = refl::AsByteArray(refl::type_attr::kShallowCopy);
   TVMFFIAny copy_attr_value = AnyView(copy_fn).CopyToTVMFFIAny();
   TVM_FFI_CHECK_SAFE_CALL(TVMFFITypeRegisterAttr(type_index, &copy_attr_name, &copy_attr_value));
-  // Also register as an instance method so Python can call __ffi_shallow_copy__
-  TVMFFIMethodInfo copy_method;
-  copy_method.name = copy_attr_name;
-  copy_method.doc = TVMFFIByteArray{nullptr, 0};
-  copy_method.flags = 0;
-  copy_method.method = AnyView(copy_fn).CopyToTVMFFIAny();
-  copy_method.metadata = TVMFFIByteArray{nullptr, 0};
-  TVM_FFI_CHECK_SAFE_CALL(TVMFFITypeRegisterMethod(type_index, &copy_method));
 }
 
 }  // namespace
@@ -1917,7 +2087,7 @@ void MakeFFINew(int32_t type_index, int32_t total_size) {
 // ============================================================================
 
 Any DeepCopy(const Any& value) {
-  static reflection::TypeAttrColumn column(reflection::type_attr::kShallowCopy);
+  static refl::TypeAttrColumn column(refl::type_attr::kShallowCopy);
   ObjectDeepCopier copier(&column);
   return copier.Run(value);
 }
@@ -1971,33 +2141,22 @@ bool RecursiveGe(const Any& lhs, const Any& rhs) {
 
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
-  // MakeInit
-  refl::GlobalDef().def("ffi.MakeInit", refl::MakeInit);
-  // Python-defined type support
-  refl::EnsureTypeAttrColumn("__ffi_new__");
-  refl::GlobalDef().def("ffi.GetFieldGetter", GetFieldGetter);
-  refl::GlobalDef().def("ffi.MakeFieldSetter", MakeFieldSetter);
-  refl::GlobalDef().def("ffi.MakeFFINew", MakeFFINew);
-  refl::GlobalDef().def("ffi.RegisterAutoInit", refl::RegisterAutoInit);
-  // Create an empty (zero-initialized) object by type index.
-  // Used by Python super().__init__() in @py_class(init=False) subclasses.
-  refl::GlobalDef().def("ffi.NewEmpty", [](int32_t type_index) -> ObjectRef {
-    return ObjectRef(CreateEmptyObject(TVMFFIGetTypeInfo(type_index)));
-  });
-  // Deep copy
   refl::EnsureTypeAttrColumn(refl::type_attr::kShallowCopy);
-  refl::GlobalDef().def("ffi.DeepCopy", DeepCopy);
-  // Repr printing
   refl::EnsureTypeAttrColumn(refl::type_attr::kRepr);
-  refl::GlobalDef().def("ffi.ReprPrint",
-                        [](const Any& value) -> String { return ReprPrint(value); });
-  // Recursive hash
   refl::EnsureTypeAttrColumn(refl::type_attr::kHash);
-  refl::GlobalDef().def("ffi.RecursiveHash", RecursiveHash);
-  // Recursive compare
   refl::EnsureTypeAttrColumn(refl::type_attr::kEq);
   refl::EnsureTypeAttrColumn(refl::type_attr::kCompare);
+  refl::EnsureTypeAttrColumn(refl::type_attr::kNew);
+  refl::EnsureTypeAttrColumn(refl::type_attr::kInit);
+  refl::EnsureTypeAttrColumn(refl::type_attr::kInitInplace);
   refl::GlobalDef()
+      .def("ffi._RegisterFFIInit", RegisterFFIInit)
+      .def("ffi.MakeFieldSetter", MakeFieldSetter)
+      .def("ffi._PyClassRegisterTypeAttrColumns", PyClassRegisterTypeAttrColumns)
+      .def("ffi.DeepCopy", DeepCopy)
+      .def("ffi.ReprPrint", ReprPrint)
+      .def("ffi.RecursiveHash", RecursiveHash)
+      .def("ffi.MakeFieldGetter", GetFieldGetter)
       .def("ffi.RecursiveEq", RecursiveEq)
       .def("ffi.RecursiveLt", RecursiveLt)
       .def("ffi.RecursiveLe", RecursiveLe)

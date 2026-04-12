@@ -27,8 +27,9 @@ from typing import Any, ClassVar, TypeVar
 from typing_extensions import dataclass_transform
 
 from .. import core
+from .._dunder import _install_dataclass_dunders
 from ..core import MISSING, TypeSchema
-from ..registry import _add_class_attrs, _install_dataclass_dunders
+from ..registry import _add_class_attrs
 from .field import KW_ONLY, Field, field
 
 _T = TypeVar("_T", bound=type)
@@ -40,14 +41,14 @@ _T = TypeVar("_T", bound=type)
 #
 # Registration happens in two phases:
 #
-#   Phase 1 (_phase1_register_type)
+#   Phase 1 (_register_type_without_fields)
 #       Allocates a C-level type index and inserts the class into the
 #       global type registry.  This must happen early so that self-
 #       referential and mutually-referential annotations can resolve
 #       the class via ``TypeSchema.from_annotation()``.  Phase 1 always
 #       succeeds (or raises immediately for non-Object parents).
 #
-#   Phase 2 (_phase2_register_fields)
+#   Phase 2 (_register_fields_into_type)
 #       Resolves string annotations via ``typing.get_type_hints``,
 #       converts them to ``TypeSchema`` / ``Field`` objects, validates
 #       field ordering, registers fields with the Cython layer, and
@@ -90,7 +91,7 @@ _PY_CLASS_BY_MODULE: dict[str, dict[str, type]] = {}
 # ---------------------------------------------------------------------------
 
 
-def _phase1_register_type(cls: type, type_key: str | None) -> Any:
+def _register_type_without_fields(cls: type, type_key: str | None) -> Any:
     """Phase 1: allocate type index and register the type (always succeeds)."""
     parent_info: core.TypeInfo | None = None
     for base in cls.__bases__:
@@ -111,7 +112,7 @@ def _phase1_register_type(cls: type, type_key: str | None) -> Any:
 
 
 def _rollback_registration(cls: type, type_info: Any) -> None:
-    """Undo :func:`_phase1_register_type` after a phase-2 failure.
+    """Undo :func:`_register_type_without_fields` after a phase-2 failure.
 
     The C-level type index is permanently consumed (cannot be reclaimed),
     but the Python-level registry dicts are cleaned up so a retry with
@@ -226,7 +227,7 @@ def _collect_py_methods(cls: type) -> list[tuple[str, Any, bool]] | None:
     return methods if methods else None
 
 
-def _phase2_register_fields(
+def _register_fields_into_type(
     cls: type,
     type_info: Any,
     globalns: dict[str, Any],
@@ -254,7 +255,7 @@ def _phase2_register_fields(
     structure_kind = _STRUCTURE_KIND_MAP.get(params.get("structural_eq"))
     type_info._register_fields(own_fields, structure_kind)
     # Register user-defined dunder methods and read back system-generated ones.
-    type_info._register_py_methods(py_methods)
+    type_info._register_py_methods(py_methods, type_attr_names=_FFI_TYPE_ATTR_NAMES)
     _add_class_attrs(cls, type_info)
 
     # Remove deferred __init__ and restore user-defined __init__ if saved
@@ -279,6 +280,7 @@ def _phase2_register_fields(
         eq=params["eq"],
         order=params["order"],
         unsafe_hash=params["unsafe_hash"],
+        py_class_mode=True,
     )
     return True
 
@@ -295,7 +297,7 @@ def _flush_pending() -> None:
         changed = False
         remaining: list[_PendingClass] = []
         for entry in _PENDING_CLASSES:
-            if _phase2_register_fields(entry.cls, entry.type_info, entry.globalns, entry.params):
+            if _register_fields_into_type(entry.cls, entry.type_info, entry.globalns, entry.params):
                 changed = True
             else:
                 remaining.append(entry)
@@ -324,7 +326,7 @@ def _make_temporary_init(
     def __init__(self: Any, *args: Any, **kwargs: Any) -> None:
         if type_info.fields is None:
             try:
-                if not _phase2_register_fields(cls, type_info, globalns, params):
+                if not _register_fields_into_type(cls, type_info, globalns, params):
                     _raise_unresolved_forward_reference(cls, globalns)
                 _flush_pending()
             except Exception:
@@ -349,7 +351,7 @@ def _install_deferred_init(
     """Install a temporary ``__init__`` that completes registration on first call.
 
     Preserves a user-defined ``__init__`` if present in *cls.__dict__*;
-    it is restored by :func:`_phase2_register_fields` after registration
+    it is restored by :func:`_register_fields_into_type` after registration
     completes so that ``_install_dataclass_dunders`` sees it and skips
     auto-generation.
     """
@@ -377,27 +379,34 @@ _STRUCTURE_KIND_MAP: dict[str | None, int] = {
     "singleton": 5,  # kTVMFFISEqHashKindUniqueInstance
 }
 
-#: Allowlist of dunder method names that ``@py_class`` will auto-register
-#: as both TypeMethod (for reflection) and TypeAttr (for C++ dispatch).
+#: Names that should be registered as TypeAttrColumn entries (for C++
+#: dispatch via ``TypeAttrColumn``), NOT as TypeMethod.
 #:
-#: Only names in this set are collected from the class body.
-#: System-managed names (``__ffi_init__``, ``__ffi_shallow_copy__``, etc.)
-#: are intentionally absent because the C++ runtime generates them.
-_FFI_RECOGNIZED_METHODS: frozenset[str] = frozenset(
+#: See ``reflection::type_attr`` in ``accessor.h`` for the C++ constants.
+_FFI_TYPE_ATTR_NAMES: frozenset[str] = frozenset(
     {
-        # Recursive operations (RecursiveHash, RecursiveEq, RecursiveCompare, ReprPrint)
         "__ffi_repr__",
         "__ffi_hash__",
         "__ffi_eq__",
         "__ffi_compare__",
-        # Structural equality/hashing (StructuralEqual, StructuralHash)
+        "__ffi_convert__",
+        "__any_hash__",
+        "__any_equal__",
         "__s_equal__",
         "__s_hash__",
-        # Serialization (ToJSONGraph, FromJSONGraph)
         "__data_to_json__",
         "__data_from_json__",
     }
 )
+
+#: Allowlist of dunder names that ``_collect_py_methods`` collects from
+#: the class body.  Names in ``_FFI_TYPE_ATTR_NAMES`` are registered as
+#: TypeAttrColumn entries; all other names are registered as TypeMethod.
+#:
+#: System-managed names (``__ffi_new__``, ``__ffi_init__``,
+#: ``__ffi_init_inplace__``, ``__ffi_shallow_copy__``) are intentionally
+#: absent because the C++ runtime generates them.
+_FFI_RECOGNIZED_METHODS: frozenset[str] = _FFI_TYPE_ATTR_NAMES
 
 
 @dataclass_transform(
@@ -518,10 +527,10 @@ def py_class(
         nonlocal effective_type_key
         globalns = getattr(sys.modules.get(cls.__module__, None), "__dict__", {})
 
-        info = _phase1_register_type(cls, effective_type_key)
+        info = _register_type_without_fields(cls, effective_type_key)
 
         try:
-            if _phase2_register_fields(cls, info, globalns, params):
+            if _register_fields_into_type(cls, info, globalns, params):
                 _flush_pending()
             else:
                 _PENDING_CLASSES.append(_PendingClass(cls, info, globalns, params))

@@ -30,10 +30,11 @@
 #include <tvm/ffi/function.h>
 #include <tvm/ffi/function_details.h>
 #include <tvm/ffi/optional.h>
-#include <tvm/ffi/reflection/init.h>
+#include <tvm/ffi/reflection/creator.h>
 #include <tvm/ffi/string.h>
 #include <tvm/ffi/type_traits.h>
 
+#include <iostream>
 #include <iterator>
 #include <optional>
 #include <sstream>
@@ -679,24 +680,6 @@ struct init<> : public InfoTrait {
 init(bool) -> init<>;
 #endif
 
-/*! \brief Well-known type attribute names used by the reflection system. */
-namespace type_attr {
-/*! \brief Method name for the auto-generated packed constructor. */
-inline constexpr const char* kInit = "__ffi_init__";
-/*! \brief Method name for the shallow-copy factory. */
-inline constexpr const char* kShallowCopy = "__ffi_shallow_copy__";
-/*! \brief Method name for the string representation. */
-inline constexpr const char* kRepr = "__ffi_repr__";
-/*! \brief Type attribute for custom recursive hash. */
-inline constexpr const char* kHash = "__ffi_hash__";
-/*! \brief Type attribute for custom recursive equality. */
-inline constexpr const char* kEq = "__ffi_eq__";
-/*! \brief Type attribute for custom recursive three-way comparison. */
-inline constexpr const char* kCompare = "__ffi_compare__";
-/*! \brief Type attribute for converting AnyView to a specific reflected object type. */
-inline constexpr const char* kConvert = "__ffi_convert__";
-}  // namespace type_attr
-
 /*!
  * \brief Helper to register Object's reflection metadata.
  * \tparam Class The class type.
@@ -719,7 +702,6 @@ class ObjectDef : public ReflectionDefBase {
       : type_index_(Class::_GetOrAllocRuntimeTypeIndex()), type_key_(Class::_type_key) {
     (MaybeSuppressAutoInit(extra_args), ...);
     RegisterExtraInfo(std::forward<ExtraArgs>(extra_args)...);
-    AutoRegisterCopy();
   }
 
   /*! \brief Non-copyable / non-movable. */
@@ -729,15 +711,41 @@ class ObjectDef : public ReflectionDefBase {
   ObjectDef& operator=(ObjectDef&&) = delete;
 
   /*!
-   * \brief Destructor.  When no explicit ``refl::init<>`` was registered,
-   * auto-generates a packed ``__ffi_init__`` from the reflected fields.
+   * \brief Destructor, which also potentially registers `__ffi_new__`, `__ffi_init__`,
+   * `__ffi_shallow_copy__`.
    */
   ~ObjectDef() noexcept(false) {
-    if (!has_explicit_init_) {
-      // Only auto-register if the type has a default creator.
-      const TVMFFITypeInfo* info = TVMFFIGetTypeInfo(type_index_);
-      if (info->metadata != nullptr && info->metadata->creator != nullptr) {
-        AutoRegisterInit();
+    const TVMFFITypeInfo* info = TVMFFIGetTypeInfo(type_index_);
+    // Step 1. Register `__ffi_shallow_copy__` <== copy constructor (if it exists and is public)
+    if constexpr (std::is_copy_constructible_v<Class>) {
+      Function fn = Function::FromTyped(
+          [](const Class* self) { return ObjectRef(ffi::make_object<Class>(*self)); },
+          std::string(type_key_) + "." + type_attr::kShallowCopy);
+      TVMFFIByteArray attr = AsByteArray(type_attr::kShallowCopy);
+      TVMFFIAny fn_any = AnyView(fn).CopyToTVMFFIAny();
+      TVM_FFI_CHECK_SAFE_CALL(TVMFFITypeRegisterAttr(type_index_, &attr, &fn_any));
+    }
+    // Step 2. Register `__ffi_new__` <== info->metadata->creator
+    // Also, `__ffi_init__` and `__ffi_init_inplace__` if no explicit init is defined.
+    if (info->metadata != nullptr && info->metadata->creator != nullptr) {
+      Function fn = Function::FromTyped(
+          [creator = info->metadata->creator]() -> ObjectRef {
+            TVMFFIObjectHandle handle;
+            TVM_FFI_CHECK_SAFE_CALL(creator(&handle));
+            return ObjectRef(::tvm::ffi::details::ObjectUnsafe::ObjectPtrFromOwned<Object>(
+                static_cast<TVMFFIObject*>(handle)));
+          },
+          std::string(type_key_) + "." + type_attr::kNew);
+      TVMFFIByteArray attr = AsByteArray(type_attr::kNew);
+      TVMFFIAny fn_any = AnyView(fn).CopyToTVMFFIAny();
+      TVM_FFI_CHECK_SAFE_CALL(TVMFFITypeRegisterAttr(type_index_, &attr, &fn_any));
+      // Step 3. Register `__ffi_init__` and `__ffi_init_inplace__` if no explicit init is defined.
+      // Use Function::GetGlobal to look up the registration function, which lives in
+      // dataclass.cc and may not be loaded yet for early (builtin) types.
+      if (!has_explicit_init_) {
+        if (std::optional<Function> opt = Function::GetGlobal("ffi._RegisterFFIInit")) {
+          (*opt)(type_index_);
+        }
       }
     }
   }
@@ -842,8 +850,11 @@ class ObjectDef : public ReflectionDefBase {
   template <typename... Args, typename... Extra>
   TVM_FFI_INLINE ObjectDef& def([[maybe_unused]] init<Args...> init_func, Extra&&... extra) {
     has_explicit_init_ = true;
-    RegisterMethod(kInitMethodName, true, &init<Args...>::template execute<Class>,
-                   std::forward<Extra>(extra)...);
+    Function init_fn = GetMethod(std::string(type_key_) + "." + kInitMethodName,
+                                 &init<Args...>::template execute<Class>);
+    TVMFFIByteArray attr_name = AsByteArray(type_attr::kInit);
+    TVMFFIAny attr_value = AnyView(init_fn).CopyToTVMFFIAny();
+    TVM_FFI_CHECK_SAFE_CALL(TVMFFITypeRegisterAttr(type_index_, &attr_name, &attr_value));
     return *this;
   }
 
@@ -858,25 +869,6 @@ class ObjectDef : public ReflectionDefBase {
       if (!value.include_) {
         has_explicit_init_ = true;
       }
-    }
-  }
-
-  /*! \brief Shallow-copy \p self via the C++ copy constructor. */
-  static ObjectRef ShallowCopy(const Class* self) {
-    return ObjectRef(ffi::make_object<Class>(*self));
-  }
-
-  void AutoRegisterCopy() {
-    if constexpr (std::is_copy_constructible_v<Class>) {
-      // Register __ffi_shallow_copy__ as an instance method
-      RegisterMethod(type_attr::kShallowCopy, false, &ObjectDef::ShallowCopy);
-      // Also register as a type attribute for generic deep copy lookup
-      Function copy_fn = GetMethod(std::string(type_key_) + "." + type_attr::kShallowCopy,
-                                   &ObjectDef::ShallowCopy);
-      TVMFFIByteArray attr_name = {type_attr::kShallowCopy,
-                                   std::char_traits<char>::length(type_attr::kShallowCopy)};
-      TVMFFIAny attr_value = AnyView(copy_fn).CopyToTVMFFIAny();
-      TVM_FFI_CHECK_SAFE_CALL(TVMFFITypeRegisterAttr(type_index_, &attr_name, &attr_value));
     }
   }
 
@@ -949,9 +941,6 @@ class ObjectDef : public ReflectionDefBase {
     info.metadata = TVMFFIByteArray{metadata_str.c_str(), metadata_str.size()};
     TVM_FFI_CHECK_SAFE_CALL(TVMFFITypeRegisterMethod(type_index_, &info));
   }
-
-  /*! \brief Register the auto-generated packed ``__ffi_init__``. */
-  void AutoRegisterInit() { RegisterAutoInit(type_index_); }
 
   int32_t type_index_;
   const char* type_key_;

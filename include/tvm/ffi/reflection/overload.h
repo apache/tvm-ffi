@@ -389,8 +389,25 @@ class OverloadObjectDef : private ObjectDef<Class> {
   TVM_FFI_INLINE OverloadObjectDef& def([[maybe_unused]] init<Args...> init_func,
                                         Extra&&... extra) {
     this->has_explicit_init_ = true;
+    bool is_first = registered_fields_.find(kInitMethodName) == registered_fields_.end();
+    // Register as method (enables overloading).
     RegisterMethod(kInitMethodName, true, &init<Args...>::template execute<Class>,
                    std::forward<Extra>(extra)...);
+    // On first init registration, also mirror into __ffi_init__ TypeAttrColumn.
+    // The Function wraps OverloadedFunction, so subsequent overloads added
+    // via Register() are automatically visible through the TypeAttrColumn.
+    if (is_first) {
+      const TVMFFITypeInfo* tinfo = TVMFFIGetTypeInfo(type_index_);
+      constexpr TVMFFIByteArray attr_name = AsByteArray(type_attr::kInit);
+      for (int32_t i = 0; i < tinfo->num_methods; ++i) {
+        if (tinfo->methods[i].name.size == attr_name.size &&
+            std::strncmp(tinfo->methods[i].name.data, attr_name.data, attr_name.size) == 0) {
+          TVM_FFI_CHECK_SAFE_CALL(
+              TVMFFITypeRegisterAttr(type_index_, &attr_name, &tinfo->methods[i].method));
+          break;
+        }
+      }
+    }
     return *this;
   }
 

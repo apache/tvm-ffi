@@ -22,7 +22,7 @@ import dataclasses
 from io import StringIO
 from typing import Any, Callable
 
-from tvm_ffi.core import TypeInfo, TypeSchema
+from tvm_ffi.core import TypeInfo, TypeSchema, _lookup_type_attr
 
 from . import consts as C
 
@@ -204,8 +204,7 @@ class ObjectInfo:
     type_key: str | None = None
     parent_type_key: str | None = None
     init_fields: list[InitFieldInfo] = dataclasses.field(default_factory=list)
-    has_auto_init: bool = False
-    has_c_init: bool = False
+    has_init: bool = False
 
     @staticmethod
     def from_type_info(type_info: TypeInfo) -> ObjectInfo:
@@ -214,18 +213,12 @@ class ObjectInfo:
         if type_info.parent_type_info is not None:
             parent_type_key = type_info.parent_type_info.type_key
 
-        # Detect auto_init / c_init from __ffi_init__ method metadata.
-        has_auto_init = False
-        has_c_init = False
-        for method in type_info.methods:
-            if method.name == "__ffi_init__":
-                has_c_init = True
-                has_auto_init = bool(method.metadata.get("auto_init", False))
-                break
+        # Detect __ffi_init__ from TypeAttrColumn.
+        has_init = _lookup_type_attr(type_info.type_index, "__ffi_init__") is not None
 
         # Walk parent chain (parent-first) to collect all init-eligible fields.
         init_fields: list[InitFieldInfo] = []
-        if has_auto_init:
+        if has_init:
             ti: TypeInfo | None = type_info
             chain: list[TypeInfo] = []
             while ti is not None:
@@ -268,8 +261,7 @@ class ObjectInfo:
             type_key=type_info.type_key,
             parent_type_key=parent_type_key,
             init_fields=init_fields,
-            has_auto_init=has_auto_init,
-            has_c_init=has_c_init,
+            has_init=has_init,
         )
 
     def gen_fields(self, ty_map: Callable[[str], str], indent: int) -> list[str]:
@@ -282,21 +274,20 @@ class ObjectInfo:
         indent_str = " " * indent
         ret = []
         for method in self.methods:
+            # __ffi_init__ is an internal protocol consumed by _gen_c_init to
+            # produce __init__; hide it from the public method stubs.
+            func_name = method.schema.name.rsplit(".", 1)[-1]
+            if func_name == "__ffi_init__":
+                continue
             if not method.is_member:
                 ret.append(f"{indent_str}@staticmethod")
             ret.append(method.gen(ty_map, indent))
         return ret
 
     def gen_init(self, ty_map: Callable[[str], str], indent: int) -> list[str]:
-        """Generate an ``__init__`` stub from reflection metadata."""
-        if self.has_auto_init:
-            return self._gen_auto_init(ty_map, indent)
-        if self.has_c_init:
-            return self._gen_c_init(ty_map, indent)
-        return []
-
-    def _gen_auto_init(self, ty_map: Callable[[str], str], indent: int) -> list[str]:
-        """Generate ``__init__`` for auto-init types (KWARGS protocol)."""
+        """Generate an ``__init__`` stub from init-eligible field metadata."""
+        if not self.has_init:
+            return []
         indent_str = " " * indent
         positional = [f for f in self.init_fields if not f.kw_only]
         kw_only = [f for f in self.init_fields if f.kw_only]
@@ -322,23 +313,3 @@ class ObjectInfo:
         if params:
             return [f"{indent_str}def __init__(self, {params}) -> None: ..."]
         return [f"{indent_str}def __init__(self) -> None: ..."]
-
-    def _gen_c_init(self, ty_map: Callable[[str], str], indent: int) -> list[str]:
-        """Generate ``__init__`` for non-auto-init types (from ``__c_ffi_init__``)."""
-        indent_str = " " * indent
-        for method in self.methods:
-            func_name = method.schema.name.rsplit(".", 1)[-1]
-            if func_name != "__c_ffi_init__":
-                continue
-            schema = method.schema
-            if schema.origin != "Callable" or not schema.args:
-                break
-            arg_types = schema.args[1:]  # skip return type (args[0])
-            parts: list[str] = []
-            for i, arg in enumerate(arg_types):
-                parts.append(f"_{i}: {arg.repr(ty_map)}")
-            params = ", ".join(parts)
-            if params:
-                return [f"{indent_str}def __init__(self, {params}, /) -> None: ..."]
-            return [f"{indent_str}def __init__(self) -> None: ..."]
-        return []
