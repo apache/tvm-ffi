@@ -134,10 +134,11 @@ def _rollback_registration(cls: type, type_info: Any) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _collect_own_fields(
+def _collect_own_fields(  # noqa: PLR0912
     cls: type,
     hints: dict[str, Any],
     decorator_kw_only: bool,
+    decorator_frozen: bool,
 ) -> list[Field]:
     """Parse own annotations into :class:`Field` objects.
 
@@ -194,6 +195,10 @@ def _collect_own_fields(
         if f.kw_only is None:
             f.kw_only = kw_only_active
 
+        # Apply class-level frozen when the field doesn't explicitly set it
+        if decorator_frozen and not f.frozen:
+            f.frozen = True
+
         # Resolve hash=None → follow compare (native dataclass semantics)
         if f.hash is None:
             f.hash = f.compare
@@ -248,7 +253,7 @@ def _register_fields_into_type(
     except (NameError, AttributeError):
         return False
 
-    own_fields = _collect_own_fields(cls, hints, params["kw_only"])
+    own_fields = _collect_own_fields(cls, hints, params["kw_only"], params["frozen"])
     py_methods = _collect_py_methods(cls)
 
     # Register fields and type-level structural eq/hash kind with the C layer.
@@ -414,11 +419,12 @@ _FFI_RECOGNIZED_METHODS: frozenset[str] = _FFI_TYPE_ATTR_NAMES
     order_default=False,
     field_specifiers=(field, Field),
 )
-def py_class(
+def py_class(  # noqa: PLR0913
     cls_or_type_key: type | str | None = None,
     /,
     *,
     type_key: str | None = None,
+    frozen: bool = False,
     init: bool = True,
     repr: bool = True,
     eq: bool = False,
@@ -465,6 +471,11 @@ def py_class(
     type_key
         Explicit FFI type key.  Auto-generated from
         ``{module}.{qualname}`` when omitted.
+    frozen
+        If True, all fields are read-only after ``__init__`` by default.
+        Individual fields can still be marked ``field(frozen=True)`` on a
+        non-frozen class.  Use ``type(obj).field_name.set(obj, value)``
+        as an escape hatch when mutation is necessary.
     init
         If True (default), generate ``__init__`` from field annotations.
     repr
@@ -514,6 +525,7 @@ def py_class(
 
     effective_type_key = type_key
     params: dict[str, Any] = {
+        "frozen": frozen,
         "init": init,
         "repr": repr,
         "eq": eq,

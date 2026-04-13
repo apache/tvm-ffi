@@ -193,8 +193,9 @@ def _make_replace(_type_info: TypeInfo) -> Callable[..., Any]:
 
     def __replace__(self: Any, **kwargs: Any) -> Any:
         obj = copy_copy(self)
+        cls = type(obj)
         for key, value in kwargs.items():
-            setattr(obj, key, value)
+            getattr(cls, key).set(obj, value)
         return obj
 
     return __replace__

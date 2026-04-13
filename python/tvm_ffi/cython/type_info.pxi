@@ -593,6 +593,24 @@ def _annotation_cobject(cls, targs):
     return TypeSchema(origin, origin_type_index=info.type_index)
 
 
+class FFIProperty(property):
+    """Property descriptor for FFI-backed fields.
+
+    When *frozen* is True the public setter (``fset``) is suppressed so
+    that normal attribute assignment raises ``AttributeError``.  The
+    real setter is stashed in :attr:`_fset` and exposed via the
+    :meth:`set` escape-hatch.
+    """
+
+    def __init__(self, fget, fset, frozen, fdel=None, doc=None):
+        super().__init__(fget, None if frozen else fset, fdel, doc)
+        self._fset = fset
+
+    def set(self, obj, value):
+        """Force-set the field value, bypassing the frozen guard."""
+        self._fset(obj, value)
+
+
 @dataclasses.dataclass(eq=False)
 class TypeField:
     """Description of a single reflected field on an FFI-backed type."""
@@ -616,7 +634,7 @@ class TypeField:
         assert self.getter is not None
 
     def as_property(self, object cls):
-        """Create a Python ``property`` object for this field on ``cls``."""
+        """Create an :class:`FFIProperty` descriptor for this field on ``cls``."""
         cdef str name = self.name
         cdef FieldGetter fget = self.getter
         cdef FieldSetter fset = self.setter
@@ -624,9 +642,10 @@ class TypeField:
         fget.__name__ = fset.__name__ = name
         fget.__module__ = fset.__module__ = cls.__module__
         fget.__qualname__ = fset.__qualname__ = f"{cls.__qualname__}.{name}"
-        ret = property(
+        ret = FFIProperty(
             fget=fget,
-            fset=fset if (not self.frozen) else None,
+            fset=fset,
+            frozen=self.frozen,
         )
         if self.doc:
             ret.__doc__ = self.doc
@@ -1003,7 +1022,7 @@ def _register_fields(type_info, fields, structure_kind=None):
                 doc=py_field.doc,
                 size=size,
                 offset=field_offset,
-                frozen=False,
+                frozen=py_field.frozen,
                 metadata={"type_schema": py_field.ty.to_json()},
                 getter=fgetter,
                 setter=fsetter,

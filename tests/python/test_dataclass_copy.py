@@ -934,10 +934,14 @@ class TestReplace:
         obj.__replace__(v_i64=100)  # ty: ignore[unresolved-attribute]
         assert obj.v_i64 == 5  # ty: ignore[unresolved-attribute]
 
-    def test_replace_readonly_field_raises(self) -> None:
+    def test_replace_readonly_field(self) -> None:
+        # __replace__ uses the FFIProperty.set() escape hatch,
+        # so it works even on frozen / read-only fields.
         pair = tvm_ffi.testing.TestIntPair(3, 4)
-        with pytest.raises(AttributeError):
-            pair.__replace__(a=10)  # ty: ignore[unresolved-attribute]
+        pair2 = pair.__replace__(a=10)  # ty: ignore[unresolved-attribute]
+        assert pair2.a == 10
+        assert pair2.b == 4
+        assert pair.a == 3  # original unchanged
 
     def test_auto_replace_for_cxx_class(self) -> None:
         # _TestCxxClassBase is copy-constructible, so replace is auto-enabled
