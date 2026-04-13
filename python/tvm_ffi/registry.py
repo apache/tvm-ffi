@@ -349,6 +349,11 @@ def _install_init(cls: type, type_info: TypeInfo) -> None:
     This ensures that ``register_object`` alone provides a working
     constructor, maintaining the invariant that ``c_class`` is a full
     alias of ``register_object`` + dunder installation.
+
+    When no ``__ffi_init__`` is available and the class is an ``Object``
+    subclass, a TypeError guard is installed to prevent segfaults from
+    uninitialised handles.  The guard is tagged with ``_ffi_auto_guard``
+    so that ``_install_dataclass_dunders`` can detect and override it.
     """
     if "__init__" in cls.__dict__:
         return
@@ -373,6 +378,7 @@ def _install_init(cls: type, type_info: TypeInfo) -> None:
 
         __init__.__qualname__ = f"{cls.__qualname__}.__init__"
         __init__.__module__ = cls.__module__
+        __init__._ffi_auto_guard = True  # type: ignore[attr-defined]
         cls.__init__ = __init__  # type: ignore[attr-defined]
 
 
