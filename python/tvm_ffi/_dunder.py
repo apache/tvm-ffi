@@ -268,21 +268,15 @@ def _install_dataclass_dunders(  # noqa: PLR0912, PLR0915
             cls.__new__ = __new__  # type: ignore[attr-defined]
 
     # __init__
-    # ┌─────────────────────┬──────────────────────┬──────────────────────────────┐
-    # │                     │ user __init__         │ no user __init__             │
-    # ├─────────────────────┼──────────────────────┼──────────────────────────────┤
-    # │ c_class, init=True  │ keep as-is           │ _make_init                   │
-    # │ c_class, init=False │ keep as-is           │ TypeError guard              │
-    # │ py_class, init=True │ keep as-is           │ _make_init(inplace)          │
-    # │ py_class, init=False│ keep as-is           │ TypeError guard              │
-    # └─────────────────────┴──────────────────────┴──────────────────────────────┘
-    # An _ffi_auto_guard __init__ (installed by register_object for types
-    # without __ffi_init__) is treated as absent so decorators like
-    # @c_class can override it with a proper init or their own guard.
-    _has_user_init = "__init__" in cls.__dict__ and not getattr(
-        cls.__dict__.get("__init__"), "_ffi_auto_guard", False
-    )
-    if not _has_user_init:
+    # ┌─────────────────────┬──────────────────────┬──────────────────────┐
+    # │                     │ user __init__        │ no user __init__     │
+    # ├─────────────────────┼──────────────────────┼──────────────────────┤
+    # │ c_class, init=True  │ keep as-is           │ _make_init           │
+    # │ c_class, init=False │ keep as-is           │ TypeError guard      │
+    # │ py_class, init=True │ keep as-is           │ _make_init(inplace)  │
+    # │ py_class, init=False│ keep as-is           │ TypeError guard      │
+    # └─────────────────────┴──────────────────────┴──────────────────────┘
+    if "__init__" not in cls.__dict__:
         if init and py_class_mode and ffi_init_inplace is not None:
             # py_class init=True: delegate to C++ __ffi_init_inplace__
             cls.__init__ = _make_init(  # type: ignore[attr-defined]

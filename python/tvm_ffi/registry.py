@@ -33,7 +33,11 @@ _SKIP_UNKNOWN_OBJECTS = False
 _T = TypeVar("_T", bound=type)
 
 
-def register_object(type_key: str | None = None) -> Callable[[_T], _T]:
+def register_object(
+    type_key: str | None = None,
+    *,
+    init: bool = True,
+) -> Callable[[_T], _T]:
     """Register object type.
 
     Parameters
@@ -41,6 +45,11 @@ def register_object(type_key: str | None = None) -> Callable[[_T], _T]:
     type_key
         The type key of the node. It requires ``type_key`` to be registered already
         on the C++ side. If not specified, the class name will be used.
+    init
+        If True (default), install ``__init__`` from the C++ ``__ffi_init__``
+        TypeAttrColumn when available, or a TypeError guard for ``Object``
+        subclasses that lack one.  Set to False when a subsequent decorator
+        (e.g. ``@c_class``) will handle ``__init__`` installation.
 
     Notes
     -----
@@ -76,7 +85,8 @@ def register_object(type_key: str | None = None) -> Callable[[_T], _T]:
         info = core._register_object_by_index(type_index, cls)
         _add_class_attrs(type_cls=cls, type_info=info)
         setattr(cls, "__tvm_ffi_type_info__", info)
-        _install_init(cls, info)
+        if init:
+            _install_init(cls, info)
         return cls
 
     if isinstance(type_key, str):
@@ -352,8 +362,7 @@ def _install_init(cls: type, type_info: TypeInfo) -> None:
 
     When no ``__ffi_init__`` is available and the class is an ``Object``
     subclass, a TypeError guard is installed to prevent segfaults from
-    uninitialised handles.  The guard is tagged with ``_ffi_auto_guard``
-    so that ``_install_dataclass_dunders`` can detect and override it.
+    uninitialised handles.
     """
     if "__init__" in cls.__dict__:
         return
@@ -378,7 +387,6 @@ def _install_init(cls: type, type_info: TypeInfo) -> None:
 
         __init__.__qualname__ = f"{cls.__qualname__}.__init__"
         __init__.__module__ = cls.__module__
-        __init__._ffi_auto_guard = True  # type: ignore[attr-defined]
         cls.__init__ = __init__  # type: ignore[attr-defined]
 
 

@@ -111,7 +111,7 @@ def c_class(
     )
 
     def decorator(cls: _T) -> _T:
-        cls = register_object(type_key)(cls)
+        cls = register_object(type_key, init=False)(cls)
         type_info = getattr(cls, "__tvm_ffi_type_info__", None)
         assert type_info is not None
         _warn_missing_field_annotations(cls, type_info, stacklevel=2)
