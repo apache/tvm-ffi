@@ -201,6 +201,22 @@ class Array(core.CContainerBase, core.Object, Sequence[T]):
         """Check if the array contains a value."""
         return _ffi_api.ArrayContains(self, value)
 
+    def __eq__(self, other: object) -> bool:
+        """Structural equality."""
+        if not (isinstance(other, type(self)) or isinstance(self, type(other))):
+            return NotImplemented
+        return _ffi_api.RecursiveEq(self, other)
+
+    def __ne__(self, other: object) -> bool:
+        """Structural inequality."""
+        if not (isinstance(other, type(self)) or isinstance(self, type(other))):
+            return NotImplemented
+        return not _ffi_api.RecursiveEq(self, other)
+
+    def __hash__(self) -> int:
+        """Structural hash."""
+        return _ffi_api.RecursiveHash(self)
+
     def __bool__(self) -> bool:
         """Return True if the array is non-empty."""
         return len(self) > 0
@@ -343,6 +359,22 @@ class List(core.CContainerBase, core.Object, MutableSequence[T]):
     def __contains__(self, value: object) -> bool:
         """Check if the list contains a value."""
         return _ffi_api.ListContains(self, value)
+
+    def __eq__(self, other: object) -> bool:
+        """Structural equality."""
+        if not (isinstance(other, type(self)) or isinstance(self, type(other))):
+            return NotImplemented
+        return _ffi_api.RecursiveEq(self, other)
+
+    def __ne__(self, other: object) -> bool:
+        """Structural inequality."""
+        if not (isinstance(other, type(self)) or isinstance(self, type(other))):
+            return NotImplemented
+        return not _ffi_api.RecursiveEq(self, other)
+
+    def __hash__(self) -> int:
+        """Structural hash."""
+        return _ffi_api.RecursiveHash(self)
 
     def __bool__(self) -> bool:
         """Return True if the list is non-empty."""
@@ -499,6 +531,22 @@ class Map(core.CContainerBase, core.Object, Mapping[K, V]):
         """Return True if the map contains key `k`."""
         return _ffi_api.MapCount(self, k) != 0
 
+    def __eq__(self, other: object) -> bool:
+        """Structural equality."""
+        if not (isinstance(other, type(self)) or isinstance(self, type(other))):
+            return NotImplemented
+        return _ffi_api.RecursiveEq(self, other)
+
+    def __ne__(self, other: object) -> bool:
+        """Structural inequality."""
+        if not (isinstance(other, type(self)) or isinstance(self, type(other))):
+            return NotImplemented
+        return not _ffi_api.RecursiveEq(self, other)
+
+    def __hash__(self) -> int:
+        """Structural hash."""
+        return _ffi_api.RecursiveHash(self)
+
     def keys(self) -> KeysView[K]:
         """Return a dynamic view of the map's keys."""
         return KeysView(self)
@@ -606,6 +654,22 @@ class Dict(core.CContainerBase, core.Object, MutableMapping[K, V]):
     def __contains__(self, k: object) -> bool:
         """Return True if the dict contains key `k`."""
         return _ffi_api.DictCount(self, k) != 0
+
+    def __eq__(self, other: object) -> bool:
+        """Structural equality."""
+        if not (isinstance(other, type(self)) or isinstance(self, type(other))):
+            return NotImplemented
+        return _ffi_api.RecursiveEq(self, other)
+
+    def __ne__(self, other: object) -> bool:
+        """Structural inequality."""
+        if not (isinstance(other, type(self)) or isinstance(self, type(other))):
+            return NotImplemented
+        return not _ffi_api.RecursiveEq(self, other)
+
+    def __hash__(self) -> int:
+        """Structural hash."""
+        return _ffi_api.RecursiveHash(self)
 
     def __len__(self) -> int:
         """Return the number of items in the dict."""

@@ -733,3 +733,119 @@ def test_map_cross_conv_incompatible_map_to_dict() -> None:
     m = tvm_ffi.Map({"a": "not_int", "b": "still_not_int"})
     with pytest.raises(TypeError):
         testing.schema_id_dict_str_int(m)  # type: ignore[invalid-argument-type]
+
+
+# ---------------------------------------------------------------------------
+# Structural __eq__ / __ne__ / __hash__ tests
+# ---------------------------------------------------------------------------
+
+
+def test_array_structural_eq() -> None:
+    a = tvm_ffi.Array([1, 2, 3])
+    b = tvm_ffi.Array([1, 2, 3])
+    c = tvm_ffi.Array([1, 2, 4])
+    assert a == b
+    assert a != c
+    assert not (a != b)
+    assert not (a == c)
+
+
+def test_array_eq_empty() -> None:
+    assert tvm_ffi.Array([]) == tvm_ffi.Array([])
+
+
+def test_array_eq_nested() -> None:
+    a = tvm_ffi.Array([tvm_ffi.Array([1, 2]), tvm_ffi.Array([3])])
+    b = tvm_ffi.Array([tvm_ffi.Array([1, 2]), tvm_ffi.Array([3])])
+    c = tvm_ffi.Array([tvm_ffi.Array([1, 2]), tvm_ffi.Array([4])])
+    assert a == b
+    assert a != c
+
+
+def test_array_eq_not_implemented_for_unrelated() -> None:
+    a = tvm_ffi.Array([1, 2, 3])
+    assert a.__eq__([1, 2, 3]) is NotImplemented
+    assert a.__ne__([1, 2, 3]) is NotImplemented
+    assert a.__eq__("hello") is NotImplemented
+
+
+def test_array_hash() -> None:
+    a = tvm_ffi.Array([1, 2, 3])
+    b = tvm_ffi.Array([1, 2, 3])
+    assert hash(a) == hash(b)
+    # Usable in sets and as dict keys
+    s = {a, b}
+    assert len(s) == 1
+    d = {a: "value"}
+    assert d[b] == "value"
+
+
+def test_list_structural_eq() -> None:
+    a = tvm_ffi.List([1, 2, 3])
+    b = tvm_ffi.List([1, 2, 3])
+    c = tvm_ffi.List([1, 2, 4])
+    assert a == b
+    assert a != c
+
+
+def test_list_eq_empty() -> None:
+    assert tvm_ffi.List([]) == tvm_ffi.List([])
+
+
+def test_list_eq_not_implemented_for_unrelated() -> None:
+    a = tvm_ffi.List([1, 2, 3])
+    assert a.__eq__([1, 2, 3]) is NotImplemented
+
+
+def test_list_hash() -> None:
+    a = tvm_ffi.List([1, 2, 3])
+    b = tvm_ffi.List([1, 2, 3])
+    assert hash(a) == hash(b)
+
+
+def test_map_structural_eq() -> None:
+    a = tvm_ffi.Map({"x": 1, "y": 2})
+    b = tvm_ffi.Map({"x": 1, "y": 2})
+    c = tvm_ffi.Map({"x": 1, "y": 3})
+    assert a == b
+    assert a != c
+
+
+def test_map_eq_empty() -> None:
+    assert tvm_ffi.Map({}) == tvm_ffi.Map({})
+
+
+def test_map_eq_not_implemented_for_unrelated() -> None:
+    a = tvm_ffi.Map({"x": 1})
+    assert a.__eq__({"x": 1}) is NotImplemented
+
+
+def test_map_hash() -> None:
+    a = tvm_ffi.Map({"x": 1, "y": 2})
+    b = tvm_ffi.Map({"x": 1, "y": 2})
+    assert hash(a) == hash(b)
+    s = {a, b}
+    assert len(s) == 1
+
+
+def test_dict_structural_eq() -> None:
+    a = tvm_ffi.Dict({"x": 1, "y": 2})
+    b = tvm_ffi.Dict({"x": 1, "y": 2})
+    c = tvm_ffi.Dict({"x": 1, "y": 3})
+    assert a == b
+    assert a != c
+
+
+def test_dict_eq_empty() -> None:
+    assert tvm_ffi.Dict({}) == tvm_ffi.Dict({})
+
+
+def test_dict_eq_not_implemented_for_unrelated() -> None:
+    a = tvm_ffi.Dict({"x": 1})
+    assert a.__eq__({"x": 1}) is NotImplemented
+
+
+def test_dict_hash() -> None:
+    a = tvm_ffi.Dict({"x": 1, "y": 2})
+    b = tvm_ffi.Dict({"x": 1, "y": 2})
+    assert hash(a) == hash(b)
