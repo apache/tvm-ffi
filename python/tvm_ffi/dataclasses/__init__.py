@@ -16,8 +16,9 @@
 # under the License.
 """FFI dataclass decorators: ``c_class`` for C++-backed types, ``py_class`` for Python-defined types."""
 
+from .._dunder import FrozenInstanceError
 from .c_class import c_class
 from .field import KW_ONLY, Field, field
 from .py_class import py_class
 
-__all__ = ["KW_ONLY", "Field", "c_class", "field", "py_class"]
+__all__ = ["Field", "FrozenInstanceError", "KW_ONLY", "c_class", "field", "py_class"]

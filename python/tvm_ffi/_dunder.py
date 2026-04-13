@@ -30,6 +30,14 @@ if TYPE_CHECKING:
 __SENTINEL = object()
 
 
+try:
+    from dataclasses import FrozenInstanceError
+except ImportError:
+
+    class FrozenInstanceError(AttributeError):  # type: ignore[no-redef]
+        """Raised when attempting to assign to or delete a field on a frozen instance."""
+
+
 def _make_init(
     type_cls: type,
     type_info: TypeInfo,
@@ -194,7 +202,7 @@ def _make_replace(_type_info: TypeInfo) -> Callable[..., Any]:
     def __replace__(self: Any, **kwargs: Any) -> Any:
         obj = copy_copy(self)
         for key, value in kwargs.items():
-            setattr(obj, key, value)
+            object.__setattr__(obj, key, value)
         return obj
 
     return __replace__
@@ -213,6 +221,7 @@ def _install_dataclass_dunders(  # noqa: PLR0912, PLR0915
     eq: bool,
     order: bool,
     unsafe_hash: bool,
+    frozen: bool = False,
     py_class_mode: bool = False,
 ) -> None:
     """Install structural dunder methods on *cls*.
@@ -241,6 +250,11 @@ def _install_dataclass_dunders(  # noqa: PLR0912, PLR0915
         ``NotImplemented`` for unrelated types.
     unsafe_hash
         If True, install ``__hash__`` using ``RecursiveHash``.
+    frozen
+        If True, install ``__setattr__`` and ``__delattr__`` guards that
+        raise :class:`FrozenInstanceError` on any mutation attempt.
+        When *frozen* is True and *unsafe_hash* is False, ``__hash__``
+        is also installed automatically (frozen objects are safely hashable).
     py_class_mode
         If True, use C++ ``__ffi_init_inplace__`` for ``__init__``
         (object already allocated by ``__new__``).
@@ -372,6 +386,57 @@ def _install_dataclass_dunders(  # noqa: PLR0912, PLR0915
             return recursive_hash(self)
 
         cls.__hash__ = __hash__  # type: ignore[attr-defined]
+
+    # Frozen guards.  Properties always retain their setter (so
+    # ``object.__setattr__`` is a universal escape hatch); the guard
+    # is enforced solely through a custom ``__setattr__``.
+    #
+    # Collect field-level frozen names from the full type hierarchy.
+    _frozen_field_names: set[str] = set()
+    _ti: TypeInfo | None = type_info
+    while _ti is not None:
+        if _ti.fields:
+            for _tf in _ti.fields:
+                if _tf.frozen:
+                    _frozen_field_names.add(_tf.name)
+        _ti = _ti.parent_type_info
+
+    if frozen:
+        # Class-level frozen: block ALL setattr / delattr.
+        if "__setattr__" not in cls.__dict__:
+
+            def __setattr__(self: Any, name: str, value: Any) -> None:
+                raise FrozenInstanceError(f"cannot assign to field {name!r}")
+
+            cls.__setattr__ = __setattr__  # type: ignore[attr-defined]
+
+        if "__delattr__" not in cls.__dict__:
+
+            def __delattr__(self: Any, name: str) -> None:
+                raise FrozenInstanceError(f"cannot delete field {name!r}")
+
+            cls.__delattr__ = __delattr__  # type: ignore[attr-defined]
+
+        # Frozen implies hashable (same as stdlib frozen dataclasses).
+        if not unsafe_hash and "__hash__" not in cls.__dict__:
+            recursive_hash_frozen = _ffi_api.RecursiveHash
+
+            def __hash_frozen__(self: Any) -> int:
+                return recursive_hash_frozen(self)
+
+            cls.__hash__ = __hash_frozen__  # type: ignore[attr-defined]
+
+    elif _frozen_field_names and "__setattr__" not in cls.__dict__:
+        # Field-level frozen only: block writes to specific fields,
+        # delegate everything else to ``object.__setattr__``.
+        _ff = frozenset(_frozen_field_names)
+
+        def __setattr_field__(self: Any, name: str, value: Any) -> None:
+            if name in _ff:
+                raise FrozenInstanceError(f"cannot assign to field {name!r}")
+            object.__setattr__(self, name, value)
+
+        cls.__setattr__ = __setattr_field__  # type: ignore[attr-defined]
 
     # __copy__ / __deepcopy__ / __replace__
     if "__copy__" not in cls.__dict__:

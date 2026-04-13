@@ -626,7 +626,7 @@ class TypeField:
         fget.__qualname__ = fset.__qualname__ = f"{cls.__qualname__}.{name}"
         ret = property(
             fget=fget,
-            fset=fset if (not self.frozen) else None,
+            fset=fset,
         )
         if self.doc:
             ret.__doc__ = self.doc
@@ -1003,7 +1003,7 @@ def _register_fields(type_info, fields, structure_kind=None):
                 doc=py_field.doc,
                 size=size,
                 offset=field_offset,
-                frozen=False,
+                frozen=py_field.frozen,
                 metadata={"type_schema": py_field.ty.to_json()},
                 getter=fgetter,
                 setter=fsetter,

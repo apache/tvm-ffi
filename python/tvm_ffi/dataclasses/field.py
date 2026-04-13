@@ -58,6 +58,10 @@ class Field:
     default_factory : Callable[[], object] | None
         A zero-argument callable that produces the default value.
         Mutually exclusive with *default*.  ``None`` when not set.
+    frozen : bool
+        Whether this field is frozen (read-only after ``__init__``).
+        Defaults to ``False``.  ``True`` forces the field to be frozen
+        regardless of the class setting.
     init : bool
         Whether this field appears in the auto-generated ``__init__``.
     repr : bool
@@ -91,6 +95,7 @@ class Field:
         "default",
         "default_factory",
         "doc",
+        "frozen",
         "hash",
         "init",
         "kw_only",
@@ -103,6 +108,7 @@ class Field:
     ty: TypeSchema | None
     default: object
     default_factory: Callable[[], object] | None
+    frozen: bool
     init: bool
     repr: bool
     hash: bool | None
@@ -123,6 +129,7 @@ class Field:
         *,
         default: object = MISSING,
         default_factory: Callable[[], object] | None = MISSING,  # type: ignore[assignment]
+        frozen: bool = False,
         init: bool = True,
         repr: bool = True,
         hash: bool | None = True,
@@ -151,6 +158,7 @@ class Field:
         self.ty = ty
         self.default = default
         self.default_factory = default_factory
+        self.frozen = frozen
         self.init = init
         self.repr = repr
         self.hash = hash
@@ -164,6 +172,7 @@ def field(
     *,
     default: object = MISSING,
     default_factory: Callable[[], object] | None = MISSING,  # type: ignore[assignment]
+    frozen: bool = False,
     init: bool = True,
     repr: bool = True,
     hash: bool | None = None,
@@ -189,6 +198,9 @@ def field(
     default_factory
         A zero-argument callable that produces the default value.
         Mutually exclusive with *default*.
+    frozen
+        Whether this field is frozen (read-only after ``__init__``).
+        Defaults to ``False``.
     init
         Whether this field appears in the auto-generated ``__init__``.
     repr
@@ -234,6 +246,7 @@ def field(
     return Field(
         default=default,
         default_factory=default_factory,
+        frozen=frozen,
         init=init,
         repr=repr,
         hash=hash,
