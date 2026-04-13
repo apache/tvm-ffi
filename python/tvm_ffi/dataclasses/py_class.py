@@ -138,6 +138,7 @@ def _collect_own_fields(
     cls: type,
     hints: dict[str, Any],
     decorator_kw_only: bool,
+    decorator_frozen: bool = False,
 ) -> list[Field]:
     """Parse own annotations into :class:`Field` objects.
 
@@ -194,6 +195,13 @@ def _collect_own_fields(
         if f.kw_only is None:
             f.kw_only = kw_only_active
 
+        # Resolve frozen: None → False.
+        # Class-level frozen is enforced by the __setattr__/__delattr__ guard,
+        # NOT by removing property setters.  Only explicit field(frozen=True)
+        # removes the property setter (TypeField.frozen=True → fset=None).
+        if getattr(f, "frozen", None) is None:
+            f.frozen = False  # type: ignore[attr-defined]
+
         # Resolve hash=None → follow compare (native dataclass semantics)
         if f.hash is None:
             f.hash = f.compare
@@ -248,7 +256,7 @@ def _register_fields_into_type(
     except (NameError, AttributeError):
         return False
 
-    own_fields = _collect_own_fields(cls, hints, params["kw_only"])
+    own_fields = _collect_own_fields(cls, hints, params["kw_only"], params.get("frozen", False))
     py_methods = _collect_py_methods(cls)
 
     # Register fields and type-level structural eq/hash kind with the C layer.
@@ -280,6 +288,7 @@ def _register_fields_into_type(
         eq=params["eq"],
         order=params["order"],
         unsafe_hash=params["unsafe_hash"],
+        frozen=params.get("frozen", False),
         py_class_mode=True,
     )
     return True
@@ -412,6 +421,7 @@ _FFI_RECOGNIZED_METHODS: frozenset[str] = _FFI_TYPE_ATTR_NAMES
 @dataclass_transform(
     eq_default=False,
     order_default=False,
+    frozen_default=False,
     field_specifiers=(field, Field),
 )
 def py_class(
@@ -424,6 +434,7 @@ def py_class(
     eq: bool = False,
     order: bool = False,
     unsafe_hash: bool = False,
+    frozen: bool = False,
     kw_only: bool = False,
     structural_eq: str | None = None,
     slots: bool = True,
@@ -476,6 +487,10 @@ def py_class(
         Requires ``eq=True``.
     unsafe_hash
         If True, generate ``__hash__`` (unsafe for mutable objects).
+    frozen
+        If True, instances are immutable after construction.  Assigning
+        to fields raises ``FrozenInstanceError``.  Individual fields
+        can override via ``field(frozen=True/False)``.
     kw_only
         If True, all fields are keyword-only in ``__init__`` by default.
     structural_eq
@@ -519,6 +534,7 @@ def py_class(
         "eq": eq,
         "order": order,
         "unsafe_hash": unsafe_hash,
+        "frozen": frozen,
         "kw_only": kw_only,
         "structural_eq": structural_eq,
     }
