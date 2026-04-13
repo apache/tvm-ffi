@@ -30,10 +30,12 @@ if TYPE_CHECKING:
 __SENTINEL = object()
 
 
-class FrozenInstanceError(AttributeError):
-    """Raised when attempting to assign to or delete a field on a frozen instance."""
+try:
+    from dataclasses import FrozenInstanceError
+except ImportError:
 
-    pass
+    class FrozenInstanceError(AttributeError):  # type: ignore[no-redef]
+        """Raised when attempting to assign to or delete a field on a frozen instance."""
 
 
 def _make_init(
@@ -191,30 +193,16 @@ def _make_deepcopy(_type_info: TypeInfo) -> Callable[..., Any]:
     return __deepcopy__
 
 
-def _make_replace(
-    _type_info: TypeInfo, *, _use_direct_setters: bool = False
-) -> Callable[..., Any]:
+def _make_replace(_type_info: TypeInfo) -> Callable[..., Any]:
     """Build ``__replace__`` with ``copy.copy`` resolved at install time."""
     import copy  # noqa: PLC0415
 
     copy_copy = copy.copy
-    # For py_class: use direct FieldSetter lookup for own fields — bypasses
-    # both the class-level __setattr__ guard (frozen classes) and the property
-    # fset=None guard (field-level frozen).
-    # For c_class: leave empty so __replace__ respects C++ readonly fields.
-    _field_setters: dict[str, Any] = {}
-    if _use_direct_setters and _type_info.fields:
-        for _tf in _type_info.fields:
-            _field_setters[_tf.name] = _tf.setter
 
     def __replace__(self: Any, **kwargs: Any) -> Any:
         obj = copy_copy(self)
         for key, value in kwargs.items():
-            setter = _field_setters.get(key)
-            if setter is not None:
-                setter(obj, value)
-            else:
-                object.__setattr__(obj, key, value)
+            object.__setattr__(obj, key, value)
         return obj
 
     return __replace__
@@ -399,10 +387,22 @@ def _install_dataclass_dunders(  # noqa: PLR0912, PLR0915
 
         cls.__hash__ = __hash__  # type: ignore[attr-defined]
 
-    # Frozen: install __setattr__ / __delattr__ guards.
-    # Frozen classes are safely hashable, so auto-enable __hash__ when the
-    # user did not explicitly pass unsafe_hash=True (mirroring stdlib dataclasses).
+    # Frozen guards.  Properties always retain their setter (so
+    # ``object.__setattr__`` is a universal escape hatch); the guard
+    # is enforced solely through a custom ``__setattr__``.
+    #
+    # Collect field-level frozen names from the full type hierarchy.
+    _frozen_field_names: set[str] = set()
+    _ti: TypeInfo | None = type_info
+    while _ti is not None:
+        if _ti.fields:
+            for _tf in _ti.fields:
+                if _tf.frozen:
+                    _frozen_field_names.add(_tf.name)
+        _ti = _ti.parent_type_info
+
     if frozen:
+        # Class-level frozen: block ALL setattr / delattr.
         if "__setattr__" not in cls.__dict__:
 
             def __setattr__(self: Any, name: str, value: Any) -> None:
@@ -426,10 +426,22 @@ def _install_dataclass_dunders(  # noqa: PLR0912, PLR0915
 
             cls.__hash__ = __hash_frozen__  # type: ignore[attr-defined]
 
+    elif _frozen_field_names and "__setattr__" not in cls.__dict__:
+        # Field-level frozen only: block writes to specific fields,
+        # delegate everything else to ``object.__setattr__``.
+        _ff = frozenset(_frozen_field_names)
+
+        def __setattr_field__(self: Any, name: str, value: Any) -> None:
+            if name in _ff:
+                raise FrozenInstanceError(f"cannot assign to field {name!r}")
+            object.__setattr__(self, name, value)
+
+        cls.__setattr__ = __setattr_field__  # type: ignore[attr-defined]
+
     # __copy__ / __deepcopy__ / __replace__
     if "__copy__" not in cls.__dict__:
         cls.__copy__ = _make_copy(type_info, ffi_shallow_copy)  # type: ignore[attr-defined]
     if "__deepcopy__" not in cls.__dict__:
         cls.__deepcopy__ = _make_deepcopy(type_info)  # type: ignore[attr-defined]
     if "__replace__" not in cls.__dict__:
-        cls.__replace__ = _make_replace(type_info, _use_direct_setters=py_class_mode)  # type: ignore[attr-defined]
+        cls.__replace__ = _make_replace(type_info)  # type: ignore[attr-defined]

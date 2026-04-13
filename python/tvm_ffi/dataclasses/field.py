@@ -58,11 +58,10 @@ class Field:
     default_factory : Callable[[], object] | None
         A zero-argument callable that produces the default value.
         Mutually exclusive with *default*.  ``None`` when not set.
-    frozen : bool | None
+    frozen : bool
         Whether this field is frozen (read-only after ``__init__``).
-        ``None`` (default) means "inherit from the decorator-level
-        ``frozen`` flag".  ``True`` forces the field to be frozen
-        regardless of the class setting; ``False`` marks it as mutable.
+        Defaults to ``False``.  ``True`` forces the field to be frozen
+        regardless of the class setting.
     init : bool
         Whether this field appears in the auto-generated ``__init__``.
     repr : bool
@@ -109,7 +108,7 @@ class Field:
     ty: TypeSchema | None
     default: object
     default_factory: Callable[[], object] | None
-    frozen: bool | None
+    frozen: bool
     init: bool
     repr: bool
     hash: bool | None
@@ -130,7 +129,7 @@ class Field:
         *,
         default: object = MISSING,
         default_factory: Callable[[], object] | None = MISSING,  # type: ignore[assignment]
-        frozen: bool | None = None,
+        frozen: bool = False,
         init: bool = True,
         repr: bool = True,
         hash: bool | None = True,
@@ -173,7 +172,7 @@ def field(
     *,
     default: object = MISSING,
     default_factory: Callable[[], object] | None = MISSING,  # type: ignore[assignment]
-    frozen: bool | None = None,
+    frozen: bool = False,
     init: bool = True,
     repr: bool = True,
     hash: bool | None = None,
@@ -201,8 +200,7 @@ def field(
         Mutually exclusive with *default*.
     frozen
         Whether this field is frozen (read-only after ``__init__``).
-        ``None`` (default) means "inherit from the decorator-level
-        ``frozen`` flag".
+        Defaults to ``False``.
     init
         Whether this field appears in the auto-generated ``__init__``.
     repr

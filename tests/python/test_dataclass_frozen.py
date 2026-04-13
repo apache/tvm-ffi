@@ -160,7 +160,7 @@ class TestFrozenInstanceErrorType:
             x: int
 
         obj = CatchAttr(x=1)
-        with pytest.raises(AttributeError):
+        with pytest.raises(FrozenInstanceError):
             obj.x = 2
 
 
@@ -724,7 +724,7 @@ class TestFieldFrozenInNonFrozenClass:
         obj = FldFrz1(x=1, y=2)
         assert obj.x == 1
         # Frozen field rejects assignment
-        with pytest.raises(AttributeError):
+        with pytest.raises(FrozenInstanceError):
             obj.x = 10
         # Mutable field is fine
         obj.y = 20
@@ -768,16 +768,15 @@ class TestAllFieldsFrozenIndividually:
             y: str = field(frozen=True)
 
         obj = AllFld(x=1, y="a")
-        with pytest.raises(AttributeError):
+        with pytest.raises(FrozenInstanceError):
             obj.x = 2
-        with pytest.raises(AttributeError):
+        with pytest.raises(FrozenInstanceError):
             obj.y = "b"
 
-    def test_no_class_level_setattr_guard(self) -> None:
-        """Even with all fields individually frozen, the class-level
-        __setattr__ guard is NOT installed (only field-level property
-        protection). A new, non-field attribute might still be settable
-        via the base class mechanism, unlike a class-level frozen=True."""
+    def test_field_level_guard_only_blocks_frozen_fields(self) -> None:
+        """Field-level frozen installs a __setattr__ guard that blocks
+        only the frozen fields.  Non-field attributes are still settable
+        via the guard's fallthrough to object.__setattr__."""
 
         @py_class(_unique_key("AllFldNoGuard"))
         class AllFldNoGuard(Object):
@@ -785,7 +784,7 @@ class TestAllFieldsFrozenIndividually:
 
         obj = AllFldNoGuard(x=1)
         # Field-level frozen blocks declared fields
-        with pytest.raises(AttributeError):
+        with pytest.raises(FrozenInstanceError):
             obj.x = 2
 
 
@@ -804,7 +803,7 @@ class TestFrozenFieldWithDefault:
 
         obj = FldDef()
         assert obj.x == 42
-        with pytest.raises(AttributeError):
+        with pytest.raises(FrozenInstanceError):
             obj.x = 99
 
     def test_frozen_field_default_overridden_at_init(self) -> None:
@@ -814,7 +813,7 @@ class TestFrozenFieldWithDefault:
 
         obj = FldDefOvr(x=7)
         assert obj.x == 7
-        with pytest.raises(AttributeError):
+        with pytest.raises(FrozenInstanceError):
             obj.x = 99
 
 
@@ -841,7 +840,7 @@ class TestFrozenFieldWithDefaultFactory:
         obj = FldFact()
         assert obj.x == 100
         assert call_count == 1
-        with pytest.raises(AttributeError):
+        with pytest.raises(FrozenInstanceError):
             obj.x = 200
 
     def test_frozen_field_factory_called_per_instance(self) -> None:
@@ -899,9 +898,9 @@ class TestMixedFrozenAndMutableFields:
 
         obj = Mixed4(a=1, b="x", c=3.14, d=4)
         # Frozen fields reject assignment
-        with pytest.raises(AttributeError):
+        with pytest.raises(FrozenInstanceError):
             obj.a = 10
-        with pytest.raises(AttributeError):
+        with pytest.raises(FrozenInstanceError):
             obj.c = 2.71
         # Mutable fields accept assignment
         obj.b = "y"
@@ -920,11 +919,11 @@ class TestMixedFrozenAndMutableFields:
             m2: str
 
         obj = MixAlt(f1=1, m1=2, f2="a", m2="b")
-        with pytest.raises(AttributeError):
+        with pytest.raises(FrozenInstanceError):
             obj.f1 = 10
         obj.m1 = 20
         assert obj.m1 == 20
-        with pytest.raises(AttributeError):
+        with pytest.raises(FrozenInstanceError):
             obj.f2 = "x"
         obj.m2 = "y"
         assert obj.m2 == "y"
@@ -1082,7 +1081,7 @@ class TestFieldFrozenInheritance:
 
         obj = NFCff(x=1, y=2, z="a")
         # Parent's frozen field stays frozen in child
-        with pytest.raises(AttributeError):
+        with pytest.raises(FrozenInstanceError):
             obj.x = 10
         # Parent's mutable field stays mutable
         obj.y = 20
@@ -1104,9 +1103,9 @@ class TestFieldFrozenInheritance:
             z: int
 
         obj = NFCff2(x=1, y=2, z=3)
-        with pytest.raises(AttributeError):
+        with pytest.raises(FrozenInstanceError):
             obj.x = 10
-        with pytest.raises(AttributeError):
+        with pytest.raises(FrozenInstanceError):
             obj.y = 20
         obj.z = 30
         assert obj.z == 30
@@ -1324,7 +1323,7 @@ class TestFieldFrozenWithCopy:
         assert obj2.x == 1
         assert obj2.y == 2
         # Frozen field stays frozen in copy
-        with pytest.raises(AttributeError):
+        with pytest.raises(FrozenInstanceError):
             obj2.x = 10
         # Mutable field stays mutable in copy
         obj2.y = 20
@@ -1340,7 +1339,7 @@ class TestFieldFrozenWithCopy:
         obj2 = copy.deepcopy(obj)
         assert obj2.x == 1
         assert obj2.y == 2
-        with pytest.raises(AttributeError):
+        with pytest.raises(FrozenInstanceError):
             obj2.x = 10
         obj2.y = 20
         assert obj2.y == 20
@@ -1371,7 +1370,7 @@ class TestFieldFrozenWithReplace:
         assert obj.x == 1
         assert obj.y == 2
         # Frozen field is still frozen in the replaced copy
-        with pytest.raises(AttributeError):
+        with pytest.raises(FrozenInstanceError):
             obj2.x = 99
 
     def test_replace_only_mutable_field(self) -> None:
@@ -1470,7 +1469,7 @@ class TestFrozenFieldTypeAnnotations:
 
         obj = FTInt(x=42)
         assert obj.x == 42
-        with pytest.raises(AttributeError):
+        with pytest.raises(FrozenInstanceError):
             obj.x = 0
 
     def test_frozen_str_field(self) -> None:
@@ -1480,7 +1479,7 @@ class TestFrozenFieldTypeAnnotations:
 
         obj = FTStr(s="hello")
         assert obj.s == "hello"
-        with pytest.raises(AttributeError):
+        with pytest.raises(FrozenInstanceError):
             obj.s = "world"
 
     def test_frozen_float_field(self) -> None:
@@ -1490,7 +1489,7 @@ class TestFrozenFieldTypeAnnotations:
 
         obj = FTFlt(f=3.14)
         assert abs(obj.f - 3.14) < 1e-10
-        with pytest.raises(AttributeError):
+        with pytest.raises(FrozenInstanceError):
             obj.f = 2.71
 
     def test_frozen_bool_field(self) -> None:
@@ -1500,7 +1499,7 @@ class TestFrozenFieldTypeAnnotations:
 
         obj = FTBool(b=True)
         assert obj.b is True
-        with pytest.raises(AttributeError):
+        with pytest.raises(FrozenInstanceError):
             obj.b = False
 
     def test_frozen_optional_field(self) -> None:
@@ -1510,12 +1509,12 @@ class TestFrozenFieldTypeAnnotations:
 
         obj = FTOpt()
         assert obj.x is None
-        with pytest.raises(AttributeError):
+        with pytest.raises(FrozenInstanceError):
             obj.x = 42
 
         obj2 = FTOpt(x=10)
         assert obj2.x == 10
-        with pytest.raises(AttributeError):
+        with pytest.raises(FrozenInstanceError):
             obj2.x = None
 
     def test_frozen_object_field(self) -> None:
@@ -1530,7 +1529,7 @@ class TestFrozenFieldTypeAnnotations:
         inner = FTInner(v=10)
         obj = FTObj(child=inner)
         assert obj.child is not None
-        with pytest.raises(AttributeError):
+        with pytest.raises(FrozenInstanceError):
             obj.child = FTInner(v=20)
 
 
@@ -1640,7 +1639,7 @@ class TestFieldFrozenTrueInNonFrozenClass:
             y: int
 
         obj = OptIn(x=1, y=2)
-        with pytest.raises(AttributeError):
+        with pytest.raises(FrozenInstanceError):
             obj.x = 10
         obj.y = 20
         assert obj.y == 20
@@ -1720,20 +1719,18 @@ class TestFrozenEscapeHatchDetails:
         with pytest.raises(FrozenInstanceError):
             obj.x = 99
 
-    def test_field_level_escape_hatch_blocked(self) -> None:
-        """object.__setattr__ cannot bypass field-level frozen because
-        the property descriptor has no setter (fset=None).  This is
-        different from class-level frozen where the property keeps its
-        setter and only the __setattr__ guard blocks writes."""
+    def test_field_level_escape_hatch(self) -> None:
+        """object.__setattr__ bypasses field-level frozen because the
+        property always retains its setter; only the __setattr__ guard
+        blocks normal writes."""
 
         @py_class(_unique_key("FldEsc"))
         class FldEsc(Object):
             x: int = field(frozen=True)
 
         obj = FldEsc(x=1)
-        with pytest.raises(AttributeError):
+        with pytest.raises(FrozenInstanceError):
             obj.x = 42
-        # object.__setattr__ also fails — the property has no setter
-        with pytest.raises(AttributeError):
-            object.__setattr__(obj, "x", 42)
-        assert obj.x == 1
+        # object.__setattr__ bypasses the guard
+        object.__setattr__(obj, "x", 42)
+        assert obj.x == 42

@@ -138,7 +138,7 @@ def _collect_own_fields(
     cls: type,
     hints: dict[str, Any],
     decorator_kw_only: bool,
-    decorator_frozen: bool = False,
+    decorator_frozen: bool,
 ) -> list[Field]:
     """Parse own annotations into :class:`Field` objects.
 
@@ -195,12 +195,8 @@ def _collect_own_fields(
         if f.kw_only is None:
             f.kw_only = kw_only_active
 
-        # Resolve frozen: None → False.
-        # Class-level frozen is enforced by the __setattr__/__delattr__ guard,
-        # NOT by removing property setters.  Only explicit field(frozen=True)
-        # removes the property setter (TypeField.frozen=True → fset=None).
-        if getattr(f, "frozen", None) is None:
-            f.frozen = False  # type: ignore[attr-defined]
+        # Resolve frozen: class-level frozen propagates to fields.
+        f.frozen = f.frozen or decorator_frozen
 
         # Resolve hash=None → follow compare (native dataclass semantics)
         if f.hash is None:
@@ -256,7 +252,7 @@ def _register_fields_into_type(
     except (NameError, AttributeError):
         return False
 
-    own_fields = _collect_own_fields(cls, hints, params["kw_only"], params.get("frozen", False))
+    own_fields = _collect_own_fields(cls, hints, params["kw_only"], params["frozen"])
     py_methods = _collect_py_methods(cls)
 
     # Register fields and type-level structural eq/hash kind with the C layer.
@@ -288,7 +284,7 @@ def _register_fields_into_type(
         eq=params["eq"],
         order=params["order"],
         unsafe_hash=params["unsafe_hash"],
-        frozen=params.get("frozen", False),
+        frozen=params["frozen"],
         py_class_mode=True,
     )
     return True
