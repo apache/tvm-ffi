@@ -850,11 +850,20 @@ class ObjectDef : public ReflectionDefBase {
   template <typename... Args, typename... Extra>
   TVM_FFI_INLINE ObjectDef& def([[maybe_unused]] init<Args...> init_func, Extra&&... extra) {
     has_explicit_init_ = true;
-    Function init_fn = GetMethod(std::string(type_key_) + "." + kInitMethodName,
-                                 &init<Args...>::template execute<Class>);
-    TVMFFIByteArray attr_name = AsByteArray(type_attr::kInit);
-    TVMFFIAny attr_value = AnyView(init_fn).CopyToTVMFFIAny();
-    TVM_FFI_CHECK_SAFE_CALL(TVMFFITypeRegisterAttr(type_index_, &attr_name, &attr_value));
+    // Register as TypeMethod (preserves type_schema metadata for Python stub generation).
+    RegisterMethod(kInitMethodName, true, &init<Args...>::template execute<Class>,
+                   std::forward<Extra>(extra)...);
+    // Also mirror into __ffi_init__ TypeAttrColumn for runtime dispatch.
+    const TVMFFITypeInfo* tinfo = TVMFFIGetTypeInfo(type_index_);
+    constexpr TVMFFIByteArray attr_name = AsByteArray(type_attr::kInit);
+    for (int32_t i = 0; i < tinfo->num_methods; ++i) {
+      if (tinfo->methods[i].name.size == attr_name.size &&
+          std::strncmp(tinfo->methods[i].name.data, attr_name.data, attr_name.size) == 0) {
+        TVM_FFI_CHECK_SAFE_CALL(
+            TVMFFITypeRegisterAttr(type_index_, &attr_name, &tinfo->methods[i].method));
+        break;
+      }
+    }
     return *this;
   }
 

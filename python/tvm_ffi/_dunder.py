@@ -27,8 +27,6 @@ from .core import TypeInfo, object_repr
 if TYPE_CHECKING:
     from .core import Function
 
-__SENTINEL = object()
-
 
 def _make_init(
     type_cls: type,
@@ -55,6 +53,7 @@ def _make_init(
     """
     sig = _make_init_signature(type_info)
     kwargs_obj = core.KWARGS
+    missing = core.MISSING
     has_post_init = hasattr(type_cls, "__post_init__")
 
     if inplace:
@@ -64,8 +63,9 @@ def _make_init(
             if kwargs:
                 ffi_args.append(kwargs_obj)
                 for key, val in kwargs.items():
-                    ffi_args.append(key)
-                    ffi_args.append(val)
+                    if val is not missing:
+                        ffi_args.append(key)
+                        ffi_args.append(val)
             ffi_init(*ffi_args)
             if has_post_init:
                 self.__post_init__()
@@ -84,8 +84,9 @@ def _make_init(
             if kwargs:
                 ffi_args.append(kwargs_obj)
                 for key, val in kwargs.items():
-                    ffi_args.append(key)
-                    ffi_args.append(val)
+                    if val is not missing:
+                        ffi_args.append(key)
+                        ffi_args.append(val)
             self.__init_handle_by_constructor__(ffi_init, *ffi_args)
             if has_post_init:
                 self.__post_init__()
@@ -138,14 +139,14 @@ def _make_init_signature(type_info: TypeInfo) -> inspect.Signature:
 
     for name, _has_default in pos_default:
         params.append(
-            inspect.Parameter(name, inspect.Parameter.POSITIONAL_OR_KEYWORD, default=__SENTINEL)
+            inspect.Parameter(name, inspect.Parameter.POSITIONAL_OR_KEYWORD, default=core.MISSING)
         )
 
     for name, _has_default in kw_required:
         params.append(inspect.Parameter(name, inspect.Parameter.KEYWORD_ONLY))
 
     for name, _has_default in kw_default:
-        params.append(inspect.Parameter(name, inspect.Parameter.KEYWORD_ONLY, default=__SENTINEL))
+        params.append(inspect.Parameter(name, inspect.Parameter.KEYWORD_ONLY, default=core.MISSING))
 
     return inspect.Signature(params)
 
@@ -253,7 +254,14 @@ def _install_dataclass_dunders(  # noqa: PLR0912, PLR0915
     type_index: int = type_info.type_index
     ffi_new: Function | None = core._lookup_type_attr(type_index, "__ffi_new__")
     ffi_init_inplace: Function | None = core._lookup_type_attr(type_index, "__ffi_init_inplace__")
-    ffi_init: Function | None = core._lookup_type_attr(type_index, "__ffi_init__")
+    # Look up __ffi_init__ from TypeMethod (preferred) or TypeAttrColumn (fallback).
+    ffi_init: Function | None = None
+    for method in type_info.methods:
+        if method.name == "__ffi_init__":
+            ffi_init = method.func
+            break
+    if ffi_init is None:
+        ffi_init = core._lookup_type_attr(type_index, "__ffi_init__")
     ffi_shallow_copy: Function | None = core._lookup_type_attr(type_index, "__ffi_shallow_copy__")
     pyobject_new = core.Object.__new__
 

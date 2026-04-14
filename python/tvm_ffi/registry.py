@@ -24,7 +24,7 @@ import warnings
 from typing import Any, Callable, Literal, Sequence, TypeVar, overload
 
 from . import core
-from .core import TypeInfo
+from .core import Function, TypeInfo
 
 # whether we simplify skip unknown objects regtistration
 _SKIP_UNKNOWN_OBJECTS = False
@@ -353,7 +353,7 @@ def init_ffi_api(namespace: str, target_module_name: str | None = None) -> None:
 
 
 def _install_init(cls: type, type_info: TypeInfo) -> None:
-    """Install ``__init__`` from the C++ ``__ffi_init__`` TypeAttrColumn.
+    """Install ``__init__`` from ``__ffi_init__`` TypeMethod or TypeAttrColumn.
 
     Skipped if the class body already defines ``__init__``.
     This ensures that ``register_object`` alone provides a working
@@ -366,7 +366,14 @@ def _install_init(cls: type, type_info: TypeInfo) -> None:
     """
     if "__init__" in cls.__dict__:
         return
-    ffi_init = core._lookup_type_attr(type_info.type_index, "__ffi_init__")
+    # Look up __ffi_init__ from TypeMethod (preferred) or TypeAttrColumn (fallback).
+    ffi_init = None
+    for method in type_info.methods:
+        if method.name == "__ffi_init__":
+            ffi_init = method.func
+            break
+    if ffi_init is None:
+        ffi_init = core._lookup_type_attr(type_info.type_index, "__ffi_init__")
     if ffi_init is not None:
         from ._dunder import _make_init  # noqa: PLC0415
 
@@ -395,11 +402,56 @@ def _add_class_attrs(type_cls: type, type_info: TypeInfo) -> type:
         name = field.name
         if not hasattr(type_cls, name):  # skip already defined attributes
             setattr(type_cls, name, field.as_property(type_cls))
+    has_ffi_init = False
     for method in type_info.methods:
         name = method.name
+        if name == "__ffi_init__":
+            _install_ffi_init_attr(type_cls, type_info, method.func)
+            has_ffi_init = True
+            continue
         if not hasattr(type_cls, name):
             setattr(type_cls, name, method.as_callable(type_cls))
+    # Also check TypeAttrColumn for auto-generated __ffi_init__.
+    if not has_ffi_init:
+        ffi_init = core._lookup_type_attr(type_info.type_index, "__ffi_init__")
+        if ffi_init is not None:
+            _install_ffi_init_attr(type_cls, type_info, ffi_init)
     return type_cls
+
+
+def _install_ffi_init_attr(cls: type, type_info: TypeInfo, ffi_init: Function) -> None:
+    """Install ``__ffi_init__`` as a method that delegates to ``__init_handle_by_constructor__``.
+
+    Custom ``__init__`` methods call ``self.__ffi_init__(*args, **kwargs)`` to
+    construct the underlying C++ object. This installs a wrapper that translates
+    that call into ``self.__init_handle_by_constructor__(ffi_init, *ffi_args)``
+    with kwargs packed using the FFI KWARGS protocol.
+
+    The wrapper includes a type-owner guard (same as ``_make_init``) to prevent
+    subclasses from accidentally using a parent's ``__ffi_init__``.
+    """
+    kwargs_obj = core.KWARGS
+    missing = core.MISSING
+    type_name = cls.__name__
+
+    def __ffi_init__(self: Any, *args: Any, **kwargs: Any) -> None:
+        if type_info is not type(self).__tvm_ffi_type_info__:
+            raise TypeError(
+                f"Calling `{type_name}.__ffi_init__()` on a `{type(self).__name__}` "
+                f"instance is not supported. Define `{type(self).__name__}` with init=True."
+            )
+        ffi_args: list[Any] = list(args)
+        if kwargs:
+            ffi_args.append(kwargs_obj)
+            for key, val in kwargs.items():
+                if val is not missing:
+                    ffi_args.append(key)
+                    ffi_args.append(val)
+        self.__init_handle_by_constructor__(ffi_init, *ffi_args)
+
+    __ffi_init__.__qualname__ = f"{cls.__qualname__}.__ffi_init__"
+    __ffi_init__.__module__ = cls.__module__
+    cls.__ffi_init__ = __ffi_init__  # type: ignore[attr-defined]
 
 
 def _warn_missing_field_annotations(cls: type, type_info: TypeInfo, *, stacklevel: int) -> None:

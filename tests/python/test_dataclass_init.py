@@ -37,12 +37,17 @@ from typing import Any
 import pytest
 from tvm_ffi import core
 from tvm_ffi.testing import (
+    TestCompare,
+    TestHash,
+    TestIntPair,
     _TestCxxAutoInit,
     _TestCxxAutoInitAllInitOff,
     _TestCxxAutoInitChild,
     _TestCxxAutoInitKwOnlyDefaults,
     _TestCxxAutoInitParent,
     _TestCxxAutoInitSimple,
+    _TestCxxClassDerived,
+    _TestCxxClassDerivedDerived,
     _TestCxxNoAutoInit,
 )
 
@@ -995,3 +1000,148 @@ class TestInitInplace:
         )
         with pytest.raises(TypeError, match="keyword-only"):
             _ffi_init_inplace(obj, 1)
+
+
+# ###########################################################################
+#  __ffi_init__ TypeMethod registration regression tests
+#
+#  These tests verify that def(init<>) in C++ registers __ffi_init__ as a
+#  TypeMethod (not just TypeAttrColumn), preserving type_schema metadata.
+#  They also verify the __ffi_init__ instance method wrapper and the MISSING
+#  sentinel used for default parameter values.
+#  See commit 2987899a for the original fix.
+# ###########################################################################
+
+
+class TestFfiInitAsTypeMethod:
+    """Verify that classes using ``def(init<>)`` expose __ffi_init__ as a TypeMethod."""
+
+    @pytest.mark.parametrize("cls", [TestIntPair, TestCompare, TestHash])
+    def test_explicit_init_has_ffi_init_type_method(self, cls: type) -> None:
+        type_info = cls.__tvm_ffi_type_info__  # ty: ignore[unresolved-attribute]
+        method_names = {m.name for m in type_info.methods}
+        assert "__ffi_init__" in method_names
+
+    def test_auto_init_does_not_have_ffi_init_type_method(self) -> None:
+        type_info = _TestCxxAutoInit.__tvm_ffi_type_info__  # ty: ignore[unresolved-attribute]
+        method_names = {m.name for m in type_info.methods}
+        assert "__ffi_init__" not in method_names
+
+    @pytest.mark.parametrize("cls", [TestIntPair, TestCompare, TestHash])
+    def test_ffi_init_type_method_has_func(self, cls: type) -> None:
+        type_info = cls.__tvm_ffi_type_info__  # ty: ignore[unresolved-attribute]
+        for method in type_info.methods:
+            if method.name == "__ffi_init__":
+                assert method.func is not None
+                break
+        else:
+            pytest.fail(f"__ffi_init__ not found in {cls.__name__} methods")
+
+
+class TestFfiInitAsInstanceMethod:
+    """Verify that __ffi_init__ is available as a callable method on registered classes."""
+
+    def test_explicit_init_class_has_ffi_init_attr(self) -> None:
+        assert hasattr(TestIntPair, "__ffi_init__")
+
+    def test_auto_init_class_has_ffi_init_attr(self) -> None:
+        assert hasattr(_TestCxxAutoInit, "__ffi_init__")
+
+    def test_ffi_init_constructs_explicit_init_object(self) -> None:
+        obj = TestIntPair.__new__(TestIntPair)
+        obj.__ffi_init__(10, 20)  # ty: ignore[unresolved-attribute]
+        assert obj.a == 10
+        assert obj.b == 20
+        assert obj.sum() == 30
+
+    def test_ffi_init_constructs_auto_init_object(self) -> None:
+        obj = _TestCxxAutoInitSimple.__new__(_TestCxxAutoInitSimple)
+        obj.__ffi_init__(7, 8)  # ty: ignore[unresolved-attribute]
+        assert obj.x == 7
+        assert obj.y == 8
+
+    def test_ffi_init_with_kwargs_protocol(self) -> None:
+        obj = _TestCxxAutoInit.__new__(_TestCxxAutoInit)
+        obj.__ffi_init__(a=1, c=3)  # ty: ignore[unresolved-attribute]
+        assert obj.a == 1
+        assert obj.b == 42
+        assert obj.c == 3
+        assert obj.d == 99
+
+
+class TestFfiInitTypeOwnerGuard:
+    """Verify the type-owner guard prevents subclass misuse of __ffi_init__."""
+
+    def test_same_type_ffi_init_succeeds(self) -> None:
+        obj = TestIntPair.__new__(TestIntPair)
+        TestIntPair.__ffi_init__(obj, 1, 2)  # ty: ignore[unresolved-attribute]
+        assert obj.a == 1
+        assert obj.b == 2
+
+    def test_subclass_ffi_init_raises_type_error(self) -> None:
+        obj = _TestCxxClassDerivedDerived.__new__(_TestCxxClassDerivedDerived)
+        with pytest.raises(TypeError, match="not supported"):
+            _TestCxxClassDerived.__ffi_init__(obj, 1, 2, 3.0)  # ty: ignore[unresolved-attribute]
+
+
+class TestMissingSentinelDefaults:
+    """Verify that auto-generated __init__ signatures use core.MISSING for defaults."""
+
+    def test_default_params_use_core_missing(self) -> None:
+        sig = inspect.signature(_TestCxxAutoInit.__init__)
+        d_param = sig.parameters["d"]
+        assert d_param.default is not inspect.Parameter.empty
+        assert d_param.default is core.MISSING
+
+    def test_kw_only_default_uses_core_missing(self) -> None:
+        sig = inspect.signature(_TestCxxAutoInitKwOnlyDefaults.__init__)
+        assert sig.parameters["k_default"].default is core.MISSING
+        assert sig.parameters["p_default"].default is core.MISSING
+
+    def test_required_params_have_no_default(self) -> None:
+        sig = inspect.signature(_TestCxxAutoInit.__init__)
+        assert sig.parameters["a"].default is inspect.Parameter.empty
+        assert sig.parameters["c"].default is inspect.Parameter.empty
+
+    def test_missing_not_sent_to_ffi(self) -> None:
+        """MISSING sentinel values should be stripped, not forwarded to C++."""
+        obj = _TestCxxAutoInitKwOnlyDefaults(p_required=1, k_required=2)
+        assert obj.p_default == 11
+        assert obj.k_default == 22
+        assert obj.hidden == 33
+
+    def test_derived_class_defaults(self) -> None:
+        obj = _TestCxxClassDerived(v_i64=1, v_i32=2, v_f64=3.0)
+        assert obj.v_f32 == 8.0
+
+
+class TestFfiInitDualRegistration:
+    """Verify __ffi_init__ is available from both TypeMethod and TypeAttrColumn."""
+
+    @pytest.mark.parametrize("cls", [TestIntPair, TestCompare])
+    def test_explicit_init_in_type_attr_column(self, cls: type) -> None:
+        type_info = cls.__tvm_ffi_type_info__  # ty: ignore[unresolved-attribute]
+        ffi_init = core._lookup_type_attr(type_info.type_index, "__ffi_init__")
+        assert ffi_init is not None
+
+    def test_auto_init_in_type_attr_column(self) -> None:
+        type_info = _TestCxxAutoInit.__tvm_ffi_type_info__  # ty: ignore[unresolved-attribute]
+        ffi_init = core._lookup_type_attr(type_info.type_index, "__ffi_init__")
+        assert ffi_init is not None
+
+    def test_explicit_init_method_and_attr_produce_same_result(self) -> None:
+        type_info = TestIntPair.__tvm_ffi_type_info__  # ty: ignore[unresolved-attribute]
+        method_func = None
+        for method in type_info.methods:
+            if method.name == "__ffi_init__":
+                method_func = method.func
+                break
+        assert method_func is not None
+        attr_func = core._lookup_type_attr(type_info.type_index, "__ffi_init__")
+        assert attr_func is not None
+        obj1 = TestIntPair.__new__(TestIntPair)
+        obj1.__init_handle_by_constructor__(method_func, 10, 20)
+        obj2 = TestIntPair.__new__(TestIntPair)
+        obj2.__init_handle_by_constructor__(attr_func, 10, 20)
+        assert obj1.a == obj2.a == 10
+        assert obj1.b == obj2.b == 20
