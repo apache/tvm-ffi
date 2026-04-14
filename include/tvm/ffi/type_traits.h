@@ -290,7 +290,7 @@ struct TypeTraits<Int, std::enable_if_t<std::is_integral_v<Int>>> : public TypeT
     }
     result->type_index = TypeIndex::kTVMFFIInt;
     result->zero_padding = 0;
-    result->v_int64 = static_cast<int64_t>(src);
+    result->v_int64 = static_cast<int64_t>(src);  // NOLINT(bugprone-signed-char-misuse)
   }
 
   TVM_FFI_INLINE static void MoveToAny(Int src, TVMFFIAny* result) { CopyToAnyView(src, result); }

@@ -478,7 +478,6 @@ TVM_FFI_STATIC_INIT_BLOCK() {
 
   refl::ObjectDef<TestUnregisteredObject>()
       .def(refl::init<int64_t, int64_t>(), "Constructor of TestUnregisteredObject")
-      .def_ro("v1", &TestUnregisteredObject::v1)
       .def_ro("v2", &TestUnregisteredObject::v2)
       .def("get_v2_plus_two", &TestUnregisteredObject::GetV2PlusTwo,
            "Get (v2 + 2) from TestUnregisteredObject");

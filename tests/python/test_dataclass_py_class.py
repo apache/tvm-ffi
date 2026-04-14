@@ -24,7 +24,6 @@ import gc
 import inspect
 import itertools
 import math
-import sys
 from typing import Any, ClassVar, Dict, List, Optional
 
 import pytest
@@ -36,8 +35,7 @@ from tvm_ffi.core import MISSING, Object, TypeInfo, TypeSchema, _to_py_class_val
 from tvm_ffi.dataclasses import KW_ONLY, Field, field, py_class
 from tvm_ffi.registry import _add_class_attrs
 from tvm_ffi.testing import TestObjectBase as _TestObjectBase
-
-_needs_310 = pytest.mark.skipif(sys.version_info < (3, 10), reason="X | Y syntax requires 3.10+")
+from tvm_ffi.testing.testing import requires_py310
 
 # ---------------------------------------------------------------------------
 # Unique type key generator (avoids collisions across tests)
@@ -195,7 +193,7 @@ class TestFieldParsing:
         obj = BoolFld(x=True)
         assert obj.x is True
 
-    @_needs_310
+    @requires_py310
     def test_optional_field(self) -> None:
         @py_class(_unique_key("OptFld"))
         class OptFld(Object):
@@ -710,7 +708,7 @@ class TestInheritance:
 class TestForwardReferences:
     """Deferred annotation resolution for mutual and self-references."""
 
-    @_needs_310
+    @requires_py310
     def test_self_reference(self) -> None:
         @py_class(_unique_key("SelfRef"))
         class SelfRef(Object):
@@ -722,7 +720,7 @@ class TestForwardReferences:
         assert head.next_node is not None
         assert head.next_node.value == 2
 
-    @_needs_310
+    @requires_py310
     def test_mutual_reference(self) -> None:
         """Two classes that reference each other."""
 
@@ -741,7 +739,7 @@ class TestForwardReferences:
         assert foo.bar is not None
         assert foo.bar.value == 2
 
-    @_needs_310
+    @requires_py310
     def test_deferred_resolution_on_instantiation(self) -> None:
         """Forward ref resolved on first instantiation."""
 
@@ -916,7 +914,7 @@ class TestHashTriState:
 class TestDeferredInitPreservation:
     """Deferred resolution preserves user-defined __init__ and init=False."""
 
-    @_needs_310
+    @requires_py310
     def test_deferred_with_user_init(self) -> None:
         """User-defined __init__ is preserved after deferred resolution."""
 
@@ -938,7 +936,7 @@ class TestDeferredInitPreservation:
         assert obj.value == 42
         assert obj.ref is None
 
-    @_needs_310
+    @requires_py310
     def test_deferred_with_init_false(self) -> None:
         """init=False is respected after deferred resolution."""
 
@@ -1152,7 +1150,7 @@ class TestInitReorderingAdversarial:
         PostReorder(y=10, x=20)
         assert seen == {"x": 20, "y": 10}
 
-    @_needs_310
+    @requires_py310
     def test_deferred_forward_ref_with_reordering(self) -> None:
         """Deferred forward-reference resolution still produces correct reordering."""
 
@@ -3776,7 +3774,7 @@ class TestContainerFieldAnnotations:
 class TestOptionalContainerFields:
     """Optional[List[T]], Optional[Dict[K,V]] via @py_class."""
 
-    @_needs_310
+    @requires_py310
     def test_optional_list_int(self) -> None:
         @py_class(_unique_key("OptListInt"))
         class OptListInt(Object):
@@ -3789,7 +3787,7 @@ class TestOptionalContainerFields:
         obj.items = [4, 5]
         assert len(obj.items) == 2
 
-    @_needs_310
+    @requires_py310
     def test_optional_dict_str_int(self) -> None:
         @py_class(_unique_key("OptDictStrInt"))
         class OptDictStrInt(Object):
@@ -3802,7 +3800,7 @@ class TestOptionalContainerFields:
         obj.data = {"b": 2}
         assert obj.data["b"] == 2
 
-    @_needs_310
+    @requires_py310
     def test_optional_list_list_int(self) -> None:
         @py_class(_unique_key("OptLLI"))
         class OptLLI(Object):
@@ -3813,7 +3811,7 @@ class TestOptionalContainerFields:
         obj.matrix = None
         assert obj.matrix is None
 
-    @_needs_310
+    @requires_py310
     def test_optional_dict_str_list_int(self) -> None:
         @py_class(_unique_key("OptDSLI"))
         class OptDSLI(Object):
@@ -3872,7 +3870,7 @@ class TestFunctionField:
         obj.func = fn2
         assert obj.func(1) == 3
 
-    @_needs_310
+    @requires_py310
     def test_optional_function_field(self) -> None:
         @py_class(_unique_key("OptFunc"))
         class OptFunc(Object):

@@ -30,13 +30,33 @@ if TYPE_CHECKING:
 # fmt: on
 # tvm-ffi-stubgen(end)
 
-from typing import ClassVar
+import sys
+from typing import Any, ClassVar
+
+import pytest
+
+from tvm_ffi import Object, get_global_func
+from tvm_ffi.dataclasses import c_class
 
 from .. import _ffi_api
 from .. import core as tvm_ffi_core
-from ..core import Object
-from ..dataclasses import c_class
-from ..registry import get_global_func
+
+requires_py39 = pytest.mark.skipif(
+    sys.version_info < (3, 9),
+    reason="requires Python 3.9+",
+)
+requires_py310 = pytest.mark.skipif(
+    sys.version_info < (3, 10),
+    reason="requires Python 3.10+",
+)
+requires_py312 = pytest.mark.skipif(
+    sys.version_info < (3, 12),
+    reason="requires Python 3.12+",
+)
+requires_py313 = pytest.mark.skipif(
+    sys.version_info < (3, 13),
+    reason="requires Python 3.13+",
+)
 
 
 @c_class("testing.TestObjectBase")
@@ -44,6 +64,7 @@ class TestObjectBase(Object):
     """Test object base class."""
 
     __test__ = False
+
     # tvm-ffi-stubgen(begin): object/testing.TestObjectBase
     # fmt: off
     v_i64: int
@@ -51,6 +72,7 @@ class TestObjectBase(Object):
     v_str: str
     if TYPE_CHECKING:
         def __init__(self, v_i64: int = ..., v_f64: float = ..., v_str: str = ...) -> None: ...
+        def __ffi_init__(self, v_i64: int = ..., v_f64: float = ..., v_str: str = ...) -> None: ...  # ty: ignore[invalid-method-override]
         def add_i64(self, _1: int, /) -> int: ...
     # fmt: on
     # tvm-ffi-stubgen(end)
@@ -60,7 +82,7 @@ class TestObjectBase(Object):
 class TestIntPair(Object):
     """Test Int Pair."""
 
-    __test__ = False
+    __test__: ClassVar[bool] = False
 
     # tvm-ffi-stubgen(begin): object/testing.TestIntPair
     # fmt: off
@@ -68,6 +90,7 @@ class TestIntPair(Object):
     b: int
     if TYPE_CHECKING:
         def __init__(self, a: int, b: int) -> None: ...
+        def __ffi_init__(self, _0: int, _1: int, /) -> None: ...  # ty: ignore[invalid-method-override]
         def sum(self, /) -> int: ...
     # fmt: on
     # tvm-ffi-stubgen(end)
@@ -78,12 +101,14 @@ class TestObjectDerived(TestObjectBase):
     """Test object derived class."""
 
     __test__ = False
+
     # tvm-ffi-stubgen(begin): object/testing.TestObjectDerived
     # fmt: off
     v_map: Mapping[Any, Any]
     v_array: Sequence[Any]
     if TYPE_CHECKING:
         def __init__(self, v_map: Mapping[Any, Any], v_array: Sequence[Any], v_i64: int = ..., v_f64: float = ..., v_str: str = ...) -> None: ...
+        def __ffi_init__(self, v_map: Mapping[Any, Any], v_array: Sequence[Any], v_i64: int = ..., v_f64: float = ..., v_str: str = ...) -> None: ...  # ty: ignore[invalid-method-override]
     # fmt: on
     # tvm-ffi-stubgen(end)
 
@@ -93,11 +118,13 @@ class TestNonCopyable(Object):
     """Test object with deleted copy constructor."""
 
     __test__ = False
+
     # tvm-ffi-stubgen(begin): object/testing.TestNonCopyable
     # fmt: off
     value: int
     if TYPE_CHECKING:
         def __init__(self, value: int) -> None: ...
+        def __ffi_init__(self, _0: int, /) -> None: ...  # ty: ignore[invalid-method-override]
     # fmt: on
     # tvm-ffi-stubgen(end)
 
@@ -184,6 +211,7 @@ class TestCompare(Object):
     ignored_field: int
     if TYPE_CHECKING:
         def __init__(self, key: int, name: str, ignored_field: int) -> None: ...
+        def __ffi_init__(self, _0: int, _1: str, _2: int, /) -> None: ...  # ty: ignore[invalid-method-override]
     # fmt: on
     # tvm-ffi-stubgen(end)
 
@@ -201,6 +229,7 @@ class TestHash(Object):
     hash_ignored: int
     if TYPE_CHECKING:
         def __init__(self, key: int, name: str, hash_ignored: int) -> None: ...
+        def __ffi_init__(self, _0: int, _1: str, _2: int, /) -> None: ...  # ty: ignore[invalid-method-override]
     # fmt: on
     # tvm-ffi-stubgen(end)
 
@@ -217,6 +246,7 @@ class TestCustomHash(Object):
     label: str
     if TYPE_CHECKING:
         def __init__(self, key: int, label: str) -> None: ...
+        def __ffi_init__(self, _0: int, _1: str, /) -> None: ...  # ty: ignore[invalid-method-override]
     # fmt: on
     # tvm-ffi-stubgen(end)
 
@@ -233,6 +263,7 @@ class TestCustomCompare(Object):
     label: str
     if TYPE_CHECKING:
         def __init__(self, key: int, label: str) -> None: ...
+        def __ffi_init__(self, _0: int, _1: str, /) -> None: ...  # ty: ignore[invalid-method-override]
     # fmt: on
     # tvm-ffi-stubgen(end)
 
@@ -249,6 +280,7 @@ class TestEqWithoutHash(Object):
     label: str
     if TYPE_CHECKING:
         def __init__(self, key: int, label: str) -> None: ...
+        def __ffi_init__(self, _0: int, _1: str, /) -> None: ...  # ty: ignore[invalid-method-override]
     # fmt: on
     # tvm-ffi-stubgen(end)
 
@@ -262,6 +294,7 @@ class _TestCxxClassBase(Object):
     v_i32: int
     if TYPE_CHECKING:
         def __init__(self, v_i64: int, v_i32: int) -> None: ...
+        def __ffi_init__(self, v_i64: int, v_i32: int) -> None: ...  # ty: ignore[invalid-method-override]
     # fmt: on
     # tvm-ffi-stubgen(end)
     not_field_1 = 1
@@ -282,6 +315,7 @@ class _TestCxxClassDerived(_TestCxxClassBase):
     v_f32: float
     if TYPE_CHECKING:
         def __init__(self, v_i64: int, v_i32: int, v_f64: float, v_f32: float = ...) -> None: ...
+        def __ffi_init__(self, v_i64: int, v_i32: int, v_f64: float, v_f32: float = ...) -> None: ...  # ty: ignore[invalid-method-override]
     # fmt: on
     # tvm-ffi-stubgen(end)
 
@@ -295,6 +329,7 @@ class _TestCxxClassDerivedDerived(_TestCxxClassDerived):
     v_bool: bool
     if TYPE_CHECKING:
         def __init__(self, v_i64: int, v_i32: int, v_f64: float, v_bool: bool, v_f32: float = ..., v_str: str = ...) -> None: ...
+        def __ffi_init__(self, v_i64: int, v_i32: int, v_f64: float, v_bool: bool, v_f32: float = ..., v_str: str = ...) -> None: ...  # ty: ignore[invalid-method-override]
     # fmt: on
     # tvm-ffi-stubgen(end)
 
@@ -309,6 +344,7 @@ class _TestCxxInitSubset(Object):
     note: str
     if TYPE_CHECKING:
         def __init__(self, required_field: int) -> None: ...
+        def __ffi_init__(self, required_field: int) -> None: ...  # ty: ignore[invalid-method-override]
     # fmt: on
     # tvm-ffi-stubgen(end)
 
@@ -324,6 +360,7 @@ class _TestCxxKwOnly(Object):
     w: int
     if TYPE_CHECKING:
         def __init__(self, *, x: int, y: int, z: int, w: int = ...) -> None: ...
+        def __ffi_init__(self, *, x: int, y: int, z: int, w: int = ...) -> None: ...  # ty: ignore[invalid-method-override]
     # fmt: on
     # tvm-ffi-stubgen(end)
 
@@ -343,6 +380,7 @@ class _TestCxxAutoInit(Object):
     d: int
     if TYPE_CHECKING:
         def __init__(self, a: int, d: int = ..., *, c: int) -> None: ...
+        def __ffi_init__(self, a: int, d: int = ..., *, c: int) -> None: ...  # ty: ignore[invalid-method-override]
     # fmt: on
     # tvm-ffi-stubgen(end)
 
@@ -360,6 +398,7 @@ class _TestCxxAutoInitSimple(Object):
     y: int
     if TYPE_CHECKING:
         def __init__(self, x: int, y: int) -> None: ...
+        def __ffi_init__(self, x: int, y: int) -> None: ...  # ty: ignore[invalid-method-override]
     # fmt: on
     # tvm-ffi-stubgen(end)
 
@@ -378,6 +417,7 @@ class _TestCxxAutoInitAllInitOff(Object):
     z: int
     if TYPE_CHECKING:
         def __init__(self) -> None: ...
+        def __ffi_init__(self) -> None: ...  # ty: ignore[invalid-method-override]
     # fmt: on
     # tvm-ffi-stubgen(end)
 
@@ -398,6 +438,7 @@ class _TestCxxAutoInitKwOnlyDefaults(Object):
     hidden: int
     if TYPE_CHECKING:
         def __init__(self, p_required: int, p_default: int = ..., *, k_required: int, k_default: int = ...) -> None: ...
+        def __ffi_init__(self, p_required: int, p_default: int = ..., *, k_required: int, k_default: int = ...) -> None: ...  # ty: ignore[invalid-method-override]
     # fmt: on
     # tvm-ffi-stubgen(end)
 
@@ -430,6 +471,7 @@ class _TestCxxAutoInitParent(Object):
     parent_default: int
     if TYPE_CHECKING:
         def __init__(self, parent_required: int, parent_default: int = ...) -> None: ...
+        def __ffi_init__(self, parent_required: int, parent_default: int = ...) -> None: ...  # ty: ignore[invalid-method-override]
     # fmt: on
     # tvm-ffi-stubgen(end)
 
@@ -447,5 +489,6 @@ class _TestCxxAutoInitChild(_TestCxxAutoInitParent):
     child_kw_only: int
     if TYPE_CHECKING:
         def __init__(self, parent_required: int, child_required: int, parent_default: int = ..., *, child_kw_only: int) -> None: ...
+        def __ffi_init__(self, parent_required: int, child_required: int, parent_default: int = ..., *, child_kw_only: int) -> None: ...  # ty: ignore[invalid-method-override]
     # fmt: on
     # tvm-ffi-stubgen(end)

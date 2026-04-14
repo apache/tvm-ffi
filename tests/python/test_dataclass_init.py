@@ -31,11 +31,11 @@ from __future__ import annotations
 
 import copy
 import inspect
-import sys
 from typing import Any
 
 import pytest
 from tvm_ffi import core
+from tvm_ffi.dataclasses import py_class
 from tvm_ffi.testing import (
     TestCompare,
     TestHash,
@@ -50,6 +50,7 @@ from tvm_ffi.testing import (
     _TestCxxClassDerivedDerived,
     _TestCxxNoAutoInit,
 )
+from tvm_ffi.testing.testing import requires_py313
 
 
 def _ffi_init(obj: Any, *args: Any) -> None:
@@ -671,7 +672,7 @@ class TestAutoInitCopyBehavior:
         assert obj_copy.y == 20
         assert not obj.same_as(obj_copy)
 
-    @pytest.mark.skipif(sys.version_info < (3, 13), reason="copy.replace requires Python 3.13+")
+    @requires_py313
     def test_replace(self) -> None:
         obj = _TestCxxAutoInit(1, c=3)
         replaced = copy.replace(obj, a=100, c=300)  # type: ignore[attr-defined]
@@ -707,7 +708,7 @@ class TestAutoInitCopyBehavior:
         assert obj_copy.z == 333
         assert not obj.same_as(obj_copy)
 
-    @pytest.mark.skipif(sys.version_info < (3, 13), reason="copy.replace requires Python 3.13+")
+    @requires_py313
     def test_replace_kw_only_defaults(self) -> None:
         obj = _TestCxxAutoInitKwOnlyDefaults(1, k_required=2)
         replaced = copy.replace(obj, k_required=99, p_default=88)  # type: ignore[attr-defined]
@@ -1035,7 +1036,7 @@ class TestFfiInitAsTypeMethod:
                 assert method.func is not None
                 break
         else:
-            pytest.fail(f"__ffi_init__ not found in {cls.__name__} methods")
+            pytest.fail(f"__ffi_init__ not found in {cls.__name__} methods")  # ty: ignore[invalid-argument-type]
 
 
 class TestFfiInitAsInstanceMethod:
@@ -1145,3 +1146,53 @@ class TestFfiInitDualRegistration:
         obj2.__init_handle_by_constructor__(attr_func, 10, 20)
         assert obj1.a == obj2.a == 10
         assert obj1.b == obj2.b == 20
+
+
+# ###########################################################################
+#  Python 3.14 annotation regression (PEP 749)
+#
+#  Python 3.14 stores annotations lazily via __annotate_func__ instead of
+#  directly in cls.__dict__["__annotations__"].  This broke @py_class field
+#  discovery when it used cls.__dict__.get("__annotations__", {}).
+# ###########################################################################
+
+
+@py_class("testing.PyClassSimple")
+class _PyClassSimple(core.Object):
+    x: int
+    y: int
+
+
+@py_class("testing.PyClassWithDefault")
+class _PyClassWithDefault(core.Object):
+    a: int
+    b: int = 42
+
+
+class TestPyClassAnnotationDiscovery:
+    """Regression: @py_class must discover fields on Python 3.14+ (PEP 749)."""
+
+    def test_fields_registered(self) -> None:
+        ti: core.TypeInfo = _PyClassSimple.__tvm_ffi_type_info__  # type: ignore[unresolved-attribute]
+        names = [f.name for f in ti.fields]
+        assert names == ["x", "y"]
+
+    def test_construct_kwargs(self) -> None:
+        obj = _PyClassSimple(x=1, y=2)
+        assert obj.x == 1
+        assert obj.y == 2
+
+    def test_construct_positional(self) -> None:
+        obj = _PyClassSimple(10, 20)
+        assert obj.x == 10
+        assert obj.y == 20
+
+    def test_default_field(self) -> None:
+        obj = _PyClassWithDefault(a=7)
+        assert obj.a == 7
+        assert obj.b == 42
+
+    def test_override_default(self) -> None:
+        obj = _PyClassWithDefault(a=1, b=2)
+        assert obj.a == 1
+        assert obj.b == 2

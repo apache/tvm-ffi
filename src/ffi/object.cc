@@ -36,7 +36,7 @@
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/ffi/string.h>
 
-#include <memory>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -215,6 +215,26 @@ class TypeTable {
 
   void RegisterTypeField(int32_t type_index, const TVMFFIFieldInfo* info) {
     Entry* entry = GetTypeEntry(type_index);
+    std::string_view new_name(info->name.data, info->name.size);
+    std::string_view type_key(entry->type_key.data, entry->type_key.size);
+    // Check: no duplicate field name within this type's own fields.
+    for (const auto& existing : entry->type_fields_data) {
+      TVM_FFI_ICHECK(std::string_view(existing.name.data, existing.name.size) != new_name)
+          << "Duplicate field name \"" << new_name << "\" in type \"" << type_key << "\"";
+    }
+    // Warn: field name should not shadow any ancestor field.
+    for (int32_t d = 0; d < entry->type_depth; ++d) {
+      const TVMFFITypeInfo* ancestor = entry->type_ancestors[d];
+      for (int32_t i = 0; i < ancestor->num_fields; ++i) {
+        if (std::string_view(ancestor->fields[i].name.data, ancestor->fields[i].name.size) ==
+            new_name) {
+          std::cerr << "[WARNING] Field \"" << new_name << "\" in type \"" << type_key
+                    << "\" duplicates an ancestor field in \""
+                    << std::string_view(ancestor->type_key.data, ancestor->type_key.size)
+                    << "\". Child types should not re-register inherited fields." << std::endl;
+        }
+      }
+    }
     TVMFFIFieldInfo field_data = *info;
     // Retain FunctionObj setter via any_pool_ so it outlives the Entry.
     if ((field_data.flags & kTVMFFIFieldFlagBitSetterIsFunctionObj) &&

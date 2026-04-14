@@ -698,12 +698,39 @@ class TypeInfo:
     def __post_init__(self):
         cdef int parent_type_index
         cdef str parent_type_key
+        # Assert no duplicate field names within this type's own fields.
+        if self.fields is not None:
+            seen = set()
+            for f in self.fields:
+                assert f.name not in seen, (
+                    f"duplicate field name {f.name!r} in TypeInfo for {self.type_key!r}; "
+                    f"TypeInfo.fields must only contain the type's own fields"
+                )
+                seen.add(f.name)
         if not self.type_ancestors:
             return
         parent_type_index = self.type_ancestors[-1]
         parent_type_key = _type_index_to_key(parent_type_index)
         # ensure parent is registered
         self.parent_type_info = _lookup_or_register_type_info_from_type_key(parent_type_key)
+        # Warn if own fields shadow any ancestor field.
+        if self.fields and self.parent_type_info is not None:
+            parent_names = set()
+            ti = self.parent_type_info
+            while ti is not None:
+                if ti.fields:
+                    for f in ti.fields:
+                        parent_names.add(f.name)
+                ti = ti.parent_type_info
+            for f in self.fields:
+                if f.name in parent_names:
+                    import warnings
+                    warnings.warn(
+                        f"Field {f.name!r} in {self.type_key!r} duplicates "
+                        f"an ancestor field. Child types should not "
+                        f"re-register inherited fields.",
+                        stacklevel=2,
+                    )
 
     @cached_property
     def total_size(self) -> int:
@@ -750,7 +777,8 @@ class TypeInfo:
         """Register user-defined dunder hooks and re-read the method table.
 
         Each entry whose name is in *type_attr_names* is registered as a
-        TypeAttrColumn entry (for C++ dispatch); all other entries are
+        TypeAttrColumn entry (for C++ dispatch); the value need not be
+        callable (e.g. ``__ffi_ir_traits__``).  All other entries are
         registered as TypeMethod (for reflection introspection).
 
         Regardless, the full method list is always re-read from the C
@@ -759,8 +787,8 @@ class TypeInfo:
 
         Parameters
         ----------
-        py_methods : list[tuple[str, callable, bool]] | None
-            Each entry is ``(name, func, is_static)``.
+        py_methods : list[tuple[str, Any, bool]] | None
+            Each entry is ``(name, value, is_static)``.
         type_attr_names : frozenset[str]
             Names to register as TypeAttrColumn instead of TypeMethod.
         """
@@ -1060,12 +1088,13 @@ cdef _register_type_metadata(int32_t type_index, int32_t total_size, int structu
 
 
 cdef _register_py_methods(int32_t type_index, list py_methods, frozenset type_attr_names):
-    """Register user-defined methods as TypeAttrColumn or TypeMethod.
+    """Register user-defined methods and type attrs as TypeAttrColumn or TypeMethod.
 
     For each entry in *py_methods*:
-    1. Convert the Python callable to a ``TVMFFIAny`` (``ffi::Function``).
+    1. Convert the Python object to a ``TVMFFIAny``.
     2. If the name is in *type_attr_names*, register as TypeAttrColumn
-       (for C++ dispatch via ``TypeAttrColumn``).
+       (for C++ dispatch via ``TypeAttrColumn``).  The value need not be
+       callable (e.g. ``__ffi_ir_traits__`` is an Object instance).
     3. Otherwise, register as TypeMethod (for reflection introspection
        via ``TypeInfo.methods``).
 
@@ -1073,8 +1102,8 @@ cdef _register_py_methods(int32_t type_index, list py_methods, frozenset type_at
     ----------
     type_index : int
         The runtime type index of the type.
-    py_methods : list[tuple[str, callable, bool]]
-        Each entry is ``(name, func, is_static)``.
+    py_methods : list[tuple[str, Any, bool]]
+        Each entry is ``(name, value, is_static)``.
     type_attr_names : frozenset[str]
         Names to register as TypeAttrColumn instead of TypeMethod.
     """
@@ -1094,7 +1123,7 @@ cdef _register_py_methods(int32_t type_index, list py_methods, frozenset type_at
             name_bytes = c_str(name)
             name_arg = ByteArrayArg(name_bytes)
 
-            # Convert Python callable -> TVMFFIAny (creates a FunctionObj)
+            # Convert Python object -> TVMFFIAny
             TVMFFIPyPyObjectToFFIAny(
                 TVMFFIPyArgSetterFactory_,
                 <PyObject*>func,

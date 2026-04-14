@@ -1178,7 +1178,7 @@ struct ObjectUnsafe {
   }
 
   TVM_FFI_INLINE static void DecRefObjectHandle(TVMFFIObjectHandle handle) {
-    reinterpret_cast<Object*>(handle)->DecRef();
+    if (handle) reinterpret_cast<Object*>(handle)->DecRef();
   }
 
   TVM_FFI_INLINE static void IncRefObjectHandle(TVMFFIObjectHandle handle) {
