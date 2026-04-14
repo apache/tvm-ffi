@@ -186,7 +186,7 @@ class JSONWriter {
   }
 
   void WriteString(const String& value) {
-    String escaped = EscapeString(value);
+    String escaped = EscapeStringJSON(value);
     std::copy(escaped.data(), escaped.data() + escaped.size(), out_iter_);
   }
 

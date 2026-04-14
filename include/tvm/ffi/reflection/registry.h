@@ -124,7 +124,7 @@ class Metadata : public InfoTrait {
       } else if (std::optional<bool> v = value.as<bool>()) {
         os << (*v ? "true" : "false");
       } else if (std::optional<String> v = value.as<String>()) {
-        String escaped = EscapeString(*v);
+        String escaped = EscapeStringJSON(*v);
         os << escaped.c_str();
       } else {
         TVM_FFI_LOG_AND_THROW(TypeError) << "Metadata can be only int, bool or string, but on key `"
