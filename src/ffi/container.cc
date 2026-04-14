@@ -195,11 +195,11 @@ TVM_FFI_STATIC_INIT_BLOCK() {
            })
       .def("ffi.MapGetItemOrMissing",
            [](const ffi::MapObj* n, const Any& k) -> Any {
-             try {
-               return n->at(k);
-             } catch (const tvm::ffi::Error& e) {
-               return GetMissingObject();
+             auto it = n->find(k);
+             if (it != n->end()) {
+               return it->second;
              }
+             return GetMissingObject();
            })
       .def_packed("ffi.Dict",
                   [](ffi::PackedArgs args, Any* ret) {
@@ -227,11 +227,11 @@ TVM_FFI_STATIC_INIT_BLOCK() {
            })
       .def("ffi.DictGetItemOrMissing",
            [](const ffi::DictObj* n, const Any& k) -> Any {
-             try {
-               return n->at(k);
-             } catch (const tvm::ffi::Error& e) {
-               return GetMissingObject();
+             auto it = n->find(k);
+             if (it != n->end()) {
+               return it->second;
              }
+             return GetMissingObject();
            })
       .def("ffi.ContainerFindFirstNonCPUDevice", [](const Any& container) -> DLDevice {
         DLDevice result{kDLCPU, 0};
