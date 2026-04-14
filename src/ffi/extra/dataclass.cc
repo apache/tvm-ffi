@@ -779,7 +779,7 @@ class ReprPrinter : public ObjectGraphDFS<ReprPrinter, ReprFrame, std::string> {
     }
     if (ti == TypeIndex::kTVMFFISmallStr) {
       String s = value.cast<String>();
-      String escaped = EscapeStringJSON(s);
+      String escaped = EscapedStringPy(s);
       *out = std::string(escaped.data(), escaped.size());
       return true;
     }
@@ -812,7 +812,7 @@ class ReprPrinter : public ObjectGraphDFS<ReprPrinter, ReprFrame, std::string> {
     // String/Bytes on heap
     if (ti == TypeIndex::kTVMFFIStr) {
       String s = details::AnyUnsafe::CopyFromAnyViewAfterCheck<String>(value);
-      String escaped = EscapeStringJSON(s);
+      String escaped = EscapedStringPy(s);
       *out = std::string(escaped.data(), escaped.size());
       return true;
     }

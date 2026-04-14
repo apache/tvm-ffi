@@ -905,11 +905,11 @@ inline String EscapedStringPy(const String& value) {
     // Detect ANSI escape sequences
     if (c == '\x1b' && d == '[') {
       size_t j = i + 2;
-      while (j < length && (std::isdigit(data[j]) || data[j] == ';')) {
+      while (j < length && (std::isdigit(static_cast<unsigned char>(data[j])) || data[j] == ';')) {
         ++j;
       }
       if (j < length && (data[j] == 'm' || data[j] == 'K')) {
-        oss << "\\u001b[";
+        oss << "\\x1b[";
         for (i += 2; i <= j; ++i) {
           oss << data[i];
         }
@@ -954,21 +954,32 @@ inline String EscapedStringPy(const String& value) {
       ++i;
       continue;
     }
-    if ((c & 0xE0) == 0xC0 && i + 1 < length) {
+    if ((c & 0xE0) == 0xC0 && i + 1 < length && (d & 0xC0) == 0x80) {
       int32_t codepoint = ((c & 0x1F) << 6) | (d & 0x3F);
       oss << "\\u" << std::hex << std::setw(4) << std::setfill('0') << codepoint;
       i += 2;
     } else if ((c & 0xF0) == 0xE0 && i + 2 < length) {
       unsigned char e = static_cast<unsigned char>(data[i + 2]);
-      int32_t codepoint = ((c & 0x0F) << 12) | ((d & 0x3F) << 6) | (e & 0x3F);
-      oss << "\\u" << std::hex << std::setw(4) << std::setfill('0') << codepoint;
-      i += 3;
+      if ((d & 0xC0) == 0x80 && (e & 0xC0) == 0x80) {
+        int32_t codepoint = ((c & 0x0F) << 12) | ((d & 0x3F) << 6) | (e & 0x3F);
+        oss << "\\u" << std::hex << std::setw(4) << std::setfill('0') << codepoint;
+        i += 3;
+      } else {
+        oss << "\\x" << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(c);
+        ++i;
+      }
     } else if ((c & 0xF8) == 0xF0 && i + 3 < length) {
       unsigned char e = static_cast<unsigned char>(data[i + 2]);
       unsigned char f = static_cast<unsigned char>(data[i + 3]);
-      int32_t codepoint = ((c & 0x07) << 18) | ((d & 0x3F) << 12) | ((e & 0x3F) << 6) | (f & 0x3F);
-      oss << "\\U" << std::hex << std::setw(8) << std::setfill('0') << codepoint;
-      i += 4;
+      if ((d & 0xC0) == 0x80 && (e & 0xC0) == 0x80 && (f & 0xC0) == 0x80) {
+        int32_t codepoint =
+            ((c & 0x07) << 18) | ((d & 0x3F) << 12) | ((e & 0x3F) << 6) | (f & 0x3F);
+        oss << "\\U" << std::hex << std::setw(8) << std::setfill('0') << codepoint;
+        i += 4;
+      } else {
+        oss << "\\x" << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(c);
+        ++i;
+      }
     } else {
       oss << "\\x" << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(c);
       ++i;
