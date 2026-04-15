@@ -308,15 +308,16 @@ def _install_dataclass_dunders(  # noqa: PLR0912, PLR0915
         # because the user's __init__ signature may not match the field
         # layout.  super().__init__() from within the user's code becomes
         # a no-op because chandle is already set.
+        import functools  # noqa: PLC0415
+
         user_init = cls.__dict__["__init__"]
 
+        @functools.wraps(user_init)
         def __init__(self: Any, *args: Any, **kwargs: Any) -> None:
             if self.__chandle__() == 0:
                 self.__init_handle_by_constructor__(ffi_new)
             user_init(self, *args, **kwargs)
 
-        __init__.__qualname__ = f"{cls.__qualname__}.__init__"
-        __init__.__module__ = cls.__module__
         cls.__init__ = __init__  # type: ignore[attr-defined]
 
     # __repr__

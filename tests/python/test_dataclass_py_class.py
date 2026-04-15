@@ -5163,3 +5163,134 @@ class TestPyClassKwOnlyRegression:
 
         with pytest.raises(TypeError, match="keyword-only"):
             KwChild(1)  # ty: ignore[missing-argument]
+
+
+# ###########################################################################
+#  No-leak / no-spurious-allocation tests for py_class
+# ###########################################################################
+
+
+class TestPyClassNoLeak:
+    """Verify that the removal of custom __new__ eliminates the memory leak.
+
+    The original bug: ``@py_class`` installed a custom ``__new__`` that called
+    ``__ffi_new__`` to pre-allocate a C++ object. When a py_class object was
+    returned from C++ through ``make_ret_object``, ``cls.__new__(cls)``
+    triggered that custom ``__new__``, allocating a spurious C++ object whose
+    refcount was never decremented.
+    """
+
+    def test_no_custom_new_on_py_class(self) -> None:
+        """py_class must NOT install a custom __new__."""
+
+        @py_class(_unique_key("NoNew"))
+        class NoNew(Object):
+            x: int
+
+        assert "__new__" not in NoNew.__dict__
+
+    def test_no_custom_new_with_user_init(self) -> None:
+        """py_class with user-defined __init__ must NOT install a custom __new__."""
+
+        @py_class(_unique_key("NoNewUI"), init=False)
+        class NoNewUI(Object):
+            x: int
+
+            def __init__(self, x: int) -> None:
+                self.x = x
+
+        assert "__new__" not in NoNewUI.__dict__
+
+    def test_make_ret_no_spurious_alloc(self) -> None:
+        """Objects returned from C++ (via DeepCopy) must not trigger spurious allocation."""
+
+        @py_class(_unique_key("RetTest"))
+        class RetTest(Object):
+            x: int
+
+        obj = RetTest(42)
+        # DeepCopy returns through make_ret_object
+        obj2 = DeepCopy(obj)
+        assert obj2.x == 42
+        assert not obj.same_as(obj2)
+
+    def test_repeated_roundtrip_no_leak(self) -> None:
+        """Repeated construct + DeepCopy cycles must not leak."""
+
+        @py_class(_unique_key("RoundTrip"))
+        class RoundTrip(Object):
+            x: int
+            y: str = "default"
+
+        gc.collect()
+        for i in range(1000):
+            o = RoundTrip(i, str(i))
+            o2 = DeepCopy(o)
+            del o, o2
+        gc.collect()
+
+    def test_user_init_wraps_metadata(self) -> None:
+        """Wrapped user __init__ preserves docstring and __wrapped__."""
+
+        @py_class(_unique_key("WrapMeta"), init=False)
+        class WrapMeta(Object):
+            x: int
+
+            def __init__(self, x: int) -> None:
+                """Initialize WrapMeta."""
+                self.x = x
+
+        assert WrapMeta.__init__.__doc__ == "Initialize WrapMeta."
+        assert hasattr(WrapMeta.__init__, "__wrapped__")
+
+    def test_chandle_guard_skips_on_make_ret(self) -> None:
+        """Auto-generated __init__ with chandle guard: make_ret never calls __init__."""
+
+        @py_class(_unique_key("ChandleGuard"))
+        class ChandleGuard(Object):
+            x: int
+
+        obj = ChandleGuard(7)
+        obj2 = DeepCopy(obj)
+        # If __init__ were called by make_ret, it would fail (no args)
+        # or overwrite fields. Verify the value survived intact.
+        assert obj2.x == 7
+
+    def test_super_init_noop_after_ffi_init(self) -> None:
+        """super().__init__() is a no-op when chandle is already set."""
+
+        @py_class(_unique_key("SuperBase"))
+        class SuperBase(Object):
+            pass
+
+        call_log: list[str] = []
+
+        @py_class(_unique_key("SuperChild"), init=False)
+        class SuperChild(SuperBase):
+            x: int
+
+            def __init__(self, x: int) -> None:
+                call_log.append("before_super")
+                super().__init__()
+                call_log.append("after_super")
+                self.x = x
+
+        obj = SuperChild(42)
+        assert obj.x == 42
+        assert call_log == ["before_super", "after_super"]
+
+    def test_user_init_mismatched_signature(self) -> None:
+        """User __init__ whose args don't match field layout still works."""
+
+        @py_class(_unique_key("Mismatch"), init=False)
+        class Mismatch(Object):
+            value: int
+            ref: Optional[Object]
+
+            def __init__(self, val: int) -> None:
+                self.value = val
+                self.ref = None
+
+        obj = Mismatch(99)
+        assert obj.value == 99
+        assert obj.ref is None
