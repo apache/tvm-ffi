@@ -422,7 +422,7 @@ _FFI_TYPE_ATTR_NAMES: frozenset[str] = frozenset(
 #: TypeAttrColumn entries; all other names are registered as TypeMethod.
 #:
 #: System-managed names (``__ffi_new__``, ``__ffi_init__``,
-#: ``__ffi_init_inplace__``, ``__ffi_shallow_copy__``) are intentionally
+#: ``__ffi_shallow_copy__``) are intentionally
 #: absent because the C++ runtime generates them.
 _FFI_RECOGNIZED_METHODS: frozenset[str] = _FFI_TYPE_ATTR_NAMES
 

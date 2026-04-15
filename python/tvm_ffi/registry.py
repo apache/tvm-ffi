@@ -381,7 +381,6 @@ def _install_init(cls: type, type_info: TypeInfo) -> None:
             cls,
             type_info,
             ffi_init=ffi_init,
-            inplace=False,
         )
     elif issubclass(cls, core.Object):
         type_name = cls.__name__

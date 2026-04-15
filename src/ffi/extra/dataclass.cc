@@ -1827,7 +1827,7 @@ Function MakeFieldSetter(int32_t field_type_index, int64_t type_converter_int,
 }
 
 // ============================================================================
-// Shared helpers for MakeInit / MakeInitInplace
+// Shared helpers for MakeInit
 // ============================================================================
 
 /*!
@@ -1992,39 +1992,22 @@ Function MakeInit(int32_t type_index) {
   });
 }
 
-Function MakeInitInplace(int32_t type_index) {
-  auto info = BuildAutoInitInfo(type_index);
-  return Function::FromPacked([info](PackedArgs args, Any* rv) {
-    TVM_FFI_ICHECK(args.size() >= 1)
-        << "__ffi_init_inplace__ requires at least one argument (self)";
-    ObjectRef self = args[0].cast<ObjectRef>();
-    Object* obj = const_cast<Object*>(self.get());
-    const auto raw_args = reinterpret_cast<const TVMFFIAny*>(args.data());
-    BindFieldArgs(obj, *info, raw_args + 1, args.size() - 1);
-  });
-}
-
 void RegisterFFIInit(int32_t type_index) {
   namespace refl = ::tvm::ffi::reflection;
   Function auto_init_fn = MakeInit(type_index);
   TVMFFIByteArray attr_name = refl::AsByteArray(refl::type_attr::kInit);
   TVMFFIAny attr_value = AnyView(auto_init_fn).CopyToTVMFFIAny();
   TVM_FFI_CHECK_SAFE_CALL(TVMFFITypeRegisterAttr(type_index, &attr_name, &attr_value));
-
-  Function init_inplace_fn = MakeInitInplace(type_index);
-  TVMFFIByteArray ip_attr_name = refl::AsByteArray(refl::type_attr::kInitInplace);
-  TVMFFIAny ip_attr_value = AnyView(init_inplace_fn).CopyToTVMFFIAny();
-  TVM_FFI_CHECK_SAFE_CALL(TVMFFITypeRegisterAttr(type_index, &ip_attr_name, &ip_attr_value));
 }
 
 /*!
  * \brief Combined registration for Python-defined types:
- * ``__ffi_init__``, ``__ffi_init_inplace__``, ``__ffi_new__``, ``__ffi_shallow_copy__``
+ * ``__ffi_init__``, ``__ffi_new__``, ``__ffi_shallow_copy__``
  */
 void PyClassRegisterTypeAttrColumns(int32_t type_index, int32_t total_size) {
   namespace refl = ::tvm::ffi::reflection;
   const TVMFFITypeInfo* type_info = TVMFFIGetTypeInfo(type_index);
-  // Step 1. Register `__ffi_init__` and `__ffi_init_inplace__`
+  // Step 1. Register `__ffi_init__`
   RegisterFFIInit(type_index);
   // Step 2. Register `__ffi_new__`
   Function new_fn = Function::FromTyped([type_index, total_size]() -> ObjectRef {
@@ -2148,7 +2131,6 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   refl::EnsureTypeAttrColumn(refl::type_attr::kCompare);
   refl::EnsureTypeAttrColumn(refl::type_attr::kNew);
   refl::EnsureTypeAttrColumn(refl::type_attr::kInit);
-  refl::EnsureTypeAttrColumn(refl::type_attr::kInitInplace);
   refl::GlobalDef()
       .def("ffi._RegisterFFIInit", RegisterFFIInit)
       .def("ffi.MakeFieldSetter", MakeFieldSetter)

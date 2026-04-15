@@ -341,19 +341,6 @@ inline constexpr const char* kNew = "__ffi_new__";
  */
 inline constexpr const char* kInit = "__ffi_init__";
 /*!
- * \brief In-place init on a pre-allocated object (no allocation).
- *
- * Used by ``@py_class`` auto-generated ``__init__``: ``__new__`` has already
- * allocated the object via ``kNew``, so this function only sets fields.
- * The first argument is ``self`` (the pre-allocated object).
- *
- * Signature: ``(self: TSelf, *args, **kwargs) -> void``, where ``TSelf`` is a subclass of
- * ObjectRef.
- *
- * Keyword arguments are packed as ``[KWARGS, key0, val0, key1, val1, ...]``.
- */
-inline constexpr const char* kInitInplace = "__ffi_init_inplace__";
-/*!
  * \brief Convert ``AnyView`` to a specific reflected ``TSelf`` type.
  *
  * Registered via ``TypeAttrDef<T>.def(kConvert, &FFIConvertFromAnyViewToObjectRef<T>)``

@@ -31,24 +31,29 @@ if TYPE_CHECKING:
 def _make_init(
     type_cls: type,
     type_info: TypeInfo,
-    inplace: bool,
     ffi_init: Function,
+    py_class_mode: bool = False,
 ) -> Callable[..., None]:
-    """Build ``__init__`` that delegates to a C++ init function.
+    """Build ``__init__`` that delegates to ``__ffi_init__``.
+
+    Both ``@c_class`` and ``@py_class`` use the same constructor-call path
+    (``self.__init_handle_by_constructor__(ffi_init, *args)``).  The only
+    difference is how ``super().__init__()`` from a subclass is handled:
+
+    * **c_class** — raises ``TypeError`` (subclass must define its own init).
+    * **py_class** — silently skips when the C++ handle is already set, so
+      ``super().__init__()`` is a harmless no-op.
 
     Parameters
     ----------
     type_cls
-        The class to build an __init__ for.  Used for signature and error messages.
+        The class to build an __init__ for.
     type_info
-        The TypeInfo for *type_cls*, used to build the signature and for type checks.
-    inplace : bool
-        If True (py_class), *ffi_init* is ``__ffi_init_inplace__`` — called as
-        ``ffi_init(self, *args)`` on a pre-allocated object.
-        If False (c_class), *ffi_init* is ``__ffi_init__`` — called via
-        ``self.__init_handle_by_constructor__(ffi_init, *args)``.
+        The TypeInfo for *type_cls*.
     ffi_init
-        The C++ initialiser resolved from TypeAttrColumn at install time.
+        The C++ ``__ffi_init__`` resolved at install time.
+    py_class_mode
+        If True, use a ``chandle`` guard instead of a ``TypeError`` guard.
 
     """
     sig = _make_init_signature(type_info)
@@ -56,17 +61,19 @@ def _make_init(
     missing = core.MISSING
     has_post_init = hasattr(type_cls, "__post_init__")
 
-    if inplace:
+    if py_class_mode:
 
         def __init__(self: Any, *args: Any, **kwargs: Any) -> None:
-            ffi_args: list[Any] = [self, *args]
+            if self.__chandle__() != 0:
+                return
+            ffi_args: list[Any] = list(args)
             if kwargs:
                 ffi_args.append(kwargs_obj)
                 for key, val in kwargs.items():
                     if val is not missing:
                         ffi_args.append(key)
                         ffi_args.append(val)
-            ffi_init(*ffi_args)
+            self.__init_handle_by_constructor__(ffi_init, *ffi_args)
             if has_post_init:
                 self.__post_init__()
 
@@ -244,16 +251,15 @@ def _install_dataclass_dunders(  # noqa: PLR0912, PLR0915
     unsafe_hash
         If True, install ``__hash__`` using ``RecursiveHash``.
     py_class_mode
-        If True, use C++ ``__ffi_init_inplace__`` for ``__init__``
-        (object already allocated by ``__new__``).
+        If True, use a ``chandle`` guard for ``__init__`` so that
+        ``super().__init__()`` is a no-op, and wrap user-defined
+        ``__init__`` to allocate via ``__ffi_init__`` before user code.
 
     """
     from . import _ffi_api  # noqa: PLC0415
 
     type_info: TypeInfo = cls.__tvm_ffi_type_info__  # type: ignore[assignment]
     type_index: int = type_info.type_index
-    ffi_new: Function | None = core._lookup_type_attr(type_index, "__ffi_new__")
-    ffi_init_inplace: Function | None = core._lookup_type_attr(type_index, "__ffi_init_inplace__")
     # Look up __ffi_init__ from TypeMethod (preferred) or TypeAttrColumn (fallback).
     ffi_init: Function | None = None
     for method in type_info.methods:
@@ -262,19 +268,8 @@ def _install_dataclass_dunders(  # noqa: PLR0912, PLR0915
             break
     if ffi_init is None:
         ffi_init = core._lookup_type_attr(type_index, "__ffi_init__")
+    ffi_new: Function | None = core._lookup_type_attr(type_index, "__ffi_new__")
     ffi_shallow_copy: Function | None = core._lookup_type_attr(type_index, "__ffi_shallow_copy__")
-    pyobject_new = core.Object.__new__
-
-    # __new__ (py_class only: allocate via __ffi_new__)
-    if py_class_mode and "__new__" not in cls.__dict__:
-        if ffi_new is not None:
-
-            def __new__(klass: type, *args: Any, **kwargs: Any) -> Any:
-                obj = pyobject_new(klass)
-                obj.__init_handle_by_constructor__(ffi_new)
-                return obj
-
-            cls.__new__ = __new__  # type: ignore[attr-defined]
 
     # __init__
     # ┌─────────────────────┬──────────────────────┬──────────────────────┐
@@ -282,25 +277,16 @@ def _install_dataclass_dunders(  # noqa: PLR0912, PLR0915
     # ├─────────────────────┼──────────────────────┼──────────────────────┤
     # │ c_class, init=True  │ keep as-is           │ _make_init           │
     # │ c_class, init=False │ keep as-is           │ TypeError guard      │
-    # │ py_class, init=True │ keep as-is           │ _make_init(inplace)  │
-    # │ py_class, init=False│ keep as-is           │ TypeError guard      │
+    # │ py_class, init=True │ wrap chandle guard   │ _make_init(py_class) │
+    # │ py_class, init=False│ wrap chandle guard   │ TypeError guard      │
     # └─────────────────────┴──────────────────────┴──────────────────────┘
     if "__init__" not in cls.__dict__:
-        if init and py_class_mode and ffi_init_inplace is not None:
-            # py_class init=True: delegate to C++ __ffi_init_inplace__
-            cls.__init__ = _make_init(  # type: ignore[attr-defined]
-                cls,
-                type_info,
-                ffi_init=ffi_init_inplace,
-                inplace=True,
-            )
-        elif init and not py_class_mode and ffi_init is not None:
-            # c_class init=True: delegate to __ffi_init__ via TypeAttrColumn
+        if init and ffi_init is not None:
             cls.__init__ = _make_init(  # type: ignore[attr-defined]
                 cls,
                 type_info,
                 ffi_init=ffi_init,
-                inplace=False,
+                py_class_mode=py_class_mode,
             )
         elif not init:
             # init=False, no user __init__: TypeError guard
@@ -315,6 +301,23 @@ def _install_dataclass_dunders(  # noqa: PLR0912, PLR0915
             __init___.__qualname__ = f"{cls.__qualname__}.__init__"
             __init___.__module__ = cls.__module__
             cls.__init__ = __init___  # type: ignore[attr-defined]
+    elif py_class_mode and ffi_new is not None:
+        # User-defined __init__: wrap with chandle guard so the C++ object
+        # is allocated (via __ffi_new__) before the user's code runs.
+        # We use __ffi_new__ (zero-arg allocator) rather than __ffi_init__
+        # because the user's __init__ signature may not match the field
+        # layout.  super().__init__() from within the user's code becomes
+        # a no-op because chandle is already set.
+        user_init = cls.__dict__["__init__"]
+
+        def __init__(self: Any, *args: Any, **kwargs: Any) -> None:
+            if self.__chandle__() == 0:
+                self.__init_handle_by_constructor__(ffi_new)
+            user_init(self, *args, **kwargs)
+
+        __init__.__qualname__ = f"{cls.__qualname__}.__init__"
+        __init__.__module__ = cls.__module__
+        cls.__init__ = __init__  # type: ignore[attr-defined]
 
     # __repr__
     if repr and "__repr__" not in cls.__dict__:

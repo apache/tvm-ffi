@@ -5046,12 +5046,12 @@ class TestDtypeDeviceFields:
 
 
 # ###########################################################################
-#  kw_only regression tests (py_class via __ffi_init_inplace__)
+#  kw_only regression tests (py_class via __ffi_init__)
 # ###########################################################################
 
 
 class TestPyClassKwOnlyRegression:
-    """Regression tests ensuring kw_only enforcement via C++ __ffi_init_inplace__."""
+    """Regression tests ensuring kw_only enforcement via C++ __ffi_init__."""
 
     def test_missing_kw_only_error_says_keyword_only(self) -> None:
         """Missing required kw_only field produces 'keyword-only' in the error."""

@@ -945,65 +945,6 @@ class TestKwOnlyErrorMessages:
 
 
 # ###########################################################################
-#  __ffi_init_inplace__ protocol tests
-# ###########################################################################
-
-
-def _ffi_init_inplace(obj: Any, *args: Any) -> None:
-    """Look up __ffi_init_inplace__ from TypeAttrColumn and call it directly."""
-    type_index = type(obj).__tvm_ffi_type_info__.type_index
-    fn = core._lookup_type_attr(type_index, "__ffi_init_inplace__")
-    assert fn is not None, f"No __ffi_init_inplace__ for {type(obj)}"
-    fn(obj, *args)
-
-
-class TestInitInplace:
-    """Test the __ffi_init_inplace__ TypeAttrColumn."""
-
-    def test_inplace_exists(self) -> None:
-        type_index = getattr(_TestCxxAutoInit, "__tvm_ffi_type_info__").type_index
-        fn = core._lookup_type_attr(type_index, "__ffi_init_inplace__")
-        assert fn is not None
-
-    def test_inplace_positional(self) -> None:
-        obj = _TestCxxAutoInit.__new__(_TestCxxAutoInit)
-        obj.__init_handle_by_constructor__(
-            core._lookup_type_attr(type(obj).__tvm_ffi_type_info__.type_index, "__ffi_new__")
-        )
-        _ffi_init_inplace(obj, 10, core.KWARGS, "c", 30)
-        assert obj.a == 10
-        assert obj.b == 42  # default
-        assert obj.c == 30
-        assert obj.d == 99  # default
-
-    def test_inplace_all_kwargs(self) -> None:
-        obj = _TestCxxAutoInit.__new__(_TestCxxAutoInit)
-        obj.__init_handle_by_constructor__(
-            core._lookup_type_attr(type(obj).__tvm_ffi_type_info__.type_index, "__ffi_new__")
-        )
-        _ffi_init_inplace(obj, core.KWARGS, "a", 1, "c", 2, "d", 3)
-        assert obj.a == 1
-        assert obj.c == 2
-        assert obj.d == 3
-
-    def test_inplace_kw_only_rejects_positional(self) -> None:
-        obj = _TestCxxAutoInit.__new__(_TestCxxAutoInit)
-        obj.__init_handle_by_constructor__(
-            core._lookup_type_attr(type(obj).__tvm_ffi_type_info__.type_index, "__ffi_new__")
-        )
-        with pytest.raises(TypeError):
-            _ffi_init_inplace(obj, 1, 2)
-
-    def test_inplace_missing_kw_only_error(self) -> None:
-        obj = _TestCxxAutoInit.__new__(_TestCxxAutoInit)
-        obj.__init_handle_by_constructor__(
-            core._lookup_type_attr(type(obj).__tvm_ffi_type_info__.type_index, "__ffi_new__")
-        )
-        with pytest.raises(TypeError, match="keyword-only"):
-            _ffi_init_inplace(obj, 1)
-
-
-# ###########################################################################
 #  __ffi_init__ TypeMethod registration regression tests
 #
 #  These tests verify that def(init<>) in C++ registers __ffi_init__ as a

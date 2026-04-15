@@ -726,7 +726,7 @@ class ObjectDef : public ReflectionDefBase {
       TVM_FFI_CHECK_SAFE_CALL(TVMFFITypeRegisterAttr(type_index_, &attr, &fn_any));
     }
     // Step 2. Register `__ffi_new__` <== info->metadata->creator
-    // Also, `__ffi_init__` and `__ffi_init_inplace__` if no explicit init is defined.
+    // Also, `__ffi_init__` if no explicit init is defined.
     if (info->metadata != nullptr && info->metadata->creator != nullptr) {
       Function fn = Function::FromTyped(
           [creator = info->metadata->creator]() -> ObjectRef {
@@ -739,7 +739,7 @@ class ObjectDef : public ReflectionDefBase {
       TVMFFIByteArray attr = AsByteArray(type_attr::kNew);
       TVMFFIAny fn_any = AnyView(fn).CopyToTVMFFIAny();
       TVM_FFI_CHECK_SAFE_CALL(TVMFFITypeRegisterAttr(type_index_, &attr, &fn_any));
-      // Step 3. Register `__ffi_init__` and `__ffi_init_inplace__` if no explicit init is defined.
+      // Step 3. Register `__ffi_init__` if no explicit init is defined.
       // Use Function::GetGlobal to look up the registration function, which lives in
       // dataclass.cc and may not be loaded yet for early (builtin) types.
       if (!has_explicit_init_) {
