@@ -28,54 +28,6 @@ except ImportError:
     _UnionType = None
 
 
-cdef class FieldGetter:
-    cdef dict __dict__
-    cdef TVMFFIFieldGetter getter
-    cdef int64_t offset
-
-    def __call__(self, CObject obj):
-        cdef TVMFFIAny result
-        cdef int c_api_ret_code
-        cdef void* field_ptr = (<char*>(<CObject>obj).chandle) + self.offset
-        result.type_index = kTVMFFINone
-        result.v_int64 = 0
-        c_api_ret_code = self.getter(field_ptr, &result)
-        CHECK_CALL(c_api_ret_code)
-        return make_ret(result)
-
-
-cdef class FieldSetter:
-    cdef dict __dict__
-    cdef void* setter
-    cdef int64_t offset
-    cdef int64_t flags
-
-    def __call__(self, CObject obj, value):
-        cdef int c_api_ret_code
-        cdef void* field_ptr = (<char*>(<CObject>obj).chandle) + self.offset
-        TVMFFIPyCallFieldSetter(
-            TVMFFIPyArgSetterFactory_,
-            self.setter,
-            self.flags,
-            field_ptr,
-            <PyObject*>value,
-            &c_api_ret_code
-        )
-        # NOTE: logic is same as check_call
-        # directly inline here to simplify backtrace
-        if c_api_ret_code == 0:
-            return
-        # backward compact with error already set case
-        # TODO(tqchen): remove after we move beyond a few versions.
-        if c_api_ret_code == -2:
-            raise raise_existing_error()
-        # epecial handle env error already set
-        error = move_from_last_error()
-        if error.kind == "EnvErrorAlreadySet":
-            raise raise_existing_error()
-        raise error.py_error()
-
-
 _TYPE_SCHEMA_ORIGIN_CONVERTER = {
     # A few Python-native types
     "Variant": "Union",
@@ -593,24 +545,6 @@ def _annotation_cobject(cls, targs):
     return TypeSchema(origin, origin_type_index=info.type_index)
 
 
-class FFIProperty(property):
-    """Property descriptor for FFI-backed fields.
-
-    When *frozen* is True the public setter (``fset``) is suppressed so
-    that normal attribute assignment raises ``AttributeError``.  The
-    real setter is stashed in :attr:`_fset` and exposed via the
-    :meth:`set` escape-hatch.
-    """
-
-    def __init__(self, fget, fset, frozen, fdel=None, doc=None):
-        super().__init__(fget, None if frozen else fset, fdel, doc)
-        self._fset = fset
-
-    def set(self, obj, value):
-        """Force-set the field value, bypassing the frozen guard."""
-        self._fset(obj, value)
-
-
 @dataclasses.dataclass(eq=False)
 class TypeField:
     """Description of a single reflected field on an FFI-backed type."""
@@ -621,7 +555,7 @@ class TypeField:
     offset: int
     frozen: bool
     metadata: dict[str, Any]
-    getter: FieldGetter
+    getter: Any
     setter: FieldSetter
     ty: Optional[TypeSchema] = None
     c_init: bool = True
@@ -634,24 +568,8 @@ class TypeField:
         assert self.getter is not None
 
     def as_property(self, object cls):
-        """Create an :class:`FFIProperty` descriptor for this field on ``cls``."""
-        cdef str name = self.name
-        cdef FieldGetter fget = self.getter
-        cdef FieldSetter fset = self.setter
-        cdef object ret
-        fget.__name__ = fset.__name__ = name
-        fget.__module__ = fset.__module__ = cls.__module__
-        fget.__qualname__ = fset.__qualname__ = f"{cls.__qualname__}.{name}"
-        ret = FFIProperty(
-            fget=fget,
-            fset=fset,
-            frozen=self.frozen,
-        )
-        if self.doc:
-            ret.__doc__ = self.doc
-            fget.__doc__ = self.doc
-            fset.__doc__ = self.doc
-        return ret
+        """Create a Python ``property`` descriptor for this field on ``cls``."""
+        return _make_field_property(self)
 
 
 @dataclasses.dataclass(eq=False)
@@ -1006,7 +924,8 @@ def _register_fields(type_info, fields, structure_kind=None):
     cdef int64_t size, alignment
     cdef int32_t field_type_index
     cdef TVMFFIFieldGetter getter
-    cdef FieldGetter fgetter
+    cdef FieldGetter generic_getter
+    cdef object fgetter
     cdef FieldSetter fsetter
     cdef list type_fields = []
     for py_field in fields:
@@ -1037,9 +956,10 @@ def _register_fields(type_info, fields, structure_kind=None):
         )
 
         # 5. Build the Python-side TypeField descriptor
-        fgetter = FieldGetter.__new__(FieldGetter)
-        fgetter.getter = getter
-        fgetter.offset = field_offset
+        generic_getter = FieldGetter.__new__(FieldGetter)
+        generic_getter.getter = getter
+        generic_getter.offset = field_offset
+        fgetter = _make_specialized_getter(field_type_index, size, field_offset, generic_getter)
         fsetter = FieldSetter.__new__(FieldSetter)
         fsetter.setter = <void*>setter_fn.chandle
         fsetter.offset = field_offset

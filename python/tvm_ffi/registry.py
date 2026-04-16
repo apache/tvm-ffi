@@ -53,10 +53,11 @@ def register_object(
 
     Notes
     -----
-    All :class:`Object` subclasses get ``__slots__ = ()`` by default via the
-    metaclass, preventing per-instance ``__dict__``.  To opt out and allow
-    arbitrary instance attributes, declare ``__slots__ = ("__dict__",)``
-    explicitly in the class body::
+    All :class:`Object` subclasses derive ``__slots__`` from their
+    annotations via the metaclass (or use ``__slots__ = ()`` when they
+    have no annotated fields), preventing a per-instance ``__dict__`` by
+    default. To opt out and allow arbitrary instance attributes, declare
+    ``__slots__ = ("__dict__",)`` explicitly in the class body::
 
         @tvm_ffi.register_object("test.MyObject")
         class MyObject(Object):
@@ -87,6 +88,12 @@ def register_object(
         setattr(cls, "__tvm_ffi_type_info__", info)
         if init:
             _install_init(cls, info)
+        # Field helpers (_force_set_field, __replace__) are installed
+        # after __init__.  For init=False (used by c_class internally),
+        # c_class installs field helpers itself after _install_dataclass_dunders.
+        if init and info.fields:
+            core._install_field_helpers(cls, info)
+            core._install_field_getattro(cls, info)
         return cls
 
     if isinstance(type_key, str):
@@ -398,9 +405,10 @@ def _install_init(cls: type, type_info: TypeInfo) -> None:
 
 def _add_class_attrs(type_cls: type, type_info: TypeInfo) -> type:
     for field in type_info.fields:
-        name = field.name
-        if not hasattr(type_cls, name):  # skip already defined attributes
-            setattr(type_cls, name, field.as_property(type_cls))
+        # Install Python property (overwrites member_descriptor from __slots__).
+        # Using exactly ``property`` (not a subclass) triggers CPython 3.12+
+        # LOAD_ATTR_PROPERTY inline-cache specialization.
+        setattr(type_cls, field.name, field.as_property(type_cls))
     has_ffi_init = False
     for method in type_info.methods:
         name = method.name

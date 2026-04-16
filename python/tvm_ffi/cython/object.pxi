@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 import json
+import typing
 from abc import ABCMeta
 from typing import Any
 
@@ -194,10 +195,69 @@ cdef class CContainerBase(CObject):
         self._dlpack_exchange_api = NULL
 
 
+# Lazy-resolved KW_ONLY sentinels (tvm_ffi.dataclasses may not be
+# importable when this .pxi is first included into core.pyx).
+_PY_KW_ONLY = None
+_FFI_KW_ONLY = None
+_KW_ONLY_RESOLVED = False
+
+
+def _resolve_kw_only_sentinels():
+    global _PY_KW_ONLY, _FFI_KW_ONLY, _KW_ONLY_RESOLVED
+    if _KW_ONLY_RESOLVED:
+        return
+    try:
+        from dataclasses import KW_ONLY as _py  # noqa: PLC0415
+        _PY_KW_ONLY = _py
+    except ImportError:
+        pass
+    try:
+        from tvm_ffi.dataclasses import KW_ONLY as _ffi  # noqa: PLC0415
+        _FFI_KW_ONLY = _ffi
+    except Exception:  # noqa: BLE001
+        pass
+    _KW_ONLY_RESOLVED = True
+
+
 class _ObjectSlotsMeta(ABCMeta):
+    @staticmethod
+    def _annotation_is_classvar(annotation: Any) -> bool:
+        if isinstance(annotation, str):
+            stripped = annotation.removeprefix("typing.")
+            return stripped == "ClassVar" or stripped.startswith("ClassVar[")
+        return annotation is typing.ClassVar or typing.get_origin(annotation) is typing.ClassVar
+
+    @staticmethod
+    def _annotation_is_kw_only(annotation: Any) -> bool:
+        if isinstance(annotation, str):
+            return annotation == "KW_ONLY" or annotation.endswith(".KW_ONLY")
+        _resolve_kw_only_sentinels()
+        return annotation is _PY_KW_ONLY or annotation is _FFI_KW_ONLY
+
+    @staticmethod
+    def _extract_slots_from_annotations(ns: dict[str, Any]) -> tuple[tuple[str, ...], dict[str, Any]]:
+        annotations = ns.get("__annotations__", {})
+        if not isinstance(annotations, dict):
+            return (), {}
+        slot_names: list[str] = []
+        saved: dict[str, Any] = {}
+        for name, annotation in annotations.items():
+            if (
+                _ObjectSlotsMeta._annotation_is_classvar(annotation)
+                or _ObjectSlotsMeta._annotation_is_kw_only(annotation)
+            ):
+                continue
+            slot_names.append(name)
+            if name in ns:
+                saved[name] = ns.pop(name)
+        return tuple(slot_names), saved
+
     def __new__(mcls, name: str, bases: tuple[type, ...], ns: dict[str, Any], **kwargs: Any):
         if "__slots__" not in ns:
-            ns["__slots__"] = ()
+            slots, saved = mcls._extract_slots_from_annotations(ns)
+            ns["__slots__"] = slots
+            if saved:
+                ns["_tvm_ffi_saved_defaults"] = saved
         return super().__new__(mcls, name, bases, ns, **kwargs)
 
     def __init__(cls, name: str, bases: tuple[type, ...], ns: dict[str, Any], **kwargs: Any):
@@ -218,9 +278,10 @@ class Object(CObject, metaclass=_ObjectSlotsMeta):
       identity unless an overridden implementation is provided on the
       concrete type. Use :py:meth:`same_as` to check whether two
       references point to the same underlying object.
-    - Subclasses that omit ``__slots__`` get ``__slots__ = ()`` injected
-      automatically by the metaclass.  To allow a per-instance ``__dict__``,
-      declare ``__slots__ = ("__dict__",)`` explicitly in the class body.
+    - Subclasses that omit ``__slots__`` get slots derived from their
+      annotations, or ``__slots__ = ()`` when they have no annotated
+      fields. To allow a per-instance ``__dict__``, declare
+      ``__slots__ = ("__dict__",)`` explicitly in the class body.
     - Most users interact with subclasses (e.g. :class:`Tensor`,
       :class:`Function`) rather than :py:class:`Object` directly.
 
@@ -443,6 +504,9 @@ cdef inline object make_fallback_cls_for_type_index(int32_t type_index):
         setattr(cls, field.name, field.as_property(cls))
     for method in type_info.methods:
         setattr(cls, method.name, method.as_callable(cls))
+    # Install fast C-level field access (same as registered classes).
+    if type_info.fields:
+        _install_field_getattro(cls, type_info)
     # Update the registry
     type_info.type_cls = cls
     _update_registry(type_index, type_key, type_info, cls)
@@ -486,7 +550,8 @@ cdef _type_info_create_from_type_key(object type_cls, str type_key):
     cdef object fields = []
     cdef object methods = []
     cdef str type_schema_json
-    cdef FieldGetter getter
+    cdef FieldGetter generic_getter
+    cdef object getter
     cdef FieldSetter setter
     cdef ByteArrayArg type_key_arg = ByteArrayArg(c_str(type_key))
 
@@ -497,9 +562,15 @@ cdef _type_info_create_from_type_key(object type_cls, str type_key):
     info = TVMFFIGetTypeInfo(type_index)
     for i in range(info.num_fields):
         field = &(info.fields[i])
-        getter = FieldGetter.__new__(FieldGetter)
-        (<FieldGetter>getter).getter = field.getter
-        (<FieldGetter>getter).offset = field.offset
+        generic_getter = FieldGetter.__new__(FieldGetter)
+        generic_getter.getter = field.getter
+        generic_getter.offset = field.offset
+        getter = _make_specialized_getter(
+            field.field_static_type_index,
+            field.size,
+            field.offset,
+            generic_getter,
+        )
         setter = FieldSetter.__new__(FieldSetter)
         (<FieldSetter>setter).setter = field.setter
         (<FieldSetter>setter).offset = field.offset

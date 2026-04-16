@@ -24,7 +24,7 @@ import itertools
 from typing import Dict, List, Optional
 
 import pytest
-from tvm_ffi.core import FFIProperty, Object  # ty: ignore[unresolved-import]
+from tvm_ffi.core import Object
 from tvm_ffi.dataclasses import field, py_class
 
 _counter = itertools.count()
@@ -32,6 +32,10 @@ _counter = itertools.count()
 
 def _unique_key(base: str) -> str:
     return f"testing.frozen.{base}_{next(_counter)}"
+
+
+def _force_set_field(obj: Object, name: str, value: object) -> None:
+    type(obj)._force_set_field(obj, name, value)  # type: ignore[attr-defined]
 
 
 # ---------------------------------------------------------------------------
@@ -216,7 +220,7 @@ class TestPerFieldFrozen:
 
 
 # ---------------------------------------------------------------------------
-#  Escape hatch: type(obj).field.set(obj, val)
+#  Escape hatch: type(obj)._force_set_field(obj, "field", val)
 # ---------------------------------------------------------------------------
 class TestEscapeHatch:
     def test_escape_hatch_sets_frozen_field(self) -> None:
@@ -225,7 +229,7 @@ class TestEscapeHatch:
             x: int
 
         p = Pt(1)
-        type(p).x.set(p, 99)  # ty: ignore[unresolved-attribute]
+        _force_set_field(p, "x", 99)
         assert p.x == 99
 
     def test_escape_hatch_on_field_level_frozen(self) -> None:
@@ -234,7 +238,7 @@ class TestEscapeHatch:
             val: int = field(frozen=True)
 
         r = Rec(5)
-        type(r).val.set(r, 50)  # ty: ignore[unresolved-attribute]
+        _force_set_field(r, "val", 50)
         assert r.val == 50
 
     def test_escape_hatch_multiple_fields(self) -> None:
@@ -244,8 +248,8 @@ class TestEscapeHatch:
             y: int
 
         p = Pt(1, 2)
-        type(p).x.set(p, 10)  # ty: ignore[unresolved-attribute]
-        type(p).y.set(p, 20)  # ty: ignore[unresolved-attribute]
+        _force_set_field(p, "x", 10)
+        _force_set_field(p, "y", 20)
         assert p.x == 10
         assert p.y == 20
 
@@ -255,7 +259,7 @@ class TestEscapeHatch:
             items: List[int]  # noqa: UP006
 
         h = HasList([1])
-        type(h).items.set(h, [10, 20])  # ty: ignore[unresolved-attribute]
+        _force_set_field(h, "items", [10, 20])
         assert len(h.items) == 2
 
     def test_regular_setattr_still_blocked_after_escape_hatch(self) -> None:
@@ -264,7 +268,7 @@ class TestEscapeHatch:
             x: int
 
         p = Pt(1)
-        type(p).x.set(p, 99)  # ty: ignore[unresolved-attribute]
+        _force_set_field(p, "x", 99)
         with pytest.raises(AttributeError):
             p.x = 100  # ty: ignore[invalid-assignment]
 
@@ -274,7 +278,7 @@ class TestEscapeHatch:
             x: int
 
         p = Pt(1)
-        type(p).x.set(p, 99)  # ty: ignore[unresolved-attribute]
+        _force_set_field(p, "x", 99)
         assert p.x == 99
 
 
@@ -435,8 +439,7 @@ class TestFrozenInheritance:
             b: int
 
         c = Child(1, 2)
-        # Escape hatch for parent field must go through Parent class descriptor
-        Parent.a.set(c, 10)  # ty: ignore[unresolved-attribute]
+        _force_set_field(c, "a", 10)
         assert c.a == 10
 
     def test_replace_on_inherited_frozen(self) -> None:
@@ -516,7 +519,7 @@ class TestFrozenPostInit:
             x: int
 
             def __post_init__(self) -> None:
-                type(self).x.set(self, self.x * 2)  # ty: ignore[unresolved-attribute]
+                _force_set_field(self, "x", self.x * 2)
 
         p = Pt(5)
         assert p.x == 10
@@ -545,44 +548,44 @@ class TestFrozenEqHash:
 
 
 # ---------------------------------------------------------------------------
-#  FFIProperty descriptor checks
+#  Shadow-slot descriptor checks
 # ---------------------------------------------------------------------------
-class TestFFIPropertyDescriptor:
-    def test_frozen_field_is_ffi_property(self) -> None:
+class TestFieldPropertyDescriptor:
+    def test_frozen_field_is_property(self) -> None:
         @py_class(_unique_key("desc_type"), frozen=True)
         class Pt(Object):
             x: int
 
-        assert isinstance(Pt.__dict__["x"], FFIProperty)
+        assert isinstance(Pt.__dict__["x"], property)
 
-    def test_frozen_field_fset_is_none(self) -> None:
+    def test_frozen_field_exposes_force_set(self) -> None:
         @py_class(_unique_key("desc_fset"), frozen=True)
         class Pt(Object):
             x: int
 
-        assert Pt.__dict__["x"].fset is None
+        assert hasattr(Pt, "_force_set_field")
 
-    def test_mutable_field_is_ffi_property(self) -> None:
+    def test_mutable_field_is_property(self) -> None:
         @py_class(_unique_key("desc_mutable"))
         class Pt(Object):
             x: int
 
-        assert isinstance(Pt.__dict__["x"], FFIProperty)
+        assert isinstance(Pt.__dict__["x"], property)
 
-    def test_mutable_field_fset_is_not_none(self) -> None:
+    def test_mutable_field_exposes_force_set(self) -> None:
         @py_class(_unique_key("desc_mutable_fset"))
         class Pt(Object):
             x: int
 
-        assert Pt.__dict__["x"].fset is not None
+        assert hasattr(Pt, "_force_set_field")
 
-    def test_mutable_field_set_method_also_works(self) -> None:
+    def test_mutable_field_force_set_works(self) -> None:
         @py_class(_unique_key("desc_mutable_set"))
         class Pt(Object):
             x: int
 
         p = Pt(1)
-        type(p).x.set(p, 99)  # ty: ignore[unresolved-attribute]
+        _force_set_field(p, "x", 99)
         assert p.x == 99
 
 
