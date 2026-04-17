@@ -214,6 +214,33 @@ def _make_replace(_type_info: TypeInfo) -> Callable[..., Any]:
 # ---------------------------------------------------------------------------
 
 
+def _set_match_args(cls: type, type_info: TypeInfo) -> None:
+    """Set ``cls.__match_args__`` from reflected fields.
+
+    Mirrors stdlib :func:`dataclasses.dataclass` semantics: the tuple
+    contains the names of positional ``__init__`` fields (``init=True``
+    and ``kw_only=False``), walking the parent chain in parent-first
+    order.  If ``cls`` already defines ``__match_args__`` in its own
+    ``__dict__``, it is left untouched.
+    """
+    if "__match_args__" in cls.__dict__:
+        return
+    chain: list[TypeInfo] = []
+    ti: TypeInfo | None = type_info
+    while ti is not None:
+        chain.append(ti)
+        ti = ti.parent_type_info
+    names: list[str] = []
+    for ancestor in reversed(chain):
+        for tf in ancestor.fields or ():
+            df = tf.dataclass_field
+            if df is None:
+                continue
+            if df.init and not df.kw_only:
+                names.append(tf.name)
+    setattr(cls, "__match_args__", tuple(names))
+
+
 def _install_dataclass_dunders(  # noqa: PLR0912, PLR0915
     cls: type,
     *,
@@ -222,6 +249,7 @@ def _install_dataclass_dunders(  # noqa: PLR0912, PLR0915
     eq: bool,
     order: bool,
     unsafe_hash: bool,
+    match_args: bool = True,
     py_class_mode: bool = False,
 ) -> None:
     """Install structural dunder methods on *cls*.
@@ -250,6 +278,11 @@ def _install_dataclass_dunders(  # noqa: PLR0912, PLR0915
         ``NotImplemented`` for unrelated types.
     unsafe_hash
         If True, install ``__hash__`` using ``RecursiveHash``.
+    match_args
+        If True (default), set ``cls.__match_args__`` to the tuple of
+        positional ``__init__`` field names for use with ``match``
+        statements.  Skipped when the class already defines
+        ``__match_args__`` in its body.
     py_class_mode
         If True, use a ``chandle`` guard for ``__init__`` so that
         ``super().__init__()`` is a no-op, and wrap user-defined
@@ -393,3 +426,6 @@ def _install_dataclass_dunders(  # noqa: PLR0912, PLR0915
         cls.__deepcopy__ = _make_deepcopy(type_info)  # type: ignore[attr-defined]
     if "__replace__" not in cls.__dict__:
         cls.__replace__ = _make_replace(type_info)  # type: ignore[attr-defined]
+
+    if match_args:
+        _set_match_args(cls, type_info)

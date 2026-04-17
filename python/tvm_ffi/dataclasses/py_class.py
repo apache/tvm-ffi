@@ -305,6 +305,7 @@ def _register_fields_into_type(
         eq=params["eq"],
         order=params["order"],
         unsafe_hash=params["unsafe_hash"],
+        match_args=params["match_args"],
         py_class_mode=True,
     )
     return True
@@ -450,6 +451,7 @@ def py_class(  # noqa: PLR0913
     eq: bool = False,
     order: bool = False,
     unsafe_hash: bool = False,
+    match_args: bool = True,
     kw_only: bool = False,
     structural_eq: str | None = None,
     slots: bool = True,
@@ -507,6 +509,11 @@ def py_class(  # noqa: PLR0913
         Requires ``eq=True``.
     unsafe_hash
         If True, generate ``__hash__`` (unsafe for mutable objects).
+    match_args
+        If True (default), set ``__match_args__`` to a tuple of the
+        positional ``__init__`` field names (``init=True`` and not
+        ``kw_only``), enabling ``match`` statements.  Ignored when the
+        class body already defines ``__match_args__``.
     kw_only
         If True, all fields are keyword-only in ``__init__`` by default.
     structural_eq
@@ -551,6 +558,7 @@ def py_class(  # noqa: PLR0913
         "eq": eq,
         "order": order,
         "unsafe_hash": unsafe_hash,
+        "match_args": match_args,
         "kw_only": kw_only,
         "structural_eq": structural_eq,
     }

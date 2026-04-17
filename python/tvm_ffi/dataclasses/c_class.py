@@ -69,6 +69,7 @@ def c_class(
     eq: bool = False,
     order: bool = False,
     unsafe_hash: bool = False,
+    match_args: bool = True,
 ) -> Callable[[_T], _T]:
     """Register a C++ FFI class and install structural dunder methods.
 
@@ -105,6 +106,11 @@ def c_class(
         *unsafe* because mutable fields contribute to the hash, so mutating
         an object while it is in a set or dict key will break invariants.
         Defaults to False.
+    match_args
+        If True (default), set ``__match_args__`` to a tuple of the
+        positional ``__init__`` field names (``init=True`` and not
+        ``kw_only``), enabling ``match`` statements.  Ignored when the
+        class body already defines ``__match_args__``.
 
     Returns
     -------
@@ -151,7 +157,13 @@ def c_class(
         _warn_missing_field_annotations(cls, type_info, stacklevel=2)
         _attach_field_objects(cls, type_info)
         _install_dataclass_dunders(
-            cls, init=init, repr=repr, eq=eq, order=order, unsafe_hash=unsafe_hash
+            cls,
+            init=init,
+            repr=repr,
+            eq=eq,
+            order=order,
+            unsafe_hash=unsafe_hash,
+            match_args=match_args,
         )
         return cls
 

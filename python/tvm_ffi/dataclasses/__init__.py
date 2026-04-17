@@ -16,17 +16,20 @@
 # under the License.
 """FFI dataclass decorators: ``c_class`` for C++-backed types, ``py_class`` for Python-defined types."""
 
-from tvm_ffi.core import Object
+from tvm_ffi.core import MISSING, Object
 
 from .c_class import c_class
-from .common import fields, is_dataclass, replace
+from .common import asdict, astuple, fields, is_dataclass, replace
 from .field import KW_ONLY, Field, field
 from .py_class import py_class
 
 __all__ = [
     "KW_ONLY",
+    "MISSING",
     "Field",
     "Object",
+    "asdict",
+    "astuple",
     "c_class",
     "field",
     "fields",
