@@ -1298,7 +1298,7 @@ class TestRegisterPyClass:
         type_key = _unique_key_ff("DupPreserve")
         cls1 = type("DupPreserve1", (core.Object,), {"__slots__": ()})
         info1 = core._register_py_class(parent_info, type_key, cls1)
-        info1._register_fields([Field(name="x", ty=TypeSchema("int"))])
+        info1._register_fields([Field(name="x", _ty_schema=TypeSchema("int"))])
         setattr(cls1, "__tvm_ffi_type_info__", info1)
         _add_class_attrs(cls1, info1)
 
@@ -1320,7 +1320,7 @@ class TestFieldRegistration:
     def test_int_field_registered(self) -> None:
         cls = _make_type(
             "FldInt",
-            [Field(name="x", ty=TypeSchema("int"), default=MISSING)],
+            [Field(name="x", _ty_schema=TypeSchema("int"), default=MISSING)],
         )
         info = getattr(cls, "__tvm_ffi_type_info__")
         assert len(info.fields) == 1
@@ -1329,7 +1329,7 @@ class TestFieldRegistration:
     def test_float_field_registered(self) -> None:
         cls = _make_type(
             "FldFloat",
-            [Field(name="val", ty=TypeSchema("float"), default=0.0)],
+            [Field(name="val", _ty_schema=TypeSchema("float"), default=0.0)],
         )
         info = getattr(cls, "__tvm_ffi_type_info__")
         assert info.fields[0].name == "val"
@@ -1337,7 +1337,7 @@ class TestFieldRegistration:
     def test_str_field_registered(self) -> None:
         cls = _make_type(
             "FldStr",
-            [Field(name="s", ty=TypeSchema("str"), default="hello")],
+            [Field(name="s", _ty_schema=TypeSchema("str"), default="hello")],
         )
         info = getattr(cls, "__tvm_ffi_type_info__")
         assert info.fields[0].name == "s"
@@ -1345,7 +1345,7 @@ class TestFieldRegistration:
     def test_bool_field_registered(self) -> None:
         cls = _make_type(
             "FldBool",
-            [Field(name="flag", ty=TypeSchema("bool"), default=False)],
+            [Field(name="flag", _ty_schema=TypeSchema("bool"), default=False)],
         )
         info = getattr(cls, "__tvm_ffi_type_info__")
         assert info.fields[0].name == "flag"
@@ -1354,9 +1354,9 @@ class TestFieldRegistration:
         cls = _make_type(
             "FldMulti",
             [
-                Field(name="a", ty=TypeSchema("int"), default=MISSING),
-                Field(name="b", ty=TypeSchema("float"), default=0.0),
-                Field(name="c", ty=TypeSchema("str"), default="x"),
+                Field(name="a", _ty_schema=TypeSchema("int"), default=MISSING),
+                Field(name="b", _ty_schema=TypeSchema("float"), default=0.0),
+                Field(name="c", _ty_schema=TypeSchema("str"), default="x"),
             ],
         )
         info = getattr(cls, "__tvm_ffi_type_info__")
@@ -1367,9 +1367,9 @@ class TestFieldRegistration:
         cls = _make_type(
             "FldOff",
             [
-                Field(name="a", ty=TypeSchema("int"), default=MISSING),
-                Field(name="b", ty=TypeSchema("float"), default=MISSING),
-                Field(name="c", ty=TypeSchema("str"), default=MISSING),
+                Field(name="a", _ty_schema=TypeSchema("int"), default=MISSING),
+                Field(name="b", _ty_schema=TypeSchema("float"), default=MISSING),
+                Field(name="c", _ty_schema=TypeSchema("str"), default=MISSING),
             ],
         )
         info = getattr(cls, "__tvm_ffi_type_info__")
@@ -1380,7 +1380,7 @@ class TestFieldRegistration:
     def test_ffi_init_method_registered(self) -> None:
         cls = _make_type(
             "FldInit",
-            [Field(name="x", ty=TypeSchema("int"), default=MISSING)],
+            [Field(name="x", _ty_schema=TypeSchema("int"), default=MISSING)],
         )
         info = getattr(cls, "__tvm_ffi_type_info__")
         ffi_init = core._lookup_type_attr(info.type_index, "__ffi_init__")
@@ -1392,13 +1392,13 @@ class TestFieldRegistration:
             [
                 Field(
                     name="visible",
-                    ty=TypeSchema("int"),
+                    _ty_schema=TypeSchema("int"),
                     default=MISSING,
                     repr=True,
                 ),
                 Field(
                     name="hidden",
-                    ty=TypeSchema("int"),
+                    _ty_schema=TypeSchema("int"),
                     default=0,
                     repr=False,
                 ),
@@ -1415,20 +1415,20 @@ class TestFieldDescriptor:
     """Field class: validation, defaults, default_factory checks."""
 
     def test_compare_default_is_false(self) -> None:
-        f = Field(name="x", ty=TypeSchema("int"))
+        f = Field(name="x", _ty_schema=TypeSchema("int"))
         assert f.compare is False
 
     def test_default_and_factory_mutually_exclusive(self) -> None:
         with pytest.raises(ValueError):
-            Field(name="x", ty=TypeSchema("int"), default=0, default_factory=lambda: 0)
+            Field(name="x", _ty_schema=TypeSchema("int"), default=0, default_factory=lambda: 0)
 
     def test_factory_must_be_callable(self) -> None:
         with pytest.raises(TypeError, match="callable"):
-            Field(name="x", ty=TypeSchema("int"), default_factory=0)  # ty: ignore[invalid-argument-type]
+            Field(name="x", _ty_schema=TypeSchema("int"), default_factory=0)  # ty: ignore[invalid-argument-type]
 
     def test_non_callable_factory_rejected(self) -> None:
         with pytest.raises(TypeError, match="callable"):
-            Field(name="x", ty=TypeSchema("int"), default_factory="not_callable")  # ty: ignore[invalid-argument-type]
+            Field(name="x", _ty_schema=TypeSchema("int"), default_factory="not_callable")  # ty: ignore[invalid-argument-type]
 
 
 # ###########################################################################
@@ -1441,8 +1441,8 @@ class TestConstruction:
         Cls = _make_type(
             "ConKw",
             [
-                Field(name="x", ty=TypeSchema("int"), default=MISSING),
-                Field(name="y", ty=TypeSchema("float"), default=MISSING),
+                Field(name="x", _ty_schema=TypeSchema("int"), default=MISSING),
+                Field(name="y", _ty_schema=TypeSchema("float"), default=MISSING),
             ],
         )
         obj = Cls(x=42, y=3.14)
@@ -1453,8 +1453,8 @@ class TestConstruction:
         Cls = _make_type(
             "ConPos",
             [
-                Field(name="x", ty=TypeSchema("int"), default=MISSING),
-                Field(name="y", ty=TypeSchema("float"), default=MISSING),
+                Field(name="x", _ty_schema=TypeSchema("int"), default=MISSING),
+                Field(name="y", _ty_schema=TypeSchema("float"), default=MISSING),
             ],
         )
         obj = Cls(10, 2.5)
@@ -1465,8 +1465,8 @@ class TestConstruction:
         Cls = _make_type(
             "ConMixed",
             [
-                Field(name="x", ty=TypeSchema("int"), default=MISSING),
-                Field(name="y", ty=TypeSchema("float"), default=MISSING),
+                Field(name="x", _ty_schema=TypeSchema("int"), default=MISSING),
+                Field(name="y", _ty_schema=TypeSchema("float"), default=MISSING),
             ],
         )
         obj = Cls(7, y=1.5)
@@ -1476,28 +1476,28 @@ class TestConstruction:
     def test_default_value_int(self) -> None:
         Cls = _make_type(
             "ConDefInt",
-            [Field(name="x", ty=TypeSchema("int"), default=99)],
+            [Field(name="x", _ty_schema=TypeSchema("int"), default=99)],
         )
         assert Cls().x == 99
 
     def test_default_value_float(self) -> None:
         Cls = _make_type(
             "ConDefFloat",
-            [Field(name="x", ty=TypeSchema("float"), default=1.5)],
+            [Field(name="x", _ty_schema=TypeSchema("float"), default=1.5)],
         )
         assert Cls().x == pytest.approx(1.5)
 
     def test_default_value_str(self) -> None:
         Cls = _make_type(
             "ConDefStr",
-            [Field(name="s", ty=TypeSchema("str"), default="hello")],
+            [Field(name="s", _ty_schema=TypeSchema("str"), default="hello")],
         )
         assert Cls().s == "hello"
 
     def test_override_default(self) -> None:
         Cls = _make_type(
             "ConOverride",
-            [Field(name="x", ty=TypeSchema("int"), default=0)],
+            [Field(name="x", _ty_schema=TypeSchema("int"), default=0)],
         )
         assert Cls(x=42).x == 42
 
@@ -1505,8 +1505,8 @@ class TestConstruction:
         Cls = _make_type(
             "ConReqOpt",
             [
-                Field(name="required", ty=TypeSchema("int"), default=MISSING),
-                Field(name="optional", ty=TypeSchema("float"), default=0.0),
+                Field(name="required", _ty_schema=TypeSchema("int"), default=MISSING),
+                Field(name="optional", _ty_schema=TypeSchema("float"), default=0.0),
             ],
         )
         obj = Cls(required=5)
@@ -1516,7 +1516,7 @@ class TestConstruction:
     def test_missing_required_raises(self) -> None:
         Cls = _make_type(
             "ConMissing",
-            [Field(name="x", ty=TypeSchema("int"), default=MISSING)],
+            [Field(name="x", _ty_schema=TypeSchema("int"), default=MISSING)],
         )
         with pytest.raises(TypeError):
             Cls()
@@ -1524,7 +1524,7 @@ class TestConstruction:
     def test_extra_kwarg_raises(self) -> None:
         Cls = _make_type(
             "ConExtra",
-            [Field(name="x", ty=TypeSchema("int"), default=MISSING)],
+            [Field(name="x", _ty_schema=TypeSchema("int"), default=MISSING)],
         )
         with pytest.raises(TypeError):
             Cls(x=1, bogus=2)
@@ -1532,14 +1532,14 @@ class TestConstruction:
     def test_str_field_construction(self) -> None:
         Cls = _make_type(
             "ConStr",
-            [Field(name="name", ty=TypeSchema("str"), default=MISSING)],
+            [Field(name="name", _ty_schema=TypeSchema("str"), default=MISSING)],
         )
         assert Cls(name="world").name == "world"
 
     def test_bool_field_construction(self) -> None:
         Cls = _make_type(
             "ConBool",
-            [Field(name="flag", ty=TypeSchema("bool"), default=MISSING)],
+            [Field(name="flag", _ty_schema=TypeSchema("bool"), default=MISSING)],
         )
         assert Cls(flag=True).flag is True
         assert Cls(flag=False).flag is False
@@ -1548,10 +1548,10 @@ class TestConstruction:
         Cls = _make_type(
             "ConKwOnly",
             [
-                Field(name="x", ty=TypeSchema("int"), default=MISSING),
+                Field(name="x", _ty_schema=TypeSchema("int"), default=MISSING),
                 Field(
                     name="y",
-                    ty=TypeSchema("int"),
+                    _ty_schema=TypeSchema("int"),
                     default=MISSING,
                     kw_only=True,
                 ),
@@ -1565,10 +1565,10 @@ class TestConstruction:
         Cls = _make_type(
             "ConKwOnlyReject",
             [
-                Field(name="x", ty=TypeSchema("int"), default=MISSING),
+                Field(name="x", _ty_schema=TypeSchema("int"), default=MISSING),
                 Field(
                     name="y",
-                    ty=TypeSchema("int"),
+                    _ty_schema=TypeSchema("int"),
                     default=MISSING,
                     kw_only=True,
                 ),
@@ -1580,7 +1580,7 @@ class TestConstruction:
     def test_isinstance_check(self) -> None:
         Cls = _make_type(
             "ConIsInstance",
-            [Field(name="x", ty=TypeSchema("int"), default=MISSING)],
+            [Field(name="x", _ty_schema=TypeSchema("int"), default=MISSING)],
         )
         obj = Cls(x=1)
         assert isinstance(obj, Cls)
@@ -1596,14 +1596,14 @@ class TestGetterSetter:
     def test_get_int(self) -> None:
         Cls = _make_type(
             "GSInt",
-            [Field(name="x", ty=TypeSchema("int"), default=MISSING)],
+            [Field(name="x", _ty_schema=TypeSchema("int"), default=MISSING)],
         )
         assert Cls(x=42).x == 42
 
     def test_set_int(self) -> None:
         Cls = _make_type(
             "GSSetInt",
-            [Field(name="x", ty=TypeSchema("int"), default=MISSING)],
+            [Field(name="x", _ty_schema=TypeSchema("int"), default=MISSING)],
         )
         obj = Cls(x=1)
         obj.x = 100
@@ -1612,14 +1612,14 @@ class TestGetterSetter:
     def test_get_float(self) -> None:
         Cls = _make_type(
             "GSFloat",
-            [Field(name="val", ty=TypeSchema("float"), default=MISSING)],
+            [Field(name="val", _ty_schema=TypeSchema("float"), default=MISSING)],
         )
         assert Cls(val=3.14).val == pytest.approx(3.14)
 
     def test_set_float(self) -> None:
         Cls = _make_type(
             "GSSetFloat",
-            [Field(name="val", ty=TypeSchema("float"), default=MISSING)],
+            [Field(name="val", _ty_schema=TypeSchema("float"), default=MISSING)],
         )
         obj = Cls(val=1.0)
         obj.val = 2.718
@@ -1628,14 +1628,14 @@ class TestGetterSetter:
     def test_get_str(self) -> None:
         Cls = _make_type(
             "GSStr",
-            [Field(name="s", ty=TypeSchema("str"), default=MISSING)],
+            [Field(name="s", _ty_schema=TypeSchema("str"), default=MISSING)],
         )
         assert Cls(s="hello").s == "hello"
 
     def test_set_str(self) -> None:
         Cls = _make_type(
             "GSSetStr",
-            [Field(name="s", ty=TypeSchema("str"), default=MISSING)],
+            [Field(name="s", _ty_schema=TypeSchema("str"), default=MISSING)],
         )
         obj = Cls(s="hello")
         obj.s = "world"
@@ -1644,14 +1644,14 @@ class TestGetterSetter:
     def test_get_bool(self) -> None:
         Cls = _make_type(
             "GSBool",
-            [Field(name="flag", ty=TypeSchema("bool"), default=MISSING)],
+            [Field(name="flag", _ty_schema=TypeSchema("bool"), default=MISSING)],
         )
         assert Cls(flag=True).flag is True
 
     def test_set_bool(self) -> None:
         Cls = _make_type(
             "GSSetBool",
-            [Field(name="flag", ty=TypeSchema("bool"), default=MISSING)],
+            [Field(name="flag", _ty_schema=TypeSchema("bool"), default=MISSING)],
         )
         obj = Cls(flag=True)
         obj.flag = False
@@ -1660,7 +1660,7 @@ class TestGetterSetter:
     def test_mutation_isolated(self) -> None:
         Cls = _make_type(
             "GSIsolate",
-            [Field(name="x", ty=TypeSchema("int"), default=MISSING)],
+            [Field(name="x", _ty_schema=TypeSchema("int"), default=MISSING)],
         )
         a = Cls(x=1)
         b = Cls(x=1)
@@ -1672,9 +1672,9 @@ class TestGetterSetter:
         Cls = _make_type(
             "GSMultiMut",
             [
-                Field(name="a", ty=TypeSchema("int"), default=MISSING),
-                Field(name="b", ty=TypeSchema("float"), default=MISSING),
-                Field(name="c", ty=TypeSchema("str"), default=MISSING),
+                Field(name="a", _ty_schema=TypeSchema("int"), default=MISSING),
+                Field(name="b", _ty_schema=TypeSchema("float"), default=MISSING),
+                Field(name="c", _ty_schema=TypeSchema("str"), default=MISSING),
             ],
         )
         obj = Cls(a=1, b=2.0, c="x")
@@ -1691,7 +1691,7 @@ class TestGetterSetter:
             [
                 Field(
                     name="arr",
-                    ty=TypeSchema("Array", (TypeSchema("int"),)),
+                    _ty_schema=TypeSchema("Array", (TypeSchema("int"),)),
                     default=MISSING,
                 ),
             ],
@@ -1714,7 +1714,7 @@ class TestObjectRefFields:
             [
                 Field(
                     name="arr",
-                    ty=TypeSchema("Array", (TypeSchema("int"),)),
+                    _ty_schema=TypeSchema("Array", (TypeSchema("int"),)),
                     default=MISSING,
                 ),
             ],
@@ -1730,7 +1730,7 @@ class TestObjectRefFields:
             [
                 Field(
                     name="arr",
-                    ty=TypeSchema("Array", (TypeSchema("int"),)),
+                    _ty_schema=TypeSchema("Array", (TypeSchema("int"),)),
                     default=MISSING,
                 ),
             ],
@@ -1742,13 +1742,13 @@ class TestObjectRefFields:
     def test_nested_object_field(self) -> None:
         Inner = _make_type(
             "ObjInner",
-            [Field(name="val", ty=TypeSchema("int"), default=MISSING)],
+            [Field(name="val", _ty_schema=TypeSchema("int"), default=MISSING)],
         )
         inner_info = getattr(Inner, "__tvm_ffi_type_info__")
         inner_schema = TypeSchema(inner_info.type_key, origin_type_index=inner_info.type_index)
         Outer = _make_type(
             "ObjOuter",
-            [Field(name="child", ty=inner_schema, default=MISSING)],
+            [Field(name="child", _ty_schema=inner_schema, default=MISSING)],
         )
         assert Outer(child=Inner(val=42)).child.val == 42
 
@@ -1765,7 +1765,7 @@ class TestOptionalFields:
             [
                 Field(
                     name="x",
-                    ty=TypeSchema("Optional", (TypeSchema("int"),)),
+                    _ty_schema=TypeSchema("Optional", (TypeSchema("int"),)),
                     default=MISSING,
                 ),
             ],
@@ -1778,7 +1778,7 @@ class TestOptionalFields:
             [
                 Field(
                     name="x",
-                    ty=TypeSchema("Optional", (TypeSchema("int"),)),
+                    _ty_schema=TypeSchema("Optional", (TypeSchema("int"),)),
                     default=None,
                 ),
             ],
@@ -1791,7 +1791,7 @@ class TestOptionalFields:
             [
                 Field(
                     name="s",
-                    ty=TypeSchema("Optional", (TypeSchema("str"),)),
+                    _ty_schema=TypeSchema("Optional", (TypeSchema("str"),)),
                     default=MISSING,
                 ),
             ],
@@ -1804,7 +1804,7 @@ class TestOptionalFields:
             [
                 Field(
                     name="s",
-                    ty=TypeSchema("Optional", (TypeSchema("str"),)),
+                    _ty_schema=TypeSchema("Optional", (TypeSchema("str"),)),
                     default=None,
                 ),
             ],
@@ -1817,7 +1817,7 @@ class TestOptionalFields:
             [
                 Field(
                     name="x",
-                    ty=TypeSchema("Optional", (TypeSchema("int"),)),
+                    _ty_schema=TypeSchema("Optional", (TypeSchema("int"),)),
                     default=MISSING,
                 ),
             ],
@@ -1832,7 +1832,7 @@ class TestOptionalFields:
             [
                 Field(
                     name="x",
-                    ty=TypeSchema("Optional", (TypeSchema("int"),)),
+                    _ty_schema=TypeSchema("Optional", (TypeSchema("int"),)),
                     default=None,
                 ),
             ],
@@ -1847,17 +1847,17 @@ class TestOptionalFields:
             [
                 Field(
                     name="a",
-                    ty=TypeSchema("Optional", (TypeSchema("int"),)),
+                    _ty_schema=TypeSchema("Optional", (TypeSchema("int"),)),
                     default=None,
                 ),
                 Field(
                     name="b",
-                    ty=TypeSchema("Optional", (TypeSchema("str"),)),
+                    _ty_schema=TypeSchema("Optional", (TypeSchema("str"),)),
                     default=None,
                 ),
                 Field(
                     name="c",
-                    ty=TypeSchema("Optional", (TypeSchema("float"),)),
+                    _ty_schema=TypeSchema("Optional", (TypeSchema("float"),)),
                     default=None,
                 ),
             ],
@@ -1877,7 +1877,7 @@ class TestOptionalFields:
             [
                 Field(
                     name="ref",
-                    ty=TypeSchema("Optional", (TypeSchema("Object"),)),
+                    _ty_schema=TypeSchema("Optional", (TypeSchema("Object"),)),
                     default=None,
                 ),
             ],
@@ -1896,7 +1896,7 @@ class TestOptionalFields:
             [
                 Field(
                     name="val",
-                    ty=TypeSchema("Union", (TypeSchema("int"), TypeSchema("str"))),
+                    _ty_schema=TypeSchema("Union", (TypeSchema("int"), TypeSchema("str"))),
                     default=MISSING,
                 ),
             ],
@@ -1913,7 +1913,7 @@ class TestOptionalFields:
             [
                 Field(
                     name="val",
-                    ty=TypeSchema("Union", (TypeSchema("int"), TypeSchema("str"))),
+                    _ty_schema=TypeSchema("Union", (TypeSchema("int"), TypeSchema("str"))),
                     default=MISSING,
                 ),
             ],
@@ -1929,7 +1929,7 @@ class TestOptionalFields:
             [
                 Field(
                     name="val",
-                    ty=TypeSchema(
+                    _ty_schema=TypeSchema(
                         "Optional",
                         (TypeSchema("Union", (TypeSchema("int"), TypeSchema("str"))),),
                     ),
@@ -1956,28 +1956,28 @@ class TestAnyField:
     def test_any_holds_int(self) -> None:
         Cls = _make_type(
             "AnyI",
-            [Field(name="val", ty=TypeSchema("Any"), default=None)],
+            [Field(name="val", _ty_schema=TypeSchema("Any"), default=None)],
         )
         assert Cls(val=42).val == 42
 
     def test_any_holds_str(self) -> None:
         Cls = _make_type(
             "AnyS",
-            [Field(name="val", ty=TypeSchema("Any"), default=None)],
+            [Field(name="val", _ty_schema=TypeSchema("Any"), default=None)],
         )
         assert Cls(val="hello").val == "hello"
 
     def test_any_holds_none(self) -> None:
         Cls = _make_type(
             "AnyN",
-            [Field(name="val", ty=TypeSchema("Any"), default=None)],
+            [Field(name="val", _ty_schema=TypeSchema("Any"), default=None)],
         )
         assert Cls().val is None
 
     def test_any_holds_object(self) -> None:
         Cls = _make_type(
             "AnyObj",
-            [Field(name="val", ty=TypeSchema("Any"), default=None)],
+            [Field(name="val", _ty_schema=TypeSchema("Any"), default=None)],
         )
         arr = tvm_ffi.Array([1, 2])
         assert len(Cls(val=arr).val) == 2
@@ -1985,7 +1985,7 @@ class TestAnyField:
     def test_any_type_change(self) -> None:
         Cls = _make_type(
             "AnyChg",
-            [Field(name="val", ty=TypeSchema("Any"), default=None)],
+            [Field(name="val", _ty_schema=TypeSchema("Any"), default=None)],
         )
         obj = Cls()
         obj.val = 42
@@ -2010,7 +2010,7 @@ class TestDefaultFactory:
             [
                 Field(
                     name="data",
-                    ty=TypeSchema("Array", (TypeSchema("int"),)),
+                    _ty_schema=TypeSchema("Array", (TypeSchema("int"),)),
                     default_factory=lambda: tvm_ffi.Array([]),
                 ),
             ],
@@ -2025,7 +2025,7 @@ class TestDefaultFactory:
             [
                 Field(
                     name="items",
-                    ty=TypeSchema("Array", (TypeSchema("int"),)),
+                    _ty_schema=TypeSchema("Array", (TypeSchema("int"),)),
                     default_factory=lambda: tvm_ffi.Array([1, 2, 3]),
                 ),
             ],
@@ -2037,14 +2037,14 @@ class TestDefaultFactory:
     def test_factory_override(self) -> None:
         Cls = _make_type(
             "DFOverride",
-            [Field(name="x", ty=TypeSchema("int"), default_factory=lambda: 42)],
+            [Field(name="x", _ty_schema=TypeSchema("int"), default_factory=lambda: 42)],
         )
         assert Cls(x=99).x == 99
 
     def test_factory_str(self) -> None:
         Cls = _make_type(
             "DFStr",
-            [Field(name="s", ty=TypeSchema("str"), default_factory=lambda: "generated")],
+            [Field(name="s", _ty_schema=TypeSchema("str"), default_factory=lambda: "generated")],
         )
         assert Cls().s == "generated"
 
@@ -2059,8 +2059,8 @@ class TestFieldRepr:
         Cls = _make_type(
             "ReprBasic",
             [
-                Field(name="x", ty=TypeSchema("int"), default=MISSING),
-                Field(name="y", ty=TypeSchema("float"), default=0.0),
+                Field(name="x", _ty_schema=TypeSchema("int"), default=MISSING),
+                Field(name="y", _ty_schema=TypeSchema("float"), default=0.0),
             ],
         )
         r = ReprPrint(Cls(x=42, y=3.14))
@@ -2070,14 +2070,14 @@ class TestFieldRepr:
     def test_repr_str_field(self) -> None:
         Cls = _make_type(
             "ReprStr",
-            [Field(name="name", ty=TypeSchema("str"), default=MISSING)],
+            [Field(name="name", _ty_schema=TypeSchema("str"), default=MISSING)],
         )
         assert '"hello"' in ReprPrint(Cls(name="hello"))
 
     def test_repr_bool_field(self) -> None:
         Cls = _make_type(
             "ReprBool",
-            [Field(name="flag", ty=TypeSchema("bool"), default=MISSING)],
+            [Field(name="flag", _ty_schema=TypeSchema("bool"), default=MISSING)],
         )
         assert "flag=True" in ReprPrint(Cls(flag=True))
 
@@ -2085,10 +2085,10 @@ class TestFieldRepr:
         Cls = _make_type(
             "ReprExcl",
             [
-                Field(name="visible", ty=TypeSchema("int"), default=MISSING),
+                Field(name="visible", _ty_schema=TypeSchema("int"), default=MISSING),
                 Field(
                     name="hidden",
-                    ty=TypeSchema("int"),
+                    _ty_schema=TypeSchema("int"),
                     default=0,
                     repr=False,
                 ),
@@ -2101,14 +2101,14 @@ class TestFieldRepr:
     def test_python_repr_delegates(self) -> None:
         Cls = _make_type(
             "ReprDeleg",
-            [Field(name="x", ty=TypeSchema("int"), default=MISSING)],
+            [Field(name="x", _ty_schema=TypeSchema("int"), default=MISSING)],
         )
         assert "x=7" in repr(Cls(x=7))
 
     def test_repr_contains_type_key(self) -> None:
         Cls = _make_type(
             "ReprKey",
-            [Field(name="x", ty=TypeSchema("int"), default=MISSING)],
+            [Field(name="x", _ty_schema=TypeSchema("int"), default=MISSING)],
         )
         info = getattr(Cls, "__tvm_ffi_type_info__")
         assert info.type_key in ReprPrint(Cls(x=1))
@@ -2119,7 +2119,7 @@ class TestFieldRepr:
             [
                 Field(
                     name="x",
-                    ty=TypeSchema("Optional", (TypeSchema("int"),)),
+                    _ty_schema=TypeSchema("Optional", (TypeSchema("int"),)),
                     default=None,
                 ),
             ],
@@ -2133,7 +2133,7 @@ class TestFieldRepr:
             [
                 Field(
                     name="items",
-                    ty=TypeSchema("Array", (TypeSchema("int"),)),
+                    _ty_schema=TypeSchema("Array", (TypeSchema("int"),)),
                     default=MISSING,
                 ),
             ],
@@ -2154,13 +2154,13 @@ class TestFieldHash:
             [
                 Field(
                     name="x",
-                    ty=TypeSchema("int"),
+                    _ty_schema=TypeSchema("int"),
                     default=MISSING,
                     compare=True,
                 ),
                 Field(
                     name="y",
-                    ty=TypeSchema("float"),
+                    _ty_schema=TypeSchema("float"),
                     default=MISSING,
                     compare=True,
                 ),
@@ -2176,7 +2176,7 @@ class TestFieldHash:
             [
                 Field(
                     name="x",
-                    ty=TypeSchema("int"),
+                    _ty_schema=TypeSchema("int"),
                     default=MISSING,
                     compare=True,
                 ),
@@ -2192,13 +2192,13 @@ class TestFieldHash:
             [
                 Field(
                     name="key",
-                    ty=TypeSchema("int"),
+                    _ty_schema=TypeSchema("int"),
                     default=MISSING,
                     compare=True,
                 ),
                 Field(
                     name="ignored",
-                    ty=TypeSchema("int"),
+                    _ty_schema=TypeSchema("int"),
                     default=0,
                     hash=False,
                 ),
@@ -2211,7 +2211,7 @@ class TestFieldHash:
     def test_hash_dunder_installed(self) -> None:
         Cls = _make_type(
             "HashDunder",
-            [Field(name="x", ty=TypeSchema("int"), default=MISSING)],
+            [Field(name="x", _ty_schema=TypeSchema("int"), default=MISSING)],
             eq=True,
             unsafe_hash=True,
         )
@@ -2223,7 +2223,7 @@ class TestFieldHash:
             [
                 Field(
                     name="x",
-                    ty=TypeSchema("int"),
+                    _ty_schema=TypeSchema("int"),
                     default=MISSING,
                     compare=True,
                 ),
@@ -2239,7 +2239,7 @@ class TestFieldHash:
             [
                 Field(
                     name="x",
-                    ty=TypeSchema("int"),
+                    _ty_schema=TypeSchema("int"),
                     default=MISSING,
                     compare=True,
                 ),
@@ -2262,13 +2262,13 @@ class TestFieldEquality:
             [
                 Field(
                     name="x",
-                    ty=TypeSchema("int"),
+                    _ty_schema=TypeSchema("int"),
                     default=MISSING,
                     compare=True,
                 ),
                 Field(
                     name="y",
-                    ty=TypeSchema("float"),
+                    _ty_schema=TypeSchema("float"),
                     default=MISSING,
                     compare=True,
                 ),
@@ -2283,7 +2283,7 @@ class TestFieldEquality:
             [
                 Field(
                     name="x",
-                    ty=TypeSchema("int"),
+                    _ty_schema=TypeSchema("int"),
                     default=MISSING,
                     compare=True,
                 ),
@@ -2298,13 +2298,13 @@ class TestFieldEquality:
             [
                 Field(
                     name="key",
-                    ty=TypeSchema("int"),
+                    _ty_schema=TypeSchema("int"),
                     default=MISSING,
                     compare=True,
                 ),
                 Field(
                     name="ignored",
-                    ty=TypeSchema("int"),
+                    _ty_schema=TypeSchema("int"),
                     default=0,
                     compare=False,
                 ),
@@ -2317,7 +2317,7 @@ class TestFieldEquality:
         """Fields with compare=False (default) are ignored by RecursiveEq."""
         Cls = _make_type(
             "CmpOff",
-            [Field(name="x", ty=TypeSchema("int"), default=MISSING)],
+            [Field(name="x", _ty_schema=TypeSchema("int"), default=MISSING)],
             eq=True,
         )
         assert RecursiveEq(Cls(x=1), Cls(x=2))
@@ -2328,7 +2328,7 @@ class TestFieldEquality:
             [
                 Field(
                     name="x",
-                    ty=TypeSchema("int"),
+                    _ty_schema=TypeSchema("int"),
                     default=MISSING,
                     compare=True,
                 ),
@@ -2343,7 +2343,7 @@ class TestFieldEquality:
             [
                 Field(
                     name="x",
-                    ty=TypeSchema("int"),
+                    _ty_schema=TypeSchema("int"),
                     default=MISSING,
                     compare=True,
                 ),
@@ -2359,7 +2359,7 @@ class TestFieldEquality:
             [
                 Field(
                     name="x",
-                    ty=TypeSchema("int"),
+                    _ty_schema=TypeSchema("int"),
                     default=MISSING,
                     compare=True,
                 ),
@@ -2376,7 +2376,7 @@ class TestFieldEquality:
             [
                 Field(
                     name="s",
-                    ty=TypeSchema("str"),
+                    _ty_schema=TypeSchema("str"),
                     default=MISSING,
                     compare=True,
                 ),
@@ -2392,13 +2392,13 @@ class TestFieldEquality:
             [
                 Field(
                     name="x",
-                    ty=TypeSchema("int"),
+                    _ty_schema=TypeSchema("int"),
                     default=MISSING,
                     compare=True,
                 ),
                 Field(
                     name="y",
-                    ty=TypeSchema("float"),
+                    _ty_schema=TypeSchema("float"),
                     default=MISSING,
                     compare=True,
                 ),
@@ -2431,7 +2431,7 @@ class TestFieldEdgeCases:
     def test_bool_true_and_false(self) -> None:
         Cls = _make_type(
             "EdgeBool",
-            [Field(name="flag", ty=TypeSchema("bool"), default=MISSING)],
+            [Field(name="flag", _ty_schema=TypeSchema("bool"), default=MISSING)],
         )
         assert Cls(flag=True).flag is True
         assert Cls(flag=False).flag is False
@@ -2439,7 +2439,7 @@ class TestFieldEdgeCases:
     def test_bool_default_false(self) -> None:
         Cls = _make_type(
             "EdgeBoolDef",
-            [Field(name="flag", ty=TypeSchema("bool"), default=False)],
+            [Field(name="flag", _ty_schema=TypeSchema("bool"), default=False)],
         )
         assert Cls().flag is False
 
@@ -2449,13 +2449,13 @@ class TestFieldEdgeCases:
             [
                 Field(
                     name="i",
-                    ty=TypeSchema("int"),
+                    _ty_schema=TypeSchema("int"),
                     default=MISSING,
                     compare=True,
                 ),
-                Field(name="f", ty=TypeSchema("float"), default=MISSING),
-                Field(name="s", ty=TypeSchema("str"), default=MISSING),
-                Field(name="b", ty=TypeSchema("bool"), default=MISSING),
+                Field(name="f", _ty_schema=TypeSchema("float"), default=MISSING),
+                Field(name="s", _ty_schema=TypeSchema("str"), default=MISSING),
+                Field(name="b", _ty_schema=TypeSchema("bool"), default=MISSING),
             ],
         )
         obj = Cls(i=42, f=3.14, s="test", b=True)
@@ -2468,13 +2468,13 @@ class TestFieldEdgeCases:
         Cls = _make_type(
             "EdgeMixed",
             [
-                Field(name="count", ty=TypeSchema("int"), default=MISSING),
+                Field(name="count", _ty_schema=TypeSchema("int"), default=MISSING),
                 Field(
                     name="items",
-                    ty=TypeSchema("Array", (TypeSchema("int"),)),
+                    _ty_schema=TypeSchema("Array", (TypeSchema("int"),)),
                     default=MISSING,
                 ),
-                Field(name="label", ty=TypeSchema("str"), default=""),
+                Field(name="label", _ty_schema=TypeSchema("str"), default=""),
             ],
         )
         obj = Cls(count=3, items=[1, 2, 3])
@@ -2486,10 +2486,10 @@ class TestFieldEdgeCases:
         Cls = _make_type(
             "EdgeMultiDef",
             [
-                Field(name="i", ty=TypeSchema("int"), default=0),
-                Field(name="f", ty=TypeSchema("float"), default=1.0),
-                Field(name="s", ty=TypeSchema("str"), default="default"),
-                Field(name="b", ty=TypeSchema("bool"), default=True),
+                Field(name="i", _ty_schema=TypeSchema("int"), default=0),
+                Field(name="f", _ty_schema=TypeSchema("float"), default=1.0),
+                Field(name="s", _ty_schema=TypeSchema("str"), default="default"),
+                Field(name="b", _ty_schema=TypeSchema("bool"), default=True),
             ],
         )
         obj = Cls()
@@ -2502,8 +2502,8 @@ class TestFieldEdgeCases:
         Cls = _make_type(
             "EdgeZero",
             [
-                Field(name="i", ty=TypeSchema("int"), default=MISSING),
-                Field(name="f", ty=TypeSchema("float"), default=MISSING),
+                Field(name="i", _ty_schema=TypeSchema("int"), default=MISSING),
+                Field(name="f", _ty_schema=TypeSchema("float"), default=MISSING),
             ],
         )
         obj = Cls(i=0, f=0.0)
@@ -2514,8 +2514,8 @@ class TestFieldEdgeCases:
         Cls = _make_type(
             "EdgeNeg",
             [
-                Field(name="i", ty=TypeSchema("int"), default=MISSING),
-                Field(name="f", ty=TypeSchema("float"), default=MISSING),
+                Field(name="i", _ty_schema=TypeSchema("int"), default=MISSING),
+                Field(name="f", _ty_schema=TypeSchema("float"), default=MISSING),
             ],
         )
         obj = Cls(i=-42, f=-3.14)
@@ -2525,7 +2525,7 @@ class TestFieldEdgeCases:
     def test_large_int(self) -> None:
         Cls = _make_type(
             "EdgeLargeInt",
-            [Field(name="x", ty=TypeSchema("int"), default=MISSING)],
+            [Field(name="x", _ty_schema=TypeSchema("int"), default=MISSING)],
         )
         large = 2**62
         assert Cls(x=large).x == large
@@ -2533,14 +2533,14 @@ class TestFieldEdgeCases:
     def test_empty_string_field(self) -> None:
         Cls = _make_type(
             "EdgeEmptyStr",
-            [Field(name="s", ty=TypeSchema("str"), default=MISSING)],
+            [Field(name="s", _ty_schema=TypeSchema("str"), default=MISSING)],
         )
         assert Cls(s="").s == ""
 
     def test_long_string_field(self) -> None:
         Cls = _make_type(
             "EdgeLongStr",
-            [Field(name="s", ty=TypeSchema("str"), default=MISSING)],
+            [Field(name="s", _ty_schema=TypeSchema("str"), default=MISSING)],
         )
         long_str = "a" * 1000
         assert Cls(s=long_str).s == long_str
@@ -2554,10 +2554,10 @@ class TestFieldEdgeCases:
         Cls = _make_type(
             "EdgeInitFalse",
             [
-                Field(name="visible", ty=TypeSchema("int"), default=MISSING),
+                Field(name="visible", _ty_schema=TypeSchema("int"), default=MISSING),
                 Field(
                     name="internal",
-                    ty=TypeSchema("int"),
+                    _ty_schema=TypeSchema("int"),
                     default=0,
                     init=False,
                 ),
@@ -2571,10 +2571,10 @@ class TestFieldEdgeCases:
         Cls = _make_type(
             "EdgeInitFalseReject",
             [
-                Field(name="visible", ty=TypeSchema("int"), default=MISSING),
+                Field(name="visible", _ty_schema=TypeSchema("int"), default=MISSING),
                 Field(
                     name="internal",
-                    ty=TypeSchema("int"),
+                    _ty_schema=TypeSchema("int"),
                     default=0,
                     init=False,
                 ),
@@ -2587,10 +2587,10 @@ class TestFieldEdgeCases:
         Cls = _make_type(
             "EdgeInitFalseWrite",
             [
-                Field(name="visible", ty=TypeSchema("int"), default=MISSING),
+                Field(name="visible", _ty_schema=TypeSchema("int"), default=MISSING),
                 Field(
                     name="internal",
-                    ty=TypeSchema("int"),
+                    _ty_schema=TypeSchema("int"),
                     default=0,
                     init=False,
                 ),
@@ -2610,11 +2610,11 @@ class TestFieldInheritance:
     def test_child_fields_after_parent(self) -> None:
         Parent = _make_type(
             "InhParent",
-            [Field(name="x", ty=TypeSchema("int"), default=MISSING)],
+            [Field(name="x", _ty_schema=TypeSchema("int"), default=MISSING)],
         )
         Child = _make_type(
             "InhChild",
-            [Field(name="y", ty=TypeSchema("int"), default=MISSING)],
+            [Field(name="y", _ty_schema=TypeSchema("int"), default=MISSING)],
             parent=Parent,
         )
         obj = Child(1, 2)
@@ -2624,11 +2624,11 @@ class TestFieldInheritance:
     def test_child_field_offsets_non_overlapping(self) -> None:
         Parent = _make_type(
             "InhParentOff",
-            [Field(name="x", ty=TypeSchema("int"), default=MISSING)],
+            [Field(name="x", _ty_schema=TypeSchema("int"), default=MISSING)],
         )
         Child = _make_type(
             "InhChildOff",
-            [Field(name="y", ty=TypeSchema("int"), default=MISSING)],
+            [Field(name="y", _ty_schema=TypeSchema("int"), default=MISSING)],
             parent=Parent,
         )
         p_info = getattr(Parent, "__tvm_ffi_type_info__")
@@ -2639,11 +2639,11 @@ class TestFieldInheritance:
     def test_mutation_no_aliasing(self) -> None:
         Parent = _make_type(
             "InhParentAlias",
-            [Field(name="x", ty=TypeSchema("int"), default=MISSING)],
+            [Field(name="x", _ty_schema=TypeSchema("int"), default=MISSING)],
         )
         Child = _make_type(
             "InhChildAlias",
-            [Field(name="y", ty=TypeSchema("int"), default=MISSING)],
+            [Field(name="y", _ty_schema=TypeSchema("int"), default=MISSING)],
             parent=Parent,
         )
         obj = Child(1, 2)
@@ -2655,16 +2655,16 @@ class TestFieldInheritance:
         """Object → A → B → C: all fields accessible and non-overlapping."""
         A = _make_type(
             "InhA",
-            [Field(name="a", ty=TypeSchema("int"), default=MISSING)],
+            [Field(name="a", _ty_schema=TypeSchema("int"), default=MISSING)],
         )
         B = _make_type(
             "InhB",
-            [Field(name="b", ty=TypeSchema("str"), default=MISSING)],
+            [Field(name="b", _ty_schema=TypeSchema("str"), default=MISSING)],
             parent=A,
         )
         C = _make_type(
             "InhC",
-            [Field(name="c", ty=TypeSchema("float"), default=MISSING)],
+            [Field(name="c", _ty_schema=TypeSchema("float"), default=MISSING)],
             parent=B,
         )
         obj = C(a=1, b="two", c=3.0)
@@ -2675,16 +2675,16 @@ class TestFieldInheritance:
     def test_three_level_offsets_non_overlapping(self) -> None:
         A = _make_type(
             "InhAOff",
-            [Field(name="a", ty=TypeSchema("int"), default=MISSING)],
+            [Field(name="a", _ty_schema=TypeSchema("int"), default=MISSING)],
         )
         B = _make_type(
             "InhBOff",
-            [Field(name="b", ty=TypeSchema("int"), default=MISSING)],
+            [Field(name="b", _ty_schema=TypeSchema("int"), default=MISSING)],
             parent=A,
         )
         C = _make_type(
             "InhCOff",
-            [Field(name="c", ty=TypeSchema("int"), default=MISSING)],
+            [Field(name="c", _ty_schema=TypeSchema("int"), default=MISSING)],
             parent=B,
         )
         a_info = getattr(A, "__tvm_ffi_type_info__")
@@ -2698,16 +2698,16 @@ class TestFieldInheritance:
     def test_three_level_mutation_no_aliasing(self) -> None:
         A = _make_type(
             "InhAMut",
-            [Field(name="a", ty=TypeSchema("int"), default=MISSING)],
+            [Field(name="a", _ty_schema=TypeSchema("int"), default=MISSING)],
         )
         B = _make_type(
             "InhBMut",
-            [Field(name="b", ty=TypeSchema("int"), default=MISSING)],
+            [Field(name="b", _ty_schema=TypeSchema("int"), default=MISSING)],
             parent=A,
         )
         C = _make_type(
             "InhCMut",
-            [Field(name="c", ty=TypeSchema("int"), default=MISSING)],
+            [Field(name="c", _ty_schema=TypeSchema("int"), default=MISSING)],
             parent=B,
         )
         obj = C(a=1, b=2, c=3)
@@ -2723,16 +2723,16 @@ class TestFieldInheritance:
     def test_three_level_isinstance(self) -> None:
         A = _make_type(
             "InhAIs",
-            [Field(name="a", ty=TypeSchema("int"), default=MISSING)],
+            [Field(name="a", _ty_schema=TypeSchema("int"), default=MISSING)],
         )
         B = _make_type(
             "InhBIs",
-            [Field(name="b", ty=TypeSchema("int"), default=MISSING)],
+            [Field(name="b", _ty_schema=TypeSchema("int"), default=MISSING)],
             parent=A,
         )
         C = _make_type(
             "InhCIs",
-            [Field(name="c", ty=TypeSchema("int"), default=MISSING)],
+            [Field(name="c", _ty_schema=TypeSchema("int"), default=MISSING)],
             parent=B,
         )
         obj = C(a=1, b=2, c=3)
@@ -2744,16 +2744,16 @@ class TestFieldInheritance:
     def test_three_level_deep_copy(self) -> None:
         A = _make_type(
             "InhACopy",
-            [Field(name="a", ty=TypeSchema("int"), default=MISSING)],
+            [Field(name="a", _ty_schema=TypeSchema("int"), default=MISSING)],
         )
         B = _make_type(
             "InhBCopy",
-            [Field(name="b", ty=TypeSchema("int"), default=MISSING)],
+            [Field(name="b", _ty_schema=TypeSchema("int"), default=MISSING)],
             parent=A,
         )
         C = _make_type(
             "InhCCopy",
-            [Field(name="c", ty=TypeSchema("int"), default=MISSING)],
+            [Field(name="c", _ty_schema=TypeSchema("int"), default=MISSING)],
             parent=B,
         )
         obj = C(a=1, b=2, c=3)
@@ -2772,16 +2772,16 @@ class TestFieldInheritance:
         GP = _make_type(
             "OffGP",
             [
-                Field(name="x", ty=TypeSchema("int"), default=MISSING),
-                Field(name="y", ty=TypeSchema("int"), default=MISSING),
+                Field(name="x", _ty_schema=TypeSchema("int"), default=MISSING),
+                Field(name="y", _ty_schema=TypeSchema("int"), default=MISSING),
             ],
         )
         P = _make_type("OffP", [], parent=GP)
         C = _make_type(
             "OffC",
             [
-                Field(name="a", ty=TypeSchema("int"), default=MISSING),
-                Field(name="b", ty=TypeSchema("int"), default=MISSING),
+                Field(name="a", _ty_schema=TypeSchema("int"), default=MISSING),
+                Field(name="b", _ty_schema=TypeSchema("int"), default=MISSING),
             ],
             parent=P,
         )
@@ -2796,8 +2796,8 @@ class TestFieldInheritance:
         GP = _make_type(
             "OffGP2",
             [
-                Field(name="x", ty=TypeSchema("int"), default=MISSING),
-                Field(name="y", ty=TypeSchema("int"), default=MISSING),
+                Field(name="x", _ty_schema=TypeSchema("int"), default=MISSING),
+                Field(name="y", _ty_schema=TypeSchema("int"), default=MISSING),
             ],
         )
         P = _make_type("OffP2", [], parent=GP)
@@ -2810,14 +2810,14 @@ class TestFieldInheritance:
         GP = _make_type(
             "OffGP3",
             [
-                Field(name="x", ty=TypeSchema("int"), default=MISSING),
-                Field(name="y", ty=TypeSchema("int"), default=MISSING),
+                Field(name="x", _ty_schema=TypeSchema("int"), default=MISSING),
+                Field(name="y", _ty_schema=TypeSchema("int"), default=MISSING),
             ],
         )
         P = _make_type("OffP3", [], parent=GP)
         C = _make_type(
             "OffC3",
-            [Field(name="a", ty=TypeSchema("int"), default=MISSING)],
+            [Field(name="a", _ty_schema=TypeSchema("int"), default=MISSING)],
             parent=P,
         )
         p_info = getattr(P, "__tvm_ffi_type_info__")
@@ -2828,13 +2828,13 @@ class TestFieldInheritance:
         """GP(x) -> Mid1() -> Mid2() -> Leaf(a): offsets propagated through two empty layers."""
         GP = _make_type(
             "OffGP4",
-            [Field(name="x", ty=TypeSchema("int"), default=MISSING)],
+            [Field(name="x", _ty_schema=TypeSchema("int"), default=MISSING)],
         )
         Mid1 = _make_type("OffMid1", [], parent=GP)
         Mid2 = _make_type("OffMid2", [], parent=Mid1)
         Leaf = _make_type(
             "OffLeaf",
-            [Field(name="a", ty=TypeSchema("int"), default=MISSING)],
+            [Field(name="a", _ty_schema=TypeSchema("int"), default=MISSING)],
             parent=Mid2,
         )
         obj = Leaf(x=1, a=2)
@@ -2849,16 +2849,16 @@ class TestFieldInheritance:
         GP = _make_type(
             "OffGP5",
             [
-                Field(name="x", ty=TypeSchema("int"), default=MISSING),
-                Field(name="y", ty=TypeSchema("int"), default=MISSING),
+                Field(name="x", _ty_schema=TypeSchema("int"), default=MISSING),
+                Field(name="y", _ty_schema=TypeSchema("int"), default=MISSING),
             ],
         )
         P = _make_type("OffP5", [], parent=GP)
         C = _make_type(
             "OffC5",
             [
-                Field(name="a", ty=TypeSchema("int"), default=MISSING),
-                Field(name="b", ty=TypeSchema("int"), default=MISSING),
+                Field(name="a", _ty_schema=TypeSchema("int"), default=MISSING),
+                Field(name="b", _ty_schema=TypeSchema("int"), default=MISSING),
             ],
             parent=P,
         )
@@ -2932,10 +2932,10 @@ class TestMutualReferences:
             Foo,
             foo_info,
             [
-                Field(name="a", ty=TypeSchema("str"), default=MISSING),
+                Field(name="a", _ty_schema=TypeSchema("str"), default=MISSING),
                 Field(
                     name="bar",
-                    ty=TypeSchema("Optional", (bar_schema,)),
+                    _ty_schema=TypeSchema("Optional", (bar_schema,)),
                     default=None,
                 ),
             ],
@@ -2946,7 +2946,7 @@ class TestMutualReferences:
             [
                 Field(
                     name="foo",
-                    ty=TypeSchema("Optional", (foo_schema,)),
+                    _ty_schema=TypeSchema("Optional", (foo_schema,)),
                     default=None,
                 ),
             ],
@@ -2965,10 +2965,10 @@ class TestMutualReferences:
             Bar,
             bar_info,
             [
-                Field(name="val", ty=TypeSchema("int"), default=MISSING),
+                Field(name="val", _ty_schema=TypeSchema("int"), default=MISSING),
                 Field(
                     name="next",
-                    ty=TypeSchema("Optional", (bar_schema,)),
+                    _ty_schema=TypeSchema("Optional", (bar_schema,)),
                     default=None,
                 ),
             ],
@@ -2990,7 +2990,7 @@ class TestMutualReferences:
             Foo,
             foo_info,
             [
-                Field(name="x", ty=TypeSchema("int"), default=MISSING),
+                Field(name="x", _ty_schema=TypeSchema("int"), default=MISSING),
             ],
         )
         self._finalize(
@@ -2999,7 +2999,7 @@ class TestMutualReferences:
             [
                 Field(
                     name="foo",
-                    ty=TypeSchema("Optional", (foo_schema,)),
+                    _ty_schema=TypeSchema("Optional", (foo_schema,)),
                     default=None,
                 ),
             ],
@@ -3022,7 +3022,7 @@ class TestNativeParentInheritance:
         assert parent_info is not None
         Child = _make_type(
             "InhNativeChild",
-            [Field(name="extra", ty=TypeSchema("int"), default=MISSING)],
+            [Field(name="extra", _ty_schema=TypeSchema("int"), default=MISSING)],
             parent=_TestObjectBase,
         )
         child_info = getattr(Child, "__tvm_ffi_type_info__")
@@ -3032,7 +3032,7 @@ class TestNativeParentInheritance:
     def test_preserves_parent_fields(self) -> None:
         Child = _make_type(
             "InhNativePreserve",
-            [Field(name="extra", ty=TypeSchema("int"), default=MISSING)],
+            [Field(name="extra", _ty_schema=TypeSchema("int"), default=MISSING)],
             parent=_TestObjectBase,
         )
         obj = Child(extra=7, v_i64=1, v_f64=2.0, v_str="x")
@@ -3044,7 +3044,7 @@ class TestNativeParentInheritance:
     def test_mutation_no_aliasing(self) -> None:
         Child = _make_type(
             "InhNativeMut",
-            [Field(name="extra", ty=TypeSchema("int"), default=MISSING)],
+            [Field(name="extra", _ty_schema=TypeSchema("int"), default=MISSING)],
             parent=_TestObjectBase,
         )
         obj = Child(extra=7, v_i64=1, v_f64=2.0, v_str="x")
@@ -3057,7 +3057,7 @@ class TestNativeParentInheritance:
     def test_parent_method_uses_parent_state(self) -> None:
         Child = _make_type(
             "InhNativeMethod",
-            [Field(name="extra", ty=TypeSchema("int"), default=MISSING)],
+            [Field(name="extra", _ty_schema=TypeSchema("int"), default=MISSING)],
             parent=_TestObjectBase,
         )
         obj = Child(extra=7, v_i64=1, v_f64=2.0, v_str="x")
@@ -3066,7 +3066,7 @@ class TestNativeParentInheritance:
     def test_copy_preserves_all_fields(self) -> None:
         Child = _make_type(
             "InhNativeCopy",
-            [Field(name="extra", ty=TypeSchema("int"), default=MISSING)],
+            [Field(name="extra", _ty_schema=TypeSchema("int"), default=MISSING)],
             parent=_TestObjectBase,
         )
         obj = Child(extra=7, v_i64=1, v_f64=2.0, v_str="x")
@@ -3079,7 +3079,7 @@ class TestNativeParentInheritance:
     def test_deepcopy_preserves_all_fields(self) -> None:
         Child = _make_type(
             "InhNativeDeepCopy",
-            [Field(name="extra", ty=TypeSchema("int"), default=MISSING)],
+            [Field(name="extra", _ty_schema=TypeSchema("int"), default=MISSING)],
             parent=_TestObjectBase,
         )
         obj = Child(extra=7, v_i64=1, v_f64=2.0, v_str="x")
@@ -3102,13 +3102,13 @@ class TestDeepCopy:
             [
                 Field(
                     name="x",
-                    ty=TypeSchema("int"),
+                    _ty_schema=TypeSchema("int"),
                     default=MISSING,
                     compare=True,
                 ),
                 Field(
                     name="s",
-                    ty=TypeSchema("str"),
+                    _ty_schema=TypeSchema("str"),
                     default=MISSING,
                     compare=True,
                 ),
@@ -3126,7 +3126,7 @@ class TestDeepCopy:
             [
                 Field(
                     name="items",
-                    ty=TypeSchema("Array", (TypeSchema("int"),)),
+                    _ty_schema=TypeSchema("Array", (TypeSchema("int"),)),
                     default=MISSING,
                 ),
             ],
@@ -3139,7 +3139,7 @@ class TestDeepCopy:
     def test_deep_copy_mutate_independent(self) -> None:
         Cls = _make_type(
             "DCMut",
-            [Field(name="x", ty=TypeSchema("int"), default=MISSING)],
+            [Field(name="x", _ty_schema=TypeSchema("int"), default=MISSING)],
         )
         obj = Cls(x=1)
         obj_copy = DeepCopy(obj)
@@ -3149,7 +3149,7 @@ class TestDeepCopy:
     def test_python_deepcopy_dunder(self) -> None:
         Cls = _make_type(
             "DCPython",
-            [Field(name="x", ty=TypeSchema("int"), default=MISSING)],
+            [Field(name="x", _ty_schema=TypeSchema("int"), default=MISSING)],
         )
         obj = Cls(x=42)
         obj_copy = copy.deepcopy(obj)
@@ -3169,7 +3169,7 @@ class TestMemoryLifetime:
             [
                 Field(
                     name="arr",
-                    ty=TypeSchema("Array", (TypeSchema("int"),)),
+                    _ty_schema=TypeSchema("Array", (TypeSchema("int"),)),
                     default=MISSING,
                 ),
             ],
@@ -3186,7 +3186,7 @@ class TestMemoryLifetime:
             [
                 Field(
                     name="arr",
-                    ty=TypeSchema("Array", (TypeSchema("int"),)),
+                    _ty_schema=TypeSchema("Array", (TypeSchema("int"),)),
                     default=MISSING,
                 ),
             ],
@@ -3202,7 +3202,7 @@ class TestMemoryLifetime:
     def test_str_field_any_storage(self) -> None:
         Cls = _make_type(
             "MemStr",
-            [Field(name="s", ty=TypeSchema("str"), default=MISSING)],
+            [Field(name="s", _ty_schema=TypeSchema("str"), default=MISSING)],
         )
         assert Cls(s="hi").s == "hi"
         long_str = "a" * 500
@@ -3219,8 +3219,8 @@ class TestBoolAlignment:
         Cls = _make_type(
             "BoolAlign",
             [
-                Field(name="flag", ty=TypeSchema("bool"), default=MISSING),
-                Field(name="val", ty=TypeSchema("int"), default=MISSING),
+                Field(name="flag", _ty_schema=TypeSchema("bool"), default=MISSING),
+                Field(name="val", _ty_schema=TypeSchema("int"), default=MISSING),
             ],
         )
         info = getattr(Cls, "__tvm_ffi_type_info__")
@@ -3232,8 +3232,8 @@ class TestBoolAlignment:
         Cls = _make_type(
             "BoolAlignVal",
             [
-                Field(name="flag", ty=TypeSchema("bool"), default=MISSING),
-                Field(name="val", ty=TypeSchema("int"), default=MISSING),
+                Field(name="flag", _ty_schema=TypeSchema("bool"), default=MISSING),
+                Field(name="val", _ty_schema=TypeSchema("int"), default=MISSING),
             ],
         )
         obj = Cls(flag=True, val=42)
@@ -3247,9 +3247,9 @@ class TestBoolAlignment:
         Cls = _make_type(
             "MultiBool",
             [
-                Field(name="a", ty=TypeSchema("bool"), default=MISSING),
-                Field(name="b", ty=TypeSchema("bool"), default=MISSING),
-                Field(name="c", ty=TypeSchema("bool"), default=MISSING),
+                Field(name="a", _ty_schema=TypeSchema("bool"), default=MISSING),
+                Field(name="b", _ty_schema=TypeSchema("bool"), default=MISSING),
+                Field(name="c", _ty_schema=TypeSchema("bool"), default=MISSING),
             ],
         )
         info = getattr(Cls, "__tvm_ffi_type_info__")
@@ -3263,10 +3263,10 @@ class TestBoolAlignment:
         Cls = _make_type(
             "BoolIntBoolInt",
             [
-                Field(name="b1", ty=TypeSchema("bool"), default=MISSING),
-                Field(name="i1", ty=TypeSchema("int"), default=MISSING),
-                Field(name="b2", ty=TypeSchema("bool"), default=MISSING),
-                Field(name="i2", ty=TypeSchema("int"), default=MISSING),
+                Field(name="b1", _ty_schema=TypeSchema("bool"), default=MISSING),
+                Field(name="i1", _ty_schema=TypeSchema("int"), default=MISSING),
+                Field(name="b2", _ty_schema=TypeSchema("bool"), default=MISSING),
+                Field(name="i2", _ty_schema=TypeSchema("int"), default=MISSING),
             ],
         )
         obj = Cls(b1=True, i1=100, b2=False, i2=200)
@@ -3285,7 +3285,7 @@ class TestTypeConversionErrors:
     def test_set_int_field_to_str_raises(self) -> None:
         Cls = _make_type(
             "ErrIntStr",
-            [Field(name="x", ty=TypeSchema("int"), default=MISSING)],
+            [Field(name="x", _ty_schema=TypeSchema("int"), default=MISSING)],
         )
         obj = Cls(x=1)
         with pytest.raises((TypeError, RuntimeError)):
@@ -3294,7 +3294,7 @@ class TestTypeConversionErrors:
     def test_set_str_field_to_int_raises(self) -> None:
         Cls = _make_type(
             "ErrStrInt",
-            [Field(name="s", ty=TypeSchema("str"), default=MISSING)],
+            [Field(name="s", _ty_schema=TypeSchema("str"), default=MISSING)],
         )
         obj = Cls(s="hello")
         with pytest.raises((TypeError, RuntimeError)):
@@ -3303,7 +3303,7 @@ class TestTypeConversionErrors:
     def test_construct_with_wrong_type_raises(self) -> None:
         Cls = _make_type(
             "ErrInit",
-            [Field(name="x", ty=TypeSchema("int"), default=MISSING)],
+            [Field(name="x", _ty_schema=TypeSchema("int"), default=MISSING)],
         )
         with pytest.raises((TypeError, RuntimeError)):
             Cls(x="bad")
@@ -3312,7 +3312,7 @@ class TestTypeConversionErrors:
         """Failed type-checked mutation preserves old value."""
         Cls = _make_type(
             "ErrPreserve",
-            [Field(name="x", ty=TypeSchema("int"), default=MISSING)],
+            [Field(name="x", _ty_schema=TypeSchema("int"), default=MISSING)],
         )
         obj = Cls(x=42)
         with pytest.raises((TypeError, RuntimeError)):
@@ -3333,7 +3333,7 @@ class TestTypeConversionErrors:
             [
                 Field(
                     name="child",
-                    ty=TypeSchema("Object"),
+                    _ty_schema=TypeSchema("Object"),
                     default=MISSING,
                 ),
             ],
@@ -3349,7 +3349,7 @@ class TestTypeConversionErrors:
             [
                 Field(
                     name="child",
-                    ty=TypeSchema("Object"),
+                    _ty_schema=TypeSchema("Object"),
                     default=MISSING,
                 ),
             ],
@@ -3364,7 +3364,7 @@ class TestTypeConversionErrors:
             [
                 Field(
                     name="child",
-                    ty=TypeSchema("Optional", (TypeSchema("Object"),)),
+                    _ty_schema=TypeSchema("Optional", (TypeSchema("Object"),)),
                     default=None,
                 ),
             ],
@@ -3379,7 +3379,7 @@ class TestTypeConversionErrors:
     def test_set_bool_field_to_str_raises(self) -> None:
         Cls = _make_type(
             "ErrBoolStr",
-            [Field(name="b", ty=TypeSchema("bool"), default=MISSING)],
+            [Field(name="b", _ty_schema=TypeSchema("bool"), default=MISSING)],
         )
         obj = Cls(b=True)
         with pytest.raises((TypeError, RuntimeError)):
@@ -3391,7 +3391,7 @@ class TestTypeConversionErrors:
             [
                 Field(
                     name="arr",
-                    ty=TypeSchema("Array", (TypeSchema("int"),)),
+                    _ty_schema=TypeSchema("Array", (TypeSchema("int"),)),
                     default=MISSING,
                 ),
             ],
@@ -3405,8 +3405,8 @@ class TestTypeConversionErrors:
         Cls = _make_type(
             "ErrMulti",
             [
-                Field(name="x", ty=TypeSchema("int"), default=MISSING),
-                Field(name="y", ty=TypeSchema("str"), default=MISSING),
+                Field(name="x", _ty_schema=TypeSchema("int"), default=MISSING),
+                Field(name="y", _ty_schema=TypeSchema("str"), default=MISSING),
             ],
         )
         with pytest.raises((TypeError, RuntimeError)):
@@ -3418,7 +3418,7 @@ class TestTypeConversionErrors:
             [
                 Field(
                     name="x",
-                    ty=TypeSchema("Optional", (TypeSchema("int"),)),
+                    _ty_schema=TypeSchema("Optional", (TypeSchema("int"),)),
                     default=None,
                 ),
             ],
@@ -3439,7 +3439,7 @@ class TestSetterGetterCornerCases:
     def test_bool_field_accepts_true_false(self) -> None:
         Cls = _make_type(
             "SGBool",
-            [Field(name="b", ty=TypeSchema("bool"), default=MISSING)],
+            [Field(name="b", _ty_schema=TypeSchema("bool"), default=MISSING)],
         )
         obj = Cls(b=True)
         assert obj.b is True
@@ -3450,7 +3450,7 @@ class TestSetterGetterCornerCases:
         """Python bool is a subclass of int — FFI should accept it."""
         Cls = _make_type(
             "SGIntBool",
-            [Field(name="x", ty=TypeSchema("int"), default=MISSING)],
+            [Field(name="x", _ty_schema=TypeSchema("int"), default=MISSING)],
         )
         obj = Cls(x=True)
         assert obj.x == 1
@@ -3462,7 +3462,7 @@ class TestSetterGetterCornerCases:
     def test_float_field_inf_nan(self) -> None:
         Cls = _make_type(
             "SGFloatEdge",
-            [Field(name="f", ty=TypeSchema("float"), default=MISSING)],
+            [Field(name="f", _ty_schema=TypeSchema("float"), default=MISSING)],
         )
         obj = Cls(f=float("inf"))
         assert math.isinf(obj.f)
@@ -3474,7 +3474,7 @@ class TestSetterGetterCornerCases:
     def test_float_field_accepts_int(self) -> None:
         Cls = _make_type(
             "SGFloatInt",
-            [Field(name="f", ty=TypeSchema("float"), default=MISSING)],
+            [Field(name="f", _ty_schema=TypeSchema("float"), default=MISSING)],
         )
         obj = Cls(f=42)
         assert obj.f == pytest.approx(42.0)
@@ -3484,7 +3484,7 @@ class TestSetterGetterCornerCases:
     def test_str_field_unicode(self) -> None:
         Cls = _make_type(
             "SGStrUni",
-            [Field(name="s", ty=TypeSchema("str"), default=MISSING)],
+            [Field(name="s", _ty_schema=TypeSchema("str"), default=MISSING)],
         )
         obj = Cls(s="日本語テスト 🎉")
         assert obj.s == "日本語テスト 🎉"
@@ -3492,7 +3492,7 @@ class TestSetterGetterCornerCases:
     def test_str_field_null_bytes(self) -> None:
         Cls = _make_type(
             "SGStrNull",
-            [Field(name="s", ty=TypeSchema("str"), default=MISSING)],
+            [Field(name="s", _ty_schema=TypeSchema("str"), default=MISSING)],
         )
         s = "hello\x00world"
         obj = Cls(s=s)
@@ -3503,7 +3503,7 @@ class TestSetterGetterCornerCases:
     def test_repeated_mutation_same_field(self) -> None:
         Cls = _make_type(
             "SGRepeat",
-            [Field(name="x", ty=TypeSchema("int"), default=MISSING)],
+            [Field(name="x", _ty_schema=TypeSchema("int"), default=MISSING)],
         )
         obj = Cls(x=0)
         for i in range(100):
@@ -3514,7 +3514,7 @@ class TestSetterGetterCornerCases:
         """Stress: repeated str assignment should not leak."""
         Cls = _make_type(
             "SGRepeatStr",
-            [Field(name="s", ty=TypeSchema("str"), default=MISSING)],
+            [Field(name="s", _ty_schema=TypeSchema("str"), default=MISSING)],
         )
         obj = Cls(s="init")
         for i in range(100):
@@ -3528,7 +3528,7 @@ class TestSetterGetterCornerCases:
             [
                 Field(
                     name="arr",
-                    ty=TypeSchema("Array", (TypeSchema("int"),)),
+                    _ty_schema=TypeSchema("Array", (TypeSchema("int"),)),
                     default=MISSING,
                 ),
             ],
@@ -3543,13 +3543,13 @@ class TestSetterGetterCornerCases:
     def test_nested_two_levels(self) -> None:
         Inner = _make_type(
             "SGInner",
-            [Field(name="val", ty=TypeSchema("int"), default=MISSING)],
+            [Field(name="val", _ty_schema=TypeSchema("int"), default=MISSING)],
         )
         inner_info = getattr(Inner, "__tvm_ffi_type_info__")
         inner_schema = TypeSchema(inner_info.type_key, origin_type_index=inner_info.type_index)
         Outer = _make_type(
             "SGOuter",
-            [Field(name="child", ty=inner_schema, default=MISSING)],
+            [Field(name="child", _ty_schema=inner_schema, default=MISSING)],
         )
         obj = Outer(child=Inner(val=42))
         assert obj.child.val == 42
@@ -3563,10 +3563,10 @@ class TestSetterGetterCornerCases:
         Cls = _make_type(
             "SGSelfRef",
             [
-                Field(name="val", ty=TypeSchema("int"), default=MISSING),
+                Field(name="val", _ty_schema=TypeSchema("int"), default=MISSING),
                 Field(
                     name="next",
-                    ty=TypeSchema("Optional", (TypeSchema("Object"),)),
+                    _ty_schema=TypeSchema("Optional", (TypeSchema("Object"),)),
                     default=None,
                 ),
             ],
@@ -3588,7 +3588,7 @@ class TestSetterGetterCornerCases:
 
         Cls = _make_type(
             "SGFactoryCount",
-            [Field(name="x", ty=TypeSchema("int"), default_factory=factory)],
+            [Field(name="x", _ty_schema=TypeSchema("int"), default_factory=factory)],
         )
         a = Cls()
         b = Cls()
@@ -3603,18 +3603,18 @@ class TestSetterGetterCornerCases:
         Cls = _make_type(
             "SGKitchenSink",
             [
-                Field(name="i", ty=TypeSchema("int"), default=MISSING),
-                Field(name="f", ty=TypeSchema("float"), default=MISSING),
-                Field(name="b", ty=TypeSchema("bool"), default=MISSING),
-                Field(name="s", ty=TypeSchema("str"), default=MISSING),
+                Field(name="i", _ty_schema=TypeSchema("int"), default=MISSING),
+                Field(name="f", _ty_schema=TypeSchema("float"), default=MISSING),
+                Field(name="b", _ty_schema=TypeSchema("bool"), default=MISSING),
+                Field(name="s", _ty_schema=TypeSchema("str"), default=MISSING),
                 Field(
                     name="arr",
-                    ty=TypeSchema("Array", (TypeSchema("int"),)),
+                    _ty_schema=TypeSchema("Array", (TypeSchema("int"),)),
                     default=MISSING,
                 ),
                 Field(
                     name="opt",
-                    ty=TypeSchema("Optional", (TypeSchema("int"),)),
+                    _ty_schema=TypeSchema("Optional", (TypeSchema("int"),)),
                     default=None,
                 ),
             ],

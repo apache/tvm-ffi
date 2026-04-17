@@ -22,9 +22,14 @@ import inspect
 import warnings
 
 import pytest
-from tvm_ffi.core import TypeInfo
+import tvm_ffi.testing
+from tvm_ffi.core import MISSING, TypeInfo
+from tvm_ffi.dataclasses import Field
+from tvm_ffi.dataclasses.c_class import _attach_field_objects
 from tvm_ffi.registry import _warn_missing_field_annotations
 from tvm_ffi.testing import (
+    TestCompare,
+    TestHash,
     _TestCxxClassBase,
     _TestCxxClassDerived,
     _TestCxxClassDerivedDerived,
@@ -397,3 +402,284 @@ def test_c_class_warns_only_own_fields_not_inherited() -> None:
         parent_field_names = {f.name for f in parent_type_info.fields}
         for name in parent_field_names:
             assert name not in msg
+
+
+# ---------------------------------------------------------------------------
+# 13. Field object attachment (_attach_field_objects)
+# ---------------------------------------------------------------------------
+
+
+def test_c_class_attaches_field_object_per_typefield() -> None:
+    """Every own reflected field gets a ``Field`` instance on ``dataclass_field``."""
+    type_info: TypeInfo = getattr(_TestCxxClassBase, "__tvm_ffi_type_info__")
+    assert type_info.fields  # sanity
+    for tf in type_info.fields:
+        assert isinstance(tf.dataclass_field, Field)
+
+
+def test_c_class_field_name_matches_typefield() -> None:
+    """``Field.name`` mirrors ``TypeField.name``."""
+    type_info: TypeInfo = getattr(_TestCxxClassBase, "__tvm_ffi_type_info__")
+    for tf in type_info.fields:
+        assert tf.dataclass_field.name == tf.name
+
+
+def test_c_class_field_private_schema_mirrors_typefield() -> None:
+    """``Field._ty_schema`` is forwarded verbatim from ``TypeField.ty``.
+
+    For C++-backed fields ``TypeField.ty`` is typically ``None`` (only
+    populated by ``@py_class`` registration), so the helper should just
+    forward the value without fabricating a :class:`TypeSchema`.
+    """
+    type_info: TypeInfo = getattr(_TestCxxClassBase, "__tvm_ffi_type_info__")
+    for tf in type_info.fields:
+        assert tf.dataclass_field._ty_schema is tf.ty
+
+
+def test_c_class_field_type_resolved_from_annotation() -> None:
+    """``Field.type`` is the resolved Python annotation, not a TypeSchema."""
+    type_info: TypeInfo = getattr(_TestCxxClassBase, "__tvm_ffi_type_info__")
+    for tf in type_info.fields:
+        # _TestCxxClassBase annotates v_i64 / v_i32 as ``int``.
+        assert tf.dataclass_field.type is int
+
+
+def test_c_class_field_defaults_missing_when_unspecified() -> None:
+    """Fields with no C++ default retain ``MISSING`` on ``Field.default``.
+
+    ``_TestCxxClassBase.v_i64`` / ``v_i32`` are registered without
+    ``refl::default_value(...)``; the reflection layer should leave
+    ``c_default`` / ``c_default_factory`` as :data:`MISSING`.
+    """
+    type_info: TypeInfo = getattr(_TestCxxClassBase, "__tvm_ffi_type_info__")
+    for tf in type_info.fields:
+        assert tf.c_default is MISSING
+        assert tf.c_default_factory is MISSING
+        assert tf.dataclass_field.default is MISSING
+        assert tf.dataclass_field.default_factory is MISSING
+
+
+def test_c_class_field_default_value_from_cxx() -> None:
+    """C++ ``refl::default_value(...)`` is exposed on ``Field.default``.
+
+    ``_TestCxxClassDerived.v_f32`` registers ``refl::default_value(8.0f)``;
+    ``_TestCxxClassDerivedDerived.v_str`` registers
+    ``refl::default_value(String("default"))``.  Both should round-trip
+    through ``TypeField.c_default`` / ``Field.default``.
+    """
+    derived_info: TypeInfo = getattr(_TestCxxClassDerived, "__tvm_ffi_type_info__")
+    by_name = {tf.name: tf for tf in derived_info.fields}
+    # v_f64: no default → MISSING.
+    assert by_name["v_f64"].c_default is MISSING
+    assert by_name["v_f64"].dataclass_field.default is MISSING
+    # v_f32: C++ default 8.0f.
+    assert by_name["v_f32"].c_default == pytest.approx(8.0)
+    assert by_name["v_f32"].dataclass_field.default == pytest.approx(8.0)
+    assert by_name["v_f32"].c_default_factory is MISSING
+    assert by_name["v_f32"].dataclass_field.default_factory is MISSING
+
+    dd_info: TypeInfo = getattr(_TestCxxClassDerivedDerived, "__tvm_ffi_type_info__")
+    dd_by_name = {tf.name: tf for tf in dd_info.fields}
+    assert dd_by_name["v_str"].c_default == "default"
+    assert dd_by_name["v_str"].dataclass_field.default == "default"
+    # v_bool has no default.
+    assert dd_by_name["v_bool"].c_default is MISSING
+
+
+def test_c_class_field_default_respects_init_false() -> None:
+    """Defaults are visible even when ``init=False`` (fields filled by C++)."""
+    subset_info: TypeInfo = getattr(_TestCxxInitSubset, "__tvm_ffi_type_info__")
+    by_name = {tf.name: tf for tf in subset_info.fields}
+    # optional_field / note are init(false) + have C++ defaults.
+    assert by_name["optional_field"].c_default == -1
+    assert by_name["optional_field"].dataclass_field.default == -1
+    assert by_name["optional_field"].dataclass_field.init is False
+    assert by_name["note"].c_default == "default"
+    assert by_name["note"].dataclass_field.default == "default"
+    # required_field has no default.
+    assert by_name["required_field"].c_default is MISSING
+
+
+def test_c_class_field_default_respects_kw_only() -> None:
+    """Defaults are visible on kw_only fields too (``_TestCxxKwOnly.w``)."""
+    kw_info: TypeInfo = getattr(_TestCxxKwOnly, "__tvm_ffi_type_info__")
+    by_name = {tf.name: tf for tf in kw_info.fields}
+    # w is kw_only and has C++ default 100.
+    assert by_name["w"].c_default == 100
+    assert by_name["w"].dataclass_field.default == 100
+    assert by_name["w"].dataclass_field.kw_only is True
+    # x / y / z are kw_only without defaults.
+    for name in ("x", "y", "z"):
+        assert by_name[name].c_default is MISSING
+        assert by_name[name].dataclass_field.default is MISSING
+
+
+def test_c_class_field_frozen_matches_typefield() -> None:
+    """``Field.frozen`` tracks ``TypeField.frozen`` (TestIntPair fields are frozen)."""
+    type_info: TypeInfo = getattr(tvm_ffi.testing.TestIntPair, "__tvm_ffi_type_info__")
+    for tf in type_info.fields:
+        assert tf.dataclass_field.frozen == tf.frozen
+
+
+def test_c_class_field_init_and_kw_only_flags() -> None:
+    """``init`` / ``kw_only`` flags propagate from the reflection layer."""
+    # _TestCxxKwOnly has *all* fields kw-only.
+    kw_info: TypeInfo = getattr(_TestCxxKwOnly, "__tvm_ffi_type_info__")
+    for tf in kw_info.fields:
+        assert tf.dataclass_field.kw_only is True
+        assert tf.dataclass_field.init is True
+
+    # _TestCxxInitSubset has some fields with Init(false) (not in __init__).
+    subset_info: TypeInfo = getattr(_TestCxxInitSubset, "__tvm_ffi_type_info__")
+    by_name = {tf.name: tf for tf in subset_info.fields}
+    assert by_name["required_field"].dataclass_field.init is True
+    # optional_field / note are marked Init(false) in C++.
+    assert by_name["optional_field"].dataclass_field.init is False
+    assert by_name["note"].dataclass_field.init is False
+
+
+def test_c_class_field_doc_matches_typefield() -> None:
+    """``Field.doc`` mirrors ``TypeField.doc``."""
+    type_info: TypeInfo = getattr(_TestCxxClassBase, "__tvm_ffi_type_info__")
+    for tf in type_info.fields:
+        assert tf.dataclass_field.doc == tf.doc
+
+
+def test_c_class_field_repr_flag_from_cxx() -> None:
+    """``refl::repr(false)`` on a C++ field propagates to ``Field.repr``.
+
+    ``_TestCxxClassBase`` registers both of its fields with
+    ``refl::repr(false)``; ``_TestCxxClassDerived`` registers its fields
+    without that modifier (default on).
+    """
+    base_info: TypeInfo = getattr(_TestCxxClassBase, "__tvm_ffi_type_info__")
+    for tf in base_info.fields:
+        assert tf.c_repr is False
+        assert tf.dataclass_field.repr is False
+    derived_info: TypeInfo = getattr(_TestCxxClassDerived, "__tvm_ffi_type_info__")
+    for tf in derived_info.fields:
+        assert tf.c_repr is True
+        assert tf.dataclass_field.repr is True
+
+
+def test_c_class_field_compare_flag_from_cxx() -> None:
+    """``refl::compare(false)`` on a C++ field propagates to ``Field.compare``.
+
+    ``TestCompare.ignored_field`` is registered with ``refl::compare(false)``;
+    ``key`` and ``name`` are registered without it.
+    """
+    type_info: TypeInfo = getattr(TestCompare, "__tvm_ffi_type_info__")
+    by_name = {tf.name: tf for tf in type_info.fields}
+    assert by_name["key"].c_compare is True
+    assert by_name["key"].dataclass_field.compare is True
+    assert by_name["name"].c_compare is True
+    assert by_name["name"].dataclass_field.compare is True
+    assert by_name["ignored_field"].c_compare is False
+    assert by_name["ignored_field"].dataclass_field.compare is False
+
+
+def test_c_class_field_hash_flag_from_cxx() -> None:
+    """``refl::hash(false)`` on a C++ field propagates to ``Field.hash``.
+
+    ``TestHash.hash_ignored`` is registered with ``refl::hash(false)``;
+    ``key`` and ``name`` are registered without it.
+    """
+    type_info: TypeInfo = getattr(TestHash, "__tvm_ffi_type_info__")
+    by_name = {tf.name: tf for tf in type_info.fields}
+    assert by_name["key"].c_hash is True
+    assert by_name["key"].dataclass_field.hash is True
+    assert by_name["name"].c_hash is True
+    assert by_name["name"].dataclass_field.hash is True
+    assert by_name["hash_ignored"].c_hash is False
+    assert by_name["hash_ignored"].dataclass_field.hash is False
+
+
+def test_c_class_field_structural_eq_default_none() -> None:
+    """Fields registered without ``s_eq_hash_def`` / ``s_eq_hash_ignore`` stay ``None``.
+
+    None of the current C++ testing fixtures set structural_eq flags on a
+    field, so we verify the default (``None``) is preserved across the
+    reflection boundary.
+    """
+    for cls in (_TestCxxClassBase, _TestCxxClassDerived, TestCompare, TestHash):
+        type_info: TypeInfo = getattr(cls, "__tvm_ffi_type_info__")
+        for tf in type_info.fields:
+            assert tf.c_structural_eq is None
+            assert tf.dataclass_field.structural_eq is None
+
+
+def test_c_class_attaches_only_own_fields_not_inherited() -> None:
+    """Only own fields get a Field; parent fields are attached on the parent's TypeInfo."""
+    derived_info: TypeInfo = getattr(_TestCxxClassDerived, "__tvm_ffi_type_info__")
+    own_names = {tf.name for tf in derived_info.fields}
+    # Derived owns v_f64 / v_f32; parent owns v_i64 / v_i32.
+    assert own_names == {"v_f64", "v_f32"}
+    for tf in derived_info.fields:
+        assert isinstance(tf.dataclass_field, Field)
+    # Parent TypeInfo already had Field objects attached when it was decorated.
+    parent_info = derived_info.parent_type_info
+    assert parent_info is not None
+    for tf in parent_info.fields:
+        assert isinstance(tf.dataclass_field, Field)
+
+
+def test_c_class_field_type_none_when_annotation_missing() -> None:
+    """Fields without a Python annotation get ``Field.type == None``."""
+    # Re-run _attach_field_objects on a bare class (no annotations) — it must
+    # not raise and should leave every Field.type == None.
+    type_info: TypeInfo = getattr(_TestCxxClassBase, "__tvm_ffi_type_info__")
+    original = [tf.dataclass_field for tf in type_info.fields]
+    bare = type("BareCls", (), {})
+    try:
+        _attach_field_objects(bare, type_info)
+        for tf in type_info.fields:
+            assert tf.dataclass_field.type is None
+    finally:
+        # Restore so later tests still see the annotated Field.type.
+        for tf, saved in zip(type_info.fields, original):
+            tf.dataclass_field = saved
+
+
+def test_c_class_attaches_field_for_new_decoration() -> None:
+    """A freshly decorated @c_class type has its own Field objects."""
+    # We don't create a new C++ type here — just re-run the decorator machinery
+    # with a duplicate key-aware workflow isn't necessary. Simply assert that
+    # the existing decorated classes all expose populated dataclass_field.
+    for cls in (_TestCxxClassBase, _TestCxxClassDerived, _TestCxxClassDerivedDerived):
+        ti: TypeInfo = getattr(cls, "__tvm_ffi_type_info__")
+        for tf in ti.fields:
+            assert tf.dataclass_field is not None
+            assert tf.dataclass_field.name == tf.name
+
+
+def test_c_class_attach_is_idempotent() -> None:
+    """Calling ``_attach_field_objects`` twice replaces Fields without error."""
+    type_info: TypeInfo = getattr(_TestCxxClassBase, "__tvm_ffi_type_info__")
+    original = [tf.dataclass_field for tf in type_info.fields]
+    try:
+        _attach_field_objects(_TestCxxClassBase, type_info)
+        for tf in type_info.fields:
+            assert isinstance(tf.dataclass_field, Field)
+            assert tf.dataclass_field.type is int
+    finally:
+        for tf, saved in zip(type_info.fields, original):
+            tf.dataclass_field = saved
+
+
+def test_c_class_attach_tolerates_unresolvable_hints() -> None:
+    """``typing.get_type_hints`` exceptions fall back silently; ``Field.type`` stays None."""
+
+    # Declaring a type with a string annotation that points at an undefined name
+    # makes get_type_hints raise NameError.  The helper must swallow it.
+    class BrokenAnn:
+        x: ThisNameIsNeverDefined  # ty: ignore[unresolved-reference]  # noqa: F821
+
+    type_info: TypeInfo = getattr(_TestCxxClassBase, "__tvm_ffi_type_info__")
+    original = [tf.dataclass_field for tf in type_info.fields]
+    try:
+        _attach_field_objects(BrokenAnn, type_info)
+        for tf in type_info.fields:
+            assert tf.dataclass_field.type is None
+    finally:
+        for tf, saved in zip(type_info.fields, original):
+            tf.dataclass_field = saved

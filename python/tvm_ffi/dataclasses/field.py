@@ -40,18 +40,25 @@ else:
 class Field:
     """Descriptor for a single field in a Python-defined TVM-FFI type.
 
-    When constructed directly (low-level API), *name* and *ty* should be
-    provided.  When returned by :func:`field` (``@py_class`` workflow),
-    *name* and *ty* are ``None`` and filled in by the decorator.
+    When constructed directly (low-level API), *name* and *_ty_schema*
+    should be provided.  When returned by :func:`field` (``@py_class``
+    workflow), both are ``None`` and filled in by the decorator.
 
     Parameters
     ----------
     name : str | None
         The field name.  ``None`` when created via :func:`field`; filled
         in by the ``@py_class`` decorator.
-    ty : TypeSchema | None
-        The type schema.  ``None`` when created via :func:`field`; filled
-        in by the ``@py_class`` decorator.
+    _ty_schema : TypeSchema | None
+        Private: the internal :class:`TypeSchema` used by the reflection
+        layer.  ``None`` when created via :func:`field`; filled in by
+        the ``@py_class`` decorator.  Consumers should use :attr:`type`
+        instead.
+    type : Any
+        The resolved Python annotation (e.g. ``int``, ``list[str]``,
+        ``Optional[X]``).  Filled in by the ``@py_class`` / ``@c_class``
+        decorator via :func:`typing.get_type_hints`; ``None`` until then
+        or when the annotation cannot be resolved.
     default : object
         Default value for the field. Mutually exclusive with *default_factory*.
         ``MISSING`` when not set.
@@ -89,6 +96,7 @@ class Field:
     """
 
     __slots__ = (
+        "_ty_schema",
         "compare",
         "default",
         "default_factory",
@@ -100,10 +108,11 @@ class Field:
         "name",
         "repr",
         "structural_eq",
-        "ty",
+        "type",
     )
     name: str | None
-    ty: TypeSchema | None
+    _ty_schema: TypeSchema | None
+    type: Any
     default: object
     default_factory: Callable[[], object] | None
     frozen: bool
@@ -123,7 +132,7 @@ class Field:
     def __init__(  # noqa: PLR0913
         self,
         name: str | None = None,
-        ty: TypeSchema | None = None,
+        _ty_schema: TypeSchema | None = None,
         *,
         default: object = MISSING,
         default_factory: Callable[[], object] | None = MISSING,  # type: ignore[assignment]
@@ -153,7 +162,8 @@ class Field:
                 f"got {structural_eq!r}"
             )
         self.name = name
-        self.ty = ty
+        self._ty_schema = _ty_schema
+        self.type = None
         self.default = default
         self.default_factory = default_factory
         self.frozen = frozen
@@ -181,8 +191,8 @@ def field(
 ) -> Any:
     """Customize a field in a ``@py_class``-decorated class.
 
-    Returns a :class:`Field` sentinel whose *name* and *ty* are
-    ``None``.  The ``@py_class`` decorator fills them in later
+    Returns a :class:`Field` sentinel whose *name* and *_ty_schema*
+    are ``None``.  The ``@py_class`` decorator fills them in later
     from the class annotations.
 
     The return type is ``Any`` because ``dataclass_transform`` field

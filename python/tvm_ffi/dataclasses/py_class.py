@@ -194,9 +194,10 @@ def _collect_own_fields(  # noqa: PLR0912
             except AttributeError:
                 pass
 
-        # Fill in name and ty (set by the decorator, not the user)
+        # Fill in name, schema, and resolved type (set by the decorator, not the user)
         f.name = name
-        f.ty = TypeSchema.from_annotation(resolved_type)
+        f._ty_schema = TypeSchema.from_annotation(resolved_type)
+        f.type = resolved_type
 
         # Resolve kw_only: None means "inherit from decorator"
         if f.kw_only is None:
@@ -270,6 +271,12 @@ def _register_fields_into_type(
     # Register fields and type-level structural eq/hash kind with the C layer.
     structure_kind = _STRUCTURE_KIND_MAP.get(params.get("structural_eq"))
     type_info._register_fields(own_fields, structure_kind)
+    # Attach the user's Field sentinel to each TypeField so the
+    # ``tvm_ffi.dataclasses.fields()`` compat layer can recover defaults
+    # and default_factory values.  _register_fields preserves order, so
+    # own_fields and type_info.fields line up 1:1.
+    for py_field, type_field in zip(own_fields, type_info.fields):
+        type_field.dataclass_field = py_field
     # Register user-defined dunder methods and read back system-generated ones.
     # Non-callable entries whose names are in _FFI_TYPE_ATTR_NAMES are routed
     # to TVMFFITypeRegisterAttr by the Cython layer.

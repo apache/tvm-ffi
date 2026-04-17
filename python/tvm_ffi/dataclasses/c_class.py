@@ -18,12 +18,46 @@
 
 from __future__ import annotations
 
+import typing
 from collections.abc import Callable
-from typing import TypeVar
+from typing import Any, TypeVar
 
 from typing_extensions import dataclass_transform
 
+from .field import Field
+
 _T = TypeVar("_T", bound=type)
+
+
+def _attach_field_objects(cls: type, type_info: Any) -> None:
+    """Populate ``TypeField.dataclass_field`` for every own reflected field.
+
+    ``@c_class`` fields originate from C++ reflection, so there is no
+    user-supplied :class:`Field`.  We synthesize one per ``TypeField``
+    and stash it on ``TypeField.dataclass_field`` so
+    :func:`~tvm_ffi.dataclasses.fields` can return it.
+    """
+    try:
+        hints = typing.get_type_hints(cls)
+    except Exception:
+        hints = {}
+    for tf in type_info.fields:
+        f = Field(
+            name=tf.name,
+            _ty_schema=tf.ty,
+            default=tf.c_default,
+            default_factory=tf.c_default_factory,
+            frozen=tf.frozen,
+            init=tf.c_init,
+            repr=tf.c_repr,
+            hash=tf.c_hash,
+            compare=tf.c_compare,
+            kw_only=tf.c_kw_only,
+            structural_eq=tf.c_structural_eq,
+            doc=tf.doc,
+        )
+        f.type = hints.get(tf.name)
+        tf.dataclass_field = f
 
 
 @dataclass_transform(eq_default=False, order_default=False)
@@ -115,6 +149,7 @@ def c_class(
         type_info = getattr(cls, "__tvm_ffi_type_info__", None)
         assert type_info is not None
         _warn_missing_field_annotations(cls, type_info, stacklevel=2)
+        _attach_field_objects(cls, type_info)
         _install_dataclass_dunders(
             cls, init=init, repr=repr, eq=eq, order=order, unsafe_hash=unsafe_hash
         )

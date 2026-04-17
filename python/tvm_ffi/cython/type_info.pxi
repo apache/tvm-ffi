@@ -627,6 +627,23 @@ class TypeField:
     c_init: bool = True
     c_kw_only: bool = False
     c_has_default: bool = False
+    # ``c_default`` / ``c_default_factory`` are populated from the C++
+    # reflection layer (``TVMFFIFieldInfo.default_value_or_factory``) for
+    # ``@c_class`` types, and from the ``Field`` descriptors for
+    # ``@py_class`` types.  Both default to :data:`MISSING` when no
+    # default / factory has been registered.
+    c_default: Any = dataclasses.field(default_factory=lambda: MISSING)
+    c_default_factory: Any = dataclasses.field(default_factory=lambda: MISSING)
+    # Presentation / structural flags decoded from the reflection layer.
+    # ``c_repr`` / ``c_compare`` / ``c_hash`` default to True and flip off
+    # when ``refl::repr(false)`` / ``refl::compare(false)`` / ``refl::hash(false)``
+    # (or the corresponding ``@py_class`` ``field(...)`` kwargs) are set.
+    # ``c_structural_eq`` is ``None`` / ``"ignore"`` / ``"def"`` matching the
+    # ``Field.structural_eq`` vocabulary.
+    c_repr: bool = True
+    c_compare: bool = True
+    c_hash: bool = True
+    c_structural_eq: Optional[str] = None
     dataclass_field: Any = None
 
     def __post_init__(self):
@@ -867,7 +884,7 @@ cdef _register_one_field(
         info.doc.size = 0
 
     # --- metadata (JSON with type_schema) ---
-    metadata_str = json.dumps({"type_schema": py_field.ty.to_json()})
+    metadata_str = json.dumps({"type_schema": py_field._ty_schema.to_json()})
     metadata_bytes = c_str(metadata_str)
     cdef ByteArrayArg metadata_arg = ByteArrayArg(metadata_bytes)
     info.metadata = metadata_arg.cdata
@@ -1011,7 +1028,7 @@ def _register_fields(type_info, fields, structure_kind=None):
     cdef list type_fields = []
     for py_field in fields:
         # 1. Get layout
-        layout = _ORIGIN_NATIVE_LAYOUT.get(py_field.ty.origin, (8, 8, kTVMFFIObject))
+        layout = _ORIGIN_NATIVE_LAYOUT.get(py_field._ty_schema.origin, (8, 8, kTVMFFIObject))
         size = layout[0]
         alignment = layout[1]
         field_type_index = layout[2]
@@ -1026,7 +1043,7 @@ def _register_fields(type_info, fields, structure_kind=None):
         getter = <TVMFFIFieldGetter><int64_t>_MAKE_FILED_GETTER(field_type_index)
         setter_fn = <CObject>_MAKE_FIELD_SETTER(
             field_type_index,
-            <int64_t><void*>py_field.ty._converter,
+            <int64_t><void*>py_field._ty_schema._converter,
             <int64_t>&_f_type_convert,
         )
 
@@ -1051,13 +1068,19 @@ def _register_fields(type_info, fields, structure_kind=None):
                 size=size,
                 offset=field_offset,
                 frozen=py_field.frozen,
-                metadata={"type_schema": py_field.ty.to_json()},
+                metadata={"type_schema": py_field._ty_schema.to_json()},
                 getter=fgetter,
                 setter=fsetter,
-                ty=py_field.ty,
+                ty=py_field._ty_schema,
                 c_init=py_field.init,
                 c_kw_only=py_field.kw_only,
                 c_has_default=(py_field.default is not MISSING or py_field.default_factory is not MISSING),
+                c_default=py_field.default,
+                c_default_factory=py_field.default_factory,
+                c_repr=py_field.repr,
+                c_compare=py_field.compare,
+                c_hash=bool(py_field.hash),
+                c_structural_eq=py_field.structural_eq,
             )
         )
 

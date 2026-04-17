@@ -114,6 +114,16 @@ cdef class CObject:
         cdef uint64_t chandle = <uint64_t>self.chandle
         return chandle
 
+    @property
+    def id_(self) -> int:
+        """The integer address of the underlying FFI handle.
+
+        Alias for :py:meth:`__chandle__`.  Returns ``0`` when the
+        handle is NULL.
+        """
+        cdef uint64_t chandle = <uint64_t>self.chandle
+        return chandle
+
     def __reduce__(self):
         cls = type(self)
         return (_new_object, (cls,), self.__getstate__())
@@ -151,6 +161,15 @@ cdef class CObject:
         return hash_value
 
     def same_as(self, other: object) -> bool:
+        return isinstance(other, CObject) and self.chandle == (<CObject>other).chandle
+
+    def is_(self, other: object) -> bool:
+        """Return ``True`` if both references point to the same FFI handle.
+
+        Alias for :py:meth:`same_as`.  Checks identity of the
+        underlying handle rather than performing a structural,
+        value-based comparison.
+        """
         return isinstance(other, CObject) and self.chandle == (<CObject>other).chandle
 
     def __move_handle_from__(self, other: CObject) -> None:
@@ -488,6 +507,12 @@ cdef _type_info_create_from_type_key(object type_cls, str type_key):
     cdef str type_schema_json
     cdef FieldGetter getter
     cdef FieldSetter setter
+    cdef bint has_default
+    cdef bint default_from_factory
+    cdef TVMFFIAny owned_default
+    cdef object c_default
+    cdef object c_default_factory
+    cdef object c_structural_eq
     cdef ByteArrayArg type_key_arg = ByteArrayArg(c_str(type_key))
 
     # NOTE: `type_key_arg` must be kept alive until after the call to `TVMFFITypeKeyToIndex`,
@@ -505,6 +530,24 @@ cdef _type_info_create_from_type_key(object type_cls, str type_key):
         (<FieldSetter>setter).offset = field.offset
         (<FieldSetter>setter).flags = field.flags
         metadata_obj = json.loads(bytearray_to_str(&field.metadata)) if field.metadata.size != 0 else {}
+        # Decode the static default value or factory (if any) registered by C++.
+        has_default = (field.flags & kTVMFFIFieldFlagBitMaskHasDefault) != 0
+        default_from_factory = (field.flags & kTVMFFIFieldFlagBitMaskDefaultFromFactory) != 0
+        c_default = MISSING
+        c_default_factory = MISSING
+        if has_default:
+            CHECK_CALL(TVMFFIAnyViewToOwnedAny(&field.default_value_or_factory, &owned_default))
+            if default_from_factory:
+                c_default_factory = make_ret(owned_default)
+            else:
+                c_default = make_ret(owned_default)
+        # Decode SEqHashIgnore / SEqHashDef into the Field.structural_eq vocabulary.
+        if (field.flags & kTVMFFIFieldFlagBitMaskSEqHashIgnore) != 0:
+            c_structural_eq = "ignore"
+        elif (field.flags & kTVMFFIFieldFlagBitMaskSEqHashDef) != 0:
+            c_structural_eq = "def"
+        else:
+            c_structural_eq = None
         fields.append(
             TypeField(
                 name=bytearray_to_str(&field.name),
@@ -517,7 +560,13 @@ cdef _type_info_create_from_type_key(object type_cls, str type_key):
                 setter=setter,
                 c_init=(field.flags & kTVMFFIFieldFlagBitMaskInitOff) == 0,
                 c_kw_only=(field.flags & kTVMFFIFieldFlagBitMaskKwOnly) != 0,
-                c_has_default=(field.flags & kTVMFFIFieldFlagBitMaskHasDefault) != 0,
+                c_has_default=has_default,
+                c_default=c_default,
+                c_default_factory=c_default_factory,
+                c_repr=(field.flags & kTVMFFIFieldFlagBitMaskReprOff) == 0,
+                c_compare=(field.flags & kTVMFFIFieldFlagBitMaskCompareOff) == 0,
+                c_hash=(field.flags & kTVMFFIFieldFlagBitMaskHashOff) == 0,
+                c_structural_eq=c_structural_eq,
             )
         )
 
