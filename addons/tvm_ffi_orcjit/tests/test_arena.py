@@ -66,9 +66,11 @@ Test structure
    succeed under VA pressure with arena.
 4. **Large data section** (test 4): 4 MB ``.nv_fatbin`` section loads
    correctly within the arena.
-5. **Leaked materialization** (test 5): ``__dso_handle`` resolves after
+5. **Overflow section** (test 5): ``.nv_fatbin`` data is allocated
+   outside the arena via separate mmap.
+6. **Leaked materialization** (test 6): ``__dso_handle`` resolves after
    prior sessions leaked mmap slabs from failed materializations.
-6. **Delta32 overflow** (test 6): ``-fpie`` GCC objects + 3 GB VA
+7. **Delta32 overflow** (test 7): ``-fpie`` GCC objects + 3 GB VA
    blocker.  With arena → PASSES; without arena → Delta32 overflow.
 
 All tests use a small arena (16 MB) and 256 MB-3 GB VA blockers -- safe
@@ -453,7 +455,52 @@ def test_large_data_section(variant: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Test 5: __dso_handle Delta32 overflow after leaked materialization
+# Test 5: Overflow section — .nv_fatbin lands outside the arena
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(not _is_linux, reason="Arena is Linux-only")
+@pytest.mark.parametrize("variant", _all_variants)
+def test_overflow_section_outside_arena(variant: str) -> None:
+    """Overflow sections (.nv_fatbin) are allocated outside the arena.
+
+    The arena memory manager detects sections named .nv_fatbin and
+    allocates them via a separate mmap() outside the arena.  This keeps
+    the arena compact for code + small rodata, reducing 2MB THP region
+    count and iTLB pressure.
+
+    Verification: get the fatbin data address and the arena VA range
+    from /proc/self/maps, then assert the fatbin address is NOT within
+    the arena region.
+    """
+    session = ExecutionSession(arena_size=_ARENA_SIZE)
+    lib = session.create_library("fatbin_overflow")
+    lib.add(obj(f"{variant}/fake_fatbin"))
+
+    # Verify the function still works correctly.
+    assert lib.get_function("get_fatbin_size")() == 4 * 1024 * 1024
+
+    # Get the actual address of the fatbin data in memory.
+    fatbin_addr = lib.get_function("get_fatbin_addr")()
+
+    # Find the arena mapping: a single large region matching the arena size.
+    # The arena is reserved as PROT_NONE and then committed in slabs, so
+    # look for the contiguous region that spans _ARENA_SIZE.
+    maps = _parse_maps()
+    arena_regions = [
+        (s, e) for s, e in maps if (e - s) >= _ARENA_SIZE
+    ]
+
+    # The fatbin address must not fall within any arena-sized region.
+    for start, end in arena_regions:
+        assert not (start <= fatbin_addr < end), (
+            f"Fatbin data at {fatbin_addr:#x} should be OUTSIDE the arena "
+            f"[{start:#x}, {end:#x}) but landed inside"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Test 6: __dso_handle Delta32 overflow after leaked materialization
 # ---------------------------------------------------------------------------
 
 

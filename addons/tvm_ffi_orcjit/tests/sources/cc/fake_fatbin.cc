@@ -19,6 +19,10 @@
 // The fatbin data is referenced only by absolute relocations (R_*_64 /
 // R_AARCH64_ABS64), never by PC-relative relocations.  This lets us test
 // overflow-region classification without needing a real CUDA toolchain.
+//
+// KEY DETAIL: References go through a pointer in .data (generates
+// R_AARCH64_ABS64 / R_X86_64_64), not via ADRP/RIP-relative.  This
+// mirrors real NVCC output where __NV_fatbin_* uses absolute relocations.
 
 #include <tvm/ffi/c_api.h>
 
@@ -31,17 +35,30 @@ __attribute__((section(".nv_fatbin"), used))
 #endif
 static const uint8_t fake_fatbin_data[4 * 1024 * 1024] = {0};
 
+// Indirect reference: .data holds an absolute-relocation pointer to
+// .nv_fatbin.  Code accesses .data via PC-relative (ADRP / RIP), and
+// .data→.nv_fatbin is absolute.  No PC-relative edge crosses from any
+// section to .nv_fatbin, matching real NVCC objects.
+static const void* const fatbin_ptr = fake_fatbin_data;
+static const uint64_t fatbin_size = sizeof(fake_fatbin_data);
+
 // get_fatbin_size: return the size of the fake fatbin blob.
-// The reference to fake_fatbin_data generates an absolute relocation
-// (R_*_64 / R_AARCH64_ABS64), NOT PC-relative.
 extern "C" {
 TVM_FFI_DLL_EXPORT int __tvm_ffi_get_fatbin_size(void* self, const TVMFFIAny* args,
                                                  int32_t num_args, TVMFFIAny* result) {
-  volatile const void* p = fake_fatbin_data;
-  (void)p;
   result->type_index = kTVMFFIInt;
   result->zero_padding = 0;
-  result->v_int64 = static_cast<int64_t>(sizeof(fake_fatbin_data));
+  result->v_int64 = static_cast<int64_t>(fatbin_size);
+  return 0;
+}
+
+// get_fatbin_addr: return the address of the fake fatbin data.
+// Used by tests to verify overflow sections land outside the arena.
+TVM_FFI_DLL_EXPORT int __tvm_ffi_get_fatbin_addr(void* self, const TVMFFIAny* args,
+                                                 int32_t num_args, TVMFFIAny* result) {
+  result->type_index = kTVMFFIInt;
+  result->zero_padding = 0;
+  result->v_int64 = reinterpret_cast<int64_t>(fatbin_ptr);
   return 0;
 }
 }

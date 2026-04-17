@@ -133,11 +133,22 @@ class ArenaJITLinkMemoryManager : public llvm::jitlink::JITLinkMemoryManager {
  private:
   class ArenaInFlightAlloc;
 
+  /*! \brief A section allocated outside the arena via separate mmap().
+   *
+   *  Sections whose only cross-section references use absolute relocations
+   *  (e.g. .nv_fatbin) are placed here to keep the arena compact. */
+  struct OverflowBlock {
+    void* addr;               // mmap'd base address
+    size_t size;              // mmap'd size (page-aligned)
+    llvm::orc::MemProt prot;  // target protection for finalize
+  };
+
   /*! \brief Metadata for a finalized allocation, stored via FinalizedAlloc handle. */
   struct FinalizedAllocInfo {
     size_t arena_offset;
     size_t arena_size;
     std::vector<llvm::orc::shared::WrapperFunctionCall> DeallocActions;
+    std::vector<OverflowBlock> overflow_blocks;
   };
 
   /*! \brief Bump-allocate from arena. Returns offset within arena. */

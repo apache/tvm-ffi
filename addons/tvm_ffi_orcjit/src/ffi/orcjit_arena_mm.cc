@@ -30,7 +30,11 @@
 
 #ifdef __linux__
 
+#include <llvm/ADT/DenseSet.h>
+#include <llvm/ADT/SmallVector.h>
 #include <llvm/ExecutionEngine/JITLink/JITLink.h>
+#include <llvm/ExecutionEngine/JITLink/aarch64.h>
+#include <llvm/ExecutionEngine/JITLink/x86_64.h>
 #include <llvm/ExecutionEngine/Orc/Shared/AllocationActions.h>
 #include <llvm/Support/Alignment.h>
 #include <llvm/Support/FormatVariadic.h>
@@ -48,6 +52,49 @@ namespace orcjit {
 using namespace llvm;
 using namespace llvm::jitlink;
 using namespace llvm::orc;
+
+// ── Overflow section edge classification ───────────────────────────
+//
+// Conservative whitelist: only known absolute relocation kinds return true.
+// Unknown or future edge kinds default to PC-relative → sections stay in
+// the arena (safe: never breaks relocations, just forgoes the overflow
+// optimization for unknown kinds).
+
+namespace {
+
+bool isAbsoluteEdge(const Triple& TT, Edge::Kind K) {
+  if (K < Edge::FirstRelocation) return true;  // KeepAlive, Invalid — not a relocation constraint
+  if (TT.isAArch64()) {
+    using namespace llvm::jitlink::aarch64;
+    switch (K) {
+      case Pointer64:
+      case Pointer32:
+      case Pointer64Authenticated:
+      case MoveWide16:
+        return true;
+      default:
+        return false;
+    }
+  }
+  if (TT.isX86()) {
+    using namespace llvm::jitlink::x86_64;
+    switch (K) {
+      case Pointer64:
+      case Pointer32:
+      case Pointer32Signed:
+      case Pointer16:
+      case Pointer8:
+      case Size64:
+      case Size32:
+        return true;
+      default:
+        return false;
+    }
+  }
+  return false;  // Unknown arch — treat as PC-relative (safe)
+}
+
+}  // namespace
 
 // ── Platform abstraction ────────────────────────────────────────────
 
@@ -121,23 +168,33 @@ Error ArenaJITLinkMemoryManager::protectPages(void* addr, size_t size, MemProt P
 class ArenaJITLinkMemoryManager::ArenaInFlightAlloc : public JITLinkMemoryManager::InFlightAlloc {
  public:
   ArenaInFlightAlloc(ArenaJITLinkMemoryManager& MM, LinkGraph& G, BasicLayout BL,
-                     size_t arena_offset, size_t standard_size, size_t finalize_size)
+                     size_t arena_offset, size_t standard_size, size_t finalize_size,
+                     std::vector<OverflowBlock> overflow_blocks)
       : MM(MM),
         G(&G),
         BL(std::move(BL)),
         arena_offset_(arena_offset),
         standard_size_(standard_size),
-        finalize_size_(finalize_size) {}
+        finalize_size_(finalize_size),
+        overflow_blocks_(std::move(overflow_blocks)) {}
 
   ~ArenaInFlightAlloc() override {
     assert(!G && "ArenaInFlightAlloc destroyed without finalize or abandon");
   }
 
   void finalize(OnFinalizedFunction OnFinalized) override {
-    // Apply target protections for each segment.
+    // Apply target protections for each arena segment.
     if (auto Err = applyProtections()) {
       OnFinalized(std::move(Err));
       return;
+    }
+
+    // Apply target protections for overflow blocks.
+    for (auto& ob : overflow_blocks_) {
+      if (auto Err = MM.protectPages(ob.addr, ob.size, ob.prot)) {
+        OnFinalized(std::move(Err));
+        return;
+      }
     }
 
     // Run finalization actions (e.g., register EH frames).
@@ -161,7 +218,8 @@ class ArenaJITLinkMemoryManager::ArenaInFlightAlloc : public JITLinkMemoryManage
     // opaque ExecutorAddr (integer), so we must use raw new here.  Ownership
     // transfers to deallocate(), which LLVM guarantees is called for every
     // finalized allocation.
-    auto* FA = new FinalizedAllocInfo{arena_offset_, standard_size_, std::move(*DeallocActions)};
+    auto* FA = new FinalizedAllocInfo{arena_offset_, standard_size_, std::move(*DeallocActions),
+                                      std::move(overflow_blocks_)};
     OnFinalized(FinalizedAlloc(ExecutorAddr::fromPtr(FA)));
   }
 
@@ -171,6 +229,11 @@ class ArenaJITLinkMemoryManager::ArenaInFlightAlloc : public JITLinkMemoryManage
     if (total > 0) {
       MM.decommitPages(MM.arena_base_ + arena_offset_, total);
       MM.freeRegion(arena_offset_, total);
+    }
+
+    // Release overflow blocks.
+    for (auto& ob : overflow_blocks_) {
+      ::munmap(ob.addr, ob.size);
     }
 
 #ifndef NDEBUG
@@ -198,6 +261,7 @@ class ArenaJITLinkMemoryManager::ArenaInFlightAlloc : public JITLinkMemoryManage
   size_t arena_offset_;
   size_t standard_size_;
   size_t finalize_size_;
+  std::vector<OverflowBlock> overflow_blocks_;
 };
 
 // ── ArenaJITLinkMemoryManager ───────────────────────────────────────
@@ -307,7 +371,68 @@ void ArenaJITLinkMemoryManager::freeRegion(size_t offset, size_t size) {
 
 void ArenaJITLinkMemoryManager::allocate(const JITLinkDylib* JD, LinkGraph& G,
                                          OnAllocatedFunction OnAllocated) {
+  // ── Overflow section classification ──
+  //
+  // Sections matching known overflow names (e.g. .nv_fatbin — large GPU
+  // device blobs referenced only by absolute relocations) are allocated
+  // outside the arena via separate mmap(), keeping the arena compact for
+  // code + small rodata.
+  //
+  // Two-phase check:
+  //   Phase 1 — Name-based candidate selection (.nv_fatbin).
+  //   Phase 2 — Edge validation: any PC-relative cross-section edge
+  //             targeting a candidate section disqualifies it (the
+  //             section stays in the arena).  This handles cases where
+  //             the compiler generates ADRP/RIP-relative refs even for
+  //             data sections.
+  //
+  // Validated candidates are temporarily set to NoAlloc so BasicLayout
+  // skips them, then immediately restored before returning.  By the time
+  // JITLink's fixUpBlocks runs, sections are back to Standard — avoiding
+  // the debug assert that prohibits edges from allocated sections to
+  // NoAlloc sections.
+  DenseSet<Section*> overflow_candidates;
+  for (auto& Sec : G.sections()) {
+    if (Sec.getMemLifetime() == MemLifetime::NoAlloc) continue;
+    StringRef Name = Sec.getName();
+    if (Name.starts_with(".nv_fatbin")) {
+      overflow_candidates.insert(&Sec);
+    }
+  }
+
+  // Phase 2: edge validation — disqualify candidates with incoming PC-relative edges.
+  if (!overflow_candidates.empty()) {
+    const auto& TT = G.getTargetTriple();
+    for (auto& Sec : G.sections()) {
+      for (auto* B : Sec.blocks()) {
+        for (auto& E : B->edges()) {
+          if (!E.isRelocation()) continue;
+          if (isAbsoluteEdge(TT, E.getKind())) continue;
+          // PC-relative edge — if it targets a candidate, disqualify.
+          if (!E.getTarget().isDefined()) continue;
+          auto* TargetSec = &E.getTarget().getBlock().getSection();
+          overflow_candidates.erase(TargetSec);
+        }
+      }
+      if (overflow_candidates.empty()) break;
+    }
+  }
+
+  // Apply: temporarily hide validated overflow sections from BasicLayout.
+  SmallVector<std::pair<Section*, MemLifetime>, 4> overflow_sections;
+  for (auto* Sec : overflow_candidates) {
+    overflow_sections.push_back({Sec, Sec->getMemLifetime()});
+    Sec->setMemLifetime(MemLifetime::NoAlloc);
+  }
+
   BasicLayout BL(G);
+
+  // Restore overflow sections to their original lifetime immediately.
+  // BasicLayout has already captured its segment list; subsequent LLVM
+  // passes (fixUpBlocks) will see the sections as normal Standard sections.
+  for (auto& [Sec, OrigLifetime] : overflow_sections) {
+    Sec->setMemLifetime(OrigLifetime);
+  }
 
   // Compute total sizes grouped by lifetime.
   auto SegsSizes = BL.getContiguousPageBasedLayoutSizes(page_size_);
@@ -324,62 +449,122 @@ void ArenaJITLinkMemoryManager::allocate(const JITLinkDylib* JD, LinkGraph& G,
   }
 
   auto TotalSize = static_cast<size_t>(SegsSizes->total());
-  if (TotalSize == 0) {
+  if (TotalSize == 0 && overflow_sections.empty()) {
     // Empty graph — return a no-op allocation.
-    OnAllocated(std::make_unique<ArenaInFlightAlloc>(*this, G, std::move(BL), 0, 0, 0));
+    OnAllocated(std::make_unique<ArenaInFlightAlloc>(*this, G, std::move(BL), 0, 0, 0,
+                                                     std::vector<OverflowBlock>{}));
     return;
   }
 
-  // Bump-allocate from arena.
-  auto OffsetOrErr = bumpAllocate(TotalSize);
-  if (!OffsetOrErr) {
-    OnAllocated(OffsetOrErr.takeError());
-    return;
+  size_t ArenaOffset = 0;
+  size_t StandardSegsSize = 0;
+  size_t FinalizeSegsSize = 0;
+
+  if (TotalSize > 0) {
+    // Bump-allocate from arena.
+    auto OffsetOrErr = bumpAllocate(TotalSize);
+    if (!OffsetOrErr) {
+      OnAllocated(OffsetOrErr.takeError());
+      return;
+    }
+    ArenaOffset = *OffsetOrErr;
+
+    // Commit pages as read-write.
+    if (auto Err = commitPages(arena_base_ + ArenaOffset, TotalSize)) {
+      freeRegion(ArenaOffset, TotalSize);
+      OnAllocated(std::move(Err));
+      return;
+    }
+
+    // Zero-fill the region.
+    std::memset(arena_base_ + ArenaOffset, 0, TotalSize);
+
+    // Assign addresses to segments, partitioned by lifetime.
+    StandardSegsSize = static_cast<size_t>(SegsSizes->StandardSegs);
+    FinalizeSegsSize = static_cast<size_t>(SegsSizes->FinalizeSegs);
+
+    auto NextStandardSegAddr = ExecutorAddr::fromPtr(arena_base_ + ArenaOffset);
+    auto NextFinalizeSegAddr = ExecutorAddr::fromPtr(arena_base_ + ArenaOffset + StandardSegsSize);
+
+    for (auto& KV : BL.segments()) {
+      auto& AG = KV.first;
+      auto& Seg = KV.second;
+
+      auto& SegAddr =
+          (AG.getMemLifetime() == MemLifetime::Standard) ? NextStandardSegAddr : NextFinalizeSegAddr;
+
+      Seg.WorkingMem = SegAddr.toPtr<char*>();
+      Seg.Addr = SegAddr;
+
+      auto SegSize = alignTo(Seg.ContentSize + Seg.ZeroFillSize, page_size_);
+      SegAddr += SegSize;
+    }
   }
-  size_t ArenaOffset = *OffsetOrErr;
 
-  // Commit pages as read-write.
-  if (auto Err = commitPages(arena_base_ + ArenaOffset, TotalSize)) {
-    freeRegion(ArenaOffset, TotalSize);
-    OnAllocated(std::move(Err));
-    return;
-  }
-
-  // Zero-fill the region.
-  std::memset(arena_base_ + ArenaOffset, 0, TotalSize);
-
-  // Assign addresses to segments, partitioned by lifetime.
-  auto StandardSegsSize = static_cast<size_t>(SegsSizes->StandardSegs);
-  auto FinalizeSegsSize = static_cast<size_t>(SegsSizes->FinalizeSegs);
-
-  auto NextStandardSegAddr = ExecutorAddr::fromPtr(arena_base_ + ArenaOffset);
-  auto NextFinalizeSegAddr = ExecutorAddr::fromPtr(arena_base_ + ArenaOffset + StandardSegsSize);
-
-  for (auto& KV : BL.segments()) {
-    auto& AG = KV.first;
-    auto& Seg = KV.second;
-
-    auto& SegAddr =
-        (AG.getMemLifetime() == MemLifetime::Standard) ? NextStandardSegAddr : NextFinalizeSegAddr;
-
-    Seg.WorkingMem = SegAddr.toPtr<char*>();
-    Seg.Addr = SegAddr;
-
-    auto SegSize = alignTo(Seg.ContentSize + Seg.ZeroFillSize, page_size_);
-    SegAddr += SegSize;
-  }
-
-  // Apply layout — copies content and assigns block addresses.
+  // Apply layout — copies content and assigns block addresses for arena segments.
   if (auto Err = BL.apply()) {
     // On error: decommit and free the arena region.
-    decommitPages(arena_base_ + ArenaOffset, TotalSize);
-    freeRegion(ArenaOffset, TotalSize);
+    if (TotalSize > 0) {
+      decommitPages(arena_base_ + ArenaOffset, TotalSize);
+      freeRegion(ArenaOffset, TotalSize);
+    }
     OnAllocated(std::move(Err));
     return;
+  }
+
+  // ── Allocate overflow sections via mmap() outside the arena ──
+  std::vector<OverflowBlock> overflow_allocs;
+
+  for (auto& [Sec, _] : overflow_sections) {
+    // Compute total size for this section's blocks.
+    size_t total_sec_size = 0;
+    for (auto* B : Sec->blocks()) {
+      total_sec_size = alignTo(total_sec_size, B->getAlignment());
+      total_sec_size += B->getSize();
+    }
+    if (total_sec_size == 0) continue;
+    total_sec_size = alignTo(total_sec_size, page_size_);
+
+    // mmap outside the arena.
+    void* addr = ::mmap(nullptr, total_sec_size, PROT_READ | PROT_WRITE,
+                        MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (addr == MAP_FAILED) {
+      // Clean up prior overflow allocs, free arena region, report error.
+      for (auto& ob : overflow_allocs) ::munmap(ob.addr, ob.size);
+      if (TotalSize > 0) {
+        decommitPages(arena_base_ + ArenaOffset, TotalSize);
+        freeRegion(ArenaOffset, TotalSize);
+      }
+      OnAllocated(make_error<StringError>(
+          "ArenaJITLinkMemoryManager: overflow mmap failed for section " +
+              Sec->getName() + ": " + std::strerror(errno),
+          inconvertibleErrorCode()));
+      return;
+    }
+
+    // Layout blocks within the mmap'd region.
+    char* ptr = static_cast<char*>(addr);
+    for (auto* B : Sec->blocks()) {
+      uint64_t align = B->getAlignment();
+      ptr = reinterpret_cast<char*>(alignTo(reinterpret_cast<uintptr_t>(ptr), align));
+      size_t bsize = B->getSize();
+      // Copy content and redirect block's mutable content pointer.
+      if (!B->isZeroFill()) {
+        auto content = B->getContent();
+        std::memcpy(ptr, content.data(), content.size());
+        B->setMutableContent(MutableArrayRef<char>(ptr, bsize));
+      }
+      // Assign block address (working mem == executor addr for in-process JIT).
+      B->setAddress(ExecutorAddr::fromPtr(ptr));
+      ptr += bsize;
+    }
+
+    overflow_allocs.push_back({addr, total_sec_size, Sec->getMemProt()});
   }
 
   OnAllocated(std::make_unique<ArenaInFlightAlloc>(*this, G, std::move(BL), ArenaOffset,
-                                                   StandardSegsSize, FinalizeSegsSize));
+                                                   StandardSegsSize, FinalizeSegsSize,
+                                                   std::move(overflow_allocs)));
 }
 
 void ArenaJITLinkMemoryManager::deallocate(std::vector<FinalizedAlloc> Allocs,
@@ -401,6 +586,11 @@ void ArenaJITLinkMemoryManager::deallocate(std::vector<FinalizedAlloc> Allocs,
     if (FA->arena_size > 0) {
       decommitPages(arena_base_ + FA->arena_offset, FA->arena_size);
       freeRegion(FA->arena_offset, FA->arena_size);
+    }
+
+    // Release overflow blocks.
+    for (auto& ob : FA->overflow_blocks) {
+      ::munmap(ob.addr, ob.size);
     }
 
     delete FA;
