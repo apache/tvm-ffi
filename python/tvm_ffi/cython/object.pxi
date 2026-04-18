@@ -739,6 +739,32 @@ def _lookup_type_attr(type_index: int32_t, attr_key: str) -> Any:
     return make_ret(data)
 
 
+def _register_type_attr(type_index: int32_t, attr_key: str, value: object) -> None:
+    """Write a TypeAttrColumn entry for *type_index*.
+
+    Wraps :c:func:`TVMFFITypeRegisterAttr`.  Overwrites any previous value
+    for the same ``(type_index, attr_key)`` slot; callers are responsible
+    for coordinating concurrent writes.
+    """
+    cdef ByteArrayArg attr_key_bytes = ByteArrayArg(c_str(attr_key))
+    cdef TVMFFIAny temp
+    cdef int c_api_ret_code
+    temp.type_index = kTVMFFINone
+    temp.v_int64 = 0
+    TVMFFIPyPyObjectToFFIAny(
+        TVMFFIPyArgSetterFactory_,
+        <PyObject*>value,
+        &temp,
+        &c_api_ret_code,
+    )
+    CHECK_CALL(c_api_ret_code)
+    try:
+        CHECK_CALL(TVMFFITypeRegisterAttr(type_index, &attr_key_bytes.cdata, &temp))
+    finally:
+        if temp.type_index >= kTVMFFIStaticObjectBegin and temp.v_obj != NULL:
+            TVMFFIObjectDecRef(<TVMFFIObjectHandle>temp.v_obj)
+
+
 def _type_cls_to_type_info(type_cls: type) -> TypeInfo | None:
     return TYPE_CLS_TO_INFO.get(type_cls, None)
 

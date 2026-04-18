@@ -27,6 +27,7 @@
 #include <tvm/ffi/container/list.h>
 #include <tvm/ffi/container/map.h>
 #include <tvm/ffi/container/tensor.h>
+#include <tvm/ffi/enum.h>
 #include <tvm/ffi/error.h>
 #include <tvm/ffi/function.h>
 #include <tvm/ffi/memory.h>
@@ -319,11 +320,14 @@ class TypeTable {
     column->data = reinterpret_cast<const TVMFFIAny*>(column->data_.data());
     column->size = static_cast<int32_t>(column->data_.size());
     column->begin_index = 0;
-    if (column->data_[type_index - column->begin_index] != nullptr) {
-      TVM_FFI_THROW(RuntimeError) << "Type attribute `" << name_str << "` is already set for type `"
-                                  << TypeIndexToTypeKey(type_index) << "`";
+    Any& slot = column->data_[type_index - column->begin_index];
+    if (slot.type_index() != kTVMFFINone) {
+      TVM_FFI_THROW(RuntimeError)
+          << "TypeAttr `" << name_str << "` is already registered for type index " << type_index
+          << ". To update the stored value, register a mutable container (e.g., Dict/List) "
+          << "once and mutate it in place on subsequent calls.";
     }
-    column->data_[type_index - column->begin_index] = value_view;
+    slot = value_view;
   }
   const TVMFFITypeAttrColumn* GetTypeAttrColumn(const TVMFFIByteArray* name) {
     String name_str(*name);
@@ -645,6 +649,12 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   refl::TypeAttrDef<ffi::DictObj>().def(
       refl::type_attr::kConvert,
       &refl::details::FFIConvertFromAnyViewToObjectRef<ffi::Dict<ffi::Any, ffi::Any>>);
+  refl::ObjectDef<ffi::EnumObj>(refl::init(false))
+      .def_ro("value", &ffi::EnumObj::value, "Ordinal assigned at registration.",
+              refl::AttachFieldFlag::SEqHashIgnore())
+      .def_ro("name", &ffi::EnumObj::name, "Instance name.");
+  refl::EnsureTypeAttrColumn(refl::type_attr::kEnumEntries);
+  refl::EnsureTypeAttrColumn(refl::type_attr::kEnumAttrs);
   refl::GlobalDef()
       .def_method("ffi.GetRegisteredTypeKeys",
                   []() -> ffi::Array<ffi::String> {

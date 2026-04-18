@@ -70,6 +70,10 @@ function (tvm_ffi_add_msvc_flags target_name)
     target_compile_definitions(${target_name} PUBLIC -D_ENABLE_EXTENDED_ALIGNED_STORAGE)
     target_compile_definitions(${target_name} PUBLIC -DNOMINMAX)
     target_compile_options(${target_name} PRIVATE "/Zi")
+    # Heavy template instantiations in reflection/creator/object.h can exceed MSVC's default
+    # per-object section limit (C1128). Apply /bigobj to every target that uses these flags so
+    # growth in any TU doesn't break the Windows build.
+    target_compile_options(${target_name} PRIVATE "/bigobj")
   endif ()
 endfunction ()
 

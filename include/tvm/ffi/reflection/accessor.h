@@ -489,6 +489,28 @@ inline constexpr const char* kDataToJson = "__data_to_json__";
  * ``ObjectRef``.
  */
 inline constexpr const char* kDataFromJson = "__data_from_json__";
+/*!
+ * \brief Per-class enum entry registry.
+ *
+ * Maps each variant's name to its registered singleton for an
+ * ``EnumObj`` subclass.  Populated by ``refl::EnumDef<T>("Name")`` on
+ * the C++ side and by ``Enum`` subclass declarations on the Python
+ * side; both languages share the same underlying storage.
+ *
+ * Value type: ``Dict<String, Enum>``.
+ */
+inline constexpr const char* kEnumEntries = "__ffi_enum_entries__";
+/*!
+ * \brief Per-class column holding extensible attributes for enum variants.
+ *
+ * The outer dict is keyed by extensible-attribute name; each value is a
+ * list indexed by the variant's ordinal (``EnumObj::value``).  Written
+ * by ``refl::EnumDef<T>::set_attr(...)`` on the C++ side and by the
+ * ``EnumAttrMap`` returned from Python ``Enum.def_attr(...)``.
+ *
+ * Value type: ``Dict<String, List<Any>>``.
+ */
+inline constexpr const char* kEnumAttrs = "__ffi_enum_attrs__";
 }  // namespace type_attr
 
 /*!

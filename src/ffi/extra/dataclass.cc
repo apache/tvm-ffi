@@ -29,6 +29,7 @@
 #include <tvm/ffi/container/map.h>
 #include <tvm/ffi/container/shape.h>
 #include <tvm/ffi/container/tensor.h>
+#include <tvm/ffi/enum.h>
 #include <tvm/ffi/extra/dataclass.h>
 #include <tvm/ffi/reflection/accessor.h>
 #include <tvm/ffi/reflection/creator.h>
@@ -50,6 +51,8 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
+
+#include "../object_internal.h"
 
 namespace tvm {
 namespace ffi {
@@ -809,6 +812,18 @@ class ReprPrinter : public ObjectGraphDFS<ReprPrinter, ReprFrame, std::string> {
         return true;
       }
     }
+    // Built-in sentinel singletons — pointer-identity dispatch ahead of any
+    // type-keyed lookups so the generic ``ffi.Object`` framing is skipped.
+    static const Object* missing_ptr = GetMissingObject().get();
+    static const Object* kwargs_ptr = GetKwargsObject().get();
+    if (obj == missing_ptr) {
+      *out = "<MISSING>";
+      return true;
+    }
+    if (obj == kwargs_ptr) {
+      *out = "<KWARGS>";
+      return true;
+    }
     // String/Bytes on heap
     if (ti == TypeIndex::kTVMFFIStr) {
       String s = details::AnyUnsafe::CopyFromAnyViewAfterCheck<String>(value);
@@ -861,6 +876,21 @@ class ReprPrinter : public ObjectGraphDFS<ReprPrinter, ReprFrame, std::string> {
                          ti == TypeIndex::kTVMFFIMap || ti == TypeIndex::kTVMFFIDict)) {
         result += "@" + AddressStr(obj);
       }
+      state_[obj] = State::kDone;
+      repr_cache_[obj] = result;
+      *out = result;
+      return true;
+    }
+    // Default repr for EnumObj subclasses: ``<type_key>.<name>``.  Reached only
+    // when no user-registered ``__ffi_repr__`` hook has claimed this type, so
+    // explicit repr overrides on specific enum subclasses still take precedence.
+    if (obj->IsInstance<EnumObj>()) {
+      const EnumObj* enum_obj = static_cast<const EnumObj*>(obj);
+      const TVMFFITypeInfo* type_info = TVMFFIGetTypeInfo(ti);
+      std::string result(type_info->type_key.data, type_info->type_key.size);
+      result += '.';
+      result.append(enum_obj->name.data(), enum_obj->name.size());
+      if (show_addr_) result += "@" + AddressStr(obj);
       state_[obj] = State::kDone;
       repr_cache_[obj] = result;
       *out = result;

@@ -150,8 +150,7 @@ if (MSVC)
   target_link_libraries(tvm_ffi_objs PRIVATE DbgHelp.lib)
   target_link_libraries(tvm_ffi_shared PRIVATE DbgHelp.lib)
   target_link_libraries(tvm_ffi_static PRIVATE DbgHelp.lib)
-  # /bigobj: printer.cc exceeds default section limit
-  target_compile_options(tvm_ffi_objs PRIVATE /bigobj)
+
   # produce pdb file
   target_link_options(tvm_ffi_shared PRIVATE /DEBUG)
 endif ()
