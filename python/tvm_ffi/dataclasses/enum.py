@@ -109,6 +109,13 @@ def entry(*args: Any, **kwargs: Any) -> Any:
     auto-assigned ordinal and name — it expresses intent without the
     empty-arg-list noise.
 
+    When the enum's ``type_key`` is C++-backed (registered via
+    ``refl::ObjectDef``), only keyword arguments are supported — field
+    values are assigned via reflected setters keyed by name.  Passing
+    positional arguments in that case raises :class:`TypeError`.
+    ``entry(value=...)`` and ``entry(name=...)`` always raise
+    :class:`TypeError` because those fields are auto-assigned.
+
     Examples
     --------
     Variant with declared fields:
@@ -227,7 +234,7 @@ class Enum(Object):
     value : int
         Dense ordinal assigned at registration (0-indexed per class).
     name : str
-        Instance name (e.g., ``"Add"`` for ``Op.Add``).
+        The variant's string name key (e.g., ``"Add"`` for ``Op.Add``).
 
     Closed Python enum
     ------------------
@@ -279,7 +286,8 @@ class Enum(Object):
        annotation.
     4. ``name: ClassVar[Cls]`` — in cross-language mode, binds to an
        existing C++-registered variant (error if unknown); otherwise
-       registers a blank Python variant.
+       registers a new Python variant with only the auto-assigned
+       :attr:`value` and :attr:`name` (equivalent to ``name = auto()``).
 
     Integer literals (``ok = 0``) are rejected: :attr:`value` is
     auto-assigned, so a user-supplied ordinal would either silently
@@ -344,12 +352,7 @@ class Enum(Object):
     @classmethod
     def entries(cls) -> Iterator[Enum]:
         """Iterate over all variants, in ordinal (value) order."""
-        entries = _entries_dict(cls)
-        if entries is None:
-            return iter(())
-        values = list(entries.values())
-        values.sort(key=lambda v: int(v.value))
-        return iter(values)
+        return iter(cls.by_value)
 
     @_ClassProperty
     def by_name(cls: type) -> Any:
@@ -420,16 +423,24 @@ class Enum(Object):
             Value returned by ``attr[variant]`` when nothing was
             registered for that variant.  Left as ``MISSING`` to raise
             :class:`KeyError` on unset variants instead.  The default
-            is a property of *this* :meth:`def_attr` call, not of the
-            underlying column — two callers declaring the same name
-            with different defaults share the storage but disagree on
-            unset reads.
+            is a property of *this* :class:`EnumAttrMap` view, not of
+            the underlying column: calling :meth:`def_attr` twice with
+            the same ``name`` but different defaults creates two views
+            that share every explicit write but may disagree on unset
+            variants — e.g., ``Op.def_attr("cost", default=0)`` and
+            ``Op.def_attr("cost", default=-1)`` return ``0`` and ``-1``
+            respectively for a variant that was never written to.
 
         Returns
         -------
         EnumAttrMap
             Mutable view over the column.  Use ``variant in attr`` to
-            distinguish an explicit write from a default-hit.
+            distinguish an explicit write from a default-hit.  ``None``
+            is reserved as the "unset" sentinel (matching C++
+            ``EnumDef::set_attr`` padding), so ``attr[variant] = None``
+            raises :class:`TypeError` — store a typed wrapper (e.g. a
+            ``0``/``False`` flag) when you need a falsy-but-present
+            value.
 
         Notes
         -----
@@ -453,6 +464,14 @@ class EnumAttrMap:
     including C++ code writing via ``EnumDef::set_attr`` — and the data
     is not a field on the variant object.  See :meth:`Enum.def_attr` for
     full semantics.
+
+    ``None`` is reserved as the column's "unset" sentinel (matching the
+    C++ ``Any(nullptr)`` padding used by ``EnumDef::set_attr``), so
+    :meth:`__setitem__` rejects ``None`` with :class:`TypeError` — an
+    explicit ``attr[variant] = None`` would otherwise be
+    indistinguishable from never-written and surprise ``variant in attr``
+    / :meth:`__getitem__` readers.  To "clear" a previously written
+    value, register a mutable container once and mutate it in place.
     """
 
     __slots__ = ("_default", "_enum_cls", "_name")
@@ -487,6 +506,12 @@ class EnumAttrMap:
         return col
 
     def __setitem__(self, variant: object, value: Any) -> None:
+        if value is None:
+            raise TypeError(
+                f"{self._enum_cls.__name__}.def_attr({self._name!r}): "
+                f"None is reserved as the 'unset' sentinel for extensible "
+                f"attributes and cannot be written explicitly."
+            )
         ordinal = self._ordinal_of(variant)
         col = self._column(create=True)
         assert col is not None  # create=True always materialises the column.

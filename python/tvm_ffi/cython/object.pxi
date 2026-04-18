@@ -740,11 +740,17 @@ def _lookup_type_attr(type_index: int32_t, attr_key: str) -> Any:
 
 
 def _register_type_attr(type_index: int32_t, attr_key: str, value: object) -> None:
-    """Write a TypeAttrColumn entry for *type_index*.
+    """Register a value for the ``(type_index, attr_key)`` slot.
 
-    Wraps :c:func:`TVMFFITypeRegisterAttr`.  Overwrites any previous value
-    for the same ``(type_index, attr_key)`` slot; callers are responsible
-    for coordinating concurrent writes.
+    Wraps :c:func:`TVMFFITypeRegisterAttr`, which raises :class:`RuntimeError`
+    if a value is already registered for the slot.  To update the stored
+    value, register a mutable container (e.g. ``Dict``/``List``) once and
+    mutate it in place on subsequent calls.
+
+    ``TVMFFIPyPyObjectToFFIAny`` produces a non-owning :c:type:`TVMFFIAny`
+    view of *value*; ``TVMFFITypeRegisterAttr`` incref's the underlying
+    object when it stores the slot, so no explicit refcount management is
+    needed here.
     """
     cdef ByteArrayArg attr_key_bytes = ByteArrayArg(c_str(attr_key))
     cdef TVMFFIAny temp
@@ -758,11 +764,7 @@ def _register_type_attr(type_index: int32_t, attr_key: str, value: object) -> No
         &c_api_ret_code,
     )
     CHECK_CALL(c_api_ret_code)
-    try:
-        CHECK_CALL(TVMFFITypeRegisterAttr(type_index, &attr_key_bytes.cdata, &temp))
-    finally:
-        if temp.type_index >= kTVMFFIStaticObjectBegin and temp.v_obj != NULL:
-            TVMFFIObjectDecRef(<TVMFFIObjectHandle>temp.v_obj)
+    CHECK_CALL(TVMFFITypeRegisterAttr(type_index, &attr_key_bytes.cdata, &temp))
 
 
 def _type_cls_to_type_info(type_cls: type) -> TypeInfo | None:

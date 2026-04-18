@@ -400,6 +400,19 @@ def test_def_attr_contains() -> None:
     assert Op.neg not in cost
 
 
+def test_def_attr_rejects_none_write() -> None:
+    """``None`` is reserved as the column's "unset" sentinel."""
+
+    class Op(Enum, type_key=_unique_key("OpNone")):
+        arity: int
+        add: ClassVar[Op] = entry(arity=2)
+
+    cost = Op.def_attr("cost", default=0)
+    with pytest.raises(TypeError, match="reserved as the 'unset' sentinel"):
+        cost[Op.add] = None
+    assert Op.add not in cost
+
+
 def test_def_attr_accepts_fresh_wrapper_from_get() -> None:
     """Variants returned by ``Cls.get(...)`` may be fresh Python wrappers
     whose ``id`` differs from the cached class attribute.  Ordinal-indexed
