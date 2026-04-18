@@ -406,6 +406,24 @@ class TestAsdict:
         with pytest.raises(TypeError, match="c_class / py_class instances"):
             asdict([1, 2, 3])
 
+    def test_defaultdict_preserved(self) -> None:
+        """``defaultdict`` round-trips with its ``default_factory`` intact.
+
+        Exercises the ``_asdict_inner`` defaultdict branch directly, since
+        FFI ``Any`` field storage converts a stored ``defaultdict`` into
+        an FFI ``Map`` on readback.  Mirrors stdlib
+        ``dataclasses._asdict_inner``'s check on ``type(obj)``.
+        """
+        from tvm_ffi.dataclasses.common import _asdict_inner  # noqa: PLC0415
+
+        dd = collections.defaultdict(list)
+        dd["a"].append(1)
+        dd["b"].append(2)
+        result = _asdict_inner(dd, dict)
+        assert type(result) is collections.defaultdict
+        assert result.default_factory is list
+        assert dict(result) == {"a": [1], "b": [2]}
+
 
 # ---------------------------------------------------------------------------
 # astuple
@@ -496,6 +514,18 @@ class TestAstuple:
             astuple(42)
         with pytest.raises(TypeError, match="c_class / py_class instances"):
             astuple([1, 2, 3])
+
+    def test_defaultdict_preserved(self) -> None:
+        """``defaultdict`` round-trips with its ``default_factory`` intact."""
+        from tvm_ffi.dataclasses.common import _astuple_inner  # noqa: PLC0415
+
+        dd = collections.defaultdict(list)
+        dd["a"].append(1)
+        dd["b"].append(2)
+        result = _astuple_inner(dd, tuple)
+        assert type(result) is collections.defaultdict
+        assert result.default_factory is list
+        assert dict(result) == {"a": [1], "b": [2]}
 
 
 # ---------------------------------------------------------------------------
