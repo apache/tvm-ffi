@@ -25,6 +25,16 @@ import tvm_ffi.testing
 from tvm_ffi.core import TypeInfo
 
 
+def _field_doc(cls: type, name: str) -> str | None:
+    type_info = cls.__tvm_ffi_type_info__  # ty: ignore[unresolved-attribute]
+    while type_info is not None:
+        for field in type_info.fields:
+            if field.name == name:
+                return field.doc
+        type_info = type_info.parent_type_info
+    raise AssertionError(f"Cannot find field doc for {cls.__name__}.{name}")
+
+
 def test_make_object() -> None:
     # with default values
     obj0 = tvm_ffi.testing.create_object("testing.TestObjectBase")
@@ -45,24 +55,24 @@ def test_method() -> None:
     assert isinstance(obj0, tvm_ffi.testing.TestObjectBase)
     assert obj0.add_i64(1) == 13
     assert type(obj0).add_i64.__doc__ == "add_i64 method"
-    assert type(obj0).v_i64.__doc__ == "i64 field"
+    assert _field_doc(type(obj0), "v_i64") == "i64 field"
 
 
 def test_attribute() -> None:
     obj = tvm_ffi.testing.TestIntPair(3, 4)
     assert obj.a == 3
     assert obj.b == 4
-    assert type(obj).a.__doc__ == "Field `a`"
-    assert type(obj).b.__doc__ == "Field `b`"
+    assert _field_doc(type(obj), "a") == "Field `a`"
+    assert _field_doc(type(obj), "b") == "Field `b`"
 
 
 def test_attribute_no_doc() -> None:
     from tvm_ffi.testing import TestObjectBase  # noqa: PLC0415
 
     # The docs for v_f64 and v_str are None because they are not explicitly set.
-    assert TestObjectBase.v_i64.__doc__ == "i64 field"
-    assert TestObjectBase.v_f64.__doc__ is None
-    assert TestObjectBase.v_str.__doc__ is None
+    assert _field_doc(TestObjectBase, "v_i64") == "i64 field"
+    assert _field_doc(TestObjectBase, "v_f64") is None
+    assert _field_doc(TestObjectBase, "v_str") is None
 
 
 def test_setter() -> None:
@@ -229,18 +239,21 @@ def test_unregistered_object_fallback() -> None:
 
 
 @pytest.mark.parametrize(
-    ("test_cls", "make_instance"),
+    ("test_cls", "expected_slots", "make_instance"),
     [
         (
             tvm_ffi.testing.TestObjectBase,
+            ("v_i64", "v_f64", "v_str"),
             lambda: tvm_ffi.testing.create_object("testing.TestObjectBase"),
         ),
         (
             tvm_ffi.testing.TestIntPair,
+            ("a", "b"),
             lambda: tvm_ffi.testing.TestIntPair(1, 2),
         ),
         (
             tvm_ffi.testing.TestObjectDerived,
+            ("v_map", "v_array"),
             lambda: tvm_ffi.testing.create_object(
                 "testing.TestObjectDerived",
                 v_i64=20,
@@ -250,9 +263,11 @@ def test_unregistered_object_fallback() -> None:
         ),
     ],
 )
-def test_object_subclass_slots(test_cls: type, make_instance: Any) -> None:
+def test_object_subclass_slots(
+    test_cls: type, expected_slots: tuple[str, ...], make_instance: Any
+) -> None:
     slots = test_cls.__dict__.get("__slots__")
-    assert slots == ()
+    assert slots == expected_slots
     assert "__dict__" not in test_cls.__dict__
     assert "__weakref__" not in test_cls.__dict__
     obj = make_instance()

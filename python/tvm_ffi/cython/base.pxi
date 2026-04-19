@@ -367,6 +367,8 @@ cdef extern from "tvm_ffi_python_helpers.h":
         const DLPackExchangeAPI* dlpack_c_exchange_api
 
     ctypedef int (*TVMFFIPyArgSetterFactory)(PyObject* value, TVMFFIPyArgSetter* out) except -1
+    ctypedef int64_t (*TVMFFIPyFieldGetIntFunc)(void* chandle, int64_t offset) noexcept
+    ctypedef double (*TVMFFIPyFieldGetFloatFunc)(void* chandle, int64_t offset) noexcept
     # The main call function
     int TVMFFIPyFuncCall(
         TVMFFIPyArgSetterFactory setter_factory,
@@ -415,6 +417,32 @@ cdef extern from "tvm_ffi_python_helpers.h":
     void TVMFFIPyPushTempFFIObject(TVMFFIPyCallContext* ctx, TVMFFIObjectHandle arg) noexcept
     void TVMFFIPyPushTempPyObject(TVMFFIPyCallContext* ctx, PyObject* arg) noexcept
     void TVMFFIPyPushExtraTempPyObject(TVMFFIPyCallContext* ctx, PyObject* arg)
+    int64_t TVMFFIPyFieldGetInt64(void* chandle, int64_t offset) noexcept nogil
+    int64_t TVMFFIPyFieldGetInt32(void* chandle, int64_t offset) noexcept nogil
+    int64_t TVMFFIPyFieldGetInt16(void* chandle, int64_t offset) noexcept nogil
+    int64_t TVMFFIPyFieldGetInt8(void* chandle, int64_t offset) noexcept nogil
+    double TVMFFIPyFieldGetFloat64(void* chandle, int64_t offset) noexcept nogil
+    double TVMFFIPyFieldGetFloat32(void* chandle, int64_t offset) noexcept nogil
+    int64_t TVMFFIPyFieldGetBool(void* chandle, int64_t offset) noexcept nogil
+    void TVMFFIPyFieldGetObjectRef(void* chandle, int64_t offset, TVMFFIAny* out) noexcept nogil
+    void TVMFFIPyFieldGetAny(void* chandle, int64_t offset, TVMFFIAny* out) noexcept nogil
+    # --- fast field-table tp_getattro ---
+    ctypedef PyObject* (*TVMFFIPyMakeRetCb)(const TVMFFIAny* result) noexcept
+    struct TVMFFIPyFieldTableEntry:
+        PyObject* name
+        int64_t offset
+        int32_t type_index
+        int32_t field_size
+    ctypedef PyObject* (*TVMFFIPyGetAttroFunc)(PyObject*, PyObject*)
+    struct TVMFFIPyFieldTable:
+        int32_t count
+        Py_ssize_t chandle_pyoffset
+        TVMFFIPyGetAttroFunc fallback
+        TVMFFIPyFieldTableEntry entries[64]
+    void TVMFFIPyFieldTableSetup(void* key, TVMFFIPyMakeRetCb make_ret_obj, TVMFFIPyMakeRetCb make_ret)
+    bint TVMFFIPyFieldTableInsert(const void* type_ptr, TVMFFIPyFieldTable* table) noexcept
+    PyObject* TVMFFIPyFieldGetAttro(PyObject* obj, PyObject* name)
+    void TVMFFIPyTypeModified(void* type_ptr) noexcept
     # the predefined setters for common POD types
     int TVMFFIPyArgSetterFloat_(TVMFFIPyArgSetter*, TVMFFIPyCallContext*, PyObject* arg, TVMFFIAny* out) except -1
     int TVMFFIPyArgSetterInt_(TVMFFIPyArgSetter*, TVMFFIPyCallContext*, PyObject* arg, TVMFFIAny* out) except -1

@@ -932,7 +932,7 @@ class TestReplace:
         assert obj.v_i64 == 5  # ty: ignore[unresolved-attribute]
 
     def test_replace_readonly_field(self) -> None:
-        # __replace__ uses the FFIProperty.set() escape hatch,
+        # __replace__ uses the shadow-slot force-set helper,
         # so it works even on frozen / read-only fields.
         pair = tvm_ffi.testing.TestIntPair(3, 4)
         pair2 = pair.__replace__(a=10)  # ty: ignore[unresolved-attribute]

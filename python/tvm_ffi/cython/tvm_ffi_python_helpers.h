@@ -24,8 +24,10 @@
 #define TVM_FFI_PYTHON_HELPERS_H_
 
 #include <Python.h>
+#include <tvm/ffi/any.h>
 #include <tvm/ffi/c_api.h>
 #include <tvm/ffi/extra/c_env_api.h>
+#include <tvm/ffi/object.h>
 
 // Define here to avoid dependencies on non-c headers for now
 #ifndef TVM_FFI_INLINE
@@ -62,6 +64,296 @@ class TVMFFIPyWithAttachedThreadState {
  private:
   PyGILState_STATE gstate_;
 };
+
+//------------------------------------------------------------------------------------
+// Helpers for direct reflected field reads
+//------------------------------------------------------------------------------------
+TVM_FFI_INLINE const char* TVMFFIPyFieldAddr(const void* chandle, int64_t offset) noexcept {
+  return static_cast<const char*>(chandle) + offset;
+}
+
+TVM_FFI_INLINE int64_t TVMFFIPyFieldGetInt64(void* chandle, int64_t offset) noexcept {
+  return *reinterpret_cast<const int64_t*>(TVMFFIPyFieldAddr(chandle, offset));
+}
+
+TVM_FFI_INLINE int64_t TVMFFIPyFieldGetInt32(void* chandle, int64_t offset) noexcept {
+  return *reinterpret_cast<const int32_t*>(TVMFFIPyFieldAddr(chandle, offset));
+}
+
+TVM_FFI_INLINE int64_t TVMFFIPyFieldGetInt16(void* chandle, int64_t offset) noexcept {
+  return *reinterpret_cast<const int16_t*>(TVMFFIPyFieldAddr(chandle, offset));
+}
+
+TVM_FFI_INLINE int64_t TVMFFIPyFieldGetInt8(void* chandle, int64_t offset) noexcept {
+  return *reinterpret_cast<const int8_t*>(TVMFFIPyFieldAddr(chandle, offset));
+}
+
+TVM_FFI_INLINE double TVMFFIPyFieldGetFloat64(void* chandle, int64_t offset) noexcept {
+  return *reinterpret_cast<const double*>(TVMFFIPyFieldAddr(chandle, offset));
+}
+
+TVM_FFI_INLINE double TVMFFIPyFieldGetFloat32(void* chandle, int64_t offset) noexcept {
+  return *reinterpret_cast<const float*>(TVMFFIPyFieldAddr(chandle, offset));
+}
+
+TVM_FFI_INLINE int64_t TVMFFIPyFieldGetBool(void* chandle, int64_t offset) noexcept {
+  return *reinterpret_cast<const bool*>(TVMFFIPyFieldAddr(chandle, offset));
+}
+
+TVM_FFI_INLINE void TVMFFIPyFieldGetObjectRef(void* chandle, int64_t offset,
+                                              TVMFFIAny* out) noexcept {
+  const auto* field =
+      reinterpret_cast<const tvm::ffi::ObjectRef*>(TVMFFIPyFieldAddr(chandle, offset));
+  if (!field->defined()) {
+    out->type_index = tvm::ffi::TypeIndex::kTVMFFINone;
+    out->zero_padding = 0;
+    out->v_int64 = 0;
+    return;
+  }
+  out->type_index = field->type_index();
+  out->zero_padding = 0;
+  out->v_obj = tvm::ffi::details::ObjectUnsafe::TVMFFIObjectPtrFromObjectRef(*field);
+  tvm::ffi::details::ObjectUnsafe::IncRefObjectHandle(out->v_obj);
+}
+
+TVM_FFI_INLINE void TVMFFIPyFieldGetAny(void* chandle, int64_t offset, TVMFFIAny* out) noexcept {
+  std::memcpy(out, TVMFFIPyFieldAddr(chandle, offset), sizeof(TVMFFIAny));
+  if (out->type_index >= tvm::ffi::TypeIndex::kTVMFFIStaticObjectBegin && out->v_obj != nullptr) {
+    tvm::ffi::details::ObjectUnsafe::IncRefObjectHandle(out->v_obj);
+  }
+}
+
+//------------------------------------------------------------------------------------
+// Fast field lookup via custom tp_getattro
+//
+// Instead of going through Python's property mechanism (LOAD_ATTR_PROPERTY ->
+// fget frame -> Cython getter -> C read), we override tp_getattro on classes
+// with reflected fields.  The custom tp_getattro does a compact field-table
+// scan with interned-string pointer comparison and reads the field inline in C.
+//
+// For POD types (int, float, bool) the read is fully inlined.
+// For complex types (ObjectRef, Any) we call back into Cython's make_ret_object
+// / make_ret via registered function pointers.
+//------------------------------------------------------------------------------------
+
+#define TVM_FFI_PY_MAX_FIELD_TABLE_ENTRIES 64
+
+/*! \brief One entry in the per-type field table. */
+struct TVMFFIPyFieldTableEntry {
+  PyObject* name;     /*!< Interned attribute name (pointer comparison) */
+  int64_t offset;     /*!< Byte offset from chandle */
+  int32_t type_index; /*!< kTVMFFIInt, kTVMFFIFloat, kTVMFFIBool, kTVMFFIAny, or
+                         >=kTVMFFIStaticObjectBegin */
+  int32_t field_size; /*!< sizeof(field) in bytes */
+};
+
+/*! \brief Function pointer type for tp_getattro. */
+typedef PyObject* (*TVMFFIPyGetAttroFunc)(PyObject*, PyObject*);
+
+/*! \brief Per-type field table stored in the global map. */
+struct TVMFFIPyFieldTable {
+  int32_t count;               /*!< Number of entries */
+  Py_ssize_t chandle_pyoffset; /*!< Byte offset of CObject.chandle in the Python struct */
+  TVMFFIPyGetAttroFunc
+      fallback; /*!< Original tp_getattro (e.g. slot_tp_getattr_hook for types with __getattr__) */
+  TVMFFIPyFieldTableEntry entries[TVM_FFI_PY_MAX_FIELD_TABLE_ENTRIES];
+};
+
+/*!
+ * \brief Callback type for converting TVMFFIAny -> Python object.
+ * \param result  Pointer to a filled TVMFFIAny (caller owns the ref inside).
+ * \return New reference to a Python object, or NULL on error (exception set).
+ */
+typedef PyObject* (*TVMFFIPyMakeRetCb)(const TVMFFIAny* result);
+
+// Module-level state — set once from Cython at init.
+static PyObject* _TVMFFIPyFieldTableKey = nullptr;
+static TVMFFIPyMakeRetCb _TVMFFIPyMakeRetObjectCb = nullptr;
+static TVMFFIPyMakeRetCb _TVMFFIPyMakeRetCb = nullptr;
+
+/*!
+ * \brief Initialize module-level state for the field-table fast path.
+ * \param key            Interned dict key (e.g. "_ffi_field_table_ptr").
+ * \param make_ret_obj   Callback: TVMFFIAny* -> Python object (for ObjectRef fields).
+ * \param make_ret       Callback: TVMFFIAny* -> Python object (for Any fields).
+ */
+TVM_FFI_INLINE void TVMFFIPyFieldTableSetup(void* key, TVMFFIPyMakeRetCb make_ret_obj,
+                                            TVMFFIPyMakeRetCb make_ret) {
+  _TVMFFIPyFieldTableKey = static_cast<PyObject*>(key);
+  _TVMFFIPyMakeRetObjectCb = make_ret_obj;
+  _TVMFFIPyMakeRetCb = make_ret;
+}
+
+/*!
+ * \brief Read a POD field (int, float, bool) directly from C++ object memory.
+ * \return New Python reference, or nullptr if the type is not POD.
+ */
+TVM_FFI_INLINE PyObject* TVMFFIPyFieldTableReadPOD(const void* chandle,
+                                                   const TVMFFIPyFieldTableEntry* entry) noexcept {
+  const char* ptr = static_cast<const char*>(chandle) + entry->offset;
+  if (entry->type_index == tvm::ffi::TypeIndex::kTVMFFIInt) {
+    switch (entry->field_size) {
+      case 8:
+        return PyLong_FromLongLong(*reinterpret_cast<const int64_t*>(ptr));
+      case 4:
+        return PyLong_FromLong(*reinterpret_cast<const int32_t*>(ptr));
+      case 2:
+        return PyLong_FromLong(*reinterpret_cast<const int16_t*>(ptr));
+      case 1:
+        return PyLong_FromLong(*reinterpret_cast<const int8_t*>(ptr));
+    }
+  } else if (entry->type_index == tvm::ffi::TypeIndex::kTVMFFIFloat) {
+    switch (entry->field_size) {
+      case 8:
+        return PyFloat_FromDouble(*reinterpret_cast<const double*>(ptr));
+      case 4:
+        return PyFloat_FromDouble(static_cast<double>(*reinterpret_cast<const float*>(ptr)));
+    }
+  } else if (entry->type_index == tvm::ffi::TypeIndex::kTVMFFIBool) {
+    if (*reinterpret_cast<const uint8_t*>(ptr)) {
+      Py_RETURN_TRUE;
+    }
+    Py_RETURN_FALSE;
+  }
+  return nullptr;
+}
+
+// ---- Global field-table map (avoids tp_dict access) ----
+// Open-addressing hash table: PyTypeObject* → TVMFFIPyFieldTable*.
+// Power-of-2 size for fast modular arithmetic.  Probe limit caps
+// worst-case scan.  Typical TVM programs register <200 types.
+#define TVM_FFI_FT_MAP_SIZE 1024
+#define TVM_FFI_FT_MAP_MASK (TVM_FFI_FT_MAP_SIZE - 1)
+#define TVM_FFI_FT_PROBE_LIMIT 64
+
+static struct {
+  const void* key;
+  TVMFFIPyFieldTable* table;
+} _TVMFFIPyFieldTableMap[TVM_FFI_FT_MAP_SIZE] = {};
+
+TVM_FFI_INLINE TVMFFIPyFieldTable* TVMFFIPyFieldTableLookup(const void* type_ptr) noexcept {
+  size_t idx = (reinterpret_cast<uintptr_t>(type_ptr) >> 4) & TVM_FFI_FT_MAP_MASK;
+  for (int p = 0; p < TVM_FFI_FT_PROBE_LIMIT; p++) {
+    if (_TVMFFIPyFieldTableMap[idx].key == type_ptr) return _TVMFFIPyFieldTableMap[idx].table;
+    if (_TVMFFIPyFieldTableMap[idx].key == nullptr) return nullptr;
+    idx = (idx + 1) & TVM_FFI_FT_MAP_MASK;
+  }
+  return nullptr;
+}
+
+TVM_FFI_INLINE bool TVMFFIPyFieldTableInsert(const void* type_ptr,
+                                             TVMFFIPyFieldTable* table) noexcept {
+  size_t idx = (reinterpret_cast<uintptr_t>(type_ptr) >> 4) & TVM_FFI_FT_MAP_MASK;
+  for (int p = 0; p < TVM_FFI_FT_PROBE_LIMIT; p++) {
+    if (_TVMFFIPyFieldTableMap[idx].key == nullptr || _TVMFFIPyFieldTableMap[idx].key == type_ptr) {
+      _TVMFFIPyFieldTableMap[idx].key = type_ptr;
+      _TVMFFIPyFieldTableMap[idx].table = table;
+      return true;
+    }
+    idx = (idx + 1) & TVM_FFI_FT_MAP_MASK;
+  }
+  // Probe limit exceeded — class will fall back to property path.
+  return false;
+}
+
+/*!
+ * \brief Custom tp_getattro: fast field lookup for reflected fields.
+ *
+ * Looks up the per-type field table from a global hash map (keyed by
+ * PyTypeObject*).  Scans entries with interned-string pointer comparison.
+ * POD fields are read inline; complex fields (ObjectRef, Any) call back
+ * into Cython.  Non-field attributes fall through to PyObject_GenericGetAttr.
+ */
+/*
+ * NOTE on descriptor override semantics (bugs 2-4 in the Codex review):
+ *
+ * The field table is a snapshot taken at class-registration time.  Mutating
+ * the class dict afterwards (A.x = ..., del A.x) does NOT update the table.
+ * This is by design: TVM FFI field descriptors are derived from C++ reflection
+ * metadata and are not meant to be replaced or deleted at runtime.
+ *
+ * NOTE on __getattribute__ interaction (bug 7):
+ *
+ * If a class defines __getattribute__, CPython may reset tp_getattro to
+ * slot_tp_getattr_hook, removing our fast path.  This is expected CPython
+ * behavior; the class falls back to the property-descriptor path.
+ *
+ * NOTE on ABI fragility (bug 10):
+ *
+ * The tp_getattro slot offset is discovered at init time by scanning the
+ * `object` type for PyObject_GenericGetAttr.  On alternative runtimes
+ * (PyPy, GraalPython) this scan may fail, leaving the offset at 0 —
+ * the fast path is simply never installed and the property path is used.
+ *
+ * NOTE on teardown (bug 11):
+ *
+ * Field tables and their interned name references are module-lifetime
+ * objects, intentionally never freed.  They live until process exit.
+ */
+static PyObject* TVMFFIPyFieldGetAttro(PyObject* obj, PyObject* name) {
+  TVMFFIPyFieldTable* table = TVMFFIPyFieldTableLookup(static_cast<const void*>(Py_TYPE(obj)));
+  if (table != nullptr) {
+    void* chandle =
+        *reinterpret_cast<void**>(reinterpret_cast<char*>(obj) + table->chandle_pyoffset);
+    if (chandle != nullptr) {
+      for (int32_t i = 0; i < table->count; i++) {
+        if (table->entries[i].name == name) {
+          // --- POD fast path (int, float, bool) ---
+          PyObject* result = TVMFFIPyFieldTableReadPOD(chandle, &table->entries[i]);
+          if (result != nullptr) return result;
+          // --- ObjectRef ---
+          if (table->entries[i].type_index >=
+                  static_cast<int32_t>(tvm::ffi::TypeIndex::kTVMFFIStaticObjectBegin) &&
+              _TVMFFIPyMakeRetObjectCb != nullptr) {
+            TVMFFIAny any_result;
+            TVMFFIPyFieldGetObjectRef(chandle, table->entries[i].offset, &any_result);
+            if (any_result.type_index == static_cast<int32_t>(tvm::ffi::TypeIndex::kTVMFFINone)) {
+              Py_RETURN_NONE;
+            }
+            return _TVMFFIPyMakeRetObjectCb(&any_result);
+          }
+          // --- Any ---
+          if (table->entries[i].type_index ==
+                  static_cast<int32_t>(tvm::ffi::TypeIndex::kTVMFFIAny) &&
+              _TVMFFIPyMakeRetCb != nullptr) {
+            TVMFFIAny any_result;
+            TVMFFIPyFieldGetAny(chandle, table->entries[i].offset, &any_result);
+            return _TVMFFIPyMakeRetCb(&any_result);
+          }
+          // Unknown field type — fall through to GenericGetAttr
+          break;
+        }
+      }
+    } else {
+      // chandle is NULL — object was created via __new__() without __init__().
+      // Check if the requested name is a registered field and raise a clear error
+      // instead of letting the fallback path dereference NULL + offset (segfault).
+      for (int32_t i = 0; i < table->count; i++) {
+        if (table->entries[i].name == name) {
+          PyErr_Format(PyExc_AttributeError,
+                       "cannot access field '%U' on an uninitialized object "
+                       "(internal handle is NULL). Use the class constructor "
+                       "instead of __new__()",
+                       name);
+          return nullptr;
+        }
+      }
+    }
+  }
+  // Fallback: call the original tp_getattro (which may handle __getattr__).
+  if (table != nullptr && table->fallback != nullptr) {
+    return table->fallback(obj, name);
+  }
+  return PyObject_GenericGetAttr(obj, name);
+}
+
+/*!
+ * \brief Notify CPython that a type object has been modified.
+ * Wraps PyType_Modified without requiring the full PyTypeObject definition.
+ */
+TVM_FFI_INLINE void TVMFFIPyTypeModified(void* type_ptr) noexcept {
+  PyType_Modified(reinterpret_cast<PyTypeObject*>(type_ptr));
+}
 
 /*!
  * \brief Thread-local call stack used by TVMFFIPyCallContext.

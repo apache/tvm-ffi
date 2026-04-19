@@ -208,9 +208,9 @@ def field(
         Mutually exclusive with *default*.
     frozen
         Whether this field is read-only after ``__init__``.  When True,
-        the Python property descriptor has no setter; use the
-        ``type(obj).field_name.set(obj, value)`` escape hatch when
-        mutation is necessary.
+        normal attribute assignment is blocked; use
+        ``type(obj)._force_set_field(obj, "field_name", value)``
+        when mutation is necessary.
     init
         Whether this field appears in the auto-generated ``__init__``.
     repr

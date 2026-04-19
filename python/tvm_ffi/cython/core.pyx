@@ -22,6 +22,7 @@
 # where the base class has to be registered before the derived class.
 # Otherwise, `TypeInfo.parent_type_info` may not be properly propagated to the derived class.
 include "./base.pxi"
+include "./field_access.pxi"
 include "./type_info.pxi"
 include "./object.pxi"
 _register_object_by_index(kTVMFFIObject, Object)

@@ -144,6 +144,7 @@ def c_class(
         installing structural dunders.
 
     """
+    from .. import core  # noqa: PLC0415
     from .._dunder import _install_dataclass_dunders  # noqa: PLC0415
     from ..registry import (  # noqa: PLC0415
         _warn_missing_field_annotations,
@@ -165,6 +166,9 @@ def c_class(
             unsafe_hash=unsafe_hash,
             match_args=match_args,
         )
+        if type_info.fields:
+            core._install_field_helpers(cls, type_info)
+            core._install_field_getattro(cls, type_info)
         return cls
 
     return decorator

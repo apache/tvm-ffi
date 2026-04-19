@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import sys
+import types
 import typing
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -160,6 +161,10 @@ def _collect_own_fields(  # noqa: PLR0912
     else:
         own_annotations = cls.__dict__.get("__annotations__", {})
 
+    # Slots-backed classes stash conflicting defaults in
+    # _tvm_ffi_saved_defaults before type.__new__ installs member_descriptors.
+    saved_defaults = cls.__dict__.get("_tvm_ffi_saved_defaults", {})
+
     for name in own_annotations:
         resolved_type = hints.get(name)
         # Skip ClassVar
@@ -180,19 +185,22 @@ def _collect_own_fields(  # noqa: PLR0912
                     pass
             continue
 
-        # Extract Field from class dict (inline of _pop_field_from_class)
-        class_val = cls.__dict__.get(name, MISSING)
+        class_val = saved_defaults.get(name, MISSING)
+        if class_val is MISSING:
+            dict_val = cls.__dict__.get(name, MISSING)
+            if dict_val is not MISSING and not isinstance(dict_val, types.MemberDescriptorType):
+                class_val = dict_val
+                try:
+                    delattr(cls, name)
+                except AttributeError:
+                    pass
+
         if isinstance(class_val, Field):
             f = class_val
         elif class_val is not MISSING:
             f = field(default=class_val)
         else:
             f = field()
-        if class_val is not MISSING:
-            try:
-                delattr(cls, name)
-            except AttributeError:
-                pass
 
         # Fill in name, schema, and resolved type (set by the decorator, not the user)
         f.name = name
@@ -212,6 +220,13 @@ def _collect_own_fields(  # noqa: PLR0912
             f.hash = f.compare
 
         fields.append(f)
+
+    # Clean up temporary stash now that defaults have been consumed
+    if saved_defaults:
+        try:
+            delattr(cls, "_tvm_ffi_saved_defaults")
+        except AttributeError:
+            pass
 
     return fields
 
@@ -308,6 +323,9 @@ def _register_fields_into_type(
         match_args=params["match_args"],
         py_class_mode=True,
     )
+    if type_info.fields:
+        core._install_field_helpers(cls, type_info)
+        core._install_field_getattro(cls, type_info)
     return True
 
 
@@ -496,7 +514,7 @@ def py_class(  # noqa: PLR0913
     frozen
         If True, all fields are read-only after ``__init__`` by default.
         Individual fields can still be marked ``field(frozen=True)`` on a
-        non-frozen class.  Use ``type(obj).field_name.set(obj, value)``
+        non-frozen class.  Use ``type(obj)._force_set_field(obj, "field_name", value)``
         as an escape hatch when mutation is necessary.
     init
         If True (default), generate ``__init__`` from field annotations.
@@ -533,7 +551,8 @@ def py_class(  # noqa: PLR0913
         - ``"singleton"``: pointer equality only, for singleton types.
     slots
         Accepted for ``dataclass_transform`` compatibility.  Object
-        subclasses always use ``__slots__ = ()`` via the metaclass.
+        subclasses derive ``__slots__`` from their annotations via the
+        metaclass unless the class body defines ``__slots__`` explicitly.
 
     Returns
     -------
