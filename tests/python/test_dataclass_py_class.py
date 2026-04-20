@@ -32,7 +32,7 @@ from tvm_ffi import core
 from tvm_ffi._dunder import _install_dataclass_dunders
 from tvm_ffi._ffi_api import DeepCopy, RecursiveEq, RecursiveHash, ReprPrint
 from tvm_ffi.core import MISSING, Object, TypeInfo, TypeSchema, _to_py_class_value
-from tvm_ffi.dataclasses import KW_ONLY, Field, field, py_class
+from tvm_ffi.dataclasses import KW_ONLY, Field, IntEnum, StrEnum, entry, field, py_class
 from tvm_ffi.registry import _add_class_attrs
 from tvm_ffi.testing import TestObjectBase as _TestObjectBase
 from tvm_ffi.testing.testing import requires_py310
@@ -192,6 +192,44 @@ class TestFieldParsing:
 
         obj = BoolFld(x=True)
         assert obj.x is True
+
+    def test_payload_enum_fields_end_to_end(self) -> None:
+        """IntEnum/StrEnum fields on @py_class accept raw payloads and expose enum objects."""
+
+        class Priority(IntEnum, type_key=_unique_key("Priority")):
+            low = entry(value=10)
+            high = entry(value=20)
+
+        class Opcode(StrEnum, type_key=_unique_key("Opcode")):
+            add = entry(value="+")
+            mul = entry(value="*")
+
+        @py_class(_unique_key("EnumFields"))
+        class Instruction(Object):
+            priority: Priority
+            opcode: Opcode
+
+        from_payload = Instruction(priority=20, opcode="*")  # ty: ignore[invalid-argument-type]
+        assert isinstance(from_payload.priority, Priority)
+        assert isinstance(from_payload.opcode, Opcode)
+        assert from_payload.priority.same_as(Priority.high)
+        assert from_payload.opcode.same_as(Opcode.mul)
+        assert from_payload.priority.value == 20
+        assert from_payload.opcode.value == "*"
+
+        from_enum = Instruction(priority=Priority.low, opcode=Opcode.add)
+        assert from_enum.priority.same_as(Priority.low)
+        assert from_enum.opcode.same_as(Opcode.add)
+
+        from_enum.priority = 20  # ty: ignore[invalid-assignment]
+        from_enum.opcode = "*"  # ty: ignore[invalid-assignment]
+        assert from_enum.priority.same_as(Priority.high)
+        assert from_enum.opcode.same_as(Opcode.mul)
+
+        with pytest.raises((TypeError, RuntimeError), match="expected"):
+            from_enum.priority = 99  # ty: ignore[invalid-assignment]
+        with pytest.raises((TypeError, RuntimeError), match="expected"):
+            from_enum.opcode = "/"  # ty: ignore[invalid-assignment]
 
     @requires_py310
     def test_optional_field(self) -> None:

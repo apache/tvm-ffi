@@ -881,7 +881,7 @@ class ReprPrinter : public ObjectGraphDFS<ReprPrinter, ReprFrame, std::string> {
       *out = result;
       return true;
     }
-    // Default repr for EnumObj subclasses: ``<type_key>.<name>``.  Reached only
+    // Default repr for EnumObj subclasses: ``<type_key>.<_name>``.  Reached only
     // when no user-registered ``__ffi_repr__`` hook has claimed this type, so
     // explicit repr overrides on specific enum subclasses still take precedence.
     if (obj->IsInstance<EnumObj>()) {
@@ -889,7 +889,7 @@ class ReprPrinter : public ObjectGraphDFS<ReprPrinter, ReprFrame, std::string> {
       const TVMFFITypeInfo* type_info = TVMFFIGetTypeInfo(ti);
       std::string result(type_info->type_key.data, type_info->type_key.size);
       result += '.';
-      result.append(enum_obj->name.data(), enum_obj->name.size());
+      result.append(enum_obj->_name.data(), enum_obj->_name.size());
       if (show_addr_) result += "@" + AddressStr(obj);
       state_[obj] = State::kDone;
       repr_cache_[obj] = result;

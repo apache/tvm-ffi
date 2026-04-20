@@ -55,8 +55,11 @@ from .py_class import py_class
 __all__ = [
     "ENUM_ATTRS_ATTR",
     "ENUM_ENTRIES_ATTR",
+    "ENUM_VALUE_ENTRIES_ATTR",
     "Enum",
     "EnumAttrMap",
+    "IntEnum",
+    "StrEnum",
     "auto",
     "entry",
 ]
@@ -66,6 +69,13 @@ ENUM_ENTRIES_ATTR = "__ffi_enum_entries__"
 
 #: TypeAttr column storing ``Dict[str, List[Any]]`` of per-variant attrs.
 ENUM_ATTRS_ATTR = "__ffi_enum_attrs__"
+
+#: TypeAttr column storing ``Dict[Any, Enum]`` (payload → singleton) —
+#: parallel to :data:`ENUM_ENTRIES_ATTR` but keyed by the user-visible
+#: payload (``IntEnum.value`` / ``StrEnum.value``).  Populated by every
+#: creator of a payload-carrying variant; consumed by FFI converters for
+#: O(1) payload → variant resolution.
+ENUM_VALUE_ENTRIES_ATTR = "__ffi_enum_value_entries__"
 
 
 # ---------------------------------------------------------------------------
@@ -77,7 +87,7 @@ class _EnumEntry:
     """Sentinel produced by :func:`entry`; consumed by ``Enum.__init_subclass__``.
 
     Holds the positional and keyword arguments forwarded to the subclass's
-    ``__init__`` when the variant is materialized.  ``value`` and ``name``
+    ``__init__`` when the variant is materialized.  ``_value`` and ``_name``
     are auto-assigned (dense ordinal and class-body name) and must not
     appear in the captured arguments.
     """
@@ -102,7 +112,7 @@ def entry(*args: Any, **kwargs: Any) -> Any:
     for these sentinels and, for each one, constructs a singleton variant
     by forwarding the captured positional and keyword arguments to the
     subclass's ``__init__``, together with an auto-assigned
-    :attr:`~Enum.value` (dense ordinal) and :attr:`~Enum.name`
+    :attr:`~Enum._value` (dense ordinal) and :attr:`~Enum._name`
     (class-body name).
 
     Prefer :func:`auto` when a variant has no declared fields beyond the
@@ -113,7 +123,7 @@ def entry(*args: Any, **kwargs: Any) -> Any:
     ``refl::ObjectDef``), only keyword arguments are supported — field
     values are assigned via reflected setters keyed by name.  Passing
     positional arguments in that case raises :class:`TypeError`.
-    ``entry(value=...)`` and ``entry(name=...)`` always raise
+    ``entry(_value=...)`` and ``entry(_name=...)`` always raise
     :class:`TypeError` because those fields are auto-assigned.
 
     Examples
@@ -149,7 +159,7 @@ def auto() -> Any:
     Semantically equivalent to :func:`entry` called with no arguments but
     reads more clearly for the common case where a variant differs from
     its siblings only by name and ordinal.  The resulting singleton has
-    only the auto-assigned :attr:`~Enum.value` and :attr:`~Enum.name`.
+    only the auto-assigned :attr:`~Enum._value` and :attr:`~Enum._name`.
 
     ``auto()`` registers a *new* Python-side variant; it is not the right
     tool for binding to a pre-existing C++-registered entry (use a bare
@@ -165,8 +175,8 @@ def auto() -> Any:
             retry = auto()
 
 
-        assert Status.ok.value == 0
-        assert Status.err.name == "err"
+        assert Status.ok._value == 0
+        assert Status.err._name == "err"
 
     Returns
     -------
@@ -187,9 +197,8 @@ def auto() -> Any:
 class _ClassProperty:
     """Read-only descriptor whose getter receives the owning class.
 
-    Used for ``by_name``/``by_value``/``attr_dict`` so they work as class-level
-    attribute access (e.g., ``Op.attr_dict["has_side_effects"]``) without
-    needing a metaclass.
+    Used for ``attr_dict`` so it works as a class-level attribute access
+    (e.g., ``Op.attr_dict["has_side_effects"]``) without needing a metaclass.
     """
 
     __slots__ = ("_fget",)
@@ -216,10 +225,10 @@ class _EnumMeta(type(Object)):
     """
 
     def __iter__(cls) -> Iterator[Any]:
-        return iter(cls.by_value)  # ty: ignore[unresolved-attribute]
+        return iter(_ordered_entries(cls))  # ty: ignore[unresolved-attribute]
 
     def __len__(cls) -> int:
-        return len(cls.by_value)  # ty: ignore[unresolved-attribute]
+        return len(_ordered_entries(cls))  # ty: ignore[unresolved-attribute]
 
 
 @dataclass_transform(
@@ -246,9 +255,9 @@ class Enum(Object, metaclass=_EnumMeta):
 
     Attributes
     ----------
-    value : int
+    _value : int
         Dense ordinal assigned at registration (0-indexed per class).
-    name : str
+    _name : str
         The variant's string name key (e.g., ``"Add"`` for ``Op.Add``).
 
     Closed Python enum
@@ -302,36 +311,38 @@ class Enum(Object, metaclass=_EnumMeta):
     4. ``name: ClassVar[Cls]`` — in cross-language mode, binds to an
        existing C++-registered variant (error if unknown); otherwise
        registers a new Python variant with only the auto-assigned
-       :attr:`value` and :attr:`name` (equivalent to ``name = auto()``).
+       :attr:`_value` and :attr:`_name` (equivalent to ``name = auto()``).
 
-    Integer literals (``ok = 0``) are rejected: :attr:`value` is
+    Integer literals (``ok = 0``) are rejected: :attr:`_value` is
     auto-assigned, so a user-supplied ordinal would either silently
-    duplicate or conflict.  ``entry(value=...)`` and ``entry(name=...)``
+    duplicate or conflict.  ``entry(_value=...)`` and ``entry(_name=...)``
     raise :class:`TypeError` at class-body time.
 
     Differences from ``enum.Enum``
     ------------------------------
-    * **Same**: :attr:`name`, :attr:`value`, iteration, identity
+    * **Same**: hidden identity fields :attr:`_name`, :attr:`_value`,
+      iteration, identity
       comparison; closed-set behavior when ``type_key`` is fresh.
     * **Extended**: ``entry(**kwargs)`` replaces the tuple-RHS idiom;
       ``dataclass_transform`` gives native type-checker support; open
       registry when ``type_key`` is shared across languages.
-    * **Different**: :attr:`value` is always the ordinal (no
-      user-supplied integer values); :meth:`def_attr` adds extensible
-      attributes outside the class schema.
+    * **Different**: :attr:`_value` is always the ordinal; :meth:`def_attr`
+      adds extensible attributes outside the class schema.  Use
+      :class:`IntEnum` / :class:`StrEnum` when you need a user-visible
+      ``value`` field.
     * **Not provided**: ``Flag`` / ``IntFlag``, member aliasing,
       ``_missing_`` hook.
 
-    Subclasses inherit :meth:`get`, :meth:`entries`, :meth:`def_attr`,
-    and the ``by_name`` / ``by_value`` / ``attr_dict`` class-level
-    views.
+    Subclasses inherit :meth:`get`, :meth:`all_entries`, :meth:`def_attr`,
+    and the ``attr_dict`` class-level view.
 
     """
 
     __slots__ = ()
 
-    value: int
-    name: str
+    _value: int
+    _name: str
+    __ffi_enum_payload_value_type__: object = None
 
     def __init_subclass__(
         cls,
@@ -365,25 +376,9 @@ class Enum(Object, metaclass=_EnumMeta):
         raise KeyError(f"{cls.__name__} has no variant named {name!r}")
 
     @classmethod
-    def entries(cls) -> Iterator[Enum]:
-        """Iterate over all variants, in ordinal (value) order."""
-        return iter(cls.by_value)
-
-    @_ClassProperty
-    def by_name(cls: type) -> Any:
-        """Live ``Dict[str, Enum]`` mapping each variant's name to the variant singleton."""
-        return _entries_dict(cls) or Dict({})
-
-    @_ClassProperty
-    def by_value(cls: type) -> list[Any]:
-        """Return the variants as a list indexed by ordinal (``variant.value``)."""
-        entries = _entries_dict(cls)
-        if entries is None:
-            return []
-        ordered: list[Any] = [None] * len(entries)
-        for inst in entries.values():
-            ordered[int(inst.value)] = inst
-        return ordered
+    def all_entries(cls) -> Iterator[Enum]:
+        """Iterate over all variants, in ordinal (``_value``) order."""
+        return iter(_ordered_entries(cls))
 
     @_ClassProperty
     def attr_dict(cls: type) -> Any:
@@ -474,7 +469,7 @@ class EnumAttrMap:
     Returned by :meth:`Enum.def_attr`.  Writes go to a ``List[Any]``
     column keyed by extensible-attribute name inside the per-class
     ``__ffi_enum_attrs__`` dict.  The list is indexed by each variant's
-    ordinal (``variant.value``) and padded with ``None`` as new variants
+    ordinal (``variant._value``) and padded with ``None`` as new variants
     are registered.  The column is shared across every consumer —
     including C++ code writing via ``EnumDef::set_attr`` — and the data
     is not a field on the variant object.  See :meth:`Enum.def_attr` for
@@ -502,7 +497,7 @@ class EnumAttrMap:
                 f"{self._enum_cls.__name__}.def_attr({self._name!r}) expects a "
                 f"{self._enum_cls.__name__} variant, got {type(variant).__name__}"
             )
-        return int(variant.value)  # type: ignore[attr-defined]
+        return int(variant._value)  # type: ignore[attr-defined]
 
     def _column(self, *, create: bool) -> Any | None:
         """Return the ``List[Any]`` column for this attribute; create if missing.
@@ -543,7 +538,7 @@ class EnumAttrMap:
                 return v
         if self._default is core.MISSING:
             raise KeyError(
-                f"{self._enum_cls.__name__}.{variant.name} has no "  # type: ignore[attr-defined]
+                f"{self._enum_cls.__name__}.{variant._name} has no "  # type: ignore[attr-defined]
                 f"extensible attribute {self._name!r} set"
             )
         return self._default
@@ -573,6 +568,56 @@ class EnumAttrMap:
         return self._name
 
 
+class IntEnum(Enum):
+    """Enum variant base with a user-visible ``value: int`` field."""
+
+    __slots__ = ()
+    value: int
+
+    def __init_subclass__(
+        cls,
+        *,
+        type_key: str | None = None,
+        frozen: bool = True,
+        init: bool = True,
+        repr: bool = True,
+        **kwargs: Any,
+    ) -> None:
+        _prepare_payload_enum_subclass(cls, value_type=int, base_name="IntEnum")
+        super().__init_subclass__(
+            type_key=type_key,
+            frozen=frozen,
+            init=init,
+            repr=repr,
+            **kwargs,
+        )
+
+
+class StrEnum(Enum):
+    """Enum variant base with a user-visible ``value: str`` field."""
+
+    __slots__ = ()
+    value: str
+
+    def __init_subclass__(
+        cls,
+        *,
+        type_key: str | None = None,
+        frozen: bool = True,
+        init: bool = True,
+        repr: bool = True,
+        **kwargs: Any,
+    ) -> None:
+        _prepare_payload_enum_subclass(cls, value_type=str, base_name="StrEnum")
+        super().__init_subclass__(
+            type_key=type_key,
+            frozen=frozen,
+            init=init,
+            repr=repr,
+            **kwargs,
+        )
+
+
 # ---------------------------------------------------------------------------
 # TypeAttr accessors
 # ---------------------------------------------------------------------------
@@ -590,6 +635,25 @@ def _attrs_dict(cls: type) -> Any:
     if type_info is None:
         return None
     return core._lookup_type_attr(type_info.type_index, ENUM_ATTRS_ATTR)
+
+
+def _value_entries_dict(cls: type) -> Any:
+    """Return the live ``Dict[Any, Enum]`` payload-to-variant index, or None."""
+    type_info = getattr(cls, "__tvm_ffi_type_info__", None)
+    if type_info is None:
+        return None
+    return core._lookup_type_attr(type_info.type_index, ENUM_VALUE_ENTRIES_ATTR)
+
+
+def _ordered_entries(cls: type) -> list[Any]:
+    """Return all variants ordered by ordinal."""
+    entries = _entries_dict(cls)
+    if entries is None:
+        return []
+    ordered: list[Any] = [None] * len(entries)
+    for inst in entries.values():
+        ordered[int(inst._value)] = inst
+    return ordered
 
 
 def _ensure_entries_dict(cls: type) -> Any:
@@ -613,6 +677,17 @@ def _ensure_attrs_dict(cls: type) -> Any:
     attrs = Dict({})
     core._register_type_attr(type_info.type_index, ENUM_ATTRS_ATTR, attrs)
     return core._lookup_type_attr(type_info.type_index, ENUM_ATTRS_ATTR)
+
+
+def _ensure_value_entries_dict(cls: type) -> Any:
+    """Return the live ``__ffi_enum_value_entries__`` dict, registering it if absent."""
+    type_info = cls.__tvm_ffi_type_info__  # ty: ignore[unresolved-attribute]
+    entries = core._lookup_type_attr(type_info.type_index, ENUM_VALUE_ENTRIES_ATTR)
+    if entries is not None:
+        return entries
+    entries = Dict({})
+    core._register_type_attr(type_info.type_index, ENUM_VALUE_ENTRIES_ATTR, entries)
+    return core._lookup_type_attr(type_info.type_index, ENUM_VALUE_ENTRIES_ATTR)
 
 
 # ---------------------------------------------------------------------------
@@ -642,11 +717,16 @@ def _collect_entry_declarations(
     dict_keys = set(cls.__dict__.keys())
 
     binders: list[str] = []
+    ordinary_fields: set[str] = set()
+    payload_value_type = getattr(cls, "__ffi_enum_payload_value_type__", None)
     for name, ann in annotations.items():
         if name.startswith("_"):
             continue
-        if _is_class_var(ann) and name not in dict_keys:
-            binders.append(name)
+        if _is_class_var(ann):
+            if name not in dict_keys:
+                binders.append(name)
+        else:
+            ordinary_fields.add(name)
 
     python_entries: dict[str, _EnumEntry] = {}
     for name, value in list(cls.__dict__.items()):
@@ -654,6 +734,14 @@ def _collect_entry_declarations(
             continue
         if isinstance(value, _EnumEntry):
             python_entries[name] = value
+            try:
+                delattr(cls, name)
+            except AttributeError:
+                pass
+        elif payload_value_type is not None and name not in ordinary_fields:
+            if isinstance(value, (staticmethod, classmethod, property)) or callable(value):
+                continue
+            python_entries[name] = _EnumEntry(value=value)
             try:
                 delattr(cls, name)
             except AttributeError:
@@ -685,11 +773,14 @@ def _resolve_entries(
     fresh Python-side entries whose ordinals extend past the C++ entries.
     """
     entries = _ensure_entries_dict(cls)
+    payload_value_type = getattr(cls, "__ffi_enum_payload_value_type__", None)
 
     for name in binders:
         if name in entries:
             # Already materialised — either C++-registered or previously bound.
-            setattr(cls, name, entries[name])
+            instance = entries[name]
+            setattr(cls, name, instance)
+            _index_payload(cls, instance, payload_value_type)
             continue
         if cxx_backed:
             raise _cxx_backed_unknown_binder_error(cls, name, type_key, entries)
@@ -697,27 +788,43 @@ def _resolve_entries(
         instance = _instantiate(cls, args=(), kwargs={}, ordinal=ordinal, name=name)
         entries[name] = instance
         setattr(cls, name, instance)
+        _index_payload(cls, instance, payload_value_type)
 
     for name, e in python_entries.items():
         if name in entries:
             raise RuntimeError(
                 f"Duplicate enum entry {name!r} for {cls.__name__}: already "
-                f"registered as ordinal {int(entries[name].value)}."
+                f"registered as ordinal {int(entries[name]._value)}."
             )
-        if "value" in e.kwargs or "name" in e.kwargs:
+        if "_value" in e.kwargs or "_name" in e.kwargs:
             raise TypeError(
-                f"{cls.__name__}.{name}: `value` and `name` are auto-assigned "
+                f"{cls.__name__}.{name}: `_value` and `_name` are auto-assigned "
                 f"and must not appear in entry(...) arguments."
             )
         ordinal = len(entries)
-        if cxx_backed:
-            instance = _instantiate_cxx_backed(
-                cls, args=e.args, kwargs=e.kwargs, ordinal=ordinal, name=name
-            )
-        else:
-            instance = _instantiate(cls, args=e.args, kwargs=e.kwargs, ordinal=ordinal, name=name)
+        instance = _instantiate_entry(
+            cls, entry=e, ordinal=ordinal, name=name, cxx_backed=cxx_backed
+        )
         entries[name] = instance
         setattr(cls, name, instance)
+        _index_payload(cls, instance, payload_value_type)
+
+
+def _index_payload(cls: type, instance: Any, payload_value_type: type | None) -> None:
+    """Record ``(instance.value → instance)`` in the value-entries column.
+
+    No-op for non-payload enums.  For payload enums, the first writer of a
+    given payload wins — matches the "first-match" semantics of the linear
+    scan that FFI converters fall back to when this column is incomplete.
+    """
+    if payload_value_type is None:
+        return
+    payload = getattr(instance, "value", None)
+    if payload is None:
+        return
+    value_entries = _ensure_value_entries_dict(cls)
+    if payload not in value_entries:
+        value_entries[payload] = instance
 
 
 def _cxx_backed_unknown_binder_error(
@@ -758,11 +865,30 @@ def _instantiate(
     ordinal: int,
     name: str,
 ) -> Any:
-    """Construct a subclass instance with auto-assigned ``value``/``name``."""
+    """Construct a subclass instance with auto-assigned ``_value``/``_name``."""
     merged = dict(kwargs)
-    merged["value"] = ordinal
-    merged["name"] = name
+    merged["_value"] = ordinal
+    merged["_name"] = name
     return cls(*args, **merged)
+
+
+def _instantiate_entry(
+    cls: type,
+    *,
+    entry: _EnumEntry,
+    ordinal: int,
+    name: str,
+    cxx_backed: bool,
+) -> Any:
+    """Instantiate an enum entry and normalize construction errors."""
+    try:
+        if cxx_backed:
+            return _instantiate_cxx_backed(
+                cls, args=entry.args, kwargs=entry.kwargs, ordinal=ordinal, name=name
+            )
+        return _instantiate(cls, args=entry.args, kwargs=entry.kwargs, ordinal=ordinal, name=name)
+    except Exception as err:
+        raise TypeError(f"{cls.__name__}.{name}: invalid enum entry: {err}") from None
 
 
 def _instantiate_cxx_backed(
@@ -777,7 +903,7 @@ def _instantiate_cxx_backed(
 
     C++-backed enums whose underlying type is registered with
     ``refl::init(false)`` (e.g. any subclass of ``EnumObj`` in C++) have no
-    ``__ffi_init__``, so the usual ``cls(value=..., name=...)`` path is not
+    ``__ffi_init__``, so the usual ``cls(_value=..., _name=...)`` path is not
     available.  Mirror ``reflection::EnumDef`` by allocating a blank instance
     via ``__ffi_new__`` and populating fields through the frozen-setter
     escape hatch exposed on the reflected property descriptors.
@@ -797,15 +923,15 @@ def _instantiate_cxx_backed(
             f"blank instances cannot be created from Python."
         )
     instance = ffi_new()
-    for key in ("value", "name", *kwargs.keys()):
+    for key in ("_value", "_name", *kwargs.keys()):
         descriptor = getattr(cls, key, None)
         if descriptor is None or not hasattr(descriptor, "set"):
             raise TypeError(
                 f"{cls.__name__}.{name}: cannot set field {key!r} on a "
                 f"C++-backed enum — no reflected setter is available."
             )
-    getattr(cls, "value").set(instance, ordinal)
-    getattr(cls, "name").set(instance, name)
+    getattr(cls, "_value").set(instance, ordinal)
+    getattr(cls, "_name").set(instance, name)
     for k, v in kwargs.items():
         getattr(cls, k).set(instance, v)
     return instance
@@ -833,3 +959,43 @@ def _is_class_var(annotation: Any) -> bool:
         stripped = annotation.replace(" ", "")
         return stripped.startswith("ClassVar") or stripped.startswith("typing.ClassVar")
     return False
+
+
+def _annotation_matches_expected(annotation: Any, expected_type: type) -> bool:
+    """Return True if *annotation* matches the required payload-field type."""
+    if annotation is expected_type:
+        return True
+    if isinstance(annotation, str):
+        stripped = annotation.replace(" ", "")
+        expected = expected_type.__name__
+        return stripped in {expected, f"builtins.{expected}"}
+    return False
+
+
+def _prepare_payload_enum_subclass(
+    cls: type[Enum], *, value_type: type[Any], base_name: str
+) -> None:
+    """Inject and validate the user-visible ``value`` field for payload enums."""
+    if "value" in cls.__dict__:
+        raise TypeError(
+            f"{base_name} reserves `value` as a declared field; use "
+            "`entry(value=...)` or `<variant> = <payload>` to assign each "
+            "variant's payload."
+        )
+
+    annotations = _own_annotations(cls)
+    existing = annotations.get("value")
+    if existing is not None:
+        if _is_class_var(existing):
+            raise TypeError(f"{base_name} reserves `value` as a declared field, not a ClassVar.")
+        if not _annotation_matches_expected(existing, value_type):
+            raise TypeError(
+                f"{base_name} requires `value: {value_type.__name__}` on subclasses, "
+                f"got {existing!r}."
+            )
+        return
+
+    updated = _own_annotations(cls)
+    updated["value"] = value_type
+    cls.__annotations__ = updated
+    cls.__ffi_enum_payload_value_type__ = value_type

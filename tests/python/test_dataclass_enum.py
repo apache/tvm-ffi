@@ -25,10 +25,11 @@ import pytest
 import tvm_ffi
 from tvm_ffi import core
 from tvm_ffi.core import Object
-from tvm_ffi.dataclasses import Enum, EnumAttrMap, auto, entry
+from tvm_ffi.dataclasses import Enum, EnumAttrMap, IntEnum, StrEnum, auto, entry
 from tvm_ffi.dataclasses.enum import (
     ENUM_ATTRS_ATTR,
     ENUM_ENTRIES_ATTR,
+    ENUM_VALUE_ENTRIES_ATTR,
     _EnumEntry,
 )
 
@@ -66,33 +67,33 @@ def test_attribute_carrying_basic() -> None:
     assert Activation.silu.is_monotonic is True  # ty: ignore[unresolved-attribute]
 
     # Ordinals auto-assigned in declaration order.
-    assert Activation.relu.value == 0
-    assert Activation.gelu.value == 1
-    assert Activation.silu.value == 2
-    assert Activation.relu.name == "relu"
-    assert Activation.gelu.name == "gelu"
+    assert Activation.relu._value == 0
+    assert Activation.gelu._value == 1
+    assert Activation.silu._value == 2
+    assert Activation.relu._name == "relu"
+    assert Activation.gelu._name == "gelu"
 
     assert Activation.get("relu").same_as(Activation.relu)
     assert Activation.get("gelu").same_as(Activation.gelu)
     assert Activation.get("silu").same_as(Activation.silu)
 
 
-def test_entry_rejects_value_kwarg() -> None:
-    """``entry(value=...)`` conflicts with the auto-assigned ordinal."""
+def test_entry_rejects__value_kwarg() -> None:
+    """``entry(_value=...)`` conflicts with the auto-assigned ordinal."""
     with pytest.raises(TypeError):
 
         class _Bad(Enum, type_key=_unique_key("BadValue")):
             flag: bool
-            a: ClassVar[_Bad] = entry(flag=True, value=5)
+            a: ClassVar[_Bad] = entry(flag=True, _value=5)
 
 
-def test_entry_rejects_name_kwarg() -> None:
-    """``entry(name=...)`` conflicts with the auto-assigned declaration key."""
+def test_entry_rejects__name_kwarg() -> None:
+    """``entry(_name=...)`` conflicts with the auto-assigned declaration key."""
     with pytest.raises(TypeError):
 
         class _Bad(Enum, type_key=_unique_key("BadName")):
             flag: bool
-            a: ClassVar[_Bad] = entry(flag=True, name="other")
+            a: ClassVar[_Bad] = entry(flag=True, _name="other")
 
 
 def test_get_missing_raises() -> None:
@@ -104,14 +105,167 @@ def test_get_missing_raises() -> None:
         Missing.get("no-such-entry")
 
 
-def test_entries_iteration_order() -> None:
+def test_public_value_and_name_are_hidden() -> None:
+    class Hidden(Enum, type_key=_unique_key("Hidden")):
+        yes = auto()
+
+    assert Hidden.yes._value == 0
+    assert Hidden.yes._name == "yes"
+    with pytest.raises(AttributeError):
+        _ = Hidden.yes.value
+    with pytest.raises(AttributeError):
+        _ = Hidden.yes.name
+
+
+def test_int_enum_payload_value() -> None:
+    class Colors(IntEnum, type_key=_unique_key("IntEnum")):
+        red = entry(value=10)
+        blue = entry(value=20)
+
+    assert Colors.red.value == 10
+    assert Colors.blue.value == 20
+    assert Colors.red._value == 0
+    assert Colors.blue._value == 1
+    assert Colors.red._name == "red"
+    assert Colors.get("red").same_as(Colors.red)
+    assert list(Colors.all_entries()) == [Colors.red, Colors.blue]
+
+
+def test_int_enum_payload_literal_sugar() -> None:
+    class Priority(IntEnum, type_key=_unique_key("IntEnumLiteral")):
+        low = 10
+        high = 20
+
+    assert isinstance(Priority.low, Priority)
+    assert isinstance(Priority.high, Priority)
+    assert not isinstance(Priority.low, int)
+    assert Priority.low.value == 10
+    assert Priority.high.value == 20
+    assert Priority.low._name == "low"
+    assert Priority.high._name == "high"
+    assert list(Priority.all_entries()) == [Priority.low, Priority.high]
+
+
+def test_str_enum_payload_value() -> None:
+    class Tokens(StrEnum, type_key=_unique_key("StrEnum")):
+        add = entry(value="+")
+        mul = entry(value="*")
+
+    assert Tokens.add.value == "+"
+    assert Tokens.mul.value == "*"
+    assert Tokens.add._value == 0
+    assert Tokens.mul._value == 1
+    assert Tokens.add._name == "add"
+    assert Tokens.get("mul").same_as(Tokens.mul)
+
+
+def test_str_enum_payload_literal_sugar() -> None:
+    class Opcode(StrEnum, type_key=_unique_key("StrEnumLiteral")):
+        add = "+"
+        mul = "*"
+
+    assert isinstance(Opcode.add, Opcode)
+    assert isinstance(Opcode.mul, Opcode)
+    assert not isinstance(Opcode.add, str)
+    assert Opcode.add.value == "+"
+    assert Opcode.mul.value == "*"
+    assert Opcode.add._name == "add"
+    assert Opcode.mul._name == "mul"
+    assert list(Opcode.all_entries()) == [Opcode.add, Opcode.mul]
+
+
+def test_payload_literal_sugar_preserves_annotated_field_defaults() -> None:
+    class Opcode(StrEnum, type_key=_unique_key("StrEnumLiteralDefault")):
+        arity: int = 0
+        add = "+"
+        mul = "*"
+
+    assert isinstance(Opcode.add, Opcode)
+    assert isinstance(Opcode.mul, Opcode)
+    assert Opcode.add.arity == 0  # ty: ignore[unresolved-attribute]
+    assert Opcode.mul.arity == 0  # ty: ignore[unresolved-attribute]
+    assert Opcode.add.value == "+"
+    assert Opcode.mul.value == "*"
+
+
+def test_int_enum_payload_literal_sugar_rejects_invalid_payload() -> None:
+    with pytest.raises(TypeError):
+
+        class _Bad(IntEnum, type_key=_unique_key("IntEnumLiteralBad")):
+            nope = "x"
+
+
+def test_str_enum_payload_literal_sugar_rejects_invalid_payload() -> None:
+    with pytest.raises(TypeError):
+
+        class _Bad(StrEnum, type_key=_unique_key("StrEnumLiteralBad")):
+            nope = 42
+
+
+def test_int_enum_populates_value_entries_typeattr() -> None:
+    class Priority(IntEnum, type_key=_unique_key("IntEnumValueEntries")):
+        low = entry(value=10)
+        high = 20  # literal sugar
+
+    type_info = Priority.__tvm_ffi_type_info__  # ty: ignore[unresolved-attribute]
+    value_entries = core._lookup_type_attr(type_info.type_index, ENUM_VALUE_ENTRIES_ATTR)
+    assert value_entries is not None
+    assert value_entries[10].same_as(Priority.low)
+    assert value_entries[20].same_as(Priority.high)
+
+
+def test_str_enum_populates_value_entries_typeattr() -> None:
+    class Opcode(StrEnum, type_key=_unique_key("StrEnumValueEntries")):
+        add = entry(value="+")
+        mul = "*"  # literal sugar
+
+    type_info = Opcode.__tvm_ffi_type_info__  # ty: ignore[unresolved-attribute]
+    value_entries = core._lookup_type_attr(type_info.type_index, ENUM_VALUE_ENTRIES_ATTR)
+    assert value_entries is not None
+    assert value_entries["+"].same_as(Opcode.add)
+    assert value_entries["*"].same_as(Opcode.mul)
+
+
+def test_plain_enum_does_not_create_value_entries_typeattr() -> None:
+    class Status(Enum, type_key=_unique_key("PlainEnumNoValue")):
+        ok: ClassVar[Status] = auto()
+
+    type_info = Status.__tvm_ffi_type_info__  # ty: ignore[unresolved-attribute]
+    value_entries = core._lookup_type_attr(type_info.type_index, ENUM_VALUE_ENTRIES_ATTR)
+    assert value_entries is None
+
+
+def test_payload_literal_sugar_preserves_methods_and_properties() -> None:
+    class Priority(IntEnum, type_key=_unique_key("IntEnumWithMethods")):
+        low = 1
+        high = 10
+
+        def is_high(self) -> bool:
+            return self.value >= 5
+
+        @classmethod
+        def default(cls) -> Priority:
+            return cls.low  # ty: ignore[invalid-return-type]
+
+        @property
+        def doubled(self) -> int:
+            return self.value * 2
+
+    assert Priority.low.is_high() is False  # ty: ignore[possibly-missing-attribute]
+    assert Priority.high.is_high() is True  # ty: ignore[possibly-missing-attribute]
+    assert Priority.default().same_as(Priority.low)
+    assert Priority.high.doubled == 20  # ty: ignore[possibly-missing-attribute]
+    assert list(Priority.all_entries()) == [Priority.low, Priority.high]
+
+
+def test_all_entries_iteration_order() -> None:
     class Ordered(Enum, type_key=_unique_key("Ordered")):
         tag: str
         a: ClassVar[Ordered] = entry(tag="first")
         b: ClassVar[Ordered] = entry(tag="second")
         c: ClassVar[Ordered] = entry(tag="third")
 
-    values = list(Ordered.entries())
+    values = list(Ordered.all_entries())
     assert len(values) == 3
     assert values[0].same_as(Ordered.a)
     assert values[1].same_as(Ordered.b)
@@ -153,12 +307,12 @@ def test_bare_classvar_without_cxx_entries() -> None:
         retry: ClassVar[Status]
 
     assert isinstance(Status.ok, Status)
-    assert Status.ok.value == 0
-    assert Status.err.value == 1
-    assert Status.retry.value == 2
-    assert Status.ok.name == "ok"
-    assert Status.err.name == "err"
-    assert list(Status.entries()) == [Status.ok, Status.err, Status.retry]
+    assert Status.ok._value == 0
+    assert Status.err._value == 1
+    assert Status.retry._value == 2
+    assert Status.ok._name == "ok"
+    assert Status.err._name == "err"
+    assert list(Status.all_entries()) == [Status.ok, Status.err, Status.retry]
     assert Status.get("ok").same_as(Status.ok)
 
 
@@ -171,10 +325,10 @@ def test_bare_classvar_mixed_with_entry() -> None:
         named: ClassVar[Kind] = entry(tag="hi")
 
     # ``ClassVar`` binders are processed before ``entry(...)`` assignments.
-    assert Kind.blank.value == 0
-    assert Kind.named.value == 1
-    assert Kind.blank.name == "blank"
-    assert Kind.named.name == "named"
+    assert Kind.blank._value == 0
+    assert Kind.named._value == 1
+    assert Kind.blank._name == "blank"
+    assert Kind.named._name == "named"
     assert Kind.named.tag == "hi"  # ty: ignore[unresolved-attribute]
 
 
@@ -196,7 +350,7 @@ def test_bare_entry_sugar_form() -> None:
     assert isinstance(Activation.relu, Activation)
     assert Activation.relu.output_zero is True  # ty: ignore[unresolved-attribute]
     assert Activation.gelu.output_zero is False  # ty: ignore[unresolved-attribute]
-    assert list(Activation.entries()) == [Activation.relu, Activation.gelu]
+    assert list(Activation.all_entries()) == [Activation.relu, Activation.gelu]
 
 
 # ---------------------------------------------------------------------------
@@ -213,12 +367,12 @@ def test_auto_basic_no_annotation() -> None:
         high = auto()
 
     assert isinstance(Priority.low, Priority)
-    assert Priority.low.value == 0
-    assert Priority.medium.value == 1
-    assert Priority.high.value == 2
-    assert Priority.low.name == "low"
-    assert Priority.high.name == "high"
-    assert list(Priority.entries()) == [Priority.low, Priority.medium, Priority.high]
+    assert Priority.low._value == 0
+    assert Priority.medium._value == 1
+    assert Priority.high._value == 2
+    assert Priority.low._name == "low"
+    assert Priority.high._name == "high"
+    assert list(Priority.all_entries()) == [Priority.low, Priority.medium, Priority.high]
 
 
 def test_auto_with_classvar_annotation() -> None:
@@ -229,9 +383,9 @@ def test_auto_with_classvar_annotation() -> None:
         run: ClassVar[Stage] = auto()
         done: ClassVar[Stage] = auto()
 
-    assert Stage.init.value == 0
-    assert Stage.run.value == 1
-    assert Stage.done.value == 2
+    assert Stage.init._value == 0
+    assert Stage.run._value == 1
+    assert Stage.done._value == 2
 
 
 def test_auto_mixed_with_bare_classvar() -> None:
@@ -248,10 +402,10 @@ def test_auto_mixed_with_bare_classvar() -> None:
         gamma: ClassVar[Mixed]
 
     # Binders (alpha, gamma) come first in annotation order, then sentinels.
-    assert Mixed.alpha.value == 0
-    assert Mixed.gamma.value == 1
-    assert Mixed.beta.value == 2
-    assert {v.name for v in Mixed.entries()} == {"alpha", "beta", "gamma"}
+    assert Mixed.alpha._value == 0
+    assert Mixed.gamma._value == 1
+    assert Mixed.beta._value == 2
+    assert {v._name for v in Mixed.all_entries()} == {"alpha", "beta", "gamma"}
 
 
 def test_auto_mixed_with_entry() -> None:
@@ -263,9 +417,9 @@ def test_auto_mixed_with_entry() -> None:
         add = entry(arity=2)
         neg = entry(arity=1)
 
-    assert Op.noop.value == 0
-    assert Op.add.value == 1
-    assert Op.neg.value == 2
+    assert Op.noop._value == 0
+    assert Op.add._value == 1
+    assert Op.neg._value == 2
     assert Op.noop.arity == 0  # ty: ignore[unresolved-attribute]
     assert Op.add.arity == 2  # ty: ignore[unresolved-attribute]
 
@@ -295,30 +449,21 @@ def test_auto_returns_fresh_sentinels() -> None:
 
 
 # ---------------------------------------------------------------------------
-# by_name / by_value / attr_dict
+# all_entries / attr_dict
 # ---------------------------------------------------------------------------
 
 
-def test_by_name_is_live_dict() -> None:
-    class K(Enum, type_key=_unique_key("ByName")):
-        a: ClassVar[K]
-        b: ClassVar[K]
-
-    assert set(K.by_name.keys()) == {"a", "b"}
-    assert K.by_name["a"].same_as(K.a)
-
-
-def test_by_value_indexed_by_ordinal() -> None:
-    class K(Enum, type_key=_unique_key("ByValue")):
+def test_all_entries_indexed_by_ordinal() -> None:
+    class K(Enum, type_key=_unique_key("AllEntries")):
         a: ClassVar[K]
         b: ClassVar[K]
         c: ClassVar[K]
 
-    by_val = K.by_value
-    assert len(by_val) == 3
-    assert by_val[0].same_as(K.a)
-    assert by_val[1].same_as(K.b)
-    assert by_val[2].same_as(K.c)
+    entries = list(K.all_entries())
+    assert len(entries) == 3
+    assert entries[0].same_as(K.a)
+    assert entries[1].same_as(K.b)
+    assert entries[2].same_as(K.c)
 
 
 def test_attr_dict_direct_access() -> None:
@@ -335,8 +480,8 @@ def test_attr_dict_direct_access() -> None:
 
     # Direct read via class-level property.
     column = Op.attr_dict["has_side_effects"]
-    assert column[Op.add.value] is False
-    assert column[Op.neg.value] is True
+    assert column[Op.add._value] is False
+    assert column[Op.neg._value] is True
 
 
 # ---------------------------------------------------------------------------
@@ -491,7 +636,7 @@ def test_enum_attrs_typeattr_stored_under_unified_column() -> None:
     stored = core._lookup_type_attr(tinfo.type_index, ENUM_ATTRS_ATTR)
     assert stored is not None
     assert "color" in stored
-    assert stored["color"][WithAttr.one.value] == "red"
+    assert stored["color"][WithAttr.one._value] == "red"
 
 
 # ---------------------------------------------------------------------------
@@ -531,17 +676,17 @@ def test_cxx_backed_classvar_binds_to_existing_entries() -> None:
         Beta: ClassVar[Variant]
 
     assert isinstance(Variant.Alpha, Variant)
-    assert Variant.Alpha.name == "Alpha"
-    assert Variant.Beta.name == "Beta"
+    assert Variant.Alpha._name == "Alpha"
+    assert Variant.Beta._name == "Beta"
     # Ordinals come from C++ (registered in Alpha, Beta declaration order).
-    assert Variant.Alpha.value == 0
-    assert Variant.Beta.value == 1
+    assert Variant.Alpha._value == 0
+    assert Variant.Beta._value == 1
     assert Variant.get("Alpha").same_as(Variant.Alpha)
 
     # C++-stored `code` attr is visible through attr_dict.
     code_col = Variant.attr_dict["code"]
-    assert code_col[Variant.Alpha.value] == 10
-    assert code_col[Variant.Beta.value] == 20
+    assert code_col[Variant.Alpha._value] == 10
+    assert code_col[Variant.Beta._value] == 20
 
 
 def test_cxx_backed_reads_entries_typeattr() -> None:
@@ -594,21 +739,23 @@ def test_cxx_backed_mixed_entries_via_auto() -> None:
         MixedTwo = auto()
 
     # Alpha/Beta come from C++ with ordinals 0 and 1.
-    assert Mixed.Alpha.value == 0
-    assert Mixed.Beta.value == 1
-    assert Mixed.Alpha.name == "Alpha"
-    assert Mixed.Beta.name == "Beta"
+    assert Mixed.Alpha._value == 0
+    assert Mixed.Beta._value == 1
+    assert Mixed.Alpha._name == "Alpha"
+    assert Mixed.Beta._name == "Beta"
 
     # Python-side entries extend the dense ordinal sequence from the C++ count.
-    assert Mixed.MixedOne.name == "MixedOne"
-    assert Mixed.MixedTwo.name == "MixedTwo"
-    assert Mixed.MixedOne.value == Mixed.Beta.value + 1
-    assert Mixed.MixedTwo.value == Mixed.Beta.value + 2
+    assert Mixed.MixedOne._name == "MixedOne"
+    assert Mixed.MixedTwo._name == "MixedTwo"
+    assert Mixed.MixedOne._value == Mixed.Beta._value + 1
+    assert Mixed.MixedTwo._value == Mixed.Beta._value + 2
 
-    # Round-trip through ``get`` / ``by_name`` / ``entries``.
+    # Round-trip through ``get`` / ``all_entries``.
     assert Mixed.get("MixedOne").same_as(Mixed.MixedOne)
     assert Mixed.get("MixedTwo").same_as(Mixed.MixedTwo)
-    assert {"Alpha", "Beta", "MixedOne", "MixedTwo"}.issubset(Mixed.by_name.keys())
+    assert {"Alpha", "Beta", "MixedOne", "MixedTwo"}.issubset(
+        {entry._name for entry in Mixed.all_entries()}
+    )
 
     # Python-side variants are real subclass instances of the cxx-backed type.
     assert isinstance(Mixed.MixedOne, Mixed)
@@ -616,8 +763,8 @@ def test_cxx_backed_mixed_entries_via_auto() -> None:
 
     # Existing C++ attrs remain unaffected; new Python variants have no attrs yet.
     code = Mixed.attr_dict["code"]
-    assert code[Mixed.Alpha.value] == 10
-    assert code[Mixed.Beta.value] == 20
+    assert code[Mixed.Alpha._value] == 10
+    assert code[Mixed.Beta._value] == 20
 
 
 def test_cxx_backed_python_entry_accepts_def_attr() -> None:
@@ -672,12 +819,12 @@ def test_default_repr_in_nested_container() -> None:
         red = auto()
         green = auto()
 
-    by_name_repr = repr(Color.by_name)
-    assert f"{key}.red" in by_name_repr
-    assert f"{key}.green" in by_name_repr
+    all_entries_repr = repr(list(Color.all_entries()))
+    assert f"{key}.red" in all_entries_repr
+    assert f"{key}.green" in all_entries_repr
 
-    by_value_entries = [repr(v) for v in Color.by_value]
-    assert by_value_entries == [f"{key}.red", f"{key}.green"]
+    all_entries = [repr(v) for v in Color.all_entries()]
+    assert all_entries == [f"{key}.red", f"{key}.green"]
 
 
 def test_default_repr_with_attribute_carrying_variant() -> None:

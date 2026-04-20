@@ -650,11 +650,12 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       refl::type_attr::kConvert,
       &refl::details::FFIConvertFromAnyViewToObjectRef<ffi::Dict<ffi::Any, ffi::Any>>);
   refl::ObjectDef<ffi::EnumObj>(refl::init(false))
-      .def_ro("value", &ffi::EnumObj::value, "Ordinal assigned at registration.",
+      .def_ro("_value", &ffi::EnumObj::_value, "Ordinal assigned at registration.",
               refl::AttachFieldFlag::SEqHashIgnore())
-      .def_ro("name", &ffi::EnumObj::name, "Instance name.");
+      .def_ro("_name", &ffi::EnumObj::_name, "Instance name.");
   refl::EnsureTypeAttrColumn(refl::type_attr::kEnumEntries);
   refl::EnsureTypeAttrColumn(refl::type_attr::kEnumAttrs);
+  refl::EnsureTypeAttrColumn(refl::type_attr::kEnumValueEntries);
   refl::GlobalDef()
       .def_method("ffi.GetRegisteredTypeKeys",
                   []() -> ffi::Array<ffi::String> {

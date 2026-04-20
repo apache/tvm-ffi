@@ -45,7 +45,7 @@ class Enum;
  * \brief Base class for FFI-registered enums.
  *
  * Each registered variant is a unique, process-wide singleton with a
- * dense ordinal (``value``) and string ``name``.  Subclasses may add
+ * dense ordinal (``_value``) and string ``_name``.  Subclasses may add
  * *declared fields* — part of the variant's schema, set at registration
  * time via ``reflection::EnumDef``.  Separately, any consumer may
  * attach *extensible attributes* (per-variant metadata stored outside
@@ -57,9 +57,9 @@ class Enum;
 class EnumObj : public Object {
  public:
   /*! \brief Declared field: dense ordinal assigned at registration time (0-indexed per class). */
-  int64_t value;
+  int64_t _value;
   /*! \brief Declared field: instance name (e.g., ``"Add"`` for ``Op.Add``). */
-  String name;
+  String _name;
 
   EnumObj() = default;
   /*!
@@ -67,7 +67,7 @@ class EnumObj : public Object {
    * \param value The dense ordinal (0-indexed per enum class).
    * \param name The instance name key.
    */
-  EnumObj(int64_t value, String name) : value(value), name(std::move(name)) {}
+  EnumObj(int64_t value, String name) : _value(value), _name(std::move(name)) {}
 
   /*!
    * \brief Look up the registered singleton for ``EnumClsObj`` by name.

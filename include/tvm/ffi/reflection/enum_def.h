@@ -49,8 +49,8 @@ namespace reflection {
  * \brief Builder that registers a single enum instance on ``EnumClsObj``.
  *
  * Each ``EnumDef<EnumClsObj>("Name")`` call allocates a fresh dense ordinal
- * (``= len(existing entries)``), constructs a variant with ``value`` and
- * ``name`` populated, and writes it into the per-class registry stored in
+ * (``= len(existing entries)``), constructs a variant with ``_value`` and
+ * ``_name`` populated, and writes it into the per-class registry stored in
  * the ``type_attr::kEnumEntries`` TypeAttr column.  Subsequent
  * ``.set_attr(...)`` calls write *extensible attributes* — per-variant
  * metadata attached outside the variant's declared fields — into the
@@ -83,8 +83,8 @@ class EnumDef : public ReflectionDefBase {
     }
     ordinal_ = static_cast<int64_t>(entries.size());
     ObjectPtr<EnumClsObj> obj = make_object<EnumClsObj>();
-    obj->value = ordinal_;
-    obj->name = name_str;
+    obj->_value = ordinal_;
+    obj->_name = name_str;
     instance_ = Enum(ObjectPtr<EnumObj>(std::move(obj)));
     entries.Set(name_str, instance_);
     // Ensure the attrs dict exists so later ``set_attr`` calls can mutate it.

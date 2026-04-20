@@ -95,6 +95,8 @@ def _register_type_without_fields(cls: type, type_key: str | None) -> Any:
     parent_info: core.TypeInfo | None = None
     for base in cls.__bases__:
         parent_info = core._type_cls_to_type_info(base)
+        if parent_info is None:
+            parent_info = getattr(base, "__tvm_ffi_type_info__", None)
         if parent_info is not None:
             break
     if parent_info is None:
