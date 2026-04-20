@@ -262,7 +262,7 @@ def _build_localns(cls: type, *, cross_module: bool = False) -> dict[str, Any]:
     localns = dict(_PY_CLASS_BY_MODULE.get(cls.__module__, {}))
     localns[cls.__name__] = cls
     if cross_module:
-        for mod_name, mod_classes in _PY_CLASS_BY_MODULE.items():
+        for mod_name, mod_classes in list(_PY_CLASS_BY_MODULE.items()):
             if mod_name == cls.__module__:
                 continue
             for name, klass in mod_classes.items():

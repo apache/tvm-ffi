@@ -778,7 +778,7 @@ class TestForwardReferences:
             "Object": Object,
             "_unique_key": _unique_key,
         }
-        exec(  # noqa: S102
+        exec(
             "from __future__ import annotations\n"
             "@py_class(_unique_key('CrossChild'))\n"
             "class CrossChild(Object):\n"
@@ -796,7 +796,7 @@ class TestForwardReferences:
             "Object": Object,
             "_unique_key": _unique_key,
         }
-        exec(  # noqa: S102
+        exec(
             "from __future__ import annotations\n"
             "@py_class(_unique_key('CrossHolder'))\n"
             "class Holder(Object):\n"
