@@ -15,6 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 import dataclasses
+import enum as _enum
 import json
 import typing
 import collections.abc
@@ -396,6 +397,10 @@ class TypeSchema:
         if isinstance(annotation, type) and issubclass(annotation, CObject):
             return _annotation_cobject(annotation, ())
 
+        # --- Stdlib Enum subclasses with homogeneous value types ---
+        if isinstance(annotation, type) and issubclass(annotation, _enum.Enum):
+            return _annotation_py_enum(annotation)
+
         # --- PyNativeObject subclasses (String, Bytes) ---
         if isinstance(annotation, type) and issubclass(annotation, PyNativeObject):
             if issubclass(annotation, str):
@@ -557,12 +562,40 @@ def _annotation_union(args):
     """Convert Union type args to a TypeSchema (Optional or Union)."""
     non_none = tuple(a for a in args if a is not type(None))
     has_none = len(non_none) < len(args)
-    converted = tuple(TypeSchema.from_annotation(a) for a in non_none)
+    converted_list = []
+    seen = set()
+    for arg in non_none:
+        schema = TypeSchema.from_annotation(arg)
+        key = json.dumps(schema.to_json(), sort_keys=True)
+        if key in seen:
+            continue
+        seen.add(key)
+        converted_list.append(schema)
+    converted = tuple(converted_list)
     if has_none:
-        if len(non_none) == 1:
+        if len(converted) == 1:
             return TypeSchema("Optional", converted)
         return TypeSchema("Optional", (TypeSchema("Union", converted),))
+    if len(converted) == 1:
+        return converted[0]
     return TypeSchema("Union", converted)
+
+
+def _annotation_py_enum(cls):
+    """Map a homogeneous stdlib Enum subclass to its underlying value schema."""
+    members = tuple(cls)
+    if not members:
+        raise TypeError(f"Enum subclass {cls!r} has no members")
+    first_schema = TypeSchema.from_annotation(type(members[0].value))
+    first_key = json.dumps(first_schema.to_json(), sort_keys=True)
+    for member in members[1:]:
+        member_schema = TypeSchema.from_annotation(type(member.value))
+        member_key = json.dumps(member_schema.to_json(), sort_keys=True)
+        if member_key != first_key:
+            raise TypeError(
+                f"Enum subclass {cls!r} has mixed value types and cannot be converted to TypeSchema"
+            )
+    return first_schema
 
 
 def _annotation_cobject(cls, targs):

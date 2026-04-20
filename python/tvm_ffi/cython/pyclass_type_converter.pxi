@@ -27,6 +27,7 @@ final result in ``CAny``.
 """
 
 import ctypes
+import enum as _enum
 import os
 from numbers import Integral, Real
 from collections.abc import Mapping
@@ -736,6 +737,8 @@ cdef object _tc_eager_protocol_step(object value, bint* stalled_value_protocol) 
     cdef object inner
     if isinstance(value, (Tensor, CObject, ObjectRValueRef, PyNativeObject)):
         return value
+    if isinstance(value, _enum.Enum):
+        return value.value
     vtype = type(value)
     if hasattr(vtype, "__tvm_ffi_object__"):
         try:

@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import copy
+import enum
 import gc
 import inspect
 import itertools
@@ -1945,6 +1946,26 @@ class TestOptionalFields:
         assert obj.val == "hi"
         obj.val = None
         assert obj.val is None
+
+    def test_stdlib_enum_field_accepts_enum_or_underlying_value(self) -> None:
+        """py_class fields typed with a stdlib Enum should accept enum values."""
+
+        class Color(enum.Enum):
+            RED = "red"
+            BLUE = "blue"
+
+        globals()["_EnumFieldColor"] = Color
+
+        @py_class(_unique_key("EnumField"))
+        class EnumField(Object):
+            val: _EnumFieldColor | str
+
+        obj = EnumField(val=Color.RED)
+        assert obj.val == "red"
+        obj.val = Color.BLUE
+        assert obj.val == "blue"
+        obj.val = "red"
+        assert obj.val == "red"
 
 
 # ###########################################################################

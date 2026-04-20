@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import collections.abc
 import ctypes
+import enum
 import os
 import sys
 import typing
@@ -94,6 +95,36 @@ class TestPODExactMatch:
     def test_none(self) -> None:
         """Test none."""
         A(type(None)).check_value(None)
+
+    def test_stdlib_enum_annotation_uses_value_schema(self) -> None:
+        """Stdlib Enum[str] annotations lower to the underlying value schema."""
+
+        class Color(enum.Enum):
+            RED = "red"
+            BLUE = "blue"
+
+        assert A(Color) == S("str")
+        assert A(Color | str) == S("str")
+
+    def test_stdlib_enum_value_converts_via_underlying_value(self) -> None:
+        """Stdlib Enum values are accepted where the underlying schema matches."""
+
+        class Color(enum.Enum):
+            RED = "red"
+            BLUE = "blue"
+
+        A(Color).check_value(Color.RED)
+        assert _to_py_class_value(A(Color).convert(Color.BLUE)) == "blue"
+
+    def test_mixed_value_stdlib_enum_annotation_rejected(self) -> None:
+        """Mixed-value stdlib Enum annotations stay unsupported."""
+
+        class Mixed(enum.Enum):
+            ONE = 1
+            TWO = "two"
+
+        with pytest.raises(TypeError, match="mixed value types"):
+            A(Mixed)
 
 
 # ---------------------------------------------------------------------------
