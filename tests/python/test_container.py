@@ -235,6 +235,11 @@ def test_array_contains(arr: list[Any], value: Any, expected: bool) -> None:
     assert (value in a) == expected
 
 
+def test_array_contains_plain_tuple() -> None:
+    a = tvm_ffi.Array([("BLOCK_SIZE", 128)])
+    assert ("BLOCK_SIZE", 128) in a
+
+
 @pytest.mark.parametrize(
     "arr, expected",
     [
@@ -764,8 +769,9 @@ def test_array_eq_nested() -> None:
 
 def test_array_eq_not_implemented_for_unrelated() -> None:
     a = tvm_ffi.Array([1, 2, 3])
-    assert a.__eq__([1, 2, 3]) is NotImplemented
-    assert a.__ne__([1, 2, 3]) is NotImplemented
+    assert a == [1, 2, 3]
+    assert a == (1, 2, 3)
+    assert not (a != [1, 2, 3])
     assert a.__eq__("hello") is NotImplemented
 
 
@@ -794,7 +800,14 @@ def test_list_eq_empty() -> None:
 
 def test_list_eq_not_implemented_for_unrelated() -> None:
     a = tvm_ffi.List([1, 2, 3])
-    assert a.__eq__([1, 2, 3]) is NotImplemented
+    assert a == [1, 2, 3]
+    assert a == (1, 2, 3)
+    assert not (a != [1, 2, 3])
+
+
+def test_list_contains_plain_tuple() -> None:
+    a = tvm_ffi.List([("BLOCK_SIZE", 128)])
+    assert ("BLOCK_SIZE", 128) in a
 
 
 def test_list_hash() -> None:
