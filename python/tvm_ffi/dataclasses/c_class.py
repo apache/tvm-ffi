@@ -165,6 +165,10 @@ def c_class(
             unsafe_hash=unsafe_hash,
             match_args=match_args,
         )
+        # Marker: distinguishes @c_class / @py_class types from FFI containers
+        # (Array, List, Map, Dict) that also have __tvm_ffi_type_info__ but are
+        # not dataclasses.  Used by is_dataclass() in common.py.
+        setattr(cls, "__tvm_ffi_is_dataclass__", True)
         return cls
 
     return decorator

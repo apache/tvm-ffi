@@ -45,9 +45,16 @@ _ATOMIC_TYPES: frozenset[type] = frozenset(
 
 
 def is_dataclass(obj: Any) -> bool:
-    """Return True if ``obj`` is a ``@c_class`` / ``@py_class`` type or instance."""
+    """Return True if ``obj`` is a ``@c_class`` / ``@py_class`` type or instance.
+
+    Returns False for FFI container types (:class:`~tvm_ffi.Array`,
+    :class:`~tvm_ffi.List`, :class:`~tvm_ffi.Map`, :class:`~tvm_ffi.Dict`)
+    even though they also carry ``__tvm_ffi_type_info__``; those are
+    reflected through :func:`~tvm_ffi.register_object` directly, not
+    through the dataclass decorators.
+    """
     cls = obj if isinstance(obj, type) else type(obj)
-    return getattr(cls, "__tvm_ffi_type_info__", None) is not None
+    return getattr(cls, "__tvm_ffi_is_dataclass__", False) is True
 
 
 def fields(obj_or_cls: Any) -> tuple[Field, ...]:
@@ -63,13 +70,13 @@ def fields(obj_or_cls: Any) -> tuple[Field, ...]:
         If ``obj_or_cls`` is not a ``@c_class`` / ``@py_class`` type or instance.
 
     """
-    cls = obj_or_cls if isinstance(obj_or_cls, type) else type(obj_or_cls)
-    ti = getattr(cls, "__tvm_ffi_type_info__", None)
-    if ti is None:
+    if not is_dataclass(obj_or_cls):
         raise TypeError(
             f"fields() argument must be a c_class or py_class type or instance, "
             f"got {type(obj_or_cls).__name__}"
         )
+    cls = obj_or_cls if isinstance(obj_or_cls, type) else type(obj_or_cls)
+    ti = getattr(cls, "__tvm_ffi_type_info__", None)
     chain = []
     while ti is not None:
         chain.append(ti)
@@ -97,7 +104,7 @@ def _is_ffi_dataclass_instance(obj: Any) -> bool:
     """Return True when *obj* is a ``@c_class`` / ``@py_class`` **instance** (not a type)."""
     if isinstance(obj, type):
         return False
-    return getattr(type(obj), "__tvm_ffi_type_info__", None) is not None
+    return is_dataclass(obj)
 
 
 def _asdict_inner(  # noqa: PLR0911, PLR0912

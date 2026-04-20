@@ -122,10 +122,11 @@ def _rollback_registration(cls: type, type_info: Any) -> None:
     core._rollback_py_class(type_info)  # ty: ignore[unresolved-attribute]
     # Remove from our own module-level resolution namespace.
     _PY_CLASS_BY_MODULE.get(cls.__module__, {}).pop(cls.__name__, None)
-    try:
-        delattr(cls, "__tvm_ffi_type_info__")
-    except AttributeError:
-        pass
+    for attr in ("__tvm_ffi_type_info__", "__tvm_ffi_is_dataclass__"):
+        try:
+            delattr(cls, attr)
+        except AttributeError:
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -582,6 +583,10 @@ def py_class(  # noqa: PLR0913
             _rollback_registration(cls, info)
             raise
 
+        # Marker: distinguishes @c_class / @py_class types from FFI containers
+        # (Array, List, Map, Dict) that also have __tvm_ffi_type_info__ but are
+        # not dataclasses.  Used by is_dataclass() in common.py.
+        setattr(cls, "__tvm_ffi_is_dataclass__", True)
         return cls
 
     # Handle different calling conventions:
