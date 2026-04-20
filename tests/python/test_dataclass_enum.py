@@ -118,6 +118,16 @@ def test_entries_iteration_order() -> None:
     assert values[2].same_as(Ordered.c)
 
 
+def test_class_iteration_and_len() -> None:
+    class Ordered(Enum, type_key=_unique_key("OrderedIter")):
+        a = auto()
+        b = auto()
+        c = auto()
+
+    assert list(Ordered) == [Ordered.a, Ordered.b, Ordered.c]
+    assert len(Ordered) == 3
+
+
 def test_frozen_variants() -> None:
     class Frozen(Enum, type_key=_unique_key("Frozen")):
         flag: bool

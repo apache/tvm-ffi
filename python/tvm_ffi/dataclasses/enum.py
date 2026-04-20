@@ -207,6 +207,21 @@ class _ClassProperty:
 # ---------------------------------------------------------------------------
 
 
+class _EnumMeta(type(Object)):
+    """Metaclass for :class:`Enum` that wires class-level iteration and length.
+
+    Kept as a dedicated subclass of ``type(Object)`` so ``iter(MyEnum)`` and
+    ``len(MyEnum)`` only resolve on :class:`Enum` subclasses, rather than
+    mutating the shared ``Object`` metaclass globally.
+    """
+
+    def __iter__(cls) -> Iterator[Any]:
+        return iter(cls.by_value)  # ty: ignore[unresolved-attribute]
+
+    def __len__(cls) -> int:
+        return len(cls.by_value)  # ty: ignore[unresolved-attribute]
+
+
 @dataclass_transform(
     eq_default=False,
     order_default=False,
@@ -214,7 +229,7 @@ class _ClassProperty:
     field_specifiers=(Field, field, entry, auto),
 )
 @c_class("ffi.Enum", init=False)
-class Enum(Object):
+class Enum(Object, metaclass=_EnumMeta):
     """A named-singleton registry with cross-language identity.
 
     Subclasses declare variants: frozen, named, ordinal-indexed
