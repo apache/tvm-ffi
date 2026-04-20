@@ -613,6 +613,36 @@ class TestHash:
         s = {a, b}
         assert len(s) == 1
 
+    def test_inherited_user_hash_slot_refresh(self) -> None:
+        @py_class(_unique_key("HashBase"), eq=True)
+        class HashBase(Object):
+            x: int
+
+            def __hash__(self) -> int:
+                return self.x * 17
+
+        @py_class(_unique_key("HashChild"), eq=True)
+        class HashChild(HashBase):
+            y: int
+
+        a = HashChild(x=3, y=1)
+        b = HashChild(x=3, y=2)
+        assert hash(a) == 51
+        assert hash(b) == 51
+
+    def test_inherited_generated_hash_slot_refresh(self) -> None:
+        @py_class(_unique_key("HashGeneratedBase"), eq=True, frozen=True, unsafe_hash=True)
+        class HashGeneratedBase(Object):
+            x: int
+
+        @py_class(_unique_key("HashGeneratedChild"), eq=True, frozen=True)
+        class HashGeneratedChild(HashGeneratedBase):
+            y: int
+
+        a = HashGeneratedChild(x=3, y=1)
+        b = HashGeneratedChild(x=3, y=1)
+        assert hash(a) == hash(b)
+
 
 # ###########################################################################
 # 12. Copy

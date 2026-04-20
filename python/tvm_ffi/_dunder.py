@@ -429,3 +429,13 @@ def _install_dataclass_dunders(  # noqa: PLR0912, PLR0915
 
     if match_args:
         _set_match_args(cls, type_info)
+
+    # Refresh CPython slots after late dunder installation. Object subclasses
+    # backed by tvm-ffi can otherwise expose the Python attribute while `hash()`
+    # or rich comparisons still use the pre-install identity slots.
+    for name in ("__eq__", "__ne__", "__lt__", "__le__", "__gt__", "__ge__", "__hash__"):
+        if name in cls.__dict__:
+            setattr(cls, name, cls.__dict__[name])
+    inherited_hash = getattr(cls, "__hash__", None)
+    if "__hash__" not in cls.__dict__ and inherited_hash not in (None, object.__hash__):
+        setattr(cls, "__hash__", inherited_hash)
