@@ -759,6 +759,62 @@ class TestForwardReferences:
         assert obj.ref is not None
         assert obj.ref.value == 2
 
+    @requires_py310
+    def test_cross_module_forward_ref_via_circular_import(self) -> None:
+        """Forward ref to a class in another module that isn't in the declaring
+        module's globals (circular import / TYPE_CHECKING-gated) still resolves.
+
+        Mirrors the loom codegen case where ``weave_ir.TaskSpec`` has a field
+        ``body: tuple[Op, ...]`` and ``Op`` lives in ``ops`` — ``ops`` already
+        imports from ``weave_ir``, so ``Op`` cannot appear in ``weave_ir``'s
+        globals without introducing a circular import.
+        """
+        # Module B: the target of the forward ref.  Define it first so it's
+        # registered in ``_PY_CLASS_BY_MODULE`` under its own module key when
+        # module A's phase-2 runs.
+        ns_b: Dict[str, Any] = {
+            "__name__": "testing.cross_mod_b",
+            "py_class": py_class,
+            "Object": Object,
+            "_unique_key": _unique_key,
+        }
+        exec(  # noqa: S102
+            "from __future__ import annotations\n"
+            "@py_class(_unique_key('CrossChild'))\n"
+            "class CrossChild(Object):\n"
+            "    x: int\n",
+            ns_b,
+        )
+        child_cls = ns_b["CrossChild"]
+        assert child_cls.__module__ == "testing.cross_mod_b"
+
+        # Module A: references ``CrossChild`` by name but does NOT have it
+        # in its globals (simulating a ``TYPE_CHECKING``-gated import).
+        ns_a: Dict[str, Any] = {
+            "__name__": "testing.cross_mod_a",
+            "py_class": py_class,
+            "Object": Object,
+            "_unique_key": _unique_key,
+        }
+        exec(  # noqa: S102
+            "from __future__ import annotations\n"
+            "@py_class(_unique_key('CrossHolder'))\n"
+            "class Holder(Object):\n"
+            "    value: int\n"
+            "    child: CrossChild | None = None\n",
+            ns_a,
+        )
+        holder_cls = ns_a["Holder"]
+        assert holder_cls.__module__ == "testing.cross_mod_a"
+
+        # Instantiation forces phase-2 to run; the cross-module localns
+        # fallback should pick up CrossChild from module B even though it's
+        # neither in module A's globals nor in module A's per-module registry.
+        child = child_cls(x=7)
+        holder = holder_cls(value=1, child=child)
+        assert holder.child is not None
+        assert holder.child.x == 7
+
 
 # ###########################################################################
 # 15. User-defined dunder preservation

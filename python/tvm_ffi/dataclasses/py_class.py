@@ -244,6 +244,32 @@ def _collect_py_methods(cls: type) -> list[tuple[str, Any, bool]] | None:
     return methods if methods else None
 
 
+def _build_localns(cls: type, *, cross_module: bool = False) -> dict[str, Any]:
+    """Build the localns dict for resolving ``cls``'s annotations.
+
+    By default, includes only classes from ``cls.__module__``, preserving
+    standard Python name resolution semantics.  When ``cross_module=True``,
+    also includes classes from all other registered modules as a fallback
+    — this is needed when ``cls`` has a forward reference to a class in
+    another module that can't appear in ``cls.__module__``'s globals due
+    to a circular import (e.g. the target is imported only under
+    ``if TYPE_CHECKING:``).
+
+    Cross-module entries are added with ``setdefault`` so same-module
+    classes and the class itself always take precedence over foreign
+    classes with the same ``__name__``.
+    """
+    localns = dict(_PY_CLASS_BY_MODULE.get(cls.__module__, {}))
+    localns[cls.__name__] = cls
+    if cross_module:
+        for mod_name, mod_classes in _PY_CLASS_BY_MODULE.items():
+            if mod_name == cls.__module__:
+                continue
+            for name, klass in mod_classes.items():
+                localns.setdefault(name, klass)
+    return localns
+
+
 def _register_fields_into_type(
     cls: type,
     type_info: Any,
@@ -255,15 +281,23 @@ def _register_fields_into_type(
     Returns True on success, False if forward references are unresolved.
     """
     # Resolve string annotations to types; return False (defer) on NameError.
-    localns = dict(_PY_CLASS_BY_MODULE.get(cls.__module__, {}))
-    localns[cls.__name__] = cls
+    #
+    # First try with module-scoped localns (standard Python name resolution).
+    # On NameError, retry with a cross-module localns that includes classes
+    # from every registered module — this handles circular imports where the
+    # target of a forward reference is imported only under TYPE_CHECKING and
+    # therefore never enters the declaring module's globals.
+    kwargs: dict[str, Any] = {"globalns": globalns, "localns": _build_localns(cls)}
+    if sys.version_info >= (3, 11):
+        kwargs["include_extras"] = True
     try:
-        kwargs: dict[str, Any] = {"globalns": globalns, "localns": localns}
-        if sys.version_info >= (3, 11):
-            kwargs["include_extras"] = True
         hints = typing.get_type_hints(cls, **kwargs)
     except (NameError, AttributeError):
-        return False
+        kwargs["localns"] = _build_localns(cls, cross_module=True)
+        try:
+            hints = typing.get_type_hints(cls, **kwargs)
+        except (NameError, AttributeError):
+            return False
 
     own_fields = _collect_own_fields(cls, hints, params["kw_only"], params["frozen"])
     py_methods = _collect_py_methods(cls)
@@ -332,8 +366,7 @@ def _flush_pending() -> None:
 
 def _raise_unresolved_forward_reference(cls: type, globalns: dict[str, Any]) -> None:
     """Raise :class:`TypeError` listing the annotations that cannot be resolved."""
-    localns = dict(_PY_CLASS_BY_MODULE.get(cls.__module__, {}))
-    localns[cls.__name__] = cls
+    localns = _build_localns(cls, cross_module=True)
     unresolved: list[str] = []
     for name, ann_str in getattr(cls, "__annotations__", {}).items():
         if isinstance(ann_str, str):
@@ -354,6 +387,10 @@ def _make_temporary_init(
             try:
                 if not _register_fields_into_type(cls, type_info, globalns, params):
                     _raise_unresolved_forward_reference(cls, globalns)
+                # cls stays in _PENDING_CLASSES after phase-2 succeeds; drop it
+                # before _flush_pending so the loop doesn't hit the Cython-level
+                # "_register_fields already called" assertion on a second pass.
+                _PENDING_CLASSES[:] = [p for p in _PENDING_CLASSES if p.cls is not cls]
                 _flush_pending()
             except Exception:
                 # Remove from pending list and roll back so the type key can be reused.
