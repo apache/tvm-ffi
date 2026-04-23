@@ -230,9 +230,9 @@ class ArenaJITLinkMemoryManager::ArenaInFlightAlloc : public JITLinkMemoryManage
     // opaque ExecutorAddr (integer), so we must use raw new here.  Ownership
     // transfers to deallocate(), which LLVM guarantees is called for every
     // finalized allocation.
-    auto* FA = new FinalizedAllocInfo{non_exec_.offset,      non_exec_.standard_size,
-                                      exec_.offset,          exec_.standard_size,
-                                      std::move(*DeallocActions), std::move(overflow_blocks_)};
+    auto* FA = new FinalizedAllocInfo{
+        non_exec_.offset,    non_exec_.standard_size,    exec_.offset,
+        exec_.standard_size, std::move(*DeallocActions), std::move(overflow_blocks_)};
     OnFinalized(FinalizedAlloc(ExecutorAddr::fromPtr(FA)));
   }
 
@@ -524,7 +524,6 @@ void ArenaJITLinkMemoryManager::allocate(const JITLinkDylib* JD, LinkGraph& G,
 
   ArenaInFlightAlloc::PoolRegion ne_region{0, 0, 0};
   ArenaInFlightAlloc::PoolRegion e_region{midpoint_, 0, 0};
-
 
   auto allocPool = [&](size_t req, bool is_exec) -> Expected<size_t> {
     if (req == 0) return size_t{0};
