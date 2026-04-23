@@ -18,9 +18,9 @@
  */
 use crate::error::Result;
 use crate::type_traits::AnyCompatible;
+use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
 /// Data type handling
 use tvm_ffi_sys::dlpack::{DLDataType, DLDataTypeCode};
-use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
 use tvm_ffi_sys::{TVMFFIAny, TVMFFIByteArray, TVMFFIDataTypeFromString, TVMFFIDataTypeToString};
 
 /// Extra methods for DLDataType
@@ -53,7 +53,7 @@ impl DLDataTypeExt for DLDataType {
     fn to_string(&self) -> crate::string::String {
         unsafe {
             let mut ffi_any = TVMFFIAny::new();
-            crate::check_safe_call!(TVMFFIDataTypeToString(&*self, &mut ffi_any)).unwrap();
+            crate::check_safe_call!(TVMFFIDataTypeToString(self, &mut ffi_any)).unwrap();
             crate::any::Any::from_raw_ffi_any(ffi_any)
                 .try_into()
                 .unwrap()
@@ -120,7 +120,7 @@ unsafe impl AnyCompatible for DLDataType {
     /// # Returns
     /// `true` if the Any contains a DLDataType, `false` otherwise
     unsafe fn check_any_strict(data: &TVMFFIAny) -> bool {
-        return data.type_index == TypeIndex::kTVMFFIDataType as i32;
+        data.type_index == TypeIndex::kTVMFFIDataType as i32
     }
 
     /// Copy a DLDataType from an Any view (after type check)
