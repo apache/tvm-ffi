@@ -609,8 +609,8 @@ void ArenaJITLinkMemoryManager::allocate(const JITLinkDylib* JD, LinkGraph& G,
     total_sec_size = alignTo(total_sec_size, page_size_);
 
     // mmap outside the arena.
-    void* addr = ::mmap(nullptr, total_sec_size, PROT_READ | PROT_WRITE,
-                        MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    void* addr =
+        ::mmap(nullptr, total_sec_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (addr == MAP_FAILED) {
       // Clean up prior overflow allocs, free both pool regions, report error.
       for (auto& ob : overflow_allocs) ::munmap(ob.addr, ob.size);
@@ -622,10 +622,10 @@ void ArenaJITLinkMemoryManager::allocate(const JITLinkDylib* JD, LinkGraph& G,
         decommitPages(arena_base_ + e_region.offset, e_total);
         freeRegion(e_region.offset, e_total);
       }
-      OnAllocated(make_error<StringError>(
-          "ArenaJITLinkMemoryManager: overflow mmap failed for section " +
-              Sec->getName() + ": " + std::strerror(errno),
-          inconvertibleErrorCode()));
+      OnAllocated(
+          make_error<StringError>("ArenaJITLinkMemoryManager: overflow mmap failed for section " +
+                                      Sec->getName() + ": " + std::strerror(errno),
+                                  inconvertibleErrorCode()));
       return;
     }
 

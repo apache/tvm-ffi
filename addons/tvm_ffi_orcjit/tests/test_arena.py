@@ -360,9 +360,7 @@ def test_arena_keeps_objects_close(variant: str) -> None:
     still passes as long as the arena keeps objects within range.
     """
     # Phase 1: with arena — must always succeed and be within arena range
-    arena_dist, arena_overflow = _measure_distance_under_pressure(
-        variant, arena_size=_ARENA_SIZE
-    )
+    arena_dist, arena_overflow = _measure_distance_under_pressure(variant, arena_size=_ARENA_SIZE)
     assert not arena_overflow, "Arena session should not overflow"
     assert arena_dist is not None
     assert arena_dist < _ARENA_SIZE, (
@@ -371,9 +369,7 @@ def test_arena_keeps_objects_close(variant: str) -> None:
     )
 
     # Phase 2: without arena — expect scatter or overflow
-    no_arena_dist, no_arena_overflow = _measure_distance_under_pressure(
-        variant, arena_size=-1
-    )
+    no_arena_dist, no_arena_overflow = _measure_distance_under_pressure(variant, arena_size=-1)
 
     if no_arena_overflow:
         # Relocation overflow without arena proves the blocker forced
@@ -487,9 +483,7 @@ def test_overflow_section_outside_arena(variant: str) -> None:
     # The arena is reserved as PROT_NONE and then committed in slabs, so
     # look for the contiguous region that spans _ARENA_SIZE.
     maps = _parse_maps()
-    arena_regions = [
-        (s, e) for s, e in maps if (e - s) >= _ARENA_SIZE
-    ]
+    arena_regions = [(s, e) for s, e in maps if (e - s) >= _ARENA_SIZE]
 
     # The fatbin address must not fall within any arena-sized region.
     for start, end in arena_regions:

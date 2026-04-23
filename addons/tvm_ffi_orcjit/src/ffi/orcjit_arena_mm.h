@@ -166,10 +166,10 @@ class ArenaJITLinkMemoryManager : public llvm::jitlink::JITLinkMemoryManager {
    *  end of finalize().  Zero-sized sub-regions indicate no allocation from that
    *  pool. */
   struct FinalizedAllocInfo {
-    size_t non_exec_offset;        // offset of non-exec Standard region (or 0 if unused)
-    size_t non_exec_standard_size; // bytes retained in non-exec pool after finalize
-    size_t exec_offset;            // offset of exec Standard region (or midpoint_ if unused)
-    size_t exec_standard_size;     // bytes retained in exec pool after finalize
+    size_t non_exec_offset;         // offset of non-exec Standard region (or 0 if unused)
+    size_t non_exec_standard_size;  // bytes retained in non-exec pool after finalize
+    size_t exec_offset;             // offset of exec Standard region (or midpoint_ if unused)
+    size_t exec_standard_size;      // bytes retained in exec pool after finalize
     std::vector<llvm::orc::shared::WrapperFunctionCall> DeallocActions;
     std::vector<OverflowBlock> overflow_blocks;
   };
