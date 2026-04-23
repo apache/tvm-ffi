@@ -116,6 +116,21 @@ class ArenaJITLinkMemoryManager : public llvm::jitlink::JITLinkMemoryManager {
   // Slab commit granularity.  Matches Linux huge page size (2 MB) on both
   // x86_64 and AArch64, enabling THP promotion via madvise(MADV_HUGEPAGE).
   static constexpr size_t kSlabSize = size_t{2} << 20;  // 2 MB
+  // PC-relative relocation reach (tightest binding fixup).  Cross-pool
+  // references (.text → .rodata, .eh_frame → .text, etc.) must fit within
+  // this signed displacement.  The binding constraint on both x86_64 and
+  // aarch64 is the signed 32-bit Delta32 used in .eh_frame unwind records
+  // (±2 GB), not the wider ADRP+ADD / RIP-rel reach.  The dual-pool allocator
+  // keeps both pools inside kPCRelReach bytes of each other even when the VA
+  // reservation is larger, so cross-pool Delta32 fixups always resolve.
+  static constexpr size_t kPCRelReach = (size_t{1} << 31) - kSlabSize;  // ~2 GB
+
+  // Default fraction of the arena reserved for non-exec segments (r--, rw-).
+  // The remainder holds exec segments (r-x).  Picked by splitting the arena
+  // at a 2 MB-aligned boundary (midpoint_); the exec pool thus starts on a
+  // 2 MB page boundary, maximizing r-x page packing.
+  // Typical CUDA binding objects: ~2 parts rodata+data to 1 part text.
+  static constexpr double kDefaultNonExecFraction = 2.0 / 3.0;
 
   explicit ArenaJITLinkMemoryManager(size_t page_size, size_t arena_capacity);
   ~ArenaJITLinkMemoryManager() override;
@@ -143,18 +158,27 @@ class ArenaJITLinkMemoryManager : public llvm::jitlink::JITLinkMemoryManager {
     llvm::orc::MemProt prot;  // target protection for finalize
   };
 
-  /*! \brief Metadata for a finalized allocation, stored via FinalizedAlloc handle. */
+  /*! \brief Metadata for a finalized allocation, stored via FinalizedAlloc handle.
+   *
+   *  The arena is split into two pools at midpoint_.  Each allocate() call may
+   *  consume a region from either or both pools.  Standard-lifetime pages remain
+   *  committed after finalize(); Finalize-lifetime pages are decommitted at the
+   *  end of finalize().  Zero-sized sub-regions indicate no allocation from that
+   *  pool. */
   struct FinalizedAllocInfo {
-    size_t arena_offset;
-    size_t arena_size;
+    size_t non_exec_offset;        // offset of non-exec Standard region (or 0 if unused)
+    size_t non_exec_standard_size; // bytes retained in non-exec pool after finalize
+    size_t exec_offset;            // offset of exec Standard region (or midpoint_ if unused)
+    size_t exec_standard_size;     // bytes retained in exec pool after finalize
     std::vector<llvm::orc::shared::WrapperFunctionCall> DeallocActions;
     std::vector<OverflowBlock> overflow_blocks;
   };
 
-  /*! \brief Bump-allocate from arena. Returns offset within arena. */
-  llvm::Expected<size_t> bumpAllocate(size_t size);
+  /*! \brief Bump-allocate from the selected pool.  Returns offset within arena. */
+  llvm::Expected<size_t> bumpAllocate(size_t size, bool is_exec);
 
-  /*! \brief Return a region to the free list (coalesces adjacent blocks). */
+  /*! \brief Return a region to the appropriate free list (coalesces adjacent blocks).
+   *         Pool is identified by comparing offset against midpoint_. */
   void freeRegion(size_t offset, size_t size);
 
   // ── Platform abstraction ──
@@ -168,14 +192,29 @@ class ArenaJITLinkMemoryManager : public llvm::jitlink::JITLinkMemoryManager {
   size_t arena_capacity_;
   size_t page_size_;
 
+  // ── Dual-pool split ──
+  // The arena is partitioned at midpoint_ (a 2 MB-aligned offset) into:
+  //   non-exec pool  = [arena_base_,           arena_base_ + midpoint_         )
+  //   exec pool      = [arena_base_ + midpoint_, arena_base_ + exec_bump_limit_)
+  // Both pools grow upward from their base.  The exec pool starts on a 2 MB
+  // boundary so r-x segments can pack as tightly as possible into 2 MB pages.
+  //
+  // exec_bump_limit_ = min(arena_capacity_, kPCRelReach).  Bytes beyond this
+  // limit stay reserved (VA only, no commit) but are not used for allocation
+  // so cross-pool references always fit within the PC-relative reach.
+  size_t midpoint_;
+  size_t exec_bump_limit_;
+
   std::mutex mu_;
-  size_t bump_offset_;
+  size_t non_exec_bump_;  // next free offset in non-exec pool ∈ [0, midpoint_]
+  size_t exec_bump_;      // next free offset in exec pool     ∈ [midpoint_, arena_capacity_]
 
   struct FreeBlock {
     size_t offset;
     size_t size;
   };
-  std::vector<FreeBlock> free_list_;
+  std::vector<FreeBlock> free_list_non_exec_;
+  std::vector<FreeBlock> free_list_exec_;
 
   /*! \brief Per-slab commit flags (0 = uncommitted, 1 = committed).
    *  Lock-free: each slab is committed exactly once via compare_exchange. */

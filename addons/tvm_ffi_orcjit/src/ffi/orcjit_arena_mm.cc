@@ -43,6 +43,7 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <cstdio>
 #include <cstring>
 
 namespace tvm {
@@ -167,15 +168,24 @@ Error ArenaJITLinkMemoryManager::protectPages(void* addr, size_t size, MemProt P
 
 class ArenaJITLinkMemoryManager::ArenaInFlightAlloc : public JITLinkMemoryManager::InFlightAlloc {
  public:
+  // A contiguous region within one pool: [offset, offset + standard_size + finalize_size).
+  // Standard-lifetime bytes come first; Finalize-lifetime bytes follow and are freed
+  // at the end of finalize().  Any field may be 0 to indicate no allocation from
+  // that pool on this call.
+  struct PoolRegion {
+    size_t offset;
+    size_t standard_size;
+    size_t finalize_size;
+  };
+
   ArenaInFlightAlloc(ArenaJITLinkMemoryManager& MM, LinkGraph& G, BasicLayout BL,
-                     size_t arena_offset, size_t standard_size, size_t finalize_size,
+                     PoolRegion non_exec, PoolRegion exec,
                      std::vector<OverflowBlock> overflow_blocks)
       : MM(MM),
         G(&G),
         BL(std::move(BL)),
-        arena_offset_(arena_offset),
-        standard_size_(standard_size),
-        finalize_size_(finalize_size),
+        non_exec_(non_exec),
+        exec_(exec),
         overflow_blocks_(std::move(overflow_blocks)) {}
 
   ~ArenaInFlightAlloc() override {
@@ -204,10 +214,12 @@ class ArenaJITLinkMemoryManager::ArenaInFlightAlloc : public JITLinkMemoryManage
       return;
     }
 
-    // Decommit finalize-lifetime pages — they're no longer needed.
-    if (finalize_size_ > 0) {
-      MM.decommitPages(MM.arena_base_ + arena_offset_ + standard_size_, finalize_size_);
-      MM.freeRegion(arena_offset_ + standard_size_, finalize_size_);
+    // Decommit finalize-lifetime pages in each pool — they're no longer needed.
+    for (auto& R : {non_exec_, exec_}) {
+      if (R.finalize_size > 0) {
+        MM.decommitPages(MM.arena_base_ + R.offset + R.standard_size, R.finalize_size);
+        MM.freeRegion(R.offset + R.standard_size, R.finalize_size);
+      }
     }
 
 #ifndef NDEBUG
@@ -218,17 +230,20 @@ class ArenaJITLinkMemoryManager::ArenaInFlightAlloc : public JITLinkMemoryManage
     // opaque ExecutorAddr (integer), so we must use raw new here.  Ownership
     // transfers to deallocate(), which LLVM guarantees is called for every
     // finalized allocation.
-    auto* FA = new FinalizedAllocInfo{arena_offset_, standard_size_, std::move(*DeallocActions),
-                                      std::move(overflow_blocks_)};
+    auto* FA = new FinalizedAllocInfo{non_exec_.offset,      non_exec_.standard_size,
+                                      exec_.offset,          exec_.standard_size,
+                                      std::move(*DeallocActions), std::move(overflow_blocks_)};
     OnFinalized(FinalizedAlloc(ExecutorAddr::fromPtr(FA)));
   }
 
   void abandon(OnAbandonedFunction OnAbandoned) override {
-    // Decommit and return entire allocation to free list.
-    size_t total = standard_size_ + finalize_size_;
-    if (total > 0) {
-      MM.decommitPages(MM.arena_base_ + arena_offset_, total);
-      MM.freeRegion(arena_offset_, total);
+    // Decommit and return each pool's full region to the appropriate free list.
+    for (auto& R : {non_exec_, exec_}) {
+      size_t total = R.standard_size + R.finalize_size;
+      if (total > 0) {
+        MM.decommitPages(MM.arena_base_ + R.offset, total);
+        MM.freeRegion(R.offset, total);
+      }
     }
 
     // Release overflow blocks.
@@ -258,9 +273,8 @@ class ArenaJITLinkMemoryManager::ArenaInFlightAlloc : public JITLinkMemoryManage
   ArenaJITLinkMemoryManager& MM;
   LinkGraph* G;
   BasicLayout BL;
-  size_t arena_offset_;
-  size_t standard_size_;
-  size_t finalize_size_;
+  PoolRegion non_exec_;
+  PoolRegion exec_;
   std::vector<OverflowBlock> overflow_blocks_;
 };
 
@@ -270,7 +284,10 @@ ArenaJITLinkMemoryManager::ArenaJITLinkMemoryManager(size_t page_size, size_t ar
     : arena_base_(nullptr),
       arena_capacity_(arena_capacity),
       page_size_(page_size),
-      bump_offset_(0) {
+      midpoint_(0),
+      exec_bump_limit_(0),
+      non_exec_bump_(0),
+      exec_bump_(0) {
   // Try requested capacity, halve on failure down to a minimum floor.
   // The floor is the smaller of kMinArenaCapacity and the requested size,
   // so explicit small arenas (e.g. 16 MB for tests) are honoured.
@@ -282,6 +299,22 @@ ArenaJITLinkMemoryManager::ArenaJITLinkMemoryManager(size_t page_size, size_t ar
     arena_base_ = static_cast<char*>(reserveVA(cap));
     if (arena_base_) {
       arena_capacity_ = cap;
+      // Partition the arena into two pools at a 2 MB-aligned midpoint.
+      // The exec pool starts at midpoint_, which is therefore on a 2 MB
+      // boundary — r-x segments pack into a minimum number of 2 MB pages.
+      //
+      // Constraint: cross-pool displacements (e.g. .text → .rodata via
+      // ADRP+ADD on aarch64) must fit in ±kPCRelReach.  The farthest pair
+      // of bytes is (end of exec, start of non-exec), separated by at most
+      // `exec_bump_limit_`, so we cap the exec pool's upper bound at
+      // kPCRelReach even when the VA reservation is larger.
+      exec_bump_limit_ = std::min(cap, kPCRelReach);
+      size_t raw_midpoint = static_cast<size_t>(exec_bump_limit_ * kDefaultNonExecFraction);
+      midpoint_ = (raw_midpoint / kSlabSize) * kSlabSize;
+      if (midpoint_ == 0) midpoint_ = kSlabSize;
+      if (midpoint_ >= exec_bump_limit_) midpoint_ = exec_bump_limit_ - kSlabSize;
+      non_exec_bump_ = 0;
+      exec_bump_ = midpoint_;
       // Initialize slab commit tracking.  make_unique<T[]>(n) value-initializes
       // the array to zero in C++17.
       num_slabs_ = (cap + kSlabSize - 1) / kSlabSize;
@@ -303,43 +336,47 @@ ArenaJITLinkMemoryManager::~ArenaJITLinkMemoryManager() {
   }
 }
 
-Expected<size_t> ArenaJITLinkMemoryManager::bumpAllocate(size_t size) {
+Expected<size_t> ArenaJITLinkMemoryManager::bumpAllocate(size_t size, bool is_exec) {
   std::lock_guard<std::mutex> Lock(mu_);
+
+  auto& free_list = is_exec ? free_list_exec_ : free_list_non_exec_;
+  auto& bump = is_exec ? exec_bump_ : non_exec_bump_;
+  size_t limit = is_exec ? exec_bump_limit_ : midpoint_;
 
   // Try free list first (best-fit).  O(n) scan — acceptable for the expected
   // workload of tens of JIT allocations, not thousands.
-  size_t best_idx = free_list_.size();
+  size_t best_idx = free_list.size();
   size_t best_waste = std::numeric_limits<size_t>::max();
-  for (size_t i = 0; i < free_list_.size(); ++i) {
-    if (free_list_[i].size >= size && free_list_[i].size - size < best_waste) {
+  for (size_t i = 0; i < free_list.size(); ++i) {
+    if (free_list[i].size >= size && free_list[i].size - size < best_waste) {
       best_idx = i;
-      best_waste = free_list_[i].size - size;
+      best_waste = free_list[i].size - size;
       if (best_waste == 0) break;
     }
   }
 
-  if (best_idx < free_list_.size()) {
-    size_t offset = free_list_[best_idx].offset;
-    if (free_list_[best_idx].size == size) {
-      free_list_.erase(free_list_.begin() + best_idx);
+  if (best_idx < free_list.size()) {
+    size_t offset = free_list[best_idx].offset;
+    if (free_list[best_idx].size == size) {
+      free_list.erase(free_list.begin() + best_idx);
     } else {
-      free_list_[best_idx].offset += size;
-      free_list_[best_idx].size -= size;
+      free_list[best_idx].offset += size;
+      free_list[best_idx].size -= size;
     }
     return offset;
   }
 
-  // Bump allocate.
-  if (bump_offset_ + size > arena_capacity_) {
-    return make_error<StringError>("ArenaJITLinkMemoryManager: arena exhausted (used " +
-                                       formatv("{0:x}", bump_offset_) + " + requested " +
-                                       formatv("{0:x}", size) + " > capacity " +
-                                       formatv("{0:x}", arena_capacity_) + ")",
-                                   inconvertibleErrorCode());
+  // Bump allocate within the pool's limit.
+  if (bump + size > limit) {
+    return make_error<StringError>(
+        std::string("ArenaJITLinkMemoryManager: ") + (is_exec ? "exec" : "non-exec") +
+            " pool exhausted (used " + formatv("{0:x}", bump).str() + " + requested " +
+            formatv("{0:x}", size).str() + " > limit " + formatv("{0:x}", limit).str() + ")",
+        inconvertibleErrorCode());
   }
 
-  size_t offset = bump_offset_;
-  bump_offset_ += size;
+  size_t offset = bump;
+  bump += size;
   return offset;
 }
 
@@ -347,24 +384,27 @@ void ArenaJITLinkMemoryManager::freeRegion(size_t offset, size_t size) {
   if (size == 0) return;
   std::lock_guard<std::mutex> Lock(mu_);
 
+  // Route to the correct pool's free list based on offset.
+  auto& free_list = (offset >= midpoint_) ? free_list_exec_ : free_list_non_exec_;
+
   // Insert into free list in sorted order.
-  auto it = std::lower_bound(free_list_.begin(), free_list_.end(), offset,
+  auto it = std::lower_bound(free_list.begin(), free_list.end(), offset,
                              [](const FreeBlock& fb, size_t off) { return fb.offset < off; });
-  it = free_list_.insert(it, FreeBlock{offset, size});
+  it = free_list.insert(it, FreeBlock{offset, size});
 
   // Coalesce with next.
   auto next = it + 1;
-  if (next != free_list_.end() && it->offset + it->size == next->offset) {
+  if (next != free_list.end() && it->offset + it->size == next->offset) {
     it->size += next->size;
-    free_list_.erase(next);
+    free_list.erase(next);
   }
 
   // Coalesce with previous.
-  if (it != free_list_.begin()) {
+  if (it != free_list.begin()) {
     auto prev = it - 1;
     if (prev->offset + prev->size == it->offset) {
       prev->size += it->size;
-      free_list_.erase(it);
+      free_list.erase(it);
     }
   }
 }
@@ -451,62 +491,105 @@ void ArenaJITLinkMemoryManager::allocate(const JITLinkDylib* JD, LinkGraph& G,
   auto TotalSize = static_cast<size_t>(SegsSizes->total());
   if (TotalSize == 0 && overflow_sections.empty()) {
     // Empty graph — return a no-op allocation.
-    OnAllocated(std::make_unique<ArenaInFlightAlloc>(*this, G, std::move(BL), 0, 0, 0,
-                                                     std::vector<OverflowBlock>{}));
+    OnAllocated(std::make_unique<ArenaInFlightAlloc>(
+        *this, G, std::move(BL), ArenaInFlightAlloc::PoolRegion{0, 0, 0},
+        ArenaInFlightAlloc::PoolRegion{midpoint_, 0, 0}, std::vector<OverflowBlock>{}));
     return;
   }
 
-  size_t ArenaOffset = 0;
-  size_t StandardSegsSize = 0;
-  size_t FinalizeSegsSize = 0;
+  // ── Dual-pool split ──
+  //
+  // Partition each segment into one of four buckets based on (Prot, Lifetime):
+  //   non-exec × Standard / Finalize   →  non-exec pool (below midpoint_)
+  //   exec     × Standard / Finalize   →  exec pool     (at/above midpoint_)
+  //
+  // Within each pool, Standard segments come first and Finalize segments
+  // second, so the Finalize tail of each pool can be freed after finalize().
+  size_t ne_std_size = 0, ne_fin_size = 0;
+  size_t e_std_size = 0, e_fin_size = 0;
+  for (auto& KV : BL.segments()) {
+    auto& AG = KV.first;
+    auto& Seg = KV.second;
+    auto SegSize = alignTo(Seg.ContentSize + Seg.ZeroFillSize, page_size_);
+    bool is_exec = (AG.getMemProt() & MemProt::Exec) != MemProt::None;
+    bool is_finalize = AG.getMemLifetime() == MemLifetime::Finalize;
+    if (is_exec) {
+      (is_finalize ? e_fin_size : e_std_size) += SegSize;
+    } else {
+      (is_finalize ? ne_fin_size : ne_std_size) += SegSize;
+    }
+  }
+  size_t ne_total = ne_std_size + ne_fin_size;
+  size_t e_total = e_std_size + e_fin_size;
 
-  if (TotalSize > 0) {
-    // Bump-allocate from arena.
-    auto OffsetOrErr = bumpAllocate(TotalSize);
-    if (!OffsetOrErr) {
-      OnAllocated(OffsetOrErr.takeError());
+  ArenaInFlightAlloc::PoolRegion ne_region{0, 0, 0};
+  ArenaInFlightAlloc::PoolRegion e_region{midpoint_, 0, 0};
+
+
+  auto allocPool = [&](size_t req, bool is_exec) -> Expected<size_t> {
+    if (req == 0) return size_t{0};
+    auto off = bumpAllocate(req, is_exec);
+    if (!off) return off.takeError();
+    if (auto Err = commitPages(arena_base_ + *off, req)) {
+      freeRegion(*off, req);
+      return std::move(Err);
+    }
+    std::memset(arena_base_ + *off, 0, req);
+    return *off;
+  };
+
+  if (ne_total > 0) {
+    auto off = allocPool(ne_total, /*is_exec=*/false);
+    if (!off) {
+      OnAllocated(off.takeError());
       return;
     }
-    ArenaOffset = *OffsetOrErr;
-
-    // Commit pages as read-write.
-    if (auto Err = commitPages(arena_base_ + ArenaOffset, TotalSize)) {
-      freeRegion(ArenaOffset, TotalSize);
-      OnAllocated(std::move(Err));
+    ne_region = {*off, ne_std_size, ne_fin_size};
+  }
+  if (e_total > 0) {
+    auto off = allocPool(e_total, /*is_exec=*/true);
+    if (!off) {
+      // Unwind non-exec allocation on failure to keep the pools consistent.
+      if (ne_total > 0) {
+        decommitPages(arena_base_ + ne_region.offset, ne_total);
+        freeRegion(ne_region.offset, ne_total);
+      }
+      OnAllocated(off.takeError());
       return;
     }
+    e_region = {*off, e_std_size, e_fin_size};
+  }
 
-    // Zero-fill the region.
-    std::memset(arena_base_ + ArenaOffset, 0, TotalSize);
+  // Assign addresses to segments from four cursors.  Standard comes first in
+  // each pool, then Finalize.
+  auto NeStdCursor = ExecutorAddr::fromPtr(arena_base_ + ne_region.offset);
+  auto NeFinCursor = ExecutorAddr::fromPtr(arena_base_ + ne_region.offset + ne_std_size);
+  auto EStdCursor = ExecutorAddr::fromPtr(arena_base_ + e_region.offset);
+  auto EFinCursor = ExecutorAddr::fromPtr(arena_base_ + e_region.offset + e_std_size);
 
-    // Assign addresses to segments, partitioned by lifetime.
-    StandardSegsSize = static_cast<size_t>(SegsSizes->StandardSegs);
-    FinalizeSegsSize = static_cast<size_t>(SegsSizes->FinalizeSegs);
-
-    auto NextStandardSegAddr = ExecutorAddr::fromPtr(arena_base_ + ArenaOffset);
-    auto NextFinalizeSegAddr = ExecutorAddr::fromPtr(arena_base_ + ArenaOffset + StandardSegsSize);
-
-    for (auto& KV : BL.segments()) {
-      auto& AG = KV.first;
-      auto& Seg = KV.second;
-
-      auto& SegAddr =
-          (AG.getMemLifetime() == MemLifetime::Standard) ? NextStandardSegAddr : NextFinalizeSegAddr;
-
-      Seg.WorkingMem = SegAddr.toPtr<char*>();
-      Seg.Addr = SegAddr;
-
-      auto SegSize = alignTo(Seg.ContentSize + Seg.ZeroFillSize, page_size_);
-      SegAddr += SegSize;
-    }
+  for (auto& KV : BL.segments()) {
+    auto& AG = KV.first;
+    auto& Seg = KV.second;
+    bool is_exec = (AG.getMemProt() & MemProt::Exec) != MemProt::None;
+    bool is_finalize = AG.getMemLifetime() == MemLifetime::Finalize;
+    auto& Cursor = is_exec ? (is_finalize ? EFinCursor : EStdCursor)
+                           : (is_finalize ? NeFinCursor : NeStdCursor);
+    Seg.WorkingMem = Cursor.toPtr<char*>();
+    Seg.Addr = Cursor;
+    auto SegSize = alignTo(Seg.ContentSize + Seg.ZeroFillSize, page_size_);
+    Cursor += SegSize;
   }
 
   // Apply layout — copies content and assigns block addresses for arena segments.
   if (auto Err = BL.apply()) {
-    // On error: decommit and free the arena region.
-    if (TotalSize > 0) {
-      decommitPages(arena_base_ + ArenaOffset, TotalSize);
-      freeRegion(ArenaOffset, TotalSize);
+    // On error: decommit and free both pool regions.
+    if (ne_total > 0) {
+      decommitPages(arena_base_ + ne_region.offset, ne_total);
+      freeRegion(ne_region.offset, ne_total);
+    }
+    if (e_total > 0) {
+      decommitPages(arena_base_ + e_region.offset, e_total);
+      freeRegion(e_region.offset, e_total);
     }
     OnAllocated(std::move(Err));
     return;
@@ -529,11 +612,15 @@ void ArenaJITLinkMemoryManager::allocate(const JITLinkDylib* JD, LinkGraph& G,
     void* addr = ::mmap(nullptr, total_sec_size, PROT_READ | PROT_WRITE,
                         MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (addr == MAP_FAILED) {
-      // Clean up prior overflow allocs, free arena region, report error.
+      // Clean up prior overflow allocs, free both pool regions, report error.
       for (auto& ob : overflow_allocs) ::munmap(ob.addr, ob.size);
-      if (TotalSize > 0) {
-        decommitPages(arena_base_ + ArenaOffset, TotalSize);
-        freeRegion(ArenaOffset, TotalSize);
+      if (ne_total > 0) {
+        decommitPages(arena_base_ + ne_region.offset, ne_total);
+        freeRegion(ne_region.offset, ne_total);
+      }
+      if (e_total > 0) {
+        decommitPages(arena_base_ + e_region.offset, e_total);
+        freeRegion(e_region.offset, e_total);
       }
       OnAllocated(make_error<StringError>(
           "ArenaJITLinkMemoryManager: overflow mmap failed for section " +
@@ -562,8 +649,7 @@ void ArenaJITLinkMemoryManager::allocate(const JITLinkDylib* JD, LinkGraph& G,
     overflow_allocs.push_back({addr, total_sec_size, Sec->getMemProt()});
   }
 
-  OnAllocated(std::make_unique<ArenaInFlightAlloc>(*this, G, std::move(BL), ArenaOffset,
-                                                   StandardSegsSize, FinalizeSegsSize,
+  OnAllocated(std::make_unique<ArenaInFlightAlloc>(*this, G, std::move(BL), ne_region, e_region,
                                                    std::move(overflow_allocs)));
 }
 
@@ -582,10 +668,14 @@ void ArenaJITLinkMemoryManager::deallocate(std::vector<FinalizedAlloc> Allocs,
       FA->DeallocActions.pop_back();
     }
 
-    // Decommit and free arena region.
-    if (FA->arena_size > 0) {
-      decommitPages(arena_base_ + FA->arena_offset, FA->arena_size);
-      freeRegion(FA->arena_offset, FA->arena_size);
+    // Decommit and free each pool's Standard region.
+    if (FA->non_exec_standard_size > 0) {
+      decommitPages(arena_base_ + FA->non_exec_offset, FA->non_exec_standard_size);
+      freeRegion(FA->non_exec_offset, FA->non_exec_standard_size);
+    }
+    if (FA->exec_standard_size > 0) {
+      decommitPages(arena_base_ + FA->exec_offset, FA->exec_standard_size);
+      freeRegion(FA->exec_offset, FA->exec_standard_size);
     }
 
     // Release overflow blocks.
