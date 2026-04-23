@@ -148,7 +148,7 @@ def test_ml_dtypes_dtype_conversion() -> None:
     np = pytest.importorskip("numpy")
     ml_dtypes = pytest.importorskip("ml_dtypes")
     if Version(ml_dtypes.__version__) < Version("0.4.0"):
-        pytest.skip("ml_dtypes < 0.4.0")
+        pytest.skip("ml_dtypes < 0.4.0")  # ty: ignore[invalid-argument-type, too-many-positional-arguments]
         return
     _check_dtype(np.dtype(ml_dtypes.int2), 0, 2, 1)
     _check_dtype(np.dtype(ml_dtypes.int4), 0, 4, 1)

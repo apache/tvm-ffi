@@ -39,9 +39,3 @@ _register_object_by_index(kTVMFFITensor, Tensor)
 include "./function.pxi"
 _register_object_by_index(kTVMFFIFunction, Function)
 include "./pyclass_type_converter.pxi"
-
-# Global invalid/missing object singleton
-MISSING = _get_global_func("ffi.GetInvalidObject", False)()
-
-# Global kwargs sentinel used by auto-generated __ffi_init__
-KWARGS = _get_global_func("ffi.GetKwargsObject", False)()

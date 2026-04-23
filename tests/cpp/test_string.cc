@@ -528,4 +528,126 @@ TEST(String, EndsWith) {
   EXPECT_FALSE(single.ends_with("yx"));
 }
 
+TEST(String, Split) {
+  String s{"a,b,c"};
+  auto parts = s.Split(',');
+  ASSERT_EQ(parts.size(), 3);
+  EXPECT_EQ(parts[0], "a");
+  EXPECT_EQ(parts[1], "b");
+  EXPECT_EQ(parts[2], "c");
+
+  // No delimiter present
+  String s2{"hello"};
+  auto parts2 = s2.Split(',');
+  ASSERT_EQ(parts2.size(), 1);
+  EXPECT_EQ(parts2[0], "hello");
+
+  // Empty string
+  String s3{""};
+  auto parts3 = s3.Split(',');
+  ASSERT_EQ(parts3.size(), 1);
+  EXPECT_EQ(parts3[0], "");
+
+  // Delimiter at boundaries
+  String s4{",a,b,"};
+  auto parts4 = s4.Split(',');
+  ASSERT_EQ(parts4.size(), 4);
+  EXPECT_EQ(parts4[0], "");
+  EXPECT_EQ(parts4[1], "a");
+  EXPECT_EQ(parts4[2], "b");
+  EXPECT_EQ(parts4[3], "");
+
+  // Consecutive delimiters
+  String s5{"a,,b"};
+  auto parts5 = s5.Split(',');
+  ASSERT_EQ(parts5.size(), 3);
+  EXPECT_EQ(parts5[0], "a");
+  EXPECT_EQ(parts5[1], "");
+  EXPECT_EQ(parts5[2], "b");
+}
+
+TEST(String, EscapeStringJSON) {
+  // Basic escaping
+  String s1{"hello"};
+  EXPECT_EQ(EscapeStringJSON(s1), "\"hello\"");
+
+  // Special characters
+  String s2{"line1\nline2\ttab"};
+  EXPECT_EQ(EscapeStringJSON(s2), "\"line1\\nline2\\ttab\"");
+
+  // Backslash and quote
+  String s3{"a\\b\"c"};
+  EXPECT_EQ(EscapeStringJSON(s3), "\"a\\\\b\\\"c\"");
+
+  // Control characters
+  String s4{std::string("a\x01\x1f z", 5)};
+  EXPECT_EQ(EscapeStringJSON(s4), "\"a\\u0001\\u001f z\"");
+}
+
+TEST(String, EscapedStringPyBasic) {
+  // Plain ASCII
+  String s1{"hello world"};
+  EXPECT_EQ(EscapedStringPy(s1), "\"hello world\"");
+
+  // C escape sequences
+  String s2{"a\nb\tc\r"};
+  EXPECT_EQ(EscapedStringPy(s2), "\"a\\nb\\tc\\r\"");
+
+  // Backslash and quote
+  String s3{"a\\b\"c"};
+  EXPECT_EQ(EscapedStringPy(s3), "\"a\\\\b\\\"c\"");
+}
+
+TEST(String, EscapedStringPyControlChars) {
+  // Control characters -> \xNN
+  String s1{std::string("\x01\x02\x7f", 3)};
+  String result = EscapedStringPy(s1);
+  EXPECT_EQ(result, "\"\\x01\\x02\\x7f\"");
+}
+
+TEST(String, EscapedStringPyANSI) {
+  // ANSI escape: ESC[31m (red)
+  String s1{std::string("\x1b[31mred\x1b[0m", 12)};
+  String result = EscapedStringPy(s1);
+  EXPECT_EQ(result, "\"\\x1b[31mred\\x1b[0m\"");
+
+  // ANSI erase line: ESC[K
+  String s2{std::string("\x1b[K", 3)};
+  EXPECT_EQ(EscapedStringPy(s2), "\"\\x1b[K\"");
+}
+
+TEST(String, EscapedStringPyUTF8) {
+  // 2-byte: U+00E9 (é) = C3 A9
+  String s1{std::string("\xc3\xa9", 2)};
+  EXPECT_EQ(EscapedStringPy(s1), "\"\\u00e9\"");
+
+  // 3-byte: U+4E16 (世) = E4 B8 96
+  String s2{std::string("\xe4\xb8\x96", 3)};
+  EXPECT_EQ(EscapedStringPy(s2), "\"\\u4e16\"");
+
+  // 4-byte: U+1F600 (😀) = F0 9F 98 80
+  String s3{std::string("\xf0\x9f\x98\x80", 4)};
+  EXPECT_EQ(EscapedStringPy(s3), "\"\\U0001f600\"");
+}
+
+TEST(String, EscapedStringPyMalformedUTF8) {
+  // Lone continuation byte -> \xNN fallback
+  String s1{std::string("\x80", 1)};
+  EXPECT_EQ(EscapedStringPy(s1), "\"\\x80\"");
+
+  // 2-byte leader followed by non-continuation -> fallback for leader
+  String s2{std::string("\xc3\x20", 2)};
+  String result2 = EscapedStringPy(s2);
+  EXPECT_EQ(result2, "\"\\xc3 \"");
+
+  // 3-byte leader with bad continuation -> fallback for leader
+  String s3{std::string("\xe4\xb8\x20", 3)};
+  String result3 = EscapedStringPy(s3);
+  EXPECT_EQ(result3, "\"\\xe4\\xb8 \"");
+
+  // Truncated 2-byte at end of string
+  String s4{std::string("\xc3", 1)};
+  EXPECT_EQ(EscapedStringPy(s4), "\"\\xc3\"");
+}
+
 }  // namespace

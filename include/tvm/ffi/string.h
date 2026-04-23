@@ -30,12 +30,15 @@
 #include <tvm/ffi/object.h>
 #include <tvm/ffi/type_traits.h>
 
+#include <cctype>
 #include <cstddef>
 #include <cstring>
+#include <iomanip>
 #include <sstream>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 // Note: We place string in tvm/ffi instead of tvm/ffi/container
 // because string itself needs special handling and is an inherent
@@ -736,6 +739,26 @@ class String {
     return std::string{data(), size()};
   }
 
+  /*!
+   * \brief Split the string by a delimiter character.
+   * \param delim The delimiter character.
+   * \return A vector of string_views pointing into this string's data.
+   * \note The returned string_views are only valid while this String is alive.
+   */
+  std::vector<std::string_view> Split(char delim) const {
+    std::vector<std::string_view> ret;
+    const char* start = data();
+    const char* end = start + size();
+    for (const char* p = start; p < end; ++p) {
+      if (*p == delim) {
+        ret.emplace_back(start, static_cast<size_t>(p - start));
+        start = p + 1;
+      }
+    }
+    ret.emplace_back(start, static_cast<size_t>(end - start));
+    return ret;
+  }
+
  private:
   template <typename, typename>
   friend struct TypeTraits;
@@ -802,11 +825,15 @@ class String {
 };
 
 /*!
- * \brief Return an escaped version of the string
+ * \brief Return a JSON-escaped version of the string (RFC 8259).
+ *
+ * Uses ``\\uXXXX`` for control characters, escapes ``\\/``, ``\\b``, ``\\f`` per the JSON spec.
+ * Non-ASCII bytes are passed through as-is (valid UTF-8 is preserved).
+ *
  * \param value The input string
  * \return The escaped string, quoted with double quotes
  */
-inline String EscapeString(const String& value) {
+inline String EscapeStringJSON(const String& value) {
   std::ostringstream oss;
   oss << '"';
   const char* data = value.data();
@@ -842,6 +869,123 @@ inline String EscapeString(const String& value) {
         break;
       }
     }
+  }
+  oss << '"';
+  return String(oss.str());
+}
+
+/*!
+ * \brief Escape a string for JSON output.
+ * \deprecated Use EscapeStringJSON instead.
+ * \param value The input string
+ * \return The escaped string, quoted with double quotes
+ */
+[[deprecated("Use EscapeStringJSON instead")]] inline String EscapeString(const String& value) {
+  return EscapeStringJSON(value);
+}
+
+/*!
+ * \brief Return a Python-style escaped string representation.
+ *
+ * Handles ANSI escape sequences, UTF-8 multibyte characters, and standard
+ * C escape sequences (\\n, \\t, \\r, \\\\, \\"). Uses \\xNN for control
+ * characters and \\uXXXX / \\UXXXXXXXX for non-ASCII codepoints.
+ *
+ * \param value The input string to escape.
+ * \return The escaped string, quoted with double quotes.
+ */
+inline String EscapedStringPy(const String& value) {
+  const char* data = value.data();
+  const size_t length = value.size();
+  std::ostringstream oss;
+  oss << '"';
+  for (size_t i = 0; i < length;) {
+    unsigned char c = static_cast<unsigned char>(data[i]);
+    unsigned char d = (i + 1 < length) ? static_cast<unsigned char>(data[i + 1]) : 0;
+    // Detect ANSI escape sequences
+    if (c == '\x1b' && d == '[') {
+      size_t j = i + 2;
+      while (j < length && (std::isdigit(static_cast<unsigned char>(data[j])) || data[j] == ';')) {
+        ++j;
+      }
+      if (j < length && (data[j] == 'm' || data[j] == 'K')) {
+        oss << "\\x1b[";
+        for (i += 2; i <= j; ++i) {
+          oss << data[i];
+        }
+        continue;
+      }
+    }
+    // Handle ASCII C escape sequences
+    switch (c) {
+      case '\n':
+        oss << "\\n";
+        ++i;
+        continue;
+      case '\t':
+        oss << "\\t";
+        ++i;
+        continue;
+      case '\r':
+        oss << "\\r";
+        ++i;
+        continue;
+      case '\\':
+        oss << "\\\\";
+        ++i;
+        continue;
+      case '\"':
+        oss << "\\\"";
+        ++i;
+        continue;
+      default:
+        break;
+    }
+    // Handle ASCII
+    if ((c & 0x80) == 0) {
+      if (c < 0x20 || c == 0x7f) {
+        // Escape control characters as \xNN
+        char buf[5];
+        TVM_FFI_SNPRINTF(buf, sizeof(buf), "\\x%02x", static_cast<unsigned>(c));
+        oss << buf;
+      } else {
+        oss << static_cast<char>(c);
+      }
+      ++i;
+      continue;
+    }
+    if ((c & 0xE0) == 0xC0 && i + 1 < length && (d & 0xC0) == 0x80) {
+      int32_t codepoint = ((c & 0x1F) << 6) | (d & 0x3F);
+      oss << "\\u" << std::hex << std::setw(4) << std::setfill('0') << codepoint;
+      i += 2;
+    } else if ((c & 0xF0) == 0xE0 && i + 2 < length) {
+      unsigned char e = static_cast<unsigned char>(data[i + 2]);
+      if ((d & 0xC0) == 0x80 && (e & 0xC0) == 0x80) {
+        int32_t codepoint = ((c & 0x0F) << 12) | ((d & 0x3F) << 6) | (e & 0x3F);
+        oss << "\\u" << std::hex << std::setw(4) << std::setfill('0') << codepoint;
+        i += 3;
+      } else {
+        oss << "\\x" << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(c);
+        ++i;
+      }
+    } else if ((c & 0xF8) == 0xF0 && i + 3 < length) {
+      unsigned char e = static_cast<unsigned char>(data[i + 2]);
+      unsigned char f = static_cast<unsigned char>(data[i + 3]);
+      if ((d & 0xC0) == 0x80 && (e & 0xC0) == 0x80 && (f & 0xC0) == 0x80) {
+        int32_t codepoint =
+            ((c & 0x07) << 18) | ((d & 0x3F) << 12) | ((e & 0x3F) << 6) | (f & 0x3F);
+        oss << "\\U" << std::hex << std::setw(8) << std::setfill('0') << codepoint;
+        i += 4;
+      } else {
+        oss << "\\x" << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(c);
+        ++i;
+      }
+    } else {
+      oss << "\\x" << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(c);
+      ++i;
+    }
+    oss.unsetf(std::ios::adjustfield | std::ios::basefield | std::ios::floatfield);
+    oss.fill(' ');
   }
   oss << '"';
   return String(oss.str());

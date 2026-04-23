@@ -14,33 +14,19 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-"""FFI dataclass decorators: ``c_class`` for C++-backed types, ``py_class`` for Python-defined types."""
+from __future__ import annotations
 
-from tvm_ffi.core import MISSING, Object
+import sys
 
-from .c_class import c_class
-from .common import asdict, astuple, fields, is_dataclass, replace
-from .enum import Enum, EnumAttrMap, IntEnum, StrEnum, auto, entry
-from .field import KW_ONLY, Field, field
-from .py_class import py_class
+import pytest
+import tvm_ffi
 
-__all__ = [
-    "KW_ONLY",
-    "MISSING",
-    "Enum",
-    "EnumAttrMap",
-    "Field",
-    "IntEnum",
-    "Object",
-    "StrEnum",
-    "asdict",
-    "astuple",
-    "auto",
-    "c_class",
-    "entry",
-    "field",
-    "fields",
-    "is_dataclass",
-    "py_class",
-    "replace",
-]
+
+def _is_free_threaded_python() -> bool:
+    return hasattr(sys, "_is_gil_enabled") and not sys._is_gil_enabled()
+
+
+@pytest.mark.skipif(not _is_free_threaded_python(), reason="requires free-threaded Python")
+def test_pyobject_deleter_handles_last_ref() -> None:
+    drop_last_ref = getattr(tvm_ffi.core, "_testing_drop_last_ref_without_thread_state")
+    drop_last_ref()

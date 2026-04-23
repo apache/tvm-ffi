@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import collections.abc
 import ctypes
+import itertools
 import os
 import sys
 import typing
@@ -36,13 +37,11 @@ from tvm_ffi.core import (
     _object_type_key_to_index,
     _to_py_class_value,
 )
+from tvm_ffi.dataclasses import IntEnum, StrEnum, entry
 
 # Python 3.9+ supports list[int], dict[str, int], tuple[int, ...] at runtime.
 # On 3.8, these raise TypeError("'type' object is not subscriptable").
 _PY39 = sys.version_info >= (3, 9)
-requires_py39 = pytest.mark.skipif(
-    not _PY39, reason="builtin generic subscripts require Python 3.9+"
-)
 from tvm_ffi.testing import (
     TestIntPair,
     TestObjectBase,
@@ -51,14 +50,37 @@ from tvm_ffi.testing import (
     _TestCxxClassDerived,
     _TestCxxClassDerivedDerived,
 )
-
+from tvm_ffi.testing.testing import requires_py39, requires_py310
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+_TYPE_KEY_COUNTER = itertools.count()
+
+
 def S(origin: str, *args: TypeSchema) -> TypeSchema:
     """Shorthand constructor for TypeSchema (string-based)."""
     return TypeSchema(origin, tuple(args))
+
+
+def _unique_type_key(base: str) -> str:
+    return f"testing.type_converter.{base}_{next(_TYPE_KEY_COUNTER)}"
+
+
+def _make_int_enum_type() -> typing.Any:
+    class Colors(IntEnum, type_key=_unique_type_key("IntEnum")):
+        red = entry(value=10)
+        blue = entry(value=20)
+
+    return Colors
+
+
+def _make_str_enum_type() -> typing.Any:
+    class Tokens(StrEnum, type_key=_unique_type_key("StrEnum")):
+        add = entry(value="+")
+        mul = entry(value="*")
+
+    return Tokens
 
 
 # Annotation-based constructor — the main subject under test.
@@ -269,7 +291,42 @@ class TestObjectTypes:
 
 
 # ---------------------------------------------------------------------------
-# Category 6: Optional
+# Category 6: Payload enums
+# ---------------------------------------------------------------------------
+class TestPayloadEnums:
+    def test_int_enum_convert_from_int(self) -> None:
+        """IntEnum accepts its user-visible integer payload."""
+        Colors = _make_int_enum_type()
+        result = _to_py_class_value(A(Colors).convert(20))
+        assert result.same_as(Colors.blue)
+
+    def test_int_enum_passthrough_existing_object(self) -> None:
+        """IntEnum keeps the object passthrough path for existing enum objects."""
+        Colors = _make_int_enum_type()
+        result = _to_py_class_value(A(Colors).convert(Colors.red))
+        assert result.same_as(Colors.red)
+
+    def test_int_enum_rejects_unknown_payload(self) -> None:
+        """IntEnum still rejects unmatched integer payloads."""
+        Colors = _make_int_enum_type()
+        with pytest.raises(TypeError, match="expected"):
+            A(Colors).check_value(99)
+
+    def test_str_enum_convert_from_str(self) -> None:
+        """StrEnum accepts its user-visible string payload."""
+        Tokens = _make_str_enum_type()
+        result = _to_py_class_value(A(Tokens).convert("*"))
+        assert result.same_as(Tokens.mul)
+
+    def test_str_enum_rejects_unknown_payload(self) -> None:
+        """StrEnum still rejects unmatched string payloads."""
+        Tokens = _make_str_enum_type()
+        with pytest.raises(TypeError, match="expected"):
+            A(Tokens).check_value("/")
+
+
+# ---------------------------------------------------------------------------
+# Category 7: Optional
 # ---------------------------------------------------------------------------
 class TestOptional:
     def test_none_passes(self) -> None:
@@ -293,7 +350,7 @@ class TestOptional:
 
 
 # ---------------------------------------------------------------------------
-# Category 7: Union / Variant
+# Category 8: Union / Variant
 # ---------------------------------------------------------------------------
 class TestUnion:
     def test_first_alt_passes(self) -> None:
@@ -315,7 +372,7 @@ class TestUnion:
 
 
 # ---------------------------------------------------------------------------
-# Category 8: Containers
+# Category 9: Containers
 # ---------------------------------------------------------------------------
 class TestContainers:
     @requires_py39
@@ -4299,7 +4356,7 @@ class TestFromAnnotationOptional:
         """Union[int, None] normalizes to Optional[int]."""
         assert A(Union[int, None]) == S("Optional", S("int"))
 
-    @pytest.mark.skipif(sys.version_info < (3, 10), reason="X | Y requires 3.10+")
+    @requires_py310
     def test_pipe_syntax(self) -> None:
         """Int | None."""
         assert A(eval("int | None")) == S("Optional", S("int"))
@@ -4316,7 +4373,7 @@ class TestFromAnnotationUnion:
         """Nested unions flatten to a single Union schema."""
         assert A(Union[int, Union[str, float]]) == S("Union", S("int"), S("str"), S("float"))
 
-    @pytest.mark.skipif(sys.version_info < (3, 10), reason="X | Y requires 3.10+")
+    @requires_py310
     def test_pipe_syntax(self) -> None:
         """Int | str."""
         assert A(eval("int | str")) == S("Union", S("int"), S("str"))

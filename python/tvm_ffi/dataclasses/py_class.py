@@ -27,8 +27,9 @@ from typing import Any, ClassVar, TypeVar
 from typing_extensions import dataclass_transform
 
 from .. import core
+from .._dunder import _install_dataclass_dunders
 from ..core import MISSING, TypeSchema
-from ..registry import _add_class_attrs, _install_dataclass_dunders
+from ..registry import _add_class_attrs
 from .field import KW_ONLY, Field, field
 
 _T = TypeVar("_T", bound=type)
@@ -40,14 +41,14 @@ _T = TypeVar("_T", bound=type)
 #
 # Registration happens in two phases:
 #
-#   Phase 1 (_phase1_register_type)
+#   Phase 1 (_register_type_without_fields)
 #       Allocates a C-level type index and inserts the class into the
 #       global type registry.  This must happen early so that self-
 #       referential and mutually-referential annotations can resolve
 #       the class via ``TypeSchema.from_annotation()``.  Phase 1 always
 #       succeeds (or raises immediately for non-Object parents).
 #
-#   Phase 2 (_phase2_register_fields)
+#   Phase 2 (_register_fields_into_type)
 #       Resolves string annotations via ``typing.get_type_hints``,
 #       converts them to ``TypeSchema`` / ``Field`` objects, validates
 #       field ordering, registers fields with the Cython layer, and
@@ -84,17 +85,18 @@ _PENDING_CLASSES: list[_PendingClass] = []
 #: variable by Python.
 _PY_CLASS_BY_MODULE: dict[str, dict[str, type]] = {}
 
-
 # ---------------------------------------------------------------------------
 # Phase 1: type registration
 # ---------------------------------------------------------------------------
 
 
-def _phase1_register_type(cls: type, type_key: str | None) -> Any:
+def _register_type_without_fields(cls: type, type_key: str | None) -> Any:
     """Phase 1: allocate type index and register the type (always succeeds)."""
     parent_info: core.TypeInfo | None = None
     for base in cls.__bases__:
         parent_info = core._type_cls_to_type_info(base)
+        if parent_info is None:
+            parent_info = getattr(base, "__tvm_ffi_type_info__", None)
         if parent_info is not None:
             break
     if parent_info is None:
@@ -111,7 +113,7 @@ def _phase1_register_type(cls: type, type_key: str | None) -> Any:
 
 
 def _rollback_registration(cls: type, type_info: Any) -> None:
-    """Undo :func:`_phase1_register_type` after a phase-2 failure.
+    """Undo :func:`_register_type_without_fields` after a phase-2 failure.
 
     The C-level type index is permanently consumed (cannot be reclaimed),
     but the Python-level registry dicts are cleaned up so a retry with
@@ -122,10 +124,11 @@ def _rollback_registration(cls: type, type_info: Any) -> None:
     core._rollback_py_class(type_info)  # ty: ignore[unresolved-attribute]
     # Remove from our own module-level resolution namespace.
     _PY_CLASS_BY_MODULE.get(cls.__module__, {}).pop(cls.__name__, None)
-    try:
-        delattr(cls, "__tvm_ffi_type_info__")
-    except AttributeError:
-        pass
+    for attr in ("__tvm_ffi_type_info__", "__tvm_ffi_is_dataclass__"):
+        try:
+            delattr(cls, attr)
+        except AttributeError:
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -133,10 +136,11 @@ def _rollback_registration(cls: type, type_info: Any) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _collect_own_fields(
+def _collect_own_fields(  # noqa: PLR0912
     cls: type,
     hints: dict[str, Any],
     decorator_kw_only: bool,
+    decorator_frozen: bool,
 ) -> list[Field]:
     """Parse own annotations into :class:`Field` objects.
 
@@ -149,7 +153,15 @@ def _collect_own_fields(
     """
     fields: list[Field] = []
     kw_only_active = decorator_kw_only
-    own_annotations: dict[str, str] = getattr(cls, "__annotations__", {})
+    # Python 3.14+ (PEP 749): annotations are lazily evaluated via
+    # __annotate__ and no longer stored directly in __dict__.  getattr()
+    # triggers evaluation and returns per-class annotations correctly.
+    # On Python < 3.14, getattr() follows MRO and returns *parent*
+    # annotations when the child has none — use __dict__ to avoid that.
+    if sys.version_info >= (3, 14):
+        own_annotations: dict[str, str] = getattr(cls, "__annotations__", {})
+    else:
+        own_annotations = cls.__dict__.get("__annotations__", {})
 
     for name in own_annotations:
         resolved_type = hints.get(name)
@@ -185,13 +197,18 @@ def _collect_own_fields(
             except AttributeError:
                 pass
 
-        # Fill in name and ty (set by the decorator, not the user)
+        # Fill in name, schema, and resolved type (set by the decorator, not the user)
         f.name = name
-        f.ty = TypeSchema.from_annotation(resolved_type)
+        f._ty_schema = TypeSchema.from_annotation(resolved_type)
+        f.type = resolved_type
 
         # Resolve kw_only: None means "inherit from decorator"
         if f.kw_only is None:
             f.kw_only = kw_only_active
+
+        # Apply class-level frozen when the field doesn't explicitly set it
+        if decorator_frozen and not f.frozen:
+            f.frozen = True
 
         # Resolve hash=None → follow compare (native dataclass semantics)
         if f.hash is None:
@@ -203,12 +220,15 @@ def _collect_own_fields(
 
 
 def _collect_py_methods(cls: type) -> list[tuple[str, Any, bool]] | None:
-    """Extract recognized FFI dunder methods from the class body.
+    """Extract recognized FFI dunder methods and type attrs from the class body.
 
     Only names listed in :data:`_FFI_RECOGNIZED_METHODS` are collected.
+    Callables are collected with their ``is_static`` flag; non-callable
+    values (e.g. ``__ffi_ir_traits__``) are collected as-is — the Cython
+    layer routes them to ``TVMFFITypeRegisterAttr`` based on name.
 
-    Returns a list of ``(name, func, is_static)`` tuples, or ``None``
-    if no eligible methods were found.
+    Returns a list of ``(name, value, is_static)`` tuples, or ``None``
+    if no eligible entries were found.
     """
     methods: list[tuple[str, Any, bool]] = []
     for name, value in cls.__dict__.items():
@@ -221,12 +241,39 @@ def _collect_py_methods(cls: type) -> list[tuple[str, Any, bool]] | None:
             func = value
             is_static = False
         else:
-            continue
+            func = value
+            is_static = False
         methods.append((name, func, is_static))
     return methods if methods else None
 
 
-def _phase2_register_fields(
+def _build_localns(cls: type, *, cross_module: bool = False) -> dict[str, Any]:
+    """Build the localns dict for resolving ``cls``'s annotations.
+
+    By default, includes only classes from ``cls.__module__``, preserving
+    standard Python name resolution semantics.  When ``cross_module=True``,
+    also includes classes from all other registered modules as a fallback
+    — this is needed when ``cls`` has a forward reference to a class in
+    another module that can't appear in ``cls.__module__``'s globals due
+    to a circular import (e.g. the target is imported only under
+    ``if TYPE_CHECKING:``).
+
+    Cross-module entries are added with ``setdefault`` so same-module
+    classes and the class itself always take precedence over foreign
+    classes with the same ``__name__``.
+    """
+    localns = dict(_PY_CLASS_BY_MODULE.get(cls.__module__, {}))
+    localns[cls.__name__] = cls
+    if cross_module:
+        for mod_name, mod_classes in list(_PY_CLASS_BY_MODULE.items()):
+            if mod_name == cls.__module__:
+                continue
+            for name, klass in mod_classes.items():
+                localns.setdefault(name, klass)
+    return localns
+
+
+def _register_fields_into_type(
     cls: type,
     type_info: Any,
     globalns: dict[str, Any],
@@ -237,24 +284,40 @@ def _phase2_register_fields(
     Returns True on success, False if forward references are unresolved.
     """
     # Resolve string annotations to types; return False (defer) on NameError.
-    localns = dict(_PY_CLASS_BY_MODULE.get(cls.__module__, {}))
-    localns[cls.__name__] = cls
+    #
+    # First try with module-scoped localns (standard Python name resolution).
+    # On NameError, retry with a cross-module localns that includes classes
+    # from every registered module — this handles circular imports where the
+    # target of a forward reference is imported only under TYPE_CHECKING and
+    # therefore never enters the declaring module's globals.
+    kwargs: dict[str, Any] = {"globalns": globalns, "localns": _build_localns(cls)}
+    if sys.version_info >= (3, 11):
+        kwargs["include_extras"] = True
     try:
-        kwargs: dict[str, Any] = {"globalns": globalns, "localns": localns}
-        if sys.version_info >= (3, 11):
-            kwargs["include_extras"] = True
         hints = typing.get_type_hints(cls, **kwargs)
     except (NameError, AttributeError):
-        return False
+        kwargs["localns"] = _build_localns(cls, cross_module=True)
+        try:
+            hints = typing.get_type_hints(cls, **kwargs)
+        except (NameError, AttributeError):
+            return False
 
-    own_fields = _collect_own_fields(cls, hints, params["kw_only"])
+    own_fields = _collect_own_fields(cls, hints, params["kw_only"], params["frozen"])
     py_methods = _collect_py_methods(cls)
 
     # Register fields and type-level structural eq/hash kind with the C layer.
     structure_kind = _STRUCTURE_KIND_MAP.get(params.get("structural_eq"))
     type_info._register_fields(own_fields, structure_kind)
+    # Attach the user's Field sentinel to each TypeField so the
+    # ``tvm_ffi.dataclasses.fields()`` compat layer can recover defaults
+    # and default_factory values.  _register_fields preserves order, so
+    # own_fields and type_info.fields line up 1:1.
+    for py_field, type_field in zip(own_fields, type_info.fields):
+        type_field.dataclass_field = py_field
     # Register user-defined dunder methods and read back system-generated ones.
-    type_info._register_py_methods(py_methods)
+    # Non-callable entries whose names are in _FFI_TYPE_ATTR_NAMES are routed
+    # to TVMFFITypeRegisterAttr by the Cython layer.
+    type_info._register_py_methods(py_methods, type_attr_names=_FFI_TYPE_ATTR_NAMES)
     _add_class_attrs(cls, type_info)
 
     # Remove deferred __init__ and restore user-defined __init__ if saved
@@ -279,6 +342,8 @@ def _phase2_register_fields(
         eq=params["eq"],
         order=params["order"],
         unsafe_hash=params["unsafe_hash"],
+        match_args=params["match_args"],
+        py_class_mode=True,
     )
     return True
 
@@ -295,7 +360,7 @@ def _flush_pending() -> None:
         changed = False
         remaining: list[_PendingClass] = []
         for entry in _PENDING_CLASSES:
-            if _phase2_register_fields(entry.cls, entry.type_info, entry.globalns, entry.params):
+            if _register_fields_into_type(entry.cls, entry.type_info, entry.globalns, entry.params):
                 changed = True
             else:
                 remaining.append(entry)
@@ -304,8 +369,7 @@ def _flush_pending() -> None:
 
 def _raise_unresolved_forward_reference(cls: type, globalns: dict[str, Any]) -> None:
     """Raise :class:`TypeError` listing the annotations that cannot be resolved."""
-    localns = dict(_PY_CLASS_BY_MODULE.get(cls.__module__, {}))
-    localns[cls.__name__] = cls
+    localns = _build_localns(cls, cross_module=True)
     unresolved: list[str] = []
     for name, ann_str in getattr(cls, "__annotations__", {}).items():
         if isinstance(ann_str, str):
@@ -324,8 +388,12 @@ def _make_temporary_init(
     def __init__(self: Any, *args: Any, **kwargs: Any) -> None:
         if type_info.fields is None:
             try:
-                if not _phase2_register_fields(cls, type_info, globalns, params):
+                if not _register_fields_into_type(cls, type_info, globalns, params):
                     _raise_unresolved_forward_reference(cls, globalns)
+                # cls stays in _PENDING_CLASSES after phase-2 succeeds; drop it
+                # before _flush_pending so the loop doesn't hit the Cython-level
+                # "_register_fields already called" assertion on a second pass.
+                _PENDING_CLASSES[:] = [p for p in _PENDING_CLASSES if p.cls is not cls]
                 _flush_pending()
             except Exception:
                 # Remove from pending list and roll back so the type key can be reused.
@@ -349,7 +417,7 @@ def _install_deferred_init(
     """Install a temporary ``__init__`` that completes registration on first call.
 
     Preserves a user-defined ``__init__`` if present in *cls.__dict__*;
-    it is restored by :func:`_phase2_register_fields` after registration
+    it is restored by :func:`_register_fields_into_type` after registration
     completes so that ``_install_dataclass_dunders`` sees it and skips
     auto-generation.
     """
@@ -377,27 +445,34 @@ _STRUCTURE_KIND_MAP: dict[str | None, int] = {
     "singleton": 5,  # kTVMFFISEqHashKindUniqueInstance
 }
 
-#: Allowlist of dunder method names that ``@py_class`` will auto-register
-#: as both TypeMethod (for reflection) and TypeAttr (for C++ dispatch).
+#: Names that should be registered as TypeAttrColumn entries (for C++
+#: dispatch via ``TypeAttrColumn``), NOT as TypeMethod.
 #:
-#: Only names in this set are collected from the class body.
-#: System-managed names (``__ffi_init__``, ``__ffi_shallow_copy__``, etc.)
-#: are intentionally absent because the C++ runtime generates them.
-_FFI_RECOGNIZED_METHODS: frozenset[str] = frozenset(
+#: See ``reflection::type_attr`` in ``accessor.h`` for the C++ constants.
+_FFI_TYPE_ATTR_NAMES: frozenset[str] = frozenset(
     {
-        # Recursive operations (RecursiveHash, RecursiveEq, RecursiveCompare, ReprPrint)
         "__ffi_repr__",
         "__ffi_hash__",
         "__ffi_eq__",
         "__ffi_compare__",
-        # Structural equality/hashing (StructuralEqual, StructuralHash)
+        "__ffi_convert__",
+        "__any_hash__",
+        "__any_equal__",
         "__s_equal__",
         "__s_hash__",
-        # Serialization (ToJSONGraph, FromJSONGraph)
         "__data_to_json__",
         "__data_from_json__",
     }
 )
+
+#: Allowlist of dunder names that ``_collect_py_methods`` collects from
+#: the class body.  Names in ``_FFI_TYPE_ATTR_NAMES`` are registered as
+#: TypeAttrColumn entries; all other names are registered as TypeMethod.
+#:
+#: System-managed names (``__ffi_new__``, ``__ffi_init__``,
+#: ``__ffi_shallow_copy__``) are intentionally
+#: absent because the C++ runtime generates them.
+_FFI_RECOGNIZED_METHODS: frozenset[str] = _FFI_TYPE_ATTR_NAMES
 
 
 @dataclass_transform(
@@ -405,16 +480,18 @@ _FFI_RECOGNIZED_METHODS: frozenset[str] = frozenset(
     order_default=False,
     field_specifiers=(field, Field),
 )
-def py_class(
+def py_class(  # noqa: PLR0913
     cls_or_type_key: type | str | None = None,
     /,
     *,
     type_key: str | None = None,
+    frozen: bool = False,
     init: bool = True,
     repr: bool = True,
     eq: bool = False,
     order: bool = False,
     unsafe_hash: bool = False,
+    match_args: bool = True,
     kw_only: bool = False,
     structural_eq: str | None = None,
     slots: bool = True,
@@ -456,6 +533,11 @@ def py_class(
     type_key
         Explicit FFI type key.  Auto-generated from
         ``{module}.{qualname}`` when omitted.
+    frozen
+        If True, all fields are read-only after ``__init__`` by default.
+        Individual fields can still be marked ``field(frozen=True)`` on a
+        non-frozen class.  Use ``type(obj).field_name.set(obj, value)``
+        as an escape hatch when mutation is necessary.
     init
         If True (default), generate ``__init__`` from field annotations.
     repr
@@ -467,6 +549,11 @@ def py_class(
         Requires ``eq=True``.
     unsafe_hash
         If True, generate ``__hash__`` (unsafe for mutable objects).
+    match_args
+        If True (default), set ``__match_args__`` to a tuple of the
+        positional ``__init__`` field names (``init=True`` and not
+        ``kw_only``), enabling ``match`` statements.  Ignored when the
+        class body already defines ``__match_args__``.
     kw_only
         If True, all fields are keyword-only in ``__init__`` by default.
     structural_eq
@@ -505,11 +592,13 @@ def py_class(
 
     effective_type_key = type_key
     params: dict[str, Any] = {
+        "frozen": frozen,
         "init": init,
         "repr": repr,
         "eq": eq,
         "order": order,
         "unsafe_hash": unsafe_hash,
+        "match_args": match_args,
         "kw_only": kw_only,
         "structural_eq": structural_eq,
     }
@@ -518,10 +607,10 @@ def py_class(
         nonlocal effective_type_key
         globalns = getattr(sys.modules.get(cls.__module__, None), "__dict__", {})
 
-        info = _phase1_register_type(cls, effective_type_key)
+        info = _register_type_without_fields(cls, effective_type_key)
 
         try:
-            if _phase2_register_fields(cls, info, globalns, params):
+            if _register_fields_into_type(cls, info, globalns, params):
                 _flush_pending()
             else:
                 _PENDING_CLASSES.append(_PendingClass(cls, info, globalns, params))
@@ -533,6 +622,10 @@ def py_class(
             _rollback_registration(cls, info)
             raise
 
+        # Marker: distinguishes @c_class / @py_class types from FFI containers
+        # (Array, List, Map, Dict) that also have __tvm_ffi_type_info__ but are
+        # not dataclasses.  Used by is_dataclass() in common.py.
+        setattr(cls, "__tvm_ffi_is_dataclass__", True)
         return cls
 
     # Handle different calling conventions:

@@ -48,7 +48,7 @@ inline ObjectPtr<Object> CreateEmptyObject(const TVMFFITypeInfo* type_info) {
     return details::ObjectUnsafe::ObjectPtrFromOwned<Object>(static_cast<TVMFFIObject*>(handle));
   }
   // Fallback: __ffi_new__ type attr (Python-defined types)
-  constexpr TVMFFIByteArray kFFINewAttrName = {"__ffi_new__", 11};
+  constexpr TVMFFIByteArray kFFINewAttrName = reflection::AsByteArray(reflection::type_attr::kNew);
   const TVMFFITypeAttrColumn* column = TVMFFIGetTypeAttrColumn(&kFFINewAttrName);
   if (column != nullptr) {
     int32_t offset = type_info->type_index - column->begin_index;
@@ -63,6 +63,7 @@ inline ObjectPtr<Object> CreateEmptyObject(const TVMFFITypeInfo* type_info) {
   TVM_FFI_THROW(RuntimeError) << "Type `" << TypeIndexToTypeKey(type_info->type_index)
                               << "` does not support reflection creation"
                               << " (no native creator or __ffi_new__ type attr)";
+  TVM_FFI_UNREACHABLE();
 }
 
 /*!
@@ -77,7 +78,7 @@ inline bool HasCreator(const TVMFFITypeInfo* type_info) {
   if (type_info->metadata != nullptr && type_info->metadata->creator != nullptr) {
     return true;
   }
-  constexpr TVMFFIByteArray kFFINewAttrName = {"__ffi_new__", 11};
+  constexpr TVMFFIByteArray kFFINewAttrName = reflection::AsByteArray(reflection::type_attr::kNew);
   const TVMFFITypeAttrColumn* column = TVMFFIGetTypeAttrColumn(&kFFINewAttrName);
   if (column != nullptr) {
     int32_t offset = type_info->type_index - column->begin_index;
@@ -90,6 +91,28 @@ inline bool HasCreator(const TVMFFITypeInfo* type_info) {
 }
 
 namespace reflection {
+
+namespace details {
+
+/*!
+ * \brief Convert an AnyView to a specific reflected object type.
+ *
+ * \tparam TObjectRef The object reference type to convert to.
+ * \param input The AnyView to convert.
+ * \return The converted object.
+ */
+template <typename TObjectRef>
+TObjectRef FFIConvertFromAnyViewToObjectRef(AnyView input) {
+  TVMFFIAny input_pod = input.CopyToTVMFFIAny();
+  if (auto opt = TypeTraits<TObjectRef>::TryCastFromAnyView(&input_pod)) {
+    return *std::move(opt);
+  }
+  TVM_FFI_THROW(TypeError) << "Cannot cast from `" << TypeIndexToTypeKey(input_pod.type_index)
+                           << "` to `" << TypeTraits<TObjectRef>::TypeStr() << "`";
+}
+
+}  // namespace details
+
 /*!
  * \brief helper wrapper class of TVMFFITypeInfo to create object based on reflection.
  */

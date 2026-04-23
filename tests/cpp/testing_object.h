@@ -96,15 +96,15 @@ inline void TIntObj::RegisterReflection() {
   refl::TypeAttrDef<TIntObj>()
       .def("test.GetValue", &TIntObj::GetValue)
       .attr("test.size", sizeof(TIntObj))
-      .attr("__any_hash__", reinterpret_cast<void*>(&TInt::CustomAnyHash))
-      .attr("__any_equal__", reinterpret_cast<void*>(&TInt::CustomAnyEqual));
+      .attr(refl::type_attr::kAnyHash, reinterpret_cast<void*>(&TInt::CustomAnyHash))
+      .attr(refl::type_attr::kAnyEqual, reinterpret_cast<void*>(&TInt::CustomAnyEqual));
   // custom json serialization
   refl::TypeAttrDef<TIntObj>()
-      .def("__data_to_json__",
+      .def(refl::type_attr::kDataToJson,
            [](const TIntObj* self) -> Map<String, Any> {
              return Map<String, Any>{{"value", self->value}};
            })
-      .def("__data_from_json__", [](Map<String, Any> json_obj) -> TInt {
+      .def(refl::type_attr::kDataFromJson, [](Map<String, Any> json_obj) -> TInt {
         return TInt(json_obj["value"].cast<int64_t>());
       });
 }
@@ -145,8 +145,8 @@ inline void TFloatObj::RegisterReflection() {
       .def("sub", [](const TFloatObj* self, double other) -> double { return self->value - other; })
       .def("add", &TFloatObj::Add, "add method");
   refl::TypeAttrDef<TFloatObj>()
-      .def("__any_hash__", &TFloat::CustomAnyHash)
-      .def("__any_equal__", &TFloat::CustomAnyEqual);
+      .def(refl::type_attr::kAnyHash, &TFloat::CustomAnyHash)
+      .def(refl::type_attr::kAnyEqual, &TFloat::CustomAnyEqual);
 }
 
 class TPrimExprObj : public Object {
@@ -272,8 +272,8 @@ class TCustomFuncObj : public Object {
         .def_ro("body", &TCustomFuncObj::body)
         .def_ro("comment", &TCustomFuncObj::comment);
     refl::TypeAttrDef<TCustomFuncObj>()
-        .def("__s_equal__", &TCustomFuncObj::SEqual)
-        .def("__s_hash__", &TCustomFuncObj::SHash);
+        .def(refl::type_attr::kSEqual, &TCustomFuncObj::SEqual)
+        .def(refl::type_attr::kSHash, &TCustomFuncObj::SHash);
   }
 
   static constexpr TVMFFISEqHashKind _type_s_eq_hash_kind = kTVMFFISEqHashKindTreeNode;

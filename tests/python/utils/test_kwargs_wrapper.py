@@ -373,7 +373,7 @@ def test_optimized_default_types() -> None:
 
 
 def test_map_dataclass_to_tuple() -> None:
-    """Test that dataclass arguments are converted to tuples via dataclasses.astuple."""
+    """Test map_dataclass_to_tuple in make_kwargs_wrapper."""
 
     @dataclasses.dataclass
     class Config:
@@ -388,7 +388,7 @@ def test_map_dataclass_to_tuple() -> None:
     def target(*args: Any) -> tuple[Any, ...]:
         return args
 
-    # Basic: one dataclass arg converted to tuple
+    # Basic: one dataclass arg converted
     wrapper = make_kwargs_wrapper(target, ["a", "cfg"], map_dataclass_to_tuple=["cfg"])
     result = wrapper(1, Config(x=10, y=20))
     assert result == (1, (10, 20))
@@ -402,7 +402,7 @@ def test_map_dataclass_to_tuple() -> None:
     result = wrapper(Config(x=1, y=2), Config(x=3, y=4))
     assert result == ((1, 2), (3, 4))
 
-    # Nested dataclass (astuple recurses)
+    # Nested dataclass (auto-recursion via type annotations)
     wrapper = make_kwargs_wrapper(target, ["a", "nested"], map_dataclass_to_tuple=["nested"])
     result = wrapper(1, Nested(value=5, cfg=Config(x=10, y=20)))
     assert result == (1, (5, (10, 20)))
@@ -412,7 +412,7 @@ def test_map_dataclass_to_tuple() -> None:
     result = wrapper(1, Config(x=10, y=20), 3)
     assert result == (1, (10, 20), 3)
 
-    # With defaults: dataclass arg has a default
+    # With defaults
     default_cfg = Config(x=0, y=0)
     wrapper = make_kwargs_wrapper(
         target, ["a", "cfg"], arg_defaults=(default_cfg,), map_dataclass_to_tuple=["cfg"]

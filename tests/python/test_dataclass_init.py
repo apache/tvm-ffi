@@ -20,7 +20,7 @@ This file exercises:
 1. metadata emitted by C++ for auto-init traits
 2. Python ``__init__`` signature generation
 3. constructor behavior across positional/kw-only/default/init=False combinations
-4. low-level KWARGS protocol via ``Object.__ffi_init__``
+4. low-level KWARGS protocol via TypeAttrColumn __ffi_init__ lookup
 5. inheritance behavior for auto-generated init
 6. copy/deepcopy/replace interplay with auto-init objects
 7. re-initialization, isinstance checks, and instance isolation
@@ -31,20 +31,34 @@ from __future__ import annotations
 
 import copy
 import inspect
-import sys
 from typing import Any
 
 import pytest
 from tvm_ffi import core
+from tvm_ffi.dataclasses import py_class
 from tvm_ffi.testing import (
+    TestCompare,
+    TestHash,
+    TestIntPair,
     _TestCxxAutoInit,
     _TestCxxAutoInitAllInitOff,
     _TestCxxAutoInitChild,
     _TestCxxAutoInitKwOnlyDefaults,
     _TestCxxAutoInitParent,
     _TestCxxAutoInitSimple,
+    _TestCxxClassDerived,
+    _TestCxxClassDerivedDerived,
     _TestCxxNoAutoInit,
 )
+from tvm_ffi.testing.testing import requires_py313
+
+
+def _ffi_init(obj: Any, *args: Any) -> None:
+    """Look up __ffi_init__ from the TypeAttrColumn and call it via __init_handle_by_constructor__."""
+    type_index = type(obj).__tvm_ffi_type_info__.type_index
+    ffi_init = core._lookup_type_attr(type_index, "__ffi_init__")
+    assert ffi_init is not None, f"No __ffi_init__ TypeAttrColumn entry for {type(obj)}"
+    obj.__init_handle_by_constructor__(ffi_init, *args)
 
 
 def _field_map(type_cls: type) -> dict[str, Any]:
@@ -61,8 +75,11 @@ def _method_metadata(type_cls: type, method_name: str) -> dict[str, Any]:
 
 class TestAutoInitMetadata:
     def test_auto_init_method_marked(self) -> None:
-        metadata = _method_metadata(_TestCxxAutoInit, "__ffi_init__")
-        assert metadata.get("auto_init") is True
+        type_info = getattr(_TestCxxAutoInit, "__tvm_ffi_type_info__")
+        ffi_init = core._lookup_type_attr(type_info.type_index, "__ffi_init__")
+        assert ffi_init is not None
+        # Auto-generated init is only in TypeAttrColumn, not in the method list
+        assert not any(m.name == "__ffi_init__" for m in type_info.methods)
 
     def test_field_bitmask_init_kw_only_and_defaults(self) -> None:
         fields = _field_map(_TestCxxAutoInit)
@@ -284,7 +301,7 @@ class TestAutoInitErrors:
 class TestAutoInitLowLevelFfiInit:
     def test_low_level_kwargs_protocol(self) -> None:
         obj = _TestCxxAutoInit.__new__(_TestCxxAutoInit)
-        obj.__ffi_init__(core.KWARGS, "a", 1, "c", 3)
+        _ffi_init(obj, core.KWARGS, "a", 1, "c", 3)
         assert obj.a == 1
         assert obj.b == 42
         assert obj.c == 3
@@ -293,47 +310,47 @@ class TestAutoInitLowLevelFfiInit:
     def test_low_level_kwargs_even_pairs_required(self) -> None:
         obj = _TestCxxAutoInit.__new__(_TestCxxAutoInit)
         with pytest.raises(TypeError):
-            obj.__ffi_init__(core.KWARGS, "a", 1, "c")
+            _ffi_init(obj, core.KWARGS, "a", 1, "c")
 
     def test_low_level_kwargs_duplicate_name(self) -> None:
         obj = _TestCxxAutoInit.__new__(_TestCxxAutoInit)
         with pytest.raises(TypeError):
-            obj.__ffi_init__(core.KWARGS, "a", 1, "a", 2, "c", 3)
+            _ffi_init(obj, core.KWARGS, "a", 1, "a", 2, "c", 3)
 
     def test_low_level_kwargs_unknown_name(self) -> None:
         obj = _TestCxxAutoInit.__new__(_TestCxxAutoInit)
         with pytest.raises(TypeError):
-            obj.__ffi_init__(core.KWARGS, "a", 1, "unknown", 2, "c", 3)
+            _ffi_init(obj, core.KWARGS, "a", 1, "unknown", 2, "c", 3)
 
     def test_low_level_kwargs_key_must_be_string(self) -> None:
         obj = _TestCxxAutoInit.__new__(_TestCxxAutoInit)
         with pytest.raises(TypeError):
-            obj.__ffi_init__(core.KWARGS, 1, 2, "a", 3, "c", 4)
+            _ffi_init(obj, core.KWARGS, 1, 2, "a", 3, "c", 4)
 
     def test_low_level_positional_too_many(self) -> None:
         obj = _TestCxxAutoInit.__new__(_TestCxxAutoInit)
         with pytest.raises(TypeError):
-            obj.__ffi_init__(1, 2, 3, 4)
+            _ffi_init(obj, 1, 2, 3, 4)
 
     def test_low_level_missing_required(self) -> None:
         obj = _TestCxxAutoInit.__new__(_TestCxxAutoInit)
         with pytest.raises(TypeError):
-            obj.__ffi_init__(1)
+            _ffi_init(obj, 1)
 
     def test_low_level_kw_only_field_rejected_positionally(self) -> None:
         obj = _TestCxxAutoInit.__new__(_TestCxxAutoInit)
         with pytest.raises(TypeError):
-            obj.__ffi_init__(1, 2)
+            _ffi_init(obj, 1, 2)
 
     def test_low_level_init_false_field_rejected(self) -> None:
         obj = _TestCxxAutoInit.__new__(_TestCxxAutoInit)
         with pytest.raises(TypeError):
-            obj.__ffi_init__(core.KWARGS, "a", 1, "b", 2, "c", 3)
+            _ffi_init(obj, core.KWARGS, "a", 1, "b", 2, "c", 3)
 
     def test_low_level_kwargs_all_init_fields_explicit(self) -> None:
         """Providing all init=True fields via KWARGS."""
         obj = _TestCxxAutoInit.__new__(_TestCxxAutoInit)
-        obj.__ffi_init__(core.KWARGS, "a", 10, "c", 30, "d", 40)
+        _ffi_init(obj, core.KWARGS, "a", 10, "c", 30, "d", 40)
         assert obj.a == 10
         assert obj.b == 42  # init=False, default
         assert obj.c == 30
@@ -343,18 +360,18 @@ class TestAutoInitLowLevelFfiInit:
         """Empty string as keyword name should be rejected as unknown."""
         obj = _TestCxxAutoInit.__new__(_TestCxxAutoInit)
         with pytest.raises(TypeError, match="unexpected keyword"):
-            obj.__ffi_init__(core.KWARGS, "", 1, "a", 2, "c", 3)
+            _ffi_init(obj, core.KWARGS, "", 1, "a", 2, "c", 3)
 
     def test_low_level_kwargs_odd_kv_count(self) -> None:
         """Odd number of key-value args after KWARGS sentinel."""
         obj = _TestCxxAutoInitSimple.__new__(_TestCxxAutoInitSimple)
         with pytest.raises(TypeError):
-            obj.__ffi_init__(core.KWARGS, "x")
+            _ffi_init(obj, core.KWARGS, "x")
 
     def test_low_level_positional_only_simple(self) -> None:
         """Positional-only mode (no KWARGS sentinel)."""
         obj = _TestCxxAutoInitSimple.__new__(_TestCxxAutoInitSimple)
-        obj.__ffi_init__(10, 20)
+        _ffi_init(obj, 10, 20)
         assert obj.x == 10
         assert obj.y == 20
 
@@ -362,20 +379,20 @@ class TestAutoInitLowLevelFfiInit:
         """Zero args for a type that requires them."""
         obj = _TestCxxAutoInitSimple.__new__(_TestCxxAutoInitSimple)
         with pytest.raises(TypeError, match="missing required"):
-            obj.__ffi_init__()
+            _ffi_init(obj)
 
     def test_low_level_kwargs_sentinel_only_no_kv_pairs(self) -> None:
         """KWARGS sentinel with zero key-value pairs; required fields still missing."""
         obj = _TestCxxAutoInit.__new__(_TestCxxAutoInit)
         with pytest.raises(TypeError, match="missing required"):
-            obj.__ffi_init__(core.KWARGS)
+            _ffi_init(obj, core.KWARGS)
 
     def test_low_level_kwargs_positional_then_sentinel_no_kv(self) -> None:
         """Positional args followed by KWARGS sentinel but no key-value pairs."""
         obj = _TestCxxAutoInit.__new__(_TestCxxAutoInit)
         # a=1 positionally, sentinel, no KV pairs → c is still missing
         with pytest.raises(TypeError, match="missing required"):
-            obj.__ffi_init__(1, core.KWARGS)
+            _ffi_init(obj, 1, core.KWARGS)
 
     def test_low_level_child_positional_routing(self) -> None:
         """Verify the inheritance positional fix at the raw __ffi_init__ level.
@@ -385,7 +402,7 @@ class TestAutoInitLowLevelFfiInit:
         So 2 positional args map to parent_required=1, child_required=2.
         """
         obj = _TestCxxAutoInitChild.__new__(_TestCxxAutoInitChild)
-        obj.__ffi_init__(1, 2, core.KWARGS, "child_kw_only", 3)
+        _ffi_init(obj, 1, 2, core.KWARGS, "child_kw_only", 3)
         assert obj.parent_required == 1
         assert obj.child_required == 2
         assert obj.parent_default == 5  # default
@@ -394,7 +411,7 @@ class TestAutoInitLowLevelFfiInit:
     def test_low_level_child_all_three_positional(self) -> None:
         """Three positional args for child at the raw protocol level."""
         obj = _TestCxxAutoInitChild.__new__(_TestCxxAutoInitChild)
-        obj.__ffi_init__(1, 2, 3, core.KWARGS, "child_kw_only", 4)
+        _ffi_init(obj, 1, 2, 3, core.KWARGS, "child_kw_only", 4)
         assert obj.parent_required == 1
         assert obj.child_required == 2
         assert obj.parent_default == 3
@@ -404,7 +421,7 @@ class TestAutoInitLowLevelFfiInit:
         """Four positional args exceed the 3 positional slots for child."""
         obj = _TestCxxAutoInitChild.__new__(_TestCxxAutoInitChild)
         with pytest.raises(TypeError, match="positional"):
-            obj.__ffi_init__(1, 2, 3, 4, core.KWARGS, "child_kw_only", 5)
+            _ffi_init(obj, 1, 2, 3, 4, core.KWARGS, "child_kw_only", 5)
 
 
 class TestAutoInitSimple:
@@ -437,7 +454,7 @@ class TestAutoInitSimple:
 
     def test_simple_low_level_kwargs(self) -> None:
         obj = _TestCxxAutoInitSimple.__new__(_TestCxxAutoInitSimple)
-        obj.__ffi_init__(core.KWARGS, "x", 10, "y", 20)
+        _ffi_init(obj, core.KWARGS, "x", 10, "y", 20)
         assert obj.x == 10
         assert obj.y == 20
 
@@ -489,7 +506,7 @@ class TestAutoInitAllInitOff:
 
     def test_low_level_empty_init(self) -> None:
         obj = _TestCxxAutoInitAllInitOff.__new__(_TestCxxAutoInitAllInitOff)
-        obj.__ffi_init__()
+        _ffi_init(obj)
         assert obj.x == 7
         assert obj.y == 9
         assert obj.z == 1234
@@ -509,7 +526,7 @@ class TestAutoInitAllInitOff:
     def test_low_level_rejects_positional(self) -> None:
         obj = _TestCxxAutoInitAllInitOff.__new__(_TestCxxAutoInitAllInitOff)
         with pytest.raises(TypeError):
-            obj.__ffi_init__(1)
+            _ffi_init(obj, 1)
 
 
 class TestAutoInitKwOnlyDefaults:
@@ -551,7 +568,7 @@ class TestAutoInitKwOnlyDefaults:
 
     def test_low_level_kwargs_call(self) -> None:
         obj = _TestCxxAutoInitKwOnlyDefaults.__new__(_TestCxxAutoInitKwOnlyDefaults)
-        obj.__ffi_init__(core.KWARGS, "p_required", 1, "k_required", 2)
+        _ffi_init(obj, core.KWARGS, "p_required", 1, "k_required", 2)
         assert obj.p_required == 1
         assert obj.p_default == 11
         assert obj.k_required == 2
@@ -655,7 +672,7 @@ class TestAutoInitCopyBehavior:
         assert obj_copy.y == 20
         assert not obj.same_as(obj_copy)
 
-    @pytest.mark.skipif(sys.version_info < (3, 13), reason="copy.replace requires Python 3.13+")
+    @requires_py313
     def test_replace(self) -> None:
         obj = _TestCxxAutoInit(1, c=3)
         replaced = copy.replace(obj, a=100, c=300)  # type: ignore[attr-defined]
@@ -691,7 +708,7 @@ class TestAutoInitCopyBehavior:
         assert obj_copy.z == 333
         assert not obj.same_as(obj_copy)
 
-    @pytest.mark.skipif(sys.version_info < (3, 13), reason="copy.replace requires Python 3.13+")
+    @requires_py313
     def test_replace_kw_only_defaults(self) -> None:
         obj = _TestCxxAutoInitKwOnlyDefaults(1, k_required=2)
         replaced = copy.replace(obj, k_required=99, p_default=88)  # type: ignore[attr-defined]
@@ -711,7 +728,7 @@ class TestAutoInitReinitialization:
         original_handle = obj.__chandle__()
         assert obj.a == 1
 
-        obj.__ffi_init__(core.KWARGS, "a", 100, "c", 300)
+        _ffi_init(obj, core.KWARGS, "a", 100, "c", 300)
         assert obj.a == 100
         assert obj.c == 300
         assert obj.__chandle__() != original_handle
@@ -722,7 +739,7 @@ class TestAutoInitReinitialization:
         obj.b = 999
         assert obj.b == 999
 
-        obj.__ffi_init__(core.KWARGS, "a", 2, "c", 4)
+        _ffi_init(obj, core.KWARGS, "a", 2, "c", 4)
         assert obj.b == 42  # reset to default
 
 
@@ -779,7 +796,7 @@ class TestAutoInitReinitInitOffNoDefault:
         """Fields b (init=False, default=42) should reset to default on reinit."""
         obj = _TestCxxAutoInit(1, c=3)
         obj.b = 999
-        obj.__ffi_init__(core.KWARGS, "a", 2, "c", 4)
+        _ffi_init(obj, core.KWARGS, "a", 2, "c", 4)
         assert obj.b == 42
 
     def test_reinit_init_false_without_reflection_default(self) -> None:
@@ -792,7 +809,7 @@ class TestAutoInitReinitInitOffNoDefault:
         obj.z = 9999
         assert obj.z == 9999
         # Reinit via low-level call
-        obj.__ffi_init__()
+        _ffi_init(obj)
         # z has no reflection default, so creator's C++ default (1234) is used
         assert obj.z == 1234
 
@@ -837,7 +854,7 @@ class TestAutoInitLowLevelKwOnlyDefaults:
     def test_low_level_positional_plus_kwargs_kw_only(self) -> None:
         """Positional arg for p_required, then KWARGS for kw_only fields."""
         obj = _TestCxxAutoInitKwOnlyDefaults.__new__(_TestCxxAutoInitKwOnlyDefaults)
-        obj.__ffi_init__(1, core.KWARGS, "k_required", 2)
+        _ffi_init(obj, 1, core.KWARGS, "k_required", 2)
         assert obj.p_required == 1
         assert obj.p_default == 11
         assert obj.k_required == 2
@@ -847,7 +864,7 @@ class TestAutoInitLowLevelKwOnlyDefaults:
     def test_low_level_two_positional_plus_kwargs(self) -> None:
         """Two positional args (p_required, p_default) then KWARGS for kw_only."""
         obj = _TestCxxAutoInitKwOnlyDefaults.__new__(_TestCxxAutoInitKwOnlyDefaults)
-        obj.__ffi_init__(1, 2, core.KWARGS, "k_required", 3, "k_default", 4)
+        _ffi_init(obj, 1, 2, core.KWARGS, "k_required", 3, "k_default", 4)
         assert obj.p_required == 1
         assert obj.p_default == 2
         assert obj.k_required == 3
@@ -857,8 +874,8 @@ class TestAutoInitLowLevelKwOnlyDefaults:
     def test_low_level_all_via_kwargs(self) -> None:
         """All init=True fields via KWARGS, no positional."""
         obj = _TestCxxAutoInitKwOnlyDefaults.__new__(_TestCxxAutoInitKwOnlyDefaults)
-        obj.__ffi_init__(
-            core.KWARGS, "p_required", 10, "p_default", 20, "k_required", 30, "k_default", 40
+        _ffi_init(
+            obj, core.KWARGS, "p_required", 10, "p_default", 20, "k_required", 30, "k_default", 40
         )
         assert obj.p_required == 10
         assert obj.p_default == 20
@@ -871,9 +888,9 @@ class TestClassLevelInitFalse:
     """init(false) passed to ObjectDef constructor suppresses __ffi_init__."""
 
     def test_no_ffi_init_method(self) -> None:
-        type_info = getattr(_TestCxxNoAutoInit, "__tvm_ffi_type_info__")
-        method_names = [m.name for m in type_info.methods]
-        assert "__ffi_init__" not in method_names
+        type_index = getattr(_TestCxxNoAutoInit, "__tvm_ffi_type_info__").type_index
+        ffi_init = core._lookup_type_attr(type_index, "__ffi_init__")
+        assert ffi_init is None
 
     def test_has_fields(self) -> None:
         type_info = getattr(_TestCxxNoAutoInit, "__tvm_ffi_type_info__")
@@ -886,5 +903,237 @@ class TestClassLevelInitFalse:
 
     def test_has_shallow_copy(self) -> None:
         type_info = getattr(_TestCxxNoAutoInit, "__tvm_ffi_type_info__")
-        method_names = [m.name for m in type_info.methods]
-        assert "__ffi_shallow_copy__" in method_names
+        # __ffi_shallow_copy__ is now TypeAttrColumn only, not a method
+        fn = core._lookup_type_attr(type_info.type_index, "__ffi_shallow_copy__")
+        assert fn is not None
+
+
+# ###########################################################################
+#  kw_only error message regression tests
+# ###########################################################################
+
+
+class TestKwOnlyErrorMessages:
+    """Verify that error messages distinguish keyword-only from positional."""
+
+    def test_missing_kw_only_error_says_keyword_only(self) -> None:
+        """Missing required kw_only field should say 'keyword-only'."""
+        with pytest.raises(TypeError, match="keyword-only"):
+            _TestCxxAutoInit(1)  # ty: ignore[missing-argument]
+
+    def test_missing_positional_error_does_not_say_keyword_only(self) -> None:
+        """Missing required positional field should NOT say 'keyword-only'."""
+        with pytest.raises(TypeError, match="missing required argument") as exc_info:
+            _TestCxxAutoInit(c=3)  # ty: ignore[missing-argument]
+        assert "keyword-only" not in str(exc_info.value)
+
+    def test_child_missing_kw_only_error_says_keyword_only(self) -> None:
+        """Inherited kw_only field should produce 'keyword-only' error."""
+        with pytest.raises(TypeError, match="keyword-only"):
+            _TestCxxAutoInitChild(parent_required=1, child_required=2)  # ty: ignore[missing-argument]
+
+    def test_kw_only_defaults_missing_error(self) -> None:
+        """KwOnlyDefaults type: missing k_required should say 'keyword-only'."""
+        with pytest.raises(TypeError, match="keyword-only"):
+            _TestCxxAutoInitKwOnlyDefaults(1)  # ty: ignore[missing-argument]
+
+    def test_low_level_kw_only_error_says_keyword_only(self) -> None:
+        """Low-level __ffi_init__ also gives 'keyword-only' error."""
+        obj = _TestCxxAutoInit.__new__(_TestCxxAutoInit)
+        with pytest.raises(TypeError, match="keyword-only"):
+            _ffi_init(obj, 1)
+
+
+# ###########################################################################
+#  __ffi_init__ TypeMethod registration regression tests
+#
+#  These tests verify that def(init<>) in C++ registers __ffi_init__ as a
+#  TypeMethod (not just TypeAttrColumn), preserving type_schema metadata.
+#  They also verify the __ffi_init__ instance method wrapper and the MISSING
+#  sentinel used for default parameter values.
+#  See commit 2987899a for the original fix.
+# ###########################################################################
+
+
+class TestFfiInitAsTypeMethod:
+    """Verify that classes using ``def(init<>)`` expose __ffi_init__ as a TypeMethod."""
+
+    @pytest.mark.parametrize("cls", [TestIntPair, TestCompare, TestHash])
+    def test_explicit_init_has_ffi_init_type_method(self, cls: type) -> None:
+        type_info = cls.__tvm_ffi_type_info__  # ty: ignore[unresolved-attribute]
+        method_names = {m.name for m in type_info.methods}
+        assert "__ffi_init__" in method_names
+
+    def test_auto_init_does_not_have_ffi_init_type_method(self) -> None:
+        type_info = _TestCxxAutoInit.__tvm_ffi_type_info__  # ty: ignore[unresolved-attribute]
+        method_names = {m.name for m in type_info.methods}
+        assert "__ffi_init__" not in method_names
+
+    @pytest.mark.parametrize("cls", [TestIntPair, TestCompare, TestHash])
+    def test_ffi_init_type_method_has_func(self, cls: type) -> None:
+        type_info = cls.__tvm_ffi_type_info__  # ty: ignore[unresolved-attribute]
+        for method in type_info.methods:
+            if method.name == "__ffi_init__":
+                assert method.func is not None
+                break
+        else:
+            pytest.fail(f"__ffi_init__ not found in {cls.__name__} methods")  # ty: ignore[invalid-argument-type]
+
+
+class TestFfiInitAsInstanceMethod:
+    """Verify that __ffi_init__ is available as a callable method on registered classes."""
+
+    def test_explicit_init_class_has_ffi_init_attr(self) -> None:
+        assert hasattr(TestIntPair, "__ffi_init__")
+
+    def test_auto_init_class_has_ffi_init_attr(self) -> None:
+        assert hasattr(_TestCxxAutoInit, "__ffi_init__")
+
+    def test_ffi_init_constructs_explicit_init_object(self) -> None:
+        obj = TestIntPair.__new__(TestIntPair)
+        obj.__ffi_init__(10, 20)  # ty: ignore[unresolved-attribute]
+        assert obj.a == 10
+        assert obj.b == 20
+        assert obj.sum() == 30
+
+    def test_ffi_init_constructs_auto_init_object(self) -> None:
+        obj = _TestCxxAutoInitSimple.__new__(_TestCxxAutoInitSimple)
+        obj.__ffi_init__(7, 8)  # ty: ignore[unresolved-attribute]
+        assert obj.x == 7
+        assert obj.y == 8
+
+    def test_ffi_init_with_kwargs_protocol(self) -> None:
+        obj = _TestCxxAutoInit.__new__(_TestCxxAutoInit)
+        obj.__ffi_init__(a=1, c=3)  # ty: ignore[unresolved-attribute]
+        assert obj.a == 1
+        assert obj.b == 42
+        assert obj.c == 3
+        assert obj.d == 99
+
+
+class TestFfiInitTypeOwnerGuard:
+    """Verify the type-owner guard prevents subclass misuse of __ffi_init__."""
+
+    def test_same_type_ffi_init_succeeds(self) -> None:
+        obj = TestIntPair.__new__(TestIntPair)
+        TestIntPair.__ffi_init__(obj, 1, 2)  # ty: ignore[unresolved-attribute]
+        assert obj.a == 1
+        assert obj.b == 2
+
+    def test_subclass_ffi_init_raises_type_error(self) -> None:
+        obj = _TestCxxClassDerivedDerived.__new__(_TestCxxClassDerivedDerived)
+        with pytest.raises(TypeError, match="not supported"):
+            _TestCxxClassDerived.__ffi_init__(obj, 1, 2, 3.0)  # ty: ignore[unresolved-attribute]
+
+
+class TestMissingSentinelDefaults:
+    """Verify that auto-generated __init__ signatures use core.MISSING for defaults."""
+
+    def test_default_params_use_core_missing(self) -> None:
+        sig = inspect.signature(_TestCxxAutoInit.__init__)
+        d_param = sig.parameters["d"]
+        assert d_param.default is not inspect.Parameter.empty
+        assert d_param.default is core.MISSING
+
+    def test_kw_only_default_uses_core_missing(self) -> None:
+        sig = inspect.signature(_TestCxxAutoInitKwOnlyDefaults.__init__)
+        assert sig.parameters["k_default"].default is core.MISSING
+        assert sig.parameters["p_default"].default is core.MISSING
+
+    def test_required_params_have_no_default(self) -> None:
+        sig = inspect.signature(_TestCxxAutoInit.__init__)
+        assert sig.parameters["a"].default is inspect.Parameter.empty
+        assert sig.parameters["c"].default is inspect.Parameter.empty
+
+    def test_missing_not_sent_to_ffi(self) -> None:
+        """MISSING sentinel values should be stripped, not forwarded to C++."""
+        obj = _TestCxxAutoInitKwOnlyDefaults(p_required=1, k_required=2)
+        assert obj.p_default == 11
+        assert obj.k_default == 22
+        assert obj.hidden == 33
+
+    def test_derived_class_defaults(self) -> None:
+        obj = _TestCxxClassDerived(v_i64=1, v_i32=2, v_f64=3.0)
+        assert obj.v_f32 == 8.0
+
+
+class TestFfiInitDualRegistration:
+    """Verify __ffi_init__ is available from both TypeMethod and TypeAttrColumn."""
+
+    @pytest.mark.parametrize("cls", [TestIntPair, TestCompare])
+    def test_explicit_init_in_type_attr_column(self, cls: type) -> None:
+        type_info = cls.__tvm_ffi_type_info__  # ty: ignore[unresolved-attribute]
+        ffi_init = core._lookup_type_attr(type_info.type_index, "__ffi_init__")
+        assert ffi_init is not None
+
+    def test_auto_init_in_type_attr_column(self) -> None:
+        type_info = _TestCxxAutoInit.__tvm_ffi_type_info__  # ty: ignore[unresolved-attribute]
+        ffi_init = core._lookup_type_attr(type_info.type_index, "__ffi_init__")
+        assert ffi_init is not None
+
+    def test_explicit_init_method_and_attr_produce_same_result(self) -> None:
+        type_info = TestIntPair.__tvm_ffi_type_info__  # ty: ignore[unresolved-attribute]
+        method_func = None
+        for method in type_info.methods:
+            if method.name == "__ffi_init__":
+                method_func = method.func
+                break
+        assert method_func is not None
+        attr_func = core._lookup_type_attr(type_info.type_index, "__ffi_init__")
+        assert attr_func is not None
+        obj1 = TestIntPair.__new__(TestIntPair)
+        obj1.__init_handle_by_constructor__(method_func, 10, 20)
+        obj2 = TestIntPair.__new__(TestIntPair)
+        obj2.__init_handle_by_constructor__(attr_func, 10, 20)
+        assert obj1.a == obj2.a == 10
+        assert obj1.b == obj2.b == 20
+
+
+# ###########################################################################
+#  Python 3.14 annotation regression (PEP 749)
+#
+#  Python 3.14 stores annotations lazily via __annotate_func__ instead of
+#  directly in cls.__dict__["__annotations__"].  This broke @py_class field
+#  discovery when it used cls.__dict__.get("__annotations__", {}).
+# ###########################################################################
+
+
+@py_class("testing.PyClassSimple")
+class _PyClassSimple(core.Object):
+    x: int
+    y: int
+
+
+@py_class("testing.PyClassWithDefault")
+class _PyClassWithDefault(core.Object):
+    a: int
+    b: int = 42
+
+
+class TestPyClassAnnotationDiscovery:
+    """Regression: @py_class must discover fields on Python 3.14+ (PEP 749)."""
+
+    def test_fields_registered(self) -> None:
+        ti: core.TypeInfo = _PyClassSimple.__tvm_ffi_type_info__  # type: ignore[unresolved-attribute]
+        names = [f.name for f in ti.fields]
+        assert names == ["x", "y"]
+
+    def test_construct_kwargs(self) -> None:
+        obj = _PyClassSimple(x=1, y=2)
+        assert obj.x == 1
+        assert obj.y == 2
+
+    def test_construct_positional(self) -> None:
+        obj = _PyClassSimple(10, 20)
+        assert obj.x == 10
+        assert obj.y == 20
+
+    def test_default_field(self) -> None:
+        obj = _PyClassWithDefault(a=7)
+        assert obj.a == 7
+        assert obj.b == 42
+
+    def test_override_default(self) -> None:
+        obj = _PyClassWithDefault(a=1, b=2)
+        assert obj.a == 1
+        assert obj.b == 2

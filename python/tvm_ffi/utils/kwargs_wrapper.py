@@ -22,11 +22,12 @@ keyword argument support using code generation techniques.
 
 from __future__ import annotations
 
-import dataclasses
 import functools
 import inspect
 import keyword
 from typing import Any, Callable, Iterable
+
+from tvm_ffi.utils.unpack_dataclass import unpack_dataclass_to_tuple
 
 # Sentinel object for missing arguments
 MISSING = object()
@@ -35,12 +36,12 @@ MISSING = object()
 _INTERNAL_TARGET_FUNC = "__i_target_func"
 _INTERNAL_MISSING = "__i_MISSING"
 _INTERNAL_DEFAULTS_DICT = "__i_arg_defaults"
-_INTERNAL_ASTUPLE = "__i_astuple"
+_INTERNAL_UNPACK = "__i_unpack"
 _INTERNAL_NAMES = {
     _INTERNAL_TARGET_FUNC,
     _INTERNAL_MISSING,
     _INTERNAL_DEFAULTS_DICT,
-    _INTERNAL_ASTUPLE,
+    _INTERNAL_UNPACK,
 }
 
 
@@ -163,34 +164,34 @@ def _build_wrapper_code(
     call_parts: list[str] = []
     runtime_defaults: dict[str, Any] = {}
 
-    def _wrap_astuple(name: str, expr: str) -> str:
+    def _transform_expr(name: str, expr: str) -> str:
         if name in dc_to_tuple_set:
-            return f"{_INTERNAL_ASTUPLE}({expr})"
+            return f"{_INTERNAL_UNPACK}({expr})"
         return expr
 
     def _add_param_with_default(name: str, default_value: Any) -> None:
         # Directly embed None and bool defaults; use MISSING sentinel for others.
         if default_value is None:
             arg_parts.append(f"{name}=None")
-            call_parts.append(_wrap_astuple(name, name))
+            call_parts.append(_transform_expr(name, name))
         elif type(default_value) is bool:
             default_value_str = "True" if default_value else "False"
             arg_parts.append(f"{name}={default_value_str}")
-            call_parts.append(_wrap_astuple(name, name))
+            call_parts.append(_transform_expr(name, name))
         else:
             arg_parts.append(f"{name}={_INTERNAL_MISSING}")
             runtime_defaults[name] = default_value
             base_expr = (
                 f'{_INTERNAL_DEFAULTS_DICT}["{name}"] if {name} is {_INTERNAL_MISSING} else {name}'
             )
-            call_parts.append(_wrap_astuple(name, base_expr))
+            call_parts.append(_transform_expr(name, base_expr))
 
     for name in arg_names:
         if name in arg_defaults_dict:
             _add_param_with_default(name, arg_defaults_dict[name])
         else:
             arg_parts.append(name)
-            call_parts.append(_wrap_astuple(name, name))
+            call_parts.append(_transform_expr(name, name))
 
     if kwonly_names:
         arg_parts.append("*")
@@ -199,7 +200,7 @@ def _build_wrapper_code(
                 _add_param_with_default(name, kwonly_defaults[name])
             else:
                 arg_parts.append(name)
-                call_parts.append(_wrap_astuple(name, name))
+                call_parts.append(_transform_expr(name, name))
 
     arg_list = ", ".join(arg_parts)
     call_list = ", ".join(call_parts)
@@ -252,10 +253,13 @@ def make_kwargs_wrapper(
         Optional prototype function to copy metadata (__name__, __doc__, __module__,
         __qualname__, __annotations__) from. If None, no metadata is copied.
     map_dataclass_to_tuple
-        Optional list of argument names whose values should be converted from dataclass
-        instances to tuples (via ``dataclasses.astuple``) before being passed to the
-        target function. This is useful when the target function expects flattened tuple
-        arguments but callers pass dataclass instances.
+        Optional list of argument names whose values should be converted from
+        dataclass instances to tuples via ``unpack_dataclass_to_tuple``.
+        Dataclass fields are unpacked to tuple and leaf fields are shallow copied.
+
+        Nested dataclass fields are recursed automatically based on type annotations.
+        Lists/tuples are recursed element-wise. Dicts are recursed on values.
+        Non-dataclass leaves are passed through unchanged.
 
     Returns
     -------
@@ -296,7 +300,7 @@ def make_kwargs_wrapper(
         _INTERNAL_DEFAULTS_DICT: runtime_defaults,
     }
     if dc_to_tuple_set:
-        exec_globals[_INTERNAL_ASTUPLE] = dataclasses.astuple
+        exec_globals[_INTERNAL_UNPACK] = unpack_dataclass_to_tuple
     namespace: dict[str, Any] = {}
     exec(code_str, exec_globals, namespace)
     new_func = namespace["wrapper"]
@@ -335,9 +339,8 @@ def make_kwargs_wrapper_from_signature(
         These arguments will not be included in the generated wrapper. If a name in this iterable
         does not exist in the signature, it is silently ignored.
     map_dataclass_to_tuple
-        Optional list of argument names whose values should be converted from dataclass
-        instances to tuples (via ``dataclasses.astuple``) before being passed to the
-        target function.
+        Optional list of argument names to unpack via ``unpack_dataclass_to_tuple``.
+        See ``make_kwargs_wrapper`` for details.
 
     Returns
     -------

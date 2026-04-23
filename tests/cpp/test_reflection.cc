@@ -29,6 +29,12 @@
 
 #include "./testing_object.h"
 
+/*! \brief Look up __ffi_init__ from the TypeAttrColumn (not the method table). */
+static tvm::ffi::Function GetInitAttr(const char* type_key) {
+  static tvm::ffi::reflection::TypeAttrColumn col(tvm::ffi::reflection::type_attr::kInit);
+  return col[tvm::ffi::TypeKeyToIndex(type_key)].cast<tvm::ffi::Function>();
+}
+
 namespace {
 
 using namespace tvm::ffi;
@@ -147,7 +153,7 @@ TEST(Reflection, CallMethod) {
 }
 
 TEST(Reflection, InitFunctionBase) {
-  Function int_init = reflection::GetMethod("test.TestObjA", "__ffi_init__");
+  Function int_init = GetInitAttr("test.TestObjA");
   Any obj_a = int_init(1, 2);
   EXPECT_TRUE(obj_a.as<TestObjA>() != nullptr);
   EXPECT_EQ(obj_a.as<TestObjA>()->x, 1);
@@ -155,7 +161,7 @@ TEST(Reflection, InitFunctionBase) {
 }
 
 TEST(Reflection, InitFunctionDerived) {
-  Function derived_init = reflection::GetMethod("test.TestObjADerived", "__ffi_init__");
+  Function derived_init = GetInitAttr("test.TestObjADerived");
   Any obj_derived = derived_init(1, 2, 3);
   EXPECT_TRUE(obj_derived.as<TestObjADerived>() != nullptr);
   EXPECT_EQ(obj_derived.as<TestObjADerived>()->x, 1);
@@ -363,7 +369,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
 }
 
 TEST(Reflection, InitWithAny) {
-  Function init = reflection::GetMethod("test.TestObjWithAny", "__ffi_init__");
+  Function init = GetInitAttr("test.TestObjWithAny");
   Any obj1 = init(42);
   ASSERT_TRUE(obj1.as<TestObjWithAny>() != nullptr);
   EXPECT_EQ(obj1.as<TestObjWithAny>()->value.cast<int>(), 42);
@@ -378,7 +384,7 @@ TEST(Reflection, InitWithAny) {
 }
 
 TEST(Reflection, InitWithAnyView) {
-  Function init = reflection::GetMethod("test.TestObjWithAnyView", "__ffi_init__");
+  Function init = GetInitAttr("test.TestObjWithAnyView");
   Any obj1 = init(42);
   ASSERT_TRUE(obj1.as<TestObjWithAnyView>() != nullptr);
   EXPECT_EQ(obj1.as<TestObjWithAnyView>()->value.cast<int>(), 42);
@@ -465,7 +471,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
 TEST(Reflection, AutoInitPositional) {
   // Auto-generated init: positional args for non-kw-only init=True fields (a, d)
   // c is kw_only so it cannot be passed positionally.
-  Function auto_init = reflection::GetMethod("test.AutoInit", "__ffi_init__");
+  Function auto_init = GetInitAttr("test.AutoInit");
   ObjectRef kwargs = Function::GetGlobalRequired("ffi.GetKwargsObject")().cast<ObjectRef>();
   // Positional: a=1, d=3; keyword: c=2
   Any obj = auto_init(int64_t{1}, int64_t{3}, kwargs, String("c"), int64_t{2});
@@ -479,7 +485,7 @@ TEST(Reflection, AutoInitPositional) {
 
 TEST(Reflection, AutoInitPartialPositional) {
   // Provide only a (position 0); c is required but missing → error
-  Function auto_init = reflection::GetMethod("test.AutoInit", "__ffi_init__");
+  Function auto_init = GetInitAttr("test.AutoInit");
   EXPECT_THROW(
       {
         try {
@@ -494,7 +500,7 @@ TEST(Reflection, AutoInitPartialPositional) {
 
 TEST(Reflection, AutoInitWithDefaults) {
   // Provide a positionally and c via KWARGS; d should use default 99
-  Function auto_init = reflection::GetMethod("test.AutoInit", "__ffi_init__");
+  Function auto_init = GetInitAttr("test.AutoInit");
   ObjectRef kwargs = Function::GetGlobalRequired("ffi.GetKwargsObject")().cast<ObjectRef>();
   Any obj = auto_init(int64_t{10}, kwargs, String("c"), int64_t{20});
   auto* p = obj.as<TestAutoInitObj>();
@@ -506,7 +512,7 @@ TEST(Reflection, AutoInitWithDefaults) {
 }
 
 TEST(Reflection, AutoInitKwargs) {
-  Function auto_init = reflection::GetMethod("test.AutoInit", "__ffi_init__");
+  Function auto_init = GetInitAttr("test.AutoInit");
   ObjectRef kwargs = Function::GetGlobalRequired("ffi.GetKwargsObject")().cast<ObjectRef>();
 
   // Positional: a=1, then KWARGS: c=30, d=40
@@ -520,7 +526,7 @@ TEST(Reflection, AutoInitKwargs) {
 }
 
 TEST(Reflection, AutoInitKwargsOnly) {
-  Function auto_init = reflection::GetMethod("test.AutoInit", "__ffi_init__");
+  Function auto_init = GetInitAttr("test.AutoInit");
   ObjectRef kwargs = Function::GetGlobalRequired("ffi.GetKwargsObject")().cast<ObjectRef>();
 
   // No positional args, all via KWARGS
@@ -535,7 +541,7 @@ TEST(Reflection, AutoInitKwargsOnly) {
 }
 
 TEST(Reflection, AutoInitKwargsDuplicate) {
-  Function auto_init = reflection::GetMethod("test.AutoInit", "__ffi_init__");
+  Function auto_init = GetInitAttr("test.AutoInit");
   ObjectRef kwargs = Function::GetGlobalRequired("ffi.GetKwargsObject")().cast<ObjectRef>();
 
   // a is provided positionally AND as kwarg → error
@@ -552,7 +558,7 @@ TEST(Reflection, AutoInitKwargsDuplicate) {
 }
 
 TEST(Reflection, AutoInitKwargsUnknown) {
-  Function auto_init = reflection::GetMethod("test.AutoInit", "__ffi_init__");
+  Function auto_init = GetInitAttr("test.AutoInit");
   ObjectRef kwargs = Function::GetGlobalRequired("ffi.GetKwargsObject")().cast<ObjectRef>();
 
   EXPECT_THROW(
@@ -606,7 +612,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
 }
 
 TEST(Reflection, AutoInitSimple) {
-  Function auto_init = reflection::GetMethod("test.AutoInitSimple", "__ffi_init__");
+  Function auto_init = GetInitAttr("test.AutoInitSimple");
   Any obj = auto_init(int64_t{10}, int64_t{20});
   auto* p = obj.as<TestAutoInitSimpleObj>();
   ASSERT_NE(p, nullptr);
@@ -615,7 +621,7 @@ TEST(Reflection, AutoInitSimple) {
 }
 
 TEST(Reflection, AutoInitSimpleTooManyArgs) {
-  Function auto_init = reflection::GetMethod("test.AutoInitSimple", "__ffi_init__");
+  Function auto_init = GetInitAttr("test.AutoInitSimple");
   EXPECT_THROW(auto_init(int64_t{1}, int64_t{2}, int64_t{3}), std::exception);
 }
 

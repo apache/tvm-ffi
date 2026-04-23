@@ -173,6 +173,23 @@ def test_register_object_wires_init() -> None:
     assert bare.__chandle__() == 0
 
 
+def test_id_and_is() -> None:
+    x = tvm_ffi.testing.TestIntPair(1, 2)
+    y = tvm_ffi.testing.TestIntPair(1, 2)
+
+    # id_ is the integer handle, aliasing __chandle__.
+    assert x.id_ == x.__chandle__()
+    assert x.id_ != 0
+    assert x.id_ != y.id_
+
+    # is_ tests handle identity, aliasing same_as.
+    assert x.is_(x)
+    assert not x.is_(y)
+    assert x.is_(x) == x.same_as(x)
+    assert not x.is_(object())
+    assert not x.is_(None)
+
+
 def test_object_protocol() -> None:
     class CompactObject:
         def __init__(self, backend_obj: Any) -> None:

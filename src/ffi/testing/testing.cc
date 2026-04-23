@@ -27,10 +27,12 @@
 #include <tvm/ffi/container/tensor.h>
 #include <tvm/ffi/container/variant.h>
 #include <tvm/ffi/dtype.h>
+#include <tvm/ffi/enum.h>
 #include <tvm/ffi/extra/c_env_api.h>
 #include <tvm/ffi/function.h>
 #include <tvm/ffi/optional.h>
 #include <tvm/ffi/reflection/accessor.h>
+#include <tvm/ffi/reflection/enum_def.h>
 #include <tvm/ffi/reflection/registry.h>
 
 #include <chrono>
@@ -77,6 +79,30 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("sum", &TestIntPair::Sum, "Method to compute sum of a and b");
   refl::TypeAttrDef<TestIntPairObj>().def(
       refl::type_attr::kConvert, &refl::details::FFIConvertFromAnyViewToObjectRef<TestIntPair>);
+}
+
+// C++-backed enum used by the Python ``Enum`` tests to exercise both
+// ``EnumDef``-registered entries and the Python ``ClassVar``-based binding.
+class TestEnumVariantObj : public tvm::ffi::EnumObj {
+ public:
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("testing.TestEnumVariant", TestEnumVariantObj,
+                                    tvm::ffi::EnumObj);
+};
+
+class TestEnumVariant : public tvm::ffi::Enum {
+ public:
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(TestEnumVariant, tvm::ffi::Enum, TestEnumVariantObj);
+};
+
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  // ObjectDef registers the type on destruction, so the temporary is intentional;
+  // silence clang-tidy's bugprone-unused-raii since the RAII finalisation is the point.
+  refl::ObjectDef<TestEnumVariantObj>(refl::init(false));  // NOLINT(bugprone-unused-raii)
+  refl::TypeAttrDef<TestEnumVariantObj>().def(
+      refl::type_attr::kConvert, &refl::details::FFIConvertFromAnyViewToObjectRef<TestEnumVariant>);
+  refl::EnumDef<TestEnumVariantObj>("Alpha").set_attr("code", int64_t{10});
+  refl::EnumDef<TestEnumVariantObj>("Beta").set_attr("code", int64_t{20});
 }
 
 class TestObjectBase : public Object {
@@ -478,7 +504,6 @@ TVM_FFI_STATIC_INIT_BLOCK() {
 
   refl::ObjectDef<TestUnregisteredObject>()
       .def(refl::init<int64_t, int64_t>(), "Constructor of TestUnregisteredObject")
-      .def_ro("v1", &TestUnregisteredObject::v1)
       .def_ro("v2", &TestUnregisteredObject::v2)
       .def("get_v2_plus_two", &TestUnregisteredObject::GetV2PlusTwo,
            "Get (v2 + 2) from TestUnregisteredObject");
@@ -542,6 +567,8 @@ TVM_FFI_STATIC_INIT_BLOCK() {
            })
       .def("testing.optional_tensor_view_has_value",
            [](const Optional<TensorView>& t) { return t.has_value(); })
+      .def("testing.enum_variant_get",
+           [](const String& name) -> Enum { return EnumObj::Get<TestEnumVariantObj>(name); })
       .def_method("testing.TestIntPairSum", &TestIntPair::Sum, "Get sum of the pair")
       // Container-with-tensor test helpers for DLPack container conversion
       // NOLINTBEGIN(performance-unnecessary-value-param)

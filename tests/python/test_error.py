@@ -88,7 +88,7 @@ def test_error_from_nested_pyfunc() -> None:
             assert pos_cxx_raise < pos_lambda
             assert pos_lambda < pos_cxx_apply
         except Exception as e:
-            pytest.xfail("May fail if debug symbols are missing")
+            pytest.xfail("May fail if debug symbols are missing")  # ty: ignore[invalid-argument-type, too-many-positional-arguments]
 
 
 def test_error_traceback_update() -> None:

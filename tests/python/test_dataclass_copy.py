@@ -22,7 +22,6 @@ from __future__ import annotations
 import copy
 import itertools
 import pickle
-import sys
 from typing import Dict, List, Optional
 
 import pytest
@@ -31,8 +30,6 @@ import tvm_ffi.testing
 from tvm_ffi._ffi_api import DeepCopy
 from tvm_ffi.core import Object
 from tvm_ffi.dataclasses import py_class
-
-_needs_310 = pytest.mark.skipif(sys.version_info < (3, 10), reason="X | Y syntax requires 3.10+")
 
 _counter_pc = itertools.count()
 
@@ -274,7 +271,7 @@ class TestDeepCopy:
 
     def test_non_copyable_type_raises(self) -> None:
         obj = tvm_ffi.testing.TestNonCopyable(42)
-        with pytest.raises(TypeError, match="does not support deepcopy"):
+        with pytest.raises((TypeError, RuntimeError), match="not copy-constructible"):
             copy.deepcopy(obj)
 
     def test_long_string_in_array(self) -> None:
@@ -934,10 +931,14 @@ class TestReplace:
         obj.__replace__(v_i64=100)  # ty: ignore[unresolved-attribute]
         assert obj.v_i64 == 5  # ty: ignore[unresolved-attribute]
 
-    def test_replace_readonly_field_raises(self) -> None:
+    def test_replace_readonly_field(self) -> None:
+        # __replace__ uses the FFIProperty.set() escape hatch,
+        # so it works even on frozen / read-only fields.
         pair = tvm_ffi.testing.TestIntPair(3, 4)
-        with pytest.raises(AttributeError):
-            pair.__replace__(a=10)  # ty: ignore[unresolved-attribute]
+        pair2 = pair.__replace__(a=10)  # ty: ignore[unresolved-attribute]
+        assert pair2.a == 10
+        assert pair2.b == 4
+        assert pair.a == 3  # original unchanged
 
     def test_auto_replace_for_cxx_class(self) -> None:
         # _TestCxxClassBase is copy-constructible, so replace is auto-enabled
@@ -950,7 +951,7 @@ class TestReplace:
 
     def test_non_copyable_type_raises(self) -> None:
         obj = tvm_ffi.testing.TestNonCopyable(42)
-        with pytest.raises(TypeError, match="does not support replace"):
+        with pytest.raises(TypeError, match="does not support copy"):
             obj.__replace__()  # ty: ignore[unresolved-attribute]
 
 
@@ -1126,7 +1127,8 @@ class TestPyClassCopyCustomInit:
             b: str
 
             def __init__(self, *, b: str, a: int) -> None:
-                self.__ffi_init__(a, b)
+                self.a = a
+                self.b = b
 
         return CopyCI
 
@@ -1180,7 +1182,8 @@ class _PickleCI(Object):
     b: str
 
     def __init__(self, *, b: str, a: int) -> None:
-        self.__ffi_init__(a, b)
+        self.a = a
+        self.b = b
 
 
 class TestPyClassPickleRoundtrip:

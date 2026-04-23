@@ -404,9 +404,9 @@ class TypeSchema:
                 return TypeSchema("bytes")
 
         # --- Non-CObject cdef classes with known origins ---
-        if annotation is DataType:
+        if annotation is DataType or (_CLASS_DTYPE is not None and annotation is _CLASS_DTYPE):
             return TypeSchema("dtype")
-        if annotation is Device:
+        if annotation is Device or (_CLASS_DEVICE is not None and annotation is _CLASS_DEVICE):
             return TypeSchema("Device")
 
         # --- ctypes.c_void_p ---
@@ -593,6 +593,24 @@ def _annotation_cobject(cls, targs):
     return TypeSchema(origin, origin_type_index=info.type_index)
 
 
+class FFIProperty(property):
+    """Property descriptor for FFI-backed fields.
+
+    When *frozen* is True the public setter (``fset``) is suppressed so
+    that normal attribute assignment raises ``AttributeError``.  The
+    real setter is stashed in :attr:`_fset` and exposed via the
+    :meth:`set` escape-hatch.
+    """
+
+    def __init__(self, fget, fset, frozen, fdel=None, doc=None):
+        super().__init__(fget, None if frozen else fset, fdel, doc)
+        self._fset = fset
+
+    def set(self, obj, value):
+        """Force-set the field value, bypassing the frozen guard."""
+        self._fset(obj, value)
+
+
 @dataclasses.dataclass(eq=False)
 class TypeField:
     """Description of a single reflected field on an FFI-backed type."""
@@ -609,6 +627,23 @@ class TypeField:
     c_init: bool = True
     c_kw_only: bool = False
     c_has_default: bool = False
+    # ``c_default`` / ``c_default_factory`` are populated from the C++
+    # reflection layer (``TVMFFIFieldInfo.default_value_or_factory``) for
+    # ``@c_class`` types, and from the ``Field`` descriptors for
+    # ``@py_class`` types.  Both default to :data:`MISSING` when no
+    # default / factory has been registered.
+    c_default: Any = dataclasses.field(default_factory=lambda: MISSING)
+    c_default_factory: Any = dataclasses.field(default_factory=lambda: MISSING)
+    # Presentation / structural flags decoded from the reflection layer.
+    # ``c_repr`` / ``c_compare`` / ``c_hash`` default to True and flip off
+    # when ``refl::repr(false)`` / ``refl::compare(false)`` / ``refl::hash(false)``
+    # (or the corresponding ``@py_class`` ``field(...)`` kwargs) are set.
+    # ``c_structural_eq`` is ``None`` / ``"ignore"`` / ``"def"`` matching the
+    # ``Field.structural_eq`` vocabulary.
+    c_repr: bool = True
+    c_compare: bool = True
+    c_hash: bool = True
+    c_structural_eq: Optional[str] = None
     dataclass_field: Any = None
 
     def __post_init__(self):
@@ -616,7 +651,7 @@ class TypeField:
         assert self.getter is not None
 
     def as_property(self, object cls):
-        """Create a Python ``property`` object for this field on ``cls``."""
+        """Create an :class:`FFIProperty` descriptor for this field on ``cls``."""
         cdef str name = self.name
         cdef FieldGetter fget = self.getter
         cdef FieldSetter fset = self.setter
@@ -624,9 +659,10 @@ class TypeField:
         fget.__name__ = fset.__name__ = name
         fget.__module__ = fset.__module__ = cls.__module__
         fget.__qualname__ = fset.__qualname__ = f"{cls.__qualname__}.{name}"
-        ret = property(
+        ret = FFIProperty(
             fget=fget,
-            fset=fset if (not self.frozen) else None,
+            fset=fset,
+            frozen=self.frozen,
         )
         if self.doc:
             ret.__doc__ = self.doc
@@ -679,12 +715,39 @@ class TypeInfo:
     def __post_init__(self):
         cdef int parent_type_index
         cdef str parent_type_key
+        # Assert no duplicate field names within this type's own fields.
+        if self.fields is not None:
+            seen = set()
+            for f in self.fields:
+                assert f.name not in seen, (
+                    f"duplicate field name {f.name!r} in TypeInfo for {self.type_key!r}; "
+                    f"TypeInfo.fields must only contain the type's own fields"
+                )
+                seen.add(f.name)
         if not self.type_ancestors:
             return
         parent_type_index = self.type_ancestors[-1]
         parent_type_key = _type_index_to_key(parent_type_index)
         # ensure parent is registered
         self.parent_type_info = _lookup_or_register_type_info_from_type_key(parent_type_key)
+        # Warn if own fields shadow any ancestor field.
+        if self.fields and self.parent_type_info is not None:
+            parent_names = set()
+            ti = self.parent_type_info
+            while ti is not None:
+                if ti.fields:
+                    for f in ti.fields:
+                        parent_names.add(f.name)
+                ti = ti.parent_type_info
+            for f in self.fields:
+                if f.name in parent_names:
+                    import warnings
+                    warnings.warn(
+                        f"Field {f.name!r} in {self.type_key!r} duplicates "
+                        f"an ancestor field. Child types should not "
+                        f"re-register inherited fields.",
+                        stacklevel=2,
+                    )
 
     @cached_property
     def total_size(self) -> int:
@@ -696,12 +759,12 @@ class TypeInfo:
         cdef const TVMFFITypeInfo* c_info = TVMFFIGetTypeInfo(self.type_index)
         if c_info != NULL and c_info.metadata != NULL:
             return c_info.metadata.total_size
-        cdef int64_t end = sizeof(TVMFFIObject)
-        if self.fields:
-            for f in self.fields:
-                f_end = f.offset + f.size
-                if f_end > end:
-                    end = f_end
+        if self.parent_type_info is None:
+            raise ValueError(f"Cannot find parent type of {type(self)}")
+        cdef int64_t end = self.parent_type_info.total_size
+        assert end >= sizeof(TVMFFIObject)
+        for f in self.fields:
+            end = max(end, f.offset + f.size)
         return (end + 7) & ~7  # align to 8 bytes
 
     def _register_fields(self, fields, structure_kind=None):
@@ -727,22 +790,27 @@ class TypeInfo:
         self.fields = _register_fields(self, fields, structure_kind)
         self._read_back_methods()
 
-    def _register_py_methods(self, py_methods=None):
-        """Register user-defined dunder methods and re-read the method table.
+    def _register_py_methods(self, py_methods=None, type_attr_names=frozenset()):
+        """Register user-defined dunder hooks and re-read the method table.
 
-        When *py_methods* is non-empty, each entry is registered as both
-        TypeMethod and TypeAttr via the C API.  Regardless, the full
-        method list is always re-read from the C type table so that
-        system-generated methods (``__ffi_init__``, ``__ffi_shallow_copy__``)
-        are picked up.
+        Each entry whose name is in *type_attr_names* is registered as a
+        TypeAttrColumn entry (for C++ dispatch); the value need not be
+        callable (e.g. ``__ffi_ir_traits__``).  All other entries are
+        registered as TypeMethod (for reflection introspection).
+
+        Regardless, the full method list is always re-read from the C
+        type table so that system-generated methods (``__ffi_init__``,
+        ``__ffi_shallow_copy__``) are picked up.
 
         Parameters
         ----------
-        py_methods : list[tuple[str, callable, bool]] | None
-            Each entry is ``(name, func, is_static)``.
+        py_methods : list[tuple[str, Any, bool]] | None
+            Each entry is ``(name, value, is_static)``.
+        type_attr_names : frozenset[str]
+            Names to register as TypeAttrColumn instead of TypeMethod.
         """
         if py_methods:
-            _register_py_methods(self.type_index, py_methods)
+            _register_py_methods(self.type_index, py_methods, type_attr_names)
         self._read_back_methods()
 
     def _read_back_methods(self):
@@ -816,7 +884,7 @@ cdef _register_one_field(
         info.doc.size = 0
 
     # --- metadata (JSON with type_schema) ---
-    metadata_str = json.dumps({"type_schema": py_field.ty.to_json()})
+    metadata_str = json.dumps({"type_schema": py_field._ty_schema.to_json()})
     metadata_bytes = c_str(metadata_str)
     cdef ByteArrayArg metadata_arg = ByteArrayArg(metadata_bytes)
     info.metadata = metadata_arg.cdata
@@ -957,18 +1025,10 @@ def _register_fields(type_info, fields, structure_kind=None):
     cdef TVMFFIFieldGetter getter
     cdef FieldGetter fgetter
     cdef FieldSetter fsetter
-
-    # Get global functions
-    _get_field_getter = _get_global_func("ffi.GetFieldGetter", False)
-    _make_field_setter = _get_global_func("ffi.MakeFieldSetter", False)
-    _make_ffi_new = _get_global_func("ffi.MakeFFINew", False)
-    _register_auto_init = _get_global_func("ffi.RegisterAutoInit", False)
-
     cdef list type_fields = []
-
     for py_field in fields:
         # 1. Get layout
-        layout = _ORIGIN_NATIVE_LAYOUT.get(py_field.ty.origin, (8, 8, kTVMFFIObject))
+        layout = _ORIGIN_NATIVE_LAYOUT.get(py_field._ty_schema.origin, (8, 8, kTVMFFIObject))
         size = layout[0]
         alignment = layout[1]
         field_type_index = layout[2]
@@ -980,10 +1040,10 @@ def _register_fields(type_info, fields, structure_kind=None):
 
         # 3. Get getter (C function pointer) and setter (FunctionObj).
         # Pointers are transported as int64_t through the FFI boundary.
-        getter = <TVMFFIFieldGetter><int64_t>_get_field_getter(field_type_index)
-        setter_fn = <CObject>_make_field_setter(
+        getter = <TVMFFIFieldGetter><int64_t>_MAKE_FILED_GETTER(field_type_index)
+        setter_fn = <CObject>_MAKE_FIELD_SETTER(
             field_type_index,
-            <int64_t><void*>py_field.ty._converter,
+            <int64_t><void*>py_field._ty_schema._converter,
             <int64_t>&_f_type_convert,
         )
 
@@ -1007,14 +1067,20 @@ def _register_fields(type_info, fields, structure_kind=None):
                 doc=py_field.doc,
                 size=size,
                 offset=field_offset,
-                frozen=False,
-                metadata={"type_schema": py_field.ty.to_json()},
+                frozen=py_field.frozen,
+                metadata={"type_schema": py_field._ty_schema.to_json()},
                 getter=fgetter,
                 setter=fsetter,
-                ty=py_field.ty,
+                ty=py_field._ty_schema,
                 c_init=py_field.init,
                 c_kw_only=py_field.kw_only,
                 c_has_default=(py_field.default is not MISSING or py_field.default_factory is not MISSING),
+                c_default=py_field.default,
+                c_default_factory=py_field.default_factory,
+                c_repr=py_field.repr,
+                c_compare=py_field.compare,
+                c_hash=bool(py_field.hash),
+                c_structural_eq=py_field.structural_eq,
             )
         )
 
@@ -1023,15 +1089,12 @@ def _register_fields(type_info, fields, structure_kind=None):
     if total_size < sizeof(TVMFFIObject):
         total_size = sizeof(TVMFFIObject)
 
-    # 7. Register __ffi_new__ + deleter
-    _make_ffi_new(type_index, total_size)
+    # 7. Register __ffi_new__, __ffi_shallow_copy__, __ffi_init__ TypeAttrColumns
+    _PYCLS_REGISTER(type_index, total_size)
 
     # 8. Register type metadata (structural_eq_hash_kind) if specified.
     if structure_kind is not None and structure_kind != 0:
         _register_type_metadata(type_index, total_size, structure_kind)
-
-    # 9. Register __ffi_init__ (auto-generated constructor)
-    _register_auto_init(type_index)
 
     return type_fields
 
@@ -1047,23 +1110,25 @@ cdef _register_type_metadata(int32_t type_index, int32_t total_size, int structu
     CHECK_CALL(TVMFFITypeRegisterMetadata(type_index, &metadata))
 
 
-cdef _register_py_methods(int32_t type_index, list py_methods):
-    """Register user-defined dunder methods as both TypeMethod and TypeAttr.
+cdef _register_py_methods(int32_t type_index, list py_methods, frozenset type_attr_names):
+    """Register user-defined methods and type attrs as TypeAttrColumn or TypeMethod.
 
-    For each method in *py_methods*:
-    1. Convert the Python callable to a ``TVMFFIAny`` (``ffi::Function``).
-    2. Call ``TVMFFITypeRegisterMethod`` so the method appears in the
-       type's reflection metadata (``TypeInfo.methods``).
-    3. Ensure the type-attribute column exists (sentinel call with
-       ``type_index = kTVMFFINone``), then call ``TVMFFITypeRegisterAttr``
-       so the C++ runtime dispatch can find the hook.
+    For each entry in *py_methods*:
+    1. Convert the Python object to a ``TVMFFIAny``.
+    2. If the name is in *type_attr_names*, register as TypeAttrColumn
+       (for C++ dispatch via ``TypeAttrColumn``).  The value need not be
+       callable (e.g. ``__ffi_ir_traits__`` is an Object instance).
+    3. Otherwise, register as TypeMethod (for reflection introspection
+       via ``TypeInfo.methods``).
 
     Parameters
     ----------
     type_index : int
         The runtime type index of the type.
-    py_methods : list[tuple[str, callable, bool]]
-        Each entry is ``(name, func, is_static)``.
+    py_methods : list[tuple[str, Any, bool]]
+        Each entry is ``(name, value, is_static)``.
+    type_attr_names : frozenset[str]
+        Names to register as TypeAttrColumn instead of TypeMethod.
     """
     cdef TVMFFIMethodInfo method_info
     cdef TVMFFIAny func_any
@@ -1081,7 +1146,7 @@ cdef _register_py_methods(int32_t type_index, list py_methods):
             name_bytes = c_str(name)
             name_arg = ByteArrayArg(name_bytes)
 
-            # Convert Python callable -> TVMFFIAny (creates a FunctionObj)
+            # Convert Python object -> TVMFFIAny
             TVMFFIPyPyObjectToFFIAny(
                 TVMFFIPyArgSetterFactory_,
                 <PyObject*>func,
@@ -1090,20 +1155,20 @@ cdef _register_py_methods(int32_t type_index, list py_methods):
             )
             CHECK_CALL(c_api_ret_code)
 
-            # 1. Register as TypeMethod
-            method_info.name = name_arg.cdata
-            method_info.doc.data = NULL
-            method_info.doc.size = 0
-            method_info.flags = kTVMFFIFieldFlagBitMaskIsStaticMethod if is_static else 0
-            method_info.method = func_any
-            method_info.metadata.data = NULL
-            method_info.metadata.size = 0
-            CHECK_CALL(TVMFFITypeRegisterMethod(type_index, &method_info))
-
-            # 2. Ensure type-attr column exists (sentinel: kTVMFFINone)
-            CHECK_CALL(TVMFFITypeRegisterAttr(kTVMFFINone, &name_arg.cdata, &sentinel_any))
-            # 3. Register as TypeAttr
-            CHECK_CALL(TVMFFITypeRegisterAttr(type_index, &name_arg.cdata, &func_any))
+            if name in type_attr_names:
+                # Register as TypeAttrColumn (for C++ dispatch)
+                CHECK_CALL(TVMFFITypeRegisterAttr(kTVMFFINone, &name_arg.cdata, &sentinel_any))
+                CHECK_CALL(TVMFFITypeRegisterAttr(type_index, &name_arg.cdata, &func_any))
+            else:
+                # Register as TypeMethod (for reflection introspection)
+                method_info.name = name_arg.cdata
+                method_info.doc.data = NULL
+                method_info.doc.size = 0
+                method_info.flags = kTVMFFIFieldFlagBitMaskIsStaticMethod if is_static else 0
+                method_info.method = func_any
+                method_info.metadata.data = NULL
+                method_info.metadata.size = 0
+                CHECK_CALL(TVMFFITypeRegisterMethod(type_index, &method_info))
         finally:
             if func_any.type_index >= kTVMFFIStaticObjectBegin and func_any.v_obj != NULL:
                 TVMFFIObjectDecRef(<TVMFFIObjectHandle>func_any.v_obj)

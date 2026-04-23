@@ -171,7 +171,8 @@ class StructEqualHandler {
       }
     }
 
-    static reflection::TypeAttrColumn custom_s_equal = reflection::TypeAttrColumn("__s_equal__");
+    static reflection::TypeAttrColumn custom_s_equal =
+        reflection::TypeAttrColumn(reflection::type_attr::kSEqual);
 
     bool success = true;
     if (custom_s_equal[type_info->type_index] == nullptr) {
@@ -463,7 +464,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("ffi.StructuralEqual", StructuralEqual::Equal)
       .def("ffi.GetFirstStructuralMismatch", StructuralEqual::GetFirstMismatch);
   // ensure the type attribute column is presented in the system even if it is empty.
-  refl::EnsureTypeAttrColumn("__s_equal__");
+  refl::EnsureTypeAttrColumn(refl::type_attr::kSEqual);
 }
 
 }  // namespace ffi

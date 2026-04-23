@@ -445,7 +445,7 @@ def test_generate_object_with_methods() -> None:
         fields=[],
         methods=[
             FuncInfo.from_schema(
-                "demo.IntPair.__c_ffi_init__",
+                "demo.IntPair.__ffi_init__",
                 TypeSchema("Callable", (TypeSchema("None"), TypeSchema("int"), TypeSchema("int"))),
                 is_member=True,
             ),
@@ -465,10 +465,9 @@ def test_generate_object_with_methods() -> None:
     assert code.lines[-1] == C.STUB_END
     assert "# fmt: off" in code.lines[1]
     assert any("if TYPE_CHECKING:" in line for line in code.lines)
-    method_lines = [
-        line for line in code.lines if "def __c_ffi_init__" in line or "def sum" in line
-    ]
-    assert any(line.strip().startswith("def __c_ffi_init__") for line in method_lines)
+    method_lines = [line for line in code.lines if "def __ffi_init__" in line or "def sum" in line]
+    # __ffi_init__ from TypeMethod is rendered as an instance method (self, ...) -> None
+    assert any(line.strip().startswith("def __ffi_init__(self") for line in method_lines)
     assert any(line.strip().startswith("def sum") for line in method_lines)
 
 

@@ -27,16 +27,17 @@
 #include <tvm/ffi/container/list.h>
 #include <tvm/ffi/container/map.h>
 #include <tvm/ffi/container/tensor.h>
+#include <tvm/ffi/enum.h>
 #include <tvm/ffi/error.h>
 #include <tvm/ffi/function.h>
 #include <tvm/ffi/memory.h>
 #include <tvm/ffi/object.h>
 #include <tvm/ffi/reflection/accessor.h>
-#include <tvm/ffi/reflection/init.h>
+#include <tvm/ffi/reflection/creator.h>
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/ffi/string.h>
 
-#include <memory>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -215,6 +216,26 @@ class TypeTable {
 
   void RegisterTypeField(int32_t type_index, const TVMFFIFieldInfo* info) {
     Entry* entry = GetTypeEntry(type_index);
+    std::string_view new_name(info->name.data, info->name.size);
+    std::string_view type_key(entry->type_key.data, entry->type_key.size);
+    // Check: no duplicate field name within this type's own fields.
+    for (const auto& existing : entry->type_fields_data) {
+      TVM_FFI_ICHECK(std::string_view(existing.name.data, existing.name.size) != new_name)
+          << "Duplicate field name \"" << new_name << "\" in type \"" << type_key << "\"";
+    }
+    // Warn: field name should not shadow any ancestor field.
+    for (int32_t d = 0; d < entry->type_depth; ++d) {
+      const TVMFFITypeInfo* ancestor = entry->type_ancestors[d];
+      for (int32_t i = 0; i < ancestor->num_fields; ++i) {
+        if (std::string_view(ancestor->fields[i].name.data, ancestor->fields[i].name.size) ==
+            new_name) {
+          std::cerr << "[WARNING] Field \"" << new_name << "\" in type \"" << type_key
+                    << "\" duplicates an ancestor field in \""
+                    << std::string_view(ancestor->type_key.data, ancestor->type_key.size)
+                    << "\". Child types should not re-register inherited fields." << std::endl;
+        }
+      }
+    }
     TVMFFIFieldInfo field_data = *info;
     // Retain FunctionObj setter via any_pool_ so it outlives the Entry.
     if ((field_data.flags & kTVMFFIFieldFlagBitSetterIsFunctionObj) &&
@@ -299,11 +320,14 @@ class TypeTable {
     column->data = reinterpret_cast<const TVMFFIAny*>(column->data_.data());
     column->size = static_cast<int32_t>(column->data_.size());
     column->begin_index = 0;
-    if (column->data_[type_index - column->begin_index] != nullptr) {
-      TVM_FFI_THROW(RuntimeError) << "Type attribute `" << name_str << "` is already set for type `"
-                                  << TypeIndexToTypeKey(type_index) << "`";
+    Any& slot = column->data_[type_index - column->begin_index];
+    if (slot.type_index() != kTVMFFINone) {
+      TVM_FFI_THROW(RuntimeError)
+          << "TypeAttr `" << name_str << "` is already registered for type index " << type_index
+          << ". To update the stored value, register a mutable container (e.g., Dict/List) "
+          << "once and mutate it in place on subsequent calls.";
     }
-    column->data_[type_index - column->begin_index] = value_view;
+    slot = value_view;
   }
   const TVMFFITypeAttrColumn* GetTypeAttrColumn(const TVMFFIByteArray* name) {
     String name_str(*name);
@@ -625,6 +649,13 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   refl::TypeAttrDef<ffi::DictObj>().def(
       refl::type_attr::kConvert,
       &refl::details::FFIConvertFromAnyViewToObjectRef<ffi::Dict<ffi::Any, ffi::Any>>);
+  refl::ObjectDef<ffi::EnumObj>(refl::init(false))
+      .def_ro("_value", &ffi::EnumObj::_value, "Ordinal assigned at registration.",
+              refl::AttachFieldFlag::SEqHashIgnore())
+      .def_ro("_name", &ffi::EnumObj::_name, "Instance name.");
+  refl::EnsureTypeAttrColumn(refl::type_attr::kEnumEntries);
+  refl::EnsureTypeAttrColumn(refl::type_attr::kEnumAttrs);
+  refl::EnsureTypeAttrColumn(refl::type_attr::kEnumValueEntries);
   refl::GlobalDef()
       .def_method("ffi.GetRegisteredTypeKeys",
                   []() -> ffi::Array<ffi::String> {

@@ -84,7 +84,7 @@ def _create_test_object_file(obj_path: Path) -> None:
             continue
 
     if compiler is None:
-        pytest.skip("No C++ compiler found (tried g++, clang++, c++)")
+        pytest.skip("No C++ compiler found (tried g++, clang++, c++)")  # ty: ignore[invalid-argument-type, too-many-positional-arguments]
 
     assert isinstance(compiler, str), "Compiler is not a string"
 
@@ -93,7 +93,7 @@ def _create_test_object_file(obj_path: Path) -> None:
     try:
         subprocess.run(compile_cmd, check=True, capture_output=True)
     except subprocess.CalledProcessError as e:
-        pytest.skip(f"Failed to compile test object file: {e.stderr.decode('utf-8')}")
+        pytest.skip(f"Failed to compile test object file: {e.stderr.decode('utf-8')}")  # ty: ignore[invalid-argument-type, too-many-positional-arguments]
     finally:
         # Clean up temporary C++ file
         cpp_file.unlink(missing_ok=True)
@@ -121,7 +121,7 @@ def _check_symbols_in_object(obj_path: Path, expected_symbols: list[str]) -> boo
                 return False
         return True
     except (subprocess.CalledProcessError, FileNotFoundError):
-        pytest.skip("nm tool not available")
+        pytest.skip("nm tool not available")  # ty: ignore[invalid-argument-type, too-many-positional-arguments]
         return False
 
 

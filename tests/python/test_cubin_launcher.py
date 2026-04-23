@@ -93,7 +93,7 @@ def _compile_kernel_to_cubin() -> bytes:
         )
 
         if result.returncode != 0:
-            pytest.skip(f"nvcc not available or compilation failed: {result.stderr}")
+            pytest.skip(f"nvcc not available or compilation failed: {result.stderr}")  # ty: ignore[invalid-argument-type, too-many-positional-arguments]
 
         return cubin_file.read_bytes()
 

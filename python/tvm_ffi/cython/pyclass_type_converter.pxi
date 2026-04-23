@@ -36,6 +36,7 @@ cdef object _INT64_MIN = -(1 << 63)
 cdef object _INT64_MAX = (1 << 63) - 1
 cdef int _VALUE_PROTOCOL_MAX_DEPTH = 64
 cdef str _TYPE_ATTR_FFI_CONVERT = "__ffi_convert__"
+cdef str _TYPE_ATTR_ENUM_VALUE_ENTRIES = "__ffi_enum_value_entries__"
 cdef class _TypeConverter
 ctypedef CAny (*_dispatch_fn_t)(_TypeConverter, object, bint*) except *
 
@@ -499,24 +500,88 @@ cdef CAny _tc_convert_union(_TypeConverter conv, object value, bint* changed) ex
 # Converters (4/N): Object Types
 # ---------------------------------------------------------------------------
 
-cdef CAny _tc_convert_object(_TypeConverter conv, object value, bint* changed) except *:
-    """Convert *value* to an object compatible with ``conv.type_index``."""
-    # TODO: SmallStr and SmallBytes => ObjectRef conversion is not supported yet
+cdef inline object _tc_get_registered_cls(int32_t type_index):
+    if 0 <= type_index < len(TYPE_INDEX_TO_CLS):
+        return TYPE_INDEX_TO_CLS[type_index]
+    return None
+
+
+cdef inline bint _tc_registered_cls_has_base(
+    int32_t type_index,
+    str module_name,
+    str base_name,
+) except *:
+    cdef object cls = _tc_get_registered_cls(type_index)
+    cdef object base
+    if cls is None:
+        return False
+    for base in cls.__mro__:
+        if (
+            getattr(base, "__module__", None) == module_name
+            and getattr(base, "__name__", None) == base_name
+        ):
+            return True
+    return False
+
+
+cdef object _tc_find_payload_enum_variant(
+    int32_t type_index, object enum_cls, object payload
+) except *:
+    """Resolve *payload* to its singleton variant (``None`` if no match).
+
+    Primary path: O(1) lookup in the cross-language value-entries column
+    (``__ffi_enum_value_entries__``).  Falls back to an O(n) linear scan
+    over ``enum_cls.all_entries()`` when the column has no entry for
+    *payload* — needed so correctness is preserved for variants whose
+    creators haven't populated the column.
+    """
+    cdef object value_entries
+    cdef object variant
+    value_entries = _lookup_type_attr(type_index, _TYPE_ATTR_ENUM_VALUE_ENTRIES)
+    if value_entries is not None:
+        variant = value_entries.get(payload)
+        if variant is not None:
+            return variant
+    for variant in enum_cls.all_entries():
+        if variant.value == payload:
+            return variant
+    return None
+
+
+cdef object _tc_normalize_int_enum_payload(object value, bint* matched) except *:
+    cdef object ivalue
+    matched[0] = False
+    if isinstance(value, bool):
+        matched[0] = True
+        return int(value)
+    if isinstance(value, int):
+        if not (_INT64_MIN <= value <= _INT64_MAX):
+            raise _ConvertError(
+                f"integer {value} out of int64 range [{_INT64_MIN}, {_INT64_MAX}]"
+            )
+        matched[0] = True
+        return value
+    if isinstance(value, Integral):
+        try:
+            ivalue = int(value)
+        except Exception as err:
+            raise _ConvertError(f"int() failed for {type(value).__qualname__}: {err}") from None
+        if not (_INT64_MIN <= ivalue <= _INT64_MAX):
+            raise _ConvertError(
+                f"integer {ivalue} out of int64 range [{_INT64_MIN}, {_INT64_MAX}]"
+            )
+        matched[0] = True
+        return ivalue
+    return None
+
+
+cdef CAny _tc_convert_object_marshaled(_TypeConverter conv, object value) except *:
     cdef int32_t actual_type_index = kTVMFFINone
     cdef CAny packed
     cdef CAny converted
     cdef Function fn_convert
     cdef object err = None
 
-    # Step 1: existing FFI objects that already satisfy the target schema are passthrough.
-    assert conv.type_index >= kTVMFFIStaticObjectBegin
-    if isinstance(value, CObject):
-        actual_type_index = TVMFFIObjectGetTypeIndex((<CObject>value).chandle)
-        if _tc_type_index_is_instance(actual_type_index, conv.type_index):
-            return CAny(value)
-    changed[0] = True
-
-    # Step 2: pack, and convert to the target type.
     packed = CAnyChecked(value, conv.err_hint, value)
     fn_convert = conv.fn_convert
     try:
@@ -533,6 +598,73 @@ cdef CAny _tc_convert_object(_TypeConverter conv, object value, bint* changed) e
             if _tc_type_index_is_instance(actual_type_index, conv.type_index):
                 return converted
     raise _ConvertError(f"expected {conv.err_hint}, got {_tc_describe_value_type(value)}") from err
+
+
+cdef CAny _tc_convert_object(_TypeConverter conv, object value, bint* changed) except *:
+    """Convert *value* to an object compatible with ``conv.type_index``."""
+    # TODO: SmallStr and SmallBytes => ObjectRef conversion is not supported yet
+    cdef int32_t actual_type_index = kTVMFFINone
+
+    # Step 1: existing FFI objects that already satisfy the target schema are passthrough.
+    assert conv.type_index >= kTVMFFIStaticObjectBegin
+    if isinstance(value, CObject):
+        actual_type_index = TVMFFIObjectGetTypeIndex((<CObject>value).chandle)
+        if _tc_type_index_is_instance(actual_type_index, conv.type_index):
+            return CAny(value)
+    changed[0] = True
+
+    # Step 2: pack, and convert to the target type.
+    return _tc_convert_object_marshaled(conv, value)
+
+
+cdef CAny _tc_convert_int_enum(_TypeConverter conv, object value, bint* changed) except *:
+    """Convert *value* to an IntEnum-compatible object."""
+    cdef int32_t actual_type_index = kTVMFFINone
+    cdef object target_cls
+    cdef object ivalue
+    cdef object variant
+    cdef bint is_int_like = False
+
+    assert conv.type_index >= kTVMFFIStaticObjectBegin
+    if isinstance(value, CObject):
+        actual_type_index = TVMFFIObjectGetTypeIndex((<CObject>value).chandle)
+        if _tc_type_index_is_instance(actual_type_index, conv.type_index):
+            return CAny(value)
+
+    target_cls = _tc_get_registered_cls(conv.type_index)
+    if target_cls is not None:
+        ivalue = _tc_normalize_int_enum_payload(value, &is_int_like)
+        if is_int_like:
+            changed[0] = True
+            variant = _tc_find_payload_enum_variant(conv.type_index, target_cls, ivalue)
+            if variant is not None:
+                return CAny(variant)
+
+    changed[0] = True
+    return _tc_convert_object_marshaled(conv, value)
+
+
+cdef CAny _tc_convert_str_enum(_TypeConverter conv, object value, bint* changed) except *:
+    """Convert *value* to a StrEnum-compatible object."""
+    cdef int32_t actual_type_index = kTVMFFINone
+    cdef object target_cls
+    cdef object variant
+
+    assert conv.type_index >= kTVMFFIStaticObjectBegin
+    if isinstance(value, CObject):
+        actual_type_index = TVMFFIObjectGetTypeIndex((<CObject>value).chandle)
+        if _tc_type_index_is_instance(actual_type_index, conv.type_index):
+            return CAny(value)
+
+    target_cls = _tc_get_registered_cls(conv.type_index)
+    if target_cls is not None and isinstance(value, str):
+        changed[0] = True
+        variant = _tc_find_payload_enum_variant(conv.type_index, target_cls, value)
+        if variant is not None:
+            return CAny(variant)
+
+    changed[0] = True
+    return _tc_convert_object_marshaled(conv, value)
 
 
 cdef inline bint _tc_type_index_is_instance(int32_t actual_tindex, int32_t target_tindex) noexcept:
@@ -703,14 +835,24 @@ def _build_converter(schema):
         conv.err_hint = "Object"
         return conv
     if origin_tindex >= kTVMFFIStaticObjectBegin:
-        conv.dispatch = _tc_convert_object
+        if _tc_registered_cls_has_base(origin_tindex, "tvm_ffi.dataclasses.enum", "IntEnum"):
+            conv.dispatch = _tc_convert_int_enum
+        elif _tc_registered_cls_has_base(origin_tindex, "tvm_ffi.dataclasses.enum", "StrEnum"):
+            conv.dispatch = _tc_convert_str_enum
+        else:
+            conv.dispatch = _tc_convert_object
         conv.type_index = origin_tindex
         conv.err_hint = origin
         return conv
 
     tindex = _object_type_key_to_index(origin)
     if tindex is not None:
-        conv.dispatch = _tc_convert_object
+        if _tc_registered_cls_has_base(tindex, "tvm_ffi.dataclasses.enum", "IntEnum"):
+            conv.dispatch = _tc_convert_int_enum
+        elif _tc_registered_cls_has_base(tindex, "tvm_ffi.dataclasses.enum", "StrEnum"):
+            conv.dispatch = _tc_convert_str_enum
+        else:
+            conv.dispatch = _tc_convert_object
         conv.type_index = tindex
         conv.err_hint = origin
         return conv

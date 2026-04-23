@@ -207,9 +207,7 @@ class StructuralKey(Object):
     hash_i64: int
     if TYPE_CHECKING:
         def __init__(self, key: Any, hash_i64: int) -> None: ...
-        def __ffi_shallow_copy__(self, /) -> Object: ...
-        @staticmethod
-        def __c_ffi_init__(*args: Any) -> Any: ...
+        def __ffi_init__(self, _0: Any, /) -> None: ...  # ty: ignore[invalid-method-override]
     # fmt: on
     # tvm-ffi-stubgen(end)
 

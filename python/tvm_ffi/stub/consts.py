@@ -16,6 +16,8 @@
 # under the License.
 """Constants used in stub generation."""
 
+from __future__ import annotations
+
 from typing import Literal
 
 from typing_extensions import TypeAlias
@@ -69,9 +71,7 @@ MOD_MAP = {
     "ffi": "tvm_ffi",
 }
 
-FN_NAME_MAP = {
-    "__ffi_init__": "__c_ffi_init__",
-}
+FN_NAME_MAP: dict[str, str] = {}
 
 BUILTIN_TYPE_KEYS = {
     "ffi.Bytes",

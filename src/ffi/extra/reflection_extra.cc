@@ -150,11 +150,12 @@ bool StructuralKeyEqual(const Any& lhs, const Any& rhs) {
 inline void StructuralKeyRegisterReflection() {
   namespace refl = tvm::ffi::reflection;
   refl::ObjectDef<StructuralKeyObj>()
+      .def(refl::init<Any>(), "Constructor that takes any key and computes its structural hash")
       .def_ro("key", &StructuralKeyObj::key)
       .def_ro("hash_i64", &StructuralKeyObj::hash_i64);
   refl::TypeAttrDef<StructuralKeyObj>()
-      .attr("__any_hash__", reinterpret_cast<void*>(&StructuralKeyHash))
-      .attr("__any_equal__", reinterpret_cast<void*>(&StructuralKeyEqual));
+      .attr(type_attr::kAnyHash, reinterpret_cast<void*>(&StructuralKeyHash))
+      .attr(type_attr::kAnyEqual, reinterpret_cast<void*>(&StructuralKeyEqual));
 }
 
 TVM_FFI_STATIC_INIT_BLOCK() {

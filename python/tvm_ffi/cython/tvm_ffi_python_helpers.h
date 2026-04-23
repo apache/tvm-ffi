@@ -47,6 +47,22 @@
 //  prefixed with TVMFFIPy so they can be easily invoked through Cython.
 ///--------------------------------------------------------------------------------
 
+//------------------------------------------------------------------------------------
+// Helpers for Python thread-state attachment
+//------------------------------------------------------------------------------------
+//
+// On classic builds, PyGILState_Ensure attaches the current thread and acquires the GIL.
+// On free-threaded builds, there is no process-wide GIL to acquire, but CPython still
+// requires an attached thread state before manipulating Python refcounts.
+class TVMFFIPyWithAttachedThreadState {
+ public:
+  TVMFFIPyWithAttachedThreadState() noexcept { gstate_ = PyGILState_Ensure(); }
+  ~TVMFFIPyWithAttachedThreadState() { PyGILState_Release(gstate_); }
+
+ private:
+  PyGILState_STATE gstate_;
+};
+
 /*!
  * \brief Thread-local call stack used by TVMFFIPyCallContext.
  */
@@ -124,6 +140,7 @@ class TVMFFIPyCallContext {
   }
 
   ~TVMFFIPyCallContext() {
+    TVMFFIPyWithAttachedThreadState thread_state;
     try {
       // recycle the temporary arguments if any
       for (int i = 0; i < this->num_temp_ffi_objects; ++i) {
@@ -664,6 +681,7 @@ class TVMFFIPyMLIRPackedSafeCall {
   }
 
   ~TVMFFIPyMLIRPackedSafeCall() {
+    TVMFFIPyWithAttachedThreadState thread_state;
     if (keep_alive_object_) {
       Py_DecRef(keep_alive_object_);
     }
@@ -717,33 +735,12 @@ void TVMFFIPyMLIRPackedSafeCallDeleter(void* self) {
   return TVMFFIPyMLIRPackedSafeCall::Deleter(self);
 }
 
-//------------------------------------------------------------------------------------
-// Helpers for free-threaded python
-//------------------------------------------------------------------------------------
-#if defined(Py_GIL_DISABLED)
-// NOGIL case
-class TVMFFIPyWithGILIfNotFreeThreaded {
- public:
-  TVMFFIPyWithGILIfNotFreeThreaded() = default;
-};
-#else
-// GIL case, need to ensure/release the GIL
-class TVMFFIPyWithGILIfNotFreeThreaded {
- public:
-  TVMFFIPyWithGILIfNotFreeThreaded() noexcept { gstate_ = PyGILState_Ensure(); }
-  ~TVMFFIPyWithGILIfNotFreeThreaded() { PyGILState_Release(gstate_); }
-
- private:
-  PyGILState_STATE gstate_;
-};
-#endif
-
 /*!
  * \brief Deleter for Python objects
  * \param py_obj The Python object to delete
  */
 extern "C" void TVMFFIPyObjectDeleter(void* py_obj) noexcept {
-  TVMFFIPyWithGILIfNotFreeThreaded gil_state;
+  TVMFFIPyWithAttachedThreadState thread_state;
   Py_DecRef(static_cast<PyObject*>(py_obj));
 }
 

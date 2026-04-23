@@ -29,7 +29,6 @@
 #include <tvm/ffi/type_traits.h>
 
 #include <string>
-#include <utility>
 
 namespace tvm {
 namespace ffi {
@@ -303,6 +302,239 @@ inline bool ForEachFieldInfoWithEarlyStop(const TypeInfo* type_info,
     if (callback_with_early_stop(type_info->fields + i)) return true;
   }
   return false;
+}
+
+/*!
+ * \brief Type attribute names used by the reflection system.
+ *
+ * Each constant names a TypeAttrColumn — a sparse, type-indexed slot that
+ * stores a ``Function`` or any other Any-compliant value.
+ *
+ *  - ``TypeAttrDef<T>.def(type_attr::kFoo, ...)`` to register a hook,
+ *  - ``TypeAttrColumn(type_attr::kFoo)[type_index]`` to look one up,
+ *
+ */
+namespace type_attr {
+/*!
+ * \brief Zero-arg object allocator.
+ *
+ * Allocates a zero-initialised object of the registered type.  For C++ types
+ * this wraps ``metadata->creator``; for Python ``@py_class`` types it is a
+ * ``calloc``-based allocator.
+ *
+ * Signature: ``() -> TSelf``, where ``TSelf`` is a subclass of ObjectRef.
+ */
+inline constexpr const char* kNew = "__ffi_new__";
+/*!
+ * \brief Packed constructor — creates **and** initialises a new object.
+ *
+ * Used by ``@c_class`` auto-generated ``__init__``: the Python side calls
+ * ``self.__init_handle_by_constructor__(ffi_init, *args)`` which invokes
+ * this function to produce a fully initialised object.
+ *
+ * For C++ types with ``refl::init<Args...>()``, the function is the explicit
+ * init; otherwise ``ffi._RegisterFFIInit`` generates a default one using reflection.
+ *
+ * Signature: ``(*args, **kwargs) -> TSelf``, where ``TSelf`` is a subclass of ObjectRef.
+ *
+ * Keyword arguments are packed as ``[KWARGS, key0, val0, key1, val1, ...]``.
+ */
+inline constexpr const char* kInit = "__ffi_init__";
+/*!
+ * \brief Convert ``AnyView`` to a specific reflected ``TSelf`` type.
+ *
+ * Registered via ``TypeAttrDef<T>.def(kConvert, &FFIConvertFromAnyViewToObjectRef<T>)``
+ * for every type that calls ``.ref<T>()``.  Used by the Python type converter
+ * to marshal values into the correct ``TSelf`` subclass.
+ *
+ * Signature: ``(AnyView src) -> TSelf``, where ``TSelf`` is a subclass of ObjectRef.
+ */
+inline constexpr const char* kConvert = "__ffi_convert__";
+/*!
+ * \brief Shallow-copy factory.
+ *
+ * Allocates a new object and copies all reflected field values from the
+ * source.  Used by Python ``copy.copy()`` via ``__copy__`` and by
+ * ``copy.replace()`` via ``__replace__``.
+ *
+ * Signature: ``(TSelf self) -> TSelf``, where ``TSelf`` is a subclass of ObjectRef.
+ */
+inline constexpr const char* kShallowCopy = "__ffi_shallow_copy__";
+/*!
+ * \brief Custom recursive repr hook.
+ *
+ * If registered, ``RecursiveRepr`` (Python ``__repr__``) calls this instead
+ * of the default field-by-field formatting.  The hook receives a callback
+ * ``fn_repr`` to recursively format nested values, avoiding infinite loops.
+ *
+ * Signature: ``(TSelf self, fn_repr: FnRepr) -> String``, where ``TSelf`` is a subclass of
+ * ObjectRef, and ``FnRepr: (AnyView value) -> String`` formats a nested value.
+ */
+inline constexpr const char* kRepr = "__ffi_repr__";
+/*!
+ * \brief Custom recursive hash hook.
+ *
+ * If registered, ``RecursiveHash`` (Python ``hash()``) calls this instead
+ * of the default field-by-field hashing.  The hook receives a callback
+ * ``fn_hash`` to recursively hash nested values, with cycle detection.
+ *
+ * Signature: ``(TSelf self, fn_hash: FnHash) -> int64``, where ``TSelf`` is a subclass of
+ * ObjectRef, and ``FnHash: (AnyView value) -> int64`` hashes a nested value.
+ */
+inline constexpr const char* kHash = "__ffi_hash__";
+/*!
+ * \brief Custom recursive equality hook.
+ *
+ * If registered, ``RecursiveEq`` (Python ``==``) calls this instead of the
+ * default field-by-field comparison.  Falls back to ``kCompare`` if only the
+ * compare hook is present.  The hook receives a callback ``fn_eq`` to
+ * recursively compare nested values.
+ *
+ * Signature: ``(TSelf lhs, TSelf rhs, fn_eq: FnEq) -> bool``, where ``TSelf`` is a subclass of
+ * ObjectRef, and ``FnEq: (AnyView lhs, AnyView rhs) -> bool`` compares nested values.
+ */
+inline constexpr const char* kEq = "__ffi_eq__";
+/*!
+ * \brief Custom recursive three-way comparison hook.
+ *
+ * If registered, ``RecursiveCompare`` (Python ``<``, ``<=``, ``>``, ``>=``)
+ * calls this.  Also used as fallback for ``RecursiveEq`` when ``kEq`` is not
+ * registered.  The hook receives a callback ``fn_cmp`` to recursively
+ * compare nested values.
+ *
+ * Signature: ``(TSelf lhs, TSelf rhs, fn_cmp: FnCmp) -> int32``, where ``TSelf`` is a subclass of
+ * ObjectRef, and ``FnCmp: (TSelf lhs, TSelf rhs) -> int32`` returns < 0, == 0, or > 0.
+ */
+inline constexpr const char* kCompare = "__ffi_compare__";
+/*!
+ * \brief Custom Any-level hash for use as ``Map``/``Dict`` key.
+ *
+ * Unlike ``kHash`` (which operates on ``ObjectRef`` and is recursive), this
+ * hook operates at the ``Any`` level — it is called by ``AnyHash`` whenever
+ * an ``Any`` holding an object of this type is used as a container key.
+ *
+ * Can be either a raw C function pointer (fast path, no boxing overhead) or
+ * a ``Function`` object.
+ *
+ * Raw pointer signature: ``int64_t (*)(const Any& src)``
+ *
+ * Function signature: ``(Any src) -> int64``
+ */
+inline constexpr const char* kAnyHash = "__any_hash__";
+/*!
+ * \brief Custom Any-level equality for use as ``Map``/``Dict`` key.
+ *
+ * Unlike ``kEq`` (which operates on ``ObjectRef``), this hook operates at the
+ * ``Any`` level — called by ``AnyEqual`` for container key comparison.
+ *
+ * Can be either a raw C function pointer (fast path) or a ``Function`` object.
+ *
+ * Raw pointer signature: ``bool (*)(const Any& lhs, const Any& rhs)``
+ *
+ * Function signature: ``(Any lhs, Any rhs) -> bool``
+ */
+inline constexpr const char* kAnyEqual = "__any_equal__";
+/*!
+ * \brief Custom structural hash hook (used by ``StructuralHash``).
+ *
+ * Unlike ``kHash`` (which is for ``RecursiveHash`` / Python ``hash()``),
+ * this is for the ``StructuralHash`` system that supports def/use region
+ * semantics (``map_free_vars``).  The hook receives the current accumulated
+ * hash and a callback to recursively hash sub-values.
+ *
+ * Signature: ``(TSelf self, int64 init_hash, Function hash_cb) -> int64``, where
+ * ``TSelf`` is a subclass of ``ObjectRef``.
+ *
+ * ``hash_cb(AnyView val, int64 init_hash, bool def_region) -> int64``
+ * recursively hashes a sub-value; ``def_region`` controls free-variable
+ * mapping.
+ */
+inline constexpr const char* kSHash = "__s_hash__";
+/*!
+ * \brief Custom structural equality hook (used by ``StructuralEqual``).
+ *
+ * Unlike ``kEq`` (which is for ``RecursiveEq`` / Python ``==``), this is for
+ * the ``StructuralEqual`` system that supports def/use region semantics and
+ * alpha-equivalence of bound variables.  The hook receives a callback to
+ * recursively compare sub-values.
+ *
+ * Signature: ``(TSelf lhs, TSelf rhs, Function eq_cb) -> bool``, where ``TSelf`` is a
+ * subclass of ``ObjectRef``.
+ *
+ * ``eq_cb(AnyView lhs, AnyView rhs, bool def_region, AnyView field_name) -> bool``
+ * recursively compares sub-values; ``def_region`` controls free-variable
+ * mapping; ``field_name`` is used for mismatch path reporting.
+ */
+inline constexpr const char* kSEqual = "__s_equal__";
+/*!
+ * \brief Serialize object data to a JSON-compatible ``Map``.
+ *
+ * If registered, ``ToJSONGraph`` calls this instead of the default
+ * field-by-field serialization.  Allows types with non-trivial internal
+ * state (e.g. ``TInt`` storing a plain ``int64_t``) to define a compact
+ * custom JSON representation.
+ *
+ * Signature: ``(TSelf self) -> Map<String, Any>``, where ``TSelf`` is a subclass of
+ * ``ObjectRef``.
+ */
+inline constexpr const char* kDataToJson = "__data_to_json__";
+/*!
+ * \brief Deserialize object data from a JSON-compatible ``Map``.
+ *
+ * Counterpart to ``kDataToJson``.  If registered, ``FromJSONGraph`` calls
+ * this to reconstruct the object from its serialized ``Map`` representation
+ * instead of using field-by-field deserialization.
+ *
+ * Signature: ``(Map<String, Any> json_data) -> TSelf``, where ``TSelf`` is a subclass of
+ * ``ObjectRef``.
+ */
+inline constexpr const char* kDataFromJson = "__data_from_json__";
+/*!
+ * \brief Per-class enum entry registry.
+ *
+ * Maps each variant's name to its registered singleton for an
+ * ``EnumObj`` subclass.  Populated by ``refl::EnumDef<T>("Name")`` on
+ * the C++ side and by ``Enum`` subclass declarations on the Python
+ * side; both languages share the same underlying storage.
+ *
+ * Value type: ``Dict<String, Enum>``.
+ */
+inline constexpr const char* kEnumEntries = "__ffi_enum_entries__";
+/*!
+ * \brief Per-class column holding extensible attributes for enum variants.
+ *
+ * The outer dict is keyed by extensible-attribute name; each value is a
+ * list indexed by the variant's ordinal (``EnumObj::_value``).  Written
+ * by ``refl::EnumDef<T>::set_attr(...)`` on the C++ side and by the
+ * ``EnumAttrMap`` returned from Python ``Enum.def_attr(...)``.
+ *
+ * Value type: ``Dict<String, List<Any>>``.
+ */
+inline constexpr const char* kEnumAttrs = "__ffi_enum_attrs__";
+/*!
+ * \brief Per-class payload-to-variant index for enums.
+ *
+ * Parallel to ``kEnumEntries`` (name → variant) but keyed by the
+ * user-visible payload carried on each variant — i.e. the ``value``
+ * field on Python ``IntEnum`` / ``StrEnum`` subclasses (``int`` or
+ * ``str``) or the equivalent payload field on a C++ ``EnumObj``
+ * subclass.  Populated by the creator of each variant (Python or C++)
+ * when the variant has a payload; absent or partially populated
+ * otherwise.  Consumed by FFI converters to resolve a raw payload
+ * (``int``/``str``) to its singleton variant in O(1).
+ *
+ * Value type: ``Dict<Any, Enum>``.
+ */
+inline constexpr const char* kEnumValueEntries = "__ffi_enum_value_entries__";
+}  // namespace type_attr
+
+/*!
+ * \brief C++17 constexpr helper: convert a ``const char*`` to ``TVMFFIByteArray``.
+ * \param s A null-terminated string literal.
+ * \return A ``TVMFFIByteArray`` whose ``data`` points to *s* and ``size`` equals ``strlen(s)``.
+ */
+inline constexpr TVMFFIByteArray AsByteArray(const char* s) {
+  return {s, std::char_traits<char>::length(s)};
 }
 
 }  // namespace reflection
