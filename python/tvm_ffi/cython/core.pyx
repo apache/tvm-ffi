@@ -38,4 +38,5 @@ include "./tensor.pxi"
 _register_object_by_index(kTVMFFITensor, Tensor)
 include "./function.pxi"
 _register_object_by_index(kTVMFFIFunction, Function)
+include "./pycallback.pxi"
 include "./pyclass_type_converter.pxi"

@@ -366,10 +366,8 @@ cdef extern from "tvm_ffi_python_helpers.h":
         int (*func)(TVMFFIPyArgSetter* handle, TVMFFIPyCallContext* ctx,  PyObject* py_arg, TVMFFIAny* out) except -1
         const DLPackExchangeAPI* dlpack_c_exchange_api
 
-    ctypedef int (*TVMFFIPyArgSetterFactory)(PyObject* value, TVMFFIPyArgSetter* out) except -1
     # The main call function
     int TVMFFIPyFuncCall(
-        TVMFFIPyArgSetterFactory setter_factory,
         void* chandle,
         PyObject* py_arg_tuple,
         TVMFFIAny* result,
@@ -379,7 +377,6 @@ cdef extern from "tvm_ffi_python_helpers.h":
     ) except -1
 
     int TVMFFIPyConstructorCall(
-        TVMFFIPyArgSetterFactory setter_factory,
         void* chandle,
         PyObject* py_arg_tuple,
         TVMFFIAny* result,
@@ -388,7 +385,6 @@ cdef extern from "tvm_ffi_python_helpers.h":
     ) except -1
 
     int TVMFFIPyCallFieldSetter(
-        TVMFFIPyArgSetterFactory setter_factory,
         void* field_setter,
         int64_t field_flags,
         void* field_ptr,
@@ -397,20 +393,18 @@ cdef extern from "tvm_ffi_python_helpers.h":
     ) except -1
 
     int TVMFFIPyPyObjectToFFIAny(
-        TVMFFIPyArgSetterFactory setter_factory,
         PyObject* py_arg,
         TVMFFIAny* out,
         int* c_api_ret_code
     ) except -1
 
     int TVMFFIPySetArgumentGenericDispatcher(
-        TVMFFIPyArgSetterFactory setter_factory,
         TVMFFIPyCallContext* ctx,
         PyObject* py_arg,
         TVMFFIAny* out
     ) except -1
 
-    size_t TVMFFIPyGetDispatchMapSize() noexcept
+    size_t TVMFFIPyGetArgDispatchMapSize() noexcept
 
     void TVMFFIPyPushTempFFIObject(TVMFFIPyCallContext* ctx, TVMFFIObjectHandle arg) noexcept
     void TVMFFIPyPushTempPyObject(TVMFFIPyCallContext* ctx, PyObject* arg) noexcept
@@ -420,6 +414,40 @@ cdef extern from "tvm_ffi_python_helpers.h":
     int TVMFFIPyArgSetterInt_(TVMFFIPyArgSetter*, TVMFFIPyCallContext*, PyObject* arg, TVMFFIAny* out) except -1
     int TVMFFIPyArgSetterBool_(TVMFFIPyArgSetter*, TVMFFIPyCallContext*, PyObject* arg, TVMFFIAny* out) except -1
     int TVMFFIPyArgSetterNone_(TVMFFIPyArgSetter*, TVMFFIPyCallContext*, PyObject* arg, TVMFFIAny* out) except -1
+
+    # Callback arg setter types — view-based AnyView -> PyObject conversion
+    # used by the C++ -> Python callback path (PyCallback).
+    ctypedef int (*TVMFFIPyCallbackArgSetterCallback)(TVMFFIPyCallbackArgSetter* handle,
+                                                      const DLPackExchangeAPI* api,
+                                                      const TVMFFIAny* arg,
+                                                      PyObject** out) except -1
+
+    ctypedef struct TVMFFIPyCallbackArgSetter:
+        TVMFFIPyCallbackArgSetterCallback func
+
+    # Built-in C callback arg setters for POD types.
+    int TVMFFIPyCallbackArgSetterNone_(TVMFFIPyCallbackArgSetter*, const DLPackExchangeAPI*,
+                                       const TVMFFIAny*, PyObject** out) except -1
+    int TVMFFIPyCallbackArgSetterBool_(TVMFFIPyCallbackArgSetter*, const DLPackExchangeAPI*,
+                                       const TVMFFIAny* arg, PyObject** out) except -1
+    int TVMFFIPyCallbackArgSetterInt_(TVMFFIPyCallbackArgSetter*, const DLPackExchangeAPI*,
+                                      const TVMFFIAny* arg, PyObject** out) except -1
+    int TVMFFIPyCallbackArgSetterFloat_(TVMFFIPyCallbackArgSetter*, const DLPackExchangeAPI*,
+                                        const TVMFFIAny* arg, PyObject** out) except -1
+    int TVMFFIPyCallbackArgSetterSmallStr_(TVMFFIPyCallbackArgSetter*, const DLPackExchangeAPI*,
+                                           const TVMFFIAny* arg, PyObject** out) except -1
+    int TVMFFIPyCallbackArgSetterSmallBytes_(TVMFFIPyCallbackArgSetter*, const DLPackExchangeAPI*,
+                                             const TVMFFIAny* arg, PyObject** out) except -1
+
+    int TVMFFIPyCallback(void* context, const TVMFFIAny* packed_args,
+                         int32_t num_args, TVMFFIAny* result) noexcept
+
+    # Closure + convert helper for the PyCallback path. Returns the raw FFI rc;
+    # callers use CHECK_CALL to translate the TLS FFI error into a Python exception.
+    int TVMFFIPyConvertPyCallback(PyObject* callable,
+                                  const DLPackExchangeAPI* dlpack_api,
+                                  TVMFFIObjectHandle* out_handle) noexcept
+
     # MLIRPackedSafeCall
     void* TVMFFIPyMLIRPackedSafeCallCreate(void (*mlir_packed_safe_call)(void**) noexcept, PyObject* keep_alive_object)
     int TVMFFIPyMLIRPackedSafeCallInvoke(void* self, const TVMFFIAny* args, int32_t num_args, TVMFFIAny* rv)

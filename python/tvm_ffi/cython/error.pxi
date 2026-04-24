@@ -150,6 +150,18 @@ def _convert_to_ffi_error(error: BaseException) -> Error:
         return Error(kind, message, py_backtrace)
 
 
+cdef public int TVMFFICyErrorSetRaisedFromPyError(PyObject* py_err) noexcept:
+    """Set the last FFI error from a Python exception.
+
+    Parameters
+    ----------
+    py_err : PyObject*
+        The Python exception to set as the last FFI error.
+    """
+    set_last_ffi_error(<object>py_err)
+    return -1
+
+
 cdef inline int CHECK_CALL(int ret) except -2:
     """Check the return code of the C API function call"""
     if ret == 0:

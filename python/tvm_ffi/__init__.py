@@ -67,7 +67,7 @@ if TYPE_CHECKING or not _is_config_mode():
     )
     from ._dtype import dtype
     from .core import Object, ObjectConvertible, Function, CAny, CContainerBase
-    from ._convert import convert
+    from ._convert import convert, convert_func
     from .error import register_error
     from ._tensor import Device, device, DLDeviceType
     from ._tensor import from_dlpack, Tensor, Shape
@@ -146,6 +146,7 @@ __all__ = [
     "__version_tuple__",
     "access_path",
     "convert",
+    "convert_func",
     "cpp",
     "dataclasses",
     "device",
