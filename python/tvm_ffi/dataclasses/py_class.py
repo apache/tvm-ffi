@@ -222,29 +222,39 @@ def _collect_own_fields(  # noqa: PLR0912
 def method(fn: Any) -> Any:
     """Mark a ``@py_class`` method for FFI TypeMethod registration.
 
-    Decorate any staticmethod or bound method on a ``@py_class`` body to
-    have it land in the C-level ``TVMFFITypeInfo.methods[]`` table so
-    that trait refs like ``$method:<name>`` — and any other FFI consumer
-    that looks the method up by name — can resolve it from C++ / Rust
-    without an extra Python-side registry.
+    Decorate any staticmethod or plain instance method on a ``@py_class``
+    body to have it land in the C-level ``TVMFFITypeInfo.methods[]``
+    table. Once registered, the method is resolvable by name from any
+    FFI consumer — Python-side reflection via ``TypeInfo.methods``,
+    C++, Rust — through the same path already used by C++-defined
+    methods declared via ``refl::ObjectDef<T>().def(...)``.
 
     Example::
 
-        from tvm_ffi import method
+        from tvm_ffi import Object, method
         from tvm_ffi.dataclasses import py_class
 
 
-        @py_class("mini.tir.PrimFunc")
-        class PrimFunc(Object):
-            __ffi_ir_traits__ = tr.FuncTraits(..., "$method:_print_prologue")
+        @py_class("example.Node")
+        class Node(Object):
+            x: int
 
             @method
-            def _print_prologue(self, printer, frame): ...
+            def label(self) -> str:
+                return f"N({self.x})"
 
-    ``staticmethod`` is supported: the sentinel is written onto the
+
+        # The method is now in ``TypeInfo.methods`` and FFI-callable:
+        info = Node.__tvm_ffi_type_info__
+        fn = next(m.func for m in info.methods if m.name == "label")
+        fn(Node(x=7))  # -> "N(7)"
+
+    ``staticmethod`` is supported: the marker is written onto the
     underlying function and unwrapped at registration time. Plain
-    functions are also accepted — the sentinel lives on the function
-    object.
+    functions are also accepted — the marker lives on the function
+    object directly. ``classmethod`` is rejected at decoration time
+    because its ``cls``-first dispatch does not match the
+    packed-call convention.
     """
     if isinstance(fn, staticmethod):
         fn.__func__.__ffi_method__ = True
@@ -306,14 +316,14 @@ def _collect_py_methods(cls: type) -> list[tuple[str, Any, bool]] | None:
     Two sources are collected:
 
     1. **TypeAttrColumn dunders** — names in :data:`_FFI_RECOGNIZED_METHODS`
-       that appear in ``cls.__dict__``. Callables (``__ffi_repr__``) and
-       non-callable values (``__ffi_ir_traits__``) both flow here; the
-       Cython layer routes them to ``TVMFFITypeRegisterAttr`` based on
-       name.
+       that appear in ``cls.__dict__``. Both callables (e.g.
+       ``__ffi_repr__``) and non-callable values flow here; the Cython
+       layer routes them to ``TVMFFITypeRegisterAttr`` based on name.
     2. **User TypeMethods** — every callable in ``cls.__dict__`` marked
        with :func:`method`. Registered via ``TVMFFITypeRegisterMethod``
-       so ``$method:NAME`` refs in IR traits (and other name-based
-       lookups from C++) resolve. The decorator pattern keeps the
+       so the method is resolvable by name from any FFI consumer
+       (introspection through ``TypeInfo.methods``, name-based lookup
+       from C++ / Rust, etc.). The decorator pattern keeps the
        per-class declaration co-located with the method body; no
        separate allowlist.
 

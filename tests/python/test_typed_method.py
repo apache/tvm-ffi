@@ -21,7 +21,7 @@
 from __future__ import annotations
 
 import itertools
-from typing import Any, ClassVar
+from typing import Any
 
 import pytest
 from tvm_ffi import Object, method
@@ -42,12 +42,15 @@ def _find_method(info: TypeInfo, name: str) -> Any:
 
 
 def _toy_method_resolve(obj: Any, ref: str, *args: Any, **kwargs: Any) -> Any:
-    """Stand-in for the C++ trait printer's ``$method:<name>`` resolution.
+    """Test helper: resolve a ``"$method:NAME"`` string ref and call it.
 
-    Parses the ``$method:NAME`` ref, looks up ``NAME`` in the instance's
-    ``TypeInfo.methods`` table, invokes the resolved ``Function`` on
-    ``obj`` (plus any extra args). A successful return value means the
-    whole ``@method`` → register → FFI callable chain is intact.
+    Parses the ``$method:`` prefix, looks up ``NAME`` in the instance's
+    ``TypeInfo.methods`` table, and invokes the resolved ``Function``
+    on ``obj`` (plus any extra args). A successful return value means
+    the whole ``@method`` → ``TVMFFITypeRegisterMethod`` → FFI callable
+    chain is intact. The ``$method:`` prefix is a test-local convention
+    for demonstrating name-based method lookup; it has no production
+    meaning on its own.
     """
     prefix = "$method:"
     if not ref.startswith(prefix):
@@ -168,24 +171,26 @@ class TestMethodRegistration:
 
 
 # ---------------------------------------------------------------------------
-# End-to-end: ``$method:<name>`` resolves via the toy printer
+# End-to-end: name-based method lookup via ``TypeInfo.methods``
 # ---------------------------------------------------------------------------
 
 
-class TestDollarMethodResolution:
-    """``$method:NAME`` refs reach ``@method``-decorated methods
-    through the ``TypeInfo.methods`` table — the fix this PR ships.
+class TestNameBasedResolution:
+    """Resolving a ``@method``-decorated method by its name through
+    ``TypeInfo.methods`` and calling it via the FFI path. This is the
+    same code path any cross-language consumer (C++, Rust, future
+    reflection-driven tooling) takes to invoke a Python-defined
+    method by name.
     """
 
-    def test_dollar_method_ref_invokes_decorated_method(self) -> None:
-        """Trait stores ``$method:label``; the toy printer resolves and
-        calls it. Mirrors what a real trait-driven C++ printer does.
+    def test_name_lookup_invokes_decorated_method(self) -> None:
+        """Name lookup → FFI call round-trip: look up ``label`` in
+        ``TypeInfo.methods`` and invoke it via the resolved Function.
         """
 
         @py_class(_unique_key("Op"))
         class Op(Object):
             kind: str
-            __ffi_ir_traits__: ClassVar = {"print_label": "$method:label"}
 
             @method
             def label(self) -> str:
@@ -194,10 +199,10 @@ class TestDollarMethodResolution:
         result = _toy_method_resolve(Op(kind="add"), "$method:label")
         assert result == "op:add"
 
-    def test_dollar_method_ref_threads_extra_args(self) -> None:
-        """The toy resolver passes ``*args`` / ``**kwargs`` through to
-        the FFI Function — covers prologue-style ``$method:NAME(printer, frame)``
-        shapes used by real trait printers.
+    def test_name_lookup_threads_extra_args(self) -> None:
+        """Extra positional / keyword arguments thread through the FFI
+        Function unchanged — covers multi-argument shapes any
+        consumer would need.
         """
 
         @py_class(_unique_key("PrologueOp"))
@@ -212,10 +217,10 @@ class TestDollarMethodResolution:
         op = PrologueOp(kind="add")
         assert _toy_method_resolve(op, "$method:print_prologue", "PR", "FR") == "PR-add-FR"
 
-    def test_dollar_method_missing_surfaces_clear_error(self) -> None:
-        """A ``$method:`` ref targeting an undecorated method raises
-        at resolution time — the failure mode a user hits when they
-        forget the ``@method`` decorator.
+    def test_name_lookup_missing_method_raises_clearly(self) -> None:
+        """Looking up a method name that was NOT decorated with
+        ``@method`` raises at resolution time — the failure mode a
+        user hits when they forget the decorator.
         """
 
         @py_class(_unique_key("OpMiss"))
