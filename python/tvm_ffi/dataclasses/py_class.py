@@ -543,12 +543,21 @@ def py_class(  # noqa: PLR0913
     repr
         If True (default), generate ``__repr__``.
     eq
-        If True, generate ``__eq__`` and ``__ne__``.
+        If True, generate ``__eq__`` and ``__ne__`` using recursive
+        field-wise content equality.  Default False, in which case the
+        class inherits the pointer-based ``__eq__`` from ``Object``
+        (``a == b`` is equivalent to ``a.same_as(b)``).  If the class
+        body defines ``__eq__`` or ``__ne__``, the generator is skipped
+        and the user definition is preserved.
     order
         If True, generate ``__lt__``, ``__le__``, ``__gt__``, ``__ge__``.
         Requires ``eq=True``.
     unsafe_hash
-        If True, generate ``__hash__`` (unsafe for mutable objects).
+        If True, generate ``__hash__`` using recursive field-wise
+        content hashing (unsafe for mutable objects).  Default False,
+        in which case the class inherits the handle-address ``__hash__``
+        from ``Object``.  A user-defined ``__hash__`` in the class body
+        is preserved.
     match_args
         If True (default), set ``__match_args__`` to a tuple of the
         positional ``__init__`` field names (``init=True`` and not
@@ -558,8 +567,8 @@ def py_class(  # noqa: PLR0913
         If True, all fields are keyword-only in ``__init__`` by default.
     structural_eq
         Structural equality/hashing kind for this type.  Controls how
-        instances participate in ``StructuralEqual`` and ``StructuralHash``.
-        Valid values are:
+        instances participate in ``structural_equal`` and
+        ``structural_hash``.  Valid values are:
 
         - ``None`` (default): structural comparison is not supported.
         - ``"tree"``: content-based comparison, the safe default for
@@ -571,6 +580,11 @@ def py_class(  # noqa: PLR0913
           fast path (only safe for types with no transitive ``"var"``
           children).
         - ``"singleton"``: pointer equality only, for singleton types.
+
+        This parameter is **independent** of ``eq`` / ``unsafe_hash``:
+        it only configures how ``structural_equal`` / ``structural_hash``
+        walk the object in C++ and never installs or alters Python-level
+        ``__eq__`` / ``__hash__``.  See Notes below.
     slots
         Accepted for ``dataclass_transform`` compatibility.  Object
         subclasses always use ``__slots__ = ()`` via the metaclass.
@@ -579,6 +593,32 @@ def py_class(  # noqa: PLR0913
     -------
     Callable | type
         A class decorator, or the decorated class (bare usage).
+
+    Notes
+    -----
+    Three orthogonal equality/hashing mechanisms coexist on a
+    ``@py_class`` type, each controlled by an independent knob:
+
+    - ``a == b`` / ``hash(a)`` — selected by ``eq`` / ``unsafe_hash``
+      params (or user-defined ``__eq__`` / ``__hash__`` in the class
+      body).  Default: pointer-based ``same_as`` and handle-address
+      hash, inherited from ``Object``.
+    - ``structural_equal(a, b)`` / ``structural_hash(a)`` — selected
+      by the ``structural_eq`` param.  Default (``None``): structural
+      comparison is unsupported for this type.
+    - ``a.same_as(b)`` — always available; always pointer comparison.
+
+    The typical pattern is to leave ``eq`` / ``unsafe_hash`` at their
+    defaults so ``==`` and ``hash()`` stay cheap and pointer-based
+    (ideal for pass-internal bookkeeping such as visited-set tracking),
+    and call ``structural_equal`` / ``structural_hash`` explicitly at
+    the points that require the heavy semantic check.
+
+    Combining ``eq=True`` (or ``unsafe_hash=True``) with a
+    ``structural_eq`` kind is legal but gives the type two different
+    recursive equalities — a Python-level one for ``==`` and a C++
+    structural one for ``structural_equal`` — which rarely coincide.
+    Prefer setting only one.
 
     """
     if order and not eq:
