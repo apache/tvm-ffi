@@ -219,30 +219,120 @@ def _collect_own_fields(  # noqa: PLR0912
     return fields
 
 
+def method(fn: Any) -> Any:
+    """Mark a ``@py_class`` method for FFI TypeMethod registration.
+
+    Decorate any staticmethod or bound method on a ``@py_class`` body to
+    have it land in the C-level ``TVMFFITypeInfo.methods[]`` table so
+    that trait refs like ``$method:<name>`` — and any other FFI consumer
+    that looks the method up by name — can resolve it from C++ / Rust
+    without an extra Python-side registry.
+
+    Example::
+
+        from tvm_ffi import method
+        from tvm_ffi.dataclasses import py_class
+
+
+        @py_class("mini.tir.PrimFunc")
+        class PrimFunc(Object):
+            __ffi_ir_traits__ = tr.FuncTraits(..., "$method:_print_prologue")
+
+            @method
+            def _print_prologue(self, printer, frame): ...
+
+    ``staticmethod`` is supported: the sentinel is written onto the
+    underlying function and unwrapped at registration time. Plain
+    functions are also accepted — the sentinel lives on the function
+    object.
+    """
+    if isinstance(fn, staticmethod):
+        fn.__func__.__ffi_method__ = True
+        return fn
+    if isinstance(fn, classmethod):
+        raise TypeError(
+            "@tvm_ffi.method: @classmethod is not supported for FFI "
+            "TypeMethod registration — the classmethod's ``cls`` first "
+            "arg does not match the packed-call convention. Use "
+            "@staticmethod or a plain instance method instead.",
+        )
+    if not callable(fn):
+        raise TypeError(
+            f"@tvm_ffi.method: expected a callable, got {type(fn).__name__}.",
+        )
+    fn.__ffi_method__ = True
+    return fn
+
+
+def _is_method_marked(value: Any) -> bool:
+    """Return True when ``value`` is a callable marked by :func:`method`."""
+    if isinstance(value, staticmethod):
+        return getattr(value.__func__, "__ffi_method__", False) is True
+    if callable(value):
+        return getattr(value, "__ffi_method__", False) is True
+    return False
+
+
+def _validate_method_name(cls: type, name: str) -> None:
+    """Reject ``@method``-marked names that collide with reserved namespaces.
+
+    Names in :data:`_FFI_TYPE_ATTR_NAMES` and Python-protocol dunders
+    are not allowed for ``@method`` — they are routed through the
+    TypeAttrColumn / Python-protocol paths instead.
+    """
+    if name in _FFI_TYPE_ATTR_NAMES:
+        raise NameError(
+            f"@py_class({cls.__name__!r}): {name!r} is a TypeAttrColumn "
+            "name — define it directly on the class body without "
+            "``@method``; the FFI system routes it to ``TVMFFITypeRegisterAttr``.",
+        )
+    if name.startswith("__ffi_"):
+        raise NameError(
+            f"@py_class({cls.__name__!r}): {name!r} starts with the "
+            "reserved ``__ffi_`` prefix. Pick a different name for your "
+            "``@method``-decorated method.",
+        )
+    if name.startswith("__") and name.endswith("__"):
+        raise NameError(
+            f"@py_class({cls.__name__!r}): {name!r} is a Python protocol "
+            "dunder — these are reserved for Python semantics and cannot "
+            "be registered as FFI TypeMethods.",
+        )
+
+
 def _collect_py_methods(cls: type) -> list[tuple[str, Any, bool]] | None:
-    """Extract recognized FFI dunder methods and type attrs from the class body.
+    """Extract FFI-registered entries from a ``@py_class`` body.
 
-    Only names listed in :data:`_FFI_RECOGNIZED_METHODS` are collected.
-    Callables are collected with their ``is_static`` flag; non-callable
-    values (e.g. ``__ffi_ir_traits__``) are collected as-is — the Cython
-    layer routes them to ``TVMFFITypeRegisterAttr`` based on name.
+    Two sources are collected:
 
-    Returns a list of ``(name, value, is_static)`` tuples, or ``None``
-    if no eligible entries were found.
+    1. **TypeAttrColumn dunders** — names in :data:`_FFI_RECOGNIZED_METHODS`
+       that appear in ``cls.__dict__``. Callables (``__ffi_repr__``) and
+       non-callable values (``__ffi_ir_traits__``) both flow here; the
+       Cython layer routes them to ``TVMFFITypeRegisterAttr`` based on
+       name.
+    2. **User TypeMethods** — every callable in ``cls.__dict__`` marked
+       with :func:`method`. Registered via ``TVMFFITypeRegisterMethod``
+       so ``$method:NAME`` refs in IR traits (and other name-based
+       lookups from C++) resolve. The decorator pattern keeps the
+       per-class declaration co-located with the method body; no
+       separate allowlist.
+
+    Validation runs at registration time — reserved ``__ffi_*`` names
+    and Python protocol dunders cannot be ``@method``-decorated; those
+    are reserved by the TypeAttrColumn and Python semantics respectively.
+
+    Returns the ``(name, value, is_static)`` list, or :data:`None` when
+    no entries were found.
     """
     methods: list[tuple[str, Any, bool]] = []
     for name, value in cls.__dict__.items():
-        if name not in _FFI_RECOGNIZED_METHODS:
+        marked = _is_method_marked(value)
+        if name not in _FFI_RECOGNIZED_METHODS and not marked:
             continue
-        if isinstance(value, staticmethod):
-            func = value.__func__
-            is_static = True
-        elif callable(value):
-            func = value
-            is_static = False
-        else:
-            func = value
-            is_static = False
+        if marked:
+            _validate_method_name(cls, name)
+        is_static = isinstance(value, staticmethod)
+        func = value.__func__ if is_static else value
         methods.append((name, func, is_static))
     return methods if methods else None
 
