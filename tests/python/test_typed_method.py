@@ -185,7 +185,7 @@ class TestDollarMethodResolution:
         @py_class(_unique_key("Op"))
         class Op(Object):
             kind: str
-            __ffi_ir_traits__: ClassVar[dict[str, str]] = {"print_label": "$method:label"}
+            __ffi_ir_traits__: ClassVar = {"print_label": "$method:label"}
 
             @method
             def label(self) -> str:
@@ -251,6 +251,45 @@ class TestMethodValidation:
                 @classmethod
                 def maker(cls) -> int:
                     return 0
+
+    def test_rejects_classmethod_method_decorator_order_swap(self) -> None:
+        """The decorator catches ``@method @classmethod`` but a user can
+        bypass it by writing ``@classmethod @method`` — @method runs
+        first on the bare function, then classmethod wraps the marked
+        function. The collector must surface this with a clear error;
+        without the guard, the entry would silently fail to register
+        (Python 3.11+) or register as a malformed instance method.
+        """
+        with pytest.raises(TypeError, match=r"wrapped by @classmethod"):
+
+            @py_class(_unique_key("CMOrderBad"))
+            class _CMOrderBad(Object):
+                x: int
+
+                @classmethod
+                @method
+                def maker(cls) -> int:
+                    return 0
+
+    def test_rejects_manually_marked_classmethod(self) -> None:
+        """The decorator can also be bypassed by marking a function
+        directly (``fn.__ffi_method__ = True``) and then wrapping it
+        in ``classmethod``. The collector's classmethod check fires
+        on the descriptor regardless of how the marker got there.
+        """
+
+        def _maker(cls: type) -> int:
+            return 0
+
+        _maker.__ffi_method__ = True  # ty: ignore[unresolved-attribute]
+        cm = classmethod(_maker)
+
+        with pytest.raises(TypeError, match=r"wrapped by @classmethod"):
+
+            @py_class(_unique_key("CMManualBad"))
+            class _CMManualBad(Object):
+                x: int
+                maker = cm
 
     def test_rejects_non_callable(self) -> None:
         """``@method`` applied to a bare value (not a callable) raises."""

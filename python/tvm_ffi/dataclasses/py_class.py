@@ -266,7 +266,7 @@ def method(fn: Any) -> Any:
 
 def _is_method_marked(value: Any) -> bool:
     """Return True when ``value`` is a callable marked by :func:`method`."""
-    if isinstance(value, staticmethod):
+    if isinstance(value, (staticmethod, classmethod)):
         return getattr(value.__func__, "__ffi_method__", False) is True
     if callable(value):
         return getattr(value, "__ffi_method__", False) is True
@@ -331,6 +331,19 @@ def _collect_py_methods(cls: type) -> list[tuple[str, Any, bool]] | None:
             continue
         if marked:
             _validate_method_name(cls, name)
+        # In every case, registering a classmethod as a TypeMethod is
+        # wrong: the packed-call convention places ``self`` (an instance)
+        # in slot 0, but classmethod's descriptor binds slot 0 to the
+        # class.
+        if isinstance(value, classmethod):
+            raise TypeError(
+                f"@py_class({cls.__name__!r}): {name!r} is wrapped by "
+                "@classmethod, which is incompatible with FFI "
+                "registration — the cls-first arg breaks the packed-call "
+                "convention. Use @staticmethod or a plain instance "
+                "method. If you wrote ``@classmethod @method``, swap to "
+                "``@staticmethod @method`` (or drop @classmethod).",
+            )
         is_static = isinstance(value, staticmethod)
         func = value.__func__ if is_static else value
         methods.append((name, func, is_static))
