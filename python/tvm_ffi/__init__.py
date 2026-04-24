@@ -86,6 +86,14 @@ if TYPE_CHECKING or not _is_config_mode():
     from . import dataclasses
     from . import structural
     from . import cpp
+    from ._pyast_evaluator import (
+        DEFAULT_DISPATCH,
+        EvaluationError,
+        OperatorDispatch,
+        UndefinedNameError,
+        eval_assign,
+        eval_expr,
+    )
 
     # optional module to speedup dlpack conversion
     from . import _optional_torch_c_dlpack
@@ -126,22 +134,27 @@ except ImportError:
     __version__ = "0.0.0.dev0"
     __version_tuple__ = (0, 0, 0, "dev0", "7d34eb8ab.d20250913")
 
+
 __all__ = [
+    "DEFAULT_DISPATCH",
     "LIB",
     "Array",
     "DLDeviceType",
     "Device",
     "Dict",
+    "EvaluationError",
     "Function",
     "List",
     "Map",
     "Module",
     "Object",
     "ObjectConvertible",
+    "OperatorDispatch",
     "Shape",
     "StreamContext",
     "StructuralKey",
     "Tensor",
+    "UndefinedNameError",
     "__version__",
     "__version_tuple__",
     "access_path",
@@ -150,6 +163,8 @@ __all__ = [
     "dataclasses",
     "device",
     "dtype",
+    "eval_assign",
+    "eval_expr",
     "from_dlpack",
     "get_first_structural_mismatch",
     "get_global_func",
