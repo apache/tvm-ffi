@@ -15,19 +15,18 @@
 # specific language governing permissions and limitations
 # under the License.
 """Tests for ``@tvm_ffi.method`` — opt-in TypeMethod registration on
-``@py_class``-decorated classes."""
+``@py_class``-decorated classes.
+"""
 
 from __future__ import annotations
 
 import itertools
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
-
 from tvm_ffi import Object, method
 from tvm_ffi.core import TypeInfo
 from tvm_ffi.dataclasses import py_class
-
 
 _counter = itertools.count()
 
@@ -53,7 +52,7 @@ def _toy_method_resolve(obj: Any, ref: str, *args: Any, **kwargs: Any) -> Any:
     prefix = "$method:"
     if not ref.startswith(prefix):
         raise ValueError(f"Not a $method: ref: {ref!r}")
-    name = ref[len(prefix):]
+    name = ref[len(prefix) :]
     info = type(obj).__tvm_ffi_type_info__  # ty: ignore[unresolved-attribute]
     m = _find_method(info, name)
     if m is None:
@@ -72,11 +71,13 @@ def _toy_method_resolve(obj: Any, ref: str, *args: Any, **kwargs: Any) -> Any:
 class TestMethodRegistration:
     """``@method`` drops the function's signature into
     ``TVMFFITypeRegisterMethod``; the name is resolvable from any FFI
-    consumer."""
+    consumer.
+    """
 
     def test_instance_method_registered_and_ffi_callable(self) -> None:
         """A plain instance-style method registers with ``is_static=False``
-        and the returned FFI Function accepts the instance as arg 0."""
+        and the returned FFI Function accepts the instance as arg 0.
+        """
 
         @py_class(_unique_key("Node"))
         class Node(Object):
@@ -86,7 +87,7 @@ class TestMethodRegistration:
             def label(self) -> str:
                 return f"N({self.x})"
 
-        m = _find_method(Node.__tvm_ffi_type_info__, "label")
+        m = _find_method(Node.__tvm_ffi_type_info__, "label")  # ty: ignore[unresolved-attribute]
         assert m is not None
         assert m.is_static is False
         # FFI call routes through the C method table — proves the
@@ -95,7 +96,8 @@ class TestMethodRegistration:
 
     def test_staticmethod_registered_with_is_static_true(self) -> None:
         """``@method`` on top of ``@staticmethod`` marks the underlying
-        function; the unwrap happens inside ``_collect_py_methods``."""
+        function; the unwrap happens inside ``_collect_py_methods``.
+        """
 
         @py_class(_unique_key("Nstat"))
         class Nstat(Object):
@@ -106,7 +108,7 @@ class TestMethodRegistration:
             def constant() -> int:
                 return 42
 
-        m = _find_method(Nstat.__tvm_ffi_type_info__, "constant")
+        m = _find_method(Nstat.__tvm_ffi_type_info__, "constant")  # ty: ignore[unresolved-attribute]
         assert m is not None
         assert m.is_static is True
         assert m.func() == 42
@@ -130,14 +132,15 @@ class TestMethodRegistration:
             def prefixed(self, p: str) -> str:
                 return f"{p}-{self.x}"
 
-        names = {m.name for m in NodeMulti.__tvm_ffi_type_info__.methods}
+        names = {m.name for m in NodeMulti.__tvm_ffi_type_info__.methods}  # ty: ignore[unresolved-attribute]
         assert {"kind", "double", "prefixed"}.issubset(names)
 
     def test_no_decorator_no_registration(self) -> None:
         """Without ``@method``, a class-body function is a plain Python
         attribute — nothing reaches ``TypeInfo.methods``. Protects the
         opt-in contract: users aren't surprised by accidental FFI
-        registration of helper methods."""
+        registration of helper methods.
+        """
 
         @py_class(_unique_key("NodeBare"))
         class NodeBare(Object):
@@ -146,11 +149,12 @@ class TestMethodRegistration:
             def helper(self) -> int:  # no @method
                 return self.x
 
-        assert _find_method(NodeBare.__tvm_ffi_type_info__, "helper") is None
+        assert _find_method(NodeBare.__tvm_ffi_type_info__, "helper") is None  # ty: ignore[unresolved-attribute]
 
     def test_python_attribute_still_callable(self) -> None:
         """Registration doesn't shadow the Python attribute — callers
-        can still invoke the method normally as ``instance.name(...)``."""
+        can still invoke the method normally as ``instance.name(...)``.
+        """
 
         @py_class(_unique_key("NodeKeep"))
         class NodeKeep(Object):
@@ -170,16 +174,18 @@ class TestMethodRegistration:
 
 class TestDollarMethodResolution:
     """``$method:NAME`` refs reach ``@method``-decorated methods
-    through the ``TypeInfo.methods`` table — the fix this PR ships."""
+    through the ``TypeInfo.methods`` table — the fix this PR ships.
+    """
 
     def test_dollar_method_ref_invokes_decorated_method(self) -> None:
         """Trait stores ``$method:label``; the toy printer resolves and
-        calls it. Mirrors what a real trait-driven C++ printer does."""
+        calls it. Mirrors what a real trait-driven C++ printer does.
+        """
 
         @py_class(_unique_key("Op"))
         class Op(Object):
             kind: str
-            __ffi_ir_traits__ = {"print_label": "$method:label"}
+            __ffi_ir_traits__: ClassVar[dict[str, str]] = {"print_label": "$method:label"}
 
             @method
             def label(self) -> str:
@@ -191,7 +197,8 @@ class TestDollarMethodResolution:
     def test_dollar_method_ref_threads_extra_args(self) -> None:
         """The toy resolver passes ``*args`` / ``**kwargs`` through to
         the FFI Function — covers prologue-style ``$method:NAME(printer, frame)``
-        shapes used by real trait printers."""
+        shapes used by real trait printers.
+        """
 
         @py_class(_unique_key("PrologueOp"))
         class PrologueOp(Object):
@@ -203,15 +210,13 @@ class TestDollarMethodResolution:
                 return f"{printer}-{self.kind}-{frame}"
 
         op = PrologueOp(kind="add")
-        assert (
-            _toy_method_resolve(op, "$method:print_prologue", "PR", "FR")
-            == "PR-add-FR"
-        )
+        assert _toy_method_resolve(op, "$method:print_prologue", "PR", "FR") == "PR-add-FR"
 
     def test_dollar_method_missing_surfaces_clear_error(self) -> None:
         """A ``$method:`` ref targeting an undecorated method raises
         at resolution time — the failure mode a user hits when they
-        forget the ``@method`` decorator."""
+        forget the ``@method`` decorator.
+        """
 
         @py_class(_unique_key("OpMiss"))
         class OpMiss(Object):
@@ -231,29 +236,32 @@ class TestDollarMethodResolution:
 
 class TestMethodValidation:
     """``@method`` + the registration path both raise with clear,
-    class-scoped messages when a name or wrapper is reserved."""
+    class-scoped messages when a name or wrapper is reserved.
+    """
 
     def test_rejects_classmethod(self) -> None:
         """``@classmethod``'s first-arg is the class, not the instance —
         breaks the packed-call convention. Rejected at decoration time
-        (before py_class even sees the method)."""
+        (before py_class even sees the method).
+        """
         with pytest.raises(TypeError, match=r"@classmethod is not supported"):
 
             class _Bad:
                 @method
                 @classmethod
-                def maker(cls) -> int:  # noqa: PLR6301
+                def maker(cls) -> int:
                     return 0
 
     def test_rejects_non_callable(self) -> None:
         """``@method`` applied to a bare value (not a callable) raises."""
         with pytest.raises(TypeError, match=r"expected a callable"):
-            method(42)  # type: ignore[arg-type]
+            method(42)
 
     def test_rejects_reserved_ffi_prefix(self) -> None:
         """``__ffi_*`` names are routed through TypeAttrColumn — using
         ``@method`` on them is surely a user error (would silently
-        double-register), so ``_collect_py_methods`` raises."""
+        double-register), so ``_collect_py_methods`` raises.
+        """
         with pytest.raises(NameError, match=r"reserved ``__ffi_`` prefix"):
 
             @py_class(_unique_key("RFfiPfx"))
@@ -267,7 +275,8 @@ class TestMethodValidation:
     def test_rejects_typeattrcolumn_name(self) -> None:
         """Decorating a TypeAttrColumn dunder with ``@method`` is
         rejected — those are routed to ``TVMFFITypeRegisterAttr``
-        already, never to TypeMethod."""
+        already, never to TypeMethod.
+        """
         with pytest.raises(NameError, match=r"TypeAttrColumn"):
 
             @py_class(_unique_key("RAttr"))
@@ -280,7 +289,8 @@ class TestMethodValidation:
 
     def test_rejects_python_protocol_dunder(self) -> None:
         """``__len__`` / ``__iter__`` / etc. are reserved for Python
-        semantics — cannot be FFI TypeMethods."""
+        semantics — cannot be FFI TypeMethods.
+        """
         with pytest.raises(NameError, match=r"Python protocol dunder"):
 
             @py_class(_unique_key("RDun"))
