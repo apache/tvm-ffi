@@ -145,7 +145,12 @@ def include_paths() -> list[str]:
     )
 
 
-def load_lib_ctypes(package: str, target_name: str, mode: str) -> ctypes.CDLL:
+def load_lib_ctypes(
+    package: str,
+    target_name: str,
+    mode: str,
+    extra_lib_paths: list[Path] | None = None,
+) -> ctypes.CDLL:
     """Load the tvm_ffi shared library by searching likely paths.
 
     Parameters
@@ -159,20 +164,31 @@ def load_lib_ctypes(package: str, target_name: str, mode: str) -> ctypes.CDLL:
     mode
         The mode to load the shared library. See `ctypes.${MODE}` for details.
         Usually it is either ``"RTLD_LOCAL"`` or ``"RTLD_GLOBAL"``.
+    extra_lib_paths
+        Optional list of additional directories to search for the shared library
+        before falling back to the built-in dev candidates and PATH-derived dirs.
+        Useful when the caller's package does not ship a wheel-style ``RECORD``
+        but knows where its build artifacts land (e.g. ``<worktree>/build/lib``).
+        Every element must be a :class:`pathlib.Path`.
 
     Returns
     -------
     The loaded shared library.
 
     """
-    lib_path: Path = _find_library_by_basename(package, target_name)
+    lib_path: Path = _find_library_by_basename(package, target_name, extra_lib_paths)
     # The dll search path need to be added explicitly in windows
     if sys.platform.startswith("win32"):
         os.add_dll_directory(str(lib_path.parent))
     return ctypes.CDLL(str(lib_path), getattr(ctypes, mode))
 
 
-def load_lib_module(package: str, target_name: str, keep_module_alive: bool = True) -> Module:
+def load_lib_module(
+    package: str,
+    target_name: str,
+    keep_module_alive: bool = True,
+    extra_lib_paths: list[Path] | None = None,
+) -> Module:
     """Load the tvm_ffi shared library by searching likely paths.
 
     Parameters
@@ -188,6 +204,13 @@ def load_lib_module(package: str, target_name: str, keep_module_alive: bool = Tr
     keep_module_alive
         Whether to keep the loaded module alive to prevent it from being unloaded.
 
+    extra_lib_paths
+        Optional list of additional directories to search for the shared library
+        before falling back to the built-in dev candidates and PATH-derived dirs.
+        Useful when the caller's package does not ship a wheel-style ``RECORD``
+        but knows where its build artifacts land (e.g. ``<worktree>/build/lib``).
+        Every element must be a :class:`pathlib.Path`.
+
     Returns
     -------
     The loaded shared library.
@@ -195,14 +218,18 @@ def load_lib_module(package: str, target_name: str, keep_module_alive: bool = Tr
     """
     from .module import load_module  # noqa: PLC0415
 
-    lib_path: Path = _find_library_by_basename(package, target_name)
+    lib_path: Path = _find_library_by_basename(package, target_name, extra_lib_paths)
     # The dll search path need to be added explicitly in windows
     if sys.platform.startswith("win32"):
         os.add_dll_directory(str(lib_path.parent))
     return load_module(lib_path, keep_module_alive=keep_module_alive)
 
 
-def _find_library_by_basename(package: str, target_name: str) -> Path:  # noqa: PLR0912
+def _find_library_by_basename(  # noqa: PLR0912
+    package: str,
+    target_name: str,
+    extra_lib_paths: list[Path] | None = None,
+) -> Path:
     """Find a shared library by target_name name across known directories.
 
     Parameters
@@ -211,6 +238,14 @@ def _find_library_by_basename(package: str, target_name: str) -> Path:  # noqa: 
         The package name where the library is expected to be found.
     target_name
         Base name (e.g., ``"tvm_ffi"`` or ``"tvm_ffi_testing"``).
+    extra_lib_paths
+        Optional list of additional directories to search **before** the
+        built-in self-anchored fallback dirs and the ``PATH``/
+        ``LD_LIBRARY_PATH``/``DYLD_LIBRARY_PATH``-derived dirs. Caller-supplied
+        directories take precedence over the built-ins, so a foreign caller
+        (e.g. ``package="tvm"``) can point at its own build tree without
+        relying on ``tvm_ffi``'s file location. Every element must be a
+        :class:`pathlib.Path`.
 
     Returns
     -------
@@ -219,10 +254,20 @@ def _find_library_by_basename(package: str, target_name: str) -> Path:  # noqa: 
 
     Raises
     ------
+    TypeError
+        If any element of ``extra_lib_paths`` is not a :class:`pathlib.Path`.
     RuntimeError
         If the library cannot be found in any of the candidate directories.
+        The error message lists every directory searched.
 
     """
+    if extra_lib_paths is not None:
+        for i, p in enumerate(extra_lib_paths):
+            if not isinstance(p, Path):
+                raise TypeError(
+                    f"extra_lib_paths[{i}] must be a pathlib.Path, got {type(p).__name__}: {p!r}"
+                )
+
     if sys.platform.startswith("win32"):
         lib_dll_names = (f"{target_name}.dll",)
     elif sys.platform.startswith("darwin"):
@@ -232,29 +277,44 @@ def _find_library_by_basename(package: str, target_name: str) -> Path:  # noqa: 
         lib_dll_names = (f"lib{target_name}.so",)
 
     # Use `importlib.metadata` is the most reliable way to find package data files
-    dist: im.PathDistribution = im.distribution(package)  # ty: ignore[invalid-assignment]
-    record = dist.read_text("RECORD") or ""
-    for line in record.splitlines():
-        partial_path, *_ = line.split(",")
-        if partial_path.endswith(lib_dll_names):
-            try:
-                path = (dist._path.parent / partial_path).resolve()
-            except OSError:
-                continue
-            if path.name in lib_dll_names:
-                return path
+    try:
+        dist: im.PathDistribution = im.distribution(package)  # ty: ignore[invalid-assignment]
+        record = dist.read_text("RECORD") or ""
+        for line in record.splitlines():
+            partial_path, *_ = line.split(",")
+            if partial_path.endswith(lib_dll_names):
+                try:
+                    path = (dist._path.parent / partial_path).resolve()
+                except OSError:
+                    continue
+                if path.name in lib_dll_names:
+                    return path
+    except (im.PackageNotFoundError, OSError):
+        # Distribution metadata may be missing when the caller's package is on
+        # PYTHONPATH without a wheel install. Fall through to the dev fallback.
+        pass
 
     # **Fallback**. it's possible that the library is not built as part of Python ecosystem,
     # e.g. Use PYTHONPATH to point to dev package, and CMake + Makefiles to build the shared library.
     dll_paths: list[Path] = []
 
-    # Case 1. It is under $PROJECT_ROOT/build/lib/ or $PROJECT_ROOT/lib/
-    dll_paths.append(_rel_top_directory() / "build" / "lib")
-    dll_paths.append(_rel_top_directory() / "lib")
-    dll_paths.append(_dev_top_directory() / "build" / "lib")
-    dll_paths.append(_dev_top_directory() / "lib")
+    # Case 1. Caller-supplied directories take precedence — these let a foreign
+    # caller (e.g. ``package="tvm"``) point at its own build tree without
+    # relying on ``tvm_ffi``'s file location.
+    if extra_lib_paths is not None:
+        dll_paths.extend(extra_lib_paths)
 
-    # Case 2. It is specified in PATH-related environment variables
+    # Case 2. Built-in self-anchored fallback (back-compat for the self-call).
+    dll_paths.extend(
+        [
+            _rel_top_directory() / "build" / "lib",
+            _rel_top_directory() / "lib",
+            _dev_top_directory() / "build" / "lib",
+            _dev_top_directory() / "lib",
+        ]
+    )
+
+    # Case 3. PATH-related environment variables.
     if sys.platform.startswith("win32"):
         dll_paths.extend(Path(p) for p in _split_env_var("PATH", ";"))
     elif sys.platform.startswith("darwin"):
@@ -273,7 +333,10 @@ def _find_library_by_basename(package: str, target_name: str) -> Path:  # noqa: 
                     return path
             except OSError:
                 continue
-    raise RuntimeError(f"Cannot find library: {', '.join(lib_dll_names)}")
+    raise RuntimeError(
+        f"Cannot find library {', '.join(lib_dll_names)}; "
+        f"searched directories:\n  " + "\n  ".join(str(p) for p in dll_paths)
+    )
 
 
 def _split_env_var(env_var: str, split: str) -> list[str]:
