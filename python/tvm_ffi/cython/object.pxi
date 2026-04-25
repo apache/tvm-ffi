@@ -200,7 +200,7 @@ cdef class CContainerBase(CObject):
     # 1. __dlpack_c_exchange_api__ (e.g. torch.Tensor) — points to a
     #    static struct in the framework's C++ runtime.  The source
     #    type is kept alive by _DISPATCH_TYPE_KEEP_ALIVE (set in
-    #    TVMFFIPyArgSetterFactory_), which prevents module unloading.
+    #    TVMFFICyArgSetterFactory), which prevents module unloading.
     #
     # 2. GetTorchFallbackExchangeAPI() — returns the address of a
     #    module-level Cython static; lives for the entire process.
@@ -758,7 +758,6 @@ def _register_type_attr(type_index: int32_t, attr_key: str, value: object) -> No
     temp.type_index = kTVMFFINone
     temp.v_int64 = 0
     TVMFFIPyPyObjectToFFIAny(
-        TVMFFIPyArgSetterFactory_,
         <PyObject*>value,
         &temp,
         &c_api_ret_code,
@@ -818,7 +817,6 @@ cdef class CAny:
         temp.type_index = kTVMFFINone
         temp.v_int64 = 0
         TVMFFIPyPyObjectToFFIAny(
-            TVMFFIPyArgSetterFactory_,
             <PyObject*>value,
             &temp,
             &c_api_ret_code

@@ -134,6 +134,7 @@ Misc
   access_path.AccessPath
   access_path.AccessStep
   convert
+  convert_func
   ObjectConvertible
 
 .. (Experimental) Dataclasses

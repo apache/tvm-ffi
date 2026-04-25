@@ -54,7 +54,6 @@ cdef class FieldSetter:
         cdef int c_api_ret_code
         cdef void* field_ptr = (<char*>(<CObject>obj).chandle) + self.offset
         TVMFFIPyCallFieldSetter(
-            TVMFFIPyArgSetterFactory_,
             self.setter,
             self.flags,
             field_ptr,
@@ -936,7 +935,6 @@ cdef _register_one_field(
         default_obj = py_field.default_factory
     if default_obj is not MISSING:
         TVMFFIPyPyObjectToFFIAny(
-            TVMFFIPyArgSetterFactory_,
             <PyObject*>default_obj,
             &default_any,
             &c_api_ret_code
@@ -1148,7 +1146,6 @@ cdef _register_py_methods(int32_t type_index, list py_methods, frozenset type_at
 
             # Convert Python object -> TVMFFIAny
             TVMFFIPyPyObjectToFFIAny(
-                TVMFFIPyArgSetterFactory_,
                 <PyObject*>func,
                 &func_any,
                 &c_api_ret_code,
