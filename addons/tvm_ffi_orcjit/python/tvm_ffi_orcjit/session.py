@@ -66,7 +66,9 @@ class ExecutionSession(Object):
         Args:
             orc_rt_path: Optional path to the liborc_rt library. If not provided,
                         it will be automatically discovered using clang.
-            arena_size: Arena size in bytes for the JIT memory manager (Linux only).
+            arena_size: Arena size in bytes for the JIT memory manager.
+                        Linux only — ignored on macOS and Windows, where the
+                        arena is compiled out.
                         0 = arch default (4GB x86_64, 8GB AArch64; falls back to
                         smaller sizes under RLIMIT_AS), >0 = custom size,
                         <0 = disable arena.

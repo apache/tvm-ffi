@@ -119,17 +119,20 @@ Error ArenaJITLinkMemoryManager::commitPages(void* addr, size_t size) {
   size_t last_slab = (offset + size - 1) / kSlabSize;
 
   for (size_t i = first_slab; i <= last_slab; ++i) {
-    uint8_t expected = 0;
-    if (slab_committed_[i].compare_exchange_strong(expected, 1, std::memory_order_acq_rel)) {
-      size_t slab_offset = i * kSlabSize;
-      size_t slab_len = std::min(kSlabSize, arena_capacity_ - slab_offset);
-      if (::mprotect(arena_base_ + slab_offset, slab_len, PROT_READ | PROT_WRITE) != 0) {
-        return make_error<StringError>(
-            "ArenaJITLinkMemoryManager: mprotect(RW) failed for slab at offset " +
-                formatv("{0:x}", slab_offset) + ": " + std::strerror(errno),
-            inconvertibleErrorCode());
-      }
+    if (slab_committed_[i].load(std::memory_order_acquire) != 0) continue;
+    size_t slab_offset = i * kSlabSize;
+    size_t slab_len = std::min(kSlabSize, arena_capacity_ - slab_offset);
+    // mprotect is idempotent, so a concurrent racer calling it on the same slab
+    // is harmless.  Only flip the flag after success — otherwise a failed commit
+    // followed by freeRegion() would leave slab_committed_[i] == 1, causing a
+    // later allocation to skip mprotect and write into PROT_NONE memory.
+    if (::mprotect(arena_base_ + slab_offset, slab_len, PROT_READ | PROT_WRITE) != 0) {
+      return make_error<StringError>(
+          "ArenaJITLinkMemoryManager: mprotect(RW) failed for slab at offset " +
+              formatv("{0:x}", slab_offset) + ": " + std::strerror(errno),
+          inconvertibleErrorCode());
     }
+    slab_committed_[i].store(1, std::memory_order_release);
   }
   return Error::success();
 }

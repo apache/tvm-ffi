@@ -581,6 +581,8 @@ ORCJITExecutionSessionObj::ORCJITExecutionSessionObj(const std::string& orc_rt_p
   //
   // arena_size_bytes: 0 = arch default (4GB x86_64, 8GB AArch64, with fallback),
   //                   >0 = custom size, <0 = disable arena.
+  // The parameter is Linux-only; on macOS/Windows the arena is compiled out
+  // entirely (see #ifdef below) and the value is ignored.
   //
   // The default is strictly larger than the relocation limit so the arena is
   // never the bottleneck — JITLink's own overflow check fires first, matching
