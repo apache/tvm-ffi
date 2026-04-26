@@ -24,6 +24,7 @@ from typing import Any
 import numpy as np
 import pytest
 import tvm_ffi
+import tvm_ffi.cpp
 
 try:
     import torch
@@ -467,3 +468,58 @@ def test_convert_func_with_torch_tensor_cls() -> None:
     out = f(a, b, c)
     assert calls == 1
     assert tuple(out.shape) == (3,)
+
+
+def test_callback_rawstr_and_bytearrayptr_args() -> None:
+    """Regression: C++ -> Python callback with kTVMFFIRawStr / kTVMFFIByteArrayPtr args.
+
+    When C++ invokes a Python callback with non-owning RawStr or ByteArrayPtr
+    arg shapes, the callback arg setter must materialise a Python str / bytes
+    directly rather than hitting the ``raise ValueError`` guard that formerly
+    existed in ``TVMFFICyCallbackArgSetterFactory``.
+
+    Two trampolines are compiled via cpp.load_inline:
+    - ``invoke_with_raw_str(callback)``    — calls ``callback("hello rawstr")``
+      using a C-string literal, which the TypeTraits pack as kTVMFFIRawStr.
+    - ``invoke_with_byte_array_ptr(callback)`` — calls ``callback(&byte_arr)``
+      where ``byte_arr`` is a ``TVMFFIByteArray`` on the stack, packed as
+      kTVMFFIByteArrayPtr.
+    """
+    mod = tvm_ffi.cpp.load_inline(
+        name="test_callback_rawstr_bytearrayptr",
+        cpp_sources="""
+#include <tvm/ffi/function.h>
+#include <tvm/ffi/c_api.h>
+
+using namespace tvm::ffi;
+
+void invoke_with_raw_str(Function callback) {
+    // Passing a string literal packs as kTVMFFIRawStr (const char* TypeTraits).
+    callback("hello rawstr");
+}
+
+void invoke_with_byte_array_ptr(Function callback) {
+    // Passing a TVMFFIByteArray* packs as kTVMFFIByteArrayPtr.
+    static const char kData[] = "hello bytearrayptr";
+    TVMFFIByteArray byte_arr{kData, sizeof(kData) - 1};
+    callback(&byte_arr);
+}
+""",
+        functions=["invoke_with_raw_str", "invoke_with_byte_array_ptr"],
+    )
+
+    # --- kTVMFFIRawStr path ---
+    str_received: list[Any] = []
+    str_cb = tvm_ffi.convert(lambda x: str_received.append(x))
+    mod.invoke_with_raw_str(str_cb)
+    assert len(str_received) == 1
+    assert isinstance(str_received[0], str), f"expected str, got {type(str_received[0])}"
+    assert str_received[0] == "hello rawstr"
+
+    # --- kTVMFFIByteArrayPtr path ---
+    bytes_received: list[Any] = []
+    bytes_cb = tvm_ffi.convert(lambda x: bytes_received.append(x))
+    mod.invoke_with_byte_array_ptr(bytes_cb)
+    assert len(bytes_received) == 1
+    assert isinstance(bytes_received[0], bytes), f"expected bytes, got {type(bytes_received[0])}"
+    assert bytes_received[0] == b"hello bytearrayptr"
