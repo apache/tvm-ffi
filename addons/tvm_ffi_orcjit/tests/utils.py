@@ -58,12 +58,20 @@ def _extra_cflags() -> list[str]:
     return []
 
 
+def _extra_cuda_cflags() -> list[str]:
+    machine = platform.machine()
+    if machine in ("aarch64", "arm64"):
+        return ["-Xcompiler", "-mno-outline-atomics"]
+    return []
+
+
 def _build_objects(
     src_dir: Path,
     out_dir: Path,
     *,
     ext_glob: str,
     extra_cflags: list[str],
+    extra_cuda_cflags: list[str] | None = None,
 ) -> None:
     """Compile all sources in *src_dir* to object files in *out_dir*."""
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -78,6 +86,7 @@ def _build_objects(
             sources=[str(src)],
             output=f"{src.stem}.o",
             extra_cflags=extra_cflags,
+            extra_cuda_cflags=extra_cuda_cflags or [],
             build_directory=str(build_dir),
         )
         shutil.copy2(obj_path, dest)
@@ -183,6 +192,17 @@ def build_test_objects(out_dir: Path | None = None) -> Path:
                 c_outdir=out_dir / "c-gcc",
                 cc_outdir=out_dir / "cc-gcc",
             )
+            # PIE variant: -fpie forces R_X86_64_PC32 for hidden-visibility
+            # externals like __dso_handle (instead of GOTPCRELX with -fPIC).
+            # Used to reproduce __dso_handle Delta32 overflow on x86_64.
+            _build_variant(
+                "GCC (PIE)",
+                cc=None,
+                cxx="g++",
+                extra_cflags=[*extra, "-fpie"],
+                c_outdir=out_dir / "c-gcc-pie",
+                cc_outdir=out_dir / "cc-gcc-pie",
+            )
         if system == "Darwin" and Path("/usr/bin/clang").exists():
             _build_variant(
                 "Apple Clang",
@@ -227,6 +247,12 @@ def build_test_objects(out_dir: Path | None = None) -> Path:
 
     # CUDA (platform-independent, uses nvcc)
     if shutil.which("nvcc"):
-        _build_objects(SOURCES_CUDA, out_dir / "cuda", ext_glob="*.cu", extra_cflags=[])
+        _build_objects(
+            SOURCES_CUDA,
+            out_dir / "cuda",
+            ext_glob="*.cu",
+            extra_cflags=[],
+            extra_cuda_cflags=_extra_cuda_cflags(),
+        )
 
     return out_dir
