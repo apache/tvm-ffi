@@ -487,24 +487,19 @@ def test_callback_rawstr_and_bytearrayptr_args() -> None:
     """
     mod = tvm_ffi.cpp.load_inline(
         name="test_callback_rawstr_bytearrayptr",
-        cpp_sources="""
-#include <tvm/ffi/function.h>
-#include <tvm/ffi/c_api.h>
+        cpp_sources=r"""
+            void invoke_with_raw_str(tvm::ffi::Function callback) {
+              // Passing a string literal packs as kTVMFFIRawStr (const char* TypeTraits).
+              callback("hello rawstr");
+            }
 
-using namespace tvm::ffi;
-
-void invoke_with_raw_str(Function callback) {
-    // Passing a string literal packs as kTVMFFIRawStr (const char* TypeTraits).
-    callback("hello rawstr");
-}
-
-void invoke_with_byte_array_ptr(Function callback) {
-    // Passing a TVMFFIByteArray* packs as kTVMFFIByteArrayPtr.
-    static const char kData[] = "hello bytearrayptr";
-    TVMFFIByteArray byte_arr{kData, sizeof(kData) - 1};
-    callback(&byte_arr);
-}
-""",
+            void invoke_with_byte_array_ptr(tvm::ffi::Function callback) {
+              // Passing a TVMFFIByteArray* packs as kTVMFFIByteArrayPtr.
+              static const char kData[] = "hello bytearrayptr";
+              TVMFFIByteArray byte_arr{kData, sizeof(kData) - 1};
+              callback(&byte_arr);
+            }
+        """,
         functions=["invoke_with_raw_str", "invoke_with_byte_array_ptr"],
     )
 
