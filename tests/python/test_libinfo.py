@@ -117,3 +117,37 @@ def test_find_python_helper_include_path() -> None:
     path = libinfo.find_python_helper_include_path()
     assert Path(path).is_dir()
     assert (Path(path) / "tvm_ffi_python_helpers.h").is_file()
+
+
+def _platform_lib_filename(target_name: str) -> str:
+    """Return the platform-appropriate shared library filename for ``target_name``."""
+    if sys.platform.startswith("win32"):
+        return f"{target_name}.dll"
+    if sys.platform.startswith("darwin"):
+        return f"lib{target_name}.dylib"
+    return f"lib{target_name}.so"
+
+
+def test_find_library_by_basename_extra_lib_paths(tmp_path: Path) -> None:
+    """A directory passed via ``extra_lib_paths`` is searched in the dev fallback."""
+    lib_file = tmp_path / _platform_lib_filename("dummy")
+    lib_file.write_bytes(b"")
+
+    result = libinfo._find_library_by_basename(
+        "nonexistent-dist-name", "dummy", extra_lib_paths=[tmp_path]
+    )
+
+    assert isinstance(result, Path)
+    assert result.resolve() == lib_file.resolve()
+    # Sanity: the result must live under the temp tree, not tvm_ffi's own tree.
+    assert tmp_path.resolve() in result.resolve().parents
+
+
+def test_find_library_by_basename_extra_lib_paths_type_error(tmp_path: Path) -> None:
+    """Non-Path elements in ``extra_lib_paths`` raise a TypeError naming the offender."""
+    with pytest.raises(TypeError, match=r"extra_lib_paths\[1\] must be a pathlib\.Path"):
+        libinfo._find_library_by_basename(
+            "apache-tvm-ffi",
+            "tvm_ffi",
+            extra_lib_paths=[tmp_path, str(tmp_path)],  # ty: ignore[invalid-argument-type]
+        )

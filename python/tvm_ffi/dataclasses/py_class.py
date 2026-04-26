@@ -219,30 +219,143 @@ def _collect_own_fields(  # noqa: PLR0912
     return fields
 
 
+def method(fn: Any) -> Any:
+    """Mark a ``@py_class`` method for FFI TypeMethod registration.
+
+    Decorate any staticmethod or plain instance method on a ``@py_class``
+    body to have it land in the C-level ``TVMFFITypeInfo.methods[]``
+    table. Once registered, the method is resolvable by name from any
+    FFI consumer — Python-side reflection via ``TypeInfo.methods``,
+    C++, Rust — through the same path already used by C++-defined
+    methods declared via ``refl::ObjectDef<T>().def(...)``.
+
+    Example::
+
+        from tvm_ffi import Object, method
+        from tvm_ffi.dataclasses import py_class
+
+
+        @py_class("example.Node")
+        class Node(Object):
+            x: int
+
+            @method
+            def label(self) -> str:
+                return f"N({self.x})"
+
+
+        # The method is now in ``TypeInfo.methods`` and FFI-callable:
+        info = Node.__tvm_ffi_type_info__
+        fn = next(m.func for m in info.methods if m.name == "label")
+        fn(Node(x=7))  # -> "N(7)"
+
+    ``staticmethod`` is supported: the marker is written onto the
+    underlying function and unwrapped at registration time. Plain
+    functions are also accepted — the marker lives on the function
+    object directly. ``classmethod`` is rejected at decoration time
+    because its ``cls``-first dispatch does not match the
+    packed-call convention.
+    """
+    if isinstance(fn, staticmethod):
+        fn.__func__.__ffi_method__ = True
+        return fn
+    if isinstance(fn, classmethod):
+        raise TypeError(
+            "@tvm_ffi.method: @classmethod is not supported for FFI "
+            "TypeMethod registration — the classmethod's ``cls`` first "
+            "arg does not match the packed-call convention. Use "
+            "@staticmethod or a plain instance method instead.",
+        )
+    if not callable(fn):
+        raise TypeError(
+            f"@tvm_ffi.method: expected a callable, got {type(fn).__name__}.",
+        )
+    fn.__ffi_method__ = True
+    return fn
+
+
+def _is_method_marked(value: Any) -> bool:
+    """Return True when ``value`` is a callable marked by :func:`method`."""
+    if isinstance(value, (staticmethod, classmethod)):
+        return getattr(value.__func__, "__ffi_method__", False) is True
+    if callable(value):
+        return getattr(value, "__ffi_method__", False) is True
+    return False
+
+
+def _validate_method_name(cls: type, name: str) -> None:
+    """Reject ``@method``-marked names that collide with reserved namespaces.
+
+    Names in :data:`_FFI_TYPE_ATTR_NAMES` and Python-protocol dunders
+    are not allowed for ``@method`` — they are routed through the
+    TypeAttrColumn / Python-protocol paths instead.
+    """
+    if name in _FFI_TYPE_ATTR_NAMES:
+        raise NameError(
+            f"@py_class({cls.__name__!r}): {name!r} is a TypeAttrColumn "
+            "name — define it directly on the class body without "
+            "``@method``; the FFI system routes it to ``TVMFFITypeRegisterAttr``.",
+        )
+    if name.startswith("__ffi_"):
+        raise NameError(
+            f"@py_class({cls.__name__!r}): {name!r} starts with the "
+            "reserved ``__ffi_`` prefix. Pick a different name for your "
+            "``@method``-decorated method.",
+        )
+    if name.startswith("__") and name.endswith("__"):
+        raise NameError(
+            f"@py_class({cls.__name__!r}): {name!r} is a Python protocol "
+            "dunder — these are reserved for Python semantics and cannot "
+            "be registered as FFI TypeMethods.",
+        )
+
+
 def _collect_py_methods(cls: type) -> list[tuple[str, Any, bool]] | None:
-    """Extract recognized FFI dunder methods and type attrs from the class body.
+    """Extract FFI-registered entries from a ``@py_class`` body.
 
-    Only names listed in :data:`_FFI_RECOGNIZED_METHODS` are collected.
-    Callables are collected with their ``is_static`` flag; non-callable
-    values (e.g. ``__ffi_ir_traits__``) are collected as-is — the Cython
-    layer routes them to ``TVMFFITypeRegisterAttr`` based on name.
+    Two sources are collected:
 
-    Returns a list of ``(name, value, is_static)`` tuples, or ``None``
-    if no eligible entries were found.
+    1. **TypeAttrColumn dunders** — names in :data:`_FFI_RECOGNIZED_METHODS`
+       that appear in ``cls.__dict__``. Both callables (e.g.
+       ``__ffi_repr__``) and non-callable values flow here; the Cython
+       layer routes them to ``TVMFFITypeRegisterAttr`` based on name.
+    2. **User TypeMethods** — every callable in ``cls.__dict__`` marked
+       with :func:`method`. Registered via ``TVMFFITypeRegisterMethod``
+       so the method is resolvable by name from any FFI consumer
+       (introspection through ``TypeInfo.methods``, name-based lookup
+       from C++ / Rust, etc.). The decorator pattern keeps the
+       per-class declaration co-located with the method body; no
+       separate allowlist.
+
+    Validation runs at registration time — reserved ``__ffi_*`` names
+    and Python protocol dunders cannot be ``@method``-decorated; those
+    are reserved by the TypeAttrColumn and Python semantics respectively.
+
+    Returns the ``(name, value, is_static)`` list, or :data:`None` when
+    no entries were found.
     """
     methods: list[tuple[str, Any, bool]] = []
     for name, value in cls.__dict__.items():
-        if name not in _FFI_RECOGNIZED_METHODS:
+        marked = _is_method_marked(value)
+        if name not in _FFI_RECOGNIZED_METHODS and not marked:
             continue
-        if isinstance(value, staticmethod):
-            func = value.__func__
-            is_static = True
-        elif callable(value):
-            func = value
-            is_static = False
-        else:
-            func = value
-            is_static = False
+        if marked:
+            _validate_method_name(cls, name)
+        # In every case, registering a classmethod as a TypeMethod is
+        # wrong: the packed-call convention places ``self`` (an instance)
+        # in slot 0, but classmethod's descriptor binds slot 0 to the
+        # class.
+        if isinstance(value, classmethod):
+            raise TypeError(
+                f"@py_class({cls.__name__!r}): {name!r} is wrapped by "
+                "@classmethod, which is incompatible with FFI "
+                "registration — the cls-first arg breaks the packed-call "
+                "convention. Use @staticmethod or a plain instance "
+                "method. If you wrote ``@classmethod @method``, swap to "
+                "``@staticmethod @method`` (or drop @classmethod).",
+            )
+        is_static = isinstance(value, staticmethod)
+        func = value.__func__ if is_static else value
         methods.append((name, func, is_static))
     return methods if methods else None
 
@@ -543,12 +656,21 @@ def py_class(  # noqa: PLR0913
     repr
         If True (default), generate ``__repr__``.
     eq
-        If True, generate ``__eq__`` and ``__ne__``.
+        If True, generate ``__eq__`` and ``__ne__`` using recursive
+        field-wise content equality.  Default False, in which case the
+        class inherits the pointer-based ``__eq__`` from ``Object``
+        (``a == b`` is equivalent to ``a.same_as(b)``).  If the class
+        body defines ``__eq__`` or ``__ne__``, the generator is skipped
+        and the user definition is preserved.
     order
         If True, generate ``__lt__``, ``__le__``, ``__gt__``, ``__ge__``.
         Requires ``eq=True``.
     unsafe_hash
-        If True, generate ``__hash__`` (unsafe for mutable objects).
+        If True, generate ``__hash__`` using recursive field-wise
+        content hashing (unsafe for mutable objects).  Default False,
+        in which case the class inherits the handle-address ``__hash__``
+        from ``Object``.  A user-defined ``__hash__`` in the class body
+        is preserved.
     match_args
         If True (default), set ``__match_args__`` to a tuple of the
         positional ``__init__`` field names (``init=True`` and not
@@ -558,8 +680,8 @@ def py_class(  # noqa: PLR0913
         If True, all fields are keyword-only in ``__init__`` by default.
     structural_eq
         Structural equality/hashing kind for this type.  Controls how
-        instances participate in ``StructuralEqual`` and ``StructuralHash``.
-        Valid values are:
+        instances participate in ``structural_equal`` and
+        ``structural_hash``.  Valid values are:
 
         - ``None`` (default): structural comparison is not supported.
         - ``"tree"``: content-based comparison, the safe default for
@@ -571,6 +693,11 @@ def py_class(  # noqa: PLR0913
           fast path (only safe for types with no transitive ``"var"``
           children).
         - ``"singleton"``: pointer equality only, for singleton types.
+
+        This parameter is **independent** of ``eq`` / ``unsafe_hash``:
+        it only configures how ``structural_equal`` / ``structural_hash``
+        walk the object in C++ and never installs or alters Python-level
+        ``__eq__`` / ``__hash__``.  See Notes below.
     slots
         Accepted for ``dataclass_transform`` compatibility.  Object
         subclasses always use ``__slots__ = ()`` via the metaclass.
@@ -579,6 +706,32 @@ def py_class(  # noqa: PLR0913
     -------
     Callable | type
         A class decorator, or the decorated class (bare usage).
+
+    Notes
+    -----
+    Three orthogonal equality/hashing mechanisms coexist on a
+    ``@py_class`` type, each controlled by an independent knob:
+
+    - ``a == b`` / ``hash(a)`` — selected by ``eq`` / ``unsafe_hash``
+      params (or user-defined ``__eq__`` / ``__hash__`` in the class
+      body).  Default: pointer-based ``same_as`` and handle-address
+      hash, inherited from ``Object``.
+    - ``structural_equal(a, b)`` / ``structural_hash(a)`` — selected
+      by the ``structural_eq`` param.  Default (``None``): structural
+      comparison is unsupported for this type.
+    - ``a.same_as(b)`` — always available; always pointer comparison.
+
+    The typical pattern is to leave ``eq`` / ``unsafe_hash`` at their
+    defaults so ``==`` and ``hash()`` stay cheap and pointer-based
+    (ideal for pass-internal bookkeeping such as visited-set tracking),
+    and call ``structural_equal`` / ``structural_hash`` explicitly at
+    the points that require the heavy semantic check.
+
+    Combining ``eq=True`` (or ``unsafe_hash=True``) with a
+    ``structural_eq`` kind is legal but gives the type two different
+    recursive equalities — a Python-level one for ``==`` and a C++
+    structural one for ``structural_equal`` — which rarely coincide.
+    Prefer setting only one.
 
     """
     if order and not eq:

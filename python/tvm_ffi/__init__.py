@@ -67,11 +67,12 @@ if TYPE_CHECKING or not _is_config_mode():
     )
     from ._dtype import dtype
     from .core import Object, ObjectConvertible, Function, CAny, CContainerBase
-    from ._convert import convert
+    from ._convert import convert, convert_func
     from .error import register_error
     from ._tensor import Device, device, DLDeviceType
     from ._tensor import from_dlpack, Tensor, Shape
     from .container import Array, Dict, List, Map
+    from .dataclasses.py_class import method
     from .module import Module, system_lib, load_module
     from .stream import StreamContext, get_raw_stream, use_raw_stream, use_torch_stream
     from .structural import (
@@ -145,6 +146,7 @@ __all__ = [
     "__version_tuple__",
     "access_path",
     "convert",
+    "convert_func",
     "cpp",
     "dataclasses",
     "device",
@@ -156,6 +158,7 @@ __all__ = [
     "get_raw_stream",
     "init_ffi_api",
     "load_module",
+    "method",
     "register_error",
     "register_global_func",
     "register_object",

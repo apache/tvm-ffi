@@ -120,7 +120,7 @@ cdef inline int ConstructorCall(void* constructor_handle,
     result.type_index = kTVMFFINone
     result.v_int64 = 0
     TVMFFIPyConstructorCall(
-        TVMFFIPyArgSetterFactory_, constructor_handle, py_arg_tuple, &result, &c_api_ret_code,
+        constructor_handle, py_arg_tuple, &result, &c_api_ret_code,
         parent_ctx
     )
     CHECK_CALL(c_api_ret_code)
@@ -556,9 +556,8 @@ cdef int TVMFFIPyArgSetterCallable_(
     PyObject* py_arg, TVMFFIAny* out
 ) except -1:
     """Setter for Callable"""
-    cdef object arg = <object>py_arg
     cdef TVMFFIObjectHandle chandle
-    _convert_to_ffi_func_handle(arg, &chandle)
+    CHECK_CALL(TVMFFIPyConvertPyCallback(py_arg, NULL, &chandle))
     out.type_index = TVMFFIObjectGetTypeIndex(chandle)
     out.v_ptr = chandle
     TVMFFIPyPushTempFFIObject(ctx, chandle)
@@ -725,16 +724,14 @@ cdef int TVMFFIPyArgSetterFFIValueProtocol_(
     # keep alive the python object since this is a temporary object
     # we must push to extra temp py objects stack to avoid overflow the temp py objects stack
     TVMFFIPyPushExtraTempPyObject(ctx, ffi_value_py_obj_ptr)
-    return TVMFFIPySetArgumentGenericDispatcher(
-        TVMFFIPyArgSetterFactory_, ctx, ffi_value_py_obj_ptr, out
-    )
+    return TVMFFIPySetArgumentGenericDispatcher(ctx, ffi_value_py_obj_ptr, out)
 
 
 cdef _DISPATCH_TYPE_KEEP_ALIVE = set()
 cdef _DISPATCH_TYPE_KEEP_ALIVE_LOCK = threading.Lock()
 
 
-cdef int TVMFFIPyArgSetterFactory_(PyObject* value, TVMFFIPyArgSetter* out) except -1:
+cdef public int TVMFFICyArgSetterFactory(PyObject* value, TVMFFIPyArgSetter* out) except -1:
     """
     Factory function that creates an argument setter for a given Python argument type.
     """
@@ -950,7 +947,6 @@ cdef class Function(CObject):
         result.type_index = kTVMFFINone
         result.v_int64 = 0
         TVMFFIPyFuncCall(
-            TVMFFIPyArgSetterFactory_,
             (<CObject>self).chandle, <PyObject*>args,
             &result,
             &c_api_ret_code,
@@ -1108,56 +1104,6 @@ def _get_global_func(name: str, allow_missing: bool):
     raise ValueError("Cannot find global function %s" % name)
 
 
-cdef int tvm_ffi_callback(void* context,
-                          const TVMFFIAny* packed_args,
-                          int32_t num_args,
-                          TVMFFIAny* result) noexcept with gil:
-    cdef list pyargs
-    cdef TVMFFIAny temp_result
-    cdef int c_api_ret_code
-    cdef object local_pyfunc = <object>(context)
-    pyargs = []
-
-    for i in range(num_args):
-        CHECK_CALL(TVMFFIAnyViewToOwnedAny(&packed_args[i], &temp_result))
-        pyargs.append(make_ret(temp_result))
-
-    try:
-        rv = local_pyfunc(*pyargs)
-        TVMFFIPyPyObjectToFFIAny(
-            TVMFFIPyArgSetterFactory_,
-            <PyObject*>rv,
-            result,
-            &c_api_ret_code
-        )
-        return c_api_ret_code
-    except Exception as err:
-        set_last_ffi_error(err)
-        return -1
-
-
-cdef inline int _convert_to_ffi_func_handle(
-    object pyfunc, TVMFFIObjectHandle* out_handle
-) except -1:
-    """Convert a python function to TVM FFI function handle"""
-    Py_INCREF(pyfunc)
-    CHECK_CALL(TVMFFIFunctionCreate(
-        <void*>(pyfunc),
-        tvm_ffi_callback,
-        TVMFFIPyObjectDeleter,
-        out_handle))
-    return 0
-
-
-def _convert_to_ffi_func(object pyfunc: Callable[..., Any]) -> Function:
-    """Convert a python function to TVM FFI function"""
-    cdef TVMFFIObjectHandle chandle
-    _convert_to_ffi_func_handle(pyfunc, &chandle)
-    ret = Function.__new__(Function)
-    (<CObject>ret).chandle = chandle
-    return ret
-
-
 cdef inline int _convert_to_opaque_object_handle(
     object pyobject, TVMFFIObjectHandle* out_handle
 ) except -1:
@@ -1201,9 +1147,9 @@ def _testing_drop_last_ref_without_thread_state() -> None:
 
 
 def _print_debug_info() -> None:
-    """Get the size of the dispatch map"""
-    cdef size_t size = TVMFFIPyGetDispatchMapSize()
-    print(f"TVMFFIPyGetDispatchMapSize: {size}")
+    """Get the size of the arg dispatch map"""
+    cdef size_t size = TVMFFIPyGetArgDispatchMapSize()
+    print(f"TVMFFIPyGetArgDispatchMapSize: {size}")
 
 
 cdef Function _OBJECT_FROM_JSON_GRAPH_STR = _get_global_func("ffi.FromJSONGraphString", True)

@@ -21,7 +21,7 @@ from __future__ import annotations
 import ctypes
 from numbers import Number
 from types import ModuleType
-from typing import Any
+from typing import Any, Callable
 
 from . import _dtype, container, core
 
@@ -138,3 +138,70 @@ def convert(value: Any) -> Any:  # noqa: PLR0911,PLR0912
     else:
         # in this case, it is an opaque python object
         return core._convert_to_opaque_object(value)
+
+
+def convert_func(
+    pyfunc: Callable[..., Any],
+    tensor_cls: type | None = None,
+) -> Any:
+    """Convert a Python callable to an FFI :py:class:`~tvm_ffi.Function`.
+
+    This is the callable-specific sibling of :py:func:`tvm_ffi.convert`.
+    It accepts one extra argument, ``tensor_cls``, that lets the caller
+    specify how tensor arguments should be delivered to the Python
+    callable when the resulting :py:class:`Function` is invoked from C++.
+    :py:func:`tvm_ffi.convert` has no such knob — it always produces a
+    :py:class:`Function` whose callback receives ``tvm_ffi.Tensor`` for
+    tensor args.
+
+    Parameters
+    ----------
+    pyfunc : Callable
+        The Python callable to wrap.
+    tensor_cls : type, optional
+        The class whose instances the callback should receive for tensor
+        args. The class must expose a ``__dlpack_c_exchange_api__``
+        :py:class:`PyCapsule`; its capsule is threaded into the callback
+        closure so tensor args are converted at the C level (via the
+        DLPack exchange API) before the Python callback body runs — this
+        is significantly faster than calling ``torch.from_dlpack(x)`` (or
+        equivalent) inside the callback. Raises :py:class:`TypeError` if
+        ``tensor_cls`` does not expose the attribute.
+
+        When ``tensor_cls`` is ``None``, ``convert_func`` behaves like the
+        callable branch of :py:func:`tvm_ffi.convert`.
+
+    Returns
+    -------
+    Function
+        The wrapped FFI function.
+
+    Examples
+    --------
+    .. code-block:: python
+
+        import torch
+        import tvm_ffi
+
+        # Without tensor_cls: same as tvm_ffi.convert(pyfunc) — the callback
+        # receives tvm_ffi.Tensor for tensor args.
+        f = tvm_ffi.convert_func(lambda x: x + 1)
+        assert isinstance(f, tvm_ffi.Function)
+
+
+        # With tensor_cls=torch.Tensor: the callback receives torch.Tensor
+        # directly; the DLPack conversion happens in C before the body runs.
+        def callback(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+            return a + b
+
+
+        g = tvm_ffi.convert_func(callback, tensor_cls=torch.Tensor)
+
+    See Also
+    --------
+    :py:func:`tvm_ffi.convert` :
+        Generic value-to-FFI conversion. Use this when you don't need to
+        specify ``tensor_cls``.
+
+    """
+    return core._convert_to_ffi_func(pyfunc, tensor_cls=tensor_cls)

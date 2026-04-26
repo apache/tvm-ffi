@@ -33,6 +33,18 @@ The behavior is controlled by two layers of annotation on
 This document explains what each annotation means, when to use it, and how
 they compose.
 
+.. note::
+
+   Structural equality and hashing **never call Python-level** ``__eq__``
+   or ``__hash__``.  ``structural_equal`` / ``structural_hash`` dispatch
+   entirely through a C++ walker driven by the kind metadata registered
+   via ``structural_eq=``; the Python ``a == b`` / ``hash(a)`` dunders
+   are independent (they default to pointer identity and handle address,
+   inherited from ``Object``).  To customize how a specific type
+   participates in *structural* comparison, register the
+   :ref:`sequal-shash` hooks described below — do **not** override
+   ``__eq__`` or ``__hash__``.
+
 
 Type-Level Annotation
 ---------------------
@@ -160,61 +172,103 @@ object, they are guaranteed equal — skip the field comparison."
 This is purely a **performance optimization**. The only behavioral difference
 from ``"tree"`` is that pointer identity short-circuits to ``True``.
 
-When is this safe?
-~~~~~~~~~~~~~~~~~~
+When is this safe (and worth it)?
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-When the type satisfies two conditions:
+Three conditions decide whether ``"const-tree"`` is the right choice:
 
 1. **Immutable** — content doesn't change after construction, so same-pointer
    always implies same-content.
 2. **No transitive** ``"var"`` **children** — skipping field traversal won't
    cause variable mappings to be missed (see :ref:`var-kind` for why this
    matters).
+3. **Sharing is common** — instances are interned or canonicalized, so the
+   same pointer actually appears on both sides of real comparisons. Without
+   interning, the shortcut never fires and ``"const-tree"`` behaves like
+   ``"tree"`` with a dead branch.
+
+Conditions 1 and 2 are correctness requirements: violating them is a bug,
+not a performance regression. Condition 3 is the payoff — ``"const-tree"``
+is worth reaching for only when it will actually save work.
+
+A useful rule of thumb: *does the system go out of its way to make two
+equal instances of this type share a pointer?* Canonical types, interned
+constants, cached shapes, and op metadata usually do. General expression
+and statement nodes usually don't — and also fail condition 2. Prefer
+``"const-tree"`` for the type / attribute / metadata layer of the IR, not
+the expression / statement layer.
+
+Note also that condition 2 is a *whole-subgraph* property: once a field
+holds an ``Expr`` (which may one day contain a ``Var``), the annotation
+silently commits the type to that invariant — a later refactor embedding
+a ``Var`` becomes a correctness break rather than a local change.
 
 Why not use it everywhere?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Most IR nodes are immutable, but many transitively contain variables
-(e.g., ``x + 1`` contains the ``"var"`` node ``x``). If the pointer
-shortcut fires, the traversal skips ``x``, and a variable mapping that should
-have been established is silently missed.
+(e.g., ``x + 1`` contains the ``"var"`` node ``x``). The pointer shortcut
+fires only when both sides of a comparison reference the **same object** —
+but when that sharing exists, skipping traversal also skips the variable
+occurrences inside, and mappings that should have been recorded are
+silently missed.
 
-The following diagram shows the danger. Suppose the ``+`` node were
-incorrectly annotated as ``"const-tree"``. When comparing two trees that
-share a sub-expression, the pointer shortcut fires on the shared node, and
-the ``"var"`` ``x`` inside it is never visited — so no ``x ↔ y`` mapping
-is recorded:
+Suppose the ``+`` node were incorrectly annotated as ``"const-tree"``, and
+consider comparing two tuples that share the ``+`` subtree via pointer
+identity:
+
+.. code-block:: text
+
+   shared = x + 1                     # pointer P, contains var x
+
+   lhs = (shared, x)                  # .0 = P, .1 = var x
+   rhs = (shared, y)                  # .0 = P, .1 = var y  (different Var)
+
+   structural_equal(lhs, rhs, map_free_vars=True)
+
+With the ``+`` annotated as plain ``"tree"`` (correct):
+
+- ``.0``: traverse into ``shared`` on both sides, visit ``x`` at ``.lhs``,
+  record the mapping ``x ↔ x``.
+- ``.1``: look up ``x`` → maps to ``x``, but rhs is ``y``. **NOT EQUAL** ✓
+
+With the ``+`` annotated as ``"const-tree"`` (the bug):
+
+- ``.0``: pointer shortcut fires on ``shared`` (both sides reference P).
+  Fields are skipped, ``x`` inside is never visited, no mapping is recorded.
+- ``.1``: compare ``x`` vs ``y``. No existing mapping, and
+  ``map_free_vars=True`` lets a new one be recorded as ``x ↔ y``.
+  **EQUAL** ✗ (wrong)
+
+The following diagram illustrates the shared structure. The ``+`` node
+(``shared``) has two incoming ``.0`` edges — one from each side — which
+is exactly the situation in which the pointer shortcut fires:
 
 .. mermaid::
 
    graph TD
-       subgraph "lhs"
-           LT["(_, _)"]
-           LE["x + 1"]
-           LX["x : var"]
-           LT -->|".0"| LE
-           LT -->|".1"| LX
-           LE -->|".lhs"| LX2["x"]
-       end
+       LT["lhs: (_, _)"]
+       RT["rhs: (_, _)"]
+       ADD["shared = x + 1<br/>const-tree<br/><i>same pointer on both sides</i>"]
+       X["x : var"]
+       ONE["1"]
+       Y["y : var"]
 
-       subgraph "rhs"
-           RT["(_, _)"]
-           RE["y + 1"]
-           RY["y : var"]
-           RT -->|".0"| RE
-           RT -->|".1"| RY
-           RE -->|".lhs"| RY2["y"]
-       end
+       LT -->|".0"| ADD
+       RT -->|".0"| ADD
+       LT -->|".1"| X
+       RT -->|".1"| Y
+       ADD -->|".lhs"| X
+       ADD -->|".rhs"| ONE
 
-       LE -. "const-tree would skip here<br/>(misses x ↔ y mapping)" .-> RE
-       LX -. "Later comparison fails:<br/>x has no recorded mapping" .-> RY
+       style ADD fill:#fff3cd
+       style X fill:#f8d7da
+       style Y fill:#f8d7da
 
-       style LE fill:#fff3cd
-       style RE fill:#fff3cd
-       style LX fill:#f8d7da
-       style RY fill:#f8d7da
-       style LX2 fill:#f8d7da
-       style RY2 fill:#f8d7da
+The same failure mode arises whenever a shared subtree containing a
+``"var"`` is compared inside any definition region (e.g., the body of a
+``Lambda`` whose params field is ``structural_eq="def"``), not only under
+``map_free_vars=True``.
 
 
 ``"dag"`` — Sharing-Aware Comparison
@@ -337,11 +391,15 @@ Full comparison: ``"tree"`` vs ``"dag"``
 
    @py_class(structural_eq="var")
    class Var(Object):
-       name: str
+       name: str = field(structural_eq="ignore")   # alpha-equivalent vars differ in name
+       type: Type                                  # participates in equality
 
 **Meaning**: "This is a variable. Two variables are equal if they are
-**bound in corresponding positions**, not if they have the same name or
-content."
+**bound in corresponding positions**, not if they have the same name."
+The ``name`` field is almost always marked ``structural_eq="ignore"``
+because alpha-equivalent variables have different names. Other fields
+such as ``type`` *are* compared — but only at the binding site (see
+:ref:`var-fields`).
 
 The problem
 ~~~~~~~~~~~
@@ -350,7 +408,7 @@ The problem
 
    fun x → x + 1       should equal       fun y → y + 1
 
-Variables are not defined by their content (name, type annotation). They
+Variables are not defined by their content, such as their name. They
 are defined by **where they are introduced** and **how they are used**.
 ``x`` and ``y`` above are interchangeable because they occupy the same
 binding position and are used in the same way.
@@ -398,6 +456,43 @@ The following diagram traces the comparison of two alpha-equivalent functions:
 
    # Bare expressions, no enclosing function:
    x + 1  vs  y + 1   →  NOT EQUAL (no definition region, different pointers)
+
+.. _var-fields:
+
+Fields and the sticky mapping
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A ``"var"`` type still has fields, and non-ignored fields *are* compared —
+but only on the **first** encounter of a var pair. Once a mapping is
+recorded, subsequent occurrences look up the mapping and skip field
+comparison entirely.
+
+Take the ``Var`` declaration from the top of this section: ``name`` is
+ignored, but ``type`` is not. The first time a pair of vars is seen in
+a definition region, their ``type`` fields are compared and the mapping
+is only established if they match. After that, the mapping is **sticky**
+— later occurrences trust the correspondence regardless of those fields:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 55 45
+
+   * - Scenario
+     - Result
+   * - ``Var("x", int)`` vs ``Var("y", int)`` on first encounter
+     - Fields match → mapping ``x ↔ y`` recorded → **Equal**
+   * - ``Var("x", int)`` vs ``Var("y", float)`` on first encounter
+     - Fields differ → **Not equal**
+   * - ``Var("x", int)`` vs ``Var("y", float)`` when ``x ↔ y`` already mapped
+     - Lookup succeeds → **Equal** (types are *not* rechecked)
+
+For IRs where type consistency is part of well-formedness, this is
+usually sufficient: a well-formed program uses each var with a consistent
+type at every occurrence, so the first-encounter check at the binding
+site covers the rest. If you truly want types re-verified at every use,
+they don't belong on the ``"var"`` node — lift them into the surrounding
+expression/statement node where they participate in normal ``"tree"``
+comparison.
 
 Full comparison: with and without definition regions
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -549,20 +644,125 @@ Use for:
 - **Any field that introduces names into scope**
 
 
-Custom Equality and Hashing
-----------------------------
+.. _sequal-shash:
 
-For types where the default field-by-field traversal is insufficient, you
-can register custom callbacks as type attributes:
+Custom Equality and Hashing: ``__s_equal__`` / ``__s_hash__``
+--------------------------------------------------------------
 
-- **``__s_equal__``** — custom equality logic
-- **``__s_hash__``** — custom hashing logic
+For types where the default field-by-field traversal is insufficient (for
+example, fields that need to be visited in a specific order, cross-field
+invariants, or sub-values that need a different ``def_region`` setting
+than the declarative field flags allow), you can register custom
+callbacks as **type attributes**:
 
-These are registered per type via ``EnsureTypeAttrColumn``. When present,
-they replace the default field iteration. The system still manages all
-kind-specific logic (``"dag"`` memoization, ``"var"`` mapping, etc.) — the
-custom callback only controls which sub-values to compare/hash and in what
-order.
+- ``__s_equal__`` — custom structural equality logic.
+- ``__s_hash__`` — custom structural hashing logic.
+
+These are the *only* supported way to override structural comparison.
+``structural_equal`` / ``structural_hash`` never consult Python
+``__eq__`` / ``__hash__`` — those dunders serve a separate purpose
+(``==`` and ``hash()``, which default to pointer identity).
+
+When either hook is registered, it replaces the default field iteration
+for that type.  All kind-specific machinery (``"dag"`` memoization,
+``"var"`` mapping, the pointer shortcut of ``"const-tree"``, etc.) is
+still managed by the framework — the custom callback only controls
+*which* sub-values are compared or hashed, *in what order*, and *with
+what* ``def_region`` flag.
+
+Signatures
+~~~~~~~~~~
+
+``__s_equal__``:
+
+.. code-block:: text
+
+   (self, other, eq_cb) -> bool
+
+   eq_cb(lhs, rhs, def_region: bool, field_name: str) -> bool
+
+``__s_hash__``:
+
+.. code-block:: text
+
+   (self, init_hash: int, hash_cb) -> int
+
+   hash_cb(value, init_hash: int, def_region: bool) -> int
+
+The ``def_region`` flag on each recursive call controls whether the
+sub-value is compared/hashed in a definition region (enabling new
+variable bindings, just like ``field(structural_eq="def")``).  The
+``field_name`` argument on ``eq_cb`` is used only for mismatch path
+reporting from :py:func:`~tvm_ffi.get_first_structural_mismatch`.
+
+Example (Python)
+~~~~~~~~~~~~~~~~
+
+.. code-block:: python
+
+   @py_class(structural_eq="tree")
+   class Lambda(Object):
+       params: list
+       body: Any
+       comment: str  # not part of identity, but also not iterated below
+
+       def __s_equal__(self, other, eq_cb):
+           # params is a definition region; body is not.
+           if not eq_cb(self.params, other.params, True, "params"):
+               return False
+           if not eq_cb(self.body, other.body, False, "body"):
+               return False
+           return True
+
+       def __s_hash__(self, init_hash, hash_cb):
+           h = hash_cb(self.params, init_hash, True)
+           h = hash_cb(self.body, h, False)
+           return h
+
+The two methods must agree: if ``__s_equal__`` considers two instances
+equal, ``__s_hash__`` must produce the same hash for them.
+
+Example (C++)
+~~~~~~~~~~~~~
+
+.. code-block:: c++
+
+   class MyNodeObj : public Object {
+    public:
+     Array<Var> params;
+     Array<ObjectRef> body;
+
+     bool SEqual(const MyNodeObj* other,
+                 ffi::TypedFunction<bool(AnyView, AnyView, bool, AnyView)> cmp) const {
+       if (!cmp(params, other->params, /*def_region=*/true, "params")) return false;
+       if (!cmp(body, other->body, /*def_region=*/false, "body")) return false;
+       return true;
+     }
+
+     int64_t SHash(int64_t init_hash,
+                   ffi::TypedFunction<int64_t(AnyView, int64_t, bool)> hash) const {
+       int64_t h = hash(params, init_hash, /*def_region=*/true);
+       h = hash(body, h, /*def_region=*/false);
+       return h;
+     }
+
+     static void RegisterReflection() {
+       namespace refl = tvm::ffi::reflection;
+       refl::ObjectDef<MyNodeObj>()
+           .def_ro("params", &MyNodeObj::params)
+           .def_ro("body", &MyNodeObj::body);
+       refl::TypeAttrDef<MyNodeObj>()
+           .def(refl::type_attr::kSEqual, &MyNodeObj::SEqual)
+           .def(refl::type_attr::kSHash, &MyNodeObj::SHash);
+     }
+
+     static constexpr TVMFFISEqHashKind _type_s_eq_hash_kind = kTVMFFISEqHashKindTreeNode;
+     TVM_FFI_DECLARE_OBJECT_INFO_FINAL("my.Node", MyNodeObj, Object);
+   };
+
+See :cpp:var:`tvm::ffi::reflection::type_attr::kSEqual` and
+:cpp:var:`tvm::ffi::reflection::type_attr::kSHash` in
+``include/tvm/ffi/reflection/accessor.h`` for the full reference.
 
 
 All Kinds at a Glance
@@ -683,7 +883,7 @@ source location:
 
    @py_class(structural_eq="var")
    class Var(Object):
-       name: str
+       name: str = field(structural_eq="ignore")
 
    @py_class(structural_eq="singleton")
    class Op(Object):

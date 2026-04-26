@@ -174,6 +174,34 @@ def test_str_enum_payload_literal_sugar() -> None:
     assert list(Opcode.all_entries()) == [Opcode.add, Opcode.mul]
 
 
+def test_payload_enum_compat_behaviors() -> None:
+    class Priority(IntEnum, type_key=_unique_key("IntEnumCompat")):
+        low = 10
+        high = 20
+
+    class Opcode(StrEnum, type_key=_unique_key("StrEnumCompat")):
+        add = "+"
+        mul = "*"
+
+    assert Priority.low.name == "low"  # ty: ignore[possibly-missing-attribute]
+    assert repr(Priority.low) == "Priority.low"
+    assert Priority.low == 10
+    assert Priority.low != 20
+    assert str(Priority.low) == "10"
+    assert hash(Priority.low) == hash(10)
+    assert Priority(10).same_as(Priority.low)  # ty: ignore[missing-argument]
+    assert Priority("low").same_as(Priority.low)  # ty: ignore[missing-argument, invalid-argument-type]
+
+    assert Opcode.add.name == "add"  # ty: ignore[possibly-missing-attribute]
+    assert repr(Opcode.add) == "Opcode.add"
+    assert Opcode.add == "+"
+    assert Opcode.add != "*"
+    assert str(Opcode.add) == "+"
+    assert hash(Opcode.add) == hash("+")
+    assert Opcode("+").same_as(Opcode.add)  # ty: ignore[missing-argument, invalid-argument-type]
+    assert Opcode("add").same_as(Opcode.add)  # ty: ignore[missing-argument, invalid-argument-type]
+
+
 def test_payload_literal_sugar_preserves_annotated_field_defaults() -> None:
     class Opcode(StrEnum, type_key=_unique_key("StrEnumLiteralDefault")):
         arity: int = 0
