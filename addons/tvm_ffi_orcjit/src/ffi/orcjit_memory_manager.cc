@@ -18,15 +18,15 @@
  */
 
 /*!
- * \file orcjit_arena_mm.cc
+ * \file orcjit_memory_manager.cc
  * \brief Arena-based JITLinkMemoryManager implementation.
  *
  * Follows the InProcessMemoryManager pattern from LLVM but replaces
  * per-object mmap with bump allocation from a pre-reserved arena.
  * Pages are committed in 2 MB slabs to enable Transparent Huge Page
- * (THP) promotion — see the class docstring in orcjit_arena_mm.h.
+ * (THP) promotion — see the class docstring in orcjit_memory_manager.h.
  */
-#include "orcjit_arena_mm.h"
+#include "orcjit_memory_manager.h"
 
 #ifdef __linux__
 

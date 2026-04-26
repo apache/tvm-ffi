@@ -39,7 +39,7 @@ find_package(tvm_ffi CONFIG REQUIRED)
 # ---- Build shared library ----
 add_library(
   tvm_ffi_orcjit SHARED src/ffi/orcjit_session.cc src/ffi/orcjit_dylib.cc
-                        src/ffi/orcjit_arena_mm.cc
+                        src/ffi/orcjit_memory_manager.cc
 )
 set_target_properties(
   tvm_ffi_orcjit PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON

@@ -46,7 +46,7 @@
 #include <cstddef>
 #include <cstring>
 
-#include "orcjit_arena_mm.h"
+#include "orcjit_memory_manager.h"
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -460,7 +460,7 @@ class DLLImportDefinitionGenerator : public llvm::orc::DefinitionGenerator {
  * because isUInt<32>(target) is true, but the resulting fixup is wrong.
  *
  * The PreFixupPass reverts broken relaxations back to indirect calls
- * through the GOT.  See orcjit_arena_mm.h for full context.
+ * through the GOT.  See orcjit_memory_manager.h for full context.
  */
 class GOTPCRELXFixPlugin : public llvm::orc::ObjectLinkingLayer::Plugin {
  public:
@@ -607,23 +607,23 @@ ORCJITExecutionSessionObj::ORCJITExecutionSessionObj(const std::string& orc_rt_p
       capacity = ArenaJITLinkMemoryManager::kDefaultArenaCapacity_x86_64;
 #endif
     }
-    arena_mm_ = std::make_unique<ArenaJITLinkMemoryManager>(page_size, capacity);
+    memory_manager_ = std::make_unique<ArenaJITLinkMemoryManager>(page_size, capacity);
   }
 #endif
 
   auto setup_builder = [this](llvm::orc::LLJITBuilder& builder) {
 #ifdef __linux__
-    if (arena_mm_) {
+    if (memory_manager_) {
       builder.setObjectLinkingLayerCreator(
           [this](llvm::orc::ExecutionSession& ES)
               -> llvm::Expected<std::unique_ptr<llvm::orc::ObjectLayer>> {
-            auto OLL = std::make_unique<llvm::orc::ObjectLinkingLayer>(ES, *arena_mm_);
+            auto OLL = std::make_unique<llvm::orc::ObjectLinkingLayer>(ES, *memory_manager_);
 #if defined(__x86_64__) || defined(_M_X64)
             OLL->addPlugin(std::make_unique<GOTPCRELXFixPlugin>());
 #endif
             return OLL;
           });
-    }  // if (arena_mm_)
+    }  // if (memory_manager_)
 #elif defined(__APPLE__) || defined(_WIN32)
     // macOS: MachOPlatform (via ExecutorNativePlatform) requires ObjectLinkingLayer.
     // Windows: need ObjectLinkingLayer for InitFiniPlugin and DLLImportDefinitionGenerator.

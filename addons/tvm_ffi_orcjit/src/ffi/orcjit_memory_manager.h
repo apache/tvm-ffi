@@ -18,7 +18,7 @@
  */
 
 /*!
- * \file orcjit_arena_mm.h
+ * \file orcjit_memory_manager.h
  * \brief Arena-based JITLinkMemoryManager for LLVM ORC JIT.
  *
  * Pre-reserves a contiguous virtual address region and bump-allocates
@@ -55,8 +55,8 @@
  *       `ff 25` opcode bytes and retargets the edge to the GOT entry
  *       with `PCRel32` + addend 0.
  */
-#ifndef TVM_FFI_ORCJIT_ORCJIT_ARENA_MM_H_
-#define TVM_FFI_ORCJIT_ORCJIT_ARENA_MM_H_
+#ifndef TVM_FFI_ORCJIT_ORCJIT_MEMORY_MANAGER_H_
+#define TVM_FFI_ORCJIT_ORCJIT_MEMORY_MANAGER_H_
 
 #include <llvm/ExecutionEngine/JITLink/JITLinkMemoryManager.h>
 #include <llvm/ExecutionEngine/Orc/Shared/MemoryFlags.h>
@@ -226,4 +226,4 @@ class ArenaJITLinkMemoryManager : public llvm::jitlink::JITLinkMemoryManager {
 }  // namespace ffi
 }  // namespace tvm
 
-#endif  // TVM_FFI_ORCJIT_ORCJIT_ARENA_MM_H_
+#endif  // TVM_FFI_ORCJIT_ORCJIT_MEMORY_MANAGER_H_

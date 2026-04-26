@@ -35,7 +35,7 @@
 #include <string>
 #include <unordered_map>
 
-#include "orcjit_arena_mm.h"
+#include "orcjit_memory_manager.h"
 
 namespace tvm {
 namespace ffi {
@@ -100,7 +100,7 @@ class ORCJITExecutionSessionObj : public Object {
 
  private:
   /*! \brief Arena memory manager — must be declared before jit_ for destruction order */
-  std::unique_ptr<ArenaJITLinkMemoryManager> arena_mm_;
+  std::unique_ptr<ArenaJITLinkMemoryManager> memory_manager_;
   /*! \brief The LLVM ORC JIT instance */
   std::unique_ptr<llvm::orc::LLJIT> jit_;
 
