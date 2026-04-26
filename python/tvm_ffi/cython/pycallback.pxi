@@ -162,6 +162,43 @@ cdef int TVMFFIPyCallbackArgSetterDLTensorPtr_(
     return 0
 
 
+cdef int TVMFFIPyCallbackArgSetterRawStr_(
+    TVMFFIPyCallbackArgSetter* handle,
+    const DLPackExchangeAPI* api,
+    const TVMFFIAny* arg,
+    PyObject** out
+) except -1:
+    """Callback arg setter for kTVMFFIRawStr -> Python str (UTF-8 decode).
+
+    ``arg.v_c_str`` is a non-owning ``const char*`` pointer into C-side storage
+    that remains valid for the duration of the callback invocation.  We copy the
+    contents into a Python ``str`` immediately, so there is no dangling-pointer
+    concern after the setter returns.
+    """
+    obj = arg.v_c_str.decode("utf-8")
+    Py_INCREF(obj)
+    out[0] = <PyObject*>obj
+    return 0
+
+
+cdef int TVMFFIPyCallbackArgSetterByteArrayPtr_(
+    TVMFFIPyCallbackArgSetter* handle,
+    const DLPackExchangeAPI* api,
+    const TVMFFIAny* arg,
+    PyObject** out
+) except -1:
+    """Callback arg setter for kTVMFFIByteArrayPtr -> Python bytes.
+
+    ``arg.v_ptr`` is a non-owning ``TVMFFIByteArray*`` pointer into C-side
+    storage valid for the callback's lifetime.  ``bytearray_to_bytes`` copies
+    the raw bytes into a new Python ``bytes`` object immediately.
+    """
+    obj = bytearray_to_bytes(<TVMFFIByteArray*>arg.v_ptr)
+    Py_INCREF(obj)
+    out[0] = <PyObject*>obj
+    return 0
+
+
 cdef int TVMFFIPyCallbackArgSetterRValueRef_(
     TVMFFIPyCallbackArgSetter* handle,
     const DLPackExchangeAPI* api,
@@ -241,9 +278,9 @@ cdef public int TVMFFICyCallbackArgSetterFactory(int32_t type_index,
     elif type_index == kTVMFFIObjectRValueRef:
         out.func = TVMFFIPyCallbackArgSetterRValueRef_
     elif type_index == kTVMFFIByteArrayPtr:
-        raise ValueError("Callback arg cannot be ByteArrayPtr")
+        out.func = TVMFFIPyCallbackArgSetterByteArrayPtr_
     elif type_index == kTVMFFIRawStr:
-        raise ValueError("Callback arg cannot be RawStr")
+        out.func = TVMFFIPyCallbackArgSetterRawStr_
     else:
         raise ValueError("Unhandled type index %d" % type_index)
     return 0
