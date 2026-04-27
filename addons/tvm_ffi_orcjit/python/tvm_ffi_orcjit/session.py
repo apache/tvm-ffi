@@ -69,9 +69,9 @@ class ExecutionSession(Object):
             arena_size: Arena size in bytes for the JIT memory manager.
                         Linux only — ignored on macOS and Windows, where the
                         arena is compiled out.
-                        0 = arch default (4GB x86_64, 8GB AArch64; falls back to
-                        smaller sizes under RLIMIT_AS), >0 = custom size,
-                        <0 = disable arena.
+                        0 = arch default (1 GB; falls back to smaller sizes
+                        down to 256 MB under RLIMIT_AS / container limits),
+                        >0 = custom size, <0 = disable arena.
 
         """
         if orc_rt_path is None:

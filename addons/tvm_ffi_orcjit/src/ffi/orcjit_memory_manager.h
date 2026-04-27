@@ -78,12 +78,14 @@ namespace orcjit {
  * addresses.  On finalization, pages receive their target protections.
  * On deallocation, pages are decommitted and returned to a free list.
  *
- * The default arena size is strictly larger than the architecture's
- * PC-relative relocation limit (4 GB on x86_64, 8 GB on AArch64) so
- * the arena is never the bottleneck — JITLink's own relocation overflow
- * checker fires first, matching dlopen/ld.so failure semantics.  If the
- * initial reservation fails (RLIMIT_AS, container limits), the
- * constructor halves the capacity down to kMinArenaCapacity (256 MB).
+ * The default arena size (1 GB) fits comfortably within the
+ * architecture's PC-relative relocation limit (±2 GB on x86_64, ±4 GB
+ * on AArch64) while covering typical ML JIT workloads without
+ * oversubscribing virtual address space.  If the arena is exhausted,
+ * JITLink's own relocation overflow checker fires, matching
+ * dlopen/ld.so failure semantics.  If the initial reservation fails
+ * (RLIMIT_AS, container limits), the constructor halves the capacity
+ * down to kMinArenaCapacity (256 MB).
  *
  * ## Slab-based commit with Transparent Huge Page (THP) support
  *
@@ -104,14 +106,13 @@ namespace orcjit {
  */
 class ArenaJITLinkMemoryManager : public llvm::jitlink::JITLinkMemoryManager {
  public:
-  // Default arena: strictly larger than the relocation limit so the arena
-  // is never the bottleneck.  JITLink's own overflow check fires first,
-  // matching dlopen/ld.so failure semantics.
-  //
-  // x86_64 PC32: ±2GB  →  4GB default (2× headroom)
-  // AArch64 ADRP: ±4GB →  8GB default (2× headroom)
-  static constexpr size_t kDefaultArenaCapacity_x86_64 = size_t{4} << 30;   // 4 GB
-  static constexpr size_t kDefaultArenaCapacity_AArch64 = size_t{8} << 30;  // 8 GB
+  // Default arena: 1 GB on both architectures.  Well within the
+  // PC-relative relocation limit (x86_64 ±2 GB, AArch64 ±4 GB) so
+  // cross-section fixups always fit; large enough to cover typical ML
+  // JIT workloads without oversubscribing virtual address space on
+  // memory-constrained hosts (containers, CI runners).
+  static constexpr size_t kDefaultArenaCapacity_x86_64 = size_t{1} << 30;   // 1 GB
+  static constexpr size_t kDefaultArenaCapacity_AArch64 = size_t{1} << 30;  // 1 GB
   static constexpr size_t kMinArenaCapacity = size_t{256} << 20;            // 256 MB floor
   // Slab commit granularity.  Matches Linux huge page size (2 MB) on both
   // x86_64 and AArch64, enabling THP promotion via madvise(MADV_HUGEPAGE).

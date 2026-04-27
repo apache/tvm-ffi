@@ -62,6 +62,13 @@
 #include "orcjit_dylib.h"
 #include "orcjit_utils.h"
 
+#if defined(__linux__) && (defined(__x86_64__) || defined(_M_X64))
+#include "llvm_patches/gotpcrelx_fix.h"
+#endif
+#if defined(__linux__) || defined(_WIN32)
+#include "llvm_patches/init_fini_plugin.h"
+#endif
+
 namespace tvm {
 namespace ffi {
 namespace orcjit {
@@ -76,253 +83,6 @@ struct LLVMInitializer {
 };
 
 static LLVMInitializer llvm_initializer;
-
-// Custom ObjectLinkingLayer plugin for init/fini section handling.
-//
-// Collects function pointers from init/fini sections (.init_array, .fini_array,
-// .ctors, .dtors, .CRT$XC*, .CRT$XT*) and runs them in priority order.
-//
-// Three-platform init/fini strategy:
-//
-//   macOS:   MachOPlatform (via orc_rt) handles __mod_init_func/__mod_term_func
-//            and __cxa_atexit natively. We delegate to jit_->initialize() and
-//            deinitialize(). No InitFiniPlugin needed.
-//
-//   Windows: COFFPlatform is unusable -- it requires MSVC CRT symbols
-//            (_CxxThrowException, RTTI vtables, etc.) that LLVM's COFF ORC
-//            runtime cannot provide (stalled for 2+ years). Our plugin handles
-//            .CRT$XC*/.CRT$XT* sections instead.
-//
-//   Linux:   ELFNixPlatform does not handle .init_array/.fini_array correctly
-//            prior to llvm/llvm-project#175981. Once a new LLVM release includes
-//            that patch, we can switch Linux to ELFNixPlatform and remove the
-//            plugin for that platform.
-//
-// The plugin is compiled only on Linux/Windows and can be removed per-platform
-// as LLVM's native platform support matures.
-class InitFiniPlugin : public llvm::orc::ObjectLinkingLayer::Plugin {
-  // Store a raw pointer to avoid a reference cycle:
-  //   Session → LLJIT → ObjectLinkingLayer → Plugin → Session
-  // The plugin's lifetime is bounded by the ObjectLinkingLayer which is
-  // owned by LLJIT which is owned by the session, so the pointer is always valid.
-  ORCJITExecutionSessionObj* session_;
-
- public:
-  explicit InitFiniPlugin(ORCJITExecutionSessionObj* session) : session_(session) {}
-
-  void modifyPassConfig(llvm::orc::MaterializationResponsibility& MR, llvm::jitlink::LinkGraph& G,
-                        llvm::jitlink::PassConfiguration& Config) override {
-    auto& jit_dylib = MR.getTargetJITDylib();
-    // Mark all init/fini section blocks and their edge targets as live
-    // so they survive dead-stripping.
-    Config.PrePrunePasses.emplace_back([](llvm::jitlink::LinkGraph& G) {
-      for (auto& Section : G.sections()) {
-        auto section_name = Section.getName();
-        // ELF: .init_array*, .fini_array*, .ctors*, .dtors*
-        // Mach-O: __DATA,__mod_init_func, __DATA,__mod_term_func
-        // COFF: .CRT$XC* (ctors), .CRT$XT* (dtors)
-        if (section_name.starts_with(".init_array") || section_name.starts_with(".fini_array") ||
-            section_name.starts_with(".ctors") || section_name.starts_with(".dtors") ||
-            section_name == "__DATA,__mod_init_func" || section_name == "__DATA,__mod_term_func" ||
-            section_name.starts_with(".CRT$XC") || section_name.starts_with(".CRT$XT")) {
-          for (auto* Block : Section.blocks()) {
-            bool has_live_sym = false;
-            for (auto* Sym : G.defined_symbols()) {
-              if (&Sym->getBlock() == Block) {
-                Sym->setLive(true);
-                has_live_sym = true;
-              }
-            }
-            // MSVC may emit .CRT$XC* blocks with data but no symbol table
-            // entries (static variables in __declspec(allocate) sections).
-            // Add an anonymous symbol so the block survives dead-stripping.
-            if (!has_live_sym) {
-              G.addAnonymousSymbol(*Block, 0, Block->getSize(), false, true).setLive(true);
-            }
-            for (auto& Edge : Block->edges()) {
-              Edge.getTarget().setLive(true);
-            }
-          }
-        }
-      }
-      return llvm::Error::success();
-    });
-#ifdef _WIN32
-    // Without COFFPlatform, __ImageBase (used by IMAGE_REL_AMD64_ADDR32NB /
-    // Pointer32NB relocations) defaults to 0. This causes all Pointer32 fixups
-    // to overflow since JIT addresses don't fit in 32 bits.
-    //
-    // Fix: set __ImageBase to the lowest block address in the graph after
-    // allocation. This makes all intra-graph Pointer32NB offsets small.
-    //
-    // Also strip .pdata/.xdata edges: SEH unwind data references external
-    // handlers (e.g., __CxxFrameHandler3) in DLLs that may be >4GB from
-    // __ImageBase. Since we don't call RtlAddFunctionTable, SEH data is
-    // unused anyway.
-    Config.PostAllocationPasses.emplace_back([](llvm::jitlink::LinkGraph& G) {
-      // Set __ImageBase to the lowest allocated block address.
-      auto ImageBaseName = G.intern("__ImageBase");
-      llvm::jitlink::Symbol* ImageBase = nullptr;
-      for (auto* Sym : G.external_symbols()) {
-        if (Sym->getName() == ImageBaseName) {
-          ImageBase = Sym;
-          break;
-        }
-      }
-      if (ImageBase) {
-        llvm::orc::ExecutorAddr BaseAddr;
-        for (auto* B : G.blocks()) {
-          if (!BaseAddr || B->getAddress() < BaseAddr) {
-            BaseAddr = B->getAddress();
-          }
-        }
-        ImageBase->getAddressable().setAddress(BaseAddr);
-      }
-      // Strip .pdata/.xdata edges: external handlers may be >4GB from
-      // __ImageBase, and we don't register SEH data anyway.
-      for (auto& Sec : G.sections()) {
-        if (Sec.getName() == ".pdata" || Sec.getName().starts_with(".xdata")) {
-          for (auto* B : Sec.blocks()) {
-            while (!B->edges_empty()) {
-              B->removeEdge(B->edges().begin());
-            }
-          }
-        }
-      }
-      return llvm::Error::success();
-    });
-#endif
-    // After fixups, read resolved function pointers from all init/fini data sections.
-    // Handles ELF (.init_array, .ctors, .fini_array, .dtors),
-    // Mach-O (__DATA,__mod_init_func, __DATA,__mod_term_func),
-    // and COFF (.CRT$XC*, .CRT$XT*) section conventions.
-    Config.PostFixupPasses.emplace_back([this, &jit_dylib](llvm::jitlink::LinkGraph& G) {
-      using Entry = ORCJITExecutionSessionObj::InitFiniEntry;
-      for (auto& Sec : G.sections()) {
-        auto section_name = Sec.getName();
-
-        // --- ELF sections ---
-        bool is_init_array = section_name.starts_with(".init_array");
-        bool is_ctors = section_name.starts_with(".ctors");
-        bool is_fini_array = section_name.starts_with(".fini_array");
-        bool is_dtors = section_name.starts_with(".dtors");
-        // --- Mach-O sections ---
-        bool is_mod_init = (section_name == "__DATA,__mod_init_func");
-        bool is_mod_term = (section_name == "__DATA,__mod_term_func");
-        // --- COFF sections ---
-        bool is_crt_xc = section_name.starts_with(".CRT$XC");
-        bool is_crt_xt = section_name.starts_with(".CRT$XT");
-
-        if (!is_init_array && !is_ctors && !is_fini_array && !is_dtors && !is_mod_init &&
-            !is_mod_term && !is_crt_xc && !is_crt_xt)
-          continue;
-
-        int priority = 0;
-        Entry::Section sec;
-        bool is_init;
-        // ELF default priority for sections without a numeric suffix is 65535.
-        // Lower priority numbers run first for .init_array; .fini_array and .ctors
-        // negate so that higher-numbered entries run first (reverse order).
-        if (is_init_array) {
-          if (section_name.consume_front(".init_array.")) {
-            section_name.getAsInteger(10, priority);
-          } else {
-            priority = 65535;
-          }
-          sec = Entry::Section::kInitArray;
-          is_init = true;
-        } else if (is_ctors) {
-          if (section_name.consume_front(".ctors.") && !section_name.getAsInteger(10, priority)) {
-            priority = -priority;
-          }
-          sec = Entry::Section::kCtors;
-          is_init = true;
-        } else if (is_fini_array) {
-          if (section_name.consume_front(".fini_array.") &&
-              !section_name.getAsInteger(10, priority)) {
-            priority = -priority;
-          } else {
-            priority = -65535;
-          }
-          sec = Entry::Section::kFiniArray;
-          is_init = false;
-        } else if (is_dtors) {
-          if (section_name.consume_front(".dtors.")) {
-            section_name.getAsInteger(10, priority);
-          }
-          sec = Entry::Section::kDtors;
-          is_init = false;
-        } else if (is_mod_init) {
-          // Mach-O __mod_init_func: no priority system, treated as init_array
-          sec = Entry::Section::kInitArray;
-          is_init = true;
-        } else if (is_mod_term) {
-          // Mach-O __mod_term_func: no priority system, treated as fini_array
-          sec = Entry::Section::kFiniArray;
-          is_init = false;
-        } else if (is_crt_xc) {
-          // COFF .CRT$XC[suffix]: C++ constructors, sorted alphabetically by suffix.
-          // Convert suffix to integer priority that preserves alphabetical ordering.
-          // E.g., .CRT$XCA → 'A'*100000=6500000, .CRT$XCU → 'U'*100000=8500000,
-          //        .CRT$XCT00200 → 'T'*100000+200=8400200
-          sec = Entry::Section::kInitArray;
-          is_init = true;
-          auto suffix = section_name.substr(7);  // after ".CRT$XC"
-          if (!suffix.empty()) {
-            priority = static_cast<int>(suffix[0]) * 100000;
-            if (suffix.size() > 1) {
-              int num = 0;
-              suffix.substr(1).getAsInteger(10, num);
-              priority += num;
-            }
-          }
-        } else {
-          // COFF .CRT$XT[suffix]: C++ destructors, same suffix-to-priority scheme.
-          sec = Entry::Section::kFiniArray;
-          is_init = false;
-          auto suffix = section_name.substr(7);  // after ".CRT$XT"
-          if (!suffix.empty()) {
-            priority = static_cast<int>(suffix[0]) * 100000;
-            if (suffix.size() > 1) {
-              int num = 0;
-              suffix.substr(1).getAsInteger(10, num);
-              priority += num;
-            }
-          }
-        }
-
-        for (auto* Block : Sec.blocks()) {
-          auto Content = Block->getContent();
-          size_t PtrSize = G.getPointerSize();
-          for (size_t Offset = 0; Offset + PtrSize <= Content.size(); Offset += PtrSize) {
-            uint64_t FnAddr = 0;
-            memcpy(&FnAddr, Content.data() + Offset, PtrSize);
-            if (FnAddr != 0) {
-              Entry entry{llvm::orc::ExecutorAddr(FnAddr), sec, priority};
-              if (is_init) {
-                session_->AddPendingInitializer(&jit_dylib, entry);
-              } else {
-                session_->AddPendingDeinitializer(&jit_dylib, entry);
-              }
-            }
-          }
-        }
-      }
-      return llvm::Error::success();
-    });
-  }
-
-  llvm::Error notifyFailed(llvm::orc::MaterializationResponsibility& MR) override {
-    return llvm::Error::success();
-  }
-
-  llvm::Error notifyRemovingResources(llvm::orc::JITDylib& JD, llvm::orc::ResourceKey K) override {
-    return llvm::Error::success();
-  }
-
-  void notifyTransferringResources(llvm::orc::JITDylib& JD, llvm::orc::ResourceKey DstKey,
-                                   llvm::orc::ResourceKey SrcKey) override {}
-};
 
 #ifdef _WIN32
 /*!
@@ -445,133 +205,6 @@ class DLLImportDefinitionGenerator : public llvm::orc::DefinitionGenerator {
 };
 #endif  // _WIN32
 
-#if defined(__linux__) && (defined(__x86_64__) || defined(_M_X64))
-/*! \brief Fix LLVM JITLink GOTPCRELX relaxation bug (x86_64).
- *
- * optimizeGOTAndStubAccesses() relaxes `call *foo@GOTPCREL(%rip)` (ff 15)
- * to `addr32 call foo` (67 e8) and sets the edge to Pointer32 (absolute
- * 32-bit).  But `call rel32` is always PC-relative — the CPU computes
- * target = RIP + imm32, not target = imm32.  The Pointer32 fixup writes
- * the absolute address, producing a wrong displacement.
- *
- * This only manifests when external symbols resolve to low addresses
- * (< 4 GB, e.g. PLT entries in a non-PIE executable) while JIT code is
- * at high addresses (the arena at 0x7f...).  The optimization fires
- * because isUInt<32>(target) is true, but the resulting fixup is wrong.
- *
- * The PreFixupPass reverts broken relaxations back to indirect calls
- * through the GOT.  See orcjit_memory_manager.h for full context.
- */
-class GOTPCRELXFixPlugin : public llvm::orc::ObjectLinkingLayer::Plugin {
- public:
-  void modifyPassConfig(llvm::orc::MaterializationResponsibility& MR, llvm::jitlink::LinkGraph& G,
-                        llvm::jitlink::PassConfiguration& Config) override {
-    Config.PreFixupPasses.emplace_back(fixBrokenGOTPCRELXRelaxation);
-  }
-  llvm::Error notifyFailed(llvm::orc::MaterializationResponsibility& MR) override {
-    return llvm::Error::success();
-  }
-  llvm::Error notifyRemovingResources(llvm::orc::JITDylib& JD, llvm::orc::ResourceKey K) override {
-    return llvm::Error::success();
-  }
-  void notifyTransferringResources(llvm::orc::JITDylib& JD, llvm::orc::ResourceKey DstKey,
-                                   llvm::orc::ResourceKey SrcKey) override {}
-
- private:
-  /*! \brief Correct broken GOTPCRELX relaxations produced by
-   *         optimizeGOTAndStubAccesses().
-   *
-   * Strategy:
-   *  1. Build target-symbol → GOT-entry-symbol map (O(B+S) up front).
-   *  2. For every Pointer32 edge whose preceding bytes are 67 e8
-   *     (relaxed call) or e9 (relaxed jmp):
-   *     - If the target is reachable via a signed 32-bit PC-relative
-   *       displacement, change the edge to BranchPCRel32.
-   *     - Otherwise revert the relaxation: restore the original
-   *       indirect-call/jmp opcode bytes (ff 15 / ff 25), retarget
-   *       the edge to the GOT entry, and use PCRel32 with addend 0
-   *       (JITLink normalises GOTPCRELX addends to 0).
-   */
-  static llvm::Error fixBrokenGOTPCRELXRelaxation(llvm::jitlink::LinkGraph& G) {
-    using namespace llvm::jitlink;
-    // Build block → first symbol at offset 0 (for GOT entry symbol lookup).
-    llvm::DenseMap<Block*, Symbol*> BlockToSym;
-    for (auto* Sym : G.defined_symbols()) {
-      if (Sym->getOffset() == 0 && !BlockToSym.count(&Sym->getBlock())) {
-        BlockToSym[&Sym->getBlock()] = Sym;
-      }
-    }
-
-    // Build target symbol → GOT entry symbol map.
-    // GOT entries are pointer-sized blocks with exactly one Pointer64 edge.
-    llvm::DenseMap<Symbol*, Symbol*> SymToGOTSym;
-    for (auto* B : G.blocks()) {
-      if (B->getSize() != G.getPointerSize()) continue;
-      if (B->edges_size() != 1) continue;
-      auto& E = *B->edges().begin();
-      if (E.getKind() == x86_64::Pointer64) {
-        auto It = BlockToSym.find(B);
-        if (It != BlockToSym.end()) {
-          SymToGOTSym[&E.getTarget()] = It->second;
-        }
-      }
-    }
-
-    for (auto* B : G.blocks()) {
-      for (auto& E : B->edges()) {
-        if (E.getKind() != x86_64::Pointer32) continue;
-        if (E.getOffset() < 2) continue;
-
-        auto MutableContent = B->getMutableContent(G);
-        auto* FixupData = reinterpret_cast<uint8_t*>(MutableContent.data()) + E.getOffset();
-        uint8_t Prev2 = FixupData[-2];
-        uint8_t Prev1 = FixupData[-1];
-
-        bool isRelaxedCall = (Prev2 == 0x67 && Prev1 == 0xe8);
-        bool isRelaxedJmp = (Prev1 == 0xe9);
-        if (!isRelaxedCall && !isRelaxedJmp) continue;
-
-        // Check if PC-relative displacement would fit.
-        auto TargetAddr = E.getTarget().getAddress();
-        auto FixupAddr = B->getFixupAddress(E);
-        int64_t Displacement = TargetAddr.getValue() - (FixupAddr.getValue() + 4) + E.getAddend();
-        if (llvm::isInt<32>(Displacement)) {
-          E.setKind(x86_64::BranchPCRel32);
-          continue;
-        }
-
-        // Distance doesn't fit — revert to indirect call/jmp through GOT.
-        auto It = SymToGOTSym.find(&E.getTarget());
-        if (It == SymToGOTSym.end()) {
-          return llvm::make_error<llvm::StringError>(
-              "Cannot revert GOTPCRELX relaxation: no GOT entry for " +
-                  (E.getTarget().hasName() ? std::string(*E.getTarget().getName())
-                                           : std::string("<anon>")),
-              llvm::inconvertibleErrorCode());
-        }
-
-        Symbol* GOTSym = It->second;
-        if (isRelaxedCall) {
-          // Restore: 67 e8 → ff 15 (call *[rip+disp32])
-          FixupData[-2] = 0xff;
-          FixupData[-1] = 0x15;
-        } else {
-          // Restore: e9 XX XX XX XX 90 → ff 25 XX XX XX XX
-          FixupData[-1] = 0xff;
-          FixupData[0] = 0x25;
-          // For jmp, the optimization shifted offset by -1; shift back.
-          E.setOffset(E.getOffset() + 1);
-        }
-        E.setKind(x86_64::PCRel32);
-        E.setTarget(*GOTSym);
-        E.setAddend(0);
-      }
-    }
-    return llvm::Error::success();
-  }
-};
-#endif  // __linux__ && __x86_64__
-
 ORCJITExecutionSessionObj::ORCJITExecutionSessionObj(const std::string& orc_rt_path,
                                                      int64_t arena_size_bytes)
     : jit_(nullptr) {
@@ -579,15 +212,16 @@ ORCJITExecutionSessionObj::ORCJITExecutionSessionObj(const std::string& orc_rt_p
   // JIT allocations stay within PC-relative relocation range (±2GB x86_64,
   // ±4GB AArch64).  Eliminates scattered-mmap relocation overflow (LLVM #173269).
   //
-  // arena_size_bytes: 0 = arch default (4GB x86_64, 8GB AArch64, with fallback),
+  // arena_size_bytes: 0 = arch default (1GB x86_64 / AArch64, with fallback),
   //                   >0 = custom size, <0 = disable arena.
   // The parameter is Linux-only; on macOS/Windows the arena is compiled out
   // entirely (see #ifdef below) and the value is ignored.
   //
-  // The default is strictly larger than the relocation limit so the arena is
-  // never the bottleneck — JITLink's own overflow check fires first, matching
-  // dlopen/ld.so semantics.  The constructor halves capacity on mmap failure
-  // (RLIMIT_AS, containers) down to 256 MB.
+  // The default is sized to cover typical ML JIT workloads while staying
+  // well under the PC-relative relocation limit; JITLink's own overflow
+  // check fires first if it is exhausted, matching dlopen/ld.so semantics.
+  // The constructor halves capacity on mmap failure (RLIMIT_AS, containers)
+  // down to 256 MB.
   //
   // LLJIT auto-configures ObjectLinkingLayer (JITLink) on x86_64 and aarch64
   // Linux (see LLJITBuilderState::prepareForConstruction).  We override
@@ -755,8 +389,8 @@ ORCJITExecutionSessionObj::ORCJITExecutionSessionObj(const std::string& orc_rt_p
 #endif
 #if defined(__linux__) || defined(_WIN32)
   // Linux/Windows: use our custom InitFiniPlugin for init/fini section
-  // collection and priority-ordered execution. See InitFiniPlugin class
-  // documentation for the three-platform init/fini strategy.
+  // collection and priority-ordered execution. See llvm_patches/init_fini_plugin.h
+  // for the three-platform init/fini strategy and removal criteria.
   auto& objlayer = jit_->getObjLinkingLayer();
   static_cast<llvm::orc::ObjectLinkingLayer&>(objlayer).addPlugin(
       std::make_unique<InitFiniPlugin>(this));

@@ -41,10 +41,10 @@ This matters for **PC-relative relocations with limited range**:
   at a wider threshold.
 
 The **arena memory manager** solves this by pre-reserving a contiguous
-VA region (default 4 GB x86_64 / 8 GB AArch64, with fallback to smaller
-sizes) via ``mmap(PROT_NONE)`` and bump-allocating within it, guaranteeing
-all JIT allocations stay within relocation range regardless of external
-VA pressure.
+VA region (default 1 GB, with fallback to smaller sizes down to 256 MB
+under RLIMIT_AS / container limits) via ``mmap(PROT_NONE)`` and
+bump-allocating within it, guaranteeing all JIT allocations stay within
+relocation range regardless of external VA pressure.
 
 Note on ``-fPIC`` vs ``-fpie``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
