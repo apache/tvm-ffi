@@ -1,21 +1,19 @@
-<!---
-Licensed to the Apache Software Foundation (ASF) under one
-or more contributor license agreements.  See the NOTICE file
-distributed with this work for additional information
-regarding copyright ownership.  The ASF licenses this file
-to you under the Apache License, Version 2.0 (the
-"License"); you may not use this file except in compliance
-with the License.  You may obtain a copy of the License at
+<!--- Licensed to the Apache Software Foundation (ASF) under one -->
+<!--- or more contributor license agreements.  See the NOTICE file -->
+<!--- distributed with this work for additional information -->
+<!--- regarding copyright ownership.  The ASF licenses this file -->
+<!--- to you under the Apache License, Version 2.0 (the -->
+<!--- "License"); you may not use this file except in compliance -->
+<!--- with the License.  You may obtain a copy of the License at -->
 
-  http://www.apache.org/licenses/LICENSE-2.0
+<!---   http://www.apache.org/licenses/LICENSE-2.0 -->
 
-Unless required by applicable law or agreed to in writing,
-software distributed under the License is distributed on an
-"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-KIND, either express or implied.  See the License for the
-specific language governing permissions and limitations
-under the License.
---->
+<!--- Unless required by applicable law or agreed to in writing, -->
+<!--- software distributed under the License is distributed on an -->
+<!--- "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY -->
+<!--- KIND, either express or implied.  See the License for the -->
+<!--- specific language governing permissions and limitations -->
+<!--- under the License. -->
 
 # LLVM patches
 
@@ -40,11 +38,21 @@ Each patch file opens with a fixed-shape header describing:
 
 ## Index
 
-| Patch                 | File                                    | LLVM issue                                                 | Upstream status       | Remove when                     |
-|-----------------------|-----------------------------------------|------------------------------------------------------------|-----------------------|----------------------------------|
-| GOTPCRELX relaxation  | `gotpcrelx_fix.{h,cc}`                  | TBD — issue not yet filed                                  | open                  | LLVM floor bumps past the fix    |
-| ELF init/fini         | `init_fini_plugin.{h,cc}` (Linux)       | [llvm/llvm-project#175981](https://github.com/llvm/llvm-project/issues/175981) | open, patch submitted | LLVM floor bumps past the fix    |
-| COFF ctor/dtor        | `init_fini_plugin.{h,cc}` (Windows)     | COFFPlatform stalled                                       | stalled 2+ years      | COFFPlatform becomes usable      |
+- **GOTPCRELX relaxation** (`gotpcrelx_fix.{h,cc}`)
+  LLVM issue: TBD — issue not yet filed.
+  Upstream status: open.
+  Remove when: LLVM floor bumps past the release that contains the fix.
+
+- **ELF init/fini** (Linux branch of `init_fini_plugin.{h,cc}`)
+  LLVM issue: [llvm/llvm-project#175981](https://github.com/llvm/llvm-project/issues/175981).
+  Upstream status: open, patch submitted.
+  Remove when: LLVM floor bumps past the release that contains the fix.
+
+- **COFF ctor/dtor** (Windows branch of `init_fini_plugin.{h,cc}`)
+  LLVM issue: COFFPlatform stalled.
+  Upstream status: stalled 2+ years.
+  Remove when: COFFPlatform becomes usable end-to-end with clang-cl /
+  MSVC objects.
 
 macOS already has working `MachOPlatform`, so no patch file is needed
 for that platform.
@@ -59,4 +67,4 @@ When deleting a patch file:
 3. Remove the plugin-registration line(s) in `orcjit_session.cc`
    identified in the file's `## Removal` header block.
 4. Remove the corresponding sources from `addons/tvm_ffi_orcjit/CMakeLists.txt`.
-5. Update the table above.
+5. Update the index above.
