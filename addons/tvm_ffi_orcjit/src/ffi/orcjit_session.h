@@ -114,6 +114,15 @@ class ORCJITExecutionSessionObj : public Object {
    */
   void RemoveDylib(llvm::orc::JITDylib* jd);
 
+  /*!
+   * \brief Release drained slabs (no live JIT allocations) back to the OS.
+   *
+   *  Returns the number of slabs reclaimed.  No-op on macOS/Windows
+   *  where the slab pool is compiled out, or when the pool has been
+   *  disabled via `slab_size < 0`.
+   */
+  int64_t ClearFreeSlabs();
+
  private:
   /*! \brief Slab-pool memory manager — must be declared before jit_ for destruction order */
   std::unique_ptr<SlabPoolMemoryManager> memory_manager_;

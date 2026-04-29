@@ -101,3 +101,23 @@ class ExecutionSession(Object):
         lib = DynamicLibrary.__new__(DynamicLibrary)
         lib.__move_handle_from__(handle)
         return lib
+
+    def clear_free_slabs(self) -> int:
+        """Release drained slabs (no live JIT allocations) back to the OS.
+
+        Call this after dropping a batch of libraries to reclaim RSS.
+        Fresh slabs that have never been allocated on are preserved, so
+        the session remains ready to accept new work.
+
+        Safety: call when no JIT work is in flight on another thread. From
+        single-threaded Python this is always safe; once ``del lib`` has
+        returned, the C++ destructor has finished and the slab's live count
+        reflects the drop.
+
+        Returns:
+            Number of slabs actually munmap'd. Returns 0 on macOS/Windows
+            (slab pool compiled out) or when the pool is disabled via
+            ``slab_size=-1``.
+
+        """
+        return int(_ffi_api.ExecutionSessionClearFreeSlabs(self))  # type: ignore

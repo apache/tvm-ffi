@@ -100,6 +100,22 @@ class SlabPoolMemoryManager : public llvm::jitlink::JITLinkMemoryManager {
     return slabs_.size();
   }
 
+  /*!
+   * \brief Release drained slabs — zero live allocations and at least one
+   *        prior allocation — back to the OS via `munmap`.
+   *
+   *  Returns the number of slabs reclaimed.  Safe to call any time the
+   *  session is quiescent (no concurrent JIT work in flight).  A typical
+   *  pattern is to call this after dropping a batch of libraries:
+   *
+   *      for lib in libs: del lib
+   *      session.clear_free_slabs()   # Python API
+   *
+   *  Fresh slabs that have never been allocated on are preserved — the
+   *  session remains ready to accept new JIT work.
+   */
+  std::size_t clearFreeSlabs();
+
  private:
   /*! \brief Reserve a fresh slab at exactly \p capacity bytes.  Returns
    *         nullptr on mmap failure (caller reports the error). */

@@ -21,6 +21,7 @@ from __future__ import annotations
 import gc
 import sys
 import tempfile
+from pathlib import Path
 
 import pytest
 import tvm_ffi
@@ -721,3 +722,144 @@ def test_pool_survives_mixed_load_drop_create(v: Variant) -> None:
     assert live[3].get_function(v.fn("test_multiply"))(7, 6) == 42
     for i, lib in enumerate(new_libs):
         assert lib.get_function(v.fn("test_subtract"))(i + 10, i) == 10
+
+
+# ---------------------------------------------------------------------------
+# Manual slab reclamation via session.clear_free_slabs() (Stage C).
+#
+# After dropping a batch of libraries, the user can call clear_free_slabs()
+# to release any drained Slabs (zero live JIT allocations) back to the OS.
+# ---------------------------------------------------------------------------
+
+
+def _build_big_object(tmp_path: Path, byte_size: int) -> str:
+    """Compile a .c file with a large `.rodata` blob to force the oversize path.
+
+    Returns the path to the generated .o file.  Skips the test if the build
+    toolchain is unavailable.
+    """
+    try:
+        import tvm_ffi.cpp  # noqa: PLC0415
+    except ImportError:
+        pytest.skip("tvm_ffi.cpp not available for on-the-fly object build")
+
+    src = tmp_path / "big.c"
+    # Global BSS array — volatile + a runtime read in big_probe() prevents
+    # the compiler from folding sizeof() out and eliding the array.  The
+    # array becomes a ZeroFill segment of `byte_size` bytes in the
+    # LinkGraph, which counts toward the slab footprint
+    # (see Slab::computeGraphFootprint).
+    src.write_text(
+        f"""
+        #include <tvm/ffi/c_api.h>
+        #include <stdint.h>
+        volatile unsigned char big_data[{byte_size}];
+        TVM_FFI_DLL_EXPORT int __tvm_ffi_big_probe(void* self,
+                                                   const TVMFFIAny* args,
+                                                   int32_t num_args,
+                                                   TVMFFIAny* result) {{
+          (void)self; (void)args; (void)num_args;
+          /* Reads big_data[0] (always zero for BSS) so the compiler must
+             emit the array; returns the array's size for verification. */
+          result->type_index = kTVMFFIInt;
+          result->zero_padding = 0;
+          result->v_int64 = (int64_t)sizeof(big_data) + (int64_t)big_data[0];
+          return 0;
+        }}
+        """
+    )
+    try:
+        return tvm_ffi.cpp.build(
+            name="big_object",
+            sources=[str(src)],
+            output="big_object.o",
+            extra_cflags=["-O2"],
+            build_directory=str(tmp_path / ".build"),
+        )
+    except Exception as exc:
+        pytest.skip(f"could not build big object for reclaim test: {exc}")
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="slab pool is Linux-only")
+def test_clear_free_slabs_no_drained() -> None:
+    """Calling clear_free_slabs with nothing to reclaim returns 0."""
+    session = ExecutionSession()
+    # Fresh session — the initial slab was never used, so not reclaimable.
+    assert session.clear_free_slabs() == 0
+    # Load + keep a library: live allocations pin the slab.
+    lib = session.create_library("alive")
+    lib.add(obj(_all_variants[0].funcs_obj()))
+    lib.get_function("test_add")(1, 2)
+    assert session.clear_free_slabs() == 0
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="slab pool is Linux-only")
+def test_clear_free_slabs_reclaims_oversize(tmp_path: Path) -> None:
+    """Dropping an oversize-path library lets clear_free_slabs reclaim its slab.
+
+    Uses a 3 MB rodata blob that exceeds the 4 MB slab's usable-per-slab
+    threshold (~2 MB after midpoint slack), forcing the oversize path. The
+    dedicated oversize slab then hosts exactly one graph — dropping it
+    returns the slab to fully-drained state, so it is reclaimable.
+    """
+    big_obj = _build_big_object(tmp_path, 3 * 1024 * 1024)
+    # 4 MB slab → usable = slab_size / 2 = 2 MB → 3 MB blob forces oversize.
+    session = ExecutionSession(slab_size=4 * 1024 * 1024)
+    lib = session.create_library("oversize")
+    lib.add(big_obj)
+    assert lib.get_function("big_probe")() == 3 * 1024 * 1024
+    del lib
+    gc.collect()
+    # The oversize slab holds only the now-dropped lib's graph, so
+    # clearFreeSlabs reclaims it. The initial (never-used) slab stays.
+    reclaimed = session.clear_free_slabs()
+    assert reclaimed >= 1, (
+        f"expected to reclaim the drained oversize slab, got {reclaimed}"
+    )
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="slab pool is Linux-only")
+def test_clear_free_slabs_idempotent(tmp_path: Path) -> None:
+    """A second call after everything has been reclaimed returns 0."""
+    big_obj = _build_big_object(tmp_path, 3 * 1024 * 1024)
+    session = ExecutionSession(slab_size=4 * 1024 * 1024)
+    lib = session.create_library("x")
+    lib.add(big_obj)
+    lib.get_function("big_probe")()
+    del lib
+    gc.collect()
+
+    assert session.clear_free_slabs() >= 1
+    assert session.clear_free_slabs() == 0
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="slab pool is Linux-only")
+def test_clear_free_slabs_preserves_live_pool(tmp_path: Path) -> None:
+    """Reclaim runs only on drained slabs; live libraries keep working."""
+    big_obj = _build_big_object(tmp_path, 3 * 1024 * 1024)
+    session = ExecutionSession(slab_size=4 * 1024 * 1024)
+
+    # First oversize lib — drop it.
+    drop_lib = session.create_library("drop")
+    drop_lib.add(big_obj)
+    drop_lib.get_function("big_probe")()
+    del drop_lib
+
+    # Second oversize lib — keep it.
+    keep_lib = session.create_library("keep")
+    keep_lib.add(big_obj)
+    assert keep_lib.get_function("big_probe")() == 3 * 1024 * 1024
+
+    gc.collect()
+    reclaimed = session.clear_free_slabs()
+    assert reclaimed >= 1, f"expected drained slab to be reclaimed, got {reclaimed}"
+
+    # The kept lib's slab was untouched; it still executes correctly.
+    assert keep_lib.get_function("big_probe")() == 3 * 1024 * 1024
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="slab pool is Linux-only")
+def test_clear_free_slabs_disabled_pool() -> None:
+    """When the slab pool is disabled, clear_free_slabs is a no-op (returns 0)."""
+    session = ExecutionSession(slab_size=-1)
+    assert session.clear_free_slabs() == 0

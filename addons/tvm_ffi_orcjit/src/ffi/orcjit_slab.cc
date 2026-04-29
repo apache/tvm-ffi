@@ -287,6 +287,11 @@ class Slab::InFlightAlloc : public JITLinkMemoryManager::InFlightAlloc {
                                       exec_.standard_size,
                                       std::move(*DeallocActions),
                                       std::move(overflow_blocks_)};
+    // Bump the slab's live-alloc counter before publishing the handle so
+    // a concurrent `clearFreeSlabs` in another thread cannot see this
+    // slab as reclaimable between handle publication and the FA reaching
+    // LLJIT's bookkeeping.
+    S.noteAllocated();
     OnFinalized(JITLinkMemoryManager::FinalizedAlloc(ExecutorAddr::fromPtr(FA)));
   }
 
@@ -723,6 +728,12 @@ void Slab::deallocateOne(FinalizedAllocInfo* FA, Error& err_out) {
     decommitPages(arena_base_ + FA->exec_offset, FA->exec_standard_size);
     freeRegion(FA->exec_offset, FA->exec_standard_size);
   }
+
+  // Decrement the live-alloc counter.  After this point the slab may be
+  // observed as reclaimable by `SlabPoolMemoryManager::clearFreeSlabs`.
+  // Safe: all DeallocActions have already run and the region has been
+  // returned to the free list.
+  noteDeallocated();
 
   // Release overflow blocks.
   for (auto& ob : FA->overflow_blocks) {

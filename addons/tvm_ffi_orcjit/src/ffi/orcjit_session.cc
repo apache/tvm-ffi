@@ -496,6 +496,15 @@ void ORCJITExecutionSessionObj::AddPendingDeinitializer(llvm::orc::JITDylib* jit
   pending_deinitializers_[jit_dylib].push_back(entry);
 }
 
+int64_t ORCJITExecutionSessionObj::ClearFreeSlabs() {
+#ifdef __linux__
+  if (memory_manager_) {
+    return static_cast<int64_t>(memory_manager_->clearFreeSlabs());
+  }
+#endif
+  return 0;
+}
+
 void ORCJITExecutionSessionObj::RemoveDylib(llvm::orc::JITDylib* jit_dylib) {
   if (jit_dylib == nullptr) return;
   // Drop any pending init/fini records keyed by this JITDylib*. After removal

@@ -184,6 +184,28 @@ void SlabPoolMemoryManager::deallocate(std::vector<FinalizedAlloc> Allocs,
   OnDeallocated(std::move(DeallocErr));
 }
 
+std::size_t SlabPoolMemoryManager::clearFreeSlabs() {
+  // Partition under the lock, move discards to a local vector, drop the
+  // lock, then let ~Slab (which calls munmap) run outside the lock.
+  // Keeping munmap outside pool_mu_ matches the rest of allocate/deallocate,
+  // which also never hold the lock across syscalls that might block.
+  std::vector<std::unique_ptr<Slab>> discard;
+  {
+    std::lock_guard<std::mutex> lock(pool_mu_);
+    auto keep_end = std::partition(slabs_.begin(), slabs_.end(), [](const auto& s) {
+      return !s->isReclaimable();
+    });
+    discard.reserve(static_cast<std::size_t>(slabs_.end() - keep_end));
+    for (auto it = keep_end; it != slabs_.end(); ++it) {
+      discard.push_back(std::move(*it));
+    }
+    slabs_.erase(keep_end, slabs_.end());
+  }
+  std::size_t reclaimed = discard.size();
+  // discard goes out of scope — Slab destructors munmap each reservation.
+  return reclaimed;
+}
+
 }  // namespace orcjit
 }  // namespace ffi
 }  // namespace tvm

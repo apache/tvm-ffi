@@ -212,6 +212,10 @@ static void RegisterOrcJITFunctions() {
       .def("orcjit.ExecutionSessionCreateDynamicLibrary",
            [](const ORCJITExecutionSession& session, const String& name) -> Module {
              return session->CreateDynamicLibrary(name);
+           })
+      .def("orcjit.ExecutionSessionClearFreeSlabs",
+           [](const ORCJITExecutionSession& session) -> int64_t {
+             return session->ClearFreeSlabs();
            });
 }
 

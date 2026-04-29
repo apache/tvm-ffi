@@ -220,6 +220,38 @@ class Slab {
   std::size_t capacity() const noexcept { return arena_capacity_; }
   std::size_t page_size() const noexcept { return page_size_; }
 
+  /*!
+   * \brief Record that a new FinalizedAlloc was published from this slab.
+   *        Called by `InFlightAlloc::finalize` just before returning the
+   *        FinalizedAlloc handle to the caller.
+   */
+  void noteAllocated() noexcept {
+    live_count_.fetch_add(1, std::memory_order_relaxed);
+    ever_used_.store(true, std::memory_order_release);
+  }
+
+  /*!
+   * \brief Record that a FinalizedAlloc on this slab has been released.
+   *        Called by `deallocateOne` after the region is returned to the
+   *        free list and DeallocActions have run.
+   */
+  void noteDeallocated() noexcept {
+    live_count_.fetch_sub(1, std::memory_order_acq_rel);
+  }
+
+  /*!
+   * \brief True iff this slab has ever hosted a FinalizedAlloc and
+   *        currently has zero live ones.
+   *
+   *  Used by `SlabPoolMemoryManager::clearFreeSlabs` to decide which
+   *  slabs can be munmap'd.  A fresh slab that has never been used is
+   *  *not* reclaimable — the caller still expects to allocate on it.
+   */
+  bool isReclaimable() const noexcept {
+    return ever_used_.load(std::memory_order_acquire) &&
+           live_count_.load(std::memory_order_acquire) == 0;
+  }
+
  private:
   class InFlightAlloc;  // defined in orcjit_slab.cc
 
@@ -262,6 +294,14 @@ class Slab {
    *         compare_exchange. */
   std::unique_ptr<std::atomic<std::uint8_t>[]> committed_;
   std::size_t num_commit_chunks_ = 0;
+
+  /*! \brief Count of live FinalizedAllocs held on this slab. */
+  std::atomic<std::size_t> live_count_{0};
+
+  /*! \brief Becomes true on the first `noteAllocated` call; never reset.
+   *         A slab that has never been used is not a reclaim candidate
+   *         (callers may still plan to allocate on it). */
+  std::atomic<bool> ever_used_{false};
 };
 
 }  // namespace orcjit
