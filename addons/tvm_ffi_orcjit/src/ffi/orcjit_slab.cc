@@ -50,6 +50,23 @@ using namespace llvm;
 using namespace llvm::jitlink;
 using namespace llvm::orc;
 
+// ── SlabPoolExhaustedError ──────────────────────────────────────────
+
+char SlabPoolExhaustedError::ID = 0;
+
+SlabPoolExhaustedError::SlabPoolExhaustedError(const char* pool, std::size_t used,
+                                               std::size_t requested, std::size_t limit)
+    : pool_(pool), used_(used), requested_(requested), limit_(limit) {}
+
+void SlabPoolExhaustedError::log(raw_ostream& os) const {
+  os << "Slab: " << pool_ << " pool exhausted (used " << formatv("{0:x}", used_) << " + requested "
+     << formatv("{0:x}", requested_) << " > limit " << formatv("{0:x}", limit_) << ")";
+}
+
+std::error_code SlabPoolExhaustedError::convertToErrorCode() const {
+  return inconvertibleErrorCode();
+}
+
 // ── Overflow section edge classification ───────────────────────────
 //
 // Conservative whitelist: only known absolute relocation kinds return true.
@@ -89,6 +106,41 @@ bool isAbsoluteEdge(const Triple& TT, Edge::Kind K) {
     }
   }
   return false;  // Unknown arch — treat as PC-relative (safe)
+}
+
+/*! \brief Identify sections eligible for the overflow (separate-mmap)
+ *         path.
+ *
+ *  Name-based candidate selection followed by edge validation: any
+ *  PC-relative cross-section edge targeting a candidate disqualifies
+ *  it (the section must live inside the slab so the fixup can reach).
+ *  Returns the surviving candidate set.
+ */
+DenseSet<Section*> classifyOverflowSections(LinkGraph& G) {
+  DenseSet<Section*> candidates;
+  for (auto& Sec : G.sections()) {
+    if (Sec.getMemLifetime() == MemLifetime::NoAlloc) continue;
+    StringRef Name = Sec.getName();
+    if (Name.starts_with(".nv_fatbin")) {
+      candidates.insert(&Sec);
+    }
+  }
+  if (candidates.empty()) return candidates;
+
+  const auto& TT = G.getTargetTriple();
+  for (auto& Sec : G.sections()) {
+    for (auto* B : Sec.blocks()) {
+      for (auto& E : B->edges()) {
+        if (!E.isRelocation()) continue;
+        if (isAbsoluteEdge(TT, E.getKind())) continue;
+        if (!E.getTarget().isDefined()) continue;
+        auto* TargetSec = &E.getTarget().getBlock().getSection();
+        candidates.erase(TargetSec);
+      }
+    }
+    if (candidates.empty()) break;
+  }
+  return candidates;
 }
 
 }  // namespace
@@ -356,11 +408,7 @@ Expected<std::size_t> Slab::bumpAllocate(std::size_t size, bool is_exec) {
 
   // Bump allocate within the pool's limit.
   if (bump + size > limit) {
-    return make_error<StringError>(
-        std::string("Slab: ") + (is_exec ? "exec" : "non-exec") + " pool exhausted (used " +
-            formatv("{0:x}", bump).str() + " + requested " + formatv("{0:x}", size).str() +
-            " > limit " + formatv("{0:x}", limit).str() + ")",
-        inconvertibleErrorCode());
+    return make_error<SlabPoolExhaustedError>(is_exec ? "exec" : "non-exec", bump, size, limit);
   }
 
   std::size_t offset = bump;
@@ -397,6 +445,36 @@ void Slab::freeRegion(std::size_t offset, std::size_t size) {
   }
 }
 
+Slab::GraphFootprint Slab::computeGraphFootprint(LinkGraph& G, std::size_t page_size) {
+  // Overflow sections live outside any slab (separate mmap at finalize
+  // time) — exclude them from the in-slab footprint.  See
+  // classifyOverflowSections() for the candidate-selection rules.
+  DenseSet<Section*> overflow_candidates = classifyOverflowSections(G);
+  SmallVector<std::pair<Section*, MemLifetime>, 4> hidden;
+  for (auto* Sec : overflow_candidates) {
+    hidden.push_back({Sec, Sec->getMemLifetime()});
+    Sec->setMemLifetime(MemLifetime::NoAlloc);
+  }
+  BasicLayout BL(G);
+  for (auto& [Sec, OrigLifetime] : hidden) {
+    Sec->setMemLifetime(OrigLifetime);
+  }
+
+  std::size_t ne_total = 0, e_total = 0;
+  for (auto& KV : BL.segments()) {
+    auto& AG = KV.first;
+    auto& Seg = KV.second;
+    auto SegSize = alignTo(Seg.ContentSize + Seg.ZeroFillSize, page_size);
+    bool is_exec = (AG.getMemProt() & MemProt::Exec) != MemProt::None;
+    if (is_exec) {
+      e_total += SegSize;
+    } else {
+      ne_total += SegSize;
+    }
+  }
+  return GraphFootprint{ne_total, e_total};
+}
+
 void Slab::allocate(LinkGraph& G,
                     JITLinkMemoryManager::OnAllocatedFunction OnAllocated) {
   // ── Overflow section classification ──
@@ -404,47 +482,15 @@ void Slab::allocate(LinkGraph& G,
   // Sections matching known overflow names (e.g. .nv_fatbin — large GPU
   // device blobs referenced only by absolute relocations) are allocated
   // outside the slab via separate mmap(), keeping the slab compact for
-  // code + small rodata.
-  //
-  // Two-phase check:
-  //   Phase 1 — Name-based candidate selection (.nv_fatbin).
-  //   Phase 2 — Edge validation: any PC-relative cross-section edge
-  //             targeting a candidate section disqualifies it (the
-  //             section stays in the slab).  This handles cases where
-  //             the compiler generates ADRP/RIP-relative refs even for
-  //             data sections.
+  // code + small rodata.  See classifyOverflowSections() for the
+  // candidate-selection + edge-validation rules.
   //
   // Validated candidates are temporarily set to NoAlloc so BasicLayout
   // skips them, then immediately restored before returning.  By the time
   // JITLink's fixUpBlocks runs, sections are back to Standard — avoiding
   // the debug assert that prohibits edges from allocated sections to
   // NoAlloc sections.
-  DenseSet<Section*> overflow_candidates;
-  for (auto& Sec : G.sections()) {
-    if (Sec.getMemLifetime() == MemLifetime::NoAlloc) continue;
-    StringRef Name = Sec.getName();
-    if (Name.starts_with(".nv_fatbin")) {
-      overflow_candidates.insert(&Sec);
-    }
-  }
-
-  // Phase 2: edge validation — disqualify candidates with incoming PC-relative edges.
-  if (!overflow_candidates.empty()) {
-    const auto& TT = G.getTargetTriple();
-    for (auto& Sec : G.sections()) {
-      for (auto* B : Sec.blocks()) {
-        for (auto& E : B->edges()) {
-          if (!E.isRelocation()) continue;
-          if (isAbsoluteEdge(TT, E.getKind())) continue;
-          // PC-relative edge — if it targets a candidate, disqualify.
-          if (!E.getTarget().isDefined()) continue;
-          auto* TargetSec = &E.getTarget().getBlock().getSection();
-          overflow_candidates.erase(TargetSec);
-        }
-      }
-      if (overflow_candidates.empty()) break;
-    }
-  }
+  DenseSet<Section*> overflow_candidates = classifyOverflowSections(G);
 
   // Apply: temporarily hide validated overflow sections from BasicLayout.
   SmallVector<std::pair<Section*, MemLifetime>, 4> overflow_sections;

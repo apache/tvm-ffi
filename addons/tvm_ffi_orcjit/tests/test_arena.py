@@ -170,8 +170,15 @@ _all_variants = _c_variants + _cpp_variants
 _is_linux = sys.platform == "linux"
 _is_x86_64 = platform.machine() in ("x86_64", "AMD64")
 
-# Arena test parameters
-_ARENA_SIZE = 16 * 1024 * 1024  # 16MB — small arena for testing
+# Arena test parameters.
+#
+# Under the slab-pool design, `slab_size` is the per-slab capacity — each
+# allocation that exceeds what an existing slab can hold spawns a new one.
+# These tests assert single-slab invariants (objects within slab_size,
+# one contiguous VA region), so `_ARENA_SIZE` must be large enough that
+# every graph we load fits in the first slab.  256 MB comfortably covers
+# the test objects (all < 5 MB each) plus their overhead.
+_ARENA_SIZE = 256 * 1024 * 1024  # 256MB — single-slab headroom for these tests
 _BLOCK_RADIUS = 256 * 1024 * 1024  # 256MB — safe for CI containers
 _DSO_BLOCK_RADIUS = 3 * 1024 * 1024 * 1024  # 3GB — needed to overflow PC32 (±2GB)
 

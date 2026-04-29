@@ -224,11 +224,11 @@ ORCJITExecutionSessionObj::ORCJITExecutionSessionObj(const std::string& orc_rt_p
   // growable pool where this parameter becomes the per-slab size and total
   // session memory grows in slab-sized increments.
   //
-  // The default is sized to cover typical ML JIT workloads while staying
-  // well under the PC-relative relocation limit; JITLink's own overflow
-  // check fires first if it is exhausted, matching dlopen/ld.so semantics.
-  // The constructor halves capacity on mmap failure (RLIMIT_AS, containers)
-  // down to 256 MB.
+  // The default (64 MB) is above typical ML JIT graph sizes while well
+  // under the PC-relative relocation limit; oversize graphs get a
+  // dedicated slab.  The initial-slab constructor halves its capacity
+  // on mmap failure (RLIMIT_AS, containers) down to 8 MB; subsequent
+  // slabs are always reserved at the chosen slab_size.
   //
   // LLJIT auto-configures ObjectLinkingLayer (JITLink) on x86_64 and aarch64
   // Linux (see LLJITBuilderState::prepareForConstruction).  We override
@@ -238,17 +238,13 @@ ORCJITExecutionSessionObj::ORCJITExecutionSessionObj(const std::string& orc_rt_p
 #ifdef __linux__
   if (slab_size_bytes >= 0) {
     auto page_size = llvm::sys::Process::getPageSizeEstimate();
-    size_t capacity;
+    size_t slab_size;
     if (slab_size_bytes > 0) {
-      capacity = static_cast<size_t>(slab_size_bytes);
+      slab_size = static_cast<size_t>(slab_size_bytes);
     } else {
-#if defined(__aarch64__)
-      capacity = ArenaJITLinkMemoryManager::kDefaultSlabCapacity_AArch64;
-#else
-      capacity = ArenaJITLinkMemoryManager::kDefaultSlabCapacity_x86_64;
-#endif
+      slab_size = SlabPoolMemoryManager::kDefaultSlabSize;
     }
-    memory_manager_ = std::make_unique<ArenaJITLinkMemoryManager>(page_size, capacity);
+    memory_manager_ = std::make_unique<SlabPoolMemoryManager>(page_size, slab_size);
   }
 #endif
 

@@ -635,3 +635,89 @@ def test_drop_all_libraries_then_session(v: Variant) -> None:
     gc.collect()
     # Session destructor runs at end-of-test; a regression in removal would
     # surface as a crash under pytest.
+
+
+# ---------------------------------------------------------------------------
+# Slab-pool growth (Stage B).
+#
+# A session now holds a growable pool of Slabs, each `slab_size` bytes.
+# When a JITLink graph won't fit in any existing slab, the pool mmap's
+# a new one; graphs larger than a single slab go to a dedicated
+# oversize slab. These tests pin the behavioral contract: small
+# slab_size sessions must still link many libraries (by growing) and
+# must reuse drained bytes within a slab (via the free list).
+# ---------------------------------------------------------------------------
+
+
+# 8 MB is the practical floor — Slab::kCommitGranularity is 2 MB and the
+# dual-pool midpoint needs at least two commit chunks of headroom above it,
+# so smaller capacities break the pool layout. See SlabPoolMemoryManager
+# kMinSlabSize.
+_SMALL_SLAB = 8 * 1024 * 1024
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="slab pool is Linux-only")
+@pytest.mark.parametrize("v", _all_variants, ids=_variant_id)
+def test_pool_grows_under_small_slab(v: Variant) -> None:
+    """Tight slab_size forces the pool to grow as more libraries load."""
+    session = ExecutionSession(slab_size=_SMALL_SLAB)
+
+    libs = []
+    for i in range(16):
+        lib = session.create_library(f"grow_{i}")
+        lib.add(obj(v.funcs_obj()))
+        assert lib.get_function(v.fn("test_add"))(i, i + 1) == 2 * i + 1
+        libs.append(lib)
+
+    # All libraries remain callable after growth. Catches bugs where the
+    # pool routes deallocate to the wrong Slab via FA->owner.
+    for i, lib in enumerate(libs):
+        assert lib.get_function(v.fn("test_multiply"))(i, 2) == i * 2
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="slab pool is Linux-only")
+@pytest.mark.parametrize("v", _all_variants, ids=_variant_id)
+def test_small_slab_recycles_after_drop(v: Variant) -> None:
+    """Drop returns bytes to the slab's free list for subsequent reuse.
+
+    If the free list weren't working, 32 iterations of load/drop under an
+    8 MB slab would either exhaust VA or force many new slabs; this test
+    passing on CI containers is the recycling evidence.
+    """
+    session = ExecutionSession(slab_size=_SMALL_SLAB)
+    for i in range(32):
+        lib = session.create_library(f"recycle_{i}")
+        lib.add(obj(v.funcs_obj()))
+        assert lib.get_function(v.fn("test_add"))(i, 1) == i + 1
+        del lib
+        gc.collect()
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="slab pool is Linux-only")
+@pytest.mark.parametrize("v", _all_variants, ids=_variant_id)
+def test_pool_survives_mixed_load_drop_create(v: Variant) -> None:
+    """Interleaved load / drop / create exercises growth + free-list together."""
+    session = ExecutionSession(slab_size=_SMALL_SLAB)
+
+    # Ramp up to 4 concurrent libraries.
+    live = [session.create_library(f"base_{i}") for i in range(4)]
+    for lib in live:
+        lib.add(obj(v.funcs_obj()))
+
+    # Drop two, add three, verify remaining two still work, verify new
+    # three work. Mixing drop/create in one session exercises slab
+    # growth alongside free-list reuse from the dropped bytes.
+    live[0] = None  # type: ignore[assignment]
+    live[2] = None  # type: ignore[assignment]
+    gc.collect()
+
+    new_libs = []
+    for i in range(3):
+        lib = session.create_library(f"after_drop_{i}")
+        lib.add(obj(v.funcs2_obj()))
+        new_libs.append(lib)
+
+    assert live[1].get_function(v.fn("test_add"))(10, 5) == 15
+    assert live[3].get_function(v.fn("test_multiply"))(7, 6) == 42
+    for i, lib in enumerate(new_libs):
+        assert lib.get_function(v.fn("test_subtract"))(i + 10, i) == 10

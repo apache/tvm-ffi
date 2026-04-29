@@ -19,44 +19,28 @@
 
 /*!
  * \file orcjit_memory_manager.h
- * \brief JITLinkMemoryManager backed by one fixed-size Slab (Stage A).
+ * \brief Per-session growable slab pool (Stage B).
  *
- * Holds a single `Slab` (see orcjit_slab.h) and delegates all
- * `JITLinkMemoryManager` operations to it.  The capacity-negotiation
- * retry loop (halve-on-mmap-failure) lives here because it is a
- * caller/kernel negotiation, not something a Slab itself should do.
+ * `SlabPoolMemoryManager` implements `JITLinkMemoryManager` on top of a
+ * per-session `std::vector<std::unique_ptr<Slab>>`.  On each `allocate`
+ * it picks the first `Slab` that can fit the graph; if none do, it
+ * `mmap`s a new fixed-size (`slab_size`) slab and appends it.  Graphs
+ * larger than a single normal slab go to the oversize path — a
+ * dedicated `Slab` sized to fit that one graph.
  *
- * In later stages this class is superseded by a `SlabPoolMemoryManager`
- * that owns multiple Slabs per session and grows on demand.  The public
- * API surface (one memory manager per LLJIT, constructed with a
- * page-size and a slab-capacity) stays the same.
+ * ## Lifecycle (Stage B)
+ *
+ * Once a slab is added to the pool it stays mapped until the pool
+ * (and its enclosing session) is destroyed.  Individual graphs are
+ * deallocated via `FA->owner->deallocateOne(...)`, returning bytes to
+ * the slab's free list, but the slab's VA reservation is not reclaimed.
+ * Stage C will add warm-slab eviction that munmaps drained slabs.
  *
  * ## GOTPCRELX relaxation workaround
  *
- * The arena triggers a latent bug in LLVM JITLink's
- * `optimizeGOTAndStubAccesses()` (x86_64.cpp).  That pass relaxes
- * `call *foo@GOTPCREL(%rip)` (ff 15) → `addr32 call foo` (67 e8) and
- * sets the edge kind to `Pointer32` (absolute 32-bit address).  However
- * the `call rel32` instruction is always **PC-relative** — the `67`
- * prefix is just padding — so the fixup should be PC-relative too
- * (matching the static linker's `R_X86_64_PC32`).
- *
- * The bug is latent because the relaxation only fires when the target
- * address fits in 32 bits (`isUInt<32>`).  On PIE executables every
- * resolved symbol is at a high address, so the guard is never true and
- * the relaxation never runs.  On **non-PIE** executables the PLT
- * entries for libc functions (malloc, free, …) live near 0x400000, the
- * guard passes, and the wrong fixup produces a garbage displacement →
- * SIGSEGV during ORC-runtime teardown.
- *
- * `GOTPCRELXFixPlugin` in llvm_patches/gotpcrelx_fix.cc works around
- * this: a PreFixupPass that runs *after* `optimizeGOTAndStubAccesses`
- * detects `Pointer32` edges on `67 e8` / `e9` instructions and either
- *   (a) converts to `BranchPCRel32` when the PC-relative displacement
- *       fits in int32, or
- *   (b) reverts the relaxation entirely — restores the `ff 15` /
- *       `ff 25` opcode bytes and retargets the edge to the GOT entry
- *       with `PCRel32` + addend 0.
+ * Unchanged from Stage A — see `llvm_patches/gotpcrelx_fix.cc`.  The
+ * plugin is added per-session to the `ObjectLinkingLayer` alongside
+ * this memory manager and is orthogonal to pool growth.
  */
 #ifndef TVM_FFI_ORCJIT_ORCJIT_MEMORY_MANAGER_H_
 #define TVM_FFI_ORCJIT_ORCJIT_MEMORY_MANAGER_H_
@@ -65,6 +49,8 @@
 
 #include <cstddef>
 #include <memory>
+#include <mutex>
+#include <vector>
 
 #include "orcjit_slab.h"
 
@@ -72,32 +58,35 @@ namespace tvm {
 namespace ffi {
 namespace orcjit {
 
-/*! \brief JITLink memory manager backed by a single `Slab`.
+/*!
+ * \brief `JITLinkMemoryManager` backed by a growable pool of `Slab`s.
  *
- *  Reserves `slab_capacity` bytes of contiguous VA at construction time,
- *  halving the request down to `kMinSlabCapacity` if the initial `mmap`
- *  fails (RLIMIT_AS, container limits).
- *
- *  `allocate` and `deallocate` forward to the underlying `Slab`.
+ * The constructor reserves one initial slab (halving its capacity down
+ * to `kMinSlabSize` if `mmap` fails under RLIMIT_AS).  Subsequent
+ * slabs are added on demand by `allocate()` and reserved at exactly
+ * `slab_size_` bytes each — no retry, no halving, errors propagate.
  */
-class ArenaJITLinkMemoryManager : public llvm::jitlink::JITLinkMemoryManager {
+class SlabPoolMemoryManager : public llvm::jitlink::JITLinkMemoryManager {
  public:
-  // Default slab capacity: 1 GB on both architectures.  Well within the
-  // PC-relative relocation limit (x86_64 ±2 GB, AArch64 ±4 GB) so
-  // cross-section fixups always fit; large enough to cover typical ML
-  // JIT workloads without oversubscribing virtual address space on
-  // memory-constrained hosts (containers, CI runners).
-  static constexpr std::size_t kDefaultSlabCapacity_x86_64 = std::size_t{1} << 30;   // 1 GB
-  static constexpr std::size_t kDefaultSlabCapacity_AArch64 = std::size_t{1} << 30;  // 1 GB
-  static constexpr std::size_t kMinSlabCapacity = std::size_t{256} << 20;            // 256 MB floor
+  // Default per-slab capacity.  64 MB is above the p99 size of typical
+  // ML JIT graphs (single-kernel bindings, fused kernels), below the
+  // PC-relative relocation limit, and a multiple of the 2 MB THP
+  // granule.  Small enough that a pinned slab only wastes 64 MB of RSS.
+  static constexpr std::size_t kDefaultSlabSize = std::size_t{64} << 20;  // 64 MB
 
-  explicit ArenaJITLinkMemoryManager(std::size_t page_size, std::size_t slab_capacity);
-  ~ArenaJITLinkMemoryManager() override = default;
+  // Lower bound on initial-slab reservation.  If the first `mmap`
+  // fails and halving drops below this, the constructor aborts.
+  // 8 MB is enough for a minimal JITDylib setup under very tight
+  // RLIMIT_AS.
+  static constexpr std::size_t kMinSlabSize = std::size_t{8} << 20;  // 8 MB
 
-  ArenaJITLinkMemoryManager(const ArenaJITLinkMemoryManager&) = delete;
-  ArenaJITLinkMemoryManager& operator=(const ArenaJITLinkMemoryManager&) = delete;
-  ArenaJITLinkMemoryManager(ArenaJITLinkMemoryManager&&) = delete;
-  ArenaJITLinkMemoryManager& operator=(ArenaJITLinkMemoryManager&&) = delete;
+  explicit SlabPoolMemoryManager(std::size_t page_size, std::size_t slab_size);
+  ~SlabPoolMemoryManager() override = default;
+
+  SlabPoolMemoryManager(const SlabPoolMemoryManager&) = delete;
+  SlabPoolMemoryManager& operator=(const SlabPoolMemoryManager&) = delete;
+  SlabPoolMemoryManager(SlabPoolMemoryManager&&) = delete;
+  SlabPoolMemoryManager& operator=(SlabPoolMemoryManager&&) = delete;
 
   void allocate(const llvm::jitlink::JITLinkDylib* JD, llvm::jitlink::LinkGraph& G,
                 OnAllocatedFunction OnAllocated) override;
@@ -105,8 +94,22 @@ class ArenaJITLinkMemoryManager : public llvm::jitlink::JITLinkMemoryManager {
   void deallocate(std::vector<FinalizedAlloc> Allocs,
                   OnDeallocatedFunction OnDeallocated) override;
 
+  /*! \brief Number of slabs currently held (test introspection). */
+  std::size_t numSlabs() const {
+    std::lock_guard<std::mutex> lock(pool_mu_);
+    return slabs_.size();
+  }
+
  private:
-  std::unique_ptr<Slab> slab_;
+  /*! \brief Reserve a fresh slab at exactly \p capacity bytes.  Returns
+   *         nullptr on mmap failure (caller reports the error). */
+  std::unique_ptr<Slab> createSlab(std::size_t capacity);
+
+  std::size_t page_size_;
+  std::size_t slab_size_;
+
+  mutable std::mutex pool_mu_;
+  std::vector<std::unique_ptr<Slab>> slabs_;
 };
 
 }  // namespace orcjit

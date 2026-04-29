@@ -115,8 +115,8 @@ class ORCJITExecutionSessionObj : public Object {
   void RemoveDylib(llvm::orc::JITDylib* jd);
 
  private:
-  /*! \brief Arena memory manager — must be declared before jit_ for destruction order */
-  std::unique_ptr<ArenaJITLinkMemoryManager> memory_manager_;
+  /*! \brief Slab-pool memory manager — must be declared before jit_ for destruction order */
+  std::unique_ptr<SlabPoolMemoryManager> memory_manager_;
   /*! \brief The LLVM ORC JIT instance */
   std::unique_ptr<llvm::orc::LLJIT> jit_;
 

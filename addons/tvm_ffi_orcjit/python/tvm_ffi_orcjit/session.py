@@ -66,18 +66,19 @@ class ExecutionSession(Object):
         Args:
             orc_rt_path: Optional path to the liborc_rt library. If not provided,
                         it will be automatically discovered using clang.
-            slab_size: Slab capacity in bytes for the JIT memory manager.
+            slab_size: Per-slab capacity in bytes for the JIT memory manager.
                        Linux only — ignored on macOS and Windows, where the
                        slab allocator is compiled out.
-                       0 = arch default (1 GB; falls back to smaller sizes
-                       down to 256 MB under RLIMIT_AS / container limits),
-                       >0 = custom size, <0 = disable slab allocator (LLJIT
-                       uses its default scattered-mmap allocator).
+                       0 = arch default (64 MB; initial slab halves on mmap
+                       failure down to 8 MB under RLIMIT_AS / container
+                       limits), >0 = custom size, <0 = disable slab allocator
+                       (LLJIT uses its default scattered-mmap allocator).
 
-                       Stage A of the slab-pool refactor: one Slab per session,
-                       so this is also the total arena capacity. Later stages
-                       will grow session memory by adding slabs of this size
-                       on demand.
+                       The session holds a growable pool of slabs: a fresh
+                       slab is mmap'd on demand when no existing one can fit
+                       a graph, and graphs larger than slab_size go to a
+                       dedicated oversize slab sized to fit. Drained slabs
+                       stay mapped until the session is destroyed.
 
         """
         if orc_rt_path is None:

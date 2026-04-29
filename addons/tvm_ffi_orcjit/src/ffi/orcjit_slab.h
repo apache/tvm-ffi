@@ -74,6 +74,34 @@ namespace orcjit {
 class Slab;  // forward-declared for FinalizedAllocInfo.
 
 /*!
+ * \brief Retriable "slab is out of room for this graph" error.
+ *
+ * Raised from `Slab::bumpAllocate` when the requested bytes would
+ * overflow the pool bump cursor (and no free-list region fits).
+ * `SlabPoolMemoryManager::allocate` catches this error type
+ * specifically, consumes it, and retries on the next slab — or
+ * creates a new one.
+ *
+ * All other `Slab::allocate` failures (mmap, mprotect, JITLink) stay
+ * as `StringError` / `JITLinkError` and are propagated to the caller
+ * without retry.
+ */
+class SlabPoolExhaustedError : public llvm::ErrorInfo<SlabPoolExhaustedError> {
+ public:
+  static char ID;
+  SlabPoolExhaustedError(const char* pool, std::size_t used, std::size_t requested,
+                         std::size_t limit);
+  void log(llvm::raw_ostream& os) const override;
+  std::error_code convertToErrorCode() const override;
+
+ private:
+  const char* pool_;
+  std::size_t used_;
+  std::size_t requested_;
+  std::size_t limit_;
+};
+
+/*!
  * \brief Metadata for a finalized allocation, stored via FinalizedAlloc
  *        handle.
  *
@@ -147,6 +175,29 @@ class Slab {
 
   /*! \brief True iff the reservation succeeded. */
   bool isValid() const noexcept { return arena_base_ != nullptr; }
+
+  /*!
+   * \brief Page-aligned per-pool byte totals for a LinkGraph.
+   *
+   * Does not include sections routed to the overflow (separate-mmap)
+   * path.  `SlabPoolMemoryManager` uses this to decide whether a graph
+   * fits a normal slab or needs the oversize path.
+   */
+  struct GraphFootprint {
+    std::size_t non_exec;
+    std::size_t exec;
+    std::size_t total() const noexcept { return non_exec + exec; }
+  };
+
+  /*!
+   * \brief Compute pool footprint for \p G without mutating bookkeeping.
+   *
+   * Temporarily reclassifies overflow-section lifetimes while a
+   * `BasicLayout` is built, then restores them — same prefix as
+   * `allocate()`.  Safe to call repeatedly; no state is retained.
+   */
+  static GraphFootprint computeGraphFootprint(llvm::jitlink::LinkGraph& G,
+                                              std::size_t page_size);
 
   /*! \brief Single-graph JIT allocation entry point. */
   void allocate(llvm::jitlink::LinkGraph& G,
