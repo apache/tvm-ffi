@@ -206,16 +206,23 @@ class DLLImportDefinitionGenerator : public llvm::orc::DefinitionGenerator {
 #endif  // _WIN32
 
 ORCJITExecutionSessionObj::ORCJITExecutionSessionObj(const std::string& orc_rt_path,
-                                                     int64_t arena_size_bytes)
+                                                     int64_t slab_size_bytes)
     : jit_(nullptr) {
-  // Create arena memory manager — pre-reserves contiguous VA region so all
-  // JIT allocations stay within PC-relative relocation range (±2GB x86_64,
-  // ±4GB AArch64).  Eliminates scattered-mmap relocation overflow (LLVM #173269).
+  // Create slab-backed memory manager — pre-reserves a contiguous VA region
+  // so all JIT allocations stay within PC-relative relocation range (±2 GB
+  // x86_64, ±4 GB AArch64).  Eliminates scattered-mmap relocation overflow
+  // (LLVM #173269).
   //
-  // arena_size_bytes: 0 = arch default (1GB x86_64 / AArch64, with fallback),
-  //                   >0 = custom size, <0 = disable arena.
+  // slab_size_bytes: 0 = arch default (1 GB x86_64 / AArch64, with fallback),
+  //                  >0 = custom size, <0 = disable arena (LLJIT uses its
+  //                  default allocator — scattered mmap, no PC-rel guarantee).
   // The parameter is Linux-only; on macOS/Windows the arena is compiled out
   // entirely (see #ifdef below) and the value is ignored.
+  //
+  // Stage A of the slab-pool refactor: there is exactly one Slab per session,
+  // so `slab_size_bytes` == the whole arena capacity.  Stage B introduces a
+  // growable pool where this parameter becomes the per-slab size and total
+  // session memory grows in slab-sized increments.
   //
   // The default is sized to cover typical ML JIT workloads while staying
   // well under the PC-relative relocation limit; JITLink's own overflow
@@ -225,20 +232,20 @@ ORCJITExecutionSessionObj::ORCJITExecutionSessionObj(const std::string& orc_rt_p
   //
   // LLJIT auto-configures ObjectLinkingLayer (JITLink) on x86_64 and aarch64
   // Linux (see LLJITBuilderState::prepareForConstruction).  We override
-  // the layer creator to pass our arena MM.  macOS/Windows are excluded:
+  // the layer creator to pass our memory manager.  macOS/Windows are excluded:
   // macOS MachOPlatform teardown crashes with the arena; Windows needs
   // further testing.
 #ifdef __linux__
-  if (arena_size_bytes >= 0) {
+  if (slab_size_bytes >= 0) {
     auto page_size = llvm::sys::Process::getPageSizeEstimate();
     size_t capacity;
-    if (arena_size_bytes > 0) {
-      capacity = static_cast<size_t>(arena_size_bytes);
+    if (slab_size_bytes > 0) {
+      capacity = static_cast<size_t>(slab_size_bytes);
     } else {
 #if defined(__aarch64__)
-      capacity = ArenaJITLinkMemoryManager::kDefaultArenaCapacity_AArch64;
+      capacity = ArenaJITLinkMemoryManager::kDefaultSlabCapacity_AArch64;
 #else
-      capacity = ArenaJITLinkMemoryManager::kDefaultArenaCapacity_x86_64;
+      capacity = ArenaJITLinkMemoryManager::kDefaultSlabCapacity_x86_64;
 #endif
     }
     memory_manager_ = std::make_unique<ArenaJITLinkMemoryManager>(page_size, capacity);
@@ -409,9 +416,9 @@ ORCJITExecutionSessionObj::ORCJITExecutionSessionObj(const std::string& orc_rt_p
 }
 
 ORCJITExecutionSession::ORCJITExecutionSession(const std::string& orc_rt_path,
-                                               int64_t arena_size_bytes) {
+                                               int64_t slab_size_bytes) {
   ObjectPtr<ORCJITExecutionSessionObj> obj =
-      make_object<ORCJITExecutionSessionObj>(orc_rt_path, arena_size_bytes);
+      make_object<ORCJITExecutionSessionObj>(orc_rt_path, slab_size_bytes);
   data_ = std::move(obj);
 }
 

@@ -19,14 +19,17 @@
 
 /*!
  * \file orcjit_memory_manager.h
- * \brief Arena-based JITLinkMemoryManager for LLVM ORC JIT.
+ * \brief JITLinkMemoryManager backed by one fixed-size Slab (Stage A).
  *
- * Pre-reserves a contiguous virtual address region and bump-allocates
- * from it, keeping all JIT allocations within range of PC-relative
- * relocations (±2GB on x86_64, ±4GB on AArch64).
+ * Holds a single `Slab` (see orcjit_slab.h) and delegates all
+ * `JITLinkMemoryManager` operations to it.  The capacity-negotiation
+ * retry loop (halve-on-mmap-failure) lives here because it is a
+ * caller/kernel negotiation, not something a Slab itself should do.
  *
- * This eliminates relocation overflow caused by scattered mmap
- * allocations under ASLR (LLVM issue #173269).
+ * In later stages this class is superseded by a `SlabPoolMemoryManager`
+ * that owns multiple Slabs per session and grows on demand.  The public
+ * API surface (one memory manager per LLJIT, constructed with a
+ * page-size and a slab-capacity) stays the same.
  *
  * ## GOTPCRELX relaxation workaround
  *
@@ -46,9 +49,9 @@
  * guard passes, and the wrong fixup produces a garbage displacement →
  * SIGSEGV during ORC-runtime teardown.
  *
- * `GOTPCRELXFixPlugin` in orcjit_session.cc works around this: a
- * PreFixupPass that runs *after* `optimizeGOTAndStubAccesses` detects
- * `Pointer32` edges on `67 e8` / `e9` instructions and either
+ * `GOTPCRELXFixPlugin` in llvm_patches/gotpcrelx_fix.cc works around
+ * this: a PreFixupPass that runs *after* `optimizeGOTAndStubAccesses`
+ * detects `Pointer32` edges on `67 e8` / `e9` instructions and either
  *   (a) converts to `BranchPCRel32` when the PC-relative displacement
  *       fits in int32, or
  *   (b) reverts the relaxation entirely — restores the `ff 15` /
@@ -59,82 +62,37 @@
 #define TVM_FFI_ORCJIT_ORCJIT_MEMORY_MANAGER_H_
 
 #include <llvm/ExecutionEngine/JITLink/JITLinkMemoryManager.h>
-#include <llvm/ExecutionEngine/Orc/Shared/MemoryFlags.h>
 
-#include <atomic>
+#include <cstddef>
 #include <memory>
-#include <mutex>
-#include <vector>
+
+#include "orcjit_slab.h"
 
 namespace tvm {
 namespace ffi {
 namespace orcjit {
 
-/*! \brief Arena-based memory manager for JITLink.
+/*! \brief JITLink memory manager backed by a single `Slab`.
  *
- * Reserves a large contiguous VA region at construction time using
- * PROT_NONE (zero physical memory cost).  Each allocate() call
- * bump-allocates from this region, commits pages as RW, and assigns
- * addresses.  On finalization, pages receive their target protections.
- * On deallocation, pages are decommitted and returned to a free list.
+ *  Reserves `slab_capacity` bytes of contiguous VA at construction time,
+ *  halving the request down to `kMinSlabCapacity` if the initial `mmap`
+ *  fails (RLIMIT_AS, container limits).
  *
- * The default arena size (1 GB) fits comfortably within the
- * architecture's PC-relative relocation limit (±2 GB on x86_64, ±4 GB
- * on AArch64) while covering typical ML JIT workloads without
- * oversubscribing virtual address space.  If the arena is exhausted,
- * JITLink's own relocation overflow checker fires, matching
- * dlopen/ld.so failure semantics.  If the initial reservation fails
- * (RLIMIT_AS, container limits), the constructor halves the capacity
- * down to kMinArenaCapacity (256 MB).
- *
- * ## Slab-based commit with Transparent Huge Page (THP) support
- *
- * Arena pages are committed in 2 MB slabs (kSlabSize) rather than
- * per-allocation.  Each slab is committed exactly once via an atomic
- * flag (lock-free, no contention with the allocator mutex).
- *
- * Benefits:
- *   - Batches up to 512 page faults into a single sequential mprotect
- *     per slab, reducing kernel trap overhead.
- *   - 2 MB matches the Linux huge page size on both x86_64 and AArch64.
- *     Combined with madvise(MADV_HUGEPAGE) applied at construction, the
- *     kernel can promote each fully-faulted slab into a single TLB
- *     entry (replacing 512 x 4 KB entries), reducing TLB misses during
- *     JIT code execution.
- *   - Worst-case waste is <2 MB in the last partially-used slab —
- *     negligible for typical ML workloads.
+ *  `allocate` and `deallocate` forward to the underlying `Slab`.
  */
 class ArenaJITLinkMemoryManager : public llvm::jitlink::JITLinkMemoryManager {
  public:
-  // Default arena: 1 GB on both architectures.  Well within the
+  // Default slab capacity: 1 GB on both architectures.  Well within the
   // PC-relative relocation limit (x86_64 ±2 GB, AArch64 ±4 GB) so
   // cross-section fixups always fit; large enough to cover typical ML
   // JIT workloads without oversubscribing virtual address space on
   // memory-constrained hosts (containers, CI runners).
-  static constexpr size_t kDefaultArenaCapacity_x86_64 = size_t{1} << 30;   // 1 GB
-  static constexpr size_t kDefaultArenaCapacity_AArch64 = size_t{1} << 30;  // 1 GB
-  static constexpr size_t kMinArenaCapacity = size_t{256} << 20;            // 256 MB floor
-  // Slab commit granularity.  Matches Linux huge page size (2 MB) on both
-  // x86_64 and AArch64, enabling THP promotion via madvise(MADV_HUGEPAGE).
-  static constexpr size_t kSlabSize = size_t{2} << 20;  // 2 MB
-  // PC-relative relocation reach (tightest binding fixup).  Cross-pool
-  // references (.text → .rodata, .eh_frame → .text, etc.) must fit within
-  // this signed displacement.  The binding constraint on both x86_64 and
-  // aarch64 is the signed 32-bit Delta32 used in .eh_frame unwind records
-  // (±2 GB), not the wider ADRP+ADD / RIP-rel reach.  The dual-pool allocator
-  // keeps both pools inside kPCRelReach bytes of each other even when the VA
-  // reservation is larger, so cross-pool Delta32 fixups always resolve.
-  static constexpr size_t kPCRelReach = (size_t{1} << 31) - kSlabSize;  // ~2 GB
+  static constexpr std::size_t kDefaultSlabCapacity_x86_64 = std::size_t{1} << 30;   // 1 GB
+  static constexpr std::size_t kDefaultSlabCapacity_AArch64 = std::size_t{1} << 30;  // 1 GB
+  static constexpr std::size_t kMinSlabCapacity = std::size_t{256} << 20;            // 256 MB floor
 
-  // Default fraction of the arena reserved for non-exec segments (r--, rw-).
-  // The remainder holds exec segments (r-x).  Picked by splitting the arena
-  // at a 2 MB-aligned boundary (midpoint_); the exec pool thus starts on a
-  // 2 MB page boundary, maximizing r-x page packing.
-  // Typical CUDA binding objects: ~2 parts rodata+data to 1 part text.
-  static constexpr double kDefaultNonExecFraction = 2.0 / 3.0;
-
-  explicit ArenaJITLinkMemoryManager(size_t page_size, size_t arena_capacity);
-  ~ArenaJITLinkMemoryManager() override;
+  explicit ArenaJITLinkMemoryManager(std::size_t page_size, std::size_t slab_capacity);
+  ~ArenaJITLinkMemoryManager() override = default;
 
   ArenaJITLinkMemoryManager(const ArenaJITLinkMemoryManager&) = delete;
   ArenaJITLinkMemoryManager& operator=(const ArenaJITLinkMemoryManager&) = delete;
@@ -144,83 +102,11 @@ class ArenaJITLinkMemoryManager : public llvm::jitlink::JITLinkMemoryManager {
   void allocate(const llvm::jitlink::JITLinkDylib* JD, llvm::jitlink::LinkGraph& G,
                 OnAllocatedFunction OnAllocated) override;
 
-  void deallocate(std::vector<FinalizedAlloc> Allocs, OnDeallocatedFunction OnDeallocated) override;
+  void deallocate(std::vector<FinalizedAlloc> Allocs,
+                  OnDeallocatedFunction OnDeallocated) override;
 
  private:
-  class ArenaInFlightAlloc;
-
-  /*! \brief A section allocated outside the arena via separate mmap().
-   *
-   *  Sections whose only cross-section references use absolute relocations
-   *  (e.g. .nv_fatbin) are placed here to keep the arena compact. */
-  struct OverflowBlock {
-    void* addr;               // mmap'd base address
-    size_t size;              // mmap'd size (page-aligned)
-    llvm::orc::MemProt prot;  // target protection for finalize
-  };
-
-  /*! \brief Metadata for a finalized allocation, stored via FinalizedAlloc handle.
-   *
-   *  The arena is split into two pools at midpoint_.  Each allocate() call may
-   *  consume a region from either or both pools.  Standard-lifetime pages remain
-   *  committed after finalize(); Finalize-lifetime pages are decommitted at the
-   *  end of finalize().  Zero-sized sub-regions indicate no allocation from that
-   *  pool. */
-  struct FinalizedAllocInfo {
-    size_t non_exec_offset;         // offset of non-exec Standard region (or 0 if unused)
-    size_t non_exec_standard_size;  // bytes retained in non-exec pool after finalize
-    size_t exec_offset;             // offset of exec Standard region (or midpoint_ if unused)
-    size_t exec_standard_size;      // bytes retained in exec pool after finalize
-    std::vector<llvm::orc::shared::WrapperFunctionCall> DeallocActions;
-    std::vector<OverflowBlock> overflow_blocks;
-  };
-
-  /*! \brief Bump-allocate from the selected pool.  Returns offset within arena. */
-  llvm::Expected<size_t> bumpAllocate(size_t size, bool is_exec);
-
-  /*! \brief Return a region to the appropriate free list (coalesces adjacent blocks).
-   *         Pool is identified by comparing offset against midpoint_. */
-  void freeRegion(size_t offset, size_t size);
-
-  // ── Platform abstraction ──
-  static void* reserveVA(size_t size);
-  static void releaseVA(void* addr, size_t size);
-  llvm::Error commitPages(void* addr, size_t size);
-  static void decommitPages(void* addr, size_t size);
-  static llvm::Error protectPages(void* addr, size_t size, llvm::orc::MemProt Prot);
-
-  char* arena_base_;
-  size_t arena_capacity_;
-  size_t page_size_;
-
-  // ── Dual-pool split ──
-  // The arena is partitioned at midpoint_ (a 2 MB-aligned offset) into:
-  //   non-exec pool  = [arena_base_,           arena_base_ + midpoint_         )
-  //   exec pool      = [arena_base_ + midpoint_, arena_base_ + exec_bump_limit_)
-  // Both pools grow upward from their base.  The exec pool starts on a 2 MB
-  // boundary so r-x segments can pack as tightly as possible into 2 MB pages.
-  //
-  // exec_bump_limit_ = min(arena_capacity_, kPCRelReach).  Bytes beyond this
-  // limit stay reserved (VA only, no commit) but are not used for allocation
-  // so cross-pool references always fit within the PC-relative reach.
-  size_t midpoint_;
-  size_t exec_bump_limit_;
-
-  std::mutex mu_;
-  size_t non_exec_bump_;  // next free offset in non-exec pool ∈ [0, midpoint_]
-  size_t exec_bump_;      // next free offset in exec pool     ∈ [midpoint_, arena_capacity_]
-
-  struct FreeBlock {
-    size_t offset;
-    size_t size;
-  };
-  std::vector<FreeBlock> free_list_non_exec_;
-  std::vector<FreeBlock> free_list_exec_;
-
-  /*! \brief Per-slab commit flags (0 = uncommitted, 1 = committed).
-   *  Lock-free: each slab is committed exactly once via compare_exchange. */
-  std::unique_ptr<std::atomic<uint8_t>[]> slab_committed_;
-  size_t num_slabs_ = 0;
+  std::unique_ptr<Slab> slab_;
 };
 
 }  // namespace orcjit

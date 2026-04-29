@@ -60,25 +60,31 @@ class ExecutionSession(Object):
 
     """
 
-    def __init__(self, orc_rt_path: str | None = None, arena_size: int = 0) -> None:
+    def __init__(self, orc_rt_path: str | None = None, slab_size: int = 0) -> None:
         """Initialize ExecutionSession.
 
         Args:
             orc_rt_path: Optional path to the liborc_rt library. If not provided,
                         it will be automatically discovered using clang.
-            arena_size: Arena size in bytes for the JIT memory manager.
-                        Linux only — ignored on macOS and Windows, where the
-                        arena is compiled out.
-                        0 = arch default (1 GB; falls back to smaller sizes
-                        down to 256 MB under RLIMIT_AS / container limits),
-                        >0 = custom size, <0 = disable arena.
+            slab_size: Slab capacity in bytes for the JIT memory manager.
+                       Linux only — ignored on macOS and Windows, where the
+                       slab allocator is compiled out.
+                       0 = arch default (1 GB; falls back to smaller sizes
+                       down to 256 MB under RLIMIT_AS / container limits),
+                       >0 = custom size, <0 = disable slab allocator (LLJIT
+                       uses its default scattered-mmap allocator).
+
+                       Stage A of the slab-pool refactor: one Slab per session,
+                       so this is also the total arena capacity. Later stages
+                       will grow session memory by adding slabs of this size
+                       on demand.
 
         """
         if orc_rt_path is None:
             orc_rt_path = _find_orc_rt_library()
             if orc_rt_path is None:
                 orc_rt_path = ""
-        self.__init_handle_by_constructor__(_ffi_api.ExecutionSession, orc_rt_path, arena_size)  # type: ignore
+        self.__init_handle_by_constructor__(_ffi_api.ExecutionSession, orc_rt_path, slab_size)  # type: ignore
 
     def create_library(self, name: str = "") -> DynamicLibrary:
         """Create a new dynamic library associated with this execution session.

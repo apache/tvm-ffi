@@ -56,7 +56,7 @@ class ORCJITExecutionSessionObj : public Object {
    * \brief Default constructor (for make_object)
    */
   explicit ORCJITExecutionSessionObj(const std::string& orc_rt_path = "",
-                                     int64_t arena_size_bytes = 0);
+                                     int64_t slab_size_bytes = 0);
 
   /*!
    * \brief Create a new DynamicLibrary (JITDylib) in this session
@@ -139,7 +139,7 @@ class ORCJITExecutionSession : public ObjectRef {
    * \return The created execution session instance
    */
   explicit ORCJITExecutionSession(const std::string& orc_rt_path = "",
-                                  int64_t arena_size_bytes = 0);
+                                  int64_t slab_size_bytes = 0);
   // Required: define object reference methods
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(ORCJITExecutionSession, ObjectRef,
                                                 ORCJITExecutionSessionObj);

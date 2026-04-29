@@ -277,7 +277,7 @@ def test_arena_colocation(variant: str) -> None:
     """
     maps_before = set(_parse_maps())
 
-    session = ExecutionSession(arena_size=_ARENA_SIZE)
+    session = ExecutionSession(slab_size=_ARENA_SIZE)
     lib1 = session.create_library("lib1")
     lib1.add(obj(f"{variant}/test_addr"))
     addr1 = lib1.get_function("code_address")()
@@ -308,7 +308,7 @@ def test_arena_colocation(variant: str) -> None:
 
 
 def _measure_distance_under_pressure(
-    variant: str, arena_size: int, radius: int = _BLOCK_RADIUS
+    variant: str, slab_size: int, radius: int = _BLOCK_RADIUS
 ) -> tuple[int | None, bool]:
     """Load two objects under VA pressure and return (distance, overflowed).
 
@@ -318,7 +318,7 @@ def _measure_distance_under_pressure(
     """
     maps_before = set(_parse_maps())
 
-    session = ExecutionSession(arena_size=arena_size)
+    session = ExecutionSession(slab_size=slab_size)
     lib1 = session.create_library("lib1")
     lib1.add(obj(f"{variant}/test_addr"))
     addr1 = lib1.get_function("code_address")()
@@ -360,7 +360,7 @@ def test_arena_keeps_objects_close(variant: str) -> None:
     still passes as long as the arena keeps objects within range.
     """
     # Phase 1: with arena — must always succeed and be within arena range
-    arena_dist, arena_overflow = _measure_distance_under_pressure(variant, arena_size=_ARENA_SIZE)
+    arena_dist, arena_overflow = _measure_distance_under_pressure(variant, slab_size=_ARENA_SIZE)
     assert not arena_overflow, "Arena session should not overflow"
     assert arena_dist is not None
     assert arena_dist < _ARENA_SIZE, (
@@ -369,7 +369,7 @@ def test_arena_keeps_objects_close(variant: str) -> None:
     )
 
     # Phase 2: without arena — expect scatter or overflow
-    no_arena_dist, no_arena_overflow = _measure_distance_under_pressure(variant, arena_size=-1)
+    no_arena_dist, no_arena_overflow = _measure_distance_under_pressure(variant, slab_size=-1)
 
     if no_arena_overflow:
         # Relocation overflow without arena proves the blocker forced
@@ -408,7 +408,7 @@ def test_arena_hidden_symbol_with_blocker(variant: str) -> None:
     """
     maps_before = set(_parse_maps())
 
-    session = ExecutionSession(arena_size=_ARENA_SIZE)
+    session = ExecutionSession(slab_size=_ARENA_SIZE)
     lib = session.create_library("hidden_test")
 
     # Load helper and force materialization
@@ -469,7 +469,7 @@ def test_overflow_section_outside_arena(variant: str) -> None:
     from /proc/self/maps, then assert the fatbin address is NOT within
     the arena region.
     """
-    session = ExecutionSession(arena_size=_ARENA_SIZE)
+    session = ExecutionSession(slab_size=_ARENA_SIZE)
     lib = session.create_library("fatbin_overflow")
     lib.add(obj(f"{variant}/fake_fatbin"))
 
@@ -604,7 +604,7 @@ def test_dso_handle_delta32_with_arena(variant: str) -> None:
     """
     maps_before = set(_parse_maps())
 
-    session = ExecutionSession(arena_size=_ARENA_SIZE)
+    session = ExecutionSession(slab_size=_ARENA_SIZE)
     lib1 = session.create_library("lib1")
     lib1.add(obj(f"{variant}/test_funcs"))
     assert lib1.get_function("test_add")(10, 20) == 30
@@ -631,7 +631,7 @@ def test_dso_handle_delta32_overflow_without_arena(variant: str) -> None:
     """Without arena, PIE __dso_handle PC32 overflows under VA pressure.
 
     Same setup as ``test_dso_handle_delta32_with_arena`` but with arena
-    disabled (``arena_size=-1``).
+    disabled (``slab_size=-1``).
 
     The 3 GB VA blocker fills all free gaps within ±3 GB of the first
     session's JIT allocations.  When lib2 is loaded, ``InProcessMemoryMapper``
@@ -650,7 +650,7 @@ def test_dso_handle_delta32_overflow_without_arena(variant: str) -> None:
     """
     maps_before = set(_parse_maps())
 
-    session = ExecutionSession(arena_size=-1)  # arena disabled
+    session = ExecutionSession(slab_size=-1)  # arena disabled
     lib1 = session.create_library("lib1")
     lib1.add(obj(f"{variant}/test_addr"))
     lib1.get_function("code_address")()

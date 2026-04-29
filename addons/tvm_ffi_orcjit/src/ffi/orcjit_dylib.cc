@@ -206,8 +206,8 @@ static void RegisterOrcJITFunctions() {
 
   refl::GlobalDef()
       .def("orcjit.ExecutionSession",
-           [](const std::string& orc_rt_path, int64_t arena_size_bytes) {
-             return ORCJITExecutionSession(orc_rt_path, arena_size_bytes);
+           [](const std::string& orc_rt_path, int64_t slab_size_bytes) {
+             return ORCJITExecutionSession(orc_rt_path, slab_size_bytes);
            })
       .def("orcjit.ExecutionSessionCreateDynamicLibrary",
            [](const ORCJITExecutionSession& session, const String& name) -> Module {
