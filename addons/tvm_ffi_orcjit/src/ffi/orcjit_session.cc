@@ -493,6 +493,24 @@ void ORCJITExecutionSessionObj::AddPendingDeinitializer(llvm::orc::JITDylib* jit
   pending_deinitializers_[jit_dylib].push_back(entry);
 }
 
+void ORCJITExecutionSessionObj::RemoveDylib(llvm::orc::JITDylib* jit_dylib) {
+  if (jit_dylib == nullptr) return;
+  // Drop any pending init/fini records keyed by this JITDylib*. After removal
+  // the address may be recycled for a freshly-created JITDylib; leftover
+  // entries would then be attributed to the wrong dylib.
+  pending_initializers_.erase(jit_dylib);
+  pending_deinitializers_.erase(jit_dylib);
+
+  if (jit_ == nullptr) return;
+  // removeJITDylib is best-effort at destruction time: the session may already
+  // be tearing down, the platform may report an error during clear(), etc.
+  // Swallow errors rather than throwing from a destructor; the session
+  // destructor will munmap everything when it runs.
+  if (auto err = jit_->getExecutionSession().removeJITDylib(*jit_dylib)) {
+    llvm::consumeError(std::move(err));
+  }
+}
+
 }  // namespace orcjit
 }  // namespace ffi
 }  // namespace tvm

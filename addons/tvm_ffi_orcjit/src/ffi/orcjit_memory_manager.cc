@@ -536,6 +536,18 @@ void ArenaJITLinkMemoryManager::allocate(const JITLinkDylib* JD, LinkGraph& G,
       freeRegion(*off, req);
       return std::move(Err);
     }
+    // Recycled-region protection reset.  commitPages() only mprotects a 2 MB
+    // slab the first time it's touched (guarded by slab_committed_).  When
+    // the region was previously handed out, finalized to r-x/r--/rw- and
+    // later returned to the free list by deallocate(), those finalize
+    // protections are still in effect — the memset(0) below would fault on
+    // read-only pages.  mprotect(RW) has no decommit effect, so the
+    // physical pages stay resident; we're only restoring write access for
+    // the upcoming zero-fill and subsequent JITLink content writes.
+    if (auto Err = protectPages(arena_base_ + *off, req, MemProt::Read | MemProt::Write)) {
+      freeRegion(*off, req);
+      return std::move(Err);
+    }
     std::memset(arena_base_ + *off, 0, req);
     return *off;
   };
@@ -671,6 +683,13 @@ void ArenaJITLinkMemoryManager::deallocate(std::vector<FinalizedAlloc> Allocs,
     }
 
     // Decommit and free each pool's Standard region.
+    //
+    // We intentionally do *not* reset page protection here.  During session
+    // teardown the ORC runtime may still execute (or read) deallocated JIT
+    // pages from other dylibs while their DeallocActions unwind — same
+    // rationale as decommitPages being a no-op.  Protection is reset lazily
+    // in allocate() when the region is re-handed out (see the
+    // "recycled-region protection reset" block in allocPool).
     if (FA->non_exec_standard_size > 0) {
       decommitPages(arena_base_ + FA->non_exec_offset, FA->non_exec_standard_size);
       freeRegion(FA->non_exec_offset, FA->non_exec_standard_size);

@@ -62,8 +62,9 @@ ORCJITDynamicLibraryObj::ORCJITDynamicLibraryObj(ORCJITExecutionSession session,
 }
 
 ORCJITDynamicLibraryObj::~ORCJITDynamicLibraryObj() {
-  // See InitFiniPlugin class doc in orcjit_session.cc for the three-platform
-  // init/fini strategy (macOS native vs. Linux/Windows plugin).
+  // Step 1: run static destructors for code in this JITDylib. See InitFiniPlugin
+  // class doc in orcjit_session.cc for the three-platform init/fini strategy
+  // (macOS native via LLJIT::deinitialize vs. Linux/Windows via our plugin).
 #if defined(__linux__) || defined(_WIN32)
   session_->RunPendingDeinitializers(GetJITDylib());
 #else
@@ -71,6 +72,23 @@ ORCJITDynamicLibraryObj::~ORCJITDynamicLibraryObj() {
     llvm::consumeError(std::move(err));
   }
 #endif
+  // Step 2: remove the JITDylib from the ExecutionSession. Triggers
+  // JITDylib::clear(), which releases all tracked linker resources — in
+  // particular, invokes the ObjectLinkingLayer's ResourceManager which calls
+  // our memory manager's deallocate() for every FinalizedAlloc belonging to
+  // this dylib.  Then calls Platform::teardownJITDylib() to drop any
+  // per-dylib platform state.  Without this call JIT code pages accumulate
+  // in the arena until the whole session is destroyed.
+  //
+  // Safe on all three platforms:
+  //   - Linux / Windows: we drive init/fini via InitFiniPlugin (no Platform
+  //     registered in the LLJIT config used here, see orcjit_session.cc).
+  //   - macOS: MachOPlatform::teardownJITDylib() only cleans internal maps
+  //     (JITDylibToHeaderAddr / JITDylibToPThreadKey); Platform::notifyRemoving
+  //     (still `llvm_unreachable("Not supported yet")`) is declared but never
+  //     called by `removeJITDylibs`, so it is not reached here.
+  session_->RemoveDylib(dylib_);
+  dylib_ = nullptr;
 }
 
 void ORCJITDynamicLibraryObj::AddObjectFile(const String& path) {

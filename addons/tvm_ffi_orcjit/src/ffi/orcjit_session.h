@@ -98,6 +98,22 @@ class ORCJITExecutionSessionObj : public Object {
   void AddPendingInitializer(llvm::orc::JITDylib* jd, const InitFiniEntry& entry);
   void AddPendingDeinitializer(llvm::orc::JITDylib* jd, const InitFiniEntry& entry);
 
+  /*!
+   * \brief Remove a JITDylib from the ExecutionSession, releasing its JIT
+   *        memory and dropping it from the session's dylib list.
+   *
+   * Invoked by \c ORCJITDynamicLibraryObj's destructor after any required
+   * static-destructor sequence (\c RunPendingDeinitializers on Linux/Windows,
+   * \c LLJIT::deinitialize on macOS) has completed. The caller must ensure no
+   * further use of the \c JITDylib* after this call — it becomes "Closed" and
+   * its address may be reused by a subsequent \c createJITDylib.
+   *
+   * Also erases any pending init/fini map entries keyed by \p jd so that a
+   * subsequent \c JITDylib allocated at the same address starts with a clean
+   * slate.
+   */
+  void RemoveDylib(llvm::orc::JITDylib* jd);
+
  private:
   /*! \brief Arena memory manager — must be declared before jit_ for destruction order */
   std::unique_ptr<ArenaJITLinkMemoryManager> memory_manager_;

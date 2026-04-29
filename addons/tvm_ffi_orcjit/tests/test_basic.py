@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import gc
 import sys
 import tempfile
 
@@ -473,3 +474,164 @@ def test_ctor_dtor(v: Variant) -> None:
         assert post.index("<fini_array.102>") < post.index("<fini_array.101>")
         assert "<ctors>" not in log
         assert "<dtors>" not in log
+
+
+# ---------------------------------------------------------------------------
+# Dylib removal — dropping a DynamicLibrary while its session is still alive.
+#
+# Dropping the last Python reference to a DynamicLibrary removes the JITDylib
+# from the ExecutionSession (releasing its JIT memory) in addition to running
+# any pending static destructors. These tests pin that contract and guard
+# against regressions in the slab-pool memory-manager refactor, which assumes
+# per-dylib deallocation actually happens at drop time.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("v", _all_variants, ids=_variant_id)
+def test_drop_empty_library(v: Variant) -> None:
+    """Drop an empty library, then reuse the session."""
+    session = ExecutionSession()
+    lib = session.create_library("empty")
+    del lib
+    # Session still works.
+    lib2 = session.create_library("after")
+    lib2.add(obj(v.funcs_obj()))
+    assert lib2.get_function(v.fn("test_add"))(1, 2) == 3
+
+
+@pytest.mark.parametrize("v", _all_variants, ids=_variant_id)
+def test_drop_loaded_library_then_recreate(v: Variant) -> None:
+    """Drop a library with live JIT code, then create and use a fresh one."""
+    session = ExecutionSession()
+
+    lib1 = session.create_library("lib1")
+    lib1.add(obj(v.funcs_obj()))
+    assert lib1.get_function(v.fn("test_add"))(3, 4) == 7
+    del lib1
+
+    lib2 = session.create_library("lib2")
+    lib2.add(obj(v.funcs_obj()))
+    assert lib2.get_function(v.fn("test_add"))(100, 1) == 101
+
+
+@pytest.mark.parametrize("v", _all_variants, ids=_variant_id)
+def test_repeated_create_drop_many_iterations(v: Variant) -> None:
+    """Long create / load / call / drop cycle must not degrade or crash.
+
+    Exercises the memory manager's recycled-region path: each iteration
+    frees JIT memory that a later iteration may be handed back by the arena.
+    """
+    session = ExecutionSession()
+    for i in range(32):
+        lib = session.create_library(f"iter_{i}")
+        lib.add(obj(v.funcs_obj()))
+        assert lib.get_function(v.fn("test_multiply"))(i + 1, 2) == (i + 1) * 2
+        del lib
+
+
+@pytest.mark.parametrize("v", _all_variants, ids=_variant_id)
+def test_drop_one_library_does_not_affect_another(v: Variant) -> None:
+    """Dropping one library must leave unrelated sibling libraries working."""
+    session = ExecutionSession()
+
+    keep = session.create_library("keep")
+    keep.add(obj(v.funcs_obj()))
+
+    drop = session.create_library("drop")
+    drop.add(obj(v.funcs2_obj()))
+    assert drop.get_function(v.fn("test_subtract"))(10, 3) == 7
+
+    del drop
+    gc.collect()
+
+    # Untouched sibling still works; room now exists for a fresh library.
+    assert keep.get_function(v.fn("test_add"))(5, 5) == 10
+    fresh = session.create_library("fresh")
+    fresh.add(obj(v.funcs2_obj()))
+    assert fresh.get_function(v.fn("test_divide"))(20, 4) == 5
+
+
+@pytest.mark.parametrize("v", _all_variants, ids=_variant_id)
+def test_captured_function_keeps_library_alive(v: Variant) -> None:
+    """A captured Function keeps the library alive after the lib handle is dropped."""
+    session = ExecutionSession()
+    lib = session.create_library("hold")
+    lib.add(obj(v.funcs_obj()))
+
+    captured = lib.get_function(v.fn("test_add"))
+    del lib
+    gc.collect()
+
+    assert captured(11, 31) == 42
+
+
+@pytest.mark.parametrize("v", _all_variants, ids=_variant_id)
+def test_drop_runs_static_destructors(v: Variant) -> None:
+    """Drop runs static destructors immediately rather than at session teardown."""
+    log: list[str] = []
+
+    @tvm_ffi.register_global_func("append_log", override=True)
+    def _append(x: str) -> None:
+        log.append(x)
+
+    session = ExecutionSession()
+    lib = session.create_library("ctor_dtor")
+    lib.add(obj(v.ctor_dtor_obj()))
+    lib.get_function(v.fn("main"))()
+
+    ctor_len = len(log)
+    assert "<main>" in log, f"main not observed: {log}"
+
+    del lib
+    gc.collect()
+
+    post = log[ctor_len:]
+    # Platform-specific fini markers: ELF (.fini_array / .dtors), Mach-O
+    # (__mod_term_func surfaces as fini_array), COFF (.CRT$XT*).
+    if sys.platform == "win32":
+        markers = ("crt.XT",)
+    else:
+        markers = ("dtors", "fini_array")
+    assert any(m in entry for entry in post for m in markers), (
+        f"no static destructors on drop (platform={sys.platform}): "
+        f"pre={log[:ctor_len]} post={post}"
+    )
+
+
+@pytest.mark.parametrize("v", _all_variants, ids=_variant_id)
+def test_drop_caller_leaves_base_usable(v: Variant) -> None:
+    """Dropping a set_link_order caller leaves its base library usable."""
+    session = ExecutionSession()
+
+    base = session.create_library("base")
+    base.add(obj(v.link_order_base_obj()))
+
+    caller = session.create_library("caller")
+    caller.set_link_order(base)
+    caller.add(obj(v.link_order_caller_obj()))
+    assert caller.get_function(v.fn("cross_lib_add"))(1, 2) == 3
+
+    del caller
+    gc.collect()
+
+    caller2 = session.create_library("caller2")
+    caller2.set_link_order(base)
+    caller2.add(obj(v.link_order_caller_obj()))
+    assert caller2.get_function(v.fn("cross_lib_add"))(10, 20) == 30
+
+
+@pytest.mark.parametrize("v", _all_variants, ids=_variant_id)
+def test_drop_all_libraries_then_session(v: Variant) -> None:
+    """Dropping every library before the session still leaves clean teardown."""
+    session = ExecutionSession()
+    libs = []
+    for i in range(4):
+        lib = session.create_library(f"lib_{i}")
+        lib.add(obj(v.funcs_obj()))
+        libs.append(lib)
+    for lib in reversed(libs):
+        del lib
+    libs.clear()
+    gc.collect()
+    # Session destructor runs at end-of-test; a regression in removal would
+    # surface as a crash under pytest.
