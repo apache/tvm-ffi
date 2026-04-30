@@ -399,7 +399,7 @@ def _install_init(cls: type, type_info: TypeInfo) -> None:
 def _add_class_attrs(type_cls: type, type_info: TypeInfo) -> type:
     for field in type_info.fields:
         name = field.name
-        if not hasattr(type_cls, name):  # skip already defined attributes
+        if name not in type_cls.__dict__:  # skip attributes defined directly on this class
             setattr(type_cls, name, field.as_property(type_cls))
     has_ffi_init = False
     for method in type_info.methods:

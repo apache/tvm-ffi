@@ -32,7 +32,7 @@ from tvm_ffi import core
 from tvm_ffi._dunder import _install_dataclass_dunders
 from tvm_ffi._ffi_api import DeepCopy, RecursiveEq, RecursiveHash, ReprPrint
 from tvm_ffi.core import MISSING, Object, TypeInfo, TypeSchema, _to_py_class_value
-from tvm_ffi.dataclasses import KW_ONLY, Field, IntEnum, StrEnum, entry, field, py_class
+from tvm_ffi.dataclasses import KW_ONLY, Field, IntEnum, StrEnum, entry, field, fields, py_class
 from tvm_ffi.registry import _add_class_attrs
 from tvm_ffi.testing import TestObjectBase as _TestObjectBase
 from tvm_ffi.testing.testing import requires_py310
@@ -738,6 +738,134 @@ class TestInheritance:
         assert obj.a == 1
         assert obj.b == 2
         assert obj.c == 3
+
+    def test_collects_fields_from_non_py_class_parent(self) -> None:
+        @py_class(_unique_key("NPCNode"))
+        class Node(Object):
+            x: int
+
+        class BaseBinOp(Node):
+            lhs: int
+            rhs: int
+
+        @py_class(_unique_key("NPCAdd"))
+        class Add(BaseBinOp):
+            pass
+
+        obj = Add(lhs=1, rhs=2, x=0)  # ty: ignore[unknown-argument]
+        assert obj.x == 0
+        assert obj.lhs == 1
+        assert obj.rhs == 2
+        assert [f.name for f in fields(Add)] == ["x", "lhs", "rhs"]
+        assert [f.name for f in _get_type_info(Add).fields] == ["lhs", "rhs"]
+
+    def test_collects_non_py_class_parent_field_options(self) -> None:
+        @py_class(_unique_key("NPCOptNode"))
+        class Node(Object):
+            x: int
+
+        class BaseOp(Node):
+            kind: ClassVar[str] = "binop"
+            lhs: int
+            hidden: int = field(default=99, init=False)
+            _: KW_ONLY
+            rhs: int
+
+        @py_class(_unique_key("NPCOptAdd"))
+        class Add(BaseOp):
+            scale: int
+
+        obj = Add(0, 1, rhs=3, scale=2)  # ty: ignore[parameter-already-assigned,unknown-argument]
+        assert obj.x == 0
+        assert obj.lhs == 1
+        assert obj.scale == 2
+        assert obj.rhs == 3
+        assert obj.hidden == 99
+        assert [f.name for f in fields(Add)] == ["x", "lhs", "hidden", "rhs", "scale"]
+        assert [f.name for f in _get_type_info(Add).fields] == [
+            "lhs",
+            "hidden",
+            "rhs",
+            "scale",
+        ]
+        with pytest.raises(TypeError):
+            Add(0, 1, 2, rhs=3)  # ty: ignore[too-many-positional-arguments,unknown-argument]
+
+    def test_registered_parent_non_py_class_fields_not_duplicated(self) -> None:
+        @py_class(_unique_key("NPCDedupNode"))
+        class Node(Object):
+            x: int
+
+        class BaseBinOp(Node):
+            lhs: int
+            rhs: int
+
+        @py_class(_unique_key("NPCDedupAdd"))
+        class Add(BaseBinOp):
+            op_id: int
+
+        @py_class(_unique_key("NPCDedupWeightedAdd"))
+        class WeightedAdd(Add):
+            weight: int
+
+        obj = WeightedAdd(x=0, lhs=1, rhs=2, op_id=3, weight=4)  # ty: ignore[unknown-argument]
+        assert obj.x == 0
+        assert obj.lhs == 1
+        assert obj.rhs == 2
+        assert obj.op_id == 3
+        assert obj.weight == 4
+        assert [f.name for f in fields(WeightedAdd)] == ["x", "lhs", "rhs", "op_id", "weight"]
+        assert [f.name for f in _get_type_info(WeightedAdd).fields] == ["weight"]
+
+    def test_multiple_non_py_class_parents_single_ffi_lineage(self) -> None:
+        @py_class(_unique_key("MROBase"))
+        class Base(Object):
+            x: int
+
+        class NonFFIClassC(Base):
+            c: int
+
+        class NonFFIClassA:
+            a: int
+
+        class NonFFIClassB:
+            b: int
+
+        @py_class(_unique_key("MROChild"))
+        class Child(NonFFIClassA, NonFFIClassB, NonFFIClassC):
+            y: int
+
+        obj = Child(x=0, c=3, b=2, a=1, y=4)  # ty: ignore[unknown-argument]
+        assert obj.x == 0
+        assert obj.a == 1
+        assert obj.b == 2
+        assert obj.c == 3
+        assert obj.y == 4
+        assert [f.name for f in fields(Child)] == ["x", "c", "b", "a", "y"]
+        assert [f.name for f in _get_type_info(Child).fields] == ["c", "b", "a", "y"]
+
+    def test_non_py_class_parent_override_preserves_field_position(self) -> None:
+        @py_class(_unique_key("OverrideBase"))
+        class Base(Object):
+            x: int
+
+        class Parent(Base):
+            a: int
+            b: int
+            c: int
+
+        @py_class(_unique_key("OverrideChild"))
+        class Child(Parent):
+            b: str
+            d: int
+
+        obj = Child(x=0, a=1, b="two", c=3, d=4)  # ty: ignore[unknown-argument]
+        assert obj.b == "two"
+        assert [f.name for f in fields(Child)] == ["x", "a", "b", "c", "d"]
+        own_fields = _get_type_info(Child).fields
+        assert [f.name for f in own_fields] == ["a", "b", "c", "d"]
+        assert own_fields[1].dataclass_field is not None
+        assert own_fields[1].dataclass_field.type is str
 
 
 # ###########################################################################

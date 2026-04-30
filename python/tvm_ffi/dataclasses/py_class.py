@@ -21,6 +21,7 @@ from __future__ import annotations
 import sys
 import typing
 from collections.abc import Callable
+from copy import copy
 from dataclasses import dataclass
 from typing import Any, ClassVar, TypeVar
 
@@ -136,12 +137,38 @@ def _rollback_registration(cls: type, type_info: Any) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _own_annotations(cls: type) -> dict[str, Any]:
+    """Return annotations declared directly on *cls*."""
+    # Python 3.14+ (PEP 749): annotations are lazily evaluated via
+    # __annotate__ and no longer stored directly in __dict__.  getattr()
+    # triggers evaluation and returns per-class annotations correctly.
+    # On Python < 3.14, getattr() follows MRO and returns *parent*
+    # annotations when the child has none — use __dict__ to avoid that.
+    if sys.version_info >= (3, 14):
+        return getattr(cls, "__annotations__", {})
+    return cls.__dict__.get("__annotations__", {})
+
+
+def _field_owner_classes(cls: type) -> list[type]:
+    """Classes whose annotations become this type's own fields."""
+    registered_parent = next(
+        (b for b in cls.__mro__[1:] if "__tvm_ffi_type_info__" in b.__dict__), object
+    )
+    represented = set(registered_parent.__mro__)
+    return [
+        b
+        for b in reversed(cls.__mro__)
+        if b is not object and b not in represented and _own_annotations(b)
+    ]
+
+
 def _collect_own_fields(  # noqa: PLR0912
     cls: type,
+    owner: type,
     hints: dict[str, Any],
-    decorator_kw_only: bool,
+    kw_only_active: bool,
     decorator_frozen: bool,
-) -> list[Field]:
+) -> tuple[list[Field], bool]:
     """Parse own annotations into :class:`Field` objects.
 
     - Skips ``ClassVar`` annotations.
@@ -152,16 +179,7 @@ def _collect_own_fields(  # noqa: PLR0912
     - Resolves ``hash=None`` to follow ``compare``.
     """
     fields: list[Field] = []
-    kw_only_active = decorator_kw_only
-    # Python 3.14+ (PEP 749): annotations are lazily evaluated via
-    # __annotate__ and no longer stored directly in __dict__.  getattr()
-    # triggers evaluation and returns per-class annotations correctly.
-    # On Python < 3.14, getattr() follows MRO and returns *parent*
-    # annotations when the child has none — use __dict__ to avoid that.
-    if sys.version_info >= (3, 14):
-        own_annotations: dict[str, str] = getattr(cls, "__annotations__", {})
-    else:
-        own_annotations = cls.__dict__.get("__annotations__", {})
+    own_annotations = _own_annotations(owner)
 
     for name in own_annotations:
         resolved_type = hints.get(name)
@@ -176,7 +194,7 @@ def _collect_own_fields(  # noqa: PLR0912
         # KW_ONLY sentinel
         if resolved_type is KW_ONLY:
             kw_only_active = True
-            if name in cls.__dict__:
+            if owner is cls and name in cls.__dict__:
                 try:
                     delattr(cls, name)
                 except AttributeError:
@@ -184,14 +202,14 @@ def _collect_own_fields(  # noqa: PLR0912
             continue
 
         # Extract Field from class dict (inline of _pop_field_from_class)
-        class_val = cls.__dict__.get(name, MISSING)
+        class_val = owner.__dict__.get(name, MISSING)
         if isinstance(class_val, Field):
-            f = class_val
+            f = class_val if owner is cls else copy(class_val)
         elif class_val is not MISSING:
             f = field(default=class_val)
         else:
             f = field()
-        if class_val is not MISSING:
+        if owner is cls and class_val is not MISSING:
             try:
                 delattr(cls, name)
             except AttributeError:
@@ -216,7 +234,7 @@ def _collect_own_fields(  # noqa: PLR0912
 
         fields.append(f)
 
-    return fields
+    return fields, kw_only_active
 
 
 def method(fn: Any) -> Any:
@@ -415,7 +433,20 @@ def _register_fields_into_type(
         except (NameError, AttributeError):
             return False
 
-    own_fields = _collect_own_fields(cls, hints, params["kw_only"], params["frozen"])
+    fields_map: dict[str, Field] = {}
+    kw_only_active = params["kw_only"]
+    for owner in _field_owner_classes(cls):
+        owner_fields, kw_only_active = _collect_own_fields(
+            cls,
+            owner,
+            hints,
+            kw_only_active,
+            params["frozen"],
+        )
+        for f in owner_fields:
+            assert f.name is not None
+            fields_map[f.name] = f
+    own_fields = list(fields_map.values())
     py_methods = _collect_py_methods(cls)
 
     # Register fields and type-level structural eq/hash kind with the C layer.
@@ -483,13 +514,16 @@ def _flush_pending() -> None:
 def _raise_unresolved_forward_reference(cls: type, globalns: dict[str, Any]) -> None:
     """Raise :class:`TypeError` listing the annotations that cannot be resolved."""
     localns = _build_localns(cls, cross_module=True)
+    owners = _field_owner_classes(cls)
+    localns.update({owner.__name__: owner for owner in owners})
     unresolved: list[str] = []
-    for name, ann_str in getattr(cls, "__annotations__", {}).items():
-        if isinstance(ann_str, str):
-            try:
-                eval(ann_str, globalns, localns)
-            except NameError:
-                unresolved.append(f"{name}: {ann_str}")
+    for owner in owners:
+        for name, ann_str in _own_annotations(owner).items():
+            if isinstance(ann_str, str):
+                try:
+                    eval(ann_str, globalns, localns)
+                except NameError:
+                    unresolved.append(f"{name}: {ann_str}")
     raise TypeError(
         f"Cannot instantiate {cls.__name__}: unresolved forward references: {unresolved}"
     )
