@@ -1,0 +1,324 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+/*!
+ * \file orcjit_slab.h
+ * \brief Single contiguous-VA region + dual-pool bump allocator.
+ *
+ * A `Slab` owns one `mmap(PROT_NONE)` reservation of fixed capacity and
+ * bump-allocates from it, keeping all JIT allocations within range of
+ * PC-relative relocations (±2 GB on x86_64, ±4 GB on AArch64).
+ *
+ * The `Slab` is the unit-of-VA-reservation for the OrcJIT memory manager.
+ * Today it is used as a single-slab arena owned by
+ * `ArenaJITLinkMemoryManager`. Stage B of the refactor will introduce a
+ * `SlabPoolMemoryManager` that holds multiple Slabs and grows by mmap-ing
+ * new ones on demand.
+ *
+ * ## Page commit + Transparent Huge Page (THP) support
+ *
+ * Pages are committed in 2 MB chunks (`kCommitGranularity`) — the 2 MB
+ * size matches the Linux huge-page granule on both x86_64 and AArch64,
+ * enabling THP promotion via `madvise(MADV_HUGEPAGE)` on the full
+ * reservation. Each 2 MB commit-chunk is `mprotect`-ed to RW exactly once
+ * via an atomic bitmap flag (`committed_`), avoiding lock contention with
+ * the per-pool allocator mutex.
+ *
+ * ## Dual-pool exec / non-exec split
+ *
+ * The slab is partitioned at a 2 MB-aligned `midpoint_` into two bump
+ * pools:
+ *
+ *   non-exec pool  = [base,           base + midpoint_                     )
+ *   exec pool      = [base + midpoint_, base + exec_bump_limit_           )
+ *
+ * Both pools grow upward; cross-pool displacements (.text → .rodata etc.)
+ * must fit in ±`kPCRelReach` — we cap `exec_bump_limit_` at that reach
+ * even when the VA reservation is larger.
+ */
+#ifndef TVM_FFI_ORCJIT_ORCJIT_SLAB_H_
+#define TVM_FFI_ORCJIT_ORCJIT_SLAB_H_
+
+#include <llvm/ExecutionEngine/JITLink/JITLinkMemoryManager.h>
+#include <llvm/ExecutionEngine/Orc/Shared/AllocationActions.h>
+#include <llvm/ExecutionEngine/Orc/Shared/MemoryFlags.h>
+#include <llvm/Support/Error.h>
+
+#include <atomic>
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <mutex>
+#include <vector>
+
+namespace tvm {
+namespace ffi {
+namespace orcjit {
+
+class Slab;  // forward-declared for FinalizedAllocInfo.
+
+/*!
+ * \brief Retriable "slab is out of room for this graph" error.
+ *
+ * Raised from `Slab::bumpAllocate` when the requested bytes would
+ * overflow the pool bump cursor (and no free-list region fits).
+ * `SlabPoolMemoryManager::allocate` catches this error type
+ * specifically, consumes it, and retries on the next slab — or
+ * creates a new one.
+ *
+ * All other `Slab::allocate` failures (mmap, mprotect, JITLink) stay
+ * as `StringError` / `JITLinkError` and are propagated to the caller
+ * without retry.
+ */
+class SlabPoolExhaustedError : public llvm::ErrorInfo<SlabPoolExhaustedError> {
+ public:
+  static char ID;
+  SlabPoolExhaustedError(const char* pool, std::size_t used, std::size_t requested,
+                         std::size_t limit);
+  void log(llvm::raw_ostream& os) const override;
+  std::error_code convertToErrorCode() const override;
+
+ private:
+  const char* pool_;
+  std::size_t used_;
+  std::size_t requested_;
+  std::size_t limit_;
+};
+
+/*!
+ * \brief Metadata for a finalized allocation, stored via FinalizedAlloc
+ *        handle.
+ *
+ * Each allocate() call may consume a region from either or both pools.
+ * Standard-lifetime pages remain committed after finalize();
+ * Finalize-lifetime pages are decommitted at the end of finalize().
+ * Zero-sized sub-regions indicate no allocation from that pool.
+ *
+ * \p owner points to the Slab that handed out this allocation.  With one
+ * slab per session today this is redundant, but stamping it now makes
+ * Stage B's pool-manager routing O(1) without address comparison.
+ */
+struct FinalizedAllocInfo {
+  Slab* owner;                  ///< Slab that owns these offsets.
+  std::size_t non_exec_offset;  ///< offset of non-exec Standard region (or 0 if unused).
+  std::size_t non_exec_standard_size;
+  std::size_t exec_offset;  ///< offset of exec Standard region (or midpoint_ if unused).
+  std::size_t exec_standard_size;
+  std::vector<llvm::orc::shared::WrapperFunctionCall> DeallocActions;
+  struct OverflowBlock {
+    void* addr;               ///< separately-mmap'd base (outside the slab).
+    std::size_t size;         ///< mapping size (page-aligned).
+    llvm::orc::MemProt prot;  ///< target protection for finalize.
+  };
+  std::vector<OverflowBlock> overflow_blocks;
+};
+
+/*!
+ * \brief One contiguous JIT memory reservation.
+ *
+ * Exposes the per-graph `allocate` entry point (matching
+ * `JITLinkMemoryManager::allocate`'s callback signature) and the
+ * per-FinalizedAlloc `deallocateOne` used by the outer memory manager to
+ * route deallocation.
+ */
+class Slab {
+ public:
+  // Commit / THP granularity.  Every 2 MB chunk is mprotect'd RW exactly
+  // once via `committed_`; `madvise(MADV_HUGEPAGE)` can then promote a
+  // fully-faulted chunk into a single huge page.
+  static constexpr std::size_t kCommitGranularity = std::size_t{2} << 20;  // 2 MB
+
+  // PC-relative relocation reach (tightest binding fixup).  Cross-pool
+  // references must fit in a signed 32-bit displacement.  The binding
+  // constraint on both x86_64 and aarch64 is the signed 32-bit Delta32
+  // used in .eh_frame unwind records (±2 GB), not the wider ADRP+ADD /
+  // RIP-rel reach.  `exec_bump_limit_` is capped at this reach so
+  // cross-pool Delta32 fixups always resolve.
+  static constexpr std::size_t kPCRelReach = (std::size_t{1} << 31) - kCommitGranularity;  // ~2 GB
+
+  // Fraction of the slab reserved for non-exec segments (r--, rw-).  The
+  // remainder holds exec (r-x).  Typical CUDA binding objects: ~2 parts
+  // rodata+data to 1 part text.
+  static constexpr double kDefaultNonExecFraction = 2.0 / 3.0;
+
+  /*! \brief Construct a Slab and reserve \p capacity bytes of VA.
+   *
+   *  On reservation failure, returns with \c base() == nullptr — the
+   *  caller is expected to retry at a smaller capacity or
+   *  \c report_fatal_error.
+   */
+  Slab(std::size_t page_size, std::size_t capacity);
+
+  ~Slab();
+
+  Slab(const Slab&) = delete;
+  Slab& operator=(const Slab&) = delete;
+  Slab(Slab&&) = delete;
+  Slab& operator=(Slab&&) = delete;
+
+  /*! \brief True iff the reservation succeeded. */
+  bool isValid() const noexcept { return arena_base_ != nullptr; }
+
+  /*!
+   * \brief Page-aligned per-pool byte totals for a LinkGraph.
+   *
+   * Does not include sections routed to the overflow (separate-mmap)
+   * path.  `SlabPoolMemoryManager` uses this to size a fresh slab —
+   * see `capacityForFootprint`.
+   */
+  struct GraphFootprint {
+    std::size_t non_exec;
+    std::size_t exec;
+    std::size_t total() const noexcept { return non_exec + exec; }
+  };
+
+  /*!
+   * \brief Compute pool footprint for \p G without mutating bookkeeping.
+   *
+   * Temporarily reclassifies overflow-section lifetimes while a
+   * `BasicLayout` is built, then restores them — same prefix as
+   * `allocate()`.  Safe to call repeatedly; no state is retained.
+   */
+  static GraphFootprint computeGraphFootprint(llvm::jitlink::LinkGraph& G, std::size_t page_size);
+
+  /*!
+   * \brief Power-of-2 capacity that fits \p fp in both pools.
+   *
+   * Starts at \p base_size (the pool's nominal slab size) and doubles
+   * until the Slab split formula yields per-pool budgets ≥ \p fp.  The
+   * returned value, when fed back to the Slab ctor, produces a slab
+   * whose non-exec and exec pools are both large enough to host the
+   * graph — no separate "oversize path" needed at the pool layer.
+   *
+   * Stops doubling once the capacity reaches \c kPCRelReach : beyond
+   * that point \c exec_bump_limit_ saturates, so the budgets no longer
+   * grow with VA.  For truly gigantic graphs the caller will observe a
+   * subsequent \c Slab::allocate failure — rare in practice because
+   * per-pool budgets at the plateau are ~1.3 GB / ~0.7 GB.
+   */
+  static std::size_t capacityForFootprint(GraphFootprint fp, std::size_t base_size);
+
+  /*! \brief Single-graph JIT allocation entry point. */
+  void allocate(llvm::jitlink::LinkGraph& G,
+                llvm::jitlink::JITLinkMemoryManager::OnAllocatedFunction OnAllocated);
+
+  /*! \brief Per-FA teardown: run DeallocActions, free pool regions,
+   *         release overflow blocks. Caller deletes the FA afterwards.
+   *
+   *  Errors are joined into \p err_out; never throws.
+   */
+  void deallocateOne(FinalizedAllocInfo* FA, llvm::Error& err_out);
+
+  /*! \brief Address-range ownership check. */
+  bool contains(const void* addr) const noexcept {
+    auto* p = static_cast<const char*>(addr);
+    return p >= arena_base_ && p < arena_base_ + arena_capacity_;
+  }
+
+  char* base() const noexcept { return arena_base_; }
+  std::size_t capacity() const noexcept { return arena_capacity_; }
+  std::size_t page_size() const noexcept { return page_size_; }
+
+  /*!
+   * \brief Record that a new FinalizedAlloc was published from this slab.
+   *        Called by `InFlightAlloc::finalize` just before returning the
+   *        FinalizedAlloc handle to the caller.
+   */
+  void noteAllocated() noexcept {
+    live_count_.fetch_add(1, std::memory_order_relaxed);
+    ever_used_.store(true, std::memory_order_release);
+  }
+
+  /*!
+   * \brief Record that a FinalizedAlloc on this slab has been released.
+   *        Called by `deallocateOne` after the region is returned to the
+   *        free list and DeallocActions have run.
+   */
+  void noteDeallocated() noexcept { live_count_.fetch_sub(1, std::memory_order_acq_rel); }
+
+  /*!
+   * \brief True iff this slab has ever hosted a FinalizedAlloc and
+   *        currently has zero live ones.
+   *
+   *  Used by `SlabPoolMemoryManager::clearFreeSlabs` to decide which
+   *  slabs can be munmap'd.  A fresh slab that has never been used is
+   *  *not* reclaimable — the caller still expects to allocate on it.
+   */
+  bool isReclaimable() const noexcept {
+    return ever_used_.load(std::memory_order_acquire) &&
+           live_count_.load(std::memory_order_acquire) == 0;
+  }
+
+ private:
+  class InFlightAlloc;  // defined in orcjit_slab.cc
+
+  /*! \brief Bump-allocate from the selected pool.  Returns offset within
+   *         the slab's VA reservation. */
+  llvm::Expected<std::size_t> bumpAllocate(std::size_t size, bool is_exec);
+
+  /*! \brief Return a region to the appropriate free list.  Pool is
+   *         identified by comparing offset against midpoint_. */
+  void freeRegion(std::size_t offset, std::size_t size);
+
+  // ── Platform abstraction (all implemented in orcjit_slab.cc) ──
+  static void* reserveVA(std::size_t size);
+  static void releaseVA(void* addr, std::size_t size);
+  llvm::Error commitPages(void* addr, std::size_t size);
+  static void decommitPages(void* addr, std::size_t size);
+  static llvm::Error protectPages(void* addr, std::size_t size, llvm::orc::MemProt Prot);
+
+  char* arena_base_;
+  std::size_t arena_capacity_;
+  std::size_t page_size_;
+
+  // Dual-pool split.  See class docstring.
+  std::size_t midpoint_;
+  std::size_t exec_bump_limit_;
+
+  std::mutex mu_;
+  std::size_t non_exec_bump_;  // next free offset in non-exec pool ∈ [0, midpoint_]
+  std::size_t exec_bump_;      // next free offset in exec pool     ∈ [midpoint_, exec_bump_limit_]
+
+  struct FreeBlock {
+    std::size_t offset;
+    std::size_t size;
+  };
+  std::vector<FreeBlock> free_list_non_exec_;
+  std::vector<FreeBlock> free_list_exec_;
+
+  /*! \brief Per-commit-chunk flags (0 = uncommitted, 1 = committed).
+   *         Lock-free: each chunk is mprotect'd exactly once via
+   *         compare_exchange. */
+  std::unique_ptr<std::atomic<std::uint8_t>[]> committed_;
+  std::size_t num_commit_chunks_ = 0;
+
+  /*! \brief Count of live FinalizedAllocs held on this slab. */
+  std::atomic<std::size_t> live_count_{0};
+
+  /*! \brief Becomes true on the first `noteAllocated` call; never reset.
+   *         A slab that has never been used is not a reclaim candidate
+   *         (callers may still plan to allocate on it). */
+  std::atomic<bool> ever_used_{false};
+};
+
+}  // namespace orcjit
+}  // namespace ffi
+}  // namespace tvm
+
+#endif  // TVM_FFI_ORCJIT_ORCJIT_SLAB_H_

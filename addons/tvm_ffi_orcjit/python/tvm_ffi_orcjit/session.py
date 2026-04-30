@@ -60,25 +60,34 @@ class ExecutionSession(Object):
 
     """
 
-    def __init__(self, orc_rt_path: str | None = None, arena_size: int = 0) -> None:
+    def __init__(self, orc_rt_path: str | None = None, slab_size: int = 0) -> None:
         """Initialize ExecutionSession.
 
         Args:
             orc_rt_path: Optional path to the liborc_rt library. If not provided,
                         it will be automatically discovered using clang.
-            arena_size: Arena size in bytes for the JIT memory manager.
-                        Linux only — ignored on macOS and Windows, where the
-                        arena is compiled out.
-                        0 = arch default (4GB x86_64, 8GB AArch64; falls back to
-                        smaller sizes under RLIMIT_AS), >0 = custom size,
-                        <0 = disable arena.
+            slab_size: Per-slab capacity in bytes for the JIT memory manager.
+                       Linux only — ignored on macOS and Windows, where the
+                       slab allocator is compiled out.
+                       0 = arch default (64 MB; initial slab halves on mmap
+                       failure down to 8 MB under RLIMIT_AS / container
+                       limits), >0 = custom size, <0 = disable slab allocator
+                       (LLJIT uses its default scattered-mmap allocator).
+
+                       The session holds a growable pool of slabs: a fresh
+                       slab is mmap'd on demand when no existing one can fit
+                       a graph. Graphs that don't fit a normal slab trigger
+                       a power-of-2 larger slab (slab_size, 2*slab_size, ...)
+                       sized to fit. Drained slabs stay mapped until the
+                       session is destroyed or ``clear_free_slabs()`` is
+                       called.
 
         """
         if orc_rt_path is None:
             orc_rt_path = _find_orc_rt_library()
             if orc_rt_path is None:
                 orc_rt_path = ""
-        self.__init_handle_by_constructor__(_ffi_api.ExecutionSession, orc_rt_path, arena_size)  # type: ignore
+        self.__init_handle_by_constructor__(_ffi_api.ExecutionSession, orc_rt_path, slab_size)  # type: ignore
 
     def create_library(self, name: str = "") -> DynamicLibrary:
         """Create a new dynamic library associated with this execution session.
@@ -94,3 +103,23 @@ class ExecutionSession(Object):
         lib = DynamicLibrary.__new__(DynamicLibrary)
         lib.__move_handle_from__(handle)
         return lib
+
+    def clear_free_slabs(self) -> int:
+        """Release drained slabs (no live JIT allocations) back to the OS.
+
+        Call this after dropping a batch of libraries to reclaim RSS.
+        Fresh slabs that have never been allocated on are preserved, so
+        the session remains ready to accept new work.
+
+        Safety: call when no JIT work is in flight on another thread. From
+        single-threaded Python this is always safe; once ``del lib`` has
+        returned, the C++ destructor has finished and the slab's live count
+        reflects the drop.
+
+        Returns:
+            Number of slabs actually munmap'd. Returns 0 on macOS/Windows
+            (slab pool compiled out) or when the pool is disabled via
+            ``slab_size=-1``.
+
+        """
+        return int(_ffi_api.ExecutionSessionClearFreeSlabs(self))  # type: ignore

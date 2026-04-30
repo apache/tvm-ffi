@@ -14,7 +14,7 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-"""Tests for JIT memory arena — verifies co-location and relocation safety.
+"""Tests for JIT memory manager — verifies co-location and relocation safety.
 
 Background
 ----------
@@ -40,11 +40,13 @@ This matters for **PC-relative relocations with limited range**:
   calls use ADRP (page-relative) which has the same scatter problem
   at a wider threshold.
 
-The **arena memory manager** solves this by pre-reserving a contiguous
-VA region (default 4 GB x86_64 / 8 GB AArch64, with fallback to smaller
-sizes) via ``mmap(PROT_NONE)`` and bump-allocating within it, guaranteeing
-all JIT allocations stay within relocation range regardless of external
-VA pressure.
+Our ``SlabPoolMemoryManager`` solves this by pre-reserving one or more
+contiguous VA slabs via ``mmap(PROT_NONE)`` and bump-allocating within
+them, guaranteeing allocations that land on the same slab stay within
+relocation range regardless of external VA pressure.  These tests pin
+``slab_size`` large enough that every graph they exercise fits on the
+initial slab, so the "co-located within one slab" property becomes
+observable end-to-end.
 
 Note on ``-fPIC`` vs ``-fpie``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -59,22 +61,24 @@ problematic relocation type.
 
 Test structure
 --------------
-1. **Co-location** (test 1): arena keeps objects within 16 MB.
-2. **Scatter baseline** (test 2): without arena, VA blocker pushes
-   objects >128 MB apart — proves arena is responsible for co-location.
+1. **Co-location** (test 1): a single slab keeps objects within its
+   size.
+2. **Scatter baseline** (test 2): with the slab pool disabled, a VA
+   blocker pushes objects far apart — proves the slab pool is
+   responsible for co-location.
 3. **Hidden-symbol calls** (test 3): ADRP/PC32 cross-object calls
-   succeed under VA pressure with arena.
+   succeed under VA pressure with a slab.
 4. **Large data section** (test 4): 4 MB ``.nv_fatbin`` section loads
-   correctly within the arena.
+   correctly within the slab.
 5. **Overflow section** (test 5): ``.nv_fatbin`` data is allocated
-   outside the arena via separate mmap.
+   outside the slab via separate mmap.
 6. **Leaked materialization** (test 6): ``__dso_handle`` resolves after
    prior sessions leaked mmap slabs from failed materializations.
 7. **Delta32 overflow** (test 7): ``-fpie`` GCC objects + 3 GB VA
-   blocker.  With arena → PASSES; without arena → Delta32 overflow.
+   blocker.  With the slab pool → PASSES; without → Delta32 overflow.
 
-All tests use a small arena (16 MB) and 256 MB-3 GB VA blockers -- safe
-for CI containers.
+All tests use a 256 MB slab and 256 MB-3 GB VA blockers — safe for CI
+containers.
 """
 
 from __future__ import annotations
@@ -170,8 +174,15 @@ _all_variants = _c_variants + _cpp_variants
 _is_linux = sys.platform == "linux"
 _is_x86_64 = platform.machine() in ("x86_64", "AMD64")
 
-# Arena test parameters
-_ARENA_SIZE = 16 * 1024 * 1024  # 16MB — small arena for testing
+# Slab test parameters.
+#
+# Under the slab-pool design, `slab_size` is the per-slab capacity — each
+# allocation that exceeds what an existing slab can hold spawns a new one.
+# These tests assert single-slab invariants (objects within slab_size,
+# one contiguous VA region), so `_SLAB_SIZE` must be large enough that
+# every graph we load fits in the first slab.  256 MB comfortably covers
+# the test objects (all < 5 MB each) plus their overhead.
+_SLAB_SIZE = 256 * 1024 * 1024  # 256MB — single-slab headroom for these tests
 _BLOCK_RADIUS = 256 * 1024 * 1024  # 256MB — safe for CI containers
 _DSO_BLOCK_RADIUS = 3 * 1024 * 1024 * 1024  # 3GB — needed to overflow PC32 (±2GB)
 
@@ -262,22 +273,22 @@ def free_blockers(blockers: list[tuple[int, int]]) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Test 1: Arena co-location — objects stay within arena range
+# Test 1: Slab co-location — objects stay within slab range
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skipif(not _is_linux, reason="Arena is Linux-only")
+@pytest.mark.skipif(not _is_linux, reason="Slab is Linux-only")
 @pytest.mark.parametrize("variant", _all_variants)
-def test_arena_colocation(variant: str) -> None:
-    """With arena, objects in separate libraries have close code addresses.
+def test_slab_colocation(variant: str) -> None:
+    """With slab, objects in separate libraries have close code addresses.
 
-    Uses a 16MB arena and inserts a 256MB VA blocker between object loads.
-    Without the arena, the blocker would push the second object far away.
-    With the arena, both objects land within the 16MB region.
+    Uses a 16MB slab and inserts a 256MB VA blocker between object loads.
+    Without the slab, the blocker would push the second object far away.
+    With the slab, both objects land within the 16MB region.
     """
     maps_before = set(_parse_maps())
 
-    session = ExecutionSession(arena_size=_ARENA_SIZE)
+    session = ExecutionSession(slab_size=_SLAB_SIZE)
     lib1 = session.create_library("lib1")
     lib1.add(obj(f"{variant}/test_addr"))
     addr1 = lib1.get_function("code_address")()
@@ -296,19 +307,19 @@ def test_arena_colocation(variant: str) -> None:
         free_blockers(blockers)
 
     distance = abs(addr1 - addr2)
-    assert distance < _ARENA_SIZE, (
-        f"Objects should be within {_ARENA_SIZE} bytes, "
+    assert distance < _SLAB_SIZE, (
+        f"Objects should be within {_SLAB_SIZE} bytes, "
         f"but distance is {distance} ({distance / (1024**2):.1f} MB)"
     )
 
 
 # ---------------------------------------------------------------------------
-# Test 2: Arena effect — compare with-arena vs without-arena under VA pressure
+# Test 2: Slab effect — compare with-slab vs without-slab under VA pressure
 # ---------------------------------------------------------------------------
 
 
 def _measure_distance_under_pressure(
-    variant: str, arena_size: int, radius: int = _BLOCK_RADIUS
+    variant: str, slab_size: int, radius: int = _BLOCK_RADIUS
 ) -> tuple[int | None, bool]:
     """Load two objects under VA pressure and return (distance, overflowed).
 
@@ -318,7 +329,7 @@ def _measure_distance_under_pressure(
     """
     maps_before = set(_parse_maps())
 
-    session = ExecutionSession(arena_size=arena_size)
+    session = ExecutionSession(slab_size=slab_size)
     lib1 = session.create_library("lib1")
     lib1.add(obj(f"{variant}/test_addr"))
     addr1 = lib1.get_function("code_address")()
@@ -341,74 +352,74 @@ def _measure_distance_under_pressure(
     return abs(addr1 - addr2), False
 
 
-@pytest.mark.skipif(not _is_linux, reason="Arena is Linux-only")
+@pytest.mark.skipif(not _is_linux, reason="Slab is Linux-only")
 @pytest.mark.parametrize("variant", _all_variants)
-def test_arena_keeps_objects_close(variant: str) -> None:
-    """Arena co-locates objects that would otherwise scatter or overflow.
+def test_slab_keeps_objects_close(variant: str) -> None:
+    """Slab co-locates objects that would otherwise scatter or overflow.
 
     Runs the same workload twice under identical VA pressure — once with
-    the arena and once without — and compares the outcomes:
+    the slab and once without — and compares the outcomes:
 
-    - **With arena**: both objects must land within the arena size (16 MB).
-    - **Without arena**: the blocker should either cause a relocation
+    - **With slab**: both objects must land within the slab size (16 MB).
+    - **Without slab**: the blocker should either cause a relocation
       overflow (proving scatter beyond relocation range) or produce a
       measurably larger distance.
 
-    The test proves the arena is responsible for co-location by showing a
+    The test proves the slab is responsible for co-location by showing a
     strictly better outcome with it enabled.  If the VA blocker happens to
     be ineffective (e.g., LLVM slab reuse on 64k-page kernels), the test
-    still passes as long as the arena keeps objects within range.
+    still passes as long as the slab keeps objects within range.
     """
-    # Phase 1: with arena — must always succeed and be within arena range
-    arena_dist, arena_overflow = _measure_distance_under_pressure(variant, arena_size=_ARENA_SIZE)
-    assert not arena_overflow, "Arena session should not overflow"
-    assert arena_dist is not None
-    assert arena_dist < _ARENA_SIZE, (
-        f"With arena, objects should be within {_ARENA_SIZE} bytes, "
-        f"but distance is {arena_dist} ({arena_dist / (1024**2):.1f} MB)"
+    # Phase 1: with slab — must always succeed and be within slab range
+    slab_dist, slab_overflow = _measure_distance_under_pressure(variant, slab_size=_SLAB_SIZE)
+    assert not slab_overflow, "Slab session should not overflow"
+    assert slab_dist is not None
+    assert slab_dist < _SLAB_SIZE, (
+        f"With slab, objects should be within {_SLAB_SIZE} bytes, "
+        f"but distance is {slab_dist} ({slab_dist / (1024**2):.1f} MB)"
     )
 
-    # Phase 2: without arena — expect scatter or overflow
-    no_arena_dist, no_arena_overflow = _measure_distance_under_pressure(variant, arena_size=-1)
+    # Phase 2: without slab — expect scatter or overflow
+    no_slab_dist, no_slab_overflow = _measure_distance_under_pressure(variant, slab_size=-1)
 
-    if no_arena_overflow:
-        # Relocation overflow without arena proves the blocker forced
-        # scatter beyond relocation range — arena prevented this.
+    if no_slab_overflow:
+        # Relocation overflow without slab proves the blocker forced
+        # scatter beyond relocation range — slab prevented this.
         return
 
-    assert no_arena_dist is not None
-    if no_arena_dist > arena_dist:
-        # Without arena produced a larger distance — arena effect shown.
+    assert no_slab_dist is not None
+    if no_slab_dist > slab_dist:
+        # Without slab produced a larger distance — slab effect shown.
         return
 
-    # Blocker was ineffective (both distances are small).  The arena
+    # Blocker was ineffective (both distances are small).  The slab
     # assertion above already passed, which is the key property.  We
-    # cannot distinguish arena effect from lucky placement here.
+    # cannot distinguish slab effect from lucky placement here.
     pytest.skip(
-        f"VA blocker ineffective: arena={arena_dist / 1024:.0f} KB, "
-        f"no-arena={no_arena_dist / 1024:.0f} KB — "
-        f"cannot demonstrate arena effect on this kernel"
+        f"VA blocker ineffective: slab={slab_dist / 1024:.0f} KB, "
+        f"no-slab={no_slab_dist / 1024:.0f} KB — "
+        f"cannot demonstrate slab effect on this kernel"
     )
 
 
 # ---------------------------------------------------------------------------
-# Test 3: Hidden-symbol ADRP/PC32 relocation with arena + blocker
+# Test 3: Hidden-symbol ADRP/PC32 relocation with slab + blocker
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skipif(not _is_linux, reason="Arena is Linux-only")
+@pytest.mark.skipif(not _is_linux, reason="Slab is Linux-only")
 @pytest.mark.parametrize("variant", _all_variants)
-def test_arena_hidden_symbol_with_blocker(variant: str) -> None:
-    """Arena prevents hidden-visibility relocation overflow under VA pressure.
+def test_slab_hidden_symbol_with_blocker(variant: str) -> None:
+    """Slab prevents hidden-visibility relocation overflow under VA pressure.
 
     Loads two objects with hidden-visibility cross-references (ADRP+ADD
     on AArch64, PC32 on x86_64) with a VA blocker between them.
-    Without arena, the blocker would push objects apart causing overflow.
-    With the arena, both objects are co-located and the call succeeds.
+    Without slab, the blocker would push objects apart causing overflow.
+    With the slab, both objects are co-located and the call succeeds.
     """
     maps_before = set(_parse_maps())
 
-    session = ExecutionSession(arena_size=_ARENA_SIZE)
+    session = ExecutionSession(slab_size=_SLAB_SIZE)
     lib = session.create_library("hidden_test")
 
     # Load helper and force materialization
@@ -434,14 +445,14 @@ def test_arena_hidden_symbol_with_blocker(variant: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skipif(not _is_linux, reason="Arena is Linux-only")
+@pytest.mark.skipif(not _is_linux, reason="Slab is Linux-only")
 @pytest.mark.parametrize("variant", _all_variants)
 def test_large_data_section(variant: str) -> None:
     """Load object with a 4MB .nv_fatbin section — basic correctness.
 
     The .nv_fatbin section is referenced only by absolute relocations,
     so it can live anywhere.  This test verifies the object loads and
-    the function works.  The 4MB section fits in the arena.
+    the function works.  The 4MB section fits in the slab.
     """
     session = ExecutionSession()
     lib = session.create_library("fatbin")
@@ -451,25 +462,25 @@ def test_large_data_section(variant: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Test 5: Overflow section — .nv_fatbin lands outside the arena
+# Test 5: Overflow section — .nv_fatbin lands outside the slab
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skipif(not _is_linux, reason="Arena is Linux-only")
+@pytest.mark.skipif(not _is_linux, reason="Slab is Linux-only")
 @pytest.mark.parametrize("variant", _all_variants)
-def test_overflow_section_outside_arena(variant: str) -> None:
-    """Overflow sections (.nv_fatbin) are allocated outside the arena.
+def test_overflow_section_outside_slab(variant: str) -> None:
+    """Overflow sections (.nv_fatbin) are allocated outside the slab.
 
-    The arena memory manager detects sections named .nv_fatbin and
-    allocates them via a separate mmap() outside the arena.  This keeps
-    the arena compact for code + small rodata, reducing 2MB THP region
+    The slab memory manager detects sections named .nv_fatbin and
+    allocates them via a separate mmap() outside the slab.  This keeps
+    the slab compact for code + small rodata, reducing 2MB THP region
     count and iTLB pressure.
 
-    Verification: get the fatbin data address and the arena VA range
+    Verification: get the fatbin data address and the slab VA range
     from /proc/self/maps, then assert the fatbin address is NOT within
-    the arena region.
+    the slab region.
     """
-    session = ExecutionSession(arena_size=_ARENA_SIZE)
+    session = ExecutionSession(slab_size=_SLAB_SIZE)
     lib = session.create_library("fatbin_overflow")
     lib.add(obj(f"{variant}/fake_fatbin"))
 
@@ -479,16 +490,16 @@ def test_overflow_section_outside_arena(variant: str) -> None:
     # Get the actual address of the fatbin data in memory.
     fatbin_addr = lib.get_function("get_fatbin_addr")()
 
-    # Find the arena mapping: a single large region matching the arena size.
-    # The arena is reserved as PROT_NONE and then committed in slabs, so
-    # look for the contiguous region that spans _ARENA_SIZE.
+    # Find the slab mapping: a single large region matching the slab size.
+    # The slab is reserved as PROT_NONE and then committed in slabs, so
+    # look for the contiguous region that spans _SLAB_SIZE.
     maps = _parse_maps()
-    arena_regions = [(s, e) for s, e in maps if (e - s) >= _ARENA_SIZE]
+    slab_regions = [(s, e) for s, e in maps if (e - s) >= _SLAB_SIZE]
 
-    # The fatbin address must not fall within any arena-sized region.
-    for start, end in arena_regions:
+    # The fatbin address must not fall within any slab-sized region.
+    for start, end in slab_regions:
         assert not (start <= fatbin_addr < end), (
-            f"Fatbin data at {fatbin_addr:#x} should be OUTSIDE the arena "
+            f"Fatbin data at {fatbin_addr:#x} should be OUTSIDE the slab "
             f"[{start:#x}, {end:#x}) but landed inside"
         )
 
@@ -520,14 +531,14 @@ def test_dso_handle_relocation_after_failed_materialization(variant: str) -> Non
     leaked slabs accumulate and push subsequent ``mmap`` allocations to
     higher addresses.
 
-    The arena prevents overflow because all allocations — both
+    The slab prevents overflow because all allocations — both
     ``__dso_handle``'s ``LinkGraph`` and the code ``LinkGraph`` — land
     within the same contiguous pre-reserved VA region.
 
-    Without arena: may FAIL on x86_64 with GCC PIE objects after
+    Without slab: may FAIL on x86_64 with GCC PIE objects after
                    repeated leaked materializations push slabs >2 GB
                    apart.
-    With arena:    PASSES (all allocations in same arena).
+    With slab:    PASSES (all allocations in same slab).
     """
     # Step 1: Trigger leaked materializations to consume low VA space.
     leaked_sessions = []
@@ -554,22 +565,22 @@ def test_dso_handle_relocation_after_failed_materialization(variant: str) -> Non
 
 
 # ---------------------------------------------------------------------------
-# Test 6: __dso_handle Delta32 overflow — arena prevents it (x86_64 PIE)
+# Test 6: __dso_handle Delta32 overflow — slab prevents it (x86_64 PIE)
 #
 # GCC -fpie objects use R_X86_64_PC32 (±2GB) for __dso_handle.
 # ELFNixPlatform's DSOHandleMaterializationUnit allocates __dso_handle
 # in a separate LinkGraph from the code.  Under VA pressure, these two
 # allocations can land >2GB apart, overflowing the Delta32 fixup.
-# The arena keeps them co-located within relocation range.
+# The slab keeps them co-located within relocation range.
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skipif(not _is_linux, reason="Arena is Linux-only")
+@pytest.mark.skipif(not _is_linux, reason="Slab is Linux-only")
 @pytest.mark.skipif(not _is_x86_64, reason="Delta32 overflow requires x86_64")
 @pytest.mark.skipif(not _pie_cpp_variants, reason="No GCC PIE C++ variants built")
 @pytest.mark.parametrize("variant", _pie_cpp_variants or ["skip"])
-def test_dso_handle_delta32_with_arena(variant: str) -> None:
-    """Arena prevents __dso_handle Delta32 overflow under VA pressure.
+def test_dso_handle_delta32_with_slab(variant: str) -> None:
+    """Slab prevents __dso_handle Delta32 overflow under VA pressure.
 
     Root cause
     ----------
@@ -589,22 +600,22 @@ def test_dso_handle_delta32_with_arena(variant: str) -> None:
 
     Test strategy
     -------------
-    1. Create a session with arena enabled (16 MB).
+    1. Create a session with slab enabled (16 MB).
     2. Load PIE GCC objects into lib1 — this triggers materialization of
        both ``__dso_handle`` (via ``DSOHandleMaterializationUnit``) and
-       the code (via ``lib.add``), all within the arena.
-    3. Block 3 GB of VA around the first allocation — without arena this
+       the code (via ``lib.add``), all within the slab.
+    3. Block 3 GB of VA around the first allocation — without slab this
        would force the next ``mmap`` to land >2 GB away.
-    4. Load a second PIE GCC object into lib2 — with arena, this still
+    4. Load a second PIE GCC object into lib2 — with slab, this still
        lands within the 16 MB region.
     5. Assert the function call succeeds — proves Delta32 is in range.
 
-    See ``test_dso_handle_delta32_overflow_without_arena`` for the
-    counterpart proving the overflow occurs without arena.
+    See ``test_dso_handle_delta32_overflow_without_slab`` for the
+    counterpart proving the overflow occurs without slab.
     """
     maps_before = set(_parse_maps())
 
-    session = ExecutionSession(arena_size=_ARENA_SIZE)
+    session = ExecutionSession(slab_size=_SLAB_SIZE)
     lib1 = session.create_library("lib1")
     lib1.add(obj(f"{variant}/test_funcs"))
     assert lib1.get_function("test_add")(10, 20) == 30
@@ -623,15 +634,15 @@ def test_dso_handle_delta32_with_arena(variant: str) -> None:
         free_blockers(blockers)
 
 
-@pytest.mark.skipif(not _is_linux, reason="Arena is Linux-only")
+@pytest.mark.skipif(not _is_linux, reason="Slab is Linux-only")
 @pytest.mark.skipif(not _is_x86_64, reason="Delta32 overflow requires x86_64")
 @pytest.mark.skipif(not _pie_cpp_variants, reason="No GCC PIE C++ variants built")
 @pytest.mark.parametrize("variant", _pie_cpp_variants or ["skip"])
-def test_dso_handle_delta32_overflow_without_arena(variant: str) -> None:
-    """Without arena, PIE __dso_handle PC32 overflows under VA pressure.
+def test_dso_handle_delta32_overflow_without_slab(variant: str) -> None:
+    """Without slab, PIE __dso_handle PC32 overflows under VA pressure.
 
-    Same setup as ``test_dso_handle_delta32_with_arena`` but with arena
-    disabled (``arena_size=-1``).
+    Same setup as ``test_dso_handle_delta32_with_slab`` but with slab
+    disabled (``slab_size=-1``).
 
     The 3 GB VA blocker fills all free gaps within ±3 GB of the first
     session's JIT allocations.  When lib2 is loaded, ``InProcessMemoryMapper``
@@ -643,14 +654,14 @@ def test_dso_handle_delta32_overflow_without_arena(variant: str) -> None:
     ±2 GB → JITLink reports ``Delta32 fixup ... is out of range``.
 
     The test accepts both outcomes:
-    - **Exception** (PC32 overflow): proves the arena is needed.
+    - **Exception** (PC32 overflow): proves the slab is needed.
     - **Success** (GOTPCRELX used): GCC chose GOT-relative despite
-      ``-fpie`` — no overflow possible, but the arena is still
+      ``-fpie`` — no overflow possible, but the slab is still
       beneficial for other relocation types.
     """
     maps_before = set(_parse_maps())
 
-    session = ExecutionSession(arena_size=-1)  # arena disabled
+    session = ExecutionSession(slab_size=-1)  # slab disabled
     lib1 = session.create_library("lib1")
     lib1.add(obj(f"{variant}/test_addr"))
     lib1.get_function("code_address")()
@@ -668,7 +679,7 @@ def test_dso_handle_delta32_overflow_without_arena(variant: str) -> None:
             # If we get here, GCC used GOTPCRELX — no overflow.
             assert result == 1030
         except Exception:
-            # R_X86_64_PC32 overflow as expected — proves arena is needed.
+            # R_X86_64_PC32 overflow as expected — proves slab is needed.
             pass
     finally:
         free_blockers(blockers)
