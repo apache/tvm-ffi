@@ -76,9 +76,11 @@ class ExecutionSession(Object):
 
                        The session holds a growable pool of slabs: a fresh
                        slab is mmap'd on demand when no existing one can fit
-                       a graph, and graphs larger than slab_size go to a
-                       dedicated oversize slab sized to fit. Drained slabs
-                       stay mapped until the session is destroyed.
+                       a graph. Graphs that don't fit a normal slab trigger
+                       a power-of-2 larger slab (slab_size, 2*slab_size, ...)
+                       sized to fit. Drained slabs stay mapped until the
+                       session is destroyed or ``clear_free_slabs()`` is
+                       called.
 
         """
         if orc_rt_path is None:

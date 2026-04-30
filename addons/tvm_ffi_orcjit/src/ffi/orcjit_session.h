@@ -147,8 +147,7 @@ class ORCJITExecutionSession : public ObjectRef {
    * \brief Create a new ExecutionSession
    * \return The created execution session instance
    */
-  explicit ORCJITExecutionSession(const std::string& orc_rt_path = "",
-                                  int64_t slab_size_bytes = 0);
+  explicit ORCJITExecutionSession(const std::string& orc_rt_path = "", int64_t slab_size_bytes = 0);
   // Required: define object reference methods
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(ORCJITExecutionSession, ObjectRef,
                                                 ORCJITExecutionSessionObj);

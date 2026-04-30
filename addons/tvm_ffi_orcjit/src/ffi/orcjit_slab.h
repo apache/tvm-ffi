@@ -115,16 +115,16 @@ class SlabPoolExhaustedError : public llvm::ErrorInfo<SlabPoolExhaustedError> {
  * Stage B's pool-manager routing O(1) without address comparison.
  */
 struct FinalizedAllocInfo {
-  Slab* owner;                    ///< Slab that owns these offsets.
-  std::size_t non_exec_offset;    ///< offset of non-exec Standard region (or 0 if unused).
+  Slab* owner;                  ///< Slab that owns these offsets.
+  std::size_t non_exec_offset;  ///< offset of non-exec Standard region (or 0 if unused).
   std::size_t non_exec_standard_size;
-  std::size_t exec_offset;        ///< offset of exec Standard region (or midpoint_ if unused).
+  std::size_t exec_offset;  ///< offset of exec Standard region (or midpoint_ if unused).
   std::size_t exec_standard_size;
   std::vector<llvm::orc::shared::WrapperFunctionCall> DeallocActions;
   struct OverflowBlock {
-    void* addr;                   ///< separately-mmap'd base (outside the slab).
-    std::size_t size;             ///< mapping size (page-aligned).
-    llvm::orc::MemProt prot;      ///< target protection for finalize.
+    void* addr;               ///< separately-mmap'd base (outside the slab).
+    std::size_t size;         ///< mapping size (page-aligned).
+    llvm::orc::MemProt prot;  ///< target protection for finalize.
   };
   std::vector<OverflowBlock> overflow_blocks;
 };
@@ -150,8 +150,7 @@ class Slab {
   // used in .eh_frame unwind records (±2 GB), not the wider ADRP+ADD /
   // RIP-rel reach.  `exec_bump_limit_` is capped at this reach so
   // cross-pool Delta32 fixups always resolve.
-  static constexpr std::size_t kPCRelReach =
-      (std::size_t{1} << 31) - kCommitGranularity;  // ~2 GB
+  static constexpr std::size_t kPCRelReach = (std::size_t{1} << 31) - kCommitGranularity;  // ~2 GB
 
   // Fraction of the slab reserved for non-exec segments (r--, rw-).  The
   // remainder holds exec (r-x).  Typical CUDA binding objects: ~2 parts
@@ -180,8 +179,8 @@ class Slab {
    * \brief Page-aligned per-pool byte totals for a LinkGraph.
    *
    * Does not include sections routed to the overflow (separate-mmap)
-   * path.  `SlabPoolMemoryManager` uses this to decide whether a graph
-   * fits a normal slab or needs the oversize path.
+   * path.  `SlabPoolMemoryManager` uses this to size a fresh slab —
+   * see `capacityForFootprint`.
    */
   struct GraphFootprint {
     std::size_t non_exec;
@@ -196,8 +195,24 @@ class Slab {
    * `BasicLayout` is built, then restores them — same prefix as
    * `allocate()`.  Safe to call repeatedly; no state is retained.
    */
-  static GraphFootprint computeGraphFootprint(llvm::jitlink::LinkGraph& G,
-                                              std::size_t page_size);
+  static GraphFootprint computeGraphFootprint(llvm::jitlink::LinkGraph& G, std::size_t page_size);
+
+  /*!
+   * \brief Power-of-2 capacity that fits \p fp in both pools.
+   *
+   * Starts at \p base_size (the pool's nominal slab size) and doubles
+   * until the Slab split formula yields per-pool budgets ≥ \p fp.  The
+   * returned value, when fed back to the Slab ctor, produces a slab
+   * whose non-exec and exec pools are both large enough to host the
+   * graph — no separate "oversize path" needed at the pool layer.
+   *
+   * Stops doubling once the capacity reaches \c kPCRelReach : beyond
+   * that point \c exec_bump_limit_ saturates, so the budgets no longer
+   * grow with VA.  For truly gigantic graphs the caller will observe a
+   * subsequent \c Slab::allocate failure — rare in practice because
+   * per-pool budgets at the plateau are ~1.3 GB / ~0.7 GB.
+   */
+  static std::size_t capacityForFootprint(GraphFootprint fp, std::size_t base_size);
 
   /*! \brief Single-graph JIT allocation entry point. */
   void allocate(llvm::jitlink::LinkGraph& G,
@@ -235,9 +250,7 @@ class Slab {
    *        Called by `deallocateOne` after the region is returned to the
    *        free list and DeallocActions have run.
    */
-  void noteDeallocated() noexcept {
-    live_count_.fetch_sub(1, std::memory_order_acq_rel);
-  }
+  void noteDeallocated() noexcept { live_count_.fetch_sub(1, std::memory_order_acq_rel); }
 
   /*!
    * \brief True iff this slab has ever hosted a FinalizedAlloc and

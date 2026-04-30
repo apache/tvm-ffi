@@ -19,28 +19,30 @@
 
 /*!
  * \file orcjit_memory_manager.h
- * \brief Per-session growable slab pool (Stage B).
+ * \brief Per-session growable slab pool.
  *
  * `SlabPoolMemoryManager` implements `JITLinkMemoryManager` on top of a
  * per-session `std::vector<std::unique_ptr<Slab>>`.  On each `allocate`
  * it picks the first `Slab` that can fit the graph; if none do, it
- * `mmap`s a new fixed-size (`slab_size`) slab and appends it.  Graphs
- * larger than a single normal slab go to the oversize path — a
- * dedicated `Slab` sized to fit that one graph.
+ * `mmap`s a fresh slab sized to fit (`Slab::capacityForFootprint`) and
+ * appends it.  Normal-size graphs land on a `slab_size`-sized slab;
+ * skewed or oversize graphs land on a power-of-2 larger slab whose
+ * per-pool budgets cover the graph.
  *
- * ## Lifecycle (Stage B)
+ * ## Lifecycle
  *
- * Once a slab is added to the pool it stays mapped until the pool
- * (and its enclosing session) is destroyed.  Individual graphs are
- * deallocated via `FA->owner->deallocateOne(...)`, returning bytes to
- * the slab's free list, but the slab's VA reservation is not reclaimed.
- * Stage C will add warm-slab eviction that munmaps drained slabs.
+ * Once a slab is added to the pool it stays mapped until it is
+ * reclaimed or until the pool (and its enclosing session) is
+ * destroyed. Individual graphs are deallocated via
+ * `FA->owner->deallocateOne(...)`, returning bytes to the slab's free
+ * list. Drained slabs can be returned to the OS via
+ * `clearFreeSlabs()`.
  *
  * ## GOTPCRELX relaxation workaround
  *
- * Unchanged from Stage A — see `llvm_patches/gotpcrelx_fix.cc`.  The
- * plugin is added per-session to the `ObjectLinkingLayer` alongside
- * this memory manager and is orthogonal to pool growth.
+ * See `llvm_patches/gotpcrelx_fix.cc`. The plugin is added per-session
+ * to the `ObjectLinkingLayer` alongside this memory manager and is
+ * orthogonal to pool growth.
  */
 #ifndef TVM_FFI_ORCJIT_ORCJIT_MEMORY_MANAGER_H_
 #define TVM_FFI_ORCJIT_ORCJIT_MEMORY_MANAGER_H_
@@ -63,15 +65,17 @@ namespace orcjit {
  *
  * The constructor reserves one initial slab (halving its capacity down
  * to `kMinSlabSize` if `mmap` fails under RLIMIT_AS).  Subsequent
- * slabs are added on demand by `allocate()` and reserved at exactly
- * `slab_size_` bytes each — no retry, no halving, errors propagate.
+ * slabs are added on demand by `allocate()` at a capacity chosen by
+ * `Slab::capacityForFootprint` — `slab_size_` for normal graphs, the
+ * next power of two up for skewed / oversize graphs.  No retry, no
+ * halving on growth; mmap errors propagate.
  */
 class SlabPoolMemoryManager : public llvm::jitlink::JITLinkMemoryManager {
  public:
   // Default per-slab capacity.  64 MB is above the p99 size of typical
   // ML JIT graphs (single-kernel bindings, fused kernels), below the
   // PC-relative relocation limit, and a multiple of the 2 MB THP
-  // granule.  Small enough that a pinned slab only wastes 64 MB of RSS.
+  // granule. Small enough that a pinned slab only wastes 64 MB of RSS.
   static constexpr std::size_t kDefaultSlabSize = std::size_t{64} << 20;  // 64 MB
 
   // Lower bound on initial-slab reservation.  If the first `mmap`
@@ -91,8 +95,7 @@ class SlabPoolMemoryManager : public llvm::jitlink::JITLinkMemoryManager {
   void allocate(const llvm::jitlink::JITLinkDylib* JD, llvm::jitlink::LinkGraph& G,
                 OnAllocatedFunction OnAllocated) override;
 
-  void deallocate(std::vector<FinalizedAlloc> Allocs,
-                  OnDeallocatedFunction OnDeallocated) override;
+  void deallocate(std::vector<FinalizedAlloc> Allocs, OnDeallocatedFunction OnDeallocated) override;
 
   /*! \brief Number of slabs currently held (test introspection). */
   std::size_t numSlabs() const {

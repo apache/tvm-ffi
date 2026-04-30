@@ -219,16 +219,16 @@ ORCJITExecutionSessionObj::ORCJITExecutionSessionObj(const std::string& orc_rt_p
   // The parameter is Linux-only; on macOS/Windows the arena is compiled out
   // entirely (see #ifdef below) and the value is ignored.
   //
-  // Stage A of the slab-pool refactor: there is exactly one Slab per session,
-  // so `slab_size_bytes` == the whole arena capacity.  Stage B introduces a
-  // growable pool where this parameter becomes the per-slab size and total
-  // session memory grows in slab-sized increments.
+  // `slab_size_bytes` is the per-slab capacity for the growable pool.
+  // Session memory grows in slab-sized increments; graphs that don't
+  // fit a normal slab trigger a power-of-2 larger slab sized to fit
+  // (see `Slab::capacityForFootprint`).
   //
   // The default (64 MB) is above typical ML JIT graph sizes while well
-  // under the PC-relative relocation limit; oversize graphs get a
-  // dedicated slab.  The initial-slab constructor halves its capacity
-  // on mmap failure (RLIMIT_AS, containers) down to 8 MB; subsequent
-  // slabs are always reserved at the chosen slab_size.
+  // under the PC-relative relocation limit.  The initial-slab constructor
+  // halves its capacity on mmap failure (RLIMIT_AS, containers) down to
+  // 8 MB; subsequent slabs are reserved at the size returned by
+  // `capacityForFootprint` (>= slab_size) and mmap errors propagate.
   //
   // LLJIT auto-configures ObjectLinkingLayer (JITLink) on x86_64 and aarch64
   // Linux (see LLJITBuilderState::prepareForConstruction).  We override

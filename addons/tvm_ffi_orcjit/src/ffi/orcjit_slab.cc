@@ -175,10 +175,10 @@ Error Slab::commitPages(void* addr, std::size_t size) {
     // followed by freeRegion() would leave committed_[i] == 1, causing a
     // later allocation to skip mprotect and write into PROT_NONE memory.
     if (::mprotect(arena_base_ + chunk_offset, chunk_len, PROT_READ | PROT_WRITE) != 0) {
-      return make_error<StringError>(
-          "Slab: mprotect(RW) failed for chunk at offset " + formatv("{0:x}", chunk_offset) + ": " +
-              std::strerror(errno),
-          inconvertibleErrorCode());
+      return make_error<StringError>("Slab: mprotect(RW) failed for chunk at offset " +
+                                         formatv("{0:x}", chunk_offset) + ": " +
+                                         std::strerror(errno),
+                                     inconvertibleErrorCode());
     }
     committed_[i].store(1, std::memory_order_release);
   }
@@ -204,9 +204,8 @@ Error Slab::protectPages(void* addr, std::size_t size, MemProt Prot) {
   if ((Prot & MemProt::Write) != MemProt::None) prot |= PROT_WRITE;
   if ((Prot & MemProt::Exec) != MemProt::None) prot |= PROT_EXEC;
   if (::mprotect(addr, size, prot) != 0) {
-    return make_error<StringError>("Slab: mprotect failed at " + formatv("{0:x}", addr) +
-                                       " size " + formatv("{0:x}", size) + ": " +
-                                       std::strerror(errno),
+    return make_error<StringError>("Slab: mprotect failed at " + formatv("{0:x}", addr) + " size " +
+                                       formatv("{0:x}", size) + ": " + std::strerror(errno),
                                    inconvertibleErrorCode());
   }
   if ((Prot & MemProt::Exec) != MemProt::None) {
@@ -480,8 +479,30 @@ Slab::GraphFootprint Slab::computeGraphFootprint(LinkGraph& G, std::size_t page_
   return GraphFootprint{ne_total, e_total};
 }
 
-void Slab::allocate(LinkGraph& G,
-                    JITLinkMemoryManager::OnAllocatedFunction OnAllocated) {
+std::size_t Slab::capacityForFootprint(GraphFootprint fp, std::size_t base_size) {
+  // Mirrors the split formula in Slab::Slab (see the ctor for the
+  // rationale behind each clamp).  Kept local rather than sharing a
+  // helper with the ctor so that changes to the split policy require
+  // a deliberate touch in both places.
+  auto budgets = [](std::size_t cap) {
+    std::size_t exec_limit = std::min(cap, kPCRelReach);
+    std::size_t raw_mid = static_cast<std::size_t>(exec_limit * kDefaultNonExecFraction);
+    std::size_t mid = (raw_mid / kCommitGranularity) * kCommitGranularity;
+    if (mid == 0) mid = kCommitGranularity;
+    if (mid >= exec_limit) mid = exec_limit - kCommitGranularity;
+    return std::pair<std::size_t, std::size_t>{mid, exec_limit - mid};
+  };
+  std::size_t cap = base_size;
+  while (true) {
+    auto [ne_budget, e_budget] = budgets(cap);
+    if (fp.non_exec <= ne_budget && fp.exec <= e_budget) return cap;
+    // Budgets plateau once exec_limit saturates; further VA doesn't help.
+    if (cap >= kPCRelReach) return cap;
+    cap *= 2;
+  }
+}
+
+void Slab::allocate(LinkGraph& G, JITLinkMemoryManager::OnAllocatedFunction OnAllocated) {
   // ── Overflow section classification ──
   //
   // Sections matching known overflow names (e.g. .nv_fatbin — large GPU
@@ -530,10 +551,10 @@ void Slab::allocate(LinkGraph& G,
   auto TotalSize = static_cast<std::size_t>(SegsSizes->total());
   if (TotalSize == 0 && overflow_sections.empty()) {
     // Empty graph — return a no-op allocation.
-    OnAllocated(std::make_unique<InFlightAlloc>(
-        *this, G, std::move(BL), InFlightAlloc::PoolRegion{0, 0, 0},
-        InFlightAlloc::PoolRegion{midpoint_, 0, 0},
-        std::vector<FinalizedAllocInfo::OverflowBlock>{}));
+    OnAllocated(std::make_unique<InFlightAlloc>(*this, G, std::move(BL),
+                                                InFlightAlloc::PoolRegion{0, 0, 0},
+                                                InFlightAlloc::PoolRegion{midpoint_, 0, 0},
+                                                std::vector<FinalizedAllocInfo::OverflowBlock>{}));
     return;
   }
 
@@ -673,9 +694,9 @@ void Slab::allocate(LinkGraph& G,
         decommitPages(arena_base_ + e_region.offset, e_total);
         freeRegion(e_region.offset, e_total);
       }
-      OnAllocated(make_error<StringError>("Slab: overflow mmap failed for section " +
-                                              Sec->getName() + ": " + std::strerror(errno),
-                                          inconvertibleErrorCode()));
+      OnAllocated(make_error<StringError>(
+          "Slab: overflow mmap failed for section " + Sec->getName() + ": " + std::strerror(errno),
+          inconvertibleErrorCode()));
       return;
     }
 

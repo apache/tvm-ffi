@@ -25,7 +25,6 @@
 
 #ifdef __linux__
 
-#include <llvm/Support/Alignment.h>
 #include <llvm/Support/Error.h>
 #include <llvm/Support/FormatVariadic.h>
 
@@ -72,58 +71,20 @@ std::unique_ptr<Slab> SlabPoolMemoryManager::createSlab(std::size_t capacity) {
 }
 
 void SlabPoolMemoryManager::allocate(const llvm::jitlink::JITLinkDylib* /*JD*/,
-                                     llvm::jitlink::LinkGraph& G,
-                                     OnAllocatedFunction OnAllocated) {
-  // Step 1: pre-compute footprint to decide normal vs oversize.
-  auto footprint = Slab::computeGraphFootprint(G, page_size_);
-  std::size_t total = footprint.total();
-
-  // Step 2: conservative usable-per-slab estimate.  The dual-pool
-  // midpoint split means a graph cannot use the entire slab — one
-  // pool's cursor is bounded at midpoint, the other at
-  // exec_bump_limit.  2 MB of slack covers midpoint alignment.  A
-  // false-positive oversize just costs one extra mmap sized to fit,
-  // never a crash.
-  std::size_t usable = slab_size_ > 2 * Slab::kCommitGranularity
-                           ? slab_size_ - 2 * Slab::kCommitGranularity
-                           : slab_size_ / 2;
-
-  // `pool_mu_` only protects the slabs_ vector itself.  We never hold
-  // it across a call into Slab::allocate or a user callback: the
-  // LLJIT linker will frequently invoke nested lookups (which trigger
-  // recursive allocate() calls via materialization) from inside
-  // OnAllocated, and a coarse lock here would deadlock.  Slabs we've
-  // seen in a snapshot are guaranteed to outlive this call because
-  // Stage B never removes slabs from the pool.
+                                     llvm::jitlink::LinkGraph& G, OnAllocatedFunction OnAllocated) {
   using AllocResult = Expected<std::unique_ptr<InFlightAlloc>>;
 
-  // Step 3: oversize path — one graph per dedicated slab.
-  if (total > usable) {
-    std::size_t needed = total + 2 * Slab::kCommitGranularity;
-    std::size_t cap = llvm::alignTo(needed, Slab::kCommitGranularity);
-    if (cap < slab_size_) cap = slab_size_;
-    auto slab = createSlab(cap);
-    if (!slab) {
-      OnAllocated(llvm::make_error<llvm::StringError>(
-          "SlabPoolMemoryManager: mmap failed for oversize slab of " +
-              llvm::formatv("{0:x}", cap).str() + " bytes",
-          llvm::inconvertibleErrorCode()));
-      return;
-    }
-    Slab* raw = slab.get();
-    {
-      std::lock_guard<std::mutex> lock(pool_mu_);
-      slabs_.push_back(std::move(slab));
-    }
-    raw->allocate(G, std::move(OnAllocated));
-    return;
-  }
-
-  // Step 4: first-fit over existing slabs.  Take a snapshot of raw
-  // pointers under the lock, then iterate without holding it.
-  // Slab::allocate is synchronous (invokes its callback inline on
-  // every code path), so we observe the result via a captured
-  // std::optional that the callback fills before the call returns.
+  // Step 1: first-fit over existing slabs.  `pool_mu_` only protects
+  // the slabs_ vector — never held across a Slab::allocate call or a
+  // user callback, since the LLJIT linker issues nested lookups (and
+  // thus re-entrant allocate() calls via materialization) from inside
+  // OnAllocated and a coarse lock would deadlock.  Snapshot raw pointers
+  // under the lock; slabs are guaranteed to outlive this call because
+  // clearFreeSlabs() is only safe when the session is quiescent.
+  //
+  // Slab::allocate is synchronous (invokes its callback inline on every
+  // code path), so a captured std::optional observes the result before
+  // the call returns.
   std::vector<Slab*> snapshot;
   {
     std::lock_guard<std::mutex> lock(pool_mu_);
@@ -140,26 +101,30 @@ void SlabPoolMemoryManager::allocate(const llvm::jitlink::JITLinkDylib* /*JD*/,
     }
     Error E = result.takeError();
     if (E.isA<SlabPoolExhaustedError>()) {
-      // Retriable: this graph didn't fit in this slab.  Try next.
+      // Retriable: this graph didn't fit this slab's per-pool budget.
       llvm::consumeError(std::move(E));
       continue;
     }
-    // Terminal error (mmap, mprotect, JITLink, BasicLayout).
+    // Terminal (mmap, mprotect, JITLink, BasicLayout).
     OnAllocated(std::move(E));
     return;
   }
 
-  // Step 5: no existing slab fits.  Mmap a new normal-size slab.
-  // Another thread may have added slabs meanwhile; we don't re-scan
-  // (would duplicate work under contention).  Concurrent creates
-  // would at worst make the pool grow faster than strictly necessary
-  // — never incorrect.
-  auto slab = createSlab(slab_size_);
+  // Step 2: grow.  Size the fresh slab to fit this graph's per-pool
+  // footprint — normal graphs fall through at slab_size_, skewed or
+  // oversize graphs double up until both pools can host them (see
+  // Slab::capacityForFootprint).  A single growth branch replaces the
+  // pre-gate "normal vs oversize" split; we trade one `N × failed
+  // Slab::allocate` scan (step 1) for the extra pre-filter — negligible
+  // since each failed call is a BasicLayout build with no mmap.
+  auto fp = Slab::computeGraphFootprint(G, page_size_);
+  std::size_t cap = Slab::capacityForFootprint(fp, slab_size_);
+  auto slab = createSlab(cap);
   if (!slab) {
-    OnAllocated(llvm::make_error<llvm::StringError>(
-        "SlabPoolMemoryManager: mmap failed for new slab of " +
-            llvm::formatv("{0:x}", slab_size_).str() + " bytes",
-        llvm::inconvertibleErrorCode()));
+    OnAllocated(
+        llvm::make_error<llvm::StringError>("SlabPoolMemoryManager: mmap failed for new slab of " +
+                                                llvm::formatv("{0:x}", cap).str() + " bytes",
+                                            llvm::inconvertibleErrorCode()));
     return;
   }
   Slab* raw = slab.get();
@@ -167,9 +132,6 @@ void SlabPoolMemoryManager::allocate(const llvm::jitlink::JITLinkDylib* /*JD*/,
     std::lock_guard<std::mutex> lock(pool_mu_);
     slabs_.push_back(std::move(slab));
   }
-  // A fresh slab must fit any graph we've already decided is in-range
-  // (step 2 + step 3 gate).  If somehow it doesn't, the error is
-  // propagated through — not retried.
   raw->allocate(G, std::move(OnAllocated));
 }
 
@@ -192,9 +154,8 @@ std::size_t SlabPoolMemoryManager::clearFreeSlabs() {
   std::vector<std::unique_ptr<Slab>> discard;
   {
     std::lock_guard<std::mutex> lock(pool_mu_);
-    auto keep_end = std::partition(slabs_.begin(), slabs_.end(), [](const auto& s) {
-      return !s->isReclaimable();
-    });
+    auto keep_end = std::partition(slabs_.begin(), slabs_.end(),
+                                   [](const auto& s) { return !s->isReclaimable(); });
     discard.reserve(static_cast<std::size_t>(slabs_.end() - keep_end));
     for (auto it = keep_end; it != slabs_.end(); ++it) {
       discard.push_back(std::move(*it));

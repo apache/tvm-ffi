@@ -594,8 +594,7 @@ def test_drop_runs_static_destructors(v: Variant) -> None:
     else:
         markers = ("dtors", "fini_array")
     assert any(m in entry for entry in post for m in markers), (
-        f"no static destructors on drop (platform={sys.platform}): "
-        f"pre={log[:ctor_len]} post={post}"
+        f"no static destructors on drop (platform={sys.platform}): pre={log[:ctor_len]} post={post}"
     )
 
 
@@ -732,18 +731,19 @@ def test_pool_survives_mixed_load_drop_create(v: Variant) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _build_big_object(tmp_path: Path, byte_size: int) -> str:
+def _build_big_object(tmp_path: Path, byte_size: int, name: str = "big_object") -> str:
     """Compile a .c file with a large `.rodata` blob to force the oversize path.
 
     Returns the path to the generated .o file.  Skips the test if the build
-    toolchain is unavailable.
+    toolchain is unavailable.  ``name`` lets callers produce multiple
+    distinctly-sized objects within the same ``tmp_path``.
     """
     try:
         import tvm_ffi.cpp  # noqa: PLC0415
     except ImportError:
         pytest.skip("tvm_ffi.cpp not available for on-the-fly object build")
 
-    src = tmp_path / "big.c"
+    src = tmp_path / f"{name}.c"
     # Global BSS array — volatile + a runtime read in big_probe() prevents
     # the compiler from folding sizeof() out and eliding the array.  The
     # array becomes a ZeroFill segment of `byte_size` bytes in the
@@ -770,11 +770,11 @@ def _build_big_object(tmp_path: Path, byte_size: int) -> str:
     )
     try:
         return tvm_ffi.cpp.build(
-            name="big_object",
+            name=name,
             sources=[str(src)],
-            output="big_object.o",
+            output=f"{name}.o",
             extra_cflags=["-O2"],
-            build_directory=str(tmp_path / ".build"),
+            build_directory=str(tmp_path / f".build_{name}"),
         )
     except Exception as exc:
         pytest.skip(f"could not build big object for reclaim test: {exc}")
@@ -813,9 +813,7 @@ def test_clear_free_slabs_reclaims_oversize(tmp_path: Path) -> None:
     # The oversize slab holds only the now-dropped lib's graph, so
     # clearFreeSlabs reclaims it. The initial (never-used) slab stays.
     reclaimed = session.clear_free_slabs()
-    assert reclaimed >= 1, (
-        f"expected to reclaim the drained oversize slab, got {reclaimed}"
-    )
+    assert reclaimed >= 1, f"expected to reclaim the drained oversize slab, got {reclaimed}"
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="slab pool is Linux-only")
@@ -835,27 +833,36 @@ def test_clear_free_slabs_idempotent(tmp_path: Path) -> None:
 
 @pytest.mark.skipif(sys.platform != "linux", reason="slab pool is Linux-only")
 def test_clear_free_slabs_preserves_live_pool(tmp_path: Path) -> None:
-    """Reclaim runs only on drained slabs; live libraries keep working."""
-    big_obj = _build_big_object(tmp_path, 3 * 1024 * 1024)
+    """Reclaim runs only on drained slabs; live libraries keep working.
+
+    Uses two different oversize blob sizes so the two libs land on
+    separately-sized slabs: the 3 MB blob forces the pool to grow to
+    8 MB (next power of two covering a 4 MB pool's non-exec budget),
+    while the 5 MB blob forces 16 MB.  Dropping the 3 MB lib then
+    leaves its 8 MB slab drained while the 16 MB slab stays live.
+    """
+    small_obj = _build_big_object(tmp_path, 3 * 1024 * 1024, name="small_obj")
+    large_obj = _build_big_object(tmp_path, 5 * 1024 * 1024, name="large_obj")
     session = ExecutionSession(slab_size=4 * 1024 * 1024)
 
-    # First oversize lib — drop it.
+    # Drop lib — lands on the 8 MB grown slab.
     drop_lib = session.create_library("drop")
-    drop_lib.add(big_obj)
+    drop_lib.add(small_obj)
     drop_lib.get_function("big_probe")()
     del drop_lib
 
-    # Second oversize lib — keep it.
+    # Keep lib — doesn't fit the 8 MB slab (5 MB > its ~4 MB non-exec
+    # budget), so the pool grows to a 16 MB slab for this one.
     keep_lib = session.create_library("keep")
-    keep_lib.add(big_obj)
-    assert keep_lib.get_function("big_probe")() == 3 * 1024 * 1024
+    keep_lib.add(large_obj)
+    assert keep_lib.get_function("big_probe")() == 5 * 1024 * 1024
 
     gc.collect()
     reclaimed = session.clear_free_slabs()
     assert reclaimed >= 1, f"expected drained slab to be reclaimed, got {reclaimed}"
 
     # The kept lib's slab was untouched; it still executes correctly.
-    assert keep_lib.get_function("big_probe")() == 3 * 1024 * 1024
+    assert keep_lib.get_function("big_probe")() == 5 * 1024 * 1024
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="slab pool is Linux-only")
