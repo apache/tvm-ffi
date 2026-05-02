@@ -22,8 +22,8 @@ use crate::dtype::AsDLDataType;
 use crate::dtype::DLDataTypeExt;
 use crate::error::Result;
 use crate::object::{Object, ObjectArc, ObjectCore, ObjectCoreWithExtraItems};
-use tvm_ffi_sys::dlpack::{DLDataType, DLDevice, DLDeviceType, DLTensor};
 use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
+use tvm_ffi_sys::dlpack::{DLDataType, DLDevice, DLDeviceType, DLTensor};
 
 //-----------------------------------------------------
 // NDAllocator Trait
@@ -66,7 +66,7 @@ impl DLTensorExt for DLTensor {
     }
 
     fn item_size(&self) -> usize {
-        (self.dtype.bits as usize * self.dtype.lanes as usize + 7) / 8
+        (self.dtype.bits as usize * self.dtype.lanes as usize).div_ceil(8)
     }
 }
 
@@ -272,15 +272,15 @@ impl Tensor {
                 object: Object::new(),
                 dltensor: DLTensor {
                     data: std::ptr::null_mut(),
-                    device: device,
+                    device,
                     ndim: shape.len() as i32,
-                    dtype: dtype,
+                    dtype,
                     shape: std::ptr::null_mut(),
                     strides: std::ptr::null_mut(),
                     byte_offset: 0,
                 },
             },
-            alloc: alloc,
+            alloc,
         };
         unsafe {
             let mut obj_arc = ObjectArc::new_with_extra_items(tensor_obj);
@@ -325,16 +325,16 @@ unsafe impl NDAllocator for CPUNDAlloc {
     const MIN_ALIGN: usize = 64;
 
     unsafe fn alloc_data(&mut self, prototype: &DLTensor) -> *mut core::ffi::c_void {
-        let numel = prototype.numel() as usize;
+        let numel = prototype.numel();
         let item_size = prototype.item_size();
-        let size = numel * item_size as usize;
+        let size = numel * item_size;
         let layout = std::alloc::Layout::from_size_align(size, Self::MIN_ALIGN).unwrap();
         let ptr = std::alloc::alloc(layout);
         ptr as *mut core::ffi::c_void
     }
 
     unsafe fn free_data(&mut self, tensor: &DLTensor) {
-        let numel = tensor.numel() as usize;
+        let numel = tensor.numel();
         let item_size = tensor.item_size();
         let size = numel * item_size;
         let layout = std::alloc::Layout::from_size_align(size, Self::MIN_ALIGN).unwrap();

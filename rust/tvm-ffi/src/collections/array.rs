@@ -165,7 +165,7 @@ impl<T: AnyCompatible + Clone> Array<T> {
     #[inline]
     fn as_container(&self) -> &ArrayObj {
         unsafe {
-            let ptr = ObjectArc::as_raw(&self.data) as *const ArrayObj;
+            let ptr = ObjectArc::as_raw(&self.data);
             &*ptr
         }
     }
