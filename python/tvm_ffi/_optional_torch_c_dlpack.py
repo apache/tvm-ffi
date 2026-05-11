@@ -44,6 +44,17 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+def _torch_extension_device(torch_module: Any) -> str:
+    """Return the torch backend name used in the optional extension library name."""
+    if torch_module.cuda.is_available():
+        if torch_module.version.cuda is not None:
+            return "cuda"
+        if torch_module.version.hip is not None:
+            return "rocm"
+        raise ValueError("Cannot determine whether to build with CUDA or ROCm.")
+    return "cpu"
+
+
 def _create_dlpack_exchange_api_capsule(ptr_as_int: int) -> Any:
     """Create a PyCapsule wrapping the DLPack exchange API pointer.
 
@@ -94,7 +105,7 @@ def load_torch_c_dlpack_extension() -> Any:  # noqa: PLR0912, PLR0915
         import torch  # noqa: PLC0415
         import torch.version  # noqa: PLC0415
 
-        prefer_rocm_override = bool(torch.cuda.is_available() and torch.version.hip is not None)
+        prefer_rocm_override = _torch_extension_device(torch) == "rocm"
         if _check_and_update_dlpack_c_exchange_api(torch.Tensor) and not prefer_rocm_override:
             # skip loading the extension if the __dlpack_c_exchange_api__
             # attribute is already set so we don't have to do it in
@@ -116,23 +127,18 @@ def load_torch_c_dlpack_extension() -> Any:  # noqa: PLR0912, PLR0915
         # `ctypes.CDLL` will raise an `AttributeError`.
         # Keep trying JIT
         pass
+    except OSError:
+        # A prebuilt torch-c-dlpack-ext wheel can be present but linked
+        # against an incompatible backend, e.g. CUDA libraries in a ROCm
+        # PyTorch environment. Keep trying the local JIT build path.
+        pass
 
     try:
         # check whether a JIT shared library is built in cache
         cache_dir = Path(os.environ.get("TVM_FFI_CACHE_DIR", "~/.cache/tvm-ffi")).expanduser()
         addon_output_dir = cache_dir
         major, minor = torch.__version__.split(".")[:2]
-        # First use "torch.cuda.is_available()" to check whether GPU environment
-        # is available. Then determine the GPU type.
-        if torch.cuda.is_available():
-            if torch.version.cuda is not None:
-                device = "cuda"
-            elif torch.version.hip is not None:
-                device = "rocm"
-            else:
-                raise ValueError("Cannot determine whether to build with CUDA or ROCm.")
-        else:
-            device = "cpu"
+        device = _torch_extension_device(torch)
         suffix = ".dll" if sys.platform.startswith("win") else ".so"
         libname = f"libtorch_c_dlpack_addon_torch{major}{minor}-{device}{suffix}"
         lib_path = addon_output_dir / libname

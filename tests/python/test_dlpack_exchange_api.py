@@ -36,6 +36,7 @@ except ImportError:
 
 # Check if DLPack Exchange API is available
 _has_dlpack_api = torch is not None and hasattr(torch.Tensor, "__dlpack_c_exchange_api__")
+_has_gpu = torch is not None and torch.cuda.is_available()
 
 
 @pytest.mark.skipif(not _has_dlpack_api, reason="PyTorch DLPack Exchange API not available")
@@ -212,6 +213,27 @@ def test_dlpack_exchange_api() -> None:
 
     # Run the comprehensive test
     mod.test_dlpack_api(tensor, api_ptr, torch.cuda.is_available())
+
+
+@pytest.mark.skipif(
+    not (_has_dlpack_api and _has_gpu),
+    reason="PyTorch DLPack Exchange API with GPU is not available",
+)
+def test_dlpack_exchange_api_gpu_tensor_metadata() -> None:
+    assert torch is not None
+    echo = tvm_ffi.get_global_func("testing.echo")
+
+    for shape in [(512,), (512, 512), (2, 3, 4)]:
+        source = torch.empty(shape, device="cuda", dtype=torch.float16)
+
+        tvm_tensor = tvm_ffi.from_dlpack(source)
+        assert tvm_tensor.shape == shape
+        assert tvm_tensor.dtype == tvm_ffi.dtype("float16")
+
+        echoed = echo(source)
+        assert tuple(echoed.shape) == shape
+        assert echoed.dtype == source.dtype
+        assert echoed.device == source.device
 
 
 @pytest.mark.skipif(not _has_dlpack_api, reason="PyTorch DLPack Exchange API not available")

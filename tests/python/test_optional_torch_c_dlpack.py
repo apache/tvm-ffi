@@ -19,6 +19,8 @@ import ctypes
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any, Optional
 
 import pytest
 
@@ -30,8 +32,39 @@ except ImportError:
 
 
 import tvm_ffi
+from tvm_ffi import _optional_torch_c_dlpack
 
 IS_WINDOWS = sys.platform.startswith("win")
+
+
+def _fake_torch_module(
+    *, cuda_available: bool, cuda_version: Optional[str], hip_version: Optional[str]
+) -> Any:
+    return SimpleNamespace(
+        cuda=SimpleNamespace(is_available=lambda: cuda_available),
+        version=SimpleNamespace(cuda=cuda_version, hip=hip_version),
+    )
+
+
+def test_torch_extension_device() -> None:
+    assert (
+        _optional_torch_c_dlpack._torch_extension_device(
+            _fake_torch_module(cuda_available=False, cuda_version=None, hip_version=None)
+        )
+        == "cpu"
+    )
+    assert (
+        _optional_torch_c_dlpack._torch_extension_device(
+            _fake_torch_module(cuda_available=True, cuda_version="12.8", hip_version=None)
+        )
+        == "cuda"
+    )
+    assert (
+        _optional_torch_c_dlpack._torch_extension_device(
+            _fake_torch_module(cuda_available=True, cuda_version=None, hip_version="7.2")
+        )
+        == "rocm"
+    )
 
 
 @pytest.mark.skipif(torch is None, reason="torch is not installed")

@@ -39,6 +39,13 @@ def _create_dlpack_exchange_api_capsule(ptr_as_int: int) -> Any:
     return capsule
 
 
+def _torch_extension_suffix() -> str:
+    """Return the backend suffix used by the prebuilt extension library."""
+    if torch.cuda.is_available():
+        return "rocm" if torch.version.hip is not None else "cuda"
+    return "cpu"
+
+
 def load_torch_c_dlpack_extension() -> None:
     """Load the torch c dlpack extension based on torch version."""
     if hasattr(torch.Tensor, "__dlpack_c_exchange_api__") or hasattr(
@@ -52,7 +59,7 @@ def load_torch_c_dlpack_extension() -> None:
         extension = "dylib"
     else:
         extension = "so"
-    suffix = "cuda" if torch.cuda.is_available() else "cpu"
+    suffix = _torch_extension_suffix()
     lib_path = (
         Path(__file__).parent
         / f"libtorch_c_dlpack_addon_torch{version.major}{version.minor}-{suffix}.{extension}"
