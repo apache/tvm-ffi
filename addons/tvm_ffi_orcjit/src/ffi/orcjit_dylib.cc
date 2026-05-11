@@ -79,31 +79,37 @@ ORCJITDynamicLibraryObj::ORCJITDynamicLibraryObj(ORCJITExecutionSession session,
 }
 
 ORCJITDynamicLibraryObj::~ORCJITDynamicLibraryObj() {
-  // Step 1: run static destructors for code in this JITDylib. See InitFiniPlugin
-  // class doc in orcjit_session.cc for the three-platform init/fini strategy
-  // (macOS native via LLJIT::deinitialize vs. Linux/Windows via our plugin).
-#if defined(__linux__) || defined(_WIN32)
+  // Step 1: run static destructors for code in this JITDylib via our
+  // InitFiniPlugin (uniform across Linux / macOS / Windows — see the
+  // plugin docstring in llvm_patches/init_fini_plugin.h).
   session_->RunPendingDeinitializers(GetJITDylib());
-#else
-  if (auto err = jit_->deinitialize(*dylib_)) {
-    llvm::consumeError(std::move(err));
+#ifdef __APPLE__
+  // Step 1b (macOS only): drain per-dylib __cxa_atexit registrations in
+  // LIFO.  Clang on Darwin lowers __attribute__((destructor)) and C++
+  // global dtors as __cxa_atexit(fn, arg, &__dso_handle) registrations
+  // during init; our shim (see orcjit_session.cc) captured them into
+  // this vector via the TLS pointer published below.
+  //
+  // Pop-and-call handles re-entrant registrations from within a dtor —
+  // the CxaAtexitRecordsScope keeps the TLS pointer live so any
+  // ___cxa_atexit call from inside a dtor also lands here.
+  {
+    CxaAtexitRecordsScope scope(&cxa_atexit_records_);
+    while (!cxa_atexit_records_.empty()) {
+      auto [fn, arg] = cxa_atexit_records_.back();
+      cxa_atexit_records_.pop_back();
+      fn(arg);
+    }
   }
 #endif
   // Step 2: remove the JITDylib from the ExecutionSession. Triggers
   // JITDylib::clear(), which releases all tracked linker resources — in
   // particular, invokes the ObjectLinkingLayer's ResourceManager which calls
   // our memory manager's deallocate() for every FinalizedAlloc belonging to
-  // this dylib.  Then calls Platform::teardownJITDylib() to drop any
-  // per-dylib platform state.  Without this call JIT code pages accumulate
-  // in the arena until the whole session is destroyed.
-  //
-  // Safe on all three platforms:
-  //   - Linux / Windows: we drive init/fini via InitFiniPlugin (no Platform
-  //     registered in the LLJIT config used here, see orcjit_session.cc).
-  //   - macOS: MachOPlatform::teardownJITDylib() only cleans internal maps
-  //     (JITDylibToHeaderAddr / JITDylibToPThreadKey); Platform::notifyRemoving
-  //     (still `llvm_unreachable("Not supported yet")`) is declared but never
-  //     called by `removeJITDylibs`, so it is not reached here.
+  // this dylib.  Without this call JIT code pages accumulate in the arena
+  // until the whole session is destroyed.  No Platform is registered in any
+  // of our LLJIT configurations (see orcjit_session.cc), so there is no
+  // Platform::teardownJITDylib callback to worry about.
   session_->RemoveDylib(dylib_);
   dylib_ = nullptr;
 }
@@ -148,23 +154,19 @@ void* ORCJITDynamicLibraryObj::GetSymbol(const String& name) {
   auto symbol_or_err =
       jit_->getExecutionSession().lookup(search_order, jit_->mangleAndIntern(name.c_str()));
 
-  // Run pending initializers. Both paths are idempotent and support incremental
-  // loading (new object files added between GetSymbol calls).
-  // See InitFiniPlugin class doc in orcjit_session.cc for three-platform strategy.
-#if defined(__linux__) || defined(_WIN32)
-  // Linux/Windows: RunPendingInitializers drains and erases the map entry;
-  // subsequent calls are no-ops until new object files add fresh entries.
-  session_->RunPendingInitializers(GetJITDylib());
-#else
-  // macOS: LLJIT tracks an InitializedDylib set (LLJIT.h:624). First call
-  // invokes dlopen (refcount 0→1, runs initializers). Subsequent calls
-  // invoke dlupdate (no refcount bump, runs only new initializers from
-  // newly-added object files). The single deinitialize() in the destructor
-  // calls dlclose (refcount 1→0), so the count stays balanced.
-  if (auto err = jit_->initialize(*dylib_)) {
-    llvm::consumeError(std::move(err));
-  }
+  // Run pending initializers via InitFiniPlugin.  RunPendingInitializers
+  // drains and erases the map entry; subsequent calls are no-ops until new
+  // object files add fresh entries — supports incremental loading.
+  //
+  // On macOS the scope publishes this dylib's __cxa_atexit records vector
+  // so the ___cxa_atexit shim (see orcjit_session.cc) can route dtor
+  // registrations here for our destructor to drain.  Static init on C
+  // and C++ code typically happens here (first GetSymbol resolves the
+  // `main` entry point, which materializes and fires __mod_init_func).
+#ifdef __APPLE__
+  CxaAtexitRecordsScope scope(&cxa_atexit_records_);
 #endif
+  session_->RunPendingInitializers(GetJITDylib());
   // Convert ExecutorAddr to pointer
   return symbol_or_err ? symbol_or_err->getAddress().toPtr<void*>() : nullptr;
 }

@@ -147,25 +147,23 @@ elseif (UNIX AND NOT WIN32)
 endif ()
 
 # ---- Find and bundle liborc_rt ----
+# Only Linux uses liborc_rt (for ExecutorNativePlatform → ELFNixPlatform).
+# macOS: we skip MachOPlatform to sidestep the compact-unwind delta bug
+#        (see src/ffi/orcjit_session.cc); liborc_rt is unused.
+# Windows: COFFPlatform is not hooked up; liborc_rt is unused.
 set(ORC_RT_PATH "")
-if (DEFINED ENV{ORC_RT_PATH})
-  set(ORC_RT_PATH "$ENV{ORC_RT_PATH}")
-else ()
-  if (WIN32)
-    file(GLOB_RECURSE _orc_rt_candidates "${_llvm_prefix}/lib/clang/*/lib/orc_rt*.lib")
-    if (NOT _orc_rt_candidates)
-      file(GLOB_RECURSE _orc_rt_candidates "${_llvm_prefix}/Library/lib/clang/*/lib/orc_rt*.lib")
-    endif ()
+if (NOT APPLE AND NOT WIN32)
+  if (DEFINED ENV{ORC_RT_PATH})
+    set(ORC_RT_PATH "$ENV{ORC_RT_PATH}")
   else ()
     file(GLOB_RECURSE _orc_rt_candidates "${_llvm_prefix}/lib/clang/*/lib/liborc_rt*.a")
+    if (_orc_rt_candidates)
+      list(GET _orc_rt_candidates 0 ORC_RT_PATH)
+    endif ()
   endif ()
-  if (_orc_rt_candidates)
-    list(GET _orc_rt_candidates 0 ORC_RT_PATH)
+  if (NOT ORC_RT_PATH)
+    message(WARNING "Could not find liborc_rt. ORC runtime features will be disabled.")
   endif ()
-endif ()
-
-if (NOT ORC_RT_PATH)
-  message(WARNING "Could not find liborc_rt. ORC runtime features will be disabled.")
 endif ()
 
 if (ORC_RT_PATH)

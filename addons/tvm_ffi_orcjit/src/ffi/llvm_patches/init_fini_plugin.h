@@ -19,18 +19,15 @@
 
 /*!
  * \file init_fini_plugin.h
- * \brief Init/fini section handling for ELF and COFF JIT objects.
+ * \brief Init/fini section handling for ELF, MachO, and COFF JIT objects.
  *
- * Emulates the missing/broken LLVM ORC platform support for init/fini
- * sections on Linux and Windows.  Collects function pointers from
- * `.init_array` / `.fini_array` / `.ctors` / `.dtors` (ELF) and
- * `.CRT$XC*` / `.CRT$XT*` (COFF), ties them to the containing
- * `JITDylib`, and runs them in priority order through
+ * Emulates the missing/broken/bypassed LLVM ORC platform support for
+ * init/fini sections on all three host platforms.  Collects function
+ * pointers from `.init_array` / `.fini_array` / `.ctors` / `.dtors`
+ * (ELF), `__DATA,__mod_init_func` / `__DATA,__mod_term_func` (MachO),
+ * and `.CRT$XC*` / `.CRT$XT*` (COFF); ties them to the containing
+ * `JITDylib`; and runs them in priority order through
  * `ORCJITExecutionSessionObj::Run{Pending{Init,De}initializers}`.
- *
- * The plugin is compiled only on Linux and Windows.  macOS already uses
- * `MachOPlatform` (via `orc_rt`) which handles `__mod_init_func` and
- * `__mod_term_func` natively, so no patch file is needed for it.
  *
  * On Windows the plugin additionally patches `__ImageBase` (set to the
  * lowest block address so `IMAGE_REL_AMD64_ADDR32NB` fixups don't
@@ -39,15 +36,19 @@
  * `RtlAddFunctionTable` anyway).  Those pieces also disappear once
  * `COFFPlatform` becomes usable.
  *
- * Trigger: any JIT module on Linux or Windows that contains
- *          constructors, destructors, or `__attribute__((constructor))`
- *          / MSVC `#pragma init_seg` equivalents.
- * Symptom without the patch: constructors/destructors never run (ELF —
- *          `ELFNixPlatform` enumerates but does not invoke them before
- *          llvm/llvm-project#175981), or relocation overflow /
- *          unresolved-SEH crashes (COFF — `COFFPlatform` is not hooked
- *          up because its MSVC CRT symbol requirements cannot be
- *          satisfied).
+ * Trigger: any JIT module on any platform containing constructors,
+ *          destructors, or `__attribute__((constructor))` /
+ *          MSVC `#pragma init_seg` equivalents.
+ * Symptom without the patch:
+ *   - ELF: constructors/destructors never run (`ELFNixPlatform`
+ *     enumerates but does not invoke them before
+ *     llvm/llvm-project#175981).
+ *   - MachO: we skip `MachOPlatform` entirely to sidestep the
+ *     compact-unwind 32-bit delta bug (see `orcjit_session.cc`), so no
+ *     platform runs init/fini; this plugin is the only mechanism.
+ *   - COFF: relocation overflow / unresolved-SEH crashes
+ *     (`COFFPlatform` is not hooked up because its MSVC CRT symbol
+ *     requirements cannot be satisfied).
  *
  * ## Removal — Linux
  *
@@ -56,12 +57,20 @@
  * bumps past the first release containing it, replace this plugin's
  * Linux usage with `ELFNixPlatform` and delete the ELF handling path
  * from this file.  Concretely:
- *   - Drop the `#include "llvm_patches/init_fini_plugin.h"` guard on
- *     `__linux__` in orcjit_session.cc.
  *   - Remove the ELF-section branches (`.init_array`, `.ctors`,
  *     `.fini_array`, `.dtors`) from `InitFiniPlugin::modifyPassConfig`.
  *   - If no platform still needs this plugin, delete this file outright
  *     and follow the checklist in `llvm_patches/README.md`.
+ *
+ * ## Removal — macOS
+ *
+ * Tied to re-enabling `MachOPlatform`.  That requires the compact-unwind
+ * per-graph `dso_base` fix (see `fix-machoplatform-libunwind-dso-base.patch`
+ * in the repo root) to land in our LLVM.  Until then we skip MachOPlatform
+ * and this plugin handles `__mod_init_func` / `__mod_term_func`.  When
+ * MachOPlatform is re-enabled, delete the MachO-section branches from
+ * `InitFiniPlugin::modifyPassConfig` and drop the macOS side of the
+ * `addPlugin` call in `orcjit_session.cc`.
  *
  * ## Removal — Windows
  *
@@ -72,16 +81,9 @@
  * objects, replace this plugin's Windows usage with it and delete the
  * COFF handling path (including the `__ImageBase` fixup and the
  * `.pdata` / `.xdata` edge stripping).
- *
- * ## Removal — macOS
- *
- * N/A — `MachOPlatform` already handles init/fini natively; this
- * plugin is not compiled on macOS.
  */
 #ifndef TVM_FFI_ORCJIT_LLVM_PATCHES_INIT_FINI_PLUGIN_H_
 #define TVM_FFI_ORCJIT_LLVM_PATCHES_INIT_FINI_PLUGIN_H_
-
-#if defined(__linux__) || defined(_WIN32)
 
 #include <llvm/ExecutionEngine/Orc/ObjectLinkingLayer.h>
 
@@ -91,10 +93,10 @@ namespace tvm {
 namespace ffi {
 namespace orcjit {
 
-/*! \brief Init/fini section collector and runner for ELF and COFF.
+/*! \brief Init/fini section collector and runner for ELF, MachO, and COFF.
  *
  * See the file-level docstring above for the three-platform strategy
- * and the removal procedure for Linux and Windows.
+ * and the removal procedure for each platform.
  */
 class InitFiniPlugin : public llvm::orc::ObjectLinkingLayer::Plugin {
   // Store a raw pointer to avoid a reference cycle:
@@ -117,7 +119,5 @@ class InitFiniPlugin : public llvm::orc::ObjectLinkingLayer::Plugin {
 }  // namespace orcjit
 }  // namespace ffi
 }  // namespace tvm
-
-#endif  // __linux__ || _WIN32
 
 #endif  // TVM_FFI_ORCJIT_LLVM_PATCHES_INIT_FINI_PLUGIN_H_

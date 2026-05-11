@@ -19,14 +19,12 @@
 
 /*!
  * \file init_fini_plugin.cc
- * \brief Init/fini section handling for ELF and COFF JIT objects.
+ * \brief Init/fini section handling for ELF, MachO, and COFF JIT objects.
  *
  * See init_fini_plugin.h for the trigger, symptom, and removal
  * procedure for each platform.
  */
 #include "init_fini_plugin.h"
-
-#if defined(__linux__) || defined(_WIN32)
 
 #include <llvm/ExecutionEngine/JITLink/JITLink.h>
 #include <llvm/ExecutionEngine/Orc/Shared/ExecutorAddress.h>
@@ -258,5 +256,3 @@ void InitFiniPlugin::notifyTransferringResources(llvm::orc::JITDylib& JD,
 }  // namespace orcjit
 }  // namespace ffi
 }  // namespace tvm
-
-#endif  // __linux__ || _WIN32

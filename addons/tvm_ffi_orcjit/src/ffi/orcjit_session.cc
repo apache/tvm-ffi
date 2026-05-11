@@ -65,9 +65,7 @@
 #if defined(__linux__) && (defined(__x86_64__) || defined(_M_X64))
 #include "llvm_patches/gotpcrelx_fix.h"
 #endif
-#if defined(__linux__) || defined(_WIN32)
 #include "llvm_patches/init_fini_plugin.h"
-#endif
 
 namespace tvm {
 namespace ffi {
@@ -232,9 +230,10 @@ ORCJITExecutionSessionObj::ORCJITExecutionSessionObj(const std::string& orc_rt_p
   //
   // LLJIT auto-configures ObjectLinkingLayer (JITLink) on x86_64 and aarch64
   // Linux (see LLJITBuilderState::prepareForConstruction).  We override
-  // the layer creator to pass our memory manager.  macOS/Windows are excluded:
-  // macOS MachOPlatform teardown crashes with the arena; Windows needs
-  // further testing.
+  // the layer creator to pass our memory manager.  macOS/Windows are gated
+  // off pending testing.  (The historical "MachOPlatform teardown crashes
+  // with the arena" concern is moot now that we skip MachOPlatform below,
+  // but enabling the slab on macOS still needs a validation pass.)
 #ifdef __linux__
   if (slab_size_bytes >= 0) {
     auto page_size = llvm::sys::Process::getPageSizeEstimate();
@@ -262,8 +261,11 @@ ORCJITExecutionSessionObj::ORCJITExecutionSessionObj(const std::string& orc_rt_p
           });
     }  // if (memory_manager_)
 #elif defined(__APPLE__) || defined(_WIN32)
-    // macOS: MachOPlatform (via ExecutorNativePlatform) requires ObjectLinkingLayer.
-    // Windows: need ObjectLinkingLayer for InitFiniPlugin and DLLImportDefinitionGenerator.
+    // Force ObjectLinkingLayer (JITLink) so we can attach InitFiniPlugin.
+    // macOS: LLJIT already defaults to JITLink for Darwin, but the explicit
+    // creator keeps the static_cast in the addPlugin site below type-safe.
+    // Windows: LLJIT defaults to RTDyld; we need JITLink for InitFiniPlugin
+    // and DLLImportDefinitionGenerator.
     builder.setObjectLinkingLayerCreator(
         [](llvm::orc::ExecutionSession& ES)
             -> llvm::Expected<std::unique_ptr<llvm::orc::ObjectLayer>> {
@@ -285,16 +287,24 @@ ORCJITExecutionSessionObj::ORCJITExecutionSessionObj(const std::string& orc_rt_p
     (void)builder;
   };
 
+  auto builder = llvm::orc::LLJITBuilder();
+#ifndef __APPLE__
+  // macOS: always skip ExecutorNativePlatform / MachOPlatform to sidestep
+  // the compact-unwind 32-bit-delta bug in JITLink's CompactUnwindSupport
+  // (personality delta against a per-JITDylib header base wraps `uint64_t`
+  // and fails `isUInt<32>` when a later user graph mmaps below the header;
+  // see the repo-root fix-machoplatform-libunwind-dso-base.patch for the
+  // full analysis).  InitFiniPlugin below handles __mod_init_func /
+  // __mod_term_func instead.  Tradeoff: no C++ exception unwinding across
+  // JIT frames on macOS.
   if (!orc_rt_path.empty()) {
-    auto builder = llvm::orc::LLJITBuilder();
     builder.setPlatformSetUp(llvm::orc::ExecutorNativePlatform(orc_rt_path));
-    setup_builder(builder);
-    jit_ = TVM_FFI_ORCJIT_LLVM_CALL(builder.create());
-  } else {
-    auto builder = llvm::orc::LLJITBuilder();
-    setup_builder(builder);
-    jit_ = TVM_FFI_ORCJIT_LLVM_CALL(builder.create());
   }
+#else
+  (void)orc_rt_path;
+#endif
+  setup_builder(builder);
+  jit_ = TVM_FFI_ORCJIT_LLVM_CALL(builder.create());
 #ifdef _WIN32
   // Strip .pdata/.xdata relocations from COFF objects before JITLink graph building.
   // clang-cl puts static functions in COMDAT sections, and .pdata SEH unwind data
@@ -390,14 +400,13 @@ ORCJITExecutionSessionObj::ORCJITExecutionSessionObj(const std::string& orc_rt_p
             llvm::StringRef(MutableBuf.data(), MutableBuf.size()), Buf->getBufferIdentifier());
       });
 #endif
-#if defined(__linux__) || defined(_WIN32)
-  // Linux/Windows: use our custom InitFiniPlugin for init/fini section
-  // collection and priority-ordered execution. See llvm_patches/init_fini_plugin.h
-  // for the three-platform init/fini strategy and removal criteria.
+  // Use our custom InitFiniPlugin on every platform for init/fini section
+  // collection and priority-ordered execution (ELF .init_array/.fini_array,
+  // MachO __mod_init_func/__mod_term_func, COFF .CRT$XC*/.CRT$XT*).  See
+  // llvm_patches/init_fini_plugin.h for per-platform removal criteria.
   auto& objlayer = jit_->getObjLinkingLayer();
   static_cast<llvm::orc::ObjectLinkingLayer&>(objlayer).addPlugin(
       std::make_unique<InitFiniPlugin>(this));
-#endif
 #ifdef _WIN32
   // On Windows, the default process-symbol generator only searches the main
   // exe module via GetProcAddress(GetModuleHandle(NULL), ...). Add a
@@ -417,6 +426,37 @@ ORCJITExecutionSession::ORCJITExecutionSession(const std::string& orc_rt_path,
       make_object<ORCJITExecutionSessionObj>(orc_rt_path, slab_size_bytes);
   data_ = std::move(obj);
 }
+
+#ifdef __APPLE__
+// macOS __cxa_atexit shim.
+//
+// We cannot override ___dso_handle (LLJIT's Platform has already defined
+// it in every user JITDylib), so we don't rely on the `dso_handle` arg.
+// Instead, each ORCJITDynamicLibraryObj publishes its own
+// `cxa_atexit_records_` vector address via a thread-local pointer,
+// scoped around any JIT entry point that may run ctors / dtors.  The
+// shim pushes (fn, arg) into the TLS-pointed vector, or silently drops
+// if no scope is active (which would be a stray call from outside any
+// JIT execution — acceptable degradation).
+using CxaAtexitRecords = std::vector<std::pair<void (*)(void*), void*>>;
+
+namespace {
+thread_local CxaAtexitRecords* g_active_cxa_records = nullptr;
+}  // namespace
+
+CxaAtexitRecordsScope::CxaAtexitRecordsScope(CxaAtexitRecords* records)
+    : prev_(g_active_cxa_records) {
+  g_active_cxa_records = records;
+}
+CxaAtexitRecordsScope::~CxaAtexitRecordsScope() { g_active_cxa_records = prev_; }
+
+extern "C" int tvm_ffi_cxa_atexit_shim(void (*fn)(void*), void* arg,
+                                       void* /*dso_handle*/) noexcept {
+  if (fn == nullptr || g_active_cxa_records == nullptr) return 0;
+  g_active_cxa_records->emplace_back(fn, arg);
+  return 0;
+}
+#endif  // __APPLE__
 
 ORCJITDynamicLibrary ORCJITExecutionSessionObj::CreateDynamicLibrary(const String& name) {
   TVM_FFI_CHECK(jit_ != nullptr, InternalError) << "ExecutionSession not initialized";
@@ -440,10 +480,32 @@ ORCJITDynamicLibrary ORCJITExecutionSessionObj::CreateDynamicLibrary(const Strin
     jit_dylib.addToLinkOrder(*kv.first, kv.second);
   }
 
-  auto dylib = ORCJITDynamicLibrary(make_object<ORCJITDynamicLibraryObj>(
-      GetRef<ORCJITExecutionSession>(this), &jit_dylib, jit_.get(), lib_name));
+  auto dylib_obj = make_object<ORCJITDynamicLibraryObj>(GetRef<ORCJITExecutionSession>(this),
+                                                        &jit_dylib, jit_.get(), lib_name);
 
-  return dylib;
+#ifdef __APPLE__
+  // Inject ___cxa_atexit on the user JITDylib so it wins over <Platform>'s
+  // fallback (which resolves to libSystem's and would orphan dtors from
+  // our drop-time drain).  Definitions on the JITDylib itself are searched
+  // before the link order, so this is the authoritative resolution site.
+  //
+  // We do NOT override ___dso_handle here — LLJIT's Platform has already
+  // defined one for every user JITDylib, and JITDylib::define refuses
+  // duplicates.  Instead, the shim reads a thread-local pointer to the
+  // owning dylib's records vector (set by CxaAtexitRecordsScope around
+  // the GetSymbol init call and the destructor drain), so the actual
+  // value of ___dso_handle is irrelevant.
+  {
+    auto& ES = jit_->getExecutionSession();
+    llvm::orc::SymbolMap shim_syms;
+    shim_syms[ES.intern("___cxa_atexit")] = {
+        llvm::orc::ExecutorAddr::fromPtr(reinterpret_cast<void*>(&tvm_ffi_cxa_atexit_shim)),
+        llvm::JITSymbolFlags::Exported | llvm::JITSymbolFlags::Callable};
+    llvm::cantFail(jit_dylib.define(llvm::orc::absoluteSymbols(std::move(shim_syms))));
+  }
+#endif
+
+  return ORCJITDynamicLibrary(std::move(dylib_obj));
 }
 
 llvm::orc::ExecutionSession& ORCJITExecutionSessionObj::GetLLVMExecutionSession() {

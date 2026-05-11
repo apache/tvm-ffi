@@ -35,7 +35,14 @@ def _find_orc_rt_library() -> str | None:
     # avoiding all C++ runtime dependencies (magic statics, RTTI, sized delete,
     # SEH, COMDAT). Our custom InitFiniPlugin handles .CRT$XC*/.CRT$XT* init/fini
     # sections, and DLLImportDefinitionGenerator resolves __imp_ DLL import stubs.
-    if sys.platform == "win32":
+    #
+    # macOS: skip ORC runtime too. ExecutorNativePlatform would install
+    # MachOPlatform, which triggers a compact-unwind 32-bit-delta bug in
+    # JITLink when a user graph mmaps below the per-JITDylib Mach-O header
+    # (see repo-root fix-machoplatform-libunwind-dso-base.patch). Our
+    # InitFiniPlugin handles __mod_init_func / __mod_term_func instead.
+    # Tradeoff: no C++ exception unwinding across JIT frames on macOS.
+    if sys.platform in ("win32", "darwin"):
         return None
     patterns = ["liborc_rt*.a"]
     for pattern in patterns:

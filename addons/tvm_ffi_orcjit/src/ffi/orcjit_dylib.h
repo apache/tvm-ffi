@@ -105,6 +105,18 @@ class ORCJITDynamicLibraryObj : public ModuleObj {
 
   /*! \brief Link order tracking (to support incremental linking) */
   llvm::orc::JITDylibSearchOrder link_order_;
+
+#ifdef __APPLE__
+  /*! \brief Per-dylib __cxa_atexit registry.
+   *
+   *  Without MachOPlatform, clang-lowered \c __attribute__((destructor))
+   *  and C++ global dtors register through \c __cxa_atexit during init.
+   *  We interpose \c ___cxa_atexit per-JITDylib (see
+   *  \c orcjit_session.cc); the shim pushes \c (fn, arg) into the vector
+   *  published via \c CxaAtexitRecordsScope around each JIT entry.  The
+   *  destructor drains LIFO before \c RemoveDylib. */
+  CxaAtexitRecords cxa_atexit_records_;
+#endif  // __APPLE__
 };
 
 /*!
