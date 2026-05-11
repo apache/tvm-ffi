@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import functools
 import hashlib
+import logging
 import os
 import shutil
 import subprocess
@@ -35,6 +36,8 @@ from tvm_ffi.utils import FileLock
 
 IS_WINDOWS = sys.platform == "win32"
 BACKEND_STR = Literal["cuda", "hip"]
+
+logger = logging.getLogger(__name__)
 
 
 @functools.lru_cache
@@ -599,6 +602,12 @@ def build_ninja(build_dir: str) -> None:
             msg.append(f"stderr:\n{status.stderr.decode(encoding)}")
 
         raise RuntimeError("\n".join(msg))
+
+    if os.environ.get("TVM_FFI_LOG_BUILD") in ("1", "stdout"):
+        logger.info("ninja build stdout:\n%s", status.stdout.decode("utf-8"))
+
+    if os.environ.get("TVM_FFI_LOG_BUILD") in ("1", "stderr"):
+        logger.info("ninja build stderr:\n%s", status.stderr.decode("utf-8"))
 
 
 # Translation table for escaping C++ string literals
