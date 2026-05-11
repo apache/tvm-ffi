@@ -45,6 +45,25 @@ namespace tvm {
 namespace ffi {
 namespace orcjit {
 
+namespace {
+// When JIT thunks start reading their ctx/handle arg, grow this wrapper with
+// a DylibFnContext prefix whose first field is the thunk pointer, and flip
+// `safe_call` at a slab-emitted redirect that dispatches via ctx[0]. Example:
+//
+//     struct DylibFnContext { TVMFFISafeCallType fn; /* + closure fields */ };
+//     struct DylibFnContextWithModule {
+//       DylibFnContext ctx;  // first — pointer-interconvertible with wrapper
+//       Module module_ref;
+//     };
+struct DylibFnContextWithModule {
+  Module module_ref;  // keeps the owning dylib (and its slab) alive
+};
+
+void DeleteDylibFnContextWithModule(void* p) {
+  delete static_cast<DylibFnContextWithModule*>(p);
+}
+}  // namespace
+
 ORCJITDynamicLibraryObj::ORCJITDynamicLibraryObj(ORCJITExecutionSession session,
                                                  llvm::orc::JITDylib* dylib, llvm::orc::LLJIT* jit,
                                                  String name)
@@ -177,13 +196,9 @@ Optional<Function> ORCJITDynamicLibraryObj::GetFunction(const String& name) {
 
   // Try to get the symbol - return NullOpt if not found
   if (void* symbol = GetSymbol(symbol_name)) {
-    // Point FunctionObj::safe_call directly at the JIT'd __tvm_ffi_<name>
-    // thunk so TVMFFIFunctionCall jumps from libtvm_ffi.so straight into the
-    // slab with no adapter .text in between. The thunk ignores its handle
-    // (x0) argument, so self=nullptr is safe. Library lifetime is held by
-    // the caller (see runtime/orcjit_cute_patch._KEEP_ALIVE).
     TVMFFISafeCallType c_func = reinterpret_cast<TVMFFISafeCallType>(symbol);
-    return Function::FromExternC(nullptr, c_func, nullptr);
+    auto* wrapper = new DylibFnContextWithModule{GetRef<Module>(this)};
+    return Function::FromExternC(wrapper, c_func, DeleteDylibFnContextWithModule);
   }
   return std::nullopt;
 }
