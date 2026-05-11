@@ -59,9 +59,7 @@ struct DylibFnContextWithModule {
   Module module_ref;  // keeps the owning dylib (and its slab) alive
 };
 
-void DeleteDylibFnContextWithModule(void* p) {
-  delete static_cast<DylibFnContextWithModule*>(p);
-}
+void DeleteDylibFnContextWithModule(void* p) { delete static_cast<DylibFnContextWithModule*>(p); }
 }  // namespace
 
 ORCJITDynamicLibraryObj::ORCJITDynamicLibraryObj(ORCJITExecutionSession session,
