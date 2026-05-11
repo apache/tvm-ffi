@@ -177,16 +177,13 @@ Optional<Function> ORCJITDynamicLibraryObj::GetFunction(const String& name) {
 
   // Try to get the symbol - return NullOpt if not found
   if (void* symbol = GetSymbol(symbol_name)) {
-    // Wrap C function pointer as tvm-ffi Function.
-    // Capture a strong self-ref so the module (and its JIT code pages) stays
-    // alive as long as the returned Function is alive.
+    // Point FunctionObj::safe_call directly at the JIT'd __tvm_ffi_<name>
+    // thunk so TVMFFIFunctionCall jumps from libtvm_ffi.so straight into the
+    // slab with no adapter .text in between. The thunk ignores its handle
+    // (x0) argument, so self=nullptr is safe. Library lifetime is held by
+    // the caller (see runtime/orcjit_cute_patch._KEEP_ALIVE).
     TVMFFISafeCallType c_func = reinterpret_cast<TVMFFISafeCallType>(symbol);
-    Module self_strong_ref = GetRef<Module>(this);
-    return Function::FromPacked([c_func, self_strong_ref](PackedArgs args, Any* rv) {
-      TVM_FFI_ICHECK_LT(rv->type_index(), ffi::TypeIndex::kTVMFFIStaticObjectBegin);
-      TVM_FFI_CHECK_SAFE_CALL((*c_func)(nullptr, reinterpret_cast<const TVMFFIAny*>(args.data()),
-                                        args.size(), reinterpret_cast<TVMFFIAny*>(rv)));
-    });
+    return Function::FromExternC(nullptr, c_func, nullptr);
   }
   return std::nullopt;
 }
