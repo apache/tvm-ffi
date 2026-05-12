@@ -47,11 +47,9 @@ logger = logging.getLogger(__name__)
 def _torch_extension_device(torch_module: Any) -> str:
     """Return the torch backend name used in the optional extension library name."""
     if torch_module.cuda.is_available():
-        if getattr(torch_module.version, "cuda", None) is not None:
-            return "cuda"
         if getattr(torch_module.version, "hip", None) is not None:
             return "rocm"
-        raise ValueError("Cannot determine whether to build with CUDA or ROCm.")
+        return "cuda"
     return "cpu"
 
 

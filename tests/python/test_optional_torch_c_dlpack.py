@@ -78,7 +78,7 @@ def test_torch_extension_device() -> None:
         )
         == "rocm"
     )
-    with pytest.raises(ValueError, match="Cannot determine whether to build with CUDA or ROCm"):
+    assert (
         _optional_torch_c_dlpack._torch_extension_device(
             _fake_torch_module(
                 cuda_available=True,
@@ -86,6 +86,8 @@ def test_torch_extension_device() -> None:
                 include_hip_attr=False,
             )
         )
+        == "cuda"
+    )
 
 
 def test_existing_torch_dlpack_api_is_preferred_on_rocm(monkeypatch: pytest.MonkeyPatch) -> None:
