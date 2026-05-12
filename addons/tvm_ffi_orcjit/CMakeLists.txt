@@ -147,10 +147,12 @@ elseif (UNIX AND NOT WIN32)
 endif ()
 
 # ---- Find and bundle liborc_rt ----
-# Only Linux uses liborc_rt (for ExecutorNativePlatform → ELFNixPlatform).
-# macOS: we skip MachOPlatform to sidestep the compact-unwind delta bug
-#        (see src/ffi/orcjit_session.cc); liborc_rt is unused.
-# Windows: COFFPlatform is not hooked up; liborc_rt is unused.
+# Platform notes:
+#
+# * Linux: liborc_rt is used for ExecutorNativePlatform → ELFNixPlatform.
+# * macOS: MachOPlatform is skipped to sidestep the compact-unwind delta bug (see
+#   src/ffi/orcjit_session.cc); liborc_rt is unused.
+# * Windows: COFFPlatform is not hooked up; liborc_rt is unused.
 set(ORC_RT_PATH "")
 if (NOT APPLE AND NOT WIN32)
   if (DEFINED ENV{ORC_RT_PATH})
