@@ -120,8 +120,8 @@ llvm::Expected<std::unique_ptr<llvm::MemoryBuffer>> StripCoffPdataXdata(
     std::memset(&MutableBuf[off + 24], 0, 4);  // PointerToRelocations
     std::memset(&MutableBuf[off + 32], 0, 2);  // NumberOfRelocations
   }
-  return llvm::MemoryBuffer::getMemBufferCopy(
-      llvm::StringRef(MutableBuf.data(), MutableBuf.size()), Buf->getBufferIdentifier());
+  return llvm::MemoryBuffer::getMemBufferCopy(llvm::StringRef(MutableBuf.data(), MutableBuf.size()),
+                                              Buf->getBufferIdentifier());
 }
 
 }  // namespace orcjit

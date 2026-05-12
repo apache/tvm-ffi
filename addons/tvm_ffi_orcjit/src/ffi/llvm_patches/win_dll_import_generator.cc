@@ -37,7 +37,6 @@
 #endif
 #include <psapi.h>
 #include <windows.h>
-
 #include <llvm/ADT/DenseMap.h>
 #include <llvm/ExecutionEngine/JITLink/JITLink.h>
 #include <llvm/ExecutionEngine/JITLink/x86_64.h>
