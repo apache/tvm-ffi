@@ -24,20 +24,15 @@
 
 #include "orcjit_session.h"
 
-#include <llvm/ADT/DenseMap.h>
-#include <llvm/ExecutionEngine/JITLink/JITLink.h>
-#include <llvm/ExecutionEngine/JITLink/x86_64.h>
 #include <llvm/ExecutionEngine/Orc/AbsoluteSymbols.h>
 #include <llvm/ExecutionEngine/Orc/LLJIT.h>
 #include <llvm/ExecutionEngine/Orc/ObjectLinkingLayer.h>
 #include <llvm/ExecutionEngine/Orc/ObjectTransformLayer.h>
 #include <llvm/ExecutionEngine/Orc/Shared/ExecutorAddress.h>
 #include <llvm/ExecutionEngine/Orc/Shared/ExecutorSymbolDef.h>
-#include <llvm/Support/DynamicLibrary.h>
 #include <llvm/Support/Error.h>
 #include <llvm/Support/Process.h>
 #include <llvm/Support/TargetSelect.h>
-#include <llvm/TargetParser/SubtargetFeature.h>
 #include <tvm/ffi/cast.h>
 #include <tvm/ffi/error.h>
 #include <tvm/ffi/object.h>
@@ -46,26 +41,17 @@
 #include <cstddef>
 #include <cstring>
 
-#include "orcjit_memory_manager.h"
-
-#ifdef _WIN32
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <psapi.h>
-#include <windows.h>
-#endif
-
 #include "orcjit_dylib.h"
+#include "orcjit_memory_manager.h"
 #include "orcjit_utils.h"
 
 #if defined(__linux__) && (defined(__x86_64__) || defined(_M_X64))
 #include "llvm_patches/gotpcrelx_fix.h"
 #endif
 #include "llvm_patches/init_fini_plugin.h"
+#ifdef _WIN32
+#include "llvm_patches/win_dll_import_generator.h"
+#endif
 
 namespace tvm {
 namespace ffi {
@@ -81,127 +67,6 @@ struct LLVMInitializer {
 };
 
 static LLVMInitializer llvm_initializer;
-
-#ifdef _WIN32
-/*!
- * \brief Custom definition generator for Windows DLL import symbols.
- *
- * On Windows with the MSVC ABI, COFF objects reference DLL-imported symbols
- * via __imp_XXX pointer stubs and direct calls. Without COFFPlatform (which
- * we skip due to MSVC CRT dependency issues), JITLink cannot resolve these.
- *
- * For each resolved symbol, this generator creates a JIT-allocated LinkGraph
- * containing:
- *   - __imp_XXX: a GOT-like pointer entry holding the real address
- *   - XXX: a PLT-like jump stub (`jmp [__imp_XXX]`) for direct calls
- *
- * By allocating stubs in JIT memory (rather than using absoluteSymbols at
- * host-process addresses), all PCRel32 fixups from JIT code reach safely.
- *
- * Symbol search order:
- *   1. Specific MSVC runtime DLLs (vcruntime140, ucrtbase, msvcp140)
- *   2. All loaded process modules (EnumProcessModules)
- *   3. LLVM's SearchForAddressOfSymbol
- */
-class DLLImportDefinitionGenerator : public llvm::orc::DefinitionGenerator {
-  llvm::orc::ExecutionSession& ES_;
-  llvm::orc::ObjectLinkingLayer& L_;
-
-  static void* FindInProcessModules(const std::string& Name) {
-    // Try specific runtime DLLs first, then tvm_ffi.dll (loaded by Python),
-    // then all process modules, then LLVM's search.
-    static const char* kRuntimeDLLs[] = {
-        "vcruntime140.dll",
-        "vcruntime140_1.dll",
-        "ucrtbase.dll",
-        "msvcp140.dll",
-    };
-    // NOTE: We intentionally do not call FreeLibrary() here. These runtime DLLs
-    // (vcruntime140, ucrtbase, etc.) are already loaded by the process and will
-    // remain loaded for its lifetime. LoadLibraryA merely increments the refcount;
-    // the extra refcount is harmless and avoids the overhead of balancing
-    // Get/FreeLibrary for every symbol lookup.
-    for (const char* dll : kRuntimeDLLs) {
-      if (HMODULE hMod = LoadLibraryA(dll)) {
-        if (auto addr = GetProcAddress(hMod, Name.c_str())) {
-          return reinterpret_cast<void*>(addr);
-        }
-      }
-    }
-    // Also check tvm_ffi.dll (host process symbol provider)
-    if (HMODULE hTvmFfi = GetModuleHandleA("tvm_ffi.dll")) {
-      if (auto addr = GetProcAddress(hTvmFfi, Name.c_str())) {
-        return reinterpret_cast<void*>(addr);
-      }
-    }
-    HMODULE hMods[1024];
-    DWORD cbNeeded;
-    if (EnumProcessModules(GetCurrentProcess(), hMods, sizeof(hMods), &cbNeeded)) {
-      DWORD count = cbNeeded / sizeof(HMODULE);
-      if (count > 1024) count = 1024;
-      for (DWORD i = 0; i < count; ++i) {
-        if (auto addr = GetProcAddress(hMods[i], Name.c_str())) {
-          return reinterpret_cast<void*>(addr);
-        }
-      }
-    }
-    if (void* addr = llvm::sys::DynamicLibrary::SearchForAddressOfSymbol(Name)) {
-      return addr;
-    }
-    return nullptr;
-  }
-
- public:
-  DLLImportDefinitionGenerator(llvm::orc::ExecutionSession& ES, llvm::orc::ObjectLinkingLayer& L)
-      : ES_(ES), L_(L) {}
-
-  llvm::Error tryToGenerate(llvm::orc::LookupState& LS, llvm::orc::LookupKind K,
-                            llvm::orc::JITDylib& JD, llvm::orc::JITDylibLookupFlags JDLookupFlags,
-                            const llvm::orc::SymbolLookupSet& LookupSet) override {
-    // Step 1: Collect unique base names (strip __imp_ prefix) and resolve addresses.
-    llvm::DenseMap<llvm::orc::SymbolStringPtr, llvm::orc::ExecutorAddr> Resolved;
-    for (auto& [Name, Flags] : LookupSet) {
-      llvm::StringRef NameStr = *Name;
-      std::string BaseName =
-          NameStr.starts_with("__imp_") ? NameStr.drop_front(6).str() : NameStr.str();
-      if (BaseName == "__ImageBase") continue;
-      auto InternedBase = ES_.intern(BaseName);
-      if (Resolved.count(InternedBase)) continue;
-      void* Addr = FindInProcessModules(BaseName);
-      if (Addr) {
-        Resolved[InternedBase] = llvm::orc::ExecutorAddr::fromPtr(Addr);
-      }
-    }
-    if (Resolved.empty()) return llvm::Error::success();
-
-    // Step 2: Build a LinkGraph with __imp_ pointers and PLT jump stubs.
-    auto G = std::make_unique<llvm::jitlink::LinkGraph>(
-        "<DLL_IMPORT_STUBS>", ES_.getSymbolStringPool(), ES_.getTargetTriple(),
-        llvm::SubtargetFeatures(), llvm::jitlink::getGenericEdgeKindName);
-    auto Prot = static_cast<llvm::orc::MemProt>(static_cast<unsigned>(llvm::orc::MemProt::Read) |
-                                                static_cast<unsigned>(llvm::orc::MemProt::Exec));
-    auto& Sec = G->createSection("__dll_stubs", Prot);
-
-    for (auto& [InternedName, Addr] : Resolved) {
-      // Absolute symbol at the real address (local to this graph)
-      auto& Target = G->addAbsoluteSymbol(G->intern(("__real_" + *InternedName).str()), Addr,
-                                          G->getPointerSize(), llvm::jitlink::Linkage::Strong,
-                                          llvm::jitlink::Scope::Local, false);
-      // __imp_XXX pointer (GOT-like entry)
-      auto& Ptr = llvm::jitlink::x86_64::createAnonymousPointer(*G, Sec, &Target);
-      Ptr.setName(G->intern(("__imp_" + *InternedName).str()));
-      Ptr.setLinkage(llvm::jitlink::Linkage::Strong);
-      Ptr.setScope(llvm::jitlink::Scope::Default);
-      // XXX jump stub (PLT-like entry) for direct calls
-      auto& StubBlock = llvm::jitlink::x86_64::createPointerJumpStubBlock(*G, Sec, Ptr);
-      G->addDefinedSymbol(StubBlock, 0, *InternedName, StubBlock.getSize(),
-                          llvm::jitlink::Linkage::Strong, llvm::jitlink::Scope::Default, true,
-                          false);
-    }
-    return L_.add(JD, std::move(G));
-  }
-};
-#endif  // _WIN32
 
 ORCJITExecutionSessionObj::ORCJITExecutionSessionObj(const std::string& orc_rt_path,
                                                      int64_t slab_size_bytes)
