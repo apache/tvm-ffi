@@ -39,10 +39,14 @@ def _create_dlpack_exchange_api_capsule(ptr_as_int: int) -> Any:
     return capsule
 
 
-def _torch_extension_suffix() -> str:
-    """Return the backend suffix used by the prebuilt extension library."""
-    if torch.cuda.is_available():
-        return "rocm" if torch.version.hip is not None else "cuda"
+def _torch_extension_device(torch_module: Any) -> str:
+    """Return the torch backend name used in the optional extension library name."""
+    if torch_module.cuda.is_available():
+        if getattr(torch_module.version, "cuda", None) is not None:
+            return "cuda"
+        if getattr(torch_module.version, "hip", None) is not None:
+            return "rocm"
+        raise ValueError("Cannot determine whether to build with CUDA or ROCm.")
     return "cpu"
 
 
@@ -59,10 +63,10 @@ def load_torch_c_dlpack_extension() -> None:
         extension = "dylib"
     else:
         extension = "so"
-    suffix = _torch_extension_suffix()
+    device = _torch_extension_device(torch)
     lib_path = (
         Path(__file__).parent
-        / f"libtorch_c_dlpack_addon_torch{version.major}{version.minor}-{suffix}.{extension}"
+        / f"libtorch_c_dlpack_addon_torch{version.major}{version.minor}-{device}.{extension}"
     )
     if not lib_path.exists() or not lib_path.is_file():
         raise ImportError("No matching prebuilt torch c dlpack extension")

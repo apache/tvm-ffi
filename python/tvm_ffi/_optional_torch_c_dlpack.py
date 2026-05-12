@@ -47,9 +47,9 @@ logger = logging.getLogger(__name__)
 def _torch_extension_device(torch_module: Any) -> str:
     """Return the torch backend name used in the optional extension library name."""
     if torch_module.cuda.is_available():
-        if torch_module.version.cuda is not None:
+        if getattr(torch_module.version, "cuda", None) is not None:
             return "cuda"
-        if torch_module.version.hip is not None:
+        if getattr(torch_module.version, "hip", None) is not None:
             return "rocm"
         raise ValueError("Cannot determine whether to build with CUDA or ROCm.")
     return "cpu"
@@ -105,8 +105,7 @@ def load_torch_c_dlpack_extension() -> Any:  # noqa: PLR0912, PLR0915
         import torch  # noqa: PLC0415
         import torch.version  # noqa: PLC0415
 
-        prefer_rocm_override = _torch_extension_device(torch) == "rocm"
-        if _check_and_update_dlpack_c_exchange_api(torch.Tensor) and not prefer_rocm_override:
+        if _check_and_update_dlpack_c_exchange_api(torch.Tensor):
             # skip loading the extension if the __dlpack_c_exchange_api__
             # attribute is already set so we don't have to do it in
             # newer version of PyTorch
@@ -118,7 +117,7 @@ def load_torch_c_dlpack_extension() -> Any:  # noqa: PLR0912, PLR0915
     try:
         import torch_c_dlpack_ext  # noqa: PLC0415, F401
 
-        if _check_and_update_dlpack_c_exchange_api(torch.Tensor) and not prefer_rocm_override:
+        if _check_and_update_dlpack_c_exchange_api(torch.Tensor):
             return None
     except ImportError:
         pass
@@ -126,11 +125,6 @@ def load_torch_c_dlpack_extension() -> Any:  # noqa: PLR0912, PLR0915
         # When torch_c_dlpack_ext and torch have different ABI
         # `ctypes.CDLL` will raise an `AttributeError`.
         # Keep trying JIT
-        pass
-    except OSError:
-        # A prebuilt torch-c-dlpack-ext wheel can be present but linked
-        # against an incompatible backend, e.g. CUDA libraries in a ROCm
-        # PyTorch environment. Keep trying the local JIT build path.
         pass
 
     try:
