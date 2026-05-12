@@ -30,6 +30,7 @@
 #include <tvm/ffi/object.h>
 #include <tvm/ffi/string.h>
 
+#include "llvm_patches/macho_cxa_atexit_shim.h"
 #include "orcjit_session.h"
 
 namespace tvm {

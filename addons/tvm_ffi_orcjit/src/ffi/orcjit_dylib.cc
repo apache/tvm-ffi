@@ -87,20 +87,10 @@ ORCJITDynamicLibraryObj::~ORCJITDynamicLibraryObj() {
   // Step 1b (macOS only): drain per-dylib __cxa_atexit registrations in
   // LIFO.  Clang on Darwin lowers __attribute__((destructor)) and C++
   // global dtors as __cxa_atexit(fn, arg, &__dso_handle) registrations
-  // during init; our shim (see orcjit_session.cc) captured them into
-  // this vector via the TLS pointer published below.
-  //
-  // Pop-and-call handles re-entrant registrations from within a dtor —
-  // the CxaAtexitRecordsScope keeps the TLS pointer live so any
-  // ___cxa_atexit call from inside a dtor also lands here.
-  {
-    CxaAtexitRecordsScope scope(&cxa_atexit_records_);
-    while (!cxa_atexit_records_.empty()) {
-      auto [fn, arg] = cxa_atexit_records_.back();
-      cxa_atexit_records_.pop_back();
-      fn(arg);
-    }
-  }
+  // during init; the shim in llvm_patches/macho_cxa_atexit_shim.cc
+  // captured them into cxa_atexit_records_ via the TLS pointer
+  // published by the GetSymbol-time scope.
+  DrainCxaAtexit(cxa_atexit_records_);
 #endif
   // Step 2: remove the JITDylib from the ExecutionSession. Triggers
   // JITDylib::clear(), which releases all tracked linker resources — in

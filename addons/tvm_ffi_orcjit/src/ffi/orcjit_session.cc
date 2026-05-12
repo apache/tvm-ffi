@@ -24,12 +24,8 @@
 
 #include "orcjit_session.h"
 
-#include <llvm/ExecutionEngine/Orc/AbsoluteSymbols.h>
 #include <llvm/ExecutionEngine/Orc/LLJIT.h>
 #include <llvm/ExecutionEngine/Orc/ObjectLinkingLayer.h>
-#include <llvm/ExecutionEngine/Orc/ObjectTransformLayer.h>
-#include <llvm/ExecutionEngine/Orc/Shared/ExecutorAddress.h>
-#include <llvm/ExecutionEngine/Orc/Shared/ExecutorSymbolDef.h>
 #include <llvm/Support/Error.h>
 #include <llvm/Support/Process.h>
 #include <llvm/Support/TargetSelect.h>
@@ -39,7 +35,6 @@
 #include <tvm/ffi/reflection/registry.h>
 
 #include <cstddef>
-#include <cstring>
 
 #include "orcjit_dylib.h"
 #include "orcjit_memory_manager.h"
@@ -49,7 +44,13 @@
 #include "llvm_patches/gotpcrelx_fix.h"
 #endif
 #include "llvm_patches/init_fini_plugin.h"
+#ifdef __APPLE__
+#include "llvm_patches/macho_cxa_atexit_shim.h"
+#endif
 #ifdef _WIN32
+#include <llvm/ExecutionEngine/Orc/ObjectTransformLayer.h>
+
+#include "llvm_patches/win_coff_pdata_strip.h"
 #include "llvm_patches/win_dll_import_generator.h"
 #endif
 
@@ -171,99 +172,9 @@ ORCJITExecutionSessionObj::ORCJITExecutionSessionObj(const std::string& orc_rt_p
   setup_builder(builder);
   jit_ = TVM_FFI_ORCJIT_LLVM_CALL(builder.create());
 #ifdef _WIN32
-  // Strip .pdata/.xdata relocations from COFF objects before JITLink graph building.
-  // clang-cl puts static functions in COMDAT sections, and .pdata SEH unwind data
-  // has relocations targeting COMDAT leader symbols. JITLink's COFFLinkGraphBuilder
-  // doesn't register COMDAT leaders in its symbol table when the second COMDAT symbol
-  // is CLASS_STATIC (not CLASS_EXTERNAL), causing "Could not find symbol" errors.
-  // We already strip .pdata/.xdata edges in a PostAllocationPass; this moves the
-  // stripping earlier to prevent the graph builder error.
-  // Strip .pdata/.xdata relocations using raw COFF binary manipulation.
-  // We avoid llvm/Object/COFF.h because windows.h (included transitively by
-  // LLJIT.h) defines IMAGE_* macros that conflict with LLVM's COFF enums.
-  jit_->getObjTransformLayer().setTransform(
-      [](std::unique_ptr<llvm::MemoryBuffer> Buf)
-          -> llvm::Expected<std::unique_ptr<llvm::MemoryBuffer>> {
-        const char* Data = Buf->getBufferStart();
-        size_t Size = Buf->getBufferSize();
-        if (Size < 20) return std::move(Buf);
-
-        // Parse COFF header (regular or bigobj format)
-        uint16_t w0, w1;
-        std::memcpy(&w0, Data, 2);
-        std::memcpy(&w1, Data + 2, 2);
-        bool bigobj = (w0 == 0 && w1 == 0xFFFF);
-
-        uint16_t machine;
-        uint32_t num_sections, ptr_to_symtab, num_symbols;
-        size_t sec_hdr_start, sym_entry_size;
-        if (bigobj) {
-          if (Size < 56) return std::move(Buf);
-          std::memcpy(&machine, Data + 6, 2);
-          std::memcpy(&num_sections, Data + 44, 4);
-          std::memcpy(&ptr_to_symtab, Data + 48, 4);
-          std::memcpy(&num_symbols, Data + 52, 4);
-          sec_hdr_start = 56;
-          sym_entry_size = 20;
-        } else {
-          machine = w0;
-          uint16_t ns, opt_hdr_size;
-          std::memcpy(&ns, Data + 2, 2);
-          std::memcpy(&opt_hdr_size, Data + 16, 2);
-          std::memcpy(&ptr_to_symtab, Data + 8, 4);
-          std::memcpy(&num_symbols, Data + 12, 4);
-          num_sections = ns;
-          sec_hdr_start = 20 + opt_hdr_size;
-          sym_entry_size = 18;
-        }
-        if (machine != 0x8664) return std::move(Buf);
-
-        // String table follows the symbol table
-        size_t strtab_start = ptr_to_symtab + static_cast<size_t>(num_symbols) * sym_entry_size;
-
-        // Resolve a section name (inline 8-byte or "/offset" string table ref)
-        constexpr size_t kSecHdrSize = 40;
-        auto resolve_name = [&](size_t hdr_off) -> llvm::StringRef {
-          const char* raw = Data + hdr_off;
-          if (raw[0] == '/' && raw[1] >= '0' && raw[1] <= '9') {
-            uint32_t offset = 0;
-            for (int j = 1; j < 8 && raw[j] >= '0' && raw[j] <= '9'; ++j)
-              offset = offset * 10 + (raw[j] - '0');
-            size_t pos = strtab_start + offset;
-            if (pos < Size) {
-              size_t len = 0;
-              while (pos + len < Size && Data[pos + len]) ++len;
-              return {Data + pos, len};
-            }
-          }
-          size_t len = 0;
-          while (len < 8 && raw[len]) ++len;
-          return {raw, len};
-        };
-
-        // Collect section header offsets needing relocation stripping
-        llvm::SmallVector<size_t, 8> strip_offsets;
-        for (uint32_t i = 0; i < num_sections; ++i) {
-          size_t off = sec_hdr_start + i * kSecHdrSize;
-          if (off + kSecHdrSize > Size) break;
-          auto name = resolve_name(off);
-          if (name.starts_with(".pdata") || name.starts_with(".xdata")) {
-            uint16_t num_relocs;
-            std::memcpy(&num_relocs, Data + off + 32, 2);
-            if (num_relocs > 0) strip_offsets.push_back(off);
-          }
-        }
-        if (strip_offsets.empty()) return std::move(Buf);
-
-        // Create mutable copy, zero out PointerToRelocations and NumberOfRelocations
-        llvm::SmallVector<char> MutableBuf(Data, Data + Size);
-        for (auto off : strip_offsets) {
-          std::memset(&MutableBuf[off + 24], 0, 4);  // PointerToRelocations
-          std::memset(&MutableBuf[off + 32], 0, 2);  // NumberOfRelocations
-        }
-        return llvm::MemoryBuffer::getMemBufferCopy(
-            llvm::StringRef(MutableBuf.data(), MutableBuf.size()), Buf->getBufferIdentifier());
-      });
+  // Strip .pdata/.xdata relocations from COFF objects before JITLink graph
+  // building.  See llvm_patches/win_coff_pdata_strip.h for the rationale.
+  jit_->getObjTransformLayer().setTransform(&StripCoffPdataXdata);
 #endif
   // Use our custom InitFiniPlugin on every platform for init/fini section
   // collection and priority-ordered execution (ELF .init_array/.fini_array,
@@ -291,37 +202,6 @@ ORCJITExecutionSession::ORCJITExecutionSession(const std::string& orc_rt_path,
       make_object<ORCJITExecutionSessionObj>(orc_rt_path, slab_size_bytes);
   data_ = std::move(obj);
 }
-
-#ifdef __APPLE__
-// macOS __cxa_atexit shim.
-//
-// We cannot override ___dso_handle (LLJIT's Platform has already defined
-// it in every user JITDylib), so we don't rely on the `dso_handle` arg.
-// Instead, each ORCJITDynamicLibraryObj publishes its own
-// `cxa_atexit_records_` vector address via a thread-local pointer,
-// scoped around any JIT entry point that may run ctors / dtors.  The
-// shim pushes (fn, arg) into the TLS-pointed vector, or silently drops
-// if no scope is active (which would be a stray call from outside any
-// JIT execution — acceptable degradation).
-using CxaAtexitRecords = std::vector<std::pair<void (*)(void*), void*>>;
-
-namespace {
-thread_local CxaAtexitRecords* g_active_cxa_records = nullptr;
-}  // namespace
-
-CxaAtexitRecordsScope::CxaAtexitRecordsScope(CxaAtexitRecords* records)
-    : prev_(g_active_cxa_records) {
-  g_active_cxa_records = records;
-}
-CxaAtexitRecordsScope::~CxaAtexitRecordsScope() { g_active_cxa_records = prev_; }
-
-extern "C" int tvm_ffi_cxa_atexit_shim(void (*fn)(void*), void* arg,
-                                       void* /*dso_handle*/) noexcept {
-  if (fn == nullptr || g_active_cxa_records == nullptr) return 0;
-  g_active_cxa_records->emplace_back(fn, arg);
-  return 0;
-}
-#endif  // __APPLE__
 
 ORCJITDynamicLibrary ORCJITExecutionSessionObj::CreateDynamicLibrary(const String& name) {
   TVM_FFI_CHECK(jit_ != nullptr, InternalError) << "ExecutionSession not initialized";
@@ -351,23 +231,8 @@ ORCJITDynamicLibrary ORCJITExecutionSessionObj::CreateDynamicLibrary(const Strin
 #ifdef __APPLE__
   // Inject ___cxa_atexit on the user JITDylib so it wins over <Platform>'s
   // fallback (which resolves to libSystem's and would orphan dtors from
-  // our drop-time drain).  Definitions on the JITDylib itself are searched
-  // before the link order, so this is the authoritative resolution site.
-  //
-  // We do NOT override ___dso_handle here — LLJIT's Platform has already
-  // defined one for every user JITDylib, and JITDylib::define refuses
-  // duplicates.  Instead, the shim reads a thread-local pointer to the
-  // owning dylib's records vector (set by CxaAtexitRecordsScope around
-  // the GetSymbol init call and the destructor drain), so the actual
-  // value of ___dso_handle is irrelevant.
-  {
-    auto& ES = jit_->getExecutionSession();
-    llvm::orc::SymbolMap shim_syms;
-    shim_syms[ES.intern("___cxa_atexit")] = {
-        llvm::orc::ExecutorAddr::fromPtr(reinterpret_cast<void*>(&tvm_ffi_cxa_atexit_shim)),
-        llvm::JITSymbolFlags::Exported | llvm::JITSymbolFlags::Callable};
-    llvm::cantFail(jit_dylib.define(llvm::orc::absoluteSymbols(std::move(shim_syms))));
-  }
+  // our drop-time drain).  See llvm_patches/macho_cxa_atexit_shim.h.
+  InstallCxaAtexitShim(jit_->getExecutionSession(), jit_dylib);
 #endif
 
   return ORCJITDynamicLibrary(std::move(dylib_obj));

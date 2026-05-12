@@ -44,32 +44,6 @@ namespace orcjit {
 // Forward declaration
 class ORCJITDynamicLibrary;
 
-#ifdef __APPLE__
-/*! \brief RAII scope that publishes a per-dylib __cxa_atexit records
- *         vector to a TLS slot consulted by the ___cxa_atexit shim in
- *         orcjit_session.cc.  The shim reads the TLS pointer and
- *         pushes (fn, arg) into it; outside any active scope the shim
- *         silently drops registrations.
- *
- *  Wrap any JIT entry point that can run ctors / dtors (e.g.
- *  GetSymbol's initialize call, the dtor's drain loop) with one of
- *  these, constructed with \c &cxa_atexit_records_ from the owning
- *  ORCJITDynamicLibraryObj.
- */
-using CxaAtexitRecords = std::vector<std::pair<void (*)(void*), void*>>;
-
-class CxaAtexitRecordsScope {
- public:
-  explicit CxaAtexitRecordsScope(CxaAtexitRecords* records);
-  ~CxaAtexitRecordsScope();
-  CxaAtexitRecordsScope(const CxaAtexitRecordsScope&) = delete;
-  CxaAtexitRecordsScope& operator=(const CxaAtexitRecordsScope&) = delete;
-
- private:
-  CxaAtexitRecords* prev_;
-};
-#endif  // __APPLE__
-
 /*!
  * \brief ExecutionSession object for LLVM ORC JIT v2
  *
