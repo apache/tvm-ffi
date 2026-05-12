@@ -43,8 +43,14 @@
 #include <llvm/Support/DynamicLibrary.h>
 #include <llvm/Support/Error.h>
 #include <llvm/TargetParser/SubtargetFeature.h>
-#include <psapi.h>
+
+// windows.h must precede psapi.h — psapi.h uses SIZE_T / DWORD typedefs
+// defined in windows.h.  Left to its own devices clang-format sorts these
+// alphabetically, landing psapi.h first and breaking the MSVC build.
+// clang-format off
 #include <windows.h>
+#include <psapi.h>
+// clang-format on
 
 #include <string>
 
