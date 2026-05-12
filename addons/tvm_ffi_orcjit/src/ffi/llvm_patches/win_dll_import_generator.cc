@@ -35,8 +35,7 @@
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
-#include <psapi.h>
-#include <windows.h>
+
 #include <llvm/ADT/DenseMap.h>
 #include <llvm/ExecutionEngine/JITLink/JITLink.h>
 #include <llvm/ExecutionEngine/JITLink/x86_64.h>
@@ -44,6 +43,8 @@
 #include <llvm/Support/DynamicLibrary.h>
 #include <llvm/Support/Error.h>
 #include <llvm/TargetParser/SubtargetFeature.h>
+#include <psapi.h>
+#include <windows.h>
 
 #include <string>
 
