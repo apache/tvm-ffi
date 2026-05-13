@@ -593,9 +593,9 @@ def build_ninja(build_dir: str) -> None:
         status = _run_command_in_dev_prompt(args=command, cwd=build_dir, capture_output=True)
     else:
         status = subprocess.run(check=False, args=command, cwd=build_dir, capture_output=True)
+    encoding = "oem" if IS_WINDOWS else "utf-8"
     if status.returncode != 0:
         msg = [f"ninja exited with status {status.returncode}"]
-        encoding = "oem" if IS_WINDOWS else "utf-8"
         if status.stdout:
             msg.append(f"stdout:\n{status.stdout.decode(encoding)}")
         if status.stderr:
@@ -603,11 +603,11 @@ def build_ninja(build_dir: str) -> None:
 
         raise RuntimeError("\n".join(msg))
 
-    if os.environ.get("TVM_FFI_LOG_BUILD") in ("1", "stdout"):
-        logger.info("ninja build stdout:\n%s", status.stdout.decode("utf-8"))
-
-    if os.environ.get("TVM_FFI_LOG_BUILD") in ("1", "stderr"):
-        logger.info("ninja build stderr:\n%s", status.stderr.decode("utf-8"))
+    LOG_BUILD = os.environ.get("TVM_FFI_CPP_EXTENSION_LOG_BUILD", "0")
+    if LOG_BUILD in ("1", "stdout"):
+        logger.info("ninja build stdout:\n%s", status.stdout.decode(encoding))
+    if LOG_BUILD in ("1", "stderr"):
+        logger.info("ninja build stderr:\n%s", status.stderr.decode(encoding))
 
 
 # Translation table for escaping C++ string literals
