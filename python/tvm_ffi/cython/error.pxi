@@ -104,6 +104,23 @@ cdef class Error(CObject):
     def backtrace(self):
         return bytearray_to_str(&(TVMFFIErrorGetCellPtr(self.chandle).backtrace))
 
+    @property
+    def extra_context(self):
+        """Optional structured payload attached to this error.
+
+        Returns ``None`` if nothing is attached.  May be inspected via the
+        appropriate type-specific helpers.
+        """
+        cdef TVMFFIObjectHandle ctx_handle = TVMFFIErrorGetCellPtr(self.chandle).extra_context
+        if ctx_handle == NULL:
+            return None
+        # Build an owned Any from the unowned handle by incrementing the refcount.
+        cdef TVMFFIAny any_val
+        any_val.type_index = TVMFFIObjectGetTypeIndex(ctx_handle)
+        any_val.v_obj = <TVMFFIObject*>ctx_handle
+        TVMFFIObjectIncRef(ctx_handle)
+        return make_ret_object(any_val)
+
 
 cdef inline Error move_from_last_error():
     # raise last error
