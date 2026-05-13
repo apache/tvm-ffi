@@ -338,11 +338,13 @@ TVM_FFI_INLINE void SetSafeCallRaised(const Error& error) {
 
 class ErrorBuilder {
  public:
+  TVM_FFI_COLD_CODE
   explicit ErrorBuilder(std::string kind, std::string backtrace, bool log_before_throw)
       : kind_(std::move(kind)),
         backtrace_(std::move(backtrace)),
         log_before_throw_(log_before_throw) {}
 
+  TVM_FFI_COLD_CODE
   explicit ErrorBuilder(std::string kind, const TVMFFIByteArray* backtrace, bool log_before_throw)
       : ErrorBuilder(std::move(kind), std::string(backtrace->data, backtrace->size),
                      log_before_throw) {}
@@ -353,7 +355,7 @@ class ErrorBuilder {
 #pragma warning(disable : 4722)
 #endif
   // avoid inline to reduce binary size, error throw path do not need to be fast
-  [[noreturn]] ~ErrorBuilder() noexcept(false) {
+  [[noreturn]] TVM_FFI_COLD_CODE ~ErrorBuilder() noexcept(false) {
     ::tvm::ffi::Error error(std::move(kind_), stream_.str(), std::move(backtrace_));
     if (log_before_throw_) {
       std::cerr << error.FullMessage();
@@ -456,7 +458,8 @@ TVM_FFI_CHECK_FUNC(_NE, !=)
   TVM_FFI_THROW(ErrorKind) << "Check failed: " << #x " " #op " " #y << *__tvm_ffi_log_err << ": "
 
 #define TVM_FFI_CHECK(cond, ErrorKind) \
-  if (!(cond)) TVM_FFI_THROW(ErrorKind) << "Check failed: (" #cond << ") is false: "
+  if (TVM_FFI_UNLIKELY(!(cond)))       \
+  TVM_FFI_THROW(ErrorKind) << "Check failed: (" #cond << ") is false: "
 
 #define TVM_FFI_CHECK_LT(x, y, ErrorKind) TVM_FFI_CHECK_BINARY_OP(_LT, <, x, y, ErrorKind)
 #define TVM_FFI_CHECK_GT(x, y, ErrorKind) TVM_FFI_CHECK_BINARY_OP(_GT, >, x, y, ErrorKind)

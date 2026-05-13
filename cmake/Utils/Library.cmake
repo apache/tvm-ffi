@@ -400,3 +400,23 @@ function (tvm_ffi_install target)
     )
   endif ()
 endfunction ()
+
+# Enable per-function section emission so functions annotated with TVM_FFI_COLD_CODE land in
+# `.text.unlikely.*` and the linker's default placement rule groups them away from hot code at the
+# tail of `.text`. Compile flags only — `--gc-sections` is intentionally NOT enabled here (separate
+# optimization; risks stripping registered globals).
+function (tvm_ffi_enable_section_layout)
+  if (CMAKE_CXX_COMPILER_ID MATCHES "^(GNU|Clang|AppleClang)$")
+    foreach (target tvm_ffi_objs tvm_ffi_extra_objs)
+      if (TARGET ${target})
+        target_compile_options(${target} PRIVATE -ffunction-sections)
+      endif ()
+    endforeach ()
+  elseif (MSVC)
+    foreach (target tvm_ffi_objs tvm_ffi_extra_objs)
+      if (TARGET ${target})
+        target_compile_options(${target} PRIVATE /Gy)
+      endif ()
+    endforeach ()
+  endif ()
+endfunction ()

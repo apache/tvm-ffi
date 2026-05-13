@@ -204,6 +204,10 @@ if (TVM_FFI_ATTACH_DEBUG_SYMBOLS)
   endif ()
 endif ()
 
+# Per-function section emission so TVM_FFI_COLD_CODE-marked functions land in `.text.unlikely.*` and
+# the linker isolates them in a cold region at the tail of `.text`.
+tvm_ffi_enable_section_layout()
+
 include(cmake/Utils/CxxWarning.cmake)
 include(cmake/Utils/Sanitizer.cmake)
 

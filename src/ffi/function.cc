@@ -83,7 +83,7 @@ class GlobalFunctionTable {
   };
 
   void Update(const String& name, Function func, bool can_override) {
-    if (table_.count(name)) {
+    if (TVM_FFI_UNLIKELY(table_.count(name) != 0)) {
       if (!can_override) {
         TVM_FFI_THROW(RuntimeError) << "Global Function `" << name << "` is already registered";
       }
@@ -93,7 +93,7 @@ class GlobalFunctionTable {
 
   void Update(const TVMFFIMethodInfo* method_info, bool can_override) {
     String name(method_info->name.data, method_info->name.size);
-    if (table_.count(name)) {
+    if (TVM_FFI_UNLIKELY(table_.count(name) != 0)) {
       if (!can_override) {
         TVM_FFI_LOG_AND_THROW(RuntimeError)
             << "Global Function `" << name << "` is already registered, possible causes:\n"

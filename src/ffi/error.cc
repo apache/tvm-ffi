@@ -20,6 +20,7 @@
  * \file src/ffi/error.cc
  * \brief Error handling implementation
  */
+#include <tvm/ffi/base_details.h>
 #include <tvm/ffi/c_api.h>
 #include <tvm/ffi/error.h>
 
@@ -30,16 +31,19 @@ namespace ffi {
 
 class SafeCallContext {
  public:
+  TVM_FFI_COLD_CODE
   void SetRaised(TVMFFIObjectHandle error) {
     last_error_ =
         details::ObjectUnsafe::ObjectPtrFromUnowned<ErrorObj>(static_cast<TVMFFIObject*>(error));
   }
 
+  TVM_FFI_COLD_CODE
   void SetRaisedByCstr(const char* kind, const char* message, const TVMFFIByteArray* backtrace) {
     Error error(kind, message, backtrace);
     last_error_ = details::ObjectUnsafe::ObjectPtrFromObjectRef<ErrorObj>(std::move(error));
   }
 
+  TVM_FFI_COLD_CODE
   void SetRaisedByCstrParts(const char* kind, const char** message_parts, int32_t num_parts,
                             const TVMFFIByteArray* backtrace) {
     std::string message;
@@ -59,6 +63,7 @@ class SafeCallContext {
     last_error_ = details::ObjectUnsafe::ObjectPtrFromObjectRef<ErrorObj>(std::move(error));
   }
 
+  TVM_FFI_COLD_CODE
   void MoveFromRaised(TVMFFIObjectHandle* result) {
     result[0] = details::ObjectUnsafe::MoveObjectPtrToTVMFFIObjectPtr(std::move(last_error_));
   }
@@ -75,12 +80,14 @@ class SafeCallContext {
 }  // namespace ffi
 }  // namespace tvm
 
+TVM_FFI_COLD_CODE
 void TVMFFIErrorSetRaisedFromCStr(const char* kind, const char* message) {
   // NOTE: run backtrace here to simplify the depth of tracekback
   tvm::ffi::SafeCallContext::ThreadLocal()->SetRaisedByCstr(
       kind, message, TVMFFIBacktrace(nullptr, 0, nullptr, 0));
 }
 
+TVM_FFI_COLD_CODE
 void TVMFFIErrorSetRaisedFromCStrParts(const char* kind, const char** message_parts,
                                        int32_t num_parts) {
   // NOTE: run backtrace here to simplify the depth of tracekback
@@ -88,14 +95,17 @@ void TVMFFIErrorSetRaisedFromCStrParts(const char* kind, const char** message_pa
       kind, message_parts, num_parts, TVMFFIBacktrace(nullptr, 0, nullptr, 0));
 }
 
+TVM_FFI_COLD_CODE
 void TVMFFIErrorSetRaised(TVMFFIObjectHandle error) {
   tvm::ffi::SafeCallContext::ThreadLocal()->SetRaised(error);
 }
 
+TVM_FFI_COLD_CODE
 void TVMFFIErrorMoveFromRaised(TVMFFIObjectHandle* result) {
   tvm::ffi::SafeCallContext::ThreadLocal()->MoveFromRaised(result);
 }
 
+TVM_FFI_COLD_CODE
 int TVMFFIErrorCreate(const TVMFFIByteArray* kind, const TVMFFIByteArray* message,
                       const TVMFFIByteArray* backtrace, TVMFFIObjectHandle* out) {
   // log other errors to the logger
@@ -112,6 +122,7 @@ int TVMFFIErrorCreate(const TVMFFIByteArray* kind, const TVMFFIByteArray* messag
   TVM_FFI_LOG_EXCEPTION_CALL_END(TVMFFIErrorCreate);
 }
 
+TVM_FFI_COLD_CODE
 int TVMFFIErrorCreateWithCauseAndExtraContext(
     const TVMFFIByteArray* kind, const TVMFFIByteArray* message, const TVMFFIByteArray* backtrace,
     TVMFFIObjectHandle cause_chain, TVMFFIObjectHandle extra_context, TVMFFIObjectHandle* out) {
