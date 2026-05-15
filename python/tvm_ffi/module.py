@@ -475,3 +475,60 @@ def load_module(path: str | PathLike, keep_module_alive: bool = True) -> Module:
     if keep_module_alive:
         _ffi_api.ModuleGlobalsAdd(mod)
     return mod
+
+
+def load_module_from_bytes(kind: str, data: bytes, keep_module_alive: bool = True) -> Module:
+    """Load a module from in-memory bytes.
+
+    Dispatches to the registered global function
+    ``ffi.Module.load_from_bytes.<kind>`` (signature: ``(bytes) -> Module``).
+    Raises ``RuntimeError`` if no loader for the given kind is registered.
+
+    Loaders are registered by consumers using
+    :py:func:`register_global_func`. For an example that registers a CUDA
+    CUBIN loader as ``ffi.Module.load_from_bytes.cubin``, see the
+    header-only :file:`tvm/ffi/extra/cuda/cubin_launcher.h` and the
+    :file:`examples/cubin_launcher/dynamic_cubin/` example.
+
+    Parameters
+    ----------
+    kind
+        The module kind, e.g. ``"cuda"``, ``"cubin"``, ``"ptx"``,
+        ``"rocm"``, or any custom kind for which a loader has been
+        registered.
+    data
+        The module payload bytes.
+    keep_module_alive
+        Whether to keep the module alive. If True, the module will be
+        kept alive for the duration of the program until ``libtvm_ffi.so``
+        is unloaded.
+
+    Returns
+    -------
+    The loaded module.
+
+    Examples
+    --------
+    .. code-block:: python
+
+        import tvm_ffi
+
+
+        @tvm_ffi.register_global_func("ffi.Module.load_from_bytes.echo")
+        def _echo_loader(payload: bytes) -> tvm_ffi.Module:
+            # Real loader would parse `payload` and return a runnable module.
+            ...
+
+
+        mod = tvm_ffi.load_module_from_bytes("echo", b"<payload>")
+
+    See Also
+    --------
+    :py:func:`tvm_ffi.load_module`
+    :py:func:`tvm_ffi.register_global_func`
+
+    """
+    mod = _ffi_api.ModuleLoadFromBytes(kind, data)
+    if keep_module_alive:
+        _ffi_api.ModuleGlobalsAdd(mod)
+    return mod

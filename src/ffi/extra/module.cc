@@ -167,6 +167,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
 
   refl::GlobalDef()
       .def("ffi.ModuleLoadFromFile", &Module::LoadFromFile)
+      .def("ffi.ModuleLoadFromBytes", &Module::LoadFromBytes)
       .def_method("ffi.ModuleImplementsFunction",
                   [](const Module& mod, const String& name, bool query_imports) {
                     return mod->ImplementsFunction(name, query_imports);

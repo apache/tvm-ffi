@@ -59,6 +59,41 @@ impl Module {
             .try_into()
     }
 
+    /// Load a module from in-memory bytes by dispatching to the registered
+    /// `ffi.Module.load_from_bytes.<kind>` loader.
+    ///
+    /// # Arguments
+    /// * `kind` - The module kind. Examples: `"cuda"`, `"cubin"`, `"ptx"`,
+    ///            `"rocm"`, or any custom kind for which a loader has been
+    ///            registered via `register_global_func`.
+    /// * `bytes` - The module payload bytes (e.g. PTX text or compiled cubin).
+    ///
+    /// # Returns
+    /// * `Result<Module>` - A `Module` instance on success
+    ///
+    /// # Errors
+    /// Returns `RuntimeError` if no loader is registered for `kind`.
+    ///
+    /// # Example
+    /// ```no_run
+    /// use tvm_ffi::{Bytes, Module, Result};
+    /// fn load_ptx(ptx: &[u8]) -> Result<Module> {
+    ///     Module::load_from_bytes("ptx", &Bytes::from(ptx))
+    /// }
+    /// ```
+    pub fn load_from_bytes<Str: AsRef<str>>(
+        kind: Str,
+        bytes: &crate::string::Bytes,
+    ) -> Result<Module> {
+        static API_FUNC: std::sync::LazyLock<Function> = std::sync::LazyLock::new(|| {
+            Function::get_global("ffi.ModuleLoadFromBytes").unwrap()
+        });
+        let kind = crate::string::String::from(kind);
+        (*API_FUNC)
+            .call_tuple_with_len::<2, _>((kind, bytes))?
+            .try_into()
+    }
+
     /// Get a function from the module by name.
     ///
     /// # Arguments

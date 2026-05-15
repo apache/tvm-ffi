@@ -97,6 +97,14 @@ Module LoadModuleFromBytes(const std::string& kind, const Bytes& bytes) {
   return (*floader)(bytes).cast<Module>();
 }
 
+Module Module::LoadFromBytes(const String& kind, const Bytes& bytes) {
+  // Thin wrapper exposing LoadModuleFromBytes through the public Module API,
+  // and registered as the `ffi.ModuleLoadFromBytes` global so non-C++
+  // bindings (Python, Rust) can call it without re-implementing the
+  // kind → loader dispatch.
+  return LoadModuleFromBytes(static_cast<std::string>(kind), bytes);
+}
+
 /*!
  * \brief Process libary binary to recover binary-serialized modules
  * \param library_bin The binary embedded in the library.

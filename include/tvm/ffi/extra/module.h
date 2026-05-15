@@ -262,6 +262,30 @@ class Module : public ObjectRef {
    *  Re-create import relationship by calling Import.
    */
   TVM_FFI_EXTRA_CXX_API static Module LoadFromFile(const String& file_name);
+
+  /*!
+   * \brief Load a module from in-memory bytes.
+   *
+   * Dispatches to the registered global function
+   * `ffi.Module.load_from_bytes.<kind>` (signature `(Bytes) -> Module`).
+   * Throws `RuntimeError` if no loader for the given kind is registered.
+   *
+   * Useful when the caller already holds the module payload (e.g. a PTX or
+   * CUBIN blob fetched from a registry) and does not want to materialize it
+   * to disk first.
+   *
+   * \note Loaders are registered by consumers, not by `libtvm_ffi.so`. For a
+   *   CUDA loader, see the header-only `tvm/ffi/extra/cuda/cubin_launcher.h`
+   *   library and the `examples/cubin_launcher/dynamic_cubin/` example,
+   *   which build a consumer-side `.so` that registers
+   *   `ffi.Module.load_from_bytes.cubin`. From Python, loaders can also be
+   *   registered via `tvm_ffi.register_global_func(...)`.
+   *
+   * \param kind The module kind, e.g. "cuda", "cubin", "ptx", "rocm".
+   * \param bytes The module payload.
+   * \return The loaded module.
+   */
+  TVM_FFI_EXTRA_CXX_API static Module LoadFromBytes(const String& kind, const Bytes& bytes);
   /*!
    * \brief Query context symbols that is registered via TVMEnvRegisterSymbols.
    * \param callback The callback to be called with the symbol name and address.
