@@ -102,7 +102,7 @@ macro_rules! bail {
 macro_rules! ensure {
     ($cond:expr, $error_kind:expr, $fmt:expr $(, $args:expr)* $(,)?) => {{
         if !$cond {
-            crate::bail!($error_kind, $fmt $(, $args)*);
+            $crate::bail!($error_kind, $fmt $(, $args)*);
         }
     }};
 }
@@ -260,11 +260,27 @@ macro_rules! impl_arg_into_ref {
 macro_rules! tvm_ffi_dll_export_typed_func {
     ($name:ident, $func:expr) => {
         $crate::macros::paste::paste! {
+            // `#[no_mangle]` is required so the symbol is preserved in a
+            // `cdylib` and matches the `__tvm_ffi_<name>` naming convention
+            // that `ffi.Module.load_from_file.<format>` looks up via
+            // `GetSymbolWithSymbolPrefix`. Without it, the linker strips the
+            // function from the output `.so`.
+            //
+            // Using plain `#[no_mangle]` (rather than `#[unsafe(no_mangle)]`,
+            // which would require rustc >= 1.82) keeps the crate buildable
+            // on older toolchains. Edition-2024 callers will see a
+            // deprecation warning, which is harmless.
+            //
+            // The path-qualified `$crate::tvm_ffi_sys::…` reference (rather
+            // than a bare `tvm_ffi_sys::…`) lets downstream crates use the
+            // macro without having to add `tvm-ffi-sys` to their own
+            // `[dependencies]`.
+            #[no_mangle]
             pub unsafe extern "C" fn [<__tvm_ffi_ $name>](
                 _handle: *mut std::ffi::c_void,
-                args: *const tvm_ffi_sys::TVMFFIAny,
+                args: *const $crate::tvm_ffi_sys::TVMFFIAny,
                 num_args: i32,
-                result: *mut tvm_ffi_sys::TVMFFIAny,
+                result: *mut $crate::tvm_ffi_sys::TVMFFIAny,
             ) -> i32 {
                 let packed_args =
                     std::slice::from_raw_parts(args as *const $crate::any::AnyView, num_args as usize);
