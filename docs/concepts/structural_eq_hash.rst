@@ -15,8 +15,8 @@
     specific language governing permissions and limitations
     under the License.
 
-Structural Equality and Hashing
-===============================
+Structural Equality, Hashing, and Walk
+======================================
 
 TVM FFI provides ``structural_equal`` and ``structural_hash`` for the
 object graph. These compare objects by **content** — recursively walking
@@ -955,3 +955,181 @@ And in Python:
 
    assert structural_equal(f1, f2)                   # alpha-equivalent
    assert structural_hash(f1) == structural_hash(f2)  # same hash
+
+
+Structural Walk and Visit
+-------------------------
+
+``structural_equal`` and ``structural_hash`` are built on a structural traversal
+of the value graph.  ``structural_walk`` exposes that traversal directly: it
+visits containers, object fields, and POD leaves, and invokes user callbacks for
+values whose runtime type matches a callback entry.
+
+It is useful when you want to collect information, validate a tree, find a node, or
+stop traversal early without writing a custom equality/hash hook.
+
+Basic Walk
+~~~~~~~~~~
+
+Pass callbacks as ordered ``(type, callback)`` entries.  The first matching
+entry runs for each visited value.  Python callbacks receive two arguments ``(value,
+def_region_kind)``.
+
+.. code-block:: python
+
+   import tvm_ffi
+
+   visited = []
+
+   def on_int(value, _):
+       visited.append(value)
+       if value == 0:
+           return tvm_ffi.VisitInterrupt(value)
+       return tvm_ffi.WalkResult.ADVANCE
+
+   result = tvm_ffi.structural_walk(root, (int, on_int), order="pre")
+
+   if result is not None:
+       print("stopped at", result.value)
+
+Callbacks may return:
+
+- ``WalkResult.ADVANCE`` to continue into children.
+- ``WalkResult.SKIP`` to skip the current value's children.
+- ``VisitInterrupt(payload)`` to stop the entire walk and return an interrupt
+  carrying ``payload``.
+- ``None`` as shorthand for ``WalkResult.ADVANCE``.
+
+Grouped Types
+~~~~~~~~~~~~~
+
+Several types can share one callback by passing a tuple of types:
+
+.. code-block:: python
+
+   numbers = []
+   strings = []
+
+   tvm_ffi.structural_walk(
+       root,
+       ((int, float), lambda value, _: numbers.append(value)),
+       (str, lambda value, _: strings.append(value)),
+   )
+
+This is normalized as if the same callback had been registered separately for
+``int`` and ``float``.  Callback entries are still tried in order, so broad
+callbacks should usually come after more specific ones.
+
+Catch-All and Object Callbacks
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``object`` and ``typing.Any`` are catch-all callbacks.  They match POD leaves
+and object-backed values.
+
+.. code-block:: python
+
+   from typing import Any
+
+   seen = []
+   tvm_ffi.structural_walk(root, (Any, lambda value, _: seen.append(value)))
+
+``tvm_ffi.Object`` is different: it matches only object-backed FFI values, such
+as ``Array``, ``Map``, ``Function``, ``String`` objects, or registered object
+classes.  It does not match POD leaves such as ``int`` or ``float``.
+
+.. code-block:: python
+
+   objects = []
+   leaves = []
+
+   tvm_ffi.structural_walk(
+       root,
+       (tvm_ffi.Object, lambda value, _: objects.append(value)),
+       (object, lambda value, _: leaves.append(value)),
+   )
+
+Def-Region Aware Walk
+~~~~~~~~~~~~~~~~~~~~~
+
+The second callback argument reports whether the current value is visited as a
+definition or a use.  This is useful for analyses such as collecting variable
+uses while skipping binders:
+
+.. code-block:: python
+
+   uses = []
+
+   tvm_ffi.structural_walk(
+       func,
+       (
+           Var,
+           lambda var, kind: (
+               uses.append(var) if kind == tvm_ffi.DefRegionKind.NONE else None
+           ),
+       ),
+   )
+
+For a function node, parameters are visited in a definition region, while
+occurrences in the body are visited with ``DefRegionKind.NONE``.
+
+Traversal Order
+~~~~~~~~~~~~~~~
+
+The default order is pre-order: callbacks run before visiting children.
+Post-order callbacks run after children.
+
+.. code-block:: python
+
+   trace = []
+
+   tvm_ffi.structural_walk(
+       tvm_ffi.Array([tvm_ffi.Array([1]), 2]),
+       (tvm_ffi.Array, lambda value, _: trace.append(f"array:{len(value)}")),
+       (int, lambda value, _: trace.append(f"int:{value}")),
+       order="post",
+   )
+
+   assert trace == ["int:1", "array:1", "int:2", "array:2"]
+
+C++ Walk
+~~~~~~~~
+
+C++ code can use ``StructuralWalk`` with typed callbacks.  Callbacks are tried
+in order and dispatch on the first argument type:
+
+.. code-block:: cpp
+
+   Optional<VisitInterrupt> result = StructuralWalk<WalkOrder::kPreOrder>(
+       root,
+       [&](const Add& add) -> Expected<WalkResult> {
+         ++num_adds;
+         return WalkResult::Advance();
+       },
+       [&](const Mul& mul) -> Expected<WalkResult> {
+         return WalkResult::Skip();
+       });
+
+C++ callbacks dispatch on their first argument, which may be ``AnyView``,
+``Any``, an ``ObjectRef`` subclass, an ``Object`` pointer type, or another
+FFI-convertible POD type.  They may also take an optional second
+``TVMFFIDefRegionKind`` argument to distinguish definition sites from uses.
+Errors should be returned as ``Expected<WalkResult>``.
+
+Low-Level ``StructuralVisitor``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``StructuralVisitor`` is the lower-level traversal object.  It is mainly useful
+inside structural visit hooks or C++ integrations that need to participate in
+the same recursive traversal protocol.
+
+Python users normally call ``structural_walk`` instead.  The low-level visitor
+API exposes:
+
+- ``visitor.visit(value)`` to recursively visit a child value.
+- ``visitor.def_region_kind()`` to inspect the current definition-region mode.
+- ``visitor.with_def_region_kind(kind, callback)`` to run a recursive visit
+  under a temporary definition-region mode.
+
+Custom visit hooks are registered as the ``__s_visit__`` type attribute.  They
+receive the active visitor and the current object, and are responsible for
+calling ``visitor.visit(child)`` on structural children.

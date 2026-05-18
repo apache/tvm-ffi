@@ -158,6 +158,22 @@ class VisitErrorContext : public ObjectRef {
   }
 
 /*!
+ * \brief End a visit try block and catch any Error as an Expected error,
+ *        appending node to the VisitErrorContext on the way up.
+ *
+ * Must be paired with TVM_FFI_VISIT_BEGIN() above the visit body.
+ *
+ * \param node The current visit value. Object-backed values are appended to the
+ *             error context's reverse_visit_pattern on exception.
+ */
+#define TVM_FFI_VISIT_END_RETURN_EXPECTED(node)                                \
+  }                                                                            \
+  catch (::tvm::ffi::Error & _tvm_ffi_visit_err_) {                            \
+    ::tvm::ffi::details::UpdateVisitErrorContext(_tvm_ffi_visit_err_, (node)); \
+    return ::tvm::ffi::Unexpected(_tvm_ffi_visit_err_);                        \
+  }
+
+/*!
  * \brief Throw an error from inside a visit, with `node` recorded
  *        as the innermost frame of the resulting VisitErrorContext.
  *

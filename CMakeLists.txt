@@ -75,6 +75,7 @@ set(_tvm_ffi_objs_sources
 set(_tvm_ffi_extra_objs_sources
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/extra/structural_equal.cc"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/extra/structural_hash.cc"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/extra/structural_visit.cc"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/extra/visit_error_context.cc"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/extra/json_parser.cc"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/extra/json_writer.cc"

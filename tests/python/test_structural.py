@@ -15,9 +15,14 @@
 # specific language governing permissions and limitations
 # under the License.
 
+from __future__ import annotations
+
+from typing import Any
+
 import numpy as np
 import tvm_ffi
 import tvm_ffi.testing
+from tvm_ffi.dataclasses import Object, field, py_class
 
 _recursive_eq = tvm_ffi.get_global_func("ffi.RecursiveEq")
 
@@ -158,3 +163,175 @@ def test_recursive_eq_mutual_cycle() -> None:
     # Different content should not be equal.
     c = make_cyclic(99)
     assert not _recursive_eq(a, c)
+
+
+def test_visit_interrupt_payload() -> None:
+    payload = {"reason": "found", "path": [1, 2, 3]}
+    interrupt = tvm_ffi.VisitInterrupt(payload)
+
+    assert isinstance(interrupt, tvm_ffi.VisitInterrupt)
+    assert tvm_ffi.structural_equal(interrupt.value, payload)
+
+
+def test_structural_walk_typed_callbacks() -> None:
+    root = tvm_ffi.Array([1, 2.5, "tag"])
+    trace: list[str] = []
+
+    result = tvm_ffi.structural_walk(
+        root,
+        (tvm_ffi.Array, lambda value, _: trace.append(f"array:{len(value)}")),
+        ((int, float), lambda value, _: trace.append(f"number:{value}")),
+        (str, lambda value, _: trace.append(f"str:{value}")),
+    )
+
+    assert result is None
+    assert trace == ["array:3", "number:1", "number:2.5", "str:tag"]
+
+
+def test_structural_walk_callback_def_region_kind() -> None:
+    @py_class(structural_eq="var")
+    class PyWalkVar(Object):
+        name: str = field(structural_eq="ignore")
+
+    @py_class(structural_eq="tree")
+    class PyWalkFunc(Object):
+        params: tvm_ffi.Array[PyWalkVar] = field(structural_eq="def")
+        body: tvm_ffi.Array[PyWalkVar]
+
+    x = PyWalkVar("x")
+    y = PyWalkVar("y")
+    root = PyWalkFunc(tvm_ffi.Array([x]), tvm_ffi.Array([x, y]))
+    uses: list[str] = []
+
+    result = tvm_ffi.structural_walk(
+        root,
+        (
+            PyWalkVar,
+            lambda value, kind: (
+                uses.append(value.name) if kind == tvm_ffi.DefRegionKind.NONE else None
+            ),
+        ),
+    )
+
+    assert result is None
+    assert uses == ["x", "y"]
+
+
+def test_structural_walk_first_match_and_skip() -> None:
+    root = tvm_ffi.Array([1, 2])
+    trace: list[str] = []
+
+    result = tvm_ffi.structural_walk(
+        root,
+        (
+            tvm_ffi.Array,
+            lambda value, _: trace.append(f"array:{len(value)}") or tvm_ffi.WalkResult.SKIP,
+        ),
+        (object, lambda value, _: trace.append(type(value).__name__)),
+    )
+
+    assert result is None
+    assert trace == ["array:2"]
+
+
+def test_structural_walk_interrupt() -> None:
+    root = tvm_ffi.Array([1, 2, 3])
+
+    def on_int(value: int, _: tvm_ffi.DefRegionKind) -> tvm_ffi.VisitInterrupt | None:
+        if value == 2:
+            return tvm_ffi.VisitInterrupt({"found": value})
+        return None
+
+    result = tvm_ffi.structural_walk(root, (int, on_int))
+
+    assert isinstance(result, tvm_ffi.VisitInterrupt)
+    assert tvm_ffi.structural_equal(result.value, {"found": 2})
+
+
+def test_structural_walk_nested_containers() -> None:
+    root = tvm_ffi.Array(
+        [
+            tvm_ffi.Map(
+                {
+                    "numbers": tvm_ffi.Array([1, 2]),
+                    "meta": tvm_ffi.Dict({"flag": True}),
+                }
+            ),
+            3,
+        ]
+    )
+    containers: list[tuple[str, int]] = []
+    scalars: list[int] = []
+    strings: list[str] = []
+
+    result = tvm_ffi.structural_walk(
+        root,
+        (tvm_ffi.Array, lambda value, _: containers.append(("array", len(value)))),
+        (tvm_ffi.Map, lambda value, _: containers.append(("map", len(value)))),
+        (tvm_ffi.Dict, lambda value, _: containers.append(("dict", len(value)))),
+        ((int, bool), lambda value, _: scalars.append(int(value))),
+        (str, lambda value, _: strings.append(value)),
+    )
+
+    assert result is None
+    assert [kind for kind, _ in containers].count("array") == 2
+    assert ("map", 2) in containers
+    assert ("dict", 1) in containers
+    assert sorted(scalars) == [1, 1, 2, 3]
+    assert set(strings) == {"numbers", "meta", "flag"}
+
+
+def test_structural_walk_object_and_any_callbacks() -> None:
+    root = tvm_ffi.Array([1, tvm_ffi.Array([2])])
+    trace: list[str] = []
+
+    result = tvm_ffi.structural_walk(
+        root,
+        (tvm_ffi.Object, lambda value, _: trace.append(f"object:{type(value).__name__}")),
+        (Any, lambda value, _: trace.append(f"any:{value}")),
+    )
+
+    assert result is None
+    assert trace == ["object:Array", "any:1", "object:Array", "any:2"]
+
+    alias_trace: list[str] = []
+    result = tvm_ffi.structural_walk(
+        tvm_ffi.Array([1]),
+        (object, lambda value, _: alias_trace.append(type(value).__name__)),
+    )
+
+    assert result is None
+    assert alias_trace == ["Array", "int"]
+
+
+def test_structural_walk_post_order_enum() -> None:
+    root = tvm_ffi.Array([tvm_ffi.Array([1]), 2])
+    trace: list[str] = []
+
+    result = tvm_ffi.structural_walk(
+        root,
+        [
+            (tvm_ffi.Array, lambda value, _: trace.append(f"array:{len(value)}")),
+            (int, lambda value, _: trace.append(f"int:{value}")),
+        ],
+        order=tvm_ffi.WalkOrder.POSTORDER,
+    )
+
+    assert result is None
+    assert trace == ["int:1", "array:1", "int:2", "array:2"]
+
+
+def test_structural_walk_mixed_callback_forms() -> None:
+    root = tvm_ffi.Array([1, 2.5, "tag"])
+    trace: list[str] = []
+
+    result = tvm_ffi.structural_walk(
+        root,
+        [(tvm_ffi.Array, lambda value, _: trace.append(f"array:{len(value)}"))],
+        (str, lambda value, _: trace.append(f"str:{value}")),
+        ((int, float), lambda value, _: trace.append(f"number:{value}")),
+        lambda value, _: trace.append(f"any:{type(value).__name__}"),
+    )
+
+    assert result is None
+    assert trace == ["array:3", "number:1", "number:2.5", "str:tag"]

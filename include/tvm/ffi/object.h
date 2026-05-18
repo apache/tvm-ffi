@@ -118,6 +118,8 @@ struct StaticTypeKey {
   static constexpr const char* kTVMFFIModule = "ffi.Module";
   /*! \brief The type key for Dict */
   static constexpr const char* kTVMFFIDict = "ffi.Dict";
+  /*! \brief The type key for VisitInterrupt */
+  static constexpr const char* kTVMFFIVisitInterrupt = "ffi.VisitInterrupt";
   /*! \brief The type key for OpaquePyObject */
   static constexpr const char* kTVMFFIOpaquePyObject = "ffi.OpaquePyObject";
 };
@@ -1083,6 +1085,49 @@ TVM_FFI_INLINE bool IsObjectInstance(int32_t object_type_index) {
       return false;
     }
   }
+}
+
+/*!
+ * \brief Return whether a runtime type index matches a target type index.
+ *
+ * \param actual_type_index Runtime type index of the value being checked.
+ * \param target_type_index Target type index to match against.
+ * \return Whether \p actual_type_index is compatible with \p target_type_index.
+ */
+TVM_FFI_INLINE bool RuntimeTypeIndexMatch(int32_t actual_type_index, int32_t target_type_index) {
+  if (actual_type_index == target_type_index) {
+    return true;
+  }
+  // Any target matches all runtime values.
+  if (target_type_index == TypeIndex::kTVMFFIAny) {
+    return true;
+  }
+  // str/bytes targets also match their small inline variants.
+  if (target_type_index == TypeIndex::kTVMFFIStr) {
+    return actual_type_index == TypeIndex::kTVMFFISmallStr;
+  }
+  if (target_type_index == TypeIndex::kTVMFFIBytes) {
+    return actual_type_index == TypeIndex::kTVMFFISmallBytes;
+  }
+  // Everything is a subclass of object.
+  if (target_type_index == TypeIndex::kTVMFFIObject) {
+    return actual_type_index >= TypeIndex::kTVMFFIStaticObjectBegin;
+  }
+  // Non-object type indices can only match through exact equality handled above.
+  if (actual_type_index < TypeIndex::kTVMFFIStaticObjectBegin ||
+      target_type_index < TypeIndex::kTVMFFIStaticObjectBegin) {
+    return false;
+  }
+  // Invariance: parent index is always smaller than the child.
+  if (actual_type_index < target_type_index) {
+    return false;
+  }
+  // Fall back to runtime ancestry metadata.
+  const TypeInfo* actual_type_info = TVMFFIGetTypeInfo(actual_type_index);
+  const TypeInfo* target_type_info = TVMFFIGetTypeInfo(target_type_index);
+  return actual_type_info->type_depth > target_type_info->type_depth &&
+         actual_type_info->type_ancestors[target_type_info->type_depth]->type_index ==
+             target_type_index;
 }
 
 /*!

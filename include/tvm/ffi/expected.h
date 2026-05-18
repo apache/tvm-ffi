@@ -64,6 +64,12 @@ template <typename E>
 Unexpected(E) -> Unexpected<E>;
 #endif
 
+namespace details {
+
+struct ExpectedUnsafe;
+
+}  // namespace details
+
 /*!
  * \brief Expected<T> provides exception-free error handling for FFI functions.
  *
@@ -112,6 +118,9 @@ class Expected {
   template <typename E, typename = std::enable_if_t<std::is_base_of_v<Error, std::remove_cv_t<E>>>>
   // NOLINTNEXTLINE(google-explicit-constructor,runtime/explicit)
   Expected(Unexpected<E> unexpected) : data_(Any(std::move(unexpected).error())) {}
+
+  /*! \brief Return the raw stored type index. */
+  TVM_FFI_INLINE int32_t type_index() const noexcept { return data_.type_index(); }
 
   /*! \brief Returns true if the Expected contains a success value. */
   TVM_FFI_INLINE bool is_ok() const noexcept {
@@ -186,8 +195,77 @@ class Expected {
   }
 
  private:
+  Expected() = default;
+
+  friend struct details::ExpectedUnsafe;
+
   Any data_;  // Invariant: holds a T (type_index != kTVMFFIError) or an Error.
 };
+
+namespace details {
+
+/*!
+ * \brief Unsafe raw-storage helpers for Expected.
+ *
+ * These helpers bypass normal value checking and are intended for ABI boundaries
+ * that already know the underlying Any storage holds either a valid T or Error.
+ */
+struct ExpectedUnsafe {
+  /*!
+   * \brief Move a raw TVMFFIAny into Expected storage.
+   * \tparam T The Expected success type.
+   * \param raw The raw FFI value to move.
+   * \return Expected backed by moved Any storage.
+   */
+  template <typename T>
+  TVM_FFI_INLINE static Expected<T> MoveFromTVMFFIAny(TVMFFIAny raw) {
+    Expected<T> result;
+    result.data_ = AnyUnsafe::MoveTVMFFIAnyToAny(&raw);
+    return result;
+  }
+
+  /*!
+   * \brief Move Expected storage to a raw TVMFFIAny.
+   * \tparam T The Expected success type.
+   * \param result The Expected value to move from.
+   * \return Raw FFI value containing moved underlying Any storage.
+   */
+  template <typename T>
+  TVM_FFI_INLINE static TVMFFIAny MoveToTVMFFIAny(Expected<T>&& result) {
+    return AnyUnsafe::MoveAnyToTVMFFIAny(std::move(result.data_));
+  }
+
+  /*!
+   * \brief Return the underlying Any storage.
+   * \tparam T The Expected success type.
+   * \param result The Expected value to inspect.
+   * \return Const reference to the raw Any storage.
+   */
+  template <typename T>
+  TVM_FFI_INLINE static const Any& GetData(const Expected<T>& result) noexcept {
+    return result.data_;
+  }
+
+  /*!
+   * \brief Read an Expected success value as a compatible raw storage type.
+   * \tparam T The type to read from the underlying Any storage.
+   * \tparam U The Expected success type.
+   * \param result The Expected value to read from.
+   * \return The stored value decoded as T.
+   *
+   * \note This assumes \p result stores T-compatible Any storage, or Error.
+   */
+  template <typename T, typename U>
+  TVM_FFI_INLINE static T ValueAs(const Expected<U>& result) {
+    const Any& data = result.data_;
+    if (TVM_FFI_PREDICT_TRUE(data.type_index() != TypeIndex::kTVMFFIError)) {
+      return AnyUnsafe::CopyFromAnyViewAfterCheck<T>(data);
+    }
+    throw AnyUnsafe::CopyFromAnyViewAfterCheck<Error>(data);
+  }
+};
+
+}  // namespace details
 
 // TypeTraits specialization for Expected<T>
 template <typename T>

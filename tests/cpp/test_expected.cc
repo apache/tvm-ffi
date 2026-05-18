@@ -19,6 +19,7 @@
 #include <gtest/gtest.h>
 #include <tvm/ffi/any.h>
 #include <tvm/ffi/container/array.h>
+#include <tvm/ffi/container/variant.h>
 #include <tvm/ffi/dtype.h>
 #include <tvm/ffi/error.h>
 #include <tvm/ffi/expected.h>
@@ -341,6 +342,29 @@ TEST(Expected, TryCastIncompatible) {
   Any any_str = String("hello");
   auto result = any_str.try_cast<Expected<int>>();
   EXPECT_FALSE(result.has_value());  // Cannot convert String to Expected<int>
+}
+
+TEST(Expected, ExpectedUnsafeGetDataCompatibleStorageType) {
+  Expected<Variant<String, bool>> result = Variant<String, bool>(false);
+
+  EXPECT_EQ(result.type_index(), TypeIndex::kTVMFFIBool);
+  EXPECT_FALSE(details::AnyUnsafe::CopyFromAnyViewAfterCheck<bool>(
+      details::ExpectedUnsafe::GetData(result)));
+
+  Expected<Variant<String, bool>> true_result = Variant<String, bool>(true);
+  EXPECT_TRUE(details::AnyUnsafe::CopyFromAnyViewAfterCheck<bool>(
+      details::ExpectedUnsafe::GetData(true_result)));
+}
+
+TEST(Expected, ExpectedUnsafeMoveBetweenExpectedStorageTypes) {
+  Expected<String> src = String("hello");
+  TVMFFIAny raw = details::ExpectedUnsafe::MoveToTVMFFIAny(std::move(src));
+  Expected<Optional<String>> dst =
+      details::ExpectedUnsafe::MoveFromTVMFFIAny<Optional<String>>(raw);
+
+  ASSERT_TRUE(dst.is_ok());
+  ASSERT_TRUE(dst.value().has_value());
+  EXPECT_EQ(dst.value().value(), "hello");
 }
 
 // Test that Expected<DLDataType>::value() && compiles and runs correctly.

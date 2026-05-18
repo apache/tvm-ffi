@@ -177,6 +177,8 @@ typedef enum {
   kTVMFFIList = 75,
   /*! \brief Dict object. */
   kTVMFFIDict = 76,
+  /*! \brief Structural visit interrupt object. */
+  kTVMFFIVisitInterrupt = 77,
   //----------------------------------------------------------------
   // more complex objects
   //----------------------------------------------------------------

@@ -76,10 +76,16 @@ if TYPE_CHECKING or not _is_config_mode():
     from .module import Module, system_lib, load_module
     from .stream import StreamContext, get_raw_stream, use_raw_stream, use_torch_stream
     from .structural import (
+        DefRegionKind,
         StructuralKey,
+        StructuralVisitor,
+        VisitInterrupt,
+        WalkOrder,
+        WalkResult,
         get_first_structural_mismatch,
         structural_equal,
         structural_hash,
+        structural_walk,
     )
     from . import serialization
     from . import access_path
@@ -130,6 +136,7 @@ __all__ = [
     "LIB",
     "Array",
     "DLDeviceType",
+    "DefRegionKind",
     "Device",
     "Dict",
     "Function",
@@ -141,7 +148,11 @@ __all__ = [
     "Shape",
     "StreamContext",
     "StructuralKey",
+    "StructuralVisitor",
     "Tensor",
+    "VisitInterrupt",
+    "WalkOrder",
+    "WalkResult",
     "__version__",
     "__version_tuple__",
     "access_path",
@@ -167,6 +178,7 @@ __all__ = [
     "structural",
     "structural_equal",
     "structural_hash",
+    "structural_walk",
     "system_lib",
     "use_raw_stream",
     "use_torch_stream",

@@ -19,21 +19,80 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
+from enum import IntEnum
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .access_path import AccessPath
 
-from . import _ffi_api
+from . import _ffi_api, core
 from .core import Object
 from .registry import register_object
 
 __all__ = [
+    "DefRegionKind",
     "StructuralKey",
+    "StructuralVisitor",
+    "VisitInterrupt",
+    "WalkOrder",
+    "WalkResult",
     "get_first_structural_mismatch",
     "structural_equal",
     "structural_hash",
+    "structural_walk",
 ]
+
+
+class WalkOrder(IntEnum):
+    """Callback placement before or after visiting children for structural walks.
+
+    See Also
+    --------
+    :py:func:`tvm_ffi.structural_walk`
+        Walk an object graph, invoke matching callbacks.
+
+    """
+
+    PREORDER = 0
+    POSTORDER = 1
+
+
+class WalkResult(IntEnum):
+    """Control signal for structural walks.
+
+    Advance continues visiting a node's children; skip continues traversal but
+    skips the current node's children.
+
+    Use :class:`VisitInterrupt` when traversal should stop entirely.
+
+    See Also
+    --------
+    :py:func:`tvm_ffi.structural_walk`
+        Walk an object graph, invoke matching callbacks.
+
+    """
+
+    ADVANCE = 0
+    SKIP = 1
+
+
+class DefRegionKind(IntEnum):
+    """Def-region state active during structural visiting.
+
+    The values mirror ``TVMFFIDefRegionKind`` in the C ABI.
+
+    See Also
+    --------
+    :py:class:`tvm_ffi.StructuralVisitor`
+        Structural traversal visitor that carries object dispatch and def-region
+        state across recursive visits.
+
+    """
+
+    NONE = 0
+    DEF_RECURSIVE = 1
+    DEF_NON_RECURSIVE = 2
 
 
 def structural_equal(
@@ -231,3 +290,242 @@ class StructuralKey(Object):
     def __eq__(self, other: Any) -> bool:
         """Compare by structural equality."""
         return isinstance(other, StructuralKey) and _ffi_api.StructuralKeyEqual(self, other)
+
+
+@register_object("ffi.VisitInterrupt")
+class VisitInterrupt(Object):
+    """Payload-carrying signal that stops a structural visit.
+
+    This object can be returned from structural walk callbacks and structural
+    visit hooks to halt traversal early. The optional payload is preserved in
+    :py:attr:`value` and returned to the caller.
+
+    Examples
+    --------
+    Use ``VisitInterrupt`` to stop a structural walk when a target node is found:
+
+    .. code-block:: python
+
+        import tvm_ffi
+
+
+        def on_node(node, _):
+            if is_target(node):
+                return tvm_ffi.VisitInterrupt(node)
+            return None
+
+
+        result = tvm_ffi.structural_walk(root, (object, on_node))
+        if result is not None:
+            found = result.value
+
+    See Also
+    --------
+    :py:func:`tvm_ffi.structural_walk`
+        Structural walk API whose callbacks may return ``VisitInterrupt``.
+
+    """
+
+    # tvm-ffi-stubgen(begin): object/ffi.VisitInterrupt
+    # fmt: off
+    value: Any
+    if TYPE_CHECKING:
+        def __init__(self, value: Any = ...) -> None: ...
+        def __ffi_init__(self, _0: Any, /) -> None: ...  # ty: ignore[invalid-method-override]
+    # fmt: on
+    # tvm-ffi-stubgen(end)
+
+    def __init__(self, value: Any = None) -> None:
+        """Create an interrupt with an optional payload.
+
+        Parameters
+        ----------
+        value
+            Payload returned to the caller when traversal stops.
+
+        """
+        self.__init_handle_by_constructor__(_ffi_api.VisitInterrupt, value)
+
+
+@register_object("ffi.StructuralVisitor")
+class StructuralVisitor(Object):
+    """Low-level structural traversal visitor.
+
+    This class exposes the low-level visitor object used by structural
+    traversal hooks.
+    """
+
+    # tvm-ffi-stubgen(begin): object/ffi.StructuralVisitor
+    # fmt: off
+    if TYPE_CHECKING:
+        def __init__(self) -> None: ...
+        def __ffi_init__(self) -> None: ...  # ty: ignore[invalid-method-override]
+    # fmt: on
+    # tvm-ffi-stubgen(end)
+
+    def __init__(self) -> None:
+        """Create a default structural visitor."""
+        self.__init_handle_by_constructor__(_ffi_api.StructuralVisitor)
+
+    def visit(self, value: Any) -> VisitInterrupt | None:
+        """Low-level API to visit ``value`` using this visitor's dispatch behavior.
+
+        Parameters
+        ----------
+        value
+            Value to visit.
+
+        Returns
+        -------
+        result
+            ``None`` if traversal should continue, otherwise a
+            :class:`VisitInterrupt` carrying the early-exit payload.
+
+        """
+        return _ffi_api.StructuralVisitorVisit(self, value)
+
+    def def_region_kind(self) -> DefRegionKind:
+        """Low-level API to return the currently active structural def-region kind.
+
+        Returns
+        -------
+        kind
+            The active :class:`DefRegionKind`.
+
+        """
+        return DefRegionKind(_ffi_api.StructuralVisitorDefRegionKind(self))
+
+    def with_def_region_kind(
+        self,
+        kind: int,
+        callback: Callable[[], Any],
+    ) -> Any:
+        """Low-level API to run ``callback`` with a temporarily active def-region kind.
+
+        Parameters
+        ----------
+        kind
+            Def region kind to use while running ``callback``.
+
+        callback
+            Nullary callable to execute inside the scoped region.
+
+        Returns
+        -------
+        result
+            The value returned by ``callback``.
+
+        """
+        return _ffi_api.StructuralVisitorWithDefRegionKind(self, kind, callback)
+
+
+def structural_walk(
+    root: Any,
+    *callbacks: tuple | Sequence | Callable,
+    order: str | WalkOrder = "pre",
+) -> VisitInterrupt | None:
+    """Walk a value structurally and invoke the first matching typed callback.
+
+    Parameters
+    ----------
+    root
+        Root value to traverse.
+
+    callbacks
+        Callback entries are tried in order. Each entry is ``(type, callback)``
+        or ``((type1, type2, ...), callback)``. Types may be builtins,
+        registered FFI object classes, or ``typing.Any``/``object`` as a
+        catch-all. Python callbacks should accept ``(value, def_region_kind)``.
+
+        You may pass callbacks in any of these forms:
+
+        - ``structural_walk(root, ((int, float), on_number), (MyNode, on_node))``
+        - ``structural_walk(root, [(int, on_int), (MyNode, on_node), (object, on_any)])``
+        - ``structural_walk(root, on_any)``
+
+    order
+        ``"pre"``/``WalkOrder.PREORDER`` to invoke callbacks before children, or
+        ``"post"``/``WalkOrder.POSTORDER`` to invoke callbacks after children.
+
+    Returns
+    -------
+    result
+        ``None`` if traversal completed, otherwise a :class:`VisitInterrupt`
+        returned by a callback.
+
+    Examples
+    --------
+    .. code-block:: python
+
+        visited = []
+
+
+        def on_int(value, _):
+            visited.append(value)
+            if value == 0:
+                return tvm_ffi.VisitInterrupt(value)
+            return tvm_ffi.WalkResult.ADVANCE
+
+
+        result = tvm_ffi.structural_walk(
+            root,
+            [
+                ((int, float), lambda value, _: visited.append(("number", value))),
+                (object, lambda value, _: visited.append(("any", value))),
+            ],
+        )
+
+    """
+    if isinstance(order, WalkOrder):
+        order_int = int(order)
+    elif order in ("pre", "post"):
+        order_int = int(WalkOrder.PREORDER if order == "pre" else WalkOrder.POSTORDER)
+    else:
+        raise ValueError(f"Unknown structural walk order: {order!r}")
+
+    callback_entries = []
+
+    def add_callback_entry(callback_entry: tuple) -> None:
+        callback_type, fn = callback_entry
+        callback_types = callback_type if isinstance(callback_type, tuple) else (callback_type,)
+        callback_entries.extend((t, fn) for t in callback_types)
+
+    for slot in callbacks:
+        if callable(slot):
+            callback_entries.append((Any, slot))
+        elif isinstance(slot, tuple) and len(slot) == 2 and callable(slot[1]):
+            add_callback_entry(slot)
+        elif isinstance(slot, Sequence):
+            for callback in slot:
+                assert isinstance(callback, tuple)
+                assert len(callback) == 2 and callable(callback[1])
+                add_callback_entry(callback)
+        else:
+            raise TypeError(
+                "structural_walk callbacks must be callbacks, (type, callback) entries, "
+                "((type1, type2, ...), callback) entries, or sequences of tuple entries"
+            )
+
+    def wrap_callback(fn: Callable[..., Any]) -> Callable[[Any, int], Any]:
+        return lambda value, kind: fn(value, DefRegionKind(kind))
+
+    entries = [(_callback_type_to_type_index(t), wrap_callback(fn)) for t, fn in callback_entries]
+    return _ffi_api.StructuralWalk(root, entries, order_int)
+
+
+def _callback_type_to_type_index(callback_type: type[Any] | Any) -> int:
+    """Convert a callback arg type to a type index."""
+    annotation = Any if callback_type is object else callback_type
+    try:
+        type_index = core.TypeSchema.from_annotation(annotation).origin_type_index
+    except TypeError as err:
+        raise TypeError(
+            "structural_walk callback type must be a supported builtin, "
+            "typing.Any/object, or an FFI-registered object class"
+        ) from err
+    if type_index < 0 and annotation is not Any:
+        raise TypeError(
+            "structural_walk callback type_index is negative, the only"
+            "acceptable negative type_index is -1 for Any"
+        )
+    return type_index

@@ -607,6 +607,7 @@ _FFI_TYPE_ATTR_NAMES: frozenset[str] = frozenset(
         "__any_equal__",
         "__s_equal__",
         "__s_hash__",
+        "__s_visit__",
         "__data_to_json__",
         "__data_from_json__",
     }

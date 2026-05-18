@@ -24,6 +24,7 @@
 #include <tvm/ffi/container/array.h>
 #include <tvm/ffi/container/map.h>
 #include <tvm/ffi/dtype.h>
+#include <tvm/ffi/extra/structural_visit.h>
 #include <tvm/ffi/memory.h>
 #include <tvm/ffi/object.h>
 #include <tvm/ffi/reflection/registry.h>
@@ -206,6 +207,32 @@ class TVar : public ObjectRef {
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(TVar, ObjectRef, TVarObj);
 };
 
+class TPairObj : public Object {
+ public:
+  ObjectRef lhs;
+  ObjectRef rhs;
+
+  TPairObj(ObjectRef lhs, ObjectRef rhs) : lhs(std::move(lhs)), rhs(std::move(rhs)) {}
+  explicit TPairObj(UnsafeInit) {}
+
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<TPairObj>().def_ro("lhs", &TPairObj::lhs).def_ro("rhs", &TPairObj::rhs);
+  }
+
+  static constexpr TVMFFISEqHashKind _type_s_eq_hash_kind = kTVMFFISEqHashKindTreeNode;
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("test.Pair", TPairObj, Object);
+};
+
+class TPair : public ObjectRef {
+ public:
+  TPair(ObjectRef lhs, ObjectRef rhs) {
+    data_ = make_object<TPairObj>(std::move(lhs), std::move(rhs));
+  }
+
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(TPair, ObjectRef, TPairObj);
+};
+
 // FreeVar test object that has a sub-field referencing another FreeVar.
 // This models the "var with nested vars" case (analogous to a relax::Var
 // whose struct_info contains tir shape vars). It is used to exercise the
@@ -292,12 +319,27 @@ class TFuncObj : public Object {
   TFuncObj(Array<TVar> params, Array<ObjectRef> body, Optional<String> comment)
       : params(params), body(body), comment(comment) {}
 
+  static TVMFFIAny StructuralVisit(StructuralVisitorObj* visitor, AnyView value) noexcept {
+    const auto* self = value.cast<const TFuncObj*>();
+
+    auto params_interrupt = visitor->WithDefRegionKind(
+        kTVMFFIDefRegionKindRecursive, [&]() { return visitor->VisitExpected(self->params); });
+    TVM_FFI_S_VISIT_MAYBE_EARLY_RETURN(params_interrupt);
+
+    auto body_interrupt = visitor->VisitExpected(self->body);
+    return details::ExpectedUnsafe::MoveToTVMFFIAny(std::move(body_interrupt));
+  }
+
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
     refl::ObjectDef<TFuncObj>()
         .def_ro("params", &TFuncObj::params, refl::AttachFieldFlag::SEqHashDefRecursive())
         .def_ro("body", &TFuncObj::body)
         .def_ro("comment", &TFuncObj::comment, refl::AttachFieldFlag::SEqHashIgnore());
+    refl::EnsureTypeAttrColumn(refl::type_attr::kStructuralVisit);
+    refl::TypeAttrDef<TFuncObj>().attr(
+        refl::type_attr::kStructuralVisit,
+        reinterpret_cast<void*>(static_cast<FStructuralVisit>(&TFuncObj::StructuralVisit)));
   }
 
   static constexpr TVMFFISEqHashKind _type_s_eq_hash_kind = kTVMFFISEqHashKindTreeNode;
