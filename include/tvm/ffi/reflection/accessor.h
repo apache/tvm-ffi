@@ -467,6 +467,46 @@ inline constexpr const char* kSHash = "__s_hash__";
  */
 inline constexpr const char* kSEqual = "__s_equal__";
 /*!
+ * \brief Custom structural visitor hook (used by ``StructuralVisitor``).
+ *
+ * The hook receives the active visitor and the current object value. It should
+ * visit structural child values through the provided visitor and return an
+ * optional ``VisitInterrupt`` when traversal should stop.
+ *
+ * Value type: either an opaque function pointer matching ``FStructuralVisitSafe``
+ *
+ * ``int (*)(void* visitor, const ObjectRef& value, Optional<VisitInterrupt>* out)``
+ *
+ * or an ``ffi::Function`` with signature
+ *
+ * ``(ObjectRef value, Function visit_child) -> Optional<VisitInterrupt>``.
+ *
+ * The opaque function pointer follows the FFI safe-call convention: it returns
+ * ``0`` on success and a non-zero value on error, with the error raised via
+ * ``TVMFFIErrorSetRaised`` (or ``TVM_FFI_SAFE_CALL_BEGIN`` / ``END`` from C++).
+ * The ``visitor`` parameter is the opaque ``void* self`` carried inside
+ * ``StructuralVisitor`` and can be reinterpreted as ``StructuralVisitor*`` to
+ * recurse via ``visitor->Visit(child)``.
+ *
+ * The ``visit_child`` callback (for the ``ffi::Function`` variant) has signature
+ * ``(ObjectRef child, int def_region_kind) -> Optional<VisitInterrupt>``.
+ */
+inline constexpr const char* kStructuralVisit = "__ffi_structural_visit__";
+/*!
+ * \brief Custom structural mapper hook (used by ``StructuralMapper``).
+ *
+ * Value type: opaque function pointer with signature
+ * ``Any (*)(StructuralMapper* mapper, AnyView value)``.
+ */
+inline constexpr const char* kStructuralMap = "__ffi_structural_map__";
+/*!
+ * \brief Custom in-place structural mutator hook (used by ``StructuralMapper``).
+ *
+ * Value type: opaque function pointer with signature
+ * ``Any (*)(StructuralMapper* mapper, ObjectRef&& value)``.
+ */
+inline constexpr const char* kStructuralInplaceMutator = "__ffi_structural_inplace_mutator__";
+/*!
  * \brief Serialize object data to a JSON-compatible ``Map``.
  *
  * If registered, ``ToJSONGraph`` calls this instead of the default

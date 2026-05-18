@@ -17,3 +17,4 @@
  * under the License.
  */
 pub mod module;
+pub mod structure;

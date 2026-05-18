@@ -231,3 +231,65 @@ class StructuralKey(Object):
     def __eq__(self, other: Any) -> bool:
         """Compare by structural equality."""
         return isinstance(other, StructuralKey) and _ffi_api.StructuralKeyEqual(self, other)
+
+
+class StructuralVisitor(Object):
+    """Structural visitor object."""
+    def __init__(self) -> None:
+        self.__init_handle_by_constructor__(_ffi_api.StructuralVisitor)
+
+    def visit(self, value: Any) -> Any:
+        return _ffi_api.StructuralVisit(self, value)
+
+    def with_def_region_kind(self, kind: TVMFFIDefRegionKind, callback: Callable[[], Any]) -> Any:
+        return _ffi_api.StructuralVisitorWithDefRegionKind(self, kind, callback)
+
+
+
+#### example usage
+
+```
+visitor = StructuralVisitor()
+visitor.visit(root)
+visitor.with_def_region_kind(TVMFFIDefRegionKind.kDefRecursive, lambda: visitor.visit(root))
+```
+
+
+def visit_for_(visitor: StructuralVisitor, op: For) -> Optional[VisitInterrupt]:
+    """Visitor implementation for For."""
+    visitor.visit(op.min)
+    visitor.visit(op.extent)
+    if op.step is not None:
+        visitor.visit(op.step)
+    visitor.visit(op.body)
+
+
+def visit_function(visitor: StructuralVisitor, op: Function) -> VisitInterrupt | None:
+    # params introduce definitions
+    ret = visitor.with_def_region_kind(
+        TVMFFIDefRegionKind.kTVMFFIDefRegionKindRecursive,
+        lambda: visitor.visit(op.params),
+    )
+    if ret is not None:
+        return ret
+
+    # body is normal use context
+    return visitor.visit(op.body)
+
+
+def visit_let(visitor: StructuralVisitor, op: Let) -> VisitInterrupt | None:
+    # RHS is use context
+    ret = visitor.visit(op.value)
+    if ret is not None:
+        return ret
+
+    # LHS var is a definition, but vars inside its annotation are uses
+    ret = visitor.with_def_region_kind(
+        TVMFFIDefRegionKind.kTVMFFIDefRegionKindNonRecursive,
+        lambda: visitor.visit(op.var),
+    )
+    if ret is not None:
+        return ret
+
+    return visitor.visit(op.body)
+
