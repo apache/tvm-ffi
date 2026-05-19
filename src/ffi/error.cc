@@ -31,12 +31,25 @@ namespace ffi {
 class SafeCallContext {
  public:
   void SetRaised(TVMFFIObjectHandle error) {
+    // Explicitly zero cause_chain and extra_context before storing in TLS.
+    // On macOS arm64 the allocator may reuse memory that contains stale
+    // non-null bytes, which would cause ~ErrorObj() to call DecRefObjectHandle
+    // on a garbage pointer → SIGBUS (alignment fault).
+    auto* cell = TVMFFIErrorGetCellPtr(error);
+    cell->cause_chain = nullptr;
+    cell->extra_context = nullptr;
     last_error_ =
         details::ObjectUnsafe::ObjectPtrFromUnowned<ErrorObj>(static_cast<TVMFFIObject*>(error));
   }
 
   void SetRaisedByCstr(const char* kind, const char* message, const TVMFFIByteArray* backtrace) {
     Error error(kind, message, backtrace);
+    // Zero the newly created Error's cause_chain / extra_context as defensive
+    // measure (see comment in SetRaised above).
+    auto* cell = TVMFFIErrorGetCellPtr(
+        details::ObjectUnsafe::TVMFFIObjectPtrFromObjectRef(error));
+    cell->cause_chain = nullptr;
+    cell->extra_context = nullptr;
     last_error_ = details::ObjectUnsafe::ObjectPtrFromObjectRef<ErrorObj>(std::move(error));
   }
 
