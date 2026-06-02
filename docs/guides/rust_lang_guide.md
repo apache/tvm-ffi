@@ -180,6 +180,22 @@ fn may_fail(value: i32) -> Result<()> {
 }
 ```
 
+### Generating Bindings with stubgen
+
+For registered C++ classes, `tvm-ffi-stubgen --target rust` generates typed Rust
+bindings whose memory layout mirrors C++ exactly, so you can construct and call
+objects without hand-written glue:
+
+```rust
+// generated for a C++ class `my_ext.IntPair` (fields `a`/`b`, defaulted `scale`, method `sum`)
+let mut pair = IntPair::ffi_new().a(1).b(2).build()?;  // builder; `scale` defaults to 1
+println!("sum = {}", pair.sum()?);                     // call a C++ method
+pair.a = 10;                                           // write a field through DerefMut
+```
+
+See {ref}`sec-stubgen-rust` for the full reference and the runnable
+[`examples/rust_stubgen`](https://github.com/apache/tvm-ffi/tree/main/examples/rust_stubgen).
+
 ## Examples
 
 The repository includes a complete example in `rust/tvm-ffi/examples/load_library.rs`.
@@ -213,5 +229,6 @@ For detailed API documentation, see the [Rust API Reference](../reference/rust/i
 ## Related Resources
 
 - [Quick Start Guide](../get_started/quickstart.rst) - General TVM FFI introduction
+- [Stub Generation](../packaging/stubgen.rst) - Full `tvm-ffi-stubgen` reference (Python and Rust targets)
 - [C++ Guide](./cpp_lang_guide.md) - C++ API usage
 - [Python Guide](./python_lang_guide.md) - Python API usage

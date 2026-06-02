@@ -727,7 +727,7 @@ class ObjectDef : public ReflectionDefBase {
 
   /*!
    * \brief Destructor, which also potentially registers `__ffi_new__`, `__ffi_init__`,
-   * `__ffi_shallow_copy__`.
+   * `__ffi_shallow_copy__`, `__ffi_type_mutable__`.
    */
   ~ObjectDef() noexcept(false) {
     const TVMFFITypeInfo* info = TVMFFIGetTypeInfo(type_index_);
@@ -763,6 +763,10 @@ class ObjectDef : public ReflectionDefBase {
         }
       }
     }
+    // Step 4. Register `__ffi_type_mutable__` <== Class::_type_mutable
+    TVMFFIByteArray attr = AsByteArray(type_attr::kTypeMutable);
+    TVMFFIAny value_any = AnyView(Class::_type_mutable).CopyToTVMFFIAny();
+    TVM_FFI_CHECK_SAFE_CALL(TVMFFITypeRegisterAttr(type_index_, &attr, &value_any));
   }
 
   /*!
