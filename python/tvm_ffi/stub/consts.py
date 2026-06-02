@@ -28,14 +28,15 @@ from typing_extensions import TypeAlias
 class MarkerSyntax:
     """Comment-syntax-specific stub directive markers.
 
-    All stub directives are embedded inside single-line comments. The comment
-    token (currently ``#`` for Python sources) parameterizes the marker set,
-    while the directive grammar (``tvm-ffi-stubgen(begin): ...`` etc.) stays
-    uniform.
+    All stub directives are embedded inside single-line comments. Only the
+    comment token differs between languages (Python ``#`` vs Rust ``//``); the
+    rest of the directive grammar (``tvm-ffi-stubgen(begin): ...`` etc.) is
+    identical. A single ``comment`` token therefore parameterizes the whole
+    marker set, so the block parser in :mod:`.file_utils` is language-agnostic.
     """
 
     comment: str
-    """The line-comment token for the target language."""
+    """The line-comment token for the target language, e.g. ``"#"`` or ``"//"``."""
 
     @property
     def prefix(self) -> str:
@@ -69,12 +70,15 @@ class MarkerSyntax:
 
 
 PYTHON_SYNTAX = MarkerSyntax(comment="#")
+RUST_SYNTAX = MarkerSyntax(comment="//")
 
 #: Map a source-file extension to the marker syntax used inside it. The block
-#: parser selects the syntax per file.
+#: parser selects the syntax per file, so a single run can process a mixed tree
+#: of ``.py`` and ``.rs`` files.
 SYNTAX_BY_EXT: dict[str, MarkerSyntax] = {
     ".py": PYTHON_SYNTAX,
     ".pyi": PYTHON_SYNTAX,
+    ".rs": RUST_SYNTAX,
 }
 
 STUB_BLOCK_KINDS: TypeAlias = Literal[
