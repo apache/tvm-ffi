@@ -14,13 +14,18 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-"""Common utilities for the `tvm-ffi-stubgen` tool."""
+"""Language-agnostic data model for the `tvm-ffi-stubgen` tool.
+
+These dataclasses describe the FFI reflection metadata (functions, object
+fields/methods, init signatures) without committing to any target language.
+Turning this metadata into source text is the job of a target language
+generator (e.g. :mod:`tvm_ffi.stub.python_generator.codegen`).
+"""
 
 from __future__ import annotations
 
 import dataclasses
-from io import StringIO
-from typing import Any, Callable
+from typing import Any
 
 from tvm_ffi.core import TypeInfo, TypeSchema, _lookup_type_attr
 
@@ -75,58 +80,8 @@ class Options:
     files: list[str] = dataclasses.field(default_factory=list)
     verbose: bool = False
     dry_run: bool = False
-
-
-@dataclasses.dataclass(frozen=True, eq=True)
-class ImportItem:
-    """An import statement item."""
-
-    mod: str
-    name: str
-    type_checking_only: bool = False
-    alias: str | None = None
-
-    def __init__(
-        self,
-        name: str,
-        type_checking_only: bool = False,
-        alias: str | None = None,
-    ) -> None:
-        """Initialize an `ImportItem` with the given module name and optional alias."""
-        if "." in name:
-            mod, name = name.rsplit(".", 1)
-            for mod_prefix, mod_replacement in C.MOD_MAP.items():
-                if mod.startswith(mod_prefix):
-                    mod = mod.replace(mod_prefix, mod_replacement, 1)
-                    break
-        else:
-            mod = ""
-        object.__setattr__(self, "mod", mod)
-        object.__setattr__(self, "name", name)
-        object.__setattr__(self, "type_checking_only", type_checking_only)
-        object.__setattr__(self, "alias", alias)
-
-    @property
-    def name_with_alias(self) -> str:
-        """Generate a string of the form `name as alias` if an alias is set, otherwise just `name`."""
-        return f"{self.name} as {self.alias}" if self.alias else self.name
-
-    @property
-    def full_name(self) -> str:
-        """Generate a string of the form `mod.name` or `name` if no module is set."""
-        return f"{self.mod}.{self.name}" if self.mod else self.name
-
-    def __repr__(self) -> str:
-        """Generate an import statement string for this item."""
-        return str(self)
-
-    def __str__(self) -> str:
-        """Generate an import statement string for this item."""
-        if self.mod:
-            ret = f"from {self.mod} import {self.name_with_alias}"
-        else:
-            ret = f"import {self.name_with_alias}"
-        return ret
+    target: str = "python"
+    """Code generator target to use."""
 
 
 @dataclasses.dataclass(init=False)
@@ -136,7 +91,7 @@ class NamedTypeSchema(TypeSchema):
     name: str
 
     def __init__(self, name: str, schema: TypeSchema) -> None:
-        """Initialize a `NamedTypeSchema` with the given name and type schema."""
+        """Initialize a `NamedTypeSchema` with the given name and schema."""
         super().__init__(origin=schema.origin, args=schema.args)
         self.name = name
 
@@ -152,37 +107,6 @@ class FuncInfo:
     def from_schema(name: str, schema: TypeSchema, *, is_member: bool = False) -> FuncInfo:
         """Construct a `FuncInfo` from a name and its type schema."""
         return FuncInfo(schema=NamedTypeSchema(name=name, schema=schema), is_member=is_member)
-
-    def gen(self, ty_map: Callable[[str], str], indent: int) -> str:
-        """Generate a function signature string for this function."""
-        try:
-            _, func_name = self.schema.name.rsplit(".", 1)
-        except ValueError:
-            func_name = self.schema.name
-        buf = StringIO()
-        buf.write(" " * indent)
-        buf.write(f"def {func_name}(")
-        if self.schema.origin != "Callable":
-            raise ValueError(f"Expected Callable type schema, but got: {self.schema}")
-        if not self.schema.args:
-            ty_map("Any")
-            buf.write("*args: Any) -> Any: ...")
-            return buf.getvalue()
-        arg_ret = self.schema.args[0]
-        arg_args = self.schema.args[1:]
-        for i, arg in enumerate(arg_args):
-            if self.is_member and i == 0:
-                buf.write("self, ")
-            else:
-                buf.write(f"_{i}: ")
-                buf.write(arg.repr(ty_map))
-                buf.write(", ")
-        if arg_args:
-            buf.write("/")
-        buf.write(") -> ")
-        buf.write(arg_ret.repr(ty_map))
-        buf.write(": ...")
-        return buf.getvalue()
 
 
 @dataclasses.dataclass
@@ -265,110 +189,3 @@ class ObjectInfo:
             init_fields=init_fields,
             has_init=has_init,
         )
-
-    def gen_fields(self, ty_map: Callable[[str], str], indent: int) -> list[str]:
-        """Generate field definitions for this object."""
-        indent_str = " " * indent
-        return [f"{indent_str}{field.name}: {field.repr(ty_map)}" for field in self.fields]
-
-    def gen_methods(self, ty_map: Callable[[str], str], indent: int) -> list[str]:
-        """Generate method definitions for this object."""
-        indent_str = " " * indent
-        ret = []
-        for method in self.methods:
-            func_name = method.schema.name.rsplit(".", 1)[-1]
-            if func_name == "__ffi_init__":
-                # __ffi_init__ is installed as an instance method (self, *args, **kwargs) -> None
-                # by _install_ffi_init_attr, regardless of the C++ static registration.
-                ret.append(self._gen_ffi_init_from_method(method, ty_map, indent))
-                continue
-            if not method.is_member:
-                ret.append(f"{indent_str}@staticmethod")
-            ret.append(method.gen(ty_map, indent))
-        return ret
-
-    @staticmethod
-    def _gen_ffi_init_from_method(
-        method: FuncInfo, ty_map: Callable[[str], str], indent: int
-    ) -> str:
-        """Render ``__ffi_init__`` TypeMethod as an instance method returning None."""
-        indent_str = " " * indent
-        schema = method.schema
-        # Subclass __ffi_init__ signatures legitimately differ from the parent
-        # (different fields → different constructor params), so suppress LSP.
-        ignore = "  # ty: ignore[invalid-method-override]"
-        if schema.origin != "Callable" or not schema.args:
-            ty_map("Any")
-            return f"{indent_str}def __ffi_init__(self, *args: Any) -> None: ...{ignore}"
-        # schema.args[0] is return type, schema.args[1:] are param types.
-        parts: list[str] = []
-        for i, arg in enumerate(schema.args[1:]):
-            parts.append(f"_{i}: {arg.repr(ty_map)}")
-        if parts:
-            params = ", ".join(parts)
-            return f"{indent_str}def __ffi_init__(self, {params}, /) -> None: ...{ignore}"
-        return f"{indent_str}def __ffi_init__(self) -> None: ...{ignore}"
-
-    def gen_ffi_init(self, ty_map: Callable[[str], str], indent: int) -> list[str]:
-        """Generate a ``__ffi_init__`` stub when it's not already in TypeMethod.
-
-        For types whose ``__ffi_init__`` is auto-generated by ``RegisterFFIInit``
-        (TypeAttrColumn only), synthesize a static-method stub from field metadata.
-        Types that already have ``__ffi_init__`` in TypeMethod (from explicit
-        ``refl::init<>``) get it via ``gen_methods`` instead.
-        """
-        if not self.has_init:
-            return []
-        # If __ffi_init__ is already in methods (from TypeMethod), gen_methods handles it.
-        if any(m.schema.name.rsplit(".", 1)[-1] == "__ffi_init__" for m in self.methods):
-            return []
-        return self._gen_ffi_init_from_fields(ty_map, indent)
-
-    def gen_init(self, ty_map: Callable[[str], str], indent: int) -> list[str]:
-        """Generate an ``__init__`` stub from init-eligible field metadata."""
-        if not self.has_init:
-            return []
-        return self._gen_init_from_fields(ty_map, indent)
-
-    def _format_field_params(self, ty_map: Callable[[str], str]) -> str:
-        """Format init-eligible fields as a parameter string with defaults and kw_only."""
-        positional = [f for f in self.init_fields if not f.kw_only]
-        kw_only = [f for f in self.init_fields if f.kw_only]
-
-        pos_required = [f for f in positional if not f.has_default]
-        pos_default = [f for f in positional if f.has_default]
-        kw_required = [f for f in kw_only if not f.has_default]
-        kw_default = [f for f in kw_only if f.has_default]
-
-        parts: list[str] = []
-        for f in pos_required:
-            parts.append(f"{f.name}: {f.schema.repr(ty_map)}")
-        for f in pos_default:
-            parts.append(f"{f.name}: {f.schema.repr(ty_map)} = ...")
-        if kw_required or kw_default:
-            parts.append("*")
-            for f in kw_required:
-                parts.append(f"{f.name}: {f.schema.repr(ty_map)}")
-            for f in kw_default:
-                parts.append(f"{f.name}: {f.schema.repr(ty_map)} = ...")
-
-        return ", ".join(parts)
-
-    def _gen_init_from_fields(self, ty_map: Callable[[str], str], indent: int) -> list[str]:
-        """Generate ``__init__`` from init-eligible field metadata (auto-generated init)."""
-        indent_str = " " * indent
-        params = self._format_field_params(ty_map)
-        if params:
-            return [f"{indent_str}def __init__(self, {params}) -> None: ..."]
-        return [f"{indent_str}def __init__(self) -> None: ..."]
-
-    def _gen_ffi_init_from_fields(self, ty_map: Callable[[str], str], indent: int) -> list[str]:
-        """Generate ``__ffi_init__`` stub from field metadata for auto-generated init."""
-        indent_str = " " * indent
-        # Subclass __ffi_init__ signatures legitimately differ from the parent
-        # (different fields → different constructor params), so suppress LSP.
-        ignore = "  # ty: ignore[invalid-method-override]"
-        params = self._format_field_params(ty_map)
-        if params:
-            return [f"{indent_str}def __ffi_init__(self, {params}) -> None: ...{ignore}"]
-        return [f"{indent_str}def __ffi_init__(self) -> None: ...{ignore}"]

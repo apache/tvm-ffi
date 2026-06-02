@@ -24,17 +24,21 @@ import importlib
 import sys
 import traceback
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from . import codegen as G
 from . import consts as C
-from .file_utils import FileInfo, collect_files
+from .file_utils import FileInfo, collect_files, syntax_for
+from .generator import get_generator
 from .lib_state import (
     collect_global_funcs,
     collect_type_keys,
     object_info_from_type_key,
     toposort_objects,
 )
-from .utils import FuncInfo, ImportItem, InitConfig, Options
+from .utils import FuncInfo, InitConfig, Options
+
+if TYPE_CHECKING:
+    from .generator import Generator
 
 
 def __main__() -> int:
@@ -45,6 +49,7 @@ def __main__() -> int:
     overview and examples of the block syntax.
     """
     opt = _parse_args()
+    generator = get_generator(opt.target)
     for imp in opt.imports or []:
         importlib.import_module(imp)
     dlls = [ctypes.CDLL(lib) for lib in opt.dlls]
@@ -60,7 +65,7 @@ def __main__() -> int:
     # - type maps: `tvm-ffi-stubgen(ty-map)`
     # - defined global functions: `tvm-ffi-stubgen(begin): global/...`
     # - defined object types: `tvm-ffi-stubgen(begin): object/...`
-    ty_map: dict[str, str] = C.TY_MAP_DEFAULTS.copy()
+    ty_map: dict[str, str] = generator.default_ty_map()
     for file in files:
         try:
             _stage_1(file, ty_map)
@@ -70,14 +75,16 @@ def __main__() -> int:
             )
 
     # Stage 2. Generate stubs if they are not defined on the file.
+    generated_prefixes: set[str] = set()
     if opt.init:
         assert init_path is not None, "init-path could not be determined"
-        _stage_2(
+        generated_prefixes = _stage_2(
             files,
             ty_map,
             init_cfg=opt.init,
             init_path=init_path,
             global_funcs=global_funcs,
+            generator=generator,
         )
 
     # Stage 3: Process
@@ -87,11 +94,23 @@ def __main__() -> int:
         if opt.verbose:
             print(f"{C.TERM_CYAN}[File] {file.path}{C.TERM_RESET}")
         try:
-            _stage_3(file, opt, ty_map, global_funcs)
+            _stage_3(
+                file,
+                opt,
+                ty_map,
+                global_funcs,
+                generator=generator,
+            )
         except Exception:
             print(
                 f'{C.TERM_RED}[Failed] File "{file.path}": {traceback.format_exc()}{C.TERM_RESET}'
             )
+
+    # Stage 4. Let the generator stitch the generated tree together (runs after the
+    # files are fully written, so language-specific wiring isn't clobbered).
+    if opt.init and generated_prefixes:
+        assert init_path is not None
+        generator.finalize_init(init_path, generated_prefixes)
     del dlls
     return 0
 
@@ -118,11 +137,12 @@ def _stage_2(
     init_cfg: InitConfig,
     init_path: Path,
     global_funcs: dict[str, list[FuncInfo]],
-) -> None:
+    generator: Generator,
+) -> set[str]:
     def _find_or_insert_file(path: Path) -> FileInfo:
         ret: FileInfo | None
         if not path.exists():
-            ret = FileInfo(path=path, lines=(), code_blocks=[])
+            ret = FileInfo(path=path, lines=(), code_blocks=[], syntax=syntax_for(path))
         else:
             for file in files:
                 if path.samefile(file.path):
@@ -148,6 +168,7 @@ def _stage_2(
     prefixes: dict[str, list[str]] = collect_type_keys()
     for prefix in global_funcs:
         prefixes.setdefault(prefix, [])
+    generated_prefixes: set[str] = set()
     for prefix, obj_names in prefixes.items():
         if not (prefix == root_prefix or prefix.startswith(prefix_filter)):
             continue
@@ -159,15 +180,17 @@ def _stage_2(
         object_infos = toposort_objects(objs)
         if not funcs and not object_infos:
             continue
+        generated_prefixes.add(prefix)
         # Step 1. Create target directory if not exists
         directory = init_path / prefix.replace(".", "/")
         directory.mkdir(parents=True, exist_ok=True)
-        # Step 2. Generate `_ffi_api.py`
-        target_path = directory / "_ffi_api.py"
+        # Step 2. Generate the API file.
+        api_filename = generator.api_filename()
+        target_path = directory / api_filename
         target_file = _find_or_insert_file(target_path)
         with target_path.open("a", encoding="utf-8") as f:
             f.write(
-                G.generate_ffi_api(
+                generator.generate_api_file(
                     target_file.code_blocks,
                     ty_map,
                     prefix,
@@ -177,12 +200,15 @@ def _stage_2(
                 )
             )
         target_file.reload()
-        # Step 3. Generate `__init__.py`
-        target_path = directory / "__init__.py"
+        # Step 3. Generate the package entry (Python `__init__.py`; re-exports the
+        # API submodule). `submodule` is the API file's stem.
+        submodule = api_filename.rsplit(".", 1)[0]
+        target_path = directory / generator.init_filename()
         target_file = _find_or_insert_file(target_path)
         with target_path.open("a", encoding="utf-8") as f:
-            f.write(G.generate_init(target_file.code_blocks, prefix, submodule="_ffi_api"))
+            f.write(generator.generate_init_file(target_file.code_blocks, prefix, submodule))
         target_file.reload()
+    return generated_prefixes
 
 
 def _stage_3(  # noqa: PLR0912
@@ -190,35 +216,23 @@ def _stage_3(  # noqa: PLR0912
     opt: Options,
     ty_map: dict[str, str],
     global_funcs: dict[str, list[FuncInfo]],
+    generator: Generator,
 ) -> None:
     defined_funcs: set[str] = set()
     defined_types: set[str] = set()
-    imports: list[ImportItem] = []
-    ffi_load_lib_imported = False
+    imports = generator.new_imports()
     # Stage 1. Collect `tvm-ffi-stubgen(import-object): ...`
     for code in file.code_blocks:
         if code.kind == "import-object":
             name, type_checking_only, alias = code.param
-            imports.append(
-                ImportItem(
-                    name,
-                    type_checking_only=(
-                        bool(type_checking_only)
-                        and isinstance(type_checking_only, str)
-                        and type_checking_only.lower() == "true"
-                    ),
-                    alias=alias if alias else None,
-                )
-            )
-            if (alias and alias == "_FFI_LOAD_LIB") or name.endswith("libinfo.load_lib_module"):
-                ffi_load_lib_imported = True
+            generator.add_imported_object(imports, name, type_checking_only, alias)
     # Stage 2. Process `tvm-ffi-stubgen(begin): global/...`
     for code in file.code_blocks:
         if code.kind == "global":
             funcs = global_funcs.get(code.param[0], [])
             for func in funcs:
                 defined_funcs.add(func.schema.name)
-            G.generate_global_funcs(code, funcs, ty_map, imports, opt)
+            generator.generate_global_funcs_block(code, funcs, ty_map, imports, opt)
     # Stage 3. Process `tvm-ffi-stubgen(begin): object/...`
     for code in file.code_blocks:
         if code.kind == "object":
@@ -226,27 +240,23 @@ def _stage_3(  # noqa: PLR0912
             assert isinstance(type_key, str)
             obj_info = object_info_from_type_key(type_key)
             type_key = ty_map.get(type_key, type_key)
-            full_name = ImportItem(type_key).full_name
-            defined_types.add(full_name)
-            G.generate_object(code, ty_map, imports, opt, obj_info)
+            defined_types.add(generator.canonical_type_name(type_key))
+            generator.generate_object_block(code, ty_map, imports, opt, obj_info)
     # Stage 4. Add imports for used types.
-    imports = [i for i in imports if i.full_name not in defined_types]
     for code in file.code_blocks:
         if code.kind == "import-section":
-            G.generate_import_section(code, imports, opt)
+            generator.generate_import_section_block(code, imports, opt, defined_types)
             break  # Only one import block per file is supported for now.
     # Stage 5. Add `__all__` for defined classes and functions.
     for code in file.code_blocks:
         if code.kind == "__all__":
-            export_names = defined_funcs | defined_types
-            if ffi_load_lib_imported:
-                export_names = export_names | {"LIB"}
-            G.generate_all(code, export_names, opt)
+            export_names = defined_funcs | defined_types | generator.extra_export_names(imports)
+            generator.generate_all_block(code, export_names, opt)
             break  # Only one __all__ block per file is supported for now.
     # Stage 6. Process `tvm-ffi-stubgen(begin): export/...`
     for code in file.code_blocks:
         if code.kind == "export":
-            G.generate_export(code)
+            generator.generate_export_block(code)
     # Finalize: write back to file
     file.update(verbose=opt.verbose, dry_run=opt.dry_run)
 
@@ -328,7 +338,7 @@ def _parse_args() -> Options:
         default=4,
         help=(
             "Extra spaces added inside each generated block, relative to the "
-            f"indentation of the corresponding '{C.STUB_BEGIN}' line."
+            "indentation of the corresponding stub 'begin' marker line."
         ),
     )
     parser.add_argument(
@@ -340,6 +350,13 @@ def _parse_args() -> Options:
             "only .py and .pyi files are modified. Use tvm-ffi-stubgen directives to "
             "select where stubs are generated."
         ),
+    )
+    parser.add_argument(
+        "--target",
+        type=str,
+        default="python",
+        choices=["python"],
+        help="Code generator target.",
     )
     parser.add_argument(
         "--verbose",
@@ -382,6 +399,7 @@ def _parse_args() -> Options:
         files=args.files,
         verbose=args.verbose,
         dry_run=args.dry_run,
+        target=args.target,
     )
 
 

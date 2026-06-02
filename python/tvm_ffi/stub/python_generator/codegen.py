@@ -14,15 +14,72 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-"""Code generation logic for the `tvm-ffi-stubgen` tool."""
+"""Python code generation for the ``tvm-ffi-stubgen`` tool.
+
+This module owns the Python codegen orchestration for language-agnostic FFI
+metadata (:class:`tvm_ffi.stub.utils.FuncInfo` /
+:class:`~tvm_ffi.stub.utils.ObjectInfo`). Rendering helpers live in
+``python_generator.utils`` so the per-block generation pipeline here stays focused
+on directive handling and source assembly.
+"""
 
 from __future__ import annotations
 
 from typing import Callable
 
-from . import consts as C
-from .file_utils import CodeBlock
-from .utils import FuncInfo, ImportItem, InitConfig, ObjectInfo, Options
+from .. import consts as C
+from ..file_utils import CodeBlock
+from ..utils import FuncInfo, InitConfig, ObjectInfo, Options
+from .utils import (
+    ImportItem,
+    render_func_signature,
+    render_object_ffi_init,
+    render_object_fields,
+    render_object_init,
+    render_object_methods,
+)
+
+# --- Python scaffolding templates (init mode) -------------------------------
+# These emit Python source plus stub-directive markers. The marker comment token
+# comes from the supplied `MarkerSyntax`, so the directive structure stays
+# language-aware even though the surrounding code is Python-specific.
+
+
+def _prompt_globals(mod: str, syntax: C.MarkerSyntax) -> str:
+    return f"""{syntax.begin} global/{mod}
+{syntax.end}
+"""
+
+
+def _prompt_class_def(
+    type_name: str, type_key: str, parent_type_name: str, syntax: C.MarkerSyntax
+) -> str:
+    return f'''@_FFI_REG_OBJ("{type_key}")
+class {type_name}({parent_type_name}):
+    """FFI binding for `{type_key}`."""
+
+    {syntax.begin} object/{type_key}
+    {syntax.end}\n\n'''
+
+
+def _prompt_import_object(type_key: str, type_name: str, syntax: C.MarkerSyntax) -> str:
+    return f"""{syntax.import_object} {type_key};False;{type_name}\n"""
+
+
+def _prompt_import_section(syntax: C.MarkerSyntax) -> str:
+    return f"""
+{syntax.begin} import-section
+{syntax.end}
+"""
+
+
+def _prompt_all_section(syntax: C.MarkerSyntax) -> str:
+    return f"""
+__all__ = [
+    {syntax.begin} __all__
+    {syntax.end}
+]
+"""
 
 
 def _type_suffix_and_record(
@@ -46,7 +103,7 @@ def _type_suffix_and_record(
     return _run
 
 
-def generate_global_funcs(
+def generate_python_global_funcs(
     code: CodeBlock,
     global_funcs: list[FuncInfo],
     ty_map: dict[str, str],
@@ -83,7 +140,7 @@ def generate_global_funcs(
         "# fmt: off",
         f'_FFI_INIT_FUNC("{prefix}", __name__)',
         "if TYPE_CHECKING:",
-        *[func.gen(fn_ty_map, indent=opt.indent) for func in global_funcs],
+        *[render_func_signature(func, fn_ty_map, opt.indent) for func in global_funcs],
         "# fmt: on",
     ]
     indent = " " * code.indent
@@ -94,7 +151,7 @@ def generate_global_funcs(
     ]
 
 
-def generate_object(
+def generate_python_object(
     code: CodeBlock,
     ty_map: dict[str, str],
     imports: list[ImportItem],
@@ -109,12 +166,12 @@ def generate_object(
     info = obj_info
     method_names = {m.schema.name.rsplit(".", 1)[-1] for m in info.methods}
     fn_ty_map = _type_suffix_and_record(ty_map, imports, func_names=method_names)
-    init_lines = info.gen_init(fn_ty_map, indent=opt.indent)
-    ffi_init_lines = info.gen_ffi_init(fn_ty_map, indent=opt.indent)
+    init_lines = render_object_init(info, fn_ty_map, opt.indent)
+    ffi_init_lines = render_object_ffi_init(info, fn_ty_map, opt.indent)
     type_checking_lines = [
         *init_lines,
         *ffi_init_lines,
-        *info.gen_methods(fn_ty_map, indent=opt.indent),
+        *render_object_methods(info, fn_ty_map, opt.indent),
     ]
     if type_checking_lines:
         imports.append(
@@ -125,7 +182,7 @@ def generate_object(
         )
         results = [
             "# fmt: off",
-            *info.gen_fields(fn_ty_map, indent=0),
+            *render_object_fields(info, fn_ty_map, 0),
             "if TYPE_CHECKING:",
             *type_checking_lines,
             "# fmt: on",
@@ -133,7 +190,7 @@ def generate_object(
     else:
         results = [
             "# fmt: off",
-            *info.gen_fields(fn_ty_map, indent=0),
+            *render_object_fields(info, fn_ty_map, 0),
             "# fmt: on",
         ]
     indent = " " * code.indent
@@ -144,7 +201,7 @@ def generate_object(
     ]
 
 
-def generate_import_section(
+def generate_python_import_section(
     code: CodeBlock,
     imports: list[ImportItem],
     opt: Options,
@@ -197,7 +254,7 @@ def generate_import_section(
         ]
 
 
-def generate_all(code: CodeBlock, names: set[str], opt: Options) -> None:
+def generate_python_all(code: CodeBlock, names: set[str], opt: Options) -> None:
     """Generate an `__all__` variable for the given names."""
     assert len(code.lines) >= 2
     if not names:
@@ -220,7 +277,7 @@ def generate_all(code: CodeBlock, names: set[str], opt: Options) -> None:
     ]
 
 
-def generate_export(code: CodeBlock) -> None:
+def generate_python_export(code: CodeBlock) -> None:
     """Generate an `__all__` variable for the given names."""
     assert len(code.lines) >= 2
 
@@ -240,13 +297,14 @@ def generate_export(code: CodeBlock) -> None:
     ]
 
 
-def generate_ffi_api(
+def generate_python_ffi_api(
     code_blocks: list[CodeBlock],
     ty_map: dict[str, str],
     module_name: str,
     object_infos: list[ObjectInfo],
     init_cfg: InitConfig,
     is_root: bool,
+    syntax: C.MarkerSyntax,
 ) -> str:
     """Generate the initial FFI API stub code for a given module."""
     # TODO(@junrus): New code is appended to the end of the file.
@@ -257,22 +315,24 @@ def generate_ffi_api(
     if not code_blocks:
         append += f"""\"\"\"FFI API bindings for {module_name}.\"\"\"\n"""
     if not any(code.kind == "import-section" for code in code_blocks):
-        append += C.PROMPT_IMPORT_SECTION
+        append += _prompt_import_section(syntax)
 
     # Part 1. Library loading
     if is_root:
-        append += C._prompt_import_object("tvm_ffi.libinfo.load_lib_module", "_FFI_LOAD_LIB")
+        append += _prompt_import_object("tvm_ffi.libinfo.load_lib_module", "_FFI_LOAD_LIB", syntax)
         append += f"""LIB = _FFI_LOAD_LIB("{init_cfg.pkg}", "{init_cfg.shared_target}")\n"""
 
     # Part 2. Global functions
     if not any(code.kind == "global" for code in code_blocks):
-        append += C._prompt_globals(module_name)
+        append += _prompt_globals(module_name, syntax)
 
     # Part 3. Object types
     if object_infos:
-        append += C._prompt_import_object("tvm_ffi.register_object", "_FFI_REG_OBJ")
+        append += _prompt_import_object("tvm_ffi.register_object", "_FFI_REG_OBJ", syntax)
 
-    defined_type_keys = {info.type_key for info in object_infos if info.type_key}
+    defined_type_keys = {
+        ty_map.get(info.type_key, info.type_key) for info in object_infos if info.type_key
+    }
     for info in object_infos:
         type_key = info.type_key
         parent_type_key = info.parent_type_key
@@ -288,28 +348,30 @@ def generate_ffi_api(
         # Import parent type keys if they are not defined in the current module
         if parent_type_key and parent_type_key not in defined_type_keys:
             parent_type_name = "_" + parent_type_key.replace(".", "_")
-            append += C._prompt_import_object(parent_type_key, parent_type_name)
+            append += _prompt_import_object(parent_type_key, parent_type_name, syntax)
         # Generate class definition
-        append += C._prompt_class_def(
+        append += _prompt_class_def(
             type_name,
             type_key,
             parent_type_name,
+            syntax,
         )
     # Part 4. __all__
     if not any(code.kind == "__all__" for code in code_blocks):
-        append += C.PROMPT_ALL_SECTION
+        append += _prompt_all_section(syntax)
     return append
 
 
-def generate_init(
+def generate_python_init(
     code_blocks: list[CodeBlock],
     module_name: str,
-    submodule: str = "_ffi_api",
+    submodule: str,
+    syntax: C.MarkerSyntax,
 ) -> str:
     """Generate the `__init__.py` file for the `tvm_ffi` package."""
     code = f"""
-{C.STUB_BEGIN} export/{submodule}
-{C.STUB_END}
+{syntax.begin} export/{submodule}
+{syntax.end}
 """
     if not code_blocks:
         return f"""\"\"\"Package {module_name}.\"\"\"\n""" + code

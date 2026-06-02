@@ -18,16 +18,65 @@
 
 from __future__ import annotations
 
+import dataclasses
 from typing import Literal
 
 from typing_extensions import TypeAlias
 
-STUB_PREFIX = "# tvm-ffi-stubgen("
-STUB_BEGIN = f"{STUB_PREFIX}begin):"
-STUB_END = f"{STUB_PREFIX}end)"
-STUB_TY_MAP = f"{STUB_PREFIX}ty-map):"
-STUB_IMPORT_OBJECT = f"{STUB_PREFIX}import-object):"
-STUB_SKIP_FILE = f"{STUB_PREFIX}skip-file)"
+
+@dataclasses.dataclass(frozen=True)
+class MarkerSyntax:
+    """Comment-syntax-specific stub directive markers.
+
+    All stub directives are embedded inside single-line comments. The comment
+    token (currently ``#`` for Python sources) parameterizes the marker set,
+    while the directive grammar (``tvm-ffi-stubgen(begin): ...`` etc.) stays
+    uniform.
+    """
+
+    comment: str
+    """The line-comment token for the target language."""
+
+    @property
+    def prefix(self) -> str:
+        """Common prefix shared by every stub directive on a line."""
+        return f"{self.comment} tvm-ffi-stubgen("
+
+    @property
+    def begin(self) -> str:
+        """Marker that opens a generated block: ``<comment> tvm-ffi-stubgen(begin):``."""
+        return f"{self.prefix}begin):"
+
+    @property
+    def end(self) -> str:
+        """Marker that closes a generated block: ``<comment> tvm-ffi-stubgen(end)``."""
+        return f"{self.prefix}end)"
+
+    @property
+    def ty_map(self) -> str:
+        """One-line type-map directive: ``<comment> tvm-ffi-stubgen(ty-map):``."""
+        return f"{self.prefix}ty-map):"
+
+    @property
+    def import_object(self) -> str:
+        """One-line import-object directive: ``<comment> tvm-ffi-stubgen(import-object):``."""
+        return f"{self.prefix}import-object):"
+
+    @property
+    def skip_file(self) -> str:
+        """Whole-file opt-out directive: ``<comment> tvm-ffi-stubgen(skip-file)``."""
+        return f"{self.prefix}skip-file)"
+
+
+PYTHON_SYNTAX = MarkerSyntax(comment="#")
+
+#: Map a source-file extension to the marker syntax used inside it. The block
+#: parser selects the syntax per file.
+SYNTAX_BY_EXT: dict[str, MarkerSyntax] = {
+    ".py": PYTHON_SYNTAX,
+    ".pyi": PYTHON_SYNTAX,
+}
+
 STUB_BLOCK_KINDS: TypeAlias = Literal[
     "global",
     "object",
@@ -51,26 +100,10 @@ TERM_CYAN = "\033[36m"
 TERM_WHITE = "\033[37m"
 DOC_URL = "https://tvm.apache.org/ffi/packaging/stubgen.html"
 
-DEFAULT_SOURCE_EXTS = {".py", ".pyi"}
-TY_MAP_DEFAULTS = {
-    "Any": "typing.Any",
-    "Callable": "typing.Callable",
-    "Array": "collections.abc.Sequence",
-    "List": "collections.abc.MutableSequence",
-    "Map": "collections.abc.Mapping",
-    "Dict": "collections.abc.MutableMapping",
-    "Object": "ffi.Object",
-    "Tensor": "ffi.Tensor",
-    "dtype": "ffi.dtype",
-    "Device": "ffi.Device",
-}
+DEFAULT_SOURCE_EXTS = set(SYNTAX_BY_EXT)
 
-# TODO(@junrushao): Make it configurable
-MOD_MAP = {
-    "testing": "tvm_ffi.testing",
-    "ffi": "tvm_ffi",
-}
-
+# Language-neutral metadata transform applied while building `ObjectInfo` from
+# the FFI reflection registry (see `utils.ObjectInfo.from_type_info`).
 FN_NAME_MAP: dict[str, str] = {}
 
 BUILTIN_TYPE_KEYS = {
@@ -84,35 +117,3 @@ BUILTIN_TYPE_KEYS = {
     "ffi.String",
     "ffi.Tensor",
 }
-
-
-def _prompt_globals(mod: str) -> str:
-    return f"""{STUB_BEGIN} global/{mod}
-{STUB_END}
-"""
-
-
-def _prompt_class_def(type_name: str, type_key: str, parent_type_name: str) -> str:
-    return f'''@_FFI_REG_OBJ("{type_key}")
-class {type_name}({parent_type_name}):
-    """FFI binding for `{type_key}`."""
-
-    {STUB_BEGIN} object/{type_key}
-    {STUB_END}\n\n'''
-
-
-def _prompt_import_object(type_key: str, type_name: str) -> str:
-    return f"""{STUB_IMPORT_OBJECT} {type_key};False;{type_name}\n"""
-
-
-PROMPT_IMPORT_SECTION = f"""
-{STUB_BEGIN} import-section
-{STUB_END}
-"""
-
-PROMPT_ALL_SECTION = f"""
-__all__ = [
-    {STUB_BEGIN} __all__
-    {STUB_END}
-]
-"""
