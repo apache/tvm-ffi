@@ -21,9 +21,11 @@ use crate::derive::{Object, ObjectRef};
 use crate::error::{Error, Result};
 use crate::function_internal::{AsPackedCallable, TupleAsPackedArgs};
 use crate::object::{Object, ObjectArc, ObjectCore};
+use crate::type_traits::AnyCompatible;
 use tvm_ffi_sys::{
     TVMFFIAny, TVMFFIByteArray, TVMFFIFunctionCell, TVMFFIFunctionCreate, TVMFFIFunctionGetGlobal,
-    TVMFFIFunctionSetGlobal, TVMFFIObjectHandle, TVMFFISafeCallType, TVMFFITypeIndex,
+    TVMFFIFunctionSetGlobal, TVMFFIGetTypeInfo, TVMFFIObjectHandle, TVMFFISafeCallType,
+    TVMFFITypeIndex,
 };
 
 /// function object
@@ -193,6 +195,74 @@ impl Function {
                 data: ObjectArc::<FunctionObj>::from_raw(result as *mut FunctionObj),
             })
         }
+    }
+
+    /// Look up the reflected method `method_name` on the type identified by `type_index`.
+    ///
+    /// The method is the `ffi::Function` registered through the C++ reflection
+    /// registry (`ObjectDef<T>::def` / `def_static`); for instance methods its
+    /// first packed argument is the object itself.
+    ///
+    /// # Arguments
+    /// * `type_index` - The runtime type index of the object type
+    /// * `method_name` - The reflected method name (without the type-key prefix)
+    ///
+    /// # Returns
+    /// * `Function` - The reflected method
+    pub fn from_type_method(type_index: i32, method_name: &str) -> Result<Function> {
+        unsafe {
+            let info = TVMFFIGetTypeInfo(type_index);
+            if info.is_null() {
+                crate::bail!(
+                    crate::error::TYPE_ERROR,
+                    "no type info for type_index `{}`",
+                    type_index
+                );
+            }
+            let info = &*info;
+            for i in 0..info.num_methods {
+                let mi = &*info.methods.add(i as usize);
+                if mi.name.as_str() == method_name {
+                    if !<Function as AnyCompatible>::check_any_strict(&mi.method) {
+                        crate::bail!(
+                            crate::error::TYPE_ERROR,
+                            "method `{}` on type_index `{}` is not a Function",
+                            method_name,
+                            type_index
+                        );
+                    }
+                    return Ok(<Function as AnyCompatible>::copy_from_any_view_after_check(
+                        &mi.method,
+                    ));
+                }
+            }
+        }
+        crate::bail!(
+            crate::error::TYPE_ERROR,
+            "method `{}` not found on type_index `{}`",
+            method_name,
+            type_index
+        );
+    }
+
+    /// Cached front of [`Function::from_type_method`], used by generated bindings.
+    ///
+    /// `cell` is a per-call-site `thread_local!` `OnceCell` (a `Function` is not
+    /// `Sync`, ruling out a `OnceLock`), so the method-table scan runs once per
+    /// thread.
+    pub fn from_type_method_cached(
+        cell: &'static std::thread::LocalKey<std::cell::OnceCell<Function>>,
+        type_index: i32,
+        method_name: &str,
+    ) -> Result<Function> {
+        cell.with(|c| {
+            if let Some(f) = c.get() {
+                return Ok(f.clone());
+            }
+            let f = Function::from_type_method(type_index, method_name)?;
+            let _ = c.set(f.clone());
+            Ok(f)
+        })
     }
 
     /// Register a function as a global function

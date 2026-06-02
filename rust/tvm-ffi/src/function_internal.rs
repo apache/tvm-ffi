@@ -152,6 +152,63 @@ crate::impl_arg_into_ref!(
     bool, i8, i16, i32, i64, isize, u8, u16, u32, u64, usize, f32, f64, String, Bytes
 );
 
+// Container types `Array<T>` / `Option<T>` are value-like for argument passing:
+// the holder is the value itself and the FFI call borrows it as an `AnyView`
+// (both already impl `AnyCompatible`). The generic forms can't go through the
+// `impl_*!` macros (no type parameters), so they are written out here. The
+// trait bounds mirror each container's own `AnyCompatible` impl: `Array<T>`
+// requires `T: AnyCompatible + Clone + 'static`, `Option<T>` only
+// `T: AnyCompatible` -- the asymmetry is inherited, not an oversight.
+impl<T: AnyCompatible + Clone + 'static> IntoArgHolder for crate::Array<T> {
+    type Target = crate::Array<T>;
+    fn into_arg_holder(self) -> Self::Target {
+        self
+    }
+}
+impl<'a, T: AnyCompatible + Clone + 'static> IntoArgHolder for &'a crate::Array<T> {
+    type Target = &'a crate::Array<T>;
+    fn into_arg_holder(self) -> Self::Target {
+        self
+    }
+}
+impl<T: AnyCompatible + Clone + 'static> ArgIntoRef for crate::Array<T> {
+    type Target = crate::Array<T>;
+    fn to_ref(&self) -> &Self::Target {
+        self
+    }
+}
+impl<'a, T: AnyCompatible + Clone + 'static> ArgIntoRef for &'a crate::Array<T> {
+    type Target = crate::Array<T>;
+    fn to_ref(&self) -> &Self::Target {
+        self
+    }
+}
+
+impl<T: AnyCompatible> IntoArgHolder for Option<T> {
+    type Target = Option<T>;
+    fn into_arg_holder(self) -> Self::Target {
+        self
+    }
+}
+impl<'a, T: AnyCompatible> IntoArgHolder for &'a Option<T> {
+    type Target = &'a Option<T>;
+    fn into_arg_holder(self) -> Self::Target {
+        self
+    }
+}
+impl<T: AnyCompatible> ArgIntoRef for Option<T> {
+    type Target = Option<T>;
+    fn to_ref(&self) -> &Self::Target {
+        self
+    }
+}
+impl<'a, T: AnyCompatible> ArgIntoRef for &'a Option<T> {
+    type Target = Option<T>;
+    fn to_ref(&self) -> &Self::Target {
+        self
+    }
+}
+
 //-----------------------------------------------------------
 // TupleAsPackedArgs
 //

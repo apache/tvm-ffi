@@ -24,8 +24,9 @@ The stub generator separates two concerns:
    :class:`.utils.FuncInfo`). None of this knows or cares about the target
    language.
 2. *Language-specific* rendering — turning that metadata into concrete source
-   text, rendering a :class:`~tvm_ffi.core.TypeSchema` into a target-language
-   type expression, and modelling that language's imports.
+   text (Python ``def``/``class`` vs Rust ``fn``/``struct``/``impl``), rendering
+   a :class:`~tvm_ffi.core.TypeSchema` into a target-language type expression
+   (``T | None`` vs ``Option<T>``), and modelling that language's imports.
 
 A :class:`Generator` encapsulates concern (2); ``cli.py`` drives concern (1) and
 delegates every act of emitting text — and every act of collecting imports — to
@@ -41,6 +42,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from . import consts as C
 from .python_generator import PythonGenerator
+from .rust_generator import RustGenerator
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -63,7 +65,7 @@ class Generator(Protocol):
     that created it understands its contents.
     """
 
-    #: Short identifier, e.g. ``"python"``.
+    #: Short identifier, e.g. ``"python"`` or ``"rust"``.
     name: str
 
     #: Comment-marker syntax for the files this generator emits.
@@ -140,14 +142,10 @@ class Generator(Protocol):
         """Emit a submodule re-export for an ``export/<submodule>`` block."""
         ...
 
-    def generate_helpers_block(self, code: CodeBlock, opt: Options) -> None:
-        """Emit shared per-file support code for generator-specific helper blocks."""
-        ...
-
     # --- whole-file scaffolding (used by `--init` mode) ---------------------
 
     def api_filename(self) -> str:
-        """File name of the scaffolded API file."""
+        """File name of the scaffolded API file (Python ``_ffi_api.py``; Rust ``mod.rs``)."""
         ...
 
     def init_filename(self) -> str:
@@ -163,7 +161,12 @@ class Generator(Protocol):
         init_cfg: InitConfig,
         is_root: bool,
     ) -> str:
-        """Return text appended to a freshly scaffolded API file (Python ``_ffi_api.py``)."""
+        """Return text appended to a scaffolded API file (Python ``_ffi_api.py``).
+
+        Whole-file headers (e.g. Rust's ``#![allow]`` inner attribute, which must
+        precede every item) may be emitted only when ``code_blocks`` is empty,
+        i.e. the target file did not exist or was empty.
+        """
         ...
 
     def generate_init_file(
@@ -173,12 +176,17 @@ class Generator(Protocol):
         ...
 
     def finalize_init(self, init_path: Path, generated_prefixes: set[str]) -> None:
-        """Post-``--init`` hook to stitch the generated tree after file creation."""
+        """Post-``--init`` hook to stitch the generated tree (after all files exist).
+
+        Python is a no-op (packages need no parent declarations). Rust writes the
+        ``pub mod <child>;`` declarations that wire the module tree together.
+        """
         ...
 
 
 _GENERATORS: dict[str, Generator] = {
     "python": PythonGenerator(),
+    "rust": RustGenerator(),
 }
 
 
