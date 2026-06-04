@@ -51,6 +51,7 @@ def test_tensor_attributes() -> None:
     x2 = np.from_dlpack(x)
     np.testing.assert_equal(x2, data)
 
+
 def test_empty_tensor_attributes() -> None:
     data: npt.NDArray[Any] = np.zeros((4, 0, 4), dtype="int16")
     if not hasattr(data, "__dlpack__"):
@@ -62,6 +63,7 @@ def test_empty_tensor_attributes() -> None:
     assert x.strides == (0, 4, 1)
     assert x.numel() == 0
     assert x.is_contiguous()
+
 
 def test_non_contiguous_tensor_attributes() -> None:
     data: npt.NDArray[Any] = np.zeros((4, 4, 4), dtype="int16")
@@ -76,6 +78,7 @@ def test_non_contiguous_tensor_attributes() -> None:
     assert x.size(-1) == 2
     assert not x.is_contiguous()
     assert x.strides == (16, 4, 1)
+
 
 def test_shape_object() -> None:
     shape = tvm_ffi.Shape((10, 8, 4, 2))
