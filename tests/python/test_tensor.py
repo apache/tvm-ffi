@@ -39,6 +39,11 @@ def test_tensor_attributes() -> None:
     x = tvm_ffi.from_dlpack(data)
     assert isinstance(x, tvm_ffi.Tensor)
     assert x.shape == (10, 8, 4, 2)
+    assert x.ndim == 4
+    assert x.numel() == 640
+    assert x.size(0) == 10
+    assert x.size(-1) == 2
+    assert x.is_contiguous()
     assert x.strides == (64, 8, 2, 1)
     assert x.dtype == tvm_ffi.dtype("int16")
     assert x.device.dlpack_device_type() == tvm_ffi.DLDeviceType.kDLCPU
@@ -46,6 +51,31 @@ def test_tensor_attributes() -> None:
     x2 = np.from_dlpack(x)
     np.testing.assert_equal(x2, data)
 
+def test_empty_tensor_attributes() -> None:
+    data: npt.NDArray[Any] = np.zeros((4, 0, 4), dtype="int16")
+    if not hasattr(data, "__dlpack__"):
+        return
+    x = tvm_ffi.from_dlpack(data)
+    assert isinstance(x, tvm_ffi.Tensor)
+    assert x.shape == (4, 0, 4)
+    assert x.ndim == 3
+    assert x.strides == (0, 4, 1)
+    assert x.numel() == 0
+    assert x.is_contiguous()
+
+def test_non_contiguous_tensor_attributes() -> None:
+    data: npt.NDArray[Any] = np.zeros((4, 4, 4), dtype="int16")
+    slice = data[1:3, :, 1:3]
+    if not hasattr(slice, "__dlpack__"):
+        return
+    x = tvm_ffi.from_dlpack(slice)
+    assert isinstance(x, tvm_ffi.Tensor)
+    assert x.shape == (2, 4, 2)
+    assert x.numel() == 16
+    assert x.size(0) == 2
+    assert x.size(-1) == 2
+    assert not x.is_contiguous()
+    assert x.strides == (16, 4, 1)
 
 def test_shape_object() -> None:
     shape = tvm_ffi.Shape((10, 8, 4, 2))

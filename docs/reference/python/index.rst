@@ -48,7 +48,10 @@ Tensor
   Device
   DLDeviceType
   device
-
+  ndim
+  numel
+  size
+  is_contiguous
 
 Function
 ~~~~~~~~

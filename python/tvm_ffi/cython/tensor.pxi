@@ -277,6 +277,46 @@ cdef class Tensor(CObject):
         return tuple(self.cdltensor.shape[i] for i in range(self.cdltensor.ndim))
 
     @property
+    def ndim(self) -> int:
+        """Number of dimensions of the tensor."""
+        return self.cdltensor.ndim
+
+    def numel(self) -> int:
+        """Total number of elements in the tensor."""
+        cdef int64_t count = 1
+        cdef int i
+        for i in range(self.cdltensor.ndim):
+            count *= self.cdltensor.shape[i]
+        return count
+
+    def size(self, idx: int) -> int:
+        """Get the size of the ``idx``-th dimension. Negative ``idx`` counts from the last dimension."""
+        cdef int ndim = self.cdltensor.ndim
+        if idx < -ndim or idx >= ndim:
+            raise IndexError(
+                f"Dimension {idx} out of range for tensor with {ndim} dimensions"
+            )
+        if idx < 0:
+            idx += ndim
+        return self.cdltensor.shape[idx]
+
+    def is_contiguous(self) -> bool:
+        """True if the Tensor is C-contiguous (row-major), False otherwise."""
+        if self.cdltensor.strides == NULL:
+            return True
+        cdef int64_t expected_stride = 1
+        cdef int i
+        cdef int k
+        for i in range(self.cdltensor.ndim, 0, -1):
+            k = i - 1
+            if self.cdltensor.shape[k] == 1:
+                continue
+            if self.cdltensor.strides[k] != expected_stride:
+                return False
+            expected_stride *= self.cdltensor.shape[k]
+        return True
+
+    @property
     def strides(self) -> tuple[int, ...]:
         """Tensor strides as a tuple of integers."""
         if self.cdltensor.strides == NULL:
