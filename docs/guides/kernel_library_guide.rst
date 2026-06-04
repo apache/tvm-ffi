@@ -173,6 +173,20 @@ This creates a symbol ``__tvm_ffi_scale`` in the shared library.
        $(tvm-ffi-config --ldflags) \
        $(tvm-ffi-config --libs)
 
+.. note::
+
+   When using Python JIT build helpers such as :py:func:`tvm_ffi.cpp.load`,
+   :py:func:`tvm_ffi.cpp.load_inline`, or :py:func:`tvm_ffi.cpp.build_inline`
+   with CUDA sources, TVM-FFI automatically detects the GPU compute capability
+   for NVCC. On machines with old CUDA drivers or GPUs that cannot be detected,
+   set ``TVM_FFI_CUDA_ARCH_LIST`` before building:
+
+   .. code-block:: bash
+
+      export TVM_FFI_CUDA_ARCH_LIST="8.9"
+
+   The value is a space-separated architecture list, for example ``"8.9 9.0a"``.
+
 **Optional arguments.** Wrap any argument type with :cpp:class:`tvm::ffi::Optional`
 to accept ``None`` from the Python side:
 

@@ -162,7 +162,11 @@ def _find_cuda_home() -> str:
 
 
 def _get_cuda_target() -> str:
-    """Get the CUDA target architecture flag."""
+    """Get the CUDA target architecture flag.
+
+    Set ``TVM_FFI_CUDA_ARCH_LIST`` to override automatic detection with a
+    space-separated architecture list, for example ``"8.9 9.0a"``.
+    """
     if "TVM_FFI_CUDA_ARCH_LIST" in os.environ:
         arch_list = os.environ["TVM_FFI_CUDA_ARCH_LIST"].split()  # e.g., "8.9 9.0a"
         flags = []
@@ -202,7 +206,9 @@ def _get_cuda_target() -> str:
             except (subprocess.CalledProcessError, FileNotFoundError):
                 pass
             raise RuntimeError(
-                "Could not detect CUDA compute_cap automatically. Please set TVM_FFI_CUDA_ARCH_LIST environment variable."
+                "Could not detect CUDA compute_cap automatically. Set "
+                "TVM_FFI_CUDA_ARCH_LIST to a space-separated CUDA architecture list, "
+                'for example "8.9 9.0a".'
             )
 
 
