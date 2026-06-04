@@ -319,6 +319,18 @@ class Object {
   static constexpr uint64_t kCombinedRefCountStrongOne = details::kCombinedRefCountStrongOne;
   static constexpr uint64_t kCombinedRefCountWeakOne = details::kCombinedRefCountWeakOne;
   static constexpr uint64_t kCombinedRefCountBothOne = details::kCombinedRefCountBothOne;
+  /*!
+   * \brief Call the object deleter under the non-throwing deleter contract.
+   * \param header The object header whose deleter should be invoked.
+   * \param flags The TVMFFIObjectDeleterFlagBitMask values for this cleanup.
+   * \note TVMFFIObject::deleter MUST NOT throw. This function is noexcept so
+   * a deleter that violates the contract terminates deterministically.
+   */
+  TVM_FFI_INLINE static void CallDeleter(TVMFFIObject* header, int flags) noexcept {
+    if (header->deleter != nullptr) {
+      header->deleter(header, flags);
+    }
+  }
   /*! \brief increase strong reference count, the caller must already hold a strong reference */
   void IncRef() {
 #ifdef _MSC_VER
@@ -374,8 +386,12 @@ class Object {
 #endif
   }
 
-  /*! \brief decrease strong reference count and delete the object */
-  void DecRef() {
+  /*!
+   * \brief decrease strong reference count and delete the object.
+   * \note Object deleters are invoked through a noexcept boundary. A deleter
+   * that throws violates the TVMFFIObject::deleter contract and terminates.
+   */
+  void DecRef() noexcept {
 #ifdef _MSC_VER
     // use simpler impl in windows to ensure correctness
     uint64_t count_before_sub =
@@ -385,25 +401,19 @@ class Object {
         1;
     if (count_before_sub == kCombinedRefCountBothOne) {  // NOLINT(*)
       // fast path: both reference counts will go to zero
-      if (header_.deleter != nullptr) {
-        // full barrrier is implicit in InterlockedDecrement
-        header_.deleter(&(this->header_), kTVMFFIObjectDeleterFlagBitMaskBoth);
-      }
+      // full barrrier is implicit in InterlockedDecrement
+      CallDeleter(&(this->header_), kTVMFFIObjectDeleterFlagBitMaskBoth);
     } else if ((count_before_sub & kCombinedRefCountMaskUInt32) == kCombinedRefCountStrongOne) {
       // strong reference count becomes zero, we need to first do strong deletion
       // then decrease weak reference count
       // full barrrier is implicit in InterlockedAdd
-      if (header_.deleter != nullptr) {
-        header_.deleter(&(this->header_), kTVMFFIObjectDeleterFlagBitMaskStrong);
-      }
+      CallDeleter(&(this->header_), kTVMFFIObjectDeleterFlagBitMaskStrong);
       // decrease weak reference count
       if (_InlineInterlockedAdd64(  //
               reinterpret_cast<volatile __int64*>(&header_.combined_ref_count),
               -kCombinedRefCountWeakOne) == 0) {  // NOLINT(*)
-        if (header_.deleter != nullptr) {
-          // full barrrier is implicit in InterlockedAdd
-          header_.deleter(&(this->header_), kTVMFFIObjectDeleterFlagBitMaskWeak);
-        }
+        // full barrrier is implicit in InterlockedAdd
+        CallDeleter(&(this->header_), kTVMFFIObjectDeleterFlagBitMaskWeak);
       }
     }
 #else
@@ -416,48 +426,38 @@ class Object {
       // common case, we need to delete both the object and the memory block
       // only acquire when we need to call deleter
       __atomic_thread_fence(__ATOMIC_ACQUIRE);
-      if (header_.deleter != nullptr) {
-        // call deleter once
-        header_.deleter(&(this->header_), kTVMFFIObjectDeleterFlagBitMaskBoth);
-      }
+      // call deleter once
+      CallDeleter(&(this->header_), kTVMFFIObjectDeleterFlagBitMaskBoth);
     } else if ((count_before_sub & kCombinedRefCountMaskUInt32) == kCombinedRefCountStrongOne) {
       // strong count is already zero
       // Slower path: there is still a weak reference left
       __atomic_thread_fence(__ATOMIC_ACQUIRE);
       // call destructor first, then decrease weak reference count
-      if (header_.deleter != nullptr) {
-        header_.deleter(&(this->header_), kTVMFFIObjectDeleterFlagBitMaskStrong);
-      }
+      CallDeleter(&(this->header_), kTVMFFIObjectDeleterFlagBitMaskStrong);
       // now decrease weak reference count
       if (__atomic_fetch_sub(&(header_.combined_ref_count), kCombinedRefCountWeakOne,
                              __ATOMIC_RELEASE) == kCombinedRefCountWeakOne) {
         __atomic_thread_fence(__ATOMIC_ACQUIRE);
-        if (header_.deleter != nullptr) {
-          header_.deleter(&(this->header_), kTVMFFIObjectDeleterFlagBitMaskWeak);
-        }
+        CallDeleter(&(this->header_), kTVMFFIObjectDeleterFlagBitMaskWeak);
       }
     }
 #endif
   }
 
   /*! \brief decrease weak reference count */
-  void DecWeakRef() {
+  void DecWeakRef() noexcept {
 #ifdef _MSC_VER
     if (_InlineInterlockedAdd64(                                               //
             reinterpret_cast<volatile __int64*>(&header_.combined_ref_count),  // NOLINT(*)
             -kCombinedRefCountWeakOne) == 0) {
-      if (header_.deleter != nullptr) {
-        header_.deleter(&(this->header_), kTVMFFIObjectDeleterFlagBitMaskWeak);
-      }
+      CallDeleter(&(this->header_), kTVMFFIObjectDeleterFlagBitMaskWeak);
     }
 #else
     // now decrease weak reference count
     if (__atomic_fetch_sub(&(header_.combined_ref_count), kCombinedRefCountWeakOne,
                            __ATOMIC_RELEASE) == kCombinedRefCountWeakOne) {
       __atomic_thread_fence(__ATOMIC_ACQUIRE);
-      if (header_.deleter != nullptr) {
-        header_.deleter(&(this->header_), kTVMFFIObjectDeleterFlagBitMaskWeak);
-      }
+      CallDeleter(&(this->header_), kTVMFFIObjectDeleterFlagBitMaskWeak);
     }
 #endif
   }
@@ -1177,7 +1177,12 @@ struct ObjectUnsafe {
     return tvm::ffi::ObjectPtr<T>(reinterpret_cast<Object*>(obj_ptr));
   }
 
-  TVM_FFI_INLINE static void DecRefObjectHandle(TVMFFIObjectHandle handle) {
+  /*!
+   * \brief Decrease strong reference count through the noexcept deleter path.
+   * \note TVMFFIObject::deleter MUST NOT throw; violations terminate before
+   * escaping this path.
+   */
+  TVM_FFI_INLINE static void DecRefObjectHandle(TVMFFIObjectHandle handle) noexcept {
     if (handle) reinterpret_cast<Object*>(handle)->DecRef();
   }
 

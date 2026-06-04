@@ -263,6 +263,8 @@ typedef struct {
      * \brief Deleter to be invoked when strong reference counter goes to zero.
      * \param self The self object handle.
      * \param flags The flags to indicate deletion behavior.
+     * \note The deleter MUST NOT throw. A deleter that throws has undefined
+     * behavior, matching the C++ destructor convention for cleanup code.
      * \sa TVMFFIObjectDeleterFlagBitMask
      */
     void (*deleter)(void* self, int flags);

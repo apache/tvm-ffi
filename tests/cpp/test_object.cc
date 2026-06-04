@@ -20,12 +20,21 @@
 #include <tvm/ffi/memory.h>
 #include <tvm/ffi/object.h>
 
+#include <stdexcept>
+
 #include "./testing_object.h"
 
 namespace {
 
 using namespace tvm::ffi;
 using namespace tvm::ffi::testing;
+
+static_assert(noexcept(details::ObjectUnsafe::DecRefObjectHandle(nullptr)),
+              "Object handle decref must preserve the noexcept deleter boundary");
+
+#if GTEST_HAS_DEATH_TEST
+void ThrowingObjectDeleter(void*, int) { throw std::runtime_error("deleter failed"); }
+#endif
 
 TEST(Object, RefCounter) {
   ObjectPtr<TIntObj> a = make_object<TIntObj>(11);
@@ -256,5 +265,20 @@ TEST(Object, OpaqueObject) {
   a.reset();
   EXPECT_EQ(deleter_trigger_counter, 1);
 }
+
+#if GTEST_HAS_DEATH_TEST
+TEST(Object, ThrowingDeleterTerminates) {
+  EXPECT_DEATH(
+      {
+        ObjectPtr<Object> obj = make_object<Object>();
+        TVMFFIObject* header = details::ObjectUnsafe::GetHeader(obj.get());
+        header->deleter = ThrowingObjectDeleter;
+        TVMFFIObjectHandle handle =
+            details::ObjectUnsafe::MoveObjectPtrToTVMFFIObjectPtr(std::move(obj));
+        TVMFFIObjectDecRef(handle);
+      },
+      "");
+}
+#endif
 
 }  // namespace
