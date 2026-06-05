@@ -48,10 +48,10 @@ Tensor
   Device
   DLDeviceType
   device
-  ndim
-  numel
-  size
-  is_contiguous
+  Tensor.ndim
+  Tensor.numel
+  Tensor.size
+  Tensor.is_contiguous
 
 Function
 ~~~~~~~~
