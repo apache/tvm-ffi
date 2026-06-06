@@ -91,6 +91,18 @@ TEST(Tensor, Basic) {
   EXPECT_EQ(strides3[1], 2);
 }
 
+TEST(Tensor, EmptyTensorIsContiguous) {
+  // An empty tensor (any shape dim == 0) is trivially contiguous regardless of
+  // stride values.  This matches NumPy / PyTorch semantics.
+  // Use strides that would normally fail the contiguity check to verify the
+  // early-return path in IsContiguous().
+  Tensor nd =
+      EmptyStrided({4, 0, 4}, {0, 0, 0}, DLDataType({kDLInt, 16, 1}), DLDevice({kDLCPU, 0}));
+  EXPECT_EQ(nd.numel(), 0);
+  EXPECT_EQ(nd.IsContiguous(), true);
+  EXPECT_EQ(nd.is_contiguous(), true);
+}
+
 TEST(Tensor, DLPack) {
   Tensor tensor = Empty({1, 2, 3}, DLDataType({kDLInt, 16, 1}), DLDevice({kDLCPU, 0}));
   DLManagedTensor* dlpack = tensor.ToDLPack();

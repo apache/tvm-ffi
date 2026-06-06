@@ -56,6 +56,11 @@ inline bool IsDirectAddressDevice(const DLDevice& device) {
  */
 inline bool IsContiguous(const DLTensor& arr) {
   if (arr.strides == nullptr) return true;
+  // An empty tensor (numel == 0) is trivially contiguous regardless of strides,
+  // matching NumPy/PyTorch semantics.
+  for (int32_t i = 0; i < arr.ndim; ++i) {
+    if (arr.shape[i] == 0) return true;
+  }
   int64_t expected_stride = 1;
   for (int32_t i = arr.ndim; i != 0; --i) {
     int32_t k = i - 1;

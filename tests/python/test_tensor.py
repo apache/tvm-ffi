@@ -60,7 +60,7 @@ def test_empty_tensor_attributes() -> None:
     assert isinstance(x, tvm_ffi.Tensor)
     assert x.shape == (4, 0, 4)
     assert x.ndim == 3
-    assert x.strides == (0, 4, 1)
+    assert x.strides == (0, 0, 0)
     assert x.numel() == 0
     assert x.is_contiguous()
 

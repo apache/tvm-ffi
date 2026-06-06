@@ -304,9 +304,14 @@ cdef class Tensor(CObject):
         """True if the Tensor is C-contiguous (row-major), False otherwise."""
         if self.cdltensor.strides == NULL:
             return True
-        cdef int64_t expected_stride = 1
+        # An empty tensor (numel == 0) is trivially contiguous regardless of strides,
+        # matching NumPy/PyTorch semantics.
         cdef int i
         cdef int k
+        for i in range(self.cdltensor.ndim):
+            if self.cdltensor.shape[i] == 0:
+                return True
+        cdef int64_t expected_stride = 1
         for i in range(self.cdltensor.ndim, 0, -1):
             k = i - 1
             if self.cdltensor.shape[k] == 1:
