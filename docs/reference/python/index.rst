@@ -49,6 +49,15 @@ Tensor
   DLDeviceType
   device
 
+.. rubric:: Tensor methods
+
+.. autosummary::
+
+  Tensor.ndim
+  Tensor.numel
+  Tensor.size
+  Tensor.is_contiguous
+
 Function
 ~~~~~~~~
 .. autosummary::
