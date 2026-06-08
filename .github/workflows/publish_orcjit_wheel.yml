@@ -18,11 +18,11 @@
 name: Publish OrcJIT wheel
 
 on:
+  # The OrcJIT addon is a standalone package versioned by
+  # addons/tvm_ffi_orcjit/pyproject.toml, independent of the tvm-ffi repo tags.
+  # Always build from main (see checkout_ref below); the wheel version comes
+  # from that pyproject.toml, so no tag input is needed.
   workflow_dispatch:
-    inputs:
-      tag:
-        description: "Tag to publish (manual run)"
-        required: true
 
 jobs:
   build_wheels:
@@ -48,7 +48,7 @@ jobs:
         with:
           arch: ${{ matrix.arch }}
           build: ${{ matrix.build }}
-          checkout_ref: ${{ inputs.tag }}
+          checkout_ref: main
 
       - name: Upload wheels
         uses: actions/upload-artifact@v4
