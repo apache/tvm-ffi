@@ -42,15 +42,27 @@ namespace details {
  * \brief Runtime structural walk for callback arrays.
  *
  * \param root The root value to visit.
- * \param callbacks Runtime callback entries of ``(type_index, ffi::Function)``. Each function is
- *                  invoked as ``callback(value, def_region_kind)``
+ * \param callbacks Runtime callback entries of ``(type_index, ffi::Function)`` invoked as
+ *                  ``callback(value)``.
+ * \param callbacks_with_def_region_kind Runtime callback entries of ``(type_index, ffi::Function)``
+ *                                       invoked as ``callback(value, def_region_kind)``.
  * \param order Integer value of \ref WalkOrder.
  * \return Expected interrupt state. An error means traversal failed.
  */
 Expected<Optional<VisitInterrupt>> StructuralWalkExpected(
-    AnyView root, const Array<Tuple<int32_t, Function>>& callbacks, int order) noexcept {
-  auto dispatch = [callbacks](AnyView x, TVMFFIDefRegionKind kind) -> Expected<WalkResult> {
+    AnyView root, const Array<Tuple<int32_t, Function>>& callbacks,
+    const Array<Tuple<int32_t, Function>>& callbacks_with_def_region_kind, int order) noexcept {
+  auto dispatch = [callbacks, callbacks_with_def_region_kind](
+                      AnyView x, TVMFFIDefRegionKind kind) -> Expected<WalkResult> {
     for (const auto& entry : callbacks) {
+      int32_t type_index = entry.template get<0>();
+      if (!RuntimeTypeIndexMatch(x.type_index(), type_index)) {
+        continue;
+      }
+      Function fn = entry.template get<1>();
+      return fn.CallExpected<WalkResult>(x);
+    }
+    for (const auto& entry : callbacks_with_def_region_kind) {
       int32_t type_index = entry.template get<0>();
       if (!RuntimeTypeIndexMatch(x.type_index(), type_index)) {
         continue;
@@ -141,8 +153,11 @@ TVM_FFI_STATIC_INIT_BLOCK() {
           })
       .def("ffi.StructuralWalk",
            [](AnyView root, const Array<Tuple<int32_t, Function>>& callbacks,
+              const Array<Tuple<int32_t, Function>>& callbacks_with_def_region_kind,
               int32_t order) -> Optional<VisitInterrupt> {
-             return details::StructuralWalkExpected(root, callbacks, order).value();
+             return details::StructuralWalkExpected(root, callbacks, callbacks_with_def_region_kind,
+                                                    order)
+                 .value();
            });
   refl::EnsureTypeAttrColumn(refl::type_attr::kStructuralVisit);
   refl::TypeAttrDef<ArrayObj>().attr(

@@ -309,7 +309,7 @@ class VisitInterrupt(Object):
         import tvm_ffi
 
 
-        def on_node(node, _):
+        def on_node(node):
             if is_target(node):
                 return tvm_ffi.VisitInterrupt(node)
             return None
@@ -422,6 +422,7 @@ class StructuralVisitor(Object):
 def structural_walk(
     root: Any,
     *callbacks: tuple | Sequence | Callable,
+    with_def_region_kind: tuple | Sequence | Callable = (),
     order: str | WalkOrder = "pre",
 ) -> VisitInterrupt | None:
     """Walk a value structurally and invoke the first matching typed callback.
@@ -432,16 +433,23 @@ def structural_walk(
         Root value to traverse.
 
     callbacks
-        Callback entries are tried in order. Each entry is ``(type, callback)``
-        or ``((type1, type2, ...), callback)``. Types may be builtins,
-        registered FFI object classes, or ``typing.Any``/``object`` as a
-        catch-all. Python callbacks should accept ``(value, def_region_kind)``.
+        Normal callbacks. These callbacks receive one argument: ``value``.
+        Callback entries are tried in order.
 
-        You may pass callbacks in any of these forms:
+        Each positional callback slot may be one of:
 
-        - ``structural_walk(root, ((int, float), on_number), (MyNode, on_node))``
-        - ``structural_walk(root, [(int, on_int), (MyNode, on_node), (object, on_any)])``
-        - ``structural_walk(root, on_any)``
+        - A single callback, used as a ``typing.Any`` catch-all.
+        - A ``(type, callback)`` entry.
+        - A grouped ``((type1, type2, ...), callback)`` entry.
+        - A sequence of entries.
+
+        Types may be builtins, registered FFI object classes, or
+        ``typing.Any``/``object`` as a catch-all.
+
+    with_def_region_kind
+        Def-region-aware callbacks. These callbacks receive two arguments:
+        ``(value, def_region_kind)``. They accept the same callback entry forms
+        as ``callbacks``.
 
     order
         ``"pre"``/``WalkOrder.PREORDER`` to invoke callbacks before children, or
@@ -460,19 +468,16 @@ def structural_walk(
         visited = []
 
 
-        def on_int(value, _):
-            visited.append(value)
-            if value == 0:
-                return tvm_ffi.VisitInterrupt(value)
-            return tvm_ffi.WalkResult.ADVANCE
-
-
+        uses = []
         result = tvm_ffi.structural_walk(
-            root,
-            [
-                ((int, float), lambda value, _: visited.append(("number", value))),
-                (object, lambda value, _: visited.append(("any", value))),
-            ],
+            node,
+            ((int, float), lambda value: visited.append(("leaf", value))),
+            with_def_region_kind=(
+                Var,
+                lambda var, kind: (
+                    uses.append(var) if kind == tvm_ffi.DefRegionKind.NONE else None
+                ),
+            ),
         )
 
     """
@@ -483,34 +488,47 @@ def structural_walk(
     else:
         raise ValueError(f"Unknown structural walk order: {order!r}")
 
-    callback_entries = []
+    def normalize_callback_slots(
+        callback_slots: tuple[tuple | Sequence | Callable, ...],
+    ) -> list[tuple[object, Callable]]:
+        callback_entries = []
 
-    def add_callback_entry(callback_entry: tuple) -> None:
-        callback_type, fn = callback_entry
-        callback_types = callback_type if isinstance(callback_type, tuple) else (callback_type,)
-        callback_entries.extend((t, fn) for t in callback_types)
+        def add_callback_entry(callback_entry: tuple) -> None:
+            callback_type, fn = callback_entry
+            callback_types = callback_type if isinstance(callback_type, tuple) else (callback_type,)
+            callback_entries.extend((t, fn) for t in callback_types)
 
-    for slot in callbacks:
-        if callable(slot):
-            callback_entries.append((Any, slot))
-        elif isinstance(slot, tuple) and len(slot) == 2 and callable(slot[1]):
-            add_callback_entry(slot)
-        elif isinstance(slot, Sequence):
-            for callback in slot:
-                assert isinstance(callback, tuple)
-                assert len(callback) == 2 and callable(callback[1])
-                add_callback_entry(callback)
-        else:
-            raise TypeError(
-                "structural_walk callbacks must be callbacks, (type, callback) entries, "
-                "((type1, type2, ...), callback) entries, or sequences of tuple entries"
-            )
+        for slot in callback_slots:
+            if callable(slot):
+                callback_entries.append((Any, slot))
+            elif isinstance(slot, tuple) and len(slot) == 2 and callable(slot[1]):
+                add_callback_entry(slot)
+            elif isinstance(slot, Sequence):
+                for callback in slot:
+                    assert isinstance(callback, tuple)
+                    assert len(callback) == 2 and callable(callback[1])
+                    add_callback_entry(callback)
+            else:
+                raise TypeError(
+                    "structural_walk callbacks must be callbacks, (type, callback) entries, "
+                    "((type1, type2, ...), callback) entries, or sequences of tuple entries"
+                )
+        return callback_entries
 
-    def wrap_callback(fn: Callable[..., Any]) -> Callable[[Any, int], Any]:
+    def wrap_callback_with_def_region_kind(fn: Callable[..., Any]) -> Callable[[Any, int], Any]:
         return lambda value, kind: fn(value, DefRegionKind(kind))
 
-    entries = [(_callback_type_to_type_index(t), wrap_callback(fn)) for t, fn in callback_entries]
-    return _ffi_api.StructuralWalk(root, entries, order_int)
+    callback_entries = normalize_callback_slots(callbacks)
+    callback_entries_with_def_region_kind = normalize_callback_slots((with_def_region_kind,))
+
+    entries: list[tuple[int, Callable[[Any], Any]]] = [
+        (_callback_type_to_type_index(t), fn) for t, fn in callback_entries
+    ]
+    entries_with_def_region_kind: list[tuple[int, Callable[[Any, int], Any]]] = [
+        (_callback_type_to_type_index(t), wrap_callback_with_def_region_kind(fn))
+        for t, fn in callback_entries_with_def_region_kind
+    ]
+    return _ffi_api.StructuralWalk(root, entries, entries_with_def_region_kind, order_int)
 
 
 def _callback_type_to_type_index(callback_type: type[Any] | Any) -> int:

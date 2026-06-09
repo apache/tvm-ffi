@@ -179,9 +179,9 @@ def test_structural_walk_typed_callbacks() -> None:
 
     result = tvm_ffi.structural_walk(
         root,
-        (tvm_ffi.Array, lambda value, _: trace.append(f"array:{len(value)}")),
-        ((int, float), lambda value, _: trace.append(f"number:{value}")),
-        (str, lambda value, _: trace.append(f"str:{value}")),
+        (tvm_ffi.Array, lambda value: trace.append(f"array:{len(value)}")),
+        ((int, float), lambda value: trace.append(f"number:{value}")),
+        (str, lambda value: trace.append(f"str:{value}")),
     )
 
     assert result is None
@@ -205,7 +205,7 @@ def test_structural_walk_callback_def_region_kind() -> None:
 
     result = tvm_ffi.structural_walk(
         root,
-        (
+        with_def_region_kind=(
             PyWalkVar,
             lambda value, kind: (
                 uses.append(value.name) if kind == tvm_ffi.DefRegionKind.NONE else None
@@ -225,9 +225,9 @@ def test_structural_walk_first_match_and_skip() -> None:
         root,
         (
             tvm_ffi.Array,
-            lambda value, _: trace.append(f"array:{len(value)}") or tvm_ffi.WalkResult.SKIP,
+            lambda value: trace.append(f"array:{len(value)}") or tvm_ffi.WalkResult.SKIP,
         ),
-        (object, lambda value, _: trace.append(type(value).__name__)),
+        (object, lambda value: trace.append(type(value).__name__)),
     )
 
     assert result is None
@@ -237,7 +237,7 @@ def test_structural_walk_first_match_and_skip() -> None:
 def test_structural_walk_interrupt() -> None:
     root = tvm_ffi.Array([1, 2, 3])
 
-    def on_int(value: int, _: tvm_ffi.DefRegionKind) -> tvm_ffi.VisitInterrupt | None:
+    def on_int(value: int) -> tvm_ffi.VisitInterrupt | None:
         if value == 2:
             return tvm_ffi.VisitInterrupt({"found": value})
         return None
@@ -266,11 +266,11 @@ def test_structural_walk_nested_containers() -> None:
 
     result = tvm_ffi.structural_walk(
         root,
-        (tvm_ffi.Array, lambda value, _: containers.append(("array", len(value)))),
-        (tvm_ffi.Map, lambda value, _: containers.append(("map", len(value)))),
-        (tvm_ffi.Dict, lambda value, _: containers.append(("dict", len(value)))),
-        ((int, bool), lambda value, _: scalars.append(int(value))),
-        (str, lambda value, _: strings.append(value)),
+        (tvm_ffi.Array, lambda value: containers.append(("array", len(value)))),
+        (tvm_ffi.Map, lambda value: containers.append(("map", len(value)))),
+        (tvm_ffi.Dict, lambda value: containers.append(("dict", len(value)))),
+        ((int, bool), lambda value: scalars.append(int(value))),
+        (str, lambda value: strings.append(value)),
     )
 
     assert result is None
@@ -287,8 +287,8 @@ def test_structural_walk_object_and_any_callbacks() -> None:
 
     result = tvm_ffi.structural_walk(
         root,
-        (tvm_ffi.Object, lambda value, _: trace.append(f"object:{type(value).__name__}")),
-        (Any, lambda value, _: trace.append(f"any:{value}")),
+        (tvm_ffi.Object, lambda value: trace.append(f"object:{type(value).__name__}")),
+        (Any, lambda value: trace.append(f"any:{value}")),
     )
 
     assert result is None
@@ -297,7 +297,7 @@ def test_structural_walk_object_and_any_callbacks() -> None:
     alias_trace: list[str] = []
     result = tvm_ffi.structural_walk(
         tvm_ffi.Array([1]),
-        (object, lambda value, _: alias_trace.append(type(value).__name__)),
+        (object, lambda value: alias_trace.append(type(value).__name__)),
     )
 
     assert result is None
@@ -311,8 +311,8 @@ def test_structural_walk_post_order_enum() -> None:
     result = tvm_ffi.structural_walk(
         root,
         [
-            (tvm_ffi.Array, lambda value, _: trace.append(f"array:{len(value)}")),
-            (int, lambda value, _: trace.append(f"int:{value}")),
+            (tvm_ffi.Array, lambda value: trace.append(f"array:{len(value)}")),
+            (int, lambda value: trace.append(f"int:{value}")),
         ],
         order=tvm_ffi.WalkOrder.POSTORDER,
     )
@@ -322,16 +322,35 @@ def test_structural_walk_post_order_enum() -> None:
 
 
 def test_structural_walk_mixed_callback_forms() -> None:
-    root = tvm_ffi.Array([1, 2.5, "tag"])
+    @py_class(structural_eq="var")
+    class PyWalkMixedVar(Object):
+        name: str = field(structural_eq="ignore")
+
+    @py_class(structural_eq="tree")
+    class PyWalkMixedFunc(Object):
+        params: tvm_ffi.Array[PyWalkMixedVar] = field(structural_eq="def")
+        body: tvm_ffi.Array[PyWalkMixedVar]
+
+    x = PyWalkMixedVar("x")
+    y = PyWalkMixedVar("y")
+    root = tvm_ffi.Array([PyWalkMixedFunc(tvm_ffi.Array([x]), tvm_ffi.Array([x, y])), "tag"])
     trace: list[str] = []
 
     result = tvm_ffi.structural_walk(
         root,
-        [(tvm_ffi.Array, lambda value, _: trace.append(f"array:{len(value)}"))],
-        (str, lambda value, _: trace.append(f"str:{value}")),
-        ((int, float), lambda value, _: trace.append(f"number:{value}")),
-        lambda value, _: trace.append(f"any:{type(value).__name__}"),
+        [(tvm_ffi.Array, lambda value: trace.append(f"array:{len(value)}"))],
+        (str, lambda value: trace.append(f"str:{value}")),
+        with_def_region_kind=[
+            (
+                PyWalkMixedVar,
+                lambda value, kind: (
+                    trace.append(f"use:{value.name}")
+                    if kind == tvm_ffi.DefRegionKind.NONE
+                    else None
+                ),
+            ),
+        ],
     )
 
     assert result is None
-    assert trace == ["array:3", "number:1", "number:2.5", "str:tag"]
+    assert trace == ["array:2", "array:1", "array:2", "use:x", "use:y", "str:tag"]

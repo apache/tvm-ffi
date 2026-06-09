@@ -972,8 +972,8 @@ Basic Walk
 ~~~~~~~~~~
 
 Pass callbacks as ordered ``(type, callback)`` entries.  The first matching
-entry runs for each visited value.  Python callbacks receive two arguments ``(value,
-def_region_kind)``.
+entry runs for each visited value.  Normal Python callbacks receive one
+argument, ``value``.
 
 .. code-block:: python
 
@@ -981,7 +981,7 @@ def_region_kind)``.
 
    visited = []
 
-   def on_int(value, _):
+   def on_int(value):
        visited.append(value)
        if value == 0:
            return tvm_ffi.VisitInterrupt(value)
@@ -1012,8 +1012,8 @@ Several types can share one callback by passing a tuple of types:
 
    tvm_ffi.structural_walk(
        root,
-       ((int, float), lambda value, _: numbers.append(value)),
-       (str, lambda value, _: strings.append(value)),
+       ((int, float), lambda value: numbers.append(value)),
+       (str, lambda value: strings.append(value)),
    )
 
 This is normalized as if the same callback had been registered separately for
@@ -1031,7 +1031,7 @@ and object-backed values.
    from typing import Any
 
    seen = []
-   tvm_ffi.structural_walk(root, (Any, lambda value, _: seen.append(value)))
+   tvm_ffi.structural_walk(root, (Any, lambda value: seen.append(value)))
 
 ``tvm_ffi.Object`` is different: it matches only object-backed FFI values, such
 as ``Array``, ``Map``, ``Function``, ``String`` objects, or registered object
@@ -1044,16 +1044,16 @@ classes.  It does not match POD leaves such as ``int`` or ``float``.
 
    tvm_ffi.structural_walk(
        root,
-       (tvm_ffi.Object, lambda value, _: objects.append(value)),
-       (object, lambda value, _: leaves.append(value)),
+       (tvm_ffi.Object, lambda value: objects.append(value)),
+       (object, lambda value: leaves.append(value)),
    )
 
 Def-Region Aware Walk
 ~~~~~~~~~~~~~~~~~~~~~
 
-The second callback argument reports whether the current value is visited as a
-definition or a use.  This is useful for analyses such as collecting variable
-uses while skipping binders:
+Callbacks passed to ``with_def_region_kind`` receive a second argument that
+reports whether the current value is visited as a definition or a use.  This is
+useful for analyses such as collecting variable uses while skipping binders:
 
 .. code-block:: python
 
@@ -1061,7 +1061,7 @@ uses while skipping binders:
 
    tvm_ffi.structural_walk(
        func,
-       (
+       with_def_region_kind=(
            Var,
            lambda var, kind: (
                uses.append(var) if kind == tvm_ffi.DefRegionKind.NONE else None
@@ -1084,8 +1084,8 @@ Post-order callbacks run after children.
 
    tvm_ffi.structural_walk(
        tvm_ffi.Array([tvm_ffi.Array([1]), 2]),
-       (tvm_ffi.Array, lambda value, _: trace.append(f"array:{len(value)}")),
-       (int, lambda value, _: trace.append(f"int:{value}")),
+       (tvm_ffi.Array, lambda value: trace.append(f"array:{len(value)}")),
+       (int, lambda value: trace.append(f"int:{value}")),
        order="post",
    )
 
