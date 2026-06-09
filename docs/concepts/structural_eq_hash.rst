@@ -1012,8 +1012,10 @@ Several types can share one callback by passing a tuple of types:
 
    tvm_ffi.structural_walk(
        root,
-       ((int, float), lambda value: numbers.append(value)),
-       (str, lambda value: strings.append(value)),
+       [
+           ((int, float), lambda value: numbers.append(value)),
+           (str, lambda value: strings.append(value)),
+       ],
    )
 
 This is normalized as if the same callback had been registered separately for
@@ -1044,8 +1046,10 @@ classes.  It does not match POD leaves such as ``int`` or ``float``.
 
    tvm_ffi.structural_walk(
        root,
-       (tvm_ffi.Object, lambda value: objects.append(value)),
-       (object, lambda value: leaves.append(value)),
+       [
+           (tvm_ffi.Object, lambda value: objects.append(value)),
+           (object, lambda value: leaves.append(value)),
+       ],
    )
 
 Def-Region Aware Walk
@@ -1084,8 +1088,10 @@ Post-order callbacks run after children.
 
    tvm_ffi.structural_walk(
        tvm_ffi.Array([tvm_ffi.Array([1]), 2]),
-       (tvm_ffi.Array, lambda value: trace.append(f"array:{len(value)}")),
-       (int, lambda value: trace.append(f"int:{value}")),
+       [
+           (tvm_ffi.Array, lambda value: trace.append(f"array:{len(value)}")),
+           (int, lambda value: trace.append(f"int:{value}")),
+       ],
        order="post",
    )
 

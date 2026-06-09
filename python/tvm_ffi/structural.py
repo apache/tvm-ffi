@@ -421,7 +421,7 @@ class StructuralVisitor(Object):
 
 def structural_walk(
     root: Any,
-    *callbacks: tuple | Sequence | Callable,
+    callbacks: tuple | Sequence | Callable = (),
     with_def_region_kind: tuple | Sequence | Callable = (),
     order: str | WalkOrder = "pre",
 ) -> VisitInterrupt | None:
@@ -436,7 +436,7 @@ def structural_walk(
         Normal callbacks. These callbacks receive one argument: ``value``.
         Callback entries are tried in order.
 
-        Each positional callback slot may be one of:
+        May be one of:
 
         - A single callback, used as a ``typing.Any`` catch-all.
         - A ``(type, callback)`` entry.
@@ -488,8 +488,8 @@ def structural_walk(
     else:
         raise ValueError(f"Unknown structural walk order: {order!r}")
 
-    def normalize_callback_slots(
-        callback_slots: tuple[tuple | Sequence | Callable, ...],
+    def normalize_callbacks(
+        callbacks: tuple | Sequence | Callable,
     ) -> list[tuple[object, Callable]]:
         callback_entries = []
 
@@ -498,28 +498,27 @@ def structural_walk(
             callback_types = callback_type if isinstance(callback_type, tuple) else (callback_type,)
             callback_entries.extend((t, fn) for t in callback_types)
 
-        for slot in callback_slots:
-            if callable(slot):
-                callback_entries.append((Any, slot))
-            elif isinstance(slot, tuple) and len(slot) == 2 and callable(slot[1]):
-                add_callback_entry(slot)
-            elif isinstance(slot, Sequence):
-                for callback in slot:
-                    assert isinstance(callback, tuple)
-                    assert len(callback) == 2 and callable(callback[1])
-                    add_callback_entry(callback)
-            else:
-                raise TypeError(
-                    "structural_walk callbacks must be callbacks, (type, callback) entries, "
-                    "((type1, type2, ...), callback) entries, or sequences of tuple entries"
-                )
+        if callable(callbacks):
+            callback_entries.append((Any, callbacks))
+        elif isinstance(callbacks, tuple) and len(callbacks) == 2 and callable(callbacks[1]):
+            add_callback_entry(callbacks)
+        elif isinstance(callbacks, Sequence):
+            for callback in callbacks:
+                assert isinstance(callback, tuple)
+                assert len(callback) == 2 and callable(callback[1])
+                add_callback_entry(callback)
+        else:
+            raise TypeError(
+                "structural_walk callbacks must be callbacks, (type, callback) entries, "
+                "((type1, type2, ...), callback) entries, or sequences of tuple entries"
+            )
         return callback_entries
 
     def wrap_callback_with_def_region_kind(fn: Callable[..., Any]) -> Callable[[Any, int], Any]:
         return lambda value, kind: fn(value, DefRegionKind(kind))
 
-    callback_entries = normalize_callback_slots(callbacks)
-    callback_entries_with_def_region_kind = normalize_callback_slots((with_def_region_kind,))
+    callback_entries = normalize_callbacks(callbacks)
+    callback_entries_with_def_region_kind = normalize_callbacks(with_def_region_kind)
 
     entries: list[tuple[int, Callable[[Any], Any]]] = [
         (_callback_type_to_type_index(t), fn) for t, fn in callback_entries
