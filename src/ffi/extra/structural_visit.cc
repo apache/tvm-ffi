@@ -87,8 +87,7 @@ Expected<Optional<VisitInterrupt>> StructuralWalkExpected(
 /*! \brief Visit entries in a sequence container. */
 TVMFFIAny VisitSeqContainer(StructuralVisitorObj* visitor, const SeqBaseObj* seq) noexcept {
   for (const Any& item : *seq) {
-    auto interrupt = visitor->VisitExpected(item);
-    TVM_FFI_S_VISIT_MAYBE_EARLY_RETURN(interrupt);
+    TVM_FFI_S_VISIT_MAYBE_EARLY_RETURN(visitor->VisitExpected(item));
   }
   return ExpectedUnsafe::MoveToTVMFFIAny(Expected<Optional<VisitInterrupt>>(std::nullopt));
 }
@@ -96,10 +95,8 @@ TVMFFIAny VisitSeqContainer(StructuralVisitorObj* visitor, const SeqBaseObj* seq
 /*! \brief Visit keys and values in a map container. */
 TVMFFIAny VisitMapContainer(StructuralVisitorObj* visitor, const MapBaseObj* map) noexcept {
   for (const auto& kv : *map) {
-    auto key_interrupt = visitor->VisitExpected(kv.first);
-    TVM_FFI_S_VISIT_MAYBE_EARLY_RETURN(key_interrupt);
-    auto val_interrupt = visitor->VisitExpected(kv.second);
-    TVM_FFI_S_VISIT_MAYBE_EARLY_RETURN(val_interrupt);
+    TVM_FFI_S_VISIT_MAYBE_EARLY_RETURN(visitor->VisitExpected(kv.first));
+    TVM_FFI_S_VISIT_MAYBE_EARLY_RETURN(visitor->VisitExpected(kv.second));
   }
   return ExpectedUnsafe::MoveToTVMFFIAny(Expected<Optional<VisitInterrupt>>(std::nullopt));
 }

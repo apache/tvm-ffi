@@ -346,7 +346,10 @@ def test_structural_walk_mixed_callback_forms() -> None:
 
     result = tvm_ffi.structural_walk(
         root,
-        (tvm_ffi.Array, lambda value: trace.append(f"array:{len(value)}")),
+        [
+            (tvm_ffi.Array, lambda value: trace.append(f"array:{len(value)}")),
+            (str, lambda value: trace.append(f"str:{value}")),
+        ],
         with_def_region_kind=[
             (
                 PyWalkMixedVar,

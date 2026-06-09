@@ -502,10 +502,17 @@ def structural_walk(
             callback_entries.append((Any, callbacks))
         elif isinstance(callbacks, tuple) and len(callbacks) == 2 and callable(callbacks[1]):
             add_callback_entry(callbacks)
-        elif isinstance(callbacks, Sequence):
+        elif isinstance(callbacks, Sequence) and not isinstance(callbacks, (str, bytes)):
             for callback in callbacks:
-                assert isinstance(callback, tuple)
-                assert len(callback) == 2 and callable(callback[1])
+                if (
+                    not isinstance(callback, tuple)
+                    or len(callback) != 2
+                    or not callable(callback[1])
+                ):
+                    raise TypeError(
+                        "structural_walk callbacks within a sequence must be "
+                        "(type, callback) tuples"
+                    )
                 add_callback_entry(callback)
         else:
             raise TypeError(
