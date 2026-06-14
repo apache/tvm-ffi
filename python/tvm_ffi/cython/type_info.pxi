@@ -1172,8 +1172,8 @@ cdef _register_py_methods(int32_t type_index, list py_methods, frozenset type_at
     ----------
     type_index : int
         The runtime type index of the type.
-    py_methods : list[tuple[str, Any, bool]]
-        Each entry is ``(name, value, is_static)``.
+    py_methods : list[tuple[str, Any, bool, str | None]]
+        Each entry is ``(name, value, is_static, metadata_json)``.
     type_attr_names : frozenset[str]
         Names to register as TypeAttrColumn instead of TypeMethod.
     """
@@ -1182,11 +1182,12 @@ cdef _register_py_methods(int32_t type_index, list py_methods, frozenset type_at
     cdef TVMFFIAny sentinel_any
     cdef int c_api_ret_code
     cdef ByteArrayArg name_arg
+    cdef ByteArrayArg metadata_arg
 
     sentinel_any.type_index = kTVMFFINone
     sentinel_any.v_int64 = 0
 
-    for name, func, is_static in py_methods:
+    for name, func, is_static, metadata_json in py_methods:
         func_any.type_index = kTVMFFINone
         func_any.v_int64 = 0
         try:
@@ -1212,8 +1213,13 @@ cdef _register_py_methods(int32_t type_index, list py_methods, frozenset type_at
                 method_info.doc.size = 0
                 method_info.flags = kTVMFFIFieldFlagBitMaskIsStaticMethod if is_static else 0
                 method_info.method = func_any
-                method_info.metadata.data = NULL
-                method_info.metadata.size = 0
+                if metadata_json is not None:
+                    metadata_bytes = c_str(metadata_json)
+                    metadata_arg = ByteArrayArg(metadata_bytes)
+                    method_info.metadata = metadata_arg.cdata
+                else:
+                    method_info.metadata.data = NULL
+                    method_info.metadata.size = 0
                 CHECK_CALL(TVMFFITypeRegisterMethod(type_index, &method_info))
         finally:
             if func_any.type_index >= kTVMFFIStaticObjectBegin and func_any.v_obj != NULL:

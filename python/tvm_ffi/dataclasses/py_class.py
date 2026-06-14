@@ -18,6 +18,8 @@
 
 from __future__ import annotations
 
+import inspect
+import json
 import sys
 import typing
 from collections.abc import Callable
@@ -78,6 +80,11 @@ class _PendingClass:
 #: forward reference.  Retried after each successful phase-2 via
 #: :func:`_flush_pending`.
 _PENDING_CLASSES: list[_PendingClass] = []
+
+
+class _DeferredAnnotation(Exception):
+    """Raised when method annotations must wait for a later py_class registration."""
+
 
 #: Per-module mapping of ``class.__name__ → class`` for every
 #: ``@py_class``-decorated type.  Used as *localns* when resolving
@@ -328,7 +335,52 @@ def _validate_method_name(cls: type, name: str) -> None:
         )
 
 
-def _collect_py_methods(cls: type) -> list[tuple[str, Any, bool]] | None:
+def _method_type_schema_json(
+    cls: type,
+    func: Any,
+    is_static: bool,
+    globalns: dict[str, Any],
+) -> str:
+    """Build reflection metadata for a Python-defined FFI TypeMethod."""
+    kwargs: dict[str, Any] = {"globalns": globalns, "localns": _build_localns(cls)}
+    if sys.version_info >= (3, 11):
+        kwargs["include_extras"] = True
+    try:
+        hints = typing.get_type_hints(func, **kwargs)
+    except (NameError, AttributeError):
+        kwargs["localns"] = _build_localns(cls, cross_module=True)
+        try:
+            hints = typing.get_type_hints(func, **kwargs)
+        except (NameError, AttributeError) as err:
+            raise _DeferredAnnotation from err
+
+    sig = inspect.signature(func)
+    params = list(sig.parameters.values())
+    if any(
+        param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
+        for param in params
+    ):
+        return json.dumps({"type_schema": TypeSchema("Callable").to_json()})
+
+    arg_schemas: list[TypeSchema] = []
+    if not is_static:
+        arg_schemas.append(TypeSchema.from_annotation(cls))
+        params = params[1:]
+
+    for param in params:
+        if param.kind is inspect.Parameter.KEYWORD_ONLY:
+            return json.dumps({"type_schema": TypeSchema("Callable").to_json()})
+        annotation = hints.get(param.name, Any)
+        arg_schemas.append(TypeSchema.from_annotation(annotation))
+
+    ret_annotation = hints.get("return", Any)
+    ret_schema = TypeSchema.from_annotation(ret_annotation)
+    return json.dumps({"type_schema": TypeSchema("Callable", (ret_schema, *arg_schemas)).to_json()})
+
+
+def _collect_py_methods(
+    cls: type, globalns: dict[str, Any] | None = None
+) -> list[tuple[Any, ...]] | None:
     """Extract FFI-registered entries from a ``@py_class`` body.
 
     Two sources are collected:
@@ -349,10 +401,14 @@ def _collect_py_methods(cls: type) -> list[tuple[str, Any, bool]] | None:
     and Python protocol dunders cannot be ``@method``-decorated; those
     are reserved by the TypeAttrColumn and Python semantics respectively.
 
-    Returns the ``(name, value, is_static)`` list, or :data:`None` when
-    no entries were found.
+    Returns the ``(name, value, is_static, metadata_json)`` list, or
+    :data:`None` when no entries were found.
     """
-    methods: list[tuple[str, Any, bool]] = []
+    legacy_shape = globalns is None
+    if globalns is None:
+        globalns = vars(sys.modules[cls.__module__])
+
+    methods: list[tuple[Any, ...]] = []
     for name, value in cls.__dict__.items():
         marked = _is_method_marked(value)
         if name not in _FFI_RECOGNIZED_METHODS and not marked:
@@ -374,7 +430,13 @@ def _collect_py_methods(cls: type) -> list[tuple[str, Any, bool]] | None:
             )
         is_static = isinstance(value, staticmethod)
         func = value.__func__ if is_static else value
-        methods.append((name, func, is_static))
+        metadata_json = None
+        if marked:
+            metadata_json = _method_type_schema_json(cls, func, is_static, globalns)
+        if legacy_shape:
+            methods.append((name, func, is_static))
+        else:
+            methods.append((name, func, is_static, metadata_json))
     return methods if methods else None
 
 
@@ -447,7 +509,10 @@ def _register_fields_into_type(
             assert f.name is not None
             fields_map[f.name] = f
     own_fields = list(fields_map.values())
-    py_methods = _collect_py_methods(cls)
+    try:
+        py_methods = _collect_py_methods(cls, globalns)
+    except _DeferredAnnotation:
+        return False
 
     # Register fields and type-level structural eq/hash kind with the C layer.
     structure_kind = _STRUCTURE_KIND_MAP.get(params.get("structural_eq"))

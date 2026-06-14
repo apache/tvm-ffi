@@ -16,11 +16,14 @@
 # under the License.
 from __future__ import annotations
 
+import itertools
 from pathlib import Path
 
 import pytest
 import tvm_ffi.stub.cli as stub_cli
+from tvm_ffi import Object, method
 from tvm_ffi.core import TypeSchema
+from tvm_ffi.dataclasses import py_class
 from tvm_ffi.stub import consts as C
 from tvm_ffi.stub.cli import _stage_2, _stage_3
 from tvm_ffi.stub.file_utils import CodeBlock, FileInfo
@@ -48,9 +51,15 @@ from tvm_ffi.stub.utils import (
     Options,
 )
 
+_counter = itertools.count()
+
 
 def _identity_ty_map(name: str) -> str:
     return name
+
+
+def _unique_type_key(base: str) -> str:
+    return f"testing.stubgen.{base}_{next(_counter)}"
 
 
 def _default_ty_map() -> dict[str, str]:
@@ -389,6 +398,38 @@ def test_objectinfo_gen_init_uses_input_annotations() -> None:
     assert info.gen_ffi_init(_type_suffix, indent=0, input_ty_map=_input_type_suffix) == [
         "def __ffi_init__(self, items: Sequence[int]) -> None: ...  # ty: "
         "ignore[invalid-method-override]"
+    ]
+
+
+def test_py_class_method_metadata_renders_stub_signature() -> None:
+    @py_class(_unique_type_key("MethodMetadata"))
+    class MethodMetadata(Object):
+        value: int
+
+        @method
+        def describe(self, values: list[int], prefix: str) -> str:
+            return f"{prefix}:{self.value}:{len(values)}"
+
+        @method
+        @staticmethod
+        def normalize(values: list[int]) -> list[int]:
+            return values
+
+    info = ObjectInfo.from_type_info(MethodMetadata.__tvm_ffi_type_info__)  # ty: ignore[unresolved-attribute]
+    methods = {method.schema.name: method for method in info.methods}
+    describe_schema = methods["describe"].schema
+
+    assert describe_schema.origin == "Callable"
+    assert [arg.origin for arg in describe_schema.args] == [
+        "str",
+        MethodMetadata.__tvm_ffi_type_info__.type_key,  # ty: ignore[unresolved-attribute]
+        "List",
+        "str",
+    ]
+    assert render_object_methods(info, _type_suffix, indent=0, input_ty_map=_input_type_suffix) == [
+        "def describe(self, _1: Sequence[int], _2: str, /) -> str: ...",
+        "@staticmethod",
+        "def normalize(_0: Sequence[int], /) -> MutableSequence[int]: ...",
     ]
 
 
