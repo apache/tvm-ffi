@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import itertools
+import typing
 from pathlib import Path
 
 import pytest
@@ -407,12 +408,12 @@ def test_py_class_method_metadata_renders_stub_signature() -> None:
         value: int
 
         @method
-        def describe(self, values: list[int], prefix: str) -> str:
+        def describe(self, values: typing.List[int], prefix: str) -> str:  # noqa: UP006
             return f"{prefix}:{self.value}:{len(values)}"
 
         @method
         @staticmethod
-        def normalize(values: list[int]) -> list[int]:
+        def normalize(values: typing.List[int]) -> typing.List[int]:  # noqa: UP006
             return values
 
     info = ObjectInfo.from_type_info(MethodMetadata.__tvm_ffi_type_info__)  # ty: ignore[unresolved-attribute]
