@@ -37,6 +37,11 @@ else:
         """Sentinel type: annotations after ``_: KW_ONLY`` are keyword-only."""
 
 
+def _field_converter(value: Any) -> Any:
+    """Static-analysis marker for fields whose values are converted by FFI."""
+    return value
+
+
 class Field:
     """Descriptor for a single field in a Python-defined TVM-FFI type.
 
@@ -102,12 +107,16 @@ class Field:
           parameters that reference outer-scope vars.
     doc : str | None
         Optional docstring for the field.
+    converter : Callable[[Any], Any]
+        Static-analysis marker for field conversion. Runtime conversion is
+        still handled by the FFI type converter.
 
     """
 
     __slots__ = (
         "_ty_schema",
         "compare",
+        "converter",
         "default",
         "default_factory",
         "doc",
@@ -130,6 +139,7 @@ class Field:
     repr: bool
     hash: bool | None
     compare: bool
+    converter: Callable[[Any], Any]
     kw_only: bool | None
     structural_eq: str | None
     doc: str | None
@@ -158,6 +168,7 @@ class Field:
         kw_only: bool | None = False,
         structural_eq: str | None = None,
         doc: str | None = None,
+        converter: Callable[[Any], Any] = _field_converter,
     ) -> None:
         # MISSING means "parameter not provided".
         # An explicit None from the user fails the callable() check,
@@ -185,12 +196,13 @@ class Field:
         self.repr = repr
         self.hash = hash
         self.compare = compare
+        self.converter = converter
         self.kw_only = kw_only
         self.structural_eq = structural_eq
         self.doc = doc
 
 
-def field(
+def field(  # noqa: PLR0913
     *,
     default: object = MISSING,
     default_factory: Callable[[], object] | None = MISSING,  # type: ignore[assignment]
@@ -202,6 +214,7 @@ def field(
     kw_only: bool | None = None,
     structural_eq: str | None = None,
     doc: str | None = None,
+    converter: Callable[[Any], Any] = _field_converter,
 ) -> Any:
     """Customize a field in a ``@py_class``-decorated class.
 
@@ -248,6 +261,9 @@ def field(
         binding.
     doc
         Optional docstring for the field.
+    converter
+        Static-analysis marker for field conversion. Runtime conversion is
+        still handled by the FFI type converter.
 
     Returns
     -------
@@ -282,4 +298,5 @@ def field(
         kw_only=kw_only,
         structural_eq=structural_eq,
         doc=doc,
+        converter=converter,
     )

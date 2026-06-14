@@ -42,6 +42,7 @@ from tvm_ffi.stub.python_generator.utils import ImportItem
 from tvm_ffi.stub.utils import (
     FuncInfo,
     InitConfig,
+    InitFieldInfo,
     NamedTypeSchema,
     ObjectInfo,
     Options,
@@ -58,6 +59,10 @@ def _default_ty_map() -> dict[str, str]:
 
 def _type_suffix(name: str) -> str:
     return PC.TY_MAP_DEFAULTS.get(name, name).rsplit(".", 1)[-1]
+
+
+def _input_type_suffix(name: str) -> str:
+    return C.TY_MAP_INPUT_DEFAULTS.get(name, C.TY_MAP_DEFAULTS.get(name, name)).rsplit(".", 1)[-1]
 
 
 def test_codeblock_from_begin_line_variants() -> None:
@@ -298,6 +303,52 @@ def test_objectinfo_gen_fields_container_types() -> None:
         "lst: MutableSequence[str]",
         "mp: Mapping[str, int]",
         "dt: MutableMapping[str, float]",
+    ]
+
+
+def test_funcinfo_gen_uses_input_annotations_for_parameters() -> None:
+    info = FuncInfo(
+        schema=NamedTypeSchema(
+            "demo.echo_list",
+            TypeSchema(
+                "Callable",
+                (
+                    TypeSchema("List", (TypeSchema("int"),)),
+                    TypeSchema("List", (TypeSchema("int"),)),
+                ),
+            ),
+        ),
+        is_member=False,
+    )
+
+    assert (
+        info.gen(_type_suffix, indent=0, input_ty_map=_input_type_suffix)
+        == "def echo_list(_0: Sequence[int], /) -> MutableSequence[int]: ..."
+    )
+
+
+def test_objectinfo_gen_init_uses_input_annotations() -> None:
+    info = ObjectInfo(
+        fields=[NamedTypeSchema("items", TypeSchema("List", (TypeSchema("int"),)))],
+        methods=[],
+        init_fields=[
+            InitFieldInfo(
+                name="items",
+                schema=NamedTypeSchema("items", TypeSchema("List", (TypeSchema("int"),))),
+                kw_only=False,
+                has_default=False,
+            )
+        ],
+        has_init=True,
+    )
+
+    assert info.gen_fields(_type_suffix, indent=0) == ["items: MutableSequence[int]"]
+    assert info.gen_init(_type_suffix, indent=0, input_ty_map=_input_type_suffix) == [
+        "def __init__(self, items: Sequence[int]) -> None: ..."
+    ]
+    assert info.gen_ffi_init(_type_suffix, indent=0, input_ty_map=_input_type_suffix) == [
+        "def __ffi_init__(self, items: Sequence[int]) -> None: ...  # ty: "
+        "ignore[invalid-method-override]"
     ]
 
 

@@ -116,6 +116,8 @@ _TYPE_SCHEMA_ORIGIN_CONVERTER = {
     "ObjectRValueRef": "Object",
 }
 
+cdef str _TYPE_ATTR_FFI_CONVERT_TYPE_SCHEMA = "__ffi_convert_type_schema__"
+
 # Sentinel for structural types (Optional, Union) that have no single type_index
 _ORIGIN_TYPE_INDEX_STRUCTURAL = -2
 # Sentinel for unknown/unresolved origins
@@ -216,6 +218,19 @@ class TypeSchema:
 
     def __repr__(self) -> str:
         return self.repr(ty_map=None)
+
+    @staticmethod
+    def _from_maybe_json(raw: object) -> "TypeSchema":
+        """Construct a TypeSchema from a TypeSchema, JSON string, or JSON dict."""
+        if isinstance(raw, TypeSchema):
+            return raw
+        if isinstance(raw, str):
+            return TypeSchema.from_json_str(raw)
+        if isinstance(raw, dict):
+            return TypeSchema.from_json_obj(raw)
+        raise TypeError(
+            f"expected TypeSchema, JSON string, or JSON dict, got {type(raw).__name__}"
+        )
 
     @staticmethod
     def from_json_obj(obj: dict[str, Any]) -> "TypeSchema":
@@ -517,12 +532,40 @@ class TypeSchema:
             assert s.repr() == "Array[int]"
 
         """
-        if ty_map is None:
-            origin = self.origin
-        else:
-            origin = ty_map(self.origin)
+        return self.output_repr(ty_map)
+
+    def input_repr(self, ty_map: "Optional[Callable[[str], str]]" = None) -> str:
+        """Render the Python input annotation accepted by this schema."""
+        return self._repr_impl(ty_map, input_mode=True, expanded_convert_types=frozenset())
+
+    def output_repr(self, ty_map: "Optional[Callable[[str], str]]" = None) -> str:
+        """Render the precise Python output annotation produced by this schema."""
+        return self._repr_impl(ty_map, input_mode=False, expanded_convert_types=frozenset())
+
+    def _repr_impl(
+        self,
+        ty_map: "Optional[Callable[[str], str]]",
+        input_mode: bool,
+        expanded_convert_types: frozenset[int],
+    ) -> str:
+        if input_mode and self.origin_type_index >= kTVMFFIStaticObjectBegin:
+            if self.origin_type_index not in expanded_convert_types:
+                raw_convert_schema = _lookup_type_attr(
+                    self.origin_type_index, _TYPE_ATTR_FFI_CONVERT_TYPE_SCHEMA
+                )
+                if raw_convert_schema is not None:
+                    return TypeSchema._from_maybe_json(raw_convert_schema)._repr_impl(
+                        ty_map,
+                        input_mode=True,
+                        expanded_convert_types=expanded_convert_types | {self.origin_type_index},
+                    )
+
+        origin = self.origin if ty_map is None else ty_map(self.origin)
         schema_args = self.args
-        args = [i.repr(ty_map) for i in (() if schema_args is None else schema_args)]
+        args = [
+            i._repr_impl(ty_map, input_mode, expanded_convert_types)
+            for i in (() if schema_args is None else schema_args)
+        ]
         if origin == "Union":
             return " | ".join(args)
         elif origin == "Optional":

@@ -30,6 +30,7 @@ from typing import Callable
 from .. import consts as C
 from ..file_utils import CodeBlock
 from ..utils import FuncInfo, InitConfig, ObjectInfo, Options
+from . import consts as PC
 from .utils import (
     ImportItem,
     render_func_signature,
@@ -103,6 +104,16 @@ def _type_suffix_and_record(
     return _run
 
 
+def _make_input_ty_map(ty_map: dict[str, str]) -> dict[str, str]:
+    """Derive input-side defaults without overriding explicit ty-map entries."""
+    input_ty_map = ty_map.copy()
+    for key, input_default in PC.TY_MAP_INPUT_DEFAULTS.items():
+        output_default = PC.TY_MAP_DEFAULTS.get(key)
+        if ty_map.get(key, output_default) == output_default:
+            input_ty_map[key] = input_default
+    return input_ty_map
+
+
 def generate_python_global_funcs(
     code: CodeBlock,
     global_funcs: list[FuncInfo],
@@ -136,11 +147,17 @@ def generate_python_global_funcs(
     )
     func_names = {f.schema.name.rsplit(".", 1)[-1] for f in global_funcs}
     fn_ty_map = _type_suffix_and_record(ty_map, imports, func_names=func_names)
+    input_fn_ty_map = _type_suffix_and_record(
+        _make_input_ty_map(ty_map), imports, func_names=func_names
+    )
     results: list[str] = [
         "# fmt: off",
         f'_FFI_INIT_FUNC("{prefix}", __name__)',
         "if TYPE_CHECKING:",
-        *[render_func_signature(func, fn_ty_map, opt.indent) for func in global_funcs],
+        *[
+            render_func_signature(func, fn_ty_map, opt.indent, input_ty_map=input_fn_ty_map)
+            for func in global_funcs
+        ],
         "# fmt: on",
     ]
     indent = " " * code.indent
@@ -166,12 +183,17 @@ def generate_python_object(
     info = obj_info
     method_names = {m.schema.name.rsplit(".", 1)[-1] for m in info.methods}
     fn_ty_map = _type_suffix_and_record(ty_map, imports, func_names=method_names)
-    init_lines = render_object_init(info, fn_ty_map, opt.indent)
-    ffi_init_lines = render_object_ffi_init(info, fn_ty_map, opt.indent)
+    input_fn_ty_map = _type_suffix_and_record(
+        _make_input_ty_map(ty_map), imports, func_names=method_names
+    )
+    init_lines = render_object_init(info, fn_ty_map, opt.indent, input_ty_map=input_fn_ty_map)
+    ffi_init_lines = render_object_ffi_init(
+        info, fn_ty_map, opt.indent, input_ty_map=input_fn_ty_map
+    )
     type_checking_lines = [
         *init_lines,
         *ffi_init_lines,
-        *render_object_methods(info, fn_ty_map, opt.indent),
+        *render_object_methods(info, fn_ty_map, opt.indent, input_ty_map=input_fn_ty_map),
     ]
     if type_checking_lines:
         imports.append(

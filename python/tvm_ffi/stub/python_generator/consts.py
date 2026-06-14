@@ -38,6 +38,13 @@ TY_MAP_DEFAULTS = {
     "Device": "ffi.Device",
 }
 
+TY_MAP_INPUT_DEFAULTS = {
+    "Array": "collections.abc.Sequence",
+    "List": "collections.abc.Sequence",
+    "Map": "collections.abc.Mapping",
+    "Dict": "collections.abc.Mapping",
+}
+
 # TODO(@junrushao): Make it configurable
 #: Module-prefix rewrites applied when constructing a Python ``import`` path.
 MOD_MAP = {

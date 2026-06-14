@@ -351,6 +351,14 @@ inline constexpr const char* kInit = "__ffi_init__";
  */
 inline constexpr const char* kConvert = "__ffi_convert__";
 /*!
+ * \brief Type schema accepted by ``kConvert`` before it returns ``TSelf``.
+ *
+ * Stored as a JSON type schema string or schema-like object.  Python stub
+ * generation uses this attribute to render widened input annotations while
+ * keeping output annotations precise.
+ */
+inline constexpr const char* kConvertTypeSchema = "__ffi_convert_type_schema__";
+/*!
  * \brief Shallow-copy factory.
  *
  * Allocates a new object and copies all reflected field values from the

@@ -24,7 +24,7 @@ from typing import Any, TypeVar
 
 from typing_extensions import dataclass_transform
 
-from .field import Field
+from .field import Field, _field_converter, field
 
 _T = TypeVar("_T", bound=type)
 
@@ -60,7 +60,12 @@ def _attach_field_objects(cls: type, type_info: Any) -> None:
         tf.dataclass_field = f
 
 
-@dataclass_transform(eq_default=False, order_default=False)
+@dataclass_transform(
+    eq_default=False,
+    order_default=False,
+    field_specifiers=(field, Field),
+    converter=_field_converter,
+)
 def c_class(
     type_key: str,
     *,

@@ -31,7 +31,7 @@ from .. import core
 from .._dunder import _install_dataclass_dunders
 from ..core import MISSING, TypeSchema
 from ..registry import _add_class_attrs
-from .field import KW_ONLY, Field, field
+from .field import KW_ONLY, Field, _field_converter, field
 
 _T = TypeVar("_T", bound=type)
 
@@ -603,6 +603,7 @@ _FFI_TYPE_ATTR_NAMES: frozenset[str] = frozenset(
         "__ffi_eq__",
         "__ffi_compare__",
         "__ffi_convert__",
+        "__ffi_convert_type_schema__",
         "__any_hash__",
         "__any_equal__",
         "__s_equal__",
@@ -627,6 +628,7 @@ _FFI_RECOGNIZED_METHODS: frozenset[str] = _FFI_TYPE_ATTR_NAMES
     eq_default=False,
     order_default=False,
     field_specifiers=(field, Field),
+    converter=_field_converter,
 )
 def py_class(  # noqa: PLR0913
     cls_or_type_key: type | str | None = None,

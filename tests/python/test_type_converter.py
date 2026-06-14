@@ -31,13 +31,14 @@ import pytest
 import tvm_ffi
 from tvm_ffi.core import (
     CAny,
+    Object,
     ObjectConvertible,
     TypeSchema,
     _lookup_type_attr,
     _object_type_key_to_index,
     _to_py_class_value,
 )
-from tvm_ffi.dataclasses import IntEnum, StrEnum, entry
+from tvm_ffi.dataclasses import IntEnum, StrEnum, entry, py_class
 from tvm_ffi.testing import (
     TestIntPair,
     TestObjectBase,
@@ -3441,6 +3442,54 @@ class TestSTLOriginParsing:
         """ObjectRValueRef maps to Object."""
         s = TypeSchema.from_json_str('{"type":"ObjectRValueRef","args":[]}')
         assert s.origin == "Object"
+
+
+def _output_ty_map(name: str) -> str:
+    return {
+        "Array": "Sequence",
+        "List": "MutableSequence",
+        "Map": "Mapping",
+        "Dict": "MutableMapping",
+    }.get(name, name)
+
+
+def _input_ty_map(name: str) -> str:
+    return {
+        "Array": "Sequence",
+        "List": "Sequence",
+        "Map": "Mapping",
+        "Dict": "Mapping",
+    }.get(name, name)
+
+
+class TestTypeSchemaAnnotationRendering:
+    """Input annotations are widened without changing output annotations."""
+
+    def test_container_input_output_repr(self) -> None:
+        """List and Dict render differently for input and output positions."""
+        schema = S("Dict", S("str"), S("List", S("int")))
+
+        assert schema.output_repr(_output_ty_map) == "MutableMapping[str, MutableSequence[int]]"
+        assert schema.input_repr(_input_ty_map) == "Mapping[str, Sequence[int]]"
+        assert schema.repr(_output_ty_map) == schema.output_repr(_output_ty_map)
+
+    def test_object_convert_type_schema_attr_widens_input_only(self) -> None:
+        """__ffi_convert_type_schema__ affects input annotations only."""
+        type_key = _unique_type_key("ConvertTypeSchema")
+        convert_schema = (
+            f'{{"type":"Union","args":[{{"type":"int"}},{{"type":"str"}},{{"type":"{type_key}"}}]}}'
+        )
+
+        @py_class(type_key)
+        class ExprLike(Object):
+            __ffi_convert_type_schema__ = convert_schema
+
+        def ty_map(name: str) -> str:
+            return "ExprLike" if name == type_key else name
+
+        schema = TypeSchema.from_annotation(ExprLike)
+        assert schema.output_repr(ty_map) == "ExprLike"
+        assert schema.input_repr(ty_map) == "int | str | ExprLike"
 
 
 # ---------------------------------------------------------------------------

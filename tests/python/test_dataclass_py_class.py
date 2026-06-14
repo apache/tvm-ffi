@@ -53,6 +53,20 @@ def _get_type_info(cls: type) -> TypeInfo:
     return ret
 
 
+def test_py_class_dataclass_transform_has_converter() -> None:
+    metadata = py_class.__dataclass_transform__  # ty: ignore[unresolved-attribute]
+    assert metadata["kwargs"]["converter"] is field().converter
+
+
+def test_field_accepts_converter_metadata() -> None:
+    def converter(value: Any) -> Any:
+        return value
+
+    f = field(converter=converter)
+    assert isinstance(f, Field)
+    assert f.converter is converter
+
+
 # ---------------------------------------------------------------------------
 # Low-level helpers for _make_type-based tests
 # ---------------------------------------------------------------------------

@@ -24,8 +24,8 @@ import warnings
 import pytest
 import tvm_ffi.testing
 from tvm_ffi.core import MISSING, TypeInfo
-from tvm_ffi.dataclasses import Field
-from tvm_ffi.dataclasses.c_class import _attach_field_objects
+from tvm_ffi.dataclasses import Field, field
+from tvm_ffi.dataclasses.c_class import _attach_field_objects, c_class
 from tvm_ffi.registry import _warn_missing_field_annotations
 from tvm_ffi.testing import (
     TestCompare,
@@ -40,6 +40,11 @@ from tvm_ffi.testing import (
 # ---------------------------------------------------------------------------
 # 1. Custom __init__ preservation
 # ---------------------------------------------------------------------------
+
+
+def test_c_class_dataclass_transform_has_converter() -> None:
+    metadata = c_class.__dataclass_transform__  # ty: ignore[unresolved-attribute]
+    assert metadata["kwargs"]["converter"] is field().converter
 
 
 def test_c_class_custom_init() -> None:

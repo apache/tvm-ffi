@@ -102,8 +102,11 @@ def render_func_signature(
     func: FuncInfo,
     ty_map: Callable[[str], str],
     indent: int,
+    input_ty_map: Callable[[str], str] | None = None,
 ) -> str:
     """Render a function signature string for ``func``."""
+    if input_ty_map is None:
+        input_ty_map = ty_map
     func_name = func.schema.name.rsplit(".", 1)[-1]
     buf = StringIO()
     buf.write(" " * indent)
@@ -121,12 +124,12 @@ def render_func_signature(
             buf.write("self, ")
         else:
             buf.write(f"_{i}: ")
-            buf.write(arg.repr(ty_map))
+            buf.write(arg.input_repr(input_ty_map))
             buf.write(", ")
     if arg_args:
         buf.write("/")
     buf.write(") -> ")
-    buf.write(arg_ret.repr(ty_map))
+    buf.write(arg_ret.output_repr(ty_map))
     buf.write(": ...")
     return buf.getvalue()
 
@@ -138,15 +141,18 @@ def render_object_fields(
 ) -> list[str]:
     """Render field definitions for ``info``."""
     indent_str = " " * indent
-    return [f"{indent_str}{field.name}: {field.repr(ty_map)}" for field in info.fields]
+    return [f"{indent_str}{field.name}: {field.output_repr(ty_map)}" for field in info.fields]
 
 
 def render_object_methods(
     info: ObjectInfo,
     ty_map: Callable[[str], str],
     indent: int,
+    input_ty_map: Callable[[str], str] | None = None,
 ) -> list[str]:
     """Render method definitions for ``info``."""
+    if input_ty_map is None:
+        input_ty_map = ty_map
     indent_str = " " * indent
     ret = []
     for method in info.methods:
@@ -154,11 +160,11 @@ def render_object_methods(
         if func_name == "__ffi_init__":
             # __ffi_init__ is installed as an instance method (self, *args, **kwargs) -> None
             # by _install_ffi_init_attr, regardless of the C++ static registration.
-            ret.append(_render_ffi_init_from_method(method, ty_map, indent))
+            ret.append(_render_ffi_init_from_method(method, ty_map, indent, input_ty_map))
             continue
         if not method.is_member:
             ret.append(f"{indent_str}@staticmethod")
-        ret.append(render_func_signature(method, ty_map, indent))
+        ret.append(render_func_signature(method, ty_map, indent, input_ty_map))
     return ret
 
 
@@ -166,8 +172,11 @@ def _render_ffi_init_from_method(
     method: FuncInfo,
     ty_map: Callable[[str], str],
     indent: int,
+    input_ty_map: Callable[[str], str] | None = None,
 ) -> str:
     """Render ``__ffi_init__`` TypeMethod as an instance method returning None."""
+    if input_ty_map is None:
+        input_ty_map = ty_map
     indent_str = " " * indent
     schema = method.schema
     # Subclass __ffi_init__ signatures legitimately differ from the parent
@@ -179,7 +188,7 @@ def _render_ffi_init_from_method(
     # schema.args[0] is return type, schema.args[1:] are param types.
     parts: list[str] = []
     for i, arg in enumerate(schema.args[1:]):
-        parts.append(f"_{i}: {arg.repr(ty_map)}")
+        parts.append(f"_{i}: {arg.input_repr(input_ty_map)}")
     if parts:
         params = ", ".join(parts)
         return f"{indent_str}def __ffi_init__(self, {params}, /) -> None: ...{ignore}"
@@ -190,6 +199,7 @@ def render_object_ffi_init(
     info: ObjectInfo,
     ty_map: Callable[[str], str],
     indent: int,
+    input_ty_map: Callable[[str], str] | None = None,
 ) -> list[str]:
     """Render a ``__ffi_init__`` stub when it's not already in TypeMethod.
 
@@ -203,25 +213,29 @@ def render_object_ffi_init(
     # If __ffi_init__ is already in methods (from TypeMethod), methods render it.
     if any(m.schema.name.rsplit(".", 1)[-1] == "__ffi_init__" for m in info.methods):
         return []
-    return _render_ffi_init_from_fields(info, ty_map, indent)
+    return _render_ffi_init_from_fields(info, ty_map, indent, input_ty_map)
 
 
 def render_object_init(
     info: ObjectInfo,
     ty_map: Callable[[str], str],
     indent: int,
+    input_ty_map: Callable[[str], str] | None = None,
 ) -> list[str]:
     """Render an ``__init__`` stub from init-eligible field metadata."""
     if not info.has_init:
         return []
-    return _render_init_from_fields(info, ty_map, indent)
+    return _render_init_from_fields(info, ty_map, indent, input_ty_map)
 
 
 def _format_field_params(
     info: ObjectInfo,
     ty_map: Callable[[str], str],
+    input_ty_map: Callable[[str], str] | None = None,
 ) -> str:
     """Format init-eligible fields as a parameter string with defaults and kw_only."""
+    if input_ty_map is None:
+        input_ty_map = ty_map
     positional = [f for f in info.init_fields if not f.kw_only]
     kw_only = [f for f in info.init_fields if f.kw_only]
 
@@ -232,15 +246,15 @@ def _format_field_params(
 
     parts: list[str] = []
     for f in pos_required:
-        parts.append(f"{f.name}: {f.schema.repr(ty_map)}")
+        parts.append(f"{f.name}: {f.schema.input_repr(input_ty_map)}")
     for f in pos_default:
-        parts.append(f"{f.name}: {f.schema.repr(ty_map)} = ...")
+        parts.append(f"{f.name}: {f.schema.input_repr(input_ty_map)} = ...")
     if kw_required or kw_default:
         parts.append("*")
         for f in kw_required:
-            parts.append(f"{f.name}: {f.schema.repr(ty_map)}")
+            parts.append(f"{f.name}: {f.schema.input_repr(input_ty_map)}")
         for f in kw_default:
-            parts.append(f"{f.name}: {f.schema.repr(ty_map)} = ...")
+            parts.append(f"{f.name}: {f.schema.input_repr(input_ty_map)} = ...")
 
     return ", ".join(parts)
 
@@ -249,10 +263,11 @@ def _render_init_from_fields(
     info: ObjectInfo,
     ty_map: Callable[[str], str],
     indent: int,
+    input_ty_map: Callable[[str], str] | None = None,
 ) -> list[str]:
     """Render ``__init__`` from init-eligible field metadata (auto-generated init)."""
     indent_str = " " * indent
-    params = _format_field_params(info, ty_map)
+    params = _format_field_params(info, ty_map, input_ty_map)
     if params:
         return [f"{indent_str}def __init__(self, {params}) -> None: ..."]
     return [f"{indent_str}def __init__(self) -> None: ..."]
@@ -262,13 +277,14 @@ def _render_ffi_init_from_fields(
     info: ObjectInfo,
     ty_map: Callable[[str], str],
     indent: int,
+    input_ty_map: Callable[[str], str] | None = None,
 ) -> list[str]:
     """Render ``__ffi_init__`` stub from field metadata for auto-generated init."""
     indent_str = " " * indent
     # Subclass __ffi_init__ signatures legitimately differ from the parent
     # (different fields -> different constructor params), so suppress LSP.
     ignore = "  # ty: ignore[invalid-method-override]"
-    params = _format_field_params(info, ty_map)
+    params = _format_field_params(info, ty_map, input_ty_map)
     if params:
         return [f"{indent_str}def __ffi_init__(self, {params}) -> None: ...{ignore}"]
     return [f"{indent_str}def __ffi_init__(self) -> None: ...{ignore}"]

@@ -448,23 +448,25 @@ def test_convert_func_with_torch_tensor_cls() -> None:
     the outer caller's conversion path, so we verify shape survives the
     round-trip rather than isinstance on the return.
     """
+    assert torch is not None
+    torch_mod = torch
     calls = 0
 
     def callback(a: Any, b: Any, c: Any) -> Any:
         nonlocal calls
         calls += 1
-        assert isinstance(a, torch.Tensor)
-        assert isinstance(b, torch.Tensor)
-        assert isinstance(c, torch.Tensor)
+        assert isinstance(a, torch_mod.Tensor)
+        assert isinstance(b, torch_mod.Tensor)
+        assert isinstance(c, torch_mod.Tensor)
         assert list(a.shape) == [2]
         assert list(b.shape) == [3]
         assert list(c.shape) == [4]
         return b
 
-    f = tvm_ffi.convert_func(callback, tensor_cls=torch.Tensor)
-    a = torch.zeros(2)
-    b = torch.ones(3)
-    c = torch.full((4,), 2.0)
+    f = tvm_ffi.convert_func(callback, tensor_cls=torch_mod.Tensor)
+    a = torch_mod.zeros(2)
+    b = torch_mod.ones(3)
+    c = torch_mod.full((4,), 2.0)
     out = f(a, b, c)
     assert calls == 1
     assert tuple(out.shape) == (3,)
