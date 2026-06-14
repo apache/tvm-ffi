@@ -327,6 +327,46 @@ def test_funcinfo_gen_uses_input_annotations_for_parameters() -> None:
     )
 
 
+def test_generate_global_funcs_populates_input_defaults_for_partial_ty_map() -> None:
+    code = CodeBlock(
+        kind="global",
+        param=("demo", "mockpkg"),
+        lineno_start=1,
+        lineno_end=2,
+        lines=[f"{C.PYTHON_SYNTAX.begin} global/demo@mockpkg", C.PYTHON_SYNTAX.end],
+    )
+    funcs = [
+        FuncInfo(
+            schema=NamedTypeSchema(
+                "demo.echo_list",
+                TypeSchema(
+                    "Callable",
+                    (
+                        TypeSchema("List", (TypeSchema("int"),)),
+                        TypeSchema("List", (TypeSchema("int"),)),
+                    ),
+                ),
+            ),
+            is_member=False,
+        )
+    ]
+    imports: list[ImportItem] = []
+
+    generate_python_global_funcs(
+        code, funcs, {"List": "collections.abc.MutableSequence"}, imports, Options()
+    )
+
+    assert code.lines == [
+        f"{C.PYTHON_SYNTAX.begin} global/demo@mockpkg",
+        "# fmt: off",
+        '_FFI_INIT_FUNC("demo", __name__)',
+        "if TYPE_CHECKING:",
+        "    def echo_list(_0: Sequence[int], /) -> MutableSequence[int]: ...",
+        "# fmt: on",
+        C.PYTHON_SYNTAX.end,
+    ]
+
+
 def test_objectinfo_gen_init_uses_input_annotations() -> None:
     info = ObjectInfo(
         fields=[NamedTypeSchema("items", TypeSchema("List", (TypeSchema("int"),)))],

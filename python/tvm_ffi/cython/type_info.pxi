@@ -546,7 +546,7 @@ class TypeSchema:
         self,
         ty_map: "Optional[Callable[[str], str]]",
         input_mode: bool,
-        expanded_convert_types: frozenset[int],
+        expanded_convert_types: "frozenset[int]",
     ) -> str:
         if input_mode and self.origin_type_index >= kTVMFFIStaticObjectBegin:
             if self.origin_type_index not in expanded_convert_types:
