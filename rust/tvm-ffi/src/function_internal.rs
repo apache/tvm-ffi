@@ -152,6 +152,33 @@ crate::impl_arg_into_ref!(
     bool, i8, i16, i32, i64, isize, u8, u16, u32, u64, usize, f32, f64, String, Bytes
 );
 
+// `Map<K, V>` passes by value/reference like the scalars above, but its type
+// parameters keep it out of the `impl_*!` macros, so the impls are spelled out.
+impl<K: AnyCompatible, V: AnyCompatible> IntoArgHolder for crate::Map<K, V> {
+    type Target = crate::Map<K, V>;
+    fn into_arg_holder(self) -> Self::Target {
+        self
+    }
+}
+impl<'a, K: AnyCompatible, V: AnyCompatible> IntoArgHolder for &'a crate::Map<K, V> {
+    type Target = &'a crate::Map<K, V>;
+    fn into_arg_holder(self) -> Self::Target {
+        self
+    }
+}
+impl<K: AnyCompatible, V: AnyCompatible> ArgIntoRef for crate::Map<K, V> {
+    type Target = crate::Map<K, V>;
+    fn to_ref(&self) -> &Self::Target {
+        self
+    }
+}
+impl<K: AnyCompatible, V: AnyCompatible> ArgIntoRef for &crate::Map<K, V> {
+    type Target = crate::Map<K, V>;
+    fn to_ref(&self) -> &Self::Target {
+        self
+    }
+}
+
 //-----------------------------------------------------------
 // TupleAsPackedArgs
 //
