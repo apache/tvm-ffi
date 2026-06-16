@@ -91,7 +91,7 @@ macro (TVM_FFI_ADD_GTEST target_name)
   target_link_libraries(${target_name} PRIVATE gtest_main)
   gtest_discover_tests(
     ${target_name}
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR} TEST_DISCOVERY_TIMEOUT 600 DISCOVERY_MODE PRE_TEST
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR} DISCOVERY_TIMEOUT 600 DISCOVERY_MODE PRE_TEST
     PROPERTIES VS_DEBUGGER_WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
   )
   set_target_properties(${target_name} PROPERTIES FOLDER tests)
