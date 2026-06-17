@@ -545,9 +545,17 @@ cdef int TVMFFIPyArgSetterObjectRValueRef_(
     PyObject* py_arg, TVMFFIAny* out
 ) except -1:
     """Setter for ObjectRValueRef"""
-    cdef object arg = <object>py_arg
+    cdef CObject src = (<object>py_arg).obj
+    # need to detach from chandle
+    # there are two possible outcomes after the call:
+    #   chandle gets moved, so it is set to NULL
+    #   callee did not move chandle, in such case src.chandle is valid
+    #     but chandle is no longer attached to PyObject
+    # we need to carefully handle chandle and PyObject recycling in both cases.
+    # These logics are implemented in TVMFFIPyTpDealloc (CObject.__dealloc__).
+    TVMFFIPyRebindPyObject(src.chandle, <PyObject*>src, NULL)
     out.type_index = kTVMFFIObjectRValueRef
-    out.v_ptr = &((<CObject>(arg.obj)).chandle)
+    out.v_ptr = &(src.chandle)
     return 0
 
 
@@ -1075,6 +1083,10 @@ cdef class Function(CObject):
         return func
 
 
+# Install the free-threaded pre-bump tp_dealloc slot on this cdef carrier (no-op on the GIL).
+TVMFFIPyWrapDealloc(<PyObject*>Function)
+
+
 def _register_global_func(name: str, pyfunc: Callable[..., Any] | Function, override: bool) -> Function:
     cdef TVMFFIObjectHandle chandle
     cdef int c_api_ret_code
@@ -1089,6 +1101,7 @@ def _register_global_func(name: str, pyfunc: Callable[..., Any] | Function, over
 
 
 def _get_global_func(name: str, allow_missing: bool):
+    # PyObject tying is not applicable here.
     cdef TVMFFIObjectHandle chandle
     cdef ByteArrayArg name_arg = ByteArrayArg(c_str(name))
 

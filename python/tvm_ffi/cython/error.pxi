@@ -122,6 +122,10 @@ cdef class Error(CObject):
         return make_ret_object(any_val)
 
 
+# Install the free-threaded pre-bump tp_dealloc slot on this cdef carrier (no-op on the GIL).
+TVMFFIPyWrapDealloc(<PyObject*>Error)
+
+
 cdef inline Error move_from_last_error():
     # raise last error
     error = Error.__new__(Error)

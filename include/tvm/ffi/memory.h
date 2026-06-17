@@ -27,6 +27,7 @@
 
 #include <cstddef>
 #include <cstdlib>
+#include <new>
 #include <type_traits>
 #include <utility>
 
@@ -76,6 +77,39 @@ TVM_FFI_INLINE void* AlignedAlloc(size_t size) {
     }
     return ptr;
   }
+#endif
+}
+
+/*!
+ * \brief Allocate aligned memory with a runtime-known alignment.
+ *
+ * Sibling of the templated ``AlignedAlloc<align>`` for callers that
+ * receive ``align`` as a parameter (e.g. custom-allocator
+ * implementations dispatching on ``TVMFFICustomAllocator::allocate``'s
+ * runtime ``alignment`` argument).
+ *
+ * \param size The size.
+ * \param align The alignment, must be a power of 2.
+ * \return The pointer to the allocated memory.
+ */
+TVM_FFI_INLINE void* AlignedAllocRuntime(size_t size, size_t align) {
+#ifdef _MSC_VER
+  if (void* ptr = _aligned_malloc(size, align)) {
+    return ptr;
+  }
+  throw std::bad_alloc();
+#else
+  if (align <= alignof(std::max_align_t)) {
+    if (void* ptr = std::malloc(size)) {
+      return ptr;
+    }
+    throw std::bad_alloc();
+  }
+  void* ptr;
+  if (posix_memalign(&ptr, align, size) != 0) {
+    throw std::bad_alloc();
+  }
+  return ptr;
 #endif
 }
 
@@ -168,7 +202,11 @@ class SimpleObjAllocator : public ObjAllocatorBase<SimpleObjAllocator> {
       // class with non-virtual destructor.
       // We are fine here as we captured the right deleter during construction.
       // This is also the right way to get storage type for an object pool.
-      void* data = AlignedAlloc<alignof(T)>(sizeof(T));
+      static_assert(alignof(T) <= alignof(::std::max_align_t),
+                    "Object types with alignment > max_align_t are not supported "
+                    "by the custom allocator hook");
+      TVMFFICustomAllocator* alloc = TVMFFIGetCustomAllocator();
+      void* data = alloc->allocate(sizeof(T), alignof(T), T::RuntimeTypeIndex(), alloc->context);
       new (data) T(std::forward<Args>(args)...);
       return reinterpret_cast<T*>(data);
     }
@@ -187,7 +225,8 @@ class SimpleObjAllocator : public ObjAllocatorBase<SimpleObjAllocator> {
         tptr->T::~T();
       }
       if (flags & kTVMFFIObjectDeleterFlagBitMaskWeak) {
-        AlignedFree(static_cast<void*>(tptr));
+        ObjectUnsafe::GetObjectAllocHeaderFromPtr(static_cast<void*>(tptr))
+            ->delete_space(static_cast<void*>(tptr));
       }
     }
   };
@@ -215,12 +254,17 @@ class SimpleObjAllocator : public ObjAllocatorBase<SimpleObjAllocator> {
       static_assert(
           alignof(ArrayType) % alignof(ElemType) == 0 && sizeof(ArrayType) % alignof(ElemType) == 0,
           "element alignment constraint");
+      static_assert(alignof(ArrayType) <= alignof(::std::max_align_t),
+                    "Object types with alignment > max_align_t are not supported "
+                    "by the custom allocator hook");
       size_t size = sizeof(ArrayType) + sizeof(ElemType) * num_elems;
       // round up to the nearest multiple of align
       constexpr size_t align = alignof(ArrayType);
       // C++ standard always guarantees that alignof operator returns a power of 2
       size_t aligned_size = (size + (align - 1)) & ~(align - 1);
-      void* data = AlignedAlloc<align>(aligned_size);
+      TVMFFICustomAllocator* alloc = TVMFFIGetCustomAllocator();
+      void* data =
+          alloc->allocate(aligned_size, align, ArrayType::RuntimeTypeIndex(), alloc->context);
       new (data) ArrayType(std::forward<Args>(args)...);
       return reinterpret_cast<ArrayType*>(data);
     }
@@ -239,7 +283,8 @@ class SimpleObjAllocator : public ObjAllocatorBase<SimpleObjAllocator> {
         tptr->ArrayType::~ArrayType();
       }
       if (flags & kTVMFFIObjectDeleterFlagBitMaskWeak) {
-        AlignedFree(static_cast<void*>(tptr));
+        ObjectUnsafe::GetObjectAllocHeaderFromPtr(static_cast<void*>(tptr))
+            ->delete_space(static_cast<void*>(tptr));
       }
     }
   };

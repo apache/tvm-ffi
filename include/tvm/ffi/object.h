@@ -1132,6 +1132,16 @@ struct ObjectUnsafe {
     return const_cast<TVMFFIObject*>(&(src->header_));
   }
 
+  /*!
+   * \brief Recover the TVMFFIObjectAllocHeader for a TVMFFIObject pointer.
+   * \param ptr The pointer to the space of the object.
+   * \return The header set by the allocator that produced ``ptr``.
+   */
+  TVM_FFI_INLINE static TVMFFIObjectAllocHeader* GetObjectAllocHeaderFromPtr(void* ptr) {
+    return reinterpret_cast<TVMFFIObjectAllocHeader*>(static_cast<char*>(ptr) -
+                                                      sizeof(TVMFFIObjectAllocHeader));
+  }
+
 // Suppress -Winvalid-offsetof: we intentionally use offsetof on non-standard-layout types
 // to avoid undefined behavior from null pointer arithmetic that sanitizers flag.
 #if defined(__clang__) || defined(__GNUC__)

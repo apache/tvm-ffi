@@ -384,7 +384,31 @@ pub struct TVMFFITypeInfo {
     pub metadata: *const TVMFFITypeMetadata,
 }
 
+/// Mandatory header preceding each Object body. See `TVMFFIObjectAllocHeader`
+/// in `tvm/ffi/c_api.h`.
+#[repr(C)]
+pub struct TVMFFIObjectAllocHeader {
+    pub delete_space: Option<unsafe extern "C" fn(ptr: *mut c_void)>,
+}
+
+/// Custom allocator entry. See `TVMFFICustomAllocator` in `tvm/ffi/c_api.h`.
+#[repr(C)]
+pub struct TVMFFICustomAllocator {
+    pub allocate: Option<
+        unsafe extern "C" fn(
+            size: usize,
+            alignment: usize,
+            type_index: i32,
+            context: *mut c_void,
+        ) -> *mut c_void,
+    >,
+    pub context: *mut c_void,
+}
+
 unsafe extern "C" {
+    pub fn TVMFFIGetCustomAllocator() -> *mut TVMFFICustomAllocator;
+    pub fn TVMFFISetCustomAllocator(allocator: *mut TVMFFICustomAllocator) -> i32;
+
     pub fn TVMFFITypeKeyToIndex(type_key: *const TVMFFIByteArray, out_tindex: *mut i32) -> i32;
     pub fn TVMFFIFunctionGetGlobal(
         name: *const TVMFFIByteArray,
