@@ -369,11 +369,9 @@ cdef extern from "tvm_ffi_python_helpers.h":
     void TVMFFIPyInstallTypeSlots(PyObject* type_obj) noexcept
     object TVMFFIPyMakeRetObject(void* chandle, PyObject* cls_type)
 
-    # Pre-bump tp_dealloc installer (free-threaded builds only; a no-op symbol on the GIL build).
-    # Called once per cdef CObject-family carrier right after the class is defined: it replaces
-    # Cython's generated tp_dealloc with a hand-built slot that runs the binding transition before
-    # any resurrection bump. One installer for every carrier (the slot is universal); a layout
-    # guard inside it fails loudly at import if a carrier's struct ever drifts.
+    # tp_dealloc installer (free-threaded builds only; a no-op symbol on the GIL build). Called
+    # once per cdef CObject-family carrier right after the class is defined; replaces Cython's
+    # generated tp_dealloc with the hand-built slot. See TVMFFIPyTpDeallocSlot in the header.
     void TVMFFIPyWrapDealloc(PyObject* type_obj) noexcept
 
     # no need to expose fields of the call context setter data structure

@@ -188,9 +188,9 @@ cdef class CObject:
         TVMFFIPyRebindPyObject(chandle, NULL, <PyObject*>self)
 
 
-# Install the free-threaded pre-bump tp_dealloc slot on each cdef carrier, once, right after
-# its class is defined (no-op on the GIL build). Heap subtypes are covered for free via
-# subtype_dealloc's base-walk into the nearest wrapped carrier.
+# Install the free-threaded tp_dealloc slot on each cdef carrier, once, right after its class is
+# defined (no-op on the GIL build). Heap subtypes are covered for free via subtype_dealloc's
+# base-walk into the nearest wrapped carrier.
 TVMFFIPyWrapDealloc(<PyObject*>CObject)
 
 

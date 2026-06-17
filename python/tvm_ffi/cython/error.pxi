@@ -122,7 +122,7 @@ cdef class Error(CObject):
         return make_ret_object(any_val)
 
 
-# Install the free-threaded pre-bump tp_dealloc slot on this cdef carrier (no-op on the GIL).
+# Install the free-threaded tp_dealloc slot on this cdef carrier (no-op on the GIL; see object.pxi).
 TVMFFIPyWrapDealloc(<PyObject*>Error)
 
 
