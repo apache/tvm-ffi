@@ -572,7 +572,12 @@ class StructuralWalkCallbackVisitorObj : public StructuralVisitorObj {
     if constexpr (order == WalkOrder::kPreOrder) {
       auto result = dispatch_(value, this->def_region_kind());
       TVM_FFI_S_VISIT_MAYBE_EARLY_RETURN_WITH_ERROR_CONTEXT(result, value);
-      TVM_FFI_UNSAFE_ASSUME(result.type_index() == TypeIndex::kTVMFFIInt);
+      // Hoist the call out of TVM_FFI_UNSAFE_ASSUME: clang's -Wassume rejects
+      // arguments that contain a call expression (its potential side effects
+      // would be discarded), while [[maybe_unused]] keeps -Wunused-variable
+      // quiet on configs where the assume macro compiles away.
+      [[maybe_unused]] int32_t type_index = result.type_index();
+      TVM_FFI_UNSAFE_ASSUME(type_index == TypeIndex::kTVMFFIInt);
       if (TVM_FFI_PREDICT_FALSE(details::ExpectedUnsafe::ValueAs<int32_t>(result) ==
                                 WalkResult::kSkipTag)) {
         return details::ExpectedUnsafe::MoveToTVMFFIAny(
