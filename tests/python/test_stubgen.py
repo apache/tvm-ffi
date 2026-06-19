@@ -39,7 +39,9 @@ from tvm_ffi.stub.python_generator.codegen import (
     generate_python_init,
     generate_python_object,
     render_func_signature,
+    render_object_ffi_init,
     render_object_fields,
+    render_object_init,
     render_object_methods,
 )
 from tvm_ffi.stub.python_generator.utils import ImportItem
@@ -72,7 +74,7 @@ def _type_suffix(name: str) -> str:
 
 
 def _input_type_suffix(name: str) -> str:
-    return C.TY_MAP_INPUT_DEFAULTS.get(name, C.TY_MAP_DEFAULTS.get(name, name)).rsplit(".", 1)[-1]
+    return PC.TY_MAP_INPUT_DEFAULTS.get(name, PC.TY_MAP_DEFAULTS.get(name, name)).rsplit(".", 1)[-1]
 
 
 def test_codeblock_from_begin_line_variants() -> None:
@@ -332,7 +334,7 @@ def test_funcinfo_gen_uses_input_annotations_for_parameters() -> None:
     )
 
     assert (
-        info.gen(_type_suffix, indent=0, input_ty_map=_input_type_suffix)
+        render_func_signature(info, _type_suffix, indent=0, input_ty_map=_input_type_suffix)
         == "def echo_list(_0: Sequence[int], /) -> MutableSequence[int]: ..."
     )
 
@@ -392,11 +394,13 @@ def test_objectinfo_gen_init_uses_input_annotations() -> None:
         has_init=True,
     )
 
-    assert info.gen_fields(_type_suffix, indent=0) == ["items: MutableSequence[int]"]
-    assert info.gen_init(_type_suffix, indent=0, input_ty_map=_input_type_suffix) == [
+    assert render_object_fields(info, _type_suffix, indent=0) == ["items: MutableSequence[int]"]
+    assert render_object_init(info, _type_suffix, indent=0, input_ty_map=_input_type_suffix) == [
         "def __init__(self, items: Sequence[int]) -> None: ..."
     ]
-    assert info.gen_ffi_init(_type_suffix, indent=0, input_ty_map=_input_type_suffix) == [
+    assert render_object_ffi_init(
+        info, _type_suffix, indent=0, input_ty_map=_input_type_suffix
+    ) == [
         "def __ffi_init__(self, items: Sequence[int]) -> None: ...  # ty: "
         "ignore[invalid-method-override]"
     ]
