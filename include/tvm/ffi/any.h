@@ -115,11 +115,8 @@ class AnyView {
    */
   template <typename T, typename = std::enable_if_t<TypeTraits<T>::convert_enabled>>
   TVM_FFI_INLINE std::optional<T> as() const {
-    if (TypeTraits<T>::CheckAnyStrict(&data_)) {
-      return TypeTraits<T>::CopyFromAnyViewAfterCheck(&data_);
-    } else {
-      return std::optional<T>(std::nullopt);
-    }
+    if (TypeTraits<T>::CheckAnyStrict(&data_)) return TypeTraits<T>::CopyFromAnyViewAfterCheck(&data_);
+    return std::nullopt;
   }
   /*!
    * \brief Shortcut of as Object to cast to a const pointer when T is an Object.
@@ -141,7 +138,7 @@ class AnyView {
   template <typename T, typename = std::enable_if_t<TypeTraits<T>::convert_enabled>>
   TVM_FFI_INLINE T cast() const {
     std::optional<T> opt = TypeTraits<T>::TryCastFromAnyView(&data_);
-    if (!opt.has_value()) {
+    if (TVM_FFI_PREDICT_FALSE(!opt.has_value())) {
       TVM_FFI_THROW(TypeError) << "Cannot convert from type `"
                                << TypeTraits<T>::GetMismatchTypeInfo(&data_) << "` to `"
                                << TypeTraits<T>::TypeStr() << "`";
@@ -353,11 +350,8 @@ class Any {
     if constexpr (std::is_same_v<T, Any>) {
       return std::move(*this);
     } else {
-      if (TypeTraits<T>::CheckAnyStrict(&data_)) {
-        return TypeTraits<T>::MoveFromAnyAfterCheck(&data_);
-      } else {
-        return std::optional<T>(std::nullopt);
-      }
+      if (TypeTraits<T>::CheckAnyStrict(&data_)) return TypeTraits<T>::MoveFromAnyAfterCheck(&data_);
+      return std::nullopt;
     }
   }
 
@@ -374,11 +368,8 @@ class Any {
     if constexpr (std::is_same_v<T, Any>) {
       return *this;
     } else {
-      if (TypeTraits<T>::CheckAnyStrict(&data_)) {
-        return TypeTraits<T>::CopyFromAnyViewAfterCheck(&data_);
-      } else {
-        return std::optional<T>(std::nullopt);
-      }
+      if (TypeTraits<T>::CheckAnyStrict(&data_)) return TypeTraits<T>::CopyFromAnyViewAfterCheck(&data_);
+      return std::nullopt;
     }
   }
 
@@ -401,7 +392,7 @@ class Any {
   template <typename T, typename = std::enable_if_t<TypeTraits<T>::convert_enabled>>
   TVM_FFI_INLINE T cast() const& {
     std::optional<T> opt = TypeTraits<T>::TryCastFromAnyView(&data_);
-    if (!opt.has_value()) {
+    if (TVM_FFI_PREDICT_FALSE(!opt.has_value())) {
       TVM_FFI_THROW(TypeError) << "Cannot convert from type `"
                                << TypeTraits<T>::GetMismatchTypeInfo(&data_) << "` to `"
                                << TypeTraits<T>::TypeStr() << "`";
@@ -416,17 +407,17 @@ class Any {
    */
   template <typename T, typename = std::enable_if_t<TypeTraits<T>::storage_enabled>>
   TVM_FFI_INLINE T cast() && {
-    if (TypeTraits<T>::CheckAnyStrict(&data_)) {
-      return TypeTraits<T>::MoveFromAnyAfterCheck(&data_);
+    if (TVM_FFI_PREDICT_FALSE(!TypeTraits<T>::CheckAnyStrict(&data_))) {
+      // slow path, try to do fallback convert
+      std::optional<T> opt = TypeTraits<T>::TryCastFromAnyView(&data_);
+      if (TVM_FFI_PREDICT_FALSE(!opt.has_value())) {
+        TVM_FFI_THROW(TypeError) << "Cannot convert from type `"
+                                 << TypeTraits<T>::GetMismatchTypeInfo(&data_) << "` to `"
+                                 << TypeTraits<T>::TypeStr() << "`";
+      }
+      return *std::move(opt);
     }
-    // slow path, try to do fallback convert
-    std::optional<T> opt = TypeTraits<T>::TryCastFromAnyView(&data_);
-    if (!opt.has_value()) {
-      TVM_FFI_THROW(TypeError) << "Cannot convert from type `"
-                               << TypeTraits<T>::GetMismatchTypeInfo(&data_) << "` to `"
-                               << TypeTraits<T>::TypeStr() << "`";
-    }
-    return *std::move(opt);
+    return TypeTraits<T>::MoveFromAnyAfterCheck(&data_);
   }
 
   /**

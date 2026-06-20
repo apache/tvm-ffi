@@ -826,12 +826,13 @@ class ObjectRef {
    * \return The pointer to the requested type.
    */
   template <typename ObjectType, typename = std::enable_if_t<std::is_base_of_v<Object, ObjectType>>>
-  const ObjectType* as() const {
-    if (data_ != nullptr && data_->IsInstance<ObjectType>()) {
-      return static_cast<ObjectType*>(data_.get());
-    } else {
-      return nullptr;
+  TVM_FFI_INLINE const ObjectType* as() const {
+    if (data_ != nullptr) {
+      if (data_->IsInstance<ObjectType>()) {
+        return static_cast<ObjectType*>(data_.get());
+      }
     }
+    return nullptr;
   }
 
   /*!
