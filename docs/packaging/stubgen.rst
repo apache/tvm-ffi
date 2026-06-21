@@ -20,9 +20,12 @@
 Stub Generation
 ===============
 
-TVM-FFI provides ``tvm-ffi-stubgen``, a tool that generates Python type stubs from C++
-reflection metadata. It turns registered global functions and classes into proper Python
-type hints, enabling IDE auto-completion and static type checking.
+TVM-FFI provides ``tvm-ffi-stubgen``, a tool that generates typed language bindings from C++
+reflection metadata. It turns registered global functions and classes into native type hints,
+enabling IDE auto-completion and static type checking.
+
+The sections below describe the default Python target. The Rust target is covered in
+:ref:`sec-stubgen-rust`.
 
 .. admonition:: Prerequisite
    :class: hint
@@ -46,6 +49,7 @@ This runs stub generation automatically after each build.
        [STUB_INIT ON|OFF]
        [STUB_PKG <pkg>]
        [STUB_PREFIX <prefix>]
+       [STUB_TARGET python|rust]
    )
 
 From the example's
@@ -239,6 +243,9 @@ All three are required together. When omitted, the tool operates in directive-on
 
 **Optional arguments:**
 
+``--target``
+   Code generator backend: ``python`` (default) or ``rust``. See :ref:`sec-stubgen-rust`.
+
 ``--verbose``
    Print a unified diff of changes to each file.
 
@@ -252,6 +259,153 @@ All three are required together. When omitted, the tool operates in directive-on
    Indentation width for generated code (default: 4).
 
 For a complete list of options, run ``tvm-ffi-stubgen --help``.
+
+.. _sec-stubgen-rust:
+
+Rust Code Stubgen (Experimental)
+--------------------------------
+
+TVM-FFI provides an efficient, easy-to-use mechanism for exposing C++ classes to Rust.
+Objects share the same memory representation, so Rust code can directly access objects
+created in C++. However, users have to hand-write the Rust definition of each registered
+object to avoid memory layout and alignment mismatches between the two sides. To eliminate
+this manual work, ``tvm-ffi-stubgen`` supports generating Rust code directly.
+
+To generate Rust stubs, pass ``STUB_TARGET rust`` to ``tvm_ffi_configure_target``
+(see :ref:`sec-stubgen-cmake`) or ``--target rust`` on the command line
+(see :ref:`sec-stubgen-cli`).
+
+Key Features
+~~~~~~~~~~~~
+
+- Generate Rust code for registered C++ classes automatically (via CLI or CMake).
+- Mirror the C++ memory layout exactly in Rust.
+- Provide Rust-native builder-style constructors for registered classes, with
+  reflected default values prefilled and overridable through setters.
+- Expose methods of registered classes through cross-language calls.
+
+Generation Output
+~~~~~~~~~~~~~~~~~
+
+This section uses `examples/rust_stubgen <https://github.com/apache/tvm-ffi/tree/main/examples/rust_stubgen>`_
+as the running example. The library registers a single type, ``rust_stubgen.IntPair``,
+with two required fields ``a`` / ``b``, a defaulted field ``scale``, and a method ``sum``:
+
+.. literalinclude:: ../../examples/rust_stubgen/src/int_pair.cc
+   :language: cpp
+   :start-after: [object.begin]
+   :end-before: [object.end]
+
+For this type the tool generates the following Rust code (bodies abridged):
+
+.. code-block:: rust
+
+   #[repr(C)]
+   #[derive(tvm_ffi::derive::Object)]
+   #[type_key = "rust_stubgen.IntPair"]
+   pub struct IntPairObj {
+       base: Object,   // the parent type, embedded as the first field
+       pub a: i64,
+       pub b: i64,
+       pub scale: i64,
+   }
+
+   #[repr(C)]
+   #[derive(tvm_ffi::derive::ObjectRef, Clone)]
+   pub struct IntPair {
+       data: ObjectArc<IntPairObj>,
+   }
+
+   impl IntPair {
+       pub fn ffi_new() -> IntPairBuilder { /* ... */ }
+       pub fn sum(&mut self) -> Result<i64> { /* ... */ }
+   }
+
+   pub struct IntPairBuilder { /* base + every field */ }
+
+   impl IntPairBuilder {
+       pub fn a(mut self, a: i64) -> Self { /* ... */ }
+       pub fn b(mut self, b: i64) -> Self { /* ... */ }
+       pub fn scale(mut self, scale: i64) -> Self { /* ... */ }
+       pub fn build(self) -> Result<IntPair> { /* ... */ }
+       pub fn build_obj(self) -> Result<IntPairObj> { /* ... */ }
+   }
+
+``IntPairObj`` mirrors the C++ memory layout exactly, so Rust code can directly
+access objects created in C++ and vice versa. ``IntPair`` is the reference type
+that owns an allocation of it; fields are read through ``Deref`` (and written
+through ``DerefMut``, since the class declares ``_type_mutable = true``), and
+``sum`` calls into the C++ implementation through the FFI.
+
+Builder-style Construction
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Construction is fully Rust-native -- no FFI call is involved -- and uniform: a
+nullary ``ffi_new()`` opens the builder, every field is set through its
+like-named consuming setter, and ``build()`` finishes the chain:
+
+.. code-block:: rust
+
+   let pair = IntPair::ffi_new().a(1).b(2).build()?;             // scale = 1 (default)
+   let scaled = IntPair::ffi_new().a(1).b(2).scale(10).build()?; // override the default
+   let err = IntPair::ffi_new().a(1).build();                    // Err: field `b` is not set
+
+``ffi_new() -> IntPairBuilder``
+   Opens the builder. A field with a ``refl::default_value`` (here ``scale``)
+   starts prefilled with its default, rendered as a Rust literal at
+   stub-generation time; every other field starts unset.
+
+``a(..)`` / ``b(..)`` / ``scale(..)``
+   One consuming setter per field. Setting a defaulted field overrides its
+   default.
+
+``build() -> Result<IntPair>``
+   Validates and allocates: returns an error if a field without a default is
+   still unset (the ``err`` case above), otherwise wraps the assembled value
+   in ``ObjectArc`` and returns the reference type. This is the endpoint to
+   use in ordinary code.
+
+``build_obj() -> Result<IntPairObj>``
+   Performs the same validation and assembly as ``build()`` -- ``build()`` in
+   fact delegates to it -- but stops at the bare, unallocated struct value.
+   It exists for inheritance: a C++ class deriving from ``IntPair`` embeds
+   ``IntPairObj`` as its first field, and the derived type's generated builder
+   gains a ``base(..)`` setter that takes exactly this value:
+
+   .. code-block:: rust
+
+      // for a hypothetical `Derived` extending IntPair with a field `c`
+      let d = Derived::ffi_new()
+          .base(IntPair::ffi_new().a(1).b(2).build_obj()?)
+          .c(3)
+          .build()?;
+
+   When ``base`` is left unset, the derived ``build()`` falls back to
+   default-constructing the parent through its all-default builder. This
+   succeeds silently when every parent field has a default; for ``IntPair``
+   it would fail with an error naming ``base``, since ``a`` and ``b`` carry
+   no default.
+
+The builder deliberately bypasses any C++ constructor logic (it never runs
+``IntPairObj``'s C++ constructor); users who need the faithful C++ semantics
+can hand-write a ``new`` constructor (outside the generated markers) on top of
+the builder.
+
+Limitations
+~~~~~~~~~~~
+
+A type that mentions an origin the Rust crate cannot represent -- in any
+position: field, method argument, return type, or nested inside another
+container -- is explicitly unsupported: the whole binding is skipped with a
+warning. This covers ``Map`` / ``Dict`` / ``List`` / ``Union`` (no Rust
+counterpart) as well as ``Optional`` / ``tuple`` (std ``Option<T>`` and Rust
+tuples do not match the C++ ``ffi::Optional`` / ``ffi::Tuple`` memory layout).
+
+A constructor alone cannot be generated when a default comes from a
+``refl::default_factory`` or when a default value has no Rust literal
+rendering: such types are emitted without ``ffi_new`` (a warning explains why),
+and construction stays on the C++ side -- e.g. through a ``def_static``
+factory.
 
 .. _sec-stubgen-advanced:
 
@@ -391,7 +545,8 @@ When you run the tool, it:
       # tvm-ffi-stubgen(import-object): ffi.Object;False;_ffi_Object
 
    This imports ``ffi.Object`` as ``_ffi_Object`` for use in generated code. The second
-   field (``False``) indicates the import is not TYPE_CHECKING-only.
+   field (``False``) indicates the import is not TYPE_CHECKING-only. The Rust target
+   records the name as a plain ``use`` and ignores the other two fields.
 
 ``skip-file`` - Skip File
    Prevents the tool from modifying the file. Place anywhere in the file.

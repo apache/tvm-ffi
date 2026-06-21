@@ -172,6 +172,7 @@ endfunction ()
 #   target_name
 #   [LINK_SHARED ON|OFF] [LINK_HEADER ON|OFF] [DEBUG_SYMBOL ON|OFF] [MSVC_FLAGS ON|OFF]
 #   [STUB_INIT ON|OFF] [STUB_DIR <dir>] [STUB_PKG <pkg>] [STUB_PREFIX <prefix>]
+#   [STUB_TARGET python|rust]
 # )
 # Configure a target to integrate with TVM-FFI CMake utilities:
 #   - Link against tvm_ffi::header and/or tvm_ffi::shared
@@ -194,6 +195,11 @@ endfunction ()
 #   STUB_INIT:    Whether to allow generating new directives. Default: OFF (ON/OFF-style)
 #   STUB_PKG:     Package name passed to stub generator (requires STUB_DIR and STUB_INIT=ON; default: ${SKBUILD_PROJECT_NAME} if set, otherwise target name)
 #   STUB_PREFIX:  Module prefix passed to stub generator (requires STUB_DIR and STUB_INIT=ON; default: "<STUB_PKG>.")
+#   STUB_TARGET:  Code generator backend: "python" (default) or "rust". Passed to the stub
+#                 generator as --target. With "rust", object bindings are emitted into a Rust
+#                 module tree under STUB_DIR (global functions are not generated for Rust).
+#                 To generate both Python and Rust stubs for one target, call this function
+#                 twice with different STUB_DIR/STUB_TARGET values.
 # ~~~
 function (tvm_ffi_configure_target target)
   if (NOT target)
@@ -219,6 +225,7 @@ function (tvm_ffi_configure_target target)
       STUB_DIR
       STUB_PKG
       STUB_PREFIX
+      STUB_TARGET
   )
   set(tvm_ffi_arg_multiValueArgs)
 
@@ -236,8 +243,17 @@ function (tvm_ffi_configure_target target)
   if (NOT DEFINED tvm_ffi_arg__STUB_INIT)
     set(tvm_ffi_arg__STUB_INIT OFF)
   endif ()
+  if (NOT DEFINED tvm_ffi_arg__STUB_TARGET)
+    set(tvm_ffi_arg__STUB_TARGET "python")
+  endif ()
 
   # Validation
+  if (NOT tvm_ffi_arg__STUB_TARGET MATCHES "^(python|rust)$")
+    message(
+      FATAL_ERROR
+        "tvm_ffi_configure_target(${target}): STUB_TARGET must be 'python' or 'rust', got '${tvm_ffi_arg__STUB_TARGET}'."
+    )
+  endif ()
   if ((NOT DEFINED tvm_ffi_arg__STUB_DIR) OR (NOT tvm_ffi_arg__STUB_DIR))
     if (DEFINED tvm_ffi_arg__STUB_PKG OR DEFINED tvm_ffi_arg__STUB_PREFIX)
       message(
@@ -346,7 +362,9 @@ function (tvm_ffi_configure_target target)
       COMPONENTS Interpreter
       REQUIRED
     )
-    set(tvm_ffi_stub_cli_args "${tvm_ffi_arg__STUB_DIR_ABS}" --dlls $<TARGET_FILE:${target}>)
+    set(tvm_ffi_stub_cli_args "${tvm_ffi_arg__STUB_DIR_ABS}" --dlls $<TARGET_FILE:${target}>
+                              --target "${tvm_ffi_arg__STUB_TARGET}"
+    )
     if (tvm_ffi_arg__STUB_INIT)
       list(
         APPEND

@@ -111,6 +111,18 @@ pub struct ObjectRef {
     data: ObjectArc<Object>,
 }
 
+/// Increase strong reference count on a raw TVM object pointer.
+///
+/// This is a public wrapper used by downstream macro expansions without exposing
+/// the internal `unsafe_` module.
+///
+/// # Safety
+/// `handle` must be a valid pointer to a live `TVMFFIObject`.
+#[inline]
+pub unsafe fn inc_ref_raw_object(handle: *mut TVMFFIObject) {
+    unsafe { unsafe_::inc_ref(handle) }
+}
+
 /// Unsafe operations on object
 pub(crate) mod unsafe_ {
     use tvm_ffi_sys::{
