@@ -18,7 +18,7 @@
 import pickle
 
 import tvm_ffi
-from tvm_ffi.core import TypeSchema, _to_py_class_value
+import tvm_ffi.testing
 
 
 def test_string() -> None:
@@ -35,7 +35,7 @@ def test_string() -> None:
     s4 = pickle.loads(pickle.dumps(s))
     assert s4 == "hello"
 
-    cached = _to_py_class_value(TypeSchema("str").convert("x" * 200))
+    cached = fecho("x" * 200)
     assert isinstance(cached, tvm_ffi.core.String)
     assert cached._tvm_ffi_cached_object is not None
 
@@ -63,3 +63,12 @@ def test_bytes() -> None:
     b5 = pickle.loads(pickle.dumps(b))
     assert b5 == b"hello"
     assert isinstance(b5, tvm_ffi.core.Bytes)
+
+    cached = fecho(b"x" * 200)
+    assert isinstance(cached, tvm_ffi.core.Bytes)
+    assert cached._tvm_ffi_cached_object is not None
+
+    cached_roundtrip = pickle.loads(pickle.dumps(cached))
+    assert isinstance(cached_roundtrip, tvm_ffi.core.Bytes)
+    assert cached_roundtrip == cached
+    assert cached_roundtrip._tvm_ffi_cached_object is None

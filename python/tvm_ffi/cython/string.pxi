@@ -70,6 +70,9 @@ class Bytes(bytes, PyNativeObject):
         val._tvm_ffi_cached_object = None
         return val
 
+    def __reduce_ex__(self, protocol):
+        return (type(self), (bytes(self),))
+
     # pylint: disable=no-self-argument
     def __from_tvm_ffi_object__(cls, obj):
         """Construct from a given tvm object."""
