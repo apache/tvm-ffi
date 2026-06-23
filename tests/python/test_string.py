@@ -21,6 +21,10 @@ import tvm_ffi
 import tvm_ffi.testing
 
 
+class TaggedString(tvm_ffi.core.String):
+    pass
+
+
 def test_string() -> None:
     fecho = tvm_ffi.get_global_func("testing.echo")
     s = tvm_ffi.core.String("hello")
@@ -43,6 +47,14 @@ def test_string() -> None:
     assert isinstance(cached_roundtrip, tvm_ffi.core.String)
     assert cached_roundtrip == cached
     assert cached_roundtrip._tvm_ffi_cached_object is None
+
+    tagged = TaggedString("hello")
+    setattr(tagged, "note", "keep")
+    tagged_roundtrip = pickle.loads(pickle.dumps(tagged))
+    assert isinstance(tagged_roundtrip, TaggedString)
+    assert tagged_roundtrip == tagged
+    assert getattr(tagged_roundtrip, "note") == "keep"
+    assert tagged_roundtrip._tvm_ffi_cached_object is None
 
 
 def test_bytes() -> None:
@@ -67,10 +79,12 @@ def test_bytes() -> None:
     cached = fecho(b"x" * 200)
     assert isinstance(cached, tvm_ffi.core.Bytes)
     assert cached._tvm_ffi_cached_object is not None
+    setattr(cached, "note", "keep")
 
     cached_roundtrip = pickle.loads(pickle.dumps(cached))
     assert isinstance(cached_roundtrip, tvm_ffi.core.Bytes)
     assert cached_roundtrip == cached
+    assert getattr(cached_roundtrip, "note") == "keep"
     assert cached_roundtrip._tvm_ffi_cached_object is None
 
 

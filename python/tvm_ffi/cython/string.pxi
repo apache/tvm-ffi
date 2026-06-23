@@ -58,7 +58,9 @@ class String(str, PyNativeObject):
         return val
 
     def __reduce_ex__(self, protocol):
-        return (type(self), (str(self),))
+        state = self.__dict__.copy() if hasattr(self, "__dict__") else {}
+        state.pop("_tvm_ffi_cached_object", None)
+        return (type(self), (str(self),), state or None)
 
     # pylint: disable=no-self-argument
     def __from_tvm_ffi_object__(cls, obj: Any) -> "String":
@@ -84,7 +86,9 @@ class Bytes(bytes, PyNativeObject):
         return val
 
     def __reduce_ex__(self, protocol):
-        return (type(self), (bytes(self),))
+        state = self.__dict__.copy() if hasattr(self, "__dict__") else {}
+        state.pop("_tvm_ffi_cached_object", None)
+        return (type(self), (bytes(self),), state or None)
 
     # pylint: disable=no-self-argument
     def __from_tvm_ffi_object__(cls, obj: Any) -> "Bytes":
