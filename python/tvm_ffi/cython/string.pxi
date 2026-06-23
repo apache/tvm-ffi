@@ -57,6 +57,9 @@ class String(str, PyNativeObject):
         val._tvm_ffi_cached_object = None
         return val
 
+    def __reduce_ex__(self, protocol):
+        return (type(self), (str(self),))
+
     # pylint: disable=no-self-argument
     def __from_tvm_ffi_object__(cls, obj: Any) -> "String":
         """Construct a ``String`` from an FFI object (internal)."""
@@ -79,6 +82,9 @@ class Bytes(bytes, PyNativeObject):
         val = bytes.__new__(cls, value)
         val._tvm_ffi_cached_object = None
         return val
+
+    def __reduce_ex__(self, protocol):
+        return (type(self), (bytes(self),))
 
     # pylint: disable=no-self-argument
     def __from_tvm_ffi_object__(cls, obj: Any) -> "Bytes":
