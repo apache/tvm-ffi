@@ -33,6 +33,7 @@ subsequent calls will be much faster.
 from __future__ import annotations
 
 import ctypes
+import hashlib
 import logging
 import os
 import subprocess
@@ -134,7 +135,17 @@ def load_torch_c_dlpack_extension() -> Any:  # noqa: PLR0912, PLR0915
         major, minor = torch.__version__.split(".")[:2]
         device = _torch_extension_device(torch)
         suffix = ".dll" if sys.platform.startswith("win") else ".so"
-        libname = f"libtorch_c_dlpack_addon_torch{major}{minor}-{device}{suffix}"
+        # The addon is a compiled extension that links libtorch's C++ ABI, so its
+        # cache key must capture the full torch build identity -- not just
+        # major.minor + device. ``torch.__version__`` carries the patch version and
+        # build tag (e.g. "+cu124", "+rocm6.2", "+cpu"); we also fold in the C++ ABI
+        # flag. Without this, two ABI-incompatible torch builds that share
+        # major.minor + device resolve to the same cached ``.so``, and a shared cache
+        # directory (NFS home, reused container images) silently loads a mismatched
+        # addon -> crashes or wrong tensor data instead of a clean rebuild.
+        abi_id = f"{torch.__version__}|cxx11abi={int(torch.compiled_with_cxx11_abi())}"
+        abi_tag = hashlib.sha256(abi_id.encode()).hexdigest()[:8]
+        libname = f"libtorch_c_dlpack_addon_torch{major}{minor}-{device}-{abi_tag}{suffix}"
         lib_path = addon_output_dir / libname
         if not lib_path.exists():
             logger.debug("JIT-compiling torch-c-dlpack-ext to cache...")
