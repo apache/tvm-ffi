@@ -22,6 +22,7 @@
 #include <tvm/ffi/container/dict.h>
 #include <tvm/ffi/container/list.h>
 #include <tvm/ffi/container/map.h>
+#include <tvm/ffi/container/tensor.h>
 #include <tvm/ffi/extra/structural_equal.h>
 #include <tvm/ffi/extra/structural_hash.h>
 #include <tvm/ffi/object.h>
@@ -35,6 +36,21 @@ namespace {
 using namespace tvm::ffi;
 using namespace tvm::ffi::testing;
 namespace refl = tvm::ffi::reflection;
+
+// CPU allocator and a helper to build a 1-D float32 tensor filled with one
+// value, like test_tensor.cc does.
+struct CPUNDAlloc {
+  void AllocData(DLTensor* tensor) { tensor->data = malloc(GetDataSize(*tensor)); }
+  void FreeData(DLTensor* tensor) { free(tensor->data); }
+};
+
+Tensor MakeFilledTensor(const Shape& shape, float value) {
+  Tensor t = Tensor::FromNDAlloc(CPUNDAlloc(), shape, DLDataType({kDLFloat, 32, 1}),
+                                 DLDevice({kDLCPU, 0}));
+  float* dst = reinterpret_cast<float*>(t.data_ptr());
+  for (int64_t i = 0; i < t.numel(); ++i) dst[i] = value;
+  return t;
+}
 
 TEST(StructuralEqualHash, Array) {
   Array<int> a = {1, 2, 3};
@@ -331,6 +347,30 @@ TEST(StructuralEqualHash, ArraySelfInsertProducesSnapshot) {
 
   EXPECT_TRUE(StructuralEqual()(arr, arr));
   EXPECT_EQ(StructuralHash()(arr), StructuralHash()(arr));
+}
+
+// Regression test for #645. StructuralHash hashes tensor content, so the
+// StructuralEqual functor has to compare content too. Otherwise two distinct
+// same-shape constants hash differently but compare equal, which breaks the
+// constant de-dup map invariant and can silently merge different weights on a
+// bucket collision.
+TEST(StructuralEqualHash, TensorContent) {
+  Tensor zeros = MakeFilledTensor({4}, 0.0f);
+  Tensor ones = MakeFilledTensor({4}, 1.0f);
+  Tensor zeros_copy = MakeFilledTensor({4}, 0.0f);
+
+  // Different content, same shape and dtype: not equal, and the hash differs.
+  EXPECT_FALSE(StructuralEqual()(zeros, ones));
+  EXPECT_NE(StructuralHash()(zeros), StructuralHash()(ones));
+
+  // Identical content still compares equal and hashes equal, so real duplicates
+  // still get merged.
+  EXPECT_TRUE(StructuralEqual()(zeros, zeros_copy));
+  EXPECT_EQ(StructuralHash()(zeros), StructuralHash()(zeros_copy));
+
+  // Skipping content is still available as an explicit opt-in.
+  EXPECT_TRUE(StructuralEqual::Equal(zeros, ones, /*map_free_vars=*/false,
+                                     /*skip_tensor_content=*/true));
 }
 
 }  // namespace
