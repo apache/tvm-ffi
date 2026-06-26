@@ -69,7 +69,7 @@ class StructuralEqual {
    * \return True if the two Any values are structurally equal, false otherwise.
    */
   TVM_FFI_INLINE bool operator()(const Any& lhs, const Any& rhs) const {
-    return Equal(lhs, rhs, false, true);
+    return Equal(lhs, rhs, false, false);
   }
 };
 
