@@ -834,8 +834,27 @@ inline void TVMFFIPyDeleteSpace(void* ptr) {
 //     transition(o); if GC: GC_UnTrack(o); if has-dict: clear dict; tp_free(o);
 //
 // where ``transition`` is the binding transition ``__dealloc__`` used to run. The GC/dict steps
-// are guarded so they no-op where they do not apply, making one slot exact for all six carriers
-// (see ``TVMFFIPyTpDeallocSlot`` below for the per-step detail).
+// are guarded so they no-op where they do not apply, making one slot exact for all six carriers.
+//
+// CYTHON STEP MAP -- Cython's generated ``tp_dealloc`` (``generate_dealloc_function`` in
+// Cython/Compiler/ModuleNode.py) emits this fixed, guarded sequence. ``[N]`` tags mark the matching
+// lines in ``TVMFFIPyTpDeallocSlot``; each "no" is inapplicable to today's carriers and is enforced
+// by the layout guard in ``TVMFFIPyWrapDealloc``, so this map cannot silently drift:
+//
+//   [0]  typed self cast       n/a   slot works off Py_TYPE(o)/chandle, no typed field
+//   [1]  tp_finalize/__del__   no    no carrier has __del__ (subclass's runs in subtype_dealloc)
+//   [2]  GC untrack            YES   guarded on PyObject_IS_GC(o)
+//   [3]  trashcan begin        no    needs_trashcan() false; the graph recurses through the C++
+//                                    iterative deleter, not nested Python tp_dealloc
+//   [4]  weakref clear         no    no carrier is weak-referenceable (tp_weaklistoffset == 0)
+//   [5]  user __dealloc__      YES   == the transition; runs FIRST, no resurrection bump
+//   [6]  __dict__ clear        YES   guarded on _PyObject_GetDictPtr (Function only)
+//   [7]  C++ member dtor       YES   folded into the transition's chandle release
+//   [8]  py-attr Py_CLEAR xN   none  carriers own no Python member but a GC type's dict ([6])
+//   [9]  base chain + tp_free  YES   tp_free(o) runs; no base chain (base is object / a carrier the
+//                                    transition covers); Cython's trailing Py_DECREF(tp) is moot --
+//                                    carrier types are immortal on FT (ob_ref_local == sentinel)
+//   [10] trashcan end          no    pairs with [3]
 //
 // Routing -- our slot always runs, but the call flow into it (and what ``o`` is) differs by how
 // the subtype was made; the difference is whether the base call is bound at COMPILE TIME or by a
@@ -872,20 +891,27 @@ inline void TVMFFIPyDeleteSpace(void* ptr) {
 //     fires the C++ deleter cannot clobber an exception pending at wrapper death -- Cython's own
 //     thunk fetches/restores around ``__dealloc__``, and replacing the thunk we must do the same.
 extern "C" inline void TVMFFIPyTpDeallocSlot(PyObject* o) {
+  // [N] tags refer to the CYTHON STEP MAP in the section header (steps [1][3][4][10] absent here).
+  // [5] the transition runs FIRST, against the wrapper's true (un-bumped) refcount -- that is what
+  //     makes a concurrent TryIncRef fail on a dying wrapper. Bracketed by Get/SetRaisedException
+  //     so a DecRef firing the C++ deleter cannot clobber an exception pending at wrapper death (as
+  //     Cython's thunk does too).
   PyObject* saved_exc = PyErr_GetRaisedException();
-  TVMFFIPyTpDeallocImpl(TVMFFICyObjectGetCHandlePtr(o), o);
+  TVMFFIPyTpDeallocImpl(TVMFFICyObjectGetCHandlePtr(o), o);  // [5] (+ [7] C++ dtor via chandle)
   PyErr_SetRaisedException(saved_exc);
-  // GC untrack (Function + any GC subtype; idempotent no-op on the non-GC plain carriers and on
-  // an already-untracked subtype). Must precede the free so the GC never walks freed memory.
+  // [2] GC untrack (Function + any GC subtype; idempotent no-op on the non-GC plain carriers and on
+  //     an already-untracked subtype). Must precede the free so the GC never walks freed memory.
   if (PyObject_IS_GC(o)) PyObject_GC_UnTrack(o);
-  // Generic ``__dict__`` teardown -- fires only for a type with a real ``tp_dictoffset``
-  // (Function; ``dictptr == nullptr`` on the five plain carriers). Mirrors Cython's inlined
-  // ``PyDict_Clear`` + ``Py_CLEAR`` exactly (a fixed-offset dict, not a managed dict).
+  // [6] Generic ``__dict__`` teardown -- fires only for a type with a real ``tp_dictoffset``
+  //     (Function; ``dictptr == nullptr`` on the five plain carriers). Mirrors Cython's inlined
+  //     ``PyDict_Clear`` + ``Py_CLEAR`` exactly (a fixed-offset dict, not a managed dict).
   PyObject** dictptr = _PyObject_GetDictPtr(o);
   if (dictptr != nullptr && *dictptr != nullptr) {
     PyDict_Clear(*dictptr);
     Py_CLEAR(*dictptr);
   }
+  // [9] reclaim memory. base-chain n/a (base is object / a carrier the transition covers); Cython's
+  //     trailing Py_DECREF(tp) is moot -- carrier types are immortal on FT (see map [9]).
   (*Py_TYPE(o)->tp_free)(o);
 }
 
@@ -910,8 +936,18 @@ extern "C" inline void TVMFFIPyWrapDealloc(PyObject* type_obj) {
   // and a GC carrier's owned state must be exactly its dict (cleared above). A future owned member
   // breaks one of these -- fail loudly here instead of leaking at runtime.
   bool is_gc = PyType_HasFeature(tp, Py_TPFLAGS_HAVE_GC);
-  if (!is_gc && tp->tp_dictoffset != 0) {
+  if (!is_gc && tp->tp_dictoffset != 0) {  // guards step [8]
     Py_FatalError("tvm_ffi: non-GC carrier gained a __dict__; hand-built tp_dealloc slot is stale");
+  }
+  // Enforce the two other STEP MAP omissions that have a checkable runtime field, so a future
+  // Cython change needing a step we drop fails loudly here instead of silently misbehaving:
+  //   step [1] -- the slot never runs tp_finalize; safe only while no carrier defines __del__.
+  if (tp->tp_finalize != nullptr) {
+    Py_FatalError("tvm_ffi: carrier gained tp_finalize (__del__); tp_dealloc slot omits it");
+  }
+  //   step [4] -- the slot never clears weakrefs; safe only while no carrier is weak-referenceable.
+  if (tp->tp_weaklistoffset != 0) {
+    Py_FatalError("tvm_ffi: carrier became weak-referenceable; tp_dealloc slot omits weakref");
   }
   tp->tp_dealloc = &TVMFFIPyTpDeallocSlot;
 }
