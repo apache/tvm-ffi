@@ -48,6 +48,9 @@ Tensor MakeFilledTensor(const Shape& shape, float value) {
   Tensor t = Tensor::FromNDAlloc(CPUNDAlloc(), shape, DLDataType({kDLFloat, 32, 1}),
                                  DLDevice({kDLCPU, 0}));
   float* dst = reinterpret_cast<float*>(t.data_ptr());
+  // dst points at GetDataSize(t) bytes (numel floats); the analyzer cannot infer that
+  // size through the allocator, so it wrongly flags this write as out of bounds.
+  // NOLINTNEXTLINE(clang-analyzer-security.ArrayBound)
   for (int64_t i = 0; i < t.numel(); ++i) dst[i] = value;
   return t;
 }
