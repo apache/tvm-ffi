@@ -501,7 +501,7 @@ cdef inline object make_ret_object(TVMFFIAny result):
 
     Caller must own +1 on ``result.v_obj``; ownership transfers to the
     returned wrapper. The Active / Inactive / Detached transition is owned in
-    one frame by ``TVMFFIPyMakeRetObject`` (tvm_ffi_python_helpers.h); this
+    one frame by ``TVMFFIPyMakeRetObject`` (tvm_ffi_python_object.h); this
     dispatcher only resolves ``cls`` and peels off the value-typed
     ``PyNativeObject`` case, which does not participate in tying.
     """

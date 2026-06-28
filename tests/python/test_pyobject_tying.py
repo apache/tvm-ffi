@@ -20,7 +20,7 @@ A 16-byte ``PyCustomAllocHeader`` is prepended to every Object that goes
 through the Python custom allocator. Its ``tagged_pyobj`` field is a tagged
 pointer to the canonical Python wrapper, encoding a three-state machine
 driven by the custom ``tp_alloc`` / ``tp_free`` slots and the
-``make_ret_object`` dispatcher in ``tvm_ffi_python_helpers.h``:
+``make_ret_object`` dispatcher in ``tvm_ffi_python_object.h``:
 
   Detached  no Python wrapper bound to the chandle (raw == NULL)
   Active    canonical wrapper alive; ``wrapper.chandle == chandle`` (tag 0)
@@ -70,7 +70,7 @@ def _is_free_threaded_python() -> bool:
 # drop+revive, ``f(x) is x``) relies on a custom allocator + tp_alloc / tp_free /
 # tp_dealloc slots whose header state machine is GIL-serialized on the classic build
 # and lock-synchronized on free-threaded builds (see the "Free-threaded builds" note
-# in ``tvm_ffi_python_helpers.h``). The feature is enabled on both, so the identity
+# in ``tvm_ffi_python_object.h``). The feature is enabled on both, so the identity
 # tests below run unconditionally on every build.
 
 

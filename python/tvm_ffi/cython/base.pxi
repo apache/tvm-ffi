@@ -360,7 +360,9 @@ def _env_get_current_stream(int device_type, int device_id):
     return <uint64_t>current_stream
 
 
-cdef extern from "tvm_ffi_python_helpers.h":
+# PyObject-tying state machine (binds one Python wrapper to one C++ chandle). The C++ impl lives in
+# tvm_ffi_python_object.h; see its top-of-file banner for the design.
+cdef extern from "tvm_ffi_python_object.h":
     int TVMFFIPyRegisterDefaultAllocator() noexcept
     void TVMFFIPyMarkPythonFinalizing() noexcept
 
@@ -369,11 +371,15 @@ cdef extern from "tvm_ffi_python_helpers.h":
     void TVMFFIPyInstallTypeSlots(PyObject* type_obj) noexcept
     object TVMFFIPyMakeRetObject(void* chandle, PyObject* cls_type)
 
-    # tp_dealloc installer (free-threaded builds only; a no-op symbol on the GIL build). Called
-    # once per cdef CObject-family carrier right after the class is defined; replaces Cython's
-    # generated tp_dealloc with the hand-built slot. See TVMFFIPyTpDeallocSlot in the header.
+    # TEMPORARY (remove with Cython GH-7769/7770): tp_dealloc installer (free-threaded builds only; a
+    # no-op symbol on the GIL build). Called once per cdef CObject-family carrier right after the
+    # class is defined; replaces Cython's generated tp_dealloc with the hand-built slot. This extern
+    # and its six carrier call sites are deleted together with the temporary section in the header.
+    # See TVMFFIPyTpDeallocSlot in tvm_ffi_python_object.h.
     void TVMFFIPyWrapDealloc(PyObject* type_obj) noexcept
 
+
+cdef extern from "tvm_ffi_python_helpers.h":
     # no need to expose fields of the call context setter data structure
     ctypedef struct TVMFFIPyCallContext:
         int device_type

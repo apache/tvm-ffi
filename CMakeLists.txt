@@ -280,7 +280,7 @@ if (TVM_FFI_BUILD_PYTHON_MODULE)
     VERBATIM
   )
 
-  # The PyObject-tying impl in tvm_ffi_python_helpers.h uses full Python C API (Py_IncRef,
+  # The PyObject-tying impl in tvm_ffi_python_object.h uses full Python C API (Py_IncRef,
   # PyObject_GC_Del, atomic header reads), so we build against the per-version ABI rather than the
   # limited (abi3) ABI.
   python_add_library(tvm_ffi_cython MODULE "${_core_cpp}" WITH_SOABI)
@@ -322,6 +322,9 @@ if (TVM_FFI_BUILD_PYTHON_MODULE)
           DESTINATION share/cmake/tvm_ffi
   )
   install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/python/tvm_ffi/cython/tvm_ffi_python_helpers.h
+          DESTINATION include/
+  )
+  install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/python/tvm_ffi/cython/tvm_ffi_python_object.h
           DESTINATION include/
   )
 endif ()
