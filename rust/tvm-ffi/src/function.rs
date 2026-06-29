@@ -150,7 +150,7 @@ impl Function {
             heap_args.resize(args_len, AnyView::new());
             &mut heap_args[..args_len]
         };
-        (&tuple_args).fill_any_view(packed_args);
+        tuple_args.fill_any_view(packed_args);
         self.call_packed(packed_args)
     }
     /// Call function with compile-time known argument count
@@ -170,7 +170,7 @@ impl Function {
         TupleType: TupleAsPackedArgs,
     {
         let mut packed_args = [AnyView::new(); LEN];
-        (&tuple_args).fill_any_view(&mut packed_args);
+        tuple_args.fill_any_view(&mut packed_args);
         self.call_packed(&packed_args)
     }
     /// Get global function by name

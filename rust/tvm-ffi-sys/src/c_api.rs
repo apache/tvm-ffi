@@ -113,6 +113,12 @@ pub struct TVMFFIObject {
     __padding: u32,
 }
 
+impl Default for TVMFFIObject {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TVMFFIObject {
     pub fn new() -> Self {
         Self {

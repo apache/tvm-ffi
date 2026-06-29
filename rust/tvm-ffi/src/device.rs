@@ -79,7 +79,7 @@ unsafe impl AnyCompatible for DLDevice {
     }
 
     unsafe fn check_any_strict(data: &TVMFFIAny) -> bool {
-        return data.type_index == TypeIndex::kTVMFFIDevice as i32;
+        data.type_index == TypeIndex::kTVMFFIDevice as i32
     }
 
     unsafe fn copy_from_any_view_after_check(data: &TVMFFIAny) -> Self {

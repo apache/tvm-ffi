@@ -107,8 +107,8 @@ pub struct DLTensor {
 impl DLDevice {
     pub fn new(device_type: DLDeviceType, device_id: i32) -> Self {
         Self {
-            device_type: device_type,
-            device_id: device_id,
+            device_type,
+            device_id,
         }
     }
 }
@@ -117,8 +117,8 @@ impl DLDataType {
     pub fn new(code: DLDataTypeCode, bits: u8, lanes: u16) -> Self {
         Self {
             code: code as u8,
-            bits: bits,
-            lanes: lanes,
+            bits,
+            lanes,
         }
     }
 }

@@ -16,6 +16,6 @@
 # under the License.
 
 [workspace]
-members = ["tvm-ffi", "tvm-ffi-sys", "tvm-ffi-macros"]
+members = ["tvm-ffi", "tvm-ffi-sys", "tvm-ffi-macros", "tvm-ffi-stubgen"]
 
 resolver = "2"
