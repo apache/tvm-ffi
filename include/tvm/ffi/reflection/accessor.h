@@ -495,6 +495,49 @@ inline constexpr const char* kSEqual = "__s_equal__";
  * visit structural children.
  */
 inline constexpr const char* kStructuralVisit = "__s_visit__";
+
+/*!
+ * \brief Custom structural map hook used by ``StructuralMapper``.
+ *
+ * The hook receives the active mapper and the input value. It should recursively map structural
+ * children through the mapper, return the input unchanged if no fields are changed, and avoid
+ * intentionally mutating the source object. An opaque hook owns its ``Any`` argument; an
+ * ``ffi::Function`` receives a borrowed packed view kept alive for the duration of the call.
+ *
+ * Value type: either an opaque function pointer to a C++ structural map hook
+ *
+ * ``TVMFFIAny (*)(StructuralMapperObj* mapper, Any value) noexcept``
+ *
+ * returning raw ``Expected<Any>`` storage, or an ``ffi::Function`` with signature
+ *
+ * ``(StructuralMapper mapper, Any value) -> Any``.
+ *
+ * A type used with the default combined map-or-in-place operation must define this attribute and
+ * ``kStructuralInplaceMutate`` together, or leave both undefined.
+ */
+inline constexpr const char* kStructuralMap = "__s_map__";
+/*!
+ * \brief Custom structural in-place mutation hook used by ``StructuralMapper``.
+ *
+ * The hook receives the active mapper and the input value. It may mutate the source object and
+ * should normally return that same object. An opaque hook owns its ``Any`` argument; an
+ * ``ffi::Function`` receives a borrowed packed view kept alive for the duration of the call. The
+ * explicit in-place path does not verify uniqueness and does not roll back changes when a later
+ * transformation fails.
+ *
+ * Value type: either an opaque function pointer to a C++ structural in-place mutation hook
+ *
+ * ``TVMFFIAny (*)(StructuralMapperObj* mapper, Any value) noexcept``
+ *
+ * returning raw ``Expected<Any>`` storage, or an ``ffi::Function`` with signature
+ *
+ * ``(StructuralMapper mapper, Any value) -> Any``.
+ *
+ * A type used with the default combined map-or-in-place operation must define this attribute and
+ * ``kStructuralMap`` together, or leave both undefined.
+ */
+inline constexpr const char* kStructuralInplaceMutate = "__s_inplace_mutate__";
+
 /*!
  * \brief Serialize object data to a JSON-compatible ``Map``.
  *
