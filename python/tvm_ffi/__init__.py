@@ -78,6 +78,7 @@ if TYPE_CHECKING or not _is_config_mode():
     from .structural import (
         DefRegionKind,
         StructuralKey,
+        StructuralMutator,
         StructuralVisitor,
         VisitInterrupt,
         WalkOrder,
@@ -85,6 +86,7 @@ if TYPE_CHECKING or not _is_config_mode():
         get_first_structural_mismatch,
         structural_equal,
         structural_hash,
+        structural_map,
         structural_walk,
     )
     from . import serialization
@@ -154,6 +156,7 @@ __all__ = [
     "Shape",
     "StreamContext",
     "StructuralKey",
+    "StructuralMutator",
     "StructuralVisitor",
     "Tensor",
     "VisitInterrupt",
@@ -184,6 +187,7 @@ __all__ = [
     "structural",
     "structural_equal",
     "structural_hash",
+    "structural_map",
     "structural_walk",
     "system_lib",
     "use_raw_stream",

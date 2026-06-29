@@ -20,6 +20,7 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
+import pytest
 import tvm_ffi
 import tvm_ffi.testing
 from tvm_ffi.dataclasses import Object, field, py_class
@@ -184,6 +185,7 @@ def test_structural_walk_typed_callbacks() -> None:
             ((int, float), lambda value: trace.append(f"number:{value}")),
             (str, lambda value: trace.append(f"str:{value}")),
         ],
+        order=tvm_ffi.WalkOrder.PREORDER,
     )
 
     assert result is None
@@ -232,6 +234,7 @@ def test_structural_walk_first_match_and_skip() -> None:
             ),
             (object, lambda value: trace.append(type(value).__name__)),
         ],
+        order=tvm_ffi.WalkOrder.PREORDER,
     )
 
     assert result is None
@@ -246,7 +249,11 @@ def test_structural_walk_interrupt() -> None:
             return tvm_ffi.VisitInterrupt({"found": value})
         return None
 
-    result = tvm_ffi.structural_walk(root, (int, on_int))
+    result = tvm_ffi.structural_walk(
+        root,
+        (int, on_int),
+        order=tvm_ffi.WalkOrder.PREORDER,
+    )
 
     assert isinstance(result, tvm_ffi.VisitInterrupt)
     assert tvm_ffi.structural_equal(result.value, {"found": 2})
@@ -297,6 +304,7 @@ def test_structural_walk_object_and_any_callbacks() -> None:
             (tvm_ffi.Object, lambda value: trace.append(f"object:{type(value).__name__}")),
             (Any, lambda value: trace.append(f"any:{value}")),
         ],
+        order=tvm_ffi.WalkOrder.PREORDER,
     )
 
     assert result is None
@@ -306,27 +314,51 @@ def test_structural_walk_object_and_any_callbacks() -> None:
     result = tvm_ffi.structural_walk(
         tvm_ffi.Array([1]),
         (object, lambda value: alias_trace.append(type(value).__name__)),
+        order=tvm_ffi.WalkOrder.PREORDER,
     )
 
     assert result is None
     assert alias_trace == ["Array", "int"]
 
 
-def test_structural_walk_post_order_enum() -> None:
+@pytest.mark.parametrize(
+    ("order", "expected_trace"),
+    [
+        pytest.param(
+            None,
+            ["int:1", "array:1", "int:2", "array:2"],
+            id="default-postorder",
+        ),
+        pytest.param(
+            tvm_ffi.WalkOrder.PREORDER,
+            ["array:2", "array:1", "int:1", "int:2"],
+            id="preorder",
+        ),
+        pytest.param(
+            tvm_ffi.WalkOrder.POSTORDER,
+            ["int:1", "array:1", "int:2", "array:2"],
+            id="postorder",
+        ),
+    ],
+)
+def test_structural_walk_pre_and_post_order(
+    order: tvm_ffi.WalkOrder | None,
+    expected_trace: list[str],
+) -> None:
     root = tvm_ffi.Array([tvm_ffi.Array([1]), 2])
     trace: list[str] = []
 
-    result = tvm_ffi.structural_walk(
-        root,
-        [
-            (tvm_ffi.Array, lambda value: trace.append(f"array:{len(value)}")),
-            (int, lambda value: trace.append(f"int:{value}")),
-        ],
-        order=tvm_ffi.WalkOrder.POSTORDER,
-    )
+    callbacks = [
+        (tvm_ffi.Array, lambda value: trace.append(f"array:{len(value)}")),
+        (int, lambda value: trace.append(f"int:{value}")),
+    ]
+    if order is None:
+        result = tvm_ffi.structural_walk(root, callbacks)
+    else:
+        result = tvm_ffi.structural_walk(root, callbacks, order=order)
 
     assert result is None
-    assert trace == ["int:1", "array:1", "int:2", "array:2"]
+    assert trace == expected_trace
 
 
 def test_structural_walk_mixed_callback_forms() -> None:
@@ -360,7 +392,169 @@ def test_structural_walk_mixed_callback_forms() -> None:
                 ),
             ),
         ],
+        order=tvm_ffi.WalkOrder.PREORDER,
     )
 
     assert result is None
     assert trace == ["array:2", "array:1", "array:2", "use:x", "use:y", "str:tag"]
+
+
+@pytest.mark.parametrize(
+    ("order", "expected_trace"),
+    [
+        pytest.param(None, ["int:1", "int:2", "array:2,3"], id="default-postorder"),
+        pytest.param(
+            tvm_ffi.WalkOrder.PREORDER,
+            ["array:1,2", "int:1", "int:2"],
+            id="preorder",
+        ),
+        pytest.param(
+            tvm_ffi.WalkOrder.POSTORDER,
+            ["int:1", "int:2", "array:2,3"],
+            id="postorder",
+        ),
+    ],
+)
+def test_structural_map_pre_and_post_order(
+    order: tvm_ffi.WalkOrder | None,
+    expected_trace: list[str],
+) -> None:
+    root = tvm_ffi.Array([1, 2])
+    trace: list[str] = []
+
+    def map_array(value: tvm_ffi.Array) -> tvm_ffi.Array:
+        trace.append(f"array:{','.join(str(item) for item in value)}")
+        return value
+
+    def map_int(value: int) -> int:
+        trace.append(f"int:{value}")
+        return value + 1
+
+    callbacks = [(tvm_ffi.Array, map_array), (int, map_int)]
+    if order is None:
+        mapped = tvm_ffi.structural_map(root, callbacks)
+    else:
+        mapped = tvm_ffi.structural_map(root, callbacks, order=order)
+
+    assert trace == expected_trace
+    assert list(root) == [1, 2]
+    assert list(mapped) == [2, 3]
+    assert not mapped.same_as(root)
+
+
+def test_structural_map_nested_containers() -> None:
+    root = tvm_ffi.Array(
+        [
+            tvm_ffi.List([1, 2]),
+            tvm_ffi.Map({3: 4}),
+            tvm_ffi.Dict({5: 6}),
+        ]
+    )
+
+    def keep_container(value: Any) -> Any:
+        return value
+
+    mapped = tvm_ffi.structural_map(
+        root,
+        [
+            (tvm_ffi.Array, keep_container),
+            (tvm_ffi.List, keep_container),
+            (tvm_ffi.Map, keep_container),
+            (tvm_ffi.Dict, keep_container),
+            (int, lambda value: value + 10),
+        ],
+    )
+
+    assert list(mapped[0]) == [11, 12]
+    assert mapped[1][13] == 14
+    assert mapped[2][15] == 16
+    assert list(root[0]) == [1, 2]
+    assert root[1][3] == 4
+    assert root[2][5] == 6
+    assert not mapped.same_as(root)
+    assert not mapped[0].same_as(root[0])
+    assert not mapped[1].same_as(root[1])
+    assert not mapped[2].same_as(root[2])
+
+
+def test_structural_map_reflected_object_uses_copy_on_write() -> None:
+    @py_class(structural_eq="tree")
+    class PyMapBox(Object):
+        value: int
+
+    root = PyMapBox(1)
+
+    mapped = tvm_ffi.structural_map(root, (int, lambda value: value + 1))
+
+    assert not mapped.same_as(root)
+    assert root.value == 1
+    assert mapped.value == 2
+
+
+def test_structural_map_map_inplace_value_or_copied_key() -> None:
+    value_source = tvm_ffi.Map({1: 1.5})
+    value_mapped = tvm_ffi.structural_map(
+        value_source,
+        (float, lambda value: value + 1.0),
+    )
+
+    assert value_mapped.same_as(value_source)
+    assert value_source[1] == 2.5
+
+    key_source = tvm_ffi.Map({1: "value"})
+    key_mapped = tvm_ffi.structural_map(
+        key_source,
+        (int, lambda value: value + 10),
+    )
+
+    assert not key_mapped.same_as(key_source)
+    assert key_source[1] == "value"
+    assert key_mapped[11] == "value"
+
+
+def test_structural_map_callback_def_region_kind() -> None:
+    @py_class(structural_eq="var")
+    class PyMapVar(Object):
+        name: str = field(structural_eq="ignore")
+
+    @py_class(structural_eq="tree")
+    class PyMapRegions(Object):
+        recursive: PyMapVar = field(structural_eq="def-recursive")
+        non_recursive: PyMapVar = field(structural_eq="def-non-recursive")
+        use: PyMapVar
+
+    root = PyMapRegions(PyMapVar("recursive"), PyMapVar("non-recursive"), PyMapVar("use"))
+    trace: list[tuple[str, tvm_ffi.DefRegionKind]] = []
+
+    mapped = tvm_ffi.structural_map(
+        root,
+        (PyMapRegions, lambda value: value),
+        with_def_region_kind=(
+            PyMapVar,
+            lambda value, kind: trace.append((value.name, kind)) or value,
+        ),
+    )
+
+    assert mapped.same_as(root)
+    assert trace == [
+        ("recursive", tvm_ffi.DefRegionKind.DEF_RECURSIVE),
+        ("non-recursive", tvm_ffi.DefRegionKind.DEF_NON_RECURSIVE),
+        ("use", tvm_ffi.DefRegionKind.NONE),
+    ]
+
+
+def test_structural_map_first_match_and_nested_callback_error() -> None:
+    mapped = tvm_ffi.structural_map(
+        1,
+        [
+            (object, lambda value: value + 1),
+            (int, lambda value: value + 100),
+        ],
+    )
+    assert mapped == 2
+
+    def fail(value: int) -> int:
+        raise ValueError(f"cannot map {value}")
+
+    with pytest.raises(ValueError, match="cannot map 2"):
+        tvm_ffi.structural_map(tvm_ffi.Array([2]), (int, fail))
