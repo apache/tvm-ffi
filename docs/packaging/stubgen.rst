@@ -49,7 +49,18 @@ This runs stub generation automatically after each build.
        [STUB_INIT ON|OFF]
        [STUB_PKG <pkg>]
        [STUB_PREFIX <prefix>]
-       [STUB_TARGET python|rust]
+       [STUB_TARGET python rust]   # one or more backends
+   )
+
+   # Or, to generate Python and Rust stubs together (each backend writes a
+   # different tree, so the output directories are given per backend):
+   tvm_ffi_configure_target(<target>
+       STUB_TARGET python rust
+       STUB_DIR_PYTHON <python-dir>
+       STUB_DIR_RUST <rust-dir>
+       [STUB_INIT ON|OFF]
+       [STUB_PKG <pkg>]
+       [STUB_PREFIX <prefix>]
    )
 
 From the example's
@@ -274,6 +285,23 @@ this manual work, ``tvm-ffi-stubgen`` supports generating Rust code directly.
 To generate Rust stubs, pass ``STUB_TARGET rust`` to ``tvm_ffi_configure_target``
 (see :ref:`sec-stubgen-cmake`) or ``--target rust`` on the command line
 (see :ref:`sec-stubgen-cli`).
+
+To generate Python and Rust stubs from a single target, list both backends in
+``STUB_TARGET``. Because each backend writes a different file tree, give the output
+directories per backend via ``STUB_DIR_PYTHON`` and ``STUB_DIR_RUST`` (instead of
+``STUB_DIR``):
+
+.. code-block:: cmake
+
+   tvm_ffi_configure_target(my_ffi_extension
+       STUB_TARGET python rust
+       STUB_INIT ON
+       STUB_DIR_PYTHON "./python"
+       STUB_DIR_RUST "./rust/src/generated")
+
+This is equivalent to invoking stub generation once per listed backend (with
+``--target python`` and ``--target rust``). The shared ``STUB_PKG`` / ``STUB_PREFIX``
+apply to every listed backend.
 
 Key Features
 ~~~~~~~~~~~~

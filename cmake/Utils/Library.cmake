@@ -172,7 +172,8 @@ endfunction ()
 #   target_name
 #   [LINK_SHARED ON|OFF] [LINK_HEADER ON|OFF] [DEBUG_SYMBOL ON|OFF] [MSVC_FLAGS ON|OFF]
 #   [STUB_INIT ON|OFF] [STUB_DIR <dir>] [STUB_PKG <pkg>] [STUB_PREFIX <prefix>]
-#   [STUB_TARGET python|rust]
+#   [STUB_TARGET <backend>...]   # one or more of: python rust
+#   [STUB_DIR_PYTHON <dir>] [STUB_DIR_RUST <dir>]
 # )
 # Configure a target to integrate with TVM-FFI CMake utilities:
 #   - Link against tvm_ffi::header and/or tvm_ffi::shared
@@ -195,11 +196,20 @@ endfunction ()
 #   STUB_INIT:    Whether to allow generating new directives. Default: OFF (ON/OFF-style)
 #   STUB_PKG:     Package name passed to stub generator (requires STUB_DIR and STUB_INIT=ON; default: ${SKBUILD_PROJECT_NAME} if set, otherwise target name)
 #   STUB_PREFIX:  Module prefix passed to stub generator (requires STUB_DIR and STUB_INIT=ON; default: "<STUB_PKG>.")
-#   STUB_TARGET:  Code generator backend: "python" (default) or "rust". Passed to the stub
-#                 generator as --target. With "rust", object bindings are emitted into a Rust
-#                 module tree under STUB_DIR (global functions are not generated for Rust).
-#                 To generate both Python and Rust stubs for one target, call this function
-#                 twice with different STUB_DIR/STUB_TARGET values.
+#   STUB_TARGET:  Code generator backend(s): a list of one or more of "python" (default) and
+#                 "rust" (e.g. STUB_TARGET python rust). Each listed backend is passed to the
+#                 stub generator as --target. With "rust", object bindings are emitted into a
+#                 Rust module tree under its STUB_DIR (global functions are not generated for Rust).
+#   STUB_TARGET with multiple backends (e.g. STUB_TARGET python rust):
+#                 Generates stubs for each listed backend. Because each backend writes a
+#                 different file tree, supply per-backend STUB_DIR_PYTHON / STUB_DIR_RUST. One
+#                 post-build stub command is emitted per backend; the shared STUB_PKG / STUB_PREFIX
+#                 apply to every backend.
+#   STUB_DIR_PYTHON / STUB_DIR_RUST:
+#                 Per-backend output directories, for listing several backends that each write a
+#                 different file tree. A listed backend with no directory (no STUB_DIR_<BACKEND>,
+#                 and no STUB_DIR for a single backend) is skipped. Relative paths resolve against
+#                 CMAKE_CURRENT_SOURCE_DIR, same as STUB_DIR.
 # ~~~
 function (tvm_ffi_configure_target target)
   if (NOT target)
@@ -225,9 +235,11 @@ function (tvm_ffi_configure_target target)
       STUB_DIR
       STUB_PKG
       STUB_PREFIX
-      STUB_TARGET
+      STUB_DIR_PYTHON
+      STUB_DIR_RUST
   )
-  set(tvm_ffi_arg_multiValueArgs)
+  # STUB_TARGET is a list: one or more of `python` / `rust`.
+  set(tvm_ffi_arg_multiValueArgs STUB_TARGET)
 
   cmake_parse_arguments(
     tvm_ffi_arg_ "${tvm_ffi_arg_options}" "${tvm_ffi_arg_oneValueArgs}"
@@ -243,25 +255,35 @@ function (tvm_ffi_configure_target target)
   if (NOT DEFINED tvm_ffi_arg__STUB_INIT)
     set(tvm_ffi_arg__STUB_INIT OFF)
   endif ()
-  if (NOT DEFINED tvm_ffi_arg__STUB_TARGET)
+  if (NOT DEFINED tvm_ffi_arg__STUB_TARGET OR NOT tvm_ffi_arg__STUB_TARGET)
     set(tvm_ffi_arg__STUB_TARGET "python")
   endif ()
 
-  # Validation
-  if (NOT tvm_ffi_arg__STUB_TARGET MATCHES "^(python|rust)$")
-    message(
-      FATAL_ERROR
-        "tvm_ffi_configure_target(${target}): STUB_TARGET must be 'python' or 'rust', got '${tvm_ffi_arg__STUB_TARGET}'."
-    )
-  endif ()
-  if ((NOT DEFINED tvm_ffi_arg__STUB_DIR) OR (NOT tvm_ffi_arg__STUB_DIR))
-    if (DEFINED tvm_ffi_arg__STUB_PKG OR DEFINED tvm_ffi_arg__STUB_PREFIX)
+  list(LENGTH tvm_ffi_arg__STUB_TARGET tvm_ffi_stub_target_count)
+
+  # Validation: every requested backend must be 'python' or 'rust'.
+  foreach (tvm_ffi_b IN LISTS tvm_ffi_arg__STUB_TARGET)
+    if (NOT tvm_ffi_b MATCHES "^(python|rust)$")
       message(
         FATAL_ERROR
-          "tvm_ffi_configure_target(${target}): STUB_PKG/STUB_PREFIX require STUB_DIR to be set."
+          "tvm_ffi_configure_target(${target}): STUB_TARGET entries must be 'python' or 'rust', got '${tvm_ffi_b}'."
       )
     endif ()
+  endforeach ()
+
+  # A stub directory may be given globally (STUB_DIR) or, when STUB_TARGET lists several backends
+  # that each write a different file tree, per backend (STUB_DIR_PYTHON / STUB_DIR_RUST).
+  set(tvm_ffi_has_stub_dir OFF)
+  if (DEFINED tvm_ffi_arg__STUB_DIR AND tvm_ffi_arg__STUB_DIR)
+    set(tvm_ffi_has_stub_dir ON)
   endif ()
+  foreach (tvm_ffi_B IN ITEMS PYTHON RUST)
+    if (DEFINED tvm_ffi_arg__STUB_DIR_${tvm_ffi_B} AND tvm_ffi_arg__STUB_DIR_${tvm_ffi_B})
+      set(tvm_ffi_has_stub_dir ON)
+    endif ()
+  endforeach ()
+
+  # Validation
   if (NOT tvm_ffi_arg__STUB_INIT)
     if (DEFINED tvm_ffi_arg__STUB_PKG OR DEFINED tvm_ffi_arg__STUB_PREFIX)
       message(
@@ -270,15 +292,16 @@ function (tvm_ffi_configure_target target)
       )
     endif ()
   else ()
-    if (NOT DEFINED tvm_ffi_arg__STUB_DIR OR NOT tvm_ffi_arg__STUB_DIR)
+    if (NOT tvm_ffi_has_stub_dir)
       message(
-        FATAL_ERROR "tvm_ffi_configure_target(${target}): STUB_INIT=ON requires STUB_DIR to be set."
+        FATAL_ERROR
+          "tvm_ffi_configure_target(${target}): STUB_INIT=ON requires a stub directory (STUB_DIR, or STUB_DIR_PYTHON/STUB_DIR_RUST)."
       )
     endif ()
   endif ()
 
-  # STUB_PKG and STUB_PREFIX defaults
-  if (tvm_ffi_arg__STUB_INIT AND tvm_ffi_arg__STUB_DIR)
+  # STUB_PKG and STUB_PREFIX defaults (shared across all listed backends)
+  if (tvm_ffi_arg__STUB_INIT AND tvm_ffi_has_stub_dir)
     if (NOT DEFINED tvm_ffi_arg__STUB_PKG)
       if (DEFINED SKBUILD_PROJECT_NAME AND SKBUILD_PROJECT_NAME)
         set(tvm_ffi_arg__STUB_PKG "${SKBUILD_PROJECT_NAME}")
@@ -352,39 +375,53 @@ function (tvm_ffi_configure_target target)
     endif ()
   endif ()
 
-  if (DEFINED tvm_ffi_arg__STUB_DIR AND tvm_ffi_arg__STUB_DIR)
-    get_filename_component(
-      tvm_ffi_arg__STUB_DIR_ABS "${tvm_ffi_arg__STUB_DIR}" ABSOLUTE BASE_DIR
-      "${CMAKE_CURRENT_SOURCE_DIR}"
-    )
+  if (tvm_ffi_has_stub_dir)
     find_package(
       Python3
       COMPONENTS Interpreter
       REQUIRED
     )
-    set(tvm_ffi_stub_cli_args "${tvm_ffi_arg__STUB_DIR_ABS}" --dlls $<TARGET_FILE:${target}>
-                              --target "${tvm_ffi_arg__STUB_TARGET}"
-    )
-    if (tvm_ffi_arg__STUB_INIT)
-      list(
-        APPEND
-        tvm_ffi_stub_cli_args
-        --init-lib
-        ${target}
-        --init-pypkg
-        "${tvm_ffi_arg__STUB_PKG}"
-        --init-prefix
-        "${tvm_ffi_arg__STUB_PREFIX}"
-      )
-    endif ()
-    add_custom_command(
-      TARGET ${target}
-      POST_BUILD
-      COMMAND ${Python3_EXECUTABLE} -m tvm_ffi.stub.cli ${tvm_ffi_stub_cli_args}
-      COMMENT
-        "[COMMAND] Running: ${Python3_EXECUTABLE} -m tvm_ffi.stub.cli ${tvm_ffi_stub_cli_args}"
-      VERBATIM
-    )
+    # One post-build stub command per backend. Each backend writes to its own STUB_DIR_<BACKEND>; a
+    # single backend may instead use the shared STUB_DIR. A listed backend with no directory is
+    # skipped.
+    foreach (tvm_ffi_b IN LISTS tvm_ffi_arg__STUB_TARGET)
+      string(TOUPPER "${tvm_ffi_b}" tvm_ffi_B)
+      set(tvm_ffi_stub_dir "")
+      if (DEFINED tvm_ffi_arg__STUB_DIR_${tvm_ffi_B} AND tvm_ffi_arg__STUB_DIR_${tvm_ffi_B})
+        set(tvm_ffi_stub_dir "${tvm_ffi_arg__STUB_DIR_${tvm_ffi_B}}")
+      elseif (tvm_ffi_stub_target_count EQUAL 1)
+        set(tvm_ffi_stub_dir "${tvm_ffi_arg__STUB_DIR}")
+      endif ()
+      if (tvm_ffi_stub_dir)
+        get_filename_component(
+          tvm_ffi_arg__STUB_DIR_ABS "${tvm_ffi_stub_dir}" ABSOLUTE BASE_DIR
+          "${CMAKE_CURRENT_SOURCE_DIR}"
+        )
+        set(tvm_ffi_stub_cli_args "${tvm_ffi_arg__STUB_DIR_ABS}" --dlls $<TARGET_FILE:${target}>
+                                  --target "${tvm_ffi_b}"
+        )
+        if (tvm_ffi_arg__STUB_INIT)
+          list(
+            APPEND
+            tvm_ffi_stub_cli_args
+            --init-lib
+            ${target}
+            --init-pypkg
+            "${tvm_ffi_arg__STUB_PKG}"
+            --init-prefix
+            "${tvm_ffi_arg__STUB_PREFIX}"
+          )
+        endif ()
+        add_custom_command(
+          TARGET ${target}
+          POST_BUILD
+          COMMAND ${Python3_EXECUTABLE} -m tvm_ffi.stub.cli ${tvm_ffi_stub_cli_args}
+          COMMENT
+            "[COMMAND] Running: ${Python3_EXECUTABLE} -m tvm_ffi.stub.cli ${tvm_ffi_stub_cli_args}"
+          VERBATIM
+        )
+      endif ()
+    endforeach ()
   endif ()
 endfunction ()
 
