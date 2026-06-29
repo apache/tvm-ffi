@@ -497,6 +497,50 @@ inline constexpr const char* kSEqual = "__s_equal__";
  * visit structural children.
  */
 inline constexpr const char* kStructuralVisit = "__s_visit__";
+
+/*!
+ * \brief Custom structural mutation hook used by ``StructuralMutator``.
+ *
+ * The hook receives the active mutator and the input value. It should recursively mutate structural
+ * children through the mutator, return the input unchanged if no fields are changed, and avoid
+ * intentionally mutating the source object. The input is borrowed and remains valid for the
+ * duration of the call.
+ *
+ * Value type: either an opaque function pointer to a C++ structural mutation hook
+ *
+ * ``TVMFFIAny (*)(StructuralMutatorObj* mutator, AnyView value) noexcept``
+ *
+ * returning raw ``Expected<Any>`` storage, or an ``ffi::Function`` with signature
+ *
+ * ``(StructuralMutator mutator, Any value) -> Any``.
+ *
+ * This is the canonical mutation hook. A type that defines
+ * ``kStructuralMaybeInplaceMutate`` must also define this attribute.
+ */
+inline constexpr const char* kStructuralMutate = "__s_mutate__";
+/*!
+ * \brief Optional custom mutation hook that may reuse its input object.
+ *
+ * The hook receives the active mutator and a borrowed input value that is safe to mutate in place.
+ * Callers must route shared objects through non-in-place mutation instead. The hook may mutate and
+ * return the source object, delegate to non-in-place mutation, or return another replacement.
+ *
+ * Value type: either an opaque function pointer to a C++ structural mutation hook
+ *
+ * ``TVMFFIAny (*)(StructuralMutatorObj* mutator, AnyView value) noexcept``
+ *
+ * returning raw ``Expected<Any>`` storage, or an
+ * ``ffi::Function`` with signature
+ *
+ * ``(StructuralMutator mutator, Any value) -> Any``.
+ *
+ * This hook is optional. When it is absent, ``DefaultMaybeInplaceMutateExpected`` falls back to
+ * non-in-place mutation through ``kStructuralMutate`` or reflected structural fields. In-place
+ * mutation is therefore explicitly opt-in and is never inferred from ownership by the reflected
+ * fallback.
+ */
+inline constexpr const char* kStructuralMaybeInplaceMutate = "__s_maybe_inplace_mutate__";
+
 /*!
  * \brief Serialize object data to a JSON-compatible value.
  *

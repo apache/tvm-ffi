@@ -217,6 +217,10 @@ structural_walk(&values, &mut probe, WalkOrder::PreOrder)?;
 assert_eq!(probe.total, 6);
 ```
 
+For `Map` and `Dict`, structural walk treats keys as structural anchors: it
+visits container values but does not pass keys to handlers. The map or dict
+object itself is still visited normally.
+
 Lambdas also work — pass a single typed lambda, or a tuple of them (up to 8)
 tried in order with the first matching argument type winning, like the
 variadic C++ `StructuralWalk(root, callbacks...)` chain. Unmatched values

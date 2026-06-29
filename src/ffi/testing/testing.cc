@@ -30,6 +30,7 @@
 #include <tvm/ffi/dtype.h>
 #include <tvm/ffi/enum.h>
 #include <tvm/ffi/extra/c_env_api.h>
+#include <tvm/ffi/extra/structural_mutate.h>
 #include <tvm/ffi/function.h>
 #include <tvm/ffi/optional.h>
 #include <tvm/ffi/reflection/accessor.h>
@@ -90,6 +91,145 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def_ro("b", &TestIntPairObj::b, "Field `b`")
       .def("sum", &TestIntPair::Sum, "Method to compute sum of a and b");
   refl::TypeAttrDef<TestIntPairObj>().def_convert<TestIntPair>();
+}
+
+// FreeVar fixture whose custom mutation hooks exercise explicit variable remapping.
+class StructuralMutateHookedVarObj : public Object {
+ public:
+  String name;
+  Optional<ObjectRef> dependency;
+
+  StructuralMutateHookedVarObj(String name, Optional<ObjectRef> dependency)
+      : name(std::move(name)), dependency(std::move(dependency)) {}
+  explicit StructuralMutateHookedVarObj(UnsafeInit) {}
+
+  static constexpr TVMFFISEqHashKind _type_s_eq_hash_kind = kTVMFFISEqHashKindFreeVar;
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("testing.StructuralMutateHookedVar",
+                                    StructuralMutateHookedVarObj, Object);
+};
+
+class StructuralMutateHookedVar : public ObjectRef {
+ public:
+  explicit StructuralMutateHookedVar(String name, Optional<ObjectRef> dependency = std::nullopt) {
+    data_ = make_object<StructuralMutateHookedVarObj>(std::move(name), std::move(dependency));
+  }
+
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(StructuralMutateHookedVar, ObjectRef,
+                                             StructuralMutateHookedVarObj);
+};
+
+Expected<Any> MutateHookedVarExpected(StructuralMutatorObj* mutator, AnyView value) noexcept {
+  try {
+    Expected<Any> existing = mutator->VarRemapGetExpected(value);
+    if (TVM_FFI_PREDICT_FALSE(existing.is_err())) {
+      return Unexpected(std::move(existing).error());
+    }
+    if (details::ExpectedUnsafe::GetData(existing).type_index() != TypeIndex::kTVMFFINone) {
+      return existing;
+    }
+
+    const auto* var = value.as<StructuralMutateHookedVarObj>();
+    Optional<ObjectRef> mapped_dependency = var->dependency;
+    bool dependency_changed = false;
+    if (var->dependency.has_value()) {
+      const ObjectRef& dependency = var->dependency.value();
+      Expected<Any> result = mutator->MutateExpected(dependency);
+      if (TVM_FFI_PREDICT_FALSE(result.is_err())) {
+        return Unexpected(std::move(result).error());
+      }
+      const Any& mapped_value = details::ExpectedUnsafe::GetData(result);
+      if (TVM_FFI_PREDICT_FALSE(mapped_value.type_index() < TypeIndex::kTVMFFIStaticObjectBegin)) {
+        return Unexpected(
+            Error("TypeError", "Hooked variable dependency must map to an object", ""));
+      }
+      mapped_dependency = mapped_value.cast<ObjectRef>();
+      dependency_changed = !var->dependency.value().same_as(mapped_dependency.value());
+    }
+
+    Any result(value);
+    bool name_changed = var->name == "n";
+    if (name_changed || dependency_changed) {
+      String mapped_name = name_changed ? String("n-mutated") : var->name;
+      result = StructuralMutateHookedVar(std::move(mapped_name), std::move(mapped_dependency));
+    }
+
+    Expected<void> stored = mutator->VarRemapSetExpected(value, result);
+    if (TVM_FFI_PREDICT_FALSE(stored.is_err())) {
+      return Unexpected(std::move(stored).error());
+    }
+    return result;
+  } catch (const Error& err) {
+    return Unexpected(err);
+  }
+}
+
+Expected<Any> MaybeInplaceMutateHookedVarExpected(StructuralMutatorObj* mutator,
+                                                  AnyView value) noexcept {
+  try {
+    Expected<Any> existing = mutator->VarRemapGetExpected(value);
+    if (TVM_FFI_PREDICT_FALSE(existing.is_err())) {
+      return Unexpected(std::move(existing).error());
+    }
+    if (details::ExpectedUnsafe::GetData(existing).type_index() != TypeIndex::kTVMFFINone) {
+      return existing;
+    }
+
+    auto* var = const_cast<StructuralMutateHookedVarObj*>(value.as<StructuralMutateHookedVarObj>());
+    if (var->dependency.has_value()) {
+      // Optional<ObjectRef>::value() returns an owning ObjectRef by value. Use a borrowed pointer
+      // so the uniqueness check observes only the dependency's existing owners.
+      const Object* dependency = var->dependency.as<Object>();
+      Expected<Any> result = mutator->MaybeInplaceMutateIfUniqueExpected(dependency);
+      if (TVM_FFI_PREDICT_FALSE(result.is_err())) {
+        return Unexpected(std::move(result).error());
+      }
+      const Any& mapped_value = details::ExpectedUnsafe::GetData(result);
+      if (TVM_FFI_PREDICT_FALSE(mapped_value.type_index() < TypeIndex::kTVMFFIStaticObjectBegin)) {
+        return Unexpected(
+            Error("TypeError", "Hooked variable dependency must map to an object", ""));
+      }
+      ObjectRef mapped_dependency = mapped_value.cast<ObjectRef>();
+      if (dependency != mapped_dependency.get()) {
+        var->dependency = std::move(mapped_dependency);
+      }
+    }
+    if (var->name == "n") {
+      var->name = String("n-maybe-mutated");
+    }
+
+    Any result(value);
+    Expected<void> stored = mutator->VarRemapSetExpected(value, result);
+    if (TVM_FFI_PREDICT_FALSE(stored.is_err())) {
+      return Unexpected(std::move(stored).error());
+    }
+    return result;
+  } catch (const Error& err) {
+    return Unexpected(err);
+  }
+}
+
+TVMFFIAny MutateHookedVar(StructuralMutatorObj* mutator, AnyView value) noexcept {
+  return details::ExpectedUnsafe::MoveToTVMFFIAny(MutateHookedVarExpected(mutator, value));
+}
+
+TVMFFIAny MaybeInplaceMutateHookedVar(StructuralMutatorObj* mutator, AnyView value) noexcept {
+  return details::ExpectedUnsafe::MoveToTVMFFIAny(
+      MaybeInplaceMutateHookedVarExpected(mutator, value));
+}
+
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  refl::ObjectDef<StructuralMutateHookedVarObj>()
+      .def(refl::init<String, Optional<ObjectRef>>())
+      .def_ro("name", &StructuralMutateHookedVarObj::name, refl::AttachFieldFlag::SEqHashIgnore())
+      .def_ro("dependency", &StructuralMutateHookedVarObj::dependency);
+  refl::EnsureTypeAttrColumn(refl::type_attr::kStructuralMutate);
+  refl::EnsureTypeAttrColumn(refl::type_attr::kStructuralMaybeInplaceMutate);
+  refl::TypeAttrDef<StructuralMutateHookedVarObj>()
+      .attr(refl::type_attr::kStructuralMutate,
+            reinterpret_cast<void*>(static_cast<FStructuralMutate>(&MutateHookedVar)))
+      .attr(refl::type_attr::kStructuralMaybeInplaceMutate,
+            reinterpret_cast<void*>(static_cast<FStructuralMutate>(&MaybeInplaceMutateHookedVar)));
 }
 
 // C++-backed enum used by the Python ``Enum`` tests to exercise both
