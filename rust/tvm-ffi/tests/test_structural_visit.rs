@@ -48,16 +48,19 @@ fn plain_walk_uses_native_sequence_fallback() {
 }
 
 #[test]
-fn plain_walk_uses_native_map_fallback() {
+fn plain_walk_visits_map_values_without_visiting_keys() {
     let root: Map<FfiString, i64> = [(FfiString::from("a"), 1i64), (FfiString::from("b"), 2i64)]
         .into_iter()
         .collect();
     let mut integers = 0;
+    let mut strings = 0;
     assert!(structural_walk(
         &root,
         |value: &VisitValue| {
             if value.cast::<i64>().is_some() {
                 integers += 1;
+            } else if value.cast::<FfiString>().is_some() {
+                strings += 1;
             }
             WalkResult::Advance
         },
@@ -66,6 +69,7 @@ fn plain_walk_uses_native_map_fallback() {
     .unwrap()
     .is_none());
     assert_eq!(integers, 2);
+    assert_eq!(strings, 0);
 }
 
 #[derive(Default)]
@@ -229,7 +233,7 @@ fn mutable_dict_is_snapshotted_before_callbacks() {
 }
 
 #[test]
-fn dense_map_layout_is_traversed_completely() {
+fn dense_map_layout_visits_all_values_without_visiting_keys() {
     // More than 4 entries forces the dense (block + iteration list) layout.
     let root: Map<FfiString, i64> = (0..9)
         .map(|i| (FfiString::from(format!("k{i}")), i as i64))
@@ -251,7 +255,7 @@ fn dense_map_layout_is_traversed_completely() {
     .unwrap()
     .is_none());
     assert_eq!(sum, (0..9).sum::<i64>());
-    assert_eq!(strings, 9);
+    assert_eq!(strings, 0);
 }
 
 #[test]

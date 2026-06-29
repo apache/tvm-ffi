@@ -192,7 +192,7 @@ TEST(StructuralVisitor, TraversesArray) {
   EXPECT_TRUE(AsTestVisitor(visitor)->visited[1].same_as(rhs));
 }
 
-TEST(StructuralVisitor, TraversesMap) {
+TEST(StructuralVisitor, TraversesMapValuesWithoutVisitingKeys) {
   ObjectRef key = TVar("key");
   ObjectRef value = TVar("value");
   Map<Any, Any> root{{key, value}};
@@ -202,9 +202,8 @@ TEST(StructuralVisitor, TraversesMap) {
 
   ASSERT_TRUE(result.is_ok());
   EXPECT_FALSE(result.value().has_value());
-  ASSERT_EQ(AsTestVisitor(visitor)->visited.size(), 2U);
-  EXPECT_TRUE(AsTestVisitor(visitor)->visited[0].same_as(key));
-  EXPECT_TRUE(AsTestVisitor(visitor)->visited[1].same_as(value));
+  ASSERT_EQ(AsTestVisitor(visitor)->visited.size(), 1U);
+  EXPECT_TRUE(AsTestVisitor(visitor)->visited[0].same_as(value));
 }
 
 TEST(StructuralVisitor, UsesFuncHook) {

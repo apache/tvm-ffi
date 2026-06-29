@@ -953,7 +953,7 @@ fn visit_children_raw<C: ChildVisit>(
         {
             // Fast path: read the MapBaseObj storage layout directly, like
             // the SeqPrefix path for arrays — zero FFI calls per entry.
-            // Dict entries are snapshotted first to keep the re-entrant
+            // Dict values are snapshotted first to keep the re-entrant
             // mutation guard. If the one-time layout validation fails
             // (e.g. an ABI-debug build), fall back to the packed-functor
             // iteration protocol.
@@ -1025,9 +1025,10 @@ fn visit_sequence<C: ChildVisit>(
     Ok(())
 }
 
-/// Walk map/dict entries by reading the `MapBaseObj` storage directly —
-/// the map analog of the `SeqPrefix` array fast path. `snapshot` first
-/// takes owned copies of all entries (Dict re-entrant mutation guard).
+/// Walk map/dict values by reading the `MapBaseObj` storage directly —
+/// the map analog of the `SeqPrefix` array fast path. Keys are structural
+/// anchors and are skipped. `snapshot` first takes owned copies of all values
+/// (Dict re-entrant mutation guard).
 #[inline(never)]
 fn visit_map_layout<C: ChildVisit>(
     value: TVMFFIAny,
@@ -1043,22 +1044,16 @@ fn visit_map_layout<C: ChildVisit>(
     let mut cursor = unsafe { MapCursor::new(map) };
 
     if snapshot {
-        let mut entries: Vec<(Any, Any)> = Vec::with_capacity(size);
+        let mut values: Vec<Any> = Vec::with_capacity(size);
         for _ in 0..size {
-            let Some((key, val)) = (unsafe { cursor.next() }) else {
+            let Some((_, value)) = (unsafe { cursor.next() }) else {
                 return Err(runtime_error("native visitor: map iteration ended early").into());
             };
-            entries.push((
-                Any::from(unsafe { view_of(&key) }),
-                Any::from(unsafe { view_of(&val) }),
-            ));
+            values.push(Any::from(unsafe { view_of(&value) }));
         }
-        for (index, (key, val)) in entries.into_iter().enumerate() {
+        for (index, value) in values.into_iter().enumerate() {
             visitor
-                .visit_child(raw_of_owned(&key), def_region_kind)
-                .map_err(|halt| with_error_context(halt, &format!("dict key [{index}]")))?;
-            visitor
-                .visit_child(raw_of_owned(&val), def_region_kind)
+                .visit_child(raw_of_owned(&value), def_region_kind)
                 .map_err(|halt| with_error_context(halt, &format!("dict value [{index}]")))?;
         }
         return Ok(());
@@ -1068,14 +1063,11 @@ fn visit_map_layout<C: ChildVisit>(
     // callbacks, so visit them in place. The `size` bound also guards the
     // dense iteration list against corruption-induced cycles.
     for index in 0..size {
-        let Some((key, val)) = (unsafe { cursor.next() }) else {
+        let Some((_, value)) = (unsafe { cursor.next() }) else {
             return Err(runtime_error("native visitor: map iteration ended early").into());
         };
         visitor
-            .visit_child(key, def_region_kind)
-            .map_err(|halt| with_error_context(halt, &format!("map key [{index}]")))?;
-        visitor
-            .visit_child(val, def_region_kind)
+            .visit_child(value, def_region_kind)
             .map_err(|halt| with_error_context(halt, &format!("map value [{index}]")))?;
     }
     Ok(())
@@ -1084,10 +1076,10 @@ fn visit_map_layout<C: ChildVisit>(
 /// Cold fallback used when the mirrored layout fails validation (e.g. an
 /// ABI-debug build): iterate through the public packed functors. Map storage
 /// is private C++; the Rust binding itself uses these iterator functors, so
-/// no structural visiting or traversal control leaves Rust. Entries are
-/// snapshotted before user callbacks run — required for Dict, whose mutation
-/// invalidates the iterator, and harmless for immutable Map on this
-/// non-performance path.
+/// no structural visiting or traversal control leaves Rust. Keys are structural
+/// anchors and are skipped. Values are snapshotted before user callbacks run —
+/// required for Dict, whose mutation invalidates the iterator, and harmless for
+/// immutable Map on this non-performance path.
 fn visit_map<C: ChildVisit>(
     value: TVMFFIAny,
     visitor: &mut C,
@@ -1114,20 +1106,16 @@ fn visit_map<C: ChildVisit>(
     let iter_any = Function::get_global(iter_name)?.call_packed(&[unsafe { view_of(&value) }])?;
     let iter = Function::try_from(iter_any)?;
 
-    let mut entries = Vec::with_capacity(size);
+    let mut values = Vec::with_capacity(size);
     for index in 0..size {
-        let key = iter.call_packed(&[AnyView::from(&0i64)])?;
         let map_value = iter.call_packed(&[AnyView::from(&1i64)])?;
-        entries.push((key, map_value));
+        values.push(map_value);
         if index + 1 != size {
             iter.call_packed(&[AnyView::from(&2i64)])?;
         }
     }
 
-    for (index, (key, map_value)) in entries.into_iter().enumerate() {
-        visitor
-            .visit_child(raw_of_owned(&key), def_region_kind)
-            .map_err(|halt| with_error_context(halt, &format!("{kind} key [{index}]")))?;
+    for (index, map_value) in values.into_iter().enumerate() {
         visitor
             .visit_child(raw_of_owned(&map_value), def_region_kind)
             .map_err(|halt| with_error_context(halt, &format!("{kind} value [{index}]")))?;
