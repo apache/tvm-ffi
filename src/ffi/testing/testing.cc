@@ -37,6 +37,7 @@
 
 #include <chrono>
 #include <iostream>
+#include <string>
 #include <thread>
 #include <utility>
 
@@ -379,6 +380,162 @@ class TestEqWithoutHash : public ObjectRef {
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(TestEqWithoutHash, ObjectRef, TestEqWithoutHashObj);
 };
 
+enum class StructuralMapTestAction : int32_t {
+  kKeep,
+  kChange,
+  kError,
+};
+
+class StructuralMapperObj;
+using FStructuralMapTestTransform = TVMFFIAny (*)(StructuralMapperObj*, Any) noexcept;
+
+Array<String>& StructuralMapTestTrace() {
+  static Array<String> trace;
+  return trace;
+}
+
+class StructuralMapTestLeafObj : public Object {
+ public:
+  int64_t value;
+  StructuralMapTestAction action;
+
+  StructuralMapTestLeafObj(int64_t value, StructuralMapTestAction action)
+      : value(value), action(action) {}
+
+  static TVMFFIAny StructuralMap(StructuralMapperObj* mapper, Any value) noexcept;
+  static TVMFFIAny StructuralInplaceMutate(StructuralMapperObj* mapper, Any value) noexcept;
+
+  static constexpr bool _type_mutable = true;
+  static constexpr TVMFFISEqHashKind _type_s_eq_hash_kind = kTVMFFISEqHashKindTreeNode;
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("testing.StructuralMapLeaf", StructuralMapTestLeafObj, Object);
+};
+
+class StructuralMapTestLeaf : public ObjectRef {
+ public:
+  StructuralMapTestLeaf(int64_t value, StructuralMapTestAction action) {
+    data_ = make_object<StructuralMapTestLeafObj>(value, action);
+  }
+
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(StructuralMapTestLeaf, ObjectRef,
+                                             StructuralMapTestLeafObj);
+};
+
+class StructuralMapTestFunctionLeafObj : public Object {
+ public:
+  int64_t value;
+  StructuralMapTestAction action;
+
+  StructuralMapTestFunctionLeafObj(int64_t value, StructuralMapTestAction action)
+      : value(value), action(action) {}
+
+  static Any StructuralMap(ObjectRef, Any value);
+  static Any StructuralInplaceMutate(ObjectRef, Any value);
+
+  static constexpr bool _type_mutable = true;
+  static constexpr TVMFFISEqHashKind _type_s_eq_hash_kind = kTVMFFISEqHashKindTreeNode;
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("testing.StructuralMapFunctionLeaf",
+                                    StructuralMapTestFunctionLeafObj, Object);
+};
+
+class StructuralMapTestFunctionLeaf : public ObjectRef {
+ public:
+  StructuralMapTestFunctionLeaf(int64_t value, StructuralMapTestAction action) {
+    data_ = make_object<StructuralMapTestFunctionLeafObj>(value, action);
+  }
+
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(StructuralMapTestFunctionLeaf, ObjectRef,
+                                             StructuralMapTestFunctionLeafObj);
+};
+
+// NOLINTNEXTLINE(bugprone-exception-escape)
+TVMFFIAny StructuralMapTestLeafObj::StructuralMap(StructuralMapperObj*, Any value) noexcept {
+  const StructuralMapTestLeafObj* leaf = value.as<StructuralMapTestLeafObj>();
+  StructuralMapTestTrace().push_back("map:" + std::to_string(leaf->value));
+
+  if (leaf->action == StructuralMapTestAction::kError) {
+    Expected<Any> result = Unexpected(Error("ValueError", "structural map leaf failed", ""));
+    return details::ExpectedUnsafe::MoveToTVMFFIAny(std::move(result));
+  }
+  if (leaf->action == StructuralMapTestAction::kChange) {
+    Expected<Any> result =
+        Any(StructuralMapTestLeaf(leaf->value + 1, StructuralMapTestAction::kKeep));
+    return details::ExpectedUnsafe::MoveToTVMFFIAny(std::move(result));
+  }
+
+  Expected<Any> result = std::move(value);
+  return details::ExpectedUnsafe::MoveToTVMFFIAny(std::move(result));
+}
+
+// NOLINTNEXTLINE(bugprone-exception-escape)
+TVMFFIAny StructuralMapTestLeafObj::StructuralInplaceMutate(StructuralMapperObj*,
+                                                            Any value) noexcept {
+  StructuralMapTestLeafObj* leaf = value.cast<StructuralMapTestLeafObj*>();
+  StructuralMapTestTrace().push_back("inplace:" + std::to_string(leaf->value));
+
+  if (leaf->action == StructuralMapTestAction::kError) {
+    Expected<Any> result = Unexpected(Error("ValueError", "structural map leaf failed", ""));
+    return details::ExpectedUnsafe::MoveToTVMFFIAny(std::move(result));
+  }
+  if (leaf->action == StructuralMapTestAction::kChange) {
+    ++leaf->value;
+    leaf->action = StructuralMapTestAction::kKeep;
+  }
+
+  Expected<Any> result = std::move(value);
+  return details::ExpectedUnsafe::MoveToTVMFFIAny(std::move(result));
+}
+
+// NOLINTNEXTLINE(performance-unnecessary-value-param)
+Any StructuralMapTestFunctionLeafObj::StructuralMap(ObjectRef, Any value) {
+  const StructuralMapTestFunctionLeafObj* leaf = value.as<StructuralMapTestFunctionLeafObj>();
+  StructuralMapTestTrace().push_back("function-map:" + std::to_string(leaf->value));
+
+  if (leaf->action == StructuralMapTestAction::kError) {
+    TVM_FFI_THROW(ValueError) << "structural map function leaf failed";
+  }
+  if (leaf->action == StructuralMapTestAction::kChange) {
+    return StructuralMapTestFunctionLeaf(leaf->value + 1, StructuralMapTestAction::kKeep);
+  }
+  return value;
+}
+
+// NOLINTNEXTLINE(performance-unnecessary-value-param)
+Any StructuralMapTestFunctionLeafObj::StructuralInplaceMutate(ObjectRef, Any value) {
+  StructuralMapTestFunctionLeafObj* leaf = value.cast<StructuralMapTestFunctionLeafObj*>();
+  StructuralMapTestTrace().push_back("function-inplace:" + std::to_string(leaf->value));
+
+  if (leaf->action == StructuralMapTestAction::kError) {
+    TVM_FFI_THROW(ValueError) << "structural map function leaf failed";
+  }
+  if (leaf->action == StructuralMapTestAction::kChange) {
+    ++leaf->value;
+    leaf->action = StructuralMapTestAction::kKeep;
+  }
+  return value;
+}
+
+ObjectRef MakeStructuralMapTestLeaf(int64_t value, int32_t action) {
+  return StructuralMapTestLeaf(value, static_cast<StructuralMapTestAction>(action));
+}
+
+ObjectRef MakeStructuralMapTestFunctionLeaf(int64_t value, int32_t action) {
+  return StructuralMapTestFunctionLeaf(value, static_cast<StructuralMapTestAction>(action));
+}
+
+int64_t GetStructuralMapTestLeafValue(const ObjectRef& value) {
+  if (const auto* leaf = value.as<StructuralMapTestLeafObj>()) {
+    return leaf->value;
+  }
+  if (const auto* leaf = value.as<StructuralMapTestFunctionLeafObj>()) {
+    return leaf->value;
+  }
+  TVM_FFI_THROW(TypeError) << "Expected a structural-map test leaf";
+}
+
+Array<String> GetStructuralMapTestTrace() { return StructuralMapTestTrace(); }
+
+void ClearStructuralMapTestTrace() { StructuralMapTestTrace().clear(); }
+
 // NOLINTNEXTLINE(performance-unnecessary-value-param)
 TVM_FFI_NO_INLINE void TestRaiseError(String kind, String msg) {
   // keep name and no liner for testing backtrace
@@ -535,6 +692,25 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def_ro("key", &TestEqWithoutHashObj::key)
       .def_ro("label", &TestEqWithoutHashObj::label);
 
+  refl::EnsureTypeAttrColumn(refl::type_attr::kStructuralMap);
+  refl::EnsureTypeAttrColumn(refl::type_attr::kStructuralInplaceMutate);
+
+  refl::ObjectDef<StructuralMapTestLeafObj>().def_rw("value", &StructuralMapTestLeafObj::value);
+  refl::TypeAttrDef<StructuralMapTestLeafObj>()
+      .attr(refl::type_attr::kStructuralMap,
+            reinterpret_cast<void*>(
+                static_cast<FStructuralMapTestTransform>(&StructuralMapTestLeafObj::StructuralMap)))
+      .attr(refl::type_attr::kStructuralInplaceMutate,
+            reinterpret_cast<void*>(static_cast<FStructuralMapTestTransform>(
+                &StructuralMapTestLeafObj::StructuralInplaceMutate)));
+
+  refl::ObjectDef<StructuralMapTestFunctionLeafObj>().def_rw(
+      "value", &StructuralMapTestFunctionLeafObj::value);
+  refl::TypeAttrDef<StructuralMapTestFunctionLeafObj>()
+      .def(refl::type_attr::kStructuralMap, &StructuralMapTestFunctionLeafObj::StructuralMap)
+      .def(refl::type_attr::kStructuralInplaceMutate,
+           &StructuralMapTestFunctionLeafObj::StructuralInplaceMutate);
+
   refl::GlobalDef()
       .def("testing.test_raise_error", TestRaiseError)
       .def("testing.add_one", [](int x) { return x + 1; })
@@ -616,6 +792,13 @@ TVM_FFI_STATIC_INIT_BLOCK() {
              return result;
            });
   // NOLINTEND(performance-unnecessary-value-param)
+
+  refl::GlobalDef()
+      .def("testing.make_structural_map_leaf", MakeStructuralMapTestLeaf)
+      .def("testing.make_structural_map_function_leaf", MakeStructuralMapTestFunctionLeaf)
+      .def("testing.structural_map_leaf_value", GetStructuralMapTestLeafValue)
+      .def("testing.structural_mapper_trace", GetStructuralMapTestTrace)
+      .def("testing.structural_mapper_clear_trace", ClearStructuralMapTestTrace);
 }
 
 }  // namespace ffi
