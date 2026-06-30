@@ -53,6 +53,12 @@
 #include <cstring>
 #include <utility>
 
+// ``_Interlocked*`` intrinsics for the MSVC arm of the spin-lock leaves below. <intrin.h>, not
+// <windows.h>, to keep min/max etc. macros out of the Cython TU.
+#if defined(_MSC_VER) && defined(Py_GIL_DISABLED)
+#include <intrin.h>
+#endif
+
 //================================================================================
 // PyObject-tying state machine.
 //
@@ -177,7 +183,8 @@
 // read is a use-after-free (``make_ret`` reads the wrapper, a concurrent dealloc frees
 // it before the IncRef). The tie stays enabled; three FT-only mechanisms close the gap,
 // all behind ``#ifdef Py_GIL_DISABLED`` so the GIL build is byte-for-byte unchanged:
-//   * The word is its own spin-lock (a Locked tag bit, CAS-acquired via ``__atomic_*``),
+//   * The word is its own spin-lock (a Locked tag bit, CAS-acquired via the portable
+//     pointer-atomic leaves -- ``__atomic_*`` on GCC/Clang, ``_Interlocked*`` on MSVC),
 //     so every transition serializes its word edits. Details in the word-access leaves.
 //   * The Active hit uses ``PyUnstable_TryIncRef`` (inc-if-nonzero), not ``Py_INCREF``,
 //     so it fails on a wrapper a concurrent dealloc is collecting -- closing the UAF.
@@ -246,7 +253,8 @@ TVM_FFI_INLINE PyObject* TVMFFIPyTagClearInTransit(PyObject* tagged) {
 //             ``TVMFFIPyLockYield`` (GC-safe back-off, free-threaded only).
 //
 // Free-threaded build: the word is a spin-lock encoded in ``tagged_pyobj`` (the Locked
-// bit), CAS-acquired and release-stored via ``__atomic_*``. Held only across short,
+// bit), CAS-acquired and release-stored via the portable pointer-atomic helpers
+// (``__atomic_*`` on GCC/Clang, ``_Interlocked*`` on MSVC). Held only across short,
 // *park-free* sections (no alloc / DecRef / GC op / blocking call), and every wait goes
 // through ``TVMFFIPyLockYield`` (detaches the thread state), so the cyclic GC's
 // stop-the-world can never freeze a holder nor starve on a waiter.
@@ -268,17 +276,62 @@ TVM_FFI_INLINE void TVMFFIPyLockYield() {
   PyEval_RestoreThread(tstate);
 }
 
+// Portable pointer atomics on ``tagged_pyobj``: ``_Interlocked*`` on MSVC (no ``__atomic_*``
+// there), ``__atomic_*`` elsewhere -- same dual-coding the C++ core uses for its refcount word
+// (``object.h`` ``TryPromoteWeakPtr`` / ``init_once.cc``). Confining the split to these four
+// leaves keeps every transition body below build-agnostic. The relaxed load is only the CAS seed
+// (ordering comes from the CAS); the MSVC CAS is strong, the builtin weak -- the spin loop copes.
+TVM_FFI_INLINE PyObject* TVMFFIPyWordLoadRelaxed(PyCustomAllocHeader* h) {
+#if defined(_MSC_VER)
+  return reinterpret_cast<PyObject* const volatile*>(&h->tagged_pyobj)[0];  // NOLINT(*)
+#else
+  return __atomic_load_n(&h->tagged_pyobj, __ATOMIC_RELAXED);
+#endif
+}
+
+TVM_FFI_INLINE PyObject* TVMFFIPyWordLoadAcquire(PyCustomAllocHeader* h) {
+#if defined(_MSC_VER)
+  // CAS NULL/NULL: an acquire-ordered read that never writes (stores only if it already was NULL).
+  return reinterpret_cast<PyObject*>(_InterlockedCompareExchangePointer(
+      reinterpret_cast<void* volatile*>(&h->tagged_pyobj), nullptr, nullptr));
+#else
+  return __atomic_load_n(&h->tagged_pyobj, __ATOMIC_ACQUIRE);
+#endif
+}
+
+TVM_FFI_INLINE void TVMFFIPyWordStoreRelease(PyCustomAllocHeader* h, PyObject* v) {
+#if defined(_MSC_VER)
+  _InterlockedExchangePointer(reinterpret_cast<void* volatile*>(&h->tagged_pyobj), v);
+#else
+  __atomic_store_n(&h->tagged_pyobj, v, __ATOMIC_RELEASE);
+#endif
+}
+
+// Acquire CAS: on match set ``desired`` and return true; else reload ``*expect`` and return false.
+TVM_FFI_INLINE bool TVMFFIPyWordCASAcquire(PyCustomAllocHeader* h, PyObject** expect,
+                                           PyObject* desired) {
+#if defined(_MSC_VER)
+  PyObject* prev = reinterpret_cast<PyObject*>(_InterlockedCompareExchangePointer(
+      reinterpret_cast<void* volatile*>(&h->tagged_pyobj), desired, *expect));
+  if (prev == *expect) return true;
+  *expect = prev;
+  return false;
+#else
+  return __atomic_compare_exchange_n(&h->tagged_pyobj, expect, desired, /*weak=*/true,
+                                     __ATOMIC_ACQUIRE, __ATOMIC_RELAXED);
+#endif
+}
+
 /*! \brief Acquire the per-word spin-lock (CAS on the Locked bit). Returns the prior binding
  *         (Locked bit cleared); release it via ``TVMFFIPyUnlockWord`` / ``TVMFFIPyUnlockKeep``. */
 TVM_FFI_INLINE PyObject* TVMFFIPyLockWord(PyCustomAllocHeader* h) {
   for (;;) {
-    PyObject* cur = __atomic_load_n(&h->tagged_pyobj, __ATOMIC_RELAXED);
+    PyObject* cur = TVMFFIPyWordLoadRelaxed(h);
     if (!TVMFFIPyTagIsLocked(cur)) {
       PyObject* locked =
           reinterpret_cast<PyObject*>(reinterpret_cast<uintptr_t>(cur) | kPyLockedTagBit);
       // Acquire on success so the locked section happens-after the matching release.
-      if (__atomic_compare_exchange_n(&h->tagged_pyobj, &cur, locked, /*weak=*/true,
-                                      __ATOMIC_ACQUIRE, __ATOMIC_RELAXED)) {
+      if (TVMFFIPyWordCASAcquire(h, &cur, locked)) {
         return cur;
       }
       // CAS failed (lost the race or spurious); ``cur`` reloaded -- retry without
@@ -291,7 +344,7 @@ TVM_FFI_INLINE PyObject* TVMFFIPyLockWord(PyCustomAllocHeader* h) {
 
 /*! \brief Release the lock, transitioning the binding to ``new_state``. */
 TVM_FFI_INLINE void TVMFFIPyUnlockWord(PyCustomAllocHeader* h, PyObject* new_state) {
-  __atomic_store_n(&h->tagged_pyobj, new_state, __ATOMIC_RELEASE);
+  TVMFFIPyWordStoreRelease(h, new_state);
 }
 
 /*! \brief Release the lock leaving the binding unchanged. On free-threaded builds this is just
@@ -302,7 +355,7 @@ TVM_FFI_INLINE void TVMFFIPyUnlockKeep(PyCustomAllocHeader* h, PyObject* cur) {
 
 /*! \brief Read the binding without acquiring the lock (a lock-free peek). */
 TVM_FFI_INLINE PyObject* TVMFFIPyAcquireLoad(PyCustomAllocHeader* h) {
-  return __atomic_load_n(&h->tagged_pyobj, __ATOMIC_ACQUIRE);
+  return TVMFFIPyWordLoadAcquire(h);
 }
 
 /*! \brief Arm ``obj`` for a concurrent reader's ``TryIncRef``; sequence before publishing it
