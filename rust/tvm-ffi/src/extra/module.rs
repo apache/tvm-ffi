@@ -51,10 +51,8 @@ impl Module {
     /// # Returns
     /// * `Result<Module>` - A `Module` instance on success
     pub fn load_from_file<Str: AsRef<str>>(file_name: Str) -> Result<Module> {
-        static API_FUNC: std::sync::LazyLock<Function> =
-            std::sync::LazyLock::new(|| Function::get_global("ffi.ModuleLoadFromFile").unwrap());
         let file_name = crate::string::String::from(file_name);
-        (*API_FUNC)
+        crate::cached_global_func!("ffi.ModuleLoadFromFile")
             .call_tuple_with_len::<1, _>((file_name,))?
             .try_into()
     }
@@ -67,10 +65,8 @@ impl Module {
     /// # Returns
     /// * `Result<Function>` - A `Function` instance on success
     pub fn get_function<Str: AsRef<str>>(&self, name: Str) -> Result<Function> {
-        static API_FUNC: std::sync::LazyLock<Function> =
-            std::sync::LazyLock::new(|| Function::get_global("ffi.ModuleGetFunction").unwrap());
         let name = crate::string::String::from(name);
-        (*API_FUNC)
+        crate::cached_global_func!("ffi.ModuleGetFunction")
             .call_tuple_with_len::<3, _>((self, name, true))?
             .try_into()
     }

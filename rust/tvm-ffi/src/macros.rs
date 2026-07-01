@@ -40,6 +40,25 @@ macro_rules! function_name {
     }};
 }
 
+/// Resolves a registered global [`Function`](crate::function::Function) by name
+/// and caches it for the lifetime of the process (lock-free after the first
+/// lookup). Each call site gets its own cache and the macro evaluates to a
+/// `&'static Function`. Panics — naming the function — if it is not registered.
+///
+/// Usage: `cached_global_func!("ffi.Map").call_packed(args)`
+#[macro_export]
+macro_rules! cached_global_func {
+    ($name:literal) => {{
+        static FUNC: std::sync::LazyLock<$crate::function::Function> =
+            std::sync::LazyLock::new(|| {
+                $crate::function::Function::get_global($name).unwrap_or_else(|_| {
+                    panic!(concat!("global function `", $name, "` is not registered"))
+                })
+            });
+        &*FUNC
+    }};
+}
+
 /// Check the return code of the safe call
 ///
 /// # Arguments
