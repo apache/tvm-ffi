@@ -191,7 +191,9 @@ where
     /// **undefined** (currently reads as `false`; see [`Map::get`]); debug builds
     /// assert against it.
     pub fn contains_key(&self, key: &K) -> bool {
-        let present = self.try_contains_key(key).expect("ffi.MapCount call failed");
+        let present = self
+            .try_contains_key(key)
+            .expect("ffi.MapCount call failed");
         if !present {
             self.debug_assert_key_type();
         }
@@ -325,7 +327,10 @@ fn iter_read<T: AnyCompatible>(functor: &Function, command: i64, kind: &str) -> 
 /// the map is now exhausted. Callers must guard `remaining > 0` (every `next`
 /// returns early when it hits 0), so the decrement can never underflow.
 fn iter_advance(functor: &Function, remaining: &mut usize) {
-    debug_assert!(*remaining > 0, "iter_advance called with no remaining entries");
+    debug_assert!(
+        *remaining > 0,
+        "iter_advance called with no remaining entries"
+    );
     *remaining -= 1;
     if *remaining > 0 {
         functor

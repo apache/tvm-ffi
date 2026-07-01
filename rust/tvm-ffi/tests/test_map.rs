@@ -16,10 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-use tvm_ffi::{
-    Any, AnyView, CPUNDAlloc, DLDataType, DLDataTypeCode, DLDevice, DLDeviceType, Function, Map,
-    String as FfiString, Tensor, TypeIndex,
-};
+use tvm_ffi::*;
 
 /// Helper to create a CPU `f32` tensor whose first element is `val`.
 fn create_tensor(val: f32, shape: &[i64]) -> Tensor {
@@ -101,19 +98,19 @@ fn test_map_iteration() {
 
 #[test]
 fn test_map_string_keys() {
-    let map: Map<FfiString, i64> = [
-        (FfiString::from("a"), 1i64),
-        (FfiString::from("b"), 2),
-        (FfiString::from("c"), 3),
+    let map: Map<String, i64> = [
+        (String::from("a"), 1i64),
+        (String::from("b"), 2),
+        (String::from("c"), 3),
     ]
     .into_iter()
     .collect();
 
     assert_eq!(map.len(), 3);
-    assert_eq!(map.get(&FfiString::from("a")).unwrap(), Some(1));
-    assert_eq!(map.get(&FfiString::from("c")).unwrap(), Some(3));
-    assert_eq!(map.get(&FfiString::from("z")).unwrap(), None);
-    assert!(map.contains_key(&FfiString::from("b")));
+    assert_eq!(map.get(&String::from("a")).unwrap(), Some(1));
+    assert_eq!(map.get(&String::from("c")).unwrap(), Some(3));
+    assert_eq!(map.get(&String::from("z")).unwrap(), None);
+    assert!(map.contains_key(&String::from("b")));
 }
 
 #[test]
@@ -147,12 +144,12 @@ fn test_map_object_values_and_refcount() {
     assert_eq!(base, 1);
 
     // Building the map stores one internal reference to the tensor object.
-    let map: Map<FfiString, Tensor> = [(FfiString::from("x"), t.clone())].into_iter().collect();
+    let map: Map<String, Tensor> = [(String::from("x"), t.clone())].into_iter().collect();
     assert_eq!(AnyView::from(&t).debug_strong_count().unwrap(), base + 1);
 
     // The value round-trips correctly and `get` hands back a fresh handle.
     let got = map
-        .get(&FfiString::from("x"))
+        .get(&String::from("x"))
         .unwrap()
         .expect("key should be present");
     assert_eq!(get_val(&got), 7.0);
@@ -160,7 +157,7 @@ fn test_map_object_values_and_refcount() {
     assert_eq!(AnyView::from(&t).debug_strong_count().unwrap(), base + 2);
 
     // Iteration yields object handles too.
-    let collected: Vec<(FfiString, Tensor)> = map.iter().collect();
+    let collected: Vec<(String, Tensor)> = map.iter().collect();
     assert_eq!(collected.len(), 1);
     assert_eq!(get_val(&collected[0].1), 7.0);
     // Peak: `t` + the map's internal ref + `got` + the iterated handle.
@@ -205,21 +202,21 @@ fn test_map_as_function_argument() {
 /// is object-typed (an absent lookup must not be miscast into a `V`).
 #[test]
 fn test_map_get_missing_with_object_values() {
-    let map: Map<FfiString, Tensor> = [(FfiString::from("x"), create_tensor(7.0, &[2]))]
+    let map: Map<String, Tensor> = [(String::from("x"), create_tensor(7.0, &[2]))]
         .into_iter()
         .collect();
 
-    let present = map.get(&FfiString::from("x")).unwrap();
+    let present = map.get(&String::from("x")).unwrap();
     assert!(present.is_some());
     assert_eq!(get_val(&present.unwrap()), 7.0);
 
     // Absent key returns `None`, never an object miscast as a tensor.
-    assert!(map.get(&FfiString::from("missing")).unwrap().is_none());
+    assert!(map.get(&String::from("missing")).unwrap().is_none());
 }
 
-/// Builds an `i64`-valued map but views it as `Map<_, FfiString>`: the
+/// Builds an `i64`-valued map but views it as `Map<_, String>`: the
 /// container-level cast succeeds, so the mismatch only surfaces on access.
-fn mistyped_value_map() -> Map<i64, FfiString> {
+fn mistyped_value_map() -> Map<i64, String> {
     let real: Map<i64, i64> = [(1i64, 10i64)].into_iter().collect();
     Map::try_from(Any::from(real)).expect("container-level cast should succeed")
 }
@@ -247,9 +244,9 @@ fn test_map_iter_type_mismatch_panics() {
 #[test]
 #[should_panic(expected = "does not match the map's stored key type")]
 fn test_map_get_mistyped_key_debug_asserts() {
-    // Real `Map<i64, i64>` viewed as `Map<FfiString, i64>`: the i64 keys do not
-    // match `K = FfiString`.
+    // Real `Map<i64, i64>` viewed as `Map<String, i64>`: the i64 keys do not
+    // match `K = String`.
     let real: Map<i64, i64> = [(1i64, 10i64)].into_iter().collect();
-    let map: Map<FfiString, i64> = Map::try_from(Any::from(real)).expect("container cast");
-    let _ = map.get(&FfiString::from("anything"));
+    let map: Map<String, i64> = Map::try_from(Any::from(real)).expect("container cast");
+    let _ = map.get(&String::from("anything"));
 }
