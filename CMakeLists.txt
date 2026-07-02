@@ -70,6 +70,7 @@ set(_tvm_ffi_objs_sources
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/dtype.cc"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/container.cc"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/init_once.cc"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/custom_allocator.cc"
 )
 
 set(_tvm_ffi_extra_objs_sources
@@ -279,20 +280,11 @@ if (TVM_FFI_BUILD_PYTHON_MODULE)
     VERBATIM
   )
 
-  if (Python_VERSION VERSION_GREATER_EQUAL "3.12" AND NOT PYTHON_IS_FREE_THREADED)
-    # >= Python3.12, use Use_SABI version
-    python_add_library(tvm_ffi_cython MODULE "${_core_cpp}" USE_SABI 3.12)
-    target_link_libraries(tvm_ffi_cython PRIVATE Python::SABIModule)
-    set_target_properties(tvm_ffi_cython PROPERTIES OUTPUT_NAME "core")
-    if (NOT WIN32)
-      target_link_libraries(tvm_ffi_cython PRIVATE Python::Module)
-      set_target_properties(tvm_ffi_cython PROPERTIES SUFFIX ".abi3.so")
-    endif ()
-  else ()
-    # before Python3.12, use WITH_SOABI version
-    python_add_library(tvm_ffi_cython MODULE "${_core_cpp}" WITH_SOABI)
-    set_target_properties(tvm_ffi_cython PROPERTIES OUTPUT_NAME "core")
-  endif ()
+  # The PyObject-tying impl in tvm_ffi_python_object.h uses full Python C API (Py_IncRef,
+  # PyObject_GC_Del, atomic header reads), so we build against the per-version ABI rather than the
+  # limited (abi3) ABI.
+  python_add_library(tvm_ffi_cython MODULE "${_core_cpp}" WITH_SOABI)
+  set_target_properties(tvm_ffi_cython PROPERTIES OUTPUT_NAME "core")
   target_include_directories(
     tvm_ffi_cython PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/python/tvm_ffi/cython
   )
@@ -330,6 +322,9 @@ if (TVM_FFI_BUILD_PYTHON_MODULE)
           DESTINATION share/cmake/tvm_ffi
   )
   install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/python/tvm_ffi/cython/tvm_ffi_python_helpers.h
+          DESTINATION include/
+  )
+  install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/python/tvm_ffi/cython/tvm_ffi_python_object.h
           DESTINATION include/
   )
 endif ()

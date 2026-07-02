@@ -582,6 +582,66 @@ TVM_FFI_DLL int TVMFFIObjectDecRef(TVMFFIObjectHandle obj);
 TVM_FFI_DLL int TVMFFIObjectCreateOpaque(void* handle, int32_t type_index,
                                          void (*deleter)(void* handle), TVMFFIObjectHandle* out);
 
+//-----------------------------------------------------------------------
+// Section: ObjectAllocHeader and CustomAllocator
+//-----------------------------------------------------------------------
+/*!
+ * \brief Mandatory header placed immediately before each TVMFFIObject body.
+ *
+ * This header may be used by TVMFFIObject::deleter to reclaim space when a
+ * custom allocator is present. It can also be set to NULL if
+ * TVMFFIObject::deleter directly calls system free. This section must be
+ * available for each Object so a frontend can rely on this field to confirm
+ * if the object came from a certain allocator.
+ */
+typedef struct {
+  /*!
+   * \brief Free the allocation.
+   * \param ptr The pointer to the space of the object.
+   * \note ``ptr`` points to the space of TVMFFIObject and does not include
+   *       the TVMFFIObjectAllocHeader.
+   */
+  void (*delete_space)(void* ptr);
+} TVMFFIObjectAllocHeader;
+
+/*!
+ * \brief Custom allocator entry registered with TVMFFISetCustomAllocator.
+ */
+typedef struct {
+  /*!
+   * \brief Allocate the space for an Object body.
+   * \param size The size requested for the object body.
+   * \param alignment The alignment requirement for the object body.
+   * \param type_index Type index of the object.
+   * \param context The ``context`` field of the registered allocator.
+   * \return Pointer to the space of the object, or NULL on failure (with
+   *         the error reported via ``TVMFFIErrorSetRaised``).
+   * \note The returned pointer must be preceded by a
+   *       ``TVMFFIObjectAllocHeader`` whose ``delete_space`` releases the
+   *       full underlying allocation when invoked.
+   */
+  void* (*allocate)(size_t size, size_t alignment, int32_t type_index, void* context);
+  /*! \brief Allocator context passed unmodified to ``allocate``. */
+  void* context;
+} TVMFFICustomAllocator;
+
+/*!
+ * \brief Get the process-wide custom allocator.
+ * \return The currently registered allocator (never NULL).
+ * \note ``TVMFFIGetCustomAllocator`` always returns a valid allocator and
+ *       can be overridden by ``TVMFFISetCustomAllocator``.
+ */
+TVM_FFI_DLL TVMFFICustomAllocator* TVMFFIGetCustomAllocator(void);
+
+/*!
+ * \brief Register the process-wide custom allocator.
+ * \param allocator Pointer to a TVMFFICustomAllocator, or NULL to restore
+ *                  the builtin default.
+ * \return 0 on success, nonzero on failure.
+ * \note ``allocator`` must be alive throughout the lifetime of the process.
+ */
+TVM_FFI_DLL int TVMFFISetCustomAllocator(TVMFFICustomAllocator* allocator);
+
 /*!
  * \brief Convert type key to type index.
  * \param type_key The key of the type.

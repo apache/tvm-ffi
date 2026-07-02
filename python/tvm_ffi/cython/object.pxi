@@ -103,9 +103,8 @@ cdef class CObject:
         self.chandle = NULL
 
     def __dealloc__(self):
-        if self.chandle != NULL:
-            CHECK_CALL(TVMFFIObjectDecRef(self.chandle))
-            self.chandle = NULL
+        # Release the wrapper's +1 on the chandle and inactivate-or-free its allocation.
+        TVMFFIPyTpDealloc(<void**>&self.chandle, <PyObject*>self)
 
     def __ctypes_handle__(self) -> object:
         return ctypes_handle(self.chandle)
@@ -173,8 +172,10 @@ cdef class CObject:
         return isinstance(other, CObject) and self.chandle == (<CObject>other).chandle
 
     def __move_handle_from__(self, other: CObject) -> None:
-        self.chandle = (<CObject>other).chandle
+        cdef void* chandle = (<CObject>other).chandle
+        self.chandle = chandle
         (<CObject>other).chandle = NULL
+        TVMFFIPyCompareAndRebindPyObject(chandle, <PyObject*>other, <PyObject*>self)
 
     def __init_handle_by_constructor__(self, fconstructor: Any, *args: Any) -> None:
         # avoid error raised during construction.
@@ -183,6 +184,8 @@ cdef class CObject:
         ConstructorCall(
             (<CObject>fconstructor).chandle, <PyObject*>args, &chandle, NULL)
         self.chandle = chandle
+        # Attach self as the canonical wrapper iff the chandle is Detached (expect=NULL).
+        TVMFFIPyCompareAndRebindPyObject(chandle, NULL, <PyObject*>self)
 
 
 cdef class CContainerBase(CObject):
@@ -432,6 +435,19 @@ cdef inline object make_ret_opaque_object(TVMFFIAny result):
     (<CObject>obj).chandle = result.v_obj
     return obj.pyobject()
 
+cdef public void** TVMFFICyObjectGetCHandlePtr(PyObject* ptr) noexcept:
+    # Address of a CObject wrapper's ``chandle`` field, for the C++ helpers.
+    return &((<CObject>ptr).chandle)
+
+
+cdef inline void _install_pyobject_tying_slots(object type_cls):
+    """Install the custom tp_alloc / tp_free PyObject-tying slots on a
+    registered FFI type. No-op unless ``type_cls`` is a ``CObject`` subclass.
+    """
+    if type_cls is not None and isinstance(type_cls, type) and issubclass(type_cls, CObject):
+        TVMFFIPyInstallTypeSlots(<PyObject*>type_cls)
+
+
 cdef inline object make_fallback_cls_for_type_index(int32_t type_index):
     cdef str type_key = _type_index_to_key(type_index)
     cdef object type_info = _lookup_or_register_type_info_from_type_key(type_key)
@@ -469,23 +485,29 @@ cdef inline object make_fallback_cls_for_type_index(int32_t type_index):
 
 
 cdef inline object make_ret_object(TVMFFIAny result):
-    cdef int32_t type_index
+    """Wrap a returned chandle into its canonical Python wrapper.
+
+    Caller must own +1 on ``result.v_obj``; ownership transfers to the
+    returned wrapper. The Active / Inactive / Detached transition is owned in
+    one frame by ``TVMFFIPyMakeRetObject`` (tvm_ffi_python_object.h); this
+    dispatcher only resolves ``cls`` and peels off the value-typed
+    ``PyNativeObject`` case, which does not participate in tying.
+    """
+    cdef int32_t type_index = result.type_index
     cdef object cls, obj
-    type_index = result.type_index
 
     if type_index < len(TYPE_INDEX_TO_CLS) and (cls := TYPE_INDEX_TO_CLS[type_index]) is not None:
         if issubclass(cls, PyNativeObject):
+            # Value-typed: the transient Object wrapper is discarded after
+            # __from_tvm_ffi_object__. No identity stability needed.
             obj = Object.__new__(Object)
             (<CObject>obj).chandle = result.v_obj
             return cls.__from_tvm_ffi_object__(cls, obj)
     else:
-        # Slow path: object is not found in registered entry
-        # In this case create a dummy stub class for future usage.
-        # For every unregistered class, this slow path will be triggered only once.
         cls = make_fallback_cls_for_type_index(type_index)
-    obj = cls.__new__(cls)
-    (<CObject>obj).chandle = result.v_obj
-    return obj
+    # Single choke point for the tying transition. Declared returning ``object``,
+    # so Cython adopts the owned reference and a NULL return raises.
+    return TVMFFIPyMakeRetObject(result.v_obj, <PyObject*>cls)
 
 
 cdef _get_method_from_method_info(const TVMFFIMethodInfo* method):
@@ -611,6 +633,12 @@ cdef _update_registry(int type_index, object type_key, object type_info, object 
     TYPE_KEY_TO_INFO[type_key] = type_info
     if type_cls is not None:
         TYPE_CLS_TO_INFO[type_cls] = type_info
+    # Universal choke point for every registered FFI type (core
+    # _register_object_by_index, dynamic _register_py_class, and
+    # make_fallback_cls_for_type_index all funnel here): install the custom
+    # tp_alloc / tp_free that drive PyObject-tying. tp_alloc / tp_free are
+    # not inherited by dynamic subtypes, so each type must be patched here.
+    _install_pyobject_tying_slots(type_cls)
 
 
 def _register_object_by_index(int type_index, object type_cls):

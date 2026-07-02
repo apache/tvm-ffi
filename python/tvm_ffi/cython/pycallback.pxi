@@ -74,7 +74,13 @@ cdef int TVMFFIPyCallbackArgSetterObject_(
     const TVMFFIAny* arg,
     PyObject** out
 ) except -1:
-    """Callback arg setter for generic static object types (type_index >= kTVMFFIStaticObjectBegin)."""
+    """Callback arg setter for generic static object types (type_index >= kTVMFFIStaticObjectBegin).
+
+    Funnels through ``make_ret_object`` so the callback receives the
+    canonical wrapper for the chandle. When the caller already has a
+    wrapper for this chandle, the callback's arg is the same Python
+    object — universal cache-on aliasing.
+    """
     cdef TVMFFIObjectHandle chandle = arg.v_ptr
     TVMFFIObjectIncRef(chandle)
     try:
