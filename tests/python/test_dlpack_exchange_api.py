@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import ctypes
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -41,7 +42,7 @@ _has_gpu = torch is not None and torch.cuda.is_available()
 
 
 @pytest.mark.skipif(not _has_dlpack_api, reason="PyTorch DLPack Exchange API not available")
-def test_dlpack_exchange_api() -> None:
+def test_dlpack_exchange_api(tmp_path: Path) -> None:
     # xfail the test on windows platform, it seems to be a bug in torch extension building on windows
     if sys.platform.startswith("win"):
         pytest.xfail("DLPack Exchange API test is known to fail on Windows platform")
@@ -210,6 +211,7 @@ def test_dlpack_exchange_api() -> None:
         cpp_sources=[source],
         functions=["test_dlpack_api"],
         extra_include_paths=include_paths,
+        build_directory=str(tmp_path),
     )
 
     # Run the comprehensive test
