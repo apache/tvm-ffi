@@ -549,7 +549,7 @@ cdef int TVMFFIPyArgSetterObjectRValueRef_(
     # Eager-detach the canonical binding before passing the chandle by rvalue ref: the callee
     # either moves it (src.chandle -> NULL) or leaves it, and either way ``src`` must no longer be
     # the canonical wrapper. Recycling in both cases is handled in TVMFFIPyTpDealloc on src death.
-    TVMFFIPyRebindPyObject(src.chandle, <PyObject*>src, NULL)
+    TVMFFIPyCompareAndRebindPyObject(src.chandle, <PyObject*>src, NULL)
     out.type_index = kTVMFFIObjectRValueRef
     out.v_ptr = &(src.chandle)
     return 0
@@ -1077,10 +1077,6 @@ cdef class Function(CObject):
         func = Function.__new__(Function)
         (<CObject>func).chandle = chandle
         return func
-
-
-# Install the free-threaded tp_dealloc slot on this cdef carrier (no-op on the GIL; see object.pxi).
-TVMFFIPyWrapDealloc(<PyObject*>Function)
 
 
 def _register_global_func(name: str, pyfunc: Callable[..., Any] | Function, override: bool) -> Function:

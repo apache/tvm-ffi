@@ -415,8 +415,6 @@ cdef class Tensor(CObject):
 
 
 _set_class_tensor(Tensor)
-# Install the free-threaded tp_dealloc slot on this cdef carrier (no-op on the GIL; see object.pxi).
-TVMFFIPyWrapDealloc(<PyObject*>Tensor)
 
 
 cdef int _dltensor_test_wrapper_from_pyobject(
@@ -546,7 +544,7 @@ cdef inline object make_tensor_from_chandle(
                 pass
     # default return the tensor.
     # NOTE: we deliberately do NOT bind this wrapper as canonical (no
-    # TVMFFIPyRebindPyObject) — this factory may wrap the same chandle more than
+    # TVMFFIPyCompareAndRebindPyObject) — this factory may wrap the same chandle more than
     # once (e.g. once per arg-setter callback), and rebinding would corrupt the
     # tying cache. Tensors returned through the FFI go via make_ret_object instead.
     tensor = _CLASS_TENSOR.__new__(_CLASS_TENSOR)

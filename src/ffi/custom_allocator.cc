@@ -45,7 +45,7 @@ void BuiltinDefaultDeleteSpace(void* ptr) {
 
 void* BuiltinDefaultAllocate(size_t size, size_t alignment, int32_t /*type_index*/,
                              void* /*context*/) {
-  void* base_alloc = details::AlignedAllocRuntime(kBuiltinDefaultBodyOffset + size, alignment);
+  void* base_alloc = details::AlignedAlloc(kBuiltinDefaultBodyOffset + size, alignment);
   void* ptr = static_cast<char*>(base_alloc) + kBuiltinDefaultBodyOffset;
   details::ObjectUnsafe::GetObjectAllocHeaderFromPtr(ptr)->delete_space =
       &BuiltinDefaultDeleteSpace;

@@ -50,12 +50,10 @@ namespace details {
 /*!
  * \brief Allocate aligned memory.
  * \param size The size.
- * \tparam align The alignment, must be a power of 2.
+ * \param align The alignment, must be a power of 2.
  * \return The pointer to the allocated memory.
  */
-template <size_t align>
-TVM_FFI_INLINE void* AlignedAlloc(size_t size) {
-  static_assert(align != 0 && (align & (align - 1)) == 0, "align must be a power of 2");
+TVM_FFI_INLINE void* AlignedAlloc(size_t size, size_t align) {
 #ifdef _MSC_VER
   // MSVC have to use _aligned_malloc
   if (void* ptr = _aligned_malloc(size, align)) {
@@ -63,49 +61,15 @@ TVM_FFI_INLINE void* AlignedAlloc(size_t size) {
   }
   throw std::bad_alloc();
 #else
-  if constexpr (align <= alignof(std::max_align_t)) {
-    // malloc guarantees alignment of std::max_align_t
-    if (void* ptr = std::malloc(size)) {
-      return ptr;
-    }
-    throw std::bad_alloc();
-  } else {
-    void* ptr;
-    // for other alignments, use posix_memalign
-    if (posix_memalign(&ptr, align, size) != 0) {
-      throw std::bad_alloc();
-    }
-    return ptr;
-  }
-#endif
-}
-
-/*!
- * \brief Allocate aligned memory with a runtime-known alignment.
- *
- * Sibling of the templated ``AlignedAlloc<align>`` for callers that
- * receive ``align`` as a parameter (e.g. custom-allocator
- * implementations dispatching on ``TVMFFICustomAllocator::allocate``'s
- * runtime ``alignment`` argument).
- *
- * \param size The size.
- * \param align The alignment, must be a power of 2.
- * \return The pointer to the allocated memory.
- */
-TVM_FFI_INLINE void* AlignedAllocRuntime(size_t size, size_t align) {
-#ifdef _MSC_VER
-  if (void* ptr = _aligned_malloc(size, align)) {
-    return ptr;
-  }
-  throw std::bad_alloc();
-#else
   if (align <= alignof(std::max_align_t)) {
+    // malloc guarantees alignment of std::max_align_t
     if (void* ptr = std::malloc(size)) {
       return ptr;
     }
     throw std::bad_alloc();
   }
   void* ptr;
+  // for other alignments, use posix_memalign
   if (posix_memalign(&ptr, align, size) != 0) {
     throw std::bad_alloc();
   }

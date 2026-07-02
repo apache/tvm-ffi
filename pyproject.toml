@@ -59,7 +59,7 @@ dev = [
   "clang-tidy",
   "ipdb",
   "ipython",
-  "cython>=3.0",
+  "cython>=3.2.8",
   "cmake",
   "scikit-build-core",
   "tomli",
@@ -100,7 +100,7 @@ tvm-ffi-config = "tvm_ffi.config:__main__"
 tvm-ffi-stubgen = "tvm_ffi.stub.cli:__main__"
 
 [build-system]
-requires = ["scikit-build-core>=0.10.0", "cython>=3.0", "setuptools-scm"]
+requires = ["scikit-build-core>=0.10.0", "cython>=3.2.8", "setuptools-scm"]
 build-backend = "scikit_build_core.build"
 
 [tool.scikit-build]
@@ -293,6 +293,9 @@ allowed-unresolved-imports = [
 
 [tool.uv]
 exclude-newer = "14 days"
+# TODO(2026-07-14): drop exclude-newer-package once the rolling 14-day cutoff reaches
+# Cython 3.2.8 (uploaded 2026-06-30); until then, override so cython>=3.2.8 resolves.
+exclude-newer-package = { cython = "2026-07-01" }
 
 [tool.uv.dependency-groups]
 docs = { requires-python = ">=3.13" }

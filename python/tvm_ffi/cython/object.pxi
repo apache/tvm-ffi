@@ -175,7 +175,7 @@ cdef class CObject:
         cdef void* chandle = (<CObject>other).chandle
         self.chandle = chandle
         (<CObject>other).chandle = NULL
-        TVMFFIPyRebindPyObject(chandle, <PyObject*>other, <PyObject*>self)
+        TVMFFIPyCompareAndRebindPyObject(chandle, <PyObject*>other, <PyObject*>self)
 
     def __init_handle_by_constructor__(self, fconstructor: Any, *args: Any) -> None:
         # avoid error raised during construction.
@@ -185,13 +185,7 @@ cdef class CObject:
             (<CObject>fconstructor).chandle, <PyObject*>args, &chandle, NULL)
         self.chandle = chandle
         # Attach self as the canonical wrapper iff the chandle is Detached (expect=NULL).
-        TVMFFIPyRebindPyObject(chandle, NULL, <PyObject*>self)
-
-
-# Install the free-threaded tp_dealloc slot on each cdef carrier, once, right after its class is
-# defined (no-op on the GIL build). Heap subtypes are covered for free via subtype_dealloc's
-# base-walk into the nearest wrapped carrier.
-TVMFFIPyWrapDealloc(<PyObject*>CObject)
+        TVMFFIPyCompareAndRebindPyObject(chandle, NULL, <PyObject*>self)
 
 
 cdef class CContainerBase(CObject):
@@ -364,9 +358,6 @@ class Object(CObject, metaclass=_ObjectSlotsMeta):
         CObject.__init_handle_by_constructor__(self, fconstructor, *args)
 
 
-TVMFFIPyWrapDealloc(<PyObject*>CContainerBase)
-
-
 cdef class OpaquePyObject(CObject):
     """Wrapper that carries an arbitrary Python object across the FFI.
 
@@ -387,9 +378,6 @@ cdef class OpaquePyObject(CObject):
         py_handle = <PyObject*>(TVMFFIOpaqueObjectGetCellPtr(self.chandle).handle)
         obj = <object>py_handle
         return obj
-
-
-TVMFFIPyWrapDealloc(<PyObject*>OpaquePyObject)
 
 
 class PyNativeObject:
