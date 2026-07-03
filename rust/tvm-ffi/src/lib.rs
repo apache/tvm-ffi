@@ -33,6 +33,7 @@ pub use tvm_ffi_sys;
 
 pub use crate::any::{Any, AnyView};
 pub use crate::collections::array::Array;
+pub use crate::collections::map::Map;
 pub use crate::collections::shape::Shape;
 pub use crate::collections::tensor::{CPUNDAlloc, NDAllocator, Tensor};
 pub use crate::device::{current_stream, with_stream};
