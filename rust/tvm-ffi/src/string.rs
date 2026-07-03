@@ -286,14 +286,14 @@ impl String {
     }
 
     /// Whether the cell is the `nullopt` sentinel (`type_index == kTVMFFINone`).
-    /// Such a cell is NOT a valid string; only [`OptionalStr`](crate::OptionalStr)
+    /// Such a cell is NOT a valid string; only [`OptionStr`](crate::option::OptionStr)
     /// holds one, and never calls string accessors on it.
     #[inline]
     pub(crate) fn is_none_cell(&self) -> bool {
         self.data.type_index == TypeIndex::kTVMFFINone as i32
     }
 
-    /// A `nullopt` sentinel cell for [`OptionalStr`](crate::OptionalStr).
+    /// A `nullopt` sentinel cell for [`OptionStr`](crate::option::OptionStr).
     /// `TVMFFIAny::new()` is exactly the all-zero `kTVMFFINone` cell.
     #[inline]
     pub(crate) fn none_cell() -> Self {

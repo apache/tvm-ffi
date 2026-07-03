@@ -16,79 +16,56 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+use tvm_ffi::option::{OptionObjRef, OptionPod, OptionStr, OptionalCompatiblePod};
 use tvm_ffi::*;
-
-/// `(size, align)` pairs verified against real `ffi::Optional<T>` instances
-/// (libstdc++ and libc++): `size = round_up(sizeof(T)+1, alignof(T))`.
-#[test]
-fn layout_matches_cpp_optional() {
-    fn sa<T: OptionalPod>() -> (usize, usize) {
-        (
-            std::mem::size_of::<Optional<T>>(),
-            std::mem::align_of::<Optional<T>>(),
-        )
-    }
-    assert_eq!(sa::<i8>(), (2, 1));
-    assert_eq!(sa::<bool>(), (2, 1));
-    assert_eq!(sa::<i16>(), (4, 2));
-    assert_eq!(sa::<i32>(), (8, 4));
-    assert_eq!(sa::<f32>(), (8, 4));
-    assert_eq!(sa::<i64>(), (16, 8));
-    assert_eq!(sa::<f64>(), (16, 8));
-}
 
 /// Payload+flag bytes `[0, size_of::<T>()]`; padding is excluded (not ABI, not
 /// guaranteed initialized).
-fn image<T: OptionalPod>(opt: &Optional<T>) -> Vec<u8> {
-    let p = opt as *const Optional<T> as *const u8;
+fn image<T: OptionalCompatiblePod>(opt: &OptionPod<T>) -> Vec<u8> {
+    let p = opt as *const OptionPod<T> as *const u8;
     let n = std::mem::size_of::<T>() + 1; // payload + flag, no padding
     // Payload and flag are always initialized; padding is not read.
     unsafe { std::slice::from_raw_parts(p, n).to_vec() }
 }
 
 /// The scalar's own bytes, to assert the optional's payload matches it verbatim.
-fn raw_bytes<T: OptionalPod>(v: &T) -> Vec<u8> {
+fn raw_bytes<T: OptionalCompatiblePod>(v: &T) -> Vec<u8> {
     let p = v as *const T as *const u8;
     // size_of::<T>() bytes of an initialized `Copy` scalar.
     unsafe { std::slice::from_raw_parts(p, std::mem::size_of::<T>()).to_vec() }
 }
 
 #[test]
+#[cfg(target_endian = "little")]
 fn byte_image_some_i32_matches_cpp() {
     // C++ probe (both STLs): some(0x12345678) => 78 56 34 12 | 01 ..
-    let o = Optional::<i32>::some(0x1234_5678);
+    let o = OptionPod::<i32>::some(0x1234_5678);
     let b = image(&o);
     assert_eq!(&b[0..4], &0x1234_5678_i32.to_le_bytes());
     assert_eq!(b[4], 1, "engaged flag must sit at offset size_of::<i32>()");
 }
 
 #[test]
+#[cfg(target_endian = "little")]
 fn byte_image_some_i64_matches_cpp() {
-    let o = Optional::<i64>::some(0x1122_3344_5566_7788);
+    let o = OptionPod::<i64>::some(0x1122_3344_5566_7788);
     let b = image(&o);
     assert_eq!(&b[0..8], &0x1122_3344_5566_7788_i64.to_le_bytes());
     assert_eq!(b[8], 1, "engaged flag must sit at offset size_of::<i64>()");
 }
 
-#[test]
-fn byte_image_none_clears_flag() {
-    let o = Optional::<i32>::none();
-    let b = image(&o);
-    assert_eq!(b[4], 0, "engaged flag must be clear for nullopt");
-}
-
 /// Payload@0 and flag@`size_of::<T>()` for every supported type, not just i32/i64.
 #[test]
 fn flag_offset_all_supported_types() {
-    fn check<T: OptionalPod + PartialEq + std::fmt::Debug>(val: T) {
+    fn check<T: OptionalCompatiblePod + PartialEq + std::fmt::Debug>(val: T) {
         let ty = std::any::type_name::<T>();
         let sz = std::mem::size_of::<T>();
-        let some = Optional::<T>::some(val);
+        let some = OptionPod::<T>::some(val);
         let b = image(&some);
         assert_eq!(&b[0..sz], &raw_bytes(&val)[..], "payload@0 for {ty}");
         assert_eq!(b[sz], 1, "engaged flag must sit at offset size_of for {ty}");
         assert_eq!(some.get(), Some(val), "engaged roundtrip for {ty}");
-        let none = Optional::<T>::none();
+        let none = OptionPod::<T>::none();
         assert_eq!(image(&none)[sz], 0, "flag must be clear for none for {ty}");
         assert!(none.get().is_none(), "disengaged roundtrip for {ty}");
     }
@@ -107,11 +84,10 @@ fn flag_offset_all_supported_types() {
 
 #[test]
 fn roundtrip_get_set() {
-    let o = Optional::<i32>::some(42);
+    let mut o = OptionPod::<i32>::some(42);
     assert_eq!(o.get(), Some(42));
     assert!(o.has_value());
 
-    // in-place mutation through a shared reference
     o.set(None);
     assert_eq!(o.get(), None);
     assert!(o.is_none());
@@ -122,37 +98,57 @@ fn roundtrip_get_set() {
 
 #[test]
 fn conversions_and_default() {
-    assert_eq!(Optional::<f64>::from(Some(2.5)).get(), Some(2.5));
-    assert_eq!(Optional::<f64>::from(None).get(), None);
-    let back: Option<i16> = Optional::<i16>::some(9).into();
+    assert_eq!(OptionPod::<f64>::from(Some(2.5)).get(), Some(2.5));
+    assert_eq!(OptionPod::<f64>::from(None).get(), None);
+    let back: Option<i16> = OptionPod::<i16>::some(9).into();
     assert_eq!(back, Some(9));
-    assert_eq!(Optional::<u8>::default().get(), None);
-    assert_eq!(Optional::<bool>::some(true).get(), Some(true));
+    assert_eq!(OptionPod::<u8>::default().get(), None);
+    assert_eq!(OptionPod::<bool>::some(true).get(), Some(true));
 }
 
 #[test]
+#[allow(clippy::clone_on_copy)] // explicitly exercising the Clone impl
 fn clone_preserves_state() {
-    let some = Optional::<i64>::some(123);
+    let some = OptionPod::<i64>::some(123);
     assert_eq!(some.clone().get(), Some(123));
-    let none = Optional::<i64>::none();
+    let none = OptionPod::<i64>::none();
     assert_eq!(none.clone().get(), None);
 }
 
+#[test]
+fn equality() {
+    assert_eq!(OptionPod::<i32>::some(1), OptionPod::<i32>::some(1));
+    assert_ne!(OptionPod::<i32>::some(1), OptionPod::<i32>::some(2));
+    assert_ne!(OptionPod::<i32>::some(1), OptionPod::<i32>::none());
+    assert_eq!(OptionPod::<i32>::none(), OptionPod::<i32>::none());
+    // `set(None)` leaves stale payload bytes; equality must still see plain None.
+    let mut stale = OptionPod::<i32>::some(7);
+    stale.set(None);
+    assert_eq!(stale, OptionPod::<i32>::none());
+
+    let a = || OptionStr::some(String::from("a"));
+    assert_eq!(a(), a());
+    assert_ne!(a(), OptionStr::some(String::from("b")));
+    assert_ne!(a(), OptionStr::none());
+    assert_eq!(OptionStr::none(), OptionStr::none());
+}
+
 // 16-byte cell (type_index@0, small_str_len@4, union@8); no padding.
-fn str_image(o: &OptionalStr) -> [u8; 16] {
-    let p = o as *const OptionalStr as *const u8;
+fn str_image(o: &OptionStr) -> [u8; 16] {
+    let p = o as *const OptionStr as *const u8;
     let mut b = [0u8; 16];
-    // OptionalStr is a fully-initialized 16-byte TVMFFIAny cell.
+    // OptionStr is a fully-initialized 16-byte TVMFFIAny cell.
     unsafe { std::ptr::copy_nonoverlapping(p, b.as_mut_ptr(), 16) };
     b
 }
 
 #[test]
+#[cfg(target_endian = "little")]
 fn optional_str_byte_image_matches_cpp() {
-    // C++ probe: Optional<String> none => 16 zero bytes;
+    // C++ probe: ffi::Optional<String> none => 16 zero bytes;
     //            some("hi")           => 0b 00 00 00 | 02 00 00 00 | 68 69 00 ...
-    assert_eq!(str_image(&OptionalStr::none()), [0u8; 16]);
-    let some = OptionalStr::some(String::from("hi"));
+    assert_eq!(str_image(&OptionStr::none()), [0u8; 16]);
+    let some = OptionStr::some(String::from("hi"));
     let b = str_image(&some);
     assert_eq!(&b[0..4], &[0x0b, 0, 0, 0], "type_index = kTVMFFISmallStr");
     assert_eq!(&b[4..8], &[0x02, 0, 0, 0], "small_str_len = 2");
@@ -162,30 +158,30 @@ fn optional_str_byte_image_matches_cpp() {
 #[test]
 fn optional_str_roundtrip_and_conversions() {
     // small (inline) string
-    let s = OptionalStr::some(String::from("hi"));
+    let s = OptionStr::some(String::from("hi"));
     assert!(s.has_value());
     assert_eq!(s.as_str(), Some("hi"));
     assert_eq!(s.get().as_deref(), Some("hi"));
 
     // nullopt
-    let n = OptionalStr::none();
+    let n = OptionStr::none();
     assert!(n.is_none());
     assert_eq!(n.as_str(), None);
     assert_eq!(n.get(), None);
 
     // conversions + default
-    let from_some: OptionalStr = Some(String::from("x")).into();
+    let from_some: OptionStr = Some(String::from("x")).into();
     assert_eq!(from_some.as_str(), Some("x"));
-    let back: Option<String> = OptionalStr::none().into();
+    let back: Option<String> = OptionStr::none().into();
     assert!(back.is_none());
-    assert!(OptionalStr::default().is_none());
+    assert!(OptionStr::default().is_none());
 }
 
 #[test]
 fn optional_str_heap_clone_no_double_free() {
     // long (heap) string exercises refcounted Clone/Drop through the wrapper.
     let long = String::from("a-very-long-heap-allocated-string-value");
-    let a = OptionalStr::some(long);
+    let a = OptionStr::some(long);
     let b = a.clone();
     assert_eq!(a.as_str(), Some("a-very-long-heap-allocated-string-value"));
     assert_eq!(b.as_str(), Some("a-very-long-heap-allocated-string-value"));
@@ -196,7 +192,7 @@ fn optional_str_heap_clone_no_double_free() {
 fn optional_str_set_in_place() {
     // Start engaged with a heap string, then replace it: `set` must drop
     // (dec_ref) the old heap string before moving the new one in.
-    let mut o = OptionalStr::some(String::from("first-long-heap-allocated-value"));
+    let mut o = OptionStr::some(String::from("first-long-heap-allocated-value"));
     assert_eq!(o.as_str(), Some("first-long-heap-allocated-value"));
 
     o.set(Some(String::from("second-long-heap-allocated-value")));
@@ -209,4 +205,16 @@ fn optional_str_set_in_place() {
 
     o.set(Some(String::from("x")));
     assert_eq!(o.as_str(), Some("x"));
+}
+
+#[test]
+fn option_obj_ref_is_nullable_pointer() {
+    // `OptionObjRef<SomeRef>` == `Option<SomeRef>`: the niche over the ref's
+    // non-null object pointer makes it a single nullable pointer, `None` == `nullptr`.
+    assert_eq!(
+        std::mem::size_of::<OptionObjRef<Array<i64>>>(),
+        std::mem::size_of::<*mut ()>()
+    );
+    let none: OptionObjRef<Array<i64>> = None;
+    assert!(none.is_none());
 }

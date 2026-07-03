@@ -27,13 +27,13 @@ pub mod function;
 pub mod function_internal;
 pub mod macros;
 pub mod object;
+pub mod option;
 pub mod string;
 pub mod type_traits;
 pub use tvm_ffi_sys;
 
 pub use crate::any::{Any, AnyView};
 pub use crate::collections::array::Array;
-pub use crate::collections::optional::{Optional, OptionalPod, OptionalStr};
 pub use crate::collections::map::Map;
 pub use crate::collections::shape::Shape;
 pub use crate::collections::tensor::{CPUNDAlloc, NDAllocator, Tensor};

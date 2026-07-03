@@ -23,69 +23,74 @@
 //! FFI call, no allocation, no reflection getter/setter. Pick the counterpart for
 //! the field's `T`:
 //!
-//! - POD scalar (`i32`, `f64`, `bool`, …) → [`Optional<T>`](Optional)
-//! - `String` → [`OptionalStr`]
-//! - `ObjectRef` subtype → plain `Option<SomeRef>` (a single nullable pointer,
-//!   `nullptr` == `None`; no dedicated type needed)
+//! - POD scalar (`i32`, `f64`, `bool`, …) → [`OptionPod<T>`](OptionPod)
+//! - `String` → [`OptionStr`]
+//! - `ObjectRef` subtype → [`OptionObjRef<T>`](OptionObjRef), an alias of plain
+//!   `Option<T>` (a single nullable pointer, `nullptr` == `None`)
 //!
-//! # `Optional<T>` — POD scalars
+//! # `OptionPod<T>` — POD scalars
 //! Mirrors the `std::optional<T>` fallback as `#[repr(C)] { value: T, engaged:
 //! bool }` (payload at offset 0, flag at `size_of::<T>()`), byte-verified against
-//! libstdc++/libc++. `T` must implement [`OptionalPod`] — the marker trait
-//! carried by the fixed set of fixed-width scalars. Read with [`get`](Optional::get),
-//! write with [`set`](Optional::set); `set` takes `&self` via interior mutability,
-//! so a shared `&Optional<T>` aliasing a C++ field stays writable (hence `!Sync`).
+//! libstdc++/libc++. `T` must implement [`OptionalCompatiblePod`] — the marker trait
+//! carried by the fixed set of fixed-width scalars. Read with [`get`](OptionPod::get),
+//! write with [`set`](OptionPod::set).
 //!
-//! # `OptionalStr` — `String`
+//! # `OptionStr` — `String`
 //! The C++ `String` specialization keeps the 16-byte string cell inline and marks
-//! `nullopt` with the `type_index == kTVMFFINone` sentinel; [`OptionalStr`] wraps
+//! `nullopt` with the `type_index == kTVMFFINone` sentinel; [`OptionStr`] wraps
 //! [`String`] the same way and reuses its refcounting `Clone`/`Drop`. Borrow with
-//! [`as_str`](OptionalStr::as_str), write with [`set`](OptionalStr::set) — which
-//! takes `&mut self`, since a shared-ref setter could drop the backing string
-//! under a live `&str`. (`ffi::Optional<Bytes>` would follow the same pattern.)
+//! [`as_str`](OptionStr::as_str), write with [`set`](OptionStr::set).
+//! (`ffi::Optional<Bytes>` would follow the same pattern.)
 
 use crate::String;
-use std::cell::UnsafeCell;
 use std::fmt::{self, Debug};
 use std::mem::MaybeUninit;
 
 //-----------------------------------------------------
-// Optional<T> — POD scalars
+// OptionPod<T> — POD scalars
 //-----------------------------------------------------
 
-/// Marker for a POD scalar `T` that can back an [`Optional<T>`]; see the
+/// Marker for a POD scalar `T` that can back an [`OptionPod<T>`]; see the
 /// [module docs](self).
 ///
 /// Unsafe: an implementor guarantees `T` is trivially copyable and its Rust
 /// representation is byte-identical to the C++ field type (`i32` ↔ `int32_t`,
 /// `f64` ↔ `double`, …), so the mirror can overlay the C++ `std::optional<T>`.
-pub unsafe trait OptionalPod: Copy {}
+///
+/// Non-scalar payloads are rejected at compile time with a pointer to the
+/// right counterpart:
+///
+/// ```compile_fail,E0277
+/// // `Array` is an `ObjectRef` subtype → use `Option<Array<i64>>` (`OptionObjRef`).
+/// let _ = tvm_ffi::option::OptionPod::<tvm_ffi::Array<i64>>::none();
+/// ```
+#[diagnostic::on_unimplemented(
+    message = "`OptionPod<{Self}>` only mirrors `ffi::Optional` of fixed-width POD scalars",
+    label = "`{Self}` is not a fixed-width POD scalar",
+    note = "for an `ObjectRef` subtype use plain `Option<{Self}>` (alias `tvm_ffi::option::OptionObjRef`): the C++ side is a single nullable pointer",
+    note = "for `String` use `tvm_ffi::option::OptionStr`"
+)]
+pub unsafe trait OptionalCompatiblePod: Copy {}
 
-/// Layout-mirror of `std::optional<T>`: `{ T value @0; bool engaged @sizeof(T) }`.
+/// In-place mirror of C++ `ffi::Optional<T>` for POD `T`, laid out as
+/// `std::optional<T>`: `{ T value @0; bool engaged @sizeof(T) }`.
+///
+/// Layout-compatible with the C++ type; see the [module docs](self).
 #[repr(C)]
-struct OptionalCell<T: OptionalPod> {
+#[derive(Clone, Copy)]
+pub struct OptionPod<T: OptionalCompatiblePod> {
     value: MaybeUninit<T>,
     engaged: bool,
 }
 
-/// In-place mirror of C++ `ffi::Optional<T>` for POD `T`.
-///
-/// Layout-compatible with the C++ type; see the [module docs](self).
-#[repr(transparent)]
-pub struct Optional<T: OptionalPod> {
-    cell: UnsafeCell<OptionalCell<T>>,
-}
-
-impl<T: OptionalPod> Optional<T> {
+impl<T: OptionalCompatiblePod> OptionPod<T> {
     /// Builds an engaged optional holding `value`.
     #[inline]
     pub fn some(value: T) -> Self {
         // Only payload+flag are written; padding isn't part of the ABI.
         Self {
-            cell: UnsafeCell::new(OptionalCell {
-                value: MaybeUninit::new(value),
-                engaged: true,
-            }),
+            value: MaybeUninit::new(value),
+            engaged: true,
         }
     }
 
@@ -94,20 +99,17 @@ impl<T: OptionalPod> Optional<T> {
     pub fn none() -> Self {
         // Zeroed (not `uninit`) payload keeps the byte-image tests reading init bytes.
         Self {
-            cell: UnsafeCell::new(OptionalCell {
-                value: MaybeUninit::zeroed(),
-                engaged: false,
-            }),
+            value: MaybeUninit::zeroed(),
+            engaged: false,
         }
     }
 
     /// Decodes the value in place. No FFI call, no allocation.
     #[inline]
     pub fn get(&self) -> Option<T> {
-        // Read the payload only after confirming `engaged` (the cell is always initialized).
-        let cell = unsafe { &*self.cell.get() };
-        if cell.engaged {
-            Some(unsafe { cell.value.assume_init() })
+        if self.engaged {
+            // The payload is written whenever `engaged` is set.
+            Some(unsafe { self.value.assume_init() })
         } else {
             None
         }
@@ -116,7 +118,7 @@ impl<T: OptionalPod> Optional<T> {
     /// Returns whether a value is present.
     #[inline]
     pub fn has_value(&self) -> bool {
-        unsafe { (*self.cell.get()).engaged }
+        self.engaged
     }
 
     /// Returns whether the optional is `nullopt`.
@@ -125,26 +127,24 @@ impl<T: OptionalPod> Optional<T> {
         !self.has_value()
     }
 
-    /// Overwrites the value in place through a shared reference.
+    /// Overwrites the value in place.
     ///
     /// Mirrors C++ assignment: `Some(v)` engages and stores `v`; `None`
     /// disengages without touching the payload bytes, as `std::optional::reset`
     /// does for trivial `T`.
     #[inline]
-    pub fn set(&self, value: Option<T>) {
-        // Interior mutation via `UnsafeCell`; caller must not race (`!Sync`).
-        let cell = unsafe { &mut *self.cell.get() };
+    pub fn set(&mut self, value: Option<T>) {
         match value {
             Some(v) => {
-                cell.value = MaybeUninit::new(v);
-                cell.engaged = true;
+                self.value = MaybeUninit::new(v);
+                self.engaged = true;
             }
-            None => cell.engaged = false,
+            None => self.engaged = false,
         }
     }
 }
 
-impl<T: OptionalPod> Default for Optional<T> {
+impl<T: OptionalCompatiblePod> Default for OptionPod<T> {
     /// `nullopt`, matching the C++ default constructor.
     #[inline]
     fn default() -> Self {
@@ -152,17 +152,16 @@ impl<T: OptionalPod> Default for Optional<T> {
     }
 }
 
-impl<T: OptionalPod> Clone for Optional<T> {
+impl<T: OptionalCompatiblePod + PartialEq> PartialEq for OptionPod<T> {
     #[inline]
-    fn clone(&self) -> Self {
-        match self.get() {
-            Some(v) => Self::some(v),
-            None => Self::none(),
-        }
+    fn eq(&self, other: &Self) -> bool {
+        self.get() == other.get()
     }
 }
 
-impl<T: OptionalPod> From<Option<T>> for Optional<T> {
+impl<T: OptionalCompatiblePod + Eq> Eq for OptionPod<T> {}
+
+impl<T: OptionalCompatiblePod> From<Option<T>> for OptionPod<T> {
     #[inline]
     fn from(value: Option<T>) -> Self {
         match value {
@@ -172,44 +171,45 @@ impl<T: OptionalPod> From<Option<T>> for Optional<T> {
     }
 }
 
-impl<T: OptionalPod> From<Optional<T>> for Option<T> {
+impl<T: OptionalCompatiblePod> From<OptionPod<T>> for Option<T> {
     #[inline]
-    fn from(value: Optional<T>) -> Self {
+    fn from(value: OptionPod<T>) -> Self {
         value.get()
     }
 }
 
-impl<T: OptionalPod + Debug> Debug for Optional<T> {
+impl<T: OptionalCompatiblePod + Debug> Debug for OptionPod<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.get() {
-            Some(v) => write!(f, "Optional::Some({v:?})"),
-            None => f.write_str("Optional::None"),
+            Some(v) => write!(f, "OptionPod::Some({v:?})"),
+            None => f.write_str("OptionPod::None"),
         }
     }
 }
 
-// Registers each supported scalar from one list: the `OptionalPod` impl and a
-// compile-time guard that `Optional<T>` matches the `std::optional<T>` footprint
+// Registers each supported scalar from one list: the `OptionalCompatiblePod` impl and a
+// compile-time guard that `OptionPod<T>` matches the `std::optional<T>` footprint
 // (`size == round_up(size_of::<T>()+1, align)`). One list keeps the impl and its
 // layout check from drifting.
-macro_rules! impl_optional_pod {
+macro_rules! impl_optional_compatible_pod {
     ($($t:ty),* $(,)?) => { $(
         // Fixed-width scalar; repr matches the C++ field's `std::optional`
         // fallback (layout proven by the `const` block below).
-        unsafe impl OptionalPod for $t {}
+        unsafe impl OptionalCompatiblePod for $t {}
         const _: () = {
             let tsz = core::mem::size_of::<$t>();
             let tal = core::mem::align_of::<$t>();
             let expect = (tsz + 1).div_ceil(tal) * tal;
-            assert!(core::mem::align_of::<Optional<$t>>() == tal);
-            assert!(core::mem::size_of::<Optional<$t>>() == expect);
+            assert!(core::mem::align_of::<OptionPod<$t>>() == tal);
+            assert!(core::mem::size_of::<OptionPod<$t>>() == expect);
         };
     )* };
 }
-impl_optional_pod!(bool, i8, i16, i32, i64, u8, u16, u32, u64, f32, f64);
+// Keep in sync with the static_assert guard at the end of include/tvm/ffi/optional.h.
+impl_optional_compatible_pod!(bool, i8, i16, i32, i64, u8, u16, u32, u64, f32, f64);
 
 //-----------------------------------------------------
-// OptionalStr — String
+// OptionStr — String
 //-----------------------------------------------------
 
 /// In-place mirror of C++ `ffi::Optional<String>`: the 16-byte string cell
@@ -219,17 +219,20 @@ impl_optional_pod!(bool, i8, i16, i32, i64, u8, u16, u32, u64, f32, f64);
 /// `nullopt` cell (`type_index` below `kTVMFFIStaticObjectBegin`).
 #[repr(transparent)]
 #[derive(Clone)]
-pub struct OptionalStr {
+pub struct OptionStr {
     // Never handed out or accessed while disengaged (a `nullopt` cell is not a
     // valid string).
     inner: String,
 }
 
 // Must stay 16 bytes to overlay C++ `ffi::Optional<String>` (parity with the POD
-// guard in `impl_optional_pod!`).
-const _: () = assert!(std::mem::size_of::<OptionalStr>() == 16);
+// guard in `impl_optional_compatible_pod!`).
+const _: () = assert!(
+    std::mem::size_of::<OptionStr>() == 16
+        && std::mem::align_of::<OptionStr>() == std::mem::align_of::<crate::TVMFFIAny>()
+);
 
-impl OptionalStr {
+impl OptionStr {
     /// An engaged optional holding `value`.
     #[inline]
     pub fn some(value: String) -> Self {
@@ -269,7 +272,7 @@ impl OptionalStr {
     /// Takes the value out, consuming self.
     #[inline]
     pub fn get(self) -> Option<String> {
-        let OptionalStr { inner } = self; // no `Drop` impl, so the move is allowed
+        let OptionStr { inner } = self; // no `Drop` impl, so the move is allowed
         if inner.is_none_cell() {
             None
         } else {
@@ -279,10 +282,6 @@ impl OptionalStr {
 
     /// Overwrites the value in place, dropping the previous one first (dec-ref'd
     /// if it was a heap string).
-    ///
-    /// `&mut self`, not `&self` like POD [`Optional::set`]: `as_str` hands out
-    /// borrows into a refcounted cell, so a shared-ref setter could drop the
-    /// backing string under a live `&str`.
     #[inline]
     pub fn set(&mut self, value: Option<String>) {
         // Assignment drops the old `String` (dec_ref if heap) before moving in the new.
@@ -293,7 +292,7 @@ impl OptionalStr {
     }
 }
 
-impl Default for OptionalStr {
+impl Default for OptionStr {
     /// `nullopt`, matching the C++ default constructor.
     #[inline]
     fn default() -> Self {
@@ -301,7 +300,7 @@ impl Default for OptionalStr {
     }
 }
 
-impl From<Option<String>> for OptionalStr {
+impl From<Option<String>> for OptionStr {
     #[inline]
     fn from(value: Option<String>) -> Self {
         match value {
@@ -311,18 +310,41 @@ impl From<Option<String>> for OptionalStr {
     }
 }
 
-impl From<OptionalStr> for Option<String> {
+impl From<OptionStr> for Option<String> {
     #[inline]
-    fn from(value: OptionalStr) -> Self {
+    fn from(value: OptionStr) -> Self {
         value.get()
     }
 }
 
-impl Debug for OptionalStr {
+impl PartialEq for OptionStr {
+    // NOT derivable: derived eq would run `String::eq` on a `nullopt` cell and
+    // dereference its null object pointer; `as_str` checks the sentinel first.
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.as_str() == other.as_str()
+    }
+}
+
+impl Eq for OptionStr {}
+
+impl Debug for OptionStr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.as_str() {
-            Some(s) => write!(f, "OptionalStr::Some({s:?})"),
-            None => f.write_str("OptionalStr::None"),
+            Some(s) => write!(f, "OptionStr::Some({s:?})"),
+            None => f.write_str("OptionStr::None"),
         }
     }
 }
+
+//-----------------------------------------------------
+// OptionObjRef — ObjectRef subtypes
+//-----------------------------------------------------
+
+/// Alias of [`Option`] for `ObjectRef`-subtype fields.
+///
+/// C++ `ffi::Optional<SomeRef>` is a single nullable pointer, so `Option<SomeRef>`
+/// (niche-optimized over the ref's non-null [`ObjectArc`](crate::ObjectArc)
+/// pointer) already mirrors it in place: `None` == `nullptr`. The alias only
+/// names that contract for consistency.
+pub type OptionObjRef<T> = Option<T>;
