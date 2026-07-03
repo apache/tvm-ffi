@@ -24,9 +24,11 @@
 //! registers (`ffi.MapGetItem`, `ffi.MapForwardIterFunctor`, ...): there is no
 //! Map-specific C ABI, and a Rust re-implementation would have to replicate the
 //! hashing (`AnyHash`/`AnyEqual`) and dense/small probing, just as the Python
-//! bindings also delegate. Element types are erased to `Any`, so `K`/`V` are
-//! validated lazily on access (see [`Map::get`] / [`Map::iter`]) rather than by
-//! [`AnyCompatible::check_any_strict`].
+//! bindings also delegate.
+//!
+//! `Any` conversions follow C++ `MapTypeTraitsBase` (map_base.h): the strict
+//! check walks every entry, and a failed strict `try_from` falls back to
+//! converting the entries one by one into a new map.
 use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::ops::Deref;
@@ -257,6 +259,32 @@ where
             .expect("ffi.MapForwardIterFunctor call failed");
         Function::try_from(result).expect("ffi.MapForwardIterFunctor returned a non-function")
     }
+
+    /// Reads all entries as raw `(Any, Any)` pairs without converting to
+    /// `K`/`V`, propagating FFI failures instead of panicking (unlike the
+    /// iterator API): this backs `check_any_strict` and
+    /// `try_cast_from_any_view`, which run during argument decoding where a
+    /// panic could unwind across the C ABI.
+    fn try_raw_entries(&self) -> Result<Vec<(Any, Any)>> {
+        let mut entries = Vec::with_capacity(self.len());
+        let mut remaining = self.len();
+        if remaining == 0 {
+            return Ok(entries);
+        }
+        let functor = crate::cached_global_func!("ffi.MapForwardIterFunctor")
+            .call_packed(&[AnyView::from(self)])
+            .and_then(Function::try_from)?;
+        loop {
+            let k = functor.call_packed(&[AnyView::from(&0i64)])?;
+            let v = functor.call_packed(&[AnyView::from(&1i64)])?;
+            entries.push((k, v));
+            remaining -= 1;
+            if remaining == 0 {
+                return Ok(entries);
+            }
+            functor.call_packed(&[AnyView::from(&2i64)])?;
+        }
+    }
 }
 
 impl<K, V> Default for Map<K, V>
@@ -408,9 +436,19 @@ where
     }
 
     unsafe fn check_any_strict(data: &TVMFFIAny) -> bool {
-        // Container-level check only; element types are validated lazily on
-        // access (see the module docs).
-        data.type_index == TypeIndex::kTVMFFIMap as i32
+        // Mirrors C++ `CheckAnyStrict` (map_base.h): every entry must strictly
+        // match `K`/`V`. An FFI failure reads as "no match" — this fn has no
+        // error channel and must not panic (see `try_raw_entries`).
+        if data.type_index != TypeIndex::kTVMFFIMap as i32 {
+            return false;
+        }
+        let map = Self::copy_from_any_view_after_check(data);
+        match map.try_raw_entries() {
+            Ok(entries) => entries
+                .iter()
+                .all(|(k, v)| k.try_as::<K>().is_some() && v.try_as::<V>().is_some()),
+            Err(_) => false,
+        }
     }
 
     unsafe fn copy_to_any_view(src: &Self, data: &mut TVMFFIAny) {
@@ -443,7 +481,22 @@ where
         if data.type_index != TypeIndex::kTVMFFIMap as i32 {
             return Err(());
         }
-        Ok(Self::copy_from_any_view_after_check(data))
+
+        // Fast path: if all entries match strictly, we can just copy the reference.
+        if Self::check_any_strict(data) {
+            return Ok(Self::copy_from_any_view_after_check(data));
+        }
+
+        // Slow path: try to convert entry by entry into a new map, as C++
+        // `TryCastFromAnyView` does.
+        let src = Self::copy_from_any_view_after_check(data);
+        let mut pairs = Vec::with_capacity(src.len());
+        for (k, v) in src.try_raw_entries().map_err(|_| ())? {
+            let k = TryFromTemp::<K>::try_from(k).map_err(|_| ())?;
+            let v = TryFromTemp::<V>::try_from(v).map_err(|_| ())?;
+            pairs.push((TryFromTemp::into_value(k), TryFromTemp::into_value(v)));
+        }
+        Self::from_pairs(&pairs).map_err(|_| ())
     }
 }
 

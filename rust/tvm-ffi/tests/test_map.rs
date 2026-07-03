@@ -214,11 +214,23 @@ fn test_map_get_missing_with_object_values() {
     assert!(map.get(&String::from("missing")).unwrap().is_none());
 }
 
-/// Builds an `i64`-valued map but views it as `Map<_, String>`: the
-/// container-level cast succeeds, so the mismatch only surfaces on access.
+/// Views a map behind an `Any` as `Map<K, V>` while bypassing the strict
+/// element check (`try_from` now walks all entries, C++-style, so a mistyped
+/// view can only be produced this way), to exercise the access-time guards.
+fn view_map_unchecked<K, V>(mut any: Any) -> Map<K, V>
+where
+    K: AnyCompatible,
+    V: AnyCompatible,
+{
+    assert_eq!(any.type_index(), TypeIndex::kTVMFFIMap as i32);
+    unsafe { Map::copy_from_any_view_after_check(&*any.as_data_ptr()) }
+}
+
+/// Builds an `i64`-valued map but views it as `Map<_, String>`, bypassing the
+/// strict check, so the mismatch only surfaces on access.
 fn mistyped_value_map() -> Map<i64, String> {
     let real: Map<i64, i64> = [(1i64, 10i64)].into_iter().collect();
-    Map::try_from(Any::from(real)).expect("container-level cast should succeed")
+    view_map_unchecked(Any::from(real))
 }
 
 /// `get` reports a value type mismatch as `Err`, not a panic.
@@ -244,9 +256,33 @@ fn test_map_iter_type_mismatch_panics() {
 #[test]
 #[should_panic(expected = "does not match the map's stored key type")]
 fn test_map_get_mistyped_key_debug_asserts() {
-    // Real `Map<i64, i64>` viewed as `Map<String, i64>`: the i64 keys do not
-    // match `K = String`.
+    // Real `Map<i64, i64>` viewed (unchecked) as `Map<String, i64>`: the i64
+    // keys do not match `K = String`.
     let real: Map<i64, i64> = [(1i64, 10i64)].into_iter().collect();
-    let map: Map<String, i64> = Map::try_from(Any::from(real)).expect("container cast");
+    let map: Map<String, i64> = view_map_unchecked(Any::from(real));
     let _ = map.get(&String::from("anything"));
+}
+
+/// `try_from` rejects a map whose values can neither strictly match nor cast
+/// to `V` (aligned with C++ `CheckAnyStrict`/`TryCastFromAnyView`).
+#[test]
+fn test_map_any_cast_value_mismatch_is_err() {
+    let real: Map<i64, i64> = [(1i64, 10i64)].into_iter().collect();
+    assert!(Map::<i64, String>::try_from(Any::from(real)).is_err());
+}
+
+/// When entries do not strictly match but are castable (i64 -> f64),
+/// `try_from` builds a NEW map with converted entries instead of sharing the
+/// object (C++ slow path).
+#[test]
+fn test_map_any_cast_slow_path_converts() {
+    let real: Map<i64, i64> = [(1i64, 10i64), (2, 20)].into_iter().collect();
+    let converted: Map<f64, f64> =
+        Map::try_from(Any::from(real.clone())).expect("i64 entries cast to f64");
+    assert_eq!(converted.len(), 2);
+    assert_eq!(converted.get(&1.0).unwrap(), Some(10.0));
+    assert_eq!(converted.get(&2.0).unwrap(), Some(20.0));
+    // Each map owns its own object: nothing is shared between them.
+    assert_eq!(AnyView::from(&real).debug_strong_count(), Some(1));
+    assert_eq!(AnyView::from(&converted).debug_strong_count(), Some(1));
 }
