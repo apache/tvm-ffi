@@ -28,6 +28,8 @@
 #include <tvm/ffi/object.h>
 #include <tvm/ffi/optional.h>
 
+#include <stdexcept>
+
 #include "./testing_object.h"
 
 namespace tvm {
@@ -119,6 +121,14 @@ class LeafObject : public CRTPObject<LeafObject> {
   static constexpr const char* _type_key = "test.CRTPLeaf";
 };
 
+class ThrowingConstructorObject : public Object {
+ public:
+  ThrowingConstructorObject() { throw std::runtime_error("constructor failed"); }
+
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("test.ThrowingConstructorObject", ThrowingConstructorObject,
+                                    Object);
+};
+
 TEST(Object, RefCounter) {
   ObjectPtr<TIntObj> a = make_object<TIntObj>(11);
   ObjectPtr<TIntObj> b = a;
@@ -140,6 +150,10 @@ TEST(Object, RefCounter) {
   EXPECT_TRUE(a == nullptr);  // NOLINT(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
 
   EXPECT_EQ(c->value, 11);
+}
+
+TEST(Object, MakeObjectPropagatesConstructorException) {
+  EXPECT_THROW(make_object<ThrowingConstructorObject>(), std::runtime_error);
 }
 
 TEST(Object, TypeInfo) {
