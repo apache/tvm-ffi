@@ -44,9 +44,12 @@ if TYPE_CHECKING:
 class RustGenerator:
     """Generator that emits Rust binding stubs.
 
-    Objects using an unrepresentable origin (``Union`` / ``Map`` / ``Dict`` /
-    ``List``) are skipped with a warning; global functions and
-    ``__all__``/``export`` re-exports are not generated.
+    Objects using an unrepresentable origin (``Union`` / ``Dict`` / ``List`` /
+    ``tuple``, or containers/``Optional`` over payloads the crate cannot hold)
+    are skipped with a warning; global functions and ``__all__``/``export``
+    re-exports are not generated. The backend targets natively-laid-out C++
+    objects only -- running it on Python-defined (``py_class``) types is
+    undefined (their fields use Python-side storage conventions).
     """
 
     name = "rust"

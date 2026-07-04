@@ -975,10 +975,8 @@ def test_render_nested() -> None:
     "schema",
     [
         TypeSchema("Union", (TypeSchema("int"), TypeSchema("str"))),
-        TypeSchema("Map", (TypeSchema("str"), TypeSchema("int"))),
         TypeSchema("Dict", (TypeSchema("str"), TypeSchema("int"))),
         TypeSchema("List", (TypeSchema("int"),)),
-        TypeSchema("Optional", (TypeSchema("int"),)),
         TypeSchema("tuple", (TypeSchema("int"), TypeSchema("float"))),
         TypeSchema("tuple"),
     ],
@@ -989,20 +987,56 @@ def test_render_unsupported_raises(schema: TypeSchema) -> None:
     assert exc.value.origin == schema.origin
 
 
+def test_render_map_typed() -> None:
+    schema = TypeSchema("Map", (TypeSchema("str"), TypeSchema("int")))
+    text, imports = _rust_render(schema)
+    assert text == "Map<String, i64>"
+    assert RustUse("tvm_ffi::Map") in imports.items
+    assert RustUse("tvm_ffi::String") in imports.items
+
+
+def test_render_optional_value_positions() -> None:
+    # Value positions render plain `Option<T>`; field position routes
+    # differently (see the `test_rust_optional_field_*` tests).
+    assert _rust_render(TypeSchema("Optional", (TypeSchema("int"),)))[0] == "Option<i64>"
+    assert _rust_render(TypeSchema("Optional", (TypeSchema("str"),)))[0] == "Option<String>"
+    assert _rust_render(TypeSchema("Optional", (TypeSchema("bytes"),)))[0] == "Option<Bytes>"
+    text, imports = _rust_render(
+        TypeSchema("Optional", (TypeSchema("Map", (TypeSchema("str"), TypeSchema("int"))),))
+    )
+    assert text == "Option<Map<String, i64>>"
+    assert RustUse("tvm_ffi::Map") in imports.items
+    # Nested inside an Array (elements are Any-encoded, so `Option<T>` is fine).
+    text, _ = _rust_render(TypeSchema("Array", (TypeSchema("Optional", (TypeSchema("int"),)),)))
+    assert text == "Array<Option<i64>>"
+
+
 @pytest.mark.parametrize(
-    "inner",
+    ("schema", "origin"),
     [
-        TypeSchema("Map", (TypeSchema("str"), TypeSchema("int"))),
-        TypeSchema("Optional", (TypeSchema("int"),)),
+        # `Any` is not `AnyCompatible`, so the crate's Map/Option bounds reject it.
+        pytest.param(TypeSchema("Map"), "Map", id="bare-map-fills-any"),
+        pytest.param(
+            TypeSchema("Map", (TypeSchema("str"), TypeSchema("Any"))), "Map", id="map-any-value"
+        ),
+        pytest.param(TypeSchema("Optional", (TypeSchema("Any"),)), "Optional", id="optional-any"),
+        # A genuinely unsupported origin buried inside a container still bubbles up.
+        pytest.param(
+            TypeSchema("Array", (TypeSchema("Dict", (TypeSchema("str"), TypeSchema("int"))),)),
+            "Dict",
+            id="array-of-dict",
+        ),
+        pytest.param(
+            TypeSchema("Map", (TypeSchema("str"), TypeSchema("List", (TypeSchema("int"),)))),
+            "List",
+            id="map-of-list",
+        ),
     ],
 )
-def test_render_unsupported_nested_raises(inner: TypeSchema) -> None:
-    # An unsupported origin buried inside an Array still bubbles up; `Optional`
-    # is unsupported even when nested (no layout-compatible Rust rendering).
-    schema = TypeSchema("Array", (inner,))
+def test_render_unsupported_nested_raises(schema: TypeSchema, origin: str) -> None:
     with pytest.raises(UnsupportedTypeError) as exc:
         _rust_render(schema)
-    assert exc.value.origin == inner.origin
+    assert exc.value.origin == origin
 
 
 def test_ty_render_dedups_same_path() -> None:
@@ -1055,8 +1089,7 @@ def _expr_info(*, mutable: bool = True) -> ObjectInfo:
 
     Native-eligible (root, field-binding init), so its ``ffi_new`` is the native
     struct-literal form. The blocked-constructor path is covered by the derived
-    fixtures (non-resolvable parent); ``Optional`` fields make the whole type
-    unsupported (see ``test_rust_optional_field_is_unsupported``).
+    fixtures (non-resolvable parent).
     """
     return ObjectInfo(
         fields=[NamedTypeSchema("value", TypeSchema("int"))],
@@ -1366,9 +1399,8 @@ def test_rust_native_explicit_init_stays_native(init_arity: int) -> None:
     assert "__ffi_init__" not in text
 
 
-def test_rust_optional_method_arg_is_unsupported() -> None:
-    # Unified treatment: an unsupported origin in a method signature (not just
-    # a field) also raises and skips the whole object.
+def test_rust_optional_method_arg_and_return() -> None:
+    # Value positions render plain `Option<T>`; no in-place mirror involved.
     info = _native_point_info()
     info.methods = [
         FuncInfo(
@@ -1376,15 +1408,224 @@ def test_rust_optional_method_arg_is_unsupported() -> None:
                 "lookup",
                 TypeSchema(
                     "Callable",
-                    (TypeSchema("int"), TypeSchema("Optional", (TypeSchema("int"),))),
+                    (
+                        TypeSchema("Optional", (TypeSchema("str"),)),
+                        TypeSchema("Optional", (TypeSchema("int"),)),
+                    ),
                 ),
             ),
             is_member=False,
         )
     ]
+    text, _ = _gen_rust_object(info)
+    assert "pub fn lookup(_0: Option<i64>) -> Result<Option<String>> {" in text
+    assert "Optional<" not in text  # the field mirror never appears in value positions
+
+
+def _optional_field_info(fields: list[NamedTypeSchema], *, has_init: bool = True) -> ObjectInfo:
+    return ObjectInfo(
+        fields=fields,
+        methods=[],
+        type_key="cpp_rust_test.OptHolder",
+        parent_type_key="ffi.Object",
+        has_init=has_init,
+    )
+
+
+@pytest.mark.parametrize(
+    ("payload", "mirror", "extra_use"),
+    [
+        # Scalars mirror at the schema-erased width: the Any cell stores the
+        # widened value for every declared C++ width.
+        pytest.param(TypeSchema("int"), "Optional<i64>", None, id="int"),
+        pytest.param(TypeSchema("float"), "Optional<f64>", None, id="float"),
+        pytest.param(TypeSchema("bool"), "Optional<bool>", None, id="bool"),
+        pytest.param(TypeSchema("str"), "Optional<String>", "tvm_ffi::String", id="str"),
+        pytest.param(TypeSchema("bytes"), "Optional<Bytes>", "tvm_ffi::Bytes", id="bytes"),
+        pytest.param(TypeSchema("Device"), "Optional<DLDevice>", "tvm_ffi::DLDevice", id="device"),
+        pytest.param(
+            TypeSchema("dtype"), "Optional<DLDataType>", "tvm_ffi::DLDataType", id="dtype"
+        ),
+        pytest.param(
+            TypeSchema("cpp_rust_test.Point"),
+            "Optional<Point>",
+            "cpp_rust_test::Point",
+            id="objref",
+        ),
+        pytest.param(
+            TypeSchema("Array", (TypeSchema("int"),)),
+            "Optional<Array<i64>>",
+            "tvm_ffi::Array",
+            id="array",
+        ),
+        pytest.param(
+            TypeSchema("Map", (TypeSchema("str"), TypeSchema("int"))),
+            "Optional<Map<String, i64>>",
+            "tvm_ffi::Map",
+            id="map",
+        ),
+        pytest.param(TypeSchema("Callable"), "Optional<Function>", "tvm_ffi::Function", id="fn"),
+        pytest.param(TypeSchema("Tensor"), "Optional<Tensor>", "tvm_ffi::Tensor", id="tensor"),
+        pytest.param(TypeSchema("Shape"), "Optional<Shape>", "tvm_ffi::Shape", id="shape"),
+    ],
+)
+def test_rust_optional_field_uniform_mirror(
+    payload: TypeSchema, mirror: str, extra_use: str | None
+) -> None:
+    schema = NamedTypeSchema("x", TypeSchema("Optional", (payload,)), size=16)
+    text, imports = _gen_rust_object(_optional_field_info([schema], has_init=False))
+    assert f"    pub x: {mirror}," in text
+    assert RustUse("tvm_ffi::Optional") in imports.items
+    if extra_use is not None:
+        assert RustUse(extra_use) in imports.items
+
+
+def test_rust_optional_field_builder_store_and_setter() -> None:
+    # size=None (synthetic schemas) is fine; the builder stores and sets the
+    # mirror type as-is (no Option<T> sugar).
+    schema = NamedTypeSchema("x", TypeSchema("Optional", (TypeSchema("int"),)))
+    text, _ = _gen_rust_object(_optional_field_info([schema]))
+    assert "    pub x: Optional<i64>," in text
+    assert "    x: Option<Optional<i64>>," in text
+    assert "pub fn x(mut self, x: Optional<i64>) -> Self {" in text
+
+
+@pytest.mark.parametrize(
+    ("payload", "origin"),
+    [
+        # `Any` / bare `Object` have no `AnyCompatible` crate rendering.
+        pytest.param(TypeSchema("Any"), "Optional", id="any"),
+        pytest.param(TypeSchema("Object"), "Optional", id="object"),
+        pytest.param(TypeSchema("ffi.Object"), "Optional", id="ffi-object"),
+        # `void*`: dotted key with no Rust rendering; without the non-element
+        # rule it would pass through as a bogus `use ctypes::c_void_p`.
+        pytest.param(TypeSchema("ctypes.c_void_p"), "Optional", id="void-ptr"),
+    ],
+)
+def test_rust_optional_field_unsupported_payloads(payload: TypeSchema, origin: str) -> None:
+    schema = NamedTypeSchema("x", TypeSchema("Optional", (payload,)), size=16)
     with pytest.raises(UnsupportedTypeError) as exc:
-        _gen_rust_object(info)
+        _gen_rust_object(_optional_field_info([schema], has_init=False))
+    assert exc.value.origin == origin
+
+
+@pytest.mark.parametrize(
+    ("payload", "size"),
+    [
+        # 8-byte fields can only come from pre-#657 reflection (the removed
+        # ptr-based / std::optional layouts).
+        pytest.param(TypeSchema("cpp_rust_test.Point"), 8, id="stale-ptr-layout"),
+        pytest.param(TypeSchema("int"), 8, id="stale-std-optional-int"),
+        # `std::string` folds to "str" but is the ~40-byte std::optional fallback.
+        pytest.param(TypeSchema("str"), 40, id="std-string-alias"),
+    ],
+)
+def test_rust_optional_field_layout_size_guard(payload: TypeSchema, size: int) -> None:
+    schema = NamedTypeSchema("x", TypeSchema("Optional", (payload,)), size=size)
+    with pytest.raises(UnsupportedTypeError) as exc:
+        _gen_rust_object(_optional_field_info([schema], has_init=False))
     assert exc.value.origin == "Optional"
+
+
+@pytest.mark.parametrize(
+    ("schema", "origin"),
+    [
+        # `Array<Any>`/`Array<Object>` violate the crate bounds even as bare
+        # field types; nested occurrences bubble up through the recursive render.
+        pytest.param(TypeSchema("Array", (TypeSchema("Any"),)), "Array", id="array-any"),
+        pytest.param(TypeSchema("Array", (TypeSchema("Object"),)), "Array", id="array-object"),
+        pytest.param(
+            TypeSchema("Map", (TypeSchema("str"), TypeSchema("Array", (TypeSchema("Any"),)))),
+            "Array",
+            id="map-of-array-any",
+        ),
+        pytest.param(
+            TypeSchema("Optional", (TypeSchema("Array", (TypeSchema("Any"),)),)),
+            "Array",
+            id="optional-array-any",
+        ),
+        pytest.param(
+            TypeSchema("Map", (TypeSchema("str"), TypeSchema("Object"))),
+            "Map",
+            id="map-object-value",
+        ),
+        pytest.param(TypeSchema("Optional", (TypeSchema("Object"),)), "Optional", id="opt-object"),
+    ],
+)
+def test_render_non_element_origins_raise(schema: TypeSchema, origin: str) -> None:
+    with pytest.raises(UnsupportedTypeError) as exc:
+        _rust_render(schema)
+    assert exc.value.origin == origin
+
+
+def test_rust_optional_engaged_default_is_unsupported() -> None:
+    # Only the `nullopt` default renders; any engaged default degrades to the
+    # loud skip-ffi_new path instead of risking an uncompilable literal.
+    for engaged in [
+        NamedTypeSchema("x", TypeSchema("Optional", (TypeSchema("int"),)), size=16, default=5),
+        NamedTypeSchema("x", TypeSchema("Optional", (TypeSchema("float"),)), size=16, default=1),
+        NamedTypeSchema("x", TypeSchema("Optional", (TypeSchema("str"),)), default="hi"),
+        NamedTypeSchema("x", TypeSchema("Optional", (TypeSchema("bool"),)), size=16, default=True),
+    ]:
+        text, _ = _gen_rust_object(_optional_field_info([engaged]))
+        assert "ffi_new" not in text  # native construction skipped ...
+        assert "pub struct OptHolderObj {" in text  # ... the struct still emits
+
+
+def test_rust_optional_builder_defaults() -> None:
+    fields = [
+        NamedTypeSchema("opt_i", TypeSchema("Optional", (TypeSchema("int"),)), size=16),
+        NamedTypeSchema(
+            "opt_j", TypeSchema("Optional", (TypeSchema("int"),)), size=16, default=None
+        ),
+        NamedTypeSchema("opt_s", TypeSchema("Optional", (TypeSchema("str"),)), default=None),
+        NamedTypeSchema(
+            "opt_p",
+            TypeSchema("Optional", (TypeSchema("cpp_rust_test.Point"),)),
+            default=None,
+        ),
+    ]
+    text, _ = _gen_rust_object(_optional_field_info(fields))
+    assert "pub fn ffi_new() -> OptHolderBuilder {" in text
+    # `nullopt`-defaulted fields are prefilled with the disengaged state ...
+    assert "opt_j: tvm_ffi::Optional::none()," in text
+    assert "opt_s: tvm_ffi::Optional::none()," in text
+    assert "opt_p: tvm_ffi::Optional::none()," in text
+    # ... while the field without a reflected default stays required.
+    assert "    opt_i: Option<Optional<i64>>," in text
+    assert "self.opt_i.ok_or_else" in text
+
+
+def test_rust_map_field_and_methods() -> None:
+    info = ObjectInfo(
+        fields=[
+            NamedTypeSchema("cfg", TypeSchema("Map", (TypeSchema("str"), TypeSchema("int")))),
+        ],
+        methods=[
+            FuncInfo(
+                NamedTypeSchema(
+                    "merge",
+                    TypeSchema(
+                        "Callable",
+                        (
+                            TypeSchema("Map", (TypeSchema("str"), TypeSchema("int"))),
+                            TypeSchema("Map", (TypeSchema("str"), TypeSchema("int"))),
+                        ),
+                    ),
+                ),
+                is_member=False,
+            )
+        ],
+        type_key="cpp_rust_test.MapHolder",
+        parent_type_key="ffi.Object",
+        has_init=True,
+    )
+    text, imports = _gen_rust_object(info)
+    # Map<K, V> is pointer-sized, so the field mirrors the C++ layout directly.
+    assert "    pub cfg: Map<String, i64>," in text
+    assert "pub fn cfg(mut self, cfg: Map<String, i64>) -> Self {" in text
+    assert "pub fn merge(_0: Map<String, i64>) -> Result<Map<String, i64>> {" in text
+    assert RustUse("tvm_ffi::Map") in imports.items
 
 
 def _native_point3d_info() -> ObjectInfo:
@@ -1567,9 +1808,11 @@ def test_rust_method_any_return_stays_any_not_anyview() -> None:
 
 
 def _has_map_info() -> ObjectInfo:
+    # A bare `Map` fills to the unsupported `Map<Any, Any>`: the canonical
+    # still-skipped fixture now that typed Maps render.
     return ObjectInfo(
         fields=[
-            NamedTypeSchema("cfg", TypeSchema("Map", (TypeSchema("str"), TypeSchema("int")))),
+            NamedTypeSchema("cfg", TypeSchema("Map")),
         ],
         methods=[],
         type_key="demo.HasMap",

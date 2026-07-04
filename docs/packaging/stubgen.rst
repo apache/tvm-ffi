@@ -425,9 +425,32 @@ Limitations
 A type that mentions an origin the Rust crate cannot represent -- in any
 position: field, method argument, return type, or nested inside another
 container -- is explicitly unsupported: the whole binding is skipped with a
-warning. This covers ``Map`` / ``Dict`` / ``List`` / ``Union`` (no Rust
-counterpart) as well as ``Optional`` / ``tuple`` (std ``Option<T>`` and Rust
-tuples do not match the C++ ``ffi::Optional`` / ``ffi::Tuple`` memory layout).
+warning. This covers ``Dict`` / ``List`` / ``Union`` (no Rust counterpart) as
+well as ``tuple`` (Rust tuples do not match the C++ ``ffi::Tuple`` memory
+layout).
+
+``Map<K, V>`` renders as the crate's ``tvm_ffi::Map<K, V>`` when both ``K``
+and ``V`` are typed; an untyped ``Map`` (``Map<Any, Any>``) is skipped because
+``Any`` does not satisfy the crate's ``AnyCompatible`` bounds.
+
+``Optional<T>`` in argument/return position renders as plain ``Option<T>``.
+An ``Optional<T>`` *field* renders as ``tvm_ffi::Optional<T>``, the in-place
+mirror of C++ ``ffi::Optional<T>``'s single 16-byte ``TVMFFIAny`` cell. The
+payload follows the container-element rules (``Any`` and bare ``ObjectRef``
+skip the object); scalars render at the schema-erased width (``i64`` /
+``f64``). A field whose reflected size is not the 16-byte cell -- the
+``std::optional`` fallback of types without Any storage, e.g. the
+``std::string`` alias of ``str`` -- skips the object instead of emitting a
+wrong ``#[repr(C)]`` overlay.
+
+For ``Optional`` fields only the ``nullopt`` default renders; an engaged
+default value suppresses the generated constructor like any other
+unrenderable default.
+
+The Rust backend targets natively-laid-out C++ objects only. Running it on
+Python-defined (``py_class``) types is undefined: their fields use
+Python-side storage conventions (``Optional``/``str`` origins are inline
+``Any`` cells), not the native C++ struct layout these mirrors assume.
 
 A constructor alone cannot be generated when a default comes from a
 ``refl::default_factory`` or when a default value has no Rust literal

@@ -34,6 +34,7 @@ from . import consts as C_RUST
 from .utils import (
     RustImports,
     UnsupportedTypeError,
+    _check_element,
     _deref_impl,
     _packed_args_expr,
     _packed_call_lines,
@@ -66,22 +67,46 @@ def _rust_string_literal(s: str) -> str:
     return "".join(out)
 
 
-def _default_expr(field: NamedTypeSchema) -> str | None:
-    """Render ``field``'s registered default as a Rust expression (``None``: can't).
+def _scalar_literal(value: object) -> str | None:
+    """Render a ``bool``/``int``/finite ``float`` value as a Rust literal (``None``: can't).
 
-    Only values whose Rust spelling is self-evident are supported: ``bool`` /
-    ``int`` / finite ``float`` literals (which coerce to the field's possibly
-    narrowed scalar type in the struct-literal position) and ``str`` (which
-    becomes a ``tvm_ffi::String``). Anything else -- objects, containers,
-    non-finite floats, factories -- has no native materialization.
+    The literal coerces to the field's possibly narrowed scalar type in the
+    struct-literal position.
     """
-    value = field.default
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, int):
         return repr(value)
     if isinstance(value, float):
         return repr(value) if math.isfinite(value) else None
+    return None
+
+
+def _optional_default_expr(field: NamedTypeSchema) -> str | None:
+    """Render an ``Optional`` field's ``nullopt`` default as the mirror's disengaged state.
+
+    Only the ``None`` default is supported: an engaged default's type-erased
+    value can disagree with the payload's kind or width, so it is treated as
+    unrenderable (``ffi_new`` is then skipped loudly).
+    """
+    if field.default is not None:
+        return None
+    return f"{C_RUST.RUST_OPTIONAL_PATH}::none()"
+
+
+def _default_expr(field: NamedTypeSchema) -> str | None:
+    """Render ``field``'s registered default as a Rust expression (``None``: can't).
+
+    Supported: ``bool``/``int``/finite ``float`` literals, ``str`` (as
+    ``tvm_ffi::String``), and the ``nullopt`` default of ``Optional`` fields.
+    Anything else has no native materialization.
+    """
+    if field.origin == "Optional":
+        return _optional_default_expr(field)
+    value = field.default
+    literal = _scalar_literal(value)
+    if literal is not None:
+        return literal
     if isinstance(value, str):
         return f"tvm_ffi::String::from({_rust_string_literal(value)})"
     return None
@@ -209,10 +234,35 @@ class _ObjectRenderer:
 
         An ``int32_t`` field must render as ``i32``, not the schema-erased
         default ``i64``; the width comes from reflection's per-field ``size``.
-        Non-scalar origins (or schemas without a size) render plainly.
+        ``Optional`` fields are layout-sensitive and route to their in-place
+        mirror. Non-scalar origins (or schemas without a size) render plainly.
         """
+        if schema.origin == "Optional":
+            return self._render_optional_field(schema)
         narrowed = C_RUST.RUST_SCALAR_BY_SIZE.get((schema.origin, schema.size))
         return narrowed if narrowed is not None else render_rust_type(schema, self._ty_render)
+
+    def _render_optional_field(self, schema: NamedTypeSchema) -> str:
+        """Render an ``Optional<T>`` FIELD as the uniform ``tvm_ffi::Optional<T>`` mirror.
+
+        The payload rules are exactly the container-element rules; the size
+        guard rejects the ``std::optional`` fallback layout of storage-disabled
+        types.
+        """
+        (payload,) = schema.args or (None,)  # Optional always has exactly one argument
+        assert payload is not None
+        _check_element("Optional", payload)
+        if schema.size not in (None, C_RUST.RUST_OPTIONAL_FIELD_SIZE):
+            raise UnsupportedTypeError(
+                "Optional",
+                f"`Optional<{payload.origin}>` field has size {schema.size}, not the "
+                f"{C_RUST.RUST_OPTIONAL_FIELD_SIZE}-byte `TVMFFIAny`-backed "
+                "`ffi::Optional` layout",
+            )
+        # No width recovery: the Any cell stores the widened v_int64/v_float64,
+        # so the schema-erased scalar is the correct mirror for every C++ width.
+        opt = self.imports.record(C_RUST.RUST_OPTIONAL_PATH)
+        return f"{opt}<{render_rust_type(payload, self._ty_render)}>"
 
     def render_param(self, schema: TypeSchema) -> str:
         """Render an argument type (a top-level ``Any`` is the non-owning ``AnyView``)."""

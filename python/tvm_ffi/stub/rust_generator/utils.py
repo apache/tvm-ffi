@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING, Callable
 
 from ..utils import UnsupportedTypeError
 from . import consts as C
-from .consts import RUST_UNSUPPORTED_ORIGINS
+from .consts import RUST_NON_ELEMENT_ORIGINS, RUST_UNSUPPORTED_ORIGINS
 
 if TYPE_CHECKING:
     from tvm_ffi.core import TypeSchema
@@ -98,6 +98,19 @@ class RustImports:
         return probe.leaf
 
 
+def _check_element(container_origin: str, elem: TypeSchema) -> None:
+    """Reject a container element / Optional payload the crate cannot hold.
+
+    Deeper nesting is covered by the recursive :func:`render_rust_type` call.
+    """
+    if elem.origin in RUST_NON_ELEMENT_ORIGINS:
+        raise UnsupportedTypeError(
+            container_origin,
+            f"`{elem.origin}` cannot be a `{container_origin}` element/payload "
+            f"(its crate rendering is not `AnyCompatible`)",
+        )
+
+
 def render_rust_type(schema: TypeSchema, ty_render: Callable[[str], str]) -> str:
     """Render a :class:`TypeSchema` into a Rust type expression.
 
@@ -106,15 +119,31 @@ def render_rust_type(schema: TypeSchema, ty_render: Callable[[str], str]) -> str
     :class:`UnsupportedTypeError` for origins the crate cannot represent.
     """
     origin = schema.origin
-    args = schema.args or ()
+    args = schema.args
 
     if origin in RUST_UNSUPPORTED_ORIGINS:
         raise UnsupportedTypeError(origin)
 
     if origin == "Array":
         assert args  # TypeSchema's post_init fills a missing element type.
+        _check_element(origin, args[0])
         elem = render_rust_type(args[0], ty_render)
         return f"{ty_render('Array')}<{elem}>"
+
+    if origin == "Map":
+        assert len(args) == 2  # TypeSchema's post_init fills a bare Map to (Any, Any).
+        for arg in args:
+            _check_element(origin, arg)
+        key = render_rust_type(args[0], ty_render)
+        value = render_rust_type(args[1], ty_render)
+        return f"{ty_render('Map')}<{key}, {value}>"
+
+    if origin == "Optional":
+        # Value position only (`None` <-> kTVMFFINone via Any); FIELD position
+        # is layout-sensitive and routes through `render_struct_field`.
+        (payload,) = args  # TypeSchema's post_init enforces exactly one argument.
+        _check_element(origin, payload)
+        return f"Option<{render_rust_type(payload, ty_render)}>"
 
     if origin == "Callable":
         # The crate's Function is type-erased: no generic params.

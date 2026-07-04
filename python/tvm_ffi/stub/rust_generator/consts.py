@@ -31,6 +31,7 @@ RUST_TY_MAP_DEFAULTS = {
     "Any": "tvm_ffi::Any",
     "Callable": "tvm_ffi::Function",
     "Array": "tvm_ffi::Array",  # the crate's own Array<T>, NOT Vec
+    "Map": "tvm_ffi::Map",  # the crate's own Map<K, V>, NOT HashMap
     "Object": "tvm_ffi::Object",
     "Tensor": "tvm_ffi::Tensor",
     "Shape": "tvm_ffi::Shape",
@@ -62,13 +63,22 @@ RUST_SCALAR_BY_SIZE = {
     ("float", 8): "f64",
 }
 
-#: Origins the crate has no FFI type for: ``Map``/``Dict``/``List``/``Union``
-#: have no Rust counterpart at all (do NOT map to ``HashMap``/``Vec``), and
-#: ``Optional``/``tuple`` only have std renderings (``Option<T>``, Rust tuples)
-#: that are not layout-compatible with C++ ``ffi::Optional``/``ffi::Tuple``.
-#: ``render_rust_type`` raises ``UnsupportedTypeError`` wherever one appears
-#: (field, argument, return, or nested) and the enclosing object is skipped.
-RUST_UNSUPPORTED_ORIGINS = frozenset({"Map", "Dict", "List", "Union", "Optional", "tuple"})
+#: Origins the crate has no FFI type for (do NOT map to ``HashMap``/``Vec``;
+#: Rust tuples don't match ``ffi::Tuple``'s layout). ``render_rust_type``
+#: raises wherever one appears and the enclosing object is skipped.
+RUST_UNSUPPORTED_ORIGINS = frozenset({"Dict", "List", "Union", "tuple"})
+
+#: Origins whose rendering cannot satisfy the crate's ``AnyCompatible``
+#: element/payload bounds (``ctypes.c_void_p`` -- ``void*`` -- has no Rust
+#: rendering at all): raise and skip the object.
+RUST_NON_ELEMENT_ORIGINS = frozenset({"Any", "Object", "ffi.Object", "ctypes.c_void_p"})
+
+#: In-place mirror of an ``Optional<T>`` FIELD: C++ ``ffi::Optional<T>`` is
+#: uniformly a single 16-byte ``TVMFFIAny`` for every ``T`` with Any storage.
+RUST_OPTIONAL_PATH = "tvm_ffi::Optional"
+#: Any other reflected field size is the ``std::optional`` fallback of
+#: storage-disabled types, which has no mirror.
+RUST_OPTIONAL_FIELD_SIZE = 16
 
 #: Module-prefix rewrites for ``use`` paths: builtin ``ffi.*`` type keys live at
 #: the crate root.
