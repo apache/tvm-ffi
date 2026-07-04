@@ -206,9 +206,20 @@ TEST(Optional, Bytes) {
   static_assert(sizeof(Optional<Bytes>) == sizeof(Bytes));
 }
 
-// The Rust binding (rust/tvm-ffi/src/option.rs) overlays Optional<T> in place as
-// `{ T value @0; bool engaged @sizeof(T) }`; pin that field order here (the header's
-// static_assert pins only size/align).
+// The Rust binding (rust/tvm-ffi/src/option.rs) mirrors Optional<T> in place as
+// `{ T value; bool engaged; }`; fail early if a toolchain's std::optional deviates from that.
+template <typename... T>
+constexpr bool all_optional_layouts_match_rust_mirror_v =
+    ((sizeof(Optional<T>) == sizeof(T) + alignof(T) && alignof(Optional<T>) == alignof(T)) && ...);
+static_assert(
+    all_optional_layouts_match_rust_mirror_v<bool, int8_t, int16_t, int32_t, int64_t, uint8_t,
+                                             uint16_t, uint32_t, uint64_t, float, double>);
+// Same contract for the String/Bytes specialization (Rust OptionStr overlays the cell).
+static_assert(sizeof(Optional<String>) == sizeof(TVMFFIAny) &&
+              sizeof(Optional<Bytes>) == sizeof(TVMFFIAny));
+
+// The overlay also assumes the field order `{ T value @0; bool engaged @sizeof(T) }`;
+// pin that here (the static_asserts above pin only size/align).
 template <typename T>
 void CheckRustMirrorFieldOrder(T v) {
   Optional<T> opt(v);

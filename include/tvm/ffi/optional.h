@@ -29,7 +29,6 @@
 #include <tvm/ffi/object.h>
 #include <tvm/ffi/string.h>
 
-#include <cstdint>
 #include <optional>
 #include <string>
 #include <utility>
@@ -477,22 +476,6 @@ struct TypeTraits<Optional<T>> : public TypeTraitsBase {
     return R"({"type":"Optional","args":[)" + details::TypeSchema<T>::v() + "]}";
   }
 };
-
-/// \cond Doxygen_Suppress
-// The Rust binding (rust/tvm-ffi/src/option.rs) mirrors Optional<T> in place as
-// `{ T value; bool engaged; }`; fail early if a toolchain's std::optional deviates from that.
-namespace details {
-template <typename... T>
-inline constexpr bool all_optional_layouts_match_rust_mirror_v =
-    ((sizeof(Optional<T>) == sizeof(T) + alignof(T) && alignof(Optional<T>) == alignof(T)) && ...);
-}  // namespace details
-static_assert(details::all_optional_layouts_match_rust_mirror_v<bool, int8_t, int16_t, int32_t,
-                                                                int64_t, uint8_t, uint16_t,
-                                                                uint32_t, uint64_t, float, double>);
-// Same contract for the String/Bytes specialization (Rust OptionStr overlays the cell).
-static_assert(sizeof(Optional<String>) == sizeof(TVMFFIAny) &&
-              sizeof(Optional<Bytes>) == sizeof(TVMFFIAny));
-/// \endcond
 }  // namespace ffi
 }  // namespace tvm
 #endif  // TVM_FFI_OPTIONAL_H_
