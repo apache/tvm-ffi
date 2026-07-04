@@ -83,7 +83,7 @@ TVM_FFI_INLINE void* AlignedAlloc(size_t size) {
  * \brief Free aligned memory.
  * \param data The pointer to the memory to free.
  */
-TVM_FFI_INLINE void AlignedFree(void* data) {
+TVM_FFI_INLINE void AlignedFree(void* data) noexcept {
 #ifdef _MSC_VER
   // MSVC have to use _aligned_free
   _aligned_free(data);
@@ -91,6 +91,26 @@ TVM_FFI_INLINE void AlignedFree(void* data) {
   std::free(data);
 #endif
 }
+
+/*! \brief Guard an allocation until ownership is transferred to an object. */
+class AllocGuard {
+ public:
+  explicit AllocGuard(void* data) noexcept : data_(data) {}
+  AllocGuard(const AllocGuard&) = delete;
+  AllocGuard& operator=(const AllocGuard&) = delete;
+
+  ~AllocGuard() noexcept {
+    if (data_ != nullptr) {
+      AlignedFree(data_);
+    }
+  }
+
+  /*! \brief Disarm the guard after successful in-place construction. */
+  void Release() noexcept { data_ = nullptr; }
+
+ private:
+  void* data_;
+};
 
 /*!
  * \brief Base class of object allocators that implements make.
@@ -169,7 +189,9 @@ class SimpleObjAllocator : public ObjAllocatorBase<SimpleObjAllocator> {
       // We are fine here as we captured the right deleter during construction.
       // This is also the right way to get storage type for an object pool.
       void* data = AlignedAlloc<alignof(T)>(sizeof(T));
+      AllocGuard alloc_guard(data);
       new (data) T(std::forward<Args>(args)...);
+      alloc_guard.Release();
       return reinterpret_cast<T*>(data);
     }
 
@@ -221,7 +243,9 @@ class SimpleObjAllocator : public ObjAllocatorBase<SimpleObjAllocator> {
       // C++ standard always guarantees that alignof operator returns a power of 2
       size_t aligned_size = (size + (align - 1)) & ~(align - 1);
       void* data = AlignedAlloc<align>(aligned_size);
+      AllocGuard alloc_guard(data);
       new (data) ArrayType(std::forward<Args>(args)...);
+      alloc_guard.Release();
       return reinterpret_cast<ArrayType*>(data);
     }
 
