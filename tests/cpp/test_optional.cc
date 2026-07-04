@@ -22,6 +22,9 @@
 #include <tvm/ffi/memory.h>
 #include <tvm/ffi/optional.h>
 
+#include <cstdint>
+#include <cstring>
+
 #include "./testing_object.h"
 
 namespace {
@@ -201,5 +204,48 @@ TEST(Optional, Bytes) {
   EXPECT_EQ(opt_bytes.value().operator std::string(), "hello");
   EXPECT_TRUE(opt_bytes != std::nullopt);
   static_assert(sizeof(Optional<Bytes>) == sizeof(Bytes));
+}
+
+// The Rust binding (rust/tvm-ffi/src/option.rs) mirrors Optional<T> in place as
+// `{ T value; bool engaged; }`; fail early if a toolchain's std::optional deviates from that.
+template <typename... T>
+constexpr bool all_optional_layouts_match_rust_mirror_v =
+    ((sizeof(Optional<T>) == sizeof(T) + alignof(T) && alignof(Optional<T>) == alignof(T)) && ...);
+static_assert(
+    all_optional_layouts_match_rust_mirror_v<bool, int8_t, int16_t, int32_t, int64_t, uint8_t,
+                                             uint16_t, uint32_t, uint64_t, float, double>);
+// Same contract for the String/Bytes specialization (Rust OptionStr overlays the cell).
+static_assert(sizeof(Optional<String>) == sizeof(TVMFFIAny) &&
+              sizeof(Optional<Bytes>) == sizeof(TVMFFIAny));
+
+// The overlay also assumes the field order `{ T value @0; bool engaged @sizeof(T) }`;
+// pin that here (the static_asserts above pin only size/align).
+template <typename T>
+void CheckRustMirrorFieldOrder(T v) {
+  Optional<T> opt(v);
+  const char* base = reinterpret_cast<const char*>(&opt);
+  T payload;
+  std::memcpy(&payload, base, sizeof(T));
+  EXPECT_EQ(payload, v) << "payload must sit at offset 0";
+  bool engaged = false;
+  std::memcpy(&engaged, base + sizeof(T), sizeof(bool));
+  EXPECT_TRUE(engaged) << "engaged flag must sit at offset sizeof(T)";
+  opt = std::nullopt;
+  std::memcpy(&engaged, base + sizeof(T), sizeof(bool));
+  EXPECT_FALSE(engaged) << "disengaging must clear the flag at offset sizeof(T)";
+}
+
+TEST(Optional, RustMirrorFieldOrder) {
+  CheckRustMirrorFieldOrder<bool>(true);
+  CheckRustMirrorFieldOrder<int8_t>(0x12);
+  CheckRustMirrorFieldOrder<int16_t>(0x1234);
+  CheckRustMirrorFieldOrder<int32_t>(0x12345678);
+  CheckRustMirrorFieldOrder<int64_t>(0x1122334455667788LL);
+  CheckRustMirrorFieldOrder<uint8_t>(0xAB);
+  CheckRustMirrorFieldOrder<uint16_t>(0xABCD);
+  CheckRustMirrorFieldOrder<uint32_t>(0xABCDEF01u);
+  CheckRustMirrorFieldOrder<uint64_t>(0xABCDEF0123456789ULL);
+  CheckRustMirrorFieldOrder<float>(1.5f);
+  CheckRustMirrorFieldOrder<double>(2.5);
 }
 }  // namespace

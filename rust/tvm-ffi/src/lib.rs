@@ -27,6 +27,7 @@ pub mod function;
 pub mod function_internal;
 pub mod macros;
 pub mod object;
+pub mod option;
 pub mod string;
 pub mod type_traits;
 pub use tvm_ffi_sys;
