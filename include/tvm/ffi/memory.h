@@ -92,26 +92,6 @@ TVM_FFI_INLINE void AlignedFree(void* data) noexcept {
 #endif
 }
 
-/*! \brief Guard an allocation until ownership is transferred to an object. */
-class AllocGuard {
- public:
-  explicit AllocGuard(void* data) noexcept : data_(data) {}
-  AllocGuard(const AllocGuard&) = delete;
-  AllocGuard& operator=(const AllocGuard&) = delete;
-
-  ~AllocGuard() noexcept {
-    if (data_ != nullptr) {
-      AlignedFree(data_);
-    }
-  }
-
-  /*! \brief Disarm the guard after successful in-place construction. */
-  void Release() noexcept { data_ = nullptr; }
-
- private:
-  void* data_;
-};
-
 /*!
  * \brief Base class of object allocators that implements make.
  *  Use curiously recurring template pattern.
@@ -169,6 +149,27 @@ class ObjAllocatorBase {
 
 // Simple allocator that uses new/delete.
 class SimpleObjAllocator : public ObjAllocatorBase<SimpleObjAllocator> {
+ private:
+  /*! \brief Guard a simple-allocator allocation until ownership is transferred to an object. */
+  class AllocGuard {
+   public:
+    explicit AllocGuard(void* data) noexcept : data_(data) {}
+    AllocGuard(const AllocGuard&) = delete;
+    AllocGuard& operator=(const AllocGuard&) = delete;
+
+    ~AllocGuard() noexcept {
+      if (data_ != nullptr) {
+        AlignedFree(data_);
+      }
+    }
+
+    /*! \brief Disarm the guard after successful in-place construction. */
+    void Release() noexcept { data_ = nullptr; }
+
+   private:
+    void* data_;
+  };
+
  public:
   template <typename T>
   class Handler {
