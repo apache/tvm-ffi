@@ -40,21 +40,70 @@ BACKEND_STR = Literal["cuda", "hip"]
 logger = logging.getLogger(__name__)
 
 
+def _detect_gpu_backend_from_torch() -> BACKEND_STR | None:
+    """Infer the GPU backend from an importable PyTorch build, if conclusive.
+
+    A ROCm PyTorch build reports a ``torch.version.hip`` string, while a CUDA
+    build reports a ``torch.version.cuda`` string; the two are mutually
+    exclusive for a given wheel. When PyTorch cannot be imported or reports
+    neither signal (for example a CPU-only build), the result is inconclusive
+    and ``None`` is returned so the caller can fall back to compiler probing.
+    """
+    try:
+        import torch  # noqa: PLC0415
+        import torch.version  # noqa: PLC0415
+    except Exception:
+        # Any import-time failure (missing package, broken install) is treated
+        # as an inconclusive signal rather than a hard error.
+        return None
+    version = getattr(torch, "version", None)
+    # Check HIP first: a ROCm build is the case most easily misclassified as
+    # CUDA by directory-based heuristics, so an explicit HIP signal is decisive.
+    if getattr(version, "hip", None):
+        return "hip"
+    if getattr(version, "cuda", None):
+        return "cuda"
+    return None
+
+
 @functools.lru_cache
 def _detect_gpu_backend() -> BACKEND_STR:
     """Auto-detect whether to use CUDA or HIP (ROCm).
 
-    Returns 'hip' if ROCm/HIP is available, 'cuda' otherwise.
+    Resolution order, from most to least authoritative:
+
+    1. The ``TVM_FFI_GPU_BACKEND`` environment override (``cuda`` or ``hip``).
+    2. PyTorch build signals (``torch.version.cuda`` / ``torch.version.hip``)
+       when PyTorch is importable and reports a conclusive value.
+    3. An available ``nvcc`` on ``PATH`` implies CUDA.
+    4. An available ``hipcc`` on ``PATH`` implies HIP.
+
+    The mere existence of ``/opt/rocm`` is deliberately *not* treated as
+    evidence that HIP is the active backend: CUDA/NVIDIA systems frequently
+    carry a stray ROCm directory, and selecting HIP from that alone misbuilds
+    CUDA sources. When no signal resolves, a clear error is raised.
     """
     # Check environment variable override first
     backend = os.environ.get("TVM_FFI_GPU_BACKEND", "").lower()
     if backend in ("cuda", "hip"):
         return backend  # type: ignore[return-value]
-    try:
-        _find_rocm_home()
-        return "hip"
-    except RuntimeError:
+
+    torch_backend = _detect_gpu_backend_from_torch()
+    if torch_backend is not None:
+        return torch_backend
+
+    if shutil.which("nvcc") is not None:
         return "cuda"
+    if shutil.which("hipcc") is not None:
+        return "hip"
+
+    raise RuntimeError(
+        "Could not determine the GPU backend for compiling CUDA/HIP sources. "
+        "PyTorch did not provide a conclusive CUDA/HIP signal, and neither "
+        "'nvcc' nor 'hipcc' was found on PATH. Set the TVM_FFI_GPU_BACKEND "
+        "environment variable to 'cuda' or 'hip', or install a supported "
+        "compiler (nvcc for CUDA, hipcc for HIP)."
+    )
 
 
 def _resolve_gpu_backend(backend: str | None) -> BACKEND_STR:
