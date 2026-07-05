@@ -30,6 +30,9 @@
 #include <tvm/ffi/object.h>
 #include <tvm/ffi/string.h>
 
+#include <atomic>
+#include <cstdint>
+
 #include "llvm_patches/macho_cxa_atexit_shim.h"
 #include "orcjit_session.h"
 
@@ -107,8 +110,13 @@ class ORCJITDynamicLibraryObj : public ModuleObj {
   /*! \brief Link order tracking (to support incremental linking) */
   llvm::orc::JITDylibSearchOrder link_order_;
 
-  /*! \brief Whether context slots have been refreshed since the last object add. */
-  bool context_symbol_refreshed_{false};
+  /*! \brief State bits for context refresh and object-add coordination. */
+  static constexpr uint64_t kContextRefreshPending = 1;
+  static constexpr uint64_t kObjectAddInProgress = 2;
+  static constexpr uint64_t kContextGenerationStep = 4;
+
+  /*! \brief Context generation (upper bits) and refresh/add state (low bits). */
+  std::atomic<uint64_t> context_refresh_state_{kContextRefreshPending};
 
 #ifdef __APPLE__
   /*! \brief Per-dylib __cxa_atexit registry.

@@ -103,9 +103,32 @@ void ORCJITDynamicLibraryObj::AddObjectFile(const String& path) {
     TVM_FFI_THROW(IOError) << "Failed to read object file: " << path;
   }
 
-  // Add object file to this JITDylib
-  TVM_FFI_ORCJIT_LLVM_CALL(jit_->addObjectFile(*dylib_, std::move(*buffer_or_err)));
-  context_symbol_refreshed_ = false;
+  // Publish an add-in-progress state before LLVM can make the object visible.
+  // Other adds serialize here, while GetFunction retries without entering
+  // symbol lookup. A failed add restores the exact prior refresh state.
+  uint64_t state = context_refresh_state_.load(std::memory_order_relaxed);
+  while (true) {
+    if (state & kObjectAddInProgress) {
+      state = context_refresh_state_.load(std::memory_order_acquire);
+      continue;
+    }
+    if (context_refresh_state_.compare_exchange_weak(state, state | kObjectAddInProgress,
+                                                     std::memory_order_acq_rel,
+                                                     std::memory_order_acquire)) {
+      break;
+    }
+  }
+
+  try {
+    TVM_FFI_ORCJIT_LLVM_CALL(jit_->addObjectFile(*dylib_, std::move(*buffer_or_err)));
+  } catch (...) {
+    context_refresh_state_.store(state, std::memory_order_release);
+    throw;
+  }
+  context_refresh_state_.store(
+      ((state & ~(kContextRefreshPending | kObjectAddInProgress)) + kContextGenerationStep) |
+          kContextRefreshPending,
+      std::memory_order_release);
 }
 
 void ORCJITDynamicLibraryObj::SetLinkOrder(const std::vector<llvm::orc::JITDylib*>& dylibs) {
@@ -180,28 +203,49 @@ Optional<Function> ORCJITDynamicLibraryObj::GetFunction(const String& name) {
     });
   }
 
-  if (!context_symbol_refreshed_) {
-    if (void** ctx_addr = reinterpret_cast<void**>(GetSymbol(symbol::tvm_ffi_library_ctx))) {
-      *ctx_addr = this;
-    }
-    Module::VisitContextSymbols([this](const String& name, void* symbol) {
-      if (void** ctx_addr = reinterpret_cast<void**>(GetSymbol(name))) {
-        *ctx_addr = symbol;
-      }
-    });
-    context_symbol_refreshed_ = true;
-  }
-
   // TVM-FFI exports have __tvm_ffi_ prefix
   std::string symbol_name = symbol::tvm_ffi_symbol_prefix + std::string(name);
 
-  // Try to get the symbol - return NullOpt if not found
-  if (void* symbol = GetSymbol(symbol_name)) {
-    TVMFFISafeCallType c_func = reinterpret_cast<TVMFFISafeCallType>(symbol);
-    auto* wrapper = new DylibFnContextWithModule{GetRef<Module>(this)};
-    return Function::FromExternC(wrapper, c_func, DeleteDylibFnContextWithModule);
+  while (true) {
+    uint64_t state = context_refresh_state_.load(std::memory_order_acquire);
+    if (state & kObjectAddInProgress) {
+      continue;
+    }
+    if (state & kContextRefreshPending) {
+      if (void** ctx_addr = reinterpret_cast<void**>(GetSymbol(symbol::tvm_ffi_library_ctx))) {
+        *ctx_addr = this;
+      }
+      Module::VisitContextSymbols([this](const String& name, void* symbol) {
+        if (void** ctx_addr = reinterpret_cast<void**>(GetSymbol(name))) {
+          *ctx_addr = symbol;
+        }
+      });
+
+      // Publish this exact generation as refreshed. A successful object add
+      // always changes the generation and leaves it pending, so an add that
+      // overlaps the assignments makes this compare-exchange fail.
+      uint64_t refreshed_state = state & ~kContextRefreshPending;
+      if (!context_refresh_state_.compare_exchange_strong(
+              state, refreshed_state, std::memory_order_acq_rel, std::memory_order_acquire)) {
+        continue;
+      }
+      state = refreshed_state;
+    }
+
+    // Try to get the symbol - return NullOpt if not found
+    void* symbol = GetSymbol(symbol_name);
+    // Do not return a result obtained across a successful object add. The
+    // next loop refreshes that newer generation before exposing a function.
+    if (context_refresh_state_.load(std::memory_order_acquire) != state) {
+      continue;
+    }
+    if (symbol != nullptr) {
+      TVMFFISafeCallType c_func = reinterpret_cast<TVMFFISafeCallType>(symbol);
+      auto* wrapper = new DylibFnContextWithModule{GetRef<Module>(this)};
+      return Function::FromExternC(wrapper, c_func, DeleteDylibFnContextWithModule);
+    }
+    return std::nullopt;
   }
-  return std::nullopt;
 }
 
 //-------------------------------------

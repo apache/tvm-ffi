@@ -21,6 +21,8 @@ from __future__ import annotations
 import gc
 import sys
 import tempfile
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -301,11 +303,20 @@ def test_call_global(v: Variant) -> None:
 
 
 def test_context_injected_after_object_add() -> None:
-    """The first function lookup after an object add injects its context pointer."""
+    """Concurrent first lookups after an object add observe the injected context pointer."""
     session = ExecutionSession()
     lib = session.create_library("context_after_add")
     lib.add(obj("c/test_context"))
-    assert lib.get_function("context_is_set")() == 1
+
+    num_workers = 8
+    barrier = threading.Barrier(num_workers)
+
+    def lookup(_worker: int) -> int:
+        barrier.wait()
+        return lib.get_function("context_is_set")()
+
+    with ThreadPoolExecutor(max_workers=num_workers) as pool:
+        assert list(pool.map(lookup, range(num_workers))) == [1] * num_workers
 
 
 # ---------------------------------------------------------------------------
