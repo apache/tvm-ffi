@@ -40,35 +40,16 @@ _LOCK_DIR_PREFIX = "tvm-ffi-test-locks"
 _LOCK_FILENAME = "gpu.lock"
 _R = TypeVar("_R")
 
-# Resolved GPU lock path, cached after the first ``run_with_gpu_lock`` call.
+# Resolved GPU lock path, cached on the first ``run_with_gpu_lock`` call.
 #
-# The path is initialized lazily on first use rather than at import time:
-# importing this module does not imply the caller will ever run a GPU test, and
-# resolving the path touches the filesystem (it creates the lock directory), so
-# there is no reason to pay that cost for callers that never lock. Caching also
-# avoids recomputing the user tag and temp-dir lookup on every call.
-#
-# If several workers make their first call concurrently they may each resolve
-# the path and race to assign this global. That race is intentionally benign:
-# every worker derives the identical path, so whichever assignment wins leaves
-# the cache correct.
+# Init is lazy (not at import) because importing does not imply a GPU test will
+# run, and resolving the path creates a directory. Concurrent first-callers may
+# race to set this global, but the race is benign: every worker derives the same
+# path.
 _GPU_LOCK_PATH: Path | None = None
 
 
-def _current_user_tag() -> str:
-    """Return a filesystem-safe identifier for the current user.
-
-    Falls back to the numeric uid, then to ``unknown``, when a login name is
-    not resolvable on the host.
-    """
-    try:
-        return getpass.getuser()
-    except Exception:  # any resolution failure falls back to a numeric or default tag
-        uid = getattr(os, "getuid", None)
-        return str(uid()) if uid is not None else "unknown"
-
-
-def _resolve_gpu_lock_path() -> Path:
+def _ensure_gpu_lock_path() -> Path:
     """Return the path to the machine-local GPU lock file, creating its directory.
 
     Returns
@@ -91,7 +72,14 @@ def _resolve_gpu_lock_path() -> Path:
     if lock_dir_override:
         lock_dir = Path(lock_dir_override).expanduser()
     else:
-        lock_dir = Path(tempfile.gettempdir()) / f"{_LOCK_DIR_PREFIX}-{_current_user_tag()}"
+        # Tag the default directory with the current user, falling back to the
+        # numeric uid then ``unknown`` when a login name cannot be resolved.
+        try:
+            user_tag = getpass.getuser()
+        except Exception:
+            uid = getattr(os, "getuid", None)
+            user_tag = str(uid()) if uid is not None else "unknown"
+        lock_dir = Path(tempfile.gettempdir()) / f"{_LOCK_DIR_PREFIX}-{user_tag}"
 
     lock_dir.mkdir(parents=True, exist_ok=True)
     return lock_dir / _LOCK_FILENAME
@@ -127,7 +115,7 @@ def run_with_gpu_lock(func: Callable[..., _R], /, *args: Any, **kwargs: Any) -> 
     global _GPU_LOCK_PATH  # noqa: PLW0603 -- intentional first-call memoization cache
     lock_path = _GPU_LOCK_PATH
     if lock_path is None:
-        lock_path = _resolve_gpu_lock_path()
+        lock_path = _ensure_gpu_lock_path()
         _GPU_LOCK_PATH = lock_path
     with FileLock(str(lock_path)):
         return func(*args, **kwargs)
