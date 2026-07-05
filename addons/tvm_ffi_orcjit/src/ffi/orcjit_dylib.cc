@@ -103,19 +103,9 @@ void ORCJITDynamicLibraryObj::AddObjectFile(const String& path) {
     TVM_FFI_THROW(IOError) << "Failed to read object file: " << path;
   }
 
-  // Publish invalidation before LLVM can make the object visible. Sharing the
-  // mutex with InitContextSymbols prevents a stale refresh from overwriting
-  // this false value after a successful add.
-  std::lock_guard<std::mutex> lock(context_symbol_refresh_mutex_);
-  bool was_refreshed = context_symbol_refreshed_.load(std::memory_order_acquire);
+  // AddObjectFile is not thread-safe and must not race GetFunction.
+  TVM_FFI_ORCJIT_LLVM_CALL(jit_->addObjectFile(*dylib_, std::move(*buffer_or_err)));
   context_symbol_refreshed_.store(false, std::memory_order_release);
-
-  try {
-    TVM_FFI_ORCJIT_LLVM_CALL(jit_->addObjectFile(*dylib_, std::move(*buffer_or_err)));
-  } catch (...) {
-    context_symbol_refreshed_.store(was_refreshed, std::memory_order_release);
-    throw;
-  }
 }
 
 void ORCJITDynamicLibraryObj::SetLinkOrder(const std::vector<llvm::orc::JITDylib*>& dylibs) {
@@ -136,7 +126,7 @@ void ORCJITDynamicLibraryObj::SetLinkOrder(const std::vector<llvm::orc::JITDylib
   dylib_->setLinkOrder(link_order_, false);
 }
 
-void* ORCJITDynamicLibraryObj::GetSymbol(const String& name, bool run_initializers) {
+void* ORCJITDynamicLibraryObj::GetSymbol(const String& name) {
   // Build search order: this dylib first, then all linked dylibs
   llvm::orc::JITDylibSearchOrder search_order;
   search_order.emplace_back(dylib_, llvm::orc::JITDylibLookupFlags::MatchAllSymbols);
@@ -156,12 +146,10 @@ void* ORCJITDynamicLibraryObj::GetSymbol(const String& name, bool run_initialize
   // registrations here for our destructor to drain.  Static init on C
   // and C++ code typically happens here (first GetSymbol resolves the
   // `main` entry point, which materializes and fires __mod_init_func).
-  if (run_initializers) {
 #ifdef __APPLE__
-    CxaAtexitRecordsScope scope(&cxa_atexit_records_);
+  CxaAtexitRecordsScope scope(&cxa_atexit_records_);
 #endif
-    session_->RunPendingInitializers(GetJITDylib());
-  }
+  session_->RunPendingInitializers(GetJITDylib());
 
   if (!symbol_or_err) {
     llvm::Error remaining =
@@ -176,15 +164,11 @@ void ORCJITDynamicLibraryObj::InitContextSymbols() {
   std::lock_guard<std::mutex> lock(context_symbol_refresh_mutex_);
   if (context_symbol_refreshed_.load(std::memory_order_acquire)) return;
 
-  // Context probes can materialize initializer entries. Defer running those
-  // entries to the ordinary user-symbol lookup below, after this mutex is
-  // released, so an initializer cannot re-enter GetFunction while the refresh
-  // lock is held.
-  if (void** ctx_addr = reinterpret_cast<void**>(GetSymbol(symbol::tvm_ffi_library_ctx, false))) {
+  if (void** ctx_addr = reinterpret_cast<void**>(GetSymbol(symbol::tvm_ffi_library_ctx))) {
     *ctx_addr = this;
   }
   Module::VisitContextSymbols([this](const String& name, void* symbol) {
-    if (void** ctx_addr = reinterpret_cast<void**>(GetSymbol(name, false))) {
+    if (void** ctx_addr = reinterpret_cast<void**>(GetSymbol(name))) {
       *ctx_addr = symbol;
     }
   });
@@ -214,26 +198,17 @@ Optional<Function> ORCJITDynamicLibraryObj::GetFunction(const String& name) {
   // TVM-FFI exports have __tvm_ffi_ prefix
   std::string symbol_name = symbol::tvm_ffi_symbol_prefix + std::string(name);
 
-  while (true) {
-    if (!context_symbol_refreshed_.load(std::memory_order_acquire)) {
-      InitContextSymbols();
-    }
-
-    // Try to get the symbol - return NullOpt if not found
-    void* symbol = GetSymbol(symbol_name);
-    // An add that overlaps symbol lookup publishes false before LLVM can make
-    // the object visible. Retry so its context refresh finishes before a
-    // function from that add can be returned.
-    if (!context_symbol_refreshed_.load(std::memory_order_acquire)) {
-      continue;
-    }
-    if (symbol != nullptr) {
-      TVMFFISafeCallType c_func = reinterpret_cast<TVMFFISafeCallType>(symbol);
-      auto* wrapper = new DylibFnContextWithModule{GetRef<Module>(this)};
-      return Function::FromExternC(wrapper, c_func, DeleteDylibFnContextWithModule);
-    }
-    return std::nullopt;
+  if (!context_symbol_refreshed_.load(std::memory_order_acquire)) {
+    InitContextSymbols();
   }
+
+  // Try to get the symbol - return NullOpt if not found
+  if (void* symbol = GetSymbol(symbol_name)) {
+    TVMFFISafeCallType c_func = reinterpret_cast<TVMFFISafeCallType>(symbol);
+    auto* wrapper = new DylibFnContextWithModule{GetRef<Module>(this)};
+    return Function::FromExternC(wrapper, c_func, DeleteDylibFnContextWithModule);
+  }
+  return std::nullopt;
 }
 
 //-------------------------------------

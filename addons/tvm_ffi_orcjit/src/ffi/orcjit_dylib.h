@@ -82,10 +82,9 @@ class ORCJITDynamicLibraryObj : public ModuleObj {
   /*!
    * \brief Look up a symbol in this library
    * \param name The symbol name to look up
-   * \param run_initializers Whether to run initializers materialized by the lookup
    * \return Pointer to the symbol, or nullptr if not found
    */
-  void* GetSymbol(const String& name, bool run_initializers = true);
+  void* GetSymbol(const String& name);
 
   /*!
    * \brief Get the underlying LLVM JITDylib
@@ -117,7 +116,7 @@ class ORCJITDynamicLibraryObj : public ModuleObj {
   /*! \brief Whether context slots have been refreshed since the last object add. */
   std::atomic<bool> context_symbol_refreshed_{false};
 
-  /*! \brief Serializes object adds with the false-path context refresh. */
+  /*! \brief Serializes the false-path context refresh between function lookups. */
   std::mutex context_symbol_refresh_mutex_;
 
 #ifdef __APPLE__
