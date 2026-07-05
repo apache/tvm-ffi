@@ -900,6 +900,7 @@ TVM_FFI_INLINE ObjectRefType ObjectRef::as_or_throw() const& {
                                << "` as type `" << TypeTraits<ObjectRefType>::TypeStr() << "`";
     }
   }
+  TVM_FFI_UNREACHABLE();
 }
 
 template <typename ObjectRefType, typename>
@@ -930,6 +931,7 @@ TVM_FFI_INLINE ObjectRefType ObjectRef::as_or_throw() && {
                                << "` as type `" << TypeTraits<ObjectRefType>::TypeStr() << "`";
     }
   }
+  TVM_FFI_UNREACHABLE();
 }
 //! \endcond
 
