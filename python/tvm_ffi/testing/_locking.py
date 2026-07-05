@@ -26,6 +26,7 @@ file lock shared by every cooperating worker on the machine.
 
 from __future__ import annotations
 
+import getpass
 import os
 import tempfile
 from collections.abc import Callable
@@ -35,8 +36,21 @@ from typing import Any, TypeVar
 from ..utils import FileLock
 
 _LOCK_DIR_ENV_VAR = "TVM_FFI_TEST_LOCK_DIR"
-_LOCK_DIR_NAME = "tvm-ffi-testing-locks"
+_LOCK_DIR_PREFIX = "tvm-ffi-testing-locks"
 _R = TypeVar("_R")
+
+
+def _current_user_tag() -> str:
+    """Return a filesystem-safe identifier for the current user.
+
+    Falls back to the numeric uid, then to ``unknown``, when a login name is
+    not resolvable on the host.
+    """
+    try:
+        return getpass.getuser()
+    except Exception:  # any resolution failure falls back to a numeric or default tag
+        uid = getattr(os, "getuid", None)
+        return str(uid()) if uid is not None else "unknown"
 
 
 def _ensure_test_lock_path(filename: str) -> Path:
@@ -55,16 +69,19 @@ def _ensure_test_lock_path(filename: str) -> Path:
 
     Notes
     -----
-    The lock directory defaults to ``<tempdir>/tvm-ffi-testing-locks`` and can
-    be redirected with the ``TVM_FFI_TEST_LOCK_DIR`` environment variable when
-    all cooperating processes need an explicitly shared machine-local path.
+    The lock directory defaults to a per-user directory under the system
+    temporary directory, ``<tempdir>/tvm-ffi-testing-locks-<user>``. Scoping the
+    default to the current user avoids ownership and permission conflicts when
+    several users share one host. It can be redirected with the
+    ``TVM_FFI_TEST_LOCK_DIR`` environment variable when all cooperating
+    processes need an explicitly shared machine-local path.
 
     """
     lock_dir_override = os.environ.get(_LOCK_DIR_ENV_VAR)
     if lock_dir_override:
         lock_dir = Path(lock_dir_override).expanduser()
     else:
-        lock_dir = Path(tempfile.gettempdir()) / _LOCK_DIR_NAME
+        lock_dir = Path(tempfile.gettempdir()) / f"{_LOCK_DIR_PREFIX}-{_current_user_tag()}"
 
     lock_dir.mkdir(parents=True, exist_ok=True)
     return lock_dir / filename
