@@ -31,7 +31,7 @@
 #include <tvm/ffi/string.h>
 
 #include <atomic>
-#include <cstdint>
+#include <mutex>
 
 #include "llvm_patches/macho_cxa_atexit_shim.h"
 #include "orcjit_session.h"
@@ -76,12 +76,16 @@ class ORCJITDynamicLibraryObj : public ModuleObj {
    */
   void SetLinkOrder(const std::vector<llvm::orc::JITDylib*>& dylibs);
 
+  /*! \brief Refresh context slots after an object add when needed. */
+  void InitContextSymbols();
+
   /*!
    * \brief Look up a symbol in this library
    * \param name The symbol name to look up
+   * \param run_initializers Whether to run initializers materialized by the lookup
    * \return Pointer to the symbol, or nullptr if not found
    */
-  void* GetSymbol(const String& name);
+  void* GetSymbol(const String& name, bool run_initializers = true);
 
   /*!
    * \brief Get the underlying LLVM JITDylib
@@ -110,13 +114,11 @@ class ORCJITDynamicLibraryObj : public ModuleObj {
   /*! \brief Link order tracking (to support incremental linking) */
   llvm::orc::JITDylibSearchOrder link_order_;
 
-  /*! \brief State bits for context refresh and object-add coordination. */
-  static constexpr uint64_t kContextRefreshPending = 1;
-  static constexpr uint64_t kObjectAddInProgress = 2;
-  static constexpr uint64_t kContextGenerationStep = 4;
+  /*! \brief Whether context slots have been refreshed since the last object add. */
+  std::atomic<bool> context_symbol_refreshed_{false};
 
-  /*! \brief Context generation (upper bits) and refresh/add state (low bits). */
-  std::atomic<uint64_t> context_refresh_state_{kContextRefreshPending};
+  /*! \brief Serializes object adds with the false-path context refresh. */
+  std::mutex context_symbol_refresh_mutex_;
 
 #ifdef __APPLE__
   /*! \brief Per-dylib __cxa_atexit registry.

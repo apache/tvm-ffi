@@ -103,32 +103,19 @@ void ORCJITDynamicLibraryObj::AddObjectFile(const String& path) {
     TVM_FFI_THROW(IOError) << "Failed to read object file: " << path;
   }
 
-  // Publish an add-in-progress state before LLVM can make the object visible.
-  // Other adds serialize here, while GetFunction retries without entering
-  // symbol lookup. A failed add restores the exact prior refresh state.
-  uint64_t state = context_refresh_state_.load(std::memory_order_relaxed);
-  while (true) {
-    if (state & kObjectAddInProgress) {
-      state = context_refresh_state_.load(std::memory_order_acquire);
-      continue;
-    }
-    if (context_refresh_state_.compare_exchange_weak(state, state | kObjectAddInProgress,
-                                                     std::memory_order_acq_rel,
-                                                     std::memory_order_acquire)) {
-      break;
-    }
-  }
+  // Publish invalidation before LLVM can make the object visible. Sharing the
+  // mutex with InitContextSymbols prevents a stale refresh from overwriting
+  // this false value after a successful add.
+  std::lock_guard<std::mutex> lock(context_symbol_refresh_mutex_);
+  bool was_refreshed = context_symbol_refreshed_.load(std::memory_order_acquire);
+  context_symbol_refreshed_.store(false, std::memory_order_release);
 
   try {
     TVM_FFI_ORCJIT_LLVM_CALL(jit_->addObjectFile(*dylib_, std::move(*buffer_or_err)));
   } catch (...) {
-    context_refresh_state_.store(state, std::memory_order_release);
+    context_symbol_refreshed_.store(was_refreshed, std::memory_order_release);
     throw;
   }
-  context_refresh_state_.store(
-      ((state & ~(kContextRefreshPending | kObjectAddInProgress)) + kContextGenerationStep) |
-          kContextRefreshPending,
-      std::memory_order_release);
 }
 
 void ORCJITDynamicLibraryObj::SetLinkOrder(const std::vector<llvm::orc::JITDylib*>& dylibs) {
@@ -149,7 +136,7 @@ void ORCJITDynamicLibraryObj::SetLinkOrder(const std::vector<llvm::orc::JITDylib
   dylib_->setLinkOrder(link_order_, false);
 }
 
-void* ORCJITDynamicLibraryObj::GetSymbol(const String& name) {
+void* ORCJITDynamicLibraryObj::GetSymbol(const String& name, bool run_initializers) {
   // Build search order: this dylib first, then all linked dylibs
   llvm::orc::JITDylibSearchOrder search_order;
   search_order.emplace_back(dylib_, llvm::orc::JITDylibLookupFlags::MatchAllSymbols);
@@ -169,10 +156,12 @@ void* ORCJITDynamicLibraryObj::GetSymbol(const String& name) {
   // registrations here for our destructor to drain.  Static init on C
   // and C++ code typically happens here (first GetSymbol resolves the
   // `main` entry point, which materializes and fires __mod_init_func).
+  if (run_initializers) {
 #ifdef __APPLE__
-  CxaAtexitRecordsScope scope(&cxa_atexit_records_);
+    CxaAtexitRecordsScope scope(&cxa_atexit_records_);
 #endif
-  session_->RunPendingInitializers(GetJITDylib());
+    session_->RunPendingInitializers(GetJITDylib());
+  }
 
   if (!symbol_or_err) {
     llvm::Error remaining =
@@ -181,6 +170,25 @@ void* ORCJITDynamicLibraryObj::GetSymbol(const String& name) {
     return nullptr;
   }
   return symbol_or_err->getAddress().toPtr<void*>();
+}
+
+void ORCJITDynamicLibraryObj::InitContextSymbols() {
+  std::lock_guard<std::mutex> lock(context_symbol_refresh_mutex_);
+  if (context_symbol_refreshed_.load(std::memory_order_acquire)) return;
+
+  // Context probes can materialize initializer entries. Defer running those
+  // entries to the ordinary user-symbol lookup below, after this mutex is
+  // released, so an initializer cannot re-enter GetFunction while the refresh
+  // lock is held.
+  if (void** ctx_addr = reinterpret_cast<void**>(GetSymbol(symbol::tvm_ffi_library_ctx, false))) {
+    *ctx_addr = this;
+  }
+  Module::VisitContextSymbols([this](const String& name, void* symbol) {
+    if (void** ctx_addr = reinterpret_cast<void**>(GetSymbol(name, false))) {
+      *ctx_addr = symbol;
+    }
+  });
+  context_symbol_refreshed_.store(true, std::memory_order_release);
 }
 
 llvm::orc::JITDylib& ORCJITDynamicLibraryObj::GetJITDylib() {
@@ -207,36 +215,16 @@ Optional<Function> ORCJITDynamicLibraryObj::GetFunction(const String& name) {
   std::string symbol_name = symbol::tvm_ffi_symbol_prefix + std::string(name);
 
   while (true) {
-    uint64_t state = context_refresh_state_.load(std::memory_order_acquire);
-    if (state & kObjectAddInProgress) {
-      continue;
-    }
-    if (state & kContextRefreshPending) {
-      if (void** ctx_addr = reinterpret_cast<void**>(GetSymbol(symbol::tvm_ffi_library_ctx))) {
-        *ctx_addr = this;
-      }
-      Module::VisitContextSymbols([this](const String& name, void* symbol) {
-        if (void** ctx_addr = reinterpret_cast<void**>(GetSymbol(name))) {
-          *ctx_addr = symbol;
-        }
-      });
-
-      // Publish this exact generation as refreshed. A successful object add
-      // always changes the generation and leaves it pending, so an add that
-      // overlaps the assignments makes this compare-exchange fail.
-      uint64_t refreshed_state = state & ~kContextRefreshPending;
-      if (!context_refresh_state_.compare_exchange_strong(
-              state, refreshed_state, std::memory_order_acq_rel, std::memory_order_acquire)) {
-        continue;
-      }
-      state = refreshed_state;
+    if (!context_symbol_refreshed_.load(std::memory_order_acquire)) {
+      InitContextSymbols();
     }
 
     // Try to get the symbol - return NullOpt if not found
     void* symbol = GetSymbol(symbol_name);
-    // Do not return a result obtained across a successful object add. The
-    // next loop refreshes that newer generation before exposing a function.
-    if (context_refresh_state_.load(std::memory_order_acquire) != state) {
+    // An add that overlaps symbol lookup publishes false before LLVM can make
+    // the object visible. Retry so its context refresh finishes before a
+    // function from that add can be returned.
+    if (!context_symbol_refreshed_.load(std::memory_order_acquire)) {
       continue;
     }
     if (symbol != nullptr) {
