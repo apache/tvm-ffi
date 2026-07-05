@@ -107,6 +107,9 @@ class ORCJITDynamicLibraryObj : public ModuleObj {
   /*! \brief Link order tracking (to support incremental linking) */
   llvm::orc::JITDylibSearchOrder link_order_;
 
+  /*! \brief Whether context slots have been refreshed since the last object add. */
+  bool context_symbol_refreshed_{false};
+
 #ifdef __APPLE__
   /*! \brief Per-dylib __cxa_atexit registry.
    *

@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import ctypes
 import gc
 import sys
 import tempfile
@@ -96,6 +97,14 @@ class Variant:
         """Return path prefix for test_call_global object."""
         return f"{self.subdir}/test_call_global"
 
+    def context_primary_obj(self) -> str:
+        """Return path prefix for the primary context object."""
+        return f"{self.subdir}/test_context_primary"
+
+    def context_incremental_obj(self) -> str:
+        """Return path prefix for the incremental context object."""
+        return f"{self.subdir}/test_context_incremental"
+
     def types_obj(self) -> str:
         """Return path prefix for test_types object."""
         return f"{self.subdir}/test_types"
@@ -136,6 +145,39 @@ _cpp_only = [v for v in _all_variants if v.subdir.startswith("cc")]
 
 def _variant_id(v: Variant) -> str:
     return repr(v)
+
+
+_CONTEXT_RECORDER_TYPE = ctypes.CFUNCTYPE(None, ctypes.c_int32)
+
+
+@_CONTEXT_RECORDER_TYPE
+def _context_recorder(_event: int) -> None:
+    pass
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _register_context_test_symbols() -> None:
+    """Register the context entries consumed by generated TVM object files."""
+
+    @tvm_ffi.register_global_func("test_orcjit_context_add_five", override=True)
+    def _add_five(value: int) -> int:
+        return value + 5
+
+    register = tvm_ffi.LIB.TVMFFIEnvModRegisterContextSymbol
+    register.argtypes = [ctypes.c_char_p, ctypes.c_void_p]
+    register.restype = ctypes.c_int
+
+    symbols = (
+        (b"__TVMFFIFunctionCall", ctypes.cast(tvm_ffi.LIB.TVMFFIFunctionCall, ctypes.c_void_p)),
+        (
+            b"__TVMFFIEnvModLookupFromImports",
+            ctypes.cast(tvm_ffi.LIB.TVMFFIEnvModLookupFromImports, ctypes.c_void_p),
+        ),
+        (b"__TVMFFITestContextPrimary", ctypes.cast(_context_recorder, ctypes.c_void_p)),
+        (b"__TVMFFITestContextIncremental", ctypes.cast(_context_recorder, ctypes.c_void_p)),
+    )
+    for name, address in symbols:
+        assert register(name, address) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -293,6 +335,57 @@ def test_call_global(v: Variant) -> None:
     mul_func = lib.get_function(v.fn("test_call_global_mul"))
     assert mul_func(7, 6) == 42
     assert mul_func(11, 11) == 121
+
+
+# ---------------------------------------------------------------------------
+# Generated-code context reinjection
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("v", _all_variants, ids=_variant_id)
+def test_context_reinjected_on_first_function_lookup(v: Variant) -> None:
+    """The first successful lookup reinjects every available context slot."""
+    session = ExecutionSession()
+    lib = session.create_library("context_first_lookup")
+
+    with pytest.raises(AttributeError, match="Module has no function"):
+        lib.get_function("not_present")
+
+    lib.add(obj(v.funcs_obj()))
+    assert lib.get_function(v.fn("test_add"))(20, 22) == 42
+
+    lib.add(obj(v.context_primary_obj()))
+    assert lib.get_function("context_primary_status")() == 0b1111
+    assert lib.get_function("context_primary_owner")() != 0
+    assert lib.get_function("context_call_global")(37) == 42
+
+
+@pytest.mark.parametrize("v", _all_variants, ids=_variant_id)
+def test_context_reinjection_is_idempotent_across_adds(v: Variant) -> None:
+    """Repeated lookups are no-ops, while an object add refreshes every slot."""
+    _, lib = make_lib(v.context_primary_obj())
+    assert lib.get_function("context_primary_status")() == 0b1111
+
+    initial = lib.get_function("context_primary_token")()
+    assert lib.get_function("context_primary_token")() == initial
+    poisoned = lib.get_function("context_poison_primary")()
+    assert poisoned != initial
+    assert lib.get_function("context_primary_token")() == poisoned
+
+    lib.add(obj(v.context_incremental_obj()))
+    assert lib.get_function("context_incremental_status")() == 0b111111
+    assert lib.get_function("context_incremental_primary_token")() == initial
+    assert lib.get_function("context_incremental_new_token")() != 0
+    assert lib.get_function("context_incremental_status")() == 0b111111
+
+
+@pytest.mark.parametrize("v", _all_variants, ids=_variant_id)
+def test_context_materialization_error_is_not_missing(v: Variant) -> None:
+    """A real materialization failure is not reported as a missing user function."""
+    _, lib = make_lib(v.context_incremental_obj())
+
+    with pytest.raises(RuntimeError):
+        lib.get_function("context_incremental_status")
 
 
 # ---------------------------------------------------------------------------
