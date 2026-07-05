@@ -49,7 +49,7 @@ torch = [
   "numpy",
   "ml_dtypes",
 ]
-test = [{ include-group = "torch" }, "pytest"]
+test = [{ include-group = "torch" }, "pytest", "pytest-xdist"]
 dev = [
   { include-group = "test" },
   "pre-commit",
@@ -176,6 +176,10 @@ sdist.exclude = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Run the suite in parallel across all available cores. GPU-touching tests
+# serialize on a shared machine-local lock via tvm_ffi.testing.run_with_gpu_lock,
+# so parallel workers do not contend for the device. Pass "-n0" to disable.
+addopts = ["-n", "auto"]
 
 [tool.ruff]
 include = ["python/**/*.py", "tests/**/*.py"]

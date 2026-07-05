@@ -32,6 +32,7 @@ except ImportError:
     torch = None  # ty: ignore[invalid-assignment]
 
 import tvm_ffi.cpp
+from tvm_ffi.testing import run_with_gpu_lock
 
 
 # Check if CUDA is available
@@ -201,28 +202,32 @@ TVM_FFI_DLL_EXPORT_TYPED_FUNC(launch_mul_two, cubin_test::LaunchMulTwo);
         extra_ldflags=["-lcudart"],
     )
 
-    # Load CUBIN from bytes
-    load_fn = mod["load_cubin_data"]
-    load_fn(cubin_bytes)
+    def run_and_check() -> None:
+        assert torch is not None
+        # Load CUBIN from bytes
+        load_fn = mod["load_cubin_data"]
+        load_fn(cubin_bytes)
 
-    # Test add_one kernel
-    launch_add_one = mod["launch_add_one"]
-    n = 256
-    x = torch.arange(n, dtype=torch.float32, device="cuda")
-    y = torch.empty(n, dtype=torch.float32, device="cuda")
+        # Test add_one kernel
+        launch_add_one = mod["launch_add_one"]
+        n = 256
+        x = torch.arange(n, dtype=torch.float32, device="cuda")
+        y = torch.empty(n, dtype=torch.float32, device="cuda")
 
-    launch_add_one(x, y)
-    expected = x + 1
-    torch.testing.assert_close(y, expected)
+        launch_add_one(x, y)
+        expected = x + 1
+        torch.testing.assert_close(y, expected)
 
-    # Test mul_two kernel
-    launch_mul_two = mod["launch_mul_two"]
-    x = torch.arange(n, dtype=torch.float32, device="cuda") * 0.5
-    y = torch.empty(n, dtype=torch.float32, device="cuda")
+        # Test mul_two kernel
+        launch_mul_two = mod["launch_mul_two"]
+        x = torch.arange(n, dtype=torch.float32, device="cuda") * 0.5
+        y = torch.empty(n, dtype=torch.float32, device="cuda")
 
-    launch_mul_two(x, y)
-    expected = x * 2
-    torch.testing.assert_close(y, expected)
+        launch_mul_two(x, y)
+        expected = x * 2
+        torch.testing.assert_close(y, expected)
+
+    run_with_gpu_lock(run_and_check)
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="CUBIN launcher only supported on Linux")
@@ -299,17 +304,21 @@ TVM_FFI_DLL_EXPORT_TYPED_FUNC(launch_add_one_ex, cubin_test_launch_ex::LaunchAdd
         extra_ldflags=["-lcudart"],
     )
 
-    load_fn = mod["load_cubin_data"]
-    load_fn(cubin_bytes)
+    def run_and_check() -> None:
+        assert torch is not None
+        load_fn = mod["load_cubin_data"]
+        load_fn(cubin_bytes)
 
-    launch_add_one_ex = mod["launch_add_one_ex"]
-    n = 256
-    x = torch.arange(n, dtype=torch.float32, device="cuda")
-    y = torch.empty(n, dtype=torch.float32, device="cuda")
+        launch_add_one_ex = mod["launch_add_one_ex"]
+        n = 256
+        x = torch.arange(n, dtype=torch.float32, device="cuda")
+        y = torch.empty(n, dtype=torch.float32, device="cuda")
 
-    launch_add_one_ex(x, y)
-    expected = x + 1
-    torch.testing.assert_close(y, expected)
+        launch_add_one_ex(x, y)
+        expected = x + 1
+        torch.testing.assert_close(y, expected)
+
+    run_with_gpu_lock(run_and_check)
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="CUBIN launcher only supported on Linux")
@@ -387,21 +396,25 @@ TVM_FFI_DLL_EXPORT_TYPED_FUNC(launch_mul_two, cubin_test_chain::LaunchMulTwo);
 
     mod = tvm_ffi.cpp.load_inline("cubin_test_chain", cuda_sources=cpp_code)
 
-    # Load CUBIN from bytes
-    load_fn = mod["load_cubin_data"]
-    load_fn(cubin_bytes)
+    def run_and_check() -> None:
+        assert torch is not None
+        # Load CUBIN from bytes
+        load_fn = mod["load_cubin_data"]
+        load_fn(cubin_bytes)
 
-    launch_add_one = mod["launch_add_one"]
-    launch_mul_two = mod["launch_mul_two"]
+        launch_add_one = mod["launch_add_one"]
+        launch_mul_two = mod["launch_mul_two"]
 
-    # Test chained execution: (x + 1) * 2
-    n = 128
-    x = torch.full((n,), 5.0, dtype=torch.float32, device="cuda")
-    temp = torch.empty(n, dtype=torch.float32, device="cuda")
-    y = torch.empty(n, dtype=torch.float32, device="cuda")
+        # Test chained execution: (x + 1) * 2
+        n = 128
+        x = torch.full((n,), 5.0, dtype=torch.float32, device="cuda")
+        temp = torch.empty(n, dtype=torch.float32, device="cuda")
+        y = torch.empty(n, dtype=torch.float32, device="cuda")
 
-    launch_add_one(x, temp)  # temp = x + 1 = 6
-    launch_mul_two(temp, y)  # y = temp * 2 = 12
+        launch_add_one(x, temp)  # temp = x + 1 = 6
+        launch_mul_two(temp, y)  # y = temp * 2 = 12
 
-    expected = torch.full((n,), 12.0, dtype=torch.float32, device="cuda")
-    torch.testing.assert_close(y, expected)
+        expected = torch.full((n,), 12.0, dtype=torch.float32, device="cuda")
+        torch.testing.assert_close(y, expected)
+
+    run_with_gpu_lock(run_and_check)

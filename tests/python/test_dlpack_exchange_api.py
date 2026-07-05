@@ -31,6 +31,7 @@ try:
     import tvm_ffi
     from torch.utils import cpp_extension
     from tvm_ffi import libinfo
+    from tvm_ffi.testing import run_with_gpu_lock
 except ImportError:
     torch = None  # ty: ignore[invalid-assignment]
 
@@ -223,17 +224,21 @@ def test_dlpack_exchange_api_gpu_tensor_metadata() -> None:
     assert torch is not None
     echo = tvm_ffi.get_global_func("testing.echo")
 
-    for shape in [(512,), (512, 512), (2, 3, 4)]:
-        source = torch.empty(shape, device="cuda", dtype=torch.float16)
+    def run_and_check() -> None:
+        assert torch is not None
+        for shape in [(512,), (512, 512), (2, 3, 4)]:
+            source = torch.empty(shape, device="cuda", dtype=torch.float16)
 
-        tvm_tensor = tvm_ffi.from_dlpack(source)
-        assert tvm_tensor.shape == shape
-        assert tvm_tensor.dtype == tvm_ffi.dtype("float16")
+            tvm_tensor = tvm_ffi.from_dlpack(source)
+            assert tvm_tensor.shape == shape
+            assert tvm_tensor.dtype == tvm_ffi.dtype("float16")
 
-        echoed = echo(source)
-        assert tuple(echoed.shape) == shape
-        assert echoed.dtype == source.dtype
-        assert echoed.device == source.device
+            echoed = echo(source)
+            assert tuple(echoed.shape) == shape
+            assert echoed.dtype == source.dtype
+            assert echoed.device == source.device
+
+    run_with_gpu_lock(run_and_check)
 
 
 @pytest.mark.skipif(not _has_dlpack_api, reason="PyTorch DLPack Exchange API not available")

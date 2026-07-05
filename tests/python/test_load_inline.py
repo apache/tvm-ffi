@@ -27,6 +27,7 @@ except ImportError:
 
 import tvm_ffi.cpp
 from tvm_ffi.module import Module
+from tvm_ffi.testing import run_with_gpu_lock
 
 
 def test_load_inline_cpp() -> None:
@@ -191,7 +192,8 @@ def test_load_inline_cuda() -> None:
         functions=["add_one_cuda"],
     )
 
-    if torch is not None:
+    def run_and_check() -> None:
+        assert torch is not None
         # test with raw stream
         x_cuda = torch.asarray([1, 2, 3, 4, 5], dtype=torch.float32, device="cuda")
         y_cuda = torch.empty_like(x_cuda)
@@ -205,6 +207,8 @@ def test_load_inline_cuda() -> None:
             mod.add_one_cuda(x_cuda, y_cuda, stream.cuda_stream)
         stream.synchronize()
         torch.testing.assert_close(x_cuda + 1, y_cuda)
+
+    run_with_gpu_lock(run_and_check)
 
 
 @pytest.mark.skipif(torch is None, reason="Requires torch")
@@ -242,7 +246,7 @@ def test_load_inline_with_env_tensor_allocator() -> None:
     )
     assert torch is not None
 
-    def run_check() -> None:
+    def run_and_check() -> None:
         """Must run in a separate function to ensure deletion happens before mod unloads.
 
         When a module returns an object, the object deleter address is part of the
@@ -257,7 +261,7 @@ def test_load_inline_with_env_tensor_allocator() -> None:
         assert y_cpu.dtype == torch.float32
         torch.testing.assert_close(x_cpu + 1, y_cpu)
 
-    run_check()
+    run_and_check()
 
 
 @pytest.mark.skipif(
@@ -321,10 +325,14 @@ def test_load_inline_both() -> None:
     mod.add_one_cpu(x, y)
     numpy.testing.assert_equal(x + 1, y)
 
-    x_cuda = torch.asarray([1, 2, 3, 4, 5], dtype=torch.float32, device="cuda")
-    y_cuda = torch.empty_like(x_cuda)
-    mod.add_one_cuda(x_cuda, y_cuda)
-    torch.testing.assert_close(x_cuda + 1, y_cuda)
+    def run_and_check() -> None:
+        assert torch is not None
+        x_cuda = torch.asarray([1, 2, 3, 4, 5], dtype=torch.float32, device="cuda")
+        y_cuda = torch.empty_like(x_cuda)
+        mod.add_one_cuda(x_cuda, y_cuda)
+        torch.testing.assert_close(x_cuda + 1, y_cuda)
+
+    run_with_gpu_lock(run_and_check)
 
 
 @pytest.mark.skipif(
@@ -349,7 +357,7 @@ def test_cuda_memory_alloc_noleak() -> None:
         functions=["return_tensor"],
     )
 
-    def run_check() -> None:
+    def run_and_check() -> None:
         """Must run in a separate function to ensure deletion happens before mod unloads."""
         assert torch is not None
         x = torch.arange(1024 * 1024, dtype=torch.float32, device="cuda")
@@ -361,4 +369,4 @@ def test_cuda_memory_alloc_noleak() -> None:
             # memory should not grow as we loop over
             assert diff <= 1024**2 * 8
 
-    run_check()
+    run_with_gpu_lock(run_and_check)

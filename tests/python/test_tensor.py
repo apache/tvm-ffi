@@ -30,6 +30,7 @@ except ImportError:
 
 import numpy as np
 import tvm_ffi
+from tvm_ffi.testing import run_with_gpu_lock
 
 
 def test_tensor_attributes() -> None:
@@ -194,10 +195,14 @@ def test_tensor_from_pytorch_rocm() -> None:
     def _check_device(x: tvm_ffi.Tensor) -> str:
         return x.device.type
 
-    # PyTorch uses device name "cuda" to represent ROCm device
-    x = torch.randn(128, device="cuda")
-    device_type = tvm_ffi.get_global_func("testing.check_device")(x)
-    assert device_type == "rocm"
+    def run_and_check() -> None:
+        assert torch is not None
+        # PyTorch uses device name "cuda" to represent ROCm device
+        x = torch.randn(128, device="cuda")
+        device_type = tvm_ffi.get_global_func("testing.check_device")(x)
+        assert device_type == "rocm"
+
+    run_with_gpu_lock(run_and_check)
 
 
 def test_optional_tensor_view() -> None:
