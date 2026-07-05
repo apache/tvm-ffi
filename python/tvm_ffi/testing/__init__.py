@@ -17,6 +17,7 @@
 """Testing utilities."""
 
 from ._ffi_api import *  # noqa: F403
+from ._locking import run_with_gpu_lock
 from .testing import (
     TestCompare,
     TestCustomCompare,

@@ -20,6 +20,7 @@ from __future__ import annotations
 import ctypes
 
 import pytest
+from tvm_ffi.testing import run_with_gpu_lock
 
 try:
     import torch
@@ -88,9 +89,13 @@ def test_current_work_stream_matches_torch_stream() -> None:
         extra_include_paths=include_paths,
     )
 
-    device_id = torch.cuda.current_device()
-    is_hip = torch.version.hip is not None
-    stream = torch.cuda.Stream(device=device_id)
-    with torch.cuda.stream(stream):
-        expected_stream = int(stream.cuda_stream)
-        mod.assert_current_work_stream(api_ptr, is_hip, expected_stream)
+    def run_and_check() -> None:
+        assert torch is not None
+        device_id = torch.cuda.current_device()
+        is_hip = torch.version.hip is not None
+        stream = torch.cuda.Stream(device=device_id)
+        with torch.cuda.stream(stream):
+            expected_stream = int(stream.cuda_stream)
+            mod.assert_current_work_stream(api_ptr, is_hip, expected_stream)
+
+    run_with_gpu_lock(run_and_check)
