@@ -38,6 +38,7 @@ namespace ffi {
 namespace orcjit {
 
 class ORCJITExecutionSession;
+class ORCJITExecutionSessionObj;
 
 class ORCJITDynamicLibraryObj : public ModuleObj {
  public:
@@ -71,7 +72,11 @@ class ORCJITDynamicLibraryObj : public ModuleObj {
    * When resolving symbols, this library will search in the specified libraries
    * in the order provided. This replaces any previous link order.
    */
-  void SetLinkOrder(const std::vector<llvm::orc::JITDylib*>& dylibs);
+  void SetLinkOrder(const std::vector<llvm::orc::JITDylib*>& dylibs,
+                    std::vector<Module> linked_libraries);
+
+  /*! \brief Return whether this library transitively retains target for linked code. */
+  bool RetainsLinkLibrary(const ORCJITDynamicLibraryObj* target) const;
 
   /*!
    * \brief Look up a symbol in this library
@@ -107,7 +112,12 @@ class ORCJITDynamicLibraryObj : public ModuleObj {
   /*! \brief Link order tracking (to support incremental linking) */
   llvm::orc::JITDylibSearchOrder link_order_;
 
+  /*! \brief Acyclic strong references retained for all previously linked code. */
+  std::vector<Module> retained_link_libraries_;
+
 #ifdef __APPLE__
+  friend class ORCJITExecutionSessionObj;
+
   /*! \brief Per-dylib __cxa_atexit registry.
    *
    *  Without MachOPlatform, clang-lowered \c __attribute__((destructor))

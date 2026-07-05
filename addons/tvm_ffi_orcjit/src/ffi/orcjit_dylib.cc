@@ -68,14 +68,6 @@ ORCJITDynamicLibraryObj::ORCJITDynamicLibraryObj(ORCJITExecutionSession session,
     : session_(std::move(session)), dylib_(dylib), jit_(jit), name_(std::move(name)) {
   TVM_FFI_CHECK(dylib_ != nullptr, ValueError) << "JITDylib cannot be null";
   TVM_FFI_CHECK(jit_ != nullptr, ValueError) << "LLJIT cannot be null";
-  if (void** ctx_addr = reinterpret_cast<void**>(GetSymbol(ffi::symbol::tvm_ffi_library_ctx))) {
-    *ctx_addr = this;
-  }
-  Module::VisitContextSymbols([this](const ffi::String& name, void* symbol) {
-    if (void** ctx_addr = reinterpret_cast<void**>(GetSymbol(name))) {
-      *ctx_addr = symbol;
-    }
-  });
 }
 
 ORCJITDynamicLibraryObj::~ORCJITDynamicLibraryObj() {
@@ -115,50 +107,82 @@ void ORCJITDynamicLibraryObj::AddObjectFile(const String& path) {
   TVM_FFI_ORCJIT_LLVM_CALL(jit_->addObjectFile(*dylib_, std::move(*buffer_or_err)));
 }
 
-void ORCJITDynamicLibraryObj::SetLinkOrder(const std::vector<llvm::orc::JITDylib*>& dylibs) {
+bool ORCJITDynamicLibraryObj::RetainsLinkLibrary(const ORCJITDynamicLibraryObj* target) const {
+  if (this == target) return true;
+  for (const Module& module : retained_link_libraries_) {
+    const auto* linked = module.as<ORCJITDynamicLibraryObj>();
+    if (linked != nullptr && linked->RetainsLinkLibrary(target)) return true;
+  }
+  return false;
+}
+
+void ORCJITDynamicLibraryObj::SetLinkOrder(const std::vector<llvm::orc::JITDylib*>& dylibs,
+                                           std::vector<Module> linked_libraries) {
+  TVM_FFI_CHECK(dylibs.size() == linked_libraries.size(), InternalError)
+      << "Mismatched ORCJIT link-order inputs";
+  for (const Module& module : linked_libraries) {
+    const auto* linked = module.as<ORCJITDynamicLibraryObj>();
+    TVM_FFI_CHECK(linked != nullptr, TypeError) << "Link order requires ORCJIT libraries";
+    TVM_FFI_CHECK(linked->jit_ == jit_, ValueError)
+        << "Link-order libraries must belong to the same execution session";
+    TVM_FFI_CHECK(linked != this, ValueError) << "An ORCJIT library cannot link to itself";
+    TVM_FFI_CHECK(!linked->RetainsLinkLibrary(this), ValueError)
+        << "ORCJIT link order cannot create a library retention cycle";
+  }
+
   // Rebuild the link order: user-specified libraries first, then the LLJIT
   // default link order (Main → Platform → ProcessSymbols).  Preserving the
   // default link order is essential — without ProcessSymbols, C++ objects
   // that need host-process symbols (runtime, libtvm_ffi) would fail to link.
-  link_order_.clear();
+  llvm::orc::JITDylibSearchOrder new_link_order;
+  new_link_order.emplace_back(dylib_, llvm::orc::JITDylibLookupFlags::MatchAllSymbols);
 
   for (auto* lib : dylibs) {
-    link_order_.emplace_back(lib, llvm::orc::JITDylibLookupFlags::MatchAllSymbols);
+    new_link_order.emplace_back(lib, llvm::orc::JITDylibLookupFlags::MatchAllSymbols);
   }
   for (auto& kv : jit_->defaultLinkOrder()) {
-    link_order_.emplace_back(kv.first, kv.second);
+    new_link_order.emplace_back(kv.first, kv.second);
   }
 
-  // Set the link order in the LLVM JITDylib
-  dylib_->setLinkOrder(link_order_, false);
+  // Preserve this JITDylib first for same-library weak/coalesced references.
+  // Replace LLVM's raw-pointer order before releasing the previous strong
+  // provider references.
+  dylib_->setLinkOrder(new_link_order, false);
+  link_order_ = std::move(new_link_order);
+  // Relocations from already-materialized objects keep targeting every prior
+  // provider even after the user replaces the search order. Retain those
+  // providers for this library's full lifetime, while rejecting cycles above.
+  for (Module& module : linked_libraries) {
+    bool retained = false;
+    for (const Module& existing : retained_link_libraries_) {
+      if (existing.get() == module.get()) {
+        retained = true;
+        break;
+      }
+    }
+    if (!retained) retained_link_libraries_.push_back(std::move(module));
+  }
 }
 
 void* ORCJITDynamicLibraryObj::GetSymbol(const String& name) {
-  // Build search order: this dylib first, then all linked dylibs
-  llvm::orc::JITDylibSearchOrder search_order;
-  search_order.emplace_back(dylib_, llvm::orc::JITDylibLookupFlags::MatchAllSymbols);
-  // Append linked libraries
-  search_order.insert(search_order.end(), link_order_.begin(), link_order_.end());
+  llvm::orc::JITDylibSearchOrder search_order = link_order_;
+  if (search_order.empty()) {
+    search_order.emplace_back(dylib_, llvm::orc::JITDylibLookupFlags::MatchAllSymbols);
+  }
 
-  // Look up symbol using the full search order
-  auto symbol_or_err =
-      jit_->getExecutionSession().lookup(search_order, jit_->mangleAndIntern(name.c_str()));
-
-  // Run pending initializers via InitFiniPlugin.  RunPendingInitializers
-  // drains and erases the map entry; subsequent calls are no-ops until new
-  // object files add fresh entries — supports incremental loading.
-  //
-  // On macOS the scope publishes this dylib's __cxa_atexit records vector
-  // so the ___cxa_atexit shim (see orcjit_session.cc) can route dtor
-  // registrations here for our destructor to drain.  Static init on C
-  // and C++ code typically happens here (first GetSymbol resolves the
-  // `main` entry point, which materializes and fires __mod_init_func).
-#ifdef __APPLE__
-  CxaAtexitRecordsScope scope(&cxa_atexit_records_);
-#endif
-  session_->RunPendingInitializers(GetJITDylib());
-  // Convert ExecutorAddr to pointer
-  return symbol_or_err ? symbol_or_err->getAddress().toPtr<void*>() : nullptr;
+  auto symbol_or_err = session_->Lookup(*dylib_, search_order, jit_->mangleAndIntern(name.c_str()));
+  if (!symbol_or_err) {
+    bool symbol_not_found = false;
+    llvm::Error remaining = llvm::handleErrors(
+        symbol_or_err.takeError(),
+        [&symbol_not_found](const llvm::orc::SymbolsNotFound&) { symbol_not_found = true; });
+    if (remaining) {
+      TVM_FFI_ORCJIT_LLVM_CALL(std::move(remaining));
+    }
+    if (symbol_not_found) return nullptr;
+    TVM_FFI_THROW(InternalError) << "ORCJIT lookup failed without an LLVM error";
+  }
+  return symbol_or_err->getAddress().toPtr<void*>();
 }
 
 llvm::orc::JITDylib& ORCJITDynamicLibraryObj::GetJITDylib() {
@@ -173,11 +197,14 @@ Optional<Function> ORCJITDynamicLibraryObj::GetFunction(const String& name) {
   if (name == "orcjit.set_link_order") {
     return Function::FromTyped([this](const Array<ORCJITDynamicLibrary>& libraries) {
       std::vector<llvm::orc::JITDylib*> libs;
+      std::vector<Module> linked_libraries;
       libs.reserve(libraries.size());
+      linked_libraries.reserve(libraries.size());
       for (const ORCJITDynamicLibrary& lib : libraries) {
         libs.push_back(&lib->GetJITDylib());
+        linked_libraries.push_back(lib);
       }
-      SetLinkOrder(libs);
+      SetLinkOrder(libs, std::move(linked_libraries));
     });
   }
 

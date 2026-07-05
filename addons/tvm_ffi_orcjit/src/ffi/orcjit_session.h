@@ -31,9 +31,13 @@
 #include <tvm/ffi/string.h>
 
 #include <atomic>
+#include <condition_variable>
+#include <cstdint>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include "orcjit_memory_manager.h"
 
@@ -43,6 +47,7 @@ namespace orcjit {
 
 // Forward declaration
 class ORCJITDynamicLibrary;
+class ORCJITDynamicLibraryObj;
 
 /*!
  * \brief ExecutionSession object for LLVM ORC JIT v2
@@ -77,6 +82,11 @@ class ORCJITExecutionSessionObj : public Object {
    */
   llvm::orc::LLJIT& GetLLJIT();
 
+  /*! \brief Perform one serialized Ready lookup and drain emitted initializers. */
+  llvm::Expected<llvm::orc::ExecutorSymbolDef> Lookup(
+      llvm::orc::JITDylib& root, const llvm::orc::JITDylibSearchOrder& search_order,
+      llvm::orc::SymbolStringPtr symbol);
+
   static constexpr bool _type_mutable = true;
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("orcjit.ExecutionSession", ORCJITExecutionSessionObj, Object);
 
@@ -92,11 +102,38 @@ class ORCJITExecutionSessionObj : public Object {
     int priority;
   };
 
-  void RunPendingInitializers(llvm::orc::JITDylib& jit_dylib);
+  struct ContextEntry {
+    llvm::orc::ExecutorAddr address;
+    void* value;
+  };
+
+  /*! \brief Return the context symbols for a live user JITDylib.
+   *
+   * Names are mangled for the session target. Returns false for LLJIT-owned
+   * JITDylibs that do not have an ORCJITDynamicLibraryObj owner.
+   */
+  bool GetContextSymbols(llvm::orc::JITDylib& jit_dylib,
+                         std::unordered_map<std::string, void*>* symbols);
+
+  /*! \brief Stage one graph's context and init/fini records until emission. */
+  llvm::Error StageMaterialization(llvm::orc::MaterializationResponsibility& mr,
+                                   llvm::orc::JITDylib& jit_dylib,
+                                   std::vector<ContextEntry> contexts,
+                                   std::vector<InitFiniEntry> initializers,
+                                   std::vector<InitFiniEntry> deinitializers);
+
+  /*! \brief Record that a staged graph reached the plugin emission callback. */
+  llvm::Error RecordEmittedMaterialization(llvm::orc::MaterializationResponsibility& mr);
+
+  /*! \brief Discard records for a failed materialization. */
+  void DiscardMaterialization(llvm::orc::MaterializationResponsibility& mr);
+
+  /*! \brief Run initializers in dependency-before-caller link order. */
+  void RunPendingInitializers(const std::vector<llvm::orc::JITDylibSP>& link_order);
   void RunPendingDeinitializers(llvm::orc::JITDylib& jit_dylib);
 
-  void AddPendingInitializer(llvm::orc::JITDylib* jd, const InitFiniEntry& entry);
-  void AddPendingDeinitializer(llvm::orc::JITDylib* jd, const InitFiniEntry& entry);
+  /*! \brief Associate a live user JITDylib with its module owner. */
+  void RegisterDylibOwner(llvm::orc::JITDylib* jd, ORCJITDynamicLibraryObj* owner);
 
   /*!
    * \brief Remove a JITDylib from the ExecutionSession, releasing its JIT
@@ -124,6 +161,39 @@ class ORCJITExecutionSessionObj : public Object {
   int64_t ClearFreeSlabs();
 
  private:
+  struct MaterializationRecord {
+    llvm::orc::JITDylib* jit_dylib;
+    uint64_t lookup_id;
+    uint64_t readiness_id;
+    std::vector<ContextEntry> contexts;
+    std::vector<InitFiniEntry> initializers;
+    std::vector<InitFiniEntry> deinitializers;
+  };
+
+  // These records are used by ObjectLinkingLayer plugin callbacks during
+  // LLJIT teardown, so they must be declared before jit_ and outlive it.
+  std::recursive_mutex lookup_mutex_;
+  std::mutex lifecycle_mutex_;
+  std::condition_variable lifecycle_cv_;
+  std::unordered_map<llvm::orc::JITDylib*, ORCJITDynamicLibraryObj*> dylib_owners_;
+  std::unordered_map<llvm::orc::MaterializationResponsibility*, MaterializationRecord>
+      staged_materializations_;
+  std::vector<MaterializationRecord> emitted_materializations_;
+  std::vector<MaterializationRecord> ready_materializations_;
+  std::unordered_map<llvm::orc::JITDylib*, std::vector<InitFiniEntry>> pending_initializers_;
+  std::unordered_map<llvm::orc::JITDylib*, std::vector<InitFiniEntry>> pending_deinitializers_;
+  uint64_t next_lookup_id_{0};
+  uint64_t next_readiness_id_{0};
+  std::vector<uint64_t> active_lookup_ids_;
+  std::unordered_map<uint64_t, size_t> pending_readiness_counts_;
+
+  /*! \brief Resolve one async full-MR Ready barrier. */
+  void CompleteMaterializationReadiness(uint64_t readiness_id, uint64_t lookup_id, bool ready);
+
+  /*! \brief Commit only records whose complete MR symbol set reached Ready. */
+  void FinishLookup(uint64_t lookup_id, bool lookup_succeeded,
+                    const std::vector<llvm::orc::JITDylibSP>& link_order);
+
   /*! \brief Slab-pool memory manager — must be declared before jit_ for destruction order */
   std::unique_ptr<SlabPoolMemoryManager> memory_manager_;
   /*! \brief The LLVM ORC JIT instance */
@@ -131,9 +201,6 @@ class ORCJITExecutionSessionObj : public Object {
 
   /*! \brief Counter for auto-generating library names */
   std::atomic<int> dylib_counter_{0};
-
-  std::unordered_map<llvm::orc::JITDylib*, std::vector<InitFiniEntry>> pending_initializers_;
-  std::unordered_map<llvm::orc::JITDylib*, std::vector<InitFiniEntry>> pending_deinitializers_;
 };
 
 /*!

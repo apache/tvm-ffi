@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import ctypes
 import gc
 import sys
 import tempfile
@@ -96,6 +97,14 @@ class Variant:
         """Return path prefix for test_call_global object."""
         return f"{self.subdir}/test_call_global"
 
+    def context_primary_obj(self) -> str:
+        """Return path prefix for the primary context object."""
+        return f"{self.subdir}/test_context_primary"
+
+    def context_incremental_obj(self) -> str:
+        """Return path prefix for the incremental context object."""
+        return f"{self.subdir}/test_context_incremental"
+
     def types_obj(self) -> str:
         """Return path prefix for test_types object."""
         return f"{self.subdir}/test_types"
@@ -136,6 +145,40 @@ _cpp_only = [v for v in _all_variants if v.subdir.startswith("cc")]
 
 def _variant_id(v: Variant) -> str:
     return repr(v)
+
+
+_CONTEXT_EVENTS: list[int] = []
+_CONTEXT_RECORDER_TYPE = ctypes.CFUNCTYPE(None, ctypes.c_int32)
+
+
+@_CONTEXT_RECORDER_TYPE
+def _record_context_event(event: int) -> None:
+    _CONTEXT_EVENTS.append(event)
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _register_context_test_symbols() -> None:
+    """Register the same context entries consumed by generated TVM objects."""
+
+    @tvm_ffi.register_global_func("test_orcjit_context_event", override=True)
+    def _record_lifetime_event(event: int) -> None:
+        _CONTEXT_EVENTS.append(event)
+
+    register = tvm_ffi.LIB.TVMFFIEnvModRegisterContextSymbol
+    register.argtypes = [ctypes.c_char_p, ctypes.c_void_p]
+    register.restype = ctypes.c_int
+
+    function_call = ctypes.cast(tvm_ffi.LIB.TVMFFIFunctionCall, ctypes.c_void_p)
+    lookup_import = ctypes.cast(tvm_ffi.LIB.TVMFFIEnvModLookupFromImports, ctypes.c_void_p)
+    recorder = ctypes.cast(_record_context_event, ctypes.c_void_p)
+    symbols = (
+        (b"__TVMFFIFunctionCall", function_call),
+        (b"__TVMFFIEnvModLookupFromImports", lookup_import),
+        (b"__TVMFFITestContextPrimary", recorder),
+        (b"__TVMFFITestContextIncremental", recorder),
+    )
+    for name, address in symbols:
+        assert register(name, address) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -293,6 +336,148 @@ def test_call_global(v: Variant) -> None:
     mul_func = lib.get_function(v.fn("test_call_global_mul"))
     assert mul_func(7, 6) == 42
     assert mul_func(11, 11) == 121
+
+
+# ---------------------------------------------------------------------------
+# Generated-code context materialization
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("v", _all_variants, ids=_variant_id)
+def test_context_materializes_after_no_context_object(v: Variant) -> None:
+    """An empty/no-context library initializes slots when they first appear."""
+    _CONTEXT_EVENTS.clear()
+    session = ExecutionSession()
+    lib = session.create_library("context_after_empty")
+
+    with pytest.raises(AttributeError, match="Module has no function"):
+        lib.get_function("not_present")
+
+    lib.add(obj(v.funcs_obj()))
+    assert lib.get_function(v.fn("test_add"))(20, 22) == 42
+
+    lib.add(obj(v.context_primary_obj()))
+    assert lib.get_function("context_primary_status")() == 0b1111
+    assert lib.get_function("context_primary_owner")() != 0
+    assert _CONTEXT_EVENTS == [1]
+
+
+@pytest.mark.parametrize("v", _all_variants, ids=_variant_id)
+def test_incremental_context_keeps_coalesced_slot(v: Variant) -> None:
+    """A weak duplicate is not reset while a genuinely new slot is initialized."""
+    _CONTEXT_EVENTS.clear()
+    _, lib = make_lib(v.context_primary_obj())
+    assert lib.get_function("context_primary_status")() == 0b1111
+
+    poisoned = lib.get_function("context_poison_primary")()
+    assert poisoned != 0
+
+    lib.add(obj(v.context_incremental_obj()))
+    # Same-JD dependency is ready, but both objects have the same owner.
+    assert lib.get_function("context_incremental_status")() == 0b0111111
+    assert lib.get_function("context_incremental_primary_token")() == poisoned
+    assert lib.get_function("context_incremental_new_token")() != 0
+    assert _CONTEXT_EVENTS == [1, 2]
+
+
+@pytest.mark.parametrize("v", _all_variants, ids=_variant_id)
+def test_context_link_order_owner_init_and_provider_lifetime(v: Variant) -> None:
+    """Linked JDs get local owners, initialize dependency-first, and retain providers."""
+    _CONTEXT_EVENTS.clear()
+    session = ExecutionSession()
+    provider = session.create_library("context_provider")
+    provider.add(obj(v.context_primary_obj()))
+    caller = session.create_library("context_caller")
+    caller.set_link_order(provider)
+    caller.add(obj(v.context_incremental_obj()))
+
+    # Looking up only the caller materializes both JDs. The provider's
+    # constructor must run before the caller's constructor.
+    assert caller.get_function("context_incremental_status")() == 0b1111111
+    provider_owner = provider.get_function("context_primary_owner")()
+    caller_owner = caller.get_function("context_incremental_owner")()
+    assert provider_owner != 0
+    assert caller_owner != 0
+    assert provider_owner != caller_owner
+    assert _CONTEXT_EVENTS == [1, 2]
+
+    # Replacing the search order cannot release providers targeted by existing
+    # relocations or leave their owner-context pointer dangling.
+    caller.set_link_order()
+    del provider
+    gc.collect()
+    assert _CONTEXT_EVENTS == [1, 2]
+    assert caller.get_function("context_incremental_status")() == 0b1111111
+
+    del caller
+    gc.collect()
+    assert -1 in _CONTEXT_EVENTS
+
+
+def test_link_order_rejects_retention_cycles() -> None:
+    """Strong provider retention stays acyclic and therefore collectable."""
+    session = ExecutionSession()
+    first = session.create_library("cycle_first")
+    second = session.create_library("cycle_second")
+
+    with pytest.raises(ValueError, match="cannot link to itself"):
+        first.set_link_order(first)
+
+    first.set_link_order(second)
+    with pytest.raises(ValueError, match="retention cycle"):
+        second.set_link_order(first)
+
+
+@pytest.mark.parametrize("v", _all_variants, ids=_variant_id)
+def test_context_packed_import_and_captured_lifetime(v: Variant) -> None:
+    """Generated lookup/call slots work after caller/provider handles are dropped."""
+    _CONTEXT_EVENTS.clear()
+    session = ExecutionSession()
+    provider = session.create_library("import_provider")
+    provider.add(obj(v.context_primary_obj()))
+    caller = session.create_library("import_caller")
+    caller.set_link_order(provider)
+    caller.import_module(provider)
+    caller.add(obj(v.context_incremental_obj()))
+
+    imported_call = caller.get_function("context_call_import")
+    assert imported_call(37) == 42
+    assert _CONTEXT_EVENTS == [1, 2]
+
+    del caller
+    del provider
+    gc.collect()
+    assert imported_call(10) == 15
+
+
+@pytest.mark.parametrize("v", _all_variants, ids=_variant_id)
+def test_context_missing_import_is_safe(v: Variant) -> None:
+    """A populated import callback reports a missing provider without a null call."""
+    _CONTEXT_EVENTS.clear()
+    _, lib = make_lib(v.context_primary_obj(), v.context_incremental_obj())
+
+    assert lib.get_function("context_call_import")(37) == -1003
+    # Same-JD constructor sections do not encode ordering between object files.
+    assert sorted(_CONTEXT_EVENTS) == [1, 2]
+
+
+@pytest.mark.parametrize("v", _all_variants, ids=_variant_id)
+def test_materialization_error_propagates_without_initializer(v: Variant) -> None:
+    """An unresolved graph is not a missing user symbol and runs no constructor."""
+    _CONTEXT_EVENTS.clear()
+    session = ExecutionSession()
+    lib = session.create_library("context_failure")
+    lib.add(obj(v.context_incremental_obj()))
+
+    with pytest.raises(Exception) as error:
+        lib.get_function("context_incremental_status")
+    assert not isinstance(error.value, AttributeError)
+    assert _CONTEXT_EVENTS == []
+
+    # The same JD remains usable after the failed graph.
+    lib.add(obj(v.funcs_obj()))
+    assert lib.get_function(v.fn("test_add"))(1, 2) == 3
+    assert _CONTEXT_EVENTS == []
 
 
 # ---------------------------------------------------------------------------

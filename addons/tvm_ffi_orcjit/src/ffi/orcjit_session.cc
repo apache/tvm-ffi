@@ -35,6 +35,8 @@
 #include <tvm/ffi/reflection/registry.h>
 
 #include <cstddef>
+#include <iterator>
+#include <utility>
 
 #include "orcjit_dylib.h"
 #include "orcjit_memory_manager.h"
@@ -227,6 +229,7 @@ ORCJITDynamicLibrary ORCJITExecutionSessionObj::CreateDynamicLibrary(const Strin
 
   auto dylib_obj = make_object<ORCJITDynamicLibraryObj>(GetRef<ORCJITExecutionSession>(this),
                                                         &jit_dylib, jit_.get(), lib_name);
+  RegisterDylibOwner(&jit_dylib, dylib_obj.get());
 
 #ifdef __APPLE__
   // Inject ___cxa_atexit on the user JITDylib so it wins over <Platform>'s
@@ -248,44 +251,260 @@ llvm::orc::LLJIT& ORCJITExecutionSessionObj::GetLLJIT() {
   return *jit_;
 }
 
+llvm::Expected<llvm::orc::ExecutorSymbolDef> ORCJITExecutionSessionObj::Lookup(
+    llvm::orc::JITDylib& root, const llvm::orc::JITDylibSearchOrder& search_order,
+    llvm::orc::SymbolStringPtr symbol) {
+  std::lock_guard<std::recursive_mutex> lock(lookup_mutex_);
+  auto link_order = root.getReverseDFSLinkOrder();
+  if (!link_order) return link_order.takeError();
+
+  uint64_t lookup_id = 0;
+  {
+    std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mutex_);
+    lookup_id = ++next_lookup_id_;
+    active_lookup_ids_.push_back(lookup_id);
+  }
+
+  auto result = jit_->getExecutionSession().lookup(search_order, std::move(symbol));
+  if (!result) {
+    FinishLookup(lookup_id, false, *link_order);
+    return result.takeError();
+  }
+  FinishLookup(lookup_id, true, *link_order);
+  RunPendingInitializers(*link_order);
+  return std::move(*result);
+}
+
 using CtorDtor = void (*)();
 
-void ORCJITExecutionSessionObj::RunPendingInitializers(llvm::orc::JITDylib& jit_dylib) {
-  auto it = pending_initializers_.find(&jit_dylib);
-  if (it != pending_initializers_.end()) {
-    llvm::sort(it->second, [](const InitFiniEntry& a, const InitFiniEntry& b) {
+bool ORCJITExecutionSessionObj::GetContextSymbols(llvm::orc::JITDylib& jit_dylib,
+                                                  std::unordered_map<std::string, void*>* symbols) {
+  ORCJITDynamicLibraryObj* owner = nullptr;
+  {
+    std::lock_guard<std::mutex> lock(lifecycle_mutex_);
+    auto it = dylib_owners_.find(&jit_dylib);
+    if (it == dylib_owners_.end()) return false;
+    owner = it->second;
+  }
+
+  symbols->clear();
+  Module::VisitContextSymbols([this, symbols](const String& name, void* value) {
+    (*symbols)[(*jit_->mangleAndIntern(name.c_str())).str()] = value;
+  });
+  (*symbols)[(*jit_->mangleAndIntern(symbol::tvm_ffi_library_ctx)).str()] =
+      static_cast<ModuleObj*>(owner);
+  return true;
+}
+
+llvm::Error ORCJITExecutionSessionObj::StageMaterialization(
+    llvm::orc::MaterializationResponsibility& mr, llvm::orc::JITDylib& jit_dylib,
+    std::vector<ContextEntry> contexts, std::vector<InitFiniEntry> initializers,
+    std::vector<InitFiniEntry> deinitializers) {
+  std::lock_guard<std::mutex> lock(lifecycle_mutex_);
+  if (active_lookup_ids_.empty()) {
+    return llvm::make_error<llvm::StringError>(
+        "ORCJIT context materialization occurred outside a serialized lookup",
+        llvm::inconvertibleErrorCode());
+  }
+  auto [it, inserted] = staged_materializations_.emplace(
+      &mr, MaterializationRecord{&jit_dylib, active_lookup_ids_.back(), 0, std::move(contexts),
+                                 std::move(initializers), std::move(deinitializers)});
+  if (!inserted) {
+    return llvm::make_error<llvm::StringError>("Duplicate ORCJIT materialization record",
+                                               llvm::inconvertibleErrorCode());
+  }
+  return llvm::Error::success();
+}
+
+llvm::Error ORCJITExecutionSessionObj::RecordEmittedMaterialization(
+    llvm::orc::MaterializationResponsibility& mr) {
+  uint64_t readiness_id = 0;
+  uint64_t lookup_id = 0;
+  llvm::orc::JITDylib* jit_dylib = nullptr;
+  llvm::orc::SymbolLookupSet symbols;
+  for (const auto& [name, flags] : mr.getSymbols()) {
+    symbols.add(name, flags.hasMaterializationSideEffectsOnly()
+                          ? llvm::orc::SymbolLookupFlags::WeaklyReferencedSymbol
+                          : llvm::orc::SymbolLookupFlags::RequiredSymbol);
+  }
+  {
+    std::lock_guard<std::mutex> lock(lifecycle_mutex_);
+    auto staged_it = staged_materializations_.find(&mr);
+    if (staged_it == staged_materializations_.end()) return llvm::Error::success();
+
+    staged_it->second.readiness_id = ++next_readiness_id_;
+    readiness_id = staged_it->second.readiness_id;
+    lookup_id = staged_it->second.lookup_id;
+    jit_dylib = staged_it->second.jit_dylib;
+    emitted_materializations_.push_back(std::move(staged_it->second));
+    staged_materializations_.erase(staged_it);
+    ++pending_readiness_counts_[lookup_id];
+  }
+
+  if (symbols.empty()) {
+    CompleteMaterializationReadiness(readiness_id, lookup_id, false);
+    return llvm::Error::success();
+  }
+
+  llvm::orc::JITDylibSearchOrder search_order;
+  search_order.emplace_back(jit_dylib, llvm::orc::JITDylibLookupFlags::MatchAllSymbols);
+  jit_->getExecutionSession().lookup(
+      llvm::orc::LookupKind::Static, search_order, std::move(symbols),
+      llvm::orc::SymbolState::Ready,
+      [this, readiness_id, lookup_id](llvm::Expected<llvm::orc::SymbolMap> ready_symbols) {
+        bool ready = static_cast<bool>(ready_symbols);
+        if (!ready_symbols) llvm::consumeError(ready_symbols.takeError());
+        CompleteMaterializationReadiness(readiness_id, lookup_id, ready);
+      },
+      llvm::orc::NoDependenciesToRegister);
+  return llvm::Error::success();
+}
+
+void ORCJITExecutionSessionObj::CompleteMaterializationReadiness(uint64_t readiness_id,
+                                                                 uint64_t lookup_id, bool ready) {
+  std::lock_guard<std::mutex> lock(lifecycle_mutex_);
+  for (auto it = emitted_materializations_.begin(); it != emitted_materializations_.end(); ++it) {
+    if (it->readiness_id != readiness_id) continue;
+    if (ready) ready_materializations_.push_back(std::move(*it));
+    emitted_materializations_.erase(it);
+    break;
+  }
+  auto pending_it = pending_readiness_counts_.find(lookup_id);
+  if (pending_it != pending_readiness_counts_.end() && pending_it->second != 0) {
+    --pending_it->second;
+  }
+  lifecycle_cv_.notify_all();
+}
+
+void ORCJITExecutionSessionObj::FinishLookup(uint64_t lookup_id, bool lookup_succeeded,
+                                             const std::vector<llvm::orc::JITDylibSP>& link_order) {
+  // Plugin notifyEmitted runs before LLVM records the finalized allocation and
+  // before MR.notifyEmitted makes its symbols Ready. Each plugin callback lodges
+  // a full-MR Ready barrier; wait for those callbacks so late plugin/resource/MR
+  // failures can never publish stale context or initializer addresses. LLJIT
+  // intentionally uses its default InPlace dispatcher, so every materializing
+  // graph reaches notifyEmitted/notifyFailed before the blocking lookup returns.
+  std::unique_lock<std::mutex> lock(lifecycle_mutex_);
+  lifecycle_cv_.wait(lock, [this, lookup_id] {
+    auto it = pending_readiness_counts_.find(lookup_id);
+    return it == pending_readiness_counts_.end() || it->second == 0;
+  });
+  pending_readiness_counts_.erase(lookup_id);
+  for (auto it = staged_materializations_.begin(); it != staged_materializations_.end();) {
+    if (it->second.lookup_id == lookup_id) {
+      it = staged_materializations_.erase(it);
+    } else {
+      ++it;
+    }
+  }
+
+  if (lookup_succeeded) {
+    auto is_in_link_order = [&link_order](llvm::orc::JITDylib* jit_dylib) {
+      for (const llvm::orc::JITDylibSP& linked : link_order) {
+        if (linked.get() == jit_dylib) return true;
+      }
+      return false;
+    };
+    for (auto it = ready_materializations_.begin(); it != ready_materializations_.end();) {
+      if (!is_in_link_order(it->jit_dylib)) {
+        ++it;
+        continue;
+      }
+
+      for (const ContextEntry& context : it->contexts) {
+        void** slot = context.address.toPtr<void**>();
+        if (*slot != context.value) *slot = context.value;
+      }
+      if (!it->initializers.empty()) {
+        auto& pending = pending_initializers_[it->jit_dylib];
+        pending.insert(pending.end(), std::make_move_iterator(it->initializers.begin()),
+                       std::make_move_iterator(it->initializers.end()));
+      }
+      if (!it->deinitializers.empty()) {
+        auto& pending = pending_deinitializers_[it->jit_dylib];
+        pending.insert(pending.end(), std::make_move_iterator(it->deinitializers.begin()),
+                       std::make_move_iterator(it->deinitializers.end()));
+      }
+      it = ready_materializations_.erase(it);
+    }
+  }
+
+  for (auto it = active_lookup_ids_.begin(); it != active_lookup_ids_.end(); ++it) {
+    if (*it == lookup_id) {
+      active_lookup_ids_.erase(it);
+      break;
+    }
+  }
+}
+
+void ORCJITExecutionSessionObj::DiscardMaterialization(
+    llvm::orc::MaterializationResponsibility& mr) {
+  std::lock_guard<std::mutex> lock(lifecycle_mutex_);
+  staged_materializations_.erase(&mr);
+}
+
+void ORCJITExecutionSessionObj::RunPendingInitializers(
+    const std::vector<llvm::orc::JITDylibSP>& link_order) {
+  for (const llvm::orc::JITDylibSP& jit_dylib_ref : link_order) {
+    llvm::orc::JITDylib* jit_dylib = jit_dylib_ref.get();
+    std::vector<InitFiniEntry> entries;
+    ORCJITDynamicLibraryObj* owner = nullptr;
+    {
+      std::lock_guard<std::mutex> lock(lifecycle_mutex_);
+      auto pending_it = pending_initializers_.find(jit_dylib);
+      if (pending_it == pending_initializers_.end()) continue;
+      entries = std::move(pending_it->second);
+      pending_initializers_.erase(pending_it);
+
+      auto owner_it = dylib_owners_.find(jit_dylib);
+      if (owner_it != dylib_owners_.end()) owner = owner_it->second;
+    }
+
+    llvm::sort(entries, [](const InitFiniEntry& a, const InitFiniEntry& b) {
       if (a.section != b.section) return static_cast<int>(a.section) < static_cast<int>(b.section);
       return a.priority < b.priority;
     });
-    for (const auto& entry : it->second) {
-      entry.address.toPtr<CtorDtor>()();
+    auto run_entries = [&entries]() {
+      for (const auto& entry : entries) {
+        entry.address.toPtr<CtorDtor>()();
+      }
+    };
+#ifdef __APPLE__
+    if (owner != nullptr) {
+      CxaAtexitRecordsScope scope(&owner->cxa_atexit_records_);
+      run_entries();
+    } else {
+      run_entries();
     }
-    pending_initializers_.erase(it);
+#else
+    (void)owner;
+    run_entries();
+#endif
   }
 }
 
 void ORCJITExecutionSessionObj::RunPendingDeinitializers(llvm::orc::JITDylib& jit_dylib) {
-  auto it = pending_deinitializers_.find(&jit_dylib);
-  if (it != pending_deinitializers_.end()) {
-    llvm::sort(it->second, [](const InitFiniEntry& a, const InitFiniEntry& b) {
-      if (a.section != b.section) return static_cast<int>(a.section) < static_cast<int>(b.section);
-      return a.priority < b.priority;
-    });
-    for (const auto& entry : it->second) {
-      entry.address.toPtr<CtorDtor>()();
-    }
+  std::vector<InitFiniEntry> entries;
+  {
+    std::lock_guard<std::mutex> lock(lifecycle_mutex_);
+    auto it = pending_deinitializers_.find(&jit_dylib);
+    if (it == pending_deinitializers_.end()) return;
+    entries = std::move(it->second);
     pending_deinitializers_.erase(it);
+  }
+  llvm::sort(entries, [](const InitFiniEntry& a, const InitFiniEntry& b) {
+    if (a.section != b.section) return static_cast<int>(a.section) < static_cast<int>(b.section);
+    return a.priority < b.priority;
+  });
+  for (const auto& entry : entries) {
+    entry.address.toPtr<CtorDtor>()();
   }
 }
 
-void ORCJITExecutionSessionObj::AddPendingInitializer(llvm::orc::JITDylib* jit_dylib,
-                                                      const InitFiniEntry& entry) {
-  pending_initializers_[jit_dylib].push_back(entry);
-}
-
-void ORCJITExecutionSessionObj::AddPendingDeinitializer(llvm::orc::JITDylib* jit_dylib,
-                                                        const InitFiniEntry& entry) {
-  pending_deinitializers_[jit_dylib].push_back(entry);
+void ORCJITExecutionSessionObj::RegisterDylibOwner(llvm::orc::JITDylib* jit_dylib,
+                                                   ORCJITDynamicLibraryObj* owner) {
+  std::lock_guard<std::mutex> lock(lifecycle_mutex_);
+  dylib_owners_[jit_dylib] = owner;
 }
 
 int64_t ORCJITExecutionSessionObj::ClearFreeSlabs() {
@@ -299,11 +518,35 @@ int64_t ORCJITExecutionSessionObj::ClearFreeSlabs() {
 
 void ORCJITExecutionSessionObj::RemoveDylib(llvm::orc::JITDylib* jit_dylib) {
   if (jit_dylib == nullptr) return;
-  // Drop any pending init/fini records keyed by this JITDylib*. After removal
-  // the address may be recycled for a freshly-created JITDylib; leftover
-  // entries would then be attributed to the wrong dylib.
-  pending_initializers_.erase(jit_dylib);
-  pending_deinitializers_.erase(jit_dylib);
+  {
+    std::lock_guard<std::mutex> lock(lifecycle_mutex_);
+    // Drop every record keyed by this JITDylib before its address can be
+    // recycled for a freshly-created library.
+    dylib_owners_.erase(jit_dylib);
+    pending_initializers_.erase(jit_dylib);
+    pending_deinitializers_.erase(jit_dylib);
+    for (auto it = staged_materializations_.begin(); it != staged_materializations_.end();) {
+      if (it->second.jit_dylib == jit_dylib) {
+        it = staged_materializations_.erase(it);
+      } else {
+        ++it;
+      }
+    }
+    for (auto it = emitted_materializations_.begin(); it != emitted_materializations_.end();) {
+      if (it->jit_dylib == jit_dylib) {
+        it = emitted_materializations_.erase(it);
+      } else {
+        ++it;
+      }
+    }
+    for (auto it = ready_materializations_.begin(); it != ready_materializations_.end();) {
+      if (it->jit_dylib == jit_dylib) {
+        it = ready_materializations_.erase(it);
+      } else {
+        ++it;
+      }
+    }
+  }
 
   if (jit_ == nullptr) return;
   // removeJITDylib is best-effort at destruction time: the session may already

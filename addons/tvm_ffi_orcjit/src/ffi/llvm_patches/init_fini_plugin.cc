@@ -32,6 +32,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <string>
+#include <unordered_map>
+#include <utility>
+#include <vector>
 
 namespace tvm {
 namespace ffi {
@@ -124,123 +128,151 @@ void InitFiniPlugin::modifyPassConfig(llvm::orc::MaterializationResponsibility& 
   // Handles ELF (.init_array, .ctors, .fini_array, .dtors),
   // Mach-O (__DATA,__mod_init_func, __DATA,__mod_term_func),
   // and COFF (.CRT$XC*, .CRT$XT*) section conventions.
-  Config.PostFixupPasses.emplace_back([this, &jit_dylib](llvm::jitlink::LinkGraph& G) {
-    using Entry = ORCJITExecutionSessionObj::InitFiniEntry;
-    for (auto& Sec : G.sections()) {
-      auto section_name = Sec.getName();
+  Config.PostFixupPasses.emplace_back(
+      [this, &MR, &jit_dylib](llvm::jitlink::LinkGraph& G) -> llvm::Error {
+        using Entry = ORCJITExecutionSessionObj::InitFiniEntry;
+        using ContextEntry = ORCJITExecutionSessionObj::ContextEntry;
+        std::unordered_map<std::string, void*> context_symbols;
+        if (!session_->GetContextSymbols(jit_dylib, &context_symbols)) {
+          return llvm::Error::success();
+        }
 
-      // --- ELF sections ---
-      bool is_init_array = section_name.starts_with(".init_array");
-      bool is_ctors = section_name.starts_with(".ctors");
-      bool is_fini_array = section_name.starts_with(".fini_array");
-      bool is_dtors = section_name.starts_with(".dtors");
-      // --- Mach-O sections ---
-      bool is_mod_init = (section_name == "__DATA,__mod_init_func");
-      bool is_mod_term = (section_name == "__DATA,__mod_term_func");
-      // --- COFF sections ---
-      bool is_crt_xc = section_name.starts_with(".CRT$XC");
-      bool is_crt_xt = section_name.starts_with(".CRT$XT");
+        std::vector<ContextEntry> contexts;
+        std::vector<Entry> initializers;
+        std::vector<Entry> deinitializers;
 
-      if (!is_init_array && !is_ctors && !is_fini_array && !is_dtors && !is_mod_init &&
-          !is_mod_term && !is_crt_xc && !is_crt_xt)
-        continue;
-
-      int priority = 0;
-      Entry::Section sec;
-      bool is_init;
-      // ELF default priority for sections without a numeric suffix is 65535.
-      // Lower priority numbers run first for .init_array; .fini_array and .ctors
-      // negate so that higher-numbered entries run first (reverse order).
-      if (is_init_array) {
-        if (section_name.consume_front(".init_array.")) {
-          section_name.getAsInteger(10, priority);
-        } else {
-          priority = 65535;
-        }
-        sec = Entry::Section::kInitArray;
-        is_init = true;
-      } else if (is_ctors) {
-        if (section_name.consume_front(".ctors.") && !section_name.getAsInteger(10, priority)) {
-          priority = -priority;
-        }
-        sec = Entry::Section::kCtors;
-        is_init = true;
-      } else if (is_fini_array) {
-        if (section_name.consume_front(".fini_array.") &&
-            !section_name.getAsInteger(10, priority)) {
-          priority = -priority;
-        } else {
-          priority = -65535;
-        }
-        sec = Entry::Section::kFiniArray;
-        is_init = false;
-      } else if (is_dtors) {
-        if (section_name.consume_front(".dtors.")) {
-          section_name.getAsInteger(10, priority);
-        }
-        sec = Entry::Section::kDtors;
-        is_init = false;
-      } else if (is_mod_init) {
-        // Mach-O __mod_init_func: no priority system, treated as init_array
-        sec = Entry::Section::kInitArray;
-        is_init = true;
-      } else if (is_mod_term) {
-        // Mach-O __mod_term_func: no priority system, treated as fini_array
-        sec = Entry::Section::kFiniArray;
-        is_init = false;
-      } else if (is_crt_xc) {
-        // COFF .CRT$XC[suffix]: C++ constructors, sorted alphabetically by suffix.
-        // Convert suffix to integer priority that preserves alphabetical ordering.
-        // E.g., .CRT$XCA → 'A'*100000=6500000, .CRT$XCU → 'U'*100000=8500000,
-        //        .CRT$XCT00200 → 'T'*100000+200=8400200
-        sec = Entry::Section::kInitArray;
-        is_init = true;
-        auto suffix = section_name.substr(7);  // after ".CRT$XC"
-        if (!suffix.empty()) {
-          priority = static_cast<int>(suffix[0]) * 100000;
-          if (suffix.size() > 1) {
-            int num = 0;
-            suffix.substr(1).getAsInteger(10, num);
-            priority += num;
+        // claimOrExternalizeWeakAndCommonSymbols runs before this plugin's passes.
+        // Only definitions still owned by this MR are retained JD-local context
+        // slots; coalesced weak duplicates are external symbols by this point.
+        for (auto* Sym : G.defined_symbols()) {
+          if (!Sym->hasName() || !MR.getSymbols().count(Sym->getName())) continue;
+          auto context_it = context_symbols.find((*Sym->getName()).str());
+          if (context_it != context_symbols.end()) {
+            contexts.push_back(ContextEntry{Sym->getAddress(), context_it->second});
           }
         }
-      } else {
-        // COFF .CRT$XT[suffix]: C++ destructors, same suffix-to-priority scheme.
-        sec = Entry::Section::kFiniArray;
-        is_init = false;
-        auto suffix = section_name.substr(7);  // after ".CRT$XT"
-        if (!suffix.empty()) {
-          priority = static_cast<int>(suffix[0]) * 100000;
-          if (suffix.size() > 1) {
-            int num = 0;
-            suffix.substr(1).getAsInteger(10, num);
-            priority += num;
-          }
-        }
-      }
 
-      for (auto* Block : Sec.blocks()) {
-        auto Content = Block->getContent();
-        size_t PtrSize = G.getPointerSize();
-        for (size_t Offset = 0; Offset + PtrSize <= Content.size(); Offset += PtrSize) {
-          uint64_t FnAddr = 0;
-          memcpy(&FnAddr, Content.data() + Offset, PtrSize);
-          if (FnAddr != 0) {
-            Entry entry{llvm::orc::ExecutorAddr(FnAddr), sec, priority};
-            if (is_init) {
-              session_->AddPendingInitializer(&jit_dylib, entry);
+        for (auto& Sec : G.sections()) {
+          auto section_name = Sec.getName();
+
+          // --- ELF sections ---
+          bool is_init_array = section_name.starts_with(".init_array");
+          bool is_ctors = section_name.starts_with(".ctors");
+          bool is_fini_array = section_name.starts_with(".fini_array");
+          bool is_dtors = section_name.starts_with(".dtors");
+          // --- Mach-O sections ---
+          bool is_mod_init = (section_name == "__DATA,__mod_init_func");
+          bool is_mod_term = (section_name == "__DATA,__mod_term_func");
+          // --- COFF sections ---
+          bool is_crt_xc = section_name.starts_with(".CRT$XC");
+          bool is_crt_xt = section_name.starts_with(".CRT$XT");
+
+          if (!is_init_array && !is_ctors && !is_fini_array && !is_dtors && !is_mod_init &&
+              !is_mod_term && !is_crt_xc && !is_crt_xt)
+            continue;
+
+          int priority = 0;
+          Entry::Section sec;
+          bool is_init;
+          // ELF default priority for sections without a numeric suffix is 65535.
+          // Lower priority numbers run first for .init_array; .fini_array and .ctors
+          // negate so that higher-numbered entries run first (reverse order).
+          if (is_init_array) {
+            if (section_name.consume_front(".init_array.")) {
+              section_name.getAsInteger(10, priority);
             } else {
-              session_->AddPendingDeinitializer(&jit_dylib, entry);
+              priority = 65535;
+            }
+            sec = Entry::Section::kInitArray;
+            is_init = true;
+          } else if (is_ctors) {
+            if (section_name.consume_front(".ctors.") && !section_name.getAsInteger(10, priority)) {
+              priority = -priority;
+            }
+            sec = Entry::Section::kCtors;
+            is_init = true;
+          } else if (is_fini_array) {
+            if (section_name.consume_front(".fini_array.") &&
+                !section_name.getAsInteger(10, priority)) {
+              priority = -priority;
+            } else {
+              priority = -65535;
+            }
+            sec = Entry::Section::kFiniArray;
+            is_init = false;
+          } else if (is_dtors) {
+            if (section_name.consume_front(".dtors.")) {
+              section_name.getAsInteger(10, priority);
+            }
+            sec = Entry::Section::kDtors;
+            is_init = false;
+          } else if (is_mod_init) {
+            // Mach-O __mod_init_func: no priority system, treated as init_array
+            sec = Entry::Section::kInitArray;
+            is_init = true;
+          } else if (is_mod_term) {
+            // Mach-O __mod_term_func: no priority system, treated as fini_array
+            sec = Entry::Section::kFiniArray;
+            is_init = false;
+          } else if (is_crt_xc) {
+            // COFF .CRT$XC[suffix]: C++ constructors, sorted alphabetically by suffix.
+            // Convert suffix to integer priority that preserves alphabetical ordering.
+            // E.g., .CRT$XCA → 'A'*100000=6500000, .CRT$XCU → 'U'*100000=8500000,
+            //        .CRT$XCT00200 → 'T'*100000+200=8400200
+            sec = Entry::Section::kInitArray;
+            is_init = true;
+            auto suffix = section_name.substr(7);  // after ".CRT$XC"
+            if (!suffix.empty()) {
+              priority = static_cast<int>(suffix[0]) * 100000;
+              if (suffix.size() > 1) {
+                int num = 0;
+                suffix.substr(1).getAsInteger(10, num);
+                priority += num;
+              }
+            }
+          } else {
+            // COFF .CRT$XT[suffix]: C++ destructors, same suffix-to-priority scheme.
+            sec = Entry::Section::kFiniArray;
+            is_init = false;
+            auto suffix = section_name.substr(7);  // after ".CRT$XT"
+            if (!suffix.empty()) {
+              priority = static_cast<int>(suffix[0]) * 100000;
+              if (suffix.size() > 1) {
+                int num = 0;
+                suffix.substr(1).getAsInteger(10, num);
+                priority += num;
+              }
+            }
+          }
+
+          for (auto* Block : Sec.blocks()) {
+            auto Content = Block->getContent();
+            size_t PtrSize = G.getPointerSize();
+            for (size_t Offset = 0; Offset + PtrSize <= Content.size(); Offset += PtrSize) {
+              uint64_t FnAddr = 0;
+              memcpy(&FnAddr, Content.data() + Offset, PtrSize);
+              if (FnAddr != 0) {
+                Entry entry{llvm::orc::ExecutorAddr(FnAddr), sec, priority};
+                if (is_init) {
+                  initializers.push_back(entry);
+                } else {
+                  deinitializers.push_back(entry);
+                }
+              }
             }
           }
         }
-      }
-    }
-    return llvm::Error::success();
-  });
+        return session_->StageMaterialization(MR, jit_dylib, std::move(contexts),
+                                              std::move(initializers), std::move(deinitializers));
+      });
+}
+
+llvm::Error InitFiniPlugin::notifyEmitted(llvm::orc::MaterializationResponsibility& MR) {
+  return session_->RecordEmittedMaterialization(MR);
 }
 
 llvm::Error InitFiniPlugin::notifyFailed(llvm::orc::MaterializationResponsibility& MR) {
+  session_->DiscardMaterialization(MR);
   return llvm::Error::success();
 }
 

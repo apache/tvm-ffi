@@ -110,6 +110,7 @@ class InitFiniPlugin : public llvm::orc::ObjectLinkingLayer::Plugin {
 
   void modifyPassConfig(llvm::orc::MaterializationResponsibility& MR, llvm::jitlink::LinkGraph& G,
                         llvm::jitlink::PassConfiguration& Config) override;
+  llvm::Error notifyEmitted(llvm::orc::MaterializationResponsibility& MR) override;
   llvm::Error notifyFailed(llvm::orc::MaterializationResponsibility& MR) override;
   llvm::Error notifyRemovingResources(llvm::orc::JITDylib& JD, llvm::orc::ResourceKey K) override;
   void notifyTransferringResources(llvm::orc::JITDylib& JD, llvm::orc::ResourceKey DstKey,
