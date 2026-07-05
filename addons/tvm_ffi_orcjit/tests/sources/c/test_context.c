@@ -17,4 +17,17 @@
  * under the License.
  */
 
-#include "../test_context_incremental.h"
+#include <tvm/ffi/c_api.h>
+
+TVM_FFI_DLL_EXPORT void* __tvm_ffi__library_ctx = NULL;
+
+TVM_FFI_DLL_EXPORT int __tvm_ffi_context_is_set(void* self, const TVMFFIAny* args, int32_t num_args,
+                                                TVMFFIAny* result) {
+  (void)self;
+  (void)args;
+  (void)num_args;
+  result->type_index = kTVMFFIInt;
+  result->zero_padding = 0;
+  result->v_int64 = __tvm_ffi__library_ctx != NULL;
+  return 0;
+}

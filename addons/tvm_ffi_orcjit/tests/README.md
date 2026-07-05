@@ -87,7 +87,7 @@ variant subdirectories (c/, cc/, c-gcc/, etc.).
 | `test_funcs2` | More arithmetic (subtract, divide) |
 | `test_funcs_conflict` | Symbol conflict testing (duplicate `add`) |
 | `test_call_global` | Callbacks into Python-registered global functions |
-| `test_context_primary` / `test_context_incremental` | First-lookup context reinjection and incremental weak slots |
+| `test_context` | First-lookup library-context injection |
 | `test_types` | Zero-arg, multi-arg, float, void return types |
 | `test_link_order_base` / `test_link_order_caller` | Cross-library symbol resolution |
 | `test_error` | Error propagation from JIT'd code |
