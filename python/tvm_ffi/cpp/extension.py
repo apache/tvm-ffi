@@ -40,14 +40,31 @@ BACKEND_STR = Literal["cuda", "hip"]
 logger = logging.getLogger(__name__)
 
 
+def _find_compiler(name: str, *home_vars: str) -> str | None:
+    """Locate a compiler on ``PATH`` or under an env-specified toolkit home's ``bin``."""
+    found = shutil.which(name)
+    if found is not None:
+        return found
+    for var in home_vars:
+        home = os.environ.get(var)
+        if home:
+            found = shutil.which(name, path=str(Path(home) / "bin"))
+            if found is not None:
+                return found
+    return None
+
+
 @functools.lru_cache
 def _detect_gpu_backend() -> BACKEND_STR:
     """Auto-detect whether to use CUDA or HIP (ROCm), defaulting to CUDA.
 
     Resolution order: the ``TVM_FFI_GPU_BACKEND`` override, then PyTorch build
-    signals (``torch.version.hip`` / ``torch.version.cuda``), then an available
-    ``hipcc`` when no ``nvcc`` is present. The mere existence of ``/opt/rocm``
-    is not treated as evidence of HIP.
+    signals (``torch.version.hip`` / ``torch.version.cuda``), then a discoverable
+    ``hipcc`` when no ``nvcc`` can be found. Compilers are resolved from ``PATH``
+    and from the ``CUDA_HOME``/``CUDA_PATH`` and ``ROCM_HOME``/``ROCM_PATH``
+    toolkit homes, so an env-specified CUDA install is honored even when ``nvcc``
+    is off ``PATH``. The mere existence of ``/opt/rocm`` is not treated as
+    evidence of HIP.
     """
     backend = os.environ.get("TVM_FFI_GPU_BACKEND", "").lower()
     if backend in ("cuda", "hip"):
@@ -55,13 +72,16 @@ def _detect_gpu_backend() -> BACKEND_STR:
     try:
         import torch  # noqa: PLC0415
 
-        if getattr(torch.version, "hip", None):
+        version = getattr(torch, "version", None)
+        if getattr(version, "hip", None):
             return "hip"
-        if getattr(torch.version, "cuda", None):
+        if getattr(version, "cuda", None):
             return "cuda"
     except Exception:
         pass
-    if shutil.which("nvcc") is None and shutil.which("hipcc") is not None:
+    if _find_compiler("nvcc", "CUDA_HOME", "CUDA_PATH") is None and (
+        _find_compiler("hipcc", "ROCM_HOME", "ROCM_PATH") is not None
+    ):
         return "hip"
     return "cuda"
 
