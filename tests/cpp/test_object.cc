@@ -80,7 +80,9 @@ inline constexpr bool object_ref_contains_is_enabled_v<
 static_assert(ObjectRef::_type_container_is_exact);
 static_assert(TNumber::_type_container_is_exact);
 static_assert(TInt::_type_container_is_exact);
-static_assert(Optional<TInt>::_type_container_is_exact);
+// Optional<T> is uniformly Any-backed and is no longer an ObjectRef, so it does
+// not participate in the ObjectRef container concept.
+static_assert(!std::is_base_of_v<ObjectRef, Optional<TInt>>);
 static_assert(!TIntOrFloatRef::_type_container_is_exact);
 static_assert(!Array<TInt>::_type_container_is_exact);
 static_assert(!List<TInt>::_type_container_is_exact);
@@ -91,7 +93,9 @@ static_assert(!Variant<TInt, TFloat>::_type_container_is_exact);
 
 static_assert(object_ref_contains_v<TNumber, TIntObj>);
 static_assert(object_ref_contains_v<TInt, TIntObj>);
-static_assert(object_ref_contains_v<Optional<TInt>, TIntObj>);
+// Optional<T> is no longer an ObjectRef, so it is outside the object-ref-contains
+// concept entirely (the trait is not even enabled for it).
+static_assert(!object_ref_contains_is_enabled_v<Optional<TInt>, TIntObj>);
 static_assert(!object_ref_contains_v<TInt, TFloatObj>);
 static_assert(!object_ref_contains_v<Array<TInt>, ArrayObj>);
 static_assert(object_ref_contains_v<TIntOrFloatRef, TIntObj>);

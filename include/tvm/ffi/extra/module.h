@@ -70,7 +70,7 @@ class TVM_FFI_EXTRA_CXX_API ModuleObj : public Object {
    * \param name The name of the function.
    * \return True if the module implements the function, false otherwise.
    */
-  virtual bool ImplementsFunction(const String& name) { return GetFunction(name).defined(); }
+  virtual bool ImplementsFunction(const String& name) { return GetFunction(name).has_value(); }
   /*!
    * \brief Get the docstring of the function, if available.
    * \param name The name of the function.

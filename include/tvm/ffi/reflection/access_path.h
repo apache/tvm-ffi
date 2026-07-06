@@ -305,8 +305,8 @@ class AccessPathObj : public Object {
       if (!(*lhs->step)->StepEqual(*(rhs->step))) {
         return false;
       }
-      lhs = static_cast<const AccessPathObj*>(lhs->parent.get());
-      rhs = static_cast<const AccessPathObj*>(rhs->parent.get());
+      lhs = lhs->parent.as<AccessPathObj>();
+      rhs = rhs->parent.as<AccessPathObj>();
       // fast path for same pointer
       if (lhs == rhs) return true;
       TVM_FFI_ICHECK(lhs != nullptr);
@@ -415,7 +415,7 @@ inline Array<AccessStep> AccessPathObj::ToSteps() const {
   while (current->parent.has_value()) {
     TVM_FFI_ICHECK(current->step.has_value());
     reverse_steps.push_back(*(current->step));
-    current = static_cast<const AccessPathObj*>(current->parent.get());
+    current = current->parent.as<AccessPathObj>();
     TVM_FFI_ICHECK(current != nullptr);
   }
   return Array<AccessStep>(reverse_steps.rbegin(), reverse_steps.rend());
@@ -432,7 +432,7 @@ inline bool AccessPathObj::IsPrefixOf(const AccessPath& other) const {
   const AccessPathObj* rhs_path = other.get();
   while (rhs_path->depth > this->depth) {
     TVM_FFI_ICHECK(rhs_path->parent.has_value());
-    rhs_path = static_cast<const AccessPathObj*>(rhs_path->parent.get());
+    rhs_path = rhs_path->parent.as<AccessPathObj>();
   }
   return PathEqual(this, rhs_path);
 }

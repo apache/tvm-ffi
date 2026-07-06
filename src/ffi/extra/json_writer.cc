@@ -44,8 +44,7 @@ namespace json {
 
 class JSONWriter {
  public:
-  // NOLINTNEXTLINE(performance-unnecessary-value-param)
-  static String Stringify(const json::Value& value, Optional<int> indent) {
+  static String Stringify(const json::Value& value, const Optional<int>& indent) {
     JSONWriter writer(indent.value_or(0));
     writer.WriteValue(value);
     return String(std::move(writer.result_));
@@ -270,8 +269,8 @@ class JSONWriter {
   std::unordered_set<const void*> active_lists_;
 };
 
-String Stringify(const json::Value& value, Optional<int> indent) {
-  return JSONWriter::Stringify(value, indent);  // NOLINT(performance-unnecessary-value-param)
+String Stringify(const json::Value& value, const Optional<int>& indent) {
+  return JSONWriter::Stringify(value, indent);
 }
 
 TVM_FFI_STATIC_INIT_BLOCK() {
