@@ -34,77 +34,18 @@
 
 namespace tvm {
 namespace ffi {
-namespace details {
-/*!
- * \brief Base class for Variant.
- *
- * \tparam all_storage_object Whether all types are derived from ObjectRef.
- */
-template <bool all_storage_object = false>
-class VariantBase {
- public:
-  TVM_FFI_INLINE bool same_as(const VariantBase<all_storage_object>& other) const {
-    return data_.same_as(other.data_);
-  }
-
- protected:
-  template <typename T>
-  explicit VariantBase(T other) : data_(std::move(other)) {}
-
-  TVM_FFI_INLINE void SetData(Any other_data) { data_ = std::move(other_data); }
-
-  TVM_FFI_INLINE Any MoveToAny() && { return std::move(data_); }
-
-  TVM_FFI_INLINE AnyView ToAnyView() const { return data_.operator AnyView(); }
-
-  Any data_;
-};
-
-// Specialization for all object ref case, backed by ObjectRef.
-template <>
-class VariantBase<true> : public ObjectRef {
- protected:
-  template <typename T>
-  explicit VariantBase(const T& other) : ObjectRef(other) {}
-  template <typename T,
-            typename = std::enable_if_t<!std::is_same_v<std::decay_t<T>, VariantBase<true>>>>
-  explicit VariantBase(T&& other) : ObjectRef(std::forward<T>(other)) {}
-  explicit VariantBase(UnsafeInit tag) : ObjectRef(tag) {}
-  explicit VariantBase(Any other)
-      : ObjectRef(details::AnyUnsafe::MoveFromAnyAfterCheck<ObjectRef>(std::move(other))) {}
-
-  TVM_FFI_INLINE void SetData(ObjectPtr<Object> other) { data_ = std::move(other); }
-
-  TVM_FFI_INLINE Any MoveToAny() && { return Any(ObjectRef(std::move(data_))); }
-
-  TVM_FFI_INLINE AnyView ToAnyView() const {
-    TVMFFIAny any_data;
-    if (data_ == nullptr) {
-      any_data.type_index = TypeIndex::kTVMFFINone;
-      any_data.zero_padding = 0;
-      any_data.v_int64 = 0;
-    } else {
-      TVM_FFI_CLEAR_PTR_PADDING_IN_FFI_ANY(&any_data);
-      any_data.type_index = data_->type_index();
-      any_data.zero_padding = 0;
-      any_data.v_obj = details::ObjectUnsafe::TVMFFIObjectPtrFromObjectPtr<Object>(data_);
-    }
-    return AnyView::CopyFromTVMFFIAny(any_data);
-  }
-};
-}  // namespace details
-
 /*!
  * \brief A typed variant container.
  *
- * When all values are ObjectRef, Variant is backed by ObjectRef,
- * otherwise it is backed by Any.
+ * \note Variant is always backed by a single Any (TVMFFIAny). Even when every
+ *       alternative derives from ObjectRef, Variant is not ObjectRef-derived;
+ *       this keeps the layout independent of the contained types
+ *       (sizeof(Variant<...>) == sizeof(Any)).
  */
 template <typename... V>
-class Variant : public details::VariantBase<details::all_object_ref_v<V...>> {
+class Variant {
  public:
   /// \cond Doxygen_Suppress
-  using TParent = details::VariantBase<details::all_object_ref_v<V...>>;
   static_assert(details::all_storage_enabled_v<V...>,
                 "All types used in Variant<...> must be compatible with Any");
   /// \cond Doxygen_Suppress
@@ -123,37 +64,31 @@ class Variant : public details::VariantBase<details::all_object_ref_v<V...>> {
    * \brief Constructor from another variant
    * \param other The other variant
    */
-  Variant(const Variant<V...>& other) : TParent(other.data_) {}
+  Variant(const Variant<V...>& other) = default;
   /*!
    * \brief Constructor from another variant
    * \param other The other variant
    */
-  Variant(Variant<V...>&& other) noexcept : TParent(std::move(other.data_)) {}
+  Variant(Variant<V...>&& other) noexcept = default;
 
   /*!
    * \brief Assignment from another variant
    * \param other The other variant
    */
-  TVM_FFI_INLINE Variant& operator=(const Variant<V...>& other) {
-    this->SetData(other.data_);
-    return *this;
-  }
+  Variant& operator=(const Variant<V...>& other) = default;
 
   /*!
    * \brief Assignment from another variant
    * \param other The other variant
    */
-  TVM_FFI_INLINE Variant& operator=(Variant<V...>&& other) noexcept {
-    this->SetData(std::move(other.data_));
-    return *this;
-  }
+  Variant& operator=(Variant<V...>&& other) noexcept = default;
 
   /*!
-   * \brief Constructor from another variant
-   * \param other The other variant
+   * \brief Constructor from a contained value
+   * \param other The value to store
    */
   template <typename T, typename = enable_if_variant_contains_t<T>>
-  Variant(T other) : TParent(std::move(other)) {}  // NOLINT(*)
+  Variant(T other) : data_(std::move(other)) {}  // NOLINT(*)
 
   /*!
    * \brief Assignment from another variant
@@ -171,7 +106,7 @@ class Variant : public details::VariantBase<details::all_object_ref_v<V...>> {
    */
   template <typename T, typename = enable_if_variant_contains_t<T>>
   TVM_FFI_INLINE std::optional<T> as() const {
-    return this->TParent::ToAnyView().template as<T>();
+    return ToAnyView().template as<T>();
   }
 
   /*!
@@ -182,7 +117,7 @@ class Variant : public details::VariantBase<details::all_object_ref_v<V...>> {
    */
   template <typename T, typename = std::enable_if_t<std::is_base_of_v<Object, T>>>
   TVM_FFI_INLINE const T* as() const {
-    return this->TParent::ToAnyView().template as<const T*>().value_or(nullptr);
+    return ToAnyView().template as<const T*>().value_or(nullptr);
   }
 
   /*!
@@ -192,7 +127,7 @@ class Variant : public details::VariantBase<details::all_object_ref_v<V...>> {
    */
   template <typename T, typename = enable_if_variant_contains_t<T>>
   TVM_FFI_INLINE T get() const& {
-    return this->TParent::ToAnyView().template cast<T>();
+    return ToAnyView().template cast<T>();
   }
 
   /*!
@@ -202,21 +137,30 @@ class Variant : public details::VariantBase<details::all_object_ref_v<V...>> {
    */
   template <typename T, typename = enable_if_variant_contains_t<T>>
   TVM_FFI_INLINE T get() && {
-    return std::move(*this).TParent::MoveToAny().template cast<T>();
+    return std::move(*this).MoveToAny().template cast<T>();
   }
 
   /*!
    * \brief Get the type key of the variant
    * \return The type key of the variant
    */
-  TVM_FFI_INLINE std::string GetTypeKey() const { return this->TParent::ToAnyView().GetTypeKey(); }
+  TVM_FFI_INLINE std::string GetTypeKey() const { return ToAnyView().GetTypeKey(); }
+
+  /*!
+   * \brief Shallow-compare with another variant.
+   * \param other The other variant.
+   * \return Whether the two hold the same underlying value.
+   */
+  TVM_FFI_INLINE bool same_as(const Variant<V...>& other) const {
+    return data_.same_as(other.data_);
+  }
 
  private:
   friend struct TypeTraits<Variant<V...>>;
   friend struct ObjectPtrHash;
   friend struct ObjectPtrEqual;
   // constructor from any
-  explicit Variant(Any data) : TParent(std::move(data)) {}
+  explicit Variant(Any data) : data_(std::move(data)) {}
   /*!
    * \brief Get the object pointer from the variant
    * \note This function is only available if all types used in Variant<...> are derived from
@@ -227,11 +171,12 @@ class Variant : public details::VariantBase<details::all_object_ref_v<V...>> {
     static_assert(all_object_v,
                   "All types used in Variant<...> must be derived from ObjectRef "
                   "to enable ObjectPtrHash/ObjectPtrEqual");
-    return this->data_.get();
+    return details::AnyUnsafe::ObjectPtrFromAnyAfterCheck(this->data_);
   }
-  // rexpose to friend class
-  using TParent::MoveToAny;
-  using TParent::ToAnyView;
+  TVM_FFI_INLINE AnyView ToAnyView() const { return data_.operator AnyView(); }
+  TVM_FFI_INLINE Any MoveToAny() && { return std::move(data_); }
+  /*! \brief The underlying Any backing store. */
+  Any data_;
 };
 
 template <typename... V>
