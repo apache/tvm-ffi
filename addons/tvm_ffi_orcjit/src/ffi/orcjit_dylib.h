@@ -30,6 +30,9 @@
 #include <tvm/ffi/object.h>
 #include <tvm/ffi/string.h>
 
+#include <atomic>
+#include <mutex>
+
 #include "llvm_patches/macho_cxa_atexit_shim.h"
 #include "orcjit_session.h"
 
@@ -73,6 +76,9 @@ class ORCJITDynamicLibraryObj : public ModuleObj {
    */
   void SetLinkOrder(const std::vector<llvm::orc::JITDylib*>& dylibs);
 
+  /*! \brief Refresh context slots after an object add when needed. */
+  void InitContextSymbols();
+
   /*!
    * \brief Look up a symbol in this library
    * \param name The symbol name to look up
@@ -106,6 +112,12 @@ class ORCJITDynamicLibraryObj : public ModuleObj {
 
   /*! \brief Link order tracking (to support incremental linking) */
   llvm::orc::JITDylibSearchOrder link_order_;
+
+  /*! \brief Whether context slots have been refreshed since the last object add. */
+  std::atomic<bool> context_symbol_refreshed_{false};
+
+  /*! \brief Serializes the false-path context refresh between function lookups. */
+  std::mutex context_symbol_refresh_mutex_;
 
 #ifdef __APPLE__
   /*! \brief Per-dylib __cxa_atexit registry.

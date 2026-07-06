@@ -68,14 +68,6 @@ ORCJITDynamicLibraryObj::ORCJITDynamicLibraryObj(ORCJITExecutionSession session,
     : session_(std::move(session)), dylib_(dylib), jit_(jit), name_(std::move(name)) {
   TVM_FFI_CHECK(dylib_ != nullptr, ValueError) << "JITDylib cannot be null";
   TVM_FFI_CHECK(jit_ != nullptr, ValueError) << "LLJIT cannot be null";
-  if (void** ctx_addr = reinterpret_cast<void**>(GetSymbol(ffi::symbol::tvm_ffi_library_ctx))) {
-    *ctx_addr = this;
-  }
-  Module::VisitContextSymbols([this](const ffi::String& name, void* symbol) {
-    if (void** ctx_addr = reinterpret_cast<void**>(GetSymbol(name))) {
-      *ctx_addr = symbol;
-    }
-  });
 }
 
 ORCJITDynamicLibraryObj::~ORCJITDynamicLibraryObj() {
@@ -111,8 +103,9 @@ void ORCJITDynamicLibraryObj::AddObjectFile(const String& path) {
     TVM_FFI_THROW(IOError) << "Failed to read object file: " << path;
   }
 
-  // Add object file to this JITDylib
+  // AddObjectFile is not thread-safe and must not race GetFunction.
   TVM_FFI_ORCJIT_LLVM_CALL(jit_->addObjectFile(*dylib_, std::move(*buffer_or_err)));
+  context_symbol_refreshed_.store(false, std::memory_order_release);
 }
 
 void ORCJITDynamicLibraryObj::SetLinkOrder(const std::vector<llvm::orc::JITDylib*>& dylibs) {
@@ -157,8 +150,29 @@ void* ORCJITDynamicLibraryObj::GetSymbol(const String& name) {
   CxaAtexitRecordsScope scope(&cxa_atexit_records_);
 #endif
   session_->RunPendingInitializers(GetJITDylib());
-  // Convert ExecutorAddr to pointer
-  return symbol_or_err ? symbol_or_err->getAddress().toPtr<void*>() : nullptr;
+
+  if (!symbol_or_err) {
+    llvm::Error remaining =
+        llvm::handleErrors(symbol_or_err.takeError(), [](const llvm::orc::SymbolsNotFound&) {});
+    if (remaining) TVM_FFI_ORCJIT_LLVM_CALL(std::move(remaining));
+    return nullptr;
+  }
+  return symbol_or_err->getAddress().toPtr<void*>();
+}
+
+void ORCJITDynamicLibraryObj::InitContextSymbols() {
+  std::lock_guard<std::mutex> lock(context_symbol_refresh_mutex_);
+  if (context_symbol_refreshed_.load(std::memory_order_acquire)) return;
+
+  if (void** ctx_addr = reinterpret_cast<void**>(GetSymbol(symbol::tvm_ffi_library_ctx))) {
+    *ctx_addr = this;
+  }
+  Module::VisitContextSymbols([this](const String& name, void* symbol) {
+    if (void** ctx_addr = reinterpret_cast<void**>(GetSymbol(name))) {
+      *ctx_addr = symbol;
+    }
+  });
+  context_symbol_refreshed_.store(true, std::memory_order_release);
 }
 
 llvm::orc::JITDylib& ORCJITDynamicLibraryObj::GetJITDylib() {
@@ -183,6 +197,10 @@ Optional<Function> ORCJITDynamicLibraryObj::GetFunction(const String& name) {
 
   // TVM-FFI exports have __tvm_ffi_ prefix
   std::string symbol_name = symbol::tvm_ffi_symbol_prefix + std::string(name);
+
+  if (!context_symbol_refreshed_.load(std::memory_order_acquire)) {
+    InitContextSymbols();
+  }
 
   // Try to get the symbol - return NullOpt if not found
   if (void* symbol = GetSymbol(symbol_name)) {

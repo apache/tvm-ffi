@@ -102,7 +102,7 @@ runs:
         CIBW_ENVIRONMENT: LLVM_PREFIX=/opt/llvm
         CIBW_ENVIRONMENT_WINDOWS: LLVM_PREFIX="C:/opt/llvm"
         CIBW_CONTAINER_ENGINE: "docker; create_args: --volume /opt/llvm:/opt/llvm"
-        CIBW_TEST_REQUIRES: pytest ninja
+        CIBW_TEST_REQUIRES: pytest pytest-xdist ninja
         CIBW_TEST_COMMAND: >-
           pip install --force-reinstall {project} &&
           pytest {project}/addons/tvm_ffi_orcjit/tests -v &&

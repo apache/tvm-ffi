@@ -21,7 +21,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "apache-tvm_ffi_orcjit"
-version = "0.1.0"
+version = "0.1.1"
 description = "Load TVM-FFI exported object files using LLVM ORC JIT v2"
 readme = "README.md"
 requires-python = ">=3.10"
