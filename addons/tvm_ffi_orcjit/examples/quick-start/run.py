@@ -20,9 +20,8 @@
 
 This script demonstrates how to:
 1. Compile C/C++ source files to object files using tvm_ffi.cpp.build
-2. Load them into an ORC JIT ExecutionSession
-3. Get functions by name
-4. Call them like regular Python functions
+2. Load them via the shared ORC JIT session (default_session().load_module)
+3. Call the resulting module's functions like regular Python functions
 
 Usage:
     python run.py          # Load C++ object file (add.o)
@@ -37,7 +36,7 @@ import sys
 from pathlib import Path
 
 import tvm_ffi.cpp
-from tvm_ffi_orcjit import ExecutionSession
+import tvm_ffi_orcjit as oj
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
@@ -71,46 +70,33 @@ def _build_object(lang: str) -> str:
 def _run_tests(obj_file: str, lang: str) -> None:
     """Load object file and run all test assertions.
 
-    All JIT references (functions, lib, session) are released automatically
+    All JIT references (functions, module) are released automatically
     when this function returns.
     """
     print(f"Loading object file: {obj_file} (lang={lang})")
 
-    # Create execution session and dynamic library
-    session = ExecutionSession()
-    lib = session.create_library()
-    lib.add(obj_file)
+    # Load the object into a module on the shared session.
+    mod = oj.default_session().load_module(obj_file)
 
     print("Object file loaded successfully\n")
 
     # Get and call the 'add' function
     print("=== Testing add function ===")
-    add = lib.get_function("add")
-    result = add(10, 20)
+    result = mod.add(10, 20)
     print(f"add(10, 20) = {result}")
     assert result == 30, f"Expected 30, got {result}"
 
     # Get and call the 'multiply' function
     print("\n=== Testing multiply function ===")
-    multiply = lib.get_function("multiply")
-    result = multiply(7, 6)
+    result = mod.multiply(7, 6)
     print(f"multiply(7, 6) = {result}")
     assert result == 42, f"Expected 42, got {result}"
 
     # Get and call the 'fibonacci' function
     print("\n=== Testing fibonacci function ===")
-    fibonacci = lib.get_function("fibonacci")
-    result = fibonacci(10)
+    result = mod.fibonacci(10)
     print(f"fibonacci(10) = {result}")
     assert result == 55, f"Expected 55, got {result}"
-
-    if lang == "cpp":
-        # String concatenation only available in C++ variant (uses std::string)
-        print("\n=== Testing concat function ===")
-        concat = lib.get_function("concat")
-        result = concat("Hello, ", "World!")
-        print(f"concat('Hello, ', 'World!') = '{result}'")
-        assert result == "Hello, World!", f"Expected 'Hello, World!', got '{result}'"
 
     print("\n" + "=" * 50)
     print("All tests passed successfully!")

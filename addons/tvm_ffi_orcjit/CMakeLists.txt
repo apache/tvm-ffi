@@ -149,7 +149,25 @@ if (APPLE)
     COMMENT "Fixing libc++ rpath to use system library"
   )
 elseif (UNIX AND NOT WIN32)
+  # Static libstdc++/libgcc: the conda LLVM toolchain's libstdc++ is newer than the manylinux ABI
+  # floor, so linking it dynamically would import too-recent GLIBCXX_* symbols and fail auditwheel.
   target_link_options(tvm_ffi_orcjit PRIVATE -static-libstdc++ -static-libgcc)
+endif ()
+
+# Hide symbols pulled from static archives so they are not re-exported and cannot interpose with a
+# host process's own copies (e.g. PyTorch's bundled LLVM). Exclude LLVM/zlib/zstd by name -- NOT
+# --exclude-libs,ALL, which would also hide the static libstdc++ symbols (operator new, __throw_*,
+# ...) that liborc_rt and JIT'd C++ code resolve from this .so at run time. The LLVM list is derived
+# from llvm-config so it tracks the toolchain version.
+if (CMAKE_SYSTEM_NAME MATCHES "Linux|Android|FreeBSD|NetBSD|OpenBSD" AND CMAKE_CXX_COMPILER_ID
+                                                                         MATCHES "GNU|Clang"
+)
+  # --exclude-libs needs exact archive filenames (no globs), so turn each -lLLVM* from llvm-config
+  # into libLLVM*.a and add zlib/zstd. One colon-separated list -- a -Wl comma list would be split.
+  set(_exclude_archives ${_llvm_libs_list} "-lz" "-lzstd")
+  list(TRANSFORM _exclude_archives REPLACE "^-l(.+)$" "lib\\1.a")
+  list(JOIN _exclude_archives ":" _exclude_libs_arg)
+  target_link_options(tvm_ffi_orcjit PRIVATE "-Wl,--exclude-libs=${_exclude_libs_arg}")
 endif ()
 
 # ---- Find and bundle liborc_rt ----

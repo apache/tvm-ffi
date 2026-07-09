@@ -345,128 +345,40 @@ With the background above, here is how the addon maps onto the concepts.
 ```text
 Python / C++ API                   LLVM ORC v2 concept
 ─────────────────────────────────────────────────────────────────
+default_session()                  shared (leaked) LLJIT + ExecutionSession
 ExecutionSession                   LLJIT + ExecutionSession
-DynamicLibrary                     JITDylib
-dylib.add("foo.o")                 ObjectLinkingLayer.add(buffer)
-dylib.get_function("add")          ExecutionSession.lookup("__tvm_ffi_add")
-dylib.set_link_order([a, b])       JITDylib.setLinkOrder([a, b, main, ...])
+session.load_module(objs)          createJITDylib + addObjectFile(s) + wire imports
+(returned) Module                  JITDylib, wrapped as a tvm_ffi.Module
+module.get_function("add")         ExecutionSession.lookup("__tvm_ffi_add")
 ```
 
-### 4.2 Object File Loading Pipeline
+`session.load_module(objects)` is the sole public loader: it creates one
+`JITDylib`, adds every object (path or in-memory bytes), injects context symbols
+eagerly, expands any embedded library binary into an import tree, and returns a
+plain `tvm_ffi.Module`. There is no incremental library API — a module is a
+unit: load all its objects at once, then look up functions on the result.
 
-```text
-dylib.add("foo.o")
-   │
-   ▼ ORCJITDynamicLibraryObj::AddObjectFile()
-   │   jit_->addObjectFile(*dylib_, MemoryBuffer)
-   │
-   ▼ ObjectTransformLayer                    (macOS: skipped; Linux/Win: may strip .pdata)
-   │   Windows: strip .pdata/.xdata           avoids JITLink COMDAT limitation
-   │            fix __ImageBase               fixes Pointer32NB relocations
-   │
-   ▼ ObjectLinkingLayer (JITLink)
-   │   Parse object → LinkGraph
-   │   Run InitFiniPlugin passes:
-   │     PrePrunePasses:    mark .init_array / .ctors blocks as live
-   │     PostAllocationPasses: (Windows) set __ImageBase, strip SEH sections
-   │     PostFixupPasses:   extract resolved init/fini function pointers
-   │                        → session.AddPendingInitializer(dylib, entry)
-   │   Resolve relocations via ExecutionSession.lookup()
-   │   Allocate JIT memory, write code, mark executable
-   │
-   ▼ JITDylib symbol table updated
-      (symbols are defined but constructors not yet run)
-```
+### 4.2 Loading and lookup
 
-### 4.3 Symbol Lookup and Initialization
+`load_module` adds each object to the JITDylib, and JITLink parses it into a
+`LinkGraph`, resolves relocations, and allocates executable JIT memory.
+`get_function` looks the symbol up (materializing lazily), then wraps the raw
+pointer as a `tvm_ffi::Function`. Symbols resolve against the dylib's own
+default link order (this dylib → Platform → process/runtime symbols); objects
+that reference each other must be loaded together, since there is no linking
+between separate `load_module` results.
 
-```text
-dylib.get_function("add")
-   │
-   ▼ ORCJITDynamicLibraryObj::GetFunction("add")
-   │   → GetSymbol("__tvm_ffi_add")
-   │       build JITDylibSearchOrder: [this, linked dylibs, LLJIT default]
-   │       jit_->getExecutionSession().lookup(order, "__tvm_ffi_add")
-   │       ← ExecutorAddr
-   │
-   ▼ Linux/Windows: RunPendingInitializers()
-   │   Sort entries by priority
-   │   Call each function pointer (C++ ctors, .init_array entries)
-   │
-   ▼ macOS: jit_->initialize(*dylib_)
-   │   ORC MachOPlatform calls __mod_init_func pointers
-   │
-   ▼ Wrap raw function pointer as tvm_ffi::Function
-      via Function::FromPacked lambda (marshals AnyView args ↔ TVMFFIAny)
-```
+Two addon-specific pieces sit in this pipeline:
 
-### 4.4 InitFiniPlugin Detail
-
-`InitFiniPlugin` is an `ObjectLinkingLayer::Plugin` — it receives callbacks during
-JITLink's pass pipeline for every object being linked.
-
-```text
-JITLink pass pipeline for each object file:
-─────────────────────────────────────────────────────────────
-PrePrunePasses
-  → InitFiniPlugin::modifyPassConfig (PrePrunePasses)
-      For each section named .init_array* / .ctors* / .fini_array* / .dtors*
-      (ELF) or __DATA,__mod_init_func (Mach-O) or .CRT$XC* (COFF):
-        Mark all blocks in that section as "keep" (live)
-        → Prevents dead-code elimination from removing constructors
-
-PostAllocationPasses (Windows only)
-  → InitFiniPlugin::modifyPassConfig (PostAllocationPasses)
-      Set __ImageBase = lowest allocated block address
-      Strip .pdata / .xdata exception handler sections
-
-PostFixupPasses
-  → InitFiniPlugin::modifyPassConfig (PostFixupPasses)
-      Iterate all blocks in init/fini sections
-      Read each 8-byte slot as an ExecutorAddr
-      Parse section name to determine: priority, is_init vs is_fini
-      Call session->AddPendingInitializer(dylib, InitFiniEntry{addr, section, priority})
-      (or AddPendingDeinitializer for dtors/fini_array)
-```
-
-### 4.5 Cross-Library Symbol Resolution
-
-```text
-libA depends on a symbol defined in libB:
-
-libA.set_link_order([libB])
-    → JITDylibSearchOrder for libA: [libA, libB, main(ProcessSymbols)]
-
-When libA's object file has an unresolved symbol "foo":
-    JITLink asks ExecutionSession.lookup([libA, libB, main], "foo")
-    → found in libB → returns libB's ExecutorAddr for "foo"
-    → relocation in libA patched with that address
-```
-
-### 4.6 Windows DLL Import Stubs
-
-Windows MSVC objects reference DLL functions through `__imp_XXX` pointer stubs (the
-Import Address Table pattern). At static link time the linker creates these stubs. In
-JIT mode there is no linker, so `DLLImportDefinitionGenerator` creates them on demand:
-
-```text
-JITLink encounters undefined symbol "__imp_malloc"
-   │
-   ▼ DLLImportDefinitionGenerator::tryToGenerate()
-   │   Search ucrtbase.dll, msvcrt.dll, then all process modules
-   │   for the real address of "malloc"
-   │
-   ▼ Allocate two JIT-memory stubs:
-   │   __imp_malloc  → 8-byte slot containing &malloc (host address)
-   │   malloc        → x86_64 jmp [__imp_malloc] trampoline
-   │
-   ▼ Define both symbols in the JITDylib
-      → JITLink can now apply PCRel32 reloc to __imp_malloc (stub is close in JIT memory)
-```
-
-The stubs must live in JIT-allocated memory (not at the host process address) because
-x86_64 `PCRel32` relocations can only reach ±2 GB. The host's `malloc` may be farther
-than 2 GB from the JIT allocation.
+- **`InitFiniPlugin`** — a JITLink pass plugin that keeps init/fini sections
+  (`.init_array`/`.ctors`/`.fini_array`/`.dtors`, `__mod_init_func`, `.CRT$XC*`)
+  live, then collects their function pointers after fixup. The addon runs them
+  in priority order at first lookup and at teardown, replacing the ORC
+  platform's initializer machinery. See `llvm_patches/init_fini_plugin.h`.
+- **Windows DLL import stubs** — `DLLImportDefinitionGenerator` resolves
+  `__imp_XXX` references to host-DLL functions by emitting JIT-memory pointer +
+  trampoline stubs, keeping `PCRel32` fixups within ±2 GB of the JIT code. See
+  `llvm_patches/win_dll_import_generator.h`.
 
 ---
 
@@ -475,22 +387,17 @@ than 2 GB from the JIT allocation.
 ```python
 import tvm_ffi_orcjit as oj
 
-# 1. Create an ExecutionSession (wraps LLJIT)
-sess = oj.ExecutionSession()
+# 1. Get the shared ExecutionSession (wraps LLJIT; created once per process)
+sess = oj.default_session()
 
-# 2. Create a JITDylib
-lib = sess.create_dynamic_library()
+# 2. Load a compiled object file into a fresh JITDylib
+#    → object parsed, JITLink links it, InitFiniPlugin collects ctors,
+#      context symbols injected eagerly, embedded binary (if any) expanded
+mod = sess.load_module("add.o")   # returns a tvm_ffi.Module
 
-# 3. Load a compiled object file
-#    → object parsed, JITLink links it, InitFiniPlugin collects ctors
-lib.add("add.o")
-
-# 4. Look up a function
-#    → LLVM resolves "__tvm_ffi_add", RunPendingInitializers() fires ctors
-add = lib.get_function("add")   # returns tvm_ffi.Function
-
-# 5. Call it
-result = add(3, 4)   # → 7
+# 3. Look up and call a function
+#    → LLVM resolves "__tvm_ffi_add"; pending constructors fire on first lookup
+result = mod.add(3, 4)   # → 7
 ```
 
 The corresponding C++ side of `add.o`:
@@ -511,7 +418,7 @@ TVM_FFI_DLL_EXPORT_TYPED_FUNC(add, add_impl);
 
 | Concept | What it is | Where in the addon |
 | --- | --- | --- |
-| Object file | Container of machine code, data, symbols, relocations | Input to `dylib.add()` |
+| Object file | Container of machine code, data, symbols, relocations | Input to `session.load_module()` |
 | Relocation | Recipe to patch a code address at link/JIT time | Applied by JITLink |
 | `.init_array` / `.ctors` | Array of C++ constructor pointers in ELF objects | Collected by `InitFiniPlugin` |
 | `ExecutionSession` | Root of the ORC JIT environment | `ORCJITExecutionSessionObj` |
@@ -520,7 +427,7 @@ TVM_FFI_DLL_EXPORT_TYPED_FUNC(add, add_impl);
 | `JITLink` | LLVM's JIT-aware linker | Used inside `ObjectLinkingLayer` |
 | JITLink pass pipeline | Pre-prune → post-alloc → post-fixup hooks | Where `InitFiniPlugin` runs |
 | `DefinitionGenerator` | Fallback symbol provider | `DLLImportDefinitionGenerator` (Win) |
-| Link order | Search path across JITDylibs for symbol resolution | `SetLinkOrder()` |
+| Link order | Search path across JITDylibs for symbol resolution | LLJIT default (Main → Platform → ProcessSymbols) |
 | `__tvm_ffi_` prefix | Namespace for TVM-FFI exported functions | Used in `GetFunction()` |
 
 ---

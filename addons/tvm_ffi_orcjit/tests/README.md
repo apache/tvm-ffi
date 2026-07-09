@@ -106,5 +106,5 @@ static initialization and finalization:
 
 ## CI
 
-The CI workflow (`.github/workflows/tvm_ffi_orcjit.yml`) runs `pytest` and the
+The CI `orcjit` job (in `.github/workflows/ci_test.yml`) runs `pytest` and the
 quick-start example via `cibuildwheel`.

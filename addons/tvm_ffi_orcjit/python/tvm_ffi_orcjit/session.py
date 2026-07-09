@@ -19,11 +19,17 @@
 from __future__ import annotations
 
 import sys
+import threading
+from pathlib import Path
+from typing import TYPE_CHECKING
 
-from tvm_ffi import Object, register_object
+import tvm_ffi
+from tvm_ffi import Module, Object, register_object
 
 from . import _ffi_api, _lib_dir
-from .dylib import DynamicLibrary
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 def _find_orc_rt_library() -> str | None:
@@ -51,43 +57,56 @@ def _find_orc_rt_library() -> str | None:
     return None
 
 
-@register_object("orcjit.ExecutionSession")
+@tvm_ffi.register_global_func("tvm_ffi_orcjit.DefaultOrcRuntimePath", override=True)
+def _default_orc_runtime_path() -> str:
+    """Resolve the ORC runtime path for the shared session (C++ hook).
+
+    Called once by the C++ ``GlobalDefault`` singleton on first use. Returns the
+    runtime bundled next to this extension, or an empty string to run with no
+    ORC platform (macOS/Windows, or when no bundled runtime is found).
+    """
+    return _find_orc_rt_library() or ""
+
+
+@register_object("tvm_ffi_orcjit.ExecutionSession")
 class ExecutionSession(Object):
     """ORC JIT Execution Session.
 
     Manages the LLVM ORC JIT execution environment and creates dynamic libraries (JITDylibs).
     This is the top-level context for JIT compilation and symbol management.
 
+    Prefer :func:`default_session` for a process-wide shared session; construct
+    an ``ExecutionSession`` directly only for an isolated session or a tuned arena.
+
     Examples
     --------
     >>> session = ExecutionSession()
-    >>> lib = session.create_library(name="main")
-    >>> lib.add("add.o")
-    >>> add_func = lib.get_function("add")
+    >>> mod = session.load_module("add.o")
+    >>> add_func = mod.get_function("add")
 
     """
 
     def __init__(self, orc_rt_path: str | None = None, slab_size: int = 0) -> None:
         """Initialize ExecutionSession.
 
-        Args:
-            orc_rt_path: Optional path to the liborc_rt library. If not provided,
-                        it will be automatically discovered using clang.
-            slab_size: Per-slab capacity in bytes for the JIT memory manager.
-                       Linux only — ignored on macOS and Windows, where the
-                       slab allocator is compiled out.
-                       0 = arch default (64 MB; initial slab halves on mmap
-                       failure down to 8 MB under RLIMIT_AS / container
-                       limits), >0 = custom size, <0 = disable slab allocator
-                       (LLJIT uses its default scattered-mmap allocator).
+        Parameters
+        ----------
+        orc_rt_path : str, optional
+            Optional path to the liborc_rt library. If not provided, it will be
+            automatically discovered using clang.
+        slab_size : int
+            Per-slab capacity in bytes for the JIT memory manager. Linux only —
+            ignored on macOS and Windows, where the slab allocator is compiled
+            out. 0 = arch default (64 MB; initial slab halves on mmap failure
+            down to 8 MB under RLIMIT_AS / container limits), >0 = custom size,
+            <0 = disable slab allocator (LLJIT uses its default scattered-mmap
+            allocator).
 
-                       The session holds a growable pool of slabs: a fresh
-                       slab is mmap'd on demand when no existing one can fit
-                       a graph. Graphs that don't fit a normal slab trigger
-                       a power-of-2 larger slab (slab_size, 2*slab_size, ...)
-                       sized to fit. Drained slabs stay mapped until the
-                       session is destroyed or ``clear_free_slabs()`` is
-                       called.
+            The session holds a growable pool of slabs: a fresh slab is mmap'd
+            on demand when no existing one can fit a graph. Graphs that don't
+            fit a normal slab trigger a power-of-2 larger slab (slab_size,
+            2*slab_size, ...) sized to fit. Drained slabs stay mapped until the
+            session is destroyed or ``clear_free_slabs()`` is called.
 
         """
         if orc_rt_path is None:
@@ -96,20 +115,78 @@ class ExecutionSession(Object):
                 orc_rt_path = ""
         self.__init_handle_by_constructor__(_ffi_api.ExecutionSession, orc_rt_path, slab_size)  # type: ignore
 
-    def create_library(self, name: str = "") -> DynamicLibrary:
-        """Create a new dynamic library associated with this execution session.
+    def load_module(
+        self,
+        objects: str | Path | bytes | bytearray | Sequence[str | Path | bytes | bytearray],
+        name: str = "",
+        keep_module_alive: bool = False,
+    ) -> Module:
+        """Load one or more object files into a fresh module.
 
-        Args:
-            name: Optional name for the library. If empty, a unique name will be generated.
+        All objects are linked into one dynamic library (JITDylib), context
+        symbols are wired up, and any embedded library binary is expanded — so
+        the result behaves like a module loaded by :func:`tvm_ffi.load_module`.
 
-        Returns:
-            A new DynamicLibrary instance.
+        Parameters
+        ----------
+        objects : str or Path or bytes or bytearray, or a sequence of them
+            Object files to load, given as paths and/or in-memory object-file
+            images. A single item is accepted as shorthand for a one-element list.
+        name : str
+            Optional name for the underlying library. Auto-generated if empty.
+        keep_module_alive : bool
+            If True, pin the module in the runtime's process-global registry
+            (see Notes). Defaults to False.
+
+        Returns
+        -------
+        Module
+            A :class:`tvm_ffi.Module` whose imports and library context are fully
+            wired.
+
+        Notes
+        -----
+        ``keep_module_alive`` mirrors :func:`tvm_ffi.load_module`'s option of
+        the same name. When True, the module is inserted into the runtime's
+        process-global module registry, so its JITDylib — and every function
+        pointer, deleter, and static allocation it owns — stays mapped until
+        the interpreter unloads ``libtvm_ffi``. Use this when Objects produced
+        by the module may outlive the local ``mod`` reference (e.g., a
+        JIT-allocated ``String`` or ``Array`` returned to Python and held past
+        ``del mod``). When False (default), the caller owns the module's
+        lifetime and its JIT memory is reclaimed on drop; callers must ensure
+        no JIT-produced Object outlives the returned module.
+
+        Pinning is transitive: the module holds a strong reference to its
+        :class:`ExecutionSession`, so pinning one module also keeps that
+        session (and its slab-pool memory manager) alive for the process
+        lifetime. Reclaim is slab-granular — a slab shared between a pinned
+        and an unpinned module stays mapped until the pinned module is gone.
+
+        Examples
+        --------
+        >>> session = default_session()
+        >>> mod = session.load_module(["a.o", "b.o", Path("c.o").read_bytes()])
+        >>> mod.my_function(1, 2)
 
         """
-        handle = _ffi_api.ExecutionSessionCreateDynamicLibrary(self, name)  # type: ignore
-        lib = DynamicLibrary.__new__(DynamicLibrary)
-        lib.__move_handle_from__(handle)
-        return lib
+        if isinstance(objects, (str, Path, bytes, bytearray)):
+            objects = [objects]
+        normalized: list[str | bytes] = []
+        for obj in objects:
+            if isinstance(obj, (bytes, bytearray)):
+                normalized.append(bytes(obj))
+            elif isinstance(obj, (str, Path)):
+                normalized.append(str(obj))
+            else:
+                raise TypeError(
+                    "load_module objects must be a path (str or Path) or object-file "
+                    f"bytes, but got {type(obj).__name__}"
+                )
+        mod = _ffi_api.SessionLoadModule(self, normalized, name)  # type: ignore
+        if keep_module_alive:
+            tvm_ffi._ffi_api.ModuleGlobalsAdd(mod)  # type: ignore
+        return mod
 
     def clear_free_slabs(self) -> int:
         """Release drained slabs (no live JIT allocations) back to the OS.
@@ -123,10 +200,51 @@ class ExecutionSession(Object):
         returned, the C++ destructor has finished and the slab's live count
         reflects the drop.
 
-        Returns:
+        Returns
+        -------
+        int
             Number of slabs actually munmap'd. Returns 0 on macOS/Windows
             (slab pool compiled out) or when the pool is disabled via
             ``slab_size=-1``.
 
         """
-        return int(_ffi_api.ExecutionSessionClearFreeSlabs(self))  # type: ignore
+        return int(_ffi_api.SessionClearFreeSlabs(self))  # type: ignore
+
+
+_default_session: ExecutionSession | None = None
+_default_session_lock = threading.Lock()
+
+
+def default_session() -> ExecutionSession:
+    """Return the process-wide shared execution session.
+
+    A single leaked, never-destroyed session shared by all callers in the
+    process, so they share one LLVM ``ExecutionSession`` — hence process
+    symbols, the slab arena, and cross-library linking. Created on first call
+    and cached for the lifetime of the process.
+
+    The ORC runtime path is resolved once, on first use, by the C++ singleton
+    calling the registered ``tvm_ffi_orcjit.DefaultOrcRuntimePath`` hook (which
+    returns the runtime bundled next to this extension, or none). For an isolated
+    session or a tuned arena, construct an :class:`ExecutionSession` directly.
+
+    Returns
+    -------
+    ExecutionSession
+        The shared execution session.
+
+    Examples
+    --------
+    >>> import tvm_ffi_orcjit as oj
+    >>> session = oj.default_session()
+    >>> mod = session.load_module("dylib0.o")
+
+    """
+    global _default_session  # noqa: PLW0603 — module-level singleton cache
+    # Double-checked locking: the FFI call releases the GIL, so guard the
+    # first-call caching to avoid two threads racing to fetch it.
+    if _default_session is None:
+        with _default_session_lock:
+            if _default_session is None:
+                _default_session = _ffi_api.GlobalDefaultSession()
+    return _default_session

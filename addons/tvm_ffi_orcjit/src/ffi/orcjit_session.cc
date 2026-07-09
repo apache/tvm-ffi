@@ -31,10 +31,12 @@
 #include <llvm/Support/TargetSelect.h>
 #include <tvm/ffi/cast.h>
 #include <tvm/ffi/error.h>
+#include <tvm/ffi/function.h>
 #include <tvm/ffi/object.h>
 #include <tvm/ffi/reflection/registry.h>
 
 #include <cstddef>
+#include <mutex>
 
 #include "orcjit_dylib.h"
 #include "orcjit_memory_manager.h"
@@ -203,8 +205,28 @@ ORCJITExecutionSession::ORCJITExecutionSession(const std::string& orc_rt_path,
   data_ = std::move(obj);
 }
 
+ORCJITExecutionSession ORCJITExecutionSessionObj::GlobalDefault() {
+  // Leaked, never-destroyed: the owned LLJIT and slab arena must not be torn
+  // down during interpreter finalization, where teardown could call back into
+  // the host language. Resolve the ORC runtime path once, from the registered
+  // global tvm_ffi_orcjit.DefaultOrcRuntimePath (a Python hook that returns the
+  // bundled runtime); absent or empty means no platform.
+  static ORCJITExecutionSession* inst = [] {
+    std::string orc_rt_path;
+    if (auto fpath = Function::GetGlobal("tvm_ffi_orcjit.DefaultOrcRuntimePath")) {
+      orc_rt_path = (*fpath)().cast<String>().operator std::string();
+    }
+    return new ORCJITExecutionSession(orc_rt_path, 0);
+  }();
+  return *inst;
+}
+
 ORCJITDynamicLibrary ORCJITExecutionSessionObj::CreateDynamicLibrary(const String& name) {
   TVM_FFI_CHECK(jit_ != nullptr, InternalError) << "ExecutionSession not initialized";
+
+  // Compound topology op — serialize against concurrent create / add / lookup /
+  // teardown on this shared session (lock order: session lock first).
+  std::lock_guard<std::mutex> lock(mutex_);
 
   // Generate name if not provided
   String lib_name = name;
@@ -250,31 +272,41 @@ llvm::orc::LLJIT& ORCJITExecutionSessionObj::GetLLJIT() {
 
 using CtorDtor = void (*)();
 
-void ORCJITExecutionSessionObj::RunPendingInitializers(llvm::orc::JITDylib& jit_dylib) {
-  auto it = pending_initializers_.find(&jit_dylib);
-  if (it != pending_initializers_.end()) {
-    llvm::sort(it->second, [](const InitFiniEntry& a, const InitFiniEntry& b) {
+namespace {
+// Remove a dylib's entries from `pending` and return them sorted into run order
+// (by section, then priority). Caller holds the session lock.
+std::vector<ORCJITExecutionSessionObj::InitFiniEntry> DrainSorted(
+    std::unordered_map<llvm::orc::JITDylib*, std::vector<ORCJITExecutionSessionObj::InitFiniEntry>>&
+        pending,
+    llvm::orc::JITDylib& jit_dylib) {
+  std::vector<ORCJITExecutionSessionObj::InitFiniEntry> entries;
+  auto it = pending.find(&jit_dylib);
+  if (it != pending.end()) {
+    entries = std::move(it->second);
+    pending.erase(it);
+    llvm::sort(entries, [](const ORCJITExecutionSessionObj::InitFiniEntry& a,
+                           const ORCJITExecutionSessionObj::InitFiniEntry& b) {
       if (a.section != b.section) return static_cast<int>(a.section) < static_cast<int>(b.section);
       return a.priority < b.priority;
     });
-    for (const auto& entry : it->second) {
-      entry.address.toPtr<CtorDtor>()();
-    }
-    pending_initializers_.erase(it);
   }
+  return entries;
+}
+}  // namespace
+
+std::vector<ORCJITExecutionSessionObj::InitFiniEntry>
+ORCJITExecutionSessionObj::DrainPendingInitializers(llvm::orc::JITDylib& jit_dylib) {
+  return DrainSorted(pending_initializers_, jit_dylib);
 }
 
-void ORCJITExecutionSessionObj::RunPendingDeinitializers(llvm::orc::JITDylib& jit_dylib) {
-  auto it = pending_deinitializers_.find(&jit_dylib);
-  if (it != pending_deinitializers_.end()) {
-    llvm::sort(it->second, [](const InitFiniEntry& a, const InitFiniEntry& b) {
-      if (a.section != b.section) return static_cast<int>(a.section) < static_cast<int>(b.section);
-      return a.priority < b.priority;
-    });
-    for (const auto& entry : it->second) {
-      entry.address.toPtr<CtorDtor>()();
-    }
-    pending_deinitializers_.erase(it);
+std::vector<ORCJITExecutionSessionObj::InitFiniEntry>
+ORCJITExecutionSessionObj::DrainPendingDeinitializers(llvm::orc::JITDylib& jit_dylib) {
+  return DrainSorted(pending_deinitializers_, jit_dylib);
+}
+
+void ORCJITExecutionSessionObj::RunInitFiniEntries(const std::vector<InitFiniEntry>& entries) {
+  for (const auto& entry : entries) {
+    entry.address.toPtr<CtorDtor>()();
   }
 }
 
