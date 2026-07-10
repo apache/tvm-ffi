@@ -102,6 +102,10 @@ runs:
         CIBW_ENVIRONMENT: LLVM_PREFIX=/opt/llvm
         CIBW_ENVIRONMENT_WINDOWS: LLVM_PREFIX="C:/opt/llvm"
         CIBW_CONTAINER_ENGINE: "docker; create_args: --volume /opt/llvm:/opt/llvm"
+        # Build against the in-tree core (not PyPI) so the addon's tvm_ffi ABI
+        # matches the core the tests reinstall; a mismatch segfaults the JIT.
+        CIBW_BEFORE_BUILD: pip install "scikit-build-core>=0.10.0" cmake ninja "{project}"
+        CIBW_BUILD_FRONTEND: "pip; args: --no-build-isolation"
         CIBW_TEST_REQUIRES: pytest pytest-xdist ninja
         CIBW_TEST_COMMAND: >-
           pip install --force-reinstall {project} &&

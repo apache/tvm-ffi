@@ -518,6 +518,16 @@ def _generate_ninja_build(  # noqa: PLR0915, PLR0912
         ninja.append("  command = ld -r -o $out $in")
         ninja.append("")
 
+        # Copy a single object straight through, bypassing `ld -r`. A partial
+        # link of one input is a pointless round-trip, and some system linkers
+        # (e.g. GNU ld 2.45) assign a nonzero sh_addr to zero-size, non-SHF_ALLOC
+        # sections like `.note.GNU-stack` during it. JITLink then materializes a
+        # zero-length block at that address, which collides with a real block in
+        # EHFrameEdgeFixer's block map and aborts C++ (eh_frame-bearing) loads.
+        ninja.append("rule copy_object")
+        ninja.append("  command = cp -f $in $out")
+        ninja.append("")
+
         if embed_cubin:
             ninja.append("rule embed_cubin")
             ninja.append(
@@ -562,7 +572,10 @@ def _generate_ninja_build(  # noqa: PLR0915, PLR0912
     if object_mode:
         # Object-only output: merge all object files into the target.
         if not IS_WINDOWS:
-            ninja.append(f"build {output_name}: merge_objects {' '.join(obj_files)}")
+            # A single object needs no partial link — copy it through to avoid
+            # `ld -r` rewriting section addresses (see the copy_object rule).
+            rule = "copy_object" if len(obj_files) == 1 else "merge_objects"
+            ninja.append(f"build {output_name}: {rule} {' '.join(obj_files)}")
             ninja.append("")
             ninja.append(f"default {output_name}")
         else:

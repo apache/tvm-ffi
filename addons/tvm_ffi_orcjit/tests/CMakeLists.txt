@@ -84,6 +84,7 @@ if (NOT WIN32)
   add_test_object(sources/cc/test_link_order_base.cc)
   add_test_object(sources/cc/test_link_order_caller.cc)
   add_test_object(sources/cc/test_error.cc)
+  add_test_object(sources/cc/test_containers.cc)
 endif ()
 
 # Pure C object files — built on all platforms (no C++ runtime deps)

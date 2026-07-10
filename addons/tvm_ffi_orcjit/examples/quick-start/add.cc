@@ -40,7 +40,3 @@ int fib_impl(int n) {
   return fib_impl(n - 1) + fib_impl(n - 2);
 }
 TVM_FFI_DLL_EXPORT_TYPED_FUNC(fibonacci, fib_impl);
-
-// String concatenation example
-std::string concat_impl(std::string a, std::string b) { return a + b; }
-TVM_FFI_DLL_EXPORT_TYPED_FUNC(concat, concat_impl);

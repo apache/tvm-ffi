@@ -27,11 +27,15 @@
 #include <llvm/ExecutionEngine/Orc/Core.h>
 #include <llvm/ExecutionEngine/Orc/LLJIT.h>
 #include <llvm/ExecutionEngine/Orc/Shared/ExecutorAddress.h>
+#include <tvm/ffi/container/array.h>
+#include <tvm/ffi/container/variant.h>
+#include <tvm/ffi/extra/module.h>
 #include <tvm/ffi/object.h>
 #include <tvm/ffi/string.h>
 
 #include <atomic>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 
@@ -41,8 +45,9 @@ namespace tvm {
 namespace ffi {
 namespace orcjit {
 
-// Forward declaration
+// Forward declarations
 class ORCJITDynamicLibrary;
+class ORCJITExecutionSession;
 
 /*!
  * \brief ExecutionSession object for LLVM ORC JIT v2
@@ -59,11 +64,47 @@ class ORCJITExecutionSessionObj : public Object {
                                      int64_t slab_size_bytes = 0);
 
   /*!
+   * \brief Get the process-wide shared execution session.
+   *
+   * A leaked, never-destroyed singleton so multiple callers in one process
+   * share one LLVM ExecutionSession — hence process symbols, the slab arena,
+   * and cross-library linking. Never torn down (interpreter finalization could
+   * otherwise call back into the host language during teardown).
+   *
+   * The ORC runtime path is resolved on first call from the registered global
+   * \c tvm_ffi_orcjit.DefaultOrcRuntimePath (a Python-side hook that returns the
+   * bundled runtime, or empty to disable); absent or empty means no platform.
+   *
+   * \return The shared execution session.
+   */
+  static ORCJITExecutionSession GlobalDefault();
+
+  /*!
    * \brief Create a new DynamicLibrary (JITDylib) in this session
    * \param name Optional name for the library (for debugging)
    * \return The created dynamic library instance
    */
   ORCJITDynamicLibrary CreateDynamicLibrary(const String& name);
+
+  /*!
+   * \brief Load a set of objects into one fresh dynamic library and return the
+   *        resulting module, fully wired.
+   *
+   * End-to-end high-level entry: creates a JITDylib, adds every object (a
+   * \c String path or in-memory \c Bytes image), injects context symbols
+   * eagerly, and — if the objects embed a library binary — reconstructs the
+   * import tree so the result behaves like a normally-loaded tvm-ffi module.
+   * The whole sequence runs under one recursive session lock, and the dylib is
+   * never exposed in a partially-loaded state, so finalization happens exactly
+   * once and cannot be repeated or interleaved.
+   *
+   * \param objects Array whose elements are each a \c String path or \c Bytes
+   *        object-file image.
+   * \param name Optional JITDylib name (auto-generated when empty).
+   * \return The root module, with imports and library context fully wired (the
+   *         dylib itself when there is no embedded library binary).
+   */
+  Module LoadModule(const Array<Variant<String, Bytes>>& objects, const String& name);
 
   /*!
    * \brief Get the underlying LLVM ExecutionSession
@@ -78,7 +119,8 @@ class ORCJITExecutionSessionObj : public Object {
   llvm::orc::LLJIT& GetLLJIT();
 
   static constexpr bool _type_mutable = true;
-  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("orcjit.ExecutionSession", ORCJITExecutionSessionObj, Object);
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("tvm_ffi_orcjit.ExecutionSession", ORCJITExecutionSessionObj,
+                                    Object);
 
   struct InitFiniEntry {
     enum class Section {
@@ -92,9 +134,24 @@ class ORCJITExecutionSessionObj : public Object {
     int priority;
   };
 
-  void RunPendingInitializers(llvm::orc::JITDylib& jit_dylib);
-  void RunPendingDeinitializers(llvm::orc::JITDylib& jit_dylib);
+  /*!
+   * \brief Remove a dylib's pending init/fini entries, sorted into run order.
+   *
+   * Separates collection from execution: the caller drains under \ref mutex_,
+   * then runs the entries with the lock released (see \ref mutex_). Caller must
+   * hold \ref mutex_.
+   *
+   * \param jit_dylib The dylib whose entries to drain.
+   * \return The entries in execution order (empty if none).
+   */
+  std::vector<InitFiniEntry> DrainPendingInitializers(llvm::orc::JITDylib& jit_dylib);
+  std::vector<InitFiniEntry> DrainPendingDeinitializers(llvm::orc::JITDylib& jit_dylib);
 
+  /*! \brief Run drained init/fini entries in order. Call with the lock released. */
+  static void RunInitFiniEntries(const std::vector<InitFiniEntry>& entries);
+
+  // Called by InitFiniPlugin during materialization, which the triggering
+  // GetSymbol runs while already holding mutex_ — so these do not lock.
   void AddPendingInitializer(llvm::orc::JITDylib* jd, const InitFiniEntry& entry);
   void AddPendingDeinitializer(llvm::orc::JITDylib* jd, const InitFiniEntry& entry);
 
@@ -103,8 +160,8 @@ class ORCJITExecutionSessionObj : public Object {
    *        memory and dropping it from the session's dylib list.
    *
    * Invoked by \c ORCJITDynamicLibraryObj's destructor after any required
-   * static-destructor sequence (\c RunPendingDeinitializers on Linux/Windows,
-   * \c LLJIT::deinitialize on macOS) has completed. The caller must ensure no
+   * static-destructor sequence (drained via \c DrainPendingDeinitializers on
+   * Linux/Windows) has completed. The caller must ensure no
    * further use of the \c JITDylib* after this call — it becomes "Closed" and
    * its address may be reused by a subsequent \c createJITDylib.
    *
@@ -124,6 +181,11 @@ class ORCJITExecutionSessionObj : public Object {
   int64_t ClearFreeSlabs();
 
  private:
+  // The dylib serializes its compound operations (add object / lookup+init /
+  // teardown) on this session's mutex_, and drains its pending init/fini
+  // entries under it. See the locking discipline on mutex_.
+  friend class ORCJITDynamicLibraryObj;
+
   /*! \brief Slab-pool memory manager — must be declared before jit_ for destruction order */
   std::unique_ptr<SlabPoolMemoryManager> memory_manager_;
   /*! \brief The LLVM ORC JIT instance */
@@ -131,6 +193,20 @@ class ORCJITExecutionSessionObj : public Object {
 
   /*! \brief Counter for auto-generating library names */
   std::atomic<int> dylib_counter_{0};
+
+  /*!
+   * \brief Serializes compound JITDylib operations on this shared session
+   *        (create / add object / symbol lookup+init / teardown) and guards the
+   *        pending init/fini maps below.
+   *
+   * Plain, non-recursive: acquired exactly once per operation, in the leaf op
+   * (CreateDynamicLibrary / AddObjectBuffer / GetSymbol / the dylib destructor);
+   * composers (LoadModule / Finalize / GetFunction) hold no lock. JIT'd
+   * constructors/destructors run after the lock is released (entries are drained
+   * under it), so a JIT'd ctor re-entering the session on the same thread does
+   * not deadlock. The resolved-call hot path never takes it.
+   */
+  std::mutex mutex_;
 
   std::unordered_map<llvm::orc::JITDylib*, std::vector<InitFiniEntry>> pending_initializers_;
   std::unordered_map<llvm::orc::JITDylib*, std::vector<InitFiniEntry>> pending_deinitializers_;

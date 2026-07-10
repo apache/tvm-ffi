@@ -289,9 +289,8 @@ def test_slab_colocation(variant: str) -> None:
     maps_before = set(_parse_maps())
 
     session = ExecutionSession(slab_size=_SLAB_SIZE)
-    lib1 = session.create_library("lib1")
-    lib1.add(obj(f"{variant}/test_addr"))
-    addr1 = lib1.get_function("code_address")()
+    mod1 = session.load_module(obj(f"{variant}/test_addr"), "lib1")
+    addr1 = mod1.get_function("code_address")()
 
     # Find where LLVM placed the first allocation and block nearby VA
     maps_after = _parse_maps()
@@ -300,9 +299,8 @@ def test_slab_colocation(variant: str) -> None:
 
     blockers = block_nearby_va(jit_center)
     try:
-        lib2 = session.create_library("lib2")
-        lib2.add(obj(f"{variant}/test_addr"))
-        addr2 = lib2.get_function("code_address")()
+        mod2 = session.load_module(obj(f"{variant}/test_addr"), "lib2")
+        addr2 = mod2.get_function("code_address")()
     finally:
         free_blockers(blockers)
 
@@ -330,9 +328,8 @@ def _measure_distance_under_pressure(
     maps_before = set(_parse_maps())
 
     session = ExecutionSession(slab_size=slab_size)
-    lib1 = session.create_library("lib1")
-    lib1.add(obj(f"{variant}/test_addr"))
-    addr1 = lib1.get_function("code_address")()
+    mod1 = session.load_module(obj(f"{variant}/test_addr"), "lib1")
+    addr1 = mod1.get_function("code_address")()
 
     maps_after = _parse_maps()
     new_maps = _find_new_mappings(maps_before, maps_after)
@@ -340,10 +337,9 @@ def _measure_distance_under_pressure(
 
     blockers = block_nearby_va(jit_center, radius=radius)
     try:
-        lib2 = session.create_library("lib2")
         try:
-            lib2.add(obj(f"{variant}/test_addr"))
-            addr2 = lib2.get_function("code_address")()
+            mod2 = session.load_module(obj(f"{variant}/test_addr"), "lib2")
+            addr2 = mod2.get_function("code_address")()
         except Exception:
             return None, True
     finally:
@@ -413,29 +409,32 @@ def test_slab_hidden_symbol_with_blocker(variant: str) -> None:
     """Slab prevents hidden-visibility relocation overflow under VA pressure.
 
     Loads two objects with hidden-visibility cross-references (ADRP+ADD
-    on AArch64, PC32 on x86_64) with a VA blocker between them.
-    Without slab, the blocker would push objects apart causing overflow.
-    With the slab, both objects are co-located and the call succeeds.
+    on AArch64, PC32 on x86_64) into one module under VA pressure. A VA
+    blocker is placed before the load; without slab the two objects could
+    scatter and overflow, with the slab they are co-located and the call
+    succeeds.
     """
     maps_before = set(_parse_maps())
 
+    # Warm the session so a slab is reserved, then block nearby VA before the
+    # real load to force any fresh scatter to land far away.
     session = ExecutionSession(slab_size=_SLAB_SIZE)
-    lib = session.create_library("hidden_test")
+    warmup = session.load_module(obj(f"{variant}/test_hidden_helper"), "warmup")
+    assert warmup.get_function("hidden_add")(1, 2) == 3
 
-    # Load helper and force materialization
-    lib.add(obj(f"{variant}/test_hidden_helper"))
-    assert lib.get_function("hidden_add")(1, 2) == 3
-
-    # Block nearby VA to force scatter
     maps_after = _parse_maps()
     new_maps = _find_new_mappings(maps_before, maps_after)
     jit_center = max(s for s, e in new_maps) if new_maps else 0xFFFF00000000
 
     blockers = block_nearby_va(jit_center)
     try:
-        lib.add(obj(f"{variant}/test_hidden_caller"))
-        fn = lib.get_function("call_hidden_add")
-        assert fn(10, 20) == 30
+        # Helper + caller cross-reference via hidden visibility, so they must
+        # live in one module (one JITDylib) to resolve.
+        mod = session.load_module(
+            [obj(f"{variant}/test_hidden_helper"), obj(f"{variant}/test_hidden_caller")],
+            "hidden_test",
+        )
+        assert mod.get_function("call_hidden_add")(10, 20) == 30
     finally:
         free_blockers(blockers)
 
@@ -455,9 +454,8 @@ def test_large_data_section(variant: str) -> None:
     the function works.  The 4MB section fits in the slab.
     """
     session = ExecutionSession()
-    lib = session.create_library("fatbin")
-    lib.add(obj(f"{variant}/fake_fatbin"))
-    fn = lib.get_function("get_fatbin_size")
+    mod = session.load_module(obj(f"{variant}/fake_fatbin"), "fatbin")
+    fn = mod.get_function("get_fatbin_size")
     assert fn() == 4 * 1024 * 1024
 
 
@@ -481,14 +479,13 @@ def test_overflow_section_outside_slab(variant: str) -> None:
     the slab region.
     """
     session = ExecutionSession(slab_size=_SLAB_SIZE)
-    lib = session.create_library("fatbin_overflow")
-    lib.add(obj(f"{variant}/fake_fatbin"))
+    mod = session.load_module(obj(f"{variant}/fake_fatbin"), "fatbin_overflow")
 
     # Verify the function still works correctly.
-    assert lib.get_function("get_fatbin_size")() == 4 * 1024 * 1024
+    assert mod.get_function("get_fatbin_size")() == 4 * 1024 * 1024
 
     # Get the actual address of the fatbin data in memory.
-    fatbin_addr = lib.get_function("get_fatbin_addr")()
+    fatbin_addr = mod.get_function("get_fatbin_addr")()
 
     # Find the slab mapping: a single large region matching the slab size.
     # The slab is reserved as PROT_NONE and then committed in slabs, so
@@ -540,28 +537,26 @@ def test_dso_handle_relocation_after_failed_materialization(variant: str) -> Non
                    apart.
     With slab:    PASSES (all allocations in same slab).
     """
-    # Step 1: Trigger leaked materializations to consume low VA space.
+    # Step 1: Trigger leaked materializations to consume low VA space. Each
+    # failed load (duplicate symbol across the two objects) leaks its slab.
     leaked_sessions = []
     for _ in range(3):
         s0 = ExecutionSession()
-        lib0 = s0.create_library("warmup")
-        lib0.add(obj(f"{variant}/test_funcs"))
-        lib0.get_function("test_add")(10, 20)
+        warm = s0.load_module(obj(f"{variant}/test_funcs"), "warmup")
+        warm.get_function("test_add")(10, 20)
         try:
-            lib0.add(obj(f"{variant}/test_funcs_conflict"))
+            s0.load_module([obj(f"{variant}/test_funcs"), obj(f"{variant}/test_funcs_conflict")])
         except Exception:
             pass
-        leaked_sessions.append((s0, lib0))
+        leaked_sessions.append((s0, warm))
 
-    # Step 2: Fresh session — cross-library resolution must still work.
+    # Step 2: Fresh session — resolution must still work after the leaks.
     session = ExecutionSession()
-    lib1 = session.create_library("lib1")
-    lib1.add(obj(f"{variant}/test_funcs"))
-    assert lib1.get_function("test_add")(10, 20) == 30
+    mod1 = session.load_module(obj(f"{variant}/test_funcs"), "lib1")
+    assert mod1.get_function("test_add")(10, 20) == 30
 
-    lib2 = session.create_library("lib2")
-    lib2.add(obj(f"{variant}/test_funcs_conflict"))
-    assert lib2.get_function("test_add")(10, 20) == 1030
+    mod2 = session.load_module(obj(f"{variant}/test_funcs_conflict"), "lib2")
+    assert mod2.get_function("test_add")(10, 20) == 1030
 
 
 # ---------------------------------------------------------------------------
@@ -616,9 +611,8 @@ def test_dso_handle_delta32_with_slab(variant: str) -> None:
     maps_before = set(_parse_maps())
 
     session = ExecutionSession(slab_size=_SLAB_SIZE)
-    lib1 = session.create_library("lib1")
-    lib1.add(obj(f"{variant}/test_funcs"))
-    assert lib1.get_function("test_add")(10, 20) == 30
+    mod1 = session.load_module(obj(f"{variant}/test_funcs"), "lib1")
+    assert mod1.get_function("test_add")(10, 20) == 30
 
     # Block 3GB of VA around the first allocation to force scatter
     maps_after = _parse_maps()
@@ -627,9 +621,8 @@ def test_dso_handle_delta32_with_slab(variant: str) -> None:
 
     blockers = block_nearby_va(jit_center, radius=_DSO_BLOCK_RADIUS)
     try:
-        lib2 = session.create_library("lib2")
-        lib2.add(obj(f"{variant}/test_funcs_conflict"))
-        assert lib2.get_function("test_add")(10, 20) == 1030
+        mod2 = session.load_module(obj(f"{variant}/test_funcs_conflict"), "lib2")
+        assert mod2.get_function("test_add")(10, 20) == 1030
     finally:
         free_blockers(blockers)
 
@@ -662,9 +655,8 @@ def test_dso_handle_delta32_overflow_without_slab(variant: str) -> None:
     maps_before = set(_parse_maps())
 
     session = ExecutionSession(slab_size=-1)  # slab disabled
-    lib1 = session.create_library("lib1")
-    lib1.add(obj(f"{variant}/test_addr"))
-    lib1.get_function("code_address")()
+    mod1 = session.load_module(obj(f"{variant}/test_addr"), "lib1")
+    mod1.get_function("code_address")()
 
     maps_after = _parse_maps()
     new_maps = _find_new_mappings(maps_before, maps_after)
@@ -672,10 +664,9 @@ def test_dso_handle_delta32_overflow_without_slab(variant: str) -> None:
 
     blockers = block_nearby_va(jit_center, radius=_DSO_BLOCK_RADIUS)
     try:
-        lib2 = session.create_library("lib2")
         try:
-            lib2.add(obj(f"{variant}/test_funcs_conflict"))
-            result = lib2.get_function("test_add")(10, 20)
+            mod2 = session.load_module(obj(f"{variant}/test_funcs_conflict"), "lib2")
+            result = mod2.get_function("test_add")(10, 20)
             # If we get here, GCC used GOTPCRELX — no overflow.
             assert result == 1030
         except Exception:

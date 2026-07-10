@@ -24,9 +24,10 @@ TVM-FFI exported functions.
 ## Features
 
 - **JIT Execution**: Load and execute compiled object files at runtime using LLVM's ORC JIT v2
-- **Multiple Libraries**: Create separate dynamic libraries with independent symbol namespaces
-- **Incremental Loading**: Add multiple object files to the same library incrementally
-- **Symbol Isolation**: Different libraries can define the same symbol without conflicts
+- **High-Level Loading**: `default_session().load_module(...)` mirrors `tvm_ffi.load_module`, returning a plain `tvm_ffi.Module`
+- **Unified Input**: Load from a file path, in-memory object bytes, or a list mixing both
+- **Shared Session**: A process-wide session so multiple callers share one JIT environment (process symbols, arena, linking)
+- **Symbol Isolation**: Separate `load_module` calls define independent symbol namespaces, so they can define the same symbol without conflicts
 - **Init/Fini Support**: Handles static constructors/destructors across ELF (`.init_array`/`.ctors`), Mach-O (`__mod_init_func`), and COFF (`.CRT$XC*`/`.CRT$XT*`)
 - **Cross-Platform**: Linux (x86_64, aarch64), macOS (arm64), Windows (AMD64)
 - **Multi-Compiler**: Tested with LLVM Clang, GCC, Apple Clang, MSVC, and clang-cl
@@ -105,55 +106,54 @@ auto-discover it and `LLVM_PREFIX` is not needed.
 
 ### Basic Example
 
+The high-level API mirrors `tvm_ffi.load_module`: a process-wide shared session
+plus a `load_module` that accepts a path, in-memory object bytes, or a list of
+either, and returns a plain `tvm_ffi.Module`.
+
 ```python
-from tvm_ffi_orcjit import ExecutionSession
+import tvm_ffi_orcjit as oj
 
-# Create an execution session
-session = ExecutionSession()
+# Shared process-wide session (created once, cached).
+session = oj.default_session()
 
-# Create a dynamic library
-lib = session.create_library()
+# Load a single object file by path.
+mod = session.load_module("example.o")
 
-# Load an object file
-lib.add("example.o")
-
-# Get and call a function
-add_func = lib.get_function("add")
-result = add_func(1, 2)
+# Call an exported function.
+result = mod.add(1, 2)
 print(f"Result: {result}")  # Output: Result: 3
 ```
 
-### Multiple Libraries with Symbol Isolation
+### Loading Multiple Objects and In-Memory Bytes
+
+Objects passed together are linked into one module (the same way a multi-object
+shared library links). Each element may be a path or an object-file image in
+memory.
 
 ```python
-session = ExecutionSession()
+from pathlib import Path
 
-lib1 = session.create_library("lib1")
-lib2 = session.create_library("lib2")
+session = oj.default_session()
 
-lib1.add("implementation_v1.o")
-lib2.add("implementation_v2.o")
-
-add_v1 = lib1.get_function("add")
-add_v2 = lib2.get_function("add")
-
-print(add_v1(5, 3))  # Uses implementation from lib1
-print(add_v2(5, 3))  # Uses implementation from lib2
+mod = session.load_module(
+    [
+        "math_ops.o",                    # path
+        Path("kernel.o").read_bytes(),   # in-memory object bytes
+    ]
+)
+result = mod.call_math(10, 20)
 ```
 
-### Cross-Library Linking
+### Isolated Sessions
+
+`default_session()` is shared across the process. For an isolated symbol
+namespace or a tuned memory arena, construct an `ExecutionSession` directly:
 
 ```python
-session = ExecutionSession()
+from tvm_ffi_orcjit import ExecutionSession
 
-base_lib = session.create_library("base")
-base_lib.add("math_ops.o")
-
-caller_lib = session.create_library("caller")
-caller_lib.set_link_order(base_lib)  # Can resolve symbols from base_lib
-caller_lib.add("caller.o")
-
-result = caller_lib.get_function("call_math")(10, 20)
+session = ExecutionSession()          # independent LLVM ExecutionSession
+mod = session.load_module("impl.o")
 ```
 
 ## Writing Functions for OrcJIT
@@ -211,13 +211,12 @@ tvm_ffi_orcjit/
 ├── src/ffi/
 │   ├── orcjit_session.cc       # ExecutionSession (LLJIT setup, plugins)
 │   ├── orcjit_session.h
-│   ├── orcjit_dylib.cc         # DynamicLibrary (object loading, symbol lookup)
+│   ├── orcjit_dylib.cc         # JIT dylib module (object loading, symbol lookup)
 │   ├── orcjit_dylib.h
 │   └── orcjit_utils.h          # LLVM error handling utilities
 ├── python/tvm_ffi_orcjit/
 │   ├── __init__.py             # Module exports and library loading
-│   ├── session.py              # Python ExecutionSession wrapper
-│   └── dylib.py                # Python DynamicLibrary wrapper
+│   └── session.py              # Python ExecutionSession + default_session
 ├── tests/                      # See tests/README.md
 └── examples/quick-start/       # Complete example with CMake
 ```
@@ -226,7 +225,7 @@ tvm_ffi_orcjit/
 
 Runs on Linux (x86_64, aarch64), macOS (arm64), Windows (AMD64) via
 `cibuildwheel`. Each platform builds test objects with multiple compilers
-and runs the full test suite. See `.github/workflows/tvm_ffi_orcjit.yml`.
+and runs the full test suite. See the `orcjit` job in `.github/workflows/ci_test.yml`.
 
 ## Troubleshooting
 
