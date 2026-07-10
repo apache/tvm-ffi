@@ -18,7 +18,6 @@
 
 from __future__ import annotations
 
-import sys
 import threading
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -26,46 +25,10 @@ from typing import TYPE_CHECKING
 import tvm_ffi
 from tvm_ffi import Module, Object, register_object
 
-from . import _ffi_api, _lib_dir
+from . import _ffi_api
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
-
-
-def _find_orc_rt_library() -> str | None:
-    """Find the bundled liborc_rt library in the same directory as the .so/.dll."""
-    # Windows: skip ORC runtime entirely. LLVM's COFFPlatform (loaded via
-    # ExecutorNativePlatform with liborc_rt) depends on MSVC C++ runtime symbols
-    # that are not available in the JIT environment. On Windows, ORC JIT uses a
-    # C-only strategy: JIT objects are compiled as pure C (TVMFFISafeCallType ABI),
-    # avoiding all C++ runtime dependencies (magic statics, RTTI, sized delete,
-    # SEH, COMDAT). Our custom InitFiniPlugin handles .CRT$XC*/.CRT$XT* init/fini
-    # sections, and DLLImportDefinitionGenerator resolves __imp_ DLL import stubs.
-    #
-    # macOS: skip ORC runtime too. ExecutorNativePlatform would install
-    # MachOPlatform, which triggers a compact-unwind 32-bit-delta bug in
-    # JITLink when a user graph mmaps below the per-JITDylib Mach-O header
-    # (see repo-root fix-machoplatform-libunwind-dso-base.patch). Our
-    # InitFiniPlugin handles __mod_init_func / __mod_term_func instead.
-    # Tradeoff: no C++ exception unwinding across JIT frames on macOS.
-    if sys.platform in ("win32", "darwin"):
-        return None
-    patterns = ["liborc_rt*.a"]
-    for pattern in patterns:
-        for lib_path in _lib_dir.glob(pattern):
-            return str(lib_path)
-    return None
-
-
-@tvm_ffi.register_global_func("tvm_ffi_orcjit.DefaultOrcRuntimePath", override=True)
-def _default_orc_runtime_path() -> str:
-    """Resolve the ORC runtime path for the shared session (C++ hook).
-
-    Called once by the C++ ``GlobalDefault`` singleton on first use. Returns the
-    runtime bundled next to this extension, or an empty string to run with no
-    ORC platform (macOS/Windows, or when no bundled runtime is found).
-    """
-    return _find_orc_rt_library() or ""
 
 
 @register_object("tvm_ffi_orcjit.ExecutionSession")
@@ -86,14 +49,26 @@ class ExecutionSession(Object):
 
     """
 
-    def __init__(self, orc_rt_path: str | None = None, slab_size: int = 0) -> None:
+    def __init__(
+        self,
+        orc_rt: str | Path | bytes | bytearray | None = "auto",
+        slab_size: int = 0,
+    ) -> None:
         """Initialize ExecutionSession.
 
         Parameters
         ----------
-        orc_rt_path : str, optional
-            Optional path to the liborc_rt library. If not provided, it will be
-            automatically discovered using clang.
+        orc_rt : str or Path or bytes or None
+            Which ORC runtime to install. Linux/ELF only — ignored on macOS and
+            Windows, which never configure an ORC platform.
+
+            - ``"auto"`` (default): the runtime embedded in this extension.
+            - a path (``str`` or ``Path``): a custom liborc_rt archive on disk.
+            - ``bytes``: a custom liborc_rt archive held in memory.
+            - ``None``: no ORC platform at all.
+
+            A custom runtime (path or bytes) must match the LLVM/compiler-rt this
+            extension was built against; ``"auto"`` is almost always what you want.
         slab_size : int
             Per-slab capacity in bytes for the JIT memory manager. Linux only —
             ignored on macOS and Windows, where the slab allocator is compiled
@@ -109,11 +84,23 @@ class ExecutionSession(Object):
             session is destroyed or ``clear_free_slabs()`` is called.
 
         """
-        if orc_rt_path is None:
-            orc_rt_path = _find_orc_rt_library()
-            if orc_rt_path is None:
-                orc_rt_path = ""
-        self.__init_handle_by_constructor__(_ffi_api.ExecutionSession, orc_rt_path, slab_size)  # type: ignore
+        # Normalize to what the C++ ctor (Optional<Variant<String, Bytes>>) reads:
+        # None -> no platform; "" -> auto/embedded; str -> path; bytes -> in-memory.
+        rt: str | bytes | None
+        if orc_rt is None:
+            rt = None
+        elif orc_rt == "auto":
+            rt = ""
+        elif isinstance(orc_rt, (bytes, bytearray)):
+            rt = bytes(orc_rt)
+        elif isinstance(orc_rt, (str, Path)):
+            rt = str(orc_rt)
+        else:
+            raise TypeError(
+                "orc_rt must be 'auto', a path (str or Path), liborc_rt bytes, or None, "
+                f"but got {type(orc_rt).__name__}"
+            )
+        self.__init_handle_by_constructor__(_ffi_api.ExecutionSession, rt, slab_size)  # type: ignore
 
     def load_module(
         self,
@@ -223,10 +210,9 @@ def default_session() -> ExecutionSession:
     symbols, the slab arena, and cross-library linking. Created on first call
     and cached for the lifetime of the process.
 
-    The ORC runtime path is resolved once, on first use, by the C++ singleton
-    calling the registered ``tvm_ffi_orcjit.DefaultOrcRuntimePath`` hook (which
-    returns the runtime bundled next to this extension, or none). For an isolated
-    session or a tuned arena, construct an :class:`ExecutionSession` directly.
+    The session uses the ORC runtime embedded in the extension (no on-disk path
+    lookup). For an isolated session or a tuned arena, construct an
+    :class:`ExecutionSession` directly.
 
     Returns
     -------
