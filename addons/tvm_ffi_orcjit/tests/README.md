@@ -92,6 +92,7 @@ variant subdirectories (c/, cc/, c-gcc/, etc.).
 | `test_link_order_base` / `test_link_order_caller` | Cross-library symbol resolution |
 | `test_error` | Error propagation from JIT'd code |
 | `test_ctor_dtor` | Constructor/destructor and init/fini sections |
+| `test_string_return` | String type tests (SmallStr ≤ 7 bytes, Heap Str > 7 bytes) |
 
 ### Constructor/destructor test coverage
 

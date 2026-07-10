@@ -85,6 +85,7 @@ if (NOT WIN32)
   add_test_object(sources/cc/test_link_order_caller.cc)
   add_test_object(sources/cc/test_error.cc)
   add_test_object(sources/cc/test_containers.cc)
+  add_test_object(sources/cc/test_string_return.cc)
 endif ()
 
 # Pure C object files — built on all platforms (no C++ runtime deps)
@@ -99,6 +100,7 @@ add_test_object(sources/c/test_link_order_base.c)
 add_test_object(sources/c/test_link_order_caller.c)
 add_test_object(sources/c/test_error.c)
 add_test_object(sources/c/test_ctor_dtor.c)
+add_test_object(sources/c/test_string_return.c)
 
 # CUDA object files — optional
 find_package(CUDAToolkit)

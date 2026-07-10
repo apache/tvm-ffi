@@ -128,6 +128,10 @@ class Variant:
             return ""
         return f"{self.subdir}/test_containers"
 
+    def string_return_obj(self) -> str:
+        """Return path prefix for test_string_return object."""
+        return f"{self.subdir}/test_string_return"
+
     def fn(self, base_name: str) -> str:
         """Return the function name for a given base name."""
         return base_name
@@ -379,6 +383,58 @@ def test_void_function(v: Variant) -> None:
     mod = load(v.types_obj())
     result = mod.get_function(v.fn("test_void_function"))()
     assert result is None
+
+
+# ---------------------------------------------------------------------------
+# String return type tests (Group 2b)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("v", _all_variants, ids=_variant_id)
+def test_jit_returns_string(v: Variant) -> None:
+    """JIT function returns a String object (kTVMFFIStr)."""
+    mod = load(v.string_return_obj())
+    result = mod.get_function(v.fn("test_get_hello_world"))()
+    assert result == "Hello World"
+    assert isinstance(result, str)
+
+
+@pytest.mark.parametrize("v", _all_variants, ids=_variant_id)
+def test_jit_returns_empty_string(v: Variant) -> None:
+    """JIT function returns an empty String object (kTVMFFIStr)."""
+    mod = load(v.string_return_obj())
+    result = mod.get_function(v.fn("test_get_empty_string"))()
+    assert result == ""
+    assert isinstance(result, str)
+
+
+@pytest.mark.parametrize("v", _all_variants, ids=_variant_id)
+def test_jit_concatenates_strings(v: Variant) -> None:
+    """JIT function takes two strings and returns concatenated result."""
+    mod = load(v.string_return_obj())
+    concat_fn = mod.get_function(v.fn("test_concatenate_strings"))()
+
+    # Test basic concatenation
+    result = concat_fn("Hello", " World")
+    assert result == "Hello World"
+
+    # Test empty strings
+    result = concat_fn("", "test")
+    assert result == "test"
+
+    result = concat_fn("test", "")
+    assert result == "test"
+
+
+@pytest.mark.parametrize("v", _all_variants, ids=_variant_id)
+def test_jit_string_length(v: Variant) -> None:
+    """JIT function returns the length of a string."""
+    mod = load(v.string_return_obj())
+    length_fn = mod.get_function(v.fn("test_string_length"))()
+
+    assert length_fn("") == 0
+    assert length_fn("Hello") == 5
+    assert length_fn("Hello, World!") == 13
 
 
 # ---------------------------------------------------------------------------
