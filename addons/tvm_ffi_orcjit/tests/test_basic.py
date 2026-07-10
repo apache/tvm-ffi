@@ -395,7 +395,7 @@ def test_jit_returns_string(v: Variant) -> None:
     """JIT function returns a String object (kTVMFFIStr)."""
     mod = load(v.string_return_obj())
     result = mod.get_function(v.fn("test_get_hello_world"))()
-    assert result == "Hello World"
+    assert result == "Hello, World!"
     assert isinstance(result, str)
 
 
