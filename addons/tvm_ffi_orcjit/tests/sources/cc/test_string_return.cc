@@ -78,6 +78,10 @@ TVM_FFI_DLL_EXPORT int __tvm_ffi_test_concatenate_strings(void* self, const TVMF
       data0 = args[0].v_bytes;
       size0 = args[0].small_str_len;
     } else {
+      if (args[0].v_ptr == nullptr) {
+        TVMFFIErrorSetRaisedFromCStr("RuntimeError", "Failed to extract string data");
+        return -1;
+      }
       TVMFFIByteArray* bytes = TVMFFIBytesGetByteArrayPtr(args[0].v_ptr);
       data0 = bytes->data;
       size0 = bytes->size;
@@ -89,6 +93,10 @@ TVM_FFI_DLL_EXPORT int __tvm_ffi_test_concatenate_strings(void* self, const TVMF
       data1 = args[1].v_bytes;
       size1 = args[1].small_str_len;
     } else {
+        if (args[1].v_ptr == nullptr) {
+          TVMFFIErrorSetRaisedFromCStr("RuntimeError", "Failed to extract string data");
+          return -1;
+        }
         TVMFFIByteArray* bytes = TVMFFIBytesGetByteArrayPtr(args[1].v_ptr);
         data1 = bytes->data;
         size1 = bytes->size;
@@ -134,11 +142,11 @@ TVM_FFI_DLL_EXPORT int __tvm_ffi_test_string_length(void* self, const TVMFFIAny*
     if (args[0].type_index == kTVMFFISmallStr) {
       size = args[0].small_str_len;
     } else {
-      TVMFFIByteArray* bytes = TVMFFIBytesGetByteArrayPtr(args[0].v_ptr);
-      if (bytes == nullptr) {
+      if (args[0].v_ptr == nullptr) {
         TVMFFIErrorSetRaisedFromCStr("RuntimeError", "Failed to extract string data");
         return -1;
       }
+      TVMFFIByteArray* bytes = TVMFFIBytesGetByteArrayPtr(args[0].v_ptr);
       size = bytes->size;
     }
 

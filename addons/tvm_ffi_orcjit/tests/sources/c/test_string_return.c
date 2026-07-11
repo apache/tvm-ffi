@@ -26,7 +26,7 @@
 #include <tvm/ffi/c_api.h>
 
 /* test_get_hello_world: returns a simple ASCII string */
-TVM_FFI_DLL_EXPORT int __tvmffi_test_get_hello_world(void* self, const TVMFFIAny* args,
+TVM_FFI_DLL_EXPORT int __tvm_ffi_test_get_hello_world(void* self, const TVMFFIAny* args,
                                                      int32_t num_args, TVMFFIAny* result) {
   /* Create a string object with "Hello, World!" */
   const char* message = "Hello, World!";
@@ -42,7 +42,7 @@ TVM_FFI_DLL_EXPORT int __tvmffi_test_get_hello_world(void* self, const TVMFFIAny
 }
 
 /* test_get_empty_string: returns an empty String */
-TVM_FFI_DLL_EXPORT int __tvmffi_test_get_empty_string(void* self, const TVMFFIAny* args,
+TVM_FFI_DLL_EXPORT int __tvm_ffi_test_get_empty_string(void* self, const TVMFFIAny* args,
                                                       int32_t num_args, TVMFFIAny* result) {
   TVMFFIByteArray input = {.data = "", .size = 0};
 
@@ -55,7 +55,7 @@ TVM_FFI_DLL_EXPORT int __tvmffi_test_get_empty_string(void* self, const TVMFFIAn
 }
 
 /* test_concatenate_strings: takes two string args and returns concatenated result */
-TVM_FFI_DLL_EXPORT int __tvmffi_test_concatenate_strings(void* self, const TVMFFIAny* args,
+TVM_FFI_DLL_EXPORT int __tvm_ffi_test_concatenate_strings(void* self, const TVMFFIAny* args,
                                                          int32_t num_args, TVMFFIAny* result) {
   if (num_args != 2) {
     TVMFFIErrorSetRaisedFromCStr("ValueError", "Expected 2 arguments");
@@ -77,6 +77,10 @@ TVM_FFI_DLL_EXPORT int __tvmffi_test_concatenate_strings(void* self, const TVMFF
     data0 = args[0].v_bytes;
     size0 = args[0].small_str_len;
   } else {
+    if (args[0].v_ptr == NULL) {
+        TVMFFIErrorSetRaisedFromCStr("RuntimeError", "Failed to extract string data");
+        return -1;
+    }
     TVMFFIByteArray* bytes = (TVMFFIByteArray*)((char*)args[0].v_ptr + sizeof(TVMFFIObject));
     data0 = bytes->data;
     size0 = bytes->size;
@@ -88,6 +92,10 @@ TVM_FFI_DLL_EXPORT int __tvmffi_test_concatenate_strings(void* self, const TVMFF
     data1 = args[1].v_bytes;
     size1 = args[1].small_str_len;
   } else {
+    if (args[1].v_ptr == NULL) {
+        TVMFFIErrorSetRaisedFromCStr("RuntimeError", "Failed to extract string data");
+        return -1;
+    }
     TVMFFIByteArray* bytes = (TVMFFIByteArray*)((char*)args[1].v_ptr + sizeof(TVMFFIObject));
     data1 = bytes->data;
     size1 = bytes->size;
@@ -116,7 +124,7 @@ TVM_FFI_DLL_EXPORT int __tvmffi_test_concatenate_strings(void* self, const TVMFF
 }
 
 /* test_string_length: returns length of input string */
-TVM_FFI_DLL_EXPORT int __tvmffi_test_string_length(void* self, const TVMFFIAny* args,
+TVM_FFI_DLL_EXPORT int __tvm_ffi_test_string_length(void* self, const TVMFFIAny* args,
                                                    int32_t num_args, TVMFFIAny* result) {
   if (num_args != 1) {
     TVMFFIErrorSetRaisedFromCStr("ValueError", "Expected 1 argument");
@@ -135,6 +143,10 @@ TVM_FFI_DLL_EXPORT int __tvmffi_test_string_length(void* self, const TVMFFIAny* 
   if (args[0].type_index == kTVMFFISmallStr) {
     size = args[0].small_str_len;
   } else {
+    if (args[0].v_ptr == NULL) {
+        TVMFFIErrorSetRaisedFromCStr("RuntimeError", "Failed to extract string data");
+        return -1;
+    }
     TVMFFIByteArray* bytes = (TVMFFIByteArray*)((char*)args[0].v_ptr + sizeof(TVMFFIObject));
     size = bytes->size;
   }
