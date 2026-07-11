@@ -71,21 +71,31 @@ TVM_FFI_DLL_EXPORT int __tvm_ffi_test_concatenate_strings(void* self, const TVMF
       return -1;
     }
 
-    // Get byte arrays (handling both SmallStr and heap Str)
-    TVMFFIByteArray* bytes0 = (args[0].type_index == kTVMFFISmallStr)
-                                  ? TVMFFISmallBytesGetContentByteArray(&args[0])
-                                  : TVMFFIBytesGetByteArrayPtr(args[0].v_ptr);
-    TVMFFIByteArray* bytes1 = (args[1].type_index == kTVMFFISmallStr)
-                                  ? TVMFFISmallBytesGetContentByteArray(&args[1])
-                                  : TVMFFIBytesGetByteArrayPtr(args[1].v_ptr);
-
-    if (bytes0 == nullptr || bytes1 == nullptr) {
-      TVMFFIErrorSetRaisedFromCStr("RuntimeError", "Failed to extract string data");
-      return -1;
+    // Manually extract data and size for both SmallStr and heap Str
+    const char* data0;
+    size_t size0;
+    if (args[0].type_index == kTVMFFISmallStr) {
+      data0 = args[0].v_bytes;
+      size0 = args[0].small_str_len;
+    } else {
+      TVMFFIByteArray* bytes = TVMFFIBytesGetByteArrayPtr(args[0].v_ptr);
+      data0 = bytes->data;
+      size0 = bytes->size;
     }
 
-    std::string str0(bytes0->data, bytes0->size);
-    std::string str1(bytes1->data, bytes1->size);
+    const char* data1;
+    size_t size1;
+    if (args[1].type_index == kTVMFFISmallStr) {
+      data1 = args[1].v_bytes;
+      size1 = args[1].small_str_len;
+    } else {
+        TVMFFIByteArray* bytes = TVMFFIBytesGetByteArrayPtr(args[1].v_ptr);
+        data1 = bytes->data;
+        size1 = bytes->size;
+    }
+
+    std::string str0(data0, size0);
+    std::string str1(data1, size1);
     std::string concatenated = str0 + str1;
 
     TVMFFIByteArray output;
@@ -119,18 +129,22 @@ TVM_FFI_DLL_EXPORT int __tvm_ffi_test_string_length(void* self, const TVMFFIAny*
       return -1;
     }
 
-    // Get byte array (handling both SmallStr and heap Str)
-    TVMFFIByteArray* bytes = (args[0].type_index == kTVMFFISmallStr)
-                                 ? TVMFFISmallBytesGetContentByteArray(&args[0])
-                                 : TVMFFIBytesGetByteArrayPtr(args[0].v_ptr);
-    if (bytes == nullptr) {
-      TVMFFIErrorSetRaisedFromCStr("RuntimeError", "Failed to extract string data");
-      return -1;
+    // Manually extract size from SmallStr or heap Str
+    size_t size;
+    if (args[0].type_index == kTVMFFISmallStr) {
+      size = args[0].small_str_len;
+    } else {
+      TVMFFIByteArray* bytes = TVMFFIBytesGetByteArrayPtr(args[0].v_ptr);
+      if (bytes == nullptr) {
+        TVMFFIErrorSetRaisedFromCStr("RuntimeError", "Failed to extract string data");
+        return -1;
+      }
+      size = bytes->size;
     }
 
     result->type_index = kTVMFFIInt;
     result->zero_padding = 0;
-    result->v_int64 = static_cast<int64_t>(bytes->size);
+    result->v_int64 = static_cast<int64_t>(size);
     return 0;
   } catch (const std::exception& e) {
     TVMFFIErrorSetRaisedFromCStr("RuntimeError", e.what());

@@ -70,21 +70,31 @@ TVM_FFI_DLL_EXPORT int __tvmffi_test_concatenate_strings(void* self, const TVMFF
     return -1;
   }
 
-  /* Get byte arrays from string objects (handling both SmallStr and heap Str) */
-  TVMFFIByteArray* bytes0 = (args[0].type_index == kTVMFFISmallStr)
-                                ? TVMFFISmallBytesGetContentByteArray(&args[0])
-                                : TVMFFIBytesGetByteArrayPtr(args[0].v_ptr);
-  TVMFFIByteArray* bytes1 = (args[1].type_index == kTVMFFISmallStr)
-                                ? TVMFFISmallBytesGetContentByteArray(&args[1])
-                                : TVMFFIBytesGetByteArrayPtr(args[1].v_ptr);
+  /* Manually extract data and size from  both SmallStr and heap Str */
+  const char* data0;
+  size_t size0;
+  if (args[0].type_index == kTVMFFISmallStr) {
+    data0 = args[0].v_bytes;
+    size0 = args[0].small_str_len;
+  } else {
+    TVMFFIByteArray* bytes = (TVMFFIByteArray*)((char*)args[0].v_ptr + sizeof(TVMFFIObject));
+    data0 = bytes->data;
+    size0 = bytes->size;
+  }
 
-  if (bytes0 == NULL || bytes1 == NULL) {
-    TVMFFIErrorSetRaisedFromCStr("RuntimeError", "Failed to extract string data");
-    return -1;
+  const char* data1;
+  size_t size1;
+  if (args[1].type_index == kTVMFFISmallStr) {
+    data1 = args[1].v_bytes;
+    size1 = args[1].small_str_len;
+  } else {
+    TVMFFIByteArray* bytes = (TVMFFIByteArray*)((char*)args[1].v_ptr + sizeof(TVMFFIObject));
+    data1 = bytes->data;
+    size1 = bytes->size;
   }
 
   /* Concatenate the two strings */
-  size_t total_len = bytes0->size + bytes1->size;
+  size_t total_len = size0 + size1;
   char buffer[512]; /* Fixed-size buffer for small test strings */
 
   if (total_len >= sizeof(buffer)) {
@@ -92,8 +102,8 @@ TVM_FFI_DLL_EXPORT int __tvmffi_test_concatenate_strings(void* self, const TVMFF
     return -1;
   }
 
-  memcpy(buffer, bytes0->data, bytes0->size);
-  memcpy(buffer + bytes0->size, bytes1->data, bytes1->size);
+  memcpy(buffer, data0, size0);
+  memcpy(buffer + size0, data1, size1);
 
   /* Create result string (TVMFFIStringFromByteArray will select SmallStr or Str) */
   TVMFFIByteArray output = {.data = buffer, .size = total_len};
@@ -120,17 +130,17 @@ TVM_FFI_DLL_EXPORT int __tvmffi_test_string_length(void* self, const TVMFFIAny* 
     return -1;
   }
 
-  /* Get byte array (handling both SmallStr and heap Str) */
-  TVMFFIByteArray* bytes = (args[0].type_index == kTVMFFISmallStr)
-                               ? TVMFFISmallBytesGetContentByteArray(&args[0])
-                               : TVMFFIBytesGetByteArrayPtr(args[0].v_ptr);
-  if (bytes == NULL) {
-    TVMFFIErrorSetRaisedFromCStr("RuntimeError", "Failed to extract string data");
-    return -1;
+  /* Manually extract size from SmallStr or heap Str */
+  size_t size;
+  if (args[0].type_index == kTVMFFISmallStr) {
+    size = args[0].small_str_len;
+  } else {
+    TVMFFIByteArray* bytes = (TVMFFIByteArray*)((char*)args[0].v_ptr + sizeof(TVMFFIObject));
+    size = bytes->size;
   }
 
   result->type_index = kTVMFFIInt;
   result->zero_padding = 0;
-  result->v_int64 = (int64_t)bytes->size;
+  result->v_int64 = (int64_t)size;
   return 0;
 }
