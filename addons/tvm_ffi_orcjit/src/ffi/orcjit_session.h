@@ -31,6 +31,7 @@
 #include <tvm/ffi/container/variant.h>
 #include <tvm/ffi/extra/module.h>
 #include <tvm/ffi/object.h>
+#include <tvm/ffi/optional.h>
 #include <tvm/ffi/string.h>
 
 #include <atomic>
@@ -58,10 +59,21 @@ class ORCJITExecutionSession;
 class ORCJITExecutionSessionObj : public Object {
  public:
   /*!
-   * \brief Default constructor (for make_object)
+   * \brief Construct a session, selecting the ORC runtime.
+   *
+   * \param orc_rt Runtime selector (Linux/ELF only; ignored on macOS/Windows,
+   *        which never configure an ORC platform):
+   *        - empty \c String (default, "auto"): the runtime embedded in this
+   *          extension (or no platform if the embed was compiled out);
+   *        - non-empty \c String: a custom liborc_rt archive on disk;
+   *        - \c Bytes: a custom liborc_rt archive held in memory;
+   *        - \c nullopt: no ORC platform at all.
+   *        A custom runtime must match the LLVM this extension was built against.
+   * \param slab_size_bytes Per-slab capacity for the JIT memory arena.
    */
-  explicit ORCJITExecutionSessionObj(const std::string& orc_rt_path = "",
-                                     int64_t slab_size_bytes = 0);
+  explicit ORCJITExecutionSessionObj(
+      const Optional<Variant<String, Bytes>>& orc_rt = Variant<String, Bytes>(String("")),
+      int64_t slab_size_bytes = 0);
 
   /*!
    * \brief Get the process-wide shared execution session.
@@ -71,9 +83,10 @@ class ORCJITExecutionSessionObj : public Object {
    * and cross-library linking. Never torn down (interpreter finalization could
    * otherwise call back into the host language during teardown).
    *
-   * The ORC runtime path is resolved on first call from the registered global
-   * \c tvm_ffi_orcjit.DefaultOrcRuntimePath (a Python-side hook that returns the
-   * bundled runtime, or empty to disable); absent or empty means no platform.
+   * Always uses the ORC runtime embedded in this extension; deliberately not
+   * user-configurable (a shared process-wide singleton with a hidden runtime
+   * knob would let the first caller pick the platform for everyone). Construct
+   * \ref ORCJITExecutionSession directly for a custom runtime.
    *
    * \return The shared execution session.
    */
@@ -221,9 +234,12 @@ class ORCJITExecutionSession : public ObjectRef {
  public:
   /*!
    * \brief Create a new ExecutionSession
-   * \return The created execution session instance
+   * \param orc_rt ORC runtime selector; see \ref ORCJITExecutionSessionObj.
+   * \param slab_size_bytes Per-slab capacity for the JIT memory arena.
    */
-  explicit ORCJITExecutionSession(const std::string& orc_rt_path = "", int64_t slab_size_bytes = 0);
+  explicit ORCJITExecutionSession(
+      const Optional<Variant<String, Bytes>>& orc_rt = Variant<String, Bytes>(String("")),
+      int64_t slab_size_bytes = 0);
   // Required: define object reference methods
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(ORCJITExecutionSession, ObjectRef,
                                                 ORCJITExecutionSessionObj);

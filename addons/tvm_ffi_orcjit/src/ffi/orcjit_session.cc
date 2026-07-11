@@ -27,15 +27,16 @@
 #include <llvm/ExecutionEngine/Orc/LLJIT.h>
 #include <llvm/ExecutionEngine/Orc/ObjectLinkingLayer.h>
 #include <llvm/Support/Error.h>
+#include <llvm/Support/MemoryBuffer.h>
 #include <llvm/Support/Process.h>
 #include <llvm/Support/TargetSelect.h>
 #include <tvm/ffi/cast.h>
 #include <tvm/ffi/error.h>
-#include <tvm/ffi/function.h>
 #include <tvm/ffi/object.h>
 #include <tvm/ffi/reflection/registry.h>
 
 #include <cstddef>
+#include <cstdint>
 #include <mutex>
 
 #include "orcjit_dylib.h"
@@ -71,7 +72,57 @@ struct LLVMInitializer {
 
 static LLVMInitializer llvm_initializer;
 
-ORCJITExecutionSessionObj::ORCJITExecutionSessionObj(const std::string& orc_rt_path,
+#ifdef TVM_FFI_ORCJIT_EMBED_ORC_RT
+// liborc_rt.a embedded in .rodata by orc_rt_embed.S.in. C linkage binds to the
+// assembler symbols; the linkage spec must be at namespace scope, not in-fn.
+extern "C" const char orc_rt_archive_start[];
+extern "C" const char orc_rt_archive_end[];
+#endif
+
+namespace {
+#ifdef TVM_FFI_ORCJIT_EMBED_ORC_RT
+// Zero-copy view of the embedded archive; its bytes live for the image lifetime.
+// Size via uintptr_t: the two symbols are distinct objects, so subtracting the
+// pointers directly would be UB.
+std::unique_ptr<llvm::MemoryBuffer> GetEmbeddedOrcRuntimeBuffer() {
+  return llvm::MemoryBuffer::getMemBuffer(
+      llvm::StringRef(orc_rt_archive_start,
+                      reinterpret_cast<std::uintptr_t>(orc_rt_archive_end) -
+                          reinterpret_cast<std::uintptr_t>(orc_rt_archive_start)),
+      "liborc_rt.a", /*RequiresNullTerminator=*/false);
+}
+#endif
+
+// Install ExecutorNativePlatform per the `orc_rt` selector (see the ctor doc).
+// A no-op except on Linux/ELF: macOS skips the platform (compact-unwind bug)
+// and Windows never wires up COFFPlatform, so both ignore the selector.
+void SetUpOrcPlatform(llvm::orc::LLJITBuilder& builder,
+                      const Optional<Variant<String, Bytes>>& orc_rt) {
+#if defined(__APPLE__) || defined(_WIN32)
+  (void)builder;
+  (void)orc_rt;
+#else
+  if (!orc_rt.has_value()) return;  // None -> no platform
+  const Variant<String, Bytes>& sel = orc_rt.value();
+  if (auto opt_path = sel.as<String>()) {
+    const String& path = *opt_path;
+    if (path.empty()) {  // "auto" -> embedded (or nothing if compiled out)
+#ifdef TVM_FFI_ORCJIT_EMBED_ORC_RT
+      builder.setPlatformSetUp(llvm::orc::ExecutorNativePlatform(GetEmbeddedOrcRuntimeBuffer()));
+#endif
+    } else {
+      builder.setPlatformSetUp(llvm::orc::ExecutorNativePlatform(path.operator std::string()));
+    }
+  } else {  // Bytes: ExecutorNativePlatform takes ownership of the copy.
+    const Bytes& bytes = sel.get<Bytes>();
+    builder.setPlatformSetUp(llvm::orc::ExecutorNativePlatform(llvm::MemoryBuffer::getMemBufferCopy(
+        llvm::StringRef(bytes.data(), bytes.size()), "liborc_rt.a")));
+  }
+#endif
+}
+}  // namespace
+
+ORCJITExecutionSessionObj::ORCJITExecutionSessionObj(const Optional<Variant<String, Bytes>>& orc_rt,
                                                      int64_t slab_size_bytes)
     : jit_(nullptr) {
   // Create slab-backed memory manager — pre-reserves a contiguous VA region
@@ -156,21 +207,15 @@ ORCJITExecutionSessionObj::ORCJITExecutionSessionObj(const std::string& orc_rt_p
   };
 
   auto builder = llvm::orc::LLJITBuilder();
-#ifndef __APPLE__
-  // macOS: always skip ExecutorNativePlatform / MachOPlatform to sidestep
-  // the compact-unwind 32-bit-delta bug in JITLink's CompactUnwindSupport
-  // (personality delta against a per-JITDylib header base wraps `uint64_t`
-  // and fails `isUInt<32>` when a later user graph mmaps below the header;
-  // see the repo-root fix-machoplatform-libunwind-dso-base.patch for the
-  // full analysis).  InitFiniPlugin below handles __mod_init_func /
-  // __mod_term_func instead.  Tradeoff: no C++ exception unwinding across
-  // JIT frames on macOS.
-  if (!orc_rt_path.empty()) {
-    builder.setPlatformSetUp(llvm::orc::ExecutorNativePlatform(orc_rt_path));
-  }
-#else
-  (void)orc_rt_path;
-#endif
+  // Configure the ORC platform from `orc_rt` (a no-op off Linux/ELF; see
+  // SetUpOrcPlatform).  macOS in particular must skip ExecutorNativePlatform /
+  // MachOPlatform to sidestep the compact-unwind 32-bit-delta bug in JITLink's
+  // CompactUnwindSupport (personality delta against a per-JITDylib header base
+  // wraps `uint64_t` and fails `isUInt<32>` when a later user graph mmaps below
+  // the header; see the repo-root fix-machoplatform-libunwind-dso-base.patch).
+  // InitFiniPlugin below handles __mod_init_func / __mod_term_func instead;
+  // tradeoff: no C++ exception unwinding across JIT frames on macOS.
+  SetUpOrcPlatform(builder, orc_rt);
   setup_builder(builder);
   jit_ = TVM_FFI_ORCJIT_LLVM_CALL(builder.create());
 #ifdef _WIN32
@@ -198,26 +243,20 @@ ORCJITExecutionSessionObj::ORCJITExecutionSessionObj(const std::string& orc_rt_p
 #endif
 }
 
-ORCJITExecutionSession::ORCJITExecutionSession(const std::string& orc_rt_path,
+ORCJITExecutionSession::ORCJITExecutionSession(const Optional<Variant<String, Bytes>>& orc_rt,
                                                int64_t slab_size_bytes) {
   ObjectPtr<ORCJITExecutionSessionObj> obj =
-      make_object<ORCJITExecutionSessionObj>(orc_rt_path, slab_size_bytes);
+      make_object<ORCJITExecutionSessionObj>(orc_rt, slab_size_bytes);
   data_ = std::move(obj);
 }
 
 ORCJITExecutionSession ORCJITExecutionSessionObj::GlobalDefault() {
   // Leaked, never-destroyed: the owned LLJIT and slab arena must not be torn
   // down during interpreter finalization, where teardown could call back into
-  // the host language. Resolve the ORC runtime path once, from the registered
-  // global tvm_ffi_orcjit.DefaultOrcRuntimePath (a Python hook that returns the
-  // bundled runtime); absent or empty means no platform.
-  static ORCJITExecutionSession* inst = [] {
-    std::string orc_rt_path;
-    if (auto fpath = Function::GetGlobal("tvm_ffi_orcjit.DefaultOrcRuntimePath")) {
-      orc_rt_path = (*fpath)().cast<String>().operator std::string();
-    }
-    return new ORCJITExecutionSession(orc_rt_path, 0);
-  }();
+  // the host language. Always "auto" (empty String) and not user-configurable
+  // (see the header) — the embedded runtime's .rodata outlives it trivially.
+  static ORCJITExecutionSession* inst =
+      new ORCJITExecutionSession(Variant<String, Bytes>(String("")), 0);
   return *inst;
 }
 

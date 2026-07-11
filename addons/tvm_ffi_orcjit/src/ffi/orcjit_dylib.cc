@@ -363,8 +363,8 @@ static void RegisterOrcJITFunctions() {
 
   refl::GlobalDef()
       .def("tvm_ffi_orcjit.ExecutionSession",
-           [](const std::string& orc_rt_path, int64_t slab_size_bytes) {
-             return ORCJITExecutionSession(orc_rt_path, slab_size_bytes);
+           [](const Optional<Variant<String, Bytes>>& orc_rt, int64_t slab_size_bytes) {
+             return ORCJITExecutionSession(orc_rt, slab_size_bytes);
            })
       .def("tvm_ffi_orcjit.GlobalDefaultSession",
            []() { return ORCJITExecutionSessionObj::GlobalDefault(); })

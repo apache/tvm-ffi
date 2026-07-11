@@ -31,6 +31,7 @@ limitations unrelated to this API.
 from __future__ import annotations
 
 import gc
+import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -49,6 +50,24 @@ def obj(name: str) -> str:
     if not path.exists():
         pytest.skip(f"{path.name} not found (not built)")
     return str(path)
+
+
+def _find_orc_rt_archive() -> str:
+    """Locate a liborc_rt archive under LLVM_PREFIX, or skip.
+
+    Used only by the custom-``orc_rt`` override tests. There is no bundled copy
+    next to the extension anymore (the runtime is embedded), so these tests fall
+    back to the archive shipped with the build's LLVM.
+    """
+    import os  # noqa: PLC0415
+
+    prefix = os.environ.get("LLVM_PREFIX")
+    if not prefix:
+        pytest.skip("LLVM_PREFIX not set; cannot locate a liborc_rt archive")
+    matches = sorted(Path(prefix).glob("lib/clang/*/lib/*/liborc_rt*.a"))
+    if not matches:
+        pytest.skip("no liborc_rt archive found under LLVM_PREFIX")
+    return str(matches[0])
 
 
 # ---------------------------------------------------------------------------
@@ -92,10 +111,44 @@ def test_default_session_concurrent_first_call() -> None:
     assert all(s is sessions[0] for s in sessions)
 
 
-def test_default_orc_runtime_path_hook_registered() -> None:
-    """The C++ singleton's ORC-path hook is registered and returns a string."""
-    path = tvm_ffi.get_global_func("tvm_ffi_orcjit.DefaultOrcRuntimePath")()
-    assert isinstance(path, str)  # bundled runtime path, or "" when none/disabled
+# ---------------------------------------------------------------------------
+# orc_rt override — custom runtime selectors on a user-created session.
+# (The "auto" default is covered via ExecutionSession() elsewhere.)
+# ---------------------------------------------------------------------------
+
+# A custom ORC runtime is only installed on Linux/ELF; elsewhere it is ignored.
+elf_only = pytest.mark.skipif(
+    sys.platform != "linux", reason="ORC platform (custom liborc_rt) is Linux/ELF only"
+)
+
+
+@elf_only
+def test_orc_rt_explicit_path() -> None:
+    """A custom on-disk liborc_rt archive is accepted (str and Path)."""
+    archive = _find_orc_rt_archive()
+    for spec in (archive, Path(archive)):
+        mod = ExecutionSession(orc_rt=spec).load_module(obj("c/test_funcs"))
+        assert mod.test_add(4, 5) == 9
+
+
+@elf_only
+def test_orc_rt_in_memory_bytes() -> None:
+    """A liborc_rt archive supplied as in-memory bytes is accepted."""
+    data = Path(_find_orc_rt_archive()).read_bytes()
+    mod = ExecutionSession(orc_rt=data).load_module(obj("c/test_funcs"))
+    assert mod.test_add(6, 7) == 13
+
+
+def test_orc_rt_none_no_platform() -> None:
+    """orc_rt=None runs with no ORC platform; C-ABI objects still load."""
+    mod = ExecutionSession(orc_rt=None).load_module(obj("c/test_funcs"))
+    assert mod.test_add(8, 9) == 17
+
+
+def test_orc_rt_rejects_bad_type() -> None:
+    """A non-str, non-bytes, non-None selector raises a clear TypeError."""
+    with pytest.raises(TypeError, match=r"orc_rt must be"):
+        ExecutionSession(orc_rt=12345)
 
 
 # ---------------------------------------------------------------------------

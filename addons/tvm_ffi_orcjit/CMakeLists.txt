@@ -170,10 +170,12 @@ if (CMAKE_SYSTEM_NAME MATCHES "Linux|Android|FreeBSD|NetBSD|OpenBSD" AND CMAKE_C
   target_link_options(tvm_ffi_orcjit PRIVATE "-Wl,--exclude-libs=${_exclude_libs_arg}")
 endif ()
 
-# ---- Find and bundle liborc_rt ----
-# Platform notes:
+# ---- Find and embed liborc_rt (Linux/ELF only) ----
+# The archive bytes are baked into the .so's .rodata (see src/ffi/orc_rt_embed.S.in) and handed to
+# ExecutorNativePlatform as a zero-copy MemoryBuffer at runtime, so the wheel ships one artifact
+# with no on-disk path lookup. Platform notes:
 #
-# * Linux: liborc_rt is used for ExecutorNativePlatform → ELFNixPlatform.
+# * Linux: liborc_rt drives ExecutorNativePlatform → ELFNixPlatform.
 # * macOS: MachOPlatform is skipped to sidestep the compact-unwind delta bug (see
 #   src/ffi/orcjit_session.cc); liborc_rt is unused.
 # * Windows: COFFPlatform is not hooked up; liborc_rt is unused.
@@ -193,9 +195,18 @@ if (NOT APPLE AND NOT WIN32)
 endif ()
 
 if (ORC_RT_PATH)
-  message(STATUS "Found liborc_rt: ${ORC_RT_PATH}")
-  file(COPY "${ORC_RT_PATH}" DESTINATION "${CMAKE_BINARY_DIR}")
-  install(FILES "${ORC_RT_PATH}" DESTINATION lib)
+  message(STATUS "Embedding liborc_rt: ${ORC_RT_PATH}")
+  enable_language(ASM)
+  configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ffi/orc_rt_embed.S.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/orc_rt_embed.S" @ONLY
+  )
+  target_sources(tvm_ffi_orcjit PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/orc_rt_embed.S")
+  target_compile_definitions(tvm_ffi_orcjit PRIVATE TVM_FFI_ORCJIT_EMBED_ORC_RT=1)
+  # Re-run .incbin if the archive itself changes (path is stable across builds).
+  set_property(
+    SOURCE "${CMAKE_CURRENT_BINARY_DIR}/orc_rt_embed.S" PROPERTY OBJECT_DEPENDS "${ORC_RT_PATH}"
+  )
 endif ()
 
 # ---- Install ----
