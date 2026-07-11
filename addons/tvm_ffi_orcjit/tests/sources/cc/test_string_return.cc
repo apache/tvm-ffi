@@ -93,18 +93,22 @@ TVM_FFI_DLL_EXPORT int __tvm_ffi_test_concatenate_strings(void* self, const TVMF
       data1 = args[1].v_bytes;
       size1 = args[1].small_str_len;
     } else {
-        if (args[1].v_ptr == nullptr) {
-          TVMFFIErrorSetRaisedFromCStr("RuntimeError", "Failed to extract string data");
-          return -1;
-        }
-        TVMFFIByteArray* bytes = TVMFFIBytesGetByteArrayPtr(args[1].v_ptr);
-        data1 = bytes->data;
-        size1 = bytes->size;
+      if (args[1].v_ptr == nullptr) {
+        TVMFFIErrorSetRaisedFromCStr("RuntimeError", "Failed to extract string data");
+        return -1;
+      }
+      TVMFFIByteArray* bytes = TVMFFIBytesGetByteArrayPtr(args[1].v_ptr);
+      data1 = bytes->data;
+      size1 = bytes->size;
     }
 
-    std::string str0(data0, size0);
-    std::string str1(data1, size1);
-    std::string concatenated = str0 + str1;
+    std::string concatenated;
+    if (size0 > 0) {
+      concatenated.append(data0, size0);
+    }
+    if (size1 > 0) {
+      concatenated.append(data1, size1);
+    }
 
     TVMFFIByteArray output;
     output.data = concatenated.c_str();

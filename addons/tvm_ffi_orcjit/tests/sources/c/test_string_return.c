@@ -110,8 +110,12 @@ TVM_FFI_DLL_EXPORT int __tvm_ffi_test_concatenate_strings(void* self, const TVMF
     return -1;
   }
 
-  memcpy(buffer, data0, size0);
-  memcpy(buffer + size0, data1, size1);
+  if (size0 > 0) {
+    memcpy(buffer, data0, size0);
+  }
+  if (size1 > 0) {
+    memcpy(buffer + size0, data1, size1);
+  }
 
   /* Create result string (TVMFFIStringFromByteArray will select SmallStr or Str) */
   TVMFFIByteArray output = {.data = buffer, .size = total_len};

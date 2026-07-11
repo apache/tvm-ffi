@@ -412,7 +412,7 @@ def test_jit_returns_empty_string(v: Variant) -> None:
 def test_jit_concatenates_strings(v: Variant) -> None:
     """JIT function takes two strings and returns concatenated result."""
     mod = load(v.string_return_obj())
-    concat_fn = mod.get_function(v.fn("test_concatenate_strings"))()
+    concat_fn = mod.get_function(v.fn("test_concatenate_strings"))
 
     # Test basic concatenation
     result = concat_fn("Hello", " World")
@@ -430,7 +430,7 @@ def test_jit_concatenates_strings(v: Variant) -> None:
 def test_jit_string_length(v: Variant) -> None:
     """JIT function returns the length of a string."""
     mod = load(v.string_return_obj())
-    length_fn = mod.get_function(v.fn("test_string_length"))()
+    length_fn = mod.get_function(v.fn("test_string_length"))
 
     assert length_fn("") == 0
     assert length_fn("Hello") == 5
