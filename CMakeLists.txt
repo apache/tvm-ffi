@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-cmake_minimum_required(VERSION 3.18)
+cmake_minimum_required(VERSION 3.26)
 
 project(tvm_ffi LANGUAGES CXX C)
 
@@ -239,9 +239,35 @@ if (TVM_FFI_BUILD_PYTHON_MODULE)
 
   find_package(
     Python
-    COMPONENTS Interpreter Development.Module Development.SABIModule
+    COMPONENTS Interpreter
     REQUIRED
   )
+
+  # Run a Python script to check for free-threaded build
+  execute_process(
+    COMMAND ${Python_EXECUTABLE} -c
+            "import sysconfig; print(sysconfig.get_config_var('Py_GIL_DISABLED') == 1)"
+    OUTPUT_VARIABLE PYTHON_IS_FREE_THREADED
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+  )
+  if (PYTHON_IS_FREE_THREADED)
+    message(STATUS "Free-threaded Python detected.")
+  endif ()
+
+  set(_tvm_ffi_python_version ${Python_VERSION})
+  if (Python_VERSION VERSION_GREATER_EQUAL "3.12" AND NOT PYTHON_IS_FREE_THREADED)
+    find_package(
+      Python ${_tvm_ffi_python_version} EXACT
+      COMPONENTS Interpreter Development.Module Development.SABIModule
+      REQUIRED
+    )
+  else ()
+    find_package(
+      Python ${_tvm_ffi_python_version} EXACT
+      COMPONENTS Interpreter Development.Module
+      REQUIRED
+    )
+  endif ()
   set(_core_cpp ${CMAKE_CURRENT_BINARY_DIR}/core.cpp)
   set(_core_pyx ${CMAKE_CURRENT_SOURCE_DIR}/python/tvm_ffi/cython/core.pyx)
   set(_cython_sources
@@ -258,17 +284,6 @@ if (TVM_FFI_BUILD_PYTHON_MODULE)
       ${CMAKE_CURRENT_SOURCE_DIR}/python/tvm_ffi/cython/object.pxi
       ${CMAKE_CURRENT_SOURCE_DIR}/python/tvm_ffi/cython/string.pxi
   )
-  # Run a Python script to check for free-threaded build
-  execute_process(
-    COMMAND ${Python_EXECUTABLE} -c
-            "import sysconfig; print(sysconfig.get_config_var('Py_GIL_DISABLED') == 1)"
-    OUTPUT_VARIABLE PYTHON_IS_FREE_THREADED
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-  )
-  if (PYTHON_IS_FREE_THREADED)
-    message(STATUS "Free-threaded Python detected.")
-  endif ()
-
   add_custom_command(
     OUTPUT ${_core_cpp}
     COMMAND ${Python_EXECUTABLE} -m cython --cplus ${_core_pyx} -o ${_core_cpp} --module-name

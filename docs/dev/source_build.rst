@@ -34,7 +34,7 @@ This guide covers two common workflows:
      - macOS: Apple Clang (via Xcode Command Line Tools)
      - Windows: MSVC (Visual Studio 2019 or 2022, x64)
 
-   - Build tools: CMake 3.18+; Ninja
+   - Build tools: CMake 3.26+; Ninja
 
 Build the Python Package
 ------------------------

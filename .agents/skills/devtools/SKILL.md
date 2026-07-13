@@ -12,7 +12,7 @@ Condensed reference from `docs/dev/`. Use this when working on the TVM-FFI codeb
 
 - **Python**: 3.9+ (managed via `uv`; default virtualenv at `.venv`)
 - **Compiler**: C++17-capable toolchain (GCC/Clang on Linux, Apple Clang on macOS, MSVC on Windows)
-- **Build tools**: CMake 3.18+, Ninja
+- **Build tools**: CMake 3.26+, Ninja
 - **Source**: Always clone with `--recursive`, or run `git submodule update --init --recursive`
 
 All Python-related commands below use [`uv`](https://docs.astral.sh/uv/). The default virtual environment is `.venv` in the repo root.
