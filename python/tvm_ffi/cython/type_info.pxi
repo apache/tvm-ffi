@@ -691,24 +691,57 @@ class TypeField:
         assert self.setter is not None
         assert self.getter is not None
 
+    def _is_payload_enum_field(self) -> bool:
+        """Return True when this field targets a registered IntEnum/StrEnum class."""
+        if self.ty is None or self.ty.origin_type_index < kTVMFFIStaticObjectBegin:
+            return False
+        try:
+            cls = TYPE_INDEX_TO_CLS[self.ty.origin_type_index]
+        except (IndexError, NameError):
+            return False
+        if cls is None:
+            return False
+        for base in cls.__mro__:
+            if (
+                getattr(base, "__module__", None) == "tvm_ffi.dataclasses.enum"
+                and getattr(base, "__name__", None) in ("IntEnum", "StrEnum")
+            ):
+                return True
+        return False
+
+    def normalize_value(self, value):
+        """Normalize raw payloads for IntEnum/StrEnum fields; pass others through."""
+        if not self._is_payload_enum_field():
+            return value
+        return _to_py_class_value(self.ty.convert(value))
+
     def as_property(self, object cls):
         """Create an :class:`FFIProperty` descriptor for this field on ``cls``."""
         cdef str name = self.name
         cdef FieldGetter fget = self.getter
         cdef FieldSetter fset = self.setter
+        cdef object field = self
+        cdef object property_fset = fset
         cdef object ret
+        if self._is_payload_enum_field():
+            def normalized_fset(obj, value):
+                fset(obj, field.normalize_value(value))
+            property_fset = normalized_fset
         fget.__name__ = fset.__name__ = name
         fget.__module__ = fset.__module__ = cls.__module__
         fget.__qualname__ = fset.__qualname__ = f"{cls.__qualname__}.{name}"
+        property_fset.__name__ = name
+        property_fset.__module__ = cls.__module__
+        property_fset.__qualname__ = f"{cls.__qualname__}.{name}"
         ret = FFIProperty(
             fget=fget,
-            fset=fset,
+            fset=property_fset,
             frozen=self.frozen,
         )
         if self.doc:
             ret.__doc__ = self.doc
             fget.__doc__ = self.doc
-            fset.__doc__ = self.doc
+            property_fset.__doc__ = self.doc
         return ret
 
 

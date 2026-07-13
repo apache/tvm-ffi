@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Mapping, MutableMapping, MutableSequence, Sequence
     from tvm_ffi import Device, Object, Tensor, dtype
+    from tvm_ffi.dataclasses import Enum
     from tvm_ffi.testing import TestIntPair
     from typing import Any, Callable
 # isort: on
@@ -39,6 +40,7 @@ if TYPE_CHECKING:
     def add_one(_0: int, /) -> int: ...
     def apply(*args: Any) -> Any: ...
     def echo(*args: Any) -> Any: ...
+    def enum_variant_get(_0: str, /) -> Enum: ...
     def get_add_one_c_symbol() -> int: ...
     def get_mlir_add_one_c_symbol() -> int: ...
     def make_array_with_mixed(_0: Tensor, _1: int, /) -> Sequence[Any]: ...
@@ -101,6 +103,7 @@ __all__ = [
     "add_one",
     "apply",
     "echo",
+    "enum_variant_get",
     "get_add_one_c_symbol",
     "get_mlir_add_one_c_symbol",
     "make_array_with_mixed",

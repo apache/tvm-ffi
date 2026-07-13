@@ -473,6 +473,31 @@ def test_generate_global_funcs_updates_block() -> None:
     ]
 
 
+def test_generate_global_funcs_imports_enum_from_dataclasses() -> None:
+    code = CodeBlock(
+        kind="global",
+        param=("demo", "mockpkg"),
+        lineno_start=1,
+        lineno_end=2,
+        lines=[f"{C.PYTHON_SYNTAX.begin} global/demo@mockpkg", C.PYTHON_SYNTAX.end],
+    )
+    funcs = [
+        FuncInfo(
+            schema=NamedTypeSchema(
+                "demo.get_enum",
+                TypeSchema("Callable", (TypeSchema("ffi.Enum"),)),
+            ),
+            is_member=False,
+        )
+    ]
+    imports: list[ImportItem] = []
+
+    generate_python_global_funcs(code, funcs, _default_ty_map(), imports, Options())
+
+    assert ImportItem("tvm_ffi.dataclasses.Enum", type_checking_only=True) in imports
+    assert "    def get_enum() -> Enum: ..." in code.lines
+
+
 def test_generate_global_funcs_noop_on_empty_list() -> None:
     code = CodeBlock(
         kind="global",

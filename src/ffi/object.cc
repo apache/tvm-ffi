@@ -637,13 +637,27 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   // Skipped: TypeIndex::kTVMFFIOpaquePyObject
   refl::TypeAttrDef<ffi::ListObj>().def_convert<ffi::List<ffi::Any>>();
   refl::TypeAttrDef<ffi::DictObj>().def_convert<ffi::Dict<ffi::Any, ffi::Any>>();
+  refl::ObjectDef<ffi::EnumStateObj>()
+      .def(refl::init<>())
+      .def_ro("entries", &ffi::EnumStateObj::entries, "Enum singletons in registration order.",
+              refl::init(false))
+      .def_ro("indexes", &ffi::EnumStateObj::indexes,
+              "Canonical integer and string indices to enum singletons.", refl::init(false))
+      .def_ro("attrs", &ffi::EnumStateObj::attrs,
+              "Extensible-attribute columns keyed by enum singleton.", refl::init(false));
   refl::ObjectDef<ffi::EnumObj>(refl::init(false))
-      .def_ro("_value", &ffi::EnumObj::_value, "Ordinal assigned at registration.",
+      .def_ro("_int_index", &ffi::EnumObj::_int_index, "Canonical integer index.",
               refl::AttachFieldFlag::SEqHashIgnore())
-      .def_ro("_name", &ffi::EnumObj::_name, "Instance name.");
-  refl::EnsureTypeAttrColumn(refl::type_attr::kEnumEntries);
-  refl::EnsureTypeAttrColumn(refl::type_attr::kEnumAttrs);
-  refl::EnsureTypeAttrColumn(refl::type_attr::kEnumValueEntries);
+      .def_ro("_str_index", &ffi::EnumObj::_str_index, "Canonical string index.");
+  refl::ObjectDef<ffi::IntEnumObj>(refl::init(false))
+      .def_ro("value", &ffi::EnumObj::_int_index, "Canonical integer index.", refl::init(false),
+              refl::AttachFieldFlag::SEqHashIgnore())
+      .def_convert<ffi::IntEnum>();
+  refl::ObjectDef<ffi::StrEnumObj>(refl::init(false))
+      .def_ro("value", &ffi::EnumObj::_str_index, "Canonical string index.", refl::init(false),
+              refl::AttachFieldFlag::SEqHashIgnore())
+      .def_convert<ffi::StrEnum>();
+  refl::EnsureTypeAttrColumn(refl::type_attr::kEnumState);
   refl::GlobalDef()
       .def_method("ffi.GetRegisteredTypeKeys",
                   []() -> ffi::Array<ffi::String> {
