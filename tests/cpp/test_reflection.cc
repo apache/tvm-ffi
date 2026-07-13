@@ -67,6 +67,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
 
   TIntObj::RegisterReflection();
   TFloatObj::RegisterReflection();
+  TCompositeNumberObj::RegisterReflection();
   TPrimExprObj::RegisterReflection();
   TVarObj::RegisterReflection();
   TPairObj::RegisterReflection();
@@ -179,6 +180,59 @@ TEST(Reflection, ObjectPtrMethod) {
   Any null_result = identity(ObjectPtr<TNumberObj>());
   EXPECT_EQ(null_result, nullptr);
   EXPECT_THROW(identity(String("not a number")), Error);
+}
+
+TEST(Reflection, RichObjectPtrFieldAndMethod) {
+  ObjectPtr<TNumberObj> primary = make_object<TIntObj>(31);
+  ObjectPtr<TNumberObj> secondary = make_object<TFloatObj>(4.5);
+  ObjectPtr<TCompositeNumberObj> composite =
+      MakeCompositeNumber("reflected", 7, primary, secondary);
+  ObjectPtr<TNumberObj> composite_base = composite;
+  TObjectPtrHolder holder(std::move(composite_base));
+
+  reflection::FieldGetter getter("test.ObjectPtrHolder", "value");
+  ObjectPtr<TCompositeNumberObj> reflected = getter(holder).cast<ObjectPtr<TCompositeNumberObj>>();
+  EXPECT_EQ(reflected.get(), composite.get());
+  EXPECT_EQ(reflected->name, "reflected");
+  EXPECT_EQ(reflected->revision, 7);
+  EXPECT_EQ(reflected->primary, primary);
+  EXPECT_EQ(reflected->children.size(), 3U);
+  EXPECT_EQ(reflected->children[0], primary);
+  EXPECT_EQ(reflected->children[1], secondary);
+  EXPECT_EQ(reflected->children[2], primary);
+  EXPECT_EQ(reflected->named_children["primary"], primary);
+  ASSERT_TRUE(reflected->fallback.has_value());
+  EXPECT_EQ(reflected->fallback.value(), primary);
+
+  Function identity = reflection::GetMethod("test.ObjectPtrHolder", "identity");
+  ObjectPtr<TCompositeNumberObj> returned =
+      identity(composite).cast<ObjectPtr<TCompositeNumberObj>>();
+  EXPECT_EQ(returned.get(), composite.get());
+  EXPECT_EQ(returned->named_children["secondary"], secondary);
+}
+
+TEST(Reflection, ObjectPtrContainerShorthandFieldInfo) {
+  auto type_schema = [](const char* field_name) {
+    const TypeInfo* type_info = TVMFFIGetTypeInfo(TCompositeNumberObj::RuntimeTypeIndex());
+    const TVMFFIFieldInfo* field_info = nullptr;
+    for (int32_t i = 0; i < type_info->num_fields; ++i) {
+      std::string_view name(type_info->fields[i].name.data, type_info->fields[i].name.size);
+      if (name == field_name) {
+        field_info = &type_info->fields[i];
+        break;
+      }
+    }
+    if (field_info == nullptr) {
+      TVM_FFI_THROW(RuntimeError) << "Cannot find field " << field_name;
+    }
+    Map<String, Any> metadata = json::Parse(String(field_info->metadata)).cast<Map<String, Any>>();
+    return std::string(metadata["type_schema"].cast<String>());
+  };
+
+  EXPECT_EQ(type_schema("children"), TypeTraits<Array<ObjectPtr<TNumberObj>>>::TypeSchema());
+  EXPECT_EQ(type_schema("named_children"),
+            (TypeTraits<Map<String, ObjectPtr<TNumberObj>>>::TypeSchema()));
+  EXPECT_EQ(type_schema("fallback"), TypeTraits<Optional<ObjectPtr<TNumberObj>>>::TypeSchema());
 }
 
 TEST(Reflection, FieldInfo) {

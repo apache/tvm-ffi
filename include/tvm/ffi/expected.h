@@ -98,14 +98,19 @@ struct ExpectedUnsafe;
 template <typename T>
 class Expected {
  public:
-  static_assert(!std::is_same_v<T, Error>, "Expected<Error> is not allowed. Use Error directly.");
+  static_assert(!details::is_qualified_object_v<T>,
+                "Expected<TObject> requires an unqualified Object subclass");
+  /*! \brief The normalized success type stored by Expected. */
+  using value_type = details::object_ptr_type_t<T>;
+  static_assert(!std::is_same_v<value_type, Error>,
+                "Expected<Error> is not allowed. Use Error directly.");
 
   /*!
    * \brief Implicit constructor from a success value.
    * \param value The success value.
    */
   // NOLINTNEXTLINE(google-explicit-constructor,runtime/explicit)
-  Expected(T value) : data_(Any(std::move(value))) {}
+  Expected(value_type value) : data_(Any(std::move(value))) {}
 
   /*!
    * \brief Implicit constructor from an error.
@@ -118,6 +123,42 @@ class Expected {
   template <typename E, typename = std::enable_if_t<std::is_base_of_v<Error, std::remove_cv_t<E>>>>
   // NOLINTNEXTLINE(google-explicit-constructor,runtime/explicit)
   Expected(Unexpected<E> unexpected) : data_(Any(std::move(unexpected).error())) {}
+
+  /*! \brief Convert between equivalent shorthand and explicit ObjectPtr success types. */
+  template <typename U,
+            std::enable_if_t<!std::is_same_v<T, U> &&
+                                 std::is_same_v<value_type, typename Expected<U>::value_type>,
+                             int> = 0>
+  // NOLINTNEXTLINE(google-explicit-constructor,runtime/explicit)
+  Expected(const Expected<U>& other)
+      : data_(other.is_err() ? Any(other.error()) : Any(other.value())) {}
+
+  /*! \brief Move between equivalent shorthand and explicit ObjectPtr success types. */
+  template <typename U,
+            std::enable_if_t<!std::is_same_v<T, U> &&
+                                 std::is_same_v<value_type, typename Expected<U>::value_type>,
+                             int> = 0>
+  // NOLINTNEXTLINE(google-explicit-constructor,runtime/explicit)
+  Expected(Expected<U>&& other)
+      : data_(other.is_err() ? Any(std::move(other).error()) : Any(std::move(other).value())) {}
+
+  template <typename U,
+            std::enable_if_t<!std::is_same_v<T, U> &&
+                                 std::is_same_v<value_type, typename Expected<U>::value_type>,
+                             int> = 0>
+  TVM_FFI_INLINE Expected& operator=(const Expected<U>& other) {
+    data_ = other.is_err() ? Any(other.error()) : Any(other.value());
+    return *this;
+  }
+
+  template <typename U,
+            std::enable_if_t<!std::is_same_v<T, U> &&
+                                 std::is_same_v<value_type, typename Expected<U>::value_type>,
+                             int> = 0>
+  TVM_FFI_INLINE Expected& operator=(Expected<U>&& other) {
+    data_ = other.is_err() ? Any(std::move(other).error()) : Any(std::move(other).value());
+    return *this;
+  }
 
   /*! \brief Return the raw stored type index. */
   TVM_FFI_INLINE int32_t type_index() const noexcept { return data_.type_index(); }
@@ -136,17 +177,17 @@ class Expected {
   TVM_FFI_INLINE bool has_value() const noexcept { return is_ok(); }
 
   /*! \brief Returns the success value, or throws the contained error. */
-  TVM_FFI_INLINE T value() const& {
+  TVM_FFI_INLINE value_type value() const& {
     if (TVM_FFI_PREDICT_TRUE(is_ok())) {
-      return details::AnyUnsafe::CopyFromAnyViewAfterCheck<T>(data_);
+      return details::AnyUnsafe::CopyFromAnyViewAfterCheck<value_type>(data_);
     }
     throw details::AnyUnsafe::CopyFromAnyViewAfterCheck<Error>(data_);
   }
 
   /*! \brief Returns the success value (moved out), or throws the contained error. */
-  TVM_FFI_INLINE T value() && {
+  TVM_FFI_INLINE value_type value() && {
     if (TVM_FFI_PREDICT_TRUE(is_ok())) {
-      return details::AnyUnsafe::MoveFromAnyAfterCheck<T>(std::move(data_));
+      return details::AnyUnsafe::MoveFromAnyAfterCheck<value_type>(std::move(data_));
     }
     throw details::AnyUnsafe::MoveFromAnyAfterCheck<Error>(std::move(data_));
   }
@@ -174,24 +215,24 @@ class Expected {
   /*!
    * \brief Returns the success value, or \p default_value if the Expected holds an error.
    */
-  template <typename U = std::remove_cv_t<T>>
-  TVM_FFI_INLINE T value_or(U&& default_value) const& {
+  template <typename U = std::remove_cv_t<value_type>>
+  TVM_FFI_INLINE value_type value_or(U&& default_value) const& {
     if (TVM_FFI_PREDICT_TRUE(is_ok())) {
-      return details::AnyUnsafe::CopyFromAnyViewAfterCheck<T>(data_);
+      return details::AnyUnsafe::CopyFromAnyViewAfterCheck<value_type>(data_);
     }
-    return T(std::forward<U>(default_value));
+    return value_type(std::forward<U>(default_value));
   }
 
   /*!
    * \brief Returns the success value (moved out), or \p default_value if the Expected holds an
    * error.
    */
-  template <typename U = std::remove_cv_t<T>>
-  TVM_FFI_INLINE T value_or(U&& default_value) && {
+  template <typename U = std::remove_cv_t<value_type>>
+  TVM_FFI_INLINE value_type value_or(U&& default_value) && {
     if (TVM_FFI_PREDICT_TRUE(is_ok())) {
-      return details::AnyUnsafe::MoveFromAnyAfterCheck<T>(std::move(data_));
+      return details::AnyUnsafe::MoveFromAnyAfterCheck<value_type>(std::move(data_));
     }
-    return T(std::forward<U>(default_value));
+    return value_type(std::forward<U>(default_value));
   }
 
  private:
@@ -273,11 +314,13 @@ inline constexpr bool use_default_type_traits_v<Expected<T>> = false;
 
 template <typename T>
 struct TypeTraits<Expected<T>> : public TypeTraitsBase {
+  using value_type = typename Expected<T>::value_type;
+
   TVM_FFI_INLINE static void CopyToAnyView(const Expected<T>& src, TVMFFIAny* result) {
     if (src.is_err()) {
       TypeTraits<Error>::CopyToAnyView(src.error(), result);
     } else {
-      TypeTraits<T>::CopyToAnyView(src.value(), result);
+      TypeTraits<value_type>::CopyToAnyView(src.value(), result);
     }
   }
 
@@ -285,30 +328,30 @@ struct TypeTraits<Expected<T>> : public TypeTraitsBase {
     if (src.is_err()) {
       TypeTraits<Error>::MoveToAny(std::move(src).error(), result);
     } else {
-      TypeTraits<T>::MoveToAny(std::move(src).value(), result);
+      TypeTraits<value_type>::MoveToAny(std::move(src).value(), result);
     }
   }
 
   TVM_FFI_INLINE static bool CheckAnyStrict(const TVMFFIAny* src) {
-    return TypeTraits<T>::CheckAnyStrict(src) || TypeTraits<Error>::CheckAnyStrict(src);
+    return TypeTraits<value_type>::CheckAnyStrict(src) || TypeTraits<Error>::CheckAnyStrict(src);
   }
 
   TVM_FFI_INLINE static Expected<T> CopyFromAnyViewAfterCheck(const TVMFFIAny* src) {
-    if (TypeTraits<T>::CheckAnyStrict(src)) {
-      return TypeTraits<T>::CopyFromAnyViewAfterCheck(src);
+    if (TypeTraits<value_type>::CheckAnyStrict(src)) {
+      return TypeTraits<value_type>::CopyFromAnyViewAfterCheck(src);
     }
     return TypeTraits<Error>::CopyFromAnyViewAfterCheck(src);
   }
 
   TVM_FFI_INLINE static Expected<T> MoveFromAnyAfterCheck(TVMFFIAny* src) {
-    if (TypeTraits<T>::CheckAnyStrict(src)) {
-      return TypeTraits<T>::MoveFromAnyAfterCheck(src);
+    if (TypeTraits<value_type>::CheckAnyStrict(src)) {
+      return TypeTraits<value_type>::MoveFromAnyAfterCheck(src);
     }
     return TypeTraits<Error>::MoveFromAnyAfterCheck(src);
   }
 
   TVM_FFI_INLINE static std::optional<Expected<T>> TryCastFromAnyView(const TVMFFIAny* src) {
-    if (auto opt = TypeTraits<T>::TryCastFromAnyView(src)) {
+    if (auto opt = TypeTraits<value_type>::TryCastFromAnyView(src)) {
       return Expected<T>(*std::move(opt));
     }
     if (auto opt_err = TypeTraits<Error>::TryCastFromAnyView(src)) {
@@ -318,14 +361,21 @@ struct TypeTraits<Expected<T>> : public TypeTraitsBase {
   }
 
   TVM_FFI_INLINE static std::string TypeStr() {
-    return "Expected<" + TypeTraits<T>::TypeStr() + ">";
+    return "Expected<" + TypeTraits<value_type>::TypeStr() + ">";
   }
 
   TVM_FFI_INLINE static std::string TypeSchema() {
-    return R"({"type":"Expected","args":[)" + details::TypeSchema<T>::v() +
+    return R"({"type":"Expected","args":[)" + details::TypeSchema<value_type>::v() +
            R"(,{"type":"ffi.Error"}]})";
   }
 };
+
+/// \cond Doxygen_Suppress
+/*! \brief Whether target Expected storage subsumes source Expected storage. */
+template <typename T, typename U>
+inline constexpr bool type_subsumes_v<Expected<T>, Expected<U>> =
+    type_subsumes_v<typename Expected<T>::value_type, typename Expected<U>::value_type>;
+/// \endcond
 
 }  // namespace ffi
 }  // namespace tvm

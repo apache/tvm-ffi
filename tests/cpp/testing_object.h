@@ -150,6 +150,49 @@ inline void TFloatObj::RegisterReflection() {
       .def(refl::type_attr::kAnyEqual, &TFloat::CustomAnyEqual);
 }
 
+class TCompositeNumberObj : public TNumberObj {
+ public:
+  String name;
+  int64_t revision{0};
+  ObjectPtr<TNumberObj> primary;
+  Array<TNumberObj> children;
+  Map<String, TNumberObj> named_children;
+  Optional<TNumberObj> fallback;
+
+  TCompositeNumberObj(String name, int64_t revision, ObjectPtr<TNumberObj> primary,
+                      Array<TNumberObj> children, Map<String, TNumberObj> named_children,
+                      Optional<TNumberObj> fallback)
+      : name(std::move(name)),
+        revision(revision),
+        primary(std::move(primary)),
+        children(std::move(children)),
+        named_children(std::move(named_children)),
+        fallback(std::move(fallback)) {}
+  explicit TCompositeNumberObj(UnsafeInit) {}
+
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<TCompositeNumberObj>()
+        .def_ro("name", &TCompositeNumberObj::name)
+        .def_ro("revision", &TCompositeNumberObj::revision)
+        .def_ro("primary", &TCompositeNumberObj::primary)
+        .def_ro("children", &TCompositeNumberObj::children)
+        .def_ro("named_children", &TCompositeNumberObj::named_children)
+        .def_ro("fallback", &TCompositeNumberObj::fallback);
+  }
+
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("test.CompositeNumber", TCompositeNumberObj, TNumberObj);
+};
+
+inline ObjectPtr<TCompositeNumberObj> MakeCompositeNumber(String name, int64_t revision,
+                                                          ObjectPtr<TNumberObj> primary,
+                                                          ObjectPtr<TNumberObj> secondary) {
+  return make_object<TCompositeNumberObj>(
+      std::move(name), revision, primary, Array<TNumberObj>{primary, secondary, primary},
+      Map<String, TNumberObj>{{"primary", primary}, {"secondary", secondary}},
+      Optional<TNumberObj>(primary));
+}
+
 class TPrimExprObj : public Object {
  public:
   std::string dtype;

@@ -143,7 +143,7 @@ template <typename T, typename = typename std::enable_if_t<details::storage_enab
 class List : public ObjectRef {
  public:
   /*! \brief The value type of the list */
-  using value_type = T;
+  using value_type = details::object_ptr_type_t<T>;
 
   /*! \brief Construct a List with UnsafeInit */
   explicit List(UnsafeInit tag) : ObjectRef(tag) {}
@@ -159,7 +159,7 @@ class List : public ObjectRef {
    * \brief Constructor from another list
    * \tparam U The value type of the other list
    */
-  template <typename U, typename = std::enable_if_t<type_subsumes_v<T, U>>>
+  template <typename U, typename = std::enable_if_t<details::container_type_subsumes_v<T, U>>>
   List(List<U>&& other)  // NOLINT(google-explicit-constructor)
       : ObjectRef(std::move(other.data_)) {}
 
@@ -167,7 +167,7 @@ class List : public ObjectRef {
    * \brief Constructor from another list
    * \tparam U The value type of the other list
    */
-  template <typename U, typename = std::enable_if_t<type_subsumes_v<T, U>>>
+  template <typename U, typename = std::enable_if_t<details::container_type_subsumes_v<T, U>>>
   List(const List<U>& other)  // NOLINT(google-explicit-constructor)
       : ObjectRef(other.data_) {}
 
@@ -194,7 +194,7 @@ class List : public ObjectRef {
    * \param other The other list.
    * \tparam U The value type of the other list.
    */
-  template <typename U, typename = std::enable_if_t<type_subsumes_v<T, U>>>
+  template <typename U, typename = std::enable_if_t<details::container_type_subsumes_v<T, U>>>
   TVM_FFI_INLINE List<T>& operator=(List<U>&& other) {
     data_ = std::move(other.data_);
     return *this;
@@ -205,7 +205,7 @@ class List : public ObjectRef {
    * \param other The other list.
    * \tparam U The value type of the other list.
    */
-  template <typename U, typename = std::enable_if_t<type_subsumes_v<T, U>>>
+  template <typename U, typename = std::enable_if_t<details::container_type_subsumes_v<T, U>>>
   TVM_FFI_INLINE List<T>& operator=(const List<U>& other) {
     data_ = other.data_;
     return *this;
@@ -222,18 +222,18 @@ class List : public ObjectRef {
    */
   template <typename IterType>
   List(IterType first, IterType last) {  // NOLINT(performance-unnecessary-value-param)
-    static_assert(is_valid_iterator_v<T, IterType>,
+    static_assert(is_valid_iterator_v<value_type, IterType>,
                   "IterType cannot be inserted into a tvm::List<T>");
     Assign(first, last);
   }
 
   /*! \brief constructor from initializer list */
-  List(std::initializer_list<T> init) {  // NOLINT(*)
+  List(std::initializer_list<value_type> init) {  // NOLINT(*)
     Assign(init.begin(), init.end());
   }
 
   /*! \brief constructor from vector */
-  List(const std::vector<T>& init) {  // NOLINT(*)
+  List(const std::vector<value_type>& init) {  // NOLINT(*)
     Assign(init.begin(), init.end());
   }
 
@@ -242,14 +242,16 @@ class List : public ObjectRef {
    * \param n The size of the container
    * \param val The init value
    */
-  explicit List(const size_t n, const T& val) { data_ = ListObj::CreateRepeated(n, val); }
+  explicit List(const size_t n, const value_type& val) { data_ = ListObj::CreateRepeated(n, val); }
 
  public:
   // iterators
   /// \cond Doxygen_Suppress
   struct ValueConverter {
-    using ResultType = T;
-    static T convert(const Any& n) { return details::AnyUnsafe::CopyFromAnyViewAfterCheck<T>(n); }
+    using ResultType = value_type;
+    static value_type convert(const Any& n) {
+      return details::AnyUnsafe::CopyFromAnyViewAfterCheck<value_type>(n);
+    }
   };
   /// \endcond
 
@@ -274,12 +276,12 @@ class List : public ObjectRef {
    * \param i The index
    * \return the i-th element.
    */
-  T operator[](int64_t i) const {
+  value_type operator[](int64_t i) const {
     ListObj* p = GetListObj();
     if (p == nullptr) {
       TVM_FFI_THROW(IndexError) << "cannot index a null list";
     }
-    return details::AnyUnsafe::CopyFromAnyViewAfterCheck<T>(p->at(i));
+    return details::AnyUnsafe::CopyFromAnyViewAfterCheck<value_type>(p->at(i));
   }
 
   /*! \return The size of the list */
@@ -298,21 +300,21 @@ class List : public ObjectRef {
   bool empty() const { return size() == 0; }
 
   /*! \return The first element of the list */
-  T front() const {
+  value_type front() const {
     ListObj* p = GetListObj();
     if (p == nullptr) {
       TVM_FFI_THROW(IndexError) << "cannot index a null list";
     }
-    return details::AnyUnsafe::CopyFromAnyViewAfterCheck<T>(p->front());
+    return details::AnyUnsafe::CopyFromAnyViewAfterCheck<value_type>(p->front());
   }
 
   /*! \return The last element of the list */
-  T back() const {
+  value_type back() const {
     ListObj* p = GetListObj();
     if (p == nullptr) {
       TVM_FFI_THROW(IndexError) << "cannot index a null list";
     }
-    return details::AnyUnsafe::CopyFromAnyViewAfterCheck<T>(p->back());
+    return details::AnyUnsafe::CopyFromAnyViewAfterCheck<value_type>(p->back());
   }
 
  public:
@@ -321,7 +323,7 @@ class List : public ObjectRef {
    * \brief push a new item to the back of the list
    * \param item The item to be pushed.
    */
-  void push_back(const T& item) {
+  void push_back(const value_type& item) {
     ListObj* p = EnsureCapacity(1);
     p->EmplaceInit(p->TVMFFISeqCell::size++, item);
   }
@@ -341,7 +343,7 @@ class List : public ObjectRef {
    * \param position An iterator pointing to the insertion point
    * \param val The element to insert
    */
-  void insert(iterator position, const T& val) {
+  void insert(iterator position, const value_type& val) {
     if (data_ == nullptr) {
       TVM_FFI_THROW(RuntimeError) << "cannot insert to a null list";
     }
@@ -357,7 +359,7 @@ class List : public ObjectRef {
    */
   template <typename IterType>
   void insert(iterator position, IterType first, IterType last) {
-    static_assert(is_valid_iterator_v<T, IterType>,
+    static_assert(is_valid_iterator_v<value_type, IterType>,
                   "IterType cannot be inserted into a tvm::List<T>");
     if (first == last) return;
     if (data_ == nullptr) {
@@ -434,7 +436,7 @@ class List : public ObjectRef {
    * \param i The index
    * \param value The value to be set.
    */
-  void Set(int64_t i, T value) { EnsureListObj()->SetItem(i, std::move(value)); }
+  void Set(int64_t i, value_type value) { EnsureListObj()->SetItem(i, std::move(value)); }
 
   /*! \return The underlying ListObj */
   ListObj* GetListObj() const { return static_cast<ListObj*>(data_.get()); }
@@ -502,7 +504,8 @@ template <typename T>
 inline constexpr bool use_default_type_traits_v<List<T>> = false;
 
 template <typename T>
-struct TypeTraits<List<T>> : public SeqTypeTraitsBase<TypeTraits<List<T>>, List<T>, T> {
+struct TypeTraits<List<T>>
+    : public SeqTypeTraitsBase<TypeTraits<List<T>>, List<T>, typename List<T>::value_type> {
   static constexpr int32_t field_static_type_index = TypeIndex::kTVMFFIList;
   static constexpr int32_t kPrimaryTypeIndex = TypeIndex::kTVMFFIList;
   static constexpr int32_t kOtherTypeIndex = TypeIndex::kTVMFFIArray;
@@ -512,7 +515,7 @@ struct TypeTraits<List<T>> : public SeqTypeTraitsBase<TypeTraits<List<T>>, List<
   TVM_FFI_INLINE static std::string TypeSchema() {
     std::ostringstream oss;
     oss << R"({"type":")" << kStaticTypeKey << R"(","args":[)";
-    oss << details::TypeSchema<T>::v();
+    oss << details::TypeSchema<typename List<T>::value_type>::v();
     oss << "]}";
     return oss.str();
   }
@@ -521,7 +524,7 @@ struct TypeTraits<List<T>> : public SeqTypeTraitsBase<TypeTraits<List<T>>, List<
 /// \cond Doxygen_Suppress
 /*! \brief Whether target List storage subsumes source List storage element-wise. */
 template <typename T, typename U>
-inline constexpr bool type_subsumes_v<List<T>, List<U>> = type_subsumes_v<T, U>;
+inline constexpr bool type_subsumes_v<List<T>, List<U>> = details::container_type_subsumes_v<T, U>;
 /// \endcond
 
 }  // namespace ffi

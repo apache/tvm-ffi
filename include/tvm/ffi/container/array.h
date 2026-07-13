@@ -173,15 +173,12 @@ class ArrayObj : public SeqBaseObj {
  */
 template <typename T, typename IterType>
 struct is_valid_iterator
-    : std::bool_constant<
-          std::is_same_v<
-              T, std::remove_cv_t<std::remove_reference_t<decltype(*std::declval<IterType>())>>> ||
-          std::is_base_of_v<
-              T, std::remove_cv_t<std::remove_reference_t<decltype(*std::declval<IterType>())>>>> {
-};
+    : std::bool_constant<type_subsumes_v<
+          T, std::remove_cv_t<std::remove_reference_t<decltype(*std::declval<IterType>())>>>> {};
 
 template <typename T, typename IterType>
-struct is_valid_iterator<Optional<T>, IterType> : is_valid_iterator<T, IterType> {};
+struct is_valid_iterator<Optional<T>, IterType>
+    : is_valid_iterator<details::object_ptr_type_t<T>, IterType> {};
 
 template <typename IterType>
 struct is_valid_iterator<Any, IterType> : std::true_type {};
@@ -215,7 +212,7 @@ template <typename T, typename = typename std::enable_if_t<details::storage_enab
 class Array : public ObjectRef {
  public:
   /*! \brief The value type of the array */
-  using value_type = T;
+  using value_type = details::object_ptr_type_t<T>;
   // constructors
   /*!
    * \brief Construct an Array with UnsafeInit
@@ -241,7 +238,7 @@ class Array : public ObjectRef {
    * \param other The other array
    * \tparam U The value type of the other array
    */
-  template <typename U, typename = std::enable_if_t<type_subsumes_v<T, U>>>
+  template <typename U, typename = std::enable_if_t<details::container_type_subsumes_v<T, U>>>
   Array(Array<U>&& other)  // NOLINT(google-explicit-constructor)
       : ObjectRef(std::move(other.data_)) {}
   /*!
@@ -249,7 +246,7 @@ class Array : public ObjectRef {
    * \param other The other array
    * \tparam U The value type of the other array
    */
-  template <typename U, typename = std::enable_if_t<type_subsumes_v<T, U>>>
+  template <typename U, typename = std::enable_if_t<details::container_type_subsumes_v<T, U>>>
   Array(const Array<U>& other)  // NOLINT(google-explicit-constructor)
       : ObjectRef(other.data_) {}
 
@@ -274,7 +271,7 @@ class Array : public ObjectRef {
    * \param other The other array
    * \tparam U The value type of the other array
    */
-  template <typename U, typename = std::enable_if_t<type_subsumes_v<T, U>>>
+  template <typename U, typename = std::enable_if_t<details::container_type_subsumes_v<T, U>>>
   TVM_FFI_INLINE Array<T>& operator=(Array<U>&& other) {
     data_ = std::move(other.data_);
     return *this;
@@ -284,7 +281,7 @@ class Array : public ObjectRef {
    * \param other The other array
    * \tparam U The value type of the other array
    */
-  template <typename U, typename = std::enable_if_t<type_subsumes_v<T, U>>>
+  template <typename U, typename = std::enable_if_t<details::container_type_subsumes_v<T, U>>>
   TVM_FFI_INLINE Array<T>& operator=(const Array<U>& other) {
     data_ = other.data_;
     return *this;
@@ -304,7 +301,7 @@ class Array : public ObjectRef {
    */
   template <typename IterType>
   Array(IterType first, IterType last) {  // NOLINT(performance-unnecessary-value-param)
-    static_assert(is_valid_iterator_v<T, IterType>,
+    static_assert(is_valid_iterator_v<value_type, IterType>,
                   "IterType cannot be inserted into a tvm::Array<T>");
     Assign(first, last);
   }
@@ -313,7 +310,7 @@ class Array : public ObjectRef {
    * \brief constructor from initializer list
    * \param init The initializer list
    */
-  Array(std::initializer_list<T> init) {  // NOLINT(*)
+  Array(std::initializer_list<value_type> init) {  // NOLINT(*)
     Assign(init.begin(), init.end());
   }
 
@@ -321,7 +318,7 @@ class Array : public ObjectRef {
    * \brief constructor from vector
    * \param init The vector
    */
-  Array(const std::vector<T>& init) {  // NOLINT(*)
+  Array(const std::vector<value_type>& init) {  // NOLINT(*)
     Assign(init.begin(), init.end());
   }
 
@@ -330,19 +327,23 @@ class Array : public ObjectRef {
    * \param n The size of the container
    * \param val The init value
    */
-  explicit Array(const size_t n, const T& val) { data_ = ArrayObj::CreateRepeated(n, val); }
+  explicit Array(const size_t n, const value_type& val) {
+    data_ = ArrayObj::CreateRepeated(n, val);
+  }
 
  public:
   // iterators
   /// \cond Doxygen_Suppress
   struct ValueConverter {
-    using ResultType = T;
+    using ResultType = value_type;
     /*!
      * \brief Convert any to T
      * \param n The any value to convert
      * \return The converted value
      */
-    static T convert(const Any& n) { return details::AnyUnsafe::CopyFromAnyViewAfterCheck<T>(n); }
+    static value_type convert(const Any& n) {
+      return details::AnyUnsafe::CopyFromAnyViewAfterCheck<value_type>(n);
+    }
   };
   /// \endcond
 
@@ -376,12 +377,12 @@ class Array : public ObjectRef {
    * \param i The index
    * \return the i-th element.
    */
-  const T operator[](int64_t i) const {
+  const value_type operator[](int64_t i) const {
     ArrayObj* p = GetArrayObj();
     if (p == nullptr) {
       TVM_FFI_THROW(IndexError) << "cannot index a null array";
     }
-    return details::AnyUnsafe::CopyFromAnyViewAfterCheck<T>(p->at(i));
+    return details::AnyUnsafe::CopyFromAnyViewAfterCheck<value_type>(p->at(i));
   }
 
   /*! \return The size of the array */
@@ -400,21 +401,21 @@ class Array : public ObjectRef {
   bool empty() const { return size() == 0; }
 
   /*! \return The first element of the array */
-  T front() const {
+  value_type front() const {
     ArrayObj* p = GetArrayObj();
     if (p == nullptr) {
       TVM_FFI_THROW(IndexError) << "cannot index a null array";
     }
-    return details::AnyUnsafe::CopyFromAnyViewAfterCheck<T>(p->front());
+    return details::AnyUnsafe::CopyFromAnyViewAfterCheck<value_type>(p->front());
   }
 
   /*! \return The last element of the array */
-  T back() const {
+  value_type back() const {
     ArrayObj* p = GetArrayObj();
     if (p == nullptr) {
       TVM_FFI_THROW(IndexError) << "cannot index a null array";
     }
-    return details::AnyUnsafe::CopyFromAnyViewAfterCheck<T>(p->back());
+    return details::AnyUnsafe::CopyFromAnyViewAfterCheck<value_type>(p->back());
   }
 
  public:
@@ -423,7 +424,7 @@ class Array : public ObjectRef {
    * \brief push a new item to the back of the list
    * \param item The item to be pushed.
    */
-  void push_back(const T& item) {
+  void push_back(const value_type& item) {
     ArrayObj* p = CopyOnWrite(1);
     p->EmplaceInit(p->TVMFFISeqCell::size++, item);
   }
@@ -443,7 +444,7 @@ class Array : public ObjectRef {
    * \param position An iterator pointing to the insertion point
    * \param val The element to insert
    */
-  void insert(iterator position, const T& val) {
+  void insert(iterator position, const value_type& val) {
     if (data_ == nullptr) {
       TVM_FFI_THROW(RuntimeError) << "cannot insert a null array";
     }
@@ -459,7 +460,7 @@ class Array : public ObjectRef {
    */
   template <typename IterType>
   void insert(iterator position, IterType first, IterType last) {
-    static_assert(is_valid_iterator_v<T, IterType>,
+    static_assert(is_valid_iterator_v<value_type, IterType>,
                   "IterType cannot be inserted into a tvm::Array<T>");
     if (first == last) return;
     if (data_ == nullptr) {
@@ -554,7 +555,7 @@ class Array : public ObjectRef {
   }
 
   template <typename... Args>
-  static size_t CalcCapacityImpl(T value, Args... args) {
+  static size_t CalcCapacityImpl(value_type value, Args... args) {
     return 1 + CalcCapacityImpl(args...);
   }
 
@@ -568,7 +569,7 @@ class Array : public ObjectRef {
   }
 
   template <typename... Args>
-  static void AgregateImpl(Array<T>& dest, T value, Args... args) {  // NOLINT(*)
+  static void AgregateImpl(Array<T>& dest, value_type value, Args... args) {  // NOLINT(*)
     dest.push_back(value);
     AgregateImpl(dest, args...);
   }
@@ -582,7 +583,7 @@ class Array : public ObjectRef {
    * \param i The index
    * \param value The value to be setted.
    */
-  void Set(int64_t i, T value) { CopyOnWrite()->SetItem(i, std::move(value)); }
+  void Set(int64_t i, value_type value) { CopyOnWrite()->SetItem(i, std::move(value)); }
 
   /*! \return The underlying ArrayObj */
   ArrayObj* GetArrayObj() const { return static_cast<ArrayObj*>(data_.get()); }
@@ -606,7 +607,7 @@ class Array : public ObjectRef {
    *
    * \return The transformed array.
    */
-  template <typename F, typename U = std::invoke_result_t<F, T>>
+  template <typename F, typename U = std::invoke_result_t<F, value_type>>
   Array<U> Map(F fmap) const {
     return Array<U>(MapHelper(data_, fmap));
   }
@@ -617,7 +618,8 @@ class Array : public ObjectRef {
    * \tparam F the type of the mutation function.
    * \note This function performs copy on write optimization.
    */
-  template <typename F, typename = std::enable_if_t<std::is_same_v<T, std::invoke_result_t<F, T>>>>
+  template <typename F, typename = std::enable_if_t<
+                            std::is_same_v<value_type, std::invoke_result_t<F, value_type>>>>
   void MutateByApply(F fmutate) {
     data_ = MapHelper(std::move(data_), fmutate);
   }
@@ -744,7 +746,7 @@ class Array : public ObjectRef {
    * or copy-on-write optimizations were applicable, may be the same
    * underlying array as the `data` parameter.
    */
-  template <typename F, typename U = std::invoke_result_t<F, T>>
+  template <typename F, typename U = std::invoke_result_t<F, value_type>>
   static ObjectPtr<Object> MapHelper(ObjectPtr<Object> data, F fmap) {
     if (data == nullptr) {
       return nullptr;
@@ -752,7 +754,8 @@ class Array : public ObjectRef {
 
     TVM_FFI_ICHECK(data->IsInstance<ArrayObj>());
 
-    constexpr bool is_same_output_type = std::is_same_v<T, U>;
+    using output_type = details::object_ptr_type_t<U>;
+    constexpr bool is_same_output_type = std::is_same_v<value_type, output_type>;
 
     if constexpr (is_same_output_type) {
       if (data.unique()) {
@@ -761,17 +764,18 @@ class Array : public ObjectRef {
         // no other shared copies of the array.
         auto arr = static_cast<ArrayObj*>(data.get());
         for (auto it = arr->MutableBegin(); it != arr->MutableEnd(); it++) {
-          T value = details::AnyUnsafe::CopyFromAnyViewAfterCheck<T>(*it);
+          value_type value = details::AnyUnsafe::CopyFromAnyViewAfterCheck<value_type>(*it);
           // reset the original value to nullptr, to ensure unique ownership
           it->reset();
-          T mapped = fmap(std::move(value));
+          output_type mapped = fmap(std::move(value));
           *it = std::move(mapped);
         }
         return data;
       }
     }
 
-    constexpr bool compatible_types = is_valid_iterator_v<T, U*> || is_valid_iterator_v<U, T*>;
+    constexpr bool compatible_types = is_valid_iterator_v<value_type, output_type*> ||
+                                      is_valid_iterator_v<output_type, value_type*>;
 
     ObjectPtr<ArrayObj> output = nullptr;
     auto arr = static_cast<ArrayObj*>(data.get());
@@ -786,7 +790,7 @@ class Array : public ObjectRef {
       // `T`.
       bool all_identical = true;
       for (; it != arr->end(); it++) {
-        U mapped = fmap(details::AnyUnsafe::CopyFromAnyViewAfterCheck<T>(*it));
+        output_type mapped = fmap(details::AnyUnsafe::CopyFromAnyViewAfterCheck<value_type>(*it));
         if (!(*it).same_as(mapped)) {
           // At least one mapped element is different than the
           // original.  Therefore, prepare the output array,
@@ -840,7 +844,7 @@ class Array : public ObjectRef {
     // so we can either start or resume the iteration from that point,
     // with no further checks on the result.
     for (; it != arr->end(); it++) {
-      U mapped = fmap(details::AnyUnsafe::CopyFromAnyViewAfterCheck<T>(*it));
+      output_type mapped = fmap(details::AnyUnsafe::CopyFromAnyViewAfterCheck<value_type>(*it));
       output->SetItem(it - arr->begin(), std::move(mapped));
     }
 
@@ -856,8 +860,9 @@ class Array : public ObjectRef {
  * \param rhs second Array to be concatenated.
  * \return The concatenated Array. Original Arrays are kept unchanged.
  */
-template <typename T, typename = typename std::enable_if_t<std::is_same_v<T, Any> ||
-                                                           TypeTraits<T>::convert_enabled>>
+template <typename T, typename = typename std::enable_if_t<
+                          std::is_same_v<details::object_ptr_type_t<T>, Any> ||
+                          TypeTraits<details::object_ptr_type_t<T>>::convert_enabled>>
 inline Array<T> Concat(Array<T> lhs, const Array<T>& rhs) {
   for (const auto& x : rhs) {
     lhs.push_back(x);
@@ -879,7 +884,8 @@ template <typename T>
 inline constexpr bool use_default_type_traits_v<Array<T>> = false;
 
 template <typename T>
-struct TypeTraits<Array<T>> : public SeqTypeTraitsBase<TypeTraits<Array<T>>, Array<T>, T> {
+struct TypeTraits<Array<T>>
+    : public SeqTypeTraitsBase<TypeTraits<Array<T>>, Array<T>, typename Array<T>::value_type> {
   static constexpr int32_t field_static_type_index = TypeIndex::kTVMFFIArray;
   static constexpr int32_t kPrimaryTypeIndex = TypeIndex::kTVMFFIArray;
   static constexpr int32_t kOtherTypeIndex = TypeIndex::kTVMFFIList;
@@ -889,7 +895,7 @@ struct TypeTraits<Array<T>> : public SeqTypeTraitsBase<TypeTraits<Array<T>>, Arr
   TVM_FFI_INLINE static std::string TypeSchema() {
     std::ostringstream oss;
     oss << R"({"type":")" << kStaticTypeKey << R"(","args":[)";
-    oss << details::TypeSchema<T>::v();
+    oss << details::TypeSchema<typename Array<T>::value_type>::v();
     oss << "]}";
     return oss.str();
   }
@@ -898,7 +904,8 @@ struct TypeTraits<Array<T>> : public SeqTypeTraitsBase<TypeTraits<Array<T>>, Arr
 /// \cond Doxygen_Suppress
 /*! \brief Whether target Array storage subsumes source Array storage element-wise. */
 template <typename T, typename U>
-inline constexpr bool type_subsumes_v<Array<T>, Array<U>> = type_subsumes_v<T, U>;
+inline constexpr bool type_subsumes_v<Array<T>, Array<U>> =
+    details::container_type_subsumes_v<T, U>;
 /// \endcond
 
 }  // namespace ffi

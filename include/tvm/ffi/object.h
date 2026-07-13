@@ -546,6 +546,22 @@ template <typename T>
 inline constexpr bool
     is_object_subclass_v<T, std::void_t<decltype(static_cast<Object*>(std::declval<T*>()))>> = true;
 
+template <typename T, typename = void>
+struct ObjectPtrType {
+  using type = T;
+};
+
+template <typename TObject>
+struct ObjectPtrType<TObject,
+                     std::enable_if_t<is_object_subclass_v<TObject> &&
+                                      std::is_same_v<TObject, std::remove_cv_t<TObject>>>> {
+  using type = ObjectPtr<TObject>;
+};
+
+/*! \brief The normalized owning storage type for generic FFI containers. */
+template <typename T>
+using object_ptr_type_t = typename ObjectPtrType<T>::type;
+
 /*! \brief Whether T is an Object subclass with cv- or reference qualification. */
 template <typename T>
 inline constexpr bool is_qualified_object_v =

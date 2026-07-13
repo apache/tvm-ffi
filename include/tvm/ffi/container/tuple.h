@@ -47,6 +47,8 @@ class Tuple : public ObjectRef {
  public:
   static_assert(details::all_storage_enabled_v<Types...>,
                 "All types used in Tuple<...> must be compatible with Any");
+  /*! \brief The normalized element types stored by the tuple. */
+  using storage_tuple_type = std::tuple<details::object_ptr_type_t<Types>...>;
   /*! \brief Default constructor */
   Tuple() : ObjectRef(MakeDefaultTupleNode()) {}
   /*!
@@ -63,8 +65,9 @@ class Tuple : public ObjectRef {
    * \tparam UTypes The types of the other tuple
    * \tparam The enable_if_t type
    */
-  template <typename... UTypes,
-            typename = std::enable_if_t<(type_subsumes_v<Types, UTypes> && ...), int>>
+  template <
+      typename... UTypes,
+      typename = std::enable_if_t<(details::container_type_subsumes_v<Types, UTypes> && ...), int>>
   Tuple(const Tuple<UTypes...>& other) : ObjectRef(other) {}  // NOLINT(google-explicit-constructor)
 
   /*!
@@ -73,8 +76,9 @@ class Tuple : public ObjectRef {
    * \tparam UTypes The types of the other tuple
    * \tparam The enable_if_t type
    */
-  template <typename... UTypes,
-            typename = std::enable_if_t<(type_subsumes_v<Types, UTypes> && ...), int>>
+  template <
+      typename... UTypes,
+      typename = std::enable_if_t<(details::container_type_subsumes_v<Types, UTypes> && ...), int>>
   Tuple(Tuple<UTypes...>&& other)  // NOLINT(google-explicit-constructor)
       : ObjectRef(std::move(other)) {}
 
@@ -116,7 +120,7 @@ class Tuple : public ObjectRef {
    * \tparam The enable_if_t type
    */
   template <typename... UTypes,
-            typename = std::enable_if_t<(type_subsumes_v<Types, UTypes> && ...)>>
+            typename = std::enable_if_t<(details::container_type_subsumes_v<Types, UTypes> && ...)>>
   TVM_FFI_INLINE Tuple& operator=(const Tuple<UTypes...>& other) {
     data_ = other.data_;
     return *this;
@@ -129,7 +133,7 @@ class Tuple : public ObjectRef {
    * \tparam The enable_if_t type
    */
   template <typename... UTypes,
-            typename = std::enable_if_t<(type_subsumes_v<Types, UTypes> && ...)>>
+            typename = std::enable_if_t<(details::container_type_subsumes_v<Types, UTypes> && ...)>>
   TVM_FFI_INLINE Tuple& operator=(Tuple<UTypes...>&& other) {
     data_ = std::move(other.data_);
     return *this;
@@ -145,7 +149,7 @@ class Tuple : public ObjectRef {
   template <size_t I>
   auto get() const& {
     static_assert(I < sizeof...(Types), "Tuple index out of bounds");
-    using ReturnType = std::tuple_element_t<I, std::tuple<Types...>>;
+    using ReturnType = std::tuple_element_t<I, storage_tuple_type>;
     const Any* ptr = GetArrayObj()->begin() + I;
     return details::AnyUnsafe::CopyFromAnyViewAfterCheck<ReturnType>(*ptr);
   }
@@ -164,7 +168,7 @@ class Tuple : public ObjectRef {
       return std::as_const(*this).template get<I>();
     }
     static_assert(I < sizeof...(Types), "Tuple index out of bounds");
-    using ReturnType = std::tuple_element_t<I, std::tuple<Types...>>;
+    using ReturnType = std::tuple_element_t<I, storage_tuple_type>;
     Any* ptr = GetArrayObj()->MutableBegin() + I;
     return details::AnyUnsafe::MoveFromAnyAfterCheck<ReturnType>(std::move(*ptr));
   }
@@ -184,7 +188,7 @@ class Tuple : public ObjectRef {
   template <size_t I, typename U>
   void Set(U&& item) {
     static_assert(I < sizeof...(Types), "Tuple index out of bounds");
-    using T = std::tuple_element_t<I, std::tuple<Types...>>;
+    using T = std::tuple_element_t<I, storage_tuple_type>;
     this->CopyIfNotUnique();
     Any* ptr = GetArrayObj()->MutableBegin() + I;
     *ptr = T(std::forward<U>(item));
@@ -200,7 +204,7 @@ class Tuple : public ObjectRef {
     ObjectPtr<ArrayObj> p = ArrayObj::Empty(sizeof...(Types));
     Any* itr = p->MutableBegin();
     // increase size after each new to ensure exception safety
-    ((new (itr++) Any(Types()), p->TVMFFISeqCell::size++), ...);
+    ((new (itr++) Any(details::object_ptr_type_t<Types>()), p->TVMFFISeqCell::size++), ...);
     return p;
   }
 
@@ -209,7 +213,9 @@ class Tuple : public ObjectRef {
     ObjectPtr<ArrayObj> p = ArrayObj::Empty(sizeof...(Types));
     Any* itr = p->MutableBegin();
     // increase size after each new to ensure exception safety
-    ((new (itr++) Any(Types(std::forward<UTypes>(args))), p->TVMFFISeqCell::size++), ...);
+    ((new (itr++) Any(details::object_ptr_type_t<Types>(std::forward<UTypes>(args))),
+      p->TVMFFISeqCell::size++),
+     ...);
     return p;
   }
 
@@ -250,7 +256,7 @@ struct TypeTraits<Tuple<Types...>> : public ObjectRefTypeTraitsBase<Tuple<Types.
     if (n->size() != sizeof...(Types)) {
       return "Array[size=" + std::to_string(n->size()) + "]";
     }
-    return GetMismatchTypeInfoHelper<0, Types...>(n->begin());
+    return GetMismatchTypeInfoHelper<0, details::object_ptr_type_t<Types>...>(n->begin());
   }
 
   template <size_t I, typename T, typename... Rest>
@@ -275,7 +281,7 @@ struct TypeTraits<Tuple<Types...>> : public ObjectRefTypeTraitsBase<Tuple<Types.
     const ArrayObj* n = reinterpret_cast<const ArrayObj*>(src->v_obj);
     if (n->size() != sizeof...(Types)) return false;
     const TVMFFIAny* ffi_any_arr = reinterpret_cast<const TVMFFIAny*>(n->begin());
-    return CheckAnyStrictHelper<0, Types...>(ffi_any_arr);
+    return CheckAnyStrictHelper<0, details::object_ptr_type_t<Types>...>(ffi_any_arr);
   }
 
   template <size_t I, typename T, typename... Rest>
@@ -302,7 +308,7 @@ struct TypeTraits<Tuple<Types...>> : public ObjectRefTypeTraitsBase<Tuple<Types.
     // slow path, try to convert to each type to match the tuple storage need.
     Array<Any> arr = TypeTraits<Array<Any>>::CopyFromAnyViewAfterCheck(src);
     Any* ptr = arr.CopyOnWrite()->MutableBegin();
-    if (TryConvertElements<0, Types...>(ptr)) {
+    if (TryConvertElements<0, details::object_ptr_type_t<Types>...>(ptr)) {
       return details::ObjectUnsafe::ObjectRefFromObjectPtr<Tuple<Types...>>(
           details::ObjectUnsafe::ObjectPtrFromObjectRef<Object>(arr));
     }
@@ -326,13 +332,13 @@ struct TypeTraits<Tuple<Types...>> : public ObjectRefTypeTraitsBase<Tuple<Types.
   }
 
   TVM_FFI_INLINE static std::string TypeStr() {
-    return details::ContainerTypeStr<Types...>("Tuple");
+    return details::ContainerTypeStr<details::object_ptr_type_t<Types>...>("Tuple");
   }
   TVM_FFI_INLINE static std::string TypeSchema() {
     std::ostringstream oss;
     oss << R"({"type":"Tuple","args":[)";
     const char* sep = "";
-    ((oss << sep << details::TypeSchema<Types>::v(), sep = ","), ...);
+    ((oss << sep << details::TypeSchema<details::object_ptr_type_t<Types>>::v(), sep = ","), ...);
     oss << "]}";
     return oss.str();
   }
@@ -343,7 +349,7 @@ struct TypeTraits<Tuple<Types...>> : public ObjectRefTypeTraitsBase<Tuple<Types.
 template <typename... T, typename... U>
 inline constexpr bool
     type_subsumes_v<Tuple<T...>, Tuple<U...>, std::enable_if_t<sizeof...(T) == sizeof...(U)>> =
-        (type_subsumes_v<T, U> && ...);
+        (details::container_type_subsumes_v<T, U> && ...);
 /// \endcond
 
 /// \cond Doxygen_Suppress
@@ -360,7 +366,7 @@ inline constexpr bool
  */
 template <std::size_t I, typename... Types>
 inline constexpr auto get(const Tuple<Types...>& t)
-    -> std::tuple_element_t<I, std::tuple<Types...>> {
+    -> std::tuple_element_t<I, typename Tuple<Types...>::storage_tuple_type> {
   return t.template get<I>();
 }
 
@@ -371,7 +377,8 @@ inline constexpr auto get(const Tuple<Types...>& t)
  * \return The I-th element of the tuple
  */
 template <std::size_t I, typename... Types>
-inline constexpr auto get(Tuple<Types...>&& t) -> std::tuple_element_t<I, std::tuple<Types...>> {
+inline constexpr auto get(Tuple<Types...>&& t)
+    -> std::tuple_element_t<I, typename Tuple<Types...>::storage_tuple_type> {
   return std::move(t).template get<I>();
 }
 
@@ -392,7 +399,7 @@ struct tuple_size<::tvm::ffi::Tuple<Types...>>
 
 template <size_t I, typename... Types>
 struct tuple_element<I, ::tvm::ffi::Tuple<Types...>> {
-  using type = std::tuple_element_t<I, std::tuple<Types...>>;
+  using type = std::tuple_element_t<I, typename ::tvm::ffi::Tuple<Types...>::storage_tuple_type>;
 };
 
 }  // namespace std

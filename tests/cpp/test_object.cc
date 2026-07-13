@@ -110,6 +110,59 @@ static_assert(!object_ref_contains_is_enabled_v<TIntObj, TIntObj>);
 static_assert(!object_ref_contains_is_enabled_v<TInt, int>);
 static_assert(!object_ref_contains_is_enabled_v<TIntOrFloatRef, int>);
 
+using TNumberObjPtr = ObjectPtr<TNumberObj>;
+static_assert(std::is_same_v<details::object_ptr_type_t<TNumberObj>, TNumberObjPtr>);
+static_assert(std::is_same_v<details::object_ptr_type_t<const TNumberObj>, const TNumberObj>);
+static_assert(std::is_same_v<details::object_ptr_type_t<TNumberObj&>, TNumberObj&>);
+static_assert(std::is_same_v<Array<TNumberObj>::value_type, TNumberObjPtr>);
+static_assert(std::is_same_v<List<TNumberObj>::value_type, TNumberObjPtr>);
+static_assert(std::is_same_v<Map<TNumberObj, TNumberObj>::key_type, TNumberObjPtr>);
+static_assert(std::is_same_v<Map<TNumberObj, TNumberObj>::mapped_type, TNumberObjPtr>);
+static_assert(std::is_same_v<Dict<TNumberObj, TNumberObj>::key_type, TNumberObjPtr>);
+static_assert(std::is_same_v<Dict<TNumberObj, TNumberObj>::mapped_type, TNumberObjPtr>);
+static_assert(std::is_same_v<std::tuple_element_t<0, Tuple<TNumberObj>>, TNumberObjPtr>);
+static_assert(std::is_same_v<Optional<TNumberObj>::value_type, TNumberObjPtr>);
+static_assert(Variant<TNumberObj, int64_t>::variant_contains_v<TNumberObjPtr>);
+static_assert(std::is_same_v<Expected<TNumberObj>::value_type, TNumberObjPtr>);
+static_assert(details::storage_enabled_v<TNumberObj>);
+static_assert(!details::storage_enabled_v<const TNumberObj>);
+static_assert(!details::storage_enabled_v<volatile TNumberObj>);
+static_assert(!details::storage_enabled_v<const volatile TNumberObj>);
+static_assert(!details::storage_enabled_v<TNumberObj&>);
+static_assert(!details::storage_enabled_v<const TNumberObj&>);
+static_assert(!details::storage_enabled_v<TNumberObj&&>);
+
+static_assert(std::is_constructible_v<Array<TNumberObj>, Array<TNumberObjPtr>>);
+static_assert(std::is_constructible_v<Array<TNumberObjPtr>, Array<TNumberObj>>);
+static_assert(std::is_constructible_v<Array<TNumberObj>, Array<TIntObj>>);
+static_assert(std::is_constructible_v<List<TNumberObj>, List<TNumberObjPtr>>);
+static_assert(std::is_constructible_v<List<TNumberObjPtr>, List<TNumberObj>>);
+static_assert(std::is_constructible_v<List<TNumberObj>, List<TIntObj>>);
+static_assert(
+    std::is_constructible_v<Map<TNumberObj, TNumberObj>, Map<TNumberObjPtr, TNumberObjPtr>>);
+static_assert(
+    std::is_constructible_v<Map<TNumberObjPtr, TNumberObjPtr>, Map<TNumberObj, TNumberObj>>);
+static_assert(std::is_constructible_v<Map<TNumberObj, TNumberObj>, Map<TIntObj, TFloatObj>>);
+static_assert(
+    std::is_constructible_v<Dict<TNumberObj, TNumberObj>, Dict<TNumberObjPtr, TNumberObjPtr>>);
+static_assert(
+    std::is_constructible_v<Dict<TNumberObjPtr, TNumberObjPtr>, Dict<TNumberObj, TNumberObj>>);
+static_assert(std::is_constructible_v<Dict<TNumberObj, TNumberObj>, Dict<TIntObj, TFloatObj>>);
+static_assert(std::is_constructible_v<Tuple<TNumberObj>, Tuple<TNumberObjPtr>>);
+static_assert(std::is_constructible_v<Tuple<TNumberObjPtr>, Tuple<TNumberObj>>);
+static_assert(std::is_constructible_v<Optional<TNumberObj>, Optional<TNumberObjPtr>>);
+static_assert(std::is_constructible_v<Optional<TNumberObjPtr>, Optional<TNumberObj>>);
+static_assert(
+    std::is_constructible_v<Variant<TNumberObj, int64_t>, Variant<TNumberObjPtr, int64_t>>);
+static_assert(
+    std::is_constructible_v<Variant<TNumberObjPtr, int64_t>, Variant<TNumberObj, int64_t>>);
+static_assert(std::is_constructible_v<Expected<TNumberObj>, Expected<TNumberObjPtr>>);
+static_assert(std::is_constructible_v<Expected<TNumberObjPtr>, Expected<TNumberObj>>);
+static_assert(std::is_constructible_v<Array<Optional<TNumberObj>>, Array<Optional<TNumberObjPtr>>>);
+static_assert(std::is_constructible_v<Array<Variant<TNumberObj, int64_t>>,
+                                      Array<Variant<TNumberObjPtr, int64_t>>>);
+static_assert(std::is_constructible_v<Array<Expected<TNumberObj>>, Array<Expected<TNumberObjPtr>>>);
+
 template <typename T>
 class CRTPObject : public Object {
  public:
@@ -134,6 +187,42 @@ class ThrowingConstructorObject : public Object {
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("test.ThrowingConstructorObject", ThrowingConstructorObject,
                                     Object);
 };
+
+class TRecursiveContainerObj : public Object {
+ public:
+  Array<TRecursiveContainerObj> array;
+  List<TRecursiveContainerObj> list;
+  Map<TRecursiveContainerObj, TRecursiveContainerObj> map;
+  Dict<TRecursiveContainerObj, TRecursiveContainerObj> dict;
+  Tuple<TRecursiveContainerObj> tuple;
+  Optional<TRecursiveContainerObj> optional;
+  Variant<TRecursiveContainerObj, int64_t> variant;
+  Expected<TRecursiveContainerObj> expected;
+
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("test.RecursiveContainer", TRecursiveContainerObj, Object);
+};
+
+using TRecursiveContainerPtr = ObjectPtr<TRecursiveContainerObj>;
+static_assert(
+    std::is_same_v<decltype(TRecursiveContainerObj::array)::value_type, TRecursiveContainerPtr>);
+static_assert(
+    std::is_same_v<decltype(TRecursiveContainerObj::list)::value_type, TRecursiveContainerPtr>);
+static_assert(
+    std::is_same_v<decltype(TRecursiveContainerObj::map)::key_type, TRecursiveContainerPtr>);
+static_assert(
+    std::is_same_v<decltype(TRecursiveContainerObj::map)::mapped_type, TRecursiveContainerPtr>);
+static_assert(
+    std::is_same_v<decltype(TRecursiveContainerObj::dict)::key_type, TRecursiveContainerPtr>);
+static_assert(
+    std::is_same_v<decltype(TRecursiveContainerObj::dict)::mapped_type, TRecursiveContainerPtr>);
+static_assert(std::is_same_v<std::tuple_element_t<0, decltype(TRecursiveContainerObj::tuple)>,
+                             TRecursiveContainerPtr>);
+static_assert(
+    std::is_same_v<decltype(TRecursiveContainerObj::optional)::value_type, TRecursiveContainerPtr>);
+static_assert(
+    decltype(TRecursiveContainerObj::variant)::variant_contains_v<TRecursiveContainerPtr>);
+static_assert(
+    std::is_same_v<decltype(TRecursiveContainerObj::expected)::value_type, TRecursiveContainerPtr>);
 
 TEST(Object, RefCounter) {
   ObjectPtr<TIntObj> a = make_object<TIntObj>(11);
@@ -672,6 +761,210 @@ TEST(ObjectPtrStorage, Expected) {
   Expected<NumberPtr> failure_roundtrip = Any(failure).cast<Expected<NumberPtr>>();
   EXPECT_TRUE(failure_roundtrip.is_err());
   EXPECT_EQ(failure_roundtrip.error().kind(), "ValueError");
+}
+
+TEST(ObjectPtrStorage, RichDerivedObject) {
+  NumberPtr primary = MakeInt(7);
+  NumberPtr secondary = MakeFloat(2.5);
+  ObjectPtr<TCompositeNumberObj> composite =
+      MakeCompositeNumber("container-value", 11, primary, secondary);
+  TCompositeNumberObj* raw_composite = composite.get();
+  NumberPtr base = composite;
+
+  Any value = std::move(base);
+  EXPECT_TRUE(base == nullptr);  // NOLINT(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
+  ObjectPtr<TCompositeNumberObj> decoded = std::move(value).cast<ObjectPtr<TCompositeNumberObj>>();
+  EXPECT_TRUE(value == nullptr);  // NOLINT(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
+  EXPECT_EQ(decoded.get(), raw_composite);
+  EXPECT_EQ(decoded->name, "container-value");
+  EXPECT_EQ(decoded->revision, 11);
+  EXPECT_EQ(decoded->primary, primary);
+  EXPECT_EQ(decoded->children[0], primary);
+  EXPECT_EQ(decoded->children[1], secondary);
+  EXPECT_EQ(decoded->children[2], primary);
+  EXPECT_EQ(decoded->named_children["primary"], primary);
+  ASSERT_TRUE(decoded->fallback.has_value());
+  EXPECT_EQ(decoded->fallback.value(), primary);
+
+  NumberPtr decoded_base = decoded;
+  Array<NumberPtr> array{decoded_base};
+  List<NumberPtr> list{decoded_base};
+  Map<NumberPtr, NumberPtr> map{{decoded_base, decoded_base}};
+  Dict<NumberPtr, NumberPtr> dict{{decoded_base, decoded_base}};
+  Tuple<NumberPtr> tuple(decoded_base);
+  Optional<NumberPtr> optional = decoded_base;
+  Variant<NumberPtr, int64_t> variant = decoded_base;
+  Expected<NumberPtr> expected = decoded_base;
+
+  ObjectPtr<TCompositeNumberObj> from_array =
+      AnyView(array[0]).cast<ObjectPtr<TCompositeNumberObj>>();
+  ObjectPtr<TCompositeNumberObj> from_list =
+      AnyView(list[0]).cast<ObjectPtr<TCompositeNumberObj>>();
+  ObjectPtr<TCompositeNumberObj> from_map =
+      AnyView(map[decoded_base]).cast<ObjectPtr<TCompositeNumberObj>>();
+  ObjectPtr<TCompositeNumberObj> from_dict =
+      AnyView(dict[decoded_base]).cast<ObjectPtr<TCompositeNumberObj>>();
+  ObjectPtr<TCompositeNumberObj> from_tuple =
+      AnyView(tuple.get<0>()).cast<ObjectPtr<TCompositeNumberObj>>();
+  ObjectPtr<TCompositeNumberObj> from_optional =
+      AnyView(optional.value()).cast<ObjectPtr<TCompositeNumberObj>>();
+  ObjectPtr<TCompositeNumberObj> from_variant =
+      AnyView(variant.get<NumberPtr>()).cast<ObjectPtr<TCompositeNumberObj>>();
+  ObjectPtr<TCompositeNumberObj> from_expected =
+      AnyView(expected.value()).cast<ObjectPtr<TCompositeNumberObj>>();
+
+  EXPECT_EQ(from_array.get(), raw_composite);
+  EXPECT_EQ(from_list.get(), raw_composite);
+  EXPECT_EQ(from_map.get(), raw_composite);
+  EXPECT_EQ(from_dict.get(), raw_composite);
+  EXPECT_EQ(from_tuple.get(), raw_composite);
+  EXPECT_EQ(from_optional.get(), raw_composite);
+  EXPECT_EQ(from_variant.get(), raw_composite);
+  EXPECT_EQ(from_expected.get(), raw_composite);
+  EXPECT_EQ(from_map->named_children["secondary"], secondary);
+}
+
+TEST(ObjectPtrStorage, ObjectSubclassContainerShorthand) {
+  NumberPtr primary = MakeInt(17);
+  NumberPtr secondary = MakeFloat(3.25);
+  ObjectPtr<TCompositeNumberObj> composite =
+      MakeCompositeNumber("shorthand", 23, primary, secondary);
+  NumberPtr value = composite;
+  TCompositeNumberObj* raw_composite = composite.get();
+
+  Array<TNumberObj> array{value, primary};
+  List<TNumberObj> list{value, secondary};
+  Map<TNumberObj, TNumberObj> map{{value, primary}, {primary, value}};
+  Dict<TNumberObj, TNumberObj> dict{{value, secondary}, {secondary, value}};
+  Tuple<TNumberObj, TNumberObj> tuple(value, primary);
+  Optional<TNumberObj> optional = value;
+  Variant<TNumberObj, int64_t> variant = value;
+  Expected<TNumberObj> expected = value;
+  ObjectPtr<TIntObj> typed_key = make_object<TIntObj>(8);
+  ObjectPtr<TFloatObj> typed_value = make_object<TFloatObj>(1.5);
+  Map<TIntObj, TFloatObj> heterogeneous_map{{typed_key, typed_value}};
+  Dict<TIntObj, TFloatObj> heterogeneous_dict{{typed_key, typed_value}};
+
+  EXPECT_EQ(array[0].get(), raw_composite);
+  EXPECT_EQ(list[0].get(), raw_composite);
+  EXPECT_EQ(map[primary].get(), raw_composite);
+  EXPECT_EQ(dict[secondary].get(), raw_composite);
+  EXPECT_EQ(tuple.get<0>().get(), raw_composite);
+  ASSERT_TRUE(optional.has_value());
+  EXPECT_EQ(optional.value().get(), raw_composite);
+  EXPECT_EQ(variant.get<NumberPtr>().get(), raw_composite);
+  EXPECT_EQ(expected.value().get(), raw_composite);
+  EXPECT_EQ(heterogeneous_map[typed_key], typed_value);
+  EXPECT_EQ(heterogeneous_dict[typed_key], typed_value);
+
+  Array<TNumberObj> mapped = array.Map([](NumberPtr item) { return item; });
+  EXPECT_TRUE(mapped.same_as(array));
+  array.MutateByApply([](NumberPtr item) { return item; });
+  array.push_back(secondary);
+  array.Set(1, value);
+  EXPECT_EQ(array[1].get(), raw_composite);
+  list.push_back(primary);
+  list.Set(1, value);
+  EXPECT_EQ(list[1].get(), raw_composite);
+  map.Set(secondary, value);
+  dict.Set(primary, value);
+  tuple.Set<1>(value);
+  EXPECT_EQ(map[secondary].get(), raw_composite);
+  EXPECT_EQ(dict[primary].get(), raw_composite);
+  EXPECT_EQ(tuple.get<1>().get(), raw_composite);
+
+  Array<NumberPtr> explicit_array = array;
+  Array<TNumberObj> shorthand_array = explicit_array;
+  EXPECT_TRUE(explicit_array.same_as(array));
+  EXPECT_TRUE(shorthand_array.same_as(array));
+
+  List<NumberPtr> explicit_list = list;
+  List<TNumberObj> shorthand_list = explicit_list;
+  EXPECT_TRUE(explicit_list.same_as(list));
+  EXPECT_TRUE(shorthand_list.same_as(list));
+
+  Map<NumberPtr, NumberPtr> explicit_map = map;
+  Map<TNumberObj, TNumberObj> shorthand_map = explicit_map;
+  EXPECT_TRUE(explicit_map.same_as(map));
+  EXPECT_TRUE(shorthand_map.same_as(map));
+
+  Dict<NumberPtr, NumberPtr> explicit_dict = dict;
+  Dict<TNumberObj, TNumberObj> shorthand_dict = explicit_dict;
+  EXPECT_TRUE(explicit_dict.same_as(dict));
+  EXPECT_TRUE(shorthand_dict.same_as(dict));
+
+  Tuple<NumberPtr, NumberPtr> explicit_tuple = tuple;
+  Tuple<TNumberObj, TNumberObj> shorthand_tuple = explicit_tuple;
+  EXPECT_TRUE(explicit_tuple.same_as(tuple));
+  EXPECT_TRUE(shorthand_tuple.same_as(tuple));
+
+  Optional<NumberPtr> explicit_optional = optional;
+  Optional<TNumberObj> shorthand_optional = explicit_optional;
+  ASSERT_TRUE(explicit_optional.has_value());
+  ASSERT_TRUE(shorthand_optional.has_value());
+  EXPECT_EQ(explicit_optional.value().get(), raw_composite);
+  EXPECT_EQ(shorthand_optional.value().get(), raw_composite);
+
+  Variant<NumberPtr, int64_t> explicit_variant = variant;
+  Variant<TNumberObj, int64_t> shorthand_variant = explicit_variant;
+  EXPECT_EQ(explicit_variant.get<NumberPtr>().get(), raw_composite);
+  EXPECT_EQ(shorthand_variant.get<NumberPtr>().get(), raw_composite);
+
+  Expected<NumberPtr> explicit_expected = expected;
+  Expected<TNumberObj> shorthand_expected = explicit_expected;
+  EXPECT_EQ(explicit_expected.value().get(), raw_composite);
+  EXPECT_EQ(shorthand_expected.value().get(), raw_composite);
+
+  Array<TNumberObj> array_roundtrip = Any(array).cast<Array<TNumberObj>>();
+  List<TNumberObj> list_roundtrip = Any(list).cast<List<TNumberObj>>();
+  Map<TNumberObj, TNumberObj> map_roundtrip = Any(map).cast<Map<TNumberObj, TNumberObj>>();
+  Dict<TNumberObj, TNumberObj> dict_roundtrip = Any(dict).cast<Dict<TNumberObj, TNumberObj>>();
+  Tuple<TNumberObj, TNumberObj> tuple_roundtrip = Any(tuple).cast<Tuple<TNumberObj, TNumberObj>>();
+  Optional<TNumberObj> optional_roundtrip = Any(optional).cast<Optional<TNumberObj>>();
+  Variant<TNumberObj, int64_t> variant_roundtrip =
+      Any(variant).cast<Variant<TNumberObj, int64_t>>();
+  Expected<TNumberObj> expected_roundtrip = Any(expected).cast<Expected<TNumberObj>>();
+
+  EXPECT_TRUE(array_roundtrip.same_as(array));
+  EXPECT_TRUE(list_roundtrip.same_as(list));
+  EXPECT_TRUE(map_roundtrip.same_as(map));
+  EXPECT_TRUE(dict_roundtrip.same_as(dict));
+  EXPECT_TRUE(tuple_roundtrip.same_as(tuple));
+  ASSERT_TRUE(optional_roundtrip.has_value());
+  EXPECT_EQ(optional_roundtrip.value().get(), raw_composite);
+  EXPECT_EQ(variant_roundtrip.get<NumberPtr>().get(), raw_composite);
+  EXPECT_EQ(expected_roundtrip.value().get(), raw_composite);
+
+  Array<Optional<TNumberObj>> optional_array{optional, std::nullopt};
+  Map<TNumberObj, Array<TNumberObj>> nested_map{{value, array}};
+  using NestedVariant = Variant<Array<TNumberObj>, Optional<TNumberObj>, int64_t>;
+  Optional<NestedVariant> nested_optional = NestedVariant(array);
+  Expected<Optional<TNumberObj>> nested_expected = optional;
+
+  ASSERT_TRUE(optional_array[0].has_value());
+  EXPECT_EQ(optional_array[0].value().get(), raw_composite);
+  EXPECT_FALSE(optional_array[1].has_value());
+  EXPECT_EQ(nested_map[value][0].get(), raw_composite);
+  ASSERT_TRUE(nested_optional.has_value());
+  EXPECT_EQ(nested_optional.value().get<Array<TNumberObj>>()[0].get(), raw_composite);
+  ASSERT_TRUE(nested_expected.value().has_value());
+  EXPECT_EQ(nested_expected.value().value().get(), raw_composite);
+
+  EXPECT_EQ(TypeTraits<Array<TNumberObj>>::TypeSchema(),
+            TypeTraits<Array<NumberPtr>>::TypeSchema());
+  EXPECT_EQ(TypeTraits<List<TNumberObj>>::TypeSchema(), TypeTraits<List<NumberPtr>>::TypeSchema());
+  EXPECT_EQ((TypeTraits<Map<TNumberObj, TNumberObj>>::TypeSchema()),
+            (TypeTraits<Map<NumberPtr, NumberPtr>>::TypeSchema()));
+  EXPECT_EQ((TypeTraits<Dict<TNumberObj, TNumberObj>>::TypeSchema()),
+            (TypeTraits<Dict<NumberPtr, NumberPtr>>::TypeSchema()));
+  EXPECT_EQ(TypeTraits<Tuple<TNumberObj>>::TypeSchema(),
+            TypeTraits<Tuple<NumberPtr>>::TypeSchema());
+  EXPECT_EQ(TypeTraits<Optional<TNumberObj>>::TypeSchema(),
+            TypeTraits<Optional<NumberPtr>>::TypeSchema());
+  EXPECT_EQ((TypeTraits<Variant<TNumberObj, int64_t>>::TypeSchema()),
+            (TypeTraits<Variant<NumberPtr, int64_t>>::TypeSchema()));
+  EXPECT_EQ(TypeTraits<Expected<TNumberObj>>::TypeSchema(),
+            TypeTraits<Expected<NumberPtr>>::TypeSchema());
 }
 
 }  // namespace

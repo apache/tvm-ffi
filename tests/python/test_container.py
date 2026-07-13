@@ -435,7 +435,7 @@ def test_seq_cross_conv_list_to_array_int() -> None:
 def test_seq_cross_conv_array_to_list_int() -> None:
     """Array<int> passed to a function expecting List<int>."""
     arr = tvm_ffi.Array([10, 20, 30])
-    result = testing.schema_id_list_int(arr)  # type: ignore[invalid-argument-type]
+    result = testing.schema_id_list_int(arr)
     assert isinstance(result, tvm_ffi.List)
     assert list(result) == [10, 20, 30]
 
@@ -451,7 +451,7 @@ def test_seq_cross_conv_list_to_array_str() -> None:
 def test_seq_cross_conv_array_to_list_str() -> None:
     """Array<String> passed to a function expecting List<String>."""
     arr = tvm_ffi.Array(["a", "b", "c"])
-    result = testing.schema_id_list_str(arr)  # type: ignore[invalid-argument-type]
+    result = testing.schema_id_list_str(arr)
     assert isinstance(result, tvm_ffi.List)
     assert list(result) == ["a", "b", "c"]
 
@@ -467,7 +467,7 @@ def test_seq_cross_conv_empty_list_to_array() -> None:
 def test_seq_cross_conv_empty_array_to_list() -> None:
     """Empty Array passed to a function expecting List<int>."""
     arr = tvm_ffi.Array([])
-    result = testing.schema_id_list_int(arr)  # type: ignore[invalid-argument-type]
+    result = testing.schema_id_list_int(arr)
     assert isinstance(result, tvm_ffi.List)
     assert len(result) == 0
 
@@ -679,7 +679,7 @@ def test_map_cross_conv_dict_to_map_str_int() -> None:
 def test_map_cross_conv_map_to_dict_str_int() -> None:
     """Map<String, int> passed to a function expecting Dict<String, int>."""
     m = tvm_ffi.Map({"a": 1, "b": 2})
-    result = testing.schema_id_dict_str_int(m)  # type: ignore[invalid-argument-type]
+    result = testing.schema_id_dict_str_int(m)
     assert isinstance(result, tvm_ffi.Dict)
     assert result["a"] == 1
     assert result["b"] == 2
@@ -696,7 +696,7 @@ def test_map_cross_conv_dict_to_map_str_str() -> None:
 def test_map_cross_conv_map_to_dict_str_str() -> None:
     """Map<String, String> passed to a function expecting Dict<String, String>."""
     m = tvm_ffi.Map({"x": "hello", "y": "world"})
-    result = testing.schema_id_dict_str_str(m)  # type: ignore[invalid-argument-type]
+    result = testing.schema_id_dict_str_str(m)
     assert isinstance(result, tvm_ffi.Dict)
     assert result["x"] == "hello"
     assert result["y"] == "world"
@@ -713,7 +713,7 @@ def test_map_cross_conv_empty_dict_to_map() -> None:
 def test_map_cross_conv_empty_map_to_dict() -> None:
     """Empty Map passed to a function expecting Dict<String, int>."""
     m = tvm_ffi.Map({})
-    result = testing.schema_id_dict_str_int(m)  # type: ignore[invalid-argument-type]
+    result = testing.schema_id_dict_str_int(m)
     assert isinstance(result, tvm_ffi.Dict)
     assert len(result) == 0
 
