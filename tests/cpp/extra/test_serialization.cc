@@ -783,6 +783,34 @@ TEST(Serialization, NullObjectPtrFields) {
   EXPECT_EQ(result->alias, nullptr);
 }
 
+TEST(Serialization, RichObjectPtrFields) {
+  ObjectPtr<TNumberObj> primary = make_object<TIntObj>(42);
+  ObjectPtr<TNumberObj> secondary = make_object<TIntObj>(9);
+  ObjectPtr<TCompositeNumberObj> composite =
+      MakeCompositeNumber("serialized", 13, primary, secondary);
+  ObjectPtr<TNumberObj> alias = composite;
+  TObjectPtrHolder holder(nullptr, std::move(alias));
+
+  Any deserialized = FromJSONGraph(ToJSONGraph(holder));
+  TObjectPtrHolder result = deserialized.cast<TObjectPtrHolder>();
+  ObjectPtr<TCompositeNumberObj> rich =
+      AnyView(result->alias).cast<ObjectPtr<TCompositeNumberObj>>();
+
+  EXPECT_EQ(result->value, nullptr);
+  EXPECT_EQ(rich->name, "serialized");
+  EXPECT_EQ(rich->revision, 13);
+  ASSERT_TRUE(rich->primary->IsInstance<TIntObj>());
+  EXPECT_EQ(static_cast<TIntObj*>(rich->primary.get())->value, 42);
+  ASSERT_EQ(rich->children.size(), 3U);
+  EXPECT_EQ(rich->children[0].get(), rich->primary.get());
+  ASSERT_TRUE(rich->children[1]->IsInstance<TIntObj>());
+  EXPECT_EQ(static_cast<TIntObj*>(rich->children[1].get())->value, 9);
+  EXPECT_EQ(rich->children[2].get(), rich->primary.get());
+  EXPECT_EQ(rich->named_children["primary"].get(), rich->primary.get());
+  ASSERT_TRUE(rich->fallback.has_value());
+  EXPECT_EQ(rich->fallback.value().get(), rich->primary.get());
+}
+
 // ---------------------------------------------------------------------------
 // Nested objects
 // ---------------------------------------------------------------------------

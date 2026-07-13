@@ -30,6 +30,10 @@ namespace {
 using namespace tvm::ffi;
 using namespace tvm::ffi::testing;
 
+using CopyAssignableVariantArray = Array<Variant<int64_t, String>>;
+static_assert(std::is_copy_constructible_v<CopyAssignableVariantArray>);
+static_assert(std::is_copy_assignable_v<CopyAssignableVariantArray>);
+
 TEST(Variant, Basic) {
   Variant<int, float> v1 = 1;
   EXPECT_EQ(v1.get<int>(), 1);
@@ -67,6 +71,19 @@ TEST(Variant, ObjectPtrHashEqual) {
   Variant<TFloat, TInt> v0 = x;
   Variant<TFloat, TInt> v1 = y;
   Variant<TFloat, TInt> v2 = v1;  // NOLINT(performance-unnecessary-copy-initialization)
+
+  EXPECT_EQ(ObjectPtrHash()(v0), ObjectPtrHash()(x));
+  EXPECT_TRUE(!ObjectPtrEqual()(v0, v1));
+  EXPECT_TRUE(!ObjectPtrEqual()(v0, v2));
+}
+
+TEST(Variant, ObjectSubclassShorthandHashEqual) {
+  ObjectPtr<TIntObj> x = make_object<TIntObj>(1);
+  ObjectPtr<TFloatObj> y = make_object<TFloatObj>(1.0f);
+
+  Variant<TFloatObj, TIntObj> v0 = x;
+  Variant<TFloatObj, TIntObj> v1 = y;
+  Variant<TFloatObj, TIntObj> v2 = v1;  // NOLINT(performance-unnecessary-copy-initialization)
 
   EXPECT_EQ(ObjectPtrHash()(v0), ObjectPtrHash()(x));
   EXPECT_TRUE(!ObjectPtrEqual()(v0, v1));

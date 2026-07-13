@@ -69,9 +69,9 @@ template <typename K, typename V,
 class Dict : public ObjectRef {
  public:
   /*! \brief The key type of the dict */
-  using key_type = K;
+  using key_type = details::object_ptr_type_t<K>;
   /*! \brief The mapped type of the dict */
-  using mapped_type = V;
+  using mapped_type = details::object_ptr_type_t<V>;
   /*! \brief The iterator type of the dict */
   class iterator;
   /*!
@@ -102,7 +102,8 @@ class Dict : public ObjectRef {
    * \tparam VU The mapped type of the other dict
    */
   template <typename KU, typename VU,
-            typename = std::enable_if_t<type_subsumes_v<K, KU> && type_subsumes_v<V, VU>>>
+            typename = std::enable_if_t<details::container_type_subsumes_v<K, KU> &&
+                                        details::container_type_subsumes_v<V, VU>>>
   Dict(Dict<KU, VU>&& other)  // NOLINT(google-explicit-constructor)
       : ObjectRef(std::move(other.data_)) {}
 
@@ -113,7 +114,8 @@ class Dict : public ObjectRef {
    * \tparam VU The mapped type of the other dict
    */
   template <typename KU, typename VU,
-            typename = std::enable_if_t<type_subsumes_v<K, KU> && type_subsumes_v<V, VU>>>
+            typename = std::enable_if_t<details::container_type_subsumes_v<K, KU> &&
+                                        details::container_type_subsumes_v<V, VU>>>
   // NOLINTNEXTLINE(google-explicit-constructor)
   Dict(const Dict<KU, VU>& other) : ObjectRef(other.data_) {}
 
@@ -142,7 +144,8 @@ class Dict : public ObjectRef {
    * \tparam VU The mapped type of the other dict
    */
   template <typename KU, typename VU,
-            typename = std::enable_if_t<type_subsumes_v<K, KU> && type_subsumes_v<V, VU>>>
+            typename = std::enable_if_t<details::container_type_subsumes_v<K, KU> &&
+                                        details::container_type_subsumes_v<V, VU>>>
   Dict<K, V>& operator=(Dict<KU, VU>&& other) {
     data_ = std::move(other.data_);
     return *this;
@@ -155,7 +158,8 @@ class Dict : public ObjectRef {
    * \tparam VU The mapped type of the other dict
    */
   template <typename KU, typename VU,
-            typename = std::enable_if_t<type_subsumes_v<K, KU> && type_subsumes_v<V, VU>>>
+            typename = std::enable_if_t<details::container_type_subsumes_v<K, KU> &&
+                                        details::container_type_subsumes_v<V, VU>>>
   Dict<K, V>& operator=(const Dict<KU, VU>& other) {
     data_ = other.data_;
     return *this;
@@ -179,7 +183,7 @@ class Dict : public ObjectRef {
    * \brief constructor from initializer list
    * \param init The initalizer list
    */
-  Dict(std::initializer_list<std::pair<K, V>> init) {
+  Dict(std::initializer_list<std::pair<key_type, mapped_type>> init) {
     data_ = DictObj::CreateFromRange<DictObj>(init.begin(), init.end());
   }
   /*!
@@ -187,7 +191,7 @@ class Dict : public ObjectRef {
    * \param init The unordered_map
    */
   template <typename Hash, typename Equal>
-  Dict(const std::unordered_map<K, V, Hash, Equal>& init) {  // NOLINT(*)
+  Dict(const std::unordered_map<key_type, mapped_type, Hash, Equal>& init) {  // NOLINT(*)
     data_ = DictObj::CreateFromRange<DictObj>(init.begin(), init.end());
   }
   /*!
@@ -195,22 +199,22 @@ class Dict : public ObjectRef {
    * \param key The key
    * \return the corresponding element.
    */
-  V at(const K& key) const {
-    return details::AnyUnsafe::CopyFromAnyViewAfterCheck<V>(GetDictObj()->at(key));
+  mapped_type at(const key_type& key) const {
+    return details::AnyUnsafe::CopyFromAnyViewAfterCheck<mapped_type>(GetDictObj()->at(key));
   }
   /*!
    * \brief Read element from dict.
    * \param key The key
    * \return the corresponding element.
    */
-  V operator[](const K& key) const { return this->at(key); }
+  mapped_type operator[](const key_type& key) const { return this->at(key); }
   /*! \return The size of the dict */
   size_t size() const {
     DictObj* n = GetDictObj();
     return n == nullptr ? 0 : n->size();
   }
   /*! \return The number of elements of the key */
-  size_t count(const K& key) const {
+  size_t count(const key_type& key) const {
     DictObj* n = GetDictObj();
     return n == nullptr ? 0 : n->count(key);
   }
@@ -228,7 +232,7 @@ class Dict : public ObjectRef {
    * \param key The index key.
    * \param value The value to be set.
    */
-  void Set(const K& key, const V& value) {
+  void Set(const key_type& key, const mapped_type& value) {
     EnsureDictObj();
     ObjectPtr<Object> new_container =
         MapBaseObj::InsertMaybeReHash<DictObj>(DictObj::KVType(key, value), data_);
@@ -241,21 +245,21 @@ class Dict : public ObjectRef {
   /*! \return end iterator */
   iterator end() const { return iterator(GetDictObj()->end()); }
   /*! \return find the key and returns the associated iterator */
-  iterator find(const K& key) const { return iterator(GetDictObj()->find(key)); }
+  iterator find(const key_type& key) const { return iterator(GetDictObj()->find(key)); }
   /*! \return The value associated with the key, std::nullopt if not found */
-  std::optional<V> Get(const K& key) const {
+  std::optional<mapped_type> Get(const key_type& key) const {
     DictObj::iterator iter = GetDictObj()->find(key);
     if (iter == GetDictObj()->end()) {
       return std::nullopt;
     }
-    return details::AnyUnsafe::CopyFromAnyViewAfterCheck<V>(iter->second);
+    return details::AnyUnsafe::CopyFromAnyViewAfterCheck<mapped_type>(iter->second);
   }
 
   /*!
    * \brief Erase the entry associated with the key (mutates in-place)
    * \param key The key
    */
-  void erase(const K& key) {
+  void erase(const key_type& key) {
     DictObj* n = GetDictObj();
     if (n != nullptr) {
       n->erase(key);
@@ -273,7 +277,7 @@ class Dict : public ObjectRef {
    public:
     using iterator_category = std::bidirectional_iterator_tag;
     using difference_type = int64_t;
-    using value_type = const std::pair<K, V>;
+    using value_type = const std::pair<key_type, mapped_type>;
     using pointer = value_type*;
     using reference = value_type;
 
@@ -288,8 +292,8 @@ class Dict : public ObjectRef {
     /*! \brief De-reference iterators */
     reference operator*() const {
       auto& kv = *itr;
-      return std::make_pair(details::AnyUnsafe::CopyFromAnyViewAfterCheck<K>(kv.first),
-                            details::AnyUnsafe::CopyFromAnyViewAfterCheck<V>(kv.second));
+      return std::make_pair(details::AnyUnsafe::CopyFromAnyViewAfterCheck<key_type>(kv.first),
+                            details::AnyUnsafe::CopyFromAnyViewAfterCheck<mapped_type>(kv.second));
     }
     /*! \brief Prefix self increment, e.g. ++iter */
     iterator& operator++() {
@@ -346,7 +350,9 @@ template <typename K, typename V>
 inline constexpr bool use_default_type_traits_v<Dict<K, V>> = false;
 
 template <typename K, typename V>
-struct TypeTraits<Dict<K, V>> : public MapTypeTraitsBase<TypeTraits<Dict<K, V>>, Dict<K, V>, K, V> {
+struct TypeTraits<Dict<K, V>>
+    : public MapTypeTraitsBase<TypeTraits<Dict<K, V>>, Dict<K, V>, typename Dict<K, V>::key_type,
+                               typename Dict<K, V>::mapped_type> {
   static constexpr int32_t kPrimaryTypeIndex = TypeIndex::kTVMFFIDict;
   static constexpr int32_t kOtherTypeIndex = TypeIndex::kTVMFFIMap;
   static constexpr const char* kTypeName = "Dict";
@@ -354,8 +360,8 @@ struct TypeTraits<Dict<K, V>> : public MapTypeTraitsBase<TypeTraits<Dict<K, V>>,
   TVM_FFI_INLINE static std::string TypeSchema() {
     std::ostringstream oss;
     oss << R"({"type":")" << StaticTypeKey::kTVMFFIDict << R"(","args":[)";
-    oss << details::TypeSchema<K>::v() << ",";
-    oss << details::TypeSchema<V>::v();
+    oss << details::TypeSchema<typename Dict<K, V>::key_type>::v() << ",";
+    oss << details::TypeSchema<typename Dict<K, V>::mapped_type>::v();
     oss << "]}";
     return oss.str();
   }
@@ -365,7 +371,7 @@ struct TypeTraits<Dict<K, V>> : public MapTypeTraitsBase<TypeTraits<Dict<K, V>>,
 /*! \brief Whether target Dict storage subsumes source Dict storage key- and value-wise. */
 template <typename K, typename V, typename KU, typename VU>
 inline constexpr bool type_subsumes_v<Dict<K, V>, Dict<KU, VU>> =
-    type_subsumes_v<K, KU> && type_subsumes_v<V, VU>;
+    details::container_type_subsumes_v<K, KU> && details::container_type_subsumes_v<V, VU>;
 /// \endcond
 
 }  // namespace ffi

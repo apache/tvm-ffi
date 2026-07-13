@@ -65,9 +65,9 @@ template <typename K, typename V,
 class Map : public ObjectRef {
  public:
   /*! \brief The key type of the map */
-  using key_type = K;
+  using key_type = details::object_ptr_type_t<K>;
   /*! \brief The mapped type of the map */
-  using mapped_type = V;
+  using mapped_type = details::object_ptr_type_t<V>;
   /*! \brief The iterator type of the map */
   class iterator;
   /*!
@@ -98,7 +98,8 @@ class Map : public ObjectRef {
    * \tparam VU The mapped type of the other map
    */
   template <typename KU, typename VU,
-            typename = std::enable_if_t<type_subsumes_v<K, KU> && type_subsumes_v<V, VU>>>
+            typename = std::enable_if_t<details::container_type_subsumes_v<K, KU> &&
+                                        details::container_type_subsumes_v<V, VU>>>
   Map(Map<KU, VU>&& other)  // NOLINT(google-explicit-constructor)
       : ObjectRef(std::move(other.data_)) {}
 
@@ -109,7 +110,8 @@ class Map : public ObjectRef {
    * \tparam VU The mapped type of the other map
    */
   template <typename KU, typename VU,
-            typename = std::enable_if_t<type_subsumes_v<K, KU> && type_subsumes_v<V, VU>>>
+            typename = std::enable_if_t<details::container_type_subsumes_v<K, KU> &&
+                                        details::container_type_subsumes_v<V, VU>>>
   Map(const Map<KU, VU>& other) : ObjectRef(other.data_) {}  // NOLINT(google-explicit-constructor)
 
   /*!
@@ -137,7 +139,8 @@ class Map : public ObjectRef {
    * \tparam VU The mapped type of the other map
    */
   template <typename KU, typename VU,
-            typename = std::enable_if_t<type_subsumes_v<K, KU> && type_subsumes_v<V, VU>>>
+            typename = std::enable_if_t<details::container_type_subsumes_v<K, KU> &&
+                                        details::container_type_subsumes_v<V, VU>>>
   Map<K, V>& operator=(Map<KU, VU>&& other) {
     data_ = std::move(other.data_);
     return *this;
@@ -150,7 +153,8 @@ class Map : public ObjectRef {
    * \tparam VU The mapped type of the other map
    */
   template <typename KU, typename VU,
-            typename = std::enable_if_t<type_subsumes_v<K, KU> && type_subsumes_v<V, VU>>>
+            typename = std::enable_if_t<details::container_type_subsumes_v<K, KU> &&
+                                        details::container_type_subsumes_v<V, VU>>>
   Map<K, V>& operator=(const Map<KU, VU>& other) {
     data_ = other.data_;
     return *this;
@@ -174,7 +178,7 @@ class Map : public ObjectRef {
    * \brief constructor from initializer list
    * \param init The initalizer list
    */
-  Map(std::initializer_list<std::pair<K, V>> init) {
+  Map(std::initializer_list<std::pair<key_type, mapped_type>> init) {
     data_ = MapObj::CreateFromRange<MapObj>(init.begin(), init.end());
   }
   /*!
@@ -182,7 +186,7 @@ class Map : public ObjectRef {
    * \param init The unordered_map
    */
   template <typename Hash, typename Equal>
-  Map(const std::unordered_map<K, V, Hash, Equal>& init) {  // NOLINT(*)
+  Map(const std::unordered_map<key_type, mapped_type, Hash, Equal>& init) {  // NOLINT(*)
     data_ = MapObj::CreateFromRange<MapObj>(init.begin(), init.end());
   }
   /*!
@@ -190,22 +194,22 @@ class Map : public ObjectRef {
    * \param key The key
    * \return the corresonding element.
    */
-  const V at(const K& key) const {
-    return details::AnyUnsafe::CopyFromAnyViewAfterCheck<V>(GetMapObj()->at(key));
+  const mapped_type at(const key_type& key) const {
+    return details::AnyUnsafe::CopyFromAnyViewAfterCheck<mapped_type>(GetMapObj()->at(key));
   }
   /*!
    * \brief Read element from map.
    * \param key The key
    * \return the corresonding element.
    */
-  const V operator[](const K& key) const { return this->at(key); }
+  const mapped_type operator[](const key_type& key) const { return this->at(key); }
   /*! \return The size of the array */
   size_t size() const {
     MapObj* n = GetMapObj();
     return n == nullptr ? 0 : n->size();
   }
   /*! \return The number of elements of the key */
-  size_t count(const K& key) const {
+  size_t count(const key_type& key) const {
     MapObj* n = GetMapObj();
     return n == nullptr ? 0 : GetMapObj()->count(key);
   }
@@ -223,7 +227,7 @@ class Map : public ObjectRef {
    * \param key The index key.
    * \param value The value to be setted.
    */
-  void Set(const K& key, const V& value) {
+  void Set(const key_type& key, const mapped_type& value) {
     CopyOnWrite();
     ObjectPtr<Object> new_data =
         MapObj::InsertMaybeReHash<MapObj>(MapObj::KVType(key, value), data_);
@@ -236,21 +240,21 @@ class Map : public ObjectRef {
   /*! \return end iterator */
   iterator end() const { return iterator(GetMapObj()->end()); }
   /*! \return find the key and returns the associated iterator */
-  iterator find(const K& key) const { return iterator(GetMapObj()->find(key)); }
+  iterator find(const key_type& key) const { return iterator(GetMapObj()->find(key)); }
   /*! \return The value associated with the key, std::nullopt if not found */
-  std::optional<V> Get(const K& key) const {
+  std::optional<mapped_type> Get(const key_type& key) const {
     MapObj::iterator iter = GetMapObj()->find(key);
     if (iter == GetMapObj()->end()) {
       return std::nullopt;
     }
-    return details::AnyUnsafe::CopyFromAnyViewAfterCheck<V>(iter->second);
+    return details::AnyUnsafe::CopyFromAnyViewAfterCheck<mapped_type>(iter->second);
   }
 
   /*!
    * \brief Erase the entry associated with the key
    * \param key The key
    */
-  void erase(const K& key) { CopyOnWrite()->erase(key); }
+  void erase(const key_type& key) { CopyOnWrite()->erase(key); }
 
   /*!
    * \brief copy on write semantics
@@ -279,7 +283,7 @@ class Map : public ObjectRef {
    public:
     using iterator_category = std::bidirectional_iterator_tag;
     using difference_type = int64_t;
-    using value_type = const std::pair<K, V>;
+    using value_type = const std::pair<key_type, mapped_type>;
     using pointer = value_type*;
     using reference = value_type;
 
@@ -294,8 +298,8 @@ class Map : public ObjectRef {
     /*! \brief De-reference iterators */
     reference operator*() const {
       auto& kv = *itr;
-      return std::make_pair(details::AnyUnsafe::CopyFromAnyViewAfterCheck<K>(kv.first),
-                            details::AnyUnsafe::CopyFromAnyViewAfterCheck<V>(kv.second));
+      return std::make_pair(details::AnyUnsafe::CopyFromAnyViewAfterCheck<key_type>(kv.first),
+                            details::AnyUnsafe::CopyFromAnyViewAfterCheck<mapped_type>(kv.second));
     }
     /*! \brief Prefix self increment, e.g. ++iter */
     iterator& operator++() {
@@ -361,7 +365,9 @@ template <typename K, typename V>
 inline constexpr bool use_default_type_traits_v<Map<K, V>> = false;
 
 template <typename K, typename V>
-struct TypeTraits<Map<K, V>> : public MapTypeTraitsBase<TypeTraits<Map<K, V>>, Map<K, V>, K, V> {
+struct TypeTraits<Map<K, V>>
+    : public MapTypeTraitsBase<TypeTraits<Map<K, V>>, Map<K, V>, typename Map<K, V>::key_type,
+                               typename Map<K, V>::mapped_type> {
   static constexpr int32_t kPrimaryTypeIndex = TypeIndex::kTVMFFIMap;
   static constexpr int32_t kOtherTypeIndex = TypeIndex::kTVMFFIDict;
   static constexpr const char* kTypeName = "Map";
@@ -369,8 +375,8 @@ struct TypeTraits<Map<K, V>> : public MapTypeTraitsBase<TypeTraits<Map<K, V>>, M
   TVM_FFI_INLINE static std::string TypeSchema() {
     std::ostringstream oss;
     oss << R"({"type":")" << StaticTypeKey::kTVMFFIMap << R"(","args":[)";
-    oss << details::TypeSchema<K>::v() << ",";
-    oss << details::TypeSchema<V>::v();
+    oss << details::TypeSchema<typename Map<K, V>::key_type>::v() << ",";
+    oss << details::TypeSchema<typename Map<K, V>::mapped_type>::v();
     oss << "]}";
     return oss.str();
   }
@@ -380,7 +386,7 @@ struct TypeTraits<Map<K, V>> : public MapTypeTraitsBase<TypeTraits<Map<K, V>>, M
 /*! \brief Whether target Map storage subsumes source Map storage key- and value-wise. */
 template <typename K, typename V, typename KU, typename VU>
 inline constexpr bool type_subsumes_v<Map<K, V>, Map<KU, VU>> =
-    type_subsumes_v<K, KU> && type_subsumes_v<V, VU>;
+    details::container_type_subsumes_v<K, KU> && details::container_type_subsumes_v<V, VU>;
 /// \endcond
 
 }  // namespace ffi

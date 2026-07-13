@@ -55,7 +55,7 @@ class Variant {
    * \brief Helper utility to check if the type can be contained in the variant
    */
   template <typename T>
-  static constexpr bool variant_contains_v = (type_subsumes_v<V, T> || ...);
+  static constexpr bool variant_contains_v = (details::container_type_subsumes_v<V, T> || ...);
   /* \brief Helper utility for SFINAE if the type is part of the variant */
   template <typename T>
   using enable_if_variant_contains_t = std::enable_if_t<variant_contains_v<T>>;
@@ -71,6 +71,18 @@ class Variant {
    */
   Variant(Variant<V...>&& other) noexcept = default;
 
+  /*! \brief Convert from a variant whose normalized alternatives are all contained. */
+  template <typename... U,
+            std::enable_if_t<
+                !std::is_same_v<Variant, Variant<U...>> && (variant_contains_v<U> && ...), int> = 0>
+  Variant(const Variant<U...>& other) : data_(Any(other)) {}  // NOLINT(*)
+
+  /*! \brief Move from a variant whose normalized alternatives are all contained. */
+  template <typename... U,
+            std::enable_if_t<
+                !std::is_same_v<Variant, Variant<U...>> && (variant_contains_v<U> && ...), int> = 0>
+  Variant(Variant<U...>&& other) : data_(Any(std::move(other))) {}  // NOLINT(*)
+
   /*!
    * \brief Assignment from another variant
    * \param other The other variant
@@ -82,6 +94,20 @@ class Variant {
    * \param other The other variant
    */
   Variant& operator=(Variant<V...>&& other) noexcept = default;
+
+  template <typename... U,
+            std::enable_if_t<
+                !std::is_same_v<Variant, Variant<U...>> && (variant_contains_v<U> && ...), int> = 0>
+  TVM_FFI_INLINE Variant& operator=(const Variant<U...>& other) {
+    return operator=(Variant(other));
+  }
+
+  template <typename... U,
+            std::enable_if_t<
+                !std::is_same_v<Variant, Variant<U...>> && (variant_contains_v<U> && ...), int> = 0>
+  TVM_FFI_INLINE Variant& operator=(Variant<U...>&& other) {
+    return operator=(Variant(std::move(other)));
+  }
 
   /*!
    * \brief Constructor from a contained value
@@ -163,13 +189,16 @@ class Variant {
   explicit Variant(Any data) : data_(std::move(data)) {}
   /*!
    * \brief Get the object pointer from the variant
-   * \note This function is only available if all types used in Variant<...> are derived from
-   * ObjectRef
+   * \note This function is only available if all types used in Variant<...> normalize to
+   * ObjectRef or ObjectPtr storage.
    */
   TVM_FFI_INLINE Object* GetObjectPtrForHashEqual() const {
-    constexpr bool all_object_v = (std::is_base_of_v<ObjectRef, V> && ...);
+    constexpr bool all_object_v =
+        ((TypeTraits<details::object_ptr_type_t<V>>::field_static_type_index ==
+          TypeIndex::kTVMFFIObject) &&
+         ...);
     static_assert(all_object_v,
-                  "All types used in Variant<...> must be derived from ObjectRef "
+                  "All types used in Variant<...> must be ObjectRef or ObjectPtr types "
                   "to enable ObjectPtrHash/ObjectPtrEqual");
     return details::AnyUnsafe::ObjectPtrFromAnyAfterCheck(this->data_);
   }
@@ -197,7 +226,7 @@ struct TypeTraits<Variant<V...>> : public TypeTraitsBase {
   }
 
   TVM_FFI_INLINE static bool CheckAnyStrict(const TVMFFIAny* src) {
-    return (TypeTraits<V>::CheckAnyStrict(src) || ...);
+    return (TypeTraits<details::object_ptr_type_t<V>>::CheckAnyStrict(src) || ...);
   }
 
   TVM_FFI_INLINE static Variant<V...> CopyFromAnyViewAfterCheck(const TVMFFIAny* src) {
@@ -214,7 +243,7 @@ struct TypeTraits<Variant<V...>> : public TypeTraitsBase {
       return CopyFromAnyViewAfterCheck(src);
     }
     // More expensive path, try to convert to each type, in order of declaration
-    return TryVariantTypes<V...>(src);
+    return TryVariantTypes<details::object_ptr_type_t<V>...>(src);
   }
 
   template <typename VariantType, typename... Rest>
@@ -228,12 +257,14 @@ struct TypeTraits<Variant<V...>> : public TypeTraitsBase {
     return std::nullopt;
   }
 
-  TVM_FFI_INLINE static std::string TypeStr() { return details::ContainerTypeStr<V...>("Variant"); }
+  TVM_FFI_INLINE static std::string TypeStr() {
+    return details::ContainerTypeStr<details::object_ptr_type_t<V>...>("Variant");
+  }
   TVM_FFI_INLINE static std::string TypeSchema() {
     std::ostringstream oss;
     oss << R"({"type":"Variant","args":[)";
     const char* sep = "";
-    ((oss << sep << details::TypeSchema<V>::v(), sep = ","), ...);
+    ((oss << sep << details::TypeSchema<details::object_ptr_type_t<V>>::v(), sep = ","), ...);
     oss << "]}";
     return oss.str();
   }
@@ -251,9 +282,25 @@ TVM_FFI_INLINE bool ObjectPtrEqual::operator()(const Variant<V...>& a,
 }
 
 /// \cond Doxygen_Suppress
+namespace details {
+
+template <typename TargetVariant, typename SourceType>
+struct VariantSubsumes;
+
+template <typename... V, typename SourceType>
+struct VariantSubsumes<Variant<V...>, SourceType>
+    : std::bool_constant<(container_type_subsumes_v<V, SourceType> || ...)> {};
+
+template <typename... V, typename... U>
+struct VariantSubsumes<Variant<V...>, Variant<U...>>
+    : std::bool_constant<(VariantSubsumes<Variant<V...>, U>::value && ...)> {};
+
+}  // namespace details
+
 /*! \brief Whether Variant storage subsumes a source type through one alternative. */
 template <typename... V, typename T>
-inline constexpr bool type_subsumes_v<Variant<V...>, T> = (type_subsumes_v<V, T> || ...);
+inline constexpr bool type_subsumes_v<Variant<V...>, T> =
+    details::VariantSubsumes<Variant<V...>, T>::value;
 /// \endcond
 }  // namespace ffi
 }  // namespace tvm

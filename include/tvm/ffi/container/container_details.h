@@ -159,7 +159,8 @@ class ReverseIterAdapter {
  * \return True if T is compatible with Any, false otherwise.
  */
 template <typename T>
-inline constexpr bool storage_enabled_v = std::is_same_v<T, Any> || TypeTraits<T>::storage_enabled;
+inline constexpr bool storage_enabled_v =
+    std::is_same_v<object_ptr_type_t<T>, Any> || TypeTraits<object_ptr_type_t<T>>::storage_enabled;
 
 /*!
  * \brief Check if all T are compatible with Any.
@@ -169,6 +170,15 @@ inline constexpr bool storage_enabled_v = std::is_same_v<T, Any> || TypeTraits<T
  */
 template <typename... T>
 inline constexpr bool all_storage_enabled_v = (storage_enabled_v<T> && ...);
+
+/*!
+ * \brief Check whether one normalized container value type subsumes another.
+ * \tparam TargetType The destination container's declared value type.
+ * \tparam SourceType The source value type.
+ */
+template <typename TargetType, typename SourceType>
+inline constexpr bool container_type_subsumes_v =
+    type_subsumes_v<object_ptr_type_t<TargetType>, object_ptr_type_t<SourceType>>;
 
 /*!
  * \brief Check if all T are compatible with Any.

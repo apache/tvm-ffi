@@ -414,11 +414,9 @@ class ObjectPtr {
    * \brief copy constructor
    * \param other The value to be moved
    */
-  template <typename U>
+  template <typename U, typename = std::enable_if_t<std::is_base_of_v<T, U>>>
   ObjectPtr(const ObjectPtr<U>& other)  // NOLINT(*)
-      : ObjectPtr(other.data_) {
-    static_assert(std::is_base_of_v<T, U>, "can only assign of child class ObjectPtr to parent");
-  }
+      : ObjectPtr(other.data_) {}
   /*!
    * \brief move constructor
    * \param other The value to be moved
@@ -431,10 +429,9 @@ class ObjectPtr {
    * \brief move constructor
    * \param other The value to be moved
    */
-  template <typename Y>
+  template <typename Y, typename = std::enable_if_t<std::is_base_of_v<T, Y>>>
   ObjectPtr(ObjectPtr<Y>&& other)  // NOLINT(*)
       : data_(other.data_) {
-    static_assert(std::is_base_of_v<T, Y>, "can only assign of child class ObjectPtr to parent");
     other.data_ = nullptr;
   }
   /*! \brief destructor */
@@ -531,12 +528,42 @@ class ObjectPtr {
 
 namespace details {
 
+/// \cond Doxygen_Suppress
+struct ObjectSubclassChecker {
+  static std::true_type Check(const volatile Object*) { return {}; }
+  static std::false_type Check(...) { return {}; }
+};
+
+template <typename T, typename = void>
+struct IsObjectSubclass : std::false_type {};
+
+template <typename T>
+struct IsObjectSubclass<T, std::void_t<T*>>
+    : decltype(ObjectSubclassChecker::Check(std::declval<T*>())){};
+/// \endcond
+
 /*!
  * \brief Whether T is Object or a subclass of Object.
  * \tparam T The type to inspect.
  */
 template <typename T>
-inline constexpr bool is_object_subclass_v = std::is_base_of_v<Object, T>;
+inline constexpr bool is_object_subclass_v = IsObjectSubclass<T>::value;
+
+template <typename T, typename = void>
+struct ObjectPtrType {
+  using type = T;
+};
+
+template <typename TObject>
+struct ObjectPtrType<TObject,
+                     std::enable_if_t<is_object_subclass_v<TObject> &&
+                                      std::is_same_v<TObject, std::remove_cv_t<TObject>>>> {
+  using type = ObjectPtr<TObject>;
+};
+
+/*! \brief The normalized owning storage type for generic FFI containers. */
+template <typename T>
+using object_ptr_type_t = typename ObjectPtrType<T>::type;
 
 /*! \brief Whether T is an Object subclass with cv- or reference qualification. */
 template <typename T>

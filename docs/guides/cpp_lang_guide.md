@@ -134,6 +134,30 @@ null pointer is represented by the FFI `None` value. Qualified pointee types suc
 Because the ABI has one `None` representation, `Optional<ObjectPtr<T>>` cannot preserve the
 difference between an absent optional and a present null pointer across an FFI round trip.
 
+Generic FFI containers provide a shorthand for these pointers. When an unqualified `Object`
+subclass is used as a container template argument, the container normalizes its effective value
+type to `ObjectPtr<T>`:
+
+```cpp
+using PairPtr = ffi::ObjectPtr<MyIntPairObj>;
+
+ffi::Array<MyIntPairObj> values;                  // stores PairPtr
+ffi::List<MyIntPairObj> mutable_values;           // stores PairPtr
+ffi::Map<MyIntPairObj, MyIntPairObj> lookup;      // maps PairPtr to PairPtr
+ffi::Dict<MyIntPairObj, MyIntPairObj> mutable_lookup;
+ffi::Tuple<MyIntPairObj> tuple;                   // get<0>() returns PairPtr
+ffi::Optional<MyIntPairObj> optional;             // value() returns PairPtr
+ffi::Variant<MyIntPairObj, int64_t> variant;      // get<PairPtr>() returns PairPtr
+ffi::Expected<MyIntPairObj> expected;             // value() returns PairPtr
+```
+
+The shorthand and explicit spellings have the same element checks, ownership behavior, FFI type
+schemas, and runtime storage. Sequence, mapping, and tuple handles can also be converted between
+the two spellings without copying their backing container. The public templates remain class
+templates—rather than C++ alias templates—to preserve C++17 class-template argument deduction.
+As with direct `ObjectPtr` support, `const`, `volatile`, reference, and other qualified object
+types are deliberately not normalized.
+
 We typically provide a reference class that wraps the ObjectPtr.
 The `ObjectRef` base class provides the interface and reference counting
 functionality for these wrapper classes.
