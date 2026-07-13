@@ -261,8 +261,11 @@ def collect_files(paths: list[Path]) -> list[FileInfo]:
                         continue
                     yield f
 
+    def _path_sort_key(path: Path) -> str:
+        return str(path)
+
     filenames = list(_walk_recursive())
-    filenames = sorted(filenames, key=lambda f: str(f))
+    filenames = sorted(filenames, key=_path_sort_key)
     files = []
     for file in filenames:
         try:

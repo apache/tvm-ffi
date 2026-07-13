@@ -398,8 +398,10 @@ cdef int TVMFFIPyArgSetterDType_(
 ) except -1:
     """Setter for dtype"""
     cdef object arg = <object>py_arg
-    # dtype is a subclass of str, so this check occur before str
-    arg = arg._tvm_ffi_dtype
+    # tvm_ffi.dtype is a subclass of str, so this check occurs before str.
+    # The internal DataType helper can also be produced by TypeSchema converters.
+    if not isinstance(arg, DataType):
+        arg = arg._tvm_ffi_dtype
     out.type_index = kTVMFFIDataType
     out.v_dtype = (<DataType>arg).cdtype
     return 0
@@ -817,9 +819,15 @@ cdef public int TVMFFICyArgSetterFactory(PyObject* value, TVMFFIPyArgSetter* out
         # because Real may not be exactly the float class
         out.func = TVMFFIPyArgSetterReal_
         return 0
+    if isinstance(arg, DataType):
+        out.func = TVMFFIPyArgSetterDType_
+        return 0
     # dtype is a subclass of str, so this check must occur before str
     if isinstance(arg, _CLASS_DTYPE):
         out.func = TVMFFIPyArgSetterDType_
+        return 0
+    if isinstance(arg, Device):
+        out.func = TVMFFIPyArgSetterDevice_
         return 0
     if isinstance(arg, _CLASS_DEVICE):
         out.func = TVMFFIPyArgSetterDevice_

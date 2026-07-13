@@ -20,12 +20,14 @@ from __future__ import annotations
 
 import copy
 from collections.abc import Callable
-from typing import Any
+from typing import Any, TypeVar
 
 from ..container import Array, Dict, List, Map
 from .field import Field
 
 __all__ = ["asdict", "astuple", "fields", "is_dataclass", "replace"]
+
+_T = TypeVar("_T")
 
 # Exact-type fast path for atomic (immutable, non-recursive) values.  Mirrors
 # :data:`dataclasses._ATOMIC_TYPES` from the standard library.
@@ -47,6 +49,8 @@ _ATOMIC_TYPES: frozenset[type] = frozenset(
 def is_dataclass(obj: Any) -> bool:
     """Return True if ``obj`` is a ``@c_class`` / ``@py_class`` type or instance.
 
+    The decorators set an internal ``__ffi_is_dataclass__`` marker after
+    successful registration, and this helper checks that marker on the class.
     Returns False for FFI container types (:class:`~tvm_ffi.Array`,
     :class:`~tvm_ffi.List`, :class:`~tvm_ffi.Map`, :class:`~tvm_ffi.Dict`)
     even though they also carry ``__tvm_ffi_type_info__``; those are
@@ -54,7 +58,7 @@ def is_dataclass(obj: Any) -> bool:
     through the dataclass decorators.
     """
     cls = obj if isinstance(obj, type) else type(obj)
-    return getattr(cls, "__tvm_ffi_is_dataclass__", False) is True
+    return getattr(cls, "__ffi_is_dataclass__", False) is True
 
 
 def fields(obj_or_cls: Any) -> tuple[Field, ...]:
@@ -89,7 +93,7 @@ def fields(obj_or_cls: Any) -> tuple[Field, ...]:
     return tuple(out)
 
 
-def replace(obj: Any, /, **changes: Any) -> Any:
+def replace(obj: _T, /, **changes: Any) -> _T:
     """Return a copy of ``obj`` with selected fields replaced.
 
     Drop-in for :func:`dataclasses.replace` for FFI-backed instances: the
@@ -97,7 +101,7 @@ def replace(obj: Any, /, **changes: Any) -> Any:
     which uses the ``FFIProperty.set()`` escape hatch so frozen fields are
     still replaceable.
     """
-    return obj.__replace__(**changes)
+    return getattr(obj, "__replace__")(**changes)
 
 
 def _is_ffi_dataclass_instance(obj: Any) -> bool:

@@ -129,7 +129,7 @@ class Field:
         "structural_eq",
         "type",
     )
-    name: str | None
+    name: str
     _ty_schema: TypeSchema | None
     type: Any
     default: object
@@ -186,7 +186,7 @@ class Field:
                 f"{sorted(Field._VALID_STRUCTURAL_EQ_VALUES, key=str)}, "
                 f"got {structural_eq!r}"
             )
-        self.name = name
+        self.name = name  # ty: ignore[invalid-assignment]
         self._ty_schema = _ty_schema
         self.type = None
         self.default = default

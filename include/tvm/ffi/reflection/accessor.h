@@ -343,11 +343,11 @@ inline constexpr const char* kInit = "__ffi_init__";
 /*!
  * \brief Convert ``AnyView`` to a specific reflected ``TSelf`` type.
  *
- * Registered via ``TypeAttrDef<T>.def(kConvert, &FFIConvertFromAnyViewToObjectRef<T>)``
- * for every type that calls ``.ref<T>()``.  Used by the Python type converter
+ * Registered via ``TypeAttrDef<TObj>().def_convert<TSelf>()`` or
+ * ``ObjectDef<TObj>().def_convert<TSelf>()``. Used by the Python type converter
  * to marshal values into the correct ``TSelf`` subclass.
  *
- * Signature: ``(AnyView src) -> TSelf``, where ``TSelf`` is a subclass of ObjectRef.
+ * Signature: ``(AnyView src) -> TSelf``, where ``TSelf`` has a registered TypeTraits converter.
  */
 inline constexpr const char* kConvert = "__ffi_convert__";
 /*!

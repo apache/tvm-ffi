@@ -17,4 +17,5 @@
 """Utilities used by the tvm_ffi Python package."""
 
 from . import kwargs_wrapper
+from .descriptors import init_property
 from .lockfile import FileLock

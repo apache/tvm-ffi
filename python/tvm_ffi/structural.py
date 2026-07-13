@@ -330,7 +330,7 @@ class VisitInterrupt(Object):
     # fmt: off
     value: Any
     if TYPE_CHECKING:
-        def __init__(self, value: Any = ...) -> None: ...
+        def __init__(self, value: Any) -> None: ...
         def __ffi_init__(self, _0: Any, /) -> None: ...  # ty: ignore[invalid-method-override]
     # fmt: on
     # tvm-ffi-stubgen(end)

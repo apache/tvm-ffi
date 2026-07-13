@@ -624,34 +624,19 @@ namespace {
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace ffi = ::tvm::ffi;
   namespace refl = ::tvm::ffi::reflection;
-  refl::TypeAttrDef<ffi::Object>().def(
-      refl::type_attr::kConvert, &refl::details::FFIConvertFromAnyViewToObjectRef<ffi::ObjectRef>);
-  refl::TypeAttrDef<ffi::details::StringObj>().def(
-      refl::type_attr::kConvert, &refl::details::FFIConvertFromAnyViewToObjectRef<ffi::String>);
-  refl::TypeAttrDef<ffi::details::BytesObj>().def(
-      refl::type_attr::kConvert, &refl::details::FFIConvertFromAnyViewToObjectRef<ffi::Bytes>);
-  refl::TypeAttrDef<ffi::ErrorObj>().def(
-      refl::type_attr::kConvert, &refl::details::FFIConvertFromAnyViewToObjectRef<ffi::Error>);
-  refl::TypeAttrDef<ffi::FunctionObj>().def(
-      refl::type_attr::kConvert, &refl::details::FFIConvertFromAnyViewToObjectRef<ffi::Function>);
-  refl::TypeAttrDef<ffi::ShapeObj>().def(
-      refl::type_attr::kConvert, &refl::details::FFIConvertFromAnyViewToObjectRef<ffi::Shape>);
-  refl::TypeAttrDef<ffi::TensorObj>().def(
-      refl::type_attr::kConvert, &refl::details::FFIConvertFromAnyViewToObjectRef<ffi::Tensor>);
-  refl::TypeAttrDef<ffi::ArrayObj>().def(
-      refl::type_attr::kConvert,
-      &refl::details::FFIConvertFromAnyViewToObjectRef<ffi::Array<ffi::Any>>);
-  refl::TypeAttrDef<ffi::MapObj>().def(
-      refl::type_attr::kConvert,
-      &refl::details::FFIConvertFromAnyViewToObjectRef<ffi::Map<ffi::Any, ffi::Any>>);
+  refl::TypeAttrDef<ffi::Object>().def_convert<ffi::ObjectRef>();
+  refl::TypeAttrDef<ffi::details::StringObj>().def_convert<ffi::String>();
+  refl::TypeAttrDef<ffi::details::BytesObj>().def_convert<ffi::Bytes>();
+  refl::TypeAttrDef<ffi::ErrorObj>().def_convert<ffi::Error>();
+  refl::TypeAttrDef<ffi::FunctionObj>().def_convert<ffi::Function>();
+  refl::TypeAttrDef<ffi::ShapeObj>().def_convert<ffi::Shape>();
+  refl::TypeAttrDef<ffi::TensorObj>().def_convert<ffi::Tensor>();
+  refl::TypeAttrDef<ffi::ArrayObj>().def_convert<ffi::Array<ffi::Any>>();
+  refl::TypeAttrDef<ffi::MapObj>().def_convert<ffi::Map<ffi::Any, ffi::Any>>();
   // Skipped: TypeIndex::kTVMFFIModule
   // Skipped: TypeIndex::kTVMFFIOpaquePyObject
-  refl::TypeAttrDef<ffi::ListObj>().def(
-      refl::type_attr::kConvert,
-      &refl::details::FFIConvertFromAnyViewToObjectRef<ffi::List<ffi::Any>>);
-  refl::TypeAttrDef<ffi::DictObj>().def(
-      refl::type_attr::kConvert,
-      &refl::details::FFIConvertFromAnyViewToObjectRef<ffi::Dict<ffi::Any, ffi::Any>>);
+  refl::TypeAttrDef<ffi::ListObj>().def_convert<ffi::List<ffi::Any>>();
+  refl::TypeAttrDef<ffi::DictObj>().def_convert<ffi::Dict<ffi::Any, ffi::Any>>();
   refl::ObjectDef<ffi::EnumObj>(refl::init(false))
       .def_ro("_value", &ffi::EnumObj::_value, "Ordinal assigned at registration.",
               refl::AttachFieldFlag::SEqHashIgnore())

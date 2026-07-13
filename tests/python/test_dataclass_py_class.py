@@ -32,10 +32,20 @@ from tvm_ffi import core
 from tvm_ffi._dunder import _install_dataclass_dunders
 from tvm_ffi._ffi_api import DeepCopy, RecursiveEq, RecursiveHash, ReprPrint
 from tvm_ffi.core import MISSING, Object, TypeInfo, TypeSchema, _to_py_class_value
-from tvm_ffi.dataclasses import KW_ONLY, Field, IntEnum, StrEnum, entry, field, fields, py_class
+from tvm_ffi.dataclasses import (
+    KW_ONLY,
+    Field,
+    IntEnum,
+    StrEnum,
+    entry,
+    field,
+    fields,
+    py_class,
+)
 from tvm_ffi.registry import _add_class_attrs
 from tvm_ffi.testing import TestObjectBase as _TestObjectBase
 from tvm_ffi.testing.testing import requires_py310
+from tvm_ffi.utils.descriptors import init_property
 
 # ---------------------------------------------------------------------------
 # Unique type key generator (avoids collisions across tests)
@@ -576,7 +586,136 @@ class TestPostInit:
 
 
 # ###########################################################################
-#  8. Repr
+#  8. init_property
+# ###########################################################################
+class TestInitProperty:
+    """init_property descriptor: eager evaluation at __init__ time."""
+
+    def test_basic_computed_at_init(self) -> None:
+        @py_class("testing.InitProp.Basic")
+        class _Basic(Object):
+            x: int = field(default=0)
+
+            @init_property
+            def doubled(self) -> int:
+                return self.x * 2
+
+        obj = _Basic(x=5)
+        assert obj.doubled == 10
+
+    def test_stored_as_field(self) -> None:
+        # init_property registers as field(init=False, structural_eq="ignore"),
+        # so the value lives in C++ object storage (not a Python slot).
+        # The compute function is called exactly once at __init__ time.
+        call_count = 0
+
+        @py_class("testing.InitProp.Cached")
+        class _Cached(Object):
+            x: int = field(default=0)
+
+            @init_property
+            def computed(self) -> int:
+                nonlocal call_count
+                call_count += 1
+                return self.x + 1
+
+        obj = _Cached(x=3)
+        assert call_count == 1
+        _ = obj.computed
+        assert call_count == 1  # second access reads C++ field, not recomputed
+        # Verify the field is registered in C++ type metadata.
+        type_info = _Cached.__tvm_ffi_type_info__
+        field_names = [f.name for f in type_info.fields]
+        assert "computed" in field_names
+        ip_field = next(f for f in type_info.fields if f.name == "computed")
+        assert not ip_field.c_init  # init=False
+        assert ip_field.c_structural_eq == "ignore"
+
+    def test_multiple_init_properties(self) -> None:
+        @py_class("testing.InitProp.Multi")
+        class _Multi(Object):
+            x: int = field(default=0)
+            y: int = field(default=0)
+
+            @init_property
+            def sum_(self) -> int:
+                return self.x + self.y
+
+            @init_property
+            def product(self) -> int:
+                return self.x * self.y
+
+        obj = _Multi(x=3, y=4)
+        assert obj.sum_ == 7
+        assert obj.product == 12
+
+    def test_inherited_init_property(self) -> None:
+        @py_class("testing.InitProp.Parent")
+        class _Parent(Object):
+            x: int = field(default=0)
+
+            @init_property
+            def from_parent(self) -> int:
+                return self.x + 100
+
+        @py_class("testing.InitProp.Child")
+        class _Child(_Parent):
+            y: int = field(default=0)
+
+            @init_property
+            def from_child(self) -> int:
+                return self.y + 200
+
+        obj = _Child(x=1, y=2)
+        assert obj.from_parent == 101
+        assert obj.from_child == 202
+
+    def test_self_referential_init_property(self) -> None:
+        @py_class("testing.InitProp.SelfRef")
+        class _SelfRef(Object):
+            val: int = field(default=0)
+
+            @init_property
+            def next(self) -> Optional[_SelfRef]:
+                if self.val <= 0:
+                    return None
+                return _SelfRef(val=self.val - 1)
+
+        a = _SelfRef(val=1)
+        assert a.next is not None
+        assert a.next.val == 0
+        assert a.next.next is None
+
+    def test_cyclic_init_property(self) -> None:
+        @py_class("testing.InitProp.CycleA")
+        class _CycleA(Object):
+            val: int
+
+            @init_property
+            def field_b(self) -> Optional[_CycleB]:
+                if self.val <= 0:
+                    return None
+                return _CycleB(val=self.val - 1)
+
+        @py_class("testing.InitProp.CycleB")
+        class _CycleB(Object):
+            val: int
+
+            @init_property
+            def field_a(self) -> Optional[_CycleA]:
+                if self.val <= 0:
+                    return None
+                return _CycleA(val=self.val - 2)
+
+        a = _CycleA(3)
+        assert a.field_b is not None
+        assert a.field_b.val == 2
+        assert a.field_b.field_a is not None
+        assert a.field_b.field_a.val == 0
+
+
+# ###########################################################################
+# 10. Repr
 # ###########################################################################
 class TestRepr:
     """__repr__ generation."""
@@ -604,7 +743,7 @@ class TestRepr:
 
 
 # ###########################################################################
-#  9. Equality
+# 11. Equality
 # ###########################################################################
 class TestEquality:
     """__eq__ and __ne__ generation."""
@@ -772,6 +911,96 @@ class TestInheritance:
         assert obj.rhs == 2
         assert [f.name for f in fields(Add)] == ["x", "lhs", "rhs"]
         assert [f.name for f in _get_type_info(Add).fields] == ["lhs", "rhs"]
+
+    def test_collects_fields_from_non_py_class_parent_with_c_class_ancestor(self) -> None:
+        class BaseBinOp(_TestObjectBase):
+            lhs: int
+            rhs: int
+
+        class AnnotatedBinOp(BaseBinOp):
+            op_name: str
+
+        @py_class(_unique_key("NPCCxxAdd"))
+        class Add(AnnotatedBinOp):
+            scale: int
+
+        obj = Add(
+            v_i64=1,
+            v_f64=2.0,
+            v_str="base",
+            lhs=3,  # ty: ignore[unknown-argument]
+            rhs=4,  # ty: ignore[unknown-argument]
+            op_name="add",  # ty: ignore[unknown-argument]
+            scale=5,
+        )
+        assert obj.v_i64 == 1
+        assert obj.v_f64 == 2.0
+        assert obj.v_str == "base"
+        assert obj.lhs == 3
+        assert obj.rhs == 4
+        assert obj.op_name == "add"
+        assert obj.scale == 5
+        assert _get_type_info(Add).parent_type_info is _get_type_info(_TestObjectBase)
+        assert [f.name for f in fields(Add)] == [
+            "v_i64",
+            "v_f64",
+            "v_str",
+            "lhs",
+            "rhs",
+            "op_name",
+            "scale",
+        ]
+        assert [f.name for f in _get_type_info(Add).fields] == [
+            "lhs",
+            "rhs",
+            "op_name",
+            "scale",
+        ]
+
+    def test_c_class_ancestor_wins_over_inherited_object_metadata(self) -> None:
+        class ObjectMixin(Object):
+            mixin: int
+
+        class BaseBinOp(_TestObjectBase):
+            lhs: int
+            rhs: int
+
+        @py_class(_unique_key("NPCCxxMROAdd"))
+        class Add(ObjectMixin, BaseBinOp):
+            scale: int
+
+        obj = Add(
+            v_i64=1,
+            v_f64=2.0,
+            v_str="base",
+            lhs=3,  # ty: ignore[unknown-argument]
+            rhs=4,  # ty: ignore[unknown-argument]
+            mixin=5,  # ty: ignore[unknown-argument]
+            scale=6,
+        )
+        assert obj.v_i64 == 1
+        assert obj.v_f64 == 2.0
+        assert obj.v_str == "base"
+        assert obj.lhs == 3
+        assert obj.rhs == 4
+        assert obj.mixin == 5
+        assert obj.scale == 6
+        assert _get_type_info(Add).parent_type_info is _get_type_info(_TestObjectBase)
+        assert [f.name for f in fields(Add)] == [
+            "v_i64",
+            "v_f64",
+            "v_str",
+            "lhs",
+            "rhs",
+            "mixin",
+            "scale",
+        ]
+        assert [f.name for f in _get_type_info(Add).fields] == [
+            "lhs",
+            "rhs",
+            "mixin",
+            "scale",
+        ]
 
     def test_collects_non_py_class_parent_field_options(self) -> None:
         @py_class(_unique_key("NPCOptNode"))
@@ -944,10 +1173,9 @@ class TestForwardReferences:
         """Forward ref to a class in another module that isn't in the declaring
         module's globals (circular import / TYPE_CHECKING-gated) still resolves.
 
-        Mirrors the loom codegen case where ``weave_ir.TaskSpec`` has a field
-        ``body: tuple[Op, ...]`` and ``Op`` lives in ``ops`` — ``ops`` already
-        imports from ``weave_ir``, so ``Op`` cannot appear in ``weave_ir``'s
-        globals without introducing a circular import.
+        This models a generated class whose field type lives in a module that
+        already imports the declaring module, so the target type can only be
+        imported under ``TYPE_CHECKING`` without introducing a circular import.
         """
         # Module B: the target of the forward ref.  Define it first so it's
         # registered in ``_PY_CLASS_BY_MODULE`` under its own module key when
@@ -3945,6 +4173,33 @@ class TestContainerFieldAnnotations:
         assert obj.matrix[0][0] == 1
         assert obj.matrix[1][2] == 6
 
+    def test_list_field_error_includes_field_path(self) -> None:
+        @py_class(_unique_key("ListErr"))
+        class ListErr(Object):
+            items: List[int]
+
+        with pytest.raises(TypeError) as exc_info:
+            ListErr(items=[1, None])  # ty: ignore[invalid-argument-type]
+
+        message = str(exc_info.value)
+        assert ".__ffi_init__() field 'items':\n" in message
+        assert "  element [1]: expected int, got None" in message
+
+    def test_field_error_indents_multiline_ffi_convert_error(self) -> None:
+        cls = _make_type(
+            "ShapeErr",
+            [Field(name="shape", _ty_schema=TypeSchema("ffi.Shape"), default=MISSING)],
+        )
+
+        with pytest.raises(TypeError) as exc_info:
+            cls(shape=[1, "x"])
+
+        message = str(exc_info.value)
+        assert ".__ffi_init__() field 'shape':\n" in message
+        assert "  expected ffi.Shape, got ffi.Array\n" in message
+        assert "    __ffi_convert__ failed:\n" in message
+        assert "      Cannot cast from `ffi.Array` to `ffi.Shape`" in message
+
     def test_dict_str_list_int_field(self) -> None:
         @py_class(_unique_key("DictStrListInt"))
         class DictStrListInt(Object):
@@ -4870,12 +5125,16 @@ class TestMultiTypeCopy:
 
 
 # ---------------------------------------------------------------------------
-# _collect_py_methods allowlist and method introspection
+# _collect_py_methods collection and method introspection
 # ---------------------------------------------------------------------------
 
 
 class TestPyMethodAllowlist:
-    """Only names in ``_FFI_RECOGNIZED_METHODS`` are collected by ``_collect_py_methods``."""
+    """Collection keeps system hooks narrow and ordinary helpers opt-in.
+
+    TypeAttrColumn names are collected by name.  Other Python methods are
+    ignored unless they are explicitly marked with ``@tvm_ffi.method``.
+    """
 
     def test_system_methods_not_in_allowlist(self) -> None:
         from tvm_ffi.dataclasses.py_class import _collect_py_methods  # noqa: PLC0415
@@ -5229,6 +5488,15 @@ class TestDtypeDeviceFields:
         assert obj.dt == "float32"
         assert isinstance(obj.dt, tvm_ffi.dtype)
 
+    def test_dtype_field_from_str(self) -> None:
+        @py_class(_unique_key("DtypeFieldFromStr"))
+        class DtypeHolder(Object):
+            dt: tvm_ffi.dtype
+
+        obj = DtypeHolder(dt="float32")  # ty: ignore[invalid-argument-type]
+        assert obj.dt == "float32"
+        assert isinstance(obj.dt, tvm_ffi.dtype)
+
     def test_dtype_field_setter(self) -> None:
         @py_class(_unique_key("DtypeFieldSet"))
         class DtypeHolder2(Object):
@@ -5246,6 +5514,14 @@ class TestDtypeDeviceFields:
         dev = tvm_ffi.device("cpu", 0)
         obj = DeviceHolder(dev=dev)
         assert obj.dev == dev
+
+    def test_device_field_from_str(self) -> None:
+        @py_class(_unique_key("DeviceFieldFromStr"))
+        class DeviceHolder(Object):
+            dev: tvm_ffi.Device
+
+        obj = DeviceHolder(dev="cpu")  # ty: ignore[invalid-argument-type]
+        assert obj.dev == tvm_ffi.device("cpu", 0)
 
     def test_dtype_device_together(self) -> None:
         @py_class(_unique_key("DtypeDeviceTogether"))

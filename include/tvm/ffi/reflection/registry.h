@@ -47,6 +47,16 @@ namespace tvm {
 namespace ffi {
 /*! \brief Reflection namespace */
 namespace reflection {
+namespace details {
+
+template <typename T, typename = void>
+struct HasContainerType : public std::false_type {};
+
+template <typename T>
+struct HasContainerType<T, std::void_t<typename T::ContainerType>> : public std::true_type {};
+
+}  // namespace details
+
 /*!
  * \brief Types of temporary metadata hold in FieldInfoBuilder and MethodInfoBuilder,
  * before they are filled into final C metadata
@@ -451,6 +461,14 @@ class ReflectionDefBase {
     return ffi::Function::FromTyped(WrapFunction(std::forward<Func>(func)), std::move(name));
   }
 
+  template <typename Value>
+  TVM_FFI_INLINE static void RegisterTypeAttrValue(int32_t type_index, const char* name,
+                                                   Value&& value) {
+    TVMFFIByteArray name_array = {name, std::char_traits<char>::length(name)};
+    TVMFFIAny value_any = AnyView(std::forward<Value>(value)).CopyToTVMFFIAny();
+    TVM_FFI_CHECK_SAFE_CALL(TVMFFITypeRegisterAttr(type_index, &name_array, &value_any));
+  }
+
   template <typename Func>
   TVM_FFI_INLINE static Func&& WrapFunction(Func&& func) {
     return std::forward<Func>(func);
@@ -841,6 +859,65 @@ class ObjectDef : public ReflectionDefBase {
   }
 
   /*!
+   * \brief Define a value type attribute for this object type.
+   *
+   * Values that are directly convertible to ``AnyView`` are stored as-is in
+   * the type attribute column.  Other values are treated as typed callables and
+   * wrapped into an ``ffi::Function`` before registration.
+   *
+   * \tparam Value The value type.
+   *
+   * \param name The name of the type attribute.
+   * \param value The value to store in the type attribute column.
+   *
+   * \return Reference to this `ObjectDef` for method chaining.
+   */
+  template <typename Value,
+            std::enable_if_t<std::is_convertible_v<Value&&, AnyView> ||
+                                 std::is_convertible_v<std::decay_t<Value>, AnyView>,
+                             int> = 0>
+  TVM_FFI_INLINE ObjectDef& def_type_attr(const char* name, Value&& value) {
+    RegisterTypeAttrValue(type_index_, name, std::forward<Value>(value));
+    return *this;
+  }
+
+  /*!
+   * \brief Define a function-valued type attribute for this object type.
+   *
+   * \tparam Func The function type.
+   *
+   * \param name The name of the type attribute.
+   * \param func The function to store in the type attribute column.
+   *
+   * \return Reference to this `ObjectDef` for method chaining.
+   */
+  template <typename Func, std::enable_if_t<!std::is_convertible_v<Func&&, AnyView> &&
+                                                !std::is_convertible_v<std::decay_t<Func>, AnyView>,
+                                            int> = 0>
+  TVM_FFI_INLINE ObjectDef& def_type_attr(const char* name, Func&& func) {
+    ffi::Function ffi_func =
+        GetMethod(std::string(type_key_) + "." + name, std::forward<Func>(func));
+    RegisterTypeAttrValue(type_index_, name, ffi_func);
+    return *this;
+  }
+
+  /*!
+   * \brief Register the standard AnyView conversion type attribute.
+   *
+   * \tparam TSelf The type produced by the conversion.
+   *
+   * \return Reference to this `ObjectDef` for method chaining.
+   */
+  template <typename TSelf>
+  TVM_FFI_INLINE ObjectDef& def_convert() {
+    if constexpr (details::HasContainerType<TSelf>::value) {
+      static_assert(std::is_same_v<typename TSelf::ContainerType, Class>,
+                    "TSelf::ContainerType must match ObjectDef's object type");
+    }
+    return def_type_attr(type_attr::kConvert, &details::FFIConvertFromAnyViewToObjectRef<TSelf>);
+  }
+
+  /*!
    * \brief Register a constructor for this object type.
    *
    * This method registers a static `__init__` method that constructs an instance
@@ -995,6 +1072,29 @@ class TypeAttrDef : public ReflectionDefBase {
       : type_index_(Class::_GetOrAllocRuntimeTypeIndex()), type_key_(Class::_type_key) {}
 
   /*!
+   * \brief Define a value type attribute.
+   *
+   * Values that are directly convertible to ``AnyView`` are stored as-is in
+   * the type attribute column.  Other values are treated as typed callables and
+   * wrapped into an ``ffi::Function`` before registration.
+   *
+   * \tparam Value The value type.
+   *
+   * \param name The name of the type attribute.
+   * \param value The value to store in the type attribute column.
+   *
+   * \return The TypeAttrDef object.
+   */
+  template <typename Value,
+            std::enable_if_t<std::is_convertible_v<Value&&, AnyView> ||
+                                 std::is_convertible_v<std::decay_t<Value>, AnyView>,
+                             int> = 0>
+  TypeAttrDef& def(const char* name, Value&& value) {
+    RegisterTypeAttrValue(type_index_, name, std::forward<Value>(value));
+    return *this;
+  }
+
+  /*!
    * \brief Define a function-valued type attribute.
    *
    * \tparam Func The function type.
@@ -1004,14 +1104,30 @@ class TypeAttrDef : public ReflectionDefBase {
    *
    * \return The TypeAttrDef object.
    */
-  template <typename Func>
+  template <typename Func, std::enable_if_t<!std::is_convertible_v<Func&&, AnyView> &&
+                                                !std::is_convertible_v<std::decay_t<Func>, AnyView>,
+                                            int> = 0>
   TypeAttrDef& def(const char* name, Func&& func) {
-    TVMFFIByteArray name_array = {name, std::char_traits<char>::length(name)};
     ffi::Function ffi_func =
         GetMethod(std::string(type_key_) + "." + name, std::forward<Func>(func));
-    TVMFFIAny value_any = AnyView(ffi_func).CopyToTVMFFIAny();
-    TVM_FFI_CHECK_SAFE_CALL(TVMFFITypeRegisterAttr(type_index_, &name_array, &value_any));
+    RegisterTypeAttrValue(type_index_, name, ffi_func);
     return *this;
+  }
+
+  /*!
+   * \brief Register the standard AnyView conversion type attribute.
+   *
+   * \tparam TSelf The type produced by the conversion.
+   *
+   * \return The TypeAttrDef object.
+   */
+  template <typename TSelf>
+  TVM_FFI_INLINE TypeAttrDef& def_convert() {
+    if constexpr (details::HasContainerType<TSelf>::value) {
+      static_assert(std::is_same_v<typename TSelf::ContainerType, Class>,
+                    "TSelf::ContainerType must match TypeAttrDef's object type");
+    }
+    return def(type_attr::kConvert, &details::FFIConvertFromAnyViewToObjectRef<TSelf>);
   }
 
   /*!
