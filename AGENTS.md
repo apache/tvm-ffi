@@ -75,7 +75,7 @@ cmake --build build_cpp --parallel --config RelWithDebInfo --target tvm_ffi_shar
 
 ### Prerequisites
 
-- Python 3.9+, C++17 compiler, CMake 3.18+, Ninja
+- Python 3.9+, C++17 compiler, CMake 3.26+, Ninja
 - Submodules: `git submodule update --init --recursive`
 
 ## Testing
