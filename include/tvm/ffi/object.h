@@ -529,6 +529,34 @@ class ObjectPtr {
   friend struct tvm::ffi::details::ObjectUnsafe;
 };
 
+namespace details {
+
+/*!
+ * \brief Whether T is Object or a subclass of Object.
+ * \tparam T The type to inspect.
+ */
+template <typename T>
+inline constexpr bool is_object_subclass_v = std::is_base_of_v<Object, T>;
+
+/*! \brief Whether T is an Object subclass with cv- or reference qualification. */
+template <typename T>
+inline constexpr bool is_qualified_object_v =
+    is_object_subclass_v<std::remove_cv_t<std::remove_reference_t<T>>> &&
+    !std::is_same_v<T, std::remove_cv_t<std::remove_reference_t<T>>>;
+
+}  // namespace details
+
+/// \cond Doxygen_Suppress
+/*!
+ * \brief Whether target ObjectPtr storage subsumes source ObjectPtr storage.
+ * \tparam BaseObject The target ObjectPtr pointee type.
+ * \tparam DerivedObject The source ObjectPtr pointee type.
+ */
+template <typename BaseObject, typename DerivedObject>
+inline constexpr bool type_subsumes_v<ObjectPtr<BaseObject>, ObjectPtr<DerivedObject>> =
+    std::is_base_of_v<BaseObject, DerivedObject>;
+/// \endcond
+
 /*!
  * \brief A custom smart pointer for Object.
  * \tparam T the content data type.
@@ -1273,6 +1301,77 @@ struct ObjectUnsafe {
 template <typename T>
 struct TypeToRuntimeTypeIndex<T, std::enable_if_t<std::is_base_of_v<ObjectRef, T>>> {
   static int32_t v() { return T::ContainerType::RuntimeTypeIndex(); }
+};
+
+template <typename TObject>
+struct TypeToRuntimeTypeIndex<
+    ObjectPtr<TObject>, std::enable_if_t<details::is_object_subclass_v<TObject> &&
+                                         std::is_same_v<TObject, std::remove_cv_t<TObject>>>> {
+  static int32_t v() { return TObject::RuntimeTypeIndex(); }
+};
+
+/*!
+ * \brief Type traits for an owning pointer to an unqualified Object subclass.
+ * \tparam TObject The unqualified Object subclass.
+ */
+template <typename TObject>
+struct TypeTraits<ObjectPtr<TObject>,
+                  std::enable_if_t<details::is_object_subclass_v<TObject> &&
+                                   std::is_same_v<TObject, std::remove_cv_t<TObject>>>>
+    : public TypeTraitsBase {
+  static constexpr int32_t field_static_type_index = TypeIndex::kTVMFFIObject;
+
+  TVM_FFI_INLINE static void CopyToAnyView(const ObjectPtr<TObject>& src, TVMFFIAny* result) {
+    if (src == nullptr) {
+      TypeTraits<std::nullptr_t>::CopyToAnyView(nullptr, result);
+      return;
+    }
+    TVMFFIObject* obj_ptr = details::ObjectUnsafe::TVMFFIObjectPtrFromObjectPtr(src);
+    result->type_index = obj_ptr->type_index;
+    result->zero_padding = 0;
+    TVM_FFI_CLEAR_PTR_PADDING_IN_FFI_ANY(result);
+    result->v_obj = obj_ptr;
+  }
+
+  TVM_FFI_INLINE static void MoveToAny(ObjectPtr<TObject> src, TVMFFIAny* result) {
+    if (src == nullptr) {
+      TypeTraits<std::nullptr_t>::MoveToAny(nullptr, result);
+      return;
+    }
+    TVMFFIObject* obj_ptr = details::ObjectUnsafe::MoveObjectPtrToTVMFFIObjectPtr(std::move(src));
+    result->type_index = obj_ptr->type_index;
+    result->zero_padding = 0;
+    TVM_FFI_CLEAR_PTR_PADDING_IN_FFI_ANY(result);
+    result->v_obj = obj_ptr;
+  }
+
+  TVM_FFI_INLINE static bool CheckAnyStrict(const TVMFFIAny* src) {
+    if (src->type_index == TypeIndex::kTVMFFINone) return true;
+    return src->type_index >= TypeIndex::kTVMFFIStaticObjectBegin &&
+           details::IsObjectInstance<TObject>(src->type_index);
+  }
+
+  TVM_FFI_INLINE static ObjectPtr<TObject> CopyFromAnyViewAfterCheck(const TVMFFIAny* src) {
+    if (src->type_index == TypeIndex::kTVMFFINone) return nullptr;
+    return details::ObjectUnsafe::ObjectPtrFromUnowned<TObject>(src->v_obj);
+  }
+
+  TVM_FFI_INLINE static ObjectPtr<TObject> MoveFromAnyAfterCheck(TVMFFIAny* src) {
+    if (src->type_index == TypeIndex::kTVMFFINone) return nullptr;
+    ObjectPtr<TObject> result = details::ObjectUnsafe::ObjectPtrFromOwned<TObject>(src->v_obj);
+    TypeTraits<std::nullptr_t>::MoveToAny(nullptr, src);
+    return result;
+  }
+
+  TVM_FFI_INLINE static std::optional<ObjectPtr<TObject>> TryCastFromAnyView(const TVMFFIAny* src) {
+    if (CheckAnyStrict(src)) return CopyFromAnyViewAfterCheck(src);
+    return std::nullopt;
+  }
+
+  TVM_FFI_INLINE static std::string TypeStr() { return TObject::_type_key; }
+  TVM_FFI_INLINE static std::string TypeSchema() {
+    return R"({"type":"Optional","args":[{"type":")" + std::string(TObject::_type_key) + R"("}]})";
+  }
 };
 
 template <typename TObjRef>

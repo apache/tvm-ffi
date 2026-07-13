@@ -757,6 +757,32 @@ TEST(Serialization, SharedObjectReferences) {
   EXPECT_EQ(result->body[0].get(), result->body[1].get());
 }
 
+TEST(Serialization, ObjectPtrFields) {
+  ObjectPtr<TIntObj> shared = make_object<TIntObj>(42);
+  ObjectPtr<TIntObj> value = shared;
+  ObjectPtr<TNumberObj> alias = shared;
+  TObjectPtrHolder holder(std::move(value), std::move(alias));
+
+  Any deserialized = FromJSONGraph(ToJSONGraph(holder));
+  TObjectPtrHolder result = deserialized.cast<TObjectPtrHolder>();
+
+  ASSERT_NE(result->value, nullptr);
+  ASSERT_NE(result->alias, nullptr);
+  EXPECT_EQ(result->value.get(), result->alias.get());
+  ASSERT_TRUE(result->value->IsInstance<TIntObj>());
+  EXPECT_EQ(static_cast<TIntObj*>(result->value.get())->value, 42);
+}
+
+TEST(Serialization, NullObjectPtrFields) {
+  TObjectPtrHolder holder(nullptr, nullptr);
+
+  Any deserialized = FromJSONGraph(ToJSONGraph(holder));
+  TObjectPtrHolder result = deserialized.cast<TObjectPtrHolder>();
+
+  EXPECT_EQ(result->value, nullptr);
+  EXPECT_EQ(result->alias, nullptr);
+}
+
 // ---------------------------------------------------------------------------
 // Nested objects
 // ---------------------------------------------------------------------------

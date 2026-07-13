@@ -28,6 +28,7 @@ from .testing import (
     TestNonCopyable,
     TestObjectBase,
     TestObjectDerived,
+    TestObjectPtrHolder,
     _SchemaAllTypes,
     _TestCxxAutoInit,
     _TestCxxAutoInitAllInitOff,
