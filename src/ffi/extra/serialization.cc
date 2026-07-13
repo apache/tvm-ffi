@@ -28,6 +28,7 @@
 #include <tvm/ffi/container/map.h>
 #include <tvm/ffi/container/shape.h>
 #include <tvm/ffi/dtype.h>
+#include <tvm/ffi/enum.h>
 #include <tvm/ffi/error.h>
 #include <tvm/ffi/extra/base64.h>
 #include <tvm/ffi/extra/serialization.h>
@@ -195,6 +196,9 @@ class ObjectGraphSerializer {
   // create the data for the object, if the type has a custom data to json function,
   // use it. otherwise, we go over the fields and create the data.
   json::Value CreateObjectData(const Any& value) {
+    const Object* obj = value.cast<const Object*>();
+    if (obj->IsInstance<IntEnumObj>()) return static_cast<const EnumObj*>(obj)->_int_index;
+    if (obj->IsInstance<EnumObj>()) return static_cast<const EnumObj*>(obj)->_str_index;
     static reflection::TypeAttrColumn data_to_json =
         reflection::TypeAttrColumn(reflection::type_attr::kDataToJson);
     if (data_to_json[value.type_index()] != nullptr) {
@@ -207,7 +211,6 @@ class ObjectGraphSerializer {
                                << "` does not support ToJSONGraph "
                                << "(no native creator or __ffi_new__ type attr)";
     }
-    const Object* obj = value.cast<const Object*>();
     json::Object data;
     // go over the content and hash the fields
     reflection::ForEachFieldInfo(type_info, [&](const TVMFFIFieldInfo* field_info) {
@@ -383,6 +386,12 @@ class ObjectGraphDeserializer {
   }
 
   Any DecodeObjectData(int32_t type_index, const json::Value& data) {
+    if (details::IsObjectInstance<IntEnumObj>(type_index)) {
+      return EnumObj::_GetByIntIndex(type_index, data.cast<int64_t>());
+    }
+    if (details::IsObjectInstance<EnumObj>(type_index)) {
+      return EnumObj::_GetByStrIndex(type_index, data.cast<String>());
+    }
     static reflection::TypeAttrColumn data_from_json =
         reflection::TypeAttrColumn(reflection::type_attr::kDataFromJson);
     if (data_from_json[type_index] != nullptr) {

@@ -260,7 +260,8 @@ automatically support deep copy (through the ``__ffi_shallow_copy__`` type
 attribute).
 
 - **Immutable leaves** (returned as-is): primitives, ``String``, ``Bytes``,
-  ``Shape``
+  ``Shape``, and ``Enum`` instances (including ``IntEnum`` and ``StrEnum``
+  subclasses)
 - **Recursively copied**: ``Array``, ``List``, ``Map``, ``Dict``, and
   reflected objects
 
@@ -404,6 +405,63 @@ The decorator:
 
    ``@tvm_ffi.register_object`` can also be used, which delegates to
    ``c_class`` internally for objects with reflected fields.
+
+
+Enum Payload Fields and Structural Identity
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``tvm_ffi.dataclasses.Enum`` and all of its subclasses use ``"singleton"``
+structural equality by default. This includes ``IntEnum``, ``StrEnum``, and
+their subclasses: two enum values are structurally equal only when they are
+the same registered variant.
+
+``tvm_ffi.dataclasses.IntEnum`` and ``StrEnum`` are reflected subclasses of
+``ffi.IntEnum`` and ``ffi.StrEnum``. Their user-visible ``value`` payload is
+stored by the native base class, so subclasses only declare entries:
+
+.. code-block:: python
+
+   from tvm_ffi.dataclasses import IntEnum, StrEnum, entry
+
+   class Level(IntEnum, type_key="my_ext.Level"):
+       low = entry(value=1)
+       high = entry(value=2)
+
+   class Opcode(StrEnum, type_key="my_ext.Opcode"):
+       add = entry(value="+")
+       mul = entry(value="*")
+
+Enum-specific ``__data_to_json__`` and ``__data_from_json__`` hooks preserve
+this singleton identity during JSON graph serialization. Following the scalar
+``TypeAttrDef`` hook pattern, plain ``Enum`` variants serialize as their
+registered name, while ``IntEnum`` and ``StrEnum`` variants serialize as their
+public ``value`` payload (an integer or string, respectively). Deserialization
+uses that scalar to resolve the registered variant instead of allocating a
+replacement object. Singleton-preserving round-trips therefore require payload
+values to be unique within an enum type. This applies both to an enum serialized
+directly and to enum-valued fields nested in another reflected object:
+
+.. code-block:: python
+
+   from tvm_ffi.serialization import from_json_graph_str, to_json_graph_str
+
+   data = to_json_graph_str(Opcode.add)
+   restored = from_json_graph_str(data)
+
+   assert restored.same_as(Opcode.add)
+
+C++ enum owners register the value-based hook pair on their concrete
+``ObjectDef`` or ``TypeAttrDef``. Python-defined ``IntEnum`` and ``StrEnum``
+classes obtain missing hooks from C++ reflection with
+``core._lookup_type_attr``: the serializer is reused from the native payload
+base, while a native factory binds the deserializer to the concrete Python
+type index. This keeps payload lookup in C++ while leaving explicit Python
+hooks unchanged. A plain ``Enum`` owner defines its name-based hook pair
+explicitly; ``EnumDef`` itself only registers variants.
+
+Payload enum values can be used in reflected object fields, including optional
+and container fields. Payload normalization recurses through ``Array``, ``List``,
+``Map``, and ``Dict`` values.
 
 
 Inheritance

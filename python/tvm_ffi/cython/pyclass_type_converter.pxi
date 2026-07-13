@@ -36,7 +36,7 @@ cdef object _INT64_MIN = -(1 << 63)
 cdef object _INT64_MAX = (1 << 63) - 1
 cdef int _VALUE_PROTOCOL_MAX_DEPTH = 64
 cdef str _TYPE_ATTR_FFI_CONVERT = "__ffi_convert__"
-cdef str _TYPE_ATTR_ENUM_VALUE_ENTRIES = "__ffi_enum_value_entries__"
+cdef str _TYPE_ATTR_ENUM_STATE = "__ffi_enum__"
 cdef class _TypeConverter
 ctypedef CAny (*_dispatch_fn_t)(_TypeConverter, object, bint*)
 
@@ -539,28 +539,12 @@ cdef inline bint _tc_registered_cls_has_base(
     return False
 
 
-cdef object _tc_find_payload_enum_variant(
-    int32_t type_index, object enum_cls, object payload
-):
-    """Resolve *payload* to its singleton variant (``None`` if no match).
-
-    Primary path: O(1) lookup in the cross-language value-entries column
-    (``__ffi_enum_value_entries__``).  Falls back to an O(n) linear scan
-    over ``enum_cls.all_entries()`` when the column has no entry for
-    *payload* — needed so correctness is preserved for variants whose
-    creators haven't populated the column.
-    """
-    cdef object value_entries
-    cdef object variant
-    value_entries = _lookup_type_attr(type_index, _TYPE_ATTR_ENUM_VALUE_ENTRIES)
-    if value_entries is not None:
-        variant = value_entries.get(payload)
-        if variant is not None:
-            return variant
-    for variant in enum_cls.all_entries():
-        if variant.value == payload:
-            return variant
-    return None
+cdef object _tc_find_payload_enum_variant(int32_t type_index, object payload):
+    """Resolve *payload* through the enum's canonical index map."""
+    cdef object state = _lookup_type_attr(type_index, _TYPE_ATTR_ENUM_STATE)
+    if state is None:
+        return None
+    return state.indexes.get(payload)
 
 
 cdef object _tc_normalize_int_enum_payload(object value, bint* matched):
@@ -657,7 +641,7 @@ cdef CAny _tc_convert_int_enum(_TypeConverter conv, object value, bint* changed)
         ivalue = _tc_normalize_int_enum_payload(value, &is_int_like)
         if is_int_like:
             changed[0] = True
-            variant = _tc_find_payload_enum_variant(conv.type_index, target_cls, ivalue)
+            variant = _tc_find_payload_enum_variant(conv.type_index, ivalue)
             if variant is not None:
                 return CAny(variant)
 
@@ -680,7 +664,7 @@ cdef CAny _tc_convert_str_enum(_TypeConverter conv, object value, bint* changed)
     target_cls = _tc_get_registered_cls(conv.type_index)
     if target_cls is not None and isinstance(value, str):
         changed[0] = True
-        variant = _tc_find_payload_enum_variant(conv.type_index, target_cls, value)
+        variant = _tc_find_payload_enum_variant(conv.type_index, value)
         if variant is not None:
             return CAny(variant)
 

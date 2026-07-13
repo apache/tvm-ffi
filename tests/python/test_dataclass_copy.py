@@ -29,7 +29,7 @@ import tvm_ffi
 import tvm_ffi.testing
 from tvm_ffi._ffi_api import DeepCopy
 from tvm_ffi.core import Object
-from tvm_ffi.dataclasses import py_class
+from tvm_ffi.dataclasses import Enum, IntEnum, StrEnum, auto, py_class
 
 _counter_pc = itertools.count()
 
@@ -108,6 +108,70 @@ class TestShallowCopy:
 # --------------------------------------------------------------------------- #
 class TestDeepCopy:
     """Tests for copy.deepcopy() / __deepcopy__."""
+
+    def test_enum_singletons_are_immutable_leaves(self) -> None:
+        class Status(Enum, type_key=_unique_key_pc("DeepCopyEnum")):
+            ready = auto()
+
+        class PriorityBase(IntEnum):
+            pass
+
+        class Priority(PriorityBase, type_key=_unique_key_pc("DeepCopyIntEnum")):
+            high = 20
+
+        class Opcode(StrEnum, type_key=_unique_key_pc("DeepCopyStrEnum")):
+            add = "+"
+
+        members = (
+            Status.ready,
+            Priority.high,
+            Opcode.add,
+            tvm_ffi.testing._TestCxxIntEnum.high,
+            tvm_ffi.testing._TestCxxStrEnum.mul,
+        )
+        for member in members:
+            assert copy.deepcopy(member).same_as(member)
+            assert DeepCopy(member).same_as(member)
+
+    def test_nested_enum_deepcopy_preserves_singletons(self) -> None:
+        class Status(Enum, type_key=_unique_key_pc("NestedDeepCopyEnum")):
+            ready = auto()
+
+        class Priority(IntEnum, type_key=_unique_key_pc("NestedDeepCopyIntEnum")):
+            high = 20
+
+        class Opcode(StrEnum, type_key=_unique_key_pc("NestedDeepCopyStrEnum")):
+            add = "+"
+
+        @py_class(_unique_key_pc("NestedDeepCopyEnumHolder"))
+        class Holder(Object):
+            status: Status
+            priority: Priority
+            opcode: Opcode
+
+        holder = Holder(status=Status.ready, priority=Priority.high, opcode=Opcode.add)
+        holder_copy = copy.deepcopy(holder)
+        assert not holder_copy.same_as(holder)
+        assert holder_copy.status.same_as(Status.ready)
+        assert holder_copy.priority.same_as(Priority.high)
+        assert holder_copy.opcode.same_as(Opcode.add)
+
+        values = tvm_ffi.Array([Status.ready, Priority.high, Opcode.add])
+        values_copy = DeepCopy(values)
+        assert not values_copy.same_as(values)
+        assert values_copy[0].same_as(Status.ready)
+        assert values_copy[1].same_as(Priority.high)
+        assert values_copy[2].same_as(Opcode.add)
+
+    def test_non_enum_structural_singleton_is_still_copied(self) -> None:
+        @py_class(_unique_key_pc("DeepCopyNonEnumSingleton"), structural_eq="singleton")
+        class Token(Object):
+            value: int
+
+        token = Token(value=1)
+        token_copy = copy.deepcopy(token)
+        assert not token_copy.same_as(token)
+        assert token_copy.value == 1
 
     def test_basic_fields(self) -> None:
         pair = tvm_ffi.testing.TestIntPair(5, 10)

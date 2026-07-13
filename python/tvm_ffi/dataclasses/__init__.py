@@ -20,7 +20,7 @@ from tvm_ffi.core import MISSING, Object
 
 from .c_class import c_class
 from .common import asdict, astuple, fields, is_dataclass, replace
-from .enum import Enum, EnumAttrMap, IntEnum, StrEnum, auto, entry
+from .enum import Enum, EnumAttrMap, EnumState, IntEnum, StrEnum, auto, entry
 from .field import KW_ONLY, Field, field
 from .py_class import py_class
 
@@ -29,6 +29,7 @@ __all__ = [
     "MISSING",
     "Enum",
     "EnumAttrMap",
+    "EnumState",
     "Field",
     "IntEnum",
     "Object",

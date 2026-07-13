@@ -4633,6 +4633,78 @@ class TestFieldTypeValidation:
         with pytest.raises((TypeError, RuntimeError)):
             obj.data = "not_a_dict"  # ty:ignore[invalid-assignment]
 
+    def test_set_payload_enum_fields_normalizes_raw_payloads(self) -> None:
+        class Priority(IntEnum, type_key=_unique_key("SetPriority")):
+            low = entry(value=10)
+            high = entry(value=20)
+
+        class Opcode(StrEnum, type_key=_unique_key("SetOpcode")):
+            add = entry(value="+")
+            mul = entry(value="*")
+
+        @py_class(_unique_key("SetEnumFields"))
+        class Instruction(Object):
+            priority: Priority
+            opcode: Opcode
+
+        obj = Instruction(priority=Priority.low, opcode=Opcode.add)
+
+        obj.priority = 20  # ty: ignore[invalid-assignment]
+        obj.opcode = "*"  # ty: ignore[invalid-assignment]
+        assert obj.priority.same_as(Priority.high)
+        assert obj.opcode.same_as(Opcode.mul)
+
+        obj.priority = Priority.low
+        obj.opcode = Opcode.add
+        assert obj.priority.same_as(Priority.low)
+        assert obj.opcode.same_as(Opcode.add)
+
+    def test_set_payload_enum_fields_rejects_unknown_payloads(self) -> None:
+        class Priority(IntEnum, type_key=_unique_key("SetPriorityReject")):
+            low = entry(value=10)
+            high = entry(value=20)
+
+        class Opcode(StrEnum, type_key=_unique_key("SetOpcodeReject")):
+            add = entry(value="+")
+            mul = entry(value="*")
+
+        @py_class(_unique_key("SetEnumFieldsReject"))
+        class Instruction(Object):
+            priority: Priority
+            opcode: Opcode
+
+        obj = Instruction(priority=Priority.low, opcode=Opcode.add)
+        with pytest.raises((TypeError, RuntimeError)):
+            obj.priority = 99  # ty: ignore[invalid-assignment]
+        with pytest.raises((TypeError, RuntimeError)):
+            obj.opcode = "/"  # ty: ignore[invalid-assignment]
+
+        assert obj.priority.same_as(Priority.low)
+        assert obj.opcode.same_as(Opcode.add)
+
+    def test_frozen_payload_enum_field_set_normalizes_raw_payload(self) -> None:
+        class Priority(IntEnum, type_key=_unique_key("FrozenSetPriority")):
+            low = entry(value=10)
+            high = entry(value=20)
+
+        class Opcode(StrEnum, type_key=_unique_key("FrozenSetOpcode")):
+            add = entry(value="+")
+            mul = entry(value="*")
+
+        @py_class(_unique_key("FrozenSetEnumFields"))
+        class Instruction(Object):
+            priority: Priority = field(frozen=True)
+            opcode: Opcode = field(frozen=True)
+
+        obj = Instruction(priority=Priority.low, opcode=Opcode.add)
+        with pytest.raises(AttributeError):
+            obj.priority = 20  # ty: ignore[invalid-assignment]
+
+        type(obj).priority.set(obj, 20)  # ty: ignore[unresolved-attribute]
+        type(obj).opcode.set(obj, "*")  # ty: ignore[unresolved-attribute]
+        assert obj.priority.same_as(Priority.high)
+        assert obj.opcode.same_as(Opcode.mul)
+
 
 # ###########################################################################
 #  30. Three-level inheritance with containers
