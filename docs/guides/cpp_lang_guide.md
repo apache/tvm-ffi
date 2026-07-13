@@ -125,6 +125,15 @@ void ExampleObjectPtr() {
 }
 ```
 
+For an unqualified `Object` subclass `T`, `ObjectPtr<T>` can also cross the FFI boundary
+directly. It can be stored in `Any` and typed containers such as `Array`, `List`, `Map`,
+`Dict`, `Tuple`, `Optional`, `Variant`, and `Expected`, and can be used as a reflected field or
+function parameter. Copying through `Any` retains the object; moving transfers its reference. A
+null pointer is represented by the FFI `None` value. Qualified pointee types such as
+`ObjectPtr<const T>`, `ObjectPtr<volatile T>`, and reference pointee types are not supported.
+Because the ABI has one `None` representation, `Optional<ObjectPtr<T>>` cannot preserve the
+difference between an absent optional and a present null pointer across an FFI round trip.
+
 We typically provide a reference class that wraps the ObjectPtr.
 The `ObjectRef` base class provides the interface and reference counting
 functionality for these wrapper classes.

@@ -30,6 +30,16 @@ namespace {
 using namespace tvm::ffi;
 using namespace tvm::ffi::testing;
 
+static_assert(TypeTraits<ObjectPtr<TIntObj>>::convert_enabled);
+static_assert(TypeTraits<ObjectPtr<TIntObj>>::storage_enabled);
+static_assert(!TypeTraits<ObjectPtr<const TIntObj>>::convert_enabled);
+static_assert(!TypeTraits<ObjectPtr<const TIntObj>>::storage_enabled);
+static_assert(!TypeTraits<ObjectPtr<volatile TIntObj>>::convert_enabled);
+static_assert(!TypeTraits<ObjectPtr<volatile TIntObj>>::storage_enabled);
+static_assert(!TypeTraits<ObjectPtr<const volatile TIntObj>>::convert_enabled);
+static_assert(!TypeTraits<ObjectPtr<const volatile TIntObj>>::storage_enabled);
+static_assert(TypeToFieldStaticTypeIndex<ObjectPtr<TIntObj>>::value == TypeIndex::kTVMFFIObject);
+
 TEST(Any, Int) {
   AnyView view0;
   EXPECT_EQ(view0.CopyToTVMFFIAny().type_index, TypeIndex::kTVMFFINone);
@@ -313,6 +323,73 @@ TEST(Any, Object) {
   EXPECT_EQ(v1.use_count(), 3);
 }
 
+TEST(Any, ObjectPtr) {
+  {
+    ObjectPtr<TIntObj> ptr = make_object<TIntObj>(11);
+    TIntObj* raw_ptr = ptr.get();
+    EXPECT_EQ(ptr.use_count(), 1);
+
+    AnyView view = ptr;
+    EXPECT_EQ(ptr.use_count(), 1);
+    EXPECT_EQ(view.type_index(), TIntObj::RuntimeTypeIndex());
+
+    ObjectPtr<TNumberObj> base_ptr = view.cast<ObjectPtr<TNumberObj>>();
+    EXPECT_EQ(ptr.use_count(), 2);
+    EXPECT_EQ(base_ptr.get(), static_cast<TNumberObj*>(raw_ptr));
+    EXPECT_EQ(static_cast<TIntObj*>(base_ptr.get())->value, 11);
+    base_ptr.reset();
+    EXPECT_EQ(ptr.use_count(), 1);
+
+    EXPECT_FALSE(view.try_cast<ObjectPtr<TFloatObj>>().has_value());
+  }
+
+  {
+    ObjectPtr<TIntObj> ptr = make_object<TIntObj>(12);
+    TIntObj* raw_ptr = ptr.get();
+    Any value = ptr;
+    EXPECT_EQ(ptr.use_count(), 2);
+    EXPECT_EQ(value.type_index(), TIntObj::RuntimeTypeIndex());
+
+    ObjectPtr<TIntObj> copied_ptr = value.cast<ObjectPtr<TIntObj>>();
+    EXPECT_EQ(copied_ptr.get(), raw_ptr);
+    EXPECT_EQ(ptr.use_count(), 3);
+    copied_ptr.reset();
+    EXPECT_EQ(ptr.use_count(), 2);
+
+    value.reset();
+    EXPECT_EQ(ptr.use_count(), 1);
+  }
+
+  {
+    ObjectPtr<TIntObj> ptr = make_object<TIntObj>(13);
+    TIntObj* raw_ptr = ptr.get();
+    Any value = std::move(ptr);
+    EXPECT_TRUE(ptr == nullptr);  // NOLINT(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
+    EXPECT_EQ(raw_ptr->use_count(), 1);
+
+    ObjectPtr<TIntObj> moved_ptr = std::move(value).cast<ObjectPtr<TIntObj>>();
+    EXPECT_TRUE(value == nullptr);  // NOLINT(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
+    EXPECT_EQ(moved_ptr.get(), raw_ptr);
+    EXPECT_EQ(moved_ptr.use_count(), 1);
+  }
+
+  {
+    ObjectPtr<TIntObj> ptr;
+    AnyView view = ptr;
+    EXPECT_EQ(view.type_index(), TypeIndex::kTVMFFINone);
+    EXPECT_EQ(view.cast<ObjectPtr<TIntObj>>(), nullptr);
+
+    Any value = ptr;
+    EXPECT_EQ(value.type_index(), TypeIndex::kTVMFFINone);
+    EXPECT_EQ(std::move(value).cast<ObjectPtr<TIntObj>>(), nullptr);
+    EXPECT_TRUE(value == nullptr);  // NOLINT(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
+  }
+
+  EXPECT_EQ(TypeToRuntimeTypeIndex<ObjectPtr<TIntObj>>::v(), TIntObj::RuntimeTypeIndex());
+  EXPECT_EQ(TypeTraits<ObjectPtr<TNumberObj>>::TypeSchema(),
+            R"({"type":"Optional","args":[{"type":"test.Number"}]})");
+}
+
 TEST(Any, ObjectRefWithFallbackTraits) {
   // Test case for TPrimExpr fallback from Any
   Any any1 = TPrimExpr("float32", 3.14);
@@ -458,7 +535,7 @@ TEST(Any, ObjectMove) {
   auto v0 = std::move(any1).cast<TPrimExpr>();
   EXPECT_EQ(v0->value, 3.14);
   EXPECT_EQ(v0.use_count(), 1);
-  EXPECT_TRUE(any1 == nullptr);  // NOLINT(bugprone-use-after-move)
+  EXPECT_TRUE(any1 == nullptr);  // NOLINT(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
 }
 
 TEST(Any, AnyEqualHash) {

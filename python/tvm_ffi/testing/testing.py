@@ -24,7 +24,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
-    from tvm_ffi import Device, dtype
+    from tvm_ffi import Device, Object, dtype
     from typing import Any
 # isort: on
 # fmt: on
@@ -105,6 +105,22 @@ class TestObjectDerived(TestObjectBase):
     if TYPE_CHECKING:
         def __init__(self, v_map: Mapping[Any, Any], v_array: Sequence[Any], v_i64: int = ..., v_f64: float = ..., v_str: str = ...) -> None: ...
         def __ffi_init__(self, v_map: Mapping[Any, Any], v_array: Sequence[Any], v_i64: int = ..., v_f64: float = ..., v_str: str = ...) -> None: ...  # ty: ignore[invalid-method-override]
+    # fmt: on
+    # tvm-ffi-stubgen(end)
+
+
+@c_class("testing.TestObjectPtrHolder")
+class TestObjectPtrHolder(Object):
+    """Test object with an ``ObjectPtr<Object>`` field."""
+
+    __test__ = False
+
+    # tvm-ffi-stubgen(begin): object/testing.TestObjectPtrHolder
+    # fmt: off
+    value: Object | None
+    if TYPE_CHECKING:
+        def __init__(self, value: Object | None) -> None: ...
+        def __ffi_init__(self, value: Object | None) -> None: ...  # ty: ignore[invalid-method-override]
     # fmt: on
     # tvm-ffi-stubgen(end)
 

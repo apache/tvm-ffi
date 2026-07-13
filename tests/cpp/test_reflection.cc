@@ -20,12 +20,15 @@
 #include <gtest/gtest.h>
 #include <tvm/ffi/container/array.h>
 #include <tvm/ffi/container/map.h>
+#include <tvm/ffi/extra/json.h>
 #include <tvm/ffi/object.h>
 #include <tvm/ffi/reflection/access_path.h>
 #include <tvm/ffi/reflection/accessor.h>
 #include <tvm/ffi/reflection/creator.h>
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/ffi/string.h>
+
+#include <string_view>
 
 #include "./testing_object.h"
 
@@ -67,6 +70,7 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   TPrimExprObj::RegisterReflection();
   TVarObj::RegisterReflection();
   TPairObj::RegisterReflection();
+  TObjectPtrHolderObj::RegisterReflection();
   TVarWithDepObj::RegisterReflection();
   TDefHolderObj::RegisterReflection();
   TFuncObj::RegisterReflection();
@@ -115,6 +119,66 @@ TEST(Reflection, FieldSetter) {
   reflection::FieldSetter setter("test.Float", "value");
   setter(a, 20.0);
   EXPECT_EQ(a.as<TFloatObj>()->value, 20.0);
+}
+
+TEST(Reflection, ObjectPtrField) {
+  ObjectPtr<TIntObj> initial = make_object<TIntObj>(10);
+  TIntObj* initial_raw = initial.get();
+  ObjectPtr<TNumberObj> initial_base = initial;
+  TObjectPtrHolder holder(std::move(initial_base));
+  EXPECT_EQ(initial.use_count(), 2);
+
+  reflection::FieldGetter getter("test.ObjectPtrHolder", "value");
+  Any value = getter(holder);
+  EXPECT_EQ(initial.use_count(), 3);
+  ObjectPtr<TNumberObj> reflected = value.cast<ObjectPtr<TNumberObj>>();
+  EXPECT_EQ(initial.use_count(), 4);
+  EXPECT_EQ(reflected.get(), static_cast<TNumberObj*>(initial_raw));
+  reflected.reset();
+  value.reset();
+  EXPECT_EQ(initial.use_count(), 2);
+
+  reflection::FieldSetter setter("test.ObjectPtrHolder", "value");
+  ObjectPtr<TFloatObj> replacement = make_object<TFloatObj>(2.5);
+  setter(holder, replacement);
+  EXPECT_EQ(replacement.use_count(), 2);
+  EXPECT_EQ(holder->value.get(), static_cast<TNumberObj*>(replacement.get()));
+  EXPECT_EQ(initial.use_count(), 1);
+
+  ObjectPtr<TNumberObj> null_value;
+  setter(holder, null_value);
+  EXPECT_EQ(holder->value, nullptr);
+  EXPECT_EQ(replacement.use_count(), 1);
+
+  EXPECT_THROW(setter(holder, String("not a number")), Error);
+  EXPECT_EQ(holder->value, nullptr);
+}
+
+TEST(Reflection, ObjectPtrFieldInfo) {
+  const TVMFFIFieldInfo* info = reflection::GetFieldInfo("test.ObjectPtrHolder", "value");
+  EXPECT_EQ(info->field_static_type_index, TypeIndex::kTVMFFIObject);
+  EXPECT_EQ(info->size, sizeof(ObjectPtr<TNumberObj>));
+  EXPECT_EQ(info->alignment, alignof(ObjectPtr<TNumberObj>));
+  Map<String, Any> metadata = json::Parse(String(info->metadata)).cast<Map<String, Any>>();
+  EXPECT_EQ(metadata["type_schema"].cast<String>(),
+            R"({"type":"Optional","args":[{"type":"test.Number"}]})");
+}
+
+TEST(Reflection, ObjectPtrMethod) {
+  Function identity = reflection::GetMethod("test.ObjectPtrHolder", "identity");
+  ObjectPtr<TIntObj> input = make_object<TIntObj>(21);
+  TIntObj* raw_input = input.get();
+  Any result = identity(input);
+  EXPECT_EQ(input.use_count(), 2);
+
+  ObjectPtr<TNumberObj> output = std::move(result).cast<ObjectPtr<TNumberObj>>();
+  EXPECT_EQ(result, nullptr);  // NOLINT(bugprone-use-after-move)
+  EXPECT_EQ(output.get(), static_cast<TNumberObj*>(raw_input));
+  EXPECT_EQ(input.use_count(), 2);
+
+  Any null_result = identity(ObjectPtr<TNumberObj>());
+  EXPECT_EQ(null_result, nullptr);
+  EXPECT_THROW(identity(String("not a number")), Error);
 }
 
 TEST(Reflection, FieldInfo) {

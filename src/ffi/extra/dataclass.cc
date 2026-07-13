@@ -1707,6 +1707,13 @@ class RecursiveComparer : public ObjectGraphDFS<RecursiveComparer, CompareFrame,
 
 // ---------- Python-defined type support ----------
 
+// Python-defined layouts use ObjectRef as the common in-memory representation for every
+// object-valued C++ parent field, including ObjectPtr<T> fields.
+static_assert(std::is_standard_layout_v<ObjectPtr<Object>>);
+static_assert(std::is_standard_layout_v<ObjectRef>);
+static_assert(sizeof(ObjectPtr<Object>) == sizeof(ObjectRef));
+static_assert(alignof(ObjectPtr<Object>) == alignof(ObjectRef));
+
 enum class PyClassFieldStorageKind {
   kPOD,
   kAny,
