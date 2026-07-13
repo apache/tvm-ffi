@@ -61,6 +61,8 @@ def _make_init(
     missing = core.MISSING
     has_post_init = hasattr(type_cls, "__post_init__")
 
+    _ip_funcs = _collect_init_property_funcs(type_cls)
+
     if py_class_mode:
 
         def __init__(self: Any, *args: Any, **kwargs: Any) -> None:
@@ -74,6 +76,10 @@ def _make_init(
                         ffi_args.append(key)
                         ffi_args.append(val)
             self.__init_handle_by_constructor__(ffi_init, *ffi_args)
+            if _ip_funcs:
+                _t = type(self)
+                for _name, _func in _ip_funcs:
+                    getattr(_t, _name).set(self, _func(self))
             if has_post_init:
                 self.__post_init__()
 
@@ -95,6 +101,10 @@ def _make_init(
                         ffi_args.append(key)
                         ffi_args.append(val)
             self.__init_handle_by_constructor__(ffi_init, *ffi_args)
+            if _ip_funcs:
+                _t = type(self)
+                for _name, _func in _ip_funcs:
+                    getattr(_t, _name).set(self, _func(self))
             if has_post_init:
                 self.__post_init__()
 
@@ -102,6 +112,20 @@ def _make_init(
     __init__.__qualname__ = f"{type_cls.__qualname__}.__init__"
     __init__.__module__ = type_cls.__module__
     return __init__
+
+
+def _collect_init_property_funcs(type_cls: type) -> list[tuple[str, Callable[..., Any]]]:
+    """Collect ``(name, func)`` pairs for all ``init_property`` fields in MRO order.
+
+    Walks from the root toward the most specific class so parent properties are
+    initialized before child properties.  Child definitions replace parent
+    definitions of the same name.
+    """
+    funcs: dict[str, Callable[..., Any]] = {}
+    for cls in reversed(type_cls.__mro__):
+        for name, func in cls.__dict__.get("__ffi_init_property_funcs__", {}).items():
+            funcs[name] = func
+    return list(funcs.items())
 
 
 def _make_init_signature(type_info: TypeInfo) -> inspect.Signature:

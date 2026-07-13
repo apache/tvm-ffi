@@ -829,9 +829,9 @@ class TestNoneDisambiguation:
 # ---------------------------------------------------------------------------
 class TestConvertSpecialTypes:
     def test_dtype_str_converts(self) -> None:
-        """Str -> dtype actually creates a DataType object."""
+        """Str -> dtype creates a public dtype wrapper."""
         result = _to_py_class_value(A(tvm_ffi.core.DataType).convert("float32"))
-        assert isinstance(result, tvm_ffi.core.DataType)
+        assert isinstance(result, tvm_ffi.dtype)
         assert str(result) == "float32"
 
     def test_dtype_passthrough(self) -> None:
@@ -845,6 +845,36 @@ class TestConvertSpecialTypes:
         dev = tvm_ffi.Device("cpu", 0)
         result = _to_py_class_value(A(tvm_ffi.Device).convert(dev))
         assert str(result) == str(dev)
+
+    def test_device_str_converts(self) -> None:
+        """Str -> Device parses the same device notation as tvm_ffi.device."""
+        result = _to_py_class_value(A(tvm_ffi.Device).convert("cpu"))
+        assert isinstance(result, tvm_ffi.Device)
+        assert result == tvm_ffi.device("cpu", 0)
+
+        result = _to_py_class_value(A(tvm_ffi.Device).convert("cuda:1"))
+        assert result == tvm_ffi.device("cuda", 1)
+
+    def test_device_bad_str_rejected(self) -> None:
+        """Invalid device strings remain type-conversion errors."""
+        with pytest.raises(TypeError, match="device"):
+            A(tvm_ffi.Device).convert("not_a_device")
+
+    def test_device_base_class_passthrough_after_public_class_override(self) -> None:
+        """The base Device cdef class remains accepted if _CLASS_DEVICE is overridden."""
+
+        class MyDevice(tvm_ffi.Device):
+            pass
+
+        old_device_cls = tvm_ffi.core._CLASS_DEVICE
+        dev = old_device_cls("cpu", 0)
+        tvm_ffi.core._set_class_device(MyDevice)
+        try:
+            result = _to_py_class_value(A(tvm_ffi.Device).convert(dev))
+            assert str(result) == str(dev)
+            assert isinstance(result, MyDevice)
+        finally:
+            tvm_ffi.core._set_class_device(old_device_cls)
 
     def test_callable_passthrough(self) -> None:
         """Test callable passthrough."""
@@ -3154,6 +3184,15 @@ class TestObjectMarshalFallback:
         assert isinstance(result2, tvm_ffi.Shape)
         assert tuple(result1) == (1, 2, 3)
         assert tuple(result2) == (1, 2, 3)
+
+    def test_convert_failure_includes_ffi_convert_error(self) -> None:
+        """Errors raised by __ffi_convert__ are included in TypeSchema.convert failures."""
+        with pytest.raises(TypeError) as exc_info:
+            S("ffi.Shape").convert([1, "x"])
+
+        assert "expected ffi.Shape, got list" in str(exc_info.value)
+        assert "\n  __ffi_convert__ failed:\n" in str(exc_info.value)
+        assert "Cannot cast from `ffi.Array` to `ffi.Shape`" in str(exc_info.value)
 
     def test_exception_rejected_by_array_schema(self) -> None:
         """Exception is NOT accepted by Array schema (Error !IS-A Array)."""

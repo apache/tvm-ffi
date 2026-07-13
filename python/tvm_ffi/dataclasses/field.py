@@ -14,15 +14,18 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-"""Field descriptor and ``field()`` helper for Python-defined TVM-FFI types."""
+"""Field descriptors and helpers for Python-defined TVM-FFI types."""
 
 from __future__ import annotations
 
+import importlib
 import sys
 from collections.abc import Callable
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Generic, TypeVar, overload
 
 from ..core import MISSING, TypeSchema
+
+_T = TypeVar("_T")
 
 # Re-export the stdlib KW_ONLY sentinel so type checkers recognise
 # ``_: KW_ONLY`` as a keyword-only boundary rather than a real field.
@@ -40,6 +43,63 @@ else:
 def _field_converter(value: Any) -> Any:
     """Static-analysis marker for fields whose values are converted by FFI."""
     return value
+
+
+def _get_forward_annotations(obj: Any) -> dict[str, Any]:
+    """Return Python 3.14+ annotations without forcing unresolved names."""
+    annotationlib: Any = importlib.import_module("annotationlib")
+    return annotationlib.get_annotations(obj, format=annotationlib.Format.FORWARDREF)
+
+
+class init_property(Generic[_T]):
+    """Auto-registered C++ field with eager computation at ``__init__`` time.
+
+    ``@py_class`` detects ``init_property`` descriptors and registers each one
+    as ``field(init=False, structural_eq="ignore")``, so the computed value
+    lives in C++ object storage and is accessible cross-language.  The value
+    is computed once — immediately after ``__ffi_init__`` — and stored via the
+    field's C++ slot.  Subsequent reads go directly to C++ memory.
+
+    The return annotation of the decorated function is injected into the class
+    ``__annotations__`` during class body execution so the field resolution
+    machinery picks it up automatically.  If no return annotation is present,
+    ``typing.Any`` is used.
+    """
+
+    def __init__(self, func: Callable[[Any], _T]) -> None:
+        self.func = func
+        self.name: str | None = None
+        if sys.version_info >= (3, 14):
+            self._return_annotation: Any = _get_forward_annotations(func).get("return")
+        else:
+            self._return_annotation = func.__annotations__.get("return")
+
+    @overload
+    def __get__(self, obj: None, objtype: type) -> init_property[_T]: ...
+
+    @overload
+    def __get__(self, obj: object, objtype: type) -> _T: ...
+
+    def __get__(self, obj: object | None, objtype: type) -> _T | init_property[_T]:
+        return self
+
+    def __set_name__(self, owner: type, name: str) -> None:
+        self.name = name
+
+        ann = self._return_annotation if self._return_annotation is not None else Any
+        # Inject into the owner's own __annotations__ so on_fields_resolved
+        # processes this name as a typed field.
+        if sys.version_info >= (3, 14):
+            # PEP 749 annotations may still be lazy here.  Materializing them as
+            # ForwardRef values preserves unresolved names while retaining every
+            # annotation already declared on the class.
+            annotations = _get_forward_annotations(owner)
+            annotations[name] = ann
+            owner.__annotations__ = annotations
+        else:
+            if "__annotations__" not in owner.__dict__:
+                owner.__annotations__ = {}
+            owner.__annotations__[name] = ann
 
 
 class Field:
@@ -129,7 +189,7 @@ class Field:
         "structural_eq",
         "type",
     )
-    name: str | None
+    name: str
     _ty_schema: TypeSchema | None
     type: Any
     default: object
@@ -186,7 +246,7 @@ class Field:
                 f"{sorted(Field._VALID_STRUCTURAL_EQ_VALUES, key=str)}, "
                 f"got {structural_eq!r}"
             )
-        self.name = name
+        self.name = name  # ty: ignore[invalid-assignment]
         self._ty_schema = _ty_schema
         self.type = None
         self.default = default

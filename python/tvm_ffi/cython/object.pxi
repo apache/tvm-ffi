@@ -727,18 +727,33 @@ def _rollback_py_class(object type_info):
         TYPE_INDEX_TO_CLS[idx] = None
 
 
-def _lookup_type_attr(type_index: int32_t, attr_key: str) -> Any:
-    cdef ByteArrayArg attr_key_bytes = ByteArrayArg(c_str(attr_key))
-    cdef const TVMFFITypeAttrColumn* column = TVMFFIGetTypeAttrColumn(&attr_key_bytes.cdata)
+cdef object _lookup_type_attr_in_column(int32_t type_index, const TVMFFITypeAttrColumn* column):
     cdef TVMFFIAny data
     cdef int32_t offset
-    if column == NULL:
-        return None
     offset = type_index - column.begin_index
     if offset < 0 or offset >= column.size:
         return None
     CHECK_CALL(TVMFFIAnyViewToOwnedAny(&(column.data[offset]), &data))
     return make_ret(data)
+
+
+def _lookup_type_attr(type_index: int32_t, attr_key: str, ancestor: bool = False) -> Any:
+    cdef ByteArrayArg attr_key_bytes = ByteArrayArg(c_str(attr_key))
+    cdef const TVMFFITypeAttrColumn* column = TVMFFIGetTypeAttrColumn(&attr_key_bytes.cdata)
+    cdef const TVMFFITypeInfo* info
+    cdef object value
+    cdef int32_t i
+    if column == NULL:
+        return None
+    value = _lookup_type_attr_in_column(type_index, column)
+    if value is not None or not ancestor:
+        return value
+    info = TVMFFIGetTypeInfo(type_index)
+    for i in range(info.type_depth - 1, -1, -1):
+        value = _lookup_type_attr_in_column(info.type_ancestors[i].type_index, column)
+        if value is not None:
+            return value
+    return None
 
 
 def _register_type_attr(type_index: int32_t, attr_key: str, value: object) -> None:
@@ -770,6 +785,12 @@ def _register_type_attr(type_index: int32_t, attr_key: str, value: object) -> No
 
 def _type_cls_to_type_info(type_cls: type) -> TypeInfo | None:
     return TYPE_CLS_TO_INFO.get(type_cls, None)
+
+
+def _type_index_to_type_info(int type_index) -> TypeInfo | None:
+    if 0 <= type_index < len(TYPE_INDEX_TO_INFO):
+        return TYPE_INDEX_TO_INFO[type_index]
+    return None
 
 
 cdef list TYPE_INDEX_TO_CLS = []

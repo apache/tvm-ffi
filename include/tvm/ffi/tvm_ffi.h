@@ -39,6 +39,7 @@
 #include <tvm/ffi/container/tensor.h>
 #include <tvm/ffi/container/tuple.h>
 #include <tvm/ffi/container/variant.h>
+#include <tvm/ffi/device.h>
 #include <tvm/ffi/dtype.h>
 #include <tvm/ffi/endian.h>
 #include <tvm/ffi/enum.h>

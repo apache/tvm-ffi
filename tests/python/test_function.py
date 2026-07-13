@@ -67,6 +67,10 @@ def test_echo() -> None:
     assert isinstance(dtype_result, tvm_ffi.dtype)
     assert dtype_result == tvm_ffi.dtype("float32")
 
+    c_dtype_result = fecho(tvm_ffi.core.DataType("float32"))
+    assert isinstance(c_dtype_result, tvm_ffi.dtype)
+    assert c_dtype_result == tvm_ffi.dtype("float32")
+
     # test device
     device_result = fecho(tvm_ffi.device("cuda:1"))
     assert isinstance(device_result, tvm_ffi.Device)
@@ -105,6 +109,16 @@ def test_echo() -> None:
         assert tensor_result.device.index == 0
 
     check_tensor()
+
+
+def test_typed_device_arg_accepts_string() -> None:
+    schema_id_device = tvm_ffi.get_global_func("testing.schema_id_device")
+    result = schema_id_device("cpu")
+    assert isinstance(result, tvm_ffi.Device)
+    assert result == tvm_ffi.device("cpu", 0)
+
+    result = schema_id_device("cuda:1")
+    assert result == tvm_ffi.device("cuda", 1)
 
 
 def test_return_raw_str_bytes() -> None:
@@ -507,7 +521,7 @@ def test_callback_rawstr_and_bytearrayptr_args() -> None:
 
     # --- kTVMFFIRawStr path ---
     str_received: list[Any] = []
-    str_cb = tvm_ffi.convert(lambda x: str_received.append(x))
+    str_cb = tvm_ffi.convert(str_received.append)
     mod.invoke_with_raw_str(str_cb)
     assert len(str_received) == 1
     assert isinstance(str_received[0], str), f"expected str, got {type(str_received[0])}"
@@ -515,7 +529,7 @@ def test_callback_rawstr_and_bytearrayptr_args() -> None:
 
     # --- kTVMFFIByteArrayPtr path ---
     bytes_received: list[Any] = []
-    bytes_cb = tvm_ffi.convert(lambda x: bytes_received.append(x))
+    bytes_cb = tvm_ffi.convert(bytes_received.append)
     mod.invoke_with_byte_array_ptr(bytes_cb)
     assert len(bytes_received) == 1
     assert isinstance(bytes_received[0], bytes), f"expected bytes, got {type(bytes_received[0])}"

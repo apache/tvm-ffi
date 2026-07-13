@@ -23,6 +23,7 @@
 #include <tvm/ffi/any.h>
 #include <tvm/ffi/container/array.h>
 #include <tvm/ffi/container/map.h>
+#include <tvm/ffi/device.h>
 #include <tvm/ffi/dtype.h>
 #include <tvm/ffi/extra/structural_visit.h>
 #include <tvm/ffi/memory.h>

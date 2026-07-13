@@ -22,6 +22,7 @@
 #include <tvm/ffi/container/list.h>
 #include <tvm/ffi/container/map.h>
 #include <tvm/ffi/container/shape.h>
+#include <tvm/ffi/device.h>
 #include <tvm/ffi/dtype.h>
 #include <tvm/ffi/extra/serialization.h>
 #include <tvm/ffi/extra/structural_equal.h>

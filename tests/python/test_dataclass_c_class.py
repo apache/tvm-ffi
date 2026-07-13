@@ -23,12 +23,16 @@ import warnings
 
 import pytest
 import tvm_ffi.testing
+from tvm_ffi import core
 from tvm_ffi.core import MISSING, TypeInfo
 from tvm_ffi.dataclasses import Field, field
 from tvm_ffi.dataclasses.c_class import _attach_field_objects, c_class
 from tvm_ffi.registry import _warn_missing_field_annotations
 from tvm_ffi.testing import (
     TestCompare,
+    TestCustomCompare,
+    TestCustomHash,
+    TestEqWithoutHash,
     TestHash,
     _TestCxxClassBase,
     _TestCxxClassDerived,
@@ -187,6 +191,28 @@ def test_c_class_ordering_different_type() -> None:
         a > 3.14  # ty: ignore[unsupported-operator]
     with pytest.raises(TypeError):
         a >= None  # ty: ignore[unsupported-operator]
+
+
+def test_c_class_installs_cxx_type_attr_columns() -> None:
+    """C++-registered TypeAttrColumn hooks become class attributes."""
+    info: TypeInfo = getattr(TestCustomCompare, "__tvm_ffi_type_info__")
+    attrs = {
+        name
+        for name in ("__ffi_hash__", "__ffi_eq__", "__ffi_compare__", "__ffi_repr__")
+        if core._lookup_type_attr(info.type_index, name) is not None
+    }
+    assert set(attrs) == {"__ffi_hash__", "__ffi_eq__", "__ffi_compare__"}
+
+    for cls, names in (
+        (TestCustomHash, ("__ffi_hash__",)),
+        (TestCustomCompare, ("__ffi_hash__", "__ffi_eq__", "__ffi_compare__")),
+        (TestEqWithoutHash, ("__ffi_eq__",)),
+    ):
+        type_info: TypeInfo = getattr(cls, "__tvm_ffi_type_info__")
+        for name in names:
+            assert core._lookup_type_attr(type_info.type_index, name) is not None
+            assert name in cls.__dict__
+            assert callable(cls.__dict__[name])
 
 
 # ---------------------------------------------------------------------------

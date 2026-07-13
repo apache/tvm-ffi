@@ -128,7 +128,7 @@ class ErrorObjFromStd : public ErrorObj {
  * \brief Managed reference to ErrorObj
  * \sa Error Object
  */
-class Error : public ObjectRef, public std::exception {
+class TVM_FFI_DLL Error : public ObjectRef, public std::exception {
  public:
   /*!
    * \brief Constructor

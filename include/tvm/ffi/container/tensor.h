@@ -26,6 +26,7 @@
 #define TVM_FFI_CONTAINER_TENSOR_H_
 
 #include <tvm/ffi/container/shape.h>
+#include <tvm/ffi/device.h>
 #include <tvm/ffi/dtype.h>
 #include <tvm/ffi/error.h>
 #include <tvm/ffi/type_traits.h>

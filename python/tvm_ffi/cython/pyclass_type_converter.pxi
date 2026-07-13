@@ -38,7 +38,7 @@ cdef int _VALUE_PROTOCOL_MAX_DEPTH = 64
 cdef str _TYPE_ATTR_FFI_CONVERT = "__ffi_convert__"
 cdef str _TYPE_ATTR_ENUM_VALUE_ENTRIES = "__ffi_enum_value_entries__"
 cdef class _TypeConverter
-ctypedef CAny (*_dispatch_fn_t)(_TypeConverter, object, bint*) except *
+ctypedef CAny (*_dispatch_fn_t)(_TypeConverter, object, bint*)
 
 
 # ---------------------------------------------------------------------------
@@ -82,11 +82,16 @@ class _ConvertError(Exception):
         return self.args[0]
 
 
+cdef str _tc_indent_message(object message, str prefix):
+    cdef str text = str(message)
+    return prefix + text.replace("\n", "\n" + prefix)
+
+
 # ---------------------------------------------------------------------------
 # Converters (1/N): Simple value converters
 # ---------------------------------------------------------------------------
 
-cdef CAny _tc_convert_any(_TypeConverter _conv, object value, bint* changed) except *:
+cdef CAny _tc_convert_any(_TypeConverter _conv, object value, bint* changed):
     """Any: accept any marshalable FFI value."""
     cdef CAny packed
     assert _CLASS_DEVICE is not None
@@ -104,6 +109,7 @@ cdef CAny _tc_convert_any(_TypeConverter _conv, object value, bint* changed) exc
             Bytes,
             Tensor,
             DataType,
+            Device,
             CObject,
             _CLASS_DEVICE,
             _CLASS_DTYPE,
@@ -113,14 +119,14 @@ cdef CAny _tc_convert_any(_TypeConverter _conv, object value, bint* changed) exc
     return packed
 
 
-cdef CAny _tc_convert_none(_TypeConverter _conv, object value, bint* changed) except *:
+cdef CAny _tc_convert_none(_TypeConverter _conv, object value, bint* changed):
     """None accepts: None only."""
     if value is None:
         return CAny(None)
     raise _ConvertError(f"expected None, got {_tc_describe_value_type(value)}")
 
 
-cdef CAny _tc_convert_int(_TypeConverter _conv, object value, bint* changed) except *:
+cdef CAny _tc_convert_int(_TypeConverter _conv, object value, bint* changed):
     """int accepts: int, bool, Integral, __tvm_ffi_int__ protocol."""
     cdef object ivalue
     if isinstance(value, bool):
@@ -149,7 +155,7 @@ cdef CAny _tc_convert_int(_TypeConverter _conv, object value, bint* changed) exc
     raise _ConvertError(f"expected int, got {_tc_describe_value_type(value)}")
 
 
-cdef CAny _tc_convert_float(_TypeConverter _conv, object value, bint* changed) except *:
+cdef CAny _tc_convert_float(_TypeConverter _conv, object value, bint* changed):
     """float accepts: float, int, bool, Real, __tvm_ffi_float__ protocol."""
     cdef object fvalue
     if isinstance(value, float):
@@ -170,7 +176,7 @@ cdef CAny _tc_convert_float(_TypeConverter _conv, object value, bint* changed) e
     raise _ConvertError(f"expected float, got {_tc_describe_value_type(value)}")
 
 
-cdef CAny _tc_convert_bool(_TypeConverter _conv, object value, bint* changed) except *:
+cdef CAny _tc_convert_bool(_TypeConverter _conv, object value, bint* changed):
     """bool accepts: bool, int, Integral."""
     cdef object bvalue
     if isinstance(value, bool):
@@ -185,7 +191,7 @@ cdef CAny _tc_convert_bool(_TypeConverter _conv, object value, bint* changed) ex
     raise _ConvertError(f"expected bool, got {_tc_describe_value_type(value)}")
 
 
-cdef CAny _tc_convert_str(_TypeConverter _conv, object value, bint* changed) except *:
+cdef CAny _tc_convert_str(_TypeConverter _conv, object value, bint* changed):
     """str accepts: str only.  Short strings use SmallStr (inline in Any)."""
     if isinstance(value, String):
         return CAny(value)
@@ -195,7 +201,7 @@ cdef CAny _tc_convert_str(_TypeConverter _conv, object value, bint* changed) exc
     raise _ConvertError(f"expected str, got {_tc_describe_value_type(value)}")
 
 
-cdef CAny _tc_convert_bytes(_TypeConverter _conv, object value, bint* changed) except *:
+cdef CAny _tc_convert_bytes(_TypeConverter _conv, object value, bint* changed):
     """bytes accepts: bytes, bytearray.  Short bytes use SmallBytes (inline in Any)."""
     if isinstance(value, Bytes):
         return CAny(value)
@@ -208,19 +214,28 @@ cdef CAny _tc_convert_bytes(_TypeConverter _conv, object value, bint* changed) e
     raise _ConvertError(f"expected bytes, got {_tc_describe_value_type(value)}")
 
 
-cdef CAny _tc_convert_device(_TypeConverter _conv, object value, bint* changed) except *:
+cdef CAny _tc_convert_device(_TypeConverter _conv, object value, bint* changed):
     """Device accepts: Device and __dlpack_device__ without __dlpack__."""
     cdef object vtype = type(value)
     assert _CLASS_DEVICE is not None
+    if isinstance(value, Device):
+        return CAny(value)
     if isinstance(value, _CLASS_DEVICE):
         return CAny(value)
+    if isinstance(value, str):
+        try:
+            device_value = _CLASS_DEVICE(value)
+        except Exception:
+            raise _ConvertError(f"expected Device, got invalid device string {value!r}") from None
+        changed[0] = True
+        return CAny(device_value)
     if hasattr(vtype, "__dlpack_device__") and not hasattr(vtype, "__dlpack__"):
         changed[0] = True
         return CAnyChecked(value, "Device", value)
     raise _ConvertError(f"expected Device, got {_tc_describe_value_type(value)}")
 
 
-cdef CAny _tc_convert_dtype(_TypeConverter _conv, object value, bint* changed) except *:
+cdef CAny _tc_convert_dtype(_TypeConverter _conv, object value, bint* changed):
     """dtype accepts: DataType, dtype wrapper, str and dtype protocols."""
     cdef object dtype_value
     assert _CLASS_DTYPE is not None
@@ -243,7 +258,7 @@ cdef CAny _tc_convert_dtype(_TypeConverter _conv, object value, bint* changed) e
     raise _ConvertError(f"expected dtype, got {_tc_describe_value_type(value)}")
 
 
-cdef CAny _tc_convert_opaque_ptr(_TypeConverter _conv, object value, bint* changed) except *:
+cdef CAny _tc_convert_opaque_ptr(_TypeConverter _conv, object value, bint* changed):
     """ctypes.c_void_p accepts ctypes.c_void_p, None and opaque pointer protocols."""
     cdef object vtype = type(value)
     if isinstance(value, ctypes.c_void_p):
@@ -258,7 +273,7 @@ cdef CAny _tc_convert_opaque_ptr(_TypeConverter _conv, object value, bint* chang
     raise _ConvertError(f"expected ctypes.c_void_p, got {_tc_describe_value_type(value)}")
 
 
-cdef CAny _tc_convert_tensor(_TypeConverter _conv, object value, bint* changed) except *:
+cdef CAny _tc_convert_tensor(_TypeConverter _conv, object value, bint* changed):
     """Tensor accepts Tensor, Tensor subtypes and DLPack exporters."""
     cdef object vtype = type(value)
     if isinstance(value, Tensor):
@@ -273,7 +288,7 @@ cdef CAny _tc_convert_tensor(_TypeConverter _conv, object value, bint* changed) 
     raise _ConvertError(f"expected Tensor, got {_tc_describe_value_type(value)}")
 
 
-cdef CAny _tc_convert_callable(_TypeConverter _conv, object value, bint* changed) except *:
+cdef CAny _tc_convert_callable(_TypeConverter _conv, object value, bint* changed):
     """Callable accepts Function and any Python callable."""
     cdef Function func
     if isinstance(value, Function):
@@ -291,21 +306,21 @@ cdef CAny _tc_convert_callable(_TypeConverter _conv, object value, bint* changed
 # ---------------------------------------------------------------------------
 
 
-cdef CAny _tc_convert_array(_TypeConverter conv, object value, bint* changed) except *:
+cdef CAny _tc_convert_array(_TypeConverter conv, object value, bint* changed):
     """Dispatch for Array[T]. Accepts Array or List CObjects (cross-type)."""
     from tvm_ffi.container import Array
 
     return _tc_convert_seq(conv, value, changed, Array)
 
 
-cdef CAny _tc_convert_list(_TypeConverter conv, object value, bint* changed) except *:
+cdef CAny _tc_convert_list(_TypeConverter conv, object value, bint* changed):
     """Dispatch for List[T]. Accepts List or Array CObjects (cross-type)."""
     from tvm_ffi.container import List
 
     return _tc_convert_seq(conv, value, changed, List)
 
 
-cdef CAny _tc_convert_map(_TypeConverter conv, object value, bint* changed) except *:
+cdef CAny _tc_convert_map(_TypeConverter conv, object value, bint* changed):
     """Dispatch for Map[K, V]. Accepts Map or Dict CObjects (cross-type)."""
     from tvm_ffi import _ffi_api
     from tvm_ffi.container import Map
@@ -313,7 +328,7 @@ cdef CAny _tc_convert_map(_TypeConverter conv, object value, bint* changed) exce
     return _tc_convert_mapping(conv, value, changed, Map, _ffi_api.Map)
 
 
-cdef CAny _tc_convert_dict(_TypeConverter conv, object value, bint* changed) except *:
+cdef CAny _tc_convert_dict(_TypeConverter conv, object value, bint* changed):
     """Dispatch for Dict[K, V]. Accepts Dict or Map CObjects (cross-type)."""
     from tvm_ffi import _ffi_api
     from tvm_ffi.container import Dict
@@ -321,7 +336,7 @@ cdef CAny _tc_convert_dict(_TypeConverter conv, object value, bint* changed) exc
     return _tc_convert_mapping(conv, value, changed, Dict, _ffi_api.Dict)
 
 
-cdef CAny _tc_convert_seq(_TypeConverter conv, object value, bint* changed, object seq_type) except *:
+cdef CAny _tc_convert_seq(_TypeConverter conv, object value, bint* changed, object seq_type):
     from tvm_ffi.container import Array, List
 
     cdef _TypeConverter elem_conv = conv.subs[0] if conv.subs else None
@@ -358,7 +373,7 @@ cdef CAny _tc_convert_seq(_TypeConverter conv, object value, bint* changed, obje
     return CAnyChecked(seq_type(converted), seq_type.__name__, value)
 
 
-cdef CAny _tc_convert_tuple(_TypeConverter conv, object value, bint* changed) except *:
+cdef CAny _tc_convert_tuple(_TypeConverter conv, object value, bint* changed):
     """Dispatch for tuple[T1, T2, ...] or bare tuple."""
     cdef int i
     cdef int n
@@ -412,7 +427,7 @@ cdef CAny _tc_convert_mapping(
     bint* changed,
     object mapping_type,
     object constructor,
-) except *:
+):
     cdef _TypeConverter key_conv = conv.subs[0] if conv.subs else None
     cdef _TypeConverter val_conv = conv.subs[1] if conv.subs else None
     cdef list list_kvs = []
@@ -472,14 +487,14 @@ cdef CAny _tc_convert_mapping(
 # Converters (3/N): Optional and Union
 # ---------------------------------------------------------------------------
 
-cdef CAny _tc_convert_optional(_TypeConverter conv, object value, bint* changed) except *:
+cdef CAny _tc_convert_optional(_TypeConverter conv, object value, bint* changed):
     """Dispatch for Optional[T]: None passthrough or inner dispatch."""
     if value is None:
         return CAny(None)
     return _type_convert_dispatch_with_fallback(<_TypeConverter>(conv.subs[0]), value, changed)
 
 
-cdef CAny _tc_convert_union(_TypeConverter conv, object value, bint* changed) except *:
+cdef CAny _tc_convert_union(_TypeConverter conv, object value, bint* changed):
     """Dispatch for Union[T1, T2, ...]."""
     cdef _TypeConverter alt
     cdef bint alt_changed
@@ -526,7 +541,7 @@ cdef inline bint _tc_registered_cls_has_base(
 
 cdef object _tc_find_payload_enum_variant(
     int32_t type_index, object enum_cls, object payload
-) except *:
+):
     """Resolve *payload* to its singleton variant (``None`` if no match).
 
     Primary path: O(1) lookup in the cross-language value-entries column
@@ -548,7 +563,7 @@ cdef object _tc_find_payload_enum_variant(
     return None
 
 
-cdef object _tc_normalize_int_enum_payload(object value, bint* matched) except *:
+cdef object _tc_normalize_int_enum_payload(object value, bint* matched):
     cdef object ivalue
     matched[0] = False
     if isinstance(value, bool):
@@ -575,7 +590,7 @@ cdef object _tc_normalize_int_enum_payload(object value, bint* matched) except *
     return None
 
 
-cdef CAny _tc_convert_object_marshaled(_TypeConverter conv, object value) except *:
+cdef CAny _tc_convert_object_marshaled(_TypeConverter conv, object value):
     cdef int32_t actual_type_index = kTVMFFINone
     cdef CAny packed
     cdef CAny converted
@@ -597,10 +612,16 @@ cdef CAny _tc_convert_object_marshaled(_TypeConverter conv, object value) except
         if actual_type_index >= kTVMFFIStaticObjectBegin:
             if _tc_type_index_is_instance(actual_type_index, conv.type_index):
                 return converted
-    raise _ConvertError(f"expected {conv.err_hint}, got {_tc_describe_value_type(value)}") from err
+    if err is not None:
+        raise _ConvertError(
+            f"expected {conv.err_hint}, got {_tc_describe_value_type(value)}\n"
+            f"  __ffi_convert__ failed:\n"
+            f"{_tc_indent_message(err, '    ')}"
+        ) from None
+    raise _ConvertError(f"expected {conv.err_hint}, got {_tc_describe_value_type(value)}")
 
 
-cdef CAny _tc_convert_object(_TypeConverter conv, object value, bint* changed) except *:
+cdef CAny _tc_convert_object(_TypeConverter conv, object value, bint* changed):
     """Convert *value* to an object compatible with ``conv.type_index``."""
     # TODO: SmallStr and SmallBytes => ObjectRef conversion is not supported yet
     cdef int32_t actual_type_index = kTVMFFINone
@@ -617,7 +638,7 @@ cdef CAny _tc_convert_object(_TypeConverter conv, object value, bint* changed) e
     return _tc_convert_object_marshaled(conv, value)
 
 
-cdef CAny _tc_convert_int_enum(_TypeConverter conv, object value, bint* changed) except *:
+cdef CAny _tc_convert_int_enum(_TypeConverter conv, object value, bint* changed):
     """Convert *value* to an IntEnum-compatible object."""
     cdef int32_t actual_type_index = kTVMFFINone
     cdef object target_cls
@@ -644,7 +665,7 @@ cdef CAny _tc_convert_int_enum(_TypeConverter conv, object value, bint* changed)
     return _tc_convert_object_marshaled(conv, value)
 
 
-cdef CAny _tc_convert_str_enum(_TypeConverter conv, object value, bint* changed) except *:
+cdef CAny _tc_convert_str_enum(_TypeConverter conv, object value, bint* changed):
     """Convert *value* to a StrEnum-compatible object."""
     cdef int32_t actual_type_index = kTVMFFINone
     cdef object target_cls
@@ -710,7 +731,7 @@ cdef str _tc_describe_value_type(object value):
     return type(value).__qualname__
 
 
-cdef CAny CAnyChecked(object value, str expected, object original_value) except *:
+cdef CAny CAnyChecked(object value, str expected, object original_value):
     """Pack *value* into CAny and normalize packing failures to _ConvertError."""
     try:
         return CAny(value)
@@ -873,7 +894,7 @@ cdef void _tc_raise_eager_value_protocol_error(_TypeConverter conv, object value
     raise _ConvertError(f"expected {conv.err_hint}, got {_tc_describe_value_type(value)}")
 
 
-cdef object _tc_eager_protocol_step(object value, bint* stalled_value_protocol) except *:
+cdef object _tc_eager_protocol_step(object value, bint* stalled_value_protocol):
     cdef object vtype
     cdef object inner
     if isinstance(value, (Tensor, CObject, ObjectRValueRef, PyNativeObject)):
@@ -913,7 +934,7 @@ cdef object _tc_eager_protocol_step(object value, bint* stalled_value_protocol) 
     return value
 
 
-cdef CAny _type_convert_dispatch_with_fallback(_TypeConverter conv, object value, bint* changed) except *:
+cdef CAny _type_convert_dispatch_with_fallback(_TypeConverter conv, object value, bint* changed):
     """Dispatch after eager protocol normalization with cycle protection."""
     cdef int depth = 0
     cdef object inner
@@ -942,7 +963,7 @@ cdef CAny _type_convert_dispatch_with_fallback(_TypeConverter conv, object value
 # ---------------------------------------------------------------------------
 # Main dispatcher (thin entry point from Python-level TypeSchema methods)
 # ---------------------------------------------------------------------------
-cdef CAny _type_convert_impl(_TypeConverter converter, object value) except *:
+cdef CAny _type_convert_impl(_TypeConverter converter, object value):
     """Dispatch to the C-level converter."""
     cdef bint changed
     return _type_convert_dispatch_with_fallback(converter, value, &changed)
