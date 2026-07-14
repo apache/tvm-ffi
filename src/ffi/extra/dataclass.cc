@@ -458,9 +458,9 @@ class ObjectDeepCopier : public ObjectGraphDFS<ObjectDeepCopier, CopyFrame, Any>
       return true;
     }
     int32_t ti = obj->type_index();
-    // Immutable leaf objects
+    // Immutable leaf objects and registered enum singletons
     if (ti == TypeIndex::kTVMFFIStr || ti == TypeIndex::kTVMFFIBytes ||
-        ti == TypeIndex::kTVMFFIShape) {
+        ti == TypeIndex::kTVMFFIShape || obj->IsInstance<EnumObj>()) {
       *out = value;
       return true;
     }
@@ -894,7 +894,7 @@ class ReprPrinter : public ObjectGraphDFS<ReprPrinter, ReprFrame, std::string> {
       *out = result;
       return true;
     }
-    // Default repr for EnumObj subclasses: ``<type_key>.<_name>``.  Reached only
+    // Default repr for EnumObj subclasses: ``<type_key>.<_str_index>``.  Reached only
     // when no user-registered ``__ffi_repr__`` hook has claimed this type, so
     // explicit repr overrides on specific enum subclasses still take precedence.
     if (obj->IsInstance<EnumObj>()) {
@@ -902,7 +902,7 @@ class ReprPrinter : public ObjectGraphDFS<ReprPrinter, ReprFrame, std::string> {
       const TVMFFITypeInfo* type_info = TVMFFIGetTypeInfo(ti);
       std::string result(type_info->type_key.data, type_info->type_key.size);
       result += '.';
-      result.append(enum_obj->_name.data(), enum_obj->_name.size());
+      result.append(enum_obj->_str_index.data(), enum_obj->_str_index.size());
       if (show_addr_) result += "@" + AddressStr(obj);
       state_[obj] = State::kDone;
       repr_cache_[obj] = result;

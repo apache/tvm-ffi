@@ -39,7 +39,7 @@ namespace ffi {
  *
  * Recursively copies the value and all reachable objects in its object graph.
  * Copy-constructible types with `ObjectDef` registration automatically support deep copy.
- * Primitive types, strings, bytes, and Shape are returned as-is (they are immutable).
+ * Primitive types, strings, bytes, Shape, and Enum singletons are returned as-is.
  * Arrays, Lists, Maps, and Dicts are recursively deep copied.
  * Objects without copy support cause a runtime error.
  *

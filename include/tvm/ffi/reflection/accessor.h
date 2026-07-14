@@ -496,65 +496,28 @@ inline constexpr const char* kSEqual = "__s_equal__";
  */
 inline constexpr const char* kStructuralVisit = "__s_visit__";
 /*!
- * \brief Serialize object data to a JSON-compatible ``Map``.
+ * \brief Serialize object data to a JSON-compatible value.
  *
  * If registered, ``ToJSONGraph`` calls this instead of the default
  * field-by-field serialization.  Allows types with non-trivial internal
  * state (e.g. ``TInt`` storing a plain ``int64_t``) to define a compact
  * custom JSON representation.
  *
- * Signature: ``(TSelf self) -> Map<String, Any>``, where ``TSelf`` is a subclass of
- * ``ObjectRef``.
+ * Signature: ``(TSelf self) -> Any``, where ``TSelf`` is a subclass of ``ObjectRef``.
  */
 inline constexpr const char* kDataToJson = "__data_to_json__";
 /*!
- * \brief Deserialize object data from a JSON-compatible ``Map``.
+ * \brief Deserialize object data from a JSON-compatible value.
  *
  * Counterpart to ``kDataToJson``.  If registered, ``FromJSONGraph`` calls
- * this to reconstruct the object from its serialized ``Map`` representation
+ * this to reconstruct the object from its serialized representation
  * instead of using field-by-field deserialization.
  *
- * Signature: ``(Map<String, Any> json_data) -> TSelf``, where ``TSelf`` is a subclass of
- * ``ObjectRef``.
+ * Signature: ``(Any json_data) -> TSelf``, where ``TSelf`` is a subclass of ``ObjectRef``.
  */
 inline constexpr const char* kDataFromJson = "__data_from_json__";
-/*!
- * \brief Per-class enum entry registry.
- *
- * Maps each variant's name to its registered singleton for an
- * ``EnumObj`` subclass.  Populated by ``refl::EnumDef<T>("Name")`` on
- * the C++ side and by ``Enum`` subclass declarations on the Python
- * side; both languages share the same underlying storage.
- *
- * Value type: ``Dict<String, Enum>``.
- */
-inline constexpr const char* kEnumEntries = "__ffi_enum_entries__";
-/*!
- * \brief Per-class column holding extensible attributes for enum variants.
- *
- * The outer dict is keyed by extensible-attribute name; each value is a
- * list indexed by the variant's ordinal (``EnumObj::_value``).  Written
- * by ``refl::EnumDef<T>::set_attr(...)`` on the C++ side and by the
- * ``EnumAttrMap`` returned from Python ``Enum.def_attr(...)``.
- *
- * Value type: ``Dict<String, List<Any>>``.
- */
-inline constexpr const char* kEnumAttrs = "__ffi_enum_attrs__";
-/*!
- * \brief Per-class payload-to-variant index for enums.
- *
- * Parallel to ``kEnumEntries`` (name → variant) but keyed by the
- * user-visible payload carried on each variant — i.e. the ``value``
- * field on Python ``IntEnum`` / ``StrEnum`` subclasses (``int`` or
- * ``str``) or the equivalent payload field on a C++ ``EnumObj``
- * subclass.  Populated by the creator of each variant (Python or C++)
- * when the variant has a payload; absent or partially populated
- * otherwise.  Consumed by FFI converters to resolve a raw payload
- * (``int``/``str``) to its singleton variant in O(1).
- *
- * Value type: ``Dict<Any, Enum>``.
- */
-inline constexpr const char* kEnumValueEntries = "__ffi_enum_value_entries__";
+/*! \brief Per-class enum state: ordered entries, canonical indices, and extensible attrs. */
+inline constexpr const char* kEnumState = "__ffi_enum__";
 }  // namespace type_attr
 
 /*!

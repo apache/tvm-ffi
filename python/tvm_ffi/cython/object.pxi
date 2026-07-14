@@ -513,6 +513,7 @@ cdef _type_info_create_from_type_key(object type_cls, str type_key):
     cdef object c_default
     cdef object c_default_factory
     cdef object c_structural_eq
+    cdef object ty_schema
     cdef ByteArrayArg type_key_arg = ByteArrayArg(c_str(type_key))
 
     # NOTE: `type_key_arg` must be kept alive until after the call to `TVMFFITypeKeyToIndex`,
@@ -530,6 +531,8 @@ cdef _type_info_create_from_type_key(object type_cls, str type_key):
         (<FieldSetter>setter).offset = field.offset
         (<FieldSetter>setter).flags = field.flags
         metadata_obj = json.loads(bytearray_to_str(&field.metadata)) if field.metadata.size != 0 else {}
+        type_schema_json = metadata_obj.get("type_schema", None)
+        ty_schema = TypeSchema.from_json_str(type_schema_json) if type_schema_json is not None else None
         # Decode the static default value or factory (if any) registered by C++.
         has_default = (field.flags & kTVMFFIFieldFlagBitMaskHasDefault) != 0
         default_from_factory = (field.flags & kTVMFFIFieldFlagBitMaskDefaultFromFactory) != 0
@@ -560,6 +563,7 @@ cdef _type_info_create_from_type_key(object type_cls, str type_key):
                 metadata=metadata_obj,
                 getter=getter,
                 setter=setter,
+                ty=ty_schema,
                 c_init=(field.flags & kTVMFFIFieldFlagBitMaskInitOff) == 0,
                 c_kw_only=(field.flags & kTVMFFIFieldFlagBitMaskKwOnly) != 0,
                 c_has_default=has_default,

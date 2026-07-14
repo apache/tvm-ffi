@@ -37,8 +37,11 @@ from tvm_ffi.testing import (
     _TestCxxClassBase,
     _TestCxxClassDerived,
     _TestCxxClassDerivedDerived,
+    _TestCxxEnumHolder,
     _TestCxxInitSubset,
+    _TestCxxIntEnum,
     _TestCxxKwOnly,
+    _TestCxxStrEnum,
 )
 
 # ---------------------------------------------------------------------------
@@ -79,6 +82,50 @@ def test_c_class_auto_init_all_explicit() -> None:
     assert obj.v_i32 == 456
     assert obj.v_f64 == 4.0
     assert obj.v_f32 == 9.0
+
+
+def test_c_class_payload_enum_fields_normalize_in_init() -> None:
+    """IntEnum/StrEnum fields on @c_class accept raw payloads in __init__."""
+    obj = _TestCxxEnumHolder(priority=20, opcode="*")  # ty: ignore[invalid-argument-type]
+
+    assert isinstance(obj.priority, _TestCxxIntEnum)
+    assert isinstance(obj.opcode, _TestCxxStrEnum)
+    assert obj.priority.same_as(_TestCxxIntEnum.high)
+    assert obj.opcode.same_as(_TestCxxStrEnum.mul)
+    assert obj.priority.value == 20
+    assert obj.opcode.value == "*"
+
+    from_enum = _TestCxxEnumHolder(priority=_TestCxxIntEnum.low, opcode=_TestCxxStrEnum.add)
+    assert from_enum.priority.same_as(_TestCxxIntEnum.low)
+    assert from_enum.opcode.same_as(_TestCxxStrEnum.add)
+
+
+def test_c_class_payload_enum_fields_normalize_on_assignment() -> None:
+    """IntEnum/StrEnum fields on @c_class accept raw payloads on assignment."""
+    obj = _TestCxxEnumHolder(priority=_TestCxxIntEnum.low, opcode=_TestCxxStrEnum.add)
+
+    obj.priority = 20  # ty: ignore[invalid-assignment]
+    obj.opcode = "*"  # ty: ignore[invalid-assignment]
+    assert obj.priority.same_as(_TestCxxIntEnum.high)
+    assert obj.opcode.same_as(_TestCxxStrEnum.mul)
+
+    obj.priority = _TestCxxIntEnum.low
+    obj.opcode = _TestCxxStrEnum.add
+    assert obj.priority.same_as(_TestCxxIntEnum.low)
+    assert obj.opcode.same_as(_TestCxxStrEnum.add)
+
+
+def test_c_class_payload_enum_fields_reject_unknown_payloads() -> None:
+    """Unknown raw payloads are rejected without replacing existing enum fields."""
+    obj = _TestCxxEnumHolder(priority=_TestCxxIntEnum.low, opcode=_TestCxxStrEnum.add)
+
+    with pytest.raises((TypeError, RuntimeError), match="expected"):
+        obj.priority = 99  # ty: ignore[invalid-assignment]
+    with pytest.raises((TypeError, RuntimeError), match="expected"):
+        obj.opcode = "/"  # ty: ignore[invalid-assignment]
+
+    assert obj.priority.same_as(_TestCxxIntEnum.low)
+    assert obj.opcode.same_as(_TestCxxStrEnum.add)
 
 
 # ---------------------------------------------------------------------------

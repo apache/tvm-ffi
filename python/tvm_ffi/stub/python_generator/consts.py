@@ -36,6 +36,7 @@ TY_MAP_DEFAULTS = {
     "Tensor": "ffi.Tensor",
     "dtype": "ffi.dtype",
     "Device": "ffi.Device",
+    "ffi.Enum": "tvm_ffi.dataclasses.Enum",
 }
 
 TY_MAP_INPUT_DEFAULTS = {

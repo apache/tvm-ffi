@@ -27,6 +27,7 @@
 #include <tvm/ffi/any.h>
 #include <tvm/ffi/c_api.h>
 #include <tvm/ffi/container/dict.h>
+#include <tvm/ffi/container/list.h>
 #include <tvm/ffi/error.h>
 #include <tvm/ffi/object.h>
 #include <tvm/ffi/reflection/accessor.h>
@@ -40,51 +41,81 @@ namespace tvm {
 namespace ffi {
 
 class Enum;
+class IntEnum;
+class StrEnum;
 
-/*!
- * \brief Base class for FFI-registered enums.
- *
- * Each registered variant is a unique, process-wide singleton with a
- * dense ordinal (``_value``) and string ``_name``.  Subclasses may add
- * *declared fields* — part of the variant's schema, set at registration
- * time via ``reflection::EnumDef``.  Separately, any consumer may
- * attach *extensible attributes* (per-variant metadata stored outside
- * the variant's fields) via ``EnumDef::set_attr`` or the Python
- * ``Enum.def_attr`` surface, without modifying ``EnumClsObj``.
- *
- * \sa reflection::EnumDef
- */
+/*! \brief Registry state shared by enum definition and lookup. */
+class EnumStateObj : public Object {
+ public:
+  /*! \brief Enum singletons in registration order. */
+  List<ObjectRef> entries;
+  /*! \brief Canonical integer and string indices to enum singletons. */
+  Dict<Any, ObjectRef> indexes;
+  /*! \brief Extensible-attribute columns keyed by enum singleton. */
+  Dict<String, Dict<ObjectRef, Any>> attrs;
+
+  /// \cond Doxygen_Suppress
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("ffi.EnumState", EnumStateObj, Object);
+  /// \endcond
+};
+
+/*! \brief ObjectRef wrapper for ``EnumStateObj``. */
+class EnumState : public ObjectRef {
+ public:
+  /// \cond Doxygen_Suppress
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(EnumState, ObjectRef, EnumStateObj);
+  /// \endcond
+};
+
+/*! \brief Base class for FFI-registered enum singletons. */
 class EnumObj : public Object {
  public:
-  /*! \brief Declared field: dense ordinal assigned at registration time (0-indexed per class). */
-  int64_t _value;
-  /*! \brief Declared field: instance name (e.g., ``"Add"`` for ``Op.Add``). */
-  String _name;
+  /*! \brief Canonical integer index. */
+  int64_t _int_index = 0;
+  /*! \brief Canonical string index. */
+  String _str_index;
 
   EnumObj() = default;
   /*!
-   * \brief Construct an EnumObj with an explicit ordinal and name.
-   * \param value The dense ordinal (0-indexed per enum class).
-   * \param name The instance name key.
+   * \brief Construct an enum singleton with canonical integer and string indices.
+   * \param int_index The canonical integer index.
+   * \param str_index The canonical string index.
    */
-  EnumObj(int64_t value, String name) : _value(value), _name(std::move(name)) {}
+  EnumObj(int64_t int_index, String str_index)
+      : _int_index(int_index), _str_index(std::move(str_index)) {}
 
+  // NOLINTBEGIN(bugprone-reserved-identifier)
   /*!
-   * \brief Look up the registered singleton for ``EnumClsObj`` by name.
-   *
-   * Reads from the per-class ``reflection::type_attr::kEnumEntries``
-   * registry populated by ``reflection::EnumDef<EnumClsObj>``.  Instances
-   * are unique per ``(type_key, name)`` pair for the life of the process,
-   * so the returned ``Enum`` compares equal (by pointer) to every other
-   * lookup of the same name.  Throws ``RuntimeError`` if no instance with
-   * the given name is registered for ``EnumClsObj``.
-   *
+   * \brief Look up a registered enum singleton by its canonical integer index.
    * \tparam EnumClsObj An ``Object`` subclass deriving from ``EnumObj``.
-   * \param name The instance name to look up (e.g., ``"Add"``).
+   * \param index The canonical integer index.
    * \return The registered ``Enum`` singleton.
    */
   template <typename EnumClsObj>
-  static Enum Get(const String& name);
+  static Enum _GetByIntIndex(int64_t index);
+  /*!
+   * \brief Look up a registered enum singleton by its canonical string index.
+   * \tparam EnumClsObj An ``Object`` subclass deriving from ``EnumObj``.
+   * \param index The canonical string index.
+   * \return The registered ``Enum`` singleton.
+   */
+  template <typename EnumClsObj>
+  static Enum _GetByStrIndex(const String& index);
+  /*!
+   * \brief Look up a registered enum singleton by runtime type and canonical integer index.
+   * \param type_index The runtime type index of the registered enum class.
+   * \param index The canonical integer index.
+   * \return The registered ``Enum`` singleton.
+   */
+  static Enum _GetByIntIndex(int32_t type_index, int64_t index);
+  /*!
+   * \brief Look up a registered enum singleton by runtime type and canonical string index.
+   * \param type_index The runtime type index of the registered enum class.
+   * \param index The canonical string index.
+   * \return The registered ``Enum`` singleton.
+   */
+  static Enum _GetByStrIndex(int32_t type_index, const String& index);
+  // NOLINTEND(bugprone-reserved-identifier)
 
   /// \cond Doxygen_Suppress
   static constexpr TVMFFISEqHashKind _type_s_eq_hash_kind = kTVMFFISEqHashKindUniqueInstance;
@@ -92,19 +123,8 @@ class EnumObj : public Object {
   /// \endcond
 
  private:
-  /*!
-   * \brief Return the process-wide ``__ffi_enum_entries__`` column pointer.
-   *
-   * The column is registered at library init via ``EnsureTypeAttrColumn``
-   * and the struct its pointer refers to is stable for the lifetime of the
-   * process, so we cache the lookup in a function-local static.
-   */
-  static const TVMFFITypeAttrColumn* GetEnumEntriesColumn() {
-    constexpr TVMFFIByteArray kAttrName =
-        reflection::AsByteArray(reflection::type_attr::kEnumEntries);
-    static const TVMFFITypeAttrColumn* column = TVMFFIGetTypeAttrColumn(&kAttrName);
-    return column;
-  }
+  template <typename Index>
+  static Enum GetByIndex(int32_t type_index, const Index& index);
 };
 
 /*!
@@ -112,9 +132,7 @@ class EnumObj : public Object {
  *
  * Holds a shared reference to a registered singleton.  Two ``Enum``
  * values compare structurally equal if and only if they point at the
- * same underlying object (see ``kTVMFFISEqHashKindUniqueInstance``),
- * which — given the register-once registry — is equivalent to sharing
- * the same ``(type_key, name)`` pair.
+ * same underlying object (see ``kTVMFFISEqHashKindUniqueInstance``).
  *
  * \sa EnumObj
  * \sa reflection::EnumDef
@@ -126,31 +144,79 @@ class Enum : public ObjectRef {
   /// \endcond
 };
 
-template <typename EnumClsObj>
-inline Enum EnumObj::Get(const String& name) {
-  static_assert(std::is_base_of_v<EnumObj, EnumClsObj>,
-                "EnumObj::Get<T> requires T to be a subclass of EnumObj");
-  const TVMFFITypeAttrColumn* column = GetEnumEntriesColumn();
-  int32_t type_index = EnumClsObj::_GetOrAllocRuntimeTypeIndex();
-  if (column != nullptr) {
-    int32_t offset = type_index - column->begin_index;
-    if (offset >= 0 && offset < column->size) {
-      const TVMFFIAny* stored = &column->data[offset];
-      if (stored->type_index != kTVMFFINone) {
-        Dict<String, ObjectRef> entries =
-            AnyView::CopyFromTVMFFIAny(*stored).cast<Dict<String, ObjectRef>>();
-        auto it = entries.find(name);
-        if (it != entries.end()) {
-          return details::ObjectUnsafe::ObjectRefFromObjectPtr<Enum>(
-              details::ObjectUnsafe::ObjectPtrFromObjectRef<EnumObj>((*it).second));
-        }
-      }
-    }
+/*!
+ * \brief Base object for payload enums whose public value is an integer.
+ */
+class IntEnumObj : public EnumObj {
+ public:
+  /// \cond Doxygen_Suppress
+  TVM_FFI_DECLARE_OBJECT_INFO("ffi.IntEnum", IntEnumObj, EnumObj);
+  /// \endcond
+};
+
+/*!
+ * \brief ObjectRef wrapper for ``IntEnumObj``.
+ */
+class IntEnum : public Enum {
+ public:
+  /// \cond Doxygen_Suppress
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(IntEnum, Enum, IntEnumObj);
+  /// \endcond
+};
+
+/*!
+ * \brief Base object for payload enums whose public value is a string.
+ */
+class StrEnumObj : public EnumObj {
+ public:
+  /// \cond Doxygen_Suppress
+  TVM_FFI_DECLARE_OBJECT_INFO("ffi.StrEnum", StrEnumObj, EnumObj);
+  /// \endcond
+};
+
+/*!
+ * \brief ObjectRef wrapper for ``StrEnumObj``.
+ */
+class StrEnum : public Enum {
+ public:
+  /// \cond Doxygen_Suppress
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(StrEnum, Enum, StrEnumObj);
+  /// \endcond
+};
+
+template <typename Index>
+inline Enum EnumObj::GetByIndex(int32_t type_index, const Index& index) {
+  static reflection::TypeAttrColumn state_column(reflection::type_attr::kEnumState);
+  if (AnyView value = state_column[type_index]; value != nullptr) {
+    EnumState state = value.cast<EnumState>();
+    if (auto entry = state->indexes.Get(Any(index))) return entry->as_or_throw<Enum>();
   }
-  TVM_FFI_THROW(RuntimeError) << "Enum `" << EnumClsObj::_type_key << "` has no instance named `"
-                              << name << "`";
+  TVM_FFI_THROW(ValueError) << "Enum `" << TypeIndexToTypeKey(type_index)
+                            << "` has no instance with index " << index;
   TVM_FFI_UNREACHABLE();
 }
+
+// NOLINTBEGIN(bugprone-reserved-identifier)
+template <typename EnumClsObj>
+inline Enum EnumObj::_GetByIntIndex(int64_t index) {
+  static_assert(std::is_base_of_v<EnumObj, EnumClsObj>);
+  return _GetByIntIndex(EnumClsObj::_GetOrAllocRuntimeTypeIndex(), index);
+}
+
+template <typename EnumClsObj>
+inline Enum EnumObj::_GetByStrIndex(const String& index) {
+  static_assert(std::is_base_of_v<EnumObj, EnumClsObj>);
+  return _GetByStrIndex(EnumClsObj::_GetOrAllocRuntimeTypeIndex(), index);
+}
+
+inline Enum EnumObj::_GetByIntIndex(int32_t type_index, int64_t index) {
+  return GetByIndex(type_index, index);
+}
+
+inline Enum EnumObj::_GetByStrIndex(int32_t type_index, const String& index) {
+  return GetByIndex(type_index, index);
+}
+// NOLINTEND(bugprone-reserved-identifier)
 
 }  // namespace ffi
 }  // namespace tvm

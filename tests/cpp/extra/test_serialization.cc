@@ -24,8 +24,11 @@
 #include <tvm/ffi/container/shape.h>
 #include <tvm/ffi/device.h>
 #include <tvm/ffi/dtype.h>
+#include <tvm/ffi/enum.h>
 #include <tvm/ffi/extra/serialization.h>
 #include <tvm/ffi/extra/structural_equal.h>
+#include <tvm/ffi/reflection/enum_def.h>
+#include <tvm/ffi/reflection/registry.h>
 #include <tvm/ffi/string.h>
 
 #include <limits>
@@ -36,6 +39,99 @@ namespace {
 
 using namespace tvm::ffi;
 using namespace tvm::ffi::testing;
+
+class SerializationEnumObj : public EnumObj {
+ public:
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("test.SerializationEnum", SerializationEnumObj, EnumObj);
+};
+
+class SerializationEnum : public Enum {
+ public:
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(SerializationEnum, Enum, SerializationEnumObj);
+};
+
+class SerializationIntEnumObj : public IntEnumObj {
+ public:
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("test.SerializationIntEnum", SerializationIntEnumObj,
+                                    IntEnumObj);
+};
+
+class SerializationIntEnum : public IntEnum {
+ public:
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(SerializationIntEnum, IntEnum,
+                                             SerializationIntEnumObj);
+};
+
+class SerializationStrEnumObj : public StrEnumObj {
+ public:
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("test.SerializationStrEnum", SerializationStrEnumObj,
+                                    StrEnumObj);
+};
+
+class SerializationStrEnum : public StrEnum {
+ public:
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(SerializationStrEnum, StrEnum,
+                                             SerializationStrEnumObj);
+};
+
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  refl::ObjectDef<SerializationEnumObj>(refl::init(false));  // NOLINT(bugprone-unused-raii)
+  refl::TypeAttrDef<SerializationEnumObj>().def_convert<SerializationEnum>();
+  refl::EnumDef<SerializationEnumObj>("Alpha");  // NOLINT(bugprone-unused-raii)
+
+  refl::ObjectDef<SerializationIntEnumObj>(refl::init(false)).def_convert<SerializationIntEnum>();
+  refl::EnumDef<SerializationIntEnumObj>("Seven", 7);  // NOLINT(bugprone-unused-raii)
+  // NOLINTNEXTLINE(bugprone-unused-raii)
+  refl::EnumDef<SerializationIntEnumObj>("Min", std::numeric_limits<int64_t>::min());
+  // NOLINTNEXTLINE(bugprone-unused-raii)
+  refl::EnumDef<SerializationIntEnumObj>("Max", std::numeric_limits<int64_t>::max());
+
+  refl::ObjectDef<SerializationStrEnumObj>(refl::init(false)).def_convert<SerializationStrEnum>();
+  refl::EnumDef<SerializationStrEnumObj>("payload");  // NOLINT(bugprone-unused-raii)
+}
+
+TEST(Serialization, EnumSingletonIdentity) {
+  Enum original = EnumObj::_GetByStrIndex<SerializationEnumObj>("Alpha");
+  json::Object expected = json::Object{
+      {"root_index", 0},
+      {"nodes", json::Array{json::Object{{"type", "test.SerializationEnum"}, {"data", "Alpha"}}}}};
+
+  EXPECT_TRUE(StructuralEqual()(ToJSONGraph(original), expected));
+  Enum restored = FromJSONGraph(expected).cast<Enum>();
+  EXPECT_TRUE(restored.same_as(original));
+}
+
+TEST(Serialization, PayloadEnumSingletonIdentity) {
+  Enum int_original = EnumObj::_GetByIntIndex<SerializationIntEnumObj>(7);
+  json::Object int_expected = json::Object{
+      {"root_index", 0},
+      {"nodes", json::Array{json::Object{{"type", "test.SerializationIntEnum"}, {"data", 7}}}}};
+  EXPECT_TRUE(StructuralEqual()(ToJSONGraph(int_original), int_expected));
+  EXPECT_TRUE(FromJSONGraph(int_expected).cast<Enum>().same_as(int_original));
+
+  Enum str_original = EnumObj::_GetByStrIndex<SerializationStrEnumObj>("payload");
+  json::Object str_expected = json::Object{
+      {"root_index", 0},
+      {"nodes",
+       json::Array{json::Object{{"type", "test.SerializationStrEnum"}, {"data", "payload"}}}}};
+  EXPECT_TRUE(StructuralEqual()(ToJSONGraph(str_original), str_expected));
+  EXPECT_TRUE(FromJSONGraph(str_expected).cast<Enum>().same_as(str_original));
+}
+
+TEST(Serialization, EnumCanonicalIndices) {
+  Enum min = EnumObj::_GetByIntIndex<SerializationIntEnumObj>(std::numeric_limits<int64_t>::min());
+  Enum max = EnumObj::_GetByIntIndex<SerializationIntEnumObj>(std::numeric_limits<int64_t>::max());
+  EXPECT_EQ(min.as_or_throw<SerializationIntEnum>()->_int_index,
+            std::numeric_limits<int64_t>::min());
+  EXPECT_EQ(max.as_or_throw<SerializationIntEnum>()->_int_index,
+            std::numeric_limits<int64_t>::max());
+  EXPECT_TRUE(EnumObj::_GetByStrIndex<SerializationIntEnumObj>("Min").same_as(min));
+  EXPECT_TRUE(EnumObj::_GetByStrIndex<SerializationIntEnumObj>("Max").same_as(max));
+  EXPECT_TRUE(EnumObj::_GetByIntIndex<SerializationStrEnumObj>(0).same_as(
+      EnumObj::_GetByStrIndex<SerializationStrEnumObj>("payload")));
+  EXPECT_THROW(EnumObj::_GetByIntIndex<SerializationIntEnumObj>(-1), Error);
+}
 
 TEST(Serialization, BoolNull) {
   json::Object expected_null =

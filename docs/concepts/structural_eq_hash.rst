@@ -585,6 +585,12 @@ identity. Pointer equality is the only valid comparison."
 No content comparison is ever performed. Different pointers are always
 unequal; same pointer is always equal.
 
+The :class:`~tvm_ffi.dataclasses.Enum` hierarchy always uses this kind by
+default. This includes :class:`~tvm_ffi.dataclasses.IntEnum`,
+:class:`~tvm_ffi.dataclasses.StrEnum`, and every subclass of these enum bases.
+Each registered enum variant is therefore structurally equal only to that same
+singleton variant.
+
 .. code-block:: python
 
    op_conv = Op.get("nn.conv2d")
@@ -882,7 +888,7 @@ When defining a new type:
 .. mermaid::
 
    graph TD
-       Start["New @py_class type"] --> Q1{"Singleton?<br/>(one instance per<br/>logical identity)"}
+       Start["New non-enum @py_class type"] --> Q1{"Singleton?<br/>(one instance per<br/>logical identity)"}
        Q1 -->|Yes| UI["structural_eq=&quot;singleton&quot;"]
        Q1 -->|No| Q2{"Represents a<br/>variable binding?"}
        Q2 -->|Yes| FV["structural_eq=&quot;var&quot;"]
@@ -897,6 +903,9 @@ When defining a new type:
        style DN fill:#cce5ff
        style CTN fill:#d4edda
        style TN fill:#d4edda
+
+Enum types do not need this decision process: :class:`~tvm_ffi.dataclasses.Enum`
+and all of its subclasses default to ``"singleton"``.
 
 For fields:
 

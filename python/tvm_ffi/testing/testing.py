@@ -36,7 +36,7 @@ from typing import Any, ClassVar
 import pytest
 
 from tvm_ffi import Object, get_global_func
-from tvm_ffi.dataclasses import c_class
+from tvm_ffi.dataclasses import IntEnum, StrEnum, c_class, entry
 
 from .. import _ffi_api
 from .. import core as tvm_ffi_core
@@ -328,6 +328,36 @@ class _TestCxxClassDerivedDerived(_TestCxxClassDerived):
         def __ffi_init__(self, v_i64: int, v_i32: int, v_f64: float, v_bool: bool, v_f32: float = ..., v_str: str = ...) -> None: ...  # ty: ignore[invalid-method-override]
     # fmt: on
     # tvm-ffi-stubgen(end)
+
+
+class _TestCxxIntEnum(IntEnum, type_key="testing.TestCxxIntEnum"):
+    low = entry(value=10)
+    high = entry(value=20)
+
+
+class _TestCxxStrEnum(StrEnum, type_key="testing.TestCxxStrEnum"):
+    add = entry(value="+")
+    mul = entry(value="*")
+
+
+@c_class("testing.TestCxxEnumHolder")
+class _TestCxxEnumHolder(Object):
+    __test__ = False
+
+    priority: _TestCxxIntEnum
+    opcode: _TestCxxStrEnum
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            priority: _TestCxxIntEnum,
+            opcode: _TestCxxStrEnum,
+        ) -> None: ...
+        def __ffi_init__(
+            self,
+            priority: _TestCxxIntEnum,
+            opcode: _TestCxxStrEnum,
+        ) -> None: ...  # ty: ignore[invalid-method-override]
 
 
 @c_class("testing.TestCxxInitSubset")
