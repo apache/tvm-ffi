@@ -26,7 +26,6 @@
 #include <tvm/ffi/base_details.h>
 #include <tvm/ffi/c_api.h>
 
-#include <limits>
 #include <optional>
 #include <string>
 #include <type_traits>
@@ -536,50 +535,6 @@ struct TypeTraits<void*> : public TypeTraitsBase {
   }
 };
 
-// Device
-template <>
-struct TypeTraits<DLDevice> : public TypeTraitsBase {
-  static constexpr int32_t field_static_type_index = TypeIndex::kTVMFFIDevice;
-
-  TVM_FFI_INLINE static void CopyToAnyView(const DLDevice& src, TVMFFIAny* result) {
-    result->type_index = TypeIndex::kTVMFFIDevice;
-    result->zero_padding = 0;
-    result->v_device = src;
-  }
-
-  TVM_FFI_INLINE static void MoveToAny(DLDevice src, TVMFFIAny* result) {
-    result->type_index = TypeIndex::kTVMFFIDevice;
-    result->zero_padding = 0;
-    result->v_device = src;
-  }
-
-  TVM_FFI_INLINE static bool CheckAnyStrict(const TVMFFIAny* src) {
-    return src->type_index == TypeIndex::kTVMFFIDevice;
-  }
-
-  TVM_FFI_INLINE static DLDevice CopyFromAnyViewAfterCheck(const TVMFFIAny* src) {
-    TVM_FFI_UNSAFE_ASSUME(src->type_index == TypeIndex::kTVMFFIDevice);
-    return src->v_device;
-  }
-
-  TVM_FFI_INLINE static DLDevice MoveFromAnyAfterCheck(TVMFFIAny* src) {
-    // POD type, we can just copy the value
-    return CopyFromAnyViewAfterCheck(src);
-  }
-
-  TVM_FFI_INLINE static std::optional<DLDevice> TryCastFromAnyView(const TVMFFIAny* src) {
-    if (src->type_index == TypeIndex::kTVMFFIDevice) {
-      return src->v_device;
-    }
-    return std::nullopt;
-  }
-
-  TVM_FFI_INLINE static std::string TypeStr() { return StaticTypeKey::kTVMFFIDevice; }
-  TVM_FFI_INLINE static std::string TypeSchema() {
-    return R"({"type":")" + std::string(StaticTypeKey::kTVMFFIDevice) + R"("})";
-  }
-};
-
 /*!
  * \brief Helper class that convert to T only via the FallbackTypes
  *
@@ -618,4 +573,5 @@ struct FallbackOnlyTraitsBase : public TypeTraitsBase {
 
 }  // namespace ffi
 }  // namespace tvm
+
 #endif  // TVM_FFI_TYPE_TRAITS_H_

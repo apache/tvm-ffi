@@ -235,13 +235,16 @@ class TestNameBasedResolution:
 
 
 # ---------------------------------------------------------------------------
-# Validation — reserved names / wrong wrappers rejected at decoration
+# Validation — wrapper rejection and special-name routing
 # ---------------------------------------------------------------------------
 
 
 class TestMethodValidation:
-    """``@method`` + the registration path both raise with clear,
-    class-scoped messages when a name or wrapper is reserved.
+    """``@method`` + the registration path rejects incompatible wrappers.
+
+    Names themselves are not restricted: marked ``__ffi_*`` names and
+    Python protocol dunders may be registered when they are not known
+    TypeAttrColumn entries.
     """
 
     def test_rejects_classmethod(self) -> None:
@@ -301,46 +304,48 @@ class TestMethodValidation:
         with pytest.raises(TypeError, match=r"expected a callable"):
             method(42)
 
-    def test_rejects_reserved_ffi_prefix(self) -> None:
-        """``__ffi_*`` names are routed through TypeAttrColumn — using
-        ``@method`` on them is surely a user error (would silently
-        double-register), so ``_collect_py_methods`` raises.
+    def test_allows_custom_ffi_prefix_method_name(self) -> None:
+        """Unknown ``__ffi_*`` names are ordinary TypeMethods when marked.
+
+        Only names known to the TypeAttrColumn table receive special routing;
+        the ``__ffi_`` prefix by itself is not reserved.
         """
-        with pytest.raises(NameError, match=r"reserved ``__ffi_`` prefix"):
 
-            @py_class(_unique_key("RFfiPfx"))
-            class _RFfiPfx(Object):
-                x: int
+        @py_class(_unique_key("RFfiPfx"))
+        class _RFfiPfx(Object):
+            x: int
 
-                @method
-                def __ffi_custom__(self) -> int:
-                    return 0
+            @method
+            def __ffi_custom__(self) -> int:
+                return self.x
 
-    def test_rejects_typeattrcolumn_name(self) -> None:
-        """Decorating a TypeAttrColumn dunder with ``@method`` is
-        rejected — those are routed to ``TVMFFITypeRegisterAttr``
-        already, never to TypeMethod.
-        """
-        with pytest.raises(NameError, match=r"TypeAttrColumn"):
+        obj = _RFfiPfx(x=7)
+        assert _toy_method_resolve(obj, "$method:__ffi_custom__") == 7
 
-            @py_class(_unique_key("RAttr"))
-            class _RAttr(Object):
-                x: int
+    def test_marked_typeattrcolumn_name_routes_to_type_attr(self) -> None:
+        """Marked callables with TypeAttrColumn names do not become TypeMethods."""
 
-                @method
-                def __ffi_repr__(self, fn_repr: Any) -> str:
-                    return "r"
+        @py_class(_unique_key("RAttr"))
+        class _RAttr(Object):
+            x: int
 
-    def test_rejects_python_protocol_dunder(self) -> None:
-        """``__len__`` / ``__iter__`` / etc. are reserved for Python
-        semantics — cannot be FFI TypeMethods.
-        """
-        with pytest.raises(NameError, match=r"Python protocol dunder"):
+            @method
+            def __ffi_repr__(self, fn_repr: Any) -> str:
+                return "r"
 
-            @py_class(_unique_key("RDun"))
-            class _RDun(Object):
-                x: int
+        info = _RAttr.__tvm_ffi_type_info__  # ty: ignore[unresolved-attribute]
+        assert _find_method(info, "__ffi_repr__") is None
 
-                @method
-                def __len__(self) -> int:
-                    return 0
+    def test_allows_python_protocol_dunder_method_name(self) -> None:
+        """Python protocol dunder names can be reflected as ordinary TypeMethods."""
+
+        @py_class(_unique_key("RDun"))
+        class _RDun(Object):
+            x: int
+
+            @method
+            def __len__(self) -> int:
+                return self.x
+
+        obj = _RDun(x=3)
+        assert _toy_method_resolve(obj, "$method:__len__") == 3

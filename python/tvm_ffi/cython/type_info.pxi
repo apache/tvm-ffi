@@ -20,7 +20,6 @@ import typing
 import collections.abc
 from functools import cached_property
 from typing import Optional, Any
-from io import StringIO
 
 try:
     from types import UnionType as _UnionType
@@ -837,7 +836,7 @@ class TypeInfo:
 
         Each entry whose name is in *type_attr_names* is registered as a
         TypeAttrColumn entry (for C++ dispatch); the value need not be
-        callable (e.g. ``__ffi_ir_traits__``).  All other entries are
+        callable.  All other entries are
         registered as TypeMethod (for reflection introspection).
 
         Regardless, the full method list is always re-read from the C
@@ -1030,6 +1029,9 @@ cdef int _f_type_convert(void* type_converter, const TVMFFIAny* value, TVMFFIAny
         cany.cdata.type_index = kTVMFFINone
         cany.cdata.v_int64 = 0
         return 0
+    except _ConvertError as err:
+        set_last_ffi_error(TypeError(err.message))
+        return -1
     except Exception as err:
         set_last_ffi_error(err)
         return -1
@@ -1164,7 +1166,7 @@ cdef _register_py_methods(int32_t type_index, list py_methods, frozenset type_at
     1. Convert the Python object to a ``TVMFFIAny``.
     2. If the name is in *type_attr_names*, register as TypeAttrColumn
        (for C++ dispatch via ``TypeAttrColumn``).  The value need not be
-       callable (e.g. ``__ffi_ir_traits__`` is an Object instance).
+       callable.
     3. Otherwise, register as TypeMethod (for reflection introspection
        via ``TypeInfo.methods``).
 

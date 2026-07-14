@@ -27,6 +27,7 @@
 #include <tvm/ffi/string.h>
 #include <tvm/ffi/type_traits.h>
 
+#include <limits>
 #include <string>
 #include <utility>
 

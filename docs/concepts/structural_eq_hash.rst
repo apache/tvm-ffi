@@ -50,13 +50,18 @@ Type-Level Annotation
 ---------------------
 
 The ``structural_eq`` parameter on ``@py_class`` declares how instances of the
-type participate in structural equality and hashing:
+type participate in structural equality and hashing. It defaults to ``"tree"``,
+so the following class is compared recursively by its fields:
 
 .. code-block:: python
 
-   @py_class(structural_eq="tree")
+   @py_class
    class Expr(Object):
        ...
+
+Specify ``structural_eq`` only when the type needs another role, such as
+``"var"``, ``"dag"``, or ``"singleton"``, or pass ``None`` explicitly to opt
+out of structural equality and hashing.
 
 Quick reference
 ~~~~~~~~~~~~~~~
@@ -70,7 +75,7 @@ Quick reference
      - Use when...
    * - ``"tree"``
      - A regular IR node
-     - Default for most IR nodes
+     - Default for ``@py_class`` and most IR nodes
    * - ``"const-tree"``
      - An immutable value node (with pointer shortcut)
      - The type has no transitive ``"var"`` children
@@ -85,7 +90,7 @@ Quick reference
      - Exactly one instance per logical identity (e.g. registry entries)
    * - ``None``
      - Not comparable
-     - The type should never be compared structurally
+     - Explicitly opt out of structural comparison
 
 
 ``"tree"`` — The Default
@@ -93,7 +98,7 @@ Quick reference
 
 .. code-block:: python
 
-   @py_class(structural_eq="tree")
+   @py_class
    class Add(Object):
        lhs: Expr
        rhs: Expr

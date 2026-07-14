@@ -314,17 +314,46 @@ class TestDAGNode:
 
 
 # ---------------------------------------------------------------------------
-# Tests: unsupported kind (default)
+# Tests: default and explicit opt-out
 # ---------------------------------------------------------------------------
 
 
-class TestUnsupported:
-    """Test that types without structural_eq= raise on structural comparison."""
+class TestDefaultTree:
+    """Test that ``py_class`` defaults to tree structural comparison."""
+
+    def test_default_tree_equal_and_hash(self) -> None:
+        """Equal field values compare and hash equally without an explicit kind."""
+
+        @py_class("testing.py.DefaultTreeEqual")
+        class DefaultTreeEqual(tvm_ffi.Object):
+            x: int
+
+        lhs = DefaultTreeEqual(x=1)
+        rhs = DefaultTreeEqual(x=1)
+        assert not lhs.same_as(rhs)
+        assert structural_equal(lhs, rhs)
+        assert structural_hash(lhs) == structural_hash(rhs)
+
+    def test_default_tree_compares_fields(self) -> None:
+        """Different field values remain structurally different by default."""
+
+        @py_class("testing.py.DefaultTreeDifferent")
+        class DefaultTreeDifferent(tvm_ffi.Object):
+            x: int
+
+        lhs = DefaultTreeDifferent(x=1)
+        rhs = DefaultTreeDifferent(x=2)
+        assert not structural_equal(lhs, rhs)
+        assert structural_hash(lhs) != structural_hash(rhs)
+
+
+class TestExplicitUnsupported:
+    """Test that ``structural_eq=None`` explicitly opts out of comparison."""
 
     def test_unsupported_raises_on_hash(self) -> None:
-        """Structural hashing raises TypeError for types without structural_eq=."""
+        """Structural hashing raises TypeError after an explicit opt-out."""
 
-        @py_class("testing.py.Plain")
+        @py_class("testing.py.Plain", structural_eq=None)
         class Plain(tvm_ffi.Object):
             x: int
 
@@ -332,9 +361,9 @@ class TestUnsupported:
             structural_hash(Plain(x=1))
 
     def test_unsupported_raises_on_equal(self) -> None:
-        """Structural equality raises TypeError for types without structural_eq=."""
+        """Structural equality raises TypeError after an explicit opt-out."""
 
-        @py_class("testing.py.Plain2")
+        @py_class("testing.py.Plain2", structural_eq=None)
         class Plain2(tvm_ffi.Object):
             x: int
 

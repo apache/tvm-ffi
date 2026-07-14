@@ -21,7 +21,7 @@ from __future__ import annotations
 import json
 import sys
 import warnings
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from typing import Any, Callable, Literal, TypeVar, overload
 
 from . import core
@@ -397,7 +397,11 @@ def _install_init(cls: type, type_info: TypeInfo) -> None:
         cls.__init__ = __init__  # type: ignore[attr-defined]
 
 
-def _add_class_attrs(type_cls: type, type_info: TypeInfo) -> type:
+def _add_class_attrs(
+    type_cls: type,
+    type_info: TypeInfo,
+    type_attr_names: Collection[str] = (),
+) -> type:
     for field in type_info.fields:
         name = field.name
         if name not in type_cls.__dict__:  # skip attributes defined directly on this class
@@ -416,7 +420,24 @@ def _add_class_attrs(type_cls: type, type_info: TypeInfo) -> type:
         ffi_init = core._lookup_type_attr(type_info.type_index, "__ffi_init__")
         if ffi_init is not None:
             _install_ffi_init_attr(type_cls, type_info, ffi_init)
+    _add_type_attr_class_attrs(type_cls, type_info, type_attr_names)
     return type_cls
+
+
+def _add_type_attr_class_attrs(
+    type_cls: type,
+    type_info: TypeInfo,
+    type_attr_names: Collection[str],
+) -> None:
+    """Install selected TypeAttrColumn values as Python class attributes."""
+    if not type_attr_names:
+        return
+    for name in type_attr_names:
+        value = core._lookup_type_attr(type_info.type_index, name)
+        if value is None:
+            continue
+        if name not in type_cls.__dict__:
+            setattr(type_cls, name, value)
 
 
 def _install_ffi_init_attr(cls: type, type_info: TypeInfo, ffi_init: Function) -> None:

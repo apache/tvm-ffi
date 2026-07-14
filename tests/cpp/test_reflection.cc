@@ -77,10 +77,21 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   refl::ObjectDef<TestObjA>()
       .def(refl::init<int64_t, int64_t>())
       .def_ro("x", &TestObjA::x)
-      .def_rw("y", &TestObjA::y);
+      .def_rw("y", &TestObjA::y)
+      .def_type_attr("test.attr.object.literal", "literal")
+      .def_type_attr("test.attr.object.string", String("ffi-string"))
+      .def_type_attr("test.attr.object.std_string", std::string("std-string"))
+      .def_type_attr("test.attr.object.int", int64_t{7})
+      .def_type_attr("test.attr.object.bool", true)
+      .def_type_attr("test.attr.object.func", [](int64_t value) -> int64_t { return value + 1; });
   refl::ObjectDef<TestObjADerived>()
       .def(refl::init<int64_t, int64_t, int64_t>())
       .def_ro("z", &TestObjADerived::z);
+  refl::TypeAttrDef<TestObjADerived>()
+      .def("test.attr.type_attr_def.literal", "derived-literal")
+      .def("test.attr.type_attr_def.string", String("derived-string"))
+      .def("test.attr.type_attr_def.int", int64_t{11})
+      .def("test.attr.type_attr_def.func", [](int64_t value) -> int64_t { return value * 2; });
 }
 
 TEST(Reflection, GetFieldByteOffset) {
@@ -204,6 +215,36 @@ TEST(Reflection, TypeAttrColumnBeginIndex) {
   // The result may or may not be None depending on begin_index; the key is no crash.
   // verify the known registered entry still works
   EXPECT_EQ(size_attr[TIntObj::RuntimeTypeIndex()].cast<int>(), sizeof(TIntObj));
+}
+
+TEST(Reflection, ObjectDefTypeAttrDirectValues) {
+  reflection::TypeAttrColumn literal_attr("test.attr.object.literal");
+  reflection::TypeAttrColumn string_attr("test.attr.object.string");
+  reflection::TypeAttrColumn std_string_attr("test.attr.object.std_string");
+  reflection::TypeAttrColumn int_attr("test.attr.object.int");
+  reflection::TypeAttrColumn bool_attr("test.attr.object.bool");
+  reflection::TypeAttrColumn func_attr("test.attr.object.func");
+  int32_t type_index = TestObjA::RuntimeTypeIndex();
+
+  EXPECT_EQ(literal_attr[type_index].cast<String>(), "literal");
+  EXPECT_EQ(string_attr[type_index].cast<String>(), "ffi-string");
+  EXPECT_EQ(std_string_attr[type_index].cast<String>(), "std-string");
+  EXPECT_EQ(int_attr[type_index].cast<int64_t>(), 7);
+  EXPECT_EQ(bool_attr[type_index].cast<bool>(), true);
+  EXPECT_EQ(func_attr[type_index].cast<Function>()(3).cast<int64_t>(), 4);
+}
+
+TEST(Reflection, TypeAttrDefDirectValues) {
+  reflection::TypeAttrColumn literal_attr("test.attr.type_attr_def.literal");
+  reflection::TypeAttrColumn string_attr("test.attr.type_attr_def.string");
+  reflection::TypeAttrColumn int_attr("test.attr.type_attr_def.int");
+  reflection::TypeAttrColumn func_attr("test.attr.type_attr_def.func");
+  int32_t type_index = TestObjADerived::RuntimeTypeIndex();
+
+  EXPECT_EQ(literal_attr[type_index].cast<String>(), "derived-literal");
+  EXPECT_EQ(string_attr[type_index].cast<String>(), "derived-string");
+  EXPECT_EQ(int_attr[type_index].cast<int64_t>(), 11);
+  EXPECT_EQ(func_attr[type_index].cast<Function>()(5).cast<int64_t>(), 10);
 }
 
 TVM_FFI_STATIC_INIT_BLOCK() {
