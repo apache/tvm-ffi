@@ -24,11 +24,13 @@
 #include <tvm/ffi/container/map.h>
 #include <tvm/ffi/container/tuple.h>
 #include <tvm/ffi/container/variant.h>
+#include <tvm/ffi/expected.h>
 #include <tvm/ffi/memory.h>
 #include <tvm/ffi/object.h>
 #include <tvm/ffi/optional.h>
 
 #include <stdexcept>
+#include <type_traits>
 
 #include "./testing_object.h"
 
@@ -469,6 +471,213 @@ TEST(Object, OpaqueObject) {
   EXPECT_EQ(deleter_trigger_counter, 0);
   a.reset();
   EXPECT_EQ(deleter_trigger_counter, 1);
+}
+
+using NumberPtr = ObjectPtr<TNumberObj>;
+
+NumberPtr MakeInt(int64_t value) { return make_object<TIntObj>(value); }
+
+NumberPtr MakeFloat(double value) { return make_object<TFloatObj>(value); }
+
+TEST(ObjectPtrStorage, Array) {
+  NumberPtr first = MakeInt(1);
+  NumberPtr second = MakeFloat(2.0);
+  NumberPtr null;
+  Array<NumberPtr> array{first, null};
+
+  EXPECT_EQ(array.size(), 2U);
+  EXPECT_EQ(array[0], first);
+  EXPECT_EQ(array[1], nullptr);
+
+  array.Set(1, second);
+  array.push_back(null);
+  EXPECT_EQ(array[1], second);
+  EXPECT_EQ(array[2], nullptr);
+
+  size_t defined = 0;
+  for (NumberPtr item : array) {
+    defined += item != nullptr;
+  }
+  EXPECT_EQ(defined, 2U);
+
+  Array<NumberPtr> roundtrip = Any(array).cast<Array<NumberPtr>>();
+  EXPECT_TRUE(roundtrip.same_as(array));
+  EXPECT_EQ(roundtrip[0], first);
+  EXPECT_EQ(roundtrip[1], second);
+  EXPECT_EQ(roundtrip[2], nullptr);
+
+  ObjectPtr<TIntObj> derived = make_object<TIntObj>(3);
+  Array<ObjectPtr<TIntObj>> derived_array{derived};
+  Array<NumberPtr> upcast_array = derived_array;
+  EXPECT_TRUE(upcast_array.same_as(derived_array));
+  EXPECT_EQ(upcast_array[0].get(), static_cast<TNumberObj*>(derived.get()));
+}
+
+TEST(ObjectPtrStorage, List) {
+  NumberPtr first = MakeInt(1);
+  NumberPtr second = MakeFloat(2.0);
+  NumberPtr null;
+  List<NumberPtr> list{first, null};
+
+  list.Set(1, second);
+  list.insert(list.begin() + 1, null);
+  list.push_back(first);
+  EXPECT_EQ(list.size(), 4U);
+  EXPECT_EQ(list[0], first);
+  EXPECT_EQ(list[1], nullptr);
+  EXPECT_EQ(list[2], second);
+  EXPECT_EQ(list[3], first);
+
+  List<NumberPtr> roundtrip = Any(list).cast<List<NumberPtr>>();
+  EXPECT_TRUE(roundtrip.same_as(list));
+  roundtrip.Set(1, second);
+  EXPECT_EQ(list[1], second);
+}
+
+TEST(ObjectPtrStorage, Map) {
+  NumberPtr key = MakeInt(1);
+  NumberPtr value = MakeFloat(2.0);
+  NumberPtr null;
+  Map<NumberPtr, NumberPtr> map{{key, value}};
+
+  EXPECT_EQ(map.count(key), 1U);
+  EXPECT_EQ(map[key], value);
+  map.Set(key, null);
+  map.Set(null, key);
+  EXPECT_EQ(map[key], nullptr);
+  EXPECT_EQ(map[null], key);
+
+  size_t entries = 0;
+  for (const auto& [stored_key, stored_value] : map) {
+    if (stored_key == key) {
+      EXPECT_EQ(stored_value, nullptr);
+    }
+    if (stored_key == nullptr) {
+      EXPECT_EQ(stored_value, key);
+    }
+    ++entries;
+  }
+  EXPECT_EQ(entries, 2U);
+
+  Map<NumberPtr, NumberPtr> roundtrip = Any(map).cast<Map<NumberPtr, NumberPtr>>();
+  EXPECT_TRUE(roundtrip.same_as(map));
+  EXPECT_EQ(roundtrip[null], key);
+}
+
+TEST(ObjectPtrStorage, Dict) {
+  NumberPtr key = MakeInt(1);
+  NumberPtr value = MakeFloat(2.0);
+  NumberPtr null;
+  Dict<NumberPtr, NumberPtr> dict{{key, value}, {null, key}};
+  Dict<NumberPtr, NumberPtr> alias = dict;
+
+  EXPECT_EQ(dict[key], value);
+  EXPECT_EQ(dict[null], key);
+  dict.Set(key, null);
+  EXPECT_EQ(alias[key], nullptr);
+
+  auto found = dict.Get(null);
+  ASSERT_TRUE(found.has_value());
+  EXPECT_EQ(found.value(), key);  // NOLINT(bugprone-unchecked-optional-access)
+
+  Dict<NumberPtr, NumberPtr> roundtrip = Any(dict).cast<Dict<NumberPtr, NumberPtr>>();
+  EXPECT_TRUE(roundtrip.same_as(dict));
+  roundtrip.erase(null);
+  EXPECT_EQ(dict.count(null), 0U);
+}
+
+TEST(ObjectPtrStorage, Tuple) {
+  NumberPtr first = MakeInt(1);
+  NumberPtr second = MakeFloat(2.0);
+  NumberPtr null;
+  Tuple<NumberPtr, NumberPtr> tuple(first, null);
+
+  EXPECT_EQ(tuple.get<0>(), first);
+  EXPECT_EQ(tuple.get<1>(), nullptr);
+  tuple.Set<1>(second);
+  EXPECT_EQ(tuple.get<1>(), second);
+
+  Tuple<NumberPtr, NumberPtr> roundtrip = Any(tuple).cast<Tuple<NumberPtr, NumberPtr>>();
+  EXPECT_TRUE(roundtrip.same_as(tuple));
+  EXPECT_EQ(roundtrip.get<0>(), first);
+  EXPECT_EQ(roundtrip.get<1>(), second);
+}
+
+TEST(ObjectPtrStorage, Variant) {
+  using NumberOrInt = Variant<NumberPtr, int64_t>;
+  NumberPtr first = MakeInt(1);
+  NumberPtr null;
+
+  NumberOrInt variant = first;
+  EXPECT_EQ(variant.get<NumberPtr>(), first);
+  NumberOrInt roundtrip = Any(variant).cast<NumberOrInt>();
+  EXPECT_EQ(roundtrip.get<NumberPtr>(), first);
+
+  variant = int64_t{2};
+  EXPECT_EQ(variant.get<int64_t>(), 2);
+  variant = null;
+  EXPECT_EQ(variant.get<NumberPtr>(), nullptr);
+}
+
+TEST(ObjectPtrStorage, OptionalAndVariantComposition) {
+  using OptionalNumber = Optional<NumberPtr>;
+  using NestedOptionalNumber = Optional<OptionalNumber>;
+  using OptionalNumberOrInt = Variant<OptionalNumber, int64_t>;
+  using OptionalNumberOrIntValue = Optional<Variant<NumberPtr, int64_t>>;
+
+  NumberPtr number = MakeInt(1);
+  OptionalNumber optional_number = number;
+  Array<OptionalNumber> array{optional_number, std::nullopt};
+  EXPECT_TRUE(array[0].has_value());
+  EXPECT_EQ(array[0].value(), number);
+  EXPECT_FALSE(array[1].has_value());
+
+  OptionalNumberOrInt variant = optional_number;
+  OptionalNumber variant_value = variant.get<OptionalNumber>();
+  ASSERT_TRUE(variant_value.has_value());
+  EXPECT_EQ(variant_value.value(), number);
+
+  OptionalNumberOrIntValue optional_variant = Variant<NumberPtr, int64_t>(number);
+  Any encoded = optional_variant;
+  OptionalNumberOrIntValue decoded = encoded.cast<OptionalNumberOrIntValue>();
+  ASSERT_TRUE(decoded.has_value());
+  EXPECT_EQ(decoded.value().get<NumberPtr>(), number);
+
+  OptionalNumber absent = std::nullopt;
+  OptionalNumber present_null = NumberPtr();
+  EXPECT_FALSE(Any(absent).cast<OptionalNumber>().has_value());
+  EXPECT_FALSE(Any(present_null).cast<OptionalNumber>().has_value());
+
+  NestedOptionalNumber nested = optional_number;
+  NestedOptionalNumber nested_roundtrip = Any(nested).cast<NestedOptionalNumber>();
+  ASSERT_TRUE(nested_roundtrip.has_value());
+  ASSERT_TRUE(nested_roundtrip.value().has_value());
+  EXPECT_EQ(nested_roundtrip.value().value(), number);
+
+  NestedOptionalNumber present_absent = OptionalNumber(std::nullopt);
+  EXPECT_FALSE(Any(present_absent).cast<NestedOptionalNumber>().has_value());
+
+  EXPECT_EQ(TypeTraits<OptionalNumber>::TypeSchema(),
+            R"({"type":"Optional","args":[{"type":"Optional","args":[{"type":"test.Number"}]}]})");
+  EXPECT_EQ(
+      TypeTraits<OptionalNumberOrInt>::TypeSchema(),
+      R"({"type":"Variant","args":[{"type":"Optional","args":[{"type":"Optional","args":[{"type":"test.Number"}]}]},{"type":"int"}]})");
+}
+
+TEST(ObjectPtrStorage, Expected) {
+  NumberPtr number = MakeInt(1);
+  Expected<NumberPtr> success = number;
+  EXPECT_TRUE(success.is_ok());
+  EXPECT_EQ(success.value(), number);
+
+  Expected<NumberPtr> success_roundtrip = Any(success).cast<Expected<NumberPtr>>();
+  EXPECT_TRUE(success_roundtrip.is_ok());
+  EXPECT_EQ(success_roundtrip.value(), number);
+
+  Expected<NumberPtr> failure = Error("ValueError", "expected failure", "");
+  Expected<NumberPtr> failure_roundtrip = Any(failure).cast<Expected<NumberPtr>>();
+  EXPECT_TRUE(failure_roundtrip.is_err());
+  EXPECT_EQ(failure_roundtrip.error().kind(), "ValueError");
 }
 
 }  // namespace

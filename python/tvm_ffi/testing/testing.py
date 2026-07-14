@@ -109,6 +109,22 @@ class TestObjectDerived(TestObjectBase):
     # tvm-ffi-stubgen(end)
 
 
+@c_class("testing.TestObjectPtrHolder")
+class TestObjectPtrHolder(Object):
+    """Test object with an ``ObjectPtr<TestObjectBase>`` field."""
+
+    __test__ = False
+
+    # tvm-ffi-stubgen(begin): object/testing.TestObjectPtrHolder
+    # fmt: off
+    value: TestObjectBase | None
+    if TYPE_CHECKING:
+        def __init__(self, value: TestObjectBase | None) -> None: ...
+        def __ffi_init__(self, value: TestObjectBase | None) -> None: ...  # ty: ignore[invalid-method-override]
+    # fmt: on
+    # tvm-ffi-stubgen(end)
+
+
 @c_class("testing.TestNonCopyable")
 class TestNonCopyable(Object):
     """Test object with deleted copy constructor."""

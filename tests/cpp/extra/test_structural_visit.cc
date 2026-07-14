@@ -332,7 +332,7 @@ TEST(StructuralVisitor, WalkVisitsPOD) {
 }
 
 TEST(StructuralVisitor, WalkVisitsObjectPtr) {
-  TVar root("x");
+  ObjectPtr<TVarObj> root = make_object<TVarObj>("x");
   std::vector<std::string> visited;
 
   Optional<VisitInterrupt> result =
@@ -343,6 +343,23 @@ TEST(StructuralVisitor, WalkVisitsObjectPtr) {
 
   EXPECT_FALSE(result.has_value());
   ExpectTrace(visited, {"x"});
+}
+
+TEST(StructuralVisitor, WalkTraversesObjectPtrFields) {
+  ObjectPtr<TIntObj> value = make_object<TIntObj>(42);
+  ObjectPtr<TNumberObj> alias = value;
+  TObjectPtrHolder root(value, alias);
+  size_t num_int_fields = 0;
+
+  Optional<VisitInterrupt> result =
+      StructuralWalk<WalkOrder::kPreOrder>(root, [&](const TIntObj* obj) -> Expected<WalkResult> {
+        EXPECT_EQ(obj, value.get());
+        ++num_int_fields;
+        return WalkResult::Advance();
+      });
+
+  EXPECT_FALSE(result.has_value());
+  EXPECT_EQ(num_int_fields, 2U);
 }
 
 TEST(StructuralVisitor, WalkReceivesDefRegionKind) {

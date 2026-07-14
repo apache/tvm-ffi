@@ -46,7 +46,15 @@ from tvm_ffi.dataclasses import (
     py_class,
 )
 from tvm_ffi.registry import _add_class_attrs
-from tvm_ffi.testing import TestObjectBase as _TestObjectBase
+from tvm_ffi.testing import (
+    TestObjectBase as _TestObjectBase,
+)
+from tvm_ffi.testing import (
+    TestObjectDerived as _TestObjectDerived,
+)
+from tvm_ffi.testing import (
+    TestObjectPtrHolder as _TestObjectPtrHolder,
+)
 from tvm_ffi.testing.testing import requires_py310
 
 # ---------------------------------------------------------------------------
@@ -3648,6 +3656,89 @@ class TestNativeParentInheritance:
         assert obj_copy.v_i64 == 1
         assert obj_copy.v_f64 == 2.0
         assert obj_copy.v_str == "x"
+
+    def test_object_ptr_parent_field_access_and_assignment(self) -> None:
+        use_count = tvm_ffi.get_global_func("testing.object_use_count")
+        target = _TestObjectBase()
+        replacement = _TestObjectBase(v_i64=20)
+        assert use_count(target) == 1
+        assert use_count(replacement) == 1
+
+        holder = _TestObjectPtrHolder(target)
+        assert use_count(target) == 2
+        stored = holder.value
+        assert stored is not None
+        assert stored.same_as(target)
+        assert use_count(target) == 3
+        del stored
+        gc.collect()
+        assert use_count(target) == 2
+
+        holder.value = None
+        assert holder.value is None
+        assert use_count(target) == 1
+
+        holder.value = replacement
+        assert use_count(replacement) == 2
+        holder.value = target
+        assert use_count(target) == 2
+        assert use_count(replacement) == 1
+
+        unrelated = _TestObjectPtrHolder(None)
+        with pytest.raises(TypeError):
+            holder.value = unrelated  # ty: ignore[invalid-assignment]
+        assert holder.value is not None
+        assert holder.value.same_as(target)
+
+        del holder
+        gc.collect()
+        assert use_count(target) == 1
+
+    def test_object_ptr_parent_field_copy_and_destruction(self) -> None:
+        @py_class(_unique_key("ObjectPtrNativeParent"))
+        class Child(_TestObjectPtrHolder):
+            extra: int
+
+        use_count = tvm_ffi.get_global_func("testing.object_use_count")
+        target = _TestObjectDerived(
+            v_map={"answer": 42},
+            v_array=[1, "two"],
+            v_i64=7,
+            v_f64=2.0,
+            v_str="target",
+        )
+        child = Child(value=target, extra=3)
+        assert use_count(target) == 2
+
+        child_copy = copy.copy(child)
+        assert child_copy.extra == 3
+        assert use_count(target) == 3
+        copied_value = child_copy.value
+        assert copied_value is not None
+        assert copied_value.same_as(target)
+        del copied_value
+
+        del child_copy
+        gc.collect()
+        assert use_count(target) == 2
+
+        child_deepcopy = copy.deepcopy(child)
+        deepcopied_value = child_deepcopy.value
+        assert isinstance(deepcopied_value, _TestObjectDerived)
+        assert not deepcopied_value.same_as(target)
+        assert deepcopied_value.v_i64 == 7
+        assert deepcopied_value.v_f64 == 2.0
+        assert deepcopied_value.v_str == "target"
+        assert deepcopied_value.v_map["answer"] == 42
+        assert tuple(deepcopied_value.v_array) == (1, "two")
+        del deepcopied_value
+        del child_deepcopy
+        gc.collect()
+        assert use_count(target) == 2
+
+        del child
+        gc.collect()
+        assert use_count(target) == 1
 
 
 # ###########################################################################

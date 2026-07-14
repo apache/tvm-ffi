@@ -19,7 +19,7 @@ from typing import Any
 import pytest
 from tvm_ffi import get_global_func_metadata, register_global_func, remove_global_func
 from tvm_ffi.core import TypeInfo, TypeSchema, _lookup_type_attr
-from tvm_ffi.testing import _SchemaAllTypes
+from tvm_ffi.testing import TestObjectPtrHolder, _SchemaAllTypes
 
 
 def _replace_container_types(ty: str) -> str:
@@ -126,6 +126,16 @@ def test_schema_field(field_name: str, expected: str) -> None:
             break
     else:
         raise ValueError(f"Field not found: {field_name}")
+
+
+def test_schema_object_ptr_field() -> None:
+    type_info: TypeInfo = getattr(TestObjectPtrHolder, "__tvm_ffi_type_info__")
+    assert len(type_info.fields) == 1
+    assert type_info.fields[0].name == "value"
+    assert (
+        str(TypeSchema.from_json_str(type_info.fields[0].metadata["type_schema"]))
+        == "testing.TestObjectBase | None"
+    )
 
 
 @pytest.mark.parametrize(

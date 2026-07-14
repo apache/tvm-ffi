@@ -234,6 +234,38 @@ class TPair : public ObjectRef {
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(TPair, ObjectRef, TPairObj);
 };
 
+class TObjectPtrHolderObj : public Object {
+ public:
+  ObjectPtr<TIntObj> value;
+  ObjectPtr<TNumberObj> alias;
+
+  TObjectPtrHolderObj(ObjectPtr<TIntObj> value, ObjectPtr<TNumberObj> alias)
+      : value(std::move(value)), alias(std::move(alias)) {}
+  explicit TObjectPtrHolderObj(UnsafeInit) {}
+
+  static ObjectPtr<TIntObj> Identity(ObjectPtr<TIntObj> value) { return value; }
+
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<TObjectPtrHolderObj>()
+        .def_rw("value", &TObjectPtrHolderObj::value)
+        .def_rw("alias", &TObjectPtrHolderObj::alias)
+        .def_static("identity", &TObjectPtrHolderObj::Identity);
+  }
+
+  static constexpr bool _type_mutable = true;
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("test.ObjectPtrHolder", TObjectPtrHolderObj, Object);
+};
+
+class TObjectPtrHolder : public ObjectRef {
+ public:
+  TObjectPtrHolder(ObjectPtr<TIntObj> value, ObjectPtr<TNumberObj> alias = nullptr) {
+    data_ = make_object<TObjectPtrHolderObj>(std::move(value), std::move(alias));
+  }
+
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(TObjectPtrHolder, ObjectRef, TObjectPtrHolderObj);
+};
+
 // FreeVar test object that has a sub-field referencing another FreeVar.
 // This models the "var with nested vars" case (analogous to a relax::Var
 // whose struct_info contains tir shape vars). It is used to exercise the
