@@ -75,6 +75,41 @@ TEST(DType, StringConversionAllDLPackTypes) {
   }
 }
 
+TEST(DType, StringConversionAliases) {
+  std::vector<std::pair<std::string, std::string>> test_cases = {
+      {"i32", "int32"},
+      {"u16", "uint16"},
+      {"f32", "float32"},
+      {"bf16", "bfloat16"},
+      {"f8_e3m4", "float8_e3m4"},
+      {"f8_e3m4x2", "float8_e3m4x2"},
+      {"f8_e4m3", "float8_e4m3"},
+      {"f8_e4m3b11fnuz", "float8_e4m3b11fnuz"},
+      {"f8_e4m3fn", "float8_e4m3fn"},
+      {"f8_e4m3fnuz", "float8_e4m3fnuz"},
+      {"f8_e4m3fnuzx2", "float8_e4m3fnuzx2"},
+      {"f8_e5m2", "float8_e5m2"},
+      {"f8_e5m2fnuz", "float8_e5m2fnuz"},
+      {"f8_e8m0fnu", "float8_e8m0fnu"},
+      {"fp8_e4m3", "float8_e4m3"},
+      {"fp8_e5m2x4", "float8_e5m2x4"},
+      {"f6_e2m3fn", "float6_e2m3fn"},
+      {"fp6_e3m2fn", "float6_e3m2fn"},
+      {"f4_e2m1fn", "float4_e2m1fn"},
+      {"fp4_e2m1fn", "float4_e2m1fn"},
+      {"f4_e2m1fnx2", "float4_e2m1fnx2"},
+      {"f4_e2m1fn_x2", "float4_e2m1fnx2"},
+      {"fp4_e2m1fn_x2", "float4_e2m1fnx2"},
+      {"float4_e2m1fn_x2", "float4_e2m1fnx2"},
+  };
+
+  for (const auto& [alias, expected] : test_cases) {
+    DLDataType parsed = StringToDLDataType(String(alias));
+    EXPECT_EQ(DLDataTypeToString(parsed), expected) << alias;
+    EXPECT_EQ(parsed, StringToDLDataType(String(expected))) << alias;
+  }
+}
+
 TEST(DataType, AnyConversion) {
   AnyView view0;
   EXPECT_EQ(view0.CopyToTVMFFIAny().type_index, TypeIndex::kTVMFFINone);

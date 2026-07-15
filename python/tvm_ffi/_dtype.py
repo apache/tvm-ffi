@@ -19,6 +19,7 @@
 # pylint: disable=invalid-name
 from __future__ import annotations
 
+import builtins
 from enum import IntEnum
 from typing import Any, ClassVar
 
@@ -288,6 +289,72 @@ class dtype(str):
         """
         return self._tvm_ffi_dtype.lanes
 
+    @property
+    def is_bool(self) -> builtins.bool:
+        """Whether this dtype stores boolean values."""
+        return self.type_code == DataTypeCode.BOOL
+
+    @property
+    def is_integer(self) -> builtins.bool:
+        """Whether this dtype stores signed or unsigned integer values."""
+        return self.type_code in {DataTypeCode.INT, DataTypeCode.UINT}
+
+    @property
+    def is_float(self) -> builtins.bool:
+        """Whether this dtype stores floating-point values."""
+        return self.type_code in {
+            DataTypeCode.FLOAT,
+            DataTypeCode.BFLOAT,
+            DataTypeCode.Float8E3M4,
+            DataTypeCode.Float8E4M3,
+            DataTypeCode.Float8E4M3B11FNUZ,
+            DataTypeCode.Float8E4M3FN,
+            DataTypeCode.Float8E4M3FNUZ,
+            DataTypeCode.Float8E5M2,
+            DataTypeCode.Float8E5M2FNUZ,
+            DataTypeCode.Float8E8M0FNU,
+            DataTypeCode.Float6E2M3FN,
+            DataTypeCode.Float6E3M2FN,
+            DataTypeCode.Float4E2M1FN,
+        }
+
+    @property
+    def is_handle(self) -> builtins.bool:
+        """Whether this dtype stores opaque handle values."""
+        return self.type_code == DataTypeCode.HANDLE
+
+    @staticmethod
+    def is_dtype(arg: str | dtype) -> builtins.bool:
+        """Check if the given string is a valid dtype.
+
+        Parameters
+        ----------
+        arg
+            The string to check.
+
+        Returns
+        -------
+        bool
+            Whether the input string is a valid dtype.
+
+        Examples
+        --------
+        .. code-block:: python
+
+            import tvm_ffi
+
+            assert tvm_ffi.dtype.is_dtype("float32")
+            assert not tvm_ffi.dtype.is_dtype("not_a_dtype")
+
+        """
+        if isinstance(arg, dtype):
+            return True
+        try:
+            core.DataType(str(arg))
+            return True
+        except ValueError:
+            return False
+
 
 try:
     # this helps to make numpy as optional
@@ -342,11 +409,19 @@ float32 = dtype("float32")
 float16 = dtype("float16")
 bfloat16 = dtype("bfloat16")
 # float8 dtypes
+float8_e3m4 = dtype("float8_e3m4")
+float8_e4m3 = dtype("float8_e4m3")
+float8_e4m3b11fnuz = dtype("float8_e4m3b11fnuz")
 float8_e4m3fn = dtype("float8_e4m3fn")
 float8_e4m3fnuz = dtype("float8_e4m3fnuz")
 float8_e5m2 = dtype("float8_e5m2")
 float8_e5m2fnuz = dtype("float8_e5m2fnuz")
 float8_e8m0fnu = dtype("float8_e8m0fnu")
+# float6 dtypes
+float6_e2m3fn = dtype("float6_e2m3fn")
+float6_e3m2fn = dtype("float6_e3m2fn")
+# float4 dtypes
+float4_e2m1fn = dtype("float4_e2m1fn")
 # float4x2 dtypes
 float4_e2m1fnx2 = dtype("float4_e2m1fnx2")
 # alias for torch naming pattern for f4x2
