@@ -19,6 +19,7 @@
 #include <tvm/ffi/dtype.h>
 #include <tvm/ffi/string.h>
 
+#include <string>
 #include <string_view>
 
 namespace tvm {
@@ -202,6 +203,31 @@ inline DLDataType StringViewToDLDataType_(std::string_view str) {
     dtype.lanes = 0;
     return dtype;
   }
+
+  auto is_digit = [](char ch) { return ch >= '0' && ch <= '9'; };
+
+  std::string normalized_dtype;
+  auto normalize_prefix = [&](std::string_view canonical_prefix, size_t alias_prefix_size) {
+    normalized_dtype.assign(canonical_prefix);
+    normalized_dtype.append(str.substr(alias_prefix_size));
+    str = normalized_dtype;
+  };
+  if (str.size() >= 2 && str[0] == 'i' && is_digit(str[1])) {
+    normalize_prefix("int", 1);
+  } else if (str.size() >= 2 && str[0] == 'u' && is_digit(str[1])) {
+    normalize_prefix("uint", 1);
+  } else if (str.size() >= 3 && str[0] == 'b' && str[1] == 'f' && is_digit(str[2])) {
+    normalize_prefix("bfloat", 2);
+  } else if (str.compare(0, 4, "fp8_") == 0) {
+    normalize_prefix("float8_", 4);
+  } else if (str.compare(0, 4, "fp6_") == 0) {
+    normalize_prefix("float6_", 4);
+  } else if (str.compare(0, 4, "fp4_") == 0) {
+    normalize_prefix("float4_", 4);
+  } else if (str.size() >= 2 && str[0] == 'f' && is_digit(str[1])) {
+    normalize_prefix("float", 1);
+  }
+
   // set the default values;
   dtype.bits = 32;
   dtype.lanes = 1;
@@ -253,10 +279,14 @@ inline DLDataType StringViewToDLDataType_(std::string_view str) {
     return static_cast<uint16_t>(multiplier * lanes_val);
   };
 
-  auto parse_float = [&](const std::string_view& str, int offset, int code, int bits) {
+  auto parse_float = [&](const std::string_view& str, int offset, int code, int bits,
+                         bool allow_underscore_lanes = false) {
     dtype.code = static_cast<uint8_t>(code);
     dtype.bits = static_cast<uint8_t>(bits);
     scan = str.data() + offset;
+    if (allow_underscore_lanes && scan < str_end && *scan == '_') {
+      ++scan;
+    }
     const char* endpt = scan;
     dtype.lanes = parse_lanes(&endpt, str_end, str);
     scan = endpt;
@@ -266,63 +296,104 @@ inline DLDataType StringViewToDLDataType_(std::string_view str) {
     return dtype;
   };
 
+  auto match_float_variant = [&](int offset, std::string_view pattern,
+                                 bool allow_underscore_lanes = false) -> int {
+    size_t end = static_cast<size_t>(offset) + pattern.size();
+    if (str.size() < end || str.compare(offset, pattern.size(), pattern) != 0) {
+      return -1;
+    }
+    if (end == str.size() || str[end] == 'x' || (allow_underscore_lanes && str[end] == '_')) {
+      return static_cast<int>(end);
+    }
+    return -1;
+  };
+
+  auto parse_float8 = [&](int offset) {
+    if (int end = match_float_variant(offset, "e4m3b11fnuz"); end >= 0) {
+      return parse_float(str, end, kDLFloat8_e4m3b11fnuz, 8);
+    } else if (int end = match_float_variant(offset, "e4m3fnuz"); end >= 0) {
+      return parse_float(str, end, kDLFloat8_e4m3fnuz, 8);
+    } else if (int end = match_float_variant(offset, "e4m3fn"); end >= 0) {
+      return parse_float(str, end, kDLFloat8_e4m3fn, 8);
+    } else if (int end = match_float_variant(offset, "e5m2fnuz"); end >= 0) {
+      return parse_float(str, end, kDLFloat8_e5m2fnuz, 8);
+    } else if (int end = match_float_variant(offset, "e8m0fnu"); end >= 0) {
+      return parse_float(str, end, kDLFloat8_e8m0fnu, 8);
+    } else if (int end = match_float_variant(offset, "e3m4"); end >= 0) {
+      return parse_float(str, end, kDLFloat8_e3m4, 8);
+    } else if (int end = match_float_variant(offset, "e4m3"); end >= 0) {
+      return parse_float(str, end, kDLFloat8_e4m3, 8);
+    } else if (int end = match_float_variant(offset, "e5m2"); end >= 0) {
+      return parse_float(str, end, kDLFloat8_e5m2, 8);
+    } else {
+      TVM_FFI_THROW(ValueError) << "unknown float8 type `" << str << '`';
+      TVM_FFI_UNREACHABLE();
+    }
+  };
+
+  auto parse_float6 = [&](int offset) {
+    if (int end = match_float_variant(offset, "e2m3fn"); end >= 0) {
+      return parse_float(str, end, kDLFloat6_e2m3fn, 6);
+    } else if (int end = match_float_variant(offset, "e3m2fn"); end >= 0) {
+      return parse_float(str, end, kDLFloat6_e3m2fn, 6);
+    } else {
+      TVM_FFI_THROW(ValueError) << "unknown float6 type `" << str << '`';
+      TVM_FFI_UNREACHABLE();
+    }
+  };
+
+  auto parse_float4 = [&](int offset) {
+    if (int end = match_float_variant(offset, "e2m1fn", /*allow_underscore_lanes=*/true);
+        end >= 0) {
+      return parse_float(str, end, kDLFloat4_e2m1fn, 4, /*allow_underscore_lanes=*/true);
+    } else {
+      TVM_FFI_THROW(ValueError) << "unknown float4 type `" << str << '`';
+      TVM_FFI_UNREACHABLE();
+    }
+  };
+
   if (str.compare(0, 3, "int") == 0) {
     dtype.code = kDLInt;
     scan = str.data() + 3;
+  } else if (str.size() >= 2 && str[0] == 'i' && is_digit(str[1])) {
+    dtype.code = kDLInt;
+    scan = str.data() + 1;
   } else if (str.compare(0, 4, "uint") == 0) {
     dtype.code = kDLUInt;
     scan = str.data() + 4;
+  } else if (str.size() >= 2 && str[0] == 'u' && is_digit(str[1])) {
+    dtype.code = kDLUInt;
+    scan = str.data() + 1;
   } else if (str.compare(0, 4, "bool") == 0) {
     dtype.code = kDLBool;
     dtype.bits = 8;
     scan = str.data() + 4;
+  } else if (str.compare(0, 4, "fp8_") == 0) {
+    return parse_float8(4);
+  } else if (str.compare(0, 3, "f8_") == 0) {
+    return parse_float8(3);
+  } else if (str.compare(0, 4, "fp6_") == 0) {
+    return parse_float6(4);
+  } else if (str.compare(0, 3, "f6_") == 0) {
+    return parse_float6(3);
+  } else if (str.compare(0, 4, "fp4_") == 0) {
+    return parse_float4(4);
+  } else if (str.compare(0, 3, "f4_") == 0) {
+    return parse_float4(3);
   } else if (str.compare(0, 5, "float") == 0) {
     if (str.compare(5, 2, "8_") == 0) {
-      if (str.compare(7, 4, "e3m4") == 0) {
-        return parse_float(str, 11, kDLFloat8_e3m4, 8);
-      } else if (str.compare(7, 4, "e4m3") == 0) {
-        if (str.compare(11, 7, "b11fnuz") == 0) {
-          return parse_float(str, 18, kDLFloat8_e4m3b11fnuz, 8);
-        } else if (str.compare(11, 2, "fn") == 0) {
-          if (str.compare(13, 2, "uz") == 0) {
-            return parse_float(str, 15, kDLFloat8_e4m3fnuz, 8);
-          } else {
-            return parse_float(str, 13, kDLFloat8_e4m3fn, 8);
-          }
-        } else {
-          return parse_float(str, 11, kDLFloat8_e4m3, 8);
-        }
-      } else if (str.compare(7, 8, "e5m2fnuz") == 0) {
-        return parse_float(str, 15, kDLFloat8_e5m2fnuz, 8);
-      } else if (str.compare(7, 4, "e5m2") == 0) {
-        return parse_float(str, 11, kDLFloat8_e5m2, 8);
-      } else if (str.compare(7, 7, "e8m0fnu") == 0) {
-        return parse_float(str, 14, kDLFloat8_e8m0fnu, 8);
-      } else {
-        TVM_FFI_THROW(ValueError) << "unknown float8 type `" << str << '`';
-        TVM_FFI_UNREACHABLE();
-      }
+      return parse_float8(7);
     } else if (str.compare(5, 2, "6_") == 0) {
-      if (str.compare(7, 6, "e2m3fn") == 0) {
-        return parse_float(str, 13, kDLFloat6_e2m3fn, 6);
-      } else if (str.compare(7, 6, "e3m2fn") == 0) {
-        return parse_float(str, 13, kDLFloat6_e3m2fn, 6);
-      } else {
-        TVM_FFI_THROW(ValueError) << "unknown float6 type `" << str << '`';
-        TVM_FFI_UNREACHABLE();
-      }
+      return parse_float6(7);
     } else if (str.compare(5, 2, "4_") == 0) {
-      // kFloat4_e2m1fn
-      if (str.compare(7, 6, "e2m1fn") == 0) {
-        return parse_float(str, 13, kDLFloat4_e2m1fn, 4);
-      } else {
-        TVM_FFI_THROW(ValueError) << "unknown float4 type `" << str << '`';
-        TVM_FFI_UNREACHABLE();
-      }
+      return parse_float4(7);
     } else {
       dtype.code = kDLFloat;
       scan = str.data() + 5;
     }
+  } else if (str.size() >= 2 && str[0] == 'f' && is_digit(str[1])) {
+    dtype.code = kDLFloat;
+    scan = str.data() + 1;
   } else if (str.compare(0, 6, "handle") == 0) {
     dtype.code = kDLOpaqueHandle;
     dtype.bits = 64;  // handle uses 64 bit by default.
@@ -331,6 +402,10 @@ inline DLDataType StringViewToDLDataType_(std::string_view str) {
     dtype.code = kDLBfloat;
     dtype.bits = 16;
     scan = str.data() + 6;
+  } else if (str.size() >= 3 && str[0] == 'b' && str[1] == 'f' && is_digit(str[2])) {
+    dtype.code = kDLBfloat;
+    dtype.bits = 16;
+    scan = str.data() + 2;
   } else if (str.compare(0, 6, "custom") == 0) {
     dtype.code = static_cast<uint8_t>(details::ParseCustomDataTypeCode(str, &scan));
   } else {

@@ -33,6 +33,64 @@ def test_dtype() -> None:
 
 
 @pytest.mark.parametrize(
+    "alias, expected",
+    [
+        ("i8", "int8"),
+        ("i16", "int16"),
+        ("i32", "int32"),
+        ("i64", "int64"),
+        ("u8", "uint8"),
+        ("u16", "uint16"),
+        ("u32", "uint32"),
+        ("u64", "uint64"),
+        ("f16", "float16"),
+        ("f32", "float32"),
+        ("f64", "float64"),
+        ("bf16", "bfloat16"),
+        ("f8_e3m4", "float8_e3m4"),
+        ("f8_e4m3", "float8_e4m3"),
+        ("f8_e4m3b11fnuz", "float8_e4m3b11fnuz"),
+        ("f8_e4m3fn", "float8_e4m3fn"),
+        ("f8_e4m3fnuz", "float8_e4m3fnuz"),
+        ("f8_e5m2", "float8_e5m2"),
+        ("f8_e5m2fnuz", "float8_e5m2fnuz"),
+        ("f8_e8m0fnu", "float8_e8m0fnu"),
+        ("fp8_e3m4", "float8_e3m4"),
+        ("fp8_e4m3", "float8_e4m3"),
+        ("fp8_e4m3b11fnuz", "float8_e4m3b11fnuz"),
+        ("fp8_e4m3fn", "float8_e4m3fn"),
+        ("fp8_e4m3fnuz", "float8_e4m3fnuz"),
+        ("fp8_e5m2", "float8_e5m2"),
+        ("fp8_e5m2fnuz", "float8_e5m2fnuz"),
+        ("fp8_e8m0fnu", "float8_e8m0fnu"),
+        ("f6_e2m3fn", "float6_e2m3fn"),
+        ("f6_e3m2fn", "float6_e3m2fn"),
+        ("fp6_e2m3fn", "float6_e2m3fn"),
+        ("fp6_e3m2fn", "float6_e3m2fn"),
+        ("f4_e2m1fn", "float4_e2m1fn"),
+        ("fp4_e2m1fn", "float4_e2m1fn"),
+        ("f32x4", "float32x4"),
+        ("f8_e4m3x4", "float8_e4m3x4"),
+        ("f8_e4m3fnx4", "float8_e4m3fnx4"),
+        ("fp8_e5m2x4", "float8_e5m2x4"),
+        ("f6_e2m3fnx4", "float6_e2m3fnx4"),
+        ("f4_e2m1fnx2", "float4_e2m1fnx2"),
+        ("f4_e2m1fn_x2", "float4_e2m1fnx2"),
+        ("fp4_e2m1fnx2", "float4_e2m1fnx2"),
+        ("fp4_e2m1fn_x2", "float4_e2m1fnx2"),
+        ("float4_e2m1fn_x2", "float4_e2m1fnx2"),
+    ],
+)
+def test_dtype_aliases(alias: str, expected: str) -> None:
+    dtype = tvm_ffi.dtype(alias)
+    expected_dtype = tvm_ffi.dtype(expected)
+    assert str(dtype) == alias
+    assert dtype.type_code == expected_dtype.type_code
+    assert dtype.bits == expected_dtype.bits
+    assert dtype.lanes == expected_dtype.lanes
+
+
+@pytest.mark.parametrize(
     "dtype_str, expected_size",
     [
         ("float32", 4),
@@ -182,11 +240,17 @@ def test_builtin_dtype_conversion() -> None:
     _check_dtype(tvm_ffi.float32, 2, 32, 1)
     _check_dtype(tvm_ffi.float64, 2, 64, 1)
     _check_dtype(tvm_ffi.bfloat16, 4, 16, 1)
+    _check_dtype(tvm_ffi.float8_e3m4, 7, 8, 1)
+    _check_dtype(tvm_ffi.float8_e4m3, 8, 8, 1)
+    _check_dtype(tvm_ffi.float8_e4m3b11fnuz, 9, 8, 1)
     _check_dtype(tvm_ffi.float8_e4m3fn, 10, 8, 1)
     _check_dtype(tvm_ffi.float8_e4m3fnuz, 11, 8, 1)
     _check_dtype(tvm_ffi.float8_e5m2, 12, 8, 1)
     _check_dtype(tvm_ffi.float8_e5m2fnuz, 13, 8, 1)
     _check_dtype(tvm_ffi.float8_e8m0fnu, 14, 8, 1)
+    _check_dtype(tvm_ffi.float6_e2m3fn, 15, 6, 1)
+    _check_dtype(tvm_ffi.float6_e3m2fn, 16, 6, 1)
+    _check_dtype(tvm_ffi.float4_e2m1fn, 17, 4, 1)
     _check_dtype(tvm_ffi.float4_e2m1fnx2, 17, 4, 2)
 
 
@@ -208,3 +272,31 @@ def test_dtype_bool() -> None:
     assert dtype_with_lanes.bits == 8
     assert dtype_with_lanes.lanes == 4
     assert dtype_with_lanes == "boolx4"
+
+
+@pytest.mark.parametrize(
+    "dtype_str, is_bool, is_integer, is_float, is_handle",
+    [
+        ("bool", True, False, False, False),
+        ("int32", False, True, False, False),
+        ("uint8", False, True, False, False),
+        ("float32", False, False, True, False),
+        ("bfloat16", False, False, True, False),
+        ("float8_e4m3fn", False, False, True, False),
+        ("float6_e2m3fn", False, False, True, False),
+        ("float4_e2m1fn", False, False, True, False),
+        ("handle", False, False, False, True),
+    ],
+)
+def test_dtype_kind_properties(
+    dtype_str: str,
+    is_bool: bool,
+    is_integer: bool,
+    is_float: bool,
+    is_handle: bool,
+) -> None:
+    dtype = tvm_ffi.dtype(dtype_str)
+    assert dtype.is_bool is is_bool
+    assert dtype.is_integer is is_integer
+    assert dtype.is_float is is_float
+    assert dtype.is_handle is is_handle

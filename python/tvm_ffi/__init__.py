@@ -111,11 +111,17 @@ if TYPE_CHECKING or not _is_config_mode():
         float32,
         float16,
         bfloat16,
+        float8_e3m4,
+        float8_e4m3,
+        float8_e4m3b11fnuz,
         float8_e4m3fn,
         float8_e4m3fnuz,
         float8_e5m2,
         float8_e5m2fnuz,
         float8_e8m0fnu,
+        float6_e2m3fn,
+        float6_e3m2fn,
+        float4_e2m1fn,
         float4_e2m1fnx2,
     )
 elif sys.platform.startswith("win32"):
