@@ -529,8 +529,6 @@ class ObjectPtr {
   friend struct tvm::ffi::details::ObjectUnsafe;
 };
 
-namespace details {
-
 /*!
  * \brief Whether T is Object or a subclass of Object.
  * \tparam T The type to inspect.
@@ -538,10 +536,12 @@ namespace details {
 template <typename T>
 inline constexpr bool is_object_subclass_v = std::is_base_of_v<Object, T>;
 
+namespace details {
+
 /*! \brief Whether T is an Object subclass with cv- or reference qualification. */
 template <typename T>
 inline constexpr bool is_qualified_object_v =
-    is_object_subclass_v<std::remove_cv_t<std::remove_reference_t<T>>> &&
+    ::tvm::ffi::is_object_subclass_v<std::remove_cv_t<std::remove_reference_t<T>>> &&
     !std::is_same_v<T, std::remove_cv_t<std::remove_reference_t<T>>>;
 
 }  // namespace details
@@ -1305,7 +1305,7 @@ struct TypeToRuntimeTypeIndex<T, std::enable_if_t<std::is_base_of_v<ObjectRef, T
 
 template <typename TObject>
 struct TypeToRuntimeTypeIndex<
-    ObjectPtr<TObject>, std::enable_if_t<details::is_object_subclass_v<TObject> &&
+    ObjectPtr<TObject>, std::enable_if_t<is_object_subclass_v<TObject> &&
                                          std::is_same_v<TObject, std::remove_cv_t<TObject>>>> {
   static int32_t v() { return TObject::RuntimeTypeIndex(); }
 };
@@ -1316,7 +1316,7 @@ struct TypeToRuntimeTypeIndex<
  */
 template <typename TObject>
 struct TypeTraits<ObjectPtr<TObject>,
-                  std::enable_if_t<details::is_object_subclass_v<TObject> &&
+                  std::enable_if_t<is_object_subclass_v<TObject> &&
                                    std::is_same_v<TObject, std::remove_cv_t<TObject>>>>
     : public TypeTraitsBase {
   static constexpr int32_t field_static_type_index = TypeIndex::kTVMFFIObject;

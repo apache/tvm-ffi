@@ -153,6 +153,7 @@ cdef extern from "tvm/ffi/c_api.h":
         kTVMFFIOpaquePyObject = 74
         kTVMFFIList = 75
         kTVMFFIDict = 76
+        kTVMFFIStaticObjectEnd
 
     ctypedef void* TVMFFIObjectHandle
 

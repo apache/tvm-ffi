@@ -71,6 +71,17 @@ class TestIntPair : public tvm::ffi::ObjectRef {
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(TestIntPair, tvm::ffi::ObjectRef, TestIntPairObj);
 };
 
+class TestFrozenCxxObj : public tvm::ffi::Object {
+ public:
+  static constexpr bool _type_mutable = true;
+  int64_t value;
+  String tag;
+
+  TestFrozenCxxObj() = default;
+
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("testing.TestFrozenCxx", TestFrozenCxxObj, tvm::ffi::Object);
+};
+
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::ObjectDef<TestIntPairObj>()

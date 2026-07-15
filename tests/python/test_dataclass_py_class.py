@@ -55,6 +55,7 @@ from tvm_ffi.testing import (
 from tvm_ffi.testing import (
     TestObjectPtrHolder as _TestObjectPtrHolder,
 )
+from tvm_ffi.testing import _TestCxxClassBase
 from tvm_ffi.testing.testing import requires_py310
 
 # ---------------------------------------------------------------------------
@@ -3597,6 +3598,25 @@ class TestNativeParentInheritance:
         parent_end = max(f.offset + f.size for f in parent_info.fields)
         assert child_info.fields[0].offset >= parent_end
 
+    def test_native_parent_tail_padding_matches_cxx(self) -> None:
+        parent_info = core._type_cls_to_type_info(_TestCxxClassBase)
+        assert parent_info is not None
+        assert max(f.offset + f.size for f in parent_info.fields) == 36
+        expected_offset = 40 if sys.platform == "win32" else 36
+
+        Child = _make_type(
+            "InhNativeTailPadding",
+            [Field(name="extra", _ty_schema=TypeSchema("bool"), default=MISSING)],
+            parent=_TestCxxClassBase,
+        )
+        child_info = getattr(Child, "__tvm_ffi_type_info__")
+        assert child_info.fields[0].offset == expected_offset
+
+        obj = Child(v_i64=1, v_i32=2, extra=True)
+        assert obj.v_i64 == 1
+        assert obj.v_i32 == 2
+        assert obj.extra is True
+
     def test_preserves_parent_fields(self) -> None:
         Child = _make_type(
             "InhNativePreserve",
@@ -3909,6 +3929,33 @@ class TestBoolAlignment:
         assert obj.a is True
         assert obj.b is False
         assert obj.c is True
+
+    def test_inherited_tail_padding_matches_cxx(self) -> None:
+        @py_class(_unique_key("BoolTailParent"))
+        class Parent(Object):
+            parent_flag: bool = False
+
+        @py_class(_unique_key("BoolTailEmpty"))
+        class Empty(Parent):
+            pass
+
+        @py_class(_unique_key("BoolTailChild"))
+        class Child(Empty):
+            child_flag: bool = False
+
+        parent_info = _get_type_info(Parent)
+        empty_info = _get_type_info(Empty)
+        child_info = _get_type_info(Child)
+        expected_offset = 32 if sys.platform == "win32" else 25
+        assert getattr(parent_info, "total_size") == 32
+        assert getattr(empty_info, "total_size") == 32
+        assert child_info.fields[0].offset == expected_offset
+        assert getattr(child_info, "total_size") == (40 if sys.platform == "win32" else 32)
+
+        obj = Child(parent_flag=True, child_flag=False)
+        obj.child_flag = True
+        assert obj.parent_flag is True
+        assert obj.child_flag is True
 
     def test_bool_int_bool_int_alternating(self) -> None:
         Cls = _make_type(

@@ -164,6 +164,7 @@ TEST(Dict, AnyConversion) {
   Any any_d = d;
   auto d2 = any_d.cast<Dict<Any, Any>>();
   EXPECT_EQ(d2.size(), 1);
+  EXPECT_TRUE(d2.same_as(d));
 }
 
 TEST(Dict, InitializerList) {

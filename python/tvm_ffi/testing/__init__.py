@@ -23,6 +23,7 @@ from .testing import (
     TestCustomCompare,
     TestCustomHash,
     TestEqWithoutHash,
+    TestFrozenCxx,
     TestHash,
     TestIntPair,
     TestNonCopyable,

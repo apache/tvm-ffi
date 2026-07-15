@@ -140,6 +140,13 @@ TEST(List, AnyImplicitConversionFromArray) {
   AnyView list_view = list_any;
   List<Any> list_any_roundtrip = list_view.cast<List<Any>>();
   EXPECT_TRUE(list_any_roundtrip.same_as(list_any));
+
+  Any owned_list = list_any;
+  List<Any> moved_roundtrip = std::move(owned_list).cast<List<Any>>();
+  EXPECT_TRUE(moved_roundtrip.same_as(list_any));
+  ASSERT_EQ(moved_roundtrip.size(), 2);
+  EXPECT_EQ(moved_roundtrip[0].cast<int>(), 1);
+  EXPECT_EQ(moved_roundtrip[1].cast<int>(), 2);
 }
 
 TEST(List, AnyConvertCheck) {

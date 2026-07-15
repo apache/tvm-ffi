@@ -401,6 +401,24 @@ The decorator:
 4. Installs ``__copy__``, ``__deepcopy__``, ``__eq__``, ``__hash__``,
    ``__repr__``, and comparison operators.
 
+Use ``frozen=True`` when the Python class should expose reflected fields as
+read-only after construction:
+
+.. code-block:: python
+
+   @c_class("my_ext.Point", frozen=True)
+   class Point(tvm_ffi.Object):
+       x: int
+       y: int
+       label: str
+
+This marks the reflected field metadata as frozen and installs read-only
+descriptors on the Python class, even for fields that are registered as
+``def_rw`` on the C++ side. It is intended for immutable value and IR node
+families. Controlled internal updates can still use the field descriptor's
+``set`` method when a framework component needs to rebuild or annotate an
+object.
+
 .. note::
 
    ``@tvm_ffi.register_object`` can also be used, which delegates to

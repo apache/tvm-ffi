@@ -133,9 +133,8 @@ TVMFFIAny VisitDict(StructuralVisitorObj* visitor, AnyView value) noexcept {
 
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
-  refl::ObjectDef<VisitInterruptObj>()
-      .def(refl::init<Any>(), "Constructor that creates a structural visit interrupt")
-      .def_ro("value", &VisitInterruptObj::value);
+  refl::ObjectDef<VisitInterruptObj>().def_ro("value", &VisitInterruptObj::value,
+                                              refl::default_value(nullptr));
   refl::ObjectDef<StructuralVisitorObj>().def(
       refl::init<>(), "Constructor that creates a default structural visitor");
   refl::GlobalDef()

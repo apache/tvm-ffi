@@ -1631,6 +1631,20 @@ class TestCustomObjectExactMatch:
 # Category 31: Custom object type hierarchy (subclass passes parent schema)
 # ---------------------------------------------------------------------------
 class TestCustomObjectHierarchy:
+    def test_type_schema_is_subtype_of_uses_type_info_hierarchy(self) -> None:
+        """TypeSchema subtype checks use registered FFI type metadata."""
+        base_schema = A(TestObjectBase)
+        derived_schema = A(TestObjectDerived)
+        int_schema = A(int)
+
+        assert base_schema.is_subtype_of(TestObjectBase)
+        assert derived_schema.is_subtype_of(TestObjectDerived)
+        assert derived_schema.is_subtype_of(TestObjectBase)
+        assert derived_schema.is_subtype_of(tvm_ffi.core.Object)
+        assert not base_schema.is_subtype_of(TestObjectDerived)
+        assert not int_schema.is_subtype_of(TestObjectBase)
+        assert not derived_schema.is_subtype_of(int)
+
     def test_derived_passes_base_schema(self) -> None:
         """TestObjectDerived passes TypeSchema('testing.TestObjectBase')."""
         obj = TestObjectDerived(v_map={"a": 1}, v_array=[1], v_i64=0, v_f64=0.0, v_str="")

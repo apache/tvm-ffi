@@ -282,6 +282,7 @@ class TypeSchema:
     def from_type_index(type_index: int, args: tuple[TypeSchema, ...] = ()) -> TypeSchema: ...
     @staticmethod
     def from_annotation(annotation: object) -> TypeSchema: ...
+    def is_subtype_of(self, target_cls: type) -> bool: ...
     def repr(self, ty_map: Callable[[str], str] | None = None) -> str: ...
     def input_repr(self, ty_map: Callable[[str], str] | None = None) -> str: ...
     def output_repr(self, ty_map: Callable[[str], str] | None = None) -> str: ...
@@ -293,7 +294,9 @@ class TypeField:
     name: str
     doc: str | None
     size: int
+    alignment: int
     offset: int
+    field_static_type_index: int
     frozen: bool
     metadata: dict[str, Any]
     getter: Any
@@ -329,6 +332,8 @@ class TypeInfo:
     fields: list[TypeField]
     methods: list[TypeMethod]
     parent_type_info: TypeInfo | None
+    total_size: int
+    _has_type_metadata: bool
     _decorator_args: dict[str, Any]
 
     def _register_fields(self, fields: list[Any], structure_kind: int | None = ...) -> None: ...
