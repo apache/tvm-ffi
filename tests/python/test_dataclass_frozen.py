@@ -16,7 +16,7 @@
 # under the License.
 """Tests for frozen support in ``@py_class``."""
 
-# ruff: noqa: D102, UP006, UP035, UP045
+# ruff: noqa: UP006, UP035, UP045
 from __future__ import annotations
 
 import copy

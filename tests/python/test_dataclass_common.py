@@ -14,7 +14,7 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-# ruff: noqa: D102, UP006, UP035, UP045
+# ruff: noqa: UP006, UP035, UP045
 """Tests for :func:`tvm_ffi.dataclasses.is_dataclass`, :func:`fields`, :func:`replace`."""
 
 from __future__ import annotations

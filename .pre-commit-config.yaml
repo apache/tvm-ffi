@@ -23,106 +23,117 @@ repos:
       - id: check-asf-header
         name: check ASF Header
         entry: python tests/lint/check_asf_header.py --check
-        language: python
-        language_version: python3
+        language: system
         pass_filenames: false
         verbose: false
-  - repo: local
-    hooks:
       - id: check-file-type
         name: check file types
         entry: python tests/lint/check_file_type.py
-        language: python
-        language_version: python3
+        language: system
         pass_filenames: false
         verbose: false
-  - repo: local
-    hooks:
       - id: check-version-consistency
         name: check version consistency
         entry: python tests/lint/check_version.py --cpp  # TODO: add `--rust` once Rust binding matures
-        language: python
-        language_version: python3
-        additional_dependencies:
-          - setuptools-scm
-          - packaging
-          - tomli
+        language: system
         pass_filenames: false
         verbose: false
-  - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v6.0.0
-    hooks:
       - id: check-added-large-files
+        name: check added large files
+        entry: check-added-large-files
+        language: system
       - id: check-case-conflict
+        name: check case conflict
+        entry: check-case-conflict
+        language: system
       - id: check-merge-conflict
+        name: check merge conflict
+        entry: check-merge-conflict
+        language: system
+        types: [text]
       - id: check-symlinks
+        name: check symlinks
+        entry: check-symlinks
+        language: system
+        types: [symlink]
       - id: end-of-file-fixer
+        name: fix end of files
+        entry: end-of-file-fixer
+        language: system
+        types: [text]
       - id: mixed-line-ending
+        name: mixed line ending
+        entry: mixed-line-ending
+        language: system
+        types: [text]
       - id: requirements-txt-fixer
+        name: fix requirements.txt
+        entry: requirements-txt-fixer
+        language: system
+        files: (^|/)requirements.*\.txt$
       - id: trailing-whitespace
+        name: trim trailing whitespace
+        entry: trailing-whitespace-fixer
+        language: system
+        types: [text]
       - id: check-yaml
+        name: check yaml
+        entry: check-yaml
+        language: system
+        types: [yaml]
       - id: check-toml
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.14.9
-    hooks:
+        name: check toml
+        entry: check-toml
+        language: system
+        types: [toml]
       - id: ruff-check
+        name: ruff check
+        entry: ruff check --fix
+        language: system
         types_or: [python, pyi, jupyter]
-        args: [--fix]
       - id: ruff-format
+        name: ruff format
+        entry: ruff format
+        language: system
         types_or: [python, pyi, jupyter]
-  - repo: local
-    hooks:
       - id: ty
         name: ty check
-        entry: uvx ty@0.0.15 check --error-on-warning
+        entry: uv run --no-sync ty check --error-on-warning
         language: system
         pass_filenames: false
         types: [python]
-  - repo: https://github.com/pre-commit/mirrors-clang-format
-    rev: "v21.1.7"
-    hooks:
       - id: clang-format
-  - repo: https://github.com/adrienverge/yamllint
-    rev: v1.37.1
-    hooks:
+        name: clang-format
+        entry: clang-format -i
+        language: system
+        files: \.(c|cc|cpp|cxx|h|hh|hpp|hxx|cu|cuh|m|mm)$
       - id: yamllint
-        args:
-          - --config-file
-          - .yamllint.yaml
-  - repo: https://github.com/ComPWA/taplo-pre-commit
-    rev: v0.9.3
-    hooks:
-      - id: taplo-format
-  - repo: https://github.com/MarcoGorelli/cython-lint
-    rev: v0.18.1
-    hooks:
+        name: yamllint
+        entry: yamllint --config-file .yamllint.yaml
+        language: system
+        types: [yaml]
       - id: cython-lint
-        args: [--max-line-length=120]
+        name: cython-lint
+        entry: cython-lint --max-line-length=120
+        language: system
+        files: \.(pyx|pxd|pxi)$
       - id: double-quote-cython-strings
-  - repo: https://github.com/scop/pre-commit-shfmt
-    rev: v3.12.0-2
-    hooks:
-      - id: shfmt
-        args: [--indent=2]
-  - repo: https://github.com/shellcheck-py/shellcheck-py
-    rev: v0.11.0.1
-    hooks:
+        name: double quote cython strings
+        entry: double-quote-cython-strings
+        language: system
+        files: \.(pyx|pxd|pxi)$
       - id: shellcheck
-  - repo: https://github.com/DavidAnson/markdownlint-cli2
-    rev: v0.20.0
-    hooks:
-      - id: markdownlint-cli2
-  - repo: https://github.com/rstcheck/rstcheck
-    rev: v6.2.5
-    hooks:
-      - id: rstcheck
-        additional_dependencies:
-          - rstcheck[sphinx]
-        args:
-          - --config
-          - docs/.rstcheck.cfg
-  - repo: https://github.com/cheshirekow/cmake-format-precommit
-    rev: v0.6.13
-    hooks:
+        name: shellcheck
+        entry: shellcheck
+        language: system
+        types: [shell]
       - id: cmake-format
+        name: cmake-format
+        entry: cmake-format -i
+        language: system
+        files: (^|/)(CMakeLists\.txt|.*\.cmake)$
       - id: cmake-lint
+        name: cmake-lint
+        entry: cmake-lint
+        language: system
+        files: (^|/)(CMakeLists\.txt|.*\.cmake)$

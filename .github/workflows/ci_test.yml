@@ -75,7 +75,8 @@ jobs:
         uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39  # v8.2.0
       - name: Set up Python environment
         run: uv sync --group dev --no-install-project
-      - uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd  # v3.0.1
+      - name: Run pre-commit
+        run: uv run --no-sync pre-commit run --show-diff-on-failure --color=always --all-files
 
   clang-tidy:
     needs: [prepare]
