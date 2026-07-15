@@ -1180,6 +1180,20 @@ struct ObjectUnsafe {
     return const_cast<TVMFFIObject*>(&(src->header_));
   }
 
+  /*!
+   * \brief Recover the TVMFFIObjectAllocHeader for an object body pointer.
+   * \param ptr The object body pointer the allocator returned (the object base).
+   * \return The header the allocator placed immediately before that body.
+   *
+   * \note ``ptr`` must be the pointer ``allocate`` returned. A vptr (if a
+   *       subclass ever had one) lives at or after ``ptr``, never before it, so
+   *       this backward arithmetic (``ptr - sizeof(header)``) is unaffected.
+   */
+  TVM_FFI_INLINE static TVMFFIObjectAllocHeader* GetObjectAllocHeaderFromPtr(void* ptr) {
+    return reinterpret_cast<TVMFFIObjectAllocHeader*>(static_cast<char*>(ptr) -
+                                                      sizeof(TVMFFIObjectAllocHeader));
+  }
+
 // Suppress -Winvalid-offsetof: we intentionally use offsetof on non-standard-layout types
 // to avoid undefined behavior from null pointer arithmetic that sanitizers flag.
 #if defined(__clang__) || defined(__GNUC__)

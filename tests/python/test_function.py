@@ -192,39 +192,41 @@ def test_global_func() -> None:
 
 
 def test_rvalue_ref() -> None:
+    # Under universal cache-on the callback's arg aliases the caller's
+    # wrapper, so use_count inside is 1 (one wrapper, one chandle ref).
+    # ``_move()`` on either side detaches that wrapper's binding before
+    # the C++ AnyViewToOwnedAny transfer nulls the source chandle.
     use_count = tvm_ffi.get_global_func("testing.object_use_count")
 
     def callback(x: Any, expected_count: int) -> Any:
-        # The use count of TVM FFI objects is decremented as part of
-        # `ObjectRef.__del__`, which runs when the Python object is
-        # destructed.  However, Python object destruction is not
-        # deterministic, and even CPython's reference-counting is
-        # considered an implementation detail.  Therefore, to ensure
-        # correct results from this test, `gc.collect()` must be
-        # explicitly called.
+        # ``gc.collect()`` ensures Python destructors have run so
+        # use_count reflects only live wrappers.
         gc.collect()
         assert expected_count == use_count(x)
         return x._move()
 
     f = tvm_ffi.convert(callback)
 
-    def check0() -> None:
+    def check_caller_move() -> None:
+        # Caller passes ``x._move()``: callback receives a fresh canonical
+        # wrapper for the moved-in chandle.
         x = tvm_ffi.convert([1, 2])
         assert use_count(x) == 1
-        f(x, 2)
         f(x._move(), 1)
         assert x.__ctypes_handle__().value is None
 
-    def check1() -> None:
+    def check_callback_move() -> None:
+        # Callback returns ``x._move()``: caller sees a fresh canonical
+        # wrapper, distinct from the now-empty ``x``.
         x = tvm_ffi.convert([1, 2])
         assert use_count(x) == 1
-        y = f(x, 2)
-        f(x._move(), 2)
+        y = f(x, 1)
+        assert y is not x
         assert x.__ctypes_handle__().value is None
         assert y.__ctypes_handle__().value is not None
 
-    check0()
-    check1()
+    check_caller_move()
+    check_callback_move()
 
 
 def test_echo_with_opaque_object() -> None:

@@ -360,6 +360,18 @@ def _env_get_current_stream(int device_type, int device_id):
     return <uint64_t>current_stream
 
 
+# PyObject-tying state machine (binds one Python wrapper to one C++ chandle). The C++ impl lives in
+# tvm_ffi_python_object.h; see its top-of-file banner for the design.
+cdef extern from "tvm_ffi_python_object.h":
+    int TVMFFIPyRegisterDefaultAllocator() noexcept
+    void TVMFFIPyMarkPythonFinalizing() noexcept
+
+    void TVMFFIPyCompareAndRebindPyObject(void* chandle, PyObject* expect, PyObject* new_object) noexcept
+    void TVMFFIPyTpDealloc(void** ptr_to_chandle, PyObject* wrapper) noexcept
+    void TVMFFIPyInstallTypeSlots(PyObject* type_obj) noexcept
+    object TVMFFIPyMakeRetObject(void* chandle, PyObject* cls_type)
+
+
 cdef extern from "tvm_ffi_python_helpers.h":
     # no need to expose fields of the call context setter data structure
     ctypedef struct TVMFFIPyCallContext:

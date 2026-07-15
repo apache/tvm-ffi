@@ -61,7 +61,8 @@ dev = [
   "cmakelang==0.6.13",
   "ipdb",
   "ipython",
-  "cython>=3.0",
+  # cython>=3.2.8: see the [build-system] requires note (free-threaded __dealloc__ fix).
+  "cython>=3.2.8",
   "cython-lint==0.18.1",
   "cmake",
   "scikit-build-core",
@@ -105,7 +106,11 @@ tvm-ffi-config = "tvm_ffi.config:__main__"
 tvm-ffi-stubgen = "tvm_ffi.stub.cli:__main__"
 
 [build-system]
-requires = ["scikit-build-core>=0.10.0", "cython>=3.0", "setuptools-scm"]
+# cython>=3.2.8: the PyObject-tying dealloc handshake runs inside the wrapper's
+# __dealloc__, and Cython 3.2.8 (2026-06-30) fixed the free-threaded object
+# keep-alive scheme for code executed there (cython#7769). Earlier Cython can
+# collect the wrapper mid-__dealloc__ on the 3.14t build.
+requires = ["scikit-build-core>=0.10.0", "cython>=3.2.8", "setuptools-scm"]
 build-backend = "scikit_build_core.build"
 
 [tool.scikit-build]
@@ -242,14 +247,11 @@ docstring-code-line-length = 80
 [tool.cibuildwheel]
 build-verbosity = 1
 
-# only build up to cp312, cp312
-# will be abi3 and can be used in future versions
-# ship 314t threaded nogil version
-build = ["cp39-*", "cp310-*", "cp311-*", "cp312-*", "cp314t-*"]
+# Per-Python-version wheels (no abi3 / limited API).
+build = ["cp39-*", "cp310-*", "cp311-*", "cp312-*", "cp313-*", "cp314t-*"]
 skip = ["*musllinux*"]
 # we only need to test on cp312
 test-skip = ["cp39-*", "cp310-*", "cp311-*"]
-# focus on testing abi3 wheel
 build-frontend = "build[uv]"
 test-command = "pytest {package}/tests/python -vvs"
 test-groups = ["test"]
