@@ -162,7 +162,6 @@ inline bool DTypeIsFloat(DLDataType dtype) {
     default:
       return false;
   }
-  return false;
 }
 
 /*!
@@ -178,7 +177,6 @@ inline bool DTypeIsInt(DLDataType dtype) {
     default:
       return false;
   }
-  return false;
 }
 
 /*!

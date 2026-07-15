@@ -90,6 +90,22 @@ class dtype(str):
     _tvm_ffi_dtype: core.DataType
 
     _NUMPY_DTYPE_TO_STR: ClassVar[dict[Any, str]] = {}
+    _INTEGER_CODES: ClassVar[set[int]] = {DataTypeCode.INT, DataTypeCode.UINT}
+    _FLOAT_CODES: ClassVar[set[int]] = {
+        DataTypeCode.FLOAT,
+        DataTypeCode.BFLOAT,
+        DataTypeCode.Float8E3M4,
+        DataTypeCode.Float8E4M3,
+        DataTypeCode.Float8E4M3B11FNUZ,
+        DataTypeCode.Float8E4M3FN,
+        DataTypeCode.Float8E4M3FNUZ,
+        DataTypeCode.Float8E5M2,
+        DataTypeCode.Float8E5M2FNUZ,
+        DataTypeCode.Float8E8M0FNU,
+        DataTypeCode.Float6E2M3FN,
+        DataTypeCode.Float6E3M2FN,
+        DataTypeCode.Float4E2M1FN,
+    }
 
     def __new__(cls, content: Any) -> dtype:
         content = str(content)
@@ -297,26 +313,12 @@ class dtype(str):
     @property
     def is_integer(self) -> builtins.bool:
         """Whether this dtype stores signed or unsigned integer values."""
-        return self.type_code in {DataTypeCode.INT, DataTypeCode.UINT}
+        return self.type_code in self._INTEGER_CODES
 
     @property
     def is_float(self) -> builtins.bool:
         """Whether this dtype stores floating-point values."""
-        return self.type_code in {
-            DataTypeCode.FLOAT,
-            DataTypeCode.BFLOAT,
-            DataTypeCode.Float8E3M4,
-            DataTypeCode.Float8E4M3,
-            DataTypeCode.Float8E4M3B11FNUZ,
-            DataTypeCode.Float8E4M3FN,
-            DataTypeCode.Float8E4M3FNUZ,
-            DataTypeCode.Float8E5M2,
-            DataTypeCode.Float8E5M2FNUZ,
-            DataTypeCode.Float8E8M0FNU,
-            DataTypeCode.Float6E2M3FN,
-            DataTypeCode.Float6E3M2FN,
-            DataTypeCode.Float4E2M1FN,
-        }
+        return self.type_code in self._FLOAT_CODES
 
     @property
     def is_handle(self) -> builtins.bool:
