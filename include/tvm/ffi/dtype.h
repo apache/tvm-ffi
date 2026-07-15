@@ -169,14 +169,8 @@ inline bool DTypeIsFloat(DLDataType dtype) {
  * \param dtype The DLDataType to check.
  * \return True if dtype is a signed or unsigned integer type, false otherwise.
  */
-inline bool DTypeIsInt(DLDataType dtype) {
-  switch (static_cast<int>(dtype.code)) {
-    case kDLInt:
-    case kDLUInt:
-      return true;
-    default:
-      return false;
-  }
+TVM_FFI_INLINE bool DTypeIsInt(DLDataType dtype) {
+  return dtype.code == kDLInt || dtype.code == kDLUInt;
 }
 
 /*!
@@ -184,7 +178,7 @@ inline bool DTypeIsInt(DLDataType dtype) {
  * \param dtype The DLDataType to check.
  * \return True if dtype is a boolean type, false otherwise.
  */
-inline bool DTypeIsBool(DLDataType dtype) { return dtype.code == kDLBool; }
+TVM_FFI_INLINE bool DTypeIsBool(DLDataType dtype) { return dtype.code == kDLBool; }
 
 /*!
  * \brief Convert a DLDataType to a compact abbreviation for text formats.
