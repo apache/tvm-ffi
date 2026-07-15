@@ -14,7 +14,7 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-# ruff: noqa: D102, UP006, UP035, UP045
+# ruff: noqa: UP006, UP035, UP045
 """Tests for __copy__, __deepcopy__, and __replace__ on FFI objects."""
 
 from __future__ import annotations

@@ -26,7 +26,6 @@ This file exercises:
 7. re-initialization, isinstance checks, and instance isolation
 """
 
-# ruff: noqa: D102
 from __future__ import annotations
 
 import copy

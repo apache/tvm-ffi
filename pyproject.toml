@@ -53,17 +53,22 @@ test = [{ include-group = "torch" }, "pytest", "pytest-xdist"]
 dev = [
   { include-group = "test" },
   "pre-commit",
-  "ruff",
+  "pre-commit-hooks==6.0.0",
+  "ruff==0.14.9",
   "ty==0.0.15",
-  "clang-format",
+  "clang-format==21.1.7",
   "clang-tidy",
+  "cmakelang==0.6.13",
   "ipdb",
   "ipython",
   "cython>=3.0",
+  "cython-lint==0.18.1",
   "cmake",
   "scikit-build-core",
+  "shellcheck-py==0.11.0.1",
   "tomli",
   "setuptools-scm",
+  "yamllint==1.37.1",
 ]
 docs = [
   "autodocsumm",
@@ -217,6 +222,7 @@ unfixable = []
   "E741", # pycodestyle: ambiguous-variable-name
   "D100", # pydocstyle: undocumented-public-module
   "D101", # pydocstyle: undocumented-public-class
+  "D102", # pydocstyle: undocumented-public-method
   "D103", # pydocstyle: undocumented-public-function
   "D107", # pydocstyle: undocumented-public-init
   "D205", # pydocstyle: missing-blank-line-after-summary
@@ -294,6 +300,7 @@ allowed-unresolved-imports = [
 exclude-newer = "14 days"
 
 [tool.uv.dependency-groups]
+dev = { requires-python = ">=3.10" }
 docs = { requires-python = ">=3.13" }
 
 [tool.setuptools_scm]

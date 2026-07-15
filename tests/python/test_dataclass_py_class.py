@@ -16,7 +16,7 @@
 # under the License.
 """Tests for Python-defined TVM-FFI types: ``@py_class`` decorator and low-level Field API."""
 
-# ruff: noqa: D102, PLR0124, PLW1641, UP006, UP035, UP045
+# ruff: noqa: PLR0124, PLW1641, UP006, UP035, UP045
 from __future__ import annotations
 
 import copy
