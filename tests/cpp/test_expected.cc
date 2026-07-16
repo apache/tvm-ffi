@@ -401,4 +401,91 @@ TEST(ExpectedRvalueMove, PodTypesCompile) {
   EXPECT_EQ(std::move(Expected<DLDataType>(dtype)).value().bits, 64);
 }
 
+// Test the default successful state of Expected<void>.
+TEST(ExpectedVoid, BasicOk) {
+  Expected<void> result;
+
+  EXPECT_TRUE(result.is_ok());
+  EXPECT_FALSE(result.is_err());
+  EXPECT_TRUE(result.has_value());
+  EXPECT_EQ(result.type_index(), TypeIndex::kTVMFFINone);
+  EXPECT_NO_THROW(result.value());
+  EXPECT_NO_THROW(std::move(result).value());
+}
+
+// Test construction of Expected<void> from Error and Unexpected.
+TEST(ExpectedVoid, ErrorConstruction) {
+  Expected<void> direct_error = Error("ValueError", "void operation failed", "");
+  EXPECT_FALSE(direct_error.is_ok());
+  EXPECT_TRUE(direct_error.is_err());
+  EXPECT_FALSE(direct_error.has_value());
+  EXPECT_EQ(direct_error.type_index(), TypeIndex::kTVMFFIError);
+  EXPECT_EQ(direct_error.error().kind(), "ValueError");
+  EXPECT_EQ(direct_error.error().message(), "void operation failed");
+
+  Expected<void> unexpected = Unexpected(Error("TypeError", "unexpected void failure", ""));
+  EXPECT_TRUE(unexpected.is_err());
+  EXPECT_EQ(unexpected.error().kind(), "TypeError");
+  EXPECT_EQ(unexpected.error().message(), "unexpected void failure");
+}
+
+// Test that both value() overloads throw the original contained Error.
+TEST(ExpectedVoid, BadValueAccessThrowsOriginalError) {
+  Expected<void> lvalue_result = Error("LValueError", "lvalue void failure", "");
+  try {
+    lvalue_result.value();
+    FAIL() << "Expected Error to be thrown";
+  } catch (const Error& err) {
+    EXPECT_EQ(err.kind(), "LValueError");
+    EXPECT_EQ(err.message(), "lvalue void failure");
+  }
+
+  Expected<void> rvalue_result = Error("RValueError", "rvalue void failure", "");
+  try {
+    std::move(rvalue_result).value();
+    FAIL() << "Expected Error to be thrown";
+  } catch (const Error& err) {
+    EXPECT_EQ(err.kind(), "RValueError");
+    EXPECT_EQ(err.message(), "rvalue void failure");
+  }
+}
+
+// Test successful Expected<void> conversion through AnyView and Any.
+TEST(ExpectedVoid, TypeTraitsSuccessRoundtrip) {
+  Expected<void> original;
+
+  AnyView view = original;
+  EXPECT_EQ(view.type_index(), TypeIndex::kTVMFFINone);
+  Expected<void> copied = view.cast<Expected<void>>();
+  EXPECT_TRUE(copied.is_ok());
+  EXPECT_NO_THROW(copied.value());
+
+  Any owned = original;
+  EXPECT_EQ(owned.type_index(), TypeIndex::kTVMFFINone);
+  Expected<void> moved = std::move(owned).cast<Expected<void>>();
+  EXPECT_TRUE(moved.is_ok());
+  EXPECT_NO_THROW(std::move(moved).value());
+}
+
+// Test failed Expected<void> conversion and rejection of incompatible values.
+TEST(ExpectedVoid, TypeTraitsErrorRoundtrip) {
+  Expected<void> original = Error("TypeError", "void conversion failed", "");
+
+  AnyView view = original;
+  Expected<void> copied = view.cast<Expected<void>>();
+  ASSERT_TRUE(copied.is_err());
+  EXPECT_EQ(copied.error().kind(), "TypeError");
+  EXPECT_EQ(copied.error().message(), "void conversion failed");
+
+  Any owned = std::move(original);
+  EXPECT_EQ(owned.type_index(), TypeIndex::kTVMFFIError);
+  Expected<void> moved = std::move(owned).cast<Expected<void>>();
+  ASSERT_TRUE(moved.is_err());
+  EXPECT_EQ(moved.error().kind(), "TypeError");
+  EXPECT_EQ(moved.error().message(), "void conversion failed");
+
+  Any incompatible = int64_t{1};
+  EXPECT_FALSE(incompatible.try_cast<Expected<void>>().has_value());
+}
+
 }  // namespace

@@ -672,7 +672,18 @@ class Function : public ObjectRef {
 
     if (ret_code == 0) {
       if constexpr (std::is_same_v<T, Any>) {
-        return std::move(result);
+        return result;
+      } else if constexpr (std::is_same_v<T, void>) {
+        if (result.type_index() == TypeIndex::kTVMFFINone) {
+          return Expected<void>();
+        }
+        if (auto err = result.template try_cast<Error>()) {
+          return Unexpected(std::move(*err));
+        }
+        return Unexpected(Error(
+            "TypeError",
+            "CallExpected: result type mismatch, expected void, but got " + result.GetTypeKey(),
+            ""));
       } else {
         // Try T first (fast path), then Error
         if (auto val = result.template try_cast<T>()) {
