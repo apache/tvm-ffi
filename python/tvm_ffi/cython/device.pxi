@@ -115,20 +115,17 @@ cdef class Device:
     }
 
     _DEVICE_NAME_TO_TYPE = {
-        "llvm": DLDeviceType.kDLCPU,
         "cpu": DLDeviceType.kDLCPU,
-        "c": DLDeviceType.kDLCPU,
-        "test": DLDeviceType.kDLCPU,
         "cuda": DLDeviceType.kDLCUDA,
-        "nvptx": DLDeviceType.kDLCUDA,
-        "cl": DLDeviceType.kDLOpenCL,
         "opencl": DLDeviceType.kDLOpenCL,
         "vulkan": DLDeviceType.kDLVulkan,
         "metal": DLDeviceType.kDLMetal,
+        "mps": DLDeviceType.kDLMetal,
         "vpi": DLDeviceType.kDLVPI,
         "rocm": DLDeviceType.kDLROCM,
         "ext_dev": DLDeviceType.kDLExtDev,
         "hexagon": DLDeviceType.kDLHexagon,
+        "wgpu": DLDeviceType.kDLWebGPU,
         "webgpu": DLDeviceType.kDLWebGPU,
         "maia": DLDeviceType.kDLMAIA,
         "trn": DLDeviceType.kDLTrn,

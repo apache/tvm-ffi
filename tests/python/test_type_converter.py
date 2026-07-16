@@ -855,10 +855,11 @@ class TestConvertSpecialTypes:
         result = _to_py_class_value(A(tvm_ffi.Device).convert("cuda:1"))
         assert result == tvm_ffi.device("cuda", 1)
 
-    def test_device_bad_str_rejected(self) -> None:
+    @pytest.mark.parametrize("value", ["not_a_device", "llvm", "c", "test", "nvptx", "cl"])
+    def test_device_bad_str_rejected(self, value: str) -> None:
         """Invalid device strings remain type-conversion errors."""
         with pytest.raises(TypeError, match="device"):
-            A(tvm_ffi.Device).convert("not_a_device")
+            A(tvm_ffi.Device).convert(value)
 
     def test_device_base_class_passthrough_after_public_class_override(self) -> None:
         """The base Device cdef class remains accepted if _CLASS_DEVICE is overridden."""
