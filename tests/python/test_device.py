@@ -87,6 +87,23 @@ def test_device_with_dev_id(
     assert dev.index == expect_device_id
 
 
+@pytest.mark.parametrize(
+    "alias, canonical_name",
+    [
+        ("llvm", "cpu"),
+        ("c", "cpu"),
+        ("test", "cpu"),
+        ("nvptx", "cuda"),
+        ("cl", "opencl"),
+    ],
+)
+def test_device_rejects_noncanonical_aliases(alias: str, canonical_name: str) -> None:
+    with pytest.raises(ValueError, match=rf"^Unknown device: {alias}$"):
+        tvm_ffi.device(alias)
+
+    assert tvm_ffi.device(canonical_name).type == canonical_name
+
+
 @pytest.mark.parametrize("dev_type, dev_id", [("cpu:0:0", None), ("cpu:?", None), ("cpu:", None)])
 def test_deive_type_error(dev_type: str, dev_id: int | None) -> None:
     with pytest.raises(ValueError):

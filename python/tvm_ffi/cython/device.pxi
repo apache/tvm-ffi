@@ -115,13 +115,8 @@ cdef class Device:
     }
 
     _DEVICE_NAME_TO_TYPE = {
-        "llvm": DLDeviceType.kDLCPU,
         "cpu": DLDeviceType.kDLCPU,
-        "c": DLDeviceType.kDLCPU,
-        "test": DLDeviceType.kDLCPU,
         "cuda": DLDeviceType.kDLCUDA,
-        "nvptx": DLDeviceType.kDLCUDA,
-        "cl": DLDeviceType.kDLOpenCL,
         "opencl": DLDeviceType.kDLOpenCL,
         "vulkan": DLDeviceType.kDLVulkan,
         "metal": DLDeviceType.kDLMetal,
