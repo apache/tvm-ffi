@@ -252,8 +252,9 @@ build-verbosity = 1
 # Per-Python-version wheels (no abi3 / limited API).
 build = ["cp39-*", "cp310-*", "cp311-*", "cp312-*", "cp313-*", "cp314t-*"]
 skip = ["*musllinux*"]
-# we only need to test on cp312
-test-skip = ["cp39-*", "cp310-*", "cp311-*"]
+# cp39-cp311 are covered by the cp312 test run. cp313 aarch64 is skipped because torch
+# ships no cp313 aarch64 wheel for the manylinux2014 image, so its test-phase install fails.
+test-skip = ["cp39-*", "cp310-*", "cp311-*", "cp313-*aarch64"]
 build-frontend = "build[uv]"
 test-command = "pytest {package}/tests/python -vvs"
 test-groups = ["test"]
