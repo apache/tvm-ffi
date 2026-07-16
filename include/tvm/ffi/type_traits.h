@@ -18,7 +18,7 @@
  */
 /*!
  * \file tvm/ffi/type_traits.h
- * \brief Type trait helpers for FFI values.
+ * \brief Type trait helpers for FFI values and lookup-only ABI objects.
  */
 #ifndef TVM_FFI_TYPE_TRAITS_H_
 #define TVM_FFI_TYPE_TRAITS_H_
@@ -573,5 +573,35 @@ struct FallbackOnlyTraitsBase : public TypeTraitsBase {
 
 }  // namespace ffi
 }  // namespace tvm
+
+/*!
+ * \brief Declare lookup-only metadata for an ABI object.
+ *
+ * Unlike TVM_FFI_DECLARE_OBJECT_INFO, this macro only looks up an existing
+ * registered type key and never allocates or registers a type index. Invoke it
+ * in the public section of an object class with a string literal key.
+ *
+ * \note Include `tvm/ffi/function.h` or `tvm/ffi/tvm_ffi.h` before expanding
+ * this macro so safe-call errors can be propagated as C++ exceptions.
+ *
+ * \param RegisteredKey The registered type key of the ABI object.
+ * \param TypeDepth The reflected depth of the type in the object hierarchy.
+ */
+#define TVM_FFI_DECLARE_OBJECT_INFO_LOOKUP(RegisteredKey, TypeDepth)           \
+  static constexpr const char* _type_key = RegisteredKey;                      \
+  static constexpr int32_t _type_depth = TypeDepth;                            \
+  static constexpr bool _type_mutable = true;                                  \
+  static constexpr bool _type_final = false;                                   \
+  static constexpr uint32_t _type_child_slots = 0;                             \
+  static constexpr bool _type_child_slots_can_overflow = true;                 \
+  static int32_t RuntimeTypeIndex() {                                          \
+    static const int32_t type_index = []() {                                   \
+      constexpr TVMFFIByteArray key{RegisteredKey, sizeof(RegisteredKey) - 1}; \
+      int32_t result = -1;                                                     \
+      TVM_FFI_CHECK_SAFE_CALL(TVMFFITypeKeyToIndex(&key, &result));            \
+      return result;                                                           \
+    }();                                                                       \
+    return type_index;                                                         \
+  }
 
 #endif  // TVM_FFI_TYPE_TRAITS_H_

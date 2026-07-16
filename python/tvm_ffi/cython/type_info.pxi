@@ -16,6 +16,7 @@
 # under the License.
 import dataclasses
 import json
+import sys
 import typing
 import collections.abc
 from functools import cached_property
@@ -204,6 +205,29 @@ class TypeSchema:
                 tindex = _object_type_key_to_index(origin)
                 if tindex is not None:
                     self.origin_type_index = tindex
+
+    def is_subtype_of(self, target_cls: type) -> bool:
+        """Return whether this schema's origin is a subtype of ``target_cls``.
+
+        The check uses FFI object type metadata.  It returns ``False`` when
+        ``target_cls`` is not an FFI object class or when this schema has a
+        structural/POD origin instead of an object type index.
+        """
+        target_info = getattr(target_cls, "__tvm_ffi_type_info__", None)
+        target_type_index = None
+        if target_info is None:
+            try:
+                target_type_index = TypeSchema.from_annotation(target_cls).origin_type_index
+            except TypeError:
+                return False
+            if target_type_index == kTVMFFIObject:
+                return self.origin_type_index >= kTVMFFIStaticObjectBegin
+            return False
+        target_type_index = target_info.type_index
+        if self.origin_type_index == target_type_index:
+            return True
+        source_info = _type_index_to_type_info(self.origin_type_index)
+        return source_info is not None and target_type_index in source_info.type_ancestors
 
     @cached_property
     def _converter(self):
@@ -659,7 +683,9 @@ class TypeField:
     name: str
     doc: Optional[str]
     size: int
+    alignment: int
     offset: int
+    field_static_type_index: int
     frozen: bool
     metadata: dict[str, Any]
     getter: FieldGetter
@@ -841,6 +867,12 @@ class TypeInfo:
             end = max(end, f.offset + f.size)
         return (end + 7) & ~7  # align to 8 bytes
 
+    @property
+    def _has_type_metadata(self) -> bool:
+        """Whether the registry publishes native size metadata for this type."""
+        cdef const TVMFFITypeInfo* c_info = TVMFFIGetTypeInfo(self.type_index)
+        return c_info != NULL and c_info.metadata != NULL
+
     def _register_fields(self, fields, structure_kind=None):
         """Register Field descriptors and set up __ffi_new__/__ffi_init__.
 
@@ -927,6 +959,28 @@ _ORIGIN_NATIVE_LAYOUT = {
     "Optional": (16, 8, -1),
     "Union": (16, 8, -1),
 }
+
+
+cdef int64_t _get_subclass_offset(object type_info):
+    """Compute where C++ places a byte-aligned field in a direct subclass."""
+    cdef int64_t end
+    if type_info is None:
+        return sizeof(TVMFFIObject)
+    if sys.platform == "win32":
+        # The Microsoft C++ ABI does not reuse a base class's tail padding.
+        return type_info.total_size
+
+    # Itanium-family ABIs start derived fields at the unpadded end of the base.
+    # TypeInfo.fields contains only this type's own fields, so recurse through
+    # empty intermediate classes as well as ordinary inheritance.
+    if type_info.parent_type_info is None:
+        end = sizeof(TVMFFIObject)
+    else:
+        end = _get_subclass_offset(type_info.parent_type_info)
+    if type_info.fields is not None:
+        for field in type_info.fields:
+            end = max(end, field.offset + field.size)
+    return end
 
 cdef _register_one_field(
     int32_t type_index,
@@ -1099,9 +1153,9 @@ def _register_fields(type_info, fields, structure_kind=None):
         The registered field descriptors.
     """
     cdef int32_t type_index = type_info.type_index
-    # Start field offsets AFTER all parent fields (not at fixed offset 24).
-    # This is critical for inheritance: child fields must not overlap parent memory.
-    cdef int64_t current_offset = type_info.parent_type_info.total_size
+    # C++ ABIs differ on whether a derived class can reuse parent tail padding.
+    # Derive the matching boundary from existing field offset/size metadata.
+    cdef int64_t current_offset = _get_subclass_offset(type_info.parent_type_info)
     cdef int64_t size, alignment
     cdef int32_t field_type_index
     cdef TVMFFIFieldGetter getter
@@ -1148,7 +1202,9 @@ def _register_fields(type_info, fields, structure_kind=None):
                 name=py_field.name,
                 doc=py_field.doc,
                 size=size,
+                alignment=alignment,
                 offset=field_offset,
+                field_static_type_index=field_type_index,
                 frozen=py_field.frozen,
                 metadata={"type_schema": py_field._ty_schema.to_json()},
                 getter=fgetter,

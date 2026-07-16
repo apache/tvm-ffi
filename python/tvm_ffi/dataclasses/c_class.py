@@ -35,7 +35,7 @@ from .field import Field, _field_converter, field
 _T = TypeVar("_T", bound=type)
 
 
-def _attach_field_objects(cls: type, type_info: Any) -> None:
+def _attach_field_objects(cls: type, type_info: Any, *, frozen: bool = False) -> None:
     """Populate ``TypeField.dataclass_field`` for every own reflected field.
 
     ``@c_class`` fields originate from C++ reflection, so there is no
@@ -48,6 +48,8 @@ def _attach_field_objects(cls: type, type_info: Any) -> None:
     except Exception:
         hints = {}
     for tf in type_info.fields:
+        if frozen:
+            tf.frozen = True
         f = Field(
             name=tf.name,
             _ty_schema=tf.ty,
@@ -66,6 +68,21 @@ def _attach_field_objects(cls: type, type_info: Any) -> None:
         tf.dataclass_field = f
 
 
+def _reinstall_field_properties(cls: type, type_info: Any, shadowed_names: set[str]) -> None:
+    """Reinstall reflected field descriptors after metadata changes.
+
+    ``register_object()`` installs field descriptors before ``@c_class`` can
+    apply decorator-level options.  When ``frozen=True`` updates
+    ``TypeField.frozen``, descriptors for non-shadowed fields must be recreated
+    so their public setters are removed.  User class attributes that shadow a
+    field remain untouched.
+    """
+    for tf in type_info.fields:
+        if tf.name in shadowed_names:
+            continue
+        setattr(cls, tf.name, tf.as_property(cls))
+
+
 @dataclass_transform(
     eq_default=False,
     order_default=False,
@@ -75,6 +92,7 @@ def _attach_field_objects(cls: type, type_info: Any) -> None:
 def c_class(
     type_key: str,
     *,
+    frozen: bool = False,
     init: bool = True,
     repr: bool = True,
     eq: bool = False,
@@ -108,6 +126,12 @@ def c_class(
         If True, install ``__eq__`` and ``__ne__`` using the C++ recursive
         structural comparison (``RecursiveEq``).  Returns ``NotImplemented``
         for unrelated types.  Defaults to False.
+    frozen
+        If True, fields owned by the decorated C++ type are read-only through
+        normal Python assignment.  Inherited fields keep the setting from their
+        declaring type.  Use ``type(obj).field_name.set(obj, value)`` as an
+        escape hatch when internal construction or translation code needs to
+        update a field.
     order
         If True, install ``__lt__``, ``__le__``, ``__gt__``, ``__ge__``
         using the C++ recursive comparators.  Returns ``NotImplemented``

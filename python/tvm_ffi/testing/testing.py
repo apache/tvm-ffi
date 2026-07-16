@@ -92,6 +92,23 @@ class TestIntPair(Object):
     # tvm-ffi-stubgen(end)
 
 
+@c_class("testing.TestFrozenCxx", frozen=True)
+class TestFrozenCxx(Object):
+    """C++ object with writable reflection fields frozen by ``@c_class``."""
+
+    __test__: ClassVar[bool] = False
+
+    # tvm-ffi-stubgen(begin): object/testing.TestFrozenCxx
+    # fmt: off
+    value: int
+    tag: str
+    if TYPE_CHECKING:
+        def __init__(self, value: int, tag: str) -> None: ...
+        def __ffi_init__(self, value: int, tag: str) -> None: ...  # ty: ignore[invalid-method-override]
+    # fmt: on
+    # tvm-ffi-stubgen(end)
+
+
 @c_class("testing.TestObjectDerived")
 class TestObjectDerived(TestObjectBase):
     """Test object derived class."""
