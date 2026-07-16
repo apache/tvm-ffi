@@ -74,7 +74,29 @@ cdef int TVMFFIPyCallbackArgSetterObject_(
     const TVMFFIAny* arg,
     PyObject** out
 ) except -1:
-    """Callback arg setter for generic static object types (type_index >= kTVMFFIStaticObjectBegin)."""
+    """Convert a generic FFI object argument for a Python callback.
+
+    The input contains a borrowed chandle, so this function increments the
+    chandle's reference count before calling ``make_ret_object(arg[0])``.
+    ``make_ret_object`` consumes that reference and returns the Python value
+    passed to the callback.
+
+    For ``CObject``-based types that support wrapper tying,
+    ``make_ret_object`` returns the existing canonical wrapper, revives its
+    previous allocation when eligible, or creates and binds a new wrapper.
+    If a live canonical wrapper already exists, the callback receives that
+    exact Python object. Chandles without Python allocator metadata are
+    wrapped normally but cannot reuse a canonical wrapper.
+
+    ``PyNativeObject`` subclasses such as ``String``, ``Bytes``, and
+    ``Shape`` are instead converted to their Python-native representations
+    and do not participate in wrapper tying. ``Tensor`` and
+    ``OpaquePyObject`` are handled by dedicated callback argument setters
+    and therefore do not use this function.
+
+    When ``api`` is provided for a ``CContainerBase``, this function attaches
+    the exchange API to support lazy DLPack conversion.
+    """
     cdef TVMFFIObjectHandle chandle = arg.v_ptr
     TVMFFIObjectIncRef(chandle)
     try:

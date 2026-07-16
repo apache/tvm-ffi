@@ -3689,7 +3689,11 @@ class TestNativeParentInheritance:
         stored = holder.value
         assert stored is not None
         assert stored.same_as(target)
-        assert use_count(target) == 3
+        # Under PyObject-tying the field accessor returns the canonical wrapper,
+        # so ``stored`` aliases ``target`` (no fresh wrapper, no extra C++ ref) and
+        # the use count stays 2 rather than climbing to 3.
+        assert stored is target
+        assert use_count(target) == 2
         del stored
         gc.collect()
         assert use_count(target) == 2

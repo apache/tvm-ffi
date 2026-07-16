@@ -22,6 +22,16 @@
 # where the base class has to be registered before the derived class.
 # Otherwise, `TypeInfo.parent_type_info` may not be properly propagated to the derived class.
 include "./base.pxi"
+
+# Install the PyObject-tying default allocator before any FFI type is registered
+# below, so every object created through the registry carries the prepended
+# PyCustomAllocHeader. The atexit hook flips the shutdown guard so cached
+# allocations on still-live chandles are leaked (not touched via a teardown
+# interpreter) once Python starts finalizing.
+CHECK_CALL(TVMFFIPyRegisterDefaultAllocator())
+import atexit as _tvm_ffi_atexit
+_tvm_ffi_atexit.register(TVMFFIPyMarkPythonFinalizing)
+
 include "./type_info.pxi"
 include "./object.pxi"
 _register_object_by_index(kTVMFFIObject, Object)

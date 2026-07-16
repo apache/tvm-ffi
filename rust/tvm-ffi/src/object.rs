@@ -22,7 +22,7 @@ use std::sync::atomic::AtomicU64;
 use crate::derive::ObjectRef;
 pub use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
 /// Object related ABI handling
-use tvm_ffi_sys::{TVMFFIObject, COMBINED_REF_COUNT_BOTH_ONE};
+use tvm_ffi_sys::{TVMFFIGetCustomAllocator, TVMFFIObject, COMBINED_REF_COUNT_BOTH_ONE};
 
 /// Object type is by default the TVMFFIObject
 #[repr(C)]
@@ -120,7 +120,7 @@ pub(crate) mod unsafe_ {
 
     use std::ffi::c_void;
     use std::sync::atomic::{fence, Ordering};
-    use tvm_ffi_sys::TVMFFIObject;
+    use tvm_ffi_sys::{TVMFFIObject, TVMFFIObjectAllocHeader};
     use tvm_ffi_sys::TVMFFIObjectDeleterFlagBitMask::{
         kTVMFFIObjectDeleterFlagBitMaskBoth, kTVMFFIObjectDeleterFlagBitMaskStrong,
         kTVMFFIObjectDeleterFlagBitMaskWeak,
@@ -197,63 +197,24 @@ pub(crate) mod unsafe_ {
         (obj.combined_ref_count.load(Ordering::Relaxed) >> 32) as usize
     }
 
-    /// Generic object deleter that works for object allocated from Box then into_raw
+    /// Generic object deleter for objects allocated through the registered
+    /// `TVMFFICustomAllocator`.
     pub unsafe extern "C" fn object_deleter_for_new<T>(ptr: *mut c_void, flags: i32)
     where
         T: super::ObjectCore,
     {
         let obj = ptr as *mut T;
         if flags & kTVMFFIObjectDeleterFlagBitMaskStrong as i32 != 0 {
-            // calling destructor of the object, does not free the memory
             std::ptr::drop_in_place(obj);
         }
         if flags & kTVMFFIObjectDeleterFlagBitMaskWeak as i32 != 0 {
-            // free the memory
-            std::alloc::dealloc(ptr as *mut u8, std::alloc::Layout::new::<T>());
-        }
-    }
-
-    pub unsafe extern "C" fn object_deleter_for_new_with_extra_items<T, U>(
-        ptr: *mut c_void,
-        flags: i32,
-    ) where
-        T: super::ObjectCoreWithExtraItems<ExtraItem = U>,
-    {
-        let obj = ptr as *mut T;
-        if flags == kTVMFFIObjectDeleterFlagBitMaskBoth as i32 {
-            // must get extra items count before dropping the object
-            let extra_items_count = T::extra_items_count(&(*obj));
-            std::ptr::drop_in_place(obj);
-            let layout = std::alloc::Layout::from_size_align(
-                std::mem::size_of::<T>() + extra_items_count * std::mem::size_of::<U>(),
-                std::mem::align_of::<T>(),
-            )
-            .unwrap();
-            // free the memory
-            std::alloc::dealloc(ptr as *mut u8, layout);
-        } else {
-            assert_eq!(std::mem::size_of::<T>() % std::mem::size_of::<u64>(), 0);
-            if flags & kTVMFFIObjectDeleterFlagBitMaskStrong as i32 != 0 {
-                // must get extra items count before dropping the object
-                let extra_items_count = T::extra_items_count(&(*obj));
-                // calling destructor of the object, does not free the memory
-                std::ptr::drop_in_place(obj);
-                // record extra count in the original memory
-                std::ptr::write(obj as *mut u64, extra_items_count as u64);
-            }
-            if flags & kTVMFFIObjectDeleterFlagBitMaskWeak as i32 != 0 {
-                // read extra items count from the original memory
-                // note we can no longer read it by calling T::extra_items_count(&(*obj))
-                // because the object is already dropped
-                let extra_items_count = std::ptr::read(obj as *mut u64) as usize;
-                let layout = std::alloc::Layout::from_size_align(
-                    std::mem::size_of::<T>() + extra_items_count * std::mem::size_of::<U>(),
-                    std::mem::align_of::<T>(),
-                )
-                .unwrap();
-                // free the memory
-                std::alloc::dealloc(ptr as *mut u8, layout);
-            }
+            let header_ptr = (ptr as *mut u8)
+                .sub(std::mem::size_of::<TVMFFIObjectAllocHeader>())
+                as *mut TVMFFIObjectAllocHeader;
+            let delete_space = (*header_ptr)
+                .delete_space
+                .expect("TVMFFIObjectAllocHeader::delete_space must be set by the allocator");
+            delete_space(ptr);
         }
     }
 }
@@ -285,14 +246,24 @@ unsafe impl ObjectCore for Object {
 //---------------------
 // ObjectArc
 //---------------------
+
+/// Allocate via the process-wide `TVMFFICustomAllocator`.
+unsafe fn allocate_via_registry(size: usize, alignment: usize, type_index: i32) -> *mut u8 {
+    let alloc = TVMFFIGetCustomAllocator();
+    let allocate_fn = (*alloc)
+        .allocate
+        .expect("TVMFFICustomAllocator::allocate must be set");
+    allocate_fn(size, alignment, type_index, (*alloc).context) as *mut u8
+}
+
 impl<T: ObjectCore> ObjectArc<T> {
     pub fn new(data: T) -> Self {
         unsafe {
-            let layout = std::alloc::Layout::new::<T>();
-            let raw_data_ptr = std::alloc::alloc(layout);
-            if raw_data_ptr.is_null() {
-                std::alloc::handle_alloc_error(layout);
-            }
+            let raw_data_ptr = allocate_via_registry(
+                std::mem::size_of::<T>(),
+                std::mem::align_of::<T>(),
+                T::type_index(),
+            );
             let ptr = raw_data_ptr as *mut T;
             std::ptr::write(ptr, data);
             // now override the header directly
@@ -322,15 +293,9 @@ impl<T: ObjectCore> ObjectArc<T> {
             assert_eq!(std::mem::align_of::<T>() % std::mem::align_of::<U>(), 0);
             assert_eq!(std::mem::size_of::<T>() % std::mem::align_of::<U>(), 0);
             let extra_items_count = T::extra_items_count(&data);
-            let layout = std::alloc::Layout::from_size_align(
-                std::mem::size_of::<T>() + extra_items_count * std::mem::size_of::<U>(),
-                std::mem::align_of::<T>(),
-            )
-            .unwrap();
-            let raw_data_ptr = std::alloc::alloc(layout);
-            if raw_data_ptr.is_null() {
-                std::alloc::handle_alloc_error(layout);
-            }
+            let total_size = std::mem::size_of::<T>() + extra_items_count * std::mem::size_of::<U>();
+            let raw_data_ptr =
+                allocate_via_registry(total_size, std::mem::align_of::<T>(), T::type_index());
             let ptr = raw_data_ptr as *mut T;
             std::ptr::write(ptr, data);
             // now override the header directly
@@ -340,7 +305,7 @@ impl<T: ObjectCore> ObjectArc<T> {
                     combined_ref_count: AtomicU64::new(COMBINED_REF_COUNT_BOTH_ONE),
                     type_index: T::type_index(),
                     __padding: 0,
-                    deleter: Some(unsafe_::object_deleter_for_new_with_extra_items::<T, U>),
+                    deleter: Some(unsafe_::object_deleter_for_new::<T>),
                 },
             );
             // move into the object arc ptr
