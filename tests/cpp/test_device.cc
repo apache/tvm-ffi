@@ -39,10 +39,9 @@ TEST(Device, AnyConversionWithString) {
     DLDeviceType device_type;
   };
   const TestCase test_cases[] = {
-      {"cpu", kDLCPU},        {"cuda", kDLCUDA},       {"opencl", kDLOpenCL}, {"vulkan", kDLVulkan},
-      {"metal", kDLMetal},    {"mps", kDLMetal},       {"vpi", kDLVPI},       {"rocm", kDLROCM},
-      {"ext_dev", kDLExtDev}, {"hexagon", kDLHexagon}, {"wgpu", kDLWebGPU},   {"webgpu", kDLWebGPU},
-      {"maia", kDLMAIA},      {"trn", kDLTrn},
+      {"cpu", kDLCPU},         {"cuda", kDLCUDA},     {"opencl", kDLOpenCL}, {"vulkan", kDLVulkan},
+      {"metal", kDLMetal},     {"vpi", kDLVPI},       {"rocm", kDLROCM},     {"ext_dev", kDLExtDev},
+      {"hexagon", kDLHexagon}, {"webgpu", kDLWebGPU}, {"maia", kDLMAIA},     {"trn", kDLTrn},
   };
   for (const TestCase& test_case : test_cases) {
     SCOPED_TRACE(test_case.name);
@@ -74,6 +73,8 @@ TEST(Device, RejectInvalidStrings) {
   EXPECT_FALSE(AnyView("test").try_cast<DLDevice>().has_value());
   EXPECT_FALSE(AnyView("nvptx").try_cast<DLDevice>().has_value());
   EXPECT_FALSE(AnyView("cl").try_cast<DLDevice>().has_value());
+  EXPECT_FALSE(AnyView("mps").try_cast<DLDevice>().has_value());
+  EXPECT_FALSE(AnyView("wgpu").try_cast<DLDevice>().has_value());
   EXPECT_FALSE(AnyView("cuda:").try_cast<DLDevice>().has_value());
   EXPECT_FALSE(AnyView("cuda:-1").try_cast<DLDevice>().has_value());
   EXPECT_FALSE(AnyView("cuda:1:2").try_cast<DLDevice>().has_value());

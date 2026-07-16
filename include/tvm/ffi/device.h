@@ -43,12 +43,12 @@ TVM_FFI_INLINE static std::optional<DLDeviceType> TryParseDLDeviceType(std::stri
   if (name == "cuda") return kDLCUDA;
   if (name == "opencl") return kDLOpenCL;
   if (name == "vulkan") return kDLVulkan;
-  if (name == "metal" || name == "mps") return kDLMetal;
+  if (name == "metal") return kDLMetal;
   if (name == "vpi") return kDLVPI;
   if (name == "rocm") return kDLROCM;
   if (name == "ext_dev") return kDLExtDev;
   if (name == "hexagon") return kDLHexagon;
-  if (name == "wgpu" || name == "webgpu") return kDLWebGPU;
+  if (name == "webgpu") return kDLWebGPU;
   if (name == "maia") return kDLMAIA;
   if (name == "trn") return kDLTrn;
   return std::nullopt;
