@@ -62,6 +62,12 @@ struct TestObjRefADerived : public ObjectRef {
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(TestObjRefADerived, ObjectRef, TestObjADerived);
 };
 
+struct PrefixLookupObj : public Object {
+  int64_t stage;
+
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("test.PrefixLookup", PrefixLookupObj, Object);
+};
+
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
 
@@ -91,6 +97,9 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   refl::ObjectDef<TestObjADerived>()
       .def(refl::init<int64_t, int64_t, int64_t>())
       .def_ro("z", &TestObjADerived::z);
+  refl::ObjectDef<PrefixLookupObj>()
+      .def_ro("stage", &PrefixLookupObj::stage)
+      .def_static("run", []() -> int64_t { return 1; });
   refl::TypeAttrDef<TestObjADerived>()
       .def("test.attr.type_attr_def.literal", "derived-literal")
       .def("test.attr.type_attr_def.string", String("derived-string"))
@@ -112,6 +121,13 @@ TEST(Reflection, FieldGetter) {
   ObjectRef b = TFloat(10.0);
   reflection::FieldGetter getter_float("test.Float", "value");
   EXPECT_EQ(getter_float(b).cast<double>(), 10.0);
+}
+
+TEST(Reflection, FieldLookupRequiresExactName) {
+  const TVMFFIFieldInfo* info = reflection::GetFieldInfo(PrefixLookupObj::_type_key, "stage");
+  EXPECT_EQ(std::string_view(info->name.data, info->name.size), "stage");
+
+  EXPECT_THROW(reflection::GetFieldInfo(PrefixLookupObj::_type_key, "stage_bytes"), Error);
 }
 
 TEST(Reflection, FieldSetter) {
@@ -231,6 +247,13 @@ TEST(Reflection, MethodInfo) {
   const TVMFFIMethodInfo* info_float_sub = reflection::GetMethodInfo("test.Float", "sub");
   EXPECT_FALSE(info_float_sub->flags & kTVMFFIFieldFlagBitMaskIsStaticMethod);
   EXPECT_EQ(Bytes(info_float_sub->doc).operator std::string(), "");
+}
+
+TEST(Reflection, MethodLookupRequiresExactName) {
+  const TVMFFIMethodInfo* info = reflection::GetMethodInfo(PrefixLookupObj::_type_key, "run");
+  EXPECT_EQ(std::string_view(info->name.data, info->name.size), "run");
+
+  EXPECT_THROW(reflection::GetMethodInfo(PrefixLookupObj::_type_key, "runner"), Error);
 }
 
 TEST(Reflection, CallMethod) {
