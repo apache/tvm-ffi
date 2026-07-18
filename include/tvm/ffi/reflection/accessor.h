@@ -43,7 +43,8 @@ inline const TVMFFIFieldInfo* GetFieldInfo(std::string_view type_key, const char
   TVM_FFI_CHECK_SAFE_CALL(TVMFFITypeKeyToIndex(&type_key_array, &type_index));
   const TypeInfo* info = TVMFFIGetTypeInfo(type_index);
   for (int32_t i = 0; i < info->num_fields; ++i) {
-    if (std::strncmp(info->fields[i].name.data, field_name, info->fields[i].name.size) == 0) {
+    if (std::strncmp(info->fields[i].name.data, field_name, info->fields[i].name.size) == 0 &&
+        field_name[info->fields[i].name.size] == '\0') {
       return &(info->fields[i]);
     }
   }
@@ -207,7 +208,8 @@ inline const TVMFFIMethodInfo* GetMethodInfo(std::string_view type_key, const ch
   TVM_FFI_CHECK_SAFE_CALL(TVMFFITypeKeyToIndex(&type_key_array, &type_index));
   const TypeInfo* info = TVMFFIGetTypeInfo(type_index);
   for (int32_t i = 0; i < info->num_methods; ++i) {
-    if (std::strncmp(info->methods[i].name.data, method_name, info->methods[i].name.size) == 0) {
+    if (std::strncmp(info->methods[i].name.data, method_name, info->methods[i].name.size) == 0 &&
+        method_name[info->methods[i].name.size] == '\0') {
       return &(info->methods[i]);
     }
   }
