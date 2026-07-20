@@ -206,7 +206,7 @@ approach: **build on old glibc, run on new**.
 
 .. code-block:: bash
 
-   docker pull quay.io/pypa/manylinux2014_x86_64
+   docker pull quay.io/pypa/manylinux_2_28_x86_64
 
 Build host and device code inside the container. For CUDA:
 
