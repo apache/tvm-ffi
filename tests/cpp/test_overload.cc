@@ -26,6 +26,8 @@
 #include <tvm/ffi/reflection/registry.h>
 #include <tvm/ffi/string.h>
 
+#include <string>
+
 namespace {
 
 using namespace tvm::ffi;
@@ -90,6 +92,19 @@ TEST(Reflection, CallOverloadedStaticMethod) {
   Any res_b = add_one(1.0f);
   static_assert(1.0f + 1.0f == 2.0f);
   EXPECT_EQ(res_b.as<float>(), 2.0f);
+}
+
+TEST(Reflection, RecordsEveryOverloadedMethodSignature) {
+  const TypeInfo* info = TVMFFIGetTypeInfo(TestOverloadObj::RuntimeTypeIndex());
+  int static_overload_count = 0;
+  for (int32_t index = 0; index < info->num_methods; ++index) {
+    const TVMFFIMethodInfo& method = info->methods[index];
+    if (std::string(method.name.data, method.name.size) == "add_one_static") {
+      ++static_overload_count;
+      EXPECT_GT(method.metadata.size, 0);
+    }
+  }
+  EXPECT_EQ(static_overload_count, 2);
 }
 
 }  // namespace

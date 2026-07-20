@@ -493,17 +493,24 @@ class OverloadObjectDef : private ObjectDef<Class> {
 
     auto method_name = std::string(type_key_) + "." + name;
 
-    // if an overload method exists, register to existing overload function
+    // If an overload method exists, add the callable to the existing runtime
+    // dispatcher but still publish a TypeMethod entry for this signature.
+    // Stub generators consume TypeInfo::methods, so omitting later entries
+    // made an overloaded C++ method look like a single Python signature.
+    Function method;
     if (const auto overload_it = registered_fields_.find(name);
         overload_it != registered_fields_.end()) {
-      ::tvm::ffi::details::OverloadBase* overload_ptr = overload_it->second;
-      return overload_ptr->Register(NewOverload(std::move(method_name), std::forward<Func>(func)));
+      overload_it->second.overload->Register(
+          NewOverload(std::move(method_name), std::forward<Func>(func)));
+      method = overload_it->second.method;
+    } else {
+      // First registration creates the runtime overload dispatcher. Keep the
+      // Function alive so every reflected signature can reference it.
+      auto [new_method, overload_ptr] =
+          GetOverloadMethod(std::move(method_name), std::forward<Func>(func));
+      method = std::move(new_method);
+      registered_fields_.try_emplace(name, RegisteredMethod{overload_ptr, method});
     }
-
-    // first time registering overload method
-    auto [method, overload_ptr] =
-        GetOverloadMethod(std::move(method_name), std::forward<Func>(func));
-    registered_fields_.try_emplace(name, overload_ptr);
 
     info.method = AnyView(method).CopyToTVMFFIAny();
     info.metadata_.emplace_back("type_schema", FuncInfo::TypeSchema());
@@ -514,7 +521,12 @@ class OverloadObjectDef : private ObjectDef<Class> {
     TVM_FFI_CHECK_SAFE_CALL(TVMFFITypeRegisterMethod(type_index_, &info));
   }
 
-  std::unordered_map<std::string, ::tvm::ffi::details::OverloadBase*> registered_fields_;
+  struct RegisteredMethod {
+    ::tvm::ffi::details::OverloadBase* overload;
+    Function method;
+  };
+
+  std::unordered_map<std::string, RegisteredMethod> registered_fields_;
 };
 
 }  // namespace reflection

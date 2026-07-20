@@ -155,16 +155,33 @@ def render_object_methods(
         input_ty_map = ty_map
     indent_str = " " * indent
     ret = []
-    for method in info.methods:
-        func_name = method.schema.name.rsplit(".", 1)[-1]
-        if func_name == "__ffi_init__":
-            # __ffi_init__ is installed as an instance method (self, *args, **kwargs) -> None
-            # by _install_ffi_init_attr, regardless of the C++ static registration.
-            ret.append(_render_ffi_init_from_method(method, ty_map, indent, input_ty_map))
-            continue
-        if not method.is_member:
-            ret.append(f"{indent_str}@staticmethod")
-        ret.append(render_func_signature(method, ty_map, indent, input_ty_map))
+    index = 0
+    while index < len(info.methods):
+        method = info.methods[index]
+        group = [method]
+        index += 1
+        while index < len(info.methods):
+            candidate = info.methods[index]
+            if (
+                candidate.schema.name != method.schema.name
+                or candidate.is_member != method.is_member
+            ):
+                break
+            group.append(candidate)
+            index += 1
+
+        for candidate in group:
+            func_name = candidate.schema.name.rsplit(".", 1)[-1]
+            if len(group) > 1:
+                ret.append(f"{indent_str}@overload")
+            if func_name == "__ffi_init__":
+                # __ffi_init__ is installed as an instance method (self, *args, **kwargs) -> None
+                # by _install_ffi_init_attr, regardless of the C++ static registration.
+                ret.append(_render_ffi_init_from_method(candidate, ty_map, indent, input_ty_map))
+                continue
+            if not candidate.is_member:
+                ret.append(f"{indent_str}@staticmethod")
+            ret.append(render_func_signature(candidate, ty_map, indent, input_ty_map))
     return ret
 
 
@@ -179,20 +196,17 @@ def _render_ffi_init_from_method(
         input_ty_map = ty_map
     indent_str = " " * indent
     schema = method.schema
-    # Subclass __ffi_init__ signatures legitimately differ from the parent
-    # (different fields -> different constructor params), so suppress LSP.
-    ignore = "  # ty: ignore[invalid-method-override]"
     if schema.origin != "Callable" or not schema.args:
         ty_map("Any")
-        return f"{indent_str}def __ffi_init__(self, *args: Any) -> None: ...{ignore}"
+        return f"{indent_str}def __ffi_init__(self, *args: Any) -> None: ..."
     # schema.args[0] is return type, schema.args[1:] are param types.
     parts: list[str] = []
     for i, arg in enumerate(schema.args[1:]):
         parts.append(f"_{i}: {arg.input_repr(input_ty_map)}")
     if parts:
         params = ", ".join(parts)
-        return f"{indent_str}def __ffi_init__(self, {params}, /) -> None: ...{ignore}"
-    return f"{indent_str}def __ffi_init__(self) -> None: ...{ignore}"
+        return f"{indent_str}def __ffi_init__(self, {params}, /) -> None: ..."
+    return f"{indent_str}def __ffi_init__(self) -> None: ..."
 
 
 def render_object_ffi_init(
@@ -281,10 +295,7 @@ def _render_ffi_init_from_fields(
 ) -> list[str]:
     """Render ``__ffi_init__`` stub from field metadata for auto-generated init."""
     indent_str = " " * indent
-    # Subclass __ffi_init__ signatures legitimately differ from the parent
-    # (different fields -> different constructor params), so suppress LSP.
-    ignore = "  # ty: ignore[invalid-method-override]"
     params = _format_field_params(info, ty_map, input_ty_map)
     if params:
-        return [f"{indent_str}def __ffi_init__(self, {params}) -> None: ...{ignore}"]
-    return [f"{indent_str}def __ffi_init__(self) -> None: ...{ignore}"]
+        return [f"{indent_str}def __ffi_init__(self, {params}) -> None: ..."]
+    return [f"{indent_str}def __ffi_init__(self) -> None: ..."]
