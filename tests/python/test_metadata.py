@@ -130,10 +130,15 @@ def test_schema_field(field_name: str, expected: str) -> None:
 
 def test_schema_object_ptr_field() -> None:
     type_info: TypeInfo = getattr(TestObjectPtrHolder, "__tvm_ffi_type_info__")
-    assert len(type_info.fields) == 1
+    assert len(type_info.fields) == 2
     assert type_info.fields[0].name == "value"
     assert (
         str(TypeSchema.from_json_str(type_info.fields[0].metadata["type_schema"]))
+        == "testing.TestObjectBase"
+    )
+    assert type_info.fields[1].name == "optional_value"
+    assert (
+        str(TypeSchema.from_json_str(type_info.fields[1].metadata["type_schema"]))
         == "testing.TestObjectBase | None"
     )
 

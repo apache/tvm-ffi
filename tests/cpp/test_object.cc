@@ -680,4 +680,50 @@ TEST(ObjectPtrStorage, Expected) {
   EXPECT_EQ(failure_roundtrip.error().kind(), "ValueError");
 }
 
+using NumberArc = tvm::ffi::Arc<TNumberObj>;
+
+NumberArc MakeArcInt(int64_t value) { return make_arc<TIntObj>(value); }
+
+NumberArc MakeArcFloat(double value) { return make_arc<TFloatObj>(value); }
+
+TEST(ArcStorage, Containers) {
+  NumberArc first = MakeArcInt(1);
+  NumberArc second = MakeArcFloat(2.0);
+
+  Array<NumberArc> array{first};
+  array.push_back(second);
+  EXPECT_EQ(array[1], second);
+
+  List<NumberArc> list{first};
+  list.push_back(second);
+  EXPECT_EQ(list[1], second);
+
+  Map<String, NumberArc> map{{"value", first}};
+  map.Set("value", second);
+  EXPECT_EQ(map["value"], second);
+
+  Dict<String, NumberArc> dict{{"value", first}};
+  dict.Set("value", second);
+  EXPECT_EQ(dict["value"], second);
+
+  Tuple<NumberArc, NumberArc> tuple(first, first);
+  tuple.Set<1>(second);
+  EXPECT_EQ(tuple.get<1>(), second);
+
+  Variant<NumberArc, int64_t> variant = int64_t{3};
+  variant = first;
+  EXPECT_EQ(variant.get<NumberArc>(), first);
+
+  Expected<NumberArc> expected{first};
+  ASSERT_TRUE(expected.is_ok());
+  EXPECT_EQ(expected.value(), first);
+
+  EXPECT_EQ(TypeTraits<List<NumberArc>>::TypeSchema(),
+            R"({"type":"ffi.List","args":[{"type":"test.Number"}]})");
+  EXPECT_EQ((TypeTraits<Map<String, NumberArc>>::TypeSchema()),
+            R"({"type":"ffi.Map","args":[{"type":"ffi.String"},{"type":"test.Number"}]})");
+  EXPECT_EQ((TypeTraits<Tuple<NumberArc, int64_t>>::TypeSchema()),
+            R"({"type":"Tuple","args":[{"type":"test.Number"},{"type":"int"}]})");
+}
+
 }  // namespace

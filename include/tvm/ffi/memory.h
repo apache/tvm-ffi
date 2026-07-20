@@ -297,6 +297,17 @@ inline ObjectPtr<T> make_object(Args&&... args) {
 }
 
 /*!
+ * \brief Allocate an object and return a non-null owning pointer.
+ * \param args Arguments to the constructor.
+ * \tparam T The node type.
+ * \return An Arc owning the allocated object.
+ */
+template <typename T, typename... Args>
+inline Arc<T> make_arc(Args&&... args) {
+  return details::ObjectUnsafe::ArcFromObjectPtr(make_object<T>(std::forward<Args>(args)...));
+}
+
+/*!
  * \brief Allocate an Object with additional ElemType[num_elems] that are stored right after.
  * \param num_elems The number of elements in the array.
  * \param args arguments to the constructor.

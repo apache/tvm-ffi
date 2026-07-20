@@ -757,9 +757,9 @@ TEST(Serialization, SharedObjectReferences) {
   EXPECT_EQ(result->body[0].get(), result->body[1].get());
 }
 
-TEST(Serialization, ObjectPtrFields) {
-  ObjectPtr<TIntObj> shared = make_object<TIntObj>(42);
-  ObjectPtr<TIntObj> value = shared;
+TEST(Serialization, ArcAndObjectPtrFields) {
+  tvm::ffi::Arc<TIntObj> shared = make_arc<TIntObj>(42);
+  tvm::ffi::Arc<TIntObj> value = shared;
   ObjectPtr<TNumberObj> alias = shared;
   TObjectPtrHolder holder(std::move(value), std::move(alias));
 
@@ -767,20 +767,21 @@ TEST(Serialization, ObjectPtrFields) {
   TObjectPtrHolder result = deserialized.cast<TObjectPtrHolder>();
 
   ASSERT_NE(result->value, nullptr);
-  ASSERT_NE(result->alias, nullptr);
-  EXPECT_EQ(result->value.get(), result->alias.get());
+  ASSERT_NE(result->optional_alias, nullptr);
+  EXPECT_EQ(result->value.get(), result->optional_alias.get());
   ASSERT_TRUE(result->value->IsInstance<TIntObj>());
   EXPECT_EQ(static_cast<TIntObj*>(result->value.get())->value, 42);
 }
 
-TEST(Serialization, NullObjectPtrFields) {
-  TObjectPtrHolder holder(nullptr, nullptr);
+TEST(Serialization, NullableObjectPtrFieldNone) {
+  TObjectPtrHolder holder(make_arc<TIntObj>(42), nullptr);
 
   Any deserialized = FromJSONGraph(ToJSONGraph(holder));
   TObjectPtrHolder result = deserialized.cast<TObjectPtrHolder>();
 
-  EXPECT_EQ(result->value, nullptr);
-  EXPECT_EQ(result->alias, nullptr);
+  ASSERT_NE(result->value, nullptr);
+  EXPECT_EQ(result->value->value, 42);
+  EXPECT_EQ(result->optional_alias, nullptr);
 }
 
 // ---------------------------------------------------------------------------

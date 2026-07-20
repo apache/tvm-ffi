@@ -128,16 +128,17 @@ class TestObjectDerived(TestObjectBase):
 
 @c_class("testing.TestObjectPtrHolder")
 class TestObjectPtrHolder(Object):
-    """Test object with an ``ObjectPtr<TestObjectBase>`` field."""
+    """Test object with ``Arc`` and nullable ``ObjectPtr`` fields."""
 
     __test__ = False
 
     # tvm-ffi-stubgen(begin): object/testing.TestObjectPtrHolder
     # fmt: off
-    value: TestObjectBase | None
+    value: TestObjectBase
+    optional_value: TestObjectBase | None
     if TYPE_CHECKING:
-        def __init__(self, value: TestObjectBase | None) -> None: ...
-        def __ffi_init__(self, value: TestObjectBase | None) -> None: ...  # ty: ignore[invalid-method-override]
+        def __init__(self, value: TestObjectBase, optional_value: TestObjectBase | None = ...) -> None: ...
+        def __ffi_init__(self, value: TestObjectBase, optional_value: TestObjectBase | None = ...) -> None: ...  # ty: ignore[invalid-method-override]
     # fmt: on
     # tvm-ffi-stubgen(end)
 

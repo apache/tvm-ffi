@@ -425,7 +425,8 @@ class Array : public ObjectRef {
    */
   void push_back(const T& item) {
     ArrayObj* p = CopyOnWrite(1);
-    p->EmplaceInit(p->TVMFFISeqCell::size++, item);
+    p->EmplaceInit(p->TVMFFISeqCell::size, item);
+    ++p->TVMFFISeqCell::size;
   }
 
   /*!
@@ -435,7 +436,8 @@ class Array : public ObjectRef {
   template <typename... Args>
   void emplace_back(Args&&... args) {
     ArrayObj* p = CopyOnWrite(1);
-    p->EmplaceInit(p->TVMFFISeqCell::size++, std::forward<Args>(args)...);
+    p->EmplaceInit(p->TVMFFISeqCell::size, std::forward<Args>(args)...);
+    ++p->TVMFFISeqCell::size;
   }
 
   /*!

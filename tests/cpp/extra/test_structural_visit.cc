@@ -345,8 +345,8 @@ TEST(StructuralVisitor, WalkVisitsObjectPtr) {
   ExpectTrace(visited, {"x"});
 }
 
-TEST(StructuralVisitor, WalkTraversesObjectPtrFields) {
-  ObjectPtr<TIntObj> value = make_object<TIntObj>(42);
+TEST(StructuralVisitor, WalkTraversesArcAndObjectPtrFields) {
+  tvm::ffi::Arc<TIntObj> value = make_arc<TIntObj>(42);
   ObjectPtr<TNumberObj> alias = value;
   TObjectPtrHolder root(value, alias);
   size_t num_int_fields = 0;

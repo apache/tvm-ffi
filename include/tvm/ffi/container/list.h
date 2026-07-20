@@ -323,7 +323,8 @@ class List : public ObjectRef {
    */
   void push_back(const T& item) {
     ListObj* p = EnsureCapacity(1);
-    p->EmplaceInit(p->TVMFFISeqCell::size++, item);
+    p->EmplaceInit(p->TVMFFISeqCell::size, item);
+    ++p->TVMFFISeqCell::size;
   }
 
   /*!
@@ -333,7 +334,8 @@ class List : public ObjectRef {
   template <typename... Args>
   void emplace_back(Args&&... args) {
     ListObj* p = EnsureCapacity(1);
-    p->EmplaceInit(p->TVMFFISeqCell::size++, std::forward<Args>(args)...);
+    p->EmplaceInit(p->TVMFFISeqCell::size, std::forward<Args>(args)...);
+    ++p->TVMFFISeqCell::size;
   }
 
   /*!
