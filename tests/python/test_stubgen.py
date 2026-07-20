@@ -267,6 +267,11 @@ def test_objectinfo_gen_overloaded_static_methods() -> None:
                 is_member=False,
             ),
             FuncInfo.from_schema(
+                "demo.Factory.reset",
+                TypeSchema("Callable", (TypeSchema("None"),)),
+                is_member=False,
+            ),
+            FuncInfo.from_schema(
                 "demo.Factory.create",
                 TypeSchema("Callable", (TypeSchema("demo.Factory"), TypeSchema("str"))),
                 is_member=False,
@@ -281,6 +286,8 @@ def test_objectinfo_gen_overloaded_static_methods() -> None:
         "  @overload",
         "  @staticmethod",
         "  def create(_0: str, /) -> demo.Factory: ...",
+        "  @staticmethod",
+        "  def reset() -> None: ...",
     ]
 
 

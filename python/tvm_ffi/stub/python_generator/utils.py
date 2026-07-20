@@ -155,21 +155,17 @@ def render_object_methods(
         input_ty_map = ty_map
     indent_str = " " * indent
     ret = []
-    index = 0
-    while index < len(info.methods):
-        method = info.methods[index]
-        group = [method]
-        index += 1
-        while index < len(info.methods):
-            candidate = info.methods[index]
-            if (
-                candidate.schema.name != method.schema.name
-                or candidate.is_member != method.is_member
-            ):
-                break
-            group.append(candidate)
-            index += 1
+    groups: list[list[FuncInfo]] = []
+    seen: dict[tuple[str, bool], list[FuncInfo]] = {}
+    for method in info.methods:
+        key = (method.schema.name, method.is_member)
+        if key not in seen:
+            group: list[FuncInfo] = []
+            groups.append(group)
+            seen[key] = group
+        seen[key].append(method)
 
+    for group in groups:
         for candidate in group:
             func_name = candidate.schema.name.rsplit(".", 1)[-1]
             if len(group) > 1:
