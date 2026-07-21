@@ -257,6 +257,40 @@ def test_objectinfo_gen_fields_and_methods() -> None:
     ]
 
 
+def test_objectinfo_gen_overloaded_static_methods() -> None:
+    info = ObjectInfo(
+        fields=[],
+        methods=[
+            FuncInfo.from_schema(
+                "demo.Factory.create",
+                TypeSchema("Callable", (TypeSchema("demo.Factory"), TypeSchema("int"))),
+                is_member=False,
+            ),
+            FuncInfo.from_schema(
+                "demo.Factory.reset",
+                TypeSchema("Callable", (TypeSchema("None"),)),
+                is_member=False,
+            ),
+            FuncInfo.from_schema(
+                "demo.Factory.create",
+                TypeSchema("Callable", (TypeSchema("demo.Factory"), TypeSchema("str"))),
+                is_member=False,
+            ),
+        ],
+    )
+    assert info.has_overloaded_methods()
+    assert render_object_methods(info, _identity_ty_map, indent=2) == [
+        "  @overload",
+        "  @staticmethod",
+        "  def create(_0: int, /) -> demo.Factory: ...",
+        "  @overload",
+        "  @staticmethod",
+        "  def create(_0: str, /) -> demo.Factory: ...",
+        "  @staticmethod",
+        "  def reset() -> None: ...",
+    ]
+
+
 def test_type_schema_container_origins() -> None:
     """Test that Array/List/Map/Dict origins are distinct and validated correctly."""
     # Array and List: 0 or 1 arg, default to (Any,)
@@ -400,10 +434,7 @@ def test_objectinfo_gen_init_uses_input_annotations() -> None:
     ]
     assert render_object_ffi_init(
         info, _type_suffix, indent=0, input_ty_map=_input_type_suffix
-    ) == [
-        "def __ffi_init__(self, items: Sequence[int]) -> None: ...  # ty: "
-        "ignore[invalid-method-override]"
-    ]
+    ) == ["def __ffi_init__(self, items: Sequence[int]) -> None: ..."]
 
 
 def test_py_class_method_metadata_renders_stub_signature() -> None:

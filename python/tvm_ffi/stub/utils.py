@@ -130,6 +130,16 @@ class ObjectInfo:
     init_fields: list[InitFieldInfo] = dataclasses.field(default_factory=list)
     has_init: bool = False
 
+    def has_overloaded_methods(self) -> bool:
+        """Return whether reflection exposed multiple signatures for a method."""
+        seen: set[tuple[str, bool]] = set()
+        for method in self.methods:
+            key = (method.schema.name, method.is_member)
+            if key in seen:
+                return True
+            seen.add(key)
+        return False
+
     @staticmethod
     def from_type_info(type_info: TypeInfo) -> ObjectInfo:
         """Construct an `ObjectInfo` from a `TypeInfo` instance."""

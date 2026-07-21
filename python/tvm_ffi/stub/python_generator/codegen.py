@@ -183,6 +183,8 @@ def generate_python_object(
     info = obj_info
     method_names = {m.schema.name.rsplit(".", 1)[-1] for m in info.methods}
     fn_ty_map = _type_suffix_and_record(ty_map, imports, func_names=method_names)
+    if info.has_overloaded_methods():
+        imports.append(ImportItem("typing.overload", type_checking_only=True))
     input_fn_ty_map = _type_suffix_and_record(
         _make_input_ty_map(ty_map), imports, func_names=method_names
     )
