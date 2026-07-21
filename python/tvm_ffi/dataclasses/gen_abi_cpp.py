@@ -316,22 +316,37 @@ class _Generator:
         self.builtins = _builtin_table()
         self.dependencies: dict[int, TypeInfo] = {info.type_index: info for info in emitted_infos}
 
+    def _get_dynamic_object_cpp_type(self, schema: TypeSchema) -> str:
+        if schema.origin_type_index < _DYNAMIC_OBJECT_TYPE_INDEX_BEGIN:
+            raise ValueError(f"Schema {schema!r} is not a registered object type")
+        info = _lookup_or_register_type_info_from_type_key(schema.origin)
+        self.dependencies[info.type_index] = info
+        return _cpp_name(info.type_key).qualified
+
     def _lower_object(self, schema: TypeSchema) -> _Carrier:
         type_index = schema.origin_type_index
         if type_index == _OBJECT_TYPE_INDEX or schema.origin == "Object":
-            return _Carrier("::tvm::ffi::ObjectPtr<::tvm::ffi::Object>", 8, 8)
+            return _Carrier("::tvm::ffi::Arc<::tvm::ffi::Object>", 8, 8)
         builtin = self.builtins.get(schema.origin_type_index)
         if builtin is not None:
             if builtin.value_type is None:
                 raise ValueError(
                     f"Static TVM-FFI type {schema.origin!r} has no supported C++ value wrapper"
                 )
+            if builtin.value_type.startswith("::tvm::ffi::ObjectPtr<"):
+                return _Carrier(f"::tvm::ffi::Arc<{builtin.object_type}>", 8, 8)
             return _Carrier(builtin.value_type, builtin.size, builtin.alignment)
-        if schema.origin_type_index < _DYNAMIC_OBJECT_TYPE_INDEX_BEGIN:
-            raise ValueError(f"Schema {schema!r} is not a registered object type")
-        info = _lookup_or_register_type_info_from_type_key(schema.origin)
-        self.dependencies[info.type_index] = info
-        object_type = _cpp_name(info.type_key).qualified
+        object_type = self._get_dynamic_object_cpp_type(schema)
+        return _Carrier(f"::tvm::ffi::Arc<{object_type}>", 8, 8)
+
+    def _lower_nullable_object(self, schema: TypeSchema) -> _Carrier:
+        type_index = schema.origin_type_index
+        if type_index == _OBJECT_TYPE_INDEX or schema.origin == "Object":
+            object_type = "::tvm::ffi::Object"
+        elif (builtin := self.builtins.get(type_index)) is not None:
+            object_type = builtin.object_type
+        else:
+            object_type = self._get_dynamic_object_cpp_type(schema)
         return _Carrier(f"::tvm::ffi::ObjectPtr<{object_type}>", 8, 8)
 
     def _lower_value(
@@ -359,18 +374,22 @@ class _Generator:
         if origin in scalar:
             return scalar[origin]
         args = schema.args
-        if (
-            origin == "Optional"
-            and is_native_field
-            and container_argument
-            and args[0].origin_type_index >= _OBJECT_TYPE_INDEX
-        ):
-            return self._lower_object(args[0])
         if origin in ("Optional", "Union"):
-            # Container elements are already stored as Any cells.  Keeping the
-            # view erased avoids depending on the unstable native wrapper
-            # representation while preserving the outer container layout.
-            return _Carrier("::tvm::ffi::Any", 16, 8)
+            carrier = _Carrier("::tvm::ffi::Any", 16, 8)
+            if (
+                origin == "Optional"
+                and container_argument
+                and args[0].origin_type_index >= _OBJECT_TYPE_INDEX
+            ):
+                carrier = self._lower_nullable_object(args[0])
+            elif (
+                origin == "Union"
+                and container_argument
+                and all(arg.origin_type_index >= _OBJECT_TYPE_INDEX for arg in args)
+            ):
+                carrier = _Carrier("::tvm::ffi::Arc<::tvm::ffi::Object>", 8, 8)
+            # Other structural elements keep their discriminated Any storage.
+            return carrier
 
         container_origins = {
             "Array": "::tvm::ffi::Array",
@@ -442,17 +461,23 @@ class _Generator:
                     field.size,
                     field.alignment,
                 ) == (
+                    16,
+                    8,
+                ):
+                    value_carrier = self._lower_object(value_schema)
+                    carrier = _Carrier(
+                        f"::tvm::ffi::Optional<{value_carrier.cpp_type}>",
+                        16,
+                        8,
+                    )
+                elif value_schema.origin_type_index >= _OBJECT_TYPE_INDEX and (
+                    field.size,
+                    field.alignment,
+                ) == (
                     8,
                     8,
                 ):
-                    carrier = self._lower_object(value_schema)
-                    if carrier.size != 8:
-                        builtin = self.builtins.get(value_schema.origin_type_index)
-                        if builtin is None:
-                            raise ValueError(
-                                f"Cannot prove pointer carrier for {owner.type_key}.{field.name}"
-                            )
-                        carrier = _Carrier(f"::tvm::ffi::ObjectPtr<{builtin.object_type}>", 8, 8)
+                    carrier = self._lower_nullable_object(value_schema)
                 else:
                     raise ValueError(
                         f"Ambiguous native Optional carrier for {owner.type_key}.{field.name} "
@@ -463,7 +488,7 @@ class _Generator:
                 and (field.size, field.alignment) == (8, 8)
                 and all(arg.origin_type_index >= _OBJECT_TYPE_INDEX for arg in schema.args)
             ):
-                carrier = _Carrier("::tvm::ffi::ObjectPtr<::tvm::ffi::Object>", 8, 8)
+                carrier = _Carrier("::tvm::ffi::Arc<::tvm::ffi::Object>", 8, 8)
             else:
                 raise ValueError(
                     f"Ambiguous native {schema.origin} carrier for {owner.type_key}.{field.name} "
@@ -493,7 +518,7 @@ class _Generator:
             # derives from std::exception) contain more than one pointer.
             # A reflected one-pointer field uses the canonical object class
             # instead of pretending that the larger wrapper is layout-compatible.
-            carrier = _Carrier(f"::tvm::ffi::ObjectPtr<{builtin.object_type}>", 8, 8)
+            carrier = _Carrier(f"::tvm::ffi::Arc<{builtin.object_type}>", 8, 8)
             expected = (8, 8)
         if actual != expected:
             raise ValueError(

@@ -27,7 +27,13 @@ from typing import Any, Callable, Optional, Union, cast
 import pytest
 import tvm_ffi
 from tvm_ffi import Array, Device, Map, Object
-from tvm_ffi.core import DataType, TypeField, TypeInfo, _lookup_or_register_type_info_from_type_key
+from tvm_ffi.core import (
+    DataType,
+    TypeField,
+    TypeInfo,
+    TypeSchema,
+    _lookup_or_register_type_info_from_type_key,
+)
 from tvm_ffi.dataclasses import gen_abi_cpp, py_class
 from tvm_ffi.dataclasses.gen_abi_cpp import _Generator
 
@@ -157,6 +163,7 @@ def native_layout_probes(tmp_path_factory: pytest.TempPathFactory) -> tvm_ffi.Mo
     source = r"""
         #include <tvm/ffi/container/dict.h>
         #include <tvm/ffi/container/list.h>
+        #include <tvm/ffi/optional.h>
         #include <tvm/ffi/reflection/registry.h>
 
         namespace tvm {
@@ -175,6 +182,12 @@ def native_layout_probes(tmp_path_factory: pytest.TempPathFactory) -> tvm_ffi.Mo
           List<ABIRawTensorObj*> list_items;
           Map<String, ABIRawTensorObj*> mapping;
           Dict<String, ABIRawTensorObj*> dictionary;
+          Arc<ABIRawTensorObj> item;
+          ObjectPtr<ABIRawTensorObj> nullable_item;
+          Optional<Arc<ABIRawTensorObj>> optional_item;
+
+          explicit ABIObjectContainersObj(UnsafeInit) : item(UnsafeInit{}) {}
+
           TVM_FFI_DECLARE_OBJECT_INFO_FINAL(
               "testing.gen_abi_cpp.native.ObjectContainers",
               ABIObjectContainersObj,
@@ -194,7 +207,10 @@ def native_layout_probes(tmp_path_factory: pytest.TempPathFactory) -> tvm_ffi.Mo
               .def_ro("array_items", &ABIObjectContainersObj::array_items)
               .def_ro("list_items", &ABIObjectContainersObj::list_items)
               .def_ro("mapping", &ABIObjectContainersObj::mapping)
-              .def_ro("dictionary", &ABIObjectContainersObj::dictionary);
+              .def_ro("dictionary", &ABIObjectContainersObj::dictionary)
+              .def_ro("item", &ABIObjectContainersObj::item)
+              .def_ro("nullable_item", &ABIObjectContainersObj::nullable_item)
+              .def_ro("optional_item", &ABIObjectContainersObj::optional_item);
         }
 
         }  // namespace testing
@@ -370,11 +386,11 @@ struct alignas(8) MixedObj : public ::tvm::ffi::Object {
   ::tvm::ffi::String title;  // offset=88, size=16, align=8
   ::tvm::ffi::Bytes payload;  // offset=104, size=16, align=8
   ::tvm::ffi::Function callback;  // offset=120, size=8, align=8
-  ::tvm::ffi::ObjectPtr<::testing::gen_abi_cpp::DependencyObj> dependency;  // offset=128, size=8, align=8
-  ::tvm::ffi::Array<::tvm::ffi::ObjectPtr<::testing::gen_abi_cpp::DependencyObj>> array_items;  // offset=136, size=8, align=8
-  ::tvm::ffi::List<::tvm::ffi::ObjectPtr<::testing::gen_abi_cpp::DependencyObj>> list_items;  // offset=144, size=8, align=8
-  ::tvm::ffi::Map<::tvm::ffi::String, ::tvm::ffi::ObjectPtr<::testing::gen_abi_cpp::DependencyObj>> mapping;  // offset=152, size=8, align=8
-  ::tvm::ffi::Dict<::tvm::ffi::String, ::tvm::ffi::ObjectPtr<::testing::gen_abi_cpp::DependencyObj>> dictionary;  // offset=160, size=8, align=8
+  ::tvm::ffi::Arc<::testing::gen_abi_cpp::DependencyObj> dependency;  // offset=128, size=8, align=8
+  ::tvm::ffi::Array<::tvm::ffi::Arc<::testing::gen_abi_cpp::DependencyObj>> array_items;  // offset=136, size=8, align=8
+  ::tvm::ffi::List<::tvm::ffi::Arc<::testing::gen_abi_cpp::DependencyObj>> list_items;  // offset=144, size=8, align=8
+  ::tvm::ffi::Map<::tvm::ffi::String, ::tvm::ffi::Arc<::testing::gen_abi_cpp::DependencyObj>> mapping;  // offset=152, size=8, align=8
+  ::tvm::ffi::Dict<::tvm::ffi::String, ::tvm::ffi::Arc<::testing::gen_abi_cpp::DependencyObj>> dictionary;  // offset=160, size=8, align=8
   ::tvm::ffi::Any optional;  // offset=168, size=16, align=8
   ::tvm::ffi::Any choice;  // offset=184, size=16, align=8
 };
@@ -436,7 +452,7 @@ static_assert(offsetof(MixedObj, choice) == 184);
 struct alignas(8) MutualLeftObj : public ::tvm::ffi::Object {
   TVM_FFI_DECLARE_OBJECT_INFO_LOOKUP("testing.gen_abi_cpp.MutualLeft", 1);
 
-  ::tvm::ffi::List<::tvm::ffi::ObjectPtr<::testing::gen_abi_cpp::MutualRightObj>> rights;  // offset=24, size=8, align=8
+  ::tvm::ffi::List<::tvm::ffi::Arc<::testing::gen_abi_cpp::MutualRightObj>> rights;  // offset=24, size=8, align=8
 };
 
 static_assert(sizeof(MutualLeftObj) == 32);
@@ -448,7 +464,7 @@ static_assert(offsetof(MutualLeftObj, rights) == 24);
 struct alignas(8) MutualRightObj : public ::tvm::ffi::Object {
   TVM_FFI_DECLARE_OBJECT_INFO_LOOKUP("testing.gen_abi_cpp.MutualRight", 1);
 
-  ::tvm::ffi::List<::tvm::ffi::ObjectPtr<::testing::gen_abi_cpp::MutualLeftObj>> lefts;  // offset=24, size=8, align=8
+  ::tvm::ffi::List<::tvm::ffi::Arc<::testing::gen_abi_cpp::MutualLeftObj>> lefts;  // offset=24, size=8, align=8
 };
 
 static_assert(sizeof(MutualRightObj) == 32);
@@ -462,8 +478,8 @@ struct alignas(8) NestedStructuralObj : public ::tvm::ffi::Object {
 
   ::tvm::ffi::List<::tvm::ffi::Any> optionals;  // offset=24, size=8, align=8
   ::tvm::ffi::Dict<::tvm::ffi::String, ::tvm::ffi::Any> unions;  // offset=32, size=8, align=8
-  ::tvm::ffi::List<::tvm::ffi::Any> optional_objects;  // offset=40, size=8, align=8
-  ::tvm::ffi::Dict<::tvm::ffi::String, ::tvm::ffi::Any> union_objects;  // offset=48, size=8, align=8
+  ::tvm::ffi::List<::tvm::ffi::ObjectPtr<::testing::gen_abi_cpp::DependencyObj>> optional_objects;  // offset=40, size=8, align=8
+  ::tvm::ffi::Dict<::tvm::ffi::String, ::tvm::ffi::Arc<::tvm::ffi::Object>> union_objects;  // offset=48, size=8, align=8
 };
 
 static_assert(sizeof(NestedStructuralObj) == 56);
@@ -484,7 +500,7 @@ static_assert(offsetof(NestedStructuralObj, union_objects) == 48);
 struct alignas(8) RecursiveObj : public ::tvm::ffi::Object {
   TVM_FFI_DECLARE_OBJECT_INFO_LOOKUP("testing.gen_abi_cpp.Recursive", 1);
 
-  ::tvm::ffi::List<::tvm::ffi::ObjectPtr<::testing::gen_abi_cpp::RecursiveObj>> children;  // offset=24, size=8, align=8
+  ::tvm::ffi::List<::tvm::ffi::Arc<::testing::gen_abi_cpp::RecursiveObj>> children;  // offset=24, size=8, align=8
 };
 
 static_assert(sizeof(RecursiveObj) == 32);
@@ -572,7 +588,7 @@ struct alignas(8) ChildObj : public ::testing::gen_abi_cpp::empty::EmptyObj {
   TVM_FFI_DECLARE_OBJECT_INFO_LOOKUP("testing.gen_abi_cpp.other.Child", 3);
 
   bool child_flag;  // offset=40, size=1, align=1
-  ::tvm::ffi::ObjectPtr<::testing::gen_abi_cpp::DependencyObj> dependency;  // offset=48, size=8, align=8
+  ::tvm::ffi::Arc<::testing::gen_abi_cpp::DependencyObj> dependency;  // offset=48, size=8, align=8
 };
 
 static_assert(sizeof(ChildObj) == 56);
@@ -706,13 +722,16 @@ namespace native {
 struct alignas(8) ObjectContainersObj : public ::tvm::ffi::Object {
   TVM_FFI_DECLARE_OBJECT_INFO_LOOKUP("testing.gen_abi_cpp.native.ObjectContainers", 1);
 
-  ::tvm::ffi::Array<::tvm::ffi::ObjectPtr<::testing::gen_abi_cpp::native::RawTensorObj>> array_items;  // offset=24, size=8, align=8
-  ::tvm::ffi::List<::tvm::ffi::ObjectPtr<::testing::gen_abi_cpp::native::RawTensorObj>> list_items;  // offset=32, size=8, align=8
-  ::tvm::ffi::Map<::tvm::ffi::String, ::tvm::ffi::ObjectPtr<::testing::gen_abi_cpp::native::RawTensorObj>> mapping;  // offset=40, size=8, align=8
-  ::tvm::ffi::Dict<::tvm::ffi::String, ::tvm::ffi::ObjectPtr<::testing::gen_abi_cpp::native::RawTensorObj>> dictionary;  // offset=48, size=8, align=8
+  ::tvm::ffi::Array<::tvm::ffi::Arc<::testing::gen_abi_cpp::native::RawTensorObj>> array_items;  // offset=24, size=8, align=8
+  ::tvm::ffi::List<::tvm::ffi::Arc<::testing::gen_abi_cpp::native::RawTensorObj>> list_items;  // offset=32, size=8, align=8
+  ::tvm::ffi::Map<::tvm::ffi::String, ::tvm::ffi::Arc<::testing::gen_abi_cpp::native::RawTensorObj>> mapping;  // offset=40, size=8, align=8
+  ::tvm::ffi::Dict<::tvm::ffi::String, ::tvm::ffi::Arc<::testing::gen_abi_cpp::native::RawTensorObj>> dictionary;  // offset=48, size=8, align=8
+  ::tvm::ffi::Arc<::testing::gen_abi_cpp::native::RawTensorObj> item;  // offset=56, size=8, align=8
+  ::tvm::ffi::ObjectPtr<::testing::gen_abi_cpp::native::RawTensorObj> nullable_item;  // offset=64, size=8, align=8
+  ::tvm::ffi::Optional<::tvm::ffi::Arc<::testing::gen_abi_cpp::native::RawTensorObj>> optional_item;  // offset=72, size=16, align=8
 };
 
-static_assert(sizeof(ObjectContainersObj) == 56);
+static_assert(sizeof(ObjectContainersObj) == 88);
 static_assert(alignof(ObjectContainersObj) == 8);
 static_assert(sizeof(decltype(ObjectContainersObj::array_items)) == 8);
 static_assert(alignof(decltype(ObjectContainersObj::array_items)) == 8);
@@ -726,6 +745,15 @@ static_assert(offsetof(ObjectContainersObj, mapping) == 40);
 static_assert(sizeof(decltype(ObjectContainersObj::dictionary)) == 8);
 static_assert(alignof(decltype(ObjectContainersObj::dictionary)) == 8);
 static_assert(offsetof(ObjectContainersObj, dictionary) == 48);
+static_assert(sizeof(decltype(ObjectContainersObj::item)) == 8);
+static_assert(alignof(decltype(ObjectContainersObj::item)) == 8);
+static_assert(offsetof(ObjectContainersObj, item) == 56);
+static_assert(sizeof(decltype(ObjectContainersObj::nullable_item)) == 8);
+static_assert(alignof(decltype(ObjectContainersObj::nullable_item)) == 8);
+static_assert(offsetof(ObjectContainersObj, nullable_item) == 64);
+static_assert(sizeof(decltype(ObjectContainersObj::optional_item)) == 16);
+static_assert(alignof(decltype(ObjectContainersObj::optional_item)) == 8);
+static_assert(offsetof(ObjectContainersObj, optional_item) == 72);
 
 }  // namespace native
 }  // namespace gen_abi_cpp
@@ -770,8 +798,8 @@ namespace gen_abi_cpp {
 struct alignas(8) ExtraObjectsObj : public ::tvm::ffi::Object {
   TVM_FFI_DECLARE_OBJECT_INFO_LOOKUP("testing.gen_abi_cpp.ExtraObjects", 1);
 
-  ::tvm::ffi::ObjectPtr<::tvm::ffi::ModuleObj> module;  // offset=24, size=8, align=8
-  ::tvm::ffi::ObjectPtr<::tvm::ffi::VisitInterruptObj> interrupt;  // offset=32, size=8, align=8
+  ::tvm::ffi::Arc<::tvm::ffi::ModuleObj> module;  // offset=24, size=8, align=8
+  ::tvm::ffi::Arc<::tvm::ffi::VisitInterruptObj> interrupt;  // offset=32, size=8, align=8
 };
 
 static_assert(sizeof(ExtraObjectsObj) == 40);
@@ -871,6 +899,68 @@ def test_schema_less_custom_object_uses_object_ptr_carrier() -> None:
     assert (carrier.size, carrier.alignment) == (8, 8)
 
 
+def test_native_object_carriers_preserve_schema_nullability() -> None:
+    object_schema = {"type": "testing.gen_abi_cpp.Dependency"}
+    optional_schema = {"type": "Optional", "args": [object_schema]}
+    owner = cast(
+        TypeInfo,
+        SimpleNamespace(type_key="testing.gen_abi_cpp.NativeObjectCarriers"),
+    )
+
+    def lower(name: str, raw_schema: dict[str, object], size: int) -> str:
+        field = cast(
+            TypeField,
+            SimpleNamespace(
+                name=name,
+                size=size,
+                alignment=8,
+                offset=24,
+                field_static_type_index=128,
+                ty=TypeSchema.from_json_obj(raw_schema),
+                metadata={"type_schema": raw_schema},
+            ),
+        )
+        return _Generator([])._lower_field(field, owner).cpp_type
+
+    object_type = "::testing::gen_abi_cpp::DependencyObj"
+    assert lower("required", object_schema, 8) == f"::tvm::ffi::Arc<{object_type}>"
+    assert lower("nullable", optional_schema, 8) == f"::tvm::ffi::ObjectPtr<{object_type}>"
+    assert (
+        lower("optional", optional_schema, 16)
+        == f"::tvm::ffi::Optional<::tvm::ffi::Arc<{object_type}>>"
+    )
+
+
+def test_non_null_object_union_uses_arc_carrier() -> None:
+    raw_schema = {
+        "type": "Variant",
+        "args": [
+            {"type": "testing.gen_abi_cpp.Dependency"},
+            {"type": "testing.gen_abi_cpp.other.Sibling"},
+        ],
+    }
+    field = cast(
+        TypeField,
+        SimpleNamespace(
+            name="choice",
+            size=8,
+            alignment=8,
+            offset=24,
+            field_static_type_index=64,
+            ty=TypeSchema.from_json_obj(raw_schema),
+            metadata={"type_schema": raw_schema},
+        ),
+    )
+    owner = cast(
+        TypeInfo,
+        SimpleNamespace(type_key="testing.gen_abi_cpp.NativeObjectUnion"),
+    )
+
+    carrier = _Generator([])._lower_field(field, owner)
+
+    assert carrier.cpp_type == "::tvm::ffi::Arc<::tvm::ffi::Object>"
+
+
 def test_extra_object_carriers_remain_typed(tmp_path: Path) -> None:
     header = gen_abi_cpp("testing.gen_abi_cpp.ExtraObjects")
     assert header == _EXPECTED_EXTRA_PROGRAM
@@ -953,8 +1043,8 @@ def test_generated_header_compiles_and_reads_live_objects(tmp_path: Path) -> Non
                       ::testing::gen_abi_cpp::empty::EmptyObj,
                       ::testing::gen_abi_cpp::other::ChildObj>);
         static_assert(std::is_constructible_v<
-                      ::tvm::ffi::ObjectPtr<::testing::gen_abi_cpp::BaseObj>,
-                      ::tvm::ffi::ObjectPtr<
+                      ::tvm::ffi::Arc<::testing::gen_abi_cpp::BaseObj>,
+                      ::tvm::ffi::Arc<
                           ::testing::gen_abi_cpp::other::ChildObj>>);
 
         int64_t gen_abi_cpp_read_sequence(
@@ -969,9 +1059,9 @@ def test_generated_header_compiles_and_reads_live_objects(tmp_path: Path) -> Non
         }
 
         bool gen_abi_cpp_upcast_identity(
-            ::tvm::ffi::ObjectPtr<
+            ::tvm::ffi::Arc<
                 ::testing::gen_abi_cpp::other::ChildObj> child) {
-          ::tvm::ffi::ObjectPtr<::testing::gen_abi_cpp::BaseObj> base = child;
+          ::tvm::ffi::Arc<::testing::gen_abi_cpp::BaseObj> base = child;
           return reinterpret_cast<const void*>(child.get()) ==
                  reinterpret_cast<const void*>(base.get());
         }

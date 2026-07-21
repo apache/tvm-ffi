@@ -171,9 +171,10 @@ class TestObjectDerived : public TestObjectBase {
 
 class TestObjectPtrHolder : public Object {
  public:
-  ObjectPtr<TestObjectBase> value;
+  Arc<TestObjectBase> value;
+  ObjectPtr<TestObjectBase> optional_value;
 
-  explicit TestObjectPtrHolder(UnsafeInit) {}
+  explicit TestObjectPtrHolder(UnsafeInit) : value(UnsafeInit{}) {}
 
   static constexpr bool _type_mutable = true;
   TVM_FFI_DECLARE_OBJECT_INFO("testing.TestObjectPtrHolder", TestObjectPtrHolder, Object);
@@ -481,7 +482,9 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def_rw("v_map", &TestObjectDerived::v_map)
       .def_rw("v_array", &TestObjectDerived::v_array);
 
-  refl::ObjectDef<TestObjectPtrHolder>().def_rw("value", &TestObjectPtrHolder::value);
+  refl::ObjectDef<TestObjectPtrHolder>()
+      .def_rw("value", &TestObjectPtrHolder::value)
+      .def_rw("optional_value", &TestObjectPtrHolder::optional_value, refl::default_value(nullptr));
 
   refl::ObjectDef<TestCxxClassBase>()
       .def_rw("v_i64", &TestCxxClassBase::v_i64, refl::repr(false))

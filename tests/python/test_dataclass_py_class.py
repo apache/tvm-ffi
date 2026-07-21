@@ -3698,9 +3698,21 @@ class TestNativeParentInheritance:
         gc.collect()
         assert use_count(target) == 2
 
-        holder.value = None
-        assert holder.value is None
-        assert use_count(target) == 1
+        with pytest.raises(TypeError, match=r"testing\.TestObjectBase"):
+            holder.value = None  # ty: ignore[invalid-assignment]
+        assert holder.value is target
+        assert use_count(target) == 2
+
+        assert holder.optional_value is None
+        holder.optional_value = target
+        assert holder.optional_value is target
+        assert use_count(target) == 3
+        holder.optional_value = None
+        assert holder.optional_value is None
+        assert use_count(target) == 2
+
+        with pytest.raises(TypeError, match=r"testing\.TestObjectBase"):
+            _TestObjectPtrHolder(None)  # ty: ignore[invalid-argument-type]
 
         holder.value = replacement
         assert use_count(replacement) == 2
@@ -3708,11 +3720,14 @@ class TestNativeParentInheritance:
         assert use_count(target) == 2
         assert use_count(replacement) == 1
 
-        unrelated = _TestObjectPtrHolder(None)
+        unrelated = _TestObjectPtrHolder(replacement)
         with pytest.raises(TypeError):
             holder.value = unrelated  # ty: ignore[invalid-assignment]
         assert holder.value is not None
         assert holder.value.same_as(target)
+        del unrelated
+        gc.collect()
+        assert use_count(replacement) == 1
 
         del holder
         gc.collect()
@@ -3731,7 +3746,7 @@ class TestNativeParentInheritance:
             v_f64=2.0,
             v_str="target",
         )
-        child = Child(value=target, extra=3)
+        child = Child(value=target, optional_value=None, extra=3)
         assert use_count(target) == 2
 
         child_copy = copy.copy(child)

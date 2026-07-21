@@ -236,21 +236,24 @@ class TPair : public ObjectRef {
 
 class TObjectPtrHolderObj : public Object {
  public:
-  ObjectPtr<TIntObj> value;
-  ObjectPtr<TNumberObj> alias;
+  Arc<TIntObj> value;
+  ObjectPtr<TNumberObj> optional_alias;
 
-  TObjectPtrHolderObj(ObjectPtr<TIntObj> value, ObjectPtr<TNumberObj> alias)
-      : value(std::move(value)), alias(std::move(alias)) {}
-  explicit TObjectPtrHolderObj(UnsafeInit) {}
+  TObjectPtrHolderObj(Arc<TIntObj> value, ObjectPtr<TNumberObj> optional_alias)
+      : value(std::move(value)), optional_alias(std::move(optional_alias)) {}
+  explicit TObjectPtrHolderObj(UnsafeInit) : value(UnsafeInit{}) {}
 
-  static ObjectPtr<TIntObj> Identity(ObjectPtr<TIntObj> value) { return value; }
+  static Arc<TIntObj> Identity(Arc<TIntObj> value) { return value; }
+  static ObjectPtr<TIntObj> OptionalIdentity(ObjectPtr<TIntObj> value) { return value; }
 
   static void RegisterReflection() {
     namespace refl = tvm::ffi::reflection;
     refl::ObjectDef<TObjectPtrHolderObj>()
         .def_rw("value", &TObjectPtrHolderObj::value)
-        .def_rw("alias", &TObjectPtrHolderObj::alias)
-        .def_static("identity", &TObjectPtrHolderObj::Identity);
+        .def_rw("optional_alias", &TObjectPtrHolderObj::optional_alias,
+                refl::default_value(nullptr))
+        .def_static("identity", &TObjectPtrHolderObj::Identity)
+        .def_static("optional_identity", &TObjectPtrHolderObj::OptionalIdentity);
   }
 
   static constexpr bool _type_mutable = true;
@@ -259,8 +262,8 @@ class TObjectPtrHolderObj : public Object {
 
 class TObjectPtrHolder : public ObjectRef {
  public:
-  TObjectPtrHolder(ObjectPtr<TIntObj> value, ObjectPtr<TNumberObj> alias = nullptr) {
-    data_ = make_object<TObjectPtrHolderObj>(std::move(value), std::move(alias));
+  TObjectPtrHolder(Arc<TIntObj> value, ObjectPtr<TNumberObj> optional_alias = nullptr) {
+    data_ = make_object<TObjectPtrHolderObj>(std::move(value), std::move(optional_alias));
   }
 
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(TObjectPtrHolder, ObjectRef, TObjectPtrHolderObj);

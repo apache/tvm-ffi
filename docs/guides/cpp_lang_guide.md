@@ -88,7 +88,7 @@ counting correctly when the stored value is an on-heap object.
 The tvm-ffi object system provides the foundation for all managed, reference-counted objects
 in the system. It enables type safety, cross-language compatibility, and efficient memory management.
 
-The object system is built around three key classes: Object, ObjectPtr, and ObjectRef.
+The object system is built around four key classes: `Object`, `ObjectPtr`, `Arc`, and `ObjectRef`.
 The `Object` class is the base class of all heap-allocated objects. It contains a common header
 that includes the `type_index`, reference counter and deleter for the object.
 Users do not need to explicitly manage these fields as part of the C++ API. Instead,
@@ -115,24 +115,40 @@ class MyIntPairObj : public tvm::ffi::Object {
 
 void ExampleObjectPtr() {
   namespace ffi = tvm::ffi;
-  // make_object automatically sets up the deleter correctly
-  // This function creates a new ObjectPtr with proper memory management
-  // It handles allocation, initialization, and sets up the reference counting system
-  ffi::ObjectPtr<MyIntPairObj> obj = ffi::make_object<MyIntPairObj>(100, 200);
+  // make_arc allocates, initializes, and sets up reference counting and the deleter.
+  ffi::Arc<MyIntPairObj> required = ffi::make_arc<MyIntPairObj>(100, 200);
+  // ObjectPtr is the nullable one-pointer carrier.
+  ffi::ObjectPtr<MyIntPairObj> optional = required;
   // EXPECT_EQ is used here for demonstration purposes (testing framework)
-  EXPECT_EQ(obj->a, 100);
-  EXPECT_EQ(obj->b, 200);
+  EXPECT_EQ(required->a, 100);
+  EXPECT_EQ(required->b, 200);
+  optional = nullptr;
 }
 ```
 
-For an unqualified `Object` subclass `T`, `ObjectPtr<T>` can also cross the FFI boundary
-directly. It can be stored in `Any` and typed containers such as `Array`, `List`, `Map`,
-`Dict`, `Tuple`, `Optional`, `Variant`, and `Expected`, and can be used as a reflected field or
-function parameter. Copying through `Any` retains the object; moving transfers its reference. A
-null pointer is represented by the FFI `None` value. Qualified pointee types such as
-`ObjectPtr<const T>`, `ObjectPtr<volatile T>`, and reference pointee types are not supported.
-Because the ABI has one `None` representation, `Optional<ObjectPtr<T>>` cannot preserve the
-difference between an absent optional and a present null pointer across an FFI round trip.
+For an unqualified `Object` subclass `T`, use `Arc<T>` when the object is required and
+`ObjectPtr<T>` when it may be absent. Both are owning pointers with the same one-pointer layout and
+reference-counting behavior. Copying through `Any` retains the object, while moving transfers its
+reference. They can be used in typed containers such as `Array`, `List`, `Map`, `Dict`, `Tuple`,
+`Optional`, `Variant`, and `Expected`, as well as reflected fields and function signatures.
+
+`Arc<T>` has no default or `nullptr` constructor, and `make_arc<T>(args...)` is its normal creation
+API. Its type schema is the bare object schema `{"type":"T"}`, so ABI `None` is rejected. By
+contrast, `ObjectPtr<T>` remains mechanically nullable, maps a null pointer to ABI `None`, and has
+schema `Optional[T]`. `Optional<Arc<T>>` is also supported and produces exactly `Optional[T]`; use
+it when the native field needs the 16-byte `Optional` carrier rather than the 8-byte
+`ObjectPtr<T>` carrier.
+
+Normal C++ move semantics leave a moved-from `Arc` empty. `Arc(UnsafeInit{})` also creates an empty
+value for reflection's controlled construct-then-populate path. These states are exceptions to the
+safe API's non-null guarantee and must be populated before use; Arc operations rely on the invariant
+without runtime validation. A reflected class with an `Arc` field should initialize that field
+explicitly in its unsafe constructor, for example
+`HolderObj(UnsafeInit) : required(UnsafeInit{}) {}`. Because `Arc` publicly inherits `ObjectPtr`,
+deliberately mutating it through the base class can likewise bypass the guarantee and is unsafe.
+
+Qualified pointee types such as `Arc<const T>`, `ObjectPtr<const T>`, volatile pointees, and
+reference pointee types are not supported.
 
 We typically provide a reference class that wraps the ObjectPtr.
 The `ObjectRef` base class provides the interface and reference counting
@@ -169,7 +185,8 @@ The ObjectRef acts as a smart pointer wrapper that automatically manages the Obj
 The overall implementation pattern is as follows:
 
 - **Object Class**: Inherits from `ffi::Object`, stores data and implements the core functionality.
-- **ObjectPtr**: Smart pointer that manages the Object lifecycle and reference counting.
+- **Arc**: Non-null owning pointer used for required object values.
+- **ObjectPtr**: Nullable owning pointer used when the object may be absent.
 - **Ref Class**: Inherits from `ffi::ObjectRef`, provides a user-friendly interface and automatic memory management.
 
 This design ensures efficient memory management while providing a clean API for users. Once we define an ObjectRef class,

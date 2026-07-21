@@ -114,14 +114,18 @@ class PointerAdjustedObj : public PointerAdjustmentPad, public CxxBaseObj {
 namespace {
 
 using tvm::ffi::Any;
+using tvm::ffi::AnyView;
+using tvm::ffi::Arc;
 using tvm::ffi::Array;
 using tvm::ffi::Dict;
 using tvm::ffi::List;
+using tvm::ffi::make_arc;
 using tvm::ffi::make_object;
 using tvm::ffi::Map;
 using tvm::ffi::Object;
 using tvm::ffi::ObjectPtr;
 using tvm::ffi::ObjectRef;
+using tvm::ffi::Optional;
 using tvm::ffi::String;
 using tvm::ffi::TypeTraits;
 using tvm::ffi::UnsafeInit;
@@ -133,6 +137,19 @@ using tvm::ffi::testing::GeneratedUnrelatedObj;
 using tvm::ffi::testing::MutualLeftObj;
 using tvm::ffi::testing::MutualRightObj;
 using tvm::ffi::testing::PointerAdjustedObj;
+
+template <typename T, typename = void>
+struct HasPublicReset : std::false_type {};
+
+template <typename T>
+struct HasPublicReset<T, std::void_t<decltype(std::declval<T&>().reset())>> : std::true_type {};
+
+template <typename T, typename = void>
+struct HasPublicSwap : std::false_type {};
+
+template <typename T>
+struct HasPublicSwap<T, std::void_t<decltype(std::declval<T&>().swap(std::declval<T&>()))>>
+    : std::true_type {};
 
 static_assert(tvm::ffi::is_object_subclass_v<GeneratedBaseObj>);
 static_assert(tvm::ffi::is_object_subclass_v<GeneratedDerivedObj>);
@@ -150,6 +167,25 @@ static_assert(
     tvm::ffi::type_subsumes_v<ObjectPtr<GeneratedBaseObj>, ObjectPtr<GeneratedDerivedObj>>);
 static_assert(
     !tvm::ffi::type_subsumes_v<ObjectPtr<GeneratedDerivedObj>, ObjectPtr<GeneratedBaseObj>>);
+static_assert(sizeof(Arc<GeneratedDerivedObj>) == sizeof(ObjectPtr<GeneratedDerivedObj>));
+static_assert(alignof(Arc<GeneratedDerivedObj>) == alignof(ObjectPtr<GeneratedDerivedObj>));
+static_assert(std::is_standard_layout_v<Arc<GeneratedDerivedObj>>);
+static_assert(std::is_base_of_v<ObjectPtr<GeneratedDerivedObj>, Arc<GeneratedDerivedObj>>);
+static_assert(!std::is_default_constructible_v<Arc<GeneratedDerivedObj>>);
+static_assert(!std::is_constructible_v<Arc<GeneratedDerivedObj>, std::nullptr_t>);
+static_assert(std::is_constructible_v<Arc<GeneratedDerivedObj>, UnsafeInit>);
+static_assert(!std::is_constructible_v<Arc<GeneratedDerivedObj>, ObjectPtr<GeneratedDerivedObj>>);
+static_assert(!HasPublicReset<Arc<GeneratedDerivedObj>>::value);
+static_assert(!HasPublicSwap<Arc<GeneratedDerivedObj>>::value);
+static_assert(std::is_constructible_v<Arc<GeneratedBaseObj>, Arc<GeneratedDerivedObj>>);
+static_assert(std::is_assignable_v<Arc<GeneratedBaseObj>&, Arc<GeneratedDerivedObj>>);
+static_assert(std::is_constructible_v<ObjectPtr<GeneratedBaseObj>, Arc<GeneratedDerivedObj>>);
+static_assert(!TypeTraits<Arc<int>>::storage_enabled);
+static_assert(tvm::ffi::type_subsumes_v<Arc<GeneratedBaseObj>, Arc<GeneratedDerivedObj>>);
+static_assert(tvm::ffi::type_subsumes_v<ObjectPtr<GeneratedBaseObj>, Arc<GeneratedDerivedObj>>);
+static_assert(!tvm::ffi::type_subsumes_v<Arc<GeneratedBaseObj>, ObjectPtr<GeneratedDerivedObj>>);
+static_assert(
+    !std::is_constructible_v<Array<Arc<GeneratedBaseObj>>, Array<ObjectPtr<GeneratedDerivedObj>>>);
 
 static_assert(std::is_same_v<Array<ObjectPtr<GeneratedDerivedObj>>::value_type,
                              ObjectPtr<GeneratedDerivedObj>>);
@@ -245,6 +281,98 @@ TEST(ObjectPtr, AnyRoundTripUsesRuntimeAncestry) {
   Any null_value = ObjectPtr<GeneratedDerivedObj>(nullptr);
   EXPECT_EQ(null_value.type_index(), tvm::ffi::TypeIndex::kTVMFFINone);
   EXPECT_EQ(null_value.cast<ObjectPtr<GeneratedBaseObj>>(), nullptr);
+}
+
+TEST(Arc, ConstructionOwnershipAndUpcast) {
+  Arc<GeneratedDerivedObj> derived = make_arc<GeneratedDerivedObj>(42);
+  EXPECT_EQ(derived->value, 42);
+  EXPECT_EQ(derived.use_count(), 1);
+
+  Arc<GeneratedDerivedObj> copied = derived;
+  EXPECT_EQ(derived.use_count(), 2);
+  EXPECT_EQ(copied.get(), derived.get());
+
+  Arc<GeneratedBaseObj> upcast = derived;
+  EXPECT_EQ(derived.use_count(), 3);
+  EXPECT_EQ(upcast.get(), static_cast<GeneratedBaseObj*>(derived.get()));
+
+  copied = make_arc<GeneratedDerivedObj>(45);
+  EXPECT_EQ(derived.use_count(), 2);
+  EXPECT_EQ(copied->value, 45);
+
+  Arc<GeneratedDerivedObj> move_source = make_arc<GeneratedDerivedObj>(43);
+  const void* move_source_address = move_source.get();
+  Arc<GeneratedBaseObj> moved = std::move(move_source);
+  EXPECT_EQ(move_source,  // NOLINT(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
+            nullptr);
+  EXPECT_EQ(moved.use_count(), 1);
+  EXPECT_EQ(static_cast<const void*>(moved.get()), move_source_address);
+
+  Arc<GeneratedBaseObj> assigned = make_arc<GeneratedDerivedObj>(44);
+  assigned = derived;
+  EXPECT_EQ(assigned.get(), static_cast<GeneratedBaseObj*>(derived.get()));
+  EXPECT_EQ(derived.use_count(), 3);
+}
+
+TEST(Arc, AnyRoundTripAndSchemas) {
+  Arc<GeneratedDerivedObj> derived = make_arc<GeneratedDerivedObj>(7);
+  Any value = derived;
+  EXPECT_EQ(derived.use_count(), 2);
+
+  Arc<GeneratedBaseObj> base = value.cast<Arc<GeneratedBaseObj>>();
+  EXPECT_EQ(base.get(), static_cast<GeneratedBaseObj*>(derived.get()));
+  EXPECT_EQ(derived.use_count(), 3);
+  EXPECT_FALSE(value.try_cast<Arc<GeneratedUnrelatedObj>>().has_value());
+
+  Any none;
+  EXPECT_FALSE(none.as<Arc<GeneratedBaseObj>>().has_value());
+  EXPECT_FALSE(none.try_cast<Arc<GeneratedBaseObj>>().has_value());
+  EXPECT_THROW(none.cast<Arc<GeneratedBaseObj>>(), tvm::ffi::Error);
+
+  EXPECT_EQ(tvm::ffi::TypeToRuntimeTypeIndex<Arc<GeneratedDerivedObj>>::v(),
+            GeneratedDerivedObj::RuntimeTypeIndex());
+  EXPECT_EQ(TypeTraits<Arc<GeneratedBaseObj>>::TypeSchema(), R"({"type":"testing.GeneratedBase"})");
+  EXPECT_EQ(TypeTraits<ObjectPtr<GeneratedBaseObj>>::TypeSchema(),
+            R"({"type":"Optional","args":[{"type":"testing.GeneratedBase"}]})");
+  EXPECT_EQ(TypeTraits<Optional<Arc<GeneratedBaseObj>>>::TypeSchema(),
+            R"({"type":"Optional","args":[{"type":"testing.GeneratedBase"}]})");
+
+  Optional<Arc<GeneratedBaseObj>> present = Arc<GeneratedBaseObj>(derived);
+  ASSERT_TRUE(present.has_value());
+  EXPECT_EQ(present.value().get(), static_cast<GeneratedBaseObj*>(derived.get()));
+  Optional<Arc<GeneratedBaseObj>> absent = std::nullopt;
+  EXPECT_FALSE(Any(absent).cast<Optional<Arc<GeneratedBaseObj>>>().has_value());
+}
+
+TEST(Arc, ContainerStorageAndValidation) {
+  Arc<GeneratedDerivedObj> first = make_arc<GeneratedDerivedObj>(1);
+  Arc<GeneratedDerivedObj> second = make_arc<GeneratedDerivedObj>(2);
+
+  Array<Arc<GeneratedDerivedObj>> derived_array{first};
+  Array<Arc<GeneratedBaseObj>> base_array = derived_array;
+  EXPECT_TRUE(base_array.same_as(derived_array));
+  Array<ObjectPtr<GeneratedBaseObj>> nullable_base_array = derived_array;
+  EXPECT_TRUE(nullable_base_array.same_as(derived_array));
+
+  derived_array.push_back(second);
+  EXPECT_EQ(derived_array.size(), 2U);
+
+  Array<ObjectPtr<GeneratedDerivedObj>> checked_source{first};
+  Array<Arc<GeneratedBaseObj>> checked = Any(checked_source).cast<Array<Arc<GeneratedBaseObj>>>();
+  // Runtime casting validates every nullable source element before reusing the storage.
+  EXPECT_TRUE(checked.same_as(checked_source));
+  EXPECT_EQ(checked[0].get(), static_cast<GeneratedBaseObj*>(first.get()));
+
+  Array<ObjectPtr<GeneratedDerivedObj>> nullable_source{nullptr, first};
+  Any nullable_value = nullable_source;
+  EXPECT_FALSE(nullable_value.try_cast<Array<Arc<GeneratedBaseObj>>>().has_value());
+  EXPECT_THROW(nullable_value.cast<Array<Arc<GeneratedBaseObj>>>(), tvm::ffi::Error);
+
+  EXPECT_EQ(TypeTraits<Array<Arc<GeneratedDerivedObj>>>::TypeSchema(),
+            R"({"type":"ffi.Array","args":[{"type":"testing.GeneratedDerived"}]})");
+  EXPECT_EQ(
+      TypeTraits<Array<ObjectPtr<GeneratedDerivedObj>>>::TypeSchema(),
+      R"({"type":"ffi.Array","args":[{"type":"Optional","args":[{"type":"testing.GeneratedDerived"}]}]})");
 }
 
 TEST(ObjectPtr, ContainerCovariance) {

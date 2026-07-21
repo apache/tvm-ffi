@@ -138,79 +138,103 @@ TEST(Reflection, FieldSetter) {
 }
 
 TEST(Reflection, ObjectPtrField) {
-  ObjectPtr<TIntObj> initial = make_object<TIntObj>(10);
+  tvm::ffi::Arc<TIntObj> initial = make_arc<TIntObj>(10);
   TIntObj* initial_raw = initial.get();
   TObjectPtrHolder holder(initial);
   EXPECT_EQ(initial.use_count(), 2);
 
   reflection::FieldGetter getter("test.ObjectPtrHolder", "value");
-  Any value = getter(holder);
-  EXPECT_EQ(initial.use_count(), 3);
-  ObjectPtr<TIntObj> reflected = value.cast<ObjectPtr<TIntObj>>();
-  EXPECT_EQ(initial.use_count(), 4);
-  EXPECT_EQ(reflected.get(), initial_raw);
-  reflected.reset();
-  value.reset();
+  {
+    Any value = getter(holder);
+    EXPECT_EQ(initial.use_count(), 3);
+    tvm::ffi::Arc<TIntObj> reflected = value.cast<tvm::ffi::Arc<TIntObj>>();
+    EXPECT_EQ(initial.use_count(), 4);
+    EXPECT_EQ(reflected.get(), initial_raw);
+  }
   EXPECT_EQ(initial.use_count(), 2);
 
   reflection::FieldSetter setter("test.ObjectPtrHolder", "value");
-  ObjectPtr<TIntObj> replacement = make_object<TIntObj>(20);
+  tvm::ffi::Arc<TIntObj> replacement = make_arc<TIntObj>(20);
   setter(holder, replacement);
   EXPECT_EQ(replacement.use_count(), 2);
   EXPECT_EQ(holder->value.get(), replacement.get());
   EXPECT_EQ(initial.use_count(), 1);
 
-  ObjectPtr<TFloatObj> incompatible = make_object<TFloatObj>(2.5);
+  tvm::ffi::Arc<TFloatObj> incompatible = make_arc<TFloatObj>(2.5);
   EXPECT_THROW(setter(holder, incompatible), Error);
   EXPECT_EQ(holder->value.get(), replacement.get());
   EXPECT_EQ(incompatible.use_count(), 1);
 
+  EXPECT_THROW(setter(holder, nullptr), Error);
+  EXPECT_EQ(holder->value.get(), replacement.get());
+
   ObjectPtr<TIntObj> null_value;
-  setter(holder, null_value);
-  EXPECT_EQ(holder->value, nullptr);
-  EXPECT_EQ(replacement.use_count(), 1);
+  EXPECT_THROW(setter(holder, null_value), Error);
+  EXPECT_EQ(holder->value.get(), replacement.get());
 
   EXPECT_THROW(setter(holder, String("not a number")), Error);
-  EXPECT_EQ(holder->value, nullptr);
+  EXPECT_EQ(holder->value.get(), replacement.get());
+
+  reflection::FieldGetter optional_getter("test.ObjectPtrHolder", "optional_alias");
+  reflection::FieldSetter optional_setter("test.ObjectPtrHolder", "optional_alias");
+  EXPECT_EQ(optional_getter(holder), nullptr);
+  optional_setter(holder, initial);
+  EXPECT_EQ(optional_getter(holder).cast<ObjectPtr<TNumberObj>>().get(), initial.get());
+  optional_setter(holder, nullptr);
+  EXPECT_EQ(optional_getter(holder), nullptr);
 }
 
 TEST(Reflection, ObjectPtrFieldInfo) {
   const TVMFFIFieldInfo* info = reflection::GetFieldInfo("test.ObjectPtrHolder", "value");
   EXPECT_EQ(info->field_static_type_index, TypeIndex::kTVMFFIObject);
-  EXPECT_EQ(info->size, sizeof(ObjectPtr<TIntObj>));
-  EXPECT_EQ(info->alignment, alignof(ObjectPtr<TIntObj>));
+  EXPECT_EQ(info->size, sizeof(tvm::ffi::Arc<TIntObj>));
+  EXPECT_EQ(info->alignment, alignof(tvm::ffi::Arc<TIntObj>));
   Map<String, Any> metadata = json::Parse(String(info->metadata)).cast<Map<String, Any>>();
-  EXPECT_EQ(metadata["type_schema"].cast<String>(),
-            R"({"type":"Optional","args":[{"type":"test.Int"}]})");
+  EXPECT_EQ(metadata["type_schema"].cast<String>(), R"({"type":"test.Int"})");
 
-  const TVMFFIFieldInfo* alias_info = reflection::GetFieldInfo("test.ObjectPtrHolder", "alias");
-  Map<String, Any> alias_metadata =
-      json::Parse(String(alias_info->metadata)).cast<Map<String, Any>>();
-  EXPECT_EQ(alias_metadata["type_schema"].cast<String>(),
+  const TVMFFIFieldInfo* optional_info =
+      reflection::GetFieldInfo("test.ObjectPtrHolder", "optional_alias");
+  EXPECT_EQ(optional_info->size, sizeof(ObjectPtr<TNumberObj>));
+  EXPECT_EQ(optional_info->alignment, alignof(ObjectPtr<TNumberObj>));
+  Map<String, Any> optional_metadata =
+      json::Parse(String(optional_info->metadata)).cast<Map<String, Any>>();
+  EXPECT_EQ(optional_metadata["type_schema"].cast<String>(),
             R"({"type":"Optional","args":[{"type":"test.Number"}]})");
 }
 
 TEST(Reflection, ObjectPtrMethod) {
   Function identity = reflection::GetMethod("test.ObjectPtrHolder", "identity");
-  ObjectPtr<TIntObj> input = make_object<TIntObj>(21);
+  tvm::ffi::Arc<TIntObj> input = make_arc<TIntObj>(21);
   TIntObj* raw_input = input.get();
   Any result = identity(input);
   EXPECT_EQ(input.use_count(), 2);
 
-  ObjectPtr<TIntObj> output = std::move(result).cast<ObjectPtr<TIntObj>>();
+  tvm::ffi::Arc<TIntObj> output = std::move(result).cast<tvm::ffi::Arc<TIntObj>>();
   EXPECT_EQ(result, nullptr);  // NOLINT(bugprone-use-after-move)
   EXPECT_EQ(output.get(), raw_input);
   EXPECT_EQ(input.use_count(), 2);
 
-  Any null_result = identity(ObjectPtr<TIntObj>());
-  EXPECT_EQ(null_result, nullptr);
-  EXPECT_THROW(identity(make_object<TFloatObj>(2.5)), Error);
+  EXPECT_THROW(identity(nullptr), Error);
+  EXPECT_THROW(identity(ObjectPtr<TIntObj>()), Error);
+  EXPECT_THROW(identity(make_arc<TFloatObj>(2.5)), Error);
   EXPECT_THROW(identity(String("not a number")), Error);
+
+  Function optional_identity = reflection::GetMethod("test.ObjectPtrHolder", "optional_identity");
+  EXPECT_EQ(optional_identity(nullptr), nullptr);
+  Any optional_result = optional_identity(input);
+  EXPECT_EQ(optional_result.cast<ObjectPtr<TIntObj>>().get(), raw_input);
 
   const TVMFFIMethodInfo* info = reflection::GetMethodInfo("test.ObjectPtrHolder", "identity");
   Map<String, Any> metadata = json::Parse(String(info->metadata)).cast<Map<String, Any>>();
+  EXPECT_EQ(metadata["type_schema"].cast<String>(),
+            R"({"type":"ffi.Function","args":[{"type":"test.Int"},{"type":"test.Int"}]})");
+
+  const TVMFFIMethodInfo* optional_info =
+      reflection::GetMethodInfo("test.ObjectPtrHolder", "optional_identity");
+  Map<String, Any> optional_metadata =
+      json::Parse(String(optional_info->metadata)).cast<Map<String, Any>>();
   EXPECT_EQ(
-      metadata["type_schema"].cast<String>(),
+      optional_metadata["type_schema"].cast<String>(),
       R"({"type":"ffi.Function","args":[{"type":"Optional","args":[{"type":"test.Int"}]},{"type":"Optional","args":[{"type":"test.Int"}]}]})");
 }
 

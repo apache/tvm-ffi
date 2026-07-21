@@ -530,6 +530,70 @@ class ObjectPtr {
 };
 
 /*!
+ * \brief A non-null owning pointer for Object.
+ * \tparam T The Object subclass being owned.
+ * \sa make_arc
+ *
+ * Arc has the same layout as ObjectPtr and supports the same copy, move, and
+ * derived-to-base conversions. Unlike ObjectPtr, its safe public API cannot
+ * create a null value. A moved-from Arc and an Arc explicitly constructed with
+ * UnsafeInit may be null; such values must be populated before use. Operations
+ * on Arc rely on the non-null invariant and do not validate it at runtime.
+ */
+template <typename T>
+class Arc : public ObjectPtr<T> {
+ public:
+  Arc() = delete;
+  Arc(std::nullptr_t) = delete;
+
+  /*! \brief Copy constructor. */
+  Arc(const Arc&) = default;
+
+  /*! \brief Move constructor. */
+  Arc(Arc&&) = default;
+
+  /*! \brief Copy assignment operator. */
+  Arc& operator=(const Arc&) = default;
+
+  /*! \brief Move assignment operator. */
+  Arc& operator=(Arc&&) = default;
+
+  /*!
+   * \brief Copy-upcast an Arc of a derived Object type.
+   * \param other The Arc to copy.
+   */
+  template <typename U, std::enable_if_t<std::is_base_of_v<T, U>, int> = 0>
+  Arc(const Arc<U>& other)  // NOLINT(*)
+      : ObjectPtr<T>(static_cast<const ObjectPtr<U>&>(other)) {}
+
+  /*!
+   * \brief Move-upcast an Arc of a derived Object type.
+   * \param other The Arc to move.
+   */
+  template <typename U, std::enable_if_t<std::is_base_of_v<T, U>, int> = 0>
+  Arc(Arc<U>&& other)  // NOLINT(*)
+      : ObjectPtr<T>(std::move(static_cast<ObjectPtr<U>&>(other))) {}
+
+  /*!
+   * \brief Construct an empty Arc for controlled construct-then-populate flows.
+   * \param tag The unsafe initialization tag.
+   */
+  explicit Arc(UnsafeInit tag) : ObjectPtr<T>(nullptr) { static_cast<void>(tag); }
+
+ private:
+  explicit Arc(ObjectPtr<T> ptr) : ObjectPtr<T>(std::move(ptr)) {}
+
+  using ObjectPtr<T>::reset;
+  using ObjectPtr<T>::swap;
+
+  template <typename U, typename... Args>
+  friend Arc<U> make_arc(Args&&... args);
+  template <typename>
+  friend class Arc;
+  friend struct tvm::ffi::details::ObjectUnsafe;
+};
+
+/*!
  * \brief Whether T is Object or a subclass of Object.
  * \tparam T The type to inspect.
  */
@@ -554,6 +618,24 @@ inline constexpr bool is_qualified_object_v =
  */
 template <typename BaseObject, typename DerivedObject>
 inline constexpr bool type_subsumes_v<ObjectPtr<BaseObject>, ObjectPtr<DerivedObject>> =
+    std::is_base_of_v<BaseObject, DerivedObject>;
+
+/*!
+ * \brief Whether target Arc storage subsumes source Arc storage.
+ * \tparam BaseObject The target Arc pointee type.
+ * \tparam DerivedObject The source Arc pointee type.
+ */
+template <typename BaseObject, typename DerivedObject>
+inline constexpr bool type_subsumes_v<Arc<BaseObject>, Arc<DerivedObject>> =
+    std::is_base_of_v<BaseObject, DerivedObject>;
+
+/*!
+ * \brief Whether nullable ObjectPtr storage subsumes non-null Arc storage.
+ * \tparam BaseObject The target ObjectPtr pointee type.
+ * \tparam DerivedObject The source Arc pointee type.
+ */
+template <typename BaseObject, typename DerivedObject>
+inline constexpr bool type_subsumes_v<ObjectPtr<BaseObject>, Arc<DerivedObject>> =
     std::is_base_of_v<BaseObject, DerivedObject>;
 /// \endcond
 
@@ -1257,6 +1339,11 @@ struct ObjectUnsafe {
   }
 
   template <typename T>
+  TVM_FFI_INLINE static Arc<T> ArcFromObjectPtr(ObjectPtr<T>&& ptr) {
+    return Arc<T>(std::move(ptr));
+  }
+
+  template <typename T>
   TVM_FFI_INLINE static T* RawObjectPtrFromUnowned(TVMFFIObject* obj_ptr) {
     // NOTE: this is important to first cast to Object*
     // then cast back to T* because objptr and tptr may not be the same
@@ -1324,6 +1411,13 @@ struct TypeToRuntimeTypeIndex<
   static int32_t v() { return TObject::RuntimeTypeIndex(); }
 };
 
+template <typename TObject>
+struct TypeToRuntimeTypeIndex<
+    Arc<TObject>, std::enable_if_t<is_object_subclass_v<TObject> &&
+                                   std::is_same_v<TObject, std::remove_cv_t<TObject>>>> {
+  static int32_t v() { return TObject::RuntimeTypeIndex(); }
+};
+
 /*!
  * \brief Type traits for an owning pointer to an unqualified Object subclass.
  * \tparam TObject The unqualified Object subclass.
@@ -1385,6 +1479,53 @@ struct TypeTraits<ObjectPtr<TObject>,
   TVM_FFI_INLINE static std::string TypeStr() { return TObject::_type_key; }
   TVM_FFI_INLINE static std::string TypeSchema() {
     return R"({"type":"Optional","args":[{"type":")" + std::string(TObject::_type_key) + R"("}]})";
+  }
+};
+
+/*!
+ * \brief Type traits for a non-null owning pointer to an unqualified Object subclass.
+ * \tparam TObject The unqualified Object subclass.
+ */
+template <typename TObject>
+struct TypeTraits<Arc<TObject>,
+                  std::enable_if_t<is_object_subclass_v<TObject> &&
+                                   std::is_same_v<TObject, std::remove_cv_t<TObject>>>>
+    : public TypeTraitsBase {
+  static constexpr int32_t field_static_type_index = TypeIndex::kTVMFFIObject;
+
+  TVM_FFI_INLINE static void CopyToAnyView(const Arc<TObject>& src, TVMFFIAny* result) {
+    TypeTraits<ObjectPtr<TObject>>::CopyToAnyView(src, result);
+  }
+
+  TVM_FFI_INLINE static void MoveToAny(Arc<TObject> src, TVMFFIAny* result) {
+    TypeTraits<ObjectPtr<TObject>>::MoveToAny(std::move(src), result);
+  }
+
+  TVM_FFI_INLINE static bool CheckAnyStrict(const TVMFFIAny* src) {
+    return src->type_index >= TypeIndex::kTVMFFIStaticObjectBegin &&
+           details::IsObjectInstance<TObject>(src->type_index);
+  }
+
+  TVM_FFI_INLINE static Arc<TObject> CopyFromAnyViewAfterCheck(const TVMFFIAny* src) {
+    return details::ObjectUnsafe::ArcFromObjectPtr(
+        details::ObjectUnsafe::ObjectPtrFromUnowned<TObject>(src->v_obj));
+  }
+
+  TVM_FFI_INLINE static Arc<TObject> MoveFromAnyAfterCheck(TVMFFIAny* src) {
+    Arc<TObject> result = details::ObjectUnsafe::ArcFromObjectPtr(
+        details::ObjectUnsafe::ObjectPtrFromOwned<TObject>(src->v_obj));
+    TypeTraits<std::nullptr_t>::MoveToAny(nullptr, src);
+    return result;
+  }
+
+  TVM_FFI_INLINE static std::optional<Arc<TObject>> TryCastFromAnyView(const TVMFFIAny* src) {
+    if (CheckAnyStrict(src)) return CopyFromAnyViewAfterCheck(src);
+    return std::nullopt;
+  }
+
+  TVM_FFI_INLINE static std::string TypeStr() { return TObject::_type_key; }
+  TVM_FFI_INLINE static std::string TypeSchema() {
+    return R"({"type":")" + std::string(TObject::_type_key) + R"("})";
   }
 };
 
