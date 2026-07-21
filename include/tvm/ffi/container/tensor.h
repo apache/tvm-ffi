@@ -103,12 +103,7 @@ inline bool IsAligned(const DLTensor& arr, size_t alignment) {
  * \return the total number of bytes needed to store packed data
  */
 inline size_t GetDataSize(size_t numel, DLDataType dtype) {
-  // compatible handling sub-byte uint1(bool), which usually stored as uint8_t
-  // TODO(tqchen): revisit and switch to kDLBool
-  if (dtype.code == kDLUInt && dtype.bits == 1 && dtype.lanes == 1) {
-    return numel;
-  }
-  // for other sub-byte types, packing is preferred
+  // Sub-byte types are stored packed.
   // Use uint64_t to avoid overflow on 32-bit platforms (WASM) for large allocations.
   return static_cast<size_t>((static_cast<uint64_t>(numel) * dtype.bits * dtype.lanes + 7) / 8);
 }

@@ -49,6 +49,16 @@ int TestEnvTensorAllocatorError(DLTensor* prototype, TVMFFIObjectHandle* out) {
   return -1;
 }
 
+TEST(Tensor, GetDataSize) {
+  DLDataType uint1 = DLDataType({kDLUInt, 1, 1});
+  EXPECT_EQ(GetDataSize(1, uint1), 1);
+  EXPECT_EQ(GetDataSize(8, uint1), 1);
+  EXPECT_EQ(GetDataSize(9, uint1), 2);
+
+  DLDataType bool8 = DLDataType({kDLBool, 8, 1});
+  EXPECT_EQ(GetDataSize(9, bool8), 9);
+}
+
 TEST(Tensor, Basic) {
   Tensor nd = Empty({1, 2, 3}, DLDataType({kDLFloat, 32, 1}), DLDevice({kDLCPU, 0}));
   Shape shape = nd.shape();
