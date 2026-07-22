@@ -20,11 +20,11 @@
 use proc_macro::TokenStream;
 use proc_macro_error::proc_macro_error;
 
-mod match_object;
+mod match_any;
 mod object_macros;
 mod utils;
 
-/// Match an ObjectRef-compatible value against typed patterns in source order.
+/// Match object-backed values carried by an Any-compatible scrutinee.
 ///
 /// The scrutinee may be an owned object handle, `Any`, or `AnyView`. Convert an
 /// already-borrowed object handle to `AnyView` before invoking the macro.
@@ -32,8 +32,8 @@ mod utils;
 /// Non-object values skip the typed patterns and use the `_` fallback.
 #[proc_macro_error]
 #[proc_macro]
-pub fn match_object(input: TokenStream) -> TokenStream {
-    match_object::expand(input)
+pub fn match_any(input: TokenStream) -> TokenStream {
+    match_any::expand(input)
 }
 
 #[proc_macro_error]

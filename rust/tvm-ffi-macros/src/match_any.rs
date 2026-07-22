@@ -24,7 +24,7 @@ use syn::{braced, parenthesized, Expr, Pat, Path, Result, Token};
 
 use crate::utils::get_tvm_ffi_crate;
 
-struct MatchObjectInput {
+struct MatchAnyInput {
     scrutinee: Expr,
     arms: Vec<TypedArm>,
     fallback: Expr,
@@ -37,7 +37,7 @@ struct TypedArm {
     body: Expr,
 }
 
-impl Parse for MatchObjectInput {
+impl Parse for MatchAnyInput {
     fn parse(input: ParseStream<'_>) -> Result<Self> {
         let scrutinee = input.call(Expr::parse_without_eager_brace)?;
         let content;
@@ -84,12 +84,12 @@ impl Parse for MatchObjectInput {
             if content.peek(Token![,]) {
                 content.parse::<Token![,]>()?;
             } else if !content.is_empty() {
-                return Err(content.error("expected `,` between match_object! arms"));
+                return Err(content.error("expected `,` between match_any! arms"));
             }
         }
 
         let fallback = fallback
-            .ok_or_else(|| content.error("match_object! requires a final `_` fallback arm"))?;
+            .ok_or_else(|| content.error("match_any! requires a final `_` fallback arm"))?;
         Ok(Self {
             scrutinee,
             arms,
@@ -99,17 +99,17 @@ impl Parse for MatchObjectInput {
 }
 
 pub fn expand(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    let input = syn::parse_macro_input!(input as MatchObjectInput);
-    expand_match_object(input).into()
+    let input = syn::parse_macro_input!(input as MatchAnyInput);
+    expand_match_any(input).into()
 }
 
-fn expand_match_object(input: MatchObjectInput) -> TokenStream {
+fn expand_match_any(input: MatchAnyInput) -> TokenStream {
     let tvm_ffi = get_tvm_ffi_crate();
     let span = Span::mixed_site();
-    let source = Ident::new("__tvm_ffi_match_object_source", span);
-    let converted = Ident::new("__tvm_ffi_match_object_converted", span);
-    let view = Ident::new("__tvm_ffi_match_object_view", span);
-    let rejected = Ident::new("__tvm_ffi_match_object_rejected", span);
+    let source = Ident::new("__tvm_ffi_match_any_source", span);
+    let converted = Ident::new("__tvm_ffi_match_any_converted", span);
+    let view = Ident::new("__tvm_ffi_match_any_view", span);
+    let rejected = Ident::new("__tvm_ffi_match_any_rejected", span);
     let scrutinee = input.scrutinee;
     let fallback = input.fallback;
     let dispatch_fallback = fallback.clone();

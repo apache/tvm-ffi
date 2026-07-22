@@ -17,11 +17,11 @@
  * under the License.
  */
 
-//! Runtime trait used by [`crate::match_object!`].
+//! Runtime trait used by [`crate::match_any!`].
 
 use crate::AnyView;
 
-/// An ObjectRef-style typed pattern accepted by [`crate::match_object!`].
+/// An ObjectRef-style typed pattern accepted by [`crate::match_any!`].
 ///
 /// The macro only calls this trait for values with an object type index.
 pub trait ObjectPattern {

@@ -19,7 +19,7 @@
 
 use std::marker::PhantomData;
 
-use tvm_ffi::{match_object, Any, AnyView, Array, ObjectPattern, Shape, Tensor};
+use tvm_ffi::{match_any, Any, AnyView, Array, ObjectPattern, Shape, Tensor};
 
 struct TensorType;
 struct ShapedType;
@@ -76,7 +76,7 @@ enum Lowered {
 }
 
 fn lower(expr: Any) -> Lowered {
-    match_object! {
+    match_any! {
         expr {
             TypedExpr::<TensorType>(tensor)
                 if tensor.shape().len() == 2 => Lowered::Matrix,
@@ -108,7 +108,7 @@ fn scrutinee_is_evaluated_once() {
         evaluations += 1;
         Shape::from([2_i64, 3, 4])
     };
-    let selected = match_object! {
+    let selected = match_any! {
         make_value() {
             TypedExpr::<ShapedType>(shaped) => shaped.rank(),
             _ => 0,
@@ -120,7 +120,7 @@ fn scrutinee_is_evaluated_once() {
 
 #[test]
 fn non_object_values_use_fallback() {
-    let selected = match_object! {
+    let selected = match_any! {
         8_i64 {
             I64Pattern(value) => value,
             _ => 0,
@@ -133,7 +133,7 @@ fn non_object_values_use_fallback() {
 fn accepts_any_view() {
     let shape = Shape::from([2_i64, 3, 4, 5]);
     let view = AnyView::from(&shape);
-    let selected = match_object! {
+    let selected = match_any! {
         view {
             TypedExpr::<ShapedType>(shaped) => shaped.rank(),
             _ => 0,
