@@ -49,7 +49,7 @@ pub fn derive_object(input: proc_macro::TokenStream) -> TokenStream {
             quote! {
                 #[inline]
                 fn type_index() -> i32 {
-                    static TYPE_INDEX: std::sync::LazyLock<i32> = std::sync::LazyLock::new(||
+                    static TYPE_INDEX: ::std::sync::LazyLock<i32> = ::std::sync::LazyLock::new(||
                         unsafe {
                             let type_key_arg =
                                  #tvm_ffi_crate::tvm_ffi_sys::TVMFFIByteArray::from_str(#type_key);
@@ -58,7 +58,7 @@ pub fn derive_object(input: proc_macro::TokenStream) -> TokenStream {
                                 &type_key_arg, &mut tindex
                             );
                             if ret != 0 {
-                                proc_macro_error::abort!("Failed to get type index for type key: {}", #type_key);
+                                panic!("Failed to get type index for type key: {}", #type_key);
                             }
                             tindex
                         }
@@ -126,24 +126,24 @@ pub fn derive_object_ref(input: proc_macro::TokenStream) -> TokenStream {
 
     let mut expanded = quote! {
         unsafe impl #tvm_ffi_crate::object::ObjectRefCore for #struct_name {
-            type ContainerType = <#data_ty as std::ops::Deref>::Target;
+            type ContainerType = <#data_ty as ::std::ops::Deref>::Target;
             #[inline]
-            fn data(this: &Self) -> &ObjectArc<Self::ContainerType> {
+            fn data(this: &Self) -> & #tvm_ffi_crate::object::ObjectArc<Self::ContainerType> {
                 &this.data
             }
             #[inline]
-            fn into_data(this: Self) -> ObjectArc<Self::ContainerType> {
+            fn into_data(this: Self) -> #tvm_ffi_crate::object::ObjectArc<Self::ContainerType> {
                 this.data
             }
             #[inline]
-            fn from_data(data: ObjectArc<Self::ContainerType>) -> Self {
+            fn from_data(data: #tvm_ffi_crate::object::ObjectArc<Self::ContainerType>) -> Self {
                 Self { data}
             }
         }
 
         // implement AnyCompatible for #struct_name
         unsafe impl #tvm_ffi_crate::type_traits::AnyCompatible for #struct_name {
-            fn type_str() -> String {
+            fn type_str() -> ::std::string::String {
                 type ContainerType = <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>
                     ::ContainerType;
                 <ContainerType as #tvm_ffi_crate::object::ObjectCore>::TYPE_KEY.into()
@@ -182,7 +182,7 @@ pub fn derive_object_ref(input: proc_macro::TokenStream) -> TokenStream {
                 let data_ptr = data.data_union.v_obj;
                 // need to increase ref because original weak ptr
                 // do not own the code
-                #tvm_ffi_crate::object::unsafe_::inc_ref(
+                #tvm_ffi_crate::object::inc_ref_raw_object(
                     data_ptr as *mut  #tvm_ffi_crate::tvm_ffi_sys::TVMFFIObject
                 );
                 Self {
@@ -222,7 +222,7 @@ pub fn derive_object_ref(input: proc_macro::TokenStream) -> TokenStream {
 
             unsafe fn try_cast_from_any_view(
                 data: & #tvm_ffi_crate::tvm_ffi_sys::TVMFFIAny
-            ) -> Result<Self, ()> {
+            ) -> ::std::result::Result<Self, ()> {
                 type ContainerType = <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>
                     ::ContainerType;
                 let type_index =
