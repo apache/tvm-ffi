@@ -290,7 +290,13 @@ cdef class Tensor(CObject):
         return count
 
     def data_ptr(self) -> int:
-        """Return the address of the first tensor element."""
+        """Return the address of the first tensor element.
+
+        Returns
+        -------
+        data_ptr
+            Address of the first tensor element, including the tensor's byte offset.
+        """
         return <uintptr_t>self.cdltensor.data + self.cdltensor.byte_offset
 
     def size(self, idx: int) -> int:
