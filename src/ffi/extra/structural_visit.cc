@@ -135,11 +135,9 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::ObjectDef<VisitInterruptObj>().def_ro("value", &VisitInterruptObj::value,
                                               refl::default_value(nullptr));
-  refl::ObjectDef<StructuralVisitorObj>().def(
-      refl::init<>(), "Constructor that creates a default structural visitor");
+  refl::ObjectDef<StructuralVisitorObj>();  // NOLINT(bugprone-unused-raii)
   refl::GlobalDef()
       .def("ffi.VisitInterrupt", [](Any value) { return VisitInterrupt(std::move(value)); })
-      .def("ffi.StructuralVisitor", []() { return StructuralVisitor(); })
       .def_method("ffi.StructuralVisitorVisit", &StructuralVisitorObj::Visit)
       .def_method("ffi.StructuralVisitorDefRegionKind", &StructuralVisitorObj::def_region_kind)
       .def_method(
