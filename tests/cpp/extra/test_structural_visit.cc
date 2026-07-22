@@ -47,7 +47,9 @@ class TestVisitorObj : public StructuralVisitorObj {
 
  private:
   static const StructuralVisitorVTable* VTable() {
-    static const StructuralVisitorVTable vtable{&TestVisitorObj::DispatchVisit};
+    static const StructuralVisitorVTable vtable{
+        &TestVisitorObj::DispatchVisit,
+    };
     return &vtable;
   }
 
@@ -126,9 +128,10 @@ TEST(StructuralVisitor, TraversesPair) {
   ObjectRef root = TPair(lhs, rhs);
   StructuralVisitor visitor = MakeTestVisitor();
 
-  Optional<VisitInterrupt> result = visitor->DefaultVisit(root);
+  Expected<Optional<VisitInterrupt>> result = visitor->DefaultVisitExpected(root);
 
-  EXPECT_FALSE(result.has_value());
+  ASSERT_TRUE(result.is_ok());
+  EXPECT_FALSE(result.value().has_value());
   ASSERT_EQ(AsTestVisitor(visitor)->visited.size(), 2U);
   EXPECT_TRUE(AsTestVisitor(visitor)->visited[0].same_as(lhs));
   EXPECT_TRUE(AsTestVisitor(visitor)->visited[1].same_as(rhs));
@@ -142,9 +145,10 @@ TEST(StructuralVisitor, TraversesFunction) {
   ObjectRef root = TFunc(params, body, String("ignored function comment"));
   StructuralVisitor visitor = MakeTestVisitor();
 
-  Optional<VisitInterrupt> result = visitor->DefaultVisit(root);
+  Expected<Optional<VisitInterrupt>> result = visitor->DefaultVisitExpected(root);
 
-  EXPECT_FALSE(result.has_value());
+  ASSERT_TRUE(result.is_ok());
+  EXPECT_FALSE(result.value().has_value());
   TestVisitorObj* test_visitor = AsTestVisitor(visitor);
   ASSERT_EQ(test_visitor->visited.size(), 4U);
   EXPECT_TRUE(test_visitor->visited[0].same_as(params));
@@ -164,10 +168,11 @@ TEST(StructuralVisitor, StopsOnInterrupt) {
   StructuralVisitor visitor = MakeTestVisitor();
   SetInterrupt(visitor, lhs);
 
-  Optional<VisitInterrupt> result = visitor->DefaultVisit(root);
+  Expected<Optional<VisitInterrupt>> result = visitor->DefaultVisitExpected(root);
 
-  ASSERT_TRUE(result.has_value());
-  EXPECT_EQ(result.value()->value.cast<String>(), "stop");
+  ASSERT_TRUE(result.is_ok());
+  ASSERT_TRUE(result.value().has_value());
+  EXPECT_EQ(result.value().value()->value.cast<String>(), "stop");
   ASSERT_EQ(AsTestVisitor(visitor)->visited.size(), 1U);
   EXPECT_TRUE(AsTestVisitor(visitor)->visited[0].same_as(lhs));
 }
@@ -178,9 +183,10 @@ TEST(StructuralVisitor, TraversesArray) {
   Array<ObjectRef> root = {lhs, rhs};
   StructuralVisitor visitor = MakeTestVisitor();
 
-  Optional<VisitInterrupt> result = visitor->DefaultVisit(root);
+  Expected<Optional<VisitInterrupt>> result = visitor->DefaultVisitExpected(root);
 
-  EXPECT_FALSE(result.has_value());
+  ASSERT_TRUE(result.is_ok());
+  EXPECT_FALSE(result.value().has_value());
   ASSERT_EQ(AsTestVisitor(visitor)->visited.size(), 2U);
   EXPECT_TRUE(AsTestVisitor(visitor)->visited[0].same_as(lhs));
   EXPECT_TRUE(AsTestVisitor(visitor)->visited[1].same_as(rhs));
@@ -192,9 +198,10 @@ TEST(StructuralVisitor, TraversesMap) {
   Map<Any, Any> root{{key, value}};
   StructuralVisitor visitor = MakeTestVisitor();
 
-  Optional<VisitInterrupt> result = visitor->DefaultVisit(root);
+  Expected<Optional<VisitInterrupt>> result = visitor->DefaultVisitExpected(root);
 
-  EXPECT_FALSE(result.has_value());
+  ASSERT_TRUE(result.is_ok());
+  EXPECT_FALSE(result.value().has_value());
   ASSERT_EQ(AsTestVisitor(visitor)->visited.size(), 2U);
   EXPECT_TRUE(AsTestVisitor(visitor)->visited[0].same_as(key));
   EXPECT_TRUE(AsTestVisitor(visitor)->visited[1].same_as(value));
@@ -246,6 +253,31 @@ TEST(StructuralVisitor, RestoresFuncDefRegion) {
   EXPECT_EQ(test_visitor->modes[1], kTVMFFIDefRegionKindRecursive);
   EXPECT_TRUE(test_visitor->visited[2].same_as(param));
   EXPECT_EQ(test_visitor->modes[2], kTVMFFIDefRegionKindRecursive);
+  EXPECT_EQ(test_visitor->def_region_kind(), kTVMFFIDefRegionKindNone);
+}
+
+TEST(StructuralVisitor, ExplicitDefRegionsOverrideFreeVarFieldClamp) {
+  TVarWithDep recursive("recursive");
+  TVarWithDep non_recursive("non-recursive");
+  TDefHolder holder(recursive, non_recursive);
+  TVarWithDep root("outer", holder);
+  StructuralVisitor visitor = MakeTestVisitor();
+
+  Expected<Optional<VisitInterrupt>> result = visitor->WithDefRegionKind(
+      kTVMFFIDefRegionKindNonRecursive, [&]() { return visitor->VisitExpected(root); });
+
+  ASSERT_TRUE(result.is_ok());
+  EXPECT_FALSE(result.value().has_value());
+  TestVisitorObj* test_visitor = AsTestVisitor(visitor);
+  ASSERT_EQ(test_visitor->visited.size(), 4U);
+  EXPECT_TRUE(test_visitor->visited[0].same_as(root));
+  EXPECT_EQ(test_visitor->modes[0], kTVMFFIDefRegionKindNonRecursive);
+  EXPECT_TRUE(test_visitor->visited[1].same_as(holder));
+  EXPECT_EQ(test_visitor->modes[1], kTVMFFIDefRegionKindNone);
+  EXPECT_TRUE(test_visitor->visited[2].same_as(recursive));
+  EXPECT_EQ(test_visitor->modes[2], kTVMFFIDefRegionKindRecursive);
+  EXPECT_TRUE(test_visitor->visited[3].same_as(non_recursive));
+  EXPECT_EQ(test_visitor->modes[3], kTVMFFIDefRegionKindNonRecursive);
   EXPECT_EQ(test_visitor->def_region_kind(), kTVMFFIDefRegionKindNone);
 }
 

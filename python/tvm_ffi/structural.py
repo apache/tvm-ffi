@@ -352,20 +352,9 @@ class StructuralVisitor(Object):
     """Low-level structural traversal visitor.
 
     This class exposes the low-level visitor object used by structural
-    traversal hooks.
+    traversal hooks. Instances are supplied by an active traversal and cannot
+    be constructed directly.
     """
-
-    # tvm-ffi-stubgen(begin): object/ffi.StructuralVisitor
-    # fmt: off
-    if TYPE_CHECKING:
-        def __init__(self) -> None: ...
-        def __ffi_init__(self) -> None: ...  # ty: ignore[invalid-method-override]
-    # fmt: on
-    # tvm-ffi-stubgen(end)
-
-    def __init__(self) -> None:
-        """Create a default structural visitor."""
-        self.__init_handle_by_constructor__(_ffi_api.StructuralVisitor)
 
     def visit(self, value: Any) -> VisitInterrupt | None:
         """Low-level API to visit ``value`` using this visitor's dispatch behavior.

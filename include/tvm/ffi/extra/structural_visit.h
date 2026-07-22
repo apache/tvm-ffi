@@ -138,9 +138,6 @@ struct StructuralVisitorVTable {
  */
 class StructuralVisitorObj : public Object {
  public:
-  /*! \brief Construct the default structural visitor. */
-  StructuralVisitorObj() : StructuralVisitorObj(VTable()) {}
-
   /*!
    * \brief Visit a value, dispatching through this visitor's vtable.
    *
@@ -164,16 +161,41 @@ class StructuralVisitorObj : public Object {
   }
 
   /*!
-   * \brief Visit using the structural visit behavior registered by kStructuralVisit for each type,
-   * or reflected structural fields when no custom behavior is registered.
+   * \brief Return the current def-region context.
+   * \return The active def-region kind.
    */
-  TVM_FFI_INLINE Optional<VisitInterrupt> DefaultVisit(AnyView value) {
-    return DefaultVisitExpected(value).value();
+  TVM_FFI_INLINE TVMFFIDefRegionKind def_region_kind() const { return def_region_mode_; }
+
+  /*!
+   * \brief Temporarily switch the def-region context while invoking \p callback.
+   *
+   * \param kind The def-region kind to set during the callback.
+   * \param callback A nullary callable that performs recursive visiting.
+   * \return The value returned by \p callback.
+   */
+  template <typename Callback>
+  TVM_FFI_INLINE auto WithDefRegionKind(TVMFFIDefRegionKind kind, Callback&& callback) {
+    class Scope {
+     public:
+      Scope(StructuralVisitorObj* visitor, TVMFFIDefRegionKind kind)
+          : visitor_(visitor), old_kind_(visitor->def_region_mode_) {
+        visitor_->def_region_mode_ = kind;
+      }
+      ~Scope() { visitor_->def_region_mode_ = old_kind_; }
+      Scope(const Scope&) = delete;
+      Scope& operator=(const Scope&) = delete;
+
+     private:
+      StructuralVisitorObj* visitor_;
+      TVMFFIDefRegionKind old_kind_;
+    };
+    Scope scope(this, kind);
+    return std::forward<Callback>(callback)();
   }
 
   /*!
-   * \brief Visit using the registered structural visit behavior by kStructuralVisit, propagating
-   * errors by Expected.
+   * \brief Visit using the structural visit behavior registered by kStructuralVisit for each type,
+   * or reflected structural fields when no custom behavior is registered.
    *
    * \param value The value to visit.
    * \return Expected interrupt state. An error means traversal failed.
@@ -209,43 +231,6 @@ class StructuralVisitorObj : public Object {
     return details::VisitReflectedFieldsExpected(this, value.cast<const Object*>());
   }
 
-  /*!
-   * \brief Return the current def-region context.
-   * \return The active def-region kind.
-   */
-  TVM_FFI_INLINE TVMFFIDefRegionKind def_region_kind() const { return def_region_mode_; }
-
-  /*!
-   * \brief Temporarily switch the def-region context while invoking \p callback.
-   *
-   * This helper scopes updates to the traversal state used by def/use-region
-   * aware visitors. The previous state is restored when the callback returns
-   * or throws.
-   *
-   * \param kind The def-region kind to set during the callback.
-   * \param callback A nullary callable that performs recursive visiting.
-   * \return The value returned by \p callback.
-   */
-  template <typename Callback>
-  TVM_FFI_INLINE auto WithDefRegionKind(TVMFFIDefRegionKind kind, Callback&& callback) {
-    class Scope {
-     public:
-      Scope(StructuralVisitorObj* visitor, TVMFFIDefRegionKind kind)
-          : visitor_(visitor), old_kind_(visitor->def_region_mode_) {
-        visitor_->def_region_mode_ = kind;
-      }
-      ~Scope() { visitor_->def_region_mode_ = old_kind_; }
-      Scope(const Scope&) = delete;
-      Scope& operator=(const Scope&) = delete;
-
-     private:
-      StructuralVisitorObj* visitor_;
-      TVMFFIDefRegionKind old_kind_;
-    };
-    Scope scope(this, kind);
-    return std::forward<Callback>(callback)();
-  }
-
   /// \cond Doxygen_Suppress
   static constexpr const bool _type_mutable = true;
   TVM_FFI_DECLARE_OBJECT_INFO("ffi.StructuralVisitor", StructuralVisitorObj, Object);
@@ -253,12 +238,8 @@ class StructuralVisitorObj : public Object {
 
  protected:
   /*!
-   * \brief Construct a structural visitor subclass with a custom dispatch vtable.
-   *
-   * \param vtable The non-null dispatch table for this visitor.
-   *
-   * \note This constructor is for internal subclasses.  The vtable and its
-   *       ``visit`` callback must be valid for the lifetime of the visitor.
+   * \brief Construct a structural visitor from an immutable dispatch vtable.
+   * \param vtable The non-null dispatch table for this visitor. It must outlive this object.
    */
   explicit StructuralVisitorObj(const StructuralVisitorVTable* vtable) : vtable_(vtable) {}
 
@@ -276,33 +257,6 @@ class StructuralVisitorObj : public Object {
    * to scope temporary changes.
    */
   TVMFFIDefRegionKind def_region_mode_ = kTVMFFIDefRegionKindNone;
-
- private:
-  /*!
-   * \brief Return the vtable used by the default visitor.
-   * \return Pointer to the static structural visitor vtable.
-   */
-  static const StructuralVisitorVTable* VTable() {
-    static const StructuralVisitorVTable vtable{&StructuralVisitorObj::DispatchVisit};
-    return &vtable;
-  }
-
-  /*!
-   * \brief Dispatch from the vtable to the default visitor.
-   * \param visitor The structural visitor object.
-   * \param value The value to visit.
-   * \return Interrupt state, or an error if traversal failed.
-   */
-  static TVMFFIAny DispatchVisit(StructuralVisitorObj* visitor, AnyView value) noexcept {
-    auto interrupt = visitor->DefaultVisitExpected(value);
-    if (TVM_FFI_PREDICT_FALSE(interrupt.type_index() == TypeIndex::kTVMFFIError)) {
-      if (value.type_index() >= TypeIndex::kTVMFFIStaticObjectBegin) {
-        Error err = interrupt.error();
-        details::UpdateVisitErrorContext(err, value.cast<ObjectRef>());
-      }
-    }
-    return details::ExpectedUnsafe::MoveToTVMFFIAny(std::move(interrupt));
-  }
 };
 
 /*!
@@ -312,10 +266,6 @@ class StructuralVisitorObj : public Object {
  */
 class StructuralVisitor : public ObjectRef {
  public:
-  /*!
-   * \brief Construct the default structural visitor.
-   */
-  StructuralVisitor() : ObjectRef(make_object<StructuralVisitorObj>()) {}
   /*!
    * \brief Construct from an existing object pointer.
    * \param n The object pointer to wrap.
@@ -355,6 +305,13 @@ TVM_FFI_INLINE static Expected<Optional<VisitInterrupt>> VisitReflectedFieldsExp
     StructuralVisitorObj* visitor, const Object* obj) noexcept {
   int32_t type_index = obj->type_index();
   const TVMFFITypeInfo* type_info = TVMFFIGetTypeInfo(type_index);
+  // A non-recursive definition applies to a FreeVar itself, but not to its children. All other
+  // inherited modes propagate until an explicit field annotation overrides them.
+  TVMFFIDefRegionKind inherited_kind = visitor->def_region_kind();
+  if (inherited_kind == kTVMFFIDefRegionKindNonRecursive && type_info->metadata != nullptr &&
+      type_info->metadata->structural_eq_hash_kind == kTVMFFISEqHashKindFreeVar) {
+    inherited_kind = kTVMFFIDefRegionKindNone;
+  }
 
   Expected<Optional<VisitInterrupt>> result = Optional<VisitInterrupt>(std::nullopt);
   reflection::ForEachFieldInfoWithEarlyStop(
@@ -372,19 +329,15 @@ TVM_FFI_INLINE static Expected<Optional<VisitInterrupt>> VisitReflectedFieldsExp
           return true;
         }
 
-        TVMFFIDefRegionKind kind = kTVMFFIDefRegionKindNone;
+        TVMFFIDefRegionKind kind = inherited_kind;
         if (field_info->flags & kTVMFFIFieldFlagBitMaskSEqHashDefNonRecursive) {
           kind = kTVMFFIDefRegionKindNonRecursive;
         } else if (field_info->flags & kTVMFFIFieldFlagBitMaskSEqHashDefRecursive) {
           kind = kTVMFFIDefRegionKindRecursive;
         }
 
-        if (kind != kTVMFFIDefRegionKindNone) {
-          result = visitor->WithDefRegionKind(
-              kind, [&]() { return visitor->VisitExpected(field_value); });
-        } else {
-          result = visitor->VisitExpected(field_value);
-        }
+        result =
+            visitor->WithDefRegionKind(kind, [&]() { return visitor->VisitExpected(field_value); });
         return StructuralVisitNeedEarlyReturn(result);
       });
   return result;
@@ -478,12 +431,12 @@ struct TypeTraits<WalkResult> : public TypeTraits<WalkResult::Storage> {
 /// \endcond
 
 /*!
- * \brief Callback order for \ref tvm::ffi::StructuralWalk.
+ * \brief Callback order for recursive structural traversal.
  */
 enum class WalkOrder : int32_t {
-  /*! \brief Invoke the callback before visiting children. */
+  /*! \brief Invoke the callback before traversing children. */
   kPreOrder = 0,
-  /*! \brief Invoke the callback after visiting children. */
+  /*! \brief Invoke the callback after traversing children. */
   kPostOrder = 1,
 };
 
@@ -541,11 +494,13 @@ class StructuralWalkCallbackVisitorObj : public StructuralVisitorObj {
 
  private:
   /*!
-   * \brief Return the vtable used by this visitor.
-   * \return Pointer to the static structural visitor vtable.
+   * \brief Return the shared callback-aware visitor vtable.
+   * \return Pointer to the immutable visitor vtable for this specialization.
    */
   static const StructuralVisitorVTable* VTable() {
-    static const StructuralVisitorVTable vtable{&StructuralWalkCallbackVisitorObj::DispatchVisit};
+    static const StructuralVisitorVTable vtable{
+        &StructuralWalkCallbackVisitorObj::DispatchVisit,
+    };
     return &vtable;
   }
 
