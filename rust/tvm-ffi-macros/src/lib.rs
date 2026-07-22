@@ -20,8 +20,16 @@
 use proc_macro::TokenStream;
 use proc_macro_error::proc_macro_error;
 
+mod match_any;
 mod object_macros;
 mod utils;
+
+/// Match a TVM-FFI value against typed patterns in source order.
+#[proc_macro_error]
+#[proc_macro]
+pub fn match_any(input: TokenStream) -> TokenStream {
+    match_any::expand(input)
+}
 
 #[proc_macro_error]
 #[proc_macro_derive(Object, attributes(type_key, type_index))]

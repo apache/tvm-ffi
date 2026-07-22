@@ -26,6 +26,7 @@ pub mod extra;
 pub mod function;
 pub mod function_internal;
 pub mod macros;
+pub mod match_any;
 pub mod object;
 pub mod optional;
 pub mod string;
@@ -45,10 +46,12 @@ pub use crate::error::{
 };
 pub use crate::extra::module::Module;
 pub use crate::function::Function;
+pub use crate::match_any::{AnyPattern, AsAnyView};
 pub use crate::object::{Object, ObjectArc, ObjectCore, ObjectCoreWithExtraItems, ObjectRefCore};
 pub use crate::optional::Optional;
 pub use crate::string::{Bytes, String};
 pub use crate::type_traits::AnyCompatible;
+pub use tvm_ffi_macros::match_any;
 
 pub use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
 pub use tvm_ffi_sys::{
