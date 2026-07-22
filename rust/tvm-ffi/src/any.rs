@@ -103,6 +103,13 @@ impl<'a, T: AnyCompatible> From<&'a T> for AnyView<'a> {
     }
 }
 
+impl<'a> From<&AnyView<'a>> for AnyView<'a> {
+    #[inline]
+    fn from(value: &AnyView<'a>) -> Self {
+        *value
+    }
+}
+
 impl Default for AnyView<'_> {
     fn default() -> Self {
         Self::new()

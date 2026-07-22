@@ -107,6 +107,7 @@ fn expand_match_any(input: MatchAnyInput) -> TokenStream {
     let tvm_ffi = get_tvm_ffi_crate();
     let span = Span::mixed_site();
     let source = Ident::new("__tvm_ffi_match_any_source", span);
+    let converted = Ident::new("__tvm_ffi_match_any_converted", span);
     let view = Ident::new("__tvm_ffi_match_any_view", span);
     let rejected = Ident::new("__tvm_ffi_match_any_rejected", span);
     let scrutinee = input.scrutinee;
@@ -139,7 +140,14 @@ fn expand_match_any(input: MatchAnyInput) -> TokenStream {
     quote! {
         {
             let #source = &(#scrutinee);
-            let #view = #tvm_ffi::AsAnyView::as_any_view(#source);
+            let #converted: ::core::result::Result<
+                #tvm_ffi::AnyView<'_>,
+                ::core::convert::Infallible,
+            > = ::core::convert::TryInto::<#tvm_ffi::AnyView<'_>>::try_into(#source);
+            let #view = match #converted {
+                ::core::result::Result::Ok(view) => view,
+                ::core::result::Result::Err(error) => match error {},
+            };
             #dispatch
         }
     }

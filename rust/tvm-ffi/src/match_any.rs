@@ -17,39 +17,9 @@
  * under the License.
  */
 
-//! Runtime traits used by [`crate::match_any!`].
+//! Runtime trait used by [`crate::match_any!`].
 
-use crate::{Any, AnyCompatible, AnyView};
-
-/// A value that can expose its contents as an erased [`AnyView`].
-///
-/// [`Any`], [`AnyView`], and every [`AnyCompatible`] value implement this
-/// trait.
-pub trait AsAnyView {
-    /// Borrow this value as an [`AnyView`].
-    fn as_any_view(&self) -> AnyView<'_>;
-}
-
-impl<T: AnyCompatible> AsAnyView for T {
-    #[inline]
-    fn as_any_view(&self) -> AnyView<'_> {
-        AnyView::from(self)
-    }
-}
-
-impl AsAnyView for Any {
-    #[inline]
-    fn as_any_view(&self) -> AnyView<'_> {
-        AnyView::from(self)
-    }
-}
-
-impl AsAnyView for AnyView<'_> {
-    #[inline]
-    fn as_any_view(&self) -> AnyView<'_> {
-        *self
-    }
-}
+use crate::AnyView;
 
 /// A typed pattern accepted by [`crate::match_any!`].
 pub trait AnyPattern {
