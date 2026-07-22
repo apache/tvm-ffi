@@ -71,7 +71,6 @@ impl ObjectPattern for I64Pattern {
 #[derive(Debug, PartialEq, Eq)]
 enum Lowered {
     Matrix,
-    Tensor(usize),
     Shaped(usize),
     Unsupported,
 }
@@ -81,7 +80,6 @@ fn lower(expr: Any) -> Lowered {
         expr {
             TypedExpr::<TensorType>(tensor)
                 if tensor.shape().len() == 2 => Lowered::Matrix,
-            TypedExpr::<TensorType>(tensor) => Lowered::Tensor(tensor.shape().len()),
             TypedExpr::<ShapedType>(shaped) => Lowered::Shaped(shaped.rank()),
             _ => Lowered::Unsupported,
         }
@@ -95,7 +93,7 @@ fn matches_object_patterns_in_source_order() {
     let shape = Shape::from([2_i64, 3, 4, 5]);
 
     assert_eq!(lower(Any::from(matrix)), Lowered::Matrix);
-    assert_eq!(lower(Any::from(volume)), Lowered::Tensor(3));
+    assert_eq!(lower(Any::from(volume)), Lowered::Shaped(3));
     assert_eq!(lower(Any::from(shape)), Lowered::Shaped(4));
     assert_eq!(
         lower(Any::from(Array::<i64>::default())),

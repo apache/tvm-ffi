@@ -26,6 +26,9 @@ mod utils;
 
 /// Match an ObjectRef-compatible value against typed patterns in source order.
 ///
+/// The scrutinee may be an owned object handle, `Any`, or `AnyView`. Convert an
+/// already-borrowed object handle to `AnyView` before invoking the macro.
+///
 /// Non-object values skip the typed patterns and use the `_` fallback.
 #[proc_macro_error]
 #[proc_macro]
