@@ -53,6 +53,16 @@ def test_tensor_attributes() -> None:
     np.testing.assert_equal(x2, data)
 
 
+def test_tensor_data_ptr() -> None:
+    data = np.arange(8, dtype="int32")
+    tensor = tvm_ffi.from_dlpack(data)
+    assert tensor.data_ptr() == data.ctypes.data
+
+    view = data[2:]
+    tensor_view = tvm_ffi.from_dlpack(view)
+    assert tensor_view.data_ptr() == view.ctypes.data
+
+
 def test_empty_tensor_is_contiguous() -> None:
     # Empty tensors are trivially contiguous regardless of what
     # strides the producer reports (numpy 2.3+ via __dlpack__ now

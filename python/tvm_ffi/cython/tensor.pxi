@@ -289,6 +289,16 @@ cdef class Tensor(CObject):
             count *= self.cdltensor.shape[i]
         return count
 
+    def data_ptr(self) -> int:
+        """Return the address of the first tensor element.
+
+        Returns
+        -------
+        data_ptr
+            Address of the first tensor element, including the tensor's byte offset.
+        """
+        return <uintptr_t>self.cdltensor.data + self.cdltensor.byte_offset
+
     def size(self, idx: int) -> int:
         """Get the size of the ``idx``-th dimension. Negative ``idx`` counts from the last dimension."""
         cdef int ndim = self.cdltensor.ndim
