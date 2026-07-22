@@ -15,7 +15,7 @@
 # specific language governing permissions and limitations
 # under the License.
 import ctypes
-from libc.stdint cimport int32_t, int64_t, uint64_t, uint32_t, uint8_t, int16_t
+from libc.stdint cimport int32_t, int64_t, uint64_t, uint32_t, uint8_t, int16_t, uintptr_t
 from libc.string cimport memcpy
 from libcpp.vector cimport vector
 from cpython.bytes cimport PyBytes_AsStringAndSize, PyBytes_FromStringAndSize, PyBytes_AsString
