@@ -17,15 +17,17 @@
  * under the License.
  */
 
-//! Runtime trait used by [`crate::match_any!`].
+//! Runtime trait used by [`crate::match_object!`].
 
 use crate::AnyView;
 
-/// A typed pattern accepted by [`crate::match_any!`].
-pub trait AnyPattern {
+/// An ObjectRef-style typed pattern accepted by [`crate::match_object!`].
+///
+/// The macro only calls this trait for values with an object type index.
+pub trait ObjectPattern {
     /// The binding produced by a successful match.
-    type Bound<'a>;
+    type Bound;
 
-    /// Try to match an erased value.
-    fn try_match<'a>(value: AnyView<'a>) -> Option<Self::Bound<'a>>;
+    /// Try to match an erased object value.
+    fn try_match(value: AnyView<'_>) -> Option<Self::Bound>;
 }

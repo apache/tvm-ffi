@@ -24,7 +24,7 @@ use syn::{braced, parenthesized, Expr, Pat, Path, Result, Token};
 
 use crate::utils::get_tvm_ffi_crate;
 
-struct MatchAnyInput {
+struct MatchObjectInput {
     scrutinee: Expr,
     arms: Vec<TypedArm>,
     fallback: Expr,
@@ -37,7 +37,7 @@ struct TypedArm {
     body: Expr,
 }
 
-impl Parse for MatchAnyInput {
+impl Parse for MatchObjectInput {
     fn parse(input: ParseStream<'_>) -> Result<Self> {
         let scrutinee = input.call(Expr::parse_without_eager_brace)?;
         let content;
@@ -84,12 +84,12 @@ impl Parse for MatchAnyInput {
             if content.peek(Token![,]) {
                 content.parse::<Token![,]>()?;
             } else if !content.is_empty() {
-                return Err(content.error("expected `,` between match_any! arms"));
+                return Err(content.error("expected `,` between match_object! arms"));
             }
         }
 
         let fallback = fallback
-            .ok_or_else(|| content.error("match_any! requires a final `_` fallback arm"))?;
+            .ok_or_else(|| content.error("match_object! requires a final `_` fallback arm"))?;
         Ok(Self {
             scrutinee,
             arms,
@@ -99,24 +99,25 @@ impl Parse for MatchAnyInput {
 }
 
 pub fn expand(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    let input = syn::parse_macro_input!(input as MatchAnyInput);
-    expand_match_any(input).into()
+    let input = syn::parse_macro_input!(input as MatchObjectInput);
+    expand_match_object(input).into()
 }
 
-fn expand_match_any(input: MatchAnyInput) -> TokenStream {
+fn expand_match_object(input: MatchObjectInput) -> TokenStream {
     let tvm_ffi = get_tvm_ffi_crate();
     let span = Span::mixed_site();
-    let source = Ident::new("__tvm_ffi_match_any_source", span);
-    let converted = Ident::new("__tvm_ffi_match_any_converted", span);
-    let view = Ident::new("__tvm_ffi_match_any_view", span);
-    let rejected = Ident::new("__tvm_ffi_match_any_rejected", span);
+    let source = Ident::new("__tvm_ffi_match_object_source", span);
+    let converted = Ident::new("__tvm_ffi_match_object_converted", span);
+    let view = Ident::new("__tvm_ffi_match_object_view", span);
+    let rejected = Ident::new("__tvm_ffi_match_object_rejected", span);
     let scrutinee = input.scrutinee;
     let fallback = input.fallback;
-    let dispatch = input
-        .arms
+    let dispatch_fallback = fallback.clone();
+    let arms = input.arms;
+    let dispatch = arms
         .into_iter()
         .rev()
-        .fold(quote!({ #fallback }), |next, arm| {
+        .fold(quote!({ #dispatch_fallback }), |next, arm| {
             let matcher = arm.matcher;
             let binding = arm.binding;
             let body = arm.body;
@@ -127,7 +128,7 @@ fn expand_match_any(input: MatchAnyInput) -> TokenStream {
             };
 
             quote! {
-                match <#matcher as #tvm_ffi::AnyPattern>::try_match(#view) {
+                match <#matcher as #tvm_ffi::ObjectPattern>::try_match(#view) {
                     #matched => { #body },
                     #rejected => {
                         ::core::mem::drop(#rejected);
@@ -148,7 +149,13 @@ fn expand_match_any(input: MatchAnyInput) -> TokenStream {
                 ::core::result::Result::Ok(view) => view,
                 ::core::result::Result::Err(error) => match error {},
             };
-            #dispatch
+            if #view.type_index()
+                >= #tvm_ffi::TypeIndex::kTVMFFIStaticObjectBegin as i32
+            {
+                #dispatch
+            } else {
+                #fallback
+            }
         }
     }
 }

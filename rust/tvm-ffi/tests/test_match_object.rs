@@ -19,10 +19,11 @@
 
 use std::marker::PhantomData;
 
-use tvm_ffi::{match_any, Any, AnyPattern, AnyView, Shape, Tensor};
+use tvm_ffi::{match_object, Any, AnyView, Array, ObjectPattern, Shape, Tensor};
 
 struct TensorType;
 struct ShapedType;
+struct I64Pattern;
 
 struct TypedExpr<T>(PhantomData<T>);
 
@@ -40,22 +41,30 @@ impl ShapedExpr {
     }
 }
 
-impl AnyPattern for TypedExpr<TensorType> {
-    type Bound<'a> = Tensor;
+impl ObjectPattern for TypedExpr<TensorType> {
+    type Bound = Tensor;
 
-    fn try_match<'a>(value: AnyView<'a>) -> Option<Self::Bound<'a>> {
+    fn try_match(value: AnyView<'_>) -> Option<Self::Bound> {
         value.try_as::<Tensor>()
     }
 }
 
-impl AnyPattern for TypedExpr<ShapedType> {
-    type Bound<'a> = ShapedExpr;
+impl ObjectPattern for TypedExpr<ShapedType> {
+    type Bound = ShapedExpr;
 
-    fn try_match<'a>(value: AnyView<'a>) -> Option<Self::Bound<'a>> {
+    fn try_match(value: AnyView<'_>) -> Option<Self::Bound> {
         value
             .try_as::<Tensor>()
             .map(ShapedExpr::Tensor)
             .or_else(|| value.try_as::<Shape>().map(ShapedExpr::Shape))
+    }
+}
+
+impl ObjectPattern for I64Pattern {
+    type Bound = i64;
+
+    fn try_match(value: AnyView<'_>) -> Option<Self::Bound> {
+        value.try_as::<i64>()
     }
 }
 
@@ -67,61 +76,30 @@ enum Lowered {
     Unsupported,
 }
 
-#[derive(Default)]
-struct FuncContext {
-    lowered: Vec<Lowered>,
-}
-
-fn lower_matrix(_tensor: Tensor, func_context: &mut FuncContext) {
-    func_context.lowered.push(Lowered::Matrix);
-}
-
-fn lower_tensor(tensor: Tensor, func_context: &mut FuncContext) {
-    func_context
-        .lowered
-        .push(Lowered::Tensor(tensor.shape().len()));
-}
-
-fn lower_shaped(shaped: ShapedExpr, func_context: &mut FuncContext) {
-    func_context.lowered.push(Lowered::Shaped(shaped.rank()));
-}
-
-fn report_unsupported(func_context: &mut FuncContext) {
-    func_context.lowered.push(Lowered::Unsupported);
-}
-
-fn lower_expr(expr: Any, func_context: &mut FuncContext) {
-    match_any! {
+fn lower(expr: Any) -> Lowered {
+    match_object! {
         expr {
             TypedExpr::<TensorType>(tensor)
-                if tensor.shape().len() == 2 => lower_matrix(tensor, func_context),
-            TypedExpr::<TensorType>(tensor) => lower_tensor(tensor, func_context),
-            TypedExpr::<ShapedType>(shaped) => lower_shaped(shaped, func_context),
-            _ => report_unsupported(func_context),
+                if tensor.shape().len() == 2 => Lowered::Matrix,
+            TypedExpr::<TensorType>(tensor) => Lowered::Tensor(tensor.shape().len()),
+            TypedExpr::<ShapedType>(shaped) => Lowered::Shaped(shaped.rank()),
+            _ => Lowered::Unsupported,
         }
     }
 }
 
 #[test]
-fn lowers_real_object_types_in_source_order() {
+fn matches_object_patterns_in_source_order() {
     let matrix = Tensor::from_slice(&[0_f32; 6], &[2, 3]).unwrap();
     let volume = Tensor::from_slice(&[0_f32; 24], &[2, 3, 4]).unwrap();
     let shape = Shape::from([2_i64, 3, 4, 5]);
-    let mut func_context = FuncContext::default();
 
-    lower_expr(Any::from(matrix), &mut func_context);
-    lower_expr(Any::from(volume), &mut func_context);
-    lower_expr(Any::from(shape), &mut func_context);
-    lower_expr(Any::from(true), &mut func_context);
-
+    assert_eq!(lower(Any::from(matrix)), Lowered::Matrix);
+    assert_eq!(lower(Any::from(volume)), Lowered::Tensor(3));
+    assert_eq!(lower(Any::from(shape)), Lowered::Shaped(4));
     assert_eq!(
-        func_context.lowered,
-        [
-            Lowered::Matrix,
-            Lowered::Tensor(3),
-            Lowered::Shaped(4),
-            Lowered::Unsupported,
-        ]
+        lower(Any::from(Array::<i64>::default())),
+        Lowered::Unsupported
     );
 }
 
@@ -132,7 +110,7 @@ fn scrutinee_is_evaluated_once() {
         evaluations += 1;
         Shape::from([2_i64, 3, 4])
     };
-    let selected = match_any! {
+    let selected = match_object! {
         make_value() {
             TypedExpr::<ShapedType>(shaped) => shaped.rank(),
             _ => 0,
@@ -143,10 +121,21 @@ fn scrutinee_is_evaluated_once() {
 }
 
 #[test]
+fn non_object_values_use_fallback() {
+    let selected = match_object! {
+        8_i64 {
+            I64Pattern(value) => value,
+            _ => 0,
+        }
+    };
+    assert_eq!(selected, 0);
+}
+
+#[test]
 fn accepts_any_view() {
     let shape = Shape::from([2_i64, 3, 4, 5]);
     let view = AnyView::from(&shape);
-    let selected = match_any! {
+    let selected = match_object! {
         view {
             TypedExpr::<ShapedType>(shaped) => shaped.rank(),
             _ => 0,
