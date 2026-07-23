@@ -22,8 +22,7 @@ use std::env;
 
 /// Return the path used to reference the `tvm-ffi` crate in generated code.
 pub(crate) fn get_tvm_ffi_crate() -> TokenStream {
-    let is_tvm_ffi = env::var("CARGO_PKG_NAME").ok().as_deref() == Some("tvm-ffi")
-        && env::var("CARGO_CRATE_NAME").ok().as_deref() == Some("tvm_ffi");
+    let is_tvm_ffi = env::var("CARGO_CRATE_NAME").ok().as_deref() == Some("tvm_ffi");
     if is_tvm_ffi {
         quote!(crate)
     } else {
