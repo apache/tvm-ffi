@@ -23,6 +23,7 @@ use crate::derive::ObjectRef;
 pub use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
 /// Object related ABI handling
 use tvm_ffi_sys::{TVMFFIGetCustomAllocator, TVMFFIObject, COMBINED_REF_COUNT_BOTH_ONE};
+use tvm_ffi_sys::TVMFFIGetTypeInfo;
 
 /// Object type is by default the TVMFFIObject
 #[repr(C)]
@@ -102,6 +103,91 @@ pub unsafe trait ObjectRefCore: Sized + Clone {
     fn from_data(data: ObjectArc<Self::ContainerType>) -> Self;
 }
 
+/// Check whether a runtime type index refers to `target_type_index` or one of
+/// its subtypes.
+///
+/// The subtype relation lives in the process-wide type table maintained by the
+/// tvm-ffi library: every registered type records its depth in the single
+/// inheritance tree together with the chain of its ancestors. The check is
+/// O(1) — if `target` really is an ancestor, it must appear in the candidate's
+/// ancestor array exactly at `target`'s depth.
+pub fn is_instance_of(object_type_index: i32, target_type_index: i32) -> bool {
+    if object_type_index == target_type_index {
+        return true;
+    }
+    // only object types participate in the type hierarchy
+    if object_type_index < TypeIndex::kTVMFFIStaticObjectBegin as i32 {
+        return false;
+    }
+    unsafe {
+        let object_info = TVMFFIGetTypeInfo(object_type_index);
+        let target_info = TVMFFIGetTypeInfo(target_type_index);
+        if object_info.is_null() || target_info.is_null() {
+            return false;
+        }
+        let target_depth = (*target_info).type_depth;
+        if (*object_info).type_depth <= target_depth {
+            return false;
+        }
+        let ancestor = *(*object_info).type_acenstors.add(target_depth as usize);
+        !ancestor.is_null() && (*ancestor).type_index == target_type_index
+    }
+}
+
+/// Runtime-checked casting between arbitrary `ObjectRef` types.
+///
+/// The cast succeeds iff the runtime type of the underlying object is the
+/// target's container type or a subtype of it, mirroring the semantics of
+/// `ObjectRef::as<T>` in C++. Upcasts, downcasts and self-casts all go through
+/// the same check; casting between unrelated types fails at runtime with a
+/// `TypeError`.
+///
+/// This trait is blanket-implemented for every [`ObjectRefCore`] type. The
+/// pointer reinterpretation is sound because every container type is
+/// `#[repr(C)]` with its base (transitively, the `TVMFFIObject` header) as
+/// the first field.
+pub trait ObjectRefCast: ObjectRefCore {
+    /// Consume `self` and rewrap the underlying object as `B` without copying.
+    fn try_cast<B: ObjectRefCore>(self) -> crate::error::Result<B> {
+        let data = Self::into_data(self);
+        unsafe {
+            let header = ObjectArc::as_raw(&data) as *const TVMFFIObject;
+            let runtime_index = (*header).type_index;
+            let target_index = <B::ContainerType as ObjectCore>::type_index();
+            if is_instance_of(runtime_index, target_index) {
+                let raw = ObjectArc::into_raw(data);
+                Ok(B::from_data(ObjectArc::from_raw(
+                    raw as *const B::ContainerType,
+                )))
+            } else {
+                let info = TVMFFIGetTypeInfo(runtime_index);
+                let source_key = if info.is_null() {
+                    format!("type_index({})", runtime_index)
+                } else {
+                    (*info).type_key.as_str().to_string()
+                };
+                Err(crate::error::Error::new(
+                    crate::error::TYPE_ERROR,
+                    &format!(
+                        "Cannot convert from type `{}` to `{}`",
+                        source_key,
+                        <B::ContainerType as ObjectCore>::TYPE_KEY
+                    ),
+                    "",
+                ))
+            }
+        }
+    }
+
+    /// Same as [`try_cast`](Self::try_cast), but shares ownership with `self`
+    /// instead of consuming it.
+    fn cast_clone<B: ObjectRefCore>(&self) -> crate::error::Result<B> {
+        Self::from_data(Self::data(self).clone()).try_cast()
+    }
+}
+
+impl<T: ObjectRefCore> ObjectRefCast for T {}
+
 /// Base class for ObjectRef
 ///
 /// This class is used to store the data of the ObjectRef
@@ -112,7 +198,8 @@ pub struct ObjectRef {
 }
 
 /// Unsafe operations on object
-pub(crate) mod unsafe_ {
+#[doc(hidden)]
+pub mod unsafe_ {
     use tvm_ffi_sys::{
         COMBINED_REF_COUNT_BOTH_ONE, COMBINED_REF_COUNT_MASK_U32, COMBINED_REF_COUNT_STRONG_ONE,
         COMBINED_REF_COUNT_WEAK_ONE,

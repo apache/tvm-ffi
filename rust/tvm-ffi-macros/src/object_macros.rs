@@ -58,7 +58,7 @@ pub fn derive_object(input: proc_macro::TokenStream) -> TokenStream {
                                 &type_key_arg, &mut tindex
                             );
                             if ret != 0 {
-                                proc_macro_error::abort!("Failed to get type index for type key: {}", #type_key);
+                                panic!("Failed to get type index for type key: {}", #type_key);
                             }
                             tindex
                         }
@@ -143,7 +143,7 @@ pub fn derive_object_ref(input: proc_macro::TokenStream) -> TokenStream {
 
         // implement AnyCompatible for #struct_name
         unsafe impl #tvm_ffi_crate::type_traits::AnyCompatible for #struct_name {
-            fn type_str() -> String {
+            fn type_str() -> std::string::String {
                 type ContainerType = <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>
                     ::ContainerType;
                 <ContainerType as #tvm_ffi_crate::object::ObjectCore>::TYPE_KEY.into()
@@ -171,7 +171,7 @@ pub fn derive_object_ref(input: proc_macro::TokenStream) -> TokenStream {
                     ::ContainerType;
                 let type_index =
                     <ContainerType as #tvm_ffi_crate::object::ObjectCore>::type_index();
-                data.type_index == type_index as i32
+                #tvm_ffi_crate::object::is_instance_of(data.type_index, type_index)
             }
 
             unsafe fn copy_from_any_view_after_check(
@@ -227,7 +227,7 @@ pub fn derive_object_ref(input: proc_macro::TokenStream) -> TokenStream {
                     ::ContainerType;
                 let type_index =
                     <ContainerType as #tvm_ffi_crate::object::ObjectCore>::type_index();
-                if data.type_index == type_index as i32 {
+                if #tvm_ffi_crate::object::is_instance_of(data.type_index, type_index) {
                     Ok(Self::copy_from_any_view_after_check(data))
                 } else {
                     Err(())
