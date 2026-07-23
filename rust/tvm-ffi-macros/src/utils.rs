@@ -22,8 +22,7 @@ use std::env;
 
 /// Return the path used to reference the `tvm-ffi` crate in generated code.
 pub(crate) fn get_tvm_ffi_crate() -> TokenStream {
-    let is_tvm_ffi = env::var("CARGO_CRATE_NAME").unwrap() == "tvm_ffi";
-    if is_tvm_ffi {
+    if env::var("CARGO_CRATE_NAME").unwrap() == "tvm_ffi" {
         quote!(crate)
     } else {
         quote!(tvm_ffi)
