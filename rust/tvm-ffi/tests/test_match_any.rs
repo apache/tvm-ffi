@@ -17,7 +17,7 @@
  * under the License.
  */
 
-use tvm_ffi::{match_any, Any, Array, Map, Shape, Tensor};
+use tvm_ffi::{match_any, Any, AnyView, Array, Map, Shape, Tensor};
 
 #[test]
 fn matches_concrete_object_containers_in_source_order() {
@@ -47,4 +47,15 @@ fn matches_concrete_object_containers_in_source_order() {
         classify(Any::from(Map::<i64, i64>::default())),
         ("unsupported", 0)
     );
+    assert_eq!(classify(Any::from(1_i64)), ("unsupported", 0));
+
+    let tensor = Tensor::from_slice(&[0_f32; 6], &[2, 3]).unwrap();
+    let view = AnyView::from(&tensor);
+    let matched_view = match_any! {
+        view {
+            Tensor(tensor) => ("tensor", tensor.shape().len()),
+            _ => ("unsupported", 0),
+        }
+    };
+    assert_eq!(matched_view, ("tensor", 2));
 }
