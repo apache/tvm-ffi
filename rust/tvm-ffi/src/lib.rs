@@ -49,6 +49,7 @@ pub use crate::object::{Object, ObjectArc, ObjectCore, ObjectCoreWithExtraItems,
 pub use crate::optional::Optional;
 pub use crate::string::{Bytes, String};
 pub use crate::type_traits::AnyCompatible;
+pub use tvm_ffi_macros::match_any;
 
 pub use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
 pub use tvm_ffi_sys::{
