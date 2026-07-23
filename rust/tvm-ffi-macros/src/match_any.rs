@@ -122,13 +122,13 @@ fn expand_match_any(input: MatchAnyInput) -> TokenStream {
             let binding = arm.binding;
             let body = arm.body;
             let matched = if let Some(guard) = arm.guard {
-                quote!(::core::option::Option::Some(#binding) if #guard)
+                quote!(::core::result::Result::Ok(#binding) if #guard)
             } else {
-                quote!(::core::option::Option::Some(#binding))
+                quote!(::core::result::Result::Ok(#binding))
             };
 
             quote! {
-                match <#matcher as #tvm_ffi::ObjectPattern>::try_match(#view) {
+                match ::core::convert::TryInto::<#matcher>::try_into(#view) {
                     #matched => { #body },
                     #rejected => {
                         ::core::mem::drop(#rejected);
