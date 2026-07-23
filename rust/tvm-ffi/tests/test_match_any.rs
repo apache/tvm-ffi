@@ -17,85 +17,63 @@
  * under the License.
  */
 
-use std::marker::PhantomData;
+use tvm_ffi::{
+    match_any, Any, AnyCompatible, AnyView, Array, ObjectPattern, ObjectRefCore, Shape, Tensor,
+};
 
-use tvm_ffi::{match_any, Any, AnyView, Array, ObjectPattern, Shape, Tensor};
+struct ObjectMatcher<T>(T);
 
-// Stand-ins for matcher types supplied by a downstream AST crate.
-struct TensorType;
-struct ShapedType;
-
-struct TypedExpr<T>(PhantomData<T>);
-
-enum ShapedExpr {
-    Tensor(Tensor),
-    Shape(Shape),
-}
-
-impl ShapedExpr {
-    fn rank(&self) -> usize {
-        match self {
-            Self::Tensor(tensor) => tensor.shape().len(),
-            Self::Shape(shape) => shape.len(),
-        }
-    }
-}
-
-impl ObjectPattern for TypedExpr<TensorType> {
-    type Bound = Tensor;
+impl<T> ObjectPattern for ObjectMatcher<T>
+where
+    T: AnyCompatible + ObjectRefCore,
+{
+    type Bound = T;
 
     fn try_match(value: AnyView<'_>) -> Option<Self::Bound> {
-        value.try_as::<Tensor>()
-    }
-}
-
-impl ObjectPattern for TypedExpr<ShapedType> {
-    type Bound = ShapedExpr;
-
-    fn try_match(value: AnyView<'_>) -> Option<Self::Bound> {
-        value
-            .try_as::<Tensor>()
-            .map(ShapedExpr::Tensor)
-            .or_else(|| value.try_as::<Shape>().map(ShapedExpr::Shape))
+        value.try_as::<T>()
     }
 }
 
 #[derive(Debug, PartialEq, Eq)]
 enum Lowered {
     Matrix,
-    Shaped(usize),
+    Tensor(usize),
+    Shape(usize),
     Unsupported,
 }
 
-#[derive(Default)]
-struct FuncContext {
-    calls: Vec<(&'static str, usize)>,
-}
+type FuncContext = Vec<&'static str>;
 
 #[test]
-fn lowers_with_ordered_patterns_and_a_guard() {
-    fn lower_tensor(tensor: Tensor, func_context: &mut FuncContext) -> Lowered {
-        func_context.calls.push(("tensor", tensor.shape().len()));
+fn matches_concrete_object_containers_in_source_order() {
+    fn lower_matrix(tensor: Tensor, func_context: &mut FuncContext) -> Lowered {
+        func_context.push("matrix");
+        debug_assert_eq!(tensor.shape().len(), 2);
         Lowered::Matrix
     }
 
-    fn lower_shaped(shaped: ShapedExpr, func_context: &mut FuncContext) -> Lowered {
-        let rank = shaped.rank();
-        func_context.calls.push(("shaped", rank));
-        Lowered::Shaped(rank)
+    fn lower_tensor(tensor: Tensor, func_context: &mut FuncContext) -> Lowered {
+        func_context.push("tensor");
+        Lowered::Tensor(tensor.shape().len())
+    }
+
+    fn lower_shape(shape: Shape, func_context: &mut FuncContext) -> Lowered {
+        func_context.push("shape");
+        Lowered::Shape(shape.len())
     }
 
     fn report_unsupported(func_context: &mut FuncContext) -> Lowered {
-        func_context.calls.push(("unsupported", 0));
+        func_context.push("unsupported");
         Lowered::Unsupported
     }
 
     fn lower(expr: Any, func_context: &mut FuncContext) -> Lowered {
         match_any! {
             expr {
-                TypedExpr::<TensorType>(tensor)
-                    if tensor.shape().len() == 2 => lower_tensor(tensor, func_context),
-                TypedExpr::<ShapedType>(shaped) => lower_shaped(shaped, func_context),
+                ObjectMatcher::<Tensor>(tensor)
+                    if tensor.shape().len() == 2 => lower_matrix(tensor, func_context),
+                ObjectMatcher::<Tensor>(tensor) => lower_tensor(tensor, func_context),
+                ObjectMatcher::<Shape>(shape) => lower_shape(shape, func_context),
                 _ => report_unsupported(func_context),
             }
         }
@@ -104,28 +82,20 @@ fn lowers_with_ordered_patterns_and_a_guard() {
     let matrix = Tensor::from_slice(&[0_f32; 6], &[2, 3]).unwrap();
     let volume = Tensor::from_slice(&[0_f32; 24], &[2, 3, 4]).unwrap();
     let shape = Shape::from([2_i64, 3, 4, 5]);
-    let mut func_context = FuncContext::default();
+    let mut func_context = FuncContext::new();
 
     assert_eq!(lower(Any::from(matrix), &mut func_context), Lowered::Matrix);
     assert_eq!(
         lower(Any::from(volume), &mut func_context),
-        Lowered::Shaped(3)
+        Lowered::Tensor(3)
     );
     assert_eq!(
         lower(Any::from(shape), &mut func_context),
-        Lowered::Shaped(4)
+        Lowered::Shape(4)
     );
     assert_eq!(
         lower(Any::from(Array::<i64>::default()), &mut func_context),
         Lowered::Unsupported
     );
-    assert_eq!(
-        func_context.calls,
-        [
-            ("tensor", 2),
-            ("shaped", 3),
-            ("shaped", 4),
-            ("unsupported", 0),
-        ]
-    );
+    assert_eq!(func_context, ["matrix", "tensor", "shape", "unsupported"]);
 }
