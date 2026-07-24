@@ -31,6 +31,11 @@ pub fn derive_object(input: proc_macro::TokenStream) -> TokenStream {
     let type_key = get_attr(&derive_input, "type_key")
         .map(attr_to_str)
         .expect("Expect #[type_key = \"<my_type_key>\"] attribute");
+    let type_final = match get_attr(&derive_input, "type_final") {
+        Some(attr) if matches!(attr.parse_meta(), Ok(syn::Meta::Path(_))) => true,
+        Some(_) => panic!("Expect #[type_final] attribute"),
+        None => false,
+    };
 
     // type index can be optional
     // for now we make it required for static index
@@ -70,6 +75,20 @@ pub fn derive_object(input: proc_macro::TokenStream) -> TokenStream {
     };
     // search for field name base and derive the base type
     // we expect base always to be the first field
+    let final_parent_check = match &derive_input.data {
+        syn::Data::Struct(s) => s.fields.iter().next().and_then(|f| {
+            let base_ty = f.ty.clone();
+            Some(quote! {
+                const _: () = {
+                    ::core::assert!(
+                        !<#base_ty as #tvm_ffi_crate::object::ObjectCore>::TYPE_FINAL,
+                        "an object type cannot derive from a final parent"
+                    );
+                };
+            })
+        }),
+        _ => panic!("First field must be `<base_name>: <ObjectCoreType>`"),
+    };
     let base_def_tokens = match &derive_input.data {
         syn::Data::Struct(s) => s.fields.iter().next().and_then(|f| {
             let (base_id, base_ty) = (f.ident.clone()?, f.ty.clone());
@@ -91,8 +110,11 @@ pub fn derive_object(input: proc_macro::TokenStream) -> TokenStream {
     };
 
     let expanded = quote! {
+        #final_parent_check
+
         unsafe impl #tvm_ffi_crate::object::ObjectCore for #struct_name {
             const TYPE_KEY: &'static str = #type_key;
+            const TYPE_FINAL: bool = #type_final;
 
             #type_index_tokens
 
@@ -143,6 +165,19 @@ pub fn derive_object_ref(input: proc_macro::TokenStream) -> TokenStream {
 
         // implement AnyCompatible for #struct_name
         unsafe impl #tvm_ffi_crate::type_traits::AnyCompatible for #struct_name {
+            const MATCH_ANY_EXACT: bool = {
+                type ContainerType =
+                    <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>::ContainerType;
+                <ContainerType as #tvm_ffi_crate::object::ObjectCore>::TYPE_FINAL
+            };
+
+            #[inline]
+            fn match_any_exact_type_index() -> i32 {
+                type ContainerType = <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>
+                    ::ContainerType;
+                <ContainerType as #tvm_ffi_crate::object::ObjectCore>::type_index()
+            }
+
             fn type_str() -> String {
                 type ContainerType = <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>
                     ::ContainerType;

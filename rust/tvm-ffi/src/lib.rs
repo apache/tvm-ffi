@@ -26,6 +26,8 @@ pub mod extra;
 pub mod function;
 pub mod function_internal;
 pub mod macros;
+#[doc(hidden)]
+pub mod match_any;
 pub mod object;
 pub mod optional;
 pub mod string;

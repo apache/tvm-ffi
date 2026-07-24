@@ -31,6 +31,7 @@ use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
 #[derive(Object)]
 #[type_key = "ffi.Module"]
 #[type_index(TypeIndex::kTVMFFIModule)]
+#[type_final]
 pub struct ModuleObj {
     object: Object,
 }
@@ -69,5 +70,34 @@ impl Module {
         crate::cached_global_func!("ffi.ModuleGetFunction")
             .call_tuple_with_len::<3, _>((self, name, true))?
             .try_into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{match_any, Any, Array};
+
+    #[test]
+    fn match_any_leaf_lookup_keeps_the_first_arm() {
+        fn classify(value: Any) -> usize {
+            match_any! {
+                value {
+                    Module(_) => 0,
+                    Module(_) => 1,
+                    Module(_) => 2,
+                    Module(_) => 3,
+                    _ => 4,
+                }
+            }
+        }
+
+        let module = Module {
+            data: ObjectArc::new(ModuleObj {
+                object: Object::new(),
+            }),
+        };
+        assert_eq!(classify(Any::from(module)), 0);
+        assert_eq!(classify(Any::from(Array::<i64>::default())), 4);
     }
 }

@@ -50,6 +50,11 @@ unsafe impl<T: Send + Sync + ObjectCore> Sync for ObjectArc<T> {}
 pub unsafe trait ObjectCore: Sized + 'static {
     /// the type key of the object
     const TYPE_KEY: &'static str;
+    /// Whether every instance of this type has exactly `Self::type_index()`.
+    ///
+    /// A final type must never have a registered subtype.
+    #[doc(hidden)]
+    const TYPE_FINAL: bool = false;
     // return the type index of the object
     fn type_index() -> i32;
     /// Return the object header
