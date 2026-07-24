@@ -59,3 +59,19 @@ fn matches_concrete_object_containers_in_source_order() {
     };
     assert_eq!(matched_view, ("tensor", 2));
 }
+
+#[test]
+fn parameterized_containers_keep_ordered_conversion() {
+    let array = [1.5_f64, 2.5].into_iter().collect::<Array<f64>>();
+    let selected = match_any! {
+        Any::from(array) {
+            Array::<i64>(_) => "integer array",
+            Tensor(_) => "tensor",
+            Shape(_) => "shape",
+            Array::<f64>(_) => "float array",
+            _ => "unsupported",
+        }
+    };
+
+    assert_eq!(selected, "float array");
+}

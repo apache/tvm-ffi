@@ -25,6 +25,23 @@ use tvm_ffi_sys::{TVMFFIAny, TVMFFIGetTypeInfo};
 /// Trait to enable a value to be compatible with Any
 /// Enables TryFrom/Into AnyView/Any
 pub unsafe trait AnyCompatible: Sized {
+    /// Whether the `AnyView -> Self` conversion matches one exact leaf type.
+    ///
+    /// If this is `true`, [`Self::match_any_exact_type_index`] must always
+    /// return the same index for the process lifetime, and conversion from an
+    /// object-backed `AnyView` must succeed if and only if its runtime type
+    /// index equals that index. Matching must not depend on any other part of
+    /// the value. `match_any!` may use this contract to skip conversions for
+    /// all other arms.
+    #[doc(hidden)]
+    const MATCH_ANY_EXACT: bool = false;
+
+    /// Return the sole runtime object type index accepted by this conversion.
+    #[doc(hidden)]
+    fn match_any_exact_type_index() -> i32 {
+        unreachable!("MATCH_ANY_EXACT is false")
+    }
+
     /// the value to copy to TVMFFIAny
     unsafe fn copy_to_any_view(src: &Self, data: &mut TVMFFIAny);
     /// consume the value to move to Any

@@ -37,7 +37,7 @@ pub fn match_any(input: TokenStream) -> TokenStream {
 }
 
 #[proc_macro_error]
-#[proc_macro_derive(Object, attributes(type_key, type_index))]
+#[proc_macro_derive(Object, attributes(type_key, type_index, type_final))]
 pub fn derive_object(input: TokenStream) -> TokenStream {
     TokenStream::from(object_macros::derive_object(input))
 }
