@@ -103,10 +103,16 @@ pub unsafe trait ObjectCoreWithExtraItems: ObjectCore {
 /// # Safety
 ///
 /// `data`, `into_data`, and `from_data` must preserve the same object
-/// allocation. That allocation must start with a valid `TVMFFIObject` header
-/// whose runtime type index is in the object range. When `Self` also implements
-/// [`AnyCompatible`], its conversions to `TVMFFIAny` must preserve that object
-/// pointer and dynamic type index.
+/// allocation and form an ownership-preserving round trip. That allocation must
+/// start with a valid `TVMFFIObject` header whose registered object-range
+/// runtime type index correctly describes its layout and inheritance.
+///
+/// When `Self` also implements [`AnyCompatible`], `copy_to_any_view` must
+/// produce a non-owning view, while `move_to_any` must transfer ownership of
+/// the same object pointer and dynamic type index. `move_from_any_after_check`
+/// must be able to reclaim that owned representation exactly once, and a true
+/// `check_any_strict` result must guarantee that both after-check constructors
+/// are valid for it.
 pub unsafe trait ObjectRefCore: Sized + Clone {
     type ContainerType: ObjectCore;
     fn data(this: &Self) -> &ObjectArc<Self::ContainerType>;
@@ -122,13 +128,27 @@ pub unsafe trait ObjectRefCore: Sized + Clone {
 /// inheritance tree together with the chain of its ancestors. The check is
 /// O(1) — if `target` really is an ancestor, it must appear in the candidate's
 /// ancestor array exactly at `target`'s depth.
+///
+/// This is a hidden support function for derive-generated object checks. Object
+/// indices in the registered range must refer to entries in the runtime type
+/// table.
+#[doc(hidden)]
 #[inline(always)]
 pub fn is_instance_of(object_type_index: i32, target_type_index: i32) -> bool {
     if object_type_index == target_type_index {
         return true;
     }
-    // only object types participate in the type hierarchy
-    if object_type_index < TypeIndex::kTVMFFIStaticObjectBegin as i32 {
+    let object_begin = TypeIndex::kTVMFFIStaticObjectBegin as i32;
+    // Every registered object is an instance of the root Object type.
+    if target_type_index == object_begin {
+        return object_type_index >= object_begin;
+    }
+    // Only object types participate in the type hierarchy.
+    if object_type_index < object_begin || target_type_index < object_begin {
+        return false;
+    }
+    // Parent indices are always smaller than their descendants.
+    if object_type_index < target_type_index {
         return false;
     }
     unsafe {
@@ -163,7 +183,10 @@ pub trait ObjectRefCast: ObjectRefCore + AnyCompatible {
     {
         let mut any_data = TVMFFIAny::new();
         unsafe {
-            Self::move_to_any(self, &mut any_data);
+            // Keep ownership in `self` while the target check runs. This makes
+            // the failure and panic paths unwind normally instead of stranding
+            // an owned object inside a raw TVMFFIAny.
+            Self::copy_to_any_view(&self, &mut any_data);
             debug_assert!(any_data.type_index >= TypeIndex::kTVMFFIStaticObjectBegin as i32);
             // SAFETY: ObjectRefCore's contract requires its AnyCompatible
             // representation to contain a valid object-range type index.
@@ -172,28 +195,19 @@ pub trait ObjectRefCast: ObjectRefCore + AnyCompatible {
             );
 
             if B::check_any_strict(&any_data) {
+                // Transfer ownership only after the borrowed representation has
+                // passed the target's complete hierarchy/container check.
+                Self::move_to_any(self, &mut any_data);
                 Ok(B::move_from_any_after_check(&mut any_data))
             } else {
-                let mismatch_data = any_data;
-                let source = Self::move_from_any_after_check(&mut any_data);
                 let msg = format!(
                     "Cannot convert from type `{}` to `{}`",
-                    B::get_mismatch_type_info(&mismatch_data),
+                    B::get_mismatch_type_info(&any_data),
                     B::type_str()
                 );
-                drop(source);
                 Err(crate::error::Error::new(crate::error::TYPE_ERROR, &msg, ""))
             }
         }
-    }
-
-    /// Same as [`try_cast`](Self::try_cast), but shares ownership with `self`
-    /// instead of consuming it.
-    fn cast_clone<B>(&self) -> crate::error::Result<B>
-    where
-        B: ObjectRefCore + AnyCompatible,
-    {
-        Self::from_data(Self::data(self).clone()).try_cast()
     }
 }
 
@@ -243,7 +257,7 @@ pub mod unsafe_ {
     /// # Arguments
     /// * `obj` - The object to decrease the reference count
     #[inline]
-    pub unsafe fn dec_ref(handle: *mut TVMFFIObject) {
+    pub(crate) unsafe fn dec_ref(handle: *mut TVMFFIObject) {
         let obj = &mut *handle;
         let old_combined_count = obj
             .combined_ref_count
@@ -284,20 +298,20 @@ pub mod unsafe_ {
     }
 
     #[inline]
-    pub unsafe fn strong_count(handle: *mut TVMFFIObject) -> usize {
+    pub(crate) unsafe fn strong_count(handle: *mut TVMFFIObject) -> usize {
         let obj = &mut *handle;
         (obj.combined_ref_count.load(Ordering::Relaxed) & COMBINED_REF_COUNT_MASK_U32) as usize
     }
 
     #[inline]
-    pub unsafe fn weak_count(handle: *mut TVMFFIObject) -> usize {
+    pub(crate) unsafe fn weak_count(handle: *mut TVMFFIObject) -> usize {
         let obj = &mut *handle;
         (obj.combined_ref_count.load(Ordering::Relaxed) >> 32) as usize
     }
 
     /// Generic object deleter for objects allocated through the registered
     /// `TVMFFICustomAllocator`.
-    pub unsafe extern "C" fn object_deleter_for_new<T>(ptr: *mut c_void, flags: i32)
+    pub(crate) unsafe extern "C" fn object_deleter_for_new<T>(ptr: *mut c_void, flags: i32)
     where
         T: super::ObjectCore,
     {

@@ -149,6 +149,7 @@ pub fn derive_object_ref(input: proc_macro::TokenStream) -> TokenStream {
                 <ContainerType as #tvm_ffi_crate::object::ObjectCore>::TYPE_KEY.into()
             }
 
+            #[inline(always)]
             unsafe fn copy_to_any_view(
                 src: &Self,
                 data: &mut  #tvm_ffi_crate::tvm_ffi_sys::TVMFFIAny

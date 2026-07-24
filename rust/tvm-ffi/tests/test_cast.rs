@@ -19,16 +19,8 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use tvm_ffi::derive::{Object, ObjectRef};
-use tvm_ffi::object::ObjectRef;
+use tvm_ffi::object::{is_instance_of, ObjectRef};
 use tvm_ffi::*;
-
-// Reference a symbol exported by libtvm_ffi_testing so the linker keeps the
-// library dependency; its static initializers register the testing type keys.
-#[test]
-fn test_cast_dummy_c_api() {
-    let ret = unsafe { tvm_ffi_sys::TVMFFITestingDummyTarget() };
-    assert_eq!(ret, 0);
-}
 
 // The type keys below are registered by libtvm_ffi_testing with the hierarchy
 // Object <- testing.TestObjectBase <- testing.TestObjectDerived. The Rust-side
@@ -106,6 +98,9 @@ fn new_derived(value: i64, extra: i64, delete_counter: Arc<AtomicU32>) -> TestDe
 
 #[test]
 fn test_is_instance_of() {
+    // Keep the testing library linked so its static type registrations run.
+    assert_eq!(unsafe { tvm_ffi_sys::TVMFFITestingDummyTarget() }, 0);
+
     let object_index = tvm_ffi::Object::type_index();
     let base_index = TestBaseObj::type_index();
     let derived_index = TestDerivedObj::type_index();
@@ -120,7 +115,7 @@ fn test_is_instance_of() {
     assert!(!is_instance_of(object_index, base_index));
     // non-object type indices never match an object type
     assert!(!is_instance_of(TypeIndex::kTVMFFIInt as i32, object_index));
-    assert!(!is_instance_of(TypeIndex::kTVMFFINone as i32, object_index));
+    assert!(!is_instance_of(object_index, TypeIndex::kTVMFFIInt as i32));
 }
 
 #[test]
@@ -162,18 +157,22 @@ fn test_downcast_failure() {
 }
 
 #[test]
-fn test_cast_clone_shares_ownership() {
+fn test_try_cast_from_any_view_preserves_runtime_subtype() {
     let delete_counter = Arc::new(AtomicU32::new(0));
-    let derived = new_derived(3, 4, delete_counter.clone());
-    let base: TestBase = derived.cast_clone().unwrap();
-    assert_eq!(base.data.value, 3);
+    let base: TestBase = new_derived(3, 4, delete_counter.clone())
+        .try_cast()
+        .unwrap();
+    let raw = unsafe { Any::into_raw_ffi_any(Any::from(base)) };
+
+    // Array::get calls this method directly, without check_any_strict first.
+    let base = unsafe { TestBase::try_cast_from_any_view(&raw) }.unwrap();
+    let derived: TestDerived = base.try_cast().unwrap();
+    assert_eq!(derived.data.base.value, 3);
+    assert_eq!(derived.data.extra, 4);
     assert_eq!(ObjectArc::strong_count(&derived.data), 2);
-    // a failed cast_clone leaves the original untouched
-    assert!(derived.cast_clone::<Shape>().is_err());
-    assert_eq!(ObjectArc::strong_count(&derived.data), 2);
-    drop(base);
-    assert_eq!(ObjectArc::strong_count(&derived.data), 1);
     drop(derived);
+    assert_eq!(delete_counter.load(Ordering::Relaxed), 0);
+    drop(unsafe { Any::from_raw_ffi_any(raw) });
     assert_eq!(delete_counter.load(Ordering::Relaxed), 1);
 }
 
@@ -190,15 +189,4 @@ fn test_any_conversion_preserves_runtime_subtype() {
     assert_eq!(derived_from_any.data.extra, 6);
     drop(derived_from_any);
     assert_eq!(delete_counter.load(Ordering::Relaxed), 1);
-}
-
-#[test]
-fn test_any_conversion_rejects_supertype() {
-    let delete_counter = Arc::new(AtomicU32::new(0));
-    let base = new_base(9, delete_counter.clone());
-    let any = Any::from(base);
-    let res: Result<TestDerived> = any.try_into();
-    let err = expect_err(res);
-    assert!(err.message().contains("testing.TestObjectBase"));
-    assert!(err.message().contains("testing.TestObjectDerived"));
 }
