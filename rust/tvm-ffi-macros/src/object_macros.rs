@@ -75,6 +75,9 @@ pub fn derive_object(input: proc_macro::TokenStream) -> TokenStream {
             let (base_id, base_ty) = (f.ident.clone()?, f.ty.clone());
             // The transitive case of subtyping
             Some(quote! {
+                const TYPE_DEPTH: i32 =
+                    <#base_ty as #tvm_ffi_crate::object::ObjectCore>::TYPE_DEPTH + 1;
+
                 #[inline]
                 unsafe fn object_header_mut(
                     this: &mut Self
@@ -172,9 +175,7 @@ pub fn derive_object_ref(input: proc_macro::TokenStream) -> TokenStream {
             ) -> bool {
                 type ContainerType = <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>
                     ::ContainerType;
-                let type_index =
-                    <ContainerType as #tvm_ffi_crate::object::ObjectCore>::type_index();
-                #tvm_ffi_crate::object::is_instance_of(data.type_index, type_index)
+                #tvm_ffi_crate::object::is_instance_of::<ContainerType>(data.type_index)
             }
 
             unsafe fn copy_from_any_view_after_check(
@@ -229,9 +230,7 @@ pub fn derive_object_ref(input: proc_macro::TokenStream) -> TokenStream {
             ) -> Result<Self, ()> {
                 type ContainerType = <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>
                     ::ContainerType;
-                let type_index =
-                    <ContainerType as #tvm_ffi_crate::object::ObjectCore>::type_index();
-                if #tvm_ffi_crate::object::is_instance_of(data.type_index, type_index) {
+                if #tvm_ffi_crate::object::is_instance_of::<ContainerType>(data.type_index) {
                     Ok(Self::copy_from_any_view_after_check(data))
                 } else {
                     Err(())

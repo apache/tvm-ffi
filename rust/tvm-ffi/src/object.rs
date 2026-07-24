@@ -54,6 +54,12 @@ unsafe impl<T: Send + Sync + ObjectCore> Sync for ObjectArc<T> {}
 pub unsafe trait ObjectCore: Sized + 'static {
     /// the type key of the object
     const TYPE_KEY: &'static str;
+    /// Depth of this type in the object inheritance tree.
+    ///
+    /// The root [`Object`] has depth zero, and every registered subtype has
+    /// depth one greater than its parent. This value must be non-negative and
+    /// agree with the runtime type table entry for `Self`.
+    const TYPE_DEPTH: i32;
     // return the type index of the object
     fn type_index() -> i32;
     /// Return the object header
@@ -120,8 +126,8 @@ pub unsafe trait ObjectRefCore: Sized + Clone {
     fn from_data(data: ObjectArc<Self::ContainerType>) -> Self;
 }
 
-/// Check whether a runtime type index refers to `target_type_index` or one of
-/// its subtypes.
+/// Check whether a runtime type index refers to `Target` or one of its
+/// subtypes.
 ///
 /// The subtype relation lives in the process-wide type table maintained by the
 /// tvm-ffi library: every registered type records its depth in the single
@@ -134,15 +140,12 @@ pub unsafe trait ObjectRefCore: Sized + Clone {
 /// table.
 #[doc(hidden)]
 #[inline(always)]
-pub fn is_instance_of(object_type_index: i32, target_type_index: i32) -> bool {
+pub fn is_instance_of<Target: ObjectCore>(object_type_index: i32) -> bool {
+    let target_type_index = Target::type_index();
     if object_type_index == target_type_index {
         return true;
     }
     let object_begin = TypeIndex::kTVMFFIStaticObjectBegin as i32;
-    // Every registered object is an instance of the root Object type.
-    if target_type_index == object_begin {
-        return object_type_index >= object_begin;
-    }
     // Only object types participate in the type hierarchy.
     if object_type_index < object_begin || target_type_index < object_begin {
         return false;
@@ -153,11 +156,10 @@ pub fn is_instance_of(object_type_index: i32, target_type_index: i32) -> bool {
     }
     unsafe {
         let object_info = TVMFFIGetTypeInfo(object_type_index);
-        let target_info = TVMFFIGetTypeInfo(target_type_index);
-        if object_info.is_null() || target_info.is_null() {
+        if object_info.is_null() {
             return false;
         }
-        let target_depth = (*target_info).type_depth;
+        let target_depth = Target::TYPE_DEPTH;
         if (*object_info).type_depth <= target_depth {
             return false;
         }
@@ -345,6 +347,7 @@ impl Object {
 
 unsafe impl ObjectCore for Object {
     const TYPE_KEY: &'static str = "ffi.Object";
+    const TYPE_DEPTH: i32 = 0;
     #[inline]
     fn type_index() -> i32 {
         TypeIndex::kTVMFFIStaticObjectBegin as i32

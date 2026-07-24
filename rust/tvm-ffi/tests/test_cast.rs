@@ -104,18 +104,20 @@ fn test_is_instance_of() {
     let object_index = tvm_ffi::Object::type_index();
     let base_index = TestBaseObj::type_index();
     let derived_index = TestDerivedObj::type_index();
+    assert_eq!(Object::TYPE_DEPTH, 0);
+    assert_eq!(TestBaseObj::TYPE_DEPTH, 1);
+    assert_eq!(TestDerivedObj::TYPE_DEPTH, 2);
     // reflexive
-    assert!(is_instance_of(base_index, base_index));
+    assert!(is_instance_of::<TestBaseObj>(base_index));
     // child -> ancestors at every depth
-    assert!(is_instance_of(derived_index, base_index));
-    assert!(is_instance_of(derived_index, object_index));
-    assert!(is_instance_of(base_index, object_index));
+    assert!(is_instance_of::<TestBaseObj>(derived_index));
+    assert!(is_instance_of::<Object>(derived_index));
+    assert!(is_instance_of::<Object>(base_index));
     // the reverse direction does not hold
-    assert!(!is_instance_of(base_index, derived_index));
-    assert!(!is_instance_of(object_index, base_index));
+    assert!(!is_instance_of::<TestDerivedObj>(base_index));
+    assert!(!is_instance_of::<TestBaseObj>(object_index));
     // non-object type indices never match an object type
-    assert!(!is_instance_of(TypeIndex::kTVMFFIInt as i32, object_index));
-    assert!(!is_instance_of(object_index, TypeIndex::kTVMFFIInt as i32));
+    assert!(!is_instance_of::<Object>(TypeIndex::kTVMFFIInt as i32));
 }
 
 #[test]

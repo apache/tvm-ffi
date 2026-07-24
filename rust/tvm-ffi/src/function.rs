@@ -95,6 +95,7 @@ impl<F: Fn(&[AnyView]) -> Result<Any> + 'static> CallbackFunctionObjImpl<F> {
 
 unsafe impl<F: Fn(&[AnyView]) -> Result<Any> + 'static> ObjectCore for CallbackFunctionObjImpl<F> {
     const TYPE_KEY: &'static str = FunctionObj::TYPE_KEY;
+    const TYPE_DEPTH: i32 = FunctionObj::TYPE_DEPTH;
     fn type_index() -> i32 {
         FunctionObj::type_index()
     }
