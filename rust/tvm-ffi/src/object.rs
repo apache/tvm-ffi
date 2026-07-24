@@ -20,10 +20,13 @@ use std::ops::{Deref, DerefMut};
 use std::sync::atomic::AtomicU64;
 
 use crate::derive::ObjectRef;
+use crate::type_traits::AnyCompatible;
 pub use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
 /// Object related ABI handling
-use tvm_ffi_sys::{TVMFFIGetCustomAllocator, TVMFFIObject, COMBINED_REF_COUNT_BOTH_ONE};
-use tvm_ffi_sys::TVMFFIGetTypeInfo;
+use tvm_ffi_sys::{
+    TVMFFIAny, TVMFFIGetCustomAllocator, TVMFFIGetTypeInfo, TVMFFIObject,
+    COMBINED_REF_COUNT_BOTH_ONE,
+};
 
 /// Object type is by default the TVMFFIObject
 #[repr(C)]
@@ -96,6 +99,14 @@ pub unsafe trait ObjectCoreWithExtraItems: ObjectCore {
 /// used by the ffi Any system and not user facing
 ///
 /// We mark as unsafe since it moves out the internal of the ObjectRef
+///
+/// # Safety
+///
+/// `data`, `into_data`, and `from_data` must preserve the same object
+/// allocation. That allocation must start with a valid `TVMFFIObject` header
+/// whose runtime type index is in the object range. When `Self` also implements
+/// [`AnyCompatible`], its conversions to `TVMFFIAny` must preserve that object
+/// pointer and dynamic type index.
 pub unsafe trait ObjectRefCore: Sized + Clone {
     type ContainerType: ObjectCore;
     fn data(this: &Self) -> &ObjectArc<Self::ContainerType>;
@@ -111,6 +122,7 @@ pub unsafe trait ObjectRefCore: Sized + Clone {
 /// inheritance tree together with the chain of its ancestors. The check is
 /// O(1) — if `target` really is an ancestor, it must appear in the candidate's
 /// ancestor array exactly at `target`'s depth.
+#[inline(always)]
 pub fn is_instance_of(object_type_index: i32, target_type_index: i32) -> bool {
     if object_type_index == target_type_index {
         return true;
@@ -136,57 +148,56 @@ pub fn is_instance_of(object_type_index: i32, target_type_index: i32) -> bool {
 
 /// Runtime-checked casting between arbitrary `ObjectRef` types.
 ///
-/// The cast succeeds iff the runtime type of the underlying object is the
-/// target's container type or a subtype of it, mirroring the semantics of
-/// `ObjectRef::as<T>` in C++. Upcasts, downcasts and self-casts all go through
-/// the same check; casting between unrelated types fails at runtime with a
-/// `TypeError`.
+/// The cast uses the target's [`AnyCompatible::check_any_strict`] implementation,
+/// mirroring the semantics of `ObjectRef::as<T>` in C++. This supports both
+/// object hierarchies and parameterized object containers.
 ///
-/// This trait is blanket-implemented for every [`ObjectRefCore`] type. The
-/// pointer reinterpretation is sound because every container type is
-/// `#[repr(C)]` with its base (transitively, the `TVMFFIObject` header) as
-/// the first field.
-pub trait ObjectRefCast: ObjectRefCore {
+/// This trait is blanket-implemented for every [`ObjectRefCore`] type that is
+/// also [`AnyCompatible`].
+pub trait ObjectRefCast: ObjectRefCore + AnyCompatible {
     /// Consume `self` and rewrap the underlying object as `B` without copying.
-    fn try_cast<B: ObjectRefCore>(self) -> crate::error::Result<B> {
-        let data = Self::into_data(self);
+    #[inline(always)]
+    fn try_cast<B>(self) -> crate::error::Result<B>
+    where
+        B: ObjectRefCore + AnyCompatible,
+    {
+        let mut any_data = TVMFFIAny::new();
         unsafe {
-            let header = ObjectArc::as_raw(&data) as *const TVMFFIObject;
-            let runtime_index = (*header).type_index;
-            let target_index = <B::ContainerType as ObjectCore>::type_index();
-            if is_instance_of(runtime_index, target_index) {
-                let raw = ObjectArc::into_raw(data);
-                Ok(B::from_data(ObjectArc::from_raw(
-                    raw as *const B::ContainerType,
-                )))
+            Self::move_to_any(self, &mut any_data);
+            debug_assert!(any_data.type_index >= TypeIndex::kTVMFFIStaticObjectBegin as i32);
+            // SAFETY: ObjectRefCore's contract requires its AnyCompatible
+            // representation to contain a valid object-range type index.
+            std::hint::assert_unchecked(
+                any_data.type_index >= TypeIndex::kTVMFFIStaticObjectBegin as i32,
+            );
+
+            if B::check_any_strict(&any_data) {
+                Ok(B::move_from_any_after_check(&mut any_data))
             } else {
-                let info = TVMFFIGetTypeInfo(runtime_index);
-                let source_key = if info.is_null() {
-                    format!("type_index({})", runtime_index)
-                } else {
-                    (*info).type_key.as_str().to_string()
-                };
-                Err(crate::error::Error::new(
-                    crate::error::TYPE_ERROR,
-                    &format!(
-                        "Cannot convert from type `{}` to `{}`",
-                        source_key,
-                        <B::ContainerType as ObjectCore>::TYPE_KEY
-                    ),
-                    "",
-                ))
+                let mismatch_data = any_data;
+                let source = Self::move_from_any_after_check(&mut any_data);
+                let msg = format!(
+                    "Cannot convert from type `{}` to `{}`",
+                    B::get_mismatch_type_info(&mismatch_data),
+                    B::type_str()
+                );
+                drop(source);
+                Err(crate::error::Error::new(crate::error::TYPE_ERROR, &msg, ""))
             }
         }
     }
 
     /// Same as [`try_cast`](Self::try_cast), but shares ownership with `self`
     /// instead of consuming it.
-    fn cast_clone<B: ObjectRefCore>(&self) -> crate::error::Result<B> {
+    fn cast_clone<B>(&self) -> crate::error::Result<B>
+    where
+        B: ObjectRefCore + AnyCompatible,
+    {
         Self::from_data(Self::data(self).clone()).try_cast()
     }
 }
 
-impl<T: ObjectRefCore> ObjectRefCast for T {}
+impl<T: ObjectRefCore + AnyCompatible> ObjectRefCast for T {}
 
 /// Base class for ObjectRef
 ///

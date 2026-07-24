@@ -126,17 +126,23 @@ pub fn derive_object_ref(input: proc_macro::TokenStream) -> TokenStream {
 
     let mut expanded = quote! {
         unsafe impl #tvm_ffi_crate::object::ObjectRefCore for #struct_name {
-            type ContainerType = <#data_ty as std::ops::Deref>::Target;
+            type ContainerType = <#data_ty as ::std::ops::Deref>::Target;
             #[inline]
-            fn data(this: &Self) -> &ObjectArc<Self::ContainerType> {
+            fn data(
+                this: &Self
+            ) -> &#tvm_ffi_crate::object::ObjectArc<Self::ContainerType> {
                 &this.data
             }
             #[inline]
-            fn into_data(this: Self) -> ObjectArc<Self::ContainerType> {
+            fn into_data(
+                this: Self
+            ) -> #tvm_ffi_crate::object::ObjectArc<Self::ContainerType> {
                 this.data
             }
             #[inline]
-            fn from_data(data: ObjectArc<Self::ContainerType>) -> Self {
+            fn from_data(
+                data: #tvm_ffi_crate::object::ObjectArc<Self::ContainerType>
+            ) -> Self {
                 Self { data}
             }
         }
@@ -155,18 +161,20 @@ pub fn derive_object_ref(input: proc_macro::TokenStream) -> TokenStream {
             ) {
                 type ContainerType = <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>
                     ::ContainerType;
-                let type_index =
-                    <ContainerType as #tvm_ffi_crate::object::ObjectCore>::type_index();
-                data.type_index = type_index as i32;
-                data.small_str_len = 0;
                 let data_ptr = #tvm_ffi_crate::object::ObjectArc::<ContainerType>::as_raw(
                     &src.data
                 );
-                data.data_union.v_obj =
-                    data_ptr as *mut ContainerType as *mut  #tvm_ffi_crate::tvm_ffi_sys::TVMFFIObject;
+                let object_ptr =
+                    data_ptr as *mut ContainerType as *mut #tvm_ffi_crate::tvm_ffi_sys::TVMFFIObject;
+                data.type_index = (*object_ptr).type_index;
+                data.small_str_len = 0;
+                data.data_union.v_obj = object_ptr;
             }
 
-            unsafe fn check_any_strict(data: & #tvm_ffi_crate::tvm_ffi_sys::TVMFFIAny) -> bool {
+            #[inline(always)]
+            unsafe fn check_any_strict(
+                data: & #tvm_ffi_crate::tvm_ffi_sys::TVMFFIAny
+            ) -> bool {
                 type ContainerType = <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>
                     ::ContainerType;
                 let type_index =
@@ -192,23 +200,24 @@ pub fn derive_object_ref(input: proc_macro::TokenStream) -> TokenStream {
                 }
             }
 
+            #[inline(always)]
             unsafe fn move_to_any(
                 src: Self,
                 data: &mut  #tvm_ffi_crate::tvm_ffi_sys::TVMFFIAny
             ) {
                 type ContainerType = <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>
                     ::ContainerType;
-                let type_index =
-                    <ContainerType as #tvm_ffi_crate::object::ObjectCore>::type_index();
-                data.type_index = type_index as i32;
-                data.small_str_len = 0;
                 let data_ptr = #tvm_ffi_crate::object::ObjectArc::into_raw(
                     src.data
                 );
-                data.data_union.v_obj =
-                    data_ptr as *mut ContainerType as *mut  #tvm_ffi_crate::tvm_ffi_sys::TVMFFIObject;
+                let object_ptr =
+                    data_ptr as *mut ContainerType as *mut #tvm_ffi_crate::tvm_ffi_sys::TVMFFIObject;
+                data.type_index = (*object_ptr).type_index;
+                data.small_str_len = 0;
+                data.data_union.v_obj = object_ptr;
             }
 
+            #[inline(always)]
             unsafe fn move_from_any_after_check(
                 data: &mut  #tvm_ffi_crate::tvm_ffi_sys::TVMFFIAny
             ) -> Self {

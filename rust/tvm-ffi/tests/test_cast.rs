@@ -73,6 +73,20 @@ struct TestDerived {
     data: ObjectArc<TestDerivedObj>,
 }
 
+// Compile coverage for downstream derives that use a qualified ObjectArc path
+// without importing ObjectArc into the surrounding module.
+mod qualified_object_arc_path {
+    use super::TestBaseObj;
+    use tvm_ffi::derive::ObjectRef;
+
+    #[repr(C)]
+    #[derive(ObjectRef, Clone)]
+    #[allow(dead_code)]
+    struct QualifiedObjectRef {
+        data: tvm_ffi::object::ObjectArc<TestBaseObj>,
+    }
+}
+
 // unwrap_err() requires the Ok type to implement Debug, which ObjectRef types do not
 fn expect_err<T>(res: Result<T>) -> Error {
     match res {
@@ -141,6 +155,36 @@ fn test_upcast_downcast_roundtrip() {
     assert_eq!(delete_counter.load(Ordering::Relaxed), 0);
     drop(derived2);
     assert_eq!(delete_counter.load(Ordering::Relaxed), 1);
+}
+
+#[test]
+fn test_upcast_preserves_runtime_type_through_any() {
+    let delete_counter = Arc::new(AtomicU32::new(0));
+    let base: TestBase = new_derived(7, 8, delete_counter.clone())
+        .try_cast()
+        .unwrap();
+
+    let view = AnyView::from(&base);
+    assert_eq!(view.type_index(), TestDerivedObj::type_index());
+    let derived_from_view: TestDerived = view.try_into().unwrap();
+    assert_eq!(derived_from_view.data.extra, 8);
+    drop(derived_from_view);
+
+    let any = Any::from(base);
+    assert_eq!(any.type_index(), TestDerivedObj::type_index());
+    let derived_from_any: TestDerived = any.try_into().unwrap();
+    assert_eq!(derived_from_any.data.extra, 8);
+    drop(derived_from_any);
+
+    assert_eq!(delete_counter.load(Ordering::Relaxed), 1);
+}
+
+#[test]
+fn test_cast_checks_parameterized_container_type() {
+    let values = Array::new(vec![1_i64, 2_i64]);
+    let values = values.try_cast::<Array<i64>>().unwrap();
+    assert_eq!(values.len(), 2);
+    assert!(values.try_cast::<Array<f32>>().is_err());
 }
 
 #[test]
