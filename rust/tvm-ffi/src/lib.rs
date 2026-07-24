@@ -45,6 +45,7 @@ pub use crate::error::{
 };
 pub use crate::extra::module::Module;
 pub use crate::function::Function;
+pub use crate::object::ObjectRefCast;
 pub use crate::object::{Object, ObjectArc, ObjectCore, ObjectCoreWithExtraItems, ObjectRefCore};
 pub use crate::optional::Optional;
 pub use crate::string::{Bytes, String};
