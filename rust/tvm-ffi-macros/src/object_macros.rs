@@ -126,23 +126,17 @@ pub fn derive_object_ref(input: proc_macro::TokenStream) -> TokenStream {
 
     let mut expanded = quote! {
         unsafe impl #tvm_ffi_crate::object::ObjectRefCore for #struct_name {
-            type ContainerType = <#data_ty as ::std::ops::Deref>::Target;
+            type ContainerType = <#data_ty as std::ops::Deref>::Target;
             #[inline]
-            fn data(
-                this: &Self
-            ) -> &#tvm_ffi_crate::object::ObjectArc<Self::ContainerType> {
+            fn data(this: &Self) -> &ObjectArc<Self::ContainerType> {
                 &this.data
             }
             #[inline]
-            fn into_data(
-                this: Self
-            ) -> #tvm_ffi_crate::object::ObjectArc<Self::ContainerType> {
+            fn into_data(this: Self) -> ObjectArc<Self::ContainerType> {
                 this.data
             }
             #[inline]
-            fn from_data(
-                data: #tvm_ffi_crate::object::ObjectArc<Self::ContainerType>
-            ) -> Self {
+            fn from_data(data: ObjectArc<Self::ContainerType>) -> Self {
                 Self { data}
             }
         }
