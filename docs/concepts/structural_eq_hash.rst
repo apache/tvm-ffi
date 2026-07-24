@@ -15,12 +15,17 @@
     specific language governing permissions and limitations
     under the License.
 
-Structural Equality, Hashing, and Walk
-======================================
+Structural Equality, Hashing, Walking, and Mapping
+==================================================
 
 TVM FFI provides ``structural_equal`` and ``structural_hash`` for the
 object graph. These compare objects by **content** — recursively walking
 fields — rather than by pointer identity.
+
+The same reflection metadata also drives ``structural_walk`` for analyses and
+``structural_map`` for transformations.  Their low-level engines,
+``StructuralVisitor`` and ``StructuralMutator``, let custom object types
+participate in the same traversal protocol.
 
 The behavior is controlled by two layers of annotation on
 :func:`~tvm_ffi.dataclasses.py_class`:
@@ -971,185 +976,264 @@ And in Python:
    assert structural_hash(f1) == structural_hash(f2)  # same hash
 
 
-Structural Walk and Visit
--------------------------
+Structural Walk and Map
+------------------------------
 
-``structural_equal`` and ``structural_hash`` are built on a structural traversal
-of the value graph.  ``structural_walk`` exposes that traversal directly: it
-visits containers, object fields, and POD leaves, and invokes user callbacks for
-values whose runtime type matches a callback entry.
+Structural walk and map use the same type metadata, field flags, and
+container registrations as structural equality and hashing.  The default
+reflected traversal visits only structural fields, skips fields marked
+``structural_eq="ignore"``, and preserves definition-region information from
+fields marked as definitions.
 
-It is useful when you want to collect information, validate a tree, find a node, or
-stop traversal early without writing a custom equality/hash hook.
+There are two layers of API:
 
-Basic Walk
-~~~~~~~~~~
+.. list-table::
+   :header-rows: 1
+   :widths: 24 38 38
 
-Pass callbacks as ordered ``(type, callback)`` entries.  The first matching
-entry runs for each visited value.  Normal Python callbacks receive one
-argument, ``value``.
+   * - API
+     - Purpose
+     - Typical use
+   * - :func:`~tvm_ffi.structural_walk`
+     - Inspect a value graph without replacing values
+     - Collect information, validate IR, or stop at a match
+   * - :func:`~tvm_ffi.structural_map`
+     - Recursively replace values and rebuild changed paths
+     - Rewriting and compiler transformation passes
+   * - :class:`~tvm_ffi.StructuralVisitor`
+     - Low-level recursive visit engine
+     - Implementing ``__s_visit__`` or a language binding
+   * - :class:`~tvm_ffi.StructuralMutator`
+     - Low-level recursive mutation engine
+     - Implementing custom mutation hooks and identity substitution
+
+``structural_walk`` and ``structural_map`` construct the corresponding low-level
+object, install callback-aware dispatch, run it on the root, and return the final
+result.  Applications normally use these two functions directly.  Custom object
+hooks receive the low-level visitor or mutator so that recursive calls remain in
+the same traversal.
+
+StructuralVisitor and StructuralMutator
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A :class:`~tvm_ffi.StructuralVisitor` carries recursive dispatch, the current
+definition-region kind, and any early-interruption state.  Its main operations
+are:
+
+- ``visitor.visit(value)`` visits a child with the same visitor.
+- ``visitor.def_region_kind()`` reports the active definition-region kind.
+- ``visitor.with_def_region_kind(kind, callback)`` temporarily changes that kind
+  while ``callback`` performs recursive visits.
+
+The default visitor dispatches to a type's ``__s_visit__`` hook when present.
+Otherwise POD values are leaves and object-backed values are visited through
+their reflected structural fields.  Array, List, Map, and Dict have built-in
+hooks that visit their elements or key-value pairs.
+
+A :class:`~tvm_ffi.StructuralMutator` adds ownership and replacement semantics.
+Its main operations are:
+
+- ``mutator.mutate(value)`` maps without intentionally modifying ``value``.
+- ``mutator.maybe_inplace_mutate(value)`` permits a type-specific implementation
+  to reuse a safely mutable value and otherwise falls back to ``mutate``.
+- ``mutator.var_remap_get(var)`` and ``mutator.var_remap_set(var, mapped)``
+  access the current identity-substitution environment.
+- ``def_region_kind`` and ``with_def_region_kind`` have the same role as on the
+  visitor.
+
+For reflected objects, ``mutate`` starts from a shallow copy, recursively maps
+each structural field, and installs mapped fields in that copy.  If no field
+changes, it returns the original object instead.  A nested change therefore
+copies only the objects along the changed path; unchanged children remain shared.
+``maybe_inplace_mutate`` is an explicit optimization path.  A type-specific
+``__s_maybe_inplace_mutate__`` hook owns the safety policy and may reuse its
+input.  Without that hook, the default implementation calls ``mutate``.
+
+.. note::
+
+   Visitor and mutator instances are supplied by an active traversal.  Python
+   code normally receives them as arguments to ``__s_visit__``, ``__s_mutate__``,
+   or ``__s_maybe_inplace_mutate__`` rather than constructing them directly.
+
+Structural Walk
+~~~~~~~~~~~~~~~
+
+:func:`~tvm_ffi.structural_walk` invokes an analysis callback at each matching
+value.  Callback entries are ordered, and only the first matching entry runs.
+A walk is post-order by default.
+A callback may return:
+
+- :attr:`~tvm_ffi.WalkResult.ADVANCE` or ``None`` to continue.
+- :attr:`~tvm_ffi.WalkResult.SKIP` to skip the current value's children.  This is
+  primarily useful with pre-order traversal.
+- :class:`~tvm_ffi.VisitInterrupt` to stop the entire traversal and return a
+  payload.
+
+For example, the following analysis records integer leaves and stops at the
+first negative value:
 
 .. code-block:: python
 
    import tvm_ffi
 
-   visited = []
+   integers = []
 
-   def on_int(value):
-       visited.append(value)
-       if value == 0:
+   def visit_int(value):
+       integers.append(value)
+       if value < 0:
            return tvm_ffi.VisitInterrupt(value)
        return tvm_ffi.WalkResult.ADVANCE
 
-   result = tvm_ffi.structural_walk(root, (int, on_int), order="pre")
-
-   if result is not None:
-       print("stopped at", result.value)
-
-Callbacks may return:
-
-- ``WalkResult.ADVANCE`` to continue into children.
-- ``WalkResult.SKIP`` to skip the current value's children.
-- ``VisitInterrupt(payload)`` to stop the entire walk and return an interrupt
-  carrying ``payload``.
-- ``None`` as shorthand for ``WalkResult.ADVANCE``.
-
-Grouped Types
-~~~~~~~~~~~~~
-
-Several types can share one callback by passing a tuple of types:
-
-.. code-block:: python
-
-   numbers = []
-   strings = []
-
-   tvm_ffi.structural_walk(
-       root,
-       [
-           ((int, float), lambda value: numbers.append(value)),
-           (str, lambda value: strings.append(value)),
-       ],
+   interrupted = tvm_ffi.structural_walk(
+       function,
+       (int, visit_int),
    )
 
-This is normalized as if the same callback had been registered separately for
-``int`` and ``float``.  Callback entries are still tried in order, so broad
-callbacks should usually come after more specific ones.
+   if interrupted is not None:
+       print("first negative value:", interrupted.value)
 
-Catch-All and Object Callbacks
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Walking never replaces a value.  Side effects should be limited to the
+analysis state owned by the callback.
 
-``object`` and ``typing.Any`` are catch-all callbacks.  They match POD leaves
-and object-backed values.
+Structural Map
+~~~~~~~~~~~~~~
 
-.. code-block:: python
+:func:`~tvm_ffi.structural_map` uses the same typed callback selection but each
+callback returns the mapped value: either its input unchanged or a replacement.
+Mapping always visits all structural children; there is no ``SKIP`` or
+``VisitInterrupt`` result.  A callback exception aborts the transformation and
+is propagated with structural visit context.  Mapping is post-order by default,
+so a callback receives a value whose children have already been mapped.
 
-   from typing import Any
-
-   seen = []
-   tvm_ffi.structural_walk(root, (Any, lambda value: seen.append(value)))
-
-``tvm_ffi.Object`` is different: it matches only object-backed FFI values, such
-as ``Array``, ``Map``, ``Function``, ``String`` objects, or registered object
-classes.  It does not match POD leaves such as ``int`` or ``float``.
+Post-order is natural for bottom-up compiler rewrites because children have
+already been mapped when the callback runs:
 
 .. code-block:: python
 
-   objects = []
-   leaves = []
+   def fold_add(add):
+       if isinstance(add.lhs, IntImm) and isinstance(add.rhs, IntImm):
+           return IntImm(add.lhs.value + add.rhs.value)
+       return add
 
-   tvm_ffi.structural_walk(
-       root,
-       [
-           (tvm_ffi.Object, lambda value: objects.append(value)),
-           (object, lambda value: leaves.append(value)),
-       ],
+   optimized = tvm_ffi.structural_map(
+       function,
+       (Add, fold_add),
    )
 
-Def-Region Aware Walk
-~~~~~~~~~~~~~~~~~~~~~
+Map callbacks must follow map semantics: they must not mutate their input in
+place.  A node with a matching callback is always processed by ``mutate`` so
+that the callback observes or returns a mapped value.
 
-Callbacks passed to ``with_def_region_kind`` receive a second argument that
-reports whether the current value is visited as a definition or a use.  This is
-useful for analyses such as collecting variable uses while skipping binders:
+Callback Selection and Order
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Both Python functions accept the same callback forms:
+
+- ``(Type, callback)`` for one type.
+- ``((TypeA, TypeB), callback)`` to share one callback across types.
+- A sequence of callback entries.
+- A bare callable as a ``typing.Any`` catch-all.
+
+``typing.Any`` and ``object`` match both POD and object-backed values.
+``tvm_ffi.Object`` matches only object-backed FFI values.  Entries are tested in
+the order supplied, so place specific types before broad catch-all callbacks.
+
+Both APIs default to post-order.  The ``order`` argument controls the
+relationship between callbacks and children:
+
+- In pre-order, a walk callback runs before the children.  For mapping, the
+  callback result becomes the value whose children are subsequently mapped.
+- In post-order, children are processed first.  A map callback therefore receives
+  the value with its mapped children already installed.
+
+Definition Regions
+~~~~~~~~~~~~~~~~~~
+
+Callbacks passed through ``with_def_region_kind`` receive
+``(value, def_region_kind)``.  The kind is one of:
+
+- ``DefRegionKind.NONE`` for an ordinary use.
+- ``DefRegionKind.DEF_RECURSIVE`` for a recursive definition region.
+- ``DefRegionKind.DEF_NON_RECURSIVE`` for a non-recursive definition.
+
+The field annotations described earlier in this document establish these
+regions.  Recursive definitions propagate the definition mode into the defined
+value's children.  A non-recursive definition applies to the FreeVar identity
+itself, while its unannotated children are treated as ordinary uses.  Explicit
+nested definition annotations establish their own region.
 
 .. code-block:: python
 
    uses = []
 
    tvm_ffi.structural_walk(
-       func,
+       function,
        with_def_region_kind=(
            Var,
            lambda var, kind: (
-               uses.append(var) if kind == tvm_ffi.DefRegionKind.NONE else None
+               uses.append(var)
+               if kind == tvm_ffi.DefRegionKind.NONE
+               else None
            ),
        ),
    )
 
-For a function node, parameters are visited in a definition region, while
-occurrences in the body are visited with ``DefRegionKind.NONE``.
+``structural_map`` accepts the same def-region-aware callback form, but the
+callback must return the mapped value.
 
-Traversal Order
-~~~~~~~~~~~~~~~
+Custom Visit and Mutation Hooks
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The default order is pre-order: callbacks run before visiting children.
-Post-order callbacks run after children.
+A type with non-standard child storage can define ``__s_visit__``.  The hook
+receives the active visitor and the current value, recursively visits every
+structural child, and returns an interrupt if one occurs:
 
 .. code-block:: python
 
-   trace = []
+   @staticmethod
+   def __s_visit__(visitor, value):
+       return visitor.visit(value.children)
 
-   tvm_ffi.structural_walk(
-       tvm_ffi.Array([tvm_ffi.Array([1]), 2]),
-       [
-           (tvm_ffi.Array, lambda value: trace.append(f"array:{len(value)}")),
-           (int, lambda value: trace.append(f"int:{value}")),
-       ],
-       order="post",
-   )
+A custom ``__s_mutate__`` hook similarly receives the active mutator.  It should
+recursively call ``mutator.mutate`` and return a new value only when needed.
+An optional ``__s_maybe_inplace_mutate__`` hook may implement an in-place
+optimization, but it owns the complete safety policy and receives no automatic
+uniqueness guarantee.  A type defining it must also define ``__s_mutate__``.  If
+the optional hook is absent, ``maybe_inplace_mutate`` delegates to ``mutate``;
+generic reflected fields are never mutated in place automatically.
 
-   assert trace == ["int:1", "array:1", "int:2", "array:2"]
+When an object marked ``structural_eq="var"`` that represents a FreeVar identity
+registers either ``__s_mutate__`` or ``__s_maybe_inplace_mutate__`` hooks, it should:
 
-C++ Walk
+1. call ``var_remap_get`` before recursively mutating the value;
+2. immediately return the mapped value on a hit;
+3. compute the final result on a miss; and
+4. call ``var_remap_set`` with that final result before returning it.
+
+C++ APIs
 ~~~~~~~~
 
-C++ code can use ``StructuralWalk`` with typed callbacks.  Callbacks are tried
-in order and dispatch on the first argument type:
+C++ provides typed counterparts.  Callback dispatch uses the first argument
+type and accepts an optional second ``TVMFFIDefRegionKind`` argument.  The
+``Expected`` forms report failures without throwing:
 
 .. code-block:: cpp
 
-   Optional<VisitInterrupt> result = StructuralWalk<WalkOrder::kPreOrder>(
+   Expected<Optional<VisitInterrupt>> walked =
+       StructuralWalkExpected<WalkOrder::kPreOrder>(
+           root,
+           [&](const Add& add) -> Expected<WalkResult> {
+             ++num_adds;
+             return WalkResult::Advance();
+           });
+
+   Expected<Any> mapped = StructuralMapExpected<WalkOrder::kPostOrder>(
        root,
-       [&](const Add& add) -> Expected<WalkResult> {
-         ++num_adds;
-         return WalkResult::Advance();
-       },
-       [&](const Mul& mul) -> Expected<WalkResult> {
-         return WalkResult::Skip();
+       [&](const Add& add) -> Expected<Any> {
+         return FoldAdd(add);
        });
 
-C++ callbacks dispatch on their first argument, which may be ``AnyView``,
-``Any``, an ``ObjectRef`` subclass, an ``Object`` pointer type, or another
-FFI-convertible POD type.  They may also take an optional second
-``TVMFFIDefRegionKind`` argument to distinguish definition sites from uses.
-Errors should be returned as ``Expected<WalkResult>``.
-
-Low-Level ``StructuralVisitor``
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-``StructuralVisitor`` is the lower-level traversal object.  It is mainly useful
-inside structural visit hooks or C++ integrations that need to participate in
-the same recursive traversal protocol.
-
-Python users normally call ``structural_walk`` instead.  The low-level visitor
-API exposes:
-
-- ``visitor.visit(value)`` to recursively visit a child value.
-- ``visitor.def_region_kind()`` to inspect the current definition-region mode.
-- ``visitor.with_def_region_kind(kind, callback)`` to run a recursive visit
-  under a temporary definition-region mode.
-
-Custom visit hooks are registered as the ``__s_visit__`` type attribute.  They
-receive the active visitor and the current object, and are responsible for
-calling ``visitor.visit(child)`` on structural children.
+Walk callbacks return ``Expected<WalkResult>``.  Map callbacks return
+``Expected<Any>`` and must obey the same non-in-place callback contract as the
+Python API.  ``StructuralWalk`` and ``StructuralMap`` are the corresponding
+throwing convenience forms.
