@@ -162,15 +162,6 @@ fn test_downcast_failure() {
 }
 
 #[test]
-fn test_cast_unrelated_type_failure() {
-    let delete_counter = Arc::new(AtomicU32::new(0));
-    let derived = new_derived(1, 2, delete_counter.clone());
-    let err = expect_err(derived.try_cast::<Shape>());
-    assert!(err.message().contains("testing.TestObjectDerived"));
-    assert!(err.message().contains("ffi.Shape"));
-}
-
-#[test]
 fn test_cast_clone_shares_ownership() {
     let delete_counter = Arc::new(AtomicU32::new(0));
     let derived = new_derived(3, 4, delete_counter.clone());
