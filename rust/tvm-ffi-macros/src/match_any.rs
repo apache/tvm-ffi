@@ -24,8 +24,10 @@ use syn::{braced, parenthesized, Expr, Pat, Path, Result, Token};
 
 use crate::utils::get_tvm_ffi_crate;
 
-// Avoid table setup for small matches; this threshold can be benchmark-tuned.
-const MIN_LOOKUP_TABLE_ARMS: usize = 4;
+// Keep single-arm matches ordered. Release benchmarks of the standard ObjectRef
+// conversion path show that lookup pays off from two arms when a later arm or
+// the fallback is reached.
+const MIN_LOOKUP_TABLE_ARMS: usize = 2;
 
 struct MatchAnyInput {
     scrutinee: Expr,

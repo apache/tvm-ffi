@@ -85,9 +85,7 @@ mod tests {
                 value {
                     Module(_) => 0,
                     Module(_) => 1,
-                    Module(_) => 2,
-                    Module(_) => 3,
-                    _ => 4,
+                    _ => 2,
                 }
             }
         }
@@ -98,6 +96,6 @@ mod tests {
             }),
         };
         assert_eq!(classify(Any::from(module)), 0);
-        assert_eq!(classify(Any::from(Array::<i64>::default())), 4);
+        assert_eq!(classify(Any::from(Array::<i64>::default())), 2);
     }
 }
