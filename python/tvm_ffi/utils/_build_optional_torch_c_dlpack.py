@@ -589,6 +589,24 @@ def parse_env_flags(env_var_name: str) -> list[str]:
     return []
 
 
+def get_cpp_standard() -> str:
+    """Get the C++ standard required to compile against the installed torch headers.
+
+    Torch 2.13 started using C++20 constructs such as designated initializers and
+    default member initializers for bit-fields in its public headers, and builds its
+    own extensions with C++20 accordingly. Older versions build with C++17.
+
+    Returns
+    -------
+    standard : str
+        Either ``"c++17"`` or ``"c++20"``.
+
+    """
+    if torch.__version__ >= torch.torch_version.TorchVersion("2.13.0"):
+        return "c++20"
+    return "c++17"
+
+
 def _run_build_on_linux_like(
     build_dir: Path,
     libname: str,
@@ -600,7 +618,7 @@ def _run_build_on_linux_like(
     """Build the module directly by invoking compiler commands (non-Windows only)."""
     from tvm_ffi.libinfo import find_dlpack_include_path  # noqa: PLC0415
 
-    default_cflags = ["-std=c++17", "-fPIC", "-O3", "-fvisibility=hidden"]
+    default_cflags = [f"-std={get_cpp_standard()}", "-fPIC", "-O3", "-fvisibility=hidden"]
     # Platform-specific linker flags
     if IS_DARWIN:
         # macOS uses @loader_path instead of $ORIGIN
@@ -650,7 +668,7 @@ def _generate_ninja_build_windows(
     from tvm_ffi.libinfo import find_dlpack_include_path  # noqa: PLC0415
 
     default_cflags = [
-        "/std:c++17",
+        f"/std:{get_cpp_standard()}",
         "/MD",
         "/wd4819",
         "/wd4251",
