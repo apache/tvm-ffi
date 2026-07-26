@@ -206,58 +206,30 @@ where
         })
 }
 
-fn expand_leaf_lookup_match(
+fn expand_leaf_table_lookup(
     tvm_ffi: &TokenStream,
-    scrutinee: &Expr,
     arms: &[TypedArm],
-    fallback: &Expr,
+    arm_constants: &[Ident],
+    view: &Ident,
 ) -> TokenStream {
     let span = Span::mixed_site();
-    let source = Ident::new("__tvm_ffi_match_any_source", span);
-    let converted = Ident::new("__tvm_ffi_match_any_converted", span);
-    let view = Ident::new("__tvm_ffi_match_any_view", span);
-    let rejected = Ident::new("__tvm_ffi_match_any_rejected", span);
     let probe = Ident::new("__tvm_ffi_match_any_probe", span);
     let pattern_list_id = Ident::new("__tvm_ffi_match_any_leaf_pattern_list_id", span);
     let type_indices = Ident::new("__tvm_ffi_match_any_type_indices", span);
     let static_table = Ident::new("__TVM_FFI_MATCH_ANY_LEAF_TABLE", span);
     let table = Ident::new("__tvm_ffi_match_any_leaf_table", span);
-    let arm_id = Ident::new("__tvm_ffi_match_any_arm_id", span);
-    let selected = Ident::new("__tvm_ffi_match_any_selected", span);
-    let selected_value = Ident::new("__tvm_ffi_match_any_selected_value", span);
-    let selected_enum = Ident::new("__TvmFfiMatchAnyArm", span);
-    let fallback_variant = Ident::new("Fallback", span);
     let arm_count = arms.len();
-    let matchers = arms.iter().map(|arm| &arm.matcher).collect::<Vec<_>>();
-    let arm_types = (0..arm_count)
-        .map(|arm_id| Ident::new(&format!("__TvmFfiMatchAnyType{arm_id}"), span))
-        .collect::<Vec<_>>();
-    let arm_variants = (0..arm_count)
-        .map(|arm_id| Ident::new(&format!("Arm{arm_id}"), span))
-        .collect::<Vec<_>>();
-    let arm_constants = (0..arm_count)
-        .map(|arm_id| Ident::new(&format!("__TVM_FFI_MATCH_ANY_ARM_{arm_id}"), span))
-        .collect::<Vec<_>>();
-    let arm_constant_definitions =
-        arm_constants
-            .iter()
-            .enumerate()
-            .map(|(arm_id, arm_constant)| {
-                quote! {
-                    const #arm_constant: #tvm_ffi::match_any_internal::ArmId =
-                        #arm_id as #tvm_ffi::match_any_internal::ArmId;
-                }
-            });
     let lookup_entries = arm_constants
         .iter()
         .enumerate()
         .map(|(arm_id, arm_constant)| quote!((#type_indices[#arm_id], #arm_constant)));
-    let pattern_list = matchers
+    let pattern_list = arms
         .iter()
+        .map(|arm| &arm.matcher)
         .rev()
         .fold(quote!(()), |tail, matcher| quote!((#matcher, #tail)));
 
-    let lookup_arm_id = quote! {
+    quote! {
         {
             use #tvm_ffi::match_any_internal::LeafPatternMetadata as _;
 
@@ -283,25 +255,20 @@ fn expand_leaf_lookup_match(
                 }
             }
         }
-    };
+    }
+}
 
-    let ordered_selection = expand_ordered_try_into_chain(
-        arms,
-        quote!(#selected_enum::#fallback_variant),
-        &view,
-        &rejected,
-        |arm_id, _| {
-            let variant = &arm_variants[arm_id];
-
-            quote!(
-                ::core::result::Result::Ok(#selected_value) => {
-                    #selected_enum::#variant(#selected_value)
-                }
-            )
-        },
-    );
-
-    let direct_selection = arms.iter().enumerate().map(|(arm_id, arm)| {
+fn expand_direct_leaf_selection(
+    arms: &[TypedArm],
+    arm_constants: &[Ident],
+    arm_variants: &[Ident],
+    arm_id: &Ident,
+    view: &Ident,
+    rejected: &Ident,
+    selected_enum: &Ident,
+    selected_value: &Ident,
+) -> TokenStream {
+    let selections = arms.iter().enumerate().map(|(arm_id, arm)| {
         let matcher = &arm.matcher;
         let variant = &arm_variants[arm_id];
         let arm_constant = &arm_constants[arm_id];
@@ -322,7 +289,24 @@ fn expand_leaf_lookup_match(
             }
         }
     });
-    let body_dispatch = arms.iter().enumerate().map(|(arm_id, arm)| {
+
+    quote! {
+        match #arm_id {
+            #(#selections,)*
+            _ => ::core::unreachable!(),
+        }
+    }
+}
+
+fn expand_leaf_body_dispatch(
+    arms: &[TypedArm],
+    arm_variants: &[Ident],
+    selected_enum: &Ident,
+    selected: &Ident,
+    fallback_variant: &Ident,
+    fallback: &Expr,
+) -> TokenStream {
+    let body_arms = arms.iter().enumerate().map(|(arm_id, arm)| {
         let binding = &arm.binding;
         let body = &arm.body;
         let variant = &arm_variants[arm_id];
@@ -333,6 +317,89 @@ fn expand_leaf_lookup_match(
             }
         }
     });
+
+    quote! {
+        match #selected {
+            #(#body_arms,)*
+            #selected_enum::#fallback_variant => {
+                #fallback
+            }
+        }
+    }
+}
+
+fn expand_leaf_lookup_match(
+    tvm_ffi: &TokenStream,
+    scrutinee: &Expr,
+    arms: &[TypedArm],
+    fallback: &Expr,
+) -> TokenStream {
+    let span = Span::mixed_site();
+    let source = Ident::new("__tvm_ffi_match_any_source", span);
+    let converted = Ident::new("__tvm_ffi_match_any_converted", span);
+    let view = Ident::new("__tvm_ffi_match_any_view", span);
+    let rejected = Ident::new("__tvm_ffi_match_any_rejected", span);
+    let arm_id = Ident::new("__tvm_ffi_match_any_arm_id", span);
+    let selected = Ident::new("__tvm_ffi_match_any_selected", span);
+    let selected_value = Ident::new("__tvm_ffi_match_any_selected_value", span);
+    let selected_enum = Ident::new("__TvmFfiMatchAnyArm", span);
+    let fallback_variant = Ident::new("Fallback", span);
+    let arm_count = arms.len();
+    let arm_types = (0..arm_count)
+        .map(|arm_id| Ident::new(&format!("__TvmFfiMatchAnyType{arm_id}"), span))
+        .collect::<Vec<_>>();
+    let arm_variants = (0..arm_count)
+        .map(|arm_id| Ident::new(&format!("Arm{arm_id}"), span))
+        .collect::<Vec<_>>();
+    let arm_constants = (0..arm_count)
+        .map(|arm_id| Ident::new(&format!("__TVM_FFI_MATCH_ANY_ARM_{arm_id}"), span))
+        .collect::<Vec<_>>();
+    let arm_constant_definitions =
+        arm_constants
+            .iter()
+            .enumerate()
+            .map(|(arm_id, arm_constant)| {
+                quote! {
+                    const #arm_constant: #tvm_ffi::match_any_internal::ArmId =
+                        #arm_id as #tvm_ffi::match_any_internal::ArmId;
+                }
+            });
+    let lookup_arm_id = expand_leaf_table_lookup(tvm_ffi, arms, &arm_constants, &view);
+
+    let ordered_selection = expand_ordered_try_into_chain(
+        arms,
+        quote!(#selected_enum::#fallback_variant),
+        &view,
+        &rejected,
+        |arm_id, _| {
+            let variant = &arm_variants[arm_id];
+
+            quote!(
+                ::core::result::Result::Ok(#selected_value) => {
+                    #selected_enum::#variant(#selected_value)
+                }
+            )
+        },
+    );
+
+    let direct_selection = expand_direct_leaf_selection(
+        arms,
+        &arm_constants,
+        &arm_variants,
+        &arm_id,
+        &view,
+        &rejected,
+        &selected_enum,
+        &selected_value,
+    );
+    let body_dispatch = expand_leaf_body_dispatch(
+        arms,
+        &arm_variants,
+        &selected_enum,
+        &selected,
+        &fallback_variant,
+        fallback,
+    );
 
     quote! {
         {
@@ -360,10 +427,7 @@ fn expand_leaf_lookup_match(
                         ::core::result::Result::Ok(
                             ::core::option::Option::Some(#arm_id),
                         ) => {
-                            match #arm_id {
-                                #(#direct_selection,)*
-                                _ => ::core::unreachable!(),
-                            }
+                            #direct_selection
                         }
                         ::core::result::Result::Ok(
                             ::core::option::Option::None,
@@ -377,12 +441,7 @@ fn expand_leaf_lookup_match(
                 } else {
                     #selected_enum::#fallback_variant
                 };
-            match #selected {
-                #(#body_dispatch,)*
-                #selected_enum::#fallback_variant => {
-                    #fallback
-                }
-            }
+            #body_dispatch
         }
     }
 }
