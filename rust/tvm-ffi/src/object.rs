@@ -62,7 +62,7 @@ pub unsafe trait ObjectCore: Sized + 'static {
     const TYPE_DEPTH: i32;
     /// Whether every instance of this type has exactly `Self::type_index()`.
     ///
-    /// A final type must never have a registered subtype.
+    /// A final type has no separately registered object-system subtype.
     #[doc(hidden)]
     const TYPE_FINAL: bool = false;
     // return the type index of the object

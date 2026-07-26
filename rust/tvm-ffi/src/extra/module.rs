@@ -72,30 +72,3 @@ impl Module {
             .try_into()
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{match_any, Any, Array};
-
-    #[test]
-    fn match_any_leaf_lookup_keeps_the_first_arm() {
-        fn classify(value: Any) -> usize {
-            match_any! {
-                value {
-                    Module(_) => 0,
-                    Module(_) => 1,
-                    _ => 2,
-                }
-            }
-        }
-
-        let module = Module {
-            data: ObjectArc::new(ModuleObj {
-                object: Object::new(),
-            }),
-        };
-        assert_eq!(classify(Any::from(module)), 0);
-        assert_eq!(classify(Any::from(Array::<i64>::default())), 2);
-    }
-}

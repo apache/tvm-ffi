@@ -17,7 +17,10 @@
  * under the License.
  */
 
-use tvm_ffi::{match_any, Any, AnyView, Array, Map, Shape, Tensor};
+use std::any::TypeId;
+
+use tvm_ffi::match_any::{ArmId, LeafLookupTable, LeafPatternMetadata, LeafPatternProbe};
+use tvm_ffi::{match_any, Any, AnyView, Array, Function, Map, Module, Shape, Tensor, TypeIndex};
 
 #[test]
 fn matches_concrete_object_containers_in_source_order() {
@@ -74,4 +77,72 @@ fn parameterized_containers_keep_ordered_conversion() {
     };
 
     assert_eq!(selected, "float array");
+}
+
+#[test]
+fn leaf_lookup_keeps_the_first_arm() {
+    fn classify(value: Any) -> usize {
+        match_any! {
+            value {
+                Module(_) => 0,
+                Module(_) => 1,
+                _ => 2,
+            }
+        }
+    }
+
+    let module: Module = Function::get_global("ffi.SystemLib")
+        .unwrap()
+        .call_tuple_with_len::<0, _>(())
+        .unwrap()
+        .try_into()
+        .unwrap();
+    assert_eq!(classify(Any::from(module)), 0);
+    assert_eq!(classify(Any::from(Array::<i64>::default())), 2);
+}
+
+#[test]
+fn lookup_table_maps_runtime_indices_to_local_arm_ids() {
+    const ARM_0: ArmId = 0;
+    const ARM_1: ArmId = 1;
+    const ARM_2: ArmId = 2;
+    let pattern_list_id = TypeId::of::<(i32, i64, f32)>();
+    let table = LeafLookupTable::build(pattern_list_id, &[(73, ARM_0), (73, ARM_1), (75, ARM_2)]);
+
+    assert_eq!(table.lookup(pattern_list_id, 73), Ok(Some(ARM_0)));
+    assert_eq!(table.lookup(pattern_list_id, 72), Ok(None));
+    assert_eq!(table.lookup(pattern_list_id, 74), Ok(None));
+    assert_eq!(table.lookup(pattern_list_id, 75), Ok(Some(ARM_2)));
+    assert_eq!(table.lookup(pattern_list_id, 76), Ok(None));
+}
+
+#[test]
+fn a_generic_pattern_list_cannot_reuse_another_lists_table() {
+    let pattern_list_id = TypeId::of::<(i32, i64)>();
+    let table = LeafLookupTable::build(pattern_list_id, &[(73, 0), (75, 1)]);
+
+    assert_eq!(table.lookup(TypeId::of::<(u8, u16)>(), 73), Err(()));
+}
+
+#[test]
+fn metadata_only_accepts_exact_leaf_patterns() {
+    type Leaf = (Module, ());
+    let leaf = LeafPatternProbe::<Leaf>::new();
+    let mut type_indices = [0; 1];
+    assert!((&leaf).leaf_pattern_list_id().is_some());
+    (&leaf).fill_leaf_type_indices(&mut type_indices);
+    assert!(type_indices[0] >= TypeIndex::kTVMFFIStaticObjectBegin as i32);
+
+    type Parameterized = (Array<i64>, ());
+    let parameterized = LeafPatternProbe::<Parameterized>::new();
+    assert!((&parameterized).leaf_pattern_list_id().is_none());
+
+    type NonFinal = (Tensor, ());
+    let non_final = LeafPatternProbe::<NonFinal>::new();
+    assert!((&non_final).leaf_pattern_list_id().is_none());
+
+    struct NoAnyCompatibleMetadata;
+    type Custom = (NoAnyCompatibleMetadata, ());
+    let custom = LeafPatternProbe::<Custom>::new();
+    assert!((&custom).leaf_pattern_list_id().is_none());
 }
