@@ -226,8 +226,8 @@ fn expand_leaf_lookup_match(
             .enumerate()
             .map(|(arm_id, arm_constant)| {
                 quote! {
-                    const #arm_constant: #tvm_ffi::match_any::ArmId =
-                        #arm_id as #tvm_ffi::match_any::ArmId;
+                    const #arm_constant: #tvm_ffi::match_any_internal::ArmId =
+                        #arm_id as #tvm_ffi::match_any_internal::ArmId;
                 }
             });
     let lookup_entries = arm_constants
@@ -241,19 +241,19 @@ fn expand_leaf_lookup_match(
 
     let lookup_arm_id = quote! {
         {
-            use #tvm_ffi::match_any::LeafPatternMetadata as _;
+            use #tvm_ffi::match_any_internal::LeafPatternMetadata as _;
 
             let #probe =
-                #tvm_ffi::match_any::LeafPatternProbe::<#pattern_list>::new();
+                #tvm_ffi::match_any_internal::LeafPatternProbe::<#pattern_list>::new();
             match (&#probe).leaf_pattern_list_id() {
                 ::core::option::Option::Some(#pattern_list_id) => {
                     static #static_table: ::std::sync::OnceLock<
-                        #tvm_ffi::match_any::LeafLookupTable,
+                        #tvm_ffi::match_any_internal::LeafLookupTable,
                     > = ::std::sync::OnceLock::new();
                     let #table = #static_table.get_or_init(|| {
                         let mut #type_indices = [0_i32; #arm_count];
                         (&#probe).fill_leaf_type_indices(&mut #type_indices);
-                        #tvm_ffi::match_any::LeafLookupTable::build(
+                        #tvm_ffi::match_any_internal::LeafLookupTable::build(
                             #pattern_list_id,
                             &[#(#lookup_entries),*],
                         )

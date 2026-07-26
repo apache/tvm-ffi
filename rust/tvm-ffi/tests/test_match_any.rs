@@ -19,7 +19,7 @@
 
 use std::any::TypeId;
 
-use tvm_ffi::match_any::{ArmId, LeafLookupTable, LeafPatternMetadata, LeafPatternProbe};
+use tvm_ffi::match_any_internal::{ArmId, LeafLookupTable, LeafPatternMetadata, LeafPatternProbe};
 use tvm_ffi::{match_any, Any, AnyView, Array, Function, Map, Module, Shape, Tensor, TypeIndex};
 
 #[test]

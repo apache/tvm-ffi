@@ -28,7 +28,7 @@ use crate::AnyCompatible;
 #[doc(hidden)]
 pub type ArmId = u32;
 
-/// Maps runtime object type indices to call-site-local arm numbers.
+/// Internal map from runtime object type indices to call-site-local arm numbers.
 ///
 /// The table stores only [`ArmId`] values. Arm bodies remain native branches in
 /// the macro expansion and are never stored as functions or closures.
