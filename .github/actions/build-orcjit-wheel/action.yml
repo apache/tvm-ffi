@@ -30,6 +30,17 @@ inputs:
   checkout_ref:
     description: "Branch, tag, or SHA to check out before building"
     required: true
+  llvm_version:
+    description: "LLVM version (selects the release tag / conda pin)"
+    default: "22.1.0"
+    required: false
+  llvm_release_repo:
+    description: >
+      GitHub repo hosting the prebuilt LLVM release assets (Linux only). The
+      asset llvm-<version>-linux-<arch>.tar.zst is downloaded from the
+      llvm-<version> tag. Point at a fork to validate before the canonical repo.
+    default: "mlc-ai/package"
+    required: false
 
 runs:
   using: "composite"
@@ -43,17 +54,44 @@ runs:
     - uses: ./.github/actions/detect-env-vars
       id: env_vars
 
-    # ---- Cache LLVM prefix ----
-    - name: Cache LLVM
+    # ---- Acquire LLVM prefix ----
+    # Linux: downloaded as a prebuilt tarball from a GitHub Release (built from
+    #   source with the manylinux gcc-toolset so the ABI stays under the floor)
+    #   and extracted to /opt/llvm. Permanent storage -- no actions/cache lifetime.
+    # macOS/Windows: no GLIBCXX floor -- keep the conda-forge binaries, cached.
+    - name: Cache LLVM (macOS/Windows)
+      if: runner.os != 'Linux'
       uses: actions/cache@v4
       id: llvm-cache
       with:
         path: ${{ runner.os == 'Windows' && 'C:/opt/llvm' || '/opt/llvm' }}
-        key: llvm-22.1.0-${{ runner.os }}-${{ inputs.arch }}-v3
+        key: llvm-${{ inputs.llvm_version }}-${{ runner.os }}-${{ inputs.arch }}-v4
 
-    # ---- Install LLVM via conda (cache miss only) ----
+    - name: Download prebuilt LLVM (Linux)
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        set -euo pipefail
+        asset="llvm-${{ inputs.llvm_version }}-linux-${{ inputs.arch }}.tar.zst"
+        base="https://github.com/${{ inputs.llvm_release_repo }}/releases/download"
+        url="${base}/llvm-${{ inputs.llvm_version }}/${asset}"
+        echo "Downloading $url"
+        curl -fL --retry 5 --retry-all-errors -o "$RUNNER_TEMP/$asset" "$url"
+        sudo mkdir -p /opt/llvm
+        sudo tar --zstd -xf "$RUNNER_TEMP/$asset" -C /opt/llvm
+        sudo chown -R "$(id -u):$(id -g)" /opt/llvm
+
+    - name: Verify LLVM prefix (Linux)
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        test -x /opt/llvm/bin/llvm-config \
+          || { echo "::error::LLVM prefix missing; the release download must succeed first"; exit 1; }
+        /opt/llvm/bin/llvm-config --version
+
+    # ---- Install LLVM via conda (macOS/Windows, cache miss only) ----
     - name: Setup conda
-      if: steps.llvm-cache.outputs.cache-hit != 'true'
+      if: steps.llvm-cache.outputs.cache-hit != 'true' && runner.os != 'Linux'
       uses: conda-incubator/setup-miniconda@fc2d68f6413eb2d87b895e92f8584b5b94a10167  # v3.3.0
       continue-on-error: true
       id: conda1
@@ -61,7 +99,7 @@ runs:
         miniforge-version: latest
 
     - name: Setup conda (retry with tar.bz2)
-      if: steps.llvm-cache.outputs.cache-hit != 'true' && steps.conda1.outcome == 'failure'
+      if: steps.llvm-cache.outputs.cache-hit != 'true' && runner.os != 'Linux' && steps.conda1.outcome == 'failure'
       uses: conda-incubator/setup-miniconda@fc2d68f6413eb2d87b895e92f8584b5b94a10167  # v3.3.0
       with:
         miniforge-version: latest
@@ -72,19 +110,20 @@ runs:
       shell: bash
       run: sudo mkdir -p /opt/llvm && sudo chown -R $(whoami) /opt/llvm
 
-    - name: Install LLVM (Unix)
-      if: steps.llvm-cache.outputs.cache-hit != 'true' && runner.os != 'Windows'
+    - name: Install LLVM (macOS)
+      if: steps.llvm-cache.outputs.cache-hit != 'true' && runner.os == 'macOS'
       shell: bash -l {0}
       run: |
         conda create -q -p /opt/llvm -c conda-forge \
-          llvmdev=22.1.0 clangdev=22.1.0 compiler-rt=22.1.0 zlib zstd-static \
+          llvmdev=${{ inputs.llvm_version }} clangdev=${{ inputs.llvm_version }} \
+          compiler-rt=${{ inputs.llvm_version }} zlib zstd-static \
           -y
 
     - name: Install LLVM (Windows)
       if: steps.llvm-cache.outputs.cache-hit != 'true' && runner.os == 'Windows'
       shell: cmd /C call {0}
       run: |
-        conda create -q -p C:\opt\llvm -c conda-forge llvmdev=22.1.0 zlib zstd-static -y
+        conda create -q -p C:\opt\llvm -c conda-forge llvmdev=${{ inputs.llvm_version }} zlib zstd-static -y
 
     # ---- Build and test wheels ----
     - name: Build and test wheels
@@ -97,6 +136,10 @@ runs:
         CIBW_ARCHS_LINUX: ${{ inputs.arch }}
         CIBW_ARCHS_MACOS: ${{ inputs.arch }}
         CIBW_ARCHS_WINDOWS: ${{ inputs.arch }}
+        # Link inside manylinux_2_28 -- the same image family the downloaded LLVM
+        # was built in (gcc-toolset-14). An older image couldn't consume its libs.
+        CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_28
+        CIBW_MANYLINUX_AARCH64_IMAGE: manylinux_2_28
         CIBW_BUILD_VERBOSITY: 1
         CMAKE_BUILD_PARALLEL_LEVEL: ${{ steps.env_vars.outputs.cpu_count }}
         CIBW_ENVIRONMENT: LLVM_PREFIX=/opt/llvm

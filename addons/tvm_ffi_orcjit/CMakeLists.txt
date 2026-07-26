@@ -148,17 +148,20 @@ if (APPLE)
             $<TARGET_FILE:tvm_ffi_orcjit>
     COMMENT "Fixing libc++ rpath to use system library"
   )
-elseif (UNIX AND NOT WIN32)
-  # Static libstdc++/libgcc: the conda LLVM toolchain's libstdc++ is newer than the manylinux ABI
-  # floor, so linking it dynamically would import too-recent GLIBCXX_* symbols and fail auditwheel.
-  target_link_options(tvm_ffi_orcjit PRIVATE -static-libstdc++ -static-libgcc)
 endif ()
+
+# libstdc++/libgcc are linked DYNAMICALLY on Linux. The prebuilt LLVM this addon links against is
+# built inside the manylinux image with its gcc-toolset, so the toolchain already sits at the
+# manylinux ABI floor and no too-recent GLIBCXX_* symbol is imported -- the -static-libstdc++
+# workaround the older conda-forge LLVM required is no longer needed.
 
 # Hide symbols pulled from static archives so they are not re-exported and cannot interpose with a
 # host process's own copies (e.g. PyTorch's bundled LLVM). Exclude LLVM/zlib/zstd by name -- NOT
-# --exclude-libs,ALL, which would also hide the static libstdc++ symbols (operator new, __throw_*,
-# ...) that liborc_rt and JIT'd C++ code resolve from this .so at run time. The LLVM list is derived
-# from llvm-config so it tracks the toolchain version.
+# --exclude-libs,ALL. The embedded liborc_rt.a is linked by the JIT at run time and resolves its C++
+# runtime through the process (dlsym), including archive-only helpers such as
+# _ZSt28__throw_bad_array_new_lengthv that libstdc++.so does not export; ALL localizes those and the
+# ORC platform then fails to materialize. This holds whether libstdc++ is static or dynamic. The
+# LLVM list is derived from llvm-config so it tracks the toolchain version.
 if (CMAKE_SYSTEM_NAME MATCHES "Linux|Android|FreeBSD|NetBSD|OpenBSD" AND CMAKE_CXX_COMPILER_ID
                                                                          MATCHES "GNU|Clang"
 )
