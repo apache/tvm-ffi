@@ -166,26 +166,44 @@ fn expand_ordered_dispatch(
     view: &Ident,
     rejected: &Ident,
 ) -> TokenStream {
-    arms.iter().rev().fold(quote!({ #fallback }), |next, arm| {
-        let matcher = &arm.matcher;
+    expand_ordered_try_into_chain(arms, quote!({ #fallback }), view, rejected, |_, arm| {
         let binding = &arm.binding;
         let body = &arm.body;
-        let matched = if let Some(guard) = &arm.guard {
-            quote!(::core::result::Result::Ok(#binding) if #guard)
+        if let Some(guard) = &arm.guard {
+            quote!(::core::result::Result::Ok(#binding) if #guard => { #body })
         } else {
-            quote!(::core::result::Result::Ok(#binding))
-        };
-
-        quote! {
-            match ::core::convert::TryInto::<#matcher>::try_into(#view) {
-                #matched => { #body },
-                #rejected => {
-                    ::core::mem::drop(#rejected);
-                    #next
-                }
-            }
+            quote!(::core::result::Result::Ok(#binding) => { #body })
         }
     })
+}
+
+fn expand_ordered_try_into_chain<F>(
+    arms: &[TypedArm],
+    fallback: TokenStream,
+    view: &Ident,
+    rejected: &Ident,
+    mut matched_arm: F,
+) -> TokenStream
+where
+    F: FnMut(usize, &TypedArm) -> TokenStream,
+{
+    arms.iter()
+        .enumerate()
+        .rev()
+        .fold(fallback, |next, (arm_id, arm)| {
+            let matcher = &arm.matcher;
+            let matched = matched_arm(arm_id, arm);
+
+            quote! {
+                match ::core::convert::TryInto::<#matcher>::try_into(#view) {
+                    #matched,
+                    #rejected => {
+                        ::core::mem::drop(#rejected);
+                        #next
+                    }
+                }
+            }
+        })
 }
 
 fn expand_leaf_lookup_match(
@@ -267,23 +285,19 @@ fn expand_leaf_lookup_match(
         }
     };
 
-    let ordered_selection = arms.iter().enumerate().rev().fold(
+    let ordered_selection = expand_ordered_try_into_chain(
+        arms,
         quote!(#selected_enum::#fallback_variant),
-        |next, (arm_id, arm)| {
-            let matcher = &arm.matcher;
+        &view,
+        &rejected,
+        |arm_id, _| {
             let variant = &arm_variants[arm_id];
 
-            quote! {
-                match ::core::convert::TryInto::<#matcher>::try_into(#view) {
-                    ::core::result::Result::Ok(#selected_value) => {
-                        #selected_enum::#variant(#selected_value)
-                    }
-                    #rejected => {
-                        ::core::mem::drop(#rejected);
-                        #next
-                    }
+            quote!(
+                ::core::result::Result::Ok(#selected_value) => {
+                    #selected_enum::#variant(#selected_value)
                 }
-            }
+            )
         },
     );
 
