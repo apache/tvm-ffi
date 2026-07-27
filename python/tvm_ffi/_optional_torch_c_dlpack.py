@@ -44,6 +44,9 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+IS_WINDOWS = sys.platform == "win32"
+IS_DARWIN = sys.platform == "darwin"
+
 
 def _torch_extension_device(torch_module: Any) -> str:
     """Return the torch backend name used in the optional extension library name."""
@@ -53,6 +56,13 @@ def _torch_extension_device(torch_module: Any) -> str:
         if getattr(torch_module.version, "hip", None) is not None:
             return "rocm"
         return "cuda"
+    if (
+        not IS_WINDOWS
+        and not IS_DARWIN
+        and hasattr(torch_module, "npu")
+        and torch_module.npu.is_available()
+    ):
+        return "torch_npu"
     return "cpu"
 
 
@@ -101,12 +111,21 @@ def _check_and_update_dlpack_c_exchange_api(tensor_cls: object) -> bool:
     return False
 
 
+def _should_use_existing_torch_dlpack_api(torch_module: Any) -> bool:
+    """Return whether Torch's existing DLPack API can be used without an addon."""
+    prefer_torch_npu_override = _torch_extension_device(torch_module) == "torch_npu"
+    return (
+        _check_and_update_dlpack_c_exchange_api(torch_module.Tensor)
+        and not prefer_torch_npu_override
+    )
+
+
 def load_torch_c_dlpack_extension() -> Any:  # noqa: PLR0912, PLR0915
     try:
         import torch  # noqa: PLC0415
         import torch.version  # noqa: PLC0415
 
-        if _check_and_update_dlpack_c_exchange_api(torch.Tensor):
+        if _should_use_existing_torch_dlpack_api(torch):
             # skip loading the extension if the __dlpack_c_exchange_api__
             # attribute is already set so we don't have to do it in
             # newer version of PyTorch
@@ -118,7 +137,7 @@ def load_torch_c_dlpack_extension() -> Any:  # noqa: PLR0912, PLR0915
     try:
         import torch_c_dlpack_ext  # noqa: PLC0415, F401
 
-        if _check_and_update_dlpack_c_exchange_api(torch.Tensor):
+        if _should_use_existing_torch_dlpack_api(torch):
             return None
     except ImportError:
         pass
@@ -164,6 +183,8 @@ def load_torch_c_dlpack_extension() -> Any:  # noqa: PLR0912, PLR0915
                 args.append("--build-with-cuda")
             elif device == "rocm":
                 args.append("--build-with-rocm")
+            elif device == "torch_npu":
+                args.append("--build-with-torch-npu")
 
             # use capture_output to reduce noise when building the torch c dlpack addon
             result = subprocess.run(args, check=False, capture_output=True)
