@@ -110,6 +110,20 @@ def test_existing_torch_dlpack_api_is_preferred_on_rocm(monkeypatch: pytest.Monk
     assert _optional_torch_c_dlpack.load_torch_c_dlpack_extension() is None
 
 
+def _run_build(args: list[str]) -> None:
+    """Run the addon build script, surfacing its output when the build fails.
+
+    The build script reports compiler and linker errors through its own stderr, so
+    capture it and attach it to the failure instead of only reporting the exit code.
+    """
+    result = subprocess.run(args, capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        raise AssertionError(
+            f"Build failed with exit status {result.returncode}\n"
+            f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        )
+
+
 @pytest.mark.skipif(torch is None, reason="torch is not installed")
 def test_build_torch_c_dlpack_extension() -> None:
     assert torch is not None
@@ -134,7 +148,7 @@ def test_build_torch_c_dlpack_extension() -> None:
             args.append("--build-with-rocm")
         else:
             raise ValueError("Cannot determine whether to build with CUDA or ROCm.")
-    subprocess.run(args, check=True)
+    _run_build(args)
 
     lib_path = str(Path(f"./output-dir/{libname}").resolve())
     assert Path(lib_path).exists()
@@ -156,13 +170,20 @@ def test_parallel_build() -> None:
     processes = []
     for i in range(num_processes):
         p = subprocess.Popen(
-            [sys.executable, str(build_script), "--output-dir", output_dir, "--libname", libname]
+            [sys.executable, str(build_script), "--output-dir", output_dir, "--libname", libname],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
         )
         processes.append((p, output_dir))
 
     for p, output_dir in processes:
-        p.wait()
-        assert p.returncode == 0
+        stdout, stderr = p.communicate()
+        if p.returncode != 0:
+            raise AssertionError(
+                f"Build failed with exit status {p.returncode}\n"
+                f"stdout:\n{stdout}\nstderr:\n{stderr}"
+            )
     lib_path = str(Path(f"{output_dir}/{libname}").resolve())
     assert Path(lib_path).exists()
 
