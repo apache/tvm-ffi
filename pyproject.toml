@@ -44,7 +44,6 @@ cpp = ["ninja"]
 [dependency-groups]
 torch = [
   # TODO: Remove the Windows ARM64 exclusion once official PyTorch wheels are available.
-  # PyTorch does not support Python 3.14t.
   "torch; python_version < '3.14' and (platform_system != 'Windows' or platform_machine != 'ARM64')",
   "setuptools",                     # setuptools is needed by torch jit for best perf
   "ninja",

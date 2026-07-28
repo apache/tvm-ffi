@@ -353,6 +353,9 @@ def _run_command_in_dev_prompt(
         else:
             raise RuntimeError(f"Unsupported Windows architecture: {platform.machine()}")
 
+        # Use cmd.exe to run the batch file and then your command.
+        # The /k flag keeps the command prompt open after the batch file runs.
+        # The "&" symbol chains the commands.
         cmd_command = '"{vsdevcmd_path}" -arch={arch} & {command}'.format(
             vsdevcmd_path=vsdevcmd_path, arch=msvc_arch, command=" ".join(args)
         )
