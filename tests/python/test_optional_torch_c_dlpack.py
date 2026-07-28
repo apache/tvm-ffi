@@ -128,15 +128,13 @@ def _run_build(args: list[str]) -> None:
 def test_build_torch_c_dlpack_extension() -> None:
     assert torch is not None
     build_script = Path(tvm_ffi.__file__).parent / "utils" / "_build_optional_torch_c_dlpack.py"
-    libname_suffix = ".dll" if IS_WINDOWS else ".so"
-    libname = f"libtorch_c_dlpack_addon_test{libname_suffix}"
     args = [
         sys.executable,
         str(build_script),
         "--output-dir",
         "./output-dir",
         "--libname",
-        libname,
+        "libtorch_c_dlpack_addon_test.so",
     ]
     # First use "torch.cuda.is_available()" to check whether GPU environment
     # is available. Then determine the GPU type.
@@ -150,7 +148,7 @@ def test_build_torch_c_dlpack_extension() -> None:
             raise ValueError("Cannot determine whether to build with CUDA or ROCm.")
     _run_build(args)
 
-    lib_path = str(Path(f"./output-dir/{libname}").resolve())
+    lib_path = str(Path("./output-dir/libtorch_c_dlpack_addon_test.so").resolve())
     assert Path(lib_path).exists()
 
     lib = ctypes.CDLL(lib_path)
@@ -165,8 +163,7 @@ def test_parallel_build() -> None:
     build_script = Path(tvm_ffi.__file__).parent / "utils" / "_build_optional_torch_c_dlpack.py"
     num_processes = 4
     output_dir = "./output-dir-parallel"
-    libname_suffix = ".dll" if IS_WINDOWS else ".so"
-    libname = f"libtorch_c_dlpack_addon_test{libname_suffix}"
+    libname = "libtorch_c_dlpack_addon_test.so"
     processes = []
     for i in range(num_processes):
         p = subprocess.Popen(

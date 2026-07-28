@@ -865,10 +865,7 @@ def main() -> None:  # noqa: PLR0912, PLR0915
 
         # Add Python library linking
         if IS_WINDOWS:
-            python_major_lib = f"python{sys.version_info.major}.lib"
-            python_version_lib = (
-                f"python{sys.version_info.major}{sys.version_info.minor}.lib"
-            )
+            python_lib = f"python{sys.version_info.major}.lib"
             python_libdir_list = [
                 sysconfig.get_config_var("LIBDIR"),
                 str(Path(sys.base_exec_prefix) / "libs"),
@@ -881,20 +878,8 @@ def main() -> None:  # noqa: PLR0912, PLR0915
                     str((Path(sysconfig.get_path("include")).parent / "libs").resolve())
                 )
             for python_libdir in python_libdir_list:
-                if not python_libdir:
-                    continue
-                libdir_path = Path(python_libdir)
-                if (libdir_path / python_major_lib).exists():
+                if python_libdir and (Path(python_libdir) / python_lib).exists():
                     ldflags.append(f"/LIBPATH:{python_libdir.replace(':', '$:')}")
-                    break
-                elif (libdir_path / python_version_lib).exists():
-                    # Some Python distributions (e.g., nuget-cpython) only provide the
-                    # versioned library (e.g., python312.lib) without the major-only stub
-                    # (python3.lib). Explicitly link the versioned library so that pybind11's
-                    # #pragma comment directive resolves correctly regardless of which name is
-                    # used.
-                    ldflags.append(f"/LIBPATH:{python_libdir.replace(':', '$:')}")
-                    ldflags.append(python_version_lib)
                     break
 
         if IS_DARWIN:
