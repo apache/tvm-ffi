@@ -77,6 +77,7 @@ pub struct LeafLookupTable<const N: usize> {
 
 impl<const N: usize> LeafLookupTable<N> {
     #[doc(hidden)]
+    #[inline(always)]
     pub fn build(pattern_list_id: TypeId, type_indices: [i32; N]) -> Self {
         assert!(N != 0, "match_any! leaf lookup requires at least one arm");
         for &type_index in &type_indices {
@@ -117,6 +118,7 @@ pub trait LeafPatternList: 'static {
 impl LeafPatternList for () {
     const ALL_EXACT_LEAF: bool = true;
 
+    #[inline(always)]
     fn fill_leaf_type_indices(out: &mut [i32]) {
         debug_assert!(out.is_empty());
     }
@@ -129,6 +131,7 @@ where
 {
     const ALL_EXACT_LEAF: bool = Head::MATCH_ANY_EXACT && Tail::ALL_EXACT_LEAF;
 
+    #[inline(always)]
     fn fill_leaf_type_indices(out: &mut [i32]) {
         let (head, tail) = out
             .split_first_mut()
@@ -164,10 +167,12 @@ pub trait LeafPatternMetadata {
 impl<T> LeafPatternMetadata for &LeafPatternProbe<T> {}
 
 impl<T: LeafPatternList> LeafPatternMetadata for LeafPatternProbe<T> {
+    #[inline(always)]
     fn leaf_pattern_list_id(&self) -> Option<TypeId> {
         T::ALL_EXACT_LEAF.then(TypeId::of::<T>)
     }
 
+    #[inline(always)]
     fn fill_leaf_type_indices(&self, out: &mut [i32]) {
         T::fill_leaf_type_indices(out);
     }
