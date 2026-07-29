@@ -24,10 +24,10 @@ use syn::{braced, parenthesized, Expr, Pat, Path, Result, Token};
 
 use crate::utils::get_tvm_ffi_crate;
 
-// Keep single-arm matches ordered. Release benchmarks of the standard ObjectRef
-// conversion path show that lookup pays off from two arms when a later arm or
-// the fallback is reached.
-const MIN_LOOKUP_TABLE_ARMS: usize = 2;
+// O3 hot-loop benchmarks across multiple shuffle seeds show a clear win for
+// uniformly distributed hits at 20 arms. This is a conservative, retestable
+// heuristic; smaller matches keep the ordered path.
+const MIN_LOOKUP_TABLE_ARMS: usize = 20;
 
 struct MatchAnyInput {
     scrutinee: Expr,
@@ -136,7 +136,7 @@ fn expand_ordered_match(
     let converted = Ident::new("__tvm_ffi_match_any_converted", span);
     let view = Ident::new("__tvm_ffi_match_any_view", span);
     let rejected = Ident::new("__tvm_ffi_match_any_rejected", span);
-    let dispatch = expand_ordered_dispatch(arms, fallback, &view, &rejected);
+    let dispatch = expand_ordered_dispatch(tvm_ffi, arms, fallback, &view, &rejected);
 
     quote! {
         {
@@ -161,23 +161,32 @@ fn expand_ordered_match(
 }
 
 fn expand_ordered_dispatch(
+    tvm_ffi: &TokenStream,
     arms: &[TypedArm],
     fallback: &Expr,
     view: &Ident,
     rejected: &Ident,
 ) -> TokenStream {
-    expand_ordered_try_into_chain(arms, quote!({ #fallback }), view, rejected, |_, arm| {
-        let binding = &arm.binding;
-        let body = &arm.body;
-        if let Some(guard) = &arm.guard {
-            quote!(::core::result::Result::Ok(#binding) if #guard => { #body })
-        } else {
-            quote!(::core::result::Result::Ok(#binding) => { #body })
-        }
-    })
+    expand_ordered_try_into_chain(
+        tvm_ffi,
+        arms,
+        quote!({ #fallback }),
+        view,
+        rejected,
+        |_, arm| {
+            let binding = &arm.binding;
+            let body = &arm.body;
+            if let Some(guard) = &arm.guard {
+                quote!(::core::result::Result::Ok(#binding) if #guard => { #body })
+            } else {
+                quote!(::core::result::Result::Ok(#binding) => { #body })
+            }
+        },
+    )
 }
 
 fn expand_ordered_try_into_chain<F>(
+    tvm_ffi: &TokenStream,
     arms: &[TypedArm],
     fallback: TokenStream,
     view: &Ident,
@@ -193,9 +202,10 @@ where
         .fold(fallback, |next, (arm_id, arm)| {
             let matcher = &arm.matcher;
             let matched = matched_arm(arm_id, arm);
+            let conversion = expand_pattern_conversion(tvm_ffi, matcher, view);
 
             quote! {
-                match ::core::convert::TryInto::<#matcher>::try_into(#view) {
+                match #conversion {
                     #matched,
                     #rejected => {
                         ::core::mem::drop(#rejected);
@@ -206,12 +216,25 @@ where
         })
 }
 
-fn expand_leaf_table_lookup(
-    tvm_ffi: &TokenStream,
-    arms: &[TypedArm],
-    arm_constants: &[Ident],
-    view: &Ident,
-) -> TokenStream {
+fn expand_pattern_conversion(tvm_ffi: &TokenStream, matcher: &Path, view: &Ident) -> TokenStream {
+    let span = Span::mixed_site();
+    let probe = Ident::new("__tvm_ffi_match_any_conversion_probe", span);
+    let converted = Ident::new("__tvm_ffi_match_any_pattern_conversion", span);
+
+    quote! {
+        {
+            use #tvm_ffi::match_any_internal::PatternConversion as _;
+
+            let #probe =
+                #tvm_ffi::match_any_internal::PatternConversionProbe::<#matcher>::new();
+            let #converted: ::core::result::Result<#matcher, ()> =
+                (&#probe).try_convert(#view);
+            #converted
+        }
+    }
+}
+
+fn expand_leaf_table_lookup(tvm_ffi: &TokenStream, arms: &[TypedArm], view: &Ident) -> TokenStream {
     let span = Span::mixed_site();
     let probe = Ident::new("__tvm_ffi_match_any_probe", span);
     let pattern_list_id = Ident::new("__tvm_ffi_match_any_leaf_pattern_list_id", span);
@@ -219,10 +242,6 @@ fn expand_leaf_table_lookup(
     let static_table = Ident::new("__TVM_FFI_MATCH_ANY_LEAF_TABLE", span);
     let table = Ident::new("__tvm_ffi_match_any_leaf_table", span);
     let arm_count = arms.len();
-    let lookup_entries = arm_constants
-        .iter()
-        .enumerate()
-        .map(|(arm_id, arm_constant)| quote!((#type_indices[#arm_id], #arm_constant)));
     let pattern_list = arms
         .iter()
         .map(|arm| &arm.matcher)
@@ -238,14 +257,14 @@ fn expand_leaf_table_lookup(
             match (&#probe).leaf_pattern_list_id() {
                 ::core::option::Option::Some(#pattern_list_id) => {
                     static #static_table: ::std::sync::OnceLock<
-                        #tvm_ffi::match_any_internal::LeafLookupTable,
+                        #tvm_ffi::match_any_internal::LeafLookupTable<#arm_count>,
                     > = ::std::sync::OnceLock::new();
                     let #table = #static_table.get_or_init(|| {
                         let mut #type_indices = [0_i32; #arm_count];
                         (&#probe).fill_leaf_type_indices(&mut #type_indices);
                         #tvm_ffi::match_any_internal::LeafLookupTable::build(
                             #pattern_list_id,
-                            &[#(#lookup_entries),*],
+                            #type_indices,
                         )
                     });
                     #table.lookup(#pattern_list_id, #view.type_index())
@@ -259,6 +278,7 @@ fn expand_leaf_table_lookup(
 }
 
 fn expand_direct_leaf_selection(
+    tvm_ffi: &TokenStream,
     arms: &[TypedArm],
     arm_constants: &[Ident],
     arm_variants: &[Ident],
@@ -272,10 +292,11 @@ fn expand_direct_leaf_selection(
         let matcher = &arm.matcher;
         let variant = &arm_variants[arm_id];
         let arm_constant = &arm_constants[arm_id];
+        let conversion = expand_pattern_conversion(tvm_ffi, matcher, view);
 
         quote! {
             #arm_constant => {
-                match ::core::convert::TryInto::<#matcher>::try_into(#view) {
+                match #conversion {
                     ::core::result::Result::Ok(#selected_value) => {
                         #selected_enum::#variant(#selected_value)
                     }
@@ -361,19 +382,18 @@ fn expand_leaf_lookup_match(
             .map(|(arm_id, arm_constant)| {
                 quote! {
                     const #arm_constant: #tvm_ffi::match_any_internal::ArmId =
-                        #arm_id as #tvm_ffi::match_any_internal::ArmId;
+                        #arm_id;
                 }
             });
-    let lookup_arm_id = expand_leaf_table_lookup(tvm_ffi, arms, &arm_constants, &view);
-
+    let lookup_arm_id = expand_leaf_table_lookup(tvm_ffi, arms, &view);
     let ordered_selection = expand_ordered_try_into_chain(
+        tvm_ffi,
         arms,
         quote!(#selected_enum::#fallback_variant),
         &view,
         &rejected,
         |arm_id, _| {
             let variant = &arm_variants[arm_id];
-
             quote!(
                 ::core::result::Result::Ok(#selected_value) => {
                     #selected_enum::#variant(#selected_value)
@@ -383,6 +403,7 @@ fn expand_leaf_lookup_match(
     );
 
     let direct_selection = expand_direct_leaf_selection(
+        tvm_ffi,
         arms,
         &arm_constants,
         &arm_variants,

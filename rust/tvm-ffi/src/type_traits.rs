@@ -56,7 +56,13 @@ pub unsafe trait AnyCompatible: Sized {
     /// NOTE: pay very careful attention to avoid memory leak!
     /// - When calling from managed Any, remember to use std::mem::ManuallyDrop
     unsafe fn move_from_any_after_check(data: &mut TVMFFIAny) -> Self;
-    /// try to cast the value from AnyView
+    /// Try to cast the value from AnyView.
+    ///
+    /// This must succeed for every value accepted by [`Self::check_any_strict`],
+    /// return the same value as [`Self::copy_from_any_view_after_check`] for
+    /// those inputs, and may additionally support non-strict conversions.
+    /// Implementations must validate every input before reading a union field
+    /// that is not valid for its runtime type index.
     unsafe fn try_cast_from_any_view(data: &TVMFFIAny) -> Result<Self, ()>;
     /// Get the type key of a type when TryCastFromAnyView fails.
     fn get_mismatch_type_info(data: &TVMFFIAny) -> String {
