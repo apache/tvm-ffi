@@ -46,13 +46,17 @@ pub use crate::error::{
     ATTRIBUTE_ERROR, INDEX_ERROR, KEY_ERROR, RUNTIME_ERROR, TYPE_ERROR, VALUE_ERROR,
 };
 pub use crate::extra::module::Module;
+pub use crate::extra::structural::{
+    structural_visit, structural_walk, walk, walk_with_context, DefRegionKind, Phase, VisitCtx,
+    VisitDispatch, VisitOutcome, VisitValue, WalkOrder, WalkResult,
+};
 pub use crate::function::Function;
 pub use crate::object::ObjectRefCast;
 pub use crate::object::{Object, ObjectArc, ObjectCore, ObjectCoreWithExtraItems, ObjectRefCore};
 pub use crate::optional::Optional;
 pub use crate::string::{Bytes, String};
 pub use crate::type_traits::AnyCompatible;
-pub use tvm_ffi_macros::match_any;
+pub use tvm_ffi_macros::{dispatch, match_any};
 
 pub use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
 pub use tvm_ffi_sys::{

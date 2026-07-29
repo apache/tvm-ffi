@@ -28,6 +28,47 @@ This workspace contains three crates:
 The overall project focuses on low-level, direct access to the ABI when possible for maximum
 efficiency while maintaining interoperability.
 
+## Structural Visitors and Walkers
+
+The `tvm-ffi` crate provides a native Rust structural walker over FFI values,
+built-in containers, and reflected object fields. `#[dispatch(visit)]` turns
+the `visit_*` methods in an inherent implementation into a typed, stateful
+visitor:
+
+```rust
+use tvm_ffi::{dispatch, structural_visit, Array, VisitCtx, WalkResult};
+
+#[derive(Default)]
+struct Sum {
+    value: i64,
+}
+
+#[dispatch(visit)]
+impl Sum {
+    fn visit_integer(&mut self, value: i64, _ctx: &mut VisitCtx<'_>) -> WalkResult {
+        self.value += value;
+        WalkResult::Advance
+    }
+}
+
+let root = Array::new(vec![1_i64, 2, 3]);
+let mut sum = Sum::default();
+structural_visit(&root, &mut sum).unwrap();
+assert_eq!(sum.value, 6);
+```
+
+Typed handlers are tested in source order. Borrowed `ObjectCore` node types use
+runtime subtype checks, owned arguments use `AnyCompatible` casts, and a final
+`&VisitValue` handler acts as a catch-all. Use `structural_walk` to select
+pre-order or post-order dispatch, or `walk`/`walk_with_context` for raw
+callbacks.
+
+`WalkResult::Advance` visits reflected or container children, `Skip` suppresses
+the current value's default recursion, and `Interrupt` stops the complete
+traversal. A handler can visit selected children through `VisitCtx` before
+returning `Skip`; definition-region state is available through the same
+context.
+
 ## Installation
 
 The Rust support depends on `libtvm_ffi`.

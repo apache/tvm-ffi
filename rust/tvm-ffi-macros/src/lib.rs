@@ -23,6 +23,15 @@ use proc_macro_error::proc_macro_error;
 mod match_any;
 mod object_macros;
 mod utils;
+mod visit;
+
+/// Generate typed structural-visit dispatch from the `visit_*` methods in an
+/// inherent implementation.
+#[proc_macro_error]
+#[proc_macro_attribute]
+pub fn dispatch(attr: TokenStream, item: TokenStream) -> TokenStream {
+    visit::dispatch(attr, item)
+}
 
 /// Match object-backed values carried by an Any-compatible scrutinee.
 ///

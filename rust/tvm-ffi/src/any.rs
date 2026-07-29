@@ -53,6 +53,25 @@ impl<'a> AnyView<'a> {
         self.data.type_index
     }
 
+    #[inline]
+    pub(crate) fn as_raw_ffi_any(&self) -> &TVMFFIAny {
+        &self.data
+    }
+
+    /// Construct a borrowed view from its ABI representation.
+    ///
+    /// # Safety
+    ///
+    /// The caller must keep every resource referenced by `data` alive for the
+    /// returned view's complete lifetime.
+    #[inline]
+    pub(crate) unsafe fn from_raw_ffi_any(data: TVMFFIAny) -> Self {
+        Self {
+            data,
+            _phantom: std::marker::PhantomData,
+        }
+    }
+
     /// More strict version than try_from/try_into
     ///
     /// This function will not try to cast the type
@@ -150,6 +169,10 @@ impl Any {
     #[inline]
     pub fn type_index(&self) -> i32 {
         self.data.type_index
+    }
+    #[inline]
+    pub(crate) fn as_raw_ffi_any(&self) -> &TVMFFIAny {
+        &self.data
     }
     /// Try to query if stored typed in Any exactly matches the type T
     ///

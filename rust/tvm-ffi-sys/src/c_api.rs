@@ -81,6 +81,16 @@ pub enum TVMFFITypeIndex {
     kTVMFFIModule = 73,
     /// Opaque python object.
     kTVMFFIOpaquePyObject = 74,
+    /// Mutable list object.
+    kTVMFFIList = 75,
+    /// Mutable dict object.
+    kTVMFFIDict = 76,
+    /// Structural visit interrupt object.
+    kTVMFFIVisitInterrupt = 77,
+    /// End of the statically allocated object type-index range.
+    kTVMFFIStaticObjectEnd = 78,
+    /// Start of dynamically allocated object type indices.
+    kTVMFFIDynObjectBegin = 128,
 }
 
 #[repr(i32)]
@@ -89,6 +99,34 @@ pub enum TVMFFIObjectDeleterFlagBitMask {
     kTVMFFIObjectDeleterFlagBitMaskStrong = 1 << 0,
     kTVMFFIObjectDeleterFlagBitMaskWeak = 1 << 1,
     kTVMFFIObjectDeleterFlagBitMaskBoth = (1 << 0) | (1 << 1),
+}
+
+/// Bit flags attached to reflected fields.
+#[repr(i32)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum TVMFFIFieldFlagBitMask {
+    kTVMFFIFieldFlagBitMaskWritable = 1 << 0,
+    kTVMFFIFieldFlagBitMaskHasDefault = 1 << 1,
+    kTVMFFIFieldFlagBitMaskIsStaticMethod = 1 << 2,
+    kTVMFFIFieldFlagBitMaskSEqHashIgnore = 1 << 3,
+    kTVMFFIFieldFlagBitMaskSEqHashDefRecursive = 1 << 4,
+    kTVMFFIFieldFlagBitMaskDefaultFromFactory = 1 << 5,
+    kTVMFFIFieldFlagBitMaskReprOff = 1 << 6,
+    kTVMFFIFieldFlagBitMaskCompareOff = 1 << 7,
+    kTVMFFIFieldFlagBitMaskHashOff = 1 << 8,
+    kTVMFFIFieldFlagBitMaskInitOff = 1 << 9,
+    kTVMFFIFieldFlagBitMaskKwOnly = 1 << 10,
+    kTVMFFIFieldFlagBitSetterIsFunctionObj = 1 << 11,
+    kTVMFFIFieldFlagBitMaskSEqHashDefNonRecursive = 1 << 12,
+}
+
+/// Definition-region mode used by structural traversal.
+#[repr(i32)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum TVMFFIDefRegionKind {
+    kTVMFFIDefRegionKindNone = 0,
+    kTVMFFIDefRegionKindRecursive = 1,
+    kTVMFFIDefRegionKindNonRecursive = 2,
 }
 
 /// Handle to Object from C API's pov
@@ -410,6 +448,14 @@ unsafe extern "C" {
     pub fn TVMFFISetCustomAllocator(allocator: *mut TVMFFICustomAllocator) -> i32;
 
     pub fn TVMFFITypeKeyToIndex(type_key: *const TVMFFIByteArray, out_tindex: *mut i32) -> i32;
+    pub fn TVMFFITypeRegisterAttr(
+        type_index: i32,
+        attr_name: *const TVMFFIByteArray,
+        attr_value: *const TVMFFIAny,
+    ) -> i32;
+    pub fn TVMFFIGetTypeAttrColumn(
+        attr_name: *const TVMFFIByteArray,
+    ) -> *const TVMFFITypeAttrColumn;
     pub fn TVMFFIFunctionGetGlobal(
         name: *const TVMFFIByteArray,
         out: *mut TVMFFIObjectHandle,
