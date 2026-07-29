@@ -25,9 +25,9 @@ use syn::{braced, parenthesized, Expr, Pat, Path, Result, Token};
 use crate::utils::get_tvm_ffi_crate;
 
 // O3 hot-loop benchmarks across multiple shuffle seeds show the first stable
-// win for uniformly distributed inputs at 16 arms. This is a retestable
+// win for uniformly distributed hits at nine arms. This is a retestable
 // heuristic; smaller matches keep the ordered path.
-const MIN_LOOKUP_TABLE_ARMS: usize = 16;
+const MIN_LOOKUP_TABLE_ARMS: usize = 9;
 
 struct MatchAnyInput {
     scrutinee: Expr,
@@ -234,6 +234,29 @@ fn expand_pattern_conversion(tvm_ffi: &TokenStream, matcher: &Path, view: &Ident
     }
 }
 
+fn expand_exact_pattern_conversion(
+    tvm_ffi: &TokenStream,
+    matcher: &Path,
+    view: &Ident,
+) -> TokenStream {
+    let span = Span::mixed_site();
+    let probe = Ident::new("__tvm_ffi_match_any_conversion_probe", span);
+    let converted = Ident::new("__tvm_ffi_match_any_pattern_conversion", span);
+
+    quote! {
+        {
+            use #tvm_ffi::match_any_internal::PatternConversion as _;
+
+            let #probe =
+                #tvm_ffi::match_any_internal::PatternConversionProbe::<#matcher>::new();
+            let #converted: ::core::result::Result<#matcher, ()> = unsafe {
+                (&#probe).try_convert_after_exact_match(#view)
+            };
+            #converted
+        }
+    }
+}
+
 fn expand_leaf_table_lookup(tvm_ffi: &TokenStream, arms: &[TypedArm], view: &Ident) -> TokenStream {
     let span = Span::mixed_site();
     let probe = Ident::new("__tvm_ffi_match_any_probe", span);
@@ -256,10 +279,10 @@ fn expand_leaf_table_lookup(tvm_ffi: &TokenStream, arms: &[TypedArm], view: &Ide
                 #tvm_ffi::match_any_internal::LeafPatternProbe::<#pattern_list>::new();
             match (&#probe).leaf_pattern_list_id() {
                 ::core::option::Option::Some(#pattern_list_id) => {
-                    static #static_table: ::std::sync::OnceLock<
-                        #tvm_ffi::match_any_internal::LeafLookupTable<#arm_count>,
-                    > = ::std::sync::OnceLock::new();
-                    let #table = #static_table.get_or_init(|| {
+                    static #static_table:
+                        #tvm_ffi::match_any_internal::LeafLookupTableCell<#arm_count> =
+                            #tvm_ffi::match_any_internal::LeafLookupTableCell::new();
+                    let #table = #static_table.try_get_or_init(|| {
                         let mut #type_indices = [0_i32; #arm_count];
                         (&#probe).fill_leaf_type_indices(&mut #type_indices);
                         #tvm_ffi::match_any_internal::LeafLookupTable::build(
@@ -267,7 +290,14 @@ fn expand_leaf_table_lookup(tvm_ffi: &TokenStream, arms: &[TypedArm], view: &Ide
                             #type_indices,
                         )
                     });
-                    #table.lookup(#pattern_list_id, #view.type_index())
+                    match #table {
+                        ::core::option::Option::Some(#table) => {
+                            #table.lookup(#pattern_list_id, #view.type_index())
+                        }
+                        ::core::option::Option::None => {
+                            ::core::result::Result::Err(())
+                        }
+                    }
                 }
                 ::core::option::Option::None => {
                     ::core::result::Result::Err(())
@@ -292,7 +322,7 @@ fn expand_direct_leaf_selection(
         let matcher = &arm.matcher;
         let variant = &arm_variants[arm_id];
         let arm_constant = &arm_constants[arm_id];
-        let conversion = expand_pattern_conversion(tvm_ffi, matcher, view);
+        let conversion = expand_exact_pattern_conversion(tvm_ffi, matcher, view);
 
         quote! {
             #arm_constant => {

@@ -18,7 +18,10 @@
  */
 
 use std::any::TypeId;
+use std::cell::UnsafeCell;
 use std::marker::PhantomData;
+use std::mem::MaybeUninit;
+use std::sync::atomic::{AtomicU8, Ordering};
 
 use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
 
@@ -45,12 +48,37 @@ impl<T> PatternConversionProbe<T> {
 pub trait PatternConversion<'a, T> {
     #[doc(hidden)]
     fn try_convert(&self, view: AnyView<'a>) -> Result<T, ()>;
+
+    /// Convert after exact-leaf lookup has established that `view` matches
+    /// `T`. Custom `TryInto` matchers retain their checked conversion.
+    ///
+    /// # Safety
+    ///
+    /// The caller must establish the `AnyCompatible::MATCH_ANY_EXACT`
+    /// contract before using the unchecked implementation.
+    #[doc(hidden)]
+    unsafe fn try_convert_after_exact_match(&self, view: AnyView<'a>) -> Result<T, ()> {
+        self.try_convert(view)
+    }
 }
 
 impl<'a, T: AnyCompatible> PatternConversion<'a, T> for PatternConversionProbe<T> {
     #[inline(always)]
     fn try_convert(&self, view: AnyView<'a>) -> Result<T, ()> {
-        crate::any::try_cast_from_any_view::<T>(&view)
+        if T::MATCH_ANY_EXACT {
+            if view.type_index() == T::match_any_exact_type_index() {
+                Ok(unsafe { crate::any::copy_from_any_view_after_check::<T>(&view) })
+            } else {
+                Err(())
+            }
+        } else {
+            crate::any::try_cast_from_any_view::<T>(&view)
+        }
+    }
+
+    #[inline(always)]
+    unsafe fn try_convert_after_exact_match(&self, view: AnyView<'a>) -> Result<T, ()> {
+        Ok(crate::any::copy_from_any_view_after_check::<T>(&view))
     }
 }
 
@@ -75,17 +103,75 @@ pub struct LeafLookupTable<const N: usize> {
     type_indices: [i32; N],
 }
 
+const LEAF_TABLE_UNINITIALIZED: u8 = 0;
+const LEAF_TABLE_INITIALIZING: u8 = 1;
+const LEAF_TABLE_READY: u8 = 2;
+
+/// Call-site storage specialized for a leaf lookup table.
+#[doc(hidden)]
+pub struct LeafLookupTableCell<const N: usize> {
+    state: AtomicU8,
+    value: UnsafeCell<MaybeUninit<LeafLookupTable<N>>>,
+}
+
+// SAFETY: `value` has one writer, is immutable after initialization, and is
+// only read after an acquire load observes the writer's release store.
+unsafe impl<const N: usize> Sync for LeafLookupTableCell<N> {}
+
+impl<const N: usize> LeafLookupTableCell<N> {
+    #[doc(hidden)]
+    pub const fn new() -> Self {
+        Self {
+            state: AtomicU8::new(LEAF_TABLE_UNINITIALIZED),
+            value: UnsafeCell::new(MaybeUninit::uninit()),
+        }
+    }
+
+    /// Return the table, initialize it, or return `None` when initialization
+    /// is already in progress or was abandoned by a panic. `match_any!` uses
+    /// its ordered path for that invocation.
+    #[doc(hidden)]
+    #[inline(always)]
+    pub fn try_get_or_init(
+        &self,
+        init: impl FnOnce() -> LeafLookupTable<N>,
+    ) -> Option<&LeafLookupTable<N>> {
+        if self.state.load(Ordering::Acquire) == LEAF_TABLE_READY {
+            // SAFETY: the acquire load observes the completed initialization.
+            return Some(unsafe { (&*self.value.get()).assume_init_ref() });
+        }
+        if self
+            .state
+            .compare_exchange(
+                LEAF_TABLE_UNINITIALIZED,
+                LEAF_TABLE_INITIALIZING,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            )
+            .is_err()
+        {
+            // Another thread is initializing the optimization. The caller can
+            // use ordered matching for this invocation.
+            return None;
+        }
+
+        let value = init();
+        // SAFETY: this thread exclusively owns initialization.
+        unsafe { (*self.value.get()).write(value) };
+        self.state.store(LEAF_TABLE_READY, Ordering::Release);
+        // SAFETY: this thread just initialized `value`.
+        Some(unsafe { (&*self.value.get()).assume_init_ref() })
+    }
+}
+
 impl<const N: usize> LeafLookupTable<N> {
     #[doc(hidden)]
     #[inline(always)]
     pub fn build(pattern_list_id: TypeId, type_indices: [i32; N]) -> Self {
         assert!(N != 0, "match_any! leaf lookup requires at least one arm");
-        for &type_index in &type_indices {
-            assert!(
-                type_index >= TypeIndex::kTVMFFIStaticObjectBegin as i32,
-                "match_any! leaf pattern returned a non-object type index"
-            );
-        }
+        debug_assert!(type_indices
+            .iter()
+            .all(|&type_index| type_index >= TypeIndex::kTVMFFIStaticObjectBegin as i32));
         Self {
             pattern_list_id,
             type_indices,

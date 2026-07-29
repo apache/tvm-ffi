@@ -150,10 +150,6 @@ pub fn is_instance_of<Target: ObjectCore>(object_type_index: i32) -> bool {
     if object_type_index == target_type_index {
         return true;
     }
-    // A final target cannot have a distinct runtime subtype.
-    if Target::TYPE_FINAL {
-        return false;
-    }
     let object_begin = TypeIndex::kTVMFFIStaticObjectBegin as i32;
     // Only object types participate in the type hierarchy.
     if object_type_index < object_begin || target_type_index < object_begin {

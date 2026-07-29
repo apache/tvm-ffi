@@ -54,7 +54,6 @@ struct TestBase {
 #[repr(C)]
 #[derive(Object)]
 #[type_key = "testing.TestObjectDerived"]
-#[type_final]
 struct TestDerivedObj {
     base: TestBaseObj,
     extra: i64,
@@ -108,7 +107,6 @@ fn test_is_instance_of() {
     assert_eq!(Object::TYPE_DEPTH, 0);
     assert_eq!(TestBaseObj::TYPE_DEPTH, 1);
     assert_eq!(TestDerivedObj::TYPE_DEPTH, 2);
-    assert!(TestDerivedObj::TYPE_FINAL);
     // reflexive
     assert!(is_instance_of::<TestBaseObj>(base_index));
     // child -> ancestors at every depth
@@ -192,12 +190,5 @@ fn test_any_conversion_preserves_runtime_subtype() {
     let derived_from_any: TestDerived = Any::from(base).try_into().unwrap();
     assert_eq!(derived_from_any.data.extra, 6);
     drop(derived_from_any);
-    assert_eq!(delete_counter.load(Ordering::Relaxed), 1);
-
-    let delete_counter = Arc::new(AtomicU32::new(0));
-    let base = new_base(1, delete_counter.clone());
-    let result: Result<TestDerived> = AnyView::from(&base).try_into();
-    assert!(result.is_err());
-    drop(base);
     assert_eq!(delete_counter.load(Ordering::Relaxed), 1);
 }

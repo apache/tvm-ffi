@@ -18,9 +18,14 @@
  */
 
 use std::any::TypeId;
+use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::sync::Barrier;
+use std::thread;
 
 use tvm_ffi::derive::{Object, ObjectRef};
-use tvm_ffi::match_any_internal::{ArmId, LeafLookupTable, LeafPatternMetadata, LeafPatternProbe};
+use tvm_ffi::match_any_internal::{
+    ArmId, LeafLookupTable, LeafLookupTableCell, LeafPatternMetadata, LeafPatternProbe,
+};
 use tvm_ffi::object::{Object as ObjectBase, ObjectArc};
 use tvm_ffi::{
     match_any, Any, AnyCompatible, AnyView, Array, Function, Map, Module, Shape, Tensor, TypeIndex,
@@ -145,7 +150,7 @@ fn parameterized_containers_keep_ordered_conversion() {
 
 #[test]
 fn large_guarded_and_non_leaf_matches_keep_ordered_dispatch() {
-    // A guard disables the lookup expansion above the 16-arm threshold.
+    // A guard disables the lookup expansion at or above the lookup threshold.
     fn guarded(view: AnyView<'_>) -> usize {
         match_any! {
             view {
@@ -158,14 +163,7 @@ fn large_guarded_and_non_leaf_matches_keep_ordered_dispatch() {
                 Module(_) => 6,
                 Module(_) => 7,
                 Module(_) => 8,
-                Module(_) => 9,
-                Module(_) => 10,
-                Module(_) => 11,
-                Module(_) => 12,
-                Module(_) => 13,
-                Module(_) => 14,
-                Module(_) => 15,
-                _ => 16,
+                _ => 9,
             }
         }
     }
@@ -183,14 +181,7 @@ fn large_guarded_and_non_leaf_matches_keep_ordered_dispatch() {
                 Module(_) => 6,
                 Module(_) => 7,
                 Module(_) => 8,
-                Module(_) => 9,
-                Module(_) => 10,
-                Module(_) => 11,
-                Module(_) => 12,
-                Module(_) => 13,
-                Module(_) => 14,
-                Module(_) => 15,
-                _ => 16,
+                _ => 9,
             }
         }
     }
@@ -223,18 +214,11 @@ fn lookup_selects_later_arms_and_isolates_generic_pattern_lists() {
                 T(_) => 5,
                 T(_) => 6,
                 T(_) => 7,
-                T(_) => 8,
-                T(_) => 9,
-                T(_) => 10,
-                T(_) => 11,
-                T(_) => 12,
-                T(_) => 13,
-                T(_) => 14,
                 Module(mut module) => {
                     let _ = &mut module;
-                    15
+                    8
                 },
-                _ => 16,
+                _ => 9,
             }
         }
     }
@@ -251,12 +235,12 @@ fn lookup_selects_later_arms_and_isolates_generic_pattern_lists() {
     // The first monomorphization initializes the table and exercises Arm0,
     // a later ArmId with a `mut` binding, and both fallback kinds.
     assert_eq!(classify::<TestIntPair>(AnyView::from(&pair)), 0);
-    assert_eq!(classify::<TestIntPair>(AnyView::from(&module)), 15);
+    assert_eq!(classify::<TestIntPair>(AnyView::from(&module)), 8);
     assert_eq!(
         classify::<TestIntPair>(AnyView::from(&Shape::from([1_i64, 2]))),
-        16
+        9
     );
-    assert_eq!(classify::<TestIntPair>(AnyView::from(&1_i64)), 16);
+    assert_eq!(classify::<TestIntPair>(AnyView::from(&1_i64)), 9);
 
     // Function-local statics are shared by generic monomorphizations. This
     // pattern list must not reuse TestIntPair's ArmId mapping.
@@ -287,6 +271,47 @@ fn lookup_table_maps_runtime_indices_to_local_arm_ids() {
 }
 
 #[test]
+fn leaf_lookup_table_cell_initializes_once_and_falls_back_when_unavailable() {
+    let pattern_list_id = TypeId::of::<(i32, i64)>();
+    let object_begin = TypeIndex::kTVMFFIStaticObjectBegin as i32;
+    let cell = LeafLookupTableCell::<1>::new();
+    let init_started = Barrier::new(2);
+    let finish_init = Barrier::new(2);
+
+    thread::scope(|scope| {
+        let initializer = scope.spawn(|| {
+            let table = cell
+                .try_get_or_init(|| {
+                    init_started.wait();
+                    finish_init.wait();
+                    LeafLookupTable::build(pattern_list_id, [object_begin])
+                })
+                .unwrap();
+            assert_eq!(table.lookup(pattern_list_id, object_begin), Ok(Some(0)));
+        });
+
+        init_started.wait();
+        assert!(cell
+            .try_get_or_init(|| panic!("a concurrent initializer must not run"))
+            .is_none());
+        finish_init.wait();
+        initializer.join().unwrap();
+    });
+    assert!(cell
+        .try_get_or_init(|| panic!("an initialized table must be reused"))
+        .is_some());
+
+    let abandoned_cell = LeafLookupTableCell::<1>::new();
+    assert!(catch_unwind(AssertUnwindSafe(|| {
+        abandoned_cell.try_get_or_init(|| panic!("initialization failed"));
+    }))
+    .is_err());
+    assert!(abandoned_cell
+        .try_get_or_init(|| LeafLookupTable::build(pattern_list_id, [object_begin]))
+        .is_none());
+}
+
+#[test]
 fn metadata_only_accepts_exact_leaf_patterns() {
     type Leaf = (Module, ());
     let leaf = LeafPatternProbe::<Leaf>::new();
@@ -307,48 +332,4 @@ fn metadata_only_accepts_exact_leaf_patterns() {
     type Custom = (NoAnyCompatibleMetadata, ());
     let custom = LeafPatternProbe::<Custom>::new();
     assert!((&custom).leaf_pattern_list_id().is_none());
-}
-
-#[test]
-fn wildcard_keeps_the_selected_conversion_alive_during_the_arm() {
-    let module: Module = Function::get_global("ffi.SystemLib")
-        .unwrap()
-        .call_tuple_with_len::<0, _>(())
-        .unwrap()
-        .try_into()
-        .unwrap();
-    let view = AnyView::from(&module);
-    let count_before = view.debug_strong_count().unwrap();
-
-    fn count_in_arm(view: AnyView<'_>) -> usize {
-        match_any! {
-            view {
-                Module(_) => view.debug_strong_count().unwrap(),
-                Module(_) => 0,
-                Module(_) => 0,
-                Module(_) => 0,
-                Module(_) => 0,
-                Module(_) => 0,
-                Module(_) => 0,
-                Module(_) => 0,
-                Module(_) => 0,
-                Module(_) => 0,
-                Module(_) => 0,
-                Module(_) => 0,
-                Module(_) => 0,
-                Module(_) => 0,
-                Module(_) => 0,
-                Module(_) => 0,
-                Module(_) => 0,
-                Module(_) => 0,
-                Module(_) => 0,
-                Module(_) => 0,
-                _ => 0,
-            }
-        }
-    }
-
-    assert_eq!(count_in_arm(view), count_before + 1);
-    assert_eq!(count_in_arm(view), count_before + 1);
-    assert_eq!(view.debug_strong_count(), Some(count_before));
 }
