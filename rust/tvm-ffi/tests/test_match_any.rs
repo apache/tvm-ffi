@@ -145,7 +145,7 @@ fn parameterized_containers_keep_ordered_conversion() {
 
 #[test]
 fn large_guarded_and_non_leaf_matches_keep_ordered_dispatch() {
-    // A guard disables the lookup expansion even at the 20-arm threshold.
+    // A guard disables the lookup expansion above the 16-arm threshold.
     fn guarded(view: AnyView<'_>) -> usize {
         match_any! {
             view {
@@ -165,11 +165,7 @@ fn large_guarded_and_non_leaf_matches_keep_ordered_dispatch() {
                 Module(_) => 13,
                 Module(_) => 14,
                 Module(_) => 15,
-                Module(_) => 16,
-                Module(_) => 17,
-                Module(_) => 18,
-                Module(_) => 19,
-                _ => 20,
+                _ => 16,
             }
         }
     }
@@ -194,11 +190,7 @@ fn large_guarded_and_non_leaf_matches_keep_ordered_dispatch() {
                 Module(_) => 13,
                 Module(_) => 14,
                 Module(_) => 15,
-                Module(_) => 16,
-                Module(_) => 17,
-                Module(_) => 18,
-                Module(_) => 19,
-                _ => 20,
+                _ => 16,
             }
         }
     }
@@ -238,15 +230,11 @@ fn lookup_selects_later_arms_and_isolates_generic_pattern_lists() {
                 T(_) => 12,
                 T(_) => 13,
                 T(_) => 14,
-                T(_) => 15,
-                T(_) => 16,
-                T(_) => 17,
-                T(_) => 18,
                 Module(mut module) => {
                     let _ = &mut module;
-                    19
+                    15
                 },
-                _ => 20,
+                _ => 16,
             }
         }
     }
@@ -263,12 +251,12 @@ fn lookup_selects_later_arms_and_isolates_generic_pattern_lists() {
     // The first monomorphization initializes the table and exercises Arm0,
     // a later ArmId with a `mut` binding, and both fallback kinds.
     assert_eq!(classify::<TestIntPair>(AnyView::from(&pair)), 0);
-    assert_eq!(classify::<TestIntPair>(AnyView::from(&module)), 19);
+    assert_eq!(classify::<TestIntPair>(AnyView::from(&module)), 15);
     assert_eq!(
         classify::<TestIntPair>(AnyView::from(&Shape::from([1_i64, 2]))),
-        20
+        16
     );
-    assert_eq!(classify::<TestIntPair>(AnyView::from(&1_i64)), 20);
+    assert_eq!(classify::<TestIntPair>(AnyView::from(&1_i64)), 16);
 
     // Function-local statics are shared by generic monomorphizations. This
     // pattern list must not reuse TestIntPair's ArmId mapping.

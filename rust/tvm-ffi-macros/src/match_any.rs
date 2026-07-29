@@ -24,10 +24,10 @@ use syn::{braced, parenthesized, Expr, Pat, Path, Result, Token};
 
 use crate::utils::get_tvm_ffi_crate;
 
-// O3 hot-loop benchmarks across multiple shuffle seeds show a clear win for
-// uniformly distributed hits at 20 arms. This is a conservative, retestable
+// O3 hot-loop benchmarks across multiple shuffle seeds show the first stable
+// win for uniformly distributed inputs at 16 arms. This is a retestable
 // heuristic; smaller matches keep the ordered path.
-const MIN_LOOKUP_TABLE_ARMS: usize = 20;
+const MIN_LOOKUP_TABLE_ARMS: usize = 16;
 
 struct MatchAnyInput {
     scrutinee: Expr,
