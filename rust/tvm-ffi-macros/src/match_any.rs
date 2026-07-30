@@ -25,9 +25,9 @@ use syn::{braced, parenthesized, Expr, Pat, Path, Result, Token};
 use crate::utils::get_tvm_ffi_crate;
 
 // O3 hot-loop benchmarks across multiple shuffle seeds show the first stable
-// win for uniformly distributed hits at nine arms. This is a retestable
+// win for uniformly distributed hits at seven arms. This is a retestable
 // heuristic; smaller matches keep the ordered path.
-const MIN_LOOKUP_TABLE_ARMS: usize = 9;
+const MIN_LOOKUP_TABLE_ARMS: usize = 7;
 
 struct MatchAnyInput {
     scrutinee: Expr,
