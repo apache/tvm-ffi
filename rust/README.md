@@ -70,29 +70,22 @@ assert_eq!(calculator.value, 7.5);
 
 Typed handlers are tested in source order: borrowed `ObjectCore` node types use
 runtime subtype checks, owned arguments use `AnyCompatible` casts, and a final
-`&VisitValue` handler acts as a catch-all. Use `structural_walk` to select
-pre-order or post-order dispatch, or `walk`/`walk_with_context` for raw
-callbacks.
+`&VisitValue` handler acts as a catch-all. A handler may take an optional third
+`DefRegionKind` argument to observe the definition-region state at the current
+value. Use `structural_walk` to select pre-order or post-order dispatch, or
+`walk`/`walk_with_context` for raw callbacks that fire at both `Phase::Enter`
+and `Phase::Exit` of every value.
 
-`WalkResult::Advance` visits reflected or container children, `Skip` suppresses
-the current value's default recursion, and `Interrupt` stops the complete
-traversal.
+`WalkResult::Advance` visits container or reflected children, `Skip` suppresses
+the current value's default recursion, and `Interrupt`/`InterruptWith` halt the
+walk, surfacing to the caller as `ControlFlow::Break`. Handlers and callbacks
+may also return `Result<WalkResult>` to propagate errors with `?`.
 
-A handler may declare an optional third `DefRegionKind` parameter to observe
-the definition-region state at the current value (maintained automatically
-from reflected field flags):
-
-```rust,ignore
-fn visit_var(&mut self, var: &VarObj, kind: DefRegionKind) -> WalkResult {
-    // kind tells a definition position apart from a use position.
-    WalkResult::Advance
-}
-```
-
-To take over a value's children, a pre-order handler visits them through
-`VisitDispatch::subvisit` and returns `Skip`. `subvisit` reports a nested
-interrupt as `ControlFlow::Break`; propagate it (and errors, via `?`) instead
-of dropping the result:
+A pre-order handler can take over a value's children instead of advancing:
+visit selected children with `subvisit`, or delegate the walker's default
+child recursion with `subvisit_children`, then return `Skip`. Both report a
+nested interrupt as `ControlFlow::Break`; propagate it (and errors, via `?`)
+instead of dropping the result:
 
 ```rust,ignore
 fn visit_func(&mut self, func: &FuncObj, kind: DefRegionKind) -> Result<WalkResult> {
@@ -105,6 +98,13 @@ fn visit_func(&mut self, func: &FuncObj, kind: DefRegionKind) -> Result<WalkResu
     Ok(WalkResult::Skip)
 }
 ```
+
+Recursion runs natively in Rust; no C++ visitor is constructed. Mutable
+`List`/`Dict` contents are snapshotted before callbacks run, so re-entrant
+mutation cannot invalidate a traversal. A non-container type that registers a
+foreign `__s_visit__` hook is rejected rather than silently walked through
+reflection; handle it with a matching pre-order handler, `subvisit`, and
+`Skip`.
 
 ## Installation
 

@@ -249,6 +249,37 @@ pub trait VisitDispatch: Sized {
         };
         finish(walker.visit_raw(raw_of(AnyView::from(child)), &mut dispatch, def_region_kind))
     }
+
+    /// Visit `value`'s children — not `value` itself — with the walker's
+    /// default rules: container contents for `Array`/`List`/`Map`/`Dict`,
+    /// reflected structural fields otherwise.
+    ///
+    /// This is the Rust analog of C++
+    /// `StructuralVisitorObj::DefaultVisitExpected`: a handler may run its
+    /// enter logic, delegate the default child recursion explicitly, run its
+    /// exit logic with the same locals in scope, and return
+    /// [`WalkResult::Skip`]. Unlike [`VisitDispatch::subvisit`] it needs no
+    /// knowledge of the value's concrete type, so it also works from a
+    /// `&VisitValue` catch-all handler.
+    ///
+    /// The result contract matches `subvisit`: propagate `Err` with `?` and
+    /// map `Ok(ControlFlow::Break(payload))` to
+    /// [`WalkResult::InterruptWith`].
+    fn subvisit_children(
+        &mut self,
+        value: &VisitValue,
+        def_region_kind: DefRegionKind,
+    ) -> Result<VisitOutcome> {
+        let walker = NativeWalker::new();
+        let mut dispatch = DispatchVisitor {
+            visitor: self,
+            order: WalkOrder::PreOrder,
+        };
+        let result = walker
+            .visit_children_raw(value.0, &mut dispatch, def_region_kind)
+            .map_err(|halt| NativeWalker::with_value_context(halt, value.0));
+        finish(result)
+    }
 }
 
 trait NativeVisit {

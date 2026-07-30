@@ -278,6 +278,45 @@ fn generated_dispatch_supports_pod_and_ordered_catch_all() {
 }
 
 #[derive(Default)]
+struct StraddleProbe {
+    events: Vec<String>,
+}
+
+#[dispatch(visit)]
+impl StraddleProbe {
+    fn visit_any(&mut self, value: &VisitValue, kind: DefRegionKind) -> Result<WalkResult> {
+        let label = match value.cast::<i64>() {
+            Some(integer) => format!("int:{integer}"),
+            None => "node".to_string(),
+        };
+        self.events.push(format!("enter:{label}"));
+        if let ControlFlow::Break(payload) = self.subvisit_children(value, kind)? {
+            return Ok(WalkResult::InterruptWith(payload));
+        }
+        self.events.push(format!("exit:{label}"));
+        Ok(WalkResult::Skip)
+    }
+}
+
+#[test]
+fn catch_all_handler_can_straddle_default_children() {
+    let root = Array::new(vec![1i64, 2]);
+    let mut probe = StraddleProbe::default();
+    assert!(structural_visit(&root, &mut probe).unwrap().is_continue());
+    assert_eq!(
+        probe.events,
+        vec![
+            "enter:node",
+            "enter:int:1",
+            "exit:int:1",
+            "enter:int:2",
+            "exit:int:2",
+            "exit:node",
+        ]
+    );
+}
+
+#[derive(Default)]
 struct OrderProbe {
     events: Vec<String>,
 }
