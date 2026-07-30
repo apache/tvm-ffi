@@ -102,7 +102,7 @@ pub struct LeafLookupTable {
 
 // Bound the dense payload allocated by one call site. Wider index spaces use
 // the sparse fallback instead of allocating in proportion to TypeIndex.
-const MAX_DIRECT_LOOKUP_BYTES: usize = 4 * 1024;
+const MAX_DIRECT_LOOKUP_BYTES: usize = 4096;
 // In randomized x86-64 O3 measurements through 128 arms, sorted lookup starts
 // winning near 84 arms depending on layout; use 96 as a conservative,
 // benchmark-tunable crossover.
