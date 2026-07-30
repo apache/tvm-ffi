@@ -30,7 +30,7 @@
 //! visitor state, and definition-region propagation remain in Rust.
 //!
 //! A Rust handler may override a type's children by visiting them through
-//! [`VisitCtx`] and returning [`WalkResult::Skip`]. No C++
+//! [`VisitDispatch::subvisit`] and returning [`WalkResult::Skip`]. No C++
 //! `ffi.StructuralVisitor` is constructed and no C++ default-visit function is
 //! called. A non-container type with a foreign `__s_visit__` hook must be
 //! handled this way; advancing into its default children is rejected instead
@@ -50,7 +50,7 @@ use crate::tvm_ffi_sys::TVMFFIFieldFlagBitMask::{
 };
 use crate::tvm_ffi_sys::{
     TVMFFIAny, TVMFFIByteArray, TVMFFIDefRegionKind, TVMFFIFieldInfo, TVMFFIGetTypeAttrColumn,
-    TVMFFIGetTypeInfo, TVMFFIObject, TVMFFITypeAttrColumn, TVMFFITypeIndex,
+    TVMFFIGetTypeInfo, TVMFFIObject, TVMFFISEqHashKind, TVMFFITypeAttrColumn, TVMFFITypeIndex,
 };
 
 const STRUCTURAL_VISIT_ATTR: &str = "__s_visit__";
@@ -220,83 +220,41 @@ type NativeResult = std::result::Result<(), NativeHalt>;
 /// FFI-compatible arguments use exact value casts, and `&VisitValue` is a
 /// catch-all. `None` asks the Rust walker to continue normally.
 pub trait VisitDispatch: Sized {
-    fn dispatch_visit(&mut self, value: &VisitValue, ctx: &mut VisitCtx<'_>)
-        -> Option<VisitResult>;
-}
-
-/// Recursive traversal access passed to a typed handler.
-///
-/// The context contains the walker, not the visitor. A handler lends its
-/// current `&mut self` back to [`VisitCtx::visit`], so nested traversal is an
-/// ordinary checked Rust reborrow and needs no raw visitor pointer.
-pub struct VisitCtx<'a> {
-    walker: &'a NativeWalker,
-    order: WalkOrder,
-    def_region_kind: DefRegionKind,
-    halted: Option<NativeHalt>,
-}
-
-impl VisitCtx<'_> {
-    /// Return the definition-region state active at the current node.
-    pub fn def_region_kind(&self) -> DefRegionKind {
-        self.def_region_kind
-    }
-
-    /// Visit `child` immediately with the same typed dispatcher.
-    pub fn visit<V, T>(&mut self, visitor: &mut V, child: &T) -> bool
-    where
-        V: VisitDispatch,
-        for<'x> AnyView<'x>: From<&'x T>,
-    {
-        self.visit_with_def_region(visitor, child, self.def_region_kind)
-    }
-
-    /// Visit `child` under an explicitly selected definition-region state.
-    ///
-    /// The override is scoped to this recursive call. The current context is
-    /// unchanged after success, error, or interruption.
-    pub fn visit_with_def_region<V, T>(
+    fn dispatch_visit(
         &mut self,
-        visitor: &mut V,
-        child: &T,
+        value: &VisitValue,
         def_region_kind: DefRegionKind,
-    ) -> bool
+    ) -> Option<VisitResult>;
+
+    /// Visit `child` immediately with this dispatcher under `def_region_kind`.
+    ///
+    /// This is how a pre-order handler takes over a value's children: visit
+    /// each selected child, then return [`WalkResult::Skip`]. Pass the
+    /// handler's received `def_region_kind` to keep the inherited
+    /// definition-region state, or another kind to override it for exactly
+    /// this subtree. The nested traversal always dispatches pre-order.
+    ///
+    /// `Err` carries a nested handler failure and should be propagated with
+    /// `?`. `Ok(ControlFlow::Break(payload))` reports a nested interrupt;
+    /// return [`WalkResult::InterruptWith`] with the payload to keep
+    /// halting. Dropping the result silently swallows both.
+    fn subvisit<T>(&mut self, child: &T, def_region_kind: DefRegionKind) -> Result<VisitOutcome>
     where
-        V: VisitDispatch,
         for<'x> AnyView<'x>: From<&'x T>,
     {
-        if self.halted.is_some() {
-            return false;
-        }
+        let walker = NativeWalker::new();
         let mut dispatch = DispatchVisitor {
-            visitor,
-            order: self.order,
+            visitor: self,
+            order: WalkOrder::PreOrder,
         };
-        let result =
-            self.walker
-                .visit_raw(raw_of(AnyView::from(child)), &mut dispatch, def_region_kind);
-        self.absorb(result)
-    }
-
-    fn absorb(&mut self, result: NativeResult) -> bool {
-        match result {
-            Ok(()) => true,
-            Err(halt) => {
-                self.halted = Some(halt);
-                false
-            }
-        }
+        finish(walker.visit_raw(raw_of(AnyView::from(child)), &mut dispatch, def_region_kind))
     }
 }
 
 trait NativeVisit {
-    fn order(&self) -> WalkOrder {
-        WalkOrder::PreOrder
-    }
+    fn enter(&mut self, value: &VisitValue, def_region_kind: DefRegionKind) -> Result<WalkResult>;
 
-    fn enter(&mut self, value: &VisitValue, ctx: &mut VisitCtx<'_>) -> Result<WalkResult>;
-
-    fn exit(&mut self, _value: &VisitValue, _ctx: &mut VisitCtx<'_>) -> Result<WalkResult> {
+    fn exit(&mut self, _value: &VisitValue, _def_region_kind: DefRegionKind) -> Result<WalkResult> {
         Ok(WalkResult::Advance)
     }
 }
@@ -307,26 +265,22 @@ struct DispatchVisitor<'a, V> {
 }
 
 impl<V: VisitDispatch> NativeVisit for DispatchVisitor<'_, V> {
-    fn order(&self) -> WalkOrder {
-        self.order
-    }
-
-    fn enter(&mut self, value: &VisitValue, ctx: &mut VisitCtx<'_>) -> Result<WalkResult> {
+    fn enter(&mut self, value: &VisitValue, def_region_kind: DefRegionKind) -> Result<WalkResult> {
         match self.order {
             WalkOrder::PreOrder => self
                 .visitor
-                .dispatch_visit(value, ctx)
+                .dispatch_visit(value, def_region_kind)
                 .unwrap_or(Ok(WalkResult::Advance)),
             WalkOrder::PostOrder => Ok(WalkResult::Advance),
         }
     }
 
-    fn exit(&mut self, value: &VisitValue, ctx: &mut VisitCtx<'_>) -> Result<WalkResult> {
+    fn exit(&mut self, value: &VisitValue, def_region_kind: DefRegionKind) -> Result<WalkResult> {
         match self.order {
             WalkOrder::PreOrder => Ok(WalkResult::Advance),
             WalkOrder::PostOrder => self
                 .visitor
-                .dispatch_visit(value, ctx)
+                .dispatch_visit(value, def_region_kind)
                 .unwrap_or(Ok(WalkResult::Advance)),
         }
     }
@@ -339,12 +293,12 @@ where
     F: FnMut(&VisitValue, Phase, DefRegionKind) -> O,
     O: IntoVisitResult,
 {
-    fn enter(&mut self, value: &VisitValue, ctx: &mut VisitCtx<'_>) -> Result<WalkResult> {
-        (self.0)(value, Phase::Enter, ctx.def_region_kind()).into_visit_result()
+    fn enter(&mut self, value: &VisitValue, def_region_kind: DefRegionKind) -> Result<WalkResult> {
+        (self.0)(value, Phase::Enter, def_region_kind).into_visit_result()
     }
 
-    fn exit(&mut self, value: &VisitValue, ctx: &mut VisitCtx<'_>) -> Result<WalkResult> {
-        (self.0)(value, Phase::Exit, ctx.def_region_kind()).into_visit_result()
+    fn exit(&mut self, value: &VisitValue, def_region_kind: DefRegionKind) -> Result<WalkResult> {
+        (self.0)(value, Phase::Exit, def_region_kind).into_visit_result()
     }
 }
 
@@ -371,19 +325,10 @@ impl NativeWalker {
         }
 
         let visit_value = VisitValue::from_raw(value);
-        let mut ctx = VisitCtx {
-            walker: self,
-            order: visitor.order(),
-            def_region_kind,
-            halted: None,
-        };
-        let enter = match visitor.enter(&visit_value, &mut ctx) {
+        let enter = match visitor.enter(&visit_value, def_region_kind) {
             Ok(flow) => flow,
             Err(error) => return Err(Self::with_value_context(error.into(), value)),
         };
-        if let Some(halt) = ctx.halted.take() {
-            return Err(Self::with_value_context(halt, value));
-        }
         match enter {
             WalkResult::Advance => {}
             WalkResult::Skip => return Ok(()),
@@ -395,13 +340,10 @@ impl NativeWalker {
             return Err(Self::with_value_context(halt, value));
         }
 
-        let exit = match visitor.exit(&visit_value, &mut ctx) {
+        let exit = match visitor.exit(&visit_value, def_region_kind) {
             Ok(flow) => flow,
             Err(error) => return Err(Self::with_value_context(error.into(), value)),
         };
-        if let Some(halt) = ctx.halted.take() {
-            return Err(Self::with_value_context(halt, value));
-        }
         match exit {
             WalkResult::Interrupt => Err(NativeHalt::Interrupt(Any::new())),
             WalkResult::InterruptWith(payload) => Err(NativeHalt::Interrupt(payload)),
@@ -567,13 +509,23 @@ impl NativeWalker {
         visitor: &mut V,
         def_region_kind: DefRegionKind,
     ) -> NativeResult {
-        if unsafe { TVMFFIGetTypeInfo(value.type_index) }.is_null() {
+        let type_info = unsafe { TVMFFIGetTypeInfo(value.type_index) };
+        if type_info.is_null() {
             return Err(runtime_error(&format!(
                 "native visitor: unregistered type index {}",
                 value.type_index
             ))
             .into());
         }
+        let seq_hash_kind = unsafe {
+            let metadata = (*type_info).metadata;
+            if metadata.is_null() {
+                TVMFFISEqHashKind::kTVMFFISEqHashKindUnsupported as i32
+            } else {
+                (*metadata).structural_eq_hash_kind
+            }
+        };
+        let def_region_kind = free_var_child_region(def_region_kind, seq_hash_kind);
         let object = unsafe { value.data_union.v_obj } as *mut u8;
         let halted = unsafe {
             for_each_field(value.type_index, |field| {
@@ -641,7 +593,7 @@ impl NativeWalker {
                 Err(runtime_error(&format!(
                     "native visitor: {value_type} registers foreign `{STRUCTURAL_VISIT_ATTR}`; \
                      use a matching pre-order Rust handler, visit its children through \
-                     `VisitCtx`, and return `WalkResult::Skip`"
+                     `VisitDispatch::subvisit`, and return `WalkResult::Skip`"
                 )))
             }
             _ => Err(Error::new(
@@ -735,6 +687,20 @@ fn field_def_region(field: &TVMFFIFieldInfo, inherited: DefRegionKind) -> DefReg
         DefRegionKind::NonRecursive
     } else if field.flags & FLAG_SEQ_HASH_DEF_RECURSIVE != 0 {
         DefRegionKind::Recursive
+    } else {
+        inherited
+    }
+}
+
+/// A non-recursive definition applies to a FreeVar value itself, but not to
+/// the FreeVar's own reflected children: nested free vars there must resolve
+/// against an outer binding instead of rebinding. Mirrors C++
+/// `VisitReflectedFieldsExpected`.
+fn free_var_child_region(inherited: DefRegionKind, structural_eq_hash_kind: i32) -> DefRegionKind {
+    if inherited == DefRegionKind::NonRecursive
+        && structural_eq_hash_kind == TVMFFISEqHashKind::kTVMFFISEqHashKindFreeVar as i32
+    {
+        DefRegionKind::None
     } else {
         inherited
     }
@@ -890,8 +856,12 @@ mod tests {
     struct RegionProbe(Vec<DefRegionKind>);
 
     impl NativeVisit for RegionProbe {
-        fn enter(&mut self, _value: &VisitValue, ctx: &mut VisitCtx<'_>) -> Result<WalkResult> {
-            self.0.push(ctx.def_region_kind());
+        fn enter(
+            &mut self,
+            _value: &VisitValue,
+            def_region_kind: DefRegionKind,
+        ) -> Result<WalkResult> {
+            self.0.push(def_region_kind);
             Ok(WalkResult::Advance)
         }
     }
@@ -901,8 +871,8 @@ mod tests {
 
     #[crate::dispatch(visit)]
     impl TypedRegionProbe {
-        fn visit_integer(&mut self, _value: i64, ctx: &mut VisitCtx<'_>) -> WalkResult {
-            self.0.push(ctx.def_region_kind());
+        fn visit_integer(&mut self, _value: i64, def_region_kind: DefRegionKind) -> WalkResult {
+            self.0.push(def_region_kind);
             WalkResult::Advance
         }
     }
@@ -963,6 +933,30 @@ mod tests {
                 DefRegionKind::NonRecursive,
                 DefRegionKind::NonRecursive,
             ]
+        );
+    }
+
+    #[test]
+    fn non_recursive_region_is_clamped_for_free_var_children_only() {
+        use TVMFFISEqHashKind::{kTVMFFISEqHashKindFreeVar, kTVMFFISEqHashKindTreeNode};
+
+        let free_var = kTVMFFISEqHashKindFreeVar as i32;
+        let tree_node = kTVMFFISEqHashKindTreeNode as i32;
+        assert_eq!(
+            free_var_child_region(DefRegionKind::NonRecursive, free_var),
+            DefRegionKind::None
+        );
+        assert_eq!(
+            free_var_child_region(DefRegionKind::Recursive, free_var),
+            DefRegionKind::Recursive
+        );
+        assert_eq!(
+            free_var_child_region(DefRegionKind::None, free_var),
+            DefRegionKind::None
+        );
+        assert_eq!(
+            free_var_child_region(DefRegionKind::NonRecursive, tree_node),
+            DefRegionKind::NonRecursive
         );
     }
 }

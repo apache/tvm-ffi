@@ -37,7 +37,7 @@ visitor. Each value is automatically dispatched to the handler matching its
 runtime type:
 
 ```rust
-use tvm_ffi::{dispatch, structural_visit, Function, VisitCtx, WalkResult};
+use tvm_ffi::{dispatch, structural_visit, Function, WalkResult};
 
 #[derive(Default)]
 struct Calculator {
@@ -46,12 +46,12 @@ struct Calculator {
 
 #[dispatch(visit)]
 impl Calculator {
-    fn visit_integer(&mut self, value: i64, _ctx: &mut VisitCtx<'_>) -> WalkResult {
+    fn visit_integer(&mut self, value: i64) -> WalkResult {
         self.value += value as f64;
         WalkResult::Advance
     }
 
-    fn visit_float(&mut self, value: f64, _ctx: &mut VisitCtx<'_>) -> WalkResult {
+    fn visit_float(&mut self, value: f64) -> WalkResult {
         self.value -= value;
         WalkResult::Advance
     }
@@ -76,9 +76,35 @@ callbacks.
 
 `WalkResult::Advance` visits reflected or container children, `Skip` suppresses
 the current value's default recursion, and `Interrupt` stops the complete
-traversal. A handler can visit selected children through `VisitCtx` before
-returning `Skip`; definition-region state is available through the same
-context.
+traversal.
+
+A handler may declare an optional third `DefRegionKind` parameter to observe
+the definition-region state at the current value (maintained automatically
+from reflected field flags):
+
+```rust,ignore
+fn visit_var(&mut self, var: &VarObj, kind: DefRegionKind) -> WalkResult {
+    // kind tells a definition position apart from a use position.
+    WalkResult::Advance
+}
+```
+
+To take over a value's children, a pre-order handler visits them through
+`VisitDispatch::subvisit` and returns `Skip`. `subvisit` reports a nested
+interrupt as `ControlFlow::Break`; propagate it (and errors, via `?`) instead
+of dropping the result:
+
+```rust,ignore
+fn visit_func(&mut self, func: &FuncObj, kind: DefRegionKind) -> Result<WalkResult> {
+    if let ControlFlow::Break(payload) = self.subvisit(&func.params, DefRegionKind::Recursive)? {
+        return Ok(WalkResult::InterruptWith(payload));
+    }
+    if let ControlFlow::Break(payload) = self.subvisit(&func.body, kind)? {
+        return Ok(WalkResult::InterruptWith(payload));
+    }
+    Ok(WalkResult::Skip)
+}
+```
 
 ## Installation
 

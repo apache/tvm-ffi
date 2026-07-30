@@ -22,8 +22,8 @@ use std::ops::ControlFlow;
 use tvm_ffi::tvm_ffi_sys::{TVMFFIByteArray, TVMFFITypeIndex, TVMFFITypeRegisterAttr};
 use tvm_ffi::{
     dispatch, structural_visit, structural_walk, walk, walk_with_context, Any, AnyView, Array,
-    DefRegionKind, Error, Function, Map, Phase, Shape, String as FfiString, VisitCtx, VisitValue,
-    WalkOrder, WalkResult, RUNTIME_ERROR,
+    DefRegionKind, Error, Function, Map, Phase, Result, Shape, String as FfiString, VisitDispatch,
+    VisitValue, WalkOrder, WalkResult, RUNTIME_ERROR,
 };
 
 fn runtime_error(message: &str) -> Error {
@@ -66,7 +66,7 @@ struct SkipForeignShape;
 
 #[dispatch(visit)]
 impl SkipForeignShape {
-    fn visit_shape(&mut self, _shape: Shape, _ctx: &mut VisitCtx<'_>) -> WalkResult {
+    fn visit_shape(&mut self, _shape: Shape) -> WalkResult {
         WalkResult::Skip
     }
 }
@@ -207,20 +207,22 @@ struct ManualRegionProbe {
 
 #[dispatch(visit)]
 impl ManualRegionProbe {
-    fn visit_array(&mut self, array: Array<i64>, ctx: &mut VisitCtx<'_>) -> WalkResult {
+    fn visit_array(&mut self, array: Array<i64>, kind: DefRegionKind) -> Result<WalkResult> {
         let overridden = array.get(0).unwrap();
-        if !ctx.visit_with_def_region(self, &overridden, DefRegionKind::NonRecursive) {
-            return WalkResult::Interrupt;
+        if let ControlFlow::Break(payload) =
+            self.subvisit(&overridden, DefRegionKind::NonRecursive)?
+        {
+            return Ok(WalkResult::InterruptWith(payload));
         }
         let inherited = array.get(1).unwrap();
-        if !ctx.visit(self, &inherited) {
-            return WalkResult::Interrupt;
+        if let ControlFlow::Break(payload) = self.subvisit(&inherited, kind)? {
+            return Ok(WalkResult::InterruptWith(payload));
         }
-        WalkResult::Skip
+        Ok(WalkResult::Skip)
     }
 
-    fn visit_integer(&mut self, _value: i64, ctx: &mut VisitCtx<'_>) -> WalkResult {
-        self.seen.push(ctx.def_region_kind());
+    fn visit_integer(&mut self, _value: i64, kind: DefRegionKind) -> WalkResult {
+        self.seen.push(kind);
         WalkResult::Advance
     }
 }
@@ -245,17 +247,17 @@ struct GenericDispatchProbe {
 
 #[dispatch(visit)]
 impl GenericDispatchProbe {
-    fn visit_integer(&mut self, value: i64, _ctx: &mut VisitCtx<'_>) -> WalkResult {
+    fn visit_integer(&mut self, value: i64) -> WalkResult {
         self.integers.push(value);
         WalkResult::Advance
     }
 
-    fn visit_object(&mut self, _value: &tvm_ffi::Object, _ctx: &mut VisitCtx<'_>) -> WalkResult {
+    fn visit_object(&mut self, _value: &tvm_ffi::Object) -> WalkResult {
         self.objects += 1;
         WalkResult::Advance
     }
 
-    fn visit_any(&mut self, _value: &VisitValue, _ctx: &mut VisitCtx<'_>) -> WalkResult {
+    fn visit_any(&mut self, _value: &VisitValue) -> WalkResult {
         self.catch_all += 1;
         WalkResult::Advance
     }
@@ -282,12 +284,12 @@ struct OrderProbe {
 
 #[dispatch(visit)]
 impl OrderProbe {
-    fn visit_array(&mut self, _array: Array<i64>, _ctx: &mut VisitCtx<'_>) -> WalkResult {
+    fn visit_array(&mut self, _array: Array<i64>) -> WalkResult {
         self.events.push("array".to_string());
         WalkResult::Advance
     }
 
-    fn visit_integer(&mut self, value: i64, _ctx: &mut VisitCtx<'_>) -> WalkResult {
+    fn visit_integer(&mut self, value: i64) -> WalkResult {
         self.events.push(format!("int:{value}"));
         WalkResult::Advance
     }

@@ -129,6 +129,18 @@ pub enum TVMFFIDefRegionKind {
     kTVMFFIDefRegionKindNonRecursive = 2,
 }
 
+/// Structural equality/hash participation kind stored in type metadata.
+#[repr(i32)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum TVMFFISEqHashKind {
+    kTVMFFISEqHashKindUnsupported = 0,
+    kTVMFFISEqHashKindTreeNode = 1,
+    kTVMFFISEqHashKindFreeVar = 2,
+    kTVMFFISEqHashKindDAGNode = 3,
+    kTVMFFISEqHashKindConstTreeNode = 4,
+    kTVMFFISEqHashKindUniqueInstance = 5,
+}
+
 /// Handle to Object from C API's pov
 pub type TVMFFIObjectHandle = *mut c_void;
 pub type TVMFFIObjectDeleter = unsafe extern "C" fn(self_ptr: *mut c_void, flags: i32);

@@ -69,11 +69,16 @@ fn expand(mode: &syn::Ident, item_impl: &ItemImpl) -> syn::Result<TokenStream2> 
     let links = handlers.iter().map(|handler| {
         let method = &handler.method;
         let attrs = &handler.cfg_attrs;
+        let kind_arg = if handler.takes_def_region_kind {
+            quote!(, def_region_kind)
+        } else {
+            quote!()
+        };
         let invoke = match &handler.argument {
             HandlerArgument::Value => quote! {
                 return Some(
                     #tvm_ffi::extra::structural_visit::IntoVisitResult::into_visit_result(
-                        self.#method(value, ctx)
+                        self.#method(value #kind_arg)
                     )
                 );
             },
@@ -81,7 +86,7 @@ fn expand(mode: &syn::Ident, item_impl: &ItemImpl) -> syn::Result<TokenStream2> 
                 if let Some(node) = value.as_node::<#node_type>() {
                     return Some(
                         #tvm_ffi::extra::structural_visit::IntoVisitResult::into_visit_result(
-                            self.#method(node, ctx)
+                            self.#method(node #kind_arg)
                         )
                     );
                 }
@@ -90,7 +95,7 @@ fn expand(mode: &syn::Ident, item_impl: &ItemImpl) -> syn::Result<TokenStream2> 
                 if let Some(node) = value.cast::<#value_type>() {
                     return Some(
                         #tvm_ffi::extra::structural_visit::IntoVisitResult::into_visit_result(
-                            self.#method(node, ctx)
+                            self.#method(node #kind_arg)
                         )
                     );
                 }
@@ -133,11 +138,11 @@ fn expand(mode: &syn::Ident, item_impl: &ItemImpl) -> syn::Result<TokenStream2> 
         impl #impl_generics #tvm_ffi::extra::structural_visit::VisitDispatch
             for #self_type #where_clause
         {
-            #[allow(unreachable_code)]
+            #[allow(unreachable_code, unused_variables)]
             fn dispatch_visit(
                 &mut self,
                 value: &#tvm_ffi::extra::structural_visit::VisitValue,
-                ctx: &mut #tvm_ffi::extra::structural_visit::VisitCtx<'_>,
+                def_region_kind: #tvm_ffi::extra::structural_visit::DefRegionKind,
             ) -> Option<#tvm_ffi::extra::structural_visit::VisitResult> {
                 #(#links)*
                 None
@@ -166,6 +171,7 @@ fn crate_path(found: FoundCrate) -> TokenStream2 {
 struct Handler {
     method: syn::Ident,
     argument: HandlerArgument,
+    takes_def_region_kind: bool,
     cfg_attrs: Vec<Meta>,
 }
 
@@ -182,12 +188,28 @@ fn parse_handler(method: &ImplItemMethod) -> syn::Result<Handler> {
         Some(FnArg::Receiver(receiver))
             if receiver.reference.is_some() && receiver.mutability.is_some()
     );
-    if !receiver_is_mut || inputs.len() != 3 {
+    if !receiver_is_mut || (inputs.len() != 2 && inputs.len() != 3) {
         return Err(syn::Error::new_spanned(
             &method.sig,
-            "visit handlers must take `&mut self`, a node, and a context",
+            "visit handlers must take `&mut self`, a node, and optionally a `DefRegionKind`",
         ));
     }
+
+    let takes_def_region_kind = if inputs.len() == 3 {
+        let kind_type = match inputs.iter().nth(2) {
+            Some(FnArg::Typed(kind)) => &kind.ty,
+            _ => unreachable!("the third argument cannot be a receiver"),
+        };
+        if !is_def_region_kind(kind_type) {
+            return Err(syn::Error::new_spanned(
+                kind_type,
+                "the third visit handler argument must be `DefRegionKind` (by value)",
+            ));
+        }
+        true
+    } else {
+        false
+    };
 
     let value_type = match inputs.iter().nth(1) {
         Some(FnArg::Typed(value)) => (*value.ty).clone(),
@@ -213,6 +235,7 @@ fn parse_handler(method: &ImplItemMethod) -> syn::Result<Handler> {
     Ok(Handler {
         method: method.sig.ident.clone(),
         argument,
+        takes_def_region_kind,
         cfg_attrs,
     })
 }
@@ -264,6 +287,16 @@ fn is_visit_value(value_type: &Type) -> bool {
         .segments
         .last()
         .is_some_and(|segment| segment.ident == "VisitValue")
+}
+
+fn is_def_region_kind(kind_type: &Type) -> bool {
+    let Type::Path(path) = kind_type else {
+        return false;
+    };
+    path.path
+        .segments
+        .last()
+        .is_some_and(|segment| segment.ident == "DefRegionKind" && segment.arguments.is_empty())
 }
 
 #[cfg(test)]

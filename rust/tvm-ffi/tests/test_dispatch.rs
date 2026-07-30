@@ -20,7 +20,9 @@
 //! This integration test compiles as a downstream crate, checking every public
 //! path emitted by the dispatch macro outside `tvm_ffi` itself.
 
-use tvm_ffi::{dispatch, structural_visit, Array, Object, VisitCtx, VisitDispatch, WalkResult};
+use tvm_ffi::{
+    dispatch, structural_visit, Array, DefRegionKind, Object, VisitDispatch, WalkResult,
+};
 
 struct ExternalCounter {
     objects: usize,
@@ -30,7 +32,7 @@ struct ExternalCounter {
 impl ExternalCounter {
     #[cfg(any(unix, windows))]
     #[cfg_attr(all(), inline)]
-    fn visit_object(&mut self, _value: &Object, _ctx: &mut VisitCtx<'_>) -> WalkResult {
+    fn visit_object(&mut self, _value: &Object, _kind: DefRegionKind) -> WalkResult {
         self.objects += 1;
         WalkResult::Advance
     }
@@ -45,20 +47,16 @@ struct CfgAttrCounter;
 #[dispatch(visit)]
 impl CfgAttrCounter {
     #[cfg(any())]
-    fn visit_disabled_catch_all(
-        &mut self,
-        _value: &tvm_ffi::VisitValue,
-        _ctx: &mut VisitCtx<'_>,
-    ) -> WalkResult {
+    fn visit_disabled_catch_all(&mut self, _value: &tvm_ffi::VisitValue) -> WalkResult {
         WalkResult::Advance
     }
 
     #[cfg_attr(all(), cfg(any()))]
-    fn visit_disabled(&mut self, _value: &Object, _ctx: &mut VisitCtx<'_>) -> WalkResult {
+    fn visit_disabled(&mut self, _value: &Object, _kind: DefRegionKind) -> WalkResult {
         WalkResult::Advance
     }
 
-    fn visit_object(&mut self, _value: &Object, _ctx: &mut VisitCtx<'_>) -> WalkResult {
+    fn visit_object(&mut self, _value: &Object) -> WalkResult {
         WalkResult::Advance
     }
 }
@@ -71,7 +69,7 @@ const _: usize = std::mem::size_of::<DisabledCounter>();
 #[dispatch(visit)]
 #[cfg(any())]
 impl DisabledCounter {
-    fn visit_object(&mut self, _value: &Object, _ctx: &mut VisitCtx<'_>) -> WalkResult {
+    fn visit_object(&mut self, _value: &Object) -> WalkResult {
         WalkResult::Advance
     }
 }
@@ -82,7 +80,7 @@ const _: usize = std::mem::size_of::<CfgAttrDisabledCounter>();
 #[dispatch(visit)]
 #[cfg_attr(all(), cfg(any()))]
 impl CfgAttrDisabledCounter {
-    fn visit_object(&mut self, _value: &Object, _ctx: &mut VisitCtx<'_>) -> WalkResult {
+    fn visit_object(&mut self, _value: &Object, _kind: DefRegionKind) -> WalkResult {
         WalkResult::Advance
     }
 }
