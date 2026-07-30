@@ -188,6 +188,65 @@ fn mutable_dict_is_snapshotted_before_callbacks() {
 }
 
 #[test]
+fn dense_map_layout_is_traversed_completely() {
+    // More than 4 entries forces the dense (block + iteration list) layout.
+    let root: Map<FfiString, i64> = (0..9)
+        .map(|i| (FfiString::from(format!("k{i}")), i as i64))
+        .collect();
+    let mut sum = 0;
+    let mut strings = 0;
+    assert!(walk(&root, |value, phase| {
+        if phase == Phase::Enter {
+            if let Some(integer) = value.cast::<i64>() {
+                sum += integer;
+            } else if value.cast::<FfiString>().is_some() {
+                strings += 1;
+            }
+        }
+        WalkResult::Advance
+    })
+    .unwrap()
+    .is_continue());
+    assert_eq!(sum, (0..9).sum::<i64>());
+    assert_eq!(strings, 9);
+}
+
+#[test]
+fn interrupt_payload_crosses_map_traversal() {
+    let root: Map<FfiString, i64> = [(FfiString::from("a"), 1i64), (FfiString::from("b"), 2i64)]
+        .into_iter()
+        .collect();
+    let outcome = walk(&root, |value, phase| {
+        if phase == Phase::Enter && value.cast::<i64>().is_some() {
+            return WalkResult::interrupt_with(99i64);
+        }
+        WalkResult::Advance
+    })
+    .unwrap();
+    let ControlFlow::Break(payload) = outcome else {
+        panic!("map walk unexpectedly completed");
+    };
+    assert_eq!(i64::try_from(payload).unwrap(), 99);
+}
+
+#[test]
+fn handler_error_crosses_map_traversal() {
+    let root: Map<FfiString, i64> = [(FfiString::from("a"), 1i64)].into_iter().collect();
+    let error = match walk(&root, |value, phase| {
+        if phase == Phase::Enter && value.cast::<i64>().is_some() {
+            Err(runtime_error("map handler failed"))
+        } else {
+            Ok(WalkResult::Advance)
+        }
+    }) {
+        Err(error) => error,
+        Ok(_) => panic!("map handler unexpectedly succeeded"),
+    };
+    assert_eq!(error.message(), "map handler failed");
+    assert!(error.backtrace().contains("object `ffi.Map`"));
+}
+
+#[test]
 fn interrupt_stops_without_running_remaining_callbacks() {
     let root = Array::new(vec![1i64, 2, 3]);
     let mut integers = 0;

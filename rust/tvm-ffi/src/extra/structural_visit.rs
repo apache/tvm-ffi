@@ -39,6 +39,7 @@
 use std::ops::ControlFlow;
 use std::os::raw::c_void;
 use std::ptr::NonNull;
+use std::sync::atomic::{AtomicU8, Ordering};
 
 use crate::any::{Any, AnyView};
 use crate::error::{Error, Result, RUNTIME_ERROR, TYPE_ERROR};
@@ -193,8 +194,17 @@ impl VisitValue {
         if self.0.type_index < TVMFFITypeIndex::kTVMFFIStaticObjectBegin as i32 {
             return None;
         }
-        if !is_instance(self.0.type_index, N::type_index()) {
-            return None;
+        let base_type_index = N::type_index();
+        if self.0.type_index != base_type_index {
+            // A final type has no registered subtype, so a differing index can
+            // never match: reject with the integer compare alone, mirroring the
+            // `_type_final` fast path of C++ `IsObjectInstance`.
+            if N::TYPE_FINAL {
+                return None;
+            }
+            if !is_instance_at_depth(self.0.type_index, base_type_index, N::TYPE_DEPTH) {
+                return None;
+            }
         }
         Some(unsafe { &*(self.0.data_union.v_obj as *const N) })
     }
@@ -437,6 +447,7 @@ impl NativeWalker {
         }
     }
 
+    #[inline]
     fn visit_children_raw<V: NativeVisit>(
         &self,
         value: TVMFFIAny,
@@ -452,6 +463,16 @@ impl NativeWalker {
             x if x == TVMFFITypeIndex::kTVMFFIMap as i32
                 || x == TVMFFITypeIndex::kTVMFFIDict as i32 =>
             {
+                // Fast path: read the MapBaseObj storage layout directly, like
+                // the SeqPrefix path for arrays — zero FFI calls per entry.
+                // Dict entries are snapshotted first to keep the re-entrant
+                // mutation guard. If the one-time layout validation fails
+                // (e.g. an ABI-debug build), fall back to the packed-functor
+                // iteration protocol.
+                if map_layout_usable(value) {
+                    let snapshot = x == TVMFFITypeIndex::kTVMFFIDict as i32;
+                    return self.visit_map_layout(value, visitor, def_region_kind, snapshot);
+                }
                 return self.visit_map(value, visitor, def_region_kind);
             }
             _ => {}
@@ -465,6 +486,7 @@ impl NativeWalker {
         }
     }
 
+    #[inline(never)]
     fn visit_sequence<V: NativeVisit>(
         &self,
         value: TVMFFIAny,
@@ -513,6 +535,61 @@ impl NativeWalker {
         for (index, child) in cells.iter().enumerate() {
             self.visit_raw(*child, visitor, def_region_kind)
                 .map_err(|halt| with_error_context(halt, &format!("sequence item [{index}]")))?;
+        }
+        Ok(())
+    }
+
+    /// Walk map/dict entries by reading the `MapBaseObj` storage directly —
+    /// the map analog of the `SeqPrefix` array fast path. `snapshot` first
+    /// takes owned copies of all entries (Dict re-entrant mutation guard).
+    #[inline(never)]
+    fn visit_map_layout<V: NativeVisit>(
+        &self,
+        value: TVMFFIAny,
+        visitor: &mut V,
+        def_region_kind: DefRegionKind,
+        snapshot: bool,
+    ) -> NativeResult {
+        let map = unsafe { &*(value.data_union.v_obj as *const MapPrefix) };
+        let size = map.size as usize;
+        if size == 0 {
+            return Ok(());
+        }
+        let mut cursor = unsafe { MapCursor::new(map) };
+
+        if snapshot {
+            let mut entries: Vec<(Any, Any)> = Vec::with_capacity(size);
+            for _ in 0..size {
+                let Some((key, val)) = (unsafe { cursor.next() }) else {
+                    return Err(runtime_error("native visitor: map iteration ended early").into());
+                };
+                entries.push((
+                    Any::from(unsafe { view_of(&key) }),
+                    Any::from(unsafe { view_of(&val) }),
+                ));
+            }
+            for (index, (mut key, mut val)) in entries.into_iter().enumerate() {
+                let key_raw = raw_of_owned(&mut key);
+                self.visit_raw(key_raw, visitor, def_region_kind)
+                    .map_err(|halt| with_error_context(halt, &format!("dict key [{index}]")))?;
+                let val_raw = raw_of_owned(&mut val);
+                self.visit_raw(val_raw, visitor, def_region_kind)
+                    .map_err(|halt| with_error_context(halt, &format!("dict value [{index}]")))?;
+            }
+            return Ok(());
+        }
+
+        // Immutable map: entry cells stay stable throughout recursive
+        // callbacks, so visit them in place. The `size` bound also guards the
+        // dense iteration list against corruption-induced cycles.
+        for index in 0..size {
+            let Some((key, val)) = (unsafe { cursor.next() }) else {
+                return Err(runtime_error("native visitor: map iteration ended early").into());
+            };
+            self.visit_raw(key, visitor, def_region_kind)
+                .map_err(|halt| with_error_context(halt, &format!("map key [{index}]")))?;
+            self.visit_raw(val, visitor, def_region_kind)
+                .map_err(|halt| with_error_context(halt, &format!("map value [{index}]")))?;
         }
         Ok(())
     }
@@ -589,6 +666,7 @@ impl NativeWalker {
         Ok(())
     }
 
+    #[inline]
     fn visit_reflected_fields<V: NativeVisit>(
         &self,
         value: TVMFFIAny,
@@ -768,6 +846,7 @@ fn finish(result: NativeResult) -> Result<VisitOutcome> {
     }
 }
 
+#[inline]
 fn field_def_region(field: &TVMFFIFieldInfo, inherited: DefRegionKind) -> DefRegionKind {
     if field.flags & FLAG_SEQ_HASH_DEF_NON_RECURSIVE != 0 {
         DefRegionKind::NonRecursive
@@ -782,6 +861,7 @@ fn field_def_region(field: &TVMFFIFieldInfo, inherited: DefRegionKind) -> DefReg
 /// the FreeVar's own reflected children: nested free vars there must resolve
 /// against an outer binding instead of rebinding. Mirrors C++
 /// `VisitReflectedFieldsExpected`.
+#[inline]
 fn free_var_child_region(inherited: DefRegionKind, structural_eq_hash_kind: i32) -> DefRegionKind {
     if inherited == DefRegionKind::NonRecursive
         && structural_eq_hash_kind == TVMFFISEqHashKind::kTVMFFISEqHashKindFreeVar as i32
@@ -804,6 +884,142 @@ fn with_error_context(halt: NativeHalt, frame: &str) -> NativeHalt {
 
 fn runtime_error(message: &str) -> Error {
     Error::new(RUNTIME_ERROR, message, "")
+}
+
+/// Layout prefix shared by the C++ `MapObj` and `DictObj` (`MapBaseObj`,
+/// release ABI without `TVM_FFI_DEBUG_WITH_ABI_CHANGE`).
+#[repr(C)]
+struct MapPrefix {
+    _header: TVMFFIObject,
+    data: *mut u8,
+    size: u64,
+    slots: u64,
+    _data_deleter: Option<unsafe extern "C" fn(*mut c_void)>,
+}
+
+/// Dense-layout extension of the prefix (`DenseMapBaseObj`).
+#[repr(C)]
+struct DenseMapPrefix {
+    base: MapPrefix,
+    fib_shift: u32,
+    iter_list_head: u64,
+    iter_list_tail: u64,
+}
+
+const _: () = {
+    assert!(std::mem::offset_of!(MapPrefix, data) == 24);
+    assert!(std::mem::offset_of!(MapPrefix, size) == 32);
+    assert!(std::mem::offset_of!(MapPrefix, slots) == 40);
+    assert!(std::mem::offset_of!(MapPrefix, _data_deleter) == 48);
+    assert!(std::mem::offset_of!(DenseMapPrefix, fib_shift) == 56);
+    assert!(std::mem::offset_of!(DenseMapPrefix, iter_list_head) == 64);
+};
+
+/// MSB tag on `slots_` marking the small (inline KV array) layout.
+const MAP_SMALL_TAG: u64 = 1 << 63;
+/// `kInvalidIndex`: terminator of the dense iteration list.
+const MAP_INVALID_INDEX: u64 = u64::MAX;
+/// `kBlockCap`: entries per dense block.
+const MAP_BLOCK_CAP: u64 = 16;
+/// `sizeof(ItemType)`: KV pair (32 bytes) + prev/next indices (16 bytes).
+const MAP_ITEM_SIZE: usize = 48;
+/// `sizeof(Block)`: `kBlockCap` metadata bytes + `kBlockCap` items.
+const MAP_BLOCK_SIZE: usize = 16 + 16 * MAP_ITEM_SIZE;
+/// Byte offset of `ItemType::next` (after the 32-byte KV pair and `prev`).
+const MAP_ITEM_NEXT_OFFSET: usize = 40;
+
+/// Borrowed traversal cursor over either map storage layout, yielding entries
+/// in the same order as the C++ iterator.
+enum MapCursor {
+    Small {
+        kv: *const TVMFFIAny,
+        index: usize,
+        size: usize,
+    },
+    Dense {
+        data: *const u8,
+        index: u64,
+    },
+}
+
+impl MapCursor {
+    #[inline]
+    unsafe fn new(map: &MapPrefix) -> MapCursor {
+        if map.slots & MAP_SMALL_TAG != 0 {
+            MapCursor::Small {
+                kv: map.data as *const TVMFFIAny,
+                index: 0,
+                size: map.size as usize,
+            }
+        } else {
+            let dense = &*(map as *const MapPrefix as *const DenseMapPrefix);
+            MapCursor::Dense {
+                data: map.data,
+                index: dense.iter_list_head,
+            }
+        }
+    }
+
+    #[inline]
+    unsafe fn next(&mut self) -> Option<(TVMFFIAny, TVMFFIAny)> {
+        match self {
+            MapCursor::Small { kv, index, size } => {
+                if *index >= *size {
+                    return None;
+                }
+                let pair = kv.add(*index * 2);
+                *index += 1;
+                Some((*pair, *pair.add(1)))
+            }
+            MapCursor::Dense { data, index } => {
+                if *index == MAP_INVALID_INDEX {
+                    return None;
+                }
+                let block = data.add((*index / MAP_BLOCK_CAP) as usize * MAP_BLOCK_SIZE);
+                let item = block.add(MAP_BLOCK_CAP as usize + (*index % MAP_BLOCK_CAP) as usize * MAP_ITEM_SIZE);
+                let key = *(item as *const TVMFFIAny);
+                let val = *(item.add(16) as *const TVMFFIAny);
+                *index = *(item.add(MAP_ITEM_NEXT_OFFSET) as *const u64);
+                Some((key, val))
+            }
+        }
+    }
+}
+
+/// Process-wide result of the one-time map layout validation:
+/// 0 = unknown, 1 = usable, 2 = unusable.
+static MAP_LAYOUT_STATE: AtomicU8 = AtomicU8::new(0);
+
+#[inline]
+fn map_layout_usable(value: TVMFFIAny) -> bool {
+    match MAP_LAYOUT_STATE.load(Ordering::Relaxed) {
+        1 => true,
+        2 => false,
+        _ => {
+            let usable = validate_map_layout(value);
+            MAP_LAYOUT_STATE.store(if usable { 1 } else { 2 }, Ordering::Relaxed);
+            usable
+        }
+    }
+}
+
+/// Cross-check the mirrored `MapBaseObj` layout against the public size
+/// functor once per process. An ABI-debug build inserts a state marker that
+/// shifts every field by 8 bytes, which this detects: offset 32 then holds a
+/// pointer value that cannot equal the reported entry count.
+fn validate_map_layout(value: TVMFFIAny) -> bool {
+    let expected = (|| -> Result<i64> {
+        let is_dict = value.type_index == TVMFFITypeIndex::kTVMFFIDict as i32;
+        let name = if is_dict { "ffi.DictSize" } else { "ffi.MapSize" };
+        Function::get_global(name)?
+            .call_packed(&[unsafe { view_of(&value) }])
+            .and_then(i64::try_from)
+    })();
+    let Ok(expected) = expected else {
+        return false;
+    };
+    let map = unsafe { &*(value.data_union.v_obj as *const MapPrefix) };
+    expected >= 0 && map.size == expected as u64
 }
 
 /// Layout prefix shared by the C++ `ArrayObj` and `ListObj`.
@@ -855,17 +1071,18 @@ fn type_key_of(type_index: i32) -> String {
     }
 }
 
-fn is_instance(object_type_index: i32, base_type_index: i32) -> bool {
+/// Subtype check with the base's inheritance depth supplied by the caller
+/// (`ObjectCore::TYPE_DEPTH`), so only the object's type info is fetched.
+#[inline]
+fn is_instance_at_depth(object_type_index: i32, base_type_index: i32, base_depth: i32) -> bool {
     if object_type_index == base_type_index {
         return true;
     }
     unsafe {
         let info = TVMFFIGetTypeInfo(object_type_index);
-        let base_info = TVMFFIGetTypeInfo(base_type_index);
-        if info.is_null() || base_info.is_null() {
+        if info.is_null() {
             return false;
         }
-        let base_depth = (*base_info).type_depth;
         if (*info).type_depth <= base_depth {
             return false;
         }
@@ -922,14 +1139,17 @@ unsafe fn visit_field_level<B>(
     None
 }
 
+#[inline]
 fn raw_of(view: AnyView<'_>) -> TVMFFIAny {
     *view.as_raw_ffi_any()
 }
 
+#[inline]
 fn raw_of_owned(any: &mut Any) -> TVMFFIAny {
     *any.as_raw_ffi_any()
 }
 
+#[inline]
 unsafe fn view_of(raw: &TVMFFIAny) -> AnyView<'_> {
     unsafe { AnyView::from_raw_ffi_any(*raw) }
 }
