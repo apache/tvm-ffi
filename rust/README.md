@@ -33,31 +33,42 @@ efficiency while maintaining interoperability.
 The `tvm-ffi` crate provides a native Rust structural walker over FFI values,
 built-in containers, and reflected object fields. `#[dispatch(visit)]` turns
 the `visit_*` methods in an inherent implementation into a typed, stateful
-visitor:
+visitor. Each value is automatically dispatched to the handler matching its
+runtime type:
 
 ```rust
-use tvm_ffi::{dispatch, structural_visit, Array, VisitCtx, WalkResult};
+use tvm_ffi::{dispatch, structural_visit, Function, VisitCtx, WalkResult};
 
 #[derive(Default)]
-struct Sum {
-    value: i64,
+struct Calculator {
+    value: f64,
 }
 
 #[dispatch(visit)]
-impl Sum {
+impl Calculator {
     fn visit_integer(&mut self, value: i64, _ctx: &mut VisitCtx<'_>) -> WalkResult {
-        self.value += value;
+        self.value += value as f64;
+        WalkResult::Advance
+    }
+
+    fn visit_float(&mut self, value: f64, _ctx: &mut VisitCtx<'_>) -> WalkResult {
+        self.value -= value;
         WalkResult::Advance
     }
 }
 
-let root = Array::new(vec![1_i64, 2, 3]);
-let mut sum = Sum::default();
-structural_visit(&root, &mut sum).unwrap();
-assert_eq!(sum.value, 6);
+let values = Function::get_global("ffi.Array")
+    .unwrap()
+    .call_tuple((10_i64, 2.5_f64))
+    .unwrap();
+let mut calculator = Calculator::default();
+assert!(structural_visit(&values, &mut calculator)
+    .unwrap()
+    .is_continue());
+assert_eq!(calculator.value, 7.5);
 ```
 
-Typed handlers are tested in source order. Borrowed `ObjectCore` node types use
+Typed handlers are tested in source order: borrowed `ObjectCore` node types use
 runtime subtype checks, owned arguments use `AnyCompatible` casts, and a final
 `&VisitValue` handler acts as a catch-all. Use `structural_walk` to select
 pre-order or post-order dispatch, or `walk`/`walk_with_context` for raw
