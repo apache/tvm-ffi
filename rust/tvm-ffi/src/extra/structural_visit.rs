@@ -219,26 +219,59 @@ type NativeResult = std::result::Result<(), NativeHalt>;
 /// order. Borrowed node arguments use refcount-free subtype checks, owned
 /// FFI-compatible arguments use exact value casts, and `&VisitValue` is a
 /// catch-all. `None` asks the Rust walker to continue normally.
+///
+/// Every visitor carries a definition-region mirror field, named through
+/// `#[dispatch(visit, def_region = <field>)]`. The walker writes the field
+/// before each dispatched handler and restores it afterwards, so during a
+/// handler [`VisitDispatch::def_region_kind`] always reports the state at
+/// the current value — including after nested [`VisitDispatch::subvisit`]
+/// calls. Treat the field as read-only; the walker's own propagation never
+/// reads it, so overwriting it only misleads your own reads and the
+/// kind-inheriting `subvisit` forms.
 pub trait VisitDispatch: Sized {
-    fn dispatch_visit(
-        &mut self,
-        value: &VisitValue,
-        def_region_kind: DefRegionKind,
-    ) -> Option<VisitResult>;
+    fn dispatch_visit(&mut self, value: &VisitValue) -> Option<VisitResult>;
 
-    /// Visit `child` immediately with this dispatcher under `def_region_kind`.
+    /// Return the definition-region state at the value being dispatched.
+    ///
+    /// Meaningful only while a handler is running; outside a walk the mirror
+    /// holds its initial or last-restored value.
+    fn def_region_kind(&self) -> DefRegionKind;
+
+    /// Mirror storage refreshed by the walker around each dispatch.
+    #[doc(hidden)]
+    fn def_region_slot(&mut self) -> &mut DefRegionKind;
+
+    /// Visit `child` immediately, inheriting the current definition-region
+    /// state.
     ///
     /// This is how a pre-order handler takes over a value's children: visit
-    /// each selected child, then return [`WalkResult::Skip`]. Pass the
-    /// handler's received `def_region_kind` to keep the inherited
-    /// definition-region state, or another kind to override it for exactly
-    /// this subtree. The nested traversal always dispatches pre-order.
+    /// each selected child, then return [`WalkResult::Skip`]. Use
+    /// [`VisitDispatch::subvisit_with_def_region`] to override the state for
+    /// exactly this subtree. The nested traversal always dispatches
+    /// pre-order.
     ///
     /// `Err` carries a nested handler failure and should be propagated with
     /// `?`. `Ok(ControlFlow::Break(payload))` reports a nested interrupt;
     /// return [`WalkResult::InterruptWith`] with the payload to keep
     /// halting. Dropping the result silently swallows both.
-    fn subvisit<T>(&mut self, child: &T, def_region_kind: DefRegionKind) -> Result<VisitOutcome>
+    fn subvisit<T>(&mut self, child: &T) -> Result<VisitOutcome>
+    where
+        for<'x> AnyView<'x>: From<&'x T>,
+    {
+        let def_region_kind = self.def_region_kind();
+        self.subvisit_with_def_region(child, def_region_kind)
+    }
+
+    /// Visit `child` immediately under an explicitly selected
+    /// definition-region state.
+    ///
+    /// The override is scoped to this recursive call; see
+    /// [`VisitDispatch::subvisit`] for the result contract.
+    fn subvisit_with_def_region<T>(
+        &mut self,
+        child: &T,
+        def_region_kind: DefRegionKind,
+    ) -> Result<VisitOutcome>
     where
         for<'x> AnyView<'x>: From<&'x T>,
     {
@@ -251,10 +284,10 @@ pub trait VisitDispatch: Sized {
     }
 
     /// Visit `value`'s children — not `value` itself — with the walker's
-    /// default rules: container contents for `Array`/`List`/`Map`/`Dict`,
-    /// reflected structural fields otherwise.
+    /// default rules, inheriting the current definition-region state.
     ///
-    /// This is the Rust analog of C++
+    /// Children are container contents for `Array`/`List`/`Map`/`Dict` and
+    /// reflected structural fields otherwise. This is the Rust analog of C++
     /// `StructuralVisitorObj::DefaultVisitExpected`: a handler may run its
     /// enter logic, delegate the default child recursion explicitly, run its
     /// exit logic with the same locals in scope, and return
@@ -262,10 +295,17 @@ pub trait VisitDispatch: Sized {
     /// knowledge of the value's concrete type, so it also works from a
     /// `&VisitValue` catch-all handler.
     ///
-    /// The result contract matches `subvisit`: propagate `Err` with `?` and
-    /// map `Ok(ControlFlow::Break(payload))` to
-    /// [`WalkResult::InterruptWith`].
-    fn subvisit_children(
+    /// The result contract matches [`VisitDispatch::subvisit`].
+    fn subvisit_children(&mut self, value: &VisitValue) -> Result<VisitOutcome> {
+        let def_region_kind = self.def_region_kind();
+        self.subvisit_children_with_def_region(value, def_region_kind)
+    }
+
+    /// Visit `value`'s children with the walker's default rules under an
+    /// explicitly selected definition-region state.
+    ///
+    /// See [`VisitDispatch::subvisit_children`].
+    fn subvisit_children_with_def_region(
         &mut self,
         value: &VisitValue,
         def_region_kind: DefRegionKind,
@@ -295,13 +335,31 @@ struct DispatchVisitor<'a, V> {
     order: WalkOrder,
 }
 
+impl<V: VisitDispatch> DispatchVisitor<'_, V> {
+    /// Run one typed dispatch with the mirror scoped to `def_region_kind`.
+    ///
+    /// The save/restore pair keeps the mirror equal to the dispatched value's
+    /// state for the whole handler call, and transparently rewinds it after
+    /// nested `subvisit` recursion.
+    fn dispatch_scoped(
+        &mut self,
+        value: &VisitValue,
+        def_region_kind: DefRegionKind,
+    ) -> Result<WalkResult> {
+        let saved = std::mem::replace(self.visitor.def_region_slot(), def_region_kind);
+        let result = self
+            .visitor
+            .dispatch_visit(value)
+            .unwrap_or(Ok(WalkResult::Advance));
+        *self.visitor.def_region_slot() = saved;
+        result
+    }
+}
+
 impl<V: VisitDispatch> NativeVisit for DispatchVisitor<'_, V> {
     fn enter(&mut self, value: &VisitValue, def_region_kind: DefRegionKind) -> Result<WalkResult> {
         match self.order {
-            WalkOrder::PreOrder => self
-                .visitor
-                .dispatch_visit(value, def_region_kind)
-                .unwrap_or(Ok(WalkResult::Advance)),
+            WalkOrder::PreOrder => self.dispatch_scoped(value, def_region_kind),
             WalkOrder::PostOrder => Ok(WalkResult::Advance),
         }
     }
@@ -309,10 +367,7 @@ impl<V: VisitDispatch> NativeVisit for DispatchVisitor<'_, V> {
     fn exit(&mut self, value: &VisitValue, def_region_kind: DefRegionKind) -> Result<WalkResult> {
         match self.order {
             WalkOrder::PreOrder => Ok(WalkResult::Advance),
-            WalkOrder::PostOrder => self
-                .visitor
-                .dispatch_visit(value, def_region_kind)
-                .unwrap_or(Ok(WalkResult::Advance)),
+            WalkOrder::PostOrder => self.dispatch_scoped(value, def_region_kind),
         }
     }
 }
@@ -898,12 +953,16 @@ mod tests {
     }
 
     #[derive(Default)]
-    struct TypedRegionProbe(Vec<DefRegionKind>);
+    struct TypedRegionProbe {
+        def_region: DefRegionKind,
+        seen: Vec<DefRegionKind>,
+    }
 
-    #[crate::dispatch(visit)]
+    #[crate::dispatch(visit, def_region = def_region)]
     impl TypedRegionProbe {
-        fn visit_integer(&mut self, _value: i64, def_region_kind: DefRegionKind) -> WalkResult {
-            self.0.push(def_region_kind);
+        fn visit_integer(&mut self, _value: i64) -> WalkResult {
+            let kind = self.def_region_kind();
+            self.seen.push(kind);
             WalkResult::Advance
         }
     }
@@ -957,7 +1016,7 @@ mod tests {
             .is_ok());
         }
         assert_eq!(
-            probe.0,
+            probe.seen,
             vec![
                 DefRegionKind::Recursive,
                 DefRegionKind::None,

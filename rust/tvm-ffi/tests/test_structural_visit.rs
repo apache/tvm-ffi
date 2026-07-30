@@ -62,9 +62,12 @@ fn plain_walk_uses_native_map_fallback() {
     assert_eq!(integers, 2);
 }
 
-struct SkipForeignShape;
+#[derive(Default)]
+struct SkipForeignShape {
+    def_region: DefRegionKind,
+}
 
-#[dispatch(visit)]
+#[dispatch(visit, def_region = def_region)]
 impl SkipForeignShape {
     fn visit_shape(&mut self, _shape: Shape) -> WalkResult {
         WalkResult::Skip
@@ -95,7 +98,7 @@ fn foreign_structural_visit_requires_explicit_rust_override() {
     assert!(error.message().contains("registers foreign `__s_visit__`"));
     assert!(error.message().contains("return `WalkResult::Skip`"));
 
-    assert!(structural_visit(&root, &mut SkipForeignShape)
+    assert!(structural_visit(&root, &mut SkipForeignShape::default())
         .unwrap()
         .is_continue());
 }
@@ -202,29 +205,64 @@ fn interrupt_stops_without_running_remaining_callbacks() {
 
 #[derive(Default)]
 struct ManualRegionProbe {
+    def_region: DefRegionKind,
     seen: Vec<DefRegionKind>,
 }
 
-#[dispatch(visit)]
+#[dispatch(visit, def_region = def_region)]
 impl ManualRegionProbe {
-    fn visit_array(&mut self, array: Array<i64>, kind: DefRegionKind) -> Result<WalkResult> {
+    fn visit_array(&mut self, array: Array<i64>) -> Result<WalkResult> {
+        let before = self.def_region_kind();
         let overridden = array.get(0).unwrap();
         if let ControlFlow::Break(payload) =
-            self.subvisit(&overridden, DefRegionKind::NonRecursive)?
+            self.subvisit_with_def_region(&overridden, DefRegionKind::NonRecursive)?
         {
             return Ok(WalkResult::InterruptWith(payload));
         }
+        // The walker rewinds the mirror after nested dispatches.
+        assert_eq!(self.def_region_kind(), before);
         let inherited = array.get(1).unwrap();
-        if let ControlFlow::Break(payload) = self.subvisit(&inherited, kind)? {
+        if let ControlFlow::Break(payload) = self.subvisit(&inherited)? {
             return Ok(WalkResult::InterruptWith(payload));
         }
         Ok(WalkResult::Skip)
     }
 
-    fn visit_integer(&mut self, _value: i64, kind: DefRegionKind) -> WalkResult {
+    fn visit_integer(&mut self, _value: i64) -> WalkResult {
+        let kind = self.def_region_kind();
         self.seen.push(kind);
         WalkResult::Advance
     }
+}
+
+#[derive(Default)]
+struct MirrorCorruptionProbe {
+    def_region: DefRegionKind,
+    seen: Vec<DefRegionKind>,
+}
+
+#[dispatch(visit, def_region = def_region)]
+impl MirrorCorruptionProbe {
+    fn visit_array(&mut self, _array: Array<i64>) -> WalkResult {
+        // Overwriting the mirror must not leak into the walker's own
+        // by-value propagation.
+        self.def_region = DefRegionKind::Recursive;
+        WalkResult::Advance
+    }
+
+    fn visit_integer(&mut self, _value: i64) -> WalkResult {
+        let kind = self.def_region_kind();
+        self.seen.push(kind);
+        WalkResult::Advance
+    }
+}
+
+#[test]
+fn mirror_corruption_does_not_affect_walker_propagation() {
+    let root = Array::new(vec![7i64]);
+    let mut probe = MirrorCorruptionProbe::default();
+    assert!(structural_visit(&root, &mut probe).unwrap().is_continue());
+    assert_eq!(probe.seen, vec![DefRegionKind::None]);
 }
 
 #[test]
@@ -240,12 +278,13 @@ fn manual_child_visit_can_override_def_region() {
 
 #[derive(Default)]
 struct GenericDispatchProbe {
+    def_region: DefRegionKind,
     integers: Vec<i64>,
     objects: usize,
     catch_all: usize,
 }
 
-#[dispatch(visit)]
+#[dispatch(visit, def_region = def_region)]
 impl GenericDispatchProbe {
     fn visit_integer(&mut self, value: i64) -> WalkResult {
         self.integers.push(value);
@@ -279,18 +318,19 @@ fn generated_dispatch_supports_pod_and_ordered_catch_all() {
 
 #[derive(Default)]
 struct StraddleProbe {
+    def_region: DefRegionKind,
     events: Vec<String>,
 }
 
-#[dispatch(visit)]
+#[dispatch(visit, def_region = def_region)]
 impl StraddleProbe {
-    fn visit_any(&mut self, value: &VisitValue, kind: DefRegionKind) -> Result<WalkResult> {
+    fn visit_any(&mut self, value: &VisitValue) -> Result<WalkResult> {
         let label = match value.cast::<i64>() {
             Some(integer) => format!("int:{integer}"),
             None => "node".to_string(),
         };
         self.events.push(format!("enter:{label}"));
-        if let ControlFlow::Break(payload) = self.subvisit_children(value, kind)? {
+        if let ControlFlow::Break(payload) = self.subvisit_children(value)? {
             return Ok(WalkResult::InterruptWith(payload));
         }
         self.events.push(format!("exit:{label}"));
@@ -318,10 +358,11 @@ fn catch_all_handler_can_straddle_default_children() {
 
 #[derive(Default)]
 struct OrderProbe {
+    def_region: DefRegionKind,
     events: Vec<String>,
 }
 
-#[dispatch(visit)]
+#[dispatch(visit, def_region = def_region)]
 impl OrderProbe {
     fn visit_array(&mut self, _array: Array<i64>) -> WalkResult {
         self.events.push("array".to_string());

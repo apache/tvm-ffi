@@ -24,10 +24,10 @@ use quote::{quote, quote_spanned};
 use syn::{parse_macro_input, FnArg, ImplItem, ImplItemMethod, ItemImpl, Meta, NestedMeta, Type};
 
 pub(crate) fn dispatch(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let mode = parse_macro_input!(attr as syn::Ident);
+    let args = parse_macro_input!(attr as DispatchArgs);
     let item_impl = parse_macro_input!(item as ItemImpl);
 
-    match expand(&mode, &item_impl) {
+    match expand(&args, &item_impl) {
         Ok(generated) => quote!(#item_impl #generated).into(),
         Err(error) => {
             let error = error.to_compile_error();
@@ -36,10 +36,43 @@ pub(crate) fn dispatch(attr: TokenStream, item: TokenStream) -> TokenStream {
     }
 }
 
-fn expand(mode: &syn::Ident, item_impl: &ItemImpl) -> syn::Result<TokenStream2> {
-    if mode != "visit" {
-        return Err(syn::Error::new(mode.span(), "expected `dispatch(visit)`"));
+struct DispatchArgs {
+    def_region_field: syn::Ident,
+}
+
+impl syn::parse::Parse for DispatchArgs {
+    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        let mode: syn::Ident = input.parse()?;
+        if mode != "visit" {
+            return Err(syn::Error::new(
+                mode.span(),
+                "expected `dispatch(visit, def_region = <field>)`",
+            ));
+        }
+        if input.parse::<syn::Token![,]>().is_err() {
+            return Err(syn::Error::new(
+                mode.span(),
+                "`dispatch(visit)` requires `def_region = <field>` naming the visitor's \
+                 `DefRegionKind` mirror field",
+            ));
+        }
+        let key: syn::Ident = input.parse()?;
+        if key != "def_region" {
+            return Err(syn::Error::new(
+                key.span(),
+                "expected `def_region = <field>`",
+            ));
+        }
+        input.parse::<syn::Token![=]>()?;
+        let def_region_field: syn::Ident = input.parse()?;
+        if !input.is_empty() {
+            return Err(input.error("unexpected tokens after `def_region = <field>`"));
+        }
+        Ok(DispatchArgs { def_region_field })
     }
+}
+
+fn expand(args: &DispatchArgs, item_impl: &ItemImpl) -> syn::Result<TokenStream2> {
     if item_impl.trait_.is_some() {
         return Err(syn::Error::new_spanned(
             item_impl,
@@ -65,20 +98,16 @@ fn expand(mode: &syn::Ident, item_impl: &ItemImpl) -> syn::Result<TokenStream2> 
         ));
     }
     let tvm_ffi = resolve_tvm_ffi_crate()?;
+    let def_region_field = &args.def_region_field;
 
     let links = handlers.iter().map(|handler| {
         let method = &handler.method;
         let attrs = &handler.cfg_attrs;
-        let kind_arg = if handler.takes_def_region_kind {
-            quote!(, def_region_kind)
-        } else {
-            quote!()
-        };
         let invoke = match &handler.argument {
             HandlerArgument::Value => quote! {
                 return Some(
                     #tvm_ffi::extra::structural_visit::IntoVisitResult::into_visit_result(
-                        self.#method(value #kind_arg)
+                        self.#method(value)
                     )
                 );
             },
@@ -86,7 +115,7 @@ fn expand(mode: &syn::Ident, item_impl: &ItemImpl) -> syn::Result<TokenStream2> 
                 if let Some(node) = value.as_node::<#node_type>() {
                     return Some(
                         #tvm_ffi::extra::structural_visit::IntoVisitResult::into_visit_result(
-                            self.#method(node #kind_arg)
+                            self.#method(node)
                         )
                     );
                 }
@@ -95,7 +124,7 @@ fn expand(mode: &syn::Ident, item_impl: &ItemImpl) -> syn::Result<TokenStream2> 
                 if let Some(node) = value.cast::<#value_type>() {
                     return Some(
                         #tvm_ffi::extra::structural_visit::IntoVisitResult::into_visit_result(
-                            self.#method(node #kind_arg)
+                            self.#method(node)
                         )
                     );
                 }
@@ -142,10 +171,32 @@ fn expand(mode: &syn::Ident, item_impl: &ItemImpl) -> syn::Result<TokenStream2> 
             fn dispatch_visit(
                 &mut self,
                 value: &#tvm_ffi::extra::structural_visit::VisitValue,
-                def_region_kind: #tvm_ffi::extra::structural_visit::DefRegionKind,
             ) -> Option<#tvm_ffi::extra::structural_visit::VisitResult> {
                 #(#links)*
                 None
+            }
+
+            fn def_region_kind(&self) -> #tvm_ffi::extra::structural_visit::DefRegionKind {
+                self.#def_region_field
+            }
+
+            #[doc(hidden)]
+            fn def_region_slot(
+                &mut self,
+            ) -> &mut #tvm_ffi::extra::structural_visit::DefRegionKind {
+                &mut self.#def_region_field
+            }
+        }
+
+        #(#[#impl_cfg_attrs])*
+        impl #impl_generics #self_type #where_clause {
+            /// Definition-region state at the value currently being dispatched.
+            ///
+            /// Inherent mirror of `VisitDispatch::def_region_kind`, callable
+            /// without importing the trait.
+            #[allow(dead_code)]
+            fn def_region_kind(&self) -> #tvm_ffi::extra::structural_visit::DefRegionKind {
+                self.#def_region_field
             }
         }
     })
@@ -171,7 +222,6 @@ fn crate_path(found: FoundCrate) -> TokenStream2 {
 struct Handler {
     method: syn::Ident,
     argument: HandlerArgument,
-    takes_def_region_kind: bool,
     cfg_attrs: Vec<Meta>,
 }
 
@@ -188,28 +238,13 @@ fn parse_handler(method: &ImplItemMethod) -> syn::Result<Handler> {
         Some(FnArg::Receiver(receiver))
             if receiver.reference.is_some() && receiver.mutability.is_some()
     );
-    if !receiver_is_mut || (inputs.len() != 2 && inputs.len() != 3) {
+    if !receiver_is_mut || inputs.len() != 2 {
         return Err(syn::Error::new_spanned(
             &method.sig,
-            "visit handlers must take `&mut self`, a node, and optionally a `DefRegionKind`",
+            "visit handlers must take `&mut self` and a node; read definition-region state \
+             through `self.def_region_kind()`",
         ));
     }
-
-    let takes_def_region_kind = if inputs.len() == 3 {
-        let kind_type = match inputs.iter().nth(2) {
-            Some(FnArg::Typed(kind)) => &kind.ty,
-            _ => unreachable!("the third argument cannot be a receiver"),
-        };
-        if !is_def_region_kind(kind_type) {
-            return Err(syn::Error::new_spanned(
-                kind_type,
-                "the third visit handler argument must be `DefRegionKind` (by value)",
-            ));
-        }
-        true
-    } else {
-        false
-    };
 
     let value_type = match inputs.iter().nth(1) {
         Some(FnArg::Typed(value)) => (*value.ty).clone(),
@@ -235,7 +270,6 @@ fn parse_handler(method: &ImplItemMethod) -> syn::Result<Handler> {
     Ok(Handler {
         method: method.sig.ident.clone(),
         argument,
-        takes_def_region_kind,
         cfg_attrs,
     })
 }
@@ -287,16 +321,6 @@ fn is_visit_value(value_type: &Type) -> bool {
         .segments
         .last()
         .is_some_and(|segment| segment.ident == "VisitValue")
-}
-
-fn is_def_region_kind(kind_type: &Type) -> bool {
-    let Type::Path(path) = kind_type else {
-        return false;
-    };
-    path.path
-        .segments
-        .last()
-        .is_some_and(|segment| segment.ident == "DefRegionKind" && segment.arguments.is_empty())
 }
 
 #[cfg(test)]

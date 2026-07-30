@@ -37,14 +37,15 @@ visitor. Each value is automatically dispatched to the handler matching its
 runtime type:
 
 ```rust
-use tvm_ffi::{dispatch, structural_visit, Function, WalkResult};
+use tvm_ffi::{dispatch, structural_visit, DefRegionKind, Function, WalkResult};
 
 #[derive(Default)]
 struct Calculator {
+    def_region: DefRegionKind,
     value: f64,
 }
 
-#[dispatch(visit)]
+#[dispatch(visit, def_region = def_region)]
 impl Calculator {
     fn visit_integer(&mut self, value: i64) -> WalkResult {
         self.value += value as f64;
@@ -70,11 +71,13 @@ assert_eq!(calculator.value, 7.5);
 
 Typed handlers are tested in source order: borrowed `ObjectCore` node types use
 runtime subtype checks, owned arguments use `AnyCompatible` casts, and a final
-`&VisitValue` handler acts as a catch-all. A handler may take an optional third
-`DefRegionKind` argument to observe the definition-region state at the current
-value. Use `structural_walk` to select pre-order or post-order dispatch, or
-`walk`/`walk_with_context` for raw callbacks that fire at both `Phase::Enter`
-and `Phase::Exit` of every value.
+`&VisitValue` handler acts as a catch-all. Every visitor names a
+`DefRegionKind` mirror field through `def_region = <field>`; the walker keeps
+that field equal to the definition-region state of the value being dispatched
+(and rewinds it after nested traversal), so a handler reads the state through
+`self.def_region_kind()` and never writes the field. Use `structural_walk` to
+select pre-order or post-order dispatch, or `walk`/`walk_with_context` for raw
+callbacks that fire at both `Phase::Enter` and `Phase::Exit` of every value.
 
 `WalkResult::Advance` visits container or reflected children, `Skip` suppresses
 the current value's default recursion, and `Interrupt`/`InterruptWith` halt the
@@ -83,16 +86,20 @@ may also return `Result<WalkResult>` to propagate errors with `?`.
 
 A pre-order handler can take over a value's children instead of advancing:
 visit selected children with `subvisit`, or delegate the walker's default
-child recursion with `subvisit_children`, then return `Skip`. Both report a
-nested interrupt as `ControlFlow::Break`; propagate it (and errors, via `?`)
-instead of dropping the result:
+child recursion with `subvisit_children`, then return `Skip`. Both inherit
+the current definition-region state; the `_with_def_region` variants override
+it for exactly that subtree. All of them report a nested interrupt as
+`ControlFlow::Break`; propagate it (and errors, via `?`) instead of dropping
+the result:
 
 ```rust,ignore
-fn visit_func(&mut self, func: &FuncObj, kind: DefRegionKind) -> Result<WalkResult> {
-    if let ControlFlow::Break(payload) = self.subvisit(&func.params, DefRegionKind::Recursive)? {
+fn visit_func(&mut self, func: &FuncObj) -> Result<WalkResult> {
+    if let ControlFlow::Break(payload) =
+        self.subvisit_with_def_region(&func.params, DefRegionKind::Recursive)?
+    {
         return Ok(WalkResult::InterruptWith(payload));
     }
-    if let ControlFlow::Break(payload) = self.subvisit(&func.body, kind)? {
+    if let ControlFlow::Break(payload) = self.subvisit(&func.body)? {
         return Ok(WalkResult::InterruptWith(payload));
     }
     Ok(WalkResult::Skip)

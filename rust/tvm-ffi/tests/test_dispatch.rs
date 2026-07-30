@@ -24,15 +24,17 @@ use tvm_ffi::{
     dispatch, structural_visit, Array, DefRegionKind, Object, VisitDispatch, WalkResult,
 };
 
+#[derive(Default)]
 struct ExternalCounter {
+    def_region: DefRegionKind,
     objects: usize,
 }
 
-#[dispatch(visit)]
+#[dispatch(visit, def_region = def_region)]
 impl ExternalCounter {
     #[cfg(any(unix, windows))]
     #[cfg_attr(all(), inline)]
-    fn visit_object(&mut self, _value: &Object, _kind: DefRegionKind) -> WalkResult {
+    fn visit_object(&mut self, _value: &Object) -> WalkResult {
         self.objects += 1;
         WalkResult::Advance
     }
@@ -42,9 +44,12 @@ fn assert_visit_dispatch<T: VisitDispatch>() {}
 
 const _: fn() = assert_visit_dispatch::<ExternalCounter>;
 
-struct CfgAttrCounter;
+#[derive(Default)]
+struct CfgAttrCounter {
+    def_region: DefRegionKind,
+}
 
-#[dispatch(visit)]
+#[dispatch(visit, def_region = def_region)]
 impl CfgAttrCounter {
     #[cfg(any())]
     fn visit_disabled_catch_all(&mut self, _value: &tvm_ffi::VisitValue) -> WalkResult {
@@ -52,7 +57,7 @@ impl CfgAttrCounter {
     }
 
     #[cfg_attr(all(), cfg(any()))]
-    fn visit_disabled(&mut self, _value: &Object, _kind: DefRegionKind) -> WalkResult {
+    fn visit_disabled(&mut self, _value: &Object) -> WalkResult {
         WalkResult::Advance
     }
 
@@ -66,7 +71,7 @@ const _: fn() = assert_visit_dispatch::<CfgAttrCounter>;
 struct DisabledCounter;
 const _: usize = std::mem::size_of::<DisabledCounter>();
 
-#[dispatch(visit)]
+#[dispatch(visit, def_region = def_region)]
 #[cfg(any())]
 impl DisabledCounter {
     fn visit_object(&mut self, _value: &Object) -> WalkResult {
@@ -77,10 +82,10 @@ impl DisabledCounter {
 struct CfgAttrDisabledCounter;
 const _: usize = std::mem::size_of::<CfgAttrDisabledCounter>();
 
-#[dispatch(visit)]
+#[dispatch(visit, def_region = def_region)]
 #[cfg_attr(all(), cfg(any()))]
 impl CfgAttrDisabledCounter {
-    fn visit_object(&mut self, _value: &Object, _kind: DefRegionKind) -> WalkResult {
+    fn visit_object(&mut self, _value: &Object) -> WalkResult {
         WalkResult::Advance
     }
 }
@@ -88,7 +93,7 @@ impl CfgAttrDisabledCounter {
 #[test]
 fn generated_dispatch_uses_public_downstream_paths() {
     let root = Array::new(vec![1i64, 2]);
-    let mut visitor = ExternalCounter { objects: 0 };
+    let mut visitor = ExternalCounter::default();
     assert!(structural_visit(&root, &mut visitor).unwrap().is_continue());
     assert_eq!(visitor.objects, 1);
 }
