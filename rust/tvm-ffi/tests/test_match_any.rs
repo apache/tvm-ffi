@@ -111,7 +111,7 @@ fn parameterized_containers_keep_ordered_conversion() {
 }
 
 #[test]
-fn dense_lookup_table_maps_runtime_indices_to_local_arm_ids() {
+fn direct_lookup_table_maps_runtime_indices_to_local_arm_ids() {
     const ARM_0: ArmId = 0;
     const ARM_2: ArmId = 2;
     let pattern_list_id = TypeId::of::<(i32, i64, f32)>();
@@ -137,68 +137,6 @@ fn dense_lookup_table_maps_runtime_indices_to_local_arm_ids() {
         table.lookup(TypeId::of::<(u8, u16)>(), object_begin + 4),
         Err(())
     );
-}
-
-#[test]
-fn lookup_table_handles_the_u8_arm_id_boundary() {
-    const LAST_ARM: ArmId = 254;
-    let pattern_list_id = TypeId::of::<[i32; 255]>();
-    let object_begin = TypeIndex::kTVMFFIStaticObjectBegin as i32;
-    let type_indices: [i32; 255] = std::array::from_fn(|arm_id| object_begin + arm_id as i32);
-    let table = LeafLookupTable::build(pattern_list_id, &type_indices);
-
-    assert_eq!(
-        table.lookup(pattern_list_id, object_begin + 254),
-        Ok(Some(LAST_ARM))
-    );
-
-    const NEXT_ARM: ArmId = 255;
-    let next_pattern_list_id = TypeId::of::<[i32; 256]>();
-    let next_type_indices: [i32; 256] = std::array::from_fn(|arm_id| object_begin + arm_id as i32);
-    let next_table = LeafLookupTable::build(next_pattern_list_id, &next_type_indices);
-
-    assert_eq!(
-        next_table.lookup(next_pattern_list_id, object_begin + 255),
-        Ok(Some(NEXT_ARM))
-    );
-}
-
-#[test]
-fn sparse_lookup_table_preserves_source_order() {
-    const ARM_0: ArmId = 0;
-    const ARM_1: ArmId = 1;
-    let pattern_list_id = TypeId::of::<(i32, i64)>();
-    let object_begin = TypeIndex::kTVMFFIStaticObjectBegin as i32;
-    // This span is one entry larger than the direct-table budget.
-    let table = LeafLookupTable::build(
-        pattern_list_id,
-        &[object_begin + 4 * 1024, object_begin, object_begin],
-    );
-
-    assert_eq!(table.lookup(pattern_list_id, object_begin), Ok(Some(ARM_1)));
-    assert_eq!(
-        table.lookup(pattern_list_id, object_begin + 4 * 1024),
-        Ok(Some(ARM_0))
-    );
-    assert_eq!(table.lookup(pattern_list_id, object_begin + 1), Ok(None));
-}
-
-#[test]
-fn large_sparse_lookup_table_maps_runtime_indices() {
-    const LAST_ARM: ArmId = 95;
-    let pattern_list_id = TypeId::of::<[i32; 96]>();
-    let object_begin = TypeIndex::kTVMFFIStaticObjectBegin as i32;
-    let type_indices: [i32; 96] = std::array::from_fn(|arm_id| {
-        object_begin + if arm_id == 1 { 0 } else { arm_id as i32 * 128 }
-    });
-    let table = LeafLookupTable::build(pattern_list_id, &type_indices);
-
-    assert_eq!(table.lookup(pattern_list_id, object_begin), Ok(Some(0)));
-    assert_eq!(
-        table.lookup(pattern_list_id, object_begin + 95 * 128),
-        Ok(Some(LAST_ARM))
-    );
-    assert_eq!(table.lookup(pattern_list_id, object_begin + 1), Ok(None));
 }
 
 #[test]

@@ -91,105 +91,56 @@ where
 
 /// Runtime type-index lookup for one `match_any!` call site.
 ///
+/// The smallest pattern `TypeIndex` is used as the base of a direct table.
 /// A successful lookup returns the matching position as a call-site-local
 /// [`ArmId`]. Arm bodies remain native branches in the macro expansion and are
 /// never stored as functions or closures.
 #[doc(hidden)]
 pub struct LeafLookupTable {
     pattern_list_id: TypeId,
-    storage: LeafLookupStorage,
+    base: i32,
+    arm_ids: Box<[ArmId]>,
 }
 
-// Bound the dense payload allocated by one call site. Wider index spaces use
-// the sparse fallback instead of allocating in proportion to TypeIndex.
-const MAX_DIRECT_LOOKUP_BYTES: usize = 4096;
-// In randomized x86-64 O3 measurements through 128 arms, sorted lookup starts
-// winning near 84 arms depending on layout; use 96 as a conservative,
-// benchmark-tunable crossover.
-const MIN_SORTED_LOOKUP_ARMS: usize = 96;
-const NO_ARM_ID: u8 = u8::MAX;
-
-enum LeafLookupStorage {
-    /// `type_index - base` directly indexes an encoded `ArmId`.
-    Direct { base: i32, arm_ids: Box<[u8]> },
-    /// A source-ordered scan is cheaper than binary search at medium sizes.
-    Linear(Box<[i32]>),
-    /// Large sparse pattern lists use sorted binary search.
-    Sorted(Box<[(i32, ArmId)]>),
-}
-
-#[cold]
-#[inline(never)]
-fn build_leaf_lookup_storage(type_indices: &[i32]) -> LeafLookupStorage {
-    assert!(
-        !type_indices.is_empty(),
-        "match_any! leaf lookup requires at least one arm"
-    );
-    assert!(
-        type_indices
-            .iter()
-            .all(|&type_index| type_index >= TypeIndex::kTVMFFIStaticObjectBegin as i32),
-        "match_any! leaf pattern returned a non-object type index"
-    );
-    let min_type_index = *type_indices.iter().min().unwrap();
-    let max_type_index = *type_indices.iter().max().unwrap();
-    let span = usize::try_from(i64::from(max_type_index) - i64::from(min_type_index) + 1)
-        .expect("match_any! leaf pattern returned an invalid type-index span");
-
-    if type_indices.len() <= u8::MAX as usize && span <= MAX_DIRECT_LOOKUP_BYTES {
-        let mut arm_ids = vec![NO_ARM_ID; span];
-        for (arm_id, &type_index) in type_indices.iter().enumerate() {
-            let offset = (type_index - min_type_index) as usize;
-            let slot = &mut arm_ids[offset];
-            // Keep the first source arm for duplicate runtime indices.
-            if *slot == NO_ARM_ID {
-                *slot = arm_id as u8;
-            }
-        }
-        LeafLookupStorage::Direct {
-            base: min_type_index,
-            arm_ids: arm_ids.into_boxed_slice(),
-        }
-    } else if type_indices.len() < MIN_SORTED_LOOKUP_ARMS {
-        LeafLookupStorage::Linear(type_indices.into())
-    } else {
-        let mut entries = type_indices
-            .iter()
-            .copied()
-            .enumerate()
-            .map(|(arm_id, type_index)| (type_index, arm_id as ArmId))
-            .collect::<Vec<_>>();
-        // Sorting by ArmId within equal indices keeps the first source arm.
-        entries.sort_unstable();
-        entries.dedup_by_key(|entry| entry.0);
-        LeafLookupStorage::Sorted(entries.into_boxed_slice())
-    }
-}
-
-#[inline(always)]
-fn lookup_linear_leaf(type_indices: &[i32], type_index: i32) -> Option<ArmId> {
-    type_indices
-        .iter()
-        .position(|&candidate| candidate == type_index)
-        .map(|arm_id| arm_id as ArmId)
-}
-
-#[inline(never)]
-fn lookup_sorted_leaf(entries: &[(i32, ArmId)], type_index: i32) -> Option<ArmId> {
-    entries
-        .binary_search_by_key(&type_index, |&(candidate, _)| candidate)
-        .ok()
-        .map(|index| entries[index].1)
-}
+const NO_ARM_ID: ArmId = ArmId::MAX;
 
 impl LeafLookupTable {
     #[doc(hidden)]
     #[cold]
     #[inline(never)]
     pub fn build(pattern_list_id: TypeId, type_indices: &[i32]) -> Self {
+        assert!(
+            !type_indices.is_empty(),
+            "match_any! leaf lookup requires at least one arm"
+        );
+        assert!(
+            type_indices
+                .iter()
+                .all(|&type_index| type_index >= TypeIndex::kTVMFFIStaticObjectBegin as i32),
+            "match_any! leaf pattern returned a non-object type index"
+        );
+        let min_type_index = *type_indices.iter().min().unwrap();
+        let max_type_index = *type_indices.iter().max().unwrap();
+        let span = usize::try_from(i64::from(max_type_index) - i64::from(min_type_index) + 1)
+            .expect("match_any! leaf pattern returned an invalid type-index span");
+        assert!(
+            type_indices.len() <= NO_ARM_ID as usize,
+            "match_any! has too many exact-leaf arms"
+        );
+        let mut arm_ids = vec![NO_ARM_ID; span];
+        for (arm_id, &type_index) in type_indices.iter().enumerate() {
+            let offset = (type_index - min_type_index) as usize;
+            let slot = &mut arm_ids[offset];
+            // Keep the first source arm for duplicate runtime indices.
+            if *slot == NO_ARM_ID {
+                *slot = arm_id as ArmId;
+            }
+        }
+
         Self {
             pattern_list_id,
-            storage: build_leaf_lookup_storage(type_indices),
+            base: min_type_index,
+            arm_ids: arm_ids.into_boxed_slice(),
         }
     }
 
@@ -199,15 +150,9 @@ impl LeafLookupTable {
         if self.pattern_list_id != pattern_list_id {
             return Err(());
         }
-        Ok(match &self.storage {
-            LeafLookupStorage::Direct { base, arm_ids } => {
-                let offset = type_index.wrapping_sub(*base) as usize;
-                let arm_id = arm_ids.get(offset).copied().unwrap_or(NO_ARM_ID);
-                (arm_id != NO_ARM_ID).then(|| ArmId::from(arm_id))
-            }
-            LeafLookupStorage::Linear(type_indices) => lookup_linear_leaf(type_indices, type_index),
-            LeafLookupStorage::Sorted(entries) => lookup_sorted_leaf(entries, type_index),
-        })
+        let offset = type_index.wrapping_sub(self.base) as usize;
+        let arm_id = self.arm_ids.get(offset).copied().unwrap_or(NO_ARM_ID);
+        Ok((arm_id != NO_ARM_ID).then_some(arm_id))
     }
 }
 

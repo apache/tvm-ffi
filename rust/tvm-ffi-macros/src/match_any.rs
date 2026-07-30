@@ -24,9 +24,7 @@ use syn::{braced, parenthesized, Expr, Pat, Path, Result, Token};
 
 use crate::utils::get_tvm_ffi_crate;
 
-// Randomized x86-64 O3 hot-loop benchmarks through 64 arms show a robust
-// exact-leaf direct-lookup win from twenty arms. This is a retestable
-// heuristic; smaller matches keep the ordered path.
+// Avoid call-site table setup for small matches.
 const MIN_LOOKUP_TABLE_ARMS: usize = 20;
 
 struct MatchAnyInput {
