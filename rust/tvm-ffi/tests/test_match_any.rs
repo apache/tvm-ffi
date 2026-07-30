@@ -18,14 +18,9 @@
  */
 
 use std::any::TypeId;
-use std::panic::{catch_unwind, AssertUnwindSafe};
-use std::sync::Barrier;
-use std::thread;
 
 use tvm_ffi::derive::{Object, ObjectRef};
-use tvm_ffi::match_any_internal::{
-    ArmId, LeafLookupTable, LeafLookupTableCell, LeafPatternMetadata, LeafPatternProbe,
-};
+use tvm_ffi::match_any_internal::{ArmId, LeafLookupTable, LeafPatternMetadata, LeafPatternProbe};
 use tvm_ffi::object::{Object as ObjectBase, ObjectArc};
 use tvm_ffi::{
     match_any, Any, AnyCompatible, AnyView, Array, Function, Map, Module, Shape, Tensor, TypeIndex,
@@ -135,66 +130,35 @@ fn custom_try_into_matcher_keeps_ordered_compatibility() {
 #[test]
 fn parameterized_containers_keep_ordered_conversion() {
     let array = [1.5_f64, 2.5].into_iter().collect::<Array<f64>>();
+    // Twenty arms make the macro consider lookup dispatch, but Array<T> is
+    // content-dependent and therefore keeps the complete ordered conversion.
     let selected = match_any! {
         Any::from(array) {
             Array::<i64>(_) => "integer array",
             Tensor(_) => "tensor",
             Shape(_) => "shape",
+            Module(_) => "module",
+            Module(_) => "module",
+            Module(_) => "module",
+            Module(_) => "module",
+            Module(_) => "module",
+            Module(_) => "module",
+            Module(_) => "module",
+            Module(_) => "module",
+            Module(_) => "module",
+            Module(_) => "module",
+            Module(_) => "module",
+            Module(_) => "module",
+            Module(_) => "module",
+            Module(_) => "module",
+            Module(_) => "module",
+            Module(_) => "module",
             Array::<f64>(_) => "float array",
             _ => "unsupported",
         }
     };
 
     assert_eq!(selected, "float array");
-}
-
-#[test]
-fn large_guarded_and_non_leaf_matches_keep_ordered_dispatch() {
-    // A guard disables the lookup expansion at or above the lookup threshold.
-    fn guarded(view: AnyView<'_>) -> usize {
-        match_any! {
-            view {
-                Module(_) if false => 0,
-                Module(_) => 1,
-                Module(_) => 2,
-                Module(_) => 3,
-                Module(_) => 4,
-                Module(_) => 5,
-                Module(_) => 6,
-                Module(_) => 7,
-                Module(_) => 8,
-                _ => 9,
-            }
-        }
-    }
-
-    // A non-leaf pattern rejects the lookup metadata and uses the ordered fallback.
-    fn non_leaf(value: Any) -> usize {
-        match_any! {
-            value {
-                Array::<i64>(_) => 0,
-                Module(_) => 1,
-                Module(_) => 2,
-                Module(_) => 3,
-                Module(_) => 4,
-                Module(_) => 5,
-                Module(_) => 6,
-                Module(_) => 7,
-                Module(_) => 8,
-                _ => 9,
-            }
-        }
-    }
-
-    let module: Module = Function::get_global("ffi.SystemLib")
-        .unwrap()
-        .call_tuple_with_len::<0, _>(())
-        .unwrap()
-        .try_into()
-        .unwrap();
-    assert_eq!(guarded(AnyView::from(&module)), 1);
-    assert_eq!(non_leaf(Any::from(module)), 1);
-    assert_eq!(non_leaf(Any::from(Array::<i64>::default())), 0);
 }
 
 #[test]
@@ -214,11 +178,22 @@ fn lookup_selects_later_arms_and_isolates_generic_pattern_lists() {
                 T(_) => 5,
                 T(_) => 6,
                 T(_) => 7,
+                T(_) => 8,
+                T(_) => 9,
+                T(_) => 10,
+                T(_) => 11,
+                T(_) => 12,
+                T(_) => 13,
+                T(_) => 14,
+                T(_) => 15,
+                T(_) => 16,
+                T(_) => 17,
+                T(_) => 18,
                 Module(mut module) => {
                     let _ = &mut module;
-                    8
+                    19
                 },
-                _ => 9,
+                _ => 20,
             }
         }
     }
@@ -235,12 +210,12 @@ fn lookup_selects_later_arms_and_isolates_generic_pattern_lists() {
     // The first monomorphization initializes the table and exercises Arm0,
     // a later ArmId with a `mut` binding, and both fallback kinds.
     assert_eq!(classify::<TestIntPair>(AnyView::from(&pair)), 0);
-    assert_eq!(classify::<TestIntPair>(AnyView::from(&module)), 8);
+    assert_eq!(classify::<TestIntPair>(AnyView::from(&module)), 19);
     assert_eq!(
         classify::<TestIntPair>(AnyView::from(&Shape::from([1_i64, 2]))),
-        9
+        20
     );
-    assert_eq!(classify::<TestIntPair>(AnyView::from(&1_i64)), 9);
+    assert_eq!(classify::<TestIntPair>(AnyView::from(&1_i64)), 20);
 
     // Function-local statics are shared by generic monomorphizations. This
     // pattern list must not reuse TestIntPair's ArmId mapping.
@@ -248,67 +223,94 @@ fn lookup_selects_later_arms_and_isolates_generic_pattern_lists() {
 }
 
 #[test]
-fn lookup_table_maps_runtime_indices_to_local_arm_ids() {
+fn dense_lookup_table_maps_runtime_indices_to_local_arm_ids() {
     const ARM_0: ArmId = 0;
     const ARM_2: ArmId = 2;
     let pattern_list_id = TypeId::of::<(i32, i64, f32)>();
     let object_begin = TypeIndex::kTVMFFIStaticObjectBegin as i32;
     let table = LeafLookupTable::build(
         pattern_list_id,
-        [object_begin, object_begin, object_begin + 2],
+        &[object_begin + 4, object_begin + 4, object_begin + 7],
     );
 
-    assert_eq!(table.lookup(pattern_list_id, object_begin), Ok(Some(ARM_0)));
-    assert_eq!(table.lookup(pattern_list_id, object_begin + 1), Ok(None));
+    assert_eq!(table.lookup(pattern_list_id, object_begin + 3), Ok(None));
     assert_eq!(
-        table.lookup(pattern_list_id, object_begin + 2),
+        table.lookup(pattern_list_id, object_begin + 4),
+        Ok(Some(ARM_0))
+    );
+    assert_eq!(table.lookup(pattern_list_id, object_begin + 5), Ok(None));
+    assert_eq!(table.lookup(pattern_list_id, object_begin + 6), Ok(None));
+    assert_eq!(
+        table.lookup(pattern_list_id, object_begin + 7),
         Ok(Some(ARM_2))
     );
+    assert_eq!(table.lookup(pattern_list_id, object_begin + 8), Ok(None));
     assert_eq!(
-        table.lookup(TypeId::of::<(u8, u16)>(), object_begin),
+        table.lookup(TypeId::of::<(u8, u16)>(), object_begin + 4),
         Err(())
     );
 }
 
 #[test]
-fn leaf_lookup_table_cell_initializes_once_and_falls_back_when_unavailable() {
+fn lookup_table_handles_the_u8_arm_id_boundary() {
+    const LAST_ARM: ArmId = 254;
+    let pattern_list_id = TypeId::of::<[i32; 255]>();
+    let object_begin = TypeIndex::kTVMFFIStaticObjectBegin as i32;
+    let type_indices: [i32; 255] = std::array::from_fn(|arm_id| object_begin + arm_id as i32);
+    let table = LeafLookupTable::build(pattern_list_id, &type_indices);
+
+    assert_eq!(
+        table.lookup(pattern_list_id, object_begin + 254),
+        Ok(Some(LAST_ARM))
+    );
+
+    const NEXT_ARM: ArmId = 255;
+    let next_pattern_list_id = TypeId::of::<[i32; 256]>();
+    let next_type_indices: [i32; 256] = std::array::from_fn(|arm_id| object_begin + arm_id as i32);
+    let next_table = LeafLookupTable::build(next_pattern_list_id, &next_type_indices);
+
+    assert_eq!(
+        next_table.lookup(next_pattern_list_id, object_begin + 255),
+        Ok(Some(NEXT_ARM))
+    );
+}
+
+#[test]
+fn sparse_lookup_table_preserves_source_order() {
+    const ARM_0: ArmId = 0;
+    const ARM_1: ArmId = 1;
     let pattern_list_id = TypeId::of::<(i32, i64)>();
     let object_begin = TypeIndex::kTVMFFIStaticObjectBegin as i32;
-    let cell = LeafLookupTableCell::<1>::new();
-    let init_started = Barrier::new(2);
-    let finish_init = Barrier::new(2);
+    // This span is one entry larger than the direct-table budget.
+    let table = LeafLookupTable::build(
+        pattern_list_id,
+        &[object_begin + 4 * 1024, object_begin, object_begin],
+    );
 
-    thread::scope(|scope| {
-        let initializer = scope.spawn(|| {
-            let table = cell
-                .try_get_or_init(|| {
-                    init_started.wait();
-                    finish_init.wait();
-                    LeafLookupTable::build(pattern_list_id, [object_begin])
-                })
-                .unwrap();
-            assert_eq!(table.lookup(pattern_list_id, object_begin), Ok(Some(0)));
-        });
+    assert_eq!(table.lookup(pattern_list_id, object_begin), Ok(Some(ARM_1)));
+    assert_eq!(
+        table.lookup(pattern_list_id, object_begin + 4 * 1024),
+        Ok(Some(ARM_0))
+    );
+    assert_eq!(table.lookup(pattern_list_id, object_begin + 1), Ok(None));
+}
 
-        init_started.wait();
-        assert!(cell
-            .try_get_or_init(|| panic!("a concurrent initializer must not run"))
-            .is_none());
-        finish_init.wait();
-        initializer.join().unwrap();
+#[test]
+fn large_sparse_lookup_table_maps_runtime_indices() {
+    const LAST_ARM: ArmId = 95;
+    let pattern_list_id = TypeId::of::<[i32; 96]>();
+    let object_begin = TypeIndex::kTVMFFIStaticObjectBegin as i32;
+    let type_indices: [i32; 96] = std::array::from_fn(|arm_id| {
+        object_begin + if arm_id == 1 { 0 } else { arm_id as i32 * 128 }
     });
-    assert!(cell
-        .try_get_or_init(|| panic!("an initialized table must be reused"))
-        .is_some());
+    let table = LeafLookupTable::build(pattern_list_id, &type_indices);
 
-    let abandoned_cell = LeafLookupTableCell::<1>::new();
-    assert!(catch_unwind(AssertUnwindSafe(|| {
-        abandoned_cell.try_get_or_init(|| panic!("initialization failed"));
-    }))
-    .is_err());
-    assert!(abandoned_cell
-        .try_get_or_init(|| LeafLookupTable::build(pattern_list_id, [object_begin]))
-        .is_none());
+    assert_eq!(table.lookup(pattern_list_id, object_begin), Ok(Some(0)));
+    assert_eq!(
+        table.lookup(pattern_list_id, object_begin + 95 * 128),
+        Ok(Some(LAST_ARM))
+    );
+    assert_eq!(table.lookup(pattern_list_id, object_begin + 1), Ok(None));
 }
 
 #[test]

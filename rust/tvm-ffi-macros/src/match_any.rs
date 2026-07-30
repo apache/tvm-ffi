@@ -24,10 +24,10 @@ use syn::{braced, parenthesized, Expr, Pat, Path, Result, Token};
 
 use crate::utils::get_tvm_ffi_crate;
 
-// O3 hot-loop benchmarks across multiple shuffle seeds show the first stable
-// win for uniformly distributed hits at seven arms. This is a retestable
+// Randomized x86-64 O3 hot-loop benchmarks through 64 arms show a robust
+// exact-leaf direct-lookup win from twenty arms. This is a retestable
 // heuristic; smaller matches keep the ordered path.
-const MIN_LOOKUP_TABLE_ARMS: usize = 7;
+const MIN_LOOKUP_TABLE_ARMS: usize = 20;
 
 struct MatchAnyInput {
     scrutinee: Expr,
@@ -279,25 +279,18 @@ fn expand_leaf_table_lookup(tvm_ffi: &TokenStream, arms: &[TypedArm], view: &Ide
                 #tvm_ffi::match_any_internal::LeafPatternProbe::<#pattern_list>::new();
             match (&#probe).leaf_pattern_list_id() {
                 ::core::option::Option::Some(#pattern_list_id) => {
-                    static #static_table:
-                        #tvm_ffi::match_any_internal::LeafLookupTableCell<#arm_count> =
-                            #tvm_ffi::match_any_internal::LeafLookupTableCell::new();
-                    let #table = #static_table.try_get_or_init(|| {
+                    static #static_table: ::std::sync::OnceLock<
+                        #tvm_ffi::match_any_internal::LeafLookupTable,
+                    > = ::std::sync::OnceLock::new();
+                    let #table = #static_table.get_or_init(|| {
                         let mut #type_indices = [0_i32; #arm_count];
                         (&#probe).fill_leaf_type_indices(&mut #type_indices);
                         #tvm_ffi::match_any_internal::LeafLookupTable::build(
                             #pattern_list_id,
-                            #type_indices,
+                            &#type_indices,
                         )
                     });
-                    match #table {
-                        ::core::option::Option::Some(#table) => {
-                            #table.lookup(#pattern_list_id, #view.type_index())
-                        }
-                        ::core::option::Option::None => {
-                            ::core::result::Result::Err(())
-                        }
-                    }
+                    #table.lookup(#pattern_list_id, #view.type_index())
                 }
                 ::core::option::Option::None => {
                     ::core::result::Result::Err(())
@@ -412,7 +405,7 @@ fn expand_leaf_lookup_match(
             .map(|(arm_id, arm_constant)| {
                 quote! {
                     const #arm_constant: #tvm_ffi::match_any_internal::ArmId =
-                        #arm_id;
+                        #arm_id as #tvm_ffi::match_any_internal::ArmId;
                 }
             });
     let lookup_arm_id = expand_leaf_table_lookup(tvm_ffi, arms, &view);
