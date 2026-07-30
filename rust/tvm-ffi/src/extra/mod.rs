@@ -17,4 +17,4 @@
  * under the License.
  */
 pub mod module;
-pub mod structural;
+pub mod structural_visit;

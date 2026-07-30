@@ -72,7 +72,7 @@ fn expand(mode: &syn::Ident, item_impl: &ItemImpl) -> syn::Result<TokenStream2> 
         let invoke = match &handler.argument {
             HandlerArgument::Value => quote! {
                 return Some(
-                    #tvm_ffi::extra::structural::IntoVisitResult::into_visit_result(
+                    #tvm_ffi::extra::structural_visit::IntoVisitResult::into_visit_result(
                         self.#method(value, ctx)
                     )
                 );
@@ -80,7 +80,7 @@ fn expand(mode: &syn::Ident, item_impl: &ItemImpl) -> syn::Result<TokenStream2> 
             HandlerArgument::BorrowedNode(node_type) => quote! {
                 if let Some(node) = value.as_node::<#node_type>() {
                     return Some(
-                        #tvm_ffi::extra::structural::IntoVisitResult::into_visit_result(
+                        #tvm_ffi::extra::structural_visit::IntoVisitResult::into_visit_result(
                             self.#method(node, ctx)
                         )
                     );
@@ -89,7 +89,7 @@ fn expand(mode: &syn::Ident, item_impl: &ItemImpl) -> syn::Result<TokenStream2> 
             HandlerArgument::Owned(value_type) => quote! {
                 if let Some(node) = value.cast::<#value_type>() {
                     return Some(
-                        #tvm_ffi::extra::structural::IntoVisitResult::into_visit_result(
+                        #tvm_ffi::extra::structural_visit::IntoVisitResult::into_visit_result(
                             self.#method(node, ctx)
                         )
                     );
@@ -130,15 +130,15 @@ fn expand(mode: &syn::Ident, item_impl: &ItemImpl) -> syn::Result<TokenStream2> 
         #(#ordering_errors)*
 
         #(#[#impl_cfg_attrs])*
-        impl #impl_generics #tvm_ffi::extra::structural::VisitDispatch
+        impl #impl_generics #tvm_ffi::extra::structural_visit::VisitDispatch
             for #self_type #where_clause
         {
             #[allow(unreachable_code)]
             fn dispatch_visit(
                 &mut self,
-                value: &#tvm_ffi::extra::structural::VisitValue,
-                ctx: &mut #tvm_ffi::extra::structural::VisitCtx<'_>,
-            ) -> Option<#tvm_ffi::extra::structural::VisitResult> {
+                value: &#tvm_ffi::extra::structural_visit::VisitValue,
+                ctx: &mut #tvm_ffi::extra::structural_visit::VisitCtx<'_>,
+            ) -> Option<#tvm_ffi::extra::structural_visit::VisitResult> {
                 #(#links)*
                 None
             }

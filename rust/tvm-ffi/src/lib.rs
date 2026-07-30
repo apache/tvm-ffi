@@ -46,7 +46,7 @@ pub use crate::error::{
     ATTRIBUTE_ERROR, INDEX_ERROR, KEY_ERROR, RUNTIME_ERROR, TYPE_ERROR, VALUE_ERROR,
 };
 pub use crate::extra::module::Module;
-pub use crate::extra::structural::{
+pub use crate::extra::structural_visit::{
     structural_visit, structural_walk, walk, walk_with_context, DefRegionKind, Phase, VisitCtx,
     VisitDispatch, VisitOutcome, VisitValue, WalkOrder, WalkResult,
 };
