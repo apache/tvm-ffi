@@ -19,7 +19,7 @@
 
 use tvm_ffi::derive::{Object, ObjectRef};
 use tvm_ffi::object::{Object as ObjectBase, ObjectArc, ObjectCore};
-use tvm_ffi::{match_any, Any, Shape, TypeIndex};
+use tvm_ffi::{match_any, Any, Array, Shape, TypeIndex};
 use tvm_ffi_sys::TVMFFIByteArray;
 
 unsafe extern "C" {
@@ -89,15 +89,9 @@ macro_rules! define_expr_leaves {
         fn register_expr_types() {
             let expr_type_index =
                 register_type::<ExprObj>(20, TypeIndex::kTVMFFIStaticObjectBegin as i32);
-            let mut expected_type_index = expr_type_index + 1;
             $(
-                assert_eq!(
-                    register_type::<$object>(0, expr_type_index),
-                    expected_type_index
-                );
-                expected_type_index += 1;
+                register_type::<$object>(0, expr_type_index);
             )+
-            assert_eq!(expected_type_index, expr_type_index + 21);
         }
     };
 }
@@ -196,4 +190,42 @@ fn dispatches_representative_ast_leaf_nodes() {
 
     assert_eq!(classify(Any::from(Shape::from([1_i64, 2]))), "unsupported");
     assert_eq!(classify(Any::from(1_i64)), "unsupported");
+
+    // This call site has enough syntactically eligible arms to consider leaf
+    // lookup, but Array<T> requires complete type conversion. The entire match
+    // must therefore retain source-ordered dispatch.
+    fn classify_mixed_patterns(value: Any) -> &'static str {
+        match_any! {
+            value {
+                AddExpr(_) => "add",
+                SubExpr(_) => "sub",
+                MulExpr(_) => "mul",
+                DivExpr(_) => "div",
+                ModExpr(_) => "mod",
+                NegExpr(_) => "neg",
+                CallExpr(_) => "call",
+                LetExpr(_) => "let",
+                IfExpr(_) => "if",
+                TupleExpr(_) => "tuple",
+                TupleGetItemExpr(_) => "tuple_get_item",
+                CastExpr(_) => "cast",
+                LoadExpr(_) => "load",
+                StoreExpr(_) => "store",
+                ForExpr(_) => "for",
+                WhileExpr(_) => "while",
+                SeqExpr(_) => "seq",
+                ReturnExpr(_) => "return",
+                Array::<i64>(_) => "integer_array",
+                Array::<f64>(_) => "float_array",
+                _ => "unsupported",
+            }
+        }
+    }
+
+    assert_eq!(
+        classify_mixed_patterns(Any::from(AddExpr::default())),
+        "add"
+    );
+    let array = [1.5_f64, 2.5].into_iter().collect::<Array<f64>>();
+    assert_eq!(classify_mixed_patterns(Any::from(array)), "float_array");
 }

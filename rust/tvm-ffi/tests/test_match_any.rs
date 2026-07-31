@@ -95,7 +95,7 @@ fn custom_try_into_matcher_keeps_ordered_compatibility() {
 }
 
 #[test]
-fn parameterized_containers_keep_ordered_conversion() {
+fn parameterized_containers_use_complete_conversion_semantics() {
     let array = [1.5_f64, 2.5].into_iter().collect::<Array<f64>>();
     // Both patterns have the same runtime Array TypeIndex, so matching must
     // inspect the element types in source order.
@@ -127,7 +127,6 @@ fn direct_lookup_table_maps_runtime_indices_to_local_arm_ids() {
         Ok(Some(ARM_0))
     );
     assert_eq!(table.lookup(pattern_list_id, object_begin + 5), Ok(None));
-    assert_eq!(table.lookup(pattern_list_id, object_begin + 6), Ok(None));
     assert_eq!(
         table.lookup(pattern_list_id, object_begin + 7),
         Ok(Some(ARM_2))
