@@ -21,16 +21,15 @@
 //! path emitted by the dispatch macro outside `tvm_ffi` itself.
 
 use tvm_ffi::{
-    dispatch, structural_visit, Array, DefRegionKind, Object, VisitDispatch, WalkResult,
+    dispatch, structural_walk, Array, DefRegionKind, Object, VisitDispatch, WalkOrder, WalkResult,
 };
 
 #[derive(Default)]
 struct ExternalCounter {
-    def_region: DefRegionKind,
     objects: usize,
 }
 
-#[dispatch(visit, def_region = def_region)]
+#[dispatch(visit)]
 impl ExternalCounter {
     #[cfg(any(unix, windows))]
     #[cfg_attr(all(), inline)]
@@ -45,11 +44,9 @@ fn assert_visit_dispatch<T: VisitDispatch>() {}
 const _: fn() = assert_visit_dispatch::<ExternalCounter>;
 
 #[derive(Default)]
-struct CfgAttrCounter {
-    def_region: DefRegionKind,
-}
+struct CfgAttrCounter {}
 
-#[dispatch(visit, def_region = def_region)]
+#[dispatch(visit)]
 impl CfgAttrCounter {
     #[cfg(any())]
     fn visit_disabled_catch_all(&mut self, _value: &tvm_ffi::VisitValue) -> WalkResult {
@@ -71,7 +68,7 @@ const _: fn() = assert_visit_dispatch::<CfgAttrCounter>;
 struct DisabledCounter;
 const _: usize = std::mem::size_of::<DisabledCounter>();
 
-#[dispatch(visit, def_region = def_region)]
+#[dispatch(visit)]
 #[cfg(any())]
 impl DisabledCounter {
     fn visit_object(&mut self, _value: &Object) -> WalkResult {
@@ -82,7 +79,7 @@ impl DisabledCounter {
 struct CfgAttrDisabledCounter;
 const _: usize = std::mem::size_of::<CfgAttrDisabledCounter>();
 
-#[dispatch(visit, def_region = def_region)]
+#[dispatch(visit)]
 #[cfg_attr(all(), cfg(any()))]
 impl CfgAttrDisabledCounter {
     fn visit_object(&mut self, _value: &Object) -> WalkResult {
@@ -90,10 +87,42 @@ impl CfgAttrDisabledCounter {
     }
 }
 
+#[derive(Default)]
+struct MixedArityCounter {
+    kinds: Vec<DefRegionKind>,
+    objects: usize,
+}
+
+#[dispatch(visit)]
+impl MixedArityCounter {
+    fn visit_int(&mut self, _value: i64, kind: DefRegionKind) -> WalkResult {
+        self.kinds.push(kind);
+        WalkResult::Advance
+    }
+
+    fn visit_object(&mut self, _value: &Object) -> WalkResult {
+        self.objects += 1;
+        WalkResult::Advance
+    }
+}
+
+#[test]
+fn handlers_may_mix_def_region_arity() {
+    let root = Array::new(vec![1i64, 2]);
+    let mut visitor = MixedArityCounter::default();
+    assert!(structural_walk(&root, &mut visitor, WalkOrder::PreOrder)
+        .unwrap()
+        .is_none());
+    assert_eq!(visitor.objects, 1);
+    assert_eq!(visitor.kinds, vec![DefRegionKind::None; 2]);
+}
+
 #[test]
 fn generated_dispatch_uses_public_downstream_paths() {
     let root = Array::new(vec![1i64, 2]);
     let mut visitor = ExternalCounter::default();
-    assert!(structural_visit(&root, &mut visitor).unwrap().is_continue());
+    assert!(structural_walk(&root, &mut visitor, WalkOrder::PreOrder)
+        .unwrap()
+        .is_none());
     assert_eq!(visitor.objects, 1);
 }
