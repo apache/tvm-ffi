@@ -37,7 +37,7 @@ visitor. Each value is automatically dispatched to the handler matching its
 runtime type:
 
 ```rust
-use tvm_ffi::{dispatch, structural_visit, DefRegionKind, Function, WalkResult};
+use tvm_ffi::{dispatch, structural_visit, Array, DefRegionKind, WalkResult};
 
 #[derive(Default)]
 struct Calculator {
@@ -58,15 +58,12 @@ impl Calculator {
     }
 }
 
-let values = Function::get_global("ffi.Array")
-    .unwrap()
-    .call_tuple((10_i64, 2.5_f64))
-    .unwrap();
+let values = Array::new(vec![10_i64, 2]);
 let mut calculator = Calculator::default();
 assert!(structural_visit(&values, &mut calculator)
     .unwrap()
     .is_continue());
-assert_eq!(calculator.value, 7.5);
+assert_eq!(calculator.value, 12.0);
 ```
 
 Typed handlers are tested in source order: borrowed `ObjectCore` node types use
