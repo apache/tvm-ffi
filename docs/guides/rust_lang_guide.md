@@ -217,38 +217,47 @@ structural_walk(&values, &mut probe, WalkOrder::PreOrder)?;
 assert_eq!(probe.total, 6);
 ```
 
-A closure works as a catch-all walker, over `&VisitValue` alone or with the
-definition-region state as a second argument:
+Lambdas also work — pass a single typed lambda, or a tuple of them tried in
+order with the first matching argument type winning, like the variadic C++
+`StructuralWalk(root, callbacks...)` chain. Unmatched values simply advance
+(a `&VisitValue` lambda acts as a catch-all), and each lambda may take a
+trailing `DefRegionKind` argument:
 
 ```rust
-use tvm_ffi::{structural_walk, Array, DefRegionKind, VisitValue, WalkOrder, WalkResult};
+use tvm_ffi::{structural_walk, Array, DefRegionKind, Object, WalkOrder, WalkResult};
 
 let values = Array::new(vec![1_i64, 2, 3]);
-let mut integers = 0;
-structural_walk(
-    &values,
-    |value: &VisitValue| {
-        if value.cast::<i64>().is_some() {
-            integers += 1;
-        }
-        WalkResult::Advance
-    },
-    WalkOrder::PreOrder,
-)?;
-assert_eq!(integers, 3);
 
-let mut uses = 0;
+let mut total = 0;
 structural_walk(
     &values,
-    |value: &VisitValue, kind: DefRegionKind| {
-        if value.cast::<i64>().is_some() && kind == DefRegionKind::None {
-            uses += 1;
-        }
+    |value: i64| {
+        total += value;
         WalkResult::Advance
     },
     WalkOrder::PreOrder,
 )?;
-assert_eq!(uses, 3);
+assert_eq!(total, 6);
+
+let mut evens = 0;
+let mut objects = 0;
+structural_walk(
+    &values,
+    (
+        |value: i64| {
+            if value % 2 == 0 {
+                evens += 1;
+            }
+            WalkResult::Advance
+        },
+        |_object: &Object, _kind: DefRegionKind| {
+            objects += 1;
+            WalkResult::Advance
+        },
+    ),
+    WalkOrder::PreOrder,
+)?;
+assert_eq!((evens, objects), (1, 1));
 ```
 
 To drive recursion yourself, implement `StructuralVisitor` and call

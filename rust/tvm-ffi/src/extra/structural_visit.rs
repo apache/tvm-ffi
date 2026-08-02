@@ -50,6 +50,7 @@
 //! different semantics; visit such a type's children explicitly from a
 //! [`StructuralVisitor`], or skip the value in a walk.
 
+use std::marker::PhantomData;
 use std::ops::ControlFlow;
 use std::os::raw::c_void;
 use std::ptr::NonNull;
@@ -287,10 +288,13 @@ impl<V: VisitDispatch> VisitDispatch for &mut V {
 ///
 /// * `&mut V` where `V: VisitDispatch` — a stateful typed visitor
 ///   (`#[dispatch(visit)]` or hand-written).
-/// * `FnMut(&VisitValue) -> impl IntoVisitResult` — a bare observer closure,
-///   the analog of a C++ `(value)` callback.
-/// * `FnMut(&VisitValue, DefRegionKind) -> impl IntoVisitResult` — the
-///   analog of a C++ `(value, def_region_kind)` callback.
+/// * A bare closure in any [`WalkChainLink`] shape — catch-all
+///   `FnMut(&VisitValue)`, typed `FnMut(T)`, node `FnMut(&N)`, each with an
+///   optional trailing [`DefRegionKind`] argument — the analog of a single
+///   C++ callback. Values a typed closure does not match advance normally.
+/// * A tuple of typed links `(link1, link2, ...)` — the analog of the C++
+///   variadic callback chain; see [`WalkChainLink`] for the accepted link
+///   shapes.
 ///
 /// Closure arguments usually need explicit type annotations
 /// (`|value: &VisitValue| ...`) for the marker to be inferred.
@@ -407,6 +411,324 @@ where
         }
     }
 }
+
+/// One typed link of a tuple walker — a single callback of the C++ variadic
+/// `StructuralWalk(root, callbacks...)` chain.
+///
+/// A tuple of links passed to [`structural_walk`] is tried in order and the
+/// first link whose argument type matches the value runs, exactly like the
+/// C++ callback chain and the Python `(type, callback)` entries. Accepted
+/// link shapes mirror `#[dispatch(visit)]` handlers:
+///
+/// * `FnMut(T) -> impl IntoVisitResult` for an FFI-convertible `T` — exact
+///   value cast via [`VisitValue::cast`].
+/// * `FnMut(&N) -> impl IntoVisitResult` for an object node `N` —
+///   refcount-free subtype check via [`VisitValue::as_node`].
+/// * `FnMut(&VisitValue) -> impl IntoVisitResult` — catch-all; place it
+///   last, links after it never run.
+/// * `&mut V` where `V: VisitDispatch` — splice a typed visitor into the
+///   chain.
+///
+/// Every closure shape may declare a trailing [`DefRegionKind`] argument,
+/// and a single typed closure may also be passed to [`structural_walk`]
+/// bare, without the tuple. Closure arguments need explicit type
+/// annotations for the marker to be inferred. Borrow rules apply per link,
+/// so state shared across links goes through a `Cell`/`RefCell` — or in a
+/// single `#[dispatch(visit)]` visitor, which shares `&mut self` between
+/// its handlers.
+pub trait WalkChainLink<Marker> {
+    /// Run this link if `value` matches its argument type; `None` hands the
+    /// value to the next link.
+    #[doc(hidden)]
+    fn try_call(
+        &mut self,
+        value: &VisitValue,
+        def_region_kind: DefRegionKind,
+    ) -> Option<VisitResult>;
+}
+
+#[doc(hidden)]
+pub struct ByOwnedLink<T>(PhantomData<T>);
+
+impl<F, T, O> WalkChainLink<ByOwnedLink<T>> for F
+where
+    F: FnMut(T) -> O,
+    T: crate::type_traits::AnyCompatible,
+    O: IntoVisitResult,
+{
+    #[inline]
+    fn try_call(
+        &mut self,
+        value: &VisitValue,
+        _def_region_kind: DefRegionKind,
+    ) -> Option<VisitResult> {
+        value
+            .cast::<T>()
+            .map(|typed| self(typed).into_visit_result())
+    }
+}
+
+#[doc(hidden)]
+pub struct ByOwnedKindLink<T>(PhantomData<T>);
+
+impl<F, T, O> WalkChainLink<ByOwnedKindLink<T>> for F
+where
+    F: FnMut(T, DefRegionKind) -> O,
+    T: crate::type_traits::AnyCompatible,
+    O: IntoVisitResult,
+{
+    #[inline]
+    fn try_call(
+        &mut self,
+        value: &VisitValue,
+        def_region_kind: DefRegionKind,
+    ) -> Option<VisitResult> {
+        value
+            .cast::<T>()
+            .map(|typed| self(typed, def_region_kind).into_visit_result())
+    }
+}
+
+#[doc(hidden)]
+pub struct ByNodeLink<N>(PhantomData<N>);
+
+impl<F, N, O> WalkChainLink<ByNodeLink<N>> for F
+where
+    F: for<'a> FnMut(&'a N) -> O,
+    N: ObjectCore,
+    O: IntoVisitResult,
+{
+    #[inline]
+    fn try_call(
+        &mut self,
+        value: &VisitValue,
+        _def_region_kind: DefRegionKind,
+    ) -> Option<VisitResult> {
+        value
+            .as_node::<N>()
+            .map(|node| self(node).into_visit_result())
+    }
+}
+
+#[doc(hidden)]
+pub struct ByNodeKindLink<N>(PhantomData<N>);
+
+impl<F, N, O> WalkChainLink<ByNodeKindLink<N>> for F
+where
+    F: for<'a> FnMut(&'a N, DefRegionKind) -> O,
+    N: ObjectCore,
+    O: IntoVisitResult,
+{
+    #[inline]
+    fn try_call(
+        &mut self,
+        value: &VisitValue,
+        def_region_kind: DefRegionKind,
+    ) -> Option<VisitResult> {
+        value
+            .as_node::<N>()
+            .map(|node| self(node, def_region_kind).into_visit_result())
+    }
+}
+
+#[doc(hidden)]
+pub enum ByCatchAllLink {}
+
+impl<F, O> WalkChainLink<ByCatchAllLink> for F
+where
+    F: for<'a> FnMut(&'a VisitValue) -> O,
+    O: IntoVisitResult,
+{
+    #[inline]
+    fn try_call(
+        &mut self,
+        value: &VisitValue,
+        _def_region_kind: DefRegionKind,
+    ) -> Option<VisitResult> {
+        Some(self(value).into_visit_result())
+    }
+}
+
+#[doc(hidden)]
+pub enum ByCatchAllKindLink {}
+
+impl<F, O> WalkChainLink<ByCatchAllKindLink> for F
+where
+    F: for<'a> FnMut(&'a VisitValue, DefRegionKind) -> O,
+    O: IntoVisitResult,
+{
+    #[inline]
+    fn try_call(
+        &mut self,
+        value: &VisitValue,
+        def_region_kind: DefRegionKind,
+    ) -> Option<VisitResult> {
+        Some(self(value, def_region_kind).into_visit_result())
+    }
+}
+
+#[doc(hidden)]
+pub enum ByDispatchLink {}
+
+impl<V: VisitDispatch> WalkChainLink<ByDispatchLink> for &mut V {
+    #[inline]
+    fn try_call(
+        &mut self,
+        value: &VisitValue,
+        def_region_kind: DefRegionKind,
+    ) -> Option<VisitResult> {
+        self.dispatch_visit(value, def_region_kind)
+    }
+}
+
+/// Runs a tuple of [`WalkChainLink`]s at the phase selected by `order`,
+/// trying links in order and short-circuiting on the first whose type
+/// matches — the Rust analog of C++ `StructuralWalkCallbackChain`. Static
+/// dispatch throughout: each link's type test inlines to the same code the
+/// `#[dispatch(visit)]` macro generates for a `visit_*` chain.
+#[doc(hidden)]
+pub struct ChainWalker<Links, Markers> {
+    links: Links,
+    order: WalkOrder,
+    markers: PhantomData<fn(Markers)>,
+}
+
+macro_rules! impl_chain_walker {
+    ($(($F:ident, $M:ident, $idx:tt)),+) => {
+        impl<$($F, $M,)+> ChainWalker<($($F,)+), ($($M,)+)>
+        where
+            $($F: WalkChainLink<$M>,)+
+        {
+            #[inline]
+            fn dispatch(
+                &mut self,
+                value: &VisitValue,
+                def_region_kind: DefRegionKind,
+            ) -> Result<WalkResult> {
+                $(
+                    if let Some(result) = self.links.$idx.try_call(value, def_region_kind) {
+                        return result;
+                    }
+                )+
+                Ok(WalkResult::Advance)
+            }
+        }
+
+        impl<$($F, $M,)+> NativeVisit for ChainWalker<($($F,)+), ($($M,)+)>
+        where
+            $($F: WalkChainLink<$M>,)+
+        {
+            fn enter(
+                &mut self,
+                value: &VisitValue,
+                def_region_kind: DefRegionKind,
+            ) -> Result<WalkResult> {
+                match self.order {
+                    WalkOrder::PreOrder => self.dispatch(value, def_region_kind),
+                    WalkOrder::PostOrder => Ok(WalkResult::Advance),
+                }
+            }
+
+            fn exit(
+                &mut self,
+                value: &VisitValue,
+                def_region_kind: DefRegionKind,
+            ) -> Result<WalkResult> {
+                match self.order {
+                    WalkOrder::PreOrder => Ok(WalkResult::Advance),
+                    WalkOrder::PostOrder => self.dispatch(value, def_region_kind),
+                }
+            }
+        }
+
+        impl<$($F, $M,)+> IntoWalker<($($M,)+)> for ($($F,)+)
+        where
+            $($F: WalkChainLink<$M>,)+
+        {
+            type Walker = ChainWalker<($($F,)+), ($($M,)+)>;
+            fn into_walker(self, order: WalkOrder) -> Self::Walker {
+                ChainWalker {
+                    links: self,
+                    order,
+                    markers: PhantomData,
+                }
+            }
+        }
+    };
+}
+
+impl_chain_walker!((F0, M0, 0));
+impl_chain_walker!((F0, M0, 0), (F1, M1, 1));
+impl_chain_walker!((F0, M0, 0), (F1, M1, 1), (F2, M2, 2));
+impl_chain_walker!((F0, M0, 0), (F1, M1, 1), (F2, M2, 2), (F3, M3, 3));
+impl_chain_walker!(
+    (F0, M0, 0),
+    (F1, M1, 1),
+    (F2, M2, 2),
+    (F3, M3, 3),
+    (F4, M4, 4)
+);
+impl_chain_walker!(
+    (F0, M0, 0),
+    (F1, M1, 1),
+    (F2, M2, 2),
+    (F3, M3, 3),
+    (F4, M4, 4),
+    (F5, M5, 5)
+);
+impl_chain_walker!(
+    (F0, M0, 0),
+    (F1, M1, 1),
+    (F2, M2, 2),
+    (F3, M3, 3),
+    (F4, M4, 4),
+    (F5, M5, 5),
+    (F6, M6, 6)
+);
+impl_chain_walker!(
+    (F0, M0, 0),
+    (F1, M1, 1),
+    (F2, M2, 2),
+    (F3, M3, 3),
+    (F4, M4, 4),
+    (F5, M5, 5),
+    (F6, M6, 6),
+    (F7, M7, 7)
+);
+
+// A bare typed closure — `FnMut(T)` or `FnMut(&N)`, optionally with a
+// trailing `DefRegionKind` — walks as a single-link chain, so a lone typed
+// handler needs no tuple wrapping; values that do not match its argument
+// type advance normally. `&VisitValue` catch-all closures keep their
+// dedicated `ClosureWalker`/`ClosureKindWalker` path above.
+macro_rules! impl_bare_link_walker {
+    ($(($marker:ident, $($fn_args:ty),+)),+ $(,)?) => {
+        $(
+            impl<F, T, O> IntoWalker<$marker<T>> for F
+            where
+                F: FnMut($($fn_args),+) -> O,
+                Self: WalkChainLink<$marker<T>>,
+                O: IntoVisitResult,
+            {
+                type Walker = ChainWalker<(F,), ($marker<T>,)>;
+                fn into_walker(self, order: WalkOrder) -> Self::Walker {
+                    ChainWalker {
+                        links: (self,),
+                        order,
+                        markers: PhantomData,
+                    }
+                }
+            }
+        )+
+    };
+}
+
+impl_bare_link_walker!(
+    (ByOwnedLink, T),
+    (ByOwnedKindLink, T, DefRegionKind),
+    (ByNodeLink, &T),
+    (ByNodeKindLink, &T, DefRegionKind),
+);
 
 /// A visitor that drives recursion itself, mirroring C++
 /// `StructuralVisitorObj`.
@@ -942,11 +1264,13 @@ where
 /// `StructuralWalk<order>(root, callbacks...)`.
 ///
 /// `walker` is anything implementing [`IntoWalker`]: a `&mut` reference to a
-/// stateful [`VisitDispatch`] visitor (`#[dispatch(visit)]`), or a bare
-/// closure taking `&VisitValue` with an optional trailing [`DefRegionKind`]
-/// — the C++ callback overloads. The walker owns recursion: the handler runs
-/// once per value, before or after the value's children according to
-/// `order`, and steers traversal through the returned [`WalkResult`].
+/// stateful [`VisitDispatch`] visitor (`#[dispatch(visit)]`), a bare closure
+/// in any [`WalkChainLink`] shape (catch-all `&VisitValue`, typed, or node,
+/// with an optional trailing [`DefRegionKind`]), or a tuple of such
+/// callbacks tried in order — the C++ callback overloads and variadic
+/// chain. The walker owns recursion: the handler runs once per value,
+/// before or after the value's children according to `order`, and steers
+/// traversal through the returned [`WalkResult`].
 pub fn structural_walk<R, M, H>(
     root: &R,
     walker: H,
