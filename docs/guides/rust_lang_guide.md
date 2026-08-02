@@ -180,6 +180,112 @@ fn may_fail(value: i32) -> Result<()> {
 }
 ```
 
+### Structural Walk and Visit
+
+Rust provides equivalents of the C++ `StructuralWalk`/`StructuralVisitor`
+APIs. Put `#[dispatch(visit)]` on an impl to turn its `visit_*` methods into
+typed handlers, then pass it to `structural_walk`; each handler returns a
+`WalkResult` (`Advance`, `Skip`, or `Interrupt`) to steer the traversal.
+Handlers dispatch on their argument type and may take an optional trailing
+`DefRegionKind` argument:
+
+```rust
+use tvm_ffi::{dispatch, structural_walk, Array, DefRegionKind, WalkOrder, WalkResult};
+
+#[derive(Default)]
+struct Probe {
+    total: i64,
+    floats: usize,
+}
+
+#[dispatch(visit)]
+impl Probe {
+    fn visit_integer(&mut self, value: i64) -> WalkResult {
+        self.total += value;
+        WalkResult::Advance
+    }
+
+    fn visit_float(&mut self, _value: f64, _kind: DefRegionKind) -> WalkResult {
+        self.floats += 1;
+        WalkResult::Advance
+    }
+}
+
+let values = Array::new(vec![1_i64, 2, 3]);
+let mut probe = Probe::default();
+structural_walk(&values, &mut probe, WalkOrder::PreOrder)?;
+assert_eq!(probe.total, 6);
+```
+
+A closure works as a catch-all walker, over `&VisitValue` alone or with the
+definition-region state as a second argument:
+
+```rust
+use tvm_ffi::{structural_walk, Array, DefRegionKind, VisitValue, WalkOrder, WalkResult};
+
+let values = Array::new(vec![1_i64, 2, 3]);
+let mut integers = 0;
+structural_walk(
+    &values,
+    |value: &VisitValue| {
+        if value.cast::<i64>().is_some() {
+            integers += 1;
+        }
+        WalkResult::Advance
+    },
+    WalkOrder::PreOrder,
+)?;
+assert_eq!(integers, 3);
+
+let mut uses = 0;
+structural_walk(
+    &values,
+    |value: &VisitValue, kind: DefRegionKind| {
+        if value.cast::<i64>().is_some() && kind == DefRegionKind::None {
+            uses += 1;
+        }
+        WalkResult::Advance
+    },
+    WalkOrder::PreOrder,
+)?;
+assert_eq!(uses, 3);
+```
+
+To drive recursion yourself, implement `StructuralVisitor` and call
+`structural_visit`; `visit` runs for each value and descends through
+`default_visit_children` (or `visit_child` for selected children):
+
+```rust
+use tvm_ffi::{
+    structural_visit, Array, DefRegionKind, Result, StructuralVisitor, VisitInterrupt, VisitValue,
+};
+
+#[derive(Default)]
+struct Depth {
+    max: usize,
+    current: usize,
+}
+
+impl StructuralVisitor for Depth {
+    fn visit(
+        &mut self,
+        value: &VisitValue,
+        def_region_kind: DefRegionKind,
+    ) -> Result<Option<VisitInterrupt>> {
+        self.current += 1;
+        self.max = self.max.max(self.current);
+        let interrupt = self.default_visit_children(value, def_region_kind)?;
+        self.current -= 1;
+        Ok(interrupt)
+    }
+}
+
+let values = Array::new(vec![1_i64, 2]);
+let mut depth = Depth::default();
+structural_visit(&values, &mut depth)?;
+assert_eq!(depth.max, 2);
+```
+
 ## Examples
 
 The repository includes a complete example in `rust/tvm-ffi/examples/load_library.rs`.
