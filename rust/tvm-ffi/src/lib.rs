@@ -47,8 +47,9 @@ pub use crate::error::{
 };
 pub use crate::extra::module::Module;
 pub use crate::extra::structural_visit::{
-    structural_visit, structural_walk, DefRegionKind, IntoWalker, StructuralVisitor, VisitDispatch,
-    VisitInterrupt, VisitValue, WalkChainLink, WalkOrder, WalkResult,
+    structural_visit, structural_walk, DefRegionKind, IntoVisitResult, IntoWalker,
+    StructuralVisitor, VisitDispatch, VisitInterrupt, VisitValue, WalkChainLink, WalkOrder,
+    WalkResult,
 };
 pub use crate::function::Function;
 pub use crate::object::ObjectRefCast;

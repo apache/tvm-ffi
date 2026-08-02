@@ -44,6 +44,10 @@
 //! object-description boundary: traversal, control flow, typed dispatch,
 //! visitor state, and definition-region propagation remain in Rust.
 //!
+//! Mutable `List`/`Dict` contents are snapshotted before callbacks run, so a
+//! callback mutating the container it was reached through cannot invalidate
+//! the traversal; the walk sees the pre-mutation contents.
+//!
 //! No C++ `ffi.StructuralVisitor` is constructed and no C++ default-visit
 //! function is called. A non-container type with a foreign `__s_visit__` hook
 //! is rejected instead of silently substituting reflection with potentially
@@ -248,7 +252,9 @@ type NativeResult = std::result::Result<(), NativeHalt>;
 /// [`crate::dispatch`] tests the implementation's `visit_*` methods in source
 /// order. Borrowed node arguments use refcount-free subtype checks, owned
 /// FFI-compatible arguments use exact value casts, and `&VisitValue` is a
-/// catch-all. `None` asks the Rust walker to continue normally.
+/// catch-all. `None` reports that no handler matched: a standalone walk then
+/// advances normally, while a tuple chain hands the value to the next link —
+/// so a spliced visitor that "handled" a value must not return `None`.
 ///
 /// This is the observer layer, mirroring C++ `StructuralWalk` callbacks: the
 /// walker owns recursion, and a handler steers it only through the returned
@@ -292,12 +298,23 @@ impl<V: VisitDispatch> VisitDispatch for &mut V {
 ///   `FnMut(&VisitValue)`, typed `FnMut(T)`, node `FnMut(&N)`, each with an
 ///   optional trailing [`DefRegionKind`] argument — the analog of a single
 ///   C++ callback. Values a typed closure does not match advance normally.
-/// * A tuple of typed links `(link1, link2, ...)` — the analog of the C++
-///   variadic callback chain; see [`WalkChainLink`] for the accepted link
-///   shapes.
+/// * A tuple of typed links `(link1, link2, ...)`, up to 8 — the analog of
+///   the C++ variadic callback chain; see [`WalkChainLink`] for the
+///   accepted link shapes. Larger handler sets belong in one
+///   `#[dispatch(visit)]` visitor, which itself splices into a tuple as a
+///   single link.
 ///
 /// Closure arguments usually need explicit type annotations
 /// (`|value: &VisitValue| ...`) for the marker to be inferred.
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` is not a supported `structural_walk` walker",
+    note = "accepted walkers: `&mut V` where `V: VisitDispatch`; a closure over `&VisitValue`, \
+            an FFI value type `T`, or `&N` of an object node type (`N: ObjectCore`, e.g. \
+            `&Object`), optionally with a trailing `DefRegionKind` argument; or a tuple of \
+            up to 8 such links",
+    note = "closure arguments need explicit type annotations; ObjectRef wrappers like `String` \
+            or `Array<T>` are FFI value types — take them by value, not by reference"
+)]
 pub trait IntoWalker<Marker> {
     #[doc(hidden)]
     type Walker: NativeVisit;
@@ -415,19 +432,29 @@ where
 /// One typed link of a tuple walker — a single callback of the C++ variadic
 /// `StructuralWalk(root, callbacks...)` chain.
 ///
-/// A tuple of links passed to [`structural_walk`] is tried in order and the
-/// first link whose argument type matches the value runs, exactly like the
-/// C++ callback chain and the Python `(type, callback)` entries. Accepted
-/// link shapes mirror `#[dispatch(visit)]` handlers:
+/// A tuple of up to 8 links passed to [`structural_walk`] is tried in order
+/// and the first link whose argument type matches the value runs, exactly
+/// like the C++ callback chain. (Python's `structural_walk` differs on one
+/// point: it keeps `callbacks` and `with_def_region_kind` as two separately
+/// ordered groups, trying every plain entry before any kind-taking entry,
+/// so a mixed Rust tuple's single interleaved order has no exact Python
+/// equivalent.) Accepted link shapes mirror `#[dispatch(visit)]` handlers:
 ///
 /// * `FnMut(T) -> impl IntoVisitResult` for an FFI-convertible `T` — exact
-///   value cast via [`VisitValue::cast`].
+///   value cast via [`VisitValue::cast`]. Exact includes the value itself:
+///   a numeric link matches only losslessly representable values, so an
+///   `Int(300)` falls through a `u8` link to the next one rather than
+///   truncating.
 /// * `FnMut(&N) -> impl IntoVisitResult` for an object node `N` —
 ///   refcount-free subtype check via [`VisitValue::as_node`].
-/// * `FnMut(&VisitValue) -> impl IntoVisitResult` — catch-all; place it
-///   last, links after it never run.
+/// * `FnMut(&VisitValue) -> impl IntoVisitResult` — catch-all.
 /// * `&mut V` where `V: VisitDispatch` — splice a typed visitor into the
-///   chain.
+///   chain; it claims every value one of its handlers matches.
+///
+/// Links after one that matches every value never run: place a catch-all
+/// closure — or a spliced visitor whose own chain ends in a `&VisitValue`
+/// handler — last. Unlike the in-visitor ordering check, misordering a
+/// tuple is not a compile error.
 ///
 /// Every closure shape may declare a trailing [`DefRegionKind`] argument,
 /// and a single typed closure may also be passed to [`structural_walk`]
@@ -436,7 +463,10 @@ where
 /// so state shared across links goes through a `Cell`/`RefCell` — or in a
 /// single `#[dispatch(visit)]` visitor, which shares `&mut self` between
 /// its handlers.
-pub trait WalkChainLink<Marker> {
+///
+/// This trait is sealed: the link shapes above are the complete set, and
+/// the dispatch method is an internal detail.
+pub trait WalkChainLink<Marker>: sealed::SealedLink<Marker> {
     /// Run this link if `value` matches its argument type; `None` hands the
     /// value to the next link.
     #[doc(hidden)]
@@ -445,6 +475,52 @@ pub trait WalkChainLink<Marker> {
         value: &VisitValue,
         def_region_kind: DefRegionKind,
     ) -> Option<VisitResult>;
+}
+
+mod sealed {
+    use super::{DefRegionKind, IntoVisitResult, ObjectCore, VisitDispatch, VisitValue};
+
+    /// Seal for [`super::WalkChainLink`]: one impl per accepted link shape,
+    /// mirroring the `WalkChainLink` impl set exactly.
+    pub trait SealedLink<Marker> {}
+
+    impl<F, T, O> SealedLink<super::ByOwnedLink<T>> for F
+    where
+        F: FnMut(T) -> O,
+        O: IntoVisitResult,
+    {
+    }
+    impl<F, T, O> SealedLink<super::ByOwnedKindLink<T>> for F
+    where
+        F: FnMut(T, DefRegionKind) -> O,
+        O: IntoVisitResult,
+    {
+    }
+    impl<F, N: ObjectCore, O> SealedLink<super::ByNodeLink<N>> for F
+    where
+        F: for<'a> FnMut(&'a N) -> O,
+        O: IntoVisitResult,
+    {
+    }
+    impl<F, N: ObjectCore, O> SealedLink<super::ByNodeKindLink<N>> for F
+    where
+        F: for<'a> FnMut(&'a N, DefRegionKind) -> O,
+        O: IntoVisitResult,
+    {
+    }
+    impl<F, O> SealedLink<super::ByCatchAllLink> for F
+    where
+        F: for<'a> FnMut(&'a VisitValue) -> O,
+        O: IntoVisitResult,
+    {
+    }
+    impl<F, O> SealedLink<super::ByCatchAllKindLink> for F
+    where
+        F: for<'a> FnMut(&'a VisitValue, DefRegionKind) -> O,
+        O: IntoVisitResult,
+    {
+    }
+    impl<V: VisitDispatch> SealedLink<super::ByDispatchLink> for &mut V {}
 }
 
 #[doc(hidden)]

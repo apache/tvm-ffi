@@ -217,11 +217,12 @@ structural_walk(&values, &mut probe, WalkOrder::PreOrder)?;
 assert_eq!(probe.total, 6);
 ```
 
-Lambdas also work — pass a single typed lambda, or a tuple of them tried in
-order with the first matching argument type winning, like the variadic C++
-`StructuralWalk(root, callbacks...)` chain. Unmatched values simply advance
-(a `&VisitValue` lambda acts as a catch-all), and each lambda may take a
-trailing `DefRegionKind` argument:
+Lambdas also work — pass a single typed lambda, or a tuple of them (up to 8)
+tried in order with the first matching argument type winning, like the
+variadic C++ `StructuralWalk(root, callbacks...)` chain. Unmatched values
+simply advance; a `&VisitValue` lambda acts as a catch-all and must come
+last, since links after an always-matching one never run. Each lambda may
+take a trailing `DefRegionKind` argument:
 
 ```rust
 use tvm_ffi::{structural_walk, Array, DefRegionKind, Object, WalkOrder, WalkResult};
@@ -260,9 +261,34 @@ structural_walk(
 assert_eq!((evens, objects), (1, 1));
 ```
 
+Both entry points return `Result<Option<VisitInterrupt>>`: `Ok(None)` means
+the whole graph was visited, and a handler stops the walk early by returning
+`WalkResult::interrupt_with(payload)`, which comes back to the caller as
+`Ok(Some(interrupt))`. Handlers may also return `Result<WalkResult>` and
+propagate errors with `?`:
+
+```rust
+use tvm_ffi::{structural_walk, Array, WalkOrder, WalkResult};
+
+let values = Array::new(vec![1_i64, 2, 3]);
+let found = structural_walk(
+    &values,
+    |value: i64| {
+        if value == 2 {
+            return WalkResult::interrupt_with(value);
+        }
+        WalkResult::Advance
+    },
+    WalkOrder::PreOrder,
+)?;
+assert_eq!(found.map(|i| i64::try_from(i.value).unwrap()), Some(2));
+```
+
 To drive recursion yourself, implement `StructuralVisitor` and call
 `structural_visit`; `visit` runs for each value and descends through
-`default_visit_children` (or `visit_child` for selected children):
+`default_visit_children`, or through `visit_child`, which visits one
+selected child and can override the def-region state for it (e.g.
+`DefRegionKind::Recursive` when descending into a binder's parameters):
 
 ```rust
 use tvm_ffi::{
@@ -294,6 +320,13 @@ let mut depth = Depth::default();
 structural_visit(&values, &mut depth)?;
 assert_eq!(depth.max, 2);
 ```
+
+Two safety notes: mutable `List`/`Dict` contents are snapshotted before
+callbacks run, so mutation during traversal cannot invalidate the walk; and
+a non-container type with a foreign `__s_visit__` hook is rejected rather
+than silently walked through reflection — visit such a type's children
+explicitly from a `StructuralVisitor`, or skip it with a pre-order
+`WalkResult::Skip`.
 
 ## Examples
 
