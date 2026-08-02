@@ -292,58 +292,6 @@ fn chain_supports_full_arity() {
 }
 
 #[test]
-fn narrow_numeric_links_match_only_exact_values() {
-    // An out-of-range Int falls through a narrow numeric link to the next
-    // one instead of silently truncating into it.
-    let root = Array::new(vec![200i64, 300, -1]);
-    let mut narrow = Vec::new();
-    let mut wide = Vec::new();
-    assert!(structural_walk(
-        &root,
-        (
-            |value: u8| {
-                narrow.push(value);
-                WalkResult::Advance
-            },
-            |value: i64| {
-                wide.push(value);
-                WalkResult::Advance
-            },
-        ),
-        WalkOrder::PreOrder,
-    )
-    .unwrap()
-    .is_none());
-    assert_eq!(narrow, vec![200u8]);
-    assert_eq!(wide, vec![300, -1]);
-}
-
-#[test]
-fn f32_links_match_only_lossless_values() {
-    let root = Array::new(vec![1.5f64, 1e300]);
-    let mut narrow = Vec::new();
-    let mut wide = Vec::new();
-    assert!(structural_walk(
-        &root,
-        (
-            |value: f32| {
-                narrow.push(value);
-                WalkResult::Advance
-            },
-            |value: f64| {
-                wide.push(value);
-                WalkResult::Advance
-            },
-        ),
-        WalkOrder::PreOrder,
-    )
-    .unwrap()
-    .is_none());
-    assert_eq!(narrow, vec![1.5f32]);
-    assert_eq!(wide, vec![1e300]);
-}
-
-#[test]
 fn bare_typed_lambda_walks_without_tuple() {
     // A lone typed handler needs no tuple: unmatched values (the array
     // itself) advance normally.

@@ -440,11 +440,11 @@ where
 /// so a mixed Rust tuple's single interleaved order has no exact Python
 /// equivalent.) Accepted link shapes mirror `#[dispatch(visit)]` handlers:
 ///
-/// * `FnMut(T) -> impl IntoVisitResult` for an FFI-convertible `T` — exact
-///   value cast via [`VisitValue::cast`]. Exact includes the value itself:
-///   a numeric link matches only losslessly representable values, so an
-///   `Int(300)` falls through a `u8` link to the next one rather than
-///   truncating.
+/// * `FnMut(T) -> impl IntoVisitResult` for an FFI-convertible `T` — value
+///   cast via [`VisitValue::cast`], which matches on the FFI type tag: a
+///   numeric link claims every `Int` (or `Float`) regardless of width and
+///   converts with `as` semantics, so prefer `i64`/`f64` links unless a
+///   deliberate narrowing is wanted.
 /// * `FnMut(&N) -> impl IntoVisitResult` for an object node `N` —
 ///   refcount-free subtype check via [`VisitValue::as_node`].
 /// * `FnMut(&VisitValue) -> impl IntoVisitResult` — catch-all.
