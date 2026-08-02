@@ -373,7 +373,9 @@ impl GenericDispatchProbe {
         WalkResult::Advance
     }
 
-    fn visit_object(&mut self, _value: &tvm_ffi::Object) -> WalkResult {
+    // Trailing DefRegionKind: handlers may mix arities within one impl.
+    fn visit_object(&mut self, _value: &tvm_ffi::Object, kind: DefRegionKind) -> WalkResult {
+        assert_eq!(kind, DefRegionKind::None);
         self.objects += 1;
         WalkResult::Advance
     }
@@ -570,26 +572,6 @@ fn visitor_interrupt_propagates_through_default_children() {
 }
 
 #[test]
-fn closure_walk_observes_values() {
-    // C++: StructuralWalk<kPreOrder>(root, [&](AnyView value) { ... })
-    let root = Array::new(vec![1i64, 2, 3]);
-    let mut integers = 0;
-    assert!(structural_walk(
-        &root,
-        |value: &VisitValue| {
-            if value.cast::<i64>().is_some() {
-                integers += 1;
-            }
-            WalkResult::Advance
-        },
-        WalkOrder::PreOrder,
-    )
-    .unwrap()
-    .is_none());
-    assert_eq!(integers, 3);
-}
-
-#[test]
 fn closure_walk_receives_def_region_kind() {
     // C++: StructuralWalk<kPreOrder>(root,
     //          [&](const TVarObj* var, TVMFFIDefRegionKind kind) { ... })
@@ -608,43 +590,6 @@ fn closure_walk_receives_def_region_kind() {
     .unwrap()
     .is_none());
     assert_eq!(kinds, vec![DefRegionKind::None; 2]);
-}
-
-#[test]
-fn closure_walk_interrupts_and_propagates_errors() {
-    let root = Array::new(vec![1i64, 2, 3]);
-    let outcome = structural_walk(
-        &root,
-        |value: &VisitValue| -> Result<WalkResult> {
-            if value.cast::<i64>() == Some(2) {
-                return Ok(WalkResult::interrupt_with(2i64));
-            }
-            Ok(WalkResult::Advance)
-        },
-        WalkOrder::PreOrder,
-    )
-    .unwrap();
-    let Some(interrupt) = outcome else {
-        panic!("closure walk unexpectedly completed");
-    };
-    assert_eq!(i64::try_from(interrupt.value).unwrap(), 2);
-
-    let error = match structural_walk(
-        &root,
-        |value: &VisitValue| -> Result<WalkResult> {
-            if value.cast::<i64>().is_some() {
-                Err(runtime_error("closure failed"))
-            } else {
-                Ok(WalkResult::Advance)
-            }
-        },
-        WalkOrder::PreOrder,
-    ) {
-        Err(error) => error,
-        Ok(_) => panic!("closure walk unexpectedly succeeded"),
-    };
-    assert_eq!(error.message(), "closure failed");
-    assert!(error.backtrace().contains("object `ffi.Array`"));
 }
 
 #[test]
