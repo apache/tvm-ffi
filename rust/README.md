@@ -31,22 +31,29 @@ efficiency while maintaining interoperability.
 ## Structural Visitors and Walkers
 
 The `tvm-ffi` crate provides native Rust structural traversal over FFI values,
-built-in containers, and reflected object fields, split into the same two
-layers as the C++ API:
+built-in containers, and reflected object fields, mirroring the two layers of
+the C++ API:
 
 - **Walk layer (observer)** — `structural_walk`, the analog of C++
-  `StructuralWalk`: the walker owns recursion; handlers observe each value
-  and steer traversal by returning a `WalkResult`.
+  `StructuralWalk`: the walker owns recursion; handlers observe each value in
+  pre- or post-order (`WalkOrder`) and steer traversal through the returned
+  `WalkResult` (`Advance`, `Skip`, `Interrupt`/`InterruptWith`).
 - **Visitor layer (user-driven)** — `structural_visit` with a
-  `StructuralVisitor`, the analog of a hand-written C++
-  `StructuralVisitorObj`: your `visit` method runs for the root and then
-  controls all recursion itself.
+  `StructuralVisitor`, the analog of a C++ `StructuralVisitorObj`: your
+  `visit` method runs for the root and controls all recursion itself.
+
+Every traversal returns `Result<Option<VisitInterrupt>>`: `Ok(None)` means
+the whole graph was visited, `Ok(Some(interrupt))` carries an interrupting
+handler's payload. Handlers may also return `Result<WalkResult>` to propagate
+errors with `?`.
 
 ### Observer walks
 
-`#[dispatch(visit)]` turns the `visit_*` methods in an inherent
-implementation into a typed, stateful observer. Each value is automatically
-dispatched to the handler matching its runtime type:
+`#[dispatch(visit)]` turns the `visit_*` methods of an inherent impl into a
+typed, stateful observer. Each value dispatches to the first handler matching
+its runtime type (a `&VisitValue` handler acts as the catch-all); a handler
+that needs the definition-region state declares a trailing `DefRegionKind`
+argument:
 
 ```rust
 use tvm_ffi::{dispatch, structural_walk, Array, WalkOrder, WalkResult};
@@ -77,56 +84,16 @@ assert!(structural_walk(&values, &mut calculator, WalkOrder::PreOrder)
 assert_eq!(calculator.value, 12.0);
 ```
 
-Typed handlers are tested in source order: borrowed `ObjectCore` node types use
-runtime subtype checks, owned arguments use `AnyCompatible` casts, and a final
-`&VisitValue` handler acts as a catch-all. A handler that needs the
-definition-region state declares a trailing `DefRegionKind` argument and the
-generated dispatch forwards it by arity — the analog of a C++ `StructuralWalk`
-callback accepting `(value, def_region_kind)` instead of `(value)`.
-`WalkOrder` selects pre-order or post-order dispatch.
-
-`structural_walk` also accepts a bare closure — a catch-all observer taking
-`&VisitValue` with an optional trailing `DefRegionKind`, mirroring the C++
-callback overloads (annotate the closure arguments so the handler shape can
-be inferred):
-
-```rust
-use tvm_ffi::{structural_walk, Array, VisitValue, WalkOrder, WalkResult};
-
-let values = Array::new(vec![1_i64, 2, 3]);
-let mut integers = 0;
-assert!(structural_walk(
-    &values,
-    |value: &VisitValue| {
-        if value.cast::<i64>().is_some() {
-            integers += 1;
-        }
-        WalkResult::Advance
-    },
-    WalkOrder::PreOrder,
-)
-.unwrap()
-.is_none());
-assert_eq!(integers, 3);
-```
-
-`WalkResult::Advance` visits container or reflected children, `Skip` suppresses
-the current value's default recursion, and `Interrupt`/`InterruptWith` halt the
-walk. Every traversal returns `Result<Option<VisitInterrupt>>`, matching the
-C++ `Expected<Optional<VisitInterrupt>>`: `Ok(None)` means the whole graph was
-visited, `Ok(Some(interrupt))` carries the interrupting handler's payload.
-Handlers and callbacks may also return `Result<WalkResult>` to propagate
-errors with `?`.
+`structural_walk` also accepts a bare closure taking `&VisitValue` (with an
+optional trailing `DefRegionKind`) as a catch-all observer.
 
 ### User-driven visitors
 
 When traversal itself is part of the analysis — visiting selected children,
 custom orders, definition-region overrides — implement `StructuralVisitor`.
-`visit` receives each value with its definition-region state and descends only
-where it chooses: `default_visit_children` delegates the default child
-recursion (the analog of C++ `DefaultVisitExpected`), and `visit_child` visits
-one child under an explicit state (the analog of `Visit` under
-`WithDefRegionKind`):
+`visit` receives each value with its definition-region state and descends
+only where it chooses: `default_visit_children` delegates the default child
+recursion, and `visit_child` visits one child under an explicit state:
 
 ```rust,ignore
 use tvm_ffi::{DefRegionKind, Result, StructuralVisitor, VisitInterrupt, VisitValue};
@@ -151,18 +118,10 @@ impl StructuralVisitor for FuncVisitor {
 }
 ```
 
-Returning without descending skips a value's children;
-`Ok(Some(VisitInterrupt))` halts the traversal. Nested
-`visit_child`/`default_visit_children` calls report a nested interrupt through
-their return value — propagate it (and errors, via `?`) instead of dropping
-the result.
-
 Recursion runs natively in Rust; no C++ visitor is constructed. Mutable
-`List`/`Dict` contents are snapshotted before callbacks run, so re-entrant
-mutation cannot invalidate a traversal. A non-container type that registers a
-foreign `__s_visit__` hook is rejected rather than silently walked through
-reflection; visit its children explicitly from a `StructuralVisitor`, or skip
-it in a walk with a pre-order `WalkResult::Skip` handler.
+`List`/`Dict` contents are snapshotted before callbacks run, and a
+non-container type with a foreign `__s_visit__` hook is rejected rather than
+silently walked through reflection.
 
 ## Installation
 
