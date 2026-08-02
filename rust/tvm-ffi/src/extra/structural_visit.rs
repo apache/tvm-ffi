@@ -247,44 +247,11 @@ impl From<Error> for NativeHalt {
 
 type NativeResult = std::result::Result<(), NativeHalt>;
 
-/// Typed dispatch implemented by a walk-layer observer.
-///
-/// [`crate::dispatch`] tests the implementation's `visit_*` methods in source
-/// order. Borrowed node arguments use refcount-free subtype checks, owned
-/// FFI-compatible arguments use exact value casts, and `&VisitValue` is a
-/// catch-all. `None` reports that no handler matched: a standalone walk then
-/// advances normally, while a tuple chain hands the value to the next link —
-/// so a spliced visitor that "handled" a value must not return `None`.
-///
-/// This is the observer layer, mirroring C++ `StructuralWalk` callbacks: the
-/// walker owns recursion, and a handler steers it only through the returned
-/// [`WalkResult`]. A traversal that must visit children itself — selected
-/// children, custom orders, explicit definition-region overrides — belongs in
-/// a [`StructuralVisitor`] instead.
-///
-/// The definition-region state active at the dispatched value arrives as the
-/// `def_region_kind` argument. A `#[dispatch(visit)]` handler opts into it by
-/// declaring a trailing `DefRegionKind` parameter — the analog of a C++
-/// `StructuralWalk` callback accepting `(value, def_region_kind)` instead of
-/// `(value)`.
-pub trait VisitDispatch: Sized {
-    fn dispatch_visit(
-        &mut self,
-        value: &VisitValue,
-        def_region_kind: DefRegionKind,
-    ) -> Option<VisitResult>;
-}
-
-impl<V: VisitDispatch> VisitDispatch for &mut V {
-    #[inline]
-    fn dispatch_visit(
-        &mut self,
-        value: &VisitValue,
-        def_region_kind: DefRegionKind,
-    ) -> Option<VisitResult> {
-        (**self).dispatch_visit(value, def_region_kind)
-    }
-}
+// The typed-dispatch layer (`VisitDispatch`, its walker adapter, and the
+// `&mut V` IntoWalker form) lives in `super::dispatch`; re-exported here so
+// the module's public paths — which `#[dispatch(visit)]`-generated code
+// names — stay stable.
+pub use super::dispatch::{ByDispatch, DispatchVisitor, VisitDispatch};
 
 /// Conversion into the walker argument of [`structural_walk`].
 ///
@@ -320,19 +287,6 @@ pub trait IntoWalker<Marker> {
     type Walker: NativeVisit;
     #[doc(hidden)]
     fn into_walker(self, order: WalkOrder) -> Self::Walker;
-}
-
-#[doc(hidden)]
-pub enum ByDispatch {}
-
-impl<'a, V: VisitDispatch> IntoWalker<ByDispatch> for &'a mut V {
-    type Walker = DispatchVisitor<&'a mut V>;
-    fn into_walker(self, order: WalkOrder) -> Self::Walker {
-        DispatchVisitor {
-            visitor: self,
-            order,
-        }
-    }
 }
 
 /// Runs a catch-all closure at the phase selected by `order` — the closure
@@ -893,37 +847,6 @@ pub trait NativeVisit {
 
     fn exit(&mut self, _value: &VisitValue, _def_region_kind: DefRegionKind) -> Result<WalkResult> {
         Ok(WalkResult::Advance)
-    }
-}
-
-/// Owns its walker so a closure's state stays inline and a `&mut` visitor
-/// keeps a single level of indirection. Public only as an
-/// [`IntoWalker::Walker`] projection.
-#[doc(hidden)]
-pub struct DispatchVisitor<V> {
-    visitor: V,
-    order: WalkOrder,
-}
-
-impl<V: VisitDispatch> NativeVisit for DispatchVisitor<V> {
-    fn enter(&mut self, value: &VisitValue, def_region_kind: DefRegionKind) -> Result<WalkResult> {
-        match self.order {
-            WalkOrder::PreOrder => self
-                .visitor
-                .dispatch_visit(value, def_region_kind)
-                .unwrap_or(Ok(WalkResult::Advance)),
-            WalkOrder::PostOrder => Ok(WalkResult::Advance),
-        }
-    }
-
-    fn exit(&mut self, value: &VisitValue, def_region_kind: DefRegionKind) -> Result<WalkResult> {
-        match self.order {
-            WalkOrder::PreOrder => Ok(WalkResult::Advance),
-            WalkOrder::PostOrder => self
-                .visitor
-                .dispatch_visit(value, def_region_kind)
-                .unwrap_or(Ok(WalkResult::Advance)),
-        }
     }
 }
 
@@ -1767,10 +1690,7 @@ mod tests {
     #[test]
     fn reflected_field_def_region_reaches_typed_handler() {
         let mut probe = TypedRegionProbe::default();
-        let mut dispatch = DispatchVisitor {
-            visitor: &mut probe,
-            order: WalkOrder::PreOrder,
-        };
+        let mut dispatch = (&mut probe).into_walker(WalkOrder::PreOrder);
         let mut value = Any::from(7i64);
         let mut field: TVMFFIFieldInfo = unsafe { std::mem::zeroed() };
         field.name = unsafe { TVMFFIByteArray::from_str("value") };
