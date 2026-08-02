@@ -986,15 +986,16 @@ fn visit_raw<V: NativeVisit>(
     }
 
     let visit_value = VisitValue::from_raw(value);
-    let enter = match visitor.enter(&visit_value, def_region_kind) {
-        Ok(flow) => flow,
+    // Single by-value matches: splitting the Result match from the
+    // WalkResult match leaves a partially-moved temporary whose drop glue
+    // the compiler cannot fold away (measurably so on the container fast
+    // path).
+    match visitor.enter(&visit_value, def_region_kind) {
+        Ok(WalkResult::Advance) => {}
+        Ok(WalkResult::Skip) => return Ok(()),
+        Ok(WalkResult::Interrupt) => return Err(NativeHalt::Interrupt(Any::new())),
+        Ok(WalkResult::InterruptWith(payload)) => return Err(NativeHalt::Interrupt(payload)),
         Err(error) => return Err(with_value_context(error.into(), value)),
-    };
-    match enter {
-        WalkResult::Advance => {}
-        WalkResult::Skip => return Ok(()),
-        WalkResult::Interrupt => return Err(NativeHalt::Interrupt(Any::new())),
-        WalkResult::InterruptWith(payload) => return Err(NativeHalt::Interrupt(payload)),
     }
 
     let children = &mut WalkChildren {
@@ -1004,14 +1005,11 @@ fn visit_raw<V: NativeVisit>(
         return Err(with_value_context(halt, value));
     }
 
-    let exit = match visitor.exit(&visit_value, def_region_kind) {
-        Ok(flow) => flow,
-        Err(error) => return Err(with_value_context(error.into(), value)),
-    };
-    match exit {
-        WalkResult::Interrupt => Err(NativeHalt::Interrupt(Any::new())),
-        WalkResult::InterruptWith(payload) => Err(NativeHalt::Interrupt(payload)),
-        WalkResult::Advance | WalkResult::Skip => Ok(()),
+    match visitor.exit(&visit_value, def_region_kind) {
+        Ok(WalkResult::Interrupt) => Err(NativeHalt::Interrupt(Any::new())),
+        Ok(WalkResult::InterruptWith(payload)) => Err(NativeHalt::Interrupt(payload)),
+        Ok(WalkResult::Advance | WalkResult::Skip) => Ok(()),
+        Err(error) => Err(with_value_context(error.into(), value)),
     }
 }
 
@@ -1284,33 +1282,44 @@ unsafe fn visit_reflected_field<C: ChildVisit>(
         .map_err(|halt| with_error_context(halt, &format!("field `{}`", field.name.as_str())))
 }
 
+// Runs once per visited value: keep the no-hook fast path small enough to
+// actually inline (one cached-column load and a tag compare) and the error
+// formatting out of line — with the cold body inside, the `#[inline]` hint
+// was declined and the call cost ~20% of the container fast path.
 #[inline]
 fn reject_foreign_structural_visit(type_index: i32) -> Result<()> {
     let Some(attr) = structural_visit_column().and_then(|column| column.get(type_index)) else {
         return Ok(());
     };
-    match attr.type_index {
-        x if x == TVMFFITypeIndex::kTVMFFINone as i32 => Ok(()),
-        x if x == TVMFFITypeIndex::kTVMFFIOpaquePtr as i32
-            || x == TVMFFITypeIndex::kTVMFFIFunction as i32 =>
-        {
-            let value_type = if type_index < TVMFFITypeIndex::kTVMFFIStaticObjectBegin as i32 {
-                format!("type index {type_index}")
-            } else {
-                format!("type `{}`", type_key_of(type_index))
-            };
-            Err(runtime_error(&format!(
-                "native visitor: {value_type} registers foreign `{STRUCTURAL_VISIT_ATTR}`; \
-                     visit its children explicitly from a `StructuralVisitor` \
-                     (`structural_visit`), or skip it with a pre-order `WalkResult::Skip` \
-                     handler"
-            )))
-        }
-        _ => Err(Error::new(
+    if attr.type_index == TVMFFITypeIndex::kTVMFFINone as i32 {
+        return Ok(());
+    }
+    reject_foreign_structural_visit_cold(type_index, attr.type_index)
+}
+
+#[cold]
+#[inline(never)]
+fn reject_foreign_structural_visit_cold(type_index: i32, attr_type_index: i32) -> Result<()> {
+    if attr_type_index == TVMFFITypeIndex::kTVMFFIOpaquePtr as i32
+        || attr_type_index == TVMFFITypeIndex::kTVMFFIFunction as i32
+    {
+        let value_type = if type_index < TVMFFITypeIndex::kTVMFFIStaticObjectBegin as i32 {
+            format!("type index {type_index}")
+        } else {
+            format!("type `{}`", type_key_of(type_index))
+        };
+        Err(runtime_error(&format!(
+            "native visitor: {value_type} registers foreign `{STRUCTURAL_VISIT_ATTR}`; \
+                 visit its children explicitly from a `StructuralVisitor` \
+                 (`structural_visit`), or skip it with a pre-order `WalkResult::Skip` \
+                 handler"
+        )))
+    } else {
+        Err(Error::new(
             TYPE_ERROR,
             &format!("{STRUCTURAL_VISIT_ATTR} must be an opaque function pointer or ffi.Function"),
             "",
-        )),
+        ))
     }
 }
 
