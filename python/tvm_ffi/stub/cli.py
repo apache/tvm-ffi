@@ -35,7 +35,7 @@ from .lib_state import (
     object_info_from_type_key,
     toposort_objects,
 )
-from .utils import FuncInfo, InitConfig, Options
+from .utils import FuncInfo, InitConfig, Options, UnsupportedTypeError
 
 if TYPE_CHECKING:
     from .generator import Generator
@@ -94,13 +94,7 @@ def __main__() -> int:
         if opt.verbose:
             print(f"{C.TERM_CYAN}[File] {file.path}{C.TERM_RESET}")
         try:
-            _stage_3(
-                file,
-                opt,
-                ty_map,
-                global_funcs,
-                generator=generator,
-            )
+            _stage_3(file, opt, ty_map, global_funcs, generator=generator)
         except Exception:
             print(
                 f'{C.TERM_RED}[Failed] File "{file.path}": {traceback.format_exc()}{C.TERM_RESET}'
@@ -240,8 +234,15 @@ def _stage_3(  # noqa: PLR0912
             assert isinstance(type_key, str)
             obj_info = object_info_from_type_key(type_key)
             type_key = ty_map.get(type_key, type_key)
+            try:
+                generator.generate_object_block(code, ty_map, imports, opt, obj_info)
+            except UnsupportedTypeError as e:
+                # Reset to bare markers and do NOT count the type as defined:
+                # another object referencing it must keep its import.
+                code.lines = [code.lines[0], code.lines[-1]]
+                print(f"{C.TERM_YELLOW}[Skipped] object {type_key}: {e}{C.TERM_RESET}")
+                continue
             defined_types.add(generator.canonical_type_name(type_key))
-            generator.generate_object_block(code, ty_map, imports, opt, obj_info)
     # Stage 4. Add imports for used types.
     for code in file.code_blocks:
         if code.kind == "import-section":
@@ -347,16 +348,16 @@ def _parse_args() -> Options:
         metavar="PATH",
         help=(
             "Files or directories to process. Directories are scanned recursively; "
-            "only .py and .pyi files are modified. Use tvm-ffi-stubgen directives to "
-            "select where stubs are generated."
+            "only .py, .pyi (Python) and .rs (Rust) files are modified. Use "
+            "tvm-ffi-stubgen directives to select where stubs are generated."
         ),
     )
     parser.add_argument(
         "--target",
         type=str,
         default="python",
-        choices=["python"],
-        help="Code generator target.",
+        choices=["python", "rust"],
+        help="Code generator target: 'python' (default) or 'rust'.",
     )
     parser.add_argument(
         "--verbose",
