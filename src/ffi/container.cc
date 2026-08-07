@@ -104,6 +104,11 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::EnsureTypeAttrColumn(refl::type_attr::kAnyHash);
   refl::EnsureTypeAttrColumn(refl::type_attr::kAnyEqual);
+  // Rust structural mutation supports hooks registered after process startup.
+  // Keeping the empty columns alive lets its hot-path lookup cache stable
+  // column addresses without caching a transient "not registered" result.
+  refl::EnsureTypeAttrColumn(refl::type_attr::kStructuralMutate);
+  refl::EnsureTypeAttrColumn(refl::type_attr::kStructuralMaybeInplaceMutate);
   refl::GlobalDef()
       .def_packed("ffi.Array",
                   [](ffi::PackedArgs args, Any* ret) {
@@ -185,6 +190,10 @@ TVM_FFI_STATIC_INIT_BLOCK() {
                   })
       .def("ffi.MapSize",
            [](const ffi::MapObj* n) -> int64_t { return static_cast<int64_t>(n->size()); })
+      .def("ffi.MapShallowCopy",
+           [](const ffi::MapObj* n) -> ffi::Map<Any, Any> {
+             return ffi::Map<Any, Any>(ffi::MapObj::ShallowCopy(n));
+           })
       .def("ffi.MapGetItem", [](const ffi::MapObj* n, const Any& k) -> Any { return n->at(k); })
       .def("ffi.MapCount",
            [](const ffi::MapObj* n, const Any& k) -> int64_t {
@@ -213,6 +222,10 @@ TVM_FFI_STATIC_INIT_BLOCK() {
                   })
       .def("ffi.DictSize",
            [](const ffi::DictObj* n) -> int64_t { return static_cast<int64_t>(n->size()); })
+      .def("ffi.DictShallowCopy",
+           [](const ffi::DictObj* n) -> ffi::Dict<Any, Any> {
+             return ffi::Dict<Any, Any>(ffi::DictObj::ShallowCopy(n));
+           })
       .def("ffi.DictGetItem", [](const ffi::DictObj* n, const Any& k) -> Any { return n->at(k); })
       .def("ffi.DictSetItem",
            [](ffi::Dict<Any, Any> d, const Any& k, const Any& v) -> void { d.Set(k, v); })

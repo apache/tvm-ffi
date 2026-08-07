@@ -498,6 +498,21 @@ inline constexpr const char* kSEqual = "__s_equal__";
  */
 inline constexpr const char* kStructuralVisit = "__s_visit__";
 /*!
+ * \brief Custom structural mutation hook used by native structural mutators.
+ *
+ * The hook receives the active mutator and the input value. It should recursively mutate structural
+ * children through the mutator, return the input unchanged if no fields are changed, and avoid
+ * intentionally mutating the source object.
+ */
+inline constexpr const char* kStructuralMutate = "__s_mutate__";
+/*!
+ * \brief Optional structural mutation hook that may reuse its input object.
+ *
+ * Callers must invoke this hook only when the input object is uniquely owned and therefore safe to
+ * mutate in place. Types defining this hook must also define \ref kStructuralMutate.
+ */
+inline constexpr const char* kStructuralMaybeInplaceMutate = "__s_maybe_inplace_mutate__";
+/*!
  * \brief Serialize object data to a JSON-compatible value.
  *
  * If registered, ``ToJSONGraph`` calls this instead of the default
