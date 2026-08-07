@@ -168,7 +168,7 @@ class Map : public ObjectRef {
    * \brief constructor from pointer
    * \param n the container pointer
    */
-  explicit Map(ObjectPtr<Object> n) : ObjectRef(n) {}
+  explicit Map(ObjectPtr<Object> n) : ObjectRef(std::move(n)) {}
   /*!
    * \brief constructor from iterator
    * \param begin begin of iterator

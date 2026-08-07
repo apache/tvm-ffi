@@ -173,7 +173,7 @@ class Dict : public ObjectRef {
    * \brief constructor from pointer
    * \param n the container pointer
    */
-  explicit Dict(ObjectPtr<Object> n) : ObjectRef(n) {}
+  explicit Dict(ObjectPtr<Object> n) : ObjectRef(std::move(n)) {}
   /*!
    * \brief constructor from iterator
    * \param begin begin of iterator

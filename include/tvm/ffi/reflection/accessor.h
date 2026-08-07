@@ -509,7 +509,7 @@ inline constexpr const char* kStructuralMutate = "__s_mutate__";
  * \brief Optional structural mutation hook that may reuse its input object.
  *
  * Callers must invoke this hook only when the input object is uniquely owned and therefore safe to
- * mutate in place. Types defining this hook must also define \ref kStructuralMutate.
+ * mutate in place. Types defining this hook must also define \c kStructuralMutate.
  */
 inline constexpr const char* kStructuralMaybeInplaceMutate = "__s_maybe_inplace_mutate__";
 /*!
