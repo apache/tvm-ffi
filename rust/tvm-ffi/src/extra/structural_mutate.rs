@@ -36,6 +36,7 @@ use std::marker::PhantomData;
 use std::ops::{ControlFlow, Deref};
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::LazyLock;
 
 use crate::any::{Any, AnyView};
 use crate::error::{Error, Result, RUNTIME_ERROR, TYPE_ERROR};
@@ -59,6 +60,8 @@ use super::structural_visit::{
 const STRUCTURAL_MUTATE_ATTR: &str = "__s_mutate__";
 const STRUCTURAL_MAYBE_INPLACE_MUTATE_ATTR: &str = "__s_maybe_inplace_mutate__";
 const SHALLOW_COPY_ATTR: &str = "__ffi_shallow_copy__";
+const MAP_SHALLOW_COPY_GLOBAL: &str = "ffi.MapShallowCopy";
+const DICT_SHALLOW_COPY_GLOBAL: &str = "ffi.DictShallowCopy";
 const FLAG_SEQ_HASH_IGNORE: i64 = kTVMFFIFieldFlagBitMaskSEqHashIgnore as i64;
 const FLAG_SETTER_IS_FUNCTION: i64 = kTVMFFIFieldFlagBitSetterIsFunctionObj as i64;
 const MAP_SMALL_TAG: u64 = 1 << 63;
@@ -904,6 +907,37 @@ trait DefaultMutationDriver: Sized {
             }
         }
 
+        // A runtime shallow-copy helper owns the non-trivial Map/Dict object
+        // allocation and deleter contract. Rust still owns recursion and
+        // updates only value cells through the fully validated cursor above.
+        // The helper is optional so a newer crate remains usable with an
+        // older runtime, falling back to the canonical constructors below.
+        if map_layout_usable(raw) {
+            if let (Some(helper), Some((cursor, size))) = (
+                map_shallow_copy_helper(raw.type_index),
+                checked_map_value_cursor(raw),
+            ) {
+                if size == 0 {
+                    return owned_from_raw(raw);
+                }
+                if raw.type_index == TVMFFITypeIndex::kTVMFFIDict as i32 {
+                    return self.map_shared_dict_with_shallow_copy(
+                        raw,
+                        def_region_kind,
+                        size,
+                        helper,
+                    );
+                }
+                return self.map_shared_map_with_shallow_copy(
+                    raw,
+                    def_region_kind,
+                    cursor,
+                    size,
+                    helper,
+                );
+            }
+        }
+
         let mut entries = snapshot_map_entries(raw)?;
         let mut changed = false;
         let kind = if raw.type_index == TVMFFITypeIndex::kTVMFFIDict as i32 {
@@ -925,6 +959,145 @@ trait DefaultMutationDriver: Sized {
             return owned_from_raw(raw);
         }
         construct_map(raw.type_index, &entries)
+    }
+
+    /// Map an immutable shared Map and allocate its output lazily at the first
+    /// changed value. Map storage cannot be invalidated by a callback, so the
+    /// source cursor remains stable for the complete traversal.
+    fn map_shared_map_with_shallow_copy(
+        &mut self,
+        raw: TVMFFIAny,
+        def_region_kind: DefRegionKind,
+        mut source_cursor: MapValueCursor,
+        size: usize,
+        helper: &Function,
+    ) -> Result<Any> {
+        for index in 0..size {
+            let Some(source_cell) = (unsafe { source_cursor.next_value_slot() }) else {
+                return Err(runtime_error(
+                    "native structural map: validated map iteration ended early",
+                ));
+            };
+            let old_raw = unsafe { *source_cell };
+            let mapped = self
+                .recurse_raw(old_raw, def_region_kind, Permit::Copy)
+                .map_err(|error| with_error_context(error, &format!("map value [{index}]")))?;
+            if same_shallow(old_raw, *mapped.as_raw_ffi_any()) {
+                continue;
+            }
+
+            let output = call_map_shallow_copy(raw, helper, "map")?;
+            let output_raw = *output.as_raw_ffi_any();
+            let Some((mut output_cursor, copied_size)) = runtime_copy_map_value_cursor(output_raw)
+            else {
+                return Err(runtime_error(
+                    "native structural map: shallow-copied map has an unusable layout",
+                ));
+            };
+            if copied_size != size {
+                return Err(runtime_error(
+                    "native structural map: shallow-copied map changed size",
+                ));
+            }
+            // Values before the first change remain untouched, but the
+            // output cursor must be aligned with the current source item.
+            for _ in 0..index {
+                if unsafe { output_cursor.next_value_slot() }.is_none() {
+                    return Err(runtime_error(
+                        "native structural map: shallow-copied map iteration ended early",
+                    ));
+                }
+            }
+            let Some(output_cell) = (unsafe { output_cursor.next_value_slot() }) else {
+                return Err(runtime_error(
+                    "native structural map: shallow-copied map iteration ended early",
+                ));
+            };
+            unsafe { replace_owned_cell(output_cell, mapped) };
+
+            // Once the output exists, advance source and output cursors in
+            // lockstep without checking an Option on every remaining item.
+            for remaining_index in index + 1..size {
+                let Some(source_cell) = (unsafe { source_cursor.next_value_slot() }) else {
+                    return Err(runtime_error(
+                        "native structural map: validated map iteration ended early",
+                    ));
+                };
+                let old_raw = unsafe { *source_cell };
+                let mapped = self
+                    .recurse_raw(old_raw, def_region_kind, Permit::Copy)
+                    .map_err(|error| {
+                        with_error_context(error, &format!("map value [{remaining_index}]"))
+                    })?;
+                let Some(output_cell) = (unsafe { output_cursor.next_value_slot() }) else {
+                    return Err(runtime_error(
+                        "native structural map: shallow-copied map iteration ended early",
+                    ));
+                };
+                if !same_shallow(old_raw, *mapped.as_raw_ffi_any()) {
+                    unsafe { replace_owned_cell(output_cell, mapped) };
+                }
+            }
+            if !output_cursor.is_complete() {
+                return Err(runtime_error(
+                    "native structural map: shallow-copied map iteration did not terminate",
+                ));
+            }
+            return Ok(output);
+        }
+        owned_from_raw(raw)
+    }
+
+    /// Map a mutable shared Dict through a private shallow copy made before
+    /// the first callback. The copy is the stable snapshot: a callback may
+    /// re-enter and mutate an alias of the source Dict without invalidating
+    /// this cursor or changing the output's initial key set.
+    fn map_shared_dict_with_shallow_copy(
+        &mut self,
+        raw: TVMFFIAny,
+        def_region_kind: DefRegionKind,
+        size: usize,
+        helper: &Function,
+    ) -> Result<Any> {
+        let output = call_map_shallow_copy(raw, helper, "dict")?;
+        let output_raw = *output.as_raw_ffi_any();
+        let Some((mut cursor, copied_size)) = runtime_copy_map_value_cursor(output_raw) else {
+            return Err(runtime_error(
+                "native structural map: shallow-copied dict has an unusable layout",
+            ));
+        };
+        if copied_size != size {
+            return Err(runtime_error(
+                "native structural map: shallow-copied dict changed size",
+            ));
+        }
+
+        let mut changed = false;
+        for index in 0..size {
+            let Some(cell) = (unsafe { cursor.next_value_slot() }) else {
+                return Err(runtime_error(
+                    "native structural map: shallow-copied dict iteration ended early",
+                ));
+            };
+            let old_raw = unsafe { *cell };
+            let mapped = self
+                .recurse_raw(old_raw, def_region_kind, Permit::Copy)
+                .map_err(|error| with_error_context(error, &format!("dict value [{index}]")))?;
+            if !same_shallow(old_raw, *mapped.as_raw_ffi_any()) {
+                unsafe { replace_owned_cell(cell, mapped) };
+                changed = true;
+            }
+        }
+        if !cursor.is_complete() {
+            return Err(runtime_error(
+                "native structural map: shallow-copied dict iteration did not terminate",
+            ));
+        }
+        if changed {
+            Ok(output)
+        } else {
+            owned_from_raw(raw)
+        }
     }
 
     fn map_reflected(&mut self, raw: TVMFFIAny, def_region_kind: DefRegionKind) -> Result<Any> {
@@ -1329,6 +1502,19 @@ fn checked_map_value_cursor(raw: TVMFFIAny) -> Option<(MapValueCursor, usize)> {
     Some((unsafe { MapValueCursor::new(map)? }, size))
 }
 
+/// Create a cursor for a private object returned by the runtime shallow-copy
+/// helper. The source layout was fully validated before the helper call, and
+/// the helper contract preserves the concrete type, size, and iteration order.
+/// The cursor still checks every slot and its final state while traversing;
+/// unlike `checked_map_value_cursor`, it avoids a redundant full preflight of
+/// an output that has not yet been published.
+fn runtime_copy_map_value_cursor(raw: TVMFFIAny) -> Option<(MapValueCursor, usize)> {
+    let pointer = unsafe { raw.data_union.v_obj };
+    let map = unsafe { pointer.cast::<MapPrefix>().as_ref()? };
+    let size = usize::try_from(map.size).ok()?;
+    Some((unsafe { MapValueCursor::new(map)? }, size))
+}
+
 fn snapshot_map_entries(raw: TVMFFIAny) -> Result<Vec<(Any, Any)>> {
     if map_layout_usable(raw) {
         let pointer = unsafe { raw.data_union.v_obj };
@@ -1409,6 +1595,51 @@ fn construct_map(type_index: i32, entries: &[(Any, Any)]) -> Result<Any> {
         args.push(AnyView::from(value));
     }
     Function::get_global(name)?.call_packed(&args)
+}
+
+fn map_shallow_copy_helper(type_index: i32) -> Option<&'static Function> {
+    static MAP_HELPER: LazyLock<Option<Function>> =
+        LazyLock::new(|| Function::get_global(MAP_SHALLOW_COPY_GLOBAL).ok());
+    static DICT_HELPER: LazyLock<Option<Function>> =
+        LazyLock::new(|| Function::get_global(DICT_SHALLOW_COPY_GLOBAL).ok());
+
+    if type_index == TVMFFITypeIndex::kTVMFFIMap as i32 {
+        MAP_HELPER.as_ref()
+    } else if type_index == TVMFFITypeIndex::kTVMFFIDict as i32 {
+        DICT_HELPER.as_ref()
+    } else {
+        None
+    }
+}
+
+fn call_map_shallow_copy(raw: TVMFFIAny, helper: &Function, kind: &str) -> Result<Any> {
+    let source = owned_from_raw(raw)?;
+    let output = helper
+        .call_packed(&[AnyView::from(&source)])
+        .map_err(|error| with_error_context(error, &format!("{kind} shallow copy")))?;
+    let output_raw = *output.as_raw_ffi_any();
+    if output_raw.type_index != raw.type_index {
+        return Err(Error::new(
+            TYPE_ERROR,
+            &format!("{kind} shallow-copy helper returned a different type"),
+            "",
+        ));
+    }
+    let source_pointer = unsafe { raw.data_union.v_obj };
+    let output_pointer = unsafe { output_raw.data_union.v_obj };
+    if output_pointer.is_null() || output_pointer == source_pointer {
+        return Err(Error::new(
+            TYPE_ERROR,
+            &format!("{kind} shallow-copy helper must return a distinct non-null object"),
+            "",
+        ));
+    }
+    if !object_is_unique(output_raw) {
+        return Err(runtime_error(&format!(
+            "native structural map: {kind} shallow-copy helper returned a shared object"
+        )));
+    }
+    Ok(output)
 }
 
 fn shallow_copy(raw: TVMFFIAny) -> Result<Any> {

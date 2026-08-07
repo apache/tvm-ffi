@@ -301,6 +301,65 @@ impl MapDispatch for IncrementIntegers {
     }
 }
 
+struct PreserveIntegers;
+
+impl MapDispatch for PreserveIntegers {
+    fn dispatch_map(
+        &mut self,
+        value: &MapValue,
+        _def_region_kind: DefRegionKind,
+    ) -> Option<Result<Any>> {
+        value.cast::<i64>().map(|integer| Ok(Any::from(integer)))
+    }
+}
+
+struct ChangeNthInteger {
+    target: usize,
+    seen: usize,
+    changed_value: Option<i64>,
+}
+
+impl MapDispatch for ChangeNthInteger {
+    fn dispatch_map(
+        &mut self,
+        value: &MapValue,
+        _def_region_kind: DefRegionKind,
+    ) -> Option<Result<Any>> {
+        value.cast::<i64>().map(|integer| {
+            let mapped = if self.seen == self.target {
+                self.changed_value = Some(integer);
+                integer + 1
+            } else {
+                integer
+            };
+            self.seen += 1;
+            Ok(Any::from(mapped))
+        })
+    }
+}
+
+struct ClearSourceDictAndIncrement {
+    source: Any,
+    cleared: bool,
+}
+
+impl MapDispatch for ClearSourceDictAndIncrement {
+    fn dispatch_map(
+        &mut self,
+        value: &MapValue,
+        _def_region_kind: DefRegionKind,
+    ) -> Option<Result<Any>> {
+        value.cast::<i64>().map(|integer| {
+            if !self.cleared {
+                Function::get_global("ffi.DictClear")?
+                    .call_packed(&[AnyView::from(&self.source)])?;
+                self.cleared = true;
+            }
+            Ok(Any::from(integer + 1))
+        })
+    }
+}
+
 #[derive(Default)]
 struct ManualIncrement {
     remap: StructuralVarRemap,
@@ -413,6 +472,14 @@ fn dict_item(dict: &Any, key: i64) -> i64 {
     Function::get_global("ffi.DictGetItem")
         .unwrap()
         .call_packed(&[AnyView::from(dict), AnyView::from(&key)])
+        .and_then(i64::try_from)
+        .unwrap()
+}
+
+fn dict_size(dict: &Any) -> i64 {
+    Function::get_global("ffi.DictSize")
+        .unwrap()
+        .call_packed(&[AnyView::from(dict)])
         .and_then(i64::try_from)
         .unwrap()
 }
@@ -713,6 +780,98 @@ fn shared_map_and_dict_copy_only_when_a_value_changes() {
     assert_ne!(any_object_pointer(&mapped_dict), dict_pointer);
     assert_eq!(dict_item(&dict, 1), 10);
     assert_eq!(dict_item(&mapped_dict, 1), 11);
+}
+
+#[test]
+fn shared_dense_map_and_dict_preserve_source_and_no_change_identity() {
+    ensure_test_types_registered();
+    let source: Map<i64, i64> = (0..64).map(|value| (value, value * 10)).collect();
+    let source_pointer = map_pointer(&source);
+
+    let unchanged = structural_map(source.clone(), &mut PreserveIntegers, WalkOrder::PostOrder)
+        .and_then(Map::<i64, i64>::try_from)
+        .unwrap();
+    assert_eq!(map_pointer(&unchanged), source_pointer);
+
+    let mapped = structural_map(source.clone(), &mut IncrementIntegers, WalkOrder::PostOrder)
+        .and_then(Map::<i64, i64>::try_from)
+        .unwrap();
+    assert_ne!(map_pointer(&mapped), source_pointer);
+    for value in 0..64 {
+        assert_eq!(source.get(&value).unwrap(), Some(value * 10));
+        assert_eq!(mapped.get(&value).unwrap(), Some(value * 10 + 1));
+    }
+
+    let mut dict_args = Vec::new();
+    for value in 0..64i64 {
+        dict_args.push(Any::from(value));
+        dict_args.push(Any::from(value * 10));
+    }
+    let dict = call_global("ffi.Dict", &dict_args);
+    let dict_pointer = any_object_pointer(&dict);
+    let unchanged_dict =
+        structural_map(dict.clone(), &mut PreserveIntegers, WalkOrder::PostOrder).unwrap();
+    assert_eq!(any_object_pointer(&unchanged_dict), dict_pointer);
+
+    let mapped_dict =
+        structural_map(dict.clone(), &mut IncrementIntegers, WalkOrder::PostOrder).unwrap();
+    assert_ne!(any_object_pointer(&mapped_dict), dict_pointer);
+    for value in 0..64 {
+        assert_eq!(dict_item(&dict, value), value * 10);
+        assert_eq!(dict_item(&mapped_dict, value), value * 10 + 1);
+    }
+}
+
+#[test]
+fn shared_dense_map_aligns_a_lazily_copied_cursor() {
+    ensure_test_types_registered();
+    let source: Map<i64, i64> = (0..64).map(|value| (value, value * 10)).collect();
+    let source_pointer = map_pointer(&source);
+    let mut mapper = ChangeNthInteger {
+        target: 31,
+        seen: 0,
+        changed_value: None,
+    };
+
+    let mapped = structural_map(source.clone(), &mut mapper, WalkOrder::PostOrder)
+        .and_then(Map::<i64, i64>::try_from)
+        .unwrap();
+
+    assert_eq!(mapper.seen, 64);
+    assert_ne!(map_pointer(&mapped), source_pointer);
+    let changed_value = mapper.changed_value.unwrap();
+    for key in 0..64 {
+        let original = key * 10;
+        assert_eq!(source.get(&key).unwrap(), Some(original));
+        assert_eq!(
+            mapped.get(&key).unwrap(),
+            Some(original + i64::from(original == changed_value))
+        );
+    }
+}
+
+#[test]
+fn shared_dict_shallow_copy_is_a_stable_reentrant_snapshot() {
+    ensure_test_types_registered();
+    let mut args = Vec::new();
+    for value in 0..16i64 {
+        args.push(Any::from(value));
+        args.push(Any::from(value * 10));
+    }
+    let source = call_global("ffi.Dict", &args);
+    let mut mapper = ClearSourceDictAndIncrement {
+        source: source.clone(),
+        cleared: false,
+    };
+
+    let mapped = structural_map(source.clone(), &mut mapper, WalkOrder::PostOrder).unwrap();
+
+    assert!(mapper.cleared);
+    assert_eq!(dict_size(&source), 0);
+    assert_eq!(dict_size(&mapped), 16);
+    for value in 0..16 {
+        assert_eq!(dict_item(&mapped, value), value * 10 + 1);
+    }
 }
 
 #[test]
