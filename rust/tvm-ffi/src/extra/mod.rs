@@ -18,4 +18,5 @@
  */
 pub mod dispatch;
 pub mod module;
+pub mod structural_mutate;
 pub mod structural_visit;

@@ -25,10 +25,10 @@ use syn::{parse_macro_input, FnArg, ImplItem, ImplItemMethod, ItemImpl, Meta, Ne
 use crate::utils::get_tvm_ffi_crate;
 
 pub(crate) fn dispatch(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let _args = parse_macro_input!(attr as DispatchArgs);
+    let args = parse_macro_input!(attr as DispatchArgs);
     let item_impl = parse_macro_input!(item as ItemImpl);
 
-    match expand(&item_impl) {
+    match expand(&item_impl, args.mode) {
         Ok(generated) => quote!(#item_impl #generated).into(),
         Err(error) => {
             let error = error.to_compile_error();
@@ -37,38 +37,80 @@ pub(crate) fn dispatch(attr: TokenStream, item: TokenStream) -> TokenStream {
     }
 }
 
-struct DispatchArgs;
+struct DispatchArgs {
+    mode: DispatchMode,
+}
+
+#[derive(Clone, Copy)]
+enum DispatchMode {
+    Visit,
+    Map,
+}
+
+impl DispatchMode {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Visit => "visit",
+            Self::Map => "map",
+        }
+    }
+
+    fn handler_prefix(self) -> &'static str {
+        match self {
+            Self::Visit => "visit_",
+            Self::Map => "map_",
+        }
+    }
+
+    fn value_type(self) -> &'static str {
+        match self {
+            Self::Visit => "VisitValue",
+            Self::Map => "MapValue",
+        }
+    }
+}
 
 impl syn::parse::Parse for DispatchArgs {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
         let mode: syn::Ident = input.parse()?;
-        if mode != "visit" {
-            return Err(syn::Error::new(mode.span(), "expected `dispatch(visit)`"));
-        }
-        if !input.is_empty() {
-            return Err(input.error(
-                "`dispatch(visit)` takes no further arguments; a handler that needs the \
-                 definition-region state declares a trailing `DefRegionKind` argument",
+        let mode = if mode == "visit" {
+            DispatchMode::Visit
+        } else if mode == "map" {
+            DispatchMode::Map
+        } else {
+            return Err(syn::Error::new(
+                mode.span(),
+                "expected `dispatch(visit)` or `dispatch(map)`",
             ));
+        };
+        if !input.is_empty() {
+            return Err(input.error(format!(
+                "`dispatch({})` takes no further arguments; a handler that needs the \
+                 definition-region state declares a trailing `DefRegionKind` argument",
+                mode.name()
+            )));
         }
-        Ok(DispatchArgs)
+        Ok(DispatchArgs { mode })
     }
 }
 
-fn expand(item_impl: &ItemImpl) -> syn::Result<TokenStream2> {
+fn expand(item_impl: &ItemImpl, mode: DispatchMode) -> syn::Result<TokenStream2> {
     if item_impl.trait_.is_some() {
         return Err(syn::Error::new_spanned(
             item_impl,
-            "`dispatch(visit)` requires an inherent impl",
+            format!("`dispatch({})` requires an inherent impl", mode.name()),
         ));
     }
 
+    let handler_prefix = mode.handler_prefix();
     let handlers = item_impl
         .items
         .iter()
         .filter_map(|item| match item {
-            ImplItem::Method(method) if method.sig.ident.to_string().starts_with("visit_") => {
-                Some(parse_handler(method))
+            ImplItem::Method(method)
+                if method.sig.ident.to_string().starts_with(handler_prefix) =>
+            {
+                Some(parse_handler(method, mode))
             }
             _ => None,
         })
@@ -77,17 +119,29 @@ fn expand(item_impl: &ItemImpl) -> syn::Result<TokenStream2> {
     if handlers.is_empty() {
         return Err(syn::Error::new_spanned(
             item_impl,
-            "`dispatch(visit)` found no `visit_*` methods",
+            format!(
+                "`dispatch({})` found no `{}*` methods",
+                mode.name(),
+                handler_prefix
+            ),
         ));
     }
     let tvm_ffi = get_tvm_ffi_crate();
+    let into_result = match mode {
+        DispatchMode::Visit => quote! {
+            #tvm_ffi::extra::structural_visit::IntoVisitResult::into_visit_result
+        },
+        DispatchMode::Map => quote! {
+            #tvm_ffi::extra::structural_mutate::IntoMapResult::into_map_result
+        },
+    };
 
     let links = handlers.iter().map(|handler| {
         let method = &handler.method;
         let attrs = &handler.cfg_attrs;
         // A handler opts into the definition-region state by declaring a
         // trailing argument; the generated dispatch forwards by arity, like
-        // the C++ StructuralWalk callback overloads.
+        // the corresponding C++ structural callback overloads.
         let kind_arg = if handler.wants_def_region {
             quote!(, def_region_kind)
         } else {
@@ -96,26 +150,20 @@ fn expand(item_impl: &ItemImpl) -> syn::Result<TokenStream2> {
         let invoke = match &handler.argument {
             HandlerArgument::Value => quote! {
                 return Some(
-                    #tvm_ffi::extra::structural_visit::IntoVisitResult::into_visit_result(
-                        self.#method(value #kind_arg)
-                    )
+                    #into_result(self.#method(value #kind_arg))
                 );
             },
             HandlerArgument::BorrowedNode(node_type) => quote! {
                 if let Some(node) = value.as_node::<#node_type>() {
                     return Some(
-                        #tvm_ffi::extra::structural_visit::IntoVisitResult::into_visit_result(
-                            self.#method(node #kind_arg)
-                        )
+                        #into_result(self.#method(node #kind_arg))
                     );
                 }
             },
             HandlerArgument::Owned(value_type) => quote! {
                 if let Some(node) = value.cast::<#value_type>() {
                     return Some(
-                        #tvm_ffi::extra::structural_visit::IntoVisitResult::into_visit_result(
-                            self.#method(node #kind_arg)
-                        )
+                        #into_result(self.#method(node #kind_arg))
                     );
                 }
             },
@@ -139,34 +187,57 @@ fn expand(item_impl: &ItemImpl) -> syn::Result<TokenStream2> {
                 let span = handler.method.span();
                 let handler_attrs = &handler.cfg_attrs;
                 let later_attrs = &later.cfg_attrs;
+                let value_type = mode.value_type();
                 quote_spanned! {span=>
                     #(#[#impl_cfg_attrs])*
                     #(#[#handler_attrs])*
                     #(#[#later_attrs])*
-                    compile_error!(
-                        "the `&VisitValue` catch-all handler must be last among enabled handlers"
-                    );
+                    compile_error!(concat!(
+                        "the `&", #value_type,
+                        "` catch-all handler must be last among enabled handlers"
+                    ));
                 }
             })
         });
+
+    let dispatch_impl = match mode {
+        DispatchMode::Visit => quote! {
+            impl #impl_generics #tvm_ffi::extra::structural_visit::VisitDispatch
+                for #self_type #where_clause
+            {
+                #[allow(unreachable_code, unused_variables)]
+                fn dispatch_visit(
+                    &mut self,
+                    value: &#tvm_ffi::extra::structural_visit::VisitValue,
+                    def_region_kind: #tvm_ffi::extra::structural_visit::DefRegionKind,
+                ) -> Option<#tvm_ffi::extra::structural_visit::VisitResult> {
+                    #(#links)*
+                    None
+                }
+            }
+        },
+        DispatchMode::Map => quote! {
+            impl #impl_generics #tvm_ffi::extra::structural_mutate::MapDispatch
+                for #self_type #where_clause
+            {
+                #[allow(unreachable_code, unused_variables)]
+                fn dispatch_map(
+                    &mut self,
+                    value: &#tvm_ffi::extra::structural_mutate::MapValue,
+                    def_region_kind: #tvm_ffi::extra::structural_visit::DefRegionKind,
+                ) -> Option<#tvm_ffi::extra::structural_mutate::MapResult> {
+                    #(#links)*
+                    None
+                }
+            }
+        },
+    };
 
     Ok(quote! {
         #(#ordering_errors)*
 
         #(#[#impl_cfg_attrs])*
-        impl #impl_generics #tvm_ffi::extra::structural_visit::VisitDispatch
-            for #self_type #where_clause
-        {
-            #[allow(unreachable_code, unused_variables)]
-            fn dispatch_visit(
-                &mut self,
-                value: &#tvm_ffi::extra::structural_visit::VisitValue,
-                def_region_kind: #tvm_ffi::extra::structural_visit::DefRegionKind,
-            ) -> Option<#tvm_ffi::extra::structural_visit::VisitResult> {
-                #(#links)*
-                None
-            }
-        }
+        #dispatch_impl
     })
 }
 
@@ -184,7 +255,7 @@ enum HandlerArgument {
     Owned(Type),
 }
 
-fn parse_handler(method: &ImplItemMethod) -> syn::Result<Handler> {
+fn parse_handler(method: &ImplItemMethod, mode: DispatchMode) -> syn::Result<Handler> {
     let inputs = &method.sig.inputs;
     let receiver_is_mut = matches!(
         inputs.first(),
@@ -194,8 +265,11 @@ fn parse_handler(method: &ImplItemMethod) -> syn::Result<Handler> {
     if !receiver_is_mut || !(inputs.len() == 2 || inputs.len() == 3) {
         return Err(syn::Error::new_spanned(
             &method.sig,
-            "visit handlers must take `&mut self`, a node, and optionally a trailing \
-             `DefRegionKind` argument",
+            format!(
+                "{} handlers must take `&mut self`, a node, and optionally a trailing \
+                 `DefRegionKind` argument",
+                mode.name()
+            ),
         ));
     }
     let wants_def_region = inputs.len() == 3;
@@ -206,7 +280,7 @@ fn parse_handler(method: &ImplItemMethod) -> syn::Result<Handler> {
     };
     let argument = match &value_type {
         Type::Reference(reference) if reference.mutability.is_none() => {
-            if is_visit_value(reference.elem.as_ref()) {
+            if is_dispatch_value(reference.elem.as_ref(), mode) {
                 HandlerArgument::Value
             } else {
                 HandlerArgument::BorrowedNode((*reference.elem).clone())
@@ -215,7 +289,10 @@ fn parse_handler(method: &ImplItemMethod) -> syn::Result<Handler> {
         Type::Reference(_) => {
             return Err(syn::Error::new_spanned(
                 value_type,
-                "visit handler values cannot be mutable references",
+                format!(
+                    "{} handler values cannot be mutable references",
+                    mode.name()
+                ),
             ));
         }
         _ => HandlerArgument::Owned(value_type),
@@ -268,12 +345,12 @@ fn presence_meta(meta: Meta) -> Option<Meta> {
     }
 }
 
-fn is_visit_value(value_type: &Type) -> bool {
+fn is_dispatch_value(value_type: &Type, mode: DispatchMode) -> bool {
     let Type::Path(path) = value_type else {
         return false;
     };
     path.path
         .segments
         .last()
-        .is_some_and(|segment| segment.ident == "VisitValue")
+        .is_some_and(|segment| segment.ident == mode.value_type())
 }

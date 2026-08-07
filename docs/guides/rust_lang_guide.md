@@ -328,6 +328,138 @@ than silently walked through reflection — visit such a type's children
 explicitly from a `StructuralVisitor`, or skip it with a pre-order
 `WalkResult::Skip`.
 
+### Structural Mapping and Mutation
+
+`structural_map` is the transforming counterpart to `structural_walk`. Put
+`#[dispatch(map)]` on an impl whose `map_*` methods return `Any` or
+`Result<Any>`. Methods are tested in source order, the first matching argument
+type wins, and an unmatched value is preserved. A method may take an optional
+trailing `DefRegionKind`; a `&MapValue` method is a catch-all and should
+therefore come last:
+
+```rust
+use tvm_ffi::{
+    dispatch, structural_map, Any, Array, DefRegionKind, MapValue, Result, WalkOrder,
+};
+
+#[derive(Default)]
+struct Increment {
+    integers: usize,
+}
+
+#[dispatch(map)]
+impl Increment {
+    fn map_integer(&mut self, value: i64, _kind: DefRegionKind) -> Any {
+        self.integers += 1;
+        Any::from(value + 1)
+    }
+
+    fn map_other(&mut self, value: &MapValue) -> Result<Any> {
+        Ok(value.to_owned())
+    }
+}
+
+let mut increment = Increment::default();
+let mapped = structural_map(
+    Array::new(vec![1_i64, 2]),
+    &mut increment,
+    WalkOrder::PostOrder,
+)?;
+let mapped = Array::<i64>::try_from(mapped)?;
+assert_eq!(mapped.iter().collect::<Vec<_>>(), vec![2, 3]);
+```
+
+A single typed closure and an ordered tuple of up to eight closures are also
+accepted. Tuple dispatch is first-match, not broadcast: later closures do not
+run after an earlier argument type matches. As with generated dispatch, a
+`&MapValue` catch-all belongs last. Numeric handlers claim the complete FFI
+`Int` or `Float` tag and then use Rust `as` conversion semantics; prefer `i64`
+or `f64` unless narrowing is deliberate.
+
+`WalkOrder::PreOrder` runs the callback before default child mapping. If it
+returns a different root, that replacement root is not passed to the callback
+again, but its children are still mapped. `WalkOrder::PostOrder` maps children
+first and passes the resulting value to the callback; a replacement returned
+there is final. `Array` and `List` elements are mapped in order. `Map` and
+`Dict` keys are identity anchors and are never mapped; only their values are.
+
+The root is consumed. A uniquely owned `Array`, `List`, `Map`, or `Dict` may
+reuse its storage in place; passing `root.clone()` keeps the source shared and
+selects copy-on-write behavior. The engine rechecks uniqueness before raw
+container writes, so retaining an owning `MapValue::to_owned()` alias from a
+pre-order callback before that container's children are mapped forces a copy.
+Reflected objects must provide `__ffi_shallow_copy__`; the copy is validated
+before fields are mapped and discarded if no structural field changes.
+
+Within one `structural_map` call, object identities whose structural-hash kind
+is `FreeVar` or `DAGNode` are mapped once. The engine caches the complete final
+result (including callback replacement and child mapping), reuses that exact
+mapped identity at later occurrences, and does not invoke the callback again.
+
+Callbacks may return `Result<Any>` to report failures. Errors propagate with
+object, field, or container-item context. In-place changes completed before a
+later error are not rolled back, and the consumed root is not returned on
+error. The native default engine rejects a non-container type that registers a
+foreign `__s_mutate__` or `__s_maybe_inplace_mutate__` hook instead of guessing
+its semantics.
+
+For type-specific recursion or for taking over a rejected foreign hook,
+implement `StructuralMutator` and call `structural_mutate`. `InplaceValue` is
+an engine-issued capability: callers cannot construct it from a read-only
+`MapValue`. Override `maybe_inplace_mutate` to opt into default container
+reuse; `default_maybe_inplace_mutate` rechecks uniqueness before writing.
+Borrowed children can be re-entered with `mutate_child`, while owned children
+can use `maybe_inplace_mutate_child`:
+
+```rust
+use tvm_ffi::{
+    structural_mutate, Any, Array, DefRegionKind, InplaceValue, MapValue, Result,
+    StructuralMutator, StructuralVarRemap,
+};
+
+#[derive(Default)]
+struct Increment {
+    remap: StructuralVarRemap,
+}
+
+impl StructuralMutator for Increment {
+    fn mutate(&mut self, value: &MapValue, kind: DefRegionKind) -> Result<Any> {
+        match value.cast::<i64>() {
+            Some(value) => Ok(Any::from(value + 1)),
+            None => self.default_mutate(value, kind),
+        }
+    }
+
+    fn maybe_inplace_mutate(
+        &mut self,
+        value: InplaceValue<'_>,
+        kind: DefRegionKind,
+    ) -> Result<Any> {
+        self.default_maybe_inplace_mutate(value, kind)
+    }
+
+    fn var_remap_get(&mut self, var: &MapValue) -> Result<Option<Any>> {
+        self.remap.get(var)
+    }
+
+    fn var_remap_set(&mut self, var: &MapValue, mapped: &Any) -> Result<()> {
+        self.remap.set(var, mapped)
+    }
+}
+
+let mapped = structural_mutate(
+    Array::new(vec![1_i64, 2]),
+    &mut Increment::default(),
+)?;
+let mapped = Array::<i64>::try_from(mapped)?;
+assert_eq!(mapped.iter().collect::<Vec<_>>(), vec![2, 3]);
+```
+
+`StructuralMutator` requires `var_remap_get` and `var_remap_set` so its default
+recursion can preserve completed `FreeVar` substitutions. `StructuralVarRemap`
+is the canonical owning implementation, as shown above; a custom mutator is
+responsible for any additional identity policy it introduces.
+
 ## Examples
 
 The repository includes a complete example in `rust/tvm-ffi/examples/load_library.rs`.
