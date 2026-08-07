@@ -459,17 +459,7 @@ unsafe extern "C" {
     pub fn TVMFFIGetCustomAllocator() -> *mut TVMFFICustomAllocator;
     pub fn TVMFFISetCustomAllocator(allocator: *mut TVMFFICustomAllocator) -> i32;
 
-    pub fn TVMFFITypeGetOrAllocIndex(
-        type_key: *const TVMFFIByteArray,
-        static_type_index: i32,
-        type_depth: i32,
-        num_child_slots: i32,
-        child_slots_can_overflow: i32,
-        parent_type_index: i32,
-    ) -> i32;
     pub fn TVMFFITypeKeyToIndex(type_key: *const TVMFFIByteArray, out_tindex: *mut i32) -> i32;
-    pub fn TVMFFITypeRegisterField(type_index: i32, info: *const TVMFFIFieldInfo) -> i32;
-    pub fn TVMFFITypeRegisterMetadata(type_index: i32, metadata: *const TVMFFITypeMetadata) -> i32;
     pub fn TVMFFITypeRegisterAttr(
         type_index: i32,
         attr_name: *const TVMFFIByteArray,

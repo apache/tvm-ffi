@@ -24,8 +24,7 @@ use tvm_ffi::derive::{Object as DeriveObject, ObjectRef as DeriveObjectRef};
 use tvm_ffi::object::ObjectRef;
 use tvm_ffi::tvm_ffi_sys::{
     TVMFFIAny, TVMFFIAnyViewToOwnedAny, TVMFFIByteArray, TVMFFIFieldFlagBitMask, TVMFFIFieldInfo,
-    TVMFFISEqHashKind, TVMFFITypeGetOrAllocIndex, TVMFFITypeMetadata, TVMFFITypeRegisterAttr,
-    TVMFFITypeRegisterField, TVMFFITypeRegisterMetadata,
+    TVMFFISEqHashKind, TVMFFITypeMetadata, TVMFFITypeRegisterAttr,
 };
 use tvm_ffi::{
     dispatch, structural_map, structural_mutate, Any, AnyView, Array, DefRegionKind, Error,
@@ -33,6 +32,21 @@ use tvm_ffi::{
     ObjectRefCore, Result, String as FfiString, StructuralMutator, StructuralVarRemap, TypeIndex,
     WalkOrder, RUNTIME_ERROR,
 };
+
+// These registration entry points are needed only to build reflected test
+// types. Keep them local instead of expanding tvm-ffi-sys's public API.
+unsafe extern "C" {
+    fn TVMFFITypeGetOrAllocIndex(
+        type_key: *const TVMFFIByteArray,
+        static_type_index: i32,
+        type_depth: i32,
+        num_child_slots: i32,
+        child_slots_can_overflow: i32,
+        parent_type_index: i32,
+    ) -> i32;
+    fn TVMFFITypeRegisterField(type_index: i32, info: *const TVMFFIFieldInfo) -> i32;
+    fn TVMFFITypeRegisterMetadata(type_index: i32, metadata: *const TVMFFITypeMetadata) -> i32;
+}
 
 #[repr(C)]
 #[derive(DeriveObject)]
