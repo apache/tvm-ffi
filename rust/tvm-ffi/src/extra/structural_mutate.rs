@@ -1157,7 +1157,7 @@ trait DefaultMutationDriver: Sized {
     unsafe fn map_reflected_field(
         &mut self,
         output_object: *mut u8,
-        field: &'static TVMFFIFieldInfo,
+        field: &TVMFFIFieldInfo,
         inherited_region: DefRegionKind,
         field_changed: &mut bool,
     ) -> Result<()> {
@@ -1170,16 +1170,19 @@ trait DefaultMutationDriver: Sized {
         // Read every field from the copy so earlier setters' side effects are
         // visible to later field mappings, exactly as in the C++ fallback.
         let source_address = output_object.offset(field.offset as isize).cast::<c_void>();
-        let mut child_raw = TVMFFIAny::new();
-        if getter(source_address, &mut child_raw) != 0 {
+        // Keep the output slot owned before entering foreign code.  A getter
+        // may populate an owning result and still report an error; `Any`
+        // then releases that partial result on every return path.
+        let mut child = Any::new();
+        if getter(source_address, Any::as_data_ptr(&mut child)) != 0 {
             return Err(with_error_context(
                 Error::from_raised(),
                 &format!("field `{}`", field.name.as_str()),
             ));
         }
-        // Reflection getters return owning values.  Keep the child alive for
+        // Reflection getters return owning values. Keep the child alive for
         // the complete recursive call, then let normal Drop release it.
-        let child = Any::from_raw_ffi_any(child_raw);
+        let child_raw = *child.as_raw_ffi_any();
         let child_region = field_def_region(field, inherited_region);
         let mapped = self
             .recurse_raw(child_raw, child_region, Permit::Copy)
@@ -1194,7 +1197,6 @@ trait DefaultMutationDriver: Sized {
             with_error_context(error, &format!("field `{}`", field.name.as_str()))
         })?;
         *field_changed = true;
-        drop(child);
         Ok(())
     }
 }
@@ -1702,17 +1704,16 @@ fn call_field_setter(
             let mut args = [TVMFFIAny::new(), *value];
             args[0].type_index = TVMFFITypeIndex::kTVMFFIOpaquePtr as i32;
             args[0].data_union.v_ptr = field_address;
-            let mut result = TVMFFIAny::new();
-            let code = TVMFFIFunctionCall(
+            // The safe-call contract permits a callee to populate `result`
+            // before returning an error. Own the slot up front so either a
+            // successful return value or a partial failure is released.
+            let mut result = Any::new();
+            TVMFFIFunctionCall(
                 field.setter as TVMFFIObjectHandle,
                 args.as_ptr(),
                 2,
-                &mut result,
-            );
-            if code == 0 {
-                drop(Any::from_raw_ffi_any(result));
-            }
-            code
+                Any::as_data_ptr(&mut result),
+            )
         }
     };
     if return_code == 0 {
@@ -1901,4 +1902,106 @@ fn shallow_copy_column() -> Option<TypeAttrColumn> {
         name: SHALLOW_COPY_ATTR,
     }
     .get()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tvm_ffi_sys::{TVMFFIAnyViewToOwnedAny, TVMFFIByteArray};
+    use crate::String;
+
+    unsafe extern "C" fn clone_any_then_fail(source: *mut c_void, result: *mut TVMFFIAny) -> i32 {
+        let code = TVMFFIAnyViewToOwnedAny(source.cast(), result);
+        if code != 0 {
+            return code;
+        }
+        Error::set_raised(&Error::new(
+            RUNTIME_ERROR,
+            "callback failed after writing an owning result",
+            "",
+        ));
+        -1
+    }
+
+    unsafe extern "C" fn setter_safe_call(
+        _handle: *mut c_void,
+        args: *const TVMFFIAny,
+        _num_args: i32,
+        result: *mut TVMFFIAny,
+    ) -> i32 {
+        clone_any_then_fail(args.add(1).cast_mut().cast(), result)
+    }
+
+    struct NoopDispatch;
+
+    impl MapDispatch for NoopDispatch {
+        fn dispatch_map(
+            &mut self,
+            _value: &MapValue,
+            _def_region_kind: DefRegionKind,
+        ) -> Option<MapResult> {
+            None
+        }
+    }
+
+    #[test]
+    fn reflected_getter_releases_partial_result_on_error() {
+        let tracked = String::from("a reference-counted reflected field value");
+        let mut value = Any::from(tracked.clone());
+        let count_before = AnyView::from(&tracked).debug_strong_count();
+        let mut field: TVMFFIFieldInfo = unsafe { std::mem::zeroed() };
+        field.name = unsafe { TVMFFIByteArray::from_str("value") };
+        field.getter = Some(clone_any_then_fail);
+        let mut mapper = NativeMapper {
+            dispatch: NoopDispatch,
+            order: WalkOrder::PreOrder,
+            memo: HashMap::new(),
+        };
+        let mut field_changed = false;
+
+        let error = unsafe {
+            mapper.map_reflected_field(
+                (&mut value as *mut Any).cast(),
+                &field,
+                DefRegionKind::None,
+                &mut field_changed,
+            )
+        }
+        .expect_err("failing getter unexpectedly succeeded");
+
+        assert_eq!(
+            error.message(),
+            "callback failed after writing an owning result"
+        );
+        assert!(!field_changed);
+        assert_eq!(AnyView::from(&tracked).debug_strong_count(), count_before);
+    }
+
+    #[test]
+    fn function_setter_releases_partial_result_on_error() {
+        let tracked = String::from("a reference-counted setter result");
+        let value = Any::from(tracked.clone());
+        let count_before = AnyView::from(&tracked).debug_strong_count();
+        let setter =
+            unsafe { Function::from_extern_c(std::ptr::null_mut(), setter_safe_call, None) };
+        let setter_owner = Any::from(setter);
+        let mut field: TVMFFIFieldInfo = unsafe { std::mem::zeroed() };
+        field.name = unsafe { TVMFFIByteArray::from_str("value") };
+        field.flags = FLAG_SETTER_IS_FUNCTION;
+        field.setter = unsafe { setter_owner.as_raw_ffi_any().data_union.v_obj.cast() };
+        let mut storage = 0u8;
+
+        let error = call_field_setter(
+            &field,
+            (&mut storage as *mut u8).cast(),
+            value.as_raw_ffi_any(),
+        )
+        .expect_err("failing Function setter unexpectedly succeeded");
+
+        assert_eq!(
+            error.message(),
+            "callback failed after writing an owning result"
+        );
+        assert_eq!(AnyView::from(&tracked).debug_strong_count(), count_before);
+    }
 }

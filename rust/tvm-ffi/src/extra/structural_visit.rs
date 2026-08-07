@@ -1198,8 +1198,10 @@ unsafe fn visit_reflected_field<C: ChildVisit>(
         ))));
     };
     let address = object.offset(field.offset as isize) as *mut c_void;
-    let mut child_raw = TVMFFIAny::new();
-    if getter(address, &mut child_raw) != 0 {
+    // Own the output slot before entering foreign code. A getter may write an
+    // owning value and subsequently fail; `Any` releases that partial result.
+    let mut child = Any::new();
+    if getter(address, Any::as_data_ptr(&mut child)) != 0 {
         return Err(with_error_context(
             NativeHalt::Error(Error::from_raised()),
             &format!("field `{}`", field.name.as_str()),
@@ -1208,7 +1210,6 @@ unsafe fn visit_reflected_field<C: ChildVisit>(
 
     // A reflection getter returns an owned Any. Keep it alive while the
     // recursive walk borrows its raw cell.
-    let child = Any::from_raw_ffi_any(child_raw);
     let borrowed = raw_of_owned(&child);
     let child_region = field_def_region(field, inherited_region);
     visitor
@@ -1664,7 +1665,8 @@ unsafe fn view_of(raw: &TVMFFIAny) -> AnyView<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Array;
+    use crate::tvm_ffi_sys::TVMFFIAnyViewToOwnedAny;
+    use crate::{Array, String};
 
     struct RegionProbe(Vec<DefRegionKind>);
 
@@ -1696,6 +1698,34 @@ mod tests {
         let value = &*(field as *const Any);
         *result = Any::into_raw_ffi_any(value.clone());
         0
+    }
+
+    unsafe extern "C" fn clone_any_field_then_fail(
+        field: *mut c_void,
+        result: *mut TVMFFIAny,
+    ) -> i32 {
+        let code = TVMFFIAnyViewToOwnedAny(field.cast(), result);
+        if code != 0 {
+            return code;
+        }
+        Error::set_raised(&Error::new(
+            RUNTIME_ERROR,
+            "getter failed after writing an owning result",
+            "",
+        ));
+        -1
+    }
+
+    struct UnreachableChild;
+
+    impl ChildVisit for UnreachableChild {
+        fn visit_child(
+            &mut self,
+            _child: TVMFFIAny,
+            _def_region_kind: DefRegionKind,
+        ) -> NativeResult {
+            panic!("failed getter unexpectedly produced a child")
+        }
     }
 
     #[test]
@@ -1746,6 +1776,36 @@ mod tests {
                 DefRegionKind::NonRecursive,
             ]
         );
+    }
+
+    #[test]
+    fn reflected_getter_releases_partial_result_on_error() {
+        let tracked = String::from("a reference-counted reflected field value");
+        let mut value = Any::from(tracked.clone());
+        let count_before = AnyView::from(&tracked).debug_strong_count();
+        let mut field: TVMFFIFieldInfo = unsafe { std::mem::zeroed() };
+        field.name = unsafe { TVMFFIByteArray::from_str("value") };
+        field.getter = Some(clone_any_field_then_fail);
+
+        let result = unsafe {
+            visit_reflected_field(
+                (&mut value as *mut Any).cast(),
+                &field,
+                &mut UnreachableChild,
+                DefRegionKind::None,
+            )
+        };
+        let error = match result {
+            Err(NativeHalt::Error(error)) => error,
+            Err(NativeHalt::Interrupt(_)) => panic!("getter failure became an interruption"),
+            Ok(()) => panic!("failing getter unexpectedly succeeded"),
+        };
+
+        assert_eq!(
+            error.message(),
+            "getter failed after writing an owning result"
+        );
+        assert_eq!(AnyView::from(&tracked).debug_strong_count(), count_before);
     }
 
     #[test]
