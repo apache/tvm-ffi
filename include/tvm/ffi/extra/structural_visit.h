@@ -218,10 +218,8 @@ class StructuralVisitorObj : public Object {
     }
 
     if (TVM_FFI_PREDICT_FALSE(attr.type_index() != TypeIndex::kTVMFFINone)) {
-      return Unexpected(Error("TypeError",
-                              std::string(reflection::type_attr::kStructuralVisit) +
-                                  " must be an opaque function pointer or ffi.Function",
-                              ""));
+      return Unexpected(
+          Error("TypeError", "__s_visit__ must be an opaque function pointer or ffi.Function", ""));
     }
 
     if (type_index < TypeIndex::kTVMFFIStaticObjectBegin) {
@@ -305,42 +303,47 @@ TVM_FFI_INLINE static Expected<Optional<VisitInterrupt>> VisitReflectedFieldsExp
     StructuralVisitorObj* visitor, const Object* obj) noexcept {
   int32_t type_index = obj->type_index();
   const TVMFFITypeInfo* type_info = TVMFFIGetTypeInfo(type_index);
-  // A non-recursive definition applies to a FreeVar itself, but not to its children. All other
-  // inherited modes propagate until an explicit field annotation overrides them.
-  TVMFFIDefRegionKind inherited_kind = visitor->def_region_kind();
-  if (inherited_kind == kTVMFFIDefRegionKindNonRecursive && type_info->metadata != nullptr &&
+  auto visit_fields = [&]() -> Expected<Optional<VisitInterrupt>> {
+    Expected<Optional<VisitInterrupt>> result = Optional<VisitInterrupt>(std::nullopt);
+    reflection::ForEachFieldInfoWithEarlyStop(
+        type_info, [&](const TVMFFIFieldInfo* field_info) -> bool {
+          if (field_info->flags & kTVMFFIFieldFlagBitMaskSEqHashIgnore) {
+            return false;
+          }
+
+          Any field_value;
+          const void* field_addr = reinterpret_cast<const char*>(obj) + field_info->offset;
+          int ret_code = field_info->getter(const_cast<void*>(field_addr),
+                                            reinterpret_cast<TVMFFIAny*>(&field_value));
+          if (TVM_FFI_PREDICT_FALSE(ret_code != 0)) {
+            result = Unexpected(details::MoveFromSafeCallRaised());
+            return true;
+          }
+
+          if (field_info->flags & kTVMFFIFieldFlagBitMaskSEqHashDefNonRecursive) {
+            result = visitor->WithDefRegionKind(kTVMFFIDefRegionKindNonRecursive, [&]() {
+              return visitor->VisitExpected(field_value);
+            });
+          } else if (field_info->flags & kTVMFFIFieldFlagBitMaskSEqHashDefRecursive) {
+            result = visitor->WithDefRegionKind(kTVMFFIDefRegionKindRecursive, [&]() {
+              return visitor->VisitExpected(field_value);
+            });
+          } else {
+            result = visitor->VisitExpected(field_value);
+          }
+          return StructuralVisitNeedEarlyReturn(result);
+        });
+    return result;
+  };
+
+  // A non-recursive definition applies to the FreeVar itself, but its fields are uses. The
+  // complete field traversal are clamped to None, then the definition region is restored.
+  if (visitor->def_region_kind() == kTVMFFIDefRegionKindNonRecursive &&
+      type_info->metadata != nullptr &&
       type_info->metadata->structural_eq_hash_kind == kTVMFFISEqHashKindFreeVar) {
-    inherited_kind = kTVMFFIDefRegionKindNone;
+    return visitor->WithDefRegionKind(kTVMFFIDefRegionKindNone, visit_fields);
   }
-
-  Expected<Optional<VisitInterrupt>> result = Optional<VisitInterrupt>(std::nullopt);
-  reflection::ForEachFieldInfoWithEarlyStop(
-      type_info, [&](const TVMFFIFieldInfo* field_info) -> bool {
-        if (field_info->flags & kTVMFFIFieldFlagBitMaskSEqHashIgnore) {
-          return false;
-        }
-
-        Any field_value;
-        const void* field_addr = reinterpret_cast<const char*>(obj) + field_info->offset;
-        int ret_code = field_info->getter(const_cast<void*>(field_addr),
-                                          reinterpret_cast<TVMFFIAny*>(&field_value));
-        if (TVM_FFI_PREDICT_FALSE(ret_code != 0)) {
-          result = Unexpected(details::MoveFromSafeCallRaised());
-          return true;
-        }
-
-        TVMFFIDefRegionKind kind = inherited_kind;
-        if (field_info->flags & kTVMFFIFieldFlagBitMaskSEqHashDefNonRecursive) {
-          kind = kTVMFFIDefRegionKindNonRecursive;
-        } else if (field_info->flags & kTVMFFIFieldFlagBitMaskSEqHashDefRecursive) {
-          kind = kTVMFFIDefRegionKindRecursive;
-        }
-
-        result =
-            visitor->WithDefRegionKind(kind, [&]() { return visitor->VisitExpected(field_value); });
-        return StructuralVisitNeedEarlyReturn(result);
-      });
-  return result;
+  return visit_fields();
 }
 
 }  // namespace details
@@ -483,13 +486,13 @@ namespace details {
  *                   accept either ``(value)`` or ``(value, def_region_kind)``.
  */
 template <WalkOrder order, typename Dispatch>
-class StructuralWalkCallbackVisitorObj : public StructuralVisitorObj {
+class StructuralWalkVisitorObj : public StructuralVisitorObj {
  public:
   /*!
    * \brief Construct a structural walk visitor.
    * \param dispatch The composed dispatcher invoked on each visited node.
    */
-  explicit StructuralWalkCallbackVisitorObj(Dispatch dispatch)
+  explicit StructuralWalkVisitorObj(Dispatch dispatch)
       : StructuralVisitorObj(VTable()), dispatch_(std::move(dispatch)) {}
 
  private:
@@ -499,7 +502,7 @@ class StructuralWalkCallbackVisitorObj : public StructuralVisitorObj {
    */
   static const StructuralVisitorVTable* VTable() {
     static const StructuralVisitorVTable vtable{
-        &StructuralWalkCallbackVisitorObj::DispatchVisit,
+        &StructuralWalkVisitorObj::DispatchVisit,
     };
     return &vtable;
   }
@@ -511,7 +514,7 @@ class StructuralWalkCallbackVisitorObj : public StructuralVisitorObj {
    * \return Interrupt state, or an error if traversal failed.
    */
   static TVMFFIAny DispatchVisit(StructuralVisitorObj* self, AnyView value) noexcept {
-    return static_cast<StructuralWalkCallbackVisitorObj*>(self)->VisitImpl(value);
+    return static_cast<StructuralWalkVisitorObj*>(self)->VisitImpl(value);
   }
 
   /*!
@@ -698,7 +701,7 @@ Expected<Optional<VisitInterrupt>> StructuralWalkExpected(AnyView root,
   static_assert(sizeof...(Callbacks) != 0, "StructuralWalk requires at least one callback");
   auto dispatch =
       details::StructuralWalkCallbackChain::FromChain(std::forward<Callbacks>(callbacks)...);
-  using Visitor = details::StructuralWalkCallbackVisitorObj<order, decltype(dispatch)>;
+  using Visitor = details::StructuralWalkVisitorObj<order, decltype(dispatch)>;
   StructuralVisitor visitor(make_object<Visitor>(std::move(dispatch)));
   return visitor->VisitExpected(root);
 }
