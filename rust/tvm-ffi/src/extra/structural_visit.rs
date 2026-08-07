@@ -190,8 +190,19 @@ pub struct VisitValue(TVMFFIAny);
 
 impl VisitValue {
     #[inline]
-    fn from_raw(raw: TVMFFIAny) -> Self {
+    pub(crate) fn from_raw(raw: TVMFFIAny) -> Self {
         VisitValue(raw)
+    }
+
+    #[inline]
+    pub(crate) fn raw(&self) -> TVMFFIAny {
+        self.0
+    }
+
+    /// Copy this borrowed value into an owning [`Any`].
+    #[inline]
+    pub fn to_owned(&self) -> Any {
+        Any::from(unsafe { view_of(&self.0) })
     }
 
     /// Convert the value into an owned typed handle.
@@ -1187,8 +1198,10 @@ unsafe fn visit_reflected_field<C: ChildVisit>(
         ))));
     };
     let address = object.offset(field.offset as isize) as *mut c_void;
-    let mut child_raw = TVMFFIAny::new();
-    if getter(address, &mut child_raw) != 0 {
+    // Own the output slot before entering foreign code. A getter may write an
+    // owning value and subsequently fail; `Any` releases that partial result.
+    let mut child = Any::new();
+    if getter(address, Any::as_data_ptr(&mut child)) != 0 {
         return Err(with_error_context(
             NativeHalt::Error(Error::from_raised()),
             &format!("field `{}`", field.name.as_str()),
@@ -1197,7 +1210,6 @@ unsafe fn visit_reflected_field<C: ChildVisit>(
 
     // A reflection getter returns an owned Any. Keep it alive while the
     // recursive walk borrows its raw cell.
-    let child = Any::from_raw_ffi_any(child_raw);
     let borrowed = raw_of_owned(&child);
     let child_region = field_def_region(field, inherited_region);
     visitor
@@ -1305,7 +1317,7 @@ fn finish(result: NativeResult) -> Result<Option<VisitInterrupt>> {
 }
 
 #[inline]
-fn field_def_region(field: &TVMFFIFieldInfo, inherited: DefRegionKind) -> DefRegionKind {
+pub(crate) fn field_def_region(field: &TVMFFIFieldInfo, inherited: DefRegionKind) -> DefRegionKind {
     if field.flags & FLAG_SEQ_HASH_DEF_NON_RECURSIVE != 0 {
         DefRegionKind::NonRecursive
     } else if field.flags & FLAG_SEQ_HASH_DEF_RECURSIVE != 0 {
@@ -1320,7 +1332,10 @@ fn field_def_region(field: &TVMFFIFieldInfo, inherited: DefRegionKind) -> DefReg
 /// against an outer binding instead of rebinding. Mirrors C++
 /// `VisitReflectedFieldsExpected`.
 #[inline]
-fn free_var_child_region(inherited: DefRegionKind, structural_eq_hash_kind: i32) -> DefRegionKind {
+pub(crate) fn free_var_child_region(
+    inherited: DefRegionKind,
+    structural_eq_hash_kind: i32,
+) -> DefRegionKind {
     if inherited == DefRegionKind::NonRecursive
         && structural_eq_hash_kind == TVMFFISEqHashKind::kTVMFFISEqHashKindFreeVar as i32
     {
@@ -1347,11 +1362,11 @@ fn runtime_error(message: &str) -> Error {
 /// Layout prefix shared by the C++ `MapObj` and `DictObj` (`MapBaseObj`,
 /// release ABI without `TVM_FFI_DEBUG_WITH_ABI_CHANGE`).
 #[repr(C)]
-struct MapPrefix {
+pub(crate) struct MapPrefix {
     _header: TVMFFIObject,
-    data: *mut u8,
-    size: u64,
-    slots: u64,
+    pub(crate) data: *mut u8,
+    pub(crate) size: u64,
+    pub(crate) slots: u64,
     _data_deleter: Option<unsafe extern "C" fn(*mut c_void)>,
 }
 
@@ -1388,7 +1403,7 @@ const MAP_ITEM_NEXT_OFFSET: usize = 40;
 
 /// Borrowed traversal cursor over either map storage layout, yielding entries
 /// in the same order as the C++ iterator.
-enum MapCursor {
+pub(crate) enum MapCursor {
     Small {
         kv: *const TVMFFIAny,
         index: usize,
@@ -1402,7 +1417,7 @@ enum MapCursor {
 
 impl MapCursor {
     #[inline]
-    unsafe fn new(map: &MapPrefix) -> MapCursor {
+    pub(crate) unsafe fn new(map: &MapPrefix) -> MapCursor {
         if map.slots & MAP_SMALL_TAG != 0 {
             MapCursor::Small {
                 kv: map.data as *const TVMFFIAny,
@@ -1419,7 +1434,7 @@ impl MapCursor {
     }
 
     #[inline]
-    unsafe fn next(&mut self) -> Option<(TVMFFIAny, TVMFFIAny)> {
+    pub(crate) unsafe fn next(&mut self) -> Option<(TVMFFIAny, TVMFFIAny)> {
         match self {
             MapCursor::Small { kv, index, size } => {
                 if *index >= *size {
@@ -1451,7 +1466,7 @@ impl MapCursor {
 static MAP_LAYOUT_STATE: AtomicU8 = AtomicU8::new(0);
 
 #[inline]
-fn map_layout_usable(value: TVMFFIAny) -> bool {
+pub(crate) fn map_layout_usable(value: TVMFFIAny) -> bool {
     match MAP_LAYOUT_STATE.load(Ordering::Relaxed) {
         1 => true,
         2 => false,
@@ -1488,23 +1503,33 @@ fn validate_map_layout(value: TVMFFIAny) -> bool {
 
 /// Layout prefix shared by the C++ `ArrayObj` and `ListObj`.
 #[repr(C)]
-struct SeqPrefix {
+pub(crate) struct SeqPrefix {
     _header: TVMFFIObject,
-    data: *const TVMFFIAny,
-    size: i64,
+    pub(crate) data: *const TVMFFIAny,
+    pub(crate) size: i64,
+    pub(crate) capacity: i64,
 }
 
 const _: () = {
     assert!(std::mem::offset_of!(SeqPrefix, data) == 24);
     assert!(std::mem::offset_of!(SeqPrefix, size) == 32);
+    assert!(std::mem::offset_of!(SeqPrefix, capacity) == 40);
 };
 
 #[derive(Clone, Copy)]
-struct TypeAttrColumn(NonNull<TVMFFITypeAttrColumn>);
+pub(crate) struct TypeAttrColumn(NonNull<TVMFFITypeAttrColumn>);
 
 impl TypeAttrColumn {
+    pub(crate) unsafe fn from_non_null(pointer: NonNull<TVMFFITypeAttrColumn>) -> Self {
+        Self(pointer)
+    }
+
+    pub(crate) fn as_ptr(self) -> *mut TVMFFITypeAttrColumn {
+        self.0.as_ptr()
+    }
+
     /// Copy one borrowed cell; ownership remains with the registry.
-    fn get(self, type_index: i32) -> Option<TVMFFIAny> {
+    pub(crate) fn get(self, type_index: i32) -> Option<TVMFFIAny> {
         unsafe {
             let column = self.0.as_ref();
             let index = type_index - column.begin_index;
@@ -1517,7 +1542,7 @@ impl TypeAttrColumn {
     }
 }
 
-fn type_attr_column(attr_name: &str) -> Option<TypeAttrColumn> {
+pub(crate) fn type_attr_column(attr_name: &str) -> Option<TypeAttrColumn> {
     unsafe {
         let attr_name = TVMFFIByteArray::from_str(attr_name);
         NonNull::new(TVMFFIGetTypeAttrColumn(&attr_name).cast_mut()).map(TypeAttrColumn)
@@ -1543,7 +1568,7 @@ fn structural_visit_column() -> Option<TypeAttrColumn> {
     Some(column)
 }
 
-fn type_key_of(type_index: i32) -> String {
+pub(crate) fn type_key_of(type_index: i32) -> String {
     unsafe {
         let info = TVMFFIGetTypeInfo(type_index);
         if info.is_null() {
@@ -1584,7 +1609,7 @@ fn is_instance_at_depth(object_type_index: i32, base_type_index: i32, base_depth
 /// # Safety
 ///
 /// `type_index` must be a registered type index.
-unsafe fn for_each_field<B>(
+pub(crate) unsafe fn for_each_field<B>(
     type_index: i32,
     mut callback: impl FnMut(&'static TVMFFIFieldInfo) -> ControlFlow<B>,
 ) -> Option<B> {
@@ -1640,7 +1665,8 @@ unsafe fn view_of(raw: &TVMFFIAny) -> AnyView<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Array;
+    use crate::tvm_ffi_sys::TVMFFIAnyViewToOwnedAny;
+    use crate::{Array, String};
 
     struct RegionProbe(Vec<DefRegionKind>);
 
@@ -1672,6 +1698,34 @@ mod tests {
         let value = &*(field as *const Any);
         *result = Any::into_raw_ffi_any(value.clone());
         0
+    }
+
+    unsafe extern "C" fn clone_any_field_then_fail(
+        field: *mut c_void,
+        result: *mut TVMFFIAny,
+    ) -> i32 {
+        let code = TVMFFIAnyViewToOwnedAny(field.cast(), result);
+        if code != 0 {
+            return code;
+        }
+        Error::set_raised(&Error::new(
+            RUNTIME_ERROR,
+            "getter failed after writing an owning result",
+            "",
+        ));
+        -1
+    }
+
+    struct UnreachableChild;
+
+    impl ChildVisit for UnreachableChild {
+        fn visit_child(
+            &mut self,
+            _child: TVMFFIAny,
+            _def_region_kind: DefRegionKind,
+        ) -> NativeResult {
+            panic!("failed getter unexpectedly produced a child")
+        }
     }
 
     #[test]
@@ -1722,6 +1776,36 @@ mod tests {
                 DefRegionKind::NonRecursive,
             ]
         );
+    }
+
+    #[test]
+    fn reflected_getter_releases_partial_result_on_error() {
+        let tracked = String::from("a reference-counted reflected field value");
+        let mut value = Any::from(tracked.clone());
+        let count_before = AnyView::from(&tracked).debug_strong_count();
+        let mut field: TVMFFIFieldInfo = unsafe { std::mem::zeroed() };
+        field.name = unsafe { TVMFFIByteArray::from_str("value") };
+        field.getter = Some(clone_any_field_then_fail);
+
+        let result = unsafe {
+            visit_reflected_field(
+                (&mut value as *mut Any).cast(),
+                &field,
+                &mut UnreachableChild,
+                DefRegionKind::None,
+            )
+        };
+        let error = match result {
+            Err(NativeHalt::Error(error)) => error,
+            Err(NativeHalt::Interrupt(_)) => panic!("getter failure became an interruption"),
+            Ok(()) => panic!("failing getter unexpectedly succeeded"),
+        };
+
+        assert_eq!(
+            error.message(),
+            "getter failed after writing an owning result"
+        );
+        assert_eq!(AnyView::from(&tracked).debug_strong_count(), count_before);
     }
 
     #[test]

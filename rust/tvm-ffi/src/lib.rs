@@ -46,6 +46,10 @@ pub use crate::error::{
     ATTRIBUTE_ERROR, INDEX_ERROR, KEY_ERROR, RUNTIME_ERROR, TYPE_ERROR, VALUE_ERROR,
 };
 pub use crate::extra::module::Module;
+pub use crate::extra::structural_mutate::{
+    structural_map, structural_mutate, InplaceValue, IntoMapResult, IntoMapper, MapChainLink,
+    MapDispatch, MapValue, StructuralMutator, StructuralVarRemap,
+};
 pub use crate::extra::structural_visit::{
     structural_visit, structural_walk, DefRegionKind, IntoVisitResult, IntoWalker,
     StructuralVisitor, VisitDispatch, VisitInterrupt, VisitValue, WalkChainLink, WalkOrder,
