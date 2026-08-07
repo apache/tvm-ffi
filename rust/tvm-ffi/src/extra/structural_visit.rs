@@ -190,8 +190,19 @@ pub struct VisitValue(TVMFFIAny);
 
 impl VisitValue {
     #[inline]
-    fn from_raw(raw: TVMFFIAny) -> Self {
+    pub(crate) fn from_raw(raw: TVMFFIAny) -> Self {
         VisitValue(raw)
+    }
+
+    #[inline]
+    pub(crate) fn raw(&self) -> TVMFFIAny {
+        self.0
+    }
+
+    /// Copy this borrowed value into an owning [`Any`].
+    #[inline]
+    pub fn to_owned(&self) -> Any {
+        Any::from(unsafe { view_of(&self.0) })
     }
 
     /// Convert the value into an owned typed handle.
@@ -1293,7 +1304,7 @@ fn finish(result: NativeResult) -> Result<Option<VisitInterrupt>> {
 }
 
 #[inline]
-fn field_def_region(field: &TVMFFIFieldInfo, inherited: DefRegionKind) -> DefRegionKind {
+pub(crate) fn field_def_region(field: &TVMFFIFieldInfo, inherited: DefRegionKind) -> DefRegionKind {
     if field.flags & FLAG_SEQ_HASH_DEF_NON_RECURSIVE != 0 {
         DefRegionKind::NonRecursive
     } else if field.flags & FLAG_SEQ_HASH_DEF_RECURSIVE != 0 {
@@ -1308,7 +1319,10 @@ fn field_def_region(field: &TVMFFIFieldInfo, inherited: DefRegionKind) -> DefReg
 /// against an outer binding instead of rebinding. Mirrors C++
 /// `VisitReflectedFieldsExpected`.
 #[inline]
-fn free_var_child_region(inherited: DefRegionKind, structural_eq_hash_kind: i32) -> DefRegionKind {
+pub(crate) fn free_var_child_region(
+    inherited: DefRegionKind,
+    structural_eq_hash_kind: i32,
+) -> DefRegionKind {
     if inherited == DefRegionKind::NonRecursive
         && structural_eq_hash_kind == TVMFFISEqHashKind::kTVMFFISEqHashKindFreeVar as i32
     {
@@ -1476,23 +1490,33 @@ fn validate_map_layout(value: TVMFFIAny) -> bool {
 
 /// Layout prefix shared by the C++ `ArrayObj` and `ListObj`.
 #[repr(C)]
-struct SeqPrefix {
+pub(crate) struct SeqPrefix {
     _header: TVMFFIObject,
-    data: *const TVMFFIAny,
-    size: i64,
+    pub(crate) data: *const TVMFFIAny,
+    pub(crate) size: i64,
+    pub(crate) capacity: i64,
 }
 
 const _: () = {
     assert!(std::mem::offset_of!(SeqPrefix, data) == 24);
     assert!(std::mem::offset_of!(SeqPrefix, size) == 32);
+    assert!(std::mem::offset_of!(SeqPrefix, capacity) == 40);
 };
 
 #[derive(Clone, Copy)]
-struct TypeAttrColumn(NonNull<TVMFFITypeAttrColumn>);
+pub(crate) struct TypeAttrColumn(NonNull<TVMFFITypeAttrColumn>);
 
 impl TypeAttrColumn {
+    pub(crate) unsafe fn from_non_null(pointer: NonNull<TVMFFITypeAttrColumn>) -> Self {
+        Self(pointer)
+    }
+
+    pub(crate) fn as_ptr(self) -> *mut TVMFFITypeAttrColumn {
+        self.0.as_ptr()
+    }
+
     /// Copy one borrowed cell; ownership remains with the registry.
-    fn get(self, type_index: i32) -> Option<TVMFFIAny> {
+    pub(crate) fn get(self, type_index: i32) -> Option<TVMFFIAny> {
         unsafe {
             let column = self.0.as_ref();
             let index = type_index - column.begin_index;
@@ -1505,7 +1529,7 @@ impl TypeAttrColumn {
     }
 }
 
-fn type_attr_column(attr_name: &str) -> Option<TypeAttrColumn> {
+pub(crate) fn type_attr_column(attr_name: &str) -> Option<TypeAttrColumn> {
     unsafe {
         let attr_name = TVMFFIByteArray::from_str(attr_name);
         NonNull::new(TVMFFIGetTypeAttrColumn(&attr_name).cast_mut()).map(TypeAttrColumn)
@@ -1531,7 +1555,7 @@ fn structural_visit_column() -> Option<TypeAttrColumn> {
     Some(column)
 }
 
-fn type_key_of(type_index: i32) -> String {
+pub(crate) fn type_key_of(type_index: i32) -> String {
     unsafe {
         let info = TVMFFIGetTypeInfo(type_index);
         if info.is_null() {
@@ -1572,7 +1596,7 @@ fn is_instance_at_depth(object_type_index: i32, base_type_index: i32, base_depth
 /// # Safety
 ///
 /// `type_index` must be a registered type index.
-unsafe fn for_each_field<B>(
+pub(crate) unsafe fn for_each_field<B>(
     type_index: i32,
     mut callback: impl FnMut(&'static TVMFFIFieldInfo) -> ControlFlow<B>,
 ) -> Option<B> {

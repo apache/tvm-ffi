@@ -287,6 +287,83 @@ where
     }
 }
 
+/// Snapshot raw entries from an `ffi.Map` or `ffi.Dict` through the stable
+/// runtime functions used by the Rust collection bindings. No private map
+/// storage is inspected.
+pub(crate) fn try_raw_map_entries(value: AnyView<'_>) -> Result<(&'static str, Vec<(Any, Any)>)> {
+    let (size_name, iter_name, kind) = match value.type_index() {
+        x if x == TypeIndex::kTVMFFIMap as i32 => {
+            ("ffi.MapSize", "ffi.MapForwardIterFunctor", "map")
+        }
+        x if x == TypeIndex::kTVMFFIDict as i32 => {
+            ("ffi.DictSize", "ffi.DictForwardIterFunctor", "dict")
+        }
+        _ => {
+            return Err(Error::new(
+                crate::TYPE_ERROR,
+                "raw map entry snapshot requires ffi.Map or ffi.Dict",
+                "",
+            ));
+        }
+    };
+    let size = Function::get_global(size_name)?
+        .call_packed(&[value])
+        .and_then(i64::try_from)?;
+    if size < 0 {
+        return Err(Error::new(
+            crate::RUNTIME_ERROR,
+            "map runtime reports a negative size",
+            "",
+        ));
+    }
+    let size = usize::try_from(size).map_err(|_| {
+        Error::new(
+            crate::RUNTIME_ERROR,
+            "map runtime size does not fit usize",
+            "",
+        )
+    })?;
+    let mut entries = Vec::with_capacity(size);
+    if size == 0 {
+        return Ok((kind, entries));
+    }
+
+    let iter = Function::get_global(iter_name)?
+        .call_packed(&[value])
+        .and_then(Function::try_from)?;
+    for index in 0..size {
+        let key = iter.call_packed(&[AnyView::from(&0i64)])?;
+        let map_value = iter.call_packed(&[AnyView::from(&1i64)])?;
+        entries.push((key, map_value));
+        if index + 1 != size {
+            iter.call_packed(&[AnyView::from(&2i64)])?;
+        }
+    }
+    Ok((kind, entries))
+}
+
+/// Construct an `ffi.Map` or `ffi.Dict` from raw owning entries through the
+/// same runtime constructors used by the Rust collection bindings.
+pub(crate) fn map_from_raw_entries(type_index: i32, entries: &[(Any, Any)]) -> Result<Any> {
+    let name = match type_index {
+        x if x == TypeIndex::kTVMFFIMap as i32 => "ffi.Map",
+        x if x == TypeIndex::kTVMFFIDict as i32 => "ffi.Dict",
+        _ => {
+            return Err(Error::new(
+                crate::TYPE_ERROR,
+                "raw map construction requires ffi.Map or ffi.Dict",
+                "",
+            ));
+        }
+    };
+    let mut args = Vec::with_capacity(entries.len() * 2);
+    for (key, value) in entries {
+        args.push(AnyView::from(key));
+        args.push(AnyView::from(value));
+    }
+    Function::get_global(name)?.call_packed(&args)
+}
+
 impl<K, V> Default for Map<K, V>
 where
     K: AnyCompatible,
