@@ -371,6 +371,15 @@ inline constexpr const char* kConvertTypeSchema = "__ffi_convert_type_schema__";
  */
 inline constexpr const char* kShallowCopy = "__ffi_shallow_copy__";
 /*!
+ * \brief Class-level mutability contract (``Class::_type_mutable``).
+ *
+ * Registered automatically by ``ObjectDef<Class>`` so that other languages and
+ * tools (e.g. ``tvm-ffi-stubgen``) can query whether the C++ side hands out
+ * non-const pointers for the type. Unlike most type attrs this is a plain
+ * ``bool`` value, not a function.
+ */
+inline constexpr const char* kTypeMutable = "__ffi_type_mutable__";
+/*!
  * \brief Custom recursive repr hook.
  *
  * If registered, ``RecursiveRepr`` (Python ``__repr__``) calls this instead

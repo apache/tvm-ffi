@@ -97,6 +97,9 @@ and optionally runs :ref:`stub generation <sec-stubgen>` as a post-build step.
     [STUB_DIR     <dir>   ]
     [STUB_PKG     <pkg>   ]
     [STUB_PREFIX  <prefix>]
+    [STUB_TARGET  python rust]  # one or more backends
+    # When STUB_TARGET lists multiple backends, use these instead of STUB_DIR:
+    [STUB_DIR_PYTHON <dir>] [STUB_DIR_RUST <dir>]
   )
 
 :LINK_SHARED: (default: ON) Link against the TVM-FFI shared library
@@ -115,6 +118,12 @@ and optionally runs :ref:`stub generation <sec-stubgen>` as a post-build step.
   and ``STUB_INIT=ON``.
 :STUB_PREFIX: (default: "") Module prefix passed to the stub generator. Requires
   ``STUB_DIR`` and ``STUB_INIT=ON``.
+:STUB_TARGET: (default: ``python``) Code generator backend(s): a list of one or more of
+  ``python`` and ``rust`` (e.g. ``STUB_TARGET python rust``). When more than one backend is
+  listed, stubs are generated for each; because each backend writes a different file tree,
+  give the output directories per backend via ``STUB_DIR_PYTHON`` / ``STUB_DIR_RUST``
+  (instead of ``STUB_DIR``). The shared ``STUB_PKG`` / ``STUB_PREFIX`` apply to every
+  listed backend.
 
 See :ref:`sec-stubgen-cmake` for a detailed explanation of each ``STUB_*`` option
 and the generation modes they control.

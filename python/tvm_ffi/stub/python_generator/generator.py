@@ -118,9 +118,6 @@ class PythonGenerator:
         """Emit a Python submodule re-export for an ``export/<submodule>`` block."""
         G.generate_python_export(code)
 
-    def generate_helpers_block(self, code: CodeBlock, opt: Options) -> None:
-        """No-op: Python needs no per-file support code (Python files have no helpers block)."""
-
     # --- whole-file scaffolding (used by `--init` mode) ---------------------
 
     def api_filename(self) -> str:
