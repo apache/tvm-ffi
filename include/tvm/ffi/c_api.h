@@ -503,15 +503,15 @@ typedef int (*TVMFFISafeCallType)(void* handle, const TVMFFIAny* args, int32_t n
 // [TVMFFISafeCallType.end]
 
 /*!
- * \brief Callback used by \ref TVMFFIMapMutateValues to map one container value.
+ * \brief Callback used by \c TVMFFIMapMutateValues to map one container value.
  *
- * \param context Opaque context supplied to \ref TVMFFIMapMutateValues.
+ * \param context Opaque context supplied to \c TVMFFIMapMutateValues.
  * \param value Borrowed value from the Map or Dict snapshot/current unique storage.
  * \param index Zero-based iteration index, used for structural error context.
  * \param allow_inplace Whether recursively mapping \p value may reuse uniquely owned storage.
  * \param result Owning mapped value. The caller initializes it to kTVMFFINone.
  * \return 0 on success, nonzero when an error has been raised through
- *         \ref TVMFFIErrorSetRaised.
+ *         \c TVMFFIErrorSetRaised.
  */
 typedef int (*TVMFFIMapValueMutator)(void* context, const TVMFFIAny* value, int64_t index,
                                      int32_t allow_inplace, TVMFFIAny* result);
@@ -764,7 +764,7 @@ TVM_FFI_DLL int TVMFFIAnyViewToOwnedAny(const TVMFFIAny* any_view, TVMFFIAny* ou
  * \param mutator Callback that recursively maps one value.
  * \param result Owning mapped Map or Dict. Must be initialized to kTVMFFINone.
  * \return 0 on success, nonzero on failure. The error can be retrieved through
- *         \ref TVMFFIErrorMoveFromRaised.
+ *         \c TVMFFIErrorMoveFromRaised.
  *
  * \note In-place changes completed before an error are not rolled back. The copy path never
  *       mutates \p source and releases any partially mapped snapshot on failure.
