@@ -137,6 +137,30 @@ let my_func = Function::from_packed(|args: &[AnyView]| -> Result<Any> {
 Function::register_global("my_custom_func", my_func)?;
 ```
 
+### Reflected Type Methods
+
+Libraries that register their API through the C++ reflection registry
+(`refl::ObjectDef<T>().def(...)`) store methods in a per-type method table
+rather than the global function table. Resolve them by type key (or type
+index) and method name; constructors registered via `refl::init` are
+reachable under the reserved name `__ffi_init__`:
+
+```rust
+use tvm_ffi::{AnyView, Function};
+
+// Resolve the reflected constructor and construct an instance
+let ctor = Function::from_type_key_method("testing.TestIntPair", "__ffi_init__")?;
+let pair = ctor.call_tuple((1i64, 2i64))?;
+
+// Resolve an instance method; the first packed argument is the object itself
+let sum = Function::from_type_key_method("testing.TestIntPair", "sum")?;
+let result = sum.call_packed(&[AnyView::from(&pair)])?;
+assert_eq!(i64::try_from(result)?, 3);
+```
+
+`Function::from_type_method(type_index, name)` performs the same lookup when
+the type index is already known (e.g. from `Any::type_index`).
+
 ### Type-Erased Functions
 
 Create functions from Rust closures:
