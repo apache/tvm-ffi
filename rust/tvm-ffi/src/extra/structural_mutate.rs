@@ -26,9 +26,10 @@
 //! in-place container mutation.  Passing a clone naturally selects
 //! copy-on-write behavior.
 //!
-//! Rust owns callback dispatch, memoization, identity remapping, and container
-//! traversal. Map/Dict entries are snapshotted through the existing Rust
-//! collection runtime interface and rebuilt only when a value changes.
+//! Rust owns callback dispatch, memoization, identity remapping, and most
+//! container traversal. Map/Dict storage is traversed through a narrow C ABI
+//! that calls directly back into Rust for each value, allowing unique maps to
+//! be updated in place without exposing the runtime's private hash layout.
 //! A non-container object with a foreign `__s_mutate__` or
 //! `__s_maybe_inplace_mutate__` hook is rejected rather than silently
 //! replacing its custom semantics with reflection.
@@ -41,7 +42,6 @@ use std::ptr::NonNull;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::any::{Any, AnyView};
-use crate::collections::map::{map_from_raw_entries, try_raw_map_entries};
 use crate::error::{Error, Result, RUNTIME_ERROR, TYPE_ERROR};
 use crate::function::Function;
 use crate::object::{self, ObjectCore};
@@ -50,7 +50,7 @@ use crate::tvm_ffi_sys::TVMFFIFieldFlagBitMask::{
 };
 use crate::tvm_ffi_sys::{
     TVMFFIAny, TVMFFIFieldInfo, TVMFFIFieldSetter, TVMFFIFunctionCall, TVMFFIGetTypeInfo,
-    TVMFFIObject, TVMFFITypeAttrColumn, TVMFFITypeIndex,
+    TVMFFIMapMutateValues, TVMFFIObject, TVMFFITypeAttrColumn, TVMFFITypeIndex,
 };
 use crate::tvm_ffi_sys::{TVMFFIObjectHandle, TVMFFISEqHashKind};
 
@@ -656,6 +656,24 @@ impl<D: MapDispatch> NativeMapper<D> {
             return owned_from_raw(raw);
         }
 
+        // Plain inline leaves have no children or structural identity.  Map
+        // them directly instead of routing through identity lookup and the
+        // default-mutation path, whose owning conversion crosses the C ABI.
+        // Raw strings, byte-array views, and ObjectRValueRef are deliberately
+        // excluded because converting those borrowed special values into an
+        // Any performs normalization rather than a bitwise copy.
+        if is_plain_inline_leaf(raw.type_index) {
+            let value = MapValue::from_raw(raw);
+            return match self.dispatch.dispatch_map(&value, def_region_kind) {
+                Some(result) => result,
+                // SAFETY: `is_plain_inline_leaf` excludes every borrowed
+                // representation that needs normalization.  These values own
+                // no external resource, so their owning form is the same
+                // bitwise TVMFFIAny value.
+                None => Ok(unsafe { Any::from_raw_ffi_any(raw) }),
+            };
+        }
+
         let identity = identity_key(raw)?;
         if let Some(key) = identity {
             if let Some(entry) = self.memo.get(&key) {
@@ -1066,10 +1084,10 @@ where
 
 /// Transform a structured value graph with ordered replacement callbacks.
 ///
-/// The root is consumed. A uniquely owned Array or List may therefore be
+/// The root is consumed. A uniquely owned built-in container may therefore be
 /// reused in place, while passing `root.clone()` keeps the original shared and
 /// selects copy-on-write behavior. Map and Dict keys are anchors and are not
-/// mapped; a changed Map or Dict is rebuilt from its snapshotted entries.
+/// mapped; their values re-enter the Rust mapper through the runtime C ABI.
 ///
 /// In-place changes completed before an error are not rolled back. Because
 /// this function consumes `root`, an error does not return the partly mapped
@@ -1089,29 +1107,71 @@ where
     native.map_raw(raw, DefRegionKind::None, Permit::MaybeInPlace)
 }
 
+struct RuntimeMapMutationContext<D> {
+    driver: *mut D,
+    def_region_kind: DefRegionKind,
+    kind: &'static str,
+}
+
+unsafe extern "C" fn runtime_map_value_mutator<D: DefaultMutationDriver>(
+    context: *mut c_void,
+    value: *const TVMFFIAny,
+    index: i64,
+    allow_inplace: i32,
+    result: *mut TVMFFIAny,
+) -> i32 {
+    let context = &mut *context.cast::<RuntimeMapMutationContext<D>>();
+    let permit = if allow_inplace != 0 {
+        Permit::MaybeInPlace
+    } else {
+        Permit::Copy
+    };
+    let mapped = (&mut *context.driver)
+        .recurse_raw(*value, context.def_region_kind, permit)
+        .map_err(|error| with_error_context(error, &format!("{} value [{index}]", context.kind)));
+    match mapped {
+        Ok(mapped) => {
+            *result = Any::into_raw_ffi_any(mapped);
+            0
+        }
+        Err(error) => {
+            Error::set_raised(&error);
+            -1
+        }
+    }
+}
+
 fn runtime_map_values<D: DefaultMutationDriver>(
     driver: &mut D,
     raw: TVMFFIAny,
     def_region_kind: DefRegionKind,
-    _permit: Permit,
+    permit: Permit,
 ) -> Result<Any> {
-    let source = owned_from_raw(raw)?;
-    let (kind, mut entries) = try_raw_map_entries(AnyView::from(&source))?;
-    let mut changed = false;
-    for (index, (_, value)) in entries.iter_mut().enumerate() {
-        let value_raw = *value.as_raw_ffi_any();
-        let mapped = driver
-            .recurse_raw(value_raw, def_region_kind, Permit::Copy)
-            .map_err(|error| with_error_context(error, &format!("{kind} value [{index}]")))?;
-        if !same_shallow(value_raw, *mapped.as_raw_ffi_any()) {
-            *value = mapped;
-            changed = true;
-        }
+    let kind = if raw.type_index == TVMFFITypeIndex::kTVMFFIDict as i32 {
+        "dict"
+    } else {
+        "map"
+    };
+    let mut context = RuntimeMapMutationContext {
+        driver,
+        def_region_kind,
+        kind,
+    };
+    let mut result = Any::new();
+    let return_code = unsafe {
+        TVMFFIMapMutateValues(
+            &raw,
+            i32::from(permit == Permit::MaybeInPlace),
+            std::ptr::from_mut(&mut context).cast(),
+            runtime_map_value_mutator::<D>,
+            Any::as_data_ptr(&mut result),
+        )
+    };
+    if return_code == 0 {
+        Ok(result)
+    } else {
+        Err(Error::from_raised())
     }
-    if !changed {
-        return owned_from_raw(raw);
-    }
-    map_from_raw_entries(raw.type_index, &entries)
 }
 
 #[derive(Clone, Copy)]
@@ -1245,6 +1305,12 @@ fn call_field_setter(
 }
 
 fn identity_key(raw: TVMFFIAny) -> Result<Option<NonNull<TVMFFIObject>>> {
+    // Built-in containers always use container-specific structural mutation
+    // and can never be FreeVar or DAG identities.  Avoid a runtime type-info
+    // lookup for every Array/List/Map/Dict encountered during recursion.
+    if is_builtin_container(raw.type_index) {
+        return Ok(None);
+    }
     let kind = structural_hash_kind(raw)?;
     if kind != Some(TVMFFISEqHashKind::kTVMFFISEqHashKindFreeVar as i32)
         && kind != Some(TVMFFISEqHashKind::kTVMFFISEqHashKindDAGNode as i32)
@@ -1252,6 +1318,21 @@ fn identity_key(raw: TVMFFIAny) -> Result<Option<NonNull<TVMFFIObject>>> {
         return Ok(None);
     }
     object_identity_key(raw).map(Some)
+}
+
+#[inline]
+fn is_plain_inline_leaf(type_index: i32) -> bool {
+    type_index < TVMFFITypeIndex::kTVMFFIRawStr as i32
+        || type_index == TVMFFITypeIndex::kTVMFFISmallStr as i32
+        || type_index == TVMFFITypeIndex::kTVMFFISmallBytes as i32
+}
+
+#[inline]
+fn is_builtin_container(type_index: i32) -> bool {
+    type_index == TVMFFITypeIndex::kTVMFFIArray as i32
+        || type_index == TVMFFITypeIndex::kTVMFFIList as i32
+        || type_index == TVMFFITypeIndex::kTVMFFIMap as i32
+        || type_index == TVMFFITypeIndex::kTVMFFIDict as i32
 }
 
 fn structural_hash_kind(raw: TVMFFIAny) -> Result<Option<i32>> {

@@ -485,13 +485,13 @@ fn user_driven_mutator_controls_default_recursion_and_in_place_opt_in() {
     let mapped_map = structural_mutate(map, &mut ManualIncrement::default())
         .and_then(Map::<i64, i64>::try_from)
         .unwrap();
-    assert_ne!(map_pointer(&mapped_map), source_map_pointer);
+    assert_eq!(map_pointer(&mapped_map), source_map_pointer);
     assert_eq!(mapped_map.get(&1).unwrap(), Some(11));
 
     let dict = call_global("ffi.Dict", &[Any::from(1i64), Any::from(10i64)]);
     let dict_pointer = any_object_pointer(&dict);
     let mapped_dict = structural_mutate(dict, &mut ManualIncrement::default()).unwrap();
-    assert_ne!(any_object_pointer(&mapped_dict), dict_pointer);
+    assert_eq!(any_object_pointer(&mapped_dict), dict_pointer);
     assert_eq!(dict_item(&mapped_dict, 1), 11);
 }
 
@@ -667,7 +667,7 @@ fn foreign_mutation_hook_requires_explicit_rust_takeover() {
 }
 
 #[test]
-fn unique_list_reuses_storage_while_map_and_dict_are_rebuilt() {
+fn unique_builtin_containers_reuse_storage() {
     ensure_test_types_registered();
     let list = call_global("ffi.List", &[Any::from(1i64), Any::from(2i64)]);
     let list_pointer = any_object_pointer(&list);
@@ -683,7 +683,7 @@ fn unique_list_reuses_storage_while_map_and_dict_are_rebuilt() {
     let mapped_small = structural_map(small, &mut IncrementIntegers, WalkOrder::PostOrder)
         .and_then(Map::<i64, i64>::try_from)
         .unwrap();
-    assert_ne!(map_pointer(&mapped_small), small_pointer);
+    assert_eq!(map_pointer(&mapped_small), small_pointer);
     assert_eq!(mapped_small.get(&1).unwrap(), Some(11));
     assert_eq!(mapped_small.get(&2).unwrap(), Some(21));
 
@@ -693,7 +693,7 @@ fn unique_list_reuses_storage_while_map_and_dict_are_rebuilt() {
     let mapped_dense = structural_map(dense, &mut IncrementIntegers, WalkOrder::PostOrder)
         .and_then(Map::<i64, i64>::try_from)
         .unwrap();
-    assert_ne!(map_pointer(&mapped_dense), dense_pointer);
+    assert_eq!(map_pointer(&mapped_dense), dense_pointer);
     for value in 0..9 {
         assert_eq!(mapped_dense.get(&value).unwrap(), Some(value * 10 + 1));
     }
@@ -709,7 +709,7 @@ fn unique_list_reuses_storage_while_map_and_dict_are_rebuilt() {
     );
     let dict_pointer = any_object_pointer(&dict);
     let mapped_dict = structural_map(dict, &mut IncrementIntegers, WalkOrder::PostOrder).unwrap();
-    assert_ne!(any_object_pointer(&mapped_dict), dict_pointer);
+    assert_eq!(any_object_pointer(&mapped_dict), dict_pointer);
     assert_eq!(
         (dict_item(&mapped_dict, 1), dict_item(&mapped_dict, 2)),
         (11, 21)
@@ -724,10 +724,28 @@ fn unique_list_reuses_storage_while_map_and_dict_are_rebuilt() {
     let dense_dict_pointer = any_object_pointer(&dense_dict);
     let mapped_dense_dict =
         structural_map(dense_dict, &mut IncrementIntegers, WalkOrder::PostOrder).unwrap();
-    assert_ne!(any_object_pointer(&mapped_dense_dict), dense_dict_pointer);
+    assert_eq!(any_object_pointer(&mapped_dense_dict), dense_dict_pointer);
     for value in 0..9i64 {
         assert_eq!(dict_item(&mapped_dense_dict, value), value * 10 + 1);
     }
+}
+
+#[test]
+fn unique_map_reuses_nested_unique_value_storage() {
+    ensure_test_types_registered();
+    let child = Array::new(vec![1i64, 2]);
+    let child_pointer = array_pointer(&child);
+    let source: Map<i64, Array<i64>> = [(1, child)].into_iter().collect();
+    let source_pointer = map_pointer(&source);
+
+    let mapped = structural_map(source, &mut IncrementIntegers, WalkOrder::PostOrder)
+        .and_then(Map::<i64, Array<i64>>::try_from)
+        .unwrap();
+    let mapped_child = mapped.get(&1).unwrap().unwrap();
+
+    assert_eq!(map_pointer(&mapped), source_pointer);
+    assert_eq!(array_pointer(&mapped_child), child_pointer);
+    assert_eq!(mapped_child.iter().collect::<Vec<_>>(), vec![2, 3]);
 }
 
 #[test]
@@ -766,6 +784,29 @@ fn shared_map_and_dict_copy_only_when_a_value_changes() {
     assert_ne!(any_object_pointer(&mapped_dict), dict_pointer);
     assert_eq!(dict_item(&dict, 1), 10);
     assert_eq!(dict_item(&mapped_dict, 1), 11);
+}
+
+#[test]
+fn shared_map_callback_error_preserves_source_and_reports_value_path() {
+    ensure_test_types_registered();
+    let source: Map<i64, i64> = [(1, 10), (2, 20)].into_iter().collect();
+    let error = match structural_map(
+        source.clone(),
+        |_integer: i64| -> Result<Any> {
+            Err(Error::new(RUNTIME_ERROR, "map mapper failed", "origin"))
+        },
+        WalkOrder::PostOrder,
+    ) {
+        Ok(_) => panic!("fallible map mapper unexpectedly succeeded"),
+        Err(error) => error,
+    };
+
+    assert_eq!(source.get(&1).unwrap(), Some(10));
+    assert_eq!(source.get(&2).unwrap(), Some(20));
+    assert_eq!(error.message(), "map mapper failed");
+    assert!(error.backtrace().contains("origin"));
+    assert!(error.backtrace().contains("map value ["));
+    assert!(error.backtrace().contains("object `ffi.Map`"));
 }
 
 #[test]
