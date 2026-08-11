@@ -243,25 +243,39 @@ if (TVM_FFI_BUILD_PYTHON_MODULE)
     COMPONENTS Interpreter
     REQUIRED
   )
+  set(_tvm_ffi_python_executable "${Python_EXECUTABLE}")
+  set(_tvm_ffi_python_version ${Python_VERSION})
 
   # Run a Python script to check for free-threaded build
   execute_process(
-    COMMAND ${Python_EXECUTABLE} -c
+    COMMAND "${_tvm_ffi_python_executable}" -c
             "import sysconfig; print(sysconfig.get_config_var('Py_GIL_DISABLED') == 1)"
     OUTPUT_VARIABLE PYTHON_IS_FREE_THREADED
     OUTPUT_STRIP_TRAILING_WHITESPACE
   )
   if (PYTHON_IS_FREE_THREADED)
     message(STATUS "Free-threaded Python detected.")
+    if (CMAKE_CROSSCOMPILING
+        AND CMAKE_VERSION VERSION_GREATER_EQUAL "4.4"
+        AND NOT DEFINED Python_FIND_ABI
+    )
+      # CMake 4.4 enforces a default gil_disabled value of OFF, excluding target 3.14t headers.
+      set(Python_FIND_ABI "ANY;ANY;ANY;ON") # cmake-lint: disable=C0103
+    endif ()
   endif ()
 
   # The PyObject-tying module builds against the per-version ABI (WITH_SOABI below), so it never
   # needs the limited-API (abi3) SABIModule component -- a plain Development.Module find suffices
-  # for every version, free-threaded or not.
-  set(_tvm_ffi_python_version ${Python_VERSION})
+  # for every version, free-threaded or not. Cross builds run Cython with the host interpreter while
+  # compiling against target headers.
+  if (CMAKE_CROSSCOMPILING)
+    set(_tvm_ffi_python_components Development.Module)
+  else ()
+    set(_tvm_ffi_python_components Interpreter Development.Module)
+  endif ()
   find_package(
     Python ${_tvm_ffi_python_version} EXACT
-    COMPONENTS Interpreter Development.Module
+    COMPONENTS ${_tvm_ffi_python_components}
     REQUIRED
   )
   set(_core_cpp ${CMAKE_CURRENT_BINARY_DIR}/core.cpp)
@@ -282,8 +296,8 @@ if (TVM_FFI_BUILD_PYTHON_MODULE)
   )
   add_custom_command(
     OUTPUT ${_core_cpp}
-    COMMAND ${Python_EXECUTABLE} -m cython --cplus ${_core_pyx} -o ${_core_cpp} --module-name
-            "tvm_ffi.core"
+    COMMAND "${_tvm_ffi_python_executable}" -m cython --cplus ${_core_pyx} -o ${_core_cpp}
+            --module-name "tvm_ffi.core"
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     COMMENT "Transpiling ${_core_pyx} to ${_core_cpp}"
     DEPENDS ${_cython_sources}
@@ -294,6 +308,16 @@ if (TVM_FFI_BUILD_PYTHON_MODULE)
   # PyObject_GC_Del, atomic header reads), so we build against the per-version ABI rather than the
   # limited (abi3) ABI.
   python_add_library(tvm_ffi_cython MODULE "${_core_cpp}" WITH_SOABI)
+  # A target-only FindPython lookup may not derive SOABI without running the target interpreter.
+  if (CMAKE_CROSSCOMPILING AND SKBUILD_SOABI)
+    if (WIN32)
+      set_property(TARGET tvm_ffi_cython PROPERTY SUFFIX ".${SKBUILD_SOABI}.pyd")
+    else ()
+      set_property(
+        TARGET tvm_ffi_cython PROPERTY SUFFIX ".${SKBUILD_SOABI}${CMAKE_SHARED_MODULE_SUFFIX}"
+      )
+    endif ()
+  endif ()
   set_target_properties(tvm_ffi_cython PROPERTIES OUTPUT_NAME "core")
   target_include_directories(
     tvm_ffi_cython PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/python/tvm_ffi/cython
