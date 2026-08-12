@@ -69,7 +69,7 @@ const FLAG_SETTER_IS_FUNCTION: i64 = kTVMFFIFieldFlagBitSetterIsFunctionObj as i
 ///
 /// Structural visit and map callbacks share the same audited implementation
 /// for typed casts and borrowed node checks.
-pub use super::common::StructuralValue as MapValue;
+pub use super::structural_common::StructuralValue as MapValue;
 
 /// Result type produced by a structural-map callback.
 #[doc(hidden)]

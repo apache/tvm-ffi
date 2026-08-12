@@ -185,7 +185,7 @@ pub type VisitResult = Result<WalkResult>;
 /// Generated visitors match this value without taking ownership: borrowed
 /// object-node handlers use [`VisitValue::as_node`], while POD or object-ref
 /// value handlers use [`VisitValue::cast`].
-pub use super::common::StructuralValue as VisitValue;
+pub use super::structural_common::StructuralValue as VisitValue;
 
 enum NativeHalt {
     Interrupt(Any),
