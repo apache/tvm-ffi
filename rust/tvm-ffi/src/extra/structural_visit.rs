@@ -180,70 +180,12 @@ impl VisitInterrupt {
 #[doc(hidden)]
 pub type VisitResult = Result<WalkResult>;
 
-/// A borrowed view of a raw tvm-ffi value.
+/// A borrowed view of a raw tvm-ffi value passed to structural-visit callbacks.
 ///
 /// Generated visitors match this value without taking ownership: borrowed
 /// object-node handlers use [`VisitValue::as_node`], while POD or object-ref
 /// value handlers use [`VisitValue::cast`].
-#[repr(transparent)]
-pub struct VisitValue(TVMFFIAny);
-
-impl VisitValue {
-    #[inline]
-    pub(crate) fn from_raw(raw: TVMFFIAny) -> Self {
-        VisitValue(raw)
-    }
-
-    #[inline]
-    pub(crate) fn raw(&self) -> TVMFFIAny {
-        self.0
-    }
-
-    /// Copy this borrowed value into an owning [`Any`].
-    #[inline]
-    pub fn to_owned(&self) -> Any {
-        Any::from(unsafe { view_of(&self.0) })
-    }
-
-    /// Convert the value into an owned typed handle.
-    #[inline]
-    pub fn cast<R: crate::type_traits::AnyCompatible>(&self) -> Option<R> {
-        unsafe {
-            if R::check_any_strict(&self.0) {
-                Some(R::copy_from_any_view_after_check(&self.0))
-            } else {
-                None
-            }
-        }
-    }
-
-    /// Runtime type index stored in this value.
-    #[inline]
-    pub fn type_index(&self) -> i32 {
-        self.0.type_index
-    }
-
-    /// Borrow the value as node type `N` if it is an instance of that type.
-    #[inline]
-    pub fn as_node<N: ObjectCore>(&self) -> Option<&N> {
-        if self.0.type_index < TVMFFITypeIndex::kTVMFFIStaticObjectBegin as i32 {
-            return None;
-        }
-        let base_type_index = N::type_index();
-        if self.0.type_index != base_type_index {
-            // A final type has no registered subtype, so a differing index can
-            // never match: reject with the integer compare alone, mirroring the
-            // `_type_final` fast path of C++ `IsObjectInstance`.
-            if N::TYPE_FINAL {
-                return None;
-            }
-            if !is_instance_at_depth(self.0.type_index, base_type_index, N::TYPE_DEPTH) {
-                return None;
-            }
-        }
-        Some(unsafe { &*(self.0.data_union.v_obj as *const N) })
-    }
-}
+pub use super::common::StructuralValue as VisitValue;
 
 enum NativeHalt {
     Interrupt(Any),
@@ -839,12 +781,9 @@ pub trait StructuralVisitor: Sized {
         value: &VisitValue,
         def_region_kind: DefRegionKind,
     ) -> Result<Option<VisitInterrupt>> {
-        let result = visit_children_raw(
-            value.0,
-            &mut UserChildren { visitor: self },
-            def_region_kind,
-        )
-        .map_err(|halt| with_value_context(halt, value.0));
+        let raw = value.raw();
+        let result = visit_children_raw(raw, &mut UserChildren { visitor: self }, def_region_kind)
+            .map_err(|halt| with_value_context(halt, raw));
         finish(result)
     }
 }
@@ -1494,13 +1433,11 @@ pub(crate) struct SeqPrefix {
     _header: TVMFFIObject,
     pub(crate) data: *const TVMFFIAny,
     pub(crate) size: i64,
-    pub(crate) capacity: i64,
 }
 
 const _: () = {
     assert!(std::mem::offset_of!(SeqPrefix, data) == 24);
     assert!(std::mem::offset_of!(SeqPrefix, size) == 32);
-    assert!(std::mem::offset_of!(SeqPrefix, capacity) == 40);
 };
 
 #[derive(Clone, Copy)]
@@ -1563,30 +1500,6 @@ pub(crate) fn type_key_of(type_index: i32) -> String {
         } else {
             (*info).type_key.as_str().to_string()
         }
-    }
-}
-
-/// Subtype check with the base's inheritance depth supplied by the caller
-/// (`ObjectCore::TYPE_DEPTH`), so only the object's type info is fetched.
-#[inline]
-fn is_instance_at_depth(object_type_index: i32, base_type_index: i32, base_depth: i32) -> bool {
-    if object_type_index == base_type_index {
-        return true;
-    }
-    unsafe {
-        let info = TVMFFIGetTypeInfo(object_type_index);
-        if info.is_null() {
-            return false;
-        }
-        if (*info).type_depth <= base_depth {
-            return false;
-        }
-        let ancestors = (*info).type_acenstors;
-        if ancestors.is_null() {
-            return false;
-        }
-        let ancestor = *ancestors.offset(base_depth as isize);
-        !ancestor.is_null() && (*ancestor).type_index == base_type_index
     }
 }
 

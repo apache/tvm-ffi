@@ -106,6 +106,36 @@ struct RustNoCopy {
     data: ObjectArc<RustNoCopyObj>,
 }
 
+#[repr(C)]
+#[derive(DeriveObject)]
+#[type_key = "testing.RustStructuralFailingGetter"]
+#[type_final]
+struct RustFailingGetterObj {
+    base: Object,
+    value: Any,
+}
+
+#[repr(C)]
+#[derive(DeriveObjectRef, Clone)]
+struct RustFailingGetter {
+    data: ObjectArc<RustFailingGetterObj>,
+}
+
+#[repr(C)]
+#[derive(DeriveObject)]
+#[type_key = "testing.RustStructuralFailingSetter"]
+#[type_final]
+struct RustFailingSetterObj {
+    base: Object,
+    value: Any,
+}
+
+#[repr(C)]
+#[derive(DeriveObjectRef, Clone)]
+struct RustFailingSetter {
+    data: ObjectArc<RustFailingSetterObj>,
+}
+
 static SHALLOW_COPY_CALLS: AtomicUsize = AtomicUsize::new(0);
 static REFLECTED_TEST_LOCK: Mutex<()> = Mutex::new(());
 
@@ -125,6 +155,31 @@ unsafe extern "C" fn any_field_setter(
     let field = &mut *field.cast::<Any>();
     *field = Any::from_raw_ffi_any(replacement);
     0
+}
+
+unsafe extern "C" fn clone_any_then_fail(
+    source: *mut std::ffi::c_void,
+    result: *mut TVMFFIAny,
+) -> i32 {
+    let code = TVMFFIAnyViewToOwnedAny(source.cast(), result);
+    if code != 0 {
+        return code;
+    }
+    Error::set_raised(&Error::new(
+        RUNTIME_ERROR,
+        "callback failed after writing an owning result",
+        "",
+    ));
+    -1
+}
+
+unsafe extern "C" fn setter_safe_call(
+    _handle: *mut std::ffi::c_void,
+    args: *const TVMFFIAny,
+    _num_args: i32,
+    result: *mut TVMFFIAny,
+) -> i32 {
+    clone_any_then_fail(args.add(1).cast_mut().cast(), result)
 }
 
 fn register_any_field(type_index: i32, name: &'static str, offset: usize, flags: i64) {
@@ -187,7 +242,7 @@ static REGISTER_IDENTITY_TYPES: LazyLock<()> = LazyLock::new(|| {
     );
 
     let type_key = unsafe { TVMFFIByteArray::from_str(RustPairObj::TYPE_KEY) };
-    let type_index = unsafe {
+    let pair_type_index = unsafe {
         TVMFFITypeGetOrAllocIndex(
             &type_key,
             -1,
@@ -197,15 +252,15 @@ static REGISTER_IDENTITY_TYPES: LazyLock<()> = LazyLock::new(|| {
             Object::type_index(),
         )
     };
-    assert!(type_index >= TypeIndex::kTVMFFIDynObjectBegin as i32);
+    assert!(pair_type_index >= TypeIndex::kTVMFFIDynObjectBegin as i32);
     register_any_field(
-        type_index,
+        pair_type_index,
         "first",
         std::mem::offset_of!(RustPairObj, first),
         TVMFFIFieldFlagBitMask::kTVMFFIFieldFlagBitMaskSEqHashDefRecursive as i64,
     );
     register_any_field(
-        type_index,
+        pair_type_index,
         "ignored",
         std::mem::offset_of!(RustPairObj, ignored),
         TVMFFIFieldFlagBitMask::kTVMFFIFieldFlagBitMaskSEqHashIgnore as i64,
@@ -217,7 +272,134 @@ static REGISTER_IDENTITY_TYPES: LazyLock<()> = LazyLock::new(|| {
         structural_eq_hash_kind: TVMFFISEqHashKind::kTVMFFISEqHashKindTreeNode as i32,
     };
     assert_eq!(
-        unsafe { TVMFFITypeRegisterMetadata(type_index, &metadata) },
+        unsafe { TVMFFITypeRegisterMetadata(pair_type_index, &metadata) },
+        0
+    );
+
+    let type_key = unsafe { TVMFFIByteArray::from_str(RustFailingGetterObj::TYPE_KEY) };
+    let getter_type_index = unsafe {
+        TVMFFITypeGetOrAllocIndex(
+            &type_key,
+            -1,
+            Object::TYPE_DEPTH + 1,
+            0,
+            1,
+            Object::type_index(),
+        )
+    };
+    assert!(getter_type_index >= TypeIndex::kTVMFFIDynObjectBegin as i32);
+    let field = TVMFFIFieldInfo {
+        name: unsafe { TVMFFIByteArray::from_str("value") },
+        doc: unsafe { TVMFFIByteArray::from_str("Fail after producing an owning field value") },
+        metadata: unsafe { TVMFFIByteArray::from_str("") },
+        flags: 0,
+        size: std::mem::size_of::<Any>() as i64,
+        alignment: std::mem::align_of::<Any>() as i64,
+        offset: std::mem::offset_of!(RustFailingGetterObj, value) as i64,
+        getter: Some(clone_any_then_fail),
+        setter: any_field_setter as *mut std::ffi::c_void,
+        default_value_or_factory: TVMFFIAny::new(),
+        field_static_type_index: -1,
+    };
+    assert_eq!(
+        unsafe { TVMFFITypeRegisterField(getter_type_index, &field) },
+        0
+    );
+    let metadata = TVMFFITypeMetadata {
+        doc: unsafe { TVMFFIByteArray::from_str("Rust failing-getter test object") },
+        creator: None,
+        total_size: i32::try_from(std::mem::size_of::<RustFailingGetterObj>()).unwrap(),
+        structural_eq_hash_kind: TVMFFISEqHashKind::kTVMFFISEqHashKindTreeNode as i32,
+    };
+    assert_eq!(
+        unsafe { TVMFFITypeRegisterMetadata(getter_type_index, &metadata) },
+        0
+    );
+    let shallow_copy = Function::from_packed(|args| {
+        let source = RustFailingGetter::try_from(args[0])?;
+        Ok(Any::from(RustFailingGetter {
+            data: ObjectArc::new(RustFailingGetterObj {
+                base: Object::new(),
+                value: source.data.value.clone(),
+            }),
+        }))
+    });
+    let attr_name = unsafe { TVMFFIByteArray::from_str("__ffi_shallow_copy__") };
+    let mut attr_value = Any::from(shallow_copy);
+    assert_eq!(
+        unsafe {
+            TVMFFITypeRegisterAttr(
+                getter_type_index,
+                &attr_name,
+                Any::as_data_ptr(&mut attr_value),
+            )
+        },
+        0
+    );
+
+    let type_key = unsafe { TVMFFIByteArray::from_str(RustFailingSetterObj::TYPE_KEY) };
+    let setter_type_index = unsafe {
+        TVMFFITypeGetOrAllocIndex(
+            &type_key,
+            -1,
+            Object::TYPE_DEPTH + 1,
+            0,
+            1,
+            Object::type_index(),
+        )
+    };
+    assert!(setter_type_index >= TypeIndex::kTVMFFIDynObjectBegin as i32);
+    let setter = unsafe { Function::from_extern_c(std::ptr::null_mut(), setter_safe_call, None) };
+    let field = TVMFFIFieldInfo {
+        name: unsafe { TVMFFIByteArray::from_str("value") },
+        doc: unsafe { TVMFFIByteArray::from_str("Fail after producing an owning setter result") },
+        metadata: unsafe { TVMFFIByteArray::from_str("") },
+        flags: TVMFFIFieldFlagBitMask::kTVMFFIFieldFlagBitSetterIsFunctionObj as i64,
+        size: std::mem::size_of::<Any>() as i64,
+        alignment: std::mem::align_of::<Any>() as i64,
+        offset: std::mem::offset_of!(RustFailingSetterObj, value) as i64,
+        getter: Some(any_field_getter),
+        setter: unsafe {
+            ObjectArc::as_raw(<Function as ObjectRefCore>::data(&setter))
+                .cast_mut()
+                .cast()
+        },
+        default_value_or_factory: TVMFFIAny::new(),
+        field_static_type_index: -1,
+    };
+    assert_eq!(
+        unsafe { TVMFFITypeRegisterField(setter_type_index, &field) },
+        0
+    );
+    let metadata = TVMFFITypeMetadata {
+        doc: unsafe { TVMFFIByteArray::from_str("Rust failing-setter test object") },
+        creator: None,
+        total_size: i32::try_from(std::mem::size_of::<RustFailingSetterObj>()).unwrap(),
+        structural_eq_hash_kind: TVMFFISEqHashKind::kTVMFFISEqHashKindTreeNode as i32,
+    };
+    assert_eq!(
+        unsafe { TVMFFITypeRegisterMetadata(setter_type_index, &metadata) },
+        0
+    );
+    let shallow_copy = Function::from_packed(|args| {
+        let source = RustFailingSetter::try_from(args[0])?;
+        Ok(Any::from(RustFailingSetter {
+            data: ObjectArc::new(RustFailingSetterObj {
+                base: Object::new(),
+                value: source.data.value.clone(),
+            }),
+        }))
+    });
+    let attr_name = unsafe { TVMFFIByteArray::from_str("__ffi_shallow_copy__") };
+    let mut attr_value = Any::from(shallow_copy);
+    assert_eq!(
+        unsafe {
+            TVMFFITypeRegisterAttr(
+                setter_type_index,
+                &attr_name,
+                Any::as_data_ptr(&mut attr_value),
+            )
+        },
         0
     );
 
@@ -236,7 +418,11 @@ static REGISTER_IDENTITY_TYPES: LazyLock<()> = LazyLock::new(|| {
     let mut attr_value = Any::from(shallow_copy);
     assert_eq!(
         unsafe {
-            TVMFFITypeRegisterAttr(type_index, &attr_name, Any::as_data_ptr(&mut attr_value))
+            TVMFFITypeRegisterAttr(
+                pair_type_index,
+                &attr_name,
+                Any::as_data_ptr(&mut attr_value),
+            )
         },
         0
     );
@@ -297,6 +483,26 @@ fn rust_no_copy() -> RustNoCopy {
     RustNoCopy {
         data: ObjectArc::new(RustNoCopyObj {
             base: Object::new(),
+        }),
+    }
+}
+
+fn rust_failing_getter(value: impl Into<Any>) -> RustFailingGetter {
+    ensure_test_types_registered();
+    RustFailingGetter {
+        data: ObjectArc::new(RustFailingGetterObj {
+            base: Object::new(),
+            value: value.into(),
+        }),
+    }
+}
+
+fn rust_failing_setter(value: impl Into<Any>) -> RustFailingSetter {
+    ensure_test_types_registered();
+    RustFailingSetter {
+        data: ObjectArc::new(RustFailingSetterObj {
+            base: Object::new(),
+            value: value.into(),
         }),
     }
 }
@@ -627,6 +833,53 @@ fn reflected_object_without_shallow_copy_is_rejected_even_when_unchanged() {
         Err(error) => error,
     };
     assert!(error.message().contains("__ffi_shallow_copy__"));
+}
+
+#[test]
+fn reflected_getter_releases_partial_result_on_error() {
+    let tracked = FfiString::from("a reference-counted reflected field value");
+    let source = rust_failing_getter(tracked.clone());
+    let count_before = AnyView::from(&tracked).debug_strong_count();
+
+    let error = match structural_map(
+        source.clone(),
+        |_integer: i64| Any::from(0i64),
+        WalkOrder::PostOrder,
+    ) {
+        Ok(_) => panic!("failing getter unexpectedly succeeded"),
+        Err(error) => error,
+    };
+
+    assert_eq!(
+        error.message(),
+        "callback failed after writing an owning result"
+    );
+    assert_eq!(AnyView::from(&tracked).debug_strong_count(), count_before);
+}
+
+#[test]
+fn function_setter_releases_partial_result_on_error() {
+    let replacement = FfiString::from("a reference-counted setter result");
+    let source = rust_failing_setter(1i64);
+    let count_before = AnyView::from(&replacement).debug_strong_count();
+
+    let error = match structural_map(
+        source,
+        |_value: i64| Any::from(replacement.clone()),
+        WalkOrder::PostOrder,
+    ) {
+        Ok(_) => panic!("failing Function setter unexpectedly succeeded"),
+        Err(error) => error,
+    };
+
+    assert_eq!(
+        error.message(),
+        "callback failed after writing an owning result"
+    );
+    assert_eq!(
+        AnyView::from(&replacement).debug_strong_count(),
+        count_before
+    );
 }
 
 #[test]

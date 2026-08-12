@@ -16,6 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+mod common;
 pub mod dispatch;
 pub mod module;
 pub mod structural_mutate;

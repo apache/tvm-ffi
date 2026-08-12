@@ -56,7 +56,7 @@ use crate::tvm_ffi_sys::{TVMFFIObjectHandle, TVMFFISEqHashKind};
 
 use super::structural_visit::{
     field_def_region, for_each_field, free_var_child_region, type_attr_column, type_key_of,
-    DefRegionKind, SeqPrefix, TypeAttrColumn, VisitValue, WalkOrder,
+    DefRegionKind, SeqPrefix, TypeAttrColumn, WalkOrder,
 };
 
 const STRUCTURAL_MUTATE_ATTR: &str = "__s_mutate__";
@@ -67,10 +67,9 @@ const FLAG_SETTER_IS_FUNCTION: i64 = kTVMFFIFieldFlagBitSetterIsFunctionObj as i
 
 /// Borrowed value passed to structural-map callbacks.
 ///
-/// This is the same representation used by structural-visit callbacks; the
-/// alias keeps typed casts and borrowed node checks on one audited unsafe
-/// implementation.
-pub type MapValue = VisitValue;
+/// Structural visit and map callbacks share the same audited implementation
+/// for typed casts and borrowed node checks.
+pub use super::common::StructuralValue as MapValue;
 
 /// Result type produced by a structural-map callback.
 #[doc(hidden)]
@@ -355,6 +354,9 @@ macro_rules! impl_map_chain {
     };
 }
 
+// Rust has no variadic generics, so implement each supported callback-tuple
+// arity explicitly. Keep this arity limit in sync with the structural-visit
+// callback chain.
 impl_map_chain!((F0, M0, 0));
 impl_map_chain!((F0, M0, 0), (F1, M1, 1));
 impl_map_chain!((F0, M0, 0), (F1, M1, 1), (F2, M2, 2));
@@ -810,7 +812,7 @@ trait DefaultMutationDriver: Sized {
             x if x == TVMFFITypeIndex::kTVMFFIMap as i32
                 || x == TVMFFITypeIndex::kTVMFFIDict as i32 =>
             {
-                return self.map_values(raw, def_region_kind, permit);
+                return self.mutate_mapping_values(raw, def_region_kind, permit);
             }
             _ => {}
         }
@@ -829,8 +831,11 @@ trait DefaultMutationDriver: Sized {
         def_region_kind: DefRegionKind,
         permit: Permit,
     ) -> Result<Any> {
-        let seq = checked_sequence(raw)?;
-        let size = seq.size;
+        // Array/List values come from the runtime and satisfy the container
+        // layout invariants by contract.
+        let seq = unsafe { &*raw.data_union.v_obj.cast::<SeqPrefix>() };
+        let data = seq.data.cast_mut();
+        let size = seq.size as usize;
         if size == 0 {
             return owned_from_raw(raw);
         }
@@ -839,9 +844,8 @@ trait DefaultMutationDriver: Sized {
             // The consumed root or a unique parent exclusively owns the
             // Array/List storage. Re-checking after the parent callback
             // prevents a callback-retained alias from observing raw writes.
-            let cells = seq.data;
             for index in 0..size {
-                let cell = unsafe { cells.add(index) };
+                let cell = unsafe { data.add(index) };
                 let old_raw = unsafe { *cell };
                 let mapped = self
                     .recurse_raw(old_raw, def_region_kind, Permit::MaybeInPlace)
@@ -860,7 +864,7 @@ trait DefaultMutationDriver: Sized {
         // Array cells are stable, but using the same owned vector keeps the
         // copy path simple and prevents source children from being mutated.
         let mut output = Vec::with_capacity(size);
-        for child_raw in unsafe { std::slice::from_raw_parts(seq.data, size) } {
+        for child_raw in unsafe { std::slice::from_raw_parts(data, size) } {
             output.push(owned_from_raw(*child_raw)?);
         }
         let mut changed = false;
@@ -880,13 +884,13 @@ trait DefaultMutationDriver: Sized {
         construct_sequence(raw.type_index, &output)
     }
 
-    fn map_values(
+    fn mutate_mapping_values(
         &mut self,
         raw: TVMFFIAny,
         def_region_kind: DefRegionKind,
         permit: Permit,
     ) -> Result<Any> {
-        runtime_map_values(self, raw, def_region_kind, permit)
+        runtime_mutate_mapping_values(self, raw, def_region_kind, permit)
     }
 
     fn map_reflected(&mut self, raw: TVMFFIAny, def_region_kind: DefRegionKind) -> Result<Any> {
@@ -1141,7 +1145,7 @@ unsafe extern "C" fn runtime_map_value_mutator<D: DefaultMutationDriver>(
     }
 }
 
-fn runtime_map_values<D: DefaultMutationDriver>(
+fn runtime_mutate_mapping_values<D: DefaultMutationDriver>(
     driver: &mut D,
     raw: TVMFFIAny,
     def_region_kind: DefRegionKind,
@@ -1172,48 +1176,6 @@ fn runtime_map_values<D: DefaultMutationDriver>(
     } else {
         Err(Error::from_raised())
     }
-}
-
-#[derive(Clone, Copy)]
-struct CheckedSequence {
-    data: *mut TVMFFIAny,
-    size: usize,
-}
-
-fn checked_sequence(raw: TVMFFIAny) -> Result<CheckedSequence> {
-    let pointer = unsafe { raw.data_union.v_obj };
-    if pointer.is_null() {
-        return Err(runtime_error(
-            "native structural map: sequence has a null object pointer",
-        ));
-    }
-    let seq = pointer.cast::<SeqPrefix>();
-    let size = unsafe { (*seq).size };
-    let capacity = unsafe { (*seq).capacity };
-    let data = unsafe { (*seq).data.cast_mut() };
-    if size < 0 || capacity < 0 {
-        return Err(runtime_error(
-            "native structural map: sequence reports a negative size or capacity",
-        ));
-    }
-    if size > capacity {
-        return Err(runtime_error(
-            "native structural map: sequence size exceeds capacity",
-        ));
-    }
-    if data.is_null() && size != 0 {
-        return Err(runtime_error(
-            "native structural map: non-empty sequence has a null data pointer",
-        ));
-    }
-    if !data.is_null() && data.align_offset(std::mem::align_of::<TVMFFIAny>()) != 0 {
-        return Err(runtime_error(
-            "native structural map: sequence data pointer is misaligned",
-        ));
-    }
-    let size = usize::try_from(size)
-        .map_err(|_| runtime_error("native structural map: sequence size does not fit usize"))?;
-    Ok(CheckedSequence { data, size })
 }
 
 fn construct_sequence(type_index: i32, items: &[Any]) -> Result<Any> {
@@ -1504,106 +1466,4 @@ fn shallow_copy_column() -> Option<TypeAttrColumn> {
         name: SHALLOW_COPY_ATTR,
     }
     .get()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::tvm_ffi_sys::{TVMFFIAnyViewToOwnedAny, TVMFFIByteArray};
-    use crate::String;
-
-    unsafe extern "C" fn clone_any_then_fail(source: *mut c_void, result: *mut TVMFFIAny) -> i32 {
-        let code = TVMFFIAnyViewToOwnedAny(source.cast(), result);
-        if code != 0 {
-            return code;
-        }
-        Error::set_raised(&Error::new(
-            RUNTIME_ERROR,
-            "callback failed after writing an owning result",
-            "",
-        ));
-        -1
-    }
-
-    unsafe extern "C" fn setter_safe_call(
-        _handle: *mut c_void,
-        args: *const TVMFFIAny,
-        _num_args: i32,
-        result: *mut TVMFFIAny,
-    ) -> i32 {
-        clone_any_then_fail(args.add(1).cast_mut().cast(), result)
-    }
-
-    struct NoopDispatch;
-
-    impl MapDispatch for NoopDispatch {
-        fn dispatch_map(
-            &mut self,
-            _value: &MapValue,
-            _def_region_kind: DefRegionKind,
-        ) -> Option<MapResult> {
-            None
-        }
-    }
-
-    #[test]
-    fn reflected_getter_releases_partial_result_on_error() {
-        let tracked = String::from("a reference-counted reflected field value");
-        let mut value = Any::from(tracked.clone());
-        let count_before = AnyView::from(&tracked).debug_strong_count();
-        let mut field: TVMFFIFieldInfo = unsafe { std::mem::zeroed() };
-        field.name = unsafe { TVMFFIByteArray::from_str("value") };
-        field.getter = Some(clone_any_then_fail);
-        let mut mapper = NativeMapper {
-            dispatch: NoopDispatch,
-            order: WalkOrder::PreOrder,
-            memo: HashMap::new(),
-        };
-        let mut field_changed = false;
-
-        let error = unsafe {
-            mapper.map_reflected_field(
-                (&mut value as *mut Any).cast(),
-                &field,
-                DefRegionKind::None,
-                &mut field_changed,
-            )
-        }
-        .expect_err("failing getter unexpectedly succeeded");
-
-        assert_eq!(
-            error.message(),
-            "callback failed after writing an owning result"
-        );
-        assert!(!field_changed);
-        assert_eq!(AnyView::from(&tracked).debug_strong_count(), count_before);
-    }
-
-    #[test]
-    fn function_setter_releases_partial_result_on_error() {
-        let tracked = String::from("a reference-counted setter result");
-        let value = Any::from(tracked.clone());
-        let count_before = AnyView::from(&tracked).debug_strong_count();
-        let setter =
-            unsafe { Function::from_extern_c(std::ptr::null_mut(), setter_safe_call, None) };
-        let setter_owner = Any::from(setter);
-        let mut field: TVMFFIFieldInfo = unsafe { std::mem::zeroed() };
-        field.name = unsafe { TVMFFIByteArray::from_str("value") };
-        field.flags = FLAG_SETTER_IS_FUNCTION;
-        field.setter = unsafe { setter_owner.as_raw_ffi_any().data_union.v_obj.cast() };
-        let mut storage = 0u8;
-
-        let error = call_field_setter(
-            &field,
-            (&mut storage as *mut u8).cast(),
-            value.as_raw_ffi_any(),
-        )
-        .expect_err("failing Function setter unexpectedly succeeded");
-
-        assert_eq!(
-            error.message(),
-            "callback failed after writing an owning result"
-        );
-        assert_eq!(AnyView::from(&tracked).debug_strong_count(), count_before);
-    }
 }
