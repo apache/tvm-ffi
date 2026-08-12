@@ -54,6 +54,7 @@ use crate::tvm_ffi_sys::{
 };
 use crate::tvm_ffi_sys::{TVMFFIObjectHandle, TVMFFISEqHashKind};
 
+use super::structural_common::impl_callback_chain_tuple_arities;
 use super::structural_visit::{
     field_def_region, for_each_field, free_var_child_region, type_attr_column, type_key_of,
     DefRegionKind, SeqPrefix, TypeAttrColumn, WalkOrder,
@@ -354,47 +355,7 @@ macro_rules! impl_map_chain {
     };
 }
 
-// Rust has no variadic generics, so implement each supported callback-tuple
-// arity explicitly. Keep this arity limit in sync with the structural-visit
-// callback chain.
-impl_map_chain!((F0, M0, 0));
-impl_map_chain!((F0, M0, 0), (F1, M1, 1));
-impl_map_chain!((F0, M0, 0), (F1, M1, 1), (F2, M2, 2));
-impl_map_chain!((F0, M0, 0), (F1, M1, 1), (F2, M2, 2), (F3, M3, 3));
-impl_map_chain!(
-    (F0, M0, 0),
-    (F1, M1, 1),
-    (F2, M2, 2),
-    (F3, M3, 3),
-    (F4, M4, 4)
-);
-impl_map_chain!(
-    (F0, M0, 0),
-    (F1, M1, 1),
-    (F2, M2, 2),
-    (F3, M3, 3),
-    (F4, M4, 4),
-    (F5, M5, 5)
-);
-impl_map_chain!(
-    (F0, M0, 0),
-    (F1, M1, 1),
-    (F2, M2, 2),
-    (F3, M3, 3),
-    (F4, M4, 4),
-    (F5, M5, 5),
-    (F6, M6, 6)
-);
-impl_map_chain!(
-    (F0, M0, 0),
-    (F1, M1, 1),
-    (F2, M2, 2),
-    (F3, M3, 3),
-    (F4, M4, 4),
-    (F5, M5, 5),
-    (F6, M6, 6),
-    (F7, M7, 7)
-);
+impl_callback_chain_tuple_arities!(impl_map_chain);
 
 macro_rules! impl_bare_map_link {
     ($(($marker:ident, $($fn_args:ty),+)),+ $(,)?) => {

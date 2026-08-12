@@ -73,6 +73,8 @@ use crate::tvm_ffi_sys::{
     TVMFFIGetTypeInfo, TVMFFIObject, TVMFFISEqHashKind, TVMFFITypeAttrColumn, TVMFFITypeIndex,
 };
 
+use super::structural_common::impl_callback_chain_tuple_arities;
+
 const STRUCTURAL_VISIT_ATTR: &str = "__s_visit__";
 const FLAG_SEQ_HASH_IGNORE: i64 = kTVMFFIFieldFlagBitMaskSEqHashIgnore as i64;
 const FLAG_SEQ_HASH_DEF_RECURSIVE: i64 = kTVMFFIFieldFlagBitMaskSEqHashDefRecursive as i64;
@@ -640,44 +642,7 @@ macro_rules! impl_chain_walker {
     };
 }
 
-impl_chain_walker!((F0, M0, 0));
-impl_chain_walker!((F0, M0, 0), (F1, M1, 1));
-impl_chain_walker!((F0, M0, 0), (F1, M1, 1), (F2, M2, 2));
-impl_chain_walker!((F0, M0, 0), (F1, M1, 1), (F2, M2, 2), (F3, M3, 3));
-impl_chain_walker!(
-    (F0, M0, 0),
-    (F1, M1, 1),
-    (F2, M2, 2),
-    (F3, M3, 3),
-    (F4, M4, 4)
-);
-impl_chain_walker!(
-    (F0, M0, 0),
-    (F1, M1, 1),
-    (F2, M2, 2),
-    (F3, M3, 3),
-    (F4, M4, 4),
-    (F5, M5, 5)
-);
-impl_chain_walker!(
-    (F0, M0, 0),
-    (F1, M1, 1),
-    (F2, M2, 2),
-    (F3, M3, 3),
-    (F4, M4, 4),
-    (F5, M5, 5),
-    (F6, M6, 6)
-);
-impl_chain_walker!(
-    (F0, M0, 0),
-    (F1, M1, 1),
-    (F2, M2, 2),
-    (F3, M3, 3),
-    (F4, M4, 4),
-    (F5, M5, 5),
-    (F6, M6, 6),
-    (F7, M7, 7)
-);
+impl_callback_chain_tuple_arities!(impl_chain_walker);
 
 // A bare typed closure — `FnMut(T)` or `FnMut(&N)`, optionally with a
 // trailing `DefRegionKind` — walks as a single-link chain, so a lone typed

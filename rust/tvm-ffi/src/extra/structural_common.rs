@@ -21,6 +21,41 @@ use crate::any::{Any, AnyView};
 use crate::object::ObjectCore;
 use crate::tvm_ffi_sys::{TVMFFIAny, TVMFFIGetTypeInfo, TVMFFITypeIndex};
 
+// Rust has no variadic generics, so callback tuples need one implementation
+// per supported arity. Keep the shared limit for structural visit and map in
+// one place.
+macro_rules! impl_callback_chain_tuple_arities {
+    ($impl_chain:ident) => {
+        impl_callback_chain_tuple_arities!(
+            @prefixes $impl_chain;
+            [];
+            (F0, M0, 0),
+            (F1, M1, 1),
+            (F2, M2, 2),
+            (F3, M3, 3),
+            (F4, M4, 4),
+            (F5, M5, 5),
+            (F6, M6, 6),
+            (F7, M7, 7)
+        );
+    };
+    (@prefixes $impl_chain:ident; [$($prefix:tt)*];) => {};
+    (
+        @prefixes $impl_chain:ident;
+        [$($prefix:tt)*];
+        $next:tt $(, $rest:tt)*
+    ) => {
+        $impl_chain!($($prefix)* $next);
+        impl_callback_chain_tuple_arities!(
+            @prefixes $impl_chain;
+            [$($prefix)* $next,];
+            $($rest),*
+        );
+    };
+}
+
+pub(crate) use impl_callback_chain_tuple_arities;
+
 /// A borrowed value shared by structural visit and map callbacks.
 ///
 /// This type centralizes the audited unsafe operations used to cast FFI
