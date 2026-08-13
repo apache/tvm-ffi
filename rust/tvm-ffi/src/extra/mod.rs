@@ -16,4 +16,6 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+pub mod dispatch;
 pub mod module;
+pub mod structural_visit;

@@ -21,9 +21,11 @@ use crate::derive::{Object, ObjectRef};
 use crate::error::{Error, Result};
 use crate::function_internal::{AsPackedCallable, TupleAsPackedArgs};
 use crate::object::{Object, ObjectArc, ObjectCore};
+use crate::type_traits::AnyCompatible;
 use tvm_ffi_sys::{
     TVMFFIAny, TVMFFIByteArray, TVMFFIFunctionCell, TVMFFIFunctionCreate, TVMFFIFunctionGetGlobal,
-    TVMFFIFunctionSetGlobal, TVMFFIObjectHandle, TVMFFISafeCallType, TVMFFITypeIndex,
+    TVMFFIFunctionSetGlobal, TVMFFIGetTypeInfo, TVMFFIObjectHandle, TVMFFISafeCallType,
+    TVMFFITypeIndex, TVMFFITypeKeyToIndex,
 };
 
 /// function object
@@ -95,6 +97,7 @@ impl<F: Fn(&[AnyView]) -> Result<Any> + 'static> CallbackFunctionObjImpl<F> {
 
 unsafe impl<F: Fn(&[AnyView]) -> Result<Any> + 'static> ObjectCore for CallbackFunctionObjImpl<F> {
     const TYPE_KEY: &'static str = FunctionObj::TYPE_KEY;
+    const TYPE_DEPTH: i32 = FunctionObj::TYPE_DEPTH;
     fn type_index() -> i32 {
         FunctionObj::type_index()
     }
@@ -192,6 +195,83 @@ impl Function {
             Ok(Self {
                 data: ObjectArc::<FunctionObj>::from_raw(result as *mut FunctionObj),
             })
+        }
+    }
+
+    /// Look up a reflected method of a type by type index and method name
+    ///
+    /// Methods registered through the C++ reflection registry
+    /// (`refl::ObjectDef<T>().def(...)`) live in the per-type method table
+    /// rather than the global function table. Constructors registered via
+    /// `refl::init` are reachable under the reserved name `__ffi_init__`.
+    /// For instance methods, the first packed argument is the object itself.
+    ///
+    /// `type_index` must be a registered type index (e.g. obtained from a
+    /// live object via `Any::type_index` or from a type key); the underlying
+    /// C API treats an unregistered index as a fatal error.
+    ///
+    /// # Arguments
+    /// * `type_index` - The type index of the type that owns the method
+    /// * `method_name` - The name of the method
+    ///
+    /// # Returns
+    /// * `Function` - The reflected method
+    pub fn from_type_method(type_index: i32, method_name: &str) -> Result<Function> {
+        unsafe {
+            let type_info = TVMFFIGetTypeInfo(type_index);
+            if type_info.is_null() {
+                crate::bail!(
+                    crate::error::TYPE_ERROR,
+                    "Cannot find type info for type_index={}",
+                    type_index
+                );
+            }
+            let type_info = &*type_info;
+            for i in 0..type_info.num_methods as usize {
+                let method_info = &*type_info.methods.add(i);
+                if method_info.name.as_str() != method_name {
+                    continue;
+                }
+                if !<Function as AnyCompatible>::check_any_strict(&method_info.method) {
+                    crate::bail!(
+                        crate::error::TYPE_ERROR,
+                        "Method `{}` of type `{}` is not a Function",
+                        method_name,
+                        type_info.type_key.as_str()
+                    );
+                }
+                // the table entry stores the method as a non-owning AnyView;
+                // copy out a strong reference
+                return Ok(<Function as AnyCompatible>::copy_from_any_view_after_check(
+                    &method_info.method,
+                ));
+            }
+            crate::bail!(
+                crate::error::TYPE_ERROR,
+                "Cannot find method `{}` of type `{}`",
+                method_name,
+                type_info.type_key.as_str()
+            );
+        }
+    }
+
+    /// Look up a reflected method of a type by type key and method name
+    ///
+    /// Same as [`Function::from_type_method`], but resolves `type_key` to a
+    /// type index first.
+    ///
+    /// # Arguments
+    /// * `type_key` - The type key of the type that owns the method
+    /// * `method_name` - The name of the method
+    ///
+    /// # Returns
+    /// * `Function` - The reflected method
+    pub fn from_type_key_method(type_key: &str, method_name: &str) -> Result<Function> {
+        unsafe {
+            let type_key_arg = TVMFFIByteArray::from_str(type_key);
+            let mut type_index: i32 = 0;
+            crate::check_safe_call!(TVMFFITypeKeyToIndex(&type_key_arg, &mut type_index))?;
+            Self::from_type_method(type_index, method_name)
         }
     }
 

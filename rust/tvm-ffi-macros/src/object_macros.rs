@@ -31,6 +31,11 @@ pub fn derive_object(input: proc_macro::TokenStream) -> TokenStream {
     let type_key = get_attr(&derive_input, "type_key")
         .map(attr_to_str)
         .expect("Expect #[type_key = \"<my_type_key>\"] attribute");
+    let type_final = match get_attr(&derive_input, "type_final") {
+        Some(attr) if matches!(attr.parse_meta(), Ok(syn::Meta::Path(_))) => true,
+        Some(_) => panic!("Expect #[type_final] attribute"),
+        None => false,
+    };
 
     // type index can be optional
     // for now we make it required for static index
@@ -58,7 +63,7 @@ pub fn derive_object(input: proc_macro::TokenStream) -> TokenStream {
                                 &type_key_arg, &mut tindex
                             );
                             if ret != 0 {
-                                proc_macro_error::abort!("Failed to get type index for type key: {}", #type_key);
+                                panic!("Failed to get type index for type key: {}", #type_key);
                             }
                             tindex
                         }
@@ -70,11 +75,28 @@ pub fn derive_object(input: proc_macro::TokenStream) -> TokenStream {
     };
     // search for field name base and derive the base type
     // we expect base always to be the first field
+    let final_parent_check = match &derive_input.data {
+        syn::Data::Struct(s) => s.fields.iter().next().and_then(|f| {
+            let base_ty = f.ty.clone();
+            Some(quote! {
+                const _: () = {
+                    ::core::assert!(
+                        !<#base_ty as #tvm_ffi_crate::object::ObjectCore>::TYPE_FINAL,
+                        "an object type cannot derive from a final parent"
+                    );
+                };
+            })
+        }),
+        _ => panic!("First field must be `<base_name>: <ObjectCoreType>`"),
+    };
     let base_def_tokens = match &derive_input.data {
         syn::Data::Struct(s) => s.fields.iter().next().and_then(|f| {
             let (base_id, base_ty) = (f.ident.clone()?, f.ty.clone());
             // The transitive case of subtyping
             Some(quote! {
+                const TYPE_DEPTH: i32 =
+                    <#base_ty as #tvm_ffi_crate::object::ObjectCore>::TYPE_DEPTH + 1;
+
                 #[inline]
                 unsafe fn object_header_mut(
                     this: &mut Self
@@ -91,8 +113,11 @@ pub fn derive_object(input: proc_macro::TokenStream) -> TokenStream {
     };
 
     let expanded = quote! {
+        #final_parent_check
+
         unsafe impl #tvm_ffi_crate::object::ObjectCore for #struct_name {
             const TYPE_KEY: &'static str = #type_key;
+            const TYPE_FINAL: bool = #type_final;
 
             #type_index_tokens
 
@@ -143,35 +168,49 @@ pub fn derive_object_ref(input: proc_macro::TokenStream) -> TokenStream {
 
         // implement AnyCompatible for #struct_name
         unsafe impl #tvm_ffi_crate::type_traits::AnyCompatible for #struct_name {
-            fn type_str() -> String {
+            const MATCH_ANY_EXACT: bool = {
+                type ContainerType =
+                    <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>::ContainerType;
+                <ContainerType as #tvm_ffi_crate::object::ObjectCore>::TYPE_FINAL
+            };
+
+            #[inline]
+            fn match_any_exact_type_index() -> i32 {
+                type ContainerType = <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>
+                    ::ContainerType;
+                <ContainerType as #tvm_ffi_crate::object::ObjectCore>::type_index()
+            }
+
+            fn type_str() -> std::string::String {
                 type ContainerType = <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>
                     ::ContainerType;
                 <ContainerType as #tvm_ffi_crate::object::ObjectCore>::TYPE_KEY.into()
             }
 
+            #[inline(always)]
             unsafe fn copy_to_any_view(
                 src: &Self,
                 data: &mut  #tvm_ffi_crate::tvm_ffi_sys::TVMFFIAny
             ) {
                 type ContainerType = <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>
                     ::ContainerType;
-                let type_index =
-                    <ContainerType as #tvm_ffi_crate::object::ObjectCore>::type_index();
-                data.type_index = type_index as i32;
-                data.small_str_len = 0;
                 let data_ptr = #tvm_ffi_crate::object::ObjectArc::<ContainerType>::as_raw(
                     &src.data
                 );
-                data.data_union.v_obj =
-                    data_ptr as *mut ContainerType as *mut  #tvm_ffi_crate::tvm_ffi_sys::TVMFFIObject;
+                let object_ptr =
+                    data_ptr as *mut ContainerType as *mut #tvm_ffi_crate::tvm_ffi_sys::TVMFFIObject;
+                data.type_index = (*object_ptr).type_index;
+                data.small_str_len = 0;
+                data.data_union.v_obj = object_ptr;
             }
 
-            unsafe fn check_any_strict(data: & #tvm_ffi_crate::tvm_ffi_sys::TVMFFIAny) -> bool {
+            #[inline(always)]
+            unsafe fn check_any_strict(
+                data: & #tvm_ffi_crate::tvm_ffi_sys::TVMFFIAny
+            ) -> bool {
                 type ContainerType = <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>
                     ::ContainerType;
-                let type_index =
-                    <ContainerType as #tvm_ffi_crate::object::ObjectCore>::type_index();
-                data.type_index == type_index as i32
+                #tvm_ffi_crate::object::is_instance_of::<ContainerType>(data.type_index)
             }
 
             unsafe fn copy_from_any_view_after_check(
@@ -192,23 +231,24 @@ pub fn derive_object_ref(input: proc_macro::TokenStream) -> TokenStream {
                 }
             }
 
+            #[inline(always)]
             unsafe fn move_to_any(
                 src: Self,
                 data: &mut  #tvm_ffi_crate::tvm_ffi_sys::TVMFFIAny
             ) {
                 type ContainerType = <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>
                     ::ContainerType;
-                let type_index =
-                    <ContainerType as #tvm_ffi_crate::object::ObjectCore>::type_index();
-                data.type_index = type_index as i32;
-                data.small_str_len = 0;
                 let data_ptr = #tvm_ffi_crate::object::ObjectArc::into_raw(
                     src.data
                 );
-                data.data_union.v_obj =
-                    data_ptr as *mut ContainerType as *mut  #tvm_ffi_crate::tvm_ffi_sys::TVMFFIObject;
+                let object_ptr =
+                    data_ptr as *mut ContainerType as *mut #tvm_ffi_crate::tvm_ffi_sys::TVMFFIObject;
+                data.type_index = (*object_ptr).type_index;
+                data.small_str_len = 0;
+                data.data_union.v_obj = object_ptr;
             }
 
+            #[inline(always)]
             unsafe fn move_from_any_after_check(
                 data: &mut  #tvm_ffi_crate::tvm_ffi_sys::TVMFFIAny
             ) -> Self {
@@ -225,9 +265,7 @@ pub fn derive_object_ref(input: proc_macro::TokenStream) -> TokenStream {
             ) -> Result<Self, ()> {
                 type ContainerType = <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>
                     ::ContainerType;
-                let type_index =
-                    <ContainerType as #tvm_ffi_crate::object::ObjectCore>::type_index();
-                if data.type_index == type_index as i32 {
+                if #tvm_ffi_crate::object::is_instance_of::<ContainerType>(data.type_index) {
                     Ok(Self::copy_from_any_view_after_check(data))
                 } else {
                     Err(())

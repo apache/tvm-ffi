@@ -49,6 +49,7 @@ impl Drop for TestIntObj {
 
 unsafe impl ObjectCore for TestIntObj {
     const TYPE_KEY: &'static str = Object::TYPE_KEY;
+    const TYPE_DEPTH: i32 = Object::TYPE_DEPTH;
     #[inline]
     fn type_index() -> i32 {
         Object::type_index()

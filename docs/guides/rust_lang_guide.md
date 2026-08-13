@@ -137,6 +137,30 @@ let my_func = Function::from_packed(|args: &[AnyView]| -> Result<Any> {
 Function::register_global("my_custom_func", my_func)?;
 ```
 
+### Reflected Type Methods
+
+Libraries that register their API through the C++ reflection registry
+(`refl::ObjectDef<T>().def(...)`) store methods in a per-type method table
+rather than the global function table. Resolve them by type key (or type
+index) and method name; constructors registered via `refl::init` are
+reachable under the reserved name `__ffi_init__`:
+
+```rust
+use tvm_ffi::{AnyView, Function};
+
+// Resolve the reflected constructor and construct an instance
+let ctor = Function::from_type_key_method("testing.TestIntPair", "__ffi_init__")?;
+let pair = ctor.call_tuple((1i64, 2i64))?;
+
+// Resolve an instance method; the first packed argument is the object itself
+let sum = Function::from_type_key_method("testing.TestIntPair", "sum")?;
+let result = sum.call_packed(&[AnyView::from(&pair)])?;
+assert_eq!(i64::try_from(result)?, 3);
+```
+
+`Function::from_type_method(type_index, name)` performs the same lookup when
+the type index is already known (e.g. from `Any::type_index`).
+
 ### Type-Erased Functions
 
 Create functions from Rust closures:
@@ -179,6 +203,154 @@ fn may_fail(value: i32) -> Result<()> {
     Ok(())
 }
 ```
+
+### Structural Walk and Visit
+
+Rust provides equivalents of the C++ `StructuralWalk`/`StructuralVisitor`
+APIs. Put `#[dispatch(visit)]` on an impl to turn its `visit_*` methods into
+typed handlers, then pass it to `structural_walk`; each handler returns a
+`WalkResult` (`Advance`, `Skip`, or `Interrupt`) to steer the traversal.
+Handlers dispatch on their argument type and may take an optional trailing
+`DefRegionKind` argument:
+
+```rust
+use tvm_ffi::{dispatch, structural_walk, Array, DefRegionKind, WalkOrder, WalkResult};
+
+#[derive(Default)]
+struct Probe {
+    total: i64,
+    floats: usize,
+}
+
+#[dispatch(visit)]
+impl Probe {
+    fn visit_integer(&mut self, value: i64) -> WalkResult {
+        self.total += value;
+        WalkResult::Advance
+    }
+
+    fn visit_float(&mut self, _value: f64, _kind: DefRegionKind) -> WalkResult {
+        self.floats += 1;
+        WalkResult::Advance
+    }
+}
+
+let values = Array::new(vec![1_i64, 2, 3]);
+let mut probe = Probe::default();
+structural_walk(&values, &mut probe, WalkOrder::PreOrder)?;
+assert_eq!(probe.total, 6);
+```
+
+Lambdas also work — pass a single typed lambda, or a tuple of them (up to 8)
+tried in order with the first matching argument type winning, like the
+variadic C++ `StructuralWalk(root, callbacks...)` chain. Unmatched values
+simply advance; a `&VisitValue` lambda acts as a catch-all and must come
+last, since links after an always-matching one never run. Each lambda may
+take a trailing `DefRegionKind` argument:
+
+```rust
+use tvm_ffi::{structural_walk, Array, DefRegionKind, Object, WalkOrder, WalkResult};
+
+let values = Array::new(vec![1_i64, 2, 3]);
+
+let mut total = 0;
+structural_walk(
+    &values,
+    |value: i64| {
+        total += value;
+        WalkResult::Advance
+    },
+    WalkOrder::PreOrder,
+)?;
+assert_eq!(total, 6);
+
+let mut evens = 0;
+let mut objects = 0;
+structural_walk(
+    &values,
+    (
+        |value: i64| {
+            if value % 2 == 0 {
+                evens += 1;
+            }
+            WalkResult::Advance
+        },
+        |_object: &Object, _kind: DefRegionKind| {
+            objects += 1;
+            WalkResult::Advance
+        },
+    ),
+    WalkOrder::PreOrder,
+)?;
+assert_eq!((evens, objects), (1, 1));
+```
+
+Both entry points return `Result<Option<VisitInterrupt>>`: `Ok(None)` means
+the whole graph was visited, and a handler stops the walk early by returning
+`WalkResult::interrupt_with(payload)`, which comes back to the caller as
+`Ok(Some(interrupt))`. Handlers may also return `Result<WalkResult>` and
+propagate errors with `?`:
+
+```rust
+use tvm_ffi::{structural_walk, Array, WalkOrder, WalkResult};
+
+let values = Array::new(vec![1_i64, 2, 3]);
+let found = structural_walk(
+    &values,
+    |value: i64| {
+        if value == 2 {
+            return WalkResult::interrupt_with(value);
+        }
+        WalkResult::Advance
+    },
+    WalkOrder::PreOrder,
+)?;
+assert_eq!(found.map(|i| i64::try_from(i.value).unwrap()), Some(2));
+```
+
+To drive recursion yourself, implement `StructuralVisitor` and call
+`structural_visit`; `visit` runs for each value and descends through
+`default_visit_children`, or through `visit_child`, which visits one
+selected child and can override the def-region state for it (e.g.
+`DefRegionKind::Recursive` when descending into a binder's parameters):
+
+```rust
+use tvm_ffi::{
+    structural_visit, Array, DefRegionKind, Result, StructuralVisitor, VisitInterrupt, VisitValue,
+};
+
+#[derive(Default)]
+struct Depth {
+    max: usize,
+    current: usize,
+}
+
+impl StructuralVisitor for Depth {
+    fn visit(
+        &mut self,
+        value: &VisitValue,
+        def_region_kind: DefRegionKind,
+    ) -> Result<Option<VisitInterrupt>> {
+        self.current += 1;
+        self.max = self.max.max(self.current);
+        let interrupt = self.default_visit_children(value, def_region_kind)?;
+        self.current -= 1;
+        Ok(interrupt)
+    }
+}
+
+let values = Array::new(vec![1_i64, 2]);
+let mut depth = Depth::default();
+structural_visit(&values, &mut depth)?;
+assert_eq!(depth.max, 2);
+```
+
+Two safety notes: mutable `List`/`Dict` contents are snapshotted before
+callbacks run, so mutation during traversal cannot invalidate the walk; and
+a non-container type with a foreign `__s_visit__` hook is rejected rather
+than silently walked through reflection — visit such a type's children
+explicitly from a `StructuralVisitor`, or skip it with a pre-order
+`WalkResult::Skip`.
 
 ## Examples
 

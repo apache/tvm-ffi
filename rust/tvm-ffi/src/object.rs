@@ -20,9 +20,10 @@ use std::ops::{Deref, DerefMut};
 use std::sync::atomic::AtomicU64;
 
 use crate::derive::ObjectRef;
+use crate::type_traits::AnyCompatible;
 pub use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
 /// Object related ABI handling
-use tvm_ffi_sys::{TVMFFIGetCustomAllocator, TVMFFIObject, COMBINED_REF_COUNT_BOTH_ONE};
+use tvm_ffi_sys::{TVMFFIAny, TVMFFIGetTypeInfo, TVMFFIObject, COMBINED_REF_COUNT_BOTH_ONE};
 
 /// Object type is by default the TVMFFIObject
 #[repr(C)]
@@ -50,6 +51,17 @@ unsafe impl<T: Send + Sync + ObjectCore> Sync for ObjectArc<T> {}
 pub unsafe trait ObjectCore: Sized + 'static {
     /// the type key of the object
     const TYPE_KEY: &'static str;
+    /// Depth of this type in the object inheritance tree.
+    ///
+    /// The root [`Object`] has depth zero, and every registered subtype has
+    /// depth one greater than its parent. This value must be non-negative and
+    /// agree with the runtime type table entry for `Self`.
+    const TYPE_DEPTH: i32;
+    /// Whether every instance of this type has exactly `Self::type_index()`.
+    ///
+    /// A final type has no separately registered object-system subtype.
+    #[doc(hidden)]
+    const TYPE_FINAL: bool = false;
     // return the type index of the object
     fn type_index() -> i32;
     /// Return the object header
@@ -95,12 +107,115 @@ pub unsafe trait ObjectCoreWithExtraItems: ObjectCore {
 /// used by the ffi Any system and not user facing
 ///
 /// We mark as unsafe since it moves out the internal of the ObjectRef
+///
+/// # Safety
+///
+/// `data`, `into_data`, and `from_data` must preserve the same object
+/// allocation and form an ownership-preserving round trip. That allocation must
+/// start with a valid `TVMFFIObject` header whose registered object-range
+/// runtime type index correctly describes its layout and inheritance.
+///
+/// When `Self` also implements [`AnyCompatible`], `copy_to_any_view` must
+/// produce a non-owning view, while `move_to_any` must transfer ownership of
+/// the same object pointer and dynamic type index. `move_from_any_after_check`
+/// must be able to reclaim that owned representation exactly once, and a true
+/// `check_any_strict` result must guarantee that both after-check constructors
+/// are valid for it.
 pub unsafe trait ObjectRefCore: Sized + Clone {
     type ContainerType: ObjectCore;
     fn data(this: &Self) -> &ObjectArc<Self::ContainerType>;
     fn into_data(this: Self) -> ObjectArc<Self::ContainerType>;
     fn from_data(data: ObjectArc<Self::ContainerType>) -> Self;
 }
+
+/// Check whether a runtime type index refers to `Target` or one of its
+/// subtypes.
+///
+/// The subtype relation lives in the process-wide type table maintained by the
+/// tvm-ffi library: every registered type records its depth in the single
+/// inheritance tree together with the chain of its ancestors. The check is
+/// O(1) — if `target` really is an ancestor, it must appear in the candidate's
+/// ancestor array exactly at `target`'s depth.
+///
+/// This is a hidden support function for derive-generated object checks. Object
+/// indices in the registered range must refer to entries in the runtime type
+/// table.
+#[doc(hidden)]
+#[inline(always)]
+pub fn is_instance_of<Target: ObjectCore>(object_type_index: i32) -> bool {
+    let target_type_index = Target::type_index();
+    if object_type_index == target_type_index {
+        return true;
+    }
+    let object_begin = TypeIndex::kTVMFFIStaticObjectBegin as i32;
+    // Only object types participate in the type hierarchy.
+    if object_type_index < object_begin || target_type_index < object_begin {
+        return false;
+    }
+    // Parent indices are always smaller than their descendants.
+    if object_type_index < target_type_index {
+        return false;
+    }
+    unsafe {
+        let object_info = TVMFFIGetTypeInfo(object_type_index);
+        if object_info.is_null() {
+            return false;
+        }
+        let target_depth = Target::TYPE_DEPTH;
+        if (*object_info).type_depth <= target_depth {
+            return false;
+        }
+        let ancestor = *(*object_info).type_acenstors.add(target_depth as usize);
+        !ancestor.is_null() && (*ancestor).type_index == target_type_index
+    }
+}
+
+/// Runtime-checked casting between arbitrary `ObjectRef` types.
+///
+/// The cast uses the target's [`AnyCompatible::check_any_strict`] implementation,
+/// mirroring the semantics of `ObjectRef::as<T>` in C++. This supports both
+/// object hierarchies and parameterized object containers.
+///
+/// This trait is blanket-implemented for every [`ObjectRefCore`] type that is
+/// also [`AnyCompatible`].
+pub trait ObjectRefCast: ObjectRefCore + AnyCompatible {
+    /// Consume `self` and rewrap the underlying object as `B` without copying.
+    #[inline(always)]
+    fn try_cast<B>(self) -> crate::error::Result<B>
+    where
+        B: ObjectRefCore + AnyCompatible,
+    {
+        let mut any_data = TVMFFIAny::new();
+        unsafe {
+            // Keep ownership in `self` while the target check runs. This makes
+            // the failure and panic paths unwind normally instead of stranding
+            // an owned object inside a raw TVMFFIAny.
+            Self::copy_to_any_view(&self, &mut any_data);
+            debug_assert!(any_data.type_index >= TypeIndex::kTVMFFIStaticObjectBegin as i32);
+            // SAFETY: ObjectRefCore's contract requires its AnyCompatible
+            // representation to contain a valid object-range type index.
+            std::hint::assert_unchecked(
+                any_data.type_index >= TypeIndex::kTVMFFIStaticObjectBegin as i32,
+            );
+
+            if B::check_any_strict(&any_data) {
+                // Transfer ownership only after the borrowed representation has
+                // passed the target's complete hierarchy/container check.
+                Self::move_to_any(self, &mut any_data);
+                Ok(B::move_from_any_after_check(&mut any_data))
+            } else {
+                let msg = format!(
+                    "Cannot convert from type `{}` to `{}`",
+                    B::get_mismatch_type_info(&any_data),
+                    B::type_str()
+                );
+                Err(crate::error::Error::new(crate::error::TYPE_ERROR, &msg, ""))
+            }
+        }
+    }
+}
+
+impl<T: ObjectRefCore + AnyCompatible> ObjectRefCast for T {}
 
 /// Base class for ObjectRef
 ///
@@ -112,7 +227,8 @@ pub struct ObjectRef {
 }
 
 /// Unsafe operations on object
-pub(crate) mod unsafe_ {
+#[doc(hidden)]
+pub mod unsafe_ {
     use tvm_ffi_sys::{
         COMBINED_REF_COUNT_BOTH_ONE, COMBINED_REF_COUNT_MASK_U32, COMBINED_REF_COUNT_STRONG_ONE,
         COMBINED_REF_COUNT_WEAK_ONE,
@@ -120,7 +236,7 @@ pub(crate) mod unsafe_ {
 
     use std::ffi::c_void;
     use std::sync::atomic::{fence, Ordering};
-    use tvm_ffi_sys::{TVMFFIObject, TVMFFIObjectAllocHeader};
+    use tvm_ffi_sys::TVMFFIObject;
     use tvm_ffi_sys::TVMFFIObjectDeleterFlagBitMask::{
         kTVMFFIObjectDeleterFlagBitMaskBoth, kTVMFFIObjectDeleterFlagBitMaskStrong,
         kTVMFFIObjectDeleterFlagBitMaskWeak,
@@ -145,7 +261,7 @@ pub(crate) mod unsafe_ {
     /// # Arguments
     /// * `obj` - The object to decrease the reference count
     #[inline]
-    pub unsafe fn dec_ref(handle: *mut TVMFFIObject) {
+    pub(crate) unsafe fn dec_ref(handle: *mut TVMFFIObject) {
         let obj = &mut *handle;
         let old_combined_count = obj
             .combined_ref_count
@@ -186,20 +302,19 @@ pub(crate) mod unsafe_ {
     }
 
     #[inline]
-    pub unsafe fn strong_count(handle: *mut TVMFFIObject) -> usize {
+    pub(crate) unsafe fn strong_count(handle: *mut TVMFFIObject) -> usize {
         let obj = &mut *handle;
         (obj.combined_ref_count.load(Ordering::Relaxed) & COMBINED_REF_COUNT_MASK_U32) as usize
     }
 
     #[inline]
-    pub unsafe fn weak_count(handle: *mut TVMFFIObject) -> usize {
+    pub(crate) unsafe fn weak_count(handle: *mut TVMFFIObject) -> usize {
         let obj = &mut *handle;
         (obj.combined_ref_count.load(Ordering::Relaxed) >> 32) as usize
     }
 
-    /// Generic object deleter for objects allocated through the registered
-    /// `TVMFFICustomAllocator`.
-    pub unsafe extern "C" fn object_deleter_for_new<T>(ptr: *mut c_void, flags: i32)
+    /// Generic object deleter for objects allocated through Rust's global allocator.
+    pub(crate) unsafe extern "C" fn object_deleter_for_new<T>(ptr: *mut c_void, flags: i32)
     where
         T: super::ObjectCore,
     {
@@ -208,13 +323,42 @@ pub(crate) mod unsafe_ {
             std::ptr::drop_in_place(obj);
         }
         if flags & kTVMFFIObjectDeleterFlagBitMaskWeak as i32 != 0 {
-            let header_ptr = (ptr as *mut u8)
-                .sub(std::mem::size_of::<TVMFFIObjectAllocHeader>())
-                as *mut TVMFFIObjectAllocHeader;
-            let delete_space = (*header_ptr)
-                .delete_space
-                .expect("TVMFFIObjectAllocHeader::delete_space must be set by the allocator");
-            delete_space(ptr);
+            std::alloc::dealloc(ptr as *mut u8, std::alloc::Layout::new::<T>());
+        }
+    }
+
+    pub(crate) unsafe extern "C" fn object_deleter_for_new_with_extra_items<T, U>(
+        ptr: *mut c_void,
+        flags: i32,
+    ) where
+        T: super::ObjectCoreWithExtraItems<ExtraItem = U>,
+    {
+        let obj = ptr as *mut T;
+        if flags == kTVMFFIObjectDeleterFlagBitMaskBoth as i32 {
+            let extra_items_count = T::extra_items_count(&(*obj));
+            std::ptr::drop_in_place(obj);
+            let layout = std::alloc::Layout::from_size_align(
+                std::mem::size_of::<T>() + extra_items_count * std::mem::size_of::<U>(),
+                std::mem::align_of::<T>(),
+            )
+            .unwrap();
+            std::alloc::dealloc(ptr as *mut u8, layout);
+        } else {
+            assert_eq!(std::mem::size_of::<T>() % std::mem::size_of::<u64>(), 0);
+            if flags & kTVMFFIObjectDeleterFlagBitMaskStrong as i32 != 0 {
+                let extra_items_count = T::extra_items_count(&(*obj));
+                std::ptr::drop_in_place(obj);
+                std::ptr::write(obj as *mut u64, extra_items_count as u64);
+            }
+            if flags & kTVMFFIObjectDeleterFlagBitMaskWeak as i32 != 0 {
+                let extra_items_count = std::ptr::read(obj as *mut u64) as usize;
+                let layout = std::alloc::Layout::from_size_align(
+                    std::mem::size_of::<T>() + extra_items_count * std::mem::size_of::<U>(),
+                    std::mem::align_of::<T>(),
+                )
+                .unwrap();
+                std::alloc::dealloc(ptr as *mut u8, layout);
+            }
         }
     }
 }
@@ -233,6 +377,7 @@ impl Object {
 
 unsafe impl ObjectCore for Object {
     const TYPE_KEY: &'static str = "ffi.Object";
+    const TYPE_DEPTH: i32 = 0;
     #[inline]
     fn type_index() -> i32 {
         TypeIndex::kTVMFFIStaticObjectBegin as i32
@@ -247,23 +392,14 @@ unsafe impl ObjectCore for Object {
 // ObjectArc
 //---------------------
 
-/// Allocate via the process-wide `TVMFFICustomAllocator`.
-unsafe fn allocate_via_registry(size: usize, alignment: usize, type_index: i32) -> *mut u8 {
-    let alloc = TVMFFIGetCustomAllocator();
-    let allocate_fn = (*alloc)
-        .allocate
-        .expect("TVMFFICustomAllocator::allocate must be set");
-    allocate_fn(size, alignment, type_index, (*alloc).context) as *mut u8
-}
-
 impl<T: ObjectCore> ObjectArc<T> {
     pub fn new(data: T) -> Self {
         unsafe {
-            let raw_data_ptr = allocate_via_registry(
-                std::mem::size_of::<T>(),
-                std::mem::align_of::<T>(),
-                T::type_index(),
-            );
+            let layout = std::alloc::Layout::new::<T>();
+            let raw_data_ptr = std::alloc::alloc(layout);
+            if raw_data_ptr.is_null() {
+                std::alloc::handle_alloc_error(layout);
+            }
             let ptr = raw_data_ptr as *mut T;
             std::ptr::write(ptr, data);
             // now override the header directly
@@ -293,9 +429,15 @@ impl<T: ObjectCore> ObjectArc<T> {
             assert_eq!(std::mem::align_of::<T>() % std::mem::align_of::<U>(), 0);
             assert_eq!(std::mem::size_of::<T>() % std::mem::align_of::<U>(), 0);
             let extra_items_count = T::extra_items_count(&data);
-            let total_size = std::mem::size_of::<T>() + extra_items_count * std::mem::size_of::<U>();
-            let raw_data_ptr =
-                allocate_via_registry(total_size, std::mem::align_of::<T>(), T::type_index());
+            let layout = std::alloc::Layout::from_size_align(
+                std::mem::size_of::<T>() + extra_items_count * std::mem::size_of::<U>(),
+                std::mem::align_of::<T>(),
+            )
+            .unwrap();
+            let raw_data_ptr = std::alloc::alloc(layout);
+            if raw_data_ptr.is_null() {
+                std::alloc::handle_alloc_error(layout);
+            }
             let ptr = raw_data_ptr as *mut T;
             std::ptr::write(ptr, data);
             // now override the header directly
@@ -305,7 +447,7 @@ impl<T: ObjectCore> ObjectArc<T> {
                     combined_ref_count: AtomicU64::new(COMBINED_REF_COUNT_BOTH_ONE),
                     type_index: T::type_index(),
                     __padding: 0,
-                    deleter: Some(unsafe_::object_deleter_for_new::<T>),
+                    deleter: Some(unsafe_::object_deleter_for_new_with_extra_items::<T, U>),
                 },
             );
             // move into the object arc ptr

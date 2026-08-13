@@ -47,9 +47,12 @@ static_assert(TypeTraits<Optional<TensorView>>::storage_enabled ==
               TypeTraits<TensorView>::storage_enabled);
 static_assert(!TypeTraits<Optional<TensorView>>::storage_enabled,
               "Optional<view> must not be storage-enabled");
-// Because Optional<int>/Optional<TInt> are storage-enabled, the outer
-// Optional<Optional<T>> uses the Any-backed representation (sizeof == sizeof(Any)),
-// and Optional<T> is accepted as a storage type (e.g. inside Variant/containers).
+// ObjectRef optionals are pointer-backed, while an outer Optional<Optional<T>>
+// remains Any-backed because nested optionals are intentionally distinct.
+static_assert(sizeof(Optional<TInt>) == sizeof(ObjectPtr<Object>));
+static_assert(alignof(Optional<TInt>) == alignof(ObjectPtr<Object>));
+static_assert(sizeof(Optional<Function>) == sizeof(Function));
+static_assert(alignof(Optional<Function>) == alignof(Function));
 static_assert(sizeof(Optional<Optional<int>>) == sizeof(Any));
 static_assert(sizeof(Optional<Optional<TInt>>) == sizeof(Any));
 static_assert(details::storage_enabled_v<Optional<int>>);
@@ -67,8 +70,7 @@ TEST(Optional, StorageEnabledPassThrough) {
 TEST(Optional, TInt) {
   Optional<TInt> x;
   Optional<TInt> y = TInt(11);
-  // Optional<T> is uniformly backed by a single Any (TVMFFIAny) regardless of T.
-  static_assert(sizeof(Optional<TInt>) == sizeof(Any));
+  static_assert(sizeof(Optional<TInt>) == sizeof(ObjectPtr<Object>));
 
   EXPECT_TRUE(!x.has_value());
   EXPECT_EQ(x.value_or(TInt(12))->value, 12);
@@ -86,6 +88,26 @@ TEST(Optional, TInt) {
   auto y2 = std::move(z_any).cast<Optional<TInt>>();
   EXPECT_TRUE(y2.has_value());
   EXPECT_EQ(y2.value_or(TInt(12))->value, 11);
+}
+
+TEST(Optional, ObjectRefPointerABI) {
+  static_assert(sizeof(Optional<ObjectRef>) == sizeof(ObjectPtr<Object>));
+  static_assert(alignof(Optional<ObjectRef>) == alignof(ObjectPtr<Object>));
+
+  ObjectRef value = TInt(19);
+  Optional<ObjectRef> present = value;
+  ASSERT_TRUE(present.has_value());
+  EXPECT_TRUE(present.same_as(value));
+  EXPECT_EQ(present.use_count(), value.use_count());
+
+  Any encoded = present;
+  Optional<ObjectRef> decoded = encoded.cast<Optional<ObjectRef>>();
+  ASSERT_TRUE(decoded.has_value());
+  EXPECT_TRUE(decoded.same_as(value));
+
+  Optional<ObjectRef> absent = std::nullopt;
+  EXPECT_EQ(absent.get(), nullptr);
+  EXPECT_FALSE(Any(absent).cast<Optional<ObjectRef>>().has_value());
 }
 
 TEST(Optional, double) {
@@ -250,15 +272,13 @@ TEST(Optional, Bytes) {
   static_assert(sizeof(Optional<Bytes>) == sizeof(Any));
 }
 
-// Optional<T> is uniformly backed by a single TVMFFIAny (Any), so its layout is
-// independent of the contained type: every Optional<T> has the size and
-// alignment of a TVMFFIAny. (The Rust binding's in-place Optional<T> mirror is a
-// separate follow-up that adopts this uniform 16-byte representation.)
+// Non-object values keep the uniform TVMFFIAny representation. Object pointer
+// values are covered above by pointer-size ABI assertions.
 template <typename... T>
-constexpr bool all_optional_layouts_uniform_v =
+constexpr bool all_non_object_optional_layouts_uniform_v =
     ((sizeof(Optional<T>) == sizeof(TVMFFIAny) && alignof(Optional<T>) == alignof(TVMFFIAny)) &&
      ...);
-static_assert(
-    all_optional_layouts_uniform_v<bool, int8_t, int16_t, int32_t, int64_t, uint8_t, uint16_t,
-                                   uint32_t, uint64_t, float, double, String, Bytes>);
+static_assert(all_non_object_optional_layouts_uniform_v<bool, int8_t, int16_t, int32_t, int64_t,
+                                                        uint8_t, uint16_t, uint32_t, uint64_t,
+                                                        float, double, String, Bytes>);
 }  // namespace

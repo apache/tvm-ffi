@@ -48,6 +48,10 @@ import tvm_ffi
 import tvm_ffi.testing
 from tvm_ffi import dataclasses as dc
 
+pytestmark = pytest.mark.skip(
+    reason="PyObject tying is compiled but dormant until allocator activation"
+)
+
 # ---------------------------------------------------------------------------
 # Test type registration
 # ---------------------------------------------------------------------------

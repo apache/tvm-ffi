@@ -20,7 +20,7 @@ use tvm_ffi::*;
 
 /// The 16-byte `TVMFFIAny` cell backing an `Optional<T>` (type_index@0,
 /// small_str_len@4, union@8); no padding.
-fn cell_image<T: AnyCompatible>(opt: &Optional<T>) -> [u8; 16] {
+fn cell_image<T: OptionalCompatible>(opt: &Optional<T>) -> [u8; 16] {
     let p = opt as *const Optional<T> as *const u8;
     let mut b = [0u8; 16];
     // `Optional<T>` is a fully-initialized 16-byte cell.
@@ -29,18 +29,35 @@ fn cell_image<T: AnyCompatible>(opt: &Optional<T>) -> [u8; 16] {
 }
 
 #[test]
-fn layout_is_uniform_16_bytes() {
-    // Independent of `T`: every `Optional<T>` is the 16-byte `TVMFFIAny` cell.
+fn non_object_layout_is_uniform_16_bytes() {
+    // Every supported non-object Optional<T> is the 16-byte TVMFFIAny cell.
     assert_eq!(std::mem::size_of::<Optional<i32>>(), 16);
     assert_eq!(std::mem::size_of::<Optional<i64>>(), 16);
     assert_eq!(std::mem::size_of::<Optional<bool>>(), 16);
     assert_eq!(std::mem::size_of::<Optional<f64>>(), 16);
     assert_eq!(std::mem::size_of::<Optional<String>>(), 16);
-    assert_eq!(std::mem::size_of::<Optional<Array<i64>>>(), 16);
     assert_eq!(
         std::mem::align_of::<Optional<i32>>(),
-        std::mem::align_of::<Optional<Array<i64>>>()
+        std::mem::align_of::<Optional<String>>()
     );
+}
+
+#[test]
+fn object_option_uses_nullable_pointer_layout() {
+    // Object classes intentionally use Rust Option<X>, not Optional<X>.
+    // ObjectArc is non-null, so Option<Array<_>> uses its null-pointer niche.
+    assert_eq!(
+        std::mem::size_of::<Option<Array<i64>>>(),
+        std::mem::size_of::<Array<i64>>()
+    );
+    assert_eq!(
+        std::mem::size_of::<Option<Array<i64>>>(),
+        std::mem::size_of::<*mut ()>()
+    );
+    let none: Option<Array<i64>> = None;
+    assert!(none.is_none());
+    let some = Some(Array::new(vec![1i64, 2, 3]));
+    assert_eq!(some.as_ref().expect("engaged").len(), 3);
 }
 
 #[test]
@@ -48,7 +65,6 @@ fn none_is_all_zero_cell() {
     // `kTVMFFINone == 0` and the union is zeroed, so `nullopt` is 16 zero bytes.
     assert_eq!(cell_image(&Optional::<i32>::none()), [0u8; 16]);
     assert_eq!(cell_image(&Optional::<String>::none()), [0u8; 16]);
-    assert_eq!(cell_image(&Optional::<Array<i64>>::none()), [0u8; 16]);
 }
 
 #[test]
@@ -72,7 +88,7 @@ fn byte_image_some_int_matches_ffi_any() {
 
 #[test]
 fn pod_roundtrip_all_supported_types() {
-    fn check<T: AnyCompatible + PartialEq + Copy + std::fmt::Debug>(val: T) {
+    fn check<T: OptionalCompatible + PartialEq + Copy + std::fmt::Debug>(val: T) {
         let ty = std::any::type_name::<T>();
         let some = Optional::<T>::some(val);
         assert!(some.has_value(), "engaged has_value for {ty}");
@@ -211,27 +227,4 @@ fn string_set_in_place() {
 
     o.set(Some(String::from("x")));
     assert_eq!(o.as_str(), Some("x"));
-}
-
-#[test]
-fn object_ref_payload_roundtrip_and_clone() {
-    // An ObjectRef payload is now the same 16-byte cell (was an 8-byte pointer).
-    let arr = Array::new(vec![1i64, 2, 3]);
-    let opt = Optional::<Array<i64>>::some(arr);
-    assert!(opt.has_value());
-    let got = opt.get().expect("engaged");
-    assert_eq!(got.len(), 3);
-
-    // clone shares the underlying object; both drop without double-free.
-    let cloned = opt.clone();
-    assert!(cloned.has_value());
-    assert_eq!(cloned.get().expect("engaged").len(), 3);
-
-    // move the payload out
-    let moved: Option<Array<i64>> = opt.into_option();
-    assert_eq!(moved.expect("moved").len(), 3);
-
-    let none = Optional::<Array<i64>>::none();
-    assert!(none.is_none());
-    assert!(none.get().is_none());
 }

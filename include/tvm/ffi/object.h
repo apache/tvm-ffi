@@ -780,9 +780,9 @@ class WeakObjectPtr {
  * \brief Optional data type in FFI.
  * \tparam T The underlying type of the optional.
  *
- * \note For storage-enabled T, Optional<T> is backed by a single TVMFFIAny (Any)
- *   and uses kTVMFFINone to represent nullopt, so its layout is independent of T.
- *   For non-storage-enabled T it falls back to std::optional<T>.
+ * \note ObjectRef, ObjectPtr, and Arc values use a nullable ObjectPtr-backed
+ *   representation. Other storage-enabled T use one TVMFFIAny, while
+ *   non-storage-enabled T fall back to std::optional<T>.
  */
 template <typename T, typename = void>
 class Optional;

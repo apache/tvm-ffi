@@ -53,6 +53,25 @@ impl<'a> AnyView<'a> {
         self.data.type_index
     }
 
+    #[inline]
+    pub(crate) fn as_raw_ffi_any(&self) -> &TVMFFIAny {
+        &self.data
+    }
+
+    /// Construct a borrowed view from its ABI representation.
+    ///
+    /// # Safety
+    ///
+    /// The caller must keep every resource referenced by `data` alive for the
+    /// returned view's complete lifetime.
+    #[inline]
+    pub(crate) unsafe fn from_raw_ffi_any(data: TVMFFIAny) -> Self {
+        Self {
+            data,
+            _phantom: std::marker::PhantomData,
+        }
+    }
+
     /// More strict version than try_from/try_into
     ///
     /// This function will not try to cast the type
@@ -151,6 +170,10 @@ impl Any {
     pub fn type_index(&self) -> i32 {
         self.data.type_index
     }
+    #[inline]
+    pub(crate) fn as_raw_ffi_any(&self) -> &TVMFFIAny {
+        &self.data
+    }
     /// Try to query if stored typed in Any exactly matches the type T
     ///
     /// This function is fast in the case of failure and can be used to check
@@ -230,6 +253,31 @@ impl Drop for Any {
             unsafe { object::unsafe_::dec_ref(self.data.data_union.v_obj) }
         }
     }
+}
+
+/// Convert an [`AnyView`] without constructing a diagnostic error on mismatch.
+#[inline]
+pub(crate) fn try_cast_from_any_view<T>(value: &AnyView<'_>) -> Result<T, ()>
+where
+    T: AnyCompatible,
+{
+    unsafe { T::try_cast_from_any_view(&value.data) }
+}
+
+/// Copy a value after exact-leaf lookup has established compatibility.
+///
+/// # Safety
+///
+/// `T::MATCH_ANY_EXACT` must be true and `value.type_index()` must equal
+/// `T::match_any_exact_type_index()`.
+#[inline(always)]
+pub(crate) unsafe fn copy_from_any_view_after_check<T>(value: &AnyView<'_>) -> T
+where
+    T: AnyCompatible,
+{
+    debug_assert!(T::MATCH_ANY_EXACT);
+    debug_assert!(T::check_any_strict(&value.data));
+    T::copy_from_any_view_after_check(&value.data)
 }
 
 // convert Any ref to AnyView

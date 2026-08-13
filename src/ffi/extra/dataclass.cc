@@ -1742,9 +1742,7 @@ PyClassFieldStorageKind GetPyClassFieldStorageKind(const TVMFFIFieldInfo* finfo)
  *
  * For the "strong" phase, iterates all reflected fields and destructs
  * Any/ObjectRef values in-place (to release references).  For the "weak"
- * phase, forwards to the prepended ``TVMFFIObjectAllocHeader``'s
- * ``delete_space`` (every Object carries one — libtvm_ffi's builtin
- * default allocator ensures it).
+ * phase, frees the underlying calloc'd memory.
  */
 void PyClassDeleter(void* self_void, int flags) {
   TVMFFIObject* self = static_cast<TVMFFIObject*>(self_void);
@@ -1768,7 +1766,7 @@ void PyClassDeleter(void* self_void, int flags) {
     });
   }
   if (flags & kTVMFFIObjectDeleterFlagBitMaskWeak) {
-    details::ObjectUnsafe::GetObjectAllocHeaderFromPtr(self_void)->delete_space(self_void);
+    std::free(self_void);
   }
 }
 
@@ -2118,16 +2116,11 @@ void PyClassRegisterTypeAttrColumns(int32_t type_index, int32_t total_size) {
   RegisterFFIInit(type_index);
   // Step 2. Register `__ffi_new__`
   Function new_fn = Function::FromTyped([type_index, total_size, type_info]() -> ObjectRef {
-    // Route through the custom-allocator registry so the prepended
-    // TVMFFIObjectAllocHeader is in place for PyClassDeleter's Weak
-    // branch. Then memset to zero-init the payload (mirrors the original
-    // calloc-based path); ConstructPyClassFields below placement-news the
-    // non-trivial fields while the memset covers the POD ones.
-    size_t alloc_size = static_cast<size_t>(total_size);
-    TVMFFICustomAllocator* alloc = TVMFFIGetCustomAllocator();
-    void* obj_ptr =
-        alloc->allocate(alloc_size, alignof(::std::max_align_t), type_index, alloc->context);
-    std::memset(obj_ptr, 0, alloc_size);
+    void* obj_ptr = std::calloc(1, static_cast<size_t>(total_size));
+    if (!obj_ptr) {
+      TVM_FFI_THROW(RuntimeError) << "Failed to allocate " << total_size << " bytes for type "
+                                  << TypeIndexToTypeKey(type_index);
+    }
     TVMFFIObject* ffi_obj = reinterpret_cast<TVMFFIObject*>(obj_ptr);
     ffi_obj->type_index = type_index;
     ffi_obj->combined_ref_count = details::kCombinedRefCountBothOne;
@@ -2142,12 +2135,10 @@ void PyClassRegisterTypeAttrColumns(int32_t type_index, int32_t total_size) {
   // Step 3. Register `__ffi_shallow_copy__`
   Function copy_fn =
       Function::FromTyped([type_index, total_size, type_info](const Object* src) -> ObjectRef {
-        // Allocator + memset mirror RegisterFFINew above.
-        size_t alloc_size = static_cast<size_t>(total_size);
-        TVMFFICustomAllocator* alloc = TVMFFIGetCustomAllocator();
-        void* obj_ptr =
-            alloc->allocate(alloc_size, alignof(::std::max_align_t), type_index, alloc->context);
-        std::memset(obj_ptr, 0, alloc_size);
+        void* obj_ptr = std::calloc(1, static_cast<size_t>(total_size));
+        if (!obj_ptr) {
+          TVM_FFI_THROW(RuntimeError) << "Failed to allocate for shallow copy";
+        }
         TVMFFIObject* ffi_obj = reinterpret_cast<TVMFFIObject*>(obj_ptr);
         ffi_obj->type_index = type_index;
         ffi_obj->combined_ref_count = details::kCombinedRefCountBothOne;

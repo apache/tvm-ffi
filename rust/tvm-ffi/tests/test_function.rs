@@ -131,6 +131,44 @@ fn test_function_echo_tensor_typed() {
     assert_eq!(result_data[3], 4.0);
 }
 
+#[test]
+fn test_function_from_type_key_method_ctor_and_method() {
+    // constructors registered via refl::init are reachable as `__ffi_init__`
+    let ctor = Function::from_type_key_method("testing.TestIntPair", "__ffi_init__").unwrap();
+    let pair = ctor.call_tuple((1i64, 2i64)).unwrap();
+    // instance method: the first packed argument is the object itself
+    let sum = Function::from_type_key_method("testing.TestIntPair", "sum").unwrap();
+    let result = sum.call_packed(&[AnyView::from(&pair)]).unwrap();
+    assert_eq!(i64::try_from(result).unwrap(), 3);
+}
+
+#[test]
+fn test_function_from_type_method_by_index() {
+    let ctor = Function::from_type_key_method("testing.TestIntPair", "__ffi_init__").unwrap();
+    let pair = ctor.call_tuple((5i64, 7i64)).unwrap();
+    let sum = Function::from_type_method(pair.type_index(), "sum").unwrap();
+    let result = sum.call_packed(&[AnyView::from(&pair)]).unwrap();
+    assert_eq!(i64::try_from(result).unwrap(), 12);
+}
+
+#[test]
+fn test_function_from_type_method_unknown_method() {
+    let error = Function::from_type_key_method("testing.TestIntPair", "nonexistent_method")
+        .err()
+        .unwrap();
+    assert_eq!(error.kind(), TYPE_ERROR);
+    assert!(error.message().contains("nonexistent_method"));
+    assert!(error.message().contains("testing.TestIntPair"));
+}
+
+#[test]
+fn test_function_from_type_key_method_unknown_type_key() {
+    let error = Function::from_type_key_method("testing.NonExistentType", "sum")
+        .err()
+        .unwrap();
+    assert!(error.message().contains("testing.NonExistentType"));
+}
+
 fn testing_add_one(x: i32) -> Result<i32> {
     Ok(x + 1)
 }

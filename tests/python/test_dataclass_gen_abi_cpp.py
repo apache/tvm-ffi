@@ -728,10 +728,10 @@ struct alignas(8) ObjectContainersObj : public ::tvm::ffi::Object {
   ::tvm::ffi::Dict<::tvm::ffi::String, ::tvm::ffi::Arc<::testing::gen_abi_cpp::native::RawTensorObj>> dictionary;  // offset=48, size=8, align=8
   ::tvm::ffi::Arc<::testing::gen_abi_cpp::native::RawTensorObj> item;  // offset=56, size=8, align=8
   ::tvm::ffi::ObjectPtr<::testing::gen_abi_cpp::native::RawTensorObj> nullable_item;  // offset=64, size=8, align=8
-  ::tvm::ffi::Optional<::tvm::ffi::Arc<::testing::gen_abi_cpp::native::RawTensorObj>> optional_item;  // offset=72, size=16, align=8
+  ::tvm::ffi::ObjectPtr<::testing::gen_abi_cpp::native::RawTensorObj> optional_item;  // offset=72, size=8, align=8
 };
 
-static_assert(sizeof(ObjectContainersObj) == 88);
+static_assert(sizeof(ObjectContainersObj) == 80);
 static_assert(alignof(ObjectContainersObj) == 8);
 static_assert(sizeof(decltype(ObjectContainersObj::array_items)) == 8);
 static_assert(alignof(decltype(ObjectContainersObj::array_items)) == 8);
@@ -751,7 +751,7 @@ static_assert(offsetof(ObjectContainersObj, item) == 56);
 static_assert(sizeof(decltype(ObjectContainersObj::nullable_item)) == 8);
 static_assert(alignof(decltype(ObjectContainersObj::nullable_item)) == 8);
 static_assert(offsetof(ObjectContainersObj, nullable_item) == 64);
-static_assert(sizeof(decltype(ObjectContainersObj::optional_item)) == 16);
+static_assert(sizeof(decltype(ObjectContainersObj::optional_item)) == 8);
 static_assert(alignof(decltype(ObjectContainersObj::optional_item)) == 8);
 static_assert(offsetof(ObjectContainersObj, optional_item) == 72);
 

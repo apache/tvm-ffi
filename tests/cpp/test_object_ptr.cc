@@ -316,6 +316,13 @@ TEST(Arc, ConstructionOwnershipAndUpcast) {
 
 TEST(Arc, AnyRoundTripAndSchemas) {
   Arc<GeneratedDerivedObj> derived = make_arc<GeneratedDerivedObj>(7);
+  using BasePtr = ObjectPtr<GeneratedBaseObj>;
+  using BaseArc = Arc<GeneratedBaseObj>;
+  static_assert(sizeof(Optional<BasePtr>) == sizeof(BasePtr));
+  static_assert(alignof(Optional<BasePtr>) == alignof(BasePtr));
+  static_assert(sizeof(Optional<BaseArc>) == sizeof(BasePtr));
+  static_assert(alignof(Optional<BaseArc>) == alignof(BasePtr));
+
   Any value = derived;
   EXPECT_EQ(derived.use_count(), 2);
 
@@ -337,9 +344,26 @@ TEST(Arc, AnyRoundTripAndSchemas) {
   EXPECT_EQ(TypeTraits<Optional<Arc<GeneratedBaseObj>>>::TypeSchema(),
             R"({"type":"Optional","args":[{"type":"testing.GeneratedBase"}]})");
 
+  BasePtr ptr = derived;
+  Optional<BasePtr> optional_ptr = ptr;
+  ASSERT_TRUE(optional_ptr.has_value());
+  EXPECT_EQ(optional_ptr.get(), ptr.get());
+  Optional<BasePtr> ptr_roundtrip = Any(optional_ptr).cast<Optional<BasePtr>>();
+  ASSERT_TRUE(ptr_roundtrip.has_value());
+  EXPECT_EQ(ptr_roundtrip.get(), ptr.get());
+  BasePtr moved_ptr = std::move(optional_ptr).value();
+  EXPECT_EQ(moved_ptr.get(), ptr.get());
+  // NOLINTNEXTLINE(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
+  EXPECT_FALSE(optional_ptr.has_value());
+
   Optional<Arc<GeneratedBaseObj>> present = Arc<GeneratedBaseObj>(derived);
   ASSERT_TRUE(present.has_value());
+  EXPECT_EQ(present.get(), static_cast<GeneratedBaseObj*>(derived.get()));
   EXPECT_EQ(present.value().get(), static_cast<GeneratedBaseObj*>(derived.get()));
+  Arc<GeneratedBaseObj> moved_arc = std::move(present).value();
+  EXPECT_EQ(moved_arc.get(), static_cast<GeneratedBaseObj*>(derived.get()));
+  // NOLINTNEXTLINE(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
+  EXPECT_FALSE(present.has_value());
   Optional<Arc<GeneratedBaseObj>> absent = std::nullopt;
   EXPECT_FALSE(Any(absent).cast<Optional<Arc<GeneratedBaseObj>>>().has_value());
 }

@@ -46,6 +46,9 @@ def _version_info() -> dict[str, Any]:
     """Return project version information using setuptools_scm."""
     version = setuptools_scm.get_version()
     v = packaging_version(version)
+    # After v0.1.13-post0, setuptools-scm derives 0.1.13.post1.devN rather than
+    # 0.1.14.devN; source checks still target the already-bumped patch 0.1.14.
+    source_release = (v.major, v.minor, v.micro + int(v.is_postrelease))
 
     return {
         "full": version,
@@ -62,6 +65,7 @@ def _version_info() -> dict[str, Any]:
         "is_devrelease": v.is_devrelease,
         "base_version": v.base_version,
         "public": v.public,
+        "source_release": source_release,
     }
 
 
@@ -106,11 +110,7 @@ def _check_cpp(version_info: dict) -> list[str]:
         errors.append(f"[C++] {c_api_path}: No version macros found: {major=}, {minor=}, {patch=}.")
         return errors
 
-    exp_major, exp_minor, exp_patch = (
-        version_info["major"],
-        version_info["minor"],
-        version_info["micro"],
-    )
+    exp_major, exp_minor, exp_patch = version_info["source_release"]
     if (major, minor, patch) != (exp_major, exp_minor, exp_patch):
         errors.append(
             f"[C++] {c_api_path}: Macro version mismatch: found {major}.{minor}.{patch}, "
@@ -143,7 +143,7 @@ def _check_rust(version_info: dict) -> list[str]:
         )
 
     # 2) Optionally enforce compatibility with Python version
-    base = version_info["base_version"]
+    base = ".".join(str(part) for part in version_info["source_release"])
     allowed: set[str] = {base}
     pre = _map_pep440_pre_to_semver(version_info.get("pre"))
     if pre:

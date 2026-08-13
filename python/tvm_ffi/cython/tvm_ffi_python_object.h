@@ -660,24 +660,20 @@ inline void TVMFFIPyMarkPythonFinalizing() noexcept {
 }
 
 /*!
- * \brief True iff ``chandle`` was allocated through the Python custom
- *        allocator (full ``PyCustomAllocHeader`` ahead of it). False for
- *        allocations that came through libtvm_ffi's builtin default
- *        (only the base ``TVMFFIObjectAllocHeader``).
+ * \brief Whether ``chandle`` participates in Python object tying.
  *
- * Detection is by comparing ``base.delete_space`` against
- * ``TVMFFIPyDeleteSpace``: each frontend recognizes its own deleter
- * pointer, so multiple frontends can coexist without a flag bit on
- * ``TVMFFIObject``.
+ * Object tying is dormant during the compatibility rollout: public object
+ * constructors still use the legacy no-prefix allocation layout, so probing
+ * memory before an arbitrary object body would be invalid. Keep the complete
+ * tying implementation compiled, but route every object through the ordinary
+ * fresh-wrapper path until allocation is activated in a later release.
  *
- * \param chandle The FFI object handle to test (NULL yields false).
- * \return True iff ``chandle`` carries a ``PyCustomAllocHeader`` (our deleter).
+ * \param chandle The FFI object handle to test.
+ * \return False while object tying remains dormant.
  */
 TVM_FFI_INLINE bool TVMFFIPyIsCanonical(void* chandle) {
-  if (chandle == nullptr) return false;
-  TVMFFIObjectAllocHeader* base = reinterpret_cast<TVMFFIObjectAllocHeader*>(
-      static_cast<char*>(chandle) - sizeof(TVMFFIObjectAllocHeader));
-  return base->delete_space == &TVMFFIPyDeleteSpace;
+  (void)chandle;
+  return false;
 }
 
 //---------------------------------------------------------------

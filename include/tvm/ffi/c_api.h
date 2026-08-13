@@ -56,13 +56,21 @@
 #define TVM_FFI_DLL_EXPORT __attribute__((visibility("default")))
 #endif
 
+// Marks a function that has no observable effects and whose return value depends
+// only on its arguments and non-volatile memory.
+#if defined(__GNUC__) || defined(__clang__)
+#define TVM_FFI_ATTRIBUTE_PURE __attribute__((__pure__))
+#else
+#define TVM_FFI_ATTRIBUTE_PURE
+#endif
+
 // NOLINTBEGIN(modernize-macro-to-enum)
 /*! \brief TVM FFI major version. */
 #define TVM_FFI_VERSION_MAJOR 0
 /*! \brief TVM FFI minor version. */
 #define TVM_FFI_VERSION_MINOR 1
 /*! \brief TVM FFI patch version. */
-#define TVM_FFI_VERSION_PATCH 13
+#define TVM_FFI_VERSION_PATCH 14
 // NOLINTEND(modernize-macro-to-enum)
 
 #ifdef __cplusplus
@@ -1484,9 +1492,10 @@ TVM_FFI_DLL int32_t TVMFFITypeGetOrAllocIndex(const TVMFFIByteArray* type_key,
 
 /*!
  * \brief Get dynamic type info by type index.
+ * \pre type_index identifies a registered type.
  * \return The type info.
  */
-TVM_FFI_DLL const TVMFFITypeInfo* TVMFFIGetTypeInfo(int32_t type_index);
+TVM_FFI_DLL TVM_FFI_ATTRIBUTE_PURE const TVMFFITypeInfo* TVMFFIGetTypeInfo(int32_t type_index);
 
 // ----------------------------------------------------------------------------
 // Static handle initialization and deinitialization API

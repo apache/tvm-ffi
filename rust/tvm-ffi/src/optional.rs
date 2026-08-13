@@ -16,30 +16,76 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-//! In-place mirror of C++ `ffi::Optional<T>` (`include/tvm/ffi/optional.h`).
+//! In-place mirror of C++ `ffi::Optional<T>` for non-object-pointer `T`
+//! (`include/tvm/ffi/optional.h`).
 //!
-//! C++ `ffi::Optional<T>` is uniformly backed by a single 16-byte `TVMFFIAny`
-//! regardless of `T`, with `type_index == kTVMFFINone` meaning `nullopt`. This
-//! makes the layout independent of the contained type, so a single Rust type
-//! mirrors every `T`.
+//! C++ `ffi::Optional<T>` is backed by one 16-byte `TVMFFIAny` for scalar,
+//! string, and other non-object-pointer values, with
+//! `type_index == kTVMFFINone` meaning `nullopt`. [`Optional<T>`] mirrors that
+//! representation.
 //!
-//! [`Optional<T>`] is `#[repr(transparent)]` over [`Any`] (the same 16-byte
-//! `TVMFFIAny` cell) and decodes such a field's bytes in place — no FFI call, no
-//! reflection getter/setter. It is named `Optional` (not `Option`) to distinguish
-//! it from Rust's [`std::option::Option`], matching the C++ `ffi::Optional` name.
+//! ObjectRef, ObjectPtr, and Arc cases are intentionally excluded. Their C++
+//! optional is one nullable object pointer, which Rust's niche-optimized
+//! [`std::option::Option<X>`] already mirrors. Using `Optional<X>` for an object
+//! class is rejected at compile time so the two ABI layouts cannot be confused.
 //!
-//! It replaces the earlier per-`T` mirrors (`OptionPod<T>` / `OptionStr` /
-//! `OptionObjRef<T>`): those tracked the three now-removed C++ storage layouts
-//! (`std::optional<T>`, the `String`/`Bytes` sentinel cell, and an `ObjectRef`
-//! pointer). With the uniform `TVMFFIAny` backing they collapse into this one
-//! type.
+//! `Optional<T>` is `#[repr(transparent)]` over [`Any`] and decodes the cell in
+//! place. It is named `Optional` (not `Option`) to match the C++ type while
+//! keeping the pointer-backed object case visually distinct.
 
 use crate::any::Any;
-use crate::string::String;
+use crate::string::{Bytes, String};
 use crate::type_traits::AnyCompatible;
 use std::fmt::{self, Debug};
 use std::marker::PhantomData;
 use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
+
+/// Marker for values whose C++ `ffi::Optional<T>` uses the 16-byte
+/// `TVMFFIAny` representation.
+///
+/// Object classes deliberately do not implement this trait. Use `Option<X>`
+/// for those values; it is the pointer-sized mirror of C++'s nullable
+/// `ObjectPtr`-backed optional.
+///
+/// ```compile_fail,E0277
+/// use tvm_ffi::{Array, Optional};
+/// let _ = Optional::<Array<i64>>::none();
+/// ```
+#[diagnostic::on_unimplemented(
+    message = "`Optional<{Self}>` only mirrors non-object-pointer `ffi::Optional` values",
+    label = "`{Self}` uses the object-pointer optional representation",
+    note = "use `Option<{Self}>` for object classes; it is the compatible nullable-pointer layout"
+)]
+pub unsafe trait OptionalCompatible: AnyCompatible {}
+
+macro_rules! impl_optional_compatible {
+    ($($t:ty),* $(,)?) => {
+        $(unsafe impl OptionalCompatible for $t {})*
+    };
+}
+
+impl_optional_compatible!(
+    bool,
+    i8,
+    i16,
+    i32,
+    i64,
+    isize,
+    u8,
+    u16,
+    u32,
+    u64,
+    usize,
+    f32,
+    f64,
+    *mut core::ffi::c_void,
+    crate::DLDataType,
+    crate::DLDevice,
+    String,
+    Bytes,
+);
+
+unsafe impl<T: OptionalCompatible> OptionalCompatible for Option<T> {}
 
 /// In-place mirror of C++ `ffi::Optional<T>`: a single 16-byte `TVMFFIAny` cell
 /// (wrapped as [`Any`]) whose `type_index == kTVMFFINone` encodes `nullopt`.
@@ -48,7 +94,7 @@ use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
 /// docs](self). Reuses [`Any`]'s reference-counting `Clone`/`Drop`, which are a
 /// no-op on the `nullopt` cell (`type_index` below `kTVMFFIStaticObjectBegin`).
 #[repr(transparent)]
-pub struct Optional<T: AnyCompatible> {
+pub struct Optional<T: OptionalCompatible> {
     // Holds either the value's `TVMFFIAny` representation or a `kTVMFFINone` cell.
     data: Any,
     _marker: PhantomData<T>,
@@ -62,7 +108,7 @@ const _: () = assert!(
         && std::mem::align_of::<Optional<i64>>() == std::mem::align_of::<crate::TVMFFIAny>()
 );
 
-impl<T: AnyCompatible> Optional<T> {
+impl<T: OptionalCompatible> Optional<T> {
     /// An engaged optional holding `value`.
     #[inline]
     pub fn some(value: T) -> Self {
@@ -145,7 +191,7 @@ impl Optional<String> {
     }
 }
 
-impl<T: AnyCompatible> Default for Optional<T> {
+impl<T: OptionalCompatible> Default for Optional<T> {
     /// `nullopt`, matching the C++ default constructor.
     #[inline]
     fn default() -> Self {
@@ -153,7 +199,7 @@ impl<T: AnyCompatible> Default for Optional<T> {
     }
 }
 
-impl<T: AnyCompatible> Clone for Optional<T> {
+impl<T: OptionalCompatible> Clone for Optional<T> {
     #[inline]
     fn clone(&self) -> Self {
         Self {
@@ -164,16 +210,16 @@ impl<T: AnyCompatible> Clone for Optional<T> {
     }
 }
 
-impl<T: AnyCompatible + PartialEq> PartialEq for Optional<T> {
+impl<T: OptionalCompatible + PartialEq> PartialEq for Optional<T> {
     #[inline]
     fn eq(&self, other: &Self) -> bool {
         self.get() == other.get()
     }
 }
 
-impl<T: AnyCompatible + Eq> Eq for Optional<T> {}
+impl<T: OptionalCompatible + Eq> Eq for Optional<T> {}
 
-impl<T: AnyCompatible> From<Option<T>> for Optional<T> {
+impl<T: OptionalCompatible> From<Option<T>> for Optional<T> {
     #[inline]
     fn from(value: Option<T>) -> Self {
         match value {
@@ -183,14 +229,14 @@ impl<T: AnyCompatible> From<Option<T>> for Optional<T> {
     }
 }
 
-impl<T: AnyCompatible> From<Optional<T>> for Option<T> {
+impl<T: OptionalCompatible> From<Optional<T>> for Option<T> {
     #[inline]
     fn from(value: Optional<T>) -> Self {
         value.into_option()
     }
 }
 
-impl<T: AnyCompatible + Debug> Debug for Optional<T> {
+impl<T: OptionalCompatible + Debug> Debug for Optional<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.get() {
             Some(v) => write!(f, "Optional::Some({v:?})"),

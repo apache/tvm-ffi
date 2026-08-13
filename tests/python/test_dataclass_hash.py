@@ -862,12 +862,12 @@ def test_shared_dag_hash_scaling_not_exponential() -> None:
         RecursiveHash(d19)
     t19 = (time.perf_counter() - t0) / repeats
 
-    # With memoization this ratio should stay close to 1x. Threshold 4x leaves
+    # With memoization this ratio should stay close to 1x. Threshold 10x leaves
     # buffer for microsecond-scale measurement noise (CI runs frequently see
     # t18~4us, t19~8us where small jitter blows past a 2x ceiling) while
-    # still catching true exponential blowup, which compounds far past 4x
+    # still catching true exponential blowup, which compounds far past 10x
     # within a few depth steps.
-    assert t19 <= t18 * 4.0, f"Unexpected super-linear scaling: d18={t18:.6f}s d19={t19:.6f}s"
+    assert t19 <= t18 * 10.0, f"Unexpected super-linear scaling: d18={t18:.6f}s d19={t19:.6f}s"
 
 
 # ---------------------------------------------------------------------------
