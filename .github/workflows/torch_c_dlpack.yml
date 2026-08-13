@@ -70,9 +70,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        arch: ["x86_64"]
+        arch: ["x86_64", "arm64"]
         python-version: ["cp39", "cp310", "cp311", "cp312", "cp313", "cp314"]
-    runs-on: windows-latest
+        exclude:
+          - {arch: arm64, python-version: cp39}
+          - {arch: arm64, python-version: cp310}
+    runs-on: ${{ matrix.arch == 'arm64' && 'windows-11-arm' || 'windows-latest' }}
     steps:
       - uses: actions/checkout@v5
         with:
