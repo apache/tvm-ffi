@@ -21,9 +21,9 @@ use crate::any::{Any, AnyView};
 use crate::object::ObjectCore;
 use crate::tvm_ffi_sys::{TVMFFIAny, TVMFFIGetTypeInfo, TVMFFITypeIndex};
 
-// Rust has no variadic generics, so callback tuples need one implementation
-// per supported arity. Keep the shared limit for structural visit and map in
-// one place.
+// Rust treats callback tuples of different lengths as different types.
+// Generate support for tuples containing 1 through 8 callbacks here so
+// structural visit and map use the same maximum length.
 macro_rules! impl_callback_chain_tuple_arities {
     ($impl_chain:ident) => {
         impl_callback_chain_tuple_arities!(

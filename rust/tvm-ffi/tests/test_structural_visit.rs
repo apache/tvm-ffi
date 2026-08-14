@@ -17,12 +17,141 @@
  * under the License.
  */
 
-use tvm_ffi::tvm_ffi_sys::{TVMFFIByteArray, TVMFFITypeIndex, TVMFFITypeRegisterAttr};
+use std::sync::LazyLock;
+
+use tvm_ffi::derive::{Object as DeriveObject, ObjectRef as DeriveObjectRef};
+use tvm_ffi::object::ObjectRef;
+use tvm_ffi::tvm_ffi_sys::{
+    TVMFFIAny, TVMFFIAnyViewToOwnedAny, TVMFFIByteArray, TVMFFIFieldFlagBitMask, TVMFFIFieldInfo,
+    TVMFFISEqHashKind, TVMFFITypeIndex, TVMFFITypeMetadata, TVMFFITypeRegisterAttr,
+};
 use tvm_ffi::{
     dispatch, structural_visit, structural_walk, Any, AnyView, Array, DefRegionKind, Error,
-    Function, Map, Object, Result, Shape, String as FfiString, StructuralVisitor, VisitInterrupt,
-    VisitValue, WalkOrder, WalkResult, RUNTIME_ERROR,
+    Function, Map, Object, ObjectArc, ObjectCore, ObjectRefCast, Result, Shape,
+    String as FfiString, StructuralVisitor, TypeIndex, VisitInterrupt, VisitValue, WalkOrder,
+    WalkResult, RUNTIME_ERROR,
 };
+
+unsafe extern "C" {
+    fn TVMFFITypeGetOrAllocIndex(
+        type_key: *const TVMFFIByteArray,
+        static_type_index: i32,
+        type_depth: i32,
+        num_child_slots: i32,
+        child_slots_can_overflow: i32,
+        parent_type_index: i32,
+    ) -> i32;
+    fn TVMFFITypeRegisterField(type_index: i32, info: *const TVMFFIFieldInfo) -> i32;
+    fn TVMFFITypeRegisterMetadata(type_index: i32, metadata: *const TVMFFITypeMetadata) -> i32;
+}
+
+#[repr(C)]
+#[derive(DeriveObject)]
+#[type_key = "testing.RustStructuralVisitDefRegion"]
+#[type_final]
+struct RustVisitDefRegionObj {
+    base: Object,
+    recursive: Any,
+    plain: Any,
+    non_recursive: Any,
+    both: Any,
+    ignored: Any,
+}
+
+#[repr(C)]
+#[derive(DeriveObjectRef, Clone)]
+struct RustVisitDefRegion {
+    data: ObjectArc<RustVisitDefRegionObj>,
+}
+
+unsafe extern "C" fn clone_any_field(field: *mut std::ffi::c_void, result: *mut TVMFFIAny) -> i32 {
+    TVMFFIAnyViewToOwnedAny(field.cast(), result)
+}
+
+fn register_any_field(type_index: i32, name: &'static str, offset: usize, flags: i64) {
+    let field = TVMFFIFieldInfo {
+        name: unsafe { TVMFFIByteArray::from_str(name) },
+        doc: unsafe { TVMFFIByteArray::from_str("Rust structural-visit test field") },
+        metadata: unsafe { TVMFFIByteArray::from_str("") },
+        flags,
+        size: std::mem::size_of::<Any>() as i64,
+        alignment: std::mem::align_of::<Any>() as i64,
+        offset: offset as i64,
+        getter: Some(clone_any_field),
+        setter: std::ptr::null_mut(),
+        default_value_or_factory: TVMFFIAny::new(),
+        field_static_type_index: -1,
+    };
+    assert_eq!(unsafe { TVMFFITypeRegisterField(type_index, &field) }, 0);
+}
+
+fn register_visit_type(type_key: &'static str, total_size: usize, kind: TVMFFISEqHashKind) -> i32 {
+    let type_key = unsafe { TVMFFIByteArray::from_str(type_key) };
+    let type_index = unsafe {
+        TVMFFITypeGetOrAllocIndex(
+            &type_key,
+            -1,
+            Object::TYPE_DEPTH + 1,
+            0,
+            1,
+            Object::type_index(),
+        )
+    };
+    assert!(type_index >= TypeIndex::kTVMFFIDynObjectBegin as i32);
+    let metadata = TVMFFITypeMetadata {
+        doc: unsafe { TVMFFIByteArray::from_str("Rust structural-visit test object") },
+        creator: None,
+        total_size: i32::try_from(total_size).unwrap(),
+        structural_eq_hash_kind: kind as i32,
+    };
+    assert_eq!(
+        unsafe { TVMFFITypeRegisterMetadata(type_index, &metadata) },
+        0
+    );
+    type_index
+}
+
+static REGISTER_REGION_TYPES: LazyLock<()> = LazyLock::new(|| {
+    let type_index = register_visit_type(
+        RustVisitDefRegionObj::TYPE_KEY,
+        std::mem::size_of::<RustVisitDefRegionObj>(),
+        TVMFFISEqHashKind::kTVMFFISEqHashKindFreeVar,
+    );
+    for (name, offset, flags) in [
+        (
+            "recursive",
+            std::mem::offset_of!(RustVisitDefRegionObj, recursive),
+            TVMFFIFieldFlagBitMask::kTVMFFIFieldFlagBitMaskSEqHashDefRecursive as i64,
+        ),
+        (
+            "plain",
+            std::mem::offset_of!(RustVisitDefRegionObj, plain),
+            0,
+        ),
+        (
+            "non_recursive",
+            std::mem::offset_of!(RustVisitDefRegionObj, non_recursive),
+            TVMFFIFieldFlagBitMask::kTVMFFIFieldFlagBitMaskSEqHashDefNonRecursive as i64,
+        ),
+        (
+            "both",
+            std::mem::offset_of!(RustVisitDefRegionObj, both),
+            TVMFFIFieldFlagBitMask::kTVMFFIFieldFlagBitMaskSEqHashDefRecursive as i64
+                | TVMFFIFieldFlagBitMask::kTVMFFIFieldFlagBitMaskSEqHashDefNonRecursive as i64,
+        ),
+        (
+            "ignored",
+            std::mem::offset_of!(RustVisitDefRegionObj, ignored),
+            TVMFFIFieldFlagBitMask::kTVMFFIFieldFlagBitMaskSEqHashIgnore as i64,
+        ),
+    ] {
+        register_any_field(type_index, name, offset, flags);
+    }
+});
+
+fn ensure_region_types_registered() {
+    LazyLock::force(&REGISTER_REGION_TYPES);
+}
 
 fn runtime_error(message: &str) -> Error {
     Error::new(RUNTIME_ERROR, message, "")
@@ -874,4 +1003,145 @@ fn bare_node_lambda_takes_def_region_kind() {
     .unwrap()
     .is_none());
     assert_eq!(objects, 1);
+}
+
+struct InheritedRegionProbe {
+    at_root: bool,
+    seen: Vec<DefRegionKind>,
+}
+
+impl StructuralVisitor for InheritedRegionProbe {
+    fn visit(
+        &mut self,
+        value: &VisitValue,
+        def_region_kind: DefRegionKind,
+    ) -> Result<Option<VisitInterrupt>> {
+        if self.at_root {
+            self.at_root = false;
+            let outer = value.cast::<Array<Array<i64>>>().unwrap();
+            let inner = outer.get(0).unwrap();
+            return self.visit_child(&inner, DefRegionKind::Recursive);
+        }
+        self.seen.push(def_region_kind);
+        self.default_visit_children(value, def_region_kind)
+    }
+}
+
+#[test]
+fn def_region_is_inherited_through_containers() {
+    let root = Array::new(vec![Array::new(vec![1i64, 2])]);
+    let mut probe = InheritedRegionProbe {
+        at_root: true,
+        seen: Vec::new(),
+    };
+    assert!(structural_visit(&root, &mut probe).unwrap().is_none());
+    assert_eq!(probe.seen, vec![DefRegionKind::Recursive; 3]);
+}
+
+#[test]
+fn reflected_field_def_region_reaches_typed_handler() {
+    ensure_region_types_registered();
+    let root = RustVisitDefRegion {
+        data: ObjectArc::new(RustVisitDefRegionObj {
+            base: Object::new(),
+            recursive: Any::from(1i64),
+            plain: Any::from(2i64),
+            non_recursive: Any::from(3i64),
+            both: Any::from(4i64),
+            ignored: Any::from(5i64),
+        }),
+    };
+    let mut seen = Vec::new();
+    assert!(structural_walk(
+        &root,
+        |_value: i64, kind: DefRegionKind| {
+            seen.push(kind);
+            WalkResult::Advance
+        },
+        WalkOrder::PreOrder,
+    )
+    .unwrap()
+    .is_none());
+    assert_eq!(
+        seen,
+        vec![
+            DefRegionKind::Recursive,
+            DefRegionKind::None,
+            DefRegionKind::NonRecursive,
+            DefRegionKind::NonRecursive,
+        ]
+    );
+}
+
+struct FreeVarClampProbe {
+    at_root: bool,
+    seen: Vec<(&'static str, DefRegionKind)>,
+}
+
+impl StructuralVisitor for FreeVarClampProbe {
+    fn visit(
+        &mut self,
+        value: &VisitValue,
+        def_region_kind: DefRegionKind,
+    ) -> Result<Option<VisitInterrupt>> {
+        if self.at_root {
+            self.at_root = false;
+            let root = value.cast::<Array<ObjectRef>>().unwrap();
+            for index in 0..root.len() {
+                let child = root.get(index).unwrap();
+                if let Some(interrupt) = self.visit_child(&child, DefRegionKind::NonRecursive)? {
+                    return Ok(Some(interrupt));
+                }
+            }
+            return Ok(None);
+        }
+
+        if value.as_node::<RustVisitDefRegionObj>().is_some() {
+            self.seen.push(("free_var", def_region_kind));
+        } else if value.cast::<Array<i64>>().is_some() {
+            self.seen.push(("array", def_region_kind));
+        } else if let Some(integer) = value.cast::<i64>() {
+            self.seen.push((
+                if integer == 6 {
+                    "free_child"
+                } else {
+                    "array_child"
+                },
+                def_region_kind,
+            ));
+        }
+        self.default_visit_children(value, def_region_kind)
+    }
+}
+
+#[test]
+fn non_recursive_region_is_clamped_for_free_var_children_only() {
+    ensure_region_types_registered();
+    let free_var = RustVisitDefRegion {
+        data: ObjectArc::new(RustVisitDefRegionObj {
+            base: Object::new(),
+            recursive: Any::new(),
+            plain: Any::from(6i64),
+            non_recursive: Any::new(),
+            both: Any::new(),
+            ignored: Any::new(),
+        }),
+    };
+    let free_var: ObjectRef = free_var.try_cast().unwrap();
+    let array: ObjectRef = Array::new(vec![7i64]).try_cast().unwrap();
+    let root = Array::new(vec![free_var, array]);
+    let mut probe = FreeVarClampProbe {
+        at_root: true,
+        seen: Vec::new(),
+    };
+    assert!(structural_visit(&root, &mut probe).unwrap().is_none());
+    assert_eq!(
+        probe.seen,
+        vec![
+            ("free_var", DefRegionKind::NonRecursive),
+            ("free_child", DefRegionKind::None),
+            ("array", DefRegionKind::NonRecursive),
+            ("array_child", DefRegionKind::NonRecursive),
+        ]
+    );
 }
