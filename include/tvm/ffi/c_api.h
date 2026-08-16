@@ -502,20 +502,6 @@ typedef int (*TVMFFISafeCallType)(void* handle, const TVMFFIAny* args, int32_t n
                                   TVMFFIAny* result);
 // [TVMFFISafeCallType.end]
 
-/*!
- * \brief Callback used by \c TVMFFIMapMutateValues to map one container value.
- *
- * \param context Opaque context supplied to \c TVMFFIMapMutateValues.
- * \param value Borrowed value from the Map or Dict snapshot/current unique storage.
- * \param index Zero-based iteration index, used for structural error context.
- * \param allow_inplace Whether recursively mapping \p value may reuse uniquely owned storage.
- * \param result Owning mapped value. The caller initializes it to kTVMFFINone.
- * \return 0 on success, nonzero when an error has been raised through
- *         \c TVMFFIErrorSetRaised.
- */
-typedef int (*TVMFFIMapValueMutator)(void* context, const TVMFFIAny* value, int64_t index,
-                                     int32_t allow_inplace, TVMFFIAny* result);
-
 // [TVMFFIFunctionCell.begin]
 /*!
  * \brief Object cell for function object following header.
@@ -748,29 +734,6 @@ TVM_FFI_DLL int TVMFFIFunctionGetGlobal(const TVMFFIByteArray* name, TVMFFIObjec
  * \return 0 on success, nonzero on failure.
  */
 TVM_FFI_DLL int TVMFFIAnyViewToOwnedAny(const TVMFFIAny* any_view, TVMFFIAny* out);
-
-/*!
- * \brief Structurally map the values of an ffi.Map or ffi.Dict through a direct C callback.
- *
- * Keys are stable anchors and are never passed to \p mutator. If \p allow_inplace is nonzero
- * and the input object is uniquely owned, value slots are updated directly and recursive
- * callbacks may reuse unique child storage. Otherwise an immutable Map is shallow-copied after
- * its first changed value, while a mutable Dict is snapshotted before the first callback. The
- * original object is returned when no value changes.
- *
- * \param source Borrowed ffi.Map or ffi.Dict value.
- * \param allow_inplace Whether unique input storage may be reused.
- * \param context Opaque context forwarded to \p mutator.
- * \param mutator Callback that recursively maps one value.
- * \param result Owning mapped Map or Dict. Must be initialized to kTVMFFINone.
- * \return 0 on success, nonzero on failure. The error can be retrieved through
- *         \c TVMFFIErrorMoveFromRaised.
- *
- * \note In-place changes completed before an error are not rolled back. The copy path never
- *       mutates \p source and releases any partially mapped snapshot on failure.
- */
-TVM_FFI_DLL int TVMFFIMapMutateValues(const TVMFFIAny* source, int32_t allow_inplace, void* context,
-                                      TVMFFIMapValueMutator mutator, TVMFFIAny* result);
 
 /*!
  * \brief Call a FFIFunc by passing in arguments.

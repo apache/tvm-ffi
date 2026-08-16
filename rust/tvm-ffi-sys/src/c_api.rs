@@ -268,15 +268,6 @@ pub type TVMFFISafeCallType = unsafe extern "C" fn(
     result: *mut TVMFFIAny,
 ) -> i32;
 
-/// Callback used by `TVMFFIMapMutateValues` to recursively map one value.
-pub type TVMFFIMapValueMutator = unsafe extern "C" fn(
-    context: *mut c_void,
-    value: *const TVMFFIAny,
-    index: i64,
-    allow_inplace: i32,
-    result: *mut TVMFFIAny,
-) -> i32;
-
 /// Function cell
 #[repr(C)]
 pub struct TVMFFIFunctionCell {
@@ -493,13 +484,6 @@ unsafe extern "C" {
         out: *mut TVMFFIObjectHandle,
     ) -> i32;
     pub fn TVMFFIAnyViewToOwnedAny(any_view: *const TVMFFIAny, out: *mut TVMFFIAny) -> i32;
-    pub fn TVMFFIMapMutateValues(
-        source: *const TVMFFIAny,
-        allow_inplace: i32,
-        context: *mut c_void,
-        mutator: TVMFFIMapValueMutator,
-        result: *mut TVMFFIAny,
-    ) -> i32;
     pub fn TVMFFIFunctionCall(
         func: TVMFFIObjectHandle,
         args: *const TVMFFIAny,

@@ -37,31 +37,16 @@ namespace ffi {
 
 namespace {
 
-Any InvokeMapValueMutator(TVMFFIMapValueMutator mutator, void* context, const Any& value,
-                          int64_t index, bool allow_inplace) {
-  TVMFFIAny mapped_raw{};
-  mapped_raw.type_index = TypeIndex::kTVMFFINone;
-  int return_code = mutator(context, details::AnyUnsafe::TVMFFIAnyPtrFromAny(value), index,
-                            allow_inplace ? 1 : 0, &mapped_raw);
-  // Take ownership before checking the status so an erroneous callback that
-  // already wrote a result cannot leak it.
-  Any mapped = details::AnyUnsafe::MoveTVMFFIAnyToAny(&mapped_raw);
-  if (TVM_FFI_PREDICT_FALSE(return_code != 0)) {
-    throw details::MoveFromSafeCallRaised();
-  }
-  return mapped;
-}
-
 template <typename MapObjType>
 Any MutateMapValues(const AnyView& value, const MapObjType* source, bool allow_inplace,
-                    void* context, TVMFFIMapValueMutator mutator) {
+                    const Function& mutator) {
   bool mutate_inplace = allow_inplace && source->unique();
   if (mutate_inplace) {
     MapObjType* target = const_cast<MapObjType*>(source);
     int64_t index = 0;
     for (auto it = target->begin(); it != target->end(); ++it, ++index) {
       const Any& old_value = it->second;
-      Any mapped = InvokeMapValueMutator(mutator, context, old_value, index, true);
+      Any mapped = mutator(old_value, index, true);
       if (!old_value.same_as(mapped)) {
         it->second = std::move(mapped);
       }
@@ -77,7 +62,7 @@ Any MutateMapValues(const AnyView& value, const MapObjType* source, bool allow_i
     int64_t index = 0;
     for (auto source_it = source->begin(); source_it != source->end(); ++source_it, ++index) {
       const Any& old_value = source_it->second;
-      Any mapped = InvokeMapValueMutator(mutator, context, old_value, index, false);
+      Any mapped = mutator(old_value, index, false);
       bool changed = !old_value.same_as(mapped);
       if (output == nullptr) {
         if (!changed) {
@@ -107,7 +92,7 @@ Any MutateMapValues(const AnyView& value, const MapObjType* source, bool allow_i
     int64_t index = 0;
     for (auto it = target->begin(); it != target->end(); ++it, ++index) {
       const Any& old_value = it->second;
-      Any mapped = InvokeMapValueMutator(mutator, context, old_value, index, false);
+      Any mapped = mutator(old_value, index, false);
       if (!old_value.same_as(mapped)) {
         it->second = std::move(mapped);
         changed = true;
@@ -118,6 +103,15 @@ Any MutateMapValues(const AnyView& value, const MapObjType* source, bool allow_i
     }
     return Any(ObjectRef(std::move(output)));
   }
+}
+
+template <typename MapObjType>
+void MutateMapValuesPacked(PackedArgs args, Any* result) {
+  TVM_FFI_ICHECK_EQ(args.size(), 3);
+  AnyView value = args[0];
+  bool allow_inplace = args[1].cast<bool>();
+  Function mutator = args[2].cast<Function>();
+  *result = MutateMapValues(value, value.cast<const MapObjType*>(), allow_inplace, mutator);
 }
 
 /*!
@@ -280,6 +274,8 @@ TVM_FFI_STATIC_INIT_BLOCK() {
            [](const ffi::MapObj* n) -> ffi::Function {
              return ffi::Function::FromTyped(MapForwardIterFunctor(n->begin(), n->end()));
            })
+      .def_packed("ffi.MapMutateValues",
+                  [](ffi::PackedArgs args, Any* ret) { MutateMapValuesPacked<MapObj>(args, ret); })
       .def("ffi.MapGetItemOrMissing",
            [](const ffi::MapObj* n, const Any& k) -> Any {
              auto it = n->find(k);
@@ -312,6 +308,8 @@ TVM_FFI_STATIC_INIT_BLOCK() {
            [](const ffi::DictObj* n) -> ffi::Function {
              return ffi::Function::FromTyped(MapForwardIterFunctor(n->begin(), n->end()));
            })
+      .def_packed("ffi.DictMutateValues",
+                  [](ffi::PackedArgs args, Any* ret) { MutateMapValuesPacked<DictObj>(args, ret); })
       .def("ffi.DictGetItemOrMissing",
            [](const ffi::DictObj* n, const Any& k) -> Any {
              auto it = n->find(k);
@@ -328,28 +326,3 @@ TVM_FFI_STATIC_INIT_BLOCK() {
 }
 }  // namespace ffi
 }  // namespace tvm
-
-int TVMFFIMapMutateValues(const TVMFFIAny* source, int32_t allow_inplace, void* context,
-                          TVMFFIMapValueMutator mutator, TVMFFIAny* result) {
-  using namespace tvm::ffi;
-  TVM_FFI_SAFE_CALL_BEGIN();
-  TVM_FFI_ICHECK(source != nullptr);
-  TVM_FFI_ICHECK(mutator != nullptr);
-  TVM_FFI_ICHECK(result != nullptr);
-  TVM_FFI_ICHECK_EQ(result->type_index, TypeIndex::kTVMFFINone);
-
-  AnyView value = AnyView::CopyFromTVMFFIAny(*source);
-  Any mapped;
-  if (source->type_index == TypeIndex::kTVMFFIMap) {
-    mapped =
-        MutateMapValues(value, value.cast<const MapObj*>(), allow_inplace != 0, context, mutator);
-  } else if (source->type_index == TypeIndex::kTVMFFIDict) {
-    mapped =
-        MutateMapValues(value, value.cast<const DictObj*>(), allow_inplace != 0, context, mutator);
-  } else {
-    TVM_FFI_THROW(TypeError) << "TVMFFIMapMutateValues expects ffi.Map or ffi.Dict, but received `"
-                             << value.GetTypeKey() << "`";
-  }
-  *result = details::AnyUnsafe::MoveAnyToTVMFFIAny(std::move(mapped));
-  TVM_FFI_SAFE_CALL_END();
-}

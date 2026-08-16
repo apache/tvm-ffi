@@ -27,9 +27,9 @@
 //! copy-on-write behavior.
 //!
 //! Rust owns callback dispatch, memoization, identity remapping, and most
-//! container traversal. Map/Dict storage is traversed through a narrow C ABI
-//! that calls directly back into Rust for each value, allowing unique maps to
-//! be updated in place without exposing the runtime's private hash layout.
+//! container traversal. Registered runtime functions traverse private Map/Dict
+//! storage and call a Rust [`Function`] for each value, allowing unique maps to
+//! be updated in place without adding a container-specific C API.
 //! A non-container object with a foreign `__s_mutate__` or
 //! `__s_maybe_inplace_mutate__` hook is rejected rather than silently
 //! replacing its custom semantics with reflection.
@@ -50,7 +50,7 @@ use crate::tvm_ffi_sys::TVMFFIFieldFlagBitMask::{
 };
 use crate::tvm_ffi_sys::{
     TVMFFIAny, TVMFFIFieldInfo, TVMFFIFieldSetter, TVMFFIFunctionCall, TVMFFIGetTypeInfo,
-    TVMFFIMapMutateValues, TVMFFIObject, TVMFFITypeAttrColumn, TVMFFITypeIndex,
+    TVMFFIObject, TVMFFITypeAttrColumn, TVMFFITypeIndex,
 };
 use crate::tvm_ffi_sys::{TVMFFIObjectHandle, TVMFFISEqHashKind};
 
@@ -1052,7 +1052,8 @@ where
 /// The root is consumed. A uniquely owned built-in container may therefore be
 /// reused in place, while passing `root.clone()` keeps the original shared and
 /// selects copy-on-write behavior. Map and Dict keys are anchors and are not
-/// mapped; their values re-enter the Rust mapper through the runtime C ABI.
+/// mapped; registered runtime functions send their values back to the Rust
+/// mapper through the existing packed-function ABI.
 ///
 /// In-place changes completed before an error are not rolled back. Because
 /// this function consumes `root`, an error does not return the partly mapped
@@ -1080,20 +1081,37 @@ struct RuntimeMapMutationContext<D> {
 
 unsafe extern "C" fn runtime_map_value_mutator<D: DefaultMutationDriver>(
     context: *mut c_void,
-    value: *const TVMFFIAny,
-    index: i64,
-    allow_inplace: i32,
+    args: *const TVMFFIAny,
+    num_args: i32,
     result: *mut TVMFFIAny,
 ) -> i32 {
-    let context = &mut *context.cast::<RuntimeMapMutationContext<D>>();
-    let permit = if allow_inplace != 0 {
-        Permit::MaybeInPlace
-    } else {
-        Permit::Copy
-    };
-    let mapped = (&mut *context.driver)
-        .recurse_raw(*value, context.def_region_kind, permit)
-        .map_err(|error| with_error_context(error, &format!("{} value [{index}]", context.kind)));
+    let mapped = (|| -> Result<Any> {
+        if context.is_null() || args.is_null() || result.is_null() {
+            return Err(runtime_error(
+                "native structural map: invalid registered map callback arguments",
+            ));
+        }
+        if num_args != 3 {
+            return Err(runtime_error(&format!(
+                "native structural map: registered map callback expected 3 arguments, got {num_args}"
+            )));
+        }
+
+        let args = std::slice::from_raw_parts(args, 3);
+        let index = i64::try_from(AnyView::from_raw_ffi_any(args[1]))?;
+        let allow_inplace = bool::try_from(AnyView::from_raw_ffi_any(args[2]))?;
+        let context = &mut *context.cast::<RuntimeMapMutationContext<D>>();
+        let permit = if allow_inplace {
+            Permit::MaybeInPlace
+        } else {
+            Permit::Copy
+        };
+        (&mut *context.driver)
+            .recurse_raw(args[0], context.def_region_kind, permit)
+            .map_err(|error| {
+                with_error_context(error, &format!("{} value [{index}]", context.kind))
+            })
+    })();
     match mapped {
         Ok(mapped) => {
             *result = Any::into_raw_ffi_any(mapped);
@@ -1112,31 +1130,34 @@ fn runtime_mutate_mapping_values<D: DefaultMutationDriver>(
     def_region_kind: DefRegionKind,
     permit: Permit,
 ) -> Result<Any> {
-    let kind = if raw.type_index == TVMFFITypeIndex::kTVMFFIDict as i32 {
-        "dict"
-    } else {
-        "map"
-    };
+    let is_dict = raw.type_index == TVMFFITypeIndex::kTVMFFIDict as i32;
+    let kind = if is_dict { "dict" } else { "map" };
     let mut context = RuntimeMapMutationContext {
         driver,
         def_region_kind,
         kind,
     };
-    let mut result = Any::new();
-    let return_code = unsafe {
-        TVMFFIMapMutateValues(
-            &raw,
-            i32::from(permit == Permit::MaybeInPlace),
+    // SAFETY: the registered Map/Dict helper calls this function synchronously
+    // and does not retain it, so `context` outlives every callback invocation.
+    let callback = unsafe {
+        Function::from_extern_c(
             std::ptr::from_mut(&mut context).cast(),
             runtime_map_value_mutator::<D>,
-            Any::as_data_ptr(&mut result),
+            None,
         )
     };
-    if return_code == 0 {
-        Ok(result)
+    let runtime_mutator = if is_dict {
+        crate::cached_global_func!("ffi.DictMutateValues")
     } else {
-        Err(Error::from_raised())
-    }
+        crate::cached_global_func!("ffi.MapMutateValues")
+    };
+    let source = unsafe { AnyView::from_raw_ffi_any(raw) };
+    let allow_inplace = permit == Permit::MaybeInPlace;
+    runtime_mutator.call_packed(&[
+        source,
+        AnyView::from(&allow_inplace),
+        AnyView::from(&callback),
+    ])
 }
 
 fn construct_sequence(type_index: i32, items: &[Any]) -> Result<Any> {
