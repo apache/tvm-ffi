@@ -17,19 +17,19 @@
  * under the License.
  */
 
+use std::cell::RefCell;
 use std::sync::LazyLock;
 
 use tvm_ffi::derive::{Object as DeriveObject, ObjectRef as DeriveObjectRef};
 use tvm_ffi::object::ObjectRef;
 use tvm_ffi::tvm_ffi_sys::{
     TVMFFIAny, TVMFFIAnyViewToOwnedAny, TVMFFIByteArray, TVMFFIFieldFlagBitMask, TVMFFIFieldInfo,
-    TVMFFISEqHashKind, TVMFFITypeIndex, TVMFFITypeMetadata, TVMFFITypeRegisterAttr,
+    TVMFFISEqHashKind, TVMFFITypeMetadata, TVMFFITypeRegisterAttr,
 };
 use tvm_ffi::{
     dispatch, structural_visit, structural_walk, Any, AnyView, Array, DefRegionKind, Error,
-    Function, Map, Object, ObjectArc, ObjectCore, ObjectRefCast, Result, Shape,
-    String as FfiString, StructuralVisitor, TypeIndex, VisitInterrupt, VisitValue, WalkOrder,
-    WalkResult, RUNTIME_ERROR,
+    Function, Map, Object, ObjectArc, ObjectCore, ObjectRefCast, Result, String as FfiString,
+    StructuralVisitor, TypeIndex, VisitInterrupt, VisitValue, WalkOrder, WalkResult, RUNTIME_ERROR,
 };
 
 unsafe extern "C" {
@@ -62,6 +62,27 @@ struct RustVisitDefRegionObj {
 #[derive(DeriveObjectRef, Clone)]
 struct RustVisitDefRegion {
     data: ObjectArc<RustVisitDefRegionObj>,
+}
+
+#[repr(C)]
+#[derive(DeriveObject)]
+#[type_key = "testing.RustStructuralVisitHook"]
+#[type_final]
+struct RustVisitHookObj {
+    base: Object,
+    selected: Any,
+    ignored: Any,
+}
+
+#[repr(C)]
+#[derive(DeriveObjectRef, Clone)]
+struct RustVisitHook {
+    data: ObjectArc<RustVisitHookObj>,
+}
+
+thread_local! {
+    static RETAINED_VISITOR: RefCell<Option<Any>> = const { RefCell::new(None) };
+    static REGISTERED_HOOK_REGIONS: RefCell<Vec<i64>> = const { RefCell::new(Vec::new()) };
 }
 
 unsafe extern "C" fn clone_any_field(field: *mut std::ffi::c_void, result: *mut TVMFFIAny) -> i32 {
@@ -111,6 +132,55 @@ fn register_visit_type(type_key: &'static str, total_size: usize, kind: TVMFFISE
     type_index
 }
 
+fn register_function_attr(type_index: i32, name: &'static str, function: Function) {
+    let name = unsafe { TVMFFIByteArray::from_str(name) };
+    let mut value = Any::from(function);
+    assert_eq!(
+        unsafe { TVMFFITypeRegisterAttr(type_index, &name, Any::as_data_ptr(&mut value)) },
+        0
+    );
+}
+
+fn registered_visit_hook(args: &[AnyView<'_>]) -> Result<Any> {
+    assert_eq!(args.len(), 2);
+    RETAINED_VISITOR.with(|retained| {
+        retained.replace(Some(Any::from(args[0])));
+    });
+    let def_region_kind = Function::get_global("ffi.StructuralVisitorDefRegionKind")?
+        .call_packed(&[args[0]])
+        .and_then(i64::try_from)?;
+    REGISTERED_HOOK_REGIONS.with(|regions| regions.borrow_mut().push(def_region_kind));
+
+    let node = RustVisitHook::try_from(args[1])?;
+    Function::get_global("ffi.StructuralVisitorVisit")?
+        .call_packed(&[args[0], AnyView::from(&node.data.selected)])
+}
+
+static REGISTER_HOOK_TYPE: LazyLock<()> = LazyLock::new(|| {
+    let type_index = register_visit_type(
+        RustVisitHookObj::TYPE_KEY,
+        std::mem::size_of::<RustVisitHookObj>(),
+        TVMFFISEqHashKind::kTVMFFISEqHashKindTreeNode,
+    );
+    register_any_field(
+        type_index,
+        "selected",
+        std::mem::offset_of!(RustVisitHookObj, selected),
+        0,
+    );
+    register_any_field(
+        type_index,
+        "ignored",
+        std::mem::offset_of!(RustVisitHookObj, ignored),
+        0,
+    );
+    register_function_attr(
+        type_index,
+        "__s_visit__",
+        Function::from_packed(registered_visit_hook),
+    );
+});
+
 static REGISTER_REGION_TYPES: LazyLock<()> = LazyLock::new(|| {
     let type_index = register_visit_type(
         RustVisitDefRegionObj::TYPE_KEY,
@@ -153,12 +223,23 @@ fn ensure_region_types_registered() {
     LazyLock::force(&REGISTER_REGION_TYPES);
 }
 
+fn rust_visit_hook(selected: impl Into<Any>, ignored: impl Into<Any>) -> RustVisitHook {
+    LazyLock::force(&REGISTER_HOOK_TYPE);
+    RustVisitHook {
+        data: ObjectArc::new(RustVisitHookObj {
+            base: Object::new(),
+            selected: selected.into(),
+            ignored: ignored.into(),
+        }),
+    }
+}
+
 fn runtime_error(message: &str) -> Error {
     Error::new(RUNTIME_ERROR, message, "")
 }
 
 #[test]
-fn plain_walk_uses_native_sequence_fallback() {
+fn plain_walk_uses_registered_array_hook() {
     let root = Array::new(vec![1i64, 2, 3]);
     let mut integers = 0;
     assert!(structural_walk(
@@ -201,168 +282,104 @@ fn plain_walk_visits_map_values_without_visiting_keys() {
     assert_eq!(strings, 0);
 }
 
-#[derive(Default)]
-struct SkipForeignShape {}
-
-#[dispatch(visit)]
-impl SkipForeignShape {
-    fn visit_shape(&mut self, _shape: Shape) -> WalkResult {
-        WalkResult::Skip
-    }
-}
-
-/// Visitor-layer handling of the foreign type: `visit` enumerates the
-/// children itself (none, for a shape) instead of the default recursion.
-#[derive(Default)]
-struct ForeignShapeVisitor {
-    shapes: usize,
-}
-
-impl StructuralVisitor for ForeignShapeVisitor {
-    fn visit(
-        &mut self,
-        value: &VisitValue,
-        def_region_kind: DefRegionKind,
-    ) -> Result<Option<VisitInterrupt>> {
-        if value.cast::<Shape>().is_some() {
-            self.shapes += 1;
-            return Ok(None);
-        }
-        self.default_visit_children(value, def_region_kind)
-    }
-}
-
 #[test]
-fn foreign_structural_visit_requires_explicit_rust_override() {
-    let hook = Function::get_global("ffi.ArraySize").unwrap();
-    let attr_name = unsafe { TVMFFIByteArray::from_str("__s_visit__") };
-    let mut attr_value = Any::from(hook);
-    assert_eq!(
-        unsafe {
-            TVMFFITypeRegisterAttr(
-                TVMFFITypeIndex::kTVMFFIShape as i32,
-                &attr_name,
-                Any::as_data_ptr(&mut attr_value),
-            )
-        },
-        0
-    );
+fn registered_function_hook_controls_children_interrupts_and_lifetime() {
+    RETAINED_VISITOR.with(|retained| {
+        retained.take();
+    });
+    REGISTERED_HOOK_REGIONS.with(|regions| regions.borrow_mut().clear());
+    let root = rust_visit_hook(11i64, 99i64);
 
-    let root = Shape::from([2i64, 3]);
-    let error = match structural_walk(
+    let mut integers = Vec::new();
+    assert!(structural_walk(
         &root,
+        |value: &VisitValue| {
+            if let Some(integer) = value.cast::<i64>() {
+                integers.push(integer);
+            }
+            WalkResult::Advance
+        },
+        WalkOrder::PreOrder,
+    )
+    .unwrap()
+    .is_none());
+    // Reflection would visit both fields. The registered hook deliberately
+    // visits only `selected`.
+    assert_eq!(integers, vec![11]);
+    REGISTERED_HOOK_REGIONS.with(|regions| {
+        assert_eq!(regions.borrow().as_slice(), &[DefRegionKind::None as i64]);
+    });
+
+    #[derive(Default)]
+    struct RecordingVisitor {
+        integers: Vec<i64>,
+    }
+    impl StructuralVisitor for RecordingVisitor {
+        fn visit(
+            &mut self,
+            value: &VisitValue,
+            def_region_kind: DefRegionKind,
+        ) -> Result<Option<VisitInterrupt>> {
+            if let Some(integer) = value.cast::<i64>() {
+                self.integers.push(integer);
+            }
+            self.default_visit_children(value, def_region_kind)
+        }
+    }
+    let mut visitor = RecordingVisitor::default();
+    assert!(structural_visit(&root, &mut visitor).unwrap().is_none());
+    assert_eq!(visitor.integers, vec![11]);
+
+    ensure_region_types_registered();
+    let wrapped = RustVisitDefRegion {
+        data: ObjectArc::new(RustVisitDefRegionObj {
+            base: Object::new(),
+            recursive: Any::from(root.clone()),
+            plain: Any::new(),
+            non_recursive: Any::new(),
+            both: Any::new(),
+            ignored: Any::new(),
+        }),
+    };
+    assert!(structural_walk(
+        &wrapped,
         |_value: &VisitValue| WalkResult::Advance,
         WalkOrder::PreOrder,
-    ) {
+    )
+    .unwrap()
+    .is_none());
+    REGISTERED_HOOK_REGIONS.with(|regions| {
+        assert_eq!(
+            regions.borrow().last().copied(),
+            Some(DefRegionKind::Recursive as i64)
+        );
+    });
+
+    let outcome = structural_walk(
+        &root,
+        |value: &VisitValue| match value.cast::<i64>() {
+            Some(11) => WalkResult::interrupt_with(FfiString::from("stop")),
+            _ => WalkResult::Advance,
+        },
+        WalkOrder::PreOrder,
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(FfiString::try_from(outcome.value).unwrap().as_str(), "stop");
+
+    let retained = RETAINED_VISITOR.with(|retained| retained.take().unwrap());
+    let error = match Function::get_global("ffi.StructuralVisitorVisit")
+        .unwrap()
+        .call_packed(&[AnyView::from(&retained), AnyView::from(&1i64)])
+    {
         Err(error) => error,
-        Ok(_) => panic!("foreign structural visit unexpectedly used reflection"),
+        Ok(_) => panic!("retained structural visitor unexpectedly remained active"),
     };
-    assert!(error.message().contains("registers foreign `__s_visit__`"));
-    assert!(error.message().contains("StructuralVisitor"));
-
-    // Walk layer: a pre-order handler skips the foreign type.
-    assert!(
-        structural_walk(&root, &mut SkipForeignShape::default(), WalkOrder::PreOrder)
-            .unwrap()
-            .is_none()
-    );
-
-    // Visitor layer: take over the type's children explicitly instead.
-    let mut takeover = ForeignShapeVisitor::default();
-    assert!(structural_visit(&root, &mut takeover).unwrap().is_none());
-    assert_eq!(takeover.shapes, 1);
+    assert!(error.message().contains("retained after its active call"));
 }
 
 #[test]
-fn mutable_list_is_snapshotted_before_callbacks() {
-    let root = Function::get_global("ffi.List")
-        .unwrap()
-        .call_packed(&[AnyView::from(&1i64), AnyView::from(&2i64)])
-        .unwrap();
-    let captured = root.clone();
-    let append = Function::get_global("ffi.ListAppend").unwrap();
-    let mut appended = false;
-    let mut integers = Vec::new();
-
-    assert!(structural_walk(
-        &root,
-        |value: &VisitValue| {
-            if let Some(integer) = value.cast::<i64>() {
-                integers.push(integer);
-                if !appended {
-                    append
-                        .call_packed(&[AnyView::from(&captured), AnyView::from(&3i64)])
-                        .unwrap();
-                    appended = true;
-                }
-            }
-            WalkResult::Advance
-        },
-        WalkOrder::PreOrder,
-    )
-    .unwrap()
-    .is_none());
-
-    assert_eq!(integers, vec![1, 2]);
-    let size = Function::get_global("ffi.ListSize")
-        .unwrap()
-        .call_packed(&[AnyView::from(&root)])
-        .and_then(i64::try_from)
-        .unwrap();
-    assert_eq!(size, 3);
-}
-
-#[test]
-fn mutable_dict_is_snapshotted_before_callbacks() {
-    let root = Function::get_global("ffi.Dict")
-        .unwrap()
-        .call_packed(&[
-            AnyView::from(&FfiString::from("a")),
-            AnyView::from(&1i64),
-            AnyView::from(&FfiString::from("b")),
-            AnyView::from(&2i64),
-        ])
-        .unwrap();
-    let captured = root.clone();
-    let set_item = Function::get_global("ffi.DictSetItem").unwrap();
-    let mut inserted = false;
-    let mut integers = Vec::new();
-
-    assert!(structural_walk(
-        &root,
-        |value: &VisitValue| {
-            if let Some(integer) = value.cast::<i64>() {
-                integers.push(integer);
-                if !inserted {
-                    set_item
-                        .call_packed(&[
-                            AnyView::from(&captured),
-                            AnyView::from(&FfiString::from("c")),
-                            AnyView::from(&3i64),
-                        ])
-                        .unwrap();
-                    inserted = true;
-                }
-            }
-            WalkResult::Advance
-        },
-        WalkOrder::PreOrder,
-    )
-    .unwrap()
-    .is_none());
-
-    integers.sort_unstable();
-    assert_eq!(integers, vec![1, 2]);
-    let size = Function::get_global("ffi.DictSize")
-        .unwrap()
-        .call_packed(&[AnyView::from(&root)])
-        .and_then(i64::try_from)
-        .unwrap();
-    assert_eq!(size, 3);
-}
-
-#[test]
-fn dense_map_layout_visits_all_values_without_visiting_keys() {
+fn registered_map_hook_visits_all_values_without_visiting_keys() {
     // More than 4 entries forces the dense (block + iteration list) layout.
     let root: Map<FfiString, i64> = (0..9)
         .map(|i| (FfiString::from(format!("k{i}")), i as i64))
@@ -648,7 +665,6 @@ fn handler_errors_include_native_visit_path() {
         Ok(_) => panic!("handler unexpectedly succeeded"),
     };
     assert_eq!(error.message(), "handler failed");
-    assert!(error.backtrace().contains("sequence item [0]"));
     assert!(error.backtrace().contains("object `ffi.Array`"));
 }
 
@@ -675,8 +691,27 @@ fn visitor_errors_include_native_visit_path() {
         Ok(_) => panic!("visitor unexpectedly succeeded"),
     };
     assert_eq!(error.message(), "visitor failed");
-    assert!(error.backtrace().contains("sequence item [0]"));
     assert!(error.backtrace().contains("object `ffi.Array`"));
+}
+
+#[test]
+fn callback_panics_resume_after_the_registered_hook_returns() {
+    let root = Array::new(vec![1i64]);
+    let panic = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        structural_walk(
+            &root,
+            |_value: i64| -> WalkResult { panic!("visitor panic") },
+            WalkOrder::PreOrder,
+        )
+    })) {
+        Err(panic) => panic,
+        Ok(_) => panic!("panicking visitor unexpectedly returned"),
+    };
+    let message = panic
+        .downcast_ref::<&str>()
+        .copied()
+        .or_else(|| panic.downcast_ref::<String>().map(String::as_str));
+    assert_eq!(message, Some("visitor panic"));
 }
 
 #[test]
@@ -854,7 +889,6 @@ fn chain_link_errors_include_native_visit_path() {
         Ok(_) => panic!("link unexpectedly succeeded"),
     };
     assert_eq!(error.message(), "link failed");
-    assert!(error.backtrace().contains("sequence item [0]"));
     assert!(error.backtrace().contains("object `ffi.Array`"));
 }
 
