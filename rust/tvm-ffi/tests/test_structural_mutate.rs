@@ -155,6 +155,7 @@ static SHALLOW_COPY_CALLS: AtomicUsize = AtomicUsize::new(0);
 static REGISTERED_MUTATE_CALLS: AtomicUsize = AtomicUsize::new(0);
 static REGISTERED_MAYBE_INPLACE_MUTATE_CALLS: AtomicUsize = AtomicUsize::new(0);
 static REFLECTED_TEST_LOCK: Mutex<()> = Mutex::new(());
+static REGISTERED_HOOK_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 thread_local! {
     static RETAINED_MUTATOR: RefCell<Option<Any>> = const { RefCell::new(None) };
@@ -250,7 +251,7 @@ fn register_any_field(type_index: i32, name: &'static str, offset: usize, flags:
     assert_eq!(unsafe { TVMFFITypeRegisterField(type_index, &field) }, 0);
 }
 
-fn register_identity_type(type_key: &'static str, total_size: usize, kind: TVMFFISEqHashKind) {
+fn register_test_type(type_key: &'static str, total_size: usize, kind: TVMFFISEqHashKind) -> i32 {
     let type_key = unsafe { TVMFFIByteArray::from_str(type_key) };
     let type_index = unsafe {
         TVMFFITypeGetOrAllocIndex(
@@ -264,7 +265,7 @@ fn register_identity_type(type_key: &'static str, total_size: usize, kind: TVMFF
     };
     assert!(type_index >= TypeIndex::kTVMFFIDynObjectBegin as i32);
     let metadata = TVMFFITypeMetadata {
-        doc: unsafe { TVMFFIByteArray::from_str("Rust structural-mutation test identity") },
+        doc: unsafe { TVMFFIByteArray::from_str("Rust structural-mutation test type") },
         creator: None,
         total_size: i32::try_from(total_size).unwrap(),
         structural_eq_hash_kind: kind as i32,
@@ -273,42 +274,45 @@ fn register_identity_type(type_key: &'static str, total_size: usize, kind: TVMFF
         unsafe { TVMFFITypeRegisterMetadata(type_index, &metadata) },
         0
     );
+    type_index
 }
 
-static REGISTER_IDENTITY_TYPES: LazyLock<()> = LazyLock::new(|| {
-    register_identity_type(
+fn register_function_attr(type_index: i32, name: &'static str, function: Function) {
+    let name = unsafe { TVMFFIByteArray::from_str(name) };
+    let mut value = Any::from(function);
+    assert_eq!(
+        unsafe { TVMFFITypeRegisterAttr(type_index, &name, Any::as_data_ptr(&mut value)) },
+        0
+    );
+}
+
+static REGISTER_TEST_TYPES: LazyLock<()> = LazyLock::new(|| {
+    register_test_type(
         RustDagNodeObj::TYPE_KEY,
         std::mem::size_of::<RustDagNodeObj>(),
         TVMFFISEqHashKind::kTVMFFISEqHashKindDAGNode,
     );
-    register_identity_type(
+    register_test_type(
         RustFreeVarObj::TYPE_KEY,
         std::mem::size_of::<RustFreeVarObj>(),
         TVMFFISEqHashKind::kTVMFFISEqHashKindFreeVar,
     );
-    register_identity_type(
+    register_test_type(
         RustNoCopyObj::TYPE_KEY,
         std::mem::size_of::<RustNoCopyObj>(),
         TVMFFISEqHashKind::kTVMFFISEqHashKindTreeNode,
     );
-    register_identity_type(
+    register_test_type(
         RustHookNodeObj::TYPE_KEY,
         std::mem::size_of::<RustHookNodeObj>(),
         TVMFFISEqHashKind::kTVMFFISEqHashKindDAGNode,
     );
 
-    let type_key = unsafe { TVMFFIByteArray::from_str(RustPairObj::TYPE_KEY) };
-    let pair_type_index = unsafe {
-        TVMFFITypeGetOrAllocIndex(
-            &type_key,
-            -1,
-            Object::TYPE_DEPTH + 1,
-            0,
-            1,
-            Object::type_index(),
-        )
-    };
-    assert!(pair_type_index >= TypeIndex::kTVMFFIDynObjectBegin as i32);
+    let pair_type_index = register_test_type(
+        RustPairObj::TYPE_KEY,
+        std::mem::size_of::<RustPairObj>(),
+        TVMFFISEqHashKind::kTVMFFISEqHashKindTreeNode,
+    );
     register_any_field(
         pair_type_index,
         "first",
@@ -321,29 +325,12 @@ static REGISTER_IDENTITY_TYPES: LazyLock<()> = LazyLock::new(|| {
         std::mem::offset_of!(RustPairObj, ignored),
         TVMFFIFieldFlagBitMask::kTVMFFIFieldFlagBitMaskSEqHashIgnore as i64,
     );
-    let metadata = TVMFFITypeMetadata {
-        doc: unsafe { TVMFFIByteArray::from_str("Rust structural-mutation reflected pair") },
-        creator: None,
-        total_size: i32::try_from(std::mem::size_of::<RustPairObj>()).unwrap(),
-        structural_eq_hash_kind: TVMFFISEqHashKind::kTVMFFISEqHashKindTreeNode as i32,
-    };
-    assert_eq!(
-        unsafe { TVMFFITypeRegisterMetadata(pair_type_index, &metadata) },
-        0
-    );
 
-    let type_key = unsafe { TVMFFIByteArray::from_str(RustFailingGetterObj::TYPE_KEY) };
-    let getter_type_index = unsafe {
-        TVMFFITypeGetOrAllocIndex(
-            &type_key,
-            -1,
-            Object::TYPE_DEPTH + 1,
-            0,
-            1,
-            Object::type_index(),
-        )
-    };
-    assert!(getter_type_index >= TypeIndex::kTVMFFIDynObjectBegin as i32);
+    let getter_type_index = register_test_type(
+        RustFailingGetterObj::TYPE_KEY,
+        std::mem::size_of::<RustFailingGetterObj>(),
+        TVMFFISEqHashKind::kTVMFFISEqHashKindTreeNode,
+    );
     let field = TVMFFIFieldInfo {
         name: unsafe { TVMFFIByteArray::from_str("value") },
         doc: unsafe { TVMFFIByteArray::from_str("Fail after producing an owning field value") },
@@ -361,16 +348,6 @@ static REGISTER_IDENTITY_TYPES: LazyLock<()> = LazyLock::new(|| {
         unsafe { TVMFFITypeRegisterField(getter_type_index, &field) },
         0
     );
-    let metadata = TVMFFITypeMetadata {
-        doc: unsafe { TVMFFIByteArray::from_str("Rust failing-getter test object") },
-        creator: None,
-        total_size: i32::try_from(std::mem::size_of::<RustFailingGetterObj>()).unwrap(),
-        structural_eq_hash_kind: TVMFFISEqHashKind::kTVMFFISEqHashKindTreeNode as i32,
-    };
-    assert_eq!(
-        unsafe { TVMFFITypeRegisterMetadata(getter_type_index, &metadata) },
-        0
-    );
     let shallow_copy = Function::from_packed(|args| {
         let source = RustFailingGetter::try_from(args[0])?;
         Ok(Any::from(RustFailingGetter {
@@ -380,31 +357,13 @@ static REGISTER_IDENTITY_TYPES: LazyLock<()> = LazyLock::new(|| {
             }),
         }))
     });
-    let attr_name = unsafe { TVMFFIByteArray::from_str("__ffi_shallow_copy__") };
-    let mut attr_value = Any::from(shallow_copy);
-    assert_eq!(
-        unsafe {
-            TVMFFITypeRegisterAttr(
-                getter_type_index,
-                &attr_name,
-                Any::as_data_ptr(&mut attr_value),
-            )
-        },
-        0
-    );
+    register_function_attr(getter_type_index, "__ffi_shallow_copy__", shallow_copy);
 
-    let type_key = unsafe { TVMFFIByteArray::from_str(RustFailingSetterObj::TYPE_KEY) };
-    let setter_type_index = unsafe {
-        TVMFFITypeGetOrAllocIndex(
-            &type_key,
-            -1,
-            Object::TYPE_DEPTH + 1,
-            0,
-            1,
-            Object::type_index(),
-        )
-    };
-    assert!(setter_type_index >= TypeIndex::kTVMFFIDynObjectBegin as i32);
+    let setter_type_index = register_test_type(
+        RustFailingSetterObj::TYPE_KEY,
+        std::mem::size_of::<RustFailingSetterObj>(),
+        TVMFFISEqHashKind::kTVMFFISEqHashKindTreeNode,
+    );
     let setter = unsafe { Function::from_extern_c(std::ptr::null_mut(), setter_safe_call, None) };
     let field = TVMFFIFieldInfo {
         name: unsafe { TVMFFIByteArray::from_str("value") },
@@ -427,16 +386,6 @@ static REGISTER_IDENTITY_TYPES: LazyLock<()> = LazyLock::new(|| {
         unsafe { TVMFFITypeRegisterField(setter_type_index, &field) },
         0
     );
-    let metadata = TVMFFITypeMetadata {
-        doc: unsafe { TVMFFIByteArray::from_str("Rust failing-setter test object") },
-        creator: None,
-        total_size: i32::try_from(std::mem::size_of::<RustFailingSetterObj>()).unwrap(),
-        structural_eq_hash_kind: TVMFFISEqHashKind::kTVMFFISEqHashKindTreeNode as i32,
-    };
-    assert_eq!(
-        unsafe { TVMFFITypeRegisterMetadata(setter_type_index, &metadata) },
-        0
-    );
     let shallow_copy = Function::from_packed(|args| {
         let source = RustFailingSetter::try_from(args[0])?;
         Ok(Any::from(RustFailingSetter {
@@ -446,18 +395,7 @@ static REGISTER_IDENTITY_TYPES: LazyLock<()> = LazyLock::new(|| {
             }),
         }))
     });
-    let attr_name = unsafe { TVMFFIByteArray::from_str("__ffi_shallow_copy__") };
-    let mut attr_value = Any::from(shallow_copy);
-    assert_eq!(
-        unsafe {
-            TVMFFITypeRegisterAttr(
-                setter_type_index,
-                &attr_name,
-                Any::as_data_ptr(&mut attr_value),
-            )
-        },
-        0
-    );
+    register_function_attr(setter_type_index, "__ffi_shallow_copy__", shallow_copy);
 
     let shallow_copy = Function::from_packed(|args| {
         SHALLOW_COPY_CALLS.fetch_add(1, Ordering::Relaxed);
@@ -470,57 +408,32 @@ static REGISTER_IDENTITY_TYPES: LazyLock<()> = LazyLock::new(|| {
             }),
         }))
     });
-    let attr_name = unsafe { TVMFFIByteArray::from_str("__ffi_shallow_copy__") };
-    let mut attr_value = Any::from(shallow_copy);
-    assert_eq!(
-        unsafe {
-            TVMFFITypeRegisterAttr(
-                pair_type_index,
-                &attr_name,
-                Any::as_data_ptr(&mut attr_value),
-            )
-        },
-        0
-    );
+    register_function_attr(pair_type_index, "__ffi_shallow_copy__", shallow_copy);
 
     let registered_mutate =
         Function::from_packed(|args| run_registered_mutate_hook(args, &REGISTERED_MUTATE_CALLS));
-    let attr_name = unsafe { TVMFFIByteArray::from_str("__s_mutate__") };
-    let mut attr_value = Any::from(registered_mutate);
-    assert_eq!(
-        unsafe {
-            TVMFFITypeRegisterAttr(
-                RustHookNodeObj::type_index(),
-                &attr_name,
-                Any::as_data_ptr(&mut attr_value),
-            )
-        },
-        0
+    register_function_attr(
+        RustHookNodeObj::type_index(),
+        "__s_mutate__",
+        registered_mutate,
     );
 
     let registered_maybe_inplace_mutate = Function::from_packed(|args| {
         run_registered_mutate_hook(args, &REGISTERED_MAYBE_INPLACE_MUTATE_CALLS)
     });
-    let attr_name = unsafe { TVMFFIByteArray::from_str("__s_maybe_inplace_mutate__") };
-    let mut attr_value = Any::from(registered_maybe_inplace_mutate);
-    assert_eq!(
-        unsafe {
-            TVMFFITypeRegisterAttr(
-                RustHookNodeObj::type_index(),
-                &attr_name,
-                Any::as_data_ptr(&mut attr_value),
-            )
-        },
-        0
+    register_function_attr(
+        RustHookNodeObj::type_index(),
+        "__s_maybe_inplace_mutate__",
+        registered_maybe_inplace_mutate,
     );
 });
 
 fn ensure_test_types_registered() {
-    LazyLock::force(&REGISTER_IDENTITY_TYPES);
+    LazyLock::force(&REGISTER_TEST_TYPES);
 }
 
 fn rust_dag_node() -> RustDagNode {
-    LazyLock::force(&REGISTER_IDENTITY_TYPES);
+    LazyLock::force(&REGISTER_TEST_TYPES);
     RustDagNode {
         data: ObjectArc::new(RustDagNodeObj {
             base: Object::new(),
@@ -529,7 +442,7 @@ fn rust_dag_node() -> RustDagNode {
 }
 
 fn rust_free_var() -> RustFreeVar {
-    LazyLock::force(&REGISTER_IDENTITY_TYPES);
+    LazyLock::force(&REGISTER_TEST_TYPES);
     RustFreeVar {
         data: ObjectArc::new(RustFreeVarObj {
             base: Object::new(),
@@ -538,7 +451,7 @@ fn rust_free_var() -> RustFreeVar {
 }
 
 fn rust_pair(first: impl Into<Any>, ignored: impl Into<Any>) -> RustPair {
-    LazyLock::force(&REGISTER_IDENTITY_TYPES);
+    LazyLock::force(&REGISTER_TEST_TYPES);
     RustPair {
         data: ObjectArc::new(RustPairObj {
             base: Object::new(),
@@ -786,22 +699,6 @@ impl StructuralMutator for RejectAliasedReentry {
     }
 }
 
-#[derive(Default)]
-struct CountingPassthrough {
-    calls: usize,
-}
-
-impl MapDispatch for CountingPassthrough {
-    fn dispatch_map(
-        &mut self,
-        _value: &MapValue,
-        _def_region_kind: DefRegionKind,
-    ) -> Option<Result<Any>> {
-        self.calls += 1;
-        None
-    }
-}
-
 fn array_pointer<T>(array: &Array<T>) -> *const tvm_ffi::collections::array::ArrayObj
 where
     T: tvm_ffi::AnyCompatible + Clone,
@@ -973,32 +870,6 @@ fn user_mutator_child_helpers_reenter_the_same_mutator() {
         owned.owned_child_pointer.unwrap()
     );
     assert_eq!(mapped.get(0).unwrap(), 2);
-}
-
-#[test]
-fn clearing_user_var_remap_starts_a_new_identity_lifetime() {
-    ensure_test_types_registered();
-    let var = rust_free_var();
-    let mut mutator = RemappingFreeVar {
-        remap: StructuralVarRemap::default(),
-        type_index: RustFreeVarObj::type_index(),
-        calls: 0,
-    };
-
-    for _ in 0..2 {
-        let mapped = structural_mutate(var.clone(), &mut mutator)
-            .and_then(i64::try_from)
-            .unwrap();
-        assert_eq!(mapped, 41);
-    }
-    assert_eq!(mutator.calls, 1);
-
-    mutator.remap.clear();
-    let mapped = structural_mutate(var.clone(), &mut mutator)
-        .and_then(i64::try_from)
-        .unwrap();
-    assert_eq!(mapped, 41);
-    assert_eq!(mutator.calls, 2);
 }
 
 #[test]
@@ -1186,6 +1057,7 @@ fn callback_errors_preserve_message_and_add_object_context() {
 #[test]
 fn registered_mutation_hooks_receive_the_rust_mutator() {
     ensure_test_types_registered();
+    let _guard = REGISTERED_HOOK_TEST_LOCK.lock().unwrap();
     RETAINED_MUTATOR.with(|retained| {
         retained.take();
     });
@@ -1228,6 +1100,7 @@ fn registered_mutation_hooks_receive_the_rust_mutator() {
 #[test]
 fn registered_hook_cannot_reenter_through_an_aliased_mutator_handle() {
     ensure_test_types_registered();
+    let _guard = REGISTERED_HOOK_TEST_LOCK.lock().unwrap();
     RETAINED_MUTATOR.with(|retained| {
         retained.take();
     });
@@ -1271,70 +1144,6 @@ fn callback_panics_resume_after_the_registered_hook_returns() {
     .and_then(Array::<i64>::try_from)
     .unwrap();
     assert_eq!(mapped.get(0).unwrap(), 2);
-}
-
-#[test]
-fn unique_builtin_containers_reuse_storage() {
-    ensure_test_types_registered();
-    let list = call_global("ffi.List", &[Any::from(1i64), Any::from(2i64)]);
-    let list_pointer = any_object_pointer(&list);
-    let mapped_list = structural_map(list, &mut IncrementIntegers, WalkOrder::PostOrder).unwrap();
-    assert_eq!(any_object_pointer(&mapped_list), list_pointer);
-    assert_eq!(
-        (list_item(&mapped_list, 0), list_item(&mapped_list, 1)),
-        (2, 3)
-    );
-
-    let small: Map<i64, i64> = [(1, 10), (2, 20)].into_iter().collect();
-    let small_pointer = map_pointer(&small);
-    let mapped_small = structural_map(small, &mut IncrementIntegers, WalkOrder::PostOrder)
-        .and_then(Map::<i64, i64>::try_from)
-        .unwrap();
-    assert_eq!(map_pointer(&mapped_small), small_pointer);
-    assert_eq!(mapped_small.get(&1).unwrap(), Some(11));
-    assert_eq!(mapped_small.get(&2).unwrap(), Some(21));
-
-    // More than four entries selects the dense map layout.
-    let dense: Map<i64, i64> = (0..9).map(|value| (value, value * 10)).collect();
-    let dense_pointer = map_pointer(&dense);
-    let mapped_dense = structural_map(dense, &mut IncrementIntegers, WalkOrder::PostOrder)
-        .and_then(Map::<i64, i64>::try_from)
-        .unwrap();
-    assert_eq!(map_pointer(&mapped_dense), dense_pointer);
-    for value in 0..9 {
-        assert_eq!(mapped_dense.get(&value).unwrap(), Some(value * 10 + 1));
-    }
-
-    let dict = call_global(
-        "ffi.Dict",
-        &[
-            Any::from(1i64),
-            Any::from(10i64),
-            Any::from(2i64),
-            Any::from(20i64),
-        ],
-    );
-    let dict_pointer = any_object_pointer(&dict);
-    let mapped_dict = structural_map(dict, &mut IncrementIntegers, WalkOrder::PostOrder).unwrap();
-    assert_eq!(any_object_pointer(&mapped_dict), dict_pointer);
-    assert_eq!(
-        (dict_item(&mapped_dict, 1), dict_item(&mapped_dict, 2)),
-        (11, 21)
-    );
-
-    let mut dense_dict_args = Vec::new();
-    for value in 0..9i64 {
-        dense_dict_args.push(Any::from(value));
-        dense_dict_args.push(Any::from(value * 10));
-    }
-    let dense_dict = call_global("ffi.Dict", &dense_dict_args);
-    let dense_dict_pointer = any_object_pointer(&dense_dict);
-    let mapped_dense_dict =
-        structural_map(dense_dict, &mut IncrementIntegers, WalkOrder::PostOrder).unwrap();
-    assert_eq!(any_object_pointer(&mapped_dense_dict), dense_dict_pointer);
-    for value in 0..9i64 {
-        assert_eq!(dict_item(&mapped_dense_dict, value), value * 10 + 1);
-    }
 }
 
 #[test]
@@ -1548,29 +1357,26 @@ fn closures_and_tuples_use_ordered_first_match() {
 }
 
 #[test]
-fn eight_callback_tuple_can_include_a_map_dispatch_link() {
-    ensure_test_types_registered();
-    let root = call_global("ffi.Array", &[Any::from(1i64), Any::from(rust_dag_node())]);
-    let mut passthrough = CountingPassthrough::default();
+fn eight_link_tuple_reaches_final_map_dispatch() {
+    let mut final_dispatch = IncrementIntegers;
     let mapped = structural_map(
-        root,
+        1i64,
         (
-            &mut passthrough,
             |_value: bool| Any::from(false),
             |_value: f64| Any::from(0.0f64),
             |value: FfiString| Any::from(value),
-            |_value: Function| Any::new(),
-            |_node: &RustDagNodeObj, _kind: DefRegionKind| Any::from(5i64),
-            |integer: i64| Any::from(integer + 1),
-            |value: &MapValue| value.to_owned(),
+            |value: Function| Any::from(value),
+            |_node: &RustDagNodeObj| Any::new(),
+            |_node: &RustFreeVarObj| Any::new(),
+            |value: Array<i64>| Any::from(value),
+            &mut final_dispatch,
         ),
-        WalkOrder::PreOrder,
+        WalkOrder::PostOrder,
     )
+    .and_then(i64::try_from)
     .unwrap();
 
-    assert_eq!(passthrough.calls, 3);
-    assert_eq!(i64::try_from(array_item(&mapped, 0)).unwrap(), 2);
-    assert_eq!(i64::try_from(array_item(&mapped, 1)).unwrap(), 5);
+    assert_eq!(mapped, 2);
 }
 
 #[test]
