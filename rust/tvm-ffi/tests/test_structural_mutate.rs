@@ -702,6 +702,106 @@ impl StructuralMutator for RemappingFreeVar {
     }
 }
 
+struct ChildHelperMutator {
+    remap: StructuralVarRemap,
+    use_owned_child: bool,
+    owned_child_pointer: Option<usize>,
+}
+
+impl StructuralMutator for ChildHelperMutator {
+    fn mutate(&mut self, value: &MapValue, def_region_kind: DefRegionKind) -> Result<Any> {
+        if value.type_index() == TypeIndex::kTVMFFINone as i32 {
+            if self.use_owned_child {
+                let child = Array::new(vec![1i64]);
+                self.owned_child_pointer = Some(array_pointer(&child) as usize);
+                self.maybe_inplace_mutate_child(child, def_region_kind)
+            } else {
+                self.mutate_child(&1i64, def_region_kind)
+            }
+        } else if let Some(integer) = value.cast::<i64>() {
+            Ok(Any::from(integer + 1))
+        } else {
+            self.default_mutate(value, def_region_kind)
+        }
+    }
+
+    fn maybe_inplace_mutate(
+        &mut self,
+        value: InplaceValue<'_>,
+        def_region_kind: DefRegionKind,
+    ) -> Result<Any> {
+        self.default_maybe_inplace_mutate(value, def_region_kind)
+    }
+
+    fn var_remap_get(&mut self, var: &MapValue) -> Result<Option<Any>> {
+        self.remap.get(var)
+    }
+
+    fn var_remap_set(&mut self, var: &MapValue, mapped_value: &Any) -> Result<()> {
+        self.remap.set(var, mapped_value)
+    }
+}
+
+#[derive(Default)]
+struct RejectAliasedReentry {
+    remap: StructuralVarRemap,
+    rejected: bool,
+}
+
+impl StructuralMutator for RejectAliasedReentry {
+    fn mutate(&mut self, value: &MapValue, def_region_kind: DefRegionKind) -> Result<Any> {
+        if let Some(integer) = value.cast::<i64>() {
+            let retained = RETAINED_MUTATOR.with(|slot| slot.borrow().as_ref().unwrap().clone());
+            let error = match Function::get_global("ffi.StructuralMutatorMutate")
+                .unwrap()
+                .call_packed(&[AnyView::from(&retained), AnyView::from(&integer)])
+            {
+                Ok(_) => panic!("aliased structural-mutator reentry unexpectedly succeeded"),
+                Err(error) => error,
+            };
+            assert!(error
+                .message()
+                .contains("may only be called by its active registered hook"));
+            self.rejected = true;
+            Ok(Any::from(integer + 1))
+        } else {
+            self.default_mutate(value, def_region_kind)
+        }
+    }
+
+    fn maybe_inplace_mutate(
+        &mut self,
+        value: InplaceValue<'_>,
+        def_region_kind: DefRegionKind,
+    ) -> Result<Any> {
+        self.default_maybe_inplace_mutate(value, def_region_kind)
+    }
+
+    fn var_remap_get(&mut self, var: &MapValue) -> Result<Option<Any>> {
+        self.remap.get(var)
+    }
+
+    fn var_remap_set(&mut self, var: &MapValue, mapped_value: &Any) -> Result<()> {
+        self.remap.set(var, mapped_value)
+    }
+}
+
+#[derive(Default)]
+struct CountingPassthrough {
+    calls: usize,
+}
+
+impl MapDispatch for CountingPassthrough {
+    fn dispatch_map(
+        &mut self,
+        _value: &MapValue,
+        _def_region_kind: DefRegionKind,
+    ) -> Option<Result<Any>> {
+        self.calls += 1;
+        None
+    }
+}
+
 fn array_pointer<T>(array: &Array<T>) -> *const tvm_ffi::collections::array::ArrayObj
 where
     T: tvm_ffi::AnyCompatible + Clone,
@@ -846,6 +946,59 @@ fn user_mutator_can_store_a_changed_free_var_result() {
     assert_eq!(mutator.calls, 1);
     assert_eq!(i64::try_from(array_item(&mapped, 0)).unwrap(), 41);
     assert_eq!(i64::try_from(array_item(&mapped, 1)).unwrap(), 41);
+}
+
+#[test]
+fn user_mutator_child_helpers_reenter_the_same_mutator() {
+    let mut borrowed = ChildHelperMutator {
+        remap: StructuralVarRemap::default(),
+        use_owned_child: false,
+        owned_child_pointer: None,
+    };
+    let mapped = structural_mutate(Any::new(), &mut borrowed)
+        .and_then(i64::try_from)
+        .unwrap();
+    assert_eq!(mapped, 2);
+
+    let mut owned = ChildHelperMutator {
+        remap: StructuralVarRemap::default(),
+        use_owned_child: true,
+        owned_child_pointer: None,
+    };
+    let mapped = structural_mutate(Any::new(), &mut owned)
+        .and_then(Array::<i64>::try_from)
+        .unwrap();
+    assert_eq!(
+        array_pointer(&mapped) as usize,
+        owned.owned_child_pointer.unwrap()
+    );
+    assert_eq!(mapped.get(0).unwrap(), 2);
+}
+
+#[test]
+fn clearing_user_var_remap_starts_a_new_identity_lifetime() {
+    ensure_test_types_registered();
+    let var = rust_free_var();
+    let mut mutator = RemappingFreeVar {
+        remap: StructuralVarRemap::default(),
+        type_index: RustFreeVarObj::type_index(),
+        calls: 0,
+    };
+
+    for _ in 0..2 {
+        let mapped = structural_mutate(var.clone(), &mut mutator)
+            .and_then(i64::try_from)
+            .unwrap();
+        assert_eq!(mapped, 41);
+    }
+    assert_eq!(mutator.calls, 1);
+
+    mutator.remap.clear();
+    let mapped = structural_mutate(var.clone(), &mut mutator)
+        .and_then(i64::try_from)
+        .unwrap();
+    assert_eq!(mapped, 41);
+    assert_eq!(mutator.calls, 2);
 }
 
 #[test]
@@ -1067,6 +1220,25 @@ fn registered_mutation_hooks_receive_the_rust_mutator() {
         REGISTERED_MAYBE_INPLACE_MUTATE_CALLS.load(Ordering::Relaxed),
         maybe_inplace_calls_before + 1
     );
+    RETAINED_MUTATOR.with(|retained| {
+        retained.take();
+    });
+}
+
+#[test]
+fn registered_hook_cannot_reenter_through_an_aliased_mutator_handle() {
+    ensure_test_types_registered();
+    RETAINED_MUTATOR.with(|retained| {
+        retained.take();
+    });
+    let mut mutator = RejectAliasedReentry::default();
+
+    let mapped = structural_mutate(rust_hook_node(), &mut mutator)
+        .and_then(i64::try_from)
+        .unwrap();
+
+    assert_eq!(mapped, 2);
+    assert!(mutator.rejected);
     RETAINED_MUTATOR.with(|retained| {
         retained.take();
     });
@@ -1373,6 +1545,32 @@ fn closures_and_tuples_use_ordered_first_match() {
     assert_eq!(mapped.get(0).unwrap(), 4);
     assert_eq!(first_calls, 1);
     assert_eq!(later_calls, 0);
+}
+
+#[test]
+fn eight_callback_tuple_can_include_a_map_dispatch_link() {
+    ensure_test_types_registered();
+    let root = call_global("ffi.Array", &[Any::from(1i64), Any::from(rust_dag_node())]);
+    let mut passthrough = CountingPassthrough::default();
+    let mapped = structural_map(
+        root,
+        (
+            &mut passthrough,
+            |_value: bool| Any::from(false),
+            |_value: f64| Any::from(0.0f64),
+            |value: FfiString| Any::from(value),
+            |_value: Function| Any::new(),
+            |_node: &RustDagNodeObj, _kind: DefRegionKind| Any::from(5i64),
+            |integer: i64| Any::from(integer + 1),
+            |value: &MapValue| value.to_owned(),
+        ),
+        WalkOrder::PreOrder,
+    )
+    .unwrap();
+
+    assert_eq!(passthrough.calls, 3);
+    assert_eq!(i64::try_from(array_item(&mapped, 0)).unwrap(), 2);
+    assert_eq!(i64::try_from(array_item(&mapped, 1)).unwrap(), 5);
 }
 
 #[test]
