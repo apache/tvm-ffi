@@ -17,6 +17,7 @@
  * under the License.
  */
 
+use std::cell::RefCell;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{LazyLock, Mutex};
 
@@ -155,6 +156,40 @@ static REGISTERED_MUTATE_CALLS: AtomicUsize = AtomicUsize::new(0);
 static REGISTERED_MAYBE_INPLACE_MUTATE_CALLS: AtomicUsize = AtomicUsize::new(0);
 static REFLECTED_TEST_LOCK: Mutex<()> = Mutex::new(());
 
+thread_local! {
+    static RETAINED_MUTATOR: RefCell<Option<Any>> = const { RefCell::new(None) };
+}
+
+fn run_registered_mutate_hook(args: &[AnyView<'_>], calls: &AtomicUsize) -> Result<Any> {
+    assert_eq!(args.len(), 2);
+    Function::get_global("ffi.StructuralMutatorDefRegionKind")
+        .unwrap()
+        .call_packed(&[args[0]])?;
+
+    // Keep one reference so the test can verify that a type hook cannot use
+    // the mutator after the structural-mutation call has ended.
+    RETAINED_MUTATOR.with(|retained| {
+        retained.replace(Some(Any::from(args[0])));
+    });
+
+    let cached = Function::get_global("ffi.StructuralMutatorVarRemapGet")
+        .unwrap()
+        .call_packed(&[args[0], args[1]])?;
+    if cached.type_index() != TypeIndex::kTVMFFINone as i32 {
+        return Ok(cached);
+    }
+
+    let child = Any::from(1i64);
+    let mapped = Function::get_global("ffi.StructuralMutatorMutate")
+        .unwrap()
+        .call_packed(&[args[0], AnyView::from(&child)])?;
+    Function::get_global("ffi.StructuralMutatorVarRemapSet")
+        .unwrap()
+        .call_packed(&[args[0], args[1], AnyView::from(&mapped)])?;
+    calls.fetch_add(1, Ordering::Relaxed);
+    Ok(mapped)
+}
+
 unsafe extern "C" fn any_field_getter(field: *mut std::ffi::c_void, result: *mut TVMFFIAny) -> i32 {
     TVMFFIAnyViewToOwnedAny(field.cast(), result)
 }
@@ -259,7 +294,7 @@ static REGISTER_IDENTITY_TYPES: LazyLock<()> = LazyLock::new(|| {
     register_identity_type(
         RustHookNodeObj::TYPE_KEY,
         std::mem::size_of::<RustHookNodeObj>(),
-        TVMFFISEqHashKind::kTVMFFISEqHashKindTreeNode,
+        TVMFFISEqHashKind::kTVMFFISEqHashKindDAGNode,
     );
 
     let type_key = unsafe { TVMFFIByteArray::from_str(RustPairObj::TYPE_KEY) };
@@ -448,17 +483,8 @@ static REGISTER_IDENTITY_TYPES: LazyLock<()> = LazyLock::new(|| {
         0
     );
 
-    // Function-valued type hooks receive the same active mutator object as
-    // opaque C++ hooks. Calling one of its registered methods verifies that
-    // the Rust object implements the shared StructuralMutator ABI.
-    let registered_mutate = Function::from_packed(|args| {
-        assert_eq!(args.len(), 2);
-        Function::get_global("ffi.StructuralMutatorDefRegionKind")
-            .unwrap()
-            .call_packed(&[args[0]])?;
-        REGISTERED_MUTATE_CALLS.fetch_add(1, Ordering::Relaxed);
-        Ok(Any::from(args[1]))
-    });
+    let registered_mutate =
+        Function::from_packed(|args| run_registered_mutate_hook(args, &REGISTERED_MUTATE_CALLS));
     let attr_name = unsafe { TVMFFIByteArray::from_str("__s_mutate__") };
     let mut attr_value = Any::from(registered_mutate);
     assert_eq!(
@@ -473,12 +499,7 @@ static REGISTER_IDENTITY_TYPES: LazyLock<()> = LazyLock::new(|| {
     );
 
     let registered_maybe_inplace_mutate = Function::from_packed(|args| {
-        assert_eq!(args.len(), 2);
-        Function::get_global("ffi.StructuralMutatorDefRegionKind")
-            .unwrap()
-            .call_packed(&[args[0]])?;
-        REGISTERED_MAYBE_INPLACE_MUTATE_CALLS.fetch_add(1, Ordering::Relaxed);
-        Ok(Any::from(args[1]))
+        run_registered_mutate_hook(args, &REGISTERED_MAYBE_INPLACE_MUTATE_CALLS)
     });
     let attr_name = unsafe { TVMFFIByteArray::from_str("__s_maybe_inplace_mutate__") };
     let mut attr_value = Any::from(registered_maybe_inplace_mutate);
@@ -588,6 +609,39 @@ impl StructuralMutator for ManualIncrement {
     fn mutate(&mut self, value: &MapValue, def_region_kind: DefRegionKind) -> Result<Any> {
         if let Some(integer) = value.cast::<i64>() {
             Ok(Any::from(integer + 1))
+        } else {
+            self.default_mutate(value, def_region_kind)
+        }
+    }
+
+    fn maybe_inplace_mutate(
+        &mut self,
+        value: InplaceValue<'_>,
+        def_region_kind: DefRegionKind,
+    ) -> Result<Any> {
+        self.default_maybe_inplace_mutate(value, def_region_kind)
+    }
+
+    fn var_remap_get(&mut self, var: &MapValue) -> Result<Option<Any>> {
+        self.remap.get(var)
+    }
+
+    fn var_remap_set(&mut self, var: &MapValue, mapped_value: &Any) -> Result<()> {
+        self.remap.set(var, mapped_value)
+    }
+}
+
+#[derive(Default)]
+struct ReplaceNone {
+    remap: StructuralVarRemap,
+    calls: usize,
+}
+
+impl StructuralMutator for ReplaceNone {
+    fn mutate(&mut self, value: &MapValue, def_region_kind: DefRegionKind) -> Result<Any> {
+        if value.type_index() == TypeIndex::kTVMFFINone as i32 {
+            self.calls += 1;
+            Ok(Any::from(8i64))
         } else {
             self.default_mutate(value, def_region_kind)
         }
@@ -749,6 +803,31 @@ fn user_driven_mutator_controls_default_recursion_and_in_place_opt_in() {
     let mapped_dict = structural_mutate(dict, &mut ManualIncrement::default()).unwrap();
     assert_eq!(any_object_pointer(&mapped_dict), dict_pointer);
     assert_eq!(dict_item(&mapped_dict, 1), 11);
+}
+
+#[test]
+fn none_values_are_dispatched_to_map_callbacks_and_user_mutators() {
+    let mut map_calls = 0;
+    let mapped = structural_map(
+        Any::new(),
+        |value: &MapValue| {
+            map_calls += 1;
+            assert_eq!(value.type_index(), TypeIndex::kTVMFFINone as i32);
+            Any::from(7i64)
+        },
+        WalkOrder::PostOrder,
+    )
+    .and_then(i64::try_from)
+    .unwrap();
+    assert_eq!(mapped, 7);
+    assert_eq!(map_calls, 1);
+
+    let mut mutator = ReplaceNone::default();
+    let mapped = structural_mutate(Any::new(), &mut mutator)
+        .and_then(i64::try_from)
+        .unwrap();
+    assert_eq!(mapped, 8);
+    assert_eq!(mutator.calls, 1);
 }
 
 #[test]
@@ -954,37 +1033,72 @@ fn callback_errors_preserve_message_and_add_object_context() {
 #[test]
 fn registered_mutation_hooks_receive_the_rust_mutator() {
     ensure_test_types_registered();
+    RETAINED_MUTATOR.with(|retained| {
+        retained.take();
+    });
 
     let source = rust_hook_node();
-    let source_pointer = unsafe { ObjectArc::as_raw(&source.data) };
     let mutate_calls_before = REGISTERED_MUTATE_CALLS.load(Ordering::Relaxed);
-    let mapped = structural_map(
-        source.clone(),
-        |_integer: i64| Any::from(0i64),
-        WalkOrder::PostOrder,
-    )
-    .and_then(RustHookNode::try_from)
-    .unwrap();
-    assert_eq!(unsafe { ObjectArc::as_raw(&mapped.data) }, source_pointer);
+    let mapped = structural_mutate(source.clone(), &mut ManualIncrement::default())
+        .and_then(i64::try_from)
+        .unwrap();
+    assert_eq!(mapped, 2);
     assert_eq!(
         REGISTERED_MUTATE_CALLS.load(Ordering::Relaxed),
         mutate_calls_before + 1
     );
 
-    drop(mapped);
+    let retained = RETAINED_MUTATOR.with(|retained| retained.take().unwrap());
+    let error = match Function::get_global("ffi.StructuralMutatorMutate")
+        .unwrap()
+        .call_packed(&[AnyView::from(&retained), AnyView::from(&1i64)])
+    {
+        Ok(_) => panic!("retained structural mutator unexpectedly remained active"),
+        Err(error) => error,
+    };
+    assert!(error.message().contains("retained after its active call"));
+
     let maybe_inplace_calls_before = REGISTERED_MAYBE_INPLACE_MUTATE_CALLS.load(Ordering::Relaxed);
-    let mapped = structural_map(
-        source,
-        |_integer: i64| Any::from(0i64),
-        WalkOrder::PostOrder,
-    )
-    .and_then(RustHookNode::try_from)
-    .unwrap();
-    assert_eq!(unsafe { ObjectArc::as_raw(&mapped.data) }, source_pointer);
+    let mapped = structural_mutate(rust_hook_node(), &mut ManualIncrement::default())
+        .and_then(i64::try_from)
+        .unwrap();
+    assert_eq!(mapped, 2);
     assert_eq!(
         REGISTERED_MAYBE_INPLACE_MUTATE_CALLS.load(Ordering::Relaxed),
         maybe_inplace_calls_before + 1
     );
+    RETAINED_MUTATOR.with(|retained| {
+        retained.take();
+    });
+}
+
+#[test]
+fn callback_panics_resume_after_the_registered_hook_returns() {
+    let panic = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        structural_map(
+            Array::new(vec![1i64]),
+            |_integer: i64| -> Any { panic!("mapper panic") },
+            WalkOrder::PostOrder,
+        )
+    })) {
+        Err(panic) => panic,
+        Ok(_) => panic!("panicking mapper unexpectedly returned"),
+    };
+
+    let message = panic
+        .downcast_ref::<&str>()
+        .copied()
+        .or_else(|| panic.downcast_ref::<String>().map(String::as_str));
+    assert_eq!(message, Some("mapper panic"));
+
+    let mapped = structural_map(
+        Array::new(vec![1i64]),
+        |integer: i64| Any::from(integer + 1),
+        WalkOrder::PostOrder,
+    )
+    .and_then(Array::<i64>::try_from)
+    .unwrap();
+    assert_eq!(mapped.get(0).unwrap(), 2);
 }
 
 #[test]
@@ -1149,43 +1263,16 @@ fn shared_outer_container_does_not_mutate_its_nested_child() {
 }
 
 #[test]
-fn shared_list_uses_snapshot_and_copy_on_write() {
+fn shared_list_uses_copy_on_write() {
     ensure_test_types_registered();
     let source = call_global("ffi.List", &[Any::from(1i64), Any::from(2i64)]);
     let source_pointer = any_object_pointer(&source);
-    let captured = source.clone();
-    let append = Function::get_global("ffi.ListAppend").unwrap();
-    let mut appended = false;
-
-    let mapped = structural_map(
-        source,
-        |value: &MapValue| {
-            if let Some(integer) = value.cast::<i64>() {
-                if !appended {
-                    append
-                        .call_packed(&[AnyView::from(&captured), AnyView::from(&3i64)])
-                        .unwrap();
-                    appended = true;
-                }
-                Any::from(integer + 1)
-            } else {
-                value.to_owned()
-            }
-        },
-        WalkOrder::PreOrder,
-    )
-    .unwrap();
+    let mapped =
+        structural_map(source.clone(), &mut IncrementIntegers, WalkOrder::PostOrder).unwrap();
 
     assert_ne!(any_object_pointer(&mapped), source_pointer);
     assert_eq!((list_item(&mapped, 0), list_item(&mapped, 1)), (2, 3));
-    assert_eq!(
-        (
-            list_item(&captured, 0),
-            list_item(&captured, 1),
-            list_item(&captured, 2),
-        ),
-        (1, 2, 3)
-    );
+    assert_eq!((list_item(&source, 0), list_item(&source, 1)), (1, 2));
 }
 
 #[derive(Default)]

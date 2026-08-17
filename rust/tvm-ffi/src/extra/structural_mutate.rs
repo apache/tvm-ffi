@@ -51,8 +51,9 @@ use crate::tvm_ffi_sys::TVMFFIFieldFlagBitMask::{
     kTVMFFIFieldFlagBitMaskSEqHashIgnore, kTVMFFIFieldFlagBitSetterIsFunctionObj,
 };
 use crate::tvm_ffi_sys::{
-    TVMFFIAny, TVMFFIByteArray, TVMFFIFieldInfo, TVMFFIFieldSetter, TVMFFIFunctionCall,
-    TVMFFIGetTypeInfo, TVMFFIObject, TVMFFITypeAttrColumn, TVMFFITypeIndex, TVMFFITypeKeyToIndex,
+    TVMFFIAny, TVMFFIAnyViewToOwnedAny, TVMFFIByteArray, TVMFFIFieldInfo, TVMFFIFieldSetter,
+    TVMFFIFunctionCall, TVMFFIGetTypeInfo, TVMFFIObject, TVMFFITypeAttrColumn, TVMFFITypeIndex,
+    TVMFFITypeKeyToIndex,
 };
 use crate::tvm_ffi_sys::{TVMFFIObjectHandle, TVMFFISEqHashKind};
 
@@ -619,10 +620,6 @@ impl<D: MapDispatch> NativeMapper<D> {
         def_region_kind: DefRegionKind,
         permit: Permit,
     ) -> Result<Any> {
-        if raw.type_index == TVMFFITypeIndex::kTVMFFINone as i32 {
-            return owned_from_raw(raw);
-        }
-
         // Plain inline leaves have no children or structural identity.  Map
         // them directly instead of routing through identity lookup and the
         // default-mutation path, whose owning conversion crosses the C ABI.
@@ -1047,8 +1044,11 @@ unsafe extern "C" fn rust_vtable_var_remap_set(
     let callback = (*mutator).callbacks.var_remap_set;
     let context = (*mutator).context;
     let var_raw = *var.as_raw_ffi_any();
-    let mapped = Any::from(mapped_value);
-    match catch_unwind(AssertUnwindSafe(|| callback(context, var_raw, &mapped))) {
+    let mapped_raw = *mapped_value.as_raw_ffi_any();
+    match catch_unwind(AssertUnwindSafe(|| {
+        let mapped = owned_from_raw(mapped_raw)?;
+        callback(context, var_raw, &mapped)
+    })) {
         Ok(Ok(())) => TVMFFIAny::new(),
         Ok(Err(error)) => result_into_raw(Err(error)),
         Err(payload) => {
@@ -1180,9 +1180,6 @@ impl<U: StructuralMutator> RuntimeMutationDriver for UserDriver<'_, U> {
         def_region_kind: DefRegionKind,
         permit: Permit,
     ) -> Result<Any> {
-        if raw.type_index == TVMFFITypeIndex::kTVMFFINone as i32 {
-            return owned_from_raw(raw);
-        }
         let result = if permit == Permit::MaybeInPlace && object_is_unique(raw) {
             let mut scoped_raw = raw;
             self.mutator
@@ -1651,8 +1648,13 @@ fn same_shallow(lhs: TVMFFIAny, rhs: TVMFFIAny) -> bool {
 }
 
 fn owned_from_raw(raw: TVMFFIAny) -> Result<Any> {
-    let view = unsafe { AnyView::from_raw_ffi_any(raw) };
-    Ok(Any::from(view))
+    let mut owned = Any::new();
+    let return_code = unsafe { TVMFFIAnyViewToOwnedAny(&raw, Any::as_data_ptr(&mut owned)) };
+    if return_code == 0 {
+        Ok(owned)
+    } else {
+        Err(Error::from_raised())
+    }
 }
 
 fn with_value_context(error: Error, raw: TVMFFIAny) -> Error {
