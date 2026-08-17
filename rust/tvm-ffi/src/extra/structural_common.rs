@@ -18,8 +18,14 @@
  */
 
 use crate::any::{Any, AnyView};
+use crate::error::Error;
 use crate::object::ObjectCore;
 use crate::tvm_ffi_sys::{TVMFFIAny, TVMFFIGetTypeInfo, TVMFFITypeIndex};
+
+/// Add one structural traversal frame to an error's backtrace.
+pub(crate) fn with_structural_error_context(error: Error, operation: &str, frame: &str) -> Error {
+    Error::with_appended_backtrace(error, &format!("[native structural {operation}] {frame}\n"))
+}
 
 // Rust treats callback tuples of different lengths as different types.
 // Generate support for tuples containing 1 through 8 callbacks here so

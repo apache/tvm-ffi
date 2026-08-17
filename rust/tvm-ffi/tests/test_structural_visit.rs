@@ -628,6 +628,43 @@ fn stateful_structural_walk_supports_post_order() {
 }
 
 #[test]
+fn nested_walk_restores_the_outer_active_visitor() {
+    let outer = Array::new(vec![10i64, 20]);
+    let inner = Array::new(vec![1i64, 2]);
+    let mut entered_inner = false;
+    let mut outer_values = Vec::new();
+    let mut inner_values = Vec::new();
+
+    assert!(structural_walk(
+        &outer,
+        |value: &VisitValue| -> Result<WalkResult> {
+            if let Some(value) = value.cast::<i64>() {
+                outer_values.push(value);
+            }
+            if !entered_inner {
+                entered_inner = true;
+                structural_walk(
+                    &inner,
+                    |value: &VisitValue| {
+                        if let Some(value) = value.cast::<i64>() {
+                            inner_values.push(value);
+                        }
+                        WalkResult::Advance
+                    },
+                    WalkOrder::PreOrder,
+                )?;
+            }
+            Ok(WalkResult::Advance)
+        },
+        WalkOrder::PreOrder,
+    )
+    .unwrap()
+    .is_none());
+    assert_eq!(outer_values, vec![10, 20]);
+    assert_eq!(inner_values, vec![1, 2]);
+}
+
+#[test]
 fn interrupt_payload_is_returned_to_the_caller() {
     let root = Array::new(vec![1i64, 2]);
     let outcome = structural_walk(

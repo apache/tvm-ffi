@@ -27,7 +27,7 @@
 use crate::error::Result;
 
 use super::structural_visit::{
-    DefRegionKind, IntoWalker, NativeVisit, VisitResult, VisitValue, WalkOrder, WalkResult,
+    DefRegionKind, IntoWalker, NativeVisit, VisitResult, VisitValue, WalkResult,
 };
 
 /// Typed dispatch implemented by a walk-layer observer.
@@ -74,11 +74,8 @@ pub enum ByDispatch {}
 
 impl<'a, V: VisitDispatch> IntoWalker<ByDispatch> for &'a mut V {
     type Walker = DispatchVisitor<&'a mut V>;
-    fn into_walker(self, order: WalkOrder) -> Self::Walker {
-        DispatchVisitor {
-            visitor: self,
-            order,
-        }
+    fn into_walker(self) -> Self::Walker {
+        DispatchVisitor { visitor: self }
     }
 }
 
@@ -88,27 +85,12 @@ impl<'a, V: VisitDispatch> IntoWalker<ByDispatch> for &'a mut V {
 #[doc(hidden)]
 pub struct DispatchVisitor<V> {
     visitor: V,
-    order: WalkOrder,
 }
 
 impl<V: VisitDispatch> NativeVisit for DispatchVisitor<V> {
-    fn enter(&mut self, value: &VisitValue, def_region_kind: DefRegionKind) -> Result<WalkResult> {
-        match self.order {
-            WalkOrder::PreOrder => self
-                .visitor
-                .dispatch_visit(value, def_region_kind)
-                .unwrap_or(Ok(WalkResult::Advance)),
-            WalkOrder::PostOrder => Ok(WalkResult::Advance),
-        }
-    }
-
-    fn exit(&mut self, value: &VisitValue, def_region_kind: DefRegionKind) -> Result<WalkResult> {
-        match self.order {
-            WalkOrder::PreOrder => Ok(WalkResult::Advance),
-            WalkOrder::PostOrder => self
-                .visitor
-                .dispatch_visit(value, def_region_kind)
-                .unwrap_or(Ok(WalkResult::Advance)),
-        }
+    fn visit(&mut self, value: &VisitValue, def_region_kind: DefRegionKind) -> Result<WalkResult> {
+        self.visitor
+            .dispatch_visit(value, def_region_kind)
+            .unwrap_or(Ok(WalkResult::Advance))
     }
 }

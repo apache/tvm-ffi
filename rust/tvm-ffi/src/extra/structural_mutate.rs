@@ -57,7 +57,7 @@ use crate::tvm_ffi_sys::{
 };
 use crate::tvm_ffi_sys::{TVMFFIObjectHandle, TVMFFISEqHashKind};
 
-use super::structural_common::impl_callback_chain_tuple_arities;
+use super::structural_common::{impl_callback_chain_tuple_arities, with_structural_error_context};
 use super::structural_visit::{
     field_def_region, for_each_field, free_var_child_region, type_attr_column, type_key_of,
     DefRegionKind, TypeAttrColumn, WalkOrder,
@@ -1771,7 +1771,7 @@ fn with_value_context(error: Error, raw: TVMFFIAny) -> Error {
 }
 
 fn with_error_context(error: Error, frame: &str) -> Error {
-    Error::with_appended_backtrace(error, &format!("[native structural map] {frame}\n"))
+    with_structural_error_context(error, "map", frame)
 }
 
 fn runtime_error(message: &str) -> Error {
