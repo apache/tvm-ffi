@@ -108,6 +108,20 @@ struct RustNoCopy {
 
 #[repr(C)]
 #[derive(DeriveObject)]
+#[type_key = "testing.RustStructuralHookNode"]
+#[type_final]
+struct RustHookNodeObj {
+    base: Object,
+}
+
+#[repr(C)]
+#[derive(DeriveObjectRef, Clone)]
+struct RustHookNode {
+    data: ObjectArc<RustHookNodeObj>,
+}
+
+#[repr(C)]
+#[derive(DeriveObject)]
 #[type_key = "testing.RustStructuralFailingGetter"]
 #[type_final]
 struct RustFailingGetterObj {
@@ -137,6 +151,8 @@ struct RustFailingSetter {
 }
 
 static SHALLOW_COPY_CALLS: AtomicUsize = AtomicUsize::new(0);
+static REGISTERED_MUTATE_CALLS: AtomicUsize = AtomicUsize::new(0);
+static REGISTERED_MAYBE_INPLACE_MUTATE_CALLS: AtomicUsize = AtomicUsize::new(0);
 static REFLECTED_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 unsafe extern "C" fn any_field_getter(field: *mut std::ffi::c_void, result: *mut TVMFFIAny) -> i32 {
@@ -238,6 +254,11 @@ static REGISTER_IDENTITY_TYPES: LazyLock<()> = LazyLock::new(|| {
     register_identity_type(
         RustNoCopyObj::TYPE_KEY,
         std::mem::size_of::<RustNoCopyObj>(),
+        TVMFFISEqHashKind::kTVMFFISEqHashKindTreeNode,
+    );
+    register_identity_type(
+        RustHookNodeObj::TYPE_KEY,
+        std::mem::size_of::<RustHookNodeObj>(),
         TVMFFISEqHashKind::kTVMFFISEqHashKindTreeNode,
     );
 
@@ -427,16 +448,44 @@ static REGISTER_IDENTITY_TYPES: LazyLock<()> = LazyLock::new(|| {
         0
     );
 
-    // The native Rust mapper deliberately refuses to invoke foreign mutator
-    // hooks because their ABI requires a C++ StructuralMutatorObj. A custom
-    // Rust StructuralMutator remains able to take this type over explicitly.
-    let foreign_mutate = Function::from_packed(|args| Ok(Any::from(args[1])));
+    // Function-valued type hooks receive the same active mutator object as
+    // opaque C++ hooks. Calling one of its registered methods verifies that
+    // the Rust object implements the shared StructuralMutator ABI.
+    let registered_mutate = Function::from_packed(|args| {
+        assert_eq!(args.len(), 2);
+        Function::get_global("ffi.StructuralMutatorDefRegionKind")
+            .unwrap()
+            .call_packed(&[args[0]])?;
+        REGISTERED_MUTATE_CALLS.fetch_add(1, Ordering::Relaxed);
+        Ok(Any::from(args[1]))
+    });
     let attr_name = unsafe { TVMFFIByteArray::from_str("__s_mutate__") };
-    let mut attr_value = Any::from(foreign_mutate);
+    let mut attr_value = Any::from(registered_mutate);
     assert_eq!(
         unsafe {
             TVMFFITypeRegisterAttr(
-                RustFreeVarObj::type_index(),
+                RustHookNodeObj::type_index(),
+                &attr_name,
+                Any::as_data_ptr(&mut attr_value),
+            )
+        },
+        0
+    );
+
+    let registered_maybe_inplace_mutate = Function::from_packed(|args| {
+        assert_eq!(args.len(), 2);
+        Function::get_global("ffi.StructuralMutatorDefRegionKind")
+            .unwrap()
+            .call_packed(&[args[0]])?;
+        REGISTERED_MAYBE_INPLACE_MUTATE_CALLS.fetch_add(1, Ordering::Relaxed);
+        Ok(Any::from(args[1]))
+    });
+    let attr_name = unsafe { TVMFFIByteArray::from_str("__s_maybe_inplace_mutate__") };
+    let mut attr_value = Any::from(registered_maybe_inplace_mutate);
+    assert_eq!(
+        unsafe {
+            TVMFFITypeRegisterAttr(
+                RustHookNodeObj::type_index(),
                 &attr_name,
                 Any::as_data_ptr(&mut attr_value),
             )
@@ -482,6 +531,15 @@ fn rust_no_copy() -> RustNoCopy {
     ensure_test_types_registered();
     RustNoCopy {
         data: ObjectArc::new(RustNoCopyObj {
+            base: Object::new(),
+        }),
+    }
+}
+
+fn rust_hook_node() -> RustHookNode {
+    ensure_test_types_registered();
+    RustHookNode {
+        data: ObjectArc::new(RustHookNodeObj {
             base: Object::new(),
         }),
     }
@@ -633,14 +691,6 @@ fn dict_item(dict: &Any, key: i64) -> i64 {
     Function::get_global("ffi.DictGetItem")
         .unwrap()
         .call_packed(&[AnyView::from(dict), AnyView::from(&key)])
-        .and_then(i64::try_from)
-        .unwrap()
-}
-
-fn dict_size(dict: &Any) -> i64 {
-    Function::get_global("ffi.DictSize")
-        .unwrap()
-        .call_packed(&[AnyView::from(dict)])
         .and_then(i64::try_from)
         .unwrap()
 }
@@ -883,7 +933,7 @@ fn function_setter_releases_partial_result_on_error() {
 }
 
 #[test]
-fn callback_errors_preserve_message_and_add_structural_path() {
+fn callback_errors_preserve_message_and_add_object_context() {
     ensure_test_types_registered();
     let error = match structural_map(
         Array::new(vec![1i64]),
@@ -898,25 +948,43 @@ fn callback_errors_preserve_message_and_add_structural_path() {
 
     assert_eq!(error.message(), "mapper failed");
     assert!(error.backtrace().contains("origin"));
-    assert!(error.backtrace().contains("sequence item [0]"));
     assert!(error.backtrace().contains("object `ffi.Array`"));
 }
 
 #[test]
-fn foreign_mutation_hook_requires_explicit_rust_takeover() {
+fn registered_mutation_hooks_receive_the_rust_mutator() {
     ensure_test_types_registered();
-    let error = match structural_map(
-        rust_free_var(),
+
+    let source = rust_hook_node();
+    let source_pointer = unsafe { ObjectArc::as_raw(&source.data) };
+    let mutate_calls_before = REGISTERED_MUTATE_CALLS.load(Ordering::Relaxed);
+    let mapped = structural_map(
+        source.clone(),
         |_integer: i64| Any::from(0i64),
         WalkOrder::PostOrder,
-    ) {
-        Ok(_) => panic!("foreign structural mutation unexpectedly used reflection"),
-        Err(error) => error,
-    };
-    assert!(error.message().contains("registers foreign `__s_mutate__`"));
-    assert!(error
-        .message()
-        .contains("implement its mutation explicitly in Rust"));
+    )
+    .and_then(RustHookNode::try_from)
+    .unwrap();
+    assert_eq!(unsafe { ObjectArc::as_raw(&mapped.data) }, source_pointer);
+    assert_eq!(
+        REGISTERED_MUTATE_CALLS.load(Ordering::Relaxed),
+        mutate_calls_before + 1
+    );
+
+    drop(mapped);
+    let maybe_inplace_calls_before = REGISTERED_MAYBE_INPLACE_MUTATE_CALLS.load(Ordering::Relaxed);
+    let mapped = structural_map(
+        source,
+        |_integer: i64| Any::from(0i64),
+        WalkOrder::PostOrder,
+    )
+    .and_then(RustHookNode::try_from)
+    .unwrap();
+    assert_eq!(unsafe { ObjectArc::as_raw(&mapped.data) }, source_pointer);
+    assert_eq!(
+        REGISTERED_MAYBE_INPLACE_MUTATE_CALLS.load(Ordering::Relaxed),
+        maybe_inplace_calls_before + 1
+    );
 }
 
 #[test]
@@ -1040,7 +1108,7 @@ fn shared_map_and_dict_copy_only_when_a_value_changes() {
 }
 
 #[test]
-fn shared_map_callback_error_preserves_source_and_reports_value_path() {
+fn shared_map_callback_error_preserves_source_and_reports_object_context() {
     ensure_test_types_registered();
     let source: Map<i64, i64> = [(1, 10), (2, 20)].into_iter().collect();
     let error = match structural_map(
@@ -1058,52 +1126,7 @@ fn shared_map_callback_error_preserves_source_and_reports_value_path() {
     assert_eq!(source.get(&2).unwrap(), Some(20));
     assert_eq!(error.message(), "map mapper failed");
     assert!(error.backtrace().contains("origin"));
-    assert!(error.backtrace().contains("map value ["));
     assert!(error.backtrace().contains("object `ffi.Map`"));
-}
-
-#[test]
-fn dict_entries_are_snapshotted_before_callbacks() {
-    ensure_test_types_registered();
-    let dict = call_global(
-        "ffi.Dict",
-        &[
-            Any::from(1i64),
-            Any::from(10i64),
-            Any::from(2i64),
-            Any::from(20i64),
-        ],
-    );
-    let captured = dict.clone();
-    let set_item = Function::get_global("ffi.DictSetItem").unwrap();
-    let mut inserted = false;
-    let mapped = structural_map(
-        dict,
-        |value: &MapValue| {
-            if let Some(integer) = value.cast::<i64>() {
-                if !inserted {
-                    set_item
-                        .call_packed(&[
-                            AnyView::from(&captured),
-                            AnyView::from(&3i64),
-                            AnyView::from(&30i64),
-                        ])
-                        .unwrap();
-                    inserted = true;
-                }
-                Any::from(integer + 1)
-            } else {
-                value.to_owned()
-            }
-        },
-        WalkOrder::PreOrder,
-    )
-    .unwrap();
-
-    assert_eq!(dict_size(&mapped), 2);
-    assert_eq!((dict_item(&mapped, 1), dict_item(&mapped, 2)), (11, 21));
-    assert_eq!(dict_size(&captured), 3);
-    assert_eq!(dict_item(&captured, 3), 30);
 }
 
 #[test]

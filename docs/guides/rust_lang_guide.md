@@ -411,35 +411,37 @@ first and passes the resulting value to the callback; a replacement returned
 there is final. `Array` and `List` elements are mapped in order. `Map` and
 `Dict` keys are identity anchors and are never mapped; only their values are.
 
-The root is consumed. A uniquely owned `Array` or `List` may reuse its storage
-in place; passing `root.clone()` keeps the source shared and selects
-copy-on-write behavior. The engine rechecks uniqueness before raw sequence
-writes, so retaining an owning `MapValue::to_owned()` alias from a pre-order
-callback before that container's children are mapped forces a copy. `Map` and
-`Dict` entries are snapshotted through the existing Rust runtime interface and
-rebuilt only when a value changes. Reflected objects must provide
-`__ffi_shallow_copy__`; the copy is validated before fields are mapped and
-discarded if no structural field changes.
+The root is consumed. A uniquely owned built-in container may reuse its
+storage in place; passing `root.clone()` keeps the source shared and selects
+copy-on-write behavior. The engine rechecks uniqueness after a pre-order
+callback, so retaining an owning `MapValue::to_owned()` alias before the
+container's children are mapped forces the non-in-place path. Reflected
+objects must provide `__ffi_shallow_copy__`; the copy is validated before
+fields are mapped and discarded if no structural field changes.
 
 Within one `structural_map` call, object identities whose structural-hash kind
 is `FreeVar` or `DAGNode` are mapped once. The engine caches the complete final
 result (including callback replacement and child mapping), reuses that exact
 mapped identity at later occurrences, and does not invoke the callback again.
 
-Callbacks may return `Result<Any>` to report failures. Errors propagate with
-object, field, or container-item context. In-place changes completed before a
-later error are not rolled back, and the consumed root is not returned on
-error. The native default engine rejects a non-container type that registers a
-foreign `__s_mutate__` or `__s_maybe_inplace_mutate__` hook instead of guessing
-its semantics.
+Default recursion uses the same type attributes as C++: it calls
+`__s_maybe_inplace_mutate__` for a uniquely owned object when available, or
+falls back to `__s_mutate__`. Each hook receives the active Rust-backed
+mutator and can recurse through its language-independent vtable. This lets the
+implementation that registered the type own its storage and mutation rules.
+When a type has no hook, object-backed values use reflected fields.
 
-For type-specific recursion or for taking over a rejected foreign hook,
-implement `StructuralMutator` and call `structural_mutate`. `InplaceValue` is
-an engine-issued capability: callers cannot construct it from a read-only
-`MapValue`. Override `maybe_inplace_mutate` to opt into default container
-reuse; `default_maybe_inplace_mutate` rechecks uniqueness before writing.
-Borrowed children can be re-entered with `mutate_child`, while owned children
-can use `maybe_inplace_mutate_child`:
+Callbacks may return `Result<Any>` to report failures. Errors propagate with
+object or reflected-field context. In-place changes completed before a later
+error are not rolled back, and the consumed root is not returned on error.
+
+For custom recursion policy, implement `StructuralMutator` and call
+`structural_mutate`. `InplaceValue` is an engine-issued capability: callers
+cannot construct it from a read-only `MapValue`. Override
+`maybe_inplace_mutate` to opt into default container reuse;
+`default_maybe_inplace_mutate` rechecks uniqueness before writing. Borrowed
+children can be re-entered with `mutate_child`, while owned children can use
+`maybe_inplace_mutate_child`:
 
 ```rust
 use tvm_ffi::{
@@ -486,9 +488,10 @@ assert_eq!(mapped.iter().collect::<Vec<_>>(), vec![2, 3]);
 ```
 
 `StructuralMutator` requires `var_remap_get` and `var_remap_set` so its default
-recursion can preserve completed `FreeVar` substitutions. `StructuralVarRemap`
-is the canonical owning implementation, as shown above; a custom mutator is
-responsible for any additional identity policy it introduces.
+recursion can preserve completed `FreeVar` and `DAGNode` substitutions.
+`StructuralVarRemap` is the canonical owning implementation, as shown above; a
+custom mutator is responsible for any additional identity policy it
+introduces.
 
 ## Examples
 

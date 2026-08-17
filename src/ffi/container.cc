@@ -28,92 +28,12 @@
 #include <tvm/ffi/function.h>
 #include <tvm/ffi/reflection/registry.h>
 
-#include <type_traits>
-
 #include "object_internal.h"
 
 namespace tvm {
 namespace ffi {
 
 namespace {
-
-template <typename MapObjType>
-Any MutateMapValues(const AnyView& value, const MapObjType* source, bool allow_inplace,
-                    const Function& mutator) {
-  bool mutate_inplace = allow_inplace && source->unique();
-  if (mutate_inplace) {
-    MapObjType* target = const_cast<MapObjType*>(source);
-    int64_t index = 0;
-    for (auto it = target->begin(); it != target->end(); ++it, ++index) {
-      const Any& old_value = it->second;
-      Any mapped = mutator(old_value, index, true);
-      if (!old_value.same_as(mapped)) {
-        it->second = std::move(mapped);
-      }
-    }
-    return Any(value);
-  }
-
-  if constexpr (std::is_same_v<MapObjType, MapObj>) {
-    // Map is immutable, so its source iterator remains stable through
-    // callbacks. Defer the shallow copy until the first actual change.
-    ObjectPtr<Object> output = nullptr;
-    MapBaseObj::iterator output_it;
-    int64_t index = 0;
-    for (auto source_it = source->begin(); source_it != source->end(); ++source_it, ++index) {
-      const Any& old_value = source_it->second;
-      Any mapped = mutator(old_value, index, false);
-      bool changed = !old_value.same_as(mapped);
-      if (output == nullptr) {
-        if (!changed) {
-          continue;
-        }
-        output = MapObj::ShallowCopy(source);
-        output_it = static_cast<MapBaseObj*>(output.get())->begin();
-        for (int64_t previous = 0; previous < index; ++previous) {
-          ++output_it;
-        }
-      }
-      if (changed) {
-        output_it->second = std::move(mapped);
-      }
-      ++output_it;
-    }
-    if (output == nullptr) {
-      return Any(value);
-    }
-    return Any(ObjectRef(std::move(output)));
-  } else {
-    // Dict is mutable. Copy before the first callback so re-entrant changes to
-    // the source cannot invalidate iteration or enter the mapped snapshot.
-    ObjectPtr<Object> output = DictObj::ShallowCopy(source);
-    auto* target = static_cast<DictObj*>(output.get());
-    bool changed = false;
-    int64_t index = 0;
-    for (auto it = target->begin(); it != target->end(); ++it, ++index) {
-      const Any& old_value = it->second;
-      Any mapped = mutator(old_value, index, false);
-      if (!old_value.same_as(mapped)) {
-        it->second = std::move(mapped);
-        changed = true;
-      }
-    }
-    if (!changed) {
-      return Any(value);
-    }
-    return Any(ObjectRef(std::move(output)));
-  }
-}
-
-template <typename MapObjType>
-void MutateMapValuesPacked(PackedArgs args, Any* result) {
-  TVM_FFI_ICHECK_EQ(args.size(), 3);
-  AnyView value = args[0];
-  bool allow_inplace = args[1].cast<bool>();
-  Function mutator = args[2].cast<Function>();
-  *result = MutateMapValues(value, value.cast<const MapObjType*>(), allow_inplace, mutator);
-}
-
 /*!
  * \brief Recursively scan an Any element for the first non-CPU tensor device.
  * \param elem The element to inspect.
@@ -274,8 +194,6 @@ TVM_FFI_STATIC_INIT_BLOCK() {
            [](const ffi::MapObj* n) -> ffi::Function {
              return ffi::Function::FromTyped(MapForwardIterFunctor(n->begin(), n->end()));
            })
-      .def_packed("ffi.MapMutateValues",
-                  [](ffi::PackedArgs args, Any* ret) { MutateMapValuesPacked<MapObj>(args, ret); })
       .def("ffi.MapGetItemOrMissing",
            [](const ffi::MapObj* n, const Any& k) -> Any {
              auto it = n->find(k);
@@ -308,8 +226,6 @@ TVM_FFI_STATIC_INIT_BLOCK() {
            [](const ffi::DictObj* n) -> ffi::Function {
              return ffi::Function::FromTyped(MapForwardIterFunctor(n->begin(), n->end()));
            })
-      .def_packed("ffi.DictMutateValues",
-                  [](ffi::PackedArgs args, Any* ret) { MutateMapValuesPacked<DictObj>(args, ret); })
       .def("ffi.DictGetItemOrMissing",
            [](const ffi::DictObj* n, const Any& k) -> Any {
              auto it = n->find(k);
