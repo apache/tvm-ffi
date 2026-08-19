@@ -81,6 +81,21 @@ struct RustVisitHook {
     data: ObjectArc<RustVisitHookObj>,
 }
 
+#[repr(C)]
+#[derive(DeriveObject)]
+#[type_key = "testing.RustStructuralVisitFailingGetter"]
+#[type_final]
+struct RustVisitFailingGetterObj {
+    base: Object,
+    value: Any,
+}
+
+#[repr(C)]
+#[derive(DeriveObjectRef, Clone)]
+struct RustVisitFailingGetter {
+    data: ObjectArc<RustVisitFailingGetterObj>,
+}
+
 thread_local! {
     static RETAINED_VISITOR: RefCell<Option<Any>> = const { RefCell::new(None) };
     static REGISTERED_HOOK_REGIONS: RefCell<Vec<i64>> = const { RefCell::new(Vec::new()) };
@@ -90,6 +105,20 @@ thread_local! {
 
 unsafe extern "C" fn clone_any_field(field: *mut std::ffi::c_void, result: *mut TVMFFIAny) -> i32 {
     TVMFFIAnyViewToOwnedAny(field.cast(), result)
+}
+
+unsafe extern "C" fn clone_any_field_then_fail(
+    field: *mut std::ffi::c_void,
+    result: *mut TVMFFIAny,
+) -> i32 {
+    let code = TVMFFIAnyViewToOwnedAny(field.cast(), result);
+    if code != 0 {
+        return code;
+    }
+    Error::set_raised(&runtime_error(
+        "visit getter failed after writing an owning result",
+    ));
+    -1
 }
 
 fn register_any_field(type_index: i32, name: &'static str, offset: usize, flags: i64) {
@@ -212,6 +241,28 @@ static REGISTER_HOOK_TYPE: LazyLock<()> = LazyLock::new(|| {
     );
 });
 
+static REGISTER_FAILING_GETTER_TYPE: LazyLock<()> = LazyLock::new(|| {
+    let type_index = register_visit_type(
+        RustVisitFailingGetterObj::TYPE_KEY,
+        std::mem::size_of::<RustVisitFailingGetterObj>(),
+        TVMFFISEqHashKind::kTVMFFISEqHashKindTreeNode,
+    );
+    let field = TVMFFIFieldInfo {
+        name: unsafe { TVMFFIByteArray::from_str("value") },
+        doc: unsafe { TVMFFIByteArray::from_str("Fail after producing an owning field value") },
+        metadata: unsafe { TVMFFIByteArray::from_str("") },
+        flags: 0,
+        size: std::mem::size_of::<Any>() as i64,
+        alignment: std::mem::align_of::<Any>() as i64,
+        offset: std::mem::offset_of!(RustVisitFailingGetterObj, value) as i64,
+        getter: Some(clone_any_field_then_fail),
+        setter: std::ptr::null_mut(),
+        default_value_or_factory: TVMFFIAny::new(),
+        field_static_type_index: -1,
+    };
+    assert_eq!(unsafe { TVMFFITypeRegisterField(type_index, &field) }, 0);
+});
+
 fn registered_primitive_visit_hook(args: &[AnyView<'_>]) -> Result<Any> {
     assert_eq!(args.len(), 2);
     Function::get_global("ffi.StructuralVisitorVisit")?
@@ -279,6 +330,16 @@ fn rust_visit_hook(selected: impl Into<Any>, ignored: impl Into<Any>) -> RustVis
     }
 }
 
+fn rust_visit_failing_getter(value: impl Into<Any>) -> RustVisitFailingGetter {
+    LazyLock::force(&REGISTER_FAILING_GETTER_TYPE);
+    RustVisitFailingGetter {
+        data: ObjectArc::new(RustVisitFailingGetterObj {
+            base: Object::new(),
+            value: value.into(),
+        }),
+    }
+}
+
 fn runtime_error(message: &str) -> Error {
     Error::new(RUNTIME_ERROR, message, "")
 }
@@ -300,6 +361,28 @@ fn plain_walk_uses_registered_array_hook() {
     .unwrap()
     .is_none());
     assert_eq!(integers, 3);
+}
+
+#[test]
+fn reflected_getter_releases_partial_result_on_error() {
+    let tracked = FfiString::from("a reference-counted reflected visit field");
+    let root = rust_visit_failing_getter(tracked.clone());
+    let count_before = AnyView::from(&tracked).debug_strong_count();
+
+    let error = match structural_walk(
+        &root,
+        |_value: &VisitValue| WalkResult::Advance,
+        WalkOrder::PreOrder,
+    ) {
+        Ok(_) => panic!("failing getter unexpectedly succeeded"),
+        Err(error) => error,
+    };
+
+    assert_eq!(
+        error.message(),
+        "visit getter failed after writing an owning result"
+    );
+    assert_eq!(AnyView::from(&tracked).debug_strong_count(), count_before);
 }
 
 #[test]

@@ -58,9 +58,9 @@ use crate::tvm_ffi_sys::TVMFFIFieldFlagBitMask::{
     kTVMFFIFieldFlagBitMaskSEqHashIgnore,
 };
 use crate::tvm_ffi_sys::{
-    TVMFFIAny, TVMFFIAnyViewToOwnedAny, TVMFFIByteArray, TVMFFIDefRegionKind, TVMFFIFieldInfo,
-    TVMFFIGetTypeAttrColumn, TVMFFIGetTypeInfo, TVMFFIObject, TVMFFISEqHashKind,
-    TVMFFITypeAttrColumn, TVMFFITypeIndex, TVMFFITypeKeyToIndex,
+    TVMFFIAny, TVMFFIByteArray, TVMFFIDefRegionKind, TVMFFIFieldInfo, TVMFFIGetTypeAttrColumn,
+    TVMFFIGetTypeInfo, TVMFFIObject, TVMFFISEqHashKind, TVMFFITypeAttrColumn, TVMFFITypeIndex,
+    TVMFFITypeKeyToIndex,
 };
 
 use super::structural_common::{impl_callback_chain_tuple_arities, with_structural_error_context};
@@ -859,11 +859,14 @@ fn visit_reflected_fields<C: ChildVisit>(
     let def_region_kind = free_var_child_region(def_region_kind, seq_hash_kind);
     let object = unsafe { value.data_union.v_obj } as *mut u8;
     let halted = unsafe {
-        for_each_field(value.type_index, |field| {
-            match visit_reflected_field(object, field, visitor, def_region_kind) {
-                Ok(()) => ControlFlow::Continue(()),
-                Err(halt) => ControlFlow::Break(halt),
-            }
+        for_each_field_info(type_info, &mut |field| match visit_reflected_field(
+            object,
+            field,
+            visitor,
+            def_region_kind,
+        ) {
+            Ok(()) => ControlFlow::Continue(()),
+            Err(halt) => ControlFlow::Break(halt),
         })
     };
     halted.map_or(Ok(()), Err)
@@ -886,8 +889,11 @@ unsafe fn visit_reflected_field<C: ChildVisit>(
         ))));
     };
     let address = object.offset(field.offset as isize) as *mut c_void;
-    let mut child_raw = TVMFFIAny::new();
-    if getter(address, &mut child_raw) != 0 {
+    // Own the result slot before entering foreign code. A getter may write an
+    // owning value and still report an error, in which case `child` must drop
+    // that partial result.
+    let mut child = Any::new();
+    if getter(address, Any::as_data_ptr(&mut child)) != 0 {
         return Err(with_error_context(
             NativeHalt::Error(Error::from_raised()),
             &format!("field `{}`", field.name.as_str()),
@@ -896,7 +902,6 @@ unsafe fn visit_reflected_field<C: ChildVisit>(
 
     // A reflection getter returns an owned Any. Keep it alive while the
     // recursive walk borrows its raw cell.
-    let child = Any::from_raw_ffi_any(child_raw);
     let borrowed = raw_of_owned(&child);
     let child_region = field_def_region(field, inherited_region);
     visitor
@@ -1342,7 +1347,7 @@ fn call_structural_visit_hook(
                 visit_result_from_raw(hook(visitor, value))
             }
             x if x == TVMFFITypeIndex::kTVMFFIFunction as i32 => {
-                let function = Function::try_from(owned_from_raw(attr)?)?;
+                let function = Function::try_from(AnyView::from_raw_ffi_any(attr))?;
                 let visitor_value = borrowed_visitor_view(visitor);
                 let value = AnyView::from_raw_ffi_any(raw);
                 visit_result_from_any(function.call_packed(&[visitor_value, value])?)
@@ -1448,16 +1453,6 @@ fn def_region_from_raw(kind: i32) -> Result<DefRegionKind> {
         x if x == DefRegionKind::Recursive as i32 => Ok(DefRegionKind::Recursive),
         x if x == DefRegionKind::NonRecursive as i32 => Ok(DefRegionKind::NonRecursive),
         _ => Err(runtime_error("invalid structural definition-region kind")),
-    }
-}
-
-fn owned_from_raw(raw: TVMFFIAny) -> Result<Any> {
-    let mut owned = Any::new();
-    let return_code = unsafe { TVMFFIAnyViewToOwnedAny(&raw, Any::as_data_ptr(&mut owned)) };
-    if return_code == 0 {
-        Ok(owned)
-    } else {
-        Err(Error::from_raised())
     }
 }
 
@@ -1649,30 +1644,25 @@ pub(crate) fn type_key_of(type_index: i32) -> String {
     }
 }
 
-/// Visit every reflected field of `type_index` and its ancestors in the same
-/// parent-to-child order as C++ `ForEachFieldInfoWithEarlyStop`.
+/// Visit every reflected field described by `info` and its ancestors in the
+/// same parent-to-child order as C++ `ForEachFieldInfoWithEarlyStop`.
 ///
 /// # Safety
 ///
-/// `type_index` must be a registered type index.
-pub(crate) unsafe fn for_each_field<B>(
-    type_index: i32,
-    mut callback: impl FnMut(&'static TVMFFIFieldInfo) -> ControlFlow<B>,
+/// `info` must point to an immortal registered type-info record.
+pub(crate) unsafe fn for_each_field_info<B>(
+    info: *const crate::tvm_ffi_sys::TVMFFITypeInfo,
+    callback: &mut impl FnMut(&'static TVMFFIFieldInfo) -> ControlFlow<B>,
 ) -> Option<B> {
-    let info = TVMFFIGetTypeInfo(type_index);
-    if info.is_null() {
-        return None;
-    }
-
     // Ancestor slot 0 is the root Object. C++ starts at slot 1, walks toward
     // the immediate parent, then visits the concrete type's own fields.
     for depth in 1..(*info).type_depth {
         let ancestor = *(*info).type_acenstors.offset(depth as isize);
-        if let Some(value) = visit_field_level(ancestor, &mut callback) {
+        if let Some(value) = visit_field_level(ancestor, callback) {
             return Some(value);
         }
     }
-    visit_field_level(info, &mut callback)
+    visit_field_level(info, callback)
 }
 
 unsafe fn visit_field_level<B>(

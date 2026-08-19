@@ -19,7 +19,7 @@
 
 use crate::any::{Any, AnyView};
 use crate::error::Error;
-use crate::object::ObjectCore;
+use crate::object::{self, ObjectCore};
 use crate::tvm_ffi_sys::{TVMFFIAny, TVMFFIGetTypeInfo, TVMFFITypeIndex};
 
 /// Add one structural traversal frame to an error's backtrace.
@@ -84,6 +84,9 @@ impl StructuralValue {
     /// Copy this borrowed value into an owning [`Any`].
     #[inline]
     pub fn to_owned(&self) -> Any {
+        if let Some(owned) = try_to_owned_without_normalization(self.0) {
+            return owned;
+        }
         Any::from(unsafe { AnyView::from_raw_ffi_any(self.0) })
     }
 
@@ -127,12 +130,45 @@ impl StructuralValue {
     }
 }
 
+/// Copy a borrowed FFI value when its owning representation is unchanged.
+///
+/// Raw string/byte views and `ObjectRValueRef` return `None` because they need
+/// the runtime's normalization or move logic. A null object pointer also
+/// returns `None` instead of constructing an invalid owning value.
+#[inline]
+pub(crate) fn try_to_owned_without_normalization(raw: TVMFFIAny) -> Option<Any> {
+    if is_plain_inline_leaf(raw.type_index) {
+        return Some(unsafe { Any::from_raw_ffi_any(raw) });
+    }
+    if raw.type_index >= TVMFFITypeIndex::kTVMFFIStaticObjectBegin as i32 {
+        let object = unsafe { raw.data_union.v_obj };
+        if object.is_null() {
+            return None;
+        }
+        unsafe { object::unsafe_::inc_ref(object) };
+        return Some(unsafe { Any::from_raw_ffi_any(raw) });
+    }
+    None
+}
+
+#[inline]
+pub(crate) fn is_plain_inline_leaf(type_index: i32) -> bool {
+    type_index < TVMFFITypeIndex::kTVMFFIRawStr as i32
+        || type_index == TVMFFITypeIndex::kTVMFFISmallStr as i32
+        || type_index == TVMFFITypeIndex::kTVMFFISmallBytes as i32
+}
+
 /// Subtype check with the base's inheritance depth supplied by the caller
 /// (`ObjectCore::TYPE_DEPTH`), so only the object's type info is fetched.
 #[inline]
 fn is_instance_at_depth(object_type_index: i32, base_type_index: i32, base_depth: i32) -> bool {
     if object_type_index == base_type_index {
         return true;
+    }
+    // Parent type indices are registered before their descendants. An object
+    // whose index precedes the target therefore cannot be its subtype.
+    if object_type_index < base_type_index {
+        return false;
     }
     unsafe {
         let info = TVMFFIGetTypeInfo(object_type_index);

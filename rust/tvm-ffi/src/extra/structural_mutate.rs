@@ -57,9 +57,12 @@ use crate::tvm_ffi_sys::{
 };
 use crate::tvm_ffi_sys::{TVMFFIObjectHandle, TVMFFISEqHashKind};
 
-use super::structural_common::{impl_callback_chain_tuple_arities, with_structural_error_context};
+use super::structural_common::{
+    impl_callback_chain_tuple_arities, is_plain_inline_leaf, try_to_owned_without_normalization,
+    with_structural_error_context,
+};
 use super::structural_visit::{
-    field_def_region, for_each_field, free_var_child_region, type_attr_column, type_key_of,
+    field_def_region, for_each_field_info, free_var_child_region, type_attr_column, type_key_of,
     DefRegionKind, TypeAttrColumn, WalkOrder,
 };
 
@@ -812,7 +815,7 @@ trait MutationDriver: Sized {
         let mut field_changed = false;
         let mut failure: Option<Error> = None;
         unsafe {
-            for_each_field(raw.type_index, |field| {
+            for_each_field_info(type_info, &mut |field| {
                 if field.flags & FLAG_SEQ_HASH_IGNORE != 0 {
                     return ControlFlow::Continue(());
                 }
@@ -1444,7 +1447,7 @@ fn call_structural_mutate_hook(
                 result_from_raw(hook(mutator, value))
             }
             x if x == TVMFFITypeIndex::kTVMFFIFunction as i32 => {
-                let function = Function::try_from(owned_from_raw(attr)?)?;
+                let function = Function::try_from(AnyView::from_raw_ffi_any(attr))?;
                 let mutator_value = borrowed_mutator_view(mutator);
                 let value = AnyView::from_raw_ffi_any(raw);
                 function.call_packed(&[mutator_value, value])
@@ -1625,9 +1628,12 @@ fn shallow_copy(raw: TVMFFIAny) -> Result<Any> {
             "",
         ));
     }
-    let function = Function::try_from(owned_from_raw(attr)?)?;
-    let source = owned_from_raw(raw)?;
-    let result = function.call_packed(&[AnyView::from(&source)])?;
+    let function = Function::try_from(unsafe { AnyView::from_raw_ffi_any(attr) })?;
+    // `raw` is borrowed from the active mutation call and remains valid for
+    // this synchronous packed call. Avoid an unnecessary object refcount
+    // increment/decrement just to pass another borrowed view.
+    let source = unsafe { AnyView::from_raw_ffi_any(raw) };
+    let result = function.call_packed(&[source])?;
     let result_raw = *result.as_raw_ffi_any();
     let result_pointer = unsafe { result_raw.data_union.v_obj };
     let source_pointer = unsafe { raw.data_union.v_obj };
@@ -1704,13 +1710,6 @@ fn identity_key(raw: TVMFFIAny) -> Result<Option<NonNull<TVMFFIObject>>> {
 }
 
 #[inline]
-fn is_plain_inline_leaf(type_index: i32) -> bool {
-    type_index < TVMFFITypeIndex::kTVMFFIRawStr as i32
-        || type_index == TVMFFITypeIndex::kTVMFFISmallStr as i32
-        || type_index == TVMFFITypeIndex::kTVMFFISmallBytes as i32
-}
-
-#[inline]
 fn is_builtin_container(type_index: i32) -> bool {
     type_index == TVMFFITypeIndex::kTVMFFIArray as i32
         || type_index == TVMFFITypeIndex::kTVMFFIList as i32
@@ -1773,6 +1772,18 @@ fn same_shallow(lhs: TVMFFIAny, rhs: TVMFFIAny) -> bool {
 }
 
 fn owned_from_raw(raw: TVMFFIAny) -> Result<Any> {
+    if let Some(owned) = try_to_owned_without_normalization(raw) {
+        return Ok(owned);
+    }
+    if raw.type_index >= TVMFFITypeIndex::kTVMFFIStaticObjectBegin as i32 {
+        return Err(runtime_error(
+            "native structural map: object-backed value has a null pointer",
+        ));
+    }
+
+    // Raw string/bytes views and ObjectRValueRef require normalization (or a
+    // move) rather than a bitwise copy; keep the generic C ABI conversion for
+    // those uncommon representations.
     let mut owned = Any::new();
     let return_code = unsafe { TVMFFIAnyViewToOwnedAny(&raw, Any::as_data_ptr(&mut owned)) };
     if return_code == 0 {
