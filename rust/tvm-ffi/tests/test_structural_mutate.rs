@@ -17,7 +17,7 @@
  * under the License.
  */
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{LazyLock, Mutex};
 
@@ -159,10 +159,41 @@ static REGISTERED_HOOK_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 thread_local! {
     static RETAINED_MUTATOR: RefCell<Option<Any>> = const { RefCell::new(None) };
+    static PROBE_FOREIGN_THREAD_MUTATOR: Cell<bool> = const { Cell::new(false) };
+    static FOREIGN_THREAD_MUTATOR_ERROR: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+fn call_mutator_from_foreign_thread(mutator: AnyView<'_>) -> String {
+    // Keep an owning reference on this thread while the worker constructs a
+    // borrowed ABI view from the raw object address.
+    let mut owner = Any::from(mutator);
+    let raw = unsafe { *Any::as_data_ptr(&mut owner) };
+    let type_index = raw.type_index;
+    let object = unsafe { raw.data_union.v_obj } as usize;
+    std::thread::spawn(move || {
+        let mut raw = TVMFFIAny::new();
+        raw.type_index = type_index;
+        raw.data_union.v_obj = object as *mut _;
+        let borrowed = std::mem::ManuallyDrop::new(unsafe { Any::from_raw_ffi_any(raw) });
+        match Function::get_global("ffi.StructuralMutatorMutate")
+            .unwrap()
+            .call_packed(&[AnyView::from(&*borrowed), AnyView::from(&1i64)])
+        {
+            Err(error) => error.message().to_string(),
+            Ok(_) => "foreign-thread mutator call unexpectedly succeeded".to_string(),
+        }
+    })
+    .join()
+    .unwrap()
 }
 
 fn run_registered_mutate_hook(args: &[AnyView<'_>], calls: &AtomicUsize) -> Result<Any> {
     assert_eq!(args.len(), 2);
+    if PROBE_FOREIGN_THREAD_MUTATOR.with(Cell::get) {
+        let message = call_mutator_from_foreign_thread(args[0]);
+        FOREIGN_THREAD_MUTATOR_ERROR.with(|error| error.replace(Some(message)));
+        return Ok(Any::from(args[1]));
+    }
     Function::get_global("ffi.StructuralMutatorDefRegionKind")
         .unwrap()
         .call_packed(&[args[0]])?;
@@ -1112,6 +1143,26 @@ fn registered_hook_cannot_reenter_through_an_aliased_mutator_handle() {
 
     assert_eq!(mapped, 2);
     assert!(mutator.rejected);
+    RETAINED_MUTATOR.with(|retained| {
+        retained.take();
+    });
+}
+
+#[test]
+fn registered_hook_rejects_foreign_thread_mutator_callback() {
+    ensure_test_types_registered();
+    let _guard = REGISTERED_HOOK_TEST_LOCK.lock().unwrap();
+    FOREIGN_THREAD_MUTATOR_ERROR.with(|error| {
+        error.take();
+    });
+
+    PROBE_FOREIGN_THREAD_MUTATOR.with(|enabled| enabled.set(true));
+    let result = structural_mutate(rust_hook_node(), &mut ManualIncrement::default());
+    PROBE_FOREIGN_THREAD_MUTATOR.with(|enabled| enabled.set(false));
+    result.unwrap();
+
+    let message = FOREIGN_THREAD_MUTATOR_ERROR.with(|error| error.take().unwrap());
+    assert!(message.contains("invoked from a different thread"));
     RETAINED_MUTATOR.with(|retained| {
         retained.take();
     });

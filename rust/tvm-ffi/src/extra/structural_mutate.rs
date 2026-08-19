@@ -1012,13 +1012,8 @@ impl Drop for RuntimeContextGuard {
 /// A non-null context must have been installed from the current mutable
 /// reborrow of the driver and its callback table must use that driver's type.
 unsafe fn take_runtime_context(mutator: StructuralMutatorHandle) -> Result<RuntimeContextGuard> {
-    if mutator.is_null() {
-        return Err(runtime_error("null active structural mutator"));
-    }
-    if (*mutator).owner_thread != std::thread::current().id() {
-        return Err(runtime_error(
-            "structural mutator callback invoked from a different thread",
-        ));
+    if !is_active_mutator(mutator) {
+        return Err(inactive_mutator_error(mutator, "callback"));
     }
     let context = (*mutator).context;
     if context.is_null() {
@@ -1170,6 +1165,34 @@ fn active_mutator() -> Result<StructuralMutatorHandle> {
     })
 }
 
+#[inline]
+fn is_active_mutator(handle: StructuralMutatorHandle) -> bool {
+    !handle.is_null() && ACTIVE_MUTATOR.with(|active| active.get() == handle)
+}
+
+#[cold]
+fn inactive_mutator_error(mutator: StructuralMutatorHandle, operation: &str) -> Error {
+    if mutator.is_null() {
+        return runtime_error("null active structural mutator");
+    }
+    // The immutable owner id lets a foreign thread be rejected before reading
+    // context fields that the owner thread may be updating.
+    unsafe {
+        if (*mutator).owner_thread != std::thread::current().id() {
+            return runtime_error(&format!(
+                "structural mutator {operation} invoked from a different thread"
+            ));
+        }
+        if (*mutator).context_identity.is_null() {
+            runtime_error("structural mutator was retained after its active call")
+        } else {
+            runtime_error(&format!(
+                "structural mutator {operation} may only be used by its active registered hook"
+            ))
+        }
+    }
+}
+
 /// Expose the current mutable reborrow only for the duration of one registered
 /// type hook. Nested vtable calls then reborrow from this pointer, and
 /// [`take_runtime_context`] hides it again while Rust is executing.
@@ -1178,16 +1201,11 @@ fn with_current_driver_context<D, T>(
     driver: &mut D,
     callback: impl FnOnce() -> Result<T>,
 ) -> Result<T> {
-    if mutator.is_null() {
-        return Err(runtime_error("null active structural mutator"));
+    if !is_active_mutator(mutator) {
+        return Err(inactive_mutator_error(mutator, "helper"));
     }
     let context = std::ptr::from_mut(driver).cast::<c_void>();
     unsafe {
-        if (*mutator).owner_thread != std::thread::current().id() {
-            return Err(runtime_error(
-                "structural mutator helper invoked from a different thread",
-            ));
-        }
         if (*mutator).context_identity != context {
             return Err(runtime_error(
                 "structural mutator helper called on a non-active mutator",
@@ -1330,12 +1348,14 @@ fn run_structural_mutator<D: MutationDriver>(root: Any, driver: &mut D) -> Resul
         panic: None,
     });
     let handle = unsafe { ObjectArc::as_raw_mut(&mut active) };
-    let result = call_mutator(
-        handle,
-        *root.as_raw_ffi_any(),
-        DefRegionKind::None,
-        Permit::MaybeInPlace,
-    );
+    let result = with_active_mutator(handle, || {
+        call_mutator(
+            handle,
+            *root.as_raw_ffi_any(),
+            DefRegionKind::None,
+            Permit::MaybeInPlace,
+        )
+    });
     // A structural hook may only use the active mutator synchronously on this
     // thread. Make a retained reference fail instead of exposing a dangling
     // Rust state pointer.

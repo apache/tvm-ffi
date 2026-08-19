@@ -17,7 +17,7 @@
  * under the License.
  */
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::sync::LazyLock;
 
 use tvm_ffi::derive::{Object as DeriveObject, ObjectRef as DeriveObjectRef};
@@ -27,9 +27,10 @@ use tvm_ffi::tvm_ffi_sys::{
     TVMFFISEqHashKind, TVMFFITypeMetadata, TVMFFITypeRegisterAttr,
 };
 use tvm_ffi::{
-    dispatch, structural_visit, structural_walk, Any, AnyView, Array, DefRegionKind, Error,
-    Function, Map, Object, ObjectArc, ObjectCore, ObjectRefCast, Result, String as FfiString,
-    StructuralVisitor, TypeIndex, VisitInterrupt, VisitValue, WalkOrder, WalkResult, RUNTIME_ERROR,
+    dispatch, structural_visit, structural_walk, Any, AnyView, Array, DLDataType, DLDataTypeCode,
+    DefRegionKind, Error, Function, Map, Object, ObjectArc, ObjectCore, ObjectRefCast, Result,
+    String as FfiString, StructuralVisitor, TypeIndex, VisitInterrupt, VisitValue, WalkOrder,
+    WalkResult, RUNTIME_ERROR,
 };
 
 unsafe extern "C" {
@@ -83,6 +84,8 @@ struct RustVisitHook {
 thread_local! {
     static RETAINED_VISITOR: RefCell<Option<Any>> = const { RefCell::new(None) };
     static REGISTERED_HOOK_REGIONS: RefCell<Vec<i64>> = const { RefCell::new(Vec::new()) };
+    static PROBE_FOREIGN_THREAD_VISITOR: Cell<bool> = const { Cell::new(false) };
+    static FOREIGN_THREAD_VISITOR_ERROR: RefCell<Option<String>> = const { RefCell::new(None) };
 }
 
 unsafe extern "C" fn clone_any_field(field: *mut std::ffi::c_void, result: *mut TVMFFIAny) -> i32 {
@@ -141,8 +144,36 @@ fn register_function_attr(type_index: i32, name: &'static str, function: Functio
     );
 }
 
+fn call_visitor_from_foreign_thread(visitor: AnyView<'_>) -> String {
+    // Keep the object alive on this thread. The worker uses a non-owning view,
+    // so it neither transfers nor releases the visitor's reference count.
+    let mut owner = Any::from(visitor);
+    let raw = unsafe { *Any::as_data_ptr(&mut owner) };
+    let type_index = raw.type_index;
+    let object = unsafe { raw.data_union.v_obj } as usize;
+    std::thread::spawn(move || {
+        let mut raw = TVMFFIAny::new();
+        raw.type_index = type_index;
+        raw.data_union.v_obj = object as *mut _;
+        let borrowed = std::mem::ManuallyDrop::new(unsafe { Any::from_raw_ffi_any(raw) });
+        match Function::get_global("ffi.StructuralVisitorVisit")
+            .unwrap()
+            .call_packed(&[AnyView::from(&*borrowed), AnyView::from(&1i64)])
+        {
+            Err(error) => error.message().to_string(),
+            Ok(_) => "foreign-thread visitor call unexpectedly succeeded".to_string(),
+        }
+    })
+    .join()
+    .unwrap()
+}
+
 fn registered_visit_hook(args: &[AnyView<'_>]) -> Result<Any> {
     assert_eq!(args.len(), 2);
+    if PROBE_FOREIGN_THREAD_VISITOR.with(Cell::get) {
+        let message = call_visitor_from_foreign_thread(args[0]);
+        FOREIGN_THREAD_VISITOR_ERROR.with(|error| error.replace(Some(message)));
+    }
     RETAINED_VISITOR.with(|retained| {
         retained.replace(Some(Any::from(args[0])));
     });
@@ -178,6 +209,20 @@ static REGISTER_HOOK_TYPE: LazyLock<()> = LazyLock::new(|| {
         type_index,
         "__s_visit__",
         Function::from_packed(registered_visit_hook),
+    );
+});
+
+fn registered_primitive_visit_hook(args: &[AnyView<'_>]) -> Result<Any> {
+    assert_eq!(args.len(), 2);
+    Function::get_global("ffi.StructuralVisitorVisit")?
+        .call_packed(&[args[0], AnyView::from(&7i64)])
+}
+
+static REGISTER_PRIMITIVE_HOOK: LazyLock<()> = LazyLock::new(|| {
+    register_function_attr(
+        TypeIndex::kTVMFFIDataType as i32,
+        "__s_visit__",
+        Function::from_packed(registered_primitive_visit_hook),
     );
 });
 
@@ -376,6 +421,126 @@ fn registered_function_hook_controls_children_interrupts_and_lifetime() {
         Ok(_) => panic!("retained structural visitor unexpectedly remained active"),
     };
     assert!(error.message().contains("retained after its active call"));
+}
+
+#[test]
+fn registered_hook_rejects_foreign_thread_visitor_callback() {
+    LazyLock::force(&REGISTER_HOOK_TYPE);
+    RETAINED_VISITOR.with(|retained| {
+        retained.take();
+    });
+    FOREIGN_THREAD_VISITOR_ERROR.with(|error| {
+        error.take();
+    });
+
+    let root = rust_visit_hook(11i64, 99i64);
+    PROBE_FOREIGN_THREAD_VISITOR.with(|enabled| enabled.set(true));
+    let result = structural_walk(
+        &root,
+        |_value: &VisitValue| WalkResult::Advance,
+        WalkOrder::PreOrder,
+    );
+    PROBE_FOREIGN_THREAD_VISITOR.with(|enabled| enabled.set(false));
+    assert!(result.unwrap().is_none());
+
+    let message = FOREIGN_THREAD_VISITOR_ERROR.with(|error| error.take().unwrap());
+    assert!(message.contains("invoked from a different thread"));
+    RETAINED_VISITOR.with(|retained| {
+        retained.take();
+    });
+}
+
+#[test]
+fn primitive_hook_fast_path_preserves_pre_and_post_order() {
+    LazyLock::force(&REGISTER_PRIMITIVE_HOOK);
+    let dtype = DLDataType::new(DLDataTypeCode::kDLFloat, 32, 1);
+
+    let mut pre = Vec::new();
+    assert!(structural_walk(
+        &dtype,
+        |value: &VisitValue| {
+            if value.cast::<DLDataType>().is_some() {
+                pre.push("dtype");
+            } else if value.cast::<i64>().is_some() {
+                pre.push("child");
+            }
+            WalkResult::Advance
+        },
+        WalkOrder::PreOrder,
+    )
+    .unwrap()
+    .is_none());
+    assert_eq!(pre, ["dtype", "child"]);
+
+    let mut skipped = Vec::new();
+    assert!(structural_walk(
+        &dtype,
+        |value: &VisitValue| {
+            if value.cast::<DLDataType>().is_some() {
+                skipped.push("dtype");
+                WalkResult::Skip
+            } else {
+                skipped.push("child");
+                WalkResult::Advance
+            }
+        },
+        WalkOrder::PreOrder,
+    )
+    .unwrap()
+    .is_none());
+    assert_eq!(skipped, ["dtype"]);
+
+    let mut post = Vec::new();
+    assert!(structural_walk(
+        &dtype,
+        |value: &VisitValue| {
+            if value.cast::<DLDataType>().is_some() {
+                post.push("dtype");
+            } else if value.cast::<i64>().is_some() {
+                post.push("child");
+            }
+            WalkResult::Advance
+        },
+        WalkOrder::PostOrder,
+    )
+    .unwrap()
+    .is_none());
+    assert_eq!(post, ["child", "dtype"]);
+}
+
+#[test]
+fn primitive_fast_path_preserves_none_interrupt_and_error() {
+    let mut none_calls = 0;
+    assert!(structural_walk(
+        &Any::new(),
+        |_value: &VisitValue| {
+            none_calls += 1;
+            WalkResult::Advance
+        },
+        WalkOrder::PreOrder,
+    )
+    .unwrap()
+    .is_none());
+    assert_eq!(none_calls, 0);
+
+    let interrupt = structural_walk(
+        &1i64,
+        |_value: i64| WalkResult::interrupt_with(9i64),
+        WalkOrder::PostOrder,
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(i64::try_from(interrupt.value).unwrap(), 9);
+
+    let error = match structural_walk(
+        &1i64,
+        |_value: i64| -> Result<WalkResult> { Err(runtime_error("primitive failed")) },
+        WalkOrder::PreOrder,
+    ) {
+        Err(error) => error,
+        Ok(_) => panic!("failing primitive callback unexpectedly succeeded"),
+    };
+    assert_eq!(error.message(), "primitive failed");
 }
 
 #[test]
