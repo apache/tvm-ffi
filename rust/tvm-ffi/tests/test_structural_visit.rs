@@ -1235,9 +1235,9 @@ fn chain_splices_dispatch_visitors_between_closures() {
 
 #[test]
 fn chain_supports_full_arity() {
-    // Doubles as the first-match ordering probe: earlier misses fall
-    // through, the first matching link claims the value, later links
-    // never run.
+    // All 12 flat links. Doubles as the first-match ordering probe: earlier
+    // misses fall through, the first matching link claims the value, later
+    // links never run.
     let root = Array::new(vec![1i64, 2, 3]);
     let mut integers = Vec::new();
     let mut objects = 0;
@@ -1249,6 +1249,11 @@ fn chain_supports_full_arity() {
             |_value: bool| WalkResult::Advance,
             |_value: tvm_ffi::String| WalkResult::Advance,
             |_value: Array<f64>| WalkResult::Advance,
+            |_value: f32| WalkResult::Advance,
+            |_value: tvm_ffi::DLDevice| WalkResult::Advance,
+            |_value: Array<bool>| WalkResult::Advance,
+            |_value: Array<tvm_ffi::String>| WalkResult::Advance,
+            |_value: Map<FfiString, i64>, _kind: DefRegionKind| WalkResult::Advance,
             |value: i64| {
                 integers.push(value);
                 WalkResult::Advance
@@ -1261,7 +1266,6 @@ fn chain_supports_full_arity() {
                 others += 1;
                 WalkResult::Advance
             },
-            |_value: &VisitValue| WalkResult::Advance,
         ),
         WalkOrder::PreOrder,
     )
@@ -1460,4 +1464,83 @@ fn non_recursive_region_is_clamped_for_free_var_children_only() {
             ("array_child", DefRegionKind::NonRecursive),
         ]
     );
+}
+
+#[test]
+fn nested_tuple_chain_exceeds_flat_arity() {
+    // A tuple is itself a link, so nesting lifts the 12-wide flat cap:
+    // 12 + 4 = 16 links here, three levels deep. Order is the flattened
+    // depth-first order.
+    let root = Array::new(vec![1i64, 2, 3]);
+    let mut integers = Vec::new();
+    let mut objects = 0;
+    let mut others = 0;
+    assert!(structural_walk(
+        &root,
+        (
+            (
+                |_value: f64| WalkResult::Advance,
+                |_value: bool| WalkResult::Advance,
+                |_value: tvm_ffi::String| WalkResult::Advance,
+                |_value: Array<f64>| WalkResult::Advance,
+                |_value: f32| WalkResult::Advance,
+                |_value: tvm_ffi::DLDevice| WalkResult::Advance,
+                |_value: Array<bool>| WalkResult::Advance,
+                |_value: Array<tvm_ffi::String>| WalkResult::Advance,
+                |_value: Map<FfiString, i64>| WalkResult::Advance,
+                |_value: Map<i64, i64>, _kind: DefRegionKind| WalkResult::Advance,
+                |_value: Array<Array<i64>>| WalkResult::Advance,
+                |_value: tvm_ffi::Function| WalkResult::Advance,
+            ),
+            (
+                |value: i64| {
+                    integers.push(value);
+                    WalkResult::Advance
+                },
+                (
+                    |_object: &Object, _kind: DefRegionKind| {
+                        objects += 1;
+                        WalkResult::Advance
+                    },
+                    (|_value: &VisitValue, _kind: DefRegionKind| {
+                        others += 1;
+                        WalkResult::Advance
+                    },),
+                ),
+                |_value: &VisitValue| WalkResult::Advance,
+            ),
+        ),
+        WalkOrder::PreOrder,
+    )
+    .unwrap()
+    .is_none());
+    assert_eq!(integers, vec![1, 2, 3]);
+    assert_eq!(objects, 1);
+    assert_eq!(others, 0);
+}
+
+#[test]
+fn nested_tuple_first_match_order_is_flattened() {
+    // An earlier nested catch-all claims everything before a later link.
+    let root = Array::new(vec![1i64, 2]);
+    let mut first = 0;
+    let mut second = 0;
+    assert!(structural_walk(
+        &root,
+        (
+            (|_value: &VisitValue| {
+                first += 1;
+                WalkResult::Advance
+            },),
+            |_value: i64| {
+                second += 1;
+                WalkResult::Advance
+            },
+        ),
+        WalkOrder::PreOrder,
+    )
+    .unwrap()
+    .is_none());
+    assert_eq!(first, 3);
+    assert_eq!(second, 0);
 }

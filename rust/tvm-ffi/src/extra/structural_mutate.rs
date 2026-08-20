@@ -153,6 +153,10 @@ impl<'a, V: MapDispatch> IntoMapper<ByMapDispatch> for &'a mut V {
 /// Links are tried in tuple order and the first matching link supplies the
 /// replacement.  Supported shapes are owned FFI values, borrowed object
 /// nodes, and `&MapValue`, each optionally followed by [`DefRegionKind`].
+/// A tuple of links is itself a link, so tuples nest: a flat tuple holds up
+/// to 12 links, and nesting — `(a, b, (c, d, ...), e)` — lifts that cap
+/// without changing order, which stays the flattened depth-first,
+/// left-to-right order.
 /// Numeric links match the complete FFI `Int` or `Float` type tag and then use
 /// Rust `as` conversion semantics, so prefer `i64` and `f64` unless narrowing
 /// is intentional.
@@ -306,6 +310,9 @@ where
 }
 
 #[doc(hidden)]
+pub struct ByMapChainLink<Markers>(PhantomData<fn(Markers)>);
+
+#[doc(hidden)]
 pub enum ByMapDispatchLink {}
 
 impl<V: MapDispatch> MapChainLink<ByMapDispatchLink> for &mut V {
@@ -315,28 +322,63 @@ impl<V: MapDispatch> MapChainLink<ByMapDispatchLink> for &mut V {
     }
 }
 
-/// Statically dispatched tuple mapper, public only as an [`IntoMapper`]
-/// projection.
+/// Statically dispatched mapper over one [`MapChainLink`] — a bare closure
+/// or a tuple of links — public only as an [`IntoMapper`] projection.
 #[doc(hidden)]
-pub struct MapChain<Links, Markers> {
-    links: Links,
-    markers: PhantomData<fn(Markers)>,
+pub struct MapChain<Link, Marker> {
+    link: Link,
+    marker: PhantomData<fn(Marker)>,
 }
 
-macro_rules! impl_map_chain {
+impl<Link, Marker> MapChain<Link, Marker> {
+    #[inline]
+    fn new(link: Link) -> Self {
+        MapChain {
+            link,
+            marker: PhantomData,
+        }
+    }
+}
+
+impl<Link, Marker> MapDispatch for MapChain<Link, Marker>
+where
+    Link: MapChainLink<Marker>,
+{
+    #[inline]
+    fn dispatch_map(
+        &mut self,
+        value: &MapValue,
+        def_region_kind: DefRegionKind,
+    ) -> Option<MapResult> {
+        self.link.try_map(value, def_region_kind)
+    }
+}
+
+// A tuple of links is itself a link, tried in order with the first match
+// winning. Tuples therefore nest: the 12-wide flat arity cap becomes a
+// per-level cap and the total chain length is unbounded. Nesting does not
+// change order: links run in depth-first, left-to-right order, i.e. the
+// flattened order.
+macro_rules! impl_map_chain_link {
     ($(($F:ident, $M:ident, $idx:tt)),+) => {
-        impl<$($F, $M,)+> MapDispatch for MapChain<($($F,)+), ($($M,)+)>
+        impl<$($F, $M,)+> sealed_map::SealedMapLink<ByMapChainLink<($($M,)+)>> for ($($F,)+)
+        where
+            $($F: MapChainLink<$M>,)+
+        {
+        }
+
+        impl<$($F, $M,)+> MapChainLink<ByMapChainLink<($($M,)+)>> for ($($F,)+)
         where
             $($F: MapChainLink<$M>,)+
         {
             #[inline]
-            fn dispatch_map(
+            fn try_map(
                 &mut self,
                 value: &MapValue,
                 def_region_kind: DefRegionKind,
             ) -> Option<MapResult> {
                 $(
-                    if let Some(result) = self.links.$idx.try_map(value, def_region_kind) {
+                    if let Some(result) = self.$idx.try_map(value, def_region_kind) {
                         return Some(result);
                     }
                 )+
@@ -348,20 +390,17 @@ macro_rules! impl_map_chain {
         where
             $($F: MapChainLink<$M>,)+
         {
-            type Mapper = MapChain<($($F,)+), ($($M,)+)>;
+            type Mapper = MapChain<($($F,)+), ByMapChainLink<($($M,)+)>>;
 
             #[inline]
             fn into_mapper(self) -> Self::Mapper {
-                MapChain {
-                    links: self,
-                    markers: PhantomData,
-                }
+                MapChain::new(self)
             }
         }
     };
 }
 
-impl_callback_chain_tuple_arities!(impl_map_chain);
+impl_callback_chain_tuple_arities!(impl_map_chain_link);
 
 macro_rules! impl_bare_map_link {
     ($(($marker:ident, $($fn_args:ty),+)),+ $(,)?) => {
@@ -372,14 +411,11 @@ macro_rules! impl_bare_map_link {
                 Self: MapChainLink<$marker<T>>,
                 O: IntoMapResult,
             {
-                type Mapper = MapChain<(F,), ($marker<T>,)>;
+                type Mapper = MapChain<F, $marker<T>>;
 
                 #[inline]
                 fn into_mapper(self) -> Self::Mapper {
-                    MapChain {
-                        links: (self,),
-                        markers: PhantomData,
-                    }
+                    MapChain::new(self)
                 }
             }
         )+
@@ -398,14 +434,11 @@ where
     F: for<'a> FnMut(&'a MapValue) -> O,
     O: IntoMapResult,
 {
-    type Mapper = MapChain<(F,), (ByMapCatchAll,)>;
+    type Mapper = MapChain<F, ByMapCatchAll>;
 
     #[inline]
     fn into_mapper(self) -> Self::Mapper {
-        MapChain {
-            links: (self,),
-            markers: PhantomData,
-        }
+        MapChain::new(self)
     }
 }
 
@@ -414,14 +447,11 @@ where
     F: for<'a> FnMut(&'a MapValue, DefRegionKind) -> O,
     O: IntoMapResult,
 {
-    type Mapper = MapChain<(F,), (ByMapCatchAllKind,)>;
+    type Mapper = MapChain<F, ByMapCatchAllKind>;
 
     #[inline]
     fn into_mapper(self) -> Self::Mapper {
-        MapChain {
-            links: (self,),
-            markers: PhantomData,
-        }
+        MapChain::new(self)
     }
 }
 

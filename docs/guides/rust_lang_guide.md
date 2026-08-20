@@ -245,9 +245,11 @@ For `Map` and `Dict`, structural walk treats keys as structural anchors: it
 visits container values but does not pass keys to handlers. The map or dict
 object itself is still visited normally.
 
-Lambdas also work — pass a single typed lambda, or a tuple of them (up to 8)
-tried in order with the first matching argument type winning, like the
-variadic C++ `StructuralWalk(root, callbacks...)` chain. Unmatched values
+Lambdas also work — pass a single typed lambda, or a tuple of them tried in
+order with the first matching argument type winning, like the variadic C++
+`StructuralWalk(root, callbacks...)` chain. A flat tuple holds up to 12
+lambdas; a tuple is itself a link, so nest `(a, b, (c, d, ...))` to chain
+more — order stays the flattened left-to-right order. Unmatched values
 simply advance; a `&VisitValue` lambda acts as a catch-all and must come
 last, since links after an always-matching one never run. Each lambda may
 take a trailing `DefRegionKind` argument:
@@ -397,8 +399,9 @@ let mapped = Array::<i64>::try_from(mapped)?;
 assert_eq!(mapped.iter().collect::<Vec<_>>(), vec![2, 3]);
 ```
 
-A single typed closure and an ordered tuple of up to eight closures are also
-accepted. Tuple dispatch is first-match, not broadcast: later closures do not
+A single typed closure and an ordered tuple of up to twelve closures are also
+accepted; a tuple is itself a link, so `(a, b, (c, d, ...))` nests beyond that
+without changing the flattened order. Tuple dispatch is first-match, not broadcast: later closures do not
 run after an earlier argument type matches. As with generated dispatch, a
 `&MapValue` catch-all belongs last. Numeric handlers claim the complete FFI
 `Int` or `Float` tag and then use Rust `as` conversion semantics; prefer `i64`

@@ -210,11 +210,12 @@ pub use super::dispatch::{ByDispatch, DispatchVisitor, VisitDispatch};
 ///   `FnMut(&VisitValue)`, typed `FnMut(T)`, node `FnMut(&N)`, each with an
 ///   optional trailing [`DefRegionKind`] argument — the analog of a single
 ///   C++ callback. Values a typed closure does not match advance normally.
-/// * A tuple of typed links `(link1, link2, ...)`, up to 8 — the analog of
-///   the C++ variadic callback chain; see [`WalkChainLink`] for the
-///   accepted link shapes. Larger handler sets belong in one
-///   `#[dispatch(visit)]` visitor, which itself splices into a tuple as a
-///   single link.
+/// * A tuple of typed links `(link1, link2, ...)` — the analog of the C++
+///   variadic callback chain; see [`WalkChainLink`] for the accepted link
+///   shapes. A flat tuple holds up to 12 links; a tuple is itself a link, so
+///   nesting `(a, b, (c, d, ...), e)` chains any number of them. Larger
+///   handler sets may also live in one `#[dispatch(visit)]` visitor, which
+///   itself splices into a tuple as a single link.
 ///
 /// Closure arguments usually need explicit type annotations
 /// (`|value: &VisitValue| ...`) for the marker to be inferred.
@@ -223,7 +224,7 @@ pub use super::dispatch::{ByDispatch, DispatchVisitor, VisitDispatch};
     note = "accepted walkers: `&mut V` where `V: VisitDispatch`; a closure over `&VisitValue`, \
             an FFI value type `T`, or `&N` of an object node type (`N: ObjectCore`, e.g. \
             `&Object`), optionally with a trailing `DefRegionKind` argument; or a tuple of \
-            up to 8 such links",
+            up to 12 such links (tuples nest, so `(a, (b, c))` chains more)",
     note = "closure arguments need explicit type annotations; ObjectRef wrappers like `String` \
             or `Array<T>` are FFI value types — take them by value, not by reference"
 )]
@@ -303,9 +304,12 @@ where
 /// One typed link of a tuple walker — a single callback of the C++ variadic
 /// `StructuralWalk(root, callbacks...)` chain.
 ///
-/// A tuple of up to 8 links passed to [`structural_walk`] is tried in order
-/// and the first link whose argument type matches the value runs, exactly
-/// like the C++ callback chain. (Python's `structural_walk` differs on one
+/// A tuple of links passed to [`structural_walk`] is tried in order and the
+/// first link whose argument type matches the value runs, exactly like the
+/// C++ callback chain. A flat tuple holds up to 12 links, and a tuple is
+/// itself a link, so `(a, b, (c, d, ...), e)` nests to any length; nesting
+/// does not change order, which stays the flattened depth-first,
+/// left-to-right order. (Python's `structural_walk` differs on one
 /// point: it keeps `callbacks` and `with_def_region_kind` as two separately
 /// ordered groups, trying every plain entry before any kind-taking entry,
 /// so a mixed Rust tuple's single interleaved order has no exact Python
@@ -515,6 +519,9 @@ where
 }
 
 #[doc(hidden)]
+pub struct ByChainLink<Markers>(PhantomData<fn(Markers)>);
+
+#[doc(hidden)]
 pub enum ByDispatchLink {}
 
 impl<V: VisitDispatch> WalkChainLink<ByDispatchLink> for &mut V {
@@ -528,48 +535,69 @@ impl<V: VisitDispatch> WalkChainLink<ByDispatchLink> for &mut V {
     }
 }
 
-/// Runs a tuple of [`WalkChainLink`]s at the phase selected by `order`,
-/// trying links in order and short-circuiting on the first whose type
-/// matches — the Rust analog of C++ `StructuralWalkCallbackChain`. Static
-/// dispatch throughout: each link's type test inlines to the same code the
-/// `#[dispatch(visit)]` macro generates for a `visit_*` chain.
+/// Runs one [`WalkChainLink`] — a bare typed closure or a tuple of links —
+/// at the phase selected by `order`; a value the link does not claim
+/// advances normally. This is the Rust analog of C++
+/// `StructuralWalkCallbackChain`. Static dispatch throughout: each link's
+/// type test inlines to the same code the `#[dispatch(visit)]` macro
+/// generates for a `visit_*` chain.
 #[doc(hidden)]
-pub struct ChainWalker<Links, Markers> {
-    links: Links,
-    markers: PhantomData<fn(Markers)>,
+pub struct ChainWalker<Link, Marker> {
+    link: Link,
+    marker: PhantomData<fn(Marker)>,
 }
 
-macro_rules! impl_chain_walker {
+impl<Link, Marker> ChainWalker<Link, Marker> {
+    #[inline]
+    fn new(link: Link) -> Self {
+        ChainWalker {
+            link,
+            marker: PhantomData,
+        }
+    }
+}
+
+impl<Link, Marker> NativeVisit for ChainWalker<Link, Marker>
+where
+    Link: WalkChainLink<Marker>,
+{
+    #[inline]
+    fn visit(&mut self, value: &VisitValue, def_region_kind: DefRegionKind) -> Result<WalkResult> {
+        self.link
+            .try_call(value, def_region_kind)
+            .unwrap_or(Ok(WalkResult::Advance))
+    }
+}
+
+// A tuple of links is itself a link, tried in order with the first match
+// winning. Tuples therefore nest: the 12-wide flat arity cap becomes a
+// per-level cap and the total chain length is unbounded. Nesting does not
+// change order: links run in depth-first, left-to-right order, i.e. the
+// flattened order.
+macro_rules! impl_chain_link {
     ($(($F:ident, $M:ident, $idx:tt)),+) => {
-        impl<$($F, $M,)+> ChainWalker<($($F,)+), ($($M,)+)>
+        impl<$($F, $M,)+> sealed::SealedLink<ByChainLink<($($M,)+)>> for ($($F,)+)
+        where
+            $($F: WalkChainLink<$M>,)+
+        {
+        }
+
+        impl<$($F, $M,)+> WalkChainLink<ByChainLink<($($M,)+)>> for ($($F,)+)
         where
             $($F: WalkChainLink<$M>,)+
         {
             #[inline]
-            fn dispatch(
+            fn try_call(
                 &mut self,
                 value: &VisitValue,
                 def_region_kind: DefRegionKind,
-            ) -> Result<WalkResult> {
+            ) -> Option<VisitResult> {
                 $(
-                    if let Some(result) = self.links.$idx.try_call(value, def_region_kind) {
-                        return result;
+                    if let Some(result) = self.$idx.try_call(value, def_region_kind) {
+                        return Some(result);
                     }
                 )+
-                Ok(WalkResult::Advance)
-            }
-        }
-
-        impl<$($F, $M,)+> NativeVisit for ChainWalker<($($F,)+), ($($M,)+)>
-        where
-            $($F: WalkChainLink<$M>,)+
-        {
-            fn visit(
-                &mut self,
-                value: &VisitValue,
-                def_region_kind: DefRegionKind,
-            ) -> Result<WalkResult> {
-                self.dispatch(value, def_region_kind)
+                None
             }
         }
 
@@ -577,21 +605,18 @@ macro_rules! impl_chain_walker {
         where
             $($F: WalkChainLink<$M>,)+
         {
-            type Walker = ChainWalker<($($F,)+), ($($M,)+)>;
+            type Walker = ChainWalker<($($F,)+), ByChainLink<($($M,)+)>>;
             fn into_walker(self) -> Self::Walker {
-                ChainWalker {
-                    links: self,
-                    markers: PhantomData,
-                }
+                ChainWalker::new(self)
             }
         }
     };
 }
 
-impl_callback_chain_tuple_arities!(impl_chain_walker);
+impl_callback_chain_tuple_arities!(impl_chain_link);
 
 // A bare typed closure — `FnMut(T)` or `FnMut(&N)`, optionally with a
-// trailing `DefRegionKind` — walks as a single-link chain, so a lone typed
+// trailing `DefRegionKind` — walks as a single link, so a lone typed
 // handler needs no tuple wrapping; values that do not match its argument
 // type advance normally. `&VisitValue` catch-all closures keep their
 // dedicated `ClosureWalker`/`ClosureKindWalker` path above.
@@ -604,12 +629,9 @@ macro_rules! impl_bare_link_walker {
                 Self: WalkChainLink<$marker<T>>,
                 O: IntoVisitResult,
             {
-                type Walker = ChainWalker<(F,), ($marker<T>,)>;
+                type Walker = ChainWalker<F, $marker<T>>;
                 fn into_walker(self) -> Self::Walker {
-                    ChainWalker {
-                        links: (self,),
-                        markers: PhantomData,
-                    }
+                    ChainWalker::new(self)
                 }
             }
         )+

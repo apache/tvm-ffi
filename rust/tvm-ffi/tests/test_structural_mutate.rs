@@ -1408,7 +1408,7 @@ fn closures_and_tuples_use_ordered_first_match() {
 }
 
 #[test]
-fn eight_link_tuple_reaches_final_map_dispatch() {
+fn twelve_link_tuple_reaches_final_map_dispatch() {
     let mut final_dispatch = IncrementIntegers;
     let mapped = structural_map(
         1i64,
@@ -1420,6 +1420,10 @@ fn eight_link_tuple_reaches_final_map_dispatch() {
             |_node: &RustDagNodeObj| Any::new(),
             |_node: &RustFreeVarObj| Any::new(),
             |value: Array<i64>| Any::from(value),
+            |value: Array<f64>| Any::from(value),
+            |value: Array<bool>| Any::from(value),
+            |value: Array<FfiString>, _kind: DefRegionKind| Any::from(value),
+            |value: Map<FfiString, i64>| Any::from(value),
             &mut final_dispatch,
         ),
         WalkOrder::PostOrder,
@@ -1428,6 +1432,51 @@ fn eight_link_tuple_reaches_final_map_dispatch() {
     .unwrap();
 
     assert_eq!(mapped, 2);
+}
+
+#[test]
+fn nested_tuple_chain_exceeds_flat_arity() {
+    // A tuple is itself a link, so nesting lifts the 12-wide flat cap:
+    // 12 + 3 = 15 links here, three levels deep. Order is the flattened
+    // depth-first order: the typed i64 link claims integers before the
+    // nested catch-all, which therefore only sees the array itself.
+    ensure_test_types_registered();
+    let root = Array::new(vec![1i64, 2, 3]);
+    let mut catch_all = 0;
+    let mapped = structural_map(
+        root,
+        (
+            (
+                |_value: bool| Any::from(false),
+                |_value: f64| Any::from(0.0f64),
+                |value: FfiString| Any::from(value),
+                |value: Function| Any::from(value),
+                |_node: &RustDagNodeObj| Any::new(),
+                |_node: &RustFreeVarObj| Any::new(),
+                |value: Array<f64>| Any::from(value),
+                |value: Array<bool>| Any::from(value),
+                |value: Array<Array<i64>>| Any::from(value),
+                |value: Map<FfiString, i64>| Any::from(value),
+                |value: Array<Function>, _kind: DefRegionKind| Any::from(value),
+                |value: Map<i64, i64>| Any::from(value),
+            ),
+            (
+                |value: i64| Any::from(value * 10),
+                (
+                    |value: Array<FfiString>| Any::from(value),
+                    (|value: &MapValue| {
+                        catch_all += 1;
+                        value.to_owned()
+                    },),
+                ),
+            ),
+        ),
+        WalkOrder::PostOrder,
+    )
+    .and_then(Array::<i64>::try_from)
+    .unwrap();
+    assert_eq!(mapped.iter().collect::<Vec<_>>(), vec![10, 20, 30]);
+    assert_eq!(catch_all, 1);
 }
 
 #[test]
