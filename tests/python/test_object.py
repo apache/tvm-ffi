@@ -16,6 +16,8 @@
 # under the License.
 from __future__ import annotations
 
+import copy
+import pickle
 import sys
 from collections.abc import Sequence
 from typing import Any
@@ -483,3 +485,60 @@ class TestIsinstanceIssubclass:
         assert not issubclass(tvm_ffi.Dict, tvm_ffi.Map)
         assert not issubclass(tvm_ffi.Array, tvm_ffi.List)
         assert not issubclass(tvm_ffi.Map, tvm_ffi.Dict)
+
+
+class TestUnpicklableTypes:
+    """Types wrapping live process resources report an actionable pickle error.
+
+    These types have no JSON-graph creator, so pickling them raises from the
+    internal ``ToJSONGraph`` serializer. The raw serializer message is confusing
+    when it surfaces from ``pickle`` (a user who never called ``ToJSONGraph``
+    sees it named in the error), so it is translated at the ``__getstate__``
+    boundary.
+    """
+
+    def test_function_pickle_error(self) -> None:
+        fn = tvm_ffi.get_global_func("ffi.String")
+        with pytest.raises(TypeError, match=r"cannot pickle `ffi\.Function` object"):
+            pickle.dumps(fn)
+
+    def test_opaque_pyobject_pickle_error(self) -> None:
+        opaque = tvm_ffi.core._convert_to_opaque_object(object())
+        with pytest.raises(TypeError, match=r"cannot pickle `ffi\.OpaquePyObject` object"):
+            pickle.dumps(opaque)
+
+    def test_nested_unpicklable_names_inner_type(self) -> None:
+        """A container holding an unpicklable value names both types."""
+
+        class Payload:
+            pass
+
+        arr = tvm_ffi.convert([Payload()])
+        with pytest.raises(
+            TypeError,
+            match=r"cannot pickle `ffi\.OpaquePyObject` object contained in `Array`",
+        ):
+            pickle.dumps(arr)
+
+    def test_error_message_is_actionable(self) -> None:
+        """The message points at a remedy rather than at the serializer."""
+        fn = tvm_ffi.get_global_func("ffi.String")
+        with pytest.raises(TypeError) as exc_info:
+            pickle.dumps(fn)
+        message = str(exc_info.value)
+        assert "ToJSONGraph" not in message
+        assert "current process" in message
+
+    def test_deepcopy_reports_same_error(self) -> None:
+        fn = tvm_ffi.get_global_func("ffi.String")
+        with pytest.raises(TypeError, match=r"cannot pickle `ffi\.Function` object"):
+            copy.deepcopy(fn)
+
+    def test_picklable_types_are_unaffected(self) -> None:
+        """Types the JSON graph does support keep round-tripping."""
+        for value in (
+            tvm_ffi.convert([1, 2, 3]),
+            tvm_ffi.convert({"a": 1}),
+            tvm_ffi.Shape((2, 3)),
+        ):
+            assert pickle.loads(pickle.dumps(value)) is not None

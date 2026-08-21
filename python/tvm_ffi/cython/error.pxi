@@ -69,6 +69,25 @@ cdef class Error(CObject):
             raise MemoryError("Failed to create error object")
         (<CObject>self).chandle = out
 
+    def __reduce__(self):
+        """Pickle by value from ``(kind, message, backtrace)``.
+
+        ``ffi.Error`` has no JSON-graph creator, so the inherited
+        :py:meth:`CObject.__reduce__` cannot serialize it. Because an error is
+        fully described by its three strings, reconstruct it through
+        :py:meth:`__init__` instead.
+
+        Notes
+        -----
+        :py:attr:`extra_context` is intentionally dropped: it may hold arbitrary
+        native payloads that have no value representation. Preserving it only
+        when it happens to be serializable would make pickling an error depend
+        on where the error came from.
+        """
+        if self.chandle == NULL:
+            return (_new_object, (Error,))
+        return (Error, (self.kind, self.message, self.backtrace))
+
     def update_backtrace(self, backtrace: str) -> None:
         """Replace the stored backtrace string with ``backtrace``.
 
