@@ -52,7 +52,7 @@ pub use crate::extra::structural_mutate::{
     StructuralMutator, StructuralVarRemap,
 };
 pub use crate::extra::structural_visit::{
-    structural_visit, structural_walk, DefRegionKind, IntoVisitResult, IntoVisitor, IntoWalker,
+    structural_visit, structural_walk, DefRegionKind, IntoVisitor, IntoWalkResult, IntoWalker,
     StructuralVisitor, VisitCallbacks, VisitChainLink, VisitContext, VisitInterrupt, VisitValue,
     WalkChainLink, WalkDispatch, WalkOrder, WalkResult,
 };

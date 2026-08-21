@@ -147,16 +147,16 @@ fn expand(item_impl: &ItemImpl, mode: DispatchMode) -> syn::Result<TokenStream2>
     let tvm_ffi = get_tvm_ffi_crate();
     let into_result = match mode {
         DispatchMode::Walk => quote! {
-            #tvm_ffi::extra::structural_visit::IntoVisitResult::into_visit_result
+            #tvm_ffi::extra::structural_visit::IntoWalkResult::into_walk_result
         },
         DispatchMode::Visit => quote! {
-            #tvm_ffi::extra::structural_visit::IntoVisitOutcome::into_visit_outcome
+            #tvm_ffi::extra::structural_visit::IntoVisitResult::into_visit_result
         },
         DispatchMode::Map => quote! {
             #tvm_ffi::extra::structural_mutate::IntoMapResult::into_map_result
         },
         DispatchMode::Mutate => quote! {
-            #tvm_ffi::extra::structural_mutate::IntoMapResult::into_map_result
+            #tvm_ffi::extra::structural_mutate::IntoMutateResult::into_mutate_result
         },
     };
     let links = expand_links(&handlers, mode, &into_result, quote!(value));
@@ -195,7 +195,7 @@ fn expand(item_impl: &ItemImpl, mode: DispatchMode) -> syn::Result<TokenStream2>
                     &mut self,
                     value: &#tvm_ffi::extra::structural_visit::VisitValue,
                     def_region_kind: #tvm_ffi::extra::structural_visit::DefRegionKind,
-                ) -> Option<#tvm_ffi::extra::structural_visit::VisitResult> {
+                ) -> Option<#tvm_ffi::extra::structural_visit::WalkCallbackResult> {
                     #(#links)*
                     None
                 }
@@ -286,9 +286,6 @@ fn expand_links(
         .map(|handler| {
             let method = &handler.method;
             let attrs = &handler.cfg_attrs;
-            // A handler opts into the definition-region state by declaring a
-            // trailing argument; the generated dispatch forwards by arity,
-            // like the corresponding C++ structural callback overloads.
             let kind_arg = if handler.wants_def_region {
                 quote!(, def_region_kind)
             } else {
@@ -322,10 +319,10 @@ fn expand_links(
                 }
                 HandlerArgument::Owned(value_type) => {
                     let result = wrap_result(quote! {
-                        #into_result(self.#method(node #kind_arg))
+                        #into_result(self.#method(typed #kind_arg))
                     });
                     quote! {
-                        if let Some(node) = #value.cast::<#value_type>() {
+                        if let Some(typed) = #value.cast::<#value_type>() {
                             return #result;
                         }
                     }
@@ -344,7 +341,6 @@ fn expand_links(
 struct Handler {
     method: syn::Ident,
     argument: HandlerArgument,
-    /// The handler declared a trailing `DefRegionKind` argument.
     wants_def_region: bool,
     cfg_attrs: Vec<Meta>,
 }

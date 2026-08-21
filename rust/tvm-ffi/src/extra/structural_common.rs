@@ -27,12 +27,7 @@ pub(crate) fn with_structural_error_context(error: Error, operation: &str, frame
     Error::with_appended_backtrace(error, &format!("[native structural {operation}] {frame}\n"))
 }
 
-// Rust treats callback tuples of different lengths as different types, so
-// each flat tuple arity needs its own impl. Generate arities 1 through 12
-// here — the same width the standard library implements its tuple traits
-// for — so structural visit and map accept the same flat tuple widths. This
-// is a per-level width, not a cap on chain length: a tuple is itself a
-// link, so nesting `(a, b, (c, d, ...))` chains any number of callbacks.
+// Generate the tuple arities supported by the standard library (1 through 12).
 macro_rules! impl_callback_chain_tuple_arities {
     ($impl_chain:ident) => {
         impl_callback_chain_tuple_arities!(

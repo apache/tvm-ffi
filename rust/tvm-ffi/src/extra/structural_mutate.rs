@@ -19,27 +19,8 @@
 
 //! Native Rust structural mutation and mapping.
 //!
-//! Two public layers share the same runtime mutation protocol:
-//!
-//! * [`StructuralMutator`] + [`structural_mutate`] let the mutator drive
-//!   recursion. `#[dispatch(mutate)]` generates this trait from typed
-//!   `mutate_*` methods. `structural_mutate` also accepts a typed callback or
-//!   callback tuple; matched callbacks receive a [`MutateContext`] for state
-//!   and explicit recursion.
-//! * [`MapDispatch`] + [`structural_map`] provide ordered pre/post-order
-//!   replacement callbacks while the engine owns recursion. `#[dispatch(map)]`
-//!   generates this layer from typed `map_*` methods.
-//!
-//! The root is consumed so Rust ownership and the runtime strong count jointly
-//! define the boundary for optional in-place container mutation. Passing a
-//! clone naturally selects copy-on-write behavior.
-//!
-//! Rust owns callback dispatch, memoization, and identity remapping. Default
-//! recursion follows the shared structural-mutation ABI: each runtime type's
-//! registered `__s_mutate__` or `__s_maybe_inplace_mutate__` hook receives the
-//! active Rust-backed mutator and re-enters Rust through its vtable for child
-//! values. This keeps container storage and type-specific behavior in the
-//! implementation that registered the hook.
+//! [`structural_mutate`] lets a mutator drive recursion, while
+//! [`structural_map`] applies callbacks around engine-owned recursion.
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -81,10 +62,7 @@ const SHALLOW_COPY_ATTR: &str = "__ffi_shallow_copy__";
 const FLAG_SEQ_HASH_IGNORE: i64 = kTVMFFIFieldFlagBitMaskSEqHashIgnore as i64;
 const FLAG_SETTER_IS_FUNCTION: i64 = kTVMFFIFieldFlagBitSetterIsFunctionObj as i64;
 
-/// Borrowed value passed to structural-map callbacks.
-///
-/// Structural visit and map callbacks share the same audited implementation
-/// for typed casts and borrowed node checks.
+/// Borrowed value passed to structural map and mutation callbacks.
 pub use super::structural_common::StructuralValue as MapValue;
 
 /// Result type produced by a structural-map callback.
@@ -110,19 +88,10 @@ impl IntoMapResult for Result<Any> {
     }
 }
 
-/// Mutable callback context for a stateful structural mutator.
+/// State and recursive operations available to a mutation callback.
 ///
-/// A matched callback owns mutation of its value. Use [`Self::mutate`] for a
-/// borrowed child, [`Self::maybe_inplace_mutate`] for an owned child, or
-/// [`Self::default_mutate`] to apply the current value's default mutation.
-/// Mutable user state lives in [`MutateCallbacks`] and is available through
-/// [`Self::state`] and [`Self::state_mut`].
-///
-/// Recursive operations take `&mut self`. This makes each recursive entry a
-/// checked reborrow of the complete mutation context: Rust rejects a state
-/// borrow that remains live across a recursive mutation. The context is valid
-/// only for the callback invocation in which it was received and cannot be
-/// sent or shared across threads.
+/// A matched callback owns mutation of its value. Recursive operations
+/// reborrow the mutator, so mutable state cannot remain borrowed across them.
 pub struct MutateContext<'a, State> {
     driver: &'a mut dyn MutateContextDriver<State>,
     current: MapValue,
@@ -130,8 +99,6 @@ pub struct MutateContext<'a, State> {
     _not_send_sync: PhantomData<Rc<()>>,
 }
 
-/// Object-safe bridge that lets `MutateContext<State>` reborrow a concrete
-/// `MutateCallbacks<State, ..>` without exposing its callback types.
 trait MutateContextDriver<State> {
     fn state(&self) -> &State;
     fn state_mut(&mut self) -> &mut State;
@@ -144,7 +111,7 @@ trait MutateContextDriver<State> {
     fn default_mutate_raw(&mut self, raw: TVMFFIAny, def_region_kind: DefRegionKind)
         -> Result<Any>;
     fn var_remap_get_raw(&mut self, raw: TVMFFIAny) -> Result<Option<Any>>;
-    fn var_remap_set_raw(&mut self, raw: TVMFFIAny, mapped_value: &Any) -> Result<()>;
+    fn var_remap_set_raw(&mut self, raw: TVMFFIAny, mutated_value: &Any) -> Result<()>;
 }
 
 impl<State> MutateContext<'_, State> {
@@ -154,32 +121,6 @@ impl<State> MutateContext<'_, State> {
     }
 
     /// Mutably borrow the user state.
-    ///
-    /// The returned borrow must end before a recursive context method is
-    /// called. The borrow checker enforces this when the borrow is used after
-    /// that call.
-    ///
-    /// ```compile_fail
-    /// use tvm_ffi::{Any, MapValue, MutateCallbacks, MutateContext, Result};
-    ///
-    /// #[derive(Default)]
-    /// struct Stats {
-    ///     calls: usize,
-    /// }
-    ///
-    /// fn mutate_any(
-    ///     _value: &MapValue,
-    ///     context: &mut MutateContext<'_, Stats>,
-    /// ) -> Result<Any> {
-    ///     let calls = &mut context.state_mut().calls;
-    ///     *calls += 1;
-    ///     let result = context.default_mutate();
-    ///     *calls += 1; // `calls` cannot stay borrowed across recursion.
-    ///     result
-    /// }
-    ///
-    /// let _mutator = MutateCallbacks::new(Stats::default(), mutate_any);
-    /// ```
     pub fn state_mut(&mut self) -> &mut State {
         self.driver.state_mut()
     }
@@ -248,35 +189,15 @@ impl<State> MutateContext<'_, State> {
     }
 
     /// Store an invocation-local identity substitution.
-    pub fn var_remap_set(&mut self, var: &MapValue, mapped_value: &Any) -> Result<()> {
-        self.driver.var_remap_set_raw(var.raw(), mapped_value)
+    pub fn var_remap_set(&mut self, var: &MapValue, mutated_value: &Any) -> Result<()> {
+        self.driver.var_remap_set_raw(var.raw(), mutated_value)
     }
 }
 
 /// Conversion into the mutator argument accepted by [`structural_mutate`].
 ///
-/// Supported inputs are `&mut U` for a hand-written [`StructuralMutator`], a
-/// typed `Fn(value, &mut MutateContext<'_, ()>)` callback, or a tuple of such
-/// callbacks. A callback chain uses first-match dispatch; unmatched values use
-/// default mutation. Use [`MutateCallbacks`] to give a callback chain ordinary
-/// mutable state.
-///
-/// Callback code still implements `Fn`, because recursive context methods may
-/// re-enter the same callback. All mutation instead goes through the single
-/// `&mut MutateContext`, so recursive calls are ordinary checked reborrows.
-///
-/// A closure that mutates captured state directly is therefore rejected:
-///
-/// ```compile_fail
-/// use tvm_ffi::{structural_mutate, Any, MutateContext};
-///
-/// let mut calls = 0_usize;
-/// structural_mutate(1_i64, |value: i64, _context: &mut MutateContext<'_, ()>| {
-///     calls += 1;
-///     Any::from(value)
-/// })
-/// .unwrap();
-/// ```
+/// Accepts a mutable [`StructuralMutator`] or a first-match callback chain.
+/// Use [`MutateCallbacks`] when the chain needs mutable state.
 #[diagnostic::on_unimplemented(
     message = "`{Self}` is not a supported `structural_mutate` mutator",
     note = "accepted mutators: `&mut U` where `U: StructuralMutator`; an `Fn` callback over an FFI value type `T`, `&N` of an object node type, or `&MapValue`, followed by `&mut MutateContext<'_, ()>`; or a tuple of up to 12 such callbacks (tuples may nest)",
@@ -293,45 +214,66 @@ impl<U: StructuralMutator> IntoMutator<U> for &mut U {
     }
 }
 
+/// Convert a mutation callback result into [`Result<Any>`].
+#[doc(hidden)]
+pub trait IntoMutateResult {
+    fn into_mutate_result(self) -> Result<Any>;
+}
+
+impl IntoMutateResult for Any {
+    fn into_mutate_result(self) -> Result<Any> {
+        Ok(self)
+    }
+}
+
+impl IntoMutateResult for Result<Any> {
+    fn into_mutate_result(self) -> Result<Any> {
+        self
+    }
+}
+
+#[doc(hidden)]
+pub type MutateResult = Result<Any>;
+
 /// One typed callback in a callback-driven structural mutator.
 pub trait MutateChainLink<State, Marker>: mutate_sealed::SealedLink<State, Marker> {
     #[doc(hidden)]
     fn try_mutate(
         &self,
         value: &MapValue,
-        context: &mut MutateContext<'_, State>,
-    ) -> Option<MapResult>;
+        mutator: &mut MutateContext<'_, State>,
+    ) -> Option<MutateResult>;
 }
 
 mod mutate_sealed {
-    use super::{IntoMapResult, MapValue, MutateContext, ObjectCore};
+    use super::{IntoMutateResult, MapValue, MutateContext, ObjectCore};
 
     pub trait SealedLink<State, Marker> {}
 
     impl<F, State, T, O> SealedLink<State, super::ByMutateOwned<T>> for F
     where
-        F: for<'context, 'driver> Fn(T, &'context mut MutateContext<'driver, State>) -> O,
-        O: IntoMapResult,
+        F: for<'mutator, 'driver> Fn(T, &'mutator mut MutateContext<'driver, State>) -> O,
+        O: IntoMutateResult,
     {
     }
 
     impl<F, State, N: ObjectCore, O> SealedLink<State, super::ByMutateNode<N>> for F
     where
-        F: for<'value, 'context, 'driver> Fn(
+        F: for<'value, 'mutator, 'driver> Fn(
             &'value N,
-            &'context mut MutateContext<'driver, State>,
+            &'mutator mut MutateContext<'driver, State>,
         ) -> O,
-        O: IntoMapResult,
+        O: IntoMutateResult,
     {
     }
 
     impl<F, State, O> SealedLink<State, super::ByMutateCatchAll> for F
     where
-        F: for<'value, 'context, 'driver> Fn(
+        F: for<'value, 'mutator, 'driver> Fn(
             &'value MapValue,
-            &'context mut MutateContext<'driver, State>,
+            &'mutator mut MutateContext<'driver, State>,
         ) -> O,
-        O: IntoMapResult,
+        O: IntoMutateResult,
     {
     }
 }
@@ -341,18 +283,18 @@ pub struct ByMutateOwned<T>(PhantomData<T>);
 
 impl<F, State, T, O> MutateChainLink<State, ByMutateOwned<T>> for F
 where
-    F: for<'context, 'driver> Fn(T, &'context mut MutateContext<'driver, State>) -> O,
+    F: for<'mutator, 'driver> Fn(T, &'mutator mut MutateContext<'driver, State>) -> O,
     T: crate::type_traits::AnyCompatible,
-    O: IntoMapResult,
+    O: IntoMutateResult,
 {
     fn try_mutate(
         &self,
         value: &MapValue,
-        context: &mut MutateContext<'_, State>,
-    ) -> Option<MapResult> {
+        mutator: &mut MutateContext<'_, State>,
+    ) -> Option<MutateResult> {
         value
             .cast::<T>()
-            .map(|typed| self(typed, context).into_map_result())
+            .map(|typed| self(typed, mutator).into_mutate_result())
     }
 }
 
@@ -361,21 +303,21 @@ pub struct ByMutateNode<N>(PhantomData<N>);
 
 impl<F, State, N, O> MutateChainLink<State, ByMutateNode<N>> for F
 where
-    F: for<'value, 'context, 'driver> Fn(
+    F: for<'value, 'mutator, 'driver> Fn(
         &'value N,
-        &'context mut MutateContext<'driver, State>,
+        &'mutator mut MutateContext<'driver, State>,
     ) -> O,
     N: ObjectCore,
-    O: IntoMapResult,
+    O: IntoMutateResult,
 {
     fn try_mutate(
         &self,
         value: &MapValue,
-        context: &mut MutateContext<'_, State>,
-    ) -> Option<MapResult> {
+        mutator: &mut MutateContext<'_, State>,
+    ) -> Option<MutateResult> {
         value
             .as_node::<N>()
-            .map(|node| self(node, context).into_map_result())
+            .map(|node| self(node, mutator).into_mutate_result())
     }
 }
 
@@ -384,18 +326,18 @@ pub enum ByMutateCatchAll {}
 
 impl<F, State, O> MutateChainLink<State, ByMutateCatchAll> for F
 where
-    F: for<'value, 'context, 'driver> Fn(
+    F: for<'value, 'mutator, 'driver> Fn(
         &'value MapValue,
-        &'context mut MutateContext<'driver, State>,
+        &'mutator mut MutateContext<'driver, State>,
     ) -> O,
-    O: IntoMapResult,
+    O: IntoMutateResult,
 {
     fn try_mutate(
         &self,
         value: &MapValue,
-        context: &mut MutateContext<'_, State>,
-    ) -> Option<MapResult> {
-        Some(self(value, context).into_map_result())
+        mutator: &mut MutateContext<'_, State>,
+    ) -> Option<MutateResult> {
+        Some(self(value, mutator).into_mutate_result())
     }
 }
 
@@ -419,10 +361,10 @@ macro_rules! impl_mutate_chain_link {
             fn try_mutate(
                 &self,
                 value: &MapValue,
-                context: &mut MutateContext<'_, State>,
-            ) -> Option<MapResult> {
+                mutator: &mut MutateContext<'_, State>,
+            ) -> Option<MutateResult> {
                 $(
-                    if let Some(result) = self.$idx.try_mutate(value, context) {
+                    if let Some(result) = self.$idx.try_mutate(value, mutator) {
                         return Some(result);
                     }
                 )+
@@ -434,46 +376,7 @@ macro_rules! impl_mutate_chain_link {
 
 impl_callback_chain_tuple_arities!(impl_mutate_chain_link);
 
-/// Stateful typed callback mutator.
-///
-/// `callbacks` may be one typed callback or a nested tuple. Every callback
-/// receives the same mutable [`MutateContext`], and therefore the same `State`.
-/// Callback code is stored behind `Rc` so recursive entries can borrow the
-/// mutable mutator while invoking the shared `Fn` independently.
-///
-/// Pass the resulting mutator to [`structural_mutate`] by mutable reference; it
-/// can be reused across mutations and its state remains available through
-/// [`Self::state`] or [`Self::into_state`].
-///
-/// ```
-/// use tvm_ffi::{
-///     structural_mutate, Any, Array, MapValue, MutateCallbacks, MutateContext, Result,
-/// };
-///
-/// #[derive(Default)]
-/// struct Stats {
-///     integers: usize,
-/// }
-///
-/// fn mutate_integer(value: i64, context: &mut MutateContext<'_, Stats>) -> Any {
-///     context.state_mut().integers += 1;
-///     Any::from(value + 1)
-/// }
-///
-/// fn mutate_any(
-///     _value: &MapValue,
-///     context: &mut MutateContext<'_, Stats>,
-/// ) -> Result<Any> {
-///     context.default_mutate()
-/// }
-///
-/// let root = Array::new(vec![1_i64, 2]);
-/// let mut mutator = MutateCallbacks::new(Stats::default(), (mutate_integer, mutate_any));
-/// let mapped = structural_mutate(root, &mut mutator).unwrap();
-/// let mapped = Array::<i64>::try_from(mapped).unwrap();
-/// assert_eq!(mapped.iter().collect::<Vec<_>>(), vec![2, 3]);
-/// assert_eq!(mutator.state().integers, 2);
-/// ```
+/// A reusable callback mutator with shared user state.
 pub struct MutateCallbacks<State, Link, Marker> {
     state: State,
     callbacks: Rc<Link>,
@@ -573,16 +476,8 @@ impl<'a, V: MapDispatch> IntoMapper<ByMapDispatch> for &'a mut V {
 
 /// One typed callback in a structural-map tuple.
 ///
-/// Links are tried in tuple order and the first matching link supplies the
-/// replacement.  Supported shapes are owned FFI values, borrowed object
-/// nodes, and `&MapValue`, each optionally followed by [`DefRegionKind`].
-/// A tuple of links is itself a link, so tuples nest: a flat tuple holds up
-/// to 12 links, and nesting — `(a, b, (c, d, ...), e)` — lifts that cap
-/// without changing order, which stays the flattened depth-first,
-/// left-to-right order.
-/// Numeric links match the complete FFI `Int` or `Float` type tag and then use
-/// Rust `as` conversion semantics, so prefer `i64` and `f64` unless narrowing
-/// is intentional.
+/// Links use first-match order and may receive an owned FFI value, borrowed
+/// object node, or `&MapValue`, optionally followed by [`DefRegionKind`].
 pub trait MapChainLink<Marker>: sealed_map::SealedMapLink<Marker> {
     #[doc(hidden)]
     fn try_map(&mut self, value: &MapValue, def_region_kind: DefRegionKind) -> Option<MapResult>;
@@ -745,8 +640,7 @@ impl<V: MapDispatch> MapChainLink<ByMapDispatchLink> for &mut V {
     }
 }
 
-/// Statically dispatched mapper over one [`MapChainLink`] — a bare closure
-/// or a tuple of links — public only as an [`IntoMapper`] projection.
+/// Adapter from a [`MapChainLink`] to [`MapDispatch`].
 #[doc(hidden)]
 pub struct MapChain<Link, Marker> {
     link: Link,
@@ -777,11 +671,6 @@ where
     }
 }
 
-// A tuple of links is itself a link, tried in order with the first match
-// winning. Tuples therefore nest: the 12-wide flat arity cap becomes a
-// per-level cap and the total chain length is unbounded. Nesting does not
-// change order: links run in depth-first, left-to-right order, i.e. the
-// flattened order.
 macro_rules! impl_map_chain_link {
     ($(($F:ident, $M:ident, $idx:tt)),+) => {
         impl<$($F, $M,)+> sealed_map::SealedMapLink<ByMapChainLink<($($M,)+)>> for ($($F,)+)
@@ -880,12 +769,7 @@ where
 
 /// Engine-issued permission to attempt in-place mutation of one value.
 ///
-/// This capability cannot be constructed by callers. The native recursion
-/// engine issues it only when the parent path permits mutation and the object
-/// is uniquely owned at dispatch time. It is deliberately distinct from
-/// [`MapValue`], which can also be obtained from a read-only structural walk.
-/// Implementations should normally inspect it and then call
-/// [`StructuralMutator::default_maybe_inplace_mutate`].
+/// The engine issues it only when the current ownership path permits reuse.
 pub struct InplaceValue<'a> {
     value: MapValue,
     _scope: PhantomData<&'a mut TVMFFIAny>,
@@ -925,14 +809,9 @@ impl Deref for InplaceValue<'_> {
     }
 }
 
-/// Stateful identity-substitution environment for a hand-written
-/// [`StructuralMutator`] that needs a custom remapping policy.
+/// Identity substitutions for a custom [`StructuralMutator`] remapping policy.
 ///
-/// The map owns both its object keys and mapped values, preventing an object
-/// address from being recycled while a mutation is in progress. The default
-/// [`StructuralMutator`] methods use an invocation-local instance managed by
-/// [`structural_mutate`]; an implementation may delegate overridden
-/// `var_remap_get` and `var_remap_set` methods to this type instead.
+/// The map owns its keys and values so object addresses remain stable.
 #[derive(Default)]
 pub struct StructuralVarRemap {
     entries: HashMap<NonNull<TVMFFIObject>, MemoEntry>,
@@ -942,17 +821,17 @@ impl StructuralVarRemap {
     /// Look up an identity replacement previously stored for `var`.
     pub fn get(&self, var: &MapValue) -> Result<Option<Any>> {
         let key = object_identity_key(var.raw())?;
-        Ok(self.entries.get(&key).map(|entry| entry.mapped.clone()))
+        Ok(self.entries.get(&key).map(|entry| entry.result.clone()))
     }
 
-    /// Store the final mapped value for `var`.
-    pub fn set(&mut self, var: &MapValue, mapped_value: &Any) -> Result<()> {
+    /// Store the final mutated value for `var`.
+    pub fn set(&mut self, var: &MapValue, mutated_value: &Any) -> Result<()> {
         let key = object_identity_key(var.raw())?;
         self.entries.insert(
             key,
             MemoEntry {
                 _original: var.to_owned(),
-                mapped: mapped_value.clone(),
+                result: mutated_value.clone(),
             },
         );
         Ok(())
@@ -964,22 +843,10 @@ impl StructuralVarRemap {
     }
 }
 
-/// User-driven structural mutation, analogous to the low-level C++
-/// `StructuralMutatorObj` API.
+/// A mutator that controls its own recursion.
 ///
-/// [`structural_mutate`] dispatches the root to [`Self::mutate`] or, when
-/// ownership permits, [`Self::maybe_inplace_mutate`]. An implementation
-/// chooses where to recurse by calling `default_*` for the current value or a
-/// child helper for a selected value. Default recursion calls the registered
-/// structural hook for the value's runtime type and uses reflection only when
-/// that type has no hook. A registered hook owns identity remapping for its
-/// type; the reflected fallback uses [`Self::var_remap_get`] and
-/// [`Self::var_remap_set`] automatically.
-///
-/// Use `#[dispatch(mutate)]` on an inherent impl of typed `mutate_*` methods
-/// to generate this trait. A matching generated handler supplies the final
-/// value; values without a matching handler use the appropriate default copy
-/// or in-place path.
+/// Implementations descend with the child or `default_*` helpers.
+/// `#[dispatch(mutate)]` generates this trait from typed `mutate_*` methods.
 pub trait StructuralMutator: Sized {
     /// Mutate one borrowed value without modifying its source storage.
     fn mutate(&mut self, value: &MapValue, def_region_kind: DefRegionKind) -> Result<Any>;
@@ -1049,21 +916,14 @@ pub trait StructuralMutator: Sized {
         user_default_mutate(self, raw, def_region_kind, permit)
     }
 
-    /// Look up a previously completed FreeVar or DAG-node substitution.
-    ///
-    /// The default uses state local to the active [`structural_mutate`]
-    /// invocation, so a mutator does not need to carry a remap field. Override
-    /// this method only to provide a custom identity policy.
+    /// Look up a FreeVar or DAG-node substitution from the active mutation.
     fn var_remap_get(&mut self, var: &MapValue) -> Result<Option<Any>> {
         invocation_var_remap_get(self, var)
     }
 
-    /// Store the final mapped result for a FreeVar or DAG-node identity.
-    ///
-    /// The default writes to the same invocation-local state as
-    /// [`Self::var_remap_get`].
-    fn var_remap_set(&mut self, var: &MapValue, mapped_value: &Any) -> Result<()> {
-        invocation_var_remap_set(self, var, mapped_value)
+    /// Store a FreeVar or DAG-node substitution for the active mutation.
+    fn var_remap_set(&mut self, var: &MapValue, mutated_value: &Any) -> Result<()> {
+        invocation_var_remap_set(self, var, mutated_value)
     }
 }
 
@@ -1075,19 +935,16 @@ where
         &mut self,
         value: &MapValue,
         def_region_kind: DefRegionKind,
-    ) -> Option<MapResult> {
-        // Clone the pointer, not the callback state. The callback allocation
-        // is then independent from the mutable borrow placed in `context`, so
-        // recursive entries can invoke the same `Fn` through a checked reborrow
-        // of this mutator.
+    ) -> Option<MutateResult> {
+        // Clone the handle before `mutator` borrows all of `self`.
         let callbacks = Rc::clone(&self.callbacks);
-        let mut context = MutateContext {
+        let mut mutator = MutateContext {
             driver: self,
             current: MapValue::from_raw(value.raw()),
             def_region_kind,
             _not_send_sync: PhantomData,
         };
-        callbacks.try_mutate(value, &mut context)
+        callbacks.try_mutate(value, &mut mutator)
     }
 }
 
@@ -1147,8 +1004,8 @@ where
         <Self as StructuralMutator>::var_remap_get(self, &MapValue::from_raw(raw))
     }
 
-    fn var_remap_set_raw(&mut self, raw: TVMFFIAny, mapped_value: &Any) -> Result<()> {
-        <Self as StructuralMutator>::var_remap_set(self, &MapValue::from_raw(raw), mapped_value)
+    fn var_remap_set_raw(&mut self, raw: TVMFFIAny, mutated_value: &Any) -> Result<()> {
+        <Self as StructuralMutator>::var_remap_set(self, &MapValue::from_raw(raw), mutated_value)
     }
 }
 
@@ -1162,7 +1019,7 @@ struct MemoEntry {
     // Keeps the pointer-valued key alive so its address cannot be reused
     // during the same mapping invocation.
     _original: Any,
-    mapped: Any,
+    result: Any,
 }
 
 struct NativeMapper<D> {
@@ -1199,7 +1056,7 @@ impl<D: MapDispatch> NativeMapper<D> {
         let identity = identity_key(raw)?;
         if let Some(key) = identity {
             if let Some(entry) = self.memo.get(&key) {
-                return Ok(entry.mapped.clone());
+                return Ok(entry.result.clone());
             }
         }
 
@@ -1221,7 +1078,7 @@ impl<D: MapDispatch> NativeMapper<D> {
                 key,
                 MemoEntry {
                     _original: original,
-                    mapped: result.clone(),
+                    result: result.clone(),
                 },
             );
         }
@@ -1277,7 +1134,7 @@ impl<D: MapDispatch> NativeMapper<D> {
         let identity = identity_key(raw)?;
         if let Some(key) = identity {
             if let Some(entry) = self.memo.get(&key) {
-                return Ok(entry.mapped.clone());
+                return Ok(entry.result.clone());
             }
         }
         let original = identity.map(|_| owned_from_raw(raw)).transpose()?;
@@ -1294,7 +1151,7 @@ impl<D: MapDispatch> NativeMapper<D> {
                 key,
                 MemoEntry {
                     _original: original,
-                    mapped: result.clone(),
+                    result: result.clone(),
                 },
             );
         }
@@ -1314,7 +1171,7 @@ trait MutationDriver: Sized {
 
     fn var_remap_get_raw(&mut self, raw: TVMFFIAny) -> Result<Option<Any>>;
 
-    fn var_remap_set_raw(&mut self, raw: TVMFFIAny, mapped_value: &Any) -> Result<()>;
+    fn var_remap_set_raw(&mut self, raw: TVMFFIAny, replacement: &Any) -> Result<()>;
 
     fn call_registered_hook(
         &mut self,
@@ -1498,9 +1355,7 @@ struct RuntimeStructuralMutatorObj {
     context_identity: *mut c_void,
     owner_thread: std::thread::ThreadId,
     callbacks: RuntimeMutatorCallbacks,
-    // Default identity substitutions belong to one traversal, not to the
-    // user mutator value. This lets generated `#[dispatch(mutate)]` types use
-    // ordinary `&mut self` state without carrying a plumbing-only field.
+    // Identity substitutions for the active traversal.
     remap: RefCell<StructuralVarRemap>,
     panic: Option<Box<dyn std::any::Any + Send>>,
 }
@@ -1654,7 +1509,7 @@ unsafe extern "C" fn rust_vtable_var_remap_get(
     let context = context_guard.context;
     let raw = *var.as_raw_ffi_any();
     match catch_unwind(AssertUnwindSafe(|| callback(context, raw))) {
-        Ok(Ok(Some(mapped))) => Any::into_raw_ffi_any(mapped),
+        Ok(Ok(Some(replacement))) => Any::into_raw_ffi_any(replacement),
         Ok(Ok(None)) => TVMFFIAny::new(),
         Ok(Err(error)) => result_into_raw(Err(error)),
         Err(payload) => {
@@ -1667,7 +1522,7 @@ unsafe extern "C" fn rust_vtable_var_remap_get(
 unsafe extern "C" fn rust_vtable_var_remap_set(
     mutator: StructuralMutatorHandle,
     var: AnyView<'static>,
-    mapped_value: AnyView<'static>,
+    replacement: AnyView<'static>,
 ) -> TVMFFIAny {
     let context_guard = match take_runtime_context(mutator) {
         Ok(guard) => guard,
@@ -1676,10 +1531,10 @@ unsafe extern "C" fn rust_vtable_var_remap_set(
     let callback = (*mutator).callbacks.var_remap_set;
     let context = context_guard.context;
     let var_raw = *var.as_raw_ffi_any();
-    let mapped_raw = *mapped_value.as_raw_ffi_any();
+    let replacement_raw = *replacement.as_raw_ffi_any();
     match catch_unwind(AssertUnwindSafe(|| {
-        let mapped = owned_from_raw(mapped_raw)?;
-        callback(context, var_raw, &mapped)
+        let replacement = owned_from_raw(replacement_raw)?;
+        callback(context, var_raw, &replacement)
     })) {
         Ok(Ok(())) => TVMFFIAny::new(),
         Ok(Err(error)) => result_into_raw(Err(error)),
@@ -1744,7 +1599,7 @@ fn invocation_var_remap_get<U: Sized>(mutator: &mut U, var: &MapValue) -> Result
 fn invocation_var_remap_set<U: Sized>(
     mutator: &mut U,
     var: &MapValue,
-    mapped_value: &Any,
+    mutated_value: &Any,
 ) -> Result<()> {
     let active = active_mutator()?;
     let context = std::ptr::from_mut(mutator).cast::<c_void>();
@@ -1754,7 +1609,7 @@ fn invocation_var_remap_set<U: Sized>(
                 "default structural var-remap used by a non-active mutator",
             ));
         }
-        (*active).remap.borrow_mut().set(var, mapped_value)
+        (*active).remap.borrow_mut().set(var, mutated_value)
     }
 }
 
@@ -1847,16 +1702,16 @@ impl<D: MapDispatch> MutationDriver for NativeMapper<D> {
 
     fn var_remap_get_raw(&mut self, raw: TVMFFIAny) -> Result<Option<Any>> {
         let key = object_identity_key(raw)?;
-        Ok(self.memo.get(&key).map(|entry| entry.mapped.clone()))
+        Ok(self.memo.get(&key).map(|entry| entry.result.clone()))
     }
 
-    fn var_remap_set_raw(&mut self, raw: TVMFFIAny, mapped_value: &Any) -> Result<()> {
+    fn var_remap_set_raw(&mut self, raw: TVMFFIAny, replacement: &Any) -> Result<()> {
         let key = object_identity_key(raw)?;
         self.memo.insert(
             key,
             MemoEntry {
                 _original: owned_from_raw(raw)?,
-                mapped: mapped_value.clone(),
+                result: replacement.clone(),
             },
         );
         Ok(())
@@ -1877,8 +1732,8 @@ impl<U: StructuralMutator> MutationDriver for U {
         self.var_remap_get(&MapValue::from_raw(raw))
     }
 
-    fn var_remap_set_raw(&mut self, raw: TVMFFIAny, mapped_value: &Any) -> Result<()> {
-        self.var_remap_set(&MapValue::from_raw(raw), mapped_value)
+    fn var_remap_set_raw(&mut self, raw: TVMFFIAny, replacement: &Any) -> Result<()> {
+        self.var_remap_set(&MapValue::from_raw(raw), replacement)
     }
 }
 
@@ -1914,13 +1769,13 @@ unsafe fn runtime_var_remap_get<D: MutationDriver>(
 /// # Safety
 ///
 /// `context` must satisfy the same requirements as [`runtime_mutate`], and
-/// `mapped_value` must remain alive for this call.
+/// `replacement` must remain alive for this call.
 unsafe fn runtime_var_remap_set<D: MutationDriver>(
     context: *mut c_void,
     raw: TVMFFIAny,
-    mapped_value: &Any,
+    replacement: &Any,
 ) -> Result<()> {
-    (&mut *context.cast::<D>()).var_remap_set_raw(raw, mapped_value)
+    (&mut *context.cast::<D>()).var_remap_set_raw(raw, replacement)
 }
 
 fn run_structural_mutator<D: MutationDriver>(root: Any, driver: &mut D) -> Result<Any> {
@@ -2157,8 +2012,8 @@ fn default_mutate_driver<D: MutationDriver>(
     // Match C++ DefaultMutateExpected: a registered type hook owns any
     // identity-remap policy for that type. Automatic remapping applies only
     // to the reflected fallback below.
-    if let Some(mapped) = driver.call_registered_hook(raw, def_region_kind, permit)? {
-        return Ok(mapped);
+    if let Some(mutated) = driver.call_registered_hook(raw, def_region_kind, permit)? {
+        return Ok(mutated);
     }
     if raw.type_index < TVMFFITypeIndex::kTVMFFIStaticObjectBegin as i32 {
         return owned_from_raw(raw);
@@ -2166,8 +2021,8 @@ fn default_mutate_driver<D: MutationDriver>(
 
     let remappable = identity_key(raw)?.is_some();
     if remappable {
-        if let Some(mapped) = driver.var_remap_get_raw(raw)? {
-            return Ok(mapped);
+        if let Some(mutated) = driver.var_remap_get_raw(raw)? {
+            return Ok(mutated);
         }
     }
 
@@ -2178,15 +2033,11 @@ fn default_mutate_driver<D: MutationDriver>(
     Ok(result)
 }
 
-/// Mutate a structured value with a user-driven mutator or callback chain.
+/// Mutate a structured value with a mutator or typed callback chain.
 ///
 /// The root is consumed to establish the ownership boundary for optional
-/// in-place mutation. Completed in-place changes are not rolled back on an
-/// error, and an error does not return the consumed root. Passing `&mut U` for
-/// `U: StructuralMutator` preserves the low-level API. A typed `Fn(value,
-/// &mut MutateContext<'_, ()>)` callback or callback tuple builds a temporary
-/// mutator. The first matching callback supplies the final value; unmatched
-/// values use default mutation with the current in-place permit.
+/// in-place mutation. A matching callback supplies the final value; unmatched
+/// values use default mutation.
 pub fn structural_mutate<R, M>(root: R, mutator: impl IntoMutator<M>) -> Result<Any>
 where
     R: Into<Any>,

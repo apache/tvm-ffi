@@ -1098,7 +1098,6 @@ fn visitor_interrupt_propagates_through_default_children() {
     }
 
     let root = Array::new(vec![1i64, 2, 3]);
-    // Keep the original two-parameter turbofish form source-compatible.
     let outcome =
         structural_visit::<Array<i64>, InterruptingVisitor>(&root, &mut InterruptingVisitor)
             .unwrap();
@@ -1192,8 +1191,6 @@ fn chain_accepts_owned_object_ref_links() {
 
 #[test]
 fn chain_links_may_mix_def_region_arity() {
-    // Like #[dispatch(walk)] handlers, each link independently opts into
-    // the trailing DefRegionKind argument.
     let root = Array::new(vec![1i64, 2]);
     let mut kinds = Vec::new();
     let mut objects = 0;
@@ -1263,8 +1260,6 @@ fn chain_link_errors_include_native_visit_path() {
 
 #[test]
 fn chain_supports_post_order() {
-    // Rust borrow rules apply per link: state shared across links goes
-    // through a RefCell (or a single #[dispatch(walk)] walker).
     let root = Array::new(vec![1i64, 2]);
     let events = std::cell::RefCell::new(Vec::new());
     assert!(structural_walk(
@@ -1301,8 +1296,6 @@ impl ObjectCounter {
 
 #[test]
 fn chain_splices_dispatch_walkers_between_closures() {
-    // A `&mut` typed walker participates in the chain like any other link,
-    // keeping its own no-match fall-through semantics.
     let root = Array::new(vec![1i64, 2]);
     let mut counter = ObjectCounter::default();
     let mut integers = 0;
@@ -1322,9 +1315,6 @@ fn chain_splices_dispatch_walkers_between_closures() {
 
 #[test]
 fn chain_supports_full_arity() {
-    // All 12 flat links. Doubles as the first-match ordering probe: earlier
-    // misses fall through, the first matching link claims the value, later
-    // links never run.
     let root = Array::new(vec![1i64, 2, 3]);
     let mut integers = Vec::new();
     let mut objects = 0;
@@ -1555,9 +1545,6 @@ fn non_recursive_region_is_clamped_for_free_var_children_only() {
 
 #[test]
 fn nested_tuple_chain_exceeds_flat_arity() {
-    // A tuple is itself a link, so nesting lifts the 12-wide flat cap:
-    // 12 + 4 = 16 links here, three levels deep. Order is the flattened
-    // depth-first order.
     let root = Array::new(vec![1i64, 2, 3]);
     let mut integers = Vec::new();
     let mut objects = 0;
@@ -1608,7 +1595,6 @@ fn nested_tuple_chain_exceeds_flat_arity() {
 
 #[test]
 fn nested_tuple_first_match_order_is_flattened() {
-    // An earlier nested catch-all claims everything before a later link.
     let root = Array::new(vec![1i64, 2]);
     let mut first = 0;
     let mut second = 0;
@@ -1691,7 +1677,6 @@ fn stateful_callback_visit_uses_ordinary_mutable_state() {
     assert_eq!(visitor.state().arrays, 1);
     assert_eq!(visitor.state().integer_sum, 6);
 
-    // The callback visitor is reusable and retains its state between runs.
     assert!(structural_visit(&root, &mut visitor).unwrap().is_none());
     assert_eq!(visitor.state().arrays, 2);
     assert_eq!(visitor.into_state().integer_sum, 12);
@@ -1705,7 +1690,7 @@ struct StatefulVisitDepth {
 }
 
 #[test]
-fn stateful_callback_visit_reborrows_context_during_recursion() {
+fn stateful_callback_visit_reborrows_visitor_during_recursion() {
     let root = Array::new(vec![Array::new(vec![1i64, 2])]);
     let mut visitor = VisitCallbacks::new(
         StatefulVisitDepth::default(),
@@ -1715,8 +1700,6 @@ fn stateful_callback_visit_reborrows_context_during_recursion() {
             let current = visitor.state().current;
             visitor.state_mut().maximum = visitor.state().maximum.max(current);
 
-            // Keep the outcome intact so both errors and interrupts propagate,
-            // while ordinary state is restored after the recursive reborrow.
             let outcome = visitor.visit_children();
             visitor.state_mut().current -= 1;
             outcome
@@ -1730,7 +1713,7 @@ fn stateful_callback_visit_reborrows_context_during_recursion() {
 }
 
 #[test]
-fn callback_visit_can_reenter_the_same_fn_through_context() {
+fn callback_visit_can_reenter_the_same_fn_through_visitor() {
     let root = Array::new(vec![1i64, 2]);
     let visits = Cell::new(0);
     assert!(structural_visit(

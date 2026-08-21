@@ -314,16 +314,9 @@ let found = structural_walk(
 assert_eq!(found.map(|i| i64::try_from(i.value).unwrap()), Some(2));
 ```
 
-To drive recursion yourself without defining a visitor type, pass a typed
-callback or callback tuple to `structural_visit`. Each callback receives a
-mutable `VisitContext`. Tuple links are tried in order; a matched callback owns
-traversal of that value, while an unmatched value uses default child traversal.
-A catch-all callback must therefore call `visit_children()` explicitly.
-
-`VisitCallbacks` stores ordinary mutable state shared by the complete callback
-chain. Recursive operations borrow the complete context mutably, so Rust
-rejects a state borrow that remains live across `visit`, `visit_with`, or
-`visit_children`:
+`structural_visit` accepts typed callbacks in addition to a `StructuralVisitor`.
+Callbacks receive `VisitContext`, use first-match dispatch, and own traversal
+of matched values. `VisitCallbacks` adds state shared by the callback chain:
 
 ```rust
 use tvm_ffi::{structural_visit, Array, VisitCallbacks, VisitContext, VisitValue};
@@ -349,19 +342,13 @@ structural_visit(&values, &mut visitor)?;
 assert_eq!(visitor.state().total, 3);
 ```
 
-Callbacks are `Fn`, not `FnMut`: mutable data belongs in the context state,
-while callback code may recursively re-enter itself. A direct callback without
-state uses `&mut VisitContext<'_, ()>`. Since an interrupt is
-`Ok(Some(interrupt))`, return it explicitly from the outer callback; `?`
-propagates `Err`, not `Some`.
+Callbacks are `Fn`; mutable data belongs in the visitor state. A catch-all
+callback must call `visit_children()` explicitly, and interrupt values must be
+returned explicitly because `?` only propagates errors.
 
-For a named stateful implementation, put `#[dispatch(visit)]` on its
-`visit_*` methods and pass `&mut` it to the same entry point. Unlike walk,
-each matching handler owns recursion: it descends through
-`default_visit_children`, or through `visit_child`, which visits one selected
-child and can override the def-region state for it (e.g.
-`DefRegionKind::Recursive` when descending into a binder's parameters).
-Unmatched values use default child traversal:
+For a named implementation, `#[dispatch(visit)]` generates
+`StructuralVisitor` from `visit_*` methods. Matching handlers own recursion;
+unmatched values use default child traversal:
 
 ```rust
 use tvm_ffi::{
@@ -396,10 +383,8 @@ structural_visit(&values, &mut depth)?;
 assert_eq!(depth.max, 2);
 ```
 
-Implement `StructuralVisitor` directly when overriding the low-level `visit`
-method is more convenient. Both forms use the same `&mut self` reborrow chain,
-so ordinary mutable fields remain available during recursive `visit_child`
-calls.
+Implement `StructuralVisitor` directly to override its low-level `visit`
+method.
 
 Two safety notes: mutable `List`/`Dict` contents are snapshotted before
 callbacks run, so mutation during traversal cannot invalidate the walk; and
@@ -488,15 +473,9 @@ Callbacks may return `Result<Any>` to report failures. Errors propagate with
 object or reflected-field context. In-place changes completed before a later
 error are not rolled back, and the consumed root is not returned on error.
 
-`structural_mutate` likewise accepts a typed callback or ordered callback
-tuple. Each callback receives a mutable `MutateContext`. The first match
-supplies the current value's final result; an unmatched value follows default
-mutation with its current in-place permit.
-
-`MutateCallbacks` stores ordinary mutable state shared by the complete callback
-chain. As with `VisitCallbacks`, recursive operations borrow the complete
-context mutably, so a state borrow cannot remain live across `mutate`,
-`maybe_inplace_mutate`, or `default_mutate`:
+`structural_mutate` accepts typed callbacks in addition to a
+`StructuralMutator`. Callbacks receive `MutateContext`; `MutateCallbacks` adds
+state shared by the callback chain:
 
 ```rust
 use tvm_ffi::{
@@ -511,29 +490,24 @@ struct Stats {
 let mut mutator = MutateCallbacks::new(
     Stats::default(),
     (
-        |value: i64, context: &mut MutateContext<'_, Stats>| {
-            context.state_mut().integers += 1;
+        |value: i64, mutator: &mut MutateContext<'_, Stats>| {
+            mutator.state_mut().integers += 1;
             Any::from(value + 1)
         },
-        |_value: &MapValue, context: &mut MutateContext<'_, Stats>| {
-            context.default_mutate()
+        |_value: &MapValue, mutator: &mut MutateContext<'_, Stats>| {
+            mutator.default_mutate()
         },
     ),
 );
-let mapped = structural_mutate(Array::new(vec![1_i64, 2]), &mut mutator)?;
-let mapped = Array::<i64>::try_from(mapped)?;
-assert_eq!(mapped.iter().collect::<Vec<_>>(), vec![2, 3]);
+let mutated = structural_mutate(Array::new(vec![1_i64, 2]), &mut mutator)?;
+let mutated = Array::<i64>::try_from(mutated)?;
+assert_eq!(mutated.iter().collect::<Vec<_>>(), vec![2, 3]);
 assert_eq!(mutator.state().integers, 2);
 ```
 
-`MutateContext::mutate` re-enters with a borrowed child on the copy path;
-`maybe_inplace_mutate` consumes an owned child and preserves its in-place
-opportunity. `default_mutate()` applies default mutation to the callback's
-current value, but deliberately uses the copy path because the callback still
-holds a shared borrow of that value. Mutation callbacks are `Fn`, not `FnMut`:
-mutable data belongs in the context state, while callback code may recursively
-re-enter itself. A direct callback without state uses
-`&mut MutateContext<'_, ()>` and is wrapped in a temporary `MutateCallbacks`.
+`MutateContext::mutate` uses the copy path for a borrowed child, while
+`maybe_inplace_mutate` preserves the reuse opportunity of an owned child.
+Callbacks are `Fn`; mutable data belongs in the mutator state.
 
 For ordinary mutable state, `#[dispatch(mutate)]` generates a
 `StructuralMutator` from `mutate_*` methods. A matching handler returns the
@@ -557,12 +531,12 @@ impl Increment {
 }
 
 let mut increment = Increment::default();
-let mapped = structural_mutate(
+let mutated = structural_mutate(
     Array::new(vec![1_i64, 2]),
     &mut increment,
 )?;
-let mapped = Array::<i64>::try_from(mapped)?;
-assert_eq!(mapped.iter().collect::<Vec<_>>(), vec![2, 3]);
+let mutated = Array::<i64>::try_from(mutated)?;
+assert_eq!(mutated.iter().collect::<Vec<_>>(), vec![2, 3]);
 assert_eq!(increment.integers, 2);
 ```
 
@@ -600,12 +574,12 @@ impl StructuralMutator for Increment {
     }
 }
 
-let mapped = structural_mutate(
+let mutated = structural_mutate(
     Array::new(vec![1_i64, 2]),
     &mut Increment::default(),
 )?;
-let mapped = Array::<i64>::try_from(mapped)?;
-assert_eq!(mapped.iter().collect::<Vec<_>>(), vec![2, 3]);
+let mutated = Array::<i64>::try_from(mutated)?;
+assert_eq!(mutated.iter().collect::<Vec<_>>(), vec![2, 3]);
 ```
 
 The default `var_remap_get` and `var_remap_set` methods use state local to one
