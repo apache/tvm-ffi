@@ -18,7 +18,7 @@
  */
 
 use std::cell::{Cell, RefCell};
-use std::sync::LazyLock;
+use std::sync::{LazyLock, Mutex};
 
 use tvm_ffi::derive::{Object as DeriveObject, ObjectRef as DeriveObjectRef};
 use tvm_ffi::object::ObjectRef;
@@ -216,7 +216,12 @@ fn registered_visit_hook(args: &[AnyView<'_>]) -> Result<Any> {
         .call_packed(&[args[0], AnyView::from(&node.data.selected)])
 }
 
+// The runtime type table leaves registration synchronization to its callers.
+// Rust tests run in parallel, so serialize the independent fixture registrations.
+static TEST_TYPE_REGISTRATION_LOCK: Mutex<()> = Mutex::new(());
+
 static REGISTER_HOOK_TYPE: LazyLock<()> = LazyLock::new(|| {
+    let _guard = TEST_TYPE_REGISTRATION_LOCK.lock().unwrap();
     let type_index = register_visit_type(
         RustVisitHookObj::TYPE_KEY,
         std::mem::size_of::<RustVisitHookObj>(),
@@ -242,6 +247,7 @@ static REGISTER_HOOK_TYPE: LazyLock<()> = LazyLock::new(|| {
 });
 
 static REGISTER_FAILING_GETTER_TYPE: LazyLock<()> = LazyLock::new(|| {
+    let _guard = TEST_TYPE_REGISTRATION_LOCK.lock().unwrap();
     let type_index = register_visit_type(
         RustVisitFailingGetterObj::TYPE_KEY,
         std::mem::size_of::<RustVisitFailingGetterObj>(),
@@ -270,6 +276,7 @@ fn registered_primitive_visit_hook(args: &[AnyView<'_>]) -> Result<Any> {
 }
 
 static REGISTER_PRIMITIVE_HOOK: LazyLock<()> = LazyLock::new(|| {
+    let _guard = TEST_TYPE_REGISTRATION_LOCK.lock().unwrap();
     register_function_attr(
         TypeIndex::kTVMFFIDataType as i32,
         "__s_visit__",
@@ -278,6 +285,7 @@ static REGISTER_PRIMITIVE_HOOK: LazyLock<()> = LazyLock::new(|| {
 });
 
 static REGISTER_REGION_TYPES: LazyLock<()> = LazyLock::new(|| {
+    let _guard = TEST_TYPE_REGISTRATION_LOCK.lock().unwrap();
     let type_index = register_visit_type(
         RustVisitDefRegionObj::TYPE_KEY,
         std::mem::size_of::<RustVisitDefRegionObj>(),
