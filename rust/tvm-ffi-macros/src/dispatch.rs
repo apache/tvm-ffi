@@ -43,29 +43,42 @@ struct DispatchArgs {
 
 #[derive(Clone, Copy)]
 enum DispatchMode {
+    Walk,
     Visit,
     Map,
+    Mutate,
 }
 
 impl DispatchMode {
     fn name(self) -> &'static str {
         match self {
+            Self::Walk => "walk",
             Self::Visit => "visit",
             Self::Map => "map",
+            Self::Mutate => "mutate",
         }
     }
 
     fn handler_prefix(self) -> &'static str {
         match self {
+            Self::Walk => "walk_",
             Self::Visit => "visit_",
             Self::Map => "map_",
+            Self::Mutate => "mutate_",
         }
     }
 
     fn value_type(self) -> &'static str {
         match self {
-            Self::Visit => "VisitValue",
-            Self::Map => "MapValue",
+            Self::Walk | Self::Visit => "VisitValue",
+            Self::Map | Self::Mutate => "MapValue",
+        }
+    }
+
+    fn result_is_optional(self) -> bool {
+        match self {
+            Self::Walk | Self::Map => true,
+            Self::Visit | Self::Mutate => false,
         }
     }
 }
@@ -73,14 +86,19 @@ impl DispatchMode {
 impl syn::parse::Parse for DispatchArgs {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
         let mode: syn::Ident = input.parse()?;
-        let mode = if mode == "visit" {
+        let mode = if mode == "walk" {
+            DispatchMode::Walk
+        } else if mode == "visit" {
             DispatchMode::Visit
         } else if mode == "map" {
             DispatchMode::Map
+        } else if mode == "mutate" {
+            DispatchMode::Mutate
         } else {
             return Err(syn::Error::new(
                 mode.span(),
-                "expected `dispatch(visit)` or `dispatch(map)`",
+                "expected `dispatch(walk)`, `dispatch(map)`, `dispatch(visit)`, or \
+                 `dispatch(mutate)`",
             ));
         };
         if !input.is_empty() {
@@ -128,53 +146,20 @@ fn expand(item_impl: &ItemImpl, mode: DispatchMode) -> syn::Result<TokenStream2>
     }
     let tvm_ffi = get_tvm_ffi_crate();
     let into_result = match mode {
-        DispatchMode::Visit => quote! {
+        DispatchMode::Walk => quote! {
             #tvm_ffi::extra::structural_visit::IntoVisitResult::into_visit_result
+        },
+        DispatchMode::Visit => quote! {
+            #tvm_ffi::extra::structural_visit::IntoVisitOutcome::into_visit_outcome
         },
         DispatchMode::Map => quote! {
             #tvm_ffi::extra::structural_mutate::IntoMapResult::into_map_result
         },
+        DispatchMode::Mutate => quote! {
+            #tvm_ffi::extra::structural_mutate::IntoMapResult::into_map_result
+        },
     };
-
-    let links = handlers.iter().map(|handler| {
-        let method = &handler.method;
-        let attrs = &handler.cfg_attrs;
-        // A handler opts into the definition-region state by declaring a
-        // trailing argument; the generated dispatch forwards by arity, like
-        // the corresponding C++ structural callback overloads.
-        let kind_arg = if handler.wants_def_region {
-            quote!(, def_region_kind)
-        } else {
-            quote!()
-        };
-        let invoke = match &handler.argument {
-            HandlerArgument::Value => quote! {
-                return Some(
-                    #into_result(self.#method(value #kind_arg))
-                );
-            },
-            HandlerArgument::BorrowedNode(node_type) => quote! {
-                if let Some(node) = value.as_node::<#node_type>() {
-                    return Some(
-                        #into_result(self.#method(node #kind_arg))
-                    );
-                }
-            },
-            HandlerArgument::Owned(value_type) => quote! {
-                if let Some(node) = value.cast::<#value_type>() {
-                    return Some(
-                        #into_result(self.#method(node #kind_arg))
-                    );
-                }
-            },
-        };
-        quote! {
-            #(#[#attrs])*
-            {
-                #invoke
-            }
-        }
-    });
+    let links = expand_links(&handlers, mode, &into_result, quote!(value));
     let self_type = &item_impl.self_ty;
     let (impl_generics, _, where_clause) = item_impl.generics.split_for_impl();
     let impl_cfg_attrs = presence_attrs(&item_impl.attrs)?;
@@ -201,18 +186,36 @@ fn expand(item_impl: &ItemImpl, mode: DispatchMode) -> syn::Result<TokenStream2>
         });
 
     let dispatch_impl = match mode {
-        DispatchMode::Visit => quote! {
-            impl #impl_generics #tvm_ffi::extra::structural_visit::VisitDispatch
+        DispatchMode::Walk => quote! {
+            impl #impl_generics #tvm_ffi::extra::structural_visit::WalkDispatch
                 for #self_type #where_clause
             {
                 #[allow(unreachable_code, unused_variables)]
-                fn dispatch_visit(
+                fn dispatch_walk(
                     &mut self,
                     value: &#tvm_ffi::extra::structural_visit::VisitValue,
                     def_region_kind: #tvm_ffi::extra::structural_visit::DefRegionKind,
                 ) -> Option<#tvm_ffi::extra::structural_visit::VisitResult> {
                     #(#links)*
                     None
+                }
+            }
+        },
+        DispatchMode::Visit => quote! {
+            impl #impl_generics #tvm_ffi::extra::structural_visit::StructuralVisitor
+                for #self_type #where_clause
+            {
+                #[allow(unreachable_code, unused_variables)]
+                fn visit(
+                    &mut self,
+                    value: &#tvm_ffi::extra::structural_visit::VisitValue,
+                    def_region_kind: #tvm_ffi::extra::structural_visit::DefRegionKind,
+                ) -> #tvm_ffi::Result<
+                    Option<#tvm_ffi::extra::structural_visit::VisitInterrupt>
+                > {
+                    #(#links)*
+                    <Self as #tvm_ffi::extra::structural_visit::StructuralVisitor>::
+                        default_visit_children(self, value, def_region_kind)
                 }
             }
         },
@@ -231,6 +234,37 @@ fn expand(item_impl: &ItemImpl, mode: DispatchMode) -> syn::Result<TokenStream2>
                 }
             }
         },
+        DispatchMode::Mutate => {
+            let inplace_links =
+                expand_links(&handlers, mode, &into_result, quote!(value.as_value()));
+            quote! {
+                impl #impl_generics #tvm_ffi::extra::structural_mutate::StructuralMutator
+                    for #self_type #where_clause
+                {
+                    #[allow(unreachable_code, unused_variables)]
+                    fn mutate(
+                        &mut self,
+                        value: &#tvm_ffi::extra::structural_mutate::MapValue,
+                        def_region_kind: #tvm_ffi::extra::structural_visit::DefRegionKind,
+                    ) -> #tvm_ffi::Result<#tvm_ffi::Any> {
+                        #(#links)*
+                        <Self as #tvm_ffi::extra::structural_mutate::StructuralMutator>::
+                            default_mutate(self, value, def_region_kind)
+                    }
+
+                    #[allow(unreachable_code, unused_variables)]
+                    fn maybe_inplace_mutate(
+                        &mut self,
+                        value: #tvm_ffi::extra::structural_mutate::InplaceValue<'_>,
+                        def_region_kind: #tvm_ffi::extra::structural_visit::DefRegionKind,
+                    ) -> #tvm_ffi::Result<#tvm_ffi::Any> {
+                        #(#inplace_links)*
+                        <Self as #tvm_ffi::extra::structural_mutate::StructuralMutator>::
+                            default_maybe_inplace_mutate(self, value, def_region_kind)
+                    }
+                }
+            }
+        }
     };
 
     Ok(quote! {
@@ -239,6 +273,72 @@ fn expand(item_impl: &ItemImpl, mode: DispatchMode) -> syn::Result<TokenStream2>
         #(#[#impl_cfg_attrs])*
         #dispatch_impl
     })
+}
+
+fn expand_links(
+    handlers: &[Handler],
+    mode: DispatchMode,
+    into_result: &TokenStream2,
+    value: TokenStream2,
+) -> Vec<TokenStream2> {
+    handlers
+        .iter()
+        .map(|handler| {
+            let method = &handler.method;
+            let attrs = &handler.cfg_attrs;
+            // A handler opts into the definition-region state by declaring a
+            // trailing argument; the generated dispatch forwards by arity,
+            // like the corresponding C++ structural callback overloads.
+            let kind_arg = if handler.wants_def_region {
+                quote!(, def_region_kind)
+            } else {
+                quote!()
+            };
+            let wrap_result = |result: TokenStream2| {
+                if mode.result_is_optional() {
+                    quote!(Some(#result))
+                } else {
+                    result
+                }
+            };
+            let invoke = match &handler.argument {
+                HandlerArgument::Value => {
+                    let result = wrap_result(quote! {
+                        #into_result(self.#method(#value #kind_arg))
+                    });
+                    quote! {
+                        return #result;
+                    }
+                }
+                HandlerArgument::BorrowedNode(node_type) => {
+                    let result = wrap_result(quote! {
+                        #into_result(self.#method(node #kind_arg))
+                    });
+                    quote! {
+                        if let Some(node) = #value.as_node::<#node_type>() {
+                            return #result;
+                        }
+                    }
+                }
+                HandlerArgument::Owned(value_type) => {
+                    let result = wrap_result(quote! {
+                        #into_result(self.#method(node #kind_arg))
+                    });
+                    quote! {
+                        if let Some(node) = #value.cast::<#value_type>() {
+                            return #result;
+                        }
+                    }
+                }
+            };
+            quote! {
+                #(#[#attrs])*
+                {
+                    #invoke
+                }
+            }
+        })
+        .collect()
 }
 
 struct Handler {

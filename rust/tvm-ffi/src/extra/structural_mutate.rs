@@ -22,10 +22,13 @@
 //! Two public layers share the same runtime mutation protocol:
 //!
 //! * [`StructuralMutator`] + [`structural_mutate`] let the mutator drive
-//!   recursion. `structural_mutate` also accepts a typed callback or callback
-//!   tuple; matched callbacks receive a [`MutatorRef`] for explicit recursion.
+//!   recursion. `#[dispatch(mutate)]` generates this trait from typed
+//!   `mutate_*` methods. `structural_mutate` also accepts a typed callback or
+//!   callback tuple; matched callbacks receive a [`MutatorRef`] for explicit
+//!   recursion.
 //! * [`MapDispatch`] + [`structural_map`] provide ordered pre/post-order
-//!   replacement callbacks while the engine owns recursion.
+//!   replacement callbacks while the engine owns recursion. `#[dispatch(map)]`
+//!   generates this layer from typed `map_*` methods.
 //!
 //! The root is consumed so Rust ownership and the runtime strong count jointly
 //! define the boundary for optional in-place container mutation. Passing a
@@ -772,12 +775,13 @@ impl Deref for InplaceValue<'_> {
 }
 
 /// Stateful identity-substitution environment for a hand-written
-/// [`StructuralMutator`].
+/// [`StructuralMutator`] that needs a custom remapping policy.
 ///
 /// The map owns both its object keys and mapped values, preventing an object
-/// address from being recycled while a mutation is in progress. A mutator
-/// can delegate its required `var_remap_get` and `var_remap_set` methods to
-/// this type.
+/// address from being recycled while a mutation is in progress. The default
+/// [`StructuralMutator`] methods use an invocation-local instance managed by
+/// [`structural_mutate`]; an implementation may delegate overridden
+/// `var_remap_get` and `var_remap_set` methods to this type instead.
 #[derive(Default)]
 pub struct StructuralVarRemap {
     entries: HashMap<NonNull<TVMFFIObject>, MemoEntry>,
@@ -820,6 +824,11 @@ impl StructuralVarRemap {
 /// that type has no hook. A registered hook owns identity remapping for its
 /// type; the reflected fallback uses [`Self::var_remap_get`] and
 /// [`Self::var_remap_set`] automatically.
+///
+/// Use `#[dispatch(mutate)]` on an inherent impl of typed `mutate_*` methods
+/// to generate this trait. A matching generated handler supplies the final
+/// value; values without a matching handler use the appropriate default copy
+/// or in-place path.
 pub trait StructuralMutator: Sized {
     /// Mutate one borrowed value without modifying its source storage.
     fn mutate(&mut self, value: &MapValue, def_region_kind: DefRegionKind) -> Result<Any>;
@@ -890,10 +899,21 @@ pub trait StructuralMutator: Sized {
     }
 
     /// Look up a previously completed FreeVar or DAG-node substitution.
-    fn var_remap_get(&mut self, var: &MapValue) -> Result<Option<Any>>;
+    ///
+    /// The default uses state local to the active [`structural_mutate`]
+    /// invocation, so a mutator does not need to carry a remap field. Override
+    /// this method only to provide a custom identity policy.
+    fn var_remap_get(&mut self, var: &MapValue) -> Result<Option<Any>> {
+        invocation_var_remap_get(self, var)
+    }
 
     /// Store the final mapped result for a FreeVar or DAG-node identity.
-    fn var_remap_set(&mut self, var: &MapValue, mapped_value: &Any) -> Result<()>;
+    ///
+    /// The default writes to the same invocation-local state as
+    /// [`Self::var_remap_get`].
+    fn var_remap_set(&mut self, var: &MapValue, mapped_value: &Any) -> Result<()> {
+        invocation_var_remap_set(self, var, mapped_value)
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1242,6 +1262,10 @@ struct RuntimeStructuralMutatorObj {
     context_identity: *mut c_void,
     owner_thread: std::thread::ThreadId,
     callbacks: RuntimeMutatorCallbacks,
+    // Default identity substitutions belong to one traversal, not to the
+    // user mutator value. This lets generated `#[dispatch(mutate)]` types use
+    // ordinary `&mut self` state without carrying a plumbing-only field.
+    remap: RefCell<StructuralVarRemap>,
     panic: Option<Box<dyn std::any::Any + Send>>,
 }
 
@@ -1466,6 +1490,36 @@ fn active_mutator() -> Result<StructuralMutatorHandle> {
             Ok(handle)
         }
     })
+}
+
+fn invocation_var_remap_get<U: Sized>(mutator: &mut U, var: &MapValue) -> Result<Option<Any>> {
+    let active = active_mutator()?;
+    let context = std::ptr::from_mut(mutator).cast::<c_void>();
+    unsafe {
+        if (*active).context_identity != context {
+            return Err(runtime_error(
+                "default structural var-remap used by a non-active mutator",
+            ));
+        }
+        (*active).remap.borrow().get(var)
+    }
+}
+
+fn invocation_var_remap_set<U: Sized>(
+    mutator: &mut U,
+    var: &MapValue,
+    mapped_value: &Any,
+) -> Result<()> {
+    let active = active_mutator()?;
+    let context = std::ptr::from_mut(mutator).cast::<c_void>();
+    unsafe {
+        if (*active).context_identity != context {
+            return Err(runtime_error(
+                "default structural var-remap used by a non-active mutator",
+            ));
+        }
+        (*active).remap.borrow_mut().set(var, mapped_value)
+    }
 }
 
 #[inline]
@@ -1790,6 +1844,7 @@ fn run_structural_mutator_with_context(
         context_identity: context,
         owner_thread: std::thread::current().id(),
         callbacks,
+        remap: RefCell::new(StructuralVarRemap::default()),
         panic: None,
     });
     let handle = unsafe { ObjectArc::as_raw_mut(&mut active) };
@@ -1803,8 +1858,10 @@ fn run_structural_mutator_with_context(
     });
     // A structural hook may only use the active mutator synchronously on this
     // thread. Make a retained reference fail instead of exposing a dangling
-    // Rust state pointer.
+    // Rust state pointer. Release invocation-local identity owners here as
+    // well: foreign code may retain the ABI object after the run ends.
     unsafe {
+        (*handle).remap.get_mut().clear();
         (*handle).context = std::ptr::null_mut();
         (*handle).context_identity = std::ptr::null_mut();
     }

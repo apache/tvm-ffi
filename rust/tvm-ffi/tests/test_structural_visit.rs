@@ -765,27 +765,89 @@ fn manual_child_visit_can_override_def_region() {
 }
 
 #[derive(Default)]
+struct GeneratedLeafVisitor {
+    integers: Vec<(i64, DefRegionKind)>,
+}
+
+#[dispatch(visit)]
+impl GeneratedLeafVisitor {
+    fn visit_integer(&mut self, value: i64, kind: DefRegionKind) {
+        self.integers.push((value, kind));
+    }
+}
+
+#[test]
+fn generated_visitor_defaults_unmatched_values() {
+    let root = Array::new(vec![1i64, 2]);
+    let mut visitor = GeneratedLeafVisitor::default();
+    assert!(structural_visit(&root, &mut visitor).unwrap().is_none());
+    assert_eq!(
+        visitor.integers,
+        vec![(1, DefRegionKind::None), (2, DefRegionKind::None)]
+    );
+}
+
+#[derive(Default)]
+struct GeneratedRecursiveVisitor {
+    events: Vec<String>,
+}
+
+#[dispatch(visit)]
+impl GeneratedRecursiveVisitor {
+    fn visit_array(
+        &mut self,
+        array: Array<i64>,
+        kind: DefRegionKind,
+    ) -> Result<Option<VisitInterrupt>> {
+        self.events.push("enter:array".to_string());
+        for value in array.iter() {
+            if let Some(interrupt) = self.visit_child(&value, kind)? {
+                return Ok(Some(interrupt));
+            }
+        }
+        self.events.push("exit:array".to_string());
+        Ok(None)
+    }
+
+    fn visit_integer(&mut self, value: i64) -> Option<VisitInterrupt> {
+        self.events.push(format!("int:{value}"));
+        (value == 2).then(|| VisitInterrupt::with(value))
+    }
+
+    fn visit_other_object(&mut self, _value: &Object) {}
+}
+
+#[test]
+fn generated_visitor_can_drive_recursion_through_mut_self() {
+    let root = Array::new(vec![1i64, 2, 3]);
+    let mut visitor = GeneratedRecursiveVisitor::default();
+    let interrupt = structural_visit(&root, &mut visitor).unwrap().unwrap();
+    assert_eq!(i64::try_from(interrupt.value).unwrap(), 2);
+    assert_eq!(visitor.events, vec!["enter:array", "int:1", "int:2"]);
+}
+
+#[derive(Default)]
 struct GenericDispatchProbe {
     integers: Vec<i64>,
     objects: usize,
     catch_all: usize,
 }
 
-#[dispatch(visit)]
+#[dispatch(walk)]
 impl GenericDispatchProbe {
-    fn visit_integer(&mut self, value: i64) -> WalkResult {
+    fn walk_integer(&mut self, value: i64) -> WalkResult {
         self.integers.push(value);
         WalkResult::Advance
     }
 
     // Trailing DefRegionKind: handlers may mix arities within one impl.
-    fn visit_object(&mut self, _value: &tvm_ffi::Object, kind: DefRegionKind) -> WalkResult {
+    fn walk_object(&mut self, _value: &tvm_ffi::Object, kind: DefRegionKind) -> WalkResult {
         assert_eq!(kind, DefRegionKind::None);
         self.objects += 1;
         WalkResult::Advance
     }
 
-    fn visit_any(&mut self, _value: &VisitValue) -> WalkResult {
+    fn walk_any(&mut self, _value: &VisitValue) -> WalkResult {
         self.catch_all += 1;
         WalkResult::Advance
     }
@@ -859,14 +921,14 @@ struct OrderProbe {
     events: Vec<String>,
 }
 
-#[dispatch(visit)]
+#[dispatch(walk)]
 impl OrderProbe {
-    fn visit_array(&mut self, _array: Array<i64>) -> WalkResult {
+    fn walk_array(&mut self, _array: Array<i64>) -> WalkResult {
         self.events.push("array".to_string());
         WalkResult::Advance
     }
 
-    fn visit_integer(&mut self, value: i64) -> WalkResult {
+    fn walk_integer(&mut self, value: i64) -> WalkResult {
         self.events.push(format!("int:{value}"));
         WalkResult::Advance
     }
@@ -1130,7 +1192,7 @@ fn chain_accepts_owned_object_ref_links() {
 
 #[test]
 fn chain_links_may_mix_def_region_arity() {
-    // Like #[dispatch(visit)] handlers, each link independently opts into
+    // Like #[dispatch(walk)] handlers, each link independently opts into
     // the trailing DefRegionKind argument.
     let root = Array::new(vec![1i64, 2]);
     let mut kinds = Vec::new();
@@ -1202,7 +1264,7 @@ fn chain_link_errors_include_native_visit_path() {
 #[test]
 fn chain_supports_post_order() {
     // Rust borrow rules apply per link: state shared across links goes
-    // through a RefCell (or a single #[dispatch(visit)] visitor).
+    // through a RefCell (or a single #[dispatch(walk)] walker).
     let root = Array::new(vec![1i64, 2]);
     let events = std::cell::RefCell::new(Vec::new());
     assert!(structural_walk(
@@ -1229,17 +1291,17 @@ struct ObjectCounter {
     objects: usize,
 }
 
-#[dispatch(visit)]
+#[dispatch(walk)]
 impl ObjectCounter {
-    fn visit_object(&mut self, _value: &Object) -> WalkResult {
+    fn walk_object(&mut self, _value: &Object) -> WalkResult {
         self.objects += 1;
         WalkResult::Advance
     }
 }
 
 #[test]
-fn chain_splices_dispatch_visitors_between_closures() {
-    // A `&mut` typed visitor participates in the chain like any other link,
+fn chain_splices_dispatch_walkers_between_closures() {
+    // A `&mut` typed walker participates in the chain like any other link,
     // keeping its own no-match fall-through semantics.
     let root = Array::new(vec![1i64, 2]);
     let mut counter = ObjectCounter::default();

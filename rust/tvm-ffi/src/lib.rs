@@ -53,8 +53,8 @@ pub use crate::extra::structural_mutate::{
 };
 pub use crate::extra::structural_visit::{
     structural_visit, structural_walk, DefRegionKind, IntoVisitResult, IntoVisitor, IntoWalker,
-    StructuralVisitor, VisitChainLink, VisitDispatch, VisitInterrupt, VisitValue, VisitorRef,
-    WalkChainLink, WalkOrder, WalkResult,
+    StructuralVisitor, VisitChainLink, VisitInterrupt, VisitValue, VisitorRef, WalkChainLink,
+    WalkDispatch, WalkOrder, WalkResult,
 };
 pub use crate::function::Function;
 pub use crate::object::ObjectRefCast;

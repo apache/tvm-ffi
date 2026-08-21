@@ -17,9 +17,9 @@
  * under the License.
  */
 
-//! Typed visitor dispatch for [`super::structural_visit::structural_walk`]:
-//! the [`VisitDispatch`] trait targeted by `#[dispatch(visit)]`, and the
-//! walker adapter that runs such a visitor at the phase selected by the walk
+//! Typed callback dispatch for [`super::structural_visit::structural_walk`]:
+//! the [`WalkDispatch`] trait targeted by `#[dispatch(walk)]`, and the
+//! walker adapter that runs such a dispatch at the phase selected by the walk
 //! order. The traversal engine, closure walkers, and tuple chains live in
 //! [`super::structural_visit`], which re-exports these items to keep its
 //! public paths stable.
@@ -32,7 +32,7 @@ use super::structural_visit::{
 
 /// Typed dispatch implemented by a walk-layer observer.
 ///
-/// [`crate::dispatch`] tests the implementation's `visit_*` methods in source
+/// [`crate::dispatch`] tests the implementation's `walk_*` methods in source
 /// order. Borrowed node arguments use refcount-free subtype checks, owned
 /// FFI-compatible arguments use exact value casts, and `&VisitValue` is a
 /// catch-all. `None` reports that no handler matched: a standalone walk then
@@ -46,51 +46,51 @@ use super::structural_visit::{
 /// a [`super::structural_visit::StructuralVisitor`] instead.
 ///
 /// The definition-region state active at the dispatched value arrives as the
-/// `def_region_kind` argument. A `#[dispatch(visit)]` handler opts into it by
+/// `def_region_kind` argument. A `#[dispatch(walk)]` handler opts into it by
 /// declaring a trailing `DefRegionKind` parameter — the analog of a C++
 /// `StructuralWalk` callback accepting `(value, def_region_kind)` instead of
 /// `(value)`.
-pub trait VisitDispatch: Sized {
-    fn dispatch_visit(
+pub trait WalkDispatch: Sized {
+    fn dispatch_walk(
         &mut self,
         value: &VisitValue,
         def_region_kind: DefRegionKind,
     ) -> Option<VisitResult>;
 }
 
-impl<V: VisitDispatch> VisitDispatch for &mut V {
+impl<V: WalkDispatch> WalkDispatch for &mut V {
     #[inline]
-    fn dispatch_visit(
+    fn dispatch_walk(
         &mut self,
         value: &VisitValue,
         def_region_kind: DefRegionKind,
     ) -> Option<VisitResult> {
-        (**self).dispatch_visit(value, def_region_kind)
+        (**self).dispatch_walk(value, def_region_kind)
     }
 }
 
 #[doc(hidden)]
-pub enum ByDispatch {}
+pub enum ByWalkDispatch {}
 
-impl<'a, V: VisitDispatch> IntoWalker<ByDispatch> for &'a mut V {
-    type Walker = DispatchVisitor<&'a mut V>;
+impl<'a, V: WalkDispatch> IntoWalker<ByWalkDispatch> for &'a mut V {
+    type Walker = DispatchWalker<&'a mut V>;
     fn into_walker(self) -> Self::Walker {
-        DispatchVisitor { visitor: self }
+        DispatchWalker { visitor: self }
     }
 }
 
-/// Owns its walker so a closure's state stays inline and a `&mut` visitor
+/// Owns its walker so a closure's state stays inline and a `&mut` walker
 /// keeps a single level of indirection. Public only as an
 /// [`IntoWalker::Walker`] projection.
 #[doc(hidden)]
-pub struct DispatchVisitor<V> {
+pub struct DispatchWalker<V> {
     visitor: V,
 }
 
-impl<V: VisitDispatch> NativeVisit for DispatchVisitor<V> {
+impl<V: WalkDispatch> NativeVisit for DispatchWalker<V> {
     fn visit(&mut self, value: &VisitValue, def_region_kind: DefRegionKind) -> Result<WalkResult> {
         self.visitor
-            .dispatch_visit(value, def_region_kind)
+            .dispatch_walk(value, def_region_kind)
             .unwrap_or(Ok(WalkResult::Advance))
     }
 }

@@ -207,7 +207,7 @@ fn may_fail(value: i32) -> Result<()> {
 ### Structural Walk and Visit
 
 Rust provides equivalents of the C++ `StructuralWalk`/`StructuralVisitor`
-APIs. Put `#[dispatch(visit)]` on an impl to turn its `visit_*` methods into
+APIs. Put `#[dispatch(walk)]` on an impl to turn its `walk_*` methods into
 typed handlers, then pass it to `structural_walk`; each handler returns a
 `WalkResult` (`Advance`, `Skip`, or `Interrupt`) to steer the traversal.
 Handlers dispatch on their argument type and may take an optional trailing
@@ -222,14 +222,14 @@ struct Probe {
     floats: usize,
 }
 
-#[dispatch(visit)]
+#[dispatch(walk)]
 impl Probe {
-    fn visit_integer(&mut self, value: i64) -> WalkResult {
+    fn walk_integer(&mut self, value: i64) -> WalkResult {
         self.total += value;
         WalkResult::Advance
     }
 
-    fn visit_float(&mut self, _value: f64, _kind: DefRegionKind) -> WalkResult {
+    fn walk_float(&mut self, _value: f64, _kind: DefRegionKind) -> WalkResult {
         self.floats += 1;
         WalkResult::Advance
     }
@@ -341,15 +341,18 @@ can recursively re-enter the same callback. Use `Cell`/`RefCell` for captured
 state. Since an interrupt is `Ok(Some(interrupt))`, return it explicitly from
 the outer callback; `?` propagates `Err`, not `Some`.
 
-For a named stateful implementation, implement `StructuralVisitor` and pass
-`&mut` it to the same entry point. `visit` runs for each value and descends
-through `default_visit_children`, or through `visit_child`, which visits one
-selected child and can override the def-region state for it (e.g.
-`DefRegionKind::Recursive` when descending into a binder's parameters):
+For a named stateful implementation, put `#[dispatch(visit)]` on its
+`visit_*` methods and pass `&mut` it to the same entry point. Unlike walk,
+each matching handler owns recursion: it descends through
+`default_visit_children`, or through `visit_child`, which visits one selected
+child and can override the def-region state for it (e.g.
+`DefRegionKind::Recursive` when descending into a binder's parameters).
+Unmatched values use default child traversal:
 
 ```rust
 use tvm_ffi::{
-    structural_visit, Array, DefRegionKind, Result, StructuralVisitor, VisitInterrupt, VisitValue,
+    dispatch, structural_visit, Array, DefRegionKind, Result, StructuralVisitor, VisitInterrupt,
+    VisitValue,
 };
 
 #[derive(Default)]
@@ -358,8 +361,9 @@ struct Depth {
     current: usize,
 }
 
-impl StructuralVisitor for Depth {
-    fn visit(
+#[dispatch(visit)]
+impl Depth {
+    fn visit_any(
         &mut self,
         value: &VisitValue,
         def_region_kind: DefRegionKind,
@@ -377,6 +381,11 @@ let mut depth = Depth::default();
 structural_visit(&values, &mut depth)?;
 assert_eq!(depth.max, 2);
 ```
+
+Implement `StructuralVisitor` directly when overriding the low-level `visit`
+method is more convenient. Both forms use the same `&mut self` reborrow chain,
+so ordinary mutable fields remain available during recursive `visit_child`
+calls.
 
 Two safety notes: mutable `List`/`Dict` contents are snapshotted before
 callbacks run, so mutation during traversal cannot invalidate the walk; and
@@ -488,6 +497,37 @@ current value, but deliberately uses the copy path because the callback still
 holds a shared borrow of that value. Mutation callbacks are `Fn` for the same
 recursive-reentry reason as visit callbacks.
 
+For ordinary mutable state, `#[dispatch(mutate)]` generates a
+`StructuralMutator` from `mutate_*` methods. A matching handler returns the
+current value's final result and may recursively call `self.mutate_child()`;
+an unmatched value follows default mutation with its current in-place permit:
+
+```rust
+use tvm_ffi::{dispatch, structural_mutate, Any, Array, DefRegionKind};
+
+#[derive(Default)]
+struct Increment {
+    integers: usize,
+}
+
+#[dispatch(mutate)]
+impl Increment {
+    fn mutate_integer(&mut self, value: i64, _kind: DefRegionKind) -> Any {
+        self.integers += 1;
+        Any::from(value + 1)
+    }
+}
+
+let mut increment = Increment::default();
+let mapped = structural_mutate(
+    Array::new(vec![1_i64, 2]),
+    &mut increment,
+)?;
+let mapped = Array::<i64>::try_from(mapped)?;
+assert_eq!(mapped.iter().collect::<Vec<_>>(), vec![2, 3]);
+assert_eq!(increment.integers, 2);
+```
+
 For a named custom recursion policy, implement `StructuralMutator` and pass
 `&mut` it to `structural_mutate`. `InplaceValue` is an engine-issued
 capability: callers cannot construct it from a read-only `MapValue`. Override
@@ -499,13 +539,11 @@ children can be re-entered with `mutate_child`, while owned children can use
 ```rust
 use tvm_ffi::{
     structural_mutate, Any, Array, DefRegionKind, InplaceValue, MapValue, Result,
-    StructuralMutator, StructuralVarRemap,
+    StructuralMutator,
 };
 
 #[derive(Default)]
-struct Increment {
-    remap: StructuralVarRemap,
-}
+struct Increment;
 
 impl StructuralMutator for Increment {
     fn mutate(&mut self, value: &MapValue, kind: DefRegionKind) -> Result<Any> {
@@ -522,14 +560,6 @@ impl StructuralMutator for Increment {
     ) -> Result<Any> {
         self.default_maybe_inplace_mutate(value, kind)
     }
-
-    fn var_remap_get(&mut self, var: &MapValue) -> Result<Option<Any>> {
-        self.remap.get(var)
-    }
-
-    fn var_remap_set(&mut self, var: &MapValue, mapped: &Any) -> Result<()> {
-        self.remap.set(var, mapped)
-    }
 }
 
 let mapped = structural_mutate(
@@ -540,11 +570,10 @@ let mapped = Array::<i64>::try_from(mapped)?;
 assert_eq!(mapped.iter().collect::<Vec<_>>(), vec![2, 3]);
 ```
 
-`StructuralMutator` requires `var_remap_get` and `var_remap_set` so its default
-recursion can preserve completed `FreeVar` and `DAGNode` substitutions.
-`StructuralVarRemap` is the canonical owning implementation, as shown above; a
-custom mutator is responsible for any additional identity policy it
-introduces.
+The default `var_remap_get` and `var_remap_set` methods use state local to one
+`structural_mutate` invocation, preserving completed `FreeVar` and `DAGNode`
+substitutions without adding a field to the mutator. Override them and use
+`StructuralVarRemap` when a custom identity policy is required.
 
 ## Examples
 

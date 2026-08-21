@@ -25,8 +25,14 @@ mod match_any;
 mod object_macros;
 mod utils;
 
-/// Generate typed structural visit or map dispatch from the `visit_*` or
-/// `map_*` methods in an inherent implementation.
+/// Generate typed structural dispatch from an inherent implementation.
+///
+/// The supported modes are `walk`, `map`, `visit`, and `mutate`:
+/// `dispatch(walk)` turns `walk_*` methods into engine-driven walk callbacks,
+/// `dispatch(map)` uses `map_*` replacement callbacks, and
+/// `dispatch(visit)`/`dispatch(mutate)` generate user-driven visitors or
+/// mutators whose `&mut self` handlers may recurse through the corresponding
+/// trait helpers.
 #[proc_macro_error]
 #[proc_macro_attribute]
 pub fn dispatch(attr: TokenStream, item: TokenStream) -> TokenStream {

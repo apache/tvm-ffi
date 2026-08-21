@@ -1376,6 +1376,133 @@ fn generated_map_dispatch_supports_kind_and_ordered_catch_all() {
     assert_eq!(mapper.catch_all, 1);
 }
 
+#[derive(Default)]
+struct GeneratedLeafMutator {
+    integers: Vec<(i64, DefRegionKind)>,
+}
+
+#[dispatch(mutate)]
+impl GeneratedLeafMutator {
+    fn mutate_integer(&mut self, value: i64, kind: DefRegionKind) -> Any {
+        self.integers.push((value, kind));
+        Any::from(value + 1)
+    }
+}
+
+#[test]
+fn generated_mutator_defaults_unmatched_values_and_preserves_inplace_permit() {
+    let root = Array::new(vec![1i64, 2]);
+    let root_pointer = array_pointer(&root);
+    let mut mutator = GeneratedLeafMutator::default();
+    let mapped = structural_mutate(root, &mut mutator)
+        .and_then(Array::<i64>::try_from)
+        .unwrap();
+
+    assert_eq!(array_pointer(&mapped), root_pointer);
+    assert_eq!(mapped.iter().collect::<Vec<_>>(), vec![2, 3]);
+    assert_eq!(
+        mutator.integers,
+        vec![(1, DefRegionKind::None), (2, DefRegionKind::None)]
+    );
+}
+
+#[test]
+fn generated_mutator_default_remap_crosses_registered_hooks() {
+    ensure_test_types_registered();
+    let _guard = REGISTERED_HOOK_TEST_LOCK.lock().unwrap();
+    RETAINED_MUTATOR.with(|retained| {
+        retained.take();
+    });
+
+    let mut mutator = GeneratedLeafMutator::default();
+    let mapped = structural_mutate(rust_hook_node(), &mut mutator)
+        .and_then(i64::try_from)
+        .unwrap();
+    assert_eq!(mapped, 2);
+    assert_eq!(mutator.integers, vec![(1, DefRegionKind::None)]);
+    RETAINED_MUTATOR.with(|retained| {
+        retained.take();
+    });
+}
+
+#[derive(Default)]
+struct GeneratedRecursiveMutator {
+    integers: Vec<i64>,
+}
+
+#[dispatch(mutate)]
+impl GeneratedRecursiveMutator {
+    fn mutate_array(&mut self, array: Array<i64>, kind: DefRegionKind) -> Result<Any> {
+        let mut mapped = Vec::with_capacity(array.len());
+        for value in array.iter() {
+            mapped.push(i64::try_from(self.mutate_child(&value, kind)?)?);
+        }
+        Ok(Any::from(Array::new(mapped)))
+    }
+
+    fn mutate_integer(&mut self, value: i64) -> Any {
+        self.integers.push(value);
+        Any::from(value + 10)
+    }
+}
+
+#[test]
+fn generated_mutator_can_drive_recursion_through_mut_self() {
+    let mut mutator = GeneratedRecursiveMutator::default();
+    let mapped = structural_mutate(Array::new(vec![1i64, 2]), &mut mutator)
+        .and_then(Array::<i64>::try_from)
+        .unwrap();
+
+    assert_eq!(mapped.iter().collect::<Vec<_>>(), vec![11, 12]);
+    assert_eq!(mutator.integers, vec![1, 2]);
+}
+
+struct GeneratedRemappingMutator {
+    type_index: i32,
+    calls: usize,
+}
+
+#[dispatch(mutate)]
+impl GeneratedRemappingMutator {
+    fn mutate_dag_node(&mut self, _value: &RustDagNodeObj) -> Any {
+        Any::from(42i64)
+    }
+
+    fn mutate_any(&mut self, value: &MapValue, kind: DefRegionKind) -> Result<Any> {
+        if value.type_index() != self.type_index {
+            return self.default_mutate(value, kind);
+        }
+        if let Some(mapped) = self.var_remap_get(value)? {
+            return Ok(mapped);
+        }
+        self.calls += 1;
+        let mapped = Any::from(41i64);
+        self.var_remap_set(value, &mapped)?;
+        Ok(mapped)
+    }
+}
+
+#[test]
+fn generated_mutator_uses_fresh_invocation_local_var_remap() {
+    ensure_test_types_registered();
+    let var = rust_free_var();
+    let mut mutator = GeneratedRemappingMutator {
+        type_index: RustFreeVarObj::type_index(),
+        calls: 0,
+    };
+
+    for expected_calls in [1, 2] {
+        let root = call_global(
+            "ffi.Array",
+            &[Any::from(var.clone()), Any::from(var.clone())],
+        );
+        let mapped = structural_mutate(root, &mut mutator).unwrap();
+        assert_eq!(mutator.calls, expected_calls);
+        assert_eq!(i64::try_from(array_item(&mapped, 0)).unwrap(), 41);
+        assert_eq!(i64::try_from(array_item(&mapped, 1)).unwrap(), 41);
+    }
+}
+
 #[test]
 fn pre_order_retained_alias_disables_in_place_mutation() {
     ensure_test_types_registered();
