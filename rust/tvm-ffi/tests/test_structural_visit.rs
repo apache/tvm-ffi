@@ -29,8 +29,8 @@ use tvm_ffi::tvm_ffi_sys::{
 use tvm_ffi::{
     dispatch, structural_visit, structural_walk, Any, AnyView, Array, DLDataType, DLDataTypeCode,
     DefRegionKind, Error, Function, Map, Object, ObjectArc, ObjectCore, ObjectRefCast, Result,
-    String as FfiString, StructuralVisitor, TypeIndex, VisitInterrupt, VisitValue, VisitorRef,
-    WalkOrder, WalkResult, RUNTIME_ERROR,
+    String as FfiString, StructuralVisitor, TypeIndex, VisitCallbacks, VisitContext,
+    VisitInterrupt, VisitValue, WalkOrder, WalkResult, RUNTIME_ERROR,
 };
 
 unsafe extern "C" {
@@ -457,7 +457,7 @@ fn registered_function_hook_controls_children_interrupts_and_lifetime() {
 
     let callback_integers = RefCell::new(Vec::new());
     assert!(
-        structural_visit(&root, |value: i64, _visitor: &VisitorRef<'_>| {
+        structural_visit(&root, |value: i64, _visitor: &mut VisitContext<'_, ()>| {
             callback_integers.borrow_mut().push(value)
         },)
         .unwrap()
@@ -1049,7 +1049,7 @@ fn visitor_errors_include_native_visit_path() {
 
     let error = match structural_visit(
         &root,
-        |_value: i64, _visitor: &VisitorRef<'_>| -> Result<()> {
+        |_value: i64, _visitor: &mut VisitContext<'_, ()>| -> Result<()> {
             Err(runtime_error("callback visitor failed"))
         },
     ) {
@@ -1637,7 +1637,7 @@ fn callback_visit_defaults_only_when_no_link_matches() {
     let root = Array::new(vec![1i64, 2]);
     let integers = Cell::new(0);
     assert!(
-        structural_visit(&root, |value: i64, _visitor: &VisitorRef<'_>| {
+        structural_visit(&root, |value: i64, _visitor: &mut VisitContext<'_, ()>| {
             integers.set(integers.get() + value);
         })
         .unwrap()
@@ -1649,8 +1649,8 @@ fn callback_visit_defaults_only_when_no_link_matches() {
     assert!(structural_visit(
         &root,
         (
-            |_array: Array<i64>, _visitor: &VisitorRef<'_>| {},
-            |value: i64, _visitor: &VisitorRef<'_>| {
+            |_array: Array<i64>, _visitor: &mut VisitContext<'_, ()>| {},
+            |value: i64, _visitor: &mut VisitContext<'_, ()>| {
                 integers.set(integers.get() + value);
             },
         ),
@@ -1660,18 +1660,88 @@ fn callback_visit_defaults_only_when_no_link_matches() {
     assert_eq!(integers.get(), 0);
 }
 
+#[derive(Default)]
+struct StatefulVisitStats {
+    arrays: usize,
+    integer_sum: i64,
+}
+
+fn stateful_visit_array(
+    _array: Array<i64>,
+    visitor: &mut VisitContext<'_, StatefulVisitStats>,
+) -> Result<Option<VisitInterrupt>> {
+    visitor.state_mut().arrays += 1;
+    assert!(visitor.current().cast::<Array<i64>>().is_some());
+    visitor.visit_children()
+}
+
+fn stateful_visit_integer(value: i64, visitor: &mut VisitContext<'_, StatefulVisitStats>) {
+    visitor.state_mut().integer_sum += value;
+}
+
 #[test]
-fn callback_visit_can_reenter_the_same_fn_through_handle() {
+fn stateful_callback_visit_uses_ordinary_mutable_state() {
+    let root = Array::new(vec![1i64, 2, 3]);
+    let mut visitor = VisitCallbacks::new(
+        StatefulVisitStats::default(),
+        (stateful_visit_array, stateful_visit_integer),
+    );
+
+    assert!(structural_visit(&root, &mut visitor).unwrap().is_none());
+    assert_eq!(visitor.state().arrays, 1);
+    assert_eq!(visitor.state().integer_sum, 6);
+
+    // The callback visitor is reusable and retains its state between runs.
+    assert!(structural_visit(&root, &mut visitor).unwrap().is_none());
+    assert_eq!(visitor.state().arrays, 2);
+    assert_eq!(visitor.into_state().integer_sum, 12);
+}
+
+#[derive(Default)]
+struct StatefulVisitDepth {
+    current: usize,
+    maximum: usize,
+    calls: usize,
+}
+
+#[test]
+fn stateful_callback_visit_reborrows_context_during_recursion() {
+    let root = Array::new(vec![Array::new(vec![1i64, 2])]);
+    let mut visitor = VisitCallbacks::new(
+        StatefulVisitDepth::default(),
+        |_value: &VisitValue, visitor: &mut VisitContext<'_, StatefulVisitDepth>| {
+            visitor.state_mut().current += 1;
+            visitor.state_mut().calls += 1;
+            let current = visitor.state().current;
+            visitor.state_mut().maximum = visitor.state().maximum.max(current);
+
+            // Keep the outcome intact so both errors and interrupts propagate,
+            // while ordinary state is restored after the recursive reborrow.
+            let outcome = visitor.visit_children();
+            visitor.state_mut().current -= 1;
+            outcome
+        },
+    );
+
+    assert!(structural_visit(&root, &mut visitor).unwrap().is_none());
+    assert_eq!(visitor.state().current, 0);
+    assert_eq!(visitor.state().maximum, 3);
+    assert_eq!(visitor.state().calls, 4);
+}
+
+#[test]
+fn callback_visit_can_reenter_the_same_fn_through_context() {
     let root = Array::new(vec![1i64, 2]);
     let visits = Cell::new(0);
-    assert!(
-        structural_visit(&root, |_value: &VisitValue, visitor: &VisitorRef<'_>| {
+    assert!(structural_visit(
+        &root,
+        |_value: &VisitValue, visitor: &mut VisitContext<'_, ()>| {
             visits.set(visits.get() + 1);
             visitor.visit_children()
-        },)
-        .unwrap()
-        .is_none()
-    );
+        },
+    )
+    .unwrap()
+    .is_none());
     assert_eq!(visits.get(), 3);
 }
 
@@ -1682,10 +1752,10 @@ fn callback_visit_tuple_is_first_match_and_can_interrupt() {
     let interrupted = structural_visit(
         &root,
         (
-            |value: i64, _visitor: &VisitorRef<'_>| {
+            |value: i64, _visitor: &mut VisitContext<'_, ()>| {
                 (value == 2).then(|| VisitInterrupt::with(value))
             },
-            |_value: &VisitValue, visitor: &VisitorRef<'_>| {
+            |_value: &VisitValue, visitor: &mut VisitContext<'_, ()>| {
                 fallback.set(fallback.get() + 1);
                 visitor.visit_children()
             },
@@ -1716,13 +1786,13 @@ fn callback_visit_supports_node_links_nested_tuples_and_def_regions() {
         &root,
         (
             (
-                |_value: f64, _visitor: &VisitorRef<'_>| {},
-                |_node: &RustVisitDefRegionObj, visitor: &VisitorRef<'_>| {
+                |_value: f64, _visitor: &mut VisitContext<'_, ()>| {},
+                |_node: &RustVisitDefRegionObj, visitor: &mut VisitContext<'_, ()>| {
                     assert_eq!(visitor.def_region_kind(), DefRegionKind::None);
                     visitor.visit_children()
                 },
             ),
-            |value: i64, visitor: &VisitorRef<'_>| {
+            |value: i64, visitor: &mut VisitContext<'_, ()>| {
                 seen.borrow_mut().push((value, visitor.def_region_kind()));
             },
         ),
@@ -1747,7 +1817,7 @@ fn callback_visit_with_overrides_child_def_region() {
     assert!(structural_visit(
         &root,
         (
-            |array: Array<i64>, visitor: &VisitorRef<'_>| {
+            |array: Array<i64>, visitor: &mut VisitContext<'_, ()>| {
                 for value in array.iter() {
                     if let Some(interrupt) = visitor.visit_with(&value, DefRegionKind::Recursive)? {
                         return Ok(Some(interrupt));
@@ -1755,7 +1825,7 @@ fn callback_visit_with_overrides_child_def_region() {
                 }
                 Ok(None)
             },
-            |value: i64, visitor: &VisitorRef<'_>| {
+            |value: i64, visitor: &mut VisitContext<'_, ()>| {
                 seen.borrow_mut().push((value, visitor.def_region_kind()));
             },
         ),
@@ -1776,21 +1846,22 @@ fn nested_callback_visit_restores_the_outer_active_visitor() {
     let outer_values = RefCell::new(Vec::new());
     let inner_values = RefCell::new(Vec::new());
 
-    assert!(
-        structural_visit(&outer, |value: &VisitValue, visitor: &VisitorRef<'_>| {
+    assert!(structural_visit(
+        &outer,
+        |value: &VisitValue, visitor: &mut VisitContext<'_, ()>| {
             if let Some(value) = value.cast::<i64>() {
                 outer_values.borrow_mut().push(value);
             }
             if !entered_inner.replace(true) {
-                structural_visit(&inner, |value: i64, _visitor: &VisitorRef<'_>| {
+                structural_visit(&inner, |value: i64, _visitor: &mut VisitContext<'_, ()>| {
                     inner_values.borrow_mut().push(value);
                 })?;
             }
             visitor.visit_children()
-        },)
-        .unwrap()
-        .is_none()
-    );
+        },
+    )
+    .unwrap()
+    .is_none());
     assert_eq!(*outer_values.borrow(), vec![10, 20]);
     assert_eq!(*inner_values.borrow(), vec![1, 2]);
 }
@@ -1799,9 +1870,12 @@ fn nested_callback_visit_restores_the_outer_active_visitor() {
 fn callback_visit_panics_resume_and_leave_the_next_run_usable() {
     let root = Array::new(vec![1i64]);
     let panic = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        structural_visit(&root, |_value: i64, _visitor: &VisitorRef<'_>| -> () {
-            panic!("callback visitor panic")
-        })
+        structural_visit(
+            &root,
+            |_value: i64, _visitor: &mut VisitContext<'_, ()>| -> () {
+                panic!("callback visitor panic")
+            },
+        )
     })) {
         Err(panic) => panic,
         Ok(_) => panic!("panicking callback visitor unexpectedly returned"),
@@ -1813,7 +1887,7 @@ fn callback_visit_panics_resume_and_leave_the_next_run_usable() {
 
     let calls = Cell::new(0);
     assert!(
-        structural_visit(&root, |_value: i64, _visitor: &VisitorRef<'_>| {
+        structural_visit(&root, |_value: i64, _visitor: &mut VisitContext<'_, ()>| {
             calls.set(calls.get() + 1);
         })
         .unwrap()
