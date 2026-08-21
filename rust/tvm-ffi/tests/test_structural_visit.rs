@@ -18,7 +18,7 @@
  */
 
 use std::cell::{Cell, RefCell};
-use std::sync::{LazyLock, Mutex};
+use std::sync::LazyLock;
 
 use tvm_ffi::derive::{Object as DeriveObject, ObjectRef as DeriveObjectRef};
 use tvm_ffi::object::ObjectRef;
@@ -216,12 +216,16 @@ fn registered_visit_hook(args: &[AnyView<'_>]) -> Result<Any> {
         .call_packed(&[args[0], AnyView::from(&node.data.selected)])
 }
 
-// The runtime type table leaves registration synchronization to its callers.
-// Rust tests run in parallel, so serialize the independent fixture registrations.
-static TEST_TYPE_REGISTRATION_LOCK: Mutex<()> = Mutex::new(());
+fn registered_primitive_visit_hook(args: &[AnyView<'_>]) -> Result<Any> {
+    assert_eq!(args.len(), 2);
+    Function::get_global("ffi.StructuralVisitorVisit")?
+        .call_packed(&[args[0], AnyView::from(&7i64)])
+}
 
-static REGISTER_HOOK_TYPE: LazyLock<()> = LazyLock::new(|| {
-    let _guard = TEST_TYPE_REGISTRATION_LOCK.lock().unwrap();
+// The runtime type table leaves registration synchronization to its callers.
+// Run every fixture registration through one thread-safe initializer because
+// Rust tests execute in parallel.
+static REGISTER_TEST_TYPES: LazyLock<()> = LazyLock::new(|| {
     let type_index = register_visit_type(
         RustVisitHookObj::TYPE_KEY,
         std::mem::size_of::<RustVisitHookObj>(),
@@ -244,10 +248,7 @@ static REGISTER_HOOK_TYPE: LazyLock<()> = LazyLock::new(|| {
         "__s_visit__",
         Function::from_packed(registered_visit_hook),
     );
-});
 
-static REGISTER_FAILING_GETTER_TYPE: LazyLock<()> = LazyLock::new(|| {
-    let _guard = TEST_TYPE_REGISTRATION_LOCK.lock().unwrap();
     let type_index = register_visit_type(
         RustVisitFailingGetterObj::TYPE_KEY,
         std::mem::size_of::<RustVisitFailingGetterObj>(),
@@ -267,25 +268,13 @@ static REGISTER_FAILING_GETTER_TYPE: LazyLock<()> = LazyLock::new(|| {
         field_static_type_index: -1,
     };
     assert_eq!(unsafe { TVMFFITypeRegisterField(type_index, &field) }, 0);
-});
 
-fn registered_primitive_visit_hook(args: &[AnyView<'_>]) -> Result<Any> {
-    assert_eq!(args.len(), 2);
-    Function::get_global("ffi.StructuralVisitorVisit")?
-        .call_packed(&[args[0], AnyView::from(&7i64)])
-}
-
-static REGISTER_PRIMITIVE_HOOK: LazyLock<()> = LazyLock::new(|| {
-    let _guard = TEST_TYPE_REGISTRATION_LOCK.lock().unwrap();
     register_function_attr(
         TypeIndex::kTVMFFIDataType as i32,
         "__s_visit__",
         Function::from_packed(registered_primitive_visit_hook),
     );
-});
 
-static REGISTER_REGION_TYPES: LazyLock<()> = LazyLock::new(|| {
-    let _guard = TEST_TYPE_REGISTRATION_LOCK.lock().unwrap();
     let type_index = register_visit_type(
         RustVisitDefRegionObj::TYPE_KEY,
         std::mem::size_of::<RustVisitDefRegionObj>(),
@@ -323,12 +312,12 @@ static REGISTER_REGION_TYPES: LazyLock<()> = LazyLock::new(|| {
     }
 });
 
-fn ensure_region_types_registered() {
-    LazyLock::force(&REGISTER_REGION_TYPES);
+fn test_prelude() {
+    LazyLock::force(&REGISTER_TEST_TYPES);
 }
 
 fn rust_visit_hook(selected: impl Into<Any>, ignored: impl Into<Any>) -> RustVisitHook {
-    LazyLock::force(&REGISTER_HOOK_TYPE);
+    test_prelude();
     RustVisitHook {
         data: ObjectArc::new(RustVisitHookObj {
             base: Object::new(),
@@ -339,7 +328,7 @@ fn rust_visit_hook(selected: impl Into<Any>, ignored: impl Into<Any>) -> RustVis
 }
 
 fn rust_visit_failing_getter(value: impl Into<Any>) -> RustVisitFailingGetter {
-    LazyLock::force(&REGISTER_FAILING_GETTER_TYPE);
+    test_prelude();
     RustVisitFailingGetter {
         data: ObjectArc::new(RustVisitFailingGetterObj {
             base: Object::new(),
@@ -466,7 +455,7 @@ fn registered_function_hook_controls_children_interrupts_and_lifetime() {
     assert!(structural_visit(&root, &mut visitor).unwrap().is_none());
     assert_eq!(visitor.integers, vec![11]);
 
-    ensure_region_types_registered();
+    test_prelude();
     let wrapped = RustVisitDefRegion {
         data: ObjectArc::new(RustVisitDefRegionObj {
             base: Object::new(),
@@ -516,7 +505,7 @@ fn registered_function_hook_controls_children_interrupts_and_lifetime() {
 
 #[test]
 fn registered_hook_rejects_foreign_thread_visitor_callback() {
-    LazyLock::force(&REGISTER_HOOK_TYPE);
+    test_prelude();
     RETAINED_VISITOR.with(|retained| {
         retained.take();
     });
@@ -543,7 +532,7 @@ fn registered_hook_rejects_foreign_thread_visitor_callback() {
 
 #[test]
 fn primitive_hook_fast_path_preserves_pre_and_post_order() {
-    LazyLock::force(&REGISTER_PRIMITIVE_HOOK);
+    test_prelude();
     let dtype = DLDataType::new(DLDataTypeCode::kDLFloat, 32, 1);
 
     let mut pre = Vec::new();
@@ -1367,7 +1356,7 @@ fn def_region_is_inherited_through_containers() {
 
 #[test]
 fn reflected_field_def_region_reaches_typed_handler() {
-    ensure_region_types_registered();
+    test_prelude();
     let root = RustVisitDefRegion {
         data: ObjectArc::new(RustVisitDefRegionObj {
             base: Object::new(),
@@ -1443,7 +1432,7 @@ impl StructuralVisitor for FreeVarClampProbe {
 
 #[test]
 fn non_recursive_region_is_clamped_for_free_var_children_only() {
-    ensure_region_types_registered();
+    test_prelude();
     let free_var = RustVisitDefRegion {
         data: ObjectArc::new(RustVisitDefRegionObj {
             base: Object::new(),
