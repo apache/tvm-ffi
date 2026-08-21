@@ -221,12 +221,14 @@ pub trait IntoMutateResult {
 }
 
 impl IntoMutateResult for Any {
+    #[inline]
     fn into_mutate_result(self) -> Result<Any> {
         Ok(self)
     }
 }
 
 impl IntoMutateResult for Result<Any> {
+    #[inline]
     fn into_mutate_result(self) -> Result<Any> {
         self
     }
@@ -414,6 +416,37 @@ impl<State, Link, Marker> MutateCallbacks<State, Link, Marker> {
     }
 }
 
+struct DirectMutateCallbacks<'a, Link, Marker> {
+    state: (),
+    callbacks: &'a Link,
+    _marker: PhantomData<fn(Marker)>,
+}
+
+trait MutateCallbackState<State> {
+    fn callback_state(&self) -> &State;
+    fn callback_state_mut(&mut self) -> &mut State;
+}
+
+impl<State, Link, Marker> MutateCallbackState<State> for MutateCallbacks<State, Link, Marker> {
+    fn callback_state(&self) -> &State {
+        &self.state
+    }
+
+    fn callback_state_mut(&mut self) -> &mut State {
+        &mut self.state
+    }
+}
+
+impl<Link, Marker> MutateCallbackState<()> for DirectMutateCallbacks<'_, Link, Marker> {
+    fn callback_state(&self) -> &() {
+        &self.state
+    }
+
+    fn callback_state_mut(&mut self) -> &mut () {
+        &mut self.state
+    }
+}
+
 #[doc(hidden)]
 pub struct ByMutateCallbacks<Marker>(PhantomData<fn(Marker)>);
 
@@ -422,7 +455,12 @@ where
     Link: MutateChainLink<(), Marker>,
 {
     fn mutate_root(self, root: Any) -> Result<Any> {
-        let mut mutator = MutateCallbacks::<(), Link, Marker>::new((), self);
+        let callbacks = self;
+        let mut mutator = DirectMutateCallbacks::<Link, Marker> {
+            state: (),
+            callbacks: &callbacks,
+            _marker: PhantomData,
+        };
         run_structural_mutator(root, &mut mutator)
     }
 }
@@ -927,25 +965,24 @@ pub trait StructuralMutator: Sized {
     }
 }
 
-impl<State, Link, Marker> MutateCallbacks<State, Link, Marker>
+fn try_mutate_callbacks<State, Link, Marker>(
+    driver: &mut impl MutateContextDriver<State>,
+    callback_ptr: *const Link,
+    value: &MapValue,
+    def_region_kind: DefRegionKind,
+) -> Option<MutateResult>
 where
     Link: MutateChainLink<State, Marker>,
 {
-    fn try_callbacks(
-        &mut self,
-        value: &MapValue,
-        def_region_kind: DefRegionKind,
-    ) -> Option<MutateResult> {
-        // Clone the handle before `mutator` borrows all of `self`.
-        let callbacks = Rc::clone(&self.callbacks);
-        let mut mutator = MutateContext {
-            driver: self,
-            current: MapValue::from_raw(value.raw()),
-            def_region_kind,
-            _not_send_sync: PhantomData,
-        };
-        callbacks.try_mutate(value, &mut mutator)
-    }
+    let mut mutator = MutateContext {
+        driver,
+        current: MapValue::from_raw(value.raw()),
+        def_region_kind,
+        _not_send_sync: PhantomData,
+    };
+    // SAFETY: The owning `Rc` or the direct callback's stack slot remains live
+    // and is never modified through the driver during recursive reentry.
+    unsafe { (&*callback_ptr).try_mutate(value, &mut mutator) }
 }
 
 impl<State, Link, Marker> StructuralMutator for MutateCallbacks<State, Link, Marker>
@@ -953,7 +990,13 @@ where
     Link: MutateChainLink<State, Marker>,
 {
     fn mutate(&mut self, value: &MapValue, def_region_kind: DefRegionKind) -> Result<Any> {
-        match self.try_callbacks(value, def_region_kind) {
+        let callback_ptr = Rc::as_ptr(&self.callbacks);
+        match try_mutate_callbacks::<State, Link, Marker>(
+            self,
+            callback_ptr,
+            value,
+            def_region_kind,
+        ) {
             Some(result) => result,
             None => self.default_mutate(value, def_region_kind),
         }
@@ -964,23 +1007,59 @@ where
         value: InplaceValue<'_>,
         def_region_kind: DefRegionKind,
     ) -> Result<Any> {
-        match self.try_callbacks(value.as_value(), def_region_kind) {
+        let callback_ptr = Rc::as_ptr(&self.callbacks);
+        match try_mutate_callbacks::<State, Link, Marker>(
+            self,
+            callback_ptr,
+            value.as_value(),
+            def_region_kind,
+        ) {
             Some(result) => result,
             None => self.default_maybe_inplace_mutate(value, def_region_kind),
         }
     }
 }
 
-impl<State, Link, Marker> MutateContextDriver<State> for MutateCallbacks<State, Link, Marker>
+impl<Link, Marker> StructuralMutator for DirectMutateCallbacks<'_, Link, Marker>
 where
-    Link: MutateChainLink<State, Marker>,
+    Link: MutateChainLink<(), Marker>,
+{
+    fn mutate(&mut self, value: &MapValue, def_region_kind: DefRegionKind) -> Result<Any> {
+        let callback_ptr = std::ptr::from_ref(self.callbacks);
+        match try_mutate_callbacks::<(), Link, Marker>(self, callback_ptr, value, def_region_kind) {
+            Some(result) => result,
+            None => self.default_mutate(value, def_region_kind),
+        }
+    }
+
+    fn maybe_inplace_mutate(
+        &mut self,
+        value: InplaceValue<'_>,
+        def_region_kind: DefRegionKind,
+    ) -> Result<Any> {
+        let callback_ptr = std::ptr::from_ref(self.callbacks);
+        match try_mutate_callbacks::<(), Link, Marker>(
+            self,
+            callback_ptr,
+            value.as_value(),
+            def_region_kind,
+        ) {
+            Some(result) => result,
+            None => self.default_maybe_inplace_mutate(value, def_region_kind),
+        }
+    }
+}
+
+impl<State, Driver> MutateContextDriver<State> for Driver
+where
+    Driver: StructuralMutator + MutateCallbackState<State>,
 {
     fn state(&self) -> &State {
-        &self.state
+        self.callback_state()
     }
 
     fn state_mut(&mut self) -> &mut State {
-        &mut self.state
+        self.callback_state_mut()
     }
 
     fn mutate_raw(

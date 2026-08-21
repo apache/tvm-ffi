@@ -177,24 +177,28 @@ pub trait IntoVisitResult {
 }
 
 impl IntoVisitResult for () {
+    #[inline]
     fn into_visit_result(self) -> Result<Option<VisitInterrupt>> {
         Ok(None)
     }
 }
 
 impl IntoVisitResult for Result<()> {
+    #[inline]
     fn into_visit_result(self) -> Result<Option<VisitInterrupt>> {
         self.map(|()| None)
     }
 }
 
 impl IntoVisitResult for Option<VisitInterrupt> {
+    #[inline]
     fn into_visit_result(self) -> Result<Option<VisitInterrupt>> {
         Ok(self)
     }
 }
 
 impl IntoVisitResult for Result<Option<VisitInterrupt>> {
+    #[inline]
     fn into_visit_result(self) -> Result<Option<VisitInterrupt>> {
         self
     }
@@ -506,6 +510,37 @@ impl<State, Link, Marker> VisitCallbacks<State, Link, Marker> {
     }
 }
 
+struct DirectVisitCallbacks<'a, Link, Marker> {
+    state: (),
+    callbacks: &'a Link,
+    _marker: PhantomData<fn(Marker)>,
+}
+
+trait VisitCallbackState<State> {
+    fn callback_state(&self) -> &State;
+    fn callback_state_mut(&mut self) -> &mut State;
+}
+
+impl<State, Link, Marker> VisitCallbackState<State> for VisitCallbacks<State, Link, Marker> {
+    fn callback_state(&self) -> &State {
+        &self.state
+    }
+
+    fn callback_state_mut(&mut self) -> &mut State {
+        &mut self.state
+    }
+}
+
+impl<Link, Marker> VisitCallbackState<()> for DirectVisitCallbacks<'_, Link, Marker> {
+    fn callback_state(&self) -> &() {
+        &self.state
+    }
+
+    fn callback_state_mut(&mut self) -> &mut () {
+        &mut self.state
+    }
+}
+
 #[doc(hidden)]
 pub struct ByVisitCallbacks<Marker>(PhantomData<fn(Marker)>);
 
@@ -514,11 +549,16 @@ where
     Link: VisitChainLink<(), Marker>,
 {
     fn visit_root(self, root: TVMFFIAny) -> Result<Option<VisitInterrupt>> {
-        let mut visitor = VisitCallbacks::<(), Link, Marker>::new((), self);
+        let callbacks = self;
+        let mut visitor = DirectVisitCallbacks::<Link, Marker> {
+            state: (),
+            callbacks: &callbacks,
+            _marker: PhantomData,
+        };
         finish(run_structural_visitor(
             root,
             &mut visitor,
-            user_runtime_vtable::<VisitCallbacks<(), Link, Marker>>(),
+            user_runtime_vtable::<DirectVisitCallbacks<Link, Marker>>(),
         ))
     }
 }
@@ -952,6 +992,29 @@ pub trait StructuralVisitor: Sized {
     }
 }
 
+fn try_visit_callbacks<State, Link, Marker>(
+    driver: &mut impl VisitContextDriver<State>,
+    callback_ptr: *const Link,
+    value: &VisitValue,
+    def_region_kind: DefRegionKind,
+) -> Result<Option<VisitInterrupt>>
+where
+    Link: VisitChainLink<State, Marker>,
+{
+    let mut visitor = VisitContext {
+        driver,
+        current: VisitValue::from_raw(value.raw()),
+        def_region_kind,
+        _not_send_sync: PhantomData,
+    };
+    // SAFETY: The owning `Rc` or the direct callback's stack slot remains live
+    // and is never modified through the driver during recursive reentry.
+    match unsafe { (&*callback_ptr).try_visit(value, &mut visitor) } {
+        Some(outcome) => outcome,
+        None => visitor.visit_children(),
+    }
+}
+
 impl<State, Link, Marker> StructuralVisitor for VisitCallbacks<State, Link, Marker>
 where
     Link: VisitChainLink<State, Marker>,
@@ -961,31 +1024,35 @@ where
         value: &VisitValue,
         def_region_kind: DefRegionKind,
     ) -> Result<Option<VisitInterrupt>> {
-        // Clone the handle before `visitor` borrows all of `self`.
-        let callbacks = Rc::clone(&self.callbacks);
-        let mut visitor = VisitContext {
-            driver: self,
-            current: VisitValue::from_raw(value.raw()),
-            def_region_kind,
-            _not_send_sync: PhantomData,
-        };
-        match callbacks.try_visit(value, &mut visitor) {
-            Some(outcome) => outcome,
-            None => visitor.visit_children(),
-        }
+        let callback_ptr = Rc::as_ptr(&self.callbacks);
+        try_visit_callbacks::<State, Link, Marker>(self, callback_ptr, value, def_region_kind)
     }
 }
 
-impl<State, Link, Marker> VisitContextDriver<State> for VisitCallbacks<State, Link, Marker>
+impl<Link, Marker> StructuralVisitor for DirectVisitCallbacks<'_, Link, Marker>
 where
-    Link: VisitChainLink<State, Marker>,
+    Link: VisitChainLink<(), Marker>,
+{
+    fn visit(
+        &mut self,
+        value: &VisitValue,
+        def_region_kind: DefRegionKind,
+    ) -> Result<Option<VisitInterrupt>> {
+        let callback_ptr = std::ptr::from_ref(self.callbacks);
+        try_visit_callbacks::<(), Link, Marker>(self, callback_ptr, value, def_region_kind)
+    }
+}
+
+impl<State, Driver> VisitContextDriver<State> for Driver
+where
+    Driver: StructuralVisitor + VisitCallbackState<State>,
 {
     fn state(&self) -> &State {
-        &self.state
+        self.callback_state()
     }
 
     fn state_mut(&mut self) -> &mut State {
-        &mut self.state
+        self.callback_state_mut()
     }
 
     fn visit_raw(

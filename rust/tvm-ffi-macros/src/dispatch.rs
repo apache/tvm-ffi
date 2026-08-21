@@ -205,6 +205,7 @@ fn expand(item_impl: &ItemImpl, mode: DispatchMode) -> syn::Result<TokenStream2>
             impl #impl_generics #tvm_ffi::extra::structural_visit::StructuralVisitor
                 for #self_type #where_clause
             {
+                #[inline]
                 #[allow(unreachable_code, unused_variables)]
                 fn visit(
                     &mut self,
@@ -241,6 +242,7 @@ fn expand(item_impl: &ItemImpl, mode: DispatchMode) -> syn::Result<TokenStream2>
                 impl #impl_generics #tvm_ffi::extra::structural_mutate::StructuralMutator
                     for #self_type #where_clause
                 {
+                    #[inline]
                     #[allow(unreachable_code, unused_variables)]
                     fn mutate(
                         &mut self,
@@ -252,6 +254,7 @@ fn expand(item_impl: &ItemImpl, mode: DispatchMode) -> syn::Result<TokenStream2>
                             default_mutate(self, value, def_region_kind)
                     }
 
+                    #[inline]
                     #[allow(unreachable_code, unused_variables)]
                     fn maybe_inplace_mutate(
                         &mut self,
