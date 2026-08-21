@@ -17,14 +17,19 @@
  * under the License.
  */
 
-//! Native Rust structural mapping.
+//! Native Rust structural mutation and mapping.
 //!
-//! [`structural_map`] mirrors the callback-controlled C++ `StructuralMap`,
-//! but keeps recursion, typed dispatch, definition-region propagation, and
-//! identity remapping in Rust.  The root is consumed so Rust ownership and
-//! the runtime strong count jointly define the boundary for optional
-//! in-place container mutation.  Passing a clone naturally selects
-//! copy-on-write behavior.
+//! Two public layers share the same runtime mutation protocol:
+//!
+//! * [`StructuralMutator`] + [`structural_mutate`] let the mutator drive
+//!   recursion. `structural_mutate` also accepts a typed callback or callback
+//!   tuple; matched callbacks receive a [`MutatorRef`] for explicit recursion.
+//! * [`MapDispatch`] + [`structural_map`] provide ordered pre/post-order
+//!   replacement callbacks while the engine owns recursion.
+//!
+//! The root is consumed so Rust ownership and the runtime strong count jointly
+//! define the boundary for optional in-place container mutation. Passing a
+//! clone naturally selects copy-on-write behavior.
 //!
 //! Rust owns callback dispatch, memoization, and identity remapping. Default
 //! recursion follows the shared structural-mutation ABI: each runtime type's
@@ -33,7 +38,7 @@
 //! values. This keeps container storage and type-specific behavior in the
 //! implementation that registered the hook.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::ffi::c_void;
 use std::marker::PhantomData;
@@ -98,6 +103,270 @@ impl IntoMapResult for Result<Any> {
     #[inline]
     fn into_map_result(self) -> MapResult {
         self
+    }
+}
+
+/// A non-owning mutation handle supplied to `structural_mutate` callbacks.
+///
+/// A matched callback owns mutation of its value. Borrowed children use the
+/// copy path through [`Self::mutate`]; an owned child may opt into an in-place
+/// attempt through [`Self::maybe_inplace_mutate`]. [`Self::default_mutate`]
+/// applies default mutation to the callback's current value and always uses
+/// the copy path, because the callback still holds a shared borrow of that
+/// value. The handle is valid only for its callback invocation and cannot be
+/// sent or shared across threads.
+pub struct MutatorRef<'a> {
+    mutator: StructuralMutatorHandle,
+    context: *mut c_void,
+    current: TVMFFIAny,
+    def_region_kind: DefRegionKind,
+    _lifetime: PhantomData<(&'a (), std::rc::Rc<()>)>,
+}
+
+impl MutatorRef<'_> {
+    /// Definition-region state active at the callback's current value.
+    pub fn def_region_kind(&self) -> DefRegionKind {
+        self.def_region_kind
+    }
+
+    /// Mutate a borrowed child through the same callback chain. The child and
+    /// its descendants begin on the non-in-place path.
+    pub fn mutate<T>(&self, child: &T) -> Result<Any>
+    where
+        for<'x> AnyView<'x>: From<&'x T>,
+    {
+        self.mutate_with(child, self.def_region_kind)
+    }
+
+    /// Mutate a borrowed child under an explicit definition-region state.
+    pub fn mutate_with<T>(&self, child: &T, def_region_kind: DefRegionKind) -> Result<Any>
+    where
+        for<'x> AnyView<'x>: From<&'x T>,
+    {
+        let view = AnyView::from(child);
+        self.driver()
+            .dispatch_raw(*view.as_raw_ffi_any(), def_region_kind, Permit::Copy)
+    }
+
+    /// Mutate an owned child, allowing an in-place attempt when it remains
+    /// uniquely owned and no matched callback borrows it.
+    pub fn maybe_inplace_mutate<T: Into<Any>>(&self, child: T) -> Result<Any> {
+        self.maybe_inplace_mutate_with(child, self.def_region_kind)
+    }
+
+    /// Mutate an owned child under an explicit definition-region state.
+    pub fn maybe_inplace_mutate_with<T: Into<Any>>(
+        &self,
+        child: T,
+        def_region_kind: DefRegionKind,
+    ) -> Result<Any> {
+        let child = child.into();
+        self.driver().dispatch_raw(
+            *child.as_raw_ffi_any(),
+            def_region_kind,
+            Permit::MaybeInPlace,
+        )
+    }
+
+    /// Apply default mutation to the callback's current value.
+    ///
+    /// This operation always uses the copy path and may be called repeatedly.
+    pub fn default_mutate(&self) -> Result<Any> {
+        default_mutate_driver(
+            &mut self.driver(),
+            self.current,
+            self.def_region_kind,
+            Permit::Copy,
+        )
+    }
+
+    /// Look up an invocation-local identity substitution.
+    pub fn var_remap_get(&self, var: &MapValue) -> Result<Option<Any>> {
+        self.driver().var_remap_get_raw(var.raw())
+    }
+
+    /// Store an invocation-local identity substitution.
+    pub fn var_remap_set(&self, var: &MapValue, mapped_value: &Any) -> Result<()> {
+        self.driver().var_remap_set_raw(var.raw(), mapped_value)
+    }
+
+    fn driver(&self) -> SharedMutationDriver {
+        SharedMutationDriver {
+            active: self.mutator,
+            context: self.context,
+        }
+    }
+}
+
+/// Conversion into the mutator argument accepted by [`structural_mutate`].
+///
+/// Supported inputs are `&mut U` for a hand-written [`StructuralMutator`], a
+/// typed `Fn(value, &MutatorRef)` callback, or a tuple of such callbacks. A
+/// callback chain uses first-match dispatch; unmatched values use default
+/// mutation. Callbacks must implement `Fn` because invoking a handle method
+/// may recursively re-enter the same callback. Use `Cell` or `RefCell` for
+/// callback-local state, or pass `&mut StructuralMutator` when ordinary
+/// mutable state is more convenient.
+///
+/// A closure that mutates captured state directly is therefore rejected:
+///
+/// ```compile_fail
+/// use tvm_ffi::{structural_mutate, Any, MutatorRef};
+///
+/// let mut calls = 0_usize;
+/// structural_mutate(1_i64, |value: i64, _mutator: &MutatorRef<'_>| {
+///     calls += 1;
+///     Any::from(value)
+/// })
+/// .unwrap();
+/// ```
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` is not a supported `structural_mutate` mutator",
+    note = "accepted mutators: `&mut U` where `U: StructuralMutator`; an `Fn` callback over an FFI value type `T`, `&N` of an object node type, or `&MapValue`, followed by `&MutatorRef`; or a tuple of up to 12 such callbacks (tuples may nest)",
+    note = "callback arguments need explicit type annotations; callbacks must implement `Fn`, not `FnMut`, because recursive mutation may re-enter the same callback"
+)]
+pub trait IntoMutator<Marker> {
+    #[doc(hidden)]
+    fn mutate_root(self, root: Any) -> Result<Any>;
+}
+
+impl<U: StructuralMutator> IntoMutator<U> for &mut U {
+    fn mutate_root(self, root: Any) -> Result<Any> {
+        run_structural_mutator(root, self)
+    }
+}
+
+/// One typed callback in a callback-driven structural mutator.
+pub trait MutateChainLink<Marker>: mutate_sealed::SealedLink<Marker> {
+    #[doc(hidden)]
+    fn try_mutate(&self, value: &MapValue, mutator: &MutatorRef<'_>) -> Option<MapResult>;
+}
+
+mod mutate_sealed {
+    use super::{IntoMapResult, MapValue, MutatorRef, ObjectCore};
+
+    pub trait SealedLink<Marker> {}
+
+    impl<F, T, O> SealedLink<super::ByMutateOwned<T>> for F
+    where
+        F: for<'a> Fn(T, &'a MutatorRef<'a>) -> O,
+        O: IntoMapResult,
+    {
+    }
+
+    impl<F, N: ObjectCore, O> SealedLink<super::ByMutateNode<N>> for F
+    where
+        F: for<'a> Fn(&'a N, &'a MutatorRef<'a>) -> O,
+        O: IntoMapResult,
+    {
+    }
+
+    impl<F, O> SealedLink<super::ByMutateCatchAll> for F
+    where
+        F: for<'a> Fn(&'a MapValue, &'a MutatorRef<'a>) -> O,
+        O: IntoMapResult,
+    {
+    }
+}
+
+#[doc(hidden)]
+pub struct ByMutateOwned<T>(PhantomData<T>);
+
+impl<F, T, O> MutateChainLink<ByMutateOwned<T>> for F
+where
+    F: for<'a> Fn(T, &'a MutatorRef<'a>) -> O,
+    T: crate::type_traits::AnyCompatible,
+    O: IntoMapResult,
+{
+    fn try_mutate(&self, value: &MapValue, mutator: &MutatorRef<'_>) -> Option<MapResult> {
+        value
+            .cast::<T>()
+            .map(|typed| self(typed, mutator).into_map_result())
+    }
+}
+
+#[doc(hidden)]
+pub struct ByMutateNode<N>(PhantomData<N>);
+
+impl<F, N, O> MutateChainLink<ByMutateNode<N>> for F
+where
+    F: for<'a> Fn(&'a N, &'a MutatorRef<'a>) -> O,
+    N: ObjectCore,
+    O: IntoMapResult,
+{
+    fn try_mutate(&self, value: &MapValue, mutator: &MutatorRef<'_>) -> Option<MapResult> {
+        value
+            .as_node::<N>()
+            .map(|node| self(node, mutator).into_map_result())
+    }
+}
+
+#[doc(hidden)]
+pub enum ByMutateCatchAll {}
+
+impl<F, O> MutateChainLink<ByMutateCatchAll> for F
+where
+    F: for<'a> Fn(&'a MapValue, &'a MutatorRef<'a>) -> O,
+    O: IntoMapResult,
+{
+    fn try_mutate(&self, value: &MapValue, mutator: &MutatorRef<'_>) -> Option<MapResult> {
+        Some(self(value, mutator).into_map_result())
+    }
+}
+
+#[doc(hidden)]
+pub struct ByMutateChainLink<Markers>(PhantomData<fn(Markers)>);
+
+macro_rules! impl_mutate_chain_link {
+    ($(($F:ident, $M:ident, $idx:tt)),+) => {
+        impl<$($F, $M,)+> mutate_sealed::SealedLink<ByMutateChainLink<($($M,)+)>> for ($($F,)+)
+        where
+            $($F: MutateChainLink<$M>,)+
+        {
+        }
+
+        impl<$($F, $M,)+> MutateChainLink<ByMutateChainLink<($($M,)+)>> for ($($F,)+)
+        where
+            $($F: MutateChainLink<$M>,)+
+        {
+            fn try_mutate(
+                &self,
+                value: &MapValue,
+                mutator: &MutatorRef<'_>,
+            ) -> Option<MapResult> {
+                $(
+                    if let Some(result) = self.$idx.try_mutate(value, mutator) {
+                        return Some(result);
+                    }
+                )+
+                None
+            }
+        }
+    };
+}
+
+impl_callback_chain_tuple_arities!(impl_mutate_chain_link);
+
+struct CallbackMutator<Link, Marker> {
+    link: Link,
+    remap: RefCell<StructuralVarRemap>,
+    _marker: PhantomData<fn(Marker)>,
+}
+
+#[doc(hidden)]
+pub struct ByMutateCallbacks<Marker>(PhantomData<fn(Marker)>);
+
+impl<Link, Marker> IntoMutator<ByMutateCallbacks<Marker>> for Link
+where
+    Link: MutateChainLink<Marker>,
+{
+    fn mutate_root(self, root: Any) -> Result<Any> {
+        let mutator: CallbackMutator<Link, Marker> = CallbackMutator {
+            link: self,
+            remap: RefCell::new(StructuralVarRemap::default()),
+            _marker: PhantomData,
+        };
+        run_shared_structural_mutator(root, &mutator, callback_runtime_callbacks::<Link, Marker>())
     }
 }
 
@@ -1037,13 +1306,14 @@ impl Drop for RuntimeContextGuard {
     }
 }
 
-/// Temporarily take the callback context out of the runtime object.
+/// Temporarily take the erased callback context out of the runtime object.
 ///
 /// # Safety
 ///
 /// `mutator` must be null or point to a live [`RuntimeStructuralMutatorObj`].
-/// A non-null context must have been installed from the current mutable
-/// reborrow of the driver and its callback table must use that driver's type.
+/// A non-null context must have been installed by the current run. Its callback
+/// table must reconstruct it according to that run's mutable-driver or
+/// shared-callback contract.
 unsafe fn take_runtime_context(mutator: StructuralMutatorHandle) -> Result<RuntimeContextGuard> {
     if !is_active_mutator(mutator) {
         return Err(inactive_mutator_error(mutator, "callback"));
@@ -1057,8 +1327,8 @@ unsafe fn take_runtime_context(mutator: StructuralMutatorHandle) -> Result<Runti
         };
         return Err(runtime_error(message));
     }
-    // No raw driver pointer remains callable while Rust holds the mutable
-    // reborrow produced from `context`.
+    // No raw context pointer remains callable while Rust executes the selected
+    // mutable-driver or shared-callback entry.
     (*mutator).context = std::ptr::null_mut();
     Ok(RuntimeContextGuard { mutator, context })
 }
@@ -1234,10 +1504,21 @@ fn with_current_driver_context<D, T>(
     driver: &mut D,
     callback: impl FnOnce() -> Result<T>,
 ) -> Result<T> {
+    let context = std::ptr::from_mut(driver).cast::<c_void>();
+    with_current_mutator_context(mutator, context, callback)
+}
+
+/// Expose an already validated mutable or shared callback context for one
+/// registered hook/vtable call. Callers determine whether the pointer may be
+/// reconstructed as `&mut D` or only `&D`; this helper never dereferences it.
+fn with_current_mutator_context<T>(
+    mutator: StructuralMutatorHandle,
+    context: *mut c_void,
+    callback: impl FnOnce() -> Result<T>,
+) -> Result<T> {
     if !is_active_mutator(mutator) {
         return Err(inactive_mutator_error(mutator, "helper"));
     }
-    let context = std::ptr::from_mut(driver).cast::<c_void>();
     unsafe {
         if (*mutator).context_identity != context {
             return Err(runtime_error(
@@ -1322,6 +1603,118 @@ impl<U: StructuralMutator> MutationDriver for U {
     }
 }
 
+/// Thin driver used by callback-backed mutation. It owns no callback state;
+/// every recursive entry exposes the original shared context and the runtime
+/// callback table reconstructs only `&CallbackMutator` from that pointer.
+struct SharedMutationDriver {
+    active: StructuralMutatorHandle,
+    context: *mut c_void,
+}
+
+impl MutationDriver for SharedMutationDriver {
+    fn dispatch_raw(
+        &mut self,
+        raw: TVMFFIAny,
+        def_region_kind: DefRegionKind,
+        permit: Permit,
+    ) -> Result<Any> {
+        with_current_mutator_context(self.active, self.context, || {
+            call_mutator(self.active, raw, def_region_kind, permit)
+        })
+    }
+
+    fn var_remap_get_raw(&mut self, raw: TVMFFIAny) -> Result<Option<Any>> {
+        let callback = unsafe { (*self.active).callbacks.var_remap_get };
+        unsafe { callback(self.context, raw) }
+    }
+
+    fn var_remap_set_raw(&mut self, raw: TVMFFIAny, mapped_value: &Any) -> Result<()> {
+        let callback = unsafe { (*self.active).callbacks.var_remap_set };
+        unsafe { callback(self.context, raw, mapped_value) }
+    }
+
+    fn call_registered_hook(
+        &mut self,
+        raw: TVMFFIAny,
+        def_region_kind: DefRegionKind,
+        permit: Permit,
+    ) -> Result<Option<Any>> {
+        with_current_mutator_context(self.active, self.context, || {
+            call_registered_structural_mutate(self.active, raw, def_region_kind, permit)
+        })
+    }
+}
+
+fn callback_runtime_callbacks<Link, Marker>() -> RuntimeMutatorCallbacks
+where
+    Link: MutateChainLink<Marker>,
+{
+    RuntimeMutatorCallbacks {
+        mutate: runtime_callback_mutate::<Link, Marker>,
+        var_remap_get: runtime_callback_var_remap_get::<Link, Marker>,
+        var_remap_set: runtime_callback_var_remap_set::<Link, Marker>,
+    }
+}
+
+unsafe fn runtime_callback_mutate<Link, Marker>(
+    context: *mut c_void,
+    raw: TVMFFIAny,
+    def_region_kind: DefRegionKind,
+    permit: Permit,
+) -> Result<Any>
+where
+    Link: MutateChainLink<Marker>,
+{
+    // SAFETY: callback-backed runs install a pointer derived from a shared
+    // `CallbackMutator`. All recursive entries reconstruct only a shared
+    // reference, so an `Fn` callback may soundly re-enter itself.
+    let callback = &*context.cast::<CallbackMutator<Link, Marker>>();
+    let active = active_mutator()?;
+    let mutator = MutatorRef {
+        mutator: active,
+        context,
+        current: raw,
+        def_region_kind,
+        _lifetime: PhantomData,
+    };
+    let result = match callback.link.try_mutate(&MapValue::from_raw(raw), &mutator) {
+        Some(result) => result,
+        None => default_mutate_driver(
+            &mut SharedMutationDriver { active, context },
+            raw,
+            def_region_kind,
+            permit,
+        ),
+    };
+    result.map_err(|error| with_value_context(error, raw))
+}
+
+unsafe fn runtime_callback_var_remap_get<Link, Marker>(
+    context: *mut c_void,
+    raw: TVMFFIAny,
+) -> Result<Option<Any>>
+where
+    Link: MutateChainLink<Marker>,
+{
+    let callback = &*context.cast::<CallbackMutator<Link, Marker>>();
+    callback.remap.borrow().get(&MapValue::from_raw(raw))
+}
+
+unsafe fn runtime_callback_var_remap_set<Link, Marker>(
+    context: *mut c_void,
+    raw: TVMFFIAny,
+    mapped_value: &Any,
+) -> Result<()>
+where
+    Link: MutateChainLink<Marker>,
+{
+    let callback = &*context.cast::<CallbackMutator<Link, Marker>>();
+    callback
+        .remap
+        .borrow_mut()
+        .set(&MapValue::from_raw(raw), mapped_value)
+}
+
 /// Invoke the concrete Rust driver selected when the runtime mutator was built.
 ///
 /// # Safety
@@ -1370,6 +1763,25 @@ fn run_structural_mutator<D: MutationDriver>(root: Any, driver: &mut D) -> Resul
         var_remap_get: runtime_var_remap_get::<D>,
         var_remap_set: runtime_var_remap_set::<D>,
     };
+    run_structural_mutator_with_context(root, context, callbacks)
+}
+
+fn run_shared_structural_mutator<D>(
+    root: Any,
+    driver: &D,
+    callbacks: RuntimeMutatorCallbacks,
+) -> Result<Any> {
+    // The ABI field is mutable for the hand-written mutator path, but the
+    // callback table supplied here must reconstruct only shared references.
+    let context = std::ptr::from_ref(driver).cast_mut().cast::<c_void>();
+    run_structural_mutator_with_context(root, context, callbacks)
+}
+
+fn run_structural_mutator_with_context(
+    root: Any,
+    context: *mut c_void,
+    callbacks: RuntimeMutatorCallbacks,
+) -> Result<Any> {
     let mut active = ObjectArc::new(RuntimeStructuralMutatorObj {
         base: Object::new(),
         vtable: &RUST_STRUCTURAL_MUTATOR_VTABLE,
@@ -1574,12 +1986,19 @@ fn user_default_mutate<U: StructuralMutator>(
     def_region_kind: DefRegionKind,
     permit: Permit,
 ) -> Result<Any> {
+    default_mutate_driver(mutator, raw, def_region_kind, permit)
+}
+
+fn default_mutate_driver<D: MutationDriver>(
+    driver: &mut D,
+    raw: TVMFFIAny,
+    def_region_kind: DefRegionKind,
+    permit: Permit,
+) -> Result<Any> {
     // Match C++ DefaultMutateExpected: a registered type hook owns any
     // identity-remap policy for that type. Automatic remapping applies only
     // to the reflected fallback below.
-    if let Some(mapped) =
-        MutationDriver::call_registered_hook(mutator, raw, def_region_kind, permit)?
-    {
+    if let Some(mapped) = driver.call_registered_hook(raw, def_region_kind, permit)? {
         return Ok(mapped);
     }
     if raw.type_index < TVMFFITypeIndex::kTVMFFIStaticObjectBegin as i32 {
@@ -1588,32 +2007,32 @@ fn user_default_mutate<U: StructuralMutator>(
 
     let remappable = identity_key(raw)?.is_some();
     if remappable {
-        let var = MapValue::from_raw(raw);
-        if let Some(mapped) = mutator.var_remap_get(&var)? {
+        if let Some(mapped) = driver.var_remap_get_raw(raw)? {
             return Ok(mapped);
         }
     }
 
-    let result = MutationDriver::map_reflected(mutator, raw, def_region_kind)?;
+    let result = driver.map_reflected(raw, def_region_kind)?;
     if remappable {
-        let var = MapValue::from_raw(raw);
-        mutator.var_remap_set(&var, &result)?;
+        driver.var_remap_set_raw(raw, &result)?;
     }
     Ok(result)
 }
 
-/// Mutate a structured value with a user-driven [`StructuralMutator`].
+/// Mutate a structured value with a user-driven mutator or callback chain.
 ///
 /// The root is consumed to establish the ownership boundary for optional
 /// in-place mutation. Completed in-place changes are not rolled back on an
-/// error, and an error does not return the consumed root.
-pub fn structural_mutate<R, U>(root: R, mutator: &mut U) -> Result<Any>
+/// error, and an error does not return the consumed root. Passing `&mut U` for
+/// `U: StructuralMutator` preserves the low-level API. A typed `Fn(value,
+/// &MutatorRef)` callback or callback tuple builds a temporary mutator. The
+/// first matching callback supplies the final value; unmatched values use
+/// default mutation with the current in-place permit.
+pub fn structural_mutate<R, M>(root: R, mutator: impl IntoMutator<M>) -> Result<Any>
 where
     R: Into<Any>,
-    U: StructuralMutator,
 {
-    let root = root.into();
-    run_structural_mutator(root, mutator)
+    mutator.mutate_root(root.into())
 }
 
 /// Transform a structured value graph with ordered replacement callbacks.

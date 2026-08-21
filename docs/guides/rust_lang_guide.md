@@ -314,9 +314,36 @@ let found = structural_walk(
 assert_eq!(found.map(|i| i64::try_from(i.value).unwrap()), Some(2));
 ```
 
-To drive recursion yourself, implement `StructuralVisitor` and call
-`structural_visit`; `visit` runs for each value and descends through
-`default_visit_children`, or through `visit_child`, which visits one
+To drive recursion yourself without defining a visitor type, pass a typed
+callback or callback tuple to `structural_visit`. Each callback receives a
+`VisitorRef`. Tuple links are tried in order; a matched callback owns traversal
+of that value, while an unmatched value uses default child traversal. A
+catch-all callback must therefore call `visit_children()` explicitly:
+
+```rust
+use std::cell::Cell;
+use tvm_ffi::{structural_visit, Array, VisitValue, VisitorRef};
+
+let values = Array::new(vec![1_i64, 2]);
+let total = Cell::new(0_i64);
+structural_visit(
+    &values,
+    (
+        |value: i64, _visitor: &VisitorRef<'_>| total.set(total.get() + value),
+        |_value: &VisitValue, visitor: &VisitorRef<'_>| visitor.visit_children(),
+    ),
+)?;
+assert_eq!(total.get(), 3);
+```
+
+Callbacks are `Fn`, not `FnMut`: `visit`, `visit_with`, and `visit_children`
+can recursively re-enter the same callback. Use `Cell`/`RefCell` for captured
+state. Since an interrupt is `Ok(Some(interrupt))`, return it explicitly from
+the outer callback; `?` propagates `Err`, not `Some`.
+
+For a named stateful implementation, implement `StructuralVisitor` and pass
+`&mut` it to the same entry point. `visit` runs for each value and descends
+through `default_visit_children`, or through `visit_child`, which visits one
 selected child and can override the def-region state for it (e.g.
 `DefRegionKind::Recursive` when descending into a binder's parameters):
 
@@ -438,9 +465,32 @@ Callbacks may return `Result<Any>` to report failures. Errors propagate with
 object or reflected-field context. In-place changes completed before a later
 error are not rolled back, and the consumed root is not returned on error.
 
-For custom recursion policy, implement `StructuralMutator` and call
-`structural_mutate`. `InplaceValue` is an engine-issued capability: callers
-cannot construct it from a read-only `MapValue`. Override
+`structural_mutate` likewise accepts a typed `Fn(value, &MutatorRef)` callback
+or an ordered callback tuple. The first match supplies the current value's
+final result; an unmatched value follows default mutation. This makes a typed
+leaf rewrite compact while preserving the root container's in-place permit:
+
+```rust
+use tvm_ffi::{structural_mutate, Any, Array, MutatorRef};
+
+let mapped = structural_mutate(
+    Array::new(vec![1_i64, 2]),
+    |value: i64, _mutator: &MutatorRef<'_>| Any::from(value + 1),
+)?;
+let mapped = Array::<i64>::try_from(mapped)?;
+assert_eq!(mapped.iter().collect::<Vec<_>>(), vec![2, 3]);
+```
+
+`MutatorRef::mutate` re-enters with a borrowed child on the copy path;
+`maybe_inplace_mutate` consumes an owned child and preserves its in-place
+opportunity. `default_mutate()` applies default mutation to the callback's
+current value, but deliberately uses the copy path because the callback still
+holds a shared borrow of that value. Mutation callbacks are `Fn` for the same
+recursive-reentry reason as visit callbacks.
+
+For a named custom recursion policy, implement `StructuralMutator` and pass
+`&mut` it to `structural_mutate`. `InplaceValue` is an engine-issued
+capability: callers cannot construct it from a read-only `MapValue`. Override
 `maybe_inplace_mutate` to opt into default container reuse;
 `default_maybe_inplace_mutate` rechecks uniqueness before writing. Borrowed
 children can be re-entered with `mutate_child`, while owned children can use
