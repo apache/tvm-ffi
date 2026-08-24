@@ -15,7 +15,6 @@
 # specific language governing permissions and limitations
 # under the License.
 import json
-import re
 from abc import ABCMeta
 from typing import Any
 
@@ -46,54 +45,6 @@ def object_repr(obj: "CObject") -> str:
 def _new_object(cls):
     """Helper function for pickle"""
     return cls.__new__(cls)
-
-
-# Types that hold a live process resource (a code pointer, a device allocation,
-# a dlopen handle, a PyObject*) and therefore have no value representation that
-# survives a pickle round trip. Maps type key -> explanation of the remedy.
-_UNPICKLABLE_TYPE_REASONS: dict[str, str] = {
-    "ffi.Function": (
-        "it wraps a callable whose implementation lives in the current process"
-    ),
-    "ffi.Module": (
-        "it wraps a shared library loaded into the current process; "
-        "pickle the module path and reload it instead"
-    ),
-    "ffi.Tensor": (
-        "it wraps a device memory allocation; "
-        "convert it to a framework tensor (e.g. via DLPack) and pickle that instead"
-    ),
-    "ffi.OpaquePyObject": (
-        "it holds an opaque reference to a Python object; "
-        "pickle the underlying object directly, or avoid storing non-FFI "
-        "Python values in containers you intend to serialize"
-    ),
-}
-
-_TO_JSON_GRAPH_UNSUPPORTED_RE = re.compile(
-    r"Type `([^`]+)` does not support ToJSONGraph"
-)
-
-
-cdef _make_unpicklable_error(CObject obj, err: TypeError):
-    """Translate a ToJSONGraph "unsupported type" error into a pickle-centric one.
-
-    Returns ``err`` unchanged when it is not the unsupported-type error, so
-    unrelated ``TypeError`` s keep propagating untouched.
-    """
-    match = _TO_JSON_GRAPH_UNSUPPORTED_RE.search(str(err))
-    if match is None:
-        return err
-    # The unsupported type may be nested (e.g. an Array holding a Function),
-    # so report the type named by the serializer rather than type(obj).
-    type_key = match.group(1)
-    reason = _UNPICKLABLE_TYPE_REASONS.get(type_key)
-    if reason is None:
-        reason = "it has no value representation that can be serialized"
-    prefix = f"cannot pickle `{type_key}` object"
-    if type_key != _type_index_to_key(TVMFFIObjectGetTypeIndex((<CObject>obj).chandle)):
-        prefix += f" contained in `{obj.__class__.__name__}`"
-    return TypeError(f"{prefix}: {reason}")
 
 
 class ObjectConvertible:
@@ -182,13 +133,7 @@ cdef class CObject:
         if not self.__chandle__() == 0:
             # need to explicit convert to str in case String
             # returned and triggered another infinite recursion in get state
-            try:
-                return {"handle": str(_OBJECT_TO_JSON_GRAPH_STR(self, None))}
-            except TypeError as err:
-                # ToJSONGraph is an internal serialization API. Surfacing its
-                # message verbatim from pickle/copy is confusing, so translate
-                # it into an actionable, pickle-centric error.
-                raise _make_unpicklable_error(self, err) from None
+            return {"handle": str(_OBJECT_TO_JSON_GRAPH_STR(self, None))}
         return {"handle": None}
 
     def __setstate__(self, state: dict[str, Any]) -> None:
