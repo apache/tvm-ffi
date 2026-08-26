@@ -64,8 +64,14 @@ impl<'a> AnyView<'a> {
     ///
     /// `data.type_index` must describe the payload, and the caller must keep
     /// every resource it references alive for the view's complete lifetime.
+    ///
+    /// `kTVMFFIObjectRValueRef` carries a further obligation: `v_ptr` must
+    /// point to a writable slot the caller uniquely owns, holding one strong
+    /// reference. Owning the view takes that reference and writes null back
+    /// through the pointer, so the view must be converted at most once and no
+    /// other access to the slot may overlap the conversion.
     #[inline]
-    pub unsafe fn from_raw_ffi_any(data: TVMFFIAny) -> Self {
+    pub(crate) unsafe fn from_raw_ffi_any(data: TVMFFIAny) -> Self {
         Self {
             data,
             _phantom: std::marker::PhantomData,
