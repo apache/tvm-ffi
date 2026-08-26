@@ -161,6 +161,26 @@ assert_eq!(i64::try_from(result)?, 3);
 `Function::from_type_method(type_index, name)` performs the same lookup when
 the type index is already known (e.g. from `Any::type_index`).
 
+### Converting Borrowed Values into `Any`
+
+`Any::from(value)` takes ownership of `value`. Use it when you own the value.
+When you only have a shared reference—for example, a field accessed through
+`&AddObj`—you cannot move the field into an `Any`. Call
+`AnyCompatible::to_any()` instead:
+
+```rust
+use tvm_ffi::{Any, AnyCompatible};
+
+fn first_operand(node: &AddObj) -> Any {
+    node.a.to_any()
+}
+```
+
+`to_any()` creates an owned `Any` while leaving the borrowed value usable. For
+object-backed values, it retains the object by incrementing its reference
+count. It is equivalent to `Any::from(node.a.clone())`, without requiring an
+explicit clone at the call site.
+
 ### Type-Erased Functions
 
 Create functions from Rust closures:

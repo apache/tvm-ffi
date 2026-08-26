@@ -137,7 +137,7 @@ impl StructuralValue {
 /// returns `None` instead of constructing an invalid owning value.
 #[inline]
 pub(crate) fn try_to_owned_without_normalization(raw: TVMFFIAny) -> Option<Any> {
-    if is_plain_inline_leaf(raw.type_index) {
+    if is_plain_inline(raw.type_index) {
         return Some(unsafe { Any::from_raw_ffi_any(raw) });
     }
     if raw.type_index >= TVMFFITypeIndex::kTVMFFIStaticObjectBegin as i32 {
@@ -151,12 +151,7 @@ pub(crate) fn try_to_owned_without_normalization(raw: TVMFFIAny) -> Option<Any> 
     None
 }
 
-#[inline]
-pub(crate) fn is_plain_inline_leaf(type_index: i32) -> bool {
-    type_index < TVMFFITypeIndex::kTVMFFIRawStr as i32
-        || type_index == TVMFFITypeIndex::kTVMFFISmallStr as i32
-        || type_index == TVMFFITypeIndex::kTVMFFISmallBytes as i32
-}
+pub(crate) use crate::any::is_plain_inline;
 
 /// Subtype check with the base's inheritance depth supplied by the caller
 /// (`ObjectCore::TYPE_DEPTH`), so only the object's type info is fetched.

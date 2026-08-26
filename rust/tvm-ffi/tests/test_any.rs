@@ -347,3 +347,210 @@ fn test_any_dl_device() {
     assert_eq!(converted_cuda_view.device_type, DLDeviceType::kDLCUDA);
     assert_eq!(converted_cuda_view.device_id, 1);
 }
+
+//---------------------------------------------------------------------------
+// AnyCompatible::to_any
+//---------------------------------------------------------------------------
+
+// Fields only reachable through `Deref`, where `Any::from` is not applicable.
+#[repr(C)]
+struct FieldHolderObj {
+    base: Object,
+    lhs: String,
+    rhs: Option<String>,
+    count: i64,
+}
+
+unsafe impl ObjectCore for FieldHolderObj {
+    const TYPE_KEY: &'static str = Object::TYPE_KEY;
+    const TYPE_DEPTH: i32 = Object::TYPE_DEPTH;
+    #[inline]
+    fn type_index() -> i32 {
+        Object::type_index()
+    }
+    #[inline]
+    unsafe fn object_header_mut(this: &mut Self) -> &mut TVMFFIObject {
+        Object::object_header_mut(&mut this.base)
+    }
+}
+
+#[test]
+fn test_to_any_matches_from_value() {
+    macro_rules! check {
+        ($value:expr, $ty:ty, $type_index:ident) => {{
+            let value: $ty = $value;
+            let any = value.to_any();
+            assert_eq!(any.type_index(), TypeIndex::$type_index as i32);
+            assert_eq!(any.type_index(), Any::from(value).type_index());
+            assert_eq!(any.try_as::<$ty>(), Some($value));
+            assert_eq!(any.debug_strong_count(), None);
+        }};
+    }
+
+    check!(-7i64, i64, kTVMFFIInt);
+    check!(true, bool, kTVMFFIBool);
+    check!(3.5f64, f64, kTVMFFIFloat);
+    check!(String::from("hello"), String, kTVMFFISmallStr);
+    check!(Bytes::from(&[1u8, 2, 3]), Bytes, kTVMFFISmallBytes);
+    assert_eq!(().to_any().type_index(), TypeIndex::kTVMFFINone as i32);
+}
+
+/// One incref, same as the `Any::from(x.clone())` it replaces, given back on drop.
+#[test]
+fn test_to_any_increfs_object_once() {
+    let s = String::from("hello world this is a long string");
+    assert_eq!(AnyView::from(&s).debug_strong_count(), Some(1));
+
+    let any = s.to_any();
+    assert_eq!(any.type_index(), TypeIndex::kTVMFFIStr as i32);
+    assert_eq!(any.debug_strong_count(), Some(2));
+
+    let by_clone = Any::from(s.clone());
+    assert_eq!(by_clone.debug_strong_count(), Some(3));
+    drop(by_clone);
+
+    assert_eq!(any.try_as::<String>().unwrap(), s);
+    drop(any);
+    assert_eq!(AnyView::from(&s).debug_strong_count(), Some(1));
+}
+
+/// The field is only reachable as a `&`, so `Any::from` cannot take it.
+#[test]
+fn test_to_any_from_borrowed_object_field() {
+    let lhs = String::from("hello world this is a long string");
+    let holder = ObjectArc::new(FieldHolderObj {
+        base: Object::new(),
+        lhs: lhs.clone(),
+        rhs: Some(lhs.clone()),
+        count: 11,
+    });
+    // `lhs` plus the two copies stored in the node.
+    assert_eq!(AnyView::from(&lhs).debug_strong_count(), Some(3));
+
+    let any = holder.lhs.to_any();
+    assert_eq!(any.debug_strong_count(), Some(4));
+    assert_eq!(any.try_as::<String>().unwrap(), lhs);
+
+    let any_opt = holder.rhs.to_any();
+    assert_eq!(
+        any_opt.try_as::<Option<String>>().unwrap(),
+        Some(lhs.clone())
+    );
+    assert_eq!(holder.count.to_any().try_as::<i64>(), Some(11));
+
+    drop(any);
+    drop(any_opt);
+    assert_eq!(AnyView::from(&lhs).debug_strong_count(), Some(3));
+}
+
+/// `Option<T>` and object containers inherit the same provided method.
+#[test]
+fn test_to_any_option_and_container() {
+    let none: Option<i64> = None;
+    assert_eq!(none.to_any().type_index(), TypeIndex::kTVMFFINone as i32);
+    assert_eq!(Some(7i64).to_any().try_as::<i64>(), Some(7));
+
+    let array = Array::<i64>::from_iter([1i64, 2, 3]);
+    let any = array.to_any();
+    assert_eq!(any.type_index(), TypeIndex::kTVMFFIArray as i32);
+    assert_eq!(any.debug_strong_count(), Some(2));
+    assert_eq!(any.try_as::<Array<i64>>().unwrap().len(), 3);
+    drop(any);
+    assert_eq!(AnyView::from(&array).debug_strong_count(), Some(1));
+}
+
+//---------------------------------------------------------------------------
+// AnyView -> Any conversion
+//---------------------------------------------------------------------------
+
+use tvm_ffi::tvm_ffi_sys::{TVMFFIAnyDataUnion, TVMFFIByteArray};
+
+/// # Safety
+///
+/// `type_index` must describe `payload`, and anything it points at must outlive
+/// the view.
+unsafe fn raw_view<'a>(type_index: TypeIndex, small_str_len: u32, payload: u64) -> AnyView<'a> {
+    unsafe {
+        AnyView::from_raw_ffi_any(TVMFFIAny {
+            type_index: type_index as i32,
+            small_str_len,
+            data_union: TVMFFIAnyDataUnion { v_uint64: payload },
+        })
+    }
+}
+
+/// A self-contained cell converts by a bitwise copy.
+#[test]
+fn test_any_from_view_copies_self_contained_cells() {
+    for (type_index, small_str_len) in [
+        (TypeIndex::kTVMFFINone, 0),
+        (TypeIndex::kTVMFFIInt, 0),
+        (TypeIndex::kTVMFFIBool, 0),
+        (TypeIndex::kTVMFFIFloat, 0),
+        (TypeIndex::kTVMFFIOpaquePtr, 0),
+        (TypeIndex::kTVMFFIDataType, 0),
+        (TypeIndex::kTVMFFIDevice, 0),
+        (TypeIndex::kTVMFFIDLTensorPtr, 0),
+        (TypeIndex::kTVMFFISmallStr, 3),
+        (TypeIndex::kTVMFFISmallBytes, 3),
+    ] {
+        let payload = 0x0102_0304_0506_0708u64;
+        // SAFETY: none of these dereferences or owns its payload.
+        let any: Any = unsafe { raw_view(type_index, small_str_len, payload) }.into();
+        assert_eq!(any.type_index(), type_index as i32, "{type_index:?}");
+        let out = unsafe { Any::into_raw_ffi_any(any) };
+        assert_eq!(out.small_str_len, small_str_len, "{type_index:?}");
+        assert_eq!(
+            unsafe { out.data_union.v_uint64 },
+            payload,
+            "{type_index:?}"
+        );
+    }
+}
+
+/// The three borrowed representations a C ABI caller can hand to a Rust
+/// callback. Rust never produces them, and they must be materialized, not copied.
+#[test]
+fn test_any_from_view_normalizes_borrowed_cells() {
+    let text = c"hello world this is a long string";
+    // SAFETY: `text` outlives the view.
+    let any: Any = unsafe { raw_view(TypeIndex::kTVMFFIRawStr, 0, text.as_ptr() as u64) }.into();
+    assert_eq!(any.type_index(), TypeIndex::kTVMFFIStr as i32);
+    assert_eq!(any.try_as::<String>().unwrap(), text.to_str().unwrap());
+
+    let payload: &[u8] = &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let byte_array = TVMFFIByteArray {
+        data: payload.as_ptr(),
+        size: payload.len(),
+    };
+    // SAFETY: `byte_array` and `payload` outlive the view.
+    let any: Any = unsafe {
+        raw_view(
+            TypeIndex::kTVMFFIByteArrayPtr,
+            0,
+            &byte_array as *const TVMFFIByteArray as u64,
+        )
+    }
+    .into();
+    assert_eq!(any.type_index(), TypeIndex::kTVMFFIBytes as i32);
+    assert_eq!(any.try_as::<Bytes>().unwrap(), payload);
+
+    let s = String::from("hello world this is a long string");
+    // SAFETY: the owned handle is handed to the conversion below exactly once.
+    let mut slot = unsafe { Any::into_raw_ffi_any(s.to_any()).data_union.v_obj };
+    assert_eq!(AnyView::from(&s).debug_strong_count(), Some(2));
+    // SAFETY: `slot` holds one owned reference for the conversion to take.
+    let any: Any = unsafe {
+        raw_view(
+            TypeIndex::kTVMFFIObjectRValueRef,
+            0,
+            &mut slot as *mut _ as u64,
+        )
+    }
+    .into();
+    assert_eq!(any.type_index(), TypeIndex::kTVMFFIStr as i32);
+    assert!(slot.is_null(), "the moved-from slot must be cleared");
+    assert_eq!(any.debug_strong_count(), Some(2));
+    drop(any);
+    assert_eq!(AnyView::from(&s).debug_strong_count(), Some(1));
+}

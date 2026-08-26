@@ -58,7 +58,7 @@ use crate::tvm_ffi_sys::{
 use crate::tvm_ffi_sys::{TVMFFIObjectHandle, TVMFFISEqHashKind};
 
 use super::structural_common::{
-    impl_callback_chain_tuple_arities, is_plain_inline_leaf, try_to_owned_without_normalization,
+    impl_callback_chain_tuple_arities, is_plain_inline, try_to_owned_without_normalization,
     with_structural_error_context,
 };
 use super::structural_visit::{
@@ -623,17 +623,17 @@ impl<D: MapDispatch> NativeMapper<D> {
         def_region_kind: DefRegionKind,
         permit: Permit,
     ) -> Result<Any> {
-        // Plain inline leaves have no children or structural identity.  Map
+        // Plain inline values have no children or structural identity.  Map
         // them directly instead of routing through identity lookup and the
         // default-mutation path, whose owning conversion crosses the C ABI.
         // Raw strings, byte-array views, and ObjectRValueRef are deliberately
         // excluded because converting those borrowed special values into an
         // Any performs normalization rather than a bitwise copy.
-        if is_plain_inline_leaf(raw.type_index) {
+        if is_plain_inline(raw.type_index) {
             let value = MapValue::from_raw(raw);
             return match self.dispatch.dispatch_map(&value, def_region_kind) {
                 Some(result) => result,
-                // SAFETY: `is_plain_inline_leaf` excludes every borrowed
+                // SAFETY: `is_plain_inline` excludes every borrowed
                 // representation that needs normalization.  These values own
                 // no external resource, so their owning form is the same
                 // bitwise TVMFFIAny value.

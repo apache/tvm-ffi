@@ -16,6 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+use crate::any::{Any, AnyView};
 use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
 use tvm_ffi_sys::{TVMFFIAny, TVMFFIGetTypeInfo};
 
@@ -68,6 +69,18 @@ pub unsafe trait AnyCompatible: Sized {
     }
     /// the type string of the type
     fn type_str() -> String;
+
+    /// Borrow `self` into an owned [`Any`], increfing object-backed values.
+    ///
+    /// The by-reference counterpart of `Any::from(value)`, for fields reached
+    /// through a `Deref` into shared object storage. `impl From<&T> for Any`
+    /// cannot be added instead: `&` is fundamental, so a downstream crate may
+    /// implement `AnyCompatible` for its own `&T` and the two impls overlap
+    /// (E0119).
+    #[inline]
+    fn to_any(&self) -> Any {
+        AnyView::from(self).into()
+    }
 }
 
 /// AnyCompatible for bool

@@ -62,10 +62,10 @@ impl<'a> AnyView<'a> {
     ///
     /// # Safety
     ///
-    /// The caller must keep every resource referenced by `data` alive for the
-    /// returned view's complete lifetime.
+    /// `data.type_index` must describe the payload, and the caller must keep
+    /// every resource it references alive for the view's complete lifetime.
     #[inline]
-    pub(crate) unsafe fn from_raw_ffi_any(data: TVMFFIAny) -> Self {
+    pub unsafe fn from_raw_ffi_any(data: TVMFFIAny) -> Self {
         Self {
             data,
             _phantom: std::marker::PhantomData,
@@ -291,15 +291,42 @@ impl<'a> From<&'a Any> for AnyView<'a> {
     }
 }
 
+/// Whether a `TVMFFIAny` cell owns everything it holds, so its owning form is a
+/// bitwise copy. Mirrors C++ `details::InplaceConvertAnyViewToAny`.
+#[inline]
+pub(crate) fn is_plain_inline(type_index: i32) -> bool {
+    type_index < TypeIndex::kTVMFFIRawStr as i32
+        || type_index == TypeIndex::kTVMFFISmallStr as i32
+        || type_index == TypeIndex::kTVMFFISmallBytes as i32
+}
+
 // convert AnyView to Any
 impl From<AnyView<'_>> for Any {
     #[inline]
     fn from(value: AnyView<'_>) -> Self {
-        unsafe {
-            let mut data = TVMFFIAny::new();
-            crate::check_safe_call!(TVMFFIAnyViewToOwnedAny(&value.data, &mut data)).unwrap();
-            Self { data }
+        let data = value.data;
+        // Owning a borrowed object is the same incref `Any::clone` does below.
+        if data.type_index >= TypeIndex::kTVMFFIStaticObjectBegin as i32 {
+            unsafe { object::unsafe_::inc_ref(data.data_union.v_obj) };
+            return Self { data };
         }
+        if is_plain_inline(data.type_index) {
+            return Self { data };
+        }
+        // What is left borrows foreign storage and needs the runtime.
+        any_view_to_owned_via_runtime(data)
+    }
+}
+
+/// Out of line so the inlined conversions above stay leaf code, without the
+/// stack frame and unwind path this call needs.
+#[cold]
+#[inline(never)]
+fn any_view_to_owned_via_runtime(view: TVMFFIAny) -> Any {
+    unsafe {
+        let mut data = TVMFFIAny::new();
+        crate::check_safe_call!(TVMFFIAnyViewToOwnedAny(&view, &mut data)).unwrap();
+        Any { data }
     }
 }
 
