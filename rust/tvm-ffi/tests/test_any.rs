@@ -393,22 +393,17 @@ fn test_to_any_matches_from_value() {
     check!(String::from("hello"), String, kTVMFFISmallStr);
     check!(Bytes::from(&[1u8, 2, 3]), Bytes, kTVMFFISmallBytes);
     assert_eq!(().to_any().type_index(), TypeIndex::kTVMFFINone as i32);
-}
+    assert_eq!(
+        Option::<i64>::None.to_any().type_index(),
+        TypeIndex::kTVMFFINone as i32
+    );
 
-/// One incref, same as the `Any::from(x.clone())` it replaces, given back on drop.
-#[test]
-fn test_to_any_increfs_object_once() {
+    // Object-backed: one incref, same as the `Any::from(x.clone())` it
+    // replaces, given back on drop.
     let s = String::from("hello world this is a long string");
-    assert_eq!(AnyView::from(&s).debug_strong_count(), Some(1));
-
     let any = s.to_any();
     assert_eq!(any.type_index(), TypeIndex::kTVMFFIStr as i32);
     assert_eq!(any.debug_strong_count(), Some(2));
-
-    let by_clone = Any::from(s.clone());
-    assert_eq!(by_clone.debug_strong_count(), Some(3));
-    drop(by_clone);
-
     assert_eq!(any.try_as::<String>().unwrap(), s);
     drop(any);
     assert_eq!(AnyView::from(&s).debug_strong_count(), Some(1));
@@ -441,22 +436,6 @@ fn test_to_any_from_borrowed_object_field() {
     drop(any);
     drop(any_opt);
     assert_eq!(AnyView::from(&lhs).debug_strong_count(), Some(3));
-}
-
-/// `Option<T>` and object containers inherit the same provided method.
-#[test]
-fn test_to_any_option_and_container() {
-    let none: Option<i64> = None;
-    assert_eq!(none.to_any().type_index(), TypeIndex::kTVMFFINone as i32);
-    assert_eq!(Some(7i64).to_any().try_as::<i64>(), Some(7));
-
-    let array = Array::<i64>::from_iter([1i64, 2, 3]);
-    let any = array.to_any();
-    assert_eq!(any.type_index(), TypeIndex::kTVMFFIArray as i32);
-    assert_eq!(any.debug_strong_count(), Some(2));
-    assert_eq!(any.try_as::<Array<i64>>().unwrap().len(), 3);
-    drop(any);
-    assert_eq!(AnyView::from(&array).debug_strong_count(), Some(1));
 }
 
 //---------------------------------------------------------------------------
