@@ -55,14 +55,14 @@ use crate::any::{Any, AnyView};
 use crate::error::{Error, Result, RUNTIME_ERROR, TYPE_ERROR};
 use crate::function::Function;
 use crate::object::{Object, ObjectArc, ObjectCore};
+use crate::reflection::TypeAttrColumn;
 use crate::tvm_ffi_sys::TVMFFIFieldFlagBitMask::{
     kTVMFFIFieldFlagBitMaskSEqHashDefNonRecursive, kTVMFFIFieldFlagBitMaskSEqHashDefRecursive,
     kTVMFFIFieldFlagBitMaskSEqHashIgnore,
 };
 use crate::tvm_ffi_sys::{
-    TVMFFIAny, TVMFFIByteArray, TVMFFIDefRegionKind, TVMFFIFieldInfo, TVMFFIGetTypeAttrColumn,
-    TVMFFIGetTypeInfo, TVMFFIObject, TVMFFISEqHashKind, TVMFFITypeAttrColumn, TVMFFITypeIndex,
-    TVMFFITypeKeyToIndex,
+    TVMFFIAny, TVMFFIByteArray, TVMFFIDefRegionKind, TVMFFIFieldInfo, TVMFFIGetTypeInfo,
+    TVMFFIObject, TVMFFISEqHashKind, TVMFFITypeAttrColumn, TVMFFITypeIndex, TVMFFITypeKeyToIndex,
 };
 
 use super::structural_common::{impl_callback_chain_tuple_arities, with_structural_error_context};
@@ -1174,7 +1174,9 @@ fn visit_children_raw<C: ChildVisit>(
     driver_context: *mut c_void,
     def_region_kind: DefRegionKind,
 ) -> NativeResult {
-    if let Some(attr) = structural_visit_column().and_then(|column| column.get(value.type_index)) {
+    if let Some(attr) =
+        structural_visit_column().and_then(|column| column.get_raw(value.type_index))
+    {
         if attr.type_index != TVMFFITypeIndex::kTVMFFINone as i32 {
             let active = active_structural_visitor()?;
             return with_current_visitor_context(active, driver_context, || {
@@ -1909,37 +1911,8 @@ fn runtime_error(message: &str) -> Error {
     Error::new(RUNTIME_ERROR, message, "")
 }
 
-#[derive(Clone, Copy)]
-pub(crate) struct TypeAttrColumn(NonNull<TVMFFITypeAttrColumn>);
-
-impl TypeAttrColumn {
-    pub(crate) unsafe fn from_non_null(pointer: NonNull<TVMFFITypeAttrColumn>) -> Self {
-        Self(pointer)
-    }
-
-    pub(crate) fn as_ptr(self) -> *mut TVMFFITypeAttrColumn {
-        self.0.as_ptr()
-    }
-
-    /// Copy one borrowed cell; ownership remains with the registry.
-    pub(crate) fn get(self, type_index: i32) -> Option<TVMFFIAny> {
-        unsafe {
-            let column = self.0.as_ref();
-            let index = type_index - column.begin_index;
-            if index < 0 || index >= column.size || column.data.is_null() {
-                None
-            } else {
-                Some(*column.data.offset(index as isize))
-            }
-        }
-    }
-}
-
 pub(crate) fn type_attr_column(attr_name: &str) -> Option<TypeAttrColumn> {
-    unsafe {
-        let attr_name = TVMFFIByteArray::from_str(attr_name);
-        NonNull::new(TVMFFIGetTypeAttrColumn(&attr_name).cast_mut()).map(TypeAttrColumn)
-    }
+    TypeAttrColumn::new(attr_name)
 }
 
 /// Cached `__s_visit__` column pointer (0 = not seen yet). A registry column
@@ -1953,7 +1926,7 @@ fn structural_visit_column() -> Option<TypeAttrColumn> {
     let cached = STRUCTURAL_VISIT_COLUMN.load(Ordering::Relaxed);
     if cached != 0 {
         let pointer = cached as *mut TVMFFITypeAttrColumn;
-        return Some(TypeAttrColumn(unsafe { NonNull::new_unchecked(pointer) }));
+        return Some(unsafe { TypeAttrColumn::from_non_null(NonNull::new_unchecked(pointer)) });
     }
     initialize_structural_visit_column()
 }
@@ -1961,7 +1934,7 @@ fn structural_visit_column() -> Option<TypeAttrColumn> {
 #[inline]
 fn has_registered_visit_hook(type_index: i32) -> bool {
     structural_visit_column()
-        .and_then(|column| column.get(type_index))
+        .and_then(|column| column.get_raw(type_index))
         .is_some_and(|attr| attr.type_index != TVMFFITypeIndex::kTVMFFINone as i32)
 }
 
@@ -1969,7 +1942,7 @@ fn has_registered_visit_hook(type_index: i32) -> bool {
 #[inline(never)]
 fn initialize_structural_visit_column() -> Option<TypeAttrColumn> {
     let column = type_attr_column(STRUCTURAL_VISIT_ATTR)?;
-    STRUCTURAL_VISIT_COLUMN.store(column.0.as_ptr() as usize, Ordering::Relaxed);
+    STRUCTURAL_VISIT_COLUMN.store(column.as_ptr() as usize, Ordering::Relaxed);
     Some(column)
 }
 
