@@ -17,6 +17,7 @@
  * under the License.
  */
 use crate::any::{Any, AnyView, ArgTryFromAnyView};
+use crate::collections::map::MapValueCompatible;
 use crate::error::Result;
 use crate::string::{Bytes, String};
 use crate::type_traits::AnyCompatible;
@@ -154,25 +155,25 @@ crate::impl_arg_into_ref!(
 
 // `Map<K, V>` passes by value/reference like the scalars above, but its type
 // parameters keep it out of the `impl_*!` macros, so the impls are spelled out.
-impl<K: AnyCompatible, V: AnyCompatible> IntoArgHolder for crate::Map<K, V> {
+impl<K: AnyCompatible, V: MapValueCompatible> IntoArgHolder for crate::Map<K, V> {
     type Target = crate::Map<K, V>;
     fn into_arg_holder(self) -> Self::Target {
         self
     }
 }
-impl<'a, K: AnyCompatible, V: AnyCompatible> IntoArgHolder for &'a crate::Map<K, V> {
+impl<'a, K: AnyCompatible, V: MapValueCompatible> IntoArgHolder for &'a crate::Map<K, V> {
     type Target = &'a crate::Map<K, V>;
     fn into_arg_holder(self) -> Self::Target {
         self
     }
 }
-impl<K: AnyCompatible, V: AnyCompatible> ArgIntoRef for crate::Map<K, V> {
+impl<K: AnyCompatible, V: MapValueCompatible> ArgIntoRef for crate::Map<K, V> {
     type Target = crate::Map<K, V>;
     fn to_ref(&self) -> &Self::Target {
         self
     }
 }
-impl<K: AnyCompatible, V: AnyCompatible> ArgIntoRef for &crate::Map<K, V> {
+impl<K: AnyCompatible, V: MapValueCompatible> ArgIntoRef for &crate::Map<K, V> {
     type Target = crate::Map<K, V>;
     fn to_ref(&self) -> &Self::Target {
         self

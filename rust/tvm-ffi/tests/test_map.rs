@@ -127,6 +127,72 @@ fn test_map_any_roundtrip() {
 }
 
 #[test]
+fn test_map_with_any_values() {
+    let empty = Map::<String, Any>::default();
+    assert!(empty.is_empty());
+
+    let array = Array::new(vec![1i64, 2, 3]);
+    let array_base_count = AnyView::from(&array).debug_strong_count().unwrap();
+    let map: Map<String, Any> = [
+        (String::from("number"), Any::from(7i64)),
+        (String::from("text"), Any::from(String::from("value"))),
+        (String::from("array"), Any::from(array.clone())),
+    ]
+    .into_iter()
+    .collect();
+
+    assert_eq!(map.len(), 3);
+    assert!(map.contains_key(&String::from("number")));
+    assert!(!map.contains_key(&String::from("missing")));
+    assert_eq!(format!("{map:?}"), "Map<String, Any>[3]");
+    assert_eq!(AnyView::from(&array).debug_strong_count().unwrap(), 2);
+    assert_eq!(
+        i64::try_from(map.get(&String::from("number")).unwrap().unwrap()).unwrap(),
+        7
+    );
+    assert_eq!(
+        String::try_from(map.get(&String::from("text")).unwrap().unwrap())
+            .unwrap()
+            .as_str(),
+        "value"
+    );
+
+    let fetched_array =
+        Array::<i64>::try_from(map.get(&String::from("array")).unwrap().unwrap()).unwrap();
+    assert_eq!(fetched_array.iter().collect::<Vec<_>>(), vec![1, 2, 3]);
+    assert_eq!(AnyView::from(&array).debug_strong_count().unwrap(), 3);
+    drop(fetched_array);
+
+    let round_trip = Map::<String, Any>::try_from(Any::from(map.clone())).unwrap();
+    let view_round_trip = Map::<String, Any>::try_from(AnyView::from(&map)).unwrap();
+    assert_eq!(round_trip.iter().count(), 3);
+    assert_eq!(round_trip.keys().count(), 3);
+    assert_eq!(round_trip.values().count(), 3);
+    assert_eq!((&round_trip).into_iter().count(), 3);
+
+    let map_size = Function::get_global("ffi.MapSize").unwrap();
+    let by_value: i64 = map_size
+        .call_tuple((round_trip.clone(),))
+        .unwrap()
+        .try_into()
+        .unwrap();
+    let by_reference: i64 = map_size
+        .call_tuple((&view_round_trip,))
+        .unwrap()
+        .try_into()
+        .unwrap();
+    assert_eq!((by_value, by_reference), (3, 3));
+
+    drop(round_trip);
+    drop(view_round_trip);
+    drop(map);
+    assert_eq!(
+        AnyView::from(&array).debug_strong_count().unwrap(),
+        array_base_count
+    );
+}
+
+#[test]
 fn test_map_shares_underlying_object() {
     let map: Map<i64, i64> = [(1i64, 10i64)].into_iter().collect();
     // Cloning shares the same underlying MapObj rather than copying entries.
