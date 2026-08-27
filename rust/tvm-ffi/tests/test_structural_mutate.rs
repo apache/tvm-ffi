@@ -1457,6 +1457,37 @@ fn generated_mutator_can_drive_recursion_through_mut_self() {
     assert_eq!(mutator.integers, vec![1, 2]);
 }
 
+#[derive(Default)]
+struct GeneratedDefaultingMutator {
+    arrays: usize,
+    integers: Vec<i64>,
+}
+
+#[dispatch(mutate)]
+impl GeneratedDefaultingMutator {
+    fn mutate_array(&mut self, array: Array<i64>, kind: DefRegionKind) -> Result<Any> {
+        self.arrays += 1;
+        self.default_mutate_value(&array, kind)
+    }
+
+    fn mutate_integer(&mut self, value: i64) -> Any {
+        self.integers.push(value);
+        Any::from(value + 1)
+    }
+}
+
+#[test]
+fn generated_mutator_can_default_recurse_from_a_typed_handler() {
+    let mut mutator = GeneratedDefaultingMutator::default();
+    let mutated = structural_mutate(Array::new(vec![1i64, 2]), &mut mutator)
+        .and_then(Array::<i64>::try_from)
+        .unwrap();
+
+    assert_eq!(mutated.iter().collect::<Vec<_>>(), vec![2, 3]);
+    assert_eq!(mutator.arrays, 1);
+    assert_eq!(mutator.integers, vec![1, 2]);
+}
+
 struct GeneratedRemappingMutator {
     type_index: i32,
     calls: usize,
