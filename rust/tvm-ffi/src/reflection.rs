@@ -26,7 +26,86 @@ use crate::tvm_ffi_sys::{
     TVMFFIAny, TVMFFIByteArray, TVMFFIFieldGetter, TVMFFIFieldInfo, TVMFFIGetTypeAttrColumn,
     TVMFFIGetTypeInfo, TVMFFIObject, TVMFFITypeAttrColumn, TVMFFITypeIndex,
 };
-use crate::{Any, AnyView, Error, ObjectCore, Result, TYPE_ERROR};
+use crate::{Any, AnyView, Array, Error, Map, ObjectCore, Result, String, TYPE_ERROR};
+
+/// Standard type attribute containing a certified complete native object layout.
+pub const NATIVE_OBJECT_LAYOUT_ATTR: &str = "__ffi_native_object_layout__";
+/// Standard type attribute describing a semantic constructor recipe.
+pub const CONSTRUCTOR_RECIPE_ATTR: &str = "__ffi_constructor_recipe__";
+/// Standard reflected static method used by constructor recipes.
+pub const CONSTRUCTOR_PREPARE_METHOD: &str = "__ffi_prepare__";
+
+/// Native layout properties that cannot be derived safely from reflected fields alone.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NativeObjectLayout {
+    pub version: i64,
+    pub alignment: usize,
+    pub is_final: bool,
+    pub field_count: usize,
+    pub fingerprint: String,
+}
+
+/// Machine-readable description of a semantic constructor.
+#[derive(Clone, Debug)]
+pub struct ConstructorRecipe {
+    pub version: i64,
+    pub method: String,
+    pub inputs: Array<String>,
+    pub derived_fields: Array<String>,
+}
+
+fn metadata_field<T>(metadata: &Map<String, Any>, owner: &str, name: &str) -> Result<T>
+where
+    T: TryFrom<Any, Error = Error>,
+{
+    let value = metadata.get(&String::from(name))?.ok_or_else(|| {
+        Error::new(
+            TYPE_ERROR,
+            &format!("{owner} metadata is missing required field `{name}`"),
+            "",
+        )
+    })?;
+    T::try_from(value)
+}
+
+/// Read and validate the complete-layout certificate for `type_index`.
+pub fn get_native_object_layout(type_index: i32) -> Result<Option<NativeObjectLayout>> {
+    let Some(value) = get_type_attr(type_index, NATIVE_OBJECT_LAYOUT_ATTR) else {
+        return Ok(None);
+    };
+    let metadata = Map::<String, Any>::try_from(value)?;
+    let alignment = metadata_field::<i64>(&metadata, NATIVE_OBJECT_LAYOUT_ATTR, "alignment")?;
+    let is_final = metadata_field::<i64>(&metadata, NATIVE_OBJECT_LAYOUT_ATTR, "final")?;
+    let field_count = metadata_field::<i64>(&metadata, NATIVE_OBJECT_LAYOUT_ATTR, "field_count")?;
+    if alignment <= 0 || field_count < 0 || !(0..=1).contains(&is_final) {
+        return Err(Error::new(
+            TYPE_ERROR,
+            "native object layout metadata contains invalid alignment, finality, or field count",
+            "",
+        ));
+    }
+    Ok(Some(NativeObjectLayout {
+        version: metadata_field(&metadata, NATIVE_OBJECT_LAYOUT_ATTR, "version")?,
+        alignment: alignment as usize,
+        is_final: is_final != 0,
+        field_count: field_count as usize,
+        fingerprint: metadata_field(&metadata, NATIVE_OBJECT_LAYOUT_ATTR, "fingerprint")?,
+    }))
+}
+
+/// Read the semantic-constructor recipe for `type_index`.
+pub fn get_constructor_recipe(type_index: i32) -> Result<Option<ConstructorRecipe>> {
+    let Some(value) = get_type_attr(type_index, CONSTRUCTOR_RECIPE_ATTR) else {
+        return Ok(None);
+    };
+    let metadata = Map::<String, Any>::try_from(value)?;
+    Ok(Some(ConstructorRecipe {
+        version: metadata_field(&metadata, CONSTRUCTOR_RECIPE_ATTR, "version")?,
+        method: metadata_field(&metadata, CONSTRUCTOR_RECIPE_ATTR, "method")?,
+        inputs: metadata_field(&metadata, CONSTRUCTOR_RECIPE_ATTR, "inputs")?,
+        derived_fields: metadata_field(&metadata, CONSTRUCTOR_RECIPE_ATTR, "derived_fields")?,
+    }))
+}
 
 /// A process-lifetime column of reflection attributes indexed by runtime type.
 ///

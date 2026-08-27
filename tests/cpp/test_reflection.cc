@@ -93,10 +93,17 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def_type_attr("test.attr.object.std_string", std::string("std-string"))
       .def_type_attr("test.attr.object.int", int64_t{7})
       .def_type_attr("test.attr.object.bool", true)
-      .def_type_attr("test.attr.object.func", [](int64_t value) -> int64_t { return value + 1; });
+      .def_type_attr("test.attr.object.func", [](int64_t value) -> int64_t { return value + 1; })
+      .def_static(refl::type_attr::kPrepare,
+                  [](int64_t x, int64_t y) {
+                    return Map<String, Any>{{"x", x}, {"y", y}};
+                  })
+      .def_constructor_recipe({"x", "y"}, {"x", "y"})
+      .def_complete_layout();
   refl::ObjectDef<TestObjADerived>()
       .def(refl::init<int64_t, int64_t, int64_t>())
-      .def_ro("z", &TestObjADerived::z);
+      .def_ro("z", &TestObjADerived::z)
+      .def_complete_layout();
   refl::ObjectDef<PrefixLookupObj>()
       .def_ro("stage", &PrefixLookupObj::stage)
       .def_static("run", []() -> int64_t { return 1; });
@@ -360,6 +367,25 @@ TEST(Reflection, ObjectDefTypeAttrDirectValues) {
   EXPECT_EQ(int_attr[type_index].cast<int64_t>(), 7);
   EXPECT_EQ(bool_attr[type_index].cast<bool>(), true);
   EXPECT_EQ(func_attr[type_index].cast<Function>()(3).cast<int64_t>(), 4);
+}
+
+TEST(Reflection, StandardBindingMetadata) {
+  int32_t type_index = TestObjA::RuntimeTypeIndex();
+  reflection::TypeAttrColumn layout_column(reflection::type_attr::kNativeObjectLayout);
+  Map<String, Any> layout = layout_column[type_index].cast<Map<String, Any>>();
+  EXPECT_EQ(layout.at("version").cast<int64_t>(), 1);
+  EXPECT_EQ(layout.at("alignment").cast<int64_t>(), alignof(TestObjA));
+  EXPECT_EQ(layout.at("final").cast<int64_t>(), 0);
+  EXPECT_EQ(layout.at("field_count").cast<int64_t>(), 2);
+  EXPECT_EQ(layout.at("fingerprint").cast<String>().size(), 16);
+
+  reflection::TypeAttrColumn recipe_column(reflection::type_attr::kConstructorRecipe);
+  Map<String, Any> recipe = recipe_column[type_index].cast<Map<String, Any>>();
+  EXPECT_EQ(recipe.at("method").cast<String>(), reflection::type_attr::kPrepare);
+  Array<String> inputs = recipe.at("inputs").cast<Array<String>>();
+  ASSERT_EQ(inputs.size(), 2);
+  EXPECT_EQ(inputs[0], "x");
+  EXPECT_EQ(inputs[1], "y");
 }
 
 TEST(Reflection, TypeAttrDefDirectValues) {

@@ -64,7 +64,11 @@ pub use crate::object::{
     Object, ObjectArc, ObjectCore, ObjectCoreWithExtraItems, ObjectIdentity, ObjectRefCore,
 };
 pub use crate::optional::{Optional, OptionalCompatible};
-pub use crate::reflection::{get_type_attr, FieldGetter, TypeAttrColumn};
+pub use crate::reflection::{
+    get_constructor_recipe, get_native_object_layout, get_type_attr, ConstructorRecipe,
+    FieldGetter, NativeObjectLayout, TypeAttrColumn, CONSTRUCTOR_PREPARE_METHOD,
+    CONSTRUCTOR_RECIPE_ATTR, NATIVE_OBJECT_LAYOUT_ATTR,
+};
 pub use crate::rvalue_ref::RValueRef;
 pub use crate::string::{Bytes, String};
 pub use crate::type_traits::AnyCompatible;
