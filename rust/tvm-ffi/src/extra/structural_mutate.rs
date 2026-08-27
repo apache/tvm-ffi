@@ -936,6 +936,20 @@ pub trait StructuralMutator: Sized {
         user_default_mutate(self, value.raw(), def_region_kind, Permit::Copy)
     }
 
+    /// Apply default non-in-place mutation to a borrowed typed value.
+    ///
+    /// Unlike [Self::mutate_child], this bypasses dispatch for the value
+    /// itself while its children still re-enter this mutator. This lets a
+    /// typed structural-mutate handler recurse through its current node
+    /// before applying a post-order rewrite.
+    fn default_mutate_value<T>(&mut self, value: &T, def_region_kind: DefRegionKind) -> Result<Any>
+    where
+        for<'x> AnyView<'x>: From<&'x T>,
+    {
+        let view = AnyView::from(value);
+        user_default_mutate(self, *view.as_raw_ffi_any(), def_region_kind, Permit::Copy)
+    }
+
     /// Apply the default mutation under an engine-issued in-place capability.
     ///
     /// Uniqueness is checked again here because user code may have retained
