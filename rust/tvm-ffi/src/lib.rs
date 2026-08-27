@@ -30,6 +30,7 @@ pub mod macros;
 pub mod match_any_internal;
 pub mod object;
 pub mod optional;
+pub mod rvalue_ref;
 pub mod string;
 pub mod type_traits;
 pub use tvm_ffi_sys;
@@ -58,8 +59,11 @@ pub use crate::extra::structural_visit::{
 };
 pub use crate::function::Function;
 pub use crate::object::ObjectRefCast;
-pub use crate::object::{Object, ObjectArc, ObjectCore, ObjectCoreWithExtraItems, ObjectRefCore};
+pub use crate::object::{
+    Object, ObjectArc, ObjectCore, ObjectCoreWithExtraItems, ObjectIdentity, ObjectRefCore,
+};
 pub use crate::optional::{Optional, OptionalCompatible};
+pub use crate::rvalue_ref::RValueRef;
 pub use crate::string::{Bytes, String};
 pub use crate::type_traits::AnyCompatible;
 pub use tvm_ffi_macros::{dispatch, match_any};

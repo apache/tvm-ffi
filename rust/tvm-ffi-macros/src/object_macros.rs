@@ -94,6 +94,8 @@ pub fn derive_object(input: proc_macro::TokenStream) -> TokenStream {
             let (base_id, base_ty) = (f.ident.clone()?, f.ty.clone());
             // The transitive case of subtyping
             Some(quote! {
+                const TYPE_PARENT_KEY: Option<&'static str> =
+                    Some(<#base_ty as #tvm_ffi_crate::object::ObjectCore>::TYPE_KEY);
                 const TYPE_DEPTH: i32 =
                     <#base_ty as #tvm_ffi_crate::object::ObjectCore>::TYPE_DEPTH + 1;
 

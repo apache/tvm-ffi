@@ -107,6 +107,9 @@ fn test_is_instance_of() {
     assert_eq!(Object::TYPE_DEPTH, 0);
     assert_eq!(TestBaseObj::TYPE_DEPTH, 1);
     assert_eq!(TestDerivedObj::TYPE_DEPTH, 2);
+    assert_eq!(Object::TYPE_PARENT_KEY, None);
+    assert_eq!(TestBaseObj::TYPE_PARENT_KEY, Some(Object::TYPE_KEY));
+    assert_eq!(TestDerivedObj::TYPE_PARENT_KEY, Some(TestBaseObj::TYPE_KEY));
     // reflexive
     assert!(is_instance_of::<TestBaseObj>(base_index));
     // child -> ancestors at every depth

@@ -1470,6 +1470,7 @@ const _: () = {
 // C++ prefix is checked by the compile-time offset assertions above.
 unsafe impl ObjectCore for RuntimeStructuralMutatorObj {
     const TYPE_KEY: &'static str = "ffi.StructuralMutator";
+    const TYPE_PARENT_KEY: Option<&'static str> = Some(Object::TYPE_KEY);
     const TYPE_DEPTH: i32 = Object::TYPE_DEPTH + 1;
 
     fn type_index() -> i32 {

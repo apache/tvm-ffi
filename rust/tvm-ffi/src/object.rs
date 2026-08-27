@@ -51,6 +51,13 @@ unsafe impl<T: Send + Sync + ObjectCore> Sync for ObjectArc<T> {}
 pub unsafe trait ObjectCore: Sized + 'static {
     /// the type key of the object
     const TYPE_KEY: &'static str;
+    /// Type key of the direct parent, or `None` for the root object.
+    ///
+    /// Derived object definitions fill this from their offset-zero base field.
+    /// It lets generated bindings validate the exact native inheritance edge,
+    /// rather than accepting any parent chain with the same depth.
+    #[doc(hidden)]
+    const TYPE_PARENT_KEY: Option<&'static str> = None;
     /// Depth of this type in the object inheritance tree.
     ///
     /// The root [`Object`] has depth zero, and every registered subtype has
@@ -126,6 +133,67 @@ pub unsafe trait ObjectRefCore: Sized + Clone {
     fn data(this: &Self) -> &ObjectArc<Self::ContainerType>;
     fn into_data(this: Self) -> ObjectArc<Self::ContainerType>;
     fn from_data(data: ObjectArc<Self::ContainerType>) -> Self;
+
+    /// Return whether two object references point to the same allocation.
+    #[inline]
+    fn same_as<Other: ObjectRefCore>(&self, other: &Other) -> bool {
+        unsafe {
+            ObjectArc::as_raw(Self::data(self)).cast::<()>()
+                == ObjectArc::as_raw(Other::data(other)).cast::<()>()
+        }
+    }
+}
+
+/// An owning, hashable identity key for an FFI object.
+///
+/// The retained strong reference prevents the allocation address from being
+/// reused while the key is alive. This makes it suitable for identity-based
+/// maps without exposing raw object pointers to downstream code.
+#[derive(Clone)]
+pub struct ObjectIdentity {
+    data: ObjectArc<Object>,
+}
+
+impl ObjectIdentity {
+    /// Retain the allocation referenced by `value` as an identity key.
+    pub fn of<T: ObjectRefCore>(value: &T) -> Self {
+        unsafe {
+            let ptr = ObjectArc::as_raw(T::data(value)) as *mut TVMFFIObject;
+            unsafe_::inc_ref(ptr);
+            Self {
+                data: ObjectArc::from_raw(ptr.cast::<Object>()),
+            }
+        }
+    }
+
+    #[inline]
+    fn as_ptr(&self) -> *const TVMFFIObject {
+        unsafe { ObjectArc::as_raw(&self.data).cast::<TVMFFIObject>() }
+    }
+}
+
+impl PartialEq for ObjectIdentity {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.as_ptr() == other.as_ptr()
+    }
+}
+
+impl Eq for ObjectIdentity {}
+
+impl std::hash::Hash for ObjectIdentity {
+    #[inline]
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.as_ptr().hash(state);
+    }
+}
+
+impl std::fmt::Debug for ObjectIdentity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("ObjectIdentity")
+            .field(&self.as_ptr())
+            .finish()
+    }
 }
 
 /// Check whether a runtime type index refers to `Target` or one of its
@@ -377,6 +445,7 @@ impl Object {
 
 unsafe impl ObjectCore for Object {
     const TYPE_KEY: &'static str = "ffi.Object";
+    const TYPE_PARENT_KEY: Option<&'static str> = None;
     const TYPE_DEPTH: i32 = 0;
     #[inline]
     fn type_index() -> i32 {

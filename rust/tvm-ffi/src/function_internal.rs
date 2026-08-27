@@ -17,10 +17,11 @@
  * under the License.
  */
 use crate::any::{Any, AnyView, ArgTryFromAnyView};
-use crate::collections::map::MapValueCompatible;
 use crate::error::Result;
+use crate::object::ObjectRefCore;
+use crate::rvalue_ref::RValueRef;
 use crate::string::{Bytes, String};
-use crate::type_traits::AnyCompatible;
+use crate::type_traits::{AnyCompatible, ContainerElement};
 
 //------------------------------------------------------------------------
 // PackedCallable
@@ -149,31 +150,99 @@ pub trait ArgIntoRef {
     fn to_ref(&self) -> &Self::Target;
 }
 
+/// Convert a canonical argument holder into its packed ABI view.
+#[doc(hidden)]
+pub trait PackedArg {
+    fn as_packed_arg(&self) -> AnyView<'_>;
+}
+
+impl<T: AnyCompatible> PackedArg for T {
+    #[inline]
+    fn as_packed_arg(&self) -> AnyView<'_> {
+        AnyView::from(self)
+    }
+}
+
+impl<T> PackedArg for RValueRef<T>
+where
+    T: ObjectRefCore + AnyCompatible,
+{
+    #[inline]
+    fn as_packed_arg(&self) -> AnyView<'_> {
+        AnyView::from(self)
+    }
+}
+
 crate::impl_arg_into_ref!(
     bool, i8, i16, i32, i64, isize, u8, u16, u32, u64, usize, f32, f64, String, Bytes
 );
 
-// `Map<K, V>` passes by value/reference like the scalars above, but its type
-// parameters keep it out of the `impl_*!` macros, so the impls are spelled out.
-impl<K: AnyCompatible, V: MapValueCompatible> IntoArgHolder for crate::Map<K, V> {
+// Parametric containers pass by value/reference like the scalars above, but
+// their type parameters keep them out of the `impl_*!` macros.
+impl<T: ContainerElement + Clone> IntoArgHolder for crate::Array<T> {
+    type Target = crate::Array<T>;
+    fn into_arg_holder(self) -> Self::Target {
+        self
+    }
+}
+impl<'a, T: ContainerElement + Clone> IntoArgHolder for &'a crate::Array<T> {
+    type Target = &'a crate::Array<T>;
+    fn into_arg_holder(self) -> Self::Target {
+        self
+    }
+}
+impl<T: ContainerElement + Clone> ArgIntoRef for crate::Array<T> {
+    type Target = crate::Array<T>;
+    fn to_ref(&self) -> &Self::Target {
+        self
+    }
+}
+impl<T: ContainerElement + Clone> ArgIntoRef for &crate::Array<T> {
+    type Target = crate::Array<T>;
+    fn to_ref(&self) -> &Self::Target {
+        self
+    }
+}
+
+impl<T> IntoArgHolder for RValueRef<T>
+where
+    T: ObjectRefCore + AnyCompatible,
+{
+    type Target = Self;
+    fn into_arg_holder(self) -> Self::Target {
+        self
+    }
+}
+
+impl<T> ArgIntoRef for RValueRef<T>
+where
+    T: ObjectRefCore + AnyCompatible,
+{
+    type Target = Self;
+    fn to_ref(&self) -> &Self::Target {
+        self
+    }
+}
+
+impl<K: ContainerElement, V: ContainerElement> IntoArgHolder for crate::Map<K, V> {
     type Target = crate::Map<K, V>;
     fn into_arg_holder(self) -> Self::Target {
         self
     }
 }
-impl<'a, K: AnyCompatible, V: MapValueCompatible> IntoArgHolder for &'a crate::Map<K, V> {
+impl<'a, K: ContainerElement, V: ContainerElement> IntoArgHolder for &'a crate::Map<K, V> {
     type Target = &'a crate::Map<K, V>;
     fn into_arg_holder(self) -> Self::Target {
         self
     }
 }
-impl<K: AnyCompatible, V: MapValueCompatible> ArgIntoRef for crate::Map<K, V> {
+impl<K: ContainerElement, V: ContainerElement> ArgIntoRef for crate::Map<K, V> {
     type Target = crate::Map<K, V>;
     fn to_ref(&self) -> &Self::Target {
         self
     }
 }
-impl<K: AnyCompatible, V: MapValueCompatible> ArgIntoRef for &crate::Map<K, V> {
+impl<K: ContainerElement, V: ContainerElement> ArgIntoRef for &crate::Map<K, V> {
     type Target = crate::Map<K, V>;
     fn to_ref(&self) -> &Self::Target {
         self
@@ -196,14 +265,14 @@ macro_rules! impl_tuple_as_packed_args {
         where
             $(
                 $T: ArgIntoRef,
-                $T::Target: AnyCompatible,
+                $T::Target: PackedArg,
             )*
         {
             const LEN: usize = $len;
 
             fn fill_any_view<'a>(&'a self, _any_view: &mut [AnyView<'a>]) {
                 $(
-                    _any_view[$idx] = AnyView::from(self.$idx.to_ref());
+                    _any_view[$idx] = self.$idx.to_ref().as_packed_arg();
                 )*
             }
         }

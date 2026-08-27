@@ -92,6 +92,25 @@ fn test_function_call_tuple() {
 }
 
 #[test]
+fn test_function_rvalue_ref_arguments() {
+    let strong_count = Function::from_typed(|value: RValueRef<Array<i64>>| -> Result<i64> {
+        let value = value.into_inner();
+        Ok(AnyView::from(&value).debug_strong_count().unwrap() as i64)
+    });
+
+    let moved = Array::new(vec![1i64, 2]);
+    assert_eq!(AnyView::from(&moved).debug_strong_count(), Some(1));
+    let count = i64::try_from(strong_count.call_tuple((RValueRef::new(moved),)).unwrap()).unwrap();
+    assert_eq!(count, 1);
+
+    let borrowed = Array::new(vec![3i64, 4]);
+    assert_eq!(AnyView::from(&borrowed).debug_strong_count(), Some(1));
+    let count = i64::try_from(strong_count.call_tuple((&borrowed,)).unwrap()).unwrap();
+    assert_eq!(count, 2);
+    assert_eq!(AnyView::from(&borrowed).debug_strong_count(), Some(1));
+}
+
+#[test]
 fn test_function_into_typed_fn() {
     let offset = 2;
     let typed_sum1 = into_typed_fn!(

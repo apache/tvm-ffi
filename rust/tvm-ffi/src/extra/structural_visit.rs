@@ -1309,6 +1309,7 @@ const _: () = {
 // `StructuralVisitorObj`; the runtime type is registered by the C++ extra.
 unsafe impl ObjectCore for RuntimeStructuralVisitorObj {
     const TYPE_KEY: &'static str = "ffi.StructuralVisitor";
+    const TYPE_PARENT_KEY: Option<&'static str> = Some(Object::TYPE_KEY);
     const TYPE_DEPTH: i32 = Object::TYPE_DEPTH + 1;
 
     fn type_index() -> i32 {
@@ -1336,6 +1337,7 @@ unsafe impl ObjectCore for RuntimeStructuralVisitorObj {
 // one `Any`, exactly matching `RuntimeVisitInterruptObj`.
 unsafe impl ObjectCore for RuntimeVisitInterruptObj {
     const TYPE_KEY: &'static str = "ffi.VisitInterrupt";
+    const TYPE_PARENT_KEY: Option<&'static str> = Some(Object::TYPE_KEY);
     const TYPE_DEPTH: i32 = Object::TYPE_DEPTH + 1;
     const TYPE_FINAL: bool = true;
 
