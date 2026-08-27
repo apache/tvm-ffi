@@ -77,6 +77,12 @@ impl_as_packed_callable!(5; T0, T1, T2, T3, T4);
 impl_as_packed_callable!(6; T0, T1, T2, T3, T4, T5);
 impl_as_packed_callable!(7; T0, T1, T2, T3, T4, T5, T6);
 impl_as_packed_callable!(8; T0, T1, T2, T3, T4, T5, T6, T7);
+// Keep typed packed callbacks and typed call tuples on the same practical
+// arity ceiling used by the structural dispatch APIs.
+impl_as_packed_callable!(9; T0, T1, T2, T3, T4, T5, T6, T7, T8);
+impl_as_packed_callable!(10; T0, T1, T2, T3, T4, T5, T6, T7, T8, T9);
+impl_as_packed_callable!(11; T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10);
+impl_as_packed_callable!(12; T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11);
 
 //--------------------------------------------------------------
 // IntoArgHolder, helper to convert to canonical holding type
@@ -90,7 +96,25 @@ pub trait IntoArgHolder {
 }
 
 crate::impl_into_arg_holder_default!(
-    bool, i8, i16, i32, i64, isize, u8, u16, u32, u64, usize, f32, f64, String, Bytes
+    (),
+    bool,
+    i8,
+    i16,
+    i32,
+    i64,
+    isize,
+    u8,
+    u16,
+    u32,
+    u64,
+    usize,
+    f32,
+    f64,
+    String,
+    Bytes,
+    Any,
+    crate::DLDataType,
+    crate::DLDevice
 );
 
 // string will be converted to String for argument passing
@@ -138,6 +162,10 @@ impl_into_arg_holder_tuple!(T0, T1, T2, T3, T4; 0, 1, 2, 3, 4);
 impl_into_arg_holder_tuple!(T0, T1, T2, T3, T4, T5; 0, 1, 2, 3, 4, 5);
 impl_into_arg_holder_tuple!(T0, T1, T2, T3, T4, T5, T6; 0, 1, 2, 3, 4, 5, 6);
 impl_into_arg_holder_tuple!(T0, T1, T2, T3, T4, T5, T6, T7; 0, 1, 2, 3, 4, 5, 6, 7);
+impl_into_arg_holder_tuple!(T0, T1, T2, T3, T4, T5, T6, T7, T8; 0, 1, 2, 3, 4, 5, 6, 7, 8);
+impl_into_arg_holder_tuple!(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9; 0, 1, 2, 3, 4, 5, 6, 7, 8, 9);
+impl_into_arg_holder_tuple!(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10; 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
+impl_into_arg_holder_tuple!(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11; 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11);
 
 //------------------------------------------------------------
 // ArgIntoRef
@@ -163,6 +191,13 @@ impl<T: AnyCompatible> PackedArg for T {
     }
 }
 
+impl PackedArg for Any {
+    #[inline]
+    fn as_packed_arg(&self) -> AnyView<'_> {
+        AnyView::from(self)
+    }
+}
+
 impl<T> PackedArg for RValueRef<T>
 where
     T: ObjectRefCore + AnyCompatible,
@@ -174,8 +209,56 @@ where
 }
 
 crate::impl_arg_into_ref!(
-    bool, i8, i16, i32, i64, isize, u8, u16, u32, u64, usize, f32, f64, String, Bytes
+    (),
+    bool,
+    i8,
+    i16,
+    i32,
+    i64,
+    isize,
+    u8,
+    u16,
+    u32,
+    u64,
+    usize,
+    f32,
+    f64,
+    String,
+    Bytes,
+    Any,
+    crate::DLDataType,
+    crate::DLDevice
 );
+
+// `Option<T>` uses the same packed representation as `T`, with `None` encoded
+// as kTVMFFINone. It needs generic implementations rather than macro entries.
+impl<T: AnyCompatible> IntoArgHolder for Option<T> {
+    type Target = Self;
+    fn into_arg_holder(self) -> Self::Target {
+        self
+    }
+}
+
+impl<'a, T: AnyCompatible> IntoArgHolder for &'a Option<T> {
+    type Target = &'a Option<T>;
+    fn into_arg_holder(self) -> Self::Target {
+        self
+    }
+}
+
+impl<T: AnyCompatible> ArgIntoRef for Option<T> {
+    type Target = Self;
+    fn to_ref(&self) -> &Self::Target {
+        self
+    }
+}
+
+impl<T: AnyCompatible> ArgIntoRef for &Option<T> {
+    type Target = Option<T>;
+    fn to_ref(&self) -> &Self::Target {
+        self
+    }
+}
 
 // Parametric containers pass by value/reference like the scalars above, but
 // their type parameters keep them out of the `impl_*!` macros.
@@ -288,3 +371,7 @@ impl_tuple_as_packed_args!(5; T0, T1, T2, T3, T4; 0, 1, 2, 3, 4);
 impl_tuple_as_packed_args!(6; T0, T1, T2, T3, T4, T5; 0, 1, 2, 3, 4, 5);
 impl_tuple_as_packed_args!(7; T0, T1, T2, T3, T4, T5, T6; 0, 1, 2, 3, 4, 5, 6);
 impl_tuple_as_packed_args!(8; T0, T1, T2, T3, T4, T5, T6, T7; 0, 1, 2, 3, 4, 5, 6, 7);
+impl_tuple_as_packed_args!(9; T0, T1, T2, T3, T4, T5, T6, T7, T8; 0, 1, 2, 3, 4, 5, 6, 7, 8);
+impl_tuple_as_packed_args!(10; T0, T1, T2, T3, T4, T5, T6, T7, T8, T9; 0, 1, 2, 3, 4, 5, 6, 7, 8, 9);
+impl_tuple_as_packed_args!(11; T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10; 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
+impl_tuple_as_packed_args!(12; T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11; 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11);

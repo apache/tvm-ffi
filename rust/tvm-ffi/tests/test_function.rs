@@ -92,6 +92,62 @@ fn test_function_call_tuple() {
 }
 
 #[test]
+fn test_function_call_tuple_supports_all_value_holders() {
+    let echo = Function::get_global("testing.echo").unwrap();
+
+    let any = Any::from(3i64);
+    assert_eq!(i64::try_from(echo.call_tuple((&any,)).unwrap()).unwrap(), 3);
+
+    assert_eq!(
+        echo.call_tuple(((),)).unwrap().type_index(),
+        TypeIndex::kTVMFFINone as i32
+    );
+
+    let optional = Some(4i64);
+    assert_eq!(
+        Option::<i64>::try_from(echo.call_tuple((&optional,)).unwrap()).unwrap(),
+        optional
+    );
+
+    let dtype = DLDataType::try_from_str("int32").unwrap();
+    assert_eq!(
+        DLDataType::try_from(echo.call_tuple((dtype,)).unwrap()).unwrap(),
+        dtype
+    );
+
+    let device = DLDevice::new(DLDeviceType::kDLCPU, 1);
+    assert_eq!(
+        DLDevice::try_from(echo.call_tuple((device,)).unwrap()).unwrap(),
+        device
+    );
+}
+
+#[test]
+fn test_function_call_tuple_supports_twelve_arguments() {
+    let sum = Function::from_typed(
+        |a0: i64,
+         a1: i64,
+         a2: i64,
+         a3: i64,
+         a4: i64,
+         a5: i64,
+         a6: i64,
+         a7: i64,
+         a8: i64,
+         a9: i64,
+         a10: i64,
+         a11: i64|
+         -> Result<i64> { Ok(a0 + a1 + a2 + a3 + a4 + a5 + a6 + a7 + a8 + a9 + a10 + a11) },
+    );
+    let result = sum
+        .call_tuple((
+            0i64, 1i64, 2i64, 3i64, 4i64, 5i64, 6i64, 7i64, 8i64, 9i64, 10i64, 11i64,
+        ))
+        .unwrap();
+    assert_eq!(i64::try_from(result).unwrap(), 66);
+}
+
+#[test]
 fn test_function_rvalue_ref_arguments() {
     let strong_count = Function::from_typed(|value: RValueRef<Array<i64>>| -> Result<i64> {
         let value = value.into_inner();
