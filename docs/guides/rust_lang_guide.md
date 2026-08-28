@@ -525,13 +525,13 @@ assert_eq!(mutated.iter().collect::<Vec<_>>(), vec![2, 3]);
 assert_eq!(mutator.state().integers, 2);
 ```
 
-`MutateContext::mutate` uses the copy path for a borrowed child, while
-`maybe_inplace_mutate` preserves the reuse opportunity of an owned child.
+`MutateContext::mutate` uses the copy path for a borrowed value, while
+`maybe_inplace_mutate` preserves the reuse opportunity of an owned value.
 Callbacks are `Fn`; mutable data belongs in the mutator state.
 
 For ordinary mutable state, `#[dispatch(mutate)]` generates a
 `StructuralMutator` from `mutate_*` methods. A matching handler returns the
-current value's final result and may recursively call `self.mutate_child()`;
+current value's final result and may recursively call `self.mutate()`;
 an unmatched value follows default mutation with its current in-place permit:
 
 ```rust
@@ -563,10 +563,10 @@ assert_eq!(increment.integers, 2);
 For a named custom recursion policy, implement `StructuralMutator` and pass
 `&mut` it to `structural_mutate`. `InplaceValue` is an engine-issued
 capability: callers cannot construct it from a read-only `MapValue`. Override
-`maybe_inplace_mutate` to opt into default container reuse;
+`dispatch_maybe_inplace_mutate` to opt into default container reuse;
 `default_maybe_inplace_mutate` rechecks uniqueness before writing. Borrowed
-children can be re-entered with `mutate_child`, while owned children can use
-`maybe_inplace_mutate_child`:
+values can be re-entered with `mutate`, while owned values can use
+`maybe_inplace_mutate`:
 
 ```rust
 use tvm_ffi::{
@@ -578,14 +578,14 @@ use tvm_ffi::{
 struct Increment;
 
 impl StructuralMutator for Increment {
-    fn mutate(&mut self, value: &MapValue, kind: DefRegionKind) -> Result<Any> {
+    fn dispatch_mutate(&mut self, value: &MapValue, kind: DefRegionKind) -> Result<Any> {
         match value.cast::<i64>() {
             Some(value) => Ok(Any::from(value + 1)),
             None => self.default_mutate(value, kind),
         }
     }
 
-    fn maybe_inplace_mutate(
+    fn dispatch_maybe_inplace_mutate(
         &mut self,
         value: InplaceValue<'_>,
         kind: DefRegionKind,

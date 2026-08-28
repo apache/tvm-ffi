@@ -244,7 +244,7 @@ fn expand(item_impl: &ItemImpl, mode: DispatchMode) -> syn::Result<TokenStream2>
                 {
                     #[inline]
                     #[allow(unreachable_code, unused_variables)]
-                    fn mutate(
+                    fn dispatch_mutate(
                         &mut self,
                         value: &#tvm_ffi::extra::structural_mutate::MapValue,
                         def_region_kind: #tvm_ffi::extra::structural_visit::DefRegionKind,
@@ -256,7 +256,7 @@ fn expand(item_impl: &ItemImpl, mode: DispatchMode) -> syn::Result<TokenStream2>
 
                     #[inline]
                     #[allow(unreachable_code, unused_variables)]
-                    fn maybe_inplace_mutate(
+                    fn dispatch_maybe_inplace_mutate(
                         &mut self,
                         value: #tvm_ffi::extra::structural_mutate::InplaceValue<'_>,
                         def_region_kind: #tvm_ffi::extra::structural_visit::DefRegionKind,
