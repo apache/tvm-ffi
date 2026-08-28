@@ -118,7 +118,7 @@ impl<T: ContainerElement + Clone> Array<T> {
 
             for (i, item) in items.into_iter().enumerate() {
                 let mut raw = TVMFFIAny::new();
-                T::move_to_any(item, &mut raw);
+                T::container_move_to_any(item, &mut raw);
                 core::ptr::write(base_ptr.add(i), raw);
             }
         }
@@ -143,13 +143,13 @@ impl<T: ContainerElement + Clone> Array<T> {
             let base_ptr = container.data as *const TVMFFIAny;
             let raw_any_ref = &*base_ptr.add(index);
 
-            match T::try_cast_from_any_view(raw_any_ref) {
+            match T::container_try_cast_from_any_view(raw_any_ref) {
                 Ok(val) => Ok(val),
                 Err(_) => crate::bail!(
                     crate::error::TYPE_ERROR,
                     "Failed to cast element at {} to {}",
                     index,
-                    T::type_str()
+                    T::container_type_str()
                 ),
             }
         }
@@ -238,7 +238,7 @@ where
     T: ContainerElement + Clone,
 {
     fn type_str() -> String {
-        format!("Array<{}>", T::type_str())
+        format!("Array<{}>", T::container_type_str())
     }
 
     unsafe fn check_any_strict(data: &TVMFFIAny) -> bool {
@@ -250,7 +250,7 @@ where
         let base_ptr = container.data as *const TVMFFIAny;
         for i in 0..container.size {
             let elem_any = &*base_ptr.add(i as usize);
-            if !T::check_any_strict(elem_any) {
+            if !T::container_check_any_strict(elem_any) {
                 return false;
             }
         }
@@ -304,7 +304,7 @@ where
 
         for i in 0..container.size {
             let any_v = &*base_ptr.add(i as usize);
-            if let Ok(item) = T::try_cast_from_any_view(any_v) {
+            if let Ok(item) = T::container_try_cast_from_any_view(any_v) {
                 items.push(item);
             } else {
                 return Err(());

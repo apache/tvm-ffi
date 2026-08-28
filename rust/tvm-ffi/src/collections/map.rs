@@ -46,22 +46,24 @@ use tvm_ffi_sys::{TVMFFIAny, TVMFFIObject};
 fn element_view<T: ContainerElement>(value: &T) -> AnyView<'_> {
     unsafe {
         let mut data = TVMFFIAny::new();
-        T::copy_to_any_view(value, &mut data);
+        T::container_copy_to_any_view(value, &mut data);
         AnyView::from_raw_ffi_any(data)
     }
 }
 
 fn element_from_any<T: ContainerElement>(value: Any) -> Result<T> {
     unsafe {
-        if T::check_any_strict(value.as_raw_ffi_any()) {
+        if T::container_check_any_strict(value.as_raw_ffi_any()) {
             let mut value = std::mem::ManuallyDrop::new(value);
-            return Ok(T::move_from_any_after_check(&mut *value.as_data_ptr()));
+            return Ok(T::container_move_from_any_after_check(
+                &mut *value.as_data_ptr(),
+            ));
         }
-        T::try_cast_from_any_view(value.as_raw_ffi_any()).map_err(|()| {
+        T::container_try_cast_from_any_view(value.as_raw_ffi_any()).map_err(|()| {
             let message = format!(
                 "Cannot convert from type `{}` to `{}`",
-                T::get_mismatch_type_info(value.as_raw_ffi_any()),
-                T::type_str()
+                T::container_get_mismatch_type_info(value.as_raw_ffi_any()),
+                T::container_type_str()
             );
             Error::new(crate::error::TYPE_ERROR, &message, "")
         })
@@ -204,7 +206,7 @@ where
                     .call_packed(&[AnyView::from(&0i64)])
                     .expect("map iterator: reading current key failed");
                 assert!(
-                    unsafe { K::check_any_strict(first_key.as_raw_ffi_any()) },
+                    unsafe { K::container_check_any_strict(first_key.as_raw_ffi_any()) },
                     "Map lookup: key type `{}` does not match the map's stored key type",
                     std::any::type_name::<K>(),
                 );
@@ -458,7 +460,11 @@ where
     V: ContainerElement,
 {
     fn type_str() -> String {
-        format!("Map<{}, {}>", K::type_str(), V::type_str())
+        format!(
+            "Map<{}, {}>",
+            K::container_type_str(),
+            V::container_type_str()
+        )
     }
 
     unsafe fn check_any_strict(data: &TVMFFIAny) -> bool {
@@ -471,7 +477,8 @@ where
         let map = <Self as AnyCompatible>::copy_from_any_view_after_check(data);
         match map.try_raw_entries() {
             Ok(entries) => entries.iter().all(|(k, v)| unsafe {
-                K::check_any_strict(k.as_raw_ffi_any()) && V::check_any_strict(v.as_raw_ffi_any())
+                K::container_check_any_strict(k.as_raw_ffi_any())
+                    && V::container_check_any_strict(v.as_raw_ffi_any())
             }),
             Err(_) => false,
         }
