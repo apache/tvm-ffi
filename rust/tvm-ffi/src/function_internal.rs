@@ -18,6 +18,8 @@
  */
 use crate::any::{Any, AnyView, ArgTryFromAnyView};
 use crate::error::Result;
+use crate::object::ObjectRefCore;
+use crate::rvalue_ref::RValueRef;
 use crate::string::{Bytes, String};
 use crate::type_traits::{AnyCompatible, ContainerElement};
 
@@ -88,7 +90,25 @@ pub trait IntoArgHolder {
 }
 
 crate::impl_into_arg_holder_default!(
-    bool, i8, i16, i32, i64, isize, u8, u16, u32, u64, usize, f32, f64, String, Bytes
+    (),
+    bool,
+    i8,
+    i16,
+    i32,
+    i64,
+    isize,
+    u8,
+    u16,
+    u32,
+    u64,
+    usize,
+    f32,
+    f64,
+    String,
+    Bytes,
+    Any,
+    crate::DLDataType,
+    crate::DLDevice
 );
 
 // string will be converted to String for argument passing
@@ -148,9 +168,87 @@ pub trait ArgIntoRef {
     fn to_ref(&self) -> &Self::Target;
 }
 
+/// Convert a canonical argument holder into its packed ABI view.
+#[doc(hidden)]
+pub trait PackedArg {
+    fn as_packed_arg(&self) -> AnyView<'_>;
+}
+
+impl<T: AnyCompatible> PackedArg for T {
+    #[inline]
+    fn as_packed_arg(&self) -> AnyView<'_> {
+        AnyView::from(self)
+    }
+}
+
+impl PackedArg for Any {
+    #[inline]
+    fn as_packed_arg(&self) -> AnyView<'_> {
+        AnyView::from(self)
+    }
+}
+
+impl<T> PackedArg for RValueRef<T>
+where
+    T: ObjectRefCore + AnyCompatible,
+{
+    #[inline]
+    fn as_packed_arg(&self) -> AnyView<'_> {
+        AnyView::from(self)
+    }
+}
+
 crate::impl_arg_into_ref!(
-    bool, i8, i16, i32, i64, isize, u8, u16, u32, u64, usize, f32, f64, String, Bytes
+    (),
+    bool,
+    i8,
+    i16,
+    i32,
+    i64,
+    isize,
+    u8,
+    u16,
+    u32,
+    u64,
+    usize,
+    f32,
+    f64,
+    String,
+    Bytes,
+    Any,
+    crate::DLDataType,
+    crate::DLDevice
 );
+
+// `Option<T>` uses the same packed representation as `T`, with `None` encoded
+// as kTVMFFINone. It needs generic implementations rather than macro entries.
+impl<T: AnyCompatible> IntoArgHolder for Option<T> {
+    type Target = Self;
+    fn into_arg_holder(self) -> Self::Target {
+        self
+    }
+}
+
+impl<'a, T: AnyCompatible> IntoArgHolder for &'a Option<T> {
+    type Target = &'a Option<T>;
+    fn into_arg_holder(self) -> Self::Target {
+        self
+    }
+}
+
+impl<T: AnyCompatible> ArgIntoRef for Option<T> {
+    type Target = Self;
+    fn to_ref(&self) -> &Self::Target {
+        self
+    }
+}
+
+impl<T: AnyCompatible> ArgIntoRef for &Option<T> {
+    type Target = Option<T>;
+    fn to_ref(&self) -> &Self::Target {
+        self
+    }
+}
 
 // Parametric containers pass by value/reference like the scalars above, but
 // their type parameters keep them out of the `impl_*!` macros.
@@ -174,6 +272,26 @@ impl<T: ContainerElement + Clone> ArgIntoRef for crate::Array<T> {
 }
 impl<T: ContainerElement + Clone> ArgIntoRef for &crate::Array<T> {
     type Target = crate::Array<T>;
+    fn to_ref(&self) -> &Self::Target {
+        self
+    }
+}
+
+impl<T> IntoArgHolder for RValueRef<T>
+where
+    T: ObjectRefCore + AnyCompatible,
+{
+    type Target = Self;
+    fn into_arg_holder(self) -> Self::Target {
+        self
+    }
+}
+
+impl<T> ArgIntoRef for RValueRef<T>
+where
+    T: ObjectRefCore + AnyCompatible,
+{
+    type Target = Self;
     fn to_ref(&self) -> &Self::Target {
         self
     }
@@ -220,14 +338,14 @@ macro_rules! impl_tuple_as_packed_args {
         where
             $(
                 $T: ArgIntoRef,
-                $T::Target: AnyCompatible,
+                $T::Target: PackedArg,
             )*
         {
             const LEN: usize = $len;
 
             fn fill_any_view<'a>(&'a self, _any_view: &mut [AnyView<'a>]) {
                 $(
-                    _any_view[$idx] = AnyView::from(self.$idx.to_ref());
+                    _any_view[$idx] = self.$idx.to_ref().as_packed_arg();
                 )*
             }
         }

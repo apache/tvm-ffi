@@ -65,6 +65,8 @@ struct TestDerived {
     data: ObjectArc<TestDerivedObj>,
 }
 
+tvm_ffi::impl_object_upcast!(TestDerived => TestBase);
+
 // unwrap_err() requires the Ok type to implement Debug, which ObjectRef types do not
 fn expect_err<T>(res: Result<T>) -> Error {
     match res {
@@ -137,6 +139,25 @@ fn test_upcast_downcast_roundtrip() {
     assert_eq!(ObjectArc::strong_count(&derived2.data), 1);
     assert_eq!(delete_counter.load(Ordering::Relaxed), 0);
     drop(derived2);
+    assert_eq!(delete_counter.load(Ordering::Relaxed), 1);
+}
+
+#[test]
+fn test_generated_borrow_and_upcast_conversions() {
+    let delete_counter = Arc::new(AtomicU32::new(0));
+    let derived = new_derived(7, 8, delete_counter.clone());
+
+    let borrowed_clone = TestDerived::from(&derived);
+    assert!(borrowed_clone.same_as(&derived));
+
+    let base = TestBase::from(&derived);
+    assert!(base.same_as(&derived));
+    assert_eq!(base.data.value, 7);
+    assert_eq!(ObjectArc::strong_count(&derived.data), 3);
+
+    drop(base);
+    drop(borrowed_clone);
+    drop(derived);
     assert_eq!(delete_counter.load(Ordering::Relaxed), 1);
 }
 

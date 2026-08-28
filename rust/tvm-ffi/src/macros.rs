@@ -59,6 +59,59 @@ macro_rules! cached_global_func {
     }};
 }
 
+/// Implement zero-copy conversions from a derived object reference to one of
+/// its base object-reference types.
+///
+/// The declared relation must match the inheritance relation registered for
+/// the two object container types. Generated bindings normally emit this next
+/// to their object-reference declarations.
+///
+/// # Safety contract
+///
+/// This macro emits an infallible safe conversion backed by a pointer rewrap.
+/// It must therefore be used only by trusted/generated binding code that has
+/// verified that `target`'s container is an ancestor of `source`'s container in
+/// the loaded FFI type table and that every valid `source` value satisfies any
+/// additional invariant imposed by the `target` reference view. The latter is
+/// relevant for typed zero-state views. Declaring an unrelated pair or omitting
+/// a target invariant would make the generated conversion unsound.
+#[macro_export]
+macro_rules! impl_object_upcast {
+    ($($source:ty => $target:ty),+ $(,)?) => {
+        $(
+            impl ::std::convert::From<$source> for $target {
+                #[inline]
+                fn from(value: $source) -> Self {
+                    let data = <$source as $crate::object::ObjectRefCore>::into_data(value);
+                    // SAFETY: The macro declaration promises that `target` is
+                    // a registered base of `source`. Both references retain
+                    // the same allocation and only change its static view.
+                    let data = unsafe {
+                        $crate::object::ObjectArc::from_raw(
+                            $crate::object::ObjectArc::into_raw(data).cast::
+                                <<$target as $crate::object::ObjectRefCore>::ContainerType>(),
+                        )
+                    };
+                    // SAFETY: The macro declaration promises both the
+                    // container inheritance relation and every additional
+                    // invariant imposed by the target reference view.
+                    unsafe {
+                        <$target as $crate::object::ObjectRefCore>::from_data(data)
+                    }
+                }
+            }
+
+            impl ::std::convert::From<&$source> for $target {
+                #[inline]
+                fn from(value: &$source) -> Self {
+                    value.clone().into()
+                }
+            }
+
+        )+
+    };
+}
+
 /// Check the return code of the safe call
 ///
 /// # Arguments

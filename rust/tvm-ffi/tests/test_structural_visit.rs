@@ -27,10 +27,10 @@ use tvm_ffi::tvm_ffi_sys::{
     TVMFFISEqHashKind, TVMFFITypeMetadata, TVMFFITypeRegisterAttr,
 };
 use tvm_ffi::{
-    dispatch, structural_visit, structural_walk, Any, AnyView, Array, DLDataType, DLDataTypeCode,
-    DefRegionKind, Error, Function, Map, Object, ObjectArc, ObjectCore, ObjectRefCast, Result,
-    String as FfiString, StructuralVisitor, TypeIndex, VisitCallbacks, VisitContext,
-    VisitInterrupt, VisitValue, WalkOrder, WalkResult, RUNTIME_ERROR,
+    dispatch, get_type_attr, structural_visit, structural_walk, Any, AnyView, Array, DLDataType,
+    DLDataTypeCode, DefRegionKind, Error, FieldGetter, Function, Map, Object, ObjectArc,
+    ObjectCore, ObjectRefCast, Result, String as FfiString, StructuralVisitor, TypeIndex,
+    VisitCallbacks, VisitContext, VisitInterrupt, VisitValue, WalkOrder, WalkResult, RUNTIME_ERROR,
 };
 
 unsafe extern "C" {
@@ -339,6 +339,25 @@ fn rust_visit_failing_getter(value: impl Into<Any>) -> RustVisitFailingGetter {
 
 fn runtime_error(message: &str) -> Error {
     Error::new(RUNTIME_ERROR, message, "")
+}
+
+#[test]
+fn public_reflection_access_uses_registered_field_and_type_attr() {
+    let root = rust_visit_hook(FfiString::from("owned field"), 99i64);
+    let type_index = RustVisitHookObj::type_index();
+
+    let getter = FieldGetter::new(type_index, "selected").unwrap();
+    let selected = getter.get::<_, FfiString>(&*root.data).unwrap();
+    drop(root);
+    assert_eq!(selected.as_str(), "owned field");
+
+    let wrong_type = rust_visit_failing_getter(0i64);
+    assert!(getter.get_any(&*wrong_type.data).is_err());
+    assert!(FieldGetter::new(type_index, "missing").is_err());
+
+    assert!(Function::try_from(get_type_attr(type_index, "__s_visit__").unwrap()).is_ok());
+    assert!(Function::from_type_attr(type_index, "__s_visit__").is_ok());
+    assert!(get_type_attr(type_index, "missing").is_none());
 }
 
 #[test]

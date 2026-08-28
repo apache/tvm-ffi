@@ -18,6 +18,7 @@
  */
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use std::{collections::HashMap, hash::Hash};
 use tvm_ffi::*;
 
 // must have repr(C) for the object header stays in the same position
@@ -145,4 +146,28 @@ fn test_object_arc_option_size() {
         std::mem::size_of::<Option<ObjectArc<TestIntObj>>>(),
         std::mem::size_of::<ObjectArc<TestIntObj>>()
     );
+}
+
+#[test]
+fn test_object_reference_identity() {
+    fn assert_hash<T: Hash>(_value: &T) {}
+
+    let first = Array::new(vec![1i64]);
+    let alias = first.clone();
+    let second = Array::new(vec![1i64]);
+
+    assert!(first.same_as(&alias));
+    assert!(!first.same_as(&second));
+
+    let first_id = ObjectIdentity::of(&first);
+    let alias_id = ObjectIdentity::of(&alias);
+    let second_id = ObjectIdentity::of(&second);
+    assert_hash(&first_id);
+    assert_eq!(first_id, alias_id);
+    assert_ne!(first_id, second_id);
+
+    let mut identities = HashMap::new();
+    identities.insert(first_id, "first");
+    assert_eq!(identities.get(&alias_id), Some(&"first"));
+    assert_eq!(identities.get(&second_id), None);
 }

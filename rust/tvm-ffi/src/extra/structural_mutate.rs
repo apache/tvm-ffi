@@ -37,6 +37,7 @@ use crate::any::{Any, AnyView};
 use crate::error::{Error, Result, RUNTIME_ERROR, TYPE_ERROR};
 use crate::function::Function;
 use crate::object::{self, Object, ObjectArc, ObjectCore};
+use crate::reflection::TypeAttrColumn;
 use crate::tvm_ffi_sys::TVMFFIFieldFlagBitMask::{
     kTVMFFIFieldFlagBitMaskSEqHashIgnore, kTVMFFIFieldFlagBitSetterIsFunctionObj,
 };
@@ -53,7 +54,7 @@ use super::structural_common::{
 };
 use super::structural_visit::{
     field_def_region, for_each_field_info, free_var_child_region, type_attr_column, type_key_of,
-    DefRegionKind, TypeAttrColumn, WalkOrder,
+    DefRegionKind, WalkOrder,
 };
 
 const STRUCTURAL_MUTATE_ATTR: &str = "__s_mutate__";
@@ -1952,8 +1953,8 @@ fn call_registered_structural_mutate(
 ) -> Result<Option<Any>> {
     let use_inplace = permit == Permit::MaybeInPlace && object_is_unique(raw);
     if use_inplace {
-        if let Some(attr) =
-            structural_maybe_inplace_mutate_column().and_then(|column| column.get(raw.type_index))
+        if let Some(attr) = structural_maybe_inplace_mutate_column()
+            .and_then(|column| column.get_raw(raw.type_index))
         {
             if attr.type_index == TVMFFITypeIndex::kTVMFFIOpaquePtr as i32
                 || attr.type_index == TVMFFITypeIndex::kTVMFFIFunction as i32
@@ -1963,7 +1964,7 @@ fn call_registered_structural_mutate(
         }
     }
 
-    let Some(attr) = structural_mutate_column().and_then(|column| column.get(raw.type_index))
+    let Some(attr) = structural_mutate_column().and_then(|column| column.get_raw(raw.type_index))
     else {
         return Ok(None);
     };
@@ -2162,7 +2163,7 @@ where
 }
 
 fn shallow_copy(raw: TVMFFIAny) -> Result<Any> {
-    let Some(attr) = shallow_copy_column().and_then(|column| column.get(raw.type_index)) else {
+    let Some(attr) = shallow_copy_column().and_then(|column| column.get_raw(raw.type_index)) else {
         return Err(Error::new(
             TYPE_ERROR,
             &format!(

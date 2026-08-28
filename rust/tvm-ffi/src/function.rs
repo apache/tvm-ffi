@@ -255,6 +255,26 @@ impl Function {
         }
     }
 
+    /// Look up a function-valued type attribute by runtime type index.
+    ///
+    /// Type attributes are the standard dispatch mechanism for protocols such
+    /// as `__ffi_init__`, `__s_visit__`, and `__s_mutate__`. Unlike reflected
+    /// methods, they live in type-indexed columns and are not inherited unless
+    /// the caller explicitly queries a base type.
+    pub fn from_type_attr(type_index: i32, attr_name: &str) -> Result<Function> {
+        let value = crate::reflection::get_type_attr(type_index, attr_name).ok_or_else(|| {
+            crate::error::Error::new(
+                crate::error::TYPE_ERROR,
+                &format!(
+                    "Cannot find type attribute `{}` for type_index={}",
+                    attr_name, type_index
+                ),
+                "",
+            )
+        })?;
+        Function::try_from(value)
+    }
+
     /// Look up a reflected method of a type by type key and method name
     ///
     /// Same as [`Function::from_type_method`], but resolves `type_key` to a
