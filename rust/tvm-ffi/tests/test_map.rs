@@ -193,6 +193,32 @@ fn test_map_with_any_values() {
 }
 
 #[test]
+fn test_map_with_any_keys_and_values() {
+    let integer_key = Any::from(1i64);
+    let string_key = Any::from(String::from("name"));
+    let map: Map<Any, Any> = [
+        (integer_key.clone(), Any::from(String::from("one"))),
+        (string_key.clone(), Any::from(2i64)),
+    ]
+    .into_iter()
+    .collect();
+
+    assert_eq!(
+        String::try_from(map.get(&integer_key).unwrap().unwrap())
+            .unwrap()
+            .as_str(),
+        "one"
+    );
+    assert_eq!(
+        i64::try_from(map.get(&string_key).unwrap().unwrap()).unwrap(),
+        2
+    );
+
+    let round_trip = Map::<Any, Any>::try_from(Any::from(map)).unwrap();
+    assert_eq!(round_trip.iter().count(), 2);
+}
+
+#[test]
 fn test_map_shares_underlying_object() {
     let map: Map<i64, i64> = [(1i64, 10i64)].into_iter().collect();
     // Cloning shares the same underlying MapObj rather than copying entries.

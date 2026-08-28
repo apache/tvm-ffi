@@ -37,93 +37,13 @@ use crate::any::TryFromTemp;
 use crate::derive::Object;
 use crate::function::Function;
 use crate::object::{Object, ObjectArc};
+use crate::type_traits::ContainerElement;
 use crate::{Any, AnyCompatible, AnyView, Error, ObjectRefCore, Result};
 use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
 use tvm_ffi_sys::{TVMFFIAny, TVMFFIObject};
 
-/// Conversion support for values stored in [`Map`].
-///
-/// Normal values use their [`AnyCompatible`] implementation. [`Any`] is the
-/// open-value case: it already owns an arbitrary ABI value, but cannot
-/// implement `AnyCompatible` because that would overlap with Rust's identity
-/// `From<Any> for Any` implementation.
-///
-/// # Safety
-///
-/// Implementations must obey the same ownership and type-checking contracts as
-/// the corresponding methods on [`AnyCompatible`].
-#[doc(hidden)]
-pub unsafe trait MapValueCompatible: map_value_sealed::Sealed + Sized {
-    unsafe fn copy_to_any_view(src: &Self, data: &mut TVMFFIAny);
-    unsafe fn check_any_strict(data: &TVMFFIAny) -> bool;
-    unsafe fn move_from_any_after_check(data: &mut TVMFFIAny) -> Self;
-    unsafe fn try_cast_from_any_view(data: &TVMFFIAny) -> std::result::Result<Self, ()>;
-    fn get_mismatch_type_info(data: &TVMFFIAny) -> String;
-    fn type_str() -> String;
-}
-
-mod map_value_sealed {
-    use super::{Any, AnyCompatible};
-
-    pub trait Sealed {}
-    impl<T: AnyCompatible> Sealed for T {}
-    impl Sealed for Any {}
-}
-
-unsafe impl<T: AnyCompatible> MapValueCompatible for T {
-    unsafe fn copy_to_any_view(src: &Self, data: &mut TVMFFIAny) {
-        T::copy_to_any_view(src, data)
-    }
-
-    unsafe fn check_any_strict(data: &TVMFFIAny) -> bool {
-        T::check_any_strict(data)
-    }
-
-    unsafe fn move_from_any_after_check(data: &mut TVMFFIAny) -> Self {
-        T::move_from_any_after_check(data)
-    }
-
-    unsafe fn try_cast_from_any_view(data: &TVMFFIAny) -> std::result::Result<Self, ()> {
-        T::try_cast_from_any_view(data)
-    }
-
-    fn get_mismatch_type_info(data: &TVMFFIAny) -> String {
-        T::get_mismatch_type_info(data)
-    }
-
-    fn type_str() -> String {
-        T::type_str()
-    }
-}
-
-unsafe impl MapValueCompatible for Any {
-    unsafe fn copy_to_any_view(src: &Self, data: &mut TVMFFIAny) {
-        *data = *src.as_raw_ffi_any();
-    }
-
-    unsafe fn check_any_strict(_data: &TVMFFIAny) -> bool {
-        true
-    }
-
-    unsafe fn move_from_any_after_check(data: &mut TVMFFIAny) -> Self {
-        Any::from_raw_ffi_any(std::mem::replace(data, TVMFFIAny::new()))
-    }
-
-    unsafe fn try_cast_from_any_view(data: &TVMFFIAny) -> std::result::Result<Self, ()> {
-        Ok(Any::from(AnyView::from_raw_ffi_any(*data)))
-    }
-
-    fn get_mismatch_type_info(_data: &TVMFFIAny) -> String {
-        "Any".to_string()
-    }
-
-    fn type_str() -> String {
-        "Any".to_string()
-    }
-}
-
 #[inline]
-fn map_value_view<T: MapValueCompatible>(value: &T) -> AnyView<'_> {
+fn element_view<T: ContainerElement>(value: &T) -> AnyView<'_> {
     unsafe {
         let mut data = TVMFFIAny::new();
         T::copy_to_any_view(value, &mut data);
@@ -131,7 +51,7 @@ fn map_value_view<T: MapValueCompatible>(value: &T) -> AnyView<'_> {
     }
 }
 
-fn map_value_from_any<T: MapValueCompatible>(value: Any) -> Result<T> {
+fn element_from_any<T: ContainerElement>(value: Any) -> Result<T> {
     unsafe {
         if T::check_any_strict(value.as_raw_ffi_any()) {
             let mut value = std::mem::ManuallyDrop::new(value);
@@ -225,8 +145,8 @@ impl<K, V> Deref for Map<K, V> {
 
 impl<K, V> Map<K, V>
 where
-    K: AnyCompatible,
-    V: MapValueCompatible,
+    K: ContainerElement,
+    V: ContainerElement,
 {
     /// Creates a new, empty map (via an `ffi.Map()` call to the C++ runtime).
     pub fn new() -> Self {
@@ -238,8 +158,8 @@ where
     fn from_pairs(pairs: &[(K, V)]) -> Result<Self> {
         let mut args: Vec<AnyView<'_>> = Vec::with_capacity(pairs.len() * 2);
         for (k, v) in pairs {
-            args.push(AnyView::from(k));
-            args.push(map_value_view(v));
+            args.push(element_view(k));
+            args.push(element_view(v));
         }
         let result = crate::cached_global_func!("ffi.Map").call_packed(&args)?;
         Self::try_from(result)
@@ -261,7 +181,7 @@ where
     /// [`Map::contains_key`] and [`Map::get`].
     fn try_contains_key(&self, key: &K) -> Result<bool> {
         let result = crate::cached_global_func!("ffi.MapCount")
-            .call_packed(&[AnyView::from(self), AnyView::from(key)])?;
+            .call_packed(&[AnyView::from(self), element_view(key)])?;
         Ok(i64::try_from(result)? != 0)
     }
 
@@ -284,7 +204,7 @@ where
                     .call_packed(&[AnyView::from(&0i64)])
                     .expect("map iterator: reading current key failed");
                 assert!(
-                    first_key.try_as::<K>().is_some(),
+                    unsafe { K::check_any_strict(first_key.as_raw_ffi_any()) },
                     "Map lookup: key type `{}` does not match the map's stored key type",
                     std::any::type_name::<K>(),
                 );
@@ -326,8 +246,8 @@ where
             return Ok(None);
         }
         let result = crate::cached_global_func!("ffi.MapGetItem")
-            .call_packed(&[AnyView::from(self), AnyView::from(key)])?;
-        let value = map_value_from_any(result)?;
+            .call_packed(&[AnyView::from(self), element_view(key)])?;
+        let value = element_from_any(result)?;
         Ok(Some(value))
     }
 
@@ -396,8 +316,8 @@ where
 
 impl<K, V> Default for Map<K, V>
 where
-    K: AnyCompatible,
-    V: MapValueCompatible,
+    K: ContainerElement,
+    V: ContainerElement,
 {
     fn default() -> Self {
         Self::new()
@@ -406,8 +326,8 @@ where
 
 impl<K, V> Debug for Map<K, V>
 where
-    K: AnyCompatible,
-    V: MapValueCompatible,
+    K: ContainerElement,
+    V: ContainerElement,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         fn short(name: &str) -> &str {
@@ -425,8 +345,8 @@ where
 
 impl<K, V> FromIterator<(K, V)> for Map<K, V>
 where
-    K: AnyCompatible,
-    V: MapValueCompatible,
+    K: ContainerElement,
+    V: ContainerElement,
 {
     /// Duplicate keys follow C++ `ffi.Map` semantics: a later pair overwrites an
     /// earlier one, so the resulting map may be smaller than the iterator.
@@ -449,11 +369,11 @@ where
 
 /// Reads the functor's current key (`command` 0) or value (`command` 1) as `T`,
 /// panicking on a type mismatch (see the note above on `ExactSizeIterator`).
-fn iter_read<T: MapValueCompatible>(functor: &Function, command: i64, kind: &str) -> T {
+fn iter_read<T: ContainerElement>(functor: &Function, command: i64, kind: &str) -> T {
     let any = functor
         .call_packed(&[AnyView::from(&command)])
         .expect("map iterator: reading current element failed");
-    map_value_from_any(any)
+    element_from_any(any)
         .unwrap_or_else(|_| panic!("map iterator: {kind} does not match the map's {kind} type"))
 }
 
@@ -519,8 +439,8 @@ pub type MapValues<V> = MapIter<V>;
 
 impl<K, V> IntoIterator for &Map<K, V>
 where
-    K: AnyCompatible,
-    V: MapValueCompatible,
+    K: ContainerElement,
+    V: ContainerElement,
 {
     type Item = (K, V);
     type IntoIter = MapItems<K, V>;
@@ -534,8 +454,8 @@ where
 
 unsafe impl<K, V> AnyCompatible for Map<K, V>
 where
-    K: AnyCompatible,
-    V: MapValueCompatible,
+    K: ContainerElement,
+    V: ContainerElement,
 {
     fn type_str() -> String {
         format!("Map<{}, {}>", K::type_str(), V::type_str())
@@ -550,8 +470,8 @@ where
         }
         let map = <Self as AnyCompatible>::copy_from_any_view_after_check(data);
         match map.try_raw_entries() {
-            Ok(entries) => entries.iter().all(|(k, v)| {
-                k.try_as::<K>().is_some() && unsafe { V::check_any_strict(v.as_raw_ffi_any()) }
+            Ok(entries) => entries.iter().all(|(k, v)| unsafe {
+                K::check_any_strict(k.as_raw_ffi_any()) && V::check_any_strict(v.as_raw_ffi_any())
             }),
             Err(_) => false,
         }
@@ -600,9 +520,9 @@ where
         let src = <Self as AnyCompatible>::copy_from_any_view_after_check(data);
         let mut pairs = Vec::with_capacity(src.len());
         for (k, v) in src.try_raw_entries().map_err(|_| ())? {
-            let k = TryFromTemp::<K>::try_from(k).map_err(|_| ())?;
-            let v = map_value_from_any::<V>(v).map_err(|_| ())?;
-            pairs.push((TryFromTemp::into_value(k), v));
+            let k = element_from_any::<K>(k).map_err(|_| ())?;
+            let v = element_from_any::<V>(v).map_err(|_| ())?;
+            pairs.push((k, v));
         }
         Self::from_pairs(&pairs).map_err(|_| ())
     }
@@ -610,8 +530,8 @@ where
 
 impl<K, V> TryFrom<Any> for Map<K, V>
 where
-    K: AnyCompatible,
-    V: MapValueCompatible,
+    K: ContainerElement,
+    V: ContainerElement,
 {
     type Error = Error;
 
@@ -623,8 +543,8 @@ where
 
 impl<'a, K, V> TryFrom<AnyView<'a>> for Map<K, V>
 where
-    K: AnyCompatible,
-    V: MapValueCompatible,
+    K: ContainerElement,
+    V: ContainerElement,
 {
     type Error = Error;
 

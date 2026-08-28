@@ -17,10 +17,9 @@
  * under the License.
  */
 use crate::any::{Any, AnyView, ArgTryFromAnyView};
-use crate::collections::map::MapValueCompatible;
 use crate::error::Result;
 use crate::string::{Bytes, String};
-use crate::type_traits::AnyCompatible;
+use crate::type_traits::{AnyCompatible, ContainerElement};
 
 //------------------------------------------------------------------------
 // PackedCallable
@@ -153,27 +152,52 @@ crate::impl_arg_into_ref!(
     bool, i8, i16, i32, i64, isize, u8, u16, u32, u64, usize, f32, f64, String, Bytes
 );
 
-// `Map<K, V>` passes by value/reference like the scalars above, but its type
-// parameters keep it out of the `impl_*!` macros, so the impls are spelled out.
-impl<K: AnyCompatible, V: MapValueCompatible> IntoArgHolder for crate::Map<K, V> {
+// Parametric containers pass by value/reference like the scalars above, but
+// their type parameters keep them out of the `impl_*!` macros.
+impl<T: ContainerElement + Clone> IntoArgHolder for crate::Array<T> {
+    type Target = crate::Array<T>;
+    fn into_arg_holder(self) -> Self::Target {
+        self
+    }
+}
+impl<'a, T: ContainerElement + Clone> IntoArgHolder for &'a crate::Array<T> {
+    type Target = &'a crate::Array<T>;
+    fn into_arg_holder(self) -> Self::Target {
+        self
+    }
+}
+impl<T: ContainerElement + Clone> ArgIntoRef for crate::Array<T> {
+    type Target = crate::Array<T>;
+    fn to_ref(&self) -> &Self::Target {
+        self
+    }
+}
+impl<T: ContainerElement + Clone> ArgIntoRef for &crate::Array<T> {
+    type Target = crate::Array<T>;
+    fn to_ref(&self) -> &Self::Target {
+        self
+    }
+}
+
+impl<K: ContainerElement, V: ContainerElement> IntoArgHolder for crate::Map<K, V> {
     type Target = crate::Map<K, V>;
     fn into_arg_holder(self) -> Self::Target {
         self
     }
 }
-impl<'a, K: AnyCompatible, V: MapValueCompatible> IntoArgHolder for &'a crate::Map<K, V> {
+impl<'a, K: ContainerElement, V: ContainerElement> IntoArgHolder for &'a crate::Map<K, V> {
     type Target = &'a crate::Map<K, V>;
     fn into_arg_holder(self) -> Self::Target {
         self
     }
 }
-impl<K: AnyCompatible, V: MapValueCompatible> ArgIntoRef for crate::Map<K, V> {
+impl<K: ContainerElement, V: ContainerElement> ArgIntoRef for crate::Map<K, V> {
     type Target = crate::Map<K, V>;
     fn to_ref(&self) -> &Self::Target {
         self
     }
 }
-impl<K: AnyCompatible, V: MapValueCompatible> ArgIntoRef for &crate::Map<K, V> {
+impl<K: ContainerElement, V: ContainerElement> ArgIntoRef for &crate::Map<K, V> {
     type Target = crate::Map<K, V>;
     fn to_ref(&self) -> &Self::Target {
         self
