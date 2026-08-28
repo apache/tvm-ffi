@@ -388,7 +388,7 @@ class kw_only : public InfoTrait {
  * \returns The byteoffset
  */
 template <typename Class, typename T>
-TVM_FFI_INLINE int64_t GetFieldByteOffsetToObject(T Class::*field_ptr) {
+TVM_FFI_INLINE int64_t GetFieldByteOffsetToObject(T Class::* field_ptr) {
   int64_t field_offset_to_class =
       reinterpret_cast<int64_t>(&(static_cast<Class*>(nullptr)->*field_ptr));
   return field_offset_to_class -
@@ -713,7 +713,7 @@ struct init<> : public InfoTrait {
 
 /*! \brief CTAD deduction guide: ``init(false)`` deduces to ``init<>``. */
 #if !defined(TVM_FFI_DOXYGEN_MODE)
-init(bool)->init<>;
+init(bool) -> init<>;
 #endif
 
 /*!
@@ -803,7 +803,7 @@ class ObjectDef : public ReflectionDefBase {
    * \return The reflection definition.
    */
   template <typename T, typename BaseClass, typename... Extra>
-  TVM_FFI_INLINE ObjectDef& def_ro(const char* name, T BaseClass::*field_ptr, Extra&&... extra) {
+  TVM_FFI_INLINE ObjectDef& def_ro(const char* name, T BaseClass::* field_ptr, Extra&&... extra) {
     RegisterField(name, field_ptr, false, std::forward<Extra>(extra)...);
     return *this;
   }
@@ -822,7 +822,7 @@ class ObjectDef : public ReflectionDefBase {
    * \return The reflection definition.
    */
   template <typename T, typename BaseClass, typename... Extra>
-  TVM_FFI_INLINE ObjectDef& def_rw(const char* name, T BaseClass::*field_ptr, Extra&&... extra) {
+  TVM_FFI_INLINE ObjectDef& def_rw(const char* name, T BaseClass::* field_ptr, Extra&&... extra) {
     static_assert(Class::_type_mutable, "Only mutable classes are supported for writable fields");
     RegisterField(name, field_ptr, true, std::forward<Extra>(extra)...);
     return *this;
@@ -1052,11 +1052,14 @@ class ObjectDef : public ReflectionDefBase {
     FingerprintInteger(&fingerprint, info->num_fields);
     std::vector<const TVMFFIFieldInfo*> fields;
     fields.reserve(info->num_fields);
-    for (int32_t index = 0; index < info->num_fields; ++index)
+    for (int32_t index = 0; index < info->num_fields; ++index) {
       fields.push_back(&info->fields[index]);
+    }
     std::sort(fields.begin(), fields.end(),
               [](const TVMFFIFieldInfo* lhs, const TVMFFIFieldInfo* rhs) {
-                if (lhs->offset != rhs->offset) return lhs->offset < rhs->offset;
+                if (lhs->offset != rhs->offset) {
+                  return lhs->offset < rhs->offset;
+                }
                 return std::string_view(lhs->name.data, lhs->name.size) <
                        std::string_view(rhs->name.data, rhs->name.size);
               });
@@ -1078,7 +1081,7 @@ class ObjectDef : public ReflectionDefBase {
   }
 
   template <typename T, typename BaseClass, typename... ExtraArgs>
-  void RegisterField(const char* name, T BaseClass::*field_ptr, bool writable,
+  void RegisterField(const char* name, T BaseClass::* field_ptr, bool writable,
                      ExtraArgs&&... extra_args) {
     static_assert(std::is_base_of_v<BaseClass, Class>, "BaseClass must be a base class of Class");
     FieldInfoBuilder info;
