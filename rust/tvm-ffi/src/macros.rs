@@ -70,8 +70,11 @@ macro_rules! cached_global_func {
 ///
 /// This macro emits an infallible safe conversion backed by a pointer rewrap.
 /// It must therefore be used only by trusted/generated binding code that has
-/// verified `target` is an ancestor of `source` in the loaded FFI type table.
-/// Declaring an unrelated pair would make the generated conversion unsound.
+/// verified that `target`'s container is an ancestor of `source`'s container in
+/// the loaded FFI type table and that every valid `source` value satisfies any
+/// additional invariant imposed by the `target` reference view. The latter is
+/// relevant for typed zero-state views. Declaring an unrelated pair or omitting
+/// a target invariant would make the generated conversion unsound.
 #[macro_export]
 macro_rules! impl_object_upcast {
     ($($source:ty => $target:ty),+ $(,)?) => {
@@ -89,7 +92,12 @@ macro_rules! impl_object_upcast {
                                 <<$target as $crate::object::ObjectRefCore>::ContainerType>(),
                         )
                     };
-                    <$target as $crate::object::ObjectRefCore>::from_data(data)
+                    // SAFETY: The macro declaration promises both the
+                    // container inheritance relation and every additional
+                    // invariant imposed by the target reference view.
+                    unsafe {
+                        <$target as $crate::object::ObjectRefCore>::from_data(data)
+                    }
                 }
             }
 

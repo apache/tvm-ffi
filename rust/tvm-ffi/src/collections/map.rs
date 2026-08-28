@@ -124,7 +124,7 @@ unsafe impl<K, V> ObjectRefCore for Map<K, V> {
         this.data
     }
 
-    fn from_data(data: ObjectArc<MapObj>) -> Self {
+    unsafe fn from_data(data: ObjectArc<MapObj>) -> Self {
         Self {
             data,
             _marker: PhantomData,

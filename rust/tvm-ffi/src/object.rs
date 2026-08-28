@@ -132,7 +132,16 @@ pub unsafe trait ObjectRefCore: Sized + Clone {
     type ContainerType: ObjectCore;
     fn data(this: &Self) -> &ObjectArc<Self::ContainerType>;
     fn into_data(this: Self) -> ObjectArc<Self::ContainerType>;
-    fn from_data(data: ObjectArc<Self::ContainerType>) -> Self;
+
+    /// Construct a reference view from an owning container handle.
+    ///
+    /// # Safety
+    ///
+    /// In addition to containing a valid `ContainerType` allocation, `data`
+    /// must satisfy every semantic invariant imposed by `Self`. This matters
+    /// for zero-state views that share a container type but accept only a
+    /// subset of its values, such as a typed expression view.
+    unsafe fn from_data(data: ObjectArc<Self::ContainerType>) -> Self;
 
     /// Return whether two object references point to the same allocation.
     #[inline]

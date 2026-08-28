@@ -81,7 +81,7 @@ unsafe impl<T: ContainerElement + Clone> ObjectRefCore for Array<T> {
         this.data
     }
 
-    fn from_data(data: ObjectArc<Self::ContainerType>) -> Self {
+    unsafe fn from_data(data: ObjectArc<Self::ContainerType>) -> Self {
         Self {
             data,
             _marker: PhantomData,
@@ -122,7 +122,8 @@ impl<T: ContainerElement + Clone> Array<T> {
                 core::ptr::write(base_ptr.add(i), raw);
             }
         }
-        Self::from_data(arc)
+        // SAFETY: `arc` was allocated and initialized above as an `Array<T>`.
+        unsafe { Self::from_data(arc) }
     }
 
     pub fn len(&self) -> usize {
