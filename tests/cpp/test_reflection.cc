@@ -94,11 +94,6 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def_type_attr("test.attr.object.int", int64_t{7})
       .def_type_attr("test.attr.object.bool", true)
       .def_type_attr("test.attr.object.func", [](int64_t value) -> int64_t { return value + 1; })
-      .def_static(refl::type_attr::kPrepare,
-                  [](int64_t x, int64_t y) {
-                    return Map<String, Any>{{"x", x}, {"y", y}};
-                  })
-      .def_constructor_recipe({"x", "y"}, {"x", "y"})
       .def_complete_layout();
   refl::ObjectDef<TestObjADerived>()
       .def(refl::init<int64_t, int64_t, int64_t>())
@@ -378,14 +373,6 @@ TEST(Reflection, StandardBindingMetadata) {
   EXPECT_EQ(layout.at("final").cast<int64_t>(), 0);
   EXPECT_EQ(layout.at("field_count").cast<int64_t>(), 2);
   EXPECT_EQ(layout.at("fingerprint").cast<String>().size(), 16);
-
-  reflection::TypeAttrColumn recipe_column(reflection::type_attr::kConstructorRecipe);
-  Map<String, Any> recipe = recipe_column[type_index].cast<Map<String, Any>>();
-  EXPECT_EQ(recipe.at("method").cast<String>(), reflection::type_attr::kPrepare);
-  Array<String> inputs = recipe.at("inputs").cast<Array<String>>();
-  ASSERT_EQ(inputs.size(), 2);
-  EXPECT_EQ(inputs[0], "x");
-  EXPECT_EQ(inputs[1], "y");
 }
 
 TEST(Reflection, TypeAttrDefDirectValues) {

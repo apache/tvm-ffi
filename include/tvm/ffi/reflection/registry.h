@@ -881,27 +881,6 @@ class ObjectDef : public ReflectionDefBase {
   }
 
   /*!
-   * \brief Register the standard machine-readable semantic-constructor recipe.
-   *
-   * \param inputs Ordered public constructor argument names.
-   * \param derived_fields Physical fields returned by `__ffi_prepare__`.
-   * \return Reference to this `ObjectDef` for method chaining.
-   */
-  TVM_FFI_INLINE ObjectDef& def_constructor_recipe(
-      std::initializer_list<const char*> inputs,
-      std::initializer_list<const char*> derived_fields) {
-    Array<String> input_names;
-    for (const char* name : inputs) input_names.push_back(String(name));
-    Array<String> derived_names;
-    for (const char* name : derived_fields) derived_names.push_back(String(name));
-    Map<String, Any> recipe{{"version", int64_t{1}},
-                            {"method", String(type_attr::kPrepare)},
-                            {"inputs", input_names},
-                            {"derived_fields", derived_names}};
-    return def_type_attr(type_attr::kConstructorRecipe, std::move(recipe));
-  }
-
-  /*!
    * \brief Define a value type attribute for this object type.
    *
    * Values that are directly convertible to ``AnyView`` are stored as-is in

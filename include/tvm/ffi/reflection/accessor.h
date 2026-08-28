@@ -381,17 +381,6 @@ inline constexpr const char* kShallowCopy = "__ffi_shallow_copy__";
  */
 inline constexpr const char* kNativeObjectLayout = "__ffi_native_object_layout__";
 /*!
- * \brief Machine-readable recipe for a reflected semantic constructor.
- *
- * The value names the static preparation method and lists its ordered inputs
- * and derived output fields.  Stub generators use it to distinguish raw
- * physical allocation from constructors that require native validation or
- * derived values.
- */
-inline constexpr const char* kConstructorRecipe = "__ffi_constructor_recipe__";
-/*! \brief Standard static method used by constructor recipes. */
-inline constexpr const char* kPrepare = "__ffi_prepare__";
-/*!
  * \brief Custom recursive repr hook.
  *
  * If registered, ``RecursiveRepr`` (Python ``__repr__``) calls this instead
