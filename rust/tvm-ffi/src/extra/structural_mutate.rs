@@ -135,40 +135,40 @@ impl<State> MutateContext<'_, State> {
         self.def_region_kind
     }
 
-    /// Mutate a borrowed child through the same callback chain. The child and
+    /// Mutate a borrowed value through the same callback chain. The value and
     /// its descendants begin on the non-in-place path.
-    pub fn mutate<T>(&mut self, child: &T) -> Result<Any>
+    pub fn mutate<T>(&mut self, value: &T) -> Result<Any>
     where
         for<'x> AnyView<'x>: From<&'x T>,
     {
-        self.mutate_with(child, self.def_region_kind)
+        self.mutate_with(value, self.def_region_kind)
     }
 
-    /// Mutate a borrowed child under an explicit definition-region state.
-    pub fn mutate_with<T>(&mut self, child: &T, def_region_kind: DefRegionKind) -> Result<Any>
+    /// Mutate a borrowed value under an explicit definition-region state.
+    pub fn mutate_with<T>(&mut self, value: &T, def_region_kind: DefRegionKind) -> Result<Any>
     where
         for<'x> AnyView<'x>: From<&'x T>,
     {
-        let view = AnyView::from(child);
+        let view = AnyView::from(value);
         self.driver
             .mutate_raw(*view.as_raw_ffi_any(), def_region_kind, Permit::Copy)
     }
 
-    /// Mutate an owned child, allowing an in-place attempt when it remains
+    /// Mutate an owned value, allowing an in-place attempt when it remains
     /// uniquely owned and no matched callback borrows it.
-    pub fn maybe_inplace_mutate<T: Into<Any>>(&mut self, child: T) -> Result<Any> {
-        self.maybe_inplace_mutate_with(child, self.def_region_kind)
+    pub fn maybe_inplace_mutate<T: Into<Any>>(&mut self, value: T) -> Result<Any> {
+        self.maybe_inplace_mutate_with(value, self.def_region_kind)
     }
 
-    /// Mutate an owned child under an explicit definition-region state.
+    /// Mutate an owned value under an explicit definition-region state.
     pub fn maybe_inplace_mutate_with<T: Into<Any>>(
         &mut self,
-        child: T,
+        value: T,
         def_region_kind: DefRegionKind,
     ) -> Result<Any> {
-        let child = child.into();
+        let value = value.into();
         self.driver.mutate_raw(
-            *child.as_raw_ffi_any(),
+            *value.as_raw_ffi_any(),
             def_region_kind,
             Permit::MaybeInPlace,
         )
@@ -883,49 +883,47 @@ impl StructuralVarRemap {
 
 /// A mutator that controls its own recursion.
 ///
-/// Implementations descend with the child or `default_*` helpers.
+/// Implementations descend with the `mutate` or `default_*` helpers.
 /// `#[dispatch(mutate)]` generates this trait from typed `mutate_*` methods.
 pub trait StructuralMutator: Sized {
-    /// Mutate one borrowed value without modifying its source storage.
-    fn mutate(&mut self, value: &MapValue, def_region_kind: DefRegionKind) -> Result<Any>;
-
-    /// Mutate one value for which the engine permits an in-place attempt.
+    /// Dispatch one borrowed value without modifying its source storage.
     ///
-    /// The default delegates to [`Self::mutate`] and therefore remains
+    /// The structural-mutation engine calls this hook for each value.
+    fn dispatch_mutate(&mut self, value: &MapValue, def_region_kind: DefRegionKind) -> Result<Any>;
+
+    /// Dispatch one value for which the engine permits an in-place attempt.
+    ///
+    /// The default delegates to [`Self::dispatch_mutate`] and therefore remains
     /// non-in-place. Override this method to opt into the default container
     /// reuse path.
-    fn maybe_inplace_mutate(
+    fn dispatch_maybe_inplace_mutate(
         &mut self,
         value: InplaceValue<'_>,
         def_region_kind: DefRegionKind,
     ) -> Result<Any> {
-        self.mutate(value.as_value(), def_region_kind)
+        self.dispatch_mutate(value.as_value(), def_region_kind)
     }
 
-    /// Re-enter this mutator for a borrowed child. The child and all of its
+    /// Re-enter this mutator for a borrowed value. The value and all of its
     /// descendants use the non-in-place path.
-    fn mutate_child<T>(&mut self, child: &T, def_region_kind: DefRegionKind) -> Result<Any>
+    fn mutate<T>(&mut self, value: &T, def_region_kind: DefRegionKind) -> Result<Any>
     where
         for<'x> AnyView<'x>: From<&'x T>,
     {
-        let view = AnyView::from(child);
+        let view = AnyView::from(value);
         dispatch_user_raw(self, *view.as_raw_ffi_any(), def_region_kind, Permit::Copy)
     }
 
-    /// Re-enter this mutator for an owned child, permitting reuse only when
+    /// Re-enter this mutator for an owned value, permitting reuse only when
     /// the converted value remains uniquely owned.
-    fn maybe_inplace_mutate_child<T>(
-        &mut self,
-        child: T,
-        def_region_kind: DefRegionKind,
-    ) -> Result<Any>
+    fn maybe_inplace_mutate<T>(&mut self, value: T, def_region_kind: DefRegionKind) -> Result<Any>
     where
         T: Into<Any>,
     {
-        let child = child.into();
+        let value = value.into();
         dispatch_user_raw(
             self,
-            *child.as_raw_ffi_any(),
+            *value.as_raw_ffi_any(),
             def_region_kind,
             Permit::MaybeInPlace,
         )
@@ -938,7 +936,7 @@ pub trait StructuralMutator: Sized {
 
     /// Apply default non-in-place mutation to a borrowed typed value.
     ///
-    /// Unlike [Self::mutate_child], this bypasses dispatch for the value
+    /// Unlike [Self::mutate], this bypasses dispatch for the value
     /// itself while its children still re-enter this mutator. This lets a
     /// typed structural-mutate handler recurse through its current node
     /// before applying a post-order rewrite.
@@ -1003,7 +1001,7 @@ impl<State, Link, Marker> StructuralMutator for MutateCallbacks<State, Link, Mar
 where
     Link: MutateChainLink<State, Marker>,
 {
-    fn mutate(&mut self, value: &MapValue, def_region_kind: DefRegionKind) -> Result<Any> {
+    fn dispatch_mutate(&mut self, value: &MapValue, def_region_kind: DefRegionKind) -> Result<Any> {
         let callback_ptr = Rc::as_ptr(&self.callbacks);
         match try_mutate_callbacks::<State, Link, Marker>(
             self,
@@ -1016,7 +1014,7 @@ where
         }
     }
 
-    fn maybe_inplace_mutate(
+    fn dispatch_maybe_inplace_mutate(
         &mut self,
         value: InplaceValue<'_>,
         def_region_kind: DefRegionKind,
@@ -1038,7 +1036,7 @@ impl<Link, Marker> StructuralMutator for DirectMutateCallbacks<'_, Link, Marker>
 where
     Link: MutateChainLink<(), Marker>,
 {
-    fn mutate(&mut self, value: &MapValue, def_region_kind: DefRegionKind) -> Result<Any> {
+    fn dispatch_mutate(&mut self, value: &MapValue, def_region_kind: DefRegionKind) -> Result<Any> {
         let callback_ptr = std::ptr::from_ref(self.callbacks);
         match try_mutate_callbacks::<(), Link, Marker>(self, callback_ptr, value, def_region_kind) {
             Some(result) => result,
@@ -1046,7 +1044,7 @@ where
         }
     }
 
-    fn maybe_inplace_mutate(
+    fn dispatch_maybe_inplace_mutate(
         &mut self,
         value: InplaceValue<'_>,
         def_region_kind: DefRegionKind,
@@ -1421,13 +1419,13 @@ struct StructuralMutatorVTable {
     var_remap_set: FStructuralVarRemapSet,
 }
 
-type RuntimeMutateCallback =
+type RuntimeDispatchMutateCallback =
     unsafe fn(*mut c_void, TVMFFIAny, DefRegionKind, Permit) -> Result<Any>;
 type RuntimeVarRemapGetCallback = unsafe fn(*mut c_void, TVMFFIAny) -> Result<Option<Any>>;
 type RuntimeVarRemapSetCallback = unsafe fn(*mut c_void, TVMFFIAny, &Any) -> Result<()>;
 
 struct RuntimeMutatorCallbacks {
-    mutate: RuntimeMutateCallback,
+    dispatch_mutate: RuntimeDispatchMutateCallback,
     var_remap_get: RuntimeVarRemapGetCallback,
     var_remap_set: RuntimeVarRemapSetCallback,
 }
@@ -1575,7 +1573,7 @@ unsafe fn rust_vtable_mutate_impl(
         Err(error) => return result_into_raw(Err(error)),
     };
     let context = context_guard.context;
-    let callback = (*mutator).callbacks.mutate;
+    let callback = (*mutator).callbacks.dispatch_mutate;
     let raw = *value.as_raw_ffi_any();
     let outcome = catch_unwind(AssertUnwindSafe(|| {
         let kind = def_region_from_raw((*mutator).def_region_mode)?;
@@ -1836,7 +1834,7 @@ impl<U: StructuralMutator> MutationDriver for U {
 ///
 /// `context` must come from the current mutable reborrow of a live `D`; the
 /// runtime object hides that pointer until this call returns.
-unsafe fn runtime_mutate<D: MutationDriver>(
+unsafe fn runtime_dispatch_mutate<D: MutationDriver>(
     context: *mut c_void,
     raw: TVMFFIAny,
     def_region_kind: DefRegionKind,
@@ -1849,7 +1847,7 @@ unsafe fn runtime_mutate<D: MutationDriver>(
 ///
 /// # Safety
 ///
-/// `context` must satisfy the same requirements as [`runtime_mutate`].
+/// `context` must satisfy the same requirements as [`runtime_dispatch_mutate`].
 unsafe fn runtime_var_remap_get<D: MutationDriver>(
     context: *mut c_void,
     raw: TVMFFIAny,
@@ -1861,7 +1859,7 @@ unsafe fn runtime_var_remap_get<D: MutationDriver>(
 ///
 /// # Safety
 ///
-/// `context` must satisfy the same requirements as [`runtime_mutate`], and
+/// `context` must satisfy the same requirements as [`runtime_dispatch_mutate`], and
 /// `replacement` must remain alive for this call.
 unsafe fn runtime_var_remap_set<D: MutationDriver>(
     context: *mut c_void,
@@ -1874,7 +1872,7 @@ unsafe fn runtime_var_remap_set<D: MutationDriver>(
 fn run_structural_mutator<D: MutationDriver>(root: Any, driver: &mut D) -> Result<Any> {
     let context = std::ptr::from_mut(driver).cast::<c_void>();
     let callbacks = RuntimeMutatorCallbacks {
-        mutate: runtime_mutate::<D>,
+        dispatch_mutate: runtime_dispatch_mutate::<D>,
         var_remap_get: runtime_var_remap_get::<D>,
         var_remap_set: runtime_var_remap_set::<D>,
     };
@@ -2080,9 +2078,10 @@ fn dispatch_user_raw<U: StructuralMutator>(
 ) -> Result<Any> {
     let result = if permit == Permit::MaybeInPlace && object_is_unique(raw) {
         let mut scoped_raw = raw;
-        mutator.maybe_inplace_mutate(InplaceValue::from_raw(&mut scoped_raw), def_region_kind)
+        mutator
+            .dispatch_maybe_inplace_mutate(InplaceValue::from_raw(&mut scoped_raw), def_region_kind)
     } else {
-        mutator.mutate(&MapValue::from_raw(raw), def_region_kind)
+        mutator.dispatch_mutate(&MapValue::from_raw(raw), def_region_kind)
     };
     result.map_err(|error| with_value_context(error, raw))
 }

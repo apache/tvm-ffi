@@ -550,7 +550,7 @@ struct ManualIncrement {
 }
 
 impl StructuralMutator for ManualIncrement {
-    fn mutate(&mut self, value: &MapValue, def_region_kind: DefRegionKind) -> Result<Any> {
+    fn dispatch_mutate(&mut self, value: &MapValue, def_region_kind: DefRegionKind) -> Result<Any> {
         if let Some(integer) = value.cast::<i64>() {
             Ok(Any::from(integer + 1))
         } else {
@@ -558,7 +558,7 @@ impl StructuralMutator for ManualIncrement {
         }
     }
 
-    fn maybe_inplace_mutate(
+    fn dispatch_maybe_inplace_mutate(
         &mut self,
         value: InplaceValue<'_>,
         def_region_kind: DefRegionKind,
@@ -582,7 +582,7 @@ struct ReplaceNone {
 }
 
 impl StructuralMutator for ReplaceNone {
-    fn mutate(&mut self, value: &MapValue, def_region_kind: DefRegionKind) -> Result<Any> {
+    fn dispatch_mutate(&mut self, value: &MapValue, def_region_kind: DefRegionKind) -> Result<Any> {
         if value.type_index() == TypeIndex::kTVMFFINone as i32 {
             self.calls += 1;
             Ok(Any::from(8i64))
@@ -591,7 +591,7 @@ impl StructuralMutator for ReplaceNone {
         }
     }
 
-    fn maybe_inplace_mutate(
+    fn dispatch_maybe_inplace_mutate(
         &mut self,
         value: InplaceValue<'_>,
         def_region_kind: DefRegionKind,
@@ -615,7 +615,7 @@ struct RemappingFreeVar {
 }
 
 impl StructuralMutator for RemappingFreeVar {
-    fn mutate(&mut self, value: &MapValue, def_region_kind: DefRegionKind) -> Result<Any> {
+    fn dispatch_mutate(&mut self, value: &MapValue, def_region_kind: DefRegionKind) -> Result<Any> {
         if value.type_index() == self.type_index {
             if let Some(mutated) = self.remap.get(value)? {
                 return Ok(mutated);
@@ -629,7 +629,7 @@ impl StructuralMutator for RemappingFreeVar {
         }
     }
 
-    fn maybe_inplace_mutate(
+    fn dispatch_maybe_inplace_mutate(
         &mut self,
         value: InplaceValue<'_>,
         def_region_kind: DefRegionKind,
@@ -646,21 +646,21 @@ impl StructuralMutator for RemappingFreeVar {
     }
 }
 
-struct ChildHelperMutator {
+struct RecursiveEntryMutator {
     remap: StructuralVarRemap,
-    use_owned_child: bool,
-    owned_child_pointer: Option<usize>,
+    use_owned_value: bool,
+    owned_value_pointer: Option<usize>,
 }
 
-impl StructuralMutator for ChildHelperMutator {
-    fn mutate(&mut self, value: &MapValue, def_region_kind: DefRegionKind) -> Result<Any> {
+impl StructuralMutator for RecursiveEntryMutator {
+    fn dispatch_mutate(&mut self, value: &MapValue, def_region_kind: DefRegionKind) -> Result<Any> {
         if value.type_index() == TypeIndex::kTVMFFINone as i32 {
-            if self.use_owned_child {
-                let child = Array::new(vec![1i64]);
-                self.owned_child_pointer = Some(array_pointer(&child) as usize);
-                self.maybe_inplace_mutate_child(child, def_region_kind)
+            if self.use_owned_value {
+                let value = Array::new(vec![1i64]);
+                self.owned_value_pointer = Some(array_pointer(&value) as usize);
+                self.maybe_inplace_mutate(value, def_region_kind)
             } else {
-                self.mutate_child(&1i64, def_region_kind)
+                self.mutate(&1i64, def_region_kind)
             }
         } else if let Some(integer) = value.cast::<i64>() {
             Ok(Any::from(integer + 1))
@@ -669,7 +669,7 @@ impl StructuralMutator for ChildHelperMutator {
         }
     }
 
-    fn maybe_inplace_mutate(
+    fn dispatch_maybe_inplace_mutate(
         &mut self,
         value: InplaceValue<'_>,
         def_region_kind: DefRegionKind,
@@ -693,7 +693,7 @@ struct RejectAliasedReentry {
 }
 
 impl StructuralMutator for RejectAliasedReentry {
-    fn mutate(&mut self, value: &MapValue, def_region_kind: DefRegionKind) -> Result<Any> {
+    fn dispatch_mutate(&mut self, value: &MapValue, def_region_kind: DefRegionKind) -> Result<Any> {
         if let Some(integer) = value.cast::<i64>() {
             let retained = RETAINED_MUTATOR.with(|slot| slot.borrow().as_ref().unwrap().clone());
             let error = match Function::get_global("ffi.StructuralMutatorMutate")
@@ -713,7 +713,7 @@ impl StructuralMutator for RejectAliasedReentry {
         }
     }
 
-    fn maybe_inplace_mutate(
+    fn dispatch_maybe_inplace_mutate(
         &mut self,
         value: InplaceValue<'_>,
         def_region_kind: DefRegionKind,
@@ -878,28 +878,28 @@ fn user_mutator_can_store_a_changed_free_var_result() {
 }
 
 #[test]
-fn user_mutator_child_helpers_reenter_the_same_mutator() {
-    let mut borrowed = ChildHelperMutator {
+fn user_mutator_recursive_entries_reenter_the_same_mutator() {
+    let mut borrowed = RecursiveEntryMutator {
         remap: StructuralVarRemap::default(),
-        use_owned_child: false,
-        owned_child_pointer: None,
+        use_owned_value: false,
+        owned_value_pointer: None,
     };
     let mutated = structural_mutate(Any::new(), &mut borrowed)
         .and_then(i64::try_from)
         .unwrap();
     assert_eq!(mutated, 2);
 
-    let mut owned = ChildHelperMutator {
+    let mut owned = RecursiveEntryMutator {
         remap: StructuralVarRemap::default(),
-        use_owned_child: true,
-        owned_child_pointer: None,
+        use_owned_value: true,
+        owned_value_pointer: None,
     };
     let mutated = structural_mutate(Any::new(), &mut owned)
         .and_then(Array::<i64>::try_from)
         .unwrap();
     assert_eq!(
         array_pointer(&mutated) as usize,
-        owned.owned_child_pointer.unwrap()
+        owned.owned_value_pointer.unwrap()
     );
     assert_eq!(mutated.get(0).unwrap(), 2);
 }
@@ -1435,7 +1435,7 @@ impl GeneratedRecursiveMutator {
     fn mutate_array(&mut self, array: Array<i64>, kind: DefRegionKind) -> Result<Any> {
         let mut mutated = Vec::with_capacity(array.len());
         for value in array.iter() {
-            mutated.push(i64::try_from(self.mutate_child(&value, kind)?)?);
+            mutated.push(i64::try_from(self.mutate(&value, kind)?)?);
         }
         Ok(Any::from(Array::new(mutated)))
     }
