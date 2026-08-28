@@ -25,7 +25,6 @@
 
 #include <tvm/ffi/any.h>
 #include <tvm/ffi/c_api.h>
-#include <tvm/ffi/container/array.h>
 #include <tvm/ffi/container/map.h>
 #include <tvm/ffi/container/variant.h>
 #include <tvm/ffi/function.h>
@@ -35,8 +34,6 @@
 #include <tvm/ffi/string.h>
 #include <tvm/ffi/type_traits.h>
 
-#include <algorithm>
-#include <iomanip>
 #include <iostream>
 #include <iterator>
 #include <optional>
@@ -752,9 +749,6 @@ class ObjectDef : public ReflectionDefBase {
    */
   ~ObjectDef() noexcept(false) {
     const TVMFFITypeInfo* info = TVMFFIGetTypeInfo(type_index_);
-    if (complete_layout_) {
-      RegisterNativeObjectLayout(info);
-    }
     // Step 1. Register `__ffi_shallow_copy__` <== copy constructor (if it exists and is public)
     if constexpr (std::is_copy_constructible_v<Class>) {
       Function fn = Function::FromTyped(
@@ -861,22 +855,6 @@ class ObjectDef : public ReflectionDefBase {
   template <typename Func, typename... Extra>
   TVM_FFI_INLINE ObjectDef& def_static(const char* name, Func&& func, Extra&&... extra) {
     RegisterMethod(name, true, std::forward<Func>(func), std::forward<Extra>(extra)...);
-    return *this;
-  }
-
-  /*!
-   * \brief Certify that reflection describes this class's complete native layout.
-   *
-   * This opt-in is intended for generated foreign-language bindings that
-   * allocate the object directly.  Polymorphic C++ objects are rejected because
-   * their compiler-owned vtable state cannot be reproduced from reflected fields.
-   *
-   * \return Reference to this `ObjectDef` for method chaining.
-   */
-  TVM_FFI_INLINE ObjectDef& def_complete_layout() {
-    static_assert(!std::is_polymorphic_v<Class>,
-                  "polymorphic C++ objects must remain opaque in foreign-language bindings");
-    complete_layout_ = true;
     return *this;
   }
 
@@ -1012,74 +990,6 @@ class ObjectDef : public ReflectionDefBase {
     TVM_FFI_CHECK_SAFE_CALL(TVMFFITypeRegisterMetadata(type_index_, &info));
   }
 
-  static void FingerprintBytes(uint64_t* state, const void* data, size_t size) {
-    const auto* bytes = static_cast<const uint8_t*>(data);
-    for (size_t index = 0; index < size; ++index) {
-      *state ^= bytes[index];
-      *state *= uint64_t{1099511628211};
-    }
-  }
-
-  static void FingerprintInteger(uint64_t* state, uint64_t value) {
-    for (int shift = 0; shift < 64; shift += 8) {
-      uint8_t byte = static_cast<uint8_t>(value >> shift);
-      FingerprintBytes(state, &byte, 1);
-    }
-  }
-
-  static void FingerprintString(uint64_t* state, std::string_view value) {
-    FingerprintInteger(state, value.size());
-    FingerprintBytes(state, value.data(), value.size());
-  }
-
-  void RegisterNativeObjectLayout(const TVMFFITypeInfo* info) {
-    TVM_FFI_CHECK(info != nullptr, InternalError);
-    TVM_FFI_CHECK(info->metadata != nullptr, InternalError);
-    uint64_t fingerprint = UINT64_C(14695981039346656037);
-    FingerprintInteger(&fingerprint, 1);
-    FingerprintString(&fingerprint, type_key_);
-    std::string_view parent_key;
-    if (info->type_depth != 0) {
-      TVM_FFI_CHECK(info->type_ancestors != nullptr, InternalError);
-      const TVMFFITypeInfo* parent = info->type_ancestors[info->type_depth - 1];
-      TVM_FFI_CHECK(parent != nullptr, InternalError);
-      parent_key = std::string_view(parent->type_key.data, parent->type_key.size);
-    }
-    FingerprintString(&fingerprint, parent_key);
-    FingerprintInteger(&fingerprint, sizeof(Class));
-    FingerprintInteger(&fingerprint, alignof(Class));
-    FingerprintInteger(&fingerprint, Class::_type_final ? 1 : 0);
-    FingerprintInteger(&fingerprint, info->num_fields);
-    std::vector<const TVMFFIFieldInfo*> fields;
-    fields.reserve(info->num_fields);
-    for (int32_t index = 0; index < info->num_fields; ++index) {
-      fields.push_back(&info->fields[index]);
-    }
-    std::sort(fields.begin(), fields.end(),
-              [](const TVMFFIFieldInfo* lhs, const TVMFFIFieldInfo* rhs) {
-                if (lhs->offset != rhs->offset) {
-                  return lhs->offset < rhs->offset;
-                }
-                return std::string_view(lhs->name.data, lhs->name.size) <
-                       std::string_view(rhs->name.data, rhs->name.size);
-              });
-    for (const TVMFFIFieldInfo* field_ptr : fields) {
-      const TVMFFIFieldInfo& field = *field_ptr;
-      FingerprintString(&fingerprint, std::string_view(field.name.data, field.name.size));
-      FingerprintInteger(&fingerprint, field.offset);
-      FingerprintInteger(&fingerprint, field.size);
-      FingerprintInteger(&fingerprint, field.alignment);
-    }
-    std::ostringstream stream;
-    stream << std::hex << std::setfill('0') << std::setw(16) << fingerprint;
-    Map<String, Any> layout{{"version", int64_t{1}},
-                            {"alignment", int64_t{alignof(Class)}},
-                            {"final", int64_t{Class::_type_final ? 1 : 0}},
-                            {"field_count", int64_t{info->num_fields}},
-                            {"fingerprint", String(stream.str())}};
-    RegisterTypeAttrValue(type_index_, type_attr::kNativeObjectLayout, std::move(layout));
-  }
-
   template <typename T, typename BaseClass, typename... ExtraArgs>
   void RegisterField(const char* name, T BaseClass::* field_ptr, bool writable,
                      ExtraArgs&&... extra_args) {
@@ -1136,7 +1046,6 @@ class ObjectDef : public ReflectionDefBase {
   int32_t type_index_;
   const char* type_key_;
   bool has_explicit_init_{false};
-  bool complete_layout_{false};
   static constexpr const char* kInitMethodName = type_attr::kInit;
 };
 

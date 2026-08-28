@@ -371,16 +371,6 @@ inline constexpr const char* kConvertTypeSchema = "__ffi_convert_type_schema__";
  */
 inline constexpr const char* kShallowCopy = "__ffi_shallow_copy__";
 /*!
- * \brief Native object-layout certificate for foreign-language allocation.
- *
- * The value is registered only when an ``ObjectDef`` explicitly calls
- * ``def_complete_layout()``.  It records the native alignment, finality and a
- * fingerprint covering the type hierarchy, total size, and direct reflected
- * fields.  Its presence certifies that the reflected fields describe the
- * complete physical object layout and that the C++ class is non-polymorphic.
- */
-inline constexpr const char* kNativeObjectLayout = "__ffi_native_object_layout__";
-/*!
  * \brief Custom recursive repr hook.
  *
  * If registered, ``RecursiveRepr`` (Python ``__repr__``) calls this instead
