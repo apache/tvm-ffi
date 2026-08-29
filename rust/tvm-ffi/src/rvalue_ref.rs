@@ -27,13 +27,10 @@ use tvm_ffi_sys::{TVMFFIAny, TVMFFIObject, TVMFFITypeIndex as TypeIndex};
 use crate::any::ArgTryFromAnyView;
 use crate::{AnyCompatible, AnyView, Error, ObjectRefCore, Result};
 
-/// An object argument whose strong reference may be moved through the FFI ABI.
+/// A move-aware object argument compatible with C++ `ffi::RValueRef<T>`.
 ///
-/// Passing this wrapper to [`crate::Function::call_tuple`] uses the same
-/// `kTVMFFIObjectRValueRef` representation as C++ `ffi::RValueRef<T>`. If the
-/// callee accepts an rvalue reference, it can take the stored reference without
-/// incrementing its count; otherwise the slot remains owned by this wrapper and
-/// is released normally.
+/// The callee may take the stored strong reference without incrementing its
+/// count; otherwise this wrapper retains and releases it.
 pub struct RValueRef<T>
 where
     T: ObjectRefCore + AnyCompatible,
@@ -57,9 +54,7 @@ where
         }
     }
 
-    /// Take the object held by this wrapper.
-    ///
-    /// This is zero-copy: the owned strong reference is moved into `T`.
+    /// Take the owned object without copying or incrementing its reference count.
     pub fn into_inner(mut self) -> T {
         let object = *self.slot.get_mut();
         assert!(!object.is_null(), "RValueRef has already been moved");

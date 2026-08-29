@@ -62,19 +62,11 @@ macro_rules! cached_global_func {
 /// Implement zero-copy conversions from a derived object reference to one of
 /// its base object-reference types.
 ///
-/// The declared relation must match the inheritance relation registered for
-/// the two object container types. Generated bindings normally emit this next
-/// to their object-reference declarations.
+/// # Safety
 ///
-/// # Safety contract
-///
-/// This macro emits an infallible safe conversion backed by a pointer rewrap.
-/// It must therefore be used only by trusted/generated binding code that has
-/// verified that `target`'s container is an ancestor of `source`'s container in
-/// the loaded FFI type table and that every valid `source` value satisfies any
-/// additional invariant imposed by the `target` reference view. The latter is
-/// relevant for typed zero-state views. Declaring an unrelated pair or omitting
-/// a target invariant would make the generated conversion unsound.
+/// Generated bindings must ensure that `target` is a registered base of
+/// `source` and that every `source` satisfies the target reference invariants.
+/// An incorrect declaration makes the generated safe conversion unsound.
 #[macro_export]
 macro_rules! impl_object_upcast {
     ($($source:ty => $target:ty),+ $(,)?) => {

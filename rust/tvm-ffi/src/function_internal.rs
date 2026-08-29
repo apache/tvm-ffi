@@ -220,8 +220,7 @@ crate::impl_arg_into_ref!(
     crate::DLDevice
 );
 
-// `Option<T>` uses the same packed representation as `T`, with `None` encoded
-// as kTVMFFINone. It needs generic implementations rather than macro entries.
+// Generic holders require explicit implementations rather than scalar macro entries.
 impl<T: AnyCompatible> IntoArgHolder for Option<T> {
     type Target = Self;
     fn into_arg_holder(self) -> Self::Target {
@@ -250,8 +249,6 @@ impl<T: AnyCompatible> ArgIntoRef for &Option<T> {
     }
 }
 
-// Parametric containers pass by value/reference like the scalars above, but
-// their type parameters keep them out of the `impl_*!` macros.
 impl<T: ContainerElement + Clone> IntoArgHolder for crate::Array<T> {
     type Target = crate::Array<T>;
     fn into_arg_holder(self) -> Self::Target {

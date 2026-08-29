@@ -166,8 +166,6 @@ pub fn derive_object_ref(input: proc_macro::TokenStream) -> TokenStream {
             }
         }
 
-        // Match standard owning Rust handles such as String: converting a
-        // borrow into an owned handle clones exactly one strong reference.
         impl ::std::convert::From<&#struct_name> for #struct_name {
             #[inline]
             fn from(value: &#struct_name) -> Self {

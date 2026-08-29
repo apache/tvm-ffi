@@ -28,12 +28,10 @@ use crate::tvm_ffi_sys::{
 };
 use crate::{Any, AnyView, Error, ObjectCore, Result, TYPE_ERROR};
 
-/// A process-lifetime column of reflection attributes indexed by runtime type.
+/// A registry-owned type-attribute column indexed by runtime type.
 ///
-/// The registry owns the column. Values returned by [`TypeAttrColumn::get`]
-/// are copied into owning [`Any`] values before they leave the registry. As
-/// with the native type table, registration must be complete or externally
-/// synchronized before a column is read concurrently.
+/// [`TypeAttrColumn::get`] returns owning copies. Registration must not race
+/// with reads.
 #[derive(Clone, Copy)]
 pub struct TypeAttrColumn(NonNull<TVMFFITypeAttrColumn>);
 
@@ -88,11 +86,7 @@ pub fn get_type_attr(type_index: i32, attr_name: &str) -> Option<Any> {
     TypeAttrColumn::new(attr_name)?.get(type_index)
 }
 
-/// A cached getter for one reflected object field.
-///
-/// The native registry owns the field metadata for the lifetime of the
-/// process.  Constructing a `FieldGetter` resolves the field name once;
-/// subsequent calls use the registered offset and C ABI getter directly.
+/// Resolves a reflected field once, then uses its registered C ABI getter.
 #[derive(Clone, Copy)]
 pub struct FieldGetter {
     owner_type_index: i32,
@@ -189,9 +183,7 @@ unsafe fn find_field(
     type_info: *const crate::tvm_ffi_sys::TVMFFITypeInfo,
     field_name: &str,
 ) -> Option<NonNull<TVMFFIFieldInfo>> {
-    // Search the concrete type first, then its nearest base.  Shadowing a base
-    // field is discouraged, but this order gives the most-derived declaration
-    // the same precedence as ordinary member lookup.
+    // Prefer the most-derived declaration, then search nearest ancestors.
     if let Some(field) = find_field_at_level(type_info, field_name) {
         return Some(field);
     }
