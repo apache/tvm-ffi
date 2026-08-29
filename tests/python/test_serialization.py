@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import itertools
 import json
 from typing import Any, Callable
 
@@ -25,6 +26,8 @@ import pytest
 import tvm_ffi
 import tvm_ffi.testing
 from tvm_ffi.serialization import from_json_graph_str, to_json_graph_str
+
+_type_counter = itertools.count()
 
 
 # ---------------------------------------------------------------------------
@@ -66,6 +69,33 @@ def _assert_any_equal(a: Any, b: Any) -> None:
         assert str(a) == str(b)
     else:
         assert a == b
+
+
+def test_serialization_hooks_are_inherited_by_subclasses() -> None:
+    restored_values: dict[int, tvm_ffi.Object] = {}
+
+    @tvm_ffi.dataclasses.py_class(f"testing.serialization.HookBase{next(_type_counter)}")
+    class Base(tvm_ffi.Object):
+        key: int
+
+        def __data_to_json__(self) -> int:
+            return self.key
+
+        @staticmethod
+        def __data_from_json__(key: int) -> tvm_ffi.Object:
+            return restored_values[key]
+
+    @tvm_ffi.dataclasses.py_class(f"testing.serialization.HookChild{next(_type_counter)}")
+    class Child(Base):
+        extra: int
+
+    child = Child(key=1, extra=2)
+    restored_values[1] = child
+    assert _roundtrip(child).same_as(child)
+
+    restored_values[1] = Base(key=1)
+    with pytest.raises(TypeError, match="__data_from_json__"):
+        _roundtrip(child)
 
 
 # ---------------------------------------------------------------------------

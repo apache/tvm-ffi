@@ -190,6 +190,31 @@ class TypeAttrColumn {
     const AnyView* any_view_data = reinterpret_cast<const AnyView*>(column_->data);
     return any_view_data[offset];
   }
+  /*!
+   * \brief Get the type attribute of a type or its nearest ancestor with one.
+   *
+   * Registration is per type index, so `operator[]` on a subclass does not
+   * return an attribute registered by a base class. Use this method for
+   * attributes that define behavior for a hierarchy. A subclass's own
+   * attribute takes priority over inherited attributes.
+   *
+   * \param type_index The type index.
+   * \return The nearest matching attribute, or an empty `AnyView`.
+   */
+  AnyView GetInherited(int32_t type_index) const {
+    AnyView result = (*this)[type_index];
+    if (result != nullptr) {
+      return result;
+    }
+    const TVMFFITypeInfo* type_info = TVMFFIGetTypeInfo(type_index);
+    for (int32_t i = type_info->type_depth - 1; i >= 0; --i) {
+      result = (*this)[type_info->type_ancestors[i]->type_index];
+      if (result != nullptr) {
+        return result;
+      }
+    }
+    return AnyView();
+  }
 
  private:
   const TVMFFITypeAttrColumn* column_;

@@ -209,8 +209,12 @@ class StructEqualHandler {
     static reflection::TypeAttrColumn custom_s_equal =
         reflection::TypeAttrColumn(reflection::type_attr::kSEqual);
 
+    // A custom hook serves the hierarchy below the type that registered it.
+    // A subclass can override the inherited behavior by registering its own.
+    AnyView custom = custom_s_equal.GetInherited(type_info->type_index);
+
     bool success = true;
-    if (custom_s_equal[type_info->type_index] == nullptr) {
+    if (custom == nullptr) {
       // We recursively compare the fields the object
       reflection::ForEachFieldInfoWithEarlyStop(type_info, [&](const TVMFFIFieldInfo* field_info) {
         // skip fields that are marked as structural eq hash ignore
@@ -277,9 +281,7 @@ class StructEqualHandler {
               return sub_success;
             });
       }
-      success = custom_s_equal[type_info->type_index]
-                    .cast<ffi::Function>()(lhs, rhs, s_equal_callback_)
-                    .cast<bool>();
+      success = custom.cast<ffi::Function>()(lhs, rhs, s_equal_callback_).cast<bool>();
     }
     return success;
   }

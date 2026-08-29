@@ -88,6 +88,31 @@ def test_field_accepts_converter_metadata() -> None:
     assert f.converter is converter
 
 
+def test_structural_hooks_are_inherited_by_subclasses() -> None:
+    @py_class(_unique_key("InheritedStructuralHookBase"))
+    class Base(Object):
+        key: int
+        ignored: int
+
+        def __s_equal__(self, other: Any, equal: Any) -> bool:
+            return equal(self.key, other.key, False, "key")
+
+        def __s_hash__(self, init_hash: int, hash_value: Any) -> int:
+            return hash_value(self.key, init_hash, False)
+
+    @py_class(_unique_key("InheritedStructuralHookChild"))
+    class Child(Base):
+        extra: int
+
+    lhs = Child(key=1, ignored=2, extra=3)
+    rhs = Child(key=1, ignored=20, extra=30)
+    different = Child(key=2, ignored=2, extra=3)
+
+    assert tvm_ffi.structural_equal(lhs, rhs)
+    assert tvm_ffi.structural_hash(lhs) == tvm_ffi.structural_hash(rhs)
+    assert not tvm_ffi.structural_equal(lhs, different)
+
+
 # ---------------------------------------------------------------------------
 # Low-level helpers for _make_type-based tests
 # ---------------------------------------------------------------------------

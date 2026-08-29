@@ -175,7 +175,11 @@ class StructuralHashHandler {
     static reflection::TypeAttrColumn custom_s_hash =
         reflection::TypeAttrColumn(reflection::type_attr::kSHash);
 
-    if (custom_s_hash[type_info->type_index] == nullptr) {
+    // Mirror structural equality: a custom hook serves subclasses unless one
+    // registers a more specific override.
+    AnyView custom = custom_s_hash.GetInherited(type_info->type_index);
+
+    if (custom == nullptr) {
       // go over the content and hash the fields
       reflection::ForEachFieldInfo(type_info, [&](const TVMFFIFieldInfo* field_info) {
         // skip fields that are marked as structural eq hash ignore
@@ -218,9 +222,9 @@ class StructuralHashHandler {
               return static_cast<int64_t>(details::StableHashCombine(inner_init, hv));
             });
       }
-      init_hash = custom_s_hash[type_info->type_index]
-                      .cast<ffi::Function>()(obj, static_cast<int64_t>(init_hash), s_hash_callback_)
-                      .cast<uint64_t>();
+      init_hash =
+          custom.cast<ffi::Function>()(obj, static_cast<int64_t>(init_hash), s_hash_callback_)
+              .cast<uint64_t>();
     }
     return init_hash;
   }

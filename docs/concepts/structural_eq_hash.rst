@@ -715,6 +715,14 @@ still managed by the framework — the custom callback only controls
 *which* sub-values are compared or hashed, *in what order*, and *with
 what* ``def_region`` flag.
 
+A hook also serves every subclass of the type that registered it.  A
+base class can therefore define equality and hashing for its whole
+hierarchy without each subclass restating the hooks.  A subclass that
+needs different behavior can register its own hook, which takes
+priority.  An inherited hook remains responsible for selecting the
+sub-values it compares or hashes, so subclasses that add relevant
+fields should override it.
+
 Signatures
 ~~~~~~~~~~
 

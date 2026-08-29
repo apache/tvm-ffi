@@ -202,8 +202,9 @@ class ObjectGraphSerializer {
     if (obj->IsInstance<EnumObj>()) return static_cast<const EnumObj*>(obj)->_str_index;
     static reflection::TypeAttrColumn data_to_json =
         reflection::TypeAttrColumn(reflection::type_attr::kDataToJson);
-    if (data_to_json[value.type_index()] != nullptr) {
-      return data_to_json[value.type_index()].cast<Function>()(value);
+    AnyView to_json = data_to_json.GetInherited(value.type_index());
+    if (to_json != nullptr) {
+      return to_json.cast<Function>()(value);
     }
     // NOTE: invariant: lhs and rhs are already the same type
     const TVMFFITypeInfo* type_info = TVMFFIGetTypeInfo(value.type_index());
@@ -265,6 +266,20 @@ class ObjectGraphSerializer {
 json::Value ToJSONGraph(const Any& value, const Any& metadata) {
   return ObjectGraphSerializer::Serialize(value, metadata);
 }
+
+namespace {
+
+// Whether `type_index` is `ancestor_index` or descends from it.
+bool DerivesFrom(int32_t type_index, int32_t ancestor_index) {
+  if (type_index == ancestor_index) return true;
+  const TVMFFITypeInfo* type_info = TVMFFIGetTypeInfo(type_index);
+  for (int32_t i = 0; i < type_info->type_depth; ++i) {
+    if (type_info->type_ancestors[i]->type_index == ancestor_index) return true;
+  }
+  return false;
+}
+
+}  // namespace
 
 class ObjectGraphDeserializer {
  public:
@@ -395,8 +410,19 @@ class ObjectGraphDeserializer {
     }
     static reflection::TypeAttrColumn data_from_json =
         reflection::TypeAttrColumn(reflection::type_attr::kDataFromJson);
-    if (data_from_json[type_index] != nullptr) {
-      return data_from_json[type_index].cast<Function>()(data);
+    AnyView from_json = data_from_json.GetInherited(type_index);
+    if (from_json != nullptr) {
+      Any decoded = from_json.cast<Function>()(data);
+      // The hook chooses the concrete result but must honor the node type from
+      // the serialized graph.
+      const Object* object = decoded.as<Object>();
+      TVM_FFI_CHECK(object != nullptr && DerivesFrom(object->type_index(), type_index), TypeError)
+          << "`" << reflection::type_attr::kDataFromJson << "` for type `"
+          << TypeIndexToTypeKey(type_index) << "` returned "
+          << (object == nullptr
+                  ? std::string("a non-object")
+                  : "a `" + std::string(TypeIndexToTypeKey(object->type_index())) + "`");
+      return decoded;
     }
     // otherwise, we go over the fields and create the data.
     const TVMFFITypeInfo* type_info = TVMFFIGetTypeInfo(type_index);
