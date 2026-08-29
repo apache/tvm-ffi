@@ -93,15 +93,15 @@ pub unsafe trait AnyCompatible: Sized {
 /// The private supertrait seals this marker and owns all conversion operations,
 /// keeping them out of the user-facing trait API.
 #[doc(hidden)]
-pub trait ContainerElement: container_element_private::Codec {}
+pub trait ContainerElement: container_element_ops::Ops {}
 
 impl<T: AnyCompatible> ContainerElement for T {}
 impl ContainerElement for Any {}
 
-mod container_element_private {
+mod container_element_ops {
     use super::{Any, AnyCompatible, AnyView, TVMFFIAny};
 
-    pub trait Codec: Sized {
+    pub trait Ops: Sized {
         unsafe fn container_copy_to_any_view(src: &Self, data: &mut TVMFFIAny);
         unsafe fn container_move_to_any(src: Self, data: &mut TVMFFIAny);
         unsafe fn container_check_any_strict(data: &TVMFFIAny) -> bool;
@@ -111,7 +111,7 @@ mod container_element_private {
         fn container_type_str() -> String;
     }
 
-    impl<T: AnyCompatible> Codec for T {
+    impl<T: AnyCompatible> Ops for T {
         #[inline]
         unsafe fn container_copy_to_any_view(src: &Self, data: &mut TVMFFIAny) {
             <T as AnyCompatible>::copy_to_any_view(src, data)
@@ -148,7 +148,7 @@ mod container_element_private {
         }
     }
 
-    impl Codec for Any {
+    impl Ops for Any {
         #[inline]
         unsafe fn container_copy_to_any_view(src: &Self, data: &mut TVMFFIAny) {
             *data = *src.as_raw_ffi_any();
