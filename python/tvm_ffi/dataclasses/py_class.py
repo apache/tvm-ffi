@@ -448,7 +448,6 @@ def on_fields_resolved(  # noqa: PLR0912, PLR0915
     eq_default=False,
     order_default=False,
     field_specifiers=(Field, field),
-    converter=_field_converter,
 )
 def py_class(  # noqa: PLR0913
     cls_or_type_key: type | str | None = None,
@@ -658,3 +657,9 @@ def py_class(  # noqa: PLR0913
     if isinstance(cls_or_type_key, type):
         return decorator(cls_or_type_key)
     raise TypeError(f"py_class: expected str or type, got {type(cls_or_type_key)}")
+
+
+# `converter` is runtime metadata rather than part of the type checker's
+# declared `dataclass_transform` signature. Set it on the generated metadata
+# so checkers can still model converted fields without rejecting the decorator.
+py_class.__dataclass_transform__["kwargs"]["converter"] = _field_converter  # ty: ignore[unresolved-attribute]
