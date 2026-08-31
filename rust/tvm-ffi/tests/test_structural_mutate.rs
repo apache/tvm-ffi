@@ -1072,7 +1072,7 @@ fn callback_errors_preserve_message_and_add_object_context() {
     ensure_test_types_registered();
     let error = match structural_map(
         Array::new(vec![1i64]),
-        |_integer: i64| -> Result<Any> {
+        |_integer: i64| -> Result<i64> {
             Err(Error::new(RUNTIME_ERROR, "mapper failed", "origin"))
         },
         WalkOrder::PostOrder,
@@ -1087,7 +1087,7 @@ fn callback_errors_preserve_message_and_add_object_context() {
 
     let error = match structural_mutate(
         Array::new(vec![1i64]),
-        |_integer: i64, _mutator: &mut MutateContext<'_, ()>| -> Result<Any> {
+        |_integer: i64, _mutator: &mut MutateContext<'_, ()>| -> Result<i64> {
             Err(Error::new(
                 RUNTIME_ERROR,
                 "callback mutator failed",
@@ -1293,7 +1293,7 @@ fn shared_map_callback_error_preserves_source_and_reports_object_context() {
     let source: Map<i64, i64> = [(1, 10), (2, 20)].into_iter().collect();
     let error = match structural_map(
         source.clone(),
-        |_integer: i64| -> Result<Any> {
+        |_integer: i64| -> Result<i64> {
             Err(Error::new(RUNTIME_ERROR, "map mapper failed", "origin"))
         },
         WalkOrder::PostOrder,
@@ -1432,12 +1432,12 @@ struct GeneratedRecursiveMutator {
 
 #[dispatch(mutate)]
 impl GeneratedRecursiveMutator {
-    fn mutate_array(&mut self, array: Array<i64>, kind: DefRegionKind) -> Result<Any> {
+    fn mutate_array(&mut self, array: Array<i64>, kind: DefRegionKind) -> Result<Array<i64>> {
         let mut mutated = Vec::with_capacity(array.len());
         for value in array.iter() {
             mutated.push(i64::try_from(self.mutate(&value, kind)?)?);
         }
-        Ok(Any::from(Array::new(mutated)))
+        Ok(Array::new(mutated))
     }
 
     fn mutate_integer(&mut self, value: i64) -> Any {
@@ -1597,6 +1597,36 @@ fn closures_and_tuples_use_ordered_first_match() {
     assert_eq!(mapped.get(0).unwrap(), 4);
     assert_eq!(first_calls, 1);
     assert_eq!(later_calls, 0);
+}
+
+#[test]
+fn callbacks_return_values_convertible_into_any() {
+    ensure_test_types_registered();
+    let mapped = structural_map(
+        Array::new(vec![1i64, 2]),
+        |integer: i64| integer + 10,
+        WalkOrder::PostOrder,
+    )
+    .and_then(Array::<i64>::try_from)
+    .unwrap();
+    assert_eq!(mapped.iter().collect::<Vec<_>>(), vec![11, 12]);
+
+    let mapped = structural_map(
+        Array::new(vec![1i64, 2]),
+        |integer: i64| -> Result<i64> { Ok(integer + 20) },
+        WalkOrder::PostOrder,
+    )
+    .and_then(Array::<i64>::try_from)
+    .unwrap();
+    assert_eq!(mapped.iter().collect::<Vec<_>>(), vec![21, 22]);
+
+    let mutated = structural_mutate(
+        Array::new(vec![1i64, 2]),
+        |integer: i64, _mutator: &mut MutateContext<'_, ()>| integer * 2,
+    )
+    .and_then(Array::<i64>::try_from)
+    .unwrap();
+    assert_eq!(mutated.iter().collect::<Vec<_>>(), vec![2, 4]);
 }
 
 #[test]

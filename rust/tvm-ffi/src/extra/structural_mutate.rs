@@ -71,21 +71,24 @@ pub use super::structural_common::StructuralValue as MapValue;
 pub type MapResult = Result<Any>;
 
 /// Convert an infallible or fallible callback result into [`MapResult`].
+///
+/// A callback may return any value convertible into [`Any`], or wrap it in
+/// [`Result`] to use `?`.
 pub trait IntoMapResult {
     fn into_map_result(self) -> MapResult;
 }
 
-impl IntoMapResult for Any {
+impl<T: Into<Any>> IntoMapResult for T {
     #[inline]
     fn into_map_result(self) -> MapResult {
-        Ok(self)
+        Ok(self.into())
     }
 }
 
-impl IntoMapResult for Result<Any> {
+impl<T: Into<Any>> IntoMapResult for Result<T> {
     #[inline]
     fn into_map_result(self) -> MapResult {
-        self
+        self.map(Into::into)
     }
 }
 
@@ -216,22 +219,25 @@ impl<U: StructuralMutator> IntoMutator<U> for &mut U {
 }
 
 /// Convert a mutation callback result into [`Result<Any>`].
+///
+/// A callback may return any value convertible into [`Any`], or wrap it in
+/// [`Result`] to use `?`.
 #[doc(hidden)]
 pub trait IntoMutateResult {
     fn into_mutate_result(self) -> Result<Any>;
 }
 
-impl IntoMutateResult for Any {
+impl<T: Into<Any>> IntoMutateResult for T {
     #[inline]
     fn into_mutate_result(self) -> Result<Any> {
-        Ok(self)
+        Ok(self.into())
     }
 }
 
-impl IntoMutateResult for Result<Any> {
+impl<T: Into<Any>> IntoMutateResult for Result<T> {
     #[inline]
     fn into_mutate_result(self) -> Result<Any> {
-        self
+        self.map(Into::into)
     }
 }
 
