@@ -564,6 +564,13 @@ inline constexpr const char* kDataToJson = "__data_to_json__";
 inline constexpr const char* kDataFromJson = "__data_from_json__";
 /*! \brief Per-class enum state: ordered entries, canonical indices, and extensible attrs. */
 inline constexpr const char* kEnumState = "__ffi_enum__";
+/*!
+ * \brief Whether the class is declared final (``Class::_type_final``).
+ *
+ * Registered as a ``bool`` by every ``ObjectDef<Class>``. A final class can
+ * never gain a subtype, so a binding generator may store it by value.
+ */
+inline constexpr const char* kTypeFinal = "__ffi_type_final__";
 }  // namespace type_attr
 
 /*!

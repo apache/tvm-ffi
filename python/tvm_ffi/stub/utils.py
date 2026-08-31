@@ -202,6 +202,8 @@ class ObjectInfo:
     """Type keys of every ancestor, root first (``["ffi.Object", "ir.Expr"]`` for ``tirx.Add``)."""
     total_size: int | None = None
     """Native ``sizeof`` in bytes, or ``None`` when the type has no metadata of its own."""
+    is_final: bool | None = None
+    """``__ffi_type_final__``: the class admits no subtype. ``None`` when unregistered."""
 
     def has_overloaded_methods(self) -> bool:
         """Return whether reflection exposed multiple signatures for a method."""
@@ -264,4 +266,5 @@ class ObjectInfo:
             has_init=has_init,
             ancestors=[info.type_key for info in ancestor_infos],
             total_size=type_info.total_size if type_info._has_type_metadata else None,
+            is_final=_lookup_type_attr(type_info.type_index, "__ffi_type_final__"),
         )

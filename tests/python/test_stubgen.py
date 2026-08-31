@@ -1030,6 +1030,22 @@ def test_objectinfo_total_size_requires_own_metadata() -> None:
     assert func.ancestors == ["ffi.Object"]
 
 
+def test_objectinfo_is_final() -> None:
+    """``ObjectDef`` publishes finality; a type registered without one publishes none."""
+    # A registered `False` must stay distinguishable from an unregistered attribute.
+    base = ObjectInfo.from_type_info(_TestCxxClassBase.__tvm_ffi_type_info__)  # ty: ignore[unresolved-attribute]
+    assert base.is_final is False
+
+    derived = ObjectInfo.from_type_info(
+        _lookup_or_register_type_info_from_type_key("testing.TestObjectDerived")
+    )
+    assert derived.is_final is True
+
+    # `ffi.Object` is registered without an `ObjectDef`, so it claims nothing.
+    root = ObjectInfo.from_type_info(_lookup_or_register_type_info_from_type_key("ffi.Object"))
+    assert root.is_final is None
+
+
 def test_named_type_schema_keeps_positional_signature() -> None:
     """Synthetic schemas (function params, tests) carry no layout facts."""
     schema = NamedTypeSchema("x", TypeSchema("int"))
