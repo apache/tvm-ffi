@@ -25,11 +25,14 @@ generator (e.g. :mod:`tvm_ffi.stub.python_generator.codegen`).
 from __future__ import annotations
 
 import dataclasses
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from tvm_ffi.core import TypeInfo, TypeSchema, _lookup_type_attr
+from tvm_ffi.core import MISSING, TypeInfo, TypeSchema, _lookup_type_attr
 
 from . import consts as C
+
+if TYPE_CHECKING:
+    from tvm_ffi.core import TypeField
 
 
 def _parse_type_schema(raw: str | dict[str, Any]) -> TypeSchema:
@@ -86,14 +89,72 @@ class Options:
 
 @dataclasses.dataclass(init=False)
 class NamedTypeSchema(TypeSchema):
-    """A type schema with an associated name."""
+    """A type schema with an associated name.
+
+    For a reflected object field, the schema also carries the facts the C++
+    registry recorded about the native field, so a generator can reason about
+    memory layout and defaults without a second reflection pass:
+
+    - ``size`` / ``alignment`` / ``offset``: the byte facts of the native field.
+      ``offset`` is measured from the start of the ``TVMFFIObject`` header, the
+      same base the C ABI field getters use. All three are ``None`` for function
+      parameters and synthetic schemas.
+    - ``default``: the registered static default value (:data:`MISSING` when
+      none). ``default_is_factory`` marks a ``default_factory`` registration,
+      whose value only exists by calling the factory through the FFI.
+    - ``structural_eq``: the decoded structural-equality flag
+      (``"ignore"``, ``"def-recursive"``, ``"def-non-recursive"`` or ``None``).
+    - ``frozen``: ``True`` for read-only (``def_ro``) fields.
+    """
 
     name: str
+    size: int | None = None
+    alignment: int | None = None
+    offset: int | None = None
+    default: Any = MISSING
+    default_is_factory: bool = False
+    structural_eq: str | None = None
+    frozen: bool = False
 
-    def __init__(self, name: str, schema: TypeSchema) -> None:
-        """Initialize a `NamedTypeSchema` with the given name and schema."""
+    def __init__(
+        self,
+        name: str,
+        schema: TypeSchema,
+        *,
+        size: int | None = None,
+        alignment: int | None = None,
+        offset: int | None = None,
+        default: Any = MISSING,
+        default_is_factory: bool = False,
+        structural_eq: str | None = None,
+        frozen: bool = False,
+    ) -> None:
+        """Initialize a `NamedTypeSchema` with the given name, schema and field facts."""
         super().__init__(origin=schema.origin, args=schema.args)
         self.name = name
+        self.size = size
+        self.alignment = alignment
+        self.offset = offset
+        self.default = default
+        self.default_is_factory = default_is_factory
+        self.structural_eq = structural_eq
+        self.frozen = frozen
+
+    @staticmethod
+    def from_type_field(field: TypeField) -> NamedTypeSchema:
+        """Construct a `NamedTypeSchema` from a reflected :class:`~tvm_ffi.core.TypeField`."""
+        is_factory = field.c_default_factory is not MISSING
+        return NamedTypeSchema(
+            name=field.name,
+            schema=_parse_type_schema(field.metadata["type_schema"]),
+            size=field.size,
+            alignment=field.alignment,
+            offset=field.offset,
+            default=field.c_default_factory if is_factory else field.c_default,
+            default_is_factory=is_factory,
+            structural_eq=field.c_structural_eq,
+            frozen=field.frozen,
+        )
 
 
 @dataclasses.dataclass
@@ -121,7 +182,15 @@ class InitFieldInfo:
 
 @dataclasses.dataclass
 class ObjectInfo:
-    """Information of an object type, including its fields and methods."""
+    """Information of an object type, including its fields and methods.
+
+    ``fields`` lists only the fields declared by this type; inherited fields are
+    reached through ``parent_type_key`` / ``ancestors``. ``total_size`` is the
+    native ``sizeof`` of the object (header included) when the type registered
+    its own metadata, and ``None`` otherwise: a type without its own
+    ``ObjectDef`` inherits its parent's metadata entry, whose size says nothing
+    about the type itself.
+    """
 
     fields: list[NamedTypeSchema]
     methods: list[FuncInfo]
@@ -129,6 +198,10 @@ class ObjectInfo:
     parent_type_key: str | None = None
     init_fields: list[InitFieldInfo] = dataclasses.field(default_factory=list)
     has_init: bool = False
+    ancestors: list[str] = dataclasses.field(default_factory=list)
+    """Type keys of every ancestor, root first (``["ffi.Object", "ir.Expr"]`` for ``tirx.Add``)."""
+    total_size: int | None = None
+    """Native ``sizeof`` in bytes, or ``None`` when the type has no metadata of its own."""
 
     def has_overloaded_methods(self) -> bool:
         """Return whether reflection exposed multiple signatures for a method."""
@@ -143,47 +216,38 @@ class ObjectInfo:
     @staticmethod
     def from_type_info(type_info: TypeInfo) -> ObjectInfo:
         """Construct an `ObjectInfo` from a `TypeInfo` instance."""
-        parent_type_key: str | None = None
-        if type_info.parent_type_info is not None:
-            parent_type_key = type_info.parent_type_info.type_key
+        # Ancestor chain, root first (`ancestor_infos[-1]` is the direct parent).
+        ancestor_infos: list[TypeInfo] = []
+        ancestor_info: TypeInfo | None = type_info.parent_type_info
+        while ancestor_info is not None:
+            ancestor_infos.append(ancestor_info)
+            ancestor_info = ancestor_info.parent_type_info
+        ancestor_infos.reverse()
+        parent_type_key = ancestor_infos[-1].type_key if ancestor_infos else None
 
         # Detect __ffi_init__ from TypeMethod or TypeAttrColumn.
         has_init = any(m.name == "__ffi_init__" for m in type_info.methods)
         if not has_init:
             has_init = _lookup_type_attr(type_info.type_index, "__ffi_init__") is not None
 
-        # Walk parent chain (parent-first) to collect all init-eligible fields.
+        # Collect init-eligible fields from the whole chain, inherited fields first.
         init_fields: list[InitFieldInfo] = []
         if has_init:
-            ti: TypeInfo | None = type_info
-            chain: list[TypeInfo] = []
-            while ti is not None:
-                chain.append(ti)
-                ti = ti.parent_type_info
-            for ancestor_info in reversed(chain):
-                for field in ancestor_info.fields:
+            for declaring_info in [*ancestor_infos, type_info]:
+                for field in declaring_info.fields:
                     if not field.c_init:
                         continue
                     init_fields.append(
                         InitFieldInfo(
                             name=field.name,
-                            schema=NamedTypeSchema(
-                                name=field.name,
-                                schema=_parse_type_schema(field.metadata["type_schema"]),
-                            ),
+                            schema=NamedTypeSchema.from_type_field(field),
                             kw_only=field.c_kw_only,
                             has_default=field.c_has_default,
                         )
                     )
 
         return ObjectInfo(
-            fields=[
-                NamedTypeSchema(
-                    name=field.name,
-                    schema=_parse_type_schema(field.metadata["type_schema"]),
-                )
-                for field in type_info.fields
-            ],
+            fields=[NamedTypeSchema.from_type_field(field) for field in type_info.fields],
             methods=[
                 FuncInfo(
                     schema=NamedTypeSchema(
@@ -198,4 +262,6 @@ class ObjectInfo:
             parent_type_key=parent_type_key,
             init_fields=init_fields,
             has_init=has_init,
+            ancestors=[info.type_key for info in ancestor_infos],
+            total_size=type_info.total_size if type_info._has_type_metadata else None,
         )

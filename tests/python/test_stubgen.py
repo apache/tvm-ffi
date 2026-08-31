@@ -23,12 +23,12 @@ from pathlib import Path
 import pytest
 import tvm_ffi.stub.cli as stub_cli
 from tvm_ffi import Object, method
-from tvm_ffi.core import TypeSchema
+from tvm_ffi.core import MISSING, TypeSchema, _lookup_or_register_type_info_from_type_key
 from tvm_ffi.dataclasses import py_class
 from tvm_ffi.stub import consts as C
 from tvm_ffi.stub.cli import _stage_2, _stage_3
-from tvm_ffi.stub.file_utils import CodeBlock, FileInfo
-from tvm_ffi.stub.generator import get_generator
+from tvm_ffi.stub.file_utils import CodeBlock, FileInfo, collect_files, syntax_for
+from tvm_ffi.stub.generator import generator_names, get_generator
 from tvm_ffi.stub.python_generator import consts as PC
 from tvm_ffi.stub.python_generator.codegen import (
     generate_python_all,
@@ -52,6 +52,12 @@ from tvm_ffi.stub.utils import (
     NamedTypeSchema,
     ObjectInfo,
     Options,
+)
+from tvm_ffi.testing import (
+    TestObjectBase,
+    _TestCxxClassBase,
+    _TestCxxClassDerived,
+    _TestCxxClassDerivedDerived,
 )
 
 _counter = itertools.count()
@@ -964,3 +970,124 @@ def test_stage_2_filters_prefix_and_marks_root(
     sub_text = sub_api.read_text(encoding="utf-8")
     assert 'LIB = _FFI_LOAD_LIB("demo-pkg", "demo_shared")' in root_text
     assert "LIB =" not in sub_text
+
+
+def test_objectinfo_from_type_info_layout_facts() -> None:
+    """Reflected size/alignment/offset/default facts reach ``ObjectInfo`` unchanged."""
+    base = ObjectInfo.from_type_info(_TestCxxClassBase.__tvm_ffi_type_info__)  # ty: ignore[unresolved-attribute]
+    derived = ObjectInfo.from_type_info(_TestCxxClassDerived.__tvm_ffi_type_info__)  # ty: ignore[unresolved-attribute]
+    dd = ObjectInfo.from_type_info(_TestCxxClassDerivedDerived.__tvm_ffi_type_info__)  # ty: ignore[unresolved-attribute]
+
+    assert base.ancestors == ["ffi.Object"]
+    assert derived.ancestors == ["ffi.Object", "testing.TestCxxClassBase"]
+    assert dd.ancestors == [
+        "ffi.Object",
+        "testing.TestCxxClassBase",
+        "testing.TestCxxClassDerived",
+    ]
+    assert dd.parent_type_key == dd.ancestors[-1]
+
+    header = 24  # sizeof(TVMFFIObject): the fields of a root type start right after it
+    v_i64, v_i32 = base.fields
+    assert (v_i64.size, v_i64.alignment, v_i64.offset) == (8, 8, header)
+    assert (v_i32.size, v_i32.alignment, v_i32.offset) == (4, 4, header + 8)
+    assert base.total_size == 40  # 36 bytes of data, padded to the 8-byte alignment
+    v_f64, v_f32 = derived.fields
+    assert v_f64.offset == base.total_size  # a derived type's fields follow the parent's size
+    assert (v_f32.size, v_f32.alignment, v_f32.offset) == (4, 4, 48)
+    assert derived.total_size == 56
+    v_str, v_bool = dd.fields
+    assert (v_str.size, v_str.alignment, v_str.offset) == (16, 8, derived.total_size)
+    assert (v_bool.size, v_bool.alignment, v_bool.offset) == (1, 1, 72)
+    assert dd.total_size == 80
+
+    assert v_f64.default is MISSING
+    assert not v_f64.default_is_factory
+    assert v_f32.default == 8.0
+    assert v_str.default == "default"
+    assert all(f.structural_eq is None for f in (*base.fields, *derived.fields, *dd.fields))
+    assert not v_i64.frozen
+
+    # `def_ro` fields are frozen; `def_rw` fields with `default_value` keep their default.
+    tob_type_info = TestObjectBase.__tvm_ffi_type_info__  # ty: ignore[unresolved-attribute]
+    tob = {f.name: f for f in ObjectInfo.from_type_info(tob_type_info).fields}
+    assert tob["v_f64"].frozen
+    assert not tob["v_i64"].frozen
+    assert tob["v_i64"].default == 10
+
+    # The auto-init parameter list carries the same facts, parent fields first.
+    assert [f.schema.offset for f in dd.init_fields] == [24, 32, 40, 48, 56, 72]
+
+
+def test_objectinfo_total_size_requires_own_metadata() -> None:
+    """A type without its own metadata inherits a meaningless size, so it reports ``None``."""
+    root = ObjectInfo.from_type_info(_lookup_or_register_type_info_from_type_key("ffi.Object"))
+    assert root.total_size == 24
+    assert root.ancestors == []
+    assert root.parent_type_key is None
+    func = ObjectInfo.from_type_info(_lookup_or_register_type_info_from_type_key("ffi.Function"))
+    assert func.total_size is None
+    assert func.ancestors == ["ffi.Object"]
+
+
+def test_named_type_schema_keeps_positional_signature() -> None:
+    """Synthetic schemas (function params, tests) carry no layout facts."""
+    schema = NamedTypeSchema("x", TypeSchema("int"))
+    assert (schema.size, schema.alignment, schema.offset) == (None, None, None)
+    assert schema.default is MISSING
+    assert not schema.default_is_factory
+    assert schema.structural_eq is None
+    assert not schema.frozen
+
+
+def test_rust_marker_syntax_parses_rs_file(tmp_path: Path) -> None:
+    """``//`` markers in a ``.rs`` file parse into the same block kinds as ``#`` markers."""
+    rs = tmp_path / "mod.rs"
+    rs.write_text(
+        "\n".join(
+            [
+                f"{C.RUST_SYNTAX.begin} object/demo.Foo",
+                "pub struct Foo;",
+                C.RUST_SYNTAX.end,
+                f"{C.RUST_SYNTAX.ty_map} a -> b",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    assert syntax_for(rs) is C.RUST_SYNTAX
+    info = FileInfo.from_file(rs)
+    assert info is not None
+    assert info.syntax is C.RUST_SYNTAX
+    assert [block.kind for block in info.code_blocks] == ["object", "ty-map"]
+    assert info.code_blocks[0].param == "demo.Foo"
+    assert info.code_blocks[0].lines[1] == "pub struct Foo;"
+
+    # Python markers are plain text inside a Rust file.
+    py_markers = tmp_path / "other.rs"
+    py_markers.write_text(
+        f"{C.PYTHON_SYNTAX.begin} object/demo.Foo\n{C.PYTHON_SYNTAX.end}\n", encoding="utf-8"
+    )
+    assert FileInfo.from_file(py_markers) is None
+
+
+def test_collect_files_filters_by_generator_exts(tmp_path: Path) -> None:
+    """Directory scans visit only the active generator's extensions; explicit files always."""
+    py = tmp_path / "a.py"
+    py.write_text(f"{C.PYTHON_SYNTAX.begin} import-section\n{C.PYTHON_SYNTAX.end}\n")
+    rs = tmp_path / "b.rs"
+    rs.write_text(f"{C.RUST_SYNTAX.begin} import-section\n{C.RUST_SYNTAX.end}\n")
+
+    python = get_generator("python")
+    assert python.source_exts == frozenset({".py", ".pyi"})
+    assert [f.path for f in collect_files([tmp_path], python.source_exts)] == [py.resolve()]
+    assert [f.path for f in collect_files([rs], python.source_exts)] == [rs.resolve()]
+    both = collect_files([tmp_path], {".py", ".RS"})
+    assert {f.path for f in both} == {py.resolve(), rs.resolve()}
+
+
+def test_generator_registry_names() -> None:
+    """``--target`` choices follow the registered generators."""
+    assert generator_names() == ["python"]
+    with pytest.raises(ValueError, match="Known generators: python"):
+        get_generator("rust")

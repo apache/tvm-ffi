@@ -29,9 +29,9 @@ class MarkerSyntax:
     """Comment-syntax-specific stub directive markers.
 
     All stub directives are embedded inside single-line comments. The comment
-    token (currently ``#`` for Python sources) parameterizes the marker set,
-    while the directive grammar (``tvm-ffi-stubgen(begin): ...`` etc.) stays
-    uniform.
+    token (``#`` for Python sources, ``//`` for Rust) parameterizes the marker
+    set, while the directive grammar (``tvm-ffi-stubgen(begin): ...`` etc.)
+    stays uniform.
     """
 
     comment: str
@@ -69,12 +69,15 @@ class MarkerSyntax:
 
 
 PYTHON_SYNTAX = MarkerSyntax(comment="#")
+RUST_SYNTAX = MarkerSyntax(comment="//")
 
 #: Map a source-file extension to the marker syntax used inside it. The block
-#: parser selects the syntax per file.
+#: parser selects the syntax per file. Which extensions a run actually visits is
+#: decided by the active generator (``Generator.source_exts``), not by this map.
 SYNTAX_BY_EXT: dict[str, MarkerSyntax] = {
     ".py": PYTHON_SYNTAX,
     ".pyi": PYTHON_SYNTAX,
+    ".rs": RUST_SYNTAX,
 }
 
 STUB_BLOCK_KINDS: TypeAlias = Literal[
@@ -99,8 +102,6 @@ TERM_MAGENTA = "\033[35m"
 TERM_CYAN = "\033[36m"
 TERM_WHITE = "\033[37m"
 DOC_URL = "https://tvm.apache.org/ffi/packaging/stubgen.html"
-
-DEFAULT_SOURCE_EXTS = set(SYNTAX_BY_EXT)
 
 # Language-neutral metadata transform applied while building `ObjectInfo` from
 # the FFI reflection registry (see `utils.ObjectInfo.from_type_info`).

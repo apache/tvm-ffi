@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING
 
 from . import consts as C
 from .file_utils import FileInfo, collect_files, syntax_for
-from .generator import get_generator
+from .generator import generator_names, get_generator
 from .lib_state import (
     collect_global_funcs,
     collect_type_keys,
@@ -53,7 +53,7 @@ def __main__() -> int:
     for imp in opt.imports or []:
         importlib.import_module(imp)
     dlls = [ctypes.CDLL(lib) for lib in opt.dlls]
-    files: list[FileInfo] = collect_files([Path(f) for f in opt.files])
+    files: list[FileInfo] = collect_files([Path(f) for f in opt.files], generator.source_exts)
     global_funcs: dict[str, list[FuncInfo]] = collect_global_funcs()
     init_path: Path | None = None
     if opt.files:
@@ -347,15 +347,16 @@ def _parse_args() -> Options:
         metavar="PATH",
         help=(
             "Files or directories to process. Directories are scanned recursively; "
-            "only .py and .pyi files are modified. Use tvm-ffi-stubgen directives to "
-            "select where stubs are generated."
+            "only files with the target's source extensions (.py and .pyi for python) "
+            "are modified. Use tvm-ffi-stubgen directives to select where stubs are "
+            "generated."
         ),
     )
     parser.add_argument(
         "--target",
         type=str,
         default="python",
-        choices=["python"],
+        choices=generator_names(),
         help="Code generator target.",
     )
     parser.add_argument(

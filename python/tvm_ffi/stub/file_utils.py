@@ -22,7 +22,7 @@ import dataclasses
 import difflib
 import os
 import traceback
-from collections.abc import Generator, Iterable
+from collections.abc import Collection, Generator, Iterable
 from pathlib import Path
 from typing import Callable
 
@@ -239,8 +239,14 @@ class FileInfo:
         self.code_blocks = source.code_blocks
 
 
-def collect_files(paths: list[Path]) -> list[FileInfo]:
-    """Collect all files from the given paths and parse them into FileInfo objects."""
+def collect_files(paths: list[Path], source_exts: Collection[str]) -> list[FileInfo]:
+    """Collect all files from the given paths and parse them into FileInfo objects.
+
+    A path given explicitly is always visited; a directory is walked recursively
+    and only files whose (lower-cased) extension is in ``source_exts`` -- the
+    extensions the active generator owns -- are considered.
+    """
+    exts = {ext.lower() for ext in source_exts}
 
     def _on_error(e: Exception) -> None:
         print(
@@ -257,7 +263,7 @@ def collect_files(paths: list[Path]) -> list[FileInfo]:
             for root, _dirs, files in path_walk(p, follow_symlinks=False, on_error=_on_error):
                 for file in files:
                     f = Path(root) / file
-                    if f.suffix.lower() not in C.DEFAULT_SOURCE_EXTS:
+                    if f.suffix.lower() not in exts:
                         continue
                     yield f
 

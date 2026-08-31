@@ -43,6 +43,7 @@ class PythonGenerator:
 
     name = "python"
     syntax = C.PYTHON_SYNTAX
+    source_exts = frozenset({".py", ".pyi"})
 
     def default_ty_map(self) -> dict[str, str]:
         """Return the default FFI-origin -> Python-type name map."""

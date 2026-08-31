@@ -66,6 +66,11 @@ class Generator(Protocol):
     #: Short identifier, e.g. ``"python"``.
     name: str
 
+    #: Source-file extensions this generator owns (lower-cased, with the dot).
+    #: Directory scans only visit these, so one tree can hold stub files for
+    #: several languages without one target rewriting another's files.
+    source_exts: frozenset[str]
+
     #: Comment-marker syntax for the files this generator emits.
     syntax: C.MarkerSyntax
 
@@ -180,6 +185,11 @@ class Generator(Protocol):
 _GENERATORS: dict[str, Generator] = {
     "python": PythonGenerator(),
 }
+
+
+def generator_names() -> list[str]:
+    """Return the registered target names, sorted (the ``--target`` choices)."""
+    return sorted(_GENERATORS)
 
 
 def get_generator(target: str) -> Generator:
