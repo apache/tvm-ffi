@@ -115,6 +115,14 @@ pub struct MutateContext<'a, State> {
     _not_send_sync: PhantomData<Rc<()>>,
 }
 
+/// Recursive mutation operations passed to structural-mutation callbacks.
+///
+/// This is the concise callback-facing name for [`MutateContext`]. The
+/// borrow lifetime is inferred in function parameters, so stateful callbacks
+/// can write `&mut Mutator<State>` and stateless callbacks can write
+/// `&mut Mutator`.
+pub type Mutator<'a, State = ()> = MutateContext<'a, State>;
+
 trait MutateContextDriver<State> {
     fn state(&self) -> &State;
     fn state_mut(&mut self) -> &mut State;
@@ -223,7 +231,7 @@ impl<State> MutateContext<'_, State> {
 /// when typed dispatch or a callback chain needs mutable state.
 #[diagnostic::on_unimplemented(
     message = "`{Self}` is not a supported `structural_mutate` mutator",
-    note = "accepted mutators: `&mut U` where `U: StructuralMutator`; a generated `MutateDispatch<State = ()>`; an `Fn` callback over an FFI value type `T`, `&N` of an object node type, or `&MapValue`, followed by `&mut MutateContext<'_, ()>`; or a tuple of up to 12 such callbacks (tuples may nest)",
+    note = "accepted mutators: `&mut U` where `U: StructuralMutator`; a generated `MutateDispatch<State = ()>`; an `Fn` callback over an FFI value type `T`, `&N` of an object node type, or `&MapValue`, followed by `&mut Mutator<State>`; or a tuple of up to 12 such callbacks (tuples may nest)",
     note = "callback arguments need explicit type annotations; use `MutateCallbacks::new(state, callbacks)` for ordinary mutable callback state"
 )]
 pub trait IntoMutator<Marker> {
@@ -277,7 +285,7 @@ pub trait MutateChainLink<State, Marker>: mutate_sealed::SealedLink<State, Marke
 ///
 /// `None` means no handler matched, so structural mutation applies its default
 /// behavior. A generated `#[dispatch(mutate)]` implementation tests
-/// `mutate_*` methods in source order and passes the same [`MutateContext`] to
+/// `mutate_*` methods in source order and passes the same [`Mutator`] to
 /// the first match.
 pub trait MutateDispatch: Sized {
     /// Mutable state shared by the dispatched callbacks.
@@ -286,7 +294,7 @@ pub trait MutateDispatch: Sized {
     fn dispatch_mutate(
         &self,
         value: &MapValue,
-        mutator: &mut MutateContext<'_, Self::State>,
+        mutator: &mut Mutator<Self::State>,
     ) -> Option<MutateResult>;
 }
 
@@ -947,7 +955,7 @@ impl StructuralVarRemap {
 ///
 /// Implementations descend with the `mutate` or `default_*` helpers.
 /// Prefer mutation callbacks or `#[dispatch(mutate)]` for typed dispatch with
-/// recursion supplied through [`MutateContext`].
+/// recursion supplied through [`Mutator`].
 pub trait StructuralMutator: Sized {
     /// Dispatch one borrowed value without modifying its source storage.
     ///

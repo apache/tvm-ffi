@@ -107,7 +107,7 @@ impl syn::parse::Parse for DispatchArgs {
         if !input.is_empty() {
             let message = if matches!(mode, DispatchMode::Mutate) {
                 "`dispatch(mutate)` takes no further arguments; the definition region is \
-                 available through `MutateContext::region()`"
+                 available through `Mutator::region()`"
                     .to_owned()
             } else {
                 format!(
@@ -268,10 +268,7 @@ fn expand(item_impl: &ItemImpl, mode: DispatchMode) -> syn::Result<TokenStream2>
                     fn dispatch_mutate(
                         &self,
                         value: &#tvm_ffi::extra::structural_mutate::MapValue,
-                        mutator: &mut #tvm_ffi::extra::structural_mutate::MutateContext<
-                            '_,
-                            Self::State,
-                        >,
+                        mutator: &mut #tvm_ffi::extra::structural_mutate::Mutator<Self::State>,
                     ) -> Option<#tvm_ffi::extra::structural_mutate::MutateResult> {
                         #(#links)*
                         None
@@ -384,8 +381,7 @@ fn parse_handler(method: &ImplItemMethod, mode: DispatchMode) -> syn::Result<Han
     };
     if !receiver_is_expected || !arity_is_expected {
         let message = if matches!(mode, DispatchMode::Mutate) {
-            "mutate handlers must take `&self`, a node, and `&mut MutateContext<'_, State>`"
-                .to_owned()
+            "mutate handlers must take `&self`, a node, and `&mut Mutator<State>`".to_owned()
         } else {
             format!(
                 "{} handlers must take `&mut self`, a node, and optionally a trailing \
@@ -401,7 +397,7 @@ fn parse_handler(method: &ImplItemMethod, mode: DispatchMode) -> syn::Result<Han
             Some(FnArg::Typed(context)) => context.ty.as_ref(),
             _ => unreachable!("the third argument cannot be a receiver"),
         };
-        Some(parse_mutate_context_state(context_type)?)
+        Some(parse_mutator_state(context_type)?)
     } else {
         None
     };
@@ -439,11 +435,11 @@ fn parse_handler(method: &ImplItemMethod, mode: DispatchMode) -> syn::Result<Han
     })
 }
 
-fn parse_mutate_context_state(context_type: &Type) -> syn::Result<Type> {
+fn parse_mutator_state(context_type: &Type) -> syn::Result<Type> {
     let Type::Reference(reference) = context_type else {
         return Err(syn::Error::new_spanned(
             context_type,
-            "the mutate context must be `&mut MutateContext<'_, State>`",
+            "the mutator must be `&mut Mutator<State>`",
         ));
     };
     if reference.mutability.is_none() {
@@ -455,41 +451,52 @@ fn parse_mutate_context_state(context_type: &Type) -> syn::Result<Type> {
     let Type::Path(path) = reference.elem.as_ref() else {
         return Err(syn::Error::new_spanned(
             context_type,
-            "expected `&mut MutateContext<'_, State>`",
+            "expected `&mut Mutator<State>`",
         ));
     };
     let Some(segment) = path.path.segments.last() else {
         return Err(syn::Error::new_spanned(
             context_type,
-            "expected `&mut MutateContext<'_, State>`",
+            "expected `&mut Mutator<State>`",
         ));
     };
-    if segment.ident != "MutateContext" {
+    let is_short_name = segment.ident == "Mutator";
+    if !is_short_name && segment.ident != "MutateContext" {
         return Err(syn::Error::new_spanned(
             context_type,
-            "expected `&mut MutateContext<'_, State>`",
+            "expected `&mut Mutator<State>`",
         ));
     }
-    let PathArguments::AngleBracketed(arguments) = &segment.arguments else {
-        return Err(syn::Error::new_spanned(
-            context_type,
-            "`MutateContext` requires its lifetime and state type",
-        ));
+    let arguments = match &segment.arguments {
+        PathArguments::AngleBracketed(arguments) => Some(arguments),
+        PathArguments::None if is_short_name => None,
+        _ => {
+            return Err(syn::Error::new_spanned(
+                context_type,
+                "`Mutator` accepts one optional state type",
+            ));
+        }
     };
-    let mut state_types = arguments.args.iter().filter_map(|argument| match argument {
-        GenericArgument::Type(state) => Some(state.clone()),
-        _ => None,
+    let mut state_types = arguments.into_iter().flat_map(|arguments| {
+        arguments.args.iter().filter_map(|argument| match argument {
+            GenericArgument::Type(state) => Some(state.clone()),
+            _ => None,
+        })
     });
-    let Some(state) = state_types.next() else {
-        return Err(syn::Error::new_spanned(
-            context_type,
-            "`MutateContext` requires a state type",
-        ));
+    let state = match state_types.next() {
+        Some(state) => state,
+        None if is_short_name => syn::parse_quote!(()),
+        None => {
+            return Err(syn::Error::new_spanned(
+                context_type,
+                "`MutateContext` requires a state type",
+            ));
+        }
     };
     if state_types.next().is_some() {
         return Err(syn::Error::new_spanned(
             context_type,
-            "`MutateContext` accepts exactly one state type",
+            "`Mutator` accepts at most one state type",
         ));
     }
     Ok(state)
