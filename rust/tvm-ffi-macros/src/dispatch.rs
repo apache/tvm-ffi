@@ -20,7 +20,10 @@
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{quote, quote_spanned};
-use syn::{parse_macro_input, FnArg, ImplItem, ImplItemMethod, ItemImpl, Meta, NestedMeta, Type};
+use syn::{
+    parse_macro_input, FnArg, GenericArgument, ImplItem, ImplItemMethod, ItemImpl, Meta,
+    NestedMeta, PathArguments, Type,
+};
 
 use crate::utils::get_tvm_ffi_crate;
 
@@ -77,8 +80,8 @@ impl DispatchMode {
 
     fn result_is_optional(self) -> bool {
         match self {
-            Self::Walk | Self::Map => true,
-            Self::Visit | Self::Mutate => false,
+            Self::Walk | Self::Map | Self::Mutate => true,
+            Self::Visit => false,
         }
     }
 }
@@ -102,11 +105,18 @@ impl syn::parse::Parse for DispatchArgs {
             ));
         };
         if !input.is_empty() {
-            return Err(input.error(format!(
-                "`dispatch({})` takes no further arguments; a handler that needs the \
-                 definition-region state declares a trailing `DefRegionKind` argument",
-                mode.name()
-            )));
+            let message = if matches!(mode, DispatchMode::Mutate) {
+                "`dispatch(mutate)` takes no further arguments; the definition region is \
+                 available through `MutateContext::region()`"
+                    .to_owned()
+            } else {
+                format!(
+                    "`dispatch({})` takes no further arguments; a handler that needs the \
+                     definition-region state declares a trailing `DefRegionKind` argument",
+                    mode.name()
+                )
+            };
+            return Err(input.error(message));
         }
         Ok(DispatchArgs { mode })
     }
@@ -158,6 +168,16 @@ fn expand(item_impl: &ItemImpl, mode: DispatchMode) -> syn::Result<TokenStream2>
         DispatchMode::Mutate => quote! {
             #tvm_ffi::extra::structural_mutate::IntoMutateResult::into_mutate_result
         },
+    };
+    let mutate_state = if matches!(mode, DispatchMode::Mutate) {
+        Some(
+            handlers[0]
+                .mutate_state
+                .as_ref()
+                .expect("mutate handlers always record their context state"),
+        )
+    } else {
+        None
     };
     let links = expand_links(&handlers, mode, &into_result, quote!(value));
     let self_type = &item_impl.self_ty;
@@ -236,34 +256,25 @@ fn expand(item_impl: &ItemImpl, mode: DispatchMode) -> syn::Result<TokenStream2>
             }
         },
         DispatchMode::Mutate => {
-            let inplace_links =
-                expand_links(&handlers, mode, &into_result, quote!(value.as_value()));
+            let state = mutate_state.expect("mutate dispatch has a context state");
             quote! {
-                impl #impl_generics #tvm_ffi::extra::structural_mutate::StructuralMutator
+                impl #impl_generics #tvm_ffi::extra::structural_mutate::MutateDispatch
                     for #self_type #where_clause
                 {
-                    #[inline]
-                    #[allow(unreachable_code, unused_variables)]
-                    fn dispatch_mutate(
-                        &mut self,
-                        value: &#tvm_ffi::extra::structural_mutate::MapValue,
-                        def_region_kind: #tvm_ffi::extra::structural_visit::DefRegionKind,
-                    ) -> #tvm_ffi::Result<#tvm_ffi::Any> {
-                        #(#links)*
-                        <Self as #tvm_ffi::extra::structural_mutate::StructuralMutator>::
-                            default_mutate(self, value, def_region_kind)
-                    }
+                    type State = #state;
 
                     #[inline]
                     #[allow(unreachable_code, unused_variables)]
-                    fn dispatch_maybe_inplace_mutate(
-                        &mut self,
-                        value: #tvm_ffi::extra::structural_mutate::InplaceValue<'_>,
-                        def_region_kind: #tvm_ffi::extra::structural_visit::DefRegionKind,
-                    ) -> #tvm_ffi::Result<#tvm_ffi::Any> {
-                        #(#inplace_links)*
-                        <Self as #tvm_ffi::extra::structural_mutate::StructuralMutator>::
-                            default_maybe_inplace_mutate(self, value, def_region_kind)
+                    fn dispatch_mutate(
+                        &self,
+                        value: &#tvm_ffi::extra::structural_mutate::MapValue,
+                        mutator: &mut #tvm_ffi::extra::structural_mutate::MutateContext<
+                            '_,
+                            Self::State,
+                        >,
+                    ) -> Option<#tvm_ffi::extra::structural_mutate::MutateResult> {
+                        #(#links)*
+                        None
                     }
                 }
             }
@@ -289,10 +300,10 @@ fn expand_links(
         .map(|handler| {
             let method = &handler.method;
             let attrs = &handler.cfg_attrs;
-            let kind_arg = if handler.wants_def_region {
-                quote!(, def_region_kind)
-            } else {
-                quote!()
+            let trailing_arg = match mode {
+                DispatchMode::Mutate => quote!(, mutator),
+                _ if handler.wants_def_region => quote!(, def_region_kind),
+                _ => quote!(),
             };
             let wrap_result = |result: TokenStream2| {
                 if mode.result_is_optional() {
@@ -304,7 +315,7 @@ fn expand_links(
             let invoke = match &handler.argument {
                 HandlerArgument::Value => {
                     let result = wrap_result(quote! {
-                        #into_result(self.#method(#value #kind_arg))
+                        #into_result(self.#method(#value #trailing_arg))
                     });
                     quote! {
                         return #result;
@@ -312,7 +323,7 @@ fn expand_links(
                 }
                 HandlerArgument::BorrowedNode(node_type) => {
                     let result = wrap_result(quote! {
-                        #into_result(self.#method(node #kind_arg))
+                        #into_result(self.#method(node #trailing_arg))
                     });
                     quote! {
                         if let Some(node) = #value.as_node::<#node_type>() {
@@ -322,7 +333,7 @@ fn expand_links(
                 }
                 HandlerArgument::Owned(value_type) => {
                     let result = wrap_result(quote! {
-                        #into_result(self.#method(typed #kind_arg))
+                        #into_result(self.#method(typed #trailing_arg))
                     });
                     quote! {
                         if let Some(typed) = #value.cast::<#value_type>() {
@@ -345,6 +356,7 @@ struct Handler {
     method: syn::Ident,
     argument: HandlerArgument,
     wants_def_region: bool,
+    mutate_state: Option<Type>,
     cfg_attrs: Vec<Meta>,
 }
 
@@ -356,22 +368,43 @@ enum HandlerArgument {
 
 fn parse_handler(method: &ImplItemMethod, mode: DispatchMode) -> syn::Result<Handler> {
     let inputs = &method.sig.inputs;
-    let receiver_is_mut = matches!(
-        inputs.first(),
-        Some(FnArg::Receiver(receiver))
-            if receiver.reference.is_some() && receiver.mutability.is_some()
-    );
-    if !receiver_is_mut || !(inputs.len() == 2 || inputs.len() == 3) {
-        return Err(syn::Error::new_spanned(
-            &method.sig,
+    let receiver_is_expected = match (mode, inputs.first()) {
+        (DispatchMode::Mutate, Some(FnArg::Receiver(receiver))) => {
+            receiver.reference.is_some() && receiver.mutability.is_none()
+        }
+        (_, Some(FnArg::Receiver(receiver))) => {
+            receiver.reference.is_some() && receiver.mutability.is_some()
+        }
+        _ => false,
+    };
+    let arity_is_expected = if matches!(mode, DispatchMode::Mutate) {
+        inputs.len() == 3
+    } else {
+        inputs.len() == 2 || inputs.len() == 3
+    };
+    if !receiver_is_expected || !arity_is_expected {
+        let message = if matches!(mode, DispatchMode::Mutate) {
+            "mutate handlers must take `&self`, a node, and `&mut MutateContext<'_, State>`"
+                .to_owned()
+        } else {
             format!(
                 "{} handlers must take `&mut self`, a node, and optionally a trailing \
                  `DefRegionKind` argument",
                 mode.name()
-            ),
-        ));
+            )
+        };
+        return Err(syn::Error::new_spanned(&method.sig, message));
     }
-    let wants_def_region = inputs.len() == 3;
+    let wants_def_region = !matches!(mode, DispatchMode::Mutate) && inputs.len() == 3;
+    let mutate_state = if matches!(mode, DispatchMode::Mutate) {
+        let context_type = match inputs.iter().nth(2) {
+            Some(FnArg::Typed(context)) => context.ty.as_ref(),
+            _ => unreachable!("the third argument cannot be a receiver"),
+        };
+        Some(parse_mutate_context_state(context_type)?)
+    } else {
+        None
+    };
 
     let value_type = match inputs.iter().nth(1) {
         Some(FnArg::Typed(value)) => (*value.ty).clone(),
@@ -401,8 +434,65 @@ fn parse_handler(method: &ImplItemMethod, mode: DispatchMode) -> syn::Result<Han
         method: method.sig.ident.clone(),
         argument,
         wants_def_region,
+        mutate_state,
         cfg_attrs,
     })
+}
+
+fn parse_mutate_context_state(context_type: &Type) -> syn::Result<Type> {
+    let Type::Reference(reference) = context_type else {
+        return Err(syn::Error::new_spanned(
+            context_type,
+            "the mutate context must be `&mut MutateContext<'_, State>`",
+        ));
+    };
+    if reference.mutability.is_none() {
+        return Err(syn::Error::new_spanned(
+            context_type,
+            "the mutate context must be a mutable reference",
+        ));
+    }
+    let Type::Path(path) = reference.elem.as_ref() else {
+        return Err(syn::Error::new_spanned(
+            context_type,
+            "expected `&mut MutateContext<'_, State>`",
+        ));
+    };
+    let Some(segment) = path.path.segments.last() else {
+        return Err(syn::Error::new_spanned(
+            context_type,
+            "expected `&mut MutateContext<'_, State>`",
+        ));
+    };
+    if segment.ident != "MutateContext" {
+        return Err(syn::Error::new_spanned(
+            context_type,
+            "expected `&mut MutateContext<'_, State>`",
+        ));
+    }
+    let PathArguments::AngleBracketed(arguments) = &segment.arguments else {
+        return Err(syn::Error::new_spanned(
+            context_type,
+            "`MutateContext` requires its lifetime and state type",
+        ));
+    };
+    let mut state_types = arguments.args.iter().filter_map(|argument| match argument {
+        GenericArgument::Type(state) => Some(state.clone()),
+        _ => None,
+    });
+    let Some(state) = state_types.next() else {
+        return Err(syn::Error::new_spanned(
+            context_type,
+            "`MutateContext` requires a state type",
+        ));
+    };
+    if state_types.next().is_some() {
+        return Err(syn::Error::new_spanned(
+            context_type,
+            "`MutateContext` accepts exactly one state type",
+        ));
+    }
+    Ok(state)
 }
 
 fn presence_attrs(attrs: &[syn::Attribute]) -> syn::Result<Vec<Meta>> {

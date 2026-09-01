@@ -151,6 +151,12 @@ impl<State> MutateContext<'_, State> {
         self.def_region_kind
     }
 
+    /// Definition region active at the callback's current value.
+    #[inline]
+    pub fn region(&self) -> DefRegionKind {
+        self.def_region_kind
+    }
+
     /// Mutate a borrowed value through the same callback chain. The value and
     /// its descendants begin on the non-in-place path.
     pub fn mutate<T>(&mut self, value: &T) -> Result<Any>
@@ -212,11 +218,12 @@ impl<State> MutateContext<'_, State> {
 
 /// Conversion into the mutator argument accepted by [`structural_mutate`].
 ///
-/// Accepts a mutable [`StructuralMutator`] or a first-match callback chain.
-/// Use [`MutateCallbacks`] when the chain needs mutable state.
+/// Accepts a mutable low-level [`StructuralMutator`], a generated
+/// [`MutateDispatch`], or a first-match callback chain. Use [`MutateCallbacks`]
+/// when typed dispatch or a callback chain needs mutable state.
 #[diagnostic::on_unimplemented(
     message = "`{Self}` is not a supported `structural_mutate` mutator",
-    note = "accepted mutators: `&mut U` where `U: StructuralMutator`; an `Fn` callback over an FFI value type `T`, `&N` of an object node type, or `&MapValue`, followed by `&mut MutateContext<'_, ()>`; or a tuple of up to 12 such callbacks (tuples may nest)",
+    note = "accepted mutators: `&mut U` where `U: StructuralMutator`; a generated `MutateDispatch<State = ()>`; an `Fn` callback over an FFI value type `T`, `&N` of an object node type, or `&MapValue`, followed by `&mut MutateContext<'_, ()>`; or a tuple of up to 12 such callbacks (tuples may nest)",
     note = "callback arguments need explicit type annotations; use `MutateCallbacks::new(state, callbacks)` for ordinary mutable callback state"
 )]
 pub trait IntoMutator<Marker> {
@@ -266,6 +273,23 @@ pub trait MutateChainLink<State, Marker>: mutate_sealed::SealedLink<State, Marke
     ) -> Option<MutateResult>;
 }
 
+/// Ordered typed callback dispatch for [`structural_mutate`].
+///
+/// `None` means no handler matched, so structural mutation applies its default
+/// behavior. A generated `#[dispatch(mutate)]` implementation tests
+/// `mutate_*` methods in source order and passes the same [`MutateContext`] to
+/// the first match.
+pub trait MutateDispatch: Sized {
+    /// Mutable state shared by the dispatched callbacks.
+    type State;
+
+    fn dispatch_mutate(
+        &self,
+        value: &MapValue,
+        mutator: &mut MutateContext<'_, Self::State>,
+    ) -> Option<MutateResult>;
+}
+
 mod mutate_sealed {
     use super::{IntoMutateResult, MapValue, MutateContext, ObjectCore};
 
@@ -296,6 +320,25 @@ mod mutate_sealed {
         ) -> O,
         O: IntoMutateResult,
     {
+    }
+
+    impl<D> SealedLink<D::State, super::ByMutateDispatch> for D where D: super::MutateDispatch {}
+}
+
+#[doc(hidden)]
+pub enum ByMutateDispatch {}
+
+impl<D> MutateChainLink<D::State, ByMutateDispatch> for D
+where
+    D: MutateDispatch,
+{
+    #[inline]
+    fn try_mutate(
+        &self,
+        value: &MapValue,
+        mutator: &mut MutateContext<'_, D::State>,
+    ) -> Option<MutateResult> {
+        self.dispatch_mutate(value, mutator)
     }
 }
 
@@ -397,7 +440,7 @@ macro_rules! impl_mutate_chain_link {
 
 impl_callback_chain_tuple_arities!(impl_mutate_chain_link);
 
-/// A reusable callback mutator with shared user state.
+/// A reusable typed-dispatch or callback mutator with shared user state.
 pub struct MutateCallbacks<State, Link, Marker> {
     state: State,
     callbacks: Rc<Link>,
@@ -900,10 +943,11 @@ impl StructuralVarRemap {
     }
 }
 
-/// A mutator that controls its own recursion.
+/// A low-level mutator that controls its own recursion.
 ///
 /// Implementations descend with the `mutate` or `default_*` helpers.
-/// `#[dispatch(mutate)]` generates this trait from typed `mutate_*` methods.
+/// Prefer mutation callbacks or `#[dispatch(mutate)]` for typed dispatch with
+/// recursion supplied through [`MutateContext`].
 pub trait StructuralMutator: Sized {
     /// Dispatch one borrowed value without modifying its source storage.
     ///
