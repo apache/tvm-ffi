@@ -70,11 +70,23 @@ pub use super::structural_common::StructuralValue as MapValue;
 #[doc(hidden)]
 pub type MapResult = Result<Any>;
 
+mod callback_result_sealed {
+    use super::{Any, Result};
+
+    pub trait Sealed {}
+
+    impl<T: Into<Any>> Sealed for T {}
+    impl<T: Into<Any>> Sealed for Result<T> {}
+}
+
 /// Convert an infallible or fallible callback result into [`MapResult`].
 ///
 /// A callback may return any value convertible into [`Any`], or wrap it in
 /// [`Result`] to use `?`.
-pub trait IntoMapResult {
+///
+/// This trait is sealed and is not an extension point.
+#[doc(hidden)]
+pub trait IntoMapResult: callback_result_sealed::Sealed {
     fn into_map_result(self) -> MapResult;
 }
 
@@ -223,7 +235,7 @@ impl<U: StructuralMutator> IntoMutator<U> for &mut U {
 /// A callback may return any value convertible into [`Any`], or wrap it in
 /// [`Result`] to use `?`.
 #[doc(hidden)]
-pub trait IntoMutateResult {
+pub trait IntoMutateResult: callback_result_sealed::Sealed {
     fn into_mutate_result(self) -> Result<Any>;
 }
 
