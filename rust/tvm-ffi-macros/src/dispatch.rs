@@ -19,7 +19,7 @@
 
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
-use quote::{quote, quote_spanned};
+use quote::{format_ident, quote, quote_spanned};
 use syn::{
     parse_macro_input, FnArg, GenericArgument, ImplItem, ImplItemMethod, ItemImpl, Meta,
     NestedMeta, PathArguments, Type,
@@ -29,15 +29,98 @@ use crate::utils::get_tvm_ffi_crate;
 
 pub(crate) fn dispatch(attr: TokenStream, item: TokenStream) -> TokenStream {
     let args = parse_macro_input!(attr as DispatchArgs);
-    let item_impl = parse_macro_input!(item as ItemImpl);
+    let mut item_impl = parse_macro_input!(item as ItemImpl);
 
     match expand(&item_impl, args.mode) {
-        Ok(generated) => quote!(#item_impl #generated).into(),
+        Ok(generated) => {
+            if matches!(args.mode, DispatchMode::Mutate) {
+                if let Err(error) = specialize_mutate_handlers(&mut item_impl) {
+                    let error = error.to_compile_error();
+                    return quote!(#item_impl #error).into();
+                }
+            }
+            quote!(#item_impl #generated).into()
+        }
         Err(error) => {
             let error = error.to_compile_error();
             quote!(#item_impl #error).into()
         }
     }
+}
+
+fn specialize_mutate_handlers(item_impl: &mut ItemImpl) -> syn::Result<()> {
+    let tvm_ffi = get_tvm_ffi_crate();
+    for item in &mut item_impl.items {
+        let ImplItem::Method(method) = item else {
+            continue;
+        };
+        if !method.sig.ident.to_string().starts_with("mutate_") {
+            continue;
+        }
+
+        let handler = parse_handler(method, DispatchMode::Mutate)?;
+        let state = handler
+            .mutate_state
+            .expect("mutate handlers always record their context state");
+        let driver = format_ident!("__TvmFfiMutateDriver");
+        if method
+            .sig
+            .generics
+            .type_params()
+            .any(|param| param.ident == driver)
+        {
+            return Err(syn::Error::new_spanned(
+                &method.sig.generics,
+                "reserved mutate-handler generic name is already in use",
+            ));
+        }
+
+        method.sig.generics.params.push(syn::parse_quote!(#driver));
+        method
+            .sig
+            .generics
+            .make_where_clause()
+            .predicates
+            .push(syn::parse_quote!(
+                #driver: #tvm_ffi::extra::structural_mutate::MutateContextDriver<#state> + ?Sized
+            ));
+
+        let context = match method.sig.inputs.iter_mut().nth(2) {
+            Some(FnArg::Typed(context)) => context,
+            _ => unreachable!("the third mutate-handler argument cannot be a receiver"),
+        };
+        let Type::Reference(reference) = context.ty.as_mut() else {
+            unreachable!("parse_handler already validated the mutate context");
+        };
+        let Type::Path(path) = reference.elem.as_mut() else {
+            unreachable!("parse_handler already validated the mutate context path");
+        };
+        let segment = path
+            .path
+            .segments
+            .last_mut()
+            .expect("a parsed Rust type path always has a segment");
+        if matches!(segment.arguments, PathArguments::None) {
+            let arguments: syn::AngleBracketedGenericArguments =
+                syn::parse_quote!(<#state, #driver>);
+            segment.arguments = PathArguments::AngleBracketed(arguments);
+            continue;
+        }
+        let PathArguments::AngleBracketed(arguments) = &mut segment.arguments else {
+            unreachable!("parse_handler already rejected parenthesized arguments");
+        };
+        if !arguments
+            .args
+            .iter()
+            .any(|argument| matches!(argument, GenericArgument::Type(_)))
+        {
+            arguments.args.push(GenericArgument::Type(state.clone()));
+        }
+        arguments
+            .args
+            .push(GenericArgument::Type(syn::parse_quote!(#driver)));
+    }
+    Ok(())
 }
 
 struct DispatchArgs {
@@ -263,13 +346,21 @@ fn expand(item_impl: &ItemImpl, mode: DispatchMode) -> syn::Result<TokenStream2>
                 {
                     type State = #state;
 
-                    #[inline]
+                    #[inline(always)]
                     #[allow(unreachable_code, unused_variables)]
-                    fn dispatch_mutate(
+                    fn dispatch_mutate<__TvmFfiMutateDriver>(
                         &self,
                         value: &#tvm_ffi::extra::structural_mutate::MapValue,
-                        mutator: &mut #tvm_ffi::extra::structural_mutate::Mutator<Self::State>,
-                    ) -> Option<#tvm_ffi::extra::structural_mutate::MutateResult> {
+                        mutator: &mut #tvm_ffi::extra::structural_mutate::Mutator<
+                            Self::State,
+                            __TvmFfiMutateDriver,
+                        >,
+                    ) -> Option<#tvm_ffi::extra::structural_mutate::MutateResult>
+                    where
+                        __TvmFfiMutateDriver:
+                            #tvm_ffi::extra::structural_mutate::MutateContextDriver<Self::State>
+                                + ?Sized,
+                    {
                         #(#links)*
                         None
                     }
