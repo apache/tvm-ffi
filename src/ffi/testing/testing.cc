@@ -206,8 +206,7 @@ class TestCxxClassDerivedDerived : public TestCxxClassDerived {
                               TestCxxClassDerived);
 };
 
-// Layout-classifier fixtures: a member the registry never sees, and a vptr in front of the
-// `TVMFFIObject` header. Neither can be accounted for by the reflected fields.
+// Fixtures for the stub layout classifier: an unreflected member, and a vptr.
 class TestCxxClassHiddenField : public Object {
  public:
   int64_t v_i64 = 0;

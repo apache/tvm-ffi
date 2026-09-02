@@ -113,7 +113,7 @@ def __main__() -> int:
         assert init_path is not None
         generator.finalize_init(init_path, generated_prefixes)
 
-    # Stage 5. Report which native layouts the loaded registry can reproduce.
+    # Write the native-layout coverage report, if requested.
     if opt.coverage_out is not None:
         infos = {
             type_key: object_info_from_type_key(type_key)

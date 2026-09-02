@@ -60,8 +60,7 @@ if TYPE_CHECKING:
 
     from .utils import NamedTypeSchema, ObjectInfo
 
-#: Natural alignment of the ``TVMFFIObject`` header (it holds a 64-bit reference
-#: count); every object embeds the header first, so none is aligned less strictly.
+#: Alignment of the ``TVMFFIObject`` header (a 64-bit reference count); no object is aligned less.
 OBJECT_HEADER_ALIGNMENT = 8
 
 OpaqueReason: TypeAlias = Literal[
@@ -253,7 +252,7 @@ def _prove_layout(
 
     Returns ``None`` when the layout is reproducible, else the reason it is not.
     """
-    # Prerequisite 1: the type must have metadata of its own, and its fields byte facts.
+    # Nothing to check without the type's own size and every field's byte facts.
     if info.total_size is None:
         return "layout-unknown", "no metadata of its own: total_size is unknown"
     fields = _field_bytes(info)
@@ -261,10 +260,9 @@ def _prove_layout(
         return "layout-unknown", fields
     verdict.fields = fields
 
-    # Prerequisite 2: the parent must be complete, so that its size is a trustworthy start.
+    # The parent's size is where this type's own bytes start, so the parent must be complete.
     if parent is None:
-        # The root of the hierarchy is the `TVMFFIObject` header itself: its bytes belong to
-        # the C ABI, not to reflected fields, and children build on its size.
+        # The root is the `TVMFFIObject` header: C ABI bytes, nothing to fill.
         verdict.alignment = OBJECT_HEADER_ALIGNMENT
         verdict.own_bytes = ByteRange(info.total_size, info.total_size)
         return None
@@ -272,7 +270,7 @@ def _prove_layout(
         return "parent-opaque", f"parent {parent.type_key!r} is opaque ({parent.reason})"
     assert parent.total_size is not None and parent.alignment is not None
 
-    # The criterion: fields must fill [parent.total_size, total_size) exactly.
+    # Fields must fill [parent.total_size, total_size) exactly.
     verdict.own_bytes = ByteRange(parent.total_size, info.total_size)
     verdict.alignment = max([parent.alignment, *(f.alignment for f in fields)])
     return _fill(verdict)
