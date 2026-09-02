@@ -221,11 +221,16 @@ def _stage_3(  # noqa: PLR0912
     defined_funcs: set[str] = set()
     defined_types: set[str] = set()
     imports = generator.new_imports()
-    # Stage 1. Collect `tvm-ffi-stubgen(import-object): ...`
+    # Stage 1. Collect `tvm-ffi-stubgen(import-object): ...` and generator-specific directives
     for code in file.code_blocks:
         if code.kind == "import-object":
             name, type_checking_only, alias = code.param
             generator.add_imported_object(imports, name, type_checking_only, alias)
+        elif code.kind == "directive":
+            name, payload = code.param
+            if name not in generator.directive_kinds:
+                raise ValueError(f"Unknown directive `{name}` at line {code.lineno_start}")
+            generator.add_directive(imports, name, payload, code.lineno_start)
     # Stage 2. Process `tvm-ffi-stubgen(begin): global/...`
     for code in file.code_blocks:
         if code.kind == "global":

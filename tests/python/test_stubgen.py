@@ -29,6 +29,7 @@ from tvm_ffi.stub import consts as C
 from tvm_ffi.stub.cli import _stage_2, _stage_3
 from tvm_ffi.stub.file_utils import CodeBlock, FileInfo, collect_files, syntax_for
 from tvm_ffi.stub.generator import generator_names, get_generator
+from tvm_ffi.stub.python_generator import PythonGenerator
 from tvm_ffi.stub.python_generator import consts as PC
 from tvm_ffi.stub.python_generator.codegen import (
     generate_python_all,
@@ -1107,3 +1108,88 @@ def test_generator_registry_names() -> None:
     assert generator_names() == ["python"]
     with pytest.raises(ValueError, match="Known generators: python"):
         get_generator("rust")
+
+
+def test_codeblock_from_begin_line_directive() -> None:
+    """``<comment> tvm-ffi-stubgen(<name>): <payload>`` parses into a one-line directive block."""
+    for syntax in (C.PYTHON_SYNTAX, C.RUST_SYNTAX):
+        block = CodeBlock.from_begin_line(7, f"{syntax.directive('field')} a.B.c -> D ", syntax)
+        assert block.kind == "directive"
+        assert block.param == ("field", "a.B.c -> D")
+        assert (block.lineno_start, block.lineno_end) == (7, 7)
+        assert block.lines == []
+    empty = CodeBlock.from_begin_line(1, C.PYTHON_SYNTAX.directive("opaque"), C.PYTHON_SYNTAX)
+    assert empty.param == ("opaque", "")
+
+    # The `name):` shape is required; anything else stays an unknown marker.
+    for line in (f"{C.PYTHON_SYNTAX.prefix}field)", f"{C.PYTHON_SYNTAX.prefix}two words): x"):
+        with pytest.raises(ValueError, match="Unknown stub type at line 3"):
+            CodeBlock.from_begin_line(3, line, C.PYTHON_SYNTAX)
+
+
+def test_fileinfo_from_file_keeps_directive_lines(tmp_path: Path) -> None:
+    """A directive is parsed as its own block and written back untouched."""
+    src = tmp_path / "mod.rs"
+    lines = [
+        "  // tvm-ffi-stubgen(nullable):  ir.Expr.span",
+        f"{C.RUST_SYNTAX.begin} object/demo.Foo",
+        C.RUST_SYNTAX.end,
+        f"{C.RUST_SYNTAX.prefix}bogus)",
+    ]
+    src.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="Unknown stub type at line 4"):
+        FileInfo.from_file(src)
+
+    src.write_text("\n".join(lines[:3]) + "\n", encoding="utf-8")
+    info = FileInfo.from_file(src)
+    assert info is not None
+    assert [block.kind for block in info.code_blocks] == ["directive", "object"]
+    assert info.code_blocks[0].param == ("nullable", "ir.Expr.span")
+    assert info.code_blocks[0].lines == [lines[0]]
+    assert info.update(verbose=False, dry_run=False) is False
+    assert src.read_text(encoding="utf-8") == "\n".join(lines[:3]) + "\n"
+
+
+def test_stage_3_routes_directives_by_generator_declaration(tmp_path: Path) -> None:
+    """Declared directives reach the generator with their payload; undeclared ones are errors."""
+    path = tmp_path / "demo.py"
+    directive = CodeBlock(
+        kind="directive",
+        param=("field", "demo.Foo.x -> Bar"),
+        lineno_start=1,
+        lineno_end=1,
+        lines=[f"{C.PYTHON_SYNTAX.directive('field')} demo.Foo.x -> Bar"],
+    )
+    all_block = CodeBlock(
+        kind="__all__",
+        param="",
+        lineno_start=2,
+        lineno_end=3,
+        lines=[f"{C.PYTHON_SYNTAX.begin} __all__", C.PYTHON_SYNTAX.end],
+    )
+
+    def _file_info() -> FileInfo:
+        return FileInfo(
+            path=path,
+            lines=tuple(line for block in (directive, all_block) for line in block.lines),
+            code_blocks=[directive, all_block],
+            syntax=C.PYTHON_SYNTAX,
+        )
+
+    # The Python generator declares no directive, so the name is unknown to it.
+    python = get_generator("python")
+    assert python.directive_kinds == frozenset()
+    with pytest.raises(ValueError, match="Unknown directive `field` at line 1"):
+        _stage_3(_file_info(), Options(dry_run=True), _default_ty_map(), {}, python)
+
+    seen: list[tuple[object, str, str, int]] = []
+
+    class FieldAware(PythonGenerator):
+        directive_kinds = frozenset({"field"})
+
+        def add_directive(self, imports: object, name: str, payload: str, lineno: int) -> None:
+            seen.append((imports, name, payload, lineno))
+
+    _stage_3(_file_info(), Options(dry_run=True), _default_ty_map(), {}, FieldAware())
+    assert [entry[1:] for entry in seen] == [("field", "demo.Foo.x -> Bar", 1)]
+    assert isinstance(seen[0][0], type(python.new_imports()))

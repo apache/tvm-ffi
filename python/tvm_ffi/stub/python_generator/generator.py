@@ -44,6 +44,7 @@ class PythonGenerator:
     name = "python"
     syntax = C.PYTHON_SYNTAX
     source_exts = frozenset({".py", ".pyi"})
+    directive_kinds: frozenset[str] = frozenset()
 
     def default_ty_map(self) -> dict[str, str]:
         """Return the default FFI-origin -> Python-type name map."""
@@ -63,6 +64,10 @@ class PythonGenerator:
         imports.items.append(ImportItem(name, type_checking_only=tco, alias=alias or None))
         if alias == "_FFI_LOAD_LIB" or name.endswith("libinfo.load_lib_module"):
             imports.has_lib_load = True
+
+    def add_directive(self, imports: PythonImports, name: str, payload: str, lineno: int) -> None:
+        """Reject every directive: the Python target declares none."""
+        raise ValueError(f"Unknown directive `{name}` at line {lineno}")
 
     def canonical_type_name(self, type_key: str) -> str:
         """Return the canonical (import-comparable) full name for a defined type key."""

@@ -67,6 +67,10 @@ class MarkerSyntax:
         """Whole-file opt-out directive: ``<comment> tvm-ffi-stubgen(skip-file)``."""
         return f"{self.prefix}skip-file)"
 
+    def directive(self, name: str) -> str:
+        """Generator-specific one-line directive: ``<comment> tvm-ffi-stubgen(<name>):``."""
+        return f"{self.prefix}{name}):"
+
 
 PYTHON_SYNTAX = MarkerSyntax(comment="#")
 RUST_SYNTAX = MarkerSyntax(comment="//")
@@ -86,6 +90,7 @@ STUB_BLOCK_KINDS: TypeAlias = Literal[
     "ty-map",
     "import-section",
     "import-object",
+    "directive",
     "export",
     "__all__",
     None,

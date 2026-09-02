@@ -52,6 +52,7 @@ class CodeBlock:
             "ty-map",
             "import-section",
             "import-object",
+            "directive",
             "export",
             "__all__",
             None,
@@ -85,6 +86,19 @@ class CodeBlock:
             return CodeBlock(
                 kind="import-object",
                 param=tuple(splits),
+                lineno_start=lineo,
+                lineno_end=lineo,
+                lines=[],
+            )
+        elif not line.startswith(syntax.begin):
+            # Generator-specific one-line directive: `<comment> tvm-ffi-stubgen(<name>): <payload>`.
+            # The pipeline checks `name` against the active generator's `directive_kinds`.
+            name, sep, payload = line[len(syntax.prefix) :].partition("):")
+            if not sep or not name or not name.replace("-", "_").isidentifier():
+                raise ValueError(f"Unknown stub type at line {lineo}: {line}")
+            return CodeBlock(
+                kind="directive",
+                param=(name, payload.strip()),
                 lineno_start=lineo,
                 lineno_end=lineo,
                 lines=[],
@@ -157,7 +171,7 @@ class FileInfo:
         return True
 
     @staticmethod
-    def from_file(  # noqa: PLR0912
+    def from_file(  # noqa: PLR0912, PLR0915
         file: Path, include_empty: bool = False, syntax: C.MarkerSyntax | None = None
     ) -> FileInfo | None:
         """Parse a file to extract code blocks based on stub markers.
@@ -214,7 +228,12 @@ class FileInfo:
                 codes.append(imp_code)
                 del imp_code
             elif clean_line.startswith(syntax.prefix):
-                raise ValueError(f"Unknown stub type at line {lineno}: {clean_line}")
+                # Process "<comment> tvm-ffi-stubgen(<name>): ..." (generator-specific directive)
+                dir_code = CodeBlock.from_begin_line(lineno, clean_line, syntax)
+                dir_code.lineno_end = lineno
+                dir_code.lines.append(line)
+                codes.append(dir_code)
+                del dir_code
             elif code is None:
                 # Process a plain line outside of any stub block
                 codes.append(

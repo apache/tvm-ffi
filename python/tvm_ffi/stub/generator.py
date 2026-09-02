@@ -74,6 +74,10 @@ class Generator(Protocol):
     #: Comment-marker syntax for the files this generator emits.
     syntax: C.MarkerSyntax
 
+    #: Names of the generator-specific one-line directives this generator accepts
+    #: (``<comment> tvm-ffi-stubgen(<name>): <payload>``). Any other name is an error.
+    directive_kinds: frozenset[str]
+
     def default_ty_map(self) -> dict[str, str]:
         """Return the default FFI-origin -> target-type name map for this language."""
         ...
@@ -88,6 +92,14 @@ class Generator(Protocol):
         self, imports: Any, name: str, type_checking_only: str, alias: str
     ) -> None:
         """Record an ``import-object`` directive (raw directive fields) into ``imports``."""
+        ...
+
+    def add_directive(self, imports: Any, name: str, payload: str, lineno: int) -> None:
+        """Record a generator-specific directive (raw payload) into ``imports``.
+
+        The collector is per file, so a directive applies to the blocks of the
+        file it appears in. ``name`` is always one of :attr:`directive_kinds`.
+        """
         ...
 
     def canonical_type_name(self, type_key: str) -> str:
