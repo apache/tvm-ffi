@@ -250,8 +250,9 @@ class ObjectInfo:
                         )
                     )
 
+        # `fields` is None while a `py_class` registration is still pending.
         return ObjectInfo(
-            fields=[NamedTypeSchema.from_type_field(field) for field in type_info.fields],
+            fields=[NamedTypeSchema.from_type_field(field) for field in type_info.fields or []],
             methods=[
                 FuncInfo(
                     schema=NamedTypeSchema(

@@ -24,6 +24,7 @@ from pathlib import Path
 import pytest
 import tvm_ffi.stub.cli as stub_cli
 import tvm_ffi.testing  # noqa: F401  (loads the `testing.*` fixture types)
+from tvm_ffi import core
 from tvm_ffi.core import TypeSchema
 from tvm_ffi.stub.layout import (
     OBJECT_HEADER_ALIGNMENT,
@@ -330,6 +331,17 @@ def test_registry_polymorphic() -> None:
     assert _ranges(verdict.uncovered) == [(32, 40)]
     # `ffi.Module` is the same shape in production code.
     assert verdicts["ffi.Module"].reason == "uncovered-bytes"
+
+
+def test_registry_tolerates_pending_py_class_registration() -> None:
+    """A ``py_class`` whose registration never completed has no fields yet; the sweep must not crash."""
+    parent_info = core._type_cls_to_type_info(core.Object)
+    assert parent_info is not None
+    cls = type("PendingLayout", (core.Object,), {"__slots__": ()})
+    core._register_py_class(parent_info, "testing.stub_layout.PendingLayout", cls)
+    verdict = _registry_verdicts()["testing.stub_layout.PendingLayout"]
+    assert verdict.reason == "layout-unknown"
+    assert verdict.fields == []
 
 
 def test_cli_coverage_out_without_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
