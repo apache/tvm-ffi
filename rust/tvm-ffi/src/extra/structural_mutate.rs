@@ -104,7 +104,7 @@ impl<T: Into<Any>> IntoMapResult for Result<T> {
     }
 }
 
-/// State and recursive operations available to a mutation callback.
+/// State and recursive operations available to a callback-chain mutation.
 ///
 /// A matched callback owns mutation of its value. Recursive operations
 /// reborrow the mutator, so mutable state cannot remain borrowed across them.
@@ -116,14 +116,120 @@ pub struct MutateContext<'a, State, Driver: ?Sized = dyn MutateContextDriver<Sta
     _not_send_sync: PhantomData<Rc<()>>,
 }
 
-/// Recursive mutation operations passed to structural-mutation callbacks.
+/// Recursive mutation operations passed to closure callback chains.
 ///
-/// This is the concise callback-facing name for [`MutateContext`]. The
-/// borrow lifetime is inferred in function parameters, so stateful callbacks
-/// can write `&mut Mutator<State>` and stateless callbacks can write
-/// `&mut Mutator`.
-pub type Mutator<'a, State = (), Driver = dyn MutateContextDriver<State> + 'a> =
+/// Typed `#[dispatch(mutate)]` implementations use [`Mutator`] instead and
+/// keep their mutable pass state directly on the dispatch object.
+pub type CallbackMutator<'a, State = (), Driver = dyn MutateContextDriver<State> + 'a> =
     MutateContext<'a, State, Driver>;
+
+/// Recursion control passed to a typed `#[dispatch(mutate)]` handler.
+///
+/// The dispatch object owns all pass state. Recursive operations take that
+/// object explicitly so Rust can safely reborrow the same `&mut self` for the
+/// child call.
+pub struct Mutator {
+    current: MapValue,
+    def_region_kind: DefRegionKind,
+    _not_send_sync: PhantomData<Rc<()>>,
+}
+
+impl Mutator {
+    /// Complete borrowed value active at this callback.
+    #[inline(always)]
+    pub fn current(&self) -> &MapValue {
+        &self.current
+    }
+
+    /// Definition-region state active at the callback's current value.
+    #[inline(always)]
+    pub fn def_region_kind(&self) -> DefRegionKind {
+        self.def_region_kind
+    }
+
+    /// Definition region active at the callback's current value.
+    #[inline(always)]
+    pub fn region(&self) -> DefRegionKind {
+        self.def_region_kind
+    }
+
+    /// Mutate a borrowed child through the same typed dispatch object.
+    #[inline(always)]
+    pub fn mutate<D, T>(&mut self, dispatch: &mut D, value: &T) -> Result<Any>
+    where
+        D: MutateDispatch,
+        for<'x> AnyView<'x>: From<&'x T>,
+    {
+        StructuralMutator::mutate(dispatch, value, self.def_region_kind)
+    }
+
+    /// Mutate a borrowed child under an explicit definition-region state.
+    #[inline(always)]
+    pub fn mutate_with<D, T>(
+        &mut self,
+        dispatch: &mut D,
+        value: &T,
+        def_region_kind: DefRegionKind,
+    ) -> Result<Any>
+    where
+        D: MutateDispatch,
+        for<'x> AnyView<'x>: From<&'x T>,
+    {
+        StructuralMutator::mutate(dispatch, value, def_region_kind)
+    }
+
+    /// Mutate an owned child and permit reuse when it remains uniquely owned.
+    #[inline(always)]
+    pub fn maybe_inplace_mutate<D, T>(&mut self, dispatch: &mut D, value: T) -> Result<Any>
+    where
+        D: MutateDispatch,
+        T: Into<Any>,
+    {
+        self.maybe_inplace_mutate_with(dispatch, value, self.def_region_kind)
+    }
+
+    /// Mutate an owned child under an explicit definition-region state.
+    #[inline(always)]
+    pub fn maybe_inplace_mutate_with<D, T>(
+        &mut self,
+        dispatch: &mut D,
+        value: T,
+        def_region_kind: DefRegionKind,
+    ) -> Result<Any>
+    where
+        D: MutateDispatch,
+        T: Into<Any>,
+    {
+        StructuralMutator::maybe_inplace_mutate(dispatch, value, def_region_kind)
+    }
+
+    /// Apply default mutation to the callback's current value.
+    #[inline(always)]
+    pub fn default_mutate<D: MutateDispatch>(&mut self, dispatch: &mut D) -> Result<Any> {
+        StructuralMutator::default_mutate(dispatch, &self.current, self.def_region_kind)
+    }
+
+    /// Look up an invocation-local identity substitution.
+    #[inline(always)]
+    pub fn var_remap_get<D: MutateDispatch>(
+        &mut self,
+        dispatch: &mut D,
+        var: &MapValue,
+    ) -> Result<Option<Any>> {
+        StructuralMutator::var_remap_get(dispatch, var)
+    }
+
+    /// Store an invocation-local identity substitution.
+    #[inline(always)]
+    pub fn var_remap_set<D: MutateDispatch>(
+        &mut self,
+        dispatch: &mut D,
+        var: &MapValue,
+        mutated_value: &Any,
+    ) -> Result<()> {
+        StructuralMutator::var_remap_set(dispatch, var, mutated_value)
+    }
+}
 
 #[doc(hidden)]
 /// Internal operations used by [`MutateContext`].
@@ -249,11 +355,12 @@ where
 /// Conversion into the mutator argument accepted by [`structural_mutate`].
 ///
 /// Accepts a mutable low-level [`StructuralMutator`], a generated
-/// [`MutateDispatch`], or a first-match callback chain. Use [`MutateCallbacks`]
-/// when typed dispatch or a callback chain needs mutable state.
+/// [`MutateDispatch`], or a first-match callback chain. Generated dispatch
+/// objects keep mutable pass state directly on themselves; [`MutateCallbacks`]
+/// remains available for closure callback chains with separate state.
 #[diagnostic::on_unimplemented(
     message = "`{Self}` is not a supported `structural_mutate` mutator",
-    note = "accepted mutators: `&mut U` where `U: StructuralMutator`; a generated `MutateDispatch<State = ()>`; an `Fn` callback over an FFI value type `T`, `&N` of an object node type, or `&MapValue`, followed by `&mut Mutator<State>`; or a tuple of up to 12 such callbacks (tuples may nest)",
+    note = "accepted mutators: `&mut U` where `U: StructuralMutator`; a generated `MutateDispatch`; an `Fn` callback over an FFI value type `T`, `&N` of an object node type, or `&MapValue`, followed by `&mut CallbackMutator<State>`; or a tuple of up to 12 such callbacks (tuples may nest)",
     note = "callback arguments need explicit type annotations; use `MutateCallbacks::new(state, callbacks)` for ordinary mutable callback state"
 )]
 pub trait IntoMutator<Marker> {
@@ -297,10 +404,6 @@ pub type MutateResult = Result<Any>;
 /// Callback tuples use a type-erased mutation driver.
 pub enum DynamicMutateCallbacks {}
 
-#[doc(hidden)]
-/// Generated dispatch keeps the concrete mutation driver for inlining.
-pub enum StaticMutateDispatch {}
-
 /// One typed callback in a callback-driven structural mutator.
 pub trait MutateChainLink<State, Marker>: mutate_sealed::SealedLink<State, Marker> {
     #[doc(hidden)]
@@ -318,19 +421,18 @@ pub trait MutateChainLink<State, Marker>: mutate_sealed::SealedLink<State, Marke
 ///
 /// `None` means no handler matched, so structural mutation applies its default
 /// behavior. A generated `#[dispatch(mutate)]` implementation tests
-/// `mutate_*` methods in source order and passes the same [`Mutator`] to
-/// the first match.
+/// `mutate_*` methods in source order and passes the same [`Mutator`] to the
+/// first match. The implementation owns its pass state and receives `&mut
+/// self`, while [`Mutator`] only controls recursion and the definition region.
 pub trait MutateDispatch: Sized {
-    /// Mutable state shared by the dispatched callbacks.
-    type State;
+    fn dispatch_mutate(&mut self, value: &MapValue, mutator: &mut Mutator) -> Option<MutateResult>;
+}
 
-    fn dispatch_mutate<Driver>(
-        &self,
-        value: &MapValue,
-        mutator: &mut Mutator<Self::State, Driver>,
-    ) -> Option<MutateResult>
-    where
-        Driver: MutateContextDriver<Self::State> + ?Sized;
+impl<D: MutateDispatch> IntoMutator<ByMutateDispatch> for D {
+    #[inline]
+    fn mutate_root(mut self, root: Any) -> Result<Any> {
+        run_structural_mutator(root, &mut self)
+    }
 }
 
 mod mutate_sealed {
@@ -364,28 +466,10 @@ mod mutate_sealed {
         O: IntoMutateResult,
     {
     }
-
-    impl<D> SealedLink<D::State, super::ByMutateDispatch> for D where D: super::MutateDispatch {}
 }
 
 #[doc(hidden)]
 pub enum ByMutateDispatch {}
-
-impl<D> MutateChainLink<D::State, ByMutateDispatch> for D
-where
-    D: MutateDispatch,
-{
-    type Strategy = StaticMutateDispatch;
-
-    #[inline(always)]
-    fn try_mutate(
-        &self,
-        value: &MapValue,
-        mutator: &mut MutateContext<'_, D::State>,
-    ) -> Option<MutateResult> {
-        self.dispatch_mutate(value, mutator)
-    }
-}
 
 #[doc(hidden)]
 pub struct ByMutateOwned<T>(PhantomData<T>);
@@ -1094,9 +1178,48 @@ pub trait StructuralMutator: Sized {
     }
 }
 
-// A plain closure has a fixed `&mut Mutator<State>` signature, while a
-// macro-generated dispatch method can be generic over the concrete driver.
-// Select the matching representation without changing the public callback API.
+impl<D: MutateDispatch> StructuralMutator for D {
+    #[inline(always)]
+    fn dispatch_mutate(&mut self, value: &MapValue, def_region_kind: DefRegionKind) -> Result<Any> {
+        let mut mutator = Mutator {
+            current: MapValue::from_raw(value.raw()),
+            def_region_kind,
+            _not_send_sync: PhantomData,
+        };
+        match MutateDispatch::dispatch_mutate(self, value, &mut mutator) {
+            Some(result) => result,
+            None => user_default_mutate(self, value.raw(), def_region_kind, Permit::Copy),
+        }
+    }
+
+    #[inline(always)]
+    fn dispatch_maybe_inplace_mutate(
+        &mut self,
+        value: InplaceValue<'_>,
+        def_region_kind: DefRegionKind,
+    ) -> Result<Any> {
+        let mut mutator = Mutator {
+            current: MapValue::from_raw(value.raw()),
+            def_region_kind,
+            _not_send_sync: PhantomData,
+        };
+        match MutateDispatch::dispatch_mutate(self, value.as_value(), &mut mutator) {
+            Some(result) => result,
+            None => {
+                let raw = value.raw();
+                let permit = if object_is_unique(raw) {
+                    Permit::MaybeInPlace
+                } else {
+                    Permit::Copy
+                };
+                user_default_mutate(self, raw, def_region_kind, permit)
+            }
+        }
+    }
+}
+
+// Closure callback chains use a type-erased context driver so one concrete
+// function signature can recurse through the complete chain.
 trait MutateCallbackStrategy<State, Link, Marker> {
     fn try_mutate<Driver>(
         driver: &mut Driver,
@@ -1132,34 +1255,6 @@ where
         // SAFETY: The owning `Rc` or the direct callback's stack slot remains live
         // and is never modified through the driver during recursive reentry.
         unsafe { (&*callback_ptr).try_mutate(value, &mut mutator) }
-    }
-}
-
-impl<State, Dispatch> MutateCallbackStrategy<State, Dispatch, ByMutateDispatch>
-    for StaticMutateDispatch
-where
-    Dispatch: MutateDispatch<State = State>,
-{
-    #[inline(always)]
-    fn try_mutate<Driver>(
-        driver: &mut Driver,
-        callback_ptr: *const Dispatch,
-        value: &MapValue,
-        def_region_kind: DefRegionKind,
-    ) -> Option<MutateResult>
-    where
-        Driver: MutateContextDriver<State>,
-    {
-        let mut mutator = MutateContext::<State, Driver> {
-            driver,
-            current: MapValue::from_raw(value.raw()),
-            def_region_kind,
-            _state: PhantomData,
-            _not_send_sync: PhantomData,
-        };
-        // SAFETY: The dispatch value is held by the owning `Rc` or by the
-        // direct callback's stack slot and is only borrowed immutably.
-        unsafe { (&*callback_ptr).dispatch_mutate(value, &mut mutator) }
     }
 }
 

@@ -495,13 +495,13 @@ example, an integer handler can return `Result<i64>` to report failures and use
 completed before a later error are not rolled back, and the consumed root is
 not returned on error.
 
-`structural_mutate` accepts typed callbacks in addition to a
-`StructuralMutator`. Callbacks receive a `Mutator`; `MutateCallbacks` adds
-state shared by the callback chain:
+`structural_mutate` accepts typed callback chains in addition to a
+`StructuralMutator`. Closure callbacks receive a `CallbackMutator`;
+`MutateCallbacks` adds state shared by that callback chain:
 
 ```rust
 use tvm_ffi::{
-    structural_mutate, Array, MapValue, MutateCallbacks, Mutator,
+    structural_mutate, Array, CallbackMutator, MapValue, MutateCallbacks,
 };
 
 #[derive(Default)]
@@ -512,11 +512,11 @@ struct Stats {
 let mut mutator = MutateCallbacks::new(
     Stats::default(),
     (
-        |value: i64, mutator: &mut Mutator<Stats>| {
+        |value: i64, mutator: &mut CallbackMutator<Stats>| {
             mutator.state_mut().integers += 1;
             value + 1
         },
-        |_value: &MapValue, mutator: &mut Mutator<Stats>| {
+        |_value: &MapValue, mutator: &mut CallbackMutator<Stats>| {
             mutator.default_mutate()
         },
     ),
@@ -527,52 +527,48 @@ assert_eq!(mutated.iter().collect::<Vec<_>>(), vec![2, 3]);
 assert_eq!(mutator.state().integers, 2);
 ```
 
-`Mutator::mutate` uses the copy path for a borrowed value, while
+`CallbackMutator::mutate` uses the copy path for a borrowed value, while
 `maybe_inplace_mutate` preserves the reuse opportunity of an owned value.
-Callbacks are `Fn`; mutable data belongs in the mutator state.
+Closure callbacks are `Fn`; mutable data belongs in the callback state.
 
-`#[dispatch(mutate)]` groups typed `mutate_*` callbacks. Dispatch only selects
-the first matching callback; `Mutator` supplies recursion, the current
-definition region, and mutable state. `mutator.mutate(child)` inherits the
-current region, while `mutate_with` is available for an explicit override. An
-unmatched value follows default mutation with its current in-place permit:
+`#[dispatch(mutate)]` groups typed `mutate_*` callbacks. The dispatch object
+owns its mutable pass state, while `Mutator` supplies recursion and the current
+definition region. `mutator.mutate(self, child)` safely reborrows that dispatch
+object and inherits the current region; `mutate_with` is available for an
+explicit override. An unmatched value follows default mutation with its
+current in-place permit:
 
 ```rust
 use tvm_ffi::{
-    dispatch, structural_mutate, Any, Array, MutateCallbacks, Mutator,
+    dispatch, structural_mutate, Array, Mutator,
 };
 
 #[derive(Default)]
-struct IncrementState {
+struct Increment {
     integers: usize,
 }
-
-struct Increment;
 
 #[dispatch(mutate)]
 impl Increment {
     fn mutate_integer(
-        &self,
+        &mut self,
         value: i64,
-        mutator: &mut Mutator<IncrementState>,
-    ) -> Any {
-        mutator.state_mut().integers += 1;
-        Any::from(value + 1)
+        _mutator: &mut Mutator,
+    ) -> i64 {
+        self.integers += 1;
+        value + 1
     }
 }
 
-let mut increment = MutateCallbacks::new(IncrementState::default(), Increment);
+let mut increment = Increment::default();
 let mutated = structural_mutate(
     Array::new(vec![1_i64, 2]),
     &mut increment,
 )?;
 let mutated = Array::<i64>::try_from(mutated)?;
 assert_eq!(mutated.iter().collect::<Vec<_>>(), vec![2, 3]);
-assert_eq!(increment.state().integers, 2);
+assert_eq!(increment.integers, 2);
 ```
-
-A generated dispatch whose context state is `()` can be passed directly to
-`structural_mutate`, without `MutateCallbacks`.
 
 For a named custom recursion policy, implement `StructuralMutator` and pass
 `&mut` it to `structural_mutate`. `InplaceValue` is an engine-issued

@@ -19,108 +19,25 @@
 
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
-use quote::{format_ident, quote, quote_spanned};
+use quote::{quote, quote_spanned};
 use syn::{
-    parse_macro_input, FnArg, GenericArgument, ImplItem, ImplItemMethod, ItemImpl, Meta,
-    NestedMeta, PathArguments, Type,
+    parse_macro_input, FnArg, ImplItem, ImplItemMethod, ItemImpl, Meta, NestedMeta, PathArguments,
+    Type,
 };
 
 use crate::utils::get_tvm_ffi_crate;
 
 pub(crate) fn dispatch(attr: TokenStream, item: TokenStream) -> TokenStream {
     let args = parse_macro_input!(attr as DispatchArgs);
-    let mut item_impl = parse_macro_input!(item as ItemImpl);
+    let item_impl = parse_macro_input!(item as ItemImpl);
 
     match expand(&item_impl, args.mode) {
-        Ok(generated) => {
-            if matches!(args.mode, DispatchMode::Mutate) {
-                if let Err(error) = specialize_mutate_handlers(&mut item_impl) {
-                    let error = error.to_compile_error();
-                    return quote!(#item_impl #error).into();
-                }
-            }
-            quote!(#item_impl #generated).into()
-        }
+        Ok(generated) => quote!(#item_impl #generated).into(),
         Err(error) => {
             let error = error.to_compile_error();
             quote!(#item_impl #error).into()
         }
     }
-}
-
-fn specialize_mutate_handlers(item_impl: &mut ItemImpl) -> syn::Result<()> {
-    let tvm_ffi = get_tvm_ffi_crate();
-    for item in &mut item_impl.items {
-        let ImplItem::Method(method) = item else {
-            continue;
-        };
-        if !method.sig.ident.to_string().starts_with("mutate_") {
-            continue;
-        }
-
-        let handler = parse_handler(method, DispatchMode::Mutate)?;
-        let state = handler
-            .mutate_state
-            .expect("mutate handlers always record their context state");
-        let driver = format_ident!("__TvmFfiMutateDriver");
-        if method
-            .sig
-            .generics
-            .type_params()
-            .any(|param| param.ident == driver)
-        {
-            return Err(syn::Error::new_spanned(
-                &method.sig.generics,
-                "reserved mutate-handler generic name is already in use",
-            ));
-        }
-
-        method.sig.generics.params.push(syn::parse_quote!(#driver));
-        method
-            .sig
-            .generics
-            .make_where_clause()
-            .predicates
-            .push(syn::parse_quote!(
-                #driver: #tvm_ffi::extra::structural_mutate::MutateContextDriver<#state> + ?Sized
-            ));
-
-        let context = match method.sig.inputs.iter_mut().nth(2) {
-            Some(FnArg::Typed(context)) => context,
-            _ => unreachable!("the third mutate-handler argument cannot be a receiver"),
-        };
-        let Type::Reference(reference) = context.ty.as_mut() else {
-            unreachable!("parse_handler already validated the mutate context");
-        };
-        let Type::Path(path) = reference.elem.as_mut() else {
-            unreachable!("parse_handler already validated the mutate context path");
-        };
-        let segment = path
-            .path
-            .segments
-            .last_mut()
-            .expect("a parsed Rust type path always has a segment");
-        if matches!(segment.arguments, PathArguments::None) {
-            let arguments: syn::AngleBracketedGenericArguments =
-                syn::parse_quote!(<#state, #driver>);
-            segment.arguments = PathArguments::AngleBracketed(arguments);
-            continue;
-        }
-        let PathArguments::AngleBracketed(arguments) = &mut segment.arguments else {
-            unreachable!("parse_handler already rejected parenthesized arguments");
-        };
-        if !arguments
-            .args
-            .iter()
-            .any(|argument| matches!(argument, GenericArgument::Type(_)))
-        {
-            arguments.args.push(GenericArgument::Type(state.clone()));
-        }
-        arguments
-            .args
-            .push(GenericArgument::Type(syn::parse_quote!(#driver)));
-    }
-    Ok(())
 }
 
 struct DispatchArgs {
@@ -252,16 +169,6 @@ fn expand(item_impl: &ItemImpl, mode: DispatchMode) -> syn::Result<TokenStream2>
             #tvm_ffi::extra::structural_mutate::IntoMutateResult::into_mutate_result
         },
     };
-    let mutate_state = if matches!(mode, DispatchMode::Mutate) {
-        Some(
-            handlers[0]
-                .mutate_state
-                .as_ref()
-                .expect("mutate handlers always record their context state"),
-        )
-    } else {
-        None
-    };
     let links = expand_links(&handlers, mode, &into_result, quote!(value));
     let self_type = &item_impl.self_ty;
     let (impl_generics, _, where_clause) = item_impl.generics.split_for_impl();
@@ -338,35 +245,22 @@ fn expand(item_impl: &ItemImpl, mode: DispatchMode) -> syn::Result<TokenStream2>
                 }
             }
         },
-        DispatchMode::Mutate => {
-            let state = mutate_state.expect("mutate dispatch has a context state");
-            quote! {
-                impl #impl_generics #tvm_ffi::extra::structural_mutate::MutateDispatch
-                    for #self_type #where_clause
-                {
-                    type State = #state;
-
-                    #[inline(always)]
-                    #[allow(unreachable_code, unused_variables)]
-                    fn dispatch_mutate<__TvmFfiMutateDriver>(
-                        &self,
-                        value: &#tvm_ffi::extra::structural_mutate::MapValue,
-                        mutator: &mut #tvm_ffi::extra::structural_mutate::Mutator<
-                            Self::State,
-                            __TvmFfiMutateDriver,
-                        >,
-                    ) -> Option<#tvm_ffi::extra::structural_mutate::MutateResult>
-                    where
-                        __TvmFfiMutateDriver:
-                            #tvm_ffi::extra::structural_mutate::MutateContextDriver<Self::State>
-                                + ?Sized,
-                    {
-                        #(#links)*
-                        None
-                    }
+        DispatchMode::Mutate => quote! {
+            impl #impl_generics #tvm_ffi::extra::structural_mutate::MutateDispatch
+                for #self_type #where_clause
+            {
+                #[inline(always)]
+                #[allow(unreachable_code, unused_variables)]
+                fn dispatch_mutate(
+                    &mut self,
+                    value: &#tvm_ffi::extra::structural_mutate::MapValue,
+                    mutator: &mut #tvm_ffi::extra::structural_mutate::Mutator,
+                ) -> Option<#tvm_ffi::extra::structural_mutate::MutateResult> {
+                    #(#links)*
+                    None
                 }
             }
-        }
+        },
     };
 
     Ok(quote! {
@@ -444,7 +338,6 @@ struct Handler {
     method: syn::Ident,
     argument: HandlerArgument,
     wants_def_region: bool,
-    mutate_state: Option<Type>,
     cfg_attrs: Vec<Meta>,
 }
 
@@ -458,7 +351,7 @@ fn parse_handler(method: &ImplItemMethod, mode: DispatchMode) -> syn::Result<Han
     let inputs = &method.sig.inputs;
     let receiver_is_expected = match (mode, inputs.first()) {
         (DispatchMode::Mutate, Some(FnArg::Receiver(receiver))) => {
-            receiver.reference.is_some() && receiver.mutability.is_none()
+            receiver.reference.is_some() && receiver.mutability.is_some()
         }
         (_, Some(FnArg::Receiver(receiver))) => {
             receiver.reference.is_some() && receiver.mutability.is_some()
@@ -472,7 +365,7 @@ fn parse_handler(method: &ImplItemMethod, mode: DispatchMode) -> syn::Result<Han
     };
     if !receiver_is_expected || !arity_is_expected {
         let message = if matches!(mode, DispatchMode::Mutate) {
-            "mutate handlers must take `&self`, a node, and `&mut Mutator<State>`".to_owned()
+            "mutate handlers must take `&mut self`, a node, and `&mut Mutator`".to_owned()
         } else {
             format!(
                 "{} handlers must take `&mut self`, a node, and optionally a trailing \
@@ -483,15 +376,13 @@ fn parse_handler(method: &ImplItemMethod, mode: DispatchMode) -> syn::Result<Han
         return Err(syn::Error::new_spanned(&method.sig, message));
     }
     let wants_def_region = !matches!(mode, DispatchMode::Mutate) && inputs.len() == 3;
-    let mutate_state = if matches!(mode, DispatchMode::Mutate) {
+    if matches!(mode, DispatchMode::Mutate) {
         let context_type = match inputs.iter().nth(2) {
             Some(FnArg::Typed(context)) => context.ty.as_ref(),
             _ => unreachable!("the third argument cannot be a receiver"),
         };
-        Some(parse_mutator_state(context_type)?)
-    } else {
-        None
-    };
+        parse_mutator(context_type)?;
+    }
 
     let value_type = match inputs.iter().nth(1) {
         Some(FnArg::Typed(value)) => (*value.ty).clone(),
@@ -521,16 +412,15 @@ fn parse_handler(method: &ImplItemMethod, mode: DispatchMode) -> syn::Result<Han
         method: method.sig.ident.clone(),
         argument,
         wants_def_region,
-        mutate_state,
         cfg_attrs,
     })
 }
 
-fn parse_mutator_state(context_type: &Type) -> syn::Result<Type> {
+fn parse_mutator(context_type: &Type) -> syn::Result<()> {
     let Type::Reference(reference) = context_type else {
         return Err(syn::Error::new_spanned(
             context_type,
-            "the mutator must be `&mut Mutator<State>`",
+            "the mutator must be `&mut Mutator`",
         ));
     };
     if reference.mutability.is_none() {
@@ -542,55 +432,28 @@ fn parse_mutator_state(context_type: &Type) -> syn::Result<Type> {
     let Type::Path(path) = reference.elem.as_ref() else {
         return Err(syn::Error::new_spanned(
             context_type,
-            "expected `&mut Mutator<State>`",
+            "expected `&mut Mutator`",
         ));
     };
     let Some(segment) = path.path.segments.last() else {
         return Err(syn::Error::new_spanned(
             context_type,
-            "expected `&mut Mutator<State>`",
+            "expected `&mut Mutator`",
         ));
     };
-    let is_short_name = segment.ident == "Mutator";
-    if !is_short_name && segment.ident != "MutateContext" {
+    if segment.ident != "Mutator" {
         return Err(syn::Error::new_spanned(
             context_type,
-            "expected `&mut Mutator<State>`",
+            "expected `&mut Mutator`",
         ));
     }
-    let arguments = match &segment.arguments {
-        PathArguments::AngleBracketed(arguments) => Some(arguments),
-        PathArguments::None if is_short_name => None,
-        _ => {
-            return Err(syn::Error::new_spanned(
-                context_type,
-                "`Mutator` accepts one optional state type",
-            ));
-        }
-    };
-    let mut state_types = arguments.into_iter().flat_map(|arguments| {
-        arguments.args.iter().filter_map(|argument| match argument {
-            GenericArgument::Type(state) => Some(state.clone()),
-            _ => None,
-        })
-    });
-    let state = match state_types.next() {
-        Some(state) => state,
-        None if is_short_name => syn::parse_quote!(()),
-        None => {
-            return Err(syn::Error::new_spanned(
-                context_type,
-                "`MutateContext` requires a state type",
-            ));
-        }
-    };
-    if state_types.next().is_some() {
+    if !matches!(segment.arguments, PathArguments::None) {
         return Err(syn::Error::new_spanned(
             context_type,
-            "`Mutator` accepts at most one state type",
+            "`Mutator` does not take a state type; store pass state on the dispatch object",
         ));
     }
-    Ok(state)
+    Ok(())
 }
 
 fn presence_attrs(attrs: &[syn::Attribute]) -> syn::Result<Vec<Meta>> {
