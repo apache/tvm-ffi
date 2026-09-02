@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING
 from . import consts as C
 from .file_utils import FileInfo, collect_files, syntax_for
 from .generator import generator_names, get_generator
+from .layout import classify, write_coverage_report
 from .lib_state import (
     collect_global_funcs,
     collect_type_keys,
@@ -111,6 +112,15 @@ def __main__() -> int:
     if opt.init and generated_prefixes:
         assert init_path is not None
         generator.finalize_init(init_path, generated_prefixes)
+
+    # Stage 5. Report which native layouts the loaded registry can reproduce.
+    if opt.coverage_out is not None:
+        infos = {
+            type_key: object_info_from_type_key(type_key)
+            for type_keys in collect_type_keys().values()
+            for type_key in type_keys
+        }
+        write_coverage_report(Path(opt.coverage_out), classify(infos))
     del dlls
     return 0
 
@@ -375,6 +385,17 @@ def _parse_args() -> Options:
             "without modifying any files."
         ),
     )
+    parser.add_argument(
+        "--coverage-out",
+        type=str,
+        default=None,
+        metavar="JSON",
+        help=(
+            "Write a JSON report classifying every registered object type by whether "
+            "its native memory layout can be reproduced from reflection (complete) or "
+            "not (opaque), with the byte evidence. May be used without PATH arguments."
+        ),
+    )
     args = parser.parse_args()
 
     init_flags = [args.init_pypkg, args.init_lib, args.init_prefix]
@@ -388,7 +409,7 @@ def _parse_args() -> Options:
             prefix=args.init_prefix,
         )
 
-    if not args.files:
+    if not args.files and args.coverage_out is None:
         parser.print_help()
         sys.exit(1)
 
@@ -401,6 +422,7 @@ def _parse_args() -> Options:
         verbose=args.verbose,
         dry_run=args.dry_run,
         target=args.target,
+        coverage_out=args.coverage_out,
     )
 
 

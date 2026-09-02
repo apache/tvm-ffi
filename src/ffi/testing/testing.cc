@@ -206,6 +206,30 @@ class TestCxxClassDerivedDerived : public TestCxxClassDerived {
                               TestCxxClassDerived);
 };
 
+// Layout-classifier fixtures: a member the registry never sees, and a vptr in front of the
+// `TVMFFIObject` header. Neither can be accounted for by the reflected fields.
+class TestCxxClassHiddenField : public Object {
+ public:
+  int64_t v_i64 = 0;
+  int64_t hidden_i64 = 0;  // deliberately not reflected
+  int32_t v_i32 = 0;
+
+  static constexpr bool _type_mutable = true;
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("testing.TestCxxClassHiddenField", TestCxxClassHiddenField,
+                                    Object);
+};
+
+class TestCxxClassPolymorphic : public Object {
+ public:
+  int64_t v_i64 = 0;
+
+  virtual ~TestCxxClassPolymorphic() = default;
+
+  static constexpr bool _type_mutable = true;
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("testing.TestCxxClassPolymorphic", TestCxxClassPolymorphic,
+                                    Object);
+};
+
 class TestCxxEnumHolderObj : public Object {
  public:
   TestCxxIntEnum priority;
@@ -497,6 +521,12 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   refl::ObjectDef<TestCxxClassDerivedDerived>()
       .def_rw("v_str", &TestCxxClassDerivedDerived::v_str, refl::default_value(String("default")))
       .def_rw("v_bool", &TestCxxClassDerivedDerived::v_bool);
+
+  refl::ObjectDef<TestCxxClassHiddenField>()
+      .def_rw("v_i64", &TestCxxClassHiddenField::v_i64)
+      .def_rw("v_i32", &TestCxxClassHiddenField::v_i32);
+
+  refl::ObjectDef<TestCxxClassPolymorphic>().def_rw("v_i64", &TestCxxClassPolymorphic::v_i64);
 
   refl::ObjectDef<TestCxxEnumHolderObj>()
       .def_rw("priority", &TestCxxEnumHolderObj::priority)

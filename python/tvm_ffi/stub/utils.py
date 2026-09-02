@@ -85,6 +85,8 @@ class Options:
     dry_run: bool = False
     target: str = "python"
     """Code generator target to use."""
+    coverage_out: str | None = None
+    """Path of the native-layout coverage report (JSON) to write, if requested."""
 
 
 @dataclasses.dataclass(init=False)
