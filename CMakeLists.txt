@@ -243,12 +243,10 @@ if (TVM_FFI_BUILD_PYTHON_MODULE)
     COMPONENTS Interpreter
     REQUIRED
   )
-  set(_tvm_ffi_python_executable "${Python_EXECUTABLE}")
-  set(_tvm_ffi_python_version ${Python_VERSION})
 
   # Run a Python script to check for free-threaded build
   execute_process(
-    COMMAND "${_tvm_ffi_python_executable}" -c
+    COMMAND "${Python_EXECUTABLE}" -c
             "import sysconfig; print(sysconfig.get_config_var('Py_GIL_DISABLED') == 1)"
     OUTPUT_VARIABLE PYTHON_IS_FREE_THREADED
     OUTPUT_STRIP_TRAILING_WHITESPACE
@@ -274,7 +272,7 @@ if (TVM_FFI_BUILD_PYTHON_MODULE)
     set(_tvm_ffi_python_components Interpreter Development.Module)
   endif ()
   find_package(
-    Python ${_tvm_ffi_python_version} EXACT
+    Python ${Python_VERSION} EXACT
     COMPONENTS ${_tvm_ffi_python_components}
     REQUIRED
   )
@@ -296,8 +294,8 @@ if (TVM_FFI_BUILD_PYTHON_MODULE)
   )
   add_custom_command(
     OUTPUT ${_core_cpp}
-    COMMAND "${_tvm_ffi_python_executable}" -m cython --cplus ${_core_pyx} -o ${_core_cpp}
-            --module-name "tvm_ffi.core"
+    COMMAND "${Python_EXECUTABLE}" -m cython --cplus ${_core_pyx} -o ${_core_cpp} --module-name
+            "tvm_ffi.core"
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     COMMENT "Transpiling ${_core_pyx} to ${_core_cpp}"
     DEPENDS ${_cython_sources}
