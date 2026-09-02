@@ -283,7 +283,8 @@ fn expand_links(
             let method = &handler.method;
             let attrs = &handler.cfg_attrs;
             let trailing_arg = match mode {
-                DispatchMode::Mutate => quote!(, mutator),
+                DispatchMode::Mutate if handler.wants_mutator => quote!(, mutator),
+                DispatchMode::Mutate => quote!(),
                 _ if handler.wants_def_region => quote!(, def_region_kind),
                 _ => quote!(),
             };
@@ -338,6 +339,7 @@ struct Handler {
     method: syn::Ident,
     argument: HandlerArgument,
     wants_def_region: bool,
+    wants_mutator: bool,
     cfg_attrs: Vec<Meta>,
 }
 
@@ -358,14 +360,11 @@ fn parse_handler(method: &ImplItemMethod, mode: DispatchMode) -> syn::Result<Han
         }
         _ => false,
     };
-    let arity_is_expected = if matches!(mode, DispatchMode::Mutate) {
-        inputs.len() == 3
-    } else {
-        inputs.len() == 2 || inputs.len() == 3
-    };
+    let arity_is_expected = inputs.len() == 2 || inputs.len() == 3;
     if !receiver_is_expected || !arity_is_expected {
         let message = if matches!(mode, DispatchMode::Mutate) {
-            "mutate handlers must take `&mut self`, a node, and `&mut Mutator`".to_owned()
+            "mutate handlers must take `&mut self`, a node, and optionally `&mut Mutator`"
+                .to_owned()
         } else {
             format!(
                 "{} handlers must take `&mut self`, a node, and optionally a trailing \
@@ -376,7 +375,8 @@ fn parse_handler(method: &ImplItemMethod, mode: DispatchMode) -> syn::Result<Han
         return Err(syn::Error::new_spanned(&method.sig, message));
     }
     let wants_def_region = !matches!(mode, DispatchMode::Mutate) && inputs.len() == 3;
-    if matches!(mode, DispatchMode::Mutate) {
+    let wants_mutator = matches!(mode, DispatchMode::Mutate) && inputs.len() == 3;
+    if wants_mutator {
         let context_type = match inputs.iter().nth(2) {
             Some(FnArg::Typed(context)) => context.ty.as_ref(),
             _ => unreachable!("the third argument cannot be a receiver"),
@@ -412,6 +412,7 @@ fn parse_handler(method: &ImplItemMethod, mode: DispatchMode) -> syn::Result<Han
         method: method.sig.ident.clone(),
         argument,
         wants_def_region,
+        wants_mutator,
         cfg_attrs,
     })
 }

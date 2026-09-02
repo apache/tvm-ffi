@@ -536,12 +536,11 @@ owns its mutable pass state, while `Mutator` supplies recursion and the current
 definition region. `mutator.mutate(self, child)` safely reborrows that dispatch
 object and inherits the current region; `mutate_with` is available for an
 explicit override. An unmatched value follows default mutation with its
-current in-place permit:
+current in-place permit. A handler that does not need these controls can omit
+the `&mut Mutator` parameter:
 
 ```rust
-use tvm_ffi::{
-    dispatch, structural_mutate, Array, Mutator,
-};
+use tvm_ffi::{dispatch, structural_mutate, Array};
 
 #[derive(Default)]
 struct Increment {
@@ -550,11 +549,7 @@ struct Increment {
 
 #[dispatch(mutate)]
 impl Increment {
-    fn mutate_integer(
-        &mut self,
-        value: i64,
-        _mutator: &mut Mutator,
-    ) -> i64 {
+    fn mutate_integer(&mut self, value: i64) -> i64 {
         self.integers += 1;
         value + 1
     }

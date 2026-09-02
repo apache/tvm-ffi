@@ -1394,7 +1394,7 @@ struct GeneratedStatelessDispatch;
 
 #[dispatch(mutate)]
 impl GeneratedStatelessDispatch {
-    fn mutate_integer(&mut self, value: i64, _mutator: &mut Mutator) -> i64 {
+    fn mutate_integer(&mut self, value: i64) -> i64 {
         value + 1
     }
 }
@@ -1515,7 +1515,7 @@ impl GeneratedDefaultingDispatch {
         mutator.default_mutate(self)
     }
 
-    fn mutate_integer(&mut self, value: i64, _mutator: &mut Mutator) -> Any {
+    fn mutate_integer(&mut self, value: i64) -> Any {
         self.integers.push(value);
         Any::from(value + 1)
     }
@@ -1540,7 +1540,7 @@ struct GeneratedRemappingDispatch {
 
 #[dispatch(mutate)]
 impl GeneratedRemappingDispatch {
-    fn mutate_dag_node(&mut self, _value: &RustDagNodeObj, _mutator: &mut Mutator) -> Any {
+    fn mutate_dag_node(&mut self, _value: &RustDagNodeObj) -> Any {
         Any::from(42i64)
     }
 
