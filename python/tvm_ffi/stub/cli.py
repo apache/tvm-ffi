@@ -120,15 +120,15 @@ def _stage_1(
     ty_map: dict[str, str],
 ) -> None:
     for code in file.code_blocks:
-        if code.kind == "ty-map":
-            try:
-                assert isinstance(code.param, str)
-                lhs, rhs = code.param.split("->")
-            except ValueError as e:
-                raise ValueError(
-                    f"Invalid ty_map format at line {code.lineno_start}. Example: `A.B -> C.D`"
-                ) from e
-            ty_map[lhs.strip()] = rhs.strip()
+        if code.kind != "directive" or code.param[0] != "ty-map":
+            continue
+        try:
+            lhs, rhs = code.param[1].split("->")
+        except ValueError as e:
+            raise ValueError(
+                f"Invalid ty_map format at line {code.lineno_start}. Example: `A.B -> C.D`"
+            ) from e
+        ty_map[lhs.strip()] = rhs.strip()
 
 
 def _stage_2(
@@ -221,16 +221,16 @@ def _stage_3(  # noqa: PLR0912
     defined_funcs: set[str] = set()
     defined_types: set[str] = set()
     imports = generator.new_imports()
-    # Stage 1. Collect `tvm-ffi-stubgen(import-object): ...` and generator-specific directives
+    # Stage 1. Hand the one-line directives the pipeline does not consume itself to the generator.
     for code in file.code_blocks:
-        if code.kind == "import-object":
-            name, type_checking_only, alias = code.param
-            generator.add_imported_object(imports, name, type_checking_only, alias)
-        elif code.kind == "directive":
-            name, payload = code.param
-            if name not in generator.directive_kinds:
-                raise ValueError(f"Unknown directive `{name}` at line {code.lineno_start}")
-            generator.add_directive(imports, name, payload, code.lineno_start)
+        if code.kind != "directive":
+            continue
+        name, payload = code.param
+        if name in C.RESERVED_DIRECTIVES:
+            continue  # consumed by `_stage_1`
+        if name not in generator.directive_kinds:
+            raise ValueError(f"Unknown directive `{name}` at line {code.lineno_start}")
+        generator.add_directive(imports, name, payload, code.lineno_start)
     # Stage 2. Process `tvm-ffi-stubgen(begin): global/...`
     for code in file.code_blocks:
         if code.kind == "global":

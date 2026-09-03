@@ -30,9 +30,10 @@ The stub generator separates two concerns:
 A :class:`Generator` encapsulates concern (2); ``cli.py`` drives concern (1) and
 delegates every act of emitting text — and every act of collecting imports — to
 the active generator. The import collector is opaque to the pipeline: ``cli.py``
-asks the generator to create one, seed it from ``import-object`` directives, and
-later render it, but never reaches inside. Adding a language is therefore
-"implement one more :class:`Generator`" rather than forking the pipeline.
+asks the generator to create one, seed it from the one-line directives the
+generator declares, and later render it, but never reaches inside. Adding a
+language is therefore "implement one more :class:`Generator`" rather than
+forking the pipeline.
 """
 
 from __future__ import annotations
@@ -74,8 +75,9 @@ class Generator(Protocol):
     #: Comment-marker syntax for the files this generator emits.
     syntax: C.MarkerSyntax
 
-    #: Names of the generator-specific one-line directives this generator accepts
-    #: (``<comment> tvm-ffi-stubgen(<name>): <payload>``). Any other name is an error.
+    #: Names of the one-line directives (``<comment> tvm-ffi-stubgen(<name>): <payload>``)
+    #: this generator consumes. Names in :data:`consts.RESERVED_DIRECTIVES` belong to the
+    #: pipeline; any other undeclared name is an error.
     directive_kinds: frozenset[str]
 
     def default_ty_map(self) -> dict[str, str]:
@@ -88,17 +90,12 @@ class Generator(Protocol):
         """Create a fresh, empty import collector for one file."""
         ...
 
-    def add_imported_object(
-        self, imports: Any, name: str, type_checking_only: str, alias: str
-    ) -> None:
-        """Record an ``import-object`` directive (raw directive fields) into ``imports``."""
-        ...
-
     def add_directive(self, imports: Any, name: str, payload: str, lineno: int) -> None:
-        """Record a generator-specific directive (raw payload) into ``imports``.
+        """Record a one-line directive (raw payload) into ``imports``.
 
         The collector is per file, so a directive applies to the blocks of the
-        file it appears in. ``name`` is always one of :attr:`directive_kinds`.
+        file it appears in. ``name`` is always one of :attr:`directive_kinds`;
+        the payload's grammar is the generator's to define.
         """
         ...
 

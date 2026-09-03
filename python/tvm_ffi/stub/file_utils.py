@@ -49,9 +49,7 @@ class CodeBlock:
         assert self.kind in {
             "global",
             "object",
-            "ty-map",
             "import-section",
-            "import-object",
             "directive",
             "export",
             "__all__",
@@ -69,30 +67,9 @@ class CodeBlock:
     @staticmethod
     def from_begin_line(lineo: int, line: str, syntax: C.MarkerSyntax) -> CodeBlock:
         """Parse a line to create a CodeBlock if it contains a stub begin marker."""
-        if line.startswith(syntax.ty_map):
-            line = line[len(syntax.ty_map) :].strip()
-            return CodeBlock(
-                kind="ty-map",
-                param=line,
-                lineno_start=lineo,
-                lineno_end=lineo,
-                lines=[],
-            )
-        elif line.startswith(syntax.import_object):
-            line = line[len(syntax.import_object) :].strip()
-            splits = [p.strip() for p in line.split(";")]
-            if len(splits) < 3:
-                splits += [""] * (3 - len(splits))
-            return CodeBlock(
-                kind="import-object",
-                param=tuple(splits),
-                lineno_start=lineo,
-                lineno_end=lineo,
-                lines=[],
-            )
-        elif not line.startswith(syntax.begin):
-            # Generator-specific one-line directive: `<comment> tvm-ffi-stubgen(<name>): <payload>`.
-            # The pipeline checks `name` against the active generator's `directive_kinds`.
+        if not line.startswith(syntax.begin):
+            # One-line directive `<comment> tvm-ffi-stubgen(<name>): <payload>`. The payload is
+            # kept verbatim for whoever consumes the name: the pipeline or the generator.
             name, sep, payload = line[len(syntax.prefix) :].partition("):")
             if not sep or not name or not name.replace("-", "_").isidentifier():
                 raise ValueError(f"Unknown stub type at line {lineo}: {line}")
@@ -113,9 +90,6 @@ class CodeBlock:
         elif stub.startswith("object/"):
             kind = "object"
             param = stub[len("object/") :].strip()
-        elif stub.startswith("ty-map/"):
-            kind = "ty-map"
-            param = stub[len("ty-map/") :].strip()
         elif stub == "import-section":
             kind = "import-section"
             param = ""
@@ -171,7 +145,7 @@ class FileInfo:
         return True
 
     @staticmethod
-    def from_file(  # noqa: PLR0912, PLR0915
+    def from_file(  # noqa: PLR0912
         file: Path, include_empty: bool = False, syntax: C.MarkerSyntax | None = None
     ) -> FileInfo | None:
         """Parse a file to extract code blocks based on stub markers.
@@ -213,22 +187,8 @@ class FileInfo:
                 code.lines.append(line)
                 codes.append(code)
                 code = None
-            elif clean_line.startswith(syntax.ty_map):
-                # Process "<comment> tvm-ffi-stubgen(ty_map)"
-                ty_code = CodeBlock.from_begin_line(lineno, clean_line, syntax)
-                ty_code.lineno_end = lineno
-                ty_code.lines.append(line)
-                codes.append(ty_code)
-                del ty_code
-            elif clean_line.startswith(syntax.import_object):
-                # Process "<comment> tvm-ffi-stubgen(import-object)"
-                imp_code = CodeBlock.from_begin_line(lineno, clean_line, syntax)
-                imp_code.lineno_end = lineno
-                imp_code.lines.append(line)
-                codes.append(imp_code)
-                del imp_code
             elif clean_line.startswith(syntax.prefix):
-                # Process "<comment> tvm-ffi-stubgen(<name>): ..." (generator-specific directive)
+                # Process a one-line directive "<comment> tvm-ffi-stubgen(<name>): ..."
                 dir_code = CodeBlock.from_begin_line(lineno, clean_line, syntax)
                 dir_code.lineno_end = lineno
                 dir_code.lines.append(line)
