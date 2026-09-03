@@ -19,7 +19,9 @@
 from __future__ import annotations
 
 #: One-line directives the Rust backend consumes.
-RUST_DIRECTIVE_KINDS = frozenset({"import-object", "field", "nullable", "enum", "opaque"})
+RUST_DIRECTIVE_KINDS = frozenset(
+    {"import-object", "field", "nullable", "enum", "opaque", "upcast", "custom-new"}
+)
 
 #: Default FFI-origin -> Rust-type map; ``::`` paths get a ``use``, bare names do not.
 RUST_TY_MAP_DEFAULTS = {
@@ -121,3 +123,7 @@ RUST_KEYWORDS = frozenset(
     "unsized virtual yield".split()
 )
 RUST_NOT_RAW_IDENTIFIERS = frozenset({"self", "Self", "super", "crate"})
+
+#: ``rustfmt``'s default ``max_width``: an allocator signature that would
+#: overflow it is rendered one parameter per line.
+RUST_MAX_WIDTH = 100

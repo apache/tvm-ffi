@@ -216,6 +216,9 @@ def test_directives_parse() -> None:
     directives.add("enum", "tirx.For.kind -> ForKind(i32) { Serial=0, Parallel = 1 }", 3)
     directives.add("enum", "tirx.For.mode -> Mode(u8)", 4)
     directives.add("opaque", " ir.SourceName ", 5)
+    directives.add("upcast", "tirx.Add -> PrimExpr", 6)
+    directives.add("upcast", "tirx.Add -> crate::typed::TypedExpr", 7)
+    directives.add("custom-new", " tirx.Add ", 8)
     assert directives.field_types == {"tirx.Add.a": "PrimExpr"}
     assert directives.nullable == {"ir.Expr.span"}
     assert directives.enums == {
@@ -223,6 +226,8 @@ def test_directives_parse() -> None:
         "tirx.For.mode": EnumSpec("Mode", "u8", ()),
     }
     assert directives.opaque == {"ir.SourceName"}
+    assert directives.upcasts == {"tirx.Add": ["PrimExpr", "crate::typed::TypedExpr"]}
+    assert directives.custom_new == {"tirx.Add"}
 
 
 @pytest.mark.parametrize(
@@ -236,7 +241,10 @@ def test_directives_parse() -> None:
         ("enum", "tirx.For.kind -> ForKind(i128)", "Name(i32)"),
         ("enum", "tirx.For.kind -> ForKind(i32) { Serial }", "Name(i32)"),
         ("opaque", "ir.SourceName ir.Source", "<type_key>"),
-        ("upcast", "tirx.Add -> PrimExpr", "Unknown directive"),
+        ("upcast", "tirx.Add", "-> <RustType>"),
+        ("upcast", "tirx.Add PrimExpr -> PrimExpr", "<type_key>"),
+        ("custom-new", "", "<type_key>"),
+        ("typed-view", "tirx.Add -> PrimExpr", "Unknown directive"),
     ],
 )
 def test_directives_reject_malformed(name: str, payload: str, expected: str) -> None:
@@ -246,7 +254,15 @@ def test_directives_reject_malformed(name: str, payload: str, expected: str) -> 
 
 
 def test_generator_declares_its_directives_and_records_imports() -> None:
-    assert RUST.directive_kinds == {"import-object", "field", "nullable", "enum", "opaque"}
+    assert RUST.directive_kinds == {
+        "import-object",
+        "field",
+        "nullable",
+        "enum",
+        "opaque",
+        "upcast",
+        "custom-new",
+    }
     imports = RUST.new_imports()
     RUST.add_directive(imports, "import-object", "tvm_ffi.libinfo.Foo;False;_Foo", 1)
     RUST.add_directive(imports, "nullable", "demo.Node.span", 2)
@@ -649,6 +665,21 @@ impl Deref for Expr {
     fn deref(&self) -> &ExprObj {
         &self.data
     }
+}
+
+impl ExprObj {
+    pub(crate) fn new(span: Option<Span>, ty: Type) -> Self {
+        let base = Object::new();
+        Self { base, span, ty }
+    }
+}
+
+impl Expr {
+    /// Lossless complete-field allocation.
+    pub fn new(span: Option<Span>, ty: Type) -> Self {
+        let obj = ExprObj::new(span, ty);
+        Self { data: ObjectArc::new(obj) }
+    }
 }"""
 
 ADD_EXPECTED = """\
@@ -688,7 +719,22 @@ impl Deref for AddObj {
     }
 }
 
-tvm_ffi::impl_object_upcast!(Add => Expr);"""
+impl AddObj {
+    pub(crate) fn new(span: Option<Span>, ty: PrimType, a: PrimExpr, b: PrimExpr) -> Self {
+        let base = ExprObj::new(span, ty.into());
+        Self { base, a, b }
+    }
+}
+
+impl Add {
+    /// Lossless complete-field allocation.
+    pub fn new(span: Option<Span>, ty: PrimType, a: PrimExpr, b: PrimExpr) -> Self {
+        let obj = AddObj::new(span, ty, a, b);
+        Self { data: ObjectArc::new(obj) }
+    }
+}
+
+tvm_ffi::impl_object_upcast!(Add => Expr, Add => PrimExpr);"""
 
 
 def test_render_complete_expr_golden() -> None:
@@ -701,11 +747,19 @@ def test_render_complete_expr_golden() -> None:
 
 
 def test_render_complete_add_golden() -> None:
-    """`tirx.Add` on top of a complete `ir.Expr`, with `field` directives narrowing `a` / `b`."""
+    """`tirx.Add` as tvm-rust-ext hand-writes it, on top of a complete `ir.Expr`.
+
+    `field` directives narrow `a` / `b` and the inherited allocator parameter
+    `ty` (upcast with `.into()` on the way to `ExprObj::new`); `upcast` adds
+    the `PrimExpr` view.
+    """
     _register(_expr())
     imports = RUST.new_imports()
-    RUST.add_directive(imports, "field", "tirx.Add.a -> PrimExpr", 1)
-    RUST.add_directive(imports, "field", "tirx.Add.b -> PrimExpr", 2)
+    RUST.add_directive(imports, "nullable", "ir.Expr.span", 1)
+    RUST.add_directive(imports, "field", "tirx.Add.a -> PrimExpr", 2)
+    RUST.add_directive(imports, "field", "tirx.Add.b -> PrimExpr", 3)
+    RUST.add_directive(imports, "field", "tirx.Add.ty -> PrimType", 4)
+    RUST.add_directive(imports, "upcast", "tirx.Add -> PrimExpr", 5)
     text, imports = _render(_add(), imports)
     assert text == ADD_EXPECTED
     assert _uses(imports) == {
@@ -713,6 +767,8 @@ def test_render_complete_add_golden() -> None:
         "tvm_ffi::ObjectArc",
         "super::ir::ExprObj",
         "super::ir::Expr",
+        "super::ir::Span",
+        "super::ir::Type",
     }
 
 
@@ -784,6 +840,34 @@ def test_unrenderable_field_keeps_the_type_opaque(field: NamedTypeSchema) -> Non
     assert "has no native mirror" in text
     assert "impl HolderObj {\n    pub fn x(&self) -> Result<" in text
     assert "const _: () =" not in text
+
+
+def test_custom_new_leaves_the_wrapper_allocator_to_hand_written_code() -> None:
+    """`custom-new` drops `Add::new`; `AddObj::new` stays for that code and derived types to call."""
+    _register(_expr())
+    imports = RUST.new_imports()
+    RUST.add_directive(imports, "custom-new", "tirx.Add", 1)
+    text, _ = _render(_add(), imports)
+    assert (
+        "impl AddObj {\n    pub(crate) fn new(span: Span, ty: Type, a: Expr, b: Expr) -> Self {"
+        in text
+    )
+    assert "impl Add {" not in text
+    assert "pub fn new(" not in text
+
+
+def test_upcast_directive_adds_typed_views() -> None:
+    """`upcast` targets follow the ancestor chain; a `::` path is imported. Opaque: no allocator."""
+    info = _info("demo.Leaf", parent="demo.Base")
+    imports = RUST.new_imports()
+    RUST.add_directive(imports, "upcast", "demo.Leaf -> crate::typed::LeafView", 1)
+    RUST.add_directive(imports, "upcast", "demo.Leaf -> Other", 2)
+    text, imports = _render(info, imports)
+    assert text.endswith(
+        "tvm_ffi::impl_object_upcast!(Leaf => Base, Leaf => LeafView, Leaf => Other);"
+    )
+    assert "crate::typed::LeafView" in _uses(imports)
+    assert "fn new(" not in text
 
 
 def test_opaque_directive_vetoes_a_complete_type() -> None:
@@ -885,11 +969,28 @@ def test_registry_complete_chain_is_mirrored() -> None:
     )
     assert "assert!(::core::mem::size_of::<TestCxxClassBaseObj>() == 40);" in base
     assert "FieldGetter" not in base
+    assert "    pub fn new(v_i64: i64, v_i32: i32) -> Self {" in base
 
     dd, imports = _render(object_info_from_type_key("testing.TestCxxClassDerivedDerived"))
     assert (
         "    base: TestCxxClassDerivedObj,\n    pub v_str: String,\n    pub v_bool: bool,\n}" in dd
     )
+    # The allocator flattens the chain; a signature over 100 columns wraps.
+    assert (
+        "impl TestCxxClassDerivedDerivedObj {\n"
+        "    pub(crate) fn new(\n"
+        "        v_i64: i64,\n"
+        "        v_i32: i32,\n"
+        "        v_f64: f64,\n"
+        "        v_f32: f32,\n"
+        "        v_str: String,\n"
+        "        v_bool: bool,\n"
+        "    ) -> Self {\n"
+        "        let base = TestCxxClassDerivedObj::new(v_i64, v_i32, v_f64, v_f32);\n"
+        "        Self { base, v_str, v_bool }\n"
+        "    }\n"
+        "}"
+    ) in dd
     assert dd.endswith(
         "tvm_ffi::impl_object_upcast!(TestCxxClassDerivedDerived => TestCxxClassBase, "
         "TestCxxClassDerivedDerived => TestCxxClassDerived);"
@@ -989,5 +1090,5 @@ def test_cli_exits_non_zero_on_a_directive_error(
     )
     monkeypatch.setattr("sys.argv", ["tvm-ffi-stubgen", "--target", "rust", str(src)])
     assert stub_cli.__main__() == 1
-    src.write_text(f"{C.RUST_SYNTAX.directive('upcast')} testing.TestCxxClassBase -> X\n")
+    src.write_text(f"{C.RUST_SYNTAX.directive('typed-view')} testing.TestCxxClassBase -> X\n")
     assert stub_cli.__main__() == 1

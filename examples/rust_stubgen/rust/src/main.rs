@@ -16,12 +16,25 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-//! Use the stubgen-generated `IntPair` binding (see ../../README.md).
+//! Use the stubgen-generated `IntPair` and `IntRange` bindings (see ../../README.md).
 
 mod generated;
 
-use generated::rust_stubgen::{IntPair, IntRange, PairKind};
-use tvm_ffi::{Module, Result};
+use generated::rust_stubgen::{IntPair, IntRange, IntRangeObj, PairKind};
+use tvm_ffi::{Error, Module, ObjectArc, ObjectRefCore, Result, VALUE_ERROR};
+
+/// The hand-written constructor of `IntRange`: the `custom-new` directive in
+/// the generated file keeps the generator from emitting one.
+impl IntRange {
+    pub fn new(begin: i64, extent: i32) -> Result<Self> {
+        if extent < 0 {
+            return Err(Error::new(VALUE_ERROR, "IntRange extent must not be negative", ""));
+        }
+        let data = ObjectArc::new(IntRangeObj::new(begin, extent));
+        // SAFETY: `data` holds a freshly allocated `IntRangeObj`, the container type of `IntRange`.
+        Ok(unsafe { Self::from_data(data) })
+    }
+}
 
 /// Path of the C++ shared library built by CMake into `../build`.
 fn lib_path() -> String {
@@ -53,11 +66,15 @@ fn main() -> Result<()> {
         .try_into()?;
     println!("sum={sum}");
 
-    // `IntRange` has a reproducible layout: its fields are plain struct members.
-    let range: IntRange = tvm_ffi::cached_global_func!("rust_stubgen.IntRange")
-        .call_tuple((10i64, 5i64))?
-        .try_into()?;
+    // `IntRange` has a reproducible layout: it is allocated in Rust and its
+    // fields are plain struct members, on both sides of the ABI.
+    let range = IntRange::new(10, 5)?;
     println!("begin={} extent={}", range.begin, range.extent);
-    assert_eq!(range.begin + i64::from(range.extent), 15);
+    let end: i64 = tvm_ffi::cached_global_func!("rust_stubgen.IntRangeEnd")
+        .call_tuple((range.clone(),))?
+        .try_into()?;
+    println!("end={end}");
+    assert_eq!(end, 15);
+    assert!(IntRange::new(0, -1).is_err());
     Ok(())
 }

@@ -66,8 +66,6 @@ class IntRangeObj : public ffi::Object {
 
 class IntRange : public ffi::ObjectRef {
  public:
-  IntRange(int64_t begin, int32_t extent) { data_ = ffi::make_object<IntRangeObj>(begin, extent); }
-
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(IntRange, ffi::ObjectRef, IntRangeObj);
 };
 
@@ -84,8 +82,8 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def("rust_stubgen.IntPair",
            [](int64_t a, int64_t b, int32_t kind) { return IntPair(a, b, kind); })
       .def("rust_stubgen.IntPairSum", [](const IntPair& pair) { return pair->Sum(); })
-      .def("rust_stubgen.IntRange",
-           [](int64_t begin, int32_t extent) { return IntRange(begin, extent); });
+      .def("rust_stubgen.IntRangeEnd",
+           [](const IntRange& range) { return range->begin + range->extent; });
 }
 // [object.end]
 

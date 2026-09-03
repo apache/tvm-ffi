@@ -23,23 +23,29 @@ struct holds depends on the verdict of :mod:`tvm_ffi.stub.layout`:
 - *complete*: the layout is reproducible, so the struct mirrors every physical
   field at its real offset and width, public, borrowed directly. A ``const``
   assertion pins the struct's ``size_of`` / ``align_of`` to the reflected facts,
-  so a mirror rustc lays out differently fails to compile.
+  so a mirror rustc lays out differently fails to compile. The type is also
+  allocatable from Rust: ``<Leaf>Obj::new`` (crate-private) takes every
+  physical field root to leaf so derived allocators can chain to it, and the
+  wrapper's public ``new`` takes the same parameters and does one
+  ``ObjectArc::new``. A ``custom-new`` directive leaves the wrapper's ``new``
+  to hand-written code; ``<Leaf>Obj::new`` is still generated for it to call.
 - *opaque*: the struct embeds only its parent, and one accessor per reflected
   field reads through the C ABI getter. The bytes are never reproduced, so the
-  binding is correct for every registered type.
+  binding is correct for every registered type. Nothing allocates it.
 
 The two target-language rules the classifier leaves to its caller live here: a
 field without a Rust mirror (``Optional<Any>``, a ``Union``, ``void*``, ...)
 makes the type opaque and is read as ``Any``; an ``opaque`` directive vetoes a
 reproducible layout. ``field`` / ``nullable`` / ``enum`` directives shape the
 field types of both forms; where a directive names a scalar width, it is checked
-against the reflected field size at generation time.
+against the reflected field size at generation time. ``upcast`` appends typed
+views to the ancestor chain.
 
-Construction and behaviour go through the registered global functions,
-hand-written outside the markers. A builtin parent (``ffi.IntEnum``, say) has
-no ``<Leaf>Obj`` in the crate: the import section defines a header-only
-stand-in per builtin ancestor, so ``derive(Object)`` computes the registry's
-``TYPE_DEPTH``.
+Nothing here calls methods or packed constructors: behaviour goes through the
+registered global functions, hand-written outside the markers. A builtin parent
+(``ffi.IntEnum``, say) has no ``<Leaf>Obj`` in the crate: the import section
+defines a header-only stand-in per builtin ancestor, so ``derive(Object)``
+computes the registry's ``TYPE_DEPTH``.
 """
 
 from __future__ import annotations
@@ -60,6 +66,15 @@ if TYPE_CHECKING:
     from ..file_utils import CodeBlock
     from ..utils import InitConfig, NamedTypeSchema, ObjectInfo, Options
     from .directives import EnumSpec
+
+
+def _call_lines(open_: str, items: list[str], close: str) -> list[str]:
+    """``open_ + items + close`` on one line, or one item per line when it would overflow."""
+    line = f"{open_}{', '.join(items)}{close}"
+    if len(line) <= C_RUST.RUST_MAX_WIDTH:
+        return [line]
+    indent = open_[: len(open_) - len(open_.lstrip())]
+    return [open_, *[f"{indent}    {item}," for item in items], f"{indent}{close}"]
 
 
 def _check_width(target: str, field: NamedTypeSchema, rust_type: str, width: int) -> None:
@@ -310,12 +325,14 @@ class _ObjectRenderer:
         ]
 
     def _upcast_lines(self) -> list[str]:
-        """``impl_object_upcast!`` from the wrapper to every ancestor's wrapper."""
+        """``impl_object_upcast!`` to every ancestor's wrapper, then the ``upcast`` directives."""
         targets = [
             self.imports.record(self._generated_type_path(key))
             for key in self.info.ancestors
             if self._generated(key)
         ]
+        for view in self.imports.directives.upcasts.get(self.type_key, []):
+            targets.append(self.imports.record(view) if "::" in view else view)
         if not targets:
             return []
         pairs = ", ".join(f"{self.leaf} => {target}" for target in targets)
@@ -353,6 +370,96 @@ class _ObjectRenderer:
             f"    assert!(::core::mem::align_of::<{self.obj_struct}>() == {verdict.alignment});",
             "};",
         ]
+
+    # --- allocators --------------------------------------------------------
+
+    def _allocator_params(self, key: str, info: ObjectInfo) -> list[tuple[str, str]]:
+        """``(field, type)`` of every physical field root to leaf, as ``<key>Obj::new`` takes them."""
+        parent = info.parent_type_key
+        inherited: list[tuple[str, str]] = []
+        if parent is not None and self._generated(parent):
+            inherited = self._allocator_params(parent, object_info_from_type_key(parent))
+        return self._level_params(key, info, inherited)
+
+    def _level_params(
+        self, key: str, info: ObjectInfo, inherited: list[tuple[str, str]]
+    ) -> list[tuple[str, str]]:
+        """Extend the parent's parameters with ``key``'s own fields by offset.
+
+        A ``field`` directive on ``<key>.<field>`` for an inherited field narrows
+        that parameter (``tirx.Add.ty -> PrimType``); the allocator body upcasts
+        it with ``.into()`` when handing it to the parent.
+        """
+        params = [(name, self._narrowed(key, name, rust_type)) for name, rust_type in inherited]
+        for field in sorted(info.fields, key=lambda f: f.offset or 0):
+            mirror = self._field_mirror(key, field, self.imports)
+            assert mirror is not None  # complete: every field along the chain has a mirror
+            params.append((field.name, mirror))
+        return params
+
+    def _narrowed(self, key: str, field_name: str, rust_type: str) -> str:
+        override = self.imports.directives.field_types.get(f"{key}.{field_name}")
+        if override is None:
+            return rust_type
+        return self.imports.record(override) if "::" in override else override
+
+    def _fn_lines(
+        self, head: str, params: list[tuple[str, str]], call: tuple[str, list[str]], result: str
+    ) -> list[str]:
+        """Render ``<head>(<params>) -> Self { let <call>; <result> }`` inside an ``impl`` block."""
+        plist = [f"{rust_ident(name)}: {rust_type}" for name, rust_type in params]
+        binding, args = call
+        return [
+            *_call_lines(f"    {head}(", plist, ") -> Self {"),
+            *_call_lines(f"        let {binding}(", args, ");"),
+            f"        {result}",
+            "    }",
+        ]
+
+    def _allocator_sections(self, base: str, has_parent: bool) -> list[list[str]]:
+        """``<Leaf>Obj::new`` and, unless ``custom-new`` reserves it, the wrapper's ``new``.
+
+        Both take every physical field root to leaf.
+        """
+        inherited: list[tuple[str, str]] = []
+        if has_parent:
+            parent = self.info.parent_type_key
+            assert parent is not None
+            inherited = self._allocator_params(parent, object_info_from_type_key(parent))
+        params = self._level_params(self.type_key, self.info, inherited)
+        to_parent = [
+            f"{rust_ident(name)}.into()" if rust_type != parent_type else rust_ident(name)
+            for (name, rust_type), (_, parent_type) in zip(params, inherited)
+        ]
+        own = [rust_ident(f.name) for f in sorted(self.info.fields, key=lambda f: f.offset or 0)]
+        forward = [rust_ident(name) for name, _ in params]
+        sections = [
+            [
+                f"impl {self.obj_struct} {{",
+                *self._fn_lines(
+                    "pub(crate) fn new",
+                    params,
+                    (f"base = {base}::new", to_parent),
+                    f"Self {{ {', '.join(['base', *own])} }}",
+                ),
+                "}",
+            ]
+        ]
+        if self.type_key not in self.imports.directives.custom_new:
+            sections.append(
+                [
+                    f"impl {self.leaf} {{",
+                    "    /// Lossless complete-field allocation.",
+                    *self._fn_lines(
+                        "pub fn new",
+                        params,
+                        (f"obj = {self.obj_struct}::new", forward),
+                        "Self { data: ObjectArc::new(obj) }",
+                    ),
+                    "}",
+                ]
+            )
+        return sections
 
     def body(self) -> list[str]:
         """Build the Rust source lines for the object."""
@@ -401,6 +508,8 @@ class _ObjectRenderer:
                     "}",
                 ]
             )
+        elif verdict.is_complete:
+            sections += self._allocator_sections(base, has_parent)
         upcasts = self._upcast_lines()
         if upcasts:
             sections.append(upcasts)

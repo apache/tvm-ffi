@@ -99,6 +99,10 @@ impl IntPairObj {
 }
 // tvm-ffi-stubgen(end)
 
+// `IntRange::new` is hand-written in main.rs (it validates the extent), so the
+// generator does not emit one; it still emits `IntRangeObj::new` for it to call.
+// tvm-ffi-stubgen(custom-new): rust_stubgen.IntRange
+
 // tvm-ffi-stubgen(begin): object/rust_stubgen.IntRange
 /// Complete: reflected fields fill [24, 40) exactly (alignment padding [36, 40)).
 #[repr(C)]
@@ -126,6 +130,13 @@ impl Deref for IntRange {
     type Target = IntRangeObj;
     fn deref(&self) -> &IntRangeObj {
         &self.data
+    }
+}
+
+impl IntRangeObj {
+    pub(crate) fn new(begin: i64, extent: i32) -> Self {
+        let base = Object::new();
+        Self { base, begin, extent }
     }
 }
 // tvm-ffi-stubgen(end)
