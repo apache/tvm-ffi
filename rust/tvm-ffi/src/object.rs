@@ -144,6 +144,21 @@ pub unsafe trait ObjectRefCore: Sized + Clone {
                 == ObjectArc::as_raw(Other::data(other)).cast::<()>()
         }
     }
+
+    /// Borrow the underlying object as node type `N` when its runtime type matches.
+    ///
+    /// Unlike [`ObjectRefCast::try_cast`], this method neither consumes the
+    /// reference nor changes the object's reference count. The returned node
+    /// cannot outlive `self`.
+    #[inline(always)]
+    fn as_node<N: ObjectCore>(&self) -> Option<&N> {
+        let object = unsafe { ObjectArc::as_raw(Self::data(self)) };
+        let type_index = unsafe { (*object.cast::<TVMFFIObject>()).type_index };
+        if !is_instance_of::<N>(type_index) {
+            return None;
+        }
+        Some(unsafe { &*object.cast::<N>() })
+    }
 }
 
 /// An owning, hashable identity key for an FFI object.
@@ -216,6 +231,11 @@ pub fn is_instance_of<Target: ObjectCore>(object_type_index: i32) -> bool {
     let target_type_index = Target::type_index();
     if object_type_index == target_type_index {
         return true;
+    }
+    // A final type cannot have a separately registered subtype. Keep common
+    // borrowed checks, such as `IntImmObj`, to one integer comparison.
+    if Target::TYPE_FINAL {
+        return false;
     }
     let object_begin = TypeIndex::kTVMFFIStaticObjectBegin as i32;
     // Only object types participate in the type hierarchy.

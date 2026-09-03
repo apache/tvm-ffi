@@ -54,6 +54,7 @@ struct TestBase {
 #[repr(C)]
 #[derive(Object)]
 #[type_key = "testing.TestObjectDerived"]
+#[type_final]
 struct TestDerivedObj {
     base: TestBaseObj,
     extra: i64,
@@ -140,6 +141,26 @@ fn test_upcast_downcast_roundtrip() {
     assert_eq!(delete_counter.load(Ordering::Relaxed), 0);
     drop(derived2);
     assert_eq!(delete_counter.load(Ordering::Relaxed), 1);
+}
+
+#[test]
+fn test_borrowed_node_cast_preserves_reference_count() {
+    let delete_counter = Arc::new(AtomicU32::new(0));
+    let base: TestBase = new_derived(7, 8, delete_counter.clone())
+        .try_cast()
+        .unwrap();
+    let strong_count = ObjectArc::strong_count(TestBase::data(&base));
+
+    let derived = base.as_node::<TestDerivedObj>().unwrap();
+    assert_eq!(derived.base.value, 7);
+    assert_eq!(derived.extra, 8);
+    let base_node = base.as_node::<TestBaseObj>().unwrap();
+    assert_eq!(base_node.value, 7);
+    assert_eq!(ObjectArc::strong_count(TestBase::data(&base)), strong_count);
+
+    let base_only = new_base(1, delete_counter.clone());
+    assert!(base_only.as_node::<TestDerivedObj>().is_none());
+    assert_eq!(ObjectArc::strong_count(TestBase::data(&base_only)), 1);
 }
 
 #[test]
