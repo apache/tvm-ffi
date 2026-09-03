@@ -1105,9 +1105,9 @@ def test_collect_files_filters_by_generator_exts(tmp_path: Path) -> None:
 
 def test_generator_registry_names() -> None:
     """``--target`` choices follow the registered generators."""
-    assert generator_names() == ["python"]
-    with pytest.raises(ValueError, match="Known generators: python"):
-        get_generator("rust")
+    assert generator_names() == ["python", "rust"]
+    with pytest.raises(ValueError, match="Known generators: python, rust"):
+        get_generator("zig")
 
 
 def test_codeblock_from_begin_line_directive() -> None:

@@ -42,6 +42,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from . import consts as C
 from .python_generator import PythonGenerator
+from .rust_generator import RustGenerator
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -193,6 +194,7 @@ class Generator(Protocol):
 
 _GENERATORS: dict[str, Generator] = {
     "python": PythonGenerator(),
+    "rust": RustGenerator(),
 }
 
 
