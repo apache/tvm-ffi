@@ -1151,7 +1151,7 @@ def test_fileinfo_from_file_keeps_directive_lines(tmp_path: Path) -> None:
 
 
 def test_stage_3_routes_directives_by_generator_declaration(tmp_path: Path) -> None:
-    """Reserved names stay with the pipeline, declared ones reach the generator, others error."""
+    """Pipeline-owned names stay in the pipeline; declared names reach the generator."""
     path = tmp_path / "demo.py"
     ty_map_directive = CodeBlock(
         kind="directive",
@@ -1184,8 +1184,8 @@ def test_stage_3_routes_directives_by_generator_declaration(tmp_path: Path) -> N
             syntax=C.PYTHON_SYNTAX,
         )
 
-    # `ty-map` is reserved: `_stage_1` consumes it and `_stage_3` never asks the generator.
-    assert "ty-map" in C.RESERVED_DIRECTIVES
+    # `ty-map` is pipeline-owned: `_stage_1` consumes it and `_stage_3` skips it.
+    assert "ty-map" in C.PIPELINE_DIRECTIVE_KINDS
     ty_map: dict[str, str] = {}
     _stage_1(_file_info(), ty_map)
     assert ty_map == {"demo.Foo": "mapped.Foo"}

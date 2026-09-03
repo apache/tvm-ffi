@@ -226,7 +226,7 @@ def _stage_3(  # noqa: PLR0912
         if code.kind != "directive":
             continue
         name, payload = code.param
-        if name in C.RESERVED_DIRECTIVES:
+        if name in C.PIPELINE_DIRECTIVE_KINDS:
             continue  # consumed by `_stage_1`
         if name not in generator.directive_kinds:
             raise ValueError(f"Unknown directive `{name}` at line {code.lineno_start}")

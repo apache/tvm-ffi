@@ -84,9 +84,10 @@ SYNTAX_BY_EXT: dict[str, MarkerSyntax] = {
     ".rs": RUST_SYNTAX,
 }
 
-#: One-line directive names the pipeline consumes itself. Every other name must be
-#: declared by the active generator (``Generator.directive_kinds``).
-RESERVED_DIRECTIVES: frozenset[str] = frozenset({"ty-map"})
+#: One-line directive names consumed by the language-neutral pipeline. Generators
+#: must not declare these names; every other name must be declared by the active
+#: generator (``Generator.directive_kinds``).
+PIPELINE_DIRECTIVE_KINDS: frozenset[str] = frozenset({"ty-map"})
 
 STUB_BLOCK_KINDS: TypeAlias = Literal[
     "global",

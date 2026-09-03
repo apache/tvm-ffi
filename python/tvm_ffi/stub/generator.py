@@ -76,8 +76,8 @@ class Generator(Protocol):
     syntax: C.MarkerSyntax
 
     #: Names of the one-line directives (``<comment> tvm-ffi-stubgen(<name>): <payload>``)
-    #: this generator consumes. Names in :data:`consts.RESERVED_DIRECTIVES` belong to the
-    #: pipeline; any other undeclared name is an error.
+    #: this generator consumes. Names in :data:`consts.PIPELINE_DIRECTIVE_KINDS` belong
+    #: to the pipeline; any other undeclared name is an error.
     directive_kinds: frozenset[str]
 
     def default_ty_map(self) -> dict[str, str]:
