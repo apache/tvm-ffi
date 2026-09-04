@@ -804,6 +804,23 @@ def test_render_complete_span_and_prim_type() -> None:
     assert "tvm_ffi::DLDataType" in _uses(imports)
 
 
+def test_render_complete_enum_field() -> None:
+    """An `enum` directive types the mirrored field; the newtype brings its own `Result` import."""
+    info = _info(
+        "demo.Pair",
+        (_field("a", "int", 24, 8), _field("kind", "int", 32, 4)),
+        total_size=40,
+        is_final=True,
+    )
+    imports = RUST.new_imports()
+    RUST.add_directive(imports, "enum", "demo.Pair.kind -> Kind(i32) { A=0, B=1 }", 1)
+    text, imports = _render(info, imports)
+    assert "    pub kind: Kind,\n" in text
+    assert "    pub fn new(a: i64, kind: Kind) -> Self {" in text
+    assert {"tvm_ffi::Result", "tvm_ffi::Error", "tvm_ffi::VALUE_ERROR"} <= _uses(imports)
+    assert "tvm_ffi::FieldGetter" not in _uses(imports)
+
+
 def test_complete_optional_field_mirrors() -> None:
     """`Optional<T>` fields mirror their C++ layout: a 16-byte cell or a nullable pointer."""
     info = _info(

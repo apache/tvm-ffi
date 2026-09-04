@@ -281,6 +281,7 @@ class _ObjectRenderer:
         """Render the open integer newtype an ``enum`` directive declares."""
         error = self.imports.record("tvm_ffi::Error")
         value_error = self.imports.record("tvm_ffi::VALUE_ERROR")
+        result = self.imports.record("tvm_ffi::Result")
         return [
             "#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]",
             "#[repr(transparent)]",
@@ -299,7 +300,7 @@ class _ObjectRenderer:
             "",
             f"impl TryFrom<i64> for {spec.name} {{",
             f"    type Error = {error};",
-            "    fn try_from(value: i64) -> Result<Self> {",
+            f"    fn try_from(value: i64) -> {result}<Self> {{",
             f"        {spec.repr}::try_from(value).map(Self).map_err(|_| {{",
             f'            {error}::new({value_error}, &format!("{spec.name} value {{value}} does not fit '
             f'{spec.repr}"), "")',

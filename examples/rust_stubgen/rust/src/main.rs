@@ -49,25 +49,23 @@ fn lib_path() -> String {
 }
 
 fn main() -> Result<()> {
-    // Load the C++ library so `IntPair` is registered with the FFI type registry.
-    // Keep it alive for as long as the bindings are used.
+    // Load the C++ library so the objects are registered with the FFI type
+    // registry. Keep it alive for as long as the bindings are used.
     let _lib = Module::load_from_file(lib_path())?;
 
-    // The object is opaque to Rust: it is constructed by the registered C++
-    // function and its fields are read through the reflection getters.
-    let pair: IntPair = tvm_ffi::cached_global_func!("rust_stubgen.IntPair")
-        .call_tuple((1i64, 2i64, i64::from(PairKind::Ordered.as_raw())))?
-        .try_into()?;
-    println!("a={} b={} kind={:?}", pair.a()?, pair.b()?, pair.kind()?);
-    assert_eq!(pair.kind()?, PairKind::Ordered);
+    // Both objects have a reproducible layout: they are allocated in Rust and
+    // their fields are plain struct members, on both sides of the ABI.
+    let pair = IntPair::new(1, 2, PairKind::Ordered);
+    println!("a={} b={} kind={:?}", pair.a, pair.b, pair.kind);
+    assert_eq!(pair.kind, PairKind::Ordered);
 
     let sum: i64 = tvm_ffi::cached_global_func!("rust_stubgen.IntPairSum")
         .call_tuple((pair.clone(),))?
         .try_into()?;
     println!("sum={sum}");
+    assert_eq!(sum, 3);
 
-    // `IntRange` has a reproducible layout: it is allocated in Rust and its
-    // fields are plain struct members, on both sides of the ABI.
+    // `IntRange::new` is hand-written above (`custom-new`), so it can validate.
     let range = IntRange::new(10, 5)?;
     println!("begin={} extent={}", range.begin, range.extent);
     let end: i64 = tvm_ffi::cached_global_func!("rust_stubgen.IntRangeEnd")

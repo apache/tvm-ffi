@@ -23,16 +23,14 @@
 // tvm-ffi-stubgen(begin): import-section
 use std::ops::Deref;
 use tvm_ffi::Error;
-use tvm_ffi::FieldGetter;
 use tvm_ffi::Object;
 use tvm_ffi::ObjectArc;
-use tvm_ffi::ObjectCore;
 use tvm_ffi::Result;
 use tvm_ffi::VALUE_ERROR;
 // tvm-ffi-stubgen(end)
 
-// The `kind` field is an integer on the C++ side; this directive gives it an
-// open integer newtype in Rust and makes the accessor return it.
+// The `kind` field is an integer on the C++ side; this directive types it as an
+// open integer newtype in Rust.
 // tvm-ffi-stubgen(enum): rust_stubgen.IntPair.kind -> PairKind(i32) { Unordered=0, Ordered=1 }
 
 // tvm-ffi-stubgen(begin): object/rust_stubgen.IntPair
@@ -61,14 +59,22 @@ impl TryFrom<i64> for PairKind {
     }
 }
 
-/// Opaque: bytes [44, 56) of [24, 56) are not accounted for by reflected fields. Fields are read through the C ABI getters.
+/// Complete: reflected fields fill [24, 48) exactly (alignment padding [44, 48)).
 #[repr(C)]
 #[derive(tvm_ffi::derive::Object)]
 #[type_key = "rust_stubgen.IntPair"]
 #[type_final]
 pub struct IntPairObj {
     base: Object,
+    pub a: i64,
+    pub b: i64,
+    pub kind: PairKind,
 }
+
+const _: () = {
+    assert!(::core::mem::size_of::<IntPairObj>() == 48);
+    assert!(::core::mem::align_of::<IntPairObj>() == 8);
+};
 
 #[repr(C)]
 #[derive(tvm_ffi::derive::ObjectRef, Clone)]
@@ -84,17 +90,17 @@ impl Deref for IntPair {
 }
 
 impl IntPairObj {
-    pub fn a(&self) -> Result<i64> {
-        FieldGetter::new(Self::type_index(), "a")?.get(self)
+    pub(crate) fn new(a: i64, b: i64, kind: PairKind) -> Self {
+        let base = Object::new();
+        Self { base, a, b, kind }
     }
+}
 
-    pub fn b(&self) -> Result<i64> {
-        FieldGetter::new(Self::type_index(), "b")?.get(self)
-    }
-
-    pub fn kind(&self) -> Result<PairKind> {
-        let raw: i64 = FieldGetter::new(Self::type_index(), "kind")?.get(self)?;
-        PairKind::try_from(raw)
+impl IntPair {
+    /// Lossless complete-field allocation.
+    pub fn new(a: i64, b: i64, kind: PairKind) -> Self {
+        let obj = IntPairObj::new(a, b, kind);
+        Self { data: ObjectArc::new(obj) }
     }
 }
 // tvm-ffi-stubgen(end)

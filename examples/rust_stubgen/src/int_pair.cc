@@ -18,7 +18,7 @@
  */
 /*!
  * \file int_pair.cc
- * \brief A tvm-ffi library that registers one object for the Rust stub generator.
+ * \brief A tvm-ffi library that registers two objects for the Rust stub generator.
  */
 #include <tvm/ffi/tvm_ffi.h>
 
@@ -29,9 +29,9 @@ namespace rust_stubgen {
 namespace ffi = tvm::ffi;
 
 // [object.begin]
-// A polymorphic object: the vtable in front of the object header means Rust
-// cannot mirror its bytes, so the generated binding reads every field through
-// the reflection getters and construction stays on the C++ side.
+// Plain data objects: every byte is accounted for by a reflected field, so the
+// generated bindings mirror the layout; Rust allocates them and reads the fields
+// directly, and the registered functions below read them back.
 class IntPairObj : public ffi::Object {
  public:
   int64_t a;
@@ -39,21 +39,16 @@ class IntPairObj : public ffi::Object {
   int32_t kind;
 
   IntPairObj(int64_t a, int64_t b, int32_t kind) : a(a), b(b), kind(kind) {}
-  virtual ~IntPairObj() = default;
-  virtual int64_t Sum() const { return a + b; }
+  int64_t Sum() const { return a + b; }
 
   TVM_FFI_DECLARE_OBJECT_INFO_FINAL("rust_stubgen.IntPair", IntPairObj, ffi::Object);
 };
 
 class IntPair : public ffi::ObjectRef {
  public:
-  IntPair(int64_t a, int64_t b, int32_t kind) { data_ = ffi::make_object<IntPairObj>(a, b, kind); }
-
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(IntPair, ffi::ObjectRef, IntPairObj);
 };
 
-// A plain data object: every byte is accounted for by a reflected field, so the
-// generated binding mirrors the layout and Rust reads the fields directly.
 class IntRangeObj : public ffi::Object {
  public:
   int64_t begin;
@@ -79,8 +74,6 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def_ro("begin", &IntRangeObj::begin, "the first value")
       .def_ro("extent", &IntRangeObj::extent, "the number of values");
   refl::GlobalDef()
-      .def("rust_stubgen.IntPair",
-           [](int64_t a, int64_t b, int32_t kind) { return IntPair(a, b, kind); })
       .def("rust_stubgen.IntPairSum", [](const IntPair& pair) { return pair->Sum(); })
       .def("rust_stubgen.IntRangeEnd",
            [](const IntRange& range) { return range->begin + range->extent; });

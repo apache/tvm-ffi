@@ -22,18 +22,18 @@ into Rust bindings. This example registers two objects in `src/int_pair.cc`
 and lets CMake regenerate `rust/src/generated/` after every build.
 
 Every object gets a `#[repr(C)]` wrapper, a reference type, `Deref`, and the
-upcasts along its ancestor chain. What the wrapper holds depends on whether the
-reflected fields account for every byte of the object:
+upcasts along its ancestor chain. Both objects here are plain data, so their
+reflected fields account for every byte and the bindings are *complete*: the
+struct mirrors the fields at their real offsets and widths, a `const` assertion
+pins its size and alignment to the reflected facts, and a generated `new`
+allocates the object in Rust. `main.rs` builds an `IntPair` and an `IntRange`
+that way, reads `pair.a` directly, and hands them to C++ functions that read
+them back.
 
-- `rust_stubgen.IntRange` does, so its binding is *complete*: the struct mirrors
-  the fields at their real offsets and widths, and Rust reads `range.begin`
-  directly. A `const` assertion pins the struct's size and alignment to the
-  reflected facts. A generated `new` allocates it in Rust from every field; a
-  C++ function then reads it back.
-- `rust_stubgen.IntPair` has a vtable in front of the object header, so its
-  binding is *opaque*: the struct embeds only the parent and every field is read
-  through an accessor that calls the C ABI getter. It is constructed by a
-  registered global function.
+An object whose layout cannot be reproduced (a polymorphic one, say, with a
+vtable in front of the object header) is bound *opaquely* instead: the struct
+embeds only the parent, every field is read through an accessor that calls the
+C ABI getter, and construction stays on the C++ side.
 
 A builtin parent such as `ffi.IntEnum` has no `<Leaf>Obj` in the crate; the
 import section defines a header-only stand-in per builtin ancestor so the
