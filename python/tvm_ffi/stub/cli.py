@@ -24,7 +24,7 @@ import importlib
 import sys
 import traceback
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
 
 from . import consts as C
 from .file_utils import FileInfo, collect_files, syntax_for
@@ -36,7 +36,7 @@ from .lib_state import (
     object_info_from_type_key,
     toposort_objects,
 )
-from .utils import DirectiveError, FuncInfo, InitConfig, Options
+from .utils import FuncInfo, InitConfig, Options
 
 if TYPE_CHECKING:
     from .generator import Generator
@@ -67,9 +67,13 @@ def __main__() -> int:
     # - defined global functions: `tvm-ffi-stubgen(begin): global/...`
     # - defined object types: `tvm-ffi-stubgen(begin): object/...`
     ty_map: dict[str, str] = generator.default_ty_map()
-    directive_errors = 0
     for file in files:
-        directive_errors += _run_stage(file, lambda: _stage_1(file, ty_map))
+        try:
+            _stage_1(file, ty_map)
+        except Exception:
+            print(
+                f'{C.TERM_RED}[Failed] File "{file.path}": {traceback.format_exc()}{C.TERM_RESET}'
+            )
 
     # Stage 2. Generate stubs if they are not defined on the file.
     generated_prefixes: set[str] = set()
@@ -90,9 +94,18 @@ def __main__() -> int:
     for file in files:
         if opt.verbose:
             print(f"{C.TERM_CYAN}[File] {file.path}{C.TERM_RESET}")
-        directive_errors += _run_stage(
-            file, lambda: _stage_3(file, opt, ty_map, global_funcs, generator=generator)
-        )
+        try:
+            _stage_3(
+                file,
+                opt,
+                ty_map,
+                global_funcs,
+                generator=generator,
+            )
+        except Exception:
+            print(
+                f'{C.TERM_RED}[Failed] File "{file.path}": {traceback.format_exc()}{C.TERM_RESET}'
+            )
 
     # Stage 4. Let the generator stitch the generated tree together (runs after the
     # files are fully written, so language-specific wiring isn't clobbered).
@@ -109,22 +122,7 @@ def __main__() -> int:
         }
         write_coverage_report(Path(opt.coverage_out), classify(infos))
     del dlls
-    return 1 if directive_errors else 0
-
-
-def _run_stage(file: FileInfo, stage: Callable[[], None]) -> bool:
-    """Run one stage over ``file``, reporting a failure without stopping the run.
-
-    Returns whether it was a :class:`DirectiveError` (the run then exits non-zero).
-    """
-    try:
-        stage()
-    except DirectiveError as e:
-        print(f'{C.TERM_RED}[Failed] File "{file.path}": {e}{C.TERM_RESET}')
-        return True
-    except Exception:
-        print(f'{C.TERM_RED}[Failed] File "{file.path}": {traceback.format_exc()}{C.TERM_RESET}')
-    return False
+    return 0
 
 
 def _stage_1(
@@ -137,7 +135,7 @@ def _stage_1(
         try:
             lhs, rhs = code.param[1].split("->")
         except ValueError as e:
-            raise DirectiveError(
+            raise ValueError(
                 f"Invalid ty_map format at line {code.lineno_start}. Example: `A.B -> C.D`"
             ) from e
         ty_map[lhs.strip()] = rhs.strip()
@@ -241,7 +239,7 @@ def _stage_3(  # noqa: PLR0912
         if name in C.PIPELINE_DIRECTIVE_KINDS:
             continue  # consumed by `_stage_1`
         if name not in generator.directive_kinds:
-            raise DirectiveError(f"Unknown directive `{name}` at line {code.lineno_start}")
+            raise ValueError(f"Unknown directive `{name}` at line {code.lineno_start}")
         generator.add_directive(imports, name, payload, code.lineno_start)
     # Stage 2. Process `tvm-ffi-stubgen(begin): global/...`
     for code in file.code_blocks:

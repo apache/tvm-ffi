@@ -44,7 +44,6 @@ from typing import TYPE_CHECKING
 from .. import consts as C
 from ..layout import Verdict, classify
 from ..lib_state import object_info_from_type_key
-from ..utils import DirectiveError
 from . import consts as C_RUST
 from .utils import RustImports, builtin_mirror_name, render_rust_type, rust_ident
 
@@ -68,7 +67,7 @@ def _call_lines(open_: str, items: list[str], close: str) -> list[str]:
 def _check_width(target: str, field: NamedTypeSchema, rust_type: str, width: int) -> None:
     """Reject a directive whose scalar type does not match the reflected field size."""
     if field.size is not None and field.size != width:
-        raise DirectiveError(
+        raise ValueError(
             f"Directive on `{target}` maps a {field.size}-byte field to `{rust_type}` "
             f"({width} bytes)"
         )
@@ -174,7 +173,7 @@ class _ObjectRenderer:
         )
         return verdicts[self.type_key]
 
-    # --- field types ---------------------------------------------------------
+    # --- field types -------------------------------------------------------
 
     def _field_mirror(self, owner: str, field: NamedTypeSchema, imports: RustImports) -> str | None:
         """Render the ``#[repr(C)]`` mirror type of ``field``, or ``None``.
@@ -202,7 +201,7 @@ class _ObjectRenderer:
             return None
         if target in directives.nullable and not mirror.startswith("Option<"):
             if field.size not in (None, C_RUST.RUST_POINTER_SIZE):
-                raise DirectiveError(
+                raise ValueError(
                     f"`nullable` directive on `{target}`: the field is {field.size} bytes, "
                     "not a pointer-sized object reference"
                 )
@@ -237,6 +236,8 @@ class _ObjectRenderer:
             return f"{imports.record(C_RUST.RUST_OPTIONAL_PATH)}<{inner}>"
         return f"Option<{inner}>"
 
+    # --- pieces ------------------------------------------------------------
+
     def _accessor_lines(self, field: NamedTypeSchema) -> list[str]:
         """One ``pub fn <field>(&self) -> Result<T>`` through the C ABI getter.
 
@@ -269,13 +270,7 @@ class _ObjectRenderer:
             ]
         if target in directives.nullable and not rust_type.startswith("Option<"):
             rust_type = f"Option<{rust_type}>"
-        return [
-            f"pub fn {name}(&self) -> Result<{rust_type}> {{",
-            f"    {getter}.get(self)",
-            "}",
-        ]
-
-    # --- pieces ------------------------------------------------------------
+        return [f"pub fn {name}(&self) -> Result<{rust_type}> {{", f"    {getter}.get(self)", "}"]
 
     def _enum_lines(self, spec: EnumSpec) -> list[str]:
         """Render the open integer newtype an ``enum`` directive declares."""
@@ -460,8 +455,8 @@ class _ObjectRenderer:
         self.imports.record("tvm_ffi::ObjectArc")
         base, has_parent = self._base_type()
         fields = self.info.fields
-        accessors = bool(fields) and not verdict.is_complete
-        if accessors:
+        has_accessors = bool(fields) and not verdict.is_complete
+        if has_accessors:
             self.imports.record("tvm_ffi::ObjectCore")  # `Self::type_index()`
             self.imports.record("tvm_ffi::FieldGetter")
             self.imports.record("tvm_ffi::Result")
@@ -486,16 +481,16 @@ class _ObjectRenderer:
         sections.append(self._deref_lines(self.leaf, self.obj_struct, "data"))
         if has_parent:
             sections.append(self._deref_lines(self.obj_struct, base, "base"))
-        if accessors:
-            lines_: list[str] = []
+        if has_accessors:
+            accessors: list[str] = []
             for i, field in enumerate(fields):
                 if i:
-                    lines_.append("")
-                lines_ += self._accessor_lines(field)
+                    accessors.append("")
+                accessors += self._accessor_lines(field)
             sections.append(
                 [
                     f"impl {self.obj_struct} {{",
-                    *[f"    {line}" if line else "" for line in lines_],
+                    *[f"    {line}" if line else "" for line in accessors],
                     "}",
                 ]
             )

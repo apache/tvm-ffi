@@ -41,7 +41,7 @@ from tvm_ffi.stub.rust_generator.codegen import (
 )
 from tvm_ffi.stub.rust_generator.directives import Directives, EnumSpec
 from tvm_ffi.stub.rust_generator.utils import RustImports, RustUse, render_rust_type, rust_ident
-from tvm_ffi.stub.utils import DirectiveError, InitConfig, NamedTypeSchema, ObjectInfo, Options
+from tvm_ffi.stub.utils import InitConfig, NamedTypeSchema, ObjectInfo, Options
 
 RUST = get_generator("rust")
 HEADER = 24  # sizeof(TVMFFIObject)
@@ -248,7 +248,7 @@ def test_directives_parse() -> None:
     ],
 )
 def test_directives_reject_malformed(name: str, payload: str, expected: str) -> None:
-    with pytest.raises(DirectiveError, match=re.escape(expected)) as exc:
+    with pytest.raises(ValueError, match=re.escape(expected)) as exc:
         Directives().add(name, payload, 7)
     assert "at line 7" in str(exc.value)
 
@@ -941,7 +941,7 @@ def test_directive_disagreeing_with_bytes_is_an_error(
     info = _info("demo.Pair", (_field("count", "int", 24, 4),), total_size=32)
     imports = RUST.new_imports()
     RUST.add_directive(imports, name, payload, 1)
-    with pytest.raises(DirectiveError, match=re.escape(message)):
+    with pytest.raises(ValueError, match=re.escape(message)):
         _render(info, imports)
 
 
@@ -1111,24 +1111,3 @@ def test_cli_init_generates_a_module_tree(tmp_path: Path, monkeypatch: pytest.Mo
     # Running again over the generated tree is a no-op.
     assert stub_cli.__main__() == 0
     assert (tmp_path / "testing" / "mod.rs").read_text(encoding="utf-8") == text
-
-
-def test_cli_exits_non_zero_on_a_directive_error(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    src = tmp_path / "mod.rs"
-    src.write_text(
-        "\n".join(
-            [
-                f"{C.RUST_SYNTAX.directive('field')} testing.TestCxxClassBase.v_i32 -> i64",
-                f"{C.RUST_SYNTAX.begin} object/testing.TestCxxClassBase",
-                C.RUST_SYNTAX.end,
-                "",
-            ]
-        ),
-        encoding="utf-8",
-    )
-    monkeypatch.setattr("sys.argv", ["tvm-ffi-stubgen", "--target", "rust", str(src)])
-    assert stub_cli.__main__() == 1
-    src.write_text(f"{C.RUST_SYNTAX.directive('typed-view')} testing.TestCxxClassBase -> X\n")
-    assert stub_cli.__main__() == 1

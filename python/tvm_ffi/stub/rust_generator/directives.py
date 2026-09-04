@@ -38,8 +38,6 @@ from __future__ import annotations
 import dataclasses
 import re
 
-from ..utils import DirectiveError
-
 _ENUM_RE = re.compile(
     r"^(?P<target>\S+)\s*->\s*(?P<name>[A-Za-z_]\w*)\((?P<repr>[iu](?:8|16|32|64))\)"
     r"\s*(?:\{(?P<body>[^{}]*)\})?$"
@@ -68,7 +66,7 @@ class Directives:
     custom_new: set[str] = dataclasses.field(default_factory=set)
 
     def add(self, name: str, payload: str, lineno: int) -> None:
-        """Parse and store one directive; raise :class:`DirectiveError` when malformed."""
+        """Parse and store one directive; raise ``ValueError`` on a malformed payload."""
         if name == "field":
             lhs, rust_type = _split_arrow(name, payload, lineno, "<type_key>.<field> -> <RustType>")
             self.field_types[_field_target(name, lhs, lineno)] = rust_type
@@ -85,11 +83,11 @@ class Directives:
         elif name == "custom-new":
             self.custom_new.add(_type_target(name, payload, lineno))
         else:
-            raise DirectiveError(f"Unknown directive `{name}` at line {lineno}")
+            raise ValueError(f"Unknown directive `{name}` at line {lineno}")
 
 
-def _invalid(name: str, lineno: int, expected: str) -> DirectiveError:
-    return DirectiveError(f"Invalid `{name}` directive at line {lineno}. Expected `{expected}`")
+def _invalid(name: str, lineno: int, expected: str) -> ValueError:
+    return ValueError(f"Invalid `{name}` directive at line {lineno}. Expected `{expected}`")
 
 
 def _type_target(name: str, text: str, lineno: int) -> str:

@@ -35,10 +35,6 @@ if TYPE_CHECKING:
     from tvm_ffi.core import TypeField
 
 
-class DirectiveError(ValueError):
-    """A directive is malformed, unknown, or contradicts reflection; the run exits non-zero."""
-
-
 def _parse_type_schema(raw: str | dict[str, Any]) -> TypeSchema:
     """Parse a type schema from either a JSON string or an already-parsed dict."""
     if isinstance(raw, dict):
