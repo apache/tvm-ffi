@@ -20,7 +20,7 @@
 
 mod generated;
 
-use generated::rust_stubgen::{IntPair, PairKind};
+use generated::rust_stubgen::{IntPair, IntRange, PairKind};
 use tvm_ffi::{Module, Result};
 
 /// Path of the C++ shared library built by CMake into `../build`.
@@ -52,5 +52,12 @@ fn main() -> Result<()> {
         .call_tuple((pair.clone(),))?
         .try_into()?;
     println!("sum={sum}");
+
+    // `IntRange` has a reproducible layout: its fields are plain struct members.
+    let range: IntRange = tvm_ffi::cached_global_func!("rust_stubgen.IntRange")
+        .call_tuple((10i64, 5i64))?
+        .try_into()?;
+    println!("begin={} extent={}", range.begin, range.extent);
+    assert_eq!(range.begin + i64::from(range.extent), 15);
     Ok(())
 }

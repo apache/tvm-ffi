@@ -35,6 +35,14 @@ if TYPE_CHECKING:
     from tvm_ffi.core import TypeField
 
 
+class DirectiveError(ValueError):
+    """A one-line directive is malformed, unknown, or disagrees with reflection.
+
+    The pipeline reports it and exits non-zero: generated code must never be
+    shaped by a directive it could not honour.
+    """
+
+
 def _parse_type_schema(raw: str | dict[str, Any]) -> TypeSchema:
     """Parse a type schema from either a JSON string or an already-parsed dict."""
     if isinstance(raw, dict):

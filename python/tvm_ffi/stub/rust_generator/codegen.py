@@ -14,39 +14,26 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-"""Rust code generation for ``tvm-ffi-stubgen``: the opaque binding form.
+"""Rust code generation for ``tvm-ffi-stubgen``.
 
-Every reflected object renders as a ``#[repr(C)]`` struct embedding only its
-parent, a reference wrapper, ``Deref``, the upcasts along the ancestor chain,
-and one accessor per reflected field that reads through the C ABI getter. The
-object's bytes are never reproduced. For ``tirx.IterVar`` deriving from
-``ir.PrimExprConvertible``::
+Every reflected object gets a ``#[repr(C)]`` object struct, a reference wrapper,
+read-only ``Deref``, and the upcasts along its ancestor chain. What the object
+struct holds depends on the verdict of :mod:`tvm_ffi.stub.layout`:
 
-    #[repr(C)]
-    #[derive(tvm_ffi::derive::Object)]
-    #[type_key = "tirx.IterVar"]
-    #[type_final]
-    pub struct IterVarObj {
-        base: PrimExprConvertibleObj,
-    }
+- *complete*: the layout is reproducible, so the struct mirrors every physical
+  field at its real offset and width, public, borrowed directly. A ``const``
+  assertion pins the struct's ``size_of`` / ``align_of`` to the reflected facts,
+  so a mirror rustc lays out differently fails to compile.
+- *opaque*: the struct embeds only its parent, and one accessor per reflected
+  field reads through the C ABI getter. The bytes are never reproduced, so the
+  binding is correct for every registered type.
 
-    #[repr(C)]
-    #[derive(tvm_ffi::derive::ObjectRef, Clone)]
-    pub struct IterVar {
-        data: ObjectArc<IterVarObj>,
-    }
-
-    impl Deref for IterVar { ... }              // IterVar -> IterVarObj
-    impl Deref for IterVarObj { ... }           // IterVarObj -> PrimExprConvertibleObj
-
-    impl IterVarObj {
-        pub fn dom(&self) -> Result<Option<Range>> {
-            FieldGetter::new(Self::type_index(), "dom")?.get(self)
-        }
-        ...
-    }
-
-    tvm_ffi::impl_object_upcast!(IterVar => PrimExprConvertible);
+The two target-language rules the classifier leaves to its caller live here: a
+field without a Rust mirror (``Optional<Any>``, a ``Union``, ``void*``, ...)
+makes the type opaque and is read as ``Any``; an ``opaque`` directive vetoes a
+reproducible layout. ``field`` / ``nullable`` / ``enum`` directives shape the
+field types of both forms; where a directive names a scalar width, it is checked
+against the reflected field size at generation time.
 
 Construction and behaviour go through the registered global functions,
 hand-written outside the markers. A builtin parent (``ffi.IntEnum``, say) has
@@ -61,6 +48,9 @@ import dataclasses
 from typing import TYPE_CHECKING
 
 from .. import consts as C
+from ..layout import Verdict, classify
+from ..lib_state import object_info_from_type_key
+from ..utils import DirectiveError
 from . import consts as C_RUST
 from .utils import RustImports, builtin_mirror_name, render_rust_type, rust_ident
 
@@ -70,6 +60,15 @@ if TYPE_CHECKING:
     from ..file_utils import CodeBlock
     from ..utils import InitConfig, NamedTypeSchema, ObjectInfo, Options
     from .directives import EnumSpec
+
+
+def _check_width(target: str, field: NamedTypeSchema, rust_type: str, width: int) -> None:
+    """Reject a directive whose scalar type does not match the reflected field size."""
+    if field.size is not None and field.size != width:
+        raise DirectiveError(
+            f"Directive on `{target}` maps a {field.size}-byte field to `{rust_type}` "
+            f"({width} bytes)"
+        )
 
 
 @dataclasses.dataclass
@@ -100,14 +99,17 @@ class _ObjectRenderer:
 
     # --- name resolution ---------------------------------------------------
 
-    def _ty_render(self, origin: str) -> str | None:
+    def _resolve(self, origin: str, imports: RustImports) -> str | None:
         """Resolve a leaf origin to its in-scope Rust name (recording its ``use``), or ``None``."""
         mapped = self.ty_map.get(origin)
         if mapped is None:
             if "." not in origin or origin.startswith("ctypes."):
                 return None
             mapped = self._generated_type_path(origin)
-        return self.imports.record(mapped)
+        return imports.record(mapped)
+
+    def _ty_render(self, origin: str) -> str | None:
+        return self._resolve(origin, self.imports)
 
     def _generated_type_path(self, type_key: str) -> str:
         """Spell a generated type key from this file.
@@ -143,7 +145,88 @@ class _ObjectRenderer:
         assert not any(self._generated(key) for key in chain), (self.type_key, chain)
         return self.imports.record_builtin_base(chain), False
 
-    # --- pieces ------------------------------------------------------------
+    # --- classification ----------------------------------------------------
+
+    def classify(self) -> Verdict:
+        """Classify this object with its ancestors, under the file's directives."""
+        infos = {key: object_info_from_type_key(key) for key in self.info.ancestors}
+        infos[self.type_key] = self.info
+        owner_of = {id(f): key for key, owner in infos.items() for f in owner.fields}
+        scratch = RustImports()
+
+        def renderable(field: NamedTypeSchema) -> bool:
+            return self._field_mirror(owner_of[id(field)], field, scratch) is not None
+
+        verdicts = classify(
+            infos, forced_opaque=self.imports.directives.opaque, field_renderable=renderable
+        )
+        return verdicts[self.type_key]
+
+    # --- field types ---------------------------------------------------------
+
+    def _field_mirror(self, owner: str, field: NamedTypeSchema, imports: RustImports) -> str | None:
+        """Render the type of ``field`` in a ``#[repr(C)]`` mirror; ``None`` when it has none.
+
+        Scalars take the width the registry recorded; ``Optional`` fields take
+        the in-place mirror of their C++ layout; directives override the rest.
+        """
+        directives = self.imports.directives
+        target = f"{owner}.{field.name}"
+        enum = directives.enums.get(target)
+        if enum is not None:
+            _check_width(target, field, enum.repr, C_RUST.RUST_SCALAR_WIDTHS[enum.repr])
+            return enum.name
+        override = directives.field_types.get(target)
+        if override is not None:
+            width = C_RUST.RUST_SCALAR_WIDTHS.get(override)
+            if width is not None:
+                _check_width(target, field, override, width)
+            mirror: str | None = imports.record(override) if "::" in override else override
+        elif field.origin == "Optional":
+            mirror = self._optional_mirror(field, imports)
+        else:
+            narrowed = C_RUST.RUST_SCALAR_BY_SIZE.get((field.origin, field.size))
+            mirror = narrowed or render_rust_type(field, lambda o: self._resolve(o, imports))
+        if mirror is None:
+            return None
+        if target in directives.nullable and not mirror.startswith("Option<"):
+            if field.size not in (None, C_RUST.RUST_POINTER_SIZE):
+                raise DirectiveError(
+                    f"`nullable` directive on `{target}`: the field is {field.size} bytes, "
+                    "not a pointer-sized object reference"
+                )
+            mirror = f"Option<{mirror}>"
+        return mirror
+
+    def _optional_mirror(self, field: NamedTypeSchema, imports: RustImports) -> str | None:
+        """Mirror an ``Optional<T>`` field in place.
+
+        An ``ObjectRef``-derived payload is a pointer-sized nullable pointer in
+        C++, mirrored by Rust's niche-optimized ``Option<T>``. Every other
+        payload stays a 16-byte ``TVMFFIAny`` cell, mirrored by
+        ``tvm_ffi::Optional<T>``. ``Optional<Any>`` has no mirror, and neither
+        does a field whose size disagrees with its payload kind.
+        """
+        (payload,) = field.args  # TypeSchema's post_init enforces exactly one argument.
+        if payload.origin == "Any":
+            return None
+        inner = render_rust_type(payload, lambda o: self._resolve(o, imports))
+        if inner is None:
+            return None
+        any_backed = (
+            payload.origin in C_RUST.RUST_ANY_BACKED_OPTIONAL_PAYLOADS
+            or payload.origin == "Optional"
+        )
+        expected = (
+            C_RUST.RUST_OPTIONAL_FIELD_SIZE
+            if any_backed
+            else C_RUST.RUST_OBJECT_OPTIONAL_FIELD_SIZE
+        )
+        if field.size not in (None, expected):
+            return None
+        if any_backed:
+            return f"{imports.record(C_RUST.RUST_OPTIONAL_PATH)}<{inner}>"
+        return f"Option<{inner}>"
 
     def _accessor_lines(self, field: NamedTypeSchema) -> list[str]:
         """One ``pub fn <field>(&self) -> Result<T>`` through the C ABI getter.
@@ -177,7 +260,13 @@ class _ObjectRenderer:
             ]
         if target in directives.nullable and not rust_type.startswith("Option<"):
             rust_type = f"Option<{rust_type}>"
-        return [f"pub fn {name}(&self) -> Result<{rust_type}> {{", f"    {getter}.get(self)", "}"]
+        return [
+            f"pub fn {name}(&self) -> Result<{rust_type}> {{",
+            f"    {getter}.get(self)",
+            "}",
+        ]
+
+    # --- pieces ------------------------------------------------------------
 
     def _enum_lines(self, spec: EnumSpec) -> list[str]:
         """Render the open integer newtype an ``enum`` directive declares."""
@@ -232,14 +321,49 @@ class _ObjectRenderer:
         pairs = ", ".join(f"{self.leaf} => {target}" for target in targets)
         return [f"tvm_ffi::impl_object_upcast!({pairs});"]
 
+    def _struct_lines(self, verdict: Verdict, base: str) -> list[str]:
+        """Render the object struct: every field when complete, the parent alone when opaque."""
+        header = [
+            "#[repr(C)]",
+            "#[derive(tvm_ffi::derive::Object)]",
+            f'#[type_key = "{self.type_key}"]',
+            *(["#[type_final]"] if self.info.is_final else []),
+            f"pub struct {self.obj_struct} {{",
+            f"    base: {base},",
+        ]
+        if not verdict.is_complete:
+            return [
+                f"/// Opaque: {verdict.detail}. Fields are read through the C ABI getters.",
+                *header,
+                "}",
+            ]
+        members = []
+        for field in sorted(self.info.fields, key=lambda f: f.offset or 0):
+            mirror = self._field_mirror(self.type_key, field, self.imports)
+            assert mirror is not None  # the verdict already ran the renderability check
+            members.append(f"    pub {rust_ident(field.name)}: {mirror},")
+        return [
+            f"/// Complete: {verdict.detail}.",
+            *header,
+            *members,
+            "}",
+            "",
+            "const _: () = {",
+            f"    assert!(::core::mem::size_of::<{self.obj_struct}>() == {verdict.total_size});",
+            f"    assert!(::core::mem::align_of::<{self.obj_struct}>() == {verdict.alignment});",
+            "};",
+        ]
+
     def body(self) -> list[str]:
         """Build the Rust source lines for the object."""
+        verdict = self.classify()
         # Derive macros are spelled by full path: their leaves collide with `Object` / `ObjectRef`.
         self.imports.record("std::ops::Deref")
         self.imports.record("tvm_ffi::ObjectArc")
         base, has_parent = self._base_type()
         fields = self.info.fields
-        if fields:
+        accessors = bool(fields) and not verdict.is_complete
+        if accessors:
             self.imports.record("tvm_ffi::ObjectCore")  # `Self::type_index()`
             self.imports.record("tvm_ffi::FieldGetter")
             self.imports.record("tvm_ffi::Result")
@@ -251,17 +375,7 @@ class _ObjectRenderer:
             for f in fields
             if f"{self.type_key}.{f.name}" in enums
         ]
-        sections.append(
-            [
-                "#[repr(C)]",
-                "#[derive(tvm_ffi::derive::Object)]",
-                f'#[type_key = "{self.type_key}"]',
-                *(["#[type_final]"] if self.info.is_final else []),
-                f"pub struct {self.obj_struct} {{",
-                f"    base: {base},",
-                "}",
-            ]
-        )
+        sections.append(self._struct_lines(verdict, base))
         sections.append(
             [
                 "#[repr(C)]",
@@ -274,16 +388,16 @@ class _ObjectRenderer:
         sections.append(self._deref_lines(self.leaf, self.obj_struct, "data"))
         if has_parent:
             sections.append(self._deref_lines(self.obj_struct, base, "base"))
-        if fields:
-            accessors: list[str] = []
+        if accessors:
+            lines_: list[str] = []
             for i, field in enumerate(fields):
                 if i:
-                    accessors.append("")
-                accessors += self._accessor_lines(field)
+                    lines_.append("")
+                lines_ += self._accessor_lines(field)
             sections.append(
                 [
                     f"impl {self.obj_struct} {{",
-                    *[f"    {line}" if line else "" for line in accessors],
+                    *[f"    {line}" if line else "" for line in lines_],
                     "}",
                 ]
             )
@@ -306,7 +420,7 @@ def generate_rust_object(
     opt: Options,
     obj_info: ObjectInfo,
 ) -> None:
-    """Emit the opaque Rust binding of ``obj_info`` into an ``object/<key>`` block."""
+    """Emit the Rust binding of ``obj_info`` into an ``object/<key>`` block."""
     assert len(code.lines) >= 2
     assert isinstance(obj_info.type_key, str)
     renderer = _ObjectRenderer(

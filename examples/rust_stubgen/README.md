@@ -18,15 +18,23 @@
 # Rust Stub Generation
 
 `tvm-ffi-stubgen --target rust` turns the reflection metadata of a C++ library
-into Rust bindings. This example registers one object, `rust_stubgen.IntPair`
-(`src/int_pair.cc`), and lets CMake regenerate `rust/src/generated/` after
-every build.
+into Rust bindings. This example registers two objects in `src/int_pair.cc`
+and lets CMake regenerate `rust/src/generated/` after every build.
 
-Every object is bound *opaquely*: Rust gets a `#[repr(C)]` wrapper that embeds
-only the parent, a reference type, `Deref`, the upcasts along the ancestor
-chain, and one accessor per reflected field that reads through the C ABI
-getter. The object's bytes are never reproduced, so the binding is correct for
-any registered type; construction goes through the registered global functions.
+Every object gets a `#[repr(C)]` wrapper, a reference type, `Deref`, and the
+upcasts along its ancestor chain. What the wrapper holds depends on whether the
+reflected fields account for every byte of the object:
+
+- `rust_stubgen.IntRange` does, so its binding is *complete*: the struct mirrors
+  the fields at their real offsets and widths, and Rust reads `range.begin`
+  directly. A `const` assertion pins the struct's size and alignment to the
+  reflected facts.
+- `rust_stubgen.IntPair` has a vtable in front of the object header, so its
+  binding is *opaque*: the struct embeds only the parent and every field is read
+  through an accessor that calls the C ABI getter.
+
+Construction goes through the registered global functions in both cases.
+
 A builtin parent such as `ffi.IntEnum` has no `<Leaf>Obj` in the crate; the
 import section defines a header-only stand-in per builtin ancestor so the
 derived type depth matches the registry.

@@ -16,21 +16,24 @@
 # under the License.
 """The Rust backend's one-line directives: payload grammar and per-file storage.
 
-All three address one reflected field as ``<type_key>.<field>``::
+Three address one reflected field as ``<type_key>.<field>``, one addresses a type::
 
     // tvm-ffi-stubgen(field): tirx.Add.a -> PrimExpr
     // tvm-ffi-stubgen(nullable): ir.Expr.span
     // tvm-ffi-stubgen(enum): tirx.For.kind -> ForKind(i32) { Serial=0, Parallel=1 }
+    // tvm-ffi-stubgen(opaque): ir.SourceName
 
-``field`` sets the accessor's Rust type (a name in scope, or a ``::`` path to
+``field`` sets the field's Rust type (a name in scope, or a ``::`` path to
 ``use``); ``nullable`` wraps it in ``Option``; ``enum`` declares an open integer
-newtype the accessor returns.
+newtype for it; ``opaque`` keeps a type opaque even when its layout is reproducible.
 """
 
 from __future__ import annotations
 
 import dataclasses
 import re
+
+from ..utils import DirectiveError
 
 _ENUM_RE = re.compile(
     r"^(?P<target>\S+)\s*->\s*(?P<name>[A-Za-z_]\w*)\((?P<repr>[iu](?:8|16|32|64))\)"
@@ -55,9 +58,10 @@ class Directives:
     field_types: dict[str, str] = dataclasses.field(default_factory=dict)
     nullable: set[str] = dataclasses.field(default_factory=set)
     enums: dict[str, EnumSpec] = dataclasses.field(default_factory=dict)
+    opaque: set[str] = dataclasses.field(default_factory=set)
 
     def add(self, name: str, payload: str, lineno: int) -> None:
-        """Parse and store one directive; raise ``ValueError`` on a malformed payload."""
+        """Parse and store one directive; raise :class:`DirectiveError` when malformed."""
         if name == "field":
             target, rust_type = _split_arrow(name, payload, lineno)
             self.field_types[target] = rust_type
@@ -66,12 +70,22 @@ class Directives:
         elif name == "enum":
             target, spec = _parse_enum(payload, lineno)
             self.enums[target] = spec
+        elif name == "opaque":
+            self.opaque.add(_type_target(name, payload, lineno))
         else:
-            raise ValueError(f"Unknown directive `{name}` at line {lineno}")
+            raise DirectiveError(f"Unknown directive `{name}` at line {lineno}")
 
 
-def _invalid(name: str, lineno: int, expected: str) -> ValueError:
-    return ValueError(f"Invalid `{name}` directive at line {lineno}. Expected `{expected}`")
+def _invalid(name: str, lineno: int, expected: str) -> DirectiveError:
+    return DirectiveError(f"Invalid `{name}` directive at line {lineno}. Expected `{expected}`")
+
+
+def _type_target(name: str, text: str, lineno: int) -> str:
+    """Validate a ``<type_key>`` reference."""
+    target = text.strip()
+    if not target or " " in target:
+        raise _invalid(name, lineno, "<type_key>")
+    return target
 
 
 def _field_target(name: str, text: str, lineno: int) -> str:

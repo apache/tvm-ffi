@@ -52,16 +52,40 @@ class IntPair : public ffi::ObjectRef {
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(IntPair, ffi::ObjectRef, IntPairObj);
 };
 
+// A plain data object: every byte is accounted for by a reflected field, so the
+// generated binding mirrors the layout and Rust reads the fields directly.
+class IntRangeObj : public ffi::Object {
+ public:
+  int64_t begin;
+  int32_t extent;
+
+  IntRangeObj(int64_t begin, int32_t extent) : begin(begin), extent(extent) {}
+
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("rust_stubgen.IntRange", IntRangeObj, ffi::Object);
+};
+
+class IntRange : public ffi::ObjectRef {
+ public:
+  IntRange(int64_t begin, int32_t extent) { data_ = ffi::make_object<IntRangeObj>(begin, extent); }
+
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(IntRange, ffi::ObjectRef, IntRangeObj);
+};
+
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::ObjectDef<IntPairObj>(refl::init(false))
       .def_ro("a", &IntPairObj::a, "the first operand")
       .def_ro("b", &IntPairObj::b, "the second operand")
       .def_ro("kind", &IntPairObj::kind, "0 = unordered, 1 = ordered");
+  refl::ObjectDef<IntRangeObj>(refl::init(false))
+      .def_ro("begin", &IntRangeObj::begin, "the first value")
+      .def_ro("extent", &IntRangeObj::extent, "the number of values");
   refl::GlobalDef()
       .def("rust_stubgen.IntPair",
            [](int64_t a, int64_t b, int32_t kind) { return IntPair(a, b, kind); })
-      .def("rust_stubgen.IntPairSum", [](const IntPair& pair) { return pair->Sum(); });
+      .def("rust_stubgen.IntPairSum", [](const IntPair& pair) { return pair->Sum(); })
+      .def("rust_stubgen.IntRange",
+           [](int64_t begin, int32_t extent) { return IntRange(begin, extent); });
 }
 // [object.end]
 

@@ -61,6 +61,7 @@ impl TryFrom<i64> for PairKind {
     }
 }
 
+/// Opaque: bytes [44, 56) of [24, 56) are not accounted for by reflected fields. Fields are read through the C ABI getters.
 #[repr(C)]
 #[derive(tvm_ffi::derive::Object)]
 #[type_key = "rust_stubgen.IntPair"]
@@ -94,6 +95,37 @@ impl IntPairObj {
     pub fn kind(&self) -> Result<PairKind> {
         let raw: i64 = FieldGetter::new(Self::type_index(), "kind")?.get(self)?;
         PairKind::try_from(raw)
+    }
+}
+// tvm-ffi-stubgen(end)
+
+// tvm-ffi-stubgen(begin): object/rust_stubgen.IntRange
+/// Complete: reflected fields fill [24, 40) exactly (alignment padding [36, 40)).
+#[repr(C)]
+#[derive(tvm_ffi::derive::Object)]
+#[type_key = "rust_stubgen.IntRange"]
+#[type_final]
+pub struct IntRangeObj {
+    base: Object,
+    pub begin: i64,
+    pub extent: i32,
+}
+
+const _: () = {
+    assert!(::core::mem::size_of::<IntRangeObj>() == 40);
+    assert!(::core::mem::align_of::<IntRangeObj>() == 8);
+};
+
+#[repr(C)]
+#[derive(tvm_ffi::derive::ObjectRef, Clone)]
+pub struct IntRange {
+    data: ObjectArc<IntRangeObj>,
+}
+
+impl Deref for IntRange {
+    type Target = IntRangeObj;
+    fn deref(&self) -> &IntRangeObj {
+        &self.data
     }
 }
 // tvm-ffi-stubgen(end)
