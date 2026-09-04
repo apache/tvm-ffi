@@ -239,6 +239,16 @@ def test_children_of_any_opaque_parent_are_parent_opaque() -> None:
     assert "by-directive" in verdicts["t.Child"].detail
 
 
+def test_unmirrored_type_and_its_descendants_are_opaque() -> None:
+    child = _info("t.Child", parent="t.Base", total_size=48, fields=(_field("x", 40, 8),))
+    infos = {"ffi.Object": ROOT, "t.Base": BASE, "t.Child": child}
+    verdicts = classify(infos, unmirrored={"t.Base"})
+    assert verdicts["t.Base"].reason == "no-mirror"
+    assert verdicts["t.Base"].own_bytes is None  # unconditional: no layout evidence is weighed
+    assert verdicts["t.Child"].reason == "parent-opaque"
+    assert "no-mirror" in verdicts["t.Child"].detail
+
+
 def test_order_does_not_matter_but_ancestors_must_be_present() -> None:
     child = _info("t.Child", parent="t.Base", total_size=48, fields=(_field("x", 40, 8),))
     verdicts = classify({"t.Child": child, "t.Base": BASE, "ffi.Object": ROOT})

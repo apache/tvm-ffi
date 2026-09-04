@@ -45,7 +45,9 @@ Nothing here calls methods or packed constructors: behaviour goes through the
 registered global functions, hand-written outside the markers. A builtin parent
 (``ffi.IntEnum``, say) has no ``<Leaf>Obj`` in the crate: the import section
 defines a header-only stand-in per builtin ancestor, so ``derive(Object)``
-computes the registry's ``TYPE_DEPTH``.
+computes the registry's ``TYPE_DEPTH``. A stand-in carries no bytes beyond the
+header, so a type under such a parent is always opaque (``no-mirror``), as is
+everything below it.
 """
 
 from __future__ import annotations
@@ -172,8 +174,18 @@ class _ObjectRenderer:
         def renderable(field: NamedTypeSchema) -> bool:
             return self._field_mirror(owner_of[id(field)], field, scratch) is not None
 
+        # The crate never reproduces a builtin's bytes: a type under `ffi.IntEnum` embeds a
+        # header-only stand-in (see `_base_type`), so nothing below such a parent is complete.
+        unmirrored = {
+            key
+            for key in self.info.ancestors
+            if key != C_RUST.RUST_ROOT_TYPE_KEY and not self._generated(key)
+        }
         verdicts = classify(
-            infos, forced_opaque=self.imports.directives.opaque, field_renderable=renderable
+            infos,
+            forced_opaque=self.imports.directives.opaque,
+            unmirrored=unmirrored,
+            field_renderable=renderable,
         )
         return verdicts[self.type_key]
 

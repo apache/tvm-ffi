@@ -878,6 +878,29 @@ def test_opaque_directive_vetoes_a_complete_type() -> None:
     assert "pub fn line(&self) -> Result<i64> {" in text
 
 
+def test_builtin_parent_keeps_the_type_opaque() -> None:
+    """The crate never mirrors a builtin's bytes: the header-only stand-in cannot be complete."""
+    # Fieldless under `ffi.Enum` (48 bytes): the fill criterion alone would call this complete.
+    info = _info(
+        "demo.Flag", parent="ffi.Enum", ancestors=["ffi.Object", "ffi.Enum"], total_size=48
+    )
+    text, _ = _render(info)
+    assert "/// Opaque: parent 'ffi.Enum' is opaque (no-mirror)." in text
+    assert "    base: FfiEnumObj," in text
+    assert "const _: () =" not in text
+    assert "fn new(" not in text
+    # The registry fixtures under `ffi.Enum` / `ffi.IntEnum` / `ffi.StrEnum` follow the same rule.
+    for type_key, parent in (
+        ("testing.TestEnumVariant", "ffi.Enum"),
+        ("testing.TestCxxIntEnum", "ffi.IntEnum"),
+        ("testing.TestCxxStrEnum", "ffi.StrEnum"),
+    ):
+        text, _ = _render(object_info_from_type_key(type_key))
+        assert f"/// Opaque: parent '{parent}' is opaque (no-mirror)." in text
+        assert "const _: () =" not in text
+        assert "fn new(" not in text
+
+
 def test_opaque_parent_keeps_the_child_opaque() -> None:
     """A child of an opaque type cannot embed a mirror of its parent: it stays opaque."""
     _register(_info("ir.Expr", (_field("span", "ir.Span", 24, 8),), total_size=40))  # hole
