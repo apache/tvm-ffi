@@ -30,7 +30,8 @@ Three address one reflected field as ``<type_key>.<field>``, three address a typ
 parameter instead. ``nullable`` wraps it in ``Option``; ``enum`` declares an open
 integer newtype for it; ``opaque`` keeps a type opaque even when its layout is
 reproducible. ``upcast`` adds a typed view outside the ancestor chain;
-``custom-new`` says the wrapper's ``new`` is hand-written, so none is generated.
+``custom-new`` says the wrapper's ``new`` is hand-written; the generated one is
+named ``from_complete_fields`` instead.
 """
 
 from __future__ import annotations

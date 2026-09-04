@@ -202,6 +202,8 @@ def test_rust_ident() -> None:
     assert rust_ident("type") == "r#type"
     assert rust_ident("self") == "self_"
     assert rust_ident("crate") == "crate_"
+    assert rust_ident("base") == "base_"  # the parent slot of every generated object struct
+    assert rust_ident("data") == "data_"  # the wrapper's `ObjectArc` member
 
 
 # ---------------------------------------------------------------------------
@@ -804,6 +806,26 @@ def test_render_complete_span_and_prim_type() -> None:
     assert "tvm_ffi::DLDataType" in _uses(imports)
 
 
+def test_reserved_member_names_get_a_trailing_underscore() -> None:
+    """A reflected `base` or `data` field must not collide with the generated members."""
+    info = _info(
+        "demo.Ramp",
+        (_field("base", "int", 24, 8), _field("data", "int", 32, 8)),
+        total_size=40,
+        is_final=True,
+    )
+    text, _ = _render(info)
+    assert "    base: Object,\n    pub base_: i64,\n    pub data_: i64,\n" in text
+    assert "    pub fn new(base_: i64, data_: i64) -> Self {" in text
+    assert "        Self { base, base_, data_ }" in text
+    # The opaque form keeps the reflected name on the C ABI side.
+    text, _ = _render(_info("demo.Node", (_field("base", "int"),)))
+    assert (
+        'pub fn base_(&self) -> Result<i64> {\n        FieldGetter::new(Self::type_index(), "base")'
+        in text
+    )
+
+
 def test_render_complete_enum_field() -> None:
     """An `enum` directive types the mirrored field; the newtype brings its own `Result` import."""
     info = _info(
@@ -859,8 +881,8 @@ def test_unrenderable_field_keeps_the_type_opaque(field: NamedTypeSchema) -> Non
     assert "const _: () =" not in text
 
 
-def test_custom_new_leaves_the_wrapper_allocator_to_hand_written_code() -> None:
-    """`custom-new` drops `Add::new`; `AddObj::new` stays for that code and derived types to call."""
+def test_custom_new_renames_the_wrapper_allocator() -> None:
+    """`custom-new`: `Add::new` stays hand-written, the allocator is `from_complete_fields`."""
     _register(_expr())
     imports = RUST.new_imports()
     RUST.add_directive(imports, "custom-new", "tirx.Add", 1)
@@ -869,8 +891,14 @@ def test_custom_new_leaves_the_wrapper_allocator_to_hand_written_code() -> None:
         "impl AddObj {\n    pub(crate) fn new(span: Span, ty: Type, a: Expr, b: Expr) -> Self {"
         in text
     )
-    assert "impl Add {" not in text
-    assert "pub fn new(" not in text
+    assert (
+        "impl Add {\n    /// Lossless complete-field allocation.\n"
+        "    pub fn from_complete_fields(span: Span, ty: Type, a: Expr, b: Expr) -> Self {\n"
+        "        let obj = AddObj::new(span, ty, a, b);\n"
+        "        Self { data: ObjectArc::new(obj) }\n"
+        "    }\n}"
+    ) in text
+    assert "    pub fn new(" not in text
 
 
 def test_upcast_directive_adds_typed_views() -> None:

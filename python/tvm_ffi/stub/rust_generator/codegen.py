@@ -23,7 +23,8 @@ the verdict of :mod:`tvm_ffi.stub.layout`:
 - *complete*: the struct mirrors every physical field at its real offset and
   width, pinned by a ``const`` size/alignment assertion. ``<Leaf>Obj::new``
   (crate-private) and the wrapper's ``new`` take every field root to leaf;
-  ``custom-new`` leaves the wrapper's ``new`` to hand-written code.
+  ``custom-new`` leaves the wrapper's ``new`` to hand-written code and names
+  the generated one ``from_complete_fields``.
 - *opaque*: the struct embeds only its parent, and each field is read through
   the C ABI getter. Nothing allocates it.
 
@@ -336,7 +337,7 @@ class _ObjectRenderer:
             f'#[type_key = "{self.type_key}"]',
             *(["#[type_final]"] if self.info.is_final else []),
             f"pub struct {self.obj_struct} {{",
-            f"    base: {base},",
+            f"    base: {base},",  # a reflected `base` field becomes `base_` (`rust_ident`)
         ]
         if not verdict.is_complete:
             return [
@@ -406,7 +407,10 @@ class _ObjectRenderer:
         ]
 
     def _allocator_sections(self, base: str, has_parent: bool) -> list[list[str]]:
-        """``<Leaf>Obj::new`` and, unless ``custom-new`` reserves it, the wrapper's ``new``."""
+        """``<Leaf>Obj::new`` and the wrapper's ``new``.
+
+        ``custom-new`` names the wrapper's allocator ``from_complete_fields`` instead.
+        """
         inherited: list[tuple[str, str]] = []
         if has_parent:
             parent = self.info.parent_type_key
@@ -431,20 +435,20 @@ class _ObjectRenderer:
                 "}",
             ]
         ]
-        if self.type_key not in self.imports.directives.custom_new:
-            sections.append(
-                [
-                    f"impl {self.leaf} {{",
-                    "    /// Lossless complete-field allocation.",
-                    *self._fn_lines(
-                        "pub fn new",
-                        params,
-                        (f"obj = {self.obj_struct}::new", forward),
-                        "Self { data: ObjectArc::new(obj) }",
-                    ),
-                    "}",
-                ]
-            )
+        custom = self.type_key in self.imports.directives.custom_new
+        sections.append(
+            [
+                f"impl {self.leaf} {{",
+                "    /// Lossless complete-field allocation.",
+                *self._fn_lines(
+                    "pub fn from_complete_fields" if custom else "pub fn new",
+                    params,
+                    (f"obj = {self.obj_struct}::new", forward),
+                    "Self { data: ObjectArc::new(obj) }",
+                ),
+                "}",
+            ]
+        )
         return sections
 
     def body(self) -> list[str]:
@@ -474,6 +478,7 @@ class _ObjectRenderer:
                 "#[repr(C)]",
                 "#[derive(tvm_ffi::derive::ObjectRef, Clone)]",
                 f"pub struct {self.leaf} {{",
+                # a reflected `data` field becomes `data_` (`rust_ident`)
                 f"    data: ObjectArc<{self.obj_struct}>,",
                 "}",
             ]

@@ -69,5 +69,5 @@ Four more directives are available: `field` names the Rust type of a field
 wraps it in `Option` (`// tvm-ffi-stubgen(nullable): rust_stubgen.IntPair.a`),
 `upcast` adds a conversion to a hand-written typed view
 (`// tvm-ffi-stubgen(upcast): rust_stubgen.IntPair -> MyView`), and
-`custom-new` keeps the generator from emitting the wrapper's `new` when it is
-hand-written (`// tvm-ffi-stubgen(custom-new): rust_stubgen.IntPair`).
+`custom-new` names the generated allocator `from_complete_fields` when `new`
+is hand-written (`// tvm-ffi-stubgen(custom-new): rust_stubgen.IntPair`).
