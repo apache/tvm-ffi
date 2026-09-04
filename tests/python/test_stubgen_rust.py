@@ -151,6 +151,9 @@ def test_render_rust_type_without_mirror(schema: TypeSchema) -> None:
 def test_rust_ident() -> None:
     assert rust_ident("value") == "value"
     assert rust_ident("imports_") == "imports"
+    assert rust_ident("type") == "r#type"
+    assert rust_ident("self") == "self_"
+    assert rust_ident("crate") == "crate_"
 
 
 # ---------------------------------------------------------------------------
@@ -242,8 +245,8 @@ impl PairObj {
         FieldGetter::new(Self::type_index(), "owner")?.get(self)
     }
 
-    pub fn extra(&self) -> Result<Any> {
-        FieldGetter::new(Self::type_index(), "extra")?.get_any(self)
+    pub fn r#type(&self) -> Result<Any> {
+        FieldGetter::new(Self::type_index(), "type")?.get_any(self)
     }
 }"""
 
@@ -257,7 +260,7 @@ def test_render_root_object() -> None:
             ("tag", TypeSchema("Optional", (TypeSchema("str"),))),
             ("items", TypeSchema("Array")),
             ("owner", TypeSchema("Object")),
-            ("extra", TypeSchema("Union", (TypeSchema("int"), TypeSchema("str")))),
+            ("type", TypeSchema("Union", (TypeSchema("int"), TypeSchema("str")))),
         ),
     )
     text, imports = _render(info)

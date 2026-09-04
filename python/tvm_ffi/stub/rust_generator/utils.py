@@ -133,5 +133,10 @@ def _generic(base: str | None, *params: str | None) -> str | None:
 
 
 def rust_ident(name: str) -> str:
-    """Spell a reflected field name in Rust: the C++ trailing underscore is dropped."""
-    return name.rstrip("_") or name
+    """Spell a reflected field name in Rust: drop the C++ trailing underscore, escape keywords."""
+    name = name.rstrip("_") or name
+    if name in C.RUST_NOT_RAW_IDENTIFIERS:
+        return f"{name}_"
+    if name in C.RUST_KEYWORDS:
+        return f"r#{name}"
+    return name

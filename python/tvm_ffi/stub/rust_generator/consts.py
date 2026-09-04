@@ -61,3 +61,13 @@ RUST_MOD_MAP = {
 
 #: Root of the object hierarchy.
 RUST_ROOT_TYPE_KEY = "ffi.Object"
+
+#: Keywords a field name may collide with: spelled ``r#name``, or ``name_`` for the four
+#: that cannot be raw identifiers.
+RUST_KEYWORDS = frozenset(
+    "as async await break const continue crate dyn else enum extern false fn for if impl in "
+    "let loop match mod move mut pub ref return self Self static struct super trait true type "
+    "unsafe use where while abstract become box do final gen macro override priv try typeof "
+    "unsized virtual yield".split()
+)
+RUST_NOT_RAW_IDENTIFIERS = frozenset({"self", "Self", "super", "crate"})
