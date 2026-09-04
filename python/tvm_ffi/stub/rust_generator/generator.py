@@ -42,12 +42,7 @@ if TYPE_CHECKING:
 
 
 class RustGenerator:
-    """Generator that emits opaque Rust bindings for reflected objects.
-
-    Every object gets a wrapper whose fields are read through the C ABI
-    getters (see :mod:`.codegen`); global functions and ``__all__`` / ``export``
-    blocks are not generated.
-    """
+    """Generator that emits opaque Rust bindings for reflected objects (see :mod:`.codegen`)."""
 
     name = "rust"
     syntax = C.RUST_SYNTAX
@@ -65,11 +60,7 @@ class RustGenerator:
         return RustImports()
 
     def add_directive(self, imports: RustImports, name: str, payload: str, lineno: int) -> None:
-        """Record ``import-object`` as a ``use``; parse the Rust directives into the collector.
-
-        For ``import-object`` only the first ``;``-separated field (the path) is
-        meaningful: Rust has no ``TYPE_CHECKING`` split and no ``use .. as``.
-        """
+        """Record ``import-object`` as a ``use`` (its path is the first ``;`` field); parse the rest."""
         if name == "import-object":
             imports.record(payload.split(";", 1)[0].strip())
         else:

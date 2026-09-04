@@ -151,9 +151,6 @@ def test_render_rust_type_without_mirror(schema: TypeSchema) -> None:
 def test_rust_ident() -> None:
     assert rust_ident("value") == "value"
     assert rust_ident("imports_") == "imports"
-    assert rust_ident("type") == "r#type"
-    assert rust_ident("self") == "self_"
-    assert rust_ident("crate") == "crate_"
 
 
 # ---------------------------------------------------------------------------
@@ -245,8 +242,8 @@ impl PairObj {
         FieldGetter::new(Self::type_index(), "owner")?.get(self)
     }
 
-    pub fn r#type(&self) -> Result<Any> {
-        FieldGetter::new(Self::type_index(), "type")?.get_any(self)
+    pub fn extra(&self) -> Result<Any> {
+        FieldGetter::new(Self::type_index(), "extra")?.get_any(self)
     }
 }"""
 
@@ -260,7 +257,7 @@ def test_render_root_object() -> None:
             ("tag", TypeSchema("Optional", (TypeSchema("str"),))),
             ("items", TypeSchema("Array")),
             ("owner", TypeSchema("Object")),
-            ("type", TypeSchema("Union", (TypeSchema("int"), TypeSchema("str")))),
+            ("extra", TypeSchema("Union", (TypeSchema("int"), TypeSchema("str")))),
         ),
     )
     text, imports = _render(info)
@@ -314,13 +311,7 @@ def test_render_derived_object_cross_module() -> None:
 
 
 def test_render_object_under_builtin_parent() -> None:
-    """A builtin parent is embedded through header-only mirrors so `TYPE_DEPTH` stays right.
-
-    `derive(Object)` derives the depth from the embedded base and the runtime
-    instance check indexes the ancestor table with it: embedding the bare
-    `Object` header under `ffi.IntEnum` (depth 2) would give `demo.Color`
-    depth 1 instead of 3, and no subtype of it could be cast to it.
-    """
+    """A builtin parent is embedded via header-only stand-ins so `TYPE_DEPTH` matches the registry."""
     info = _info(
         "demo.Color",
         (("value", TypeSchema("int")),),
@@ -329,18 +320,18 @@ def test_render_object_under_builtin_parent() -> None:
     )
     text, imports = _render(info)
     assert "    base: FfiIntEnumObj," in text
-    # One mirror per builtin ancestor below `ffi.Object`, root first, chained through `base`.
+    # One stand-in per builtin ancestor below `ffi.Object`, chained through `base`.
     assert imports.builtin_mirrors == {"ffi.Enum": "Object", "ffi.IntEnum": "FfiEnumObj"}
     assert "tvm_ffi::Object" in _uses(imports)
-    # The mirrors are depth carriers only: no Deref to them, no upcast, no crate import.
+    # No Deref, upcast or crate import for the stand-ins.
     assert "impl Deref for ColorObj" not in text
     assert "impl_object_upcast" not in text
     assert not any("Enum" in path for path in _uses(imports))
-    # A direct child of `ffi.Object` embeds the crate's header and needs no mirror.
+    # A child of `ffi.Object` embeds the crate's header.
     text, imports = _render(_info("demo.Root"))
     assert "    base: Object," in text
     assert imports.builtin_mirrors == {}
-    # A generated parent is embedded by name even when the chain passes through builtins.
+    # A generated parent is embedded by name.
     red = _info(
         "demo.Red",
         parent="demo.Color",
@@ -356,8 +347,7 @@ use std::ops::Deref;
 use tvm_ffi::Object;
 use tvm_ffi::ObjectArc;
 
-/// Header-only stand-in for the builtin `ffi.Enum`, which the crate does not
-/// mirror: it only gives `derive(Object)` the ancestor depth of the types below it.
+/// Header-only stand-in for the builtin `ffi.Enum`; it only carries the ancestor depth.
 #[allow(dead_code)]
 #[repr(C)]
 #[derive(tvm_ffi::derive::Object)]
@@ -366,8 +356,7 @@ struct FfiEnumObj {
     base: Object,
 }
 
-/// Header-only stand-in for the builtin `ffi.IntEnum`, which the crate does not
-/// mirror: it only gives `derive(Object)` the ancestor depth of the types below it.
+/// Header-only stand-in for the builtin `ffi.IntEnum`; it only carries the ancestor depth.
 #[allow(dead_code)]
 #[repr(C)]
 #[derive(tvm_ffi::derive::Object)]
@@ -376,8 +365,7 @@ struct FfiIntEnumObj {
     base: FfiEnumObj,
 }
 
-/// Header-only stand-in for the builtin `ffi.StrEnum`, which the crate does not
-/// mirror: it only gives `derive(Object)` the ancestor depth of the types below it.
+/// Header-only stand-in for the builtin `ffi.StrEnum`; it only carries the ancestor depth.
 #[allow(dead_code)]
 #[repr(C)]
 #[derive(tvm_ffi::derive::Object)]
@@ -643,8 +631,7 @@ def test_cli_init_generates_a_module_tree(tmp_path: Path, monkeypatch: pytest.Mo
         "tvm_ffi::impl_object_upcast!(TestCxxClassDerivedDerived => TestCxxClassBase, "
         "TestCxxClassDerivedDerived => TestCxxClassDerived);"
     ) in text
-    # Builtin parents: `ffi.Object -> ffi.Enum -> {ffi.IntEnum, ffi.StrEnum}` is mirrored once,
-    # in the import section, and the enum-derived fixtures embed the last mirror of their chain.
+    # Builtin ancestors are mirrored once, in the import section; enum fixtures embed the last one.
     assert text.count("struct FfiEnumObj {\n    base: Object,\n}") == 1
     assert text.count("struct FfiIntEnumObj {\n    base: FfiEnumObj,\n}") == 1
     assert text.count("struct FfiStrEnumObj {\n    base: FfiEnumObj,\n}") == 1

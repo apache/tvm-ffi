@@ -18,13 +18,10 @@
 
 from __future__ import annotations
 
-#: One-line directives the Rust backend consumes. ``import-object`` carries a
-#: ``use`` path; the other three are parsed by :mod:`.directives`.
+#: One-line directives the Rust backend consumes.
 RUST_DIRECTIVE_KINDS = frozenset({"import-object", "field", "nullable", "enum"})
 
-#: Default FFI-origin -> Rust-type map. Values are fully qualified paths so
-#: ``RustUse``/``RustImports`` can derive both the leaf name and the ``use``
-#: import; values without ``::`` (primitives) need no import.
+#: Default FFI-origin -> Rust-type map; ``::`` paths get a ``use``, bare names do not.
 RUST_TY_MAP_DEFAULTS = {
     "int": "i64",
     "float": "f64",
@@ -36,8 +33,7 @@ RUST_TY_MAP_DEFAULTS = {
     "Callable": "tvm_ffi::Function",
     "Array": "tvm_ffi::Array",  # the crate's own Array<T>, NOT Vec
     "Map": "tvm_ffi::Map",  # the crate's own Map<K, V>, NOT HashMap
-    # A generic object VALUE is the single-pointer `ObjectRef` handle, not the
-    # `Object` header struct (which only ever appears as an embedded `base`).
+    # An object value is the `ObjectRef` handle; `Object` only appears as an embedded `base`.
     "Object": "tvm_ffi::object::ObjectRef",
     "Tensor": "tvm_ffi::Tensor",
     "Shape": "tvm_ffi::Shape",
@@ -55,27 +51,13 @@ RUST_TY_MAP_DEFAULTS = {
     "ffi.Function": "tvm_ffi::Function",
 }
 
-#: Origins the crate has no type for (Rust tuples do not match ``ffi::Tuple``,
-#: and ``Dict``/``List``/``Union`` have no FFI mirror). A field of such a type
-#: is read as ``tvm_ffi::Any``.
+#: Origins without a crate mirror; such a field is read as ``tvm_ffi::Any``.
 RUST_UNSUPPORTED_ORIGINS = frozenset({"Dict", "List", "Union", "tuple"})
 
-#: Module-prefix rewrites for ``use`` paths: builtin ``ffi.*`` type keys live at
-#: the crate root.
+#: ``use``-path rewrites: builtin ``ffi.*`` type keys live at the crate root.
 RUST_MOD_MAP = {
     "ffi": "tvm_ffi",
 }
 
-#: The root of the object hierarchy; every ``ObjectInfo.ancestors`` starts with it.
+#: Root of the object hierarchy.
 RUST_ROOT_TYPE_KEY = "ffi.Object"
-
-#: Keywords a reflected field name may collide with; they are spelled as raw
-#: identifiers (``r#type``), except the four that Rust forbids as raw
-#: identifiers, which get a trailing underscore instead.
-RUST_KEYWORDS = frozenset(
-    "as async await break const continue crate dyn else enum extern false fn for if impl in "
-    "let loop match mod move mut pub ref return self Self static struct super trait true type "
-    "unsafe use where while abstract become box do final gen macro override priv try typeof "
-    "unsized virtual yield".split()
-)
-RUST_NOT_RAW_IDENTIFIERS = frozenset({"self", "Self", "super", "crate"})

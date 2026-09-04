@@ -16,19 +16,15 @@
 # under the License.
 """The Rust backend's one-line directives: payload grammar and per-file storage.
 
-The pipeline hands every declared directive to the generator as
-``(name, payload, lineno)`` (see :class:`~tvm_ffi.stub.generator.Generator`);
-this module owns what the payloads mean. All three address one reflected field
-as ``<type_key>.<field>``::
+All three address one reflected field as ``<type_key>.<field>``::
 
     // tvm-ffi-stubgen(field): tirx.Add.a -> PrimExpr
     // tvm-ffi-stubgen(nullable): ir.Expr.span
     // tvm-ffi-stubgen(enum): tirx.For.kind -> ForKind(i32) { Serial=0, Parallel=1 }
 
-``field`` names the Rust type of the field's accessor (a bare name the file has
-in scope, or a ``::`` path to ``use``). ``nullable`` wraps the accessor's type in
-``Option``. ``enum`` declares an open integer newtype for the field and makes the
-accessor return it.
+``field`` sets the accessor's Rust type (a name in scope, or a ``::`` path to
+``use``); ``nullable`` wraps it in ``Option``; ``enum`` declares an open integer
+newtype the accessor returns.
 """
 
 from __future__ import annotations

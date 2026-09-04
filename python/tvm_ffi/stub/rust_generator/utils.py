@@ -14,10 +14,7 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-"""Rust generator helpers: ``use`` modelling, type rendering, identifier hygiene.
-
-The per-object orchestration lives in ``rust_generator.codegen``.
-"""
+"""Rust generator helpers: ``use`` modelling, type rendering, identifier spelling."""
 
 from __future__ import annotations
 
@@ -33,12 +30,10 @@ if TYPE_CHECKING:
 
 @dataclasses.dataclass(frozen=True, eq=True)
 class RustUse:
-    """A single Rust ``use`` item: ``use <path>;``.
+    """A Rust ``use`` item: ``use <path>;``.
 
-    Construction normalizes dotted FFI names into ``::`` paths, rewriting the
-    leading module via :data:`~.consts.RUST_MOD_MAP` (``ffi.String ->
-    tvm_ffi::String``); ``::`` paths pass through; bare names (``i64``,
-    ``bool``) stay bare and need no ``use``.
+    Dotted FFI names become ``::`` paths via :data:`~.consts.RUST_MOD_MAP`
+    (``ffi.String -> tvm_ffi::String``); bare names (``i64``) need no ``use``.
     """
 
     path: str
@@ -64,16 +59,10 @@ class RustUse:
 
 
 def builtin_mirror_name(type_key: str) -> str:
-    """Name of the header-only stand-in for a builtin type: ``ffi.IntEnum -> FfiIntEnumObj``.
+    """Name of the header-only stand-in for a builtin type (``ffi.IntEnum -> FfiIntEnumObj``).
 
-    The crate has no ``<Leaf>Obj`` struct for most builtin types, yet a type
-    deriving from one must embed a base whose ``TYPE_DEPTH`` is right:
-    ``derive(Object)`` computes the depth from the embedded base, and the
-    runtime instance check indexes the ancestor table with it, so embedding the
-    bare ``Object`` header under ``ffi.IntEnum`` would misplace every subtype.
-    Each file therefore defines one mirror per builtin ancestor it needs. The
-    module head stays as a prefix so a mirror never collides with a generated
-    ``<Leaf>Obj``.
+    ``derive(Object)`` takes ``TYPE_DEPTH`` from the embedded base, so a type
+    under a builtin needs a base at the builtin's depth; the crate has none.
     """
     head, _, leaf = type_key.rpartition(".")
     return f"{head.replace('.', '_').capitalize()}{leaf}Obj"
@@ -86,17 +75,12 @@ class RustImports:
     items: list[RustUse] = dataclasses.field(default_factory=list)
     directives: Directives = dataclasses.field(default_factory=Directives)
     builtin_mirrors: dict[str, str] = dataclasses.field(default_factory=dict)
-    """Builtin ancestors mirrored in this file, root first: type key -> the base its
-    mirror embeds (the crate's ``Object`` for a child of ``ffi.Object``, else the
-    parent's mirror name). See :func:`builtin_mirror_name`."""
+    """Builtin ancestors mirrored in this file, root first: type key -> the base each embeds."""
 
     def record_builtin_base(self, chain: list[str]) -> str:
-        """Record the mirrors for the builtin ancestor ``chain``; return the name to embed.
+        """Record the stand-ins for the builtin ``chain`` (root side first); return the last name.
 
-        ``chain`` lists a type's builtin ancestors below ``ffi.Object``, root
-        side first, ending with its parent; each is mirrored once per file. An
-        empty chain means the parent is ``ffi.Object`` itself, embedded as the
-        crate's ``Object`` header.
+        An empty chain (parent ``ffi.Object``) yields the crate's ``Object``.
         """
         base = self.record("tvm_ffi::Object")
         for key in chain:
@@ -105,16 +89,13 @@ class RustImports:
         return base
 
     def record(self, name: str) -> str:
-        """Record a ``use`` (deduped by path) and return the name to spell in code.
+        """Record a ``use`` (deduped) and return the name to spell in code.
 
-        That is the leaf, except when another path already claimed the same
-        leaf: then the full path is returned and no ``use`` is added. Bare
-        prelude/primitive names record no ``use``.
+        The leaf, or the full path when another path already claimed that leaf.
         """
         probe = RustUse(name)
         if not probe.as_use_line():
             return probe.leaf
-        # `items` stays small (a handful of `use`s per file): linear scans.
         for item in self.items:
             if item.path == probe.path:
                 return item.leaf
@@ -125,11 +106,7 @@ class RustImports:
 
 
 def render_rust_type(schema: TypeSchema, ty_render: Callable[[str], str | None]) -> str | None:
-    """Render a :class:`TypeSchema` as a Rust value type, or ``None`` when it has none.
-
-    ``ty_render`` maps a leaf origin to its in-scope Rust name (recording the
-    ``use`` it needs), or returns ``None`` for an origin without a Rust type.
-    """
+    """Render ``schema`` as a Rust value type via ``ty_render`` (leaf origin -> name), or ``None``."""
     origin, args = schema.origin, schema.args
     if origin in C.RUST_UNSUPPORTED_ORIGINS:
         return None
@@ -156,15 +133,5 @@ def _generic(base: str | None, *params: str | None) -> str | None:
 
 
 def rust_ident(name: str) -> str:
-    """Spell a reflected field name as a Rust identifier.
-
-    A trailing underscore (the C++ member convention) is dropped; a keyword
-    becomes a raw identifier, or gets a trailing underscore when Rust forbids
-    the raw form. The C ABI getter keeps the original name.
-    """
-    name = name.rstrip("_") or name
-    if name in C.RUST_NOT_RAW_IDENTIFIERS:
-        return f"{name}_"
-    if name in C.RUST_KEYWORDS:
-        return f"r#{name}"
-    return name
+    """Spell a reflected field name in Rust: the C++ trailing underscore is dropped."""
+    return name.rstrip("_") or name

@@ -16,14 +16,11 @@
 # under the License.
 """Rust code generation for ``tvm-ffi-stubgen``: the opaque binding form.
 
-Every reflected object renders as an *opaque* binding: a ``#[repr(C)]`` struct
-that embeds only its parent, the reference wrapper, read-only ``Deref``, the
-upcasts along the ancestor chain, and one accessor per reflected field that
-reads through the C ABI getter. The bytes of the object are never reproduced,
-so the binding is correct for every registered type; a later step upgrades the
-types whose layout the registry can prove.
-
-Per object, for ``tirx.IterVar`` deriving from ``ir.PrimExprConvertible``::
+Every reflected object renders as a ``#[repr(C)]`` struct embedding only its
+parent, a reference wrapper, ``Deref``, the upcasts along the ancestor chain,
+and one accessor per reflected field that reads through the C ABI getter. The
+object's bytes are never reproduced. For ``tirx.IterVar`` deriving from
+``ir.PrimExprConvertible``::
 
     #[repr(C)]
     #[derive(tvm_ffi::derive::Object)]
@@ -51,17 +48,11 @@ Per object, for ``tirx.IterVar`` deriving from ``ir.PrimExprConvertible``::
 
     tvm_ffi::impl_object_upcast!(IterVar => PrimExprConvertible);
 
-Nothing here constructs objects or calls methods: construction and behaviour
-go through the registered global functions, hand-written outside the markers.
-
-A parent among the ``ffi.*`` builtins (``ffi.IntEnum``, say) has no
-``<Leaf>Obj`` in the crate. Embedding the bare ``Object`` header instead would
-be wrong: ``derive(Object)`` derives ``TYPE_DEPTH`` from the embedded base and
-the runtime instance check indexes the ancestor table with it, so every
-subtype of such a type would fail to cast. The import section therefore
-defines a header-only mirror per builtin ancestor (``FfiEnumObj``,
-``FfiIntEnumObj``, ...) and the object embeds the last one; no ``Deref`` or
-upcast leads to a mirror.
+Construction and behaviour go through the registered global functions,
+hand-written outside the markers. A builtin parent (``ffi.IntEnum``, say) has
+no ``<Leaf>Obj`` in the crate: the import section defines a header-only
+stand-in per builtin ancestor, so ``derive(Object)`` computes the registry's
+``TYPE_DEPTH``.
 """
 
 from __future__ import annotations
@@ -88,9 +79,7 @@ class _ObjectRenderer:
     info: ObjectInfo
     imports: RustImports
     ty_map: dict[str, str]
-    #: Module segments of the file this object lands in (its type key minus the
-    #: leaf; ``tirx.transform.X`` -> ``("tirx", "transform")``): one file per
-    #: prefix, mounted at ``<out>/<seg>/.../mod.rs`` (see :func:`finalize_rust_module_tree`).
+    #: Module segments of the file this object lands in (``tirx.transform.X`` -> ``("tirx", "transform")``).
     mod_segments: tuple[str, ...]
 
     @property
@@ -112,12 +101,7 @@ class _ObjectRenderer:
     # --- name resolution ---------------------------------------------------
 
     def _ty_render(self, origin: str) -> str | None:
-        """Resolve a leaf origin to its in-scope Rust name, recording its ``use``.
-
-        Unmapped dotted names (object type keys) resolve against the generated
-        module tree. An unmapped bare origin (``const char*``) or a
-        ``ctypes.*`` sentinel (``void*``) has no Rust type.
-        """
+        """Resolve a leaf origin to its in-scope Rust name (recording its ``use``), or ``None``."""
         mapped = self.ty_map.get(origin)
         if mapped is None:
             if "." not in origin or origin.startswith("ctypes."):
@@ -126,15 +110,10 @@ class _ObjectRenderer:
         return self.imports.record(mapped)
 
     def _generated_type_path(self, type_key: str) -> str:
-        """Resolve a generated-tree type key to a path valid from this file.
+        """Spell a generated type key from this file.
 
-        A bare ``use ir::Expr;`` is broken in edition 2021 (it resolves to an
-        extern crate ``ir``), so cross-module references anchor at the shared
-        generated root: ``super::`` once per segment of this file's own module
-        path, then the referenced key's full path (``super::ir::Expr`` from
-        ``tirx/mod.rs``). A key in *this* file's module is a local item: bare
-        leaf, no ``use``. A builtin ``ffi.*`` key lives in the crate and passes
-        through for :class:`~.utils.RustUse` to rewrite.
+        Same module: the bare leaf. Elsewhere: ``super::`` per segment of this
+        file's module, then the full path (edition 2021 rejects ``use ir::Expr``).
         """
         head, _, _ = type_key.partition(".")
         if head in C_RUST.RUST_MOD_MAP:
@@ -146,23 +125,14 @@ class _ObjectRenderer:
         return f"{supers or 'self::'}{type_key.replace('.', '::')}"
 
     def _generated(self, type_key: str) -> bool:
-        """Whether ``type_key`` has a generated binding to refer to.
-
-        Builtin ``ffi.*`` types live in the crate, which has no ``<Leaf>Obj``
-        struct for them: a type under such a parent embeds a header-only
-        mirror (see :meth:`_base_type`) and upcasts only to generated ancestors.
-        """
+        """Whether ``type_key`` has a generated binding (builtin ``ffi.*`` types live in the crate)."""
         return type_key.partition(".")[0] not in C_RUST.RUST_MOD_MAP
 
     def _base_type(self) -> tuple[str, bool]:
-        """Resolve the struct embedded as ``base`` and whether it is a generated parent.
+        """Resolve the ``base`` struct and whether it is a generated parent.
 
-        A generated parent is embedded by name. Otherwise the parent is a
-        builtin: ``ffi.Object`` itself, embedded as the crate's ``Object``
-        header, or a deeper ``ffi.*`` type, embedded as the header-only mirror
-        the import section defines for every builtin ancestor on the way (see
-        :meth:`RustImports.record_builtin_base`), so that ``derive(Object)``
-        computes the same ``TYPE_DEPTH`` the registry holds.
+        A builtin parent below ``ffi.Object`` is embedded as its header-only
+        stand-in (see :meth:`RustImports.record_builtin_base`).
         """
         parent = self.info.parent_type_key
         if parent is not None and self._generated(parent):
@@ -170,17 +140,15 @@ class _ObjectRenderer:
         chain = [key for key in self.info.ancestors if key != C_RUST.RUST_ROOT_TYPE_KEY]
         if parent not in (None, C_RUST.RUST_ROOT_TYPE_KEY, *chain):
             chain.append(parent)
-        # A builtin type only ever derives from builtin types.
         assert not any(self._generated(key) for key in chain), (self.type_key, chain)
         return self.imports.record_builtin_base(chain), False
 
     # --- pieces ------------------------------------------------------------
 
     def _accessor_lines(self, field: NamedTypeSchema) -> list[str]:
-        """One ``pub fn <field>(&self) -> Result<T>`` reading through the C ABI getter.
+        """One ``pub fn <field>(&self) -> Result<T>`` through the C ABI getter.
 
-        ``T`` comes from the ``enum`` / ``field`` / ``nullable`` directives, else
-        from the schema; a field without a Rust type is read as ``Any``.
+        ``T`` comes from the directives, else the schema; without a Rust type, ``Any``.
         """
         directives = self.imports.directives
         target = f"{self.type_key}.{field.name}"
@@ -266,9 +234,7 @@ class _ObjectRenderer:
 
     def body(self) -> list[str]:
         """Build the Rust source lines for the object."""
-        # Boilerplate `use`s go through the same collector as field types. The
-        # derive macros are spelled by full path, never imported: their leaves
-        # collide with `tvm_ffi::Object` / `ObjectRef`.
+        # Derive macros are spelled by full path: their leaves collide with `Object` / `ObjectRef`.
         self.imports.record("std::ops::Deref")
         self.imports.record("tvm_ffi::ObjectArc")
         base, has_parent = self._base_type()
@@ -363,10 +329,9 @@ def generate_rust_object(
 
 
 def _builtin_mirror_lines(type_key: str, base: str) -> list[str]:
-    """Render the header-only stand-in for one builtin ancestor (see :func:`builtin_mirror_name`)."""
+    """Render the header-only stand-in for one builtin ancestor."""
     return [
-        f"/// Header-only stand-in for the builtin `{type_key}`, which the crate does not",
-        "/// mirror: it only gives `derive(Object)` the ancestor depth of the types below it.",
+        f"/// Header-only stand-in for the builtin `{type_key}`; it only carries the ancestor depth.",
         "#[allow(dead_code)]",
         "#[repr(C)]",
         "#[derive(tvm_ffi::derive::Object)]",
@@ -383,15 +348,11 @@ def generate_rust_import_section(
     opt: Options,
     defined_types: set[str],
 ) -> None:
-    """Render the ``use`` statements and the builtin mirrors into an ``import-section`` block.
+    """Render the ``use`` lines, then the builtin stand-ins, into an ``import-section`` block.
 
-    Imports for types defined in this same file are dropped; the rest are
-    deduped and sorted. The header-only mirrors of the builtin ancestors some
-    object of this file derives from follow, root first (see
-    :meth:`RustImports.record_builtin_base`).
+    Imports of types defined in this file are dropped; the rest are deduped and sorted.
     """
     assert len(code.lines) >= 2
-    # `record` never admits bare types, so every `as_use_line()` is non-empty.
     body = sorted({item.as_use_line() for item in imports.items if item.path not in defined_types})
     for type_key, base in imports.builtin_mirrors.items():
         body += ["", *_builtin_mirror_lines(type_key, base)]
@@ -437,12 +398,9 @@ def generate_rust_api_file(
 
 
 def finalize_rust_module_tree(init_path: Path, prefixes: set[str]) -> None:
-    """Stitch the generated tree under ``init_path`` into a valid Rust module tree.
+    """Declare each generated prefix with ``pub mod`` in its parent's ``mod.rs``.
 
-    Ensures every generated prefix is declared via ``pub mod`` in its parent's
-    ``mod.rs``, creating intermediate ``mod.rs`` files as needed; declarations
-    are appended only when absent. The user still mounts ``init_path`` with one
-    ``mod`` line at the crate root (stubgen does not edit ``lib.rs``/``main.rs``).
+    Missing ``mod.rs`` files are created; the user mounts ``init_path`` with one ``mod`` line.
     """
     children: dict[Path, set[str]] = {}
     for prefix in prefixes:
