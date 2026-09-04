@@ -53,6 +53,15 @@ Per object, for ``tirx.IterVar`` deriving from ``ir.PrimExprConvertible``::
 
 Nothing here constructs objects or calls methods: construction and behaviour
 go through the registered global functions, hand-written outside the markers.
+
+A parent among the ``ffi.*`` builtins (``ffi.IntEnum``, say) has no
+``<Leaf>Obj`` in the crate. Embedding the bare ``Object`` header instead would
+be wrong: ``derive(Object)`` derives ``TYPE_DEPTH`` from the embedded base and
+the runtime instance check indexes the ancestor table with it, so every
+subtype of such a type would fail to cast. The import section therefore
+defines a header-only mirror per builtin ancestor (``FfiEnumObj``,
+``FfiIntEnumObj``, ...) and the object embeds the last one; no ``Deref`` or
+upcast leads to a mirror.
 """
 
 from __future__ import annotations
@@ -62,7 +71,7 @@ from typing import TYPE_CHECKING
 
 from .. import consts as C
 from . import consts as C_RUST
-from .utils import RustImports, render_rust_type, rust_ident
+from .utils import RustImports, builtin_mirror_name, render_rust_type, rust_ident
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -140,21 +149,30 @@ class _ObjectRenderer:
         """Whether ``type_key`` has a generated binding to refer to.
 
         Builtin ``ffi.*`` types live in the crate, which has no ``<Leaf>Obj``
-        struct for them: a type under such a parent embeds the object header
-        and upcasts only to generated ancestors.
+        struct for them: a type under such a parent embeds a header-only
+        mirror (see :meth:`_base_type`) and upcasts only to generated ancestors.
         """
         return type_key.partition(".")[0] not in C_RUST.RUST_MOD_MAP
 
     def _base_type(self) -> tuple[str, bool]:
         """Resolve the struct embedded as ``base`` and whether it is a generated parent.
 
-        A root type, or one whose parent has no generated binding, embeds the
-        ``TVMFFIObject`` header instead.
+        A generated parent is embedded by name. Otherwise the parent is a
+        builtin: ``ffi.Object`` itself, embedded as the crate's ``Object``
+        header, or a deeper ``ffi.*`` type, embedded as the header-only mirror
+        the import section defines for every builtin ancestor on the way (see
+        :meth:`RustImports.record_builtin_base`), so that ``derive(Object)``
+        computes the same ``TYPE_DEPTH`` the registry holds.
         """
         parent = self.info.parent_type_key
-        if parent is None or not self._generated(parent):
-            return self.imports.record("tvm_ffi::Object"), False
-        return self.imports.record(self._generated_type_path(parent) + "Obj"), True
+        if parent is not None and self._generated(parent):
+            return self.imports.record(self._generated_type_path(parent) + "Obj"), True
+        chain = [key for key in self.info.ancestors if key != C_RUST.RUST_ROOT_TYPE_KEY]
+        if parent not in (None, C_RUST.RUST_ROOT_TYPE_KEY, *chain):
+            chain.append(parent)
+        # A builtin type only ever derives from builtin types.
+        assert not any(self._generated(key) for key in chain), (self.type_key, chain)
+        return self.imports.record_builtin_base(chain), False
 
     # --- pieces ------------------------------------------------------------
 
@@ -344,26 +362,43 @@ def generate_rust_object(
 # --- import section (`use` statements) --------------------------------------
 
 
+def _builtin_mirror_lines(type_key: str, base: str) -> list[str]:
+    """Render the header-only stand-in for one builtin ancestor (see :func:`builtin_mirror_name`)."""
+    return [
+        f"/// Header-only stand-in for the builtin `{type_key}`, which the crate does not",
+        "/// mirror: it only gives `derive(Object)` the ancestor depth of the types below it.",
+        "#[allow(dead_code)]",
+        "#[repr(C)]",
+        "#[derive(tvm_ffi::derive::Object)]",
+        f'#[type_key = "{type_key}"]',
+        f"struct {builtin_mirror_name(type_key)} {{",
+        f"    base: {base},",
+        "}",
+    ]
+
+
 def generate_rust_import_section(
     code: CodeBlock,
     imports: RustImports,
     opt: Options,
     defined_types: set[str],
 ) -> None:
-    """Render the collected ``use`` statements into an ``import-section`` block.
+    """Render the ``use`` statements and the builtin mirrors into an ``import-section`` block.
 
     Imports for types defined in this same file are dropped; the rest are
-    deduped and sorted.
+    deduped and sorted. The header-only mirrors of the builtin ancestors some
+    object of this file derives from follow, root first (see
+    :meth:`RustImports.record_builtin_base`).
     """
     assert len(code.lines) >= 2
     # `record` never admits bare types, so every `as_use_line()` is non-empty.
-    use_lines = sorted(
-        {item.as_use_line() for item in imports.items if item.path not in defined_types}
-    )
+    body = sorted({item.as_use_line() for item in imports.items if item.path not in defined_types})
+    for type_key, base in imports.builtin_mirrors.items():
+        body += ["", *_builtin_mirror_lines(type_key, base)]
     indent = " " * code.indent
     code.lines = [
         code.lines[0],
-        *[indent + line for line in use_lines],
+        *[(indent + line) if line else "" for line in body],
         code.lines[-1],
     ]
     _ = opt  # accepted for protocol parity

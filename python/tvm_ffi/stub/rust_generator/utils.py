@@ -63,12 +63,46 @@ class RustUse:
         return f"use {self.path};"
 
 
+def builtin_mirror_name(type_key: str) -> str:
+    """Name of the header-only stand-in for a builtin type: ``ffi.IntEnum -> FfiIntEnumObj``.
+
+    The crate has no ``<Leaf>Obj`` struct for most builtin types, yet a type
+    deriving from one must embed a base whose ``TYPE_DEPTH`` is right:
+    ``derive(Object)`` computes the depth from the embedded base, and the
+    runtime instance check indexes the ancestor table with it, so embedding the
+    bare ``Object`` header under ``ffi.IntEnum`` would misplace every subtype.
+    Each file therefore defines one mirror per builtin ancestor it needs. The
+    module head stays as a prefix so a mirror never collides with a generated
+    ``<Leaf>Obj``.
+    """
+    head, _, leaf = type_key.rpartition(".")
+    return f"{head.replace('.', '_').capitalize()}{leaf}Obj"
+
+
 @dataclasses.dataclass
 class RustImports:
     """The per-file collector: the ``use`` items and the Rust directives of one file."""
 
     items: list[RustUse] = dataclasses.field(default_factory=list)
     directives: Directives = dataclasses.field(default_factory=Directives)
+    builtin_mirrors: dict[str, str] = dataclasses.field(default_factory=dict)
+    """Builtin ancestors mirrored in this file, root first: type key -> the base its
+    mirror embeds (the crate's ``Object`` for a child of ``ffi.Object``, else the
+    parent's mirror name). See :func:`builtin_mirror_name`."""
+
+    def record_builtin_base(self, chain: list[str]) -> str:
+        """Record the mirrors for the builtin ancestor ``chain``; return the name to embed.
+
+        ``chain`` lists a type's builtin ancestors below ``ffi.Object``, root
+        side first, ending with its parent; each is mirrored once per file. An
+        empty chain means the parent is ``ffi.Object`` itself, embedded as the
+        crate's ``Object`` header.
+        """
+        base = self.record("tvm_ffi::Object")
+        for key in chain:
+            self.builtin_mirrors.setdefault(key, base)
+            base = builtin_mirror_name(key)
+        return base
 
     def record(self, name: str) -> str:
         """Record a ``use`` (deduped by path) and return the name to spell in code.

@@ -27,6 +27,9 @@ only the parent, a reference type, `Deref`, the upcasts along the ancestor
 chain, and one accessor per reflected field that reads through the C ABI
 getter. The object's bytes are never reproduced, so the binding is correct for
 any registered type; construction goes through the registered global functions.
+A parent among the `ffi.*` builtins (`ffi.IntEnum`, say) has no `<Leaf>Obj` in
+the crate: the import section then defines a header-only stand-in per builtin
+ancestor, so the type depth `derive(Object)` computes matches the registry.
 
 ## Build and run
 

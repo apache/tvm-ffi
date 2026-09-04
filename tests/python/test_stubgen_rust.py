@@ -314,7 +314,13 @@ def test_render_derived_object_cross_module() -> None:
 
 
 def test_render_object_under_builtin_parent() -> None:
-    """The crate has no `<Leaf>Obj` for builtin types: embed the header, upcast to nothing."""
+    """A builtin parent is embedded through header-only mirrors so `TYPE_DEPTH` stays right.
+
+    `derive(Object)` derives the depth from the embedded base and the runtime
+    instance check indexes the ancestor table with it: embedding the bare
+    `Object` header under `ffi.IntEnum` (depth 2) would give `demo.Color`
+    depth 1 instead of 3, and no subtype of it could be cast to it.
+    """
     info = _info(
         "demo.Color",
         (("value", TypeSchema("int")),),
@@ -322,10 +328,86 @@ def test_render_object_under_builtin_parent() -> None:
         ancestors=["ffi.Object", "ffi.Enum", "ffi.IntEnum"],
     )
     text, imports = _render(info)
-    assert "    base: Object," in text
+    assert "    base: FfiIntEnumObj," in text
+    # One mirror per builtin ancestor below `ffi.Object`, root first, chained through `base`.
+    assert imports.builtin_mirrors == {"ffi.Enum": "Object", "ffi.IntEnum": "FfiEnumObj"}
+    assert "tvm_ffi::Object" in _uses(imports)
+    # The mirrors are depth carriers only: no Deref to them, no upcast, no crate import.
     assert "impl Deref for ColorObj" not in text
     assert "impl_object_upcast" not in text
     assert not any("Enum" in path for path in _uses(imports))
+    # A direct child of `ffi.Object` embeds the crate's header and needs no mirror.
+    text, imports = _render(_info("demo.Root"))
+    assert "    base: Object," in text
+    assert imports.builtin_mirrors == {}
+    # A generated parent is embedded by name even when the chain passes through builtins.
+    red = _info(
+        "demo.Red",
+        parent="demo.Color",
+        ancestors=["ffi.Object", "ffi.Enum", "ffi.IntEnum", "demo.Color"],
+    )
+    text, imports = _render(red)
+    assert "    base: ColorObj," in text
+    assert imports.builtin_mirrors == {}
+
+
+BUILTIN_MIRRORS_EXPECTED = """\
+use std::ops::Deref;
+use tvm_ffi::Object;
+use tvm_ffi::ObjectArc;
+
+/// Header-only stand-in for the builtin `ffi.Enum`, which the crate does not
+/// mirror: it only gives `derive(Object)` the ancestor depth of the types below it.
+#[allow(dead_code)]
+#[repr(C)]
+#[derive(tvm_ffi::derive::Object)]
+#[type_key = "ffi.Enum"]
+struct FfiEnumObj {
+    base: Object,
+}
+
+/// Header-only stand-in for the builtin `ffi.IntEnum`, which the crate does not
+/// mirror: it only gives `derive(Object)` the ancestor depth of the types below it.
+#[allow(dead_code)]
+#[repr(C)]
+#[derive(tvm_ffi::derive::Object)]
+#[type_key = "ffi.IntEnum"]
+struct FfiIntEnumObj {
+    base: FfiEnumObj,
+}
+
+/// Header-only stand-in for the builtin `ffi.StrEnum`, which the crate does not
+/// mirror: it only gives `derive(Object)` the ancestor depth of the types below it.
+#[allow(dead_code)]
+#[repr(C)]
+#[derive(tvm_ffi::derive::Object)]
+#[type_key = "ffi.StrEnum"]
+struct FfiStrEnumObj {
+    base: FfiEnumObj,
+}"""
+
+
+def test_import_section_defines_builtin_mirrors_once() -> None:
+    """Objects sharing builtin ancestors share one mirror chain, rendered after the `use`s."""
+    imports = RustImports()
+    enum_chain = ["ffi.Object", "ffi.Enum"]
+    for type_key, parent in (
+        ("demo.Color", "ffi.IntEnum"),
+        ("demo.Mode", "ffi.IntEnum"),
+        ("demo.Flag", "ffi.Enum"),
+        ("demo.Op", "ffi.StrEnum"),
+    ):
+        ancestors = enum_chain if parent == "ffi.Enum" else [*enum_chain, parent]
+        _render(_info(type_key, parent=parent, ancestors=ancestors), imports)
+    block = CodeBlock(
+        kind="import-section",
+        param="",
+        lineno_start=1,
+        lineno_end=2,
+        lines=[f"{C.RUST_SYNTAX.begin} import-section", C.RUST_SYNTAX.end],
+    )
+    generate_rust_import_section(block, imports, Options(), defined_types=set())
+    assert "\n".join(block.lines[1:-1]) == BUILTIN_MIRRORS_EXPECTED
 
 
 ITER_VAR_EXPECTED = """\
@@ -561,6 +643,15 @@ def test_cli_init_generates_a_module_tree(tmp_path: Path, monkeypatch: pytest.Mo
         "tvm_ffi::impl_object_upcast!(TestCxxClassDerivedDerived => TestCxxClassBase, "
         "TestCxxClassDerivedDerived => TestCxxClassDerived);"
     ) in text
+    # Builtin parents: `ffi.Object -> ffi.Enum -> {ffi.IntEnum, ffi.StrEnum}` is mirrored once,
+    # in the import section, and the enum-derived fixtures embed the last mirror of their chain.
+    assert text.count("struct FfiEnumObj {\n    base: Object,\n}") == 1
+    assert text.count("struct FfiIntEnumObj {\n    base: FfiEnumObj,\n}") == 1
+    assert text.count("struct FfiStrEnumObj {\n    base: FfiEnumObj,\n}") == 1
+    assert text.index("struct FfiIntEnumObj") < text.index(f"{C.RUST_SYNTAX.begin} object/")
+    assert "pub struct TestEnumVariantObj {\n    base: FfiEnumObj,\n}" in text
+    assert "pub struct TestCxxIntEnumObj {\n    base: FfiIntEnumObj,\n}" in text
+    assert "pub struct TestCxxStrEnumObj {\n    base: FfiStrEnumObj,\n}" in text
     # Running again over the generated tree is a no-op.
     assert stub_cli.__main__() == 0
     assert (tmp_path / "testing" / "mod.rs").read_text(encoding="utf-8") == text

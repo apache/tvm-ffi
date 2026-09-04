@@ -66,6 +66,9 @@ RUST_MOD_MAP = {
     "ffi": "tvm_ffi",
 }
 
+#: The root of the object hierarchy; every ``ObjectInfo.ancestors`` starts with it.
+RUST_ROOT_TYPE_KEY = "ffi.Object"
+
 #: Keywords a reflected field name may collide with; they are spelled as raw
 #: identifiers (``r#type``), except the four that Rust forbids as raw
 #: identifiers, which get a trailing underscore instead.
