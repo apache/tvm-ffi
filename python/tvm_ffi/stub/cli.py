@@ -115,8 +115,7 @@ def __main__() -> int:
 def _run_stage(file: FileInfo, stage: Callable[[], None]) -> bool:
     """Run one stage over ``file``, reporting a failure without stopping the run.
 
-    Returns whether the failure was a :class:`DirectiveError`, which makes the
-    whole run exit non-zero.
+    Returns whether it was a :class:`DirectiveError` (the run then exits non-zero).
     """
     try:
         stage()

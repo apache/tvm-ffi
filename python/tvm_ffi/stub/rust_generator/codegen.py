@@ -17,37 +17,23 @@
 """Rust code generation for ``tvm-ffi-stubgen``.
 
 Every reflected object gets a ``#[repr(C)]`` object struct, a reference wrapper,
-read-only ``Deref``, and the upcasts along its ancestor chain. What the object
-struct holds depends on the verdict of :mod:`tvm_ffi.stub.layout`:
+``Deref``, and the upcasts along its ancestor chain. The struct's contents follow
+the verdict of :mod:`tvm_ffi.stub.layout`:
 
-- *complete*: the layout is reproducible, so the struct mirrors every physical
-  field at its real offset and width, public, borrowed directly. A ``const``
-  assertion pins the struct's ``size_of`` / ``align_of`` to the reflected facts,
-  so a mirror rustc lays out differently fails to compile. The type is also
-  allocatable from Rust: ``<Leaf>Obj::new`` (crate-private) takes every
-  physical field root to leaf so derived allocators can chain to it, and the
-  wrapper's public ``new`` takes the same parameters and does one
-  ``ObjectArc::new``. A ``custom-new`` directive leaves the wrapper's ``new``
-  to hand-written code; ``<Leaf>Obj::new`` is still generated for it to call.
-- *opaque*: the struct embeds only its parent, and one accessor per reflected
-  field reads through the C ABI getter. The bytes are never reproduced, so the
-  binding is correct for every registered type. Nothing allocates it.
+- *complete*: the struct mirrors every physical field at its real offset and
+  width, pinned by a ``const`` size/alignment assertion. ``<Leaf>Obj::new``
+  (crate-private) and the wrapper's ``new`` take every field root to leaf;
+  ``custom-new`` leaves the wrapper's ``new`` to hand-written code.
+- *opaque*: the struct embeds only its parent, and each field is read through
+  the C ABI getter. Nothing allocates it.
 
-The two target-language rules the classifier leaves to its caller live here: a
-field without a Rust mirror (``Optional<Any>``, a ``Union``, ``void*``, ...)
+A field without a Rust mirror (``Optional<Any>``, ``Union``, ``void*``, ...)
 makes the type opaque and is read as ``Any``; an ``opaque`` directive vetoes a
-reproducible layout. ``field`` / ``nullable`` / ``enum`` directives shape the
-field types of both forms; where a directive names a scalar width, it is checked
-against the reflected field size at generation time. ``upcast`` appends typed
-views to the ancestor chain.
-
-Nothing here calls methods or packed constructors: behaviour goes through the
-registered global functions, hand-written outside the markers. A builtin parent
-(``ffi.IntEnum``, say) has no ``<Leaf>Obj`` in the crate: the import section
-defines a header-only stand-in per builtin ancestor, so ``derive(Object)``
-computes the registry's ``TYPE_DEPTH``. A stand-in carries no bytes beyond the
-header, so a type under such a parent is always opaque (``no-mirror``), as is
-everything below it.
+reproducible layout; a scalar width named by a directive is checked against the
+reflected field size. A builtin parent (``ffi.IntEnum``, say) has no
+``<Leaf>Obj`` in the crate: the import section defines a header-only stand-in
+per builtin ancestor so ``derive(Object)`` computes the registry's
+``TYPE_DEPTH``, and everything under such a parent stays opaque (``no-mirror``).
 """
 
 from __future__ import annotations
@@ -174,8 +160,7 @@ class _ObjectRenderer:
         def renderable(field: NamedTypeSchema) -> bool:
             return self._field_mirror(owner_of[id(field)], field, scratch) is not None
 
-        # The crate never reproduces a builtin's bytes: a type under `ffi.IntEnum` embeds a
-        # header-only stand-in (see `_base_type`), so nothing below such a parent is complete.
+        # Builtin ancestors are header-only stand-ins (`_base_type`): none below is complete.
         unmirrored = {
             key
             for key in self.info.ancestors
@@ -192,10 +177,9 @@ class _ObjectRenderer:
     # --- field types ---------------------------------------------------------
 
     def _field_mirror(self, owner: str, field: NamedTypeSchema, imports: RustImports) -> str | None:
-        """Render the type of ``field`` in a ``#[repr(C)]`` mirror; ``None`` when it has none.
+        """Render the ``#[repr(C)]`` mirror type of ``field``, or ``None``.
 
-        Scalars take the width the registry recorded; ``Optional`` fields take
-        the in-place mirror of their C++ layout; directives override the rest.
+        Directives win; then scalars by reflected width, ``Optional`` by C++ layout, else schema.
         """
         directives = self.imports.directives
         target = f"{owner}.{field.name}"
@@ -228,11 +212,9 @@ class _ObjectRenderer:
     def _optional_mirror(self, field: NamedTypeSchema, imports: RustImports) -> str | None:
         """Mirror an ``Optional<T>`` field in place.
 
-        An ``ObjectRef``-derived payload is a pointer-sized nullable pointer in
-        C++, mirrored by Rust's niche-optimized ``Option<T>``. Every other
-        payload stays a 16-byte ``TVMFFIAny`` cell, mirrored by
-        ``tvm_ffi::Optional<T>``. ``Optional<Any>`` has no mirror, and neither
-        does a field whose size disagrees with its payload kind.
+        An object payload is a nullable pointer (``Option<T>``); any other payload
+        is a 16-byte ``TVMFFIAny`` cell (``tvm_ffi::Optional<T>``). ``Optional<Any>``
+        and a size mismatch have no mirror.
         """
         (payload,) = field.args  # TypeSchema's post_init enforces exactly one argument.
         if payload.origin == "Any":
@@ -386,7 +368,7 @@ class _ObjectRenderer:
     # --- allocators --------------------------------------------------------
 
     def _allocator_params(self, key: str, info: ObjectInfo) -> list[tuple[str, str]]:
-        """``(field, type)`` of every physical field root to leaf, as ``<key>Obj::new`` takes them."""
+        """``(field, type)`` of every physical field root to leaf, as ``<key>Obj::new`` takes."""
         parent = info.parent_type_key
         inherited: list[tuple[str, str]] = []
         if parent is not None and self._generated(parent):
@@ -398,9 +380,8 @@ class _ObjectRenderer:
     ) -> list[tuple[str, str]]:
         """Extend the parent's parameters with ``key``'s own fields by offset.
 
-        A ``field`` directive on ``<key>.<field>`` for an inherited field narrows
-        that parameter (``tirx.Add.ty -> PrimType``); the allocator body upcasts
-        it with ``.into()`` when handing it to the parent.
+        A ``field`` directive on an inherited field narrows that parameter; the
+        body hands it to the parent with ``.into()``.
         """
         params = [(name, self._narrowed(key, name, rust_type)) for name, rust_type in inherited]
         for field in sorted(info.fields, key=lambda f: f.offset or 0):
@@ -429,10 +410,7 @@ class _ObjectRenderer:
         ]
 
     def _allocator_sections(self, base: str, has_parent: bool) -> list[list[str]]:
-        """``<Leaf>Obj::new`` and, unless ``custom-new`` reserves it, the wrapper's ``new``.
-
-        Both take every physical field root to leaf.
-        """
+        """``<Leaf>Obj::new`` and, unless ``custom-new`` reserves it, the wrapper's ``new``."""
         inherited: list[tuple[str, str]] = []
         if has_parent:
             parent = self.info.parent_type_key

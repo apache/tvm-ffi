@@ -83,9 +83,8 @@ OpaqueReason: TypeAlias = Literal[
   a vptr, ...).
 - ``unrenderable-field``: the caller's predicate rejected a field.
 - ``by-directive``: the caller vetoed a type whose layout is reproducible.
-- ``no-mirror``: the caller's target never reproduces this type's bytes (a
-  builtin its runtime owns), whatever the layout says; everything below it
-  is ``parent-opaque``.
+- ``no-mirror``: the caller's target never reproduces this type's bytes
+  (a builtin its runtime owns); everything below it is ``parent-opaque``.
 """
 
 
@@ -195,8 +194,7 @@ def classify(
         complete; a type that is opaque for a layout reason keeps that reason.
     unmirrored
         Type keys whose bytes the target never reproduces (builtins its runtime
-        owns). Such a type is opaque with reason ``no-mirror`` before any layout
-        evidence is weighed, and so is every type below it (``parent-opaque``).
+        owns): opaque with reason ``no-mirror`` before any layout evidence is weighed.
     field_renderable
         Predicate deciding whether a reflected field has a native mirror in the
         target language. A rejected field demotes its type to opaque with

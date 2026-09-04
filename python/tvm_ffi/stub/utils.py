@@ -36,11 +36,7 @@ if TYPE_CHECKING:
 
 
 class DirectiveError(ValueError):
-    """A one-line directive is malformed, unknown, or disagrees with reflection.
-
-    The pipeline reports it and exits non-zero: generated code must never be
-    shaped by a directive it could not honour.
-    """
+    """A directive is malformed, unknown, or contradicts reflection; the run exits non-zero."""
 
 
 def _parse_type_schema(raw: str | dict[str, Any]) -> TypeSchema:

@@ -56,10 +56,7 @@ RUST_TY_MAP_DEFAULTS = {
 #: Origins without a crate mirror; such a field is read as ``tvm_ffi::Any``.
 RUST_UNSUPPORTED_ORIGINS = frozenset({"Dict", "List", "Union", "tuple"})
 
-#: Width-correct scalar for a ``#[repr(C)]`` struct field, keyed by
-#: ``(ffi origin, sizeof(T))``: the type schema erases scalar widths, so the
-#: width comes from the reflected field size. Signedness is not recorded;
-#: unsigned C++ fields render as the same-width signed type.
+#: Mirror scalar by ``(origin, reflected size)``: the schema erases widths and signedness.
 RUST_SCALAR_BY_SIZE = {
     ("int", 1): "i8",
     ("int", 2): "i16",
@@ -69,8 +66,7 @@ RUST_SCALAR_BY_SIZE = {
     ("float", 8): "f64",
 }
 
-#: Byte width of the scalar Rust types a ``field`` / ``enum`` directive may name,
-#: checked against the reflected field size at generation time.
+#: Byte width of the scalars a ``field`` / ``enum`` directive may name; checked against the field.
 RUST_SCALAR_WIDTHS = {
     "i8": 1,
     "u8": 1,
@@ -88,20 +84,12 @@ RUST_SCALAR_WIDTHS = {
 #: Size of an object reference field; ``nullable`` may only wrap those.
 RUST_POINTER_SIZE = 8
 
-#: In-place mirror of a non-object ``Optional<T>`` field: C++ ``ffi::Optional<T>``
-#: is a single 16-byte ``TVMFFIAny`` cell (``nullopt == kTVMFFINone``) for
-#: payloads that are not ``ObjectRef``-derived. Object payloads use the
-#: pointer-sized form (``nullopt == nullptr``), mirrored by Rust's ``Option<T>``.
+#: C++ ``Optional<T>`` is a 16-byte ``TVMFFIAny`` cell, or a nullable pointer for object payloads.
 RUST_OPTIONAL_PATH = "tvm_ffi::Optional"
 RUST_OPTIONAL_FIELD_SIZE = 16
 RUST_OBJECT_OPTIONAL_FIELD_SIZE = 8
 
-#: ``Optional`` payload origins whose C++ optional stays 16-byte Any-backed:
-#: everything that is not a pointer-sized object reference (strings and bytes
-#: are 16-byte values themselves). A nested ``Optional`` payload also stays
-#: Any-backed; it is special-cased where this set is consulted. The reflected
-#: field size is checked either way, so a payload this set misclassifies makes
-#: the field unrenderable rather than mis-mirrored.
+#: ``Optional`` payloads kept as the 16-byte cell (a nested ``Optional`` too); the size is checked.
 RUST_ANY_BACKED_OPTIONAL_PAYLOADS = frozenset(
     {"int", "float", "bool", "Device", "dtype", "DataType", "str", "bytes"}
 )
@@ -124,6 +112,5 @@ RUST_KEYWORDS = frozenset(
 )
 RUST_NOT_RAW_IDENTIFIERS = frozenset({"self", "Self", "super", "crate"})
 
-#: ``rustfmt``'s default ``max_width``: an allocator signature that would
-#: overflow it is rendered one parameter per line.
+#: ``rustfmt``'s default ``max_width``; a wider allocator signature wraps one parameter per line.
 RUST_MAX_WIDTH = 100

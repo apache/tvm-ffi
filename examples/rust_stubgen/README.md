@@ -28,8 +28,8 @@ reflected fields account for every byte of the object:
 - `rust_stubgen.IntRange` does, so its binding is *complete*: the struct mirrors
   the fields at their real offsets and widths, and Rust reads `range.begin`
   directly. A `const` assertion pins the struct's size and alignment to the
-  reflected facts. The object is allocated in Rust, by a generated function
-  that takes every field by value; a C++ function then reads it back.
+  reflected facts. A generated `new` allocates it in Rust from every field; a
+  C++ function then reads it back.
 - `rust_stubgen.IntPair` has a vtable in front of the object header, so its
   binding is *opaque*: the struct embeds only the parent and every field is read
   through an accessor that calls the C ABI getter. It is constructed by a
@@ -64,16 +64,14 @@ open newtype:
 // tvm-ffi-stubgen(enum): rust_stubgen.IntPair.kind -> PairKind(i32) { Unordered=0, Ordered=1 }
 ```
 
-It also marks `IntRange` as having a hand-written `new` (in `main.rs`, where it
-validates the extent), so the generator emits none of its own:
+It also marks `IntRange`'s `new` as hand-written (in `main.rs`, where it
+validates the extent), so the generator does not emit one:
 
 ```rust
 // tvm-ffi-stubgen(custom-new): rust_stubgen.IntRange
 ```
 
-Without the marker the generator emits `IntRange::new` itself, and a
-hand-written one is a duplicate definition. Three more directives are
-available: `field` names the Rust type of a field
+Three more directives are available: `field` names the Rust type of a field
 (`// tvm-ffi-stubgen(field): rust_stubgen.IntPair.a -> MyInt`), `nullable`
 wraps it in `Option` (`// tvm-ffi-stubgen(nullable): rust_stubgen.IntPair.a`),
 and `upcast` adds a conversion to a hand-written typed view
