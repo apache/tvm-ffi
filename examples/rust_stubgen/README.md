@@ -18,17 +18,17 @@
 # Rust Stub Generation
 
 `tvm-ffi-stubgen --target rust` turns the reflection metadata of a C++ library
-into Rust bindings. This example registers two objects in `src/int_pair.cc`
-and lets CMake regenerate `rust/src/generated/` after every build.
+into Rust bindings. This example registers one object, `rust_stubgen.IntPair`
+(`src/int_pair.cc`), and lets CMake regenerate `rust/src/generated/` after
+every build.
 
 Every object gets a `#[repr(C)]` wrapper, a reference type, `Deref`, and the
-upcasts along its ancestor chain. Both objects here are plain data, so their
-reflected fields account for every byte and the bindings are *complete*: the
-struct mirrors the fields at their real offsets and widths, a `const` assertion
-pins its size and alignment to the reflected facts, and a generated `new`
-allocates the object in Rust. `main.rs` builds an `IntPair` and an `IntRange`
-that way, reads `pair.a` directly, and hands them to C++ functions that read
-them back.
+upcasts along its ancestor chain. `IntPair` is plain data, so its reflected
+fields account for every byte and the binding is *complete*: the struct mirrors
+the fields at their real offsets and widths, a `const` assertion pins its size
+and alignment to the reflected facts, and a generated `new` allocates the object
+in Rust. `main.rs` builds one that way, reads `pair.a` directly, and hands it to
+a C++ function that reads it back.
 
 An object whose layout cannot be reproduced (a polymorphic one, say, with a
 vtable in front of the object header) is bound *opaquely* instead: the struct
@@ -64,15 +64,10 @@ open newtype:
 // tvm-ffi-stubgen(enum): rust_stubgen.IntPair.kind -> PairKind(i32) { Unordered=0, Ordered=1 }
 ```
 
-It also marks `IntRange`'s `new` as hand-written (in `main.rs`, where it
-validates the extent), so the generator does not emit one:
-
-```rust
-// tvm-ffi-stubgen(custom-new): rust_stubgen.IntRange
-```
-
-Three more directives are available: `field` names the Rust type of a field
+Four more directives are available: `field` names the Rust type of a field
 (`// tvm-ffi-stubgen(field): rust_stubgen.IntPair.a -> MyInt`), `nullable`
 wraps it in `Option` (`// tvm-ffi-stubgen(nullable): rust_stubgen.IntPair.a`),
-and `upcast` adds a conversion to a hand-written typed view
-(`// tvm-ffi-stubgen(upcast): rust_stubgen.IntRange -> MyView`).
+`upcast` adds a conversion to a hand-written typed view
+(`// tvm-ffi-stubgen(upcast): rust_stubgen.IntPair -> MyView`), and
+`custom-new` keeps the generator from emitting the wrapper's `new` when it is
+hand-written (`// tvm-ffi-stubgen(custom-new): rust_stubgen.IntPair`).

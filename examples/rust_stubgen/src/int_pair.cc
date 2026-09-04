@@ -18,7 +18,7 @@
  */
 /*!
  * \file int_pair.cc
- * \brief A tvm-ffi library that registers two objects for the Rust stub generator.
+ * \brief A tvm-ffi library that registers one object for the Rust stub generator.
  */
 #include <tvm/ffi/tvm_ffi.h>
 
@@ -29,9 +29,9 @@ namespace rust_stubgen {
 namespace ffi = tvm::ffi;
 
 // [object.begin]
-// Plain data objects: every byte is accounted for by a reflected field, so the
-// generated bindings mirror the layout; Rust allocates them and reads the fields
-// directly, and the registered functions below read them back.
+// A plain data object: every byte is accounted for by a reflected field, so the
+// generated binding mirrors the layout; Rust allocates it and reads the fields
+// directly, and the registered function below reads it back.
 class IntPairObj : public ffi::Object {
  public:
   int64_t a;
@@ -49,34 +49,13 @@ class IntPair : public ffi::ObjectRef {
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(IntPair, ffi::ObjectRef, IntPairObj);
 };
 
-class IntRangeObj : public ffi::Object {
- public:
-  int64_t begin;
-  int32_t extent;
-
-  IntRangeObj(int64_t begin, int32_t extent) : begin(begin), extent(extent) {}
-
-  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("rust_stubgen.IntRange", IntRangeObj, ffi::Object);
-};
-
-class IntRange : public ffi::ObjectRef {
- public:
-  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(IntRange, ffi::ObjectRef, IntRangeObj);
-};
-
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::ObjectDef<IntPairObj>(refl::init(false))
       .def_ro("a", &IntPairObj::a, "the first operand")
       .def_ro("b", &IntPairObj::b, "the second operand")
       .def_ro("kind", &IntPairObj::kind, "0 = unordered, 1 = ordered");
-  refl::ObjectDef<IntRangeObj>(refl::init(false))
-      .def_ro("begin", &IntRangeObj::begin, "the first value")
-      .def_ro("extent", &IntRangeObj::extent, "the number of values");
-  refl::GlobalDef()
-      .def("rust_stubgen.IntPairSum", [](const IntPair& pair) { return pair->Sum(); })
-      .def("rust_stubgen.IntRangeEnd",
-           [](const IntRange& range) { return range->begin + range->extent; });
+  refl::GlobalDef().def("rust_stubgen.IntPairSum", [](const IntPair& pair) { return pair->Sum(); });
 }
 // [object.end]
 
