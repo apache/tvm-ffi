@@ -43,7 +43,8 @@ cpp = ["ninja"]
 
 [dependency-groups]
 torch = [
-  "torch; python_version < '3.14'", # pytorch does not yet ship with 3.14t
+  # TODO: Remove the Windows ARM64 exclusion once official PyTorch wheels are available.
+  "torch; python_version < '3.14' and (platform_system != 'Windows' or platform_machine != 'ARM64')",
   "setuptools",                     # setuptools is needed by torch jit for best perf
   "ninja",
   "numpy",
@@ -266,7 +267,7 @@ archs = ["x86_64", "arm64"]
 environment = { MACOSX_DEPLOYMENT_TARGET = "10.14" }
 
 [tool.cibuildwheel.windows]
-archs = ["AMD64"]
+archs = ["AMD64", "ARM64"]
 repair-wheel-command = "delvewheel repair --ignore-existing -w {dest_dir} -v {wheel}"
 
 [tool.ty.environment]
