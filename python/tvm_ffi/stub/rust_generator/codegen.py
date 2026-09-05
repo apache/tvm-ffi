@@ -35,6 +35,12 @@ reflected field size. A builtin parent (``ffi.IntEnum``, say) has no
 ``<Leaf>Obj`` in the crate: the import section defines a header-only stand-in
 per builtin ancestor so ``derive(Object)`` computes the registry's
 ``TYPE_DEPTH``, and everything under such a parent stays opaque (``no-mirror``).
+
+Every type key an object refers to (parent, ancestors, field types) must be
+provided in the same run: ``ffi.*`` by the crate, a ``ty-map`` by a hand-written
+binding whose object struct is ``<Name>Obj``, anything else by an ``object/``
+block in one of the processed files. Otherwise the block is an error naming the
+missing keys, so a partial binding never references a module that does not exist.
 """
 
 from __future__ import annotations
@@ -49,6 +55,7 @@ from . import consts as C_RUST
 from .utils import RustImports, builtin_mirror_name, render_rust_type, rust_ident
 
 if TYPE_CHECKING:
+    from collections.abc import Container
     from pathlib import Path
 
     from ..file_utils import CodeBlock
@@ -83,6 +90,10 @@ class _ObjectRenderer:
     ty_map: dict[str, str]
     #: Module segments of the file this object lands in (``tirx.transform.X`` -> ``("tirx", "transform")``).
     mod_segments: tuple[str, ...]
+    #: Type keys with an ``object/`` block somewhere in this run (see :meth:`_provider`).
+    declared: Container[str]
+    #: Referenced type keys nobody provides; reported together once the body is built.
+    missing: set[str] = dataclasses.field(default_factory=set)
 
     @property
     def type_key(self) -> str:
@@ -108,6 +119,7 @@ class _ObjectRenderer:
         if mapped is None:
             if "." not in origin or origin.startswith("ctypes."):
                 return None
+            self._provider(origin)  # the crate or this run; a key nobody provides is recorded
             mapped = self._generated_type_path(origin)
         return imports.record(mapped)
 
@@ -129,23 +141,38 @@ class _ObjectRenderer:
         supers = "super::" * len(self.mod_segments)
         return f"{supers or 'self::'}{type_key.replace('.', '::')}"
 
-    def _generated(self, type_key: str) -> bool:
-        """Whether ``type_key`` has a generated binding (builtin ``ffi.*`` types live in the crate)."""
-        return type_key.partition(".")[0] not in C_RUST.RUST_MOD_MAP
+    def _provider(self, type_key: str) -> str | None:
+        """Who provides the binding of ``type_key``; a key nobody does is recorded in :attr:`missing`.
+
+        ``"crate"`` for builtin ``ffi.*`` types, ``"mapped"`` for a ``ty-map`` to a
+        hand-written binding, ``"generated"`` for an ``object/`` block in this run.
+        """
+        if type_key.partition(".")[0] in C_RUST.RUST_MOD_MAP:
+            return "crate"
+        if type_key in self.ty_map:
+            return "mapped"
+        if type_key in self.declared:
+            return "generated"
+        self.missing.add(type_key)
+        return None
 
     def _base_type(self) -> tuple[str, bool]:
-        """Resolve the ``base`` struct and whether it is a generated parent.
+        """Resolve the ``base`` struct and whether it is a generated or ``ty-map``'d parent.
 
         A builtin parent below ``ffi.Object`` is embedded as its header-only
         stand-in (see :meth:`RustImports.record_builtin_base`).
         """
         parent = self.info.parent_type_key
-        if parent is not None and self._generated(parent):
-            return self.imports.record(self._generated_type_path(parent) + "Obj"), True
+        if parent is not None:
+            provider = self._provider(parent)
+            if provider == "mapped":
+                return self.imports.record(self.ty_map[parent] + "Obj"), True
+            if provider != "crate":  # generated in this run, or missing (reported after the body)
+                return self.imports.record(self._generated_type_path(parent) + "Obj"), True
         chain = [key for key in self.info.ancestors if key != C_RUST.RUST_ROOT_TYPE_KEY]
         if parent not in (None, C_RUST.RUST_ROOT_TYPE_KEY, *chain):
             chain.append(parent)
-        assert not any(self._generated(key) for key in chain), (self.type_key, chain)
+        assert all(self._provider(key) == "crate" for key in chain), (self.type_key, chain)
         return self.imports.record_builtin_base(chain), False
 
     # --- classification ----------------------------------------------------
@@ -164,7 +191,7 @@ class _ObjectRenderer:
         unmirrored = {
             key
             for key in self.info.ancestors
-            if key != C_RUST.RUST_ROOT_TYPE_KEY and not self._generated(key)
+            if key != C_RUST.RUST_ROOT_TYPE_KEY and self._provider(key) == "crate"
         }
         verdicts = classify(
             infos,
@@ -317,11 +344,13 @@ class _ObjectRenderer:
 
     def _upcast_lines(self) -> list[str]:
         """``impl_object_upcast!`` to every ancestor's wrapper, then the ``upcast`` directives."""
-        targets = [
-            self.imports.record(self._generated_type_path(key))
-            for key in self.info.ancestors
-            if self._generated(key)
-        ]
+        targets: list[str] = []
+        for key in self.info.ancestors:
+            provider = self._provider(key)
+            if provider == "mapped":
+                targets.append(self.imports.record(self.ty_map[key]))
+            elif provider != "crate":
+                targets.append(self.imports.record(self._generated_type_path(key)))
         for view in self.imports.directives.upcasts.get(self.type_key, []):
             targets.append(self.imports.record(view) if "::" in view else view)
         if not targets:
@@ -368,7 +397,7 @@ class _ObjectRenderer:
         """``(field, type)`` of every physical field root to leaf, as ``<key>Obj::new`` takes."""
         parent = info.parent_type_key
         inherited: list[tuple[str, str]] = []
-        if parent is not None and self._generated(parent):
+        if parent is not None and self._provider(parent) != "crate":
             inherited = self._allocator_params(parent, object_info_from_type_key(parent))
         return self._level_params(key, info, inherited)
 
@@ -518,8 +547,12 @@ def generate_rust_object(
     imports: RustImports,
     opt: Options,
     obj_info: ObjectInfo,
+    declared: Container[str],
 ) -> None:
-    """Emit the Rust binding of ``obj_info`` into an ``object/<key>`` block."""
+    """Emit the Rust binding of ``obj_info`` into an ``object/<key>`` block.
+
+    Raises ``ValueError`` when it refers to a type key this run does not provide.
+    """
     assert len(code.lines) >= 2
     assert isinstance(obj_info.type_key, str)
     renderer = _ObjectRenderer(
@@ -527,8 +560,15 @@ def generate_rust_object(
         imports=imports,
         ty_map=ty_map,
         mod_segments=tuple(obj_info.type_key.split(".")[:-1]),
+        declared=declared,
     )
     body = renderer.body()
+    if renderer.missing:
+        keys = ", ".join(f"`{key}`" for key in sorted(renderer.missing))
+        raise ValueError(
+            f"`{obj_info.type_key}` (line {code.lineno_start}) depends on {keys}, which this run "
+            "does not ask for: add an `object/<key>` block or a `ty-map` directive for each"
+        )
     indent = " " * code.indent
     code.lines = [
         code.lines[0],

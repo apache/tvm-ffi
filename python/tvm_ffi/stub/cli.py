@@ -39,6 +39,8 @@ from .lib_state import (
 from .utils import FuncInfo, InitConfig, Options
 
 if TYPE_CHECKING:
+    from collections.abc import Container
+
     from .generator import Generator
 
 
@@ -97,6 +99,13 @@ def __main__() -> int:
     # Stage 3: Process
     # - `tvm-ffi-stubgen(begin): global/...`
     # - `tvm-ffi-stubgen(begin): object/...`
+    # Every `object/` block of the run: what a generated binding may refer to.
+    declared = frozenset(
+        code.param
+        for file in files
+        for code in file.code_blocks
+        if code.kind == "object" and isinstance(code.param, str)
+    )
     for file in files:
         if opt.verbose:
             print(f"{C.TERM_CYAN}[File] {file.path}{C.TERM_RESET}")
@@ -107,6 +116,7 @@ def __main__() -> int:
                 ty_map,
                 global_funcs,
                 generator=generator,
+                declared=declared,
             )
         except Exception:
             failed += 1
@@ -238,6 +248,7 @@ def _stage_3(  # noqa: PLR0912
     ty_map: dict[str, str],
     global_funcs: dict[str, list[FuncInfo]],
     generator: Generator,
+    declared: Container[str] = frozenset(),
 ) -> bool:
     """Process one file's blocks; return whether its content is (or would be) changed."""
     defined_funcs: set[str] = set()
@@ -268,7 +279,7 @@ def _stage_3(  # noqa: PLR0912
             obj_info = object_info_from_type_key(type_key)
             type_key = ty_map.get(type_key, type_key)
             defined_types.add(generator.canonical_type_name(type_key))
-            generator.generate_object_block(code, ty_map, imports, opt, obj_info)
+            generator.generate_object_block(code, ty_map, imports, opt, obj_info, declared)
     # Stage 4. Add imports for used types.
     for code in file.code_blocks:
         if code.kind == "import-section":

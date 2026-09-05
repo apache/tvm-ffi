@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Iterator
+from collections.abc import Container, Iterator
 from pathlib import Path
 
 import pytest
@@ -27,7 +27,7 @@ import tvm_ffi.stub.cli as stub_cli
 import tvm_ffi.testing  # noqa: F401  (loads the `testing.*` fixture types)
 from tvm_ffi.core import TypeSchema
 from tvm_ffi.stub import consts as C
-from tvm_ffi.stub.cli import _stage_3
+from tvm_ffi.stub.cli import _stage_1, _stage_3
 from tvm_ffi.stub.file_utils import CodeBlock, FileInfo
 from tvm_ffi.stub.generator import get_generator
 from tvm_ffi.stub.lib_state import object_info_from_type_key
@@ -118,12 +118,26 @@ def _object_block(type_key: str) -> CodeBlock:
     )
 
 
-def _render(info: ObjectInfo, imports: RustImports | None = None) -> tuple[str, RustImports]:
+class _Everything:
+    """Stands in for the run's declared type keys when a test does not care: all are asked for."""
+
+    def __contains__(self, key: object) -> bool:
+        return True
+
+
+ALL_DECLARED = _Everything()
+
+
+def _render(
+    info: ObjectInfo,
+    imports: RustImports | None = None,
+    declared: Container[str] = ALL_DECLARED,
+) -> tuple[str, RustImports]:
     """Render ``info`` into a fresh object block; return the body text and the collector."""
     imports = RustImports() if imports is None else imports
     assert info.type_key is not None
     block = _object_block(info.type_key)
-    generate_rust_object(block, RUST.default_ty_map(), imports, Options(), info)
+    generate_rust_object(block, RUST.default_ty_map(), imports, Options(), info, declared)
     return "\n".join(block.lines[1:-1]), imports
 
 
@@ -1227,3 +1241,64 @@ def test_cli_check_rejects_init_flags(tmp_path: Path, monkeypatch: pytest.Monkey
     with pytest.raises(SystemExit) as excinfo:
         stub_cli.__main__()
     assert excinfo.value.code == 2
+
+
+# ---------------------------------------------------------------------------
+# Partial generation: every referenced type key must be provided in the run
+# ---------------------------------------------------------------------------
+
+
+def test_unasked_dependencies_are_an_error() -> None:
+    info = _info("tirx.Add", (_field("a", "tirx.Var"),), parent="ir.Expr")
+    expected = (
+        r"`tirx.Add` \(line 1\) depends on `ir.Expr`, `tirx.Var`, which this run does not ask"
+    )
+    with pytest.raises(ValueError, match=expected):
+        _render(info, declared=frozenset({"tirx.Add"}))
+    # Declared in another file of the run: reached by module path, as before.
+    text, imports = _render(info, declared=frozenset({"tirx.Add", "ir.Expr", "tirx.Var"}))
+    assert "    base: ExprObj," in text
+    assert "pub fn a(&self) -> Result<Var> {" in text  # same module: a bare name
+    assert {"super::ir::ExprObj", "super::ir::Expr"} <= _uses(imports)
+
+
+def test_ty_map_parent_redirects_base_deref_and_upcast() -> None:
+    info = _info("tirx.Add", parent="ir.Expr", ancestors=["ffi.Object", "ir.Expr"])
+    ty_map = {**RUST.default_ty_map(), "ir.Expr": "crate::ir::Expr"}
+    block = _object_block("tirx.Add")
+    imports = RustImports()
+    generate_rust_object(block, ty_map, imports, Options(), info, frozenset({"tirx.Add"}))
+    text = "\n".join(block.lines[1:-1])
+    assert "    base: ExprObj," in text
+    assert "impl Deref for AddObj {\n    type Target = ExprObj;" in text
+    assert text.endswith("tvm_ffi::impl_object_upcast!(Add => Expr);")
+    assert {"crate::ir::ExprObj", "crate::ir::Expr"} <= _uses(imports)
+    assert not any(path.startswith("super::") for path in _uses(imports))
+
+
+def test_stage_3_checks_dependencies_across_the_run(tmp_path: Path) -> None:
+    src = tmp_path / "mod.rs"
+    blocks = [
+        f"{C.RUST_SYNTAX.begin} import-section",
+        C.RUST_SYNTAX.end,
+        f"{C.RUST_SYNTAX.begin} object/testing.TestCxxClassDerived",
+        C.RUST_SYNTAX.end,
+        "",
+    ]
+    declared = frozenset({"testing.TestCxxClassDerived"})
+    src.write_text("\n".join(blocks), encoding="utf-8")
+    info = FileInfo.from_file(src)
+    assert info is not None
+    with pytest.raises(ValueError, match=r"depends on `testing\.TestCxxClassBase`"):
+        _stage_3(info, Options(dry_run=True), RUST.default_ty_map(), {}, RUST, declared)
+    # A `ty-map` names a hand-written parent; its `<Name>Obj` becomes the base slot.
+    mapped = f"{C.RUST_SYNTAX.ty_map} testing.TestCxxClassBase -> crate::hand::TestCxxClassBase"
+    src.write_text("\n".join([mapped, *blocks]), encoding="utf-8")
+    info = FileInfo.from_file(src)
+    assert info is not None
+    ty_map = RUST.default_ty_map()
+    _stage_1(info, ty_map)
+    _stage_3(info, Options(dry_run=True), ty_map, {}, RUST, declared)
+    text = "\n".join(line for block in info.code_blocks for line in block.lines)
+    assert "    base: TestCxxClassBaseObj," in text
+    assert "use crate::hand::TestCxxClassBaseObj;" in text

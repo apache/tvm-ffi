@@ -35,6 +35,7 @@ from .codegen import (
 from .utils import RustImports, RustUse
 
 if TYPE_CHECKING:
+    from collections.abc import Container
     from pathlib import Path
 
     from ..file_utils import CodeBlock
@@ -93,9 +94,10 @@ class RustGenerator:
         imports: RustImports,
         opt: Options,
         obj_info: ObjectInfo,
+        declared: Container[str] = frozenset(),
     ) -> None:
         """Emit the opaque Rust binding for an ``object/<key>`` block."""
-        generate_rust_object(code, ty_map, imports, opt, obj_info)
+        generate_rust_object(code, ty_map, imports, opt, obj_info, declared)
 
     def generate_import_section_block(
         self, code: CodeBlock, imports: RustImports, opt: Options, defined_types: set[str]
