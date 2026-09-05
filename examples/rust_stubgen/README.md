@@ -71,3 +71,14 @@ wraps it in `Option` (`// tvm-ffi-stubgen(nullable): rust_stubgen.IntPair.a`),
 (`// tvm-ffi-stubgen(upcast): rust_stubgen.IntPair -> MyView`), and
 `custom-new` names the generated allocator `from_complete_fields` when `new`
 is hand-written (`// tvm-ffi-stubgen(custom-new): rust_stubgen.IntPair`).
+
+## Partial generation
+
+Every type an object refers to (its parent, its ancestors, the types of its
+fields) has to be provided in the same `tvm-ffi-stubgen` run: `ffi.*` types
+come from the `tvm-ffi` crate, an `object/<key>` block in any processed file
+generates it, and a `ty-map` points at a hand-written binding whose object
+struct is named `<Name>Obj`
+(`// tvm-ffi-stubgen(ty-map): rust_stubgen.IntPair -> crate::hand::IntPair`).
+Anything else is an error listing the missing keys, so a partial binding never
+references a module that does not exist.

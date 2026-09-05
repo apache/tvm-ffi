@@ -32,6 +32,7 @@ from . import consts as PC
 from .utils import ImportItem, PythonImports
 
 if TYPE_CHECKING:
+    from collections.abc import Container
     from pathlib import Path
 
     from ..file_utils import CodeBlock
@@ -94,6 +95,7 @@ class PythonGenerator:
         imports: PythonImports,
         opt: Options,
         obj_info: ObjectInfo,
+        declared: Container[str] = frozenset(),
     ) -> None:
         """Emit a Python class definition for an ``object/<key>`` block."""
         G.generate_python_object(code, ty_map, imports.items, opt, obj_info)

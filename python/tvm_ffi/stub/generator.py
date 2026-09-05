@@ -45,6 +45,7 @@ from .python_generator import PythonGenerator
 from .rust_generator import RustGenerator
 
 if TYPE_CHECKING:
+    from collections.abc import Container
     from pathlib import Path
 
     from .file_utils import CodeBlock
@@ -133,8 +134,13 @@ class Generator(Protocol):
         imports: Any,
         opt: Options,
         obj_info: ObjectInfo,
+        declared: Container[str] = frozenset(),
     ) -> None:
-        """Emit a type definition (fields + methods + init) for an ``object/<key>`` block."""
+        """Emit a type definition (fields + methods + init) for an ``object/<key>`` block.
+
+        ``declared`` lists the type keys that have an ``object/`` block anywhere in
+        this run, for generators that must know what a binding may refer to.
+        """
         ...
 
     def generate_import_section_block(
