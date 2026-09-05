@@ -17,20 +17,57 @@
  * under the License.
  */
 
-//! Traversal tests using built-in C++ hooks and primitive leaf behavior.
+//! Traversal and reflection tests using types registered by C++ at startup.
 //! Tests that register custom types live in `test_structural_visit_fixtures.rs`,
 //! which Cargo runs in a separate process.
 
 use std::cell::{Cell, RefCell};
+use tvm_ffi::object::ObjectRef;
 use tvm_ffi::{
     dispatch, get_type_attr, structural_visit, structural_walk, Any, Array, DLDataType,
-    DLDataTypeCode, DefRegionKind, Error, Map, Object, Result, String as FfiString,
-    StructuralVisitor, TypeIndex, VisitCallbacks, VisitContext, VisitInterrupt, VisitValue,
-    WalkOrder, WalkResult, RUNTIME_ERROR,
+    DLDataTypeCode, DefRegionKind, Error, FieldGetter, Function, Map, Object, ObjectRefCore,
+    Result, String as FfiString, StructuralVisitor, TypeIndex, VisitCallbacks, VisitContext,
+    VisitInterrupt, VisitValue, WalkOrder, WalkResult, RUNTIME_ERROR,
 };
 
 fn runtime_error(message: &str) -> Error {
     Error::new(RUNTIME_ERROR, message, "")
+}
+
+#[test]
+fn public_reflection_access_uses_registered_field_and_type_attr() {
+    // Keep the existing C++ test library linked so its startup registrations
+    // are available even when this test is run by itself.
+    assert_eq!(
+        unsafe { tvm_ffi::tvm_ffi_sys::TVMFFITestingDummyTarget() },
+        0
+    );
+    let root = Function::get_global("ffi.MakeObjectFromPackedArgs")
+        .unwrap()
+        .call_tuple((
+            FfiString::from("testing.TestObjectBase"),
+            FfiString::from("v_str"),
+            FfiString::from("an owning C++ reflected field value"),
+        ))
+        .unwrap();
+    let type_index = root.type_index();
+    let root = ObjectRef::try_from(root).unwrap();
+
+    let getter = FieldGetter::new(type_index, "v_str").unwrap();
+    let selected = getter
+        .get::<_, FfiString>(&**ObjectRef::data(&root))
+        .unwrap();
+    drop(root);
+    assert_eq!(selected.as_str(), "an owning C++ reflected field value");
+
+    let wrong_type = Array::new(vec![0i64]);
+    assert!(getter.get_any(&**Array::data(&wrong_type)).is_err());
+    assert!(FieldGetter::new(type_index, "missing").is_err());
+
+    // ObjectDef registers this Function-valued attribute for copyable C++ types.
+    assert!(Function::try_from(get_type_attr(type_index, "__ffi_shallow_copy__").unwrap()).is_ok());
+    assert!(Function::from_type_attr(type_index, "__ffi_shallow_copy__").is_ok());
+    assert!(get_type_attr(type_index, "missing").is_none());
 }
 
 #[test]

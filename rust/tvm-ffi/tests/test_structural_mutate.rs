@@ -21,7 +21,9 @@ use std::cell::{Cell, RefCell};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{LazyLock, Mutex};
 
+use tvm_ffi::collections::map::MapObj;
 use tvm_ffi::derive::{Object as DeriveObject, ObjectRef as DeriveObjectRef};
+use tvm_ffi::function::FunctionObj;
 use tvm_ffi::object::ObjectRef;
 use tvm_ffi::tvm_ffi_sys::{
     TVMFFIAny, TVMFFIAnyViewToOwnedAny, TVMFFIByteArray, TVMFFIFieldFlagBitMask, TVMFFIFieldInfo,
@@ -91,20 +93,6 @@ struct RustPairObj {
 #[derive(DeriveObjectRef, Clone)]
 struct RustPair {
     data: ObjectArc<RustPairObj>,
-}
-
-#[repr(C)]
-#[derive(DeriveObject)]
-#[type_key = "testing.RustStructuralNoCopy"]
-#[type_final]
-struct RustNoCopyObj {
-    base: Object,
-}
-
-#[repr(C)]
-#[derive(DeriveObjectRef, Clone)]
-struct RustNoCopy {
-    data: ObjectArc<RustNoCopyObj>,
 }
 
 #[repr(C)]
@@ -317,6 +305,9 @@ fn register_function_attr(type_index: i32, name: &'static str, function: Functio
     );
 }
 
+// Registering custom hooks can relocate columns used by built-in container
+// hooks. Every test must wait for this initializer before reading reflection
+// data, including tests that only use types registered by C++.
 static REGISTER_TEST_TYPES: LazyLock<()> = LazyLock::new(|| {
     register_test_type(
         RustDagNodeObj::TYPE_KEY,
@@ -327,11 +318,6 @@ static REGISTER_TEST_TYPES: LazyLock<()> = LazyLock::new(|| {
         RustFreeVarObj::TYPE_KEY,
         std::mem::size_of::<RustFreeVarObj>(),
         TVMFFISEqHashKind::kTVMFFISEqHashKindFreeVar,
-    );
-    register_test_type(
-        RustNoCopyObj::TYPE_KEY,
-        std::mem::size_of::<RustNoCopyObj>(),
-        TVMFFISEqHashKind::kTVMFFISEqHashKindTreeNode,
     );
     register_test_type(
         RustHookNodeObj::TYPE_KEY,
@@ -488,15 +474,6 @@ fn rust_pair(first: impl Into<Any>, ignored: impl Into<Any>) -> RustPair {
             base: Object::new(),
             first: first.into(),
             ignored: ignored.into(),
-        }),
-    }
-}
-
-fn rust_no_copy() -> RustNoCopy {
-    ensure_test_types_registered();
-    RustNoCopy {
-        data: ObjectArc::new(RustNoCopyObj {
-            base: Object::new(),
         }),
     }
 }
@@ -836,6 +813,7 @@ fn user_driven_mutator_controls_default_recursion_and_in_place_opt_in() {
 
 #[test]
 fn none_values_are_dispatched_to_map_callbacks_and_user_mutators() {
+    ensure_test_types_registered();
     let mut map_calls = 0;
     let mapped = structural_map(
         Any::new(),
@@ -879,6 +857,7 @@ fn user_mutator_can_store_a_changed_free_var_result() {
 
 #[test]
 fn user_mutator_recursive_entries_reenter_the_same_mutator() {
+    ensure_test_types_registered();
     let mut borrowed = RecursiveEntryMutator {
         remap: StructuralVarRemap::default(),
         use_owned_value: false,
@@ -1009,9 +988,20 @@ fn reflected_no_change_still_validates_copy_and_returns_original() {
 #[test]
 fn reflected_object_without_shallow_copy_is_rejected_even_when_unchanged() {
     ensure_test_types_registered();
+    // Keep the C++ test library linked for its startup registrations.
+    assert_eq!(
+        unsafe { tvm_ffi::tvm_ffi_sys::TVMFFITestingDummyTarget() },
+        0
+    );
+    // This existing C++ test type deletes its copy constructor.
+    let source = Function::from_type_key_method("testing.TestNonCopyable", "__ffi_init__")
+        .unwrap()
+        .call_tuple((1i64,))
+        .unwrap();
+    // Leave its integer field unmatched to test the unchanged-object path.
     let error = match structural_map(
-        rust_no_copy(),
-        |_integer: i64| Any::from(0i64),
+        source,
+        |string: FfiString| Any::from(string),
         WalkOrder::PostOrder,
     ) {
         Ok(_) => panic!("reflected object without a shallow-copy hook unexpectedly succeeded"),
@@ -1022,6 +1012,7 @@ fn reflected_object_without_shallow_copy_is_rejected_even_when_unchanged() {
 
 #[test]
 fn reflected_getter_releases_partial_result_on_error() {
+    ensure_test_types_registered();
     let tracked = FfiString::from("a reference-counted reflected field value");
     let source = rust_failing_getter(tracked.clone());
     let count_before = AnyView::from(&tracked).debug_strong_count();
@@ -1044,6 +1035,7 @@ fn reflected_getter_releases_partial_result_on_error() {
 
 #[test]
 fn function_setter_releases_partial_result_on_error() {
+    ensure_test_types_registered();
     let replacement = FfiString::from("a reference-counted setter result");
     let source = rust_failing_setter(1i64);
     let count_before = AnyView::from(&replacement).debug_strong_count();
@@ -1204,6 +1196,7 @@ fn registered_hook_rejects_foreign_thread_mutator_callback() {
 
 #[test]
 fn callback_panics_resume_after_the_registered_hook_returns() {
+    ensure_test_types_registered();
     let panic = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         structural_map(
             Array::new(vec![1i64]),
@@ -1401,6 +1394,7 @@ impl GeneratedStatelessDispatch {
 
 #[test]
 fn generated_stateless_mutate_dispatch_is_a_direct_callback() {
+    ensure_test_types_registered();
     assert_eq!(
         structural_mutate(1i64, GeneratedStatelessDispatch)
             .and_then(i64::try_from)
@@ -1411,6 +1405,7 @@ fn generated_stateless_mutate_dispatch_is_a_direct_callback() {
 
 #[test]
 fn generated_mutate_dispatch_defaults_unmatched_values_and_preserves_inplace_permit() {
+    ensure_test_types_registered();
     let root = Array::new(vec![1i64, 2]);
     let root_pointer = array_pointer(&root);
     let mut mutator = GeneratedLeafDispatch::default();
@@ -1472,6 +1467,7 @@ impl GeneratedRecursiveDispatch {
 
 #[test]
 fn generated_mutate_dispatch_recurses_through_context() {
+    ensure_test_types_registered();
     let mut mutator = GeneratedRecursiveDispatch::default();
     let mutated = structural_mutate(Array::new(vec![1i64, 2]), &mut mutator)
         .and_then(Array::<i64>::try_from)
@@ -1523,6 +1519,7 @@ impl GeneratedDefaultingDispatch {
 
 #[test]
 fn generated_mutate_dispatch_can_default_recurse_from_a_typed_handler() {
+    ensure_test_types_registered();
     let mut mutator = GeneratedDefaultingDispatch::default();
     let mutated = structural_mutate(Array::new(vec![1i64, 2]), &mut mutator)
         .and_then(Array::<i64>::try_from)
@@ -1676,6 +1673,7 @@ fn callbacks_return_values_convertible_into_any() {
 
 #[test]
 fn twelve_link_tuple_reaches_final_map_dispatch() {
+    ensure_test_types_registered();
     let mut final_dispatch = IncrementIntegers;
     let mapped = structural_map(
         1i64,
@@ -1684,8 +1682,8 @@ fn twelve_link_tuple_reaches_final_map_dispatch() {
             |_value: f64| Any::from(0.0f64),
             |value: FfiString| Any::from(value),
             |value: Function| Any::from(value),
-            |_node: &RustDagNodeObj| Any::new(),
-            |_node: &RustFreeVarObj| Any::new(),
+            |_node: &MapObj| Any::new(),
+            |_node: &FunctionObj| Any::new(),
             |value: Array<i64>| Any::from(value),
             |value: Array<f64>| Any::from(value),
             |value: Array<bool>| Any::from(value),
@@ -1714,8 +1712,8 @@ fn nested_tuple_chain_exceeds_flat_arity() {
                 |_value: f64| Any::from(0.0f64),
                 |value: FfiString| Any::from(value),
                 |value: Function| Any::from(value),
-                |_node: &RustDagNodeObj| Any::new(),
-                |_node: &RustFreeVarObj| Any::new(),
+                |_node: &MapObj| Any::new(),
+                |_node: &FunctionObj| Any::new(),
                 |value: Array<f64>| Any::from(value),
                 |value: Array<bool>| Any::from(value),
                 |value: Array<Array<i64>>| Any::from(value),
@@ -2086,6 +2084,7 @@ fn callback_mutate_can_use_its_invocation_local_var_remap() {
 
 #[test]
 fn nested_callback_mutate_restores_the_outer_active_mutator() {
+    ensure_test_types_registered();
     let mutated = structural_mutate(
         1i64,
         |value: i64, mutator: &mut CallbackMutator| -> Result<Any> {
@@ -2106,6 +2105,7 @@ fn nested_callback_mutate_restores_the_outer_active_mutator() {
 
 #[test]
 fn callback_mutate_panics_resume_and_leave_the_next_run_usable() {
+    ensure_test_types_registered();
     let panic = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         structural_mutate(
             Array::new(vec![1i64]),

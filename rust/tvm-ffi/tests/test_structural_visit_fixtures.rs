@@ -30,10 +30,9 @@ use tvm_ffi::tvm_ffi_sys::{
     TVMFFISEqHashKind, TVMFFITypeMetadata, TVMFFITypeRegisterAttr,
 };
 use tvm_ffi::{
-    get_type_attr, structural_visit, structural_walk, Any, AnyView, Array, DefRegionKind, Error,
-    FieldGetter, Function, Object, ObjectArc, ObjectCore, ObjectRefCast, Result,
-    String as FfiString, StructuralVisitor, TypeIndex, VisitContext, VisitInterrupt, VisitValue,
-    WalkOrder, WalkResult, RUNTIME_ERROR,
+    structural_visit, structural_walk, Any, AnyView, Array, DefRegionKind, Error, Function, Object,
+    ObjectArc, ObjectCore, ObjectRefCast, Result, String as FfiString, StructuralVisitor,
+    TypeIndex, VisitContext, VisitInterrupt, VisitValue, WalkOrder, WalkResult, RUNTIME_ERROR,
 };
 
 unsafe extern "C" {
@@ -68,6 +67,8 @@ struct RustVisitDefRegion {
     data: ObjectArc<RustVisitDefRegionObj>,
 }
 
+// The Function-hook tests need to retain the FFI visitor and exercise its
+// lifetime and thread checks. Built-in container hooks do not expose that handle.
 #[repr(C)]
 #[derive(DeriveObject)]
 #[type_key = "testing.RustStructuralVisitHook"]
@@ -372,26 +373,6 @@ impl StructuralVisitor for FreeVarClampProbe {
         }
         self.default_visit_children(value, def_region_kind)
     }
-}
-
-#[test]
-fn public_reflection_access_uses_registered_field_and_type_attr() {
-    test_prelude();
-    let root = rust_visit_hook(FfiString::from("owned field"), 99i64);
-    let type_index = RustVisitHookObj::type_index();
-
-    let getter = FieldGetter::new(type_index, "selected").unwrap();
-    let selected = getter.get::<_, FfiString>(&*root.data).unwrap();
-    drop(root);
-    assert_eq!(selected.as_str(), "owned field");
-
-    let wrong_type = rust_visit_failing_getter(0i64);
-    assert!(getter.get_any(&*wrong_type.data).is_err());
-    assert!(FieldGetter::new(type_index, "missing").is_err());
-
-    assert!(Function::try_from(get_type_attr(type_index, "__s_visit__").unwrap()).is_ok());
-    assert!(Function::from_type_attr(type_index, "__s_visit__").is_ok());
-    assert!(get_type_attr(type_index, "missing").is_none());
 }
 
 #[test]
