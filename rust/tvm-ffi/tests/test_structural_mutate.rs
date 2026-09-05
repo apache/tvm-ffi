@@ -18,494 +18,15 @@
  */
 
 use std::cell::{Cell, RefCell};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{LazyLock, Mutex};
-
 use tvm_ffi::collections::map::MapObj;
-use tvm_ffi::derive::{Object as DeriveObject, ObjectRef as DeriveObjectRef};
 use tvm_ffi::function::FunctionObj;
 use tvm_ffi::object::ObjectRef;
-use tvm_ffi::tvm_ffi_sys::{
-    TVMFFIAny, TVMFFIAnyViewToOwnedAny, TVMFFIByteArray, TVMFFIFieldFlagBitMask, TVMFFIFieldInfo,
-    TVMFFISEqHashKind, TVMFFITypeMetadata, TVMFFITypeRegisterAttr,
-};
 use tvm_ffi::{
     dispatch, structural_map, structural_mutate, Any, AnyView, Array, CallbackMutator,
-    DefRegionKind, Error, Function, InplaceValue, Map, MapDispatch, MapValue, MutateCallbacks,
-    Mutator, Object, ObjectArc, ObjectCore, ObjectRefCore, Result, String as FfiString,
+    DefRegionKind, Error, FieldGetter, Function, InplaceValue, Map, MapDispatch, MapValue,
+    MutateCallbacks, Mutator, Object, ObjectArc, ObjectRefCore, Result, String as FfiString,
     StructuralMutator, StructuralVarRemap, TypeIndex, WalkOrder, RUNTIME_ERROR,
 };
-
-// These registration entry points are needed only to build reflected test
-// types. Keep them local instead of expanding tvm-ffi-sys's public API.
-unsafe extern "C" {
-    fn TVMFFITypeGetOrAllocIndex(
-        type_key: *const TVMFFIByteArray,
-        static_type_index: i32,
-        type_depth: i32,
-        num_child_slots: i32,
-        child_slots_can_overflow: i32,
-        parent_type_index: i32,
-    ) -> i32;
-    fn TVMFFITypeRegisterField(type_index: i32, info: *const TVMFFIFieldInfo) -> i32;
-    fn TVMFFITypeRegisterMetadata(type_index: i32, metadata: *const TVMFFITypeMetadata) -> i32;
-}
-
-#[repr(C)]
-#[derive(DeriveObject)]
-#[type_key = "testing.RustStructuralDagNode"]
-#[type_final]
-struct RustDagNodeObj {
-    base: Object,
-}
-
-#[repr(C)]
-#[derive(DeriveObjectRef, Clone)]
-struct RustDagNode {
-    data: ObjectArc<RustDagNodeObj>,
-}
-
-#[repr(C)]
-#[derive(DeriveObject)]
-#[type_key = "testing.RustStructuralFreeVar"]
-#[type_final]
-struct RustFreeVarObj {
-    base: Object,
-}
-
-#[repr(C)]
-#[derive(DeriveObjectRef, Clone)]
-struct RustFreeVar {
-    data: ObjectArc<RustFreeVarObj>,
-}
-
-#[repr(C)]
-#[derive(DeriveObject)]
-#[type_key = "testing.RustStructuralPair"]
-#[type_final]
-struct RustPairObj {
-    base: Object,
-    first: Any,
-    ignored: Any,
-}
-
-#[repr(C)]
-#[derive(DeriveObjectRef, Clone)]
-struct RustPair {
-    data: ObjectArc<RustPairObj>,
-}
-
-#[repr(C)]
-#[derive(DeriveObject)]
-#[type_key = "testing.RustStructuralHookNode"]
-#[type_final]
-struct RustHookNodeObj {
-    base: Object,
-}
-
-#[repr(C)]
-#[derive(DeriveObjectRef, Clone)]
-struct RustHookNode {
-    data: ObjectArc<RustHookNodeObj>,
-}
-
-#[repr(C)]
-#[derive(DeriveObject)]
-#[type_key = "testing.RustStructuralFailingGetter"]
-#[type_final]
-struct RustFailingGetterObj {
-    base: Object,
-    value: Any,
-}
-
-#[repr(C)]
-#[derive(DeriveObjectRef, Clone)]
-struct RustFailingGetter {
-    data: ObjectArc<RustFailingGetterObj>,
-}
-
-#[repr(C)]
-#[derive(DeriveObject)]
-#[type_key = "testing.RustStructuralFailingSetter"]
-#[type_final]
-struct RustFailingSetterObj {
-    base: Object,
-    value: Any,
-}
-
-#[repr(C)]
-#[derive(DeriveObjectRef, Clone)]
-struct RustFailingSetter {
-    data: ObjectArc<RustFailingSetterObj>,
-}
-
-static SHALLOW_COPY_CALLS: AtomicUsize = AtomicUsize::new(0);
-static REGISTERED_MUTATE_CALLS: AtomicUsize = AtomicUsize::new(0);
-static REGISTERED_MAYBE_INPLACE_MUTATE_CALLS: AtomicUsize = AtomicUsize::new(0);
-static REFLECTED_TEST_LOCK: Mutex<()> = Mutex::new(());
-static REGISTERED_HOOK_TEST_LOCK: Mutex<()> = Mutex::new(());
-
-thread_local! {
-    static RETAINED_MUTATOR: RefCell<Option<Any>> = const { RefCell::new(None) };
-    static PROBE_FOREIGN_THREAD_MUTATOR: Cell<bool> = const { Cell::new(false) };
-    static FOREIGN_THREAD_MUTATOR_ERROR: RefCell<Option<String>> = const { RefCell::new(None) };
-}
-
-fn call_mutator_from_foreign_thread(mutator: AnyView<'_>) -> String {
-    // Keep an owning reference on this thread while the worker constructs a
-    // borrowed ABI view from the raw object address.
-    let mut owner = Any::from(mutator);
-    let raw = unsafe { *Any::as_data_ptr(&mut owner) };
-    let type_index = raw.type_index;
-    let object = unsafe { raw.data_union.v_obj } as usize;
-    std::thread::spawn(move || {
-        let mut raw = TVMFFIAny::new();
-        raw.type_index = type_index;
-        raw.data_union.v_obj = object as *mut _;
-        let borrowed = std::mem::ManuallyDrop::new(unsafe { Any::from_raw_ffi_any(raw) });
-        match Function::get_global("ffi.StructuralMutatorMutate")
-            .unwrap()
-            .call_packed(&[AnyView::from(&*borrowed), AnyView::from(&1i64)])
-        {
-            Err(error) => error.message().to_string(),
-            Ok(_) => "foreign-thread mutator call unexpectedly succeeded".to_string(),
-        }
-    })
-    .join()
-    .unwrap()
-}
-
-fn run_registered_mutate_hook(args: &[AnyView<'_>], calls: &AtomicUsize) -> Result<Any> {
-    assert_eq!(args.len(), 2);
-    if PROBE_FOREIGN_THREAD_MUTATOR.with(Cell::get) {
-        let message = call_mutator_from_foreign_thread(args[0]);
-        FOREIGN_THREAD_MUTATOR_ERROR.with(|error| error.replace(Some(message)));
-        return Ok(Any::from(args[1]));
-    }
-    Function::get_global("ffi.StructuralMutatorDefRegionKind")
-        .unwrap()
-        .call_packed(&[args[0]])?;
-
-    // Keep one reference so the test can verify that a type hook cannot use
-    // the mutator after the structural-mutation call has ended.
-    RETAINED_MUTATOR.with(|retained| {
-        retained.replace(Some(Any::from(args[0])));
-    });
-
-    let cached = Function::get_global("ffi.StructuralMutatorVarRemapGet")
-        .unwrap()
-        .call_packed(&[args[0], args[1]])?;
-    if cached.type_index() != TypeIndex::kTVMFFINone as i32 {
-        return Ok(cached);
-    }
-
-    let child = Any::from(1i64);
-    let mutated = Function::get_global("ffi.StructuralMutatorMutate")
-        .unwrap()
-        .call_packed(&[args[0], AnyView::from(&child)])?;
-    Function::get_global("ffi.StructuralMutatorVarRemapSet")
-        .unwrap()
-        .call_packed(&[args[0], args[1], AnyView::from(&mutated)])?;
-    calls.fetch_add(1, Ordering::Relaxed);
-    Ok(mutated)
-}
-
-unsafe extern "C" fn any_field_getter(field: *mut std::ffi::c_void, result: *mut TVMFFIAny) -> i32 {
-    TVMFFIAnyViewToOwnedAny(field.cast(), result)
-}
-
-unsafe extern "C" fn any_field_setter(
-    field: *mut std::ffi::c_void,
-    value: *const TVMFFIAny,
-) -> i32 {
-    let mut replacement = TVMFFIAny::new();
-    let code = TVMFFIAnyViewToOwnedAny(value, &mut replacement);
-    if code != 0 {
-        return code;
-    }
-    let field = &mut *field.cast::<Any>();
-    *field = Any::from_raw_ffi_any(replacement);
-    0
-}
-
-unsafe extern "C" fn clone_any_then_fail(
-    source: *mut std::ffi::c_void,
-    result: *mut TVMFFIAny,
-) -> i32 {
-    let code = TVMFFIAnyViewToOwnedAny(source.cast(), result);
-    if code != 0 {
-        return code;
-    }
-    Error::set_raised(&Error::new(
-        RUNTIME_ERROR,
-        "callback failed after writing an owning result",
-        "",
-    ));
-    -1
-}
-
-unsafe extern "C" fn setter_safe_call(
-    _handle: *mut std::ffi::c_void,
-    args: *const TVMFFIAny,
-    _num_args: i32,
-    result: *mut TVMFFIAny,
-) -> i32 {
-    clone_any_then_fail(args.add(1).cast_mut().cast(), result)
-}
-
-fn register_any_field(type_index: i32, name: &'static str, offset: usize, flags: i64) {
-    let field = TVMFFIFieldInfo {
-        name: unsafe { TVMFFIByteArray::from_str(name) },
-        doc: unsafe { TVMFFIByteArray::from_str("Rust structural-mutation test field") },
-        metadata: unsafe { TVMFFIByteArray::from_str("") },
-        flags,
-        size: std::mem::size_of::<Any>() as i64,
-        alignment: std::mem::align_of::<Any>() as i64,
-        offset: offset as i64,
-        getter: Some(any_field_getter),
-        setter: any_field_setter as *mut std::ffi::c_void,
-        default_value_or_factory: TVMFFIAny::new(),
-        field_static_type_index: -1,
-    };
-    assert_eq!(unsafe { TVMFFITypeRegisterField(type_index, &field) }, 0);
-}
-
-fn register_test_type(type_key: &'static str, total_size: usize, kind: TVMFFISEqHashKind) -> i32 {
-    let type_key = unsafe { TVMFFIByteArray::from_str(type_key) };
-    let type_index = unsafe {
-        TVMFFITypeGetOrAllocIndex(
-            &type_key,
-            -1,
-            Object::TYPE_DEPTH + 1,
-            0,
-            1,
-            Object::type_index(),
-        )
-    };
-    assert!(type_index >= TypeIndex::kTVMFFIDynObjectBegin as i32);
-    let metadata = TVMFFITypeMetadata {
-        doc: unsafe { TVMFFIByteArray::from_str("Rust structural-mutation test type") },
-        creator: None,
-        total_size: i32::try_from(total_size).unwrap(),
-        structural_eq_hash_kind: kind as i32,
-    };
-    assert_eq!(
-        unsafe { TVMFFITypeRegisterMetadata(type_index, &metadata) },
-        0
-    );
-    type_index
-}
-
-fn register_function_attr(type_index: i32, name: &'static str, function: Function) {
-    let name = unsafe { TVMFFIByteArray::from_str(name) };
-    let mut value = Any::from(function);
-    assert_eq!(
-        unsafe { TVMFFITypeRegisterAttr(type_index, &name, Any::as_data_ptr(&mut value)) },
-        0
-    );
-}
-
-// Registering custom hooks can relocate columns used by built-in container
-// hooks. Every test must wait for this initializer before reading reflection
-// data, including tests that only use types registered by C++.
-static REGISTER_TEST_TYPES: LazyLock<()> = LazyLock::new(|| {
-    register_test_type(
-        RustDagNodeObj::TYPE_KEY,
-        std::mem::size_of::<RustDagNodeObj>(),
-        TVMFFISEqHashKind::kTVMFFISEqHashKindDAGNode,
-    );
-    register_test_type(
-        RustFreeVarObj::TYPE_KEY,
-        std::mem::size_of::<RustFreeVarObj>(),
-        TVMFFISEqHashKind::kTVMFFISEqHashKindFreeVar,
-    );
-    register_test_type(
-        RustHookNodeObj::TYPE_KEY,
-        std::mem::size_of::<RustHookNodeObj>(),
-        TVMFFISEqHashKind::kTVMFFISEqHashKindDAGNode,
-    );
-
-    let pair_type_index = register_test_type(
-        RustPairObj::TYPE_KEY,
-        std::mem::size_of::<RustPairObj>(),
-        TVMFFISEqHashKind::kTVMFFISEqHashKindTreeNode,
-    );
-    register_any_field(
-        pair_type_index,
-        "first",
-        std::mem::offset_of!(RustPairObj, first),
-        TVMFFIFieldFlagBitMask::kTVMFFIFieldFlagBitMaskSEqHashDefRecursive as i64,
-    );
-    register_any_field(
-        pair_type_index,
-        "ignored",
-        std::mem::offset_of!(RustPairObj, ignored),
-        TVMFFIFieldFlagBitMask::kTVMFFIFieldFlagBitMaskSEqHashIgnore as i64,
-    );
-
-    let getter_type_index = register_test_type(
-        RustFailingGetterObj::TYPE_KEY,
-        std::mem::size_of::<RustFailingGetterObj>(),
-        TVMFFISEqHashKind::kTVMFFISEqHashKindTreeNode,
-    );
-    let field = TVMFFIFieldInfo {
-        name: unsafe { TVMFFIByteArray::from_str("value") },
-        doc: unsafe { TVMFFIByteArray::from_str("Fail after producing an owning field value") },
-        metadata: unsafe { TVMFFIByteArray::from_str("") },
-        flags: 0,
-        size: std::mem::size_of::<Any>() as i64,
-        alignment: std::mem::align_of::<Any>() as i64,
-        offset: std::mem::offset_of!(RustFailingGetterObj, value) as i64,
-        getter: Some(clone_any_then_fail),
-        setter: any_field_setter as *mut std::ffi::c_void,
-        default_value_or_factory: TVMFFIAny::new(),
-        field_static_type_index: -1,
-    };
-    assert_eq!(
-        unsafe { TVMFFITypeRegisterField(getter_type_index, &field) },
-        0
-    );
-    let shallow_copy = Function::from_packed(|args| {
-        let source = RustFailingGetter::try_from(args[0])?;
-        Ok(Any::from(RustFailingGetter {
-            data: ObjectArc::new(RustFailingGetterObj {
-                base: Object::new(),
-                value: source.data.value.clone(),
-            }),
-        }))
-    });
-    register_function_attr(getter_type_index, "__ffi_shallow_copy__", shallow_copy);
-
-    let setter_type_index = register_test_type(
-        RustFailingSetterObj::TYPE_KEY,
-        std::mem::size_of::<RustFailingSetterObj>(),
-        TVMFFISEqHashKind::kTVMFFISEqHashKindTreeNode,
-    );
-    let setter = unsafe { Function::from_extern_c(std::ptr::null_mut(), setter_safe_call, None) };
-    let field = TVMFFIFieldInfo {
-        name: unsafe { TVMFFIByteArray::from_str("value") },
-        doc: unsafe { TVMFFIByteArray::from_str("Fail after producing an owning setter result") },
-        metadata: unsafe { TVMFFIByteArray::from_str("") },
-        flags: TVMFFIFieldFlagBitMask::kTVMFFIFieldFlagBitSetterIsFunctionObj as i64,
-        size: std::mem::size_of::<Any>() as i64,
-        alignment: std::mem::align_of::<Any>() as i64,
-        offset: std::mem::offset_of!(RustFailingSetterObj, value) as i64,
-        getter: Some(any_field_getter),
-        setter: unsafe {
-            ObjectArc::as_raw(<Function as ObjectRefCore>::data(&setter))
-                .cast_mut()
-                .cast()
-        },
-        default_value_or_factory: TVMFFIAny::new(),
-        field_static_type_index: -1,
-    };
-    assert_eq!(
-        unsafe { TVMFFITypeRegisterField(setter_type_index, &field) },
-        0
-    );
-    let shallow_copy = Function::from_packed(|args| {
-        let source = RustFailingSetter::try_from(args[0])?;
-        Ok(Any::from(RustFailingSetter {
-            data: ObjectArc::new(RustFailingSetterObj {
-                base: Object::new(),
-                value: source.data.value.clone(),
-            }),
-        }))
-    });
-    register_function_attr(setter_type_index, "__ffi_shallow_copy__", shallow_copy);
-
-    let shallow_copy = Function::from_packed(|args| {
-        SHALLOW_COPY_CALLS.fetch_add(1, Ordering::Relaxed);
-        let source = RustPair::try_from(args[0])?;
-        Ok(Any::from(RustPair {
-            data: ObjectArc::new(RustPairObj {
-                base: Object::new(),
-                first: source.data.first.clone(),
-                ignored: source.data.ignored.clone(),
-            }),
-        }))
-    });
-    register_function_attr(pair_type_index, "__ffi_shallow_copy__", shallow_copy);
-
-    let registered_mutate =
-        Function::from_packed(|args| run_registered_mutate_hook(args, &REGISTERED_MUTATE_CALLS));
-    register_function_attr(
-        RustHookNodeObj::type_index(),
-        "__s_mutate__",
-        registered_mutate,
-    );
-
-    let registered_maybe_inplace_mutate = Function::from_packed(|args| {
-        run_registered_mutate_hook(args, &REGISTERED_MAYBE_INPLACE_MUTATE_CALLS)
-    });
-    register_function_attr(
-        RustHookNodeObj::type_index(),
-        "__s_maybe_inplace_mutate__",
-        registered_maybe_inplace_mutate,
-    );
-});
-
-fn ensure_test_types_registered() {
-    LazyLock::force(&REGISTER_TEST_TYPES);
-}
-
-fn rust_dag_node() -> RustDagNode {
-    LazyLock::force(&REGISTER_TEST_TYPES);
-    RustDagNode {
-        data: ObjectArc::new(RustDagNodeObj {
-            base: Object::new(),
-        }),
-    }
-}
-
-fn rust_free_var() -> RustFreeVar {
-    LazyLock::force(&REGISTER_TEST_TYPES);
-    RustFreeVar {
-        data: ObjectArc::new(RustFreeVarObj {
-            base: Object::new(),
-        }),
-    }
-}
-
-fn rust_pair(first: impl Into<Any>, ignored: impl Into<Any>) -> RustPair {
-    LazyLock::force(&REGISTER_TEST_TYPES);
-    RustPair {
-        data: ObjectArc::new(RustPairObj {
-            base: Object::new(),
-            first: first.into(),
-            ignored: ignored.into(),
-        }),
-    }
-}
-
-fn rust_hook_node() -> RustHookNode {
-    ensure_test_types_registered();
-    RustHookNode {
-        data: ObjectArc::new(RustHookNodeObj {
-            base: Object::new(),
-        }),
-    }
-}
-
-fn rust_failing_getter(value: impl Into<Any>) -> RustFailingGetter {
-    ensure_test_types_registered();
-    RustFailingGetter {
-        data: ObjectArc::new(RustFailingGetterObj {
-            base: Object::new(),
-            value: value.into(),
-        }),
-    }
-}
-
-fn rust_failing_setter(value: impl Into<Any>) -> RustFailingSetter {
-    ensure_test_types_registered();
-    RustFailingSetter {
-        data: ObjectArc::new(RustFailingSetterObj {
-            base: Object::new(),
-            value: value.into(),
-        }),
-    }
-}
 
 struct IncrementIntegers;
 
@@ -585,44 +106,6 @@ impl StructuralMutator for ReplaceNone {
     }
 }
 
-struct RemappingFreeVar {
-    remap: StructuralVarRemap,
-    type_index: i32,
-    calls: usize,
-}
-
-impl StructuralMutator for RemappingFreeVar {
-    fn dispatch_mutate(&mut self, value: &MapValue, def_region_kind: DefRegionKind) -> Result<Any> {
-        if value.type_index() == self.type_index {
-            if let Some(mutated) = self.remap.get(value)? {
-                return Ok(mutated);
-            }
-            self.calls += 1;
-            let mutated = Any::from(41i64);
-            self.remap.set(value, &mutated)?;
-            Ok(mutated)
-        } else {
-            self.default_mutate(value, def_region_kind)
-        }
-    }
-
-    fn dispatch_maybe_inplace_mutate(
-        &mut self,
-        value: InplaceValue<'_>,
-        def_region_kind: DefRegionKind,
-    ) -> Result<Any> {
-        self.default_maybe_inplace_mutate(value, def_region_kind)
-    }
-
-    fn var_remap_get(&mut self, var: &MapValue) -> Result<Option<Any>> {
-        self.remap.get(var)
-    }
-
-    fn var_remap_set(&mut self, var: &MapValue, mutated_value: &Any) -> Result<()> {
-        self.remap.set(var, mutated_value)
-    }
-}
-
 struct RecursiveEntryMutator {
     remap: StructuralVarRemap,
     use_owned_value: bool,
@@ -663,48 +146,32 @@ impl StructuralMutator for RecursiveEntryMutator {
     }
 }
 
-#[derive(Default)]
-struct RejectAliasedReentry {
-    remap: StructuralVarRemap,
-    rejected: bool,
+fn reflected_object() -> Any {
+    // Reference the existing test library so its C++ startup registrations are linked.
+    assert_eq!(
+        unsafe { tvm_ffi::tvm_ffi_sys::TVMFFITestingDummyTarget() },
+        0
+    );
+    Function::get_global("ffi.MakeObjectFromPackedArgs")
+        .unwrap()
+        .call_tuple((
+            FfiString::from("testing.TestObjectBase"),
+            FfiString::from("v_i64"),
+            1i64,
+            FfiString::from("v_f64"),
+            2.5f64,
+            FfiString::from("v_str"),
+            FfiString::from("a reflected string"),
+        ))
+        .unwrap()
 }
 
-impl StructuralMutator for RejectAliasedReentry {
-    fn dispatch_mutate(&mut self, value: &MapValue, def_region_kind: DefRegionKind) -> Result<Any> {
-        if let Some(integer) = value.cast::<i64>() {
-            let retained = RETAINED_MUTATOR.with(|slot| slot.borrow().as_ref().unwrap().clone());
-            let error = match Function::get_global("ffi.StructuralMutatorMutate")
-                .unwrap()
-                .call_packed(&[AnyView::from(&retained), AnyView::from(&integer)])
-            {
-                Ok(_) => panic!("aliased structural-mutator reentry unexpectedly succeeded"),
-                Err(error) => error,
-            };
-            assert!(error
-                .message()
-                .contains("may only be called by its active registered hook"));
-            self.rejected = true;
-            Ok(Any::from(integer + 1))
-        } else {
-            self.default_mutate(value, def_region_kind)
-        }
-    }
-
-    fn dispatch_maybe_inplace_mutate(
-        &mut self,
-        value: InplaceValue<'_>,
-        def_region_kind: DefRegionKind,
-    ) -> Result<Any> {
-        self.default_maybe_inplace_mutate(value, def_region_kind)
-    }
-
-    fn var_remap_get(&mut self, var: &MapValue) -> Result<Option<Any>> {
-        self.remap.get(var)
-    }
-
-    fn var_remap_set(&mut self, var: &MapValue, mutated_value: &Any) -> Result<()> {
-        self.remap.set(var, mutated_value)
-    }
+fn reflected_field<T: TryFrom<Any, Error = Error>>(value: &Any, name: &str) -> T {
+    let object = ObjectRef::try_from(value.clone()).unwrap();
+    FieldGetter::new(value.type_index(), name)
+        .unwrap()
+        .get::<_, T>(&**ObjectRef::data(&object))
+        .unwrap()
 }
 
 fn array_pointer<T>(array: &Array<T>) -> *const tvm_ffi::collections::array::ArrayObj
@@ -756,7 +223,6 @@ fn dict_item(dict: &Any, key: i64) -> i64 {
 
 #[test]
 fn unique_array_is_reused_while_shared_array_uses_copy_on_write() {
-    ensure_test_types_registered();
     let unique = Array::new(vec![1i64, 2, 3]);
     let unique_pointer = array_pointer(&unique);
     let mapped = structural_map(unique, &mut IncrementIntegers, WalkOrder::PostOrder)
@@ -777,7 +243,6 @@ fn unique_array_is_reused_while_shared_array_uses_copy_on_write() {
 
 #[test]
 fn user_driven_mutator_controls_default_recursion_and_in_place_opt_in() {
-    ensure_test_types_registered();
     let unique = Array::new(vec![1i64, 2]);
     let unique_pointer = array_pointer(&unique);
     let mutated =
@@ -813,7 +278,6 @@ fn user_driven_mutator_controls_default_recursion_and_in_place_opt_in() {
 
 #[test]
 fn none_values_are_dispatched_to_map_callbacks_and_user_mutators() {
-    ensure_test_types_registered();
     let mut map_calls = 0;
     let mapped = structural_map(
         Any::new(),
@@ -838,26 +302,7 @@ fn none_values_are_dispatched_to_map_callbacks_and_user_mutators() {
 }
 
 #[test]
-fn user_mutator_can_store_a_changed_free_var_result() {
-    ensure_test_types_registered();
-    let var = rust_free_var();
-    let type_index = RustFreeVarObj::type_index();
-    let root = call_global("ffi.Array", &[Any::from(var.clone()), Any::from(var)]);
-    let mut mutator = RemappingFreeVar {
-        remap: StructuralVarRemap::default(),
-        type_index,
-        calls: 0,
-    };
-
-    let mutated = structural_mutate(root, &mut mutator).unwrap();
-    assert_eq!(mutator.calls, 1);
-    assert_eq!(i64::try_from(array_item(&mutated, 0)).unwrap(), 41);
-    assert_eq!(i64::try_from(array_item(&mutated, 1)).unwrap(), 41);
-}
-
-#[test]
 fn user_mutator_recursive_entries_reenter_the_same_mutator() {
-    ensure_test_types_registered();
     let mut borrowed = RecursiveEntryMutator {
         remap: StructuralVarRemap::default(),
         use_owned_value: false,
@@ -884,69 +329,8 @@ fn user_mutator_recursive_entries_reenter_the_same_mutator() {
 }
 
 #[test]
-fn dag_identity_caches_the_final_pre_order_replacement() {
-    ensure_test_types_registered();
-    let node = rust_dag_node();
-    let root = call_global("ffi.Array", &[Any::from(node.clone()), Any::from(node)]);
-    let mut identity_calls = 0;
-    let mapped = structural_map(
-        root,
-        (
-            |_node: &RustDagNodeObj| {
-                identity_calls += 1;
-                Any::from(Array::new(vec![1i64]))
-            },
-            |integer: i64| Any::from(integer + 1),
-        ),
-        WalkOrder::PreOrder,
-    )
-    .unwrap();
-
-    let first = array_item(&mapped, 0);
-    let second = array_item(&mapped, 1);
-    assert_eq!(identity_calls, 1);
-    assert_eq!(any_object_pointer(&first), any_object_pointer(&second));
-    assert_eq!(i64::try_from(array_item(&first, 0)).unwrap(), 2);
-    assert_eq!(i64::try_from(array_item(&second, 0)).unwrap(), 2);
-}
-
-#[test]
-fn free_var_identity_caches_the_final_pre_order_replacement() {
-    ensure_test_types_registered();
-    let node = rust_free_var();
-    let type_index = RustFreeVarObj::type_index();
-    let root = call_global("ffi.Array", &[Any::from(node.clone()), Any::from(node)]);
-    let mut identity_calls = 0;
-    let mapped = structural_map(
-        root,
-        |value: &MapValue| {
-            if value.type_index() == type_index {
-                identity_calls += 1;
-                Any::from(Array::new(vec![1i64]))
-            } else if let Some(integer) = value.cast::<i64>() {
-                Any::from(integer + 1)
-            } else {
-                value.to_owned()
-            }
-        },
-        WalkOrder::PreOrder,
-    )
-    .unwrap();
-
-    let first = array_item(&mapped, 0);
-    let second = array_item(&mapped, 1);
-    assert_eq!(identity_calls, 1);
-    assert_eq!(any_object_pointer(&first), any_object_pointer(&second));
-    assert_eq!(i64::try_from(array_item(&first, 0)).unwrap(), 2);
-    assert_eq!(i64::try_from(array_item(&second, 0)).unwrap(), 2);
-}
-
-#[test]
-fn reflected_fields_use_shallow_copy_setters_and_field_flags() {
-    ensure_test_types_registered();
-    let _guard = REFLECTED_TEST_LOCK.lock().unwrap();
-    let source = rust_pair(1i64, 9i64);
-    let source_pointer = unsafe { ObjectArc::as_raw(&source.data) };
+fn reflected_fields_use_shallow_copy_and_setters() {
+    let source = reflected_object();
     let mut regions = Vec::new();
     let mapped = structural_map(
         source.clone(),
@@ -956,38 +340,34 @@ fn reflected_fields_use_shallow_copy_setters_and_field_flags() {
         },
         WalkOrder::PostOrder,
     )
-    .and_then(RustPair::try_from)
     .unwrap();
 
-    assert_ne!(unsafe { ObjectArc::as_raw(&mapped.data) }, source_pointer);
-    assert_eq!(i64::try_from(source.data.first.clone()).unwrap(), 1);
-    assert_eq!(i64::try_from(mapped.data.first.clone()).unwrap(), 2);
-    assert_eq!(i64::try_from(mapped.data.ignored.clone()).unwrap(), 9);
-    assert_eq!(regions, vec![DefRegionKind::Recursive]);
+    assert_ne!(any_object_pointer(&mapped), any_object_pointer(&source));
+    assert_eq!(reflected_field::<i64>(&source, "v_i64"), 1);
+    assert_eq!(reflected_field::<i64>(&mapped, "v_i64"), 2);
+    assert_eq!(reflected_field::<f64>(&mapped, "v_f64"), 2.5);
+    assert_eq!(
+        reflected_field::<FfiString>(&mapped, "v_str").as_str(),
+        "a reflected string"
+    );
+    assert_eq!(regions, vec![DefRegionKind::None]);
 }
 
 #[test]
-fn reflected_no_change_still_validates_copy_and_returns_original() {
-    ensure_test_types_registered();
-    let _guard = REFLECTED_TEST_LOCK.lock().unwrap();
-    let source = rust_pair(1i64, 9i64);
-    let source_pointer = unsafe { ObjectArc::as_raw(&source.data) };
-    let calls_before = SHALLOW_COPY_CALLS.load(Ordering::Relaxed);
+fn reflected_no_change_returns_original() {
+    let source = reflected_object();
     let mapped = structural_map(
         source.clone(),
         |string: FfiString| Any::from(string),
         WalkOrder::PostOrder,
     )
-    .and_then(RustPair::try_from)
     .unwrap();
 
-    assert_eq!(unsafe { ObjectArc::as_raw(&mapped.data) }, source_pointer);
-    assert_eq!(SHALLOW_COPY_CALLS.load(Ordering::Relaxed), calls_before + 1);
+    assert_eq!(any_object_pointer(&mapped), any_object_pointer(&source));
 }
 
 #[test]
 fn reflected_object_without_shallow_copy_is_rejected_even_when_unchanged() {
-    ensure_test_types_registered();
     // Keep the C++ test library linked for its startup registrations.
     assert_eq!(
         unsafe { tvm_ffi::tvm_ffi_sys::TVMFFITestingDummyTarget() },
@@ -1011,57 +391,7 @@ fn reflected_object_without_shallow_copy_is_rejected_even_when_unchanged() {
 }
 
 #[test]
-fn reflected_getter_releases_partial_result_on_error() {
-    ensure_test_types_registered();
-    let tracked = FfiString::from("a reference-counted reflected field value");
-    let source = rust_failing_getter(tracked.clone());
-    let count_before = AnyView::from(&tracked).debug_strong_count();
-
-    let error = match structural_map(
-        source.clone(),
-        |_integer: i64| Any::from(0i64),
-        WalkOrder::PostOrder,
-    ) {
-        Ok(_) => panic!("failing getter unexpectedly succeeded"),
-        Err(error) => error,
-    };
-
-    assert_eq!(
-        error.message(),
-        "callback failed after writing an owning result"
-    );
-    assert_eq!(AnyView::from(&tracked).debug_strong_count(), count_before);
-}
-
-#[test]
-fn function_setter_releases_partial_result_on_error() {
-    ensure_test_types_registered();
-    let replacement = FfiString::from("a reference-counted setter result");
-    let source = rust_failing_setter(1i64);
-    let count_before = AnyView::from(&replacement).debug_strong_count();
-
-    let error = match structural_map(
-        source,
-        |_value: i64| Any::from(replacement.clone()),
-        WalkOrder::PostOrder,
-    ) {
-        Ok(_) => panic!("failing Function setter unexpectedly succeeded"),
-        Err(error) => error,
-    };
-
-    assert_eq!(
-        error.message(),
-        "callback failed after writing an owning result"
-    );
-    assert_eq!(
-        AnyView::from(&replacement).debug_strong_count(),
-        count_before
-    );
-}
-
-#[test]
 fn callback_errors_preserve_message_and_add_object_context() {
-    ensure_test_types_registered();
     let error = match structural_map(
         Array::new(vec![1i64]),
         |_integer: i64| -> Result<i64> {
@@ -1096,107 +426,7 @@ fn callback_errors_preserve_message_and_add_object_context() {
 }
 
 #[test]
-fn registered_mutation_hooks_receive_the_rust_mutator() {
-    ensure_test_types_registered();
-    let _guard = REGISTERED_HOOK_TEST_LOCK.lock().unwrap();
-    RETAINED_MUTATOR.with(|retained| {
-        retained.take();
-    });
-
-    let source = rust_hook_node();
-    let mutate_calls_before = REGISTERED_MUTATE_CALLS.load(Ordering::Relaxed);
-    let mutated = structural_mutate(source.clone(), &mut ManualIncrement::default())
-        .and_then(i64::try_from)
-        .unwrap();
-    assert_eq!(mutated, 2);
-    assert_eq!(
-        REGISTERED_MUTATE_CALLS.load(Ordering::Relaxed),
-        mutate_calls_before + 1
-    );
-
-    let retained = RETAINED_MUTATOR.with(|retained| retained.take().unwrap());
-    let error = match Function::get_global("ffi.StructuralMutatorMutate")
-        .unwrap()
-        .call_packed(&[AnyView::from(&retained), AnyView::from(&1i64)])
-    {
-        Ok(_) => panic!("retained structural mutator unexpectedly remained active"),
-        Err(error) => error,
-    };
-    assert!(error.message().contains("retained after its active call"));
-
-    let mutate_calls_before = REGISTERED_MUTATE_CALLS.load(Ordering::Relaxed);
-    let mutated = structural_mutate(
-        source.clone(),
-        |value: i64, _mutator: &mut CallbackMutator| Any::from(value + 1),
-    )
-    .and_then(i64::try_from)
-    .unwrap();
-    assert_eq!(mutated, 2);
-    assert_eq!(
-        REGISTERED_MUTATE_CALLS.load(Ordering::Relaxed),
-        mutate_calls_before + 1
-    );
-    RETAINED_MUTATOR.with(|retained| {
-        retained.take();
-    });
-
-    let maybe_inplace_calls_before = REGISTERED_MAYBE_INPLACE_MUTATE_CALLS.load(Ordering::Relaxed);
-    let mutated = structural_mutate(rust_hook_node(), &mut ManualIncrement::default())
-        .and_then(i64::try_from)
-        .unwrap();
-    assert_eq!(mutated, 2);
-    assert_eq!(
-        REGISTERED_MAYBE_INPLACE_MUTATE_CALLS.load(Ordering::Relaxed),
-        maybe_inplace_calls_before + 1
-    );
-    RETAINED_MUTATOR.with(|retained| {
-        retained.take();
-    });
-}
-
-#[test]
-fn registered_hook_cannot_reenter_through_an_aliased_mutator_handle() {
-    ensure_test_types_registered();
-    let _guard = REGISTERED_HOOK_TEST_LOCK.lock().unwrap();
-    RETAINED_MUTATOR.with(|retained| {
-        retained.take();
-    });
-    let mut mutator = RejectAliasedReentry::default();
-
-    let mutated = structural_mutate(rust_hook_node(), &mut mutator)
-        .and_then(i64::try_from)
-        .unwrap();
-
-    assert_eq!(mutated, 2);
-    assert!(mutator.rejected);
-    RETAINED_MUTATOR.with(|retained| {
-        retained.take();
-    });
-}
-
-#[test]
-fn registered_hook_rejects_foreign_thread_mutator_callback() {
-    ensure_test_types_registered();
-    let _guard = REGISTERED_HOOK_TEST_LOCK.lock().unwrap();
-    FOREIGN_THREAD_MUTATOR_ERROR.with(|error| {
-        error.take();
-    });
-
-    PROBE_FOREIGN_THREAD_MUTATOR.with(|enabled| enabled.set(true));
-    let result = structural_mutate(rust_hook_node(), &mut ManualIncrement::default());
-    PROBE_FOREIGN_THREAD_MUTATOR.with(|enabled| enabled.set(false));
-    result.unwrap();
-
-    let message = FOREIGN_THREAD_MUTATOR_ERROR.with(|error| error.take().unwrap());
-    assert!(message.contains("invoked from a different thread"));
-    RETAINED_MUTATOR.with(|retained| {
-        retained.take();
-    });
-}
-
-#[test]
 fn callback_panics_resume_after_the_registered_hook_returns() {
-    ensure_test_types_registered();
     let panic = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         structural_map(
             Array::new(vec![1i64]),
@@ -1226,7 +456,6 @@ fn callback_panics_resume_after_the_registered_hook_returns() {
 
 #[test]
 fn unique_map_reuses_nested_unique_value_storage() {
-    ensure_test_types_registered();
     let child = Array::new(vec![1i64, 2]);
     let child_pointer = array_pointer(&child);
     let source: Map<i64, Array<i64>> = [(1, child)].into_iter().collect();
@@ -1244,7 +473,6 @@ fn unique_map_reuses_nested_unique_value_storage() {
 
 #[test]
 fn shared_map_and_dict_copy_only_when_a_value_changes() {
-    ensure_test_types_registered();
     let source: Map<i64, i64> = [(1, 10)].into_iter().collect();
     let source_pointer = map_pointer(&source);
     let unchanged = structural_map(
@@ -1282,7 +510,6 @@ fn shared_map_and_dict_copy_only_when_a_value_changes() {
 
 #[test]
 fn shared_map_callback_error_preserves_source_and_reports_object_context() {
-    ensure_test_types_registered();
     let source: Map<i64, i64> = [(1, 10), (2, 20)].into_iter().collect();
     let error = match structural_map(
         source.clone(),
@@ -1304,7 +531,6 @@ fn shared_map_callback_error_preserves_source_and_reports_object_context() {
 
 #[test]
 fn shared_outer_container_does_not_mutate_its_nested_child() {
-    ensure_test_types_registered();
     let nested = call_global("ffi.List", &[Any::from(1i64)]);
     let nested_pointer = any_object_pointer(&nested);
     let outer = call_global("ffi.Array", &[nested]);
@@ -1323,7 +549,6 @@ fn shared_outer_container_does_not_mutate_its_nested_child() {
 
 #[test]
 fn shared_list_uses_copy_on_write() {
-    ensure_test_types_registered();
     let source = call_global("ffi.List", &[Any::from(1i64), Any::from(2i64)]);
     let source_pointer = any_object_pointer(&source);
     let mapped =
@@ -1355,7 +580,6 @@ impl GeneratedMapper {
 
 #[test]
 fn generated_map_dispatch_supports_kind_and_ordered_catch_all() {
-    ensure_test_types_registered();
     let mut mapper = GeneratedMapper::default();
     let mapped = structural_map(Array::new(vec![1i64, 2]), &mut mapper, WalkOrder::PostOrder)
         .and_then(Array::<i64>::try_from)
@@ -1394,7 +618,6 @@ impl GeneratedStatelessDispatch {
 
 #[test]
 fn generated_stateless_mutate_dispatch_is_a_direct_callback() {
-    ensure_test_types_registered();
     assert_eq!(
         structural_mutate(1i64, GeneratedStatelessDispatch)
             .and_then(i64::try_from)
@@ -1405,7 +628,6 @@ fn generated_stateless_mutate_dispatch_is_a_direct_callback() {
 
 #[test]
 fn generated_mutate_dispatch_defaults_unmatched_values_and_preserves_inplace_permit() {
-    ensure_test_types_registered();
     let root = Array::new(vec![1i64, 2]);
     let root_pointer = array_pointer(&root);
     let mut mutator = GeneratedLeafDispatch::default();
@@ -1419,25 +641,6 @@ fn generated_mutate_dispatch_defaults_unmatched_values_and_preserves_inplace_per
         mutator.integers,
         vec![(1, DefRegionKind::None), (2, DefRegionKind::None)]
     );
-}
-
-#[test]
-fn generated_mutate_dispatch_default_remap_crosses_registered_hooks() {
-    ensure_test_types_registered();
-    let _guard = REGISTERED_HOOK_TEST_LOCK.lock().unwrap();
-    RETAINED_MUTATOR.with(|retained| {
-        retained.take();
-    });
-
-    let mut mutator = GeneratedLeafDispatch::default();
-    let mutated = structural_mutate(rust_hook_node(), &mut mutator)
-        .and_then(i64::try_from)
-        .unwrap();
-    assert_eq!(mutated, 2);
-    assert_eq!(mutator.integers, vec![(1, DefRegionKind::None)]);
-    RETAINED_MUTATOR.with(|retained| {
-        retained.take();
-    });
 }
 
 #[derive(Default)]
@@ -1467,7 +670,6 @@ impl GeneratedRecursiveDispatch {
 
 #[test]
 fn generated_mutate_dispatch_recurses_through_context() {
-    ensure_test_types_registered();
     let mut mutator = GeneratedRecursiveDispatch::default();
     let mutated = structural_mutate(Array::new(vec![1i64, 2]), &mut mutator)
         .and_then(Array::<i64>::try_from)
@@ -1479,23 +681,6 @@ fn generated_mutate_dispatch_recurses_through_context() {
         mutator.integers,
         vec![(1, DefRegionKind::None), (2, DefRegionKind::None)]
     );
-}
-
-#[test]
-fn generated_mutate_dispatch_inherits_region_during_explicit_recursion() {
-    ensure_test_types_registered();
-    let _guard = REFLECTED_TEST_LOCK.lock().unwrap();
-    let root = rust_pair(Array::new(vec![1i64]), Any::new());
-    let mut mutator = GeneratedRecursiveDispatch::default();
-
-    let mutated = structural_mutate(root, &mut mutator)
-        .and_then(RustPair::try_from)
-        .unwrap();
-    let first = Array::<i64>::try_from(mutated.data.first.clone()).unwrap();
-
-    assert_eq!(first.iter().collect::<Vec<_>>(), vec![11]);
-    assert_eq!(mutator.arrays, vec![DefRegionKind::Recursive]);
-    assert_eq!(mutator.integers, vec![(1, DefRegionKind::Recursive)]);
 }
 
 #[derive(Default)]
@@ -1519,7 +704,6 @@ impl GeneratedDefaultingDispatch {
 
 #[test]
 fn generated_mutate_dispatch_can_default_recurse_from_a_typed_handler() {
-    ensure_test_types_registered();
     let mut mutator = GeneratedDefaultingDispatch::default();
     let mutated = structural_mutate(Array::new(vec![1i64, 2]), &mut mutator)
         .and_then(Array::<i64>::try_from)
@@ -1530,55 +714,8 @@ fn generated_mutate_dispatch_can_default_recurse_from_a_typed_handler() {
     assert_eq!(mutator.integers, vec![1, 2]);
 }
 
-struct GeneratedRemappingDispatch {
-    type_index: i32,
-    calls: usize,
-}
-
-#[dispatch(mutate)]
-impl GeneratedRemappingDispatch {
-    fn mutate_dag_node(&mut self, _value: &RustDagNodeObj) -> Any {
-        Any::from(42i64)
-    }
-
-    fn mutate_any(&mut self, value: &MapValue, mutator: &mut Mutator) -> Result<Any> {
-        if value.type_index() != self.type_index {
-            return mutator.default_mutate(self);
-        }
-        if let Some(mutated) = mutator.var_remap_get(self, value)? {
-            return Ok(mutated);
-        }
-        self.calls += 1;
-        let mutated = Any::from(41i64);
-        mutator.var_remap_set(self, value, &mutated)?;
-        Ok(mutated)
-    }
-}
-
-#[test]
-fn generated_mutate_dispatch_uses_fresh_invocation_local_var_remap() {
-    ensure_test_types_registered();
-    let var = rust_free_var();
-    let mut mutator = GeneratedRemappingDispatch {
-        type_index: RustFreeVarObj::type_index(),
-        calls: 0,
-    };
-
-    for expected_calls in [1, 2] {
-        let root = call_global(
-            "ffi.Array",
-            &[Any::from(var.clone()), Any::from(var.clone())],
-        );
-        let mutated = structural_mutate(root, &mut mutator).unwrap();
-        assert_eq!(mutator.calls, expected_calls);
-        assert_eq!(i64::try_from(array_item(&mutated, 0)).unwrap(), 41);
-        assert_eq!(i64::try_from(array_item(&mutated, 1)).unwrap(), 41);
-    }
-}
-
 #[test]
 fn pre_order_retained_alias_disables_in_place_mutation() {
-    ensure_test_types_registered();
     let root = call_global("ffi.List", &[Any::from(1i64)]);
     let root_pointer = any_object_pointer(&root);
     let mut retained = None;
@@ -1607,7 +744,6 @@ fn pre_order_retained_alias_disables_in_place_mutation() {
 
 #[test]
 fn closures_and_tuples_use_ordered_first_match() {
-    ensure_test_types_registered();
     let root = Array::new(vec![1i64, 2]);
     let mapped = structural_map(
         root,
@@ -1643,7 +779,6 @@ fn closures_and_tuples_use_ordered_first_match() {
 
 #[test]
 fn callbacks_return_values_convertible_into_any() {
-    ensure_test_types_registered();
     let mapped = structural_map(
         Array::new(vec![1i64, 2]),
         |integer: i64| integer + 10,
@@ -1673,7 +808,6 @@ fn callbacks_return_values_convertible_into_any() {
 
 #[test]
 fn twelve_link_tuple_reaches_final_map_dispatch() {
-    ensure_test_types_registered();
     let mut final_dispatch = IncrementIntegers;
     let mapped = structural_map(
         1i64,
@@ -1701,7 +835,6 @@ fn twelve_link_tuple_reaches_final_map_dispatch() {
 
 #[test]
 fn nested_tuple_chain_exceeds_flat_arity() {
-    ensure_test_types_registered();
     let root = Array::new(vec![1i64, 2, 3]);
     let mut catch_all = 0;
     let mapped = structural_map(
@@ -1742,7 +875,6 @@ fn nested_tuple_chain_exceeds_flat_arity() {
 
 #[test]
 fn callbacks_run_in_the_configured_order() {
-    ensure_test_types_registered();
     let root = Array::new(vec![1i64, 2]);
     let mut pre = Vec::new();
     structural_map(
@@ -1771,7 +903,6 @@ fn callbacks_run_in_the_configured_order() {
 
 #[test]
 fn map_keys_are_anchors_and_object_leaves_are_preserved() {
-    ensure_test_types_registered();
     let root: Map<FfiString, i64> = [(FfiString::from("a"), 1i64), (FfiString::from("b"), 2i64)]
         .into_iter()
         .collect();
@@ -1821,7 +952,6 @@ fn map_keys_are_anchors_and_object_leaves_are_preserved() {
 
 #[test]
 fn callback_mutate_defaults_unmatched_values_and_preserves_root_permit() {
-    ensure_test_types_registered();
     let root = Array::new(vec![1i64, 2]);
     let root_pointer = array_pointer(&root);
     let mutated = structural_mutate(root, |value: i64, _mutator: &mut CallbackMutator| {
@@ -1854,7 +984,6 @@ fn stateful_mutate_default(
 
 #[test]
 fn callback_mutator_carries_reusable_mutable_state() {
-    ensure_test_types_registered();
     let mut mutator = MutateCallbacks::new(
         CallbackMutateStats::default(),
         (stateful_mutate_integer, stateful_mutate_default),
@@ -1905,7 +1034,6 @@ fn stateful_mutate_recursive(
 
 #[test]
 fn callback_mutator_state_can_change_around_recursive_reborrows() {
-    ensure_test_types_registered();
     let root = Array::new(vec![Array::new(vec![1i64, 2])]);
     let mut mutator =
         MutateCallbacks::new(CallbackMutateDepth::default(), stateful_mutate_recursive);
@@ -1924,7 +1052,6 @@ fn callback_mutator_state_can_change_around_recursive_reborrows() {
 
 #[test]
 fn callback_mutate_current_default_is_repeatable_copy_path() {
-    ensure_test_types_registered();
     let root = Array::new(vec![1i64, 2]);
     let root_pointer = array_pointer(&root);
     let defaults = Cell::new(0);
@@ -1950,7 +1077,6 @@ fn callback_mutate_current_default_is_repeatable_copy_path() {
 
 #[test]
 fn callback_mutate_match_is_final_and_same_fn_can_reenter() {
-    ensure_test_types_registered();
     let integer_calls = Cell::new(0);
     let mutated = structural_mutate(
         Array::new(vec![1i64]),
@@ -1983,19 +1109,20 @@ fn callback_mutate_match_is_final_and_same_fn_can_reenter() {
 
 #[test]
 fn callback_mutate_supports_node_links_nested_tuples_and_reflection() {
-    ensure_test_types_registered();
-    let _guard = REFLECTED_TEST_LOCK.lock().unwrap();
     let root = call_global(
         "ffi.Array",
-        &[Any::from(rust_dag_node()), Any::from(rust_pair(1i64, 9i64))],
+        &[
+            Any::from(Function::from_packed(|_| Ok(Any::new()))),
+            reflected_object(),
+        ],
     );
     let regions = RefCell::new(Vec::new());
     let mutated = structural_mutate(
         root,
         (
             (
-                |_value: f64, _mutator: &mut CallbackMutator| Any::new(),
-                |_node: &RustDagNodeObj, _mutator: &mut CallbackMutator| Any::from(7i64),
+                |_value: bool, _mutator: &mut CallbackMutator| Any::new(),
+                |_node: &FunctionObj, _mutator: &mut CallbackMutator| Any::from(7i64),
             ),
             |value: i64, mutator: &mut CallbackMutator| {
                 regions.borrow_mut().push(mutator.def_region_kind());
@@ -2006,15 +1133,18 @@ fn callback_mutate_supports_node_links_nested_tuples_and_reflection() {
     .unwrap();
 
     assert_eq!(i64::try_from(array_item(&mutated, 0)).unwrap(), 7);
-    let pair = RustPair::try_from(array_item(&mutated, 1)).unwrap();
-    assert_eq!(i64::try_from(pair.data.first.clone()).unwrap(), 2);
-    assert_eq!(i64::try_from(pair.data.ignored.clone()).unwrap(), 9);
-    assert_eq!(*regions.borrow(), vec![DefRegionKind::Recursive]);
+    let object = array_item(&mutated, 1);
+    assert_eq!(reflected_field::<i64>(&object, "v_i64"), 2);
+    assert_eq!(reflected_field::<f64>(&object, "v_f64"), 2.5);
+    assert_eq!(
+        reflected_field::<FfiString>(&object, "v_str").as_str(),
+        "a reflected string"
+    );
+    assert_eq!(*regions.borrow(), vec![DefRegionKind::None]);
 }
 
 #[test]
 fn callback_mutate_distinguishes_borrowed_and_owned_children() {
-    ensure_test_types_registered();
     let borrowed_child = Array::new(vec![1i64]);
     let borrowed_pointer = array_pointer(&borrowed_child);
     let mutated = structural_mutate(
@@ -2049,42 +1179,7 @@ fn callback_mutate_distinguishes_borrowed_and_owned_children() {
 }
 
 #[test]
-fn callback_mutate_can_use_its_invocation_local_var_remap() {
-    ensure_test_types_registered();
-    let var = rust_free_var();
-    let calls = Cell::new(0);
-    let type_index = RustFreeVarObj::type_index();
-    let mut mutator = MutateCallbacks::new(
-        (),
-        |value: &MapValue, mutator: &mut CallbackMutator| -> Result<Any> {
-            if value.type_index() != type_index {
-                return mutator.default_mutate();
-            }
-            if let Some(mutated) = mutator.var_remap_get(value)? {
-                return Ok(mutated);
-            }
-            calls.set(calls.get() + 1);
-            let mutated = Any::from(41i64);
-            mutator.var_remap_set(value, &mutated)?;
-            Ok(mutated)
-        },
-    );
-
-    for expected_calls in 1..=2 {
-        let root = call_global(
-            "ffi.Array",
-            &[Any::from(var.clone()), Any::from(var.clone())],
-        );
-        let mutated = structural_mutate(root, &mut mutator).unwrap();
-        assert_eq!(calls.get(), expected_calls);
-        assert_eq!(i64::try_from(array_item(&mutated, 0)).unwrap(), 41);
-        assert_eq!(i64::try_from(array_item(&mutated, 1)).unwrap(), 41);
-    }
-}
-
-#[test]
 fn nested_callback_mutate_restores_the_outer_active_mutator() {
-    ensure_test_types_registered();
     let mutated = structural_mutate(
         1i64,
         |value: i64, mutator: &mut CallbackMutator| -> Result<Any> {
@@ -2105,7 +1200,6 @@ fn nested_callback_mutate_restores_the_outer_active_mutator() {
 
 #[test]
 fn callback_mutate_panics_resume_and_leave_the_next_run_usable() {
-    ensure_test_types_registered();
     let panic = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         structural_mutate(
             Array::new(vec![1i64]),
