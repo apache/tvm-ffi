@@ -18,10 +18,11 @@
  */
 
 use std::cell::{Cell, RefCell};
+use std::rc::Rc;
 
 use tvm_ffi::derive::{Object as DeriveObject, ObjectRef as DeriveObjectRef};
 use tvm_ffi::object::ObjectRef;
-use tvm_ffi::tvm_ffi_sys::TVMFFITestingDummyTarget;
+use tvm_ffi::tvm_ffi_sys::{TVMFFIAny, TVMFFITestingDummyTarget};
 use tvm_ffi::{
     dispatch, get_type_attr, structural_visit, structural_walk, Any, AnyView, Array, DLDataType,
     DLDataTypeCode, DefRegionKind, Error, FieldGetter, Function, Map, Object, ObjectArc,
@@ -91,6 +92,14 @@ fn test_int_pair(a: i64, b: i64) -> TestIntPair {
         .call_tuple((a, b))
         .unwrap()
         .try_into()
+        .unwrap()
+}
+
+// Only hook integration tests need this fixture. Rust supplies an observer;
+// the traversal hook itself is already registered by the C++ testing library.
+fn cxx_visit_hook(selected: impl Into<Any>, ignored: impl Into<Any>, observer: Function) -> Any {
+    fixture_constructor("testing.StructuralVisitHook")
+        .call_tuple((selected.into(), ignored.into(), observer))
         .unwrap()
 }
 
@@ -250,6 +259,157 @@ fn reflected_fields_are_visited_without_a_hook() {
         .is_none()
     );
     assert_eq!(*integers.borrow(), vec![11, 99]);
+}
+
+#[test]
+fn cxx_function_hook_controls_children_and_interrupts() {
+    let regions = Rc::new(RefCell::new(Vec::new()));
+    let observed_regions = Rc::clone(&regions);
+    let observer = Function::from_packed(move |args| {
+        assert_eq!(args.len(), 1);
+        let kind =
+            Function::get_global("ffi.StructuralVisitorDefRegionKind")?.call_packed(&[args[0]])?;
+        observed_regions.borrow_mut().push(i64::try_from(kind)?);
+        Ok(Any::new())
+    });
+    let root = cxx_visit_hook(11i64, 99i64, observer);
+    assert!(Function::from_type_attr(root.type_index(), "__s_visit__").is_ok());
+
+    for order in [WalkOrder::PreOrder, WalkOrder::PostOrder] {
+        let mut integers = Vec::new();
+        assert!(structural_walk(
+            &root,
+            |value: i64| {
+                integers.push(value);
+                WalkResult::Advance
+            },
+            order,
+        )
+        .unwrap()
+        .is_none());
+        // Reflection would visit both fields; the C++ hook selects only one.
+        assert_eq!(integers, vec![11]);
+    }
+
+    #[derive(Default)]
+    struct RecordingVisitor {
+        integers: Vec<i64>,
+    }
+    impl StructuralVisitor for RecordingVisitor {
+        fn visit(
+            &mut self,
+            value: &VisitValue,
+            kind: DefRegionKind,
+        ) -> Result<Option<VisitInterrupt>> {
+            if let Some(integer) = value.cast::<i64>() {
+                self.integers.push(integer);
+            }
+            self.default_visit_children(value, kind)
+        }
+    }
+    let mut visitor = RecordingVisitor::default();
+    assert!(structural_visit(&root, &mut visitor).unwrap().is_none());
+    assert_eq!(visitor.integers, vec![11]);
+
+    let integers = RefCell::new(Vec::new());
+    assert!(
+        structural_visit(&root, |value: i64, _visitor: &mut VisitContext<'_, ()>| {
+            integers.borrow_mut().push(value)
+        },)
+        .unwrap()
+        .is_none()
+    );
+    assert_eq!(*integers.borrow(), vec![11]);
+    assert_eq!(*regions.borrow(), vec![DefRegionKind::None as i64; 4]);
+
+    regions.borrow_mut().clear();
+    let wrapped =
+        cxx_visit_def_region(root.clone(), Any::new(), Any::new(), Any::new(), Any::new());
+    structural_walk(
+        &wrapped,
+        |_value: &VisitValue| WalkResult::Advance,
+        WalkOrder::PreOrder,
+    )
+    .unwrap();
+    assert_eq!(*regions.borrow(), vec![DefRegionKind::Recursive as i64]);
+
+    let interrupt = structural_walk(
+        &root,
+        |_value: i64| WalkResult::interrupt_with(FfiString::from("stop")),
+        WalkOrder::PreOrder,
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(
+        FfiString::try_from(interrupt.value).unwrap().as_str(),
+        "stop"
+    );
+}
+
+#[test]
+fn retained_visitor_from_cxx_hook_rejects_calls_after_traversal() {
+    let retained = Rc::new(RefCell::new(None));
+    let observed_visitor = Rc::clone(&retained);
+    let observer = Function::from_packed(move |args| {
+        assert_eq!(args.len(), 1);
+        observed_visitor.replace(Some(Any::from(args[0])));
+        Ok(Any::new())
+    });
+    let root = cxx_visit_hook(1i64, 99i64, observer);
+    structural_walk(
+        &root,
+        |_value: &VisitValue| WalkResult::Advance,
+        WalkOrder::PreOrder,
+    )
+    .unwrap();
+
+    let error = Function::get_global("ffi.StructuralVisitorVisit")
+        .unwrap()
+        .call_tuple((retained.take().unwrap(), 1i64))
+        .err()
+        .expect("retained structural visitor unexpectedly remained active");
+    assert!(error.message().contains("retained after its active call"));
+}
+
+#[test]
+fn cxx_hook_rejects_foreign_thread_visitor_calls() {
+    let checked = Rc::new(Cell::new(false));
+    let observer_checked = Rc::clone(&checked);
+    let observer = Function::from_packed(move |args| {
+        assert_eq!(args.len(), 1);
+        // Keep an owning reference on this thread until the worker joins.
+        // The worker only borrows the visitor, without transferring ownership.
+        let mut owner = Any::from(args[0]);
+        let raw = unsafe { *Any::as_data_ptr(&mut owner) };
+        let type_index = raw.type_index;
+        let address = unsafe { raw.data_union.v_obj } as usize;
+        let message = std::thread::spawn(move || {
+            let mut raw = TVMFFIAny::new();
+            raw.type_index = type_index;
+            raw.data_union.v_obj = address as *mut _;
+            let visitor = std::mem::ManuallyDrop::new(unsafe { Any::from_raw_ffi_any(raw) });
+            Function::get_global("ffi.StructuralVisitorVisit")
+                .unwrap()
+                .call_packed(&[AnyView::from(&*visitor), AnyView::from(&1i64)])
+                .err()
+                .expect("foreign-thread visitor call unexpectedly succeeded")
+                .message()
+                .to_string()
+        })
+        .join()
+        .unwrap();
+        assert!(message.contains("invoked from a different thread"));
+        observer_checked.set(true);
+        Ok(Any::new())
+    });
+    let root = cxx_visit_hook(1i64, 99i64, observer);
+    structural_walk(
+        &root,
+        |_value: &VisitValue| WalkResult::Advance,
+        WalkOrder::PreOrder,
+    )
+    .unwrap();
+    assert!(checked.get(), "C++ hook observer was never called");
 }
 
 #[test]

@@ -30,6 +30,7 @@
 #include <tvm/ffi/dtype.h>
 #include <tvm/ffi/enum.h>
 #include <tvm/ffi/extra/c_env_api.h>
+#include <tvm/ffi/extra/structural_visit.h>
 #include <tvm/ffi/function.h>
 #include <tvm/ffi/optional.h>
 #include <tvm/ffi/reflection/accessor.h>
@@ -92,8 +93,21 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   refl::TypeAttrDef<TestIntPairObj>().def_convert<TestIntPair>();
 }
 
-// Register reflected-field fixtures before language-binding tests run in parallel.
-// Neither fixture needs a custom structural-visit hook.
+// Register structural-visit fixtures before language-binding tests run in parallel.
+class TestStructuralVisitHookObj : public Object {
+ public:
+  Any selected;
+  Any ignored;
+  Function observer;
+
+  TestStructuralVisitHookObj(Any selected, Any ignored, Function observer)
+      : selected(std::move(selected)), ignored(std::move(ignored)), observer(std::move(observer)) {}
+
+  static constexpr TVMFFISEqHashKind _type_s_eq_hash_kind = kTVMFFISEqHashKindTreeNode;
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("testing.StructuralVisitHook", TestStructuralVisitHookObj,
+                                    Object);
+};
+
 class TestStructuralVisitDefRegionObj : public Object {
  public:
   Any recursive;
@@ -140,6 +154,22 @@ struct StructuralVisitFailingGetter : reflection::InfoTrait {
 
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
+  refl::ObjectDef<TestStructuralVisitHookObj>()
+      .def(refl::init<Any, Any, Function>())
+      .def_ro("selected", &TestStructuralVisitHookObj::selected)
+      .def_ro("ignored", &TestStructuralVisitHookObj::ignored)
+      .def_ro("observer", &TestStructuralVisitHookObj::observer,
+              refl::AttachFieldFlag::SEqHashIgnore());
+  refl::TypeAttrDef<TestStructuralVisitHookObj>().def(
+      refl::type_attr::kStructuralVisit,
+      [](const StructuralVisitor& visitor,
+         const TestStructuralVisitHookObj* self) -> Optional<VisitInterrupt> {
+        // Expose the visitor to bindings for lifetime checks. This C++ hook
+        // controls child selection and is registered before any test runs.
+        self->observer(visitor);
+        return visitor->Visit(self->selected);
+      });
+
   refl::ObjectDef<TestStructuralVisitDefRegionObj>()
       .def(refl::init<Any, Any, Any, Any, Any>())
       .def_ro("recursive", &TestStructuralVisitDefRegionObj::recursive,
