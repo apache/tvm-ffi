@@ -223,8 +223,9 @@ fn registered_primitive_visit_hook(args: &[AnyView<'_>]) -> Result<Any> {
 }
 
 // The runtime type table leaves registration synchronization to its callers.
-// Run every fixture registration through one thread-safe initializer because
-// Rust tests execute in parallel.
+// Every test, including those using only built-in types, must wait for this
+// initializer before reading reflection data: registering a custom __s_visit__
+// hook can relocate the column containing the built-in Array/Map hooks.
 static REGISTER_TEST_TYPES: LazyLock<()> = LazyLock::new(|| {
     let type_index = register_visit_type(
         RustVisitHookObj::TYPE_KEY,
@@ -343,6 +344,7 @@ fn runtime_error(message: &str) -> Error {
 
 #[test]
 fn public_reflection_access_uses_registered_field_and_type_attr() {
+    test_prelude();
     let root = rust_visit_hook(FfiString::from("owned field"), 99i64);
     let type_index = RustVisitHookObj::type_index();
 
@@ -362,6 +364,7 @@ fn public_reflection_access_uses_registered_field_and_type_attr() {
 
 #[test]
 fn plain_walk_uses_registered_array_hook() {
+    test_prelude();
     let root = Array::new(vec![1i64, 2, 3]);
     let mut integers = 0;
     assert!(structural_walk(
@@ -381,6 +384,7 @@ fn plain_walk_uses_registered_array_hook() {
 
 #[test]
 fn reflected_getter_releases_partial_result_on_error() {
+    test_prelude();
     let tracked = FfiString::from("a reference-counted reflected visit field");
     let root = rust_visit_failing_getter(tracked.clone());
     let count_before = AnyView::from(&tracked).debug_strong_count();
@@ -403,6 +407,7 @@ fn reflected_getter_releases_partial_result_on_error() {
 
 #[test]
 fn plain_walk_visits_map_values_without_visiting_keys() {
+    test_prelude();
     let root: Map<FfiString, i64> = [(FfiString::from("a"), 1i64), (FfiString::from("b"), 2i64)]
         .into_iter()
         .collect();
@@ -428,6 +433,7 @@ fn plain_walk_visits_map_values_without_visiting_keys() {
 
 #[test]
 fn registered_function_hook_controls_children_interrupts_and_lifetime() {
+    test_prelude();
     RETAINED_VISITOR.with(|retained| {
         retained.take();
     });
@@ -619,6 +625,7 @@ fn primitive_hook_fast_path_preserves_pre_and_post_order() {
 
 #[test]
 fn primitive_fast_path_preserves_none_interrupt_and_error() {
+    test_prelude();
     let mut none_calls = 0;
     assert!(structural_walk(
         &Any::new(),
@@ -654,6 +661,7 @@ fn primitive_fast_path_preserves_none_interrupt_and_error() {
 
 #[test]
 fn registered_map_hook_visits_all_values_without_visiting_keys() {
+    test_prelude();
     // More than 4 entries forces the dense (block + iteration list) layout.
     let root: Map<FfiString, i64> = (0..9)
         .map(|i| (FfiString::from(format!("k{i}")), i as i64))
@@ -680,6 +688,7 @@ fn registered_map_hook_visits_all_values_without_visiting_keys() {
 
 #[test]
 fn interrupt_payload_crosses_map_traversal() {
+    test_prelude();
     let root: Map<FfiString, i64> = [(FfiString::from("a"), 1i64), (FfiString::from("b"), 2i64)]
         .into_iter()
         .collect();
@@ -702,6 +711,7 @@ fn interrupt_payload_crosses_map_traversal() {
 
 #[test]
 fn handler_error_crosses_map_traversal() {
+    test_prelude();
     let root: Map<FfiString, i64> = [(FfiString::from("a"), 1i64)].into_iter().collect();
     let error = match structural_walk(
         &root,
@@ -723,6 +733,7 @@ fn handler_error_crosses_map_traversal() {
 
 #[test]
 fn interrupt_stops_without_running_remaining_callbacks() {
+    test_prelude();
     let root = Array::new(vec![1i64, 2, 3]);
     let mut integers = 0;
     let outcome = structural_walk(
@@ -774,6 +785,7 @@ impl StructuralVisitor for ManualRegionVisitor {
 
 #[test]
 fn manual_child_visit_can_override_def_region() {
+    test_prelude();
     let root = Array::new(vec![7i64, 8]);
     let mut probe = ManualRegionVisitor::default();
     assert!(structural_visit(&root, &mut probe).unwrap().is_none());
@@ -797,6 +809,7 @@ impl GeneratedLeafVisitor {
 
 #[test]
 fn generated_visitor_defaults_unmatched_values() {
+    test_prelude();
     let root = Array::new(vec![1i64, 2]);
     let mut visitor = GeneratedLeafVisitor::default();
     assert!(structural_visit(&root, &mut visitor).unwrap().is_none());
@@ -838,6 +851,7 @@ impl GeneratedRecursiveVisitor {
 
 #[test]
 fn generated_visitor_can_drive_recursion_through_mut_self() {
+    test_prelude();
     let root = Array::new(vec![1i64, 2, 3]);
     let mut visitor = GeneratedRecursiveVisitor::default();
     let interrupt = structural_visit(&root, &mut visitor).unwrap().unwrap();
@@ -874,6 +888,7 @@ impl GenericDispatchProbe {
 
 #[test]
 fn generated_dispatch_supports_pod_and_ordered_catch_all() {
+    test_prelude();
     let root = Array::new(vec![1i64, 2]);
     let mut probe = GenericDispatchProbe::default();
     assert!(structural_walk(&root, &mut probe, WalkOrder::PreOrder)
@@ -919,6 +934,7 @@ impl StructuralVisitor for StraddleVisitor {
 
 #[test]
 fn visitor_can_straddle_default_children() {
+    test_prelude();
     let root = Array::new(vec![1i64, 2]);
     let mut probe = StraddleVisitor::default();
     assert!(structural_visit(&root, &mut probe).unwrap().is_none());
@@ -955,6 +971,7 @@ impl OrderProbe {
 
 #[test]
 fn stateful_structural_walk_supports_post_order() {
+    test_prelude();
     let root = Array::new(vec![1i64, 2]);
     let mut probe = OrderProbe::default();
     assert!(structural_walk(&root, &mut probe, WalkOrder::PostOrder)
@@ -965,6 +982,7 @@ fn stateful_structural_walk_supports_post_order() {
 
 #[test]
 fn nested_walk_restores_the_outer_active_visitor() {
+    test_prelude();
     let outer = Array::new(vec![10i64, 20]);
     let inner = Array::new(vec![1i64, 2]);
     let mut entered_inner = false;
@@ -1002,6 +1020,7 @@ fn nested_walk_restores_the_outer_active_visitor() {
 
 #[test]
 fn interrupt_payload_is_returned_to_the_caller() {
+    test_prelude();
     let root = Array::new(vec![1i64, 2]);
     let outcome = structural_walk(
         &root,
@@ -1022,6 +1041,7 @@ fn interrupt_payload_is_returned_to_the_caller() {
 
 #[test]
 fn handler_errors_include_native_visit_path() {
+    test_prelude();
     let root = Array::new(vec![1i64]);
     let error = match structural_walk(
         &root,
@@ -1043,6 +1063,7 @@ fn handler_errors_include_native_visit_path() {
 
 #[test]
 fn visitor_errors_include_native_visit_path() {
+    test_prelude();
     struct FailingVisitor;
 
     impl StructuralVisitor for FailingVisitor {
@@ -1081,6 +1102,7 @@ fn visitor_errors_include_native_visit_path() {
 
 #[test]
 fn callback_panics_resume_after_the_registered_hook_returns() {
+    test_prelude();
     let root = Array::new(vec![1i64]);
     let panic = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         structural_walk(
@@ -1101,6 +1123,7 @@ fn callback_panics_resume_after_the_registered_hook_returns() {
 
 #[test]
 fn visitor_interrupt_propagates_through_default_children() {
+    test_prelude();
     struct InterruptingVisitor;
 
     impl StructuralVisitor for InterruptingVisitor {
@@ -1128,6 +1151,7 @@ fn visitor_interrupt_propagates_through_default_children() {
 
 #[test]
 fn closure_walk_receives_def_region_kind() {
+    test_prelude();
     // C++: StructuralWalk<kPreOrder>(root,
     //          [&](const TVarObj* var, TVMFFIDefRegionKind kind) { ... })
     let root = Array::new(vec![1i64, 2]);
@@ -1149,6 +1173,7 @@ fn closure_walk_receives_def_region_kind() {
 
 #[test]
 fn closure_walk_supports_post_order_and_skip() {
+    test_prelude();
     let root = Array::new(vec![1i64, 2]);
     let mut order_probe = Vec::new();
     assert!(structural_walk(
@@ -1188,6 +1213,7 @@ fn closure_walk_supports_post_order_and_skip() {
 // ---------------------------------------------------------------------------
 #[test]
 fn chain_accepts_owned_object_ref_links() {
+    test_prelude();
     let root = Array::new(vec![Array::new(vec![1i64]), Array::new(vec![2i64, 3])]);
     let mut lengths = Vec::new();
     assert!(structural_walk(
@@ -1210,6 +1236,7 @@ fn chain_accepts_owned_object_ref_links() {
 
 #[test]
 fn chain_links_may_mix_def_region_arity() {
+    test_prelude();
     let root = Array::new(vec![1i64, 2]);
     let mut kinds = Vec::new();
     let mut objects = 0;
@@ -1236,6 +1263,7 @@ fn chain_links_may_mix_def_region_arity() {
 
 #[test]
 fn chain_links_can_skip_children() {
+    test_prelude();
     let root = Array::new(vec![Array::new(vec![1i64]), Array::new(vec![2i64])]);
     let mut arrays = 0;
     let mut integers = 0;
@@ -1261,6 +1289,7 @@ fn chain_links_can_skip_children() {
 
 #[test]
 fn chain_link_errors_include_native_visit_path() {
+    test_prelude();
     let root = Array::new(vec![1i64]);
     let error = match structural_walk(
         &root,
@@ -1279,6 +1308,7 @@ fn chain_link_errors_include_native_visit_path() {
 
 #[test]
 fn chain_supports_post_order() {
+    test_prelude();
     let root = Array::new(vec![1i64, 2]);
     let events = std::cell::RefCell::new(Vec::new());
     assert!(structural_walk(
@@ -1315,6 +1345,7 @@ impl ObjectCounter {
 
 #[test]
 fn chain_splices_dispatch_walkers_between_closures() {
+    test_prelude();
     let root = Array::new(vec![1i64, 2]);
     let mut counter = ObjectCounter::default();
     let mut integers = 0;
@@ -1334,6 +1365,7 @@ fn chain_splices_dispatch_walkers_between_closures() {
 
 #[test]
 fn chain_supports_full_arity() {
+    test_prelude();
     let root = Array::new(vec![1i64, 2, 3]);
     let mut integers = Vec::new();
     let mut objects = 0;
@@ -1374,6 +1406,7 @@ fn chain_supports_full_arity() {
 
 #[test]
 fn typed_lambda_walks_bare_and_as_single_link_tuple() {
+    test_prelude();
     // A lone typed handler needs no tuple: unmatched values (the array
     // itself) advance normally. The 1-tuple spelling routes through the
     // chain impls instead and must agree.
@@ -1405,6 +1438,7 @@ fn typed_lambda_walks_bare_and_as_single_link_tuple() {
 
 #[test]
 fn bare_node_lambda_takes_def_region_kind() {
+    test_prelude();
     let root = Array::new(vec![1i64, 2]);
     let mut objects = 0;
     assert!(structural_walk(
@@ -1445,6 +1479,7 @@ impl StructuralVisitor for InheritedRegionProbe {
 
 #[test]
 fn def_region_is_inherited_through_containers() {
+    test_prelude();
     let root = Array::new(vec![Array::new(vec![1i64, 2])]);
     let mut probe = InheritedRegionProbe {
         at_root: true,
@@ -1564,6 +1599,7 @@ fn non_recursive_region_is_clamped_for_free_var_children_only() {
 
 #[test]
 fn nested_tuple_chain_exceeds_flat_arity() {
+    test_prelude();
     let root = Array::new(vec![1i64, 2, 3]);
     let mut integers = Vec::new();
     let mut objects = 0;
@@ -1614,6 +1650,7 @@ fn nested_tuple_chain_exceeds_flat_arity() {
 
 #[test]
 fn nested_tuple_first_match_order_is_flattened() {
+    test_prelude();
     let root = Array::new(vec![1i64, 2]);
     let mut first = 0;
     let mut second = 0;
@@ -1639,6 +1676,7 @@ fn nested_tuple_first_match_order_is_flattened() {
 
 #[test]
 fn callback_visit_defaults_only_when_no_link_matches() {
+    test_prelude();
     let root = Array::new(vec![1i64, 2]);
     let integers = Cell::new(0);
     assert!(
@@ -1686,6 +1724,7 @@ fn stateful_visit_integer(value: i64, visitor: &mut VisitContext<'_, StatefulVis
 
 #[test]
 fn stateful_callback_visit_uses_ordinary_mutable_state() {
+    test_prelude();
     let root = Array::new(vec![1i64, 2, 3]);
     let mut visitor = VisitCallbacks::new(
         StatefulVisitStats::default(),
@@ -1710,6 +1749,7 @@ struct StatefulVisitDepth {
 
 #[test]
 fn stateful_callback_visit_reborrows_visitor_during_recursion() {
+    test_prelude();
     let root = Array::new(vec![Array::new(vec![1i64, 2])]);
     let mut visitor = VisitCallbacks::new(
         StatefulVisitDepth::default(),
@@ -1733,6 +1773,7 @@ fn stateful_callback_visit_reborrows_visitor_during_recursion() {
 
 #[test]
 fn callback_visit_can_reenter_the_same_fn_through_visitor() {
+    test_prelude();
     let root = Array::new(vec![1i64, 2]);
     let visits = Cell::new(0);
     assert!(structural_visit(
@@ -1749,6 +1790,7 @@ fn callback_visit_can_reenter_the_same_fn_through_visitor() {
 
 #[test]
 fn callback_visit_tuple_is_first_match_and_can_interrupt() {
+    test_prelude();
     let root = Array::new(vec![1i64, 2, 3]);
     let fallback = Cell::new(0);
     let interrupted = structural_visit(
@@ -1814,6 +1856,7 @@ fn callback_visit_supports_node_links_nested_tuples_and_def_regions() {
 
 #[test]
 fn callback_visit_with_overrides_child_def_region() {
+    test_prelude();
     let root = Array::new(vec![1i64, 2]);
     let seen = RefCell::new(Vec::new());
     assert!(structural_visit(
@@ -1842,6 +1885,7 @@ fn callback_visit_with_overrides_child_def_region() {
 
 #[test]
 fn nested_callback_visit_restores_the_outer_active_visitor() {
+    test_prelude();
     let outer = Array::new(vec![10i64, 20]);
     let inner = Array::new(vec![1i64, 2]);
     let entered_inner = Cell::new(false);
@@ -1870,17 +1914,26 @@ fn nested_callback_visit_restores_the_outer_active_visitor() {
 
 #[test]
 fn callback_visit_panics_resume_and_leave_the_next_run_usable() {
+    test_prelude();
     let root = Array::new(vec![1i64]);
-    let panic = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+    let entered_callback = Cell::new(false);
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         structural_visit(
             &root,
             |_value: i64, _visitor: &mut VisitContext<'_, ()>| -> () {
+                entered_callback.set(true);
                 panic!("callback visitor panic")
             },
         )
-    })) {
+    }));
+    assert!(
+        entered_callback.get(),
+        "panicking callback visitor was never called"
+    );
+    let panic = match outcome {
         Err(panic) => panic,
-        Ok(_) => panic!("panicking callback visitor unexpectedly returned"),
+        Ok(Err(error)) => panic!("panicking callback visitor returned an error: {error}"),
+        Ok(Ok(_)) => panic!("panicking callback visitor unexpectedly returned"),
     };
     assert_eq!(
         panic.downcast_ref::<&str>().copied(),
