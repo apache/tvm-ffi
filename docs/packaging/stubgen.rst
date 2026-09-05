@@ -387,6 +387,25 @@ When you run the tool, it:
 
       # tvm-ffi-stubgen(ty-map): ffi.reflection.AccessStep -> ffi.access_path.AccessStep
 
+``prefix`` - Demand a Namespace
+   Declares that the file holds every object registered directly under a type-key
+   prefix (``tirx`` covers ``tirx.Add`` but not ``tirx.transform.X``). Each run appends
+   an empty ``object/<type_key>`` block for every such object that no processed file
+   defines yet, parents first, after the file's last block (an ``import-section`` is
+   added after the ``prefix`` line when the file has none), and then fills it. Code
+   outside the blocks is preserved, so a file can start as a one-line skeleton.
+
+   .. code-block:: python
+
+      # tvm-ffi-stubgen(prefix): my_ffi_extension
+
+``skip`` - Skip an Object
+   Leaves one object out of a ``prefix`` roll-out.
+
+   .. code-block:: python
+
+      # tvm-ffi-stubgen(skip): my_ffi_extension.Internal
+
 ``import-object`` - Import Object
    Injects a custom import into generated code. The format is
    ``<full_name>;<type_checking_only>;<alias>``.

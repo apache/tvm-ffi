@@ -87,7 +87,7 @@ SYNTAX_BY_EXT: dict[str, MarkerSyntax] = {
 #: One-line directive names consumed by the language-neutral pipeline. Generators
 #: must not declare these names; every other name must be declared by the active
 #: generator (``Generator.directive_kinds``).
-PIPELINE_DIRECTIVE_KINDS: frozenset[str] = frozenset({"ty-map"})
+PIPELINE_DIRECTIVE_KINDS: frozenset[str] = frozenset({"ty-map", "prefix", "skip"})
 
 STUB_BLOCK_KINDS: TypeAlias = Literal[
     "global",
