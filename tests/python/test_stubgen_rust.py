@@ -1145,3 +1145,85 @@ def test_cli_init_generates_a_module_tree(tmp_path: Path, monkeypatch: pytest.Mo
     # Running again over the generated tree is a no-op.
     assert stub_cli.__main__() == 0
     assert (tmp_path / "testing" / "mod.rs").read_text(encoding="utf-8") == text
+
+
+def test_cli_check_reports_stale_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "tvm-ffi-stubgen",
+            "--target",
+            "rust",
+            "--init-pypkg",
+            "demo",
+            "--init-lib",
+            "demo_shared",
+            "--init-prefix",
+            "testing.",
+            str(tmp_path),
+        ],
+    )
+    assert stub_cli.__main__() == 0
+    mod_rs = tmp_path / "testing" / "mod.rs"
+    fresh = mod_rs.read_text(encoding="utf-8")
+    check = ["tvm-ffi-stubgen", "--target", "rust", "--check", str(tmp_path)]
+    # An up-to-date tree passes the check.
+    monkeypatch.setattr("sys.argv", check)
+    assert stub_cli.__main__() == 0
+    assert "[Stale]" not in capsys.readouterr().out
+    # A stale block fails it, is named, and is left untouched.
+    stale = fresh.replace("    pub v_str: String,\n", "    pub v_str: String, // stale\n", 1)
+    assert stale != fresh
+    mod_rs.write_text(stale, encoding="utf-8")
+    assert stub_cli.__main__() == 1
+    assert f"[Stale] {mod_rs}" in capsys.readouterr().out
+    assert mod_rs.read_text(encoding="utf-8") == stale
+    # Running in place repairs it; the check passes again.
+    monkeypatch.setattr("sys.argv", ["tvm-ffi-stubgen", "--target", "rust", str(tmp_path)])
+    assert stub_cli.__main__() == 0
+    assert mod_rs.read_text(encoding="utf-8") == fresh
+    monkeypatch.setattr("sys.argv", check)
+    assert stub_cli.__main__() == 0
+
+
+def test_cli_failed_file_exits_2(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "mod.rs").write_text(
+        "\n".join(
+            [
+                f"{C.RUST_SYNTAX.directive('bogus')} testing.TestCxxClassBase",
+                f"{C.RUST_SYNTAX.begin} object/testing.TestCxxClassBase",
+                C.RUST_SYNTAX.end,
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    for extra in ([], ["--check"]):
+        monkeypatch.setattr(
+            "sys.argv", ["tvm-ffi-stubgen", "--target", "rust", *extra, str(tmp_path)]
+        )
+        assert stub_cli.__main__() == 2
+
+
+def test_cli_check_rejects_init_flags(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "tvm-ffi-stubgen",
+            "--target",
+            "rust",
+            "--check",
+            "--init-pypkg",
+            "demo",
+            "--init-lib",
+            "demo_shared",
+            "--init-prefix",
+            "testing.",
+            str(tmp_path),
+        ],
+    )
+    with pytest.raises(SystemExit) as excinfo:
+        stub_cli.__main__()
+    assert excinfo.value.code == 2

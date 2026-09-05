@@ -48,6 +48,9 @@ def __main__() -> int:
     This generates in-place type stubs inside special ``tvm-ffi-stubgen`` blocks
     in the given files or directories. See the module docstring for an
     overview and examples of the block syntax.
+
+    Returns 0, or 2 when a file failed to process, or 1 when ``--check`` found
+    a file whose stub blocks are out of date.
     """
     opt = _parse_args()
     generator = get_generator(opt.target)
@@ -67,10 +70,13 @@ def __main__() -> int:
     # - defined global functions: `tvm-ffi-stubgen(begin): global/...`
     # - defined object types: `tvm-ffi-stubgen(begin): object/...`
     ty_map: dict[str, str] = generator.default_ty_map()
+    failed = 0
+    stale = 0
     for file in files:
         try:
             _stage_1(file, ty_map)
         except Exception:
+            failed += 1
             print(
                 f'{C.TERM_RED}[Failed] File "{file.path}": {traceback.format_exc()}{C.TERM_RESET}'
             )
@@ -95,7 +101,7 @@ def __main__() -> int:
         if opt.verbose:
             print(f"{C.TERM_CYAN}[File] {file.path}{C.TERM_RESET}")
         try:
-            _stage_3(
+            changed = _stage_3(
                 file,
                 opt,
                 ty_map,
@@ -103,9 +109,14 @@ def __main__() -> int:
                 generator=generator,
             )
         except Exception:
+            failed += 1
             print(
                 f'{C.TERM_RED}[Failed] File "{file.path}": {traceback.format_exc()}{C.TERM_RESET}'
             )
+            continue
+        if changed and opt.check:
+            stale += 1
+            print(f"{C.TERM_YELLOW}[Stale] {file.path}{C.TERM_RESET}")
 
     # Stage 4. Let the generator stitch the generated tree together (runs after the
     # files are fully written, so language-specific wiring isn't clobbered).
@@ -122,7 +133,7 @@ def __main__() -> int:
         }
         write_coverage_report(Path(opt.coverage_out), classify(infos))
     del dlls
-    return 0
+    return 2 if failed else 1 if stale else 0
 
 
 def _stage_1(
@@ -227,7 +238,8 @@ def _stage_3(  # noqa: PLR0912
     ty_map: dict[str, str],
     global_funcs: dict[str, list[FuncInfo]],
     generator: Generator,
-) -> None:
+) -> bool:
+    """Process one file's blocks; return whether its content is (or would be) changed."""
     defined_funcs: set[str] = set()
     defined_types: set[str] = set()
     imports = generator.new_imports()
@@ -273,7 +285,7 @@ def _stage_3(  # noqa: PLR0912
         if code.kind == "export":
             generator.generate_export_block(code)
     # Finalize: write back to file
-    file.update(verbose=opt.verbose, dry_run=opt.dry_run)
+    return file.update(verbose=opt.verbose, dry_run=opt.dry_run)
 
 
 def _parse_args() -> Options:
@@ -391,6 +403,14 @@ def _parse_args() -> Options:
         ),
     )
     parser.add_argument(
+        "--check",
+        action="store_true",
+        help=(
+            "Don't write changes; report every file whose stub blocks are out of date "
+            "and exit with status 1 if there is any. Cannot be combined with --init-*."
+        ),
+    )
+    parser.add_argument(
         "--coverage-out",
         type=str,
         default=None,
@@ -413,6 +433,8 @@ def _parse_args() -> Options:
             shared_target=args.init_lib,
             prefix=args.init_prefix,
         )
+    if args.check and init_cfg is not None:
+        parser.error("--check cannot be combined with --init-* flags")
 
     if not args.files and args.coverage_out is None:
         parser.print_help()
@@ -425,7 +447,8 @@ def _parse_args() -> Options:
         indent=args.indent,
         files=args.files,
         verbose=args.verbose,
-        dry_run=args.dry_run,
+        dry_run=args.dry_run or args.check,
+        check=args.check,
         target=args.target,
         coverage_out=args.coverage_out,
     )

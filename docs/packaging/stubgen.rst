@@ -245,6 +245,11 @@ All three are required together. When omitted, the tool operates in directive-on
 ``--dry-run``
    Preview changes without writing to files.
 
+``--check``
+   Write nothing; print ``[Stale] <file>`` for every file whose stub blocks are out of
+   date and exit with status 1 if there is any (2 if a file failed to process), so CI
+   can reject a stale tree. Cannot be combined with ``--init-*``.
+
 ``--imports``
    Additional Python modules to import before generation (semicolon-separated).
 

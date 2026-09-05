@@ -83,10 +83,9 @@ class Options:
     files: list[str] = dataclasses.field(default_factory=list)
     verbose: bool = False
     dry_run: bool = False
+    check: bool = False
     target: str = "python"
-    """Code generator target to use."""
     coverage_out: str | None = None
-    """Path of the native-layout coverage report (JSON) to write, if requested."""
 
 
 @dataclasses.dataclass(init=False)
