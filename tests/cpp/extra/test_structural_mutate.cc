@@ -44,6 +44,101 @@ TVM_FFI_STATIC_INIT_BLOCK() { TMutatePairObj::RegisterReflection(); }
 
 Expected<Any> Increment(int64_t value) { return Any(value + 1); }
 
+struct MutateCount {
+  int value = 0;
+  int mutate_raw = 0;
+  int mutate_expected = 0;
+  int maybe_inplace_raw = 0;
+  int maybe_inplace_expected = 0;
+};
+
+class StructuralMapWithMutateCount : public StructuralMapEngineBase {
+ public:
+  using StateTupleType = std::tuple<const MutateCount&, const int&>;
+
+  StructuralMapWithMutateCount(const StructuralMutatorVTable* vtable, MutateCount& count,
+                               const int& marker)
+      : StructuralMapEngineBase(vtable), count_(count), marker_(marker) {}
+
+  Expected<Any> DefaultMutateExpected(AnyView value) noexcept {
+    ++count_.value;
+    ++count_.mutate_expected;
+    return StructuralMapEngineBase::DefaultMutateExpected(value);
+  }
+
+  Expected<Any> DefaultMaybeInplaceMutateExpected(AnyView value) noexcept {
+    ++count_.value;
+    ++count_.maybe_inplace_expected;
+    return StructuralMapEngineBase::DefaultMaybeInplaceMutateExpected(value);
+  }
+
+ protected:
+  TVMFFIAny DefaultMutateRaw(AnyView value) noexcept {
+    ++count_.mutate_raw;
+    return details::ExpectedUnsafe::MoveToTVMFFIAny(DefaultMutateExpected(value));
+  }
+
+  TVMFFIAny DefaultMaybeInplaceMutateRaw(AnyView value) noexcept {
+    ++count_.maybe_inplace_raw;
+    return details::ExpectedUnsafe::MoveToTVMFFIAny(DefaultMaybeInplaceMutateExpected(value));
+  }
+
+  StateTupleType StateTuple() const noexcept { return StateTupleType(count_, marker_); }
+
+ private:
+  MutateCount& count_;
+  const int& marker_;
+};
+
+TEST(StructuralMap, ParentLayerOwnsBothDescentsAndProvidesState) {
+  MutateCount count;
+  const int marker = 17;
+  std::vector<int> callback_counts;
+  auto identity = [&](const AnyArray& value, const MutateCount& live_count, const int& live_marker,
+                      TVMFFIDefRegionKind kind) -> Expected<Any> {
+    EXPECT_EQ(&live_count, &count);
+    EXPECT_EQ(&live_marker, &marker);
+    EXPECT_EQ(live_marker, 17);
+    EXPECT_EQ(kind, kTVMFFIDefRegionKindNone);
+    callback_counts.push_back(live_count.value);
+    return Any(value);
+  };
+  int var_callback_count = 0;
+  auto map_var = [&](const TVarObj* value, const MutateCount& live_count,
+                     const int& live_marker) -> Expected<Any> {
+    EXPECT_EQ(&live_count, &count);
+    EXPECT_EQ(&live_marker, &marker);
+    ++var_callback_count;
+    return Any(TVar(value->name + "-mapped"));
+  };
+  using Mutator = StructuralMapEngine<StructuralMapWithMutateCount, WalkOrder::kPostOrder,
+                                      decltype(identity), decltype(map_var)>;
+  StructuralMutator mutator(
+      make_object<Mutator>(std::tie(count, marker), std::move(identity), std::move(map_var)));
+
+  ASSERT_FALSE(mutator->MutateExpected(String("unmatched")).is_err());
+  AnyArray rebuild_root{int64_t{1}};
+  ASSERT_FALSE(mutator->MutateExpected(rebuild_root).is_err());
+
+  ASSERT_FALSE(mutator->MaybeInplaceMutateExpected(String("unmatched")).is_err());
+  AnyArray inplace_root{int64_t{1}};
+  ASSERT_FALSE(mutator->MaybeInplaceMutateExpected(inplace_root).is_err());
+
+  EXPECT_GT(count.mutate_raw, 0);
+  EXPECT_GT(count.mutate_expected, 0);
+  EXPECT_GT(count.maybe_inplace_raw, 0);
+  EXPECT_GT(count.maybe_inplace_expected, 0);
+  EXPECT_EQ(callback_counts.size(), 2U);
+  EXPECT_GT(callback_counts[0], 0);
+  EXPECT_GT(callback_counts[1], callback_counts[0]);
+
+  TVar var("n");
+  AnyArray repeated{var, var};
+  AnyArray mapped = mutator->MutateExpected(repeated).value().cast<AnyArray>();
+  EXPECT_EQ(var_callback_count, 1);
+  EXPECT_TRUE(mapped[0].cast<TVar>().same_as(mapped[1].cast<TVar>()));
+}
+
 template <WalkOrder order>
 void CheckNestedArrayMapOrder(const std::vector<std::string>& expected_trace) {
   AnyArray inner_array{int64_t{1}};
@@ -131,6 +226,16 @@ TEST(StructuralMap, RegisteredMutateHookUsesAssignOrReturn) {
       StructuralMap<WalkOrder::kPostOrder>(nullable, [](const String& value) -> Expected<Any> {
         return Any(value);
       }).cast<TMutatePair>();
+  EXPECT_FALSE(nullable_mapped->lhs.defined());
+  EXPECT_TRUE(nullable_mapped->rhs.same_as(rhs));
+
+  int nullable_var_callbacks = 0;
+  nullable_mapped =
+      StructuralMap<WalkOrder::kPostOrder>(nullable, [&](const TVar& value) -> Expected<Any> {
+        ++nullable_var_callbacks;
+        return value.defined() ? Any(value) : Any(ObjectRef(nullptr));
+      }).cast<TMutatePair>();
+  EXPECT_EQ(nullable_var_callbacks, 2);
   EXPECT_FALSE(nullable_mapped->lhs.defined());
   EXPECT_TRUE(nullable_mapped->rhs.same_as(rhs));
 
@@ -424,6 +529,32 @@ TEST(StructuralMapDyn, ReusesRemapResultForRepeatedVar) {
   auto arr = mapped.cast<AnyArray>();
   EXPECT_EQ(calls, 1);
   EXPECT_TRUE(arr[0].cast<TVar>().same_as(arr[1].cast<TVar>()));
+}
+
+template <WalkOrder order>
+void CheckDynamicParentLayer() {
+  MutateCount count;
+  const int marker = 17;
+  int64_t calls = 0;
+  Function increment = Function::FromTyped([&](int64_t value) -> Any {
+    ++calls;
+    return Any(value + 1);
+  });
+  using Mutator = StructuralMapDynEngine<StructuralMapWithMutateCount, order>;
+  StructuralMutator mutator(make_object<Mutator>(
+      std::tie(count, marker),
+      Array<Tuple<int32_t, Function>>{Tuple<int32_t, Function>(TypeIndex::kTVMFFIInt, increment)},
+      Array<Tuple<int32_t, Function>>()));
+
+  AnyArray mapped = mutator->Mutate(AnyArray{int64_t{1}}).cast<AnyArray>();
+  EXPECT_EQ(mapped[0].cast<int64_t>(), 2);
+  EXPECT_EQ(calls, 1);
+  EXPECT_GT(count.value, 0);
+}
+
+TEST(StructuralMapDyn, ParentLayerRunsThroughHeaderDefinedEngine) {
+  CheckDynamicParentLayer<WalkOrder::kPreOrder>();
+  CheckDynamicParentLayer<WalkOrder::kPostOrder>();
 }
 
 }  // namespace
