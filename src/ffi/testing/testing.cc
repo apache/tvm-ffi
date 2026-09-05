@@ -92,6 +92,72 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   refl::TypeAttrDef<TestIntPairObj>().def_convert<TestIntPair>();
 }
 
+// Register reflected-field fixtures before language-binding tests run in parallel.
+// Neither fixture needs a custom structural-visit hook.
+class TestStructuralVisitDefRegionObj : public Object {
+ public:
+  Any recursive;
+  Any plain;
+  Any non_recursive;
+  Any both;
+  Any ignored;
+
+  TestStructuralVisitDefRegionObj(Any recursive, Any plain, Any non_recursive, Any both,
+                                  Any ignored)
+      : recursive(std::move(recursive)),
+        plain(std::move(plain)),
+        non_recursive(std::move(non_recursive)),
+        both(std::move(both)),
+        ignored(std::move(ignored)) {}
+
+  static constexpr TVMFFISEqHashKind _type_s_eq_hash_kind = kTVMFFISEqHashKindFreeVar;
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("testing.StructuralVisitDefRegion",
+                                    TestStructuralVisitDefRegionObj, Object);
+};
+
+class TestStructuralVisitFailingGetterObj : public Object {
+ public:
+  Any value;
+
+  explicit TestStructuralVisitFailingGetterObj(Any value) : value(std::move(value)) {}
+
+  static constexpr TVMFFISEqHashKind _type_s_eq_hash_kind = kTVMFFISEqHashKindTreeNode;
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("testing.StructuralVisitFailingGetter",
+                                    TestStructuralVisitFailingGetterObj, Object);
+};
+
+// Exercise callers' cleanup of an owning getter result even when the getter fails.
+struct StructuralVisitFailingGetter : reflection::InfoTrait {
+  static int Get(void* field, TVMFFIAny* result) {
+    TVM_FFI_SAFE_CALL_BEGIN();
+    TVM_FFI_CHECK_SAFE_CALL(TVMFFIAnyViewToOwnedAny(static_cast<TVMFFIAny*>(field), result));
+    TVM_FFI_THROW(RuntimeError) << "visit getter failed after writing an owning result";
+    TVM_FFI_SAFE_CALL_END();
+  }
+
+  void Apply(TVMFFIFieldInfo* info) const { info->getter = Get; }
+};
+
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  refl::ObjectDef<TestStructuralVisitDefRegionObj>()
+      .def(refl::init<Any, Any, Any, Any, Any>())
+      .def_ro("recursive", &TestStructuralVisitDefRegionObj::recursive,
+              refl::AttachFieldFlag::SEqHashDefRecursive())
+      .def_ro("plain", &TestStructuralVisitDefRegionObj::plain)
+      .def_ro("non_recursive", &TestStructuralVisitDefRegionObj::non_recursive,
+              refl::AttachFieldFlag::SEqHashDefNonRecursive())
+      .def_ro("both", &TestStructuralVisitDefRegionObj::both,
+              refl::AttachFieldFlag::SEqHashDefRecursive(),
+              refl::AttachFieldFlag::SEqHashDefNonRecursive())
+      .def_ro("ignored", &TestStructuralVisitDefRegionObj::ignored,
+              refl::AttachFieldFlag::SEqHashIgnore());
+
+  refl::ObjectDef<TestStructuralVisitFailingGetterObj>()
+      .def(refl::init<Any>())
+      .def_ro("value", &TestStructuralVisitFailingGetterObj::value, StructuralVisitFailingGetter{});
+}
+
 // C++-backed enum used by the Python ``Enum`` tests to exercise both
 // ``EnumDef``-registered entries and the Python ``ClassVar``-based binding.
 class TestEnumVariantObj : public tvm::ffi::EnumObj {
