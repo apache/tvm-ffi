@@ -198,12 +198,18 @@ def test_render_rust_type_without_mirror(schema: TypeSchema) -> None:
 
 def test_rust_ident() -> None:
     assert rust_ident("value") == "value"
-    assert rust_ident("imports_") == "imports"
+    assert rust_ident("imports_") == "imports"  # C++ member convention: one trailing underscore
+    assert rust_ident("__dict__") == "dict"  # dunder convention: both pairs
+    assert rust_ident("__dict") == "__dict"  # neither convention: kept verbatim
+    assert rust_ident("_private") == "_private"
+    assert rust_ident("odd__") == "odd__"
+    assert rust_ident("_") == "_"
+    assert rust_ident("____") == "____"
     assert rust_ident("type") == "r#type"
     assert rust_ident("self") == "self_"
     assert rust_ident("crate") == "crate_"
     assert rust_ident("base") == "base_"  # the parent slot of every generated object struct
-    assert rust_ident("data") == "data_"  # the wrapper's `ObjectArc` member
+    assert rust_ident("data") == "data"  # the wrapper slot is `base`, so `data` is free
 
 
 # ---------------------------------------------------------------------------
@@ -288,13 +294,13 @@ pub struct PairObj {{
 #[repr(C)]
 #[derive(tvm_ffi::derive::ObjectRef, Clone)]
 pub struct Pair {{
-    data: ObjectArc<PairObj>,
+    base: ObjectArc<PairObj>,
 }}
 
 impl Deref for Pair {{
     type Target = PairObj;
     fn deref(&self) -> &PairObj {{
-        &self.data
+        &self.base
     }}
 }}
 
@@ -509,13 +515,13 @@ pub struct IterVarObj {{
 #[repr(C)]
 #[derive(tvm_ffi::derive::ObjectRef, Clone)]
 pub struct IterVar {{
-    data: ObjectArc<IterVarObj>,
+    base: ObjectArc<IterVarObj>,
 }}
 
 impl Deref for IterVar {{
     type Target = IterVarObj;
     fn deref(&self) -> &IterVarObj {{
-        &self.data
+        &self.base
     }}
 }}
 
@@ -659,13 +665,13 @@ const _: () = {
 #[repr(C)]
 #[derive(tvm_ffi::derive::ObjectRef, Clone)]
 pub struct Expr {
-    data: ObjectArc<ExprObj>,
+    base: ObjectArc<ExprObj>,
 }
 
 impl Deref for Expr {
     type Target = ExprObj;
     fn deref(&self) -> &ExprObj {
-        &self.data
+        &self.base
     }
 }
 
@@ -680,7 +686,7 @@ impl Expr {
     /// Lossless complete-field allocation.
     pub fn new(span: Option<Span>, ty: Type) -> Self {
         let obj = ExprObj::new(span, ty);
-        Self { data: ObjectArc::new(obj) }
+        Self { base: ObjectArc::new(obj) }
     }
 }"""
 
@@ -704,13 +710,13 @@ const _: () = {
 #[repr(C)]
 #[derive(tvm_ffi::derive::ObjectRef, Clone)]
 pub struct Add {
-    data: ObjectArc<AddObj>,
+    base: ObjectArc<AddObj>,
 }
 
 impl Deref for Add {
     type Target = AddObj;
     fn deref(&self) -> &AddObj {
-        &self.data
+        &self.base
     }
 }
 
@@ -732,7 +738,7 @@ impl Add {
     /// Lossless complete-field allocation.
     pub fn new(span: Option<Span>, ty: PrimType, a: PrimExpr, b: PrimExpr) -> Self {
         let obj = AddObj::new(span, ty, a, b);
-        Self { data: ObjectArc::new(obj) }
+        Self { base: ObjectArc::new(obj) }
     }
 }
 
@@ -815,9 +821,9 @@ def test_reserved_member_names_get_a_trailing_underscore() -> None:
         is_final=True,
     )
     text, _ = _render(info)
-    assert "    base: Object,\n    pub base_: i64,\n    pub data_: i64,\n" in text
-    assert "    pub fn new(base_: i64, data_: i64) -> Self {" in text
-    assert "        Self { base, base_, data_ }" in text
+    assert "    base: Object,\n    pub base_: i64,\n    pub data: i64,\n" in text
+    assert "    pub fn new(base_: i64, data: i64) -> Self {" in text
+    assert "        Self { base, base_, data }" in text
     # The opaque form keeps the reflected name on the C ABI side.
     text, _ = _render(_info("demo.Node", (_field("base", "int"),)))
     assert (
@@ -895,7 +901,7 @@ def test_custom_new_renames_the_wrapper_allocator() -> None:
         "impl Add {\n    /// Lossless complete-field allocation.\n"
         "    pub fn from_complete_fields(span: Span, ty: Type, a: Expr, b: Expr) -> Self {\n"
         "        let obj = AddObj::new(span, ty, a, b);\n"
-        "        Self { data: ObjectArc::new(obj) }\n"
+        "        Self { base: ObjectArc::new(obj) }\n"
         "    }\n}"
     ) in text
     assert "    pub fn new(" not in text

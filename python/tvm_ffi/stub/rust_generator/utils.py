@@ -133,12 +133,18 @@ def _generic(base: str | None, *params: str | None) -> str | None:
 
 
 def rust_ident(name: str) -> str:
-    """Spell a reflected field name in Rust: drop the C++ trailing underscore, escape collisions.
+    """Spell a reflected field name in Rust.
 
-    Keywords become raw identifiers; the four that cannot, and the names the
-    generated structs use themselves (``base``, ``data``), get a trailing underscore.
+    Two naming conventions are unwrapped, and nothing else is renamed: a C++
+    member with one trailing underscore (``global_var_map_``) loses it, and a
+    dunder name (``__dict__``) loses both pairs. Keywords become raw
+    identifiers; the four that cannot, and ``base`` (the member name the
+    generated structs use themselves), get a trailing underscore.
     """
-    name = name.rstrip("_") or name
+    if len(name) > 4 and name.startswith("__") and name.endswith("__"):
+        name = name[2:-2]
+    elif len(name) > 1 and name.endswith("_") and not name.endswith("__"):
+        name = name[:-1]
     if name in C.RUST_NOT_RAW_IDENTIFIERS or name in C.RUST_RESERVED_MEMBERS:
         return f"{name}_"
     if name in C.RUST_KEYWORDS:

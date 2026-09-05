@@ -112,10 +112,10 @@ RUST_KEYWORDS = frozenset(
 )
 RUST_NOT_RAW_IDENTIFIERS = frozenset({"self", "Self", "super", "crate"})
 
-#: Member names the generated structs use themselves: ``base`` is the parent slot of every object
-#: struct, ``data`` the wrapper's ``ObjectArc``. A reflected field with one of these names would
-#: collide (or shadow through ``Deref``), so ``rust_ident`` spells it ``base_`` / ``data_``.
-RUST_RESERVED_MEMBERS = frozenset({"base", "data"})
+#: The one member name the generated structs use themselves: ``base`` is the parent slot of every
+#: object struct and the ``ObjectArc`` slot of every reference wrapper. A reflected field of that
+#: name would collide (or shadow through ``Deref``), so ``rust_ident`` spells it ``base_``.
+RUST_RESERVED_MEMBERS = frozenset({"base"})
 
 #: ``rustfmt``'s default ``max_width``; a wider allocator signature wraps one parameter per line.
 RUST_MAX_WIDTH = 100

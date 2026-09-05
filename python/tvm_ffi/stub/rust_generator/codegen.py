@@ -444,7 +444,7 @@ class _ObjectRenderer:
                     "pub fn from_complete_fields" if custom else "pub fn new",
                     params,
                     (f"obj = {self.obj_struct}::new", forward),
-                    "Self { data: ObjectArc::new(obj) }",
+                    "Self { base: ObjectArc::new(obj) }",
                 ),
                 "}",
             ]
@@ -478,12 +478,11 @@ class _ObjectRenderer:
                 "#[repr(C)]",
                 "#[derive(tvm_ffi::derive::ObjectRef, Clone)]",
                 f"pub struct {self.leaf} {{",
-                # a reflected `data` field becomes `data_` (`rust_ident`)
-                f"    data: ObjectArc<{self.obj_struct}>,",
+                f"    base: ObjectArc<{self.obj_struct}>,",
                 "}",
             ]
         )
-        sections.append(self._deref_lines(self.leaf, self.obj_struct, "data"))
+        sections.append(self._deref_lines(self.leaf, self.obj_struct, "base"))
         if has_parent:
             sections.append(self._deref_lines(self.obj_struct, base, "base"))
         if has_accessors:

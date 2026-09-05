@@ -133,36 +133,33 @@ pub fn derive_object_ref(input: proc_macro::TokenStream) -> TokenStream {
     let derive_input = syn::parse_macro_input!(input as DeriveInput);
     let struct_name = derive_input.ident.clone();
 
-    // search for field name base and derive the base type
-    // we expect base always to be the first field
-    let data_ty = match &derive_input.data {
-        syn::Data::Struct(s) => s.fields.iter().next().and_then(|f| {
-            let (data_id, data_ty) = (f.ident.clone()?, f.ty.clone());
-            if data_id == "data" {
-                // The transitive case of subtyping
-                Some(data_ty)
-            } else {
-                None
-            }
-        }),
+    // The `ObjectArc<T>` slot is the first field; its name is the struct's choice
+    // (`data` in this crate, `base` in stubgen output, so that reflected fields
+    // named `data` keep their name).
+    let (data_id, data_ty) = match &derive_input.data {
+        syn::Data::Struct(s) => s
+            .fields
+            .iter()
+            .next()
+            .and_then(|f| Some((f.ident.clone()?, f.ty.clone()))),
         _ => panic!("derive only works for structs"),
     }
-    .expect("First field must be `data: ObjectArc<T>`");
+    .expect("First field must be `<name>: ObjectArc<T>`");
 
     let mut expanded = quote! {
         unsafe impl #tvm_ffi_crate::object::ObjectRefCore for #struct_name {
             type ContainerType = <#data_ty as std::ops::Deref>::Target;
             #[inline]
             fn data(this: &Self) -> &ObjectArc<Self::ContainerType> {
-                &this.data
+                &this.#data_id
             }
             #[inline]
             fn into_data(this: Self) -> ObjectArc<Self::ContainerType> {
-                this.data
+                this.#data_id
             }
             #[inline]
             unsafe fn from_data(data: ObjectArc<Self::ContainerType>) -> Self {
-                Self { data}
+                Self { #data_id: data }
             }
         }
 
@@ -202,7 +199,7 @@ pub fn derive_object_ref(input: proc_macro::TokenStream) -> TokenStream {
                 type ContainerType = <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>
                     ::ContainerType;
                 let data_ptr = #tvm_ffi_crate::object::ObjectArc::<ContainerType>::as_raw(
-                    &src.data
+                    &src.#data_id
                 );
                 let object_ptr =
                     data_ptr as *mut ContainerType as *mut #tvm_ffi_crate::tvm_ffi_sys::TVMFFIObject;
@@ -232,7 +229,7 @@ pub fn derive_object_ref(input: proc_macro::TokenStream) -> TokenStream {
                     data_ptr as *mut  #tvm_ffi_crate::tvm_ffi_sys::TVMFFIObject
                 );
                 Self {
-                    data : #tvm_ffi_crate::object::ObjectArc::from_raw(
+                    #data_id: #tvm_ffi_crate::object::ObjectArc::from_raw(
                         data_ptr as *mut ContainerType
                     )
                 }
@@ -246,7 +243,7 @@ pub fn derive_object_ref(input: proc_macro::TokenStream) -> TokenStream {
                 type ContainerType = <#struct_name as #tvm_ffi_crate::object::ObjectRefCore>
                     ::ContainerType;
                 let data_ptr = #tvm_ffi_crate::object::ObjectArc::into_raw(
-                    src.data
+                    src.#data_id
                 );
                 let object_ptr =
                     data_ptr as *mut ContainerType as *mut #tvm_ffi_crate::tvm_ffi_sys::TVMFFIObject;
@@ -263,7 +260,7 @@ pub fn derive_object_ref(input: proc_macro::TokenStream) -> TokenStream {
                     ::ContainerType;
                 let data_ptr = data.data_union.v_obj as *mut ContainerType;
                 Self {
-                    data : #tvm_ffi_crate::object::ObjectArc::<ContainerType>::from_raw(data_ptr)
+                    #data_id: #tvm_ffi_crate::object::ObjectArc::<ContainerType>::from_raw(data_ptr)
                 }
             }
 

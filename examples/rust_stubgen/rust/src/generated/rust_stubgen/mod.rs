@@ -79,13 +79,13 @@ const _: () = {
 #[repr(C)]
 #[derive(tvm_ffi::derive::ObjectRef, Clone)]
 pub struct IntPair {
-    data: ObjectArc<IntPairObj>,
+    base: ObjectArc<IntPairObj>,
 }
 
 impl Deref for IntPair {
     type Target = IntPairObj;
     fn deref(&self) -> &IntPairObj {
-        &self.data
+        &self.base
     }
 }
 
@@ -100,7 +100,7 @@ impl IntPair {
     /// Lossless complete-field allocation.
     pub fn new(a: i64, b: i64, kind: PairKind) -> Self {
         let obj = IntPairObj::new(a, b, kind);
-        Self { data: ObjectArc::new(obj) }
+        Self { base: ObjectArc::new(obj) }
     }
 }
 // tvm-ffi-stubgen(end)
