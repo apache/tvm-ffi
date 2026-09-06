@@ -165,12 +165,10 @@ def _stage_1(
 
 
 def _roll_out_prefixes(files: list[FileInfo]) -> int:
-    """Append an ``object/<key>`` block for every registered object under a file's ``prefix``.
+    """Append an ``object/<key>`` block for each registered object under a file's ``prefix``.
 
-    A key with a block in any file of the run, or named by a ``skip`` directive in
-    the file, is left alone. New blocks follow the file's last object block, parents
-    first; an ``import-section`` is added after the ``prefix`` line when the file has
-    none. Returns the number of files whose directives were invalid.
+    Keys with a block in any file of the run, or named by ``skip``, are left alone; an
+    ``import-section`` is added when the file has none. Returns the number of bad files.
     """
     defined = {code.param for file in files for code in file.code_blocks if code.kind == "object"}
     registry = collect_type_keys()
