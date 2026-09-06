@@ -36,7 +36,7 @@ tvm_ffi_configure_target(
   STUB_TARGET
   rust
   STUB_INIT
-  ON
+  OFF
   STUB_DIR
   "./rust/src/generated"
 )

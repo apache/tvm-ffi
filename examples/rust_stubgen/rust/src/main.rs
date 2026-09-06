@@ -41,10 +41,11 @@ fn main() -> Result<()> {
     let _lib = Module::load_from_file(lib_path())?;
 
     // The object has a reproducible layout: it is allocated in Rust and its
-    // fields are plain struct members, on both sides of the ABI.
-    let pair = IntPair::new(1, 2, PairKind::Ordered);
+    // fields are plain struct members, on both sides of the ABI. `IntPair::new`
+    // is hand-written next to the generated block and derives `kind` itself.
+    let pair = IntPair::new(2, 1);
     println!("a={} b={} kind={:?}", pair.a, pair.b, pair.kind);
-    assert_eq!(pair.kind, PairKind::Ordered);
+    assert_eq!(pair.kind, PairKind::Unordered);
 
     let sum: i64 = tvm_ffi::cached_global_func!("rust_stubgen.IntPairSum")
         .call_tuple((pair.clone(),))?

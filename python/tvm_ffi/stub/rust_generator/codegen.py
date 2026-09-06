@@ -138,7 +138,8 @@ class _ObjectRenderer:
         Same module: the bare leaf. Elsewhere: ``super::`` per segment of this
         file's module, then the full path (edition 2021 rejects ``use ir::Expr``).
         """
-        if is_crate_type_key(type_key):
+        head, _, _ = type_key.partition(".")
+        if head in C_RUST.RUST_MOD_MAP:
             return type_key
         mod, _, type_leaf = type_key.rpartition(".")
         if tuple(mod.split(".")) == self.mod_segments:

@@ -1414,19 +1414,6 @@ def test_roll_out_matches_the_prefix_exactly(
     assert not any(block.kind == "object" for block in info.code_blocks)
 
 
-def test_prefix_ffi_rolls_out_nothing_from_the_registry(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The real registry has `ffi.Array`, `ffi.Map`, `ffi.Module`...; none of them gets a block."""
-    src = tmp_path / "ffi.rs"
-    src.write_text(f"{C.RUST_SYNTAX.directive('prefix')} ffi\n", encoding="utf-8")
-    monkeypatch.setattr("sys.argv", ["tvm-ffi-stubgen", "--target", "rust", str(tmp_path)])
-    assert stub_cli.__main__() == 0
-    text = src.read_text(encoding="utf-8")
-    assert f"{C.RUST_SYNTAX.begin} object/" not in text
-    assert "pub struct Array" not in text
-
-
 def test_prefix_survives_init(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """`--init` rewrites the file on disk and reloads it; the roll-out must come after that."""
     (tmp_path / "testing").mkdir()

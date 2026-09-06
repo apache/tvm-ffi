@@ -209,6 +209,19 @@ jobs:
         run: |
           cargo test
 
+      # Build the Rust stubgen example against the installed package. Its post-build
+      # step refreshes the bindings in place, so a diff means the checked-in file was stale.
+      - name: Run rust stubgen example
+        if: ${{ matrix.os == 'ubuntu-latest' }}
+        working-directory: examples/rust_stubgen
+        env:
+          CMAKE_BUILD_PARALLEL_LEVEL: ${{ steps.env_vars.outputs.cpu_count }}
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build
+          git diff --exit-code -- rust/src/generated
+          cd rust && cargo run
+
   # Build + test the orcjit wheel. On Linux the action downloads a prebuilt LLVM
   # tarball from a GitHub Release (built from source under the manylinux
   # gcc-toolset so the ABI stays under the floor); macOS/Windows install LLVM via
