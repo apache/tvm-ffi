@@ -82,8 +82,6 @@ def __main__() -> int:
             print(
                 f'{C.TERM_RED}[Failed] File "{file.path}": {traceback.format_exc()}{C.TERM_RESET}'
             )
-    # Stage 1b. Add the object blocks a `tvm-ffi-stubgen(prefix)` file asks for.
-    failed += _roll_out_prefixes(files)
 
     # Stage 2. Generate stubs if they are not defined on the file.
     generated_prefixes: set[str] = set()
@@ -97,6 +95,10 @@ def __main__() -> int:
             global_funcs=global_funcs,
             generator=generator,
         )
+
+    # Stage 2b. Add the object blocks a `tvm-ffi-stubgen(prefix)` file asks for. This runs
+    # after `--init`, which rewrites files on disk and reloads them.
+    failed += _roll_out_prefixes(files)
 
     # Stage 3: Process
     # - `tvm-ffi-stubgen(begin): global/...`

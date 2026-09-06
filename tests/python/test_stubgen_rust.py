@@ -1403,3 +1403,20 @@ def test_roll_out_matches_the_prefix_exactly(
         end,
         "mod tail {}",
     ]
+
+
+def test_prefix_survives_init(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`--init` rewrites the file on disk and reloads it; the roll-out must come after that."""
+    (tmp_path / "testing").mkdir()
+    mod_rs = tmp_path / "testing" / "mod.rs"
+    mod_rs.write_text(f"{C.RUST_SYNTAX.directive('prefix')} testing\n", encoding="utf-8")
+    init = ["--init-pypkg", "demo", "--init-lib", "demo_shared", "--init-prefix", "testing."]
+    monkeypatch.setattr("sys.argv", ["tvm-ffi-stubgen", "--target", "rust", *init, str(tmp_path)])
+    assert stub_cli.__main__() == 0
+    text = mod_rs.read_text(encoding="utf-8")
+    assert text.startswith(f"{C.RUST_SYNTAX.directive('prefix')} testing\n")
+    assert "pub struct TestCxxClassDerivedObj {" in text
+    monkeypatch.setattr(
+        "sys.argv", ["tvm-ffi-stubgen", "--target", "rust", "--check", str(tmp_path)]
+    )
+    assert stub_cli.__main__() == 0
