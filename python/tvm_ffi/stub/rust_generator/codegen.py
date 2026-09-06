@@ -52,7 +52,13 @@ from .. import consts as C
 from ..layout import Verdict, classify
 from ..lib_state import object_info_from_type_key
 from . import consts as C_RUST
-from .utils import RustImports, builtin_mirror_name, render_rust_type, rust_ident
+from .utils import (
+    RustImports,
+    builtin_mirror_name,
+    is_crate_type_key,
+    render_rust_type,
+    rust_ident,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Container
@@ -132,8 +138,7 @@ class _ObjectRenderer:
         Same module: the bare leaf. Elsewhere: ``super::`` per segment of this
         file's module, then the full path (edition 2021 rejects ``use ir::Expr``).
         """
-        head, _, _ = type_key.partition(".")
-        if head in C_RUST.RUST_MOD_MAP:
+        if is_crate_type_key(type_key):
             return type_key
         mod, _, type_leaf = type_key.rpartition(".")
         if tuple(mod.split(".")) == self.mod_segments:
@@ -147,7 +152,7 @@ class _ObjectRenderer:
         ``"crate"`` for builtin ``ffi.*`` types, ``"mapped"`` for a ``ty-map`` to a
         hand-written binding, ``"generated"`` for an ``object/`` block in this run.
         """
-        if type_key.partition(".")[0] in C_RUST.RUST_MOD_MAP:
+        if is_crate_type_key(type_key):
             return "crate"
         if type_key in self.ty_map:
             return "mapped"

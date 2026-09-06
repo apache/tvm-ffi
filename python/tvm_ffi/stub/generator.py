@@ -114,6 +114,14 @@ class Generator(Protocol):
         """Return extra public-export names implied by the collected imports."""
         ...
 
+    def is_builtin(self, type_key: str) -> bool:
+        """Whether the target's runtime binds ``type_key`` itself.
+
+        Such a key gets no ``object/`` block: neither ``--init`` scaffolds one nor a
+        ``prefix`` directive rolls one out.
+        """
+        ...
+
     # --- per-block generation (mutates `code.lines`) ------------------------
 
     def generate_global_funcs_block(

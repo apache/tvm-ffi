@@ -75,6 +75,10 @@ class PythonGenerator:
         """Return extra ``__all__`` names implied by the collected imports."""
         return {"LIB"} if imports.has_lib_load else set()
 
+    def is_builtin(self, type_key: str) -> bool:
+        """Whether the ``tvm_ffi`` package binds ``type_key`` itself."""
+        return type_key in C.BUILTIN_TYPE_KEYS
+
     # --- per-block generation (mutates `code.lines`) ------------------------
 
     def generate_global_funcs_block(

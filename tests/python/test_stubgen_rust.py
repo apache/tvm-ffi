@@ -1369,7 +1369,7 @@ def test_roll_out_matches_the_prefix_exactly(
     monkeypatch.setattr(
         stub_cli,
         "collect_type_keys",
-        lambda: {"a": ["a.Y", "a.X"], "a.b": ["a.b.Z"], "ffi": ["ffi.Object"]},
+        lambda: {"a": ["a.Y", "a.X"], "a.b": ["a.b.Z"], "ffi": ["ffi.Array", "ffi.Object"]},
     )
     monkeypatch.setattr(
         stub_cli,
@@ -1392,7 +1392,7 @@ def test_roll_out_matches_the_prefix_exactly(
     )
     info = FileInfo.from_file(src)
     assert info is not None
-    assert stub_cli._roll_out_prefixes([info]) == 0
+    assert stub_cli._roll_out_prefixes([info], RUST) == 0
     assert [line for block in info.code_blocks for line in block.lines] == [
         f"{C.RUST_SYNTAX.directive('prefix')} a.",
         f"{begin} import-section",
@@ -1405,12 +1405,26 @@ def test_roll_out_matches_the_prefix_exactly(
         end,
         "mod tail {}",
     ]
-    # Builtin type keys live in the crate and are never rolled out.
+    # Every `ffi.*` key lives in the crate and is never rolled out, `ffi.Array` included: a
+    # generated non-generic `Array` would shadow the crate's `Array<T>`.
     src.write_text(f"{C.RUST_SYNTAX.directive('prefix')} ffi\n", encoding="utf-8")
     info = FileInfo.from_file(src)
     assert info is not None
-    assert stub_cli._roll_out_prefixes([info]) == 0
+    assert stub_cli._roll_out_prefixes([info], RUST) == 0
     assert not any(block.kind == "object" for block in info.code_blocks)
+
+
+def test_prefix_ffi_rolls_out_nothing_from_the_registry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The real registry has `ffi.Array`, `ffi.Map`, `ffi.Module`...; none of them gets a block."""
+    src = tmp_path / "ffi.rs"
+    src.write_text(f"{C.RUST_SYNTAX.directive('prefix')} ffi\n", encoding="utf-8")
+    monkeypatch.setattr("sys.argv", ["tvm-ffi-stubgen", "--target", "rust", str(tmp_path)])
+    assert stub_cli.__main__() == 0
+    text = src.read_text(encoding="utf-8")
+    assert f"{C.RUST_SYNTAX.begin} object/" not in text
+    assert "pub struct Array" not in text
 
 
 def test_prefix_survives_init(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

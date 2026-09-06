@@ -115,6 +115,7 @@ DOC_URL = "https://tvm.apache.org/ffi/packaging/stubgen.html"
 # the FFI reflection registry (see `utils.ObjectInfo.from_type_info`).
 FN_NAME_MAP: dict[str, str] = {}
 
+#: Type keys the Python package binds itself (see ``PythonGenerator.is_builtin``).
 BUILTIN_TYPE_KEYS = {
     "ffi.Bytes",
     "ffi.Error",

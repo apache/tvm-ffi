@@ -58,6 +58,11 @@ class RustUse:
         return f"use {self.path};"
 
 
+def is_crate_type_key(type_key: str) -> bool:
+    """Whether the ``tvm_ffi`` crate binds ``type_key`` itself (every ``ffi.*`` key)."""
+    return type_key.partition(".")[0] in C.RUST_MOD_MAP
+
+
 def builtin_mirror_name(type_key: str) -> str:
     """Name of the header-only stand-in for a builtin type (``ffi.IntEnum -> FfiIntEnumObj``).
 

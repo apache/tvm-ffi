@@ -32,7 +32,7 @@ from .codegen import (
     generate_rust_import_section,
     generate_rust_object,
 )
-from .utils import RustImports, RustUse
+from .utils import RustImports, RustUse, is_crate_type_key
 
 if TYPE_CHECKING:
     from collections.abc import Container
@@ -74,6 +74,10 @@ class RustGenerator:
     def extra_export_names(self, imports: RustImports) -> set[str]:
         """No extra export names for Rust."""
         return set()
+
+    def is_builtin(self, type_key: str) -> bool:
+        """Every ``ffi.*`` key is bound by the crate (the rule ``codegen`` resolves types with)."""
+        return is_crate_type_key(type_key)
 
     # --- per-block generation -------------------------------------------------
 

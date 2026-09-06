@@ -98,7 +98,7 @@ def __main__() -> int:
 
     # Stage 2b. Add the object blocks a `tvm-ffi-stubgen(prefix)` file asks for. This runs
     # after `--init`, which rewrites files on disk and reloads them.
-    failed += _roll_out_prefixes(files)
+    failed += _roll_out_prefixes(files, generator)
 
     # Stage 3: Process
     # - `tvm-ffi-stubgen(begin): global/...`
@@ -166,15 +166,14 @@ def _stage_1(
         ty_map[lhs.strip()] = rhs.strip()
 
 
-def _roll_out_prefixes(files: list[FileInfo]) -> int:
+def _roll_out_prefixes(files: list[FileInfo], generator: Generator) -> int:
     """Append an ``object/<key>`` block for each registered object under a file's ``prefix``.
 
-    Keys with a block in any file of the run, or named by ``skip``, are left alone; an
-    ``import-section`` is added when the file has none. Returns the number of bad files.
+    Keys with a block in any file of the run, named by ``skip``, or bound by the target's
+    runtime are left alone; an ``import-section`` is added when the file has none. Returns
+    the number of bad files.
     """
-    defined = {
-        code.param for file in files for code in file.code_blocks if code.kind == "object"
-    } | C.BUILTIN_TYPE_KEYS
+    defined = {code.param for file in files for code in file.code_blocks if code.kind == "object"}
     registry = collect_type_keys()
     owners: dict[str, Path] = {}
     failed = 0
@@ -200,7 +199,11 @@ def _roll_out_prefixes(files: list[FileInfo]) -> int:
             )
             continue
         skipped = {c.param[1].strip() for c in directives if c.param[0] == "skip"}
-        keys = [key for key in registry[prefix] if key not in defined and key not in skipped]
+        keys = [
+            key
+            for key in registry[prefix]
+            if key not in defined and key not in skipped and not generator.is_builtin(key)
+        ]
         blocks = file.code_blocks
         if not any(c.kind == "import-section" for c in blocks):
             at = blocks.index(head) + 1
@@ -251,7 +254,7 @@ def _stage_2(
     }
     defined_objs: set[str] = {  # ty: ignore[invalid-assignment]
         code.param for file in files for code in file.code_blocks if code.kind == "object"
-    } | C.BUILTIN_TYPE_KEYS
+    }
     skipped: set[str] = {
         code.param[1].strip()
         for file in files
@@ -275,7 +278,9 @@ def _stage_2(
             [] if prefix in defined_func_prefixes else global_funcs.get(prefix, []),
             key=lambda f: f.schema.name,
         )
-        objs = sorted(set(obj_names) - defined_objs - skipped)
+        objs = sorted(
+            key for key in set(obj_names) - defined_objs - skipped if not generator.is_builtin(key)
+        )
         object_infos = toposort_objects(objs)
         if not funcs and not object_infos:
             continue

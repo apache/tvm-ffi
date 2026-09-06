@@ -390,7 +390,8 @@ When you run the tool, it:
 ``prefix`` - Demand a Namespace
    Rust target only. Adds an ``object/<type_key>`` block to the file for every object
    registered directly under the prefix that no processed file defines yet; ``skip``
-   leaves one out. Code outside the blocks is preserved.
+   leaves one out, and a key the ``tvm_ffi`` crate binds itself (every ``ffi.*`` key)
+   is never added. Code outside the blocks is preserved.
 
    .. code-block:: rust
 
