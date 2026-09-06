@@ -172,7 +172,9 @@ def _roll_out_prefixes(files: list[FileInfo]) -> int:
     Keys with a block in any file of the run, or named by ``skip``, are left alone; an
     ``import-section`` is added when the file has none. Returns the number of bad files.
     """
-    defined = {code.param for file in files for code in file.code_blocks if code.kind == "object"}
+    defined = {
+        code.param for file in files for code in file.code_blocks if code.kind == "object"
+    } | C.BUILTIN_TYPE_KEYS
     registry = collect_type_keys()
     owners: dict[str, Path] = {}
     failed = 0
@@ -250,6 +252,12 @@ def _stage_2(
     defined_objs: set[str] = {  # ty: ignore[invalid-assignment]
         code.param for file in files for code in file.code_blocks if code.kind == "object"
     } | C.BUILTIN_TYPE_KEYS
+    skipped: set[str] = {
+        code.param[1].strip()
+        for file in files
+        for code in file.code_blocks
+        if code.kind == "directive" and code.param[0] == "skip"
+    }
 
     # Step 0. Generate missing `_ffi_api.py` and `__init__.py` under each prefix.
     prefix_filter = init_cfg.prefix.strip()
@@ -267,7 +275,7 @@ def _stage_2(
             [] if prefix in defined_func_prefixes else global_funcs.get(prefix, []),
             key=lambda f: f.schema.name,
         )
-        objs = sorted(set(obj_names) - defined_objs)
+        objs = sorted(set(obj_names) - defined_objs - skipped)
         object_infos = toposort_objects(objs)
         if not funcs and not object_infos:
             continue

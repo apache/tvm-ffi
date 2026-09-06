@@ -1367,7 +1367,9 @@ def test_roll_out_matches_the_prefix_exactly(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(
-        stub_cli, "collect_type_keys", lambda: {"a": ["a.Y", "a.X"], "a.b": ["a.b.Z"]}
+        stub_cli,
+        "collect_type_keys",
+        lambda: {"a": ["a.Y", "a.X"], "a.b": ["a.b.Z"], "ffi": ["ffi.Object"]},
     )
     monkeypatch.setattr(
         stub_cli,
@@ -1403,19 +1405,27 @@ def test_roll_out_matches_the_prefix_exactly(
         end,
         "mod tail {}",
     ]
+    # Builtin type keys live in the crate and are never rolled out.
+    src.write_text(f"{C.RUST_SYNTAX.directive('prefix')} ffi\n", encoding="utf-8")
+    info = FileInfo.from_file(src)
+    assert info is not None
+    assert stub_cli._roll_out_prefixes([info]) == 0
+    assert not any(block.kind == "object" for block in info.code_blocks)
 
 
 def test_prefix_survives_init(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """`--init` rewrites the file on disk and reloads it; the roll-out must come after that."""
     (tmp_path / "testing").mkdir()
     mod_rs = tmp_path / "testing" / "mod.rs"
-    mod_rs.write_text(f"{C.RUST_SYNTAX.directive('prefix')} testing\n", encoding="utf-8")
+    skip = f"{C.RUST_SYNTAX.directive('skip')} testing.TestCxxClassDerivedDerived"
+    mod_rs.write_text(f"{C.RUST_SYNTAX.directive('prefix')} testing\n{skip}\n", encoding="utf-8")
     init = ["--init-pypkg", "demo", "--init-lib", "demo_shared", "--init-prefix", "testing."]
     monkeypatch.setattr("sys.argv", ["tvm-ffi-stubgen", "--target", "rust", *init, str(tmp_path)])
     assert stub_cli.__main__() == 0
     text = mod_rs.read_text(encoding="utf-8")
     assert text.startswith(f"{C.RUST_SYNTAX.directive('prefix')} testing\n")
     assert "pub struct TestCxxClassDerivedObj {" in text
+    assert "object/testing.TestCxxClassDerivedDerived" not in text  # `--init` honours `skip`
     monkeypatch.setattr(
         "sys.argv", ["tvm-ffi-stubgen", "--target", "rust", "--check", str(tmp_path)]
     )
