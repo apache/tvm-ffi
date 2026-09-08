@@ -28,6 +28,8 @@ use tvm_ffi_sys::{
     TVMFFITypeIndex, TVMFFITypeKeyToIndex,
 };
 
+mod local;
+
 /// function object
 #[repr(C)]
 #[derive(Object)]
@@ -38,13 +40,17 @@ pub struct FunctionObj {
     cell: TVMFFIFunctionCell,
 }
 
-/// A shareable packed function. Rust callbacks must have thread-safe captures.
+/// A shareable packed-function handle.
+///
+/// Callbacks created with [`Function::from_packed_local`] or
+/// [`Function::from_typed_local`] reject calls outside their creating thread.
 #[derive(Clone, ObjectRef)]
 pub struct Function {
     data: ObjectArc<FunctionObj>,
 }
 
-// SAFETY: Rust callbacks require Send + Sync, including their captured state.
+// SAFETY: Rust callbacks either have Send + Sync captures or keep them in
+// owner-thread storage behind a checked, shareable handle.
 // Foreign callbacks must uphold the same contract (see from_extern_c). Opt in
 // only the handle, not FunctionObj or its potentially stateful derived layouts.
 unsafe impl Send for Function {}
@@ -345,6 +351,54 @@ impl Function {
             );
             Self { data: func_arc }
         }
+    }
+
+    /// Construct a packed callback that can only run on its creating thread.
+    ///
+    /// Captures need not be `Send` or `Sync`. The returned handle may be retained
+    /// by native code or sent to another thread, but calls there return an error.
+    /// Captures are released on the creating thread: immediately when the last
+    /// handle is dropped there, or, after a foreign-thread drop, when the owner
+    /// next creates, calls, or drops a local function, or exits. Handles retained
+    /// past owner-thread exit can no longer call the callback.
+    ///
+    /// Capturing the function's own handle delays cleanup until thread exit.
+    ///
+    /// # Panics
+    ///
+    /// Panics if called during destruction of the local callback registry.
+    pub fn from_packed_local<F>(func: F) -> Self
+    where
+        F: Fn(&[AnyView]) -> Result<Any> + 'static,
+    {
+        local::new(func)
+    }
+
+    /// Construct a typed callback that can only run on its creating thread.
+    ///
+    /// This accepts thread-confined captures such as IR handles or `Rc<Cell<_>>`.
+    /// See [`Self::from_packed_local`] for call and destruction behavior.
+    ///
+    /// ```
+    /// use std::{cell::Cell, rc::Rc};
+    /// use tvm_ffi::Function;
+    ///
+    /// let calls = Rc::new(Cell::new(0));
+    /// let state = calls.clone();
+    /// let function = Function::from_typed_local(move |value: i64| {
+    ///     state.set(state.get() + 1);
+    ///     Ok(value + 1)
+    /// });
+    /// let result: i64 = function.call_tuple((4i64,))?.try_into()?;
+    /// assert_eq!(result, 5);
+    /// assert_eq!(calls.get(), 1);
+    /// # Ok::<(), tvm_ffi::Error>(())
+    /// ```
+    pub fn from_typed_local<F, I, O>(func: F) -> Self
+    where
+        F: AsPackedCallable<I, O> + 'static,
+    {
+        Self::from_packed_local(move |args| func.call_packed(args))
     }
 
     /// Construct a function from a typed function.

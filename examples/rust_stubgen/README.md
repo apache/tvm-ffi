@@ -141,8 +141,12 @@ cross-compilation target.
 Complete and opaque objects inherit `!Send` and `!Sync` from `tvm_ffi::Object`,
 including when viewed through a base or `ObjectRef`. The zero-sized marker does
 not change their ABI layout. `Function` remains shareable, so its `from_packed`
-and `from_typed` callbacks require `Send + Sync` captures. Scoped structural
-callbacks are unaffected. `ObjectArc` requires unique ownership for mutable access.
+and `from_typed` callbacks require `Send + Sync` captures. Use `from_packed_local`
+or `from_typed_local` when a retained callback captures thread-confined objects:
+the handle can cross the ABI, but calls must stay on its creating thread. A last
+handle dropped elsewhere defers capture cleanup until the owner next uses a local
+function or exits. Scoped structural callbacks are unaffected. `ObjectArc`
+requires unique ownership for mutable access.
 
 These are source-compatibility changes. Any unsafe thread-safety opt-in must
 cover hidden native state, destruction, and all accepted dynamic subtypes.
