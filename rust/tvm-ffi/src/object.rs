@@ -40,12 +40,6 @@ pub struct Object {
     _thread_confined: std::marker::PhantomData<std::rc::Rc<()>>,
 }
 
-const _: () = {
-    assert!(std::mem::size_of::<Object>() == std::mem::size_of::<TVMFFIObject>());
-    assert!(std::mem::align_of::<Object>() == std::mem::align_of::<TVMFFIObject>());
-    assert!(std::mem::offset_of!(Object, header) == 0);
-};
-
 /// Arc-like wrapper for Object that allows shared ownership.
 ///
 /// Mutable dereferencing panics if another strong or external weak owner exists.

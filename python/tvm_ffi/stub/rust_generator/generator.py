@@ -69,7 +69,6 @@ class RustGenerator:
         else:
             imports.directives.add(name, payload, lineno)
             if name == "no-alloc":
-                # A misspelled type must not silently leave its allocator enabled.
                 object_info_from_type_key(payload.strip())
 
     def canonical_type_name(self, type_key: str) -> str:
