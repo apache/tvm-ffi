@@ -247,7 +247,6 @@ def test_directives_parse() -> None:
     directives.add("upcast", "tirx.Add -> crate::typed::TypedExpr", 7)
     directives.add("custom-new", " tirx.Add ", 8)
     directives.add("no-alloc", " ir.SourceName ", 9)
-    directives.add("nullable-storage", " tirx.PrimFunc.body ", 10)
     assert directives.field_types == {"tirx.Add.a": "PrimExpr"}
     assert directives.nullable == {"ir.Expr.span"}
     assert directives.enums == {
@@ -258,7 +257,6 @@ def test_directives_parse() -> None:
     assert directives.upcasts == {"tirx.Add": ["PrimExpr", "crate::typed::TypedExpr"]}
     assert directives.custom_new == {"tirx.Add"}
     assert directives.no_alloc == {"ir.SourceName"}
-    assert directives.nullable_storage == {"tirx.PrimFunc.body"}
 
 
 @pytest.mark.parametrize(
@@ -294,7 +292,6 @@ def test_generator_declares_its_directives_and_records_imports() -> None:
         "upcast",
         "custom-new",
         "no-alloc",
-        "nullable-storage",
     }
     imports = RUST.new_imports()
     RUST.add_directive(imports, "import-object", "tvm_ffi.libinfo.Foo;False;_Foo", 1)
@@ -932,13 +929,13 @@ def test_custom_new_renames_the_wrapper_allocator() -> None:
     assert "    pub fn new(" not in text
 
 
-def test_object_policies_preserve_fields_and_apply_to_descendants() -> None:
+def test_no_alloc_preserves_fields_and_applies_to_descendants() -> None:
     base = _info("demo.Base", (_field("value", "Object", 24, 8),), total_size=32)
     child = _info("demo.Child", parent="demo.Base", total_size=32)
     _register(base)
     imports = RustImports()
     for name in ("no-alloc", "custom-new"):
-        RUST.add_directive(imports, name, "demo.Base", 1)
+        imports.directives.add(name, "demo.Base", 1)
     for info in (base, child):
         text, _ = _render(info, imports)
         assert "/// Complete:" in text
@@ -946,59 +943,6 @@ def test_object_policies_preserve_fields_and_apply_to_descendants() -> None:
         assert "from_complete_fields" not in text
     text, _ = _render(base, imports)
     assert "pub value: ObjectRef," in text
-
-
-def test_nullable_storage_keeps_constructor_required_and_accessor_borrowed() -> None:
-    base = _info("demo.Base", (_field("body", "Object", 24, 8),), total_size=32)
-    child = _info("demo.Child", parent="demo.Base", total_size=32)
-    _register(base)
-    imports = RustImports()
-    RUST.add_directive(imports, "nullable-storage", "demo.Base.body", 1)
-    text, _ = _render(base, imports)
-    assert "    body: Option<ObjectRef>," in text
-    assert "pub body:" not in text
-    assert "pub fn body(&self) -> &ObjectRef" in text
-    assert 'self.body.as_ref().expect("Base.body has been moved out")' in text
-    assert "pub fn new(body: ObjectRef) -> Self" in text
-    assert "Self { base, body: Some(body) }" in text
-    assert "assert!(::core::mem::size_of::<Option<ObjectRef>>() == 8);" in text
-    assert "assert!(::core::mem::offset_of!(BaseObj, body) == 24);" in text
-    text, _ = _render(child, imports)
-    assert "pub fn new(body: ObjectRef) -> Self" in text
-    assert "BaseObj::new(body)" in text  # not Some(body); the base owns that conversion
-
-
-@pytest.mark.parametrize(
-    ("schema", "size", "extra", "message"),
-    [
-        ("int", 8, None, "requires a pointer-sized object-reference field"),
-        ("str", 16, None, "requires a pointer-sized object-reference field"),
-        ("Object", 16, None, "requires a pointer-sized object-reference field"),
-        (TypeSchema("Optional", (TypeSchema("Object"),)), 8, None, "requires a non-optional field"),
-        ("Object", 8, ("nullable", "demo.Node.body"), "requires a non-optional field"),
-        ("Object", 8, ("field", "demo.Node.body -> i64"), "object-reference field"),
-        ("Object", 8, ("enum", "demo.Node.body -> Kind(i64)"), "cannot be combined with `enum`"),
-    ],
-)
-def test_nullable_storage_rejects_incompatible_fields(
-    schema: str | TypeSchema, size: int, extra: tuple[str, str] | None, message: str
-) -> None:
-    info = _info("demo.Node", (_field("body", schema, 24, size),), total_size=24 + size)
-    imports = RustImports()
-    RUST.add_directive(imports, "nullable-storage", "demo.Node.body", 1)
-    if extra is not None:
-        RUST.add_directive(imports, *extra, 2)
-    with pytest.raises(ValueError, match=re.escape(message)):
-        _render(info, imports)
-
-
-def test_nullable_storage_rejects_unknown_fields_and_opaque_layouts() -> None:
-    imports = RustImports()
-    RUST.add_directive(imports, "nullable-storage", "demo.Node.body", 1)
-    with pytest.raises(ValueError, match="unknown own field"):
-        _render(_info("demo.Node", total_size=24), imports)
-    with pytest.raises(ValueError, match="requires a complete layout"):
-        _render(_info("demo.Node", (_field("body", "Object", 24, 8),)), imports)
 
 
 def test_upcast_directive_adds_typed_views() -> None:
@@ -1230,7 +1174,8 @@ def test_generated_object_contracts_compile_and_drop(tmp_path: Path) -> None:
     """Compile the generated code, including negative API checks, against the real crate."""
     imports = RustImports()
     RUST.add_directive(imports, "no-alloc", "testing.TestCxxClassBase", 1)
-    RUST.add_directive(imports, "nullable-storage", "testing.TestDeepCopyEdges.v_obj", 2)
+    RUST.add_directive(imports, "nullable", "testing.TestDeepCopyEdges.v_obj", 2)
+    RUST.add_directive(imports, "custom-new", "testing.TestDeepCopyEdges", 3)
     keys = ["TestCxxClassBase", "TestCxxClassHiddenField", "TestObjectBase", "TestDeepCopyEdges"]
     bodies = [_render(object_info_from_type_key(f"testing.{key}"), imports)[0] for key in keys]
     docs = "\n".join(
@@ -1246,6 +1191,13 @@ def test_generated_object_contracts_compile_and_drop(tmp_path: Path) -> None:
     source = docs + "\n" + "\n".join(item.as_use_line() for item in imports.items)
     source += "\n" + "\n".join(bodies)
     source += r"""
+// Keep semantic construction in the binding, using the existing nullable allocator.
+impl TestDeepCopyEdges {
+    pub fn new(v_any: tvm_ffi::Any, v_obj: tvm_ffi::object::ObjectRef) -> Self {
+        Self::from_complete_fields(v_any, Some(v_obj))
+    }
+}
+
 #[test]
 fn native_null_storage_is_safe_to_drop() {
     use tvm_ffi::object::ObjectRefCore;
@@ -1255,7 +1207,7 @@ fn native_null_storage_is_safe_to_drop() {
     let child = TestObjectBase::new(1, 2.0, "child".into());
     let object = tvm_ffi::object::ObjectRef::try_from(tvm_ffi::Any::from(child.clone())).unwrap();
     let holder = TestDeepCopyEdges::new(7i64.into(), object);
-    assert!(holder.v_obj().same_as(&child));
+    assert!(holder.v_obj.as_ref().unwrap().same_as(&child));
     let native_child = FieldGetter::new(TestDeepCopyEdgesObj::type_index(), "v_obj")
         .unwrap().get_any(&*holder).unwrap();
     assert!(tvm_ffi::object::ObjectRef::try_from(native_child).unwrap().same_as(&child));
@@ -1272,6 +1224,7 @@ fn native_null_storage_is_safe_to_drop() {
         assert_eq!(setter(ptr.cast_mut().cast::<u8>().offset(field.offset as isize).cast(),
                          &TVMFFIAny::new()), 0);
     }
+    assert!(holder.v_obj.is_none());
     drop(holder);
     assert_eq!(ObjectArc::strong_count(TestObjectBase::data(&child)), 1);
 }
@@ -1306,19 +1259,10 @@ fn native_null_storage_is_safe_to_drop() {
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-@pytest.mark.parametrize(
-    ("name", "target"),
-    [
-        ("no-alloc", "testing.MissingObjectContract"),
-        ("nullable-storage", "testing.TestCxxClassBase.missing"),
-    ],
-)
-def test_cli_rejects_invalid_object_policies(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str, target: str
-) -> None:
+def test_cli_rejects_unknown_no_alloc_type(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     src = tmp_path / "mod.rs"
     original = (
-        f"{C.RUST_SYNTAX.directive(name)} {target}\n"
+        f"{C.RUST_SYNTAX.directive('no-alloc')} testing.MissingObjectContract\n"
         f"{C.RUST_SYNTAX.begin} object/testing.TestCxxClassBase\n{C.RUST_SYNTAX.end}\n"
     )
     src.write_text(original, encoding="utf-8")

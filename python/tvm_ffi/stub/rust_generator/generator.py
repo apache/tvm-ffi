@@ -50,7 +50,7 @@ class RustGenerator:
     syntax = C.RUST_SYNTAX
     source_exts = frozenset({".rs"})
     directive_kinds = C_RUST.RUST_DIRECTIVE_KINDS
-    shared_directive_kinds = frozenset({"no-alloc", "nullable-storage"})
+    shared_directive_kinds = frozenset({"no-alloc"})
 
     def default_ty_map(self) -> dict[str, str]:
         """Return the default FFI-origin -> Rust-type name map."""
@@ -68,17 +68,9 @@ class RustGenerator:
             imports.record(payload.split(";", 1)[0].strip())
         else:
             imports.directives.add(name, payload, lineno)
-
-    def validate_directives(self, imports: RustImports) -> None:
-        """Do not silently ignore a misspelled safety policy target."""
-        rules = imports.directives
-        owners = rules.no_alloc | {target.rpartition(".")[0] for target in rules.nullable_storage}
-        for key in sorted(owners):
-            info = object_info_from_type_key(key)
-            for target in rules.nullable_storage:
-                owner, _, field = target.rpartition(".")
-                if owner == key and field not in {f.name for f in info.fields}:
-                    raise ValueError(f"`nullable-storage` names unknown own field `{target}`")
+            if name == "no-alloc":
+                # A misspelled type must not silently leave its allocator enabled.
+                object_info_from_type_key(payload.strip())
 
     def canonical_type_name(self, type_key: str) -> str:
         """Return the Rust path for a defined type key (matches :attr:`RustUse.path`)."""

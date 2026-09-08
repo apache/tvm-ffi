@@ -117,66 +117,46 @@ wraps an object-reference field in `Option` (for example, a nullable `span`),
 and `upcast` adds a conversion to a hand-written typed view
 (`// tvm-ffi-stubgen(upcast): rust_stubgen.IntPair -> MyView`).
 
-## Object lifetime and construction policies
+## Construction and ownership
 
-Complete byte layout alone does not say whether a type may be allocated, shared
-between threads, or have its fields moved out by native code. Declare these
-policies outside the generated blocks; no type names are hard-coded in stubgen:
+A complete layout does not always permit direct allocation. For a registry-owned
+type, keep its readable fields but suppress both generated allocators:
 
 ```rust
 // tvm-ffi-stubgen(no-alloc): ir.SourceName
-// tvm-ffi-stubgen(nullable-storage): tirx.PrimFunc.body
 ```
 
-- `no-alloc` keeps complete readable fields but omits both `<Type>Obj::new`
-  and the wrapper allocator. It also applies to descendants, and takes precedence
-  over `custom-new`. An interned type can keep a hand-written method that calls
-  its existing registry lookup; generating a binding does not require Rust to
-  allocate the object.
-- `nullable-storage` applies to a required, pointer-sized object-reference
-  field in a complete layout. It generates private `Option<T>` storage, a
-  borrowing accessor `field(&self) -> &T`, and an allocator that takes `T`
-  and stores `Some(value)`. Native code may leave the slot null after a move,
-  including on error; Rust can then drop the object safely. The accessor panics
-  on that moved-from state. Use ordinary `nullable` instead if callers are
-  allowed to construct an absent value. Optional/scalar fields and conflicting
-  directives are rejected, and the generated storage's size, alignment and
-  offset are checked at compile time.
+`no-alloc` takes precedence over `custom-new` and also applies to descendants
+across all input files in the same invocation. Include the file declaring this
+policy when generating descendants. The binding supplies the existing registry
+lookup; stubgen does not infer or translate native constructor semantics.
 
-These two policies apply across **all input files in the same invocation**,
-so a descendant in another module cannot bypass its base's allocation policy.
-When generating a subset of files, include the files declaring its ancestors'
-policies too. Existing `field`, `nullable`, `enum`, `opaque`, `upcast`, and
-`custom-new` directives remain file-local.
+If native code can move an object-reference field out and leave it null, reuse
+`nullable` and `custom-new` in the file containing that binding:
 
-These directives encode reviewed native behavior, not behavior inferred from
-field sizes. In particular, `nullable-storage` does not make concurrent native
-mutation of a borrowed Rust field safe, and `no-alloc` does not automatically
-translate a C++ constructor's validation into Rust.
+```rust
+// tvm-ffi-stubgen(nullable): tirx.PrimFunc.body
+// tvm-ffi-stubgen(custom-new): tirx.PrimFunc
+```
 
-Generated objects, both complete and opaque, inherit `!Send` and `!Sync` from
-`tvm_ffi::Object`. Atomic reference counts do not prove that hidden native state
-or its destructor is thread-safe. The base marker has zero size and does not
-change the ABI; upcasting to a base node or `ObjectRef`, or retaining an
-`ObjectIdentity`, does not erase the restriction. No per-type directive is needed.
-An explicit unsafe thread-safety implementation must cover all dynamic subtypes,
-not just the fields visible in Rust. This is a Rust compile-time restriction,
-not a lock or a runtime check on foreign code.
+The generated field is `pub body: Option<Stmt>`. The hand-written `new` takes a
+`Stmt` and passes `Some(body)` to `from_complete_fields`. Read it with `as_ref()`
+or a binding-level `body()` helper. The low-level allocator still accepts `None`;
+this preserves nullable storage, not a private-field invariant. Native mutation
+must not invalidate a live Rust borrow. Other directives remain file-local.
 
-`Function` remains shareable for global function caches. `from_packed` and
-`from_typed` therefore require `Send + Sync` captures; an `Rc`, `Cell`, or local
-object cannot be smuggled to another thread inside a closure. Use synchronized
-shared state when necessary. This restriction does not apply to the scoped
-callbacks passed to structural walk/map/visit/mutate, nor to a packed function's
-arguments and results, which are created and consumed on the calling thread.
+## Thread safety
 
-This tightens Rust source compatibility. Downstream pass factories that wrap
-callbacks in `Function` must forward the `Send + Sync` bounds. A process-wide
-`OnceLock<Module>` also needs a separate loading/ownership design; an opaque
-`Module` is not automatically thread-safe. Do not add blanket unsafe implementations
-just to restore compilation. `ObjectArc` also rejects mutable dereferencing while
-another strong or external weak owner exists, instead of creating aliased `&mut`
-references.
+Complete and opaque objects inherit `!Send` and `!Sync` from `tvm_ffi::Object`,
+including when viewed through a base or `ObjectRef`. The zero-sized marker does
+not change their ABI layout. `Function` remains shareable, so its `from_packed`
+and `from_typed` callbacks require `Send + Sync` captures. Scoped structural
+callbacks are unaffected. `ObjectArc` requires unique ownership for mutable access.
+
+These are source-compatibility changes: pass factories must forward the callback
+bounds, and a process-wide `OnceLock<Module>` needs a separate ownership design.
+Do not add unsafe thread-safety implementations just to restore compilation;
+they must cover hidden native state, destruction, and all accepted dynamic subtypes.
 
 ## Partial generation
 

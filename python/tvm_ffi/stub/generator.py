@@ -106,10 +106,6 @@ class Generator(Protocol):
         """
         ...
 
-    def validate_directives(self, imports: Any) -> None:
-        """Validate collected directives before generating any blocks in this file."""
-        ...
-
     def canonical_type_name(self, type_key: str) -> str:
         """Return the canonical identifier for a locally-defined type key.
 

@@ -345,7 +345,6 @@ def _stage_3(  # noqa: PLR0912
         if name not in generator.directive_kinds:
             raise ValueError(f"Unknown directive `{name}` at line {code.lineno_start}")
         generator.add_directive(imports, name, payload, code.lineno_start)
-    generator.validate_directives(imports)
     # Stage 2. Process `tvm-ffi-stubgen(begin): global/...`
     for code in file.code_blocks:
         if code.kind == "global":

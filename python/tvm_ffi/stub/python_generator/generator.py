@@ -68,9 +68,6 @@ class PythonGenerator:
         if alias == "_FFI_LOAD_LIB" or full_name.endswith("libinfo.load_lib_module"):
             imports.has_lib_load = True
 
-    def validate_directives(self, imports: PythonImports) -> None:
-        """Python import directives need no registry validation."""
-
     def canonical_type_name(self, type_key: str) -> str:
         """Return the canonical (import-comparable) full name for a defined type key."""
         return ImportItem(type_key).full_name

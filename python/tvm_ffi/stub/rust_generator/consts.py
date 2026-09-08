@@ -29,7 +29,6 @@ RUST_DIRECTIVE_KINDS = frozenset(
         "upcast",
         "custom-new",
         "no-alloc",
-        "nullable-storage",
     }
 )
 

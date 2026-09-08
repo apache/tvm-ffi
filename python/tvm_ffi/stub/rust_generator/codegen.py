@@ -45,8 +45,6 @@ missing keys, so a partial binding never references a module that does not exist
 Layout and allocation are separate: ``no-alloc`` suppresses both allocators
 without hiding readable fields. Thread restrictions are inherited from the
 crate's ``Object`` base, including for opaque views.
-``nullable-storage`` models object-reference slots that native code may move
-out of, without making the constructor argument optional.
 """
 
 from __future__ import annotations
@@ -215,34 +213,6 @@ class _ObjectRenderer:
 
     # --- field types -------------------------------------------------------
 
-    def _nullable_storage_type(self, owner: str, field: NamedTypeSchema, mirror: str) -> str:
-        """Require an object handle, not merely something pointer-sized (e.g. i64)."""
-        target = f"{owner}.{field.name}"
-        if target in self.imports.directives.nullable or field.origin == "Optional":
-            raise ValueError(f"`nullable-storage` on `{target}` requires a non-optional field")
-        object_origin = field.origin in {
-            "Object",
-            "Array",
-            "Map",
-            "Tensor",
-            "Shape",
-            "Callable",
-        } or (
-            "." in field.origin
-            and not field.origin.startswith("ctypes.")
-            and field.origin not in {"ffi.String", "ffi.Bytes"}
-        )
-        if (
-            not object_origin
-            or field.size != C_RUST.RUST_POINTER_SIZE
-            or mirror.startswith(("Option<", "Optional<"))
-            or mirror in C_RUST.RUST_SCALAR_WIDTHS
-        ):
-            raise ValueError(
-                f"`nullable-storage` on `{target}` requires a pointer-sized object-reference field"
-            )
-        return f"Option<{mirror}>"
-
     def _field_mirror(self, owner: str, field: NamedTypeSchema, imports: RustImports) -> str | None:
         """Render the ``#[repr(C)]`` mirror type of ``field``, or ``None``.
 
@@ -252,8 +222,6 @@ class _ObjectRenderer:
         target = f"{owner}.{field.name}"
         enum = directives.enums.get(target)
         if enum is not None:
-            if target in directives.nullable_storage:
-                raise ValueError(f"`nullable-storage` on `{target}` cannot be combined with `enum`")
             _check_width(target, field, enum.repr, C_RUST.RUST_SCALAR_WIDTHS[enum.repr])
             return enum.name
         override = directives.field_types.get(target)
@@ -269,8 +237,6 @@ class _ObjectRenderer:
             mirror = narrowed or render_rust_type(field, lambda o: self._resolve(o, imports))
         if mirror is None:
             return None
-        if target in directives.nullable_storage:
-            return self._nullable_storage_type(owner, field, mirror)
         if target in directives.nullable and not mirror.startswith("Option<"):
             if field.size not in (None, C_RUST.RUST_POINTER_SIZE):
                 raise ValueError(
@@ -419,19 +385,10 @@ class _ObjectRenderer:
                 "}",
             ]
         members = []
-        storage_checks = []
         for field in sorted(self.info.fields, key=lambda f: f.offset or 0):
             mirror = self._field_mirror(self.type_key, field, self.imports)
             assert mirror is not None  # the verdict already ran the renderability check
-            visibility = "" if self._has_nullable_storage(self.type_key, field.name) else "pub "
-            members.append(f"    {visibility}{rust_ident(field.name)}: {mirror},")
-            if not visibility:
-                storage_checks += [
-                    f"    assert!(::core::mem::size_of::<{mirror}>() == {field.size});",
-                    f"    assert!(::core::mem::align_of::<{mirror}>() == {field.alignment});",
-                    f"    assert!(::core::mem::offset_of!({self.obj_struct}, "
-                    f"{rust_ident(field.name)}) == {field.offset});",
-                ]
+            members.append(f"    pub {rust_ident(field.name)}: {mirror},")
         return [
             f"/// Complete: {verdict.detail}.",
             *header,
@@ -441,45 +398,8 @@ class _ObjectRenderer:
             "const _: () = {",
             f"    assert!(::core::mem::size_of::<{self.obj_struct}>() == {verdict.total_size});",
             f"    assert!(::core::mem::align_of::<{self.obj_struct}>() == {verdict.alignment});",
-            *storage_checks,
             "};",
         ]
-
-    def _has_nullable_storage(self, owner: str, name: str) -> bool:
-        return f"{owner}.{name}" in self.imports.directives.nullable_storage
-
-    def _storage_accessors(self) -> list[str]:
-        lines = []
-        for field in self.info.fields:
-            if not self._has_nullable_storage(self.type_key, field.name):
-                continue
-            mirror = self._field_mirror(self.type_key, field, self.imports)
-            assert mirror is not None and mirror.startswith("Option<")
-            value_type = mirror.removeprefix("Option<").removesuffix(">")
-            name = rust_ident(field.name)
-            lines += [
-                "    /// Borrow the field; panics if native code has moved it out.",
-                "    #[inline]",
-                f"    pub fn {name}(&self) -> &{value_type} {{",
-                f'        self.{name}.as_ref().expect("{self.leaf}.{field.name} has been moved out")',
-                "    }",
-            ]
-        return [f"impl {self.obj_struct} {{", *lines, "}"] if lines else []
-
-    def _validate_storage_directives(self, verdict: Verdict) -> None:
-        prefix = f"{self.type_key}."
-        targets = {
-            t
-            for t in self.imports.directives.nullable_storage
-            if t.rpartition(".")[0] == self.type_key
-        }
-        fields = {f"{prefix}{f.name}": f for f in self.info.fields}
-        for target in sorted(targets):
-            if target not in fields:
-                raise ValueError(f"`nullable-storage` names unknown own field `{target}`")
-            if not verdict.is_complete:
-                raise ValueError(f"`nullable-storage` on `{target}` requires a complete layout")
-            self._field_mirror(self.type_key, fields[target], self.imports)
 
     # --- allocators --------------------------------------------------------
 
@@ -503,8 +423,6 @@ class _ObjectRenderer:
         for field in sorted(info.fields, key=lambda f: f.offset or 0):
             mirror = self._field_mirror(key, field, self.imports)
             assert mirror is not None  # complete: every field along the chain has a mirror
-            if self._has_nullable_storage(key, field.name):
-                mirror = mirror.removeprefix("Option<").removesuffix(">")
             params.append((field.name, mirror))
         return params
 
@@ -542,12 +460,7 @@ class _ObjectRenderer:
             f"{rust_ident(name)}.into()" if rust_type != parent_type else rust_ident(name)
             for (name, rust_type), (_, parent_type) in zip(params, inherited)
         ]
-        own = [
-            f"{rust_ident(f.name)}: Some({rust_ident(f.name)})"
-            if self._has_nullable_storage(self.type_key, f.name)
-            else rust_ident(f.name)
-            for f in sorted(self.info.fields, key=lambda f: f.offset or 0)
-        ]
+        own = [rust_ident(f.name) for f in sorted(self.info.fields, key=lambda f: f.offset or 0)]
         forward = [rust_ident(name) for name, _ in params]
         sections = [
             [
@@ -580,7 +493,6 @@ class _ObjectRenderer:
     def body(self) -> list[str]:
         """Build the Rust source lines for the object."""
         verdict = self.classify()
-        self._validate_storage_directives(verdict)
         # Derive macros are spelled by full path: their leaves collide with `Object` / `ObjectRef`.
         self.imports.record("std::ops::Deref")
         self.imports.record("tvm_ffi::ObjectArc")
@@ -626,8 +538,6 @@ class _ObjectRenderer:
                 ]
             )
         elif verdict.is_complete:
-            if storage_accessors := self._storage_accessors():
-                sections.append(storage_accessors)
             hierarchy = {self.type_key, *self.info.ancestors}
             if not hierarchy.intersection(self.imports.directives.no_alloc):
                 sections += self._allocator_sections(base, has_parent)
