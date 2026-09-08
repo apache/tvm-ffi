@@ -20,7 +20,17 @@ from __future__ import annotations
 
 #: One-line directives the Rust backend consumes.
 RUST_DIRECTIVE_KINDS = frozenset(
-    {"import-object", "field", "nullable", "enum", "opaque", "upcast", "custom-new"}
+    {
+        "import-object",
+        "field",
+        "nullable",
+        "enum",
+        "opaque",
+        "upcast",
+        "custom-new",
+        "no-alloc",
+        "nullable-storage",
+    }
 )
 
 #: Default FFI-origin -> Rust-type map; ``::`` paths get a ``use``, bare names do not.

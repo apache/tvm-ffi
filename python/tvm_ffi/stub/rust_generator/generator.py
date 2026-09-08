@@ -25,6 +25,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from .. import consts as C
+from ..lib_state import object_info_from_type_key
 from . import consts as C_RUST
 from .codegen import (
     finalize_rust_module_tree,
@@ -43,12 +44,13 @@ if TYPE_CHECKING:
 
 
 class RustGenerator:
-    """Generator that emits opaque Rust bindings for reflected objects (see :mod:`.codegen`)."""
+    """Generator for complete and opaque Rust bindings (see :mod:`.codegen`)."""
 
     name = "rust"
     syntax = C.RUST_SYNTAX
     source_exts = frozenset({".rs"})
     directive_kinds = C_RUST.RUST_DIRECTIVE_KINDS
+    shared_directive_kinds = frozenset({"no-alloc", "nullable-storage"})
 
     def default_ty_map(self) -> dict[str, str]:
         """Return the default FFI-origin -> Rust-type name map."""
@@ -66,6 +68,17 @@ class RustGenerator:
             imports.record(payload.split(";", 1)[0].strip())
         else:
             imports.directives.add(name, payload, lineno)
+
+    def validate_directives(self, imports: RustImports) -> None:
+        """Do not silently ignore a misspelled safety policy target."""
+        rules = imports.directives
+        owners = rules.no_alloc | {target.rpartition(".")[0] for target in rules.nullable_storage}
+        for key in sorted(owners):
+            info = object_info_from_type_key(key)
+            for target in rules.nullable_storage:
+                owner, _, field = target.rpartition(".")
+                if owner == key and field not in {f.name for f in info.fields}:
+                    raise ValueError(f"`nullable-storage` names unknown own field `{target}`")
 
     def canonical_type_name(self, type_key: str) -> str:
         """Return the Rust path for a defined type key (matches :attr:`RustUse.path`)."""
@@ -100,7 +113,7 @@ class RustGenerator:
         obj_info: ObjectInfo,
         declared: Container[str] = frozenset(),
     ) -> None:
-        """Emit the opaque Rust binding for an ``object/<key>`` block."""
+        """Emit the Rust binding for an ``object/<key>`` block."""
         generate_rust_object(code, ty_map, imports, opt, obj_info, declared)
 
     def generate_import_section_block(

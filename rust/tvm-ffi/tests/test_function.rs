@@ -54,6 +54,32 @@ fn test_function_from_packed() {
 }
 
 #[test]
+fn test_function_thread_safe_captures_and_global_cache() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    let calls = Arc::new(AtomicUsize::new(0));
+    let state = calls.clone();
+    let function = Function::from_typed(move |value: i64| {
+        state.fetch_add(1, Ordering::Relaxed);
+        // Neither the argument holder nor the returned Any needs to be Send.
+        cached_global_func!("testing.echo").call_tuple((value,))
+    });
+    std::thread::scope(|scope| {
+        for value in 0..4i64 {
+            let function = &function;
+            scope.spawn(move || {
+                let result: i64 = function.call_tuple((value,)).unwrap().try_into().unwrap();
+                assert_eq!(result, value);
+            });
+        }
+    });
+    assert_eq!(calls.load(Ordering::Relaxed), 4);
+    std::thread::spawn(move || drop(function)).join().unwrap();
+    assert_eq!(Arc::strong_count(&calls), 1);
+}
+
+#[test]
 fn test_function_from_typed() {
     let offset = 2;
     // test one argument

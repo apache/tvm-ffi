@@ -21,6 +21,34 @@ use std::sync::Arc;
 use std::{collections::HashMap, hash::Hash};
 use tvm_ffi::*;
 
+// An erased owning or borrowed view must not acquire thread-safety merely
+// because its concrete object's non-thread-safe fields are no longer visible.
+macro_rules! assert_not_impl {
+    ($ty:ty: $bound:path) => {
+        const _: fn() = || {
+            trait AmbiguousIfImpl<A> {
+                fn check() {}
+            }
+            impl<T: ?Sized> AmbiguousIfImpl<()> for T {}
+            struct ImplementsBound;
+            impl<T: ?Sized + $bound> AmbiguousIfImpl<ImplementsBound> for T {}
+            let _ = <$ty as AmbiguousIfImpl<_>>::check;
+        };
+    };
+}
+
+assert_not_impl!(Object: Send);
+assert_not_impl!(Object: Sync);
+assert_not_impl!(ObjectArc<Object>: Send);
+assert_not_impl!(ObjectArc<Object>: Sync);
+assert_not_impl!(tvm_ffi::object::ObjectRef: Send);
+assert_not_impl!(tvm_ffi::object::ObjectRef: Sync);
+assert_not_impl!(ObjectIdentity: Send);
+assert_not_impl!(ObjectIdentity: Sync);
+assert_not_impl!(&Object: Send);
+assert_not_impl!(Any: Send);
+assert_not_impl!(AnyView<'static>: Send);
+
 // must have repr(C) for the object header stays in the same position
 #[repr(C)]
 struct TestIntObj {
@@ -101,6 +129,21 @@ fn test_object_arc() {
 }
 
 #[test]
+fn test_object_arc_mutable_borrow_requires_unique_ownership() {
+    let deleted = Arc::new(AtomicU32::new(0));
+    let mut value = ObjectArc::new(TestIntObj::new(1, deleted, 0));
+    let alias = value.clone();
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        value.value = 2;
+    }));
+    assert!(result.is_err());
+    assert_eq!(alias.value, 1);
+    drop(alias);
+    value.value = 3;
+    assert_eq!(value.value, 3);
+}
+
+#[test]
 fn test_object_arc_with_extra_items() {
     let delete_counter = Arc::new(AtomicU32::new(0));
     let mut obj_arc =
@@ -121,6 +164,39 @@ fn test_object_arc_with_extra_items() {
     }
     drop(obj_arc);
     assert_eq!(delete_counter.load(Ordering::Relaxed), 1);
+}
+
+#[test]
+fn test_extra_items_with_a_surviving_weak_owner() {
+    use tvm_ffi::tvm_ffi_sys::{
+        TVMFFIObjectDeleterFlagBitMask::kTVMFFIObjectDeleterFlagBitMaskWeak,
+        COMBINED_REF_COUNT_WEAK_ONE,
+    };
+    for count in [0, 3] {
+        let deleted = Arc::new(AtomicU32::new(0));
+        let value = ObjectArc::new_with_extra_items(TestIntObj::new(1, deleted.clone(), count));
+        // Model a native weak reference through the existing combined-count ABI.
+        unsafe {
+            let header = ObjectArc::as_raw(&value).cast::<TVMFFIObject>();
+            (*header)
+                .combined_ref_count
+                .fetch_add(COMBINED_REF_COUNT_WEAK_ONE, Ordering::Relaxed);
+            drop(value);
+            assert_eq!(deleted.load(Ordering::Relaxed), 1);
+            assert_eq!(
+                (*header)
+                    .combined_ref_count
+                    .fetch_sub(COMBINED_REF_COUNT_WEAK_ONE, Ordering::Release),
+                COMBINED_REF_COUNT_WEAK_ONE,
+            );
+            std::sync::atomic::fence(Ordering::Acquire);
+            (*header).deleter.unwrap()(
+                header.cast_mut().cast(),
+                kTVMFFIObjectDeleterFlagBitMaskWeak as i32,
+            );
+        }
+        assert_eq!(deleted.load(Ordering::Relaxed), 1);
+    }
 }
 
 #[test]

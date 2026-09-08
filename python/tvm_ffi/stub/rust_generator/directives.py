@@ -16,7 +16,7 @@
 # under the License.
 """The Rust backend's one-line directives: payload grammar and per-file storage.
 
-Three address one reflected field as ``<type_key>.<field>``, three address a type::
+Field directives address ``<type_key>.<field>``; type directives address ``<type_key>``::
 
     // tvm-ffi-stubgen(field): tirx.Add.a -> PrimExpr
     // tvm-ffi-stubgen(nullable): ir.Expr.span
@@ -24,6 +24,8 @@ Three address one reflected field as ``<type_key>.<field>``, three address a typ
     // tvm-ffi-stubgen(opaque): ir.SourceName
     // tvm-ffi-stubgen(upcast): tirx.Add -> PrimExpr
     // tvm-ffi-stubgen(custom-new): tirx.Add
+    // tvm-ffi-stubgen(no-alloc): ir.SourceName
+    // tvm-ffi-stubgen(nullable-storage): tirx.PrimFunc.body
 
 ``field`` sets the field's Rust type (a name in scope, or a ``::`` path to
 ``use``); on a field inherited from an ancestor it narrows the allocator
@@ -32,6 +34,12 @@ integer newtype for it; ``opaque`` keeps a type opaque even when its layout is
 reproducible. ``upcast`` adds a typed view outside the ancestor chain;
 ``custom-new`` says the wrapper's ``new`` is hand-written; the generated one is
 named ``from_complete_fields`` instead.
+
+``no-alloc`` preserves readable fields but suppresses both allocators, including
+in descendants.
+``nullable-storage`` keeps an object-reference field private and nullable while
+requiring a non-null constructor argument and exposing a borrowing accessor.
+These two policies are shared across all files in a generation run.
 """
 
 from __future__ import annotations
@@ -65,6 +73,8 @@ class Directives:
     opaque: set[str] = dataclasses.field(default_factory=set)
     upcasts: dict[str, list[str]] = dataclasses.field(default_factory=dict)
     custom_new: set[str] = dataclasses.field(default_factory=set)
+    no_alloc: set[str] = dataclasses.field(default_factory=set)
+    nullable_storage: set[str] = dataclasses.field(default_factory=set)
 
     def add(self, name: str, payload: str, lineno: int) -> None:
         """Parse and store one directive; raise ``ValueError`` on a malformed payload."""
@@ -83,6 +93,10 @@ class Directives:
             self.upcasts.setdefault(_type_target(name, lhs, lineno), []).append(rust_type)
         elif name == "custom-new":
             self.custom_new.add(_type_target(name, payload, lineno))
+        elif name == "no-alloc":
+            self.no_alloc.add(_type_target(name, payload, lineno))
+        elif name == "nullable-storage":
+            self.nullable_storage.add(_field_target(name, payload, lineno))
         else:
             raise ValueError(f"Unknown directive `{name}` at line {lineno}")
 
