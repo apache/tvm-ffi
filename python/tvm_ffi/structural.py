@@ -19,6 +19,7 @@
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import Callable, Sequence
 from enum import IntEnum
 from typing import TYPE_CHECKING, Any
@@ -33,6 +34,7 @@ from .registry import register_object
 __all__ = [
     "DefRegionKind",
     "StructuralKey",
+    "StructuralMutator",
     "StructuralVisitor",
     "VisitInterrupt",
     "WalkOrder",
@@ -40,17 +42,22 @@ __all__ = [
     "get_first_structural_mismatch",
     "structural_equal",
     "structural_hash",
+    "structural_map",
+    "structural_mutate",
+    "structural_visit",
     "structural_walk",
 ]
 
 
 class WalkOrder(IntEnum):
-    """Callback placement before or after visiting children for structural walks.
+    """Callback placement before or after recursively traversing children.
 
     See Also
     --------
     :py:func:`tvm_ffi.structural_walk`
         Walk an object graph, invoke matching callbacks.
+    :py:func:`tvm_ffi.structural_map`
+        Structurally map an object graph with replacement callbacks.
 
     """
 
@@ -87,6 +94,8 @@ class DefRegionKind(IntEnum):
     :py:class:`tvm_ffi.StructuralVisitor`
         Structural traversal visitor that carries object dispatch and def-region
         state across recursive visits.
+    :py:class:`tvm_ffi.StructuralMutator`
+        Structural mutator that recursively mutates values.
 
     """
 
@@ -315,7 +324,7 @@ class VisitInterrupt(Object):
             return None
 
 
-        result = tvm_ffi.structural_walk(root, (object, on_node))
+        result = tvm_ffi.structural_walk(root, (object, on_node), order="pre")
         if result is not None:
             found = result.value
 
@@ -373,6 +382,33 @@ class StructuralVisitor(Object):
         """
         return _ffi_api.StructuralVisitorVisit(self, value)
 
+    def default_visit(self, value: Any) -> VisitInterrupt | None:
+        """Visit ``value`` using its registered or reflected child traversal.
+
+        .. warning::
+            Never call ``default_visit`` on the value whose ``__s_visit__`` hook
+            is currently running. Doing so re-enters the same hook recursively
+            and can exhaust the C stack, crashing the process.
+
+        This bypasses the active engine callback dispatch for ``value`` itself,
+        but still invokes the value type's registered ``__s_visit__`` hook when
+        one exists. Use it for a child whose default traversal is wanted.
+        Recursive children still use this visitor.
+
+        Parameters
+        ----------
+        value
+            Value whose default children should be traversed.
+
+        Returns
+        -------
+        result
+            ``None`` if traversal should continue, otherwise a
+            :class:`VisitInterrupt` carrying the early-exit payload.
+
+        """
+        return _ffi_api.StructuralVisitorDefaultVisit(self, value)
+
     def def_region_kind(self) -> DefRegionKind:
         """Low-level API to return the currently active structural def-region kind.
 
@@ -408,11 +444,127 @@ class StructuralVisitor(Object):
         return _ffi_api.StructuralVisitorWithDefRegionKind(self, kind, callback)
 
 
+@register_object("ffi.StructuralMutator")
+class StructuralMutator(Object):
+    """Low-level structural mutator.
+
+    This class exposes the mutator object used by structural-map and custom
+    mutation hooks.
+    """
+
+    def mutate(self, value: Any) -> Any:
+        """Mutate ``value`` without modifying it in place.
+
+        The original value is returned when none of its structural fields
+        change; otherwise, the result is a mutated copy.
+
+        Parameters
+        ----------
+        value
+            Value to mutate.
+
+        Returns
+        -------
+        result
+            The mutated owning value.
+
+        """
+        return _ffi_api.StructuralMutatorMutate(self, value)
+
+    def default_mutate(self, value: Any) -> Any:
+        """Mutate ``value`` using its registered or reflected default behavior.
+
+        This bypasses the active engine callback for ``value`` itself while
+        recursive children re-enter the same mutator. A ``structural_mutate``
+        callback may use it on its matched value to request default descent.
+
+        Parameters
+        ----------
+        value
+            Value whose default mutation should run.
+
+        Returns
+        -------
+        result
+            The mutated owning value.
+
+        """
+        return _ffi_api.StructuralMutatorDefaultMutate(  # ty: ignore[unresolved-attribute]
+            self, value
+        )
+
+    def var_remap_get(self, var: Object) -> Any | None:
+        """Return the replacement recorded for a variable identity.
+
+        Parameters
+        ----------
+        var
+            Variable identity to look up. It must be an object-backed value
+            with free-variable or DAG-node structural metadata.
+
+        Returns
+        -------
+        result
+            The recorded replacement, or ``None`` if ``var`` has no replacement.
+
+        """
+        return _ffi_api.StructuralMutatorVarRemapGet(self, var)
+
+    def var_remap_set(self, var: Object, mapped_value: Any) -> None:
+        """Record or replace the substitution for a variable identity.
+
+        Parameters
+        ----------
+        var
+            Variable identity to bind. It must be an object-backed value with
+            free-variable or DAG-node structural metadata.
+
+        mapped_value
+            Replacement returned for subsequent lookups of ``var``.
+
+        """
+        _ffi_api.StructuralMutatorVarRemapSet(self, var, mapped_value)
+
+    def def_region_kind(self) -> DefRegionKind:
+        """Return the currently active structural def-region kind.
+
+        Returns
+        -------
+        kind
+            The active :class:`DefRegionKind`.
+
+        """
+        return DefRegionKind(_ffi_api.StructuralMutatorDefRegionKind(self))
+
+    def with_def_region_kind(
+        self,
+        kind: int,
+        callback: Callable[[], Any],
+    ) -> Any:
+        """Run ``callback`` with a temporarily active def-region kind.
+
+        Parameters
+        ----------
+        kind
+            Def-region kind to use while running ``callback``.
+
+        callback
+            Nullary callable to execute inside the scoped region.
+
+        Returns
+        -------
+        result
+            The value returned by ``callback``.
+
+        """
+        return _ffi_api.StructuralMutatorWithDefRegionKind(self, kind, callback)
+
+
 def structural_walk(
     root: Any,
     callbacks: tuple | Sequence | Callable = (),
     with_def_region_kind: tuple | Sequence | Callable = (),
-    order: str | WalkOrder = "pre",
+    order: str | WalkOrder = "post",
 ) -> VisitInterrupt | None:
     """Walk a value structurally and invoke the first matching typed callback.
 
@@ -441,8 +593,9 @@ def structural_walk(
         as ``callbacks``.
 
     order
-        ``"pre"``/``WalkOrder.PREORDER`` to invoke callbacks before children, or
-        ``"post"``/``WalkOrder.POSTORDER`` to invoke callbacks after children.
+        ``"post"``/``WalkOrder.POSTORDER`` (the default) to invoke callbacks
+        after children, or ``"pre"``/``WalkOrder.PREORDER`` to invoke callbacks
+        before children.
 
     Returns
     -------
@@ -477,68 +630,265 @@ def structural_walk(
     else:
         raise ValueError(f"Unknown structural walk order: {order!r}")
 
-    def normalize_callbacks(
-        callbacks: tuple | Sequence | Callable,
-    ) -> list[tuple[object, Callable]]:
-        callback_entries = []
-
-        def add_callback_entry(callback_entry: tuple) -> None:
-            callback_type, fn = callback_entry
-            callback_types = callback_type if isinstance(callback_type, tuple) else (callback_type,)
-            callback_entries.extend((t, fn) for t in callback_types)
-
-        if callable(callbacks):
-            callback_entries.append((Any, callbacks))
-        elif isinstance(callbacks, tuple) and len(callbacks) == 2 and callable(callbacks[1]):
-            add_callback_entry(callbacks)
-        elif isinstance(callbacks, Sequence) and not isinstance(callbacks, (str, bytes)):
-            for callback in callbacks:
-                if (
-                    not isinstance(callback, tuple)
-                    or len(callback) != 2
-                    or not callable(callback[1])
-                ):
-                    raise TypeError(
-                        "structural_walk callbacks within a sequence must be "
-                        "(type, callback) tuples"
-                    )
-                add_callback_entry(callback)
-        else:
-            raise TypeError(
-                "structural_walk callbacks must be callbacks, (type, callback) entries, "
-                "((type1, type2, ...), callback) entries, or sequences of tuple entries"
-            )
-        return callback_entries
-
     def wrap_callback_with_def_region_kind(fn: Callable[..., Any]) -> Callable[[Any, int], Any]:
         return lambda value, kind: fn(value, DefRegionKind(kind))
 
-    callback_entries = normalize_callbacks(callbacks)
-    callback_entries_with_def_region_kind = normalize_callbacks(with_def_region_kind)
+    callback_entries = _normalize_callbacks(callbacks, api_name="structural_walk")
+    callback_entries_with_def_region_kind = _normalize_callbacks(
+        with_def_region_kind, api_name="structural_walk"
+    )
 
     entries: list[tuple[int, Callable[[Any], Any]]] = [
-        (_callback_type_to_type_index(t), fn) for t, fn in callback_entries
+        (_callback_type_to_type_index(t, api_name="structural_walk"), fn)
+        for t, fn in callback_entries
     ]
     entries_with_def_region_kind: list[tuple[int, Callable[[Any, int], Any]]] = [
-        (_callback_type_to_type_index(t), wrap_callback_with_def_region_kind(fn))
+        (
+            _callback_type_to_type_index(t, api_name="structural_walk"),
+            wrap_callback_with_def_region_kind(fn),
+        )
         for t, fn in callback_entries_with_def_region_kind
     ]
     return _ffi_api.StructuralWalk(root, entries, entries_with_def_region_kind, order_int)
 
 
-def _callback_type_to_type_index(callback_type: type[Any] | Any) -> int:
+def structural_visit(
+    root: Any,
+    callbacks: tuple | Sequence | Callable = (),
+) -> VisitInterrupt | None:
+    """Visit a value structurally with callbacks that own child traversal.
+
+    Each callback receives ``(value, visitor)``. It may call
+    :meth:`StructuralVisitor.visit` for selected children or
+    :meth:`StructuralVisitor.default_visit` for the value's registered/default
+    descent. Returning without either call prunes that value's subtree.
+
+    Parameters
+    ----------
+    root
+        Root value to traverse.
+
+    callbacks
+        A callback, ``(type, callback)`` entry, grouped type entry, or sequence
+        of entries. Entries are tried in order and the first match owns descent.
+
+    Returns
+    -------
+    result
+        ``None`` if traversal completed, otherwise a :class:`VisitInterrupt`.
+
+    """
+    callback_entries = _normalize_callbacks(callbacks, api_name="structural_visit")
+    entries: list[tuple[int, Callable[[Any, StructuralVisitor], Any]]] = [
+        (_callback_type_to_type_index(t, api_name="structural_visit"), fn)
+        for t, fn in callback_entries
+    ]
+    return _ffi_api.StructuralVisit(root, entries)
+
+
+def structural_mutate(
+    root: Any,
+    callbacks: tuple | Sequence | Callable = (),
+) -> Any:
+    """Mutate a value with callbacks that own recursive mutation.
+
+    Each callback receives ``(value, mutator)`` and may optionally receive a
+    third ``allow_inplace`` boolean, which is true only when the callback's
+    value is on a uniquely owned path. The flag lets a callback choose an
+    ownership-aware implementation; recursive descent still uses
+    :meth:`StructuralMutator.mutate` for selected children or
+    :meth:`StructuralMutator.default_mutate` for the matched value's default
+    mutation. Its returned value is final and is not traversed again. Entries
+    use ``structural_map`` matching rules, and an unmatched value follows
+    registered/default mutation.
+
+    Parameters
+    ----------
+    root
+        Root value to mutate. Passing a regular Python reference preserves it
+        through copy-on-write; passing ``root._move()`` transfers ownership and
+        permits in-place mutation along unique paths.
+    callbacks
+        Callback entries tried in order; the first match owns mutation.
+
+    Returns
+    -------
+    result
+        The mutated owning value.
+
+    """
+    callback_entries = _normalize_callbacks(callbacks, api_name="structural_mutate")
+    entries: list[tuple[int, Callable[..., Any], bool]] = [
+        (
+            _callback_type_to_type_index(t, api_name="structural_mutate"),
+            fn,
+            _callback_accepts_allow_inplace(fn),
+        )
+        for t, fn in callback_entries
+    ]
+    return _ffi_api.StructuralMutate(root, entries)  # ty: ignore[unresolved-attribute]
+
+
+def structural_map(
+    root: Any,
+    callbacks: tuple | Sequence | Callable = (),
+    with_def_region_kind: tuple | Sequence | Callable = (),
+    order: str | WalkOrder = "post",
+) -> Any:
+    """Structurally map a value using typed replacement callbacks.
+
+    Each callback must follow map semantics: it returns the unchanged input or
+    a replacement value and must not mutate its input in place.
+
+    Parameters
+    ----------
+    root
+        Root value to map. Passing a regular Python reference preserves it
+        through copy-on-write; passing ``root._move()`` transfers ownership and
+        permits in-place mutation along unique paths.
+
+    callbacks
+        Normal callbacks. These callbacks receive one argument, ``value``, and
+        return its mapped value. Callback entries are tried in order.
+
+        May be one of:
+
+        - A single callback, used as a ``typing.Any`` catch-all.
+        - A ``(type, callback)`` entry.
+        - A grouped ``((type1, type2, ...), callback)`` entry.
+        - A sequence of entries.
+
+        Types may be builtins, registered FFI object classes, or
+        ``typing.Any``/``object`` as a catch-all.
+
+    with_def_region_kind
+        Def-region-aware callbacks. These callbacks receive
+        ``(value, def_region_kind)`` and return the mapped value. They accept
+        the same callback entry forms as ``callbacks``.
+
+    order
+        ``"post"``/``WalkOrder.POSTORDER`` (the default) to invoke callbacks
+        after children, or ``"pre"``/``WalkOrder.PREORDER`` to invoke callbacks
+        before children.
+
+    Returns
+    -------
+    result
+        The mapped owning value.
+
+    Examples
+    --------
+    .. code-block:: python
+
+        def fold_add(expr):
+            if isinstance(expr.lhs, IntImm) and isinstance(expr.rhs, IntImm):
+                return IntImm(expr.lhs.value + expr.rhs.value)
+            return expr
+
+
+        optimized = tvm_ffi.structural_map(
+            function,
+            (Add, fold_add),
+        )
+
+    """
+    if isinstance(order, WalkOrder):
+        order_int = int(order)
+    elif order in ("pre", "post"):
+        order_int = int(WalkOrder.PREORDER if order == "pre" else WalkOrder.POSTORDER)
+    else:
+        raise ValueError(f"Unknown structural map order: {order!r}")
+
+    def wrap_callback_with_def_region_kind(fn: Callable[..., Any]) -> Callable[[Any, int], Any]:
+        return lambda value, kind: fn(value, DefRegionKind(kind))
+
+    callback_entries = _normalize_callbacks(callbacks, api_name="structural_map")
+    callback_entries_with_def_region_kind = _normalize_callbacks(
+        with_def_region_kind, api_name="structural_map"
+    )
+
+    entries: list[tuple[int, Callable[[Any], Any]]] = [
+        (_callback_type_to_type_index(t, api_name="structural_map"), fn)
+        for t, fn in callback_entries
+    ]
+    entries_with_def_region_kind: list[tuple[int, Callable[[Any, int], Any]]] = [
+        (
+            _callback_type_to_type_index(t, api_name="structural_map"),
+            wrap_callback_with_def_region_kind(fn),
+        )
+        for t, fn in callback_entries_with_def_region_kind
+    ]
+    return _ffi_api.StructuralMap(root, entries, entries_with_def_region_kind, order_int)
+
+
+def _normalize_callbacks(
+    callbacks: tuple | Sequence | Callable,
+    *,
+    api_name: str,
+) -> list[tuple[object, Callable]]:
+    """Normalize typed callback shorthand into individual callback entries."""
+    callback_entries = []
+
+    def add_callback_entry(callback_entry: tuple) -> None:
+        callback_type, fn = callback_entry
+        callback_types = callback_type if isinstance(callback_type, tuple) else (callback_type,)
+        callback_entries.extend((t, fn) for t in callback_types)
+
+    if callable(callbacks):
+        callback_entries.append((Any, callbacks))
+    elif isinstance(callbacks, tuple) and len(callbacks) == 2 and callable(callbacks[1]):
+        add_callback_entry(callbacks)
+    elif isinstance(callbacks, Sequence) and not isinstance(callbacks, (str, bytes)):
+        for callback in callbacks:
+            if not isinstance(callback, tuple) or len(callback) != 2 or not callable(callback[1]):
+                raise TypeError(
+                    f"{api_name} callbacks within a sequence must be (type, callback) tuples"
+                )
+            add_callback_entry(callback)
+    else:
+        raise TypeError(
+            f"{api_name} callbacks must be callbacks, (type, callback) entries, "
+            "((type1, type2, ...), callback) entries, or sequences of tuple entries"
+        )
+    return callback_entries
+
+
+def _callback_accepts_allow_inplace(callback: Callable[..., Any]) -> bool:
+    """Return whether a StructuralMutate callback accepts its optional flag."""
+    try:
+        signature = inspect.signature(callback)
+    except (TypeError, ValueError):
+        # Some extension callables do not expose a signature. Keep their
+        # existing two-argument, copy-safe behavior.
+        return False
+
+    try:
+        signature.bind(None, None, False)
+    except TypeError:
+        try:
+            signature.bind(None, None)
+        except TypeError as err:
+            raise TypeError(
+                "structural_mutate callback must accept (value, mutator) or "
+                "(value, mutator, allow_inplace)"
+            ) from err
+        return False
+    return True
+
+
+def _callback_type_to_type_index(callback_type: type[Any] | Any, *, api_name: str) -> int:
     """Convert a callback arg type to a type index."""
     annotation = Any if callback_type is object else callback_type
     try:
         type_index = core.TypeSchema.from_annotation(annotation).origin_type_index
     except TypeError as err:
         raise TypeError(
-            "structural_walk callback type must be a supported builtin, "
+            f"{api_name} callback type must be a supported builtin, "
             "typing.Any/object, or an FFI-registered object class"
         ) from err
     if type_index < 0 and annotation is not Any:
         raise TypeError(
-            "structural_walk callback type_index is negative, the only"
+            f"{api_name} callback type_index is negative, the only "
             "acceptable negative type_index is -1 for Any"
         )
     return type_index

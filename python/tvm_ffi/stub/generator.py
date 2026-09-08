@@ -30,9 +30,10 @@ The stub generator separates two concerns:
 A :class:`Generator` encapsulates concern (2); ``cli.py`` drives concern (1) and
 delegates every act of emitting text — and every act of collecting imports — to
 the active generator. The import collector is opaque to the pipeline: ``cli.py``
-asks the generator to create one, seed it from ``import-object`` directives, and
-later render it, but never reaches inside. Adding a language is therefore
-"implement one more :class:`Generator`" rather than forking the pipeline.
+asks the generator to create one, seed it from the one-line directives the
+generator declares, and later render it, but never reaches inside. Adding a
+language is therefore "implement one more :class:`Generator`" rather than
+forking the pipeline.
 """
 
 from __future__ import annotations
@@ -41,8 +42,10 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from . import consts as C
 from .python_generator import PythonGenerator
+from .rust_generator import RustGenerator
 
 if TYPE_CHECKING:
+    from collections.abc import Container
     from pathlib import Path
 
     from .file_utils import CodeBlock
@@ -66,8 +69,18 @@ class Generator(Protocol):
     #: Short identifier, e.g. ``"python"``.
     name: str
 
+    #: Source-file extensions this generator owns (lower-cased, with the dot).
+    #: Directory scans only visit these, so one tree can hold stub files for
+    #: several languages without one target rewriting another's files.
+    source_exts: frozenset[str]
+
     #: Comment-marker syntax for the files this generator emits.
     syntax: C.MarkerSyntax
+
+    #: Names of the one-line directives (``<comment> tvm-ffi-stubgen(<name>): <payload>``)
+    #: this generator consumes. Names in :data:`consts.PIPELINE_DIRECTIVE_KINDS` belong
+    #: to the pipeline; any other undeclared name is an error.
+    directive_kinds: frozenset[str]
 
     def default_ty_map(self) -> dict[str, str]:
         """Return the default FFI-origin -> target-type name map for this language."""
@@ -79,10 +92,13 @@ class Generator(Protocol):
         """Create a fresh, empty import collector for one file."""
         ...
 
-    def add_imported_object(
-        self, imports: Any, name: str, type_checking_only: str, alias: str
-    ) -> None:
-        """Record an ``import-object`` directive (raw directive fields) into ``imports``."""
+    def add_directive(self, imports: Any, name: str, payload: str, lineno: int) -> None:
+        """Record a one-line directive (raw payload) into ``imports``.
+
+        The collector is per file, so a directive applies to the blocks of the
+        file it appears in. ``name`` is always one of :attr:`directive_kinds`;
+        the payload's grammar is the generator's to define.
+        """
         ...
 
     def canonical_type_name(self, type_key: str) -> str:
@@ -96,6 +112,14 @@ class Generator(Protocol):
 
     def extra_export_names(self, imports: Any) -> set[str]:
         """Return extra public-export names implied by the collected imports."""
+        ...
+
+    def is_builtin(self, type_key: str) -> bool:
+        """Whether the target's runtime binds ``type_key`` itself.
+
+        Such a key gets no ``object/`` block: neither ``--init`` scaffolds one nor a
+        ``prefix`` directive rolls one out.
+        """
         ...
 
     # --- per-block generation (mutates `code.lines`) ------------------------
@@ -118,8 +142,13 @@ class Generator(Protocol):
         imports: Any,
         opt: Options,
         obj_info: ObjectInfo,
+        declared: Container[str] = frozenset(),
     ) -> None:
-        """Emit a type definition (fields + methods + init) for an ``object/<key>`` block."""
+        """Emit a type definition (fields + methods + init) for an ``object/<key>`` block.
+
+        ``declared`` lists the type keys that have an ``object/`` block anywhere in
+        this run, for generators that must know what a binding may refer to.
+        """
         ...
 
     def generate_import_section_block(
@@ -179,7 +208,13 @@ class Generator(Protocol):
 
 _GENERATORS: dict[str, Generator] = {
     "python": PythonGenerator(),
+    "rust": RustGenerator(),
 }
+
+
+def generator_names() -> list[str]:
+    """Return the registered target names, sorted (the ``--target`` choices)."""
+    return sorted(_GENERATORS)
 
 
 def get_generator(target: str) -> Generator:

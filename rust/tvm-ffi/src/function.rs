@@ -255,6 +255,23 @@ impl Function {
         }
     }
 
+    /// Look up a function-valued attribute for a concrete runtime type.
+    ///
+    /// Type attributes are not inherited from base types.
+    pub fn from_type_attr(type_index: i32, attr_name: &str) -> Result<Function> {
+        let value = crate::reflection::get_type_attr(type_index, attr_name).ok_or_else(|| {
+            crate::error::Error::new(
+                crate::error::TYPE_ERROR,
+                &format!(
+                    "Cannot find type attribute `{}` for type_index={}",
+                    attr_name, type_index
+                ),
+                "",
+            )
+        })?;
+        Function::try_from(value)
+    }
+
     /// Look up a reflected method of a type by type key and method name
     ///
     /// Same as [`Function::from_type_method`], but resolves `type_key` to a

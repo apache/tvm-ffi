@@ -264,6 +264,44 @@ inline void UpdateVisitErrorContext(Error& err, const ObjectRef& node) {  // NOL
   error_obj->extra_context =
       details::ObjectUnsafe::MoveObjectPtrToTVMFFIObjectPtr(std::move(new_context));
 }
+
+/*!
+ * \brief Name \p node in a raw failed result's visit error context.
+ *
+ * The overload the visit and mutate engines use at a hook boundary: hooks propagate errors
+ * untouched, and the engine, which knows the node it dispatched on, adds that frame. The Error
+ * is refcounted, so annotating this handle annotates the object \p result carries.
+ *
+ * \param result A raw result already known to hold an Error.
+ * \param node The node to name; a non-object node has no frame to add.
+ */
+TVM_FFI_COLD_CODE inline void UpdateVisitErrorContext(const TVMFFIAny& result,
+                                                      AnyView node) noexcept {
+  if (node.type_index() >= TypeIndex::kTVMFFIStaticObjectBegin) {
+    Error err = AnyView::CopyFromTVMFFIAny(result).cast<Error>();
+    UpdateVisitErrorContext(err, node.cast<ObjectRef>());
+  }
+}
+
+/*!
+ * \brief Name \p node in a failed result's visit error context.
+ *
+ * The guarded counterpart to the ObjectRef overload, for engine call sites that hold a borrowed
+ * node of unknown kind. A visited node may be a primitive -- a container element, a reflected
+ * field -- and `AnyView::cast<ObjectRef>()` throws on one. The engines that call this are
+ * `noexcept`, so an unguarded cast would terminate rather than propagate; skipping the frame is
+ * correct because a non-object node has no identity to name in the context.
+ *
+ * \param err The Error to annotate. Refcounted, so annotating this handle annotates the shared
+ *            object the caller's result carries.
+ * \param node The node to name; skipped when it is not object-backed.
+ */
+TVM_FFI_COLD_CODE inline void UpdateVisitErrorContext(Error& err,
+                                                      AnyView node) noexcept {  // NOLINT(*)
+  if (node.type_index() >= TypeIndex::kTVMFFIStaticObjectBegin) {
+    UpdateVisitErrorContext(err, node.cast<ObjectRef>());
+  }
+}
 }  // namespace details
 
 }  // namespace ffi

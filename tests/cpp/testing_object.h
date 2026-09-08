@@ -25,6 +25,7 @@
 #include <tvm/ffi/container/map.h>
 #include <tvm/ffi/device.h>
 #include <tvm/ffi/dtype.h>
+#include <tvm/ffi/extra/structural_mutate.h>
 #include <tvm/ffi/extra/structural_visit.h>
 #include <tvm/ffi/memory.h>
 #include <tvm/ffi/object.h>
@@ -234,6 +235,56 @@ class TPair : public ObjectRef {
   TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(TPair, ObjectRef, TPairObj);
 };
 
+class TMutatePairObj : public Object {
+ public:
+  ObjectRef lhs;
+  ObjectRef rhs;
+
+  TMutatePairObj(ObjectRef lhs, ObjectRef rhs) : lhs(std::move(lhs)), rhs(std::move(rhs)) {}
+  explicit TMutatePairObj(UnsafeInit) {}
+
+  // Every test that reads this process-global counter must reset it first.
+  static int& StructuralMutateCallCount() {
+    static int count = 0;
+    return count;
+  }
+
+  static TVMFFIAny StructuralMutate(StructuralMutatorObj* mutator, AnyView value) noexcept {
+    ++StructuralMutateCallCount();
+    const auto* self = value.cast<const TMutatePairObj*>();
+    TVM_FFI_S_MUTATE_ASSIGN_OR_RETURN(ObjectRef, lhs, mutator->MutateExpected(self->lhs));
+    TVM_FFI_S_MUTATE_ASSIGN_OR_RETURN(ObjectRef, rhs, mutator->MutateExpected(self->rhs));
+    if (lhs.same_as(self->lhs) && rhs.same_as(self->rhs)) {
+      return details::AnyUnsafe::MoveAnyToTVMFFIAny(Any(value));
+    }
+    return details::AnyUnsafe::MoveAnyToTVMFFIAny(
+        Any(make_object<TMutatePairObj>(std::move(lhs), std::move(rhs))));
+  }
+
+  static void RegisterReflection() {
+    namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<TMutatePairObj>()
+        .def_ro("lhs", &TMutatePairObj::lhs)
+        .def_ro("rhs", &TMutatePairObj::rhs);
+    refl::EnsureTypeAttrColumn(refl::type_attr::kStructuralMutate);
+    refl::TypeAttrDef<TMutatePairObj>().attr(
+        refl::type_attr::kStructuralMutate,
+        reinterpret_cast<void*>(static_cast<FStructuralMutate>(&TMutatePairObj::StructuralMutate)));
+  }
+
+  static constexpr TVMFFISEqHashKind _type_s_eq_hash_kind = kTVMFFISEqHashKindTreeNode;
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("test.MutatePair", TMutatePairObj, Object);
+};
+
+class TMutatePair : public ObjectRef {
+ public:
+  TMutatePair(ObjectRef lhs, ObjectRef rhs) {
+    data_ = make_object<TMutatePairObj>(std::move(lhs), std::move(rhs));
+  }
+
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(TMutatePair, ObjectRef, TMutatePairObj);
+};
+
 class TObjectPtrHolderObj : public Object {
  public:
   Arc<TIntObj> value;
@@ -361,7 +412,9 @@ class TFuncObj : public Object {
     TVM_FFI_S_VISIT_MAYBE_EARLY_RETURN(visitor->WithDefRegionKind(
         kTVMFFIDefRegionKindRecursive, [&]() { return visitor->VisitExpected(self->params); }));
 
-    return details::ExpectedUnsafe::MoveToTVMFFIAny(visitor->VisitExpected(self->body));
+    auto body_result = visitor->VisitExpected(self->body);
+    TVM_FFI_S_VISIT_MAYBE_EARLY_RETURN(body_result);
+    return details::ExpectedUnsafe::MoveToTVMFFIAny(std::move(body_result));
   }
 
   static void RegisterReflection() {

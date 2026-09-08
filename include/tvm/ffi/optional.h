@@ -83,16 +83,21 @@ class Optional<T,
  public:
   // default constructors.
   Optional() = default;
+  // Special members are explicitly inlined to enable move cleanup optimizations
+  TVM_FFI_INLINE ~Optional() = default;
   // NOLINTBEGIN(google-explicit-constructor)
-  Optional(const Optional& other) = default;
-  Optional(Optional&& other) noexcept = default;
-  Optional(std::optional<T> other) : data_(std::move(other)) {}
+  TVM_FFI_INLINE Optional(const Optional& other) = default;
+  TVM_FFI_INLINE Optional(Optional&& other) noexcept = default;
+  TVM_FFI_INLINE Optional(std::optional<T> other) : data_(std::move(other)) {}
   Optional(std::nullopt_t) {}
-  Optional(T other) : data_(std::move(other)) {}
+  TVM_FFI_INLINE Optional(T other) : data_(std::move(other)) {}
   // NOLINTEND(google-explicit-constructor)
 
-  Optional& operator=(const Optional& other) = default;
-  Optional& operator=(Optional&& other) noexcept = default;
+  TVM_FFI_INLINE Optional& operator=(const Optional& other) = default;
+  TVM_FFI_INLINE Optional& operator=(Optional&& other) noexcept {
+    data_ = std::move(other.data_);
+    return *this;
+  }
 
   TVM_FFI_INLINE Optional& operator=(T other) {
     data_ = std::move(other);
@@ -177,19 +182,21 @@ class Optional<T,
  public:
   /*! \brief default constructor, represents nullopt (Any() is kTVMFFINone). */
   Optional() = default;
+  // Special members are explicitly inlined to enable move cleanup optimizations
+  TVM_FFI_INLINE ~Optional() = default;
   // NOLINTBEGIN(google-explicit-constructor)
   /*! \brief construct nullopt from std::nullopt. */
   Optional(std::nullopt_t) {}
   /*! \brief copy constructor. */
-  Optional(const Optional& other) = default;
+  TVM_FFI_INLINE Optional(const Optional& other) = default;
   /*! \brief move constructor. */
-  Optional(Optional&& other) noexcept = default;
+  TVM_FFI_INLINE Optional(Optional&& other) noexcept = default;
   /*! \brief construct from a value of type T (copy). */
-  Optional(const T& value) : data_(value) {}
+  TVM_FFI_INLINE Optional(const T& value) : data_(value) {}
   /*! \brief construct from a value of type T (move). */
-  Optional(T&& value) : data_(std::move(value)) {}
+  TVM_FFI_INLINE Optional(T&& value) : data_(std::move(value)) {}
   /*! \brief construct from a std::optional<T>. */
-  Optional(std::optional<T> other) {
+  TVM_FFI_INLINE Optional(std::optional<T> other) {
     if (other.has_value()) {
       data_ = Any(*std::move(other));
     }
@@ -197,9 +204,12 @@ class Optional<T,
   // NOLINTEND(google-explicit-constructor)
 
   /*! \brief copy assignment. */
-  Optional& operator=(const Optional& other) = default;
+  TVM_FFI_INLINE Optional& operator=(const Optional& other) = default;
   /*! \brief move assignment. */
-  Optional& operator=(Optional&& other) noexcept = default;
+  TVM_FFI_INLINE Optional& operator=(Optional&& other) noexcept {
+    data_ = std::move(other.data_);
+    return *this;
+  }
 
   TVM_FFI_INLINE Optional& operator=(T other) {
     data_ = Any(std::move(other));
@@ -348,7 +358,7 @@ class Optional<T,
  private:
   friend struct TypeTraits<Optional<T>>;
   // construct directly from an Any backing store.
-  explicit Optional(Any data) : data_(std::move(data)) {}
+  TVM_FFI_INLINE explicit Optional(Any data) : data_(std::move(data)) {}
   TVM_FFI_INLINE AnyView ToAnyView() const { return data_.operator AnyView(); }
   TVM_FFI_INLINE Any MoveToAny() && { return std::move(data_); }
   /*! \brief The underlying Any backing store, kTVMFFINone represents nullopt. */
@@ -369,22 +379,27 @@ class Optional<T, std::enable_if_t<use_object_ref_optional_v<T>>> : public Objec
   static constexpr bool _type_container_is_exact = T::_type_container_is_exact;
 
   Optional() = default;
+  // Special members are explicitly inlined to enable move cleanup optimizations
+  TVM_FFI_INLINE ~Optional() = default;
   // NOLINTBEGIN(google-explicit-constructor)
-  Optional(const Optional&) = default;
-  Optional(Optional&&) noexcept = default;
+  TVM_FFI_INLINE Optional(const Optional&) = default;
+  TVM_FFI_INLINE Optional(Optional&&) noexcept = default;
   explicit Optional(UnsafeInit tag) : ObjectRef(tag) {}
   Optional(std::nullopt_t) {}
   Optional(std::nullptr_t) {}
-  Optional(std::optional<T> other) {
+  TVM_FFI_INLINE Optional(std::optional<T> other) {
     if (other.has_value()) {
       *this = *std::move(other);
     }
   }
-  Optional(T other) : ObjectRef(std::move(other)) {}
+  TVM_FFI_INLINE Optional(T other) : ObjectRef(std::move(other)) {}
   // NOLINTEND(google-explicit-constructor)
 
-  Optional& operator=(const Optional&) = default;
-  Optional& operator=(Optional&&) noexcept = default;
+  TVM_FFI_INLINE Optional& operator=(const Optional&) = default;
+  TVM_FFI_INLINE Optional& operator=(Optional&& other) noexcept {
+    ObjectRef::operator=(std::move(other));
+    return *this;
+  }
 
   TVM_FFI_INLINE Optional& operator=(T other) {
     ObjectRef::operator=(std::move(other));
@@ -543,21 +558,26 @@ class Optional<T, std::enable_if_t<is_object_ptr_type_v<T> || is_arc_type_v<T>>>
   using ContainerType = typename Traits::ContainerType;
 
   Optional() = default;
+  // Special members are explicitly inlined to enable move cleanup optimizations
+  TVM_FFI_INLINE ~Optional() = default;
   // NOLINTBEGIN(google-explicit-constructor)
-  Optional(const Optional&) = default;
-  Optional(Optional&&) noexcept = default;
+  TVM_FFI_INLINE Optional(const Optional&) = default;
+  TVM_FFI_INLINE Optional(Optional&&) noexcept = default;
   Optional(std::nullopt_t) : StorageType(nullptr) {}
   Optional(std::nullptr_t) : StorageType(nullptr) {}
-  Optional(std::optional<T> other) {
+  TVM_FFI_INLINE Optional(std::optional<T> other) {
     if (other.has_value()) {
       static_cast<StorageType&>(*this) = StorageType(std::move(*other));
     }
   }
-  Optional(T value) : StorageType(std::move(value)) {}
+  TVM_FFI_INLINE Optional(T value) : StorageType(std::move(value)) {}
   // NOLINTEND(google-explicit-constructor)
 
-  Optional& operator=(const Optional&) = default;
-  Optional& operator=(Optional&&) noexcept = default;
+  TVM_FFI_INLINE Optional& operator=(const Optional&) = default;
+  TVM_FFI_INLINE Optional& operator=(Optional&& other) noexcept {
+    static_cast<StorageType&>(*this) = std::move(static_cast<StorageType&>(other));
+    return *this;
+  }
 
   TVM_FFI_INLINE Optional& operator=(T value) {
     static_cast<StorageType&>(*this) = StorageType(std::move(value));

@@ -16,7 +16,9 @@
 # under the License.
 
 
+import copy
 import gc
+import pickle
 import weakref
 from typing import NoReturn
 
@@ -151,3 +153,92 @@ def test_error_no_cyclic_reference() -> None:
     finally:
         # re-enable gc whenever exception occurs
         gc.enable()
+
+
+def _raise_from_cxx() -> BaseException:
+    """Return a Python exception produced by a C++-side FFI error."""
+    test_raise_error = tvm_ffi.get_global_func("testing.test_raise_error")
+    try:
+        test_raise_error("ValueError", "error XYZ")
+    except ValueError as e:
+        return e
+    raise AssertionError("expected the FFI call to raise")
+
+
+def test_exception_pickle_roundtrip() -> None:
+    """Exceptions carrying ``__tvm_ffi_error__`` must survive pickling.
+
+    Regression test: ``ffi.Error`` has no JSON-graph creator, so the inherited
+    ``CObject.__reduce__`` used to fail with a ``ToJSONGraph`` ``TypeError``
+    whenever a test harness pickled an FFI-originated exception.
+    """
+    err = _raise_from_cxx()
+    restored = pickle.loads(pickle.dumps(err))
+
+    assert isinstance(restored, ValueError)
+    assert restored.args == err.args
+    ffi_error = restored.__tvm_ffi_error__  # ty: ignore[unresolved-attribute]
+    assert isinstance(ffi_error, tvm_ffi.core.Error)
+    assert ffi_error.kind == "ValueError"
+    assert ffi_error.message == "error XYZ"
+    assert ffi_error.backtrace.find("TestRaiseError") != -1
+
+
+def test_exception_deepcopy_roundtrip() -> None:
+    """``copy.deepcopy`` goes through ``__reduce_ex__`` and must work too."""
+    err = _raise_from_cxx()
+    restored = copy.deepcopy(err)
+
+    assert isinstance(restored, ValueError)
+    assert restored.__tvm_ffi_error__.kind == "ValueError"  # ty: ignore[unresolved-attribute]
+    assert restored.__tvm_ffi_error__.message == "error XYZ"  # ty: ignore[unresolved-attribute]
+
+
+def test_ffi_error_pickle_roundtrip() -> None:
+    """A bare :class:`tvm_ffi.core.Error` round-trips by value."""
+    error = tvm_ffi.core.Error("TypeError", "boom", 'File "a.py", line 1, in f\n')
+    restored = pickle.loads(pickle.dumps(error))
+
+    assert isinstance(restored, tvm_ffi.core.Error)
+    assert restored.kind == "TypeError"
+    assert restored.message == "boom"
+    assert restored.backtrace == 'File "a.py", line 1, in f\n'
+    # a fresh object, not the original handle
+    assert not restored.same_as(error)
+
+
+def test_ffi_error_pickle_null_handle() -> None:
+    """An ``Error`` with a NULL handle round-trips without dereferencing it."""
+    error = tvm_ffi.core.Error.__new__(tvm_ffi.core.Error)
+    assert error.__chandle__() == 0
+
+    restored = pickle.loads(pickle.dumps(error))
+    assert isinstance(restored, tvm_ffi.core.Error)
+    assert restored.__chandle__() == 0
+
+
+def test_ffi_error_pickle_drops_extra_context() -> None:
+    """``extra_context`` is intentionally not preserved across pickling.
+
+    It may hold arbitrary native payloads with no value representation, so
+    dropping it keeps pickling an error independent of where it came from.
+    """
+    error = tvm_ffi.core.Error("ValueError", "boom", "")
+    restored = pickle.loads(pickle.dumps(error))
+    assert restored.extra_context is None
+
+
+def test_restored_exception_can_propagate_through_ffi() -> None:
+    """An unpickled exception still works as an FFI error payload.
+
+    ``set_last_ffi_error`` calls ``update_backtrace`` on ``__tvm_ffi_error__``,
+    so the attribute must survive as a live ``Error``, not as ``None``.
+    """
+    restored = pickle.loads(pickle.dumps(_raise_from_cxx()))
+
+    def callback(_: int) -> NoReturn:
+        raise restored
+
+    fapply = tvm_ffi.convert(callback)
+    with pytest.raises(ValueError, match="error XYZ"):
+        fapply(1)

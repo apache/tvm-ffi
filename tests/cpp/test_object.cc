@@ -353,6 +353,24 @@ TEST(Object, WeakObjectPtr) {
   EXPECT_TRUE(expired_lock == nullptr);
 }
 
+TEST(Object, UniqueWithWeakObjectPtr) {
+  ObjectPtr<TIntObj> strong_ptr = make_object<TIntObj>(42);
+
+  EXPECT_TRUE(strong_ptr.unique());
+  EXPECT_TRUE(strong_ptr->unique());
+  EXPECT_EQ(strong_ptr.use_count(), 1);
+
+  WeakObjectPtr<TIntObj> weak_ptr(strong_ptr);
+  EXPECT_FALSE(strong_ptr.unique());
+  EXPECT_FALSE(strong_ptr->unique());
+  EXPECT_EQ(strong_ptr.use_count(), 1);
+
+  weak_ptr.reset();
+  EXPECT_TRUE(strong_ptr.unique());
+  EXPECT_TRUE(strong_ptr->unique());
+  EXPECT_EQ(strong_ptr.use_count(), 1);
+}
+
 TEST(Object, WeakObjectPtrAssignment) {
   // Test copy construction
   ObjectPtr<TIntObj> new_strong = make_object<TIntObj>(100);

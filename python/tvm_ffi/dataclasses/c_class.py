@@ -87,7 +87,6 @@ def _reinstall_field_properties(cls: type, type_info: Any, shadowed_names: set[s
     eq_default=False,
     order_default=False,
     field_specifiers=(Field, field),
-    converter=_field_converter,
 )
 def c_class(
     type_key: str,
@@ -216,3 +215,9 @@ def c_class(
         return cls
 
     return decorator
+
+
+# `converter` is runtime metadata rather than part of the type checker's
+# declared `dataclass_transform` signature. Set it on the generated metadata
+# so checkers can still model converted fields without rejecting the decorator.
+c_class.__dataclass_transform__["kwargs"]["converter"] = _field_converter  # ty: ignore[unresolved-attribute]

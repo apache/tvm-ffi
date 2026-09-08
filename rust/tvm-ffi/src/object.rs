@@ -125,7 +125,92 @@ pub unsafe trait ObjectRefCore: Sized + Clone {
     type ContainerType: ObjectCore;
     fn data(this: &Self) -> &ObjectArc<Self::ContainerType>;
     fn into_data(this: Self) -> ObjectArc<Self::ContainerType>;
-    fn from_data(data: ObjectArc<Self::ContainerType>) -> Self;
+
+    /// Construct a reference view from an owning container handle.
+    ///
+    /// # Safety
+    ///
+    /// In addition to containing a valid `ContainerType` allocation, `data`
+    /// must satisfy every semantic invariant imposed by `Self`. This matters
+    /// for zero-state views that share a container type but accept only a
+    /// subset of its values, such as a typed expression view.
+    unsafe fn from_data(data: ObjectArc<Self::ContainerType>) -> Self;
+
+    /// Return whether two object references point to the same allocation.
+    #[inline]
+    fn same_as<Other: ObjectRefCore>(&self, other: &Other) -> bool {
+        unsafe {
+            ObjectArc::as_raw(Self::data(self)).cast::<()>()
+                == ObjectArc::as_raw(Other::data(other)).cast::<()>()
+        }
+    }
+
+    /// Borrow the underlying object as node type `N` when its runtime type matches.
+    ///
+    /// Unlike [`ObjectRefCast::try_cast`], this method neither consumes the
+    /// reference nor changes the object's reference count. The returned node
+    /// cannot outlive `self`.
+    #[inline(always)]
+    fn as_node<N: ObjectCore>(&self) -> Option<&N> {
+        let object = unsafe { ObjectArc::as_raw(Self::data(self)) };
+        let type_index = unsafe { (*object.cast::<TVMFFIObject>()).type_index };
+        if !is_instance_of::<N>(type_index) {
+            return None;
+        }
+        Some(unsafe { &*object.cast::<N>() })
+    }
+}
+
+/// An owning, hashable identity key for an FFI object.
+///
+/// The retained strong reference prevents the allocation address from being
+/// reused while the key is alive. This makes it suitable for identity-based
+/// maps without exposing raw object pointers to downstream code.
+#[derive(Clone)]
+pub struct ObjectIdentity {
+    data: ObjectArc<Object>,
+}
+
+impl ObjectIdentity {
+    /// Retain the allocation referenced by `value` as an identity key.
+    pub fn of<T: ObjectRefCore>(value: &T) -> Self {
+        unsafe {
+            let ptr = ObjectArc::as_raw(T::data(value)) as *mut TVMFFIObject;
+            unsafe_::inc_ref(ptr);
+            Self {
+                data: ObjectArc::from_raw(ptr.cast::<Object>()),
+            }
+        }
+    }
+
+    #[inline]
+    fn as_ptr(&self) -> *const TVMFFIObject {
+        unsafe { ObjectArc::as_raw(&self.data).cast::<TVMFFIObject>() }
+    }
+}
+
+impl PartialEq for ObjectIdentity {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.as_ptr() == other.as_ptr()
+    }
+}
+
+impl Eq for ObjectIdentity {}
+
+impl std::hash::Hash for ObjectIdentity {
+    #[inline]
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.as_ptr().hash(state);
+    }
+}
+
+impl std::fmt::Debug for ObjectIdentity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("ObjectIdentity")
+            .field(&self.as_ptr())
+            .finish()
+    }
 }
 
 /// Check whether a runtime type index refers to `Target` or one of its
@@ -146,6 +231,11 @@ pub fn is_instance_of<Target: ObjectCore>(object_type_index: i32) -> bool {
     let target_type_index = Target::type_index();
     if object_type_index == target_type_index {
         return true;
+    }
+    // A final type cannot have a separately registered subtype. Keep common
+    // borrowed checks, such as `IntImmObj`, to one integer comparison.
+    if Target::TYPE_FINAL {
+        return false;
     }
     let object_begin = TypeIndex::kTVMFFIStaticObjectBegin as i32;
     // Only object types participate in the type hierarchy.

@@ -101,6 +101,9 @@ TVM_FFI_INLINE bool IsObjectInstance(int32_t object_type_index);
  * - _type_mutable:
  *      Whether we would like to expose cast to non-constant pointer
  *      ObjectType* from Any/AnyView. By default, we set to false so it is not exposed.
+ * - _type_s_eq_hash_subclass_kind_fixed:
+ *      Whether every subclass must retain this type's structural equality and hash kind.
+ *      By default, this is false so downstream subclasses may select their own kind.
  *
  * The following two fields are necessary for base classes that can be sub-classed.
  *
@@ -179,9 +182,20 @@ class Object {
   }
 
   /*!
-   * \return Whether the object.use_count() == 1.
+   * \return Whether the object has one strong reference and no external weak references.
+   * \note Checking both weak and strong count is needed to ensure correctness in decisions such as
+   *       copy-on-write in multi-threaded setting.
    */
-  bool unique() const { return use_count() == 1; }
+  bool unique() const {
+#ifdef _MSC_VER
+    return (reinterpret_cast<const volatile uint64_t*>(
+               &header_.combined_ref_count))[0] ==  // NOLINT(*)
+           kCombinedRefCountBothOne;
+#else
+    return __atomic_load_n(&(header_.combined_ref_count), __ATOMIC_RELAXED) ==
+           kCombinedRefCountBothOne;
+#endif
+  }
 
   /*!
    * \return The usage count of the cell.
@@ -221,6 +235,8 @@ class Object {
   static constexpr int32_t _type_depth = 0;
   /*! \brief The structural equality and hash kind of the type */
   static constexpr TVMFFISEqHashKind _type_s_eq_hash_kind = kTVMFFISEqHashKindUnsupported;
+  /*! \brief Whether subclasses must retain this type's structural equality and hash kind */
+  static constexpr bool _type_s_eq_hash_subclass_kind_fixed = false;
   // The following functions are provided by macro
   // TVM_FFI_DECLARE_OBJECT_INFO and TVM_FFI_DECLARE_OBJECT_INFO_FINAL
   /*!
@@ -242,7 +258,7 @@ class Object {
   static constexpr uint64_t kCombinedRefCountWeakOne = details::kCombinedRefCountWeakOne;
   static constexpr uint64_t kCombinedRefCountBothOne = details::kCombinedRefCountBothOne;
   /*! \brief increase strong reference count, the caller must already hold a strong reference */
-  void IncRef() {
+  TVM_FFI_INLINE void IncRef() {
 #ifdef _MSC_VER
     _InterlockedIncrement64(
         reinterpret_cast<volatile __int64*>(&header_.combined_ref_count));  // NOLINT(*)
@@ -297,7 +313,7 @@ class Object {
   }
 
   /*! \brief decrease strong reference count and delete the object */
-  void DecRef() {
+  TVM_FFI_INLINE void DecRef() {
 #ifdef _MSC_VER
     // use simpler impl in windows to ensure correctness
     uint64_t count_before_sub =
@@ -400,6 +416,7 @@ class Object {
 template <typename T>
 class ObjectPtr {
  public:
+  // Special members are explicitly inlined to enable move cleanup optimizations
   /*! \brief default constructor */
   ObjectPtr() = default;
   /*! \brief default constructor */
@@ -408,14 +425,14 @@ class ObjectPtr {
    * \brief copy constructor
    * \param other The value to be moved
    */
-  ObjectPtr(const ObjectPtr<T>& other)  // NOLINT(*)
+  TVM_FFI_INLINE ObjectPtr(const ObjectPtr<T>& other)  // NOLINT(*)
       : ObjectPtr(other.data_) {}
   /*!
    * \brief copy constructor
    * \param other The value to be moved
    */
   template <typename U>
-  ObjectPtr(const ObjectPtr<U>& other)  // NOLINT(*)
+  TVM_FFI_INLINE ObjectPtr(const ObjectPtr<U>& other)  // NOLINT(*)
       : ObjectPtr(other.data_) {
     static_assert(std::is_base_of_v<T, U>, "can only assign of child class ObjectPtr to parent");
   }
@@ -423,7 +440,7 @@ class ObjectPtr {
    * \brief move constructor
    * \param other The value to be moved
    */
-  ObjectPtr(ObjectPtr<T>&& other)  // NOLINT(*)
+  TVM_FFI_INLINE ObjectPtr(ObjectPtr<T>&& other) noexcept  // NOLINT(*)
       : data_(other.data_) {
     other.data_ = nullptr;
   }
@@ -432,13 +449,13 @@ class ObjectPtr {
    * \param other The value to be moved
    */
   template <typename Y>
-  ObjectPtr(ObjectPtr<Y>&& other)  // NOLINT(*)
+  TVM_FFI_INLINE ObjectPtr(ObjectPtr<Y>&& other) noexcept  // NOLINT(*)
       : data_(other.data_) {
     static_assert(std::is_base_of_v<T, Y>, "can only assign of child class ObjectPtr to parent");
     other.data_ = nullptr;
   }
   /*! \brief destructor */
-  ~ObjectPtr() { this->reset(); }
+  TVM_FFI_INLINE ~ObjectPtr() { this->reset(); }
   /*!
    * \brief Swap this array with another Object
    * \param other The other Object
@@ -465,7 +482,7 @@ class ObjectPtr {
    * \param other The value to be assigned.
    * \return reference to self.
    */
-  ObjectPtr<T>& operator=(const ObjectPtr<T>& other) {  // NOLINT(*)
+  TVM_FFI_INLINE ObjectPtr<T>& operator=(const ObjectPtr<T>& other) {  // NOLINT(*)
     // takes in plane operator to enable copy elison.
     // copy-and-swap idiom
     ObjectPtr(other).swap(*this);  // NOLINT(*)
@@ -476,7 +493,7 @@ class ObjectPtr {
    * \param other The value to be assigned.
    * \return reference to self.
    */
-  ObjectPtr<T>& operator=(ObjectPtr<T>&& other) {  // NOLINT(*)
+  TVM_FFI_INLINE ObjectPtr<T>& operator=(ObjectPtr<T>&& other) noexcept {  // NOLINT(*)
     // copy-and-swap idiom
     ObjectPtr(std::move(other)).swap(*this);  // NOLINT(*)
     return *this;
@@ -487,7 +504,9 @@ class ObjectPtr {
    */
   explicit operator bool() const { return get() != nullptr; }
   /*! \brief reset the content of ptr to be nullptr */
-  void reset() {
+  // Explicitly inlined: the inlined destructor delegates here, so an out-of-line
+  // reset would turn every destruction back into a call.
+  TVM_FFI_INLINE void reset() {
     if (data_ != nullptr) {
       data_->DecRef();
       data_ = nullptr;
@@ -496,7 +515,7 @@ class ObjectPtr {
   /*! \return The use count of the ptr, for debug purposes */
   int use_count() const { return data_ != nullptr ? data_->use_count() : 0; }
   /*! \return whether the reference is unique */
-  bool unique() const { return data_ != nullptr && data_->use_count() == 1; }
+  bool unique() const { return data_ != nullptr && data_->unique(); }
   /*! \return Whether two ObjectPtr do not equal each other */
   bool operator==(const ObjectPtr<T>& other) const { return data_ == other.data_; }
   /*! \return Whether two ObjectPtr equals each other */
@@ -546,17 +565,20 @@ class Arc : public ObjectPtr<T> {
   Arc() = delete;
   Arc(std::nullptr_t) = delete;
 
+  // Special members are explicitly inlined to enable move cleanup optimizations
+  TVM_FFI_INLINE ~Arc() = default;
+
   /*! \brief Copy constructor. */
-  Arc(const Arc&) = default;
+  TVM_FFI_INLINE Arc(const Arc&) = default;
 
   /*! \brief Move constructor. */
-  Arc(Arc&&) = default;
+  TVM_FFI_INLINE Arc(Arc&&) noexcept = default;
 
   /*! \brief Copy assignment operator. */
-  Arc& operator=(const Arc&) = default;
+  TVM_FFI_INLINE Arc& operator=(const Arc&) = default;
 
   /*! \brief Move assignment operator. */
-  Arc& operator=(Arc&&) = default;
+  TVM_FFI_INLINE Arc& operator=(Arc&&) noexcept = default;
 
   /*!
    * \brief Copy-upcast an Arc of a derived Object type.
@@ -744,7 +766,9 @@ class WeakObjectPtr {
   }
 
   /*! \brief reset the content of ptr to be nullptr */
-  void reset() {
+  // Explicitly inlined: the inlined destructor delegates here, so an out-of-line
+  // reset would turn every destruction back into a call.
+  TVM_FFI_INLINE void reset() {
     if (data_ != nullptr) {
       data_->DecWeakRef();
       data_ = nullptr;
@@ -792,14 +816,18 @@ class ObjectRef {
  public:
   /*! \brief default constructor */
   ObjectRef() = default;
+  // Special members are explicitly inlined to enable move cleanup optimizations
+  TVM_FFI_INLINE ~ObjectRef() = default;
   /*! \brief copy constructor */
-  ObjectRef(const ObjectRef& other) = default;
+  TVM_FFI_INLINE ObjectRef(const ObjectRef& other) = default;
   /*! \brief move constructor */
-  ObjectRef(ObjectRef&& other) noexcept : data_(std::move(other.data_)) { other.data_ = nullptr; }
+  TVM_FFI_INLINE ObjectRef(ObjectRef&& other) noexcept : data_(std::move(other.data_)) {
+    other.data_ = nullptr;
+  }
   /*! \brief copy assignment */
-  ObjectRef& operator=(const ObjectRef& other) = default;
+  TVM_FFI_INLINE ObjectRef& operator=(const ObjectRef& other) = default;
   /*! \brief move assignment */
-  ObjectRef& operator=(ObjectRef&& other) noexcept {
+  TVM_FFI_INLINE ObjectRef& operator=(ObjectRef&& other) noexcept {
     data_ = std::move(other.data_);
     other.data_ = nullptr;
     return *this;
@@ -1058,6 +1086,10 @@ struct ObjectPtrEqual {
   static constexpr int32_t _type_depth = ParentType::_type_depth + 1;                         \
   TVM_FFI_COLD_CODE static int32_t _GetOrAllocRuntimeTypeIndex() {                            \
     static_assert(!ParentType::_type_final, "ParentType marked as final");                    \
+    static_assert(!ParentType::_type_s_eq_hash_subclass_kind_fixed ||                         \
+                      TypeName::_type_s_eq_hash_kind == ParentType::_type_s_eq_hash_kind,     \
+                  "Subclass must retain the structural equality and hash kind of its fixed "  \
+                  "ancestor");                                                                \
     static_assert(TypeName::_type_child_slots == 0 || ParentType::_type_child_slots == 0 ||   \
                       TypeName::_type_child_slots < ParentType::_type_child_slots,            \
                   "Need to set _type_child_slots when parent specifies it.");                 \
@@ -1081,6 +1113,10 @@ struct ObjectPtrEqual {
   static constexpr int32_t _type_depth = ParentType::_type_depth + 1;                         \
   TVM_FFI_COLD_CODE static int32_t _GetOrAllocRuntimeTypeIndex() {                            \
     static_assert(!ParentType::_type_final, "ParentType marked as final");                    \
+    static_assert(!ParentType::_type_s_eq_hash_subclass_kind_fixed ||                         \
+                      TypeName::_type_s_eq_hash_kind == ParentType::_type_s_eq_hash_kind,     \
+                  "Subclass must retain the structural equality and hash kind of its fixed "  \
+                  "ancestor");                                                                \
     static_assert(TypeName::_type_child_slots == 0 || ParentType::_type_child_slots == 0 ||   \
                       TypeName::_type_child_slots < ParentType::_type_child_slots,            \
                   "Need to set _type_child_slots when parent specifies it.");                 \
@@ -1174,7 +1210,7 @@ template <typename TargetType>
 TVM_FFI_INLINE bool IsObjectInstance(int32_t object_type_index) {
   static_assert(std::is_base_of_v<Object, TargetType>);
   // Everything is a subclass of object.
-  if constexpr (std::is_same_v<TargetType, Object>) {
+  if constexpr (std::is_same_v<std::remove_cv_t<TargetType>, Object>) {
     return true;
   } else if constexpr (TargetType::_type_final) {
     // if the target type is a final type
@@ -1436,6 +1472,7 @@ struct TypeTraits<ObjectPtr<TObject>,
     }
     TVMFFIObject* obj_ptr = details::ObjectUnsafe::TVMFFIObjectPtrFromObjectPtr(src);
     result->type_index = obj_ptr->type_index;
+    TVM_FFI_UNSAFE_ASSUME(result->type_index >= TypeIndex::kTVMFFIStaticObjectBegin);
     result->zero_padding = 0;
     TVM_FFI_CLEAR_PTR_PADDING_IN_FFI_ANY(result);
     result->v_obj = obj_ptr;
@@ -1448,6 +1485,7 @@ struct TypeTraits<ObjectPtr<TObject>,
     }
     TVMFFIObject* obj_ptr = details::ObjectUnsafe::MoveObjectPtrToTVMFFIObjectPtr(std::move(src));
     result->type_index = obj_ptr->type_index;
+    TVM_FFI_UNSAFE_ASSUME(result->type_index >= TypeIndex::kTVMFFIStaticObjectBegin);
     result->zero_padding = 0;
     TVM_FFI_CLEAR_PTR_PADDING_IN_FFI_ANY(result);
     result->v_obj = obj_ptr;
@@ -1543,6 +1581,7 @@ struct ObjectRefTypeTraitsBase : public TypeTraitsBase {
     }
     TVMFFIObject* obj_ptr = details::ObjectUnsafe::TVMFFIObjectPtrFromObjectRef(src);
     result->type_index = obj_ptr->type_index;
+    TVM_FFI_UNSAFE_ASSUME(result->type_index >= TypeIndex::kTVMFFIStaticObjectBegin);
     result->zero_padding = 0;
     TVM_FFI_CLEAR_PTR_PADDING_IN_FFI_ANY(result);
     result->v_obj = obj_ptr;
@@ -1557,6 +1596,7 @@ struct ObjectRefTypeTraitsBase : public TypeTraitsBase {
     }
     TVMFFIObject* obj_ptr = details::ObjectUnsafe::MoveObjectRefToTVMFFIObjectPtr(std::move(src));
     result->type_index = obj_ptr->type_index;
+    TVM_FFI_UNSAFE_ASSUME(result->type_index >= TypeIndex::kTVMFFIStaticObjectBegin);
     result->zero_padding = 0;
     TVM_FFI_CLEAR_PTR_PADDING_IN_FFI_ANY(result);
     result->v_obj = obj_ptr;
@@ -1660,6 +1700,7 @@ struct TypeTraits<TObject*, std::enable_if_t<std::is_base_of_v<Object, TObject>>
   TVM_FFI_INLINE static void CopyToAnyView(TObject* src, TVMFFIAny* result) {
     TVMFFIObject* obj_ptr = details::ObjectUnsafe::GetHeader(src);
     result->type_index = obj_ptr->type_index;
+    TVM_FFI_UNSAFE_ASSUME(result->type_index >= TypeIndex::kTVMFFIStaticObjectBegin);
     result->zero_padding = 0;
     TVM_FFI_CLEAR_PTR_PADDING_IN_FFI_ANY(result);
     result->v_obj = obj_ptr;
@@ -1668,6 +1709,7 @@ struct TypeTraits<TObject*, std::enable_if_t<std::is_base_of_v<Object, TObject>>
   TVM_FFI_INLINE static void MoveToAny(TObject* src, TVMFFIAny* result) {
     TVMFFIObject* obj_ptr = details::ObjectUnsafe::GetHeader(src);
     result->type_index = obj_ptr->type_index;
+    TVM_FFI_UNSAFE_ASSUME(result->type_index >= TypeIndex::kTVMFFIStaticObjectBegin);
     result->zero_padding = 0;
     TVM_FFI_CLEAR_PTR_PADDING_IN_FFI_ANY(result);
     result->v_obj = obj_ptr;

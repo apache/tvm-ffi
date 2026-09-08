@@ -128,7 +128,36 @@ class SeqBaseObj : public Object, protected TVMFFISeqCell {
     if (i < 0 || i >= TVMFFISeqCell::size) {
       TVM_FFI_THROW(IndexError) << "Index " << i << " out of bounds " << TVMFFISeqCell::size;
     }
+    SetItemAfterCheck(i, std::move(item));
+  }
+
+  /*!
+   * \brief Set i-th element after the caller has established that i is in bounds.
+   * \param i The index.
+   * \param item The value to be set.
+   */
+  TVM_FFI_INLINE void SetItemAfterCheck(int64_t i, Any item) {
     static_cast<Any*>(data)[i] = std::move(item);
+  }
+
+  /*!
+   * \brief Inplace-initialize the elements starting at idx from [first, last).
+   * \param idx The starting point.
+   * \param first Begin of iterator.
+   * \param last End of iterator.
+   * \tparam IterType The iterator type.
+   * \return Self.
+   */
+  template <typename IterType>
+  SeqBaseObj* InitRange(int64_t idx, IterType first, IterType last) {
+    TVM_FFI_DCHECK_GE(idx, 0);
+    TVM_FFI_DCHECK_LE(idx + std::distance(first, last), TVMFFISeqCell::size);
+    Any* itr = MutableBegin() + idx;
+    for (; first != last; ++first) {
+      Any ref = *first;
+      new (itr++) Any(std::move(ref));
+    }
+    return this;
   }
 
   /*! \brief Remove the last element */

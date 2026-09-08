@@ -83,13 +83,17 @@ Structural
 
   StructuralKey
   StructuralVisitor
+  StructuralMutator
   VisitInterrupt
+  DefRegionKind
   WalkOrder
   WalkResult
   get_first_structural_mismatch
   structural_equal
   structural_hash
   structural_walk
+  structural_visit
+  structural_map
 
 
 Global Registry

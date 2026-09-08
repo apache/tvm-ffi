@@ -275,6 +275,11 @@ TEST(Any, Object) {
   AnyView view2 = any1;
   EXPECT_EQ(v1.use_count(), 2);
 
+  EXPECT_EQ(details::AnyUnsafe::RawObjectPtrFromAnyAfterCheck(any1), v1.get());
+  EXPECT_EQ(details::AnyUnsafe::RawObjectPtrFromAnyAfterCheck<TIntObj>(any1), v1.get());
+  EXPECT_EQ(details::AnyUnsafe::RawObjectPtrFromAnyViewAfterCheck(view2), v1.get());
+  EXPECT_EQ(details::AnyUnsafe::RawObjectPtrFromAnyViewAfterCheck<TIntObj>(view2), v1.get());
+
   // convert to weak raw object ptr
   const TIntObj* v1_ptr = view2.cast<const TIntObj*>();
   EXPECT_EQ(v1.use_count(), 2);

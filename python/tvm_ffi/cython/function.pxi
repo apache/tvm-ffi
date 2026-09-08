@@ -550,6 +550,32 @@ cdef int TVMFFIPyArgSetterFFIOpaquePtrCompatible_(
     return 0
 
 
+_OPAQUE_PTR_HANDLERS = {}
+"""Map exact Python classes to their setup-time opaque-pointer handlers.
+
+Populate this dictionary before instances of registered classes are passed to
+TVM FFI, then treat it as read-only while FFI calls are running.
+"""
+
+
+cdef object _lookup_opaque_ptr_handler(object type_cls):
+    """Return the setup-time exact-class opaque pointer handler, if present."""
+    return _OPAQUE_PTR_HANDLERS.get(type_cls)
+
+
+cdef int TVMFFIPyArgSetterOpaquePtrHandler_(
+    TVMFFIPyArgSetter* handle, TVMFFIPyCallContext* ctx,
+    PyObject* py_arg, TVMFFIAny* out
+) except -1:
+    """Use the exact-class handler installed during application setup."""
+    cdef object arg = <object>py_arg
+    cdef object func = _OPAQUE_PTR_HANDLERS[type(arg)]
+    cdef long long long_ptr = <long long>func(arg)
+    out.type_index = kTVMFFIOpaquePtr
+    out.v_ptr = <void*>long_ptr
+    return 0
+
+
 cdef int TVMFFIPyArgSetterObjectRValueRef_(
     TVMFFIPyArgSetter* handle, TVMFFIPyCallContext* ctx,
     PyObject* py_arg, TVMFFIAny* out
@@ -875,6 +901,9 @@ cdef public int TVMFFICyArgSetterFactory(PyObject* value, TVMFFIPyArgSetter* out
         return 0
     if hasattr(arg_class, "__tvm_ffi_opaque_ptr__"):
         out.func = TVMFFIPyArgSetterFFIOpaquePtrCompatible_
+        return 0
+    if _lookup_opaque_ptr_handler(arg_class) is not None:
+        out.func = TVMFFIPyArgSetterOpaquePtrHandler_
         return 0
     if callable(arg):
         out.func = TVMFFIPyArgSetterCallable_

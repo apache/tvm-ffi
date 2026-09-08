@@ -23,6 +23,7 @@ use std::ops::Deref;
 use crate::any::TryFromTemp;
 use crate::derive::Object;
 use crate::object::{Object, ObjectArc};
+use crate::type_traits::ContainerElement;
 use crate::{Any, AnyCompatible, AnyView, ObjectCoreWithExtraItems, ObjectRefCore};
 use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
 use tvm_ffi_sys::{TVMFFIAny, TVMFFIObject};
@@ -50,12 +51,12 @@ unsafe impl ObjectCoreWithExtraItems for ArrayObj {
 
 #[repr(C)]
 #[derive(Clone)]
-pub struct Array<T: AnyCompatible + Clone> {
+pub struct Array<T: ContainerElement + Clone> {
     data: ObjectArc<ArrayObj>,
     _marker: PhantomData<T>,
 }
 
-impl<T: AnyCompatible + Clone> Debug for Array<T> {
+impl<T: ContainerElement + Clone> Debug for Array<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let full_name = std::any::type_name::<T>();
         let short_name = full_name.split("::").last().unwrap_or(full_name);
@@ -63,13 +64,13 @@ impl<T: AnyCompatible + Clone> Debug for Array<T> {
     }
 }
 
-impl<T: AnyCompatible + Clone> Default for Array<T> {
+impl<T: ContainerElement + Clone> Default for Array<T> {
     fn default() -> Self {
         Self::new(vec![])
     }
 }
 
-unsafe impl<T: AnyCompatible + Clone> ObjectRefCore for Array<T> {
+unsafe impl<T: ContainerElement + Clone> ObjectRefCore for Array<T> {
     type ContainerType = ArrayObj;
 
     fn data(this: &Self) -> &ObjectArc<Self::ContainerType> {
@@ -80,7 +81,7 @@ unsafe impl<T: AnyCompatible + Clone> ObjectRefCore for Array<T> {
         this.data
     }
 
-    fn from_data(data: ObjectArc<Self::ContainerType>) -> Self {
+    unsafe fn from_data(data: ObjectArc<Self::ContainerType>) -> Self {
         Self {
             data,
             _marker: PhantomData,
@@ -88,7 +89,7 @@ unsafe impl<T: AnyCompatible + Clone> ObjectRefCore for Array<T> {
     }
 }
 
-impl<T: AnyCompatible + Clone> Array<T> {
+impl<T: ContainerElement + Clone> Array<T> {
     /// Creates a new Array from a vector of items.
     pub fn new(items: Vec<T>) -> Self {
         let capacity = items.len();
@@ -116,12 +117,13 @@ impl<T: AnyCompatible + Clone> Array<T> {
             container.data = base_ptr as *mut _;
 
             for (i, item) in items.into_iter().enumerate() {
-                let any: Any = Any::from(item);
-                let raw = Any::into_raw_ffi_any(any);
+                let mut raw = TVMFFIAny::new();
+                T::container_move_to_any(item, &mut raw);
                 core::ptr::write(base_ptr.add(i), raw);
             }
         }
-        Self::from_data(arc)
+        // SAFETY: `arc` was allocated and initialized above as an `Array<T>`.
+        unsafe { Self::from_data(arc) }
     }
 
     pub fn len(&self) -> usize {
@@ -142,13 +144,13 @@ impl<T: AnyCompatible + Clone> Array<T> {
             let base_ptr = container.data as *const TVMFFIAny;
             let raw_any_ref = &*base_ptr.add(index);
 
-            match T::try_cast_from_any_view(raw_any_ref) {
+            match T::container_try_cast_from_any_view(raw_any_ref) {
                 Ok(val) => Ok(val),
                 Err(_) => crate::bail!(
                     crate::error::TYPE_ERROR,
                     "Failed to cast element at {} to {}",
                     index,
-                    T::type_str()
+                    T::container_type_str()
                 ),
             }
         }
@@ -173,7 +175,7 @@ impl<T: AnyCompatible + Clone> Array<T> {
 
 // --- Index Implementation ---
 
-impl<T: AnyCompatible + Clone> std::ops::Index<usize> for Array<T> {
+impl<T: ContainerElement + Clone> std::ops::Index<usize> for Array<T> {
     type Output = AnyView<'static>;
 
     fn index(&self, index: usize) -> &Self::Output {
@@ -194,13 +196,13 @@ impl<T: AnyCompatible + Clone> std::ops::Index<usize> for Array<T> {
 
 // --- Iterator Implementations ---
 
-pub struct ArrayIterator<'a, T: AnyCompatible + Clone> {
+pub struct ArrayIterator<'a, T: ContainerElement + Clone> {
     array: &'a Array<T>,
     index: usize,
     len: usize,
 }
 
-impl<'a, T: AnyCompatible + Clone> Iterator for ArrayIterator<'a, T> {
+impl<'a, T: ContainerElement + Clone> Iterator for ArrayIterator<'a, T> {
     type Item = T;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -214,7 +216,7 @@ impl<'a, T: AnyCompatible + Clone> Iterator for ArrayIterator<'a, T> {
     }
 }
 
-impl<'a, T: AnyCompatible + Clone> IntoIterator for &'a Array<T> {
+impl<'a, T: ContainerElement + Clone> IntoIterator for &'a Array<T> {
     type Item = T;
     type IntoIter = ArrayIterator<'a, T>;
 
@@ -223,7 +225,7 @@ impl<'a, T: AnyCompatible + Clone> IntoIterator for &'a Array<T> {
     }
 }
 
-impl<T: AnyCompatible + Clone> FromIterator<T> for Array<T> {
+impl<T: ContainerElement + Clone> FromIterator<T> for Array<T> {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         let items: Vec<T> = iter.into_iter().collect();
         Self::new(items)
@@ -234,10 +236,10 @@ impl<T: AnyCompatible + Clone> FromIterator<T> for Array<T> {
 
 unsafe impl<T> AnyCompatible for Array<T>
 where
-    T: AnyCompatible + Clone + 'static,
+    T: ContainerElement + Clone,
 {
     fn type_str() -> String {
-        format!("Array<{}>", T::type_str())
+        format!("Array<{}>", T::container_type_str())
     }
 
     unsafe fn check_any_strict(data: &TVMFFIAny) -> bool {
@@ -245,15 +247,11 @@ where
             return false;
         }
 
-        if std::any::TypeId::of::<T>() == std::any::TypeId::of::<Any>() {
-            return true;
-        }
-
         let container = &*(data.data_union.v_obj as *const ArrayObj);
         let base_ptr = container.data as *const TVMFFIAny;
         for i in 0..container.size {
             let elem_any = &*base_ptr.add(i as usize);
-            if !T::check_any_strict(elem_any) {
+            if !T::container_check_any_strict(elem_any) {
                 return false;
             }
         }
@@ -294,8 +292,10 @@ where
         }
 
         // Fast path: if types match exactly, we can just copy the reference.
-        if Self::check_any_strict(data) {
-            return Ok(Self::copy_from_any_view_after_check(data));
+        if <Self as AnyCompatible>::check_any_strict(data) {
+            return Ok(<Self as AnyCompatible>::copy_from_any_view_after_check(
+                data,
+            ));
         }
 
         // Slow path: try to convert element by element.
@@ -305,7 +305,7 @@ where
 
         for i in 0..container.size {
             let any_v = &*base_ptr.add(i as usize);
-            if let Ok(item) = T::try_cast_from_any_view(any_v) {
+            if let Ok(item) = T::container_try_cast_from_any_view(any_v) {
                 items.push(item);
             } else {
                 return Err(());
@@ -318,7 +318,7 @@ where
 
 impl<T> TryFrom<Any> for Array<T>
 where
-    T: AnyCompatible + Clone + 'static,
+    T: ContainerElement + Clone,
 {
     type Error = crate::error::Error;
 
@@ -330,7 +330,7 @@ where
 
 impl<'a, T> TryFrom<AnyView<'a>> for Array<T>
 where
-    T: AnyCompatible + Clone + 'static,
+    T: ContainerElement + Clone,
 {
     type Error = crate::error::Error;
 

@@ -51,6 +51,7 @@ class AnyView {
   TVMFFIAny data_;
   // Any can see AnyView
   friend class Any;
+  friend struct details::AnyUnsafe;
 
  public:
   // NOTE: the following functions use style
@@ -72,7 +73,7 @@ class AnyView {
   /*! \return the internal type index */
   TVM_FFI_INLINE int32_t type_index() const noexcept { return data_.type_index; }
   /*! \brief Default constructor */
-  AnyView() {
+  TVM_FFI_INLINE AnyView() {
     data_.type_index = TypeIndex::kTVMFFINone;
     data_.zero_padding = 0;
     data_.v_int64 = 0;
@@ -92,7 +93,7 @@ class AnyView {
    * \param other The value to convert from.
    */
   template <typename T, typename = std::enable_if_t<TypeTraits<T>::convert_enabled>>
-  AnyView(const T& other) {  // NOLINT(*)
+  TVM_FFI_INLINE AnyView(const T& other) {  // NOLINT(*)
     TypeTraits<T>::CopyToAnyView(other, &data_);
   }
   /*!
@@ -257,7 +258,7 @@ class Any {
   /*!
    * \brief Default constructor
    */
-  Any() {
+  TVM_FFI_INLINE Any() {
     data_.type_index = TypeIndex::kTVMFFINone;
     data_.zero_padding = 0;
     data_.v_int64 = 0;
@@ -265,12 +266,12 @@ class Any {
   /*!
    * \brief Destructor
    */
-  ~Any() { this->reset(); }
+  TVM_FFI_INLINE ~Any() { this->reset(); }
   /*!
    * \brief Constructor from another Any
    * \param other The other Any
    */
-  Any(const Any& other) : data_(other.data_) {
+  TVM_FFI_INLINE Any(const Any& other) : data_(other.data_) {
     if (data_.type_index >= TypeIndex::kTVMFFIStaticObjectBegin) {
       details::ObjectUnsafe::IncRefObjectHandle(data_.v_obj);
     }
@@ -279,7 +280,7 @@ class Any {
    * \brief Move constructor from another Any
    * \param other The other Any
    */
-  Any(Any&& other) noexcept : data_(other.data_) {
+  TVM_FFI_INLINE Any(Any&& other) noexcept : data_(other.data_) {
     other.data_.type_index = TypeIndex::kTVMFFINone;
     other.data_.zero_padding = 0;
     other.data_.v_int64 = 0;
@@ -608,7 +609,24 @@ struct AnyUnsafe : public ObjectUnsafe {
 
   template <typename T>
   TVM_FFI_INLINE static bool CheckAnyStrict(const Any& ref) {
-    return TypeTraits<T>::CheckAnyStrict(&(ref.data_));
+    if constexpr (!std::is_same_v<T, Any>) {
+      return TypeTraits<T>::CheckAnyStrict(&(ref.data_));
+    } else {
+      // Any holds any value, so there is nothing to check against.
+      return true;
+    }
+  }
+
+  // Borrowed form: a caller checking a field it does not own passes AnyView(field), which
+  // costs no refcount where CheckAnyStrict would build a temporary Any. A distinct name, so
+  // an ObjectRef argument never has two conversions to choose from.
+  template <typename T>
+  TVM_FFI_INLINE static bool CheckAnyViewStrict(const AnyView& ref) {
+    if constexpr (!std::is_same_v<T, Any>) {
+      return TypeTraits<T>::CheckAnyStrict(&(ref.data_));
+    } else {
+      return true;
+    }
   }
 
   template <typename T>
@@ -629,8 +647,14 @@ struct AnyUnsafe : public ObjectUnsafe {
     }
   }
 
-  TVM_FFI_INLINE static Object* ObjectPtrFromAnyAfterCheck(const Any& ref) {
-    return reinterpret_cast<Object*>(ref.data_.v_obj);
+  template <typename TObject = Object>
+  TVM_FFI_INLINE static TObject* RawObjectPtrFromAnyAfterCheck(const Any& ref) {
+    return ObjectUnsafe::RawObjectPtrFromUnowned<TObject>(ref.data_.v_obj);
+  }
+
+  template <typename TObject = Object>
+  TVM_FFI_INLINE static TObject* RawObjectPtrFromAnyViewAfterCheck(const AnyView& ref) {
+    return ObjectUnsafe::RawObjectPtrFromUnowned<TObject>(ref.data_.v_obj);
   }
 
   TVM_FFI_INLINE static const TVMFFIAny* TVMFFIAnyPtrFromAny(const Any& ref) {

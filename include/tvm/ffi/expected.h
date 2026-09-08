@@ -43,6 +43,15 @@ class Unexpected {
                 "Unexpected<E> requires E to be Error or a subclass of Error.");
 
  public:
+  // Special members are explicitly inlined to enable move cleanup optimizations
+  TVM_FFI_INLINE ~Unexpected() = default;
+  /// \cond Doxygen_Suppress
+  TVM_FFI_INLINE Unexpected(const Unexpected&) = default;
+  TVM_FFI_INLINE Unexpected(Unexpected&&) noexcept = default;
+  /// \endcond
+  TVM_FFI_INLINE Unexpected& operator=(const Unexpected&) = default;
+  TVM_FFI_INLINE Unexpected& operator=(Unexpected&&) noexcept = default;
+
   /*! \brief Construct from an error value. */
   explicit Unexpected(E error) : error_(std::move(error)) {}
 
@@ -64,9 +73,24 @@ template <typename E>
 Unexpected(E) -> Unexpected<E>;
 #endif
 
+template <typename T>
+class Expected;
+
 namespace details {
 
 struct ExpectedUnsafe;
+
+template <typename T>
+inline constexpr bool is_expected_v = false;
+
+template <typename T>
+inline constexpr bool is_expected_v<Expected<T>> = true;
+
+template <typename T>
+inline constexpr bool is_unexpected_v = false;
+
+template <typename E>
+inline constexpr bool is_unexpected_v<Unexpected<E>> = true;
 
 }  // namespace details
 
@@ -104,24 +128,79 @@ class Expected {
       "Expected with a cv-qualified void success type is not allowed. Use Expected<void>.");
   static_assert(!std::is_same_v<T, Error>, "Expected<Error> is not allowed. Use Error directly.");
 
+  // Special members are explicitly inlined to enable move cleanup optimizations
+  TVM_FFI_INLINE ~Expected() = default;
+  /// \cond Doxygen_Suppress
+  TVM_FFI_INLINE Expected(const Expected&) = default;
+  TVM_FFI_INLINE Expected(Expected&&) noexcept = default;
+  /// \endcond
+  TVM_FFI_INLINE Expected& operator=(const Expected&) = default;
+  TVM_FFI_INLINE Expected& operator=(Expected&&) noexcept = default;
+
   /*!
    * \brief Implicit constructor from a success value.
    * \param value The success value.
    */
   // NOLINTNEXTLINE(google-explicit-constructor,runtime/explicit)
-  Expected(T value) : data_(Any(std::move(value))) {}
+  TVM_FFI_INLINE Expected(T value) : data_(Any(std::move(value))) {}
+
+  /*!
+   * \brief Implicit constructor from a different success value type.
+   * \tparam U Source type implicitly convertible to ``T``.
+   * \param value The success value to convert.
+   */
+  // Excludes Error, Unexpected, and Expected deliberately: Any subsumes all three, so without
+  // these an Expected<Any> built from an error would store it as a success value. The Expected
+  // exclusion also keeps this overload disjoint from Expected(Expected<U>) instead of relying on
+  // partial ordering to choose between two paths that must agree.
+  //
+  // std::expected admits constructible sources and uses C++20 explicit(bool) to separate its
+  // implicit subset. Under C++17, convertibility keeps exactly that implicit subset and drops only
+  // explicit-only conversions; is_constructible plus explicit(bool) can extend it after an upgrade.
+  template <typename U, typename = std::enable_if_t<!details::is_expected_v<std::decay_t<U>> &&
+                                                    !details::is_unexpected_v<std::decay_t<U>> &&
+                                                    !std::is_base_of_v<Error, std::decay_t<U>> &&
+                                                    std::is_convertible_v<U, T>>>
+  // NOLINTNEXTLINE(google-explicit-constructor,runtime/explicit)
+  TVM_FFI_INLINE Expected(U&& value) : data_(Any(T(std::forward<U>(value)))) {}
+
+  /*!
+   * \brief Implicit converting constructor from another Expected success type.
+   * \tparam U Source success type whose storage is subsumed by or implicitly convertible to ``T``.
+   * \param other The Expected value to convert.
+   */
+  // Subsumption belongs only here: this source already contains a materialized U or Error whose
+  // representation may be reused. Applying type_subsumes_v<Any, U> to the bare-value constructor
+  // would accept every U, including types that cannot be materialized as Any, and fail in its body.
+  // Taking by value gives a local to move from, copying an lvalue source and moving an rvalue. The
+  // implicit copy constructor still wins for Expected<T> itself by the non-template tiebreaker.
+  template <typename U,
+            typename = std::enable_if_t<!std::is_void_v<U> &&
+                                        (type_subsumes_v<T, U> || std::is_convertible_v<U, T>)>>
+  // NOLINTNEXTLINE(google-explicit-constructor,runtime/explicit)
+  TVM_FFI_INLINE Expected(Expected<U> other) {
+    if constexpr (type_subsumes_v<T, U>) {
+      // data_ holds a T or an Error. Subsumption proves the source representation already
+      // satisfies that invariant, so the Any moves without inspecting its state. Do not make
+      // this unconditional: value() reads back through MoveFromAnyAfterCheck<T>, whose check is
+      // the success/error state, not the type.
+      data_ = std::move(other.data_);
+    } else {
+      data_ = other.is_err() ? Any(std::move(other).error()) : Any(T(std::move(other).value()));
+    }
+  }
 
   /*!
    * \brief Implicit constructor from an error.
    * \param error The error value.
    */
   // NOLINTNEXTLINE(google-explicit-constructor,runtime/explicit)
-  Expected(Error error) : data_(Any(std::move(error))) {}
+  TVM_FFI_INLINE Expected(Error error) : data_(Any(std::move(error))) {}
 
   /*! \brief Implicit constructor from an Unexpected wrapper. */
   template <typename E, typename = std::enable_if_t<std::is_base_of_v<Error, std::remove_cv_t<E>>>>
   // NOLINTNEXTLINE(google-explicit-constructor,runtime/explicit)
-  Expected(Unexpected<E> unexpected) : data_(Any(std::move(unexpected).error())) {}
+  TVM_FFI_INLINE Expected(Unexpected<E> unexpected) : data_(Any(std::move(unexpected).error())) {}
 
   /*! \brief Return the raw stored type index. */
   TVM_FFI_INLINE int32_t type_index() const noexcept { return data_.type_index(); }
@@ -199,6 +278,8 @@ class Expected {
   }
 
  private:
+  template <typename>
+  friend class Expected;
   Expected() = default;
 
   friend struct details::ExpectedUnsafe;
@@ -216,6 +297,15 @@ class Expected {
 template <>
 class Expected<void> {
  public:
+  // Special members are explicitly inlined to enable move cleanup optimizations
+  TVM_FFI_INLINE ~Expected() = default;
+  /// \cond Doxygen_Suppress
+  TVM_FFI_INLINE Expected(const Expected&) = default;
+  TVM_FFI_INLINE Expected(Expected&&) noexcept = default;
+  /// \endcond
+  TVM_FFI_INLINE Expected& operator=(const Expected&) = default;
+  TVM_FFI_INLINE Expected& operator=(Expected&&) noexcept = default;
+
   /*! \brief Construct a successful Expected<void>. */
   Expected() = default;
 
@@ -224,12 +314,12 @@ class Expected<void> {
    * \param error The error value.
    */
   // NOLINTNEXTLINE(google-explicit-constructor,runtime/explicit)
-  Expected(Error error) : data_(Any(std::move(error))) {}
+  TVM_FFI_INLINE Expected(Error error) : data_(Any(std::move(error))) {}
 
   /*! \brief Implicit constructor from an Unexpected wrapper. */
   template <typename E, typename = std::enable_if_t<std::is_base_of_v<Error, std::remove_cv_t<E>>>>
   // NOLINTNEXTLINE(google-explicit-constructor,runtime/explicit)
-  Expected(Unexpected<E> unexpected) : data_(Any(std::move(unexpected).error())) {}
+  TVM_FFI_INLINE Expected(Unexpected<E> unexpected) : data_(Any(std::move(unexpected).error())) {}
 
   /*! \brief Return the raw stored type index. */
   TVM_FFI_INLINE int32_t type_index() const noexcept { return data_.type_index(); }
@@ -317,10 +407,25 @@ struct ExpectedUnsafe {
   }
 
   /*!
-   * \brief Return the underlying Any storage.
+   * \brief Return the underlying Any storage as an xvalue; by-value initialization moves from it.
    * \tparam T The Expected success type.
-   * \param result The Expected value to inspect.
-   * \return Const reference to the raw Any storage.
+   * \param result The Expected value whose storage will be exposed as an xvalue.
+   * \return An xvalue reference to the underlying Any storage.
+   *
+   * \note The const overload returns ``const Any&``, which remains const under ``std::move`` and
+   *       therefore selects the copy constructor. The assign-or-return macro selects this overload
+   *       from a non-const result, so its outer ``std::move`` only makes the move intent explicit.
+   */
+  template <typename T>
+  TVM_FFI_INLINE static Any&& GetData(Expected<T>& result) noexcept {
+    return std::move(result.data_);
+  }
+
+  /*!
+   * \brief Return a const reference to the underlying Any storage.
+   * \tparam T The Expected success type.
+   * \param result The Expected value whose storage will be viewed.
+   * \return A const reference to the underlying Any storage.
    */
   template <typename T>
   TVM_FFI_INLINE static const Any& GetData(const Expected<T>& result) noexcept {
@@ -351,6 +456,35 @@ struct ExpectedUnsafe {
       throw AnyUnsafe::CopyFromAnyViewAfterCheck<Error>(data);
     }
   }
+};
+
+/*!
+ * \brief Return proxy used by early-return macros in raw or typed functions.
+ * \tparam T The success type, fixed when the proxy stores its ``Expected<T>``.
+ *
+ * A return statement selects either the raw ``TVMFFIAny`` conversion used by
+ * hooks or the same ``Expected<T>`` type used by typed helpers. Both
+ * conversions are rvalue-qualified because handing off the stored payload is
+ * a single move; an lvalue helper cannot accidentally transfer it twice. As
+ * with other moved-from values, deliberately converting ``std::move(helper)``
+ * twice remains caller error.
+ */
+template <typename T>
+class MaybeReturnHelper {
+ public:
+  TVM_FFI_INLINE explicit MaybeReturnHelper(Expected<T>&& value) noexcept
+      : value_(std::move(value)) {}
+
+  // NOLINTNEXTLINE(google-explicit-constructor,runtime/explicit)
+  TVM_FFI_INLINE operator TVMFFIAny() && noexcept {
+    return ExpectedUnsafe::MoveToTVMFFIAny(std::move(value_));
+  }
+
+  // NOLINTNEXTLINE(google-explicit-constructor,runtime/explicit)
+  TVM_FFI_INLINE operator Expected<T>() && noexcept { return std::move(value_); }
+
+ private:
+  Expected<T> value_;
 };
 
 }  // namespace details

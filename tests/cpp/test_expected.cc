@@ -95,6 +95,35 @@ TEST(Expected, ObjectRefType) {
   EXPECT_EQ(result.value()->value, 123);
 }
 
+TEST(Expected, ImplicitConvertingConstructor) {
+  static_assert(std::is_convertible_v<String, Expected<Any>>);
+  static_assert(!std::is_convertible_v<String, Expected<int>>);
+  static_assert(std::is_assignable_v<Expected<Any>&, String>);
+  static_assert(std::is_convertible_v<Expected<int>, Expected<double>>);
+  static_assert(std::is_convertible_v<Expected<String>, Expected<Any>>);
+  static_assert(!std::is_convertible_v<Expected<void>, Expected<Any>>);
+
+  // Non-subsuming success types require value conversion.
+  Expected<double> success = Expected<int>(42);
+  ASSERT_TRUE(success.is_ok());
+  EXPECT_EQ(success.value(), 42.0);
+
+  Expected<double> failure = Expected<int>(Error("ValueError", "conversion failed", ""));
+  ASSERT_TRUE(failure.is_err());
+  EXPECT_EQ(failure.error().kind(), "ValueError");
+  EXPECT_EQ(failure.error().message(), "conversion failed");
+
+  // Any subsumes String storage, so both success and error states move without inspection.
+  Expected<Any> subsumed_success = Expected<String>(String("hello"));
+  ASSERT_TRUE(subsumed_success.is_ok());
+  EXPECT_EQ(subsumed_success.value().cast<String>(), "hello");
+
+  Expected<Any> subsumed_failure = Expected<String>(Error("TypeError", "subsumed error", ""));
+  ASSERT_TRUE(subsumed_failure.is_err());
+  EXPECT_EQ(subsumed_failure.error().kind(), "TypeError");
+  EXPECT_EQ(subsumed_failure.error().message(), "subsumed error");
+}
+
 // Test with String type
 TEST(Expected, StringType) {
   Expected<String> result = String("hello");

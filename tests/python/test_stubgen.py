@@ -23,12 +23,13 @@ from pathlib import Path
 import pytest
 import tvm_ffi.stub.cli as stub_cli
 from tvm_ffi import Object, method
-from tvm_ffi.core import TypeSchema
+from tvm_ffi.core import MISSING, TypeSchema, _lookup_or_register_type_info_from_type_key
 from tvm_ffi.dataclasses import py_class
 from tvm_ffi.stub import consts as C
-from tvm_ffi.stub.cli import _stage_2, _stage_3
-from tvm_ffi.stub.file_utils import CodeBlock, FileInfo
-from tvm_ffi.stub.generator import get_generator
+from tvm_ffi.stub.cli import _stage_1, _stage_2, _stage_3
+from tvm_ffi.stub.file_utils import CodeBlock, FileInfo, collect_files, syntax_for
+from tvm_ffi.stub.generator import generator_names, get_generator
+from tvm_ffi.stub.python_generator import PythonGenerator
 from tvm_ffi.stub.python_generator import consts as PC
 from tvm_ffi.stub.python_generator.codegen import (
     generate_python_all,
@@ -52,6 +53,12 @@ from tvm_ffi.stub.utils import (
     NamedTypeSchema,
     ObjectInfo,
     Options,
+)
+from tvm_ffi.testing import (
+    TestObjectBase,
+    _TestCxxClassBase,
+    _TestCxxClassDerived,
+    _TestCxxClassDerivedDerived,
 )
 
 _counter = itertools.count()
@@ -82,7 +89,6 @@ def test_codeblock_from_begin_line_variants() -> None:
         (f"{C.PYTHON_SYNTAX.begin} global/demo", "global", ("demo", "")),
         (f"{C.PYTHON_SYNTAX.begin} global/demo@.registry", "global", ("demo", ".registry")),
         (f"{C.PYTHON_SYNTAX.begin} object/demo.TypeBase", "object", "demo.TypeBase"),
-        (f"{C.PYTHON_SYNTAX.begin} ty-map/custom", "ty-map", "custom"),
         (f"{C.PYTHON_SYNTAX.begin} import-section", "import-section", ""),
     ]
     for lineno, (line, kind, param) in enumerate(cases, start=1):
@@ -97,8 +103,8 @@ def test_codeblock_from_begin_line_variants() -> None:
 def test_codeblock_from_begin_line_ty_map_and_unknown() -> None:
     line = f"{C.PYTHON_SYNTAX.ty_map} custom -> mapped"
     block = CodeBlock.from_begin_line(5, line, C.PYTHON_SYNTAX)
-    assert block.kind == "ty-map"
-    assert block.param == "custom -> mapped"
+    assert block.kind == "directive"
+    assert block.param == ("ty-map", "custom -> mapped")
     assert block.lineno_start == 5
     assert block.lineno_end == 5
 
@@ -147,8 +153,8 @@ def test_fileinfo_from_file_parses_blocks(tmp_path: Path) -> None:
         C.PYTHON_SYNTAX.end,
     ]
 
-    assert ty_map.kind == "ty-map"
-    assert ty_map.param == "x -> y"
+    assert ty_map.kind == "directive"
+    assert ty_map.param == ("ty-map", "x -> y")
     assert ty_map.lineno_start == ty_map.lineno_end == 5
     assert ty_map.lines == [f"{C.PYTHON_SYNTAX.ty_map} x -> y"]
 
@@ -798,8 +804,8 @@ def test_stage_3_adds_LIB_when_load_lib_imported(tmp_path: Path) -> None:
         lines=[f"{C.PYTHON_SYNTAX.begin} global/testing", C.PYTHON_SYNTAX.end],
     )
     import_obj_block = CodeBlock(
-        kind="import-object",
-        param=("tvm_ffi.libinfo.load_lib_module", "False", "_FFI_LOAD_LIB"),
+        kind="directive",
+        param=("import-object", "tvm_ffi.libinfo.load_lib_module;False;_FFI_LOAD_LIB"),
         lineno_start=1,
         lineno_end=1,
         lines=[
@@ -964,3 +970,240 @@ def test_stage_2_filters_prefix_and_marks_root(
     sub_text = sub_api.read_text(encoding="utf-8")
     assert 'LIB = _FFI_LOAD_LIB("demo-pkg", "demo_shared")' in root_text
     assert "LIB =" not in sub_text
+
+
+def test_objectinfo_from_type_info_layout_facts() -> None:
+    """Reflected size/alignment/offset/default facts reach ``ObjectInfo`` unchanged."""
+    base = ObjectInfo.from_type_info(_TestCxxClassBase.__tvm_ffi_type_info__)  # ty: ignore[unresolved-attribute]
+    derived = ObjectInfo.from_type_info(_TestCxxClassDerived.__tvm_ffi_type_info__)  # ty: ignore[unresolved-attribute]
+    dd = ObjectInfo.from_type_info(_TestCxxClassDerivedDerived.__tvm_ffi_type_info__)  # ty: ignore[unresolved-attribute]
+
+    assert base.ancestors == ["ffi.Object"]
+    assert derived.ancestors == ["ffi.Object", "testing.TestCxxClassBase"]
+    assert dd.ancestors == [
+        "ffi.Object",
+        "testing.TestCxxClassBase",
+        "testing.TestCxxClassDerived",
+    ]
+    assert dd.parent_type_key == dd.ancestors[-1]
+
+    header = 24  # sizeof(TVMFFIObject): the fields of a root type start right after it
+    v_i64, v_i32 = base.fields
+    assert (v_i64.size, v_i64.alignment, v_i64.offset) == (8, 8, header)
+    assert (v_i32.size, v_i32.alignment, v_i32.offset) == (4, 4, header + 8)
+    assert base.total_size == 40  # 36 bytes of data, padded to the 8-byte alignment
+    v_f64, v_f32 = derived.fields
+    assert v_f64.offset == base.total_size  # a derived type's fields follow the parent's size
+    assert (v_f32.size, v_f32.alignment, v_f32.offset) == (4, 4, 48)
+    assert derived.total_size == 56
+    v_str, v_bool = dd.fields
+    assert (v_str.size, v_str.alignment, v_str.offset) == (16, 8, derived.total_size)
+    assert (v_bool.size, v_bool.alignment, v_bool.offset) == (1, 1, 72)
+    assert dd.total_size == 80
+
+    assert v_f64.default is MISSING
+    assert not v_f64.default_is_factory
+    assert v_f32.default == 8.0
+    assert v_str.default == "default"
+    assert all(f.structural_eq is None for f in (*base.fields, *derived.fields, *dd.fields))
+    assert not v_i64.frozen
+
+    # `def_ro` fields are frozen; `def_rw` fields with `default_value` keep their default.
+    tob_type_info = TestObjectBase.__tvm_ffi_type_info__  # ty: ignore[unresolved-attribute]
+    tob = {f.name: f for f in ObjectInfo.from_type_info(tob_type_info).fields}
+    assert tob["v_f64"].frozen
+    assert not tob["v_i64"].frozen
+    assert tob["v_i64"].default == 10
+
+    # The auto-init parameter list carries the same facts, parent fields first.
+    assert [f.schema.offset for f in dd.init_fields] == [24, 32, 40, 48, 56, 72]
+
+
+def test_objectinfo_total_size_requires_own_metadata() -> None:
+    """A type without its own metadata inherits a meaningless size, so it reports ``None``."""
+    root = ObjectInfo.from_type_info(_lookup_or_register_type_info_from_type_key("ffi.Object"))
+    assert root.total_size == 24
+    assert root.ancestors == []
+    assert root.parent_type_key is None
+    func = ObjectInfo.from_type_info(_lookup_or_register_type_info_from_type_key("ffi.Function"))
+    assert func.total_size is None
+    assert func.ancestors == ["ffi.Object"]
+
+
+def test_objectinfo_is_final() -> None:
+    """``ObjectDef`` publishes finality; a type registered without one publishes none."""
+    # A registered `False` must stay distinguishable from an unregistered attribute.
+    base = ObjectInfo.from_type_info(_TestCxxClassBase.__tvm_ffi_type_info__)  # ty: ignore[unresolved-attribute]
+    assert base.is_final is False
+
+    derived = ObjectInfo.from_type_info(
+        _lookup_or_register_type_info_from_type_key("testing.TestObjectDerived")
+    )
+    assert derived.is_final is True
+
+    # `ffi.Object` is registered without an `ObjectDef`, so it claims nothing.
+    root = ObjectInfo.from_type_info(_lookup_or_register_type_info_from_type_key("ffi.Object"))
+    assert root.is_final is None
+
+
+def test_named_type_schema_keeps_positional_signature() -> None:
+    """Synthetic schemas (function params, tests) carry no layout facts."""
+    schema = NamedTypeSchema("x", TypeSchema("int"))
+    assert (schema.size, schema.alignment, schema.offset) == (None, None, None)
+    assert schema.default is MISSING
+    assert not schema.default_is_factory
+    assert schema.structural_eq is None
+    assert not schema.frozen
+
+
+def test_rust_marker_syntax_parses_rs_file(tmp_path: Path) -> None:
+    """``//`` markers in a ``.rs`` file parse into the same block kinds as ``#`` markers."""
+    rs = tmp_path / "mod.rs"
+    rs.write_text(
+        "\n".join(
+            [
+                f"{C.RUST_SYNTAX.begin} object/demo.Foo",
+                "pub struct Foo;",
+                C.RUST_SYNTAX.end,
+                f"{C.RUST_SYNTAX.ty_map} a -> b",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    assert syntax_for(rs) is C.RUST_SYNTAX
+    info = FileInfo.from_file(rs)
+    assert info is not None
+    assert info.syntax is C.RUST_SYNTAX
+    assert [block.kind for block in info.code_blocks] == ["object", "directive"]
+    assert info.code_blocks[0].param == "demo.Foo"
+    assert info.code_blocks[1].param == ("ty-map", "a -> b")
+    assert info.code_blocks[0].lines[1] == "pub struct Foo;"
+
+    # Python markers are plain text inside a Rust file.
+    py_markers = tmp_path / "other.rs"
+    py_markers.write_text(
+        f"{C.PYTHON_SYNTAX.begin} object/demo.Foo\n{C.PYTHON_SYNTAX.end}\n", encoding="utf-8"
+    )
+    assert FileInfo.from_file(py_markers) is None
+
+
+def test_collect_files_filters_by_generator_exts(tmp_path: Path) -> None:
+    """Directory scans visit only the active generator's extensions; explicit files always."""
+    py = tmp_path / "a.py"
+    py.write_text(f"{C.PYTHON_SYNTAX.begin} import-section\n{C.PYTHON_SYNTAX.end}\n")
+    rs = tmp_path / "b.rs"
+    rs.write_text(f"{C.RUST_SYNTAX.begin} import-section\n{C.RUST_SYNTAX.end}\n")
+
+    python = get_generator("python")
+    assert python.source_exts == frozenset({".py", ".pyi"})
+    assert [f.path for f in collect_files([tmp_path], python.source_exts)] == [py.resolve()]
+    assert [f.path for f in collect_files([rs], python.source_exts)] == [rs.resolve()]
+    both = collect_files([tmp_path], {".py", ".RS"})
+    assert {f.path for f in both} == {py.resolve(), rs.resolve()}
+
+
+def test_generator_registry_names() -> None:
+    """``--target`` choices follow the registered generators."""
+    assert generator_names() == ["python", "rust"]
+    with pytest.raises(ValueError, match="Known generators: python, rust"):
+        get_generator("zig")
+
+
+def test_codeblock_from_begin_line_directive() -> None:
+    """``<comment> tvm-ffi-stubgen(<name>): <payload>`` parses into a one-line directive block."""
+    for syntax in (C.PYTHON_SYNTAX, C.RUST_SYNTAX):
+        block = CodeBlock.from_begin_line(7, f"{syntax.directive('field')} a.B.c -> D ", syntax)
+        assert block.kind == "directive"
+        assert block.param == ("field", "a.B.c -> D")
+        assert (block.lineno_start, block.lineno_end) == (7, 7)
+        assert block.lines == []
+    empty = CodeBlock.from_begin_line(1, C.PYTHON_SYNTAX.directive("opaque"), C.PYTHON_SYNTAX)
+    assert empty.param == ("opaque", "")
+
+    # The `name):` shape is required; anything else stays an unknown marker.
+    for line in (f"{C.PYTHON_SYNTAX.prefix}field)", f"{C.PYTHON_SYNTAX.prefix}two words): x"):
+        with pytest.raises(ValueError, match="Unknown stub type at line 3"):
+            CodeBlock.from_begin_line(3, line, C.PYTHON_SYNTAX)
+
+
+def test_fileinfo_from_file_keeps_directive_lines(tmp_path: Path) -> None:
+    """A directive is parsed as its own block and written back untouched."""
+    src = tmp_path / "mod.rs"
+    lines = [
+        "  // tvm-ffi-stubgen(nullable):  ir.Expr.span",
+        f"{C.RUST_SYNTAX.begin} object/demo.Foo",
+        C.RUST_SYNTAX.end,
+        f"{C.RUST_SYNTAX.prefix}bogus)",
+    ]
+    src.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="Unknown stub type at line 4"):
+        FileInfo.from_file(src)
+
+    src.write_text("\n".join(lines[:3]) + "\n", encoding="utf-8")
+    info = FileInfo.from_file(src)
+    assert info is not None
+    assert [block.kind for block in info.code_blocks] == ["directive", "object"]
+    assert info.code_blocks[0].param == ("nullable", "ir.Expr.span")
+    assert info.code_blocks[0].lines == [lines[0]]
+    assert info.update(verbose=False, dry_run=False) is False
+    assert src.read_text(encoding="utf-8") == "\n".join(lines[:3]) + "\n"
+
+
+def test_stage_3_routes_directives_by_generator_declaration(tmp_path: Path) -> None:
+    """Pipeline-owned names stay in the pipeline; declared names reach the generator."""
+    path = tmp_path / "demo.py"
+    ty_map_directive = CodeBlock(
+        kind="directive",
+        param=("ty-map", "demo.Foo -> mapped.Foo"),
+        lineno_start=1,
+        lineno_end=1,
+        lines=[f"{C.PYTHON_SYNTAX.ty_map} demo.Foo -> mapped.Foo"],
+    )
+    directive = CodeBlock(
+        kind="directive",
+        param=("field", "demo.Foo.x -> Bar"),
+        lineno_start=2,
+        lineno_end=2,
+        lines=[f"{C.PYTHON_SYNTAX.directive('field')} demo.Foo.x -> Bar"],
+    )
+    all_block = CodeBlock(
+        kind="__all__",
+        param="",
+        lineno_start=3,
+        lineno_end=4,
+        lines=[f"{C.PYTHON_SYNTAX.begin} __all__", C.PYTHON_SYNTAX.end],
+    )
+    blocks = (ty_map_directive, directive, all_block)
+
+    def _file_info() -> FileInfo:
+        return FileInfo(
+            path=path,
+            lines=tuple(line for block in blocks for line in block.lines),
+            code_blocks=list(blocks),
+            syntax=C.PYTHON_SYNTAX,
+        )
+
+    # `ty-map` is pipeline-owned: `_stage_1` consumes it and `_stage_3` skips it.
+    assert "ty-map" in C.PIPELINE_DIRECTIVE_KINDS
+    ty_map: dict[str, str] = {}
+    _stage_1(_file_info(), ty_map)
+    assert ty_map == {"demo.Foo": "mapped.Foo"}
+
+    # The Python generator does not declare `field`, so the name is unknown to it.
+    python = get_generator("python")
+    assert python.directive_kinds == frozenset({"import-object"})
+    with pytest.raises(ValueError, match="Unknown directive `field` at line 2"):
+        _stage_3(_file_info(), Options(dry_run=True), _default_ty_map(), {}, python)
+
+    seen: list[tuple[object, str, str, int]] = []
+
+    class FieldAware(PythonGenerator):
+        directive_kinds = frozenset({"field"})
+
+        def add_directive(self, imports: object, name: str, payload: str, lineno: int) -> None:
+            seen.append((imports, name, payload, lineno))
+
+    _stage_3(_file_info(), Options(dry_run=True), _default_ty_map(), {}, FieldAware())
+    assert [entry[1:] for entry in seen] == [("field", "demo.Foo.x -> Bar", 2)]
+    assert isinstance(seen[0][0], type(python.new_imports()))

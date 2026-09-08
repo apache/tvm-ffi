@@ -24,6 +24,8 @@ import warnings
 from collections.abc import Collection, Sequence
 from typing import Any, Callable, Literal, TypeVar, overload
 
+from typing_extensions import get_annotations
+
 from . import core
 from .core import Function, TypeInfo
 
@@ -485,7 +487,7 @@ def _warn_missing_field_annotations(cls: type, type_info: TypeInfo, *, stackleve
     reflected_names = {field.name for field in type_info.fields}
     if not reflected_names:
         return
-    own_annotations = cls.__dict__.get("__annotations__", {})
+    own_annotations = get_annotations(cls)
     missing = sorted(reflected_names - set(own_annotations))
     if missing:
         missing_str = ", ".join(missing)

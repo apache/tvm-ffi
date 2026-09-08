@@ -74,31 +74,56 @@ Expected<Optional<VisitInterrupt>> StructuralWalkExpected(
   };
 
   if (order == static_cast<int>(WalkOrder::kPreOrder)) {
-    using Visitor = StructuralWalkCallbackVisitorObj<WalkOrder::kPreOrder, decltype(dispatch)>;
+    using Visitor =
+        StructuralWalkEngine<StructuralVisitorObj, WalkOrder::kPreOrder, decltype(dispatch)>;
     StructuralVisitor visitor(make_object<Visitor>(std::move(dispatch)));
     return visitor->VisitExpected(root);
   } else {
-    using Visitor = StructuralWalkCallbackVisitorObj<WalkOrder::kPostOrder, decltype(dispatch)>;
+    using Visitor =
+        StructuralWalkEngine<StructuralVisitorObj, WalkOrder::kPostOrder, decltype(dispatch)>;
     StructuralVisitor visitor(make_object<Visitor>(std::move(dispatch)));
     return visitor->VisitExpected(root);
   }
 }
 
-/*! \brief Visit entries in a sequence container. */
-TVMFFIAny VisitSeqContainer(StructuralVisitorObj* visitor, const SeqBaseObj* seq) noexcept {
-  for (const Any& item : *seq) {
-    TVM_FFI_S_VISIT_MAYBE_EARLY_RETURN(visitor->VisitExpected(item));
-  }
-  return ExpectedUnsafe::MoveToTVMFFIAny(Expected<Optional<VisitInterrupt>>(std::nullopt));
+/*!
+ * \brief Runtime callback-driven structural visit.
+ * \param root The root value to visit.
+ * \param callbacks Runtime callback entries of ``(type_index, ffi::Function)`` invoked as
+ *                  ``callback(value, visitor)``.
+ * \return Expected interrupt state. An error means traversal failed.
+ */
+Expected<Optional<VisitInterrupt>> StructuralVisitExpected(
+    AnyView root, const Array<Tuple<int32_t, Function>>& callbacks) noexcept {
+  auto dispatch = [callbacks](AnyView value,
+                              StructuralVisitorObj* visitor) -> Expected<Optional<VisitInterrupt>> {
+    for (const auto& entry : callbacks) {
+      if (!RuntimeTypeIndexMatch(value.type_index(), entry.template get<0>())) continue;
+      return entry.template get<1>().CallExpected<Optional<VisitInterrupt>>(
+          value, GetRef<StructuralVisitor>(visitor));
+    }
+    return visitor->DefaultVisitExpected(value);
+  };
+
+  using Visitor = StructuralVisitEngine<StructuralVisitorObj, decltype(dispatch)>;
+  StructuralVisitor visitor(make_object<Visitor>(std::move(dispatch)));
+  return visitor->VisitExpected(root);
 }
 
-/*! \brief Visit keys and values in a map container. */
-TVMFFIAny VisitMapContainer(StructuralVisitorObj* visitor, const MapBaseObj* map) noexcept {
-  for (const auto& kv : *map) {
-    TVM_FFI_S_VISIT_MAYBE_EARLY_RETURN(visitor->VisitExpected(kv.first));
+/*! \brief Visit entries in a sequence container. */
+TVMFFIAny VisitSeqContainer(StructuralVisitorObj* visitor, const SeqBaseObj* self) noexcept {
+  for (const Any& item : *self) {
+    TVM_FFI_S_VISIT_MAYBE_EARLY_RETURN(visitor->VisitExpected(item));
+  }
+  return AnyView(nullptr).CopyToTVMFFIAny();
+}
+
+/*! \brief Visit values in a map container while treating keys as structural anchors. */
+TVMFFIAny VisitMapContainer(StructuralVisitorObj* visitor, const MapBaseObj* self) noexcept {
+  for (const auto& kv : *self) {
     TVM_FFI_S_VISIT_MAYBE_EARLY_RETURN(visitor->VisitExpected(kv.second));
   }
-  return ExpectedUnsafe::MoveToTVMFFIAny(Expected<Optional<VisitInterrupt>>(std::nullopt));
+  return AnyView(nullptr).CopyToTVMFFIAny();
 }
 
 /*! \brief Structural visit hook for ArrayObj. */
@@ -139,6 +164,10 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   refl::GlobalDef()
       .def("ffi.VisitInterrupt", [](Any value) { return VisitInterrupt(std::move(value)); })
       .def_method("ffi.StructuralVisitorVisit", &StructuralVisitorObj::Visit)
+      .def_method("ffi.StructuralVisitorDefaultVisit",
+                  [](const StructuralVisitor& visitor, AnyView value) {
+                    return visitor->DefaultVisitExpected(value).value();
+                  })
       .def_method("ffi.StructuralVisitorDefRegionKind", &StructuralVisitorObj::def_region_kind)
       .def_method(
           "ffi.StructuralVisitorWithDefRegionKind",
@@ -152,6 +181,11 @@ TVM_FFI_STATIC_INIT_BLOCK() {
              return details::StructuralWalkExpected(root, callbacks, callbacks_with_def_region_kind,
                                                     order)
                  .value();
+           })
+      .def("ffi.StructuralVisit",
+           [](AnyView root,
+              const Array<Tuple<int32_t, Function>>& callbacks) -> Optional<VisitInterrupt> {
+             return details::StructuralVisitExpected(root, callbacks).value();
            });
   refl::EnsureTypeAttrColumn(refl::type_attr::kStructuralVisit);
   refl::TypeAttrDef<ArrayObj>().attr(

@@ -27,8 +27,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from . import consts as C
-from .file_utils import FileInfo, collect_files, syntax_for
-from .generator import get_generator
+from .file_utils import CodeBlock, FileInfo, collect_files, syntax_for
+from .generator import generator_names, get_generator
+from .layout import classify, write_coverage_report
 from .lib_state import (
     collect_global_funcs,
     collect_type_keys,
@@ -38,6 +39,8 @@ from .lib_state import (
 from .utils import FuncInfo, InitConfig, Options
 
 if TYPE_CHECKING:
+    from collections.abc import Container
+
     from .generator import Generator
 
 
@@ -47,13 +50,16 @@ def __main__() -> int:
     This generates in-place type stubs inside special ``tvm-ffi-stubgen`` blocks
     in the given files or directories. See the module docstring for an
     overview and examples of the block syntax.
+
+    Returns 0, or 2 when a file failed to process, or 1 when ``--check`` found
+    a file whose stub blocks are out of date.
     """
     opt = _parse_args()
     generator = get_generator(opt.target)
     for imp in opt.imports or []:
         importlib.import_module(imp)
     dlls = [ctypes.CDLL(lib) for lib in opt.dlls]
-    files: list[FileInfo] = collect_files([Path(f) for f in opt.files])
+    files: list[FileInfo] = collect_files([Path(f) for f in opt.files], generator.source_exts)
     global_funcs: dict[str, list[FuncInfo]] = collect_global_funcs()
     init_path: Path | None = None
     if opt.files:
@@ -66,10 +72,13 @@ def __main__() -> int:
     # - defined global functions: `tvm-ffi-stubgen(begin): global/...`
     # - defined object types: `tvm-ffi-stubgen(begin): object/...`
     ty_map: dict[str, str] = generator.default_ty_map()
+    failed = 0
+    stale = 0
     for file in files:
         try:
             _stage_1(file, ty_map)
         except Exception:
+            failed += 1
             print(
                 f'{C.TERM_RED}[Failed] File "{file.path}": {traceback.format_exc()}{C.TERM_RESET}'
             )
@@ -87,32 +96,58 @@ def __main__() -> int:
             generator=generator,
         )
 
+    # Stage 2b. Add the object blocks a `tvm-ffi-stubgen(prefix)` file asks for. This runs
+    # after `--init`, which rewrites files on disk and reloads them.
+    failed += _roll_out_prefixes(files, generator)
+
     # Stage 3: Process
     # - `tvm-ffi-stubgen(begin): global/...`
     # - `tvm-ffi-stubgen(begin): object/...`
+    # Every `object/` block of the run: what a generated binding may refer to.
+    declared = frozenset(
+        code.param
+        for file in files
+        for code in file.code_blocks
+        if code.kind == "object" and isinstance(code.param, str)
+    )
     for file in files:
         if opt.verbose:
             print(f"{C.TERM_CYAN}[File] {file.path}{C.TERM_RESET}")
         try:
-            _stage_3(
+            changed = _stage_3(
                 file,
                 opt,
                 ty_map,
                 global_funcs,
                 generator=generator,
+                declared=declared,
             )
         except Exception:
+            failed += 1
             print(
                 f'{C.TERM_RED}[Failed] File "{file.path}": {traceback.format_exc()}{C.TERM_RESET}'
             )
+            continue
+        if changed and opt.check:
+            stale += 1
+            print(f"{C.TERM_YELLOW}[Stale] {file.path}{C.TERM_RESET}")
 
     # Stage 4. Let the generator stitch the generated tree together (runs after the
     # files are fully written, so language-specific wiring isn't clobbered).
     if opt.init and generated_prefixes:
         assert init_path is not None
         generator.finalize_init(init_path, generated_prefixes)
+
+    # Write the native-layout coverage report, if requested.
+    if opt.coverage_out is not None:
+        infos = {
+            type_key: object_info_from_type_key(type_key)
+            for type_keys in collect_type_keys().values()
+            for type_key in type_keys
+        }
+        write_coverage_report(Path(opt.coverage_out), classify(infos))
     del dlls
-    return 0
+    return 2 if failed else 1 if stale else 0
 
 
 def _stage_1(
@@ -120,15 +155,76 @@ def _stage_1(
     ty_map: dict[str, str],
 ) -> None:
     for code in file.code_blocks:
-        if code.kind == "ty-map":
-            try:
-                assert isinstance(code.param, str)
-                lhs, rhs = code.param.split("->")
-            except ValueError as e:
-                raise ValueError(
-                    f"Invalid ty_map format at line {code.lineno_start}. Example: `A.B -> C.D`"
-                ) from e
-            ty_map[lhs.strip()] = rhs.strip()
+        if code.kind != "directive" or code.param[0] != "ty-map":
+            continue
+        try:
+            lhs, rhs = code.param[1].split("->")
+        except ValueError as e:
+            raise ValueError(
+                f"Invalid ty_map format at line {code.lineno_start}. Example: `A.B -> C.D`"
+            ) from e
+        ty_map[lhs.strip()] = rhs.strip()
+
+
+def _roll_out_prefixes(files: list[FileInfo], generator: Generator) -> int:
+    """Append an ``object/<key>`` block for each registered object under a file's ``prefix``.
+
+    Keys with a block in any file of the run, named by ``skip``, or bound by the target's
+    runtime are left alone; an ``import-section`` is added when the file has none. Returns
+    the number of bad files.
+    """
+    defined = {code.param for file in files for code in file.code_blocks if code.kind == "object"}
+    registry = collect_type_keys()
+    owners: dict[str, Path] = {}
+    failed = 0
+    for file in files:
+        directives = [c for c in file.code_blocks if c.kind == "directive"]
+        heads = [c for c in directives if c.param[0] == "prefix"]
+        if not heads:
+            continue
+        head = heads[0]
+        prefix = head.param[1].rstrip(".")
+        error = ""
+        if len(heads) > 1:
+            error = f"more than one `prefix` directive (line {heads[1].lineno_start})"
+        elif owners.setdefault(prefix, file.path) != file.path:
+            error = f"prefix `{prefix}` is already declared by {owners[prefix]}"
+        if error:
+            failed += 1
+            print(f'{C.TERM_RED}[Failed] File "{file.path}": {error}{C.TERM_RESET}')
+            continue
+        if prefix not in registry:
+            print(
+                f"{C.TERM_YELLOW}[Skipped] No registered object under prefix `{prefix}`{C.TERM_RESET}"
+            )
+            continue
+        skipped = {c.param[1].strip() for c in directives if c.param[0] == "skip"}
+        keys = [
+            key
+            for key in registry[prefix]
+            if key not in defined and key not in skipped and not generator.is_builtin(key)
+        ]
+        blocks = file.code_blocks
+        if not any(c.kind == "import-section" for c in blocks):
+            at = blocks.index(head) + 1
+            blocks[at:at] = _new_blocks(file.syntax, head.lineno_start, "import-section")
+        at = max(i for i, c in enumerate(blocks) if c.kind in ("object", "import-section")) + 1
+        blocks[at:at] = [
+            block
+            for info in toposort_objects(keys)
+            for block in _new_blocks(file.syntax, head.lineno_start, f"object/{info.type_key}")
+        ]
+    return failed
+
+
+def _new_blocks(syntax: C.MarkerSyntax, lineno: int, stub: str) -> list[CodeBlock]:
+    """Return a blank line and an empty ``begin``/``end`` block for ``stub``, to insert into a file."""
+    begin = f"{syntax.begin} {stub}"
+    block = CodeBlock.from_begin_line(lineno, begin, syntax)
+    block.lineno_end = lineno
+    block.lines = [begin, syntax.end]
+    blank = CodeBlock(kind=None, param="", lineno_start=lineno, lineno_end=lineno, lines=[""])
+    return [blank, block]
 
 
 def _stage_2(
@@ -158,7 +254,13 @@ def _stage_2(
     }
     defined_objs: set[str] = {  # ty: ignore[invalid-assignment]
         code.param for file in files for code in file.code_blocks if code.kind == "object"
-    } | C.BUILTIN_TYPE_KEYS
+    }
+    skipped: set[str] = {
+        code.param[1].strip()
+        for file in files
+        for code in file.code_blocks
+        if code.kind == "directive" and code.param[0] == "skip"
+    }
 
     # Step 0. Generate missing `_ffi_api.py` and `__init__.py` under each prefix.
     prefix_filter = init_cfg.prefix.strip()
@@ -176,7 +278,9 @@ def _stage_2(
             [] if prefix in defined_func_prefixes else global_funcs.get(prefix, []),
             key=lambda f: f.schema.name,
         )
-        objs = sorted(set(obj_names) - defined_objs)
+        objs = sorted(
+            key for key in set(obj_names) - defined_objs - skipped if not generator.is_builtin(key)
+        )
         object_infos = toposort_objects(objs)
         if not funcs and not object_infos:
             continue
@@ -217,15 +321,22 @@ def _stage_3(  # noqa: PLR0912
     ty_map: dict[str, str],
     global_funcs: dict[str, list[FuncInfo]],
     generator: Generator,
-) -> None:
+    declared: Container[str] = frozenset(),
+) -> bool:
+    """Process one file's blocks; return whether its content is (or would be) changed."""
     defined_funcs: set[str] = set()
     defined_types: set[str] = set()
     imports = generator.new_imports()
-    # Stage 1. Collect `tvm-ffi-stubgen(import-object): ...`
+    # Stage 1. Hand the one-line directives the pipeline does not consume itself to the generator.
     for code in file.code_blocks:
-        if code.kind == "import-object":
-            name, type_checking_only, alias = code.param
-            generator.add_imported_object(imports, name, type_checking_only, alias)
+        if code.kind != "directive":
+            continue
+        name, payload = code.param
+        if name in C.PIPELINE_DIRECTIVE_KINDS:
+            continue  # consumed by `_stage_1`
+        if name not in generator.directive_kinds:
+            raise ValueError(f"Unknown directive `{name}` at line {code.lineno_start}")
+        generator.add_directive(imports, name, payload, code.lineno_start)
     # Stage 2. Process `tvm-ffi-stubgen(begin): global/...`
     for code in file.code_blocks:
         if code.kind == "global":
@@ -241,7 +352,7 @@ def _stage_3(  # noqa: PLR0912
             obj_info = object_info_from_type_key(type_key)
             type_key = ty_map.get(type_key, type_key)
             defined_types.add(generator.canonical_type_name(type_key))
-            generator.generate_object_block(code, ty_map, imports, opt, obj_info)
+            generator.generate_object_block(code, ty_map, imports, opt, obj_info, declared)
     # Stage 4. Add imports for used types.
     for code in file.code_blocks:
         if code.kind == "import-section":
@@ -258,7 +369,7 @@ def _stage_3(  # noqa: PLR0912
         if code.kind == "export":
             generator.generate_export_block(code)
     # Finalize: write back to file
-    file.update(verbose=opt.verbose, dry_run=opt.dry_run)
+    return file.update(verbose=opt.verbose, dry_run=opt.dry_run)
 
 
 def _parse_args() -> Options:
@@ -347,15 +458,16 @@ def _parse_args() -> Options:
         metavar="PATH",
         help=(
             "Files or directories to process. Directories are scanned recursively; "
-            "only .py and .pyi files are modified. Use tvm-ffi-stubgen directives to "
-            "select where stubs are generated."
+            "only files with the target's source extensions (.py and .pyi for python) "
+            "are modified. Use tvm-ffi-stubgen directives to select where stubs are "
+            "generated."
         ),
     )
     parser.add_argument(
         "--target",
         type=str,
         default="python",
-        choices=["python"],
+        choices=generator_names(),
         help="Code generator target.",
     )
     parser.add_argument(
@@ -374,6 +486,25 @@ def _parse_args() -> Options:
             "without modifying any files."
         ),
     )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help=(
+            "Don't write changes; report every file whose stub blocks are out of date "
+            "and exit with status 1 if there is any. Cannot be combined with --init-*."
+        ),
+    )
+    parser.add_argument(
+        "--coverage-out",
+        type=str,
+        default=None,
+        metavar="JSON",
+        help=(
+            "Write a JSON report classifying every registered object type by whether "
+            "its native memory layout can be reproduced from reflection (complete) or "
+            "not (opaque), with the byte evidence. May be used without PATH arguments."
+        ),
+    )
     args = parser.parse_args()
 
     init_flags = [args.init_pypkg, args.init_lib, args.init_prefix]
@@ -386,8 +517,10 @@ def _parse_args() -> Options:
             shared_target=args.init_lib,
             prefix=args.init_prefix,
         )
+    if args.check and init_cfg is not None:
+        parser.error("--check cannot be combined with --init-* flags")
 
-    if not args.files:
+    if not args.files and args.coverage_out is None:
         parser.print_help()
         sys.exit(1)
 
@@ -398,8 +531,10 @@ def _parse_args() -> Options:
         indent=args.indent,
         files=args.files,
         verbose=args.verbose,
-        dry_run=args.dry_run,
+        dry_run=args.dry_run or args.check,
+        check=args.check,
         target=args.target,
+        coverage_out=args.coverage_out,
     )
 
 

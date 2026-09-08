@@ -347,3 +347,93 @@ fn test_any_dl_device() {
     assert_eq!(converted_cuda_view.device_type, DLDeviceType::kDLCUDA);
     assert_eq!(converted_cuda_view.device_id, 1);
 }
+
+//---------------------------------------------------------------------------
+// AnyCompatible::to_any
+//---------------------------------------------------------------------------
+
+// Fields only reachable through `Deref`, where `Any::from` is not applicable.
+#[repr(C)]
+struct FieldHolderObj {
+    base: Object,
+    lhs: String,
+    rhs: Option<String>,
+    count: i64,
+}
+
+unsafe impl ObjectCore for FieldHolderObj {
+    const TYPE_KEY: &'static str = Object::TYPE_KEY;
+    const TYPE_DEPTH: i32 = Object::TYPE_DEPTH;
+    #[inline]
+    fn type_index() -> i32 {
+        Object::type_index()
+    }
+    #[inline]
+    unsafe fn object_header_mut(this: &mut Self) -> &mut TVMFFIObject {
+        Object::object_header_mut(&mut this.base)
+    }
+}
+
+#[test]
+fn test_to_any_matches_from_value() {
+    macro_rules! check {
+        ($value:expr, $ty:ty, $type_index:ident) => {{
+            let value: $ty = $value;
+            let any = value.to_any();
+            assert_eq!(any.type_index(), TypeIndex::$type_index as i32);
+            assert_eq!(any.type_index(), Any::from(value).type_index());
+            assert_eq!(any.try_as::<$ty>(), Some($value));
+            assert_eq!(any.debug_strong_count(), None);
+        }};
+    }
+
+    check!(-7i64, i64, kTVMFFIInt);
+    check!(true, bool, kTVMFFIBool);
+    check!(3.5f64, f64, kTVMFFIFloat);
+    check!(String::from("hello"), String, kTVMFFISmallStr);
+    check!(Bytes::from(&[1u8, 2, 3]), Bytes, kTVMFFISmallBytes);
+    assert_eq!(().to_any().type_index(), TypeIndex::kTVMFFINone as i32);
+    assert_eq!(
+        Option::<i64>::None.to_any().type_index(),
+        TypeIndex::kTVMFFINone as i32
+    );
+
+    // Object-backed: one incref, same as the `Any::from(x.clone())` it
+    // replaces, given back on drop.
+    let s = String::from("hello world this is a long string");
+    let any = s.to_any();
+    assert_eq!(any.type_index(), TypeIndex::kTVMFFIStr as i32);
+    assert_eq!(any.debug_strong_count(), Some(2));
+    assert_eq!(any.try_as::<String>().unwrap(), s);
+    drop(any);
+    assert_eq!(AnyView::from(&s).debug_strong_count(), Some(1));
+}
+
+/// The field is only reachable as a `&`, so `Any::from` cannot take it.
+#[test]
+fn test_to_any_from_borrowed_object_field() {
+    let lhs = String::from("hello world this is a long string");
+    let holder = ObjectArc::new(FieldHolderObj {
+        base: Object::new(),
+        lhs: lhs.clone(),
+        rhs: Some(lhs.clone()),
+        count: 11,
+    });
+    // `lhs` plus the two copies stored in the node.
+    assert_eq!(AnyView::from(&lhs).debug_strong_count(), Some(3));
+
+    let any = holder.lhs.to_any();
+    assert_eq!(any.debug_strong_count(), Some(4));
+    assert_eq!(any.try_as::<String>().unwrap(), lhs);
+
+    let any_opt = holder.rhs.to_any();
+    assert_eq!(
+        any_opt.try_as::<Option<String>>().unwrap(),
+        Some(lhs.clone())
+    );
+    assert_eq!(holder.count.to_any().try_as::<i64>(), Some(11));
+
+    drop(any);
+    drop(any_opt);
+    assert_eq!(AnyView::from(&lhs).debug_strong_count(), Some(3));
+}

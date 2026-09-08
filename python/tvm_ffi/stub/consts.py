@@ -29,9 +29,9 @@ class MarkerSyntax:
     """Comment-syntax-specific stub directive markers.
 
     All stub directives are embedded inside single-line comments. The comment
-    token (currently ``#`` for Python sources) parameterizes the marker set,
-    while the directive grammar (``tvm-ffi-stubgen(begin): ...`` etc.) stays
-    uniform.
+    token (``#`` for Python sources, ``//`` for Rust) parameterizes the marker
+    set, while the directive grammar (``tvm-ffi-stubgen(begin): ...`` etc.)
+    stays uniform.
     """
 
     comment: str
@@ -54,35 +54,46 @@ class MarkerSyntax:
 
     @property
     def ty_map(self) -> str:
-        """One-line type-map directive: ``<comment> tvm-ffi-stubgen(ty-map):``."""
-        return f"{self.prefix}ty-map):"
+        """The ``ty-map`` directive marker: ``<comment> tvm-ffi-stubgen(ty-map):``."""
+        return self.directive("ty-map")
 
     @property
     def import_object(self) -> str:
-        """One-line import-object directive: ``<comment> tvm-ffi-stubgen(import-object):``."""
-        return f"{self.prefix}import-object):"
+        """The ``import-object`` directive marker: ``<comment> tvm-ffi-stubgen(import-object):``."""
+        return self.directive("import-object")
 
     @property
     def skip_file(self) -> str:
         """Whole-file opt-out directive: ``<comment> tvm-ffi-stubgen(skip-file)``."""
         return f"{self.prefix}skip-file)"
 
+    def directive(self, name: str) -> str:
+        """One-line directive marker: ``<comment> tvm-ffi-stubgen(<name>):``."""
+        return f"{self.prefix}{name}):"
+
 
 PYTHON_SYNTAX = MarkerSyntax(comment="#")
+RUST_SYNTAX = MarkerSyntax(comment="//")
 
 #: Map a source-file extension to the marker syntax used inside it. The block
-#: parser selects the syntax per file.
+#: parser selects the syntax per file. Which extensions a run actually visits is
+#: decided by the active generator (``Generator.source_exts``), not by this map.
 SYNTAX_BY_EXT: dict[str, MarkerSyntax] = {
     ".py": PYTHON_SYNTAX,
     ".pyi": PYTHON_SYNTAX,
+    ".rs": RUST_SYNTAX,
 }
+
+#: One-line directive names consumed by the language-neutral pipeline. Generators
+#: must not declare these names; every other name must be declared by the active
+#: generator (``Generator.directive_kinds``).
+PIPELINE_DIRECTIVE_KINDS: frozenset[str] = frozenset({"ty-map", "prefix", "skip"})
 
 STUB_BLOCK_KINDS: TypeAlias = Literal[
     "global",
     "object",
-    "ty-map",
     "import-section",
-    "import-object",
+    "directive",
     "export",
     "__all__",
     None,
@@ -99,8 +110,6 @@ TERM_MAGENTA = "\033[35m"
 TERM_CYAN = "\033[36m"
 TERM_WHITE = "\033[37m"
 DOC_URL = "https://tvm.apache.org/ffi/packaging/stubgen.html"
-
-DEFAULT_SOURCE_EXTS = set(SYNTAX_BY_EXT)
 
 # Language-neutral metadata transform applied while building `ObjectInfo` from
 # the FFI reflection registry (see `utils.ObjectInfo.from_type_info`).

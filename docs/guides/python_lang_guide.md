@@ -163,6 +163,27 @@ compile_kernel = tvm_ffi.get_global_func("my_compiler.compile_kernel")
 compile_kernel(workspace)
 ```
 
+When a third-party class cannot define or be monkey-patched with that protocol, add an exact-class
+handler during application setup:
+
+```python
+import tvm_ffi
+
+
+class ForeignWorkspace:
+    __slots__ = ("address",)
+
+    def __init__(self, address: int):
+        self.address = address
+
+
+tvm_ffi.core._OPAQUE_PTR_HANDLERS[ForeignWorkspace] = lambda workspace: workspace.address
+```
+
+Configure `tvm_ffi.core._OPAQUE_PTR_HANDLERS` before instances of those classes are passed to FFI,
+then treat the mapping as read-only while FFI calls are running. Dispatch matches exact classes
+rather than subclasses, and a class's own `__tvm_ffi_opaque_ptr__` takes precedence.
+
 ## Container Types
 
 TVM FFI provides five container types that split into **immutable** (copy-on-write) and

@@ -79,6 +79,45 @@ fn test_array_any_conversions() {
 }
 
 #[test]
+fn test_array_with_any_elements() {
+    let array = Array::new(vec![
+        Any::from(7i64),
+        Any::from(String::from("value")),
+        Any::from(Array::new(vec![1i64, 2])),
+    ]);
+
+    assert_eq!(i64::try_from(array.get(0).unwrap()).unwrap(), 7);
+    assert_eq!(
+        String::try_from(array.get(1).unwrap()).unwrap().as_str(),
+        "value"
+    );
+    assert_eq!(
+        Array::<i64>::try_from(array.get(2).unwrap())
+            .unwrap()
+            .iter()
+            .collect::<Vec<_>>(),
+        vec![1, 2]
+    );
+
+    let round_trip = Array::<Any>::try_from(Any::from(array)).unwrap();
+    assert_eq!(round_trip.len(), 3);
+
+    let array_size = Function::get_global("ffi.ArraySize").unwrap();
+    let by_value = i64::try_from(array_size.call_tuple((round_trip.clone(),)).unwrap()).unwrap();
+    let by_reference = i64::try_from(array_size.call_tuple((&round_trip,)).unwrap()).unwrap();
+    assert_eq!((by_value, by_reference), (3, 3));
+
+    let widened = Array::<Any>::try_from(Any::from(Array::new(vec![3i64, 4]))).unwrap();
+    assert_eq!(
+        widened
+            .iter()
+            .map(|value| i64::try_from(value).unwrap())
+            .collect::<Vec<_>>(),
+        vec![3, 4]
+    );
+}
+
+#[test]
 fn test_array_recursive_type_checking() {
     // 1. Create an Array of Shapes
     let shape_array = Array::new(vec![Shape::from(vec![1, 2]), Shape::from(vec![3])]);

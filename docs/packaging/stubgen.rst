@@ -245,6 +245,11 @@ All three are required together. When omitted, the tool operates in directive-on
 ``--dry-run``
    Preview changes without writing to files.
 
+``--check``
+   Write nothing; print ``[Stale] <file>`` for every file whose stub blocks are out of
+   date and exit with status 1 if there is any (2 if a file failed to process), so CI
+   can reject a stale tree. Cannot be combined with ``--init-*``.
+
 ``--imports``
    Additional Python modules to import before generation (semicolon-separated).
 
@@ -381,6 +386,17 @@ When you run the tool, it:
    .. code-block:: python
 
       # tvm-ffi-stubgen(ty-map): ffi.reflection.AccessStep -> ffi.access_path.AccessStep
+
+``prefix`` - Demand a Namespace
+   Rust target only. Adds an ``object/<type_key>`` block to the file for every object
+   registered directly under the prefix that no processed file defines yet; ``skip``
+   leaves one out, and a key the ``tvm_ffi`` crate binds itself (every ``ffi.*`` key)
+   is never added. Code outside the blocks is preserved.
+
+   .. code-block:: rust
+
+      // tvm-ffi-stubgen(prefix): my_ffi_extension
+      // tvm-ffi-stubgen(skip): my_ffi_extension.Internal
 
 ``import-object`` - Import Object
    Injects a custom import into generated code. The format is

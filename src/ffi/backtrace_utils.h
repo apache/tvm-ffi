@@ -26,6 +26,8 @@
 
 #include <tvm/ffi/base_details.h>
 
+#include <climits>
+#include <cstdlib>
 #include <cstring>
 #include <sstream>
 #include <string>
@@ -41,7 +43,13 @@ namespace ffi {
 
 inline int32_t GetBacktraceLimit() {
   if (const char* env = std::getenv("TVM_TRACEBACK_LIMIT")) {
-    return std::stoi(env);
+    char* end = nullptr;
+    int64_t value = std::strtol(env, &end, 10);
+    // An empty, non-numeric, negative, or out-of-range value falls back to the
+    // default rather than throwing from inside the error reporter.
+    if (end != env && *end == '\0' && value >= 0 && value <= INT32_MAX) {
+      return static_cast<int32_t>(value);
+    }
   }
   return 512;
 }
@@ -120,7 +128,7 @@ inline bool DetectFFIBoundary(const char* filename, const char* symbol) {
     if (strncmp(symbol, "slot_tp_call", 12) == 0) {
       return true;
     }
-    if (strncmp(symbol, "object_is_not_callable", 11) == 0) {
+    if (strncmp(symbol, "object_is_not_callable", 22) == 0) {
       return true;
     }
     // Python interpreter stack frames

@@ -32,9 +32,50 @@
 #include <tvm/ffi/error.h>
 
 #include <iostream>
+#include <mutex>
 #include <vector>
 
 #include "./backtrace_utils.h"
+
+namespace {
+
+/*! \brief Global singleton holding tvm_ffi's DbgHelp symbol session. */
+struct DbgHelpSession {
+  /*! \brief Serializes every DbgHelp call made by tvm_ffi. */
+  std::mutex mutex;
+  /*! \brief Session handle, or nullptr when no session could be established. */
+  HANDLE handle = nullptr;
+
+  static DbgHelpSession* Global() {
+    static DbgHelpSession inst;
+    return &inst;
+  }
+
+  DbgHelpSession() {
+    HANDLE current_process_handle = GetCurrentProcess();
+    // Duplicate rather than key the session on GetCurrentProcess() directly: that
+    // value is the same in every component, so another DbgHelp user in this process
+    // could close our symbols. A duplicated handle is a key only we hold.
+    if (!DuplicateHandle(current_process_handle, current_process_handle, current_process_handle,
+                         &handle, 0, FALSE, DUPLICATE_SAME_ACCESS)) {
+      handle = nullptr;
+      return;
+    }
+    // LOAD_LINES keeps file and line information; UNDNAME demangles C++ names.
+    SymSetOptions(SYMOPT_LOAD_LINES | SYMOPT_UNDNAME);
+    // TRUE enumerates loaded modules now, so no module is discovered later while
+    // the mutex is held. Unlike the previous code the result is checked: a session
+    // that failed to initialize must not be cached as usable.
+    if (!SymInitialize(handle, NULL, TRUE)) {
+      // Nothing was filed under this key, so there is no session to SymCleanup;
+      // release the handle and leave it null to report the failure.
+      CloseHandle(handle);
+      handle = nullptr;
+    }
+  }
+};
+
+}  // namespace
 
 const TVMFFIByteArray* TVMFFIBacktrace(const char* filename, int lineno, const char* func,
                                        int cross_ffi_boundary) {
@@ -48,14 +89,29 @@ const TVMFFIByteArray* TVMFFIBacktrace(const char* filename, int lineno, const c
     // need to skip TVMFFIBacktrace and the caller function
     // which is already included in filename and func
     backtrace.skip_frame_count = 2;
-    backtrace.Append(filename, func, lineno);
+    if (!tvm::ffi::ShouldExcludeFrame(filename, func)) {
+      backtrace.Append(filename, func, lineno);
+    }
   }
 
-  HANDLE process = GetCurrentProcess();
   HANDLE thread = GetCurrentThread();
 
-  SymSetOptions(SYMOPT_LOAD_LINES | SYMOPT_UNDNAME);
-  SymInitialize(process, NULL, TRUE);
+  DbgHelpSession* session = DbgHelpSession::Global();
+  std::lock_guard<std::mutex> lock(session->mutex);
+  HANDLE process = session->handle;
+  if (process == nullptr) {
+    // StackWalk64 resolves through the session, so without one there is nothing
+    // to walk. Report the caller's own frame instead of using a dead session.
+    backtrace_str = backtrace.GetBacktrace();
+    backtrace_array.data = backtrace_str.data();
+    backtrace_array.size = backtrace_str.size();
+    return &backtrace_array;
+  }
+  // Register modules loaded since the session was created. StackWalk64 needs a
+  // module's unwind tables to step through it, so a DLL DbgHelp does not know
+  // truncates the walk at its first frame rather than just losing the name.
+  SymRefreshModuleList(process);
+
   CONTEXT context = {};
   RtlCaptureContext(&context);
 
@@ -138,7 +194,6 @@ const TVMFFIByteArray* TVMFFIBacktrace(const char* filename, int lineno, const c
     }
     backtrace.Append(filename, symbol, lineno);
   }
-  SymCleanup(process);
   backtrace_str = backtrace.GetBacktrace();
   backtrace_array.data = backtrace_str.data();
   backtrace_array.size = backtrace_str.size();

@@ -32,6 +32,7 @@ from . import consts as PC
 from .utils import ImportItem, PythonImports
 
 if TYPE_CHECKING:
+    from collections.abc import Container
     from pathlib import Path
 
     from ..file_utils import CodeBlock
@@ -43,6 +44,8 @@ class PythonGenerator:
 
     name = "python"
     syntax = C.PYTHON_SYNTAX
+    source_exts = frozenset({".py", ".pyi"})
+    directive_kinds: frozenset[str] = frozenset({"import-object"})
 
     def default_ty_map(self) -> dict[str, str]:
         """Return the default FFI-origin -> Python-type name map."""
@@ -54,13 +57,14 @@ class PythonGenerator:
         """Create an empty import collector."""
         return PythonImports()
 
-    def add_imported_object(
-        self, imports: PythonImports, name: str, type_checking_only: str, alias: str
-    ) -> None:
-        """Record an ``import-object`` directive into the collector."""
+    def add_directive(self, imports: PythonImports, name: str, payload: str, lineno: int) -> None:
+        """Record an ``import-object`` directive (``<full_name>;<type_checking_only>;<alias>``)."""
+        assert name == "import-object", name
+        parts = [part.strip() for part in payload.split(";")]
+        full_name, type_checking_only, alias = parts + [""] * (3 - len(parts))
         tco = type_checking_only.lower() == "true"
-        imports.items.append(ImportItem(name, type_checking_only=tco, alias=alias or None))
-        if alias == "_FFI_LOAD_LIB" or name.endswith("libinfo.load_lib_module"):
+        imports.items.append(ImportItem(full_name, type_checking_only=tco, alias=alias or None))
+        if alias == "_FFI_LOAD_LIB" or full_name.endswith("libinfo.load_lib_module"):
             imports.has_lib_load = True
 
     def canonical_type_name(self, type_key: str) -> str:
@@ -70,6 +74,10 @@ class PythonGenerator:
     def extra_export_names(self, imports: PythonImports) -> set[str]:
         """Return extra ``__all__`` names implied by the collected imports."""
         return {"LIB"} if imports.has_lib_load else set()
+
+    def is_builtin(self, type_key: str) -> bool:
+        """Whether the ``tvm_ffi`` package binds ``type_key`` itself."""
+        return type_key in C.BUILTIN_TYPE_KEYS
 
     # --- per-block generation (mutates `code.lines`) ------------------------
 
@@ -91,6 +99,7 @@ class PythonGenerator:
         imports: PythonImports,
         opt: Options,
         obj_info: ObjectInfo,
+        declared: Container[str] = frozenset(),
     ) -> None:
         """Emit a Python class definition for an ``object/<key>`` block."""
         G.generate_python_object(code, ty_map, imports.items, opt, obj_info)

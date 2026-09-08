@@ -39,6 +39,15 @@ namespace ffi {
 /*! \brief Map object */
 class MapObj : public MapBaseObj {
  public:
+  /*!
+   * \brief Create a shallow copy with the same iteration order.
+   * \param src The source map object.
+   * \return The copied underlying map storage.
+   */
+  static ObjectPtr<Object> ShallowCopy(const MapObj* src) {
+    return MapBaseObj::CopyFrom<MapObj>(const_cast<MapObj*>(src));
+  }
+
   /// \cond Doxygen_Suppress
   static constexpr const int32_t _type_index = TypeIndex::kTVMFFIMap;
   static const constexpr bool _type_final = true;

@@ -18,12 +18,11 @@
 
 from __future__ import annotations
 
-import sys
 import typing
 from collections.abc import Callable, Iterator
-from typing import TYPE_CHECKING, Any, ClassVar, overload
+from typing import TYPE_CHECKING, Any, ClassVar, TypeVar, overload
 
-from typing_extensions import Self
+from typing_extensions import Self, get_annotations
 
 from .. import core
 from ..container import Dict, List
@@ -37,8 +36,9 @@ else:
     _EnumMetaBase = type(Object)
 
 if TYPE_CHECKING:
+    _EnumClsT = TypeVar("_EnumClsT", bound=type)
 
-    def _enum_c_class(type_key: str, **kwargs: Any) -> Callable[[type], type]:
+    def _enum_c_class(type_key: str, **kwargs: Any) -> Callable[[_EnumClsT], _EnumClsT]:
         return lambda cls: cls
 
 else:
@@ -496,9 +496,7 @@ def _register(entries: Any, indexes: Any, instance: Any) -> None:
 
 
 def _own_annotations(cls: type) -> dict[str, Any]:
-    if sys.version_info >= (3, 14):
-        return dict(getattr(cls, "__annotations__", {}) or {})
-    return dict(cls.__dict__.get("__annotations__", {}))
+    return get_annotations(cls)
 
 
 def _is_class_var(annotation: Any) -> bool:

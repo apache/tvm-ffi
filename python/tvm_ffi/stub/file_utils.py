@@ -22,7 +22,7 @@ import dataclasses
 import difflib
 import os
 import traceback
-from collections.abc import Generator, Iterable
+from collections.abc import Collection, Generator, Iterable
 from pathlib import Path
 from typing import Callable
 
@@ -49,9 +49,8 @@ class CodeBlock:
         assert self.kind in {
             "global",
             "object",
-            "ty-map",
             "import-section",
-            "import-object",
+            "directive",
             "export",
             "__all__",
             None,
@@ -68,23 +67,15 @@ class CodeBlock:
     @staticmethod
     def from_begin_line(lineo: int, line: str, syntax: C.MarkerSyntax) -> CodeBlock:
         """Parse a line to create a CodeBlock if it contains a stub begin marker."""
-        if line.startswith(syntax.ty_map):
-            line = line[len(syntax.ty_map) :].strip()
+        if not line.startswith(syntax.begin):
+            # One-line directive `<comment> tvm-ffi-stubgen(<name>): <payload>`. The payload is
+            # kept verbatim for whoever consumes the name: the pipeline or the generator.
+            name, sep, payload = line[len(syntax.prefix) :].partition("):")
+            if not sep or not name or not name.replace("-", "_").isidentifier():
+                raise ValueError(f"Unknown stub type at line {lineo}: {line}")
             return CodeBlock(
-                kind="ty-map",
-                param=line,
-                lineno_start=lineo,
-                lineno_end=lineo,
-                lines=[],
-            )
-        elif line.startswith(syntax.import_object):
-            line = line[len(syntax.import_object) :].strip()
-            splits = [p.strip() for p in line.split(";")]
-            if len(splits) < 3:
-                splits += [""] * (3 - len(splits))
-            return CodeBlock(
-                kind="import-object",
-                param=tuple(splits),
+                kind="directive",
+                param=(name, payload.strip()),
                 lineno_start=lineo,
                 lineno_end=lineo,
                 lines=[],
@@ -99,9 +90,6 @@ class CodeBlock:
         elif stub.startswith("object/"):
             kind = "object"
             param = stub[len("object/") :].strip()
-        elif stub.startswith("ty-map/"):
-            kind = "ty-map"
-            param = stub[len("ty-map/") :].strip()
         elif stub == "import-section":
             kind = "import-section"
             param = ""
@@ -199,22 +187,13 @@ class FileInfo:
                 code.lines.append(line)
                 codes.append(code)
                 code = None
-            elif clean_line.startswith(syntax.ty_map):
-                # Process "<comment> tvm-ffi-stubgen(ty_map)"
-                ty_code = CodeBlock.from_begin_line(lineno, clean_line, syntax)
-                ty_code.lineno_end = lineno
-                ty_code.lines.append(line)
-                codes.append(ty_code)
-                del ty_code
-            elif clean_line.startswith(syntax.import_object):
-                # Process "<comment> tvm-ffi-stubgen(import-object)"
-                imp_code = CodeBlock.from_begin_line(lineno, clean_line, syntax)
-                imp_code.lineno_end = lineno
-                imp_code.lines.append(line)
-                codes.append(imp_code)
-                del imp_code
             elif clean_line.startswith(syntax.prefix):
-                raise ValueError(f"Unknown stub type at line {lineno}: {clean_line}")
+                # Process a one-line directive "<comment> tvm-ffi-stubgen(<name>): ..."
+                dir_code = CodeBlock.from_begin_line(lineno, clean_line, syntax)
+                dir_code.lineno_end = lineno
+                dir_code.lines.append(line)
+                codes.append(dir_code)
+                del dir_code
             elif code is None:
                 # Process a plain line outside of any stub block
                 codes.append(
@@ -239,8 +218,14 @@ class FileInfo:
         self.code_blocks = source.code_blocks
 
 
-def collect_files(paths: list[Path]) -> list[FileInfo]:
-    """Collect all files from the given paths and parse them into FileInfo objects."""
+def collect_files(paths: list[Path], source_exts: Collection[str]) -> list[FileInfo]:
+    """Collect all files from the given paths and parse them into FileInfo objects.
+
+    A path given explicitly is always visited; a directory is walked recursively
+    and only files whose (lower-cased) extension is in ``source_exts`` -- the
+    extensions the active generator owns -- are considered.
+    """
+    exts = {ext.lower() for ext in source_exts}
 
     def _on_error(e: Exception) -> None:
         print(
@@ -257,7 +242,7 @@ def collect_files(paths: list[Path]) -> list[FileInfo]:
             for root, _dirs, files in path_walk(p, follow_symlinks=False, on_error=_on_error):
                 for file in files:
                     f = Path(root) / file
-                    if f.suffix.lower() not in C.DEFAULT_SOURCE_EXTS:
+                    if f.suffix.lower() not in exts:
                         continue
                     yield f
 

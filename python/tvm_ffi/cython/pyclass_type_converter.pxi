@@ -267,7 +267,11 @@ cdef CAny _tc_convert_opaque_ptr(_TypeConverter _conv, object value, bint* chang
     if value is None:
         changed[0] = True
         return CAny(ctypes.c_void_p(None))
-    if hasattr(vtype, "__tvm_ffi_opaque_ptr__") or hasattr(vtype, "__cuda_stream__"):
+    if (
+        hasattr(vtype, "__tvm_ffi_opaque_ptr__")
+        or _lookup_opaque_ptr_handler(vtype) is not None
+        or hasattr(vtype, "__cuda_stream__")
+    ):
         changed[0] = True
         return CAnyChecked(value, "ctypes.c_void_p", value)
     raise _ConvertError(f"expected ctypes.c_void_p, got {_tc_describe_value_type(value)}")

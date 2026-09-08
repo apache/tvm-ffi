@@ -1,0 +1,56 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+//! Use the stubgen-generated `IntPair` binding (see ../../README.md).
+
+mod generated;
+
+use generated::rust_stubgen::{IntPair, PairKind};
+use tvm_ffi::{Module, Result};
+
+/// Path of the C++ shared library built by CMake into `../build`.
+fn lib_path() -> String {
+    let name = if cfg!(target_os = "windows") {
+        "rust_stubgen.dll"
+    } else if cfg!(target_os = "macos") {
+        "librust_stubgen.dylib"
+    } else {
+        "librust_stubgen.so"
+    };
+    format!("{}/../build/{}", env!("CARGO_MANIFEST_DIR"), name)
+}
+
+fn main() -> Result<()> {
+    // Load the C++ library so `IntPair` is registered with the FFI type registry.
+    // Keep it alive for as long as the binding is used.
+    let _lib = Module::load_from_file(lib_path())?;
+
+    // The object has a reproducible layout: it is allocated in Rust and its
+    // fields are plain struct members, on both sides of the ABI. `IntPair::new`
+    // is hand-written next to the generated block and derives `kind` itself.
+    let pair = IntPair::new(2, 1);
+    println!("a={} b={} kind={:?}", pair.a, pair.b, pair.kind);
+    assert_eq!(pair.kind, PairKind::Unordered);
+
+    let sum: i64 = tvm_ffi::cached_global_func!("rust_stubgen.IntPairSum")
+        .call_tuple((pair.clone(),))?
+        .try_into()?;
+    println!("sum={sum}");
+    assert_eq!(sum, 3);
+    Ok(())
+}

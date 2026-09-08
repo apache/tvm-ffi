@@ -60,28 +60,30 @@ class Variant {
   template <typename T>
   using enable_if_variant_contains_t = std::enable_if_t<variant_contains_v<T>>;
   /// \endcond
+  // Special members are explicitly inlined to enable move cleanup optimizations
+  TVM_FFI_INLINE ~Variant() = default;
   /*!
    * \brief Constructor from another variant
    * \param other The other variant
    */
-  Variant(const Variant<V...>& other) = default;
+  TVM_FFI_INLINE Variant(const Variant<V...>& other) = default;
   /*!
    * \brief Constructor from another variant
    * \param other The other variant
    */
-  Variant(Variant<V...>&& other) noexcept = default;
+  TVM_FFI_INLINE Variant(Variant<V...>&& other) noexcept = default;
 
   /*!
    * \brief Assignment from another variant
    * \param other The other variant
    */
-  Variant& operator=(const Variant<V...>& other) = default;
+  TVM_FFI_INLINE Variant& operator=(const Variant<V...>& other) = default;
 
   /*!
    * \brief Assignment from another variant
    * \param other The other variant
    */
-  Variant& operator=(Variant<V...>&& other) noexcept = default;
+  TVM_FFI_INLINE Variant& operator=(Variant<V...>&& other) noexcept = default;
 
   /*!
    * \brief Constructor from a contained value
@@ -171,7 +173,7 @@ class Variant {
     static_assert(all_object_v,
                   "All types used in Variant<...> must be derived from ObjectRef "
                   "to enable ObjectPtrHash/ObjectPtrEqual");
-    return details::AnyUnsafe::ObjectPtrFromAnyAfterCheck(this->data_);
+    return details::AnyUnsafe::RawObjectPtrFromAnyAfterCheck(this->data_);
   }
   TVM_FFI_INLINE AnyView ToAnyView() const { return data_.operator AnyView(); }
   TVM_FFI_INLINE Any MoveToAny() && { return std::move(data_); }

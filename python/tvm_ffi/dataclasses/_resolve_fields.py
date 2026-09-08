@@ -37,6 +37,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from typing_extensions import get_annotations
+
 from .. import core
 from .field import KW_ONLY
 
@@ -190,14 +192,11 @@ def rollback_registration(cls: type, type_info: TypeInfo) -> None:
 
 def own_annotations(cls: type) -> dict[str, Any]:
     """Return annotations declared directly on ``cls`` without MRO merging."""
-    # Python 3.14+ (PEP 749): annotations are lazily evaluated via
-    # __annotate__ and no longer stored directly in __dict__.  getattr()
-    # triggers evaluation and returns per-class annotations correctly.
-    # On Python < 3.14, getattr() follows MRO and returns *parent*
-    # annotations when the child has none — use __dict__ to avoid that.
-    if sys.version_info >= (3, 14):
-        return getattr(cls, "__annotations__", {})
-    return cls.__dict__.get("__annotations__", {})
+    # Reading ``__annotations__`` directly gets this wrong in opposite ways on
+    # either side of Python 3.14: before it, ``getattr`` follows the MRO; from
+    # 3.14 on (PEP 649/749), annotations are computed lazily. This helper means
+    # "declared on this class" consistently and returns a fresh dictionary.
+    return get_annotations(cls)
 
 
 def _field_owner_classes(cls: type) -> list[type]:

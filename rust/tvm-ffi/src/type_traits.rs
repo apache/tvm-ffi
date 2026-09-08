@@ -16,6 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+use crate::any::{Any, AnyView};
 use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
 use tvm_ffi_sys::{TVMFFIAny, TVMFFIGetTypeInfo};
 
@@ -68,6 +69,121 @@ pub unsafe trait AnyCompatible: Sized {
     }
     /// the type string of the type
     fn type_str() -> String;
+
+    /// Borrow `self` into an owned [`Any`], increfing object-backed values.
+    ///
+    /// The by-reference counterpart of `Any::from(value)`, for fields reached
+    /// through a `Deref` into shared object storage. `impl From<&T> for Any`
+    /// cannot be added instead: `&` is fundamental, so a downstream crate may
+    /// implement `AnyCompatible` for its own `&T` and the two impls overlap
+    /// (E0119).
+    #[inline]
+    fn to_any(&self) -> Any {
+        AnyView::from(self).into()
+    }
+}
+
+/// Marker for a value that can be stored in an FFI container.
+///
+/// This is an implementation detail of [`crate::Array`] and [`crate::Map`].
+/// Users should implement [`AnyCompatible`]; the blanket implementation below
+/// then makes that type a container element automatically. [`Any`] is handled
+/// separately so heterogeneous containers such as `Array<Any>` also work.
+///
+/// The private supertrait seals this marker and owns all conversion operations,
+/// keeping them out of the user-facing trait API.
+#[doc(hidden)]
+pub trait ContainerElement: container_element_ops::Ops {}
+
+impl<T: AnyCompatible> ContainerElement for T {}
+impl ContainerElement for Any {}
+
+mod container_element_ops {
+    use super::{Any, AnyCompatible, AnyView, TVMFFIAny};
+
+    pub trait Ops: Sized {
+        unsafe fn container_copy_to_any_view(src: &Self, data: &mut TVMFFIAny);
+        unsafe fn container_move_to_any(src: Self, data: &mut TVMFFIAny);
+        unsafe fn container_check_any_strict(data: &TVMFFIAny) -> bool;
+        unsafe fn container_move_from_any_after_check(data: &mut TVMFFIAny) -> Self;
+        unsafe fn container_try_cast_from_any_view(data: &TVMFFIAny) -> Result<Self, ()>;
+        fn container_get_mismatch_type_info(data: &TVMFFIAny) -> String;
+        fn container_type_str() -> String;
+    }
+
+    impl<T: AnyCompatible> Ops for T {
+        #[inline]
+        unsafe fn container_copy_to_any_view(src: &Self, data: &mut TVMFFIAny) {
+            <T as AnyCompatible>::copy_to_any_view(src, data)
+        }
+
+        #[inline]
+        unsafe fn container_move_to_any(src: Self, data: &mut TVMFFIAny) {
+            <T as AnyCompatible>::move_to_any(src, data)
+        }
+
+        #[inline]
+        unsafe fn container_check_any_strict(data: &TVMFFIAny) -> bool {
+            <T as AnyCompatible>::check_any_strict(data)
+        }
+
+        #[inline]
+        unsafe fn container_move_from_any_after_check(data: &mut TVMFFIAny) -> Self {
+            <T as AnyCompatible>::move_from_any_after_check(data)
+        }
+
+        #[inline]
+        unsafe fn container_try_cast_from_any_view(data: &TVMFFIAny) -> Result<Self, ()> {
+            <T as AnyCompatible>::try_cast_from_any_view(data)
+        }
+
+        #[inline]
+        fn container_get_mismatch_type_info(data: &TVMFFIAny) -> String {
+            <T as AnyCompatible>::get_mismatch_type_info(data)
+        }
+
+        #[inline]
+        fn container_type_str() -> String {
+            <T as AnyCompatible>::type_str()
+        }
+    }
+
+    impl Ops for Any {
+        #[inline]
+        unsafe fn container_copy_to_any_view(src: &Self, data: &mut TVMFFIAny) {
+            *data = *src.as_raw_ffi_any();
+        }
+
+        #[inline]
+        unsafe fn container_move_to_any(src: Self, data: &mut TVMFFIAny) {
+            *data = Any::into_raw_ffi_any(src);
+        }
+
+        #[inline]
+        unsafe fn container_check_any_strict(_data: &TVMFFIAny) -> bool {
+            true
+        }
+
+        #[inline]
+        unsafe fn container_move_from_any_after_check(data: &mut TVMFFIAny) -> Self {
+            Any::from_raw_ffi_any(std::mem::replace(data, TVMFFIAny::new()))
+        }
+
+        #[inline]
+        unsafe fn container_try_cast_from_any_view(data: &TVMFFIAny) -> Result<Self, ()> {
+            Ok(Any::from(AnyView::from_raw_ffi_any(*data)))
+        }
+
+        #[inline]
+        fn container_get_mismatch_type_info(_data: &TVMFFIAny) -> String {
+            "Any".to_string()
+        }
+
+        #[inline]
+        fn container_type_str() -> String {
+            "Any".to_string()
+        }
+    }
 }
 
 /// AnyCompatible for bool

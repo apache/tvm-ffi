@@ -375,6 +375,14 @@ TEST(Reflection, TypeAttrDefDirectValues) {
   EXPECT_EQ(func_attr[type_index].cast<Function>()(5).cast<int64_t>(), 10);
 }
 
+TEST(Reflection, ObjectDefPublishesTypeFinal) {
+  reflection::TypeAttrColumn final_attr(reflection::type_attr::kTypeFinal);
+
+  EXPECT_FALSE(final_attr[TestObjA::RuntimeTypeIndex()].cast<bool>());
+  EXPECT_TRUE(final_attr[TestObjADerived::RuntimeTypeIndex()].cast<bool>());
+  EXPECT_TRUE(final_attr[TypeKeyToIndex("ffi.Module")].cast<bool>());
+}
+
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def_method("testing.Int_GetValue", &TIntObj::GetValue);

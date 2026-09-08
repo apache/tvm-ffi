@@ -127,24 +127,6 @@ class ArrayObj : public SeqBaseObj {
     return p;
   }
 
-  /*!
-   * \brief Inplace-initialize the elements starting idx from [first, last)
-   * \param idx The starting point
-   * \param first Begin of iterator
-   * \param last End of iterator
-   * \tparam IterType The type of iterator
-   * \return Self
-   */
-  template <typename IterType>
-  ArrayObj* InitRange(int64_t idx, IterType first, IterType last) {
-    Any* itr = MutableBegin() + idx;
-    for (; first != last; ++first) {
-      Any ref = *first;
-      new (itr++) Any(std::move(ref));
-    }
-    return this;
-  }
-
   /*! \brief Initial size of ArrayObj */
   static constexpr int64_t kInitSize = 4;
 

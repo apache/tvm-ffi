@@ -341,6 +341,28 @@ def test_function_with_opaque_ptr_protocol() -> None:
     assert y.value == 10
 
 
+def test_function_with_opaque_ptr_handler() -> None:
+    """The setup map converts an exact third-party class to an opaque pointer."""
+
+    class ForeignEvent:
+        __slots__ = ("address",)
+
+        def __init__(self, address: int) -> None:
+            self.address = address
+
+    handlers = tvm_ffi.core._OPAQUE_PTR_HANDLERS
+    handlers[ForeignEvent] = lambda value: value.address
+    try:
+        fecho = tvm_ffi.get_global_func("testing.echo")
+        event = ForeignEvent(0xCAFE)
+        result = fecho(event)
+        assert isinstance(result, ctypes.c_void_p)
+        assert result.value == 0xCAFE
+        tvm_ffi.core.TypeSchema.from_annotation(ctypes.c_void_p).check_value(event)
+    finally:
+        del handlers[ForeignEvent]
+
+
 def test_function_with_dlpack_data_type_protocol() -> None:
     class DLPackDataTypeProtocol:
         def __init__(self, dlpack_data_type: tuple[int, int, int]) -> None:
