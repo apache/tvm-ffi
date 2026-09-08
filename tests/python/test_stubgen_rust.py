@@ -1302,7 +1302,6 @@ fn native_null_storage_is_safe_to_drop() {
         f'[dependencies]\ntvm-ffi = {{ path = "{crate.as_posix()}" }}\n',
         encoding="utf-8",
     )
-    shutil.copyfile(crate.parent / "Cargo.lock", tmp_path / "Cargo.lock")
     env = os.environ.copy()
     # Do not inherit a workspace target directory: parallel test runs are independent.
     env["CARGO_TARGET_DIR"] = str(tmp_path / "target")
