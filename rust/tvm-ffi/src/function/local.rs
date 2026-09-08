@@ -17,6 +17,9 @@
  * under the License.
  */
 
+//! Owner-thread storage for callbacks with non-Send captures.
+//! The FFI Function holds a thread-checked ID, not the closure itself.
+
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -29,6 +32,7 @@ use crate::{Any, AnyView, Error, Result, RUNTIME_ERROR};
 type Callback = dyn Fn(&[AnyView]) -> Result<Any>;
 
 struct LocalCallbacks {
+    // Never reuse IDs: a delayed release must not remove a newer callback.
     next_id: usize,
     callbacks: HashMap<usize, Rc<Callback>>,
     release_sender: Sender<usize>,
@@ -57,6 +61,7 @@ fn with_callbacks<R>(
     let (result, released) = CALLBACKS.try_with(|callbacks| {
         let mut callbacks = callbacks.borrow_mut();
         let mut released = Vec::new();
+        // Every owner-thread operation also collects foreign-thread releases.
         while let Ok(id) = callbacks.released.try_recv() {
             if let Some(callback) = callbacks.callbacks.remove(&id) {
                 released.push(callback);
@@ -79,6 +84,7 @@ struct LocalCallbackHandle {
 
 impl LocalCallbackHandle {
     fn call(&self, args: &[AnyView]) -> Result<Any> {
+        // Reject foreign calls before looking up any thread-local state.
         if self.owner != thread::current().id() {
             return Err(Error::new(
                 RUNTIME_ERROR,
@@ -86,6 +92,7 @@ impl LocalCallbackHandle {
                 "",
             ));
         }
+        // Keep the closure alive across reentrant calls without borrowing the registry.
         let callback = with_callbacks(|callbacks| callbacks.callbacks.get(&self.id).cloned())
             .ok()
             .flatten()
@@ -103,10 +110,11 @@ impl LocalCallbackHandle {
 impl Drop for LocalCallbackHandle {
     fn drop(&mut self) {
         if self.owner == thread::current().id() {
-            // A failed TLS lookup means thread teardown already owns cleanup.
+            // A failed TLS lookup means the registry is being or has been destroyed.
             let _ = with_callbacks(|callbacks| callbacks.callbacks.remove(&self.id));
         } else {
-            // If the owner has exited, its TLS has already dropped the captures.
+            // Send only the ID: dropping the closure here could touch non-Send state.
+            // A send failure means the owner has already destroyed the registry.
             let _ = self.release_sender.send(self.id);
         }
     }
@@ -128,5 +136,6 @@ where
         }
     })
     .expect("cannot create a local function during thread-local teardown");
+    // The wrapper satisfies Send + Sync; the actual closure stays in the registry.
     Function::from_packed(move |args| handle.call(args))
 }
