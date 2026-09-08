@@ -123,27 +123,18 @@ A complete layout does not always permit direct allocation. For a registry-owned
 type, keep its readable fields but suppress both generated allocators:
 
 ```rust
-// tvm-ffi-stubgen(no-alloc): ir.SourceName
+// tvm-ffi-stubgen(no-alloc): <type_key>
 ```
 
-`no-alloc` takes precedence over `custom-new` and also applies to descendants
-across all input files in the same invocation. Include the file declaring this
-policy when generating descendants. The binding supplies the existing registry
-lookup; stubgen does not infer or translate native constructor semantics.
+`no-alloc` takes precedence over `custom-new` and also applies to descendants.
+`no-alloc`, `nullable`, and `opaque` are shared across all input files in the same
+invocation, so include the files declaring these policies when generating
+descendants. Directives containing Rust type names remain file-local. The binding
+supplies the registry lookup; stubgen does not infer native constructor semantics.
 
-If native code can move an object-reference field out and leave it null, reuse
-`nullable` and `custom-new` in the file containing that binding:
-
-```rust
-// tvm-ffi-stubgen(nullable): tirx.PrimFunc.body
-// tvm-ffi-stubgen(custom-new): tirx.PrimFunc
-```
-
-The generated field is `pub body: Option<Stmt>`. The hand-written `new` takes a
-`Stmt` and passes `Some(body)` to `from_complete_fields`. Read it with `as_ref()`
-or a binding-level `body()` helper. The low-level allocator still accepts `None`;
-this preserves nullable storage, not a private-field invariant. Native mutation
-must not invalidate a live Rust borrow. Other directives remain file-local.
+Layout metadata and pointer sizes describe the loaded libraries and the current
+process. Run stubgen against the ABI you intend to build for, not a different
+cross-compilation target.
 
 ## Thread safety
 
@@ -153,10 +144,8 @@ not change their ABI layout. `Function` remains shareable, so its `from_packed`
 and `from_typed` callbacks require `Send + Sync` captures. Scoped structural
 callbacks are unaffected. `ObjectArc` requires unique ownership for mutable access.
 
-These are source-compatibility changes: pass factories must forward the callback
-bounds, and a process-wide `OnceLock<Module>` needs a separate ownership design.
-Do not add unsafe thread-safety implementations just to restore compilation;
-they must cover hidden native state, destruction, and all accepted dynamic subtypes.
+These are source-compatibility changes. Any unsafe thread-safety opt-in must
+cover hidden native state, destruction, and all accepted dynamic subtypes.
 
 ## Partial generation
 

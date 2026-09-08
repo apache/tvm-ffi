@@ -50,7 +50,7 @@ class RustGenerator:
     syntax = C.RUST_SYNTAX
     source_exts = frozenset({".rs"})
     directive_kinds = C_RUST.RUST_DIRECTIVE_KINDS
-    shared_directive_kinds = frozenset({"no-alloc"})
+    shared_directive_kinds = frozenset({"no-alloc", "nullable", "opaque"})
 
     def default_ty_map(self) -> dict[str, str]:
         """Return the default FFI-origin -> Rust-type name map."""

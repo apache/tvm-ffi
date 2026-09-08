@@ -35,7 +35,8 @@ reproducible. ``upcast`` adds a typed view outside the ancestor chain;
 named ``from_complete_fields`` instead.
 
 ``no-alloc`` preserves readable fields but suppresses both allocators, including
-in descendants. It applies across all files in a generation run.
+in descendants. Like ``nullable`` and ``opaque``, it applies across all files in
+a generation run. Directives containing Rust type names remain file-local.
 """
 
 from __future__ import annotations

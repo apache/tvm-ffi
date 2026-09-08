@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import ctypes
 import os
 import re
 import shutil
@@ -889,6 +890,33 @@ def test_complete_optional_field_mirrors() -> None:
     assert "tvm_ffi::Optional" in _uses(imports)
 
 
+@pytest.mark.parametrize("pointer_size", [4, 8])
+def test_object_reference_fields_use_native_pointer_size(
+    monkeypatch: pytest.MonkeyPatch, pointer_size: int
+) -> None:
+    assert RC.RUST_POINTER_SIZE == ctypes.sizeof(ctypes.c_void_p)
+    monkeypatch.setattr(RC, "RUST_POINTER_SIZE", pointer_size)
+    info = _info(
+        "demo.References",
+        (
+            _field("value", "Object", 24, pointer_size),
+            _field(
+                "optional",
+                TypeSchema("Optional", (TypeSchema("Object"),)),
+                24 + pointer_size,
+                pointer_size,
+            ),
+        ),
+        total_size=24 + 2 * pointer_size,
+    )
+    imports = RustImports()
+    RUST.add_directive(imports, "nullable", "demo.References.value", 1)
+    text, _ = _render(info, imports)
+    assert "/// Complete:" in text
+    assert "pub value: Option<ObjectRef>," in text
+    assert "pub optional: Option<ObjectRef>," in text
+
+
 @pytest.mark.parametrize(
     "field",
     [
@@ -1166,6 +1194,43 @@ def test_cli_shares_object_policies_across_files(
         text = (tmp_path / filename).read_text(encoding="utf-8")
         assert "/// Complete:" in text
         assert "fn new(" not in text
+    assert stub_cli.__main__() == 0
+
+
+@pytest.mark.parametrize("policy", ["nullable", "opaque"])
+def test_cli_preserves_parent_layout_policies_across_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, policy: str
+) -> None:
+    base = _info("demo.Base", (_field("value", "Object", 24, 8),), total_size=32)
+    child = _info("demo.Child", parent="demo.Base", total_size=32)
+    _register(base, child)
+    monkeypatch.setattr(stub_cli, "object_info_from_type_key", codegen.object_info_from_type_key)
+    target = "demo.Base.value" if policy == "nullable" else "demo.Base"
+    for filename, key in (("parent.rs", "demo.Base"), ("child.rs", "demo.Child")):
+        directive = f"{C.RUST_SYNTAX.directive(policy)} {target}\n" if key == "demo.Base" else ""
+        (tmp_path / filename).write_text(
+            f"{directive}{C.RUST_SYNTAX.begin} object/{key}\n{C.RUST_SYNTAX.end}\n",
+            encoding="utf-8",
+        )
+    # Process the child first: generation must not depend on its parent's file order.
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "tvm-ffi-stubgen",
+            "--target",
+            "rust",
+            str(tmp_path / "child.rs"),
+            str(tmp_path / "parent.rs"),
+        ],
+    )
+    assert stub_cli.__main__() == 0
+    for filename in ("parent.rs", "child.rs"):
+        text = (tmp_path / filename).read_text(encoding="utf-8")
+        if policy == "nullable":
+            assert "pub fn new(value: Option<ObjectRef>) -> Self" in text
+        else:
+            assert "/// Opaque:" in text
+            assert "fn new(" not in text
     assert stub_cli.__main__() == 0
 
 

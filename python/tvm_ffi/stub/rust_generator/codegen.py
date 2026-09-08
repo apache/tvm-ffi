@@ -263,11 +263,7 @@ class _ObjectRenderer:
             payload.origin in C_RUST.RUST_ANY_BACKED_OPTIONAL_PAYLOADS
             or payload.origin == "Optional"
         )
-        expected = (
-            C_RUST.RUST_OPTIONAL_FIELD_SIZE
-            if any_backed
-            else C_RUST.RUST_OBJECT_OPTIONAL_FIELD_SIZE
-        )
+        expected = C_RUST.RUST_OPTIONAL_FIELD_SIZE if any_backed else C_RUST.RUST_POINTER_SIZE
         if field.size not in (None, expected):
             return None
         if any_backed:
