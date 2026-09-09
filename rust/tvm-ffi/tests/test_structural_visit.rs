@@ -21,8 +21,8 @@ use std::cell::{Cell, RefCell};
 use tvm_ffi::object::ObjectRef;
 use tvm_ffi::{
     dispatch, get_type_attr, structural_visit, structural_walk, Any, Array, DLDataType,
-    DLDataTypeCode, DefRegionKind, Error, FieldGetter, Function, Map, Object, ObjectRefCore,
-    Result, String as FfiString, StructuralVisitor, TypeIndex, VisitCallbacks, VisitContext,
+    DLDataTypeCode, DefRegionKind, Error, FieldGetter, Function, Map, Object, Result,
+    String as FfiString, StructuralVisitor, TypeIndex, VisitCallbacks, VisitContext,
     VisitInterrupt, VisitValue, WalkOrder, WalkResult, RUNTIME_ERROR,
 };
 
@@ -50,14 +50,12 @@ fn public_reflection_access_uses_registered_field_and_type_attr() {
     let root = ObjectRef::try_from(root).unwrap();
 
     let getter = FieldGetter::new(type_index, "v_str").unwrap();
-    let selected = getter
-        .get::<_, FfiString>(&**ObjectRef::data(&root))
-        .unwrap();
+    let selected = getter.get::<_, FfiString>(&root).unwrap();
     drop(root);
     assert_eq!(selected.as_str(), "an owning C++ reflected field value");
 
     let wrong_type = Array::new(vec![0i64]);
-    assert!(getter.get_any(&**Array::data(&wrong_type)).is_err());
+    assert!(getter.get_any(&wrong_type).is_err());
     assert!(FieldGetter::new(type_index, "missing").is_err());
 
     // ObjectDef registers this Function-valued attribute for copyable C++ types.
@@ -328,10 +326,7 @@ fn manual_child_visit_can_override_def_region() {
     let root = Array::new(vec![7i64, 8]);
     let mut probe = ManualRegionVisitor::default();
     assert!(structural_visit(&root, &mut probe).unwrap().is_none());
-    assert_eq!(
-        probe.seen,
-        vec![DefRegionKind::Simple, DefRegionKind::None]
-    );
+    assert_eq!(probe.seen, vec![DefRegionKind::Simple, DefRegionKind::None]);
 }
 
 #[derive(Default)]

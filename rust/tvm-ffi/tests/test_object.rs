@@ -37,17 +37,17 @@ macro_rules! assert_not_impl {
     };
 }
 
-assert_not_impl!(Object: Send);
-assert_not_impl!(Object: Sync);
 assert_not_impl!(ObjectArc<Object>: Send);
 assert_not_impl!(ObjectArc<Object>: Sync);
+assert_not_impl!(ObjectArc<Object>: std::ops::DerefMut);
 assert_not_impl!(tvm_ffi::object::ObjectRef: Send);
 assert_not_impl!(tvm_ffi::object::ObjectRef: Sync);
 assert_not_impl!(ObjectIdentity: Send);
 assert_not_impl!(ObjectIdentity: Sync);
-assert_not_impl!(&Object: Send);
 assert_not_impl!(Any: Send);
+assert_not_impl!(Any: Sync);
 assert_not_impl!(AnyView<'static>: Send);
+assert_not_impl!(AnyView<'static>: Sync);
 
 // must have repr(C) for the object header stays in the same position
 #[repr(C)]
@@ -99,6 +99,10 @@ unsafe impl ObjectCoreWithExtraItems for TestIntObj {
 
 #[test]
 fn test_object_arc() {
+    fn require_shared<T: Send + Sync>() {}
+    require_shared::<Object>();
+    require_shared::<ObjectArc<tvm_ffi::function::FunctionObj>>();
+
     let delete_counter = Arc::new(AtomicU32::new(0));
     let obj_arc = ObjectArc::new(TestIntObj::new(11, delete_counter.clone(), 0));
     assert_eq!(obj_arc.value, 11);
@@ -129,21 +133,6 @@ fn test_object_arc() {
 }
 
 #[test]
-fn test_object_arc_mutable_borrow_requires_unique_ownership() {
-    let deleted = Arc::new(AtomicU32::new(0));
-    let mut value = ObjectArc::new(TestIntObj::new(1, deleted, 0));
-    let alias = value.clone();
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        value.value = 2;
-    }));
-    assert!(result.is_err());
-    assert_eq!(alias.value, 1);
-    drop(alias);
-    value.value = 3;
-    assert_eq!(value.value, 3);
-}
-
-#[test]
 fn test_object_arc_with_extra_items() {
     let delete_counter = Arc::new(AtomicU32::new(0));
     let mut obj_arc =
@@ -156,9 +145,10 @@ fn test_object_arc_with_extra_items() {
         // layout check of extra items
         assert_eq!(TestIntObj::extra_items_count(&obj_arc), 10);
         assert_eq!(TestIntObj::extra_items(&obj_arc).len(), 10);
-        assert_eq!(TestIntObj::extra_items_mut(&mut obj_arc).len(), 10);
+        let obj = &mut *ObjectArc::as_raw_mut(&mut obj_arc);
+        assert_eq!(TestIntObj::extra_items_mut(obj).len(), 10);
         assert_eq!(
-            TestIntObj::extra_items_mut(&mut obj_arc).as_ptr() as *mut u8,
+            TestIntObj::extra_items_mut(obj).as_ptr() as *mut u8,
             (ObjectArc::as_raw_mut(&mut obj_arc) as *mut u8).add(std::mem::size_of::<TestIntObj>())
         );
     }

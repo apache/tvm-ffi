@@ -127,8 +127,9 @@ where
                     },
                 });
                 // reset the data ptr correctly after Arc is created
-                obj_arc.data.data = BytesObj::extra_items(&obj_arc).as_ptr();
-                let extra_items = BytesObj::extra_items_mut(&mut obj_arc);
+                let obj = &mut *ObjectArc::as_raw_mut(&mut obj_arc);
+                obj.data.data = BytesObj::extra_items(obj).as_ptr();
+                let extra_items = BytesObj::extra_items_mut(obj);
                 extra_items[..value.len()].copy_from_slice(value);
                 // write the trailing \0 for ffi compatibility
                 extra_items[value.len()] = 0;
@@ -315,8 +316,9 @@ where
                         size: bytes.len(),
                     },
                 });
-                obj_arc.data.data = StringObj::extra_items(&obj_arc).as_ptr();
-                let extra_items = StringObj::extra_items_mut(&mut obj_arc);
+                let obj = &mut *ObjectArc::as_raw_mut(&mut obj_arc);
+                obj.data.data = StringObj::extra_items(obj).as_ptr();
+                let extra_items = StringObj::extra_items_mut(obj);
                 extra_items[..bytes.len()].copy_from_slice(bytes);
                 // write the trailing \0 for ffi compatibility
                 extra_items[bytes.len()] = 0;

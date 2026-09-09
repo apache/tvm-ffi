@@ -43,8 +43,8 @@ block in one of the processed files. Otherwise the block is an error naming the
 missing keys, so a partial binding never references a module that does not exist.
 
 Layout and allocation are separate: ``no-alloc`` suppresses both allocators
-without hiding readable fields. Thread restrictions are inherited from the
-crate's ``Object`` base, including for opaque views.
+without hiding readable fields. Layout metadata does not establish thread
+safety; generated handles do not opt into cross-thread sharing.
 """
 
 from __future__ import annotations
@@ -272,22 +272,35 @@ class _ObjectRenderer:
 
     # --- pieces ------------------------------------------------------------
 
-    def _accessor_lines(self, field: NamedTypeSchema) -> list[str]:
+    def _accessor_fields(self) -> list[tuple[str, NamedTypeSchema]]:
+        # Getters live on handles, so object-prefix Deref no longer inherits
+        # them. Expose the ancestors' fields without cloning an upcast handle.
+        fields = {field.name: (self.type_key, field) for field in self.info.fields}
+        for owner in reversed(self.info.ancestors):
+            if self._provider(owner) == "crate":
+                continue
+            for field in object_info_from_type_key(owner).fields:
+                fields.setdefault(field.name, (owner, field))
+        return list(fields.values())
+
+    def _accessor_lines(self, owner: str, field: NamedTypeSchema) -> list[str]:
         """One ``pub fn <field>(&self) -> Result<T>`` through the C ABI getter.
 
         ``T`` comes from the directives, else the schema; without a Rust type, ``Any``.
         """
         directives = self.imports.directives
-        target = f"{self.type_key}.{field.name}"
+        target = f"{owner}.{field.name}"
         name = rust_ident(field.name)
-        getter = f'FieldGetter::new(Self::type_index(), "{field.name}")?'
+        getter = f'FieldGetter::new({self.obj_struct}::type_index(), "{field.name}")?'
 
         enum = directives.enums.get(target)
         if enum is not None:
+            module, _, _ = self._generated_type_path(owner).rpartition("::")
+            enum_type = self.imports.record(f"{module}::{enum.name}") if module else enum.name
             return [
-                f"pub fn {name}(&self) -> Result<{enum.name}> {{",
+                f"pub fn {name}(&self) -> Result<{enum_type}> {{",
                 f"    let raw: i64 = {getter}.get(self)?;",
-                f"    {enum.name}::try_from(raw)",
+                f"    {enum_type}::try_from(raw)",
                 "}",
             ]
         override = directives.field_types.get(target)
@@ -494,9 +507,10 @@ class _ObjectRenderer:
         self.imports.record("tvm_ffi::ObjectArc")
         base, has_parent = self._base_type()
         fields = self.info.fields
-        has_accessors = bool(fields) and not verdict.is_complete
+        accessor_fields = [] if verdict.is_complete else self._accessor_fields()
+        has_accessors = bool(accessor_fields)
         if has_accessors:
-            self.imports.record("tvm_ffi::ObjectCore")  # `Self::type_index()`
+            self.imports.record("tvm_ffi::ObjectCore")  # `<Name>Obj::type_index()`
             self.imports.record("tvm_ffi::FieldGetter")
             self.imports.record("tvm_ffi::Result")
 
@@ -522,13 +536,13 @@ class _ObjectRenderer:
             sections.append(self._deref_lines(self.obj_struct, base, "base"))
         if has_accessors:
             accessors: list[str] = []
-            for i, field in enumerate(fields):
+            for i, (owner, field) in enumerate(accessor_fields):
                 if i:
                     accessors.append("")
-                accessors += self._accessor_lines(field)
+                accessors += self._accessor_lines(owner, field)
             sections.append(
                 [
-                    f"impl {self.obj_struct} {{",
+                    f"impl {self.leaf} {{",
                     *[f"    {line}" if line else "" for line in accessors],
                     "}",
                 ]

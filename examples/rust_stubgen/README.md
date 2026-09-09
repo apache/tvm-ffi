@@ -138,16 +138,15 @@ cross-compilation target.
 
 ## Thread safety
 
-Complete and opaque objects inherit `!Send` and `!Sync` from `tvm_ffi::Object`,
-including when viewed through a base or `ObjectRef`. The zero-sized marker does
-not change their ABI layout. `Function` remains shareable, so its `from_packed`
-and `from_typed` callbacks require `Send + Sync` captures. Use `from_packed_local`
-or `from_typed_local` for thread-confined captures; their API docs describe the
-owner-thread call and cleanup rules. Scoped structural callbacks are unaffected.
-`ObjectArc` requires unique ownership for mutable access.
+`Object` is an ABI header, not a thread-safety guarantee for the full object.
+Generated handles do not implement `ObjectThreadSafe`: layout metadata alone
+cannot prove that hidden native state or dynamic subtypes are safe to share.
+Bindings may opt in after auditing those contracts. Erased `ObjectRef` handles
+remain non-shareable, and reflected getters operate on handles, not bare prefixes.
 
-These are source-compatibility changes. Any unsafe thread-safety opt-in must
-cover hidden native state, destruction, and all accepted dynamic subtypes.
+`Function` remains shareable and requires `Send + Sync` captures. Scoped
+structural callbacks have no such bound. `ObjectArc` has no `DerefMut`: even a
+unique owner must not overwrite the live object header embedded in its data.
 
 ## Partial generation
 

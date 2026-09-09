@@ -170,7 +170,7 @@ fn reflected_field<T: TryFrom<Any, Error = Error>>(value: &Any, name: &str) -> T
     let object = ObjectRef::try_from(value.clone()).unwrap();
     FieldGetter::new(value.type_index(), name)
         .unwrap()
-        .get::<_, T>(&**ObjectRef::data(&object))
+        .get::<_, T>(&object)
         .unwrap()
 }
 

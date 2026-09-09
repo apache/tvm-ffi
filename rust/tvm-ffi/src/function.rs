@@ -20,15 +20,13 @@ use crate::any::{Any, AnyView};
 use crate::derive::{Object, ObjectRef};
 use crate::error::{Error, Result};
 use crate::function_internal::{AsPackedCallable, TupleAsPackedArgs};
-use crate::object::{Object, ObjectArc, ObjectCore};
+use crate::object::{Object, ObjectArc, ObjectCore, ObjectThreadSafe};
 use crate::type_traits::AnyCompatible;
 use tvm_ffi_sys::{
     TVMFFIAny, TVMFFIByteArray, TVMFFIFunctionCell, TVMFFIFunctionCreate, TVMFFIFunctionGetGlobal,
     TVMFFIFunctionSetGlobal, TVMFFIGetTypeInfo, TVMFFIObjectHandle, TVMFFISafeCallType,
     TVMFFITypeIndex, TVMFFITypeKeyToIndex,
 };
-
-mod local;
 
 /// function object
 #[repr(C)]
@@ -40,18 +38,16 @@ pub struct FunctionObj {
     cell: TVMFFIFunctionCell,
 }
 
-/// A shareable packed-function handle. Local callbacks only run on their creating thread.
+/// A shareable packed function. Rust callbacks must have thread-safe captures.
 #[derive(Clone, ObjectRef)]
 pub struct Function {
     data: ObjectArc<FunctionObj>,
 }
 
-// SAFETY: Rust callbacks either have Send + Sync captures or keep them in
-// owner-thread storage behind a checked, shareable handle.
-// Foreign callbacks must uphold the same contract (see from_extern_c). Opt in
-// only the handle, not FunctionObj or its potentially stateful derived layouts.
-unsafe impl Send for Function {}
-unsafe impl Sync for Function {}
+// SAFETY: Rust callbacks require Send + Sync, including their captured state.
+// Foreign callbacks must uphold the same contract (see from_extern_c), including
+// hidden captures and their destruction. This applies to every ffi.Function.
+unsafe impl ObjectThreadSafe for FunctionObj {}
 
 //------------------------------------------------------------------------
 // CallbackFunctionObjImpl
@@ -348,34 +344,6 @@ impl Function {
             );
             Self { data: func_arc }
         }
-    }
-
-    /// Construct a packed callback that can only run on its creating thread.
-    ///
-    /// Captures need not be `Send` or `Sync`. The handle may be shared, but calls
-    /// from other threads return an error. Captures are released on the creating
-    /// thread: immediately if the last handle is dropped there, otherwise when it
-    /// next creates, calls, or drops a local function, or runs TLS teardown.
-    /// TLS cleanup is best-effort; see [`std::thread::LocalKey`].
-    ///
-    /// # Panics
-    ///
-    /// Panics if the local callback registry is being or has been destroyed.
-    pub fn from_packed_local<F>(func: F) -> Self
-    where
-        F: Fn(&[AnyView]) -> Result<Any> + 'static,
-    {
-        local::new(func)
-    }
-
-    /// Construct a typed callback that can only run on its creating thread.
-    ///
-    /// Typed counterpart of [`Self::from_packed_local`], with the same restrictions.
-    pub fn from_typed_local<F, I, O>(func: F) -> Self
-    where
-        F: AsPackedCallable<I, O> + 'static,
-    {
-        Self::from_packed_local(move |args| func.call_packed(args))
     }
 
     /// Construct a function from a typed function.

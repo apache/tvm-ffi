@@ -327,25 +327,25 @@ impl Deref for Pair {{
     }}
 }}
 
-impl PairObj {{
+impl Pair {{
     pub fn a(&self) -> Result<i64> {{
-        FieldGetter::new(Self::type_index(), "a")?.get(self)
+        FieldGetter::new(PairObj::type_index(), "a")?.get(self)
     }}
 
     pub fn tag(&self) -> Result<Option<String>> {{
-        FieldGetter::new(Self::type_index(), "tag")?.get(self)
+        FieldGetter::new(PairObj::type_index(), "tag")?.get(self)
     }}
 
     pub fn items(&self) -> Result<Array<Any>> {{
-        FieldGetter::new(Self::type_index(), "items")?.get(self)
+        FieldGetter::new(PairObj::type_index(), "items")?.get(self)
     }}
 
     pub fn owner(&self) -> Result<ObjectRef> {{
-        FieldGetter::new(Self::type_index(), "owner")?.get(self)
+        FieldGetter::new(PairObj::type_index(), "owner")?.get(self)
     }}
 
     pub fn r#type(&self) -> Result<Any> {{
-        FieldGetter::new(Self::type_index(), "type")?.get_any(self)
+        FieldGetter::new(PairObj::type_index(), "type")?.get_any(self)
     }}
 }}"""
 
@@ -555,26 +555,26 @@ impl Deref for IterVarObj {{
     }}
 }}
 
-impl IterVarObj {{
+impl IterVar {{
     pub fn dom(&self) -> Result<Option<Range>> {{
-        FieldGetter::new(Self::type_index(), "dom")?.get(self)
+        FieldGetter::new(IterVarObj::type_index(), "dom")?.get(self)
     }}
 
     pub fn var(&self) -> Result<PrimVar> {{
-        FieldGetter::new(Self::type_index(), "var")?.get(self)
+        FieldGetter::new(IterVarObj::type_index(), "var")?.get(self)
     }}
 
     pub fn iter_type(&self) -> Result<IterVarType> {{
-        let raw: i64 = FieldGetter::new(Self::type_index(), "iter_type")?.get(self)?;
+        let raw: i64 = FieldGetter::new(IterVarObj::type_index(), "iter_type")?.get(self)?;
         IterVarType::try_from(raw)
     }}
 
     pub fn thread_tag(&self) -> Result<String> {{
-        FieldGetter::new(Self::type_index(), "thread_tag")?.get(self)
+        FieldGetter::new(IterVarObj::type_index(), "thread_tag")?.get(self)
     }}
 
     pub fn span(&self) -> Result<Option<Span>> {{
-        FieldGetter::new(Self::type_index(), "span")?.get(self)
+        FieldGetter::new(IterVarObj::type_index(), "span")?.get(self)
     }}
 }}
 
@@ -850,7 +850,7 @@ def test_reserved_member_names_get_a_trailing_underscore() -> None:
     # The opaque form keeps the reflected name on the C ABI side.
     text, _ = _render(_info("demo.Node", (_field("base", "int"),)))
     assert (
-        'pub fn base_(&self) -> Result<i64> {\n        FieldGetter::new(Self::type_index(), "base")'
+        'pub fn base_(&self) -> Result<i64> {\n        FieldGetter::new(NodeObj::type_index(), "base")'
         in text
     )
 
@@ -933,7 +933,7 @@ def test_unrenderable_field_keeps_the_type_opaque(field: NamedTypeSchema) -> Non
     text, _ = _render(info)
     assert "/// Opaque: field 'x'" in text
     assert "has no native mirror" in text
-    assert "impl HolderObj {\n    pub fn x(&self) -> Result<" in text
+    assert "impl Holder {\n    pub fn x(&self) -> Result<" in text
     assert "const _: () =" not in text
 
 
@@ -1025,6 +1025,8 @@ def test_opaque_parent_keeps_the_child_opaque() -> None:
     assert "/// Opaque: parent 'ir.Expr' is opaque (uncovered-bytes)." in text
     assert "    base: ExprObj," in text
     assert "pub fn a(&self) -> Result<Expr> {" in text
+    assert "pub fn span(&self) -> Result<Span> {" in text
+    assert 'FieldGetter::new(AddObj::type_index(), "span")?.get(self)' in text
 
 
 @pytest.mark.parametrize(
@@ -1274,7 +1276,7 @@ fn native_null_storage_is_safe_to_drop() {
     let holder = TestDeepCopyEdges::new(7i64.into(), object);
     assert!(holder.v_obj.as_ref().unwrap().same_as(&child));
     let native_child = FieldGetter::new(TestDeepCopyEdgesObj::type_index(), "v_obj")
-        .unwrap().get_any(&*holder).unwrap();
+        .unwrap().get_any(&holder).unwrap();
     assert!(tvm_ffi::object::ObjectRef::try_from(native_child).unwrap().same_as(&child));
     // Clear the field using the existing C++ reflection setter, leaving the same
     // null storage as a native move-out. No borrowed field reference is live here.

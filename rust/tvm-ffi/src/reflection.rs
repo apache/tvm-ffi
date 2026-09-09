@@ -26,7 +26,7 @@ use crate::tvm_ffi_sys::{
     TVMFFIAny, TVMFFIByteArray, TVMFFIFieldGetter, TVMFFIFieldInfo, TVMFFIGetTypeAttrColumn,
     TVMFFIGetTypeInfo, TVMFFIObject, TVMFFITypeAttrColumn, TVMFFITypeIndex,
 };
-use crate::{Any, AnyView, Error, ObjectCore, Result, TYPE_ERROR};
+use crate::{Any, AnyView, Error, ObjectArc, ObjectRefCore, Result, TYPE_ERROR};
 
 /// A registry-owned type-attribute column indexed by runtime type.
 ///
@@ -134,8 +134,17 @@ impl FieldGetter {
     /// Read the field as an owning [`Any`].
     ///
     /// `object` may have the declared owner type or any registered subtype.
-    pub fn get_any<N: ObjectCore>(&self, object: &N) -> Result<Any> {
-        let object_pointer = std::ptr::from_ref(object);
+    /// Use its handle, not a bare ABI prefix: the handle preserves the dynamic
+    /// object's ownership and thread restrictions.
+    ///
+    /// ```compile_fail
+    /// use tvm_ffi::{FieldGetter, Object};
+    /// fn read_prefix(getter: &FieldGetter, prefix: &Object) {
+    ///     let _ = getter.get_any(prefix);
+    /// }
+    /// ```
+    pub fn get_any<R: ObjectRefCore>(&self, object: &R) -> Result<Any> {
+        let object_pointer = unsafe { ObjectArc::as_raw(R::data(object)) };
         let header = object_pointer.cast::<TVMFFIObject>();
         let dynamic_type_index = unsafe { (*header).type_index };
         if !unsafe {
@@ -170,9 +179,9 @@ impl FieldGetter {
     }
 
     /// Read and convert the field to `T`.
-    pub fn get<N, T>(&self, object: &N) -> Result<T>
+    pub fn get<R, T>(&self, object: &R) -> Result<T>
     where
-        N: ObjectCore,
+        R: ObjectRefCore,
         T: TryFrom<Any, Error = Error>,
     {
         T::try_from(self.get_any(object)?)

@@ -16,7 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-use std::ops::{Deref, DerefMut};
+use std::ops::Deref;
 use std::sync::atomic::AtomicU64;
 
 use crate::derive::ObjectRef;
@@ -25,24 +25,17 @@ pub use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
 /// Object related ABI handling
 use tvm_ffi_sys::{TVMFFIAny, TVMFFIGetTypeInfo, TVMFFIObject, COMBINED_REF_COUNT_BOTH_ONE};
 
-/// The common object header, including for objects with unknown native state.
-///
-/// Objects are not `Send` or `Sync` by default: atomic reference counting does
-/// not make an object's fields or destructor thread-safe. Keeping this marker
-/// in the base also prevents casts to a base node or [`ObjectRef`] from erasing
-/// a derived object's thread restrictions. It does not change the C ABI layout.
-///
-/// An explicit unsafe `Send`/`Sync` implementation for a binding must account for
-/// every dynamic subtype it accepts, including hidden state and destruction.
+/// The common ABI header. It does not describe a dynamic object's hidden state.
 #[repr(C)]
 pub struct Object {
     header: TVMFFIObject,
-    _thread_confined: std::marker::PhantomData<std::rc::Rc<()>>,
 }
 
 /// Arc-like wrapper for Object that allows shared ownership.
 ///
-/// Mutable dereferencing panics if another strong or external weak owner exists.
+/// Unlike `std::sync::Arc`, the reference-count header is part of `T`.
+/// There is no `DerefMut`: replacing `T` would overwrite that live header,
+/// even with a single owner. Mutation must preserve the object's ABI invariants.
 ///
 /// \tparam T The type of the object to be wrapped
 #[repr(C)]
@@ -51,8 +44,9 @@ pub struct ObjectArc<T: ObjectCore> {
     _phantom: std::marker::PhantomData<T>,
 }
 
-unsafe impl<T: Send + Sync + ObjectCore> Send for ObjectArc<T> {}
-unsafe impl<T: Send + Sync + ObjectCore> Sync for ObjectArc<T> {}
+// A Send + Sync prefix alone cannot prove that its dynamic allocation is safe.
+unsafe impl<T: ObjectThreadSafe> Send for ObjectArc<T> {}
+unsafe impl<T: ObjectThreadSafe> Sync for ObjectArc<T> {}
 
 // The allocation length must outlive T's destructor when weak owners remain.
 // Keep it before the ABI-visible object, never in the live reference-count header.
@@ -98,6 +92,15 @@ pub unsafe trait ObjectCore: Sized + 'static {
     /// \return The object header
     unsafe fn object_header_mut(this: &mut Self) -> &mut TVMFFIObject;
 }
+
+/// Allow an [`ObjectArc`] to be shared across threads.
+///
+/// # Safety
+///
+/// Every allocation accepted by this view must support access and destruction
+/// on arbitrary threads, including hidden native state and dynamic subtypes.
+/// Visible fields being `Send + Sync` is necessary, but not sufficient.
+pub unsafe trait ObjectThreadSafe: ObjectCore + Send + Sync {}
 
 /// Traits for objects with extra items that follows the object
 ///
@@ -462,7 +465,6 @@ impl Object {
     pub fn new() -> Self {
         Self {
             header: TVMFFIObject::new(),
-            _thread_confined: std::marker::PhantomData,
         }
     }
 }
@@ -593,13 +595,13 @@ impl<T: ObjectCore> ObjectArc<T> {
 
     /// Get the raw mutable pointer from the ObjectArc
     ///
-    /// Caller should view this as a non-owning reference
+    /// This is non-owning and does not check uniqueness.
     ///
-    /// # Arguments
-    /// * `this` - The ObjectArc to get the raw pointer
+    /// # Safety
     ///
-    /// # Returns
-    /// * `*mut T` - The raw pointer
+    /// Before writing, the caller must establish exclusive access (including
+    /// against native aliases and weak owners). Writes must preserve the live
+    /// header, allocation layout, and invariants of the full dynamic object.
     #[inline]
     pub unsafe fn as_raw_mut(this: &mut Self) -> *mut T {
         this.ptr.as_ptr()
@@ -636,25 +638,6 @@ impl<T: ObjectCore> Deref for ObjectArc<T> {
     #[inline]
     fn deref(&self) -> &Self::Target {
         unsafe { self.ptr.as_ref() }
-    }
-}
-
-// Exclusive Rust access requires both a single strong owner and no external
-// weak owners that could acquire another strong reference during the borrow.
-impl<T: ObjectCore> DerefMut for ObjectArc<T> {
-    #[inline]
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        unsafe {
-            let header = &*self.ptr.as_ptr().cast::<TVMFFIObject>();
-            assert_eq!(
-                header
-                    .combined_ref_count
-                    .load(std::sync::atomic::Ordering::Acquire),
-                COMBINED_REF_COUNT_BOTH_ONE,
-                "cannot mutably borrow a shared ObjectArc"
-            );
-            self.ptr.as_mut()
-        }
     }
 }
 
