@@ -93,30 +93,35 @@ impl Drop for CallOnDrop {
 
 #[test]
 fn foreign_release_defers_cleanup_and_destructors_can_reenter() {
-    let drops = Rc::new(Cell::new(0));
-    let state = drops.clone();
-    let cleanup = CallOnDrop(Function::from_typed_local(move || {
-        state.set(state.get() + 1);
-        Ok(())
-    }));
-    let function = Function::from_typed_local(move || {
-        let _keep_capture = &cleanup;
-        Ok(())
-    });
-    thread::spawn(move || {
-        // The C++ container releases the last function handle on this thread.
-        let container = tvm_ffi::cached_global_func!("ffi.Array")
-            .call_tuple((&function,))
-            .unwrap();
-        drop(function);
-        drop(container);
-    })
-    .join()
-    .unwrap();
-    assert_eq!(drops.get(), 0);
-    drop(Function::from_typed_local(|| Ok(())));
-    assert_eq!(drops.get(), 1);
-    assert_eq!(Rc::strong_count(&drops), 1);
+    for rust_array in [false, true] {
+        let drops = Rc::new(Cell::new(0));
+        let state = drops.clone();
+        let cleanup = CallOnDrop(Function::from_typed_local(move || {
+            state.set(state.get() + 1);
+            Ok(())
+        }));
+        let function = Function::from_typed_local(move || {
+            let _keep_capture = &cleanup;
+            Ok(())
+        });
+        thread::spawn(move || {
+            // Both allocators must release the last handle on this foreign thread.
+            let container = if rust_array {
+                Any::from(Array::new(vec![function]))
+            } else {
+                tvm_ffi::cached_global_func!("ffi.Array")
+                    .call_tuple((function,))
+                    .unwrap()
+            };
+            drop(container);
+        })
+        .join()
+        .unwrap();
+        assert_eq!(drops.get(), 0);
+        drop(Function::from_typed_local(|| Ok(())));
+        assert_eq!(drops.get(), 1);
+        assert_eq!(Rc::strong_count(&drops), 1);
+    }
 }
 
 struct OwnerDrop {

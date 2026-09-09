@@ -25,6 +25,7 @@ use crate::derive::Object;
 use crate::object::{Object, ObjectArc};
 use crate::type_traits::ContainerElement;
 use crate::{Any, AnyCompatible, AnyView, ObjectCoreWithExtraItems, ObjectRefCore};
+use tvm_ffi_sys::TVMFFIObjectDeleterFlagBitMask::kTVMFFIObjectDeleterFlagBitMaskStrong;
 use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
 use tvm_ffi_sys::{TVMFFIAny, TVMFFIObject};
 
@@ -45,7 +46,29 @@ pub struct ArrayObj {
 unsafe impl ObjectCoreWithExtraItems for ArrayObj {
     type ExtraItem = TVMFFIAny;
     fn extra_items_count(this: &Self) -> usize {
-        this.size as usize
+        this.capacity as usize
+    }
+}
+
+impl ArrayObj {
+    // Installed only on Rust allocations; the public ABI view itself does not own data.
+    unsafe extern "C" fn delete(ptr: *mut core::ffi::c_void, flags: i32) {
+        if flags & kTVMFFIObjectDeleterFlagBitMaskStrong as i32 != 0 {
+            let array = ptr.cast::<Self>();
+            // Match C++ SeqBaseObj: release live elements, then any external storage.
+            // Read the current size: native code may have moved or removed elements.
+            let data = (*array).data.cast::<Any>();
+            for i in 0..(*array).size as usize {
+                core::ptr::drop_in_place(data.add(i));
+            }
+            if let Some(deleter) = (*array).data_deleter {
+                deleter((*array).data);
+            }
+        }
+        // Keep the existing allocation metadata and two-phase weak-reference cleanup.
+        crate::object::unsafe_::object_deleter_for_new_with_extra_items::<Self, TVMFFIAny>(
+            ptr, flags,
+        );
     }
 }
 
@@ -93,33 +116,29 @@ impl<T: ContainerElement + Clone> Array<T> {
     /// Creates a new Array from a vector of items.
     pub fn new(items: Vec<T>) -> Self {
         let capacity = items.len();
-        Self::new_with_capacity(items, capacity)
-    }
-
-    /// Internal helper to allocate an ArrayObj with specific headroom.
-    fn new_with_capacity(items: Vec<T>, capacity: usize) -> Self {
-        let size = items.len();
-
         // Allocate with capacity
         let arc = ObjectArc::<ArrayObj>::new_with_extra_items(ArrayObj {
             object: Object::new(),
             data: core::ptr::null_mut(),
-            size: size as i64,
+            size: 0,
             capacity: capacity as i64,
             data_deleter: None,
         });
 
         unsafe {
             let raw_ptr = ObjectArc::as_raw(&arc) as *mut ArrayObj;
+            (*raw_ptr.cast::<TVMFFIObject>()).deleter = Some(ArrayObj::delete);
             let container = &mut *raw_ptr;
 
-            let base_ptr = ArrayObj::extra_items_mut(container).as_ptr() as *mut TVMFFIAny;
+            let base_ptr = raw_ptr.add(1).cast::<TVMFFIAny>();
             container.data = base_ptr as *mut _;
 
             for (i, item) in items.into_iter().enumerate() {
-                let mut raw = TVMFFIAny::new();
-                T::container_move_to_any(item, &mut raw);
-                core::ptr::write(base_ptr.add(i), raw);
+                let mut value = Any::new();
+                T::container_move_to_any(item, &mut *value.as_data_ptr());
+                core::ptr::write(base_ptr.add(i), Any::into_raw_ffi_any(value));
+                // Only initialized slots may be destroyed if conversion unwinds.
+                container.size += 1;
             }
         }
         // SAFETY: `arc` was allocated and initialized above as an `Array<T>`.

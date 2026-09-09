@@ -16,6 +16,8 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+use std::sync::{atomic::Ordering, Arc};
+
 use tvm_ffi::*;
 
 /// Helper to create a Tensor with a specific float value and shape
@@ -168,4 +170,86 @@ fn test_array_parametric_heterogeneity() {
         .unwrap(),
         &[1, 2, 3]
     );
+}
+
+fn captured_function(state: &Arc<()>) -> Function {
+    let state = state.clone();
+    Function::from_typed(move || {
+        let _keep_capture = &state;
+        Ok(())
+    })
+}
+
+#[test]
+fn test_array_releases_nested_elements_at_last_strong_reference() {
+    use tvm_ffi_sys::{
+        TVMFFIObject, TVMFFIObjectDeleterFlagBitMask::kTVMFFIObjectDeleterFlagBitMaskWeak,
+        COMBINED_REF_COUNT_WEAK_ONE,
+    };
+
+    for keep_weak in [false, true] {
+        let state = Arc::new(());
+        let array = Array::new(vec![
+            Any::from(Array::new(vec![captured_function(&state)])),
+            Any::from(7i64),
+            Any::new(),
+        ]);
+        let alias = array.clone();
+        let header =
+            unsafe { ObjectArc::as_raw(ObjectRefCore::data(&array)).cast::<TVMFFIObject>() };
+        if keep_weak {
+            // Model a native weak owner, which must not delay element destruction.
+            unsafe {
+                (*header)
+                    .combined_ref_count
+                    .fetch_add(COMBINED_REF_COUNT_WEAK_ONE, Ordering::Relaxed);
+            }
+        }
+        drop(array);
+        assert_eq!(Arc::strong_count(&state), 2);
+        // Erase the type and let a C++ container release the last strong reference.
+        let retained = cached_global_func!("ffi.Array")
+            .call_tuple((Any::from(alias),))
+            .unwrap();
+        drop(retained);
+        assert_eq!(Arc::strong_count(&state), 1);
+        if keep_weak {
+            unsafe {
+                assert_eq!(
+                    (*header)
+                        .combined_ref_count
+                        .fetch_sub(COMBINED_REF_COUNT_WEAK_ONE, Ordering::Release),
+                    COMBINED_REF_COUNT_WEAK_ONE,
+                );
+                std::sync::atomic::fence(Ordering::Acquire);
+                (*header).deleter.unwrap()(
+                    header.cast_mut().cast(),
+                    kTVMFFIObjectDeleterFlagBitMaskWeak as i32,
+                );
+            }
+            assert_eq!(Arc::strong_count(&state), 1);
+        }
+    }
+}
+
+#[test]
+fn test_array_releases_elements_after_native_inplace_mutation() {
+    let old_state = Arc::new(());
+    let new_state = Arc::new(());
+    let array = Array::new(vec![captured_function(&old_state)]);
+    let pointer = unsafe { ObjectArc::as_raw(ObjectRefCore::data(&array)) };
+    let replacement = captured_function(&new_state);
+    let mapped = structural_mutate(array, move |_: Function, _: &mut CallbackMutator| {
+        replacement.clone()
+    })
+    .and_then(Array::<Function>::try_from)
+    .unwrap();
+    assert_eq!(
+        unsafe { ObjectArc::as_raw(ObjectRefCore::data(&mapped)) },
+        pointer
+    );
+    assert_eq!(Arc::strong_count(&old_state), 1);
+    assert_eq!(Arc::strong_count(&new_state), 2);
+    drop(mapped);
+    assert_eq!(Arc::strong_count(&new_state), 1);
 }
