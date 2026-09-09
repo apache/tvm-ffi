@@ -129,12 +129,13 @@ use tvm_ffi::Function;
 // Get global function
 let func = Function::get_global("my_function")?;
 
-// Register a new global function
-let my_func = Function::from_packed(|args: &[AnyView]| -> Result<Any> {
-    // Function implementation
-    Ok(Any::default())
-});
-Function::register_global("my_custom_func", my_func)?;
+// SAFETY: the callback has no captured state and supports cross-thread use.
+unsafe {
+    let my_func = Function::from_packed(|_args: &[AnyView]| -> Result<Any> {
+        Ok(Any::default())
+    });
+    Function::register_global("my_custom_func", my_func)?;
+}
 ```
 
 ### Reflected Type Methods
@@ -185,19 +186,25 @@ explicit clone at the call site.
 
 Create functions from Rust closures:
 
+These constructors are `unsafe`: callers must preserve the captures' threading
+requirements for every call and final release, including through native copies.
+Non-`Send` captures must stay on their owning thread; non-`Sync` captures must
+not be accessed concurrently. No TLS storage or runtime thread guard is added.
+
 ```rust
 use tvm_ffi::{Function, Any, AnyView, Result};
 
-// From packed closure
-let func = Function::from_packed(|args: &[AnyView]| -> Result<Any> {
-    // Process args and return result
-    Ok(Any::default())
-});
+// SAFETY: the callback has no captured state.
+let func = unsafe {
+    Function::from_packed(|_args: &[AnyView]| -> Result<Any> {
+        Ok(Any::default())
+    })
+};
 
-// From typed closure
-let typed_func = Function::from_typed(|x: i64, y: i64| -> Result<i64> {
-    Ok(x + y)
-});
+// SAFETY: the callback has no captured state.
+let typed_func = unsafe {
+    Function::from_typed(|x: i64, y: i64| -> Result<i64> { Ok(x + y) })
+};
 ```
 
 ### Error Handling

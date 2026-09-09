@@ -1112,7 +1112,8 @@ fn callback_mutate_supports_node_links_nested_tuples_and_reflection() {
     let root = call_global(
         "ffi.Array",
         &[
-            Any::from(Function::from_packed(|_| Ok(Any::new()))),
+            // SAFETY: the callback has no captured state.
+            Any::from(unsafe { Function::from_packed(|_| Ok(Any::new())) }),
             reflected_object(),
         ],
     );

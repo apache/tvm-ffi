@@ -387,7 +387,8 @@ macro_rules! tvm_ffi_dll_export_typed_func {
 /// ```rust
 /// use tvm_ffi::*;
 ///
-/// let func = Function::from_typed(|x: i32, y: i32| -> Result<i32> { Ok(x + y) });
+/// // SAFETY: the callback has no captured state.
+/// let func = unsafe { Function::from_typed(|x: i32, y: i32| -> Result<i32> { Ok(x + y) }) };
 /// let typed_func = into_typed_fn!(func, Fn(i32, &i32) -> Result<i32>);
 /// let result = typed_func(10, &20).unwrap(); // Returns 30
 /// assert_eq!(result, 30);

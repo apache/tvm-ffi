@@ -305,8 +305,7 @@ impl Function {
     ///
     /// The function and its captured state must support calls and destruction
     /// on arbitrary threads. Registration makes it reachable from every thread.
-    /// Rust callbacks made by `from_packed` or `from_typed` meet this requirement;
-    /// arbitrary native functions do not necessarily do so.
+    /// This is not guaranteed merely by constructing a `Function`.
     pub unsafe fn register_global(name: &str, func: Function) -> Result<()> {
         unsafe {
             let name_arg = TVMFFIByteArray::from_str(name);
@@ -321,24 +320,27 @@ impl Function {
     }
     /// Construct a function from a packed function.
     ///
-    /// Native callees may retain callbacks and invoke or release them on another
-    /// thread, so captures must be `Send + Sync`. Arguments and results stay on
-    /// the calling thread and do not need those bounds.
+    /// # Safety
+    ///
+    /// All calls and destruction, including through copies retained by native
+    /// code, must respect the captured state's thread requirements. Captures
+    /// that are not `Send` must stay on their owning thread; captures that are
+    /// not `Sync` must not be accessed concurrently. `Send + Sync` captures
+    /// satisfy these requirements without restricting the calling thread.
     ///
     /// ```compile_fail
-    /// use std::rc::Rc;
     /// use tvm_ffi::{Any, Function};
-    /// let state = Rc::new(1i64);
-    /// let _ = Function::from_packed(move |_| Ok(Any::from(*state)));
+    /// // Even a capture-free callback requires an explicit unsafe call.
+    /// let _ = Function::from_packed(|_| Ok(Any::new()));
     /// ```
     /// # Arguments
     /// * `func` - The packed function in signature of `Fn(&[AnyView]) -> Result<Any>`
     ///
     /// # Returns
     /// * `Function` - The function
-    pub fn from_packed<F>(func: F) -> Self
+    pub unsafe fn from_packed<F>(func: F) -> Self
     where
-        F: Fn(&[AnyView]) -> Result<Any> + Send + Sync + 'static,
+        F: Fn(&[AnyView]) -> Result<Any> + 'static,
     {
         unsafe {
             let callback_arc = ObjectArc::new(CallbackFunctionObjImpl::from_callback(func));
@@ -351,31 +353,30 @@ impl Function {
 
     /// Construct a function from a typed function.
     ///
-    /// Captured state must be `Send + Sync`, as for [`Self::from_packed`].
+    /// # Safety
+    ///
+    /// The caller must uphold the capture-threading requirements of
+    /// [`Self::from_packed`], including when native code retains the function.
     ///
     /// ```compile_fail
-    /// use std::cell::Cell;
     /// use tvm_ffi::Function;
-    /// let state = Cell::new(0i64); // Send, but not Sync.
-    /// let _ = Function::from_typed(move || {
-    ///     state.set(state.get() + 1);
-    ///     Ok(state.get())
-    /// });
+    /// let _ = Function::from_typed(|| -> tvm_ffi::Result<i64> { Ok(1) });
     /// ```
     /// # Arguments
     /// * `func` - The typed function with function signature of `F(T0, T1, ...) -> Result<O>`
     ///
     /// # Returns
     /// * `Function` - The function
-    pub fn from_typed<F, I, O>(func: F) -> Self
+    pub unsafe fn from_typed<F, I, O>(func: F) -> Self
     where
-        F: AsPackedCallable<I, O> + Send + Sync + 'static,
+        F: AsPackedCallable<I, O> + 'static,
     {
         let closure = move |packed_args: &[AnyView]| -> Result<Any> {
             let ret_value = func.call_packed(packed_args)?;
             Ok(ret_value)
         };
-        Self::from_packed(closure)
+        // SAFETY: the wrapper captures only func, whose contract the caller upholds.
+        unsafe { Self::from_packed(closure) }
     }
 
     /// # Safety
@@ -383,9 +384,9 @@ impl Function {
     /// `handle` must be a valid pointer (or null) that is compatible with
     /// `safe_call` and `deleter`. The caller must ensure the handle outlives
     /// the returned `Function` (or that `deleter` properly frees it).
-    /// `safe_call` must support concurrent calls from arbitrary threads, and
-    /// `deleter` must be safe to run on any thread. These requirements also apply
-    /// to the state behind `handle`.
+    /// All calls and destruction, including through native copies, must respect
+    /// the thread requirements of the state behind `handle`, as for
+    /// [`Self::from_packed`].
     pub unsafe fn from_extern_c(
         handle: *mut std::ffi::c_void,
         safe_call: TVMFFISafeCallType,

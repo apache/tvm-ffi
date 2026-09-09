@@ -174,10 +174,13 @@ fn test_array_parametric_heterogeneity() {
 
 fn captured_function(state: &Arc<()>) -> Function {
     let state = state.clone();
-    Function::from_typed(move || {
-        let _keep_capture = &state;
-        Ok(())
-    })
+    // SAFETY: the callback captures only an Arc<()>.
+    unsafe {
+        Function::from_typed(move || {
+            let _keep_capture = &state;
+            Ok(())
+        })
+    }
 }
 
 #[test]

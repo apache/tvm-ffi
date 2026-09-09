@@ -35,22 +35,38 @@ fn test_function_get_global_required() {
 
 #[test]
 fn test_function_from_packed() {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
     let value = 2;
     let v2 = 4;
-    let check_and_add_value = Function::from_packed(move |args: &[AnyView]| -> Result<Any> {
-        ensure!(
-            args.len() == 1,
-            VALUE_ERROR,
-            "Expected 1 argument, got {}",
-            args.len()
-        );
-        let v0 = i32::try_from(args[0])?;
-        ensure!(v0 == value, VALUE_ERROR, "Expected {}, got {}", value, v0);
-        Ok(Any::from(v0 + v2))
-    });
+    let calls = Rc::new(Cell::new(0));
+    let captured = calls.clone();
+    // SAFETY: this callback and all its copies are called and dropped on this thread.
+    let check_and_add_value = unsafe {
+        Function::from_packed(move |args: &[AnyView]| -> Result<Any> {
+            captured.set(captured.get() + 1);
+            ensure!(
+                args.len() == 1,
+                VALUE_ERROR,
+                "Expected 1 argument, got {}",
+                args.len()
+            );
+            let v0 = i32::try_from(args[0])?;
+            ensure!(v0 == value, VALUE_ERROR, "Expected {}, got {}", value, v0);
+            Ok(Any::from(v0 + v2))
+        })
+    };
     let args = [AnyView::from(&value)];
     let result = check_and_add_value.call_packed(&args).unwrap();
     assert_eq!(i32::try_from(result).unwrap(), 6);
+    let alias = check_and_add_value.clone();
+    drop(check_and_add_value);
+    assert_eq!(Rc::strong_count(&calls), 2);
+    assert_eq!(i32::try_from(alias.call_packed(&args).unwrap()).unwrap(), 6);
+    assert_eq!(calls.get(), 2);
+    drop(alias);
+    assert_eq!(Rc::strong_count(&calls), 1);
 }
 
 #[test]
@@ -60,11 +76,14 @@ fn test_function_thread_safe_captures_and_global_cache() {
 
     let calls = Arc::new(AtomicUsize::new(0));
     let state = calls.clone();
-    let function = Function::from_typed(move |value: i64| {
-        state.fetch_add(1, Ordering::Relaxed);
-        // Neither the argument holder nor the returned Any needs to be Send.
-        cached_global_func!("testing.echo").call_tuple((value,))
-    });
+    // SAFETY: the callback captures only an Arc<AtomicUsize>.
+    let function = unsafe {
+        Function::from_typed(move |value: i64| {
+            state.fetch_add(1, Ordering::Relaxed);
+            // Neither the argument holder nor the returned Any needs to be Send.
+            cached_global_func!("testing.echo").call_tuple((value,))
+        })
+    };
     // SAFETY: the Rust callback captures only an Arc<AtomicUsize>.
     unsafe { Function::register_global("testing.rust_shared_callback", function).unwrap() };
     std::thread::scope(|scope| {
@@ -84,20 +103,22 @@ fn test_function_thread_safe_captures_and_global_cache() {
 #[test]
 fn test_function_from_typed() {
     let offset = 2;
-    // test one argument
-    let sum1 = Function::from_typed(move |x: i32| -> Result<i32> { Ok(x + offset) });
+    // SAFETY: the callback captures only an integer.
+    let sum1 = unsafe { Function::from_typed(move |x: i32| -> Result<i32> { Ok(x + offset) }) };
     let result = sum1.call_packed(&[AnyView::from(&1)]).unwrap();
     assert_eq!(i32::try_from(result).unwrap(), 1 + offset);
-    // test two arguments
-    let sum2 = Function::from_typed(move |x: i32, y: i32| -> Result<i32> { Ok(x + y) });
+    // SAFETY: the callback has no captured state.
+    let sum2 = unsafe { Function::from_typed(move |x: i32, y: i32| -> Result<i32> { Ok(x + y) }) };
     let result = sum2
         .call_packed(&[AnyView::from(&1), AnyView::from(&2)])
         .unwrap();
     assert_eq!(i32::try_from(result).unwrap(), 3);
-    // test three arguments
-    let sum3f = Function::from_typed(move |x: i32, y: i32, z: f32| -> Result<f32> {
-        Ok((x + y) as f32 + z)
-    });
+    // SAFETY: the callback has no captured state.
+    let sum3f = unsafe {
+        Function::from_typed(move |x: i32, y: i32, z: f32| -> Result<f32> {
+            Ok((x + y) as f32 + z)
+        })
+    };
     let result = sum3f
         .call_packed(&[AnyView::from(&1), AnyView::from(&2), AnyView::from(&3)])
         .unwrap();
@@ -107,8 +128,8 @@ fn test_function_from_typed() {
 #[test]
 fn test_function_call_tuple() {
     let offset = 2;
-    // test one argument
-    let sum1 = Function::from_typed(move |x: i32| -> Result<i32> { Ok(x + offset) });
+    // SAFETY: the callback captures only an integer.
+    let sum1 = unsafe { Function::from_typed(move |x: i32| -> Result<i32> { Ok(x + offset) }) };
     let result = sum1.call_tuple((1,)).unwrap();
     assert_eq!(i32::try_from(result).unwrap(), 1 + offset);
     // test pass by reference
@@ -152,10 +173,13 @@ fn test_function_call_tuple_supports_all_value_holders() {
 
 #[test]
 fn test_function_rvalue_ref_arguments() {
-    let strong_count = Function::from_typed(|value: RValueRef<Array<i64>>| -> Result<i64> {
-        let value = value.into_inner();
-        Ok(AnyView::from(&value).debug_strong_count().unwrap() as i64)
-    });
+    // SAFETY: the callback has no captured state.
+    let strong_count = unsafe {
+        Function::from_typed(|value: RValueRef<Array<i64>>| -> Result<i64> {
+            let value = value.into_inner();
+            Ok(AnyView::from(&value).debug_strong_count().unwrap() as i64)
+        })
+    };
 
     let moved = Array::new(vec![1i64, 2]);
     assert_eq!(AnyView::from(&moved).debug_strong_count(), Some(1));
@@ -172,19 +196,24 @@ fn test_function_rvalue_ref_arguments() {
 #[test]
 fn test_function_into_typed_fn() {
     let offset = 2;
+    // SAFETY: the callback captures only an integer.
     let typed_sum1 = into_typed_fn!(
-        Function::from_typed(move |x: i32| -> Result<i32> { Ok(x + offset) }),
+        unsafe { Function::from_typed(move |x: i32| -> Result<i32> { Ok(x + offset) }) },
         Fn(&i32) -> Result<i32>);
     assert_eq!(typed_sum1(&1).unwrap(), 1 + offset);
     // try to box the resulting function
-    let sum2 = Function::from_typed(move |x: i32, y: i32| -> Result<i32> { Ok(x + y) });
+    // SAFETY: the callback has no captured state.
+    let sum2 = unsafe { Function::from_typed(move |x: i32, y: i32| -> Result<i32> { Ok(x + y) }) };
     let typed_sum2 = Box::new(into_typed_fn!(sum2, Fn(&i32, i32) -> Result<i32>));
     assert_eq!(typed_sum2(&1, 2).unwrap(), 3);
 
     // test three arguments
-    let sum3 = Function::from_typed(move |x: i32, y: i32, z: f32| -> Result<f32> {
-        Ok((x + y) as f32 + z)
-    });
+    // SAFETY: the callback has no captured state.
+    let sum3 = unsafe {
+        Function::from_typed(move |x: i32, y: i32, z: f32| -> Result<f32> {
+            Ok((x + y) as f32 + z)
+        })
+    };
     let typed_sum3 = Box::new(into_typed_fn!(sum3, Fn(&i32, i32, f32) -> Result<f32>));
     assert_eq!(typed_sum3(&1, 2, 3.0).unwrap(), 6.0);
 }
@@ -280,13 +309,26 @@ fn test_function_echo_string_bytes() {
 
 #[test]
 fn test_function_apply() {
-    let add_one = Function::from_typed(|x: i32| -> Result<i32> { Ok(x + 1) });
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    let calls = Rc::new(Cell::new(0));
+    let captured = calls.clone();
+    // SAFETY: testing.apply invokes and releases the callback on this thread.
+    let add_one = unsafe {
+        Function::from_typed(move |x: i32| -> Result<i32> {
+            captured.set(captured.get() + 1);
+            Ok(x + 1)
+        })
+    };
     let fapply = into_typed_fn!(
         Function::get_global("testing.apply").unwrap(),
         Fn(Function, i32) -> Result<i32>
     );
     let result = fapply(add_one, 3).unwrap();
     assert_eq!(result, 4);
+    assert_eq!(calls.get(), 1);
+    assert_eq!(Rc::strong_count(&calls), 1);
 }
 
 fn test_add_one_tensor(x: tvm_ffi::Tensor, y: tvm_ffi::Tensor) -> Result<()> {
