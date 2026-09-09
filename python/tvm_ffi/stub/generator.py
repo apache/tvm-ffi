@@ -82,10 +82,6 @@ class Generator(Protocol):
     #: to the pipeline; any other undeclared name is an error.
     directive_kinds: frozenset[str]
 
-    #: Type policies that also apply to references/descendants in other input files.
-    #: Unlike local type spellings, these directives must not depend on Rust imports.
-    shared_directive_kinds: frozenset[str]
-
     def default_ty_map(self) -> dict[str, str]:
         """Return the default FFI-origin -> target-type name map for this language."""
         ...
@@ -99,9 +95,8 @@ class Generator(Protocol):
     def add_directive(self, imports: Any, name: str, payload: str, lineno: int) -> None:
         """Record a one-line directive (raw payload) into ``imports``.
 
-        The collector is per file. The pipeline also seeds it with directives
-        in :attr:`shared_directive_kinds` from the other input files.
-        ``name`` is always one of :attr:`directive_kinds`;
+        The collector is per file, so a directive applies to the blocks of the
+        file it appears in. ``name`` is always one of :attr:`directive_kinds`;
         the payload's grammar is the generator's to define.
         """
         ...

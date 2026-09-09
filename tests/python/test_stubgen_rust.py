@@ -18,12 +18,7 @@
 
 from __future__ import annotations
 
-import ctypes
-import os
 import re
-import shutil
-import subprocess
-import sys
 from collections.abc import Container, Iterator
 from pathlib import Path
 
@@ -31,7 +26,6 @@ import pytest
 import tvm_ffi.stub.cli as stub_cli
 import tvm_ffi.testing  # noqa: F401  (loads the `testing.*` fixture types)
 from tvm_ffi.core import TypeSchema
-from tvm_ffi.libinfo import find_libtvm_ffi
 from tvm_ffi.stub import consts as C
 from tvm_ffi.stub.cli import _stage_1, _stage_3
 from tvm_ffi.stub.file_utils import CodeBlock, FileInfo
@@ -247,7 +241,6 @@ def test_directives_parse() -> None:
     directives.add("upcast", "tirx.Add -> PrimExpr", 6)
     directives.add("upcast", "tirx.Add -> crate::typed::TypedExpr", 7)
     directives.add("custom-new", " tirx.Add ", 8)
-    directives.add("no-alloc", " ir.SourceName ", 9)
     assert directives.field_types == {"tirx.Add.a": "PrimExpr"}
     assert directives.nullable == {"ir.Expr.span"}
     assert directives.enums == {
@@ -257,7 +250,6 @@ def test_directives_parse() -> None:
     assert directives.opaque == {"ir.SourceName"}
     assert directives.upcasts == {"tirx.Add": ["PrimExpr", "crate::typed::TypedExpr"]}
     assert directives.custom_new == {"tirx.Add"}
-    assert directives.no_alloc == {"ir.SourceName"}
 
 
 @pytest.mark.parametrize(
@@ -292,7 +284,6 @@ def test_generator_declares_its_directives_and_records_imports() -> None:
         "opaque",
         "upcast",
         "custom-new",
-        "no-alloc",
     }
     imports = RUST.new_imports()
     RUST.add_directive(imports, "import-object", "tvm_ffi.libinfo.Foo;False;_Foo", 1)
@@ -890,33 +881,6 @@ def test_complete_optional_field_mirrors() -> None:
     assert "tvm_ffi::Optional" in _uses(imports)
 
 
-@pytest.mark.parametrize("pointer_size", [4, 8])
-def test_object_reference_fields_use_native_pointer_size(
-    monkeypatch: pytest.MonkeyPatch, pointer_size: int
-) -> None:
-    assert RC.RUST_POINTER_SIZE == ctypes.sizeof(ctypes.c_void_p)
-    monkeypatch.setattr(RC, "RUST_POINTER_SIZE", pointer_size)
-    info = _info(
-        "demo.References",
-        (
-            _field("value", "Object", 24, pointer_size),
-            _field(
-                "optional",
-                TypeSchema("Optional", (TypeSchema("Object"),)),
-                24 + pointer_size,
-                pointer_size,
-            ),
-        ),
-        total_size=24 + 2 * pointer_size,
-    )
-    imports = RustImports()
-    RUST.add_directive(imports, "nullable", "demo.References.value", 1)
-    text, _ = _render(info, imports)
-    assert "/// Complete:" in text
-    assert "pub value: Option<ObjectRef>," in text
-    assert "pub optional: Option<ObjectRef>," in text
-
-
 @pytest.mark.parametrize(
     "field",
     [
@@ -955,22 +919,6 @@ def test_custom_new_renames_the_wrapper_allocator() -> None:
         "    }\n}"
     ) in text
     assert "    pub fn new(" not in text
-
-
-def test_no_alloc_preserves_fields_and_applies_to_descendants() -> None:
-    base = _info("demo.Base", (_field("value", "Object", 24, 8),), total_size=32)
-    child = _info("demo.Child", parent="demo.Base", total_size=32)
-    _register(base)
-    imports = RustImports()
-    for name in ("no-alloc", "custom-new"):
-        imports.directives.add(name, "demo.Base", 1)
-    for info in (base, child):
-        text, _ = _render(info, imports)
-        assert "/// Complete:" in text
-        assert "fn new(" not in text
-        assert "from_complete_fields" not in text
-    text, _ = _render(base, imports)
-    assert "pub value: ObjectRef," in text
 
 
 def test_upcast_directive_adds_typed_views() -> None:
@@ -1171,168 +1119,6 @@ def test_stage_3_applies_directives_to_a_registered_type(tmp_path: Path) -> None
     assert "pub struct Kind(i32);" in text
     assert "    pub v_i32: Kind,\n" in text
     assert "use tvm_ffi::Error;" in text
-
-
-def test_cli_shares_object_policies_across_files(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # The child lives in a separate file; it must not bypass the base's allocation policy.
-    for filename, key, directives in (
-        ("base.rs", "testing.TestCxxClassBase", ["no-alloc"]),
-        ("child.rs", "testing.TestCxxClassDerived", []),
-    ):
-        (tmp_path / filename).write_text(
-            "\n".join(
-                [f"{C.RUST_SYNTAX.directive(name)} {key}" for name in directives]
-                + [f"{C.RUST_SYNTAX.begin} object/{key}", C.RUST_SYNTAX.end, ""]
-            ),
-            encoding="utf-8",
-        )
-    monkeypatch.setattr("sys.argv", ["tvm-ffi-stubgen", "--target", "rust", str(tmp_path)])
-    assert stub_cli.__main__() == 0
-    for filename in ("base.rs", "child.rs"):
-        text = (tmp_path / filename).read_text(encoding="utf-8")
-        assert "/// Complete:" in text
-        assert "fn new(" not in text
-    assert stub_cli.__main__() == 0
-
-
-@pytest.mark.parametrize("policy", ["nullable", "opaque"])
-def test_cli_preserves_parent_layout_policies_across_files(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, policy: str
-) -> None:
-    base = _info("demo.Base", (_field("value", "Object", 24, 8),), total_size=32)
-    child = _info("demo.Child", parent="demo.Base", total_size=32)
-    _register(base, child)
-    monkeypatch.setattr(stub_cli, "object_info_from_type_key", codegen.object_info_from_type_key)
-    target = "demo.Base.value" if policy == "nullable" else "demo.Base"
-    for filename, key in (("parent.rs", "demo.Base"), ("child.rs", "demo.Child")):
-        directive = f"{C.RUST_SYNTAX.directive(policy)} {target}\n" if key == "demo.Base" else ""
-        (tmp_path / filename).write_text(
-            f"{directive}{C.RUST_SYNTAX.begin} object/{key}\n{C.RUST_SYNTAX.end}\n",
-            encoding="utf-8",
-        )
-    # Process the child first: generation must not depend on its parent's file order.
-    monkeypatch.setattr(
-        "sys.argv",
-        [
-            "tvm-ffi-stubgen",
-            "--target",
-            "rust",
-            str(tmp_path / "child.rs"),
-            str(tmp_path / "parent.rs"),
-        ],
-    )
-    assert stub_cli.__main__() == 0
-    for filename in ("parent.rs", "child.rs"):
-        text = (tmp_path / filename).read_text(encoding="utf-8")
-        if policy == "nullable":
-            assert "pub fn new(value: Option<ObjectRef>) -> Self" in text
-        else:
-            assert "/// Opaque:" in text
-            assert "fn new(" not in text
-    assert stub_cli.__main__() == 0
-
-
-@pytest.mark.skipif(shutil.which("cargo") is None, reason="Rust toolchain not installed")
-def test_generated_object_contracts_compile_and_drop(tmp_path: Path) -> None:
-    """Compile the generated code, including negative API checks, against the real crate."""
-    imports = RustImports()
-    RUST.add_directive(imports, "no-alloc", "testing.TestCxxClassBase", 1)
-    RUST.add_directive(imports, "nullable", "testing.TestDeepCopyEdges.v_obj", 2)
-    RUST.add_directive(imports, "custom-new", "testing.TestDeepCopyEdges", 3)
-    keys = ["TestCxxClassBase", "TestCxxClassHiddenField", "TestObjectBase", "TestDeepCopyEdges"]
-    bodies = [_render(object_info_from_type_key(f"testing.{key}"), imports)[0] for key in keys]
-    docs = "\n".join(
-        f"//! ```compile_fail\n//! {snippet}\n//! ```"
-        for snippet in (
-            "use generated_contracts::TestCxxClassBase; let _ = TestCxxClassBase::new(1, 2);",
-            "fn send<T: Send>() {} send::<generated_contracts::TestCxxClassHiddenField>();",
-            "fn sync<T: Sync>() {} sync::<generated_contracts::TestCxxClassHiddenField>();",
-            "fn send<T: Send>() {} send::<generated_contracts::TestObjectBase>();",
-            "use generated_contracts::TestDeepCopyEdges; let _ = TestDeepCopyEdges::new(1.into(), None);",
-        )
-    )
-    source = docs + "\n" + "\n".join(item.as_use_line() for item in imports.items)
-    source += "\n" + "\n".join(bodies)
-    source += r"""
-// Keep semantic construction in the binding, using the existing nullable allocator.
-impl TestDeepCopyEdges {
-    pub fn new(v_any: tvm_ffi::Any, v_obj: tvm_ffi::object::ObjectRef) -> Self {
-        Self::from_complete_fields(v_any, Some(v_obj))
-    }
-}
-
-#[test]
-fn native_null_storage_is_safe_to_drop() {
-    use tvm_ffi::object::ObjectRefCore;
-    use tvm_ffi::tvm_ffi_sys::{TVMFFIAny, TVMFFIGetTypeInfo, TVMFFIFieldSetter, TVMFFITestingDummyTarget};
-    use tvm_ffi::tvm_ffi_sys::TVMFFIFieldFlagBitMask::kTVMFFIFieldFlagBitSetterIsFunctionObj;
-    assert_eq!(unsafe { TVMFFITestingDummyTarget() }, 0);
-    let child = TestObjectBase::new(1, 2.0, "child".into());
-    let object = tvm_ffi::object::ObjectRef::try_from(tvm_ffi::Any::from(child.clone())).unwrap();
-    let holder = TestDeepCopyEdges::new(7i64.into(), object);
-    assert!(holder.v_obj.as_ref().unwrap().same_as(&child));
-    let native_child = FieldGetter::new(TestDeepCopyEdgesObj::type_index(), "v_obj")
-        .unwrap().get_any(&*holder).unwrap();
-    assert!(tvm_ffi::object::ObjectRef::try_from(native_child).unwrap().same_as(&child));
-    // Clear the field using the existing C++ reflection setter, leaving the same
-    // null storage as a native move-out. No borrowed field reference is live here.
-    unsafe {
-        let info = &*TVMFFIGetTypeInfo(TestDeepCopyEdgesObj::type_index());
-        let field = (0..info.num_fields as usize).map(|i| &*info.fields.add(i))
-            .find(|f| f.name.as_str() == "v_obj").unwrap();
-        assert!(!field.setter.is_null());
-        assert_eq!(field.flags & (kTVMFFIFieldFlagBitSetterIsFunctionObj as i64), 0);
-        let setter: TVMFFIFieldSetter = std::mem::transmute(field.setter);
-        let ptr = ObjectArc::as_raw(TestDeepCopyEdges::data(&holder));
-        assert_eq!(setter(ptr.cast_mut().cast::<u8>().offset(field.offset as isize).cast(),
-                         &TVMFFIAny::new()), 0);
-    }
-    assert!(holder.v_obj.is_none());
-    drop(holder);
-    assert_eq!(ObjectArc::strong_count(TestObjectBase::data(&child)), 1);
-}
-"""
-    (tmp_path / "src").mkdir()
-    (tmp_path / "src/lib.rs").write_text(source, encoding="utf-8")
-    crate = Path(__file__).resolve().parents[2] / "rust/tvm-ffi"
-    (tmp_path / "Cargo.toml").write_text(
-        '[package]\nname = "generated_contracts"\nversion = "0.0.0"\nedition = "2021"\n'
-        f'[dependencies]\ntvm-ffi = {{ path = "{crate.as_posix()}" }}\n',
-        encoding="utf-8",
-    )
-    env = os.environ.copy()
-    # Do not inherit a workspace target directory: parallel test runs are independent.
-    env["CARGO_TARGET_DIR"] = str(tmp_path / "target")
-    loader = (
-        "PATH"
-        if sys.platform == "win32"
-        else ("DYLD_LIBRARY_PATH" if sys.platform == "darwin" else "LD_LIBRARY_PATH")
-    )
-    env[loader] = str(Path(find_libtvm_ffi()).parent) + os.pathsep + env.get(loader, "")
-    result = subprocess.run(
-        ["cargo", "test", "--quiet"],
-        cwd=tmp_path,
-        env=env,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=180,
-    )
-    assert result.returncode == 0, result.stdout + result.stderr
-
-
-def test_cli_rejects_unknown_no_alloc_type(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    src = tmp_path / "mod.rs"
-    original = (
-        f"{C.RUST_SYNTAX.directive('no-alloc')} testing.MissingObjectContract\n"
-        f"{C.RUST_SYNTAX.begin} object/testing.TestCxxClassBase\n{C.RUST_SYNTAX.end}\n"
-    )
-    src.write_text(original, encoding="utf-8")
-    monkeypatch.setattr("sys.argv", ["tvm-ffi-stubgen", "--target", "rust", str(tmp_path)])
-    assert stub_cli.__main__() == 2
-    assert src.read_text(encoding="utf-8") == original
 
 
 def test_cli_init_generates_a_module_tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

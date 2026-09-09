@@ -18,20 +18,9 @@
 
 from __future__ import annotations
 
-import ctypes
-
 #: One-line directives the Rust backend consumes.
 RUST_DIRECTIVE_KINDS = frozenset(
-    {
-        "import-object",
-        "field",
-        "nullable",
-        "enum",
-        "opaque",
-        "upcast",
-        "custom-new",
-        "no-alloc",
-    }
+    {"import-object", "field", "nullable", "enum", "opaque", "upcast", "custom-new"}
 )
 
 #: Default FFI-origin -> Rust-type map; ``::`` paths get a ``use``, bare names do not.
@@ -92,12 +81,13 @@ RUST_SCALAR_WIDTHS = {
     "f64": 8,
 }
 
-#: The registry is loaded in this process, so its object pointers have the host ABI size.
-RUST_POINTER_SIZE = ctypes.sizeof(ctypes.c_void_p)
+#: Size of an object reference field; ``nullable`` may only wrap those.
+RUST_POINTER_SIZE = 8
 
 #: C++ ``Optional<T>`` is a 16-byte ``TVMFFIAny`` cell, or a nullable pointer for object payloads.
 RUST_OPTIONAL_PATH = "tvm_ffi::Optional"
 RUST_OPTIONAL_FIELD_SIZE = 16
+RUST_OBJECT_OPTIONAL_FIELD_SIZE = 8
 
 #: ``Optional`` payloads kept as the 16-byte cell (a nested ``Optional`` too); the size is checked.
 RUST_ANY_BACKED_OPTIONAL_PAYLOADS = frozenset(

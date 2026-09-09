@@ -38,17 +38,11 @@ pub struct FunctionObj {
     cell: TVMFFIFunctionCell,
 }
 
-/// A shareable packed function. Rust callbacks must have thread-safe captures.
+/// Error reference class
 #[derive(Clone, ObjectRef)]
 pub struct Function {
     data: ObjectArc<FunctionObj>,
 }
-
-// SAFETY: Rust callbacks require Send + Sync, including their captured state.
-// Foreign callbacks must uphold the same contract (see from_extern_c). Opt in
-// only the handle, not FunctionObj or its potentially stateful derived layouts.
-unsafe impl Send for Function {}
-unsafe impl Sync for Function {}
 
 //------------------------------------------------------------------------
 // CallbackFunctionObjImpl
@@ -317,18 +311,7 @@ impl Function {
             Ok(())
         }
     }
-    /// Construct a function from a packed function.
-    ///
-    /// A Function can be called, retained, and dropped on another thread, so its
-    /// captured state must be `Send + Sync`. This does not require its arguments
-    /// or result to be `Send`: they are supplied and returned on the calling thread.
-    ///
-    /// ```compile_fail
-    /// use std::rc::Rc;
-    /// use tvm_ffi::{Any, Function};
-    /// let state = Rc::new(1i64);
-    /// let _ = Function::from_packed(move |_| Ok(Any::from(*state)));
-    /// ```
+    /// Construct a function from a packed function
     /// # Arguments
     /// * `func` - The packed function in signature of `Fn(&[AnyView]) -> Result<Any>`
     ///
@@ -336,7 +319,7 @@ impl Function {
     /// * `Function` - The function
     pub fn from_packed<F>(func: F) -> Self
     where
-        F: Fn(&[AnyView]) -> Result<Any> + Send + Sync + 'static,
+        F: Fn(&[AnyView]) -> Result<Any> + 'static,
     {
         unsafe {
             let callback_arc = ObjectArc::new(CallbackFunctionObjImpl::from_callback(func));
@@ -347,19 +330,7 @@ impl Function {
         }
     }
 
-    /// Construct a function from a typed function.
-    ///
-    /// Captured state must be `Send + Sync`, as for [`Self::from_packed`].
-    ///
-    /// ```compile_fail
-    /// use std::cell::Cell;
-    /// use tvm_ffi::Function;
-    /// let state = Cell::new(0i64); // Send, but not Sync.
-    /// let _ = Function::from_typed(move || {
-    ///     state.set(state.get() + 1);
-    ///     Ok(state.get())
-    /// });
-    /// ```
+    /// Construct a function from a typed function
     /// # Arguments
     /// * `func` - The typed function with function signature of `F(T0, T1, ...) -> Result<O>`
     ///
@@ -367,7 +338,7 @@ impl Function {
     /// * `Function` - The function
     pub fn from_typed<F, I, O>(func: F) -> Self
     where
-        F: AsPackedCallable<I, O> + Send + Sync + 'static,
+        F: AsPackedCallable<I, O> + 'static,
     {
         let closure = move |packed_args: &[AnyView]| -> Result<Any> {
             let ret_value = func.call_packed(packed_args)?;
@@ -381,9 +352,6 @@ impl Function {
     /// `handle` must be a valid pointer (or null) that is compatible with
     /// `safe_call` and `deleter`. The caller must ensure the handle outlives
     /// the returned `Function` (or that `deleter` properly frees it).
-    /// `safe_call` must support concurrent calls from arbitrary threads, and
-    /// `deleter` must be safe to run on any thread. These requirements also apply
-    /// to the state behind `handle`.
     pub unsafe fn from_extern_c(
         handle: *mut std::ffi::c_void,
         safe_call: TVMFFISafeCallType,

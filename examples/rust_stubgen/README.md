@@ -111,41 +111,11 @@ Besides `prefix` and `custom-new`, this example declares the integer field
 // tvm-ffi-stubgen(enum): rust_stubgen.IntPair.kind -> PairKind(i32) { Unordered=0, Ordered=1 }
 ```
 
-`field` names the Rust type of a field
+Three more are available: `field` names the Rust type of a field
 (`// tvm-ffi-stubgen(field): rust_stubgen.IntPair.a -> MyInt`), `nullable`
-wraps an object-reference field in `Option` (for example, a nullable `span`),
+wraps it in `Option` (`// tvm-ffi-stubgen(nullable): rust_stubgen.IntPair.a`),
 and `upcast` adds a conversion to a hand-written typed view
 (`// tvm-ffi-stubgen(upcast): rust_stubgen.IntPair -> MyView`).
-
-## Construction and ownership
-
-A complete layout does not always permit direct allocation. For a registry-owned
-type, keep its readable fields but suppress both generated allocators:
-
-```rust
-// tvm-ffi-stubgen(no-alloc): <type_key>
-```
-
-`no-alloc` takes precedence over `custom-new` and also applies to descendants.
-`no-alloc`, `nullable`, and `opaque` are shared across all input files in the same
-invocation, so include the files declaring these policies when generating
-descendants. Directives containing Rust type names remain file-local. The binding
-supplies the registry lookup; stubgen does not infer native constructor semantics.
-
-Layout metadata and pointer sizes describe the loaded libraries and the current
-process. Run stubgen against the ABI you intend to build for, not a different
-cross-compilation target.
-
-## Thread safety
-
-Complete and opaque objects inherit `!Send` and `!Sync` from `tvm_ffi::Object`,
-including when viewed through a base or `ObjectRef`. The zero-sized marker does
-not change their ABI layout. `Function` remains shareable, so its `from_packed`
-and `from_typed` callbacks require `Send + Sync` captures. Scoped structural
-callbacks are unaffected. `ObjectArc` requires unique ownership for mutable access.
-
-These are source-compatibility changes. Any unsafe thread-safety opt-in must
-cover hidden native state, destruction, and all accepted dynamic subtypes.
 
 ## Partial generation
 

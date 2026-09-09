@@ -39,7 +39,7 @@ from .lib_state import (
 from .utils import FuncInfo, InitConfig, Options
 
 if TYPE_CHECKING:
-    from collections.abc import Container, Sequence
+    from collections.abc import Container
 
     from .generator import Generator
 
@@ -110,12 +110,6 @@ def __main__() -> int:
         for code in file.code_blocks
         if code.kind == "object" and isinstance(code.param, str)
     )
-    shared_directives = [
-        code
-        for file in files
-        for code in file.code_blocks
-        if code.kind == "directive" and code.param[0] in generator.shared_directive_kinds
-    ]
     for file in files:
         if opt.verbose:
             print(f"{C.TERM_CYAN}[File] {file.path}{C.TERM_RESET}")
@@ -127,7 +121,6 @@ def __main__() -> int:
                 global_funcs,
                 generator=generator,
                 declared=declared,
-                shared_directives=shared_directives,
             )
         except Exception:
             failed += 1
@@ -329,14 +322,13 @@ def _stage_3(  # noqa: PLR0912
     global_funcs: dict[str, list[FuncInfo]],
     generator: Generator,
     declared: Container[str] = frozenset(),
-    shared_directives: Sequence[CodeBlock] = (),
 ) -> bool:
     """Process one file's blocks; return whether its content is (or would be) changed."""
     defined_funcs: set[str] = set()
     defined_types: set[str] = set()
     imports = generator.new_imports()
     # Stage 1. Hand the one-line directives the pipeline does not consume itself to the generator.
-    for code in [*shared_directives, *file.code_blocks]:
+    for code in file.code_blocks:
         if code.kind != "directive":
             continue
         name, payload = code.param

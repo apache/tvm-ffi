@@ -41,10 +41,6 @@ provided in the same run: ``ffi.*`` by the crate, a ``ty-map`` by a hand-written
 binding whose object struct is ``<Name>Obj``, anything else by an ``object/``
 block in one of the processed files. Otherwise the block is an error naming the
 missing keys, so a partial binding never references a module that does not exist.
-
-Layout and allocation are separate: ``no-alloc`` suppresses both allocators
-without hiding readable fields. Thread restrictions are inherited from the
-crate's ``Object`` base, including for opaque views.
 """
 
 from __future__ import annotations
@@ -263,7 +259,11 @@ class _ObjectRenderer:
             payload.origin in C_RUST.RUST_ANY_BACKED_OPTIONAL_PAYLOADS
             or payload.origin == "Optional"
         )
-        expected = C_RUST.RUST_OPTIONAL_FIELD_SIZE if any_backed else C_RUST.RUST_POINTER_SIZE
+        expected = (
+            C_RUST.RUST_OPTIONAL_FIELD_SIZE
+            if any_backed
+            else C_RUST.RUST_OBJECT_OPTIONAL_FIELD_SIZE
+        )
         if field.size not in (None, expected):
             return None
         if any_backed:
@@ -534,9 +534,7 @@ class _ObjectRenderer:
                 ]
             )
         elif verdict.is_complete:
-            hierarchy = {self.type_key, *self.info.ancestors}
-            if not hierarchy.intersection(self.imports.directives.no_alloc):
-                sections += self._allocator_sections(base, has_parent)
+            sections += self._allocator_sections(base, has_parent)
         upcasts = self._upcast_lines()
         if upcasts:
             sections.append(upcasts)

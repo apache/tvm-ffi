@@ -46,7 +46,6 @@ class PythonGenerator:
     syntax = C.PYTHON_SYNTAX
     source_exts = frozenset({".py", ".pyi"})
     directive_kinds: frozenset[str] = frozenset({"import-object"})
-    shared_directive_kinds: frozenset[str] = frozenset()
 
     def default_ty_map(self) -> dict[str, str]:
         """Return the default FFI-origin -> Python-type name map."""

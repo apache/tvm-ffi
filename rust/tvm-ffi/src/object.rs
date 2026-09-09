@@ -25,24 +25,14 @@ pub use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
 /// Object related ABI handling
 use tvm_ffi_sys::{TVMFFIAny, TVMFFIGetTypeInfo, TVMFFIObject, COMBINED_REF_COUNT_BOTH_ONE};
 
-/// The common object header, including for objects with unknown native state.
-///
-/// Objects are not `Send` or `Sync` by default: atomic reference counting does
-/// not make an object's fields or destructor thread-safe. Keeping this marker
-/// in the base also prevents casts to a base node or [`ObjectRef`] from erasing
-/// a derived object's thread restrictions. It does not change the C ABI layout.
-///
-/// An explicit unsafe `Send`/`Sync` implementation for a binding must account for
-/// every dynamic subtype it accepts, including hidden state and destruction.
+/// Object type is by default the TVMFFIObject
 #[repr(C)]
 pub struct Object {
+    /// example implementation of the object
     header: TVMFFIObject,
-    _thread_confined: std::marker::PhantomData<std::rc::Rc<()>>,
 }
 
-/// Arc-like wrapper for Object that allows shared ownership.
-///
-/// Mutable dereferencing panics if another strong or external weak owner exists.
+/// Arc-like wrapper for Object that allows shared ownership
 ///
 /// \tparam T The type of the object to be wrapped
 #[repr(C)]
@@ -53,19 +43,6 @@ pub struct ObjectArc<T: ObjectCore> {
 
 unsafe impl<T: Send + Sync + ObjectCore> Send for ObjectArc<T> {}
 unsafe impl<T: Send + Sync + ObjectCore> Sync for ObjectArc<T> {}
-
-// The allocation length must outlive T's destructor when weak owners remain.
-// Keep it before the ABI-visible object, never in the live reference-count header.
-fn extra_items_layout<T: ObjectCoreWithExtraItems>(count: usize) -> (std::alloc::Layout, usize) {
-    use std::alloc::Layout;
-    let items = Layout::array::<T::ExtraItem>(count).expect("extra items layout overflow");
-    let (body, _) = Layout::new::<T>()
-        .extend(items)
-        .expect("object layout overflow");
-    Layout::new::<usize>()
-        .extend(body)
-        .expect("allocation layout overflow")
-}
 
 /// Traits that can be used to check if a type is an object
 ///
@@ -363,7 +340,7 @@ pub mod unsafe_ {
     /// * `obj` - The object to increase the reference count
     #[inline]
     pub unsafe fn inc_ref(handle: *mut TVMFFIObject) {
-        let obj = &*handle;
+        let obj = &mut *handle;
         obj.combined_ref_count.fetch_add(1, Ordering::Relaxed);
     }
 
@@ -375,16 +352,17 @@ pub mod unsafe_ {
     /// * `obj` - The object to decrease the reference count
     #[inline]
     pub(crate) unsafe fn dec_ref(handle: *mut TVMFFIObject) {
-        // Do not keep a Rust reference to the header across a deleter call.
-        let old_combined_count = (*handle)
+        let obj = &mut *handle;
+        let old_combined_count = obj
             .combined_ref_count
-            // Match C++ Object::DecRef: publish this owner's writes before the
-            // last owner acquires them and runs the destructor.
-            .fetch_sub(COMBINED_REF_COUNT_STRONG_ONE, Ordering::Release);
+            .fetch_sub(COMBINED_REF_COUNT_STRONG_ONE, Ordering::Relaxed);
         if old_combined_count == COMBINED_REF_COUNT_BOTH_ONE {
-            fence(Ordering::Acquire);
-            if let Some(deleter) = (*handle).deleter {
-                deleter(handle.cast(), kTVMFFIObjectDeleterFlagBitMaskBoth as i32);
+            if let Some(deleter) = obj.deleter {
+                fence(Ordering::Acquire);
+                deleter(
+                    obj as *mut TVMFFIObject as *mut c_void,
+                    kTVMFFIObjectDeleterFlagBitMaskBoth as i32,
+                );
             }
         } else if (old_combined_count & COMBINED_REF_COUNT_MASK_U32)
             == COMBINED_REF_COUNT_STRONG_ONE
@@ -392,16 +370,22 @@ pub mod unsafe_ {
             // slow path, there is still a weak reference left
             // need to run two phase decrement
             fence(Ordering::Acquire);
-            if let Some(deleter) = (*handle).deleter {
-                deleter(handle.cast(), kTVMFFIObjectDeleterFlagBitMaskStrong as i32);
+            if let Some(deleter) = obj.deleter {
+                deleter(
+                    obj as *mut TVMFFIObject as *mut c_void,
+                    kTVMFFIObjectDeleterFlagBitMaskStrong as i32,
+                );
             }
-            let old_weak_count = (*handle)
+            let old_weak_count = obj
                 .combined_ref_count
                 .fetch_sub(COMBINED_REF_COUNT_WEAK_ONE, Ordering::Release);
             if old_weak_count == COMBINED_REF_COUNT_WEAK_ONE {
                 fence(Ordering::Acquire);
-                if let Some(deleter) = (*handle).deleter {
-                    deleter(handle.cast(), kTVMFFIObjectDeleterFlagBitMaskWeak as i32);
+                if let Some(deleter) = obj.deleter {
+                    deleter(
+                        obj as *mut TVMFFIObject as *mut c_void,
+                        kTVMFFIObjectDeleterFlagBitMaskWeak as i32,
+                    );
                 }
             }
         }
@@ -409,13 +393,13 @@ pub mod unsafe_ {
 
     #[inline]
     pub(crate) unsafe fn strong_count(handle: *mut TVMFFIObject) -> usize {
-        let obj = &*handle;
+        let obj = &mut *handle;
         (obj.combined_ref_count.load(Ordering::Relaxed) & COMBINED_REF_COUNT_MASK_U32) as usize
     }
 
     #[inline]
     pub(crate) unsafe fn weak_count(handle: *mut TVMFFIObject) -> usize {
-        let obj = &*handle;
+        let obj = &mut *handle;
         (obj.combined_ref_count.load(Ordering::Relaxed) >> 32) as usize
     }
 
@@ -440,16 +424,31 @@ pub mod unsafe_ {
         T: super::ObjectCoreWithExtraItems<ExtraItem = U>,
     {
         let obj = ptr as *mut T;
-        if flags & kTVMFFIObjectDeleterFlagBitMaskStrong as i32 != 0 {
+        if flags == kTVMFFIObjectDeleterFlagBitMaskBoth as i32 {
+            let extra_items_count = T::extra_items_count(&(*obj));
             std::ptr::drop_in_place(obj);
-        }
-        if flags & kTVMFFIObjectDeleterFlagBitMaskWeak as i32 != 0 {
-            // The object's offset depends only on alignment, not item count.
-            let (_, offset) = super::extra_items_layout::<T>(0);
-            let allocation = ptr.cast::<u8>().sub(offset);
-            let count = allocation.cast::<usize>().read();
-            let (layout, _) = super::extra_items_layout::<T>(count);
-            std::alloc::dealloc(allocation, layout);
+            let layout = std::alloc::Layout::from_size_align(
+                std::mem::size_of::<T>() + extra_items_count * std::mem::size_of::<U>(),
+                std::mem::align_of::<T>(),
+            )
+            .unwrap();
+            std::alloc::dealloc(ptr as *mut u8, layout);
+        } else {
+            assert_eq!(std::mem::size_of::<T>() % std::mem::size_of::<u64>(), 0);
+            if flags & kTVMFFIObjectDeleterFlagBitMaskStrong as i32 != 0 {
+                let extra_items_count = T::extra_items_count(&(*obj));
+                std::ptr::drop_in_place(obj);
+                std::ptr::write(obj as *mut u64, extra_items_count as u64);
+            }
+            if flags & kTVMFFIObjectDeleterFlagBitMaskWeak as i32 != 0 {
+                let extra_items_count = std::ptr::read(obj as *mut u64) as usize;
+                let layout = std::alloc::Layout::from_size_align(
+                    std::mem::size_of::<T>() + extra_items_count * std::mem::size_of::<U>(),
+                    std::mem::align_of::<T>(),
+                )
+                .unwrap();
+                std::alloc::dealloc(ptr as *mut u8, layout);
+            }
         }
     }
 }
@@ -462,7 +461,6 @@ impl Object {
     pub fn new() -> Self {
         Self {
             header: TVMFFIObject::new(),
-            _thread_confined: std::marker::PhantomData,
         }
     }
 }
@@ -521,13 +519,16 @@ impl<T: ObjectCore> ObjectArc<T> {
             assert_eq!(std::mem::align_of::<T>() % std::mem::align_of::<U>(), 0);
             assert_eq!(std::mem::size_of::<T>() % std::mem::align_of::<U>(), 0);
             let extra_items_count = T::extra_items_count(&data);
-            let (layout, offset) = extra_items_layout::<T>(extra_items_count);
+            let layout = std::alloc::Layout::from_size_align(
+                std::mem::size_of::<T>() + extra_items_count * std::mem::size_of::<U>(),
+                std::mem::align_of::<T>(),
+            )
+            .unwrap();
             let raw_data_ptr = std::alloc::alloc(layout);
             if raw_data_ptr.is_null() {
                 std::alloc::handle_alloc_error(layout);
             }
-            raw_data_ptr.cast::<usize>().write(extra_items_count);
-            let ptr = raw_data_ptr.add(offset).cast::<T>();
+            let ptr = raw_data_ptr as *mut T;
             std::ptr::write(ptr, data);
             // now override the header directly
             std::ptr::write(
@@ -602,7 +603,7 @@ impl<T: ObjectCore> ObjectArc<T> {
     /// * `*mut T` - The raw pointer
     #[inline]
     pub unsafe fn as_raw_mut(this: &mut Self) -> *mut T {
-        this.ptr.as_ptr()
+        this.ptr.as_mut()
     }
 
     /// Get the strong reference count of the ObjectArc
@@ -614,7 +615,9 @@ impl<T: ObjectCore> ObjectArc<T> {
     /// * `usize` - The strong reference count
     #[inline]
     pub fn strong_count(this: &Self) -> usize {
-        unsafe { unsafe_::strong_count(this.ptr.as_ptr().cast::<TVMFFIObject>()) }
+        unsafe {
+            unsafe_::strong_count(this.ptr.as_ref() as *const T as *mut T as *mut TVMFFIObject)
+        }
     }
 
     /// Get the weak reference count of the ObjectArc
@@ -626,7 +629,7 @@ impl<T: ObjectCore> ObjectArc<T> {
     /// * `usize` - The weak reference count
     #[inline]
     pub fn weak_count(this: &Self) -> usize {
-        unsafe { unsafe_::weak_count(this.ptr.as_ptr().cast::<TVMFFIObject>()) }
+        unsafe { unsafe_::weak_count(this.ptr.as_ref() as *const T as *mut T as *mut TVMFFIObject) }
     }
 }
 
@@ -639,29 +642,18 @@ impl<T: ObjectCore> Deref for ObjectArc<T> {
     }
 }
 
-// Exclusive Rust access requires both a single strong owner and no external
-// weak owners that could acquire another strong reference during the borrow.
+// implement DerefMut for ObjectArc
 impl<T: ObjectCore> DerefMut for ObjectArc<T> {
     #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {
-        unsafe {
-            let header = &*self.ptr.as_ptr().cast::<TVMFFIObject>();
-            assert_eq!(
-                header
-                    .combined_ref_count
-                    .load(std::sync::atomic::Ordering::Acquire),
-                COMBINED_REF_COUNT_BOTH_ONE,
-                "cannot mutably borrow a shared ObjectArc"
-            );
-            self.ptr.as_mut()
-        }
+        unsafe { self.ptr.as_mut() }
     }
 }
 
 // implement Drop for ObjectArc
 impl<T: ObjectCore> Drop for ObjectArc<T> {
     fn drop(&mut self) {
-        unsafe { unsafe_::dec_ref(self.ptr.as_ptr().cast::<TVMFFIObject>()) }
+        unsafe { unsafe_::dec_ref(self.ptr.as_mut() as *mut T as *mut TVMFFIObject) }
     }
 }
 
@@ -669,7 +661,7 @@ impl<T: ObjectCore> Drop for ObjectArc<T> {
 impl<T: ObjectCore> Clone for ObjectArc<T> {
     #[inline]
     fn clone(&self) -> Self {
-        unsafe { unsafe_::inc_ref(self.ptr.as_ptr().cast::<TVMFFIObject>()) }
+        unsafe { unsafe_::inc_ref(self.ptr.as_ref() as *const T as *mut T as *mut TVMFFIObject) }
         Self {
             ptr: self.ptr,
             _phantom: std::marker::PhantomData,
