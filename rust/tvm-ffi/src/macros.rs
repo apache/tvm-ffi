@@ -49,19 +49,22 @@ macro_rules! function_name {
 #[macro_export]
 macro_rules! cached_global_func {
     ($name:literal) => {{
-        static FUNC: std::sync::LazyLock<std::sync::atomic::AtomicPtr<$crate::function::Function>> =
-            std::sync::LazyLock::new(|| {
-                let function = $crate::function::Function::get_global($name).unwrap_or_else(|_| {
+        struct CachedGlobalFunction($crate::function::Function);
+
+        // SAFETY: this wrapper only holds registered globals, whose registration
+        // requires calls and destruction to support arbitrary threads.
+        unsafe impl ::std::marker::Send for CachedGlobalFunction {}
+        // SAFETY: the global registration contract also permits concurrent calls.
+        unsafe impl ::std::marker::Sync for CachedGlobalFunction {}
+
+        static FUNC: std::sync::LazyLock<CachedGlobalFunction> = std::sync::LazyLock::new(|| {
+            CachedGlobalFunction(
+                $crate::function::Function::get_global($name).unwrap_or_else(|_| {
                     panic!(concat!("global function `", $name, "` is not registered"))
-                });
-                std::sync::atomic::AtomicPtr::new(std::boxed::Box::into_raw(std::boxed::Box::new(
-                    function,
-                )))
-            });
-        // SAFETY: only globally registered functions are cached here. Their
-        // registration permits cross-thread use, and this cache retains them
-        // for the process lifetime. This does not apply to arbitrary Functions.
-        unsafe { &*FUNC.load(std::sync::atomic::Ordering::Relaxed) }
+                }),
+            )
+        });
+        &FUNC.0
     }};
 }
 

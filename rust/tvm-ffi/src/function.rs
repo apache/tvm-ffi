@@ -322,11 +322,9 @@ impl Function {
     ///
     /// # Safety
     ///
-    /// All calls and destruction, including through copies retained by native
-    /// code, must respect the captured state's thread requirements. Captures
-    /// that are not `Send` must stay on their owning thread; captures that are
-    /// not `Sync` must not be accessed concurrently. `Send + Sync` captures
-    /// satisfy these requirements without restricting the calling thread.
+    /// Non-`Send` captures must remain on their owning thread, and non-`Sync`
+    /// captures must not be accessed concurrently. These requirements apply
+    /// to all calls and final destruction, including through native copies.
     ///
     /// ```compile_fail
     /// use tvm_ffi::{Any, Function};
