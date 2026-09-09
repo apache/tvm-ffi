@@ -65,18 +65,20 @@ fn test_function_thread_safe_captures_and_global_cache() {
         // Neither the argument holder nor the returned Any needs to be Send.
         cached_global_func!("testing.echo").call_tuple((value,))
     });
+    // SAFETY: the Rust callback captures only an Arc<AtomicUsize>.
+    unsafe { Function::register_global("testing.rust_shared_callback", function).unwrap() };
     std::thread::scope(|scope| {
         for value in 0..4i64 {
-            let function = &function;
             scope.spawn(move || {
+                let function = cached_global_func!("testing.rust_shared_callback");
                 let result: i64 = function.call_tuple((value,)).unwrap().try_into().unwrap();
                 assert_eq!(result, value);
             });
         }
     });
     assert_eq!(calls.load(Ordering::Relaxed), 4);
-    std::thread::spawn(move || drop(function)).join().unwrap();
-    assert_eq!(Arc::strong_count(&calls), 1);
+    // The global registry retains the callback after the calling threads exit.
+    assert_eq!(Arc::strong_count(&calls), 2);
 }
 
 #[test]

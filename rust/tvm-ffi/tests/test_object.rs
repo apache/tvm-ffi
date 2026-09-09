@@ -48,6 +48,10 @@ assert_not_impl!(Any: Send);
 assert_not_impl!(Any: Sync);
 assert_not_impl!(AnyView<'static>: Send);
 assert_not_impl!(AnyView<'static>: Sync);
+assert_not_impl!(Function: Send);
+assert_not_impl!(Function: Sync);
+assert_not_impl!(ObjectArc<tvm_ffi::function::FunctionObj>: Send);
+assert_not_impl!(ObjectArc<tvm_ffi::function::FunctionObj>: Sync);
 
 // must have repr(C) for the object header stays in the same position
 #[repr(C)]
@@ -101,7 +105,6 @@ unsafe impl ObjectCoreWithExtraItems for TestIntObj {
 fn test_object_arc() {
     fn require_shared<T: Send + Sync>() {}
     require_shared::<Object>();
-    require_shared::<ObjectArc<tvm_ffi::function::FunctionObj>>();
 
     let delete_counter = Arc::new(AtomicU32::new(0));
     let obj_arc = ObjectArc::new(TestIntObj::new(11, delete_counter.clone(), 0));

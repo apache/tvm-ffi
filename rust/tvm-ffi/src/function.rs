@@ -20,7 +20,7 @@ use crate::any::{Any, AnyView};
 use crate::derive::{Object, ObjectRef};
 use crate::error::{Error, Result};
 use crate::function_internal::{AsPackedCallable, TupleAsPackedArgs};
-use crate::object::{Object, ObjectArc, ObjectCore, ObjectThreadSafe};
+use crate::object::{Object, ObjectArc, ObjectCore};
 use crate::type_traits::AnyCompatible;
 use tvm_ffi_sys::{
     TVMFFIAny, TVMFFIByteArray, TVMFFIFunctionCell, TVMFFIFunctionCreate, TVMFFIFunctionGetGlobal,
@@ -38,16 +38,12 @@ pub struct FunctionObj {
     cell: TVMFFIFunctionCell,
 }
 
-/// A shareable packed function. Rust callbacks must have thread-safe captures.
+/// A packed function. Native captures may include non-thread-safe state,
+/// so an arbitrary Function is neither Send nor Sync.
 #[derive(Clone, ObjectRef)]
 pub struct Function {
     data: ObjectArc<FunctionObj>,
 }
-
-// SAFETY: Rust callbacks require Send + Sync, including their captured state.
-// Foreign callbacks must uphold the same contract (see from_extern_c), including
-// hidden captures and their destruction. This applies to every ffi.Function.
-unsafe impl ObjectThreadSafe for FunctionObj {}
 
 //------------------------------------------------------------------------
 // CallbackFunctionObjImpl
@@ -304,7 +300,14 @@ impl Function {
     ///
     /// # Returns
     /// * `Result<()>` - The result of the registration
-    pub fn register_global(name: &str, func: Function) -> Result<()> {
+    ///
+    /// # Safety
+    ///
+    /// The function and its captured state must support calls and destruction
+    /// on arbitrary threads. Registration makes it reachable from every thread.
+    /// Rust callbacks made by `from_packed` or `from_typed` meet this requirement;
+    /// arbitrary native functions do not necessarily do so.
+    pub unsafe fn register_global(name: &str, func: Function) -> Result<()> {
         unsafe {
             let name_arg = TVMFFIByteArray::from_str(name);
             let can_override = 0;
@@ -318,9 +321,9 @@ impl Function {
     }
     /// Construct a function from a packed function.
     ///
-    /// A Function can be called, retained, and dropped on another thread, so its
-    /// captured state must be `Send + Sync`. This does not require its arguments
-    /// or result to be `Send`: they are supplied and returned on the calling thread.
+    /// Native callees may retain callbacks and invoke or release them on another
+    /// thread, so captures must be `Send + Sync`. Arguments and results stay on
+    /// the calling thread and do not need those bounds.
     ///
     /// ```compile_fail
     /// use std::rc::Rc;

@@ -24,6 +24,12 @@ use tvm_ffi::*;
 
 #[test]
 fn test_any_shape() {
+    let empty = Shape::new();
+    assert!(empty.as_slice().is_empty());
+    assert!(empty == Shape::from([]));
+    let empty = Shape::try_from(Any::from(empty)).unwrap();
+    assert!(empty.as_slice().is_empty());
+
     let shape = Shape::from(vec![1, 2, 3, 4]);
     let any = Any::from(shape.clone());
     let any_view = AnyView::from(&shape);

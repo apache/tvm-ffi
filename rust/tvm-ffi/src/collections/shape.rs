@@ -60,7 +60,11 @@ impl Shape {
 
     /// Get the shape as a slice
     pub fn as_slice(&self) -> &[i64] {
-        unsafe { std::slice::from_raw_parts(self.data.data.data, self.data.data.size) }
+        if self.data.data.size == 0 {
+            &[]
+        } else {
+            unsafe { std::slice::from_raw_parts(self.data.data.data, self.data.data.size) }
+        }
     }
 
     /// Fill the strides from the shape

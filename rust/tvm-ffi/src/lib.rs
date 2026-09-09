@@ -62,7 +62,6 @@ pub use crate::function::Function;
 pub use crate::object::ObjectRefCast;
 pub use crate::object::{
     Object, ObjectArc, ObjectCore, ObjectCoreWithExtraItems, ObjectIdentity, ObjectRefCore,
-    ObjectThreadSafe,
 };
 pub use crate::optional::{Optional, OptionalCompatible};
 pub use crate::reflection::{get_type_attr, FieldGetter, TypeAttrColumn};

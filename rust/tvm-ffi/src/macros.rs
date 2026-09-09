@@ -49,13 +49,19 @@ macro_rules! function_name {
 #[macro_export]
 macro_rules! cached_global_func {
     ($name:literal) => {{
-        static FUNC: std::sync::LazyLock<$crate::function::Function> =
+        static FUNC: std::sync::LazyLock<std::sync::atomic::AtomicPtr<$crate::function::Function>> =
             std::sync::LazyLock::new(|| {
-                $crate::function::Function::get_global($name).unwrap_or_else(|_| {
+                let function = $crate::function::Function::get_global($name).unwrap_or_else(|_| {
                     panic!(concat!("global function `", $name, "` is not registered"))
-                })
+                });
+                std::sync::atomic::AtomicPtr::new(std::boxed::Box::into_raw(std::boxed::Box::new(
+                    function,
+                )))
             });
-        &*FUNC
+        // SAFETY: only globally registered functions are cached here. Their
+        // registration permits cross-thread use, and this cache retains them
+        // for the process lifetime. This does not apply to arbitrary Functions.
+        unsafe { &*FUNC.load(std::sync::atomic::Ordering::Relaxed) }
     }};
 }
 

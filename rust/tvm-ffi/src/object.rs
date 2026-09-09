@@ -36,6 +36,9 @@ pub struct Object {
 /// Unlike `std::sync::Arc`, the reference-count header is part of `T`.
 /// There is no `DerefMut`: replacing `T` would overwrite that live header,
 /// even with a single owner. Mutation must preserve the object's ABI invariants.
+/// The ABI prefix alone does not establish thread safety for the allocation.
+/// Concrete reference bindings can implement Rust's `Send` and `Sync` after
+/// auditing their full dynamic objects, including hidden state and destruction.
 ///
 /// \tparam T The type of the object to be wrapped
 #[repr(C)]
@@ -43,10 +46,6 @@ pub struct ObjectArc<T: ObjectCore> {
     ptr: std::ptr::NonNull<T>,
     _phantom: std::marker::PhantomData<T>,
 }
-
-// A Send + Sync prefix alone cannot prove that its dynamic allocation is safe.
-unsafe impl<T: ObjectThreadSafe> Send for ObjectArc<T> {}
-unsafe impl<T: ObjectThreadSafe> Sync for ObjectArc<T> {}
 
 // The allocation length must outlive T's destructor when weak owners remain.
 // Keep it before the ABI-visible object, never in the live reference-count header.
@@ -92,15 +91,6 @@ pub unsafe trait ObjectCore: Sized + 'static {
     /// \return The object header
     unsafe fn object_header_mut(this: &mut Self) -> &mut TVMFFIObject;
 }
-
-/// Allow an [`ObjectArc`] to be shared across threads.
-///
-/// # Safety
-///
-/// Every allocation accepted by this view must support access and destruction
-/// on arbitrary threads, including hidden native state and dynamic subtypes.
-/// Visible fields being `Send + Sync` is necessary, but not sufficient.
-pub unsafe trait ObjectThreadSafe: ObjectCore + Send + Sync {}
 
 /// Traits for objects with extra items that follows the object
 ///
