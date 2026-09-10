@@ -286,6 +286,8 @@ allowed-unresolved-imports = [
   "torch",
   "torch.*",
   "torch.utils.*",
+  "torch_npu",
+  "torch_npu.*",
   "my_ffi_extension",
   "my_ffi_extension.*",
   "_pytest.*",
