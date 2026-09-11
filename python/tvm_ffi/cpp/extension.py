@@ -22,6 +22,7 @@ import functools
 import hashlib
 import logging
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -344,11 +345,19 @@ def _run_command_in_dev_prompt(
         if not Path(vsdevcmd_path).exists():
             raise FileNotFoundError(f"VsDevCmd.bat not found at: {vsdevcmd_path}")
 
+        machine = platform.machine().lower()
+        if machine in ("arm64", "aarch64"):
+            msvc_arch = "arm64"
+        elif machine in ("amd64", "x86_64"):
+            msvc_arch = "x64"
+        else:
+            raise RuntimeError(f"Unsupported Windows architecture: {platform.machine()}")
+
         # Use cmd.exe to run the batch file and then your command.
         # The /k flag keeps the command prompt open after the batch file runs.
         # The "&" symbol chains the commands.
-        cmd_command = '"{vsdevcmd_path}" -arch=x64 & {command}'.format(
-            vsdevcmd_path=vsdevcmd_path, command=" ".join(args)
+        cmd_command = '"{vsdevcmd_path}" -arch={arch} & {command}'.format(
+            vsdevcmd_path=vsdevcmd_path, arch=msvc_arch, command=" ".join(args)
         )
 
         # Execute the command in a new shell
