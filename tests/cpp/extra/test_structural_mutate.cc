@@ -345,6 +345,9 @@ class StructuralMapWithMutateCount : public StructuralMapEngineBase {
 class StructuralMutateLayer : public StructuralMapEngineBase {
  public:
   using MutatorObjType = StructuralMutateLayer;
+  using StructuralMapEngineBase::HasVarRemap;
+  using StructuralMapEngineBase::VarRemapGetImpl;
+  using StructuralMapEngineBase::VarRemapSetImpl;
 
   explicit StructuralMutateLayer(const StructuralMutatorVTable* vtable)
       : StructuralMapEngineBase(vtable) {}
@@ -559,6 +562,25 @@ TEST(StructuralMutate, CallbackArityControlsInplaceMutation) {
 }
 
 TEST(StructuralMutate, MatchedVarOwnsRemapConsistency) {
+  TVar key("key"), replacement("replacement");
+  {
+    auto engine = make_object<StructuralMutateLayer>(nullptr);
+    EXPECT_FALSE(engine->HasVarRemap());
+    EXPECT_TRUE(engine->VarRemapGetImpl(nullptr).is_err());
+    EXPECT_TRUE(engine->VarRemapGetImpl(1).is_err());
+    EXPECT_EQ(engine->VarRemapGetImpl(key).value(), nullptr);
+    engine->VarRemapSetImpl(key, replacement).value();
+    EXPECT_TRUE(engine->HasVarRemap());
+    EXPECT_FALSE(key.unique());
+    EXPECT_TRUE(engine->VarRemapGetImpl(key).value().cast<TVar>().same_as(replacement));
+    EXPECT_EQ(engine->VarRemapGetImpl(TVar("missing")).value(), nullptr);
+    engine->VarRemapSetImpl(key, Any(Unchanged())).value();
+    EXPECT_EQ(engine->VarRemapGetImpl(key).value().type_index(), TypeIndex::kTVMFFIUnchanged);
+    EXPECT_TRUE(engine->HasVarRemap());
+    EXPECT_TRUE(replacement.unique());
+  }
+  EXPECT_TRUE(key.unique());
+
   TVarWithDep var("n", TVar("type"));
   TPair root(TDefHolder(TVarWithDep("pattern"), var), var);
   int type_callback_count = 0;

@@ -1085,6 +1085,9 @@ class StructuralMapEngineBase : public StructuralMutatorObj {
     }
   }
 
+  /*! \brief Whether the owned variable-remap environment has any entries. */
+  TVM_FFI_INLINE bool HasVarRemap() const noexcept { return !var_remap_.empty(); }
+
   /*!
    * \brief Look up a replacement in the identity-substitution environment.
    * \param var The borrowed variable identity to look up.
@@ -1094,6 +1097,9 @@ class StructuralMapEngineBase : public StructuralMutatorObj {
     if (TVM_FFI_PREDICT_FALSE(var.type_index() < TypeIndex::kTVMFFIStaticObjectBegin)) {
       return VarRemapKeyTypeError();
     }
+    // An empty environment is common for ordinary unchanged traversal. Avoid
+    // hashing the identity (including a bucket-count division) on this path.
+    if (var_remap_.empty()) return Any(nullptr);
     const Object* var_ptr =
         details::AnyUnsafe::RawObjectPtrFromAnyViewAfterCheck<const Object>(var);
     auto it = var_remap_.find(var_ptr);
@@ -1112,15 +1118,24 @@ class StructuralMapEngineBase : public StructuralMutatorObj {
     }
     const Object* var_ptr =
         details::AnyUnsafe::RawObjectPtrFromAnyViewAfterCheck<const Object>(var);
-    Any owned_mapped_value(mapped_value);
-    auto [it, inserted] = var_remap_.try_emplace(var_ptr, std::move(owned_mapped_value));
-    if (inserted) {
-      details::ObjectUnsafe::IncRefObjectHandle(
-          reinterpret_cast<TVMFFIObjectHandle>(const_cast<Object*>(var_ptr)));
-    } else {
-      it->second = std::move(owned_mapped_value);
+    // Allocation in the owned binding must not escape this noexcept boundary.
+    // In particular, a failed insertion leaves both the map and borrowed key
+    // unchanged, while the local owning replacement releases normally.
+    try {
+      Any owned_mapped_value(mapped_value);
+      auto [it, inserted] = var_remap_.try_emplace(var_ptr, std::move(owned_mapped_value));
+      if (inserted) {
+        details::ObjectUnsafe::IncRefObjectHandle(
+            reinterpret_cast<TVMFFIObjectHandle>(const_cast<Object*>(var_ptr)));
+      } else {
+        it->second = std::move(owned_mapped_value);
+      }
+      return Expected<void>();
+    } catch (Error& error) {
+      return Unexpected(std::move(error));
+    } catch (const std::exception& error) {
+      return Unexpected(Error("RuntimeError", error.what(), ""));
     }
-    return Expected<void>();
   }
 
  private:
