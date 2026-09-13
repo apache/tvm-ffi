@@ -155,6 +155,13 @@ pub(crate) fn try_to_owned_without_normalization(raw: TVMFFIAny) -> Option<Any> 
 
 pub(crate) use crate::any::is_plain_inline;
 
+#[inline]
+pub(crate) fn same_shallow(lhs: TVMFFIAny, rhs: TVMFFIAny) -> bool {
+    lhs.type_index == rhs.type_index
+        && lhs.small_str_len == rhs.small_str_len
+        && unsafe { lhs.data_union.v_uint64 == rhs.data_union.v_uint64 }
+}
+
 /// Subtype check with the base's inheritance depth supplied by the caller
 /// (`ObjectCore::TYPE_DEPTH`), so only the object's type info is fetched.
 #[inline]

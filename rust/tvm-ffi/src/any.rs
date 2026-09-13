@@ -304,6 +304,7 @@ pub(crate) fn is_plain_inline(type_index: i32) -> bool {
     type_index < TypeIndex::kTVMFFIRawStr as i32
         || type_index == TypeIndex::kTVMFFISmallStr as i32
         || type_index == TypeIndex::kTVMFFISmallBytes as i32
+        || type_index == TypeIndex::kTVMFFIUnchanged as i32
 }
 
 // convert AnyView to Any

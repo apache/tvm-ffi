@@ -58,6 +58,7 @@ pub use crate::extra::structural_visit::{
     StructuralVisitor, VisitCallbacks, VisitChainLink, VisitContext, VisitInterrupt, VisitValue,
     WalkChainLink, WalkDispatch, WalkOrder, WalkResult,
 };
+pub use crate::extra::unchanged::{Unchanged, UnchangedOr};
 pub use crate::function::Function;
 pub use crate::object::ObjectRefCast;
 pub use crate::object::{
