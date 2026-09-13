@@ -1434,7 +1434,15 @@ impl<D: MapDispatch> NativeMapper<D> {
         if is_plain_inline(raw.type_index) {
             let value = MapValue::from_raw(raw);
             return match self.dispatch.dispatch_map(&value, def_region_kind) {
-                Some(result) => result,
+                Some(result) => {
+                    let mapped = result?;
+                    // A pre-order callback may replace an inline leaf with a subtree.
+                    if self.order == WalkOrder::PreOrder && !is_plain_inline(mapped.type_index()) {
+                        self.map_default_root(&mapped, def_region_kind, Permit::MaybeInPlace)
+                    } else {
+                        Ok(mapped)
+                    }
+                }
                 // SAFETY: `is_plain_inline` excludes every borrowed
                 // representation that needs normalization.  These values own
                 // no external resource, so their owning form is the same
