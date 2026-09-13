@@ -496,41 +496,11 @@ completed before a later error are not rolled back, and the consumed root is
 not returned on error.
 
 Callbacks can also return `Unchanged` or `UnchangedOr<T>`, optionally wrapped
-in `Result`. These preserve the native mutation protocol's unchanged marker
-without acquiring another owner of the input. A pre-order map callback that
-returns `Unchanged` still lets the engine map the original value's children.
-The top-level `structural_map` and `structural_mutate` functions resolve the
-marker and return an ordinary owning `Any`.
-
-`Mutator`, `CallbackMutator`, and `StructuralMutator` provide `mutate_result`
-and `default_mutate_result` for recursion that keeps this distinction. The
-existing `mutate` and `default_mutate` methods still return the resolved value.
-For example, a callback can delegate to a native hook without materializing
-its unchanged result:
-
-```rust
-use tvm_ffi::{
-    structural_mutate, Any, Array, CallbackMutator, MapValue, Result, UnchangedOr,
-};
-
-let mapped = structural_mutate(
-    Array::new(vec![1_i64, 2]),
-    |_value: &MapValue, mutator: &mut CallbackMutator| -> Result<UnchangedOr<Any>> {
-        mutator.default_mutate_result()
-    },
-)?;
-let mapped = Array::<i64>::try_from(mapped)?;
-assert_eq!(mapped.iter().collect::<Vec<_>>(), vec![1, 2]);
-```
-
-Use `UnchangedOr::changed(value)` for a replacement and
-`UnchangedOr::<T>::unchanged()` to keep the original. `value_or(original)`
-moves out the replacement or original; `value_or_else` only materializes the
-original when needed. `map` and `try_map` convert a typed replacement while
-preserving unchanged and propagating errors. `try_cast::<T>()` checks an
-erased result with the strict FFI type checks used by `Any::try_as`, without
-cloning it. Borrowing a wrapper as `AnyView`
-does not increment a replacement object's reference count.
+in `Result`. A pre-order map still maps the original value's children when
+a callback returns `Unchanged`. Use `mutate_result` and
+`default_mutate_result` to preserve unchanged during recursion; existing
+owning-value helpers and top-level functions resolve the marker to the
+original value.
 
 `structural_mutate` accepts typed callback chains in addition to a
 `StructuralMutator`. Closure callbacks receive a `CallbackMutator`;
