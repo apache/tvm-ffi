@@ -818,6 +818,42 @@ fn callbacks_return_values_convertible_into_any() {
 }
 
 #[test]
+fn recursive_mutate_returns_unchanged_or_a_replacement() {
+    fn clamp_negative_integers(
+        value: &MapValue,
+        mutator: &mut CallbackMutator,
+    ) -> Result<UnchangedOr<Any>> {
+        if let Some(integer) = value.cast::<i64>() {
+            if integer >= 0 {
+                // Keep this input without constructing an owning return value.
+                return Ok(UnchangedOr::unchanged());
+            }
+            return Ok(UnchangedOr::changed(Any::from(0i64)));
+        }
+
+        // Recurse into containers. Keep the unchanged marker if no child changed.
+        mutator.default_mutate_result()
+    }
+
+    // No rewrite: the public entry resolves unchanged to the original array.
+    let source = Array::new(vec![1i64, 2]);
+    let result = structural_mutate(source.clone(), clamp_negative_integers)
+        .and_then(Array::<i64>::try_from)
+        .unwrap();
+    assert_eq!(result.iter().collect::<Vec<_>>(), vec![1, 2]);
+    assert_eq!(array_pointer(&result), array_pointer(&source));
+
+    // One rewrite: replace only the negative integer and keep the source intact.
+    let source = Array::new(vec![-1i64, 2]);
+    let result = structural_mutate(source.clone(), clamp_negative_integers)
+        .and_then(Array::<i64>::try_from)
+        .unwrap();
+    assert_eq!(result.iter().collect::<Vec<_>>(), vec![0, 2]);
+    assert_ne!(array_pointer(&result), array_pointer(&source));
+    assert_eq!(source.iter().collect::<Vec<_>>(), vec![-1, 2]);
+}
+
+#[test]
 fn pre_order_unchanged_reuses_unmodified_subtrees() {
     let unchanged = Array::new(vec![1i64, 2]);
     let changed = Array::new(vec![-1i64, 2]);
