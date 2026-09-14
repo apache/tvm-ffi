@@ -102,9 +102,12 @@ mod container_element_ops {
     use super::{Any, AnyCompatible, AnyView, TVMFFIAny};
 
     pub trait Ops: Sized {
+        const CONTAINER_IS_ANY: bool = false;
+
         unsafe fn container_copy_to_any_view(src: &Self, data: &mut TVMFFIAny);
         unsafe fn container_move_to_any(src: Self, data: &mut TVMFFIAny);
         unsafe fn container_check_any_strict(data: &TVMFFIAny) -> bool;
+        unsafe fn container_copy_from_any_view_after_check(data: &TVMFFIAny) -> Self;
         unsafe fn container_move_from_any_after_check(data: &mut TVMFFIAny) -> Self;
         unsafe fn container_try_cast_from_any_view(data: &TVMFFIAny) -> Result<Self, ()>;
         fn container_get_mismatch_type_info(data: &TVMFFIAny) -> String;
@@ -125,6 +128,11 @@ mod container_element_ops {
         #[inline]
         unsafe fn container_check_any_strict(data: &TVMFFIAny) -> bool {
             <T as AnyCompatible>::check_any_strict(data)
+        }
+
+        #[inline]
+        unsafe fn container_copy_from_any_view_after_check(data: &TVMFFIAny) -> Self {
+            <T as AnyCompatible>::copy_from_any_view_after_check(data)
         }
 
         #[inline]
@@ -149,6 +157,8 @@ mod container_element_ops {
     }
 
     impl Ops for Any {
+        const CONTAINER_IS_ANY: bool = true;
+
         #[inline]
         unsafe fn container_copy_to_any_view(src: &Self, data: &mut TVMFFIAny) {
             *data = *src.as_raw_ffi_any();
@@ -162,6 +172,11 @@ mod container_element_ops {
         #[inline]
         unsafe fn container_check_any_strict(_data: &TVMFFIAny) -> bool {
             true
+        }
+
+        #[inline]
+        unsafe fn container_copy_from_any_view_after_check(data: &TVMFFIAny) -> Self {
+            Any::from(AnyView::from_raw_ffi_any(*data))
         }
 
         #[inline]

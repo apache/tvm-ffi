@@ -178,9 +178,7 @@ impl<T: ContainerElement> UnchangedOr<T> {
     /// [`Any::try_as`]. For a known typed conversion, use `map(Into::into)`.
     #[inline]
     pub fn try_cast<U: ContainerElement>(self) -> Result<UnchangedOr<U>> {
-        if self.is_unchanged()
-            || unsafe { U::container_check_any_strict(self.data.as_raw_ffi_any()) }
-        {
+        if unsafe { UnchangedOr::<U>::check_any_strict(self.data.as_raw_ffi_any()) } {
             Ok(UnchangedOr {
                 data: self.data,
                 _marker: PhantomData,
@@ -236,14 +234,20 @@ unsafe impl<T: ContainerElement> AnyCompatible for UnchangedOr<T> {
     }
 
     unsafe fn check_any_strict(data: &TVMFFIAny) -> bool {
-        Unchanged::check_any_strict(data) || T::container_check_any_strict(data)
+        if T::CONTAINER_IS_ANY {
+            // An erased successful result excludes the ABI's error channel.
+            data.type_index != TVMFFITypeIndex::kTVMFFIError as i32
+        } else {
+            Unchanged::check_any_strict(data) || T::container_check_any_strict(data)
+        }
     }
 
     unsafe fn copy_from_any_view_after_check(data: &TVMFFIAny) -> Self {
-        Self {
-            data: AnyView::from_raw_ffi_any(*data).into(),
-            _marker: PhantomData,
+        if Unchanged::check_any_strict(data) {
+            return Self::unchanged();
         }
+        // Materialize T, including numeric narrowing, before storing its value.
+        Self::changed(T::container_copy_from_any_view_after_check(data))
     }
 
     unsafe fn move_from_any_after_check(data: &mut TVMFFIAny) -> Self {
@@ -254,6 +258,9 @@ unsafe impl<T: ContainerElement> AnyCompatible for UnchangedOr<T> {
     }
 
     unsafe fn try_cast_from_any_view(data: &TVMFFIAny) -> std::result::Result<Self, ()> {
+        if T::CONTAINER_IS_ANY && data.type_index == TVMFFITypeIndex::kTVMFFIError as i32 {
+            return Err(());
+        }
         if Unchanged::check_any_strict(data) {
             return Ok(Self::unchanged());
         }
