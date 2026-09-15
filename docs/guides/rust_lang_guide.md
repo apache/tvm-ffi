@@ -477,13 +477,9 @@ container's children are mapped forces the non-in-place path. Reflected
 objects must provide `__ffi_shallow_copy__`; the copy is validated before
 fields are mapped and discarded if no structural field changes.
 
-Within one `structural_map` call, callbacks run at every occurrence, including
-repeated `FreeVar` and `DAGNode` identities. Default reflected recursion manages
-identity substitutions; callback replacements are not cached. A variable use
-without a recorded substitution retains the original without visiting fields.
-Unchanged simple definitions need no entry; pattern definitions and DAG nodes
-can cache `Unchanged` to skip repeated descent. Registered hooks manage their
-own remapping.
+Within one `structural_map` call, callbacks run at every occurrence; their
+results are not cached. Default recursion manages identity remapping with
+the same semantics as C++.
 
 Default recursion uses the same type attributes as C++: it calls
 `__s_maybe_inplace_mutate__` for a uniquely owned object when available, or
