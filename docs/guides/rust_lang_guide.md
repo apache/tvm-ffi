@@ -368,7 +368,7 @@ returned explicitly because `?` only propagates errors.
 
 `VisitCallbacks::with_layer` and `WalkWithLayer` customize default recursion
 with reusable `VisitLayer<State>` policies. See the `VisitLayer` API
-documentation for composition and shared-state examples.
+documentation for layer composition and state access.
 
 For a named implementation, `#[dispatch(visit)]` generates
 `StructuralVisitor` from `visit_*` methods. Matching handlers own recursion;
