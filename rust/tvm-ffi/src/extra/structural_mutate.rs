@@ -1134,7 +1134,7 @@ impl StructuralVarRemap {
         Ok(self.entries.get(&key).map(|entry| entry.result.clone()))
     }
 
-    /// Store the final mutated value for `var`.
+    /// Store a descent result or an [`Unchanged`] marker for `var`.
     pub fn set(&mut self, var: &MapValue, mutated_value: &Any) -> Result<()> {
         let key = object_identity_key(var.raw())?;
         self.entries.insert(
@@ -1545,7 +1545,7 @@ struct MemoEntry {
 struct NativeMapper<D> {
     dispatch: D,
     order: WalkOrder,
-    memo: HashMap<NonNull<TVMFFIObject>, MemoEntry>,
+    remap: StructuralVarRemap,
 }
 
 impl<D: MapDispatch> NativeMapper<D> {
@@ -1587,39 +1587,11 @@ impl<D: MapDispatch> NativeMapper<D> {
             };
         }
 
-        let identity = identity_key(raw)?;
-        if let Some(key) = identity {
-            if let Some(entry) = self.memo.get(&key) {
-                return Ok(entry.result.clone());
-            }
-        }
-
-        // Identity nodes need an owning key for the complete invocation.  The
-        // extra owner intentionally disables mutation of the original
-        // identity node; a distinct callback replacement may still be unique.
-        let original = identity.map(|_| owned_from_raw(raw)).transpose()?;
-        let effective_permit = if identity.is_some() {
-            Permit::Copy
-        } else {
-            permit
-        };
-        let result = self
-            .map_uncached_raw(raw, def_region_kind, effective_permit)
-            .map_err(|error| with_value_context(error, raw))?;
-
-        if let (Some(key), Some(original)) = (identity, original) {
-            self.memo.insert(
-                key,
-                MemoEntry {
-                    _original: original,
-                    result: resolve_result(result.clone(), raw)?,
-                },
-            );
-        }
-        Ok(result)
+        self.map_current_raw(raw, def_region_kind, permit)
+            .map_err(|error| with_value_context(error, raw))
     }
 
-    fn map_uncached_raw(
+    fn map_current_raw(
         &mut self,
         raw: TVMFFIAny,
         def_region_kind: DefRegionKind,
@@ -1665,9 +1637,7 @@ impl<D: MapDispatch> NativeMapper<D> {
         }
     }
 
-    /// Map a pre-order callback replacement without invoking a callback for
-    /// the replacement root.  Its children still enter the full map engine,
-    /// and an identity replacement is memoized with its final default result.
+    /// Descend into a pre-order replacement without dispatching its root again.
     fn map_default_root(
         &mut self,
         mapped: &Any,
@@ -1675,31 +1645,8 @@ impl<D: MapDispatch> NativeMapper<D> {
         permit: Permit,
     ) -> Result<Any> {
         let raw = *mapped.as_raw_ffi_any();
-        let identity = identity_key(raw)?;
-        if let Some(key) = identity {
-            if let Some(entry) = self.memo.get(&key) {
-                return Ok(entry.result.clone());
-            }
-        }
-        let original = identity.map(|_| owned_from_raw(raw)).transpose()?;
-        let effective_permit = if identity.is_some() {
-            Permit::Copy
-        } else {
-            permit
-        };
-        let result = self
-            .default_map_current_raw(raw, def_region_kind, effective_permit)
-            .map_err(|error| with_value_context(error, raw))?;
-        if let (Some(key), Some(original)) = (identity, original) {
-            self.memo.insert(
-                key,
-                MemoEntry {
-                    _original: original,
-                    result: resolve_result(result.clone(), raw)?,
-                },
-            );
-        }
-        Ok(result)
+        self.default_map_current_raw(raw, def_region_kind, permit)
+            .map_err(|error| with_value_context(error, raw))
     }
 }
 
@@ -1735,14 +1682,7 @@ trait MutationDriver: Sized {
         def_region_kind: DefRegionKind,
         permit: Permit,
     ) -> Result<Any> {
-        if let Some(mapped) = self.call_registered_hook(raw, def_region_kind, permit)? {
-            return Ok(mapped);
-        }
-        if raw.type_index < TVMFFITypeIndex::kTVMFFIStaticObjectBegin as i32 {
-            owned_from_raw(raw)
-        } else {
-            self.map_reflected(raw, def_region_kind)
-        }
+        default_mutate_driver(self, raw, def_region_kind, permit)
     }
 
     fn map_reflected(&mut self, raw: TVMFFIAny, def_region_kind: DefRegionKind) -> Result<Any> {
@@ -2245,20 +2185,11 @@ impl<D: MapDispatch> MutationDriver for NativeMapper<D> {
     }
 
     fn var_remap_get_raw(&mut self, raw: TVMFFIAny) -> Result<Option<Any>> {
-        let key = object_identity_key(raw)?;
-        Ok(self.memo.get(&key).map(|entry| entry.result.clone()))
+        self.remap.get(&MapValue::from_raw(raw))
     }
 
     fn var_remap_set_raw(&mut self, raw: TVMFFIAny, replacement: &Any) -> Result<()> {
-        let key = object_identity_key(raw)?;
-        self.memo.insert(
-            key,
-            MemoEntry {
-                _original: owned_from_raw(raw)?,
-                result: replacement.clone(),
-            },
-        );
-        Ok(())
+        self.remap.set(&MapValue::from_raw(raw), replacement)
     }
 }
 
@@ -2579,18 +2510,29 @@ fn default_mutate_driver<D: MutationDriver>(
         return owned_from_raw(raw);
     }
 
-    let remappable = identity_key(raw)?.is_some();
-    if remappable {
+    let kind = structural_hash_kind(raw)?;
+    let is_free_var = kind == Some(TVMFFISEqHashKind::kTVMFFISEqHashKindFreeVar as i32);
+    let is_dag_node = kind == Some(TVMFFISEqHashKind::kTVMFFISEqHashKindDAGNode as i32);
+    if is_free_var || is_dag_node {
         if let Some(mutated) = driver.var_remap_get_raw(raw)? {
-            return Ok(mutated);
+            // The ABI uses None for a miss; an Unchanged marker is a cached result.
+            if mutated.type_index() != TVMFFITypeIndex::kTVMFFINone as i32 {
+                return Ok(mutated);
+            }
         }
+    }
+    // A variable use with no binding retains its identity without visiting fields.
+    if is_free_var && def_region_kind == DefRegionKind::None {
+        return Ok(Unchanged.into());
     }
 
     let result = driver.map_reflected(raw, def_region_kind)?;
-    if remappable {
-        // The invocation's existing remap policy stores resolved values.
-        let cached = resolve_result(result.clone(), raw)?;
-        driver.var_remap_set_raw(raw, &cached)?;
+    if is_dag_node
+        || (is_free_var && (def_region_kind == DefRegionKind::Pattern || !is_unchanged(&result)))
+    {
+        // Keep markers for DAG nodes and pattern definitions. An unchanged simple
+        // definition needs no binding: subsequent uses retain the original on a miss.
+        driver.var_remap_set_raw(raw, &result)?;
     }
     Ok(result)
 }
@@ -2614,6 +2556,10 @@ where
 /// selects copy-on-write behavior. Map and Dict keys are anchors and are not
 /// mapped. Their registered structural hooks own container traversal.
 ///
+/// Callbacks run at every occurrence. Default reflected descent handles FreeVar
+/// and DAG-node remapping; registered hooks own their type's remapping policy.
+/// Callback replacements are not automatically recorded as substitutions.
+///
 /// In-place changes completed before an error are not rolled back. Because
 /// this function consumes `root`, an error does not return the partly mapped
 /// root to the caller.
@@ -2626,7 +2572,7 @@ where
     let mut native = NativeMapper {
         dispatch: mapper.into_mapper(),
         order,
-        memo: HashMap::new(),
+        remap: StructuralVarRemap::default(),
     };
     run_structural_mutator(root, &mut native)
 }
@@ -2712,30 +2658,6 @@ fn call_field_setter(
     } else {
         Err(Error::from_raised())
     }
-}
-
-fn identity_key(raw: TVMFFIAny) -> Result<Option<NonNull<TVMFFIObject>>> {
-    // Built-in containers always use container-specific structural mutation
-    // and can never be FreeVar or DAG identities.  Avoid a runtime type-info
-    // lookup for every Array/List/Map/Dict encountered during recursion.
-    if is_builtin_container(raw.type_index) {
-        return Ok(None);
-    }
-    let kind = structural_hash_kind(raw)?;
-    if kind != Some(TVMFFISEqHashKind::kTVMFFISEqHashKindFreeVar as i32)
-        && kind != Some(TVMFFISEqHashKind::kTVMFFISEqHashKindDAGNode as i32)
-    {
-        return Ok(None);
-    }
-    object_identity_key(raw).map(Some)
-}
-
-#[inline]
-fn is_builtin_container(type_index: i32) -> bool {
-    type_index == TVMFFITypeIndex::kTVMFFIArray as i32
-        || type_index == TVMFFITypeIndex::kTVMFFIList as i32
-        || type_index == TVMFFITypeIndex::kTVMFFIMap as i32
-        || type_index == TVMFFITypeIndex::kTVMFFIDict as i32
 }
 
 fn structural_hash_kind(raw: TVMFFIAny) -> Result<Option<i32>> {
