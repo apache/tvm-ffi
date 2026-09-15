@@ -28,63 +28,6 @@ use super::*;
 /// callback engine for a child. A tuple `(outer, inner)` composes two layers;
 /// tuples may nest. Layers are shared during recursive calls, so mutable data
 /// belongs in the context's state.
-///
-/// This layer tracks array nesting for both visit callbacks and a walk
-/// dispatcher. The current array's walk callback runs outside its own scope;
-/// callbacks for its children see the updated depth.
-///
-/// ```
-/// use tvm_ffi::{
-///     structural_visit, Any, Array, DefRegionKind, Result, VisitCallbacks,
-///     VisitContext, VisitInterrupt, VisitLayer, VisitValue, WalkOrder,
-///     WalkDispatch, WalkResult, WalkWithLayer,
-/// };
-///
-/// #[derive(Default)]
-/// struct Stats { depth: usize, depths: Vec<usize> }
-///
-/// struct ArrayScope;
-/// impl VisitLayer<Stats> for ArrayScope {
-///     fn default_visit(
-///         &self, value: &VisitValue, visitor: &mut VisitContext<'_, Stats>,
-///     ) -> Result<Option<VisitInterrupt>> {
-///         let old_depth = visitor.state().depth;
-///         if value.cast::<Array<Any>>().is_some() {
-///             visitor.state_mut().depth += 1;
-///         }
-///         let result = visitor.visit_children();
-///         visitor.state_mut().depth = old_depth;
-///         result // Restore state before forwarding an interrupt or error.
-///     }
-/// }
-///
-/// let root = Array::new(vec![Any::from(Array::new(vec![1_i64])), Any::from(2_i64)]);
-/// let mut visitor = VisitCallbacks::new(
-///     Stats::default(),
-///     |_: i64, visitor: &mut VisitContext<'_, Stats>| {
-///         let state = visitor.state_mut();
-///         state.depths.push(state.depth);
-///     },
-/// ).with_layer(ArrayScope);
-/// structural_visit(&root, &mut visitor)?;
-/// assert_eq!(visitor.state().depths, vec![2, 1]);
-/// assert_eq!(visitor.state().depth, 0);
-///
-/// impl WalkDispatch for Stats {
-///     fn dispatch_walk(
-///         &mut self, value: &VisitValue, _: DefRegionKind,
-///     ) -> Option<Result<WalkResult>> {
-///         value.cast::<i64>()?;
-///         self.depths.push(self.depth);
-///         Some(Ok(WalkResult::Advance))
-///     }
-/// }
-/// let mut walker = WalkWithLayer::new(Stats::default(), ArrayScope);
-/// walker.walk(&root, WalkOrder::PreOrder)?;
-/// assert_eq!(walker.state().depths, vec![2, 1]);
-/// assert_eq!(walker.state().depth, 0);
-/// # Ok::<(), tvm_ffi::Error>(())
-/// ```
 pub trait VisitLayer<State> {
     /// Customize default descent for the current value.
     ///
