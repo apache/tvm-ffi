@@ -43,7 +43,8 @@ cpp = ["ninja"]
 
 [dependency-groups]
 torch = [
-  "torch; python_version < '3.14'", # pytorch does not yet ship with 3.14t
+  # Windows ARM64 tests install PyTorch from NVIDIA's nightly index below.
+  "torch; python_version < '3.14' and (platform_system != 'Windows' or platform_machine != 'ARM64')",
   "setuptools",                     # setuptools is needed by torch jit for best perf
   "ninja",
   "numpy",
@@ -266,8 +267,17 @@ archs = ["x86_64", "arm64"]
 environment = { MACOSX_DEPLOYMENT_TARGET = "10.14" }
 
 [tool.cibuildwheel.windows]
-archs = ["AMD64"]
+archs = ["AMD64", "ARM64"]
 repair-wheel-command = "delvewheel repair --ignore-existing -w {dest_dir} -v {wheel}"
+
+[[tool.cibuildwheel.overrides]]
+select = "*-win_arm64"
+before-test = "uv pip install torch"
+
+[tool.cibuildwheel.overrides.environment]
+UV_INDEX = "https://pypi.nvidia.com/nvtorch_oot_nightly/"
+UV_NO_CONFIG = "1"
+UV_PRERELEASE = "allow"
 
 [tool.ty.environment]
 python-version = "3.9"
