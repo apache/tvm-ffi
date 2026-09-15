@@ -1,0 +1,320 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+//! Reusable customization of default structural descent.
+
+use super::*;
+
+/// A reusable default-recursion policy sharing state with traversal callbacks.
+///
+/// `visit_children()` on this layer's context continues with the next layer
+/// (or the built-in hooks and reflected fields). `visit()` re-enters the full
+/// callback engine for a child. A tuple `(outer, inner)` composes two layers;
+/// tuples may nest. Layers are shared during recursive calls, so mutable data
+/// belongs in the context's state.
+///
+/// This layer tracks array nesting for both visit callbacks and a walk
+/// dispatcher. The current array's walk callback runs outside its own scope;
+/// callbacks for its children see the updated depth.
+///
+/// ```
+/// use tvm_ffi::{
+///     structural_visit, Any, Array, DefRegionKind, Result, VisitCallbacks,
+///     VisitContext, VisitInterrupt, VisitLayer, VisitValue, WalkOrder,
+///     WalkDispatch, WalkResult, WalkWithLayer,
+/// };
+///
+/// #[derive(Default)]
+/// struct Stats { depth: usize, depths: Vec<usize> }
+///
+/// struct ArrayScope;
+/// impl VisitLayer<Stats> for ArrayScope {
+///     fn default_visit(
+///         &self, value: &VisitValue, visitor: &mut VisitContext<'_, Stats>,
+///     ) -> Result<Option<VisitInterrupt>> {
+///         let old_depth = visitor.state().depth;
+///         if value.cast::<Array<Any>>().is_some() {
+///             visitor.state_mut().depth += 1;
+///         }
+///         let result = visitor.visit_children();
+///         visitor.state_mut().depth = old_depth;
+///         result // Restore state before forwarding an interrupt or error.
+///     }
+/// }
+///
+/// let root = Array::new(vec![Any::from(Array::new(vec![1_i64])), Any::from(2_i64)]);
+/// let mut visitor = VisitCallbacks::new(
+///     Stats::default(),
+///     |_: i64, visitor: &mut VisitContext<'_, Stats>| {
+///         let state = visitor.state_mut();
+///         state.depths.push(state.depth);
+///     },
+/// ).with_layer(ArrayScope);
+/// structural_visit(&root, &mut visitor)?;
+/// assert_eq!(visitor.state().depths, vec![2, 1]);
+/// assert_eq!(visitor.state().depth, 0);
+///
+/// impl WalkDispatch for Stats {
+///     fn dispatch_walk(
+///         &mut self, value: &VisitValue, _: DefRegionKind,
+///     ) -> Option<Result<WalkResult>> {
+///         value.cast::<i64>()?;
+///         self.depths.push(self.depth);
+///         Some(Ok(WalkResult::Advance))
+///     }
+/// }
+/// let mut walker = WalkWithLayer::new(Stats::default(), ArrayScope);
+/// walker.walk(&root, WalkOrder::PreOrder)?;
+/// assert_eq!(walker.state().depths, vec![2, 1]);
+/// assert_eq!(walker.state().depth, 0);
+/// # Ok::<(), tvm_ffi::Error>(())
+/// ```
+pub trait VisitLayer<State> {
+    /// Customize default descent for the current value.
+    ///
+    /// Return interrupts explicitly, and restore any scoped state before
+    /// returning an interrupt or error. Walk invokes this between its pre- and
+    /// post-order callback positions; visit invokes it only on callback miss
+    /// or when a matched callback requests default descent.
+    fn default_visit(
+        &self,
+        value: &VisitValue,
+        visitor: &mut VisitContext<'_, State>,
+    ) -> Result<Option<VisitInterrupt>>;
+}
+
+/// Default descent through registered hooks or reflected structural fields.
+pub struct DefaultVisitLayer;
+
+impl<State> VisitLayer<State> for DefaultVisitLayer {
+    fn default_visit(
+        &self,
+        _value: &VisitValue,
+        visitor: &mut VisitContext<'_, State>,
+    ) -> Result<Option<VisitInterrupt>> {
+        visitor.visit_children()
+    }
+}
+
+impl<State, Outer: VisitLayer<State>, Inner: VisitLayer<State>> VisitLayer<State>
+    for (Outer, Inner)
+{
+    fn default_visit(
+        &self,
+        value: &VisitValue,
+        visitor: &mut VisitContext<'_, State>,
+    ) -> Result<Option<VisitInterrupt>> {
+        let kind = visitor.def_region_kind();
+        visit_with_layer(
+            &mut NextLayer {
+                driver: &mut *visitor.driver,
+                layer: &self.1,
+            },
+            &self.0,
+            value,
+            kind,
+        )
+    }
+}
+
+pub(super) fn visit_with_layer<State>(
+    driver: &mut dyn VisitContextDriver<State>,
+    layer: &impl VisitLayer<State>,
+    value: &VisitValue,
+    def_region_kind: DefRegionKind,
+) -> Result<Option<VisitInterrupt>> {
+    layer.default_visit(
+        value,
+        &mut VisitContext {
+            driver,
+            current: VisitValue::from_raw(value.raw()),
+            def_region_kind,
+            _not_send_sync: PhantomData,
+        },
+    )
+}
+
+struct NextLayer<'a, State, Layer> {
+    driver: &'a mut dyn VisitContextDriver<State>,
+    layer: &'a Layer,
+}
+
+impl<State, Layer: VisitLayer<State>> VisitContextDriver<State> for NextLayer<'_, State, Layer> {
+    fn state(&self) -> &State {
+        self.driver.state()
+    }
+    fn state_mut(&mut self) -> &mut State {
+        self.driver.state_mut()
+    }
+    fn visit_raw(&mut self, raw: TVMFFIAny, kind: DefRegionKind) -> Result<Option<VisitInterrupt>> {
+        self.driver.visit_raw(raw, kind)
+    }
+    fn visit_children_raw(
+        &mut self,
+        raw: TVMFFIAny,
+        kind: DefRegionKind,
+    ) -> Result<Option<VisitInterrupt>> {
+        visit_with_layer(self.driver, self.layer, &VisitValue::from_raw(raw), kind)
+    }
+}
+
+pub(super) struct VisitDescent<'a, V> {
+    pub(super) visitor: &'a mut V,
+}
+
+impl<State, V: StructuralVisitor + VisitCallbackState<State>> VisitContextDriver<State>
+    for VisitDescent<'_, V>
+{
+    fn state(&self) -> &State {
+        self.visitor.callback_state()
+    }
+    fn state_mut(&mut self) -> &mut State {
+        self.visitor.callback_state_mut()
+    }
+    fn visit_raw(&mut self, raw: TVMFFIAny, kind: DefRegionKind) -> Result<Option<VisitInterrupt>> {
+        VisitContextDriver::visit_raw(self.visitor, raw, kind)
+    }
+    fn visit_children_raw(
+        &mut self,
+        raw: TVMFFIAny,
+        kind: DefRegionKind,
+    ) -> Result<Option<VisitInterrupt>> {
+        // Bypass the current layer; children still re-enter the complete visitor.
+        default_user_visit_children(self.visitor, &VisitValue::from_raw(raw), kind)
+    }
+}
+
+/// A walk dispatcher combined with a reusable default-recursion layer.
+///
+/// The dispatcher is also the state visible through the layer's context. Use
+/// `#[dispatch(walk)]` or implement [`WalkDispatch`] to define its callbacks.
+/// Run repeatedly with [`Self::walk`], or pass this value to [`structural_walk`].
+pub struct WalkWithLayer<Walker, Layer> {
+    walker: Walker,
+    layer: Rc<Layer>,
+}
+
+impl<Walker: WalkDispatch, Layer: VisitLayer<Walker>> WalkWithLayer<Walker, Layer> {
+    /// Combine a dispatcher and a default-recursion layer.
+    pub fn new(walker: Walker, layer: Layer) -> Self {
+        Self {
+            walker,
+            layer: Rc::new(layer),
+        }
+    }
+
+    /// Access the dispatcher and its traversal state.
+    pub fn state(&self) -> &Walker {
+        &self.walker
+    }
+
+    /// Mutably access the dispatcher outside an active walk.
+    pub fn state_mut(&mut self) -> &mut Walker {
+        &mut self.walker
+    }
+
+    /// Recover the dispatcher and its state.
+    pub fn into_state(self) -> Walker {
+        self.walker
+    }
+
+    /// Walk a root using this dispatcher and layer.
+    pub fn walk<R>(&mut self, root: &R, order: WalkOrder) -> Result<Option<VisitInterrupt>>
+    where
+        for<'x> AnyView<'x>: From<&'x R>,
+    {
+        let raw = raw_of(AnyView::from(root));
+        finish(match order {
+            WalkOrder::PreOrder => {
+                run_structural_visitor(raw, self, walk_runtime_vtable::<Self, true>())
+            }
+            WalkOrder::PostOrder => {
+                run_structural_visitor(raw, self, walk_runtime_vtable::<Self, false>())
+            }
+        })
+    }
+}
+
+#[doc(hidden)]
+pub enum ByLayeredWalk {}
+
+impl<Walker: WalkDispatch, Layer: VisitLayer<Walker>> IntoWalker<ByLayeredWalk>
+    for WalkWithLayer<Walker, Layer>
+{
+    type Walker = Self;
+    fn into_walker(self) -> Self {
+        self
+    }
+}
+
+impl<Walker: WalkDispatch, Layer: VisitLayer<Walker>> NativeVisit for WalkWithLayer<Walker, Layer> {
+    const CUSTOM_DESCENT: bool = true;
+
+    fn visit(&mut self, value: &VisitValue, kind: DefRegionKind) -> Result<WalkResult> {
+        self.walker
+            .dispatch_walk(value, kind)
+            .unwrap_or(Ok(WalkResult::Advance))
+    }
+
+    fn default_visit_children<const PRE_ORDER: bool>(
+        &mut self,
+        value: &VisitValue,
+        kind: DefRegionKind,
+    ) -> Result<Option<VisitInterrupt>> {
+        let layer = Rc::clone(&self.layer);
+        visit_with_layer(
+            &mut WalkDescent::<_, _, PRE_ORDER> { visitor: self },
+            &*layer,
+            value,
+            kind,
+        )
+    }
+}
+
+struct WalkDescent<'a, Walker, Layer, const PRE_ORDER: bool> {
+    visitor: &'a mut WalkWithLayer<Walker, Layer>,
+}
+
+impl<Walker: WalkDispatch, Layer: VisitLayer<Walker>, const PRE_ORDER: bool>
+    VisitContextDriver<Walker> for WalkDescent<'_, Walker, Layer, PRE_ORDER>
+{
+    fn state(&self) -> &Walker {
+        &self.visitor.walker
+    }
+    fn state_mut(&mut self) -> &mut Walker {
+        &mut self.visitor.walker
+    }
+    fn visit_raw(&mut self, raw: TVMFFIAny, kind: DefRegionKind) -> Result<Option<VisitInterrupt>> {
+        if raw.type_index == TVMFFITypeIndex::kTVMFFINone as i32 {
+            return Ok(None);
+        }
+        let active = active_structural_visitor()?;
+        let context = std::ptr::from_mut(&mut *self.visitor).cast::<c_void>();
+        finish(with_current_visitor_context(active, context, || {
+            call_visitor(active, raw, kind)
+        }))
+    }
+    fn visit_children_raw(
+        &mut self,
+        raw: TVMFFIAny,
+        kind: DefRegionKind,
+    ) -> Result<Option<VisitInterrupt>> {
+        default_walk_children::<_, PRE_ORDER>(self.visitor, &VisitValue::from_raw(raw), kind)
+    }
+}
