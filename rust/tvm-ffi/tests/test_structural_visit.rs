@@ -23,11 +23,131 @@ use tvm_ffi::{
     dispatch, get_type_attr, structural_visit, structural_walk, Any, Array, DLDataType,
     DLDataTypeCode, DefRegionKind, Error, FieldGetter, Function, Map, Object, ObjectRefCore,
     Result, String as FfiString, StructuralVisitor, TypeIndex, VisitCallbacks, VisitContext,
-    VisitInterrupt, VisitValue, WalkOrder, WalkResult, RUNTIME_ERROR,
+    VisitInterrupt, VisitLayer, VisitValue, WalkDispatch, WalkOrder, WalkResult, WalkWithLayer,
+    RUNTIME_ERROR,
 };
 
 fn runtime_error(message: &str) -> Error {
     Error::new(RUNTIME_ERROR, message, "")
+}
+
+#[test]
+fn composed_layers_share_array_scope_with_visit_and_walk_callbacks() {
+    #[derive(Debug, PartialEq, Eq)]
+    enum Event {
+        EnterArray(usize),
+        Integer(i64, usize),
+        LeaveArray(usize),
+    }
+
+    #[derive(Default)]
+    struct CollectIntegers {
+        depth: usize,
+        events: Vec<Event>,
+        descent_depths: Vec<usize>,
+    }
+
+    impl CollectIntegers {
+        fn record(&mut self, value: i64) {
+            self.events.push(Event::Integer(value, self.depth));
+        }
+    }
+
+    // The outer layer establishes a scope around an array's children.
+    // It does not know what the callbacks will do with the current depth.
+    struct ArrayScope;
+
+    impl VisitLayer<CollectIntegers> for ArrayScope {
+        fn default_visit(
+            &self,
+            value: &VisitValue,
+            visitor: &mut VisitContext<'_, CollectIntegers>,
+        ) -> Result<Option<VisitInterrupt>> {
+            if value.cast::<Array<Any>>().is_none() {
+                return visitor.visit_children();
+            }
+            let outer_depth = visitor.state().depth;
+            let depth = outer_depth + 1;
+            visitor.state_mut().depth = depth;
+            visitor.state_mut().events.push(Event::EnterArray(depth));
+
+            // Continue to RecordDescent, not directly to the children.
+            let result = visitor.visit_children();
+
+            visitor.state_mut().events.push(Event::LeaveArray(depth));
+            visitor.state_mut().depth = outer_depth;
+            result
+        }
+    }
+
+    // The inner layer observes the scope set by ArrayScope. Its continuation
+    // reaches the built-in Array hook, whose children re-enter the full engine.
+    struct RecordDescent;
+
+    impl VisitLayer<CollectIntegers> for RecordDescent {
+        fn default_visit(
+            &self,
+            _value: &VisitValue,
+            visitor: &mut VisitContext<'_, CollectIntegers>,
+        ) -> Result<Option<VisitInterrupt>> {
+            let state = visitor.state_mut();
+            state.descent_depths.push(state.depth);
+            visitor.visit_children()
+        }
+    }
+
+    // [1, [2, 3], 4]: the final sibling must see the restored outer depth.
+    let root = Array::new(vec![
+        Any::from(1_i64),
+        Any::from(Array::new(vec![2_i64, 3])),
+        Any::from(4_i64),
+    ]);
+    let expected = vec![
+        Event::EnterArray(1),
+        Event::Integer(1, 1),
+        Event::EnterArray(2),
+        Event::Integer(2, 2),
+        Event::Integer(3, 2),
+        Event::LeaveArray(2),
+        Event::Integer(4, 1),
+        Event::LeaveArray(1),
+    ];
+
+    let mut visitor = VisitCallbacks::new(
+        CollectIntegers::default(),
+        |value: i64, visitor: &mut VisitContext<'_, CollectIntegers>| {
+            visitor.state_mut().record(value);
+            // Matched visit callbacks own recursion: an integer needs no descent.
+        },
+    )
+    .with_layer((ArrayScope, RecordDescent));
+    assert!(structural_visit(&root, &mut visitor).unwrap().is_none());
+    assert_eq!(visitor.state().events, expected);
+    assert_eq!(visitor.state().depth, 0);
+    // Only unmatched arrays enter the default layers in this visit.
+    assert_eq!(visitor.state().descent_depths, vec![1, 2]);
+
+    impl WalkDispatch for CollectIntegers {
+        fn dispatch_walk(
+            &mut self,
+            value: &VisitValue,
+            _def_region_kind: DefRegionKind,
+        ) -> Option<Result<WalkResult>> {
+            self.record(value.cast::<i64>()?);
+            Some(Ok(WalkResult::Advance))
+        }
+    }
+
+    // Reuse exactly the same layers with a walk dispatcher. Walk manages
+    // recursion, so default layers also run for matched integer leaves.
+    for order in [WalkOrder::PreOrder, WalkOrder::PostOrder] {
+        let mut walker =
+            WalkWithLayer::new(CollectIntegers::default(), (ArrayScope, RecordDescent));
+        assert!(walker.walk(&root, order).unwrap().is_none());
+        assert_eq!(walker.state().events, expected);
+        assert_eq!(walker.state().depth, 0);
+        assert_eq!(walker.state().descent_depths, vec![1, 1, 2, 2, 2, 1]);
+    }
 }
 
 #[test]
@@ -328,10 +448,7 @@ fn manual_child_visit_can_override_def_region() {
     let root = Array::new(vec![7i64, 8]);
     let mut probe = ManualRegionVisitor::default();
     assert!(structural_visit(&root, &mut probe).unwrap().is_none());
-    assert_eq!(
-        probe.seen,
-        vec![DefRegionKind::Simple, DefRegionKind::None]
-    );
+    assert_eq!(probe.seen, vec![DefRegionKind::Simple, DefRegionKind::None]);
 }
 
 #[derive(Default)]
