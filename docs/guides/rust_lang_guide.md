@@ -366,6 +366,14 @@ Callbacks are `Fn`; mutable data belongs in the visitor state. A catch-all
 callback must call `visit_children()` explicitly, and interrupt values must be
 returned explicitly because `?` only propagates errors.
 
+Use `VisitCallbacks::with_layer` to customize default recursion with a reusable
+`VisitLayer<State>`. Inside a layer, `visit_children()` continues to the next
+layer or built-in traversal, while `visit()` re-enters callback dispatch.
+Layers share callback state and can be nested as `(outer, inner)` tuples.
+For walk, `WalkWithLayer::new(dispatcher, layer)` uses a `WalkDispatch` object
+as the shared state; call `.walk(&root, order)` to run it. See the `VisitLayer`
+API example for sharing an array-depth policy between visit and walk.
+
 For a named implementation, `#[dispatch(visit)]` generates
 `StructuralVisitor` from `visit_*` methods. Matching handlers own recursion;
 unmatched values use default child traversal:
