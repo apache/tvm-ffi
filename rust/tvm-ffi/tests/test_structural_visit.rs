@@ -159,6 +159,7 @@ fn policy_continuation_scopes_regions_and_restores_after_halts() {
 
     struct Probe {
         outcome: Outcome,
+        target_type: i32,
         seen: Vec<(i64, DefRegionKind)>,
         regions: Vec<DefRegionKind>,
         restored: bool,
@@ -195,13 +196,13 @@ fn policy_continuation_scopes_regions_and_restores_after_halts() {
             value: &VisitValue,
             ctx: &mut VisitContext<'_, Probe>,
         ) -> Result<Option<VisitInterrupt>> {
-            let Some(array) = value.cast::<Array<i64>>() else {
+            if value.type_index() != ctx.state().target_type {
                 return ctx.visit_children();
-            };
+            }
             assert_eq!(ctx.def_region_kind(), DefRegionKind::None);
-            let result = ctx.default_visit_children(&array, self.0);
+            let result = ctx.default_visit_children(&value.to_owned(), self.0);
             assert_eq!(ctx.def_region_kind(), DefRegionKind::None);
-            assert_eq!(ctx.current().cast::<Array<i64>>().unwrap().len(), 2);
+            assert_eq!(ctx.current().type_index(), value.type_index());
             // Also check the ABI region after normal, error and interrupt returns.
             assert!(ctx.visit(&3_i64)?.is_none());
             ctx.state_mut().restored = true;
@@ -216,12 +217,16 @@ fn policy_continuation_scopes_regions_and_restores_after_halts() {
             value: &VisitValue,
             ctx: &mut VisitContext<'_, Probe>,
         ) -> Result<Option<VisitInterrupt>> {
-            let Some(array) = value.cast::<Array<i64>>() else {
+            if value.type_index() != ctx.state().target_type {
                 return ctx.visit_children();
-            };
+            }
             let kind = ctx.def_region_kind();
             ctx.state_mut().regions.push(kind);
-            ctx.default_visit_children(&array, self.0)
+            let result = ctx.default_visit_children(&value.to_owned(), self.0);
+            // Restore the immediate enclosing scope, not just the root scope.
+            assert_eq!(ctx.def_region_kind(), kind);
+            assert!(ctx.visit(&4_i64)?.is_none());
+            result
         }
     }
 
@@ -232,10 +237,10 @@ fn policy_continuation_scopes_regions_and_restores_after_halts() {
             value: &VisitValue,
             ctx: &mut VisitContext<'_, Probe>,
         ) -> Result<Option<VisitInterrupt>> {
-            if value.cast::<Array<i64>>().is_some() {
+            if value.type_index() == ctx.state().target_type {
                 let kind = ctx.def_region_kind();
                 ctx.state_mut().regions.push(kind);
-                // A pattern must already be active before reaching the Array hook.
+                // A pattern must be active before reaching a hook or reflected fields.
                 // Explicit re-dispatch from this policy cannot downgrade it either.
                 assert!(ctx.visit_with(&0_i64, DefRegionKind::None)?.is_none());
             }
@@ -243,69 +248,89 @@ fn policy_continuation_scopes_regions_and_restores_after_halts() {
         }
     }
 
-    let root = Array::new(vec![1_i64, 2]);
+    assert_eq!(
+        unsafe { tvm_ffi::tvm_ffi_sys::TVMFFITestingDummyTarget() },
+        0
+    );
+    let reflected = Function::get_global("ffi.MakeObjectFromPackedArgs")
+        .unwrap()
+        .call_tuple((
+            FfiString::from("testing.TestObjectBase"),
+            FfiString::from("v_i64"),
+            1_i64,
+        ))
+        .unwrap();
+    let array = Any::from(Array::new(vec![1_i64, 2]));
     let kinds = [
         DefRegionKind::None,
         DefRegionKind::Simple,
         DefRegionKind::Pattern,
     ];
-    for outer in kinds {
-        for inner in kinds {
-            let effective = if outer == DefRegionKind::Pattern {
-                outer
-            } else {
-                inner
-            };
-            for outcome in [Outcome::Finish, Outcome::Interrupt, Outcome::Error] {
-                // None selects visit; Some(order) selects walk.
-                for order in [None, Some(WalkOrder::PreOrder), Some(WalkOrder::PostOrder)] {
-                    let state = Probe {
-                        outcome,
-                        seen: vec![],
-                        regions: vec![],
-                        restored: false,
-                    };
-                    let policy = (SetRegion(outer), (ChangeAgain(inner), RecordRegion));
-                    let (result, state) = if let Some(order) = order {
-                        let mut walker = WalkWithPolicy::new(state, policy);
-                        let result = walker.walk(&root, order);
-                        (result, walker.into_state())
-                    } else {
-                        let mut visitor = VisitCallbacks::new(
-                            state,
-                            |value: i64, ctx: &mut VisitContext<'_, Probe>| {
-                                let kind = ctx.def_region_kind();
-                                ctx.state_mut().record(value, kind)
-                            },
-                        )
-                        .with_policy(policy);
-                        let result = structural_visit(&root, &mut visitor);
-                        (result, visitor.into_state())
-                    };
-                    match outcome {
-                        Outcome::Finish => assert!(result.unwrap().is_none()),
-                        Outcome::Interrupt => {
-                            assert_eq!(i64::try_from(result.unwrap().unwrap().value).unwrap(), 42,)
+    // Exercise both the C++ Array hook and direct Rust reflected descent.
+    for (root, has_second_integer) in [(array, true), (reflected, false)] {
+        for outer in kinds {
+            for inner in kinds {
+                let effective = if outer == DefRegionKind::Pattern {
+                    outer
+                } else {
+                    inner
+                };
+                for outcome in [Outcome::Finish, Outcome::Interrupt, Outcome::Error] {
+                    // None selects visit; Some(order) selects walk.
+                    for order in [None, Some(WalkOrder::PreOrder), Some(WalkOrder::PostOrder)] {
+                        let state = Probe {
+                            outcome,
+                            target_type: root.type_index(),
+                            seen: vec![],
+                            regions: vec![],
+                            restored: false,
+                        };
+                        let policy = (SetRegion(outer), (ChangeAgain(inner), RecordRegion));
+                        let (result, state) = if let Some(order) = order {
+                            let mut walker = WalkWithPolicy::new(state, policy);
+                            let result = walker.walk(&root, order);
+                            (result, walker.into_state())
+                        } else {
+                            let mut visitor = VisitCallbacks::new(
+                                state,
+                                |value: i64, ctx: &mut VisitContext<'_, Probe>| {
+                                    let kind = ctx.def_region_kind();
+                                    ctx.state_mut().record(value, kind)
+                                },
+                            )
+                            .with_policy(policy);
+                            let result = structural_visit(&root, &mut visitor);
+                            (result, visitor.into_state())
+                        };
+                        match outcome {
+                            Outcome::Finish => assert!(result.unwrap().is_none()),
+                            Outcome::Interrupt => {
+                                assert_eq!(
+                                    i64::try_from(result.unwrap().unwrap().value).unwrap(),
+                                    42,
+                                )
+                            }
+                            Outcome::Error => assert!(result
+                                .err()
+                                .unwrap()
+                                .to_string()
+                                .contains("continuation failed")),
                         }
-                        Outcome::Error => assert!(result
-                            .err()
-                            .unwrap()
-                            .to_string()
-                            .contains("continuation failed")),
+                        assert!(state.restored);
+                        assert_eq!(state.regions, vec![outer, effective]);
+                        let explicit = if effective == DefRegionKind::Pattern {
+                            DefRegionKind::Pattern
+                        } else {
+                            DefRegionKind::None
+                        };
+                        let mut expected = vec![(0, explicit), (1, effective)];
+                        if has_second_integer && matches!(outcome, Outcome::Finish) {
+                            expected.push((2, effective));
+                        }
+                        expected.push((4, outer));
+                        expected.push((3, DefRegionKind::None));
+                        assert_eq!(state.seen, expected);
                     }
-                    assert!(state.restored);
-                    assert_eq!(state.regions, vec![outer, effective]);
-                    let explicit = if effective == DefRegionKind::Pattern {
-                        DefRegionKind::Pattern
-                    } else {
-                        DefRegionKind::None
-                    };
-                    let mut expected = vec![(0, explicit), (1, effective)];
-                    if matches!(outcome, Outcome::Finish) {
-                        expected.push((2, effective));
-                    }
-                    expected.push((3, DefRegionKind::None));
-                    assert_eq!(state.seen, expected);
                 }
             }
         }
