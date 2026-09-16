@@ -224,8 +224,8 @@ impl From<Error> for NativeHalt {
 
 type NativeResult = std::result::Result<(), NativeHalt>;
 
-mod layer;
-pub use layer::{DefaultVisitLayer, VisitLayer, WalkWithLayer};
+mod policy;
+pub use policy::{DefaultVisitPolicy, VisitPolicy, WalkWithPolicy};
 
 /// State and recursive operations available to a visit callback.
 ///
@@ -299,8 +299,8 @@ impl<State> VisitContext<'_, State> {
     }
 
     /// Apply default descent without dispatching the current value again.
-    /// A callback enters its configured layer; within a layer this continues
-    /// with the next layer, then registered hooks or reflected fields.
+    /// A callback enters its configured policy; within a policy this continues
+    /// with the next policy, then registered hooks or reflected fields.
     pub fn visit_children(&mut self) -> Result<Option<VisitInterrupt>> {
         self.driver
             .visit_children_raw(self.current.raw(), self.def_region_kind)
@@ -473,8 +473,8 @@ macro_rules! impl_visit_chain_link {
 impl_callback_chain_tuple_arities!(impl_visit_chain_link);
 
 /// A reusable callback visitor with shared user state.
-pub struct VisitCallbacks<State, Link, Marker, Layer = DefaultVisitLayer> {
-    layer: Option<Rc<Layer>>,
+pub struct VisitCallbacks<State, Link, Marker, Policy = DefaultVisitPolicy> {
+    policy: Option<Rc<Policy>>,
     state: State,
     callbacks: Rc<Link>,
     _marker: PhantomData<fn(Marker)>,
@@ -489,23 +489,23 @@ where
         Self {
             state,
             callbacks: Rc::new(callbacks),
-            layer: None,
+            policy: None,
             _marker: PhantomData,
         }
     }
 }
 
-impl<State, Link, Marker, Layer> VisitCallbacks<State, Link, Marker, Layer> {
-    /// Set the default-recursion layer while retaining the callbacks and state.
-    /// A matched callback enters the layer only when it calls `visit_children()`.
-    pub fn with_layer<L: VisitLayer<State>>(
+impl<State, Link, Marker, Policy> VisitCallbacks<State, Link, Marker, Policy> {
+    /// Set the default-recursion policy while retaining the callbacks and state.
+    /// A matched callback enters the policy only when it calls `visit_children()`.
+    pub fn with_policy<P: VisitPolicy<State>>(
         self,
-        layer: L,
-    ) -> VisitCallbacks<State, Link, Marker, L> {
+        policy: P,
+    ) -> VisitCallbacks<State, Link, Marker, P> {
         VisitCallbacks {
             state: self.state,
             callbacks: self.callbacks,
-            layer: Some(Rc::new(layer)),
+            policy: Some(Rc::new(policy)),
             _marker: PhantomData,
         }
     }
@@ -537,8 +537,8 @@ trait VisitCallbackState<State> {
     fn callback_state_mut(&mut self) -> &mut State;
 }
 
-impl<State, Link, Marker, Layer> VisitCallbackState<State>
-    for VisitCallbacks<State, Link, Marker, Layer>
+impl<State, Link, Marker, Policy> VisitCallbackState<State>
+    for VisitCallbacks<State, Link, Marker, Policy>
 {
     fn callback_state(&self) -> &State {
         &self.state
@@ -1037,10 +1037,10 @@ where
     }
 }
 
-impl<State, Link, Marker, Layer> StructuralVisitor for VisitCallbacks<State, Link, Marker, Layer>
+impl<State, Link, Marker, Policy> StructuralVisitor for VisitCallbacks<State, Link, Marker, Policy>
 where
     Link: VisitChainLink<State, Marker>,
-    Layer: VisitLayer<State>,
+    Policy: VisitPolicy<State>,
 {
     fn visit(
         &mut self,
@@ -1056,12 +1056,12 @@ where
         value: &VisitValue,
         def_region_kind: DefRegionKind,
     ) -> Result<Option<VisitInterrupt>> {
-        let Some(layer) = self.layer.as_ref().map(Rc::clone) else {
+        let Some(policy) = self.policy.as_ref().map(Rc::clone) else {
             return default_user_visit_children(self, value, def_region_kind);
         };
-        layer::visit_with_layer(
-            &mut layer::VisitDescent { visitor: self },
-            &*layer,
+        policy::visit_with_policy(
+            &mut policy::VisitDescent { visitor: self },
+            &*policy,
             value,
             def_region_kind,
         )

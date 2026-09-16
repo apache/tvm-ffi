@@ -23,7 +23,7 @@ use tvm_ffi::{
     dispatch, get_type_attr, structural_visit, structural_walk, Any, Array, DLDataType,
     DLDataTypeCode, DefRegionKind, Error, FieldGetter, Function, Map, Object, ObjectRefCore,
     Result, String as FfiString, StructuralVisitor, TypeIndex, VisitCallbacks, VisitContext,
-    VisitInterrupt, VisitLayer, VisitValue, WalkDispatch, WalkOrder, WalkResult, WalkWithLayer,
+    VisitInterrupt, VisitPolicy, VisitValue, WalkDispatch, WalkOrder, WalkResult, WalkWithPolicy,
     RUNTIME_ERROR,
 };
 
@@ -32,7 +32,7 @@ fn runtime_error(message: &str) -> Error {
 }
 
 #[test]
-fn composed_layers_share_array_scope_with_visit_and_walk_callbacks() {
+fn composed_policies_share_array_scope_with_visit_and_walk_callbacks() {
     #[derive(Debug, PartialEq, Eq)]
     enum Event {
         EnterArray(usize),
@@ -53,11 +53,11 @@ fn composed_layers_share_array_scope_with_visit_and_walk_callbacks() {
         }
     }
 
-    // The outer layer establishes a scope around an array's children.
+    // The outer policy establishes a scope around an array's children.
     // It does not know what the callbacks will do with the current depth.
     struct ArrayScope;
 
-    impl VisitLayer<CollectIntegers> for ArrayScope {
+    impl VisitPolicy<CollectIntegers> for ArrayScope {
         fn default_visit(
             &self,
             value: &VisitValue,
@@ -80,11 +80,11 @@ fn composed_layers_share_array_scope_with_visit_and_walk_callbacks() {
         }
     }
 
-    // The inner layer observes the scope set by ArrayScope. Its continuation
+    // The inner policy observes the scope set by ArrayScope. Its continuation
     // reaches the built-in Array hook, whose children re-enter the full engine.
     struct RecordDescent;
 
-    impl VisitLayer<CollectIntegers> for RecordDescent {
+    impl VisitPolicy<CollectIntegers> for RecordDescent {
         fn default_visit(
             &self,
             _value: &VisitValue,
@@ -120,11 +120,11 @@ fn composed_layers_share_array_scope_with_visit_and_walk_callbacks() {
             // Matched visit callbacks own recursion: an integer needs no descent.
         },
     )
-    .with_layer((ArrayScope, RecordDescent));
+    .with_policy((ArrayScope, RecordDescent));
     assert!(structural_visit(&root, &mut visitor).unwrap().is_none());
     assert_eq!(visitor.state().events, expected);
     assert_eq!(visitor.state().depth, 0);
-    // Only unmatched arrays enter the default layers in this visit.
+    // Only unmatched arrays enter the default policies in this visit.
     assert_eq!(visitor.state().descent_depths, vec![1, 2]);
 
     impl WalkDispatch for CollectIntegers {
@@ -138,11 +138,11 @@ fn composed_layers_share_array_scope_with_visit_and_walk_callbacks() {
         }
     }
 
-    // Reuse exactly the same layers with a walk dispatcher. Walk manages
-    // recursion, so default layers also run for matched integer leaves.
+    // Reuse exactly the same policies with a walk dispatcher. Walk manages
+    // recursion, so default policies also run for matched integer leaves.
     for order in [WalkOrder::PreOrder, WalkOrder::PostOrder] {
         let mut walker =
-            WalkWithLayer::new(CollectIntegers::default(), (ArrayScope, RecordDescent));
+            WalkWithPolicy::new(CollectIntegers::default(), (ArrayScope, RecordDescent));
         assert!(walker.walk(&root, order).unwrap().is_none());
         assert_eq!(walker.state().events, expected);
         assert_eq!(walker.state().depth, 0);

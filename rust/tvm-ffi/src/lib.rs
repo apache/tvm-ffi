@@ -54,10 +54,10 @@ pub use crate::extra::structural_mutate::{
     MutateContext, MutateDispatch, Mutator, StructuralMutator, StructuralVarRemap,
 };
 pub use crate::extra::structural_visit::{
-    structural_visit, structural_walk, DefRegionKind, DefaultVisitLayer, IntoVisitor,
+    structural_visit, structural_walk, DefRegionKind, DefaultVisitPolicy, IntoVisitor,
     IntoWalkResult, IntoWalker, StructuralVisitor, VisitCallbacks, VisitChainLink, VisitContext,
-    VisitInterrupt, VisitLayer, VisitValue, WalkChainLink, WalkDispatch, WalkOrder, WalkResult,
-    WalkWithLayer,
+    VisitInterrupt, VisitPolicy, VisitValue, WalkChainLink, WalkDispatch, WalkOrder, WalkResult,
+    WalkWithPolicy,
 };
 pub use crate::extra::unchanged::{Unchanged, UnchangedOr};
 pub use crate::function::Function;

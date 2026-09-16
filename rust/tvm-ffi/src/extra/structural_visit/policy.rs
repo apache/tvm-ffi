@@ -23,12 +23,12 @@ use super::*;
 
 /// A reusable default-recursion policy sharing state with traversal callbacks.
 ///
-/// `visit_children()` on this layer's context continues with the next layer
+/// `visit_children()` on this policy's context continues with the next policy
 /// (or the built-in hooks and reflected fields). `visit()` re-enters the full
-/// callback engine for a child. A tuple `(outer, inner)` composes two layers;
-/// tuples may nest. Layers are shared during recursive calls, so mutable data
+/// callback engine for a child. A tuple `(outer, inner)` composes two policies;
+/// tuples may nest. Policies are shared during recursive calls, so mutable data
 /// belongs in the context's state.
-pub trait VisitLayer<State> {
+pub trait VisitPolicy<State> {
     /// Customize default descent for the current value.
     ///
     /// Return interrupts explicitly, and restore any scoped state before
@@ -43,9 +43,9 @@ pub trait VisitLayer<State> {
 }
 
 /// Default descent through registered hooks or reflected structural fields.
-pub struct DefaultVisitLayer;
+pub struct DefaultVisitPolicy;
 
-impl<State> VisitLayer<State> for DefaultVisitLayer {
+impl<State> VisitPolicy<State> for DefaultVisitPolicy {
     fn default_visit(
         &self,
         _value: &VisitValue,
@@ -55,7 +55,7 @@ impl<State> VisitLayer<State> for DefaultVisitLayer {
     }
 }
 
-impl<State, Outer: VisitLayer<State>, Inner: VisitLayer<State>> VisitLayer<State>
+impl<State, Outer: VisitPolicy<State>, Inner: VisitPolicy<State>> VisitPolicy<State>
     for (Outer, Inner)
 {
     fn default_visit(
@@ -64,10 +64,10 @@ impl<State, Outer: VisitLayer<State>, Inner: VisitLayer<State>> VisitLayer<State
         visitor: &mut VisitContext<'_, State>,
     ) -> Result<Option<VisitInterrupt>> {
         let kind = visitor.def_region_kind();
-        visit_with_layer(
-            &mut NextLayer {
+        visit_with_policy(
+            &mut NextPolicy {
                 driver: &mut *visitor.driver,
-                layer: &self.1,
+                policy: &self.1,
             },
             &self.0,
             value,
@@ -76,13 +76,13 @@ impl<State, Outer: VisitLayer<State>, Inner: VisitLayer<State>> VisitLayer<State
     }
 }
 
-pub(super) fn visit_with_layer<State>(
+pub(super) fn visit_with_policy<State>(
     driver: &mut dyn VisitContextDriver<State>,
-    layer: &impl VisitLayer<State>,
+    policy: &impl VisitPolicy<State>,
     value: &VisitValue,
     def_region_kind: DefRegionKind,
 ) -> Result<Option<VisitInterrupt>> {
-    layer.default_visit(
+    policy.default_visit(
         value,
         &mut VisitContext {
             driver,
@@ -93,12 +93,14 @@ pub(super) fn visit_with_layer<State>(
     )
 }
 
-struct NextLayer<'a, State, Layer> {
+struct NextPolicy<'a, State, Policy> {
     driver: &'a mut dyn VisitContextDriver<State>,
-    layer: &'a Layer,
+    policy: &'a Policy,
 }
 
-impl<State, Layer: VisitLayer<State>> VisitContextDriver<State> for NextLayer<'_, State, Layer> {
+impl<State, Policy: VisitPolicy<State>> VisitContextDriver<State>
+    for NextPolicy<'_, State, Policy>
+{
     fn state(&self) -> &State {
         self.driver.state()
     }
@@ -113,7 +115,7 @@ impl<State, Layer: VisitLayer<State>> VisitContextDriver<State> for NextLayer<'_
         raw: TVMFFIAny,
         kind: DefRegionKind,
     ) -> Result<Option<VisitInterrupt>> {
-        visit_with_layer(self.driver, self.layer, &VisitValue::from_raw(raw), kind)
+        visit_with_policy(self.driver, self.policy, &VisitValue::from_raw(raw), kind)
     }
 }
 
@@ -138,27 +140,27 @@ impl<State, V: StructuralVisitor + VisitCallbackState<State>> VisitContextDriver
         raw: TVMFFIAny,
         kind: DefRegionKind,
     ) -> Result<Option<VisitInterrupt>> {
-        // Bypass the current layer; children still re-enter the complete visitor.
+        // Bypass the current policy; children still re-enter the complete visitor.
         default_user_visit_children(self.visitor, &VisitValue::from_raw(raw), kind)
     }
 }
 
-/// A walk dispatcher combined with a reusable default-recursion layer.
+/// A walk dispatcher combined with a reusable default-recursion policy.
 ///
-/// The dispatcher is also the state visible through the layer's context. Use
+/// The dispatcher is also the state visible through the policy's context. Use
 /// `#[dispatch(walk)]` or implement [`WalkDispatch`] to define its callbacks.
 /// Run repeatedly with [`Self::walk`], or pass this value to [`structural_walk`].
-pub struct WalkWithLayer<Walker, Layer> {
+pub struct WalkWithPolicy<Walker, Policy> {
     walker: Walker,
-    layer: Rc<Layer>,
+    policy: Rc<Policy>,
 }
 
-impl<Walker: WalkDispatch, Layer: VisitLayer<Walker>> WalkWithLayer<Walker, Layer> {
-    /// Combine a dispatcher and a default-recursion layer.
-    pub fn new(walker: Walker, layer: Layer) -> Self {
+impl<Walker: WalkDispatch, Policy: VisitPolicy<Walker>> WalkWithPolicy<Walker, Policy> {
+    /// Combine a dispatcher and a default-recursion policy.
+    pub fn new(walker: Walker, policy: Policy) -> Self {
         Self {
             walker,
-            layer: Rc::new(layer),
+            policy: Rc::new(policy),
         }
     }
 
@@ -177,7 +179,7 @@ impl<Walker: WalkDispatch, Layer: VisitLayer<Walker>> WalkWithLayer<Walker, Laye
         self.walker
     }
 
-    /// Walk a root using this dispatcher and layer.
+    /// Walk a root using this dispatcher and policy.
     pub fn walk<R>(&mut self, root: &R, order: WalkOrder) -> Result<Option<VisitInterrupt>>
     where
         for<'x> AnyView<'x>: From<&'x R>,
@@ -195,10 +197,10 @@ impl<Walker: WalkDispatch, Layer: VisitLayer<Walker>> WalkWithLayer<Walker, Laye
 }
 
 #[doc(hidden)]
-pub enum ByLayeredWalk {}
+pub enum ByPolicyWalk {}
 
-impl<Walker: WalkDispatch, Layer: VisitLayer<Walker>> IntoWalker<ByLayeredWalk>
-    for WalkWithLayer<Walker, Layer>
+impl<Walker: WalkDispatch, Policy: VisitPolicy<Walker>> IntoWalker<ByPolicyWalk>
+    for WalkWithPolicy<Walker, Policy>
 {
     type Walker = Self;
     fn into_walker(self) -> Self {
@@ -206,7 +208,9 @@ impl<Walker: WalkDispatch, Layer: VisitLayer<Walker>> IntoWalker<ByLayeredWalk>
     }
 }
 
-impl<Walker: WalkDispatch, Layer: VisitLayer<Walker>> NativeVisit for WalkWithLayer<Walker, Layer> {
+impl<Walker: WalkDispatch, Policy: VisitPolicy<Walker>> NativeVisit
+    for WalkWithPolicy<Walker, Policy>
+{
     const CUSTOM_DESCENT: bool = true;
 
     fn visit(&mut self, value: &VisitValue, kind: DefRegionKind) -> Result<WalkResult> {
@@ -220,22 +224,22 @@ impl<Walker: WalkDispatch, Layer: VisitLayer<Walker>> NativeVisit for WalkWithLa
         value: &VisitValue,
         kind: DefRegionKind,
     ) -> Result<Option<VisitInterrupt>> {
-        let layer = Rc::clone(&self.layer);
-        visit_with_layer(
+        let policy = Rc::clone(&self.policy);
+        visit_with_policy(
             &mut WalkDescent::<_, _, PRE_ORDER> { visitor: self },
-            &*layer,
+            &*policy,
             value,
             kind,
         )
     }
 }
 
-struct WalkDescent<'a, Walker, Layer, const PRE_ORDER: bool> {
-    visitor: &'a mut WalkWithLayer<Walker, Layer>,
+struct WalkDescent<'a, Walker, Policy, const PRE_ORDER: bool> {
+    visitor: &'a mut WalkWithPolicy<Walker, Policy>,
 }
 
-impl<Walker: WalkDispatch, Layer: VisitLayer<Walker>, const PRE_ORDER: bool>
-    VisitContextDriver<Walker> for WalkDescent<'_, Walker, Layer, PRE_ORDER>
+impl<Walker: WalkDispatch, Policy: VisitPolicy<Walker>, const PRE_ORDER: bool>
+    VisitContextDriver<Walker> for WalkDescent<'_, Walker, Policy, PRE_ORDER>
 {
     fn state(&self) -> &Walker {
         &self.visitor.walker
