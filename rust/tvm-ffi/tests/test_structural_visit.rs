@@ -23,8 +23,7 @@ use tvm_ffi::{
     dispatch, get_type_attr, structural_visit, structural_walk, Any, Array, DLDataType,
     DLDataTypeCode, DefRegionKind, Error, FieldGetter, Function, Map, Object, ObjectRefCore,
     Result, String as FfiString, StructuralVisitor, TypeIndex, VisitCallbacks, VisitContext,
-    VisitInterrupt, VisitPolicy, VisitValue, WalkDispatch, WalkOrder, WalkResult, WalkWithPolicy,
-    RUNTIME_ERROR,
+    VisitInterrupt, VisitPolicy, VisitValue, WalkOrder, WalkResult, WalkWithPolicy, RUNTIME_ERROR,
 };
 
 fn runtime_error(message: &str) -> Error {
@@ -127,18 +126,15 @@ fn composed_policies_share_array_scope_with_visit_and_walk_callbacks() {
     // Only unmatched arrays enter the default policies in this visit.
     assert_eq!(visitor.state().descent_depths, vec![1, 2]);
 
-    impl WalkDispatch for CollectIntegers {
-        fn dispatch_walk(
-            &mut self,
-            value: &VisitValue,
-            _def_region_kind: DefRegionKind,
-        ) -> Option<Result<WalkResult>> {
-            self.record(value.cast::<i64>()?);
-            Some(Ok(WalkResult::Advance))
+    #[dispatch(walk)]
+    impl CollectIntegers {
+        fn walk_integer(&mut self, value: i64) -> WalkResult {
+            self.record(value);
+            WalkResult::Advance
         }
     }
 
-    // Reuse exactly the same policies with a walk dispatcher. Walk manages
+    // Reuse the policies with a macro-generated walk dispatcher. Walk manages
     // recursion, so default policies also run for matched integer leaves.
     for order in [WalkOrder::PreOrder, WalkOrder::PostOrder] {
         let mut walker =
