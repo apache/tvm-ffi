@@ -302,8 +302,47 @@ impl<State> VisitContext<'_, State> {
     /// A callback enters its configured policy; within a policy this continues
     /// with the next policy, then registered hooks or reflected fields.
     pub fn visit_children(&mut self) -> Result<Option<VisitInterrupt>> {
-        self.driver
-            .visit_children_raw(self.current.raw(), self.def_region_kind)
+        self.default_visit_children_raw(self.current.raw(), self.def_region_kind)
+    }
+
+    /// Apply default descent to `value` under an explicit definition region.
+    ///
+    /// Like [`Self::visit_children`], this continues with the next policy (or
+    /// enters the configured policy from a callback), then registered hooks or
+    /// reflected fields. It does not dispatch callbacks for `value` itself;
+    /// its children re-enter the full callback engine.
+    ///
+    /// An enclosing [`DefRegionKind::Pattern`] cannot be downgraded. The current
+    /// value and region of this context are unchanged after the call, including
+    /// when descent returns an error or interrupt.
+    pub fn default_visit_children<T>(
+        &mut self,
+        value: &T,
+        def_region_kind: DefRegionKind,
+    ) -> Result<Option<VisitInterrupt>>
+    where
+        for<'x> AnyView<'x>: From<&'x T>,
+    {
+        self.default_visit_children_raw(raw_of(AnyView::from(value)), def_region_kind)
+    }
+
+    fn default_visit_children_raw(
+        &mut self,
+        raw: TVMFFIAny,
+        def_region_kind: DefRegionKind,
+    ) -> Result<Option<VisitInterrupt>> {
+        if raw.type_index == TVMFFITypeIndex::kTVMFFINone as i32 {
+            return Ok(None);
+        }
+        let kind = if self.def_region_kind == DefRegionKind::Pattern {
+            DefRegionKind::Pattern
+        } else {
+            def_region_kind
+        };
+        let active = active_structural_visitor()?;
+        // Keep the ABI visitor in sync while policies run, not only inside
+        // hooks: a subsequent visit_with must also preserve a pattern region.
+        with_visitor_def_region(active, kind, || self.driver.visit_children_raw(raw, kind))
     }
 }
 
