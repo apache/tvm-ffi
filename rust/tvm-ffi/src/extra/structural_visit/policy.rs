@@ -225,12 +225,17 @@ impl<Walker: WalkDispatch, Policy: VisitPolicy<Walker>> NativeVisit
         kind: DefRegionKind,
     ) -> Result<Option<VisitInterrupt>> {
         let policy = Rc::clone(&self.policy);
-        visit_with_policy(
-            &mut WalkDescent::<_, _, PRE_ORDER> { visitor: self },
-            &*policy,
-            value,
-            kind,
-        )
+        let active = active_structural_visitor()?;
+        // Reflected children arrive directly from the Rust walker. Synchronize
+        // the ABI region before the policy can re-enter callback dispatch.
+        with_visitor_def_region(active, kind, || {
+            visit_with_policy(
+                &mut WalkDescent::<_, _, PRE_ORDER> { visitor: self },
+                &*policy,
+                value,
+                kind,
+            )
+        })
     }
 }
 

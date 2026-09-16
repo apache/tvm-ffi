@@ -708,6 +708,78 @@ fn policy_regions_compose_with_field_flags_and_function_hooks() {
 }
 
 #[test]
+fn walk_policy_preserves_reflected_pattern_before_default_descent() {
+    assert_eq!(
+        unsafe { tvm_ffi::tvm_ffi_sys::TVMFFITestingDummyTarget() },
+        0
+    );
+    let root = Function::get_global("testing.make_visit_region_graph")
+        .unwrap()
+        .call_tuple((false,))
+        .unwrap();
+    #[derive(Default)]
+    struct Probe(Vec<(i64, DefRegionKind)>);
+    #[dispatch(walk)]
+    impl Probe {
+        fn walk_integer(&mut self, value: i64, kind: DefRegionKind) -> WalkResult {
+            self.0.push((value, kind));
+            WalkResult::Advance
+        }
+    }
+    struct Reenter(DefRegionKind);
+    impl VisitPolicy<Probe> for Reenter {
+        fn default_visit(
+            &self,
+            value: &VisitValue,
+            ctx: &mut VisitContext<'_, Probe>,
+        ) -> Result<Option<VisitInterrupt>> {
+            match value.cast::<i64>() {
+                Some(2) => {
+                    assert_eq!(ctx.def_region_kind(), DefRegionKind::Pattern);
+                    // Re-dispatch immediately: visit_children() must not be needed
+                    // to synchronize the ABI visitor with the reflected field region.
+                    ctx.visit_with(&99_i64, self.0)
+                }
+                Some(3) => {
+                    assert_eq!(ctx.def_region_kind(), DefRegionKind::None);
+                    // The preceding field's Pattern scope must not leak into a sibling.
+                    ctx.visit(&100_i64)
+                }
+                _ => ctx.visit_children(),
+            }
+        }
+    }
+    use DefRegionKind::{None as Use, Pattern, Simple};
+    for requested in [Use, Simple] {
+        for order in [WalkOrder::PreOrder, WalkOrder::PostOrder] {
+            let mut walker = WalkWithPolicy::new(Probe::default(), Reenter(requested));
+            assert!(walker.walk(&root, order).unwrap().is_none());
+            let expected = match order {
+                WalkOrder::PreOrder => vec![
+                    (1, Simple),
+                    (2, Pattern),
+                    (99, Pattern),
+                    (3, Use),
+                    (100, Use),
+                ],
+                WalkOrder::PostOrder => vec![
+                    (1, Simple),
+                    (99, Pattern),
+                    (2, Pattern),
+                    (100, Use),
+                    (3, Use),
+                ],
+            };
+            assert_eq!(
+                walker.state().0,
+                expected,
+                "order={order:?}, requested={requested:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn public_reflection_access_uses_registered_field_and_type_attr() {
     // Keep the existing C++ test library linked so its startup registrations
     // are available even when this test is run by itself.
