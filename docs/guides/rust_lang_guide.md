@@ -539,6 +539,10 @@ assert_eq!(mutator.state().integers, 2);
 
 `CallbackMutator::mutate` uses the copy path for a borrowed value, while
 `maybe_inplace_mutate` preserves the reuse opportunity of an owned value.
+Use `maybe_inplace_mutate_with_mode(value, region, InplaceMode::Disallow)`
+to disable reuse explicitly (`Mutator` also takes the dispatch object first).
+`Allow` still requires unique ownership; a borrowed callback's
+`default_mutate()` remains on the copy path.
 Closure callbacks are `Fn`; mutable data belongs in the callback state.
 
 `#[dispatch(mutate)]` groups typed `mutate_*` callbacks. The dispatch object
@@ -579,8 +583,10 @@ For a named custom recursion policy, implement `StructuralMutator` and pass
 `&mut` it to `structural_mutate`. `InplaceValue` is an engine-issued
 capability: callers cannot construct it from a read-only `MapValue`. Override
 `dispatch_maybe_inplace_mutate` to opt into default container reuse;
-`default_maybe_inplace_mutate` rechecks uniqueness before writing. Borrowed
-values can be re-entered with `mutate`, while owned values can use
+`default_maybe_inplace_mutate` rechecks uniqueness before writing. Its
+`_with_mode` variant can disable reuse even with a capability; the
+`_with_mode_result` variant also preserves `Unchanged`.
+Borrowed values can be re-entered with `mutate`, while owned values can use
 `maybe_inplace_mutate`:
 
 ```rust

@@ -23,10 +23,10 @@ use tvm_ffi::function::FunctionObj;
 use tvm_ffi::object::ObjectRef;
 use tvm_ffi::{
     dispatch, structural_map, structural_mutate, Any, AnyView, Array, CallbackMutator,
-    DefRegionKind, Error, FieldGetter, Function, InplaceValue, Map, MapDispatch, MapValue,
-    MutateCallbacks, Mutator, Object, ObjectArc, ObjectRefCore, Result, String as FfiString,
-    StructuralMutator, StructuralVarRemap, TypeIndex, Unchanged, UnchangedOr, WalkOrder,
-    RUNTIME_ERROR,
+    DefRegionKind, Error, FieldGetter, Function, InplaceMode, InplaceValue, Map, MapDispatch,
+    MapValue, MutateCallbacks, Mutator, Object, ObjectArc, ObjectRefCore, Result,
+    String as FfiString, StructuralMutator, StructuralVarRemap, TypeIndex, Unchanged, UnchangedOr,
+    WalkOrder, RUNTIME_ERROR,
 };
 
 struct IncrementIntegers;
@@ -327,6 +327,135 @@ fn user_mutator_recursive_entries_reenter_the_same_mutator() {
         owned.owned_value_pointer.unwrap()
     );
     assert_eq!(mutated.get(0).unwrap(), 2);
+}
+
+// A permission may be disabled at default descent. It must stay disabled for
+// uniquely owned children too; retaining an alias must independently force copying.
+#[test]
+fn default_mutation_mode_preserves_ownership_and_unchanged_results() {
+    struct Controlled {
+        mode: InplaceMode,
+        retain: bool,
+        increment: bool,
+        alias: Option<Any>,
+        inplace_calls: usize,
+    }
+    impl StructuralMutator for Controlled {
+        fn dispatch_mutate(&mut self, value: &MapValue, kind: DefRegionKind) -> Result<Any> {
+            if let Some(integer) = value.cast::<i64>() {
+                Ok(if self.increment {
+                    Any::from(integer + 1)
+                } else {
+                    Unchanged.into()
+                })
+            } else {
+                self.default_mutate(value, kind)
+            }
+        }
+        fn dispatch_maybe_inplace_mutate(
+            &mut self,
+            value: InplaceValue<'_>,
+            kind: DefRegionKind,
+        ) -> Result<Any> {
+            self.inplace_calls += 1;
+            if self.retain && self.alias.is_none() {
+                self.alias = Some(value.to_owned());
+            }
+            if self.increment {
+                self.default_maybe_inplace_mutate_with_mode(value, kind, self.mode)
+            } else {
+                let result =
+                    self.default_maybe_inplace_mutate_with_mode_result(value, kind, self.mode)?;
+                assert!(result.is_unchanged());
+                Ok(result.into())
+            }
+        }
+    }
+    for mode in [InplaceMode::Disallow, InplaceMode::Allow] {
+        for retain in [false, true] {
+            for increment in [false, true] {
+                let child = Array::new(vec![1_i64]);
+                let child_ptr = array_pointer(&child);
+                let root = Array::new(vec![child]);
+                let root_ptr = array_pointer(&root);
+                let mut mutator = Controlled {
+                    mode,
+                    retain,
+                    increment,
+                    alias: None,
+                    inplace_calls: 0,
+                };
+                let result = structural_mutate(root, &mut mutator)
+                    .and_then(Array::<Array<i64>>::try_from)
+                    .unwrap();
+                let child = result.get(0).unwrap();
+                let reuse = mode == InplaceMode::Allow && !retain;
+                assert_eq!(array_pointer(&result) == root_ptr, reuse || !increment);
+                assert_eq!(array_pointer(&child) == child_ptr, reuse || !increment);
+                assert_eq!(child.get(0).unwrap(), if increment { 2 } else { 1 });
+                assert_eq!(mutator.inplace_calls, if reuse { 2 } else { 1 });
+                if let Some(alias) = mutator.alias {
+                    let original = Array::<Array<i64>>::try_from(alias).unwrap();
+                    assert_eq!(original.get(0).unwrap().get(0).unwrap(), 1);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn owned_entry_mode_is_forwarded_by_generated_and_closure_callbacks() {
+    struct Entry {
+        mode: InplaceMode,
+        pointer: usize,
+    }
+    #[dispatch(mutate)]
+    impl Entry {
+        fn mutate_bool(&mut self, _: bool, ctx: &mut Mutator) -> Result<Any> {
+            let child = Array::new(vec![1_i64]);
+            self.pointer = array_pointer(&child) as usize;
+            ctx.maybe_inplace_mutate_with_mode(self, child, DefRegionKind::Pattern, self.mode)
+        }
+        fn mutate_integer(&mut self, value: i64, ctx: &mut Mutator) -> i64 {
+            assert_eq!(ctx.def_region_kind(), DefRegionKind::Pattern);
+            value + 1
+        }
+    }
+    assert_eq!(InplaceMode::default(), InplaceMode::Disallow);
+    for mode in [InplaceMode::Disallow, InplaceMode::Allow] {
+        let mut entry = Entry { mode, pointer: 0 };
+        let result = structural_mutate(true, &mut entry)
+            .and_then(Array::<i64>::try_from)
+            .unwrap();
+        assert_eq!(
+            array_pointer(&result) as usize == entry.pointer,
+            mode == InplaceMode::Allow
+        );
+        assert_eq!(result.get(0).unwrap(), 2);
+
+        let pointer = Cell::new(0usize);
+        let result = structural_mutate(
+            true,
+            (
+                |_: bool, ctx: &mut CallbackMutator| {
+                    let child = Array::new(vec![1_i64]);
+                    pointer.set(array_pointer(&child) as usize);
+                    ctx.maybe_inplace_mutate_with_mode(child, DefRegionKind::Pattern, mode)
+                },
+                |value: i64, ctx: &mut CallbackMutator| {
+                    assert_eq!(ctx.def_region_kind(), DefRegionKind::Pattern);
+                    value + 1
+                },
+            ),
+        )
+        .and_then(Array::<i64>::try_from)
+        .unwrap();
+        assert_eq!(
+            array_pointer(&result) as usize == pointer.get(),
+            mode == InplaceMode::Allow
+        );
+        assert_eq!(result.get(0).unwrap(), 2);
+    }
 }
 
 #[test]

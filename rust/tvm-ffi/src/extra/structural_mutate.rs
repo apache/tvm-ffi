@@ -106,6 +106,37 @@ impl<T: Into<Any>> IntoMapResult for Result<T> {
     }
 }
 
+/// Permission to attempt in-place structural mutation along an owned path.
+///
+/// `Allow` still requires unique ownership; it does not grant permission to
+/// modify a borrowed value. Use an owned value or an engine-issued
+/// [`InplaceValue`] with the mode-aware mutation helpers.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum InplaceMode {
+    /// Use ordinary mutation, including for uniquely owned values.
+    #[default]
+    Disallow,
+    /// Permit reuse when ownership and alias checks allow it.
+    Allow,
+}
+
+impl InplaceMode {
+    fn permit(self) -> Permit {
+        match self {
+            Self::Disallow => Permit::Copy,
+            Self::Allow => Permit::MaybeInPlace,
+        }
+    }
+
+    fn permit_if_unique(self, raw: TVMFFIAny) -> Permit {
+        if self == Self::Allow && object_is_unique(raw) {
+            Permit::MaybeInPlace
+        } else {
+            Permit::Copy
+        }
+    }
+}
+
 /// State and recursive operations available to a callback-chain mutation.
 ///
 /// A matched callback owns mutation of its value. Recursive operations
@@ -202,7 +233,25 @@ impl Mutator {
         D: MutateDispatch,
         T: Into<Any>,
     {
-        StructuralMutator::maybe_inplace_mutate(dispatch, value, def_region_kind)
+        self.maybe_inplace_mutate_with_mode(dispatch, value, def_region_kind, InplaceMode::Allow)
+    }
+
+    /// Mutate an owned child under an explicit region and in-place permission.
+    ///
+    /// `Disallow` keeps this input on the copy path even when uniquely owned.
+    #[inline(always)]
+    pub fn maybe_inplace_mutate_with_mode<D, T>(
+        &mut self,
+        dispatch: &mut D,
+        value: T,
+        def_region_kind: DefRegionKind,
+        mode: InplaceMode,
+    ) -> Result<Any>
+    where
+        D: MutateDispatch,
+        T: Into<Any>,
+    {
+        StructuralMutator::maybe_inplace_mutate_with_mode(dispatch, value, def_region_kind, mode)
     }
 
     /// Apply default mutation to the callback's current value.
@@ -358,12 +407,23 @@ where
         value: T,
         def_region_kind: DefRegionKind,
     ) -> Result<Any> {
+        self.maybe_inplace_mutate_with_mode(value, def_region_kind, InplaceMode::Allow)
+    }
+
+    /// Mutate an owned value under an explicit region and in-place permission.
+    ///
+    /// `Disallow` keeps this input on the copy path even when uniquely owned.
+    #[inline(always)]
+    pub fn maybe_inplace_mutate_with_mode<T: Into<Any>>(
+        &mut self,
+        value: T,
+        def_region_kind: DefRegionKind,
+        mode: InplaceMode,
+    ) -> Result<Any> {
         let value = value.into();
-        let result = self.driver.mutate_raw(
-            *value.as_raw_ffi_any(),
-            def_region_kind,
-            Permit::MaybeInPlace,
-        )?;
+        let result =
+            self.driver
+                .mutate_raw(*value.as_raw_ffi_any(), def_region_kind, mode.permit())?;
         Ok(if is_unchanged(&result) { value } else { result })
     }
 
@@ -1194,12 +1254,29 @@ pub trait StructuralMutator: Sized {
     where
         T: Into<Any>,
     {
+        self.maybe_inplace_mutate_with_mode(value, def_region_kind, InplaceMode::Allow)
+    }
+
+    /// Re-enter for an owned value with an explicit region and in-place permission.
+    ///
+    /// `Allow` checks uniqueness before dispatch; `Disallow` uses ordinary
+    /// mutation without checking uniqueness. An independently owned replacement
+    /// or a later explicit owned entry can establish a new permission boundary.
+    fn maybe_inplace_mutate_with_mode<T>(
+        &mut self,
+        value: T,
+        def_region_kind: DefRegionKind,
+        mode: InplaceMode,
+    ) -> Result<Any>
+    where
+        T: Into<Any>,
+    {
         let value = value.into();
         let result = dispatch_user_raw(
             self,
             *value.as_raw_ffi_any(),
             def_region_kind,
-            Permit::MaybeInPlace,
+            mode.permit(),
         )?;
         Ok(if is_unchanged(&result) { value } else { result })
     }
@@ -1234,12 +1311,24 @@ pub trait StructuralMutator: Sized {
         value: InplaceValue<'_>,
         def_region_kind: DefRegionKind,
     ) -> Result<Any> {
+        self.default_maybe_inplace_mutate_with_mode(value, def_region_kind, InplaceMode::Allow)
+    }
+
+    /// Apply default mutation with a capability and an explicit permission.
+    ///
+    /// `Disallow` overrides the capability and uses the copy path. `Allow`
+    /// rechecks uniqueness because the handler may have retained an owning
+    /// alias. Consuming the capability prevents a borrow from it surviving this
+    /// call. Unlike the C++ default-descent API, safe Rust cannot simply trust
+    /// the earlier uniqueness check after arbitrary user code has run.
+    fn default_maybe_inplace_mutate_with_mode(
+        &mut self,
+        value: InplaceValue<'_>,
+        def_region_kind: DefRegionKind,
+        mode: InplaceMode,
+    ) -> Result<Any> {
         let raw = value.raw();
-        let permit = if object_is_unique(raw) {
-            Permit::MaybeInPlace
-        } else {
-            Permit::Copy
-        };
+        let permit = mode.permit_if_unique(raw);
         user_default_mutate(self, raw, def_region_kind, permit)
             .and_then(|result| resolve_result(result, raw))
     }
@@ -1284,12 +1373,20 @@ pub trait StructuralMutator: Sized {
         value: InplaceValue<'_>,
         kind: DefRegionKind,
     ) -> Result<UnchangedOr<Any>> {
+        self.default_maybe_inplace_mutate_with_mode_result(value, kind, InplaceMode::Allow)
+    }
+
+    /// Default mutation with a capability and permission, preserving unchanged.
+    ///
+    /// Uses the same ownership checks as [`Self::default_maybe_inplace_mutate_with_mode`].
+    fn default_maybe_inplace_mutate_with_mode_result(
+        &mut self,
+        value: InplaceValue<'_>,
+        kind: DefRegionKind,
+        mode: InplaceMode,
+    ) -> Result<UnchangedOr<Any>> {
         let raw = value.raw();
-        let permit = if object_is_unique(raw) {
-            Permit::MaybeInPlace
-        } else {
-            Permit::Copy
-        };
+        let permit = mode.permit_if_unique(raw);
         user_default_mutate(self, raw, kind, permit).and_then(UnchangedOr::from_carrier)
     }
 
