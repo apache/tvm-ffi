@@ -529,6 +529,185 @@ fn callback_default_descent_retargets_reflected_fields() {
 }
 
 #[test]
+fn policy_halts_skip_remaining_policies_and_restore_outer_state() {
+    #[derive(Default)]
+    struct Probe {
+        events: Vec<&'static str>,
+        depth: usize,
+    }
+    #[dispatch(walk)]
+    impl Probe {
+        fn walk_any(&mut self, value: &VisitValue, kind: DefRegionKind) -> WalkResult {
+            assert!(
+                value.cast::<Array<i64>>().is_some(),
+                "children must not be visited"
+            );
+            assert_eq!(kind, DefRegionKind::None);
+            self.events.push("callback");
+            WalkResult::Advance
+        }
+    }
+    struct Scope;
+    impl VisitPolicy<Probe> for Scope {
+        fn default_visit(
+            &self,
+            value: &VisitValue,
+            ctx: &mut VisitContext<'_, Probe>,
+        ) -> Result<Option<VisitInterrupt>> {
+            ctx.state_mut().events.push("enter");
+            ctx.state_mut().depth += 1;
+            let result = ctx.default_visit_children(&value.to_owned(), DefRegionKind::Pattern);
+            assert_eq!(ctx.def_region_kind(), DefRegionKind::None);
+            ctx.state_mut().depth -= 1;
+            ctx.state_mut().events.push("exit");
+            result
+        }
+    }
+    struct Stop(bool);
+    impl VisitPolicy<Probe> for Stop {
+        fn default_visit(
+            &self,
+            _: &VisitValue,
+            ctx: &mut VisitContext<'_, Probe>,
+        ) -> Result<Option<VisitInterrupt>> {
+            assert_eq!(ctx.def_region_kind(), DefRegionKind::Pattern);
+            assert_eq!(ctx.state().depth, 1);
+            ctx.state_mut().events.push("stop");
+            if self.0 {
+                Err(runtime_error("policy failed"))
+            } else {
+                Ok(Some(VisitInterrupt::with(42_i64)))
+            }
+        }
+    }
+    struct Unreachable;
+    impl VisitPolicy<Probe> for Unreachable {
+        fn default_visit(
+            &self,
+            _: &VisitValue,
+            _: &mut VisitContext<'_, Probe>,
+        ) -> Result<Option<VisitInterrupt>> {
+            panic!("the policy after Stop must not run")
+        }
+    }
+    let root = Array::new(vec![1_i64]);
+    for error in [false, true] {
+        for order in [None, Some(WalkOrder::PreOrder), Some(WalkOrder::PostOrder)] {
+            let policies = (Scope, (Stop(error), Unreachable));
+            let (result, state) = if let Some(order) = order {
+                let mut walker = WalkWithPolicy::new(Probe::default(), policies);
+                let result = walker.walk(&root, order);
+                (result, walker.into_state())
+            } else {
+                let mut visitor = VisitCallbacks::new(
+                    Probe::default(),
+                    |value: &VisitValue, ctx: &mut VisitContext<'_, Probe>| {
+                        let kind = ctx.def_region_kind();
+                        ctx.state_mut().walk_any(value, kind);
+                        ctx.visit_children()
+                    },
+                )
+                .with_policy(policies);
+                let result = structural_visit(&root, &mut visitor);
+                (result, visitor.into_state())
+            };
+            if error {
+                assert!(result.err().unwrap().to_string().contains("policy failed"));
+            } else {
+                assert_eq!(i64::try_from(result.unwrap().unwrap().value).unwrap(), 42);
+            }
+            let expected = if order == Some(WalkOrder::PostOrder) {
+                vec!["enter", "stop", "exit"]
+            } else {
+                vec!["callback", "enter", "stop", "exit"]
+            };
+            assert_eq!(state.events, expected);
+            assert_eq!(state.depth, 0);
+        }
+    }
+}
+
+#[test]
+fn policy_regions_compose_with_field_flags_and_function_hooks() {
+    assert_eq!(
+        unsafe { tvm_ffi::tvm_ffi_sys::TVMFFITestingDummyTarget() },
+        0
+    );
+    #[derive(Default)]
+    struct Probe(Vec<(i64, DefRegionKind)>);
+    #[dispatch(walk)]
+    impl Probe {
+        fn walk_integer(&mut self, value: i64, kind: DefRegionKind) -> WalkResult {
+            self.0.push((value, kind));
+            WalkResult::Advance
+        }
+    }
+    struct SetRootRegion(i32, DefRegionKind);
+    impl VisitPolicy<Probe> for SetRootRegion {
+        fn default_visit(
+            &self,
+            value: &VisitValue,
+            ctx: &mut VisitContext<'_, Probe>,
+        ) -> Result<Option<VisitInterrupt>> {
+            if value.type_index() == self.0 {
+                ctx.default_visit_children(&value.to_owned(), self.1)
+            } else {
+                ctx.visit_children()
+            }
+        }
+    }
+    use DefRegionKind::{None as Use, Pattern, Simple};
+    for with_hook in [false, true] {
+        let root = Function::get_global("testing.make_visit_region_graph")
+            .unwrap()
+            .call_tuple((with_hook,))
+            .unwrap();
+        if with_hook {
+            // Exercise the Function-valued __s_visit__ path, not an opaque pointer hook.
+            assert!(
+                Function::try_from(get_type_attr(root.type_index(), "__s_visit__").unwrap())
+                    .is_ok()
+            );
+        }
+        for region in [Use, Simple, Pattern] {
+            let ordinary = if with_hook && region == Use {
+                Simple
+            } else {
+                region
+            };
+            let mut expected = vec![
+                (1, if region == Pattern { Pattern } else { Simple }),
+                (2, Pattern),
+                (3, ordinary),
+            ];
+            if with_hook {
+                expected.push((4, region));
+            }
+            for order in [None, Some(WalkOrder::PreOrder), Some(WalkOrder::PostOrder)] {
+                let policy = SetRootRegion(root.type_index(), region);
+                let state = if let Some(order) = order {
+                    let mut walker = WalkWithPolicy::new(Probe::default(), policy);
+                    assert!(walker.walk(&root, order).unwrap().is_none());
+                    walker.into_state()
+                } else {
+                    let mut visitor = VisitCallbacks::new(
+                        Probe::default(),
+                        |value: i64, ctx: &mut VisitContext<'_, Probe>| {
+                            let kind = ctx.def_region_kind();
+                            ctx.state_mut().0.push((value, kind));
+                        },
+                    )
+                    .with_policy(policy);
+                    assert!(structural_visit(&root, &mut visitor).unwrap().is_none());
+                    visitor.into_state()
+                };
+                assert_eq!(state.0, expected);
+            }
+        }
+    }
+}
+
+#[test]
 fn public_reflection_access_uses_registered_field_and_type_attr() {
     // Keep the existing C++ test library linked so its startup registrations
     // are available even when this test is run by itself.

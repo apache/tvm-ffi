@@ -30,6 +30,7 @@
 #include <tvm/ffi/dtype.h>
 #include <tvm/ffi/enum.h>
 #include <tvm/ffi/extra/c_env_api.h>
+#include <tvm/ffi/extra/structural_visit.h>
 #include <tvm/ffi/function.h>
 #include <tvm/ffi/optional.h>
 #include <tvm/ffi/reflection/accessor.h>
@@ -144,6 +145,49 @@ TVM_FFI_STATIC_INIT_BLOCK() {
   refl::ObjectDef<TestCxxIntEnumObj>(refl::init(false)).def_convert<TestCxxIntEnum>();
 
   refl::ObjectDef<TestCxxStrEnumObj>(refl::init(false)).def_convert<TestCxxStrEnum>();
+}
+
+// Structural traversal fixtures shared by language binding tests.
+class TestVisitRegionsObj : public Object {
+ public:
+  int64_t simple = 1;
+  int64_t pattern = 2;
+  int64_t ordinary = 3;
+
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("testing.TestVisitRegions", TestVisitRegionsObj, Object);
+};
+
+class TestVisitHookObj : public Object {
+ public:
+  ObjectRef child;
+
+  explicit TestVisitHookObj(ObjectRef child) : child(std::move(child)) {}
+
+  TVM_FFI_DECLARE_OBJECT_INFO_FINAL("testing.TestVisitHook", TestVisitHookObj, Object);
+};
+
+TVM_FFI_STATIC_INIT_BLOCK() {
+  namespace refl = tvm::ffi::reflection;
+  refl::ObjectDef<TestVisitRegionsObj>()
+      .def_ro("simple", &TestVisitRegionsObj::simple, refl::AttachFieldFlag::SEqHashDefSimple())
+      .def_ro("pattern", &TestVisitRegionsObj::pattern, refl::AttachFieldFlag::SEqHashDefPattern())
+      .def_ro("ordinary", &TestVisitRegionsObj::ordinary);
+  refl::ObjectDef<TestVisitHookObj>().def_ro("child", &TestVisitHookObj::child);
+  refl::EnsureTypeAttrColumn(refl::type_attr::kStructuralVisit);
+  refl::TypeAttrDef<TestVisitHookObj>().def(
+      refl::type_attr::kStructuralVisit,
+      [](StructuralVisitor visitor, const TestVisitHookObj* self) {
+        auto result = visitor->WithDefRegionKind(kTVMFFIDefRegionKindSimple,
+                                                 [&] { return visitor->Visit(self->child); });
+        if (result.has_value()) return result;
+        // This sibling observes the region restored after the scoped child visit.
+        return visitor->Visit(int64_t{4});
+      });
+  refl::GlobalDef().def("testing.make_visit_region_graph", [](bool with_hook) -> Any {
+    ObjectRef fields(make_object<TestVisitRegionsObj>());
+    if (with_hook) return ObjectRef(make_object<TestVisitHookObj>(fields));
+    return fields;
+  });
 }
 
 class TestObjectBase : public Object {
