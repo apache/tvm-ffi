@@ -538,86 +538,101 @@ fn consuming_callbacks_forward_permissions_without_temporary_owners() {
 }
 
 #[test]
-fn consuming_default_descent_cannot_reuse_another_contexts_value() {
+fn consuming_default_descent_transfers_between_contexts_without_node_borrows() {
     struct Inner<'a> {
         value: Option<MutateValue<'a>>,
         preserve_unchanged: bool,
+        result: Any,
     }
     #[dispatch(mutate)]
     impl Inner<'_> {
         fn mutate_bool(&mut self, _: bool, ctx: &mut Mutator) -> Result<Any> {
             let value = self.value.take().unwrap();
-            if self.preserve_unchanged {
-                ctx.default_mutate_with_mode_result(self, value, InplaceMode::Allow)
-                    .map(Into::into)
+            self.result = if self.preserve_unchanged {
+                ctx.default_mutate_with_mode_result(self, value, InplaceMode::Allow)?
+                    .into()
             } else {
-                ctx.default_mutate_with_mode(self, value, InplaceMode::Allow)
-            }
+                ctx.default_mutate_with_mode(self, value, InplaceMode::Allow)?
+            };
+            Ok(Any::new())
         }
         fn mutate_integer(&mut self, value: i64) -> i64 {
             value + 1
         }
     }
-    fn check(
+    fn transfer(
         value: MutateValue<'_>,
-        current: &MapValue,
         generated: bool,
-        preserve_unchanged: bool,
+        preserve: bool,
+        retain: bool,
     ) -> Result<Any> {
-        // Borrow from the issuing context, independently of the consumed handle.
-        let node = current
-            .as_node::<tvm_ffi::collections::array::ArrayObj>()
-            .unwrap();
+        // Only an owning alias can survive consumption of the handle.
+        let alias = retain.then(|| value.cast::<Array<i64>>().unwrap());
         assert_eq!(value.inplace_mode(), InplaceMode::Allow);
+        // Carry the result back to the array callback: Unchanged belongs to
+        // that input, not to the nested traversal's boolean root.
         let result = if generated {
-            structural_mutate(
-                true,
-                &mut Inner {
-                    value: Some(value),
-                    preserve_unchanged,
-                },
-            )?
+            let mut inner = Inner {
+                value: Some(value),
+                preserve_unchanged: preserve,
+                result: Any::new(),
+            };
+            structural_mutate(true, &mut inner)?;
+            inner.result
         } else {
             let slot = RefCell::new(Some(value));
+            let output = Cell::new(None);
             structural_mutate(
                 true,
                 (
                     |_: bool, ctx: &mut CallbackMutator| -> Result<Any> {
                         let value = slot.borrow_mut().take().unwrap();
-                        if preserve_unchanged {
-                            ctx.default_mutate_with_mode_result(value, InplaceMode::Allow)
-                                .map(Into::into)
+                        output.set(Some(if preserve {
+                            ctx.default_mutate_with_mode_result(value, InplaceMode::Allow)?
+                                .into()
                         } else {
-                            ctx.default_mutate_with_mode(value, InplaceMode::Allow)
-                        }
+                            ctx.default_mutate_with_mode(value, InplaceMode::Allow)?
+                        }));
+                        Ok(Any::new())
                     },
                     |value: i64, _: &mut CallbackMutator| value + 1,
                 ),
-            )?
+            )?;
+            output.take().unwrap()
         };
-        let output = Array::<i64>::try_from(result)?;
-        assert_ne!(array_pointer(&output) as usize, node as *const _ as usize);
-        assert_eq!(output.get(0)?, 2);
-        // Acquire an owner only after descent; it must not cause the copy above.
-        assert_eq!(current.cast::<Array<i64>>().unwrap().get(0)?, 1);
-        Ok(output.into())
+        if let Some(alias) = alias {
+            assert_eq!(alias.get(0)?, 1);
+        }
+        Ok(result)
     }
-    struct Outer(bool);
+    struct Outer {
+        preserve: bool,
+        retain: bool,
+    }
     #[dispatch(mutate)]
     impl Outer {
-        fn mutate_any(&mut self, value: MutateValue<'_>, ctx: &mut Mutator) -> Result<Any> {
-            check(value, ctx.current(), true, self.0)
+        fn mutate_any(&mut self, value: MutateValue<'_>) -> Result<Any> {
+            transfer(value, true, self.preserve, self.retain)
         }
     }
-    for preserve_unchanged in [false, true] {
-        structural_mutate(Array::new(vec![1_i64]), &mut Outer(preserve_unchanged)).unwrap();
-        structural_mutate(
-            Array::new(vec![1_i64]),
-            |value: MutateValue<'_>, ctx: &mut CallbackMutator| {
-                check(value, ctx.current(), false, preserve_unchanged)
-            },
-        )
-        .unwrap();
+    for preserve in [false, true] {
+        for retain in [false, true] {
+            for generated in [false, true] {
+                let root = Array::new(vec![1_i64]);
+                let pointer = array_pointer(&root);
+                let result = if generated {
+                    structural_mutate(root, &mut Outer { preserve, retain })
+                } else {
+                    structural_mutate(root, |value: MutateValue<'_>, _: &mut CallbackMutator| {
+                        transfer(value, false, preserve, retain)
+                    })
+                }
+                .and_then(Array::<i64>::try_from)
+                .unwrap();
+                assert_eq!(array_pointer(&result) == pointer, !retain);
+                assert_eq!(result.get(0).unwrap(), 2);
+            }
+        }
     }
 }
 
@@ -1018,15 +1033,20 @@ fn generated_mutate_dispatch_recurses_through_context() {
 
 #[derive(Default)]
 struct GeneratedDefaultingDispatch {
+    preserve_unchanged: bool,
     arrays: usize,
     integers: Vec<i64>,
 }
 
 #[dispatch(mutate)]
 impl GeneratedDefaultingDispatch {
-    fn mutate_array(&mut self, _array: Array<i64>, mutator: &mut Mutator) -> Result<Any> {
+    fn mutate_array(&mut self, array: Array<i64>, mutator: &mut Mutator) -> Result<Any> {
         self.arrays += 1;
-        mutator.default_mutate(self)
+        if self.preserve_unchanged {
+            mutator.default_mutate_result(self, &array).map(Into::into)
+        } else {
+            mutator.default_mutate(self, &array)
+        }
     }
 
     fn mutate_integer(&mut self, value: i64) -> Any {
@@ -1037,14 +1057,19 @@ impl GeneratedDefaultingDispatch {
 
 #[test]
 fn generated_mutate_dispatch_can_default_recurse_from_a_typed_handler() {
-    let mut mutator = GeneratedDefaultingDispatch::default();
-    let mutated = structural_mutate(Array::new(vec![1i64, 2]), &mut mutator)
-        .and_then(Array::<i64>::try_from)
-        .unwrap();
+    for preserve_unchanged in [false, true] {
+        let mut mutator = GeneratedDefaultingDispatch {
+            preserve_unchanged,
+            ..Default::default()
+        };
+        let mutated = structural_mutate(Array::new(vec![1i64, 2]), &mut mutator)
+            .and_then(Array::<i64>::try_from)
+            .unwrap();
 
-    assert_eq!(mutated.iter().collect::<Vec<_>>(), vec![2, 3]);
-    assert_eq!(mutator.arrays, 1);
-    assert_eq!(mutator.integers, vec![1, 2]);
+        assert_eq!(mutated.iter().collect::<Vec<_>>(), vec![2, 3]);
+        assert_eq!(mutator.arrays, 1);
+        assert_eq!(mutator.integers, vec![1, 2]);
+    }
 }
 
 #[test]
@@ -1154,7 +1179,7 @@ fn recursive_mutate_returns_unchanged_or_a_replacement() {
         }
 
         // Recurse into containers. Keep the unchanged marker if no child changed.
-        mutator.default_mutate_result()
+        mutator.default_mutate_result(value)
     }
 
     // No rewrite: the public entry resolves unchanged to the original array.
@@ -1383,11 +1408,11 @@ fn stateful_mutate_integer(value: i64, mutator: &mut CallbackMutator<CallbackMut
 }
 
 fn stateful_mutate_default(
-    _value: &MapValue,
+    value: &MapValue,
     mutator: &mut CallbackMutator<CallbackMutateStats>,
 ) -> Result<Any> {
     mutator.state_mut().defaults += 1;
-    mutator.default_mutate()
+    mutator.default_mutate(value)
 }
 
 #[test]
@@ -1425,13 +1450,12 @@ fn stateful_mutate_recursive(
     value: &MapValue,
     mutator: &mut CallbackMutator<CallbackMutateDepth>,
 ) -> Result<Any> {
-    assert_eq!(mutator.current().type_index(), value.type_index());
     {
         let state = mutator.state_mut();
         state.current += 1;
         state.maximum = state.maximum.max(state.current);
     }
-    let mutated = mutator.default_mutate()?;
+    let mutated = mutator.default_mutate(value)?;
     {
         let state = mutator.state_mut();
         state.current -= 1;
@@ -1459,7 +1483,7 @@ fn callback_mutator_state_can_change_around_recursive_reborrows() {
 }
 
 #[test]
-fn callback_mutate_current_default_is_repeatable_copy_path() {
+fn callback_mutate_explicit_default_is_repeatable_copy_path() {
     let root = Array::new(vec![1i64, 2]);
     let root_pointer = array_pointer(&root);
     let defaults = Cell::new(0);
@@ -1467,10 +1491,10 @@ fn callback_mutate_current_default_is_repeatable_copy_path() {
         root,
         (
             |value: i64, _mutator: &mut CallbackMutator| Any::from(value + 1),
-            |_value: &MapValue, mutator: &mut CallbackMutator| -> Result<Any> {
+            |value: &MapValue, mutator: &mut CallbackMutator| -> Result<Any> {
                 defaults.set(defaults.get() + 1);
-                let first = mutator.default_mutate()?;
-                let second = mutator.default_mutate()?;
+                let first = mutator.default_mutate(value)?;
+                let second = mutator.default_mutate(value)?;
                 assert_ne!(any_object_pointer(&first), any_object_pointer(&second));
                 Ok(first)
             },
@@ -1504,9 +1528,9 @@ fn callback_mutate_match_is_final_and_same_fn_can_reenter() {
     let calls = Cell::new(0);
     let mutated = structural_mutate(
         Array::new(vec![1i64, 2]),
-        |_value: &MapValue, mutator: &mut CallbackMutator| {
+        |value: &MapValue, mutator: &mut CallbackMutator| {
             calls.set(calls.get() + 1);
-            mutator.default_mutate()
+            mutator.default_mutate(value)
         },
     )
     .and_then(Array::<i64>::try_from)

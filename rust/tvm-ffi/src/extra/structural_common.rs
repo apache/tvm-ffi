@@ -72,6 +72,14 @@ pub(crate) use impl_callback_chain_tuple_arities;
 #[repr(transparent)]
 pub struct StructuralValue(TVMFFIAny);
 
+impl<'a> From<&'a StructuralValue> for AnyView<'a> {
+    #[inline]
+    fn from(value: &'a StructuralValue) -> Self {
+        // SAFETY: the view cannot outlive the borrowed structural value.
+        unsafe { AnyView::from_raw_ffi_any(value.raw()) }
+    }
+}
+
 impl StructuralValue {
     #[inline]
     pub(crate) fn from_raw(raw: TVMFFIAny) -> Self {

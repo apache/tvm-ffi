@@ -543,8 +543,10 @@ assert_eq!(mutator.state().integers, 2);
 Closure callbacks are `Fn`; mutable data belongs in the callback state.
 
 Use `MutateValue<'_, T>` with `default_mutate_with_mode` to forward in-place
-permission into default descent. Generated handlers may take `InplaceMode`
-after `&mut Mutator`; see the `MutateValue` API for ownership requirements.
+permission into default descent. Borrow the node through `value`; mutation
+contexts do not expose `current()`, and copy-only default descent takes an
+explicit borrow (`default_mutate(value)`). Generated handlers may take
+`InplaceMode` after `&mut Mutator`; see `MutateValue` for ownership requirements.
 
 `#[dispatch(mutate)]` groups typed `mutate_*` callbacks. The dispatch object
 owns its mutable pass state, while `Mutator` supplies recursion and the current
