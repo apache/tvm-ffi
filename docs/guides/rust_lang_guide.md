@@ -540,22 +540,15 @@ assert_eq!(mutator.state().integers, 2);
 
 `CallbackMutator::mutate` uses the copy path for a borrowed value, while
 `maybe_inplace_mutate` preserves the reuse opportunity of an owned value.
-Use `maybe_inplace_mutate_with_mode(value, region, InplaceMode::Disallow)`
-to disable reuse explicitly (`Mutator` also takes the dispatch object first).
-`Allow` still requires unique ownership. For current-value default descent,
-consume a `MutateValue<'_, T>` with `default_mutate_with_mode(value, mode)`;
-`T` selects the matched type and defaults to `Any`. The handle preserves the
-engine's permission without acquiring ownership. Borrows must end before the
-call; retained owning aliases force copying. A borrowed callback's existing
-`default_mutate()` remains on the copy path.
 Closure callbacks are `Fn`; mutable data belongs in the callback state.
+
+Use `MutateValue<'_, T>` with `default_mutate_with_mode` to forward in-place
+permission into default descent. Generated handlers may take `InplaceMode`
+after `&mut Mutator`; see the `MutateValue` API for ownership requirements.
 
 `#[dispatch(mutate)]` groups typed `mutate_*` callbacks. The dispatch object
 owns its mutable pass state, while `Mutator` supplies recursion and the current
-definition region. A handler can take `MutateValue<'_, T>` and an optional
-trailing `InplaceMode` after `&mut Mutator`; default descent consumes the handle
-with `mutator.default_mutate_with_mode(self, value, mode)`.
-`mutator.mutate(self, child)` safely reborrows that dispatch
+definition region. `mutator.mutate(self, child)` safely reborrows that dispatch
 object and inherits the current region; `mutate_with` is available for an
 explicit override. An unmatched value follows default mutation with its
 current in-place permit. A handler that does not need these controls can omit
@@ -591,10 +584,8 @@ For a named custom recursion policy, implement `StructuralMutator` and pass
 `&mut` it to `structural_mutate`. `InplaceValue` is an engine-issued
 capability: callers cannot construct it from a read-only `MapValue`. Override
 `dispatch_maybe_inplace_mutate` to opt into default container reuse;
-`default_maybe_inplace_mutate` rechecks uniqueness before writing. Its
-`_with_mode` variant can disable reuse even with a capability; the
-`_with_mode_result` variant also preserves `Unchanged`.
-Borrowed values can be re-entered with `mutate`, while owned values can use
+`default_maybe_inplace_mutate` rechecks uniqueness before writing. Borrowed
+values can be re-entered with `mutate`, while owned values can use
 `maybe_inplace_mutate`:
 
 ```rust
