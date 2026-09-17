@@ -488,6 +488,11 @@ Within one `structural_map` call, callbacks run at every occurrence; their
 results are not cached. Default recursion manages identity remapping with
 the same semantics as C++.
 
+`MutateCallbacks::with_policy` and `MapWithPolicy` use `MutationPolicy<State>`
+to manage context around default recursion. Policies consume `MutateValue`
+and return `UnchangedOr<Any>`; see the API documentation for composition and
+scoped definition regions.
+
 Default recursion uses the same type attributes as C++: it calls
 `__s_maybe_inplace_mutate__` for a uniquely owned object when available, or
 falls back to `__s_mutate__`. Each hook receives the active Rust-backed

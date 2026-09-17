@@ -23,10 +23,10 @@ use tvm_ffi::function::FunctionObj;
 use tvm_ffi::object::ObjectRef;
 use tvm_ffi::{
     dispatch, structural_map, structural_mutate, Any, AnyView, Array, CallbackMutator,
-    DefRegionKind, Error, FieldGetter, Function, InplaceMode, InplaceValue, Map, MapDispatch,
-    MapValue, MutateCallbacks, MutateValue, Mutator, Object, ObjectArc, ObjectRefCore, Result,
-    String as FfiString, StructuralMutator, StructuralVarRemap, TypeIndex, Unchanged, UnchangedOr,
-    WalkOrder, RUNTIME_ERROR,
+    DefRegionKind, DefaultMutationPolicy, Error, FieldGetter, Function, InplaceMode, InplaceValue,
+    Map, MapDispatch, MapValue, MapWithPolicy, MutateCallbacks, MutateValue, MutationPolicy,
+    Mutator, Object, ObjectArc, ObjectRefCore, Result, String as FfiString, StructuralMutator,
+    StructuralVarRemap, TypeIndex, Unchanged, UnchangedOr, WalkOrder, RUNTIME_ERROR,
 };
 
 struct IncrementIntegers;
@@ -1648,4 +1648,407 @@ fn callback_mutate_panics_resume_and_leave_the_next_run_usable() {
     .and_then(Array::<i64>::try_from)
     .unwrap();
     assert_eq!(mutated.get(0).unwrap(), 2);
+}
+
+#[derive(Default)]
+struct PolicyState {
+    depth: usize,
+    events: Vec<(&'static str, usize)>,
+}
+#[dispatch(map)]
+impl PolicyState {
+    fn map_integer(&mut self, value: i64) -> i64 {
+        self.events.push(("integer", self.depth));
+        value + 1
+    }
+    fn map_array(&mut self, value: Array<Any>) -> Any {
+        self.events.push(("callback", self.depth));
+        value.into()
+    }
+}
+
+struct ArrayPolicy;
+impl MutationPolicy<PolicyState> for ArrayPolicy {
+    fn default_mutate(
+        &self,
+        value: MutateValue<'_>,
+        ctx: &mut CallbackMutator<PolicyState>,
+    ) -> Result<UnchangedOr<Any>> {
+        if value
+            .as_node::<tvm_ffi::collections::array::ArrayObj>()
+            .is_none()
+        {
+            return ctx.default_maybe_inplace_mutate_result(value);
+        }
+        ctx.state_mut().depth += 1;
+        let depth = ctx.state().depth;
+        ctx.state_mut().events.push(("enter", depth));
+        let result = ctx.default_maybe_inplace_mutate_result(value);
+        ctx.state_mut().depth -= 1;
+        let depth = ctx.state().depth;
+        ctx.state_mut().events.push(("exit", depth));
+        result
+    }
+}
+struct RecordPolicy;
+impl MutationPolicy<PolicyState> for RecordPolicy {
+    fn default_mutate(
+        &self,
+        value: MutateValue<'_>,
+        ctx: &mut CallbackMutator<PolicyState>,
+    ) -> Result<UnchangedOr<Any>> {
+        if value
+            .as_node::<tvm_ffi::collections::array::ArrayObj>()
+            .is_some()
+        {
+            let depth = ctx.state().depth;
+            ctx.state_mut().events.push(("next", depth));
+        }
+        ctx.default_maybe_inplace_mutate_result(value)
+    }
+}
+
+#[test]
+fn mutation_policies_share_state_and_preserve_callback_order() {
+    let root = || Array::new(vec![Any::from(Array::new(vec![1_i64])), Any::from(2_i64)]);
+    let pre = vec![
+        ("callback", 0),
+        ("enter", 1),
+        ("next", 1),
+        ("callback", 1),
+        ("enter", 2),
+        ("next", 2),
+        ("integer", 2),
+        ("exit", 1),
+        ("integer", 1),
+        ("exit", 0),
+    ];
+    let post = vec![
+        ("enter", 1),
+        ("next", 1),
+        ("enter", 2),
+        ("next", 2),
+        ("integer", 2),
+        ("exit", 1),
+        ("callback", 1),
+        ("integer", 1),
+        ("exit", 0),
+        ("callback", 0),
+    ];
+    for order in [WalkOrder::PreOrder, WalkOrder::PostOrder] {
+        let mut mapper = MapWithPolicy::new(
+            PolicyState::default(),
+            (ArrayPolicy, (RecordPolicy, DefaultMutationPolicy)),
+        );
+        let output = structural_map(root(), &mut mapper, order).unwrap();
+        assert_eq!(i64::try_from(array_item(&output, 1)).unwrap(), 3);
+        assert_eq!(
+            i64::try_from(array_item(&array_item(&output, 0), 0)).unwrap(),
+            2
+        );
+        assert_eq!(mapper.state().depth, 0);
+        assert_eq!(
+            &mapper.state().events,
+            if order == WalkOrder::PreOrder {
+                &pre
+            } else {
+                &post
+            }
+        );
+    }
+    let mut mutator = MutateCallbacks::new(
+        PolicyState::default(),
+        (
+            |x: i64, ctx: &mut CallbackMutator<PolicyState>| {
+                let depth = ctx.state().depth;
+                ctx.state_mut().events.push(("integer", depth));
+                x + 1
+            },
+            |value: MutateValue<'_>, ctx: &mut CallbackMutator<PolicyState>| {
+                let depth = ctx.state().depth;
+                ctx.state_mut().events.push(("callback", depth));
+                ctx.default_maybe_inplace_mutate_result(value)
+            },
+        ),
+    )
+    .with_policy((ArrayPolicy, RecordPolicy));
+    let output = structural_mutate(root(), &mut mutator).unwrap();
+    assert_eq!(i64::try_from(array_item(&output, 1)).unwrap(), 3);
+    assert_eq!(mutator.state().events, pre);
+    assert_eq!(mutator.state().depth, 0);
+}
+
+#[test]
+fn mutation_policy_continuations_preserve_ownership_and_markers() {
+    struct Ownership {
+        increment: bool,
+        retained: Option<Any>,
+    }
+    #[dispatch(map)]
+    impl Ownership {
+        fn map_integer(&mut self, x: i64) -> UnchangedOr<i64> {
+            if self.increment {
+                UnchangedOr::changed(x + 1)
+            } else {
+                UnchangedOr::unchanged()
+            }
+        }
+    }
+    struct Control {
+        mode: InplaceMode,
+        retain: bool,
+    }
+    impl MutationPolicy<Ownership> for Control {
+        fn default_mutate(
+            &self,
+            value: MutateValue<'_>,
+            ctx: &mut CallbackMutator<Ownership>,
+        ) -> Result<UnchangedOr<Any>> {
+            let array = value
+                .as_node::<tvm_ffi::collections::array::ArrayObj>()
+                .is_some();
+            if array && self.retain {
+                ctx.state_mut().retained = Some(value.to_owned());
+            }
+            let result = ctx.default_mutate_with_mode_result(value, self.mode)?;
+            if array && !ctx.state().increment {
+                assert!(result.is_unchanged());
+            }
+            Ok(result)
+        }
+    }
+    for entry in 0..3 {
+        // pre-order map, post-order map, mutation callback
+        for case in 0..4 {
+            // unique, shared, alias retained by policy, forced copy
+            for increment in [false, true] {
+                let root = Array::new(vec![1_i64]);
+                let pointer = array_pointer(&root);
+                let alias = (case == 1).then(|| root.clone());
+                let policy = (
+                    Control {
+                        mode: if case == 3 {
+                            InplaceMode::Disallow
+                        } else {
+                            InplaceMode::Allow
+                        },
+                        retain: case == 2,
+                    },
+                    DefaultMutationPolicy,
+                );
+                let state = Ownership {
+                    increment,
+                    retained: None,
+                };
+                let (output, state) = if entry < 2 {
+                    let mut mapper = MapWithPolicy::new(state, policy);
+                    let output = mapper
+                        .map(
+                            root,
+                            if entry == 0 {
+                                WalkOrder::PreOrder
+                            } else {
+                                WalkOrder::PostOrder
+                            },
+                        )
+                        .unwrap();
+                    (output, mapper.into_state())
+                } else {
+                    let mut mutator = MutateCallbacks::new(
+                        state,
+                        (
+                            |x: i64, ctx: &mut CallbackMutator<Ownership>| {
+                                ctx.state_mut().map_integer(x)
+                            },
+                            |value: MutateValue<'_>, ctx: &mut CallbackMutator<Ownership>| {
+                                ctx.default_maybe_inplace_mutate_result(value)
+                            },
+                        ),
+                    )
+                    .with_policy(policy);
+                    let output = structural_mutate(root, &mut mutator).unwrap();
+                    (output, mutator.into_state())
+                };
+                let output = Array::<i64>::try_from(output).unwrap();
+                assert_eq!(output.get(0).unwrap(), if increment { 2 } else { 1 });
+                assert_eq!(array_pointer(&output) == pointer, !increment || case == 0);
+                if let Some(alias) = alias {
+                    assert_eq!(alias.get(0).unwrap(), 1);
+                }
+                if let Some(alias) = state.retained {
+                    assert_eq!(Array::<i64>::try_from(alias).unwrap().get(0).unwrap(), 1);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn mutation_policy_regions_retargeting_and_error_restore() {
+    use DefRegionKind::{None as Use, Pattern, Simple};
+    #[derive(Default)]
+    struct Regions(Vec<(i64, DefRegionKind)>);
+    #[dispatch(map)]
+    impl Regions {
+        fn map_integer(&mut self, x: i64, kind: DefRegionKind) -> i64 {
+            self.0.push((x, kind));
+            x
+        }
+        fn map_array(&mut self, value: Array<i64>, kind: DefRegionKind) -> Any {
+            self.0.push((200, kind));
+            value.into()
+        }
+    }
+    struct Redirect(DefRegionKind);
+    impl MutationPolicy<Regions> for Redirect {
+        fn default_mutate(
+            &self,
+            value: MutateValue<'_>,
+            ctx: &mut CallbackMutator<Regions>,
+        ) -> Result<UnchangedOr<Any>> {
+            if value.cast::<bool>() == Some(false) {
+                // Bypass this container's callback, but enter the next policy and redispatch its children.
+                return ctx.with_def_region_kind(Pattern, |ctx| {
+                    ctx.default_mutate(&Array::new(vec![1_i64]))
+                        .map(UnchangedOr::changed)
+                });
+            }
+            if value.cast::<i64>() == Some(2) {
+                assert_eq!(ctx.def_region_kind(), Pattern);
+                ctx.mutate_with(&99_i64, self.0)?;
+                let error: Result<()> = ctx.with_def_region_kind(Use, |ctx| {
+                    assert_eq!(ctx.def_region_kind(), Pattern);
+                    Err(Error::new(RUNTIME_ERROR, "scoped error", ""))
+                });
+                assert!(error.is_err());
+                assert_eq!(ctx.def_region_kind(), Pattern);
+            }
+            ctx.default_maybe_inplace_mutate_result(value)
+        }
+    }
+    struct Observe;
+    impl MutationPolicy<Regions> for Observe {
+        fn default_mutate(
+            &self,
+            value: MutateValue<'_>,
+            ctx: &mut CallbackMutator<Regions>,
+        ) -> Result<UnchangedOr<Any>> {
+            if value
+                .as_node::<tvm_ffi::collections::array::ArrayObj>()
+                .is_some()
+            {
+                assert_eq!(ctx.def_region_kind(), Pattern);
+                let kind = ctx.def_region_kind();
+                ctx.state_mut().0.push((100, kind));
+            }
+            ctx.default_maybe_inplace_mutate_result(value)
+        }
+    }
+    assert_eq!(
+        unsafe { tvm_ffi::tvm_ffi_sys::TVMFFITestingDummyTarget() },
+        0
+    );
+    for requested in [Use, Simple] {
+        for order in [WalkOrder::PreOrder, WalkOrder::PostOrder] {
+            let mut mapper = MapWithPolicy::new(Regions::default(), (Redirect(requested), Observe));
+            let output = mapper.map(false, order).unwrap();
+            assert_eq!(i64::try_from(array_item(&output, 0)).unwrap(), 1);
+            let mut expected = vec![(100, Pattern), (1, Pattern)];
+            if order == WalkOrder::PostOrder {
+                expected.push((200, Use)); // The root callback sees the result after descent.
+            }
+            assert_eq!(mapper.state().0, expected);
+            mapper.state_mut().0.clear();
+            let graph = Function::get_global("testing.make_visit_region_graph")
+                .unwrap()
+                .call_tuple((false,))
+                .unwrap();
+            mapper.map(graph, order).unwrap();
+            let expected = if order == WalkOrder::PreOrder {
+                vec![(1, Simple), (2, Pattern), (99, Pattern), (3, Use)]
+            } else {
+                vec![(1, Simple), (99, Pattern), (2, Pattern), (3, Use)]
+            };
+            assert_eq!(mapper.state().0, expected);
+        }
+        let mut mutator = MutateCallbacks::new(
+            Regions::default(),
+            |value: MutateValue<'_>, ctx: &mut CallbackMutator<Regions>| {
+                if let Some(x) = value.cast::<i64>() {
+                    let kind = ctx.def_region_kind();
+                    ctx.state_mut().0.push((x, kind));
+                }
+                if value
+                    .as_node::<tvm_ffi::collections::array::ArrayObj>()
+                    .is_some()
+                {
+                    let kind = ctx.def_region_kind();
+                    ctx.state_mut().0.push((200, kind));
+                }
+                ctx.default_maybe_inplace_mutate_result(value)
+            },
+        )
+        .with_policy((Redirect(requested), Observe));
+        let output = structural_mutate(false, &mut mutator).unwrap();
+        assert_eq!(i64::try_from(array_item(&output, 0)).unwrap(), 1);
+        assert_eq!(mutator.state().0, vec![(100, Pattern), (1, Pattern)]);
+        mutator.state_mut().0.clear();
+        let graph = Function::get_global("testing.make_visit_region_graph")
+            .unwrap()
+            .call_tuple((false,))
+            .unwrap();
+        structural_mutate(graph, &mut mutator).unwrap();
+        assert_eq!(
+            mutator.state().0,
+            vec![(1, Simple), (2, Pattern), (99, Pattern), (3, Use)]
+        );
+    }
+}
+
+#[test]
+fn mutation_policy_halts_restore_state_and_skip_later_policies() {
+    struct Halt(bool);
+    impl MutationPolicy<PolicyState> for Halt {
+        fn default_mutate(
+            &self,
+            _: MutateValue<'_>,
+            _: &mut CallbackMutator<PolicyState>,
+        ) -> Result<UnchangedOr<Any>> {
+            if self.0 {
+                Err(Error::new(RUNTIME_ERROR, "stop descent", ""))
+            } else {
+                Ok(UnchangedOr::unchanged())
+            }
+        }
+    }
+    for fail in [false, true] {
+        for order in [WalkOrder::PreOrder, WalkOrder::PostOrder] {
+            let mut mapper = MapWithPolicy::new(
+                PolicyState::default(),
+                (ArrayPolicy, (Halt(fail), RecordPolicy)),
+            );
+            let result = mapper.map(Array::new(vec![1_i64]), order);
+            assert_eq!(result.is_err(), fail);
+            assert_eq!(mapper.state().depth, 0);
+            assert!(!mapper
+                .state()
+                .events
+                .iter()
+                .any(|(tag, _)| matches!(*tag, "integer" | "next")));
+            if let Err(error) = result {
+                assert!(error.message().contains("stop descent"));
+            }
+        }
+        let mut mutator = MutateCallbacks::new(
+            PolicyState::default(),
+            |x: i64, _: &mut CallbackMutator<PolicyState>| x + 1,
+        )
+        .with_policy((ArrayPolicy, (Halt(fail), RecordPolicy)));
+        assert_eq!(
+            structural_mutate(Array::new(vec![1_i64]), &mut mutator).is_err(),
+            fail
+        );
+        assert_eq!(mutator.state().events, vec![("enter", 1), ("exit", 0)]);
+        assert_eq!(mutator.state().depth, 0);
+    }
 }
