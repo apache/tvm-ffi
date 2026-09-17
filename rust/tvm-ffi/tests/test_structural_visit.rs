@@ -1009,7 +1009,7 @@ impl GenericDispatchProbe {
         WalkResult::Advance
     }
 
-    fn walk_any(&mut self, _value: &tvm_ffi::StructuralValue) -> WalkResult {
+    fn walk_any(&mut self, _value: &tvm_ffi::View) -> WalkResult {
         self.catch_all += 1;
         WalkResult::Advance
     }

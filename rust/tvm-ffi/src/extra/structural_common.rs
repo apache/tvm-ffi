@@ -66,23 +66,23 @@ pub(crate) use impl_callback_chain_tuple_arities;
 
 /// A borrowed value shared by structural visit, walk, map, and mutate callbacks.
 ///
-/// Use `&StructuralValue` for an erased callback argument. [`Self::as_node`]
+/// Use `&View` for an erased callback argument. [`Self::as_node`]
 /// borrows an object node, while [`Self::cast`] returns a typed value (acquiring
 /// ownership for object handles). This view does not grant in-place permission;
 /// consuming mutation callbacks use [`crate::MutateValue`] instead.
 /// `VisitValue` and `MapValue` remain compatibility names for this type.
 #[repr(transparent)]
-pub struct StructuralValue(TVMFFIAny);
+pub struct View(TVMFFIAny);
 
-impl<'a> From<&'a StructuralValue> for AnyView<'a> {
+impl<'a> From<&'a View> for AnyView<'a> {
     #[inline]
-    fn from(value: &'a StructuralValue) -> Self {
+    fn from(value: &'a View) -> Self {
         // SAFETY: the view cannot outlive the borrowed structural value.
         unsafe { AnyView::from_raw_ffi_any(value.raw()) }
     }
 }
 
-impl StructuralValue {
+impl View {
     #[inline]
     pub(crate) fn from_raw(raw: TVMFFIAny) -> Self {
         Self(raw)

@@ -37,7 +37,7 @@ pub trait VisitPolicy<State> {
     /// or when a matched callback requests default descent.
     fn default_visit(
         &self,
-        value: &StructuralValue,
+        value: &View,
         visitor: &mut VisitContext<'_, State>,
     ) -> Result<Option<VisitInterrupt>>;
 }
@@ -48,7 +48,7 @@ pub struct DefaultVisitPolicy;
 impl<State> VisitPolicy<State> for DefaultVisitPolicy {
     fn default_visit(
         &self,
-        _value: &StructuralValue,
+        _value: &View,
         visitor: &mut VisitContext<'_, State>,
     ) -> Result<Option<VisitInterrupt>> {
         visitor.visit_children()
@@ -60,7 +60,7 @@ impl<State, Outer: VisitPolicy<State>, Inner: VisitPolicy<State>> VisitPolicy<St
 {
     fn default_visit(
         &self,
-        value: &StructuralValue,
+        value: &View,
         visitor: &mut VisitContext<'_, State>,
     ) -> Result<Option<VisitInterrupt>> {
         let kind = visitor.def_region_kind();
@@ -79,14 +79,14 @@ impl<State, Outer: VisitPolicy<State>, Inner: VisitPolicy<State>> VisitPolicy<St
 pub(super) fn visit_with_policy<State>(
     driver: &mut dyn VisitContextDriver<State>,
     policy: &impl VisitPolicy<State>,
-    value: &StructuralValue,
+    value: &View,
     def_region_kind: DefRegionKind,
 ) -> Result<Option<VisitInterrupt>> {
     policy.default_visit(
         value,
         &mut VisitContext {
             driver,
-            current: StructuralValue::from_raw(value.raw()),
+            current: View::from_raw(value.raw()),
             def_region_kind,
             _not_send_sync: PhantomData,
         },
@@ -115,12 +115,7 @@ impl<State, Policy: VisitPolicy<State>> VisitContextDriver<State>
         raw: TVMFFIAny,
         kind: DefRegionKind,
     ) -> Result<Option<VisitInterrupt>> {
-        visit_with_policy(
-            self.driver,
-            self.policy,
-            &StructuralValue::from_raw(raw),
-            kind,
-        )
+        visit_with_policy(self.driver, self.policy, &View::from_raw(raw), kind)
     }
 }
 
@@ -146,7 +141,7 @@ impl<State, V: StructuralVisitor + VisitCallbackState<State>> VisitContextDriver
         kind: DefRegionKind,
     ) -> Result<Option<VisitInterrupt>> {
         // Bypass the current policy; children still re-enter the complete visitor.
-        default_user_visit_children(self.visitor, &StructuralValue::from_raw(raw), kind)
+        default_user_visit_children(self.visitor, &View::from_raw(raw), kind)
     }
 }
 
@@ -218,7 +213,7 @@ impl<Walker: WalkDispatch, Policy: VisitPolicy<Walker>> NativeVisit
 {
     const CUSTOM_DESCENT: bool = true;
 
-    fn visit(&mut self, value: &StructuralValue, kind: DefRegionKind) -> Result<WalkResult> {
+    fn visit(&mut self, value: &View, kind: DefRegionKind) -> Result<WalkResult> {
         self.walker
             .dispatch_walk(value, kind)
             .unwrap_or(Ok(WalkResult::Advance))
@@ -226,7 +221,7 @@ impl<Walker: WalkDispatch, Policy: VisitPolicy<Walker>> NativeVisit
 
     fn default_visit_children<const PRE_ORDER: bool>(
         &mut self,
-        value: &StructuralValue,
+        value: &View,
         kind: DefRegionKind,
     ) -> Result<Option<VisitInterrupt>> {
         let policy = Rc::clone(&self.policy);
@@ -272,6 +267,6 @@ impl<Walker: WalkDispatch, Policy: VisitPolicy<Walker>, const PRE_ORDER: bool>
         raw: TVMFFIAny,
         kind: DefRegionKind,
     ) -> Result<Option<VisitInterrupt>> {
-        default_walk_children::<_, PRE_ORDER>(self.visitor, &StructuralValue::from_raw(raw), kind)
+        default_walk_children::<_, PRE_ORDER>(self.visitor, &View::from_raw(raw), kind)
     }
 }

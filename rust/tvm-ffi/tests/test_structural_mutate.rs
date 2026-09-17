@@ -913,7 +913,7 @@ impl GeneratedMapper {
         Any::from(value + 1)
     }
 
-    fn map_any(&mut self, value: &tvm_ffi::StructuralValue) -> Result<Any> {
+    fn map_any(&mut self, value: &tvm_ffi::View) -> Result<Any> {
         self.catch_all += 1;
         Ok(value.to_owned())
     }
@@ -1401,7 +1401,7 @@ fn stateful_mutate_integer(value: i64, mutator: &mut CallbackMutator<CallbackMut
 }
 
 fn stateful_mutate_default(
-    value: &tvm_ffi::StructuralValue,
+    value: &tvm_ffi::View,
     mutator: &mut CallbackMutator<CallbackMutateStats>,
 ) -> Result<Any> {
     mutator.state_mut().defaults += 1;
