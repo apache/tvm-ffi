@@ -223,7 +223,12 @@ impl From<Error> for NativeHalt {
 type NativeResult = std::result::Result<(), NativeHalt>;
 
 mod policy;
-pub use policy::{DefaultVisitPolicy, VisitPolicy, WalkWithPolicy};
+pub use policy::{ContextPolicy, DefaultContextPolicy, WalkWithPolicy};
+
+/// Compatibility name for [`ContextPolicy`].
+pub use policy::ContextPolicy as VisitPolicy;
+/// Compatibility name for [`DefaultContextPolicy`].
+pub use policy::DefaultContextPolicy as DefaultVisitPolicy;
 
 /// State and recursive operations available to a visit callback.
 ///
@@ -510,7 +515,7 @@ macro_rules! impl_visit_chain_link {
 impl_callback_chain_tuple_arities!(impl_visit_chain_link);
 
 /// A reusable callback visitor with shared user state.
-pub struct VisitCallbacks<State, Link, Marker, Policy = DefaultVisitPolicy> {
+pub struct VisitCallbacks<State, Link, Marker, Policy = DefaultContextPolicy> {
     policy: Option<Rc<Policy>>,
     state: State,
     callbacks: Rc<Link>,
@@ -535,7 +540,7 @@ where
 impl<State, Link, Marker, Policy> VisitCallbacks<State, Link, Marker, Policy> {
     /// Set the default-recursion policy while retaining the callbacks and state.
     /// A matched callback enters the policy only when it calls `visit_children()`.
-    pub fn with_policy<P: VisitPolicy<State>>(
+    pub fn with_policy<P: ContextPolicy<State>>(
         self,
         policy: P,
     ) -> VisitCallbacks<State, Link, Marker, P> {
@@ -1089,7 +1094,7 @@ where
 impl<State, Link, Marker, Policy> StructuralVisitor for VisitCallbacks<State, Link, Marker, Policy>
 where
     Link: VisitChainLink<State, Marker>,
-    Policy: VisitPolicy<State>,
+    Policy: ContextPolicy<State>,
 {
     fn visit(
         &mut self,

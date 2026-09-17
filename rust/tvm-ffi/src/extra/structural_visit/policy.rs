@@ -21,14 +21,14 @@
 
 use super::*;
 
-/// A reusable default-recursion policy sharing state with traversal callbacks.
+/// A reusable policy for managing context around default visit and walk recursion.
 ///
 /// `visit_children()` on this policy's context continues with the next policy
 /// (or the built-in hooks and reflected fields). `visit()` re-enters the full
 /// callback engine for a child. A tuple `(outer, inner)` composes two policies;
 /// tuples may nest. Policies are shared during recursive calls, so mutable data
-/// belongs in the context's state.
-pub trait VisitPolicy<State> {
+/// belongs in the context's state. Save and restore scoped state around descent.
+pub trait ContextPolicy<State> {
     /// Customize default descent for the current value.
     ///
     /// Return interrupts explicitly, and restore any scoped state before
@@ -43,9 +43,9 @@ pub trait VisitPolicy<State> {
 }
 
 /// Default descent through registered hooks or reflected structural fields.
-pub struct DefaultVisitPolicy;
+pub struct DefaultContextPolicy;
 
-impl<State> VisitPolicy<State> for DefaultVisitPolicy {
+impl<State> ContextPolicy<State> for DefaultContextPolicy {
     fn default_visit(
         &self,
         _value: &StructuralView,
@@ -55,7 +55,7 @@ impl<State> VisitPolicy<State> for DefaultVisitPolicy {
     }
 }
 
-impl<State, Outer: VisitPolicy<State>, Inner: VisitPolicy<State>> VisitPolicy<State>
+impl<State, Outer: ContextPolicy<State>, Inner: ContextPolicy<State>> ContextPolicy<State>
     for (Outer, Inner)
 {
     fn default_visit(
@@ -78,7 +78,7 @@ impl<State, Outer: VisitPolicy<State>, Inner: VisitPolicy<State>> VisitPolicy<St
 
 pub(super) fn visit_with_policy<State>(
     driver: &mut dyn VisitContextDriver<State>,
-    policy: &impl VisitPolicy<State>,
+    policy: &impl ContextPolicy<State>,
     value: &StructuralView,
     def_region_kind: DefRegionKind,
 ) -> Result<Option<VisitInterrupt>> {
@@ -98,7 +98,7 @@ struct NextPolicy<'a, State, Policy> {
     policy: &'a Policy,
 }
 
-impl<State, Policy: VisitPolicy<State>> VisitContextDriver<State>
+impl<State, Policy: ContextPolicy<State>> VisitContextDriver<State>
     for NextPolicy<'_, State, Policy>
 {
     fn state(&self) -> &State {
@@ -160,7 +160,7 @@ pub struct WalkWithPolicy<Walker, Policy> {
     policy: Rc<Policy>,
 }
 
-impl<Walker: WalkDispatch, Policy: VisitPolicy<Walker>> WalkWithPolicy<Walker, Policy> {
+impl<Walker: WalkDispatch, Policy: ContextPolicy<Walker>> WalkWithPolicy<Walker, Policy> {
     /// Combine a dispatcher and a default-recursion policy.
     pub fn new(walker: Walker, policy: Policy) -> Self {
         Self {
@@ -204,7 +204,7 @@ impl<Walker: WalkDispatch, Policy: VisitPolicy<Walker>> WalkWithPolicy<Walker, P
 #[doc(hidden)]
 pub enum ByPolicyWalk {}
 
-impl<Walker: WalkDispatch, Policy: VisitPolicy<Walker>> IntoWalker<ByPolicyWalk>
+impl<Walker: WalkDispatch, Policy: ContextPolicy<Walker>> IntoWalker<ByPolicyWalk>
     for WalkWithPolicy<Walker, Policy>
 {
     type Walker = Self;
@@ -213,7 +213,7 @@ impl<Walker: WalkDispatch, Policy: VisitPolicy<Walker>> IntoWalker<ByPolicyWalk>
     }
 }
 
-impl<Walker: WalkDispatch, Policy: VisitPolicy<Walker>> NativeVisit
+impl<Walker: WalkDispatch, Policy: ContextPolicy<Walker>> NativeVisit
     for WalkWithPolicy<Walker, Policy>
 {
     const CUSTOM_DESCENT: bool = true;
@@ -248,7 +248,7 @@ struct WalkDescent<'a, Walker, Policy, const PRE_ORDER: bool> {
     visitor: &'a mut WalkWithPolicy<Walker, Policy>,
 }
 
-impl<Walker: WalkDispatch, Policy: VisitPolicy<Walker>, const PRE_ORDER: bool>
+impl<Walker: WalkDispatch, Policy: ContextPolicy<Walker>, const PRE_ORDER: bool>
     VisitContextDriver<Walker> for WalkDescent<'_, Walker, Policy, PRE_ORDER>
 {
     fn state(&self) -> &Walker {

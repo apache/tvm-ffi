@@ -20,10 +20,10 @@
 use std::cell::{Cell, RefCell};
 use tvm_ffi::object::ObjectRef;
 use tvm_ffi::{
-    dispatch, get_type_attr, structural_visit, structural_walk, Any, Array, DLDataType,
-    DLDataTypeCode, DefRegionKind, Error, FieldGetter, Function, Map, Object, ObjectRefCore,
-    Result, String as FfiString, StructuralVisitor, TypeIndex, VisitCallbacks, VisitContext,
-    VisitInterrupt, VisitPolicy, VisitValue, WalkOrder, WalkResult, WalkWithPolicy, RUNTIME_ERROR,
+    dispatch, get_type_attr, structural_visit, structural_walk, Any, Array, ContextPolicy,
+    DLDataType, DLDataTypeCode, DefRegionKind, Error, FieldGetter, Function, Map, Object,
+    ObjectRefCore, Result, String as FfiString, StructuralVisitor, TypeIndex, VisitCallbacks,
+    VisitContext, VisitInterrupt, VisitValue, WalkOrder, WalkResult, WalkWithPolicy, RUNTIME_ERROR,
 };
 
 fn runtime_error(message: &str) -> Error {
@@ -49,7 +49,7 @@ fn composed_policies_share_array_scope_with_visit_and_walk_callbacks() {
     // It does not know what the callbacks will do with the current depth.
     struct ArrayScope;
 
-    impl VisitPolicy<CollectIntegers> for ArrayScope {
+    impl ContextPolicy<CollectIntegers> for ArrayScope {
         fn default_visit(
             &self,
             value: &VisitValue,
@@ -74,7 +74,7 @@ fn composed_policies_share_array_scope_with_visit_and_walk_callbacks() {
     // reaches the built-in Array hook, whose children re-enter the full engine.
     struct RecordDescent;
 
-    impl VisitPolicy<CollectIntegers> for RecordDescent {
+    impl ContextPolicy<CollectIntegers> for RecordDescent {
         fn default_visit(
             &self,
             _value: &VisitValue,
@@ -166,7 +166,7 @@ fn policy_continuation_scopes_regions_and_restores_after_halts() {
         }
     }
     struct Scope(DefRegionKind, i64);
-    impl VisitPolicy<Probe> for Scope {
+    impl ContextPolicy<Probe> for Scope {
         fn default_visit(
             &self,
             value: &VisitValue,
@@ -276,7 +276,7 @@ fn policy_continuation_retargets_without_dispatching_the_container() {
     }
 
     struct Redirect;
-    impl VisitPolicy<Probe> for Redirect {
+    impl ContextPolicy<Probe> for Redirect {
         fn default_visit(
             &self,
             value: &VisitValue,
@@ -303,7 +303,7 @@ fn policy_continuation_retargets_without_dispatching_the_container() {
     }
 
     struct Observe;
-    impl VisitPolicy<Probe> for Observe {
+    impl ContextPolicy<Probe> for Observe {
         fn default_visit(
             &self,
             value: &VisitValue,
@@ -426,7 +426,7 @@ fn policy_halts_skip_remaining_policies_and_restore_outer_state() {
         }
     }
     struct Scope;
-    impl VisitPolicy<Probe> for Scope {
+    impl ContextPolicy<Probe> for Scope {
         fn default_visit(
             &self,
             value: &VisitValue,
@@ -442,7 +442,7 @@ fn policy_halts_skip_remaining_policies_and_restore_outer_state() {
         }
     }
     struct Stop(bool);
-    impl VisitPolicy<Probe> for Stop {
+    impl ContextPolicy<Probe> for Stop {
         fn default_visit(
             &self,
             _: &VisitValue,
@@ -459,7 +459,7 @@ fn policy_halts_skip_remaining_policies_and_restore_outer_state() {
         }
     }
     struct Unreachable;
-    impl VisitPolicy<Probe> for Unreachable {
+    impl ContextPolicy<Probe> for Unreachable {
         fn default_visit(
             &self,
             _: &VisitValue,
@@ -508,7 +508,7 @@ fn policy_halts_skip_remaining_policies_and_restore_outer_state() {
 #[test]
 fn policy_regions_compose_with_field_flags_and_function_hooks() {
     struct SetRootRegion(i32, DefRegionKind);
-    impl VisitPolicy<PolicyRegionTrace> for SetRootRegion {
+    impl ContextPolicy<PolicyRegionTrace> for SetRootRegion {
         fn default_visit(
             &self,
             value: &VisitValue,
@@ -573,7 +573,7 @@ fn policy_regions_compose_with_field_flags_and_function_hooks() {
 fn walk_policy_preserves_reflected_pattern_before_default_descent() {
     let root = visit_region_graph(false);
     struct Reenter(DefRegionKind);
-    impl VisitPolicy<PolicyRegionTrace> for Reenter {
+    impl ContextPolicy<PolicyRegionTrace> for Reenter {
         fn default_visit(
             &self,
             value: &VisitValue,

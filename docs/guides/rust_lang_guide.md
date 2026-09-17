@@ -366,9 +366,9 @@ Callbacks are `Fn`; mutable data belongs in the visitor state. A catch-all
 callback must call `visit_children()` explicitly, and interrupt values must be
 returned explicitly because `?` only propagates errors.
 
-`VisitCallbacks::with_policy` and `WalkWithPolicy` customize default recursion
-with reusable `VisitPolicy<State>` policies. See the `VisitPolicy` API
-documentation for policy composition and state access.
+`VisitCallbacks::with_policy` and `WalkWithPolicy` use `ContextPolicy<State>`
+to manage context around default recursion. See the `ContextPolicy` API
+documentation for composition and shared state access.
 
 For a named implementation, `#[dispatch(visit)]` generates
 `StructuralVisitor` from `visit_*` methods. Matching handlers own recursion;
