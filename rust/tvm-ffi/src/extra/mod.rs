@@ -24,4 +24,4 @@ pub mod structural_visit;
 pub mod unchanged;
 
 /// Borrowed value shared by structural traversal and transformation callbacks.
-pub use structural_common::View;
+pub use structural_common::StructuralView;

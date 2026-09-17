@@ -175,7 +175,7 @@ fn expand(item_impl: &ItemImpl, mode: DispatchMode) -> syn::Result<TokenStream2>
                 let span = handler.method.span();
                 let handler_attrs = &handler.cfg_attrs;
                 let later_attrs = &later.cfg_attrs;
-                let value_type = "View";
+                let value_type = "StructuralView";
                 quote_spanned! {span=>
                     #(#[#impl_cfg_attrs])*
                     #(#[#handler_attrs])*
@@ -196,7 +196,7 @@ fn expand(item_impl: &ItemImpl, mode: DispatchMode) -> syn::Result<TokenStream2>
                 #[allow(unreachable_code, unused_variables)]
                 fn dispatch_walk(
                     &mut self,
-                    value: &#tvm_ffi::View,
+                    value: &#tvm_ffi::StructuralView,
                     def_region_kind: #tvm_ffi::extra::structural_visit::DefRegionKind,
                 ) -> Option<#tvm_ffi::extra::structural_visit::WalkCallbackResult> {
                     #(#links)*
@@ -212,7 +212,7 @@ fn expand(item_impl: &ItemImpl, mode: DispatchMode) -> syn::Result<TokenStream2>
                 #[allow(unreachable_code, unused_variables)]
                 fn visit(
                     &mut self,
-                    value: &#tvm_ffi::View,
+                    value: &#tvm_ffi::StructuralView,
                     def_region_kind: #tvm_ffi::extra::structural_visit::DefRegionKind,
                 ) -> #tvm_ffi::Result<
                     Option<#tvm_ffi::extra::structural_visit::VisitInterrupt>
@@ -230,7 +230,7 @@ fn expand(item_impl: &ItemImpl, mode: DispatchMode) -> syn::Result<TokenStream2>
                 #[allow(unreachable_code, unused_variables)]
                 fn dispatch_map(
                     &mut self,
-                    value: &#tvm_ffi::View,
+                    value: &#tvm_ffi::StructuralView,
                     def_region_kind: #tvm_ffi::extra::structural_visit::DefRegionKind,
                 ) -> Option<#tvm_ffi::extra::structural_mutate::MapResult> {
                     #(#links)*
@@ -246,7 +246,7 @@ fn expand(item_impl: &ItemImpl, mode: DispatchMode) -> syn::Result<TokenStream2>
                 #[allow(unreachable_code, unused_variables)]
                 fn dispatch_mutate(
                     &mut self,
-                    value: &#tvm_ffi::View,
+                    value: &#tvm_ffi::StructuralView,
                     mutator: &mut #tvm_ffi::extra::structural_mutate::Mutator,
                 ) -> Option<#tvm_ffi::extra::structural_mutate::MutateResult> {
                     <Self as #tvm_ffi::extra::structural_mutate::MutateDispatch>::dispatch_mutate_value(
@@ -565,7 +565,7 @@ fn is_dispatch_value(value_type: &Type) -> bool {
     path.path.segments.last().is_some_and(|segment| {
         matches!(
             segment.ident.to_string().as_str(),
-            "View" | "VisitValue" | "MapValue"
+            "StructuralView" | "VisitValue" | "MapValue"
         )
     })
 }
