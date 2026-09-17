@@ -329,38 +329,28 @@ fn user_mutator_recursive_entries_reenter_the_same_mutator() {
     assert_eq!(mutated.get(0).unwrap(), 2);
 }
 
-// A permission may be disabled at default descent. It must stay disabled for
-// uniquely owned children too; retaining an alias must independently force copying.
+// Test the low-level capability helpers; nested ownership and aliases are
+// covered by consuming_callbacks_forward_permissions_without_temporary_owners.
 #[test]
 fn default_mutation_mode_preserves_ownership_and_unchanged_results() {
     struct Controlled {
         mode: InplaceMode,
-        retain: bool,
         increment: bool,
-        alias: Option<Any>,
-        inplace_calls: usize,
     }
     impl StructuralMutator for Controlled {
-        fn dispatch_mutate(&mut self, value: &MapValue, kind: DefRegionKind) -> Result<Any> {
-            if let Some(integer) = value.cast::<i64>() {
-                Ok(if self.increment {
-                    Any::from(integer + 1)
-                } else {
-                    Unchanged.into()
-                })
+        fn dispatch_mutate(&mut self, value: &MapValue, _: DefRegionKind) -> Result<Any> {
+            let integer = value.cast::<i64>().unwrap();
+            Ok(if self.increment {
+                Any::from(integer + 1)
             } else {
-                self.default_mutate(value, kind)
-            }
+                Unchanged.into()
+            })
         }
         fn dispatch_maybe_inplace_mutate(
             &mut self,
             value: InplaceValue<'_>,
             kind: DefRegionKind,
         ) -> Result<Any> {
-            self.inplace_calls += 1;
-            if self.retain && self.alias.is_none() {
-                self.alias = Some(value.to_owned());
-            }
             if self.increment {
                 self.default_maybe_inplace_mutate_with_mode(value, kind, self.mode)
             } else {
@@ -372,33 +362,17 @@ fn default_mutation_mode_preserves_ownership_and_unchanged_results() {
         }
     }
     for mode in [InplaceMode::Disallow, InplaceMode::Allow] {
-        for retain in [false, true] {
-            for increment in [false, true] {
-                let child = Array::new(vec![1_i64]);
-                let child_ptr = array_pointer(&child);
-                let root = Array::new(vec![child]);
-                let root_ptr = array_pointer(&root);
-                let mut mutator = Controlled {
-                    mode,
-                    retain,
-                    increment,
-                    alias: None,
-                    inplace_calls: 0,
-                };
-                let result = structural_mutate(root, &mut mutator)
-                    .and_then(Array::<Array<i64>>::try_from)
-                    .unwrap();
-                let child = result.get(0).unwrap();
-                let reuse = mode == InplaceMode::Allow && !retain;
-                assert_eq!(array_pointer(&result) == root_ptr, reuse || !increment);
-                assert_eq!(array_pointer(&child) == child_ptr, reuse || !increment);
-                assert_eq!(child.get(0).unwrap(), if increment { 2 } else { 1 });
-                assert_eq!(mutator.inplace_calls, if reuse { 2 } else { 1 });
-                if let Some(alias) = mutator.alias {
-                    let original = Array::<Array<i64>>::try_from(alias).unwrap();
-                    assert_eq!(original.get(0).unwrap().get(0).unwrap(), 1);
-                }
-            }
+        for increment in [false, true] {
+            let root = Array::new(vec![1_i64]);
+            let pointer = array_pointer(&root);
+            let result = structural_mutate(root, &mut Controlled { mode, increment })
+                .and_then(Array::<i64>::try_from)
+                .unwrap();
+            assert_eq!(
+                array_pointer(&result) == pointer,
+                mode == InplaceMode::Allow || !increment
+            );
+            assert_eq!(result.get(0).unwrap(), if increment { 2 } else { 1 });
         }
     }
 }
@@ -469,13 +443,10 @@ fn consuming_callbacks_forward_permissions_without_temporary_owners() {
     impl Forward {
         fn observe(&mut self, value: &MutateValue<'_, Array<Any>>) {
             self.modes.push(value.inplace_mode());
-            assert_eq!(
-                value
-                    .as_node::<tvm_ffi::collections::array::ArrayObj>()
-                    .unwrap()
-                    .size,
-                1
-            );
+            let node = value
+                .as_node::<tvm_ffi::collections::array::ArrayObj>()
+                .unwrap();
+            assert_eq!(node.size, 1);
             // A temporary typed handle must not permanently revoke permission.
             let temporary = value.cast::<Array<Any>>().unwrap();
             if self.retain && self.alias.is_none() {
@@ -526,26 +497,25 @@ fn consuming_callbacks_forward_permissions_without_temporary_owners() {
                 alias: None,
                 modes: vec![],
             };
-            let result =
-                if generated {
-                    structural_mutate(root, &mut state).unwrap()
-                } else {
-                    let mut callbacks = MutateCallbacks::new(state, (
-                    |_: MutateValue<'_, FfiString>, _: &mut CallbackMutator<Forward>| -> Any {
-                        panic!("typed miss must continue")
-                    },
-                    (|value: i64, _: &mut CallbackMutator<Forward>| value + 1,
-                     |value: MutateValue<'_, Array<Any>>, ctx: &mut CallbackMutator<Forward>| {
-                        assert_eq!(value.inplace_mode(), ctx.inplace_mode());
-                        ctx.state_mut().observe(&value);
-                        let requested = ctx.state().requested;
-                        ctx.default_mutate_with_mode(value, requested)
-                     }),
-                ));
-                    let result = structural_mutate(root, &mut callbacks).unwrap();
-                    state = callbacks.into_state();
-                    result
+            let result = if generated {
+                structural_mutate(root, &mut state).unwrap()
+            } else {
+                let miss = |_: MutateValue<'_, FfiString>,
+                            _: &mut CallbackMutator<Forward>|
+                 -> Any { panic!("typed miss must continue") };
+                let increment = |value: i64, _: &mut CallbackMutator<Forward>| value + 1;
+                let descend = |value: MutateValue<'_, Array<Any>>,
+                               ctx: &mut CallbackMutator<Forward>| {
+                    assert_eq!(value.inplace_mode(), ctx.inplace_mode());
+                    ctx.state_mut().observe(&value);
+                    let requested = ctx.state().requested;
+                    ctx.default_mutate_with_mode(value, requested)
                 };
+                let mut callbacks = MutateCallbacks::new(state, (miss, (increment, descend)));
+                let result = structural_mutate(root, &mut callbacks).unwrap();
+                state = callbacks.into_state();
+                result
+            };
             let result = Array::<Array<i64>>::try_from(result).unwrap();
             let child = result.get(0).unwrap();
             let reuse = requested == Allow && !shared && !retain;
