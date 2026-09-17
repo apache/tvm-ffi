@@ -571,34 +571,34 @@ fn consuming_default_descent_transfers_between_contexts_without_node_borrows() {
         assert_eq!(value.inplace_mode(), InplaceMode::Allow);
         // Carry the result back to the array callback: Unchanged belongs to
         // that input, not to the nested traversal's boolean root.
+        let mut inner = Inner {
+            value: Some(value),
+            preserve_unchanged: preserve,
+            result: Any::new(),
+        };
         let result = if generated {
-            let mut inner = Inner {
-                value: Some(value),
-                preserve_unchanged: preserve,
-                result: Any::new(),
-            };
             structural_mutate(true, &mut inner)?;
             inner.result
         } else {
-            let slot = RefCell::new(Some(value));
-            let output = Cell::new(None);
-            structural_mutate(
-                true,
+            let mut callbacks = MutateCallbacks::new(
+                inner,
                 (
-                    |_: bool, ctx: &mut CallbackMutator| -> Result<Any> {
-                        let value = slot.borrow_mut().take().unwrap();
-                        output.set(Some(if preserve {
+                    |_: bool, ctx: &mut CallbackMutator<Inner<'_>>| -> Result<Any> {
+                        let value = ctx.state_mut().value.take().unwrap();
+                        let result = if ctx.state().preserve_unchanged {
                             ctx.default_mutate_with_mode_result(value, InplaceMode::Allow)?
                                 .into()
                         } else {
                             ctx.default_mutate_with_mode(value, InplaceMode::Allow)?
-                        }));
+                        };
+                        ctx.state_mut().result = result;
                         Ok(Any::new())
                     },
-                    |value: i64, _: &mut CallbackMutator| value + 1,
+                    |value: i64, _: &mut CallbackMutator<Inner<'_>>| value + 1,
                 ),
-            )?;
-            output.take().unwrap()
+            );
+            structural_mutate(true, &mut callbacks)?;
+            callbacks.into_state().result
         };
         if let Some(alias) = alias {
             assert_eq!(alias.get(0)?, 1);
@@ -615,23 +615,30 @@ fn consuming_default_descent_transfers_between_contexts_without_node_borrows() {
             transfer(value, true, self.preserve, self.retain)
         }
     }
-    for preserve in [false, true] {
-        for retain in [false, true] {
-            for generated in [false, true] {
-                let root = Array::new(vec![1_i64]);
-                let pointer = array_pointer(&root);
-                let result = if generated {
-                    structural_mutate(root, &mut Outer { preserve, retain })
-                } else {
-                    structural_mutate(root, |value: MutateValue<'_>, _: &mut CallbackMutator| {
-                        transfer(value, false, preserve, retain)
-                    })
-                }
-                .and_then(Array::<i64>::try_from)
-                .unwrap();
-                assert_eq!(array_pointer(&result) == pointer, !retain);
-                assert_eq!(result.get(0).unwrap(), 2);
+    for (case, preserve, retain) in [
+        ("plain / unique", false, false),
+        ("plain / retained alias", false, true),
+        ("unchanged-or / unique", true, false),
+        ("unchanged-or / retained alias", true, true),
+    ] {
+        for (style, generated) in [("macro", true), ("closure", false)] {
+            let root = Array::new(vec![1_i64]);
+            let pointer = array_pointer(&root);
+            let result = if generated {
+                structural_mutate(root, &mut Outer { preserve, retain })
+            } else {
+                structural_mutate(root, |value: MutateValue<'_>, _: &mut CallbackMutator| {
+                    transfer(value, false, preserve, retain)
+                })
             }
+            .and_then(Array::<i64>::try_from)
+            .unwrap_or_else(|error| panic!("{style}: {case}: {error}"));
+            assert_eq!(
+                array_pointer(&result) == pointer,
+                !retain,
+                "{style}: {case}"
+            );
+            assert_eq!(result.get(0).unwrap(), 2, "{style}: {case}");
         }
     }
 }
