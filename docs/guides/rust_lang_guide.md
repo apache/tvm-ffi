@@ -511,7 +511,7 @@ original value.
 
 ```rust
 use tvm_ffi::{
-    structural_mutate, Array, CallbackMutator, MapValue, MutateCallbacks,
+    structural_mutate, Array, CallbackMutator, MutateValue, MutateCallbacks,
 };
 
 #[derive(Default)]
@@ -526,8 +526,9 @@ let mut mutator = MutateCallbacks::new(
             mutator.state_mut().integers += 1;
             value + 1
         },
-        |_value: &MapValue, mutator: &mut CallbackMutator<Stats>| {
-            mutator.default_mutate()
+        |value: MutateValue<'_>, mutator: &mut CallbackMutator<Stats>| {
+            let mode = mutator.inplace_mode();
+            mutator.default_mutate_with_mode(value, mode)
         },
     ),
 );
@@ -541,13 +542,20 @@ assert_eq!(mutator.state().integers, 2);
 `maybe_inplace_mutate` preserves the reuse opportunity of an owned value.
 Use `maybe_inplace_mutate_with_mode(value, region, InplaceMode::Disallow)`
 to disable reuse explicitly (`Mutator` also takes the dispatch object first).
-`Allow` still requires unique ownership; a borrowed callback's
+`Allow` still requires unique ownership. For current-value default descent,
+consume a `MutateValue<'_, T>` with `default_mutate_with_mode(value, mode)`;
+`T` selects the matched type and defaults to `Any`. The handle preserves the
+engine's permission without acquiring ownership. Borrows must end before the
+call; retained owning aliases force copying. A borrowed callback's existing
 `default_mutate()` remains on the copy path.
 Closure callbacks are `Fn`; mutable data belongs in the callback state.
 
 `#[dispatch(mutate)]` groups typed `mutate_*` callbacks. The dispatch object
 owns its mutable pass state, while `Mutator` supplies recursion and the current
-definition region. `mutator.mutate(self, child)` safely reborrows that dispatch
+definition region. A handler can take `MutateValue<'_, T>` and an optional
+trailing `InplaceMode` after `&mut Mutator`; default descent consumes the handle
+with `mutator.default_mutate_with_mode(self, value, mode)`.
+`mutator.mutate(self, child)` safely reborrows that dispatch
 object and inherits the current region; `mutate_with` is available for an
 explicit override. An unmatched value follows default mutation with its
 current in-place permit. A handler that does not need these controls can omit

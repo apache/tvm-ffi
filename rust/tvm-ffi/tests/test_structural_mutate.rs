@@ -24,7 +24,7 @@ use tvm_ffi::object::ObjectRef;
 use tvm_ffi::{
     dispatch, structural_map, structural_mutate, Any, AnyView, Array, CallbackMutator,
     DefRegionKind, Error, FieldGetter, Function, InplaceMode, InplaceValue, Map, MapDispatch,
-    MapValue, MutateCallbacks, Mutator, Object, ObjectArc, ObjectRefCore, Result,
+    MapValue, MutateCallbacks, MutateValue, Mutator, Object, ObjectArc, ObjectRefCore, Result,
     String as FfiString, StructuralMutator, StructuralVarRemap, TypeIndex, Unchanged, UnchangedOr,
     WalkOrder, RUNTIME_ERROR,
 };
@@ -455,6 +455,145 @@ fn owned_entry_mode_is_forwarded_by_generated_and_closure_callbacks() {
             mode == InplaceMode::Allow
         );
         assert_eq!(result.get(0).unwrap(), 2);
+    }
+}
+
+#[test]
+fn consuming_callbacks_forward_permissions_without_temporary_owners() {
+    struct Forward {
+        requested: InplaceMode,
+        retain: bool,
+        alias: Option<Any>,
+        modes: Vec<InplaceMode>,
+    }
+    impl Forward {
+        fn observe(&mut self, value: &MutateValue<'_, Array<Any>>) {
+            self.modes.push(value.inplace_mode());
+            assert_eq!(
+                value
+                    .as_node::<tvm_ffi::collections::array::ArrayObj>()
+                    .unwrap()
+                    .size,
+                1
+            );
+            // A temporary typed handle must not permanently revoke permission.
+            let temporary = value.cast::<Array<Any>>().unwrap();
+            if self.retain && self.alias.is_none() {
+                self.alias = Some(temporary.clone().into());
+            }
+            drop(temporary);
+        }
+    }
+    #[dispatch(mutate)]
+    impl Forward {
+        fn mutate_string(&mut self, _: MutateValue<'_, FfiString>) -> Any {
+            panic!("typed miss must preserve the capability for the next handler")
+        }
+        fn mutate_array(
+            &mut self,
+            value: MutateValue<'_, Array<Any>>,
+            ctx: &mut Mutator,
+            mode: InplaceMode,
+        ) -> Result<UnchangedOr<Any>> {
+            assert_eq!(mode, ctx.inplace_mode());
+            assert_eq!(mode, value.inplace_mode());
+            self.observe(&value);
+            ctx.default_mutate_with_mode_result(self, value, self.requested)
+        }
+        fn mutate_integer(&mut self, value: i64, ctx: &mut Mutator, mode: InplaceMode) -> i64 {
+            assert_eq!(mode, InplaceMode::Disallow);
+            assert_eq!(mode, ctx.inplace_mode());
+            value + 1
+        }
+    }
+    use InplaceMode::{Allow, Disallow};
+    // Unique input, explicit disable, shared parent, and an alias retained by a handler.
+    for (requested, shared, retain) in [
+        (Allow, false, false),
+        (Disallow, false, false),
+        (Allow, true, false),
+        (Allow, false, true),
+    ] {
+        for generated in [true, false] {
+            let child = Array::new(vec![1_i64]);
+            let child_ptr = array_pointer(&child);
+            let root = Array::new(vec![child]);
+            let root_ptr = array_pointer(&root);
+            let original = shared.then(|| root.clone());
+            let mut state = Forward {
+                requested,
+                retain,
+                alias: None,
+                modes: vec![],
+            };
+            let result =
+                if generated {
+                    structural_mutate(root, &mut state).unwrap()
+                } else {
+                    let mut callbacks = MutateCallbacks::new(state, (
+                    |_: MutateValue<'_, FfiString>, _: &mut CallbackMutator<Forward>| -> Any {
+                        panic!("typed miss must continue")
+                    },
+                    (|value: i64, _: &mut CallbackMutator<Forward>| value + 1,
+                     |value: MutateValue<'_, Array<Any>>, ctx: &mut CallbackMutator<Forward>| {
+                        assert_eq!(value.inplace_mode(), ctx.inplace_mode());
+                        ctx.state_mut().observe(&value);
+                        let requested = ctx.state().requested;
+                        ctx.default_mutate_with_mode(value, requested)
+                     }),
+                ));
+                    let result = structural_mutate(root, &mut callbacks).unwrap();
+                    state = callbacks.into_state();
+                    result
+                };
+            let result = Array::<Array<i64>>::try_from(result).unwrap();
+            let child = result.get(0).unwrap();
+            let reuse = requested == Allow && !shared && !retain;
+            assert_eq!(
+                state.modes,
+                vec![
+                    if shared { Disallow } else { Allow },
+                    if reuse { Allow } else { Disallow }
+                ]
+            );
+            assert_eq!(array_pointer(&result) == root_ptr, reuse);
+            assert_eq!(array_pointer(&child) == child_ptr, reuse);
+            assert_eq!(child.get(0).unwrap(), 2);
+            for alias in original.map(Any::from).into_iter().chain(state.alias) {
+                let alias = Array::<Array<i64>>::try_from(alias).unwrap();
+                assert_eq!(alias.get(0).unwrap().get(0).unwrap(), 1);
+            }
+        }
+    }
+}
+
+#[test]
+fn consuming_default_descent_preserves_unchanged_and_propagates_errors() {
+    for fail in [false, true] {
+        let root = Array::new(vec![1_i64]);
+        let pointer = array_pointer(&root);
+        let result = structural_mutate(
+            root,
+            |value: MutateValue<'_>, ctx: &mut CallbackMutator| -> Result<UnchangedOr<Any>> {
+                if value.cast::<i64>().is_some() {
+                    return if fail {
+                        Err(Error::new(RUNTIME_ERROR, "child failed", ""))
+                    } else {
+                        Ok(UnchangedOr::unchanged())
+                    };
+                }
+                let mode = ctx.inplace_mode();
+                let result = ctx.default_mutate_with_mode_result(value, mode)?;
+                assert!(result.is_unchanged());
+                Ok(result)
+            },
+        );
+        if fail {
+            assert!(result.err().unwrap().to_string().contains("child failed"));
+        } else {
+            let result = Array::<i64>::try_from(result.unwrap()).unwrap();
+            assert_eq!(array_pointer(&result), pointer);
+        }
     }
 }
 

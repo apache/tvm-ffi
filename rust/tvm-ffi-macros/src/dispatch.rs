@@ -256,6 +256,19 @@ fn expand(item_impl: &ItemImpl, mode: DispatchMode) -> syn::Result<TokenStream2>
                     value: &#tvm_ffi::extra::structural_mutate::MapValue,
                     mutator: &mut #tvm_ffi::extra::structural_mutate::Mutator,
                 ) -> Option<#tvm_ffi::extra::structural_mutate::MutateResult> {
+                    <Self as #tvm_ffi::extra::structural_mutate::MutateDispatch>::dispatch_mutate_value(
+                        self, #tvm_ffi::MutateValue::borrowed(value), mutator,
+                    )
+                }
+
+                #[inline(always)]
+                #[allow(unreachable_code, unused_variables, unused_mut)]
+                fn dispatch_mutate_value(
+                    &mut self,
+                    mut value: #tvm_ffi::MutateValue<'_>,
+                    mutator: &mut #tvm_ffi::Mutator,
+                ) -> Option<#tvm_ffi::extra::structural_mutate::MutateResult> {
+                    let inplace_mode = value.inplace_mode();
                     #(#links)*
                     None
                 }
@@ -283,6 +296,9 @@ fn expand_links(
             let method = &handler.method;
             let attrs = &handler.cfg_attrs;
             let trailing_arg = match mode {
+                DispatchMode::Mutate if handler.wants_inplace_mode => {
+                    quote!(, mutator, inplace_mode)
+                }
                 DispatchMode::Mutate if handler.wants_mutator => quote!(, mutator),
                 DispatchMode::Mutate => quote!(),
                 _ if handler.wants_def_region => quote!(, def_region_kind),
@@ -297,6 +313,11 @@ fn expand_links(
             };
             let invoke = match &handler.argument {
                 HandlerArgument::Value => {
+                    let value = if matches!(mode, DispatchMode::Mutate) {
+                        quote!(#value.as_value())
+                    } else {
+                        value.clone()
+                    };
                     let result = wrap_result(quote! {
                         #into_result(self.#method(#value #trailing_arg))
                     });
@@ -311,6 +332,17 @@ fn expand_links(
                     quote! {
                         if let Some(node) = #value.as_node::<#node_type>() {
                             return #result;
+                        }
+                    }
+                }
+                HandlerArgument::Capability(value_type) => {
+                    let result = wrap_result(quote! {
+                        #into_result(self.#method(typed #trailing_arg))
+                    });
+                    quote! {
+                        match #value.try_cast::<#value_type>() {
+                            Ok(typed) => return #result,
+                            Err(original) => #value = original,
                         }
                     }
                 }
@@ -340,6 +372,7 @@ struct Handler {
     argument: HandlerArgument,
     wants_def_region: bool,
     wants_mutator: bool,
+    wants_inplace_mode: bool,
     cfg_attrs: Vec<Meta>,
 }
 
@@ -347,6 +380,7 @@ enum HandlerArgument {
     Value,
     BorrowedNode(Type),
     Owned(Type),
+    Capability(Type),
 }
 
 fn parse_handler(method: &ImplItemMethod, mode: DispatchMode) -> syn::Result<Handler> {
@@ -360,10 +394,12 @@ fn parse_handler(method: &ImplItemMethod, mode: DispatchMode) -> syn::Result<Han
         }
         _ => false,
     };
-    let arity_is_expected = inputs.len() == 2 || inputs.len() == 3;
+    let arity_is_expected = inputs.len() == 2
+        || inputs.len() == 3
+        || (matches!(mode, DispatchMode::Mutate) && inputs.len() == 4);
     if !receiver_is_expected || !arity_is_expected {
         let message = if matches!(mode, DispatchMode::Mutate) {
-            "mutate handlers must take `&mut self`, a node, and optionally `&mut Mutator`"
+            "mutate handlers must take `&mut self`, a node, optionally `&mut Mutator`, then optionally `InplaceMode`"
                 .to_owned()
         } else {
             format!(
@@ -375,7 +411,17 @@ fn parse_handler(method: &ImplItemMethod, mode: DispatchMode) -> syn::Result<Han
         return Err(syn::Error::new_spanned(&method.sig, message));
     }
     let wants_def_region = !matches!(mode, DispatchMode::Mutate) && inputs.len() == 3;
-    let wants_mutator = matches!(mode, DispatchMode::Mutate) && inputs.len() == 3;
+    let wants_mutator = matches!(mode, DispatchMode::Mutate) && inputs.len() >= 3;
+    let wants_inplace_mode = matches!(mode, DispatchMode::Mutate) && inputs.len() == 4;
+    if wants_inplace_mode {
+        let Some(FnArg::Typed(arg)) = inputs.iter().nth(3) else {
+            unreachable!()
+        };
+        if !matches!(arg.ty.as_ref(), Type::Path(path) if path.path.segments.last().is_some_and(|s| s.ident == "InplaceMode" && matches!(s.arguments, PathArguments::None)))
+        {
+            return Err(syn::Error::new_spanned(&arg.ty, "expected `InplaceMode`"));
+        }
+    }
     if wants_mutator {
         let context_type = match inputs.iter().nth(2) {
             Some(FnArg::Typed(context)) => context.ty.as_ref(),
@@ -405,6 +451,28 @@ fn parse_handler(method: &ImplItemMethod, mode: DispatchMode) -> syn::Result<Han
                 ),
             ));
         }
+        Type::Path(path)
+            if matches!(mode, DispatchMode::Mutate)
+                && path
+                    .path
+                    .segments
+                    .last()
+                    .is_some_and(|s| s.ident == "MutateValue") =>
+        {
+            let segment = path.path.segments.last().unwrap();
+            let value_type = if let PathArguments::AngleBracketed(args) = &segment.arguments {
+                args.args.iter().find_map(|arg| match arg {
+                    syn::GenericArgument::Type(ty) => Some(ty.clone()),
+                    _ => None,
+                })
+            } else {
+                None
+            };
+            let tvm_ffi = get_tvm_ffi_crate();
+            HandlerArgument::Capability(
+                value_type.unwrap_or_else(|| syn::parse_quote!(#tvm_ffi::Any)),
+            )
+        }
         _ => HandlerArgument::Owned(value_type),
     };
     let cfg_attrs = presence_attrs(&method.attrs)?;
@@ -413,6 +481,7 @@ fn parse_handler(method: &ImplItemMethod, mode: DispatchMode) -> syn::Result<Han
         argument,
         wants_def_region,
         wants_mutator,
+        wants_inplace_mode,
         cfg_attrs,
     })
 }
