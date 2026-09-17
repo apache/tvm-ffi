@@ -329,8 +329,6 @@ fn user_mutator_recursive_entries_reenter_the_same_mutator() {
     assert_eq!(mutated.get(0).unwrap(), 2);
 }
 
-// Test the low-level capability helpers; nested ownership and aliases are
-// covered by consuming_callbacks_forward_permissions_without_temporary_owners.
 #[test]
 fn default_mutation_mode_preserves_ownership_and_unchanged_results() {
     struct Controlled {
@@ -478,7 +476,6 @@ fn consuming_callbacks_forward_permissions_without_temporary_owners() {
         }
     }
     use InplaceMode::{Allow, Disallow};
-    // Unique input, explicit disable, shared parent, and an alias retained by a handler.
     for (requested, shared, retain) in [
         (Allow, false, false),
         (Disallow, false, false),
@@ -566,7 +563,6 @@ fn consuming_default_descent_transfers_between_contexts_without_node_borrows() {
         preserve: bool,
         retain: bool,
     ) -> Result<Any> {
-        // Only an owning alias can survive consumption of the handle.
         let alias = retain.then(|| value.cast::<Array<i64>>().unwrap());
         assert_eq!(value.inplace_mode(), InplaceMode::Allow);
         // Carry the result back to the array callback: Unchanged belongs to
@@ -615,30 +611,23 @@ fn consuming_default_descent_transfers_between_contexts_without_node_borrows() {
             transfer(value, true, self.preserve, self.retain)
         }
     }
-    for (case, preserve, retain) in [
-        ("plain / unique", false, false),
-        ("plain / retained alias", false, true),
-        ("unchanged-or / unique", true, false),
-        ("unchanged-or / retained alias", true, true),
-    ] {
-        for (style, generated) in [("macro", true), ("closure", false)] {
-            let root = Array::new(vec![1_i64]);
-            let pointer = array_pointer(&root);
-            let result = if generated {
-                structural_mutate(root, &mut Outer { preserve, retain })
-            } else {
-                structural_mutate(root, |value: MutateValue<'_>, _: &mut CallbackMutator| {
-                    transfer(value, false, preserve, retain)
-                })
+    for preserve in [false, true] {
+        for retain in [false, true] {
+            for generated in [false, true] {
+                let root = Array::new(vec![1_i64]);
+                let pointer = array_pointer(&root);
+                let result = if generated {
+                    structural_mutate(root, &mut Outer { preserve, retain })
+                } else {
+                    structural_mutate(root, |value: MutateValue<'_>, _: &mut CallbackMutator| {
+                        transfer(value, false, preserve, retain)
+                    })
+                }
+                .and_then(Array::<i64>::try_from)
+                .unwrap();
+                assert_eq!(array_pointer(&result) == pointer, !retain);
+                assert_eq!(result.get(0).unwrap(), 2);
             }
-            .and_then(Array::<i64>::try_from)
-            .unwrap_or_else(|error| panic!("{style}: {case}: {error}"));
-            assert_eq!(
-                array_pointer(&result) == pointer,
-                !retain,
-                "{style}: {case}"
-            );
-            assert_eq!(result.get(0).unwrap(), 2, "{style}: {case}");
         }
     }
 }
