@@ -538,6 +538,90 @@ fn consuming_callbacks_forward_permissions_without_temporary_owners() {
 }
 
 #[test]
+fn consuming_default_descent_cannot_reuse_another_contexts_value() {
+    struct Inner<'a> {
+        value: Option<MutateValue<'a>>,
+        preserve_unchanged: bool,
+    }
+    #[dispatch(mutate)]
+    impl Inner<'_> {
+        fn mutate_bool(&mut self, _: bool, ctx: &mut Mutator) -> Result<Any> {
+            let value = self.value.take().unwrap();
+            if self.preserve_unchanged {
+                ctx.default_mutate_with_mode_result(self, value, InplaceMode::Allow)
+                    .map(Into::into)
+            } else {
+                ctx.default_mutate_with_mode(self, value, InplaceMode::Allow)
+            }
+        }
+        fn mutate_integer(&mut self, value: i64) -> i64 {
+            value + 1
+        }
+    }
+    fn check(
+        value: MutateValue<'_>,
+        current: &MapValue,
+        generated: bool,
+        preserve_unchanged: bool,
+    ) -> Result<Any> {
+        // Borrow from the issuing context, independently of the consumed handle.
+        let node = current
+            .as_node::<tvm_ffi::collections::array::ArrayObj>()
+            .unwrap();
+        assert_eq!(value.inplace_mode(), InplaceMode::Allow);
+        let result = if generated {
+            structural_mutate(
+                true,
+                &mut Inner {
+                    value: Some(value),
+                    preserve_unchanged,
+                },
+            )?
+        } else {
+            let slot = RefCell::new(Some(value));
+            structural_mutate(
+                true,
+                (
+                    |_: bool, ctx: &mut CallbackMutator| -> Result<Any> {
+                        let value = slot.borrow_mut().take().unwrap();
+                        if preserve_unchanged {
+                            ctx.default_mutate_with_mode_result(value, InplaceMode::Allow)
+                                .map(Into::into)
+                        } else {
+                            ctx.default_mutate_with_mode(value, InplaceMode::Allow)
+                        }
+                    },
+                    |value: i64, _: &mut CallbackMutator| value + 1,
+                ),
+            )?
+        };
+        let output = Array::<i64>::try_from(result)?;
+        assert_ne!(array_pointer(&output) as usize, node as *const _ as usize);
+        assert_eq!(output.get(0)?, 2);
+        // Acquire an owner only after descent; it must not cause the copy above.
+        assert_eq!(current.cast::<Array<i64>>().unwrap().get(0)?, 1);
+        Ok(output.into())
+    }
+    struct Outer(bool);
+    #[dispatch(mutate)]
+    impl Outer {
+        fn mutate_any(&mut self, value: MutateValue<'_>, ctx: &mut Mutator) -> Result<Any> {
+            check(value, ctx.current(), true, self.0)
+        }
+    }
+    for preserve_unchanged in [false, true] {
+        structural_mutate(Array::new(vec![1_i64]), &mut Outer(preserve_unchanged)).unwrap();
+        structural_mutate(
+            Array::new(vec![1_i64]),
+            |value: MutateValue<'_>, ctx: &mut CallbackMutator| {
+                check(value, ctx.current(), false, preserve_unchanged)
+            },
+        )
+        .unwrap();
+    }
+}
+
+#[test]
 fn consuming_default_descent_preserves_unchanged_and_propagates_errors() {
     for fail in [false, true] {
         let root = Array::new(vec![1_i64]);
