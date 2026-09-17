@@ -144,17 +144,17 @@ impl InplaceMode {
 ///
 /// Unlike an owning typed argument, this handle does not increment the reference
 /// count. Borrow through it to inspect the node, then consume it in
-/// `default_mutate_with_mode` to continue recursion. A surviving owning alias
+/// `default_maybe_inplace_mutate` to continue recursion. A surviving owning alias
 /// still forces copying. Node borrows come from this handle, not from the
 /// callback context, so the handle can safely be passed to another context.
 /// `T` selects the callback's matched FFI type; `Any` matches every value.
 ///
 /// A node borrow cannot survive consumption of the handle:
 /// ```compile_fail
-/// use tvm_ffi::{CallbackMutator, InplaceMode, MutateValue};
+/// use tvm_ffi::{CallbackMutator, MutateValue};
 /// fn invalid(value: MutateValue<'_>, ctx: &mut CallbackMutator) {
 ///     let node = value.as_node::<tvm_ffi::collections::array::ArrayObj>().unwrap();
-///     ctx.default_mutate_with_mode(value, InplaceMode::Allow).unwrap();
+///     ctx.default_maybe_inplace_mutate(value).unwrap();
 ///     println!("{}", node.size);
 /// }
 /// ```
@@ -162,12 +162,12 @@ impl InplaceMode {
 /// Moving the handle into a nested callback cannot bypass that borrow:
 /// ```compile_fail
 /// use std::cell::RefCell;
-/// use tvm_ffi::{structural_mutate, CallbackMutator, InplaceMode, MutateValue};
+/// use tvm_ffi::{structural_mutate, CallbackMutator, MutateValue};
 /// fn invalid(value: MutateValue<'_>) {
 ///     let node = value.as_node::<tvm_ffi::collections::array::ArrayObj>().unwrap();
 ///     let pending = RefCell::new(Some(value));
 ///     structural_mutate(true, |_: bool, inner: &mut CallbackMutator| {
-///         inner.default_mutate_with_mode(pending.borrow_mut().take().unwrap(), InplaceMode::Allow)
+///         inner.default_maybe_inplace_mutate(pending.borrow_mut().take().unwrap())
 ///     }).unwrap();
 ///     println!("{}", node.size);
 /// }
@@ -425,6 +425,28 @@ impl Mutator {
         StructuralMutator::default_mutate_value_result(dispatch, value, self.def_region_kind)
     }
 
+    /// Consume the handle for default descent with its existing permission.
+    #[inline]
+    pub fn default_maybe_inplace_mutate<D: MutateDispatch, T>(
+        &mut self,
+        dispatch: &mut D,
+        value: MutateValue<'_, T>,
+    ) -> Result<Any> {
+        let mode = value.inplace_mode();
+        self.default_mutate_with_mode(dispatch, value, mode)
+    }
+
+    /// Consume the handle for default descent, preserving permission and `Unchanged`.
+    #[inline]
+    pub fn default_maybe_inplace_mutate_result<D: MutateDispatch, T>(
+        &mut self,
+        dispatch: &mut D,
+        value: MutateValue<'_, T>,
+    ) -> Result<UnchangedOr<Any>> {
+        let mode = value.inplace_mode();
+        self.default_mutate_with_mode_result(dispatch, value, mode)
+    }
+
     /// Continue default mutation after relinquishing the callback value's borrows.
     ///
     /// The requested mode can restrict, but cannot upgrade, the engine-issued
@@ -641,6 +663,23 @@ where
         self.driver
             .default_mutate_borrowed(view, self.def_region_kind)
             .and_then(UnchangedOr::from_carrier)
+    }
+
+    /// Consume the handle for default descent with its existing permission.
+    #[inline]
+    pub fn default_maybe_inplace_mutate<T>(&mut self, value: MutateValue<'_, T>) -> Result<Any> {
+        let mode = value.inplace_mode();
+        self.default_mutate_with_mode(value, mode)
+    }
+
+    /// Consume the handle for default descent, preserving permission and `Unchanged`.
+    #[inline]
+    pub fn default_maybe_inplace_mutate_result<T>(
+        &mut self,
+        value: MutateValue<'_, T>,
+    ) -> Result<UnchangedOr<Any>> {
+        let mode = value.inplace_mode();
+        self.default_mutate_with_mode_result(value, mode)
     }
 
     /// Continue default mutation after relinquishing the callback value's borrows.

@@ -530,8 +530,7 @@ let mut mutator = MutateCallbacks::new(
             value + 1
         },
         |value: MutateValue<'_>, mutator: &mut CallbackMutator<Stats>| {
-            let mode = mutator.inplace_mode();
-            mutator.default_mutate_with_mode(value, mode)
+            mutator.default_maybe_inplace_mutate(value)
         },
     ),
 );
@@ -545,8 +544,8 @@ assert_eq!(mutator.state().integers, 2);
 `maybe_inplace_mutate` preserves the reuse opportunity of an owned value.
 Closure callbacks are `Fn`; mutable data belongs in the callback state.
 
-Use `MutateValue<'_, T>` with `default_mutate_with_mode` to forward in-place
-permission into default descent. Borrow the node through `value`; mutation
+Use `MutateValue<'_, T>` with `default_maybe_inplace_mutate` to forward its
+permission, or `default_mutate_with_mode` to restrict it. Borrow through `value`; mutation
 contexts do not expose `current()`, and copy-only default descent takes an
 explicit borrow (`default_mutate(value)`). Generated handlers may take
 `InplaceMode` after `&mut Mutator`; see `MutateValue` for ownership requirements.

@@ -546,10 +546,9 @@ fn consuming_default_descent_transfers_between_contexts_without_node_borrows() {
         fn mutate_bool(&mut self, _: bool, ctx: &mut Mutator) -> Result<Any> {
             let value = self.value.take().unwrap();
             self.result = if self.preserve_unchanged {
-                ctx.default_mutate_with_mode_result(self, value, InplaceMode::Allow)?
-                    .into()
+                ctx.default_maybe_inplace_mutate_result(self, value)?.into()
             } else {
-                ctx.default_mutate_with_mode(self, value, InplaceMode::Allow)?
+                ctx.default_maybe_inplace_mutate(self, value)?
             };
             Ok(Any::new())
         }
@@ -582,10 +581,9 @@ fn consuming_default_descent_transfers_between_contexts_without_node_borrows() {
                     |_: bool, ctx: &mut CallbackMutator<Inner<'_>>| -> Result<Any> {
                         let value = ctx.state_mut().value.take().unwrap();
                         let result = if ctx.state().preserve_unchanged {
-                            ctx.default_mutate_with_mode_result(value, InplaceMode::Allow)?
-                                .into()
+                            ctx.default_maybe_inplace_mutate_result(value)?.into()
                         } else {
-                            ctx.default_mutate_with_mode(value, InplaceMode::Allow)?
+                            ctx.default_maybe_inplace_mutate(value)?
                         };
                         ctx.state_mut().result = result;
                         Ok(Any::new())
@@ -647,8 +645,7 @@ fn consuming_default_descent_preserves_unchanged_and_propagates_errors() {
                         Ok(UnchangedOr::unchanged())
                     };
                 }
-                let mode = ctx.inplace_mode();
-                let result = ctx.default_mutate_with_mode_result(value, mode)?;
+                let result = ctx.default_maybe_inplace_mutate_result(value)?;
                 assert!(result.is_unchanged());
                 Ok(result)
             },
