@@ -491,7 +491,9 @@ the same semantics as C++.
 `MutateCallbacks::with_policy` and `MapWithPolicy` use `MutContextPolicy<State>`
 to manage context around default recursion. Policies consume `MutateValue`
 and return `UnchangedOr<Any>`; see the API documentation for composition and
-scoped definition regions.
+scoped definition regions. Pass `MapWithPolicy` directly to `structural_map`;
+it cannot be a callback tuple member or another wrapper's dispatcher. Compose
+policies as `(outer, inner)` within one wrapper.
 
 Default recursion uses the same type attributes as C++: it calls
 `__s_maybe_inplace_mutate__` for a uniquely owned object when available, or

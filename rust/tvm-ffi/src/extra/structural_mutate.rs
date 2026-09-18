@@ -1155,8 +1155,15 @@ pub trait MapDispatch: Sized {
         value: &StructuralView,
         def_region_kind: DefRegionKind,
     ) -> Option<MapResult>;
+}
 
-    #[doc(hidden)]
+/// Internal root-mapping protocol used by [`IntoMapper`].
+#[doc(hidden)]
+pub trait NativeMap: Sized {
+    fn map_root(&mut self, root: Any, order: WalkOrder) -> Result<Any>;
+}
+
+impl<D: MapDispatch> NativeMap for D {
     fn map_root(&mut self, root: Any, order: WalkOrder) -> Result<Any> {
         run_structural_mutator(
             root,
@@ -1179,20 +1186,16 @@ impl<V: MapDispatch> MapDispatch for &mut V {
     ) -> Option<MapResult> {
         (**self).dispatch_map(value, def_region_kind)
     }
-
-    fn map_root(&mut self, root: Any, order: WalkOrder) -> Result<Any> {
-        (**self).map_root(root, order)
-    }
 }
 
 /// Conversion into the mapper consumed by [`structural_map`].
 #[diagnostic::on_unimplemented(
     message = "unsupported structural-map callback shape",
     label = "this value cannot be used as a structural mapper",
-    note = "pass `&mut` a type implementing `MapDispatch`, a supported closure, or a tuple of callbacks"
+    note = "pass `&mut` a `MapDispatch`, a supported closure or callback tuple, or a `MapWithPolicy`"
 )]
 pub trait IntoMapper<Marker> {
-    type Mapper: MapDispatch;
+    type Mapper: NativeMap;
     fn into_mapper(self) -> Self::Mapper;
 }
 

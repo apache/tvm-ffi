@@ -24,10 +24,10 @@ use tvm_ffi::object::ObjectRef;
 use tvm_ffi::{
     dispatch, structural_map, structural_mutate, Any, AnyView, Array, CallbackMutator,
     DefRegionKind, DefaultMutContextPolicy, Error, FieldGetter, Function, InplaceMode,
-    InplaceValue, Map, MapDispatch, MapValue, MapWithPolicy, MutContextPolicy, MutateCallbacks,
-    MutateValue, Mutator, Object, ObjectArc, ObjectRefCore, Result, String as FfiString,
-    StructuralMutator, StructuralVarRemap, TypeIndex, Unchanged, UnchangedOr, WalkOrder,
-    RUNTIME_ERROR,
+    InplaceValue, IntoMapper, Map, MapDispatch, MapValue, MapWithPolicy, MutContextPolicy,
+    MutateCallbacks, MutateValue, Mutator, Object, ObjectArc, ObjectRefCore, Result,
+    String as FfiString, StructuralMutator, StructuralVarRemap, TypeIndex, Unchanged, UnchangedOr,
+    WalkOrder, RUNTIME_ERROR,
 };
 
 struct IncrementIntegers;
@@ -1777,6 +1777,48 @@ fn mutation_policies_share_state_and_preserve_callback_order() {
     assert_eq!(i64::try_from(array_item(&output, 1)).unwrap(), 3);
     assert_eq!(mutator.state().events, pre);
     assert_eq!(mutator.state().depth, 0);
+}
+
+#[test]
+fn map_policy_entries_preserve_descent_and_callback_composition() {
+    struct Stop;
+    impl<State> MutContextPolicy<State> for Stop {
+        fn default_mutate(
+            &self,
+            _: MutateValue<'_>,
+            _: &mut CallbackMutator<State>,
+        ) -> Result<UnchangedOr<Any>> {
+            Ok(UnchangedOr::unchanged())
+        }
+    }
+
+    let root = || Array::new(vec![1_i64]);
+    let first = |value: Any| Array::<i64>::try_from(value).unwrap().get(0).unwrap();
+    for order in [WalkOrder::PreOrder, WalkOrder::PostOrder] {
+        for entry in 0..3 {
+            let mut state = PolicyState::default();
+            let output = {
+                let mut mapper = MapWithPolicy::new(&mut state, (DefaultMutContextPolicy, Stop));
+                match entry {
+                    0 => structural_map(root(), mapper, order),
+                    1 => structural_map(root(), &mut mapper, order),
+                    _ => mapper.map(root(), order),
+                }
+            }
+            .unwrap();
+            assert_eq!(first(output), 1);
+            assert_eq!(state.events, vec![("callback", 0)]);
+        }
+
+        let mut dispatch = IncrementIntegers;
+        let callbacks = (|s: FfiString| s, (&mut dispatch,));
+        assert_eq!(first(structural_map(root(), callbacks, order).unwrap()), 2);
+
+        let callbacks = (|x: i64| x + 1, (|s: FfiString| s,));
+        assert_eq!(first(structural_map(root(), callbacks, order).unwrap()), 2);
+        let mapper = MapWithPolicy::new(callbacks.into_mapper(), Stop);
+        assert_eq!(first(structural_map(root(), mapper, order).unwrap()), 1);
+    }
 }
 
 #[test]

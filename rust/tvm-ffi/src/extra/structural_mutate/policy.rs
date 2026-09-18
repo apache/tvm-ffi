@@ -21,6 +21,9 @@
 
 use super::*;
 
+#[cfg(doctest)]
+mod compile_fail;
+
 /// Default-recursion policy for [`MutateCallbacks::with_policy`] and [`MapWithPolicy`].
 ///
 /// `ctx.default_maybe_inplace_mutate_result(value)` continues to the next policy,
@@ -194,6 +197,8 @@ impl<D, Policy> MutateCallbackState<D> for NativeMapper<'_, D, Policy> {
 ///
 /// Run with [`Self::map`] or [`structural_map`]. Each node's map callback runs
 /// outside its policy scope; its children run inside.
+/// This mapper cannot be a callback tuple member or another wrapper's dispatcher.
+/// Compose policies as `(outer, inner)` within one wrapper.
 pub struct MapWithPolicy<Mapper, Policy> {
     mapper: Mapper,
     policy: Rc<Policy>,
@@ -237,12 +242,17 @@ impl<Mapper: MapDispatch, Policy: MutContextPolicy<Mapper>> MapWithPolicy<Mapper
     }
 }
 
-impl<Mapper: MapDispatch, Policy: MutContextPolicy<Mapper>> MapDispatch
+impl<Mapper: MapDispatch, Policy: MutContextPolicy<Mapper>> NativeMap
     for MapWithPolicy<Mapper, Policy>
 {
-    fn dispatch_map(&mut self, value: &StructuralView, kind: DefRegionKind) -> Option<MapResult> {
-        self.mapper.dispatch_map(value, kind)
+    fn map_root(&mut self, root: Any, order: WalkOrder) -> Result<Any> {
+        self.map(root, order)
     }
+}
+
+impl<Mapper: MapDispatch, Policy: MutContextPolicy<Mapper>> NativeMap
+    for &mut MapWithPolicy<Mapper, Policy>
+{
     fn map_root(&mut self, root: Any, order: WalkOrder) -> Result<Any> {
         self.map(root, order)
     }
@@ -253,6 +263,15 @@ pub enum ByPolicyMap {}
 
 impl<Mapper: MapDispatch, Policy: MutContextPolicy<Mapper>> IntoMapper<ByPolicyMap>
     for MapWithPolicy<Mapper, Policy>
+{
+    type Mapper = Self;
+    fn into_mapper(self) -> Self {
+        self
+    }
+}
+
+impl<'a, Mapper: MapDispatch, Policy: MutContextPolicy<Mapper>> IntoMapper<ByPolicyMap>
+    for &'a mut MapWithPolicy<Mapper, Policy>
 {
     type Mapper = Self;
     fn into_mapper(self) -> Self {
