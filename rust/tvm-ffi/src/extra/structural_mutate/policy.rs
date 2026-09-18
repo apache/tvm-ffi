@@ -21,36 +21,13 @@
 
 use super::*;
 
-/// A reusable policy around default map and mutation recursion.
+/// Default-recursion policy for [`MutateCallbacks::with_policy`] and [`MapWithPolicy`].
 ///
-/// Consume `value` with `default_maybe_inplace_mutate_result()` to continue to
-/// the next policy, then registered hooks or reflected fields. Children re-enter
-/// the full callback engine. A tuple `(outer, inner)` composes policies.
-/// Policies share callback state; restore scoped state before forwarding errors.
-///
-/// ```
-/// use tvm_ffi::{
-///     structural_mutate, Any, Array, CallbackMutator, DefRegionKind, MutateCallbacks,
-///     MutateValue, MutContextPolicy, Result, UnchangedOr,
-/// };
-/// struct AsPattern;
-/// impl<State> MutContextPolicy<State> for AsPattern {
-///     fn default_mutate(
-///         &self, value: MutateValue<'_>, ctx: &mut CallbackMutator<State>,
-///     ) -> Result<UnchangedOr<Any>> {
-///         ctx.with_def_region_kind(DefRegionKind::Pattern, |ctx| {
-///             ctx.default_maybe_inplace_mutate_result(value)
-///         })
-///     }
-/// }
-/// let mut mutator = MutateCallbacks::new((), |x: i64, ctx: &mut CallbackMutator| {
-///     assert_eq!(ctx.def_region_kind(), DefRegionKind::Pattern);
-///     x + 1
-/// }).with_policy(AsPattern);
-/// let result = structural_mutate(Array::new(vec![1_i64]), &mut mutator)?;
-/// assert_eq!(Array::<i64>::try_from(result)?.get(0)?, 2);
-/// # Ok::<(), tvm_ffi::Error>(())
-/// ```
+/// `ctx.default_maybe_inplace_mutate_result(value)` continues to the next policy,
+/// then hooks or reflected fields; children re-enter callback dispatch.
+/// Policies share callback state and compose as `(outer, inner)`.
+/// Restore user state before returning, including on errors; use
+/// [`MutateContext::with_def_region_kind`] for scoped definition regions.
 pub trait MutContextPolicy<State> {
     /// Customize default descent, preserving the input permission and result marker.
     fn default_mutate(
@@ -213,12 +190,10 @@ impl<D, Policy> MutateCallbackState<D> for NativeMapper<'_, D, Policy> {
     }
 }
 
-/// A map dispatcher combined with a reusable default-recursion policy.
+/// A [`MapDispatch`] with a [`MutContextPolicy`], sharing the dispatcher's state.
 ///
-/// The dispatcher is the policy's shared state. Define its callbacks with
-/// `#[dispatch(map)]` or [`MapDispatch`], then call [`Self::map`] or pass the
-/// adapter to [`structural_map`]. Map callbacks run outside their own node's
-/// policy scope; children see the context established during descent.
+/// Run with [`Self::map`] or [`structural_map`]. Each node's map callback runs
+/// outside its policy scope; its children run inside.
 pub struct MapWithPolicy<Mapper, Policy> {
     mapper: Mapper,
     policy: Rc<Policy>,
