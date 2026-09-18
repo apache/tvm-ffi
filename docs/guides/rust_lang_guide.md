@@ -366,7 +366,7 @@ Callbacks are `Fn`; mutable data belongs in the visitor state. A catch-all
 callback must call `visit_children()` explicitly, and interrupt values must be
 returned explicitly because `?` only propagates errors.
 
-`VisitCallbacks::with_policy` and `WalkWithPolicy` use `ContextPolicy<State>`
+`VisitCallbacks::with_policy` and `WalkWithContextPolicy` use `ContextPolicy<State>`
 to manage context around default recursion. See the `ContextPolicy` API
 documentation for composition and shared state access.
 
@@ -488,10 +488,10 @@ Within one `structural_map` call, callbacks run at every occurrence; their
 results are not cached. Default recursion manages identity remapping with
 the same semantics as C++.
 
-`MutateCallbacks::with_policy` and `MapWithPolicy` use `MutContextPolicy<State>`
+`MutateCallbacks::with_policy` and `MapWithContextPolicy` use `MutContextPolicy<State>`
 to manage context around default recursion. Policies consume `MutateValue`
 and return `UnchangedOr<Any>`; see the API documentation for composition and
-scoped definition regions. Pass `MapWithPolicy` directly to `structural_map`;
+scoped definition regions. Pass `MapWithContextPolicy` directly to `structural_map`;
 it cannot be a callback tuple member or another wrapper's dispatcher. Compose
 policies as `(outer, inner)` within one wrapper.
 

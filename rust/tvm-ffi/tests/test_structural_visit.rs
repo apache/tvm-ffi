@@ -23,7 +23,8 @@ use tvm_ffi::{
     dispatch, get_type_attr, structural_visit, structural_walk, Any, Array, ContextPolicy,
     DLDataType, DLDataTypeCode, DefRegionKind, Error, FieldGetter, Function, Map, Object,
     ObjectRefCore, Result, String as FfiString, StructuralVisitor, TypeIndex, VisitCallbacks,
-    VisitContext, VisitInterrupt, VisitValue, WalkOrder, WalkResult, WalkWithPolicy, RUNTIME_ERROR,
+    VisitContext, VisitInterrupt, VisitValue, WalkOrder, WalkResult, WalkWithContextPolicy,
+    RUNTIME_ERROR,
 };
 
 fn runtime_error(message: &str) -> Error {
@@ -120,7 +121,7 @@ fn composed_policies_share_array_scope_with_visit_and_walk_callbacks() {
     // recursion, so default policies also run for matched integer leaves.
     for order in [WalkOrder::PreOrder, WalkOrder::PostOrder] {
         let mut walker =
-            WalkWithPolicy::new(CollectIntegers::default(), (ArrayScope, RecordDescent));
+            WalkWithContextPolicy::new(CollectIntegers::default(), (ArrayScope, RecordDescent));
         assert!(walker.walk(&root, order).unwrap().is_none());
         assert_eq!(walker.state().integers, expected);
         assert_eq!(walker.state().depth, 0);
@@ -195,7 +196,7 @@ fn policy_continuation_scopes_regions_and_restores_after_halts() {
             };
             let policies = (Scope(Simple, 4), (Scope(Pattern, 3), Scope(Use, 2)));
             let (result, state) = if let Some(order) = order {
-                let mut walker = WalkWithPolicy::new(state, policies);
+                let mut walker = WalkWithContextPolicy::new(state, policies);
                 let result = walker.walk(&root, order);
                 (result, walker.into_state())
             } else {
@@ -332,7 +333,7 @@ fn policy_continuation_retargets_without_dispatching_the_container() {
     ];
     for order in [WalkOrder::PreOrder, WalkOrder::PostOrder] {
         for skip in [false, true] {
-            let mut walker = WalkWithPolicy::new(Probe(vec![], skip), (Redirect, Observe));
+            let mut walker = WalkWithContextPolicy::new(Probe(vec![], skip), (Redirect, Observe));
             assert!(walker.walk(&root, order).unwrap().is_none());
             let mut expected = descent.clone();
             let array_callback = ("array callback", 2, DefRegionKind::None);
@@ -473,7 +474,7 @@ fn policy_halts_skip_remaining_policies_and_restore_outer_state() {
         for order in [None, Some(WalkOrder::PreOrder), Some(WalkOrder::PostOrder)] {
             let policies = (Scope, (Stop(error), Unreachable));
             let (result, state) = if let Some(order) = order {
-                let mut walker = WalkWithPolicy::new(Probe::default(), policies);
+                let mut walker = WalkWithContextPolicy::new(Probe::default(), policies);
                 let result = walker.walk(&root, order);
                 (result, walker.into_state())
             } else {
@@ -548,7 +549,8 @@ fn policy_regions_compose_with_field_flags_and_function_hooks() {
             for order in [None, Some(WalkOrder::PreOrder), Some(WalkOrder::PostOrder)] {
                 let policy = SetRootRegion(root.type_index(), region);
                 let state = if let Some(order) = order {
-                    let mut walker = WalkWithPolicy::new(PolicyRegionTrace::default(), policy);
+                    let mut walker =
+                        WalkWithContextPolicy::new(PolicyRegionTrace::default(), policy);
                     assert!(walker.walk(&root, order).unwrap().is_none());
                     walker.into_state()
                 } else {
@@ -598,7 +600,8 @@ fn walk_policy_preserves_reflected_pattern_before_default_descent() {
     use DefRegionKind::{None as Use, Pattern, Simple};
     for requested in [Use, Simple] {
         for order in [WalkOrder::PreOrder, WalkOrder::PostOrder] {
-            let mut walker = WalkWithPolicy::new(PolicyRegionTrace::default(), Reenter(requested));
+            let mut walker =
+                WalkWithContextPolicy::new(PolicyRegionTrace::default(), Reenter(requested));
             assert!(walker.walk(&root, order).unwrap().is_none());
             let expected = match order {
                 WalkOrder::PreOrder => vec![

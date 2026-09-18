@@ -24,7 +24,7 @@ use tvm_ffi::object::ObjectRef;
 use tvm_ffi::{
     dispatch, structural_map, structural_mutate, Any, AnyView, Array, CallbackMutator,
     DefRegionKind, DefaultMutContextPolicy, Error, FieldGetter, Function, InplaceMode,
-    InplaceValue, IntoMapper, Map, MapDispatch, MapValue, MapWithPolicy, MutContextPolicy,
+    InplaceValue, IntoMapper, Map, MapDispatch, MapValue, MapWithContextPolicy, MutContextPolicy,
     MutateCallbacks, MutateValue, Mutator, Object, ObjectArc, ObjectRefCore, Result,
     String as FfiString, StructuralMutator, StructuralVarRemap, TypeIndex, Unchanged, UnchangedOr,
     WalkOrder, RUNTIME_ERROR,
@@ -1737,7 +1737,7 @@ fn mutation_policies_share_state_and_preserve_callback_order() {
         ("callback", 0),
     ];
     for order in [WalkOrder::PreOrder, WalkOrder::PostOrder] {
-        let mut mapper = MapWithPolicy::new(
+        let mut mapper = MapWithContextPolicy::new(
             PolicyState::default(),
             (ArrayPolicy, (RecordPolicy, DefaultMutContextPolicy)),
         );
@@ -1798,7 +1798,8 @@ fn map_policy_entries_preserve_descent_and_callback_composition() {
         for entry in 0..3 {
             let mut state = PolicyState::default();
             let output = {
-                let mut mapper = MapWithPolicy::new(&mut state, (DefaultMutContextPolicy, Stop));
+                let mut mapper =
+                    MapWithContextPolicy::new(&mut state, (DefaultMutContextPolicy, Stop));
                 match entry {
                     0 => structural_map(root(), mapper, order),
                     1 => structural_map(root(), &mut mapper, order),
@@ -1816,7 +1817,7 @@ fn map_policy_entries_preserve_descent_and_callback_composition() {
 
         let callbacks = (|x: i64| x + 1, (|s: FfiString| s,));
         assert_eq!(first(structural_map(root(), callbacks, order).unwrap()), 2);
-        let mapper = MapWithPolicy::new(callbacks.into_mapper(), Stop);
+        let mapper = MapWithContextPolicy::new(callbacks.into_mapper(), Stop);
         assert_eq!(first(structural_map(root(), mapper, order).unwrap()), 1);
     }
 }
@@ -1884,7 +1885,7 @@ fn mutation_policy_continuations_preserve_ownership_and_markers() {
                     retained: None,
                 };
                 let (output, state) = if entry < 2 {
-                    let mut mapper = MapWithPolicy::new(state, policy);
+                    let mut mapper = MapWithContextPolicy::new(state, policy);
                     let output = mapper
                         .map(
                             root,
@@ -1993,7 +1994,8 @@ fn mutation_policy_regions_retargeting_and_error_restore() {
     );
     for requested in [Use, Simple] {
         for order in [WalkOrder::PreOrder, WalkOrder::PostOrder] {
-            let mut mapper = MapWithPolicy::new(Regions::default(), (Redirect(requested), Observe));
+            let mut mapper =
+                MapWithContextPolicy::new(Regions::default(), (Redirect(requested), Observe));
             let output = mapper.map(false, order).unwrap();
             assert_eq!(i64::try_from(array_item(&output, 0)).unwrap(), 1);
             let mut expected = vec![(100, Pattern), (1, Pattern)];
@@ -2066,7 +2068,7 @@ fn mutation_policy_halts_restore_state_and_skip_later_policies() {
     }
     for fail in [false, true] {
         for order in [WalkOrder::PreOrder, WalkOrder::PostOrder] {
-            let mut mapper = MapWithPolicy::new(
+            let mut mapper = MapWithContextPolicy::new(
                 PolicyState::default(),
                 (ArrayPolicy, (Halt(fail), RecordPolicy)),
             );

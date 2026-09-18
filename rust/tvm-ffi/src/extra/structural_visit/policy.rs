@@ -155,12 +155,12 @@ impl<State, V: StructuralVisitor + VisitCallbackState<State>> VisitContextDriver
 /// The dispatcher is also the state visible through the policy's context. Use
 /// `#[dispatch(walk)]` or implement [`WalkDispatch`] to define its callbacks.
 /// Run repeatedly with [`Self::walk`], or pass this value to [`structural_walk`].
-pub struct WalkWithPolicy<Walker, Policy> {
+pub struct WalkWithContextPolicy<Walker, Policy> {
     walker: Walker,
     policy: Rc<Policy>,
 }
 
-impl<Walker: WalkDispatch, Policy: ContextPolicy<Walker>> WalkWithPolicy<Walker, Policy> {
+impl<Walker: WalkDispatch, Policy: ContextPolicy<Walker>> WalkWithContextPolicy<Walker, Policy> {
     /// Combine a dispatcher and a default-recursion policy.
     pub fn new(walker: Walker, policy: Policy) -> Self {
         Self {
@@ -205,7 +205,7 @@ impl<Walker: WalkDispatch, Policy: ContextPolicy<Walker>> WalkWithPolicy<Walker,
 pub enum ByPolicyWalk {}
 
 impl<Walker: WalkDispatch, Policy: ContextPolicy<Walker>> IntoWalker<ByPolicyWalk>
-    for WalkWithPolicy<Walker, Policy>
+    for WalkWithContextPolicy<Walker, Policy>
 {
     type Walker = Self;
     fn into_walker(self) -> Self {
@@ -214,7 +214,7 @@ impl<Walker: WalkDispatch, Policy: ContextPolicy<Walker>> IntoWalker<ByPolicyWal
 }
 
 impl<Walker: WalkDispatch, Policy: ContextPolicy<Walker>> NativeVisit
-    for WalkWithPolicy<Walker, Policy>
+    for WalkWithContextPolicy<Walker, Policy>
 {
     const CUSTOM_DESCENT: bool = true;
 
@@ -245,7 +245,7 @@ impl<Walker: WalkDispatch, Policy: ContextPolicy<Walker>> NativeVisit
 }
 
 struct WalkDescent<'a, Walker, Policy, const PRE_ORDER: bool> {
-    visitor: &'a mut WalkWithPolicy<Walker, Policy>,
+    visitor: &'a mut WalkWithContextPolicy<Walker, Policy>,
 }
 
 impl<Walker: WalkDispatch, Policy: ContextPolicy<Walker>, const PRE_ORDER: bool>

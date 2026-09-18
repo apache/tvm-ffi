@@ -223,7 +223,7 @@ impl From<Error> for NativeHalt {
 type NativeResult = std::result::Result<(), NativeHalt>;
 
 mod policy;
-pub use policy::{ContextPolicy, DefaultContextPolicy, WalkWithPolicy};
+pub use policy::{ContextPolicy, DefaultContextPolicy, WalkWithContextPolicy};
 
 /// State and recursive operations available to a visit callback.
 ///

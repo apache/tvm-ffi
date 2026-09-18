@@ -24,7 +24,7 @@ use super::*;
 #[cfg(doctest)]
 mod compile_fail;
 
-/// Default-recursion policy for [`MutateCallbacks::with_policy`] and [`MapWithPolicy`].
+/// Default-recursion policy for [`MutateCallbacks::with_policy`] and [`MapWithContextPolicy`].
 ///
 /// `ctx.default_maybe_inplace_mutate_result(value)` continues to the next policy,
 /// then hooks or reflected fields; children re-enter callback dispatch.
@@ -199,12 +199,12 @@ impl<D, Policy> MutateCallbackState<D> for NativeMapper<'_, D, Policy> {
 /// outside its policy scope; its children run inside.
 /// This mapper cannot be a callback tuple member or another wrapper's dispatcher.
 /// Compose policies as `(outer, inner)` within one wrapper.
-pub struct MapWithPolicy<Mapper, Policy> {
+pub struct MapWithContextPolicy<Mapper, Policy> {
     mapper: Mapper,
     policy: Rc<Policy>,
 }
 
-impl<Mapper: MapDispatch, Policy: MutContextPolicy<Mapper>> MapWithPolicy<Mapper, Policy> {
+impl<Mapper: MapDispatch, Policy: MutContextPolicy<Mapper>> MapWithContextPolicy<Mapper, Policy> {
     /// Combine a dispatcher and a default-recursion policy.
     pub fn new(mapper: Mapper, policy: Policy) -> Self {
         Self {
@@ -243,7 +243,7 @@ impl<Mapper: MapDispatch, Policy: MutContextPolicy<Mapper>> MapWithPolicy<Mapper
 }
 
 impl<Mapper: MapDispatch, Policy: MutContextPolicy<Mapper>> NativeMap
-    for MapWithPolicy<Mapper, Policy>
+    for MapWithContextPolicy<Mapper, Policy>
 {
     fn map_root(&mut self, root: Any, order: WalkOrder) -> Result<Any> {
         self.map(root, order)
@@ -251,7 +251,7 @@ impl<Mapper: MapDispatch, Policy: MutContextPolicy<Mapper>> NativeMap
 }
 
 impl<Mapper: MapDispatch, Policy: MutContextPolicy<Mapper>> NativeMap
-    for &mut MapWithPolicy<Mapper, Policy>
+    for &mut MapWithContextPolicy<Mapper, Policy>
 {
     fn map_root(&mut self, root: Any, order: WalkOrder) -> Result<Any> {
         self.map(root, order)
@@ -262,7 +262,7 @@ impl<Mapper: MapDispatch, Policy: MutContextPolicy<Mapper>> NativeMap
 pub enum ByPolicyMap {}
 
 impl<Mapper: MapDispatch, Policy: MutContextPolicy<Mapper>> IntoMapper<ByPolicyMap>
-    for MapWithPolicy<Mapper, Policy>
+    for MapWithContextPolicy<Mapper, Policy>
 {
     type Mapper = Self;
     fn into_mapper(self) -> Self {
@@ -271,7 +271,7 @@ impl<Mapper: MapDispatch, Policy: MutContextPolicy<Mapper>> IntoMapper<ByPolicyM
 }
 
 impl<'a, Mapper: MapDispatch, Policy: MutContextPolicy<Mapper>> IntoMapper<ByPolicyMap>
-    for &'a mut MapWithPolicy<Mapper, Policy>
+    for &'a mut MapWithContextPolicy<Mapper, Policy>
 {
     type Mapper = Self;
     fn into_mapper(self) -> Self {

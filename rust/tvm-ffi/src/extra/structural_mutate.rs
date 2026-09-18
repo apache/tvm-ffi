@@ -72,7 +72,7 @@ pub use super::StructuralView;
 pub use super::StructuralView as MapValue;
 
 mod policy;
-pub use policy::{DefaultMutContextPolicy, MapWithPolicy, MutContextPolicy};
+pub use policy::{DefaultMutContextPolicy, MapWithContextPolicy, MutContextPolicy};
 
 /// Result type produced by a structural-map callback.
 #[doc(hidden)]
@@ -1192,7 +1192,7 @@ impl<V: MapDispatch> MapDispatch for &mut V {
 #[diagnostic::on_unimplemented(
     message = "unsupported structural-map callback shape",
     label = "this value cannot be used as a structural mapper",
-    note = "pass `&mut` a `MapDispatch`, a supported closure or callback tuple, or a `MapWithPolicy`"
+    note = "pass `&mut` a `MapDispatch`, a supported closure or callback tuple, or a `MapWithContextPolicy`"
 )]
 pub trait IntoMapper<Marker> {
     type Mapper: NativeMap;

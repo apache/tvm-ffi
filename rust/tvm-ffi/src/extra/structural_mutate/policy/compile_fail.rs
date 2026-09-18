@@ -20,7 +20,7 @@
 //! A policy mapper cannot be used as a callback, even in a one-element tuple.
 //! ```compile_fail,E0277
 //! use tvm_ffi::*;
-//! fn invalid<D: MapDispatch>(mapper: &mut MapWithPolicy<D, DefaultMutContextPolicy>) {
+//! fn invalid<D: MapDispatch>(mapper: &mut MapWithContextPolicy<D, DefaultMutContextPolicy>) {
 //!     structural_map(1_i64, (mapper,), WalkOrder::PreOrder).unwrap();
 //! }
 //! ```
@@ -28,7 +28,7 @@
 //! Adding another callback must not discard the policy.
 //! ```compile_fail,E0277
 //! use tvm_ffi::*;
-//! fn invalid<D: MapDispatch>(mapper: &mut MapWithPolicy<D, DefaultMutContextPolicy>) {
+//! fn invalid<D: MapDispatch>(mapper: &mut MapWithContextPolicy<D, DefaultMutContextPolicy>) {
 //!     structural_map(1_i64, (mapper, |s: String| s), WalkOrder::PreOrder).unwrap();
 //! }
 //! ```
@@ -36,7 +36,7 @@
 //! Nested callback tuples obey the same restriction.
 //! ```compile_fail,E0277
 //! use tvm_ffi::*;
-//! fn invalid<D: MapDispatch>(mapper: &mut MapWithPolicy<D, DefaultMutContextPolicy>) {
+//! fn invalid<D: MapDispatch>(mapper: &mut MapWithContextPolicy<D, DefaultMutContextPolicy>) {
 //!     structural_map(1_i64, (|s: String| s, ((mapper,),)), WalkOrder::PostOrder).unwrap();
 //! }
 //! ```
@@ -44,7 +44,7 @@
 //! Compose policies in a tuple instead of nesting mapper wrappers.
 //! ```compile_fail,E0277
 //! use tvm_ffi::*;
-//! fn invalid<D: MapDispatch>(mapper: MapWithPolicy<D, DefaultMutContextPolicy>) {
-//!     MapWithPolicy::new(mapper, DefaultMutContextPolicy);
+//! fn invalid<D: MapDispatch>(mapper: MapWithContextPolicy<D, DefaultMutContextPolicy>) {
+//!     MapWithContextPolicy::new(mapper, DefaultMutContextPolicy);
 //! }
 //! ```

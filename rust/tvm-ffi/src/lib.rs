@@ -51,14 +51,14 @@ pub use crate::extra::module::Module;
 pub use crate::extra::structural_mutate::{
     structural_map, structural_mutate, CallbackMutator, DefaultMutContextPolicy, InplaceMode,
     InplaceValue, IntoMapResult, IntoMapper, IntoMutator, MapChainLink, MapDispatch, MapValue,
-    MapWithPolicy, MutContextPolicy, MutateCallbacks, MutateChainLink, MutateContext,
+    MapWithContextPolicy, MutContextPolicy, MutateCallbacks, MutateChainLink, MutateContext,
     MutateDispatch, MutateValue, Mutator, StructuralMutator, StructuralVarRemap,
 };
 pub use crate::extra::structural_visit::{
     structural_visit, structural_walk, ContextPolicy, DefRegionKind, DefaultContextPolicy,
     IntoVisitor, IntoWalkResult, IntoWalker, StructuralVisitor, VisitCallbacks, VisitChainLink,
     VisitContext, VisitInterrupt, VisitValue, WalkChainLink, WalkDispatch, WalkOrder, WalkResult,
-    WalkWithPolicy,
+    WalkWithContextPolicy,
 };
 pub use crate::extra::unchanged::{Unchanged, UnchangedOr};
 pub use crate::extra::StructuralView;
