@@ -2014,7 +2014,7 @@ impl<D: MapDispatch, Policy: MutContextPolicy<D>> NativeMapper<'_, D, Policy> {
                     // A pre-order callback may replace an inline leaf with a subtree.
                     if self.order == WalkOrder::PreOrder && !is_plain_inline(mapped.type_index()) {
                         let descended =
-                            self.map_default_root(&mapped, def_region_kind, Permit::MaybeInPlace)?;
+                            self.map_default_root(&mapped, def_region_kind, Permit::Copy)?;
                         Ok(if is_unchanged(&descended) {
                             mapped
                         } else {
@@ -2044,6 +2044,9 @@ impl<D: MapDispatch, Policy: MutContextPolicy<D>> NativeMapper<'_, D, Policy> {
     ) -> Result<Any> {
         match self.order {
             WalkOrder::PreOrder => {
+                // A replacement inherits the input's permission, established
+                // before the callback can acquire or release ownership.
+                let permit = permit.inplace_mode(raw).permit();
                 let value = StructuralView::from_raw(raw);
                 let Some(callback_result) = self.dispatch.dispatch_map(&value, def_region_kind)
                 else {
@@ -2057,8 +2060,7 @@ impl<D: MapDispatch, Policy: MutContextPolicy<D>> NativeMapper<'_, D, Policy> {
                     drop(mapped);
                     self.default_map_current_raw(raw, def_region_kind, permit)
                 } else {
-                    let descended =
-                        self.map_default_root(&mapped, def_region_kind, Permit::MaybeInPlace)?;
+                    let descended = self.map_default_root(&mapped, def_region_kind, permit)?;
                     Ok(if is_unchanged(&descended) {
                         mapped
                     } else {

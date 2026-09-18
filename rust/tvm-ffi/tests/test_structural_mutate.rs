@@ -1104,6 +1104,82 @@ fn pre_order_retained_alias_disables_in_place_mutation() {
 }
 
 #[test]
+fn pre_order_replacements_preserve_inplace_permission() {
+    #[derive(Default)]
+    struct Replace {
+        pointer: usize,
+        mode: Option<InplaceMode>,
+    }
+    #[dispatch(map)]
+    impl Replace {
+        fn map_bool(&mut self, _: bool) -> Array<i64> {
+            let replacement = Array::new(vec![1_i64]);
+            self.pointer = array_pointer(&replacement) as usize;
+            replacement
+        }
+        fn map_array(&mut self, _: Array<Any>) -> Array<i64> {
+            self.map_bool(true)
+        }
+        fn map_integer(&mut self, value: i64) -> i64 {
+            value + 1
+        }
+    }
+    struct Observe;
+    impl MutContextPolicy<Replace> for Observe {
+        fn default_mutate(
+            &self,
+            value: MutateValue<'_>,
+            ctx: &mut tvm_ffi::MutateContext<'_, Replace>,
+        ) -> Result<UnchangedOr<Any>> {
+            if value.type_index() == TypeIndex::kTVMFFIArray as i32 {
+                ctx.state_mut().mode = Some(value.inplace_mode());
+            }
+            ctx.default_maybe_inplace_mutate_result(value)
+        }
+    }
+    for with_policy in [false, true] {
+        for case in ["inline", "unique", "shared"] {
+            let root = if case == "inline" {
+                Any::from(true)
+            } else {
+                Any::from(Array::new(vec![true]))
+            };
+            let alias = (case == "shared").then(|| root.clone());
+            let mut state = Replace::default();
+            let output = if with_policy {
+                let mut mapper = MapWithContextPolicy::new(state, Observe);
+                let output = mapper.map(root, WalkOrder::PreOrder).unwrap();
+                state = mapper.into_state();
+                output
+            } else {
+                structural_map(root, &mut state, WalkOrder::PreOrder).unwrap()
+            };
+            let output = Array::<i64>::try_from(output).unwrap();
+            let reuse = case == "unique";
+            assert_eq!(output.get(0).unwrap(), 2);
+            assert_eq!(
+                array_pointer(&output) as usize == state.pointer,
+                reuse,
+                "{case}, policy={with_policy}"
+            );
+            if with_policy {
+                assert_eq!(
+                    state.mode,
+                    Some(if reuse {
+                        InplaceMode::Allow
+                    } else {
+                        InplaceMode::Disallow
+                    })
+                );
+            }
+            if let Some(alias) = alias {
+                assert!(Array::<bool>::try_from(alias).unwrap().get(0).unwrap());
+            }
+        }
+    }
+}
+
+#[test]
 fn closures_and_tuples_use_ordered_first_match() {
     let root = Array::new(vec![1i64, 2]);
     let mapped = structural_map(
