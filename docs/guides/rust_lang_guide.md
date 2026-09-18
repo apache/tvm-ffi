@@ -488,7 +488,7 @@ Within one `structural_map` call, callbacks run at every occurrence; their
 results are not cached. Default recursion manages identity remapping with
 the same semantics as C++.
 
-`MutateCallbacks::with_policy` and `MapWithPolicy` use `MutationPolicy<State>`
+`MutateCallbacks::with_policy` and `MapWithPolicy` use `MutContextPolicy<State>`
 to manage context around default recursion. Policies consume `MutateValue`
 and return `UnchangedOr<Any>`; see the API documentation for composition and
 scoped definition regions.

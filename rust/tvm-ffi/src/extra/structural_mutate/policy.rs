@@ -31,10 +31,10 @@ use super::*;
 /// ```
 /// use tvm_ffi::{
 ///     structural_mutate, Any, Array, CallbackMutator, DefRegionKind, MutateCallbacks,
-///     MutateValue, MutationPolicy, Result, UnchangedOr,
+///     MutateValue, MutContextPolicy, Result, UnchangedOr,
 /// };
 /// struct AsPattern;
-/// impl<State> MutationPolicy<State> for AsPattern {
+/// impl<State> MutContextPolicy<State> for AsPattern {
 ///     fn default_mutate(
 ///         &self, value: MutateValue<'_>, ctx: &mut CallbackMutator<State>,
 ///     ) -> Result<UnchangedOr<Any>> {
@@ -51,7 +51,7 @@ use super::*;
 /// assert_eq!(Array::<i64>::try_from(result)?.get(0)?, 2);
 /// # Ok::<(), tvm_ffi::Error>(())
 /// ```
-pub trait MutationPolicy<State> {
+pub trait MutContextPolicy<State> {
     /// Customize default descent, preserving the input permission and result marker.
     fn default_mutate(
         &self,
@@ -61,9 +61,9 @@ pub trait MutationPolicy<State> {
 }
 
 /// Default descent through registered hooks or reflected structural fields.
-pub struct DefaultMutationPolicy;
+pub struct DefaultMutContextPolicy;
 
-impl<State> MutationPolicy<State> for DefaultMutationPolicy {
+impl<State> MutContextPolicy<State> for DefaultMutContextPolicy {
     fn default_mutate(
         &self,
         value: MutateValue<'_>,
@@ -73,7 +73,7 @@ impl<State> MutationPolicy<State> for DefaultMutationPolicy {
     }
 }
 
-impl<State, Outer: MutationPolicy<State>, Inner: MutationPolicy<State>> MutationPolicy<State>
+impl<State, Outer: MutContextPolicy<State>, Inner: MutContextPolicy<State>> MutContextPolicy<State>
     for (Outer, Inner)
 {
     fn default_mutate(
@@ -97,7 +97,7 @@ impl<State, Outer: MutationPolicy<State>, Inner: MutationPolicy<State>> Mutation
 
 pub(super) fn mutate_with_policy<State>(
     driver: &mut dyn MutateContextDriver<State>,
-    policy: &impl MutationPolicy<State>,
+    policy: &impl MutContextPolicy<State>,
     value: MutateValue<'_>,
     kind: DefRegionKind,
 ) -> Result<Any> {
@@ -118,7 +118,7 @@ struct NextPolicy<'a, State, Policy> {
     policy: &'a Policy,
 }
 
-impl<State, Policy: MutationPolicy<State>> MutateContextDriver<State>
+impl<State, Policy: MutContextPolicy<State>> MutateContextDriver<State>
     for NextPolicy<'_, State, Policy>
 {
     fn state(&self) -> &State {
@@ -224,7 +224,7 @@ pub struct MapWithPolicy<Mapper, Policy> {
     policy: Rc<Policy>,
 }
 
-impl<Mapper: MapDispatch, Policy: MutationPolicy<Mapper>> MapWithPolicy<Mapper, Policy> {
+impl<Mapper: MapDispatch, Policy: MutContextPolicy<Mapper>> MapWithPolicy<Mapper, Policy> {
     /// Combine a dispatcher and a default-recursion policy.
     pub fn new(mapper: Mapper, policy: Policy) -> Self {
         Self {
@@ -262,7 +262,7 @@ impl<Mapper: MapDispatch, Policy: MutationPolicy<Mapper>> MapWithPolicy<Mapper, 
     }
 }
 
-impl<Mapper: MapDispatch, Policy: MutationPolicy<Mapper>> MapDispatch
+impl<Mapper: MapDispatch, Policy: MutContextPolicy<Mapper>> MapDispatch
     for MapWithPolicy<Mapper, Policy>
 {
     fn dispatch_map(&mut self, value: &StructuralView, kind: DefRegionKind) -> Option<MapResult> {
@@ -276,7 +276,7 @@ impl<Mapper: MapDispatch, Policy: MutationPolicy<Mapper>> MapDispatch
 #[doc(hidden)]
 pub enum ByPolicyMap {}
 
-impl<Mapper: MapDispatch, Policy: MutationPolicy<Mapper>> IntoMapper<ByPolicyMap>
+impl<Mapper: MapDispatch, Policy: MutContextPolicy<Mapper>> IntoMapper<ByPolicyMap>
     for MapWithPolicy<Mapper, Policy>
 {
     type Mapper = Self;

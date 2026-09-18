@@ -23,10 +23,11 @@ use tvm_ffi::function::FunctionObj;
 use tvm_ffi::object::ObjectRef;
 use tvm_ffi::{
     dispatch, structural_map, structural_mutate, Any, AnyView, Array, CallbackMutator,
-    DefRegionKind, DefaultMutationPolicy, Error, FieldGetter, Function, InplaceMode, InplaceValue,
-    Map, MapDispatch, MapValue, MapWithPolicy, MutateCallbacks, MutateValue, MutationPolicy,
-    Mutator, Object, ObjectArc, ObjectRefCore, Result, String as FfiString, StructuralMutator,
-    StructuralVarRemap, TypeIndex, Unchanged, UnchangedOr, WalkOrder, RUNTIME_ERROR,
+    DefRegionKind, DefaultMutContextPolicy, Error, FieldGetter, Function, InplaceMode,
+    InplaceValue, Map, MapDispatch, MapValue, MapWithPolicy, MutContextPolicy, MutateCallbacks,
+    MutateValue, Mutator, Object, ObjectArc, ObjectRefCore, Result, String as FfiString,
+    StructuralMutator, StructuralVarRemap, TypeIndex, Unchanged, UnchangedOr, WalkOrder,
+    RUNTIME_ERROR,
 };
 
 struct IncrementIntegers;
@@ -1668,7 +1669,7 @@ impl PolicyState {
 }
 
 struct ArrayPolicy;
-impl MutationPolicy<PolicyState> for ArrayPolicy {
+impl MutContextPolicy<PolicyState> for ArrayPolicy {
     fn default_mutate(
         &self,
         value: MutateValue<'_>,
@@ -1691,7 +1692,7 @@ impl MutationPolicy<PolicyState> for ArrayPolicy {
     }
 }
 struct RecordPolicy;
-impl MutationPolicy<PolicyState> for RecordPolicy {
+impl MutContextPolicy<PolicyState> for RecordPolicy {
     fn default_mutate(
         &self,
         value: MutateValue<'_>,
@@ -1738,7 +1739,7 @@ fn mutation_policies_share_state_and_preserve_callback_order() {
     for order in [WalkOrder::PreOrder, WalkOrder::PostOrder] {
         let mut mapper = MapWithPolicy::new(
             PolicyState::default(),
-            (ArrayPolicy, (RecordPolicy, DefaultMutationPolicy)),
+            (ArrayPolicy, (RecordPolicy, DefaultMutContextPolicy)),
         );
         let output = structural_map(root(), &mut mapper, order).unwrap();
         assert_eq!(i64::try_from(array_item(&output, 1)).unwrap(), 3);
@@ -1798,7 +1799,7 @@ fn mutation_policy_continuations_preserve_ownership_and_markers() {
         mode: InplaceMode,
         retain: bool,
     }
-    impl MutationPolicy<Ownership> for Control {
+    impl MutContextPolicy<Ownership> for Control {
         fn default_mutate(
             &self,
             value: MutateValue<'_>,
@@ -1834,7 +1835,7 @@ fn mutation_policy_continuations_preserve_ownership_and_markers() {
                         },
                         retain: case == 2,
                     },
-                    DefaultMutationPolicy,
+                    DefaultMutContextPolicy,
                 );
                 let state = Ownership {
                     increment,
@@ -1900,7 +1901,7 @@ fn mutation_policy_regions_retargeting_and_error_restore() {
         }
     }
     struct Redirect(DefRegionKind);
-    impl MutationPolicy<Regions> for Redirect {
+    impl MutContextPolicy<Regions> for Redirect {
         fn default_mutate(
             &self,
             value: MutateValue<'_>,
@@ -1927,7 +1928,7 @@ fn mutation_policy_regions_retargeting_and_error_restore() {
         }
     }
     struct Observe;
-    impl MutationPolicy<Regions> for Observe {
+    impl MutContextPolicy<Regions> for Observe {
         fn default_mutate(
             &self,
             value: MutateValue<'_>,
@@ -2008,7 +2009,7 @@ fn mutation_policy_regions_retargeting_and_error_restore() {
 #[test]
 fn mutation_policy_halts_restore_state_and_skip_later_policies() {
     struct Halt(bool);
-    impl MutationPolicy<PolicyState> for Halt {
+    impl MutContextPolicy<PolicyState> for Halt {
         fn default_mutate(
             &self,
             _: MutateValue<'_>,

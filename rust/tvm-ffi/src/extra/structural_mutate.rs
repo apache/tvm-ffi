@@ -72,7 +72,7 @@ pub use super::StructuralView;
 pub use super::StructuralView as MapValue;
 
 mod policy;
-pub use policy::{DefaultMutationPolicy, MapWithPolicy, MutationPolicy};
+pub use policy::{DefaultMutContextPolicy, MapWithPolicy, MutContextPolicy};
 
 /// Result type produced by a structural-map callback.
 #[doc(hidden)]
@@ -1040,7 +1040,7 @@ macro_rules! impl_mutate_chain_link {
 impl_callback_chain_tuple_arities!(impl_mutate_chain_link);
 
 /// A reusable typed-dispatch or callback mutator with shared user state.
-pub struct MutateCallbacks<State, Link, Marker, Policy = DefaultMutationPolicy> {
+pub struct MutateCallbacks<State, Link, Marker, Policy = DefaultMutContextPolicy> {
     policy: Option<Rc<Policy>>,
     state: State,
     callbacks: Rc<Link>,
@@ -1064,7 +1064,7 @@ where
 
 impl<State, Link, Marker, Policy> MutateCallbacks<State, Link, Marker, Policy> {
     /// Customize default descent while sharing the callback state.
-    pub fn with_policy<P: MutationPolicy<State>>(
+    pub fn with_policy<P: MutContextPolicy<State>>(
         self,
         policy: P,
     ) -> MutateCallbacks<State, Link, Marker, P> {
@@ -1160,7 +1160,7 @@ pub trait MapDispatch: Sized {
     fn map_root(&mut self, root: Any, order: WalkOrder) -> Result<Any> {
         run_structural_mutator(
             root,
-            &mut NativeMapper::<_, DefaultMutationPolicy> {
+            &mut NativeMapper::<_, DefaultMutContextPolicy> {
                 dispatch: self,
                 order,
                 policy: None,
@@ -1942,7 +1942,7 @@ where
 
 impl<State, Link, Marker, Policy> StructuralMutator for MutateCallbacks<State, Link, Marker, Policy>
 where
-    Policy: MutationPolicy<State>,
+    Policy: MutContextPolicy<State>,
     Link: MutateChainLink<State, Marker>,
     Link::Strategy: MutateCallbackStrategy<State, Link, Marker>,
 {
@@ -2134,7 +2134,7 @@ struct NativeMapper<'a, D, Policy> {
     remap: StructuralVarRemap,
 }
 
-impl<D: MapDispatch, Policy: MutationPolicy<D>> NativeMapper<'_, D, Policy> {
+impl<D: MapDispatch, Policy: MutContextPolicy<D>> NativeMapper<'_, D, Policy> {
     fn map_raw(
         &mut self,
         raw: TVMFFIAny,
@@ -2763,7 +2763,7 @@ fn def_region_from_raw(kind: i32) -> Result<DefRegionKind> {
     }
 }
 
-impl<D: MapDispatch, Policy: MutationPolicy<D>> MutationDriver for NativeMapper<'_, D, Policy> {
+impl<D: MapDispatch, Policy: MutContextPolicy<D>> MutationDriver for NativeMapper<'_, D, Policy> {
     fn dispatch_raw(
         &mut self,
         raw: TVMFFIAny,
