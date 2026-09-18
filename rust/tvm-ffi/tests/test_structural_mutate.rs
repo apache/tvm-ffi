@@ -22,10 +22,10 @@ use tvm_ffi::collections::map::MapObj;
 use tvm_ffi::function::FunctionObj;
 use tvm_ffi::object::ObjectRef;
 use tvm_ffi::{
-    dispatch, structural_map, structural_mutate, Any, AnyView, Array, CallbackMutator,
-    DefRegionKind, DefaultMutContextPolicy, Error, FieldGetter, Function, InplaceMode,
-    InplaceValue, IntoMapper, Map, MapDispatch, MapValue, MapWithContextPolicy, MutContextPolicy,
-    MutateCallbacks, MutateValue, Mutator, Object, ObjectArc, ObjectRefCore, Result,
+    dispatch, structural_map, structural_mutate, Any, AnyView, Array, DefRegionKind,
+    DefaultMutContextPolicy, Error, FieldGetter, Function, InplaceMode, InplaceValue, IntoMapper,
+    Map, MapDispatch, MapValue, MapWithContextPolicy, MutContextPolicy, MutateCallbacks,
+    MutateContext, MutateValue, Mutator, Object, ObjectArc, ObjectRefCore, Result,
     String as FfiString, StructuralMutator, StructuralVarRemap, TypeIndex, Unchanged, UnchangedOr,
     WalkOrder, RUNTIME_ERROR,
 };
@@ -410,12 +410,12 @@ fn owned_entry_mode_is_forwarded_by_generated_and_closure_callbacks() {
         let result = structural_mutate(
             true,
             (
-                |_: bool, ctx: &mut CallbackMutator| {
+                |_: bool, ctx: &mut MutateContext<'_>| {
                     let child = Array::new(vec![1_i64]);
                     pointer.set(array_pointer(&child) as usize);
                     ctx.maybe_inplace_mutate_with_mode(child, DefRegionKind::Pattern, mode)
                 },
-                |value: i64, ctx: &mut CallbackMutator| {
+                |value: i64, ctx: &mut MutateContext<'_>| {
                     assert_eq!(ctx.def_region_kind(), DefRegionKind::Pattern);
                     value + 1
                 },
@@ -499,11 +499,11 @@ fn consuming_callbacks_forward_permissions_without_temporary_owners() {
                 structural_mutate(root, &mut state).unwrap()
             } else {
                 let miss = |_: MutateValue<'_, FfiString>,
-                            _: &mut CallbackMutator<Forward>|
+                            _: &mut MutateContext<'_, Forward>|
                  -> Any { panic!("typed miss must continue") };
-                let increment = |value: i64, _: &mut CallbackMutator<Forward>| value + 1;
+                let increment = |value: i64, _: &mut MutateContext<'_, Forward>| value + 1;
                 let descend = |value: MutateValue<'_, Array<Any>>,
-                               ctx: &mut CallbackMutator<Forward>| {
+                               ctx: &mut MutateContext<'_, Forward>| {
                     assert_eq!(value.inplace_mode(), ctx.inplace_mode());
                     ctx.state_mut().observe(&value);
                     let requested = ctx.state().requested;
@@ -579,7 +579,7 @@ fn consuming_default_descent_transfers_between_contexts_without_node_borrows() {
             let mut callbacks = MutateCallbacks::new(
                 inner,
                 (
-                    |_: bool, ctx: &mut CallbackMutator<Inner<'_>>| -> Result<Any> {
+                    |_: bool, ctx: &mut MutateContext<'_, Inner<'_>>| -> Result<Any> {
                         let value = ctx.state_mut().value.take().unwrap();
                         let result = if ctx.state().preserve_unchanged {
                             ctx.default_maybe_inplace_mutate_result(value)?.into()
@@ -589,7 +589,7 @@ fn consuming_default_descent_transfers_between_contexts_without_node_borrows() {
                         ctx.state_mut().result = result;
                         Ok(Any::new())
                     },
-                    |value: i64, _: &mut CallbackMutator<Inner<'_>>| value + 1,
+                    |value: i64, _: &mut MutateContext<'_, Inner<'_>>| value + 1,
                 ),
             );
             structural_mutate(true, &mut callbacks)?;
@@ -618,7 +618,7 @@ fn consuming_default_descent_transfers_between_contexts_without_node_borrows() {
                 let result = if generated {
                     structural_mutate(root, &mut Outer { preserve, retain })
                 } else {
-                    structural_mutate(root, |value: MutateValue<'_>, _: &mut CallbackMutator| {
+                    structural_mutate(root, |value: MutateValue<'_>, _: &mut MutateContext<'_>| {
                         transfer(value, false, preserve, retain)
                     })
                 }
@@ -638,7 +638,7 @@ fn consuming_default_descent_preserves_unchanged_and_propagates_errors() {
         let pointer = array_pointer(&root);
         let result = structural_mutate(
             root,
-            |value: MutateValue<'_>, ctx: &mut CallbackMutator| -> Result<UnchangedOr<Any>> {
+            |value: MutateValue<'_>, ctx: &mut MutateContext<'_>| -> Result<UnchangedOr<Any>> {
                 if value.cast::<i64>().is_some() {
                     return if fail {
                         Err(Error::new(RUNTIME_ERROR, "child failed", ""))
@@ -751,7 +751,7 @@ fn callback_errors_preserve_message_and_add_object_context() {
 
     let error = match structural_mutate(
         Array::new(vec![1i64]),
-        |_integer: i64, _mutator: &mut CallbackMutator| -> Result<i64> {
+        |_integer: i64, _mutator: &mut MutateContext<'_>| -> Result<i64> {
             Err(Error::new(
                 RUNTIME_ERROR,
                 "callback mutator failed",
@@ -1151,7 +1151,7 @@ fn callbacks_return_values_convertible_into_any() {
 
     let mutated = structural_mutate(
         Array::new(vec![1i64, 2]),
-        |integer: i64, _mutator: &mut CallbackMutator| integer * 2,
+        |integer: i64, _mutator: &mut MutateContext<'_>| integer * 2,
     )
     .and_then(Array::<i64>::try_from)
     .unwrap();
@@ -1162,7 +1162,7 @@ fn callbacks_return_values_convertible_into_any() {
 fn recursive_mutate_returns_unchanged_or_a_replacement() {
     fn clamp_negative_integers(
         value: &MapValue,
-        mutator: &mut CallbackMutator,
+        mutator: &mut MutateContext<'_>,
     ) -> Result<UnchangedOr<Any>> {
         if let Some(integer) = value.cast::<i64>() {
             if integer >= 0 {
@@ -1381,7 +1381,7 @@ fn map_keys_are_anchors_and_object_leaves_are_preserved() {
 fn callback_mutate_defaults_unmatched_values_and_preserves_root_permit() {
     let root = Array::new(vec![1i64, 2]);
     let root_pointer = array_pointer(&root);
-    let mutated = structural_mutate(root, |value: i64, _mutator: &mut CallbackMutator| {
+    let mutated = structural_mutate(root, |value: i64, _mutator: &mut MutateContext<'_>| {
         Any::from(value + 1)
     })
     .and_then(Array::<i64>::try_from)
@@ -1396,14 +1396,17 @@ struct CallbackMutateStats {
     defaults: usize,
 }
 
-fn stateful_mutate_integer(value: i64, mutator: &mut CallbackMutator<CallbackMutateStats>) -> Any {
+fn stateful_mutate_integer(
+    value: i64,
+    mutator: &mut MutateContext<'_, CallbackMutateStats>,
+) -> Any {
     mutator.state_mut().integers.push(value);
     Any::from(value + 1)
 }
 
 fn stateful_mutate_default(
     value: &tvm_ffi::StructuralView,
-    mutator: &mut CallbackMutator<CallbackMutateStats>,
+    mutator: &mut MutateContext<'_, CallbackMutateStats>,
 ) -> Result<Any> {
     mutator.state_mut().defaults += 1;
     mutator.default_mutate(value)
@@ -1442,7 +1445,7 @@ struct CallbackMutateDepth {
 
 fn stateful_mutate_recursive(
     value: &MapValue,
-    mutator: &mut CallbackMutator<CallbackMutateDepth>,
+    mutator: &mut MutateContext<'_, CallbackMutateDepth>,
 ) -> Result<Any> {
     {
         let state = mutator.state_mut();
@@ -1484,8 +1487,8 @@ fn callback_mutate_explicit_default_is_repeatable_copy_path() {
     let mutated = structural_mutate(
         root,
         (
-            |value: i64, _mutator: &mut CallbackMutator| Any::from(value + 1),
-            |value: &MapValue, mutator: &mut CallbackMutator| -> Result<Any> {
+            |value: i64, _mutator: &mut MutateContext<'_>| Any::from(value + 1),
+            |value: &MapValue, mutator: &mut MutateContext<'_>| -> Result<Any> {
                 defaults.set(defaults.get() + 1);
                 let first = mutator.default_mutate(value)?;
                 let second = mutator.default_mutate(value)?;
@@ -1507,8 +1510,10 @@ fn callback_mutate_match_is_final_and_same_fn_can_reenter() {
     let mutated = structural_mutate(
         Array::new(vec![1i64]),
         (
-            |_array: Array<i64>, _mutator: &mut CallbackMutator| Any::from(Array::new(vec![10i64])),
-            |value: i64, _mutator: &mut CallbackMutator| {
+            |_array: Array<i64>, _mutator: &mut MutateContext<'_>| {
+                Any::from(Array::new(vec![10i64]))
+            },
+            |value: i64, _mutator: &mut MutateContext<'_>| {
                 integer_calls.set(integer_calls.get() + 1);
                 Any::from(value + 1)
             },
@@ -1522,7 +1527,7 @@ fn callback_mutate_match_is_final_and_same_fn_can_reenter() {
     let calls = Cell::new(0);
     let mutated = structural_mutate(
         Array::new(vec![1i64, 2]),
-        |value: &MapValue, mutator: &mut CallbackMutator| {
+        |value: &MapValue, mutator: &mut MutateContext<'_>| {
             calls.set(calls.get() + 1);
             mutator.default_mutate(value)
         },
@@ -1547,10 +1552,10 @@ fn callback_mutate_supports_node_links_nested_tuples_and_reflection() {
         root,
         (
             (
-                |_value: bool, _mutator: &mut CallbackMutator| Any::new(),
-                |_node: &FunctionObj, _mutator: &mut CallbackMutator| Any::from(7i64),
+                |_value: bool, _mutator: &mut MutateContext<'_>| Any::new(),
+                |_node: &FunctionObj, _mutator: &mut MutateContext<'_>| Any::from(7i64),
             ),
-            |value: i64, mutator: &mut CallbackMutator| {
+            |value: i64, mutator: &mut MutateContext<'_>| {
                 regions.borrow_mut().push(mutator.def_region_kind());
                 Any::from(value + 1)
             },
@@ -1576,8 +1581,8 @@ fn callback_mutate_distinguishes_borrowed_and_owned_children() {
     let mutated = structural_mutate(
         true,
         (
-            |_value: bool, mutator: &mut CallbackMutator| mutator.mutate(&borrowed_child),
-            |value: i64, _mutator: &mut CallbackMutator| Any::from(value + 1),
+            |_value: bool, mutator: &mut MutateContext<'_>| mutator.mutate(&borrowed_child),
+            |value: i64, _mutator: &mut MutateContext<'_>| Any::from(value + 1),
         ),
     )
     .and_then(Array::<i64>::try_from)
@@ -1590,12 +1595,12 @@ fn callback_mutate_distinguishes_borrowed_and_owned_children() {
     let mutated = structural_mutate(
         true,
         (
-            |_value: bool, mutator: &mut CallbackMutator| {
+            |_value: bool, mutator: &mut MutateContext<'_>| {
                 let child = Array::new(vec![1i64]);
                 owned_pointer.set(array_pointer(&child) as usize);
                 mutator.maybe_inplace_mutate(child)
             },
-            |value: i64, _mutator: &mut CallbackMutator| Any::from(value + 1),
+            |value: i64, _mutator: &mut MutateContext<'_>| Any::from(value + 1),
         ),
     )
     .and_then(Array::<i64>::try_from)
@@ -1608,11 +1613,11 @@ fn callback_mutate_distinguishes_borrowed_and_owned_children() {
 fn nested_callback_mutate_restores_the_outer_active_mutator() {
     let mutated = structural_mutate(
         1i64,
-        |value: i64, mutator: &mut CallbackMutator| -> Result<Any> {
+        |value: i64, mutator: &mut MutateContext<'_>| -> Result<Any> {
             if value != 1 {
                 return Ok(Any::from(value + 1));
             }
-            let inner = structural_mutate(2i64, |value: i64, _mutator: &mut CallbackMutator| {
+            let inner = structural_mutate(2i64, |value: i64, _mutator: &mut MutateContext<'_>| {
                 Any::from(value + 10)
             })?;
             assert_eq!(i64::try_from(inner).unwrap(), 12);
@@ -1629,7 +1634,7 @@ fn callback_mutate_panics_resume_and_leave_the_next_run_usable() {
     let panic = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         structural_mutate(
             Array::new(vec![1i64]),
-            |_value: i64, _mutator: &mut CallbackMutator| -> Any {
+            |_value: i64, _mutator: &mut MutateContext<'_>| -> Any {
                 panic!("callback mutator panic")
             },
         )
@@ -1644,7 +1649,7 @@ fn callback_mutate_panics_resume_and_leave_the_next_run_usable() {
 
     let mutated = structural_mutate(
         Array::new(vec![1i64]),
-        |value: i64, _mutator: &mut CallbackMutator| Any::from(value + 1),
+        |value: i64, _mutator: &mut MutateContext<'_>| Any::from(value + 1),
     )
     .and_then(Array::<i64>::try_from)
     .unwrap();
@@ -1673,7 +1678,7 @@ impl MutContextPolicy<PolicyState> for ArrayPolicy {
     fn default_mutate(
         &self,
         value: MutateValue<'_>,
-        ctx: &mut CallbackMutator<PolicyState>,
+        ctx: &mut MutateContext<'_, PolicyState>,
     ) -> Result<UnchangedOr<Any>> {
         if value
             .as_node::<tvm_ffi::collections::array::ArrayObj>()
@@ -1696,7 +1701,7 @@ impl MutContextPolicy<PolicyState> for RecordPolicy {
     fn default_mutate(
         &self,
         value: MutateValue<'_>,
-        ctx: &mut CallbackMutator<PolicyState>,
+        ctx: &mut MutateContext<'_, PolicyState>,
     ) -> Result<UnchangedOr<Any>> {
         if value
             .as_node::<tvm_ffi::collections::array::ArrayObj>()
@@ -1760,12 +1765,12 @@ fn mutation_policies_share_state_and_preserve_callback_order() {
     let mut mutator = MutateCallbacks::new(
         PolicyState::default(),
         (
-            |x: i64, ctx: &mut CallbackMutator<PolicyState>| {
+            |x: i64, ctx: &mut MutateContext<'_, PolicyState>| {
                 let depth = ctx.state().depth;
                 ctx.state_mut().events.push(("integer", depth));
                 x + 1
             },
-            |value: MutateValue<'_>, ctx: &mut CallbackMutator<PolicyState>| {
+            |value: MutateValue<'_>, ctx: &mut MutateContext<'_, PolicyState>| {
                 let depth = ctx.state().depth;
                 ctx.state_mut().events.push(("callback", depth));
                 ctx.default_maybe_inplace_mutate_result(value)
@@ -1786,7 +1791,7 @@ fn map_policy_entries_preserve_descent_and_callback_composition() {
         fn default_mutate(
             &self,
             _: MutateValue<'_>,
-            _: &mut CallbackMutator<State>,
+            _: &mut MutateContext<'_, State>,
         ) -> Result<UnchangedOr<Any>> {
             Ok(UnchangedOr::unchanged())
         }
@@ -1846,7 +1851,7 @@ fn mutation_policy_continuations_preserve_ownership_and_markers() {
         fn default_mutate(
             &self,
             value: MutateValue<'_>,
-            ctx: &mut CallbackMutator<Ownership>,
+            ctx: &mut MutateContext<'_, Ownership>,
         ) -> Result<UnchangedOr<Any>> {
             let array = value
                 .as_node::<tvm_ffi::collections::array::ArrayObj>()
@@ -1901,10 +1906,10 @@ fn mutation_policy_continuations_preserve_ownership_and_markers() {
                     let mut mutator = MutateCallbacks::new(
                         state,
                         (
-                            |x: i64, ctx: &mut CallbackMutator<Ownership>| {
+                            |x: i64, ctx: &mut MutateContext<'_, Ownership>| {
                                 ctx.state_mut().map_integer(x)
                             },
-                            |value: MutateValue<'_>, ctx: &mut CallbackMutator<Ownership>| {
+                            |value: MutateValue<'_>, ctx: &mut MutateContext<'_, Ownership>| {
                                 ctx.default_maybe_inplace_mutate_result(value)
                             },
                         ),
@@ -1948,7 +1953,7 @@ fn mutation_policy_regions_retargeting_and_error_restore() {
         fn default_mutate(
             &self,
             value: MutateValue<'_>,
-            ctx: &mut CallbackMutator<Regions>,
+            ctx: &mut MutateContext<'_, Regions>,
         ) -> Result<UnchangedOr<Any>> {
             if value.cast::<bool>() == Some(false) {
                 // Bypass this container's callback, but enter the next policy and redispatch its children.
@@ -1975,7 +1980,7 @@ fn mutation_policy_regions_retargeting_and_error_restore() {
         fn default_mutate(
             &self,
             value: MutateValue<'_>,
-            ctx: &mut CallbackMutator<Regions>,
+            ctx: &mut MutateContext<'_, Regions>,
         ) -> Result<UnchangedOr<Any>> {
             if value
                 .as_node::<tvm_ffi::collections::array::ArrayObj>()
@@ -2018,7 +2023,7 @@ fn mutation_policy_regions_retargeting_and_error_restore() {
         }
         let mut mutator = MutateCallbacks::new(
             Regions::default(),
-            |value: MutateValue<'_>, ctx: &mut CallbackMutator<Regions>| {
+            |value: MutateValue<'_>, ctx: &mut MutateContext<'_, Regions>| {
                 if let Some(x) = value.cast::<i64>() {
                     let kind = ctx.def_region_kind();
                     ctx.state_mut().0.push((x, kind));
@@ -2057,7 +2062,7 @@ fn mutation_policy_halts_restore_state_and_skip_later_policies() {
         fn default_mutate(
             &self,
             _: MutateValue<'_>,
-            _: &mut CallbackMutator<PolicyState>,
+            _: &mut MutateContext<'_, PolicyState>,
         ) -> Result<UnchangedOr<Any>> {
             if self.0 {
                 Err(Error::new(RUNTIME_ERROR, "stop descent", ""))
@@ -2086,7 +2091,7 @@ fn mutation_policy_halts_restore_state_and_skip_later_policies() {
         }
         let mut mutator = MutateCallbacks::new(
             PolicyState::default(),
-            |x: i64, _: &mut CallbackMutator<PolicyState>| x + 1,
+            |x: i64, _: &mut MutateContext<'_, PolicyState>| x + 1,
         )
         .with_policy((ArrayPolicy, (Halt(fail), RecordPolicy)));
         assert_eq!(

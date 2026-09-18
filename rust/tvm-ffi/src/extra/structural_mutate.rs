@@ -154,8 +154,8 @@ impl InplaceMode {
 ///
 /// A node borrow cannot survive consumption of the handle:
 /// ```compile_fail
-/// use tvm_ffi::{CallbackMutator, MutateValue};
-/// fn invalid(value: MutateValue<'_>, ctx: &mut CallbackMutator) {
+/// use tvm_ffi::{MutateContext, MutateValue};
+/// fn invalid(value: MutateValue<'_>, ctx: &mut MutateContext<'_>) {
 ///     let node = value.as_node::<tvm_ffi::collections::array::ArrayObj>().unwrap();
 ///     ctx.default_maybe_inplace_mutate(value).unwrap();
 ///     println!("{}", node.size);
@@ -165,11 +165,11 @@ impl InplaceMode {
 /// Moving the handle into a nested callback cannot bypass that borrow:
 /// ```compile_fail
 /// use std::cell::RefCell;
-/// use tvm_ffi::{structural_mutate, CallbackMutator, MutateValue};
+/// use tvm_ffi::{structural_mutate, MutateContext, MutateValue};
 /// fn invalid(value: MutateValue<'_>) {
 ///     let node = value.as_node::<tvm_ffi::collections::array::ArrayObj>().unwrap();
 ///     let pending = RefCell::new(Some(value));
-///     structural_mutate(true, |_: bool, inner: &mut CallbackMutator| {
+///     structural_mutate(true, |_: bool, inner: &mut MutateContext<'_>| {
 ///         inner.default_maybe_inplace_mutate(pending.borrow_mut().take().unwrap())
 ///     }).unwrap();
 ///     println!("{}", node.size);
@@ -257,26 +257,19 @@ impl<T> Deref for MutateValue<'_, T> {
     }
 }
 
-/// State and recursive operations available to a callback-chain mutation.
+/// State and recursive operations shared by mutation callbacks and context policies.
 ///
 /// A matched callback owns mutation of its value. Recursive operations
 /// reborrow the mutator, so mutable state cannot remain borrowed across them.
 /// The context does not store a node: inspect the callback argument and pass
 /// it explicitly to default recursion.
-pub struct MutateContext<'a, State, Driver: ?Sized = dyn MutateContextDriver<State> + 'a> {
+pub struct MutateContext<'a, State = (), Driver: ?Sized = dyn MutateContextDriver<State> + 'a> {
     driver: &'a mut Driver,
     def_region_kind: DefRegionKind,
     inplace_mode: InplaceMode,
     _state: PhantomData<fn() -> State>,
     _not_send_sync: PhantomData<Rc<()>>,
 }
-
-/// Recursive mutation operations passed to closure callback chains.
-///
-/// Typed `#[dispatch(mutate)]` implementations use [`Mutator`] instead and
-/// keep their mutable pass state directly on the dispatch object.
-pub type CallbackMutator<'a, State = (), Driver = dyn MutateContextDriver<State> + 'a> =
-    MutateContext<'a, State, Driver>;
 
 /// Recursion control passed to a typed `#[dispatch(mutate)]` handler.
 ///
@@ -751,7 +744,7 @@ where
 /// remains available for closure callback chains with separate state.
 #[diagnostic::on_unimplemented(
     message = "`{Self}` is not a supported `structural_mutate` mutator",
-    note = "accepted mutators: `&mut U` where `U: StructuralMutator`; a generated `MutateDispatch`; an `Fn` callback over an FFI value type `T`, `&N` of an object node type, or `&StructuralView`, or a consuming `MutateValue<T>`, followed by `&mut CallbackMutator<State>`; or a tuple of up to 12 such callbacks (tuples may nest)",
+    note = "accepted mutators: `&mut U` where `U: StructuralMutator`; a generated `MutateDispatch`; an `Fn` callback over an FFI value type `T`, `&N` of an object node type, or `&StructuralView`, or a consuming `MutateValue<T>`, followed by `&mut MutateContext<'_, State>`; or a tuple of up to 12 such callbacks (tuples may nest)",
     note = "callback arguments need explicit type annotations; use `MutateCallbacks::new(state, callbacks)` for ordinary mutable callback state"
 )]
 pub trait IntoMutator<Marker> {
@@ -1641,11 +1634,7 @@ pub trait StructuralMutator: Sized {
     }
 
     #[doc(hidden)]
-    fn dispatch_default_mutate(
-        &mut self,
-        value: MutateValue<'_>,
-        kind: DefRegionKind,
-    ) -> Result<Any> {
+    fn on_default_mutate(&mut self, value: MutateValue<'_>, kind: DefRegionKind) -> Result<Any> {
         default_mutate_driver(
             self,
             value.value.raw(),
@@ -1989,11 +1978,7 @@ where
         }
     }
 
-    fn dispatch_default_mutate(
-        &mut self,
-        value: MutateValue<'_>,
-        kind: DefRegionKind,
-    ) -> Result<Any> {
+    fn on_default_mutate(&mut self, value: MutateValue<'_>, kind: DefRegionKind) -> Result<Any> {
         match self.policy.clone() {
             Some(policy) => policy::mutate_with_policy(
                 &mut policy::MutationDescent { driver: self },
@@ -3118,7 +3103,7 @@ fn user_default_mutate<U: StructuralMutator>(
 ) -> Result<Any> {
     with_mutation_region(def_region_kind, |kind| {
         let value = StructuralView::from_raw(raw);
-        mutator.dispatch_default_mutate(MutateValue::new(&value, permit.inplace_mode(raw)), kind)
+        mutator.on_default_mutate(MutateValue::new(&value, permit.inplace_mode(raw)), kind)
     })
 }
 

@@ -49,8 +49,8 @@ pub use crate::error::{
 };
 pub use crate::extra::module::Module;
 pub use crate::extra::structural_mutate::{
-    structural_map, structural_mutate, CallbackMutator, DefaultMutContextPolicy, InplaceMode,
-    InplaceValue, IntoMapResult, IntoMapper, IntoMutator, MapChainLink, MapDispatch, MapValue,
+    structural_map, structural_mutate, DefaultMutContextPolicy, InplaceMode, InplaceValue,
+    IntoMapResult, IntoMapper, IntoMutator, MapChainLink, MapDispatch, MapValue,
     MapWithContextPolicy, MutContextPolicy, MutateCallbacks, MutateChainLink, MutateContext,
     MutateDispatch, MutateValue, Mutator, StructuralMutator, StructuralVarRemap,
 };

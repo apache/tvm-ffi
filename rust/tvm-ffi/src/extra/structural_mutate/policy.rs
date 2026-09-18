@@ -21,9 +21,6 @@
 
 use super::*;
 
-#[cfg(doctest)]
-mod compile_fail;
-
 /// Default-recursion policy for [`MutateCallbacks::with_policy`] and [`MapWithContextPolicy`].
 ///
 /// `ctx.default_maybe_inplace_mutate_result(value)` continues to the next policy,

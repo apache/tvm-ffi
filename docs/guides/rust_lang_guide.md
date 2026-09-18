@@ -516,12 +516,12 @@ owning-value helpers and top-level functions resolve the marker to the
 original value.
 
 `structural_mutate` accepts typed callback chains in addition to a
-`StructuralMutator`. Closure callbacks receive a `CallbackMutator`;
+`StructuralMutator`. Closure callbacks receive a `MutateContext`;
 `MutateCallbacks` adds state shared by that callback chain:
 
 ```rust
 use tvm_ffi::{
-    structural_mutate, Array, CallbackMutator, MutateValue, MutateCallbacks,
+    structural_mutate, Array, MutateCallbacks, MutateContext, MutateValue,
 };
 
 #[derive(Default)]
@@ -532,11 +532,11 @@ struct Stats {
 let mut mutator = MutateCallbacks::new(
     Stats::default(),
     (
-        |value: i64, mutator: &mut CallbackMutator<Stats>| {
+        |value: i64, mutator: &mut MutateContext<'_, Stats>| {
             mutator.state_mut().integers += 1;
             value + 1
         },
-        |value: MutateValue<'_>, mutator: &mut CallbackMutator<Stats>| {
+        |value: MutateValue<'_>, mutator: &mut MutateContext<'_, Stats>| {
             mutator.default_maybe_inplace_mutate(value)
         },
     ),
@@ -547,7 +547,7 @@ assert_eq!(mutated.iter().collect::<Vec<_>>(), vec![2, 3]);
 assert_eq!(mutator.state().integers, 2);
 ```
 
-`CallbackMutator::mutate` uses the copy path for a borrowed value, while
+`MutateContext::mutate` uses the copy path for a borrowed value, while
 `maybe_inplace_mutate` preserves the reuse opportunity of an owned value.
 Closure callbacks are `Fn`; mutable data belongs in the callback state.
 
