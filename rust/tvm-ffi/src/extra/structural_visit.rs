@@ -225,11 +225,6 @@ type NativeResult = std::result::Result<(), NativeHalt>;
 mod policy;
 pub use policy::{ContextPolicy, DefaultContextPolicy, WalkWithPolicy};
 
-/// Compatibility name for [`ContextPolicy`].
-pub use policy::ContextPolicy as VisitPolicy;
-/// Compatibility name for [`DefaultContextPolicy`].
-pub use policy::DefaultContextPolicy as DefaultVisitPolicy;
-
 /// State and recursive operations available to a visit callback.
 ///
 /// A matched callback owns traversal of its value. Recursive operations
