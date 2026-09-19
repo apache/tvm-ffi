@@ -149,34 +149,12 @@ class VisitErrorAccessPathFinder {
       // Primitive — cannot hold an ObjectRef chain entry.
       return;
     }
-    switch (type_index) {
-      case TypeIndex::kTVMFFIArray:
-        this->VisitSequence(
-            details::AnyUnsafe::MoveFromAnyAfterCheck<Array<Any>>(std::move(value)));
-        break;
-      case TypeIndex::kTVMFFIList:
-        this->VisitSequence(details::AnyUnsafe::MoveFromAnyAfterCheck<List<Any>>(std::move(value)));
-        break;
-      case TypeIndex::kTVMFFIMap:
-        this->VisitMap(details::AnyUnsafe::MoveFromAnyAfterCheck<Map<Any, Any>>(std::move(value)));
-        break;
-      case TypeIndex::kTVMFFIDict:
-        this->VisitMap(details::AnyUnsafe::MoveFromAnyAfterCheck<Dict<Any, Any>>(std::move(value)));
-        break;
-      default:
-        if (type_index >= TypeIndex::kTVMFFIStaticObjectBegin) {
-          ObjectRef obj = details::AnyUnsafe::MoveFromAnyAfterCheck<ObjectRef>(std::move(value));
-          this->VisitObject(obj);
-        }
-        break;
-    }
+    this->VisitObject(details::AnyUnsafe::MoveFromAnyAfterCheck<ObjectRef>(std::move(value)));
   }
 
   void VisitObject(const ObjectRef& node) {
     // Defensive: error path; never throw.
     if (!node.defined()) return;
-    const TVMFFITypeInfo* type_info = TVMFFIGetTypeInfo(node->type_index());
-    if (type_info == nullptr || type_info->metadata == nullptr) return;
 
     bool matched_step = num_pattern_step_matched_ < records_.size() &&
                         node.same_as(records_[records_.size() - 1 - num_pattern_step_matched_]);
@@ -190,7 +168,28 @@ class VisitErrorAccessPathFinder {
       }
     }
 
-    this->VisitChildrenFields(node, type_info);
+    // Match containers before descending, just like reflected objects.
+    switch (node->type_index()) {
+      case TypeIndex::kTVMFFIArray:
+        this->VisitSequence(node.as_or_throw<Array<Any>>());
+        break;
+      case TypeIndex::kTVMFFIList:
+        this->VisitSequence(node.as_or_throw<List<Any>>());
+        break;
+      case TypeIndex::kTVMFFIMap:
+        this->VisitMap(node.as_or_throw<Map<Any, Any>>());
+        break;
+      case TypeIndex::kTVMFFIDict:
+        this->VisitMap(node.as_or_throw<Dict<Any, Any>>());
+        break;
+      default: {
+        const TVMFFITypeInfo* type_info = TVMFFIGetTypeInfo(node->type_index());
+        if (type_info != nullptr && type_info->metadata != nullptr) {
+          this->VisitChildrenFields(node, type_info);
+        }
+        break;
+      }
+    }
 
     if (matched_step) --num_pattern_step_matched_;
   }

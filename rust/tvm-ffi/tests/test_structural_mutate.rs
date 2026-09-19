@@ -744,12 +744,15 @@ fn reflected_object_without_shallow_copy_is_rejected_even_when_unchanged() {
 #[test]
 fn callback_errors_preserve_message_and_add_object_context() {
     let child = reflected_object();
+    let container = Any::from(Array::new(vec![child.clone()]));
     let root = call_global(
         "ffi.MakeObjectFromPackedArgs",
         &[
-            FfiString::from("testing.TestObjectPtrHolder").into(),
-            FfiString::from("value").into(),
-            child.clone(),
+            FfiString::from("testing.TestDeepCopyEdges").into(),
+            FfiString::from("v_any").into(),
+            container.clone(),
+            FfiString::from("v_obj").into(),
+            Any::default(),
         ],
     );
     let payload = ObjectRef::try_from(Any::from(Array::new(vec![7i64]))).unwrap();
@@ -824,6 +827,10 @@ fn callback_errors_preserve_message_and_add_object_context() {
             "reverse_visit_pattern",
         ));
         let size = i64::try_from(call_global("ffi.ListSize", &[records.clone()])).unwrap();
+        assert!((0..size).any(|i| {
+            let node = call_global("ffi.ListGetItem", &[records.clone(), i.into()]);
+            any_object_pointer(&node) == any_object_pointer(&container)
+        }));
         let outermost = call_global("ffi.ListGetItem", &[records, (size - 1).into()]);
         assert_eq!(any_object_pointer(&outermost), any_object_pointer(&root));
         let paths = call_global(
@@ -837,7 +844,7 @@ fn callback_errors_preserve_message_and_add_object_context() {
                 .try_as::<FfiString>()
                 .unwrap()
                 .as_str(),
-            "<root>.value"
+            "<root>.v_any[0]"
         );
     }
     let records = Any::from(reflected_field::<ObjectRef>(
