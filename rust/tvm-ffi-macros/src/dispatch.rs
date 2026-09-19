@@ -195,7 +195,7 @@ fn expand(item_impl: &ItemImpl, mode: DispatchMode) -> syn::Result<TokenStream2>
                     &mut self,
                     value: &#tvm_ffi::StructuralView,
                     def_region_kind: #tvm_ffi::extra::structural_visit::DefRegionKind,
-                ) -> Option<#tvm_ffi::extra::structural_visit::WalkCallbackResult> {
+                ) -> Option<#tvm_ffi::Result<#tvm_ffi::WalkResult>> {
                     #(#links)*
                     None
                 }

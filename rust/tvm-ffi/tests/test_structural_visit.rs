@@ -206,6 +206,11 @@ fn policy_continuation_scopes_regions_and_restores_after_halts() {
             let (result, state) = if let Some(order) = order {
                 let mut walker = WalkWithContextPolicy::new(state, policies);
                 let result = structural_walk(&root, &mut walker, order);
+                // Reuse the same borrowed walker after completion, interruption,
+                // or error. The new root must begin outside every prior region.
+                assert!(structural_walk(&99_i64, &mut walker, order)
+                    .unwrap()
+                    .is_none());
                 (result, walker.into_state())
             } else {
                 let mut visitor =
@@ -235,6 +240,9 @@ fn policy_continuation_scopes_regions_and_restores_after_halts() {
             }
             // Unwind the innermost, middle, and outer scopes.
             expected.extend([(2, Pattern), (3, Simple), (4, Use)]);
+            if order.is_some() {
+                expected.push((99, Use));
+            }
             assert_eq!(state.seen, expected);
         }
     }

@@ -945,8 +945,6 @@ macro_rules! impl_mutate_chain_link {
         where
             $($F: MutateChainLink<State, $M>,)+
         {
-
-
             fn try_mutate(
                 &self,
                 value: &mut Option<MutateValue<'_>>,
@@ -2076,7 +2074,9 @@ impl<D: MapDispatch, Policy: MutContextPolicy<D>> NativeMapper<'_, D, Policy> {
                     *mapped.as_raw_ffi_any()
                 };
                 let value = StructuralView::from_raw(mapped_raw);
+                // Keep child rewrites when the callback leaves its input unchanged.
                 match self.dispatch.dispatch_map(&value, def_region_kind) {
+                    Some(Ok(result)) if is_unchanged(&result) => Ok(mapped),
                     Some(result) => result,
                     None => Ok(mapped),
                 }

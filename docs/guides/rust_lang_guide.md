@@ -513,7 +513,8 @@ not returned on error.
 
 Callbacks can also return `Unchanged` or `UnchangedOr<T>`, optionally wrapped
 in `Result`. A pre-order map still maps the original value's children when
-a callback returns `Unchanged`. Use `mutate_result` and
+a callback returns `Unchanged`; a post-order map keeps the result of child
+mapping. Use `mutate_result` and
 `default_mutate_result` to preserve unchanged during recursion; existing
 owning-value helpers and top-level functions resolve the marker to the
 original value.

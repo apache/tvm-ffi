@@ -195,6 +195,22 @@ impl<D, Policy> MutateCallbackState<D> for NativeMapper<'_, D, Policy> {
 /// map callback runs outside its policy scope; its children run inside.
 /// This mapper cannot be a callback tuple member or another wrapper's dispatcher.
 /// Compose policies as `(outer, inner)` within one wrapper.
+///
+/// Callback tuples must not bypass a mapper's policy, including nested tuples:
+/// ```compile_fail,E0277
+/// use tvm_ffi::*;
+/// fn invalid<D: MapDispatch>(mapper: &mut MapWithContextPolicy<D, DefaultMutContextPolicy>) {
+///     structural_map(1_i64, (|s: String| s, ((mapper,),)), WalkOrder::PostOrder).unwrap();
+/// }
+/// ```
+///
+/// Nesting wrappers is rejected for the same reason:
+/// ```compile_fail,E0277
+/// use tvm_ffi::*;
+/// fn invalid<D: MapDispatch>(mapper: MapWithContextPolicy<D, DefaultMutContextPolicy>) {
+///     MapWithContextPolicy::new(mapper, DefaultMutContextPolicy);
+/// }
+/// ```
 pub struct MapWithContextPolicy<Mapper, Policy> {
     mapper: Mapper,
     policy: Rc<Policy>,

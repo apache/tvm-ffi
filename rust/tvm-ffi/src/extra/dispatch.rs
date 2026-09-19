@@ -21,9 +21,7 @@
 
 use crate::error::Result;
 
-use super::structural_visit::{
-    DefRegionKind, IntoWalker, NativeVisit, StructuralView, WalkCallbackResult, WalkResult,
-};
+use super::structural_visit::{DefRegionKind, IntoWalker, NativeVisit, StructuralView, WalkResult};
 
 /// Dispatch for typed `structural_walk` observer callbacks.
 ///
@@ -34,7 +32,7 @@ pub trait WalkDispatch: Sized {
         &mut self,
         value: &StructuralView,
         def_region_kind: DefRegionKind,
-    ) -> Option<WalkCallbackResult>;
+    ) -> Option<Result<WalkResult>>;
 }
 
 impl<V: WalkDispatch> WalkDispatch for &mut V {
@@ -43,7 +41,7 @@ impl<V: WalkDispatch> WalkDispatch for &mut V {
         &mut self,
         value: &StructuralView,
         def_region_kind: DefRegionKind,
-    ) -> Option<WalkCallbackResult> {
+    ) -> Option<Result<WalkResult>> {
         (**self).dispatch_walk(value, def_region_kind)
     }
 }

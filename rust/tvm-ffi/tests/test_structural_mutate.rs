@@ -1243,6 +1243,42 @@ fn pre_order_unchanged_reuses_unmodified_subtrees() {
 }
 
 #[test]
+fn post_order_unchanged_preserves_descendant_rewrites() {
+    for with_policy in [false, true] {
+        for shared in [false, true] {
+            let root = Array::new(vec![1_i64]);
+            let pointer = array_pointer(&root);
+            let alias = shared.then(|| root.clone());
+            let callbacks = (
+                |integer: i64| integer + 1,
+                |value: &StructuralView| {
+                    assert_eq!(value.cast::<Array<i64>>().unwrap().get(0).unwrap(), 2);
+                    Unchanged
+                },
+            );
+            let mapped = if with_policy {
+                structural_map(
+                    root,
+                    MapWithContextPolicy::new(callbacks.into_mapper(), DefaultMutContextPolicy),
+                    WalkOrder::PostOrder,
+                )
+            } else {
+                structural_map(root, callbacks, WalkOrder::PostOrder)
+            }
+            .and_then(Array::<i64>::try_from)
+            .unwrap();
+            assert_eq!(mapped.get(0).unwrap(), 2);
+            if let Some(alias) = alias {
+                assert_eq!(alias.get(0).unwrap(), 1);
+                assert_ne!(array_pointer(&mapped), pointer);
+            } else {
+                assert_eq!(array_pointer(&mapped), pointer);
+            }
+        }
+    }
+}
+
+#[test]
 fn twelve_link_tuple_reaches_final_map_dispatch() {
     let mut final_dispatch = IncrementIntegers;
     let mapped = structural_map(
