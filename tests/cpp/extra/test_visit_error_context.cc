@@ -18,8 +18,6 @@
  */
 #include <gtest/gtest.h>
 #include <tvm/ffi/container/array.h>
-#include <tvm/ffi/container/dict.h>
-#include <tvm/ffi/container/list.h>
 #include <tvm/ffi/container/map.h>
 #include <tvm/ffi/error.h>
 #include <tvm/ffi/extra/structural_equal.h>
@@ -366,40 +364,41 @@ TEST(FindAccessPaths, AccessKindCoverage) {
     EXPECT_TRUE(StructuralEqual::Equal(expected, paths[0]));
   }
 
-  TPairRef target(empty, empty);
-  TPairRef other(empty, empty);
-  auto check_container = [&](const ObjectRef& container, const refl::AccessStep& item) {
-    SCOPED_TRACE(container->GetTypeKey());
-    TPairRef root(container, empty);
-    for (bool record_container : {false, true}) {
-      auto ctx_obj = make_object<VisitErrorContextObj>();
-      ctx_obj->reverse_visit_pattern = record_container ? List<ObjectRef>{target, container, root}
-                                                        : List<ObjectRef>{target, root};
-      auto paths = VisitErrorContext::FindAccessPaths(root, VisitErrorContext(std::move(ctx_obj)));
-      ASSERT_EQ(paths.size(), 1u);
-      EXPECT_TRUE(
-          StructuralEqual::Equal(refl::AccessPath::Root()->Attr("lhs")->Extend(item), paths[0]));
-    }
+  // Sub-scenario B: ArrayItem step.
+  {
+    TPairRef leaf1(empty, empty);
+    TPairRef leaf2(empty, empty);
+    Array<ObjectRef> arr = {leaf1, leaf2};
+    TPairRef root(arr, empty);
 
-    // Containers can be roots or the failing node itself.
-    auto ctx_obj = make_object<VisitErrorContextObj>();
-    ctx_obj->reverse_visit_pattern = List<ObjectRef>{target, container};
-    auto paths =
-        VisitErrorContext::FindAccessPaths(container, VisitErrorContext(std::move(ctx_obj)));
-    ASSERT_EQ(paths.size(), 1u);
-    EXPECT_TRUE(StructuralEqual::Equal(refl::AccessPath::Root()->Extend(item), paths[0]));
+    ObjectPtr<VisitErrorContextObj> ctx_obj = make_object<VisitErrorContextObj>();
+    ctx_obj->reverse_visit_pattern = List<ObjectRef>{leaf1, root};
+    VisitErrorContext ctx(std::move(ctx_obj));
 
-    ctx_obj = make_object<VisitErrorContextObj>();
-    ctx_obj->reverse_visit_pattern = List<ObjectRef>{container, root};
-    paths = VisitErrorContext::FindAccessPaths(root, VisitErrorContext(std::move(ctx_obj)));
+    Array<refl::AccessPath> paths = VisitErrorContext::FindAccessPaths(root, ctx);
     ASSERT_EQ(paths.size(), 1u);
-    EXPECT_TRUE(StructuralEqual::Equal(refl::AccessPath::Root()->Attr("lhs"), paths[0]));
-  };
-  check_container(Array<ObjectRef>{target, other}, refl::AccessStep::ArrayItem(0));
-  check_container(List<ObjectRef>{target, other}, refl::AccessStep::ArrayItem(0));
-  check_container(Map<Any, Any>{{String("key"), target}}, refl::AccessStep::MapItem(String("key")));
-  check_container(Dict<Any, Any>{{String("key"), target}},
-                  refl::AccessStep::MapItem(String("key")));
+
+    refl::AccessPath expected = refl::AccessPath::Root()->Attr("lhs")->ArrayItem(0);
+    EXPECT_TRUE(StructuralEqual::Equal(expected, paths[0]));
+  }
+
+  // Sub-scenario C: MapItem step.
+  {
+    TPairRef target(empty, empty);
+    Map<Any, Any> m;
+    m.Set(String("key"), target);
+    TPairRef root(m, empty);
+
+    ObjectPtr<VisitErrorContextObj> ctx_obj = make_object<VisitErrorContextObj>();
+    ctx_obj->reverse_visit_pattern = List<ObjectRef>{target, root};
+    VisitErrorContext ctx(std::move(ctx_obj));
+
+    Array<refl::AccessPath> paths = VisitErrorContext::FindAccessPaths(root, ctx);
+    ASSERT_EQ(paths.size(), 1u);
+
+    refl::AccessPath expected = refl::AccessPath::Root()->Attr("lhs")->MapItem(String("key"));
+    EXPECT_TRUE(StructuralEqual::Equal(expected, paths[0]));
+  }
 }
 
 // ---------------------------------------------------------------------------

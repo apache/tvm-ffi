@@ -149,12 +149,34 @@ class VisitErrorAccessPathFinder {
       // Primitive — cannot hold an ObjectRef chain entry.
       return;
     }
-    this->VisitObject(details::AnyUnsafe::MoveFromAnyAfterCheck<ObjectRef>(std::move(value)));
+    switch (type_index) {
+      case TypeIndex::kTVMFFIArray:
+        this->VisitSequence(
+            details::AnyUnsafe::MoveFromAnyAfterCheck<Array<Any>>(std::move(value)));
+        break;
+      case TypeIndex::kTVMFFIList:
+        this->VisitSequence(details::AnyUnsafe::MoveFromAnyAfterCheck<List<Any>>(std::move(value)));
+        break;
+      case TypeIndex::kTVMFFIMap:
+        this->VisitMap(details::AnyUnsafe::MoveFromAnyAfterCheck<Map<Any, Any>>(std::move(value)));
+        break;
+      case TypeIndex::kTVMFFIDict:
+        this->VisitMap(details::AnyUnsafe::MoveFromAnyAfterCheck<Dict<Any, Any>>(std::move(value)));
+        break;
+      default:
+        if (type_index >= TypeIndex::kTVMFFIStaticObjectBegin) {
+          ObjectRef obj = details::AnyUnsafe::MoveFromAnyAfterCheck<ObjectRef>(std::move(value));
+          this->VisitObject(obj);
+        }
+        break;
+    }
   }
 
   void VisitObject(const ObjectRef& node) {
     // Defensive: error path; never throw.
     if (!node.defined()) return;
+    const TVMFFITypeInfo* type_info = TVMFFIGetTypeInfo(node->type_index());
+    if (type_info == nullptr || type_info->metadata == nullptr) return;
 
     bool matched_step = num_pattern_step_matched_ < records_.size() &&
                         node.same_as(records_[records_.size() - 1 - num_pattern_step_matched_]);
@@ -168,28 +190,7 @@ class VisitErrorAccessPathFinder {
       }
     }
 
-    // Match containers before descending, just like reflected objects.
-    switch (node->type_index()) {
-      case TypeIndex::kTVMFFIArray:
-        this->VisitSequence(node.as_or_throw<Array<Any>>());
-        break;
-      case TypeIndex::kTVMFFIList:
-        this->VisitSequence(node.as_or_throw<List<Any>>());
-        break;
-      case TypeIndex::kTVMFFIMap:
-        this->VisitMap(node.as_or_throw<Map<Any, Any>>());
-        break;
-      case TypeIndex::kTVMFFIDict:
-        this->VisitMap(node.as_or_throw<Dict<Any, Any>>());
-        break;
-      default: {
-        const TVMFFITypeInfo* type_info = TVMFFIGetTypeInfo(node->type_index());
-        if (type_info != nullptr && type_info->metadata != nullptr) {
-          this->VisitChildrenFields(node, type_info);
-        }
-        break;
-      }
-    }
+    this->VisitChildrenFields(node, type_info);
 
     if (matched_step) --num_pattern_step_matched_;
   }
@@ -324,20 +325,6 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def_ro("prev_error_context", &VisitErrorContextObj::prev_error_context);
   refl::GlobalDef().def("ffi.VisitErrorContext.FindAccessPaths",
                         &VisitErrorContext::FindAccessPaths);
-  // Bindings can append a node without mutating retained errors or contexts.
-  refl::GlobalDef().def(
-      "ffi.VisitErrorContext.WithNode", [](Optional<ObjectRef> previous, const ObjectRef& node) {
-        auto context = make_object<VisitErrorContextObj>();
-        if (auto prior = previous.as<VisitErrorContext>()) {
-          context->reverse_visit_pattern = List<ObjectRef>((*prior)->reverse_visit_pattern.begin(),
-                                                           (*prior)->reverse_visit_pattern.end());
-          context->prev_error_context = (*prior)->prev_error_context;
-        } else {
-          context->prev_error_context = std::move(previous);
-        }
-        context->reverse_visit_pattern.push_back(node);
-        return VisitErrorContext(std::move(context));
-      });
 }
 
 }  // namespace ffi
