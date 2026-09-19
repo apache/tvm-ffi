@@ -412,7 +412,7 @@ Implement `StructuralVisitor` directly to override its low-level `visit`
 method.
 
 Use `#[dispatch(visit, policy = MyPolicy)]` to apply a `ContextPolicy<Self>`
-to default recursion. The policy accesses the visitor through `ctx.state_mut()`.
+to default recursion.
 
 Two safety notes: mutable `List`/`Dict` contents are snapshotted before
 callbacks run, so mutation during traversal cannot invalidate the walk; and
@@ -599,8 +599,7 @@ assert_eq!(increment.integers, 2);
 ```
 
 Use `#[dispatch(mutate, policy = MyPolicy)]` to apply a `MutContextPolicy<Self>`
-to default recursion. Both policy expressions may use `self` for configuration
-and are evaluated on each default descent; tuples compose multiple policies.
+to default recursion.
 
 For low-level custom recursion, implement `StructuralMutator` and pass
 `&mut` it to `structural_mutate`. `InplaceValue` is an engine-issued
