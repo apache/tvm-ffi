@@ -2289,13 +2289,10 @@ struct StructuralMutatorVTable {
     var_remap_set: FStructuralVarRemapSet,
 }
 
-type RuntimeDispatchMutateCallback =
-    unsafe fn(*mut c_void, TVMFFIAny, DefRegionKind, Permit) -> Result<Any>;
 type RuntimeVarRemapGetCallback = unsafe fn(*mut c_void, TVMFFIAny) -> Result<Option<Any>>;
 type RuntimeVarRemapSetCallback = unsafe fn(*mut c_void, TVMFFIAny, &Any) -> Result<()>;
 
 struct RuntimeMutatorCallbacks {
-    dispatch_mutate: RuntimeDispatchMutateCallback,
     var_remap_get: RuntimeVarRemapGetCallback,
     var_remap_set: RuntimeVarRemapSetCallback,
 }
@@ -2361,12 +2358,16 @@ unsafe impl ObjectCore for RuntimeStructuralMutatorObj {
     }
 }
 
-static RUST_STRUCTURAL_MUTATOR_VTABLE: StructuralMutatorVTable = StructuralMutatorVTable {
-    mutate: rust_vtable_mutate,
-    maybe_inplace_mutate: rust_vtable_maybe_inplace_mutate,
-    var_remap_get: rust_vtable_var_remap_get,
-    var_remap_set: rust_vtable_var_remap_set,
-};
+struct RuntimeMutatorVTable<D>(PhantomData<D>);
+
+impl<D: MutationDriver> RuntimeMutatorVTable<D> {
+    const VTABLE: StructuralMutatorVTable = StructuralMutatorVTable {
+        mutate: rust_vtable_mutate::<D>,
+        maybe_inplace_mutate: rust_vtable_maybe_inplace_mutate::<D>,
+        var_remap_get: rust_vtable_var_remap_get,
+        var_remap_set: rust_vtable_var_remap_set,
+    };
+}
 
 struct RuntimeContextGuard {
     mutator: StructuralMutatorHandle,
@@ -2409,31 +2410,32 @@ unsafe fn take_runtime_context(mutator: StructuralMutatorHandle) -> Result<Runti
     Ok(RuntimeContextGuard { mutator, context })
 }
 
-unsafe extern "C" fn rust_vtable_mutate(
+unsafe extern "C" fn rust_vtable_mutate<D: MutationDriver>(
     mutator: StructuralMutatorHandle,
     value: AnyView<'static>,
 ) -> TVMFFIAny {
     // SAFETY: this function is installed only in the vtable of a live
-    // RuntimeStructuralMutatorObj; `value` is borrowed for this call.
-    rust_vtable_mutate_impl(mutator, value, Permit::Copy)
+    // RuntimeStructuralMutatorObj built for D; `value` is borrowed for this call.
+    rust_vtable_mutate_impl::<D>(mutator, value, Permit::Copy)
 }
 
-unsafe extern "C" fn rust_vtable_maybe_inplace_mutate(
+unsafe extern "C" fn rust_vtable_maybe_inplace_mutate<D: MutationDriver>(
     mutator: StructuralMutatorHandle,
     value: AnyView<'static>,
 ) -> TVMFFIAny {
     // SAFETY: same vtable and borrowed-value contract as
     // `rust_vtable_mutate`.
-    rust_vtable_mutate_impl(mutator, value, Permit::MaybeInPlace)
+    rust_vtable_mutate_impl::<D>(mutator, value, Permit::MaybeInPlace)
 }
 
-/// Run one erased vtable mutation callback and convert its result to ABI form.
+/// Run one typed vtable mutation callback and convert its result to ABI form.
 ///
 /// # Safety
 ///
-/// `mutator` must be a live runtime mutator handle, and `value` must remain
-/// valid for this call.
-unsafe fn rust_vtable_mutate_impl(
+/// `mutator` must be a live runtime mutator created for `D`, and `value`
+/// must remain valid for this call.
+#[inline(always)]
+unsafe fn rust_vtable_mutate_impl<D: MutationDriver>(
     mutator: StructuralMutatorHandle,
     value: AnyView<'static>,
     permit: Permit,
@@ -2443,11 +2445,12 @@ unsafe fn rust_vtable_mutate_impl(
         Err(error) => return result_into_raw(Err(error)),
     };
     let context = context_guard.context;
-    let callback = (*mutator).callbacks.dispatch_mutate;
     let raw = *value.as_raw_ffi_any();
     let outcome = catch_unwind(AssertUnwindSafe(|| {
         let kind = def_region_from_raw((*mutator).def_region_mode)?;
-        with_active_mutator(mutator, || callback(context, raw, kind, permit))
+        with_active_mutator(mutator, || {
+            runtime_dispatch_mutate::<D>(context, raw, kind, permit)
+        })
     }));
     match outcome {
         Ok(result) => result_into_raw(result),
@@ -2756,21 +2759,26 @@ unsafe fn runtime_var_remap_set<D: MutationDriver>(
 fn run_structural_mutator<D: MutationDriver>(root: Any, driver: &mut D) -> Result<Any> {
     let context = std::ptr::from_mut(driver).cast::<c_void>();
     let callbacks = RuntimeMutatorCallbacks {
-        dispatch_mutate: runtime_dispatch_mutate::<D>,
         var_remap_get: runtime_var_remap_get::<D>,
         var_remap_set: runtime_var_remap_set::<D>,
     };
-    run_structural_mutator_with_context(root, context, callbacks)
+    run_structural_mutator_with_context(
+        root,
+        context,
+        callbacks,
+        &RuntimeMutatorVTable::<D>::VTABLE,
+    )
 }
 
 fn run_structural_mutator_with_context(
     root: Any,
     context: *mut c_void,
     callbacks: RuntimeMutatorCallbacks,
+    vtable: &'static StructuralMutatorVTable,
 ) -> Result<Any> {
     let mut active = ObjectArc::new(RuntimeStructuralMutatorObj {
         base: Object::new(),
-        vtable: &RUST_STRUCTURAL_MUTATOR_VTABLE,
+        vtable,
         def_region_mode: DefRegionKind::None as i32,
         context,
         context_identity: context,
@@ -3265,6 +3273,8 @@ fn with_error_context(error: Error, frame: &str) -> Error {
     with_structural_error_context(error, "map", frame)
 }
 
+#[cold]
+#[inline(never)]
 fn runtime_error(message: &str) -> Error {
     Error::new(RUNTIME_ERROR, message, "")
 }
