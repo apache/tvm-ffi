@@ -68,15 +68,8 @@ const FLAG_SETTER_IS_FUNCTION: i64 = kTVMFFIFieldFlagBitSetterIsFunctionObj as i
 /// Borrowed value passed to structural map and mutation callbacks.
 pub use super::StructuralView;
 
-/// Compatibility name for [`StructuralView`].
-pub use super::StructuralView as MapValue;
-
 mod policy;
 pub use policy::{DefaultMutContextPolicy, MapWithContextPolicy, MutContextPolicy};
-
-/// Result type produced by a structural-map callback.
-#[doc(hidden)]
-pub type MapResult = Result<Any>;
 
 mod callback_result_sealed {
     use super::{Any, Result};
@@ -87,27 +80,27 @@ mod callback_result_sealed {
     impl<T: Into<Any>> Sealed for Result<T> {}
 }
 
-/// Convert an infallible or fallible callback result into [`MapResult`].
+/// Convert an infallible or fallible map or mutation callback result into [`Result<Any>`].
 ///
 /// A callback may return any value convertible into [`Any`], or wrap it in
 /// [`Result`] to use `?`.
 ///
 /// This trait is sealed and is not an extension point.
 #[doc(hidden)]
-pub trait IntoMapResult: callback_result_sealed::Sealed {
-    fn into_map_result(self) -> MapResult;
+pub trait IntoMutateResult: callback_result_sealed::Sealed {
+    fn into_mutate_result(self) -> Result<Any>;
 }
 
-impl<T: Into<Any>> IntoMapResult for T {
+impl<T: Into<Any>> IntoMutateResult for T {
     #[inline]
-    fn into_map_result(self) -> MapResult {
+    fn into_mutate_result(self) -> Result<Any> {
         Ok(self.into())
     }
 }
 
-impl<T: Into<Any>> IntoMapResult for Result<T> {
+impl<T: Into<Any>> IntoMutateResult for Result<T> {
     #[inline]
-    fn into_map_result(self) -> MapResult {
+    fn into_mutate_result(self) -> Result<Any> {
         self.map(Into::into)
     }
 }
@@ -263,11 +256,10 @@ impl<T> Deref for MutateValue<'_, T> {
 /// reborrow the mutator, so mutable state cannot remain borrowed across them.
 /// The context does not store a node: inspect the callback argument and pass
 /// it explicitly to default recursion.
-pub struct MutateContext<'a, State = (), Driver: ?Sized = dyn MutateContextDriver<State> + 'a> {
-    driver: &'a mut Driver,
+pub struct MutateContext<'a, State = ()> {
+    driver: &'a mut dyn MutateContextDriver<State>,
     def_region_kind: DefRegionKind,
     inplace_mode: InplaceMode,
-    _state: PhantomData<fn() -> State>,
     _not_send_sync: PhantomData<Rc<()>>,
 }
 
@@ -295,12 +287,6 @@ impl Mutator {
     /// Definition-region state active at the callback's current value.
     #[inline(always)]
     pub fn def_region_kind(&self) -> DefRegionKind {
-        self.def_region_kind
-    }
-
-    /// Definition region active at the callback's current value.
-    #[inline(always)]
-    pub fn region(&self) -> DefRegionKind {
         self.def_region_kind
     }
 
@@ -379,7 +365,7 @@ impl Mutator {
         D: MutateDispatch,
         for<'x> AnyView<'x>: From<&'x T>,
     {
-        StructuralMutator::default_mutate_value(dispatch, value, self.def_region_kind)
+        StructuralMutator::default_mutate(dispatch, value, self.def_region_kind)
     }
 
     /// Mutate a borrowed child while preserving an unchanged result.
@@ -418,7 +404,7 @@ impl Mutator {
         D: MutateDispatch,
         for<'x> AnyView<'x>: From<&'x T>,
     {
-        StructuralMutator::default_mutate_value_result(dispatch, value, self.def_region_kind)
+        StructuralMutator::default_mutate_result(dispatch, value, self.def_region_kind)
     }
 
     /// Consume the handle for default descent with its existing permission.
@@ -493,14 +479,11 @@ impl Mutator {
     }
 }
 
-#[doc(hidden)]
 /// Internal operations used by [`MutateContext`].
 ///
-/// The dispatch macro keeps the concrete implementor visible to the compiler
-/// so recursive `mutate` calls can be inlined. This is not a user extension
-/// point. Borrowed inputs carry a lifetime; in-place entry requires an owned
+/// Borrowed inputs carry a lifetime; in-place entry requires an owned
 /// value or a consumed capability, never a bare ABI value plus permission.
-pub trait MutateContextDriver<State> {
+trait MutateContextDriver<State> {
     fn state(&self) -> &State;
     fn state_mut(&mut self) -> &mut State;
     fn mutate_borrowed(&mut self, value: AnyView<'_>, kind: DefRegionKind) -> Result<Any>;
@@ -519,10 +502,7 @@ pub trait MutateContextDriver<State> {
     fn var_remap_set(&mut self, var: &StructuralView, mutated_value: &Any) -> Result<()>;
 }
 
-impl<State, Driver> MutateContext<'_, State, Driver>
-where
-    Driver: MutateContextDriver<State> + ?Sized,
-{
+impl<State> MutateContext<'_, State> {
     /// User state shared by every callback in this mutation.
     #[inline(always)]
     pub fn state(&self) -> &State {
@@ -549,25 +529,18 @@ where
         self.def_region_kind
     }
 
-    /// Definition region active at the callback's current value.
-    #[inline]
-    pub fn region(&self) -> DefRegionKind {
-        self.def_region_kind
-    }
-
     /// Run recursive operations in a definition region, preserving an outer Pattern.
     /// The previous context is restored on return, error, or unwinding.
     pub fn with_def_region_kind<T>(
         &mut self,
         kind: DefRegionKind,
-        callback: impl FnOnce(&mut MutateContext<'_, State, Driver>) -> Result<T>,
+        callback: impl FnOnce(&mut MutateContext<'_, State>) -> Result<T>,
     ) -> Result<T> {
         with_mutation_region(kind, |kind| {
             callback(&mut MutateContext {
                 driver: &mut *self.driver,
                 def_region_kind: kind,
                 inplace_mode: self.inplace_mode,
-                _state: PhantomData,
                 _not_send_sync: PhantomData,
             })
         })
@@ -758,47 +731,14 @@ impl<U: StructuralMutator> IntoMutator<U> for &mut U {
     }
 }
 
-/// Convert a mutation callback result into [`Result<Any>`].
-///
-/// A callback may return any value convertible into [`Any`], or wrap it in
-/// [`Result`] to use `?`.
-#[doc(hidden)]
-pub trait IntoMutateResult: callback_result_sealed::Sealed {
-    fn into_mutate_result(self) -> Result<Any>;
-}
-
-impl<T: Into<Any>> IntoMutateResult for T {
-    #[inline]
-    fn into_mutate_result(self) -> Result<Any> {
-        Ok(self.into())
-    }
-}
-
-impl<T: Into<Any>> IntoMutateResult for Result<T> {
-    #[inline]
-    fn into_mutate_result(self) -> Result<Any> {
-        self.map(Into::into)
-    }
-}
-
-#[doc(hidden)]
-pub type MutateResult = Result<Any>;
-
-#[doc(hidden)]
-/// Callback tuples use a type-erased mutation driver.
-pub enum DynamicMutateCallbacks {}
-
 /// One typed callback in a callback-driven structural mutator.
 pub trait MutateChainLink<State, Marker>: mutate_sealed::SealedLink<State, Marker> {
-    #[doc(hidden)]
-    type Strategy;
-
     #[doc(hidden)]
     fn try_mutate(
         &self,
         value: &mut Option<MutateValue<'_>>,
         mutator: &mut MutateContext<'_, State>,
-    ) -> Option<MutateResult>;
+    ) -> Option<Result<Any>>;
 }
 
 /// Ordered typed callback dispatch for [`structural_mutate`].
@@ -809,13 +749,13 @@ pub trait MutateChainLink<State, Marker>: mutate_sealed::SealedLink<State, Marke
 /// first match. The implementation owns its pass state and receives `&mut
 /// self`, while [`Mutator`] controls recursion, the definition region, and
 /// in-place permission. Handlers can consume [`MutateValue`] and take an
-/// optional trailing [`InplaceMode`] after `&mut Mutator`.
+/// optional `&mut Mutator` to inspect the region and in-place permission.
 pub trait MutateDispatch: Sized {
     fn dispatch_mutate(
         &mut self,
         value: &StructuralView,
         mutator: &mut Mutator,
-    ) -> Option<MutateResult>;
+    ) -> Option<Result<Any>>;
 
     /// Dispatch an engine-issued value. Existing borrowed dispatchers retain
     /// their copy-only default recursion; generated dispatch supports consuming it.
@@ -823,7 +763,7 @@ pub trait MutateDispatch: Sized {
         &mut self,
         value: MutateValue<'_>,
         mutator: &mut Mutator,
-    ) -> Option<MutateResult> {
+    ) -> Option<Result<Any>> {
         self.dispatch_mutate(value.as_value(), mutator)
     }
 }
@@ -893,12 +833,11 @@ where
     T: crate::type_traits::ContainerElement,
     O: IntoMutateResult,
 {
-    type Strategy = DynamicMutateCallbacks;
     fn try_mutate(
         &self,
         value: &mut Option<MutateValue<'_>>,
         mutator: &mut MutateContext<'_, State>,
-    ) -> Option<MutateResult> {
+    ) -> Option<Result<Any>> {
         match value
             .take()
             .expect("unconsumed callback value")
@@ -922,13 +861,11 @@ where
     T: crate::type_traits::AnyCompatible,
     O: IntoMutateResult,
 {
-    type Strategy = DynamicMutateCallbacks;
-
     fn try_mutate(
         &self,
         value: &mut Option<MutateValue<'_>>,
         mutator: &mut MutateContext<'_, State>,
-    ) -> Option<MutateResult> {
+    ) -> Option<Result<Any>> {
         value
             .as_ref()
             .expect("unconsumed callback value")
@@ -949,13 +886,11 @@ where
     N: ObjectCore,
     O: IntoMutateResult,
 {
-    type Strategy = DynamicMutateCallbacks;
-
     fn try_mutate(
         &self,
         value: &mut Option<MutateValue<'_>>,
         mutator: &mut MutateContext<'_, State>,
-    ) -> Option<MutateResult> {
+    ) -> Option<Result<Any>> {
         value
             .as_ref()
             .expect("unconsumed callback value")
@@ -975,13 +910,11 @@ where
     ) -> O,
     O: IntoMutateResult,
 {
-    type Strategy = DynamicMutateCallbacks;
-
     fn try_mutate(
         &self,
         value: &mut Option<MutateValue<'_>>,
         mutator: &mut MutateContext<'_, State>,
-    ) -> Option<MutateResult> {
+    ) -> Option<Result<Any>> {
         Some(
             self(
                 value
@@ -1012,13 +945,13 @@ macro_rules! impl_mutate_chain_link {
         where
             $($F: MutateChainLink<State, $M>,)+
         {
-            type Strategy = DynamicMutateCallbacks;
+
 
             fn try_mutate(
                 &self,
                 value: &mut Option<MutateValue<'_>>,
                 mutator: &mut MutateContext<'_, State>,
-            ) -> Option<MutateResult> {
+            ) -> Option<Result<Any>> {
                 $(
                     if let Some(result) = self.$idx.try_mutate(value, mutator) {
                         return Some(result);
@@ -1124,7 +1057,6 @@ pub struct ByMutateCallbacks<Marker>(PhantomData<fn(Marker)>);
 impl<Link, Marker> IntoMutator<ByMutateCallbacks<Marker>> for Link
 where
     Link: MutateChainLink<(), Marker>,
-    Link::Strategy: MutateCallbackStrategy<(), Link, Marker>,
 {
     fn mutate_root(self, root: Any) -> Result<Any> {
         let callbacks = self;
@@ -1147,7 +1079,7 @@ pub trait MapDispatch: Sized {
         &mut self,
         value: &StructuralView,
         def_region_kind: DefRegionKind,
-    ) -> Option<MapResult>;
+    ) -> Option<Result<Any>>;
 }
 
 /// Internal root-mapping protocol used by [`IntoMapper`].
@@ -1176,7 +1108,7 @@ impl<V: MapDispatch> MapDispatch for &mut V {
         &mut self,
         value: &StructuralView,
         def_region_kind: DefRegionKind,
-    ) -> Option<MapResult> {
+    ) -> Option<Result<Any>> {
         (**self).dispatch_map(value, def_region_kind)
     }
 }
@@ -1214,53 +1146,53 @@ pub trait MapChainLink<Marker>: sealed_map::SealedMapLink<Marker> {
         &mut self,
         value: &StructuralView,
         def_region_kind: DefRegionKind,
-    ) -> Option<MapResult>;
+    ) -> Option<Result<Any>>;
 }
 
 mod sealed_map {
-    use super::{DefRegionKind, IntoMapResult, MapDispatch, ObjectCore, StructuralView};
+    use super::{DefRegionKind, IntoMutateResult, MapDispatch, ObjectCore, StructuralView};
 
     pub trait SealedMapLink<Marker> {}
 
     impl<F, T, O> SealedMapLink<super::ByMapOwned<T>> for F
     where
         F: FnMut(T) -> O,
-        O: IntoMapResult,
+        O: IntoMutateResult,
     {
     }
 
     impl<F, T, O> SealedMapLink<super::ByMapOwnedKind<T>> for F
     where
         F: FnMut(T, DefRegionKind) -> O,
-        O: IntoMapResult,
+        O: IntoMutateResult,
     {
     }
 
     impl<F, N: ObjectCore, O> SealedMapLink<super::ByMapNode<N>> for F
     where
         F: for<'a> FnMut(&'a N) -> O,
-        O: IntoMapResult,
+        O: IntoMutateResult,
     {
     }
 
     impl<F, N: ObjectCore, O> SealedMapLink<super::ByMapNodeKind<N>> for F
     where
         F: for<'a> FnMut(&'a N, DefRegionKind) -> O,
-        O: IntoMapResult,
+        O: IntoMutateResult,
     {
     }
 
     impl<F, O> SealedMapLink<super::ByMapCatchAll> for F
     where
         F: for<'a> FnMut(&'a StructuralView) -> O,
-        O: IntoMapResult,
+        O: IntoMutateResult,
     {
     }
 
     impl<F, O> SealedMapLink<super::ByMapCatchAllKind> for F
     where
         F: for<'a> FnMut(&'a StructuralView, DefRegionKind) -> O,
-        O: IntoMapResult,
+        O: IntoMutateResult,
     {
     }
 
@@ -1274,15 +1206,17 @@ impl<F, T, O> MapChainLink<ByMapOwned<T>> for F
 where
     F: FnMut(T) -> O,
     T: crate::type_traits::AnyCompatible,
-    O: IntoMapResult,
+    O: IntoMutateResult,
 {
     #[inline]
     fn try_map(
         &mut self,
         value: &StructuralView,
         _def_region_kind: DefRegionKind,
-    ) -> Option<MapResult> {
-        value.cast::<T>().map(|typed| self(typed).into_map_result())
+    ) -> Option<Result<Any>> {
+        value
+            .cast::<T>()
+            .map(|typed| self(typed).into_mutate_result())
     }
 }
 
@@ -1293,17 +1227,17 @@ impl<F, T, O> MapChainLink<ByMapOwnedKind<T>> for F
 where
     F: FnMut(T, DefRegionKind) -> O,
     T: crate::type_traits::AnyCompatible,
-    O: IntoMapResult,
+    O: IntoMutateResult,
 {
     #[inline]
     fn try_map(
         &mut self,
         value: &StructuralView,
         def_region_kind: DefRegionKind,
-    ) -> Option<MapResult> {
+    ) -> Option<Result<Any>> {
         value
             .cast::<T>()
-            .map(|typed| self(typed, def_region_kind).into_map_result())
+            .map(|typed| self(typed, def_region_kind).into_mutate_result())
     }
 }
 
@@ -1314,17 +1248,17 @@ impl<F, N, O> MapChainLink<ByMapNode<N>> for F
 where
     F: for<'a> FnMut(&'a N) -> O,
     N: ObjectCore,
-    O: IntoMapResult,
+    O: IntoMutateResult,
 {
     #[inline]
     fn try_map(
         &mut self,
         value: &StructuralView,
         _def_region_kind: DefRegionKind,
-    ) -> Option<MapResult> {
+    ) -> Option<Result<Any>> {
         value
             .as_node::<N>()
-            .map(|node| self(node).into_map_result())
+            .map(|node| self(node).into_mutate_result())
     }
 }
 
@@ -1335,17 +1269,17 @@ impl<F, N, O> MapChainLink<ByMapNodeKind<N>> for F
 where
     F: for<'a> FnMut(&'a N, DefRegionKind) -> O,
     N: ObjectCore,
-    O: IntoMapResult,
+    O: IntoMutateResult,
 {
     #[inline]
     fn try_map(
         &mut self,
         value: &StructuralView,
         def_region_kind: DefRegionKind,
-    ) -> Option<MapResult> {
+    ) -> Option<Result<Any>> {
         value
             .as_node::<N>()
-            .map(|node| self(node, def_region_kind).into_map_result())
+            .map(|node| self(node, def_region_kind).into_mutate_result())
     }
 }
 
@@ -1355,15 +1289,15 @@ pub enum ByMapCatchAll {}
 impl<F, O> MapChainLink<ByMapCatchAll> for F
 where
     F: for<'a> FnMut(&'a StructuralView) -> O,
-    O: IntoMapResult,
+    O: IntoMutateResult,
 {
     #[inline]
     fn try_map(
         &mut self,
         value: &StructuralView,
         _def_region_kind: DefRegionKind,
-    ) -> Option<MapResult> {
-        Some(self(value).into_map_result())
+    ) -> Option<Result<Any>> {
+        Some(self(value).into_mutate_result())
     }
 }
 
@@ -1373,15 +1307,15 @@ pub enum ByMapCatchAllKind {}
 impl<F, O> MapChainLink<ByMapCatchAllKind> for F
 where
     F: for<'a> FnMut(&'a StructuralView, DefRegionKind) -> O,
-    O: IntoMapResult,
+    O: IntoMutateResult,
 {
     #[inline]
     fn try_map(
         &mut self,
         value: &StructuralView,
         def_region_kind: DefRegionKind,
-    ) -> Option<MapResult> {
-        Some(self(value, def_region_kind).into_map_result())
+    ) -> Option<Result<Any>> {
+        Some(self(value, def_region_kind).into_mutate_result())
     }
 }
 
@@ -1397,7 +1331,7 @@ impl<V: MapDispatch> MapChainLink<ByMapDispatchLink> for &mut V {
         &mut self,
         value: &StructuralView,
         def_region_kind: DefRegionKind,
-    ) -> Option<MapResult> {
+    ) -> Option<Result<Any>> {
         self.dispatch_map(value, def_region_kind)
     }
 }
@@ -1428,7 +1362,7 @@ where
         &mut self,
         value: &StructuralView,
         def_region_kind: DefRegionKind,
-    ) -> Option<MapResult> {
+    ) -> Option<Result<Any>> {
         self.link.try_map(value, def_region_kind)
     }
 }
@@ -1450,7 +1384,7 @@ macro_rules! impl_map_chain_link {
                 &mut self,
                 value: &StructuralView,
                 def_region_kind: DefRegionKind,
-            ) -> Option<MapResult> {
+            ) -> Option<Result<Any>> {
                 $(
                     if let Some(result) = self.$idx.try_map(value, def_region_kind) {
                         return Some(result);
@@ -1483,7 +1417,7 @@ macro_rules! impl_bare_map_link {
             where
                 F: FnMut($($fn_args),+) -> O,
                 Self: MapChainLink<$marker<T>>,
-                O: IntoMapResult,
+                O: IntoMutateResult,
             {
                 type Mapper = MapChain<F, $marker<T>>;
 
@@ -1506,7 +1440,7 @@ impl_bare_map_link!(
 impl<F, O> IntoMapper<ByMapCatchAll> for F
 where
     F: for<'a> FnMut(&'a StructuralView) -> O,
-    O: IntoMapResult,
+    O: IntoMutateResult,
 {
     type Mapper = MapChain<F, ByMapCatchAll>;
 
@@ -1519,7 +1453,7 @@ where
 impl<F, O> IntoMapper<ByMapCatchAllKind> for F
 where
     F: for<'a> FnMut(&'a StructuralView, DefRegionKind) -> O,
-    O: IntoMapResult,
+    O: IntoMutateResult,
 {
     type Mapper = MapChain<F, ByMapCatchAllKind>;
 
@@ -1687,23 +1621,13 @@ pub trait StructuralMutator: Sized {
         Ok(if is_unchanged(&result) { value } else { result })
     }
 
-    /// Apply default non-in-place mutation to `value`'s children.
-    fn default_mutate(
-        &mut self,
-        value: &StructuralView,
-        def_region_kind: DefRegionKind,
-    ) -> Result<Any> {
-        user_default_mutate(self, value.raw(), def_region_kind, Permit::Copy)
-            .and_then(|result| resolve_result(result, value.raw()))
-    }
-
     /// Apply default non-in-place mutation to a borrowed typed value.
     ///
     /// Unlike [Self::mutate], this bypasses dispatch for the value
     /// itself while its children still re-enter this mutator. This lets a
     /// typed structural-mutate handler recurse through its current node
     /// before applying a post-order rewrite.
-    fn default_mutate_value<T>(&mut self, value: &T, def_region_kind: DefRegionKind) -> Result<Any>
+    fn default_mutate<T>(&mut self, value: &T, def_region_kind: DefRegionKind) -> Result<Any>
     where
         for<'x> AnyView<'x>: From<&'x T>,
     {
@@ -1753,18 +1677,8 @@ pub trait StructuralMutator: Sized {
             .and_then(UnchangedOr::from_carrier)
     }
 
-    /// Default non-in-place mutation with an unchanged-or-replacement result.
-    fn default_mutate_result(
-        &mut self,
-        value: &StructuralView,
-        kind: DefRegionKind,
-    ) -> Result<UnchangedOr<Any>> {
-        user_default_mutate(self, value.raw(), kind, Permit::Copy)
-            .and_then(UnchangedOr::from_carrier)
-    }
-
     /// Default mutation of a borrowed typed value, preserving unchanged.
-    fn default_mutate_value_result<T>(
+    fn default_mutate_result<T>(
         &mut self,
         value: &T,
         kind: DefRegionKind,
@@ -1865,51 +1779,6 @@ impl<D: MutateDispatch> StructuralMutator for D {
 
 // Closure callback chains use a type-erased context driver so one concrete
 // function signature can recurse through the complete chain.
-trait MutateCallbackStrategy<State, Link, Marker> {
-    fn try_mutate<Driver>(
-        driver: &mut Driver,
-        callback_ptr: *const Link,
-        value: &StructuralView,
-        def_region_kind: DefRegionKind,
-        inplace_mode: InplaceMode,
-    ) -> Option<MutateResult>
-    where
-        Driver: MutateContextDriver<State>;
-}
-
-impl<State, Link, Marker> MutateCallbackStrategy<State, Link, Marker> for DynamicMutateCallbacks
-where
-    Link: MutateChainLink<State, Marker>,
-{
-    #[inline(always)]
-    fn try_mutate<Driver>(
-        driver: &mut Driver,
-        callback_ptr: *const Link,
-        value: &StructuralView,
-        def_region_kind: DefRegionKind,
-        inplace_mode: InplaceMode,
-    ) -> Option<MutateResult>
-    where
-        Driver: MutateContextDriver<State>,
-    {
-        let mut mutator = MutateContext::<State, dyn MutateContextDriver<State>> {
-            driver,
-            def_region_kind,
-            inplace_mode,
-            _state: PhantomData,
-            _not_send_sync: PhantomData,
-        };
-        // SAFETY: The owning `Rc` or the direct callback's stack slot remains live
-        // and is never modified through the driver during recursive reentry.
-        unsafe {
-            (&*callback_ptr).try_mutate(
-                &mut Some(MutateValue::new(value, inplace_mode)),
-                &mut mutator,
-            )
-        }
-    }
-}
-
 #[inline(always)]
 fn try_mutate_callbacks<State, Link, Marker, Driver>(
     driver: &mut Driver,
@@ -1917,26 +1786,31 @@ fn try_mutate_callbacks<State, Link, Marker, Driver>(
     value: &StructuralView,
     def_region_kind: DefRegionKind,
     inplace_mode: InplaceMode,
-) -> Option<MutateResult>
+) -> Option<Result<Any>>
 where
     Link: MutateChainLink<State, Marker>,
-    Link::Strategy: MutateCallbackStrategy<State, Link, Marker>,
     Driver: MutateContextDriver<State>,
 {
-    <Link::Strategy as MutateCallbackStrategy<State, Link, Marker>>::try_mutate(
+    let mut mutator = MutateContext {
         driver,
-        callback_ptr,
-        value,
         def_region_kind,
         inplace_mode,
-    )
+        _not_send_sync: PhantomData,
+    };
+    // SAFETY: The owning `Rc` or the direct callback's stack slot remains live
+    // and is never modified through the driver during recursive reentry.
+    unsafe {
+        (&*callback_ptr).try_mutate(
+            &mut Some(MutateValue::new(value, inplace_mode)),
+            &mut mutator,
+        )
+    }
 }
 
 impl<State, Link, Marker, Policy> StructuralMutator for MutateCallbacks<State, Link, Marker, Policy>
 where
     Policy: MutContextPolicy<State>,
     Link: MutateChainLink<State, Marker>,
-    Link::Strategy: MutateCallbackStrategy<State, Link, Marker>,
 {
     #[inline(always)]
     fn dispatch_mutate(
@@ -1999,7 +1873,6 @@ where
 impl<Link, Marker> StructuralMutator for DirectMutateCallbacks<'_, Link, Marker>
 where
     Link: MutateChainLink<(), Marker>,
-    Link::Strategy: MutateCallbackStrategy<(), Link, Marker>,
 {
     #[inline(always)]
     fn dispatch_mutate(

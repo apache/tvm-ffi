@@ -83,7 +83,6 @@ pub(super) fn mutate_with_policy<State>(
             driver,
             def_region_kind: kind,
             inplace_mode: value.inplace_mode(),
-            _state: PhantomData,
             _not_send_sync: PhantomData,
         };
         policy.default_mutate(value, &mut ctx).map(Any::from)
@@ -192,8 +191,8 @@ impl<D, Policy> MutateCallbackState<D> for NativeMapper<'_, D, Policy> {
 
 /// A [`MapDispatch`] with a [`MutContextPolicy`], sharing the dispatcher's state.
 ///
-/// Run with [`Self::map`] or [`structural_map`]. Each node's map callback runs
-/// outside its policy scope; its children run inside.
+/// Pass this value or a mutable reference to [`structural_map`]. Each node's
+/// map callback runs outside its policy scope; its children run inside.
 /// This mapper cannot be a callback tuple member or another wrapper's dispatcher.
 /// Compose policies as `(outer, inner)` within one wrapper.
 pub struct MapWithContextPolicy<Mapper, Policy> {
@@ -224,11 +223,14 @@ impl<Mapper: MapDispatch, Policy: MutContextPolicy<Mapper>> MapWithContextPolicy
     pub fn into_state(self) -> Mapper {
         self.mapper
     }
+}
 
-    /// Map an owning root with fresh invocation-local identity substitutions.
-    pub fn map<R: Into<Any>>(&mut self, root: R, order: WalkOrder) -> Result<Any> {
+impl<Mapper: MapDispatch, Policy: MutContextPolicy<Mapper>> NativeMap
+    for MapWithContextPolicy<Mapper, Policy>
+{
+    fn map_root(&mut self, root: Any, order: WalkOrder) -> Result<Any> {
         run_structural_mutator(
-            root.into(),
+            root,
             &mut NativeMapper {
                 dispatch: &mut self.mapper,
                 order,
@@ -240,18 +242,10 @@ impl<Mapper: MapDispatch, Policy: MutContextPolicy<Mapper>> MapWithContextPolicy
 }
 
 impl<Mapper: MapDispatch, Policy: MutContextPolicy<Mapper>> NativeMap
-    for MapWithContextPolicy<Mapper, Policy>
-{
-    fn map_root(&mut self, root: Any, order: WalkOrder) -> Result<Any> {
-        self.map(root, order)
-    }
-}
-
-impl<Mapper: MapDispatch, Policy: MutContextPolicy<Mapper>> NativeMap
     for &mut MapWithContextPolicy<Mapper, Policy>
 {
     fn map_root(&mut self, root: Any, order: WalkOrder) -> Result<Any> {
-        self.map(root, order)
+        (**self).map_root(root, order)
     }
 }
 

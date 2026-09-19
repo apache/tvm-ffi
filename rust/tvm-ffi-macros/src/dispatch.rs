@@ -155,10 +155,7 @@ fn expand(item_impl: &ItemImpl, mode: DispatchMode) -> syn::Result<TokenStream2>
         DispatchMode::Visit => quote! {
             #tvm_ffi::extra::structural_visit::IntoVisitResult::into_visit_result
         },
-        DispatchMode::Map => quote! {
-            #tvm_ffi::extra::structural_mutate::IntoMapResult::into_map_result
-        },
-        DispatchMode::Mutate => quote! {
+        DispatchMode::Map | DispatchMode::Mutate => quote! {
             #tvm_ffi::extra::structural_mutate::IntoMutateResult::into_mutate_result
         },
     };
@@ -232,7 +229,7 @@ fn expand(item_impl: &ItemImpl, mode: DispatchMode) -> syn::Result<TokenStream2>
                     &mut self,
                     value: &#tvm_ffi::StructuralView,
                     def_region_kind: #tvm_ffi::extra::structural_visit::DefRegionKind,
-                ) -> Option<#tvm_ffi::extra::structural_mutate::MapResult> {
+                ) -> Option<#tvm_ffi::Result<#tvm_ffi::Any>> {
                     #(#links)*
                     None
                 }
@@ -248,7 +245,7 @@ fn expand(item_impl: &ItemImpl, mode: DispatchMode) -> syn::Result<TokenStream2>
                     &mut self,
                     value: &#tvm_ffi::StructuralView,
                     mutator: &mut #tvm_ffi::extra::structural_mutate::Mutator,
-                ) -> Option<#tvm_ffi::extra::structural_mutate::MutateResult> {
+                ) -> Option<#tvm_ffi::Result<#tvm_ffi::Any>> {
                     <Self as #tvm_ffi::extra::structural_mutate::MutateDispatch>::dispatch_mutate_value(
                         self, #tvm_ffi::MutateValue::borrowed(value), mutator,
                     )
@@ -260,8 +257,7 @@ fn expand(item_impl: &ItemImpl, mode: DispatchMode) -> syn::Result<TokenStream2>
                     &mut self,
                     mut value: #tvm_ffi::MutateValue<'_>,
                     mutator: &mut #tvm_ffi::Mutator,
-                ) -> Option<#tvm_ffi::extra::structural_mutate::MutateResult> {
-                    let inplace_mode = value.inplace_mode();
+                ) -> Option<#tvm_ffi::Result<#tvm_ffi::Any>> {
                     #(#links)*
                     None
                 }
@@ -289,9 +285,6 @@ fn expand_links(
             let method = &handler.method;
             let attrs = &handler.cfg_attrs;
             let trailing_arg = match mode {
-                DispatchMode::Mutate if handler.wants_inplace_mode => {
-                    quote!(, mutator, inplace_mode)
-                }
                 DispatchMode::Mutate if handler.wants_mutator => quote!(, mutator),
                 DispatchMode::Mutate => quote!(),
                 _ if handler.wants_def_region => quote!(, def_region_kind),
@@ -365,7 +358,6 @@ struct Handler {
     argument: HandlerArgument,
     wants_def_region: bool,
     wants_mutator: bool,
-    wants_inplace_mode: bool,
     cfg_attrs: Vec<Meta>,
 }
 
@@ -378,21 +370,16 @@ enum HandlerArgument {
 
 fn parse_handler(method: &ImplItemMethod, mode: DispatchMode) -> syn::Result<Handler> {
     let inputs = &method.sig.inputs;
-    let receiver_is_expected = match (mode, inputs.first()) {
-        (DispatchMode::Mutate, Some(FnArg::Receiver(receiver))) => {
-            receiver.reference.is_some() && receiver.mutability.is_some()
-        }
-        (_, Some(FnArg::Receiver(receiver))) => {
+    let receiver_is_expected = match inputs.first() {
+        Some(FnArg::Receiver(receiver)) => {
             receiver.reference.is_some() && receiver.mutability.is_some()
         }
         _ => false,
     };
-    let arity_is_expected = inputs.len() == 2
-        || inputs.len() == 3
-        || (matches!(mode, DispatchMode::Mutate) && inputs.len() == 4);
+    let arity_is_expected = inputs.len() == 2 || inputs.len() == 3;
     if !receiver_is_expected || !arity_is_expected {
         let message = if matches!(mode, DispatchMode::Mutate) {
-            "mutate handlers must take `&mut self`, a node, optionally `&mut Mutator`, then optionally `InplaceMode`"
+            "mutate handlers must take `&mut self`, a node, and optionally `&mut Mutator`"
                 .to_owned()
         } else {
             format!(
@@ -405,16 +392,6 @@ fn parse_handler(method: &ImplItemMethod, mode: DispatchMode) -> syn::Result<Han
     }
     let wants_def_region = !matches!(mode, DispatchMode::Mutate) && inputs.len() == 3;
     let wants_mutator = matches!(mode, DispatchMode::Mutate) && inputs.len() >= 3;
-    let wants_inplace_mode = matches!(mode, DispatchMode::Mutate) && inputs.len() == 4;
-    if wants_inplace_mode {
-        let Some(FnArg::Typed(arg)) = inputs.iter().nth(3) else {
-            unreachable!()
-        };
-        if !matches!(arg.ty.as_ref(), Type::Path(path) if path.path.segments.last().is_some_and(|s| s.ident == "InplaceMode" && matches!(s.arguments, PathArguments::None)))
-        {
-            return Err(syn::Error::new_spanned(&arg.ty, "expected `InplaceMode`"));
-        }
-    }
     if wants_mutator {
         let context_type = match inputs.iter().nth(2) {
             Some(FnArg::Typed(context)) => context.ty.as_ref(),
@@ -474,7 +451,6 @@ fn parse_handler(method: &ImplItemMethod, mode: DispatchMode) -> syn::Result<Han
         argument,
         wants_def_region,
         wants_mutator,
-        wants_inplace_mode,
         cfg_attrs,
     })
 }
@@ -562,10 +538,8 @@ fn is_dispatch_value(value_type: &Type) -> bool {
     let Type::Path(path) = value_type else {
         return false;
     };
-    path.path.segments.last().is_some_and(|segment| {
-        matches!(
-            segment.ident.to_string().as_str(),
-            "StructuralView" | "VisitValue" | "MapValue"
-        )
-    })
+    path.path
+        .segments
+        .last()
+        .is_some_and(|segment| segment.ident == "StructuralView")
 }

@@ -70,7 +70,6 @@ pub(crate) use impl_callback_chain_tuple_arities;
 /// borrows an object node, while [`Self::cast`] returns a typed value (acquiring
 /// ownership for object handles). This view does not grant in-place permission;
 /// consuming mutation callbacks use [`crate::MutateValue`] instead.
-/// `VisitValue` and `MapValue` remain compatibility names for this type.
 #[repr(transparent)]
 pub struct StructuralView(TVMFFIAny);
 

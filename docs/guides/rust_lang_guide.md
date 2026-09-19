@@ -367,8 +367,9 @@ callback must call `visit_children()` explicitly, and interrupt values must be
 returned explicitly because `?` only propagates errors.
 
 `VisitCallbacks::with_policy` and `WalkWithContextPolicy` use `ContextPolicy<State>`
-to manage context around default recursion. See the `ContextPolicy` API
-documentation for composition and shared state access.
+to manage context around default recursion. Pass `WalkWithContextPolicy` to
+`structural_walk`; pass `&mut walker` to reuse it and inspect its state afterward.
+See the `ContextPolicy` API documentation for composition and shared state access.
 
 For a named implementation, `#[dispatch(visit)]` generates
 `StructuralVisitor` from `visit_*` methods. Matching handlers own recursion;
@@ -418,7 +419,8 @@ explicitly from a `StructuralVisitor`, or skip it with a pre-order
 `WalkResult::Skip`.
 
 `StructuralView` is the shared borrowed callback value for visit, walk, map,
-and mutate; `VisitValue` and `MapValue` remain compatibility names.
+and mutate. Mapping callbacks return replacement values; their input view is
+borrowed and does not grant in-place mutation permission.
 
 ### Structural Mapping and Mutation
 
@@ -491,7 +493,8 @@ the same semantics as C++.
 `MutateCallbacks::with_policy` and `MapWithContextPolicy` use `MutContextPolicy<State>`
 to manage context around default recursion. Policies consume `MutateValue`
 and return `UnchangedOr<Any>`; see the API documentation for composition and
-scoped definition regions. Pass `MapWithContextPolicy` directly to `structural_map`;
+scoped definition regions. Pass `MapWithContextPolicy` directly to `structural_map`,
+or pass `&mut mapper` to reuse it and inspect its state afterward;
 it cannot be a callback tuple member or another wrapper's dispatcher. Compose
 policies as `(outer, inner)` within one wrapper.
 

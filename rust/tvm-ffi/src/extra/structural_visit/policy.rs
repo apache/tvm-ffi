@@ -154,7 +154,7 @@ impl<State, V: StructuralVisitor + VisitCallbackState<State>> VisitContextDriver
 ///
 /// The dispatcher is also the state visible through the policy's context. Use
 /// `#[dispatch(walk)]` or implement [`WalkDispatch`] to define its callbacks.
-/// Run repeatedly with [`Self::walk`], or pass this value to [`structural_walk`].
+/// Pass this value or a mutable reference to [`structural_walk`].
 pub struct WalkWithContextPolicy<Walker, Policy> {
     walker: Walker,
     policy: Rc<Policy>,
@@ -183,22 +183,6 @@ impl<Walker: WalkDispatch, Policy: ContextPolicy<Walker>> WalkWithContextPolicy<
     pub fn into_state(self) -> Walker {
         self.walker
     }
-
-    /// Walk a root using this dispatcher and policy.
-    pub fn walk<R>(&mut self, root: &R, order: WalkOrder) -> Result<Option<VisitInterrupt>>
-    where
-        for<'x> AnyView<'x>: From<&'x R>,
-    {
-        let raw = raw_of(AnyView::from(root));
-        finish(match order {
-            WalkOrder::PreOrder => {
-                run_structural_visitor(raw, self, walk_runtime_vtable::<Self, true>())
-            }
-            WalkOrder::PostOrder => {
-                run_structural_visitor(raw, self, walk_runtime_vtable::<Self, false>())
-            }
-        })
-    }
 }
 
 #[doc(hidden)]
@@ -206,6 +190,15 @@ pub enum ByPolicyWalk {}
 
 impl<Walker: WalkDispatch, Policy: ContextPolicy<Walker>> IntoWalker<ByPolicyWalk>
     for WalkWithContextPolicy<Walker, Policy>
+{
+    type Walker = Self;
+    fn into_walker(self) -> Self {
+        self
+    }
+}
+
+impl<Walker: WalkDispatch, Policy: ContextPolicy<Walker>> IntoWalker<ByPolicyWalk>
+    for &mut WalkWithContextPolicy<Walker, Policy>
 {
     type Walker = Self;
     fn into_walker(self) -> Self {

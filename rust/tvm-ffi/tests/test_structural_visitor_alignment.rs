@@ -27,8 +27,8 @@
 //! definition region, the rest inherit the surrounding state.
 
 use tvm_ffi::{
-    structural_visit, Array, DefRegionKind, Result, String as FfiString, StructuralVisitor,
-    VisitInterrupt, VisitValue,
+    structural_visit, Array, DefRegionKind, Result, String as FfiString, StructuralView,
+    StructuralVisitor, VisitInterrupt,
 };
 
 /// C++: class TestVisitorObj : public StructuralVisitorObj
@@ -49,7 +49,7 @@ impl StructuralVisitor for RecordingVisitor {
     /// `TFuncObj::StructuralVisit`.
     fn visit(
         &mut self,
-        value: &VisitValue,
+        value: &StructuralView,
         def_region_kind: DefRegionKind,
     ) -> Result<Option<VisitInterrupt>> {
         let integer = value.cast::<i64>();
@@ -103,9 +103,9 @@ fn records_values_and_def_region_modes() {
     assert_eq!(
         visitor.modes,
         vec![
-            DefRegionKind::None,      // the array itself
+            DefRegionKind::None,    // the array itself
             DefRegionKind::Pattern, // element 0: the "params" position
-            DefRegionKind::None,      // element 1: the "body" position
+            DefRegionKind::None,    // element 1: the "body" position
         ]
     );
 }
