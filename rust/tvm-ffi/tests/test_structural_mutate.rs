@@ -23,11 +23,12 @@ use tvm_ffi::function::FunctionObj;
 use tvm_ffi::object::ObjectRef;
 use tvm_ffi::{
     dispatch, structural_map, structural_mutate, structural_visit, structural_walk, Any, AnyView,
-    Array, DefRegionKind, DefaultMutContextPolicy, Error, FieldGetter, Function, InplaceMode,
-    InplaceValue, IntoMapper, Map, MapDispatch, MapWithContextPolicy, MutContextPolicy,
-    MutateCallbacks, MutateContext, MutateValue, Mutator, Object, ObjectArc, ObjectRefCore, Result,
-    String as FfiString, StructuralMutator, StructuralVarRemap, StructuralView, TypeIndex,
-    Unchanged, UnchangedOr, VisitContext, WalkOrder, WalkResult, RUNTIME_ERROR,
+    Array, DefRegionKind, DefaultContextPolicy, DefaultMutContextPolicy, Error, FieldGetter,
+    Function, InplaceMode, InplaceValue, IntoMapper, Map, MapDispatch, MapWithContextPolicy,
+    MutContextPolicy, MutateCallbacks, MutateContext, MutateValue, Mutator, Object, ObjectArc,
+    ObjectRefCore, Result, String as FfiString, StructuralMutator, StructuralVarRemap,
+    StructuralView, StructuralVisitor, TypeIndex, Unchanged, UnchangedOr, VisitCallbacks,
+    VisitContext, VisitInterrupt, WalkOrder, WalkResult, RUNTIME_ERROR,
 };
 
 struct IncrementIntegers;
@@ -743,6 +744,29 @@ fn reflected_object_without_shallow_copy_is_rejected_even_when_unchanged() {
 
 #[test]
 fn callback_errors_preserve_message_and_add_object_context() {
+    struct Delegate(Error);
+    #[dispatch(visit, policy = (DefaultContextPolicy, DefaultContextPolicy))]
+    impl Delegate {
+        fn visit_any(
+            &mut self,
+            value: &StructuralView,
+            kind: DefRegionKind,
+        ) -> Result<Option<VisitInterrupt>> {
+            if value.cast::<i64>().is_some() {
+                return Err(self.0.clone());
+            }
+            self.default_visit_children(value, kind)
+        }
+    }
+    #[dispatch(mutate, policy = (DefaultMutContextPolicy, DefaultMutContextPolicy))]
+    impl Delegate {
+        fn mutate_any(&mut self, value: MutateValue<'_>, ctx: &mut Mutator) -> Result<Any> {
+            if value.cast::<i64>().is_some() {
+                return Err(self.0.clone());
+            }
+            ctx.default_maybe_inplace_mutate(self, value)
+        }
+    }
     let child = reflected_object();
     let root = call_global(
         "ffi.MakeObjectFromPackedArgs",
@@ -800,6 +824,15 @@ fn callback_errors_preserve_message_and_add_object_context() {
             .err()
             .unwrap(),
         );
+        let mut mapper = MapWithContextPolicy::new(
+            (|_: i64| -> Result<i64> { Err(source.clone()) }).into_mapper(),
+            (DefaultMutContextPolicy, DefaultMutContextPolicy),
+        );
+        errors.push(
+            structural_map(root.clone(), &mut mapper, order)
+                .err()
+                .unwrap(),
+        );
     }
     errors.push(
         structural_mutate(
@@ -817,6 +850,34 @@ fn callback_errors_preserve_message_and_add_object_context() {
         .err()
         .unwrap(),
     );
+    let mut visitor = VisitCallbacks::new(
+        (),
+        |value: &StructuralView, ctx: &mut VisitContext<'_, ()>| {
+            if value.cast::<i64>().is_some() {
+                return Err(source.clone());
+            }
+            ctx.visit_children()
+        },
+    )
+    .with_policy((DefaultContextPolicy, DefaultContextPolicy));
+    errors.push(structural_visit(&root, &mut visitor).err().unwrap());
+    let mut mutator =
+        MutateCallbacks::new((), |value: MutateValue<'_>, ctx: &mut MutateContext| {
+            if value.cast::<i64>().is_some() {
+                return Err(source.clone());
+            }
+            ctx.default_maybe_inplace_mutate(value)
+        })
+        .with_policy((DefaultMutContextPolicy, DefaultMutContextPolicy));
+    errors.push(structural_mutate(root.clone(), &mut mutator).err().unwrap());
+    let mut delegate = Delegate(source.clone());
+    errors.push(structural_visit(&root, &mut delegate).err().unwrap());
+    errors.push(
+        structural_mutate(root.clone(), &mut delegate)
+            .err()
+            .unwrap(),
+    );
+    let seeded = errors[0].clone();
     for error in errors {
         assert_eq!(error.message(), "callback failed");
         assert!(error.backtrace().contains("origin"));
@@ -831,6 +892,9 @@ fn callback_errors_preserve_message_and_add_object_context() {
             "reverse_visit_pattern",
         ));
         let size = i64::try_from(call_global("ffi.ListSize", &[records.clone()])).unwrap();
+        assert_eq!(size, 2);
+        let innermost = call_global("ffi.ListGetItem", &[records.clone(), 0_i64.into()]);
+        assert_eq!(any_object_pointer(&innermost), any_object_pointer(&child));
         let outermost = call_global("ffi.ListGetItem", &[records, (size - 1).into()]);
         assert_eq!(any_object_pointer(&outermost), any_object_pointer(&root));
         let paths = call_global(
@@ -856,6 +920,28 @@ fn callback_errors_preserve_message_and_add_object_context() {
         1
     );
     assert_eq!(source.backtrace(), "origin");
+
+    // Keep nonconsecutive occurrences: child -> root -> child is a distinct path.
+    let error = structural_map(
+        child.clone(),
+        |_: i64| -> Result<i64> { Err(seeded.clone()) },
+        WalkOrder::PreOrder,
+    )
+    .err()
+    .unwrap();
+    let context = Any::from(error.extra_context().unwrap());
+    let records = Any::from(reflected_field::<ObjectRef>(
+        &context,
+        "reverse_visit_pattern",
+    ));
+    assert_eq!(
+        i64::try_from(call_global("ffi.ListSize", &[records.clone()])).unwrap(),
+        3
+    );
+    for (i, expected) in [&child, &root, &child].into_iter().enumerate() {
+        let node = call_global("ffi.ListGetItem", &[records.clone(), (i as i64).into()]);
+        assert_eq!(any_object_pointer(&node), any_object_pointer(expected));
+    }
 
     // The failing node may be a pre-order replacement or a post-order rebuilt parent.
     for order in [WalkOrder::PreOrder, WalkOrder::PostOrder] {

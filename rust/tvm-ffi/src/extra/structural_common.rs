@@ -45,6 +45,7 @@ pub(crate) fn with_visit_error_context(error: Error, raw: TVMFFIAny) -> Error {
             ))
             .ok()?;
         }
+        let node = StructuralView::from_raw(raw).cast::<object::ObjectRef>()?;
         let mut previous = error.extra_context();
         let mut nodes = Vec::new();
         if let Some(prior) = previous.as_ref() {
@@ -60,6 +61,16 @@ pub(crate) fn with_visit_error_context(error: Error, raw: TVMFFIAny) -> Error {
                     .ok()?
                     .try_as::<i64>()?;
                 let get_item = Function::get_global("ffi.ListGetItem").ok()?;
+                if size > 0 {
+                    let last = get_item
+                        .call_tuple((records.clone(), size - 1))
+                        .ok()?
+                        .try_as::<object::ObjectRef>()?;
+                    // Callback, policy and default descent can report the same frame.
+                    if last.same_as(&node) {
+                        return None;
+                    }
+                }
                 for i in 0..size {
                     nodes.push(get_item.call_tuple((records.clone(), i)).ok()?);
                 }
@@ -69,7 +80,6 @@ pub(crate) fn with_visit_error_context(error: Error, raw: TVMFFIAny) -> Error {
                     .ok()?;
             }
         }
-        let node = StructuralView::from_raw(raw).cast::<object::ObjectRef>()?;
         nodes.push(Any::from(node));
         let records = Function::get_global("ffi.List")
             .ok()?
