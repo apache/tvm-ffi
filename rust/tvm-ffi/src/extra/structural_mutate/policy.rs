@@ -78,6 +78,7 @@ pub(super) fn mutate_with_policy<State>(
     value: MutateValue<'_>,
     kind: DefRegionKind,
 ) -> Result<Any> {
+    let raw = value.value.raw();
     with_mutation_region(kind, |kind| {
         let mut ctx = MutateContext {
             driver,
@@ -87,6 +88,7 @@ pub(super) fn mutate_with_policy<State>(
         };
         policy.default_mutate(value, &mut ctx).map(Any::from)
     })
+    .map_err(|error| with_value_context(error, raw))
 }
 
 struct NextPolicy<'a, State, Policy> {

@@ -17,12 +17,12 @@
  * under the License.
  */
 use crate::derive::{Object, ObjectRef};
-use crate::object::{Object, ObjectArc};
+use crate::object::{self, Object, ObjectArc, ObjectRefCore};
 use std::ffi::c_void;
 use tvm_ffi_sys::TVMFFIBacktraceUpdateMode::kTVMFFIBacktraceUpdateModeAppend;
 use tvm_ffi_sys::{
-    TVMFFIByteArray, TVMFFIErrorCell, TVMFFIErrorCreate, TVMFFIErrorMoveFromRaised,
-    TVMFFIErrorSetRaised, TVMFFIObjectHandle, TVMFFITypeIndex,
+    TVMFFIByteArray, TVMFFIErrorCell, TVMFFIErrorCreateWithCauseAndExtraContext,
+    TVMFFIErrorMoveFromRaised, TVMFFIErrorSetRaised, TVMFFIObjectHandle, TVMFFITypeIndex,
 };
 
 /// Error kind, wraps in a struct to be explicit
@@ -69,15 +69,32 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 impl Error {
     pub fn new(kind: ErrorKind<'_>, message: &str, traceback: &str) -> Self {
+        Self::new_with_cause_and_extra_context(kind, message, traceback, None, None)
+    }
+
+    /// Create an error retaining its cause and any application-specific context.
+    pub fn new_with_cause_and_extra_context(
+        kind: ErrorKind<'_>,
+        message: &str,
+        traceback: &str,
+        cause_chain: Option<&Error>,
+        extra_context: Option<&object::ObjectRef>,
+    ) -> Self {
         unsafe {
             let kind_data = TVMFFIByteArray::from_str(kind.as_str());
             let message_data = TVMFFIByteArray::from_str(message);
             let traceback_data = TVMFFIByteArray::from_str(traceback);
             let mut error_handle: TVMFFIObjectHandle = std::ptr::null_mut();
-            let ret = TVMFFIErrorCreate(
+            let ret = TVMFFIErrorCreateWithCauseAndExtraContext(
                 &kind_data,
                 &message_data,
                 &traceback_data,
+                cause_chain.map_or(std::ptr::null_mut(), |cause| {
+                    ObjectArc::as_raw(&cause.data) as TVMFFIObjectHandle
+                }),
+                extra_context.map_or(std::ptr::null_mut(), |context| {
+                    ObjectArc::as_raw(object::ObjectRef::data(context)) as TVMFFIObjectHandle
+                }),
                 &mut error_handle,
             );
             assert_eq!(ret, 0, "Failed to create error object");
@@ -137,6 +154,35 @@ impl Error {
         self.data.cell.backtrace.as_str()
     }
 
+    /// Return the cause, if one was attached to this error.
+    pub fn cause_chain(&self) -> Option<Error> {
+        let handle = self.data.cell.cause_chain;
+        if handle.is_null() {
+            return None;
+        }
+        // The cell owns the handle; acquire a reference for the returned wrapper.
+        unsafe {
+            object::unsafe_::inc_ref(handle.cast());
+            Some(Self {
+                data: ObjectArc::from_raw(handle.cast()),
+            })
+        }
+    }
+
+    /// Return the application-specific context, if present.
+    pub fn extra_context(&self) -> Option<object::ObjectRef> {
+        let handle = self.data.cell.extra_context;
+        if handle.is_null() {
+            return None;
+        }
+        unsafe {
+            object::unsafe_::inc_ref(handle.cast());
+            Some(object::ObjectRef::from_data(ObjectArc::from_raw(
+                handle.cast(),
+            )))
+        }
+    }
+
     /// Get the traceback of the error in the order of most recent call last
     ///
     /// # Returns
@@ -179,7 +225,13 @@ impl Error {
             let mut new_backtrace = String::new();
             new_backtrace.push_str(this.backtrace());
             new_backtrace.push_str(backtrace);
-            return Error::new(this.kind(), this.message(), &new_backtrace);
+            Self::new_with_cause_and_extra_context(
+                this.kind(),
+                this.message(),
+                &new_backtrace,
+                this.cause_chain().as_ref(),
+                this.extra_context().as_ref(),
+            )
         }
     }
 }

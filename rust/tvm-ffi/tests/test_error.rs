@@ -59,6 +59,30 @@ fn test_error_with_context() {
     assert!(error0.backtrace().contains("test_error_with_context"));
     let result = error_fn1(false).unwrap();
     assert_eq!(result, 1);
+
+    let payload = object::ObjectRef::try_from(Any::from(Array::new(vec![7i64]))).unwrap();
+    for shared in [false, true] {
+        let error = Error::new_with_cause_and_extra_context(
+            RUNTIME_ERROR,
+            "outer",
+            "origin",
+            Some(&error0),
+            Some(&payload),
+        );
+        let retained = shared.then(|| error.clone());
+        let output = Error::with_appended_backtrace(error, " frame");
+        assert_eq!(output.backtrace(), "origin frame");
+        assert!(output.cause_chain().unwrap().same_as(&error0));
+        assert!(output.extra_context().unwrap().same_as(&payload));
+        if let Some(retained) = retained {
+            assert_eq!(retained.backtrace(), "origin");
+        }
+    }
+    assert_eq!(ObjectArc::strong_count(Error::data(&error0)), 1);
+    assert_eq!(
+        ObjectArc::strong_count(object::ObjectRef::data(&payload)),
+        1
+    );
 }
 
 #[test]

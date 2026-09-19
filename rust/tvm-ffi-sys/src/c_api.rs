@@ -301,6 +301,8 @@ pub struct TVMFFIErrorCell {
         backtrace: *const TVMFFIByteArray,
         update_mode: i32,
     ),
+    pub cause_chain: TVMFFIObjectHandle,
+    pub extra_context: TVMFFIObjectHandle,
 }
 
 /// Shape cell used in shape object following header.
@@ -501,6 +503,14 @@ unsafe extern "C" {
         kind: *const TVMFFIByteArray,
         message: *const TVMFFIByteArray,
         backtrace: *const TVMFFIByteArray,
+        out: *mut TVMFFIObjectHandle,
+    ) -> i32;
+    pub fn TVMFFIErrorCreateWithCauseAndExtraContext(
+        kind: *const TVMFFIByteArray,
+        message: *const TVMFFIByteArray,
+        backtrace: *const TVMFFIByteArray,
+        cause_chain: TVMFFIObjectHandle,
+        extra_context: TVMFFIObjectHandle,
         out: *mut TVMFFIObjectHandle,
     ) -> i32;
     pub fn TVMFFITensorFromDLPack(

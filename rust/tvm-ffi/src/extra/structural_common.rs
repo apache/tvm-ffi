@@ -19,12 +19,39 @@
 
 use crate::any::{Any, AnyView};
 use crate::error::Error;
+use crate::function::Function;
 use crate::object::{self, ObjectCore};
 use crate::tvm_ffi_sys::{TVMFFIAny, TVMFFIGetTypeInfo, TVMFFITypeIndex};
 
 /// Add one structural traversal frame to an error's backtrace.
 pub(crate) fn with_structural_error_context(error: Error, operation: &str, frame: &str) -> Error {
     Error::with_appended_backtrace(error, &format!("[native structural {operation}] {frame}\n"))
+}
+
+#[cold]
+pub(crate) fn with_visit_error_context(error: Error, raw: TVMFFIAny) -> Error {
+    if raw.type_index < TVMFFITypeIndex::kTVMFFIStaticObjectBegin as i32 {
+        return error;
+    }
+    let context = (|| {
+        let node = StructuralView::from_raw(raw).cast::<object::ObjectRef>()?;
+        Function::get_global("ffi.VisitErrorContext.WithNode")
+            .ok()?
+            .call_tuple((error.extra_context(), Any::from(node)))
+            .ok()?
+            .try_as::<object::ObjectRef>()
+    })();
+    // Diagnostic enrichment must not replace the original error on failure.
+    match context {
+        Some(context) => Error::new_with_cause_and_extra_context(
+            error.kind(),
+            error.message(),
+            error.backtrace(),
+            error.cause_chain().as_ref(),
+            Some(&context),
+        ),
+        None => error,
+    }
 }
 
 // Generate the tuple arities supported by the standard library (1 through 12).

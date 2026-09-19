@@ -50,7 +50,7 @@ use crate::tvm_ffi_sys::{TVMFFIObjectHandle, TVMFFISEqHashKind};
 
 use super::structural_common::{
     impl_callback_chain_tuple_arities, is_plain_inline, same_shallow,
-    try_to_owned_without_normalization, with_structural_error_context,
+    try_to_owned_without_normalization, with_structural_error_context, with_visit_error_context,
 };
 use super::structural_visit::{
     field_def_region, for_each_field_info, free_var_child_region, type_attr_column, type_key_of,
@@ -2033,7 +2033,6 @@ impl<D: MapDispatch, Policy: MutContextPolicy<D>> NativeMapper<'_, D, Policy> {
         }
 
         self.map_current_raw(raw, def_region_kind, permit)
-            .map_err(|error| with_value_context(error, raw))
     }
 
     fn map_current_raw(
@@ -2052,7 +2051,7 @@ impl<D: MapDispatch, Policy: MutContextPolicy<D>> NativeMapper<'_, D, Policy> {
                 else {
                     return self.default_map_current_raw(raw, def_region_kind, permit);
                 };
-                let mapped = callback_result?;
+                let mapped = callback_result.map_err(|error| with_value_context(error, raw))?;
                 let mapped_raw = *mapped.as_raw_ffi_any();
                 if is_unchanged(&mapped) || same_shallow(raw, mapped_raw) {
                     // Release the callback's temporary ownership before the
@@ -2079,7 +2078,7 @@ impl<D: MapDispatch, Policy: MutContextPolicy<D>> NativeMapper<'_, D, Policy> {
                 // Keep child rewrites when the callback leaves its input unchanged.
                 match self.dispatch.dispatch_map(&value, def_region_kind) {
                     Some(Ok(result)) if is_unchanged(&result) => Ok(mapped),
-                    Some(result) => result,
+                    Some(result) => result.map_err(|error| with_value_context(error, mapped_raw)),
                     None => Ok(mapped),
                 }
             }
@@ -2095,7 +2094,6 @@ impl<D: MapDispatch, Policy: MutContextPolicy<D>> NativeMapper<'_, D, Policy> {
     ) -> Result<Any> {
         let raw = *mapped.as_raw_ffi_any();
         self.default_map_current_raw(raw, def_region_kind, permit)
-            .map_err(|error| with_value_context(error, raw))
     }
 }
 
@@ -2980,9 +2978,20 @@ fn user_default_mutate<U: StructuralMutator>(
         let value = StructuralView::from_raw(raw);
         mutator.on_default_mutate(MutateValue::new(&value, permit.inplace_mode(raw)), kind)
     })
+    .map_err(|error| with_value_context(error, raw))
 }
 
 fn default_mutate_driver<D: MutationDriver>(
+    driver: &mut D,
+    raw: TVMFFIAny,
+    def_region_kind: DefRegionKind,
+    permit: Permit,
+) -> Result<Any> {
+    default_mutate_driver_impl(driver, raw, def_region_kind, permit)
+        .map_err(|error| with_value_context(error, raw))
+}
+
+fn default_mutate_driver_impl<D: MutationDriver>(
     driver: &mut D,
     raw: TVMFFIAny,
     def_region_kind: DefRegionKind,
@@ -3215,7 +3224,10 @@ fn with_value_context(error: Error, raw: TVMFFIAny) -> Error {
     if raw.type_index < TVMFFITypeIndex::kTVMFFIStaticObjectBegin as i32 {
         error
     } else {
-        with_error_context(error, &format!("object `{}`", type_key_of(raw.type_index)))
+        with_error_context(
+            with_visit_error_context(error, raw),
+            &format!("object `{}`", type_key_of(raw.type_index)),
+        )
     }
 }
 

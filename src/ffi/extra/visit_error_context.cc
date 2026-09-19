@@ -325,6 +325,20 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def_ro("prev_error_context", &VisitErrorContextObj::prev_error_context);
   refl::GlobalDef().def("ffi.VisitErrorContext.FindAccessPaths",
                         &VisitErrorContext::FindAccessPaths);
+  // Bindings can append a node without mutating retained errors or contexts.
+  refl::GlobalDef().def(
+      "ffi.VisitErrorContext.WithNode", [](Optional<ObjectRef> previous, const ObjectRef& node) {
+        auto context = make_object<VisitErrorContextObj>();
+        if (auto prior = previous.as<VisitErrorContext>()) {
+          context->reverse_visit_pattern = List<ObjectRef>((*prior)->reverse_visit_pattern.begin(),
+                                                           (*prior)->reverse_visit_pattern.end());
+          context->prev_error_context = (*prior)->prev_error_context;
+        } else {
+          context->prev_error_context = std::move(previous);
+        }
+        context->reverse_visit_pattern.push_back(node);
+        return VisitErrorContext(std::move(context));
+      });
 }
 
 }  // namespace ffi

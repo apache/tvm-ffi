@@ -65,7 +65,9 @@ use crate::tvm_ffi_sys::{
     TVMFFIObject, TVMFFISEqHashKind, TVMFFITypeAttrColumn, TVMFFITypeIndex, TVMFFITypeKeyToIndex,
 };
 
-use super::structural_common::{impl_callback_chain_tuple_arities, with_structural_error_context};
+use super::structural_common::{
+    impl_callback_chain_tuple_arities, with_structural_error_context, with_visit_error_context,
+};
 
 const STRUCTURAL_VISIT_ATTR: &str = "__s_visit__";
 const FLAG_SEQ_HASH_IGNORE: i64 = kTVMFFIFieldFlagBitMaskSEqHashIgnore as i64;
@@ -1223,7 +1225,7 @@ impl<V: StructuralVisitor> ChildVisit for UserChildren<'_, V> {
         {
             Ok(None) => Ok(()),
             Ok(Some(interrupt)) => Err(NativeHalt::Interrupt(interrupt.value)),
-            Err(error) => Err(NativeHalt::Error(error)),
+            Err(error) => Err(with_value_context(NativeHalt::Error(error), child)),
         }
     }
 }
@@ -1722,7 +1724,7 @@ unsafe fn runtime_user_visit<V: StructuralVisitor>(
     match (&mut *context.cast::<V>()).visit(&StructuralView::from_raw(raw), def_region_kind) {
         Ok(None) => Ok(()),
         Ok(Some(interrupt)) => Err(NativeHalt::Interrupt(interrupt.value)),
-        Err(error) => Err(NativeHalt::Error(error)),
+        Err(error) => Err(with_value_context(NativeHalt::Error(error), raw)),
     }
 }
 
@@ -1918,6 +1920,10 @@ fn with_value_context(halt: NativeHalt, value: TVMFFIAny) -> NativeHalt {
     if value.type_index < TVMFFITypeIndex::kTVMFFIStaticObjectBegin as i32 {
         halt
     } else {
+        let halt = match halt {
+            NativeHalt::Error(error) => NativeHalt::Error(with_visit_error_context(error, value)),
+            interrupt => interrupt,
+        };
         with_error_context(halt, &format!("object `{}`", type_key_of(value.type_index)))
     }
 }
