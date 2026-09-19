@@ -109,6 +109,18 @@ fn composed_policies_share_array_scope_with_visit_and_walk_callbacks() {
     // Only unmatched arrays enter the default policies in this visit.
     assert_eq!(visitor.state().descent_depths, vec![1, 2]);
 
+    #[dispatch(visit, policy = (ArrayScope, RecordDescent))]
+    impl CollectIntegers {
+        fn visit_integer(&mut self, value: i64) {
+            self.record(value);
+        }
+    }
+    let mut visitor = CollectIntegers::default();
+    assert!(structural_visit(&root, &mut visitor).unwrap().is_none());
+    assert_eq!(visitor.integers, expected);
+    assert_eq!(visitor.descent_depths, vec![1, 2]);
+    assert_eq!(visitor.depth, 0);
+
     #[dispatch(walk)]
     impl CollectIntegers {
         fn walk_integer(&mut self, value: i64) -> WalkResult {
@@ -194,9 +206,31 @@ fn policy_continuation_scopes_regions_and_restores_after_halts() {
         }
     }
     use DefRegionKind::{None as Use, Pattern, Simple};
+    #[dispatch(visit, policy = (Scope(Simple, 4), (Scope(Pattern, 3), Scope(Use, 2))))]
+    impl Probe {
+        fn visit_any(
+            &mut self,
+            value: &StructuralView,
+            kind: DefRegionKind,
+        ) -> Result<Option<VisitInterrupt>> {
+            if let Some(value) = value.cast::<i64>() {
+                self.record(value, kind)
+            } else {
+                self.default_visit_children(value, kind)
+            }
+        }
+    }
     let root = Array::new(vec![1_i64, 5]);
     for outcome in [Outcome::Finish, Outcome::Interrupt, Outcome::Error] {
-        for order in [None, Some(WalkOrder::PreOrder), Some(WalkOrder::PostOrder)] {
+        for (entry, order) in [
+            None,
+            None,
+            Some(WalkOrder::PreOrder),
+            Some(WalkOrder::PostOrder),
+        ]
+        .into_iter()
+        .enumerate()
+        {
             let state = Probe {
                 outcome,
                 seen: vec![],
@@ -212,6 +246,10 @@ fn policy_continuation_scopes_regions_and_restores_after_halts() {
                     .unwrap()
                     .is_none());
                 (result, walker.into_state())
+            } else if entry == 0 {
+                let mut visitor = state;
+                let result = structural_visit(&root, &mut visitor);
+                (result, visitor)
             } else {
                 let mut visitor =
                     VisitCallbacks::new(state, |value: i64, ctx: &mut VisitContext<'_, Probe>| {
@@ -591,37 +629,61 @@ fn policy_regions_compose_with_field_flags_and_function_hooks() {
     }
 }
 
-#[test]
-fn walk_policy_preserves_reflected_pattern_before_default_descent() {
-    let root = visit_region_graph(false);
-    struct Reenter(DefRegionKind);
-    impl ContextPolicy<PolicyRegionTrace> for Reenter {
-        fn default_visit(
-            &self,
-            value: &StructuralView,
-            ctx: &mut VisitContext<'_, PolicyRegionTrace>,
-        ) -> Result<Option<VisitInterrupt>> {
-            match value.cast::<i64>() {
-                Some(2) => {
-                    assert_eq!(ctx.def_region_kind(), DefRegionKind::Pattern);
-                    // Re-dispatch immediately: visit_children() must not be needed
-                    // to synchronize the ABI visitor with the reflected field region.
-                    ctx.visit_with(&99_i64, self.0)
-                }
-                Some(3) => {
-                    assert_eq!(ctx.def_region_kind(), DefRegionKind::None);
-                    // The preceding field's Pattern scope must not leak into a sibling.
-                    ctx.visit(&100_i64)
-                }
-                _ => ctx.visit_children(),
+struct ReenterRegion(DefRegionKind);
+impl ContextPolicy<PolicyRegionTrace> for ReenterRegion {
+    fn default_visit(
+        &self,
+        value: &StructuralView,
+        ctx: &mut VisitContext<'_, PolicyRegionTrace>,
+    ) -> Result<Option<VisitInterrupt>> {
+        match value.cast::<i64>() {
+            Some(2) => {
+                assert_eq!(ctx.def_region_kind(), DefRegionKind::Pattern);
+                // Re-dispatch immediately: visit_children() must not be needed
+                // to synchronize the ABI visitor with the reflected field region.
+                ctx.visit_with(&99_i64, self.0)
             }
+            Some(3) => {
+                assert_eq!(ctx.def_region_kind(), DefRegionKind::None);
+                // The preceding field's Pattern scope must not leak into a sibling.
+                ctx.visit(&100_i64)
+            }
+            _ => ctx.visit_children(),
         }
     }
+}
+
+#[dispatch(visit, policy = ReenterRegion(DefRegionKind::None))]
+impl PolicyRegionTrace {
+    fn visit_any(
+        &mut self,
+        value: &StructuralView,
+        kind: DefRegionKind,
+    ) -> Result<Option<VisitInterrupt>> {
+        if let Some(integer) = value.cast::<i64>() {
+            self.walk_integer(integer, kind);
+            if integer != 2 && integer != 3 {
+                return Ok(None);
+            }
+        }
+        self.default_visit_children(value, DefRegionKind::None)
+    }
+}
+
+#[test]
+fn policies_preserve_reflected_pattern_before_default_descent() {
+    let root = visit_region_graph(false);
     use DefRegionKind::{None as Use, Pattern, Simple};
+    let mut visitor = PolicyRegionTrace::default();
+    assert!(structural_visit(&root, &mut visitor).unwrap().is_none());
+    assert_eq!(
+        visitor.0,
+        vec![(1, Simple), (2, Pattern), (99, Pattern), (3, Use), (100, Use)]
+    );
     for requested in [Use, Simple] {
         for order in [WalkOrder::PreOrder, WalkOrder::PostOrder] {
             let mut walker =
-                WalkWithContextPolicy::new(PolicyRegionTrace::default(), Reenter(requested));
+                WalkWithContextPolicy::new(PolicyRegionTrace::default(), ReenterRegion(requested));
             assert!(structural_walk(&root, &mut walker, order)
                 .unwrap()
                 .is_none());

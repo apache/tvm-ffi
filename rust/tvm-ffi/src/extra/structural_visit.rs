@@ -564,7 +564,8 @@ struct DirectVisitCallbacks<'a, Link, Marker> {
     _marker: PhantomData<fn(Marker)>,
 }
 
-trait VisitCallbackState<State> {
+#[doc(hidden)]
+pub trait VisitCallbackState<State> {
     fn callback_state(&self) -> &State;
     fn callback_state_mut(&mut self) -> &mut State;
 }
@@ -1014,6 +1015,16 @@ fn default_user_visit_children<V: StructuralVisitor>(
     )
 }
 
+#[doc(hidden)]
+pub fn default_visit_with_policy<V: StructuralVisitor + VisitCallbackState<V>>(
+    visitor: &mut V,
+    policy: &impl ContextPolicy<V>,
+    value: &StructuralView,
+    kind: DefRegionKind,
+) -> Result<Option<VisitInterrupt>> {
+    policy::visit_with_policy(&mut policy::VisitDescent { visitor }, policy, value, kind)
+}
+
 fn try_visit_callbacks<State, Link, Marker>(
     driver: &mut impl VisitContextDriver<State>,
     callback_ptr: *const Link,
@@ -1219,10 +1230,9 @@ impl<V: StructuralVisitor> ChildVisit for UserChildren<'_, V> {
         if child.type_index == TVMFFITypeIndex::kTVMFFINone as i32 {
             return Ok(());
         }
-        match self
-            .visitor
-            .visit(&StructuralView::from_raw(child), def_region_kind)
-        {
+        match with_visit_region(def_region_kind, |kind| {
+            self.visitor.visit(&StructuralView::from_raw(child), kind)
+        }) {
             Ok(None) => Ok(()),
             Ok(Some(interrupt)) => Err(NativeHalt::Interrupt(interrupt.value)),
             Err(error) => Err(with_value_context(NativeHalt::Error(error), child)),
@@ -1878,6 +1888,18 @@ fn visit_result_from_any(value: Any) -> NativeResult {
         )
         .into()),
     }
+}
+
+fn with_visit_region<T>(
+    kind: DefRegionKind,
+    callback: impl FnOnce(DefRegionKind) -> Result<T>,
+) -> Result<T> {
+    let active = active_structural_visitor()?;
+    with_visitor_def_region(active, kind, || {
+        // SAFETY: the active invocation keeps this thread's ABI visitor alive.
+        let kind = def_region_from_raw(unsafe { (*active).def_region_mode })?;
+        callback(kind)
+    })
 }
 
 fn with_visitor_def_region<T>(

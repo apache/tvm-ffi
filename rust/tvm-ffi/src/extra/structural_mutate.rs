@@ -766,6 +766,16 @@ pub trait MutateDispatch: Sized {
     ) -> Option<Result<Any>> {
         self.dispatch_mutate(value.as_value(), mutator)
     }
+
+    #[doc(hidden)]
+    fn on_default_mutate(&mut self, value: MutateValue<'_>, kind: DefRegionKind) -> Result<Any> {
+        default_mutate_driver(
+            self,
+            value.value.raw(),
+            kind,
+            value.permit(value.inplace_mode()),
+        )
+    }
 }
 
 impl<D: MutateDispatch> IntoMutator<ByMutateDispatch> for D {
@@ -1022,7 +1032,8 @@ struct DirectMutateCallbacks<'a, Link, Marker> {
     _marker: PhantomData<fn(Marker)>,
 }
 
-trait MutateCallbackState<State> {
+#[doc(hidden)]
+pub trait MutateCallbackState<State> {
     fn callback_state(&self) -> &State;
     fn callback_state_mut(&mut self) -> &mut State;
 }
@@ -1724,6 +1735,10 @@ pub trait StructuralMutator: Sized {
 }
 
 impl<D: MutateDispatch> StructuralMutator for D {
+    fn on_default_mutate(&mut self, value: MutateValue<'_>, kind: DefRegionKind) -> Result<Any> {
+        MutateDispatch::on_default_mutate(self, value, kind)
+    }
+
     #[inline(always)]
     fn dispatch_mutate(
         &mut self,
@@ -1773,6 +1788,21 @@ impl<D: MutateDispatch> StructuralMutator for D {
             }
         }
     }
+}
+
+#[doc(hidden)]
+pub fn default_mutate_with_policy<D: MutateDispatch + MutateCallbackState<D>>(
+    dispatch: &mut D,
+    policy: &impl MutContextPolicy<D>,
+    value: MutateValue<'_>,
+    kind: DefRegionKind,
+) -> Result<Any> {
+    policy::mutate_with_policy(
+        &mut policy::MutationDescent { driver: dispatch },
+        policy,
+        value,
+        kind,
+    )
 }
 
 // Closure callback chains use a type-erased context driver so one concrete

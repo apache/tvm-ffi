@@ -1944,6 +1944,13 @@ impl MutContextPolicy<PolicyState> for RecordPolicy {
     }
 }
 
+#[dispatch(mutate, policy = (ArrayPolicy, RecordPolicy))]
+impl PolicyState {
+    fn mutate_integer(&mut self, value: i64) -> i64 {
+        self.map_integer(value)
+    }
+}
+
 #[test]
 fn mutation_policies_share_state_and_preserve_callback_order() {
     let root = || Array::new(vec![Any::from(Array::new(vec![1_i64])), Any::from(2_i64)]);
@@ -2012,6 +2019,21 @@ fn mutation_policies_share_state_and_preserve_callback_order() {
     assert_eq!(i64::try_from(array_item(&output, 1)).unwrap(), 3);
     assert_eq!(mutator.state().events, pre);
     assert_eq!(mutator.state().depth, 0);
+
+    let mut dispatch = PolicyState::default();
+    let output = structural_mutate(root(), &mut dispatch).unwrap();
+    assert_eq!(i64::try_from(array_item(&output, 1)).unwrap(), 3);
+    assert_eq!(
+        i64::try_from(array_item(&array_item(&output, 0), 0)).unwrap(),
+        2
+    );
+    assert_eq!(dispatch.depth, 0);
+    assert_eq!(
+        dispatch.events,
+        pre.into_iter()
+            .filter(|(tag, _)| *tag != "callback")
+            .collect::<Vec<_>>()
+    );
 }
 
 #[test]
@@ -2061,6 +2083,8 @@ fn mutation_policy_continuations_preserve_ownership_and_markers() {
     struct Ownership {
         increment: bool,
         retained: Option<Any>,
+        mode: InplaceMode,
+        retain: bool,
     }
     #[dispatch(map)]
     impl Ownership {
@@ -2095,8 +2119,24 @@ fn mutation_policy_continuations_preserve_ownership_and_markers() {
             Ok(result)
         }
     }
-    for entry in 0..3 {
-        // pre-order map, post-order map, mutation callback
+    #[dispatch(mutate, policy = (
+        Control { mode: self.mode, retain: self.retain },
+        DefaultMutContextPolicy,
+    ))]
+    impl Ownership {
+        fn mutate_integer(&mut self, value: i64) -> UnchangedOr<i64> {
+            self.map_integer(value)
+        }
+        fn mutate_array(
+            &mut self,
+            value: MutateValue<'_, Array<i64>>,
+            mutator: &mut Mutator,
+        ) -> Result<UnchangedOr<Any>> {
+            mutator.default_maybe_inplace_mutate_result(self, value)
+        }
+    }
+    for entry in 0..4 {
+        // pre-order map, post-order map, closure mutation, generated mutation
         for case in 0..4 {
             // unique, shared, alias retained by policy, forced copy
             for increment in [false, true] {
@@ -2117,6 +2157,8 @@ fn mutation_policy_continuations_preserve_ownership_and_markers() {
                 let state = Ownership {
                     increment,
                     retained: None,
+                    mode: policy.0.mode,
+                    retain: policy.0.retain,
                 };
                 let (output, state) = if entry < 2 {
                     let mut mapper = MapWithContextPolicy::new(state, policy);
@@ -2131,6 +2173,10 @@ fn mutation_policy_continuations_preserve_ownership_and_markers() {
                     )
                     .unwrap();
                     (output, mapper.into_state())
+                } else if entry == 3 {
+                    let mut dispatch = state;
+                    let output = structural_mutate(root, &mut dispatch).unwrap();
+                    (output, dispatch)
                 } else {
                     let mut mutator = MutateCallbacks::new(
                         state,
@@ -2165,7 +2211,7 @@ fn mutation_policy_continuations_preserve_ownership_and_markers() {
 fn mutation_policy_regions_retargeting_and_error_restore() {
     use DefRegionKind::{None as Use, Pattern, Simple};
     #[derive(Default)]
-    struct Regions(Vec<(i64, DefRegionKind)>);
+    struct Regions(Vec<(i64, DefRegionKind)>, DefRegionKind);
     #[dispatch(map)]
     impl Regions {
         fn map_integer(&mut self, x: i64, kind: DefRegionKind) -> i64 {
@@ -2220,6 +2266,25 @@ fn mutation_policy_regions_retargeting_and_error_restore() {
                 ctx.state_mut().0.push((100, kind));
             }
             ctx.default_maybe_inplace_mutate_result(value)
+        }
+    }
+    #[dispatch(mutate, policy = (Redirect(self.1), Observe))]
+    impl Regions {
+        fn mutate_any(
+            &mut self,
+            value: MutateValue<'_>,
+            mutator: &mut Mutator,
+        ) -> Result<UnchangedOr<Any>> {
+            if let Some(x) = value.cast::<i64>() {
+                self.map_integer(x, mutator.def_region_kind());
+            }
+            if value
+                .as_node::<tvm_ffi::collections::array::ArrayObj>()
+                .is_some()
+            {
+                self.0.push((200, mutator.def_region_kind()));
+            }
+            mutator.default_maybe_inplace_mutate_result(self, value)
         }
     }
     assert_eq!(
@@ -2279,6 +2344,20 @@ fn mutation_policy_regions_retargeting_and_error_restore() {
         structural_mutate(graph, &mut mutator).unwrap();
         assert_eq!(
             mutator.state().0,
+            vec![(1, Simple), (2, Pattern), (99, Pattern), (3, Use)]
+        );
+        let mut dispatch = Regions(vec![], requested);
+        let output = structural_mutate(false, &mut dispatch).unwrap();
+        assert_eq!(i64::try_from(array_item(&output, 0)).unwrap(), 1);
+        assert_eq!(dispatch.0, vec![(100, Pattern), (1, Pattern)]);
+        dispatch.0.clear();
+        let graph = Function::get_global("testing.make_visit_region_graph")
+            .unwrap()
+            .call_tuple((false,))
+            .unwrap();
+        structural_mutate(graph, &mut dispatch).unwrap();
+        assert_eq!(
+            dispatch.0,
             vec![(1, Simple), (2, Pattern), (99, Pattern), (3, Use)]
         );
     }

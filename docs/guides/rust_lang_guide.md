@@ -411,6 +411,9 @@ assert_eq!(depth.max, 2);
 Implement `StructuralVisitor` directly to override its low-level `visit`
 method.
 
+Use `#[dispatch(visit, policy = MyPolicy)]` to apply a `ContextPolicy<Self>`
+to default recursion. The policy accesses the visitor through `ctx.state_mut()`.
+
 Two safety notes: mutable `List`/`Dict` contents are snapshotted before
 callbacks run, so mutation during traversal cannot invalidate the walk; and
 a non-container type with a foreign `__s_visit__` hook is rejected rather
@@ -558,8 +561,8 @@ Closure callbacks are `Fn`; mutable data belongs in the callback state.
 Use `MutateValue<'_, T>` with `default_maybe_inplace_mutate` to forward its
 permission, or `default_mutate_with_mode` to restrict it. Borrow through `value`; mutation
 contexts do not expose `current()`, and copy-only default descent takes an
-explicit borrow (`default_mutate(value)`). Generated handlers may take
-`InplaceMode` after `&mut Mutator`; see `MutateValue` for ownership requirements.
+explicit borrow (`default_mutate(value)`). Generated handlers can read the mode
+through `Mutator::inplace_mode()`; see `MutateValue` for ownership requirements.
 
 `#[dispatch(mutate)]` groups typed `mutate_*` callbacks. The dispatch object
 owns its mutable pass state, while `Mutator` supplies recursion and the current
@@ -595,7 +598,11 @@ assert_eq!(mutated.iter().collect::<Vec<_>>(), vec![2, 3]);
 assert_eq!(increment.integers, 2);
 ```
 
-For a named custom recursion policy, implement `StructuralMutator` and pass
+Use `#[dispatch(mutate, policy = MyPolicy)]` to apply a `MutContextPolicy<Self>`
+to default recursion. Both policy expressions may use `self` for configuration
+and are evaluated on each default descent; tuples compose multiple policies.
+
+For low-level custom recursion, implement `StructuralMutator` and pass
 `&mut` it to `structural_mutate`. `InplaceValue` is an engine-issued
 capability: callers cannot construct it from a read-only `StructuralView`. Override
 `dispatch_maybe_inplace_mutate` to opt into default container reuse;

@@ -26,6 +26,11 @@ mod object_macros;
 mod utils;
 
 /// Generate `walk`, `map`, `visit`, or `mutate` dispatch from an inherent impl.
+///
+/// `#[dispatch(visit, policy = expr)]` and `#[dispatch(mutate, policy = expr)]`
+/// use a `ContextPolicy<Self>` or `MutContextPolicy<Self>` for default recursion.
+/// The expression runs at each default descent and may read `self` for configuration;
+/// mutable traversal state stays on `self`. Policy tuples compose as usual.
 #[proc_macro_error]
 #[proc_macro_attribute]
 pub fn dispatch(attr: TokenStream, item: TokenStream) -> TokenStream {

@@ -26,8 +26,8 @@ use super::*;
 /// `visit_children()` on this policy's context continues with the next policy
 /// (or the built-in hooks and reflected fields). `visit()` re-enters the full
 /// callback engine for a child. A tuple `(outer, inner)` composes two policies;
-/// tuples may nest. Policies are shared during recursive calls, so mutable data
-/// belongs in the context's state. Save and restore scoped state around descent.
+/// tuples may nest. Policies receive `&self`; mutable pass data belongs in the
+/// context's state. Save and restore scoped state around descent.
 pub trait ContextPolicy<State> {
     /// Customize default descent for the current value.
     ///
@@ -82,15 +82,17 @@ pub(super) fn visit_with_policy<State>(
     value: &StructuralView,
     def_region_kind: DefRegionKind,
 ) -> Result<Option<VisitInterrupt>> {
-    policy.default_visit(
-        value,
-        &mut VisitContext {
-            driver,
-            current: StructuralView::from_raw(value.raw()),
-            def_region_kind,
-            _not_send_sync: PhantomData,
-        },
-    )
+    with_visit_region(def_region_kind, |def_region_kind| {
+        policy.default_visit(
+            value,
+            &mut VisitContext {
+                driver,
+                current: StructuralView::from_raw(value.raw()),
+                def_region_kind,
+                _not_send_sync: PhantomData,
+            },
+        )
+    })
 }
 
 struct NextPolicy<'a, State, Policy> {
@@ -223,17 +225,12 @@ impl<Walker: WalkDispatch, Policy: ContextPolicy<Walker>> NativeVisit
         kind: DefRegionKind,
     ) -> Result<Option<VisitInterrupt>> {
         let policy = Rc::clone(&self.policy);
-        let active = active_structural_visitor()?;
-        // Reflected children arrive directly from the Rust walker. Synchronize
-        // the ABI region before the policy can re-enter callback dispatch.
-        with_visitor_def_region(active, kind, || {
-            visit_with_policy(
-                &mut WalkDescent::<_, _, PRE_ORDER> { visitor: self },
-                &*policy,
-                value,
-                kind,
-            )
-        })
+        visit_with_policy(
+            &mut WalkDescent::<_, _, PRE_ORDER> { visitor: self },
+            &*policy,
+            value,
+            kind,
+        )
     }
 }
 
