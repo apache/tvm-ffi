@@ -65,9 +65,9 @@ pub(crate) fn with_visit_error_context(error: Error, raw: TVMFFIAny) -> Error {
                     let last = get_item
                         .call_tuple((records.clone(), size - 1))
                         .ok()?
-                        .try_as::<object::ObjectRef>()?;
+                        .try_as::<object::ObjectRef>();
                     // Callback, policy and default descent can report the same frame.
-                    if last.same_as(&node) {
+                    if last.is_some_and(|last| last.same_as(&node)) {
                         return None;
                     }
                 }
