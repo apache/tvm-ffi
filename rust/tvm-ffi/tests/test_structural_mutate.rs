@@ -1076,101 +1076,76 @@ fn generated_mutate_dispatch_can_default_recurse_from_a_typed_handler() {
 }
 
 #[test]
-fn pre_order_retained_alias_disables_in_place_mutation() {
-    let root = call_global("ffi.List", &[Any::from(1i64)]);
-    let root_pointer = any_object_pointer(&root);
-    let mut retained = None;
-    let mapped = structural_map(
-        root,
-        |value: &StructuralView| {
-            if value.type_index() == TypeIndex::kTVMFFIList as i32 {
-                retained = Some(value.to_owned());
-                value.to_owned()
-            } else if let Some(integer) = value.cast::<i64>() {
-                Any::from(integer + 1)
-            } else {
-                value.to_owned()
-            }
-        },
-        WalkOrder::PreOrder,
-    )
-    .unwrap();
-    let retained = retained.unwrap();
-
-    assert_eq!(any_object_pointer(&retained), root_pointer);
-    assert_ne!(any_object_pointer(&mapped), root_pointer);
-    assert_eq!(list_item(&retained, 0), 1);
-    assert_eq!(list_item(&mapped, 0), 2);
-}
-
-#[test]
-fn pre_order_replacements_preserve_inplace_permission() {
-    #[derive(Default)]
-    struct Replace {
-        pointer: usize,
-        mode: Option<InplaceMode>,
-    }
-    #[dispatch(map)]
-    impl Replace {
-        fn map_bool(&mut self, _: bool) -> Array<i64> {
-            let replacement = Array::new(vec![1_i64]);
-            self.pointer = array_pointer(&replacement) as usize;
-            replacement
-        }
-        fn map_array(&mut self, _: Array<Any>) -> Array<i64> {
-            self.map_bool(true)
-        }
-        fn map_integer(&mut self, value: i64) -> i64 {
-            value + 1
-        }
-    }
-    struct Observe;
-    impl MutContextPolicy<Replace> for Observe {
+fn pre_order_mapping_preserves_inplace_permission() {
+    struct Observe<'a>(&'a Cell<Option<InplaceMode>>);
+    impl<State> MutContextPolicy<State> for Observe<'_> {
         fn default_mutate(
             &self,
             value: MutateValue<'_>,
-            ctx: &mut tvm_ffi::MutateContext<'_, Replace>,
+            ctx: &mut tvm_ffi::MutateContext<'_, State>,
         ) -> Result<UnchangedOr<Any>> {
-            if value.type_index() == TypeIndex::kTVMFFIArray as i32 {
-                ctx.state_mut().mode = Some(value.inplace_mode());
+            if value.type_index() >= TypeIndex::kTVMFFIStaticObjectBegin as i32 {
+                self.0.set(Some(value.inplace_mode()));
             }
             ctx.default_maybe_inplace_mutate_result(value)
         }
     }
     for with_policy in [false, true] {
-        for case in ["inline", "unique", "shared"] {
-            let root = if case == "inline" {
-                Any::from(true)
-            } else {
-                Any::from(Array::new(vec![true]))
+        for case in ["inline", "unique", "shared", "retained"] {
+            let root = match case {
+                "inline" => Any::from(true),
+                "retained" => call_global("ffi.List", &[Any::from(1_i64)]),
+                _ => Any::from(Array::new(vec![true])),
             };
+            let root_pointer = (case == "retained").then(|| any_object_pointer(&root));
             let alias = (case == "shared").then(|| root.clone());
-            let mut state = Replace::default();
+            let mut retained = None;
+            let mut pointer = std::ptr::null();
+            let mode = Cell::new(None);
+            let mut mapper = (|value: &StructuralView| {
+                if let Some(integer) = value.cast::<i64>() {
+                    return Any::from(integer + 1);
+                }
+                let mapped = if case == "retained" {
+                    retained = Some(value.to_owned());
+                    value.to_owned()
+                } else {
+                    Array::new(vec![1_i64]).into()
+                };
+                pointer = any_object_pointer(&mapped);
+                mapped
+            })
+            .into_mapper();
             let output = if with_policy {
-                let mut mapper = MapWithContextPolicy::new(state, Observe);
-                let output = mapper.map(root, WalkOrder::PreOrder).unwrap();
-                state = mapper.into_state();
-                output
+                MapWithContextPolicy::new(&mut mapper, Observe(&mode))
+                    .map(root, WalkOrder::PreOrder)
+                    .unwrap()
             } else {
-                structural_map(root, &mut state, WalkOrder::PreOrder).unwrap()
+                structural_map(root, &mut mapper, WalkOrder::PreOrder).unwrap()
             };
-            let output = Array::<i64>::try_from(output).unwrap();
             let reuse = case == "unique";
-            assert_eq!(output.get(0).unwrap(), 2);
             assert_eq!(
-                array_pointer(&output) as usize == state.pointer,
+                any_object_pointer(&output) == pointer,
                 reuse,
                 "{case}, policy={with_policy}"
             );
             if with_policy {
                 assert_eq!(
-                    state.mode,
+                    mode.get(),
                     Some(if reuse {
                         InplaceMode::Allow
                     } else {
                         InplaceMode::Disallow
                     })
                 );
+            }
+            if case == "retained" {
+                let retained = retained.unwrap();
+                assert_eq!(any_object_pointer(&retained), root_pointer.unwrap());
+                assert_eq!(list_item(&retained, 0), 1);
+                assert_eq!(list_item(&output, 0), 2);
+            } else {
+                assert_eq!(Array::<i64>::try_from(output).unwrap().get(0).unwrap(), 2);
             }
             if let Some(alias) = alias {
                 assert!(Array::<bool>::try_from(alias).unwrap().get(0).unwrap());
