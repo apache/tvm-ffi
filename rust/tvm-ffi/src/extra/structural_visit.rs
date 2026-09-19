@@ -1125,15 +1125,7 @@ where
 pub trait NativeVisit: Sized {
     const CUSTOM_DESCENT: bool = false;
 
-    /// The root must carry a valid borrow rather than an unchecked ABI value.
-    /// ```compile_fail,E0308
-    /// use tvm_ffi::{extra::structural_visit::NativeVisit, tvm_ffi_sys::TVMFFIAny, WalkOrder};
-    /// fn invalid<W: NativeVisit>(walker: &mut W, raw: TVMFFIAny) {
-    ///     walker.walk_root(raw, WalkOrder::PreOrder).unwrap();
-    /// }
-    /// ```
-    fn walk_root(&mut self, root: AnyView<'_>, order: WalkOrder) -> Result<Option<VisitInterrupt>> {
-        let root = raw_of(root);
+    fn walk_root(&mut self, root: TVMFFIAny, order: WalkOrder) -> Result<Option<VisitInterrupt>> {
         finish(match order {
             WalkOrder::PreOrder => {
                 run_structural_visitor(root, self, walk_runtime_vtable::<Self, true>())
@@ -1162,7 +1154,7 @@ pub trait NativeVisit: Sized {
 impl<V: NativeVisit> NativeVisit for &mut V {
     const CUSTOM_DESCENT: bool = V::CUSTOM_DESCENT;
 
-    fn walk_root(&mut self, root: AnyView<'_>, order: WalkOrder) -> Result<Option<VisitInterrupt>> {
+    fn walk_root(&mut self, root: TVMFFIAny, order: WalkOrder) -> Result<Option<VisitInterrupt>> {
         // Register the actual visitor as the active context, not this reference's
         // stack slot: policy continuations validate that identity when reentering.
         (**self).walk_root(root, order)
@@ -1964,7 +1956,9 @@ where
     H: IntoWalker<M>,
     for<'x> AnyView<'x>: From<&'x R>,
 {
-    walker.into_walker().walk_root(AnyView::from(root), order)
+    walker
+        .into_walker()
+        .walk_root(raw_of(AnyView::from(root)), order)
 }
 
 fn finish(result: NativeResult) -> Result<Option<VisitInterrupt>> {
