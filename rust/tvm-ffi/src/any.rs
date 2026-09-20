@@ -417,6 +417,7 @@ crate::impl_try_from_any!(
     *mut core::ffi::c_void,
     crate::string::String,
     crate::string::Bytes,
+    crate::big_int::BigInt,
     crate::object::ObjectRef,
     tvm_ffi_sys::dlpack::DLDataType,
     tvm_ffi_sys::dlpack::DLDevice,

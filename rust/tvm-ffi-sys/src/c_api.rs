@@ -529,6 +529,8 @@ unsafe extern "C" {
     pub fn TVMFFITensorToDLPackVersioned(from: TVMFFIObjectHandle, out: *mut *mut c_void) -> i32;
     pub fn TVMFFIStringFromByteArray(input: *const TVMFFIByteArray, out: *mut TVMFFIAny) -> i32;
     pub fn TVMFFIBytesFromByteArray(input: *const TVMFFIByteArray, out: *mut TVMFFIAny) -> i32;
+    pub fn TVMFFIBigIntFromByteArray(input: *const TVMFFIByteArray, out: *mut TVMFFIAny) -> i32;
+    pub fn TVMFFIBigIntGetContentByteArray(value: *const TVMFFIAny) -> TVMFFIByteArray;
     pub fn TVMFFIDataTypeFromString(str: *const TVMFFIByteArray, out: *mut DLDataType) -> i32;
     pub fn TVMFFIDataTypeToString(dtype: *const DLDataType, out: *mut TVMFFIAny) -> i32;
     pub fn TVMFFITraceback(
