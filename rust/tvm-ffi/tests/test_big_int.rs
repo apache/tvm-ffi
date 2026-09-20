@@ -88,6 +88,98 @@ fn test_big_int_inline_representation() {
 }
 
 #[test]
+fn test_big_int_from_bool() {
+    for (input, expected) in [(false, 0i64), (true, 1)] {
+        let value = BigInt::from(input);
+        assert_eq!(type_index_of(&value), TypeIndex::kTVMFFIInt as i32);
+        assert_eq!(value.to_i64(), Some(expected));
+    }
+}
+
+/// Rebuild a double from canonical words; exact when the magnitude has at most 53 significant bits.
+fn words_as_f64(value: &BigInt) -> f64 {
+    let negative = value.is_negative();
+    let mut words: Vec<u64> = value
+        .words()
+        .iter()
+        .map(|&w| if negative { !(w as u64) } else { w as u64 })
+        .collect();
+    if negative {
+        for word in words.iter_mut() {
+            let (sum, overflow) = word.overflowing_add(1);
+            *word = sum;
+            if !overflow {
+                break;
+            }
+        }
+    }
+    let magnitude: f64 = words
+        .iter()
+        .enumerate()
+        .filter(|(_, &word)| word != 0)
+        .map(|(i, &word)| word as f64 * 2f64.powi(64 * i as i32))
+        .sum();
+    if negative {
+        -magnitude
+    } else {
+        magnitude
+    }
+}
+
+#[test]
+fn test_big_int_from_f64() {
+    let cases = [
+        (0.0, BigInt::from(0i64)),
+        (-0.0, BigInt::from(0i64)),
+        (1.9, BigInt::from(1i64)),
+        (-1.9, BigInt::from(-1i64)),
+        (-0.999, BigInt::from(0i64)),
+        (123456789.987, BigInt::from(123456789i64)),
+        (9007199254740994.0, BigInt::from(9007199254740994i64)),
+        (i64::MIN as f64, BigInt::from(i64::MIN)),
+        // i64::MAX rounds up to 2^63 as a double, which no longer fits inline.
+        (i64::MAX as f64, BigInt::from(1u128 << 63)),
+        (-(i64::MAX as f64), BigInt::from(i64::MIN)),
+        (18446744073709551616.0, BigInt::from(1u128 << 64)),
+        (1e30, BigInt::from(1000000000000000019884624838656i128)),
+        (
+            -1.5 * 2f64.powi(100),
+            BigInt::from(-1901475900342344102245054808064i128),
+        ),
+    ];
+    for (input, expected) in cases {
+        assert_eq!(BigInt::try_from(input).unwrap(), expected, "{input}");
+    }
+    // Wide magnitudes: the significand straddles words at every alignment.
+    for input in [
+        1e300,
+        -1e300,
+        f64::MAX,
+        -f64::MAX,
+        1.75 * 2f64.powi(1000),
+        -(2f64.powi(1023)),
+        3.0 * 2f64.powi(191),
+    ] {
+        let value = BigInt::try_from(input).unwrap();
+        assert_eq!(type_index_of(&value), TypeIndex::kTVMFFIBigInt as i32);
+        assert_eq!(value.is_negative(), input < 0.0);
+        assert_eq!(words_as_f64(&value), input, "{input}");
+    }
+    assert_eq!(
+        BigInt::try_from(3.0 * 2f64.powi(191)).unwrap().words(),
+        &[0, 0, i64::MIN, 1]
+    );
+    let error = BigInt::try_from(f64::NAN).unwrap_err();
+    assert_eq!(error.kind(), VALUE_ERROR);
+    assert!(error.message().contains("NaN"));
+    for input in [f64::INFINITY, f64::NEG_INFINITY] {
+        let error = BigInt::try_from(input).unwrap_err();
+        assert_eq!(error.kind(), OVERFLOW_ERROR);
+        assert!(error.message().contains("infinity"));
+    }
+}
+
+#[test]
 fn test_big_int_heap_representation() {
     let heap = [
         (BigInt::from(u64::MAX), vec![-1, 0]),
@@ -109,6 +201,31 @@ fn test_big_int_heap_representation() {
         assert_eq!(copy.words().as_ptr(), value.words().as_ptr());
         drop(copy);
         assert_eq!(AnyView::from(&value).debug_strong_count(), Some(1));
+    }
+}
+
+#[test]
+fn test_big_int_words_mirror_runtime_content() {
+    // The native word slice must be the runtime's own view of the same cell.
+    for value in [
+        wide(),
+        BigInt::from(u64::MAX),
+        BigInt::from(i128::MIN),
+        BigInt::from(-5i64),
+    ] {
+        let mut any = Any::from(value.clone());
+        let content = unsafe { tvm_ffi_sys::TVMFFIBigIntGetContentByteArray(any.as_data_ptr()) };
+        let runtime = unsafe {
+            std::slice::from_raw_parts(
+                content.data as *const i64,
+                content.size / std::mem::size_of::<i64>(),
+            )
+        };
+        assert_eq!(value.words(), runtime);
+        // A heap value is shared, so both views borrow the same object words.
+        if value.to_i64().is_none() {
+            assert_eq!(value.words().as_ptr(), runtime.as_ptr());
+        }
     }
 }
 
