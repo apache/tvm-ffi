@@ -16,16 +16,15 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-use crate::object::unsafe_;
+use crate::derive::Object;
+use crate::error::{Error, OVERFLOW_ERROR, VALUE_ERROR};
+use crate::object::{unsafe_, Object, ObjectCoreWithExtraItems};
 use crate::type_traits::AnyCompatible;
 use std::cmp::Ordering;
 use std::fmt::{Debug, Display, Write as _};
 use std::hash::{Hash, Hasher};
 use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
-use tvm_ffi_sys::{
-    TVMFFIAny, TVMFFIAnyDataUnion, TVMFFIBigIntFromByteArray, TVMFFIBigIntGetContentByteArray,
-    TVMFFIByteArray,
-};
+use tvm_ffi_sys::{TVMFFIAny, TVMFFIAnyDataUnion, TVMFFIBigIntFromByteArray, TVMFFIByteArray};
 
 /// ABI stable arbitrary-precision signed integer for ffi.
 ///
@@ -40,6 +39,28 @@ use tvm_ffi_sys::{
 #[repr(C)]
 pub struct BigInt {
     data: TVMFFIAny,
+}
+
+// BigIntObj for heap-allocated integers: the word count, then the canonical
+// two's-complement words as trailing items. Mirrors C++ `details::BigIntObj`.
+// Instances are created by the runtime, which owns the normalization rules.
+#[repr(C)]
+#[derive(Object)]
+#[type_key = "ffi.BigInt"]
+#[type_index(TypeIndex::kTVMFFIBigInt)]
+#[type_final]
+pub(crate) struct BigIntObj {
+    object: Object,
+    size: usize,
+}
+
+unsafe impl ObjectCoreWithExtraItems for BigIntObj {
+    type ExtraItem = i64;
+    #[inline]
+    /// Get the count of extra items (the logical word count)
+    fn extra_items_count(this: &Self) -> usize {
+        this.size
+    }
 }
 
 impl BigInt {
@@ -81,11 +102,8 @@ impl BigInt {
             if self.data.type_index == TypeIndex::kTVMFFIInt as i32 {
                 std::slice::from_ref(&self.data.data_union.v_int64)
             } else {
-                let content = TVMFFIBigIntGetContentByteArray(&self.data);
-                std::slice::from_raw_parts(
-                    content.data as *const i64,
-                    content.size / std::mem::size_of::<i64>(),
-                )
+                let obj: &BigIntObj = &*(self.data.data_union.v_obj as *const BigIntObj);
+                BigIntObj::extra_items(obj)
             }
         }
     }
@@ -159,6 +177,13 @@ macro_rules! impl_big_int_from_int {
 
 impl_big_int_from_int!(i8, i16, i32, i64, isize, u8, u16, u32);
 
+impl From<bool> for BigInt {
+    #[inline]
+    fn from(value: bool) -> Self {
+        Self::from_i64(i64::from(value))
+    }
+}
+
 impl From<u64> for BigInt {
     fn from(value: u64) -> Self {
         match i64::try_from(value) {
@@ -192,6 +217,57 @@ impl From<u128> for BigInt {
             // The zero guard keeps the value positive; normalization prunes it when redundant.
             Err(_) => Self::from_words(&[value as i64, (value >> 64) as i64, 0]),
         }
+    }
+}
+
+/// Negate two's-complement words in place, modulo their fixed width.
+fn negate_in_place(words: &mut [i64]) {
+    let mut carry = true;
+    for word in words.iter_mut() {
+        let (sum, overflow) = (!(*word as u64)).overflowing_add(u64::from(carry));
+        *word = sum as i64;
+        carry = overflow;
+    }
+}
+
+impl TryFrom<f64> for BigInt {
+    type Error = Error;
+
+    /// Convert a finite double by truncating toward zero.
+    ///
+    /// NaN raises `ValueError` and infinity raises `OverflowError`.
+    fn try_from(value: f64) -> Result<Self, Error> {
+        // The upper bound is exclusive: i64::MAX rounds up to 2^63 as a double.
+        const LOWER: f64 = i64::MIN as f64;
+        if (LOWER..-LOWER).contains(&value) {
+            return Ok(Self::from_i64(value as i64));
+        }
+        if value.is_nan() {
+            return Err(Error::new(VALUE_ERROR, "Cannot convert NaN to BigInt", ""));
+        }
+        if value.is_infinite() {
+            return Err(Error::new(
+                OVERFLOW_ERROR,
+                "Cannot convert infinity to BigInt",
+                "",
+            ));
+        }
+        // |value| >= 2^63 is an integer: place the 53-bit significand at its binary exponent.
+        let bits = value.to_bits();
+        let exponent = (((bits >> 52) & 0x7ff) - 1075) as usize;
+        let significand = (bits & ((1u64 << 52) - 1)) | (1u64 << 52);
+        let whole = exponent / 64;
+        let part = exponent % 64;
+        // Low zero words, up to two significand words, and a zero sign guard.
+        let mut words = vec![0i64; whole + 3];
+        words[whole] = (significand << part) as i64;
+        if part != 0 {
+            words[whole + 1] = (significand >> (64 - part)) as i64;
+        }
+        if value < 0.0 {
+            negate_in_place(&mut words);
+        }
+        Ok(Self::from_words(&words))
     }
 }
 
@@ -267,19 +343,9 @@ impl Display for BigInt {
         }
         let words = self.words();
         let negative = words[words.len() - 1] < 0;
-        // Magnitude words: negating two's complement is complement plus one.
-        let mut magnitude: Vec<u64> = words
-            .iter()
-            .map(|&w| if negative { !(w as u64) } else { w as u64 })
-            .collect();
+        let mut magnitude = words.to_vec();
         if negative {
-            for word in magnitude.iter_mut() {
-                let (sum, overflow) = word.overflowing_add(1);
-                *word = sum;
-                if !overflow {
-                    break;
-                }
-            }
+            negate_in_place(&mut magnitude);
         }
         // Peel base-10^19 chunks, least significant first, by long division.
         const CHUNK: u128 = 10_000_000_000_000_000_000;
@@ -290,8 +356,8 @@ impl Display for BigInt {
         while !magnitude.is_empty() {
             let mut remainder = 0u128;
             for word in magnitude.iter_mut().rev() {
-                let current = (remainder << 64) | u128::from(*word);
-                *word = (current / CHUNK) as u64;
+                let current = (remainder << 64) | u128::from(*word as u64);
+                *word = (current / CHUNK) as i64;
                 remainder = current % CHUNK;
             }
             chunks.push(remainder as u64);
