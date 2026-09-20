@@ -48,7 +48,7 @@ pub use crate::dtype::DLDataTypeExt;
 pub use crate::error::{Error, ErrorKind, Result};
 pub use crate::error::{
     ATTRIBUTE_ERROR, INDEX_ERROR, INTERNAL_ERROR, KEY_ERROR, OVERFLOW_ERROR, RUNTIME_ERROR,
-    TYPE_ERROR, VALUE_ERROR,
+    TYPE_ERROR, VALUE_ERROR, ZERO_DIVISION_ERROR,
 };
 pub use crate::extra::module::Module;
 pub use crate::extra::structural_mutate::{

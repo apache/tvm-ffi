@@ -49,6 +49,7 @@ pub const KEY_ERROR: ErrorKind = ErrorKind("KeyError");
 pub const INDEX_ERROR: ErrorKind = ErrorKind("IndexError");
 pub const INTERNAL_ERROR: ErrorKind = ErrorKind("InternalError");
 pub const OVERFLOW_ERROR: ErrorKind = ErrorKind("OverflowError");
+pub const ZERO_DIVISION_ERROR: ErrorKind = ErrorKind("ZeroDivisionError");
 
 /// error object
 #[repr(C)]
