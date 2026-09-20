@@ -2137,6 +2137,21 @@ trait MutationDriver: Sized {
         permit: Permit,
     ) -> Result<Any>;
 
+    // The ABI entry has already installed and validated the active region.
+    #[inline(always)]
+    fn dispatch_abi_raw<const INPLACE: bool>(
+        &mut self,
+        raw: TVMFFIAny,
+        kind: DefRegionKind,
+    ) -> TVMFFIAny {
+        let permit = if INPLACE {
+            Permit::MaybeInPlace
+        } else {
+            Permit::Copy
+        };
+        result_into_raw(self.dispatch_raw(raw, kind, permit))
+    }
+
     fn var_remap_get_raw(&mut self, raw: TVMFFIAny) -> Result<Option<Any>>;
 
     fn var_remap_set_raw(&mut self, raw: TVMFFIAny, replacement: &Any) -> Result<()>;
@@ -2420,7 +2435,7 @@ unsafe extern "C" fn rust_vtable_mutate<D: MutationDriver>(
 ) -> TVMFFIAny {
     // SAFETY: this function is installed only in the vtable of a live
     // RuntimeStructuralMutatorObj built for D; `value` is borrowed for this call.
-    rust_vtable_mutate_impl::<D>(mutator, value, Permit::Copy)
+    rust_vtable_mutate_impl::<D, false>(mutator, value)
 }
 
 unsafe extern "C" fn rust_vtable_maybe_inplace_mutate<D: MutationDriver>(
@@ -2429,7 +2444,7 @@ unsafe extern "C" fn rust_vtable_maybe_inplace_mutate<D: MutationDriver>(
 ) -> TVMFFIAny {
     // SAFETY: same vtable and borrowed-value contract as
     // `rust_vtable_mutate`.
-    rust_vtable_mutate_impl::<D>(mutator, value, Permit::MaybeInPlace)
+    rust_vtable_mutate_impl::<D, true>(mutator, value)
 }
 
 /// Run one typed vtable mutation callback and convert its result to ABI form.
@@ -2439,10 +2454,9 @@ unsafe extern "C" fn rust_vtable_maybe_inplace_mutate<D: MutationDriver>(
 /// `mutator` must be a live runtime mutator created for `D`, and `value`
 /// must remain valid for this call.
 #[inline(always)]
-unsafe fn rust_vtable_mutate_impl<D: MutationDriver>(
+unsafe fn rust_vtable_mutate_impl<D: MutationDriver, const INPLACE: bool>(
     mutator: StructuralMutatorHandle,
     value: AnyView<'static>,
-    permit: Permit,
 ) -> TVMFFIAny {
     let context_guard = match take_runtime_context(mutator) {
         Ok(guard) => guard,
@@ -2450,19 +2464,30 @@ unsafe fn rust_vtable_mutate_impl<D: MutationDriver>(
     };
     let context = context_guard.context;
     let raw = *value.as_raw_ffi_any();
-    let outcome = catch_unwind(AssertUnwindSafe(|| {
-        let kind = def_region_from_raw((*mutator).def_region_mode)?;
-        with_active_mutator(mutator, || {
-            runtime_dispatch_mutate::<D>(context, raw, kind, permit)
-        })
-    }));
+    let outcome = catch_unwind(AssertUnwindSafe(
+        #[inline(always)]
+        || {
+            let kind = match def_region_from_raw((*mutator).def_region_mode) {
+                Ok(kind) => kind,
+                Err(error) => return result_into_raw(Err(error)),
+            };
+            // take_runtime_context verified that this mutator is already active.
+            runtime_dispatch_mutate::<D, INPLACE>(context, raw, kind)
+        },
+    ));
     match outcome {
-        Ok(result) => result_into_raw(result),
-        Err(payload) => {
-            (*mutator).panic = Some(payload);
-            result_into_raw(Err(runtime_error("panic in structural mutator callback")))
-        }
+        Ok(result) => result,
+        Err(payload) => mutation_panic_result(mutator, payload),
     }
+}
+
+#[cold]
+unsafe fn mutation_panic_result(
+    mutator: StructuralMutatorHandle,
+    payload: Box<dyn std::any::Any + Send>,
+) -> TVMFFIAny {
+    (*mutator).panic = Some(payload);
+    result_into_raw(Err(runtime_error("panic in structural mutator callback")))
 }
 
 unsafe extern "C" fn rust_vtable_var_remap_get(
@@ -2710,6 +2735,20 @@ impl<U: StructuralMutator> MutationDriver for U {
         dispatch_user_raw(self, raw, def_region_kind, permit)
     }
 
+    #[inline(always)]
+    fn dispatch_abi_raw<const INPLACE: bool>(
+        &mut self,
+        raw: TVMFFIAny,
+        kind: DefRegionKind,
+    ) -> TVMFFIAny {
+        let permit = if INPLACE {
+            Permit::MaybeInPlace
+        } else {
+            Permit::Copy
+        };
+        result_into_raw(dispatch_user_current_raw(self, raw, kind, permit))
+    }
+
     fn var_remap_get_raw(&mut self, raw: TVMFFIAny) -> Result<Option<Any>> {
         self.var_remap_get(&StructuralView::from_raw(raw))
     }
@@ -2725,13 +2764,13 @@ impl<U: StructuralMutator> MutationDriver for U {
 ///
 /// `context` must come from the current mutable reborrow of a live `D`; the
 /// runtime object hides that pointer until this call returns.
-unsafe fn runtime_dispatch_mutate<D: MutationDriver>(
+#[inline(always)]
+unsafe fn runtime_dispatch_mutate<D: MutationDriver, const INPLACE: bool>(
     context: *mut c_void,
     raw: TVMFFIAny,
     def_region_kind: DefRegionKind,
-    permit: Permit,
-) -> Result<Any> {
-    (&mut *context.cast::<D>()).dispatch_raw(raw, def_region_kind, permit)
+) -> TVMFFIAny {
+    (&mut *context.cast::<D>()).dispatch_abi_raw::<INPLACE>(raw, def_region_kind)
 }
 
 /// Dispatch a variable-remap lookup through the erased driver context.
@@ -3011,16 +3050,24 @@ fn dispatch_user_raw<U: StructuralMutator>(
     with_mutation_region(
         def_region_kind,
         #[inline(always)]
-        |kind| {
-            let result = if permit == Permit::MaybeInPlace && object_is_unique(raw) {
-                let mut scoped_raw = raw;
-                mutator.dispatch_maybe_inplace_mutate(InplaceValue::from_raw(&mut scoped_raw), kind)
-            } else {
-                mutator.dispatch_mutate(&StructuralView::from_raw(raw), kind)
-            };
-            result.map_err(|error| with_value_context(error, raw))
-        },
+        |kind| dispatch_user_current_raw(mutator, raw, kind, permit),
     )
+}
+
+#[inline(always)]
+fn dispatch_user_current_raw<U: StructuralMutator>(
+    mutator: &mut U,
+    raw: TVMFFIAny,
+    kind: DefRegionKind,
+    permit: Permit,
+) -> Result<Any> {
+    let result = if permit == Permit::MaybeInPlace && object_is_unique(raw) {
+        let mut scoped_raw = raw;
+        mutator.dispatch_maybe_inplace_mutate(InplaceValue::from_raw(&mut scoped_raw), kind)
+    } else {
+        mutator.dispatch_mutate(&StructuralView::from_raw(raw), kind)
+    };
+    result.map_err(|error| with_value_context(error, raw))
 }
 
 fn user_default_mutate<U: StructuralMutator>(
