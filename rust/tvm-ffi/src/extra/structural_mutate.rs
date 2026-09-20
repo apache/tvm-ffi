@@ -2162,8 +2162,12 @@ trait MutationDriver: Sized {
         default_mutate_driver(self, raw, def_region_kind, permit)
     }
 
-    fn map_reflected(&mut self, raw: TVMFFIAny, def_region_kind: DefRegionKind) -> Result<Any> {
-        let type_info = checked_type_info(raw.type_index)?;
+    fn map_reflected(
+        &mut self,
+        raw: TVMFFIAny,
+        def_region_kind: DefRegionKind,
+        type_info: *const crate::tvm_ffi_sys::TVMFFITypeInfo,
+    ) -> Result<Any> {
         let seq_hash_kind = unsafe {
             if (*type_info).metadata.is_null() {
                 TVMFFISEqHashKind::kTVMFFISEqHashKindUnsupported as i32
@@ -2950,6 +2954,7 @@ unsafe fn result_from_raw(raw: TVMFFIAny) -> Result<Any> {
     }
 }
 
+#[inline(always)]
 fn with_mutator_def_region<T>(
     mutator: StructuralMutatorHandle,
     kind: DefRegionKind,
@@ -2958,34 +2963,42 @@ fn with_mutator_def_region<T>(
     unsafe {
         let previous = (*mutator).def_region_mode;
         // Precedence: a pattern region propagates; entering any kind inside it has no effect.
-        if previous == DefRegionKind::Pattern as i32 {
-            return callback();
+        if previous != DefRegionKind::Pattern as i32 {
+            (*mutator).def_region_mode = kind as i32;
         }
-        (*mutator).def_region_mode = kind as i32;
         struct Restore {
             mutator: StructuralMutatorHandle,
             previous: i32,
         }
         impl Drop for Restore {
             fn drop(&mut self) {
-                unsafe { (*self.mutator).def_region_mode = self.previous };
+                if self.previous != DefRegionKind::Pattern as i32 {
+                    unsafe { (*self.mutator).def_region_mode = self.previous };
+                }
             }
         }
         let _restore = Restore { mutator, previous };
+        // One call site keeps the continuation visible to the inliner.
         callback()
     }
 }
 
+#[inline(always)]
 fn with_mutation_region<T>(
     kind: DefRegionKind,
     callback: impl FnOnce(DefRegionKind) -> Result<T>,
 ) -> Result<T> {
     let mutator = active_mutator()?;
-    with_mutator_def_region(mutator, kind, || {
-        // SAFETY: the active invocation keeps this thread's ABI mutator alive.
-        let effective = def_region_from_raw(unsafe { (*mutator).def_region_mode })?;
-        callback(effective)
-    })
+    with_mutator_def_region(
+        mutator,
+        kind,
+        #[inline(always)]
+        || {
+            // SAFETY: the active invocation keeps this thread's ABI mutator alive.
+            let effective = def_region_from_raw(unsafe { (*mutator).def_region_mode })?;
+            callback(effective)
+        },
+    )
 }
 
 #[inline(always)]
@@ -2995,15 +3008,19 @@ fn dispatch_user_raw<U: StructuralMutator>(
     def_region_kind: DefRegionKind,
     permit: Permit,
 ) -> Result<Any> {
-    with_mutation_region(def_region_kind, |kind| {
-        let result = if permit == Permit::MaybeInPlace && object_is_unique(raw) {
-            let mut scoped_raw = raw;
-            mutator.dispatch_maybe_inplace_mutate(InplaceValue::from_raw(&mut scoped_raw), kind)
-        } else {
-            mutator.dispatch_mutate(&StructuralView::from_raw(raw), kind)
-        };
-        result.map_err(|error| with_value_context(error, raw))
-    })
+    with_mutation_region(
+        def_region_kind,
+        #[inline(always)]
+        |kind| {
+            let result = if permit == Permit::MaybeInPlace && object_is_unique(raw) {
+                let mut scoped_raw = raw;
+                mutator.dispatch_maybe_inplace_mutate(InplaceValue::from_raw(&mut scoped_raw), kind)
+            } else {
+                mutator.dispatch_mutate(&StructuralView::from_raw(raw), kind)
+            };
+            result.map_err(|error| with_value_context(error, raw))
+        },
+    )
 }
 
 fn user_default_mutate<U: StructuralMutator>(
@@ -3045,7 +3062,14 @@ fn default_mutate_driver_impl<D: MutationDriver>(
         return owned_from_raw(raw);
     }
 
-    let kind = structural_hash_kind(raw)?;
+    let type_info = checked_type_info(raw.type_index)?;
+    let kind = unsafe {
+        if (*type_info).metadata.is_null() {
+            None
+        } else {
+            Some((*(*type_info).metadata).structural_eq_hash_kind)
+        }
+    };
     let is_free_var = kind == Some(TVMFFISEqHashKind::kTVMFFISEqHashKindFreeVar as i32);
     let is_dag_node = kind == Some(TVMFFISEqHashKind::kTVMFFISEqHashKindDAGNode as i32);
     if is_free_var || is_dag_node {
@@ -3061,7 +3085,7 @@ fn default_mutate_driver_impl<D: MutationDriver>(
         return Ok(Unchanged.into());
     }
 
-    let result = driver.map_reflected(raw, def_region_kind)?;
+    let result = driver.map_reflected(raw, def_region_kind, type_info)?;
     if is_dag_node
         || (is_free_var && (def_region_kind == DefRegionKind::Pattern || !is_unchanged(&result)))
     {
@@ -3186,20 +3210,6 @@ fn call_field_setter(
         Ok(())
     } else {
         Err(Error::from_raised())
-    }
-}
-
-fn structural_hash_kind(raw: TVMFFIAny) -> Result<Option<i32>> {
-    if raw.type_index < TVMFFITypeIndex::kTVMFFIStaticObjectBegin as i32 {
-        return Ok(None);
-    }
-    let type_info = checked_type_info(raw.type_index)?;
-    unsafe {
-        if (*type_info).metadata.is_null() {
-            Ok(None)
-        } else {
-            Ok(Some((*(*type_info).metadata).structural_eq_hash_kind))
-        }
     }
 }
 

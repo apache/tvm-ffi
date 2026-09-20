@@ -72,6 +72,7 @@ impl<State, Outer: MutContextPolicy<State>, Inner: MutContextPolicy<State>> MutC
     }
 }
 
+#[inline(always)]
 pub(super) fn mutate_with_policy<State>(
     driver: &mut dyn MutateContextDriver<State>,
     policy: &impl MutContextPolicy<State>,
@@ -79,15 +80,19 @@ pub(super) fn mutate_with_policy<State>(
     kind: DefRegionKind,
 ) -> Result<Any> {
     let raw = value.value.raw();
-    with_mutation_region(kind, |kind| {
-        let mut ctx = MutateContext {
-            driver,
-            def_region_kind: kind,
-            inplace_mode: value.inplace_mode(),
-            _not_send_sync: PhantomData,
-        };
-        policy.default_mutate(value, &mut ctx).map(Any::from)
-    })
+    with_mutation_region(
+        kind,
+        #[inline(always)]
+        |kind| {
+            let mut ctx = MutateContext {
+                driver,
+                def_region_kind: kind,
+                inplace_mode: value.inplace_mode(),
+                _not_send_sync: PhantomData,
+            };
+            policy.default_mutate(value, &mut ctx).map(Any::from)
+        },
+    )
     .map_err(|error| with_value_context(error, raw))
 }
 
