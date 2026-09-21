@@ -2626,6 +2626,9 @@ thread_local! {
     static ACTIVE_MUTATOR: Cell<StructuralMutatorHandle> = const {
         Cell::new(std::ptr::null_mut())
     };
+    static IDLE_MUTATOR: Cell<Option<ObjectArc<RuntimeStructuralMutatorObj>>> = const {
+        Cell::new(None)
+    };
 }
 
 fn with_active_mutator<T>(handle: StructuralMutatorHandle, callback: impl FnOnce() -> T) -> T {
@@ -2945,17 +2948,27 @@ fn run_structural_mutator_with_context(
     callbacks: RuntimeMutatorCallbacks,
     vtable: &'static StructuralMutatorVTable,
 ) -> Result<Any> {
-    let mut active = ObjectArc::new(RuntimeStructuralMutatorObj {
-        base: Object::new(),
-        vtable,
-        def_region_mode: DefRegionKind::None as i32,
-        context,
-        context_identity: context,
-        owner_thread: std::thread::current().id(),
-        callbacks,
-        remap: RefCell::new(StructuralVarRemap::default()),
-        panic: None,
-    });
+    let mut active = match IDLE_MUTATOR.try_with(Cell::take).ok().flatten() {
+        Some(mut active) => {
+            active.vtable = vtable;
+            active.def_region_mode = DefRegionKind::None as i32;
+            active.context = context;
+            active.context_identity = context;
+            active.callbacks = callbacks;
+            active
+        }
+        None => ObjectArc::new(RuntimeStructuralMutatorObj {
+            base: Object::new(),
+            vtable,
+            def_region_mode: DefRegionKind::None as i32,
+            context,
+            context_identity: context,
+            owner_thread: std::thread::current().id(),
+            callbacks,
+            remap: RefCell::new(StructuralVarRemap::default()),
+            panic: None,
+        }),
+    };
     let handle = unsafe { ObjectArc::as_raw_mut(&mut active) };
     let result = with_active_mutator(handle, || {
         call_mutator(
@@ -2975,6 +2988,17 @@ fn run_structural_mutator_with_context(
         (*handle).context_identity = std::ptr::null_mut();
     }
     let panic = unsafe { (*handle).panic.take() };
+    // One atomic snapshot excludes both retained owners and weak handles.
+    // The idle object has no driver context or invocation-local substitutions.
+    if unsafe {
+        (*handle.cast::<TVMFFIObject>())
+            .combined_ref_count
+            .load(Ordering::Acquire)
+    } == crate::tvm_ffi_sys::COMBINED_REF_COUNT_BOTH_ONE
+    {
+        *active.remap.get_mut() = StructuralVarRemap::default();
+        let _ = IDLE_MUTATOR.try_with(|idle| idle.replace(Some(active)));
+    }
     if let Some(payload) = panic {
         drop(result);
         resume_unwind(payload);
@@ -3634,4 +3658,109 @@ fn structural_maybe_inplace_mutate_column() -> Option<TypeAttrColumn> {
 
 fn shallow_copy_column() -> Option<TypeAttrColumn> {
     cached_column(&SHALLOW_COPY_COLUMN, SHALLOW_COPY_ATTR)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tvm_ffi_sys::{TVMFFIObjectDeleterFlagBitMask, COMBINED_REF_COUNT_WEAK_ONE};
+
+    #[test]
+    fn idle_mutator_excludes_retained_handles_and_resets_each_invocation() {
+        #[derive(Default)]
+        struct Probe {
+            mode: u8,
+            handle: StructuralMutatorHandle,
+            retained: Option<ObjectArc<RuntimeStructuralMutatorObj>>,
+        }
+        impl StructuralMutator for Probe {
+            fn dispatch_mutate(&mut self, value: &StructuralView, _: DefRegionKind) -> Result<Any> {
+                self.handle = active_mutator()?;
+                unsafe {
+                    assert_eq!((*self.handle).def_region_mode, DefRegionKind::None as i32);
+                    assert!((*self.handle).remap.borrow().entries.is_empty());
+                }
+                let key = Any::from(crate::Array::new(Vec::<i64>::new()));
+                self.var_remap_set(StructuralView::from_any(&key), &Any::from(7_i64))?;
+                match self.mode {
+                    1 => unsafe {
+                        object::unsafe_::inc_ref(self.handle.cast());
+                        self.retained = Some(ObjectArc::from_raw(self.handle));
+                    },
+                    2 => unsafe {
+                        (*self.handle.cast::<TVMFFIObject>())
+                            .combined_ref_count
+                            .fetch_add(COMBINED_REF_COUNT_WEAK_ONE, Ordering::Relaxed);
+                    },
+                    3 => {
+                        let outer = self.handle;
+                        structural_mutate(1_i64, |value: i64, _: &mut MutateContext<'_>| {
+                            assert_ne!(active_mutator().unwrap(), outer);
+                            value
+                        })?;
+                        assert_eq!(active_mutator()?, outer);
+                    }
+                    4 => return Err(runtime_error("cache error")),
+                    5 => panic!("cache panic"),
+                    _ => {}
+                }
+                Ok(value.to_owned())
+            }
+        }
+
+        for mode in 0..6 {
+            IDLE_MUTATOR.with(|idle| drop(idle.take()));
+            let mut probe = Probe {
+                mode,
+                ..Probe::default()
+            };
+            let result = catch_unwind(AssertUnwindSafe(|| structural_mutate(1_i64, &mut probe)));
+            match mode {
+                4 => assert!(result.unwrap().is_err()),
+                5 => assert!(result.is_err()),
+                _ => assert_eq!(i64::try_from(result.unwrap().unwrap()).unwrap(), 1),
+            }
+            assert!(active_mutator().is_err());
+            let cached = IDLE_MUTATOR.with(Cell::take);
+            if mode == 1 || mode == 2 {
+                assert!(cached.is_none());
+                let mut next = Probe::default();
+                structural_mutate(2_i64, &mut next).unwrap();
+                assert_ne!(next.handle, probe.handle);
+                if mode == 1 {
+                    assert!(probe.retained.as_ref().unwrap().context.is_null());
+                    assert!(unsafe { take_runtime_context(probe.handle) }.is_err());
+                } else {
+                    // The last strong owner dropped; release the simulated foreign weak handle.
+                    unsafe {
+                        let header = &*probe.handle.cast::<TVMFFIObject>();
+                        assert_eq!(
+                            header
+                                .combined_ref_count
+                                .fetch_sub(COMBINED_REF_COUNT_WEAK_ONE, Ordering::Release),
+                            COMBINED_REF_COUNT_WEAK_ONE
+                        );
+                        std::sync::atomic::fence(Ordering::Acquire);
+                        (header.deleter.unwrap())(
+                            probe.handle.cast(),
+                            TVMFFIObjectDeleterFlagBitMask::kTVMFFIObjectDeleterFlagBitMaskWeak
+                                as i32,
+                        );
+                    }
+                }
+            } else {
+                let cached = cached.unwrap();
+                assert!(cached.context.is_null());
+                assert!(cached.context_identity.is_null());
+                assert!(cached.panic.is_none());
+                assert_eq!(cached.remap.borrow().entries.capacity(), 0);
+                IDLE_MUTATOR.with(|idle| idle.set(Some(cached)));
+                let previous = probe.handle;
+                probe.mode = 0;
+                structural_mutate(2_i64, &mut probe).unwrap();
+                assert_eq!(probe.handle, previous);
+            }
+        }
+        IDLE_MUTATOR.with(|idle| drop(idle.take()));
+    }
 }
