@@ -190,8 +190,8 @@ class ExecutionSession(Object):
         ``keep_module_alive`` mirrors :func:`tvm_ffi.load_module`'s option of
         the same name. When True, the module is inserted into the runtime's
         process-global module registry, so its JITDylib — and every function
-        pointer, deleter, and static allocation it owns — stays mapped until
-        the interpreter unloads ``libtvm_ffi``. Use this when Objects produced
+        pointer, deleter, and static allocation it owns — stays mapped for the
+        duration of the process. Use this when Objects produced
         by the module may outlive the local ``mod`` reference (e.g., a
         JIT-allocated ``String`` or ``Array`` returned to Python and held past
         ``del mod``). When False (default), the caller owns the module's

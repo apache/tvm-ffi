@@ -29,8 +29,6 @@ Examples
 
 """
 
-import ctypes
-import os
 import platform
 from pathlib import Path
 
@@ -54,8 +52,8 @@ _LIB_PATH = [
 _lib_path = None
 for path in _LIB_PATH:
     if path.exists():
-        _ = load_module(str(path))
         _lib_path = path
+        break
 if _lib_path is None:
     raise RuntimeError(
         f"Could not find {_LIB_NAME}. "
@@ -63,19 +61,10 @@ if _lib_path is None:
         f"Please ensure the package is installed correctly."
     )
 
-# Keep a second, process-lifetime local handle. RTLD_NODELETE is important for
-# modules pinned by keep_module_alive: their object deleters point into JIT code
-# owned by this DSO and may run during interpreter shutdown, after Python module
-# globals have otherwise released their handles. This does not promote the DSO
-# or its statically linked LLVM into the process-global symbol namespace.
-if os.name == "posix":
-    _c_lib = ctypes.CDLL(
-        str(_lib_path),
-        mode=ctypes.RTLD_LOCAL | getattr(os, "RTLD_NODELETE", 0),
-    )
-else:
-    _dll_directory = os.add_dll_directory(str(_lib_path.parent))
-    _c_lib = ctypes.CDLL(str(_lib_path))
+# The TVM-FFI loader uses local symbol scope. Retain the returned module here
+# and in TVM-FFI's process-lifetime module registry so registered functions and
+# JIT-owned object deleters remain valid through interpreter shutdown.
+_lib_module = load_module(_lib_path, keep_module_alive=True)
 
 from .session import ExecutionSession, default_session
 

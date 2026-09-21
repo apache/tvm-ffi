@@ -22,9 +22,11 @@ import ctypes
 import platform
 import shutil
 import subprocess
+import sys
 
 import pytest
 import tvm_ffi_orcjit
+from utils import build_test_objects
 
 
 @pytest.mark.skipif(platform.system() == "Windows", reason="RTLD_DEFAULT is POSIX-only")
@@ -52,3 +54,38 @@ def test_addon_exports_only_initializer() -> None:
     output = subprocess.run(command, check=True, capture_output=True, text=True).stdout
     exported = {line.split()[0].split("@@", 1)[0] for line in output.splitlines() if line.strip()}
     assert exported == expected
+
+
+def test_tvm_ffi_loader_survives_process_shutdown() -> None:
+    """The TVM-FFI keep-alive registry must retain the addon through shutdown."""
+    obj_dir = build_test_objects()
+    candidates = [
+        "cc-gcc/test_funcs.o",
+        "cc/test_funcs.o",
+        "cc-appleclang/test_funcs.o",
+        "c-msvc/test_funcs.o",
+        "c-clang-cl/test_funcs.o",
+        "c/test_funcs.o",
+        "c-gcc/test_funcs.o",
+    ]
+    obj_path = next(
+        (obj_dir / candidate for candidate in candidates if (obj_dir / candidate).is_file()), None
+    )
+    if obj_path is None:
+        pytest.skip("no test object is available")
+
+    script = """
+import sys
+from tvm_ffi_orcjit import ExecutionSession
+
+module = ExecutionSession().load_module(sys.argv[1], keep_module_alive=True)
+assert module.test_add(2, 3) == 5
+del module
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script, str(obj_path.resolve())],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr

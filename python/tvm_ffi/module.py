@@ -445,7 +445,7 @@ def load_module(path: str | PathLike, keep_module_alive: bool = True) -> Module:
 
     keep_module_alive
         Whether to keep the module alive. If True, the module will be kept alive
-        for the duration of the program until libtvm_ffi.so is unloaded.
+        for the duration of the process.
 
     Returns
     -------

@@ -49,8 +49,12 @@ class ModuleGlobals {
   }
 
   static ModuleGlobals* Get() {
-    static ModuleGlobals instance;
-    return &instance;
+    // Process-lifetime by design. A pinned DSO may have registered functions
+    // whose callable contexts and deleters live in that DSO. Destroying this
+    // registry during static teardown can unload the DSO before the global
+    // function registry and other dependents release those callbacks.
+    static auto* instance = new ModuleGlobals();
+    return instance;
   }
 
  private:

@@ -1116,7 +1116,7 @@ def load_inline(  # noqa: PLR0913
 
     keep_module_alive
         Whether to keep the module alive. If True, the module will be kept alive
-        for the duration of the program until libtvm_ffi.so is unloaded.
+        for the duration of the process.
 
     backend
         The GPU backend to use. It can be "cuda" or "hip".
@@ -1441,7 +1441,7 @@ def load(  # noqa: PLR0913
 
     keep_module_alive
         Whether to keep the module alive. If True, the module will be kept alive
-        for the duration of the program until libtvm_ffi.so is unloaded.
+        for the duration of the process.
 
     backend
         The GPU backend to use. It can be "cuda" or "hip".
