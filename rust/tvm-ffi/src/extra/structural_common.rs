@@ -171,6 +171,13 @@ impl StructuralView {
     }
 
     #[inline]
+    pub(crate) fn from_any(value: &Any) -> &Self {
+        // SAFETY: StructuralView is transparent over TVMFFIAny. The owning
+        // Any keeps its contents live for the lifetime of this shared borrow.
+        unsafe { &*std::ptr::from_ref(value.as_raw_ffi_any()).cast::<Self>() }
+    }
+
+    #[inline]
     pub(crate) fn raw(&self) -> TVMFFIAny {
         self.0
     }

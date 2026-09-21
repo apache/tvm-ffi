@@ -70,6 +70,6 @@ impl<V: WalkDispatch> NativeVisit for DispatchWalker<V> {
     ) -> Result<WalkResult> {
         self.walker
             .dispatch_walk(value, def_region_kind)
-            .unwrap_or(Ok(WalkResult::Advance))
+            .unwrap_or_else(|| Ok(WalkResult::Advance))
     }
 }

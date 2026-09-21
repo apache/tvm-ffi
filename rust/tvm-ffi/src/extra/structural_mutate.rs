@@ -34,6 +34,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::LazyLock;
 
 use crate::any::{Any, AnyView};
+use crate::collections::array::ArrayObj;
 use crate::error::{Error, Result, RUNTIME_ERROR, TYPE_ERROR};
 use crate::function::Function;
 use crate::object::{self, Object, ObjectArc, ObjectCore};
@@ -1099,15 +1100,7 @@ pub trait NativeMap: Sized {
 
 impl<D: MapDispatch> NativeMap for D {
     fn map_root(&mut self, root: Any, order: WalkOrder) -> Result<Any> {
-        run_structural_mutator(
-            root,
-            &mut NativeMapper::<_, DefaultMutContextPolicy> {
-                dispatch: self,
-                order,
-                policy: None,
-                remap: StructuralVarRemap::default(),
-            },
-        )
+        run_native_mapper::<_, DefaultMutContextPolicy>(root, self, None, order)
     }
 }
 
@@ -1881,10 +1874,12 @@ where
     }
 
     fn on_default_mutate(&mut self, value: MutateValue<'_>, kind: DefRegionKind) -> Result<Any> {
-        match self.policy.clone() {
+        match self.policy.as_ref().map(Rc::as_ptr) {
             Some(policy) => policy::mutate_with_policy(
                 &mut policy::MutationDescent { driver: self },
-                policy.as_ref(),
+                // SAFETY: callbacks cannot replace the policy; its owning Rc
+                // remains live throughout this recursive call.
+                unsafe { &*policy },
                 value,
                 kind,
             ),
@@ -2016,14 +2011,39 @@ struct MemoEntry {
     result: Any,
 }
 
-struct NativeMapper<'a, D, Policy> {
+struct NativeMapper<'a, D, Policy, const PRE_ORDER: bool> {
     dispatch: &'a mut D,
     policy: Option<Rc<Policy>>,
-    order: WalkOrder,
     remap: StructuralVarRemap,
 }
 
-impl<D: MapDispatch, Policy: MutContextPolicy<D>> NativeMapper<'_, D, Policy> {
+fn run_native_mapper<D: MapDispatch, Policy: MutContextPolicy<D>>(
+    root: Any,
+    dispatch: &mut D,
+    policy: Option<Rc<Policy>>,
+    order: WalkOrder,
+) -> Result<Any> {
+    match order {
+        WalkOrder::PreOrder => NativeMapper::<_, _, true>::run(root, dispatch, policy),
+        WalkOrder::PostOrder => NativeMapper::<_, _, false>::run(root, dispatch, policy),
+    }
+}
+
+impl<D: MapDispatch, Policy: MutContextPolicy<D>, const PRE_ORDER: bool>
+    NativeMapper<'_, D, Policy, PRE_ORDER>
+{
+    fn run(root: Any, dispatch: &mut D, policy: Option<Rc<Policy>>) -> Result<Any> {
+        run_structural_mutator(
+            root,
+            &mut NativeMapper::<_, _, PRE_ORDER> {
+                dispatch,
+                policy,
+                remap: StructuralVarRemap::default(),
+            },
+        )
+    }
+
+    #[inline(always)]
     fn map_raw(
         &mut self,
         raw: TVMFFIAny,
@@ -2042,7 +2062,7 @@ impl<D: MapDispatch, Policy: MutContextPolicy<D>> NativeMapper<'_, D, Policy> {
                 Some(result) => {
                     let mapped = result?;
                     // A pre-order callback may replace an inline leaf with a subtree.
-                    if self.order == WalkOrder::PreOrder && !is_plain_inline(mapped.type_index()) {
+                    if PRE_ORDER && !is_plain_inline(mapped.type_index()) {
                         let descended =
                             self.map_default_root(&mapped, def_region_kind, Permit::Copy)?;
                         Ok(if is_unchanged(&descended) {
@@ -2071,8 +2091,8 @@ impl<D: MapDispatch, Policy: MutContextPolicy<D>> NativeMapper<'_, D, Policy> {
         def_region_kind: DefRegionKind,
         permit: Permit,
     ) -> Result<Any> {
-        match self.order {
-            WalkOrder::PreOrder => {
+        match PRE_ORDER {
+            true => {
                 // A replacement inherits the input's permission, established
                 // before the callback can acquire or release ownership.
                 let permit = permit.inplace_mode(raw).permit();
@@ -2097,18 +2117,18 @@ impl<D: MapDispatch, Policy: MutContextPolicy<D>> NativeMapper<'_, D, Policy> {
                     })
                 }
             }
-            WalkOrder::PostOrder => {
+            false => {
                 let mapped = self.default_map_current_raw(raw, def_region_kind, permit)?;
-                let mapped_raw = if is_unchanged(&mapped) {
-                    raw
+                let original = StructuralView::from_raw(raw);
+                let value = if is_unchanged(&mapped) {
+                    &original
                 } else {
-                    *mapped.as_raw_ffi_any()
+                    StructuralView::from_any(&mapped)
                 };
-                let value = StructuralView::from_raw(mapped_raw);
                 // Keep child rewrites when the callback leaves its input unchanged.
-                match self.dispatch.dispatch_map(&value, def_region_kind) {
+                match self.dispatch.dispatch_map(value, def_region_kind) {
                     Some(Ok(result)) if is_unchanged(&result) => Ok(mapped),
-                    Some(result) => result.map_err(|error| with_value_context(error, mapped_raw)),
+                    Some(result) => result.map_err(|error| with_value_context(error, value.raw())),
                     None => Ok(mapped),
                 }
             }
@@ -2162,9 +2182,22 @@ trait MutationDriver: Sized {
         def_region_kind: DefRegionKind,
         permit: Permit,
     ) -> Result<Option<Any>> {
-        let mutator = active_mutator()?;
-        with_current_driver_context(mutator, self, || {
-            call_registered_structural_mutate(mutator, raw, def_region_kind, permit)
+        let (mutator, context) = checked_driver_context(self)?;
+        if raw.type_index == TVMFFITypeIndex::kTVMFFIArray as i32
+            && permit == Permit::MaybeInPlace
+            && object_is_unique(raw)
+        {
+            return with_mutation_region(def_region_kind, |kind| {
+                mutate_array(self, mutator, raw, kind)
+            })
+            .map(Some);
+        }
+        let Some(attr) = structural_mutate_hook(raw, permit) else {
+            // No foreign call needs access to the driver on a hook miss.
+            return Ok(None);
+        };
+        with_current_driver_context(mutator, context, || {
+            call_structural_mutate_hook(mutator, raw, def_region_kind, attr).map(Some)
         })
     }
 
@@ -2640,27 +2673,14 @@ fn inactive_mutator_error(mutator: StructuralMutatorHandle, operation: &str) -> 
 /// Expose the current mutable reborrow only for the duration of one registered
 /// type hook. Nested vtable calls then reborrow from this pointer, and
 /// [`take_runtime_context`] hides it again while Rust is executing.
-fn with_current_driver_context<D, T>(
+fn with_current_driver_context<T>(
     mutator: StructuralMutatorHandle,
-    driver: &mut D,
+    context: *mut c_void,
     callback: impl FnOnce() -> Result<T>,
 ) -> Result<T> {
-    let context = std::ptr::from_mut(driver).cast::<c_void>();
-    if !is_active_mutator(mutator) {
-        return Err(inactive_mutator_error(mutator, "helper"));
-    }
+    // checked_driver_context validated this reborrow; no user code runs
+    // between that check and exposing the pointer to the registered hook.
     unsafe {
-        if (*mutator).context_identity != context {
-            return Err(runtime_error(
-                "structural mutator helper called on a non-active mutator",
-            ));
-        }
-        if !(*mutator).context.is_null() {
-            return Err(runtime_error(
-                "structural mutator driver context is already exposed",
-            ));
-        }
-
         (*mutator).context = context;
         struct HideContext {
             mutator: StructuralMutatorHandle,
@@ -2677,6 +2697,25 @@ fn with_current_driver_context<D, T>(
     }
 }
 
+fn checked_driver_context<D>(driver: &mut D) -> Result<(StructuralMutatorHandle, *mut c_void)> {
+    let mutator = active_mutator()?;
+    let context = std::ptr::from_mut(driver).cast::<c_void>();
+    unsafe {
+        if (*mutator).context_identity != context {
+            return Err(runtime_error(
+                "structural mutator helper called on a non-active mutator",
+            ));
+        }
+        if !(*mutator).context.is_null() {
+            return Err(runtime_error(
+                "structural mutator driver context is already exposed",
+            ));
+        }
+
+        Ok((mutator, context))
+    }
+}
+
 fn def_region_from_raw(kind: i32) -> Result<DefRegionKind> {
     match kind {
         x if x == DefRegionKind::None as i32 => Ok(DefRegionKind::None),
@@ -2686,7 +2725,9 @@ fn def_region_from_raw(kind: i32) -> Result<DefRegionKind> {
     }
 }
 
-impl<D: MapDispatch, Policy: MutContextPolicy<D>> MutationDriver for NativeMapper<'_, D, Policy> {
+impl<D: MapDispatch, Policy: MutContextPolicy<D>, const PRE_ORDER: bool> MutationDriver
+    for NativeMapper<'_, D, Policy, PRE_ORDER>
+{
     fn dispatch_raw(
         &mut self,
         raw: TVMFFIAny,
@@ -2696,18 +2737,34 @@ impl<D: MapDispatch, Policy: MutContextPolicy<D>> MutationDriver for NativeMappe
         with_mutation_region(def_region_kind, |kind| self.map_raw(raw, kind, permit))
     }
 
+    #[inline(always)]
+    fn dispatch_abi_raw<const INPLACE: bool>(
+        &mut self,
+        raw: TVMFFIAny,
+        kind: DefRegionKind,
+    ) -> TVMFFIAny {
+        let permit = if INPLACE {
+            Permit::MaybeInPlace
+        } else {
+            Permit::Copy
+        };
+        result_into_raw(self.map_raw(raw, kind, permit))
+    }
+
+    #[inline(always)]
     fn default_map_current_raw(
         &mut self,
         raw: TVMFFIAny,
         kind: DefRegionKind,
         permit: Permit,
     ) -> Result<Any> {
-        match self.policy.clone() {
+        match self.policy.as_ref().map(Rc::as_ptr) {
             Some(policy) => {
                 let view = StructuralView::from_raw(raw);
                 policy::mutate_with_policy(
                     &mut policy::MutationDescent { driver: self },
-                    policy.as_ref(),
+                    // SAFETY: recursive mapping never replaces the owning Rc.
+                    unsafe { &*policy },
                     MutateValue::new(&view, permit.inplace_mode(raw)),
                     kind,
                 )
@@ -2741,6 +2798,12 @@ impl<U: StructuralMutator> MutationDriver for U {
         raw: TVMFFIAny,
         kind: DefRegionKind,
     ) -> TVMFFIAny {
+        if INPLACE && raw.type_index < TVMFFITypeIndex::kTVMFFIStaticObjectBegin as i32 {
+            return result_into_raw(
+                self.dispatch_mutate(&StructuralView::from_raw(raw), kind)
+                    .map_err(|error| with_value_context(error, raw)),
+            );
+        }
         let permit = if INPLACE {
             Permit::MaybeInPlace
         } else {
@@ -2879,12 +2942,8 @@ fn call_mutator(
     })
 }
 
-fn call_registered_structural_mutate(
-    mutator: StructuralMutatorHandle,
-    raw: TVMFFIAny,
-    def_region_kind: DefRegionKind,
-    permit: Permit,
-) -> Result<Option<Any>> {
+#[inline(always)]
+fn structural_mutate_hook(raw: TVMFFIAny, permit: Permit) -> Option<TVMFFIAny> {
     let use_inplace = permit == Permit::MaybeInPlace && object_is_unique(raw);
     if use_inplace {
         if let Some(attr) = structural_maybe_inplace_mutate_column()
@@ -2893,19 +2952,12 @@ fn call_registered_structural_mutate(
             if attr.type_index == TVMFFITypeIndex::kTVMFFIOpaquePtr as i32
                 || attr.type_index == TVMFFITypeIndex::kTVMFFIFunction as i32
             {
-                return call_structural_mutate_hook(mutator, raw, def_region_kind, attr).map(Some);
+                return Some(attr);
             }
         }
     }
-
-    let Some(attr) = structural_mutate_column().and_then(|column| column.get_raw(raw.type_index))
-    else {
-        return Ok(None);
-    };
-    if attr.type_index == TVMFFITypeIndex::kTVMFFINone as i32 {
-        return Ok(None);
-    }
-    call_structural_mutate_hook(mutator, raw, def_region_kind, attr).map(Some)
+    let attr = structural_mutate_column().and_then(|column| column.get_raw(raw.type_index))?;
+    (attr.type_index != TVMFFITypeIndex::kTVMFFINone as i32).then_some(attr)
 }
 
 fn call_structural_mutate_hook(
@@ -2958,6 +3010,7 @@ unsafe fn borrowed_mutator_view<'a>(mutator: StructuralMutatorHandle) -> AnyView
     AnyView::from_raw_ffi_any(raw)
 }
 
+#[inline(always)]
 fn result_into_raw(result: Result<Any>) -> TVMFFIAny {
     unsafe {
         match result {
@@ -2983,6 +3036,7 @@ fn resolve_result(result: Any, original: TVMFFIAny) -> Result<Any> {
 ///
 /// `raw` must contain one owning TVMFFIAny result that has not already been
 /// consumed. An Error object is converted into the Rust error channel.
+#[inline(always)]
 unsafe fn result_from_raw(raw: TVMFFIAny) -> Result<Any> {
     let value = Any::from_raw_ffi_any(raw);
     if value.type_index() != TVMFFITypeIndex::kTVMFFIError as i32 {
@@ -3081,6 +3135,45 @@ fn user_default_mutate<U: StructuralMutator>(
         mutator.on_default_mutate(MutateValue::new(&value, permit.inplace_mode(raw)), kind)
     })
     .map_err(|error| with_value_context(error, raw))
+}
+
+#[inline(never)]
+fn mutate_array<D: MutationDriver>(
+    driver: &mut D,
+    mutator: StructuralMutatorHandle,
+    raw: TVMFFIAny,
+    kind: DefRegionKind,
+) -> Result<Any> {
+    // Array has a fixed native hook and a shared ABI layout. Keep its loop in
+    // Rust so child callbacks can inline without exposing a foreign reborrow.
+    let array = unsafe { raw.data_union.v_obj.cast::<ArrayObj>() };
+    if array.is_null() {
+        return Err(runtime_error("structural mutation of a null array"));
+    }
+    let (items, len) = unsafe { ((*array).data.cast::<TVMFFIAny>(), (*array).size as usize) };
+    for index in 0..len {
+        // SAFETY: the active root owns this array, and both the input's
+        // permission and unique ownership were checked before entering.
+        let original = unsafe { *items.add(index) };
+        let outcome = catch_unwind(AssertUnwindSafe(
+            #[inline(always)]
+            || driver.dispatch_abi_raw::<true>(original, kind),
+        ));
+        let mapped = unsafe {
+            result_from_raw(match outcome {
+                Ok(value) => value,
+                Err(payload) => mutation_panic_result(mutator, payload),
+            })?
+        };
+        if is_unchanged(&mapped) || same_shallow(original, *mapped.as_raw_ffi_any()) {
+            continue;
+        }
+        unsafe {
+            let old = std::ptr::replace(items.add(index), Any::into_raw_ffi_any(mapped));
+            drop(Any::from_raw_ffi_any(old));
+        }
+    }
+    Ok(Unchanged.into())
 }
 
 fn default_mutate_driver<D: MutationDriver>(
@@ -3195,12 +3288,18 @@ fn shallow_copy(raw: TVMFFIAny) -> Result<Any> {
             "",
         ));
     }
-    let function = Function::try_from(unsafe { AnyView::from_raw_ffi_any(attr) })?;
-    // `raw` is borrowed from the active mutation call and remains valid for
-    // this synchronous packed call. Avoid an unnecessary object refcount
-    // increment/decrement just to pass another borrowed view.
-    let source = unsafe { AnyView::from_raw_ffi_any(raw) };
-    let result = function.call_packed(&[source])?;
+    let function = unsafe { attr.data_union.v_obj };
+    if function.is_null() {
+        return Err(runtime_error("shallow copy function pointer is null"));
+    }
+    // The registry owns this function throughout the call; borrowing it avoids
+    // an atomic retain/release for every reflected node.
+    let mut result = Any::new();
+    let status =
+        unsafe { TVMFFIFunctionCall(function.cast(), &raw, 1, Any::as_data_ptr(&mut result)) };
+    if status != 0 {
+        return Err(Error::from_raised());
+    }
     let result_raw = *result.as_raw_ffi_any();
     let result_pointer = unsafe { result_raw.data_union.v_obj };
     let source_pointer = unsafe { raw.data_union.v_obj };
@@ -3293,6 +3392,7 @@ fn object_is_unique(raw: TVMFFIAny) -> bool {
     !pointer.is_null() && unsafe { object::unsafe_::strong_count(pointer) == 1 }
 }
 
+#[inline(always)]
 fn owned_from_raw(raw: TVMFFIAny) -> Result<Any> {
     if let Some(owned) = try_to_owned_without_normalization(raw) {
         return Ok(owned);
@@ -3315,6 +3415,7 @@ fn owned_from_raw(raw: TVMFFIAny) -> Result<Any> {
     }
 }
 
+#[cold]
 fn with_value_context(error: Error, raw: TVMFFIAny) -> Error {
     if raw.type_index < TVMFFITypeIndex::kTVMFFIStaticObjectBegin as i32 {
         error
@@ -3326,6 +3427,7 @@ fn with_value_context(error: Error, raw: TVMFFIAny) -> Error {
     }
 }
 
+#[cold]
 fn with_error_context(error: Error, frame: &str) -> Error {
     with_structural_error_context(error, "map", frame)
 }

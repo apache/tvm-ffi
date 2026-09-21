@@ -264,7 +264,7 @@ fn expand(item_impl: &ItemImpl, args: DispatchArgs) -> syn::Result<TokenStream2>
             {
                 #policy_method
 
-                #[inline]
+                #[inline(always)]
                 #[allow(unreachable_code, unused_variables)]
                 fn visit(
                     &mut self,
