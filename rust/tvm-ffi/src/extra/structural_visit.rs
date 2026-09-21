@@ -1375,7 +1375,7 @@ fn visit_reflected_fields<C: ChildVisit>(
     visitor: &mut C,
     def_region_kind: DefRegionKind,
 ) -> NativeResult {
-    let type_info = unsafe { TVMFFIGetTypeInfo(value.type_index) };
+    let type_info = super::structural_common::cached_type_info(value.type_index);
     if type_info.is_null() {
         return Err(runtime_error(&format!(
             "native visitor: unregistered type index {}",

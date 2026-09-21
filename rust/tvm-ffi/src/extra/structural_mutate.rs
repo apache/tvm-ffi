@@ -45,8 +45,7 @@ use crate::tvm_ffi_sys::TVMFFIFieldFlagBitMask::{
 };
 use crate::tvm_ffi_sys::{
     TVMFFIAny, TVMFFIAnyViewToOwnedAny, TVMFFIByteArray, TVMFFIFieldInfo, TVMFFIFieldSetter,
-    TVMFFIFunctionCall, TVMFFIGetTypeInfo, TVMFFIObject, TVMFFITypeAttrColumn, TVMFFITypeIndex,
-    TVMFFITypeKeyToIndex,
+    TVMFFIFunctionCall, TVMFFIObject, TVMFFITypeAttrColumn, TVMFFITypeIndex, TVMFFITypeKeyToIndex,
 };
 use crate::tvm_ffi_sys::{TVMFFIObjectHandle, TVMFFISEqHashKind};
 
@@ -236,11 +235,12 @@ impl<'a, T> MutateValue<'a, T> {
         }
     }
 
+    // Combine permissions here; policy entry and built-in descent recheck ownership.
     fn permit(&self, requested: InplaceMode) -> Permit {
         if self.mode == InplaceMode::Disallow {
             Permit::Copy
         } else {
-            requested.permit_if_unique(self.value.raw())
+            requested.permit()
         }
     }
 }
@@ -3429,15 +3429,21 @@ fn var_remap_key_error() -> Error {
     )
 }
 
+#[inline(always)]
 fn checked_type_info(type_index: i32) -> Result<*const crate::tvm_ffi_sys::TVMFFITypeInfo> {
-    let info = unsafe { TVMFFIGetTypeInfo(type_index) };
+    let info = super::structural_common::cached_type_info(type_index);
     if info.is_null() {
-        Err(runtime_error(&format!(
-            "native structural map: unregistered type index {type_index}"
-        )))
+        Err(unregistered_type_error(type_index))
     } else {
         Ok(info)
     }
+}
+
+#[cold]
+fn unregistered_type_error(type_index: i32) -> Error {
+    runtime_error(&format!(
+        "native structural map: unregistered type index {type_index}"
+    ))
 }
 
 #[inline]

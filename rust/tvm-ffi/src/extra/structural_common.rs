@@ -26,6 +26,28 @@ use crate::tvm_ffi_sys::{
     TVMFFIAny, TVMFFIByteArray, TVMFFIGetTypeInfo, TVMFFITypeIndex, TVMFFITypeKeyToIndex,
 };
 
+#[inline(never)]
+pub(crate) fn cached_type_info(type_index: i32) -> *const crate::tvm_ffi_sys::TVMFFITypeInfo {
+    thread_local! {
+        static LAST_TYPE_INFO: std::cell::Cell<(i32, *const crate::tvm_ffi_sys::TVMFFITypeInfo)> = const {
+            std::cell::Cell::new((-1, std::ptr::null()))
+        };
+    }
+    LAST_TYPE_INFO.with(|cache| {
+        let (cached_index, info) = cache.get();
+        if type_index == cached_index {
+            return info;
+        }
+        let info = unsafe { TVMFFIGetTypeInfo(type_index) };
+        if !info.is_null() {
+            // Registered type entries keep their address for the runtime's
+            // lifetime. Cache the entry, not its mutable reflection metadata.
+            cache.set((type_index, info));
+        }
+        info
+    })
+}
+
 /// Add one structural traversal frame to an error's backtrace.
 pub(crate) fn with_structural_error_context(error: Error, operation: &str, frame: &str) -> Error {
     Error::with_appended_backtrace(error, &format!("[native structural {operation}] {frame}\n"))
