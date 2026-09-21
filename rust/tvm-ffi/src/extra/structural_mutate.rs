@@ -25,7 +25,6 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::ffi::c_void;
-use std::hash::{BuildHasherDefault, Hasher};
 use std::marker::PhantomData;
 use std::ops::{ControlFlow, Deref};
 use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
@@ -45,7 +44,8 @@ use crate::tvm_ffi_sys::TVMFFIFieldFlagBitMask::{
 };
 use crate::tvm_ffi_sys::{
     TVMFFIAny, TVMFFIAnyViewToOwnedAny, TVMFFIByteArray, TVMFFIFieldInfo, TVMFFIFieldSetter,
-    TVMFFIFunctionCall, TVMFFIObject, TVMFFITypeAttrColumn, TVMFFITypeIndex, TVMFFITypeKeyToIndex,
+    TVMFFIFunctionCall, TVMFFIGetTypeInfo, TVMFFIObject, TVMFFITypeAttrColumn, TVMFFITypeIndex,
+    TVMFFITypeKeyToIndex,
 };
 use crate::tvm_ffi_sys::{TVMFFIObjectHandle, TVMFFISEqHashKind};
 
@@ -1513,30 +1513,7 @@ impl Deref for InplaceValue<'_> {
 /// The map owns its keys and values so object addresses remain stable.
 #[derive(Default)]
 pub struct StructuralVarRemap {
-    entries: HashMap<NonNull<TVMFFIObject>, MemoEntry, BuildHasherDefault<IdentityHasher>>,
-}
-
-#[derive(Default)]
-struct IdentityHasher(u64);
-
-impl Hasher for IdentityHasher {
-    fn write(&mut self, bytes: &[u8]) {
-        for byte in bytes {
-            self.0 = (self.0 ^ u64::from(*byte)).wrapping_mul(0x100000001b3);
-        }
-    }
-
-    fn write_usize(&mut self, value: usize) {
-        self.0 = value as u64;
-    }
-
-    fn finish(&self) -> u64 {
-        // Mix address alignment bits into both the bucket index and control tag.
-        let mut hash = self.0;
-        hash = (hash ^ (hash >> 33)).wrapping_mul(0xff51afd7ed558ccd);
-        hash = (hash ^ (hash >> 33)).wrapping_mul(0xc4ceb9fe1a85ec53);
-        hash ^ (hash >> 33)
-    }
+    entries: HashMap<NonNull<TVMFFIObject>, MemoEntry>,
 }
 
 impl StructuralVarRemap {
@@ -1898,12 +1875,10 @@ where
     }
 
     fn on_default_mutate(&mut self, value: MutateValue<'_>, kind: DefRegionKind) -> Result<Any> {
-        match self.policy.as_ref().map(Rc::as_ptr) {
+        match self.policy.clone() {
             Some(policy) => policy::mutate_with_policy(
                 &mut policy::MutationDescent { driver: self },
-                // SAFETY: callbacks cannot replace the policy; its owning Rc
-                // remains live throughout this recursive call.
-                unsafe { &*policy },
+                policy.as_ref(),
                 value,
                 kind,
             ),
@@ -2035,7 +2010,7 @@ struct MemoEntry {
     result: Any,
 }
 
-struct NativeMapper<'a, D, Policy, const PRE_ORDER: bool, const HAS_POLICY: bool> {
+struct NativeMapper<'a, D, Policy, const PRE_ORDER: bool> {
     dispatch: &'a mut D,
     policy: Option<Rc<Policy>>,
     remap: StructuralVarRemap,
@@ -2047,28 +2022,19 @@ fn run_native_mapper<D: MapDispatch, Policy: MutContextPolicy<D>>(
     policy: Option<Rc<Policy>>,
     order: WalkOrder,
 ) -> Result<Any> {
-    match (order, policy.is_some()) {
-        (WalkOrder::PreOrder, _) => NativeMapper::<_, _, true, false>::run(root, dispatch, policy),
-        (WalkOrder::PostOrder, false) => {
-            NativeMapper::<_, _, false, false>::run(root, dispatch, policy)
-        }
-        (WalkOrder::PostOrder, true) => {
-            NativeMapper::<_, _, false, true>::run(root, dispatch, policy)
-        }
+    match order {
+        WalkOrder::PreOrder => NativeMapper::<_, _, true>::run(root, dispatch, policy),
+        WalkOrder::PostOrder => NativeMapper::<_, _, false>::run(root, dispatch, policy),
     }
 }
 
-impl<
-        D: MapDispatch,
-        Policy: MutContextPolicy<D>,
-        const PRE_ORDER: bool,
-        const HAS_POLICY: bool,
-    > NativeMapper<'_, D, Policy, PRE_ORDER, HAS_POLICY>
+impl<D: MapDispatch, Policy: MutContextPolicy<D>, const PRE_ORDER: bool>
+    NativeMapper<'_, D, Policy, PRE_ORDER>
 {
     fn run(root: Any, dispatch: &mut D, policy: Option<Rc<Policy>>) -> Result<Any> {
         run_structural_mutator(
             root,
-            &mut NativeMapper::<_, _, PRE_ORDER, HAS_POLICY> {
+            &mut NativeMapper::<_, _, PRE_ORDER> {
                 dispatch,
                 policy,
                 remap: StructuralVarRemap::default(),
@@ -2089,12 +2055,7 @@ impl<
         // Raw strings, byte-array views, and ObjectRValueRef are deliberately
         // excluded because converting those borrowed special values into an
         // Any performs normalization rather than a bitwise copy.
-        let no_policy = if PRE_ORDER {
-            self.policy.is_none()
-        } else {
-            !HAS_POLICY
-        };
-        if no_policy && is_plain_inline(raw.type_index) {
+        if self.policy.is_none() && is_plain_inline(raw.type_index) {
             let value = StructuralView::from_raw(raw);
             return match self.dispatch.dispatch_map(&value, def_region_kind) {
                 Some(result) => {
@@ -2229,17 +2190,6 @@ trait MutationDriver: Sized {
                 mutate_array(self, mutator, raw, kind)
             })
             .map(Some);
-        }
-        if raw.type_index == TVMFFITypeIndex::kTVMFFIArray as i32 {
-            let array = unsafe { raw.data_union.v_obj.cast::<ArrayObj>() };
-            // Packed construction uses an i32 argument count. Larger arrays
-            // retain the registered hook's unrestricted allocation path.
-            if array.is_null() || unsafe { (*array).size <= i32::MAX as i64 } {
-                return with_mutation_region(def_region_kind, |kind| {
-                    copy_mutate_array(self, mutator, raw, kind)
-                })
-                .map(Some);
-            }
         }
         let Some(attr) = structural_mutate_hook(raw, permit) else {
             // No foreign call needs access to the driver on a hook miss.
@@ -2774,12 +2724,8 @@ fn def_region_from_raw(kind: i32) -> Result<DefRegionKind> {
     }
 }
 
-impl<
-        D: MapDispatch,
-        Policy: MutContextPolicy<D>,
-        const PRE_ORDER: bool,
-        const HAS_POLICY: bool,
-    > MutationDriver for NativeMapper<'_, D, Policy, PRE_ORDER, HAS_POLICY>
+impl<D: MapDispatch, Policy: MutContextPolicy<D>, const PRE_ORDER: bool> MutationDriver
+    for NativeMapper<'_, D, Policy, PRE_ORDER>
 {
     fn dispatch_raw(
         &mut self,
@@ -2811,22 +2757,12 @@ impl<
         kind: DefRegionKind,
         permit: Permit,
     ) -> Result<Any> {
-        let policy = if PRE_ORDER {
-            self.policy.as_ref().map(Rc::as_ptr)
-        } else if HAS_POLICY {
-            Some(Rc::as_ptr(
-                self.policy.as_ref().expect("policy selected at the root"),
-            ))
-        } else {
-            None
-        };
-        match policy {
+        match self.policy.clone() {
             Some(policy) => {
                 let view = StructuralView::from_raw(raw);
                 policy::mutate_with_policy(
                     &mut policy::MutationDescent { driver: self },
-                    // SAFETY: recursive mapping never replaces the owning Rc.
-                    unsafe { &*policy },
+                    policy.as_ref(),
                     MutateValue::new(&view, permit.inplace_mode(raw)),
                     kind,
                 )
@@ -3234,103 +3170,6 @@ fn mutate_array<D: MutationDriver>(
     Ok(Unchanged.into())
 }
 
-#[inline(always)]
-fn copy_array_child<D: MutationDriver>(
-    driver: &mut D,
-    mutator: StructuralMutatorHandle,
-    original: TVMFFIAny,
-    kind: DefRegionKind,
-) -> Result<Any> {
-    let outcome = catch_unwind(AssertUnwindSafe(
-        #[inline(always)]
-        || driver.dispatch_abi_raw::<false>(original, kind),
-    ));
-    unsafe {
-        result_from_raw(match outcome {
-            Ok(value) => value,
-            Err(payload) => mutation_panic_result(mutator, payload),
-        })
-    }
-}
-
-#[inline(never)]
-fn copy_mutate_array<D: MutationDriver>(
-    driver: &mut D,
-    mutator: StructuralMutatorHandle,
-    raw: TVMFFIAny,
-    kind: DefRegionKind,
-) -> Result<Any> {
-    let array = unsafe { raw.data_union.v_obj.cast::<ArrayObj>() };
-    if array.is_null() {
-        return Err(runtime_error("structural mutation of a null array"));
-    }
-    let (items, len) = unsafe { ((*array).data.cast::<TVMFFIAny>(), (*array).size as usize) };
-    for index in 0..len {
-        let original = unsafe { *items.add(index) };
-        let mapped = copy_array_child(driver, mutator, original, kind)?;
-        if !is_unchanged(&mapped) && !same_shallow(original, *mapped.as_raw_ffi_any()) {
-            return copy_mutate_array_changed(driver, mutator, items, len, index, mapped, kind);
-        }
-    }
-    Ok(Unchanged.into())
-}
-
-#[inline(never)]
-fn copy_mutate_array_changed<D: MutationDriver>(
-    driver: &mut D,
-    mutator: StructuralMutatorHandle,
-    items: *const TVMFFIAny,
-    len: usize,
-    index: usize,
-    first: Any,
-    kind: DefRegionKind,
-) -> Result<Any> {
-    let output = empty_array(len)?;
-    let array = unsafe { output.as_raw_ffi_any().data_union.v_obj.cast::<ArrayObj>() };
-    // The constructor returned a unique array of initialized, owned ABI values.
-    let target = unsafe { (*array).data.cast::<Any>() };
-    // Copy only the visited prefix; future callbacks must not see extra owners.
-    for i in 0..index {
-        let value = owned_from_raw(unsafe { *items.add(i) })?;
-        unsafe { drop(std::ptr::replace(target.add(i), value)) };
-    }
-    unsafe { drop(std::ptr::replace(target.add(index), first)) };
-    for i in index + 1..len {
-        let original = unsafe { *items.add(i) };
-        let mapped = resolve_result(copy_array_child(driver, mutator, original, kind)?, original)?;
-        unsafe { drop(std::ptr::replace(target.add(i), mapped)) };
-    }
-    Ok(output)
-}
-
-fn empty_array(len: usize) -> Result<Any> {
-    static CONSTRUCTOR: std::sync::OnceLock<Function> = std::sync::OnceLock::new();
-    let constructor = match CONSTRUCTOR.get() {
-        Some(constructor) => constructor,
-        None => {
-            let constructor = Function::get_global("ffi.Array")?;
-            CONSTRUCTOR.get_or_init(|| constructor)
-        }
-    };
-    let output = if len <= 16 {
-        constructor.call_packed(&[AnyView::new(); 16][..len])?
-    } else {
-        constructor.call_packed(&vec![AnyView::new(); len])?
-    };
-    let raw = *output.as_raw_ffi_any();
-    if raw.type_index != TVMFFITypeIndex::kTVMFFIArray as i32 || !object_is_unique(raw) {
-        return Err(runtime_error(
-            "array constructor must return a uniquely owned array",
-        ));
-    }
-    if unsafe { (*raw.data_union.v_obj.cast::<ArrayObj>()).size != len as i64 } {
-        return Err(runtime_error(
-            "array constructor returned an unexpected length",
-        ));
-    }
-    Ok(output)
-}
-
 fn default_mutate_driver<D: MutationDriver>(
     driver: &mut D,
     raw: TVMFFIAny,
@@ -3534,7 +3373,7 @@ fn var_remap_key_error() -> Error {
 
 #[inline(always)]
 fn checked_type_info(type_index: i32) -> Result<*const crate::tvm_ffi_sys::TVMFFITypeInfo> {
-    let info = super::structural_common::cached_type_info(type_index);
+    let info = unsafe { TVMFFIGetTypeInfo(type_index) };
     if info.is_null() {
         Err(unregistered_type_error(type_index))
     } else {

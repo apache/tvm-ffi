@@ -180,8 +180,8 @@ impl<State, Driver: MutationDriver + MutateCallbackState<State>> MutateContextDr
     }
 }
 
-impl<D, Policy, const PRE_ORDER: bool, const HAS_POLICY: bool> MutateCallbackState<D>
-    for NativeMapper<'_, D, Policy, PRE_ORDER, HAS_POLICY>
+impl<D, Policy, const PRE_ORDER: bool> MutateCallbackState<D>
+    for NativeMapper<'_, D, Policy, PRE_ORDER>
 {
     fn callback_state(&self) -> &D {
         self.dispatch

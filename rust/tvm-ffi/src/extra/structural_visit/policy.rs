@@ -229,12 +229,10 @@ impl<Walker: WalkDispatch, Policy: ContextPolicy<Walker>> NativeVisit
         value: &StructuralView,
         kind: DefRegionKind,
     ) -> Result<Option<VisitInterrupt>> {
-        let policy = Rc::as_ptr(&self.policy);
+        let policy = Rc::clone(&self.policy);
         visit_with_policy(
             &mut WalkDescent::<_, _, PRE_ORDER> { visitor: self },
-            // SAFETY: traversal only mutates the dispatcher; the owning Rc
-            // stays live and its policy is never replaced during recursion.
-            unsafe { &*policy },
+            &*policy,
             value,
             kind,
         )
