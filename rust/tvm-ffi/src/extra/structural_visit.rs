@@ -1303,43 +1303,6 @@ fn visit_raw<V: NativeVisit, const PRE_ORDER: bool>(
     }
 }
 
-#[inline(never)]
-fn visit_array<C: ChildVisit>(
-    value: TVMFFIAny,
-    visitor: &mut C,
-    driver_context: *mut c_void,
-    def_region_kind: DefRegionKind,
-) -> NativeResult {
-    let active = active_structural_visitor()?;
-    checked_visitor_context(active, driver_context)?;
-    with_visitor_def_region(active, def_region_kind, || {
-        let kind = def_region_from_raw(unsafe { (*active).def_region_mode })?;
-        let array = unsafe {
-            value
-                .data_union
-                .v_obj
-                .cast::<crate::collections::array::ArrayObj>()
-        };
-        if array.is_null() {
-            return Err(runtime_error("structural visit of a null array").into());
-        }
-        let (items, len) = unsafe { ((*array).data.cast::<TVMFFIAny>(), (*array).size as usize) };
-        for index in 0..len {
-            let child = unsafe { *items.add(index) };
-            match catch_unwind(AssertUnwindSafe(
-                #[inline(always)]
-                || visitor.visit_child(&StructuralView::from_raw(child), kind),
-            )) {
-                Ok(result) => result?,
-                Err(payload) => {
-                    return unsafe { visit_result_from_raw(visit_panic_result(active, payload)) }
-                }
-            }
-        }
-        Ok(())
-    })
-}
-
 #[inline]
 fn visit_children_raw<C: ChildVisit>(
     value: TVMFFIAny,
@@ -1351,9 +1314,6 @@ fn visit_children_raw<C: ChildVisit>(
         structural_visit_column().and_then(|column| column.get_raw(value.type_index))
     {
         if attr.type_index != TVMFFITypeIndex::kTVMFFINone as i32 {
-            if value.type_index == TVMFFITypeIndex::kTVMFFIArray as i32 {
-                return visit_array(value, visitor, driver_context, def_region_kind);
-            }
             let active = active_structural_visitor()?;
             return with_current_visitor_context(active, driver_context, || {
                 call_structural_visit_hook(active, value, def_region_kind, attr)

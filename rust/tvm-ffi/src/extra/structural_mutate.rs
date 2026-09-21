@@ -34,7 +34,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::LazyLock;
 
 use crate::any::{Any, AnyView};
-use crate::collections::array::ArrayObj;
 use crate::error::{Error, Result, RUNTIME_ERROR, TYPE_ERROR};
 use crate::function::Function;
 use crate::object::{self, Object, ObjectArc, ObjectCore};
@@ -2182,15 +2181,6 @@ trait MutationDriver: Sized {
         permit: Permit,
     ) -> Result<Option<Any>> {
         let (mutator, context) = checked_driver_context(self)?;
-        if raw.type_index == TVMFFITypeIndex::kTVMFFIArray as i32
-            && permit == Permit::MaybeInPlace
-            && object_is_unique(raw)
-        {
-            return with_mutation_region(def_region_kind, |kind| {
-                mutate_array(self, mutator, raw, kind)
-            })
-            .map(Some);
-        }
         let Some(attr) = structural_mutate_hook(raw, permit) else {
             // No foreign call needs access to the driver on a hook miss.
             return Ok(None);
@@ -3129,45 +3119,6 @@ fn user_default_mutate<U: StructuralMutator>(
         mutator.on_default_mutate(MutateValue::new(&value, permit.inplace_mode(raw)), kind)
     })
     .map_err(|error| with_value_context(error, raw))
-}
-
-#[inline(never)]
-fn mutate_array<D: MutationDriver>(
-    driver: &mut D,
-    mutator: StructuralMutatorHandle,
-    raw: TVMFFIAny,
-    kind: DefRegionKind,
-) -> Result<Any> {
-    // Array has a fixed native hook and a shared ABI layout. Keep its loop in
-    // Rust so child callbacks can inline without exposing a foreign reborrow.
-    let array = unsafe { raw.data_union.v_obj.cast::<ArrayObj>() };
-    if array.is_null() {
-        return Err(runtime_error("structural mutation of a null array"));
-    }
-    let (items, len) = unsafe { ((*array).data.cast::<TVMFFIAny>(), (*array).size as usize) };
-    for index in 0..len {
-        // SAFETY: the active root owns this array, and both the input's
-        // permission and unique ownership were checked before entering.
-        let original = unsafe { *items.add(index) };
-        let outcome = catch_unwind(AssertUnwindSafe(
-            #[inline]
-            || driver.dispatch_abi_raw::<true>(original, kind),
-        ));
-        let mapped = unsafe {
-            result_from_raw(match outcome {
-                Ok(value) => value,
-                Err(payload) => mutation_panic_result(mutator, payload),
-            })?
-        };
-        if is_unchanged(&mapped) || same_shallow(original, *mapped.as_raw_ffi_any()) {
-            continue;
-        }
-        unsafe {
-            let old = std::ptr::replace(items.add(index), Any::into_raw_ffi_any(mapped));
-            drop(Any::from_raw_ffi_any(old));
-        }
-    }
-    Ok(Unchanged.into())
 }
 
 fn default_mutate_driver<D: MutationDriver>(
