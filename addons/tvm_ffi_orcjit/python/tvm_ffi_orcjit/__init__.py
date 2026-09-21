@@ -65,7 +65,7 @@ if _lib_path is None:
 # JIT-owned object deleters remain valid through interpreter shutdown.
 _lib_module = load_module(_lib_path, keep_module_alive=True)
 
-from .session import ExecutionSession, default_session  # noqa: E402
+from .session import ExecutionSession, default_session
 
 __all__ = ["ExecutionSession", "default_session"]
 
