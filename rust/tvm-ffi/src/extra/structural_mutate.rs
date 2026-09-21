@@ -2845,6 +2845,7 @@ impl<
 }
 
 impl<U: StructuralMutator> MutationDriver for U {
+    #[inline(always)]
     fn dispatch_raw(
         &mut self,
         raw: TVMFFIAny,
@@ -2998,7 +2999,7 @@ fn call_mutator(
             (*(*mutator).vtable).mutate
         }
     };
-    with_mutator_def_region(mutator, def_region_kind, || unsafe {
+    with_mutator_def_region(mutator, def_region_kind, |_| unsafe {
         let view = AnyView::from_raw_ffi_any(raw);
         result_from_raw(callback(mutator, view))
     })
@@ -3028,7 +3029,7 @@ fn call_structural_mutate_hook(
     def_region_kind: DefRegionKind,
     attr: TVMFFIAny,
 ) -> Result<Any> {
-    with_mutator_def_region(mutator, def_region_kind, || unsafe {
+    with_mutator_def_region(mutator, def_region_kind, |_| unsafe {
         match attr.type_index {
             x if x == TVMFFITypeIndex::kTVMFFIOpaquePtr as i32 => {
                 let pointer = attr.data_union.v_ptr;
@@ -3114,14 +3115,17 @@ unsafe fn result_from_raw(raw: TVMFFIAny) -> Result<Any> {
 fn with_mutator_def_region<T>(
     mutator: StructuralMutatorHandle,
     kind: DefRegionKind,
-    callback: impl FnOnce() -> T,
+    callback: impl FnOnce(DefRegionKind) -> T,
 ) -> T {
     unsafe {
         let previous = (*mutator).def_region_mode;
         // Precedence: a pattern region propagates; entering any kind inside it has no effect.
-        if previous != DefRegionKind::Pattern as i32 {
+        let effective = if previous == DefRegionKind::Pattern as i32 {
+            DefRegionKind::Pattern
+        } else {
             (*mutator).def_region_mode = kind as i32;
-        }
+            kind
+        };
         struct Restore {
             mutator: StructuralMutatorHandle,
             previous: i32,
@@ -3135,7 +3139,7 @@ fn with_mutator_def_region<T>(
         }
         let _restore = Restore { mutator, previous };
         // One call site keeps the continuation visible to the inliner.
-        callback()
+        callback(effective)
     }
 }
 
@@ -3145,16 +3149,7 @@ fn with_mutation_region<T>(
     callback: impl FnOnce(DefRegionKind) -> Result<T>,
 ) -> Result<T> {
     let mutator = active_mutator()?;
-    with_mutator_def_region(
-        mutator,
-        kind,
-        #[inline(always)]
-        || {
-            // SAFETY: the active invocation keeps this thread's ABI mutator alive.
-            let effective = def_region_from_raw(unsafe { (*mutator).def_region_mode })?;
-            callback(effective)
-        },
-    )
+    with_mutator_def_region(mutator, kind, callback)
 }
 
 #[inline(always)]
