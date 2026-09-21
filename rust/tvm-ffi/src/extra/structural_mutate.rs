@@ -3022,6 +3022,7 @@ fn result_into_raw(result: Result<Any>) -> TVMFFIAny {
 
 /// Resolve only at an owning-value API boundary; internal Any carriers and
 /// native hooks keep the unchanged tag to avoid acquiring the original.
+#[inline(always)]
 fn resolve_result(result: Any, original: TVMFFIAny) -> Result<Any> {
     if is_unchanged(&result) {
         owned_from_raw(original)

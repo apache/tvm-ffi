@@ -256,9 +256,9 @@ pub(crate) use crate::any::is_plain_inline;
 
 #[inline]
 pub(crate) fn same_shallow(lhs: TVMFFIAny, rhs: TVMFFIAny) -> bool {
-    lhs.type_index == rhs.type_index
-        && lhs.small_str_len == rhs.small_str_len
-        && unsafe { lhs.data_union.v_uint64 == rhs.data_union.v_uint64 }
+    (lhs.type_index == rhs.type_index)
+        & (lhs.small_str_len == rhs.small_str_len)
+        & unsafe { lhs.data_union.v_uint64 == rhs.data_union.v_uint64 }
 }
 
 /// Subtype check with the base's inheritance depth supplied by the caller
