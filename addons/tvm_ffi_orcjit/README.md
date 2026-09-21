@@ -102,6 +102,12 @@ The `LLVM_PREFIX` environment variable tells CMake where to find LLVM. If
 LLVM is installed in a conda env or a standard system path, CMake can
 auto-discover it and `LLVM_PREFIX` is not needed.
 
+On Linux, each `load_module` call follows the same default compiler selection
+as `tvm_ffi.cpp.build`: `$CXX`, or `c++` when unset. ORC asks that compiler for
+its `libstdc++.so.6` and optional `libstdc++_nonshared.a`, then keeps both local
+to the new JITDylib. Discovery is cached, and `load_module(..., cxx="g++-14")`
+can select a different toolchain without supplying runtime-library paths.
+
 ## Usage
 
 ### Basic Example

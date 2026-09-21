@@ -18,6 +18,11 @@
 
 from __future__ import annotations
 
+import functools
+import os
+import shlex
+import subprocess
+import sys
 import threading
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -29,6 +34,48 @@ from . import _ffi_api
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+
+
+def _query_compiler_file(command: tuple[str, ...], filename: str) -> Path | None:
+    """Ask a GCC-compatible driver which runtime file it would link."""
+    try:
+        result = subprocess.run(
+            [*command, f"-print-file-name={filename}"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        return None
+    if result.returncode != 0:
+        return None
+    output = result.stdout.strip()
+    if not output or output == filename:
+        return None
+    path = Path(output)
+    return path.resolve() if path.is_file() else None
+
+
+@functools.cache
+def _discover_linux_cxx_runtime(cxx: str) -> tuple[str | None, str | None]:
+    """Discover the runtime selected by one C++ driver command."""
+    command = tuple(shlex.split(cxx))
+    if not command:
+        raise ValueError("CXX must name a C++ compiler command")
+
+    shared = _query_compiler_file(command, "libstdc++.so.6")
+    nonshared = _query_compiler_file(command, "libstdc++_nonshared.a")
+    return (
+        str(shared) if shared is not None else None,
+        str(nonshared) if nonshared is not None else None,
+    )
+
+
+def _discover_cxx_runtime(cxx: str | None) -> tuple[str | None, str | None]:
+    """Follow tvm_ffi.cpp's $CXX-or-c++ default for Linux JIT objects."""
+    if not sys.platform.startswith("linux"):
+        return (None, None)
+    return _discover_linux_cxx_runtime(cxx if cxx is not None else os.environ.get("CXX", "c++"))
 
 
 @register_object("tvm_ffi_orcjit.ExecutionSession")
@@ -107,6 +154,7 @@ class ExecutionSession(Object):
         objects: str | Path | bytes | bytearray | Sequence[str | Path | bytes | bytearray],
         name: str = "",
         keep_module_alive: bool = False,
+        cxx: str | None = None,
     ) -> Module:
         """Load one or more object files into a fresh module.
 
@@ -124,6 +172,12 @@ class ExecutionSession(Object):
         keep_module_alive : bool
             If True, pin the module in the runtime's process-global registry
             (see Notes). Defaults to False.
+        cxx : str or None
+            C++ compiler command whose runtime should resolve symbols in these
+            objects on Linux. Defaults to ``$CXX``, or ``c++`` when unset,
+            matching :func:`tvm_ffi.cpp.build`. The compiler is queried once
+            for its shared libstdc++ and optional ``libstdc++_nonshared.a``;
+            no runtime path needs to be supplied. Ignored on other platforms.
 
         Returns
         -------
@@ -170,7 +224,14 @@ class ExecutionSession(Object):
                     "load_module objects must be a path (str or Path) or object-file "
                     f"bytes, but got {type(obj).__name__}"
                 )
-        mod = _ffi_api.SessionLoadModule(self, normalized, name)  # type: ignore
+        cxx_runtime_path, libstdcxx_nonshared_path = _discover_cxx_runtime(cxx)
+        mod = _ffi_api.SessionLoadModule(  # type: ignore
+            self,
+            normalized,
+            name,
+            cxx_runtime_path,
+            libstdcxx_nonshared_path,
+        )
         if keep_module_alive:
             tvm_ffi._ffi_api.ModuleGlobalsAdd(mod)  # type: ignore
         return mod

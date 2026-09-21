@@ -155,22 +155,22 @@ endif ()
 # manylinux ABI floor and no too-recent GLIBCXX_* symbol is imported -- the -static-libstdc++
 # workaround the older conda-forge LLVM required is no longer needed.
 
-# Hide symbols pulled from static archives so they are not re-exported and cannot interpose with a
-# host process's own copies (e.g. PyTorch's bundled LLVM). Exclude LLVM/zlib/zstd by name -- NOT
-# --exclude-libs,ALL. The embedded liborc_rt.a is linked by the JIT at run time and resolves its C++
-# runtime through the process (dlsym), including archive-only helpers such as
-# _ZSt28__throw_bad_array_new_lengthv that libstdc++.so does not export; ALL localizes those and the
-# ORC platform then fails to materialize. This holds whether libstdc++ is static or dynamic. The
-# LLVM list is derived from llvm-config so it tracks the toolchain version.
+# Export only the explicit initialization API. In particular, do not publish symbols from the
+# statically linked LLVM/zlib/zstd archives: the addon is loaded into host processes that may carry
+# a different LLVM, and interposition between those copies is unsafe. On ELF, --exclude-libs,ALL
+# also gives archive members local binding before the version script trims the dynamic symbol table.
 if (CMAKE_SYSTEM_NAME MATCHES "Linux|Android|FreeBSD|NetBSD|OpenBSD" AND CMAKE_CXX_COMPILER_ID
                                                                          MATCHES "GNU|Clang"
 )
-  # --exclude-libs needs exact archive filenames (no globs), so turn each -lLLVM* from llvm-config
-  # into libLLVM*.a and add zlib/zstd. One colon-separated list -- a -Wl comma list would be split.
-  set(_exclude_archives ${_llvm_libs_list} "-lz" "-lzstd")
-  list(TRANSFORM _exclude_archives REPLACE "^-l(.+)$" "lib\\1.a")
-  list(JOIN _exclude_archives ":" _exclude_libs_arg)
-  target_link_options(tvm_ffi_orcjit PRIVATE "-Wl,--exclude-libs=${_exclude_libs_arg}")
+  target_link_options(
+    tvm_ffi_orcjit PRIVATE "LINKER:--exclude-libs,ALL"
+    "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/cmake/orcjit.lds"
+  )
+elseif (APPLE)
+  target_link_options(
+    tvm_ffi_orcjit PRIVATE
+    "LINKER:-exported_symbols_list,${CMAKE_CURRENT_SOURCE_DIR}/cmake/orcjit.macos.lds"
+  )
 endif ()
 
 # ---- Find and embed liborc_rt (Linux/ELF only) ----

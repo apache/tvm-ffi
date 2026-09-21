@@ -59,6 +59,7 @@ sdist.include = [
   "/LICENSE",
   "/pyproject.toml",
   "/CMakeLists.txt",
+  "/cmake/**",
   "/src/**/*.h",
   "/src/**/*.cc",
   "/src/**/*.cpp",

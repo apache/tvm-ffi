@@ -241,10 +241,13 @@ void ORCJITDynamicLibraryObj::AddObjectBuffer(std::unique_ptr<llvm::MemoryBuffer
 }
 
 Module ORCJITExecutionSessionObj::LoadModule(const Array<Variant<String, Bytes>>& objects,
-                                             const String& name) {
+                                             const String& name,
+                                             const Optional<String>& cxx_runtime_path,
+                                             const Optional<String>& libstdcxx_nonshared_path) {
   // Hold no lock here: the callees each lock mutex_ at the leaf, and the fresh
   // dylib is unpublished until this returns, so no other thread can race it.
-  ORCJITDynamicLibrary dylib = CreateDynamicLibrary(name);
+  ORCJITDynamicLibrary dylib =
+      CreateDynamicLibrary(name, cxx_runtime_path, libstdcxx_nonshared_path);
   ORCJITDynamicLibraryObj* self = dylib.get();
 
   for (const Variant<String, Bytes>& object : objects) {
@@ -370,18 +373,17 @@ static void RegisterOrcJITFunctions() {
            []() { return ORCJITExecutionSessionObj::GlobalDefault(); })
       .def("tvm_ffi_orcjit.SessionLoadModule",
            [](const ORCJITExecutionSession& session, const Array<Variant<String, Bytes>>& objects,
-              const String& name) -> Module { return session->LoadModule(objects, name); })
+              const String& name, const Optional<String>& cxx_runtime_path,
+              const Optional<String>& libstdcxx_nonshared_path) -> Module {
+             return session->LoadModule(objects, name, cxx_runtime_path, libstdcxx_nonshared_path);
+           })
       .def("tvm_ffi_orcjit.SessionClearFreeSlabs",
            [](const ORCJITExecutionSession& session) -> int64_t {
              return session->ClearFreeSlabs();
            });
 }
 
-TVM_FFI_STATIC_INIT_BLOCK() {
-  // This block may not execute when loaded via dlopen on some platforms.
-  // Call TVMFFIOrcJITInitialize() explicitly if functions are not registered.
-  RegisterOrcJITFunctions();
-}
+TVM_FFI_STATIC_INIT_BLOCK() { RegisterOrcJITFunctions(); }
 
 }  // namespace orcjit
 }  // namespace ffi

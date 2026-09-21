@@ -95,9 +95,13 @@ class ORCJITExecutionSessionObj : public Object {
   /*!
    * \brief Create a new DynamicLibrary (JITDylib) in this session
    * \param name Optional name for the library (for debugging)
+   * \param cxx_runtime_path Compiler-selected shared C++ runtime, if any.
+   * \param libstdcxx_nonshared_path Compiler-selected nonshared archive, if any.
    * \return The created dynamic library instance
    */
-  ORCJITDynamicLibrary CreateDynamicLibrary(const String& name);
+  ORCJITDynamicLibrary CreateDynamicLibrary(
+      const String& name, const Optional<String>& cxx_runtime_path = std::nullopt,
+      const Optional<String>& libstdcxx_nonshared_path = std::nullopt);
 
   /*!
    * \brief Load a set of objects into one fresh dynamic library and return the
@@ -114,10 +118,14 @@ class ORCJITExecutionSessionObj : public Object {
    * \param objects Array whose elements are each a \c String path or \c Bytes
    *        object-file image.
    * \param name Optional JITDylib name (auto-generated when empty).
+   * \param cxx_runtime_path Compiler-selected shared C++ runtime, if any.
+   * \param libstdcxx_nonshared_path Compiler-selected nonshared archive, if any.
    * \return The root module, with imports and library context fully wired (the
    *         dylib itself when there is no embedded library binary).
    */
-  Module LoadModule(const Array<Variant<String, Bytes>>& objects, const String& name);
+  Module LoadModule(const Array<Variant<String, Bytes>>& objects, const String& name,
+                    const Optional<String>& cxx_runtime_path = std::nullopt,
+                    const Optional<String>& libstdcxx_nonshared_path = std::nullopt);
 
   /*!
    * \brief Get the underlying LLVM ExecutionSession
@@ -206,6 +214,9 @@ class ORCJITExecutionSessionObj : public Object {
 
   /*! \brief Counter for auto-generating library names */
   std::atomic<int> dylib_counter_{0};
+
+  /*! \brief Compiler-selected C++ runtime search JITDylibs, keyed by shared-library path. */
+  std::unordered_map<std::string, llvm::orc::JITDylib*> cxx_runtime_dylibs_;
 
   /*!
    * \brief Serializes compound JITDylib operations on this shared session
