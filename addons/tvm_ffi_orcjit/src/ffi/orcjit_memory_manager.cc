@@ -27,6 +27,7 @@
 
 #include <llvm/Support/Error.h>
 #include <llvm/Support/FormatVariadic.h>
+#include <tvm/ffi/error.h>
 
 #include <algorithm>
 #include <optional>
@@ -60,8 +61,8 @@ SlabPoolMemoryManager::SlabPoolMemoryManager(std::size_t page_size, std::size_t 
     }
     cap /= 2;
   }
-  llvm::report_fatal_error("SlabPoolMemoryManager: failed to reserve at least " +
-                           llvm::Twine(floor / (1024 * 1024)) + " MB of virtual address space");
+  TVM_FFI_THROW(RuntimeError) << "SlabPoolMemoryManager: failed to reserve at least "
+                              << floor / (1024 * 1024) << " MB of virtual address space";
 }
 
 std::unique_ptr<Slab> SlabPoolMemoryManager::createSlab(std::size_t capacity) {
@@ -79,8 +80,8 @@ void SlabPoolMemoryManager::allocate(const llvm::jitlink::JITLinkDylib* /*JD*/,
   // user callback, since the LLJIT linker issues nested lookups (and
   // thus re-entrant allocate() calls via materialization) from inside
   // OnAllocated and a coarse lock would deadlock.  Snapshot raw pointers
-  // under the lock; slabs are guaranteed to outlive this call because
-  // clearFreeSlabs() is only safe when the session is quiescent.
+  // under the lock. Slabs outlive this call because the enclosing execution
+  // session serializes allocation, teardown, and clearFreeSlabs().
   //
   // Slab::allocate is synchronous (invokes its callback inline on every
   // code path), so a captured std::optional observes the result before

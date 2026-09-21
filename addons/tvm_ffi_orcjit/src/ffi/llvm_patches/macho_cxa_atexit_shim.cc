@@ -67,12 +67,12 @@ CxaAtexitRecordsScope::CxaAtexitRecordsScope(CxaAtexitRecords* records)
 }
 CxaAtexitRecordsScope::~CxaAtexitRecordsScope() { g_active_cxa_records = prev_; }
 
-void InstallCxaAtexitShim(llvm::orc::ExecutionSession& ES, llvm::orc::JITDylib& jd) {
+llvm::Error InstallCxaAtexitShim(llvm::orc::ExecutionSession& ES, llvm::orc::JITDylib& jd) {
   llvm::orc::SymbolMap shim_syms;
   shim_syms[ES.intern("___cxa_atexit")] = {
       llvm::orc::ExecutorAddr::fromPtr(reinterpret_cast<void*>(&tvm_ffi_cxa_atexit_shim)),
       llvm::JITSymbolFlags::Exported | llvm::JITSymbolFlags::Callable};
-  llvm::cantFail(jd.define(llvm::orc::absoluteSymbols(std::move(shim_syms))));
+  return jd.define(llvm::orc::absoluteSymbols(std::move(shim_syms)));
 }
 
 void DrainCxaAtexit(CxaAtexitRecords& records) {

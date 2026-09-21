@@ -52,11 +52,11 @@
  *
  * ## Removal — Linux
  *
- * LLVM issue: https://github.com/llvm/llvm-project/issues/175981
- * When the upstream fix lands and the project's minimum LLVM version
- * bumps past the first release containing it, replace this plugin's
- * Linux usage with `ELFNixPlatform` and delete the ELF handling path
- * from this file.  Concretely:
+ * LLVM issue: https://github.com/llvm/llvm-project/pull/175981
+ * The upstream fix is included in LLVM 23.1.1 but not LLVM 22.1.0, the
+ * addon's current CI baseline. When the project's minimum LLVM version
+ * reaches 23 and its lifecycle calls use `ELFNixPlatform`, delete the ELF
+ * handling path from this file. Concretely:
  *   - Remove the ELF-section branches (`.init_array`, `.ctors`,
  *     `.fini_array`, `.dtors`) from `InitFiniPlugin::modifyPassConfig`.
  *   - If no platform still needs this plugin, delete this file outright

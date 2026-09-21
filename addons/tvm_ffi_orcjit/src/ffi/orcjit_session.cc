@@ -24,6 +24,7 @@
 
 #include "orcjit_session.h"
 
+#include <llvm/ADT/ScopeExit.h>
 #include <llvm/ExecutionEngine/Orc/EPCDynamicLibrarySearchGenerator.h>
 #include <llvm/ExecutionEngine/Orc/ExecutionUtils.h>
 #include <llvm/ExecutionEngine/Orc/LLJIT.h>
@@ -40,6 +41,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
+#include <sstream>
 
 #if defined(__linux__) && defined(__GLIBCXX__)
 #include <bits/functexcept.h>
@@ -198,7 +200,7 @@ ORCJITExecutionSessionObj::ORCJITExecutionSessionObj(const Optional<Variant<Stri
   // x86_64, ±4 GB AArch64).  Eliminates scattered-mmap relocation overflow
   // (LLVM #173269).
   //
-  // slab_size_bytes: 0 = arch default (1 GB x86_64 / AArch64, with fallback),
+  // slab_size_bytes: 0 = default (64 MB, with fallback),
   //                  >0 = custom size, <0 = disable arena (LLJIT uses its
   //                  default allocator — scattered mmap, no PC-rel guarantee).
   // The parameter is Linux-only; on macOS/Windows the arena is compiled out
@@ -226,6 +228,10 @@ ORCJITExecutionSessionObj::ORCJITExecutionSessionObj(const Optional<Variant<Stri
     auto page_size = llvm::sys::Process::getPageSizeEstimate();
     size_t slab_size;
     if (slab_size_bytes > 0) {
+      constexpr std::size_t kMinCustomSlabSize = 2 * Slab::kCommitGranularity;
+      TVM_FFI_CHECK(static_cast<uint64_t>(slab_size_bytes) >= kMinCustomSlabSize, ValueError)
+          << "slab_size must be 0, negative (disabled), or at least " << kMinCustomSlabSize
+          << " bytes, but got " << slab_size_bytes;
       slab_size = static_cast<size_t>(slab_size_bytes);
     } else {
       slab_size = SlabPoolMemoryManager::kDefaultSlabSize;
@@ -402,6 +408,9 @@ ORCJITDynamicLibrary ORCJITExecutionSessionObj::CreateDynamicLibrary(
 
   llvm::orc::JITDylib& jit_dylib =
       TVM_FFI_ORCJIT_LLVM_CALL(jit_->getExecutionSession().createJITDylib(lib_name.c_str()));
+  // If any subsequent link-order/generator setup fails, remove the partially
+  // configured dylib while the session mutex is still held.
+  llvm::scope_exit cleanup_dylib([this, &jit_dylib]() { RemoveDylib(&jit_dylib); });
 #if defined(__linux__) && defined(__GLIBCXX__)
   llvm::orc::JITDylib* cxx_runtime_dylib = nullptr;
   if (cxx_runtime) {
@@ -452,16 +461,16 @@ ORCJITDynamicLibrary ORCJITExecutionSessionObj::CreateDynamicLibrary(
   }
 #endif
 
-  auto dylib_obj = make_object<ORCJITDynamicLibraryObj>(GetRef<ORCJITExecutionSession>(this),
-                                                        &jit_dylib, jit_.get(), lib_name);
-
 #ifdef __APPLE__
   // Inject ___cxa_atexit on the user JITDylib so it wins over <Platform>'s
   // fallback (which resolves to libSystem's and would orphan dtors from
   // our drop-time drain).  See llvm_patches/macho_cxa_atexit_shim.h.
-  InstallCxaAtexitShim(jit_->getExecutionSession(), jit_dylib);
+  TVM_FFI_ORCJIT_LLVM_CALL(InstallCxaAtexitShim(jit_->getExecutionSession(), jit_dylib));
 #endif
 
+  auto dylib_obj = make_object<ORCJITDynamicLibraryObj>(GetRef<ORCJITExecutionSession>(this),
+                                                        &jit_dylib, jit_.get(), lib_name);
+  cleanup_dylib.release();
   return ORCJITDynamicLibrary(std::move(dylib_obj));
 }
 
@@ -528,6 +537,9 @@ void ORCJITExecutionSessionObj::AddPendingDeinitializer(llvm::orc::JITDylib* jit
 int64_t ORCJITExecutionSessionObj::ClearFreeSlabs() {
 #ifdef __linux__
   if (memory_manager_) {
+    // Synchronize with lookup/materialization and dylib teardown. This makes
+    // the public API safe even when another host thread is using the session.
+    std::lock_guard<std::mutex> lock(mutex_);
     return static_cast<int64_t>(memory_manager_->clearFreeSlabs());
   }
 #endif

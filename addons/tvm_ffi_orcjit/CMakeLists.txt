@@ -22,6 +22,9 @@ endif ()
 
 # ---- Find packages ----
 find_package(LLVM REQUIRED CONFIG)
+if (LLVM_PACKAGE_VERSION VERSION_LESS 22.0)
+  message(FATAL_ERROR "tvm_ffi_orcjit requires LLVM 22 or newer; found ${LLVM_PACKAGE_VERSION}")
+endif ()
 message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION} in ${LLVM_DIR}")
 
 find_package(
@@ -76,12 +79,22 @@ execute_process(
   COMMAND ${LLVM_CONFIG_EXE} --link-static --libs Core OrcJIT Support native
   OUTPUT_STRIP_TRAILING_WHITESPACE
   OUTPUT_VARIABLE _llvm_libs
+  ERROR_VARIABLE _llvm_libs_error
+  RESULT_VARIABLE _llvm_libs_rc
 )
+if (NOT _llvm_libs_rc EQUAL 0)
+  message(FATAL_ERROR "llvm-config --link-static --libs failed: ${_llvm_libs_error}")
+endif ()
 execute_process(
   COMMAND ${LLVM_CONFIG_EXE} --link-static --ldflags
   OUTPUT_STRIP_TRAILING_WHITESPACE
   OUTPUT_VARIABLE _llvm_ldflags
+  ERROR_VARIABLE _llvm_ldflags_error
+  RESULT_VARIABLE _llvm_ldflags_rc
 )
+if (NOT _llvm_ldflags_rc EQUAL 0)
+  message(FATAL_ERROR "llvm-config --link-static --ldflags failed: ${_llvm_ldflags_error}")
+endif ()
 separate_arguments(_llvm_libs_list NATIVE_COMMAND "${_llvm_libs}")
 separate_arguments(_llvm_ldflags_list NATIVE_COMMAND "${_llvm_ldflags}")
 

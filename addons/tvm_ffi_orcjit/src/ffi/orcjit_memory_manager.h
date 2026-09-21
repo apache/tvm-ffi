@@ -23,7 +23,7 @@
  *
  * `SlabPoolMemoryManager` implements `JITLinkMemoryManager` on top of a
  * per-session `std::vector<std::unique_ptr<Slab>>`.  On each `allocate`
- * it picks the first `Slab` that can fit the graph; if none do, it
+ * it picks the first `Slab` that can fit the graph; if none does, it
  * `mmap`s a fresh slab sized to fit (`Slab::capacityForFootprint`) and
  * appends it.  Normal-size graphs land on a `slab_size`-sized slab;
  * skewed or oversize graphs land on a power-of-2 larger slab whose
@@ -63,8 +63,8 @@ namespace orcjit {
 /*!
  * \brief `JITLinkMemoryManager` backed by a growable pool of `Slab`s.
  *
- * The constructor reserves one initial slab (halving its capacity down
- * to `kMinSlabSize` if `mmap` fails under RLIMIT_AS).  Subsequent
+ * The constructor reserves one initial slab, halving on `mmap` failure down to
+ * `min(slab_size, kMinSlabSize)`. Subsequent
  * slabs are added on demand by `allocate()` at a capacity chosen by
  * `Slab::capacityForFootprint` — `slab_size_` for normal graphs, the
  * next power of two up for skewed / oversize graphs.  No retry, no
@@ -78,8 +78,9 @@ class SlabPoolMemoryManager : public llvm::jitlink::JITLinkMemoryManager {
   // granule. Small enough that a pinned slab only wastes 64 MB of RSS.
   static constexpr std::size_t kDefaultSlabSize = std::size_t{64} << 20;  // 64 MB
 
-  // Lower bound on initial-slab reservation.  If the first `mmap`
-  // fails and halving drops below this, the constructor aborts.
+  // Lower bound for initial-slab fallback when the requested capacity is at
+  // least this large. Smaller valid custom capacities use their own size. If
+  // every reservation fails, construction raises a RuntimeError.
   // 8 MB is enough for a minimal JITDylib setup under very tight
   // RLIMIT_AS.
   static constexpr std::size_t kMinSlabSize = std::size_t{8} << 20;  // 8 MB
@@ -108,8 +109,8 @@ class SlabPoolMemoryManager : public llvm::jitlink::JITLinkMemoryManager {
    *        prior allocation — back to the OS via `munmap`.
    *
    *  Returns the number of slabs reclaimed.  Safe to call any time the
-   *  session is quiescent (no concurrent JIT work in flight).  A typical
-   *  pattern is to call this after dropping a batch of libraries:
+   *  The enclosing execution session serializes this operation with JIT work.
+   *  A typical pattern is to call it after dropping a batch of libraries:
    *
    *      for lib in libs: del lib
    *      session.clear_free_slabs()   # Python API

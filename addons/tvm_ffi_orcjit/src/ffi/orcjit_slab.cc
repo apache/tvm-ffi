@@ -37,10 +37,12 @@
 #include <sys/mman.h>
 
 #include <algorithm>
+#include <cassert>
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
 #include <limits>
+#include <thread>
 
 namespace tvm {
 namespace ffi {
@@ -167,20 +169,38 @@ Error Slab::commitPages(void* addr, std::size_t size) {
   std::size_t last_chunk = (offset + size - 1) / kCommitGranularity;
 
   for (std::size_t i = first_chunk; i <= last_chunk; ++i) {
-    if (committed_[i].load(std::memory_order_acquire) != 0) continue;
-    std::size_t chunk_offset = i * kCommitGranularity;
-    std::size_t chunk_len = std::min(kCommitGranularity, arena_capacity_ - chunk_offset);
-    // mprotect is idempotent, so a concurrent racer calling it on the same chunk
-    // is harmless.  Only flip the flag after success — otherwise a failed commit
-    // followed by freeRegion() would leave committed_[i] == 1, causing a
-    // later allocation to skip mprotect and write into PROT_NONE memory.
-    if (::mprotect(arena_base_ + chunk_offset, chunk_len, PROT_READ | PROT_WRITE) != 0) {
-      return make_error<StringError>("Slab: mprotect(RW) failed for chunk at offset " +
-                                         formatv("{0:x}", chunk_offset) + ": " +
-                                         std::strerror(errno),
-                                     inconvertibleErrorCode());
+    constexpr std::uint8_t kUncommitted = 0;
+    constexpr std::uint8_t kCommitting = 1;
+    constexpr std::uint8_t kCommitted = 2;
+    auto& state = committed_[i];
+    while (true) {
+      std::uint8_t observed = state.load(std::memory_order_acquire);
+      if (observed == kCommitted) break;
+      if (observed == kCommitting) {
+        std::this_thread::yield();
+        continue;
+      }
+      if (!state.compare_exchange_weak(observed, kCommitting, std::memory_order_acq_rel,
+                                       std::memory_order_acquire)) {
+        continue;
+      }
+
+      // Only the thread that claimed this chunk may change its protection.
+      // A duplicate mprotect(RW) racing after another allocation finalized to
+      // RX/R would silently remove that allocation's execute/read-only state.
+      std::size_t chunk_offset = i * kCommitGranularity;
+      std::size_t chunk_len = std::min(kCommitGranularity, arena_capacity_ - chunk_offset);
+      if (::mprotect(arena_base_ + chunk_offset, chunk_len, PROT_READ | PROT_WRITE) != 0) {
+        int commit_errno = errno;
+        state.store(kUncommitted, std::memory_order_release);
+        return make_error<StringError>("Slab: mprotect(RW) failed for chunk at offset " +
+                                           formatv("{0:x}", chunk_offset) + ": " +
+                                           std::strerror(commit_errno),
+                                       inconvertibleErrorCode());
+      }
+      state.store(kCommitted, std::memory_order_release);
+      break;
     }
-    committed_[i].store(1, std::memory_order_release);
   }
   return Error::success();
 }
@@ -411,7 +431,7 @@ Expected<std::size_t> Slab::bumpAllocate(std::size_t size, bool is_exec) {
   }
 
   // Bump allocate within the pool's limit.
-  if (bump + size > limit) {
+  if (size > limit - bump) {
     return make_error<SlabPoolExhaustedError>(is_exec ? "exec" : "non-exec", bump, size, limit);
   }
 

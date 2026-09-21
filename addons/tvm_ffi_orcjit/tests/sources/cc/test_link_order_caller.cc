@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// Caller library for cross-library linking test (C++ version).
+// Caller object for the intra-module linking test (C++ version).
 // References __tvm_ffi_helper_add from test_link_order_base.cc and
 // exports cross_lib_add which forwards to it.
 

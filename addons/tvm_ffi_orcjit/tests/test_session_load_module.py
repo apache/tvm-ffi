@@ -311,8 +311,8 @@ def test_load_module_expands_embedded_library_bin(tmp_path: Path) -> None:
     """An embedded library binary is deserialized and its imports are wired."""
 
     # A custom module kind whose loader returns a real orcjit module. This also
-    # forces the loader to re-enter load_module while the outer call holds the
-    # session lock — exercising the recursive session lock.
+    # forces load_module to re-enter the shared session during outer-module
+    # finalization, exercising nested loading without deadlock.
     @tvm_ffi.register_global_func("ffi.Module.load_from_bytes.orcjit_test_probe", override=True)
     def _load_probe(_data: bytes) -> tvm_ffi.Module:
         return default_session().load_module(obj("c/test_funcs2"))
@@ -342,8 +342,8 @@ def test_load_module_expands_embedded_library_bin(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 # Concurrency — the shared session driven by many threads at once.
 #
-# Exercises the recursive session lock: overlapping create / add / lookup /
-# drop on one shared ExecutionSession must not corrupt linker state.
+# Exercises the session lock and per-dylib initializer gate: overlapping
+# create / add / lookup / drop must not corrupt linker state.
 # ---------------------------------------------------------------------------
 
 

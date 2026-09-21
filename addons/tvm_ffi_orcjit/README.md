@@ -26,8 +26,9 @@ TVM-FFI exported functions.
 - **JIT Execution**: Load and execute compiled object files at runtime using LLVM's ORC JIT v2
 - **High-Level Loading**: `default_session().load_module(...)` mirrors `tvm_ffi.load_module`, returning a plain `tvm_ffi.Module`
 - **Unified Input**: Load from a file path, in-memory object bytes, or a list mixing both
-- **Shared Session**: A process-wide session so multiple callers share one JIT environment (process symbols, arena, linking)
+- **Shared Session**: A process-wide session so callers share process-symbol resolution and the Linux slab pool while loaded modules remain isolated
 - **Symbol Isolation**: Separate `load_module` calls define independent symbol namespaces, so they can define the same symbol without conflicts
+- **Bounded-Range Memory**: A growable Linux slab pool keeps JIT code/data close enough for 32-bit PC-relative relocations and supports explicit drained-slab reclamation
 - **Init/Fini Support**: Handles static constructors/destructors across ELF (`.init_array`/`.ctors`), Mach-O (`__mod_init_func`), and COFF (`.CRT$XC*`/`.CRT$XT*`)
 - **Cross-Platform**: Linux (x86_64, aarch64), macOS (arm64), Windows (AMD64)
 - **Multi-Compiler**: Tested with LLVM Clang, GCC, Apple Clang, MSVC, and clang-cl
@@ -206,7 +207,8 @@ Compile: `clang -O2 -c -o example.o example.c`
   relocations from COFF objects before JITLink graph building, working around a
   JITLink limitation with COMDAT section symbols.
 
-Please refers to [ORCJIT_PRIMER.md](./ORCJIT_PRIMER.md) to learn more about object file, linking, llvm orcjit v2, and how the addon works.
+Refer to [ORCJIT_PRIMER.md](./ORCJIT_PRIMER.md) for background on object files,
+linking, LLVM ORC JIT v2, and the addon's architecture.
 
 ## Project Structure
 
@@ -219,6 +221,9 @@ tvm_ffi_orcjit/
 │   ├── orcjit_session.h
 │   ├── orcjit_dylib.cc         # JIT dylib module (object loading, symbol lookup)
 │   ├── orcjit_dylib.h
+│   ├── orcjit_memory_manager.*  # Growable Linux slab pool
+│   ├── orcjit_slab.*            # Contiguous-VA allocator and page protection
+│   ├── llvm_patches/            # Isolated upstream LLVM workarounds
 │   └── orcjit_utils.h          # LLVM error handling utilities
 ├── python/tvm_ffi_orcjit/
 │   ├── __init__.py             # Module exports and library loading
@@ -260,6 +265,12 @@ The package requires LLVM 22+. Set `LLVM_PREFIX` to the LLVM install prefix:
 ```bash
 export LLVM_PREFIX=/path/to/llvm
 ```
+
+### Reclaiming unused JIT memory on Linux
+
+Dropping a module returns its regions to the session's slab pool for reuse. To
+return fully drained slabs to the operating system, call
+`session.clear_free_slabs()`. The call is synchronized with concurrent JIT work.
 
 ## License
 

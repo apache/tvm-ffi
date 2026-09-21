@@ -155,8 +155,9 @@ symbol resolution must be deferred until all relevant objects are present.
 
 ## 3. LLVM ORC JIT v2
 
-**ORC** stands for *On Request Compilation*. LLVM ORC JIT v2 (introduced in LLVM 9,
-stabilized in LLVM 13+) is a complete redesign of LLVM's JIT infrastructure. It is
+**ORC** stands for *On Request Compilation*. The ORCv2 APIs have been available since
+LLVM 7 and replaced ORCv1 completely in LLVM 12. They redesign LLVM's JIT infrastructure
+around a composable, concurrent symbol/materialization model. ORCv2 is
 designed to be composable, asynchronous, and correct for production use (unlike the
 older `MCJIT` which had several fundamental limitations around multi-module linking).
 
@@ -312,7 +313,7 @@ The three platform objects in LLVM are:
 | Platform | OS | Init section driven |
 | --- | --- | --- |
 | `MachOPlatform` | macOS / iOS | `__DATA,__mod_init_func` |
-| `ELFNativePlatform` | Linux / ELF | `.init_array`, TLS |
+| `ELFNixPlatform` | Linux / ELF | `.init_array`, TLS |
 | `COFFPlatform` | Windows | `.CRT$XC*` init, `__cxa_atexit` interop |
 
 `ExecutorNativePlatform` is a convenience builder that auto-selects the right platform
@@ -322,17 +323,18 @@ for the host OS and loads the ORC runtime from a given path.
 
 The addon takes a different approach on each platform:
 
-- **macOS**: ORC platform support is *optional*. When the caller passes an ORC runtime
-  path to `ExecutionSession`, `ExecutorNativePlatform` activates `MachOPlatform`.
-  `jit_->initialize(dylib)` and `jit_->deinitialize(dylib)` then drive `__mod_init_func`
-  and `__cxa_atexit` teardown natively. Without the path, the addon falls back to its
-  own `InitFiniPlugin`.
+- **macOS**: the addon deliberately does not configure an ORC platform. It uses
+  `InitFiniPlugin` for `__mod_init_func` / `__mod_term_func` and a per-dylib
+  `__cxa_atexit` shim. This avoids a compact-unwind address-delta failure in the
+  current `MachOPlatform` integration. The `orc_rt` argument is ignored.
 - **Windows**: `COFFPlatform` is skipped entirely because it requires MSVC CRT symbols
   (`_CxxThrowException`, RTTI vtables, iostream objects) that are not resolvable in
   the JIT context. Instead, `InitFiniPlugin` manually handles `.CRT$XC*` / `.CRT$XT*`
-  init/fini sections.
-- **Linux**: `ELFNativePlatform` is not used. `InitFiniPlugin` handles `.init_array` /
-  `.fini_array` / `.ctors` / `.dtors` directly, without the ORC runtime.
+  init/fini sections. The `orc_rt` argument is ignored.
+- **Linux**: the default embedded `liborc_rt` configures `ExecutorNativePlatform`
+  (and therefore `ELFNixPlatform`). A custom archive may be supplied by path or bytes,
+  and `None` disables the platform. `InitFiniPlugin` still collects and invokes ELF
+  init/fini arrays to work around current upstream behavior.
 
 ---
 
@@ -360,21 +362,28 @@ unit: load all its objects at once, then look up functions on the result.
 
 ### 4.2 Loading and lookup
 
-`load_module` adds each object to the JITDylib, and JITLink parses it into a
-`LinkGraph`, resolves relocations, and allocates executable JIT memory.
-`get_function` looks the symbol up (materializing lazily), then wraps the raw
+`load_module` registers each object with the JITDylib. On the first relevant lookup,
+JITLink parses it into a `LinkGraph`, resolves relocations, and allocates executable
+JIT memory. `get_function` looks the symbol up (materializing lazily), then wraps the raw
 pointer as a `tvm_ffi::Function`. Symbols resolve against the dylib's own
-default link order (this dylib → Platform → process/runtime symbols); objects
+link order (this dylib → LLJIT defaults, with a compiler-selected C++ runtime
+inserted before process symbols on Linux); objects
 that reference each other must be loaded together, since there is no linking
 between separate `load_module` results.
 
-Two addon-specific pieces sit in this pipeline:
+Several addon-specific pieces sit in this pipeline:
 
 - **`InitFiniPlugin`** — a JITLink pass plugin that keeps init/fini sections
   (`.init_array`/`.ctors`/`.fini_array`/`.dtors`, `__mod_init_func`, `.CRT$XC*`)
   live, then collects their function pointers after fixup. The addon runs them
   in priority order at first lookup and at teardown, replacing the ORC
   platform's initializer machinery. See `llvm_patches/init_fini_plugin.h`.
+- **Linux slab-pool memory manager** — reserves contiguous virtual-address regions,
+  separates executable from non-executable allocations, recycles freed regions, and
+  grows by adding slabs. This keeps 32-bit PC-relative relocations in range and offers
+  explicit reclamation through `clear_free_slabs()`.
+- **GOTPCRELX correction (Linux/x86-64)** — repairs or reverses unsafe JITLink
+  relaxations before fixup.
 - **Windows DLL import stubs** — `DLLImportDefinitionGenerator` resolves
   `__imp_XXX` references to host-DLL functions by emitting JIT-memory pointer +
   trampoline stubs, keeping `PCRel32` fixups within ±2 GB of the JIT code. See
@@ -391,12 +400,12 @@ import tvm_ffi_orcjit as oj
 sess = oj.default_session()
 
 # 2. Load a compiled object file into a fresh JITDylib
-#    → object parsed, JITLink links it, InitFiniPlugin collects ctors,
-#      context symbols injected eagerly, embedded binary (if any) expanded
+#    → objects registered; context and embedded-binary probes may materialize
+#      objects immediately, and context slots are populated before ctors run
 mod = sess.load_module("add.o")   # returns a tvm_ffi.Module
 
 # 3. Look up and call a function
-#    → LLVM resolves "__tvm_ffi_add"; pending constructors fire on first lookup
+#    → LLVM resolves "__tvm_ffi_add"; any pending constructors run before return
 result = mod.add(3, 4)   # → 7
 ```
 
@@ -426,6 +435,7 @@ TVM_FFI_DLL_EXPORT_TYPED_FUNC(add, add_impl);
 | `JITDylib` | Symbol namespace / virtual shared library | `ORCJITDynamicLibraryObj::dylib_` |
 | `JITLink` | LLVM's JIT-aware linker | Used inside `ObjectLinkingLayer` |
 | JITLink pass pipeline | Pre-prune → post-alloc → post-fixup hooks | Where `InitFiniPlugin` runs |
+| Slab pool | Contiguous, growable Linux JIT memory arena | `SlabPoolMemoryManager` / `Slab` |
 | `DefinitionGenerator` | Fallback symbol provider | `DLLImportDefinitionGenerator` (Win) |
 | Link order | Search path across JITDylibs for symbol resolution | LLJIT default (Main → Platform → ProcessSymbols) |
 | `__tvm_ffi_` prefix | Namespace for TVM-FFI exported functions | Used in `GetFunction()` |

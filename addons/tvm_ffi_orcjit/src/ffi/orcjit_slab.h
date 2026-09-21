@@ -25,11 +25,9 @@
  * bump-allocates from it, keeping all JIT allocations within range of
  * PC-relative relocations (±2 GB on x86_64, ±4 GB on AArch64).
  *
- * The `Slab` is the unit-of-VA-reservation for the OrcJIT memory manager.
- * Today it is used as a single-slab arena owned by
- * `ArenaJITLinkMemoryManager`. Stage B of the refactor will introduce a
- * `SlabPoolMemoryManager` that holds multiple Slabs and grows by mmap-ing
- * new ones on demand.
+ * The `Slab` is the unit of VA reservation for `SlabPoolMemoryManager`,
+ * which owns a growable set of slabs and adds one when no existing slab can
+ * satisfy a graph's per-pool footprint.
  *
  * ## Page commit + Transparent Huge Page (THP) support
  *
@@ -37,8 +35,9 @@
  * size matches the Linux huge-page granule on both x86_64 and AArch64,
  * enabling THP promotion via `madvise(MADV_HUGEPAGE)` on the full
  * reservation. Each 2 MB commit-chunk is `mprotect`-ed to RW exactly once
- * via an atomic bitmap flag (`committed_`), avoiding lock contention with
- * the per-pool allocator mutex.
+ * via an atomic state bitmap (`committed_`), avoiding lock contention with
+ * the per-pool allocator mutex while ensuring only one thread changes the
+ * protection of a commit chunk.
  *
  * ## Dual-pool exec / non-exec split
  *
@@ -111,8 +110,8 @@ class SlabPoolExhaustedError : public llvm::ErrorInfo<SlabPoolExhaustedError> {
  * Zero-sized sub-regions indicate no allocation from that pool.
  *
  * \p owner points to the Slab that handed out this allocation.  With one
- * slab per session today this is redundant, but stamping it now makes
- * Stage B's pool-manager routing O(1) without address comparison.
+ * Stamping the owning slab makes pool-manager deallocation routing O(1)
+ * without address comparison.
  */
 struct FinalizedAllocInfo {
   Slab* owner;                  ///< Slab that owns these offsets.
@@ -160,8 +159,8 @@ class Slab {
   /*! \brief Construct a Slab and reserve \p capacity bytes of VA.
    *
    *  On reservation failure, returns with \c base() == nullptr — the
-   *  caller is expected to retry at a smaller capacity or
-   *  \c report_fatal_error.
+   *  caller is expected to retry at a smaller capacity or propagate a
+   *  recoverable allocation error.
    */
   Slab(std::size_t page_size, std::size_t capacity);
 
@@ -302,9 +301,8 @@ class Slab {
   std::vector<FreeBlock> free_list_non_exec_;
   std::vector<FreeBlock> free_list_exec_;
 
-  /*! \brief Per-commit-chunk flags (0 = uncommitted, 1 = committed).
-   *         Lock-free: each chunk is mprotect'd exactly once via
-   *         compare_exchange. */
+  /*! \brief Per-commit-chunk states (0 = uncommitted, 1 = committing,
+   *         2 = committed). Each chunk is mprotect'd exactly once. */
   std::unique_ptr<std::atomic<std::uint8_t>[]> committed_;
   std::size_t num_commit_chunks_ = 0;
 

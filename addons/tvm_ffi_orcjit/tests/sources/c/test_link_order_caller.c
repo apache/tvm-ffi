@@ -18,17 +18,17 @@
  */
 
 /*
- * Caller library for cross-library linking test.
+ * Caller object for the intra-module linking test.
  * References __tvm_ffi_helper_add from test_link_order_base.c via extern
  * declaration, and exports cross_lib_add which forwards to it.
  */
 #include <tvm/ffi/c_api.h>
 
-/* Declare external symbol from the base library */
+/* Declare the external symbol from the base object. */
 extern int __tvm_ffi_helper_add(void* self, const TVMFFIAny* args, int32_t num_args,
                                 TVMFFIAny* result);
 
-/* cross_lib_add: forwards to helper_add in the base library */
+/* cross_lib_add: forwards to helper_add in the base object. */
 TVM_FFI_DLL_EXPORT int __tvm_ffi_cross_lib_add(void* self, const TVMFFIAny* args, int32_t num_args,
                                                TVMFFIAny* result) {
   return __tvm_ffi_helper_add(self, args, num_args, result);

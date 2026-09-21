@@ -61,6 +61,7 @@
 #ifdef __APPLE__
 
 #include <llvm/ExecutionEngine/Orc/Core.h>
+#include <llvm/Support/Error.h>
 
 #include <utility>
 #include <vector>
@@ -100,7 +101,7 @@ class CxaAtexitRecordsScope {
  *  libSystem fallback — JITDylib::define-time symbols are searched before
  *  the link order.
  */
-void InstallCxaAtexitShim(llvm::orc::ExecutionSession& ES, llvm::orc::JITDylib& jd);
+llvm::Error InstallCxaAtexitShim(llvm::orc::ExecutionSession& ES, llvm::orc::JITDylib& jd);
 
 /*! \brief Drain captured `(fn, arg)` records LIFO, running each dtor.
  *

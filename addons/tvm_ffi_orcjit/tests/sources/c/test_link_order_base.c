@@ -18,7 +18,7 @@
  */
 
 /*
- * Base library for cross-library linking test.
+ * Base object for the intra-module linking test.
  * Exports helper_add which is called by test_link_order_caller.c.
  */
 #include <tvm/ffi/c_api.h>

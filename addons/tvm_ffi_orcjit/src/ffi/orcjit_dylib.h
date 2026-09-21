@@ -31,7 +31,12 @@
 #include <tvm/ffi/object.h>
 #include <tvm/ffi/string.h>
 
+#include <condition_variable>
+#include <cstddef>
 #include <memory>
+#include <mutex>
+#include <thread>
+#include <vector>
 
 #include "llvm_patches/macho_cxa_atexit_shim.h"
 #include "orcjit_session.h"
@@ -105,7 +110,25 @@ class ORCJITDynamicLibraryObj : public ModuleObj {
    * \param name The symbol name to look up
    * \return Pointer to the symbol, or nullptr if not found
    */
-  void* GetSymbol(const String& name);
+  void* GetSymbol(const String& name, bool run_initializers = true);
+
+  /*! \brief Wait until another thread has finished running this dylib's initializers. */
+  void WaitForInitializers();
+
+  /*! \brief Check the initializer gate while holding the session mutex. */
+  bool InitializerTurnAvailable();
+
+  /*! \brief Mark a (possibly nested) initializer run owned by the current thread. */
+  void BeginInitializerRun();
+
+  /*! \brief Finish an initializer run and wake blocked lookup threads when outermost. */
+  void EndInitializerRun();
+
+  /*! \brief Run entries outside the session mutex while preserving lookup ordering. */
+  void RunInitializers(const std::vector<ORCJITExecutionSessionObj::InitFiniEntry>& entries);
+
+  /*! \brief Drain and run every initializer collected by raw context lookups. */
+  void RunPendingInitializers();
 
   /*!
    * \brief Get the underlying LLVM JITDylib
@@ -127,6 +150,15 @@ class ORCJITDynamicLibraryObj : public ModuleObj {
 
   /*! \brief Whether Finalize has run; guards against double-finalizing. */
   bool finalized_{false};
+
+  // Constructors run without the session mutex to permit re-entry. These
+  // fields prevent a second thread from observing callable code before the
+  // first thread completes initialization; same-thread nested lookup remains
+  // allowed for constructor callbacks.
+  std::mutex initializer_mutex_;
+  std::condition_variable initializer_cv_;
+  std::thread::id initializer_thread_;
+  std::size_t initializer_depth_{0};
 
 #ifdef __APPLE__
   /*! \brief Per-dylib __cxa_atexit registry.

@@ -52,6 +52,7 @@
 #include <psapi.h>
 // clang-format on
 
+#include <array>
 #include <string>
 
 namespace tvm {
@@ -61,22 +62,26 @@ namespace orcjit {
 void* DLLImportDefinitionGenerator::FindInProcessModules(const std::string& Name) {
   // Try specific runtime DLLs first, then tvm_ffi.dll (loaded by Python),
   // then all process modules, then LLVM's search.
-  static const char* kRuntimeDLLs[] = {
+  static constexpr std::array<const char*, 4> kRuntimeDLLs = {
       "vcruntime140.dll",
       "vcruntime140_1.dll",
       "ucrtbase.dll",
       "msvcp140.dll",
   };
-  // NOTE: We intentionally do not call FreeLibrary() here. These runtime DLLs
-  // (vcruntime140, ucrtbase, etc.) are already loaded by the process and will
-  // remain loaded for its lifetime. LoadLibraryA merely increments the refcount;
-  // the extra refcount is harmless and avoids the overhead of balancing
-  // Get/FreeLibrary for every symbol lookup.
-  for (const char* dll : kRuntimeDLLs) {
-    if (HMODULE hMod = LoadLibraryA(dll)) {
-      if (auto addr = GetProcAddress(hMod, Name.c_str())) {
-        return reinterpret_cast<void*>(addr);
-      }
+  // Resolve the runtime handles once. GetModuleHandle avoids a refcount change
+  // for DLLs already present; LoadLibrary supplies a process-lifetime handle for
+  // an optional runtime that was not yet loaded.
+  static const std::array<HMODULE, kRuntimeDLLs.size()> kRuntimeHandles = []() {
+    std::array<HMODULE, kRuntimeDLLs.size()> handles{};
+    for (std::size_t i = 0; i < kRuntimeDLLs.size(); ++i) {
+      handles[i] = GetModuleHandleA(kRuntimeDLLs[i]);
+      if (handles[i] == nullptr) handles[i] = LoadLibraryA(kRuntimeDLLs[i]);
+    }
+    return handles;
+  }();
+  for (HMODULE module : kRuntimeHandles) {
+    if (module != nullptr) {
+      if (auto addr = GetProcAddress(module, Name.c_str())) return reinterpret_cast<void*>(addr);
     }
   }
   // Also check tvm_ffi.dll (host process symbol provider)

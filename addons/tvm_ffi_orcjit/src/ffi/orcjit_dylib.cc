@@ -281,7 +281,76 @@ Module ORCJITDynamicLibraryObj::Finalize() {
   return GetRef<Module>(this);
 }
 
-void* ORCJITDynamicLibraryObj::GetSymbol(const String& name) {
+void ORCJITDynamicLibraryObj::WaitForInitializers() {
+  std::unique_lock<std::mutex> lock(initializer_mutex_);
+  const std::thread::id current = std::this_thread::get_id();
+  initializer_cv_.wait(lock, [this, current]() {
+    return initializer_depth_ == 0 || initializer_thread_ == current;
+  });
+}
+
+bool ORCJITDynamicLibraryObj::InitializerTurnAvailable() {
+  std::lock_guard<std::mutex> lock(initializer_mutex_);
+  return initializer_depth_ == 0 || initializer_thread_ == std::this_thread::get_id();
+}
+
+void ORCJITDynamicLibraryObj::BeginInitializerRun() {
+  std::lock_guard<std::mutex> lock(initializer_mutex_);
+  const std::thread::id current = std::this_thread::get_id();
+  TVM_FFI_CHECK(initializer_depth_ == 0 || initializer_thread_ == current, InternalError)
+      << "Initializer ownership changed unexpectedly";
+  if (initializer_depth_ == 0) initializer_thread_ = current;
+  ++initializer_depth_;
+}
+
+void ORCJITDynamicLibraryObj::EndInitializerRun() {
+  bool notify = false;
+  {
+    std::lock_guard<std::mutex> lock(initializer_mutex_);
+    TVM_FFI_CHECK(initializer_depth_ != 0 && initializer_thread_ == std::this_thread::get_id(),
+                  InternalError)
+        << "Initializer completion does not match its owner";
+    if (--initializer_depth_ == 0) {
+      initializer_thread_ = std::thread::id();
+      notify = true;
+    }
+  }
+  if (notify) initializer_cv_.notify_all();
+}
+
+void ORCJITDynamicLibraryObj::RunInitializers(
+    const std::vector<ORCJITExecutionSessionObj::InitFiniEntry>& entries) {
+  if (entries.empty()) return;
+  try {
+#ifdef __APPLE__
+    // Route any __cxa_atexit registrations made during init to this dylib's
+    // records; see llvm_patches/macho_cxa_atexit_shim.h.
+    CxaAtexitRecordsScope scope(&cxa_atexit_records_);
+#endif
+    ORCJITExecutionSessionObj::RunInitFiniEntries(entries);
+  } catch (...) {
+    EndInitializerRun();
+    throw;
+  }
+  EndInitializerRun();
+}
+
+void ORCJITDynamicLibraryObj::RunPendingInitializers() {
+  std::vector<ORCJITExecutionSessionObj::InitFiniEntry> init;
+  while (true) {
+    WaitForInitializers();
+    std::unique_lock<std::mutex> session_lock(session_->mutex_);
+    // Another thread may have started initialization after the wait but before
+    // this session lock was acquired. Re-check under the session→gate lock order.
+    if (!InitializerTurnAvailable()) continue;
+    init = session_->DrainPendingInitializers(GetJITDylib());
+    if (!init.empty()) BeginInitializerRun();
+    break;
+  }
+  RunInitializers(init);
+}
+
+void* ORCJITDynamicLibraryObj::GetSymbol(const String& name, bool run_initializers) {
   // Search this dylib only. Its JITDylib link order (set at creation) already
   // chains to Main → Platform → ProcessSymbols for host/runtime symbols, so a
   // single-entry search order resolves everything a self-contained module needs.
@@ -293,20 +362,22 @@ void* ORCJITDynamicLibraryObj::GetSymbol(const String& name) {
   // Drain under the lock; run constructors after release (see below).
   llvm::Expected<llvm::orc::ExecutorSymbolDef> symbol_or_err = llvm::orc::ExecutorSymbolDef();
   std::vector<ORCJITExecutionSessionObj::InitFiniEntry> init;
-  {
-    std::lock_guard<std::mutex> lock(session_->mutex_);
+  while (true) {
+    WaitForInitializers();
+    std::unique_lock<std::mutex> session_lock(session_->mutex_);
+    if (!InitializerTurnAvailable()) continue;
     symbol_or_err =
         jit_->getExecutionSession().lookup(search_order, jit_->mangleAndIntern(name.c_str()));
-    init = session_->DrainPendingInitializers(GetJITDylib());
+    if (symbol_or_err && run_initializers) {
+      init = session_->DrainPendingInitializers(GetJITDylib());
+      if (!init.empty()) BeginInitializerRun();
+    } else if (!symbol_or_err && run_initializers) {
+      // Never execute entries collected by a failed materialization: their
+      // target memory may already have been abandoned.
+      session_->DrainPendingInitializers(GetJITDylib());
+    }
+    break;
   }
-
-  // Run this dylib's constructors (drained above) with the lock released.
-#ifdef __APPLE__
-  // Route any __cxa_atexit registrations made during init to this dylib's
-  // records; see llvm_patches/macho_cxa_atexit_shim.h.
-  CxaAtexitRecordsScope scope(&cxa_atexit_records_);
-#endif
-  ORCJITExecutionSessionObj::RunInitFiniEntries(init);
 
   if (!symbol_or_err) {
     llvm::Error remaining =
@@ -314,21 +385,27 @@ void* ORCJITDynamicLibraryObj::GetSymbol(const String& name) {
     if (remaining) TVM_FFI_ORCJIT_LLVM_CALL(std::move(remaining));
     return nullptr;
   }
+  // Run this dylib's constructors with the session lock released. The
+  // per-dylib initializer gate blocks other threads until completion while
+  // allowing same-thread constructor callbacks to re-enter the dylib.
+  RunInitializers(init);
   return symbol_or_err->getAddress().toPtr<void*>();
 }
 
 void ORCJITDynamicLibraryObj::InitContextSymbols() {
   // Called once from Finalize before the dylib is published, so no guard is
-  // needed. Point the library-context slot at this module and inject any
-  // registered context symbols.
-  if (void** ctx_addr = reinterpret_cast<void**>(GetSymbol(symbol::tvm_ffi_library_ctx))) {
+  // needed. Resolve every context slot without running initializers, populate
+  // the slots, then run the collected initializers. Constructors can therefore
+  // safely use the library context on their first instruction.
+  if (void** ctx_addr = reinterpret_cast<void**>(GetSymbol(symbol::tvm_ffi_library_ctx, false))) {
     *ctx_addr = this;
   }
   Module::VisitContextSymbols([this](const String& name, void* symbol) {
-    if (void** ctx_addr = reinterpret_cast<void**>(GetSymbol(name))) {
+    if (void** ctx_addr = reinterpret_cast<void**>(GetSymbol(name, false))) {
       *ctx_addr = symbol;
     }
   });
+  RunPendingInitializers();
 }
 
 llvm::orc::JITDylib& ORCJITDynamicLibraryObj::GetJITDylib() {
@@ -337,9 +414,9 @@ llvm::orc::JITDylib& ORCJITDynamicLibraryObj::GetJITDylib() {
 }
 
 Optional<Function> ORCJITDynamicLibraryObj::GetFunction(const String& name) {
-  // Pure symbol lookup. Context symbols were injected once at load time (see
-  // Finalize), so this holds no lock and does no refresh — the returned
-  // Function, once resolved, is invoked lock-free on the hot path.
+  // Context symbols were injected once at load time (see Finalize). Resolution
+  // is serialized by GetSymbol, but the returned Function is invoked lock-free
+  // on the hot path.
   //
   // TVM-FFI exports have the __tvm_ffi_ prefix.
   std::string symbol_name = symbol::tvm_ffi_symbol_prefix + std::string(name);
@@ -356,31 +433,31 @@ Optional<Function> ORCJITDynamicLibraryObj::GetFunction(const String& name) {
 //-------------------------------------
 
 static void RegisterOrcJITFunctions() {
-  static bool registered = false;
-  if (registered) return;
-  registered = true;
+  static std::once_flag once;
+  std::call_once(once, []() {
+    namespace refl = tvm::ffi::reflection;
 
-  namespace refl = tvm::ffi::reflection;
+    refl::ObjectDef<ORCJITExecutionSessionObj>();
 
-  refl::ObjectDef<ORCJITExecutionSessionObj>();
-
-  refl::GlobalDef()
-      .def("tvm_ffi_orcjit.ExecutionSession",
-           [](const Optional<Variant<String, Bytes>>& orc_rt, int64_t slab_size_bytes) {
-             return ORCJITExecutionSession(orc_rt, slab_size_bytes);
-           })
-      .def("tvm_ffi_orcjit.GlobalDefaultSession",
-           []() { return ORCJITExecutionSessionObj::GlobalDefault(); })
-      .def("tvm_ffi_orcjit.SessionLoadModule",
-           [](const ORCJITExecutionSession& session, const Array<Variant<String, Bytes>>& objects,
-              const String& name, const Optional<String>& cxx_runtime_path,
-              const Optional<String>& libstdcxx_nonshared_path) -> Module {
-             return session->LoadModule(objects, name, cxx_runtime_path, libstdcxx_nonshared_path);
-           })
-      .def("tvm_ffi_orcjit.SessionClearFreeSlabs",
-           [](const ORCJITExecutionSession& session) -> int64_t {
-             return session->ClearFreeSlabs();
-           });
+    refl::GlobalDef()
+        .def("tvm_ffi_orcjit.ExecutionSession",
+             [](const Optional<Variant<String, Bytes>>& orc_rt, int64_t slab_size_bytes) {
+               return ORCJITExecutionSession(orc_rt, slab_size_bytes);
+             })
+        .def("tvm_ffi_orcjit.GlobalDefaultSession",
+             []() { return ORCJITExecutionSessionObj::GlobalDefault(); })
+        .def("tvm_ffi_orcjit.SessionLoadModule",
+             [](const ORCJITExecutionSession& session, const Array<Variant<String, Bytes>>& objects,
+                const String& name, const Optional<String>& cxx_runtime_path,
+                const Optional<String>& libstdcxx_nonshared_path) -> Module {
+               return session->LoadModule(objects, name, cxx_runtime_path,
+                                          libstdcxx_nonshared_path);
+             })
+        .def("tvm_ffi_orcjit.SessionClearFreeSlabs",
+             [](const ORCJITExecutionSession& session) -> int64_t {
+               return session->ClearFreeSlabs();
+             });
+  });
 }
 
 TVM_FFI_STATIC_INIT_BLOCK() { RegisterOrcJITFunctions(); }

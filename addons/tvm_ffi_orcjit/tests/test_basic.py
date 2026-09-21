@@ -106,6 +106,14 @@ class Variant:
         """Return path prefix for test_call_global object."""
         return f"{self.subdir}/test_call_global"
 
+    def link_order_base_obj(self) -> str:
+        """Return path prefix for the intra-module dependency object."""
+        return f"{self.subdir}/test_link_order_base"
+
+    def link_order_caller_obj(self) -> str:
+        """Return path prefix for the object that calls the dependency."""
+        return f"{self.subdir}/test_link_order_caller"
+
     def types_obj(self) -> str:
         """Return path prefix for test_types object."""
         return f"{self.subdir}/test_types"
@@ -189,6 +197,17 @@ def test_multiple_objects_in_one_module(v: Variant) -> None:
     assert mod.get_function(v.fn("test_multiply"))(4, 5) == 20
     assert mod.get_function(v.fn("test_subtract"))(10, 3) == 7
     assert mod.get_function(v.fn("test_divide"))(20, 4) == 5
+
+
+@pytest.mark.parametrize("v", _all_variants, ids=_variant_id)
+@pytest.mark.parametrize("reverse", [False, True], ids=["caller-first", "base-first"])
+def test_intra_module_dependency_is_input_order_independent(v: Variant, reverse: bool) -> None:
+    """Undefined symbols resolve between objects regardless of input order."""
+    objects = [v.link_order_caller_obj(), v.link_order_base_obj()]
+    if reverse:
+        objects.reverse()
+    mod = load(*objects)
+    assert mod.get_function(v.fn("cross_lib_add"))(17, 25) == 42
 
 
 @pytest.mark.parametrize("v", _all_variants, ids=_variant_id)
@@ -285,8 +304,9 @@ def test_call_global(v: Variant) -> None:
 
 
 def test_context_injected_at_load() -> None:
-    """Context is injected eagerly at load, so concurrent lookups all observe it."""
+    """Context is injected before constructors and concurrent lookups observe it."""
     mod = load("c/test_context")
+    assert mod.context_was_set_during_init() == 1
 
     num_workers = 8
     barrier = threading.Barrier(num_workers)
@@ -461,6 +481,42 @@ def test_ctor_dtor(v: Variant) -> None:
         assert "<dtors>" not in log
 
 
+def test_concurrent_first_lookup_waits_for_initializers() -> None:
+    """A second thread cannot call newly materialized code before init completes."""
+    ctor_entered = threading.Event()
+    release_ctor = threading.Event()
+    second_started = threading.Event()
+    second_returned = threading.Event()
+
+    @tvm_ffi.register_global_func("append_log", override=True)
+    def _block_first_ctor(_value: str) -> None:
+        if not ctor_entered.is_set():
+            ctor_entered.set()
+            release_ctor.wait(timeout=5)
+
+    mod = load("c/test_ctor_dtor")
+
+    def first_call() -> None:
+        mod.main()
+
+    def second_call() -> None:
+        second_started.set()
+        mod.main()
+        second_returned.set()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(first_call)
+        assert ctor_entered.wait(timeout=5), "constructor did not start"
+        second = pool.submit(second_call)
+        assert second_started.wait(timeout=5), "second lookup did not start"
+        assert not second_returned.wait(timeout=0.25), (
+            "second call returned before the first thread completed initialization"
+        )
+        release_ctor.set()
+        first.result(timeout=5)
+        second.result(timeout=5)
+
+
 # ---------------------------------------------------------------------------
 # Module drop — dropping a loaded Module while its session is still alive.
 #
@@ -630,7 +686,7 @@ def test_containers_tuple(v: Variant) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Slab-pool growth (Stage B).
+# Slab-pool growth.
 #
 # A session holds a growable pool of Slabs, each `slab_size` bytes. When a
 # JITLink graph won't fit in any existing slab, the pool mmap's a new one;
@@ -640,10 +696,8 @@ def test_containers_tuple(v: Variant) -> None:
 # ---------------------------------------------------------------------------
 
 
-# 8 MB is the practical floor — Slab::kCommitGranularity is 2 MB and the
-# dual-pool midpoint needs at least two commit chunks of headroom above it,
-# so smaller capacities break the pool layout. See SlabPoolMemoryManager
-# kMinSlabSize.
+# Use 8 MB to force frequent growth while leaving more headroom than the 4 MB
+# structural minimum (one 2 MB commit chunk per allocation pool).
 _SMALL_SLAB = 8 * 1024 * 1024
 
 
@@ -850,3 +904,10 @@ def test_clear_free_slabs_disabled_pool() -> None:
     """When the slab pool is disabled, clear_free_slabs is a no-op (returns 0)."""
     session = ExecutionSession(slab_size=-1)
     assert session.clear_free_slabs() == 0
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="slab pool is Linux-only")
+def test_rejects_too_small_custom_slab() -> None:
+    """A slab needs at least one 2 MB commit chunk per allocation pool."""
+    with pytest.raises(ValueError, match="slab_size must be"):
+        ExecutionSession(slab_size=2 * 1024 * 1024)

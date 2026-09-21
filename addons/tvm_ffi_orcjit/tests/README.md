@@ -87,9 +87,9 @@ variant subdirectories (c/, cc/, c-gcc/, etc.).
 | `test_funcs2` | More arithmetic (subtract, divide) |
 | `test_funcs_conflict` | Symbol conflict testing (duplicate `add`) |
 | `test_call_global` | Callbacks into Python-registered global functions |
-| `test_context` | First-lookup library-context injection |
+| `test_context` | Eager library-context injection, including constructor ordering |
 | `test_types` | Zero-arg, multi-arg, float, void return types |
-| `test_link_order_base` / `test_link_order_caller` | Cross-library symbol resolution |
+| `test_link_order_base` / `test_link_order_caller` | Cross-object symbol resolution within one module |
 | `test_error` | Error propagation from JIT'd code |
 | `test_ctor_dtor` | Constructor/destructor and init/fini sections |
 

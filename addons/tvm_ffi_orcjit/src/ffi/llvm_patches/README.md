@@ -45,8 +45,9 @@ Each patch file opens with a fixed-shape header describing:
 
 - **ELF init/fini** (Linux branch of `init_fini_plugin.{h,cc}`)
   LLVM issue: [llvm/llvm-project#175981](https://github.com/llvm/llvm-project/issues/175981).
-  Upstream status: open, patch submitted.
-  Remove when: LLVM floor bumps past the release that contains the fix.
+  Upstream status: merged; included in LLVM 23.1.1, not LLVM 22.1.0.
+  Remove when: the LLVM floor reaches 23 and the addon switches its lifecycle
+  calls to the upstream `ELFNixPlatform` path.
 
 - **COFF ctor/dtor** (Windows branch of `init_fini_plugin.{h,cc}`)
   LLVM issue: COFFPlatform stalled.
@@ -54,8 +55,18 @@ Each patch file opens with a fixed-shape header describing:
   Remove when: COFFPlatform becomes usable end-to-end with clang-cl /
   MSVC objects.
 
-macOS already has working `MachOPlatform`, so no patch file is needed
-for that platform.
+- **Mach-O `__cxa_atexit` scoping** (`macho_cxa_atexit_shim.{h,cc}`)
+  Upstream dependency: re-enabling `MachOPlatform` after the compact-unwind
+  per-graph DSO-base fix is available.
+  Remove when: the addon can use `MachOPlatform` end-to-end.
+
+- **COFF unwind-data stripping** (`win_coff_pdata_strip.{h,cc}`)
+  Upstream dependency: usable `COFFPlatform` support with SEH registration.
+  Remove when: `.pdata` / `.xdata` can be registered and relocated normally.
+
+- **Windows DLL import stubs** (`win_dll_import_generator.{h,cc}`)
+  Upstream dependency: usable `COFFPlatform` and in-range DLL call stubs.
+  Remove when: host DLL imports work end-to-end without the custom generator.
 
 ## Removal checklist
 

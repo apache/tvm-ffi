@@ -51,14 +51,13 @@ _LIB_PATH = [
 ]
 _lib_path = None
 for path in _LIB_PATH:
-    if path.exists():
+    if path.is_file():
         _lib_path = path
         break
 if _lib_path is None:
     raise RuntimeError(
-        f"Could not find {_LIB_NAME}. "
-        f"Searched in {_LIB_PATH} and site-packages. "
-        f"Please ensure the package is installed correctly."
+        f"Could not find {_LIB_NAME}. Searched {_LIB_PATH}. "
+        "Please ensure the package is installed correctly."
     )
 
 # The TVM-FFI loader uses local symbol scope. Retain the returned module here
@@ -66,7 +65,7 @@ if _lib_path is None:
 # JIT-owned object deleters remain valid through interpreter shutdown.
 _lib_module = load_module(_lib_path, keep_module_alive=True)
 
-from .session import ExecutionSession, default_session
+from .session import ExecutionSession, default_session  # noqa: E402
 
 __all__ = ["ExecutionSession", "default_session"]
 
