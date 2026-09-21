@@ -2497,7 +2497,7 @@ unsafe fn rust_vtable_mutate_impl<D: MutationDriver, const INPLACE: bool>(
     let context = context_guard.context;
     let raw = *value.as_raw_ffi_any();
     let outcome = catch_unwind(AssertUnwindSafe(
-        #[inline(always)]
+        #[inline]
         || {
             let kind = match def_region_from_raw((*mutator).def_region_mode) {
                 Ok(kind) => kind,
@@ -2750,7 +2750,7 @@ impl<D: MapDispatch, Policy: MutContextPolicy<D>, const PRE_ORDER: bool> Mutatio
         result_into_raw(self.map_raw(raw, kind, permit))
     }
 
-    #[inline(always)]
+    #[inline]
     fn default_map_current_raw(
         &mut self,
         raw: TVMFFIAny,
@@ -2781,7 +2781,7 @@ impl<D: MapDispatch, Policy: MutContextPolicy<D>, const PRE_ORDER: bool> Mutatio
 }
 
 impl<U: StructuralMutator> MutationDriver for U {
-    #[inline(always)]
+    #[inline]
     fn dispatch_raw(
         &mut self,
         raw: TVMFFIAny,
@@ -2941,7 +2941,7 @@ fn call_mutator(
     })
 }
 
-#[inline(always)]
+#[inline]
 fn structural_mutate_hook(raw: TVMFFIAny, permit: Permit) -> Option<TVMFFIAny> {
     let use_inplace = permit == Permit::MaybeInPlace && object_is_unique(raw);
     if use_inplace {
@@ -3021,7 +3021,7 @@ fn result_into_raw(result: Result<Any>) -> TVMFFIAny {
 
 /// Resolve only at an owning-value API boundary; internal Any carriers and
 /// native hooks keep the unchanged tag to avoid acquiring the original.
-#[inline(always)]
+#[inline]
 fn resolve_result(result: Any, original: TVMFFIAny) -> Result<Any> {
     if is_unchanged(&result) {
         owned_from_raw(original)
@@ -3150,7 +3150,7 @@ fn mutate_array<D: MutationDriver>(
         // permission and unique ownership were checked before entering.
         let original = unsafe { *items.add(index) };
         let outcome = catch_unwind(AssertUnwindSafe(
-            #[inline(always)]
+            #[inline]
             || driver.dispatch_abi_raw::<true>(original, kind),
         ));
         let mapped = unsafe {
@@ -3371,7 +3371,7 @@ fn var_remap_key_error() -> Error {
     )
 }
 
-#[inline(always)]
+#[inline]
 fn checked_type_info(type_index: i32) -> Result<*const crate::tvm_ffi_sys::TVMFFITypeInfo> {
     let info = unsafe { TVMFFIGetTypeInfo(type_index) };
     if info.is_null() {
@@ -3397,7 +3397,7 @@ fn object_is_unique(raw: TVMFFIAny) -> bool {
     !pointer.is_null() && unsafe { object::unsafe_::strong_count(pointer) == 1 }
 }
 
-#[inline(always)]
+#[inline]
 fn owned_from_raw(raw: TVMFFIAny) -> Result<Any> {
     if let Some(owned) = try_to_owned_without_normalization(raw) {
         return Ok(owned);
