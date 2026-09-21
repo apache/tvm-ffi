@@ -254,6 +254,57 @@ fn unique_array_is_reused_while_shared_array_uses_copy_on_write() {
     assert_ne!(array_pointer(&mapped), source_pointer);
     assert_eq!(source.iter().collect::<Vec<_>>(), vec![4, 5]);
     assert_eq!(mapped.iter().collect::<Vec<_>>(), vec![5, 6]);
+
+    for failure in 0..3 {
+        let first = Array::<i64>::new(vec![]);
+        let last = Array::<i64>::new(vec![]);
+        let refs = |array: &Array<i64>| ObjectArc::strong_count(ObjectRefCore::data(array));
+        let source = call_global(
+            "ffi.Array",
+            &[first.clone().into(), 1_i64.into(), last.clone().into()],
+        );
+        let mut mutator = MutateCallbacks::new(
+            0usize,
+            |value: MutateValue<'_>, ctx: &mut MutateContext<'_, usize>| -> Result<Any> {
+                assert_eq!(ctx.inplace_mode(), InplaceMode::Disallow);
+                if let Some(integer) = value.cast::<i64>() {
+                    return Ok((integer + 1).into());
+                }
+                if let Some(array) = value.as_node::<tvm_ffi::collections::array::ArrayObj>() {
+                    if std::ptr::eq(array, array_pointer(&last)) {
+                        *ctx.state_mut() += 1;
+                        // The changed integer retained the prefix, but not the unvisited suffix.
+                        assert_eq!((refs(&first), refs(&last)), (3, 2));
+                        if failure == 1 {
+                            return Err(Error::new(RUNTIME_ERROR, "late error", ""));
+                        }
+                        assert_ne!(failure, 2, "late panic");
+                    }
+                    if array.size == 0 {
+                        return Ok(Unchanged.into());
+                    }
+                }
+                ctx.default_maybe_inplace_mutate(value)
+            },
+        );
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            structural_mutate(source.clone(), &mut mutator)
+        }));
+        assert_eq!(*mutator.state(), 1);
+        match failure {
+            0 => {
+                let mapped = result.unwrap().unwrap();
+                assert_eq!((refs(&first), refs(&last)), (3, 3));
+                drop(mapped);
+            }
+            1 => assert!(result.unwrap().is_err()),
+            2 => assert!(result.is_err()),
+            _ => unreachable!(),
+        }
+        assert_eq!((refs(&first), refs(&last)), (2, 2));
+        drop(source);
+        assert_eq!((refs(&first), refs(&last)), (1, 1));
+    }
 }
 
 #[test]

@@ -2230,6 +2230,17 @@ trait MutationDriver: Sized {
             })
             .map(Some);
         }
+        if raw.type_index == TVMFFITypeIndex::kTVMFFIArray as i32 {
+            let array = unsafe { raw.data_union.v_obj.cast::<ArrayObj>() };
+            // Packed construction uses an i32 argument count. Larger arrays
+            // retain the registered hook's unrestricted allocation path.
+            if array.is_null() || unsafe { (*array).size <= i32::MAX as i64 } {
+                return with_mutation_region(def_region_kind, |kind| {
+                    copy_mutate_array(self, mutator, raw, kind)
+                })
+                .map(Some);
+            }
+        }
         let Some(attr) = structural_mutate_hook(raw, permit) else {
             // No foreign call needs access to the driver on a hook miss.
             return Ok(None);
@@ -3226,6 +3237,103 @@ fn mutate_array<D: MutationDriver>(
         }
     }
     Ok(Unchanged.into())
+}
+
+#[inline(always)]
+fn copy_array_child<D: MutationDriver>(
+    driver: &mut D,
+    mutator: StructuralMutatorHandle,
+    original: TVMFFIAny,
+    kind: DefRegionKind,
+) -> Result<Any> {
+    let outcome = catch_unwind(AssertUnwindSafe(
+        #[inline(always)]
+        || driver.dispatch_abi_raw::<false>(original, kind),
+    ));
+    unsafe {
+        result_from_raw(match outcome {
+            Ok(value) => value,
+            Err(payload) => mutation_panic_result(mutator, payload),
+        })
+    }
+}
+
+#[inline(never)]
+fn copy_mutate_array<D: MutationDriver>(
+    driver: &mut D,
+    mutator: StructuralMutatorHandle,
+    raw: TVMFFIAny,
+    kind: DefRegionKind,
+) -> Result<Any> {
+    let array = unsafe { raw.data_union.v_obj.cast::<ArrayObj>() };
+    if array.is_null() {
+        return Err(runtime_error("structural mutation of a null array"));
+    }
+    let (items, len) = unsafe { ((*array).data.cast::<TVMFFIAny>(), (*array).size as usize) };
+    for index in 0..len {
+        let original = unsafe { *items.add(index) };
+        let mapped = copy_array_child(driver, mutator, original, kind)?;
+        if !is_unchanged(&mapped) && !same_shallow(original, *mapped.as_raw_ffi_any()) {
+            return copy_mutate_array_changed(driver, mutator, items, len, index, mapped, kind);
+        }
+    }
+    Ok(Unchanged.into())
+}
+
+#[inline(never)]
+fn copy_mutate_array_changed<D: MutationDriver>(
+    driver: &mut D,
+    mutator: StructuralMutatorHandle,
+    items: *const TVMFFIAny,
+    len: usize,
+    index: usize,
+    first: Any,
+    kind: DefRegionKind,
+) -> Result<Any> {
+    let output = empty_array(len)?;
+    let array = unsafe { output.as_raw_ffi_any().data_union.v_obj.cast::<ArrayObj>() };
+    // The constructor returned a unique array of initialized, owned ABI values.
+    let target = unsafe { (*array).data.cast::<Any>() };
+    // Copy only the visited prefix; future callbacks must not see extra owners.
+    for i in 0..index {
+        let value = owned_from_raw(unsafe { *items.add(i) })?;
+        unsafe { drop(std::ptr::replace(target.add(i), value)) };
+    }
+    unsafe { drop(std::ptr::replace(target.add(index), first)) };
+    for i in index + 1..len {
+        let original = unsafe { *items.add(i) };
+        let mapped = resolve_result(copy_array_child(driver, mutator, original, kind)?, original)?;
+        unsafe { drop(std::ptr::replace(target.add(i), mapped)) };
+    }
+    Ok(output)
+}
+
+fn empty_array(len: usize) -> Result<Any> {
+    static CONSTRUCTOR: std::sync::OnceLock<Function> = std::sync::OnceLock::new();
+    let constructor = match CONSTRUCTOR.get() {
+        Some(constructor) => constructor,
+        None => {
+            let constructor = Function::get_global("ffi.Array")?;
+            CONSTRUCTOR.get_or_init(|| constructor)
+        }
+    };
+    let output = if len <= 16 {
+        constructor.call_packed(&[AnyView::new(); 16][..len])?
+    } else {
+        constructor.call_packed(&vec![AnyView::new(); len])?
+    };
+    let raw = *output.as_raw_ffi_any();
+    if raw.type_index != TVMFFITypeIndex::kTVMFFIArray as i32 || !object_is_unique(raw) {
+        return Err(runtime_error(
+            "array constructor must return a uniquely owned array",
+        ));
+    }
+    if unsafe { (*raw.data_union.v_obj.cast::<ArrayObj>()).size != len as i64 } {
+        return Err(runtime_error(
+            "array constructor returned an unexpected length",
+        ));
+    }
+    Ok(output)
 }
 
 fn default_mutate_driver<D: MutationDriver>(
