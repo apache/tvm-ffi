@@ -64,7 +64,7 @@ pub struct BigInt {
 #[type_key = "ffi.BigInt"]
 #[type_index(TypeIndex::kTVMFFIBigInt)]
 #[type_final]
-pub(crate) struct BigIntObj {
+struct BigIntObj {
     object: Object,
     size: usize,
 }
@@ -326,24 +326,12 @@ impl TryFrom<f64> for BigInt {
                 "",
             ));
         }
-        // |value| >= 2^63 is an integer: place the 53-bit significand at its binary exponent.
+        // |value| >= 2^63 is an integer: shift the 53-bit significand to its binary exponent.
         let bits = value.to_bits();
-        let exponent = (((bits >> 52) & 0x7ff) - 1075) as usize;
-        let significand = (bits & ((1u64 << 52) - 1)) | (1u64 << 52);
-        let whole = exponent / 64;
-        let part = exponent % 64;
-        // Low zero words, up to two significand words, and a zero sign guard;
-        // the largest finite double needs 18 words, so the buffer stays on the stack.
-        let mut buffer = [0i64; 19];
-        let words = &mut buffer[..whole + 3];
-        words[whole] = (significand << part) as i64;
-        if part != 0 {
-            words[whole + 1] = (significand >> (64 - part)) as i64;
-        }
-        if value < 0.0 {
-            int_ops::negate_in_place(words);
-        }
-        Ok(Self::from_words(words))
+        let exponent = ((bits >> 52) & 0x7ff) as i64 - 1075;
+        let significand = ((bits & ((1u64 << 52) - 1)) | (1u64 << 52)) as i64;
+        let magnitude = Self::from_i64(significand) << exponent;
+        Ok(if value < 0.0 { -magnitude } else { magnitude })
     }
 }
 
@@ -369,15 +357,10 @@ impl FromStr for BigInt {
         }
         // Accumulate 19-digit chunks: magnitude = magnitude * 10^len + chunk.
         let mut magnitude = Vec::new();
-        let head = digits.len() % 19;
-        let chunks = std::iter::once(&digits[..head])
-            .filter(|chunk| !chunk.is_empty())
-            .chain(digits.as_bytes()[head..].chunks(19).map(|chunk| {
-                // SAFETY: chunks of ASCII digits are valid UTF-8.
-                unsafe { std::str::from_utf8_unchecked(chunk) }
-            }));
-        for chunk in chunks {
-            let value: u64 = chunk.parse().expect("ASCII digits parse as u64");
+        for chunk in digits.as_bytes().chunks(19) {
+            let value = chunk
+                .iter()
+                .fold(0u64, |acc, &digit| acc * 10 + u64::from(digit - b'0'));
             int_ops::mul_add_small(&mut magnitude, 10u64.pow(chunk.len() as u32), value);
         }
         let mut words: Vec<i64> = magnitude.into_iter().map(|word| word as i64).collect();
@@ -428,7 +411,7 @@ impl PartialOrd for BigInt {
 impl Ord for BigInt {
     fn cmp(&self, other: &Self) -> Ordering {
         let (a, b) = (self.words(), other.words());
-        let (negative_a, negative_b) = (a[a.len() - 1] < 0, b[b.len() - 1] < 0);
+        let (negative_a, negative_b) = (int_ops::is_negative(a), int_ops::is_negative(b));
         if negative_a != negative_b {
             return if negative_a {
                 Ordering::Less
@@ -437,11 +420,10 @@ impl Ord for BigInt {
             };
         }
         // With equal signs, sign-extended words compare as unsigned from the top.
-        let extension = if negative_a { u64::MAX } else { 0 };
-        let word = |words: &[i64], i: usize| words.get(i).map_or(extension, |&w| w as u64);
+        let extension = int_ops::extension(a);
         (0..a.len().max(b.len()))
             .rev()
-            .map(|i| word(a, i).cmp(&word(b, i)))
+            .map(|i| int_ops::word_at(a, i, extension).cmp(&int_ops::word_at(b, i, extension)))
             .find(|ordering| ordering.is_ne())
             .unwrap_or(Ordering::Equal)
     }
@@ -468,10 +450,8 @@ impl Display for BigInt {
         // Peel base-10^19 chunks, least significant first, by long division.
         const CHUNK: u128 = 10_000_000_000_000_000_000;
         let mut chunks = Vec::new();
-        while magnitude.last() == Some(&0) {
-            magnitude.pop();
-        }
-        while !magnitude.is_empty() {
+        while let Some(top) = magnitude.iter().rposition(|&word| word != 0) {
+            magnitude.truncate(top + 1);
             let mut remainder = 0u128;
             for word in magnitude.iter_mut().rev() {
                 let current = (remainder << 64) | u128::from(*word as u64);
@@ -479,9 +459,6 @@ impl Display for BigInt {
                 remainder = current % CHUNK;
             }
             chunks.push(remainder as u64);
-            while magnitude.last() == Some(&0) {
-                magnitude.pop();
-            }
         }
         let mut digits = String::new();
         let mut chunks = chunks.iter().rev();
