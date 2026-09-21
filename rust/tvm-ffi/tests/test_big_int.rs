@@ -60,6 +60,8 @@ fn test_big_int_inline_representation() {
         assert_eq!(value.to_i64(), Some(0));
     }
     let inline = [
+        BigInt::from(false),
+        BigInt::from(true),
         BigInt::from(-1i8),
         BigInt::from(i16::MIN),
         BigInt::from(u32::MAX),
@@ -70,6 +72,8 @@ fn test_big_int_inline_representation() {
         BigInt::from(u128::from(u64::MAX >> 1)),
     ];
     let expected = [
+        0,
+        1,
         -1,
         i64::from(i16::MIN),
         i64::from(u32::MAX),
@@ -88,49 +92,11 @@ fn test_big_int_inline_representation() {
 }
 
 #[test]
-fn test_big_int_from_bool() {
-    for (input, expected) in [(false, 0i64), (true, 1)] {
-        let value = BigInt::from(input);
-        assert_eq!(type_index_of(&value), TypeIndex::kTVMFFIInt as i32);
-        assert_eq!(value.to_i64(), Some(expected));
-    }
-}
-
-/// Rebuild a double from canonical words; exact when the magnitude has at most 53 significant bits.
-fn words_as_f64(value: &BigInt) -> f64 {
-    let negative = value.is_negative();
-    let mut words: Vec<u64> = value
-        .words()
-        .iter()
-        .map(|&w| if negative { !(w as u64) } else { w as u64 })
-        .collect();
-    if negative {
-        for word in words.iter_mut() {
-            let (sum, overflow) = word.overflowing_add(1);
-            *word = sum;
-            if !overflow {
-                break;
-            }
-        }
-    }
-    let magnitude: f64 = words
-        .iter()
-        .enumerate()
-        .filter(|(_, &word)| word != 0)
-        .map(|(i, &word)| word as f64 * 2f64.powi(64 * i as i32))
-        .sum();
-    if negative {
-        -magnitude
-    } else {
-        magnitude
-    }
-}
-
-#[test]
-fn test_big_int_from_f64() {
+fn test_big_int_f64_conversions() {
     let cases = [
         (0.0, BigInt::from(0i64)),
         (-0.0, BigInt::from(0i64)),
+        (f64::MIN_POSITIVE, BigInt::from(0i64)),
         (1.9, BigInt::from(1i64)),
         (-1.9, BigInt::from(-1i64)),
         (-0.999, BigInt::from(0i64)),
@@ -163,7 +129,7 @@ fn test_big_int_from_f64() {
         let value = BigInt::try_from(input).unwrap();
         assert_eq!(type_index_of(&value), TypeIndex::kTVMFFIBigInt as i32);
         assert_eq!(value.is_negative(), input < 0.0);
-        assert_eq!(words_as_f64(&value), input, "{input}");
+        assert_eq!(value.to_f64().unwrap(), input, "{input}");
     }
     assert_eq!(
         BigInt::try_from(3.0 * 2f64.powi(191)).unwrap().words(),
@@ -176,6 +142,23 @@ fn test_big_int_from_f64() {
         let error = BigInt::try_from(input).unwrap_err();
         assert_eq!(error.kind(), OVERFLOW_ERROR);
         assert!(error.message().contains("infinity"));
+    }
+
+    // Nearest double with ties to even: 2^47 is half an ulp at 2^100.
+    let x = pow2(100);
+    assert_eq!(x.to_f64().unwrap(), 2f64.powi(100));
+    assert_eq!((&x + pow2(47)).to_f64().unwrap(), 2f64.powi(100));
+    let above = f64::from_bits(2f64.powi(100).to_bits() + 1);
+    assert_eq!((&x + pow2(47) + 1i64).to_f64().unwrap(), above);
+    assert_eq!(big(i64::MIN as i128).to_f64().unwrap(), i64::MIN as f64);
+    assert_eq!((-pow2(100) - 1i64).to_f64().unwrap(), -(2f64.powi(100)));
+    let largest = BigInt::try_from(f64::MAX).unwrap();
+    assert_eq!(largest.to_f64().unwrap(), f64::MAX);
+    assert_eq!((&largest + pow2(970) - 1i64).to_f64().unwrap(), f64::MAX);
+    for value in [&largest + pow2(970), pow2(1024), -pow2(1024), pow2(1100)] {
+        let error = value.to_f64().unwrap_err();
+        assert_eq!(error.kind(), OVERFLOW_ERROR);
+        assert!(error.message().contains("finite double"));
     }
 }
 
@@ -558,8 +541,7 @@ fn test_big_int_structural_traversal() {
 }
 
 // ============================================================================
-// Arithmetic: ported from tests/cpp/test_big_int.cc, then checked against the
-// C++ operators through the testing oracles.
+// Arithmetic: ported from tests/cpp/test_big_int.cc.
 // ============================================================================
 
 fn big(value: i128) -> BigInt {
@@ -776,32 +758,6 @@ fn test_big_int_independent_wide_fixture() {
         (&a >> 97i64).to_string(),
         "-365375409332725729551097270762435786773001928705"
     );
-}
-
-#[test]
-fn test_big_int_to_f64() {
-    for x in [-7.9, -0.0, 0.0, 0.5, 7.9, f64::MIN_POSITIVE] {
-        assert_inline(&BigInt::try_from(x).unwrap(), x as i64);
-    }
-    assert_eq!(BigInt::try_from(2f64.powi(100)).unwrap(), pow2(100));
-    // shift=64 writes one significand word between a low zero word and a high sign guard.
-    assert_eq!(BigInt::try_from(2f64.powi(116)).unwrap(), pow2(116));
-    assert_eq!(BigInt::try_from(-(2f64.powi(100))).unwrap(), -pow2(100));
-    let x = pow2(100);
-    assert_eq!(x.to_f64().unwrap(), 2f64.powi(100));
-    assert_eq!((&x + pow2(47)).to_f64().unwrap(), 2f64.powi(100));
-    let above = f64::from_bits(2f64.powi(100).to_bits() + 1);
-    assert_eq!((&x + pow2(47) + 1i64).to_f64().unwrap(), above);
-    assert_eq!(big(i64::MIN as i128).to_f64().unwrap(), i64::MIN as f64);
-    assert_eq!((-pow2(100) - 1i64).to_f64().unwrap(), -(2f64.powi(100)));
-    let largest = BigInt::try_from(f64::MAX).unwrap();
-    assert_eq!(largest.to_f64().unwrap(), f64::MAX);
-    assert_eq!((&largest + pow2(970) - 1i64).to_f64().unwrap(), f64::MAX);
-    for value in [&largest + pow2(970), pow2(1024), -pow2(1024), pow2(1100)] {
-        let error = value.to_f64().unwrap_err();
-        assert_eq!(error.kind(), OVERFLOW_ERROR);
-        assert!(error.message().contains("finite double"));
-    }
 }
 
 #[test]

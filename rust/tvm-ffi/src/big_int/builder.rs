@@ -26,7 +26,7 @@
 //! the `BigIntObj` header, and other languages only ever call the deleter.
 use super::{int_ops, BigInt, BigIntObj};
 use crate::object::{unsafe_, Object};
-use std::alloc::{alloc, dealloc, handle_alloc_error, Layout};
+use std::alloc::{alloc_zeroed, dealloc, handle_alloc_error, Layout};
 use std::ffi::c_void;
 use std::mem::{align_of, size_of, ManuallyDrop};
 use std::sync::atomic::AtomicU64;
@@ -70,14 +70,12 @@ impl WordsBuilder {
         debug_assert!(size <= capacity);
         let layout = layout(capacity);
         unsafe {
-            let base = alloc(layout);
+            let base = alloc_zeroed(layout);
             if base.is_null() {
                 handle_alloc_error(layout);
             }
             base.cast::<usize>().write(capacity);
             let obj = base.add(PREFIX).cast::<BigIntObj>();
-            // Zero the words explicitly: cheaper than calloc for these small sizes.
-            obj.add(1).cast::<i64>().write_bytes(0, capacity);
             obj.write(BigIntObj {
                 object: Object::new(),
                 size,

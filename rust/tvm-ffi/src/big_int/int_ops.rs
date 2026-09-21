@@ -52,7 +52,7 @@ pub(super) fn is_negative(x: &[i64]) -> bool {
 
 /// The word that sign-extends `x` beyond its length.
 #[inline]
-fn extension(x: &[i64]) -> u64 {
+pub(super) fn extension(x: &[i64]) -> u64 {
     if is_negative(x) {
         u64::MAX
     } else {
@@ -62,7 +62,7 @@ fn extension(x: &[i64]) -> u64 {
 
 /// Word `i` of `x`, sign-extended past its length.
 #[inline]
-fn word_at(x: &[i64], i: usize, extension: u64) -> u64 {
+pub(super) fn word_at(x: &[i64], i: usize, extension: u64) -> u64 {
     x.get(i).map_or(extension, |&w| w as u64)
 }
 
