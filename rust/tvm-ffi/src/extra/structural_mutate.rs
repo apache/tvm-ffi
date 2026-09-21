@@ -2035,7 +2035,7 @@ struct MemoEntry {
     result: Any,
 }
 
-struct NativeMapper<'a, D, Policy, const PRE_ORDER: bool> {
+struct NativeMapper<'a, D, Policy, const PRE_ORDER: bool, const HAS_POLICY: bool> {
     dispatch: &'a mut D,
     policy: Option<Rc<Policy>>,
     remap: StructuralVarRemap,
@@ -2047,19 +2047,28 @@ fn run_native_mapper<D: MapDispatch, Policy: MutContextPolicy<D>>(
     policy: Option<Rc<Policy>>,
     order: WalkOrder,
 ) -> Result<Any> {
-    match order {
-        WalkOrder::PreOrder => NativeMapper::<_, _, true>::run(root, dispatch, policy),
-        WalkOrder::PostOrder => NativeMapper::<_, _, false>::run(root, dispatch, policy),
+    match (order, policy.is_some()) {
+        (WalkOrder::PreOrder, _) => NativeMapper::<_, _, true, false>::run(root, dispatch, policy),
+        (WalkOrder::PostOrder, false) => {
+            NativeMapper::<_, _, false, false>::run(root, dispatch, policy)
+        }
+        (WalkOrder::PostOrder, true) => {
+            NativeMapper::<_, _, false, true>::run(root, dispatch, policy)
+        }
     }
 }
 
-impl<D: MapDispatch, Policy: MutContextPolicy<D>, const PRE_ORDER: bool>
-    NativeMapper<'_, D, Policy, PRE_ORDER>
+impl<
+        D: MapDispatch,
+        Policy: MutContextPolicy<D>,
+        const PRE_ORDER: bool,
+        const HAS_POLICY: bool,
+    > NativeMapper<'_, D, Policy, PRE_ORDER, HAS_POLICY>
 {
     fn run(root: Any, dispatch: &mut D, policy: Option<Rc<Policy>>) -> Result<Any> {
         run_structural_mutator(
             root,
-            &mut NativeMapper::<_, _, PRE_ORDER> {
+            &mut NativeMapper::<_, _, PRE_ORDER, HAS_POLICY> {
                 dispatch,
                 policy,
                 remap: StructuralVarRemap::default(),
@@ -2080,7 +2089,12 @@ impl<D: MapDispatch, Policy: MutContextPolicy<D>, const PRE_ORDER: bool>
         // Raw strings, byte-array views, and ObjectRValueRef are deliberately
         // excluded because converting those borrowed special values into an
         // Any performs normalization rather than a bitwise copy.
-        if self.policy.is_none() && is_plain_inline(raw.type_index) {
+        let no_policy = if PRE_ORDER {
+            self.policy.is_none()
+        } else {
+            !HAS_POLICY
+        };
+        if no_policy && is_plain_inline(raw.type_index) {
             let value = StructuralView::from_raw(raw);
             return match self.dispatch.dispatch_map(&value, def_region_kind) {
                 Some(result) => {
@@ -2749,8 +2763,12 @@ fn def_region_from_raw(kind: i32) -> Result<DefRegionKind> {
     }
 }
 
-impl<D: MapDispatch, Policy: MutContextPolicy<D>, const PRE_ORDER: bool> MutationDriver
-    for NativeMapper<'_, D, Policy, PRE_ORDER>
+impl<
+        D: MapDispatch,
+        Policy: MutContextPolicy<D>,
+        const PRE_ORDER: bool,
+        const HAS_POLICY: bool,
+    > MutationDriver for NativeMapper<'_, D, Policy, PRE_ORDER, HAS_POLICY>
 {
     fn dispatch_raw(
         &mut self,
@@ -2782,7 +2800,16 @@ impl<D: MapDispatch, Policy: MutContextPolicy<D>, const PRE_ORDER: bool> Mutatio
         kind: DefRegionKind,
         permit: Permit,
     ) -> Result<Any> {
-        match self.policy.as_ref().map(Rc::as_ptr) {
+        let policy = if PRE_ORDER {
+            self.policy.as_ref().map(Rc::as_ptr)
+        } else if HAS_POLICY {
+            Some(Rc::as_ptr(
+                self.policy.as_ref().expect("policy selected at the root"),
+            ))
+        } else {
+            None
+        };
+        match policy {
             Some(policy) => {
                 let view = StructuralView::from_raw(raw);
                 policy::mutate_with_policy(
