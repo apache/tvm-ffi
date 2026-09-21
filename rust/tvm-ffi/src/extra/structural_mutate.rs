@@ -25,6 +25,7 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::ffi::c_void;
+use std::hash::{BuildHasherDefault, Hasher};
 use std::marker::PhantomData;
 use std::ops::{ControlFlow, Deref};
 use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
@@ -1512,7 +1513,30 @@ impl Deref for InplaceValue<'_> {
 /// The map owns its keys and values so object addresses remain stable.
 #[derive(Default)]
 pub struct StructuralVarRemap {
-    entries: HashMap<NonNull<TVMFFIObject>, MemoEntry>,
+    entries: HashMap<NonNull<TVMFFIObject>, MemoEntry, BuildHasherDefault<IdentityHasher>>,
+}
+
+#[derive(Default)]
+struct IdentityHasher(u64);
+
+impl Hasher for IdentityHasher {
+    fn write(&mut self, bytes: &[u8]) {
+        for byte in bytes {
+            self.0 = (self.0 ^ u64::from(*byte)).wrapping_mul(0x100000001b3);
+        }
+    }
+
+    fn write_usize(&mut self, value: usize) {
+        self.0 = value as u64;
+    }
+
+    fn finish(&self) -> u64 {
+        // Mix address alignment bits into both the bucket index and control tag.
+        let mut hash = self.0;
+        hash = (hash ^ (hash >> 33)).wrapping_mul(0xff51afd7ed558ccd);
+        hash = (hash ^ (hash >> 33)).wrapping_mul(0xc4ceb9fe1a85ec53);
+        hash ^ (hash >> 33)
+    }
 }
 
 impl StructuralVarRemap {
@@ -3362,15 +3386,20 @@ fn call_field_setter(
 
 fn object_identity_key(raw: TVMFFIAny) -> Result<NonNull<TVMFFIObject>> {
     if raw.type_index < TVMFFITypeIndex::kTVMFFIStaticObjectBegin as i32 {
-        return Err(Error::new(
-            TYPE_ERROR,
-            "variable-remap keys must be object-backed values",
-            "",
-        ));
+        return Err(var_remap_key_error());
     }
     let pointer = unsafe { raw.data_union.v_obj };
     NonNull::new(pointer)
         .ok_or_else(|| runtime_error("native structural map: identity object has a null pointer"))
+}
+
+#[cold]
+fn var_remap_key_error() -> Error {
+    Error::new(
+        TYPE_ERROR,
+        "variable-remap keys must be object-backed values",
+        "",
+    )
 }
 
 fn checked_type_info(type_index: i32) -> Result<*const crate::tvm_ffi_sys::TVMFFITypeInfo> {
