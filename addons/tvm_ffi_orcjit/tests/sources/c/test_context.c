@@ -19,7 +19,9 @@
 
 #include <tvm/ffi/c_api.h>
 
-TVM_FFI_DLL_EXPORT void* __tvm_ffi__library_ctx = NULL;
+// The host writes this slot after compilation and before constructors run.
+// Volatile keeps the constructor's read from being folded to NULL.
+TVM_FFI_DLL_EXPORT void* volatile __tvm_ffi__library_ctx = NULL;
 static int context_was_set_during_init = 0;
 
 static void record_context_during_init(void) {
