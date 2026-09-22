@@ -38,17 +38,6 @@ Each patch file opens with a fixed-shape header describing:
 
 ## Index
 
-- **GOTPCRELX relaxation** (`gotpcrelx_fix.{h,cc}`)
-  LLVM issue: TBD — issue not yet filed.
-  Upstream status: open.
-  Remove when: LLVM floor bumps past the release that contains the fix.
-
-- **ELF init/fini** (Linux branch of `init_fini_plugin.{h,cc}`)
-  LLVM issue: [llvm/llvm-project#175981](https://github.com/llvm/llvm-project/issues/175981).
-  Upstream status: merged; included in LLVM 23.1.1, not LLVM 22.1.0.
-  Remove when: the LLVM floor reaches 23 and the addon switches its lifecycle
-  calls to the upstream `ELFNixPlatform` path.
-
 - **COFF ctor/dtor** (Windows branch of `init_fini_plugin.{h,cc}`)
   LLVM issue: COFFPlatform stalled.
   Upstream status: stalled 2+ years.

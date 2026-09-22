@@ -151,6 +151,9 @@ class ORCJITDynamicLibraryObj : public ModuleObj {
   /*! \brief Whether Finalize has run; guards against double-finalizing. */
   bool finalized_{false};
 
+  /*! \brief Whether LLVM's platform initialization completed successfully. */
+  bool platform_initialized_{false};
+
   // Constructors run without the session mutex to permit re-entry. These
   // fields prevent a second thread from observing callable code before the
   // first thread completes initialization; same-thread nested lookup remains

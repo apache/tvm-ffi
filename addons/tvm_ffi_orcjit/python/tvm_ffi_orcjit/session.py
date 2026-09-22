@@ -106,13 +106,14 @@ class ExecutionSession(Object):
         Parameters
         ----------
         orc_rt : str or Path or bytes or None
-            Which ORC runtime to install. Linux/ELF only — ignored on macOS and
-            Windows, which never configure an ORC platform.
+            Which native ORC runtime to install. Linux/ELF only — ignored on
+            macOS and Windows, which retain LLJIT's generic platform support.
 
             - ``"auto"`` (default): the runtime embedded in this extension.
             - a path (``str`` or ``Path``): a custom liborc_rt archive on disk.
             - ``bytes``: a custom liborc_rt archive held in memory.
-            - ``None``: no ORC platform at all.
+            - ``None``: no ORC platform or ELF constructor/destructor lifecycle;
+              intended for plain C-ABI objects that do not require either.
 
             A custom runtime (path or bytes) must match the LLVM/compiler-rt this
             extension was built against; ``"auto"`` is almost always what you want.

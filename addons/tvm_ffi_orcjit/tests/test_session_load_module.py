@@ -140,7 +140,7 @@ def test_orc_rt_in_memory_bytes() -> None:
 
 
 def test_orc_rt_none_no_platform() -> None:
-    """orc_rt=None runs with no ORC platform; C-ABI objects still load."""
+    """orc_rt=None skips the ELF platform; plain C-ABI objects still load."""
     mod = ExecutionSession(orc_rt=None).load_module(obj("c/test_funcs"))
     assert mod.test_add(8, 9) == 17
 

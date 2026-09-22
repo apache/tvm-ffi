@@ -60,13 +60,13 @@ class ORCJITExecutionSessionObj : public Object {
   /*!
    * \brief Construct a session, selecting the ORC runtime.
    *
-   * \param orc_rt Runtime selector (Linux/ELF only; ignored on macOS/Windows,
-   *        which never configure an ORC platform):
+   * \param orc_rt Native runtime selector (Linux/ELF only; ignored on
+   *        macOS/Windows, which retain LLJIT's generic platform support):
    *        - empty \c String (default, "auto"): the runtime embedded in this
-   *          extension (or no platform if the embed was compiled out);
+   *          extension, or no native platform if embedding was unavailable;
    *        - non-empty \c String: a custom liborc_rt archive on disk;
    *        - \c Bytes: a custom liborc_rt archive held in memory;
-   *        - \c nullopt: no ORC platform at all.
+   *        - \c nullopt: no ORC platform or ELF init/fini lifecycle.
    *        A custom runtime must match the LLVM this extension was built against.
    * \param slab_size_bytes Per-slab capacity for the JIT memory arena.
    */
@@ -144,14 +144,7 @@ class ORCJITExecutionSessionObj : public Object {
                                     Object);
 
   struct InitFiniEntry {
-    enum class Section {
-      kInitArray = 0,
-      kCtors = 1,
-      kDtors = 2,
-      kFiniArray = 3,
-    };
     llvm::orc::ExecutorAddr address;
-    Section section;
     int priority;
   };
 
@@ -181,8 +174,8 @@ class ORCJITExecutionSessionObj : public Object {
    *        memory and dropping it from the session's dylib list.
    *
    * Invoked by \c ORCJITDynamicLibraryObj's destructor after any required
-   * static-destructor sequence (drained via \c DrainPendingDeinitializers on
-   * Linux/Windows) has completed. The caller must ensure no
+   * static-destructor sequence (upstream ELFNixPlatform on Linux, or the local
+   * adapter on macOS/Windows) has completed. The caller must ensure no
    * further use of the \c JITDylib* after this call — it becomes "Closed" and
    * its address may be reused by a subsequent \c createJITDylib.
    *
@@ -207,10 +200,15 @@ class ORCJITExecutionSessionObj : public Object {
   // entries under it. See the locking discipline on mutex_.
   friend class ORCJITDynamicLibraryObj;
 
-  /*! \brief Slab-pool memory manager — must be declared before jit_ for destruction order */
-  std::unique_ptr<SlabPoolMemoryManager> memory_manager_;
+  /*! \brief Slab manager staged for transfer into LLJIT during construction. */
+  std::unique_ptr<SlabPoolMemoryManager> pending_memory_manager_;
+  /*! \brief Non-owning view of LLJIT's slab manager, used by ClearFreeSlabs. */
+  SlabPoolMemoryManager* memory_manager_{nullptr};
   /*! \brief The LLVM ORC JIT instance */
   std::unique_ptr<llvm::orc::LLJIT> jit_;
+
+  /*! \brief Whether Linux has an ExecutorNativePlatform backed by liborc_rt. */
+  bool has_orc_platform_{false};
 
   /*! \brief Counter for auto-generating library names */
   int dylib_counter_{0};

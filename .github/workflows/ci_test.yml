@@ -236,7 +236,7 @@ jobs:
     name: orcjit ${{ matrix.os }} (${{ matrix.arch }})
     runs-on: ${{ matrix.os }}
     env:
-      LLVM_VERSION: "22.1.0"
+      LLVM_VERSION: "23.1.1"
       # Repo hosting the prebuilt LLVM release assets consumed on Linux. Built
       # out-of-band from source in a manylinux image so the ABI stays under the
       # manylinux_2_28 floor; see that repo's build_llvm workflow.

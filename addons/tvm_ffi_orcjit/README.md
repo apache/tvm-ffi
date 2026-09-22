@@ -65,7 +65,7 @@ pip install apache-tvm-ffi apache-tvm_ffi_orcjit
 #### Prerequisites
 
 - Python 3.10+, CMake 3.20+, C++17 compiler
-- LLVM 22+ development libraries (`llvmdev`, `llvm-config`)
+- LLVM 23.1.1+ development libraries (`llvmdev`, `llvm-config`)
 - Static `zlib` and `zstd` libraries (in the same prefix as LLVM)
 
 #### Install LLVM via conda-forge
@@ -74,14 +74,14 @@ The easiest way to get all dependencies is via conda-forge:
 
 ```bash
 conda create -p /opt/llvm -c conda-forge \
-  llvmdev=22.1.0 clangdev=22.1.0 compiler-rt=22.1.0 zlib zstd-static -y
+  llvmdev=23.1.1 clangdev=23.1.1 compiler-rt=23.1.1 zlib zstd-static -y
 export LLVM_PREFIX=/opt/llvm
 ```
 
 On Windows:
 
 ```cmd
-conda create -p C:\opt\llvm -c conda-forge llvmdev=22.1.0 zlib zstd-static -y
+conda create -p C:\opt\llvm -c conda-forge llvmdev=23.1.1 zlib zstd-static -y
 set LLVM_PREFIX=C:\opt\llvm
 ```
 
@@ -196,10 +196,11 @@ Compile: `clang -O2 -c -o example.o example.c`
 
 - **LLJIT**: Built on LLVM's ORC JIT v2 with `ObjectLinkingLayer` (JITLink) for
   all platforms.
-- **InitFiniPlugin**: Custom `ObjectLinkingLayer::Plugin` that collects function
-  pointers from init/fini sections (ELF `.init_array`/`.ctors`/`.fini_array`/`.dtors`,
-  Mach-O `__mod_init_func`/`__mod_term_func`, COFF `.CRT$XC*`/`.CRT$XT*`) and
-  runs them in priority order at symbol lookup / library teardown.
+- **ELF Lifecycle** (Linux): LLVM 23.1.1+ `ELFNixPlatform` runs ordered
+  constructors and destructors through `LLJIT::initialize` / `deinitialize`.
+- **InitFiniPlugin** (macOS/Windows): A local `ObjectLinkingLayer::Plugin`
+  handles Mach-O `__mod_init_func`/`__mod_term_func` and COFF
+  `.CRT$XC*`/`.CRT$XT*` while those ORC platforms remain unsuitable.
 - **DLL Import Stubs** (Windows): Custom `DefinitionGenerator` that resolves host
   process symbols from all loaded DLLs and creates `__imp_*` pointer stubs in
   JIT memory, keeping all fixups within PCRel32 range.
@@ -260,7 +261,7 @@ checks (`__security_cookie`) which are CRT symbols the JIT cannot resolve.
 
 ### LLVM version mismatch
 
-The package requires LLVM 22+. Set `LLVM_PREFIX` to the LLVM install prefix:
+The package requires LLVM 23.1.1+. Set `LLVM_PREFIX` to the LLVM install prefix:
 
 ```bash
 export LLVM_PREFIX=/path/to/llvm

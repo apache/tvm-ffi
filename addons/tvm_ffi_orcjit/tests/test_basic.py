@@ -442,12 +442,18 @@ def test_ctor_dtor(v: Variant) -> None:
         log += x
 
     mod = load(v.ctor_dtor_obj())
+    if sys.platform == "linux":
+        assert log, "ELFNixPlatform did not run constructors during load"
     mod.get_function(v.fn("main"))()
     del mod
 
     main_idx = log.index("<main>")
     pre = log[:main_idx]
     post = log[main_idx:]
+
+    if v.subdir.startswith("cc"):
+        assert "<cxx_ctor>" in pre, f"C++ global constructor did not run: {log!r}"
+        assert "<cxx_dtor>" in post, f"C++ __cxa_atexit destructor did not run: {log!r}"
 
     if sys.platform == "win32":
         # Windows (all compilers): COFF .CRT$XC* constructors + .CRT$XT* terminators.
@@ -481,6 +487,10 @@ def test_ctor_dtor(v: Variant) -> None:
         assert "<dtors>" not in log
 
 
+@pytest.mark.skipif(
+    sys.platform == "linux",
+    reason="ELFNixPlatform completes initialization before load_module returns",
+)
 def test_concurrent_first_lookup_waits_for_initializers() -> None:
     """A second thread cannot call newly materialized code before init completes."""
     ctor_entered = threading.Event()

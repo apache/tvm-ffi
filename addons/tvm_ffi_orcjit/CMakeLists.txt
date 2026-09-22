@@ -22,8 +22,8 @@ endif ()
 
 # ---- Find packages ----
 find_package(LLVM REQUIRED CONFIG)
-if (LLVM_PACKAGE_VERSION VERSION_LESS 22.0)
-  message(FATAL_ERROR "tvm_ffi_orcjit requires LLVM 22 or newer; found ${LLVM_PACKAGE_VERSION}")
+if (LLVM_PACKAGE_VERSION VERSION_LESS 23.1.1)
+  message(FATAL_ERROR "tvm_ffi_orcjit requires LLVM 23.1.1 or newer; found ${LLVM_PACKAGE_VERSION}")
 endif ()
 message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION} in ${LLVM_DIR}")
 
@@ -41,17 +41,21 @@ find_package(tvm_ffi CONFIG REQUIRED)
 
 # ---- Build shared library ----
 add_library(
-  tvm_ffi_orcjit SHARED
-  src/ffi/orcjit_session.cc
-  src/ffi/orcjit_dylib.cc
-  src/ffi/orcjit_memory_manager.cc
-  src/ffi/orcjit_slab.cc
-  src/ffi/llvm_patches/gotpcrelx_fix.cc
-  src/ffi/llvm_patches/init_fini_plugin.cc
-  src/ffi/llvm_patches/macho_cxa_atexit_shim.cc
-  src/ffi/llvm_patches/win_coff_pdata_strip.cc
-  src/ffi/llvm_patches/win_dll_import_generator.cc
+  tvm_ffi_orcjit SHARED src/ffi/orcjit_session.cc src/ffi/orcjit_dylib.cc
+                        src/ffi/orcjit_memory_manager.cc src/ffi/orcjit_slab.cc
 )
+if (APPLE)
+  target_sources(
+    tvm_ffi_orcjit PRIVATE src/ffi/llvm_patches/init_fini_plugin.cc
+                           src/ffi/llvm_patches/macho_cxa_atexit_shim.cc
+  )
+elseif (WIN32)
+  target_sources(
+    tvm_ffi_orcjit
+    PRIVATE src/ffi/llvm_patches/init_fini_plugin.cc src/ffi/llvm_patches/win_coff_pdata_strip.cc
+            src/ffi/llvm_patches/win_dll_import_generator.cc
+  )
+endif ()
 set_target_properties(
   tvm_ffi_orcjit PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON
 )
@@ -206,7 +210,7 @@ if (NOT APPLE AND NOT WIN32)
     endif ()
   endif ()
   if (NOT ORC_RT_PATH)
-    message(WARNING "Could not find liborc_rt. ORC runtime features will be disabled.")
+    message(WARNING "Could not find liborc_rt. Linux ORC platform lifecycle will be disabled.")
   endif ()
 endif ()
 

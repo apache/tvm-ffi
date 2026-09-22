@@ -55,10 +55,9 @@
 #include "orcjit_memory_manager.h"
 #include "orcjit_utils.h"
 
-#if defined(__linux__) && (defined(__x86_64__) || defined(_M_X64))
-#include "llvm_patches/gotpcrelx_fix.h"
-#endif
+#if defined(__APPLE__) || defined(_WIN32)
 #include "llvm_patches/init_fini_plugin.h"
+#endif
 #ifdef __APPLE__
 #include "llvm_patches/macho_cxa_atexit_shim.h"
 #endif
@@ -113,6 +112,7 @@ const char* GetAddonCxxRuntimeName() {
 #endif
 }
 
+#if defined(__linux__) && defined(__GLIBCXX__)
 void* GetCxxRuntimeHandle(llvm::StringRef runtime_path) {
   // Keep one process-lifetime local handle per compiler-selected runtime. This
   // avoids incrementing the dlopen reference count on every load_module call.
@@ -132,7 +132,6 @@ void* GetCxxRuntimeHandle(llvm::StringRef runtime_path) {
   return handle;
 }
 
-#if defined(__linux__) && defined(__GLIBCXX__)
 class LibStdCxxNonsharedGenerator final : public llvm::orc::DefinitionGenerator {
  public:
   LibStdCxxNonsharedGenerator(
@@ -164,29 +163,39 @@ class LibStdCxxNonsharedGenerator final : public llvm::orc::DefinitionGenerator 
 #endif
 
 // Install ExecutorNativePlatform per the `orc_rt` selector (see the ctor doc).
-// A no-op except on Linux/ELF: macOS skips the platform (compact-unwind bug)
-// and Windows never wires up COFFPlatform, so both ignore the selector.
-void SetUpOrcPlatform(llvm::orc::LLJITBuilder& builder,
+// A no-op off Linux/ELF: those targets retain LLJIT's generic platform support
+// and use the local lifecycle adapter below.
+bool SetUpOrcPlatform(llvm::orc::LLJITBuilder& builder,
                       const Optional<Variant<String, Bytes>>& orc_rt) {
 #if defined(__APPLE__) || defined(_WIN32)
   (void)builder;
   (void)orc_rt;
+  return false;
 #else
-  if (!orc_rt.has_value()) return;  // None -> no platform
+  if (!orc_rt.has_value()) {
+    // Explicitly honor `None`: LLJIT otherwise installs its generic platform.
+    builder.setPlatformSetUp(llvm::orc::setUpInactivePlatform);
+    return false;
+  }
   const Variant<String, Bytes>& sel = orc_rt.value();
   if (auto opt_path = sel.as<String>()) {
     const String& path = *opt_path;
-    if (path.empty()) {  // "auto" -> embedded (or nothing if compiled out)
+    if (path.empty()) {  // "auto" -> embedded
 #ifdef TVM_FFI_ORCJIT_EMBED_ORC_RT
       builder.setPlatformSetUp(llvm::orc::ExecutorNativePlatform(GetEmbeddedOrcRuntimeBuffer()));
+      return true;
+#else
+      return false;
 #endif
     } else {
       builder.setPlatformSetUp(llvm::orc::ExecutorNativePlatform(path.operator std::string()));
+      return true;
     }
   } else {  // Bytes: ExecutorNativePlatform takes ownership of the copy.
     const Bytes& bytes = sel.get<Bytes>();
     builder.setPlatformSetUp(llvm::orc::ExecutorNativePlatform(llvm::MemoryBuffer::getMemBufferCopy(
         llvm::StringRef(bytes.data(), bytes.size()), "liborc_rt.a")));
+    return true;
   }
 #endif
 }
@@ -218,9 +227,9 @@ ORCJITExecutionSessionObj::ORCJITExecutionSessionObj(const Optional<Variant<Stri
   // `capacityForFootprint` (>= slab_size) and mmap errors propagate.
   //
   // LLJIT auto-configures ObjectLinkingLayer (JITLink) on x86_64 and aarch64
-  // Linux (see LLJITBuilderState::prepareForConstruction).  We override
-  // the layer creator to pass our memory manager.  macOS/Windows are gated
-  // off pending testing.  (The historical "MachOPlatform teardown crashes
+  // Linux (see LLJITBuilderState::prepareForConstruction). We replace its
+  // memory manager with our slab pool. macOS/Windows are gated off pending
+  // testing. (The historical "MachOPlatform teardown crashes
   // with the arena" concern is moot now that we skip MachOPlatform below,
   // but enabling the slab on macOS still needs a validation pass.)
 #ifdef __linux__
@@ -236,21 +245,23 @@ ORCJITExecutionSessionObj::ORCJITExecutionSessionObj(const Optional<Variant<Stri
     } else {
       slab_size = SlabPoolMemoryManager::kDefaultSlabSize;
     }
-    memory_manager_ = std::make_unique<SlabPoolMemoryManager>(page_size, slab_size);
+    pending_memory_manager_ = std::make_unique<SlabPoolMemoryManager>(page_size, slab_size);
+    memory_manager_ = pending_memory_manager_.get();
   }
 #endif
 
   auto setup_builder = [this](llvm::orc::LLJITBuilder& builder) {
 #ifdef __linux__
     if (memory_manager_) {
+      builder.setMemoryManagerCreator(
+          [this](llvm::orc::ExecutionSession&)
+              -> llvm::Expected<std::unique_ptr<llvm::jitlink::JITLinkMemoryManager>> {
+            return std::move(pending_memory_manager_);
+          });
       builder.setObjectLinkingLayerCreator(
-          [this](llvm::orc::ExecutionSession& ES)
+          [](llvm::orc::ExecutionSession& ES, llvm::jitlink::JITLinkMemoryManager& memory_manager)
               -> llvm::Expected<std::unique_ptr<llvm::orc::ObjectLayer>> {
-            auto OLL = std::make_unique<llvm::orc::ObjectLinkingLayer>(ES, *memory_manager_);
-#if defined(__x86_64__) || defined(_M_X64)
-            OLL->addPlugin(std::make_unique<GOTPCRELXFixPlugin>());
-#endif
-            return OLL;
+            return std::make_unique<llvm::orc::ObjectLinkingLayer>(ES, memory_manager);
           });
     }  // if (memory_manager_)
 #elif defined(__APPLE__) || defined(_WIN32)
@@ -260,9 +271,9 @@ ORCJITExecutionSessionObj::ORCJITExecutionSessionObj(const Optional<Variant<Stri
     // Windows: LLJIT defaults to RTDyld; we need JITLink for InitFiniPlugin
     // and DLLImportDefinitionGenerator.
     builder.setObjectLinkingLayerCreator(
-        [](llvm::orc::ExecutionSession& ES)
+        [](llvm::orc::ExecutionSession& ES, llvm::jitlink::JITLinkMemoryManager& memory_manager)
             -> llvm::Expected<std::unique_ptr<llvm::orc::ObjectLayer>> {
-          return std::make_unique<llvm::orc::ObjectLinkingLayer>(ES);
+          return std::make_unique<llvm::orc::ObjectLinkingLayer>(ES, memory_manager);
         });
 #endif
 #if (defined(__linux__) && defined(__GLIBCXX__)) || defined(__APPLE__)
@@ -278,14 +289,10 @@ ORCJITExecutionSessionObj::ORCJITExecutionSessionObj(const Optional<Variant<Stri
       // cannot see its C++ runtime dependency. Search that dependency through
       // a private handle instead of promoting the addon (and its statically
       // linked LLVM) into the process-global namespace.
-      void* cxx_runtime = GetCxxRuntimeHandle(GetAddonCxxRuntimeName());
-      if (!cxx_runtime) {
-        const char* error = dlerror();
-        return llvm::make_error<llvm::StringError>(error ? error : "failed to open the C++ runtime",
-                                                   llvm::inconvertibleErrorCode());
-      }
-      process_symbols->addGenerator(std::make_unique<llvm::orc::EPCDynamicLibrarySearchGenerator>(
-          J.getExecutionSession(), llvm::orc::ExecutorAddr::fromPtr(cxx_runtime)));
+      auto cxx_runtime_generator = llvm::orc::EPCDynamicLibrarySearchGenerator::Load(
+          J.getExecutionSession(), J.getDylibMgr(), GetAddonCxxRuntimeName());
+      if (!cxx_runtime_generator) return cxx_runtime_generator.takeError();
+      process_symbols->addGenerator(std::move(*cxx_runtime_generator));
 
 #if defined(__linux__) && defined(__GLIBCXX__)
       // GCC's libstdc++.so linker script may satisfy this helper from
@@ -319,15 +326,15 @@ ORCJITExecutionSessionObj::ORCJITExecutionSessionObj(const Optional<Variant<Stri
   };
 
   auto builder = llvm::orc::LLJITBuilder();
-  // Configure the ORC platform from `orc_rt` (a no-op off Linux/ELF; see
-  // SetUpOrcPlatform).  macOS in particular must skip ExecutorNativePlatform /
+  // Configure the native ORC platform from `orc_rt` (a no-op off Linux/ELF;
+  // see SetUpOrcPlatform). macOS must skip ExecutorNativePlatform /
   // MachOPlatform to sidestep the compact-unwind 32-bit-delta bug in JITLink's
   // CompactUnwindSupport (personality delta against a per-JITDylib header base
   // wraps `uint64_t` and fails `isUInt<32>` when a later user graph mmaps below
-  // the header; see the repo-root fix-machoplatform-libunwind-dso-base.patch).
-  // InitFiniPlugin below handles __mod_init_func / __mod_term_func instead;
-  // tradeoff: no C++ exception unwinding across JIT frames on macOS.
-  SetUpOrcPlatform(builder, orc_rt);
+  // the header).
+  // InitFiniPlugin below handles __mod_init_func / __mod_term_func; LLJIT's
+  // generic platform still registers unwind information for JIT frames.
+  has_orc_platform_ = SetUpOrcPlatform(builder, orc_rt);
   setup_builder(builder);
   jit_ = TVM_FFI_ORCJIT_LLVM_CALL(builder.create());
 #ifdef _WIN32
@@ -335,13 +342,13 @@ ORCJITExecutionSessionObj::ORCJITExecutionSessionObj(const Optional<Variant<Stri
   // building.  See llvm_patches/win_coff_pdata_strip.h for the rationale.
   jit_->getObjTransformLayer().setTransform(&StripCoffPdataXdata);
 #endif
-  // Use our custom InitFiniPlugin on every platform for init/fini section
-  // collection and priority-ordered execution (ELF .init_array/.fini_array,
-  // MachO __mod_init_func/__mod_term_func, COFF .CRT$XC*/.CRT$XT*).  See
-  // llvm_patches/init_fini_plugin.h for per-platform removal criteria.
+#if defined(__APPLE__) || defined(_WIN32)
+  // Mach-O and COFF still need the local lifecycle adapter. Linux uses LLVM
+  // 23's ELFNixPlatform initialize/deinitialize path instead.
   auto& objlayer = jit_->getObjLinkingLayer();
   static_cast<llvm::orc::ObjectLinkingLayer&>(objlayer).addPlugin(
       std::make_unique<InitFiniPlugin>(this));
+#endif
 #ifdef _WIN32
   // On Windows, the default process-symbol generator only searches the main
   // exe module via GetProcAddress(GetModuleHandle(NULL), ...). Add a
@@ -419,8 +426,10 @@ ORCJITDynamicLibrary ORCJITExecutionSessionObj::CreateDynamicLibrary(
     if (it == cxx_runtime_dylibs_.end()) {
       std::string runtime_name = "<C++ runtime " + std::to_string(cxx_runtime_dylibs_.size()) + ">";
       auto& runtime_dylib = jit_->getExecutionSession().createBareJITDylib(std::move(runtime_name));
-      runtime_dylib.addGenerator(std::make_unique<llvm::orc::EPCDynamicLibrarySearchGenerator>(
-          jit_->getExecutionSession(), llvm::orc::ExecutorAddr::fromPtr(cxx_runtime)));
+      auto runtime_generator =
+          TVM_FFI_ORCJIT_LLVM_CALL(llvm::orc::EPCDynamicLibrarySearchGenerator::Load(
+              jit_->getExecutionSession(), jit_->getDylibMgr(), runtime_path.c_str()));
+      runtime_dylib.addGenerator(std::move(runtime_generator));
       it = cxx_runtime_dylibs_.emplace(std::move(runtime_path), &runtime_dylib).first;
     }
     cxx_runtime_dylib = it->second;
@@ -462,9 +471,9 @@ ORCJITDynamicLibrary ORCJITExecutionSessionObj::CreateDynamicLibrary(
 #endif
 
 #ifdef __APPLE__
-  // Inject ___cxa_atexit on the user JITDylib so it wins over <Platform>'s
-  // fallback (which resolves to libSystem's and would orphan dtors from
-  // our drop-time drain).  See llvm_patches/macho_cxa_atexit_shim.h.
+  // Inject ___cxa_atexit on the user JITDylib so it wins over the generic
+  // platform's libSystem fallback, which would orphan dtors from our drop-time
+  // drain. See llvm_patches/macho_cxa_atexit_shim.h.
   TVM_FFI_ORCJIT_LLVM_CALL(InstallCxaAtexitShim(jit_->getExecutionSession(), jit_dylib));
 #endif
 
@@ -500,7 +509,6 @@ std::vector<ORCJITExecutionSessionObj::InitFiniEntry> DrainSorted(
     pending.erase(it);
     llvm::sort(entries, [](const ORCJITExecutionSessionObj::InitFiniEntry& a,
                            const ORCJITExecutionSessionObj::InitFiniEntry& b) {
-      if (a.section != b.section) return static_cast<int>(a.section) < static_cast<int>(b.section);
       return a.priority < b.priority;
     });
   }

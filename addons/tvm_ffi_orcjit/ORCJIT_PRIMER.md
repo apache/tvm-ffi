@@ -252,7 +252,9 @@ addObjectFile(buffer)
 5. **Finalizes** by writing machine code into the allocated pages and marking them
    executable.
 
-The pass pipeline is where `tvm_ffi_orcjit`'s `InitFiniPlugin` does its work.
+The pass pipeline is where the addon's platform adapters and relocation fixes do
+their work. `InitFiniPlugin` is attached only on macOS and Windows; Linux uses
+LLVM's upstream `ELFNixPlatform` lifecycle.
 
 ### 3.2 Symbol Lookup and Resolution
 
@@ -323,18 +325,22 @@ for the host OS and loads the ORC runtime from a given path.
 
 The addon takes a different approach on each platform:
 
-- **macOS**: the addon deliberately does not configure an ORC platform. It uses
-  `InitFiniPlugin` for `__mod_init_func` / `__mod_term_func` and a per-dylib
-  `__cxa_atexit` shim. This avoids a compact-unwind address-delta failure in the
-  current `MachOPlatform` integration. The `orc_rt` argument is ignored.
+- **macOS**: the addon retains LLJIT's generic platform support for unwind
+  registration, but does not configure `MachOPlatform`. It uses `InitFiniPlugin`
+  for `__mod_init_func` / `__mod_term_func` and a per-dylib `__cxa_atexit` shim.
+  This avoids a compact-unwind address-delta failure in the current
+  `MachOPlatform` integration. The `orc_rt` argument is ignored.
 - **Windows**: `COFFPlatform` is skipped entirely because it requires MSVC CRT symbols
   (`_CxxThrowException`, RTTI vtables, iostream objects) that are not resolvable in
-  the JIT context. Instead, `InitFiniPlugin` manually handles `.CRT$XC*` / `.CRT$XT*`
-  init/fini sections. The `orc_rt` argument is ignored.
+  the JIT context. LLJIT's generic platform support plus `InitFiniPlugin`
+  manually handles `.CRT$XC*` / `.CRT$XT*` init/fini sections. The `orc_rt`
+  argument is ignored.
 - **Linux**: the default embedded `liborc_rt` configures `ExecutorNativePlatform`
   (and therefore `ELFNixPlatform`). A custom archive may be supplied by path or bytes,
-  and `None` disables the platform. `InitFiniPlugin` still collects and invokes ELF
-  init/fini arrays to work around current upstream behavior.
+  and `None` disables the platform. On LLVM 23.1.1+, `LLJIT::initialize` and
+  `LLJIT::deinitialize` use the upstream platform for correctly ordered ELF
+  constructors, destructors, and `__cxa_atexit` handling. The explicit `None`
+  mode is intended for plain C-ABI objects that do not require that lifecycle.
 
 ---
 
@@ -373,17 +379,16 @@ between separate `load_module` results.
 
 Several addon-specific pieces sit in this pipeline:
 
-- **`InitFiniPlugin`** — a JITLink pass plugin that keeps init/fini sections
-  (`.init_array`/`.ctors`/`.fini_array`/`.dtors`, `__mod_init_func`, `.CRT$XC*`)
-  live, then collects their function pointers after fixup. The addon runs them
-  in priority order at first lookup and at teardown, replacing the ORC
-  platform's initializer machinery. See `llvm_patches/init_fini_plugin.h`.
+- **Linux ELF lifecycle** — LLVM 23.1.1+ `ELFNixPlatform` keeps and orders ELF
+  init/fini sections; the addon calls `LLJIT::initialize` after context wiring
+  and `LLJIT::deinitialize` before removing the JITDylib.
+- **`InitFiniPlugin` (macOS/Windows)** — keeps the Mach-O or COFF lifecycle
+  sections live, collects their function pointers after fixup, and runs them at
+  initialization/teardown while those native ORC platforms remain unsuitable.
 - **Linux slab-pool memory manager** — reserves contiguous virtual-address regions,
   separates executable from non-executable allocations, recycles freed regions, and
   grows by adding slabs. This keeps 32-bit PC-relative relocations in range and offers
   explicit reclamation through `clear_free_slabs()`.
-- **GOTPCRELX correction (Linux/x86-64)** — repairs or reverses unsafe JITLink
-  relaxations before fixup.
 - **Windows DLL import stubs** — `DLLImportDefinitionGenerator` resolves
   `__imp_XXX` references to host-DLL functions by emitting JIT-memory pointer +
   trampoline stubs, keeping `PCRel32` fixups within ±2 GB of the JIT code. See
@@ -429,12 +434,12 @@ TVM_FFI_DLL_EXPORT_TYPED_FUNC(add, add_impl);
 | --- | --- | --- |
 | Object file | Container of machine code, data, symbols, relocations | Input to `session.load_module()` |
 | Relocation | Recipe to patch a code address at link/JIT time | Applied by JITLink |
-| `.init_array` / `.ctors` | Array of C++ constructor pointers in ELF objects | Collected by `InitFiniPlugin` |
+| `.init_array` / `.ctors` | Array of C++ constructor pointers in ELF objects | Managed by LLVM 23.1.1+ `ELFNixPlatform` |
 | `ExecutionSession` | Root of the ORC JIT environment | `ORCJITExecutionSessionObj` |
 | `LLJIT` | High-level ORC JIT wrapper | Stored in `ORCJITExecutionSessionObj::jit_` |
 | `JITDylib` | Symbol namespace / virtual shared library | `ORCJITDynamicLibraryObj::dylib_` |
 | `JITLink` | LLVM's JIT-aware linker | Used inside `ObjectLinkingLayer` |
-| JITLink pass pipeline | Pre-prune → post-alloc → post-fixup hooks | Where `InitFiniPlugin` runs |
+| JITLink pass pipeline | Pre-prune → post-alloc → post-fixup hooks | Platform adapters and relocation fixes |
 | Slab pool | Contiguous, growable Linux JIT memory arena | `SlabPoolMemoryManager` / `Slab` |
 | `DefinitionGenerator` | Fallback symbol provider | `DLLImportDefinitionGenerator` (Win) |
 | Link order | Search path across JITDylibs for symbol resolution | LLJIT default (Main → Platform → ProcessSymbols) |

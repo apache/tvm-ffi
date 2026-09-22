@@ -43,14 +43,10 @@ namespace {
 // Each CxaAtexitRecordsScope saves the previous pointer and restores it
 // on exit, so nested scopes compose correctly across re-entrant init/fini.
 //
-// We cannot override ___dso_handle (LLJIT's Platform has already defined
-// it in every user JITDylib), so we don't rely on the `dso_handle` arg
-// passed to the shim.  Instead, each ORCJITDynamicLibraryObj publishes its
-// own records vector via this TLS slot, scoped around any JIT entry point
-// that may run ctors / dtors.  The shim pushes (fn, arg) into the
-// TLS-pointed vector, or silently drops if no scope is active (which
-// would be a stray call from outside any JIT execution — acceptable
-// degradation).
+// We cannot override ___dso_handle (LLJIT's platform has already defined it in
+// every user JITDylib), so we do not rely on the dso_handle argument passed to
+// the shim. Each ORCJITDynamicLibraryObj publishes its own records vector via
+// this TLS slot while JIT code may run constructors or destructors.
 thread_local CxaAtexitRecords* g_active_cxa_records = nullptr;
 
 extern "C" int tvm_ffi_cxa_atexit_shim(void (*fn)(void*), void* arg,

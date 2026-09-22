@@ -21,20 +21,18 @@
  * \file macho_cxa_atexit_shim.h
  * \brief Per-JITDylib `__cxa_atexit` interposer for macOS JIT.
  *
- * We skip `MachOPlatform` entirely on macOS to sidestep the
+ * We skip the native `MachOPlatform` on macOS to sidestep the
  * compact-unwind 32-bit-delta bug in JITLink's `CompactUnwindSupport`
- * (see the analysis in orcjit_session.cc and
- * fix-machoplatform-libunwind-dso-base.patch at the repo root).  With
- * no Platform in the picture, clang-lowered
+ * (see the analysis in orcjit_session.cc). Without that native platform,
+ * clang-lowered
  * `__attribute__((destructor))` and C++ global dtors — which register
  * through `__cxa_atexit(fn, arg, &__dso_handle)` during init — would
  * fall through to libSystem's `___cxa_atexit`, orphaning those
  * callbacks from our drop-time drain.
  *
  * This shim:
- *   1. Installs an absolute symbol for `___cxa_atexit` on each user
- *      JITDylib that points at our own capture function
- *      (`InstallCxaAtexitShim`).
+ *   1. Installs an absolute symbol for `___cxa_atexit` on each user JITDylib
+ *      that points at our capture function (`InstallCxaAtexitShim`).
  *   2. Publishes the owning dylib's `CxaAtexitRecords` vector in TLS
  *      (`CxaAtexitRecordsScope`) so the capture function knows where
  *      to push `(fn, arg)` pairs.
@@ -97,9 +95,9 @@ class CxaAtexitRecordsScope {
  *
  *  Must be called once per user JITDylib, before any JIT code on that dylib
  *  materializes.  Placing the definition on the dylib itself (rather than
- *  injecting into the link order) ensures it wins over `<Platform>`'s
- *  libSystem fallback — JITDylib::define-time symbols are searched before
- *  the link order.
+ *  injecting into the link order) ensures the shim wins over libSystem's
+ *  fallback — JITDylib::define-time symbols are searched before the link
+ *  order.
  */
 llvm::Error InstallCxaAtexitShim(llvm::orc::ExecutionSession& ES, llvm::orc::JITDylib& jd);
 

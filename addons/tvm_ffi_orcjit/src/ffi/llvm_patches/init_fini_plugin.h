@@ -19,14 +19,13 @@
 
 /*!
  * \file init_fini_plugin.h
- * \brief Init/fini section handling for ELF, MachO, and COFF JIT objects.
+ * \brief Init/fini section handling for Mach-O and COFF JIT objects.
  *
- * Emulates the missing/broken/bypassed LLVM ORC platform support for
- * init/fini sections on all three host platforms.  Collects function
- * pointers from `.init_array` / `.fini_array` / `.ctors` / `.dtors`
- * (ELF), `__DATA,__mod_init_func` / `__DATA,__mod_term_func` (MachO),
- * and `.CRT$XC*` / `.CRT$XT*` (COFF); ties them to the containing
- * `JITDylib`; and runs them in priority order through
+ * Emulates the bypassed LLVM ORC platform support for init/fini sections on
+ * macOS and Windows. Collects function pointers from
+ * `__DATA,__mod_init_func` / `__DATA,__mod_term_func` (Mach-O) and
+ * `.CRT$XC*` / `.CRT$XT*` (COFF), ties them to the containing `JITDylib`,
+ * and runs them in priority order through
  * `ORCJITExecutionSessionObj::Run{Pending{Init,De}initializers}`.
  *
  * On Windows the plugin additionally patches `__ImageBase` (set to the
@@ -36,38 +35,21 @@
  * `RtlAddFunctionTable` anyway).  Those pieces also disappear once
  * `COFFPlatform` becomes usable.
  *
- * Trigger: any JIT module on any platform containing constructors,
- *          destructors, or `__attribute__((constructor))` /
- *          MSVC `#pragma init_seg` equivalents.
+ * Trigger: a Mach-O or COFF JIT module containing constructors, destructors,
+ *          or MSVC `#pragma init_seg` equivalents.
  * Symptom without the patch:
- *   - ELF: constructors/destructors never run (`ELFNixPlatform`
- *     enumerates but does not invoke them before
- *     llvm/llvm-project#175981).
- *   - MachO: we skip `MachOPlatform` entirely to sidestep the
- *     compact-unwind 32-bit delta bug (see `orcjit_session.cc`), so no
- *     platform runs init/fini; this plugin is the only mechanism.
+ *   - MachO: we skip `MachOPlatform` to sidestep the compact-unwind 32-bit
+ *     delta bug (see `orcjit_session.cc`); LLJIT's generic support does not
+ *     provide the native Mach-O object lifecycle, so this plugin does.
  *   - COFF: relocation overflow / unresolved-SEH crashes
  *     (`COFFPlatform` is not hooked up because its MSVC CRT symbol
  *     requirements cannot be satisfied).
  *
- * ## Removal — Linux
- *
- * LLVM issue: https://github.com/llvm/llvm-project/pull/175981
- * The upstream fix is included in LLVM 23.1.1 but not LLVM 22.1.0, the
- * addon's current CI baseline. When the project's minimum LLVM version
- * reaches 23 and its lifecycle calls use `ELFNixPlatform`, delete the ELF
- * handling path from this file. Concretely:
- *   - Remove the ELF-section branches (`.init_array`, `.ctors`,
- *     `.fini_array`, `.dtors`) from `InitFiniPlugin::modifyPassConfig`.
- *   - If no platform still needs this plugin, delete this file outright
- *     and follow the checklist in `llvm_patches/README.md`.
- *
  * ## Removal — macOS
  *
- * Tied to re-enabling `MachOPlatform`.  That requires the compact-unwind
- * per-graph `dso_base` fix (see `fix-machoplatform-libunwind-dso-base.patch`
- * in the repo root) to land in our LLVM.  Until then we skip MachOPlatform
- * and this plugin handles `__mod_init_func` / `__mod_term_func`.  When
+ * Tied to re-enabling `MachOPlatform`. That requires a compact-unwind
+ * per-graph `dso_base` fix to land in LLVM. Until then this plugin handles
+ * `__mod_init_func` / `__mod_term_func`. When
  * MachOPlatform is re-enabled, delete the MachO-section branches from
  * `InitFiniPlugin::modifyPassConfig` and drop the macOS side of the
  * `addPlugin` call in `orcjit_session.cc`.
@@ -93,10 +75,10 @@ namespace tvm {
 namespace ffi {
 namespace orcjit {
 
-/*! \brief Init/fini section collector and runner for ELF, MachO, and COFF.
+/*! \brief Init/fini section collector and runner for Mach-O and COFF.
  *
- * See the file-level docstring above for the three-platform strategy
- * and the removal procedure for each platform.
+ * See the file-level docstring above for the two-platform strategy and the
+ * removal procedure for each platform.
  */
 class InitFiniPlugin : public llvm::orc::ObjectLinkingLayer::Plugin {
   // Store a raw pointer to avoid a reference cycle:

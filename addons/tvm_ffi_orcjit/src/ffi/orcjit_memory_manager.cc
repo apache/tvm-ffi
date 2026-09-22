@@ -139,8 +139,12 @@ void SlabPoolMemoryManager::allocate(const llvm::jitlink::JITLinkDylib* /*JD*/,
 void SlabPoolMemoryManager::deallocate(std::vector<FinalizedAlloc> Allocs,
                                        OnDeallocatedFunction OnDeallocated) {
   Error DeallocErr = Error::success();
-  for (auto& Alloc : Allocs) {
-    auto* FA = Alloc.release().toPtr<FinalizedAllocInfo*>();
+  // Match LLVM's InProcessMemoryManager: tear down a batch in reverse
+  // allocation order. Platform allocations register the JITDylib header
+  // before user graphs register their init/fini sections, so forward teardown
+  // would deregister the header while later deallocation actions still need it.
+  for (auto It = Allocs.rbegin(); It != Allocs.rend(); ++It) {
+    auto* FA = It->release().toPtr<FinalizedAllocInfo*>();
     FA->owner->deallocateOne(FA, DeallocErr);
     delete FA;
   }

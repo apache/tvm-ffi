@@ -29,6 +29,7 @@
 #include <tvm/ffi/endian.h>
 
 #include <cstddef>
+#include <type_traits>
 #include <utility>
 
 #if defined(_MSC_VER)

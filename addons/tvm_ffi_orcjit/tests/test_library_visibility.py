@@ -46,13 +46,19 @@ def test_addon_exports_only_initializer() -> None:
     lib_path = tvm_ffi_orcjit._lib_path
     if platform.system() == "Darwin":
         command = [nm, "-gjU", str(lib_path)]
+        # LLVM's PrettyStackTrace object marks this hidden symbol with
+        # REFERENCED_DYNAMICALLY, which makes Apple ld export it even when an
+        # exported-symbols list is present.
+        allowed_runtime_exports = {"___crashreporter_info__"}
         expected = {"_TVMFFIOrcJITInitialize"}
     else:
         command = [nm, "-D", "--defined-only", "--format=posix", str(lib_path)]
+        allowed_runtime_exports = set()
         expected = {"TVMFFIOrcJITInitialize"}
 
     output = subprocess.run(command, check=True, capture_output=True, text=True).stdout
     exported = {line.split()[0].split("@@", 1)[0] for line in output.splitlines() if line.strip()}
+    exported -= allowed_runtime_exports
     assert exported == expected
 
 

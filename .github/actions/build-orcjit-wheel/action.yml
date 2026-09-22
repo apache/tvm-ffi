@@ -32,7 +32,7 @@ inputs:
     required: true
   llvm_version:
     description: "LLVM version (selects the release tag / conda pin)"
-    default: "22.1.0"
+    default: "23.1.1"
     required: false
   llvm_release_repo:
     description: >

@@ -26,6 +26,14 @@ using namespace tvm::ffi;
 using ctor_t = void (*)();
 using dtor_t = void (*)();
 
+// Exercises compiler-generated __cxa_atexit registration. ELFNixPlatform owns
+// this lifecycle on Linux; the addon's scoped shim owns it on macOS.
+struct GlobalLifecycle {
+  GlobalLifecycle() { PUTS_LOG("<cxx_ctor>"); }
+  ~GlobalLifecycle() { PUTS_LOG("<cxx_dtor>"); }
+};
+static GlobalLifecycle global_lifecycle;
+
 // __attribute__((constructor/destructor)) works on both ELF and Mach-O:
 // ELF   → .init_array / .fini_array
 // Mach-O → __DATA,__mod_init_func / __cxa_atexit

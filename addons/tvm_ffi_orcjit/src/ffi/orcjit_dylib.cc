@@ -193,22 +193,32 @@ ORCJITDynamicLibraryObj::ORCJITDynamicLibraryObj(ORCJITExecutionSession session,
 }
 
 ORCJITDynamicLibraryObj::~ORCJITDynamicLibraryObj() {
-  // Step 1: run this dylib's static destructors. Drain the entries under the
-  // lock but run them released — a JIT'd dtor may re-enter the session on this
-  // thread, which the plain mutex could not survive while held.
-  std::vector<ORCJITExecutionSessionObj::InitFiniEntry> deinit;
+#ifdef __linux__
+  if (session_->has_orc_platform_) {
+    if (platform_initialized_) {
+      // LLVM 23's ELFNixPlatform now implements ordered deinitialization. This
+      // also drains __cxa_atexit registrations through liborc_rt.
+      if (auto err = jit_->deinitialize(GetJITDylib())) llvm::consumeError(std::move(err));
+    }
+  } else
+#endif
   {
-    std::lock_guard<std::mutex> lock(session_->mutex_);
-    deinit = session_->DrainPendingDeinitializers(GetJITDylib());
+    // Mach-O and COFF use the local lifecycle adapter. Drain under the lock,
+    // then run released so a JIT'd dtor may re-enter the session.
+    std::vector<ORCJITExecutionSessionObj::InitFiniEntry> deinit;
+    {
+      std::lock_guard<std::mutex> lock(session_->mutex_);
+      deinit = session_->DrainPendingDeinitializers(GetJITDylib());
+    }
+    ORCJITExecutionSessionObj::RunInitFiniEntries(deinit);
   }
-  ORCJITExecutionSessionObj::RunInitFiniEntries(deinit);
 #ifdef __APPLE__
   // Drain per-dylib __cxa_atexit registrations (LIFO) captured during init; see
   // llvm_patches/macho_cxa_atexit_shim.h.
   DrainCxaAtexit(cxa_atexit_records_);
 #endif
-  // Step 2: remove the JITDylib, releasing its JIT memory via the memory
-  // manager's deallocate() (see orcjit_session.cc — no Platform teardown here).
+  // Remove the JITDylib after platform/local lifecycle teardown, releasing its
+  // JIT memory through the memory manager's deallocate path.
   {
     std::lock_guard<std::mutex> lock(session_->mutex_);
     session_->RemoveDylib(dylib_);
@@ -395,8 +405,8 @@ void* ORCJITDynamicLibraryObj::GetSymbol(const String& name, bool run_initialize
 void ORCJITDynamicLibraryObj::InitContextSymbols() {
   // Called once from Finalize before the dylib is published, so no guard is
   // needed. Resolve every context slot without running initializers, populate
-  // the slots, then run the collected initializers. Constructors can therefore
-  // safely use the library context on their first instruction.
+  // the slots, then invoke the upstream Linux platform or the local macOS/COFF
+  // adapter. Constructors can safely use the context on their first instruction.
   if (void** ctx_addr = reinterpret_cast<void**>(GetSymbol(symbol::tvm_ffi_library_ctx, false))) {
     *ctx_addr = this;
   }
@@ -405,6 +415,23 @@ void ORCJITDynamicLibraryObj::InitContextSymbols() {
       *ctx_addr = symbol;
     }
   });
+#ifdef __linux__
+  if (session_->has_orc_platform_) {
+    // LLVM's platform call may execute arbitrary JIT constructors. Hold the
+    // per-dylib gate, but not the session mutex, so same-thread callbacks can
+    // re-enter while other threads cannot observe partially initialized code.
+    BeginInitializerRun();
+    try {
+      TVM_FFI_ORCJIT_LLVM_CALL(jit_->initialize(GetJITDylib()));
+      platform_initialized_ = true;
+    } catch (...) {
+      EndInitializerRun();
+      throw;
+    }
+    EndInitializerRun();
+    return;
+  }
+#endif
   RunPendingInitializers();
 }
 

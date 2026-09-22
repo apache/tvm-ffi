@@ -35,14 +35,10 @@
  * reclaimed or until the pool (and its enclosing session) is
  * destroyed. Individual graphs are deallocated via
  * `FA->owner->deallocateOne(...)`, returning bytes to the slab's free
- * list. Drained slabs can be returned to the OS via
- * `clearFreeSlabs()`.
+ * list. Batched allocations are released in reverse allocation order so
+ * platform metadata outlives the user graphs that refer to it. Drained slabs
+ * can be returned to the OS via `clearFreeSlabs()`.
  *
- * ## GOTPCRELX relaxation workaround
- *
- * See `llvm_patches/gotpcrelx_fix.cc`. The plugin is added per-session
- * to the `ObjectLinkingLayer` alongside this memory manager and is
- * orthogonal to pool growth.
  */
 #ifndef TVM_FFI_ORCJIT_ORCJIT_MEMORY_MANAGER_H_
 #define TVM_FFI_ORCJIT_ORCJIT_MEMORY_MANAGER_H_
