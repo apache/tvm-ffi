@@ -16,12 +16,12 @@
 # under the License.
 
 [build-system]
-requires = ["scikit-build-core>=0.10.0", "apache-tvm-ffi"]
+requires = ["scikit-build-core>=0.10.0", "apache-tvm-ffi>=0.1.14.post1"]
 build-backend = "scikit_build_core.build"
 
 [project]
 name = "apache-tvm_ffi_orcjit"
-version = "0.1.1"
+version = "0.1.2"
 description = "Load TVM-FFI exported object files using LLVM ORC JIT v2"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -39,7 +39,7 @@ classifiers = [
   "Programming Language :: Python :: 3.13",
   "Programming Language :: C++",
 ]
-dependencies = ["apache-tvm-ffi>=0.1.0"]
+dependencies = ["apache-tvm-ffi>=0.1.14.post1"]
 
 [project.urls]
 Homepage = "https://github.com/apache/tvm-ffi"
