@@ -36,20 +36,17 @@ use tvm_ffi_sys::{TVMFFIAny, TVMFFIAnyDataUnion, TVMFFIObject};
 
 /// ABI stable arbitrary-precision signed integer for ffi.
 ///
-/// Mirrors C++ `tvm::ffi::BigInt` in representation and arithmetic. A value
-/// that fits `i64` is stored inline as `kTVMFFIInt`, and any wider value owns
-/// a `kTVMFFIBigInt` object holding its minimal two's-complement `i64` words,
-/// least-significant word first. Every operation returns that canonical form,
-/// so equal values share one representation and word-wise comparison decides
-/// equality.
+/// Mirrors C++ `tvm::ffi::BigInt`: a value that fits `i64` is stored inline as
+/// `kTVMFFIInt`, and any wider value owns a `kTVMFFIBigInt` object holding its
+/// minimal two's-complement `i64` words, least-significant word first. Every
+/// operation returns that canonical form, so word-wise comparison decides equality.
 ///
-/// Arithmetic has unbounded signed integer semantics. `/` and `%` truncate
-/// toward zero; [`floor_div`](Self::floor_div) and [`floor_mod`](Self::floor_mod)
-/// round the quotient down. Bitwise operations use infinite two's-complement
-/// sign extension, right shifts round down, and negative shift counts are
-/// errors. Like the primitive integer operators, `/`, `%`, `<<` and `>>` panic
-/// on those errors; the `try_*` methods return them instead and are the right
-/// choice inside ffi callbacks, where a panic cannot unwind.
+/// Arithmetic is unbounded and signed. `/` and `%` truncate toward zero;
+/// [`floor_div`](Self::floor_div) and [`floor_mod`](Self::floor_mod) round down.
+/// Bitwise operations sign-extend infinitely, and negative shift counts are errors.
+/// Like the primitive operators, `/`, `%`, `<<` and `>>` panic on those errors;
+/// the `try_*` methods return them instead, as ffi callbacks need since a panic
+/// cannot unwind across them.
 #[repr(C)]
 pub struct BigInt {
     data: TVMFFIAny,
@@ -116,8 +113,7 @@ impl BigInt {
         if size <= 1 {
             return Self::from_i64(words.first().copied().unwrap_or(0));
         }
-        // The object is allocated at its final length, so the crate's generic
-        // extra-items deleter can release it; the words follow the header.
+        // Allocated at its final length, so the crate's generic extra-items deleter fits.
         unsafe {
             let mut obj = ObjectArc::new_with_extra_items(BigIntObj {
                 object: Object::new(),
@@ -484,9 +480,7 @@ impl Debug for BigInt {
     }
 }
 
-//-----------------------------------------------------
-// Arithmetic: an inline fast path, then the word fallbacks
-//-----------------------------------------------------
+// ---- Arithmetic: an inline fast path, then the word fallbacks.
 #[inline]
 fn add_impl(a: &BigInt, b: &BigInt) -> BigInt {
     if let (Some(x), Some(y)) = (a.to_i64(), b.to_i64()) {
@@ -758,9 +752,7 @@ impl Not for BigInt {
     }
 }
 
-//-----------------------------------------------------
-// AnyCompatible implementation for BigInt
-//-----------------------------------------------------
+// ---- AnyCompatible.
 unsafe impl AnyCompatible for BigInt {
     fn type_str() -> std::string::String {
         "BigInt".to_string()

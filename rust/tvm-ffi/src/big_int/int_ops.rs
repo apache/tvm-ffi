@@ -20,15 +20,12 @@
 //!
 //! Every fallback takes canonical two's-complement words, least-significant
 //! first, and returns a canonical `BigInt`. The functions mirror C++
-//! `details::int_ops` in `include/tvm/ffi/big_int.h` one for one and follow its
-//! index-based structure so the two can be reviewed side by side; keep them in
-//! sync. Word arithmetic wraps modulo 2^64 on purpose, so every carry chain
-//! uses the explicit `wrapping_*`/`overflowing_*` forms.
-//!
-//! Unlike C++, which builds the result inside a freshly allocated object and
-//! prunes its length afterwards, each algorithm here writes into a
-//! [`WordsBuf`] and ends with [`BigInt::from_words`]: a result that fits `i64`
-//! never touches the heap, and a wider one is allocated at its exact length.
+//! `details::int_ops` in `include/tvm/ffi/big_int.h` one for one; keep them in
+//! sync. Word arithmetic wraps modulo 2^64 on purpose, hence the explicit
+//! `wrapping_*`/`overflowing_*` forms. Unlike C++, which builds each result in a
+//! fresh object and prunes it afterwards, the algorithms write into a
+//! [`WordsBuf`] and finish with [`BigInt::from_words`], so a result that fits
+//! `i64` never touches the heap and a wider one is allocated at its exact length.
 #![allow(clippy::needless_range_loop)]
 
 use super::BigInt;
@@ -40,10 +37,8 @@ const BASE: u64 = 1 << 32;
 /// Words kept on the stack before a result or scratch buffer spills to the heap.
 const INLINE_WORDS: usize = 32;
 
-/// Storage for result or scratch words, zeroed in place on first use: the caller's
-/// stack frame holds up to `INLINE_WORDS`, and longer buffers spill to the heap.
-/// Two phases (`new`, then `zeroed`) keep the 256-byte inline array from being
-/// moved by value.
+/// Result or scratch words, zeroed in place on first use: up to `INLINE_WORDS` on
+/// the caller's stack, longer on the heap. Two phases avoid moving the array.
 struct WordsBuf {
     inline: MaybeUninit<[i64; INLINE_WORDS]>,
     heap: Vec<i64>,
@@ -68,10 +63,8 @@ impl WordsBuf {
         &mut self.heap
     }
 
-    /// Zero `len` words in place, or `OverflowError` when they cannot be allocated.
-    ///
-    /// Only a left shift can outgrow its operands by an arbitrary factor; every other
-    /// operation needs at most a few words beyond operands that already exist.
+    /// Like `zeroed`, but `OverflowError` instead of an abort when the words cannot
+    /// be allocated: only a left shift can outgrow its operands arbitrarily.
     fn try_zeroed(&mut self, len: usize) -> Result<&mut [i64]> {
         if len <= INLINE_WORDS {
             return Ok(self.inline_zeroed(len));
@@ -560,10 +553,8 @@ pub(super) fn div_rem(a: &[i64], b: &[i64]) -> Result<(BigInt, BigInt)> {
         return Ok((BigInt::from_i64(0), BigInt::from_words(a)));
     }
 
-    // Algorithm D uses radix 2^32, keeping products and estimates in u64.
-    // Example: A[0] A[1] A[2] A[3] / B[0] B[1] B[2], with digits most-significant first.
-    // Actual u/v digits are least-significant first, one radix digit per slot.
-    // The scalar dispatch leaves at least two magnitude digits in the divisor.
+    // Algorithm D in radix 2^32 keeps products and estimates in u64. Digits below
+    // are least-significant first; the scalar dispatch left at least two in b.
     let top_word = abs_word(b, first_b, (n - 1) / 2) as u64;
     let mut top_digit = (top_word >> (((n - 1) % 2) * 32)) as u32;
     let mut shift = 0u32;
@@ -601,24 +592,22 @@ pub(super) fn div_rem(a: &[i64], b: &[i64]) -> Result<(BigInt, BigInt)> {
 
     let mut quotient_word = 0u64;
     for j in (0..=(m - n)).rev() {
-        // - Step 1: Estimate q from the leading digits.
-        // A[0]=u[j+n], A[1]=u[j+n-1], B[0]=v[n-1]; q=estimate and r=residual below.
-        // A[0] is at most B[0]; clamp equality so q remains a radix digit.
+        // Step 1: estimate q = A[0]A[1] / B[0] with A[0] = u[j+n], B[0] = v[n-1];
+        // A[0] <= B[0], and equality is clamped so q stays a radix digit.
         let (mut estimate, mut residual) = if u[j + n] == v[n - 1] {
             (BASE - 1, u[j + n - 1] as u64 + v[n - 1] as u64)
         } else {
             let numerator = ((u[j + n] as u64) << 32) | u[j + n - 1] as u64;
             (numerator / v[n - 1] as u64, numerator % v[n - 1] as u64)
         };
-        // - Step 2: Refine q using B[1] until q*B[1] <= r*base + A[2].
-        // Decrement q and add B[0] to r at most twice; r < base guards the shift.
+        // Step 2: refine q with B[1] until q*B[1] <= r*base + A[2]; at most two
+        // decrements, and r < base guards the shift.
         while residual < BASE && estimate * v[n - 2] as u64 > (residual << 32) + u[j + n - 2] as u64
         {
             estimate -= 1;
             residual += v[n - 1] as u64;
         }
-        // - Step 3: Subtract the full q * B[...] from A[...].
-        // The refined estimate is correct or one high; subtract the whole window to decide.
+        // Step 3: subtract q * B from the window; q is correct or one too high.
         let mut borrow = 0u64;
         for i in 0..n {
             // A radix-digit product plus the incoming borrow fits u64.
@@ -633,7 +622,7 @@ pub(super) fn div_rem(a: &[i64], b: &[i64]) -> Result<(BigInt, BigInt)> {
         let negative = old < borrow;
         u[j + n] = i64::from(old.wrapping_sub(borrow) as u32);
         if negative {
-            // - Step 4: Decrement q and add back all of B[...], restoring 0 <= R < divisor.
+            // Step 4: decrement q and add B back, restoring 0 <= R < divisor.
             estimate -= 1;
             let mut carry = 0u64;
             for i in 0..n {
@@ -664,8 +653,7 @@ pub(super) fn div_rem(a: &[i64], b: &[i64]) -> Result<(BigInt, BigInt)> {
         }
         r[i] = word as i64;
     }
-    // Truncation gives the quotient the operand-sign XOR and a nonzero
-    // remainder the dividend's sign.
+    // The quotient takes the operand-sign XOR, a nonzero remainder the dividend's sign.
     if is_negative(a) != is_negative(b) {
         negate_in_place(q);
     }
@@ -688,8 +676,8 @@ pub(super) fn trunc_mod(a: &[i64], b: &[i64]) -> Result<BigInt> {
         }
         let divisor = b[0].unsigned_abs();
         if divisor <= u64::from(u32::MAX) {
-            // remainder < divisor < 2^32 lets each brought-down half fit u64.
-            // The result fits inline, so a small divisor needs no quotient or allocation.
+            // remainder < divisor < 2^32: each brought-down half fits u64 and the
+            // result is inline, so no quotient or allocation is needed.
             let first = first_nonzero(a);
             let mut remainder = 0u64;
             for i in (0..a.len()).rev() {
@@ -722,11 +710,10 @@ pub(super) fn floor_div(a: &[i64], b: &[i64]) -> Result<BigInt> {
 pub(super) fn floor_mod(a: &[i64], b: &[i64]) -> Result<BigInt> {
     let remainder = trunc_mod(a, b)?;
     if !remainder.is_zero() && is_negative(a) != is_negative(b) {
-        // For a scalar divisor, |r| < |b| and opposite signs make r+b safe and inline.
+        // The floor remainder is r+b, which |r| < |b| keeps inline for a scalar divisor.
         if let ([divisor], Some(r)) = (b, remainder.to_i64()) {
             return Ok(BigInt::from_i64(r + divisor));
         }
-        // The remainder paired with the floor quotient q-1 is r+b.
         return Ok(add(remainder.words(), b));
     }
     Ok(remainder)
