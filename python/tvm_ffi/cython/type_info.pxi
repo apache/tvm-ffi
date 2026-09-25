@@ -168,6 +168,9 @@ class TypeSchema:
     origin: str
     args: tuple["TypeSchema", ...] | None = None
     origin_type_index: int = dataclasses.field(default=_ORIGIN_TYPE_INDEX_UNKNOWN, repr=False)
+    #: The key the schema was parsed from when it was folded into ``origin``
+    #: (``"ffi.BigInt"`` for an ``int`` origin); ``None`` otherwise. Not part of equality.
+    type_key: str | None = dataclasses.field(default=None, repr=False, compare=False)
 
     def __post_init__(self):
         origin = self.origin
@@ -268,10 +271,13 @@ class TypeSchema:
             raise TypeError(
                 f"expected schema dict with 'type' key, got {type(obj).__name__}"
             )
-        origin = obj["type"]
-        origin = _TYPE_SCHEMA_ORIGIN_CONVERTER.get(origin, origin)
+        raw_origin = obj["type"]
+        origin = _TYPE_SCHEMA_ORIGIN_CONVERTER.get(raw_origin, raw_origin)
+        # Keep the key the converter folded away (`ffi.BigInt` -> `int`) for
+        # consumers that must tell the two apart, such as the Rust stub generator.
+        type_key = raw_origin if raw_origin != origin else None
         if "args" not in obj:
-            return TypeSchema(origin)
+            return TypeSchema(origin, type_key=type_key)
         raw_args = obj["args"]
         if not isinstance(raw_args, (list, tuple)):
             raw_args = ()
@@ -279,7 +285,7 @@ class TypeSchema:
             TypeSchema.from_json_obj(a) for a in raw_args
             if isinstance(a, dict)
         )
-        return TypeSchema(origin, args)
+        return TypeSchema(origin, args, type_key=type_key)
 
     @staticmethod
     def from_json_str(s: str) -> "TypeSchema":

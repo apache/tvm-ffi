@@ -4635,3 +4635,25 @@ class TestSmallStringOptimization:
         b = tvm_ffi.core.Bytes(b"x" * 200)
         cany = A(bytes).convert(b)
         assert cany.type_index == _BYTES_TYPE_INDEX
+
+
+# ---------------------------------------------------------------------------
+# Category 64: parsed type key
+# ---------------------------------------------------------------------------
+class TestParsedTypeKey:
+    """``from_json_*`` keeps the raw key when it folds the origin into another name."""
+
+    def test_folded_key_is_kept(self) -> None:
+        s = TypeSchema.from_json_str('{"type":"ffi.BigInt"}')
+        assert (s.origin, s.type_key) == ("int", "ffi.BigInt")
+        assert s == TypeSchema("int")  # the key takes no part in equality
+        assert repr(s) == "int"
+
+    def test_unfolded_key_is_none(self) -> None:
+        assert TypeSchema.from_json_str('{"type":"int"}').type_key is None
+        assert TypeSchema("int").type_key is None
+
+    def test_nested_key_stays_on_the_leaf(self) -> None:
+        s = TypeSchema.from_json_str('{"type":"Optional","args":[{"type":"ffi.BigInt"}]}')
+        assert s.type_key is None
+        assert s.args[0].type_key == "ffi.BigInt"
