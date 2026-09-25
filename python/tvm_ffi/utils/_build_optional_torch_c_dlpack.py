@@ -50,6 +50,9 @@ cpp_source = """
 #include <c10/hip/HIPStream.h>
 #include <ATen/hip/impl/HIPStreamMasqueradingAsCUDA.h>
 #endif
+#ifdef BUILD_WITH_TORCH_NPU
+#include <torch_npu/csrc/core/npu/NPUStream.h>
+#endif
 
 using namespace std;
 namespace at {
@@ -504,7 +507,7 @@ struct TorchDLPackExchangeAPI : public DLPackExchangeAPI {
     }
   }
 
-  // Get current CUDA/ROCm work stream
+  // Get current CUDA/ROCm/torch_npu work stream
   static int CurrentWorkStream(DLDeviceType device_type, int32_t device_id, void** out_stream) {
     try {
 #ifdef BUILD_WITH_ROCM
@@ -516,6 +519,15 @@ struct TorchDLPackExchangeAPI : public DLPackExchangeAPI {
 #ifdef BUILD_WITH_CUDA
       if (device_type == kDLCUDA) {
         *out_stream = at::cuda::getCurrentCUDAStream(device_id).stream();
+        return 0;
+      }
+#endif
+#ifdef BUILD_WITH_TORCH_NPU
+      // torch_npu exposes Ascend as kDLExtDev. Return its current stream so
+      // that kernels launched through tvm-ffi stay aligned with the caller's
+      // torch.npu stream.
+      if (device_type == kDLExtDev) {
+        *out_stream = c10_npu::getCurrentNPUStream(device_id).stream();
         return 0;
       }
 #endif
@@ -744,12 +756,8 @@ def get_torch_include_paths(build_with_cuda: bool) -> Sequence[str]:
         return torch.utils.cpp_extension.include_paths(cuda=build_with_cuda)  # ty: ignore[unknown-argument]
 
 
-def main() -> None:  # noqa: PLR0912, PLR0915
-    """Build the torch c dlpack extension."""
-    # we need to set the following env to avoid tvm_ffi to build the torch c-dlpack addon during importing
-    os.environ["TVM_FFI_DISABLE_TORCH_C_DLPACK"] = "1"
-    from tvm_ffi.utils.lockfile import FileLock  # noqa: PLC0415
-
+def _parse_args(args: Sequence[str] | None = None) -> argparse.Namespace:
+    """Parse command-line arguments for the Torch C DLPack addon build."""
     parser = argparse.ArgumentParser(
         description="Build the torch c dlpack extension. After building, a shared library will be placed in the output directory.",
     )
@@ -766,26 +774,44 @@ def main() -> None:  # noqa: PLR0912, PLR0915
         default=str(Path(os.environ.get("TVM_FFI_CACHE_DIR", "~/.cache/tvm-ffi")).expanduser()),
         help="Directory to store the built extension library. If not specified, the default cache directory of tvm-ffi will be used.",
     )
-    parser.add_argument(
+    device_group = parser.add_mutually_exclusive_group()
+    device_group.add_argument(
         "--build-with-cuda",
         action="store_true",
         help="Build with CUDA support.",
     )
-    parser.add_argument(
+    device_group.add_argument(
         "--build-with-rocm",
         action="store_true",
         help="Build with ROCm support.",
+    )
+    device_group.add_argument(
+        "--build-with-torch-npu",
+        action="store_true",
+        help="Build with torch_npu support.",
     )
     parser.add_argument(
         "--libname",
         type=str,
         default="auto",
-        help="The name of the generated library. It can be a name 'auto' to auto-generate a name following 'libtorch_c_dlpack_addon_torch{version.major}{version.minor}-cpu/cuda.{extension}'.",
+        help="The name of the generated library. It can be 'auto' to generate "
+        "'libtorch_c_dlpack_addon_torch{version.major}{version.minor}-"
+        "cpu/cuda/rocm/torch_npu.{extension}'.",
     )
 
-    args = parser.parse_args()
-    if args.build_with_cuda and args.build_with_rocm:
-        raise ValueError("Cannot enable both CUDA and ROCm at the same time.")
+    parsed_args = parser.parse_args(args)
+    if parsed_args.build_with_torch_npu and (IS_WINDOWS or IS_DARWIN):
+        parser.error("--build-with-torch-npu is not supported on Windows or macOS.")
+    return parsed_args
+
+
+def main() -> None:  # noqa: PLR0912, PLR0915
+    """Build the torch c dlpack extension."""
+    # we need to set the following env to avoid tvm_ffi to build the torch c-dlpack addon during importing
+    os.environ["TVM_FFI_DISABLE_TORCH_C_DLPACK"] = "1"
+    from tvm_ffi.utils.lockfile import FileLock  # noqa: PLC0415
+
+    args = _parse_args()
 
     # resolve build directory
     if args.build_dir is None:
@@ -803,6 +829,8 @@ def main() -> None:  # noqa: PLR0912, PLR0915
             device = "cuda"
         elif args.build_with_rocm:
             device = "rocm"
+        elif args.build_with_torch_npu:
+            device = "torch_npu"
         else:
             device = "cpu"
         suffix = ".dll" if IS_WINDOWS else ".so"
@@ -837,7 +865,21 @@ def main() -> None:  # noqa: PLR0912, PLR0915
         elif args.build_with_rocm:
             cflags.extend(torch.utils.cpp_extension.COMMON_HIP_FLAGS)
             cflags.append("-DBUILD_WITH_ROCM")
+        elif args.build_with_torch_npu:
+            cflags.append("-DBUILD_WITH_TORCH_NPU")
         include_paths.extend(get_torch_include_paths(args.build_with_cuda or args.build_with_rocm))
+
+        # torch_npu ships headers and libraries under its own package directory;
+        # add both include and lib paths so the linker can find libtorch_npu.
+        # Note: c10_npu symbols are compiled into libtorch_npu itself; there is
+        # no separate libc10_npu to link against.
+        if args.build_with_torch_npu:
+            import torch_npu  # noqa: PLC0415
+
+            torch_npu_path = Path(torch_npu.__file__).parent
+            include_paths.append(str(torch_npu_path / "include"))
+            torch_npu_lib_dir = str(torch_npu_path / "lib")
+            ldflags.extend(["-L", torch_npu_lib_dir])
 
         # use CXX11 ABI
         if torch.compiled_with_cxx11_abi():
@@ -862,6 +904,10 @@ def main() -> None:  # noqa: PLR0912, PLR0915
             ldflags.extend(["-lc10", "-ltorch", "-ltorch_cpu", "-ltorch_python"])
             if args.build_with_cuda:
                 ldflags.extend(["-ltorch_cuda", "-lc10_cuda"])
+            if args.build_with_torch_npu:
+                # c10_npu symbols are exported from libtorch_npu.so; there is
+                # no separate libc10_npu to link against.
+                ldflags.extend(["-ltorch_npu"])
 
         # Add Python library linking
         if IS_WINDOWS:
