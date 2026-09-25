@@ -811,7 +811,17 @@ class WeakObjectPtr {
 template <typename T, typename = void>
 class Optional;
 
-/*! \brief Base class of all object reference */
+/*!
+ * \brief ObjectRef is the base class for named, managed references to TVM-FFI objects.
+ *
+ * Each reference holds an `ObjectPtr<Object>`, which manages the underlying object’s lifetime
+ * through reference counting. Use `operator->` to access data members and member functions
+ * of the underlying object.
+ *
+ * A reference class can define its own constructors, member functions, and operators, and
+ * inherit from other reference classes to share and specialize its interface. It can also
+ * impose additional constraints on the underlying object.
+ */
 class ObjectRef {
  public:
   /*! \brief default constructor */

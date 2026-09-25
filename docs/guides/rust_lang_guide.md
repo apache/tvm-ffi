@@ -65,6 +65,13 @@ export LD_LIBRARY_PATH=$(tvm-ffi-config --libdir):$LD_LIBRARY_PATH
 
 ## Basic Usage
 
+**Named managed reference**. A named managed reference follows the newtype pattern around
+`ObjectArc<T>`, which manages the underlying object’s lifetime through reference counting.
+Define methods and associated functions on the named type, and implement traits to provide
+shared interfaces. The named type can also impose additional constraints on the underlying object.
+For example, `Array<T>` holds an `ObjectArc<ArrayObj>` while constraining the array’s
+element type to `T`. Named reference types implement `ObjectRefCore` for shared reference operations.
+
 ### Loading a Module
 
 Load a compiled TVM FFI module and call its functions:

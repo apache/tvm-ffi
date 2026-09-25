@@ -307,9 +307,10 @@ pub trait ObjectRefCast: ObjectRefCore + AnyCompatible {
 
 impl<T: ObjectRefCore + AnyCompatible> ObjectRefCast for T {}
 
-/// Base class for ObjectRef
+/// A generic managed reference to a TVM-FFI object.
 ///
-/// This class is used to store the data of the ObjectRef
+/// Holds an `ObjectArc<Object>` that manages the underlying object's lifetime
+/// through reference counting.
 #[repr(C)]
 #[derive(ObjectRef, Clone)]
 pub struct ObjectRef {

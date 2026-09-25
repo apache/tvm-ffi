@@ -93,9 +93,19 @@ It declares a class ``MyObjectObj`` that inherits from :cpp:class:`~tvm::ffi::Ob
        /*parent_type=*/ffi::Object);
    };
 
-**Managed reference**. Optionally, a managed reference class can be defined by inheriting
-from :cpp:class:`~tvm::ffi::ObjectRef` and using one of the following macros to define the methods.
-Define its constructor by wrapping the :cpp:func:`tvm::ffi::make_object` function.
+**Named managed reference**. :cpp:class:`~tvm::ffi::ObjectRef` is the base class for named,
+managed references to TVM-FFI objects. Each reference holds an ``ObjectPtr<Object>``, which
+manages the underlying object’s lifetime through reference counting. Use ``operator->`` to
+access data members and member functions of the underlying object.
+
+A reference class can define its own constructors, member functions, and operators, and
+inherit from other reference classes to share and specialize its interface. It can also
+impose additional constraints on the underlying object. For example, ``Array<T>`` uses
+``ArrayObj`` as its underlying object type while constraining the array’s element type to ``T``.
+
+Optionally, define a named managed reference class by inheriting from
+:cpp:class:`~tvm::ffi::ObjectRef` and using one of the following macros. A constructor that
+creates the underlying object can wrap :cpp:func:`tvm::ffi::make_object`.
 
  :c:macro:`TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE(TypeName, ParentType, ObjectName) <TVM_FFI_DEFINE_OBJECT_REF_METHODS_NULLABLE>`
    Define a nullable reference class.
