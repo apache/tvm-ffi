@@ -47,6 +47,7 @@ pub const RUNTIME_ERROR: ErrorKind = ErrorKind("RuntimeError");
 pub const ATTRIBUTE_ERROR: ErrorKind = ErrorKind("AttributeError");
 pub const KEY_ERROR: ErrorKind = ErrorKind("KeyError");
 pub const INDEX_ERROR: ErrorKind = ErrorKind("IndexError");
+pub const INTERNAL_ERROR: ErrorKind = ErrorKind("InternalError");
 
 /// error object
 #[repr(C)]
