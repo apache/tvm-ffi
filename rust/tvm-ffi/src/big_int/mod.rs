@@ -17,14 +17,12 @@
  * under the License.
  */
 //! Integers with inline `i64` storage and arbitrary-precision arithmetic.
-mod builder;
 mod int_ops;
 
 use crate::derive::Object;
 use crate::error::{Error, Result, OVERFLOW_ERROR, VALUE_ERROR};
-use crate::object::{unsafe_, Object, ObjectCoreWithExtraItems};
+use crate::object::{unsafe_, Object, ObjectArc, ObjectCoreWithExtraItems};
 use crate::type_traits::AnyCompatible;
-use builder::WordsBuilder;
 use std::cmp::Ordering;
 use std::fmt::{Debug, Display, Write as _};
 use std::hash::{Hash, Hasher};
@@ -118,9 +116,16 @@ impl BigInt {
         if size <= 1 {
             return Self::from_i64(words.first().copied().unwrap_or(0));
         }
-        let mut builder = WordsBuilder::new(size);
-        builder.words_mut().copy_from_slice(&words[..size]);
-        builder.finish()
+        // The object is allocated at its final length, so the crate's generic
+        // extra-items deleter can release it; the words follow the header.
+        unsafe {
+            let mut obj = ObjectArc::new_with_extra_items(BigIntObj {
+                object: Object::new(),
+                size,
+            });
+            BigIntObj::extra_items_mut(&mut obj).copy_from_slice(&words[..size]);
+            Self::from_obj(ObjectArc::into_raw(obj) as *mut BigIntObj)
+        }
     }
 
     /// Borrow the canonical two's-complement words, least-significant word first.

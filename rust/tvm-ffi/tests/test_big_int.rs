@@ -1224,3 +1224,22 @@ fn test_big_int_native_objects_cross_runtime() {
     drop(map);
     assert_eq!(AnyView::from(&held).debug_strong_count(), Some(1));
 }
+
+#[test]
+fn test_big_int_wide_results_spill_to_heap_buffers() {
+    // Results and division scratch wider than the 32-word stack buffer take the heap path.
+    let x = &pow2(3000) + 12345i64;
+    assert_eq!(x.words().len(), 47);
+    let square = &x * &x;
+    assert_eq!(square.words().len(), 94);
+    let (quotient, remainder) = square.div_rem(&x).unwrap();
+    assert_eq!(quotient, x);
+    assert_inline(&remainder, 0);
+    assert_eq!(&x % &pow2(3000), big(12345));
+    assert_eq!(&x + &x, &x << 1i64);
+    assert_inline(&(&(-&x) + &x), 0);
+    assert_eq!(&(&x << 100i64) >> 100i64, x);
+    assert_eq!(&x & &x, x);
+    assert_inline(&(&x ^ &x), 0);
+    assert_eq!(x.to_string().parse::<BigInt>().unwrap(), x);
+}
