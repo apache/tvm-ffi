@@ -17,7 +17,7 @@
  * under the License.
  */
 use crate::any::{Any, AnyView, ArgTryFromAnyView};
-use crate::error::Result;
+use crate::error::{Error, Result, INTERNAL_ERROR};
 use crate::object::ObjectRefCore;
 use crate::rvalue_ref::RValueRef;
 use crate::string::{Bytes, String};
@@ -26,6 +26,22 @@ use crate::type_traits::{AnyCompatible, ContainerElement};
 //------------------------------------------------------------------------
 // PackedCallable
 //------------------------------------------------------------------------
+/// The error to raise for a panic caught at an FFI boundary, where unwinding
+/// into the caller would abort the process.
+#[doc(hidden)]
+pub fn panic_to_error(payload: Box<dyn std::any::Any + Send>) -> Error {
+    let message = payload
+        .downcast_ref::<&str>()
+        .copied()
+        .or_else(|| {
+            payload
+                .downcast_ref::<std::string::String>()
+                .map(|s| s.as_str())
+        })
+        .unwrap_or("unknown payload");
+    Error::new(INTERNAL_ERROR, &format!("panicked: {message}"), "")
+}
+
 pub trait AsPackedCallable<I, O> {
     // Call the function in packed convention
     fn call_packed(&self, packed_args: &[AnyView]) -> Result<Any>;

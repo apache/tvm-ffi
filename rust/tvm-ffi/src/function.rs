@@ -81,7 +81,12 @@ impl<F: Fn(&[AnyView]) -> Result<Any> + 'static> CallbackFunctionObjImpl<F> {
     ) -> i32 {
         let this = &*(handle as *mut Self);
         let packed_args = std::slice::from_raw_parts(args as *const AnyView, num_args as usize);
-        let ret_value = (this.callback)(packed_args);
+        let ret_value = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            (this.callback)(packed_args)
+        })) {
+            Ok(ret_value) => ret_value,
+            Err(payload) => Err(crate::function_internal::panic_to_error(payload)),
+        };
         match ret_value {
             Ok(value) => {
                 *result = Any::into_raw_ffi_any(value);
@@ -317,6 +322,9 @@ impl Function {
     ///
     /// # Returns
     /// * `Function` - The function
+    ///
+    /// Report errors by returning them. A panic in `func` is caught and raised
+    /// to the caller as an `InternalError`, but panicking is discouraged.
     pub fn from_packed<F>(func: F) -> Self
     where
         F: Fn(&[AnyView]) -> Result<Any> + 'static,
@@ -336,6 +344,9 @@ impl Function {
     ///
     /// # Returns
     /// * `Function` - The function
+    ///
+    /// Report errors by returning them. A panic in `func` is caught and raised
+    /// to the caller as an `InternalError`, but panicking is discouraged.
     pub fn from_typed<F, I, O>(func: F) -> Self
     where
         F: AsPackedCallable<I, O> + 'static,

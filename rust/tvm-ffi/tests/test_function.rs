@@ -290,3 +290,48 @@ fn test_function_call_tensor_fn() {
     assert_eq!(y_data[2], 3.0);
     assert_eq!(y_data[3], 4.0);
 }
+
+// Functions should report errors by returning them; these panic only to test
+// that a panic is still raised to the caller instead of aborting.
+fn testing_panic(x: i32) -> Result<i32> {
+    if x < 0 {
+        panic!("negative input {x}");
+    }
+    Ok(x)
+}
+tvm_ffi_dll_export_typed_func!(testing_panic, testing_panic);
+
+#[test]
+fn test_function_exported_panic_raises_internal_error() {
+    // SAFETY: null handle is valid for testing_panic which doesn't use the handle.
+    let f = unsafe { Function::from_extern_c(std::ptr::null_mut(), __tvm_ffi_testing_panic, None) };
+    let typed = into_typed_fn!(f, Fn(i32) -> Result<i32>);
+    assert_eq!(typed(1).unwrap(), 1);
+    let error = typed(-1).unwrap_err();
+    assert_eq!(error.kind(), INTERNAL_ERROR);
+    assert!(
+        error.message().contains("negative input -1"),
+        "{}",
+        error.message()
+    );
+}
+
+#[test]
+fn test_function_callback_panic_raises_internal_error() {
+    let f = Function::from_typed(|x: i32| -> Result<i32> {
+        if x < 0 {
+            panic!("callback got {x}");
+        }
+        Ok(x)
+    });
+    let typed = into_typed_fn!(f, Fn(i32) -> Result<i32>);
+    let error = typed(-2).unwrap_err();
+    assert_eq!(error.kind(), INTERNAL_ERROR);
+    assert!(
+        error.message().contains("callback got -2"),
+        "{}",
+        error.message()
+    );
+    // The function stays usable after a panic.
+    assert_eq!(typed(3).unwrap(), 3);
+}
