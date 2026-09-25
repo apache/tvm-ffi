@@ -81,17 +81,7 @@ impl<F: Fn(&[AnyView]) -> Result<Any> + 'static> CallbackFunctionObjImpl<F> {
     ) -> i32 {
         let this = &*(handle as *mut Self);
         let packed_args = std::slice::from_raw_parts(args as *const AnyView, num_args as usize);
-        let ret_value = (this.callback)(packed_args);
-        match ret_value {
-            Ok(value) => {
-                *result = Any::into_raw_ffi_any(value);
-                0
-            }
-            Err(error) => {
-                Error::set_raised(&error);
-                -1
-            }
-        }
+        crate::function_internal::complete_safe_call(result, || (this.callback)(packed_args))
     }
 }
 

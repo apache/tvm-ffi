@@ -308,6 +308,9 @@ macro_rules! impl_arg_into_ref {
 
 /// Macro to export a typed function as a C symbol that follows the tvm-ffi ABI
 ///
+/// An error the function returns is raised to the caller, and so is a panic,
+/// as a `RuntimeError`.
+///
 /// # Arguments
 /// * `$name` - The name of the function
 /// * `$func` - The function to export
@@ -348,17 +351,9 @@ macro_rules! tvm_ffi_dll_export_typed_func {
             ) -> i32 {
                 let packed_args =
                     std::slice::from_raw_parts(args as *const $crate::any::AnyView, num_args as usize);
-                let ret_value = $crate::function_internal::call_packed_callable($func, packed_args);
-                match ret_value {
-                    Ok(value) => {
-                        *result = $crate::any::Any::into_raw_ffi_any(value);
-                        0
-                    }
-                    Err(error) => {
-                        $crate::error::Error::set_raised(&error);
-                        -1
-                    }
-                }
+                $crate::function_internal::complete_safe_call(result, || {
+                    $crate::function_internal::call_packed_callable($func, packed_args)
+                })
             }
         }
     };

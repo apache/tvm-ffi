@@ -17,15 +17,46 @@
  * under the License.
  */
 use crate::any::{Any, AnyView, ArgTryFromAnyView};
-use crate::error::Result;
+use crate::error::{Error, Result, RUNTIME_ERROR};
 use crate::object::ObjectRefCore;
 use crate::rvalue_ref::RValueRef;
 use crate::string::{Bytes, String};
 use crate::type_traits::{AnyCompatible, ContainerElement};
+use tvm_ffi_sys::TVMFFIAny;
 
 //------------------------------------------------------------------------
 // PackedCallable
 //------------------------------------------------------------------------
+/// Completes a `TVMFFISafeCallType` call made into Rust: runs `f`, stores
+/// its value in `result` and returns 0, or raises its error and returns -1.
+/// A panic becomes a raised `RuntimeError`, because unwinding out of an
+/// `extern "C"` function aborts the process.
+///
+/// # Safety
+/// `result` must be valid for writes.
+#[doc(hidden)]
+pub unsafe fn complete_safe_call(result: *mut TVMFFIAny, f: impl FnOnce() -> Result<Any>) -> i32 {
+    let error = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
+        Ok(Ok(value)) => {
+            *result = Any::into_raw_ffi_any(value);
+            return 0;
+        }
+        Ok(Err(error)) => error,
+        Err(payload) => {
+            let message = if let Some(s) = payload.downcast_ref::<&str>() {
+                s
+            } else if let Some(s) = payload.downcast_ref::<std::string::String>() {
+                s.as_str()
+            } else {
+                "unknown payload"
+            };
+            Error::new(RUNTIME_ERROR, &format!("panicked: {message}"), "")
+        }
+    };
+    Error::set_raised(&error);
+    -1
+}
+
 pub trait AsPackedCallable<I, O> {
     // Call the function in packed convention
     fn call_packed(&self, packed_args: &[AnyView]) -> Result<Any>;
