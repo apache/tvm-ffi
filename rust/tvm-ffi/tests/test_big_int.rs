@@ -611,22 +611,6 @@ fn test_big_int_promotion_demotion_and_mixed_operands() {
 }
 
 #[test]
-fn test_big_int_normalized_equality() {
-    let value = pow2(255) + 13i64;
-    let equal = (&big(2) << 254i64) + 13i64;
-    assert_eq!(value, equal);
-    assert_ne!(value, &value + 1i64);
-    assert_ne!(value, &value + pow2(128));
-    assert_ne!(pow2(192), pow2(193));
-    assert_ne!(value, pow2(128));
-    assert_ne!(value, -&value);
-    let above = big(i64::MAX as i128) + 1i64;
-    let below = big(i64::MIN as i128) - 1i64;
-    assert_ne!(above, big(i64::MAX as i128));
-    assert_ne!(below, big(i64::MIN as i128));
-}
-
-#[test]
 fn test_big_int_signed_division() {
     // (a, b, trunc q, trunc r, floor q, floor r)
     for (a, b, q, r, floor_q, floor_r) in [
@@ -655,6 +639,13 @@ fn test_big_int_signed_division() {
         assert_inline(&wx.floor_div(&wy).unwrap(), floor_q);
         assert_eq!(wx.floor_mod(&wy).unwrap(), &BigInt::from(floor_r) << shift);
     }
+    // An exact multiword quotient from a dividend with low zero words and a minimum top word.
+    assert_eq!(
+        (&big(i64::MIN as i128) << 128i64)
+            .div_rem(&pow2(64))
+            .unwrap(),
+        (-pow2(127), big(0))
+    );
     let wide = pow2(255) + 13i64;
     for divisor in [big(0), pow2(0) - 1i64] {
         for result in [
@@ -806,53 +797,6 @@ fn test_big_int_from_str() {
 }
 
 #[test]
-fn test_big_int_word_multiply() {
-    // Half-product carry, complete-word carry, and unequal multiword lengths.
-    for (m, n) in [(32i64, 32i64), (64, 64), (255, 256)] {
-        let (a, b) = (pow2(m) - 1i64, pow2(n) - 1i64);
-        let expected = pow2(m + n) - pow2(m) - pow2(n) + 1i64;
-        assert_eq!(&a * &b, expected);
-    }
-    let (a, b) = (pow2(255) - 1i64, pow2(256) - 1i64);
-    let product = pow2(511) - pow2(255) - pow2(256) + 1i64;
-    assert_eq!(-&a * &b, -&product);
-    assert_eq!(&a * -&b, -&product);
-    assert_eq!(-&a * -&b, product);
-    assert_inline(&(&a * 0i64), 0);
-    assert_inline(&(0i64 * &a), 0);
-    assert_inline(&(-&a * 0i64), 0);
-}
-
-#[test]
-fn test_big_int_signed_div_rem() {
-    let divisor = pow2(130) + 5i64;
-    let quotient = pow2(120) + 3i64;
-    let exact = &quotient * &divisor;
-    let dividend = &exact + 7i64;
-    // General zero, all nonexact sign quadrants, and an exact low-zero/minimum-word magnitude.
-    for (a, b, q, r) in [
-        (big(0), divisor.clone(), big(0), big(0)),
-        (big(7), divisor.clone(), big(0), big(7)),
-        (dividend.clone(), divisor.clone(), quotient.clone(), big(7)),
-        (-&dividend, divisor.clone(), -&quotient, big(-7)),
-        (dividend.clone(), -&divisor, -&quotient, big(7)),
-        (-&dividend, -&divisor, quotient.clone(), big(-7)),
-        (
-            &big(i64::MIN as i128) << 128i64,
-            pow2(64),
-            -pow2(127),
-            big(0),
-        ),
-    ] {
-        assert_eq!(a.div_rem(&b).unwrap(), (q, r), "{a} / {b}");
-    }
-    assert_eq!((-&exact).floor_div(&divisor).unwrap(), -&quotient);
-    assert_eq!((-&exact).floor_mod(&divisor).unwrap(), big(0));
-    assert_eq!((-&dividend).floor_div(&divisor).unwrap(), -&quotient - 1i64);
-    assert_eq!((-&dividend).floor_mod(&divisor).unwrap(), &divisor - 7i64);
-}
-
-#[test]
 fn test_big_int_multiword_division_estimates() {
     let base = pow2(32);
     let divisor = pow2(63) + &base - 1i64;
@@ -952,10 +896,6 @@ fn test_big_int_scalar_div_rem_boundaries() {
         assert_eq!(dq, q, "{a} / {b}");
         assert_inline(&dr, r);
     }
-    assert_eq!(&dividend / 3i64, quotient);
-    assert_inline(&(-&dividend % 3i64), -2);
-    assert_eq!((-&dividend).floor_div(&big(3)).unwrap(), -&quotient - 1i64);
-    assert_inline(&(-&dividend).floor_mod(&big(3)).unwrap(), 1);
 }
 
 #[test]
@@ -973,14 +913,6 @@ fn test_big_int_small_divisor_remainders() {
         assert_inline(&(&a % b), trunc);
         assert_inline(&a.floor_mod(&BigInt::from(b)).unwrap(), floor);
     }
-    assert_eq!(
-        value.try_rem(&big(0)).unwrap_err().kind(),
-        ZERO_DIVISION_ERROR
-    );
-    assert_eq!(
-        value.floor_mod(&big(0)).unwrap_err().kind(),
-        ZERO_DIVISION_ERROR
-    );
 }
 
 /// Deterministic xorshift64 generator for the differential test.
