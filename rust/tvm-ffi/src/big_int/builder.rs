@@ -25,7 +25,8 @@
 //! deleter reads it back. The prefix is invisible to the ABI: `v_obj` points at
 //! the `BigIntObj` header, and other languages only ever call the deleter.
 use super::{int_ops, BigInt, BigIntObj};
-use crate::object::{unsafe_, Object};
+use crate::error::Result;
+use crate::object::unsafe_;
 use std::alloc::{alloc_zeroed, dealloc, handle_alloc_error, Layout};
 use std::ffi::c_void;
 use std::mem::{align_of, size_of, ManuallyDrop};
@@ -41,12 +42,15 @@ const PREFIX: usize = if size_of::<usize>() > align_of::<BigIntObj>() {
     align_of::<BigIntObj>()
 };
 
-fn layout(capacity: usize) -> Layout {
+fn try_layout(capacity: usize) -> Option<Layout> {
     capacity
         .checked_mul(size_of::<i64>())
         .and_then(|words| words.checked_add(PREFIX + size_of::<BigIntObj>()))
         .and_then(|size| Layout::from_size_align(size, align_of::<BigIntObj>()).ok())
-        .expect("BigInt allocation is too large")
+}
+
+fn layout(capacity: usize) -> Layout {
+    try_layout(capacity).expect("BigInt allocation is too large")
 }
 
 /// A zero-initialized construction buffer of `capacity` words with a logical size.
@@ -60,33 +64,46 @@ pub(super) struct WordsBuilder {
 }
 
 impl WordsBuilder {
-    /// Allocate `size` zeroed words.
+    /// Allocate `size` zeroed words; like `Vec`, exhaustion aborts.
     pub(super) fn new(size: usize) -> Self {
         Self::with_capacity(size, size)
     }
 
     /// Allocate `capacity` zeroed words, the first `size` of them logical.
     pub(super) fn with_capacity(size: usize, capacity: usize) -> Self {
-        debug_assert!(size <= capacity);
         let layout = layout(capacity);
+        Self::alloc(size, capacity, layout).unwrap_or_else(|| handle_alloc_error(layout))
+    }
+
+    /// Allocate `size` zeroed words, or `OverflowError` when they cannot be allocated.
+    ///
+    /// Only a left shift can outgrow its operands by an arbitrary factor; every other
+    /// operation allocates at most a few words beyond an operand that already exists,
+    /// so those keep the ordinary abort-on-exhaustion contract.
+    pub(super) fn try_new(size: usize) -> Result<Self> {
+        let too_large = || int_ops::overflow("BigInt allocation is too large");
+        let layout = try_layout(size).ok_or_else(too_large)?;
+        Self::alloc(size, size, layout).ok_or_else(too_large)
+    }
+
+    /// Zeroed storage behind the object header, or `None` when the allocator refuses.
+    fn alloc(size: usize, capacity: usize, layout: Layout) -> Option<Self> {
+        debug_assert!(size <= capacity);
         unsafe {
             let base = alloc_zeroed(layout);
             if base.is_null() {
-                handle_alloc_error(layout);
+                return None;
             }
             base.cast::<usize>().write(capacity);
             let obj = base.add(PREFIX).cast::<BigIntObj>();
-            obj.write(BigIntObj {
-                object: Object::new(),
-                size,
-            });
             obj.cast::<TVMFFIObject>().write(TVMFFIObject {
                 combined_ref_count: AtomicU64::new(COMBINED_REF_COUNT_BOTH_ONE),
                 type_index: TypeIndex::kTVMFFIBigInt as i32,
                 __padding: 0,
                 deleter: Some(big_int_deleter),
             });
-            Self { obj, capacity }
+            std::ptr::addr_of_mut!((*obj).size).write(size);
+            Some(Self { obj, capacity })
         }
     }
 

@@ -40,7 +40,7 @@ fn negative_shift() -> Error {
     Error::new(VALUE_ERROR, "Negative BigInt shift count", "")
 }
 
-fn overflow(message: &str) -> Error {
+pub(super) fn overflow(message: &str) -> Error {
     Error::new(OVERFLOW_ERROR, message, "")
 }
 
@@ -316,7 +316,7 @@ pub(super) fn shl(x: &[i64], count: &[i64]) -> Result<BigInt> {
         .checked_add(whole)
         .and_then(|size| size.checked_add(1))
         .ok_or_else(too_large)?;
-    let mut builder = WordsBuilder::new(size);
+    let mut builder = WordsBuilder::try_new(size)?;
     let data = builder.words_mut();
     let ext = extension(x);
     // The low `whole` words stay zero.

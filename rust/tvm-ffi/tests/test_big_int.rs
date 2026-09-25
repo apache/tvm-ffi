@@ -711,6 +711,12 @@ fn test_big_int_wide_arithmetic_and_bitwise() {
     let error = huge.try_shl(huge.clone()).unwrap_err();
     assert_eq!(error.kind(), OVERFLOW_ERROR);
     assert_eq!(error.message(), "BigInt shift count is too large");
+    // A count that fits `usize` but not memory is an error, not an abort.
+    for count in [1i64 << 61, i64::MAX] {
+        let error = big(1).try_shl(count).unwrap_err();
+        assert_eq!(error.kind(), OVERFLOW_ERROR);
+        assert_eq!(error.message(), "BigInt allocation is too large");
+    }
     assert_inline(&huge.try_shr(huge.clone()).unwrap(), 0);
     let error = huge.try_shl(-1).unwrap_err();
     assert_eq!(error.kind(), VALUE_ERROR);
