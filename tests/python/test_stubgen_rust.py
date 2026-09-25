@@ -23,8 +23,9 @@ from collections.abc import Container, Iterator
 from pathlib import Path
 
 import pytest
+import tvm_ffi.cpp
 import tvm_ffi.stub.cli as stub_cli
-import tvm_ffi.testing  # noqa: F401  (loads the `testing.*` fixture types)
+import tvm_ffi.testing  # loads the `testing.*` fixture types
 from tvm_ffi.core import TypeSchema
 from tvm_ffi.stub import consts as C
 from tvm_ffi.stub.cli import _stage_1, _stage_3
@@ -179,8 +180,9 @@ def _render_type(schema: TypeSchema) -> tuple[str | None, RustImports]:
     imports = RustImports()
     ty_map = RC.RUST_TY_MAP_DEFAULTS
 
-    def ty_render(origin: str) -> str | None:
-        return imports.record(ty_map[origin]) if origin in ty_map else None
+    def ty_render(origin: str, type_key: str | None) -> str | None:
+        leaf = type_key if type_key in ty_map else origin
+        return imports.record(ty_map[leaf]) if leaf in ty_map else None
 
     return render_rust_type(schema, ty_render), imports
 
@@ -188,6 +190,7 @@ def _render_type(schema: TypeSchema) -> tuple[str | None, RustImports]:
 def test_render_rust_type_value_positions() -> None:
     assert _render_type(TypeSchema("int"))[0] == "i64"
     assert _render_type(TypeSchema("str"))[0] == "String"
+    assert _render_type(TypeSchema.from_json_str('{"type":"ffi.BigInt"}'))[0] == "BigInt"
     assert _render_type(TypeSchema("Any"))[0] == "Any"
     assert _render_type(TypeSchema("Callable", (TypeSchema("int"),)))[0] == "Function"
     assert _render_type(TypeSchema("Optional", (TypeSchema("str"),)))[0] == "Option<String>"
@@ -879,6 +882,107 @@ def test_complete_optional_field_mirrors() -> None:
     assert "pub name: Optional<String>," in text
     assert "pub items: Option<Array<Any>>," in text
     assert "tvm_ffi::Optional" in _uses(imports)
+
+
+def test_complete_big_int_field_mirrors() -> None:
+    """The schema folds `ffi.BigInt` into `int`; the parsed type key keeps the cell apart."""
+    big = TypeSchema.from_json_str('{"type":"ffi.BigInt"}')
+    maybe = TypeSchema.from_json_str('{"type":"Optional","args":[{"type":"ffi.BigInt"}]}')
+    assert (big.origin, big.type_key) == ("int", "ffi.BigInt")
+    info = _info(
+        "demo.Big",
+        (
+            _field("value", big, 24, 16),
+            _field("maybe", maybe, 40, 16),
+            _field("count", "int", 56, 8),
+        ),
+        total_size=64,
+        is_final=True,
+    )
+    text, imports = _render(info)
+    assert (
+        "    base: Object,\n"
+        "    pub value: BigInt,\n"
+        "    pub maybe: Optional<BigInt>,\n"
+        "    pub count: i64,\n"
+        "}"
+    ) in text
+    assert "    pub fn new(value: BigInt, maybe: Optional<BigInt>, count: i64) -> Self {" in text
+    assert "assert!(::core::mem::size_of::<BigObj>() == 64);" in text
+    assert {"tvm_ffi::BigInt", "tvm_ffi::Optional"} <= _uses(imports)
+
+
+def test_ty_map_origin_override_survives_lossless_fold() -> None:
+    """A `ty-map` for `str` still wins for a reflected `ffi.String`: the lossless fold keeps no key."""
+    name = TypeSchema.from_json_str('{"type":"ffi.String"}')
+    assert (name.origin, name.type_key) == ("str", None)
+    info = _info("demo.Named", (_field("name", name, 24, 16),), total_size=40, is_final=True)
+    ty_map = dict(RUST.default_ty_map())
+    ty_map["str"] = "crate::MyStr"
+    imports = RustImports()
+    assert info.type_key is not None
+    block = _object_block(info.type_key)
+    generate_rust_object(block, ty_map, imports, Options(), info, ALL_DECLARED)
+    text = "\n".join(block.lines[1:-1])
+    assert "    pub name: MyStr,\n" in text
+    assert "crate::MyStr" in _uses(imports)
+
+
+@pytest.fixture(scope="module")
+def big_int_holder() -> ObjectInfo:
+    """Reflection of a C++ class with `BigInt` fields, compiled and registered at test time."""
+    tvm_ffi.cpp.load_inline(
+        name="test_stubgen_rust_big_int",
+        cpp_sources=r"""
+            #include <tvm/ffi/big_int.h>
+            #include <tvm/ffi/optional.h>
+            #include <tvm/ffi/reflection/registry.h>
+
+            namespace stubgen_test {
+            using namespace tvm::ffi;
+
+            class BigIntHolder : public Object {
+             public:
+              BigInt value;
+              Optional<BigInt> maybe;
+              int64_t count = 0;
+              static constexpr bool _type_mutable = true;
+              TVM_FFI_DECLARE_OBJECT_INFO_FINAL("stubgen_test.BigIntHolder", BigIntHolder, Object);
+            };
+
+            TVM_FFI_STATIC_INIT_BLOCK() {
+              namespace refl = tvm::ffi::reflection;
+              refl::ObjectDef<BigIntHolder>()
+                  .def_rw("value", &BigIntHolder::value)
+                  .def_rw("maybe", &BigIntHolder::maybe)
+                  .def_rw("count", &BigIntHolder::count);
+            }
+            }  // namespace stubgen_test
+
+            int64_t touch() { return 0; }
+        """,
+        functions=["touch"],
+    )
+    return object_info_from_type_key("stubgen_test.BigIntHolder")
+
+
+def test_registry_big_int_fields_are_mirrored(big_int_holder: ObjectInfo) -> None:
+    """Reflected `BigInt` and `Optional<BigInt>` fields arrive as `int` plus the parsed type key."""
+    value, maybe, count = sorted(big_int_holder.fields, key=lambda f: f.offset or 0)
+    assert (value.origin, value.type_key, value.size) == ("int", "ffi.BigInt", 16)
+    assert (maybe.args[0].origin, maybe.args[0].type_key, maybe.size) == ("int", "ffi.BigInt", 16)
+    assert (count.origin, count.type_key, count.size) == ("int", None, 8)
+    text, imports = _render(big_int_holder)
+    assert (
+        "pub struct BigIntHolderObj {\n"
+        "    base: Object,\n"
+        "    pub value: BigInt,\n"
+        "    pub maybe: Optional<BigInt>,\n"
+        "    pub count: i64,\n"
+        "}"
+    ) in text
+    assert "assert!(::core::mem::size_of::<BigIntHolderObj>() == 64);" in text
+    assert {"tvm_ffi::BigInt", "tvm_ffi::Optional"} <= _uses(imports)
 
 
 @pytest.mark.parametrize(

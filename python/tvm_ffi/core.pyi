@@ -271,12 +271,14 @@ class TypeSchema:
     origin: str
     args: tuple[TypeSchema, ...] = ()
     origin_type_index: int
+    type_key: str | None
 
     def __init__(
         self,
         origin: str,
         args: tuple[TypeSchema, ...] = (),
         origin_type_index: int = ...,
+        type_key: str | None = None,
     ) -> None: ...
     @staticmethod
     def from_json_obj(obj: dict[str, Any]) -> TypeSchema: ...

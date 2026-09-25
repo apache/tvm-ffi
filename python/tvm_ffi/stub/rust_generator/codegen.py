@@ -119,9 +119,16 @@ class _ObjectRenderer:
 
     # --- name resolution ---------------------------------------------------
 
-    def _resolve(self, origin: str, imports: RustImports) -> str | None:
-        """Resolve a leaf origin to its in-scope Rust name (recording its ``use``), or ``None``."""
-        mapped = self.ty_map.get(origin)
+    def _resolve(
+        self, origin: str, imports: RustImports, type_key: str | None = None
+    ) -> str | None:
+        """Resolve a leaf origin to its in-scope Rust name (recording its ``use``), or ``None``.
+
+        A ``ty-map`` entry for the type key the schema was parsed from wins over the origin.
+        """
+        mapped = self.ty_map.get(type_key) if type_key is not None else None
+        if mapped is None:
+            mapped = self.ty_map.get(origin)
         if mapped is None:
             if "." not in origin or origin.startswith("ctypes."):
                 return None
@@ -129,8 +136,8 @@ class _ObjectRenderer:
             mapped = self._generated_type_path(origin)
         return imports.record(mapped)
 
-    def _ty_render(self, origin: str) -> str | None:
-        return self._resolve(origin, self.imports)
+    def _ty_render(self, origin: str, type_key: str | None = None) -> str | None:
+        return self._resolve(origin, self.imports, type_key)
 
     def _generated_type_path(self, type_key: str) -> str:
         """Spell a generated type key from this file.
@@ -230,7 +237,7 @@ class _ObjectRenderer:
             mirror = self._optional_mirror(field, imports)
         else:
             narrowed = C_RUST.RUST_SCALAR_BY_SIZE.get((field.origin, field.size))
-            mirror = narrowed or render_rust_type(field, lambda o: self._resolve(o, imports))
+            mirror = narrowed or render_rust_type(field, lambda o, k: self._resolve(o, imports, k))
         if mirror is None:
             return None
         if target in directives.nullable and not mirror.startswith("Option<"):
@@ -252,7 +259,7 @@ class _ObjectRenderer:
         (payload,) = field.args  # TypeSchema's post_init enforces exactly one argument.
         if payload.origin == "Any":
             return None
-        inner = render_rust_type(payload, lambda o: self._resolve(o, imports))
+        inner = render_rust_type(payload, lambda o, k: self._resolve(o, imports, k))
         if inner is None:
             return None
         any_backed = (

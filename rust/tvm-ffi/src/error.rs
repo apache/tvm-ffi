@@ -47,6 +47,8 @@ pub const RUNTIME_ERROR: ErrorKind = ErrorKind("RuntimeError");
 pub const ATTRIBUTE_ERROR: ErrorKind = ErrorKind("AttributeError");
 pub const KEY_ERROR: ErrorKind = ErrorKind("KeyError");
 pub const INDEX_ERROR: ErrorKind = ErrorKind("IndexError");
+pub const OVERFLOW_ERROR: ErrorKind = ErrorKind("OverflowError");
+pub const ZERO_DIVISION_ERROR: ErrorKind = ErrorKind("ZeroDivisionError");
 
 /// error object
 #[repr(C)]

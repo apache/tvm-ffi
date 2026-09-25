@@ -45,6 +45,7 @@ RUST_TY_MAP_DEFAULTS = {
     # --- builtin object type keys (ffi.*) ---
     "ffi.String": "tvm_ffi::String",
     "ffi.Bytes": "tvm_ffi::Bytes",
+    "ffi.BigInt": "tvm_ffi::BigInt",
     "ffi.Module": "tvm_ffi::Module",
     "ffi.Error": "tvm_ffi::Error",
     "ffi.Object": "tvm_ffi::object::ObjectRef",
