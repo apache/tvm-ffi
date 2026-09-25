@@ -273,6 +273,7 @@ class TypeSchema:
     origin_type_index: int
     fallback: TypeSchema | None
     named_args: dict[str, tuple[TypeSchema, ...]] | None
+    type_key: str | None
 
     def __init__(
         self,
@@ -281,6 +282,7 @@ class TypeSchema:
         origin_type_index: int = ...,
         fallback: TypeSchema | None = None,
         named_args: dict[str, tuple[TypeSchema, ...]] | None = None,
+        type_key: str | None = None,
     ) -> None: ...
     @staticmethod
     def from_json_obj(obj: dict[str, Any]) -> TypeSchema: ...

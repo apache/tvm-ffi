@@ -110,25 +110,31 @@ class RustImports:
         return probe.leaf
 
 
-def render_rust_type(schema: TypeSchema, ty_render: Callable[[str], str | None]) -> str | None:
-    """Render ``schema`` as a Rust value type via ``ty_render`` (leaf origin -> name), or ``None``."""
+def render_rust_type(
+    schema: TypeSchema, ty_render: Callable[[str, str | None], str | None]
+) -> str | None:
+    """Render ``schema`` as a Rust value type, or ``None``.
+
+    ``ty_render`` names a leaf from its origin and the type key it was parsed from (``None``
+    when they agree): the schema folds ``ffi.BigInt`` into ``int``.
+    """
     origin, args = schema.origin, schema.args
     if origin in C.RUST_UNSUPPORTED_ORIGINS:
         return None
     if origin == "Array":
         assert args  # TypeSchema's post_init fills a missing element type.
-        return _generic(ty_render("Array"), render_rust_type(args[0], ty_render))
+        return _generic(ty_render("Array", None), render_rust_type(args[0], ty_render))
     if origin == "Map":
         assert len(args) == 2  # TypeSchema's post_init fills a bare Map to (Any, Any).
         key = render_rust_type(args[0], ty_render)
         value = render_rust_type(args[1], ty_render)
-        return _generic(ty_render("Map"), key, value)
+        return _generic(ty_render("Map", None), key, value)
     if origin == "Optional":
         (payload,) = args  # TypeSchema's post_init enforces exactly one argument.
         return _generic("Option", render_rust_type(payload, ty_render))
     if origin == "Callable":
-        return ty_render("Callable")  # the crate's Function is type-erased
-    return ty_render(origin)
+        return ty_render("Callable", None)  # the crate's Function is type-erased
+    return ty_render(origin, schema.type_key)
 
 
 def _generic(base: str | None, *params: str | None) -> str | None:

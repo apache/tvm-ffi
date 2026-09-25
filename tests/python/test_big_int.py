@@ -143,7 +143,11 @@ def test_integer_type_schema(bigint_module: tvm_ffi.Module) -> None:
     metadata = bigint_module.get_function_metadata("identity")
     assert metadata is not None
     assert "ffi.BigInt" in metadata["type_schema"]
-    assert str(TypeSchema.from_json_str(metadata["type_schema"])) == "Callable[[int], int]"
+    schema = TypeSchema.from_json_str(metadata["type_schema"])
+    assert str(schema) == "Callable[[int], int]"
+    assert schema.named_args is not None
+    assert schema.named_args["return"][0].type_key == "ffi.BigInt"
+    assert schema.named_args["params"][0].type_key == "ffi.BigInt"
 
 
 def test_integer_callbacks(bigint_module: tvm_ffi.Module) -> None:

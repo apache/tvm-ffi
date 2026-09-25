@@ -170,6 +170,9 @@ class TypeSchema:
     origin_type_index: int = dataclasses.field(default=_ORIGIN_TYPE_INDEX_UNKNOWN, repr=False)
     fallback: "TypeSchema | None" = None
     named_args: "dict[str, tuple[TypeSchema, ...]] | None" = None
+    #: The key the schema was parsed from when it was folded into ``origin``
+    #: (``"ffi.BigInt"`` for an ``int`` origin); ``None`` otherwise. Not part of equality.
+    type_key: str | None = dataclasses.field(default=None, repr=False, compare=False)
 
     def __post_init__(self):
         origin = self.origin
@@ -300,10 +303,13 @@ class TypeSchema:
             raise TypeError(
                 f"expected schema dict with 'type' key, got {type(obj).__name__}"
             )
-        origin = obj["type"]
-        if not isinstance(origin, str):
+        raw_origin = obj["type"]
+        if not isinstance(raw_origin, str):
             raise TypeError("schema type must be a string")
-        origin = _TYPE_SCHEMA_ORIGIN_CONVERTER.get(origin, origin)
+        origin = _TYPE_SCHEMA_ORIGIN_CONVERTER.get(raw_origin, raw_origin)
+        # Keep the key the converter folded away (`ffi.BigInt` -> `int`) for
+        # consumers that must tell the two apart, such as the Rust stub generator.
+        type_key = raw_origin if raw_origin != origin else None
         fallback = TypeSchema.from_json_obj(obj["fallback"]) if "fallback" in obj else None
         raw_named = obj.get("named_args")
         named_args = None
@@ -318,7 +324,7 @@ class TypeSchema:
                     raise TypeError("named_args lists must contain type schemas")
                 named_args[name] = tuple(TypeSchema.from_json_obj(value) for value in values)
         if "args" not in obj:
-            return TypeSchema(origin, fallback=fallback, named_args=named_args)
+            return TypeSchema(origin, fallback=fallback, named_args=named_args, type_key=type_key)
         raw_args = obj["args"]
         if (obj["type"] == "std::function" and isinstance(raw_args, (list, tuple))
                 and len(raw_args) == 2 and isinstance(raw_args[1], (list, tuple))):
@@ -326,14 +332,14 @@ class TypeSchema:
             ret = TypeSchema.from_json_obj(raw_args[0])
             params = tuple(TypeSchema.from_json_obj(value) for value in raw_args[1])
             return TypeSchema(origin, fallback=fallback,
-                              named_args={"return": (ret,), "params": params})
+                              named_args={"return": (ret,), "params": params}, type_key=type_key)
         if not isinstance(raw_args, (list, tuple)):
             raw_args = ()
         args = tuple(
             TypeSchema.from_json_obj(a) for a in raw_args
             if isinstance(a, dict)
         )
-        return TypeSchema(origin, args, fallback=fallback, named_args=named_args)
+        return TypeSchema(origin, args, fallback=fallback, named_args=named_args, type_key=type_key)
 
     @staticmethod
     def from_json_str(s: str) -> "TypeSchema":
