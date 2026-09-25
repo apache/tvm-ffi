@@ -357,7 +357,9 @@ unsafe impl NDAllocator for CPUNDAlloc {
 /// The view does not keep anything alive. The caller must ensure that the
 /// `DLTensor` it points to, and the memory that the `DLTensor` points to
 /// (data, shape and strides), outlive every use of the view. For an argument
-/// of an exported function, that is the duration of the call.
+/// of an exported function, that is the duration of the call. For the same
+/// reason, as in C++, a view cannot be moved into an owned [`Any`](crate::Any);
+/// use [`Tensor`] instead.
 #[derive(Clone, Copy, Debug)]
 pub struct TensorView {
     tensor: *const DLTensor,
@@ -428,14 +430,24 @@ impl TensorView {
         unsafe { std::slice::from_raw_parts(t.strides, t.ndim as usize) }
     }
 
-    /// Whether the elements are laid out in row-major order without gaps.
-    ///
-    /// # Panics
-    /// If the `DLTensor` has null strides; see [`strides`](Self::strides).
+    /// Whether the elements are laid out in row-major order without gaps, as
+    /// C++ `tvm::ffi::IsContiguous` decides: a `DLTensor` with null strides
+    /// or no elements is contiguous, and a dimension of extent 1 may have any
+    /// stride.
     pub fn is_contiguous(&self) -> bool {
+        if self.dltensor().strides.is_null() {
+            return true;
+        }
+        let shape = self.shape();
+        if shape.contains(&0) {
+            return true;
+        }
         let mut expected_stride = 1;
-        for (size, stride) in self.shape().iter().zip(self.strides()).rev() {
-            if *size != 1 && *stride != expected_stride {
+        for (size, stride) in shape.iter().zip(self.strides()).rev() {
+            if *size == 1 {
+                continue;
+            }
+            if *stride != expected_stride {
                 return false;
             }
             expected_stride *= size;
@@ -452,6 +464,11 @@ impl From<&Tensor> for TensorView {
     }
 }
 
+// As in C++, where `TypeTraits<DLTensor*>::MoveToAny` throws this, and
+// `TypeTraits<TensorView>` does not support moves.
+const NOT_OWNED: &str =
+    "DLTensor* cannot be held in Any as it does not retain ownership, use Tensor instead";
+
 unsafe impl AnyCompatible for TensorView {
     fn type_str() -> String {
         // make it consistent with c++ representation
@@ -465,8 +482,8 @@ unsafe impl AnyCompatible for TensorView {
         data.data_union.v_ptr = src.tensor as *mut core::ffi::c_void;
     }
 
-    unsafe fn move_to_any(src: Self, data: &mut TVMFFIAny) {
-        Self::copy_to_any_view(&src, data);
+    unsafe fn move_to_any(_src: Self, _data: &mut TVMFFIAny) {
+        panic!("{}", NOT_OWNED);
     }
 
     unsafe fn check_any_strict(data: &TVMFFIAny) -> bool {
@@ -479,8 +496,8 @@ unsafe impl AnyCompatible for TensorView {
         }
     }
 
-    unsafe fn move_from_any_after_check(data: &mut TVMFFIAny) -> Self {
-        Self::copy_from_any_view_after_check(data)
+    unsafe fn move_from_any_after_check(_data: &mut TVMFFIAny) -> Self {
+        panic!("{}", NOT_OWNED);
     }
 
     unsafe fn try_cast_from_any_view(data: &TVMFFIAny) -> std::result::Result<Self, ()> {

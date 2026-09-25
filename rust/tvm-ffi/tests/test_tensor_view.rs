@@ -93,6 +93,17 @@ fn test_tensor_view_contiguity() {
     let mut padded_strides = [4i64, 1];
     let padded = dltensor(&mut data, &mut shape, padded_strides.as_mut_ptr());
     assert!(!unsafe { TensorView::from_raw(&padded) }.is_contiguous());
+    // As in C++ `IsContiguous`: null strides and empty tensors are
+    // contiguous, and a dimension of extent 1 may have any stride.
+    let unstrided = dltensor(&mut data, &mut shape, std::ptr::null_mut());
+    assert!(unsafe { TensorView::from_raw(&unstrided) }.is_contiguous());
+    let mut row_shape = [1i64, 3];
+    let mut row_strides = [7i64, 1];
+    let row = dltensor(&mut data, &mut row_shape, row_strides.as_mut_ptr());
+    assert!(unsafe { TensorView::from_raw(&row) }.is_contiguous());
+    let mut empty_shape = [0i64, 3];
+    let empty = dltensor(&mut data, &mut empty_shape, padded_strides.as_mut_ptr());
+    assert!(unsafe { TensorView::from_raw(&empty) }.is_contiguous());
 }
 
 #[test]
@@ -101,4 +112,11 @@ fn test_tensor_view_null_strides() {
     let (mut data, mut shape) = ([0f32; 6], [2i64, 3]);
     let compact = dltensor(&mut data, &mut shape, std::ptr::null_mut());
     unsafe { TensorView::from_raw(&compact) }.strides();
+}
+
+#[test]
+#[should_panic(expected = "does not retain ownership")]
+fn test_tensor_view_cannot_move_to_any() {
+    let tensor = Tensor::from_slice(&[0.0f32; 6], &[2, 3]).unwrap();
+    let _ = Any::from(TensorView::from(&tensor));
 }
