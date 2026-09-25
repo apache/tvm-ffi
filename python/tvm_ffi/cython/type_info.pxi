@@ -156,6 +156,11 @@ _TYPE_INDEX_TO_ORIGIN[kTVMFFISmallBytes] = "bytes"
 _TYPE_INDEX_TO_ORIGIN[kTVMFFIObjectRValueRef] = "Object"
 _TYPE_INDEX_TO_ORIGIN[kTVMFFIBigInt] = "int"
 
+# Folds that lose information: the folded origin is also a native type, so the
+# schema retains the key it was parsed from (``TypeSchema.type_key``).
+_TYPE_INDEX_TO_RETAINED_TYPE_KEY = {kTVMFFIBigInt: "ffi.BigInt"}
+_RETAINED_TYPE_KEYS = frozenset(_TYPE_INDEX_TO_RETAINED_TYPE_KEY.values())
+
 
 @dataclasses.dataclass(repr=False)
 class TypeSchema:
@@ -273,9 +278,11 @@ class TypeSchema:
             )
         raw_origin = obj["type"]
         origin = _TYPE_SCHEMA_ORIGIN_CONVERTER.get(raw_origin, raw_origin)
-        # Keep the key the converter folded away (`ffi.BigInt` -> `int`) for
-        # consumers that must tell the two apart, such as the Rust stub generator.
-        type_key = raw_origin if raw_origin != origin else None
+        # Keep the key only when the fold loses it (`ffi.BigInt` -> `int`, where
+        # `int` is also a native type) for consumers that must tell the two apart,
+        # such as the Rust stub generator. Other folds (`ffi.String` -> `str`) keep
+        # None so a `ty-map` entry for the origin is not shadowed by the key's.
+        type_key = raw_origin if raw_origin in _RETAINED_TYPE_KEYS else None
         if "args" not in obj:
             return TypeSchema(origin, type_key=type_key)
         raw_args = obj["args"]
@@ -314,7 +321,12 @@ class TypeSchema:
         origin = _TYPE_INDEX_TO_ORIGIN.get(type_index, None)
         if origin is None:
             origin = _type_index_to_key(type_index)
-        return TypeSchema(origin, args, origin_type_index=type_index)
+        return TypeSchema(
+            origin,
+            args,
+            origin_type_index=type_index,
+            type_key=_TYPE_INDEX_TO_RETAINED_TYPE_KEY.get(type_index),
+        )
 
     @staticmethod
     def from_annotation(annotation: object) -> "TypeSchema":
@@ -617,13 +629,18 @@ class TypeSchema:
             return f"{origin}[{args}]"
 
     def to_json(self) -> dict[str, Any]:
-        """Convert a TypeSchema to a JSON-compatible dict."""
+        """Convert a TypeSchema to a JSON-compatible dict.
+
+        A retained :attr:`type_key` is written back in place of the folded origin
+        (``ffi.BigInt`` rather than ``int``), so parsing the result restores the key.
+        """
+        origin = self.type_key or self.origin
         if self.args is not None and (self.args or self.origin == "tuple"):
             return {
-                "type": self.origin,
+                "type": origin,
                 "args": [a.to_json() for a in self.args],
             }
-        return {"type": self.origin}
+        return {"type": origin}
 
 
 def _annotation_union(args):

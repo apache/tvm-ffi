@@ -4657,3 +4657,23 @@ class TestParsedTypeKey:
         s = TypeSchema.from_json_str('{"type":"Optional","args":[{"type":"ffi.BigInt"}]}')
         assert s.type_key is None
         assert s.args[0].type_key == "ffi.BigInt"
+
+    def test_lossless_fold_keeps_no_key(self) -> None:
+        # `ffi.String` -> `str` loses nothing (`str` only ever means a string), so no key is
+        # kept and a `ty-map` entry for the origin is not shadowed by one for the key.
+        s = TypeSchema.from_json_str('{"type":"ffi.String"}')
+        assert (s.origin, s.type_key) == ("str", None)
+
+    def test_from_type_index_agrees_with_json(self) -> None:
+        big_int_index = _object_type_key_to_index("ffi.BigInt")
+        assert big_int_index is not None
+        s = TypeSchema.from_type_index(big_int_index)
+        assert (s.origin, s.type_key) == ("int", "ffi.BigInt")
+        assert TypeSchema.from_type_index(1).type_key is None  # kTVMFFIInt
+
+    def test_to_json_round_trips_the_key(self) -> None:
+        obj = {"type": "Optional", "args": [{"type": "ffi.BigInt"}]}
+        s = TypeSchema.from_json_obj(obj)
+        assert s.to_json() == obj
+        assert TypeSchema.from_json_obj(s.to_json()).args[0].type_key == "ffi.BigInt"
+        assert TypeSchema("int").to_json() == {"type": "int"}

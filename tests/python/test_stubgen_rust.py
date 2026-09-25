@@ -912,6 +912,22 @@ def test_complete_big_int_field_mirrors() -> None:
     assert {"tvm_ffi::BigInt", "tvm_ffi::Optional"} <= _uses(imports)
 
 
+def test_ty_map_origin_override_survives_lossless_fold() -> None:
+    """A `ty-map` for `str` still wins for a reflected `ffi.String`: the lossless fold keeps no key."""
+    name = TypeSchema.from_json_str('{"type":"ffi.String"}')
+    assert (name.origin, name.type_key) == ("str", None)
+    info = _info("demo.Named", (_field("name", name, 24, 16),), total_size=40, is_final=True)
+    ty_map = dict(RUST.default_ty_map())
+    ty_map["str"] = "crate::MyStr"
+    imports = RustImports()
+    assert info.type_key is not None
+    block = _object_block(info.type_key)
+    generate_rust_object(block, ty_map, imports, Options(), info, ALL_DECLARED)
+    text = "\n".join(block.lines[1:-1])
+    assert "    pub name: MyStr,\n" in text
+    assert "crate::MyStr" in _uses(imports)
+
+
 @pytest.fixture(scope="module")
 def big_int_holder() -> ObjectInfo:
     """Reflection of a C++ class with `BigInt` fields, compiled and registered at test time."""
