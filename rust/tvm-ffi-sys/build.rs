@@ -83,7 +83,12 @@ fn main() {
     println!("cargo:rustc-link-search=native={}", lib_dir);
     // link the library
     println!("cargo:rustc-link-lib=dylib=tvm_ffi");
-    println!("cargo:rustc-link-lib=dylib=tvm_ffi_testing");
+    // The testing library registers the `testing.*` global functions that
+    // tests call; link it only when asked, so that users of the crate do not
+    // depend on it at run time.
+    if env::var_os("CARGO_FEATURE_TESTING").is_some() {
+        println!("cargo:rustc-link-lib=dylib=tvm_ffi_testing");
+    }
     // update the LD_LIBRARY_PATH environment variable
     update_ld_library_path(&lib_dir);
 }

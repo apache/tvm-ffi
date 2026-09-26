@@ -33,6 +33,10 @@ paste = "1.0"
 tvm-ffi-sys = { version = "0.1.0-alpha.0", path = "../tvm-ffi-sys" }
 tvm-ffi-macros = { version = "0.1.0-alpha.0", path = "../tvm-ffi-macros" }
 
+[dev-dependencies]
+# The tests call the `testing.*` global functions.
+tvm-ffi-sys = { version = "0.1.0-alpha.0", path = "../tvm-ffi-sys", features = ["testing"] }
+
 # only needed for example building
 [features]
 example = []
