@@ -22,7 +22,9 @@ use crate::dtype::AsDLDataType;
 use crate::dtype::DLDataTypeExt;
 use crate::error::Result;
 use crate::object::{Object, ObjectArc, ObjectCore, ObjectCoreWithExtraItems};
+use crate::type_traits::AnyCompatible;
 use tvm_ffi_sys::dlpack::{DLDataType, DLDevice, DLDeviceType, DLTensor};
+use tvm_ffi_sys::TVMFFIAny;
 use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
 
 //-----------------------------------------------------
@@ -340,5 +342,175 @@ unsafe impl NDAllocator for CPUNDAlloc {
         let size = numel * item_size;
         let layout = std::alloc::Layout::from_size_align(size, Self::MIN_ALIGN).unwrap();
         std::alloc::dealloc(tensor.data as *mut u8, layout);
+    }
+}
+
+/// A non-owning view of a tensor: a pointer to a `DLTensor`.
+///
+/// This mirrors `tvm::ffi::TensorView` in C++. A function argument of this
+/// type accepts both a borrowed `DLTensor*` (type index `kTVMFFIDLTensorPtr`,
+/// how C and C++ callers pass tensors) and a `Tensor` object (type index
+/// `kTVMFFITensor`), and is passed on as a `DLTensor*`. Prefer it over
+/// [`Tensor`] for arguments of exported functions that only read a tensor's
+/// metadata and data.
+///
+/// The view does not keep anything alive. The caller must ensure that the
+/// `DLTensor` it points to, and the memory that the `DLTensor` points to
+/// (data, shape and strides), outlive every use of the view. For an argument
+/// of an exported function, that is the duration of the call. For the same
+/// reason, as in C++, a view cannot be moved into an owned [`Any`](crate::Any);
+/// use [`Tensor`] instead.
+#[derive(Clone, Copy, Debug)]
+pub struct TensorView {
+    tensor: *const DLTensor,
+}
+
+impl TensorView {
+    /// Creates a view of a `DLTensor`.
+    ///
+    /// # Safety
+    /// `tensor` must be non-null and valid for every use of the view.
+    pub unsafe fn from_raw(tensor: *const DLTensor) -> Self {
+        assert!(!tensor.is_null(), "TensorView of a null DLTensor");
+        Self { tensor }
+    }
+
+    /// The viewed `DLTensor`.
+    pub fn as_raw(&self) -> *const DLTensor {
+        self.tensor
+    }
+
+    fn dltensor(&self) -> &DLTensor {
+        unsafe { &*self.tensor }
+    }
+
+    /// The data pointer, as in the `DLTensor`; `byte_offset` is not applied.
+    pub fn data_ptr(&self) -> *mut core::ffi::c_void {
+        self.dltensor().data
+    }
+
+    pub fn device(&self) -> DLDevice {
+        self.dltensor().device
+    }
+
+    pub fn dtype(&self) -> DLDataType {
+        self.dltensor().dtype
+    }
+
+    pub fn ndim(&self) -> usize {
+        self.dltensor().ndim as usize
+    }
+
+    pub fn shape(&self) -> &[i64] {
+        let t = self.dltensor();
+        if t.ndim == 0 {
+            return &[];
+        }
+        unsafe { std::slice::from_raw_parts(t.shape, t.ndim as usize) }
+    }
+
+    pub fn numel(&self) -> usize {
+        self.shape().iter().product::<i64>() as usize
+    }
+
+    /// The strides, in elements.
+    ///
+    /// # Panics
+    /// If the `DLTensor` has null strides and at least one dimension, which
+    /// DLPack forbids since v1.2, as C++ `TensorView::strides` checks.
+    pub fn strides(&self) -> &[i64] {
+        let t = self.dltensor();
+        if t.ndim == 0 {
+            return &[];
+        }
+        assert!(
+            !t.strides.is_null(),
+            "TensorView::strides of a DLTensor with null strides"
+        );
+        unsafe { std::slice::from_raw_parts(t.strides, t.ndim as usize) }
+    }
+
+    /// Whether the elements are laid out in row-major order without gaps, as
+    /// C++ `tvm::ffi::IsContiguous` decides: a `DLTensor` with null strides
+    /// or no elements is contiguous, and a dimension of extent 1 may have any
+    /// stride.
+    pub fn is_contiguous(&self) -> bool {
+        if self.dltensor().strides.is_null() {
+            return true;
+        }
+        let shape = self.shape();
+        if shape.contains(&0) {
+            return true;
+        }
+        let mut expected_stride = 1;
+        for (size, stride) in shape.iter().zip(self.strides()).rev() {
+            if *size == 1 {
+                continue;
+            }
+            if *stride != expected_stride {
+                return false;
+            }
+            expected_stride *= size;
+        }
+        true
+    }
+}
+
+impl From<&Tensor> for TensorView {
+    fn from(tensor: &Tensor) -> Self {
+        Self {
+            tensor: &tensor.data.dltensor as *const DLTensor,
+        }
+    }
+}
+
+// As in C++, where `TypeTraits<DLTensor*>::MoveToAny` throws this, and
+// `TypeTraits<TensorView>` does not support moves.
+const NOT_OWNED: &str =
+    "DLTensor* cannot be held in Any as it does not retain ownership, use Tensor instead";
+
+unsafe impl AnyCompatible for TensorView {
+    fn type_str() -> String {
+        // make it consistent with c++ representation
+        "DLTensor*".to_string()
+    }
+
+    unsafe fn copy_to_any_view(src: &Self, data: &mut TVMFFIAny) {
+        data.type_index = TypeIndex::kTVMFFIDLTensorPtr as i32;
+        data.small_str_len = 0;
+        data.data_union.v_uint64 = 0;
+        data.data_union.v_ptr = src.tensor as *mut core::ffi::c_void;
+    }
+
+    unsafe fn move_to_any(_src: Self, _data: &mut TVMFFIAny) {
+        panic!("{}", NOT_OWNED);
+    }
+
+    unsafe fn check_any_strict(data: &TVMFFIAny) -> bool {
+        data.type_index == TypeIndex::kTVMFFIDLTensorPtr as i32
+    }
+
+    unsafe fn copy_from_any_view_after_check(data: &TVMFFIAny) -> Self {
+        Self {
+            tensor: data.data_union.v_ptr as *const DLTensor,
+        }
+    }
+
+    unsafe fn move_from_any_after_check(_data: &mut TVMFFIAny) -> Self {
+        panic!("{}", NOT_OWNED);
+    }
+
+    unsafe fn try_cast_from_any_view(data: &TVMFFIAny) -> std::result::Result<Self, ()> {
+        if data.type_index == TypeIndex::kTVMFFIDLTensorPtr as i32 {
+            Ok(Self::copy_from_any_view_after_check(data))
+        } else if data.type_index == TypeIndex::kTVMFFITensor as i32 {
+            // A tensor object's DLTensor follows its object header.
+            let obj = data.data_union.v_obj as *const TensorObj;
+            Ok(Self {
+                tensor: &(*obj).dltensor as *const DLTensor,
+            })
+        } else {
+            Err(())
+        }
     }
 }
