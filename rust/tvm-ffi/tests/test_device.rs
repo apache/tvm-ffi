@@ -34,6 +34,36 @@ fn test_device_stream() {
 }
 
 #[test]
+fn test_device_stream_restored_after_error() {
+    let device = DLDevice::new(DLDeviceType::kDLCPU, 0);
+    let dummy_stream = 3 as TVMFFIStreamHandle;
+    // SAFETY: dummy_stream is a test value; CPU device accepts any stream handle.
+    let result: Result<()> = unsafe {
+        with_stream(&device, dummy_stream, || {
+            Err(Error::new(VALUE_ERROR, "closure failed", ""))
+        })
+    };
+    assert_eq!(result.unwrap_err().message(), "closure failed");
+    assert_eq!(current_stream(&device), std::ptr::null_mut());
+}
+
+#[test]
+fn test_device_stream_restored_after_panic() {
+    let device = DLDevice::new(DLDeviceType::kDLCPU, 0);
+    let dummy_stream = 4 as TVMFFIStreamHandle;
+    let unwound = std::panic::catch_unwind(|| {
+        // SAFETY: dummy_stream is a test value; CPU device accepts any stream handle.
+        unsafe {
+            with_stream(&device, dummy_stream, || -> Result<()> {
+                panic!("closure panicked")
+            })
+        }
+    });
+    assert!(unwound.is_err());
+    assert_eq!(current_stream(&device), std::ptr::null_mut());
+}
+
+#[test]
 fn test_device_any_conversion() {
     let device = DLDevice::new(DLDeviceType::kDLCPU, 0);
     let any_device: Any = device.into();
