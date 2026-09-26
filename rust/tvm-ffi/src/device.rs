@@ -28,6 +28,9 @@ pub fn current_stream(device: &DLDevice) -> TVMFFIStreamHandle {
 }
 /// Call `f` with the device stream temporarily set to `stream`.
 ///
+/// The previous stream is restored however `f` exits: when it returns a
+/// value, when it returns an error, and when it panics.
+///
 /// # Safety
 ///
 /// `stream` must be a valid stream handle for the given device, or null.
@@ -45,16 +48,48 @@ pub unsafe fn with_stream<T>(
             &mut prev_stream as *mut TVMFFIStreamHandle
         ))?;
     }
-    let result = f()?;
-    unsafe {
-        crate::check_safe_call!(TVMFFIEnvSetStream(
-            device.device_type as i32,
-            device.device_id,
-            prev_stream,
-            std::ptr::null_mut()
-        ))?;
+    let restore = RestoreStream {
+        device: *device,
+        stream: prev_stream,
+    };
+    let result = f();
+    let restored = restore.restore();
+    let value = result?;
+    restored?;
+    Ok(value)
+}
+
+/// Restores a device's previous stream when dropped, so that an unwinding
+/// panic in `with_stream`'s closure still restores it.
+struct RestoreStream {
+    device: DLDevice,
+    stream: TVMFFIStreamHandle,
+}
+
+impl RestoreStream {
+    fn set(&self) -> i32 {
+        unsafe {
+            TVMFFIEnvSetStream(
+                self.device.device_type as i32,
+                self.device.device_id,
+                self.stream,
+                std::ptr::null_mut(),
+            )
+        }
     }
-    Ok(result)
+
+    /// Restores the stream now, reporting a failure.
+    fn restore(self) -> Result<()> {
+        let restore = std::mem::ManuallyDrop::new(self);
+        crate::check_safe_call!(restore.set())
+    }
+}
+
+impl Drop for RestoreStream {
+    fn drop(&mut self) {
+        // Only reached while unwinding; a failure cannot be reported there.
+        self.set();
+    }
 }
 
 /// AnyCompatible for DLDevice
