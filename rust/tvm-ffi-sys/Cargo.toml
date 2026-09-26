@@ -27,3 +27,7 @@ license = "Apache-2.0"
 [lib]
 name = "tvm_ffi_sys"
 crate-type = ["lib"]
+
+[features]
+# Link libtvm_ffi_testing, which registers the `testing.*` global functions.
+testing = []
