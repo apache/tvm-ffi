@@ -188,6 +188,7 @@ def _render_type(schema: TypeSchema) -> tuple[str | None, RustImports]:
 def test_render_rust_type_value_positions() -> None:
     assert _render_type(TypeSchema("int"))[0] == "i64"
     assert _render_type(TypeSchema("str"))[0] == "String"
+    assert _render_type(TypeSchema("ffi.BigInt"))[0] == "BigInt"
     assert _render_type(TypeSchema("Any"))[0] == "Any"
     assert _render_type(TypeSchema("Callable", (TypeSchema("int"),)))[0] == "Function"
     assert _render_type(TypeSchema("Optional", (TypeSchema("str"),)))[0] == "Option<String>"

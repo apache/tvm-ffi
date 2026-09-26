@@ -122,6 +122,7 @@ crate::impl_into_arg_holder_default!(
     f64,
     String,
     Bytes,
+    crate::big_int::BigInt,
     Any,
     crate::DLDataType,
     crate::DLDevice
@@ -231,6 +232,7 @@ crate::impl_arg_into_ref!(
     f64,
     String,
     Bytes,
+    crate::big_int::BigInt,
     Any,
     crate::DLDataType,
     crate::DLDevice

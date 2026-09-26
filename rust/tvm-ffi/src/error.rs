@@ -48,6 +48,7 @@ pub const ATTRIBUTE_ERROR: ErrorKind = ErrorKind("AttributeError");
 pub const KEY_ERROR: ErrorKind = ErrorKind("KeyError");
 pub const INDEX_ERROR: ErrorKind = ErrorKind("IndexError");
 pub const INTERNAL_ERROR: ErrorKind = ErrorKind("InternalError");
+pub const OVERFLOW_ERROR: ErrorKind = ErrorKind("OverflowError");
 
 /// error object
 #[repr(C)]

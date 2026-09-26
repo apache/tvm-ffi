@@ -17,6 +17,7 @@
  * under the License.
  */
 pub mod any;
+pub mod big_int;
 pub mod collections;
 pub mod derive;
 pub mod device;
@@ -37,6 +38,7 @@ pub mod type_traits;
 pub use tvm_ffi_sys;
 
 pub use crate::any::{Any, AnyView};
+pub use crate::big_int::BigInt;
 pub use crate::collections::array::Array;
 pub use crate::collections::map::Map;
 pub use crate::collections::shape::Shape;
@@ -45,7 +47,8 @@ pub use crate::device::{current_stream, with_stream};
 pub use crate::dtype::DLDataTypeExt;
 pub use crate::error::{Error, ErrorKind, Result};
 pub use crate::error::{
-    ATTRIBUTE_ERROR, INDEX_ERROR, INTERNAL_ERROR, KEY_ERROR, RUNTIME_ERROR, TYPE_ERROR, VALUE_ERROR,
+    ATTRIBUTE_ERROR, INDEX_ERROR, INTERNAL_ERROR, KEY_ERROR, OVERFLOW_ERROR, RUNTIME_ERROR,
+    TYPE_ERROR, VALUE_ERROR,
 };
 pub use crate::extra::module::Module;
 pub use crate::extra::structural_mutate::{

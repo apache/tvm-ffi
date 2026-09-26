@@ -83,6 +83,7 @@ impl_optional_compatible!(
     crate::DLDevice,
     String,
     Bytes,
+    crate::big_int::BigInt,
 );
 
 unsafe impl<T: OptionalCompatible> OptionalCompatible for Option<T> {}
