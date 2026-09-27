@@ -123,6 +123,63 @@ fn test_object_arc_with_extra_items() {
     assert_eq!(delete_counter.load(Ordering::Relaxed), 1);
 }
 
+// Records the size of this thread's latest deallocation, to check the layout an
+// object is released with.
+struct RecordingAllocator;
+
+thread_local! {
+    static LAST_DEALLOC_SIZE: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+unsafe impl std::alloc::GlobalAlloc for RecordingAllocator {
+    unsafe fn alloc(&self, layout: std::alloc::Layout) -> *mut u8 {
+        std::alloc::System.alloc(layout)
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: std::alloc::Layout) {
+        let _ = LAST_DEALLOC_SIZE.try_with(|size| size.set(layout.size()));
+        std::alloc::System.dealloc(ptr, layout)
+    }
+}
+
+#[global_allocator]
+static ALLOCATOR: RecordingAllocator = RecordingAllocator;
+
+#[test]
+fn test_object_arc_with_extra_items_outlived_by_weak_ref() {
+    use std::sync::atomic::fence;
+    use tvm_ffi_sys::COMBINED_REF_COUNT_WEAK_ONE as WEAK_ONE;
+    let delete_counter = Arc::new(AtomicU32::new(0));
+    let mut obj_arc =
+        ObjectArc::new_with_extra_items(TestIntObj::new(13, delete_counter.clone(), 10));
+    unsafe {
+        let header = ObjectArc::as_raw_mut(&mut obj_arc) as *mut TVMFFIObject;
+        // A weak reference held the way C++ `WeakObjectPtr` does (`Object::IncWeakRef`).
+        (*header)
+            .combined_ref_count
+            .fetch_add(WEAK_ONE, Ordering::Relaxed);
+        drop(obj_arc);
+        // The data is dropped; the weak reference still sees an intact, expired header.
+        assert_eq!(delete_counter.load(Ordering::Relaxed), 1);
+        assert_eq!(
+            (*header).combined_ref_count.load(Ordering::Relaxed),
+            WEAK_ONE
+        );
+        // `Object::DecWeakRef`: the last weak reference frees the full allocation.
+        let old = (*header)
+            .combined_ref_count
+            .fetch_sub(WEAK_ONE, Ordering::Release);
+        assert_eq!(old, WEAK_ONE);
+        fence(Ordering::Acquire);
+        let weak = tvm_ffi_sys::TVMFFIObjectDeleterFlagBitMask::kTVMFFIObjectDeleterFlagBitMaskWeak;
+        ((*header).deleter.unwrap())(header.cast(), weak as i32);
+    }
+    assert_eq!(
+        LAST_DEALLOC_SIZE.with(|size| size.get()),
+        std::mem::size_of::<TestIntObj>() + 10 * std::mem::size_of::<u64>()
+    );
+}
+
 #[test]
 fn test_object_arc_from_raw() {
     unsafe {

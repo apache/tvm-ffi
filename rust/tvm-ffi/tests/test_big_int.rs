@@ -1157,6 +1157,43 @@ fn test_big_int_native_objects_cross_runtime() {
     assert_eq!(AnyView::from(&held).debug_strong_count(), Some(1));
 }
 
+/// Hold a weak reference as C++ `WeakObjectPtr` does (`Object::IncWeakRef`) while the
+/// last strong reference to heap `value` goes, then release it (`Object::DecWeakRef`).
+/// Returns the (strong, weak) counts the weak reference saw and whether it freed.
+fn outlive_with_weak_ref(value: BigInt) -> (u64, u64, bool) {
+    use std::sync::atomic::{fence, Ordering};
+    use tvm_ffi_sys::COMBINED_REF_COUNT_WEAK_ONE as WEAK_ONE;
+    unsafe {
+        let raw = Any::into_raw_ffi_any(Any::from(value));
+        let header = raw.data_union.v_obj;
+        (*header)
+            .combined_ref_count
+            .fetch_add(WEAK_ONE, Ordering::Relaxed);
+        drop(Any::from_raw_ffi_any(raw));
+        let count = (*header).combined_ref_count.load(Ordering::Relaxed);
+        let last = (*header)
+            .combined_ref_count
+            .fetch_sub(WEAK_ONE, Ordering::Release)
+            == WEAK_ONE;
+        if last {
+            fence(Ordering::Acquire);
+            let weak =
+                tvm_ffi_sys::TVMFFIObjectDeleterFlagBitMask::kTVMFFIObjectDeleterFlagBitMaskWeak;
+            ((*header).deleter.unwrap())(header.cast(), weak as i32);
+        }
+        (count & 0xFFFF_FFFF, count >> 32, last)
+    }
+}
+
+#[test]
+fn test_big_int_objects_outlived_by_weak_ref() {
+    // Both allocation paths: `from_words` (crate allocator) and an operator result.
+    for value in [BigInt::from(u64::MAX), &wide() + &wide()] {
+        assert!(value.to_i64().is_none());
+        assert_eq!(outlive_with_weak_ref(value), (0, 1, true));
+    }
+}
+
 #[test]
 fn test_big_int_wide_results_spill_to_heap_buffers() {
     // Results and division scratch wider than the 32-word stack buffer take the heap path.

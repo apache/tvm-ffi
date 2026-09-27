@@ -435,14 +435,18 @@ pub mod unsafe_ {
             .unwrap();
             std::alloc::dealloc(ptr as *mut u8, layout);
         } else {
-            assert_eq!(std::mem::size_of::<T>() % std::mem::size_of::<u64>(), 0);
+            // Weak references keep using the header, so the weak phase finds the item
+            // count in the first word after it.
+            let header_size = std::mem::size_of::<TVMFFIObject>();
+            assert!(std::mem::size_of::<T>() >= header_size + std::mem::size_of::<u64>());
+            let count_slot = (ptr as *mut u8).add(header_size) as *mut u64;
             if flags & kTVMFFIObjectDeleterFlagBitMaskStrong as i32 != 0 {
                 let extra_items_count = T::extra_items_count(&(*obj));
                 std::ptr::drop_in_place(obj);
-                std::ptr::write(obj as *mut u64, extra_items_count as u64);
+                std::ptr::write(count_slot, extra_items_count as u64);
             }
             if flags & kTVMFFIObjectDeleterFlagBitMaskWeak as i32 != 0 {
-                let extra_items_count = std::ptr::read(obj as *mut u64) as usize;
+                let extra_items_count = std::ptr::read(count_slot) as usize;
                 let layout = std::alloc::Layout::from_size_align(
                     std::mem::size_of::<T>() + extra_items_count * std::mem::size_of::<U>(),
                     std::mem::align_of::<T>(),
