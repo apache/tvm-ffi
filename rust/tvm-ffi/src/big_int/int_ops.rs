@@ -22,10 +22,10 @@
 //! first, and returns a canonical `BigInt`. The functions mirror C++
 //! `details::int_ops` in `include/tvm/ffi/big_int.h` one for one; keep them in
 //! sync. Word arithmetic wraps modulo 2^64 on purpose, hence the explicit
-//! `wrapping_*`/`overflowing_*` forms. Unlike C++, which builds each result in a
-//! fresh object and prunes it afterwards, the algorithms write into a
-//! [`WordsBuf`] and finish with [`BigInt::from_words`], so a result that fits
-//! `i64` never touches the heap and a wider one is allocated at its exact length.
+//! `wrapping_*`/`overflowing_*` forms. As in C++, a result whose words are each
+//! computed once is written straight into a fresh object and pruned in place
+//! (`BigInt::build`); multiplication and division accumulate into a zeroed
+//! [`WordsBuf`] and finish with [`BigInt::from_words`].
 #![allow(clippy::needless_range_loop)]
 
 use super::BigInt;
@@ -61,19 +61,6 @@ impl WordsBuf {
         }
         self.heap.resize(len, 0);
         &mut self.heap
-    }
-
-    /// Like `zeroed`, but `OverflowError` instead of an abort when the words cannot
-    /// be allocated: only a left shift can outgrow its operands arbitrarily.
-    fn try_zeroed(&mut self, len: usize) -> Result<&mut [i64]> {
-        if len <= INLINE_WORDS {
-            return Ok(self.inline_zeroed(len));
-        }
-        self.heap
-            .try_reserve_exact(len)
-            .map_err(|_| overflow("BigInt allocation is too large"))?;
-        self.heap.resize(len, 0);
-        Ok(&mut self.heap)
     }
 
     #[inline]
@@ -223,49 +210,40 @@ pub(super) fn shr_i64(a: i64, b: i64) -> Result<i64> {
 pub(super) fn add(a: &[i64], b: &[i64]) -> BigInt {
     // One sign-extension word retains the carry out until normalization.
     let size = a.len().max(b.len()) + 1;
-    let mut buf = WordsBuf::new();
-    let data = buf.zeroed(size);
     let (ext_a, ext_b) = (extension(a), extension(b));
     let mut carry = 0u64;
-    for (i, out) in data.iter_mut().enumerate() {
+    BigInt::build(size, |i| {
         let (sum, c1) = word_at(a, i, ext_a).overflowing_add(word_at(b, i, ext_b));
         let (result, c2) = sum.overflowing_add(carry);
         carry = u64::from(c1 | c2);
-        *out = result as i64;
-    }
-    BigInt::from_words(data)
+        result as i64
+    })
 }
 
 /// Subtract signed integers: a - b = a + !b + 1 after sign extension.
 pub(super) fn sub(a: &[i64], b: &[i64]) -> BigInt {
     let size = a.len().max(b.len()) + 1;
-    let mut buf = WordsBuf::new();
-    let data = buf.zeroed(size);
     let (ext_a, ext_b) = (extension(a), extension(b));
     let mut carry = 1u64;
-    for (i, out) in data.iter_mut().enumerate() {
+    BigInt::build(size, |i| {
         let (sum, c1) = word_at(a, i, ext_a).overflowing_add(!word_at(b, i, ext_b));
         let (result, c2) = sum.overflowing_add(carry);
         carry = u64::from(c1 | c2);
-        *out = result as i64;
-    }
-    BigInt::from_words(data)
+        result as i64
+    })
 }
 
 /// Negate a signed integer: -x = !x + 1, with room for negating a minimum value.
 pub(super) fn negate(x: &[i64]) -> BigInt {
     let size = x.len() + 1;
-    let mut buf = WordsBuf::new();
-    let data = buf.zeroed(size);
     let ext = extension(x);
     let mut carry = 1u64;
-    for (i, out) in data.iter_mut().enumerate() {
+    BigInt::build(size, |i| {
         let word = !word_at(x, i, ext);
         let (result, overflow) = word.overflowing_add(carry);
         carry = u64::from(overflow);
-        *out = result as i64;
-    }
-    BigInt::from_words(data)
+        result as i64
+    })
 }
 
 /// Negate two's-complement words in place, modulo their fixed width.
@@ -320,13 +298,10 @@ pub(super) fn mul(a: &[i64], b: &[i64]) -> BigInt {
 /// Apply a sign-extended bitwise operation.
 fn bitwise(a: &[i64], b: &[i64], op: impl Fn(u64, u64) -> u64) -> BigInt {
     let size = a.len().max(b.len());
-    let mut buf = WordsBuf::new();
-    let data = buf.zeroed(size);
     let (ext_a, ext_b) = (extension(a), extension(b));
-    for (i, out) in data.iter_mut().enumerate() {
-        *out = op(word_at(a, i, ext_a), word_at(b, i, ext_b)) as i64;
-    }
-    BigInt::from_words(data)
+    BigInt::build(size, |i| {
+        op(word_at(a, i, ext_a), word_at(b, i, ext_b)) as i64
+    })
 }
 
 pub(super) fn and(a: &[i64], b: &[i64]) -> BigInt {
@@ -343,12 +318,7 @@ pub(super) fn xor(a: &[i64], b: &[i64]) -> BigInt {
 
 /// Complement all sign-extended bits.
 pub(super) fn not(x: &[i64]) -> BigInt {
-    let mut buf = WordsBuf::new();
-    let data = buf.zeroed(x.len());
-    for (out, &word) in data.iter_mut().zip(x) {
-        *out = !word;
-    }
-    BigInt::from_words(data)
+    BigInt::build(x.len(), |i| !x[i])
 }
 
 /// Convert a nonnegative shift count; `None` when it does not fit `usize`.
@@ -363,6 +333,10 @@ fn shift_count(count: &[i64]) -> Result<Option<usize>> {
 }
 
 /// Shift a signed integer left, growing as needed.
+///
+/// Inlined so callers unwrap the `Result` in registers: moving a `BigInt` out of a
+/// returned `Result` reloads it in one 16-byte read that store forwarding misses.
+#[inline]
 pub(super) fn shl(x: &[i64], count: &[i64]) -> Result<BigInt> {
     let shift = shift_count(count)?;
     if x.len() == 1 && x[0] == 0 {
@@ -377,19 +351,20 @@ pub(super) fn shl(x: &[i64], count: &[i64]) -> Result<BigInt> {
         .checked_add(whole)
         .and_then(|size| size.checked_add(1))
         .ok_or_else(too_large)?;
-    let mut buf = WordsBuf::new();
-    let data = buf.try_zeroed(size)?;
     let ext = extension(x);
-    // The low `whole` words stay zero.
-    for i in whole..size {
+    BigInt::try_build(size, |i| {
+        // The low `whole` words are zero.
+        if i < whole {
+            return 0;
+        }
         let j = i - whole;
         let mut word = word_at(x, j, ext) << part;
         if part != 0 && j != 0 {
             word |= (x[j - 1] as u64) >> (64 - part);
         }
-        data[i] = word as i64;
-    }
-    Ok(BigInt::from_words(data))
+        word as i64
+    })
+    .ok_or_else(|| overflow("BigInt allocation is too large"))
 }
 
 /// Shift a signed integer right with sign extension; huge counts give 0 or -1.
@@ -401,18 +376,16 @@ pub(super) fn shr(x: &[i64], count: &[i64]) -> Result<BigInt> {
     let whole = shift / 64;
     let size = x.len() - whole;
     let part = (shift % 64) as u32;
-    let mut buf = WordsBuf::new();
-    let data = buf.zeroed(size);
     let ext = extension(x);
-    for i in 0..size {
+    let result = BigInt::build(size, |i| {
         let mut word = (x[i + whole] as u64) >> part;
         // The last partial word draws its high bits from the sign extension.
         if part != 0 {
             word |= word_at(x, i + whole + 1, ext) << (64 - part);
         }
-        data[i] = word as i64;
-    }
-    Ok(BigInt::from_words(data))
+        word as i64
+    });
+    Ok(result)
 }
 
 // Absolute-value access without copying operands: negation carries through the

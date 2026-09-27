@@ -23,7 +23,9 @@ use crate::derive::Object;
 use crate::error::{Error, Result, OVERFLOW_ERROR, VALUE_ERROR};
 use crate::object::{unsafe_, Object, ObjectArc, ObjectCoreWithExtraItems};
 use crate::type_traits::AnyCompatible;
+use std::alloc::Layout;
 use std::cmp::Ordering;
+use std::ffi::c_void;
 use std::fmt::{Debug, Display, Write as _};
 use std::hash::{Hash, Hasher};
 use std::ops::{
@@ -31,8 +33,10 @@ use std::ops::{
     Mul, MulAssign, Neg, Not, Rem, RemAssign, Shl, ShlAssign, Shr, ShrAssign, Sub, SubAssign,
 };
 use std::str::FromStr;
+use std::sync::atomic::AtomicU64;
+use tvm_ffi_sys::TVMFFIObjectDeleterFlagBitMask::kTVMFFIObjectDeleterFlagBitMaskWeak;
 use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
-use tvm_ffi_sys::{TVMFFIAny, TVMFFIAnyDataUnion, TVMFFIObject};
+use tvm_ffi_sys::{TVMFFIAny, TVMFFIAnyDataUnion, TVMFFIObject, COMBINED_REF_COUNT_BOTH_ONE};
 
 /// ABI stable arbitrary-precision signed integer for ffi.
 ///
@@ -73,6 +77,28 @@ unsafe impl ObjectCoreWithExtraItems for BigIntObj {
     }
 }
 
+// `BigInt::try_build` allocates from the C allocator like C++
+// `make_inplace_array_object`, so it can prune the logical size in place (C++
+// `ShrinkSize`): `free` needs no layout, unlike Rust's global allocator.
+extern "C" {
+    fn malloc(size: usize) -> *mut c_void;
+    fn free(ptr: *mut c_void);
+}
+
+/// Release an object from `BigInt::try_build` like C++ `ArrayHandler::Deleter_`;
+/// the words need no destructor.
+unsafe extern "C" fn delete_obj(ptr: *mut c_void, flags: i32) {
+    if flags & kTVMFFIObjectDeleterFlagBitMaskWeak as i32 != 0 {
+        free(ptr);
+    }
+}
+
+/// Layout of an object with `len` words; `None` beyond `isize::MAX` bytes.
+fn obj_layout(len: usize) -> Option<Layout> {
+    let words = Layout::array::<i64>(len).ok()?;
+    Some(Layout::new::<BigIntObj>().extend(words).ok()?.0)
+}
+
 impl BigInt {
     /// Create the integer zero.
     pub fn new() -> Self {
@@ -108,6 +134,7 @@ impl BigInt {
     ///
     /// Redundant sign-extension words are pruned and a value that fits `i64`
     /// is stored inline; an empty slice is zero.
+    #[inline]
     pub fn from_words(words: &[i64]) -> Self {
         let size = int_ops::normalized_len(words);
         if size <= 1 {
@@ -122,6 +149,46 @@ impl BigInt {
             BigIntObj::extra_items_mut(&mut obj).copy_from_slice(&words[..size]);
             Self::from_obj(ObjectArc::into_raw(obj) as *mut BigIntObj)
         }
+    }
+
+    /// Build from `len` words, word `i` being `word(i)` called in increasing order,
+    /// written straight into a fresh object that is then pruned in place like C++
+    /// `Normalize`; `None` when the object cannot be allocated.
+    #[inline]
+    fn try_build(len: usize, mut word: impl FnMut(usize) -> i64) -> Option<Self> {
+        let layout = obj_layout(len)?;
+        unsafe {
+            let obj = malloc(layout.size()).cast::<BigIntObj>();
+            if obj.is_null() {
+                return None;
+            }
+            let data = obj.add(1).cast::<i64>();
+            for i in 0..len {
+                data.add(i).write(word(i));
+            }
+            let size = int_ops::normalized_len(std::slice::from_raw_parts(data, len));
+            if size <= 1 {
+                let value = if size == 1 { *data } else { 0 };
+                free(obj.cast());
+                return Some(Self::from_i64(value));
+            }
+            obj.cast::<TVMFFIObject>().write(TVMFFIObject {
+                combined_ref_count: AtomicU64::new(COMBINED_REF_COUNT_BOTH_ONE),
+                type_index: TypeIndex::kTVMFFIBigInt as i32,
+                __padding: 0,
+                deleter: Some(delete_obj),
+            });
+            std::ptr::addr_of_mut!((*obj).size).write(size);
+            Some(Self::from_obj(obj))
+        }
+    }
+
+    /// Like `try_build`, but like `Vec`, exhaustion aborts.
+    #[inline]
+    fn build(len: usize, word: impl FnMut(usize) -> i64) -> Self {
+        Self::try_build(len, word).unwrap_or_else(|| {
+            std::alloc::handle_alloc_error(obj_layout(len).unwrap_or(Layout::new::<BigIntObj>()))
+        })
     }
 
     /// Borrow the canonical two's-complement words, least-significant word first.
