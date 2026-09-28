@@ -16,6 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+use crate::any::{AnyView, TryFromTemp};
 use crate::collections::shape::Shape;
 use crate::derive::{Object, ObjectRef};
 use crate::dtype::AsDLDataType;
@@ -461,6 +462,18 @@ impl From<&Tensor> for TensorView {
         Self {
             tensor: &tensor.data.dltensor as *const DLTensor,
         }
+    }
+}
+
+// A borrowed `AnyView` converts as C++ `AnyView::cast<TensorView>` does: from
+// a `DLTensor*` or from a tensor object. `try_as`, like C++ `as`, accepts only
+// a `DLTensor*`. There is no conversion from an owned `Any`, which would leave
+// the view pointing into a value the conversion drops.
+impl<'a> TryFrom<AnyView<'a>> for TensorView {
+    type Error = crate::error::Error;
+    #[inline]
+    fn try_from(value: AnyView<'a>) -> Result<Self> {
+        TryFromTemp::<Self>::try_from(value).map(TryFromTemp::into_value)
     }
 }
 
