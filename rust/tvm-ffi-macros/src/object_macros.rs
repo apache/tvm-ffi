@@ -37,8 +37,45 @@ pub fn derive_object(input: proc_macro::TokenStream) -> TokenStream {
         None => false,
     };
 
-    // type index can be optional
-    // for now we make it required for static index
+    // Reserved child slots and whether children may exceed them, as C++
+    // `_type_child_slots` and `_type_child_slots_can_overflow` declare them.
+    let child_slots = match get_attr(&derive_input, "type_child_slots").map(|a| a.parse_meta()) {
+        Some(Ok(syn::Meta::NameValue(syn::MetaNameValue {
+            lit: syn::Lit::Int(n),
+            ..
+        }))) => n
+            .base10_parse::<i32>()
+            .expect("Expect #[type_child_slots = <non-negative integer>]"),
+        Some(_) => panic!("Expect #[type_child_slots = <non-negative integer>]"),
+        None => 0,
+    };
+    let child_slots_can_overflow =
+        match get_attr(&derive_input, "type_child_slots_can_overflow").map(|a| a.parse_meta()) {
+            Some(Ok(syn::Meta::NameValue(syn::MetaNameValue {
+                lit: syn::Lit::Bool(b),
+                ..
+            }))) => b.value,
+            Some(_) => panic!("Expect #[type_child_slots_can_overflow = <bool>]"),
+            None => true,
+        };
+    assert!(
+        child_slots >= 0,
+        "Expect #[type_child_slots = <non-negative integer>]"
+    );
+    assert!(
+        !(type_final && child_slots > 0),
+        "a final object type cannot reserve child slots"
+    );
+    // we expect base always to be the first field
+    let base_ty = match &derive_input.data {
+        syn::Data::Struct(s) => s.fields.iter().next().map(|f| f.ty.clone()),
+        _ => None,
+    }
+    .expect("First field must be `<base_name>: <ObjectCoreType>`");
+
+    // Without a static index, the type is registered under its parent on first
+    // use, or takes the index its key already has, as C++
+    // `TVM_FFI_DECLARE_OBJECT_INFO` does.
     let type_index_tokens = match get_attr(&derive_input, "type_index").map(attr_to_expr) {
         Some(type_index) => {
             let type_index_expr =
@@ -58,12 +95,19 @@ pub fn derive_object(input: proc_macro::TokenStream) -> TokenStream {
                         unsafe {
                             let type_key_arg =
                                  #tvm_ffi_crate::tvm_ffi_sys::TVMFFIByteArray::from_str(#type_key);
-                            let mut tindex = 0;
-                            let ret =  #tvm_ffi_crate::tvm_ffi_sys::TVMFFITypeKeyToIndex(
-                                &type_key_arg, &mut tindex
+                            let tindex = #tvm_ffi_crate::tvm_ffi_sys::TVMFFITypeGetOrAllocIndex(
+                                &type_key_arg,
+                                -1,
+                                <#struct_name as #tvm_ffi_crate::object::ObjectCore>::TYPE_DEPTH,
+                                #child_slots,
+                                #child_slots_can_overflow as i32,
+                                <#base_ty as #tvm_ffi_crate::object::ObjectCore>::type_index(),
                             );
-                            if ret != 0 {
-                                panic!("Failed to get type index for type key: {}", #type_key);
+                            if tindex < 0 {
+                                panic!(
+                                    "Failed to get or allocate type index for type key: {}",
+                                    #type_key
+                                );
                             }
                             tindex
                         }

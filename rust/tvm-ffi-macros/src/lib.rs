@@ -49,8 +49,25 @@ pub fn match_any(input: TokenStream) -> TokenStream {
     match_any::expand(input)
 }
 
+/// Derive `ObjectCore` for an object struct whose first field is its parent.
+///
+/// `#[type_key = "..."]` names the type. Without `#[type_index(...)]`, the type
+/// is registered under its parent on first use, or takes the index its key
+/// already has, as C++ `TVM_FFI_DECLARE_OBJECT_INFO` does. `#[type_final]`,
+/// `#[type_child_slots = N]` and `#[type_child_slots_can_overflow = bool]`
+/// mirror C++ `_type_final`, `_type_child_slots` (default 0) and
+/// `_type_child_slots_can_overflow` (default true).
 #[proc_macro_error]
-#[proc_macro_derive(Object, attributes(type_key, type_index, type_final))]
+#[proc_macro_derive(
+    Object,
+    attributes(
+        type_key,
+        type_index,
+        type_final,
+        type_child_slots,
+        type_child_slots_can_overflow
+    )
+)]
 pub fn derive_object(input: TokenStream) -> TokenStream {
     object_macros::derive_object(input)
 }
