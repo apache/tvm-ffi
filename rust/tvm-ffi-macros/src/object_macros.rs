@@ -76,16 +76,16 @@ pub fn derive_object(input: proc_macro::TokenStream) -> TokenStream {
     // search for field name base and derive the base type
     // we expect base always to be the first field
     let final_parent_check = match &derive_input.data {
-        syn::Data::Struct(s) => s.fields.iter().next().and_then(|f| {
+        syn::Data::Struct(s) => s.fields.iter().next().map(|f| {
             let base_ty = f.ty.clone();
-            Some(quote! {
+            quote! {
                 const _: () = {
                     ::core::assert!(
                         !<#base_ty as #tvm_ffi_crate::object::ObjectCore>::TYPE_FINAL,
                         "an object type cannot derive from a final parent"
                     );
                 };
-            })
+            }
         }),
         _ => panic!("First field must be `<base_name>: <ObjectCoreType>`"),
     };

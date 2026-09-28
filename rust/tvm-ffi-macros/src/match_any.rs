@@ -298,6 +298,9 @@ fn expand_leaf_table_lookup(tvm_ffi: &TokenStream, arms: &[TypedArm], view: &Ide
     }
 }
 
+// The identifiers are the hygienic names the generated code shares with its
+// caller.
+#[allow(clippy::too_many_arguments)]
 fn expand_direct_leaf_selection(
     tvm_ffi: &TokenStream,
     arms: &[TypedArm],
