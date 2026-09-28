@@ -958,19 +958,19 @@ inline int32_t TypeKeyToIndex(std::string_view type_key) {
 // These should not be used directly; use the public macros instead.
 
 // Internal implementation macro that generates the C ABI wrapper function
-#define TVM_FFI_DLL_EXPORT_TYPED_FUNC_IMPL_(ExportName, Function)                      \
-  extern "C" {                                                                         \
-  TVM_FFI_DLL_EXPORT int __tvm_ffi_##ExportName(void* self, const TVMFFIAny* args,     \
-                                                int32_t num_args, TVMFFIAny* result) { \
-    TVM_FFI_SAFE_CALL_BEGIN();                                                         \
-    using FuncInfo = ::tvm::ffi::details::FunctionInfo<decltype(Function)>;            \
-    static std::string name = #ExportName;                                             \
-    ::tvm::ffi::details::unpack_call<typename FuncInfo::RetType>(                      \
-        std::make_index_sequence<FuncInfo::num_args>{}, &name, Function,               \
-        reinterpret_cast<const ::tvm::ffi::AnyView*>(args), num_args,                  \
-        reinterpret_cast<::tvm::ffi::Any*>(result));                                   \
-    TVM_FFI_SAFE_CALL_END();                                                           \
-  }                                                                                    \
+#define TVM_FFI_DLL_EXPORT_TYPED_FUNC_IMPL_(ExportName, Function)                         \
+  extern "C" {                                                                            \
+  TVM_FFI_DLL_EXPORT int __tvm_ffi_##ExportName(void* self, const TVMFFIAny* args,        \
+                                                int32_t num_args, TVMFFIAny* result) {    \
+    TVM_FFI_SAFE_CALL_BEGIN();                                                            \
+    using FuncInfo = ::tvm::ffi::details::FunctionInfo<std::decay_t<decltype(Function)>>; \
+    static std::string name = #ExportName;                                                \
+    ::tvm::ffi::details::unpack_call<typename FuncInfo::RetType>(                         \
+        std::make_index_sequence<FuncInfo::num_args>{}, &name, Function,                  \
+        reinterpret_cast<const ::tvm::ffi::AnyView*>(args), num_args,                     \
+        reinterpret_cast<::tvm::ffi::Any*>(result));                                      \
+    TVM_FFI_SAFE_CALL_END();                                                              \
+  }                                                                                       \
   }
 /// \endcond
 
@@ -1011,7 +1011,7 @@ inline int32_t TypeKeyToIndex(std::string_view type_key) {
   TVM_FFI_DLL_EXPORT int __tvm_ffi__metadata_##ExportName(void* self, const TVMFFIAny* args,     \
                                                           int32_t num_args, TVMFFIAny* result) { \
     TVM_FFI_SAFE_CALL_BEGIN();                                                                   \
-    using FuncInfo = ::tvm::ffi::details::FunctionInfo<decltype(Function)>;                      \
+    using FuncInfo = ::tvm::ffi::details::FunctionInfo<std::decay_t<decltype(Function)>>;        \
     std::ostringstream os;                                                                       \
     os << R"({"type_schema":)"                                                                   \
        << ::tvm::ffi::EscapeStringJSON(::tvm::ffi::String(FuncInfo::TypeSchema())) << R"(})";    \
