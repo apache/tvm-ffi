@@ -34,6 +34,7 @@ fn update_ld_library_path(lib_dir: &str) {
         return;
     }
     // Get the current value of the environment variable at build time (if any)
+    println!("cargo:rerun-if-env-changed={}", os_env_var);
     let current_val = env::var(os_env_var).unwrap_or_else(|_| String::new());
     // Use platform-specific separator
     let separator = if os_env_var == "PATH" { ";" } else { ":" };
@@ -47,37 +48,48 @@ fn update_ld_library_path(lib_dir: &str) {
 }
 
 fn main() {
-    // When building documentation, we may not need actual linking
-    // Check if this is a rustdoc build
-    let is_rustdoc = env::var("RUSTDOC").is_ok() || env::var("CARGO_CFG_DOC").is_ok();
+    // docs.rs builds the documentation without tvm-ffi installed, and so does
+    // docs/conf.py, which sets DOCS_RS as docs.rs does. Cargo sets RUSTDOC for
+    // every build script, so it cannot tell a documentation build apart.
+    let docs_only = env::var_os("DOCS_RS").is_some();
+    println!("cargo:rerun-if-env-changed=DOCS_RS");
+    // The library directory comes from the tvm-ffi-config found on PATH.
+    println!("cargo:rerun-if-env-changed=PATH");
+    println!("cargo:rerun-if-changed=build.rs");
 
-    // Run `mylib-config --libdir` to get the library path
-    let config_result = Command::new("tvm-ffi-config").arg("--libdir").output();
-
-    let lib_dir = match config_result {
-        Ok(output) if output.status.success() => String::from_utf8(output.stdout)
-            .unwrap_or_default()
-            .trim()
-            .to_string(),
-        _ if is_rustdoc => {
-            // For rustdoc builds, we can proceed without the library
-            eprintln!("Warning: tvm-ffi-config not available, skipping for documentation build");
-            return;
+    // Run `tvm-ffi-config --libdir` to get the library path
+    let found = match Command::new("tvm-ffi-config").arg("--libdir").output() {
+        Ok(output) if output.status.success() => {
+            let lib_dir = String::from_utf8(output.stdout)
+                .unwrap_or_default()
+                .trim()
+                .to_string();
+            if lib_dir.is_empty() {
+                Err("`tvm-ffi-config --libdir` printed no library directory".to_string())
+            } else {
+                Ok(lib_dir)
+            }
         }
-        _ => {
-            panic!("Failed to run tvm-ffi-config. Make sure tvm-ffi is installed.");
-        }
+        Ok(output) => Err(format!(
+            "`tvm-ffi-config --libdir` failed ({}): {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        )),
+        Err(err) => Err(format!("could not run `tvm-ffi-config`: {err}")),
     };
-
-    if lib_dir.is_empty() {
-        if is_rustdoc {
-            eprintln!(
-                "Warning: Empty lib_dir from tvm-ffi-config, skipping for documentation build"
-            );
+    let lib_dir = match found {
+        Ok(lib_dir) => lib_dir,
+        Err(reason) if docs_only => {
+            println!("cargo:warning={reason}; not linking libtvm_ffi for a documentation build");
             return;
         }
-        panic!("tvm-ffi-config returned empty library path");
-    }
+        Err(reason) => panic!(
+            "{reason}. tvm-ffi-sys links libtvm_ffi from the directory that \
+             `tvm-ffi-config --libdir` prints: install tvm-ffi (e.g. `pip install \
+             apache-tvm-ffi`) and put tvm-ffi-config on PATH. To build documentation \
+             only, set DOCS_RS=1."
+        ),
+    };
 
     // add the library directory to the linker search path
     println!("cargo:rustc-link-search=native={}", lib_dir);

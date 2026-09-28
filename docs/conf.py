@@ -210,7 +210,8 @@ def _build_rust_docs() -> None:
             ["cargo", "doc", "--no-deps", "--workspace", "--target-dir", "target"],
             check=True,
             cwd=_RUST_DIR,
-            env={**os.environ, "RUSTDOCFLAGS": "--cfg docsrs"},
+            # DOCS_RS lets tvm-ffi-sys build without tvm-ffi installed, as on docs.rs.
+            env={**os.environ, "RUSTDOCFLAGS": "--cfg docsrs", "DOCS_RS": "1"},
         )
 
         print(f"Rust documentation built successfully at {target_doc}")
