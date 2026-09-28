@@ -51,12 +51,25 @@ pub fn match_any(input: TokenStream) -> TokenStream {
 
 /// Derive `ObjectCore` for an object struct whose first field is its parent.
 ///
-/// `#[type_key = "..."]` names the type. Without `#[type_index(...)]`, the type
-/// is registered under its parent on first use, or takes the index its key
-/// already has, as C++ `TVM_FFI_DECLARE_OBJECT_INFO` does. `#[type_final]`,
-/// `#[type_child_slots = N]` and `#[type_child_slots_can_overflow = bool]`
-/// mirror C++ `_type_final`, `_type_child_slots` (default 0) and
-/// `_type_child_slots_can_overflow` (default true).
+/// `#[type_key = "..."]` names the type, and `#[type_index(...)]` gives it a
+/// static index. Otherwise a type defined in Rust declares `#[type_register]`:
+/// it is registered under its parent on first use of `type_index()`, or takes
+/// the index its key already has, as C++ `TVM_FFI_DECLARE_OBJECT_INFO` does.
+/// Without `#[type_register]`, the type binds a key its defining library,
+/// usually C++, has registered, and `type_index()` panics if that library is
+/// not loaded yet, so a binding never registers a key with the wrong child
+/// slots.
+///
+/// `#[type_final]`, and with `#[type_register]` `#[type_child_slots = N]` and
+/// `#[type_child_slots_can_overflow = bool]`, mirror C++ `_type_final`,
+/// `_type_child_slots` (default 0) and `_type_child_slots_can_overflow`
+/// (default true).
+///
+/// Registrations from Rust hold one lock, so they do not race each other. The
+/// runtime's type table is not locked otherwise: as for C++, a type must not
+/// be registered while another thread loads a library that registers types.
+/// Calling `type_index()` before starting such threads registers a type
+/// eagerly.
 #[proc_macro_error]
 #[proc_macro_derive(
     Object,
@@ -64,6 +77,7 @@ pub fn match_any(input: TokenStream) -> TokenStream {
         type_key,
         type_index,
         type_final,
+        type_register,
         type_child_slots,
         type_child_slots_can_overflow
     )

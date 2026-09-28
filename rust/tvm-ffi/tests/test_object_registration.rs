@@ -21,12 +21,14 @@ use tvm_ffi::object::{is_instance_of, ObjectRef};
 use tvm_ffi::*;
 use tvm_ffi_sys::{TVMFFIByteArray, TVMFFIGetTypeInfo, TVMFFITypeKeyToIndex};
 
-// Type keys that nothing else registers: deriving `Object` registers them on
-// first use, under their parents, as C++ `TVM_FFI_DECLARE_OBJECT_INFO` does.
+// Type keys that nothing else registers: deriving `Object` with
+// `#[type_register]` registers them on first use, under their parents, as C++
+// `TVM_FFI_DECLARE_OBJECT_INFO` does.
 
 #[repr(C)]
 #[derive(Object)]
 #[type_key = "testing.rust.RegisteredBase"]
+#[type_register]
 #[type_child_slots = 2]
 #[type_child_slots_can_overflow = false]
 struct RegisteredBaseObj {
@@ -43,6 +45,7 @@ struct RegisteredBase {
 #[repr(C)]
 #[derive(Object)]
 #[type_key = "testing.rust.RegisteredLeaf"]
+#[type_register]
 #[type_final]
 struct RegisteredLeafObj {
     base: RegisteredBaseObj,
@@ -105,4 +108,83 @@ fn test_registered_object_types_round_trip_through_any() {
     let obj: ObjectRef = base.try_cast().unwrap();
     let leaf: RegisteredLeaf = obj.try_cast().unwrap();
     assert_eq!(leaf.data.extra, 8);
+}
+
+// Types defined here, registered from several threads at once.
+macro_rules! concurrent_types {
+    ($($name:ident = $key:literal),*) => {
+        $(
+            #[repr(C)]
+            #[derive(Object)]
+            #[type_key = $key]
+            #[type_register]
+            struct $name {
+                base: Object,
+            }
+        )*
+    };
+}
+
+concurrent_types!(
+    Concurrent0 = "testing.rust.Concurrent0",
+    Concurrent1 = "testing.rust.Concurrent1",
+    Concurrent2 = "testing.rust.Concurrent2",
+    Concurrent3 = "testing.rust.Concurrent3",
+    Concurrent4 = "testing.rust.Concurrent4",
+    Concurrent5 = "testing.rust.Concurrent5",
+    Concurrent6 = "testing.rust.Concurrent6",
+    Concurrent7 = "testing.rust.Concurrent7"
+);
+
+#[test]
+fn test_registration_from_threads() {
+    let registrations: [fn() -> i32; 8] = [
+        <Concurrent0 as ObjectCore>::type_index,
+        <Concurrent1 as ObjectCore>::type_index,
+        <Concurrent2 as ObjectCore>::type_index,
+        <Concurrent3 as ObjectCore>::type_index,
+        <Concurrent4 as ObjectCore>::type_index,
+        <Concurrent5 as ObjectCore>::type_index,
+        <Concurrent6 as ObjectCore>::type_index,
+        <Concurrent7 as ObjectCore>::type_index,
+    ];
+    let barrier = std::sync::Barrier::new(registrations.len());
+    let indices: Vec<i32> = std::thread::scope(|scope| {
+        let handles: Vec<_> = registrations
+            .iter()
+            .map(|register| {
+                let barrier = &barrier;
+                scope.spawn(move || {
+                    barrier.wait();
+                    register()
+                })
+            })
+            .collect();
+        handles.into_iter().map(|h| h.join().unwrap()).collect()
+    });
+    for (i, &index) in indices.iter().enumerate() {
+        assert_eq!(
+            index,
+            registered_index(&format!("testing.rust.Concurrent{i}"))
+        );
+        assert!(
+            !indices[..i].contains(&index),
+            "type indices must be distinct"
+        );
+    }
+}
+
+// A type that binds a key its defining library registers, without
+// `#[type_register]`, does not register it.
+#[repr(C)]
+#[derive(Object)]
+#[type_key = "testing.rust.NeverRegistered"]
+struct UnregisteredBindingObj {
+    base: Object,
+}
+
+#[test]
+#[should_panic(expected = "is not registered: load the library that defines it first")]
+fn test_binding_does_not_register() {
+    let _ = <UnregisteredBindingObj as ObjectCore>::type_index();
 }

@@ -25,6 +25,12 @@ pub use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
 /// Object related ABI handling
 use tvm_ffi_sys::{TVMFFIAny, TVMFFIGetTypeInfo, TVMFFIObject, COMBINED_REF_COUNT_BOTH_ONE};
 
+/// Held while `#[derive(Object)]` with `#[type_register]` registers a type, so
+/// that registrations from Rust do not race each other: the runtime does not
+/// lock its type table and leaves that to callers.
+#[doc(hidden)]
+pub static TYPE_REGISTRATION: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Object type is by default the TVMFFIObject
 #[repr(C)]
 pub struct Object {

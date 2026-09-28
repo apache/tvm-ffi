@@ -37,6 +37,15 @@ pub fn derive_object(input: proc_macro::TokenStream) -> TokenStream {
         None => false,
     };
 
+    // Whether this type is defined here, so that it registers its key, as C++
+    // `TVM_FFI_DECLARE_OBJECT_INFO` does. Without it, the type binds a key
+    // that its defining library, usually C++, has registered.
+    let type_register = match get_attr(&derive_input, "type_register") {
+        Some(attr) if matches!(attr.parse_meta(), Ok(syn::Meta::Path(_))) => true,
+        Some(_) => panic!("Expect #[type_register] attribute"),
+        None => false,
+    };
+
     // Reserved child slots and whether children may exceed them, as C++
     // `_type_child_slots` and `_type_child_slots_can_overflow` declare them.
     let child_slots = match get_attr(&derive_input, "type_child_slots").map(|a| a.parse_meta()) {
@@ -66,6 +75,12 @@ pub fn derive_object(input: proc_macro::TokenStream) -> TokenStream {
         !(type_final && child_slots > 0),
         "a final object type cannot reserve child slots"
     );
+    assert!(
+        type_register
+            || (get_attr(&derive_input, "type_child_slots").is_none()
+                && get_attr(&derive_input, "type_child_slots_can_overflow").is_none()),
+        "#[type_child_slots] and #[type_child_slots_can_overflow] need #[type_register]"
+    );
     // we expect base always to be the first field
     let base_ty = match &derive_input.data {
         syn::Data::Struct(s) => s.fields.iter().next().map(|f| f.ty.clone()),
@@ -73,9 +88,10 @@ pub fn derive_object(input: proc_macro::TokenStream) -> TokenStream {
     }
     .expect("First field must be `<base_name>: <ObjectCoreType>`");
 
-    // Without a static index, the type is registered under its parent on first
-    // use, or takes the index its key already has, as C++
-    // `TVM_FFI_DECLARE_OBJECT_INFO` does.
+    // A type with a static index has it; one defined here registers its key
+    // under its parent on first use, or takes the index the key already has,
+    // as C++ `TVM_FFI_DECLARE_OBJECT_INFO` does; any other type binds the
+    // index its defining library registered.
     let type_index_tokens = match get_attr(&derive_input, "type_index").map(attr_to_expr) {
         Some(type_index) => {
             let type_index_expr =
@@ -87,12 +103,19 @@ pub fn derive_object(input: proc_macro::TokenStream) -> TokenStream {
                 }
             }
         }
-        None => {
+        None if type_register => {
             quote! {
                 #[inline]
                 fn type_index() -> i32 {
                     static TYPE_INDEX: std::sync::LazyLock<i32> = std::sync::LazyLock::new(||
                         unsafe {
+                            // The parent first, since registering it takes the
+                            // same lock.
+                            let parent =
+                                <#base_ty as #tvm_ffi_crate::object::ObjectCore>::type_index();
+                            let _registering = #tvm_ffi_crate::object::TYPE_REGISTRATION
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner());
                             let type_key_arg =
                                  #tvm_ffi_crate::tvm_ffi_sys::TVMFFIByteArray::from_str(#type_key);
                             let tindex = #tvm_ffi_crate::tvm_ffi_sys::TVMFFITypeGetOrAllocIndex(
@@ -101,11 +124,37 @@ pub fn derive_object(input: proc_macro::TokenStream) -> TokenStream {
                                 <#struct_name as #tvm_ffi_crate::object::ObjectCore>::TYPE_DEPTH,
                                 #child_slots,
                                 #child_slots_can_overflow as i32,
-                                <#base_ty as #tvm_ffi_crate::object::ObjectCore>::type_index(),
+                                parent,
                             );
                             if tindex < 0 {
                                 panic!(
                                     "Failed to get or allocate type index for type key: {}",
+                                    #type_key
+                                );
+                            }
+                            tindex
+                        }
+                    );
+                    *TYPE_INDEX
+                }
+            }
+        }
+        None => {
+            quote! {
+                #[inline]
+                fn type_index() -> i32 {
+                    static TYPE_INDEX: std::sync::LazyLock<i32> = std::sync::LazyLock::new(||
+                        unsafe {
+                            let type_key_arg =
+                                 #tvm_ffi_crate::tvm_ffi_sys::TVMFFIByteArray::from_str(#type_key);
+                            let mut tindex = 0;
+                            let ret = #tvm_ffi_crate::tvm_ffi_sys::TVMFFITypeKeyToIndex(
+                                &type_key_arg, &mut tindex
+                            );
+                            if ret != 0 {
+                                panic!(
+                                    "Type key {} is not registered: load the library that defines \
+                                     it first, or add #[type_register] if this crate defines it",
                                     #type_key
                                 );
                             }
