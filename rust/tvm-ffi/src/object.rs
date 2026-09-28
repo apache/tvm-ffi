@@ -418,6 +418,14 @@ pub mod unsafe_ {
         }
     }
 
+    /// Layout of a `T` followed by `count` extra items, kept at least one word past the
+    /// header: once a weak reference outlives the data, the deleter stores `count` there.
+    pub(crate) fn extra_items_layout<T, U>(count: usize) -> std::alloc::Layout {
+        let size = std::mem::size_of::<T>() + count * std::mem::size_of::<U>();
+        let min_size = std::mem::size_of::<TVMFFIObject>() + std::mem::size_of::<u64>();
+        std::alloc::Layout::from_size_align(size.max(min_size), std::mem::align_of::<T>()).unwrap()
+    }
+
     pub(crate) unsafe extern "C" fn object_deleter_for_new_with_extra_items<T, U>(
         ptr: *mut c_void,
         flags: i32,
@@ -428,18 +436,14 @@ pub mod unsafe_ {
         if flags == kTVMFFIObjectDeleterFlagBitMaskBoth as i32 {
             let extra_items_count = T::extra_items_count(&(*obj));
             std::ptr::drop_in_place(obj);
-            let layout = std::alloc::Layout::from_size_align(
-                std::mem::size_of::<T>() + extra_items_count * std::mem::size_of::<U>(),
-                std::mem::align_of::<T>(),
-            )
-            .unwrap();
-            std::alloc::dealloc(ptr as *mut u8, layout);
+            std::alloc::dealloc(
+                ptr as *mut u8,
+                extra_items_layout::<T, U>(extra_items_count),
+            );
         } else {
             // Weak references keep using the header, so the weak phase finds the item
             // count in the first word after it.
-            let header_size = std::mem::size_of::<TVMFFIObject>();
-            assert!(std::mem::size_of::<T>() >= header_size + std::mem::size_of::<u64>());
-            let count_slot = (ptr as *mut u8).add(header_size) as *mut u64;
+            let count_slot = (ptr as *mut u8).add(std::mem::size_of::<TVMFFIObject>()) as *mut u64;
             if flags & kTVMFFIObjectDeleterFlagBitMaskStrong as i32 != 0 {
                 let extra_items_count = T::extra_items_count(&(*obj));
                 std::ptr::drop_in_place(obj);
@@ -447,12 +451,10 @@ pub mod unsafe_ {
             }
             if flags & kTVMFFIObjectDeleterFlagBitMaskWeak as i32 != 0 {
                 let extra_items_count = std::ptr::read(count_slot) as usize;
-                let layout = std::alloc::Layout::from_size_align(
-                    std::mem::size_of::<T>() + extra_items_count * std::mem::size_of::<U>(),
-                    std::mem::align_of::<T>(),
-                )
-                .unwrap();
-                std::alloc::dealloc(ptr as *mut u8, layout);
+                std::alloc::dealloc(
+                    ptr as *mut u8,
+                    extra_items_layout::<T, U>(extra_items_count),
+                );
             }
         }
     }
@@ -524,11 +526,7 @@ impl<T: ObjectCore> ObjectArc<T> {
             assert_eq!(std::mem::align_of::<T>() % std::mem::align_of::<U>(), 0);
             assert_eq!(std::mem::size_of::<T>() % std::mem::align_of::<U>(), 0);
             let extra_items_count = T::extra_items_count(&data);
-            let layout = std::alloc::Layout::from_size_align(
-                std::mem::size_of::<T>() + extra_items_count * std::mem::size_of::<U>(),
-                std::mem::align_of::<T>(),
-            )
-            .unwrap();
+            let layout = unsafe_::extra_items_layout::<T, U>(extra_items_count);
             let raw_data_ptr = std::alloc::alloc(layout);
             if raw_data_ptr.is_null() {
                 std::alloc::handle_alloc_error(layout);

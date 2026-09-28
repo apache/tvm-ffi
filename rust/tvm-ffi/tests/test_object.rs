@@ -145,27 +145,28 @@ unsafe impl std::alloc::GlobalAlloc for RecordingAllocator {
 #[global_allocator]
 static ALLOCATOR: RecordingAllocator = RecordingAllocator;
 
-#[test]
-fn test_object_arc_with_extra_items_outlived_by_weak_ref() {
+/// Drops `obj_arc` while a weak reference outlives it, held the way C++ `WeakObjectPtr`
+/// does (`Object::IncWeakRef`, then `Object::DecWeakRef`). `expired` runs while only the
+/// weak reference is left. Returns the size the allocation is freed with.
+fn release_outlived_by_weak_ref<T: ObjectCore>(
+    mut obj_arc: ObjectArc<T>,
+    expired: impl FnOnce(),
+) -> usize {
     use std::sync::atomic::fence;
     use tvm_ffi_sys::COMBINED_REF_COUNT_WEAK_ONE as WEAK_ONE;
-    let delete_counter = Arc::new(AtomicU32::new(0));
-    let mut obj_arc =
-        ObjectArc::new_with_extra_items(TestIntObj::new(13, delete_counter.clone(), 10));
     unsafe {
         let header = ObjectArc::as_raw_mut(&mut obj_arc) as *mut TVMFFIObject;
-        // A weak reference held the way C++ `WeakObjectPtr` does (`Object::IncWeakRef`).
         (*header)
             .combined_ref_count
             .fetch_add(WEAK_ONE, Ordering::Relaxed);
         drop(obj_arc);
         // The data is dropped; the weak reference still sees an intact, expired header.
-        assert_eq!(delete_counter.load(Ordering::Relaxed), 1);
         assert_eq!(
             (*header).combined_ref_count.load(Ordering::Relaxed),
             WEAK_ONE
         );
-        // `Object::DecWeakRef`: the last weak reference frees the full allocation.
+        expired();
+        // The last weak reference frees the full allocation.
         let old = (*header)
             .combined_ref_count
             .fetch_sub(WEAK_ONE, Ordering::Release);
@@ -174,9 +175,67 @@ fn test_object_arc_with_extra_items_outlived_by_weak_ref() {
         let weak = tvm_ffi_sys::TVMFFIObjectDeleterFlagBitMask::kTVMFFIObjectDeleterFlagBitMaskWeak;
         ((*header).deleter.unwrap())(header.cast(), weak as i32);
     }
+    LAST_DEALLOC_SIZE.with(|size| size.get())
+}
+
+#[test]
+fn test_object_arc_with_extra_items_outlived_by_weak_ref() {
+    let delete_counter = Arc::new(AtomicU32::new(0));
+    let obj_arc = ObjectArc::new_with_extra_items(TestIntObj::new(13, delete_counter.clone(), 10));
+    let freed = release_outlived_by_weak_ref(obj_arc, || {
+        assert_eq!(delete_counter.load(Ordering::Relaxed), 1);
+    });
     assert_eq!(
-        LAST_DEALLOC_SIZE.with(|size| size.get()),
+        freed,
         std::mem::size_of::<TestIntObj>() + 10 * std::mem::size_of::<u64>()
+    );
+}
+
+// Only the header, with a fixed number of items after it.
+#[repr(C)]
+struct HeaderOnlyObj<const N: usize> {
+    object: Object,
+}
+
+unsafe impl<const N: usize> ObjectCore for HeaderOnlyObj<N> {
+    const TYPE_KEY: &'static str = Object::TYPE_KEY;
+    const TYPE_DEPTH: i32 = Object::TYPE_DEPTH;
+    #[inline]
+    fn type_index() -> i32 {
+        Object::type_index()
+    }
+    #[inline]
+    unsafe fn object_header_mut(this: &mut Self) -> &mut TVMFFIObject {
+        Object::object_header_mut(&mut this.object)
+    }
+}
+
+unsafe impl<const N: usize> ObjectCoreWithExtraItems for HeaderOnlyObj<N> {
+    type ExtraItem = u64;
+    #[inline]
+    fn extra_items_count(_: &Self) -> usize {
+        N
+    }
+}
+
+#[test]
+fn test_header_only_object_with_extra_items_outlived_by_weak_ref() {
+    // The item count is kept in the word after the header: the first item for N = 2,
+    // padding the allocation reserves for N = 0.
+    let header_size = std::mem::size_of::<TVMFFIObject>();
+    let obj_arc = ObjectArc::new_with_extra_items(HeaderOnlyObj::<2> {
+        object: Object::new(),
+    });
+    assert_eq!(
+        release_outlived_by_weak_ref(obj_arc, || {}),
+        header_size + 16
+    );
+    let obj_arc = ObjectArc::new_with_extra_items(HeaderOnlyObj::<0> {
+        object: Object::new(),
+    });
+    assert_eq!(
+        release_outlived_by_weak_ref(obj_arc, || {}),
+        header_size + 8
     );
 }
 
