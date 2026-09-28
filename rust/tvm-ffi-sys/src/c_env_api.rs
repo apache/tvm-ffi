@@ -53,13 +53,22 @@ unsafe extern "C" {
 
     pub fn TVMFFIEnvGetStream(device_type: i32, device_id: i32) -> TVMFFIStreamHandle;
 
+    /// Set the allocator of this thread, or unset it with `None`; the
+    /// original allocator, possibly `None`, is written to
+    /// `opt_out_original_allocator` unless it is null.
     pub fn TVMFFIEnvSetDLPackManagedTensorAllocator(
-        allocator: DLPackManagedTensorAllocator,
+        allocator: Option<DLPackManagedTensorAllocator>,
         write_to_global_context: i32,
-        opt_out_original_allocator: *mut DLPackManagedTensorAllocator,
+        opt_out_original_allocator: *mut Option<DLPackManagedTensorAllocator>,
     ) -> i32;
 
-    pub fn TVMFFIEnvGetDLPackManagedTensorAllocator() -> DLPackManagedTensorAllocator;
+    /// The current allocator, or `None` when none is set.
+    pub fn TVMFFIEnvGetDLPackManagedTensorAllocator() -> Option<DLPackManagedTensorAllocator>;
+
+    /// Allocate a tensor with the current allocator. Only the device, dtype,
+    /// ndim and shape of `prototype` are used; `out` receives an owned
+    /// `ffi.Tensor` handle.
+    pub fn TVMFFIEnvTensorAlloc(prototype: *mut DLTensor, out: *mut TVMFFIObjectHandle) -> i32;
 
     pub fn TVMFFIEnvCheckSignals() -> i32;
 

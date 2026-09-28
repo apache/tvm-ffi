@@ -24,6 +24,7 @@ use crate::error::Result;
 use crate::object::{Object, ObjectArc, ObjectCore, ObjectCoreWithExtraItems};
 use tvm_ffi_sys::dlpack::{DLDataType, DLDevice, DLDeviceType, DLTensor};
 use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
+use tvm_ffi_sys::{TVMFFIEnvTensorAlloc, TVMFFIObjectHandle};
 
 //-----------------------------------------------------
 // NDAllocator Trait
@@ -298,6 +299,42 @@ impl Tensor {
             }
         }
     }
+    /// Create a Tensor with the environment allocator of this thread, as C++
+    /// `Tensor::FromEnvAlloc(TVMFFIEnvTensorAlloc, ...)` does.
+    ///
+    /// Kernel libraries allocate intermediate tensors this way, so that they
+    /// come from the caller's allocator, such as the one a framework sets
+    /// with `TVMFFIEnvSetDLPackManagedTensorAllocator`.
+    ///
+    /// # Arguments
+    /// * `shape` - The shape of the Tensor
+    /// * `dtype` - The data type of the Tensor
+    /// * `device` - The device of the Tensor
+    ///
+    /// # Returns
+    /// * `Result<Tensor>` - The created Tensor, or the error the allocator
+    ///   raised, which is a `RuntimeError` when no allocator is set
+    pub fn from_env_alloc(shape: &[i64], dtype: DLDataType, device: DLDevice) -> Result<Self> {
+        let mut prototype = DLTensor {
+            data: std::ptr::null_mut(),
+            device,
+            ndim: shape.len() as i32,
+            dtype,
+            shape: shape.as_ptr() as *mut i64,
+            strides: std::ptr::null_mut(),
+            byte_offset: 0,
+        };
+        let mut out: TVMFFIObjectHandle = std::ptr::null_mut();
+        unsafe {
+            if TVMFFIEnvTensorAlloc(&mut prototype, &mut out) != 0 {
+                return Err(crate::error::Error::from_raised());
+            }
+            Ok(Self {
+                data: ObjectArc::from_raw(out as *const TensorObj),
+            })
+        }
+    }
+
     /// Create a Tensor from a slice
     ///
     /// # Arguments
