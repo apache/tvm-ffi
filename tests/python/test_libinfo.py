@@ -60,6 +60,29 @@ def test_basic_path_flags(flag: str, expected_fn: Callable[[], str], is_dir: boo
     assert path.is_dir() if is_dir else path.is_file()
 
 
+def test_cython_lib_path_does_not_import_extension() -> None:
+    """``--cython-lib-path`` should locate the extension without importing it (#805).
+
+    Importing ``tvm_ffi.core`` pulls in optional dependencies such as torch,
+    whose import-time warnings would otherwise leak into the config output.
+    """
+    result = subprocess.run(
+        [sys.executable, "-X", "importtime", "-m", "tvm_ffi.config", "--cython-lib-path"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    imported = {
+        line.rsplit("|", 1)[-1].strip()
+        for line in result.stderr.splitlines()
+        if line.startswith("import time:")
+    }
+    assert "tvm_ffi.libinfo" in imported
+    assert "tvm_ffi.core" not in imported
+    assert "torch" not in imported
+    assert result.stdout.strip() == libinfo.find_cython_lib()
+
+
 def test_libdir_matches_library_parent() -> None:
     expected_dir = Path(libinfo.find_libtvm_ffi()).parent
     output = _stdout_for("--libdir")
