@@ -491,6 +491,10 @@ unsafe extern "C" {
         f: TVMFFIObjectHandle,
         can_override: i32,
     ) -> i32;
+    pub fn TVMFFIFunctionSetGlobalFromMethodInfo(
+        method_info: *const TVMFFIMethodInfo,
+        allow_override: i32,
+    ) -> i32;
     pub fn TVMFFIFunctionCreate(
         self_ptr: *mut c_void,
         safe_call: TVMFFISafeCallType,

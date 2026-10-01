@@ -284,6 +284,19 @@ TEST(Func, FromExternC) {
   EXPECT_EQ(fadd1(1).cast<int>(), 2);
 }
 
+struct TestingAdd2 {
+  static int Run(int x) { return x + 2; }
+};
+
+// A library that generates its exports parenthesizes the function it names, and MSVC
+// deduces decltype((&TestingAdd2::Run)) as a reference to the function pointer.
+TVM_FFI_DLL_EXPORT_TYPED_FUNC(testing_add2, (&TestingAdd2::Run))
+
+TEST(Func, FromExternCStaticMemberAddress) {
+  Function fadd2 = Function::FromExternC(nullptr, __tvm_ffi_testing_add2, nullptr);
+  EXPECT_EQ(fadd2(1).cast<int>(), 3);
+}
+
 int invoke_testing_add1(int x) {
   return Function::InvokeExternC(nullptr, __tvm_ffi_testing_add1, x).cast<int>();
 }

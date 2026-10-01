@@ -825,6 +825,10 @@ unsafe impl AnyCompatible for BigInt {
         "BigInt".to_string()
     }
 
+    fn type_schema() -> std::string::String {
+        crate::type_traits::type_schema(<BigIntObj as crate::ObjectCore>::TYPE_KEY, &[])
+    }
+
     unsafe fn copy_to_any_view(this: &Self, data: &mut TVMFFIAny) {
         *data = this.data;
     }

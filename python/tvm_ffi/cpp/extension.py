@@ -364,6 +364,14 @@ def _run_command_in_dev_prompt(
         ) from e
 
 
+def _windows_argument(argument: str) -> str:
+    """Quote one argument of a Windows command line if it would otherwise split on a space.
+
+    The CUDA toolkit installs under ``Program Files`` by default.
+    """
+    return subprocess.list2cmdline([argument])
+
+
 def _generate_ninja_build(  # noqa: PLR0915, PLR0912
     name: str,
     extra_cflags: Sequence[str],
@@ -400,7 +408,7 @@ def _generate_ninja_build(  # noqa: PLR0915, PLR0912
     tvm_ffi_lib_name = tvm_ffi_lib.stem
     if IS_WINDOWS:
         default_cflags = ["/O2", "/MD"]
-        default_cxxflags = ["/std:c++17", "/MD", "/EHsc"]
+        default_cxxflags = ["/std:c++17", "/O2", "/MD", "/EHsc"]
         _win_warnings = [
             "/wd4819",
             "/wd4251",
@@ -415,12 +423,20 @@ def _generate_ninja_build(  # noqa: PLR0915, PLR0912
         ]
         default_cflags += _win_warnings
         default_cxxflags += _win_warnings
-        default_cuda_cflags = ["-Xcompiler", "/std:c++17", "/O2"]
+        # nvcc forwards its own -std and -O to cl for the host pass, as it does to gcc.
+        # /MD matches the C++ objects: cl's default /MT fails a mixed link (LNK2038).
+        default_cuda_cflags = ["-Xcompiler", "/MD", "-std=c++17", "-O2"]
         default_ldflags = [
             "/DLL",
-            f"/LIBPATH:{tvm_ffi_lib_path}",
+            _windows_argument(f"/LIBPATH:{tvm_ffi_lib_path}"),
             f"{tvm_ffi_lib_name}.lib",
         ]
+        if with_cuda:
+            default_cuda_cflags += [_get_cuda_target()]
+            default_ldflags += [
+                _windows_argument(f"/LIBPATH:{Path(_find_cuda_home()) / 'lib' / 'x64'}"),
+                "cudart.lib",  # cuda runtime library
+            ]
     else:
         default_cflags = ["-fPIC", "-O2"]
         default_cxxflags = ["-std=c++17", "-fPIC", "-O2"]
@@ -1266,7 +1282,7 @@ def build(  # noqa: PLR0913
         The default flags are:
 
         - ['-Xcompiler', '-fPIC', '-std=c++17', '-O2'] (Linux/macOS)
-        - ['-Xcompiler', '/std:c++17', '/O2'] (Windows)
+        - ['-Xcompiler', '/MD', '-std=c++17', '-O2'] (Windows)
 
     extra_ldflags
         The extra linker flags.
@@ -1422,7 +1438,7 @@ def load(  # noqa: PLR0913
         The default flags are:
 
         - ['-Xcompiler', '-fPIC', '-std=c++17', '-O2'] (Linux/macOS)
-        - ['-Xcompiler', '/std:c++17', '/O2'] (Windows)
+        - ['-Xcompiler', '/MD', '-std=c++17', '-O2'] (Windows)
 
     extra_ldflags
         The extra linker flags.

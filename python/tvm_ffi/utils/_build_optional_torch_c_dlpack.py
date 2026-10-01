@@ -847,7 +847,7 @@ def main() -> None:  # noqa: PLR0912, PLR0915
 
         for lib_dir in torch.utils.cpp_extension.library_paths():
             if IS_WINDOWS:
-                ldflags.append(f"/LIBPATH:{lib_dir}")
+                ldflags.append(subprocess.list2cmdline([f"/LIBPATH:{lib_dir}"]))
             else:
                 ldflags.extend(["-L", str(lib_dir)])
 
@@ -879,7 +879,10 @@ def main() -> None:  # noqa: PLR0912, PLR0915
                 )
             for python_libdir in python_libdir_list:
                 if python_libdir and (Path(python_libdir) / python_lib).exists():
-                    ldflags.append(f"/LIBPATH:{python_libdir.replace(':', '$:')}")
+                    # A Python installed for all users lives under C:\Program Files.
+                    ldflags.append(
+                        subprocess.list2cmdline([f"/LIBPATH:{python_libdir.replace(':', '$:')}"])
+                    )
                     break
 
         if IS_DARWIN:
