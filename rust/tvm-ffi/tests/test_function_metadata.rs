@@ -18,14 +18,18 @@
  */
 //! The metadata and doc strings that Rust records for exported and global
 //! functions match the ones C++ records for the same signatures in
-//! `libtvm_ffi_testing`, byte for byte.
+//! `libtvm_ffi_testing`, byte for byte. Exported functions have them with the
+//! `export-metadata` feature, as C++ ones with
+//! `TVM_FFI_DLL_EXPORT_INCLUDE_METADATA`; global functions always do.
 
 use tvm_ffi::function_internal::AsPackedCallable;
-use tvm_ffi::tvm_ffi_sys::{TVMFFIAny, TVMFFISafeCallType};
+#[cfg(feature = "export-metadata")]
+use tvm_ffi::tvm_ffi_sys::TVMFFIAny;
 use tvm_ffi::*;
 
 // Exported by libtvm_ffi_testing with `TVM_FFI_DLL_EXPORT_TYPED_FUNC` and
 // `TVM_FFI_DLL_EXPORT_INCLUDE_METADATA`, for `int64_t(int64_t)`.
+#[cfg(feature = "export-metadata")]
 extern "C" {
     fn __tvm_ffi__metadata_testing_dll_schema_id_int(
         handle: *mut std::ffi::c_void,
@@ -36,13 +40,17 @@ extern "C" {
 }
 
 /// Calls an exported metadata or doc getter.
-fn call_getter(getter: TVMFFISafeCallType) -> String {
+#[cfg(feature = "export-metadata")]
+fn call_getter(getter: tvm_ffi::tvm_ffi_sys::TVMFFISafeCallType) -> String {
     // SAFETY: the getters take no arguments and do not use the handle.
     let getter = unsafe { Function::from_extern_c(std::ptr::null_mut(), getter, None) };
     getter.call_packed(&[]).unwrap().try_into().unwrap()
 }
 
+/// The dummy call keeps `libtvm_ffi_testing`, which registers the C++
+/// functions compared with, linked.
 fn global_metadata(name: &str) -> String {
+    assert_eq!(unsafe { tvm_ffi_sys::TVMFFITestingDummyTarget() }, 0);
     Function::get_global("ffi.GetGlobalFuncMetadata")
         .unwrap()
         .call_tuple_with_len::<1, _>((String::from(name),))
@@ -56,6 +64,7 @@ fn rust_schema_id_int(x: i64) -> Result<i64> {
 }
 tvm_ffi_dll_export_typed_func!(rust_schema_id_int, rust_schema_id_int);
 
+#[cfg(feature = "export-metadata")]
 #[test]
 fn test_exported_metadata_matches_cpp() {
     let rust = call_getter(__tvm_ffi__metadata_rust_schema_id_int);
@@ -72,6 +81,7 @@ tvm_ffi_dll_export_typed_func_doc!(
     "Add two integers and return the sum.\n\n\"a\" and \"b\" are integers."
 );
 
+#[cfg(feature = "export-metadata")]
 #[test]
 fn test_exported_doc_is_verbatim() {
     let doc = call_getter(__tvm_ffi__doc_rust_add);
@@ -97,6 +107,7 @@ fn rust_packed(_args: &[AnyView]) -> Result<Any> {
 }
 tvm_ffi_dll_export_typed_func!(rust_packed, Packed(rust_packed));
 
+#[cfg(feature = "export-metadata")]
 #[test]
 fn test_exported_packed_metadata_is_untyped() {
     let rust = call_getter(__tvm_ffi__metadata_rust_packed);
@@ -104,6 +115,31 @@ fn test_exported_packed_metadata_is_untyped() {
         rust.as_str(),
         global_metadata("testing.schema_packed").as_str()
     );
+}
+
+// Without `export-metadata`, the exports define no metadata or doc getters:
+// these symbols of the same names would otherwise be defined twice.
+#[cfg(not(feature = "export-metadata"))]
+mod without_export_metadata {
+    #[no_mangle]
+    pub extern "C" fn __tvm_ffi__metadata_rust_schema_id_int() {}
+    #[no_mangle]
+    pub extern "C" fn __tvm_ffi__metadata_rust_packed() {}
+    #[no_mangle]
+    pub extern "C" fn __tvm_ffi__doc_rust_add() {}
+}
+
+#[cfg(not(feature = "export-metadata"))]
+#[test]
+fn test_exports_without_metadata() {
+    // The functions themselves are exported.
+    // SAFETY: rust_add takes two arguments and does not use the handle.
+    let add = unsafe { Function::from_extern_c(std::ptr::null_mut(), __tvm_ffi_rust_add, None) };
+    let sum = add.call_tuple_with_len::<2, _>((1i64, 2i64)).unwrap();
+    assert_eq!(i64::try_from(sum).unwrap(), 3);
+    without_export_metadata::__tvm_ffi__metadata_rust_schema_id_int();
+    without_export_metadata::__tvm_ffi__metadata_rust_packed();
+    without_export_metadata::__tvm_ffi__doc_rust_add();
 }
 
 /// Registers `func` as `testing.rust.<name>` and checks that its metadata is
@@ -210,6 +246,6 @@ fn test_global_typed_registration_calls_the_function() {
     )
     .unwrap();
     let add = Function::get_global("testing.rust.add").unwrap();
-    let add = into_typed_fn!(add, Fn(i64, i64) -> Result<i64>);
-    assert_eq!(add(1, 2).unwrap(), 3);
+    let sum = add.call_tuple_with_len::<2, _>((1i64, 2i64)).unwrap();
+    assert_eq!(i64::try_from(sum).unwrap(), 3);
 }

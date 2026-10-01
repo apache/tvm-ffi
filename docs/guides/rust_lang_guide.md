@@ -172,12 +172,18 @@ tvm_ffi_dll_export_typed_func!(add, add);
 tvm_ffi_dll_export_typed_func_doc!(add, "Add two integers and return the sum.");
 ```
 
-Like C++ `TVM_FFI_DLL_EXPORT_TYPED_FUNC` with
-`TVM_FFI_DLL_EXPORT_INCLUDE_METADATA`, the export also writes the function's
-type schema as `__tvm_ffi__metadata_<name>`, and
+With the `export-metadata` feature of the `tvm-ffi` crate, the counterpart of
+C++ `TVM_FFI_DLL_EXPORT_INCLUDE_METADATA`, the export also writes the
+function's type schema as `__tvm_ffi__metadata_<name>`, and
 `tvm_ffi_dll_export_typed_func_doc!` writes its doc string as
 `__tvm_ffi__doc_<name>`, which `Module.get_function_metadata` and
-`Module.get_function_doc` read.
+`Module.get_function_doc` read. As in C++, it is off by default, and without
+it `tvm_ffi_dll_export_typed_func_doc!` exports nothing:
+
+```toml
+[dependencies]
+tvm-ffi = { version = "...", features = ["export-metadata"] }
+```
 
 ### Reflected Type Methods
 

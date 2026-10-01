@@ -313,13 +313,14 @@ macro_rules! impl_arg_into_ref {
 /// since unwinding into the caller would abort the process, but panicking
 /// is discouraged.
 ///
-/// Like C++ `TVM_FFI_DLL_EXPORT_TYPED_FUNC` with
+/// With the `export-metadata` feature, the counterpart of C++
 /// `TVM_FFI_DLL_EXPORT_INCLUDE_METADATA`, the macro also exports the
 /// function's metadata, `{"type_schema":...}`, as `__tvm_ffi__metadata_<name>`,
 /// which `Module::GetFunctionMetadata` and the stub generator read. A
 /// function's schema lists its parameter and return types; a callable whose
 /// signature is not known, such as a custom [`AsPackedCallable`], has the
-/// schema of an untyped function.
+/// schema of an untyped function. As in C++, the feature is off by default,
+/// so exports are minimal.
 ///
 /// [`AsPackedCallable`]: crate::function_internal::AsPackedCallable
 ///
@@ -380,7 +381,53 @@ macro_rules! tvm_ffi_dll_export_typed_func {
                     }
                 }
             }
+        }
+        $crate::__tvm_ffi_dll_export_metadata!($name, $func);
+    };
+}
 
+/// Macro to export the doc string of a function exported with
+/// [`tvm_ffi_dll_export_typed_func!`], as C++ `TVM_FFI_DLL_EXPORT_TYPED_FUNC_DOC`
+/// does
+///
+/// With the `export-metadata` feature, the doc string is exported as
+/// `__tvm_ffi__doc_<name>`, which `Module::GetFunctionDoc` and the stub
+/// generator read. Without it, as C++ without
+/// `TVM_FFI_DLL_EXPORT_INCLUDE_METADATA`, the macro exports nothing, but
+/// still checks that the doc string is a string constant. The macro never
+/// exports the function itself.
+///
+/// # Arguments
+/// * `$name` - The name the function is exported as
+/// * `$doc` - The doc string, a string literal
+///
+/// # Example
+/// ```rust
+/// use tvm_ffi::*;
+///
+/// fn add(a: i64, b: i64) -> Result<i64> { Ok(a + b) }
+///
+/// tvm_ffi_dll_export_typed_func!(add, add);
+/// tvm_ffi_dll_export_typed_func_doc!(add, "Add two integers and return the sum.");
+/// ```
+#[macro_export]
+macro_rules! tvm_ffi_dll_export_typed_func_doc {
+    ($name:ident, $doc:expr) => {
+        $crate::__tvm_ffi_dll_export_doc!($name, $doc);
+    };
+}
+
+// The metadata and doc getters the export macros emit with the
+// `export-metadata` feature. A `#[cfg]` in a `macro_rules!` expansion would
+// test the features of the crate that invokes the macro, so the feature
+// selects which definition of these helpers this crate compiles instead.
+
+#[cfg(feature = "export-metadata")]
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __tvm_ffi_dll_export_metadata {
+    ($name:ident, $func:expr) => {
+        $crate::macros::paste::paste! {
             #[no_mangle]
             pub unsafe extern "C" fn [<__tvm_ffi__metadata_ $name>](
                 _handle: *mut std::ffi::c_void,
@@ -400,29 +447,17 @@ macro_rules! tvm_ffi_dll_export_typed_func {
     };
 }
 
-/// Macro to export the doc string of a function exported with
-/// [`tvm_ffi_dll_export_typed_func!`], as C++ `TVM_FFI_DLL_EXPORT_TYPED_FUNC_DOC`
-/// does
-///
-/// The doc string is exported as `__tvm_ffi__doc_<name>`, which
-/// `Module::GetFunctionDoc` and the stub generator read. The macro exports
-/// only the doc string, not the function.
-///
-/// # Arguments
-/// * `$name` - The name the function is exported as
-/// * `$doc` - The doc string, a string literal
-///
-/// # Example
-/// ```rust
-/// use tvm_ffi::*;
-///
-/// fn add(a: i64, b: i64) -> Result<i64> { Ok(a + b) }
-///
-/// tvm_ffi_dll_export_typed_func!(add, add);
-/// tvm_ffi_dll_export_typed_func_doc!(add, "Add two integers and return the sum.");
-/// ```
+#[cfg(not(feature = "export-metadata"))]
+#[doc(hidden)]
 #[macro_export]
-macro_rules! tvm_ffi_dll_export_typed_func_doc {
+macro_rules! __tvm_ffi_dll_export_metadata {
+    ($name:ident, $func:expr) => {};
+}
+
+#[cfg(feature = "export-metadata")]
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __tvm_ffi_dll_export_doc {
     ($name:ident, $doc:expr) => {
         $crate::macros::paste::paste! {
             #[no_mangle]
@@ -436,6 +471,15 @@ macro_rules! tvm_ffi_dll_export_typed_func_doc {
                 $crate::function_internal::write_exported_str(Ok(DOC.to_string()), result)
             }
         }
+    };
+}
+
+#[cfg(not(feature = "export-metadata"))]
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __tvm_ffi_dll_export_doc {
+    ($name:ident, $doc:expr) => {
+        const _: &str = $doc;
     };
 }
 
