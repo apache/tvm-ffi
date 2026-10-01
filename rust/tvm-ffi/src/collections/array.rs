@@ -238,6 +238,8 @@ unsafe impl<T> AnyCompatible for Array<T>
 where
     T: ContainerElement + Clone,
 {
+    const FIELD_STATIC_TYPE_INDEX: i32 = TypeIndex::kTVMFFIArray as i32;
+
     fn type_str() -> String {
         format!("Array<{}>", T::container_type_str())
     }

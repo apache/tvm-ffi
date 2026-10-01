@@ -30,6 +30,9 @@ use crate::dlpack::DLDevice;
 #[repr(i32)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum TVMFFITypeIndex {
+    /// Any value, which never appears as the type index of a value, but may
+    /// appear in field annotations during reflection
+    kTVMFFIAny = -1,
     /// None/nullptr value
     kTVMFFINone = 0,
     /// POD int value
@@ -95,6 +98,13 @@ pub enum TVMFFITypeIndex {
     kTVMFFIStaticObjectEnd = 79,
     /// Start of dynamically allocated object type indices.
     kTVMFFIDynObjectBegin = 128,
+}
+
+impl TVMFFITypeIndex {
+    /// Object, the root of the object type hierarchy, which shares its index
+    /// with `kTVMFFIStaticObjectBegin`
+    #[allow(non_upper_case_globals)]
+    pub const kTVMFFIObject: TVMFFITypeIndex = TVMFFITypeIndex::kTVMFFIStaticObjectBegin;
 }
 
 #[repr(i32)]
@@ -474,6 +484,9 @@ unsafe extern "C" {
         child_slots_can_overflow: i32,
         parent_type_index: i32,
     ) -> i32;
+    pub fn TVMFFITypeRegisterField(type_index: i32, info: *const TVMFFIFieldInfo) -> i32;
+    pub fn TVMFFITypeRegisterMethod(type_index: i32, info: *const TVMFFIMethodInfo) -> i32;
+    pub fn TVMFFITypeRegisterMetadata(type_index: i32, metadata: *const TVMFFITypeMetadata) -> i32;
     pub fn TVMFFITypeRegisterAttr(
         type_index: i32,
         attr_name: *const TVMFFIByteArray,

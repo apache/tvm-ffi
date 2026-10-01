@@ -459,6 +459,8 @@ where
     K: ContainerElement,
     V: ContainerElement,
 {
+    const FIELD_STATIC_TYPE_INDEX: i32 = TypeIndex::kTVMFFIObject as i32;
+
     fn type_str() -> String {
         format!(
             "Map<{}, {}>",

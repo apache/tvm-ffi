@@ -65,6 +65,17 @@ pub fn match_any(input: TokenStream) -> TokenStream {
 /// `_type_child_slots` (default 0) and `_type_child_slots_can_overflow`
 /// (default true).
 ///
+/// With `#[type_register]`, the type also registers its reflection, as C++
+/// `refl::ObjectDef` does, so that other languages read its fields and call
+/// its methods: fields marked `#[def_ro]`, or `#[def_rw]` in a type marked
+/// `#[type_mutable]`, with an optional `(name = "...", doc = "...")`, and what
+/// the function `#[type_reflection(path)]` names registers with the
+/// [`ObjectDef`](../tvm_ffi/reflection/struct.ObjectDef.html) it is passed,
+/// such as methods. Other languages may set a `#[def_rw]` field while Rust
+/// code holds a reference to the object, as they may set a field of a mutable
+/// C++ object, so Rust code must not keep a reference to such a field, or to
+/// the object, across a call that may set it.
+///
 /// Registrations from Rust hold one lock, so they do not race each other. The
 /// runtime's type table is not locked otherwise: as for C++, a type must not
 /// be registered while another thread loads a library that registers types.
@@ -79,7 +90,11 @@ pub fn match_any(input: TokenStream) -> TokenStream {
         type_final,
         type_register,
         type_child_slots,
-        type_child_slots_can_overflow
+        type_child_slots_can_overflow,
+        type_mutable,
+        type_reflection,
+        def_ro,
+        def_rw
     )
 )]
 pub fn derive_object(input: TokenStream) -> TokenStream {

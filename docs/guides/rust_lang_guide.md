@@ -203,6 +203,51 @@ assert_eq!(i64::try_from(result)?, 3);
 `Function::from_type_method(type_index, name)` performs the same lookup when
 the type index is already known (e.g. from `Any::type_index`).
 
+### Defining Object Types
+
+A Rust crate defines an object type of its own with `#[derive(Object)]` and
+`#[type_register]`, and registers its reflection along with it, as C++
+`refl::ObjectDef` does, so that Python reads its fields and calls its methods
+as for a C++ type. Mark fields with `#[def_ro]` (or `#[def_rw]` in a type
+marked `#[type_mutable]`), and name a function that registers methods with
+`#[type_reflection(...)]`:
+
+```rust
+use tvm_ffi::derive::{Object, ObjectRef};
+use tvm_ffi::reflection::ObjectDef;
+use tvm_ffi::{Object, ObjectArc, Result};
+
+#[repr(C)]
+#[derive(Object)]
+#[type_key = "my_ext.Point"]
+#[type_register]
+#[type_reflection(PointObj::register_reflection)]
+pub struct PointObj {
+    object: Object,
+    #[def_ro(doc = "The x coordinate")]
+    x: i64,
+    #[def_ro]
+    y: i64,
+}
+
+#[repr(C)]
+#[derive(ObjectRef, Clone)]
+pub struct Point {
+    data: ObjectArc<PointObj>,
+}
+
+impl PointObj {
+    fn register_reflection(def: &mut ObjectDef<Self>) {
+        // An instance method takes the object first.
+        def.def("norm1", |p: Point| -> Result<i64> { Ok(p.data.x.abs() + p.data.y.abs()) }, "");
+    }
+}
+```
+
+The type and its reflection are registered on first use of
+`PointObj::type_index()`, before any object of the type exists. Each field and
+method records its type schema, so the stub generator sees their types.
+
 ### Converting Borrowed Values into `Any`
 
 `Any::from(value)` takes ownership of `value`. Use it when you own the value.

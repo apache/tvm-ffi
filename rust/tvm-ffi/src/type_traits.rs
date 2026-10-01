@@ -43,6 +43,12 @@ pub unsafe trait AnyCompatible: Sized {
         unreachable!("MATCH_ANY_EXACT is false")
     }
 
+    /// The static type index of a reflected field of this type, as C++
+    /// `TypeTraits<T>::field_static_type_index` declares it: the index of a
+    /// value of this type whatever it holds, or `kTVMFFIAny` when it is not
+    /// fixed. Serialization writes a field of a POD index inline.
+    const FIELD_STATIC_TYPE_INDEX: i32 = TypeIndex::kTVMFFIAny as i32;
+
     /// the value to copy to TVMFFIAny
     unsafe fn copy_to_any_view(src: &Self, data: &mut TVMFFIAny);
     /// consume the value to move to Any
@@ -130,9 +136,11 @@ impl TypeSchema for AnyView<'_> {
     }
 }
 
-/// Marker for a value that can be stored in an FFI container.
+/// Marker for a value that can be stored in an FFI container or a reflected
+/// field.
 ///
-/// This is an implementation detail of [`crate::Array`] and [`crate::Map`].
+/// This is an implementation detail of [`crate::Array`], [`crate::Map`] and
+/// [`crate::reflection::ObjectDef`].
 /// Users should implement [`AnyCompatible`]; the blanket implementation below
 /// then makes that type a container element automatically. [`Any`] is handled
 /// separately so heterogeneous containers such as `Array<Any>` also work.
@@ -150,6 +158,7 @@ mod container_element_ops {
 
     pub trait Ops: Sized {
         const CONTAINER_IS_ANY: bool = false;
+        const CONTAINER_FIELD_STATIC_TYPE_INDEX: i32;
 
         unsafe fn container_copy_to_any_view(src: &Self, data: &mut TVMFFIAny);
         unsafe fn container_move_to_any(src: Self, data: &mut TVMFFIAny);
@@ -163,6 +172,8 @@ mod container_element_ops {
     }
 
     impl<T: AnyCompatible> Ops for T {
+        const CONTAINER_FIELD_STATIC_TYPE_INDEX: i32 = T::FIELD_STATIC_TYPE_INDEX;
+
         #[inline]
         unsafe fn container_copy_to_any_view(src: &Self, data: &mut TVMFFIAny) {
             <T as AnyCompatible>::copy_to_any_view(src, data)
@@ -211,6 +222,7 @@ mod container_element_ops {
 
     impl Ops for Any {
         const CONTAINER_IS_ANY: bool = true;
+        const CONTAINER_FIELD_STATIC_TYPE_INDEX: i32 = super::TypeIndex::kTVMFFIAny as i32;
 
         #[inline]
         unsafe fn container_copy_to_any_view(src: &Self, data: &mut TVMFFIAny) {
@@ -261,6 +273,8 @@ mod container_element_ops {
 
 /// AnyCompatible for bool
 unsafe impl AnyCompatible for bool {
+    const FIELD_STATIC_TYPE_INDEX: i32 = TypeIndex::kTVMFFIBool as i32;
+
     unsafe fn copy_to_any_view(src: &Self, data: &mut TVMFFIAny) {
         data.type_index = TypeIndex::kTVMFFIBool as i32;
         data.small_str_len = 0;
@@ -304,6 +318,8 @@ macro_rules! impl_any_compatible_for_int {
     ($($int_type:ty),* $(,)?) => {
         $(
             unsafe impl AnyCompatible for $int_type {
+                const FIELD_STATIC_TYPE_INDEX: i32 = TypeIndex::kTVMFFIInt as i32;
+
                 fn type_str() -> String {
                     "int".to_string()
                 }
@@ -410,6 +426,8 @@ unsafe impl<T: AnyCompatible> AnyCompatible for Option<T> {
 
 /// AnyCompatible for void*
 unsafe impl AnyCompatible for *mut core::ffi::c_void {
+    const FIELD_STATIC_TYPE_INDEX: i32 = TypeIndex::kTVMFFIOpaquePtr as i32;
+
     unsafe fn copy_to_any_view(src: &Self, data: &mut TVMFFIAny) {
         data.type_index = TypeIndex::kTVMFFIOpaquePtr as i32;
         data.small_str_len = 0;
@@ -453,6 +471,8 @@ macro_rules! impl_any_compatible_for_float {
     ($($float_type:ty),* $(,)?) => {
         $(
             unsafe impl AnyCompatible for $float_type {
+                const FIELD_STATIC_TYPE_INDEX: i32 = TypeIndex::kTVMFFIFloat as i32;
+
                 fn type_str() -> String {
                     "float".to_string()
                 }
@@ -504,6 +524,8 @@ impl_any_compatible_for_float!(f32, f64);
 // note that this is indeed a bit relaxation of the type
 // but it is necessary for us to enable void/none interoperability
 unsafe impl AnyCompatible for () {
+    const FIELD_STATIC_TYPE_INDEX: i32 = TypeIndex::kTVMFFINone as i32;
+
     fn type_str() -> String {
         // make it consistent with c++ representation
         "None".to_string()
