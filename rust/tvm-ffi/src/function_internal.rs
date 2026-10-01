@@ -18,10 +18,12 @@
  */
 use crate::any::{Any, AnyView, ArgTryFromAnyView};
 use crate::error::{Error, Result, INTERNAL_ERROR};
-use crate::object::ObjectRefCore;
+use crate::function::FunctionObj;
+use crate::object::{ObjectCore, ObjectRefCore};
 use crate::rvalue_ref::RValueRef;
 use crate::string::{Bytes, String};
-use crate::type_traits::{AnyCompatible, ContainerElement};
+use crate::type_traits::{AnyCompatible, ContainerElement, TypeSchema};
+use tvm_ffi_sys::{TVMFFIAny, TVMFFIByteArray, TVMFFIStringFromByteArray};
 
 //------------------------------------------------------------------------
 // PackedCallable
@@ -45,6 +47,72 @@ pub fn panic_to_error(payload: Box<dyn std::any::Any + Send>) -> Error {
 pub trait AsPackedCallable<I, O> {
     // Call the function in packed convention
     fn call_packed(&self, packed_args: &[AnyView]) -> Result<Any>;
+
+    /// The type schema of the function, as C++ `FunctionInfo::TypeSchema`
+    /// writes it.
+    ///
+    /// A typed function lists its return and parameter types. The default,
+    /// for a callable whose signature is not known, is the schema of an
+    /// untyped function, as C++ `refl::GlobalDef().def_packed` records it.
+    fn type_schema() -> std::string::String
+    where
+        Self: Sized,
+    {
+        crate::type_traits::type_schema(FunctionObj::TYPE_KEY, &[])
+    }
+}
+
+/// The type schema of `func`, a value of a callable type.
+#[inline]
+pub fn type_schema_of<Fun, I, O>(_func: &Fun) -> std::string::String
+where
+    Fun: AsPackedCallable<I, O>,
+{
+    Fun::type_schema()
+}
+
+/// The metadata C++ records for a function or field of type schema
+/// `type_schema`: `{"type_schema":<type_schema as a JSON string>}`.
+///
+/// The string is escaped by the runtime's JSON writer, which escapes as C++
+/// `EscapeStringJSON` does, so the metadata matches the C++ one byte for byte.
+pub(crate) fn type_schema_metadata(type_schema: &str) -> Result<std::string::String> {
+    let escaped: String = crate::cached_global_func!("ffi.json.Stringify")
+        .call_tuple_with_len::<2, _>((String::from(type_schema), ()))?
+        .try_into()?;
+    Ok(format!(r#"{{"type_schema":{}}}"#, escaped.as_str()))
+}
+
+/// Writes `text` to `result` as a string allocated by the runtime, so that it
+/// outlives the library that wrote it, as the getters that
+/// `TVM_FFI_DLL_EXPORT_TYPED_FUNC` and `TVM_FFI_DLL_EXPORT_TYPED_FUNC_DOC`
+/// export do. Returns the safe call return code.
+///
+/// # Safety
+///
+/// `result` must be valid for writes of one `TVMFFIAny`.
+#[doc(hidden)]
+pub unsafe fn write_exported_str(text: Result<std::string::String>, result: *mut TVMFFIAny) -> i32 {
+    match text {
+        Ok(text) => {
+            let text = TVMFFIByteArray::from_str(&text);
+            TVMFFIStringFromByteArray(&text, result)
+        }
+        Err(error) => {
+            Error::set_raised(&error);
+            -1
+        }
+    }
+}
+
+/// The metadata a library exports for a function `func` as
+/// `__tvm_ffi__metadata_<name>`, as `TVM_FFI_DLL_EXPORT_TYPED_FUNC` does.
+#[doc(hidden)]
+pub fn exported_metadata<Fun, I, O>(func: &Fun) -> Result<std::string::String>
+where
+    Fun: AsPackedCallable<I, O>,
+{
+    type_schema_metadata(&type_schema_of(func))
 }
 
 #[inline]
@@ -61,8 +129,19 @@ macro_rules! impl_as_packed_callable {
         where
             Fun: Fn($($t,)*) -> Result<Out> + 'static,
             Any: From<Out>,
+            Out: TypeSchema,
             $($t: ArgTryFromAnyView),*
         {
+            fn type_schema() -> std::string::String {
+                let params: &[std::string::String] = &[$(<$t as TypeSchema>::type_schema()),*];
+                format!(
+                    r#"{{"type":"{}","named_args":{{"return":[{}],"params":[{}]}}}}"#,
+                    FunctionObj::TYPE_KEY,
+                    Out::type_schema(),
+                    params.join(","),
+                )
+            }
+
             fn call_packed(&self, packed_args: &[AnyView]) -> Result<Any>
             {
                 crate::ensure!(

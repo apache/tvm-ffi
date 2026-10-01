@@ -428,7 +428,7 @@ crate::impl_try_from_any_for_parametric!(Option<T>);
 //------------------------------------------------------------
 /// ArgTryFromAnyView: Helper for function argument passing
 ///-----------------------------------------------------------
-pub(crate) trait ArgTryFromAnyView: Sized {
+pub(crate) trait ArgTryFromAnyView: Sized + crate::type_traits::TypeSchema {
     fn try_from_any_view(value: &AnyView, arg_index: usize) -> Result<Self, Error>;
 }
 
