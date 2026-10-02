@@ -596,14 +596,14 @@ class Optional<T, std::enable_if_t<is_object_ptr_type_v<T> || is_arc_type_v<T>>>
 
   TVM_FFI_INLINE T value() const& {
     if (TVM_FFI_PREDICT_FALSE(!has_value())) {
-      TVM_FFI_THROW(RuntimeError) << "Back optional access";
+      TVM_FFI_THROW(RuntimeError) << "Bad optional access";
     }
     return Traits::Copy(static_cast<const StorageType&>(*this));
   }
 
   TVM_FFI_INLINE T value() && {
     if (TVM_FFI_PREDICT_FALSE(!has_value())) {
-      TVM_FFI_THROW(RuntimeError) << "Back optional access";
+      TVM_FFI_THROW(RuntimeError) << "Bad optional access";
     }
     return Traits::Move(std::move(static_cast<StorageType&>(*this)));
   }
