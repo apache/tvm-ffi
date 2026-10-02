@@ -142,6 +142,47 @@ let my_func = Function::from_packed(|args: &[AnyView]| -> Result<Any> {
     Ok(Any::default())
 });
 Function::register_global("my_custom_func", my_func)?;
+
+// Register a typed function with a doc string
+Function::register_global_typed(
+    "my_add",
+    |x: i64, y: i64| -> Result<i64> { Ok(x + y) },
+    "Add two integers.",
+)?;
+```
+
+As C++ `refl::GlobalDef().def` does, a typed function's metadata records its
+type schema, so `tvm_ffi.get_global_func_metadata` and the stub generator see
+its parameter and return types. `Function::register_global` records the schema
+of an untyped function, as `def_packed` does.
+
+### Exporting Functions from a Library
+
+A Rust `cdylib` exports a typed function under the `__tvm_ffi_<name>` symbol
+that `Module::load_from_file` and `tvm_ffi.load_module` look up:
+
+```rust
+use tvm_ffi::*;
+
+fn add(a: i64, b: i64) -> Result<i64> {
+    Ok(a + b)
+}
+
+tvm_ffi_dll_export_typed_func!(add, add);
+tvm_ffi_dll_export_typed_func_doc!(add, "Add two integers and return the sum.");
+```
+
+With the `export-metadata` feature of the `tvm-ffi` crate, the counterpart of
+C++ `TVM_FFI_DLL_EXPORT_INCLUDE_METADATA`, the export also writes the
+function's type schema as `__tvm_ffi__metadata_<name>`, and
+`tvm_ffi_dll_export_typed_func_doc!` writes its doc string as
+`__tvm_ffi__doc_<name>`, which `Module.get_function_metadata` and
+`Module.get_function_doc` read. As in C++, it is off by default, and without
+it `tvm_ffi_dll_export_typed_func_doc!` exports nothing:
+
+```toml
+[dependencies]
+tvm-ffi = { version = "...", features = ["export-metadata"] }
 ```
 
 ### Reflected Type Methods
@@ -167,6 +208,51 @@ assert_eq!(i64::try_from(result)?, 3);
 
 `Function::from_type_method(type_index, name)` performs the same lookup when
 the type index is already known (e.g. from `Any::type_index`).
+
+### Defining Object Types
+
+A Rust crate defines an object type of its own with `#[derive(Object)]` and
+`#[type_register]`, and registers its reflection along with it, as C++
+`refl::ObjectDef` does, so that Python reads its fields and calls its methods
+as for a C++ type. Mark fields with `#[def_ro]` (or `#[def_rw]` in a type
+marked `#[type_mutable]`), and name a function that registers methods with
+`#[type_reflection(...)]`:
+
+```rust
+use tvm_ffi::derive::{Object, ObjectRef};
+use tvm_ffi::reflection::ObjectDef;
+use tvm_ffi::{Object, ObjectArc, Result};
+
+#[repr(C)]
+#[derive(Object)]
+#[type_key = "my_ext.Point"]
+#[type_register]
+#[type_reflection(PointObj::register_reflection)]
+pub struct PointObj {
+    object: Object,
+    #[def_ro(doc = "The x coordinate")]
+    x: i64,
+    #[def_ro]
+    y: i64,
+}
+
+#[repr(C)]
+#[derive(ObjectRef, Clone)]
+pub struct Point {
+    data: ObjectArc<PointObj>,
+}
+
+impl PointObj {
+    fn register_reflection(def: &mut ObjectDef<Self>) {
+        // An instance method takes the object first.
+        def.def("norm1", |p: Point| -> Result<i64> { Ok(p.data.x.abs() + p.data.y.abs()) }, "");
+    }
+}
+```
+
+The type and its reflection are registered on first use of
+`PointObj::type_index()`, before any object of the type exists. Each field and
+method records its type schema, so the stub generator sees their types.
 
 ### Converting Borrowed Values into `Any`
 

@@ -30,6 +30,9 @@ use crate::dlpack::DLDevice;
 #[repr(i32)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum TVMFFITypeIndex {
+    /// Any value, which never appears as the type index of a value, but may
+    /// appear in field annotations during reflection
+    kTVMFFIAny = -1,
     /// None/nullptr value
     kTVMFFINone = 0,
     /// POD int value
@@ -95,6 +98,13 @@ pub enum TVMFFITypeIndex {
     kTVMFFIStaticObjectEnd = 79,
     /// Start of dynamically allocated object type indices.
     kTVMFFIDynObjectBegin = 128,
+}
+
+impl TVMFFITypeIndex {
+    /// Object, the root of the object type hierarchy, which shares its index
+    /// with `kTVMFFIStaticObjectBegin`
+    #[allow(non_upper_case_globals)]
+    pub const kTVMFFIObject: TVMFFITypeIndex = TVMFFITypeIndex::kTVMFFIStaticObjectBegin;
 }
 
 #[repr(i32)]
@@ -466,6 +476,17 @@ unsafe extern "C" {
     pub fn TVMFFISetCustomAllocator(allocator: *mut TVMFFICustomAllocator) -> i32;
 
     pub fn TVMFFITypeKeyToIndex(type_key: *const TVMFFIByteArray, out_tindex: *mut i32) -> i32;
+    pub fn TVMFFITypeGetOrAllocIndex(
+        type_key: *const TVMFFIByteArray,
+        static_type_index: i32,
+        type_depth: i32,
+        num_child_slots: i32,
+        child_slots_can_overflow: i32,
+        parent_type_index: i32,
+    ) -> i32;
+    pub fn TVMFFITypeRegisterField(type_index: i32, info: *const TVMFFIFieldInfo) -> i32;
+    pub fn TVMFFITypeRegisterMethod(type_index: i32, info: *const TVMFFIMethodInfo) -> i32;
+    pub fn TVMFFITypeRegisterMetadata(type_index: i32, metadata: *const TVMFFITypeMetadata) -> i32;
     pub fn TVMFFITypeRegisterAttr(
         type_index: i32,
         attr_name: *const TVMFFIByteArray,
@@ -482,6 +503,10 @@ unsafe extern "C" {
         name: *const TVMFFIByteArray,
         f: TVMFFIObjectHandle,
         can_override: i32,
+    ) -> i32;
+    pub fn TVMFFIFunctionSetGlobalFromMethodInfo(
+        method_info: *const TVMFFIMethodInfo,
+        allow_override: i32,
     ) -> i32;
     pub fn TVMFFIFunctionCreate(
         self_ptr: *mut c_void,

@@ -94,6 +94,8 @@ impl Drop for RestoreStream {
 
 /// AnyCompatible for DLDevice
 unsafe impl AnyCompatible for DLDevice {
+    const FIELD_STATIC_TYPE_INDEX: i32 = TypeIndex::kTVMFFIDevice as i32;
+
     fn type_str() -> String {
         // make it consistent with c++ representation
         "Device".to_string()

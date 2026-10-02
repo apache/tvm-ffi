@@ -459,11 +459,20 @@ where
     K: ContainerElement,
     V: ContainerElement,
 {
+    const FIELD_STATIC_TYPE_INDEX: i32 = TypeIndex::kTVMFFIObject as i32;
+
     fn type_str() -> String {
         format!(
             "Map<{}, {}>",
             K::container_type_str(),
             V::container_type_str()
+        )
+    }
+
+    fn type_schema() -> String {
+        crate::type_traits::type_schema(
+            <MapObj as crate::ObjectCore>::TYPE_KEY,
+            &[K::container_type_schema(), V::container_type_schema()],
         )
     }
 

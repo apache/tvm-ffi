@@ -79,6 +79,8 @@ impl DLDataTypeExt for DLDataType {
 /// This implementation allows DLDataType to be used with the TVM FFI Any system,
 /// enabling type-safe conversion between DLDataType and the generic Any type.
 unsafe impl AnyCompatible for DLDataType {
+    const FIELD_STATIC_TYPE_INDEX: i32 = TypeIndex::kTVMFFIDataType as i32;
+
     /// Get the type string identifier for DLDataType
     ///
     /// # Returns

@@ -43,6 +43,12 @@ pub unsafe trait AnyCompatible: Sized {
         unreachable!("MATCH_ANY_EXACT is false")
     }
 
+    /// The static type index of a reflected field of this type, as C++
+    /// `TypeTraits<T>::field_static_type_index` declares it: the index of a
+    /// value of this type whatever it holds, or `kTVMFFIAny` when it is not
+    /// fixed. Serialization writes a field of a POD index inline.
+    const FIELD_STATIC_TYPE_INDEX: i32 = TypeIndex::kTVMFFIAny as i32;
+
     /// the value to copy to TVMFFIAny
     unsafe fn copy_to_any_view(src: &Self, data: &mut TVMFFIAny);
     /// consume the value to move to Any
@@ -70,6 +76,16 @@ pub unsafe trait AnyCompatible: Sized {
     /// the type string of the type
     fn type_str() -> String;
 
+    /// The type schema of the type: the JSON object C++
+    /// `TypeTraits<T>::TypeSchema` writes, which the type schemas of functions
+    /// and fields embed.
+    ///
+    /// The default, `{"type":"<type_str>"}`, fits a type whose type string is
+    /// its type key, as for object references.
+    fn type_schema() -> String {
+        type_schema(&Self::type_str(), &[])
+    }
+
     /// Borrow `self` into an owned [`Any`], increfing object-backed values.
     ///
     /// The by-reference counterpart of `Any::from(value)`, for fields reached
@@ -83,9 +99,48 @@ pub unsafe trait AnyCompatible: Sized {
     }
 }
 
-/// Marker for a value that can be stored in an FFI container.
+/// Writes a type schema, `{"type":"<origin>"}` or, with type arguments,
+/// `{"type":"<origin>","args":[...]}`, as C++ `TypeTraits<T>::TypeSchema` does.
+pub(crate) fn type_schema(origin: &str, args: &[String]) -> String {
+    if args.is_empty() {
+        format!(r#"{{"type":"{origin}"}}"#)
+    } else {
+        format!(r#"{{"type":"{origin}","args":[{}]}}"#, args.join(","))
+    }
+}
+
+/// The type schema of a function parameter or return type.
 ///
-/// This is an implementation detail of [`crate::Array`] and [`crate::Map`].
+/// This is [`AnyCompatible::type_schema`] for a type that converts through
+/// [`Any`], and `{"type":"Any"}` for `Any` and `AnyView` themselves, as C++
+/// `details::TypeSchema<T>` writes them.
+pub(crate) trait TypeSchema {
+    fn type_schema() -> String;
+}
+
+impl<T: AnyCompatible> TypeSchema for T {
+    fn type_schema() -> String {
+        <T as AnyCompatible>::type_schema()
+    }
+}
+
+impl TypeSchema for Any {
+    fn type_schema() -> String {
+        type_schema("Any", &[])
+    }
+}
+
+impl TypeSchema for AnyView<'_> {
+    fn type_schema() -> String {
+        type_schema("Any", &[])
+    }
+}
+
+/// Marker for a value that can be stored in an FFI container or a reflected
+/// field.
+///
+/// This is an implementation detail of [`crate::Array`], [`crate::Map`] and
+/// [`crate::reflection::ObjectDef`].
 /// Users should implement [`AnyCompatible`]; the blanket implementation below
 /// then makes that type a container element automatically. [`Any`] is handled
 /// separately so heterogeneous containers such as `Array<Any>` also work.
@@ -103,6 +158,7 @@ mod container_element_ops {
 
     pub trait Ops: Sized {
         const CONTAINER_IS_ANY: bool = false;
+        const CONTAINER_FIELD_STATIC_TYPE_INDEX: i32;
 
         unsafe fn container_copy_to_any_view(src: &Self, data: &mut TVMFFIAny);
         unsafe fn container_move_to_any(src: Self, data: &mut TVMFFIAny);
@@ -112,9 +168,12 @@ mod container_element_ops {
         unsafe fn container_try_cast_from_any_view(data: &TVMFFIAny) -> Result<Self, ()>;
         fn container_get_mismatch_type_info(data: &TVMFFIAny) -> String;
         fn container_type_str() -> String;
+        fn container_type_schema() -> String;
     }
 
     impl<T: AnyCompatible> Ops for T {
+        const CONTAINER_FIELD_STATIC_TYPE_INDEX: i32 = T::FIELD_STATIC_TYPE_INDEX;
+
         #[inline]
         unsafe fn container_copy_to_any_view(src: &Self, data: &mut TVMFFIAny) {
             <T as AnyCompatible>::copy_to_any_view(src, data)
@@ -154,10 +213,16 @@ mod container_element_ops {
         fn container_type_str() -> String {
             <T as AnyCompatible>::type_str()
         }
+
+        #[inline]
+        fn container_type_schema() -> String {
+            <T as AnyCompatible>::type_schema()
+        }
     }
 
     impl Ops for Any {
         const CONTAINER_IS_ANY: bool = true;
+        const CONTAINER_FIELD_STATIC_TYPE_INDEX: i32 = super::TypeIndex::kTVMFFIAny as i32;
 
         #[inline]
         unsafe fn container_copy_to_any_view(src: &Self, data: &mut TVMFFIAny) {
@@ -198,11 +263,18 @@ mod container_element_ops {
         fn container_type_str() -> String {
             "Any".to_string()
         }
+
+        #[inline]
+        fn container_type_schema() -> String {
+            <Any as super::TypeSchema>::type_schema()
+        }
     }
 }
 
 /// AnyCompatible for bool
 unsafe impl AnyCompatible for bool {
+    const FIELD_STATIC_TYPE_INDEX: i32 = TypeIndex::kTVMFFIBool as i32;
+
     unsafe fn copy_to_any_view(src: &Self, data: &mut TVMFFIAny) {
         data.type_index = TypeIndex::kTVMFFIBool as i32;
         data.small_str_len = 0;
@@ -246,6 +318,8 @@ macro_rules! impl_any_compatible_for_int {
     ($($int_type:ty),* $(,)?) => {
         $(
             unsafe impl AnyCompatible for $int_type {
+                const FIELD_STATIC_TYPE_INDEX: i32 = TypeIndex::kTVMFFIInt as i32;
+
                 fn type_str() -> String {
                     "int".to_string()
                 }
@@ -295,6 +369,10 @@ unsafe impl<T: AnyCompatible> AnyCompatible for Option<T> {
     fn type_str() -> String {
         // make it consistent with c++ representation
         "Optional<".to_string() + T::type_str().as_str() + ">"
+    }
+
+    fn type_schema() -> String {
+        type_schema("Optional", &[<T as AnyCompatible>::type_schema()])
     }
 
     unsafe fn copy_to_any_view(src: &Self, data: &mut TVMFFIAny) {
@@ -348,6 +426,8 @@ unsafe impl<T: AnyCompatible> AnyCompatible for Option<T> {
 
 /// AnyCompatible for void*
 unsafe impl AnyCompatible for *mut core::ffi::c_void {
+    const FIELD_STATIC_TYPE_INDEX: i32 = TypeIndex::kTVMFFIOpaquePtr as i32;
+
     unsafe fn copy_to_any_view(src: &Self, data: &mut TVMFFIAny) {
         data.type_index = TypeIndex::kTVMFFIOpaquePtr as i32;
         data.small_str_len = 0;
@@ -391,6 +471,8 @@ macro_rules! impl_any_compatible_for_float {
     ($($float_type:ty),* $(,)?) => {
         $(
             unsafe impl AnyCompatible for $float_type {
+                const FIELD_STATIC_TYPE_INDEX: i32 = TypeIndex::kTVMFFIFloat as i32;
+
                 fn type_str() -> String {
                     "float".to_string()
                 }
@@ -442,6 +524,8 @@ impl_any_compatible_for_float!(f32, f64);
 // note that this is indeed a bit relaxation of the type
 // but it is necessary for us to enable void/none interoperability
 unsafe impl AnyCompatible for () {
+    const FIELD_STATIC_TYPE_INDEX: i32 = TypeIndex::kTVMFFINone as i32;
+
     fn type_str() -> String {
         // make it consistent with c++ representation
         "None".to_string()

@@ -238,8 +238,17 @@ unsafe impl<T> AnyCompatible for Array<T>
 where
     T: ContainerElement + Clone,
 {
+    const FIELD_STATIC_TYPE_INDEX: i32 = TypeIndex::kTVMFFIArray as i32;
+
     fn type_str() -> String {
         format!("Array<{}>", T::container_type_str())
+    }
+
+    fn type_schema() -> String {
+        crate::type_traits::type_schema(
+            <ArrayObj as crate::ObjectCore>::TYPE_KEY,
+            &[T::container_type_schema()],
+        )
     }
 
     unsafe fn check_any_strict(data: &TVMFFIAny) -> bool {

@@ -208,6 +208,7 @@ jobs:
         working-directory: rust
         run: |
           cargo test
+          cargo test -p tvm-ffi --features export-metadata
 
       # Build the Rust stubgen example against the installed package. Its post-build
       # step refreshes the bindings in place, so a diff means the checked-in file was stale.
