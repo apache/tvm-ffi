@@ -242,6 +242,13 @@ where
         format!("Array<{}>", T::container_type_str())
     }
 
+    fn type_schema() -> String {
+        crate::type_traits::type_schema(
+            <ArrayObj as crate::ObjectCore>::TYPE_KEY,
+            &[T::container_type_schema()],
+        )
+    }
+
     unsafe fn check_any_strict(data: &TVMFFIAny) -> bool {
         if data.type_index != TypeIndex::kTVMFFIArray as i32 {
             return false;

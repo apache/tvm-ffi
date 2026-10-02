@@ -142,6 +142,47 @@ let my_func = Function::from_packed(|args: &[AnyView]| -> Result<Any> {
     Ok(Any::default())
 });
 Function::register_global("my_custom_func", my_func)?;
+
+// Register a typed function with a doc string
+Function::register_global_typed(
+    "my_add",
+    |x: i64, y: i64| -> Result<i64> { Ok(x + y) },
+    "Add two integers.",
+)?;
+```
+
+As C++ `refl::GlobalDef().def` does, a typed function's metadata records its
+type schema, so `tvm_ffi.get_global_func_metadata` and the stub generator see
+its parameter and return types. `Function::register_global` records the schema
+of an untyped function, as `def_packed` does.
+
+### Exporting Functions from a Library
+
+A Rust `cdylib` exports a typed function under the `__tvm_ffi_<name>` symbol
+that `Module::load_from_file` and `tvm_ffi.load_module` look up:
+
+```rust
+use tvm_ffi::*;
+
+fn add(a: i64, b: i64) -> Result<i64> {
+    Ok(a + b)
+}
+
+tvm_ffi_dll_export_typed_func!(add, add);
+tvm_ffi_dll_export_typed_func_doc!(add, "Add two integers and return the sum.");
+```
+
+With the `export-metadata` feature of the `tvm-ffi` crate, the counterpart of
+C++ `TVM_FFI_DLL_EXPORT_INCLUDE_METADATA`, the export also writes the
+function's type schema as `__tvm_ffi__metadata_<name>`, and
+`tvm_ffi_dll_export_typed_func_doc!` writes its doc string as
+`__tvm_ffi__doc_<name>`, which `Module.get_function_metadata` and
+`Module.get_function_doc` read. As in C++, it is off by default, and without
+it `tvm_ffi_dll_export_typed_func_doc!` exports nothing:
+
+```toml
+[dependencies]
+tvm-ffi = { version = "...", features = ["export-metadata"] }
 ```
 
 ### Reflected Type Methods
