@@ -48,6 +48,12 @@ class TIntOrFloatRef : public ObjectRef {
   using ContainerType = Object;
 };
 
+class TPositiveIntRef : public ObjectRef {
+ public:
+  static constexpr bool _type_container_is_exact = false;
+  TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE(TPositiveIntRef, ObjectRef, TIntObj);
+};
+
 }  // namespace testing
 
 template <>
@@ -56,6 +62,15 @@ struct TypeTraits<testing::TIntOrFloatRef>
   TVM_FFI_INLINE static bool CheckAnyStrict(const TVMFFIAny* src) {
     return TypeTraits<testing::TInt>::CheckAnyStrict(src) ||
            TypeTraits<testing::TFloat>::CheckAnyStrict(src);
+  }
+};
+
+template <>
+struct TypeTraits<testing::TPositiveIntRef>
+    : public ObjectRefTypeTraitsBase<testing::TPositiveIntRef> {
+  TVM_FFI_INLINE static bool CheckAnyStrict(const TVMFFIAny* src) {
+    return ObjectRefTypeTraitsBase<testing::TPositiveIntRef>::CheckAnyStrict(src) &&
+           details::ObjectUnsafe::RawObjectPtrFromUnowned<testing::TIntObj>(src->v_obj)->value > 0;
   }
 };
 
@@ -247,6 +262,13 @@ TEST(ObjectRef, AsUsesTypeTraitsCheckAnyStrict) {
   auto float_like = b.as<TIntOrFloatRef>();
   ASSERT_TRUE(float_like.has_value()) << "Expected TIntOrFloatRef cast from TFloat to succeed";
   EXPECT_NE((*float_like).as<TFloatObj>(), nullptr);  // NOLINT(bugprone-unchecked-optional-access)
+}
+
+TEST(ObjectRef, StrictOnlyTraits) {
+  Any invalid = TInt(-1);
+  Any valid = TInt(1);
+  EXPECT_FALSE(invalid.try_cast<TPositiveIntRef>().has_value());
+  EXPECT_EQ(valid.cast<TPositiveIntRef>()->value, 1);
 }
 
 TEST(ObjectRef, GetRefUsesObjectRefContainment) {

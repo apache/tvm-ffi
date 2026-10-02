@@ -1577,6 +1577,21 @@ struct TypeTraits<Arc<TObject>,
   }
 };
 
+/*!
+ * \brief Default type traits for an ObjectRef subclass.
+ * \tparam TObjRef The ObjectRef subclass.
+ *
+ * A TypeTraits<TObjRef> specialization deriving from this base can customize only
+ * CheckAnyStrict while inheriting the default cast, copy, and move operations.
+ * TryCastFromAnyView statically dispatches to TypeTraits<TObjRef>::CheckAnyStrict,
+ * so the final specialization's checks apply without virtual dispatch. On success,
+ * it reuses CopyFromAnyViewAfterCheck.
+ *
+ * A custom CheckAnyStrict must validate the storage and nullability requirements
+ * of TObjRef before accepting a value. It can call this base's CheckAnyStrict to
+ * check those requirements before applying additional semantic constraints. It
+ * must not call the inherited TryCastFromAnyView, which would recurse.
+ */
 template <typename TObjRef>
 struct ObjectRefTypeTraitsBase : public TypeTraitsBase {
   static constexpr int32_t field_static_type_index = TypeIndex::kTVMFFIObject;
@@ -1643,17 +1658,8 @@ struct ObjectRefTypeTraitsBase : public TypeTraitsBase {
   }
 
   TVM_FFI_INLINE static std::optional<TObjRef> TryCastFromAnyView(const TVMFFIAny* src) {
-    if constexpr (TObjRef::_type_is_nullable) {
-      if (src->type_index == TypeIndex::kTVMFFINone) {
-        return details::ObjectUnsafe::ObjectRefFromObjectPtr<TObjRef>(nullptr);
-      }
-    }
-    if (src->type_index >= TypeIndex::kTVMFFIStaticObjectBegin &&
-        details::IsObjectInstance<ContainerType>(src->type_index)) {
-      return details::ObjectUnsafe::ObjectRefFromObjectPtr<TObjRef>(
-          details::ObjectUnsafe::ObjectPtrFromUnowned<ContainerType>(src->v_obj));
-    }
-    return std::nullopt;
+    if (!TypeTraits<TObjRef>::CheckAnyStrict(src)) return std::nullopt;
+    return CopyFromAnyViewAfterCheck(src);
   }
 
   TVM_FFI_INLINE static std::string TypeStr() { return ContainerType::_type_key; }
