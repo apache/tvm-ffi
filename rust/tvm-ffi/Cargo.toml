@@ -19,6 +19,7 @@
 name = "tvm-ffi"
 description = "tvm-ffi rust support"
 
+# Development placeholder; publish_crates.yml sets the release version from the Git tag.
 version = "0.1.0-alpha.0"
 edition = "2021"
 license = "Apache-2.0"
@@ -30,6 +31,7 @@ crate-type = ["lib"]
 
 [dependencies]
 paste = "1.0"
+# Release CI also updates the internal dependency versions, including dev-dependencies.
 tvm-ffi-sys = { version = "0.1.0-alpha.0", path = "../tvm-ffi-sys" }
 tvm-ffi-macros = { version = "0.1.0-alpha.0", path = "../tvm-ffi-macros" }
 
