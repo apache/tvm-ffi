@@ -101,21 +101,17 @@ jobs:
               ["git", "describe", "--tags", "--exact-match", "--match", os.environ["RELEASE_TAG"]],
               text=True,
           ).strip()
-          # Accept only the repository's release tag forms and map them onto SemVer:
-          #   v0.1.15       -> 0.1.15
-          #   v0.1.15-rc0   -> 0.1.15-rc.0    (likewise alpha/beta)
-          #   v0.1.14-post1 -> 0.1.15-post.1  (PEP 440 post releases sort above their base
-          #                                    release, so they become a prerelease of the
-          #                                    next patch rather than of the same one)
+          # v0.1.15 -> 0.1.15, v0.1.15-rc0 -> 0.1.15-rc.0, v0.1.14-post1 -> 0.1.15-post.1
+          # (a post release sorts above its base, so it becomes a prerelease of the next patch).
           match = re.fullmatch(
               r"v(?P<major>\d+)\.(?P<minor>\d+)\.(?P<patch>\d+)"
-              r"(?:-(?P<kind>alpha|beta|rc|post)(?P<num>\d+))?",
+              r"(?:-(?P<kind>rc|post)(?P<num>\d+))?",
               tag,
           )
           if match is None:
               raise SystemExit(
                   f"unsupported release tag {tag!r}: "
-                  "expected vX.Y.Z, vX.Y.Z-(alpha|beta|rc)N or vX.Y.Z-postN"
+                  "expected vX.Y.Z, vX.Y.Z-rcN or vX.Y.Z-postN"
               )
           major, minor, patch = (int(match[name]) for name in ("major", "minor", "patch"))
           kind, num = match["kind"], match["num"]
@@ -133,7 +129,8 @@ jobs:
               for section in ("dependencies", "dev-dependencies", "build-dependencies"):
                   for name, dependency in manifest.get(section, {}).items():
                       if name in crates:
-                          dependency["version"] = version
+                          # Exact pin: the three crates ship together.
+                          dependency["version"] = f"={version}"
               path.write_text(tomlkit.dumps(manifest), encoding="utf-8")
               print(f"{crate}: {version}")
           with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:
@@ -202,16 +199,13 @@ jobs:
         shell: bash
         run: *set_crate_versions
 
-      # Package and verify all three crates before anything is uploaded, so a crate that fails
-      # verification cannot leave an earlier one irrevocably published.
+      # Verify all three crates before anything is uploaded; the publishes below skip re-verifying.
       - name: Package and verify crates
         working-directory: rust
         run: cargo +stable package --workspace --registry crates-io --allow-dirty
 
-      # Publish in dependency order; each publish waits for the registry index before returning.
-      # A version that is already on crates.io is skipped, so a run that stopped part-way can be
-      # repeated and resumes with the crates that are still missing.
-      # Configure a crates.io API token with publish access to all three crates.
+      # Publish in dependency order, skipping versions already on crates.io so a partial run can be
+      # repeated. Needs a crates.io token with publish access to all three crates.
       - name: Publish crates to crates.io
         working-directory: rust
         shell: bash
@@ -223,12 +217,11 @@ jobs:
               echo "${crate}@${CRATE_VERSION} is already on crates.io; skipping."
               continue
             elif ! grep -q "could not find" <<< "${lookup}"; then
-              # Anything other than a definite "not found" (network, index, auth) must not be
-              # mistaken for an unpublished crate.
+              # Only a definite "not found" may fall through to publishing.
               echo "${lookup}"
               echo "::error::Could not determine whether ${crate}@${CRATE_VERSION} is on crates.io"
               exit 1
             fi
             echo "Publishing ${crate}@${CRATE_VERSION}"
-            cargo +stable publish --package "${crate}" --registry crates-io --allow-dirty
+            cargo +stable publish --package "${crate}" --registry crates-io --allow-dirty --no-verify
           done
