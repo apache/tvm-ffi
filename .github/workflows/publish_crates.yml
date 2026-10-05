@@ -21,7 +21,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag to publish (manual run, e.g. v0.1.15 or v0.1.15-rc0)"
+        description: "Tag to publish (manual run, e.g. v0.1.15, v0.1.15-rc0 or v0.1.14-post1)"
         required: true
         type: string
       dry_run:
@@ -101,9 +101,30 @@ jobs:
               ["git", "describe", "--tags", "--exact-match", "--match", os.environ["RELEASE_TAG"]],
               text=True,
           ).strip()
-          version = tag.removeprefix("v")
-          # Normalize the repository's RC tags to numeric SemVer prerelease identifiers.
-          version = re.sub(r"-(alpha|beta|rc)(\d+)$", r"-\1.\2", version)
+          # Accept only the repository's release tag forms and map them onto SemVer:
+          #   v0.1.15       -> 0.1.15
+          #   v0.1.15-rc0   -> 0.1.15-rc.0    (likewise alpha/beta)
+          #   v0.1.14-post1 -> 0.1.15-post.1  (PEP 440 post releases sort above their base
+          #                                    release, so they become a prerelease of the
+          #                                    next patch rather than of the same one)
+          match = re.fullmatch(
+              r"v(?P<major>\d+)\.(?P<minor>\d+)\.(?P<patch>\d+)"
+              r"(?:-(?P<kind>alpha|beta|rc|post)(?P<num>\d+))?",
+              tag,
+          )
+          if match is None:
+              raise SystemExit(
+                  f"unsupported release tag {tag!r}: "
+                  "expected vX.Y.Z, vX.Y.Z-(alpha|beta|rc)N or vX.Y.Z-postN"
+              )
+          major, minor, patch = (int(match[name]) for name in ("major", "minor", "patch"))
+          kind, num = match["kind"], match["num"]
+          if kind == "post":
+              version = f"{major}.{minor}.{patch + 1}-post.{num}"
+          elif kind:
+              version = f"{major}.{minor}.{patch}-{kind}.{num}"
+          else:
+              version = f"{major}.{minor}.{patch}"
           crates = ("tvm-ffi", "tvm-ffi-sys", "tvm-ffi-macros")
           for crate in crates:
               path = Path("rust") / crate / "Cargo.toml"
@@ -115,6 +136,8 @@ jobs:
                           dependency["version"] = version
               path.write_text(tomlkit.dumps(manifest), encoding="utf-8")
               print(f"{crate}: {version}")
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:
+              env_file.write(f"CRATE_VERSION={version}\n")
           PY
           # Cargo validates the derived SemVer and the updated dependency requirements.
           cargo +stable metadata --manifest-path rust/Cargo.toml --no-deps --format-version 1 > /dev/null
@@ -179,10 +202,21 @@ jobs:
         shell: bash
         run: *set_crate_versions
 
-      # Cargo publishes the workspace in dependency order and waits for the registry index.
+      # Publish in dependency order; each publish waits for the registry index before returning.
+      # A version that is already on crates.io is skipped, so a run that stopped part-way can be
+      # repeated and resumes with the crates that are still missing.
       # Configure a crates.io API token with publish access to all three crates.
       - name: Publish crates to crates.io
         working-directory: rust
+        shell: bash
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: cargo +stable publish --workspace --registry crates-io --allow-dirty
+        run: |
+          for crate in tvm-ffi-macros tvm-ffi-sys tvm-ffi; do
+            if cargo +stable info --registry crates-io "${crate}@${CRATE_VERSION}" > /dev/null 2>&1; then
+              echo "${crate}@${CRATE_VERSION} is already on crates.io; skipping."
+              continue
+            fi
+            echo "Publishing ${crate}@${CRATE_VERSION}"
+            cargo +stable publish --package "${crate}" --registry crates-io --allow-dirty
+          done
