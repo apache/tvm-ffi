@@ -21,7 +21,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag to publish (manual run, e.g. v0.1.15, v0.1.15-rc0 or v0.1.14-post1)"
+        description: "Tag to publish (manual run)"
         required: true
         type: string
       dry_run:
@@ -139,18 +139,20 @@ jobs:
           # Cargo validates the derived SemVer and the updated dependency requirements.
           cargo +stable metadata --manifest-path rust/Cargo.toml --no-deps --format-version 1 > /dev/null
 
-      - name: Build crates
-        working-directory: rust
-        run: cargo +stable build --release --workspace
-
       - name: Test crates
         working-directory: rust
         run: cargo +stable test --release --workspace
 
-      - name: Package and verify crates
+      # Packages and verifies the crates; only the release-version edits above are uncommitted.
+      - name: Dry-run crate publication
         working-directory: rust
-        # Only the release-version edits above are uncommitted in this checkout.
-        run: cargo +stable package --workspace --registry crates-io --allow-dirty
+        run: cargo +stable publish --dry-run --workspace --registry crates-io --allow-dirty
+
+      # The dry run keeps its .crate files in a temporary directory; write them out again,
+      # without re-verifying, for the artifact upload.
+      - name: Package crates
+        working-directory: rust
+        run: cargo +stable package --workspace --registry crates-io --allow-dirty --no-verify
 
       - name: Upload crate artifacts
         uses: actions/upload-artifact@v4
@@ -158,11 +160,6 @@ jobs:
           name: crates-${{ matrix.os }}-${{ matrix.arch }}
           path: rust/target/package/*.crate
           if-no-files-found: error
-
-      - name: Dry-run crate publication
-        if: inputs.dry_run
-        working-directory: rust
-        run: cargo +stable publish --dry-run --workspace --registry crates-io --allow-dirty
 
   upload_crates:
     needs: [build_crates]
