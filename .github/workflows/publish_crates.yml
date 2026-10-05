@@ -202,6 +202,12 @@ jobs:
         shell: bash
         run: *set_crate_versions
 
+      # Package and verify all three crates before anything is uploaded, so a crate that fails
+      # verification cannot leave an earlier one irrevocably published.
+      - name: Package and verify crates
+        working-directory: rust
+        run: cargo +stable package --workspace --registry crates-io --allow-dirty
+
       # Publish in dependency order; each publish waits for the registry index before returning.
       # A version that is already on crates.io is skipped, so a run that stopped part-way can be
       # repeated and resumes with the crates that are still missing.
@@ -213,9 +219,15 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
           for crate in tvm-ffi-macros tvm-ffi-sys tvm-ffi; do
-            if cargo +stable info --registry crates-io "${crate}@${CRATE_VERSION}" > /dev/null 2>&1; then
+            if lookup=$(cargo +stable info --registry crates-io "${crate}@${CRATE_VERSION}" 2>&1); then
               echo "${crate}@${CRATE_VERSION} is already on crates.io; skipping."
               continue
+            elif ! grep -q "could not find" <<< "${lookup}"; then
+              # Anything other than a definite "not found" (network, index, auth) must not be
+              # mistaken for an unpublished crate.
+              echo "${lookup}"
+              echo "::error::Could not determine whether ${crate}@${CRATE_VERSION} is on crates.io"
+              exit 1
             fi
             echo "Publishing ${crate}@${CRATE_VERSION}"
             cargo +stable publish --package "${crate}" --registry crates-io --allow-dirty
