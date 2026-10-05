@@ -87,40 +87,20 @@ jobs:
       - name: Set crate versions from Git
         shell: bash
         run: &set_crate_versions |
+          # The crate version is the tag without its "v": 0.1.15, 0.1.15-rc0 or 0.1.14-post1.
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-(rc|post)[0-9]+)?$ ]]; then
+            echo "::error::unsupported release tag '$RELEASE_TAG': expected vX.Y.Z, vX.Y.Z-rcN or vX.Y.Z-postN"
+            exit 1
+          fi
+          export CRATE_VERSION="${RELEASE_TAG#v}"
+          echo "CRATE_VERSION=$CRATE_VERSION" >> "$GITHUB_ENV"
           uv run --no-project --with tomlkit python - <<'PY'
-          from __future__ import annotations
-
           import os
-          import re
-          import subprocess
           from pathlib import Path
 
           import tomlkit
 
-          tag = subprocess.check_output(
-              ["git", "describe", "--tags", "--exact-match", "--match", os.environ["RELEASE_TAG"]],
-              text=True,
-          ).strip()
-          # v0.1.15 -> 0.1.15, v0.1.15-rc0 -> 0.1.15-rc.0, v0.1.14-post1 -> 0.1.15-post.1
-          # (a post release sorts above its base, so it becomes a prerelease of the next patch).
-          match = re.fullmatch(
-              r"v(?P<major>\d+)\.(?P<minor>\d+)\.(?P<patch>\d+)"
-              r"(?:-(?P<kind>rc|post)(?P<num>\d+))?",
-              tag,
-          )
-          if match is None:
-              raise SystemExit(
-                  f"unsupported release tag {tag!r}: "
-                  "expected vX.Y.Z, vX.Y.Z-rcN or vX.Y.Z-postN"
-              )
-          major, minor, patch = (int(match[name]) for name in ("major", "minor", "patch"))
-          kind, num = match["kind"], match["num"]
-          if kind == "post":
-              version = f"{major}.{minor}.{patch + 1}-post.{num}"
-          elif kind:
-              version = f"{major}.{minor}.{patch}-{kind}.{num}"
-          else:
-              version = f"{major}.{minor}.{patch}"
+          version = os.environ["CRATE_VERSION"]
           crates = ("tvm-ffi", "tvm-ffi-sys", "tvm-ffi-macros")
           for crate in crates:
               path = Path("rust") / crate / "Cargo.toml"
@@ -133,8 +113,6 @@ jobs:
                           dependency["version"] = f"={version}"
               path.write_text(tomlkit.dumps(manifest), encoding="utf-8")
               print(f"{crate}: {version}")
-          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:
-              env_file.write(f"CRATE_VERSION={version}\n")
           PY
           # Cargo validates the derived SemVer and the updated dependency requirements.
           cargo +stable metadata --manifest-path rust/Cargo.toml --no-deps --format-version 1 > /dev/null
