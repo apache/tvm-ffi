@@ -53,9 +53,9 @@ The build will:
 
 - Query `tvm-ffi-config --libdir` to add the appropriate link search path.
 - Link against `tvm_ffi`.
-- Update the appropriate dynamic loader path environment variable for `cargo run` and `cargo test`.
+- Update the appropriate dynamic loader path environment variable for `cargo run` and `cargo test` within this workspace.
 
-For running downstream applications, you need to set the `LD_LIBRARY_PATH` so `libtvm_ffi` is available in the path.
+Downstream crates do not inherit this: set the `LD_LIBRARY_PATH` so `libtvm_ffi` is available in the path, also for `cargo run` and `cargo test`.
 
 ```bash
 export LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:`tvm-ffi-config --libdir`

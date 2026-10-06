@@ -48,11 +48,11 @@ Add to your `Cargo.toml`:
 tvm-ffi = { path = "path/to/tvm-ffi/rust/tvm-ffi" }
 ```
 
-For published versions (when available):
+For published versions:
 
 ```toml
 [dependencies]
-tvm-ffi = "0.1.0-alpha.0"
+tvm-ffi = "0.1.14"
 ```
 
 ### Environment Setup
