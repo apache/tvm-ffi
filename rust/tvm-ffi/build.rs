@@ -63,10 +63,12 @@ fn update_ld_library_path(lib_dir: &str) {
 
 fn main() {
     // Run `mylib-config --libdir` to get the library path
-    let config_output = Command::new("tvm-ffi-config")
-        .arg("--libdir")
-        .output()
-        .expect("Failed to run tvm-ffi-config");
+    let config_output = match Command::new("tvm-ffi-config").arg("--libdir").output() {
+        Ok(output) => output,
+        // docs.rs (and docs/conf.py) build the documentation without tvm-ffi installed.
+        Err(_) if env::var_os("DOCS_RS").is_some() => return,
+        Err(err) => panic!("Failed to run tvm-ffi-config: {err}"),
+    };
     let lib_dir = String::from_utf8(config_output.stdout)
         .expect("Invalid UTF-8 output from tvm-ffi-config")
         .trim()
