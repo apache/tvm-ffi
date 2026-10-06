@@ -90,6 +90,21 @@ fn main() -> Result<()> {
 }
 ```
 
+A module also reports whether it implements a function, and reads the
+metadata and doc string a function was exported with, as
+`Module.implements_function`, `Module.get_function_metadata` and
+`Module.get_function_doc` do in Python. The second argument says whether to
+also look in the modules it imports:
+
+```rust
+let module = Module::load_from_file("build/add_one_cpu.so")?;
+if module.implements_function("add_one_cpu", false)? {
+    // A JSON object such as {"type_schema": "..."}, if it was exported
+    let metadata = module.get_function_metadata("add_one_cpu", false)?;
+    let doc = module.get_function_doc("add_one_cpu", false)?;
+}
+```
+
 ### Working with Tensors
 
 Create and manipulate tensors:
