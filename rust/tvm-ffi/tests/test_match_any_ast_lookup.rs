@@ -20,38 +20,19 @@
 use tvm_ffi::derive::{Object, ObjectRef};
 use tvm_ffi::object::{Object as ObjectBase, ObjectArc, ObjectCore};
 use tvm_ffi::{match_any, Any, Array, Shape, TypeIndex};
-use tvm_ffi_sys::TVMFFIByteArray;
-
-unsafe extern "C" {
-    fn TVMFFITypeGetOrAllocIndex(
-        type_key: *const TVMFFIByteArray,
-        static_type_index: i32,
-        type_depth: i32,
-        num_child_slots: i32,
-        child_slots_can_overflow: i32,
-        parent_type_index: i32,
-    ) -> i32;
-}
 
 #[repr(C)]
 #[derive(Object)]
 #[type_key = "testing.match_any.Expr"]
+#[type_register]
+#[type_child_slots = 20]
+#[type_child_slots_can_overflow = false]
 struct ExprObj {
     base: ObjectBase,
 }
 
-fn register_type<T: ObjectCore>(num_child_slots: i32, parent_type_index: i32) -> i32 {
-    let type_key = unsafe { TVMFFIByteArray::from_str(T::TYPE_KEY) };
-    let type_index = unsafe {
-        TVMFFITypeGetOrAllocIndex(
-            &type_key,
-            -1,
-            T::TYPE_DEPTH,
-            num_child_slots,
-            0,
-            parent_type_index,
-        )
-    };
+fn register_type<T: ObjectCore>() -> i32 {
+    let type_index = T::type_index();
     assert!(type_index >= TypeIndex::kTVMFFIStaticObjectBegin as i32);
     type_index
 }
@@ -62,6 +43,7 @@ macro_rules! define_expr_leaves {
             #[repr(C)]
             #[derive(Object)]
             #[type_key = $type_key]
+            #[type_register]
             #[type_final]
             struct $object {
                 base: ExprObj,
@@ -87,10 +69,9 @@ macro_rules! define_expr_leaves {
         )+
 
         fn register_expr_types() {
-            let expr_type_index =
-                register_type::<ExprObj>(20, TypeIndex::kTVMFFIStaticObjectBegin as i32);
+            register_type::<ExprObj>();
             $(
-                register_type::<$object>(0, expr_type_index);
+                register_type::<$object>();
             )+
         }
     };
