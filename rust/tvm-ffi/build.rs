@@ -49,6 +49,7 @@ fn update_ld_library_path(lib_dir: &str) {
         return;
     }
     // Get the current value of the environment variable at build time (if any)
+    println!("cargo:rerun-if-env-changed={}", os_env_var);
     let current_val = env::var(os_env_var).unwrap_or_else(|_| String::new());
     // Use platform-specific separator
     let separator = if os_env_var == "PATH" { ";" } else { ":" };
@@ -62,20 +63,55 @@ fn update_ld_library_path(lib_dir: &str) {
 }
 
 fn main() {
-    // Run `mylib-config --libdir` to get the library path
-    let config_output = match Command::new("tvm-ffi-config").arg("--libdir").output() {
-        Ok(output) => output,
-        // docs.rs (and docs/conf.py) build the documentation without tvm-ffi installed.
-        Err(_) if env::var_os("DOCS_RS").is_some() => return,
-        Err(err) => panic!("Failed to run tvm-ffi-config: {err}"),
+    // docs.rs builds the documentation without tvm-ffi installed, and so does
+    // docs/conf.py, which sets DOCS_RS as docs.rs does. Cargo sets RUSTDOC for
+    // every build script, so it cannot tell a documentation build apart.
+    let docs_only = env::var_os("DOCS_RS").is_some();
+    println!("cargo:rerun-if-env-changed=DOCS_RS");
+    // The library directory comes from the tvm-ffi-config found on PATH.
+    println!("cargo:rerun-if-env-changed=PATH");
+    println!("cargo:rerun-if-changed=build.rs");
+
+    // Run `tvm-ffi-config --libdir` to get the library path
+    let found = match Command::new("tvm-ffi-config").arg("--libdir").output() {
+        Ok(output) if output.status.success() => {
+            let lib_dir = String::from_utf8(output.stdout)
+                .unwrap_or_default()
+                .trim()
+                .to_string();
+            if lib_dir.is_empty() {
+                Err("`tvm-ffi-config --libdir` printed no library directory".to_string())
+            } else {
+                Ok(lib_dir)
+            }
+        }
+        Ok(output) => Err(format!(
+            "`tvm-ffi-config --libdir` failed ({}): {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        )),
+        Err(err) => Err(format!("could not run `tvm-ffi-config`: {err}")),
     };
-    let lib_dir = String::from_utf8(config_output.stdout)
-        .expect("Invalid UTF-8 output from tvm-ffi-config")
-        .trim()
-        .to_string();
-    // update the LD_LIBRARY_PATH environment variable
-    // note that we will also need to update ld_library_path for
-    // the cases here besides the tvm-ffi-sys crate so cargo test works out of the box
+    let lib_dir = match found {
+        Ok(lib_dir) => lib_dir,
+        Err(reason) if docs_only => {
+            println!(
+                "cargo:warning={reason}; not setting the loader path for a documentation build"
+            );
+            return;
+        }
+        Err(reason) => panic!(
+            "{reason}. tvm-ffi sets the dynamic loader path for `cargo run` and `cargo test` \
+             from the directory that `tvm-ffi-config --libdir` prints: install tvm-ffi (e.g. \
+             `pip install apache-tvm-ffi`) and put tvm-ffi-config on PATH. To build \
+             documentation only, set DOCS_RS=1."
+        ),
+    };
+
+    // Let `cargo run` and `cargo test` in this workspace find libtvm_ffi. Cargo only
+    // forwards a package's own build-script environment to the binaries it runs, so
+    // the tvm-ffi-sys build script cannot do this for us, and downstream crates set
+    // the loader path themselves (see ../README.md).
     update_ld_library_path(&lib_dir);
     // generate the example library
     generate_example_lib();
