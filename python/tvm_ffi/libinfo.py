@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import ctypes
 import importlib.metadata as im
+import importlib.util
 import os
 import sys
 from pathlib import Path
@@ -112,12 +113,15 @@ def find_dlpack_include_path() -> str:
 
 def find_cython_lib() -> str:
     """Find the path to tvm cython."""
-    from tvm_ffi import core  # noqa: PLC0415
-
-    try:
-        return str(Path(core.__file__).resolve())
-    except OSError:
-        pass
+    # Locate the extension without importing it: importing ``tvm_ffi.core``
+    # has side effects (e.g. it optionally imports torch), which is
+    # undesirable for lightweight callers such as ``tvm-ffi-config``.
+    spec = importlib.util.find_spec("tvm_ffi.core")
+    if spec is not None and spec.origin is not None:
+        try:
+            return str(Path(spec.origin).resolve())
+        except OSError:
+            pass
     raise RuntimeError("Cannot find tvm cython path.")
 
 
