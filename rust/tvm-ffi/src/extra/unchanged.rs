@@ -63,6 +63,10 @@ unsafe impl AnyCompatible for Unchanged {
     fn type_str() -> std::string::String {
         "Unchanged".into()
     }
+
+    fn type_schema() -> std::string::String {
+        crate::type_traits::type_schema("ffi.Unchanged", &[])
+    }
 }
 
 crate::impl_try_from_any!(Unchanged);
@@ -269,6 +273,10 @@ unsafe impl<T: ContainerElement> AnyCompatible for UnchangedOr<T> {
 
     fn type_str() -> std::string::String {
         format!("UnchangedOr<{}>", T::container_type_str())
+    }
+
+    fn type_schema() -> std::string::String {
+        crate::type_traits::type_schema("UnchangedOr", &[T::container_type_schema()])
     }
 }
 

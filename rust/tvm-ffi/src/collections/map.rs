@@ -467,6 +467,13 @@ where
         )
     }
 
+    fn type_schema() -> String {
+        crate::type_traits::type_schema(
+            <MapObj as crate::ObjectCore>::TYPE_KEY,
+            &[K::container_type_schema(), V::container_type_schema()],
+        )
+    }
+
     unsafe fn check_any_strict(data: &TVMFFIAny) -> bool {
         // Mirrors C++ `CheckAnyStrict` (map_base.h): every entry must strictly
         // match `K`/`V`. An FFI failure reads as "no match" — this fn has no
