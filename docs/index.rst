@@ -30,7 +30,11 @@ To install TVM-FFI via pip or uv, run:
 .. code-block:: bash
 
    pip install apache-tvm-ffi
-   pip install torch-c-dlpack-ext  # compatibility package for torch <= 2.9
+
+With PyTorch 2.10+ already installed, TVM FFI uses its native DLPack exchange
+API without the addon. The pure-Python ``torch-c-dlpack-ext`` shim preserves
+existing downstream dependencies and imports. Older PyTorch versions retain
+TVM FFI's optional JIT fallback.
 
 
 Table of Contents

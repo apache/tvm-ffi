@@ -75,7 +75,7 @@ cmake --build build_cpp --parallel --config RelWithDebInfo --target tvm_ffi_shar
 
 ### Prerequisites
 
-- Python 3.9+, C++17 compiler, CMake 3.26+, Ninja
+- Python 3.11+, C++17 compiler, CMake 3.26+, Ninja
 - Submodules: `git submodule update --init --recursive`
 
 ## Testing
@@ -116,7 +116,7 @@ Key linters: `ruff` (Python), `clang-format` (C++, Google style, 100-col),
 ### clang-tidy (separate from pre-commit)
 
 ```bash
-uv run --no-project --with "clang-tidy==21.1.1" \
+uv run --no-project --with "clang-tidy" \
   python tests/lint/clang_tidy_precommit.py \
     --build-dir=build-pre-commit \
     --jobs=$(sysctl -n hw.ncpu) \

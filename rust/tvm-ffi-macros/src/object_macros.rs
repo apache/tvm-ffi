@@ -32,7 +32,7 @@ pub fn derive_object(input: proc_macro::TokenStream) -> TokenStream {
         .map(attr_to_str)
         .expect("Expect #[type_key = \"<my_type_key>\"] attribute");
     let type_final = match get_attr(&derive_input, "type_final") {
-        Some(attr) if matches!(attr.parse_meta(), Ok(syn::Meta::Path(_))) => true,
+        Some(attr) if matches!(&attr.meta, syn::Meta::Path(_)) => true,
         Some(_) => panic!("Expect #[type_final] attribute"),
         None => false,
     };
@@ -41,29 +41,37 @@ pub fn derive_object(input: proc_macro::TokenStream) -> TokenStream {
     // `TVM_FFI_DECLARE_OBJECT_INFO` does. Without it, the type binds a key
     // that its defining library, usually C++, has registered.
     let type_register = match get_attr(&derive_input, "type_register") {
-        Some(attr) if matches!(attr.parse_meta(), Ok(syn::Meta::Path(_))) => true,
+        Some(attr) if matches!(&attr.meta, syn::Meta::Path(_)) => true,
         Some(_) => panic!("Expect #[type_register] attribute"),
         None => false,
     };
 
     // Reserved child slots and whether children may exceed them, as C++
     // `_type_child_slots` and `_type_child_slots_can_overflow` declare them.
-    let child_slots = match get_attr(&derive_input, "type_child_slots").map(|a| a.parse_meta()) {
-        Some(Ok(syn::Meta::NameValue(syn::MetaNameValue {
-            lit: syn::Lit::Int(n),
+    let child_slots = match get_attr(&derive_input, "type_child_slots").map(|a| &a.meta) {
+        Some(syn::Meta::NameValue(syn::MetaNameValue {
+            value:
+                syn::Expr::Lit(syn::ExprLit {
+                    lit: syn::Lit::Int(n),
+                    ..
+                }),
             ..
-        }))) => n
+        })) => n
             .base10_parse::<i32>()
             .expect("Expect #[type_child_slots = <non-negative integer>]"),
         Some(_) => panic!("Expect #[type_child_slots = <non-negative integer>]"),
         None => 0,
     };
     let child_slots_can_overflow =
-        match get_attr(&derive_input, "type_child_slots_can_overflow").map(|a| a.parse_meta()) {
-            Some(Ok(syn::Meta::NameValue(syn::MetaNameValue {
-                lit: syn::Lit::Bool(b),
+        match get_attr(&derive_input, "type_child_slots_can_overflow").map(|a| &a.meta) {
+            Some(syn::Meta::NameValue(syn::MetaNameValue {
+                value:
+                    syn::Expr::Lit(syn::ExprLit {
+                        lit: syn::Lit::Bool(b),
+                        ..
+                    }),
                 ..
-            }))) => b.value,
+            })) => b.value,
             Some(_) => panic!("Expect #[type_child_slots_can_overflow = <bool>]"),
             None => true,
         };

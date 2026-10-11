@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import gc
 import sys
+import sysconfig
 import tempfile
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -166,6 +167,8 @@ def test_create_session() -> None:
     """Create an ExecutionSession successfully."""
     session = ExecutionSession()
     assert session is not None
+    if sysconfig.get_config_var("Py_GIL_DISABLED"):
+        assert not sys._is_gil_enabled()
 
 
 # ---------------------------------------------------------------------------

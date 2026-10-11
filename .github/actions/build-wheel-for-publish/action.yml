@@ -46,17 +46,17 @@ runs:
   using: "composite"
   steps:
     - name: Set up uv
-      uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+      uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
 
     - name: Check out source
-      uses: actions/checkout@v5
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         ref: ${{ inputs.checkout_ref }}
         submodules: recursive
         fetch-depth: 0
         fetch-tags: true
-
-    - uses: ./.github/actions/detect-env-vars
+        persist-credentials: false
+    - uses: $/.github/actions/detect-env-vars
       id: env_vars
 
     - name: Print current commit
@@ -75,17 +75,18 @@ runs:
 
     - name: Run cpp tests[windows]
       if: ${{ runner.os == 'Windows' }}
-      shell: cmd
+      shell: pwsh
       env:
         CMAKE_BUILD_PARALLEL_LEVEL: ${{ steps.env_vars.outputs.cpu_count }}
+        BUILD_ARCH: ${{ inputs.arch == 'ARM64' && 'ARM64' || 'x64' }}
       run: >
-        cmake . -B build_test -DTVM_FFI_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Debug &&
+        cmake . -B build_test -A $env:BUILD_ARCH -DTVM_FFI_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Debug &&
         cmake --build build_test --clean-first --config Debug --target tvm_ffi_tests &&
         ctest -V -C Debug --test-dir build_test --output-on-failure
 
     - name: Build wheels
       if: ${{ inputs.build_wheels == 'true' }}
-      uses: pypa/cibuildwheel@294735312765b09d24a2fbec22660ce817587d55  # v4.1.0
+      uses: pypa/cibuildwheel@b3395e271a35f73dad77f21802abe9b986dfe299 # v4.3.1
       env:
         CIBW_ARCHS_MACOS: ${{ inputs.arch }}
         CIBW_ARCHS_LINUX: ${{ inputs.arch }}

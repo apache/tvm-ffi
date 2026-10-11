@@ -15,154 +15,55 @@
 # specific language governing permissions and limitations
 # under the License.
 
-name: torch c dlpack
-
+name: Torch DLPack compatibility wheel
 on:
+  push:
+    paths: ["addons/torch_c_dlpack_ext/**", ".github/workflows/torch_c_dlpack.yml"]
+  pull_request:
+    paths: ["addons/torch_c_dlpack_ext/**", ".github/workflows/torch_c_dlpack.yml"]
   workflow_dispatch:
-    inputs:
-      branch:
-        description: "Branch or tag to publish (manual run)"
-        required: true
-
+permissions:
+  contents: read
 jobs:
-  build_wheels_linux:
-    strategy:
-      fail-fast: false
-      matrix:
-        arch: ["x86_64", "aarch64"]
-        python-version: ["cp39", "cp310", "cp311", "cp312", "cp313", "cp314"]
-    runs-on: ${{ matrix.arch == 'aarch64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
-    steps:
-      - uses: jlumbroso/free-disk-space@main
-        if: ${{ matrix.arch == 'x86_64'}}
-      - uses: actions/checkout@v5
-        with:
-          repository: apache/tvm-ffi
-          ref: main
-          fetch-depth: 0
-          submodules: recursive
-          path: tvm-ffi
-      - name: prepare docker environment
-        run: |
-          docker pull quay.io/pypa/manylinux_2_28_${{ matrix.arch }}:latest
-          docker run --name build_lib -d quay.io/pypa/manylinux_2_28_${{ matrix.arch }}:latest tail -f /dev/null
-          docker cp tvm-ffi build_lib:/tvm-ffi
-          wget https://developer.download.nvidia.com/compute/cuda/13.0.2/local_installers/cuda-repo-rhel8-13-0-local-13.0.2_580.95.05-1.${{ matrix.arch }}.rpm > /dev/null 2>&1
-          docker cp cuda-repo-rhel8-13-0-local-13.0.2_580.95.05-1.${{ matrix.arch }}.rpm build_lib:/
-          rm cuda-repo-rhel8-13-0-local-13.0.2_580.95.05-1.${{ matrix.arch }}.rpm
-          docker exec build_lib bash -c "rpm -i /cuda-repo-rhel8-13-0-local-13.0.2_580.95.05-1.${{ matrix.arch }}.rpm \
-          && dnf clean all \
-          && dnf -y install cuda-toolkit-13-0 \
-          && rm /cuda-repo-rhel8-13-0-local-13.0.2_580.95.05-1.${{ matrix.arch }}.rpm \
-          && dnf clean all"
-      - name: build torch libs and wheels
-        run: |
-          docker exec -w /tvm-ffi build_lib bash ./addons/torch_c_dlpack_ext/build_aot_wheels.sh ${{ matrix.arch }} ${{ matrix.python-version }}
-      - name: collect built wheels
-        run: |
-          mkdir wheelhouse
-          docker cp build_lib:/tvm-ffi/addons/torch_c_dlpack_ext/wheelhouse/ .
-      - uses: actions/upload-artifact@v4
-        with:
-          name: pypi-wheels-linux-${{ matrix.arch }}-${{ matrix.python-version }}
-          path: ./wheelhouse/*.whl
-  build_wheels_windows:
-    strategy:
-      fail-fast: false
-      matrix:
-        arch: ["x86_64"]
-        python-version: ["cp39", "cp310", "cp311", "cp312", "cp313", "cp314"]
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          repository: apache/tvm-ffi
-          ref: main
-          fetch-depth: 0
-          submodules: recursive
-          path: tvm-ffi
-      - uses: Jimver/cuda-toolkit@3d45d157f327c09c04b50ee6ccdea2d9d017ec76  # v0.2.35
-        id: cuda-toolkit
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
-      - name: build wheels
-        env:
-          CUDA_HOME: ${{steps.cuda-toolkit.outputs.CUDA_PATH}}
-        shell: cmd
-        working-directory: ./tvm-ffi
-        run: ./addons/torch_c_dlpack_ext/build_aot_wheels.bat ${{ matrix.arch }} ${{ matrix.python-version }}
-      - uses: actions/upload-artifact@v4
-        with:
-          name: pypi-wheels-windows-${{ matrix.arch }}-${{ matrix.python-version }}
-          path: ./tvm-ffi/addons/torch_c_dlpack_ext/wheelhouse/*.whl
-  build_wheels_macos:
-    strategy:
-      fail-fast: false
-      matrix:
-        arch: ["arm64"]
-        python-version: ["cp39", "cp310", "cp311", "cp312", "cp313", "cp314"]
-    runs-on: macos-14
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          repository: apache/tvm-ffi
-          ref: main
-          fetch-depth: 0
-          submodules: recursive
-          path: tvm-ffi
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
-      - name: build torch libs and wheels
-        working-directory: ./tvm-ffi
-        run: |
-          bash ./addons/torch_c_dlpack_ext/build_aot_wheels.sh ${{ matrix.arch }} ${{ matrix.python-version }}
-      - uses: actions/upload-artifact@v4
-        with:
-          name: pypi-wheels-macos-${{ matrix.arch }}-${{ matrix.python-version }}
-          path: ./tvm-ffi/addons/torch_c_dlpack_ext/wheelhouse/*.whl
-  build_source:
+  build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: apache/tvm-ffi
-          ref: main
-          fetch-depth: 0
-          submodules: recursive
-          path: tvm-ffi
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
-          python-version: "3.12"
+          python-version: "3.15t"
           activate-environment: true
-      - name: build source
+      - name: Resolve current stable dependencies
+        working-directory: addons/torch_c_dlpack_ext
+        run: uv sync --no-default-groups --group build --group test --upgrade --no-install-project
+      - name: Build and test universal wheel
+        working-directory: addons/torch_c_dlpack_ext
         run: |
-          uv pip install build
-          cd ./tvm-ffi/addons/torch_c_dlpack_ext
-          python -m build -s
-      - uses: actions/upload-artifact@v4
+          uv run --no-sync python -m build
+          uv run --no-sync twine check dist/*
+          uv pip install --python .venv/bin/python dist/*.whl
+          uv run --no-sync python -m pytest -o addopts="" tests -q
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: pypi-source
-          path: ./tvm-ffi/addons/torch_c_dlpack_ext/dist/*tar.gz
+          name: torch-dlpack
+          path: addons/torch_c_dlpack_ext/dist/*
   upload_pypi:
-    needs: [build_wheels_linux, build_wheels_windows, build_wheels_macos, build_source]
+    if: github.event_name == 'workflow_dispatch'
+    needs: build
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
       id-token: write
       attestations: write
-    if: github.event_name == 'workflow_dispatch'   # <-- publish only on manual trigger
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          pattern: pypi-*
+          name: torch-dlpack
           path: dist
-          merge-multiple: true
-      - name: Generate artifact attestation for sdist and wheels
-        uses: actions/attest-build-provenance@v1
+      - name: Generate artifact attestation for sdist and wheel
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: dist/*
-      - name: Publish package distributions to PyPI
-        uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e  # v1.13.0
-        with:
-          attestations: true
-          verbose: true
-          # testing publish url
-          # repository-url: https://test.pypi.org/legacy/
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2

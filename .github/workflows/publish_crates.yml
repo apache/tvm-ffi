@@ -57,15 +57,15 @@ jobs:
 
     steps:
       - name: Check out release source
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: refs/tags/${{ inputs.tag }}
           submodules: recursive
           fetch-depth: 0
           fetch-tags: true
-
+          persist-credentials: false
       - name: Set up uv
-        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           python-version: "3.13"
           activate-environment: true
@@ -74,7 +74,7 @@ jobs:
       - name: Set up Rust
         run: rustup toolchain install stable --profile minimal
 
-      - uses: ./.github/actions/detect-env-vars
+      - uses: $/.github/actions/detect-env-vars
         id: env_vars
 
       # tvm-ffi-sys locates libtvm_ffi through tvm-ffi-config on PATH.
@@ -133,28 +133,32 @@ jobs:
         run: cargo +stable package --workspace --registry crates-io --allow-dirty --no-verify
 
       - name: Upload crate artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: crates-${{ matrix.os }}-${{ matrix.arch }}
           path: rust/target/package/*.crate
           if-no-files-found: error
 
   upload_crates:
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     needs: [build_crates]
     runs-on: ubuntu-latest
     environment: crates-io
     if: github.event_name == 'workflow_dispatch' && !inputs.dry_run
     steps:
       - name: Check out release source
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: refs/tags/${{ inputs.tag }}
           submodules: recursive
           fetch-depth: 0
           fetch-tags: true
-
+          persist-credentials: false
       - name: Set up uv
-        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           python-version: "3.13"
           activate-environment: true
@@ -162,7 +166,7 @@ jobs:
       - name: Set up Rust
         run: rustup toolchain install stable --profile minimal
 
-      - uses: ./.github/actions/detect-env-vars
+      - uses: $/.github/actions/detect-env-vars
         id: env_vars
 
       - name: Build and install TVM FFI
@@ -179,13 +183,20 @@ jobs:
         working-directory: rust
         run: cargo +stable package --workspace --registry crates-io --allow-dirty
 
-      # Publish in dependency order, skipping versions already on crates.io so a partial run can be
-      # repeated. Needs a crates.io token with publish access to all three crates.
+      - name: Attest crates
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: rust/target/package/*.crate
+      - name: Authenticate trusted publisher
+        if: vars.USE_TRUSTED_PUBLISHING == 'true'
+        uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5
+        id: crates_auth
+      # Publish in dependency order; skip existing versions for retries.
       - name: Publish crates to crates.io
         working-directory: rust
         shell: bash
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ vars.USE_TRUSTED_PUBLISHING == 'true' && steps.crates_auth.outputs.token || vars.USE_TRUSTED_PUBLISHING != 'true' && secrets.CARGO_REGISTRY_TOKEN }}
         run: |
           for crate in tvm-ffi-macros tvm-ffi-sys tvm-ffi; do
             if lookup=$(cargo +stable info --registry crates-io "${crate}@${CRATE_VERSION}" 2>&1); then

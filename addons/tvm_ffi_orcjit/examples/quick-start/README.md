@@ -31,7 +31,7 @@ load them into the ORC JIT at runtime, and call them from Python.
 
 ## Prerequisites
 
-- Python 3.10+, C/C++ compiler
+- Python 3.11+, C/C++ compiler
 - `apache-tvm-ffi` and `apache-tvm_ffi_orcjit` packages installed
 
 ## Run

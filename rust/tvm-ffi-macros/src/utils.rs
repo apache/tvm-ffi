@@ -41,7 +41,7 @@ pub(crate) fn get_attr<'a>(
     derive_input: &'a syn::DeriveInput,
     name: &str,
 ) -> Option<&'a syn::Attribute> {
-    derive_input.attrs.iter().find(|a| a.path.is_ident(name))
+    derive_input.attrs.iter().find(|a| a.path().is_ident(name))
 }
 
 /// Convert an attribute to a string
@@ -52,13 +52,16 @@ pub(crate) fn get_attr<'a>(
 /// # Returns
 /// * `syn::LitStr` - The string value of the attribute
 pub(crate) fn attr_to_str(attr: &syn::Attribute) -> syn::LitStr {
-    match attr.parse_meta() {
-        Ok(syn::Meta::NameValue(syn::MetaNameValue {
-            lit: syn::Lit::Str(s),
+    match &attr.meta {
+        syn::Meta::NameValue(syn::MetaNameValue {
+            value:
+                syn::Expr::Lit(syn::ExprLit {
+                    lit: syn::Lit::Str(s),
+                    ..
+                }),
             ..
-        })) => s,
-        Ok(_m) => panic!("Expected a string literal, got"),
-        Err(e) => panic!("{}", e),
+        }) => s.clone(),
+        _ => panic!("Expected a string literal"),
     }
 }
 
@@ -70,8 +73,36 @@ pub(crate) fn attr_to_str(attr: &syn::Attribute) -> syn::LitStr {
 /// # Returns
 /// * `syn::Result<syn::Expr>` - The integer value of the attribute
 pub(crate) fn attr_to_expr(attr: &syn::Attribute) -> syn::Result<syn::Expr> {
-    let parser = |input: syn::parse::ParseStream| {
-        input.parse::<syn::Expr>() // parse expression after '='
-    };
-    syn::parse::Parser::parse2(parser, attr.tokens.clone())
+    match &attr.meta {
+        syn::Meta::NameValue(value) => Ok(value.value.clone()),
+        syn::Meta::List(_) => attr.parse_args(),
+        _ => Err(syn::Error::new_spanned(
+            attr,
+            "expected `name = expression`",
+        )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use quote::ToTokens;
+
+    #[test]
+    fn attribute_expressions() {
+        for attr in [
+            syn::parse_quote!(#[type_index(42)]),
+            syn::parse_quote!(#[type_index = 42]),
+        ] {
+            assert_eq!(
+                attr_to_expr(&attr).unwrap().to_token_stream().to_string(),
+                "42"
+            );
+        }
+        assert!(attr_to_expr(&syn::parse_quote!(#[type_index])).is_err());
+        assert_eq!(
+            attr_to_str(&syn::parse_quote!(#[type_key = "example.Key"])).value(),
+            "example.Key"
+        );
+    }
 }

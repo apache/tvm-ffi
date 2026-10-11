@@ -21,8 +21,8 @@ use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{quote, quote_spanned};
 use syn::{
-    parse_macro_input, Expr, FnArg, ImplItem, ImplItemMethod, ItemImpl, Meta, NestedMeta,
-    PathArguments, Token, Type,
+    parse_macro_input, Expr, FnArg, ImplItem, ImplItemFn, ItemImpl, Meta, PathArguments, Token,
+    Type,
 };
 
 use crate::utils::get_tvm_ffi_crate;
@@ -103,13 +103,15 @@ impl syn::parse::Parse for DispatchArgs {
         } else {
             input.parse::<Token![,]>()?;
             if !matches!(mode, DispatchMode::Visit | DispatchMode::Mutate) {
-                return Err(input.error(
-                    "`policy` is supported by `dispatch(visit)` and `dispatch(mutate)`",
-                ));
+                return Err(input
+                    .error("`policy` is supported by `dispatch(visit)` and `dispatch(mutate)`"));
             }
             let name: syn::Ident = input.parse()?;
             if name != "policy" {
-                return Err(syn::Error::new(name.span(), "expected `policy = expression`"));
+                return Err(syn::Error::new(
+                    name.span(),
+                    "expected `policy = expression`",
+                ));
             }
             input.parse::<Token![=]>()?;
             let policy = input.parse()?;
@@ -136,9 +138,7 @@ fn expand(item_impl: &ItemImpl, args: DispatchArgs) -> syn::Result<TokenStream2>
         .items
         .iter()
         .filter_map(|item| match item {
-            ImplItem::Method(method)
-                if method.sig.ident.to_string().starts_with(handler_prefix) =>
-            {
+            ImplItem::Fn(method) if method.sig.ident.to_string().starts_with(handler_prefix) => {
                 Some(parse_handler(method, mode))
             }
             _ => None,
@@ -430,11 +430,11 @@ enum HandlerArgument {
     Capability(Type),
 }
 
-fn parse_handler(method: &ImplItemMethod, mode: DispatchMode) -> syn::Result<Handler> {
+fn parse_handler(method: &ImplItemFn, mode: DispatchMode) -> syn::Result<Handler> {
     let inputs = &method.sig.inputs;
     let receiver_is_expected = match inputs.first() {
         Some(FnArg::Receiver(receiver)) => {
-            receiver.reference.is_some() && receiver.mutability.is_some()
+            matches!(receiver.kind, syn::ReceiverKind::Reference(_, _, Some(_)))
         }
         _ => false,
     };
@@ -558,12 +558,11 @@ fn parse_mutator(context_type: &Type) -> syn::Result<()> {
 }
 
 fn presence_attrs(attrs: &[syn::Attribute]) -> syn::Result<Vec<Meta>> {
-    attrs
+    Ok(attrs
         .iter()
-        .filter(|attr| attr.path.is_ident("cfg") || attr.path.is_ident("cfg_attr"))
-        .map(|attr| attr.parse_meta().map(presence_meta))
-        .filter_map(Result::transpose)
-        .collect()
+        .filter(|attr| attr.path().is_ident("cfg") || attr.path().is_ident("cfg_attr"))
+        .filter_map(|attr| presence_meta(attr.meta.clone()))
+        .collect())
 }
 
 fn presence_meta(meta: Meta) -> Option<Meta> {
@@ -577,21 +576,22 @@ fn presence_meta(meta: Meta) -> Option<Meta> {
         return None;
     }
 
-    let mut items = list.nested.into_iter();
+    let mut items = list
+        .parse_args_with(syn::punctuated::Punctuated::<Meta, syn::Token![,]>::parse_terminated)
+        .ok()?
+        .into_iter();
     let condition = items.next()?;
-    let mut retained = syn::punctuated::Punctuated::new();
+    let mut retained = syn::punctuated::Punctuated::<Meta, syn::Token![,]>::new();
     retained.push(condition);
     for item in items {
-        if let NestedMeta::Meta(meta) = item {
-            if let Some(meta) = presence_meta(meta) {
-                retained.push(NestedMeta::Meta(meta));
-            }
+        if let Some(meta) = presence_meta(item) {
+            retained.push(meta);
         }
     }
     if retained.len() == 1 {
         None
     } else {
-        list.nested = retained;
+        list.tokens = quote!(#retained);
         Some(Meta::List(list))
     }
 }

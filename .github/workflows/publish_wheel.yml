@@ -24,6 +24,9 @@ on:
         description: "Tag to publish (manual run)"
         required: true
 
+permissions:
+  contents: read
+
 jobs:
   build_wheels:
     runs-on: ${{ matrix.os }}
@@ -36,15 +39,16 @@ jobs:
           - {os: windows-latest, arch: AMD64, linux_image: "", build_sdist: "false"}
           - {os: windows-11-arm, arch: ARM64, linux_image: "", build_sdist: "false"}
           - {os: macos-14, arch: arm64, linux_image: "", build_sdist: "false"}
+          - {os: macos-15-intel, arch: x86_64, linux_image: "", build_sdist: "false"}
 
     steps:
       - name: Checkout repository (for local composite action)
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 1
-
+          persist-credentials: false
       - name: Build wheel
-        uses: ./.github/actions/build-wheel-for-publish
+        uses: $/.github/actions/build-wheel-for-publish
         with:
           os: ${{ matrix.os }}
           arch: ${{ matrix.arch }}
@@ -52,13 +56,13 @@ jobs:
           checkout_ref: ${{ inputs.tag }}
           build_sdist: ${{ matrix.build_sdist }}
       - name: Upload wheels
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: cibw-wheels-${{ matrix.os }}-${{ matrix.arch }}-${{ strategy.job-index }}
           path: ./wheelhouse/*.whl
       - name: Upload sdist
         if: ${{ matrix.build_sdist == 'true' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: cibw-sdist
           path: dist/*.tar.gz
@@ -72,7 +76,7 @@ jobs:
       attestations: write
     if: github.event_name == 'workflow_dispatch'   # <-- publish only on manual trigger
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           # unpacks all CIBW artifacts into dist/
           pattern: cibw-*
@@ -80,12 +84,12 @@ jobs:
           merge-multiple: true
 
       - name: Generate artifact attestation for sdist and wheels
-        uses: actions/attest-build-provenance@v1
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: dist/*
 
       - name: Publish package distributions to PyPI
-        uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e  # v1.13.0
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           attestations: true
           verbose: true

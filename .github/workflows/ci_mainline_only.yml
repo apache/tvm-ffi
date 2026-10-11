@@ -23,18 +23,22 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
 jobs:
   prepare:
     name: Prepare
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           fetch-tags: true
+          persist-credentials: false
       - name: Detect skip ci and docs changes
         id: detect
-        uses: ./.github/actions/detect-skip-ci
+        uses: $/.github/actions/detect-skip-ci
         with:
           github_event_name: ${{ github.event_name }}
           pr_base_ref: ${{ github.event.pull_request.base.ref || '' }}
@@ -44,23 +48,26 @@ jobs:
     needs: [prepare]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: recursive
           fetch-depth: 0
           fetch-tags: true
+          persist-credentials: false
       - name: Set up uv
-        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
-      - uses: ./.github/actions/detect-env-vars
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: $/.github/actions/detect-env-vars
         id: env_vars
       - name: Run clang-tidy
         run: |
-          uv run --no-project --with "clang-tidy==21.1.1"     \
+          uv run --no-project --with "clang-tidy"     \
             python tests/lint/clang_tidy_precommit.py         \
               --build-dir=build-pre-commit                    \
-              --jobs=${{ steps.env_vars.outputs.cpu_count }}  \
+              --jobs="${CI_STEPS_ENV_VARS_OUTPUTS_CPU_COUNT}"  \
               ./src/ ./include ./tests
 
+        env:
+          CI_STEPS_ENV_VARS_OUTPUTS_CPU_COUNT: ${{ steps.env_vars.outputs.cpu_count }}
   build-wheels:
     name: Build wheels
     needs: [prepare]
@@ -72,16 +79,18 @@ jobs:
           - {os: ubuntu-latest, arch: x86_64, linux_image: manylinux_2_28, build_sdist: "true"}
           - {os: ubuntu-24.04-arm, arch: aarch64, linux_image: manylinux_2_28, build_sdist: "false"}
           - {os: windows-latest, arch: AMD64, linux_image: "", build_sdist: "false"}
+          - {os: windows-11-arm, arch: ARM64, linux_image: "", build_sdist: "false"}
           - {os: macos-14, arch: arm64, linux_image: "", build_sdist: "false"}
+          - {os: macos-15-intel, arch: x86_64, linux_image: "", build_sdist: "false"}
 
     steps:
       - name: Checkout repository (for local composite action)
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 1
-
+          persist-credentials: false
       - name: Build wheel
-        uses: ./.github/actions/build-wheel-for-publish
+        uses: $/.github/actions/build-wheel-for-publish
         with:
           os: ${{ matrix.os }}
           arch: ${{ matrix.arch }}
@@ -101,19 +110,19 @@ jobs:
           - {os: macos-14, python_version: "3.13"}
           - {os: windows-latest, python_version: "3.12"}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: recursive
           fetch-depth: 0
           fetch-tags: true
-
+          persist-credentials: false
       - name: Set up uv
-        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           python-version: ${{ matrix.python_version }}
           activate-environment: true
 
-      - uses: ./.github/actions/detect-env-vars
+      - uses: $/.github/actions/detect-env-vars
         id: env_vars
 
       - name: Install dependencies for examples
@@ -135,12 +144,12 @@ jobs:
 
       - name: Run example/quickstart (CPU) [windows]
         if: ${{ runner.os == 'Windows' }}
-        shell: cmd
+        shell: pwsh
         env:
           CMAKE_BUILD_PARALLEL_LEVEL: ${{ steps.env_vars.outputs.cpu_count }}
         run: |
           cd examples\quickstart
-          call run_all_cpu.bat
+          & .\run_all_cpu.bat
 
       - name: Run example/stable_c_abi [posix]
         if: ${{ runner.os != 'Windows' }}
@@ -154,12 +163,12 @@ jobs:
 
       - name: Run example/stable_c_abi [windows]
         if: ${{ runner.os == 'Windows' }}
-        shell: cmd
+        shell: pwsh
         env:
           CMAKE_BUILD_PARALLEL_LEVEL: ${{ steps.env_vars.outputs.cpu_count }}
         run: |
           cd examples\stable_c_abi
-          call run_all.bat
+          & .\run_all.bat
 
       - name: Run example/python_packaging [posix]
         if: ${{ runner.os != 'Windows' }}

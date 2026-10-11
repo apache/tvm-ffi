@@ -14,79 +14,20 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-"""torch c dlpack ext core methods."""
+"""Compatibility entry point for PyTorch's native DLPack exchange API."""
 
-import ctypes
-import sys
-from pathlib import Path
-from typing import Any
+from __future__ import annotations
 
 import torch
-from packaging.version import Version
-
-
-def _create_dlpack_exchange_api_capsule(ptr_as_int: int) -> Any:
-    """Create a PyCapsule wrapping the DLPack exchange API pointer."""
-    capsule_name = b"dlpack_exchange_api"
-    pythonapi = ctypes.pythonapi
-    pythonapi.PyCapsule_New.restype = ctypes.py_object
-    pythonapi.PyCapsule_New.argtypes = [
-        ctypes.c_void_p,
-        ctypes.c_char_p,
-        ctypes.c_void_p,
-    ]
-    capsule = pythonapi.PyCapsule_New(ctypes.c_void_p(ptr_as_int), capsule_name, None)
-    return capsule
-
-
-def _torch_extension_device(torch_module: Any) -> str:
-    """Return the torch backend name used in the optional extension library name."""
-    if torch_module.cuda.is_available():
-        if getattr(torch_module.version, "cuda", None) is not None:
-            return "cuda"
-        if getattr(torch_module.version, "hip", None) is not None:
-            return "rocm"
-        return "cuda"
-    return "cpu"
 
 
 def load_torch_c_dlpack_extension() -> None:
-    """Load the torch c dlpack extension based on torch version."""
-    if hasattr(torch.Tensor, "__dlpack_c_exchange_api__") or hasattr(
-        torch.Tensor, "__c_dlpack_exchange_api__"
+    """Use PyTorch's built-in API without loading an ABI-specific library."""
+    if not (
+        hasattr(torch.Tensor, "__dlpack_c_exchange_api__")
+        or hasattr(torch.Tensor, "__c_dlpack_exchange_api__")
     ):
-        return None
-    version = Version(torch.__version__)
-    if sys.platform.startswith("win32"):
-        extension = "dll"
-    elif sys.platform.startswith("darwin"):
-        extension = "dylib"
-    else:
-        extension = "so"
-    device = _torch_extension_device(torch)
-    lib_path = (
-        Path(__file__).parent
-        / f"libtorch_c_dlpack_addon_torch{version.major}{version.minor}-{device}.{extension}"
-    )
-    if not lib_path.exists() or not lib_path.is_file():
-        raise ImportError("No matching prebuilt torch c dlpack extension")
-    lib = ctypes.CDLL(str(lib_path))
-    func = lib.TorchDLPackExchangeAPIPtr
-    func.restype = ctypes.c_uint64
-    func.argtypes = []
-    # note: we need to keep this behavior for a while
-    # to ensure backward compatibility with older versions dependencies
-    # that relies on the value being int.
-    # We will do eager upgrade to PyCapsule in the tvm-ffi side instead.
-    dlpack_exchange_api_ptr_as_int = func()
-    setattr(torch.Tensor, "__c_dlpack_exchange_api__", dlpack_exchange_api_ptr_as_int)
-    setattr(
-        torch.Tensor,
-        "__dlpack_c_exchange_api__",
-        _create_dlpack_exchange_api_capsule(dlpack_exchange_api_ptr_as_int),
-    )
-
-    return lib
+        raise ImportError("PyTorch with the native DLPack exchange API is required")
 
 
 _lib = load_torch_c_dlpack_extension()

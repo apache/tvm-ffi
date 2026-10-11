@@ -18,7 +18,6 @@
  */
 
 use proc_macro::TokenStream;
-use proc_macro_error::proc_macro_error;
 
 mod dispatch;
 mod match_any;
@@ -31,7 +30,6 @@ mod utils;
 /// use a `ContextPolicy<Self>` or `MutContextPolicy<Self>` for default recursion.
 /// The expression runs at each default descent and may read `self` for configuration;
 /// mutable traversal state stays on `self`. Policy tuples compose as usual.
-#[proc_macro_error]
 #[proc_macro_attribute]
 pub fn dispatch(attr: TokenStream, item: TokenStream) -> TokenStream {
     dispatch::dispatch(attr, item)
@@ -43,7 +41,6 @@ pub fn dispatch(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// already-borrowed object handle to `AnyView` before invoking the macro.
 ///
 /// Non-object values skip the typed patterns and use the `_` fallback.
-#[proc_macro_error]
 #[proc_macro]
 pub fn match_any(input: TokenStream) -> TokenStream {
     match_any::expand(input)
@@ -70,7 +67,6 @@ pub fn match_any(input: TokenStream) -> TokenStream {
 /// be registered while another thread loads a library that registers types.
 /// Calling `type_index()` before starting such threads registers a type
 /// eagerly.
-#[proc_macro_error]
 #[proc_macro_derive(
     Object,
     attributes(
@@ -86,7 +82,6 @@ pub fn derive_object(input: TokenStream) -> TokenStream {
     object_macros::derive_object(input)
 }
 
-#[proc_macro_error]
 #[proc_macro_derive(ObjectRef, attributes(type_key, type_index))]
 pub fn derive_object_ref(input: TokenStream) -> TokenStream {
     object_macros::derive_object_ref(input)

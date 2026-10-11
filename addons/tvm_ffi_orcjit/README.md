@@ -64,7 +64,7 @@ pip install apache-tvm-ffi apache-tvm_ffi_orcjit
 
 #### Prerequisites
 
-- Python 3.10+, CMake 3.20+, C++17 compiler
+- Python 3.11+, CMake 3.20+, C++17 compiler
 - LLVM 23.1.1+ development libraries (`llvmdev`, `llvm-config`)
 - Static `zlib` and `zstd` libraries (in the same prefix as LLVM)
 

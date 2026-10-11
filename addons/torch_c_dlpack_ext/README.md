@@ -16,14 +16,15 @@
 <!--- under the License. -->
 # Torch C DLPack Extension
 
-This folder contains the source for the `torch-c-dlpack-ext` package, which provides an
-Ahead-Of-Time (AOT) compiled module to support faster DLPack conversion in DLPack v1.2.
-By default, `tvm-ffi` will JIT-compile a version of this functionality during loading,
-and use a safe-fallback if JIT-compilation fails.
-Installing this wheel allows users to avoid this JIT compilation overhead and
-also avoid the cases where the user environment does not necessarily have a compiler toolchain
-to run JIT-compilation.
+This package preserves the `torch_c_dlpack_ext` import for consumers that
+already depend on it. PyTorch 2.10 and newer provide the native DLPack exchange
+API, so the package uses that API without loading or compiling a separate
+library. The pure Python wheel also works on Python 3.14t and 3.15t when a
+compatible PyTorch wheel is installed.
 
 ```bash
-pip install torch-c-dlpack-ext
+uv pip install torch-c-dlpack-ext
 ```
+
+AOT libraries for older PyTorch ABIs are no longer bundled. TVM FFI's own
+optional JIT/fallback path remains available for older PyTorch users.

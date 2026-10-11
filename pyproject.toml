@@ -31,7 +31,7 @@ classifiers = [
   "Intended Audience :: Science/Research",
 ]
 keywords = ["machine learning", "inference"]
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 dependencies = ["typing-extensions>=4.13"]  # 4.13 added `get_annotations`
 
 [project.urls]
@@ -42,11 +42,10 @@ GitHub = "https://github.com/apache/tvm-ffi"
 cpp = ["ninja"]
 
 [dependency-groups]
+cpp = ["setuptools", "ninja"]
 torch = [
-  # Windows ARM64 tests install PyTorch from NVIDIA's nightly index below.
-  "torch; python_version < '3.14' and (platform_system != 'Windows' or platform_machine != 'ARM64')",
-  "setuptools",                     # setuptools is needed by torch jit for best perf
-  "ninja",
+  { include-group = "cpp" },
+  "torch",
   "numpy",
   "ml_dtypes",
 ]
@@ -54,23 +53,23 @@ test = [{ include-group = "torch" }, "pytest", "pytest-xdist"]
 dev = [
   { include-group = "test" },
   "pre-commit",
-  "pre-commit-hooks==6.0.0",
-  "ruff==0.14.9",
-  "ty==0.0.15",
-  "clang-format==21.1.7",
+  "pre-commit-hooks",
+  "ruff",
+  "ty",
+  "clang-format",
   "clang-tidy",
-  "cmakelang==0.6.13",
+  "cmakelang",
   "ipdb",
   "ipython",
-  # cython>=3.2.8: see the [build-system] requires note (free-threaded __dealloc__ fix).
-  "cython>=3.2.8",
-  "cython-lint==0.18.1",
+  # Cython 3.3 supports Python 3.15, including free-threaded builds.
+  "cython>=3.3",
+  "cython-lint",
   "cmake",
   "scikit-build-core",
-  "shellcheck-py==0.11.0.1",
+  "shellcheck-py",
   "tomli",
   "setuptools-scm",
-  "yamllint==1.37.1",
+  "yamllint",
 ]
 docs = [
   "autodocsumm",
@@ -83,9 +82,7 @@ docs = [
   "nbconvert",
   "nbsphinx",
   "nbstripout",
-  # TODO: unpin when sphinx-toolbox fixes `from sphinx.ext.autodoc import logger` (removed in Sphinx 9)
-  # Blocked by: sphinx-toolbox/utils.py imports logger from sphinx.ext.autodoc (broken as of v4.1.2)
-  "sphinx<9",
+  "sphinx",
   "sphinx-autobuild",
   "sphinx-book-theme",
   "sphinx-copybutton",
@@ -108,12 +105,9 @@ tvm-ffi-config = "tvm_ffi.config:__main__"
 tvm-ffi-stubgen = "tvm_ffi.stub.cli:__main__"
 
 [build-system]
-# cython>=3.2.8: the PyObject-tying dealloc handshake runs inside the wrapper's
-# __dealloc__, and Cython 3.2.8 (2026-06-30) fixed the free-threaded object
-# keep-alive scheme for code executed there (cython#7769). Earlier Cython can
-# collect the wrapper mid-__dealloc__ on the 3.14t build.
-# scikit-build-core 1.1.0 breaks free-threaded Development.Module discovery on CMake <4.1.2.
-requires = ["scikit-build-core>=0.10.0,!=1.1.0", "cython>=3.2.8", "setuptools-scm"]
+# Cython 3.3 supports Python 3.15 and keeps free-threaded wrappers alive
+# during __dealloc__ (cython#7769).
+requires = ["scikit-build-core>=0.10.0", "cython>=3.3", "setuptools-scm"]
 build-backend = "scikit_build_core.build"
 
 [tool.scikit-build]
@@ -200,7 +194,7 @@ addopts = ["-n", "auto"]
 include = ["python/**/*.py", "tests/**/*.py"]
 line-length = 100
 indent-width = 4
-target-version = "py39"
+target-version = "py311"
 
 [tool.ruff.lint]
 select = [
@@ -253,13 +247,12 @@ docstring-code-line-length = 80
 build-verbosity = 1
 
 # Per-Python-version wheels (no abi3 / limited API).
-build = ["cp39-*", "cp310-*", "cp311-*", "cp312-*", "cp313-*", "cp314-*", "cp314t-*"]
+build = ["cp311-*", "cp312-*", "cp313-*", "cp314-*", "cp314t-*", "cp315-*", "cp315t-*"]
 skip = ["*musllinux*"]
-# cp39-cp311 are covered by the cp312 test run.
-test-skip = ["cp39-*", "cp310-*", "cp311-*"]
 build-frontend = "build[uv]"
-test-command = "pytest {package}/tests/python -vvs"
-test-groups = ["test"]
+test-command = "pytest {package}/tests/python -n0 -vvs"
+test-requires = ["pytest", "pytest-xdist", "numpy", "ml_dtypes"]
+before-test = "uv pip install --upgrade --group {package}/pyproject.toml:torch"
 
 [tool.cibuildwheel.linux]
 archs = ["x86_64", "aarch64"]
@@ -272,17 +265,14 @@ environment = { MACOSX_DEPLOYMENT_TARGET = "10.14" }
 archs = ["AMD64", "ARM64"]
 repair-wheel-command = "delvewheel repair --ignore-existing -w {dest_dir} -v {wheel}"
 
+# Current Torch wheels omit macOS Intel and Windows ARM64 on Python 3.14+.
+# Keep running the core tests and optional native-extension helpers.
 [[tool.cibuildwheel.overrides]]
-select = "*-win_arm64"
-before-test = "uv pip install torch"
-
-[tool.cibuildwheel.overrides.environment]
-UV_INDEX = "https://pypi.nvidia.com/nvtorch_oot_nightly/"
-UV_NO_CONFIG = "1"
-UV_PRERELEASE = "allow"
+select = ["*-macosx_x86_64", "cp31{4,5}{,t}-win_arm64"]
+before-test = "uv pip install --upgrade --group {package}/pyproject.toml:cpp"
 
 [tool.ty.environment]
-python-version = "3.9"
+python-version = "3.11"
 extra-paths = ["python", "examples", "tests/python"]
 
 [tool.ty.src]
@@ -313,12 +303,20 @@ allowed-unresolved-imports = [
 ]
 
 [tool.uv]
-exclude-newer = "14 days"
+prerelease = "disallow"
 
 [tool.uv.dependency-groups]
-dev = { requires-python = ">=3.10" }
+dev = { requires-python = ">=3.11" }
 docs = { requires-python = ">=3.13" }
 
 [tool.setuptools_scm]
 version_file = "python/tvm_ffi/_version.py"
 write_to = "python/tvm_ffi/_version.py"
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }

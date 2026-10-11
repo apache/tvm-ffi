@@ -46,12 +46,12 @@ runs:
   using: "composite"
   steps:
     - name: Check out source
-      uses: actions/checkout@v5
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         ref: ${{ inputs.checkout_ref }}
         submodules: recursive
-
-    - uses: ./.github/actions/detect-env-vars
+        persist-credentials: false
+    - uses: $/.github/actions/detect-env-vars
       id: env_vars
 
     # ---- Acquire LLVM prefix ----
@@ -61,7 +61,7 @@ runs:
     # macOS/Windows: no GLIBCXX floor -- keep the conda-forge binaries, cached.
     - name: Cache LLVM (macOS/Windows)
       if: runner.os != 'Linux'
-      uses: actions/cache@v4
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       id: llvm-cache
       with:
         path: ${{ runner.os == 'Windows' && 'C:/opt/llvm' || '/opt/llvm' }}
@@ -72,15 +72,19 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        asset="llvm-${{ inputs.llvm_version }}-linux-${{ inputs.arch }}.tar.zst"
-        base="https://github.com/${{ inputs.llvm_release_repo }}/releases/download"
-        url="${base}/llvm-${{ inputs.llvm_version }}/${asset}"
+        asset="llvm-${CI_INPUTS_LLVM_VERSION}-linux-${CI_INPUTS_ARCH}.tar.zst"
+        base="https://github.com/${CI_INPUTS_LLVM_RELEASE_REPO}/releases/download"
+        url="${base}/llvm-${CI_INPUTS_LLVM_VERSION}/${asset}"
         echo "Downloading $url"
         curl -fL --retry 5 --retry-all-errors -o "$RUNNER_TEMP/$asset" "$url"
         sudo mkdir -p /opt/llvm
         sudo tar --zstd -xf "$RUNNER_TEMP/$asset" -C /opt/llvm
         sudo chown -R "$(id -u):$(id -g)" /opt/llvm
 
+      env:
+        CI_INPUTS_LLVM_VERSION: ${{ inputs.llvm_version }}
+        CI_INPUTS_LLVM_RELEASE_REPO: ${{ inputs.llvm_release_repo }}
+        CI_INPUTS_ARCH: ${{ inputs.arch }}
     - name: Verify LLVM prefix (Linux)
       if: runner.os == 'Linux'
       shell: bash
@@ -92,7 +96,7 @@ runs:
     # ---- Install LLVM via conda (macOS/Windows, cache miss only) ----
     - name: Setup conda
       if: steps.llvm-cache.outputs.cache-hit != 'true' && runner.os != 'Linux'
-      uses: conda-incubator/setup-miniconda@fc2d68f6413eb2d87b895e92f8584b5b94a10167  # v3.3.0
+      uses: conda-incubator/setup-miniconda@be893c923ea9cf1cf7cd510fbdde27c7e18cbdcb # v4.1.0
       continue-on-error: true
       id: conda1
       with:
@@ -100,7 +104,7 @@ runs:
 
     - name: Setup conda (retry with tar.bz2)
       if: steps.llvm-cache.outputs.cache-hit != 'true' && runner.os != 'Linux' && steps.conda1.outcome == 'failure'
-      uses: conda-incubator/setup-miniconda@fc2d68f6413eb2d87b895e92f8584b5b94a10167  # v3.3.0
+      uses: conda-incubator/setup-miniconda@be893c923ea9cf1cf7cd510fbdde27c7e18cbdcb # v4.1.0
       with:
         miniforge-version: latest
         use-only-tar-bz2: true
@@ -115,19 +119,23 @@ runs:
       shell: bash -l {0}
       run: |
         conda create -q -p /opt/llvm -c conda-forge \
-          llvmdev=${{ inputs.llvm_version }} clangdev=${{ inputs.llvm_version }} \
-          compiler-rt=${{ inputs.llvm_version }} zlib zstd-static \
+          llvmdev="${CI_INPUTS_LLVM_VERSION}" clangdev="${CI_INPUTS_LLVM_VERSION}" \
+          compiler-rt="${CI_INPUTS_LLVM_VERSION}" zlib zstd-static \
           -y
 
+      env:
+        CI_INPUTS_LLVM_VERSION: ${{ inputs.llvm_version }}
     - name: Install LLVM (Windows)
       if: steps.llvm-cache.outputs.cache-hit != 'true' && runner.os == 'Windows'
-      shell: cmd /C call {0}
+      shell: pwsh
       run: |
-        conda create -q -p C:\opt\llvm -c conda-forge llvmdev=${{ inputs.llvm_version }} zlib zstd-static -y
+        conda create -q -p C:\opt\llvm -c conda-forge "llvmdev=$env:CI_INPUTS_LLVM_VERSION" zlib zstd-static -y
 
     # ---- Build and test wheels ----
+      env:
+        CI_INPUTS_LLVM_VERSION: ${{ inputs.llvm_version }}
     - name: Build and test wheels
-      uses: pypa/cibuildwheel@294735312765b09d24a2fbec22660ce817587d55  # v4.1.0
+      uses: pypa/cibuildwheel@b3395e271a35f73dad77f21802abe9b986dfe299 # v4.3.1
       with:
         package-dir: addons/tvm_ffi_orcjit
         output-dir: wheelhouse
@@ -143,19 +151,19 @@ runs:
         CIBW_BUILD_VERBOSITY: 1
         CMAKE_BUILD_PARALLEL_LEVEL: ${{ steps.env_vars.outputs.cpu_count }}
         CIBW_ENVIRONMENT: LLVM_PREFIX=/opt/llvm
+        CIBW_ENVIRONMENT_MACOS: LLVM_PREFIX=/opt/llvm MACOSX_DEPLOYMENT_TARGET=11.0
         CIBW_ENVIRONMENT_WINDOWS: LLVM_PREFIX="C:/opt/llvm"
         CIBW_CONTAINER_ENGINE: "docker; create_args: --volume /opt/llvm:/opt/llvm"
         # Build against the in-tree core (not PyPI) so the addon's tvm_ffi ABI
         # matches the core the tests reinstall; a mismatch segfaults the JIT.
         CIBW_BEFORE_BUILD: pip install "scikit-build-core>=0.10.0" cmake ninja "{project}"
         CIBW_BUILD_FRONTEND: "pip; args: --no-build-isolation"
+        CIBW_BEFORE_TEST: pip install --force-reinstall "{project}"
         CIBW_TEST_REQUIRES: pytest pytest-xdist ninja
         CIBW_TEST_COMMAND: >-
-          pip install --force-reinstall {project} &&
           pytest {project}/addons/tvm_ffi_orcjit/tests -v &&
           python {project}/addons/tvm_ffi_orcjit/examples/quick-start/run.py --lang cpp &&
           python {project}/addons/tvm_ffi_orcjit/examples/quick-start/run.py --lang c
         CIBW_TEST_COMMAND_WINDOWS: >-
-          pip install --force-reinstall {project} &&
           pytest {project}/addons/tvm_ffi_orcjit/tests -v &&
           python {project}/addons/tvm_ffi_orcjit/examples/quick-start/run.py --lang c

@@ -64,7 +64,7 @@ impl Parse for MatchAnyInput {
                 let matcher = content.parse::<Path>()?;
                 let binding_content;
                 parenthesized!(binding_content in content);
-                let binding = binding_content.parse::<Pat>()?;
+                let binding = binding_content.call(Pat::parse_single)?;
                 if !binding_content.is_empty() {
                     return Err(binding_content.error("expected one binding pattern"));
                 }

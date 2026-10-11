@@ -35,38 +35,38 @@ runs:
   using: "composite"
   steps:
     - name: Checkout code
-      uses: actions/checkout@v5
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         fetch-depth: 0
-
+        persist-credentials: false
     - name: Detect [skip ci] and docs-only changes
       shell: bash
       id: detect
       run: |
         set -e
 
-        echo "Event: ${{ inputs.github_event_name }}"
-        if [[ "${{ inputs.github_event_name }}" == "workflow_dispatch" ]]; then
+        echo "Event: ${CI_INPUTS_GITHUB_EVENT_NAME}"
+        if [[ "${CI_INPUTS_GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
           echo "should_skip_ci_commit=false" >> $GITHUB_OUTPUT
           echo "should_skip_ci_docs_only=false" >> $GITHUB_OUTPUT
           exit 0
         fi
 
-        if [[ "${{ inputs.github_event_name }}" == "pull_request" ]]; then
-          echo "Fetching base branch '${{ inputs.pr_base_ref }}' for diff..."
+        if [[ "${CI_INPUTS_GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+          echo "Fetching base branch '${CI_INPUTS_PR_BASE_REF}' for diff..."
           # Get commit message from PR head commit first
-          if ! commit_message=$(git log -1 --pretty=%B ${{ inputs.pr_head_sha }} 2>/dev/null); then
+          if ! commit_message=$(git log -1 --pretty=%B "${CI_INPUTS_PR_HEAD_SHA}" 2>/dev/null); then
             echo "Warning: Failed to get commit message, assuming no skip"
             commit_message=""
           fi
           echo "Commit message: $commit_message"
 
-          if ! git fetch origin "${{ inputs.pr_base_ref }}" 2>/dev/null; then
+          if ! git fetch origin "${CI_INPUTS_PR_BASE_REF}" 2>/dev/null; then
             echo "Warning: Failed to fetch base branch, assuming all files changed"
             changed_files=$(git ls-files)
           else
             # Get list of changed files between base and PR head
-            changed_files=$(git diff --name-only origin/${{ inputs.pr_base_ref }} ${{ inputs.pr_head_sha }})
+            changed_files=$(git diff --name-only origin/"${CI_INPUTS_PR_BASE_REF}" "${CI_INPUTS_PR_HEAD_SHA}")
           fi
         else
           # For push event, get head commit message and diff against previous commit
@@ -112,6 +112,10 @@ runs:
           echo "should_skip_ci_docs_only=false" >> $GITHUB_OUTPUT
         fi
 
+      env:
+        CI_INPUTS_PR_HEAD_SHA: ${{ inputs.pr_head_sha }}
+        CI_INPUTS_PR_BASE_REF: ${{ inputs.pr_base_ref }}
+        CI_INPUTS_GITHUB_EVENT_NAME: ${{ inputs.github_event_name }}
 outputs:
   should_skip_ci_commit:
     description: 'Set to true if [bypass ci] detected in commit message'

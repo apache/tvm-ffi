@@ -26,6 +26,9 @@ on:
       # dev branch is used for testing purposes
       - dev
 
+permissions:
+  contents: read
+
 jobs:
   prepare:
     name: Prepare
@@ -37,13 +40,14 @@ jobs:
       cpp_files: ${{ steps.cpp_files.outputs.files }}
       orcjit_changed: ${{ steps.orcjit_files.outputs.changed }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           fetch-tags: true
+          persist-credentials: false
       - name: Detect skip ci and docs changes
         id: detect
-        uses: ./.github/actions/detect-skip-ci
+        uses: $/.github/actions/detect-skip-ci
         with:
           github_event_name: ${{ github.event_name }}
           pr_base_ref: ${{ github.event.pull_request.base.ref || '' }}
@@ -51,28 +55,37 @@ jobs:
       - name: Get changed C++ files
         id: cpp_files
         run: |
-          FILES=$(git diff --name-only --diff-filter=ACMR origin/${{ github.base_ref }}...HEAD -- \
-            src/ tests/ | grep -E '\.(c|cc|cpp|cxx)$' | tr '\n' ' ')
-          echo "files=$FILES" >> $GITHUB_OUTPUT
-          [ -n "$FILES" ] && echo "changed=true" >> $GITHUB_OUTPUT || echo "changed=false" >> $GITHUB_OUTPUT
+          BASE_REF=${CI_GITHUB_BASE_REF:+origin/$CI_GITHUB_BASE_REF}
+          BASE_REF=${BASE_REF:-HEAD^}
+          FILES=$(git diff --name-only --diff-filter=ACMR "$BASE_REF"...HEAD -- \
+            src/ tests/ | { grep -E '\.(c|cc|cpp|cxx)$' || true; } | tr '\n' ' ')
+          echo "files=$FILES" >> "$GITHUB_OUTPUT"
+          [ -n "$FILES" ] && echo "changed=true" >> "$GITHUB_OUTPUT" || echo "changed=false" >> "$GITHUB_OUTPUT"
+        env:
+          CI_GITHUB_BASE_REF: ${{ github.base_ref }}
       - name: Get changed OrcJIT files
         id: orcjit_files
         run: |
-          FILES=$(git diff --name-only --diff-filter=ACMR origin/${{ github.base_ref }}...HEAD -- \
+          BASE_REF=${CI_GITHUB_BASE_REF:+origin/$CI_GITHUB_BASE_REF}
+          BASE_REF=${BASE_REF:-HEAD^}
+          FILES=$(git diff --name-only --diff-filter=ACMR "$BASE_REF"...HEAD -- \
             addons/tvm_ffi_orcjit/ .github/actions/build-orcjit-wheel/ | tr '\n' ' ')
-          echo "files=$FILES" >> $GITHUB_OUTPUT
-          [ -n "$FILES" ] && echo "changed=true" >> $GITHUB_OUTPUT || echo "changed=false" >> $GITHUB_OUTPUT
+          echo "files=$FILES" >> "$GITHUB_OUTPUT"
+          [ -n "$FILES" ] && echo "changed=true" >> "$GITHUB_OUTPUT" || echo "changed=false" >> "$GITHUB_OUTPUT"
 
+        env:
+          CI_GITHUB_BASE_REF: ${{ github.base_ref }}
   lint:
     needs: [prepare]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           fetch-tags: true
+          persist-credentials: false
       - name: Set up uv
-        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
       - name: Set up Python environment
         run: uv sync --group dev --no-install-project
       - name: Run pre-commit
@@ -83,36 +96,42 @@ jobs:
     if: needs.prepare.outputs.cpp_changed == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: recursive
           fetch-depth: 0
           fetch-tags: true
+          persist-credentials: false
       - name: Set up uv
-        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           python-version: 3.13
-      - uses: ./.github/actions/detect-env-vars
+      - uses: $/.github/actions/detect-env-vars
         id: env_vars
       - name: Run clang-tidy
         run: |
-          uv run --no-project --with "clang-tidy==21.1.1"     \
+          read -r -a cpp_files <<< "$CI_NEEDS_PREPARE_OUTPUTS_CPP_FILES"
+          uv run --no-project --with "clang-tidy"     \
             python tests/lint/clang_tidy_precommit.py         \
               --build-dir=build-pre-commit                    \
-              --jobs=${{ steps.env_vars.outputs.cpu_count }}  \
-              ${{ needs.prepare.outputs.cpp_files }}
+              --jobs="${CI_STEPS_ENV_VARS_OUTPUTS_CPU_COUNT}"  \
+              "${cpp_files[@]}"
 
+        env:
+          CI_NEEDS_PREPARE_OUTPUTS_CPP_FILES: ${{ needs.prepare.outputs.cpp_files }}
+          CI_STEPS_ENV_VARS_OUTPUTS_CPU_COUNT: ${{ steps.env_vars.outputs.cpu_count }}
   doc:
     needs: [lint, prepare]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: recursive
           fetch-depth: 0
           fetch-tags: true
+          persist-credentials: false
       - name: Set up uv
-        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           python-version: 3.13
       - name: Generate docs
@@ -132,27 +151,31 @@ jobs:
       matrix:
         include:
           - {os: ubuntu-latest, arch: x86_64, python_version: '3.14t'}
+          - {os: ubuntu-latest, arch: x86_64, python_version: '3.15t'}
           - {os: ubuntu-24.04-arm, arch: aarch64, python_version: '3.14'}
-          - {os: windows-latest, arch: AMD64, python_version: '3.9'}
+          - {os: windows-latest, arch: AMD64, python_version: '3.11'}
           - {os: macos-14, arch: arm64, python_version: '3.13'}
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: recursive
           fetch-depth: 0
           fetch-tags: true
+          persist-credentials: false
       - name: Print current commit
         run: git log -1 --oneline
 
       # Detect CPU count
-      - uses: ./.github/actions/detect-env-vars
+      - uses: $/.github/actions/detect-env-vars
         id: env_vars
       - name: Print CPU count
         run: |
-          echo "CPU count: ${{ steps.env_vars.outputs.cpu_count }}"
+          echo "CPU count: ${CI_STEPS_ENV_VARS_OUTPUTS_CPU_COUNT}"
 
       # Run C++ tests
+        env:
+          CI_STEPS_ENV_VARS_OUTPUTS_CPU_COUNT: ${{ steps.env_vars.outputs.cpu_count }}
       - name: Run cpp tests
         if: ${{ matrix.os != 'windows-latest' }}
         env:
@@ -163,7 +186,7 @@ jobs:
           ctest -V -C Debug --test-dir build_test --output-on-failure
       - name: Run cpp tests[windows]
         if: ${{ matrix.os == 'windows-latest' }}
-        shell: cmd
+        shell: pwsh
         env:
           CMAKE_BUILD_PARALLEL_LEVEL: ${{ steps.env_vars.outputs.cpu_count }}
         run: >
@@ -183,7 +206,7 @@ jobs:
 
       # Run Python tests
       - name: Setup Python ${{ matrix.python_version }}
-        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           python-version: ${{ matrix.python_version }}
           activate-environment: true
@@ -191,16 +214,17 @@ jobs:
         env:
           CMAKE_BUILD_PARALLEL_LEVEL: ${{ steps.env_vars.outputs.cpu_count }}
         run: |
-          uv pip install --reinstall --verbose --group test -e .
+          uv sync --no-default-groups --group test --upgrade
       - name: Run python tests
         if: ${{ matrix.os != 'windows-latest' }}
         run: |
           pytest -vvs tests/python
       - name: Run python tests [windows]
         if: ${{ matrix.os == 'windows-latest' }}
-        shell: cmd
+        shell: pwsh
         run: |
-          call "%VS_DEV_CMD_PATH%"
+          & (Join-Path (Split-Path $env:VS_DEV_CMD_PATH) "Launch-VsDevShell.ps1") `
+            -Arch amd64 -HostArch amd64 -SkipAutomaticLocation
           pytest -vvs tests/python
 
       # Run Rust tests, must happen after installing the pip package.
@@ -251,12 +275,12 @@ jobs:
           - {os: windows-latest, arch: AMD64, build: "cp312-win_amd64"}
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 1
-
+          persist-credentials: false
       - name: Build OrcJIT wheel
-        uses: ./.github/actions/build-orcjit-wheel
+        uses: $/.github/actions/build-orcjit-wheel
         with:
           arch: ${{ matrix.arch }}
           build: ${{ matrix.build }}
@@ -264,7 +288,7 @@ jobs:
           llvm_version: ${{ env.LLVM_VERSION }}
           llvm_release_repo: ${{ env.LLVM_RELEASE_REPO }}
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: cibw-orcjit-wheels-${{ matrix.os }}-${{ matrix.arch }}-${{ strategy.job-index }}
           path: wheelhouse/*.whl
