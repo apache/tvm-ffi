@@ -337,6 +337,31 @@ impl<K: ContainerElement, V: ContainerElement> ArgIntoRef for &crate::Map<K, V> 
     }
 }
 
+impl<T: ContainerElement> IntoArgHolder for crate::List<T> {
+    type Target = crate::List<T>;
+    fn into_arg_holder(self) -> Self::Target {
+        self
+    }
+}
+impl<'a, T: ContainerElement> IntoArgHolder for &'a crate::List<T> {
+    type Target = &'a crate::List<T>;
+    fn into_arg_holder(self) -> Self::Target {
+        self
+    }
+}
+impl<T: ContainerElement> ArgIntoRef for crate::List<T> {
+    type Target = crate::List<T>;
+    fn to_ref(&self) -> &Self::Target {
+        self
+    }
+}
+impl<T: ContainerElement> ArgIntoRef for &crate::List<T> {
+    type Target = crate::List<T>;
+    fn to_ref(&self) -> &Self::Target {
+        self
+    }
+}
+
 //-----------------------------------------------------------
 // TupleAsPackedArgs
 //

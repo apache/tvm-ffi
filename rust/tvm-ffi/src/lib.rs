@@ -40,6 +40,7 @@ pub use tvm_ffi_sys;
 pub use crate::any::{Any, AnyView};
 pub use crate::big_int::BigInt;
 pub use crate::collections::array::Array;
+pub use crate::collections::list::List;
 pub use crate::collections::map::Map;
 pub use crate::collections::shape::Shape;
 pub use crate::collections::tensor::{CPUNDAlloc, NDAllocator, Tensor, TensorView};

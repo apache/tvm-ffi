@@ -43,7 +43,7 @@ use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
 use tvm_ffi_sys::{TVMFFIAny, TVMFFIObject};
 
 #[inline]
-fn element_view<T: ContainerElement>(value: &T) -> AnyView<'_> {
+pub(crate) fn element_view<T: ContainerElement>(value: &T) -> AnyView<'_> {
     unsafe {
         let mut data = TVMFFIAny::new();
         T::container_copy_to_any_view(value, &mut data);
@@ -51,7 +51,7 @@ fn element_view<T: ContainerElement>(value: &T) -> AnyView<'_> {
     }
 }
 
-fn element_from_any<T: ContainerElement>(value: Any) -> Result<T> {
+pub(crate) fn element_from_any<T: ContainerElement>(value: Any) -> Result<T> {
     unsafe {
         if T::container_check_any_strict(value.as_raw_ffi_any()) {
             let mut value = std::mem::ManuallyDrop::new(value);
