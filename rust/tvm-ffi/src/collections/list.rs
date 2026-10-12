@@ -97,6 +97,28 @@ unsafe fn write_cell<T: ContainerElement>(cell: *mut TVMFFIAny, value: T) {
     ptr::write(cell, raw);
 }
 
+// The error paths stay out of line so the hot paths are small enough to inline.
+#[cold]
+#[inline(never)]
+fn index_error<T>(what: &str) -> Result<T> {
+    crate::bail!(
+        crate::error::INDEX_ERROR,
+        "List {} index out of bound",
+        what
+    )
+}
+
+#[cold]
+#[inline(never)]
+fn type_error<T: ContainerElement>(index: usize) -> Result<T> {
+    crate::bail!(
+        crate::error::TYPE_ERROR,
+        "Failed to cast element at {} to {}",
+        index,
+        T::container_type_str()
+    )
+}
+
 /// Mutable, reference-counted sequence of `T`, sharing its underlying
 /// `ListObj` with C++. Cloning is cheap (it bumps the refcount) and yields a
 /// handle to the same list.
@@ -167,11 +189,13 @@ impl<T: ContainerElement> List<T> {
     }
 
     /// Returns the number of elements.
+    #[inline]
     pub fn len(&self) -> usize {
         self.data.size as usize
     }
 
     /// Returns `true` if the list contains no elements.
+    #[inline]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -182,31 +206,29 @@ impl<T: ContainerElement> List<T> {
     }
 
     /// Returns the element at `index`.
+    #[inline]
     pub fn get(&self, index: usize) -> Result<T> {
-        if index >= self.len() {
-            crate::bail!(crate::error::INDEX_ERROR, "List get index out of bound");
-        }
+        let obj = self.obj();
         unsafe {
-            let cell = &*ListObj::cell(self.obj(), index);
-            match T::container_try_cast_from_any_view(cell) {
+            if index >= (*obj).size as usize {
+                return index_error("get");
+            }
+            match T::container_try_cast_from_any_view(&*ListObj::cell(obj, index)) {
                 Ok(value) => Ok(value),
-                Err(_) => crate::bail!(
-                    crate::error::TYPE_ERROR,
-                    "Failed to cast element at {} to {}",
-                    index,
-                    T::container_type_str()
-                ),
+                Err(()) => type_error(index),
             }
         }
     }
 
     /// Replaces the element at `index`.
+    #[inline]
     pub fn set(&self, index: usize, value: T) -> Result<()> {
-        if index >= self.len() {
-            crate::bail!(crate::error::INDEX_ERROR, "List set index out of bound");
-        }
+        let obj = self.obj();
         unsafe {
-            let cell = ListObj::cell(self.obj(), index);
+            if index >= (*obj).size as usize {
+                return index_error("set");
+            }
+            let cell = ListObj::cell(obj, index);
             let old = take_cell(cell);
             write_cell(cell, value);
             drop(old);
@@ -215,6 +237,7 @@ impl<T: ContainerElement> List<T> {
     }
 
     /// Appends `value` to the end of the list.
+    #[inline]
     pub fn push(&self, value: T) -> Result<()> {
         let obj = self.obj();
         unsafe {
@@ -234,7 +257,7 @@ impl<T: ContainerElement> List<T> {
     pub fn insert(&self, index: usize, value: T) -> Result<()> {
         let size = self.len();
         if index > size {
-            crate::bail!(crate::error::INDEX_ERROR, "List insert index out of bound");
+            return index_error("insert");
         }
         let obj = self.obj();
         unsafe {
@@ -256,23 +279,30 @@ impl<T: ContainerElement> List<T> {
     }
 
     /// Removes and returns the element at `index`, shifting the elements after it.
+    #[inline]
     pub fn remove(&self, index: usize) -> Result<T> {
-        let size = self.len();
-        if index >= size {
-            crate::bail!(crate::error::INDEX_ERROR, "List remove index out of bound");
-        }
         let obj = self.obj();
-        let value = unsafe {
+        unsafe {
+            let size = (*obj).size as usize;
+            if index >= size {
+                return index_error("remove");
+            }
             let cell = ListObj::cell(obj, index);
-            let value = take_cell(cell);
-            ptr::copy(cell.add(1), cell, size - index - 1);
+            let mut raw = ptr::read(cell);
+            if index + 1 < size {
+                ptr::copy(cell.add(1), cell, size - index - 1);
+            }
             (*obj).size -= 1;
-            value
-        };
-        element_from_any(value)
+            // Exact type: move the value out without going through `Any`.
+            if T::container_check_any_strict(&raw) {
+                return Ok(T::container_move_from_any_after_check(&mut raw));
+            }
+            element_from_any(Any::from_raw_ffi_any(raw))
+        }
     }
 
     /// Removes all elements, keeping the buffer.
+    #[inline]
     pub fn clear(&self) {
         unsafe { ListObj::truncate(self.obj(), 0) }
     }
@@ -320,10 +350,23 @@ pub struct ListIterator<'a, T> {
 impl<T: ContainerElement> Iterator for ListIterator<'_, T> {
     type Item = T;
 
+    #[inline]
     fn next(&mut self) -> Option<T> {
-        let item = self.list.get(self.index).ok()?;
-        self.index += 1;
-        Some(item)
+        let obj = self.list.obj();
+        unsafe {
+            if self.index >= (*obj).size as usize {
+                return None;
+            }
+            let item =
+                T::container_try_cast_from_any_view(&*ListObj::cell(obj, self.index)).ok()?;
+            self.index += 1;
+            Some(item)
+        }
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (0, Some(self.list.len().saturating_sub(self.index)))
     }
 }
 
