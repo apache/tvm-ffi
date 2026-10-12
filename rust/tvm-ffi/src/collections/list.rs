@@ -25,10 +25,9 @@
 //! the buffer directly, with no FFI call. The object and its element buffer
 //! are allocated by the C++ runtime (`ffi.List`), because the buffer is a
 //! separate allocation that `data_deleter` has to free with the allocator that
-//! produced it. For the same reason, growing a full buffer is left to C++:
-//! [`List::push`] and [`List::insert`] call `ffi.ListAppend` or
-//! `ffi.ListInsert` only when there is no spare capacity, and
-//! [`List::insert_many`] and [`List::reserve`] grow through `ffi.ListReserve`.
+//! produced it. For the same reason, growing a full buffer is left to C++
+//! (`ffi.ListReserve`), which the mutators call only when there is no spare
+//! capacity; the elements themselves are then written in place.
 //!
 //! A `List` is a shared handle, as in C++ and Python: cloning it bumps the
 //! refcount, and a mutation through one handle is seen through all of them.
@@ -182,7 +181,16 @@ impl<T: ContainerElement> List<T> {
     fn from_items(items: &[T]) -> Result<Self> {
         let args: Vec<AnyView<'_>> = items.iter().map(element_view).collect();
         let result = crate::cached_global_func!("ffi.List").call_packed(&args)?;
-        Self::try_from(result)
+        // The runtime returns a fresh `ffi.List` of exactly these elements, so
+        // take it without re-checking them.
+        unsafe {
+            debug_assert_eq!(
+                result.as_raw_ffi_any().type_index,
+                TypeIndex::kTVMFFIList as i32
+            );
+            let mut result = std::mem::ManuallyDrop::new(result);
+            Ok(Self::move_from_any_after_check(&mut *result.as_data_ptr()))
+        }
     }
 
     #[inline]
@@ -242,17 +250,12 @@ impl<T: ContainerElement> List<T> {
     /// Appends `value` to the end of the list.
     #[inline]
     pub fn push(&self, value: T) -> Result<()> {
+        self.reserve_for(1)?;
         let obj = self.obj();
         unsafe {
-            if (*obj).size < (*obj).capacity {
-                write_cell(ListObj::cell(obj, (*obj).size as usize), value);
-                (*obj).size += 1;
-                return Ok(());
-            }
+            write_cell(ListObj::cell(obj, (*obj).size as usize), value);
+            (*obj).size += 1;
         }
-        // Full: the C++ runtime grows the buffer with the allocator that owns it.
-        crate::cached_global_func!("ffi.ListAppend")
-            .call_packed(&[AnyView::from(self), element_view(&value)])?;
         Ok(())
     }
 
@@ -262,22 +265,14 @@ impl<T: ContainerElement> List<T> {
         if index > size {
             return index_error("insert");
         }
+        self.reserve_for(1)?;
         let obj = self.obj();
         unsafe {
-            if (*obj).size < (*obj).capacity {
-                let cell = ListObj::cell(obj, index);
-                ptr::copy(cell, cell.add(1), size - index);
-                write_cell(cell, value);
-                (*obj).size += 1;
-                return Ok(());
-            }
+            let cell = ListObj::cell(obj, index);
+            ptr::copy(cell, cell.add(1), size - index);
+            write_cell(cell, value);
+            (*obj).size += 1;
         }
-        // Full: the C++ runtime grows the buffer with the allocator that owns it.
-        crate::cached_global_func!("ffi.ListInsert").call_packed(&[
-            AnyView::from(self),
-            AnyView::from(&(index as i64)),
-            element_view(&value),
-        ])?;
         Ok(())
     }
 
@@ -384,11 +379,7 @@ impl<T: ContainerElement> List<T> {
         if count == 0 {
             return Ok(());
         }
-        let capacity = self.capacity();
-        if size + count > capacity {
-            // Full: grow geometrically, like C++ `List::EnsureCapacity`.
-            self.grow_to((capacity * 2).max(size + count))?;
-        }
+        self.reserve_for(count)?;
         let obj = self.obj();
         unsafe {
             let cell = ListObj::cell(obj, index);
@@ -412,8 +403,21 @@ impl<T: ContainerElement> List<T> {
         Ok(())
     }
 
+    /// Makes room for `extra` more elements, growing geometrically like C++
+    /// `List::EnsureCapacity`.
+    #[inline]
+    fn reserve_for(&self, extra: usize) -> Result<()> {
+        let (size, capacity) = (self.len(), self.capacity());
+        if size + extra > capacity {
+            self.grow_to((capacity * 2).max(size + extra))?;
+        }
+        Ok(())
+    }
+
     /// Has the C++ runtime grow the buffer to hold `capacity` elements, with
     /// the allocator that owns it (`ffi.ListReserve`).
+    #[cold]
+    #[inline(never)]
     fn grow_to(&self, capacity: usize) -> Result<()> {
         crate::cached_global_func!("ffi.ListReserve")
             .call_packed(&[AnyView::from(self), AnyView::from(&(capacity as i64))])?;
