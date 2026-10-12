@@ -31,7 +31,7 @@ classifiers = [
   "Intended Audience :: Science/Research",
 ]
 keywords = ["machine learning", "inference"]
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 dependencies = ["typing-extensions>=4.13"]  # 4.13 added `get_annotations`
 
 [project.urls]
@@ -194,7 +194,7 @@ addopts = ["-n", "auto"]
 include = ["python/**/*.py", "tests/**/*.py"]
 line-length = 100
 indent-width = 4
-target-version = "py311"
+target-version = "py310"
 
 [tool.ruff.lint]
 select = [
@@ -247,7 +247,7 @@ docstring-code-line-length = 80
 build-verbosity = 1
 
 # Per-Python-version wheels (no abi3 / limited API).
-build = ["cp311-*", "cp312-*", "cp313-*", "cp314-*", "cp314t-*", "cp315-*", "cp315t-*"]
+build = ["cp310-*", "cp311-*", "cp312-*", "cp313-*", "cp314-*", "cp314t-*", "cp315-*", "cp315t-*"]
 skip = ["*musllinux*"]
 build-frontend = "build[uv]"
 test-command = "pytest {package}/tests/python -n0 -vvs"
@@ -306,7 +306,7 @@ allowed-unresolved-imports = [
 prerelease = "disallow"
 
 [tool.uv.dependency-groups]
-dev = { requires-python = ">=3.11" }
+dev = { requires-python = ">=3.10" }
 docs = { requires-python = ">=3.13" }
 
 [tool.setuptools_scm]

@@ -18,7 +18,7 @@
 [project]
 name = "torch_c_dlpack_ext"
 version = "0.1.5"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 description = "torch c dlpack ext"
 dependencies = ["torch>=2.10"]
 
