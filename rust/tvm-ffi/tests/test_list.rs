@@ -255,8 +255,35 @@ fn test_list_conversion_copies() {
     assert_eq!(floats.get(0).unwrap(), 1.0);
     assert_eq!(ints.len(), 2);
 
-    // A list is not an `Array`, and a non-sequence is not a list.
+    // A non-sequence is not a list.
     assert!(List::<i64>::try_from(Any::from(1i64)).is_err());
+}
+
+#[test]
+fn test_list_converts_to_array() {
+    // The other direction of C++ `SeqTypeTraitsBase`: an `ffi.List` becomes a
+    // new `Array`, never a shared one.
+    let list: List<i64> = [1i64, 2, 3].into_iter().collect();
+    let array: Array<i64> = Any::from(list.clone()).try_into().unwrap();
+    assert_eq!(array.len(), 3);
+    assert_eq!(array.get(2).unwrap(), 3);
+    list.push(4).unwrap();
+    assert_eq!(array.len(), 3);
+
+    // Elements convert on the way (int -> float), mismatches are rejected.
+    let floats: Array<f64> = Any::from(list.clone()).try_into().unwrap();
+    assert_eq!(floats.get(3).unwrap(), 4.0);
+    let mixed: List<Any> = List::new();
+    mixed.push(Any::from(1i64)).unwrap();
+    mixed.push(Any::from(String::from("x"))).unwrap();
+    assert!(Array::<i64>::try_from(Any::from(mixed.clone())).is_err());
+    let as_any: Array<Any> = Any::from(mixed).try_into().unwrap();
+    assert_eq!(as_any.len(), 2);
+
+    // The common case: a list handed to a function typed with `Array<T>`.
+    let sum = Function::from_typed(|items: Array<i64>| -> Result<i64> { Ok(items.iter().sum()) });
+    let total: i64 = sum.call_tuple((list.clone(),)).unwrap().try_into().unwrap();
+    assert_eq!(total, 10);
 }
 
 #[test]

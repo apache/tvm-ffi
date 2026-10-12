@@ -21,6 +21,7 @@ use std::marker::PhantomData;
 use std::ops::Deref;
 
 use crate::any::TryFromTemp;
+use crate::collections::list::seq_cells;
 use crate::derive::Object;
 use crate::object::{Object, ObjectArc};
 use crate::type_traits::ContainerElement;
@@ -287,31 +288,27 @@ where
     }
 
     unsafe fn try_cast_from_any_view(data: &TVMFFIAny) -> Result<Self, ()> {
-        if data.type_index != TypeIndex::kTVMFFIArray as i32 {
+        // Mirrors C++ `SeqTypeTraitsBase::TryCastFromAnyView`: `ffi.List` is
+        // the accepted other sequence type, and is always copied.
+        if data.type_index != TypeIndex::kTVMFFIArray as i32
+            && data.type_index != TypeIndex::kTVMFFIList as i32
+        {
             return Err(());
         }
 
-        // Fast path: if types match exactly, we can just copy the reference.
+        // Fast path: an array whose elements all match shares the reference.
         if <Self as AnyCompatible>::check_any_strict(data) {
             return Ok(<Self as AnyCompatible>::copy_from_any_view_after_check(
                 data,
             ));
         }
 
-        // Slow path: try to convert element by element.
-        let container = &*(data.data_union.v_obj as *const ArrayObj);
-        let base_ptr = container.data as *const TVMFFIAny;
-        let mut items = Vec::with_capacity(container.size as usize);
-
-        for i in 0..container.size {
-            let any_v = &*base_ptr.add(i as usize);
-            if let Ok(item) = T::container_try_cast_from_any_view(any_v) {
-                items.push(item);
-            } else {
-                return Err(());
-            }
+        // Slow path: convert element by element into a new array.
+        let cells = seq_cells(data);
+        let mut items = Vec::with_capacity(cells.len());
+        for cell in cells {
+            items.push(T::container_try_cast_from_any_view(cell)?);
         }
-
         Ok(Array::new(items))
     }
 }

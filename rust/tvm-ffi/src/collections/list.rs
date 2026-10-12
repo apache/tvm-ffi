@@ -156,12 +156,13 @@ unsafe impl<T> ObjectRefCore for List<T> {
     }
 }
 
-/// The elements of the `ffi.List` or `ffi.Array` object `data` holds.
+/// The elements of the `ffi.List` or `ffi.Array` object `data` holds; both
+/// share the `TVMFFISeqCell` layout, so this is the one accessor for either.
 ///
 /// # Safety
 /// `data` must hold one of those two objects, and the list must not be
 /// mutated while the slice is alive.
-unsafe fn seq_cells(data: &TVMFFIAny) -> &[TVMFFIAny] {
+pub(crate) unsafe fn seq_cells(data: &TVMFFIAny) -> &[TVMFFIAny] {
     let seq = &*(data.data_union.v_obj as *const ListObj);
     if seq.size == 0 {
         return &[];
