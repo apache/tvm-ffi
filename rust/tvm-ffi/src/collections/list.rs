@@ -42,7 +42,7 @@ use std::marker::PhantomData;
 use std::ptr;
 
 use crate::any::TryFromTemp;
-use crate::collections::map::{element_from_any, element_view};
+use crate::collections::map::element_view;
 use crate::derive::Object;
 use crate::object::{Object, ObjectArc};
 use crate::type_traits::ContainerElement;
@@ -278,7 +278,8 @@ impl<T: ContainerElement> List<T> {
         Ok(())
     }
 
-    /// Removes and returns the element at `index`, shifting the elements after it.
+    /// Removes and returns the element at `index`, shifting the elements after
+    /// it. If that element is not a `T`, the list is left untouched.
     #[inline]
     pub fn remove(&self, index: usize) -> Result<T> {
         let obj = self.obj();
@@ -288,16 +289,24 @@ impl<T: ContainerElement> List<T> {
                 return index_error("remove");
             }
             let cell = ListObj::cell(obj, index);
-            let mut raw = ptr::read(cell);
+            // Convert first, so that a mismatch leaves the list untouched.
+            let value = if T::container_check_any_strict(&*cell) {
+                let mut raw = ptr::read(cell);
+                T::container_move_from_any_after_check(&mut raw)
+            } else {
+                match T::container_try_cast_from_any_view(&*cell) {
+                    Ok(value) => {
+                        drop(take_cell(cell));
+                        value
+                    }
+                    Err(()) => return type_error(index),
+                }
+            };
             if index + 1 < size {
                 ptr::copy(cell.add(1), cell, size - index - 1);
             }
             (*obj).size -= 1;
-            // Exact type: move the value out without going through `Any`.
-            if T::container_check_any_strict(&raw) {
-                return Ok(T::container_move_from_any_after_check(&mut raw));
-            }
-            element_from_any(Any::from_raw_ffi_any(raw))
+            Ok(value)
         }
     }
 
@@ -307,8 +316,8 @@ impl<T: ContainerElement> List<T> {
         unsafe { ListObj::truncate(self.obj(), 0) }
     }
 
-    /// Returns an iterator over the elements. It re-reads the length on every
-    /// step, so it stays in bounds if the list is mutated meanwhile.
+    /// Returns an iterator over the elements, yielding `Result<T>`; see
+    /// [`ListIterator`].
     pub fn iter(&self) -> ListIterator<'_, T> {
         ListIterator {
             list: self,
@@ -340,27 +349,34 @@ impl<T: ContainerElement> FromIterator<T> for List<T> {
 
 // --- Iterator ---
 
-/// Iterator over a [`List`], created by [`List::iter`]. Like the `Array`
-/// iterator, it ends at the first element that is not a `T`.
+/// Iterator over a [`List`], created by [`List::iter`]. Each step yields
+/// `Ok(T)`, or the `TYPE_ERROR` [`List::get`] would give when the element at
+/// that position is not a `T` (another handle to the same list may have put
+/// it there), and then moves on to the next element. It re-reads the length
+/// on every step, so it stays in bounds if the list is mutated meanwhile.
 pub struct ListIterator<'a, T> {
     list: &'a List<T>,
     index: usize,
 }
 
 impl<T: ContainerElement> Iterator for ListIterator<'_, T> {
-    type Item = T;
+    type Item = Result<T>;
 
     #[inline]
-    fn next(&mut self) -> Option<T> {
+    fn next(&mut self) -> Option<Result<T>> {
         let obj = self.list.obj();
         unsafe {
             if self.index >= (*obj).size as usize {
                 return None;
             }
-            let item =
-                T::container_try_cast_from_any_view(&*ListObj::cell(obj, self.index)).ok()?;
+            let index = self.index;
             self.index += 1;
-            Some(item)
+            Some(
+                match T::container_try_cast_from_any_view(&*ListObj::cell(obj, index)) {
+                    Ok(value) => Ok(value),
+                    Err(()) => type_error(index),
+                },
+            )
         }
     }
 
@@ -371,7 +387,7 @@ impl<T: ContainerElement> Iterator for ListIterator<'_, T> {
 }
 
 impl<'a, T: ContainerElement> IntoIterator for &'a List<T> {
-    type Item = T;
+    type Item = Result<T>;
     type IntoIter = ListIterator<'a, T>;
 
     fn into_iter(self) -> Self::IntoIter {

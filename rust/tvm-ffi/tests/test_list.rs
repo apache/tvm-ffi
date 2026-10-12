@@ -35,7 +35,10 @@ fn test_list_basic() {
     assert_eq!(list.get(0).unwrap(), 1);
     assert_eq!(list.get(2).unwrap(), 3);
     assert!(list.get(3).is_err());
-    assert_eq!(list.iter().collect::<Vec<_>>(), vec![1, 2, 3]);
+    assert_eq!(
+        list.iter().collect::<Result<Vec<_>>>().unwrap(),
+        vec![1, 2, 3]
+    );
     assert_eq!(format!("{list:?}"), "List<i64>[3]");
 }
 
@@ -114,7 +117,7 @@ fn test_list_growth_stays_with_runtime() {
     let mut expected: Vec<i64> = vec![-1];
     expected.extend(0..(list.len() as i64 - 51));
     expected.extend(1000..1050);
-    assert_eq!(list.iter().collect::<Vec<_>>(), expected);
+    assert_eq!(list.iter().collect::<Result<Vec<_>>>().unwrap(), expected);
 }
 
 #[test]
@@ -173,6 +176,7 @@ fn test_list_iter_during_mutation() {
     let list: List<i64> = [1i64, 2, 3].into_iter().collect();
     let mut seen = Vec::new();
     for item in &list {
+        let item = item.unwrap();
         seen.push(item);
         if item == 1 {
             list.remove(list.len() - 1).unwrap();
@@ -202,6 +206,40 @@ fn test_list_of_any_and_objects() {
 }
 
 #[test]
+fn test_list_mismatched_element_is_reported() {
+    // Another handle to the same object puts a `String` where an `i64` is expected.
+    let ints: List<i64> = [1i64, 2, 3].into_iter().collect();
+    let as_any: List<Any> = Any::from(ints.clone()).try_into().unwrap();
+    as_any.set(1, Any::from(String::from("x"))).unwrap();
+
+    // `get` and the iterator report that element instead of truncating.
+    assert!(ints.get(1).is_err());
+    let items: Vec<Result<i64>> = ints.iter().collect();
+    assert_eq!(items.len(), 3);
+    assert_eq!(*items[0].as_ref().unwrap(), 1);
+    assert!(items[1].is_err());
+    assert_eq!(*items[2].as_ref().unwrap(), 3);
+    assert!(ints.iter().collect::<Result<Vec<_>>>().is_err());
+    assert!(ints.iter().sum::<Result<i64>>().is_err());
+
+    // `remove` of that element fails and leaves the list untouched.
+    assert!(ints.remove(1).is_err());
+    assert_eq!(ints.len(), 3);
+    let kept: String = as_any.get(1).unwrap().try_into().unwrap();
+    assert_eq!(kept.as_str(), "x");
+    assert_eq!(ints.remove(2).unwrap(), 3);
+    assert_eq!(ints.remove(0).unwrap(), 1);
+    assert_eq!(ints.len(), 1);
+
+    // A convertible element (an int cell read as `f64`) is removed and converted.
+    let floats: List<f64> = [1.5f64].into_iter().collect();
+    let alias: List<Any> = Any::from(floats.clone()).try_into().unwrap();
+    alias.push(Any::from(2i64)).unwrap();
+    assert_eq!(floats.remove(1).unwrap(), 2.0);
+    assert_eq!(floats.len(), 1);
+}
+
+#[test]
 fn test_list_conversion_copies() {
     // An `ffi.Array` converts into a new list.
     let array = Array::new(vec![1i64, 2]);
@@ -225,7 +263,7 @@ fn test_list_conversion_copies() {
 fn test_list_as_function_argument() {
     let sum = Function::from_typed(|list: List<i64>| -> Result<i64> {
         list.push(10)?;
-        Ok(list.iter().sum())
+        list.iter().sum()
     });
     let list: List<i64> = [1i64, 2].into_iter().collect();
     let total: i64 = sum.call_tuple((list.clone(),)).unwrap().try_into().unwrap();

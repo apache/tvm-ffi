@@ -51,7 +51,7 @@ pub(crate) fn element_view<T: ContainerElement>(value: &T) -> AnyView<'_> {
     }
 }
 
-pub(crate) fn element_from_any<T: ContainerElement>(value: Any) -> Result<T> {
+fn element_from_any<T: ContainerElement>(value: Any) -> Result<T> {
     unsafe {
         if T::container_check_any_strict(value.as_raw_ffi_any()) {
             let mut value = std::mem::ManuallyDrop::new(value);
