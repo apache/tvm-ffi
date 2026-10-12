@@ -139,6 +139,16 @@ fn test_list_releases_elements() {
     list.clear();
     assert_eq!(probe.debug_strong_count().unwrap(), base);
 
+    // Bulk edits release elements too.
+    list.extend([array.clone(), array.clone(), array.clone()])
+        .unwrap();
+    assert_eq!(probe.debug_strong_count().unwrap(), base + 3);
+    list.remove_range(0, 2).unwrap();
+    assert_eq!(probe.debug_strong_count().unwrap(), base + 1);
+    list.reverse();
+    list.truncate(0);
+    assert_eq!(probe.debug_strong_count().unwrap(), base);
+
     // Elements pushed through the C++ growth path are released by the C++
     // destructor; elements written in place by Rust the same way.
     for _ in 0..10 {
@@ -169,6 +179,130 @@ fn test_list_handles_share_one_object() {
         .unwrap();
     assert_eq!(list.len(), 3);
     assert_eq!(list.get(2).unwrap().as_str(), "c");
+}
+
+#[test]
+fn test_list_reserve() {
+    let list: List<i64> = (1..=3).collect();
+    let (buffer, deleter) = buffer_identity(&list);
+
+    // Within capacity: nothing happens.
+    list.reserve(0).unwrap();
+    assert_eq!(buffer_identity(&list).0, buffer);
+
+    // Beyond: C++ reallocates once, keeps its deleter, and the pushes that
+    // follow land in place.
+    list.reserve(100).unwrap();
+    assert!(list.capacity() >= 103);
+    let (grown, deleter_after) = buffer_identity(&list);
+    assert_ne!(grown, buffer);
+    assert_eq!(deleter_after, deleter);
+    assert_eq!(
+        list.iter().collect::<Result<Vec<_>>>().unwrap(),
+        vec![1, 2, 3]
+    );
+    for i in 4..=103 {
+        list.push(i).unwrap();
+    }
+    assert_eq!(buffer_identity(&list).0, grown);
+    assert_eq!(list.len(), 103);
+}
+
+#[test]
+fn test_list_ends() {
+    let list: List<i64> = List::new();
+    assert!(list.first().is_err());
+    assert!(list.last().is_err());
+    assert!(list.pop().is_err());
+    list.extend([1i64, 2, 3]).unwrap();
+    assert_eq!(list.first().unwrap(), 1);
+    assert_eq!(list.last().unwrap(), 3);
+    assert_eq!(list.pop().unwrap(), 3);
+    assert_eq!(list.pop().unwrap(), 2);
+    assert_eq!(list.len(), 1);
+}
+
+#[test]
+fn test_list_bulk_edits() {
+    // Grow once so the buffer has headroom, then make room again.
+    let list: List<i64> = List::new();
+    list.extend(1..=5).unwrap();
+    list.truncate(3);
+    assert!(list.capacity() > list.len());
+
+    // In place: the buffer stays.
+    let buffer = buffer_identity(&list).0;
+    list.insert_many(1, [10i64]).unwrap();
+    assert_eq!(buffer_identity(&list).0, buffer);
+    assert_eq!(
+        list.iter().collect::<Result<Vec<_>>>().unwrap(),
+        vec![1, 10, 2, 3]
+    );
+
+    // Full: C++ reallocates through `ffi.ListReserve`, then the batch lands in place.
+    while list.len() < list.capacity() {
+        list.push(0).unwrap();
+    }
+    let len = list.len();
+    list.insert_many(2, [20i64, 21]).unwrap();
+    assert_eq!(list.len(), len + 2);
+    assert_eq!(list.get(1).unwrap(), 10);
+    assert_eq!(list.get(2).unwrap(), 20);
+    assert_eq!(list.get(3).unwrap(), 21);
+    assert_eq!(list.get(4).unwrap(), 2);
+    list.extend(std::iter::empty()).unwrap();
+    assert!(list.insert_many(list.len() + 1, [0i64]).is_err());
+
+    list.remove_range(2, 4).unwrap();
+    assert_eq!(list.len(), len);
+    assert_eq!(list.get(2).unwrap(), 2);
+    list.remove_range(1, 1).unwrap();
+    assert!(list.remove_range(3, 2).is_err());
+    assert!(list.remove_range(0, list.len() + 1).is_err());
+
+    list.truncate(3);
+    assert_eq!(
+        list.iter().collect::<Result<Vec<_>>>().unwrap(),
+        vec![1, 10, 2]
+    );
+    list.truncate(10);
+    assert_eq!(list.len(), 3);
+    list.resize(1, 0).unwrap();
+    list.resize(4, 9).unwrap();
+    assert_eq!(
+        list.iter().collect::<Result<Vec<_>>>().unwrap(),
+        vec![1, 9, 9, 9]
+    );
+    list.reverse();
+    assert_eq!(
+        list.iter().collect::<Result<Vec<_>>>().unwrap(),
+        vec![9, 9, 9, 1]
+    );
+    list.clear();
+    list.reverse();
+    assert!(list.is_empty());
+}
+
+#[test]
+fn test_list_iter_rev() {
+    let list: List<i64> = (1..=5).collect();
+    assert_eq!(
+        list.iter().rev().collect::<Result<Vec<_>>>().unwrap(),
+        vec![5, 4, 3, 2, 1]
+    );
+    let mut it = list.iter();
+    assert_eq!(it.next().unwrap().unwrap(), 1);
+    assert_eq!(it.next_back().unwrap().unwrap(), 5);
+    assert_eq!(it.next_back().unwrap().unwrap(), 4);
+    assert_eq!(it.collect::<Result<Vec<_>>>().unwrap(), vec![2, 3]);
+
+    // Shrinking the list while iterating from the back stays in bounds.
+    let mut it = list.iter().rev();
+    assert_eq!(it.next().unwrap().unwrap(), 5);
+    list.truncate(2);
+    assert_eq!(it.next().unwrap().unwrap(), 2);
+    assert_eq!(it.next().unwrap().unwrap(), 1);
+    assert!(it.next().is_none());
 }
 
 #[test]

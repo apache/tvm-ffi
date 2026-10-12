@@ -212,6 +212,8 @@ TVM_FFI_STATIC_INIT_BLOCK() {
              }
            })
       .def("ffi.ListClear", [](ffi::List<Any> n) -> void { n.clear(); })
+      .def("ffi.ListReserve",
+           [](ffi::List<Any> n, int64_t capacity) -> void { n.reserve(capacity); })
       .def_packed("ffi.Map",
                   [](ffi::PackedArgs args, Any* ret) {
                     TVM_FFI_ICHECK_EQ(args.size() % 2, 0);

@@ -19,14 +19,16 @@
 //! Mutable [`List`] container sharing the `ffi.List` object layout with C++.
 //!
 //! `ListObj` mirrors C++ `ListObj` (`Object` followed by `TVMFFISeqCell`), so
-//! Rust reads and edits the element cells in place: [`List::get`],
-//! [`List::set`], [`List::insert`], [`List::remove`], [`List::clear`] and
-//! iteration touch the buffer directly, with no FFI call. The object and its
-//! element buffer are allocated by the C++ runtime (`ffi.List`), because the
-//! buffer is a separate allocation that `data_deleter` has to free with the
-//! allocator that produced it. For the same reason, growing a full buffer is
-//! left to C++: [`List::push`] and [`List::insert`] call `ffi.ListAppend` or
-//! `ffi.ListInsert` only when there is no spare capacity.
+//! Rust reads and edits the element cells in place: reads, [`List::set`],
+//! [`List::insert`], [`List::remove`], [`List::remove_range`],
+//! [`List::truncate`], [`List::reverse`], [`List::clear`] and iteration touch
+//! the buffer directly, with no FFI call. The object and its element buffer
+//! are allocated by the C++ runtime (`ffi.List`), because the buffer is a
+//! separate allocation that `data_deleter` has to free with the allocator that
+//! produced it. For the same reason, growing a full buffer is left to C++:
+//! [`List::push`] and [`List::insert`] call `ffi.ListAppend` or
+//! `ffi.ListInsert` only when there is no spare capacity, and
+//! [`List::insert_many`] and [`List::reserve`] grow through `ffi.ListReserve`.
 //!
 //! A `List` is a shared handle, as in C++ and Python: cloning it bumps the
 //! refcount, and a mutation through one handle is seen through all of them.
@@ -317,12 +319,141 @@ impl<T: ContainerElement> List<T> {
         unsafe { ListObj::truncate(self.obj(), 0) }
     }
 
-    /// Returns an iterator over the elements, yielding `Result<T>`; see
-    /// [`ListIterator`].
+    /// Returns the first element, or an `INDEX_ERROR` if the list is empty.
+    pub fn first(&self) -> Result<T> {
+        if self.is_empty() {
+            return index_error("first");
+        }
+        self.get(0)
+    }
+
+    /// Returns the last element, or an `INDEX_ERROR` if the list is empty.
+    pub fn last(&self) -> Result<T> {
+        match self.len() {
+            0 => index_error("last"),
+            len => self.get(len - 1),
+        }
+    }
+
+    /// Removes and returns the last element, or an `INDEX_ERROR` if the list
+    /// is empty.
+    pub fn pop(&self) -> Result<T> {
+        match self.len() {
+            0 => index_error("pop"),
+            len => self.remove(len - 1),
+        }
+    }
+
+    /// Shortens the list to `len` elements, dropping the rest; a no-op when it
+    /// is already that short. C++ `resize` when shrinking.
+    pub fn truncate(&self, len: usize) {
+        unsafe { ListObj::truncate(self.obj(), len) }
+    }
+
+    /// Removes the elements in `start..end`, shifting the ones after them.
+    pub fn remove_range(&self, start: usize, end: usize) -> Result<()> {
+        let obj = self.obj();
+        unsafe {
+            let size = (*obj).size as usize;
+            if start > end || end > size {
+                return index_error("remove_range");
+            }
+            if start == end {
+                return Ok(());
+            }
+            // Rotate the removed cells to the back and drop them from there,
+            // so the list is consistent while each element is released.
+            std::slice::from_raw_parts_mut(ListObj::cell(obj, start), size - start)
+                .rotate_left(end - start);
+            ListObj::truncate(obj, size - (end - start));
+        }
+        Ok(())
+    }
+
+    /// Inserts every item of `iter`, in order, at `index`, shifting the
+    /// elements after it. C++ `insert(position, first, last)`.
+    pub fn insert_many<I: IntoIterator<Item = T>>(&self, index: usize, iter: I) -> Result<()> {
+        let size = self.len();
+        if index > size {
+            return index_error("insert_many");
+        }
+        let items: Vec<T> = iter.into_iter().collect();
+        let count = items.len();
+        if count == 0 {
+            return Ok(());
+        }
+        let capacity = self.capacity();
+        if size + count > capacity {
+            // Full: grow geometrically, like C++ `List::EnsureCapacity`.
+            self.grow_to((capacity * 2).max(size + count))?;
+        }
+        let obj = self.obj();
+        unsafe {
+            let cell = ListObj::cell(obj, index);
+            ptr::copy(cell, cell.add(count), size - index);
+            for (offset, item) in items.into_iter().enumerate() {
+                write_cell(cell.add(offset), item);
+            }
+            (*obj).size += count as i64;
+        }
+        Ok(())
+    }
+
+    /// Makes room for at least `additional` more elements without
+    /// reallocating again. C++ `reserve`.
+    pub fn reserve(&self, additional: usize) -> Result<()> {
+        let total = self.len() + additional;
+        if total > self.capacity() {
+            self.grow_to(total)?;
+        }
+        Ok(())
+    }
+
+    /// Has the C++ runtime grow the buffer to hold `capacity` elements, with
+    /// the allocator that owns it (`ffi.ListReserve`).
+    fn grow_to(&self, capacity: usize) -> Result<()> {
+        crate::cached_global_func!("ffi.ListReserve")
+            .call_packed(&[AnyView::from(self), AnyView::from(&(capacity as i64))])?;
+        Ok(())
+    }
+
+    /// Appends every item of `iter`, in order.
+    pub fn extend<I: IntoIterator<Item = T>>(&self, iter: I) -> Result<()> {
+        self.insert_many(self.len(), iter)
+    }
+
+    /// Resizes the list to `new_len` elements, dropping the tail or appending
+    /// clones of `value`. C++ `resize`.
+    pub fn resize(&self, new_len: usize, value: T) -> Result<()>
+    where
+        T: Clone,
+    {
+        let len = self.len();
+        if new_len <= len {
+            self.truncate(new_len);
+            return Ok(());
+        }
+        self.extend(std::iter::repeat_n(value, new_len - len))
+    }
+
+    /// Reverses the elements in place. C++ `Reverse`.
+    pub fn reverse(&self) {
+        let obj = self.obj();
+        unsafe {
+            let size = (*obj).size as usize;
+            if size > 1 {
+                std::slice::from_raw_parts_mut(ListObj::cell(obj, 0), size).reverse();
+            }
+        }
+    }
+
+    /// Returns a double-ended iterator over the elements, yielding
+    /// `Result<T>`; see [`ListIterator`].
     pub fn iter(&self) -> ListIterator<'_, T> {
         ListIterator {
             list: self,
             index: 0,
+            back: usize::MAX,
         }
     }
 }
@@ -354,10 +485,29 @@ impl<T: ContainerElement> FromIterator<T> for List<T> {
 /// `Ok(T)`, or the `TYPE_ERROR` [`List::get`] would give when the element at
 /// that position is not a `T` (another handle to the same list may have put
 /// it there), and then moves on to the next element. It re-reads the length
-/// on every step, so it stays in bounds if the list is mutated meanwhile.
+/// on every step, so it stays in bounds if the list is mutated meanwhile;
+/// iterating from the back (`rev`) pins the end at the first back step.
 pub struct ListIterator<'a, T> {
     list: &'a List<T>,
     index: usize,
+    /// One past the last position still to visit from the back; `usize::MAX`
+    /// until `next_back` runs, so forward iteration follows the live length.
+    back: usize,
+}
+
+impl<T: ContainerElement> ListIterator<'_, T> {
+    #[inline]
+    fn end(&self) -> usize {
+        self.back.min(self.list.len())
+    }
+
+    #[inline]
+    unsafe fn read(&self, index: usize) -> Result<T> {
+        match T::container_try_cast_from_any_view(&*ListObj::cell(self.list.obj(), index)) {
+            Ok(value) => Ok(value),
+            Err(()) => type_error(index),
+        }
+    }
 }
 
 impl<T: ContainerElement> Iterator for ListIterator<'_, T> {
@@ -365,25 +515,29 @@ impl<T: ContainerElement> Iterator for ListIterator<'_, T> {
 
     #[inline]
     fn next(&mut self) -> Option<Result<T>> {
-        let obj = self.list.obj();
-        unsafe {
-            if self.index >= (*obj).size as usize {
-                return None;
-            }
-            let index = self.index;
-            self.index += 1;
-            Some(
-                match T::container_try_cast_from_any_view(&*ListObj::cell(obj, index)) {
-                    Ok(value) => Ok(value),
-                    Err(()) => type_error(index),
-                },
-            )
+        if self.index >= self.end() {
+            return None;
         }
+        let index = self.index;
+        self.index += 1;
+        Some(unsafe { self.read(index) })
     }
 
     #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
-        (0, Some(self.list.len().saturating_sub(self.index)))
+        (0, Some(self.end().saturating_sub(self.index)))
+    }
+}
+
+impl<T: ContainerElement> DoubleEndedIterator for ListIterator<'_, T> {
+    #[inline]
+    fn next_back(&mut self) -> Option<Result<T>> {
+        let end = self.end();
+        if end <= self.index {
+            return None;
+        }
+        self.back = end - 1;
+        Some(unsafe { self.read(end - 1) })
     }
 }
 
