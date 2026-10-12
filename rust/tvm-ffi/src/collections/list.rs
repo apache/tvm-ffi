@@ -373,11 +373,13 @@ impl<T: ContainerElement> List<T> {
     /// Inserts every item of `iter`, in order, at `index`, shifting the
     /// elements after it. C++ `insert(position, first, last)`.
     pub fn insert_many<I: IntoIterator<Item = T>>(&self, index: usize, iter: I) -> Result<()> {
+        // Drain the iterator first: it may reach this same list through
+        // another handle, so the length is only read once it is done.
+        let items: Vec<T> = iter.into_iter().collect();
         let size = self.len();
         if index > size {
             return index_error("insert_many");
         }
-        let items: Vec<T> = iter.into_iter().collect();
         let count = items.len();
         if count == 0 {
             return Ok(());
@@ -400,7 +402,8 @@ impl<T: ContainerElement> List<T> {
     }
 
     /// Makes room for at least `additional` more elements without
-    /// reallocating again. C++ `reserve`.
+    /// reallocating again, like `Vec::reserve`. C++ `reserve(n)` takes the
+    /// absolute capacity instead.
     pub fn reserve(&self, additional: usize) -> Result<()> {
         let total = self.len() + additional;
         if total > self.capacity() {
@@ -419,7 +422,8 @@ impl<T: ContainerElement> List<T> {
 
     /// Appends every item of `iter`, in order.
     pub fn extend<I: IntoIterator<Item = T>>(&self, iter: I) -> Result<()> {
-        self.insert_many(self.len(), iter)
+        let items: Vec<T> = iter.into_iter().collect();
+        self.insert_many(self.len(), items)
     }
 
     /// Resizes the list to `new_len` elements, dropping the tail or appending

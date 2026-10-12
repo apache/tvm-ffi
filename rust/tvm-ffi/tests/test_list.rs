@@ -284,6 +284,39 @@ fn test_list_bulk_edits() {
 }
 
 #[test]
+fn test_list_insert_many_with_self_mutating_iterator() {
+    // The iterator pushes into the same list while `insert_many` drains it;
+    // the length must be read afterwards or the shift and size go stale.
+    let list: List<i64> = List::new();
+    list.push(0).unwrap();
+    list.insert_many(
+        0,
+        (1..=3).map(|i| {
+            list.push(100 + i).unwrap();
+            i
+        }),
+    )
+    .unwrap();
+    assert_eq!(list.len(), 7);
+    assert!(list.len() <= list.capacity());
+    assert_eq!(
+        list.iter().collect::<Result<Vec<_>>>().unwrap(),
+        vec![1, 2, 3, 0, 101, 102, 103]
+    );
+
+    // `extend` appends after whatever the iterator added.
+    list.extend((1..=2).map(|i| {
+        list.push(200 + i).unwrap();
+        i
+    }))
+    .unwrap();
+    assert_eq!(
+        list.iter().collect::<Result<Vec<_>>>().unwrap(),
+        vec![1, 2, 3, 0, 101, 102, 103, 201, 202, 1, 2]
+    );
+}
+
+#[test]
 fn test_list_iter_rev() {
     let list: List<i64> = (1..=5).collect();
     assert_eq!(
