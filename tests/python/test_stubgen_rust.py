@@ -197,6 +197,10 @@ def test_render_rust_type_value_positions() -> None:
     text, imports = _render_type(TypeSchema("Map", (TypeSchema("str"), TypeSchema("Array"))))
     assert text == "Map<String, Array<Any>>"
     assert _uses(imports) == {"tvm_ffi::Map", "tvm_ffi::String", "tvm_ffi::Array", "tvm_ffi::Any"}
+    text, imports = _render_type(TypeSchema("List", (TypeSchema("int"),)))
+    assert text == "List<i64>"
+    assert _uses(imports) == {"tvm_ffi::List"}
+    assert _render_type(TypeSchema.from_json_str('{"type":"ffi.List"}'))[0] == "List<Any>"
 
 
 @pytest.mark.parametrize(
@@ -205,7 +209,7 @@ def test_render_rust_type_value_positions() -> None:
         TypeSchema("Union", (TypeSchema("int"), TypeSchema("str"))),
         TypeSchema("Dict", (TypeSchema("str"), TypeSchema("int"))),
         TypeSchema("tuple"),
-        TypeSchema("Array", (TypeSchema("List", (TypeSchema("int"),)),)),
+        TypeSchema("List", (TypeSchema("Dict", (TypeSchema("str"), TypeSchema("int"))),)),
         TypeSchema("Optional", (TypeSchema("ctypes.c_void_p"),)),
     ],
 )
@@ -882,6 +886,22 @@ def test_complete_optional_field_mirrors() -> None:
     assert "pub name: Optional<String>," in text
     assert "pub items: Option<Array<Any>>," in text
     assert "tvm_ffi::Optional" in _uses(imports)
+
+
+def test_complete_list_field_mirrors() -> None:
+    """A `List<T>` field is an object handle and mirrors like `Array<T>`."""
+    info = _info(
+        "demo.Table",
+        (
+            _field("rows", TypeSchema("List", (TypeSchema("int"),)), 24, 8),
+            _field("cells", TypeSchema("List", (TypeSchema("Array"),)), 32, 8),
+        ),
+        total_size=40,
+    )
+    text, imports = _render(info)
+    assert "pub rows: List<i64>," in text
+    assert "pub cells: List<Array<Any>>," in text
+    assert {"tvm_ffi::List", "tvm_ffi::Array", "tvm_ffi::Any"} <= _uses(imports)
 
 
 def test_complete_big_int_field_mirrors() -> None:

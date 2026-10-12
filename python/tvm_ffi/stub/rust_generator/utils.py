@@ -121,9 +121,9 @@ def render_rust_type(
     origin, args = schema.origin, schema.args
     if origin in C.RUST_UNSUPPORTED_ORIGINS:
         return None
-    if origin == "Array":
+    if origin in ("Array", "List"):
         assert args  # TypeSchema's post_init fills a missing element type.
-        return _generic(ty_render("Array", None), render_rust_type(args[0], ty_render))
+        return _generic(ty_render(origin, None), render_rust_type(args[0], ty_render))
     if origin == "Map":
         assert len(args) == 2  # TypeSchema's post_init fills a bare Map to (Any, Any).
         key = render_rust_type(args[0], ty_render)

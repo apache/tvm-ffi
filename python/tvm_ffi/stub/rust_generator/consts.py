@@ -34,6 +34,7 @@ RUST_TY_MAP_DEFAULTS = {
     "Any": "tvm_ffi::Any",
     "Callable": "tvm_ffi::Function",
     "Array": "tvm_ffi::Array",  # the crate's own Array<T>, NOT Vec
+    "List": "tvm_ffi::List",  # the crate's own List<T>, NOT Vec
     "Map": "tvm_ffi::Map",  # the crate's own Map<K, V>, NOT HashMap
     # An object value is the `ObjectRef` handle; `Object` only appears as an embedded `base`.
     "Object": "tvm_ffi::object::ObjectRef",
@@ -55,7 +56,7 @@ RUST_TY_MAP_DEFAULTS = {
 }
 
 #: Origins without a crate mirror; such a field is read as ``tvm_ffi::Any``.
-RUST_UNSUPPORTED_ORIGINS = frozenset({"Dict", "List", "Union", "tuple"})
+RUST_UNSUPPORTED_ORIGINS = frozenset({"Dict", "Union", "tuple"})
 
 #: Mirror scalar by ``(origin, reflected size)``: the schema erases widths and signedness.
 RUST_SCALAR_BY_SIZE = {
