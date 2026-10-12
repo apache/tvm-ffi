@@ -16,24 +16,30 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-//! Mutable [`List`] container backed by the C++ `ffi.List` object.
+//! Mutable [`List`] container sharing the `ffi.List` object layout with C++.
 //!
-//! `ListObj` mirrors C++ `SeqBaseObj`, the layout `ffi.Array` also uses, so
-//! [`List::len`] and [`List::get`] read the object directly (no FFI). Mutation
-//! is delegated to the global functions the C++ runtime registers
-//! (`ffi.ListAppend`, `ffi.ListSetItem`, ...): growing the buffer has to go
-//! through the allocator and deleter the C++ side installed.
+//! `ListObj` mirrors C++ `ListObj` (`Object` followed by `TVMFFISeqCell`), so
+//! Rust reads and edits the element cells in place: [`List::get`],
+//! [`List::set`], [`List::insert`], [`List::remove`], [`List::clear`] and
+//! iteration touch the buffer directly, with no FFI call. The object and its
+//! element buffer are allocated by the C++ runtime (`ffi.List`), because the
+//! buffer is a separate allocation that `data_deleter` has to free with the
+//! allocator that produced it. For the same reason, growing a full buffer is
+//! left to C++: [`List::push`] and [`List::insert`] call `ffi.ListAppend` or
+//! `ffi.ListInsert` only when there is no spare capacity.
 //!
 //! A `List` is a shared handle, as in C++ and Python: cloning it bumps the
 //! refcount, and a mutation through one handle is seen through all of them.
 //! That is why the mutating methods take `&self`, and why elements are
-//! returned by value rather than by reference.
+//! returned by value rather than by reference. Like its C++ counterpart it is
+//! not synchronized; the raw buffer pointer keeps it `!Send` and `!Sync`.
 //!
 //! `Any` conversions follow C++ `SeqTypeTraitsBase` (seq_base.h): an `ffi.List`
 //! whose elements all match `T` is shared; an `ffi.Array`, or a list whose
 //! elements need converting, is copied into a new list.
 use std::fmt::Debug;
 use std::marker::PhantomData;
+use std::ptr;
 
 use crate::any::TryFromTemp;
 use crate::collections::map::{element_from_any, element_view};
@@ -44,9 +50,9 @@ use crate::{Any, AnyCompatible, AnyView, Error, ObjectRefCore, Result};
 use tvm_ffi_sys::TVMFFITypeIndex as TypeIndex;
 use tvm_ffi_sys::{TVMFFIAny, TVMFFIObject};
 
-/// Container object for [`List`], mirroring C++ `SeqBaseObj`. Unlike
-/// `ffi.Array`, the element buffer `data` points to is a separate allocation
-/// that C++ replaces when the list grows.
+/// Container object for [`List`], laid out as C++ `ListObj`. Unlike
+/// `ffi.Array`, the element buffer `data` is a separate allocation that the
+/// C++ runtime replaces when the list grows.
 #[repr(C)]
 #[derive(Object)]
 #[type_key = "ffi.List"]
@@ -59,6 +65,36 @@ pub struct ListObj {
     pub capacity: i64,
     /// Deleter for the element buffer.
     pub data_deleter: Option<unsafe extern "C" fn(*mut core::ffi::c_void)>,
+}
+
+impl ListObj {
+    /// Cell `index` of the buffer; the caller keeps `index` below `capacity`.
+    #[inline]
+    unsafe fn cell(this: *mut ListObj, index: usize) -> *mut TVMFFIAny {
+        ((*this).data as *mut TVMFFIAny).add(index)
+    }
+
+    /// Drops the elements from the back down to `len`, like C++ `ShrinkBy`.
+    unsafe fn truncate(this: *mut ListObj, len: usize) {
+        while (*this).size as usize > len {
+            (*this).size -= 1;
+            drop(take_cell(Self::cell(this, (*this).size as usize)));
+        }
+    }
+}
+
+/// Moves the element out of `cell`; the caller overwrites the cell or drops
+/// it from the list's accounting.
+#[inline]
+unsafe fn take_cell(cell: *mut TVMFFIAny) -> Any {
+    Any::from_raw_ffi_any(ptr::read(cell))
+}
+
+#[inline]
+unsafe fn write_cell<T: ContainerElement>(cell: *mut TVMFFIAny, value: T) {
+    let mut raw = TVMFFIAny::new();
+    T::container_move_to_any(value, &mut raw);
+    ptr::write(cell, raw);
 }
 
 /// Mutable, reference-counted sequence of `T`, sharing its underlying
@@ -124,7 +160,13 @@ impl<T: ContainerElement> List<T> {
         Self::try_from(result)
     }
 
-    /// Returns the number of elements by reading the `ListObj` header (no FFI call).
+    #[inline]
+    fn obj(&self) -> *mut ListObj {
+        // SAFETY: `self.data` keeps the object alive for as long as the pointer is used.
+        unsafe { ObjectArc::as_raw(&self.data) as *mut ListObj }
+    }
+
+    /// Returns the number of elements.
     pub fn len(&self) -> usize {
         self.data.size as usize
     }
@@ -134,13 +176,18 @@ impl<T: ContainerElement> List<T> {
         self.len() == 0
     }
 
-    /// Returns the element at `index`, read directly from the element buffer.
+    /// Returns the number of elements the buffer holds before it is reallocated.
+    pub fn capacity(&self) -> usize {
+        self.data.capacity as usize
+    }
+
+    /// Returns the element at `index`.
     pub fn get(&self, index: usize) -> Result<T> {
         if index >= self.len() {
             crate::bail!(crate::error::INDEX_ERROR, "List get index out of bound");
         }
         unsafe {
-            let cell = &*(self.data.data as *const TVMFFIAny).add(index);
+            let cell = &*ListObj::cell(self.obj(), index);
             match T::container_try_cast_from_any_view(cell) {
                 Ok(value) => Ok(value),
                 Err(_) => crate::bail!(
@@ -158,16 +205,26 @@ impl<T: ContainerElement> List<T> {
         if index >= self.len() {
             crate::bail!(crate::error::INDEX_ERROR, "List set index out of bound");
         }
-        crate::cached_global_func!("ffi.ListSetItem").call_packed(&[
-            AnyView::from(self),
-            AnyView::from(&(index as i64)),
-            element_view(&value),
-        ])?;
+        unsafe {
+            let cell = ListObj::cell(self.obj(), index);
+            let old = take_cell(cell);
+            write_cell(cell, value);
+            drop(old);
+        }
         Ok(())
     }
 
     /// Appends `value` to the end of the list.
     pub fn push(&self, value: T) -> Result<()> {
+        let obj = self.obj();
+        unsafe {
+            if (*obj).size < (*obj).capacity {
+                write_cell(ListObj::cell(obj, (*obj).size as usize), value);
+                (*obj).size += 1;
+                return Ok(());
+            }
+        }
+        // Full: the C++ runtime grows the buffer with the allocator that owns it.
         crate::cached_global_func!("ffi.ListAppend")
             .call_packed(&[AnyView::from(self), element_view(&value)])?;
         Ok(())
@@ -175,9 +232,21 @@ impl<T: ContainerElement> List<T> {
 
     /// Inserts `value` at `index`, shifting the elements after it.
     pub fn insert(&self, index: usize, value: T) -> Result<()> {
-        if index > self.len() {
+        let size = self.len();
+        if index > size {
             crate::bail!(crate::error::INDEX_ERROR, "List insert index out of bound");
         }
+        let obj = self.obj();
+        unsafe {
+            if (*obj).size < (*obj).capacity {
+                let cell = ListObj::cell(obj, index);
+                ptr::copy(cell, cell.add(1), size - index);
+                write_cell(cell, value);
+                (*obj).size += 1;
+                return Ok(());
+            }
+        }
+        // Full: the C++ runtime grows the buffer with the allocator that owns it.
         crate::cached_global_func!("ffi.ListInsert").call_packed(&[
             AnyView::from(self),
             AnyView::from(&(index as i64)),
@@ -188,18 +257,24 @@ impl<T: ContainerElement> List<T> {
 
     /// Removes and returns the element at `index`, shifting the elements after it.
     pub fn remove(&self, index: usize) -> Result<T> {
-        if index >= self.len() {
+        let size = self.len();
+        if index >= size {
             crate::bail!(crate::error::INDEX_ERROR, "List remove index out of bound");
         }
-        let result = crate::cached_global_func!("ffi.ListPop")
-            .call_packed(&[AnyView::from(self), AnyView::from(&(index as i64))])?;
-        element_from_any(result)
+        let obj = self.obj();
+        let value = unsafe {
+            let cell = ListObj::cell(obj, index);
+            let value = take_cell(cell);
+            ptr::copy(cell.add(1), cell, size - index - 1);
+            (*obj).size -= 1;
+            value
+        };
+        element_from_any(value)
     }
 
-    /// Removes all elements.
-    pub fn clear(&self) -> Result<()> {
-        crate::cached_global_func!("ffi.ListClear").call_packed(&[AnyView::from(self)])?;
-        Ok(())
+    /// Removes all elements, keeping the buffer.
+    pub fn clear(&self) {
+        unsafe { ListObj::truncate(self.obj(), 0) }
     }
 
     /// Returns an iterator over the elements. It re-reads the length on every

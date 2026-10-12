@@ -18,6 +18,15 @@
  */
 use tvm_ffi::*;
 
+/// Address of the element buffer and of its deleter.
+fn buffer_identity<T>(list: &List<T>) -> (usize, usize) {
+    let obj = <List<T> as ObjectRefCore>::data(list);
+    (
+        obj.data as usize,
+        obj.data_deleter.map(|f| f as usize).unwrap_or(0),
+    )
+}
+
 #[test]
 fn test_list_basic() {
     let list: List<i64> = [1i64, 2, 3].into_iter().collect();
@@ -48,6 +57,7 @@ fn test_list_mutation() {
         list.push(i).unwrap();
     }
     assert_eq!(list.len(), 100);
+    assert!(list.capacity() >= 100);
     assert_eq!(list.get(99).unwrap(), 99);
 
     list.set(0, -1).unwrap();
@@ -65,8 +75,75 @@ fn test_list_mutation() {
     assert_eq!(list.len(), 100);
     assert!(list.remove(100).is_err());
 
-    list.clear().unwrap();
+    list.clear();
     assert!(list.is_empty());
+    assert!(list.capacity() >= 100);
+}
+
+#[test]
+fn test_list_growth_stays_with_runtime() {
+    let list: List<i64> = List::new();
+    let (_, deleter) = buffer_identity(&list);
+    assert_ne!(deleter, 0);
+
+    // Within capacity the cells are written in place: same buffer.
+    while list.len() < list.capacity() {
+        list.push(list.len() as i64).unwrap();
+    }
+    let (buffer, _) = buffer_identity(&list);
+    assert_eq!(buffer_identity(&list), (buffer, deleter));
+
+    // Full: C++ reallocates (new buffer) and keeps its own deleter.
+    list.push(list.len() as i64).unwrap();
+    let (grown, deleter_after) = buffer_identity(&list);
+    assert_ne!(grown, buffer);
+    assert_eq!(deleter_after, deleter);
+
+    // Same for a full insert, and for C++ growing it further.
+    while list.len() < list.capacity() {
+        list.push(list.len() as i64).unwrap();
+    }
+    list.insert(0, -1).unwrap();
+    assert_eq!(buffer_identity(&list).1, deleter);
+    let append = Function::get_global("ffi.ListAppend").unwrap();
+    for i in 0..50 {
+        append.call_tuple((list.clone(), 1000 + i)).unwrap();
+    }
+    assert_eq!(buffer_identity(&list).1, deleter);
+
+    let mut expected: Vec<i64> = vec![-1];
+    expected.extend(0..(list.len() as i64 - 51));
+    expected.extend(1000..1050);
+    assert_eq!(list.iter().collect::<Vec<_>>(), expected);
+}
+
+#[test]
+fn test_list_releases_elements() {
+    let array = Array::new(vec![1i64]);
+    let probe = Any::from(array.clone());
+    let base = probe.debug_strong_count().unwrap();
+
+    let list: List<Array<i64>> = List::new();
+    list.push(array.clone()).unwrap();
+    list.push(array.clone()).unwrap();
+    list.insert(0, array.clone()).unwrap();
+    assert_eq!(probe.debug_strong_count().unwrap(), base + 3);
+
+    list.set(0, Array::new(vec![2i64])).unwrap();
+    assert_eq!(probe.debug_strong_count().unwrap(), base + 2);
+    drop(list.remove(1).unwrap());
+    assert_eq!(probe.debug_strong_count().unwrap(), base + 1);
+    list.clear();
+    assert_eq!(probe.debug_strong_count().unwrap(), base);
+
+    // Elements pushed through the C++ growth path are released by the C++
+    // destructor; elements written in place by Rust the same way.
+    for _ in 0..10 {
+        list.push(array.clone()).unwrap();
+    }
+    assert_eq!(probe.debug_strong_count().unwrap(), base + 10);
+    drop(list);
+    assert_eq!(probe.debug_strong_count().unwrap(), base);
 }
 
 #[test]
