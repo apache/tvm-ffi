@@ -1025,6 +1025,25 @@ def test_custom_new_renames_the_wrapper_allocator() -> None:
     assert "    pub fn new(" not in text
 
 
+def test_allocator_body_wraps_like_rustfmt() -> None:
+    """Past 100 columns a `let` first moves its call to the next line; the rest go one per line."""
+
+    def render(width: int) -> tuple[str, str]:
+        name = "f" * width
+        text, _ = _render(_info("demo.W", (_field(name, "int", 24, 8),), total_size=32))
+        return name, text
+
+    name, text = render(70)  # the `let` is exactly 100 columns
+    assert f"        let obj = WObj::new({name});\n" in text
+    name, text = render(76)  # 106 columns; the call alone is exactly 100
+    assert f"        let obj =\n            WObj::new({name});\n" in text
+    name, text = render(77)  # the call alone is 101 columns; `Self { .. }` is exactly 100
+    assert f"        let obj = WObj::new(\n            {name},\n        );\n" in text
+    assert f"        Self {{ base, {name} }}\n" in text
+    name, text = render(78)
+    assert f"        Self {{\n            base,\n            {name},\n        }}\n" in text
+
+
 def test_upcast_directive_adds_typed_views() -> None:
     """`upcast` targets follow the ancestor chain; a `::` path is imported. Opaque: no allocator."""
     info = _info("demo.Leaf", parent="demo.Base")

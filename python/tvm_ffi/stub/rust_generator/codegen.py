@@ -70,12 +70,24 @@ if TYPE_CHECKING:
 
 
 def _call_lines(open_: str, items: list[str], close: str) -> list[str]:
-    """``open_ + items + close`` on one line, or one item per line when it would overflow."""
+    """``open_ + items + close`` on one line, or wrapped the way rustfmt does when it would overflow.
+
+    A ``let`` first moves its call to the next line; anything else, and a call that
+    still does not fit, takes one item per line.
+    """
     line = f"{open_}{', '.join(items)}{close}"
     if len(line) <= C_RUST.RUST_MAX_WIDTH:
         return [line]
     indent = open_[: len(open_) - len(open_.lstrip())]
-    return [open_, *[f"{indent}    {item}," for item in items], f"{indent}{close}"]
+    let, eq, call = open_.partition(" = ")
+    moved = f"{indent}    {call}{', '.join(items)}{close}"
+    if eq and len(moved) <= C_RUST.RUST_MAX_WIDTH:
+        return [f"{let} =", moved]
+    return [
+        open_.rstrip(),
+        *[f"{indent}    {item}," for item in items],
+        f"{indent}{close.lstrip()}",
+    ]
 
 
 def _check_width(target: str, field: NamedTypeSchema, rust_type: str, width: int) -> None:
@@ -436,15 +448,15 @@ class _ObjectRenderer:
         return self.imports.record(override) if "::" in override else override
 
     def _fn_lines(
-        self, head: str, params: list[tuple[str, str]], call: tuple[str, list[str]], result: str
+        self, head: str, params: list[tuple[str, str]], call: tuple[str, list[str]], init: list[str]
     ) -> list[str]:
-        """Render ``<head>(<params>) -> Self { let <call>; <result> }`` inside an ``impl`` block."""
+        """Render ``<head>(<params>) -> Self { let <call>; Self { <init> } }`` in an ``impl`` block."""
         plist = [f"{rust_ident(name)}: {rust_type}" for name, rust_type in params]
         binding, args = call
         return [
             *_call_lines(f"    {head}(", plist, ") -> Self {"),
             *_call_lines(f"        let {binding}(", args, ");"),
-            f"        {result}",
+            *_call_lines("        Self { ", init, " }"),
             "    }",
         ]
 
@@ -472,7 +484,7 @@ class _ObjectRenderer:
                     "pub(crate) fn new",
                     params,
                     (f"base = {base}::new", to_parent),
-                    f"Self {{ {', '.join(['base', *own])} }}",
+                    ["base", *own],
                 ),
                 "}",
             ]
@@ -486,7 +498,7 @@ class _ObjectRenderer:
                     "pub fn from_complete_fields" if custom else "pub fn new",
                     params,
                     (f"obj = {self.obj_struct}::new", forward),
-                    "Self { base: ObjectArc::new(obj) }",
+                    ["base: ObjectArc::new(obj)"],
                 ),
                 "}",
             ]
