@@ -202,6 +202,24 @@ fn test_function_from_type_method_by_index() {
 }
 
 #[test]
+fn test_function_reflection_access_path() {
+    use tvm_ffi::reflection::{AccessPath, AccessPathObj, AccessStep};
+
+    let root = Function::from_type_method(AccessPathObj::type_index(), "_root").unwrap();
+    let root: AccessPath = root.call_tuple(()).unwrap().try_into().unwrap();
+    let attr = Function::from_type_key_method("ffi.reflection.AccessPath", "_attr").unwrap();
+    let path: AccessPath = attr
+        .call_tuple((&root, String::from("x")))
+        .unwrap()
+        .try_into()
+        .unwrap();
+    let to_steps =
+        Function::from_type_key_method("ffi.reflection.AccessPath", "_to_steps").unwrap();
+    let steps: Array<AccessStep> = to_steps.call_tuple((&path,)).unwrap().try_into().unwrap();
+    assert_eq!(steps.len(), 1);
+}
+
+#[test]
 fn test_function_from_type_method_unknown_method() {
     let error = Function::from_type_key_method("testing.TestIntPair", "nonexistent_method")
         .err()

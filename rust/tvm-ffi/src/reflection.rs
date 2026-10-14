@@ -22,6 +22,8 @@
 use std::ffi::c_void;
 use std::ptr::NonNull;
 
+use crate::derive::{Object, ObjectRef};
+use crate::object::{Object, ObjectArc};
 use crate::tvm_ffi_sys::{
     TVMFFIAny, TVMFFIByteArray, TVMFFIFieldGetter, TVMFFIFieldInfo, TVMFFIGetTypeAttrColumn,
     TVMFFIGetTypeInfo, TVMFFIObject, TVMFFITypeAttrColumn, TVMFFITypeIndex,
@@ -84,6 +86,36 @@ impl TypeAttrColumn {
 /// Look up one type attribute and copy it into an owning value.
 pub fn get_type_attr(type_index: i32, attr_name: &str) -> Option<Any> {
     TypeAttrColumn::new(attr_name)?.get(type_index)
+}
+
+/// One step of an [`AccessPath`]: an attribute, array index or map key (`ffi.reflection.AccessStep`).
+#[repr(C)]
+#[derive(Object)]
+#[type_key = "ffi.reflection.AccessStep"]
+#[type_final]
+pub struct AccessStepObj {
+    object: Object,
+}
+
+#[repr(C)]
+#[derive(ObjectRef, Clone)]
+pub struct AccessStep {
+    data: ObjectArc<AccessStepObj>,
+}
+
+/// A path from a root value to a nested one (`ffi.reflection.AccessPath`).
+#[repr(C)]
+#[derive(Object)]
+#[type_key = "ffi.reflection.AccessPath"]
+#[type_final]
+pub struct AccessPathObj {
+    object: Object,
+}
+
+#[repr(C)]
+#[derive(ObjectRef, Clone)]
+pub struct AccessPath {
+    data: ObjectArc<AccessPathObj>,
 }
 
 /// Resolves a reflected field once, then uses its registered C ABI getter.

@@ -81,6 +81,8 @@ class RustImports:
     directives: Directives = dataclasses.field(default_factory=Directives)
     builtin_mirrors: dict[str, str] = dataclasses.field(default_factory=dict)
     """Builtin ancestors mirrored in this file, root first: type key -> the base each embeds."""
+    reserved: set[str] = dataclasses.field(default_factory=set)
+    """Names the file's ``object/`` blocks define; an import may not take one."""
 
     def record_builtin_base(self, chain: list[str]) -> str:
         """Record the stand-ins for the builtin ``chain`` (root side first); return the last name.
@@ -96,7 +98,7 @@ class RustImports:
     def record(self, name: str) -> str:
         """Record a ``use`` (deduped) and return the name to spell in code.
 
-        The leaf, or the full path when another path already claimed that leaf.
+        The leaf, or the full path when another path or an object already claimed that leaf.
         """
         probe = RustUse(name)
         if not probe.as_use_line():
@@ -104,7 +106,7 @@ class RustImports:
         for item in self.items:
             if item.path == probe.path:
                 return item.leaf
-        if any(item.leaf == probe.leaf for item in self.items):
+        if probe.leaf in self.reserved or any(item.leaf == probe.leaf for item in self.items):
             return probe.path
         self.items.append(probe)
         return probe.leaf

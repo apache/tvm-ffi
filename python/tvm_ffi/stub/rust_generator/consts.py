@@ -52,6 +52,8 @@ RUST_TY_MAP_DEFAULTS = {
     "ffi.Tensor": "tvm_ffi::Tensor",
     "ffi.Shape": "tvm_ffi::Shape",
     "ffi.Function": "tvm_ffi::Function",
+    "ffi.reflection.AccessPath": "tvm_ffi::reflection::AccessPath",
+    "ffi.reflection.AccessStep": "tvm_ffi::reflection::AccessStep",
 }
 
 #: Origins without a crate mirror; such a field is read as ``tvm_ffi::Any``.
