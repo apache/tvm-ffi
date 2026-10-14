@@ -347,6 +347,12 @@ C++/CUDA source files and loads them as a module in one step:
 Essentially, :py:func:`tvm_ffi.cpp.load` is a convenience function that JIT-compiles the source
 files and loads the resulting library as a :py:class:`tvm_ffi.Module`.
 
+Device code is passed through ``cuda_files`` / ``cuda_sources`` and compiled for the GPU backend given
+by ``backend``: ``"cuda"`` (``nvcc``), ``"hip"`` (``hipcc``), or ``"sycl"`` (``icpx -fsycl``, for Intel
+XPU). Without ``backend``, it is taken from the ``TVM_FFI_GPU_BACKEND`` environment variable or from
+the installed PyTorch build. SYCL is single-source C++, so with ``"sycl"`` every C++ source is
+compiled with ``icpx``.
+
 System Library
 ~~~~~~~~~~~~~~
 

@@ -50,6 +50,10 @@ def test_device_from_str() -> None:
         ("cuda:0", DLDeviceType.kDLCUDA, 0),
         ("cuda:3", DLDeviceType.kDLCUDA, 3),
         ("metal:2", DLDeviceType.kDLMetal, 2),
+        ("oneapi", DLDeviceType.kDLOneAPI, 0),
+        ("oneapi:1", DLDeviceType.kDLOneAPI, 1),
+        ("xpu", DLDeviceType.kDLOneAPI, 0),
+        ("xpu:2", DLDeviceType.kDLOneAPI, 2),
     ],
 )
 def test_device_dlpack_device_type(
