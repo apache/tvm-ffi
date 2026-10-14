@@ -23,6 +23,7 @@ import hashlib
 import logging
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -36,7 +37,8 @@ from tvm_ffi.module import Module, load_module
 from tvm_ffi.utils import FileLock
 
 IS_WINDOWS = sys.platform == "win32"
-BACKEND_STR = Literal["cuda", "hip"]
+BACKEND_STR = Literal["cuda", "hip", "sycl"]
+_BACKENDS = ("cuda", "hip", "sycl")
 
 logger = logging.getLogger(__name__)
 
@@ -57,18 +59,18 @@ def _find_compiler(name: str, *home_vars: str) -> str | None:
 
 @functools.lru_cache
 def _detect_gpu_backend() -> BACKEND_STR:
-    """Auto-detect whether to use CUDA or HIP (ROCm), defaulting to CUDA.
+    """Auto-detect whether to use CUDA, HIP (ROCm), or SYCL, defaulting to CUDA.
 
     Resolution order: the ``TVM_FFI_GPU_BACKEND`` override, then PyTorch build
-    signals (``torch.version.hip`` / ``torch.version.cuda``), then a discoverable
+    signals (``torch.version.hip`` / ``torch.version.cuda`` / ``torch.version.xpu``), then a discoverable
     ``hipcc`` when no ``nvcc`` can be found. Compilers are resolved from ``PATH``
     and from the ``CUDA_HOME``/``CUDA_PATH`` and ``ROCM_HOME``/``ROCM_PATH``
     toolkit homes, so an env-specified CUDA install is honored even when ``nvcc``
     is off ``PATH``. The mere existence of ``/opt/rocm`` is not treated as
-    evidence of HIP.
+    evidence of HIP. SYCL is never inferred from the presence of ``icpx`` alone.
     """
     backend = os.environ.get("TVM_FFI_GPU_BACKEND", "").lower()
-    if backend in ("cuda", "hip"):
+    if backend in _BACKENDS:
         return backend  # type: ignore[return-value]
     try:
         import torch  # noqa: PLC0415
@@ -78,6 +80,8 @@ def _detect_gpu_backend() -> BACKEND_STR:
             return "hip"
         if getattr(version, "cuda", None):
             return "cuda"
+        if getattr(version, "xpu", None):
+            return "sycl"
     except Exception:
         pass
     if _find_compiler("nvcc", "CUDA_HOME", "CUDA_PATH") is None and (
@@ -89,13 +93,15 @@ def _detect_gpu_backend() -> BACKEND_STR:
 
 def _resolve_gpu_backend(backend: str | None) -> BACKEND_STR:
     if backend is not None:
-        if backend in ("cuda", "hip"):
+        if backend in _BACKENDS:
             return backend  # type: ignore[return-value]
-        raise ValueError(f"Invalid backend: {backend}. Supported backends are 'cuda' and 'hip'.")
+        raise ValueError(
+            f"Invalid backend: {backend}. Supported backends are 'cuda', 'hip', and 'sycl'."
+        )
     return _detect_gpu_backend()
 
 
-def _hash_sources(
+def _hash_sources(  # noqa: PLR0913
     cpp_source: str | None,
     cuda_source: str | None,
     cpp_files: Sequence[str] | None,
@@ -106,8 +112,12 @@ def _hash_sources(
     extra_ldflags: Sequence[str],
     extra_include_paths: Sequence[str],
     embed_cubin: Mapping[str, bytes] | None = None,
+    backend: str | None = None,
 ) -> str:
-    """Generate a unique hash for the given sources and functions."""
+    """Generate a unique hash for the given sources and functions.
+
+    ``backend`` is only hashed when given, so existing cache keys are unchanged.
+    """
     m = hashlib.sha256()
 
     def _hash(obj: Any) -> None:
@@ -146,6 +156,8 @@ def _hash_sources(
             embed_cubin,
         )
     )
+    if backend is not None:
+        _hash(backend)
 
     return m.hexdigest()[:16]
 
@@ -302,6 +314,32 @@ def _get_rocm_target() -> list[str]:
     )
 
 
+def _find_sycl_compiler() -> str:
+    """Find the oneAPI DPC++ compiler (``icpx``)."""
+    icpx = _find_compiler("icpx", "CMPLR_ROOT")
+    if icpx is None and os.environ.get("ONEAPI_ROOT"):
+        icpx = shutil.which(
+            "icpx", path=str(Path(os.environ["ONEAPI_ROOT"]) / "compiler" / "latest" / "bin")
+        )
+    if icpx is None:
+        raise RuntimeError(
+            "Could not find the SYCL compiler icpx. Please source the oneAPI setvars.sh script "
+            "or set the CMPLR_ROOT environment variable."
+        )
+    return icpx
+
+
+def _get_sycl_targets() -> list[str]:
+    """Get the SYCL ahead-of-time target flags, or none to JIT compile from SPIR-V."""
+    targets = os.environ.get("TVM_FFI_SYCL_TARGETS", "").replace(",", " ").split()
+    for target in targets:  # e.g., "intel_gpu_pvc intel_gpu_bmg_g21"
+        if not re.fullmatch(r"[A-Za-z0-9_]+", target):
+            raise ValueError(f"Invalid SYCL target: {target}")
+    if not targets:
+        return []
+    return ["-fsycl-targets={}".format(",".join(targets))]
+
+
 def _run_command_in_dev_prompt(
     args: list[str],
     cwd: str | os.PathLike[str],
@@ -402,6 +440,13 @@ def _generate_ninja_build(  # noqa: PLR0915, PLR0912
         object_mode = False
         output_name = f"{name}{'.dll' if IS_WINDOWS else '.so'}"
     has_cuda_sources = any(Path(s).suffix.lower() == ".cu" for s in sources)
+    with_sycl = backend == "sycl"
+    if with_sycl and has_cuda_sources:
+        raise ValueError(
+            "CUDA (.cu) sources cannot be built with the sycl backend, use C++ sources instead."
+        )
+    if with_sycl and IS_WINDOWS:
+        raise NotImplementedError("The sycl backend is not yet supported on Windows")
     with_hip = backend == "hip"
     with_cuda = backend == "cuda"
     with_backend = with_hip or with_cuda or has_cuda_sources
@@ -461,6 +506,11 @@ def _generate_ninja_build(  # noqa: PLR0915, PLR0912
                 f"-L{Path(rocm_home) / 'lib'!s}",
                 "-lamdhip64",
             ]
+        if with_sycl:
+            # SYCL is single-source C++, so every C++ source is compiled and linked with icpx.
+            sycl_flags = ["-fsycl", *_get_sycl_targets()]
+            default_cxxflags = ["-std=c++20", "-fPIC", "-O2", *sycl_flags]
+            default_ldflags += sycl_flags
         if with_cuda:
             default_cuda_cflags = ["-Xcompiler", "-fPIC", *default_cuda_cflags]
             default_cuda_cflags += [_get_cuda_target()]
@@ -472,6 +522,9 @@ def _generate_ninja_build(  # noqa: PLR0915, PLR0912
     extra_cflags_list = [flag.strip() for flag in extra_cflags]
     cflags = default_cflags + extra_cflags_list
     cxxflags = default_cxxflags + extra_cflags_list
+    if with_sycl:
+        # SYCL device code is compiled by the C++ rule
+        cxxflags += [flag.strip() for flag in extra_cuda_cflags]
     cuda_cflags = default_cuda_cflags + [flag.strip() for flag in extra_cuda_cflags]
     ldflags = default_ldflags + [flag.strip() for flag in extra_ldflags]
     include_paths = default_include_paths + [
@@ -489,7 +542,10 @@ def _generate_ninja_build(  # noqa: PLR0915, PLR0912
     with_c = any(Path(s).suffix.lower() == ".c" for s in sources)
     ninja: list[str] = []
     ninja.append("ninja_required_version = 1.3")
-    ninja.append("cxx = {}".format(os.environ.get("CXX", "cl" if IS_WINDOWS else "c++")))
+    if with_sycl:
+        ninja.append(f"cxx = {_find_sycl_compiler()}")
+    else:
+        ninja.append("cxx = {}".format(os.environ.get("CXX", "cl" if IS_WINDOWS else "c++")))
     ninja.append("cxxflags = {}".format(" ".join(cxxflags)))
     if with_c:
         ninja.append("cc = {}".format(os.environ.get("CC", "cl" if IS_WINDOWS else "cc")))
@@ -728,7 +784,7 @@ def _str_seq2list(seq: Sequence[str] | str | None) -> list[str]:
         return list(seq)
 
 
-def _build_impl(  # noqa: PLR0913
+def _build_impl(  # noqa: PLR0912, PLR0913
     name: str,
     sources: Sequence[str] | str | None,
     extra_cflags: Sequence[str] | None,
@@ -747,7 +803,12 @@ def _build_impl(  # noqa: PLR0913
     assert source_path_list, "sources must be provided."
 
     has_cuda = any(Path(p).suffix.lower() == ".cu" for p in source_path_list)
-    resolved_backend = _resolve_gpu_backend(backend) if has_cuda else None
+    if has_cuda:
+        resolved_backend: str | None = _resolve_gpu_backend(backend)
+    elif backend == "sycl":
+        resolved_backend = "sycl"
+    else:
+        resolved_backend = None
     extra_ldflags_list = list(extra_ldflags) if extra_ldflags is not None else []
     extra_cflags_list = list(extra_cflags) if extra_cflags is not None else []
     extra_cuda_cflags_list = list(extra_cuda_cflags) if extra_cuda_cflags is not None else []
@@ -767,6 +828,7 @@ def _build_impl(  # noqa: PLR0913
             extra_ldflags_list,
             extra_include_paths_list,
             embed_cubin,
+            backend="sycl" if resolved_backend == "sycl" else None,
         )
         build_dir = Path(cache_dir).expanduser() / f"{name}_{source_hash}"
     else:
@@ -916,7 +978,10 @@ def build_inline(  # noqa: PLR0913
         See the `examples/cubin_launcher` directory for examples how to use cubin launcher to launch CUBIN kernels in TVM-FFI.
 
     backend
-        The GPU backend to use. It can be "cuda" or "hip".
+        The GPU backend to use. It can be "cuda", "hip", or "sycl".
+        With "sycl", the device sources are SYCL C++ and all C++ sources are compiled and
+        linked with ``icpx -fsycl -std=c++20``; set ``TVM_FFI_SYCL_TARGETS`` (e.g.
+        ``"intel_gpu_pvc intel_gpu_bmg_g21"``) for ahead-of-time compilation.
         If not specified, the backend will be automatically determined based on the available GPU and the provided source code.
 
     output
@@ -981,6 +1046,9 @@ def build_inline(  # noqa: PLR0913
     cuda_source = "\n".join(cuda_source_list)
     with_backend = bool(cuda_source_list)
     del cuda_source_list
+    with_sycl = with_backend and _resolve_gpu_backend(backend) == "sycl"
+    if with_sycl:
+        backend = "sycl"
 
     extra_ldflags_list = list(extra_ldflags) if extra_ldflags is not None else []
     extra_cflags_list = list(extra_cflags) if extra_cflags is not None else []
@@ -1018,6 +1086,7 @@ def build_inline(  # noqa: PLR0913
             extra_ldflags_list,
             extra_include_paths_list,
             embed_cubin,
+            backend="sycl" if with_sycl else None,
         )
         build_dir = Path(cache_dir).expanduser() / f"{name}_{source_hash}"
     else:
@@ -1025,7 +1094,7 @@ def build_inline(  # noqa: PLR0913
     build_dir.mkdir(parents=True, exist_ok=True)
 
     cpp_file = str((build_dir / "main.cpp").resolve())
-    cuda_file = str((build_dir / "cuda.cu").resolve())
+    cuda_file = str((build_dir / ("sycl.cpp" if with_sycl else "cuda.cu")).resolve())
 
     with FileLock(str(build_dir / "lock")):
         # write source files if they do not already exist
@@ -1144,7 +1213,10 @@ def load_inline(  # noqa: PLR0913
         for the duration of the process.
 
     backend
-        The GPU backend to use. It can be "cuda" or "hip".
+        The GPU backend to use. It can be "cuda", "hip", or "sycl".
+        With "sycl", the device sources are SYCL C++ and all C++ sources are compiled and
+        linked with ``icpx -fsycl -std=c++20``; set ``TVM_FFI_SYCL_TARGETS`` (e.g.
+        ``"intel_gpu_pvc intel_gpu_bmg_g21"``) for ahead-of-time compilation.
         If not specified, the backend will be automatically determined based on the available GPU and the provided source code.
 
     Returns
@@ -1309,7 +1381,10 @@ def build(  # noqa: PLR0913
         specify the cache directory.
 
     backend
-        The GPU backend to use. It can be "cuda" or "hip".
+        The GPU backend to use. It can be "cuda", "hip", or "sycl".
+        With "sycl", the device sources are SYCL C++ and all C++ sources are compiled and
+        linked with ``icpx -fsycl -std=c++20``; set ``TVM_FFI_SYCL_TARGETS`` (e.g.
+        ``"intel_gpu_pvc intel_gpu_bmg_g21"``) for ahead-of-time compilation.
         If not specified, the backend will be automatically determined based on the available GPU and the provided source code.
 
     output
@@ -1469,7 +1544,10 @@ def load(  # noqa: PLR0913
         for the duration of the process.
 
     backend
-        The GPU backend to use. It can be "cuda" or "hip".
+        The GPU backend to use. It can be "cuda", "hip", or "sycl".
+        With "sycl", the device sources are SYCL C++ and all C++ sources are compiled and
+        linked with ``icpx -fsycl -std=c++20``; set ``TVM_FFI_SYCL_TARGETS`` (e.g.
+        ``"intel_gpu_pvc intel_gpu_bmg_g21"``) for ahead-of-time compilation.
         If not specified, the backend will be automatically determined based on the available GPU and the provided source code.
 
     Returns

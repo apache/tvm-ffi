@@ -310,6 +310,37 @@ TEST(Tensor, TensorViewAsStrided) {
   EXPECT_EQ(offset_data2[0 * 3 + 0 * 1], 2.0f);  // Points to data[2]
 }
 
+TEST(Tensor, OneAPIIsDirectAddressDevice) {
+  EXPECT_TRUE(IsDirectAddressDevice(DLDevice{kDLOneAPI, 0}));
+  EXPECT_TRUE(IsDirectAddressDevice(DLDevice{kDLOneAPI, 3}));
+  EXPECT_FALSE(IsDirectAddressDevice(DLDevice{kDLOpenCL, 0}));
+
+  alignas(64) char buffer[128];
+  DLTensor arr{};
+  arr.data = buffer;
+  arr.device = DLDevice{kDLOneAPI, 0};
+  arr.byte_offset = 4;
+  EXPECT_FALSE(IsAligned(arr, 64));
+  arr.byte_offset = 64;
+  EXPECT_TRUE(IsAligned(arr, 64));
+}
+
+TEST(Tensor, OneAPITensorViewAsStridedFoldsOffset) {
+  // Memory is host-allocated; only pointer arithmetic is exercised, never device access.
+  Tensor tensor = Empty({2, 3}, DLDataType({kDLFloat, 32, 1}), DLDevice({kDLOneAPI, 0}));
+  TensorView tensor_view = tensor;
+  void* original_data_ptr = tensor_view.data_ptr();
+
+  TensorView offset_view = tensor_view.as_strided({2, 2}, {3, 1}, 1);
+  EXPECT_EQ(offset_view.device().device_type, kDLOneAPI);
+  EXPECT_EQ(offset_view.data_ptr(), reinterpret_cast<char*>(original_data_ptr) + 4);
+  EXPECT_EQ(offset_view.byte_offset(), 0);
+
+  Tensor offset_tensor = tensor.as_strided({2, 2}, {3, 1}, 2);
+  EXPECT_EQ(offset_tensor.data_ptr(), reinterpret_cast<char*>(original_data_ptr) + 8);
+  EXPECT_EQ(offset_tensor.byte_offset(), 0);
+}
+
 TEST(Tensor, AsStrided) {
   // Create a base tensor with shape [2, 3] = 6 elements
   Tensor tensor = Empty({2, 3}, DLDataType({kDLFloat, 32, 1}), DLDevice({kDLCPU, 0}));

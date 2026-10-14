@@ -104,6 +104,8 @@ def device(device_type: str | int | DLDeviceType, index: int | None = None) -> D
 
       assert tvm_ffi.device("cuda:0") == tvm_ffi.device("cuda", 0)
       assert tvm_ffi.device("cpu:0") == tvm_ffi.device("cpu", 0)
+      # Intel XPU: "xpu" is an alias of the canonical "oneapi"
+      assert tvm_ffi.device("xpu:0") == tvm_ffi.device("oneapi", 0)
 
     """
     # must refer to core._CLASS_DEVICE so we pick up override here

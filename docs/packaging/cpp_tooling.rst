@@ -61,6 +61,9 @@ and should be included only when needed:
   ``#include <tvm/ffi/extra/module.h>``
 - **CUBIN launcher** (see :doc:`../guides/cubin_launcher`):
   ``#include <tvm/ffi/extra/cuda/cubin_launcher.h>``
+- **SYCL helpers** for Intel XPU kernels, requiring a SYCL 2020 compiler in C++20 mode
+  (see :doc:`../guides/kernel_library_guide`):
+  ``#include <tvm/ffi/extra/sycl/base.h>``
 
 
 Build with TVM-FFI
@@ -176,6 +179,16 @@ The examples below are from the :doc:`Quick Start <../get_started/quickstart>` t
       :language: bash
       :start-after: [cuda_compile.begin]
       :end-before: [cuda_compile.end]
+
+For Intel XPU, compile SYCL sources with the oneAPI DPC++ compiler. Add
+``-fsycl-targets=intel_gpu_<arch>`` to compile ahead of time for specific GPUs:
+
+.. code-block:: bash
+
+   icpx -fsycl -std=c++20 -shared -fPIC your_kernel.cpp -o kernel.so \
+       $(tvm-ffi-config --cxxflags) \
+       $(tvm-ffi-config --ldflags) \
+       $(tvm-ffi-config --libs)
 
 The three ``tvm-ffi-config`` flags provide:
 
