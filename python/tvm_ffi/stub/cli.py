@@ -26,6 +26,8 @@ import traceback
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from tvm_ffi.core import _object_type_key_to_index
+
 from . import consts as C
 from .file_utils import CodeBlock, FileInfo, collect_files, syntax_for
 from .generator import generator_names, get_generator
@@ -170,8 +172,9 @@ def _roll_out_prefixes(files: list[FileInfo], generator: Generator) -> int:
     """Append an ``object/<key>`` block for each registered object under a file's ``prefix``.
 
     Keys with a block in any file of the run, named by ``skip``, or bound by the target's
-    runtime are left alone; an ``import-section`` is added when the file has none. Returns
-    the number of bad files.
+    runtime are left alone; an ``import-section`` is added when the file has none. A block
+    under the prefix whose type is no longer registered is removed. Returns the number of
+    bad files.
     """
     defined = {code.param for file in files for code in file.code_blocks if code.kind == "object"}
     registry = collect_type_keys()
@@ -193,6 +196,7 @@ def _roll_out_prefixes(files: list[FileInfo], generator: Generator) -> int:
             failed += 1
             print(f'{C.TERM_RED}[Failed] File "{file.path}": {error}{C.TERM_RESET}')
             continue
+        _remove_unregistered_blocks(file, prefix, registry.get(prefix, []))
         if prefix not in registry:
             print(
                 f"{C.TERM_YELLOW}[Skipped] No registered object under prefix `{prefix}`{C.TERM_RESET}"
@@ -215,6 +219,27 @@ def _roll_out_prefixes(files: list[FileInfo], generator: Generator) -> int:
             for block in _new_blocks(file.syntax, head.lineno_start, f"object/{info.type_key}")
         ]
     return failed
+
+
+def _remove_unregistered_blocks(file: FileInfo, prefix: str, registered: list[str]) -> None:
+    """Drop each ``object/`` block directly under ``prefix`` whose type is not ``registered``."""
+    kept: list[CodeBlock] = []
+    for code in file.code_blocks:
+        if (
+            code.kind == "object"
+            and isinstance(code.param, str)
+            and code.param.rpartition(".")[0] == prefix
+            and code.param not in registered
+        ):
+            print(
+                f'{C.TERM_YELLOW}[Removed] File "{file.path}": `object/{code.param}` '
+                f"(line {code.lineno_start}): the type is no longer registered{C.TERM_RESET}"
+            )
+            if kept and kept[-1].kind is None and kept[-1].lines == [""]:
+                kept.pop()  # the blank line the roll-out put before it
+            continue
+        kept.append(code)
+    file.code_blocks[:] = kept
 
 
 def _new_blocks(syntax: C.MarkerSyntax, lineno: int, stub: str) -> list[CodeBlock]:
@@ -323,8 +348,13 @@ def _stage_3(  # noqa: PLR0912
     generator: Generator,
     declared: Container[str] = frozenset(),
 ) -> bool:
-    """Process one file's blocks; return whether its content is (or would be) changed."""
+    """Process one file's blocks; return whether its content is (or would be) changed.
+
+    An ``object/`` block whose type is no longer registered is left as is; once the rest
+    of the file is processed, they are reported together as an error.
+    """
     defined_funcs: set[str] = set()
+    unregistered: list[str] = []
     defined_types: set[str] = set()
     imports = generator.new_imports()
     # Stage 1. Hand the one-line directives the pipeline does not consume itself to the generator.
@@ -349,6 +379,9 @@ def _stage_3(  # noqa: PLR0912
         if code.kind == "object":
             type_key = code.param
             assert isinstance(type_key, str)
+            if _object_type_key_to_index(type_key) is None:
+                unregistered.append(f"`object/{type_key}` (line {code.lineno_start})")
+                continue
             obj_info = object_info_from_type_key(type_key)
             type_key = ty_map.get(type_key, type_key)
             defined_types.add(generator.canonical_type_name(type_key))
@@ -369,7 +402,12 @@ def _stage_3(  # noqa: PLR0912
         if code.kind == "export":
             generator.generate_export_block(code)
     # Finalize: write back to file
-    return file.update(verbose=opt.verbose, dry_run=opt.dry_run)
+    changed = file.update(verbose=opt.verbose, dry_run=opt.dry_run)
+    if unregistered:
+        raise ValueError(
+            f"{', '.join(unregistered)}: the type is no longer registered; delete the block"
+        )
+    return changed
 
 
 def _parse_args() -> Options:

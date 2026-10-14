@@ -75,7 +75,8 @@ directly under it gets an `object/<type_key>` block in this file on the next
 run, and a `skip` line (`// tvm-ffi-stubgen(skip): rust_stubgen.Internal`)
 leaves one out. Add a second object to `int_pair.cc` and rebuild, and its block
 appears after `IntPair`; delete a block and it comes back, so dropping a binding
-means writing `skip`. Code outside the blocks is never touched.
+means writing `skip`. Remove the object from the C++ side and its block is
+removed on the next run. Code outside the blocks is never touched.
 
 Nothing requires a `generated/` directory: the blocks can live in any `.rs`
 file the command line points at. This example keeps them under
@@ -143,4 +144,7 @@ references a module that does not exist.
    ```
 
 4. In CI, run the same command with `--check`. It writes nothing and exits with
-   status 1 when a block is out of date (2 when a file fails to process).
+   status 1 when a block is out of date (2 when a file fails to process). A
+   block whose type is no longer registered, outside a `prefix` file's own
+   namespace, fails its file; every such block of the file is listed with its
+   line.

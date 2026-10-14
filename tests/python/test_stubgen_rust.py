@@ -1554,3 +1554,59 @@ def test_prefix_survives_init(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
         "sys.argv", ["tvm-ffi-stubgen", "--target", "rust", "--check", str(tmp_path)]
     )
     assert stub_cli.__main__() == 0
+
+
+# ---------------------------------------------------------------------------
+# Blocks whose type is no longer registered
+# ---------------------------------------------------------------------------
+
+
+def test_prefix_removes_blocks_of_unregistered_types(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    src = tmp_path / "testing.rs"
+    gone = f"{C.RUST_SYNTAX.begin} object/testing.NoLongerRegistered"
+    src.write_text(
+        "\n".join(
+            [f"{C.RUST_SYNTAX.directive('prefix')} testing", "", gone, C.RUST_SYNTAX.end, ""]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("sys.argv", ["tvm-ffi-stubgen", "--target", "rust", str(tmp_path)])
+    assert stub_cli.__main__() == 0
+    out = capsys.readouterr().out
+    assert "[Removed]" in out and "`object/testing.NoLongerRegistered` (line 3)" in out
+    text = src.read_text(encoding="utf-8")
+    assert "NoLongerRegistered" not in text
+    assert "pub struct TestCxxClassBaseObj {" in text  # the rest of the namespace is rolled out
+    monkeypatch.setattr(
+        "sys.argv", ["tvm-ffi-stubgen", "--target", "rust", "--check", str(tmp_path)]
+    )
+    assert stub_cli.__main__() == 0
+
+
+def test_explicit_blocks_of_unregistered_types_are_reported_together(tmp_path: Path) -> None:
+    src = tmp_path / "mod.rs"
+    blocks = [
+        f"{C.RUST_SYNTAX.begin} import-section",
+        C.RUST_SYNTAX.end,
+        f"{C.RUST_SYNTAX.begin} object/demo.Gone",
+        C.RUST_SYNTAX.end,
+        f"{C.RUST_SYNTAX.begin} object/testing.TestCxxClassBase",
+        C.RUST_SYNTAX.end,
+        f"{C.RUST_SYNTAX.begin} object/demo.AlsoGone",
+        C.RUST_SYNTAX.end,
+        "",
+    ]
+    src.write_text("\n".join(blocks), encoding="utf-8")
+    info = FileInfo.from_file(src)
+    assert info is not None
+    expected = (
+        r"`object/demo\.Gone` \(line 3\), `object/demo\.AlsoGone` \(line 7\): "
+        r"the type is no longer registered"
+    )
+    with pytest.raises(ValueError, match=expected):
+        _stage_3(info, Options(), RUST.default_ty_map(), {}, RUST, ALL_DECLARED)
+    text = src.read_text(encoding="utf-8")
+    assert "pub struct TestCxxClassBaseObj {" in text  # the other blocks are still written
+    assert f"{C.RUST_SYNTAX.begin} object/demo.Gone\n{C.RUST_SYNTAX.end}" in text
