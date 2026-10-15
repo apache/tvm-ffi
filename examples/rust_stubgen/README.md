@@ -120,9 +120,10 @@ and `upcast` adds a conversion to a hand-written typed view
 ## Partial generation
 
 Every type an object refers to (its parent, its ancestors, the types of its
-fields) has to be provided in the same `tvm-ffi-stubgen` run: the `ffi.*` types
-the `tvm-ffi` crate binds come from it, an `object/<key>` block in any processed
-file generates it, and a `ty-map` points at a hand-written binding whose object
+fields) has to be provided in the same `tvm-ffi-stubgen` run: `ffi.*` types
+come from the `tvm-ffi` crate (a field of an `ffi.*` type the crate does not
+bind is read as `Any`), an `object/<key>` block in any processed file
+generates it, and a `ty-map` points at a hand-written binding whose object
 struct is named `<Name>Obj`
 (`// tvm-ffi-stubgen(ty-map): rust_stubgen.IntPair -> crate::hand::IntPair`).
 Anything else is an error listing the missing keys, so a partial binding never

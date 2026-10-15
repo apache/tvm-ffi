@@ -992,6 +992,7 @@ def test_registry_big_int_fields_are_mirrored(big_int_holder: ObjectInfo) -> Non
         _field("x", TypeSchema("Optional", (TypeSchema("int"),)), 24, 8),  # not the 16-byte cell
         _field("x", TypeSchema("Union", (TypeSchema("int"), TypeSchema("str"))), 24, 16),
         _field("x", "ctypes.c_void_p", 24, 8),
+        _field("x", "ffi.VisitInterrupt", 24, 8),
     ],
 )
 def test_unrenderable_field_keeps_the_type_opaque(field: NamedTypeSchema) -> None:
@@ -1432,15 +1433,17 @@ def test_stage_3_checks_dependencies_across_the_run(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_ffi_field_type_needs_a_crate_binding() -> None:
+def test_ffi_field_type_off_the_default_ty_map_reads_as_any() -> None:
     """Of the `ffi.*` keys, only those on the default `ty-map` name a type the crate binds."""
     text, imports = _render(_info("demo.Doc", (_field("path", "ffi.reflection.AccessPath"),)))
     assert "    pub fn path(&self) -> Result<AccessPath> {" in text
     assert "tvm_ffi::reflection::AccessPath" in _uses(imports)
-    info = _info("demo.Doc", (_field("interrupt", "ffi.VisitInterrupt"),))
-    expected = r"depends on `ffi\.VisitInterrupt`.*the crate does not bind it"
-    with pytest.raises(ValueError, match=expected):
-        _render(info)
+    text, imports = _render(_info("demo.Doc", (_field("interrupt", "ffi.VisitInterrupt"),)))
+    assert (
+        "    pub fn interrupt(&self) -> Result<Any> {\n"
+        '        FieldGetter::new(Self::type_index(), "interrupt")?.get_any(self)\n'
+    ) in text
+    assert not any("VisitInterrupt" in path for path in _uses(imports))
 
 
 def test_parent_with_the_objects_own_name_is_spelled_in_full() -> None:

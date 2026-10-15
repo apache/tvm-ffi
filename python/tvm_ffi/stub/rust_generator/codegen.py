@@ -28,18 +28,18 @@ the verdict of :mod:`tvm_ffi.stub.layout`:
 - *opaque*: the struct embeds only its parent, and each field is read through
   the C ABI getter. Nothing allocates it.
 
-A field without a Rust mirror (``Optional<Any>``, ``Union``, ``void*``, ...)
-makes the type opaque and is read as ``Any``; an ``opaque`` directive vetoes a
-reproducible layout; a scalar width named by a directive is checked against the
-reflected field size. A builtin parent (``ffi.IntEnum``, say) has no
+A field without a Rust mirror (``Optional<Any>``, ``Union``, ``void*``, an
+``ffi.*`` type the default ``ty-map`` does not list, ...) makes the type opaque
+and is read as ``Any``; an ``opaque`` directive vetoes a reproducible layout; a
+scalar width named by a directive is checked against the reflected field size.
+A builtin parent (``ffi.IntEnum``, say) has no
 ``<Leaf>Obj`` in the crate: the import section defines a header-only stand-in
 per builtin ancestor so ``derive(Object)`` computes the registry's
 ``TYPE_DEPTH``, and everything under such a parent stays opaque (``no-mirror``).
 
 Every type key an object refers to (parent, ancestors, field types) must be
-provided in the same run: ``ffi.*`` by the crate (as a field type, only the keys
-the default ``ty-map`` lists), a ``ty-map`` by a hand-written binding whose
-object struct is ``<Name>Obj``, anything else by an ``object/``
+provided in the same run: ``ffi.*`` by the crate, a ``ty-map`` by a hand-written
+binding whose object struct is ``<Name>Obj``, anything else by an ``object/``
 block in one of the processed files. Otherwise the block is an error naming the
 missing keys, so a partial binding never references a module that does not exist.
 """
@@ -152,7 +152,7 @@ class _ObjectRenderer:
             if "." not in origin or origin.startswith("ctypes."):
                 return None
             if self._provider(origin) == "crate":  # a key nobody provides is recorded
-                self.missing.add(origin)  # an `ffi.*` key off the default `ty-map`: no crate type
+                return None  # an `ffi.*` key off the default `ty-map`: no crate type, read as `Any`
             return imports.record(self._generated_type_path(origin))
         return self._record_mapped(key, mapped, imports)
 
@@ -627,8 +627,7 @@ def generate_rust_object(
         keys = ", ".join(f"`{key}`" for key in sorted(renderer.missing))
         raise ValueError(
             f"`{obj_info.type_key}` (line {code.lineno_start}) depends on {keys}, which this run "
-            "does not ask for: add an `object/<key>` block or a `ty-map` directive for each "
-            "(an `ffi.*` key takes a `ty-map`: the crate does not bind it)"
+            "does not ask for: add an `object/<key>` block or a `ty-map` directive for each"
         )
     indent = " " * code.indent
     code.lines = [
