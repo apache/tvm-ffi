@@ -27,3 +27,10 @@ to run JIT-compilation.
 ```bash
 pip install torch-c-dlpack-ext
 ```
+
+## Release ref selection
+
+The manually triggered `.github\workflows\torch_c_dlpack.yml` release workflow uses
+the required `branch` input to select the branch or tag to build. All wheel and
+source build jobs check out that ref from the repository where the workflow runs,
+not a hardcoded upstream repository or `main` branch.
