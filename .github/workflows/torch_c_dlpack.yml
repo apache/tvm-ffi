@@ -21,8 +21,9 @@ on:
   workflow_dispatch:
     inputs:
       branch:
-        description: "Branch or tag to publish (manual run)"
+        description: "Branch or tag to build"
         required: true
+        type: string
 
 jobs:
   build_wheels_linux:
@@ -37,8 +38,7 @@ jobs:
         if: ${{ matrix.arch == 'x86_64'}}
       - uses: actions/checkout@v5
         with:
-          repository: apache/tvm-ffi
-          ref: main
+          ref: ${{ inputs.branch }}
           fetch-depth: 0
           submodules: recursive
           path: tvm-ffi
@@ -76,8 +76,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          repository: apache/tvm-ffi
-          ref: main
+          ref: ${{ inputs.branch }}
           fetch-depth: 0
           submodules: recursive
           path: tvm-ffi
@@ -104,8 +103,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          repository: apache/tvm-ffi
-          ref: main
+          ref: ${{ inputs.branch }}
           fetch-depth: 0
           submodules: recursive
           path: tvm-ffi
@@ -123,8 +121,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          repository: apache/tvm-ffi
-          ref: main
+          ref: ${{ inputs.branch }}
           fetch-depth: 0
           submodules: recursive
           path: tvm-ffi
