@@ -59,7 +59,9 @@ impl<State, Outer: MutContextPolicy<State>, Inner: MutContextPolicy<State>> MutC
         ctx: &mut MutateContext<'_, State>,
     ) -> Result<UnchangedOr<Any>> {
         let kind = ctx.def_region_kind();
+        let mutator = ctx.active_mutator()?;
         mutate_with_policy(
+            mutator,
             &mut NextPolicy {
                 driver: &mut *ctx.driver,
                 policy: &self.1,
@@ -74,18 +76,21 @@ impl<State, Outer: MutContextPolicy<State>, Inner: MutContextPolicy<State>> MutC
 
 #[inline(always)]
 pub(super) fn mutate_with_policy<State>(
+    mutator: StructuralMutatorHandle,
     driver: &mut dyn MutateContextDriver<State>,
     policy: &impl MutContextPolicy<State>,
     value: MutateValue<'_>,
     kind: DefRegionKind,
 ) -> Result<Any> {
     let raw = value.value.raw();
-    with_mutation_region(
+    with_mutator_def_region(
+        mutator,
         kind,
         #[inline(always)]
         |kind| {
             let mut ctx = MutateContext {
                 driver,
+                mutator,
                 def_region_kind: kind,
                 inplace_mode: value.inplace_mode(),
                 _not_send_sync: PhantomData,
@@ -104,36 +109,74 @@ struct NextPolicy<'a, State, Policy> {
 impl<State, Policy: MutContextPolicy<State>> MutateContextDriver<State>
     for NextPolicy<'_, State, Policy>
 {
+    #[inline]
     fn state(&self) -> &State {
         self.driver.state()
     }
+    #[inline]
     fn state_mut(&mut self) -> &mut State {
         self.driver.state_mut()
     }
-    fn mutate_borrowed(&mut self, value: AnyView<'_>, kind: DefRegionKind) -> Result<Any> {
-        self.driver.mutate_borrowed(value, kind)
+    #[inline]
+    fn mutate_borrowed(
+        &mut self,
+        mutator: StructuralMutatorHandle,
+        value: AnyView<'_>,
+        kind: DefRegionKind,
+    ) -> Result<Any> {
+        self.driver.mutate_borrowed(mutator, value, kind)
     }
-    fn mutate_owned(&mut self, value: Any, kind: DefRegionKind, mode: InplaceMode) -> Result<Any> {
-        self.driver.mutate_owned(value, kind, mode)
+    #[inline]
+    fn mutate_owned(
+        &mut self,
+        mutator: StructuralMutatorHandle,
+        value: Any,
+        kind: DefRegionKind,
+        mode: InplaceMode,
+    ) -> Result<Any> {
+        self.driver.mutate_owned(mutator, value, kind, mode)
     }
-    fn default_mutate_borrowed(&mut self, value: AnyView<'_>, kind: DefRegionKind) -> Result<Any> {
+    fn default_mutate_borrowed(
+        &mut self,
+        mutator: StructuralMutatorHandle,
+        value: AnyView<'_>,
+        kind: DefRegionKind,
+    ) -> Result<Any> {
         let view = StructuralView::from_raw(*value.as_raw_ffi_any());
-        mutate_with_policy(self.driver, self.policy, MutateValue::borrowed(&view), kind)
+        mutate_with_policy(
+            mutator,
+            self.driver,
+            self.policy,
+            MutateValue::new_at(mutator, &view, InplaceMode::Disallow),
+            kind,
+        )
     }
     fn default_mutate_value(
         &mut self,
+        mutator: StructuralMutatorHandle,
         mut value: MutateValue<'_>,
         kind: DefRegionKind,
         mode: InplaceMode,
     ) -> Result<Any> {
         value.mode = value.permit(mode).inplace_mode(value.value.raw());
-        mutate_with_policy(self.driver, self.policy, value, kind)
+        mutate_with_policy(mutator, self.driver, self.policy, value, kind)
     }
-    fn var_remap_get(&mut self, var: &StructuralView) -> Result<Option<Any>> {
-        self.driver.var_remap_get(var)
+    #[inline]
+    fn var_remap_get(
+        &mut self,
+        mutator: StructuralMutatorHandle,
+        var: &StructuralView,
+    ) -> Result<Option<Any>> {
+        self.driver.var_remap_get(mutator, var)
     }
-    fn var_remap_set(&mut self, var: &StructuralView, replacement: &Any) -> Result<()> {
-        self.driver.var_remap_set(var, replacement)
+    #[inline]
+    fn var_remap_set(
+        &mut self,
+        mutator: StructuralMutatorHandle,
+        var: &StructuralView,
+        replacement: &Any,
+    ) -> Result<()> {
+        self.driver.var_remap_set(mutator, var, replacement)
     }
 }
 
@@ -144,39 +187,82 @@ pub(super) struct MutationDescent<'a, Driver> {
 impl<State, Driver: MutationDriver + MutateCallbackState<State>> MutateContextDriver<State>
     for MutationDescent<'_, Driver>
 {
+    #[inline]
     fn state(&self) -> &State {
         self.driver.callback_state()
     }
+    #[inline]
     fn state_mut(&mut self) -> &mut State {
         self.driver.callback_state_mut()
     }
-    fn mutate_borrowed(&mut self, value: AnyView<'_>, kind: DefRegionKind) -> Result<Any> {
+    #[inline]
+    fn mutate_borrowed(
+        &mut self,
+        mutator: StructuralMutatorHandle,
+        value: AnyView<'_>,
+        kind: DefRegionKind,
+    ) -> Result<Any> {
         self.driver
-            .dispatch_raw(*value.as_raw_ffi_any(), kind, Permit::Copy)
+            .dispatch_raw(mutator, *value.as_raw_ffi_any(), kind, Permit::Copy)
     }
-    fn mutate_owned(&mut self, value: Any, kind: DefRegionKind, mode: InplaceMode) -> Result<Any> {
+    #[inline]
+    fn mutate_owned(
+        &mut self,
+        mutator: StructuralMutatorHandle,
+        value: Any,
+        kind: DefRegionKind,
+        mode: InplaceMode,
+    ) -> Result<Any> {
         let raw = *value.as_raw_ffi_any();
-        let result = self.driver.dispatch_raw(raw, kind, mode.permit())?;
+        let result = self
+            .driver
+            .dispatch_raw(mutator, raw, kind, mode.permit())?;
         Ok(if is_unchanged(&result) { value } else { result })
     }
-    fn default_mutate_borrowed(&mut self, value: AnyView<'_>, kind: DefRegionKind) -> Result<Any> {
+    #[inline]
+    fn default_mutate_borrowed(
+        &mut self,
+        mutator: StructuralMutatorHandle,
+        value: AnyView<'_>,
+        kind: DefRegionKind,
+    ) -> Result<Any> {
         // The policy context has already installed this definition region.
-        default_mutate_driver(self.driver, *value.as_raw_ffi_any(), kind, Permit::Copy)
+        default_mutate_driver(
+            mutator,
+            self.driver,
+            *value.as_raw_ffi_any(),
+            kind,
+            Permit::Copy,
+        )
     }
+    #[inline]
     fn default_mutate_value(
         &mut self,
+        mutator: StructuralMutatorHandle,
         value: MutateValue<'_>,
         kind: DefRegionKind,
         mode: InplaceMode,
     ) -> Result<Any> {
         let permit = value.permit(mode);
-        default_mutate_driver(self.driver, value.value.raw(), kind, permit)
+        default_mutate_driver(mutator, self.driver, value.value.raw(), kind, permit)
     }
-    fn var_remap_get(&mut self, var: &StructuralView) -> Result<Option<Any>> {
-        self.driver.var_remap_get_raw(var.raw())
+    #[inline]
+    fn var_remap_get(
+        &mut self,
+        mutator: StructuralMutatorHandle,
+        var: &StructuralView,
+    ) -> Result<Option<Any>> {
+        self.driver.var_remap_get_raw(mutator, var.raw())
     }
-    fn var_remap_set(&mut self, var: &StructuralView, replacement: &Any) -> Result<()> {
-        self.driver.var_remap_set_raw(var.raw(), replacement)
+    #[inline]
+    fn var_remap_set(
+        &mut self,
+        mutator: StructuralMutatorHandle,
+        var: &StructuralView,
+        replacement: &Any,
+    ) -> Result<()> {
+        self.driver
+            .var_remap_set_raw(mutator, var.raw(), replacement)
     }
 }
 

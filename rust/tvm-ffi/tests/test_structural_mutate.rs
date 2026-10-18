@@ -2500,3 +2500,106 @@ fn mutation_policy_halts_restore_state_and_skip_later_policies() {
         assert_eq!(mutator.state().depth, 0);
     }
 }
+
+#[test]
+fn native_dense_map_mutation_copies_once_and_reuses_unique_storage() {
+    // More than 4 entries forces the dense (block + iteration list) layout.
+    let source: Map<i64, i64> = (0..40).map(|i| (i, i * 10)).collect();
+    let source_pointer = map_pointer(&source);
+    let mapped = structural_map(source.clone(), &mut IncrementIntegers, WalkOrder::PostOrder)
+        .and_then(Map::<i64, i64>::try_from)
+        .unwrap();
+    assert_ne!(map_pointer(&mapped), source_pointer);
+    assert_eq!(mapped.len(), 40);
+    for i in 0..40 {
+        assert_eq!(source.get(&i).unwrap(), Some(i * 10));
+        assert_eq!(mapped.get(&i).unwrap(), Some(i * 10 + 1));
+    }
+    assert_eq!(
+        mapped.keys().collect::<Vec<_>>(),
+        source.keys().collect::<Vec<_>>()
+    );
+
+    let unique: Map<i64, i64> = (0..40).map(|i| (i, i * 10)).collect();
+    let unique_pointer = map_pointer(&unique);
+    let mutated = structural_map(unique, &mut IncrementIntegers, WalkOrder::PostOrder)
+        .and_then(Map::<i64, i64>::try_from)
+        .unwrap();
+    assert_eq!(map_pointer(&mutated), unique_pointer);
+    for i in 0..40 {
+        assert_eq!(mutated.get(&i).unwrap(), Some(i * 10 + 1));
+    }
+
+    let mut args = Vec::new();
+    for i in 0..40i64 {
+        args.push(Any::from(i));
+        args.push(Any::from(i * 10));
+    }
+    let dict = call_global("ffi.Dict", &args);
+    let dict_pointer = any_object_pointer(&dict);
+    let mapped_dict =
+        structural_map(dict.clone(), &mut IncrementIntegers, WalkOrder::PostOrder).unwrap();
+    assert_ne!(any_object_pointer(&mapped_dict), dict_pointer);
+    assert_eq!(dict_item(&dict, 17), 170);
+    assert_eq!(dict_item(&mapped_dict, 17), 171);
+    let mutated_dict = structural_map(dict, &mut IncrementIntegers, WalkOrder::PostOrder).unwrap();
+    assert_eq!(any_object_pointer(&mutated_dict), dict_pointer);
+    assert_eq!(dict_item(&mutated_dict, 17), 171);
+    assert_eq!(dict_item(&mutated_dict, 39), 391);
+}
+
+#[test]
+fn native_sequence_mutation_reuses_unique_lists_and_nested_arrays() {
+    let list = call_global(
+        "ffi.List",
+        &[Any::from(1i64), Any::from(2i64), Any::from(3i64)],
+    );
+    let list_pointer = any_object_pointer(&list);
+    let mutated = structural_map(list, &mut IncrementIntegers, WalkOrder::PostOrder).unwrap();
+    assert_eq!(any_object_pointer(&mutated), list_pointer);
+    assert_eq!(
+        (0..3).map(|i| list_item(&mutated, i)).collect::<Vec<_>>(),
+        vec![2, 3, 4]
+    );
+
+    let inner = Array::new(vec![1i64, 2]);
+    let inner_pointer = array_pointer(&inner);
+    let outer = Array::new(vec![inner]);
+    let outer_pointer = array_pointer(&outer);
+    let mapped = structural_map(outer, &mut IncrementIntegers, WalkOrder::PostOrder)
+        .and_then(Array::<Array<i64>>::try_from)
+        .unwrap();
+    assert_eq!(array_pointer(&mapped), outer_pointer);
+    let mapped_inner = mapped.get(0).unwrap();
+    assert_eq!(array_pointer(&mapped_inner), inner_pointer);
+    assert_eq!(mapped_inner.iter().collect::<Vec<_>>(), vec![2, 3]);
+
+    // A shared array copies at the first changed element and keeps the
+    // unchanged prefix by identity.
+    let leaf = Array::new(vec![7i64]);
+    let leaf_pointer = array_pointer(&leaf);
+    let shared = Array::new(vec![leaf.clone(), Array::new(vec![1i64])]);
+    let shared_pointer = array_pointer(&shared);
+    let mapped = structural_map(
+        shared.clone(),
+        |value: i64| Any::from(if value == 1 { 100 } else { value }),
+        WalkOrder::PostOrder,
+    )
+    .and_then(Array::<Array<i64>>::try_from)
+    .unwrap();
+    assert_ne!(array_pointer(&mapped), shared_pointer);
+    assert_eq!(array_pointer(&mapped.get(0).unwrap()), leaf_pointer);
+    assert_eq!(mapped.get(1).unwrap().iter().collect::<Vec<_>>(), vec![100]);
+    assert_eq!(shared.get(1).unwrap().iter().collect::<Vec<_>>(), vec![1]);
+
+    let error = match structural_map(
+        Array::new(vec![1i64]),
+        |_: i64| -> Result<i64> { Err(Error::new(RUNTIME_ERROR, "array mapper failed", "")) },
+        WalkOrder::PostOrder,
+    ) {
+        Ok(_) => panic!("fallible array mapper unexpectedly succeeded"),
+        Err(error) => error,
+    };
+    assert_eq!(error.message(), "array mapper failed");
+    assert!(error.backtrace().contains("object `ffi.Array`"));
+}

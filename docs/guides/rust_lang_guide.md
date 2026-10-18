@@ -436,8 +436,10 @@ method.
 Use `#[dispatch(visit, policy = MyPolicy)]` to apply a `ContextPolicy<Self>`
 to default recursion.
 
-Two safety notes: mutable `List`/`Dict` contents are snapshotted before
-callbacks run, so mutation during traversal cannot invalidate the walk; and
+Two safety notes: the built-in containers are traversed natively by the Rust
+engine with the semantics of their C++ hooks, reading mutable `List`/`Dict`
+contents live, so a callback must not restructure the container it is being
+visited from (the same contract as the C++ engine); and
 a non-container type with a foreign `__s_visit__` hook is rejected rather
 than silently walked through reflection — visit such a type's children
 explicitly from a `StructuralVisitor`, or skip it with a pre-order

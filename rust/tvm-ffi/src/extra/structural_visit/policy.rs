@@ -64,10 +64,13 @@ impl<State, Outer: ContextPolicy<State>, Inner: ContextPolicy<State>> ContextPol
         visitor: &mut VisitContext<'_, State>,
     ) -> Result<Option<VisitInterrupt>> {
         let kind = visitor.def_region_kind();
+        let handle = visitor.active_visitor()?;
         visit_with_policy(
+            handle,
             &mut NextPolicy {
                 driver: &mut *visitor.driver,
                 policy: &self.1,
+                handle,
             },
             &self.0,
             value,
@@ -78,12 +81,14 @@ impl<State, Outer: ContextPolicy<State>, Inner: ContextPolicy<State>> ContextPol
 
 #[inline(always)]
 pub(super) fn visit_with_policy<State>(
+    handle: StructuralVisitorHandle,
     driver: &mut dyn VisitContextDriver<State>,
     policy: &impl ContextPolicy<State>,
     value: &StructuralView,
     def_region_kind: DefRegionKind,
 ) -> Result<Option<VisitInterrupt>> {
-    with_visit_region(
+    with_visitor_def_region(
+        handle,
         def_region_kind,
         #[inline(always)]
         |def_region_kind| {
@@ -91,6 +96,7 @@ pub(super) fn visit_with_policy<State>(
                 value,
                 &mut VisitContext {
                     driver,
+                    visitor: handle,
                     current: StructuralView::from_raw(value.raw()),
                     def_region_kind,
                     _not_send_sync: PhantomData,
@@ -103,26 +109,32 @@ pub(super) fn visit_with_policy<State>(
 struct NextPolicy<'a, State, Policy> {
     driver: &'a mut dyn VisitContextDriver<State>,
     policy: &'a Policy,
+    handle: StructuralVisitorHandle,
 }
 
 impl<State, Policy: ContextPolicy<State>> VisitContextDriver<State>
     for NextPolicy<'_, State, Policy>
 {
+    #[inline]
     fn state(&self) -> &State {
         self.driver.state()
     }
+    #[inline]
     fn state_mut(&mut self) -> &mut State {
         self.driver.state_mut()
     }
+    #[inline]
     fn visit_raw(&mut self, raw: TVMFFIAny, kind: DefRegionKind) -> Result<Option<VisitInterrupt>> {
         self.driver.visit_raw(raw, kind)
     }
+    #[inline]
     fn visit_children_raw(
         &mut self,
         raw: TVMFFIAny,
         kind: DefRegionKind,
     ) -> Result<Option<VisitInterrupt>> {
         visit_with_policy(
+            self.handle,
             self.driver,
             self.policy,
             &StructuralView::from_raw(raw),
@@ -138,14 +150,26 @@ pub(super) struct VisitDescent<'a, V> {
 impl<State, V: StructuralVisitor + VisitCallbackState<State>> VisitContextDriver<State>
     for VisitDescent<'_, V>
 {
+    #[inline]
     fn state(&self) -> &State {
         self.visitor.callback_state()
     }
+    #[inline]
     fn state_mut(&mut self) -> &mut State {
         self.visitor.callback_state_mut()
     }
     fn visit_raw(&mut self, raw: TVMFFIAny, kind: DefRegionKind) -> Result<Option<VisitInterrupt>> {
-        VisitContextDriver::visit_raw(self.visitor, raw, kind)
+        if raw.type_index == TVMFFITypeIndex::kTVMFFINone as i32 {
+            return Ok(None);
+        }
+        // Caller and callee are both Rust with a known visitor type: visit
+        // directly instead of crossing the C-ABI vtable.
+        let active = active_structural_visitor()?;
+        let context = std::ptr::from_mut(&mut *self.visitor).cast::<c_void>();
+        checked_visitor_context(active, context)?;
+        finish(with_visitor_def_region(active, kind, |kind| {
+            user_visit_raw(self.visitor, &StructuralView::from_raw(raw), kind)
+        }))
     }
     fn visit_children_raw(
         &mut self,
@@ -224,15 +248,26 @@ impl<Walker: WalkDispatch, Policy: ContextPolicy<Walker>> NativeVisit
             .unwrap_or_else(|| Ok(WalkResult::Advance))
     }
 
+    #[inline]
     fn default_visit_children<const PRE_ORDER: bool>(
         &mut self,
+        visitor: ActiveVisitor,
         value: &StructuralView,
         kind: DefRegionKind,
     ) -> Result<Option<VisitInterrupt>> {
-        let policy = Rc::clone(&self.policy);
+        let handle = visitor.0;
+        let policy: *const Policy = Rc::as_ptr(&self.policy);
+        // SAFETY: the policy lives in its own `Rc` allocation that `self`
+        // owns for the whole walk and never mutates, so the `&mut self`
+        // reborrow below does not alias it. Borrowing through the pointer
+        // avoids a refcount round trip per node.
         visit_with_policy(
-            &mut WalkDescent::<_, _, PRE_ORDER> { visitor: self },
-            &*policy,
+            handle,
+            &mut WalkDescent::<_, _, PRE_ORDER> {
+                visitor: self,
+                handle,
+            },
+            unsafe { &*policy },
             value,
             kind,
         )
@@ -241,32 +276,44 @@ impl<Walker: WalkDispatch, Policy: ContextPolicy<Walker>> NativeVisit
 
 struct WalkDescent<'a, Walker, Policy, const PRE_ORDER: bool> {
     visitor: &'a mut WalkWithContextPolicy<Walker, Policy>,
+    handle: StructuralVisitorHandle,
 }
 
 impl<Walker: WalkDispatch, Policy: ContextPolicy<Walker>, const PRE_ORDER: bool>
     VisitContextDriver<Walker> for WalkDescent<'_, Walker, Policy, PRE_ORDER>
 {
+    #[inline]
     fn state(&self) -> &Walker {
         &self.visitor.walker
     }
+    #[inline]
     fn state_mut(&mut self) -> &mut Walker {
         &mut self.visitor.walker
     }
+    #[inline]
     fn visit_raw(&mut self, raw: TVMFFIAny, kind: DefRegionKind) -> Result<Option<VisitInterrupt>> {
         if raw.type_index == TVMFFITypeIndex::kTVMFFINone as i32 {
             return Ok(None);
         }
-        let active = active_structural_visitor()?;
-        let context = std::ptr::from_mut(&mut *self.visitor).cast::<c_void>();
-        finish(with_current_visitor_context(active, context, || {
-            call_visitor(active, raw, kind)
+        // Caller and callee are both Rust with a known visitor type: recurse
+        // directly instead of crossing the C-ABI vtable. The ABI visitor's
+        // region is still kept in sync for hooks reached deeper down.
+        let handle = self.handle;
+        finish(with_visitor_def_region(handle, kind, |kind| {
+            visit_raw::<_, PRE_ORDER>(handle, raw, self.visitor, kind)
         }))
     }
+    #[inline]
     fn visit_children_raw(
         &mut self,
         raw: TVMFFIAny,
         kind: DefRegionKind,
     ) -> Result<Option<VisitInterrupt>> {
-        default_walk_children::<_, PRE_ORDER>(self.visitor, &StructuralView::from_raw(raw), kind)
+        default_walk_children::<_, PRE_ORDER>(
+            self.handle,
+            self.visitor,
+            &StructuralView::from_raw(raw),
+            kind,
+        )
     }
 }

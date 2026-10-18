@@ -22,9 +22,7 @@ use crate::error::Error;
 use crate::function::Function;
 use crate::object::{self, ObjectCore, ObjectRefCore};
 use crate::reflection::FieldGetter;
-use crate::tvm_ffi_sys::{
-    TVMFFIAny, TVMFFIByteArray, TVMFFIGetTypeInfo, TVMFFITypeIndex, TVMFFITypeKeyToIndex,
-};
+use crate::tvm_ffi_sys::{TVMFFIAny, TVMFFIByteArray, TVMFFITypeIndex, TVMFFITypeKeyToIndex};
 
 /// Add one structural traversal frame to an error's backtrace.
 pub(crate) fn with_structural_error_context(error: Error, operation: &str, frame: &str) -> Error {
@@ -274,7 +272,7 @@ fn is_instance_at_depth(object_type_index: i32, base_type_index: i32, base_depth
         return false;
     }
     unsafe {
-        let info = TVMFFIGetTypeInfo(object_type_index);
+        let info = object::type_info(object_type_index);
         if info.is_null() {
             return false;
         }

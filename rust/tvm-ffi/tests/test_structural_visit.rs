@@ -678,7 +678,13 @@ fn policies_preserve_reflected_pattern_before_default_descent() {
     assert!(structural_visit(&root, &mut visitor).unwrap().is_none());
     assert_eq!(
         visitor.0,
-        vec![(1, Simple), (2, Pattern), (99, Pattern), (3, Use), (100, Use)]
+        vec![
+            (1, Simple),
+            (2, Pattern),
+            (99, Pattern),
+            (3, Use),
+            (100, Use)
+        ]
     );
     for requested in [Use, Simple] {
         for order in [WalkOrder::PreOrder, WalkOrder::PostOrder] {
@@ -2059,4 +2065,49 @@ fn callback_visit_panics_resume_and_leave_the_next_run_usable() {
         .is_none()
     );
     assert_eq!(calls.get(), 1);
+}
+
+#[test]
+fn native_container_descent_keeps_runtime_order() {
+    // More than 4 entries forces the dense (block + iteration list) layout.
+    let map: Map<i64, i64> = (0..40).map(|i| (i * 3, i * 5 + 1)).collect();
+    let expected: Vec<i64> = map.values().collect();
+    let mut seen = Vec::new();
+    assert!(structural_walk(
+        &map,
+        |value: &StructuralView| {
+            if let Some(integer) = value.cast::<i64>() {
+                seen.push(integer);
+            }
+            WalkResult::Advance
+        },
+        WalkOrder::PreOrder,
+    )
+    .unwrap()
+    .is_none());
+    assert_eq!(seen, expected);
+
+    let items: Vec<i64> = (0..100).collect();
+    let array = Array::new(items.clone());
+    let views: Vec<tvm_ffi::AnyView<'_>> = items.iter().map(tvm_ffi::AnyView::from).collect();
+    let list = Function::get_global("ffi.List")
+        .unwrap()
+        .call_packed(&views)
+        .unwrap();
+    for (name, root) in [("array", tvm_ffi::Any::from(array)), ("list", list)] {
+        let mut seen = Vec::new();
+        assert!(structural_walk(
+            &root,
+            |value: &StructuralView| {
+                if let Some(integer) = value.cast::<i64>() {
+                    seen.push(integer);
+                }
+                WalkResult::Advance
+            },
+            WalkOrder::PostOrder,
+        )
+        .unwrap()
+        .is_none());
+        assert_eq!(seen, items, "{name}");
+    }
 }
