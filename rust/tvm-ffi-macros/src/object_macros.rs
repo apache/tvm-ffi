@@ -103,12 +103,25 @@ pub fn derive_object(input: proc_macro::TokenStream) -> TokenStream {
                 }
             }
         }
+        // The resolved index is cached in a plain atomic rather than a
+        // `LazyLock`: a type test is one relaxed load and a compare, with no
+        // `Once` state machine on the hot path. Resolution is idempotent, so a
+        // race between two first calls stores the same value twice. Object
+        // indices are never 0.
         None if type_register => {
             quote! {
                 #[inline]
                 fn type_index() -> i32 {
-                    static TYPE_INDEX: std::sync::LazyLock<i32> = std::sync::LazyLock::new(||
-                        unsafe {
+                    static TYPE_INDEX: std::sync::atomic::AtomicI32 =
+                        std::sync::atomic::AtomicI32::new(0);
+                    let cached = TYPE_INDEX.load(std::sync::atomic::Ordering::Relaxed);
+                    if cached != 0 {
+                        return cached;
+                    }
+                    #[cold]
+                    #[inline(never)]
+                    fn resolve() -> i32 {
+                        let tindex = unsafe {
                             // The parent first, since registering it takes the
                             // same lock.
                             let parent =
@@ -133,9 +146,11 @@ pub fn derive_object(input: proc_macro::TokenStream) -> TokenStream {
                                 );
                             }
                             tindex
-                        }
-                    );
-                    *TYPE_INDEX
+                        };
+                        TYPE_INDEX.store(tindex, std::sync::atomic::Ordering::Relaxed);
+                        tindex
+                    }
+                    resolve()
                 }
             }
         }
@@ -143,8 +158,16 @@ pub fn derive_object(input: proc_macro::TokenStream) -> TokenStream {
             quote! {
                 #[inline]
                 fn type_index() -> i32 {
-                    static TYPE_INDEX: std::sync::LazyLock<i32> = std::sync::LazyLock::new(||
-                        unsafe {
+                    static TYPE_INDEX: std::sync::atomic::AtomicI32 =
+                        std::sync::atomic::AtomicI32::new(0);
+                    let cached = TYPE_INDEX.load(std::sync::atomic::Ordering::Relaxed);
+                    if cached != 0 {
+                        return cached;
+                    }
+                    #[cold]
+                    #[inline(never)]
+                    fn resolve() -> i32 {
+                        let tindex = unsafe {
                             let type_key_arg =
                                  #tvm_ffi_crate::tvm_ffi_sys::TVMFFIByteArray::from_str(#type_key);
                             let mut tindex = 0;
@@ -159,9 +182,11 @@ pub fn derive_object(input: proc_macro::TokenStream) -> TokenStream {
                                 );
                             }
                             tindex
-                        }
-                    );
-                    *TYPE_INDEX
+                        };
+                        TYPE_INDEX.store(tindex, std::sync::atomic::Ordering::Relaxed);
+                        tindex
+                    }
+                    resolve()
                 }
             }
         }
