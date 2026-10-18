@@ -898,6 +898,7 @@ impl<State, D: MutateDriver<State> + ?Sized> MutateContext<'_, State, D> {
     /// The mode can restrict, but cannot upgrade, the handle's permission.
     /// Retained owning aliases force copying; temporary handles can be dropped
     /// before this call to preserve reuse of the current value.
+    #[inline]
     pub fn default_mutate_with_mode<T>(
         &mut self,
         value: MutateValue<'_, T>,
@@ -911,6 +912,7 @@ impl<State, D: MutateDriver<State> + ?Sized> MutateContext<'_, State, D> {
     }
 
     /// Consume the callback value for default descent, preserving `Unchanged`.
+    #[inline]
     pub fn default_mutate_with_mode_result<T>(
         &mut self,
         value: MutateValue<'_, T>,
@@ -2094,7 +2096,10 @@ impl<D: MutateDispatch> StructuralMutator for D {
     }
 }
 
+// Thin: inlined into the generated `on_default_mutate` so a policy node costs
+// one frame between the dispatch chain and `default_mutate_driver`.
 #[doc(hidden)]
+#[inline(always)]
 pub fn default_mutate_with_policy<D: MutateDispatch + MutateCallbackState<D>>(
     dispatch: &mut D,
     policy: &impl MutContextPolicy<D>,
@@ -3821,25 +3826,34 @@ fn with_mutator_def_region<T>(
 ) -> T {
     unsafe {
         let previous = (*mutator).def_region_mode;
-        // Precedence: a pattern region propagates; entering any kind inside it has no effect.
-        let effective = if previous == DefRegionKind::Pattern as i32 {
-            DefRegionKind::Pattern
+        // Most children keep their parent's region: nothing to write or
+        // restore then. A pattern region propagates likewise: entering any
+        // kind inside it has no effect.
+        let (effective, entered) = if previous == kind as i32 {
+            (kind, false)
+        } else if previous == DefRegionKind::Pattern as i32 {
+            (DefRegionKind::Pattern, false)
         } else {
             (*mutator).def_region_mode = kind as i32;
-            kind
+            (kind, true)
         };
         struct Restore {
             mutator: StructuralMutatorHandle,
             previous: i32,
+            entered: bool,
         }
         impl Drop for Restore {
             fn drop(&mut self) {
-                if self.previous != DefRegionKind::Pattern as i32 {
+                if self.entered {
                     unsafe { (*self.mutator).def_region_mode = self.previous };
                 }
             }
         }
-        let _restore = Restore { mutator, previous };
+        let _restore = Restore {
+            mutator,
+            previous,
+            entered,
+        };
         // One call site keeps the continuation visible to the inliner.
         callback(effective)
     }

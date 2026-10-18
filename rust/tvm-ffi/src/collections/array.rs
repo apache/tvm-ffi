@@ -23,6 +23,7 @@ use std::ops::Deref;
 use crate::any::TryFromTemp;
 use crate::collections::list::seq_cells;
 use crate::derive::Object;
+use crate::extra::StructuralView;
 use crate::object::{Object, ObjectArc};
 use crate::type_traits::ContainerElement;
 use crate::{Any, AnyCompatible, AnyView, ObjectCoreWithExtraItems, ObjectRefCore};
@@ -163,6 +164,43 @@ impl<T: ContainerElement + Clone> Array<T> {
             index: 0,
             len: self.len(),
         }
+    }
+
+    /// The elements as borrowed structural values.
+    ///
+    /// Unlike [`Self::iter`], this neither copies nor retains an element: a
+    /// structural hook or callback can pass each view straight back into the
+    /// engine, and read a node through [`StructuralView::as_node`] or take one
+    /// out with [`StructuralView::cast`] only where it needs it.
+    pub fn element_views(&self) -> &[StructuralView] {
+        let container = self.as_container();
+        // SAFETY: the buffer holds `size` initialized `TVMFFIAny` cells and
+        // `StructuralView` is transparent over `TVMFFIAny`. The slice borrows
+        // the array, which keeps the cells alive and unchanged.
+        unsafe { std::slice::from_raw_parts(container.data as *const StructuralView, self.len()) }
+    }
+
+    /// Replace the element at `index` in place when this handle is the only
+    /// one to the array, like C++ `Array::Set` on an array whose
+    /// `CopyOnWrite()` needs no copy. A shared array is left untouched and
+    /// `Ok(false)` tells the caller to build a new one instead.
+    pub fn set_if_unique(&mut self, index: usize, value: T) -> Result<bool, crate::Error> {
+        if index >= self.len() {
+            crate::bail!(crate::error::INDEX_ERROR, "Array set index out of bound");
+        }
+        if ObjectArc::strong_count(&self.data) != 1 {
+            return Ok(false);
+        }
+        // SAFETY: this handle is the sole owner, so nothing else reads the
+        // cell while it is replaced; the index was checked above.
+        unsafe {
+            let cell = (self.as_container().data as *mut TVMFFIAny).add(index);
+            let mut raw = TVMFFIAny::new();
+            T::container_move_to_any(value, &mut raw);
+            let previous = core::ptr::replace(cell, raw);
+            drop(crate::any::Any::from_raw_ffi_any(previous));
+        }
+        Ok(true)
     }
 
     #[inline]

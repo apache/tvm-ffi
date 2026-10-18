@@ -169,3 +169,42 @@ fn test_array_parametric_heterogeneity() {
         &[1, 2, 3]
     );
 }
+
+#[test]
+fn test_array_element_views_and_unique_set() {
+    let mut array = Array::new(vec![1i64, 2, 3]);
+    let values: Vec<i64> = array
+        .element_views()
+        .iter()
+        .map(|view| view.cast::<i64>().unwrap())
+        .collect();
+    assert_eq!(values, vec![1, 2, 3]);
+
+    // A unique array is updated in place; a shared one is left alone.
+    assert!(array.set_if_unique(1, 20).unwrap());
+    assert_eq!(array.iter().collect::<Vec<_>>(), vec![1, 20, 3]);
+    assert!(array.set_if_unique(3, 0).is_err());
+    let shared = array.clone();
+    assert!(!array.set_if_unique(0, 10).unwrap());
+    assert_eq!(shared.iter().collect::<Vec<_>>(), vec![1, 20, 3]);
+    drop(shared);
+    assert!(array.set_if_unique(0, 10).unwrap());
+    assert_eq!(array.iter().collect::<Vec<_>>(), vec![10, 20, 3]);
+
+    // Views borrow object elements without retaining them; `cast` retains.
+    let inner = Array::new(vec![7i64]);
+    let outer = Array::new(vec![inner.clone()]);
+    let before = ObjectArc::strong_count(Array::data(&inner));
+    let views = outer.element_views();
+    assert_eq!(views.len(), 1);
+    assert_eq!(ObjectArc::strong_count(Array::data(&inner)), before);
+    let taken = views[0].cast::<Array<i64>>().unwrap();
+    assert_eq!(ObjectArc::strong_count(Array::data(&inner)), before + 1);
+    assert_eq!(taken.get(0).unwrap(), 7);
+    drop(taken);
+    // Replacing an object element drops the old one.
+    let mut outer = outer;
+    assert!(outer.set_if_unique(0, Array::new(vec![8i64])).unwrap());
+    assert_eq!(ObjectArc::strong_count(Array::data(&inner)), before - 1);
+    assert_eq!(outer.get(0).unwrap().get(0).unwrap(), 8);
+}

@@ -2165,6 +2165,9 @@ fn with_visitor_def_region<T>(
     kind: DefRegionKind,
     callback: impl FnOnce(DefRegionKind) -> T,
 ) -> T {
+    // The walk side enters this scope once per node; an equal-kind fast path
+    // measured as a wash here (the flag it needs costs what the store saves),
+    // unlike on the mutate side, which enters it three times per node.
     unsafe {
         let previous = (*visitor).def_region_mode;
         let effective = if previous == DefRegionKind::Pattern as i32 {

@@ -763,6 +763,14 @@ the reference and assign. A hook owns identity remapping for its type, as the
 C++ hooks do: use `var_remap_get` at a variable use and `var_remap_set` at its
 definition.
 
+A hook that walks an `Array` field element by element should use
+`Array::element_views`, which borrows the elements as `StructuralView`s
+without retaining them, and pass each view to `visit` or `mutate`; `iter`
+would clone every element. On an in-place node, `Array::set_if_unique` writes
+a replacement into an array that nothing else holds, the way the C++ hooks
+write their slots, and reports `false` when the array is shared and must be
+rebuilt.
+
 ## Examples
 
 The repository includes a complete example in `rust/tvm-ffi/examples/load_library.rs`.
