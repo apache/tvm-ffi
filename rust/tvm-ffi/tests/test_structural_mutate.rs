@@ -1300,10 +1300,10 @@ fn generated_mutate_dispatch_can_default_recurse_from_a_typed_handler() {
 fn pre_order_mapping_preserves_inplace_permission() {
     struct Observe<'a>(&'a Cell<Option<InplaceMode>>);
     impl<State> MutContextPolicy<State> for Observe<'_> {
-        fn default_mutate(
+        fn default_mutate<D: tvm_ffi::MutateDriver<State> + ?Sized>(
             &self,
             value: MutateValue<'_>,
-            ctx: &mut tvm_ffi::MutateContext<'_, State>,
+            ctx: &mut tvm_ffi::MutateContext<'_, State, D>,
         ) -> Result<UnchangedOr<Any>> {
             if value.type_index() >= TypeIndex::kTVMFFIStaticObjectBegin as i32 {
                 self.0.set(Some(value.inplace_mode()));
@@ -1995,10 +1995,10 @@ impl PolicyState {
 
 struct ArrayPolicy;
 impl MutContextPolicy<PolicyState> for ArrayPolicy {
-    fn default_mutate(
+    fn default_mutate<D: tvm_ffi::MutateDriver<PolicyState> + ?Sized>(
         &self,
         value: MutateValue<'_>,
-        ctx: &mut MutateContext<'_, PolicyState>,
+        ctx: &mut MutateContext<'_, PolicyState, D>,
     ) -> Result<UnchangedOr<Any>> {
         if value
             .as_node::<tvm_ffi::collections::array::ArrayObj>()
@@ -2018,10 +2018,10 @@ impl MutContextPolicy<PolicyState> for ArrayPolicy {
 }
 struct RecordPolicy;
 impl MutContextPolicy<PolicyState> for RecordPolicy {
-    fn default_mutate(
+    fn default_mutate<D: tvm_ffi::MutateDriver<PolicyState> + ?Sized>(
         &self,
         value: MutateValue<'_>,
-        ctx: &mut MutateContext<'_, PolicyState>,
+        ctx: &mut MutateContext<'_, PolicyState, D>,
     ) -> Result<UnchangedOr<Any>> {
         if value
             .as_node::<tvm_ffi::collections::array::ArrayObj>()
@@ -2130,10 +2130,10 @@ fn mutation_policies_share_state_and_preserve_callback_order() {
 fn map_policy_entries_preserve_descent_and_callback_composition() {
     struct Stop;
     impl<State> MutContextPolicy<State> for Stop {
-        fn default_mutate(
+        fn default_mutate<D: tvm_ffi::MutateDriver<State> + ?Sized>(
             &self,
             _: MutateValue<'_>,
-            _: &mut MutateContext<'_, State>,
+            _: &mut MutateContext<'_, State, D>,
         ) -> Result<UnchangedOr<Any>> {
             Ok(UnchangedOr::unchanged())
         }
@@ -2191,10 +2191,10 @@ fn mutation_policy_continuations_preserve_ownership_and_markers() {
         retain: bool,
     }
     impl MutContextPolicy<Ownership> for Control {
-        fn default_mutate(
+        fn default_mutate<D: tvm_ffi::MutateDriver<Ownership> + ?Sized>(
             &self,
             value: MutateValue<'_>,
-            ctx: &mut MutateContext<'_, Ownership>,
+            ctx: &mut MutateContext<'_, Ownership, D>,
         ) -> Result<UnchangedOr<Any>> {
             let array = value
                 .as_node::<tvm_ffi::collections::array::ArrayObj>()
@@ -2315,10 +2315,10 @@ fn mutation_policy_regions_retargeting_and_error_restore() {
     }
     struct Redirect(DefRegionKind);
     impl MutContextPolicy<Regions> for Redirect {
-        fn default_mutate(
+        fn default_mutate<D: tvm_ffi::MutateDriver<Regions> + ?Sized>(
             &self,
             value: MutateValue<'_>,
-            ctx: &mut MutateContext<'_, Regions>,
+            ctx: &mut MutateContext<'_, Regions, D>,
         ) -> Result<UnchangedOr<Any>> {
             if value.cast::<bool>() == Some(false) {
                 // Bypass this container's callback, but enter the next policy and redispatch its children.
@@ -2342,10 +2342,10 @@ fn mutation_policy_regions_retargeting_and_error_restore() {
     }
     struct Observe;
     impl MutContextPolicy<Regions> for Observe {
-        fn default_mutate(
+        fn default_mutate<D: tvm_ffi::MutateDriver<Regions> + ?Sized>(
             &self,
             value: MutateValue<'_>,
-            ctx: &mut MutateContext<'_, Regions>,
+            ctx: &mut MutateContext<'_, Regions, D>,
         ) -> Result<UnchangedOr<Any>> {
             if value
                 .as_node::<tvm_ffi::collections::array::ArrayObj>()
@@ -2457,10 +2457,10 @@ fn mutation_policy_regions_retargeting_and_error_restore() {
 fn mutation_policy_halts_restore_state_and_skip_later_policies() {
     struct Halt(bool);
     impl MutContextPolicy<PolicyState> for Halt {
-        fn default_mutate(
+        fn default_mutate<D: tvm_ffi::MutateDriver<PolicyState> + ?Sized>(
             &self,
             _: MutateValue<'_>,
-            _: &mut MutateContext<'_, PolicyState>,
+            _: &mut MutateContext<'_, PolicyState, D>,
         ) -> Result<UnchangedOr<Any>> {
             if self.0 {
                 Err(Error::new(RUNTIME_ERROR, "stop descent", ""))
@@ -2602,4 +2602,48 @@ fn native_sequence_mutation_reuses_unique_lists_and_nested_arrays() {
     };
     assert_eq!(error.message(), "array mapper failed");
     assert!(error.backtrace().contains("object `ffi.Array`"));
+}
+
+/// An extension trait on the context, written once for every driver, the
+/// shape pass code uses for typed re-entry helpers.
+trait MapElements {
+    fn map_elements(&mut self, array: &Array<Any>) -> Result<Array<Any>>;
+}
+
+impl<S, D: tvm_ffi::MutateDriver<S> + ?Sized> MapElements for MutateContext<'_, S, D> {
+    fn map_elements(&mut self, array: &Array<Any>) -> Result<Array<Any>> {
+        let items = array
+            .iter()
+            .map(|item| self.mutate(&item))
+            .collect::<Result<Vec<Any>>>()?;
+        Ok(Array::new(items))
+    }
+}
+
+struct ViaExtension;
+
+impl MutContextPolicy<IncrementIntegers> for ViaExtension {
+    fn default_mutate<D: tvm_ffi::MutateDriver<IncrementIntegers> + ?Sized>(
+        &self,
+        value: MutateValue<'_>,
+        ctx: &mut MutateContext<'_, IncrementIntegers, D>,
+    ) -> Result<UnchangedOr<Any>> {
+        match value.cast::<Array<Any>>() {
+            Some(array) => Ok(UnchangedOr::changed(Any::from(ctx.map_elements(&array)?))),
+            None => ctx.default_maybe_inplace_mutate_result(value),
+        }
+    }
+}
+
+#[test]
+fn mutate_policy_helpers_are_generic_over_the_driver() {
+    let mut mapper = MapWithContextPolicy::new(IncrementIntegers, ViaExtension);
+    let mapped = structural_map(
+        Array::new(vec![1i64, 2, 3]),
+        &mut mapper,
+        WalkOrder::PostOrder,
+    )
+    .and_then(Array::<i64>::try_from)
+    .unwrap();
+    assert_eq!(mapped.iter().collect::<Vec<_>>(), vec![2, 3, 4]);
 }

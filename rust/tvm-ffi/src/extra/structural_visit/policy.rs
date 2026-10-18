@@ -35,10 +35,14 @@ pub trait ContextPolicy<State> {
     /// returning an interrupt or error. Walk invokes this between its pre- and
     /// post-order callback positions; visit invokes it only on callback miss
     /// or when a matched callback requests default descent.
-    fn default_visit(
+    ///
+    /// The context is generic over the engine's [`VisitDriver`] so that its
+    /// recursive calls dispatch statically; implementations only name `D` as
+    /// a bound.
+    fn default_visit<D: VisitDriver<State> + ?Sized>(
         &self,
         value: &StructuralView,
-        visitor: &mut VisitContext<'_, State>,
+        visitor: &mut VisitContext<'_, State, D>,
     ) -> Result<Option<VisitInterrupt>>;
 }
 
@@ -46,10 +50,11 @@ pub trait ContextPolicy<State> {
 pub struct DefaultContextPolicy;
 
 impl<State> ContextPolicy<State> for DefaultContextPolicy {
-    fn default_visit(
+    #[inline]
+    fn default_visit<D: VisitDriver<State> + ?Sized>(
         &self,
         _value: &StructuralView,
-        visitor: &mut VisitContext<'_, State>,
+        visitor: &mut VisitContext<'_, State, D>,
     ) -> Result<Option<VisitInterrupt>> {
         visitor.visit_children()
     }
@@ -58,10 +63,11 @@ impl<State> ContextPolicy<State> for DefaultContextPolicy {
 impl<State, Outer: ContextPolicy<State>, Inner: ContextPolicy<State>> ContextPolicy<State>
     for (Outer, Inner)
 {
-    fn default_visit(
+    #[inline]
+    fn default_visit<D: VisitDriver<State> + ?Sized>(
         &self,
         value: &StructuralView,
-        visitor: &mut VisitContext<'_, State>,
+        visitor: &mut VisitContext<'_, State, D>,
     ) -> Result<Option<VisitInterrupt>> {
         let kind = visitor.def_region_kind();
         let handle = visitor.active_visitor()?;
@@ -71,6 +77,7 @@ impl<State, Outer: ContextPolicy<State>, Inner: ContextPolicy<State>> ContextPol
                 driver: &mut *visitor.driver,
                 policy: &self.1,
                 handle,
+                _state: PhantomData,
             },
             &self.0,
             value,
@@ -80,9 +87,9 @@ impl<State, Outer: ContextPolicy<State>, Inner: ContextPolicy<State>> ContextPol
 }
 
 #[inline(always)]
-pub(super) fn visit_with_policy<State>(
+pub(super) fn visit_with_policy<State, D: VisitDriver<State> + ?Sized>(
     handle: StructuralVisitorHandle,
-    driver: &mut dyn VisitContextDriver<State>,
+    driver: &mut D,
     policy: &impl ContextPolicy<State>,
     value: &StructuralView,
     def_region_kind: DefRegionKind,
@@ -99,6 +106,7 @@ pub(super) fn visit_with_policy<State>(
                     visitor: handle,
                     current: StructuralView::from_raw(value.raw()),
                     def_region_kind,
+                    _state: PhantomData,
                     _not_send_sync: PhantomData,
                 },
             )
@@ -106,14 +114,20 @@ pub(super) fn visit_with_policy<State>(
     )
 }
 
-struct NextPolicy<'a, State, Policy> {
-    driver: &'a mut dyn VisitContextDriver<State>,
+struct NextPolicy<'a, State, Policy, D: ?Sized> {
+    driver: &'a mut D,
     policy: &'a Policy,
     handle: StructuralVisitorHandle,
+    _state: PhantomData<fn() -> State>,
 }
 
-impl<State, Policy: ContextPolicy<State>> VisitContextDriver<State>
-    for NextPolicy<'_, State, Policy>
+impl<State, Policy: ContextPolicy<State>, D: VisitDriver<State> + ?Sized>
+    visit_driver_sealed::Sealed<State> for NextPolicy<'_, State, Policy, D>
+{
+}
+
+impl<State, Policy: ContextPolicy<State>, D: VisitDriver<State> + ?Sized> VisitDriver<State>
+    for NextPolicy<'_, State, Policy, D>
 {
     #[inline]
     fn state(&self) -> &State {
@@ -147,7 +161,12 @@ pub(super) struct VisitDescent<'a, V> {
     pub(super) visitor: &'a mut V,
 }
 
-impl<State, V: StructuralVisitor + VisitCallbackState<State>> VisitContextDriver<State>
+impl<State, V: StructuralVisitor + VisitCallbackState<State>> visit_driver_sealed::Sealed<State>
+    for VisitDescent<'_, V>
+{
+}
+
+impl<State, V: StructuralVisitor + VisitCallbackState<State>> VisitDriver<State>
     for VisitDescent<'_, V>
 {
     #[inline]
@@ -280,7 +299,12 @@ struct WalkDescent<'a, Walker, Policy, const PRE_ORDER: bool> {
 }
 
 impl<Walker: WalkDispatch, Policy: ContextPolicy<Walker>, const PRE_ORDER: bool>
-    VisitContextDriver<Walker> for WalkDescent<'_, Walker, Policy, PRE_ORDER>
+    visit_driver_sealed::Sealed<Walker> for WalkDescent<'_, Walker, Policy, PRE_ORDER>
+{
+}
+
+impl<Walker: WalkDispatch, Policy: ContextPolicy<Walker>, const PRE_ORDER: bool> VisitDriver<Walker>
+    for WalkDescent<'_, Walker, Policy, PRE_ORDER>
 {
     #[inline]
     fn state(&self) -> &Walker {

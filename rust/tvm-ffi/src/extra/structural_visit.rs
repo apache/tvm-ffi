@@ -225,25 +225,42 @@ pub use policy::{ContextPolicy, DefaultContextPolicy, WalkWithContextPolicy};
 ///
 /// A matched callback owns traversal of its value. Recursive operations
 /// reborrow the visitor, so mutable state cannot remain borrowed across them.
-pub struct VisitContext<'a, State> {
-    driver: &'a mut dyn VisitContextDriver<State>,
+///
+/// `D` is the engine's recursion driver (see [`VisitDriver`]). A policy is
+/// generic over it, so its recursive calls are direct; closure callbacks
+/// receive the type-erased default, `VisitContext<'_, State>`.
+pub struct VisitContext<'a, State, D: ?Sized = dyn VisitDriver<State> + 'a> {
+    driver: &'a mut D,
     // The runtime visitor of this traversal. Null when the context was built
     // on a handle-less `StructuralVisitor` entry; the active visitor is then
     // resolved through thread-local state on demand.
     visitor: StructuralVisitorHandle,
     current: StructuralView,
     def_region_kind: DefRegionKind,
+    _state: PhantomData<fn() -> State>,
     _not_send_sync: PhantomData<Rc<()>>,
 }
 
-trait VisitContextDriver<State> {
+/// Recursion driver behind a [`VisitContext`]: the engine layer that the
+/// context's `visit`, `visit_children` and state accessors forward to.
+///
+/// [`ContextPolicy`] is generic over the driver so those forwards are direct
+/// calls into the engine's descent type rather than virtual calls. The trait
+/// is sealed: the engines implement it for their descent types and for every
+/// [`StructuralVisitor`] that carries callback state. A policy only ever
+/// names it as a bound, `D: VisitDriver<State> + ?Sized`.
+pub trait VisitDriver<State>: visit_driver_sealed::Sealed<State> {
+    #[doc(hidden)]
     fn state(&self) -> &State;
+    #[doc(hidden)]
     fn state_mut(&mut self) -> &mut State;
+    #[doc(hidden)]
     fn visit_raw(
         &mut self,
         raw: TVMFFIAny,
         def_region_kind: DefRegionKind,
     ) -> Result<Option<VisitInterrupt>>;
+    #[doc(hidden)]
     fn visit_children_raw(
         &mut self,
         raw: TVMFFIAny,
@@ -251,7 +268,11 @@ trait VisitContextDriver<State> {
     ) -> Result<Option<VisitInterrupt>>;
 }
 
-impl<State> VisitContext<'_, State> {
+mod visit_driver_sealed {
+    pub trait Sealed<State> {}
+}
+
+impl<State, D: VisitDriver<State> + ?Sized> VisitContext<'_, State, D> {
     /// User state shared by every callback in this traversal.
     pub fn state(&self) -> &State {
         self.driver.state()
@@ -1058,7 +1079,7 @@ pub fn default_visit_with_policy<V: StructuralVisitor + VisitCallbackState<V>>(
 }
 
 fn try_visit_callbacks<State, Link, Marker>(
-    driver: &mut impl VisitContextDriver<State>,
+    driver: &mut impl VisitDriver<State>,
     callback_ptr: *const Link,
     value: &StructuralView,
     def_region_kind: DefRegionKind,
@@ -1066,11 +1087,13 @@ fn try_visit_callbacks<State, Link, Marker>(
 where
     Link: VisitChainLink<State, Marker>,
 {
-    let mut visitor = VisitContext {
-        driver,
+    // Closure callbacks take the type-erased context.
+    let mut visitor: VisitContext<'_, State> = VisitContext {
+        driver: driver as &mut dyn VisitDriver<State>,
         visitor: std::ptr::null_mut(),
         current: StructuralView::from_raw(value.raw()),
         def_region_kind,
+        _state: PhantomData,
         _not_send_sync: PhantomData,
     };
     // SAFETY: The owning `Rc` or the direct callback's stack slot remains live
@@ -1131,7 +1154,12 @@ where
     }
 }
 
-impl<State, Driver> VisitContextDriver<State> for Driver
+impl<State, Driver> visit_driver_sealed::Sealed<State> for Driver where
+    Driver: StructuralVisitor + VisitCallbackState<State>
+{
+}
+
+impl<State, Driver> VisitDriver<State> for Driver
 where
     Driver: StructuralVisitor + VisitCallbackState<State>,
 {
@@ -1701,10 +1729,8 @@ unsafe fn rust_vtable_visit_impl(
     let outcome = catch_unwind(AssertUnwindSafe(
         #[inline(always)]
         || {
-            let result = def_region_from_raw((*visitor).def_region_mode)
-                .map_err(NativeHalt::Error)
-                .and_then(|kind| callback(context, raw, kind));
-            native_result_into_raw(result)
+            let kind = def_region_from_raw((*visitor).def_region_mode);
+            native_result_into_raw(callback(context, raw, kind))
         },
     ));
     match outcome {
@@ -2058,13 +2084,20 @@ fn with_visitor_def_region<T>(
     }
 }
 
+/// Read the definition region stored in the ABI visitor.
+///
+/// Only this engine and the C++ engine write that field, and both store a
+/// valid kind; debug builds verify it, release builds convert directly.
 #[inline(always)]
-fn def_region_from_raw(kind: i32) -> Result<DefRegionKind> {
+fn def_region_from_raw(kind: i32) -> DefRegionKind {
+    debug_assert!(
+        (DefRegionKind::None as i32..=DefRegionKind::Simple as i32).contains(&kind),
+        "invalid structural definition-region kind {kind}"
+    );
     match kind {
-        x if x == DefRegionKind::None as i32 => Ok(DefRegionKind::None),
-        x if x == DefRegionKind::Pattern as i32 => Ok(DefRegionKind::Pattern),
-        x if x == DefRegionKind::Simple as i32 => Ok(DefRegionKind::Simple),
-        _ => Err(runtime_error("invalid structural definition-region kind")),
+        x if x == DefRegionKind::Pattern as i32 => DefRegionKind::Pattern,
+        x if x == DefRegionKind::Simple as i32 => DefRegionKind::Simple,
+        _ => DefRegionKind::None,
     }
 }
 

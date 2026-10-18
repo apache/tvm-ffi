@@ -30,10 +30,14 @@ use super::*;
 /// [`MutateContext::with_def_region_kind`] for scoped definition regions.
 pub trait MutContextPolicy<State> {
     /// Customize default descent, preserving the input permission and result marker.
-    fn default_mutate(
+    ///
+    /// The context is generic over the engine's [`MutateDriver`] so that its
+    /// recursive calls dispatch statically; implementations only name `D` as
+    /// a bound.
+    fn default_mutate<D: MutateDriver<State> + ?Sized>(
         &self,
         value: MutateValue<'_>,
-        ctx: &mut MutateContext<'_, State>,
+        ctx: &mut MutateContext<'_, State, D>,
     ) -> Result<UnchangedOr<Any>>;
 }
 
@@ -41,10 +45,11 @@ pub trait MutContextPolicy<State> {
 pub struct DefaultMutContextPolicy;
 
 impl<State> MutContextPolicy<State> for DefaultMutContextPolicy {
-    fn default_mutate(
+    #[inline]
+    fn default_mutate<D: MutateDriver<State> + ?Sized>(
         &self,
         value: MutateValue<'_>,
-        ctx: &mut MutateContext<'_, State>,
+        ctx: &mut MutateContext<'_, State, D>,
     ) -> Result<UnchangedOr<Any>> {
         ctx.default_maybe_inplace_mutate_result(value)
     }
@@ -53,10 +58,11 @@ impl<State> MutContextPolicy<State> for DefaultMutContextPolicy {
 impl<State, Outer: MutContextPolicy<State>, Inner: MutContextPolicy<State>> MutContextPolicy<State>
     for (Outer, Inner)
 {
-    fn default_mutate(
+    #[inline]
+    fn default_mutate<D: MutateDriver<State> + ?Sized>(
         &self,
         value: MutateValue<'_>,
-        ctx: &mut MutateContext<'_, State>,
+        ctx: &mut MutateContext<'_, State, D>,
     ) -> Result<UnchangedOr<Any>> {
         let kind = ctx.def_region_kind();
         let mutator = ctx.active_mutator()?;
@@ -65,6 +71,7 @@ impl<State, Outer: MutContextPolicy<State>, Inner: MutContextPolicy<State>> MutC
             &mut NextPolicy {
                 driver: &mut *ctx.driver,
                 policy: &self.1,
+                _state: PhantomData,
             },
             &self.0,
             value,
@@ -75,9 +82,9 @@ impl<State, Outer: MutContextPolicy<State>, Inner: MutContextPolicy<State>> MutC
 }
 
 #[inline(always)]
-pub(super) fn mutate_with_policy<State>(
+pub(super) fn mutate_with_policy<State, D: MutateDriver<State> + ?Sized>(
     mutator: StructuralMutatorHandle,
-    driver: &mut dyn MutateContextDriver<State>,
+    driver: &mut D,
     policy: &impl MutContextPolicy<State>,
     value: MutateValue<'_>,
     kind: DefRegionKind,
@@ -93,6 +100,7 @@ pub(super) fn mutate_with_policy<State>(
                 mutator,
                 def_region_kind: kind,
                 inplace_mode: value.inplace_mode(),
+                _state: PhantomData,
                 _not_send_sync: PhantomData,
             };
             policy.default_mutate(value, &mut ctx).map(Any::from)
@@ -101,13 +109,19 @@ pub(super) fn mutate_with_policy<State>(
     .map_err(|error| with_value_context(error, raw))
 }
 
-struct NextPolicy<'a, State, Policy> {
-    driver: &'a mut dyn MutateContextDriver<State>,
+struct NextPolicy<'a, State, Policy, D: ?Sized> {
+    driver: &'a mut D,
     policy: &'a Policy,
+    _state: PhantomData<fn() -> State>,
 }
 
-impl<State, Policy: MutContextPolicy<State>> MutateContextDriver<State>
-    for NextPolicy<'_, State, Policy>
+impl<State, Policy: MutContextPolicy<State>, D: MutateDriver<State> + ?Sized>
+    mutate_driver_sealed::Sealed<State> for NextPolicy<'_, State, Policy, D>
+{
+}
+
+impl<State, Policy: MutContextPolicy<State>, D: MutateDriver<State> + ?Sized> MutateDriver<State>
+    for NextPolicy<'_, State, Policy, D>
 {
     #[inline]
     fn state(&self) -> &State {
@@ -184,7 +198,12 @@ pub(super) struct MutationDescent<'a, Driver> {
     pub(super) driver: &'a mut Driver,
 }
 
-impl<State, Driver: MutationDriver + MutateCallbackState<State>> MutateContextDriver<State>
+impl<State, Driver: MutationDriver + MutateCallbackState<State>> mutate_driver_sealed::Sealed<State>
+    for MutationDescent<'_, Driver>
+{
+}
+
+impl<State, Driver: MutationDriver + MutateCallbackState<State>> MutateDriver<State>
     for MutationDescent<'_, Driver>
 {
     #[inline]

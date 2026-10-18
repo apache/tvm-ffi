@@ -51,10 +51,10 @@ fn composed_policies_share_array_scope_with_visit_and_walk_callbacks() {
     struct ArrayScope;
 
     impl ContextPolicy<CollectIntegers> for ArrayScope {
-        fn default_visit(
+        fn default_visit<D: tvm_ffi::VisitDriver<CollectIntegers> + ?Sized>(
             &self,
             value: &StructuralView,
-            visitor: &mut VisitContext<'_, CollectIntegers>,
+            visitor: &mut VisitContext<'_, CollectIntegers, D>,
         ) -> Result<Option<VisitInterrupt>> {
             if value.cast::<Array<Any>>().is_none() {
                 return visitor.visit_children();
@@ -76,10 +76,10 @@ fn composed_policies_share_array_scope_with_visit_and_walk_callbacks() {
     struct RecordDescent;
 
     impl ContextPolicy<CollectIntegers> for RecordDescent {
-        fn default_visit(
+        fn default_visit<D: tvm_ffi::VisitDriver<CollectIntegers> + ?Sized>(
             &self,
             _value: &StructuralView,
-            visitor: &mut VisitContext<'_, CollectIntegers>,
+            visitor: &mut VisitContext<'_, CollectIntegers, D>,
         ) -> Result<Option<VisitInterrupt>> {
             let state = visitor.state_mut();
             state.descent_depths.push(state.depth);
@@ -188,10 +188,10 @@ fn policy_continuation_scopes_regions_and_restores_after_halts() {
     }
     struct Scope(DefRegionKind, i64);
     impl ContextPolicy<Probe> for Scope {
-        fn default_visit(
+        fn default_visit<D: tvm_ffi::VisitDriver<Probe> + ?Sized>(
             &self,
             value: &StructuralView,
-            ctx: &mut VisitContext<'_, Probe>,
+            ctx: &mut VisitContext<'_, Probe, D>,
         ) -> Result<Option<VisitInterrupt>> {
             let Some(array) = value.cast::<Array<i64>>() else {
                 return ctx.visit_children();
@@ -332,10 +332,10 @@ fn policy_continuation_retargets_without_dispatching_the_container() {
 
     struct Redirect;
     impl ContextPolicy<Probe> for Redirect {
-        fn default_visit(
+        fn default_visit<D: tvm_ffi::VisitDriver<Probe> + ?Sized>(
             &self,
             value: &StructuralView,
-            ctx: &mut VisitContext<'_, Probe>,
+            ctx: &mut VisitContext<'_, Probe, D>,
         ) -> Result<Option<VisitInterrupt>> {
             let Some(array) = value.cast::<Array<Any>>() else {
                 return ctx.visit_children();
@@ -359,10 +359,10 @@ fn policy_continuation_retargets_without_dispatching_the_container() {
 
     struct Observe;
     impl ContextPolicy<Probe> for Observe {
-        fn default_visit(
+        fn default_visit<D: tvm_ffi::VisitDriver<Probe> + ?Sized>(
             &self,
             value: &StructuralView,
-            ctx: &mut VisitContext<'_, Probe>,
+            ctx: &mut VisitContext<'_, Probe, D>,
         ) -> Result<Option<VisitInterrupt>> {
             if let Some(array) = value.cast::<Array<Any>>() {
                 assert_eq!(ctx.current().cast::<Array<Any>>().unwrap().len(), 1);
@@ -484,10 +484,10 @@ fn policy_halts_skip_remaining_policies_and_restore_outer_state() {
     }
     struct Scope;
     impl ContextPolicy<Probe> for Scope {
-        fn default_visit(
+        fn default_visit<D: tvm_ffi::VisitDriver<Probe> + ?Sized>(
             &self,
             value: &StructuralView,
-            ctx: &mut VisitContext<'_, Probe>,
+            ctx: &mut VisitContext<'_, Probe, D>,
         ) -> Result<Option<VisitInterrupt>> {
             ctx.state_mut().events.push("enter");
             ctx.state_mut().depth += 1;
@@ -500,10 +500,10 @@ fn policy_halts_skip_remaining_policies_and_restore_outer_state() {
     }
     struct Stop(bool);
     impl ContextPolicy<Probe> for Stop {
-        fn default_visit(
+        fn default_visit<D: tvm_ffi::VisitDriver<Probe> + ?Sized>(
             &self,
             _: &StructuralView,
-            ctx: &mut VisitContext<'_, Probe>,
+            ctx: &mut VisitContext<'_, Probe, D>,
         ) -> Result<Option<VisitInterrupt>> {
             assert_eq!(ctx.def_region_kind(), DefRegionKind::Pattern);
             assert_eq!(ctx.state().depth, 1);
@@ -517,10 +517,10 @@ fn policy_halts_skip_remaining_policies_and_restore_outer_state() {
     }
     struct Unreachable;
     impl ContextPolicy<Probe> for Unreachable {
-        fn default_visit(
+        fn default_visit<D: tvm_ffi::VisitDriver<Probe> + ?Sized>(
             &self,
             _: &StructuralView,
-            _: &mut VisitContext<'_, Probe>,
+            _: &mut VisitContext<'_, Probe, D>,
         ) -> Result<Option<VisitInterrupt>> {
             panic!("the policy after Stop must not run")
         }
@@ -566,10 +566,10 @@ fn policy_halts_skip_remaining_policies_and_restore_outer_state() {
 fn policy_regions_compose_with_field_flags_and_function_hooks() {
     struct SetRootRegion(i32, DefRegionKind);
     impl ContextPolicy<PolicyRegionTrace> for SetRootRegion {
-        fn default_visit(
+        fn default_visit<D: tvm_ffi::VisitDriver<PolicyRegionTrace> + ?Sized>(
             &self,
             value: &StructuralView,
-            ctx: &mut VisitContext<'_, PolicyRegionTrace>,
+            ctx: &mut VisitContext<'_, PolicyRegionTrace, D>,
         ) -> Result<Option<VisitInterrupt>> {
             if value.type_index() == self.0 {
                 ctx.default_visit_children(&value.to_owned(), self.1)
@@ -631,10 +631,10 @@ fn policy_regions_compose_with_field_flags_and_function_hooks() {
 
 struct ReenterRegion(DefRegionKind);
 impl ContextPolicy<PolicyRegionTrace> for ReenterRegion {
-    fn default_visit(
+    fn default_visit<D: tvm_ffi::VisitDriver<PolicyRegionTrace> + ?Sized>(
         &self,
         value: &StructuralView,
-        ctx: &mut VisitContext<'_, PolicyRegionTrace>,
+        ctx: &mut VisitContext<'_, PolicyRegionTrace, D>,
     ) -> Result<Option<VisitInterrupt>> {
         match value.cast::<i64>() {
             Some(2) => {
@@ -2110,4 +2110,50 @@ fn native_container_descent_keeps_runtime_order() {
         .is_none());
         assert_eq!(seen, items, "{name}");
     }
+}
+
+#[derive(Default)]
+struct DriverGenericCount {
+    entered: usize,
+    integers: usize,
+}
+
+#[dispatch(walk)]
+impl DriverGenericCount {
+    fn walk_integer(&mut self, _value: i64) -> WalkResult {
+        self.integers += 1;
+        WalkResult::Advance
+    }
+}
+
+/// Shared policy logic written once for every driver, the shape pass code uses.
+fn enter_and_descend<D: tvm_ffi::VisitDriver<DriverGenericCount> + ?Sized>(
+    ctx: &mut VisitContext<'_, DriverGenericCount, D>,
+) -> Result<Option<VisitInterrupt>> {
+    ctx.state_mut().entered += 1;
+    ctx.visit_children()
+}
+
+struct ViaHelper;
+
+impl ContextPolicy<DriverGenericCount> for ViaHelper {
+    fn default_visit<D: tvm_ffi::VisitDriver<DriverGenericCount> + ?Sized>(
+        &self,
+        _value: &StructuralView,
+        ctx: &mut VisitContext<'_, DriverGenericCount, D>,
+    ) -> Result<Option<VisitInterrupt>> {
+        enter_and_descend(ctx)
+    }
+}
+
+#[test]
+fn policy_helpers_are_generic_over_the_driver() {
+    let root = Array::new(vec![Array::new(vec![1i64, 2]), Array::new(vec![3i64])]);
+    let mut walker = WalkWithContextPolicy::new(DriverGenericCount::default(), ViaHelper);
+    assert!(structural_walk(&root, &mut walker, WalkOrder::PreOrder)
+        .unwrap()
+        .is_none());
+    assert_eq!(walker.state().integers, 3);
+    // The root, two inner arrays and three integers each enter the policy once.
+    assert_eq!(walker.state().entered, 6);
 }

@@ -392,6 +392,11 @@ returned explicitly because `?` only propagates errors.
 to manage context around default recursion. Pass `WalkWithContextPolicy` to
 `structural_walk`; pass `&mut walker` to reuse it and inspect its state afterward.
 See the `ContextPolicy` API documentation for composition and shared state access.
+A policy's `default_visit` is generic over the engine's `VisitDriver`, so the
+context's recursive calls dispatch statically; an implementation names it only
+as a bound, `fn default_visit<D: VisitDriver<State> + ?Sized>(&self, value:
+&StructuralView, ctx: &mut VisitContext<'_, State, D>)`, while closure
+callbacks keep receiving the type-erased `VisitContext<'_, State>`.
 
 For a named implementation, `#[dispatch(visit)]` generates
 `StructuralVisitor` from `visit_*` methods. Matching handlers own recursion;
@@ -520,7 +525,10 @@ the same semantics as C++.
 `MutateCallbacks::with_policy` and `MapWithContextPolicy` use `MutContextPolicy<State>`
 to manage context around default recursion. Policies consume `MutateValue`
 and return `UnchangedOr<Any>`; see the API documentation for composition and
-scoped definition regions. Pass `MapWithContextPolicy` directly to `structural_map`,
+scoped definition regions. Like `ContextPolicy`, a policy's `default_mutate` is
+generic over the engine's `MutateDriver` (`fn default_mutate<D: MutateDriver<State>
++ ?Sized>(&self, value: MutateValue<'_>, ctx: &mut MutateContext<'_, State, D>)`),
+while closure callbacks receive the type-erased `MutateContext<'_, State>`. Pass `MapWithContextPolicy` directly to `structural_map`,
 or pass `&mut mapper` to reuse it and inspect its state afterward;
 it cannot be a callback tuple member or another wrapper's dispatcher. Compose
 policies as `(outer, inner)` within one wrapper.

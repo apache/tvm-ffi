@@ -277,13 +277,18 @@ impl<T> Deref for MutateValue<'_, T> {
 /// reborrow the mutator, so mutable state cannot remain borrowed across them.
 /// The context does not store a node: inspect the callback argument and pass
 /// it explicitly to default recursion.
-pub struct MutateContext<'a, State = ()> {
-    driver: &'a mut dyn MutateContextDriver<State>,
+///
+/// `D` is the engine's recursion driver (see [`MutateDriver`]). A policy is
+/// generic over it, so its recursive calls are direct; closure callbacks
+/// receive the type-erased default, `MutateContext<'_, State>`.
+pub struct MutateContext<'a, State = (), D: ?Sized = dyn MutateDriver<State> + 'a> {
+    driver: &'a mut D,
     // The runtime mutator of this run, or null when the context was built on
     // a handle-less `StructuralMutator` entry (resolved through TLS then).
     mutator: StructuralMutatorHandle,
     def_region_kind: DefRegionKind,
     inplace_mode: InplaceMode,
+    _state: PhantomData<fn() -> State>,
     _not_send_sync: PhantomData<Rc<()>>,
 }
 
@@ -644,15 +649,25 @@ where
 ///
 /// Borrowed inputs carry a lifetime; in-place entry requires an owned
 /// value or a consumed capability, never a bare ABI value plus permission.
-trait MutateContextDriver<State> {
+///
+/// [`MutContextPolicy`] is generic over the driver so the context's forwards
+/// are direct calls into the engine's descent type rather than virtual calls.
+/// The trait is sealed: the engines implement it for their descent types and
+/// for every [`StructuralMutator`] that carries callback state. A policy only
+/// ever names it as a bound, `D: MutateDriver<State> + ?Sized`.
+pub trait MutateDriver<State>: mutate_driver_sealed::Sealed<State> {
+    #[doc(hidden)]
     fn state(&self) -> &State;
+    #[doc(hidden)]
     fn state_mut(&mut self) -> &mut State;
+    #[doc(hidden)]
     fn mutate_borrowed(
         &mut self,
         mutator: StructuralMutatorHandle,
         value: AnyView<'_>,
         kind: DefRegionKind,
     ) -> Result<Any>;
+    #[doc(hidden)]
     fn mutate_owned(
         &mut self,
         mutator: StructuralMutatorHandle,
@@ -660,6 +675,7 @@ trait MutateContextDriver<State> {
         kind: DefRegionKind,
         mode: InplaceMode,
     ) -> Result<Any>;
+    #[doc(hidden)]
     fn default_mutate_borrowed(
         &mut self,
         mutator: StructuralMutatorHandle,
@@ -667,6 +683,7 @@ trait MutateContextDriver<State> {
         kind: DefRegionKind,
     ) -> Result<Any>;
     /// Consume the handle to exclude node borrows before default descent.
+    #[doc(hidden)]
     fn default_mutate_value(
         &mut self,
         mutator: StructuralMutatorHandle,
@@ -676,11 +693,13 @@ trait MutateContextDriver<State> {
     ) -> Result<Any> {
         self.default_mutate_borrowed(mutator, AnyView::from(value.as_value()), kind)
     }
+    #[doc(hidden)]
     fn var_remap_get(
         &mut self,
         mutator: StructuralMutatorHandle,
         var: &StructuralView,
     ) -> Result<Option<Any>>;
+    #[doc(hidden)]
     fn var_remap_set(
         &mut self,
         mutator: StructuralMutatorHandle,
@@ -689,7 +708,11 @@ trait MutateContextDriver<State> {
     ) -> Result<()>;
 }
 
-impl<State> MutateContext<'_, State> {
+mod mutate_driver_sealed {
+    pub trait Sealed<State> {}
+}
+
+impl<State, D: MutateDriver<State> + ?Sized> MutateContext<'_, State, D> {
     /// User state shared by every callback in this mutation.
     #[inline(always)]
     pub fn state(&self) -> &State {
@@ -726,7 +749,7 @@ impl<State> MutateContext<'_, State> {
     pub fn with_def_region_kind<T>(
         &mut self,
         kind: DefRegionKind,
-        callback: impl FnOnce(&mut MutateContext<'_, State>) -> Result<T>,
+        callback: impl FnOnce(&mut MutateContext<'_, State, D>) -> Result<T>,
     ) -> Result<T> {
         let mutator = self.active_mutator()?;
         with_mutator_def_region(mutator, kind, |kind| {
@@ -735,6 +758,7 @@ impl<State> MutateContext<'_, State> {
                 mutator,
                 def_region_kind: kind,
                 inplace_mode: self.inplace_mode,
+                _state: PhantomData,
                 _not_send_sync: PhantomData,
             })
         })
@@ -2099,13 +2123,15 @@ fn try_mutate_callbacks<State, Link, Marker, Driver>(
 ) -> Option<Result<Any>>
 where
     Link: MutateChainLink<State, Marker>,
-    Driver: MutateContextDriver<State>,
+    Driver: MutateDriver<State>,
 {
-    let mut context = MutateContext {
-        driver,
+    // Closure callbacks take the type-erased context.
+    let mut context: MutateContext<'_, State> = MutateContext {
+        driver: driver as &mut dyn MutateDriver<State>,
         mutator,
         def_region_kind,
         inplace_mode,
+        _state: PhantomData,
         _not_send_sync: PhantomData,
     };
     // SAFETY: The owning `Rc` or the direct callback's stack slot remains live
@@ -2331,7 +2357,12 @@ where
     }
 }
 
-impl<State, Driver> MutateContextDriver<State> for Driver
+impl<State, Driver> mutate_driver_sealed::Sealed<State> for Driver where
+    Driver: StructuralMutator + MutateCallbackState<State>
+{
+}
+
+impl<State, Driver> MutateDriver<State> for Driver
 where
     Driver: StructuralMutator + MutateCallbackState<State>,
 {
@@ -2791,8 +2822,11 @@ struct RuntimeMutatorCallbacks {
 ///
 /// C++ type hooks read `vtable` and `def_region_mode`; Rust keeps its erased
 /// driver state after that shared prefix.
+// Public only because the sealed `MutateDriver` names its handle; the fields
+// stay private and the type is not part of the documented API.
+#[doc(hidden)]
 #[repr(C)]
-struct RuntimeStructuralMutatorObj {
+pub struct RuntimeStructuralMutatorObj {
     base: Object,
     vtable: *const StructuralMutatorVTable,
     def_region_mode: i32,
@@ -2944,10 +2978,7 @@ unsafe fn rust_vtable_mutate_impl<D: MutationDriver, const INPLACE: bool>(
     let outcome = catch_unwind(AssertUnwindSafe(
         #[inline]
         || {
-            let kind = match def_region_from_raw((*mutator).def_region_mode) {
-                Ok(kind) => kind,
-                Err(error) => return result_into_raw(Err(error)),
-            };
+            let kind = def_region_from_raw((*mutator).def_region_mode);
             // take_runtime_context verified that this mutator is already active.
             runtime_dispatch_mutate::<D, INPLACE>(mutator, context, raw, kind)
         },
@@ -3174,13 +3205,20 @@ fn expose_driver_context<T>(
     }
 }
 
+/// Read the definition region stored in the ABI mutator.
+///
+/// Only this engine and the C++ engine write that field, and both store a
+/// valid kind; debug builds verify it, release builds convert directly.
 #[inline(always)]
-fn def_region_from_raw(kind: i32) -> Result<DefRegionKind> {
+fn def_region_from_raw(kind: i32) -> DefRegionKind {
+    debug_assert!(
+        (DefRegionKind::None as i32..=DefRegionKind::Simple as i32).contains(&kind),
+        "invalid structural definition-region kind {kind}"
+    );
     match kind {
-        x if x == DefRegionKind::None as i32 => Ok(DefRegionKind::None),
-        x if x == DefRegionKind::Pattern as i32 => Ok(DefRegionKind::Pattern),
-        x if x == DefRegionKind::Simple as i32 => Ok(DefRegionKind::Simple),
-        _ => Err(runtime_error("invalid structural definition-region kind")),
+        x if x == DefRegionKind::Pattern as i32 => DefRegionKind::Pattern,
+        x if x == DefRegionKind::Simple as i32 => DefRegionKind::Simple,
+        _ => DefRegionKind::None,
     }
 }
 
@@ -3639,6 +3677,11 @@ fn user_default_mutate_at<U: StructuralMutator>(
     .map_err(|error| with_value_context(error, raw))
 }
 
+// The per-node hub of default descent. It is the one call on the recursion
+// cycle that is deliberately not inlined: with the policy context generic
+// over its driver, everything else inlines, and without a cut point the
+// optimizer builds one oversized recursive frame.
+#[inline(never)]
 fn default_mutate_driver<D: MutationDriver>(
     mutator: StructuralMutatorHandle,
     driver: &mut D,
