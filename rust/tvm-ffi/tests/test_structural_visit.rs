@@ -1315,6 +1315,8 @@ fn visitor_errors_include_native_visit_path() {
     assert!(error.backtrace().contains("object `ffi.Array`"));
 }
 
+// A callback panic is carried across the C++ frames only with the per-entry catch.
+#[cfg(not(feature = "abort-on-callback-panic"))]
 #[test]
 fn callback_panics_resume_after_the_registered_hook_returns() {
     let root = Array::new(vec![1i64]);
@@ -2029,6 +2031,8 @@ fn nested_callback_visit_restores_the_outer_active_visitor() {
     assert_eq!(*inner_values.borrow(), vec![1, 2]);
 }
 
+// A callback panic is carried across the C++ frames only with the per-entry catch.
+#[cfg(not(feature = "abort-on-callback-panic"))]
 #[test]
 fn callback_visit_panics_resume_and_leave_the_next_run_usable() {
     let root = Array::new(vec![1i64]);

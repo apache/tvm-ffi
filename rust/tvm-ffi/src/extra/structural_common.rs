@@ -24,6 +24,30 @@ use crate::object::{self, ObjectCore, ObjectRefCore};
 use crate::reflection::FieldGetter;
 use crate::tvm_ffi_sys::{TVMFFIAny, TVMFFIByteArray, TVMFFITypeIndex, TVMFFITypeKeyToIndex};
 
+/// Run the Rust body of one ABI entry of a structural engine.
+///
+/// By default the body runs under `catch_unwind`, so a panic in a callback
+/// never unwinds into the C++ `noexcept` frames that called the entry; the
+/// engine carries the payload back to its Rust caller, where the `Function`
+/// boundary turns it into an `InternalError`. With the
+/// `abort-on-callback-panic` feature the catch is compiled out: a panic then
+/// reaches the `extern "C"` boundary and aborts the process. Enabling it saves
+/// a fraction of an instruction per entry, and a consumer built with
+/// `panic = "abort"` already gets the same code without it.
+#[inline(always)]
+pub(crate) fn guard_callback<R>(
+    body: impl FnOnce() -> R,
+) -> std::result::Result<R, Box<dyn std::any::Any + Send>> {
+    #[cfg(not(feature = "abort-on-callback-panic"))]
+    {
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(body))
+    }
+    #[cfg(feature = "abort-on-callback-panic")]
+    {
+        Ok(body())
+    }
+}
+
 /// Add one structural traversal frame to an error's backtrace.
 pub(crate) fn with_structural_error_context(error: Error, operation: &str, frame: &str) -> Error {
     Error::with_appended_backtrace(error, &format!("[native structural {operation}] {frame}\n"))

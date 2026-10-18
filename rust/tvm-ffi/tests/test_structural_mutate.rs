@@ -997,6 +997,8 @@ fn callback_errors_preserve_message_and_add_object_context() {
     }
 }
 
+// A callback panic is carried across the C++ frames only with the per-entry catch.
+#[cfg(not(feature = "abort-on-callback-panic"))]
 #[test]
 fn callback_panics_resume_after_the_registered_hook_returns() {
     let panic = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -1949,6 +1951,8 @@ fn nested_callback_mutate_restores_the_outer_active_mutator() {
     assert_eq!(mutated, 4);
 }
 
+// A callback panic is carried across the C++ frames only with the per-entry catch.
+#[cfg(not(feature = "abort-on-callback-panic"))]
 #[test]
 fn callback_mutate_panics_resume_and_leave_the_next_run_usable() {
     let panic = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {

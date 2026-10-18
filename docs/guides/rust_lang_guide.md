@@ -444,7 +444,10 @@ to default recursion.
 Two safety notes: the built-in containers are traversed natively by the Rust
 engine with the semantics of their C++ hooks, reading mutable `List`/`Dict`
 contents live, so a callback must not restructure the container it is being
-visited from (the same contract as the C++ engine); and
+visited from (the same contract as the C++ engine); a panic in a callback is
+caught at every C++-to-Rust entry so it never unwinds into C++ frames, and
+resumes on the Rust side (the `abort-on-callback-panic` cargo feature compiles
+that catch out, making such a panic abort the process); and
 a non-container type with a foreign `__s_visit__` hook is rejected rather
 than silently walked through reflection — visit such a type's children
 explicitly from a `StructuralVisitor`, or skip it with a pre-order

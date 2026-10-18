@@ -45,7 +45,7 @@ use std::cell::Cell;
 use std::marker::PhantomData;
 use std::ops::ControlFlow;
 use std::os::raw::c_void;
-use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
+use std::panic::resume_unwind;
 use std::ptr::NonNull;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -66,7 +66,8 @@ use crate::tvm_ffi_sys::{
 };
 
 use super::structural_common::{
-    impl_callback_chain_tuple_arities, with_structural_error_context, with_visit_error_context,
+    guard_callback, impl_callback_chain_tuple_arities, with_structural_error_context,
+    with_visit_error_context,
 };
 use super::structural_containers as containers;
 
@@ -1726,13 +1727,13 @@ unsafe fn rust_vtable_visit_impl(
     };
     let context = context_guard.context;
     let raw = *value.as_raw_ffi_any();
-    let outcome = catch_unwind(AssertUnwindSafe(
+    let outcome = guard_callback(
         #[inline(always)]
         || {
             let kind = def_region_from_raw((*visitor).def_region_mode);
             native_result_into_raw(callback(context, raw, kind))
         },
-    ));
+    );
     match outcome {
         Ok(result) => result,
         Err(payload) => visit_panic_result(visitor, payload),

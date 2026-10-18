@@ -27,7 +27,7 @@ use std::collections::HashMap;
 use std::ffi::c_void;
 use std::marker::PhantomData;
 use std::ops::{ControlFlow, Deref};
-use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
+use std::panic::resume_unwind;
 use std::ptr::NonNull;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -48,7 +48,7 @@ use crate::tvm_ffi_sys::{
 use crate::tvm_ffi_sys::{TVMFFIObjectHandle, TVMFFISEqHashKind};
 
 use super::structural_common::{
-    impl_callback_chain_tuple_arities, is_plain_inline, same_shallow,
+    guard_callback, impl_callback_chain_tuple_arities, is_plain_inline, same_shallow,
     try_to_owned_without_normalization, with_structural_error_context, with_visit_error_context,
 };
 use super::structural_containers as containers;
@@ -2975,14 +2975,14 @@ unsafe fn rust_vtable_mutate_impl<D: MutationDriver, const INPLACE: bool>(
     };
     let context = context_guard.context;
     let raw = *value.as_raw_ffi_any();
-    let outcome = catch_unwind(AssertUnwindSafe(
+    let outcome = guard_callback(
         #[inline]
         || {
             let kind = def_region_from_raw((*mutator).def_region_mode);
             // take_runtime_context verified that this mutator is already active.
             runtime_dispatch_mutate::<D, INPLACE>(mutator, context, raw, kind)
         },
-    ));
+    );
     match outcome {
         Ok(result) => result,
         Err(payload) => mutation_panic_result(mutator, payload),
@@ -3009,7 +3009,7 @@ unsafe extern "C" fn rust_vtable_var_remap_get(
     let callback = (*mutator).callbacks.var_remap_get;
     let context = context_guard.context;
     let raw = *var.as_raw_ffi_any();
-    match catch_unwind(AssertUnwindSafe(|| callback(mutator, context, raw))) {
+    match guard_callback(|| callback(mutator, context, raw)) {
         Ok(Ok(Some(replacement))) => Any::into_raw_ffi_any(replacement),
         Ok(Ok(None)) => TVMFFIAny::new(),
         Ok(Err(error)) => result_into_raw(Err(error)),
@@ -3033,10 +3033,10 @@ unsafe extern "C" fn rust_vtable_var_remap_set(
     let context = context_guard.context;
     let var_raw = *var.as_raw_ffi_any();
     let replacement_raw = *replacement.as_raw_ffi_any();
-    match catch_unwind(AssertUnwindSafe(|| {
+    match guard_callback(|| {
         let replacement = owned_from_raw(replacement_raw)?;
         callback(mutator, context, var_raw, &replacement)
-    })) {
+    }) {
         Ok(Ok(())) => TVMFFIAny::new(),
         Ok(Err(error)) => result_into_raw(Err(error)),
         Err(payload) => {

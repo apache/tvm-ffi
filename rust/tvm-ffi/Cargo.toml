@@ -42,6 +42,12 @@ tvm-ffi-sys = { version = "0.1.0-alpha.0", path = "../tvm-ffi-sys", features = [
 # only needed for example building
 [features]
 example = []
+# Compile out the per-entry panic catch on the structural engines' ABI entries.
+# A panic in a visit or mutate callback then aborts the process instead of
+# surfacing as a panic or `InternalError`; it saves a fraction of an
+# instruction per C++-to-Rust entry, and a consumer built with
+# `panic = "abort"` already gets the same code without this feature.
+abort-on-callback-panic = []
 
 [[example]]
 name = "load_library"
