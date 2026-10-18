@@ -683,6 +683,86 @@ The default `var_remap_get` and `var_remap_set` methods use state local to one
 substitutions without adding a field to the mutator. Override them and use
 `StructuralVarRemap` when a custom identity policy is required.
 
+### Rust Structural Hooks
+
+The engines descend into an object through, in order: the built-in containers
+natively, a Rust hook registered for its type, its registered C++ `__s_visit__`
+or `__s_mutate__` hook, and finally its reflected fields. A C++ hook costs a
+round trip across the ABI vtable for the node and again for every child it
+visits; a Rust hook runs in the engine's own frame and reaches each child with
+one indirect call. When your crate mirrors the node types of an IR, port the
+hooks of the hot kinds and register them once at startup:
+
+```rust
+use tvm_ffi::{
+    register_structural_hooks, Any, DefRegionKind, MutateChildren, ObjectCore, Result,
+    StructuralHooks, StructuralView, UnchangedOr, VisitChildren, VisitHalt,
+};
+
+// `BindObj { base, var: Var, value: Expr }`, a Rust mirror of the C++ node.
+fn bind_visit(value: &StructuralView, children: &mut VisitChildren<'_>) -> Result<(), VisitHalt> {
+    let node = value.as_node::<BindObj>().expect("registered for Bind");
+    children.visit_with(&node.var, DefRegionKind::Simple)?;
+    children.visit(&node.value)
+}
+
+fn bind_mutate(value: &StructuralView, children: &mut MutateChildren<'_>) -> Result<UnchangedOr<Any>> {
+    let node = value.as_node::<BindObj>().expect("registered for Bind");
+    let mapped_value = children.mutate(&node.value)?;
+    let mapped_var = children.mutate_with(&node.var, DefRegionKind::Simple)?;
+    if mapped_value.unchanged_or_same_as_value(&node.value)
+        && mapped_var.unchanged_or_same_as_value(&node.var)
+    {
+        return Ok(UnchangedOr::unchanged());
+    }
+    let var: Option<Var> = mapped_var.into_option().map(TryFrom::try_from).transpose()?;
+    let value: Option<Expr> = mapped_value.into_option().map(TryFrom::try_from).transpose()?;
+    if let Some(var) = &var {
+        children.var_remap_set(&node.var, &UnchangedOr::changed(var.clone().into()))?;
+    }
+    // SAFETY: `node` is not used after the first write.
+    if let Some(this) = unsafe { children.inplace_node::<BindObj>() } {
+        if let Some(var) = var {
+            this.var = var;
+        }
+        if let Some(value) = value {
+            this.value = value;
+        }
+        return Ok(UnchangedOr::unchanged());
+    }
+    Ok(UnchangedOr::changed(Bind::new(
+        var.unwrap_or_else(|| node.var.clone()),
+        value.unwrap_or_else(|| node.value.clone()),
+    ).into()))
+}
+
+register_structural_hooks::<BindObj>(StructuralHooks {
+    visit: Some(bind_visit),
+    mutate: Some(bind_mutate),
+})?;
+```
+
+A hook applies to the exact type index it is registered for; like the C++
+attribute columns, hooks do not inherit. `VisitChildren::visit_with` and
+`MutateChildren::mutate_with` enter a definition region for one child, the
+Rust form of `visitor->WithDefRegionKind(kind, ...)`; a pattern region in
+effect at the node propagates instead. A visit hook returns `Err(VisitHalt)`
+to stop early, which `?` on a child visit produces for both an interrupt and
+an error.
+
+One mutate hook serves both C++ protocols. `MutateChildren::is_inplace` is true
+when the engine would have chosen the type's `__s_maybe_inplace_mutate__` hook:
+the node is uniquely owned on an owned path. The hook may then write the mutated
+children into the node through `inplace_node` and return `Unchanged`; otherwise
+it returns a rebuilt node, or `Unchanged` when no child changed. Children are
+mutated with the matching permission automatically; `mutate_with_mode` with
+`InplaceMode::Disallow` forces a copy for a child reached through a container
+that is itself shared. `inplace_node` is `unsafe` because the `&mut` it returns
+aliases the hook's `&StructuralView`: read the fields to mutate first, then take
+the reference and assign. A hook owns identity remapping for its type, as the
+C++ hooks do: use `var_remap_get` at a variable use and `var_remap_set` at its
+definition.
+
 ## Examples
 
 The repository includes a complete example in `rust/tvm-ffi/examples/load_library.rs`.

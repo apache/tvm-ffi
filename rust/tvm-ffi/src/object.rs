@@ -266,77 +266,84 @@ pub fn is_instance_of<Target: ObjectCore>(object_type_index: i32) -> bool {
     }
 }
 
-/// Process-wide cache of `TVMFFIGetTypeInfo` results.
+/// A lock-free, append-only table from runtime type index to a pointer-sized
+/// value.
 ///
-/// A registered `TVMFFITypeInfo` record is immortal (the runtime never frees
-/// its type table), so its address can be cached for the life of the process.
-/// `TVMFFIGetTypeInfo` is a C call that reaches the table through two
-/// un-inlined frames; the structural engines run one such lookup per non-final
-/// subtype test and per reflected node, which made it about 16% of a
-/// hook-driven mutation. The cache is a lock-free, append-only table: static
-/// indices live in a fixed array and dynamic indices in lazily allocated
-/// chunks, so a hit costs two loads and a hot lookup never takes a lock.
-mod type_info_cache {
+/// Static indices live in a fixed array and dynamic indices in lazily
+/// allocated chunks, so a hit costs two loads and a hot lookup never takes a
+/// lock. Chunks are leaked once published, so a stored pointer stays
+/// readable for the life of the process. The type-info cache and the Rust
+/// structural hook registry are built on it.
+pub(crate) mod type_index_table {
     use std::ptr::null_mut;
     use std::sync::atomic::{AtomicPtr, Ordering};
 
-    use tvm_ffi_sys::{TVMFFIGetTypeInfo, TVMFFITypeIndex, TVMFFITypeInfo};
+    use tvm_ffi_sys::TVMFFITypeIndex;
 
     const STATIC_LIMIT: usize = TVMFFITypeIndex::kTVMFFIDynObjectBegin as usize;
     const CHUNK_SIZE: usize = 1024;
     const NUM_CHUNKS: usize = 64;
 
-    struct Chunk([AtomicPtr<TVMFFITypeInfo>; CHUNK_SIZE]);
+    struct Chunk<T>([AtomicPtr<T>; CHUNK_SIZE]);
 
-    static STATIC_INFO: [AtomicPtr<TVMFFITypeInfo>; STATIC_LIMIT] =
-        [const { AtomicPtr::new(null_mut()) }; STATIC_LIMIT];
-    static DYNAMIC_INFO: [AtomicPtr<Chunk>; NUM_CHUNKS] =
-        [const { AtomicPtr::new(null_mut()) }; NUM_CHUNKS];
+    pub(crate) struct TypeIndexTable<T> {
+        static_slots: [AtomicPtr<T>; STATIC_LIMIT],
+        dynamic: [AtomicPtr<Chunk<T>>; NUM_CHUNKS],
+    }
 
-    /// The runtime type record of `type_index`, or null when it is not
-    /// registered. Equivalent to `TVMFFIGetTypeInfo` with a cache in front.
-    #[inline]
-    pub(crate) fn type_info(type_index: i32) -> *const TVMFFITypeInfo {
-        let Ok(index) = usize::try_from(type_index) else {
-            return std::ptr::null();
-        };
-        let slot = if index < STATIC_LIMIT {
-            &STATIC_INFO[index]
-        } else {
+    impl<T> TypeIndexTable<T> {
+        /// An empty table, usable in a `static`.
+        pub(crate) const fn new() -> Self {
+            Self {
+                static_slots: [const { AtomicPtr::new(null_mut()) }; STATIC_LIMIT],
+                dynamic: [const { AtomicPtr::new(null_mut()) }; NUM_CHUNKS],
+            }
+        }
+
+        /// Whether `type_index` has a slot in the table.
+        pub(crate) fn in_range(type_index: i32) -> bool {
+            usize::try_from(type_index)
+                .is_ok_and(|index| index < STATIC_LIMIT + CHUNK_SIZE * NUM_CHUNKS)
+        }
+
+        /// The pointer stored for `type_index`, or null when nothing was
+        /// stored or the index has no slot.
+        #[inline]
+        pub(crate) fn get(&self, type_index: i32) -> *mut T {
+            let Ok(index) = usize::try_from(type_index) else {
+                return null_mut();
+            };
+            if index < STATIC_LIMIT {
+                return self.static_slots[index].load(Ordering::Acquire);
+            }
             let dynamic = index - STATIC_LIMIT;
-            let Some(chunk) = DYNAMIC_INFO.get(dynamic / CHUNK_SIZE) else {
-                // Beyond the cached range: fall back to the runtime lookup.
-                return unsafe { TVMFFIGetTypeInfo(type_index) };
+            let Some(chunk) = self.dynamic.get(dynamic / CHUNK_SIZE) else {
+                return null_mut();
             };
             let chunk = chunk.load(Ordering::Acquire);
             if chunk.is_null() {
-                return fill(type_index);
+                return null_mut();
             }
             // SAFETY: a published chunk is leaked and never freed.
-            &unsafe { &*chunk }.0[dynamic % CHUNK_SIZE]
-        };
-        let cached = slot.load(Ordering::Relaxed);
-        if cached.is_null() {
-            fill(type_index)
-        } else {
-            cached
+            unsafe { &*chunk }.0[dynamic % CHUNK_SIZE].load(Ordering::Acquire)
         }
-    }
 
-    #[cold]
-    #[inline(never)]
-    fn fill(type_index: i32) -> *const TVMFFITypeInfo {
-        let info = unsafe { TVMFFIGetTypeInfo(type_index) };
-        if info.is_null() {
-            // Not registered: a later registration must be able to fill it.
-            return info;
-        }
-        let index = type_index as usize;
-        let slot = if index < STATIC_LIMIT {
-            &STATIC_INFO[index]
-        } else {
+        /// Store `value` for `type_index`, allocating its chunk on first use.
+        /// Returns `false` when the index has no slot.
+        #[cold]
+        #[inline(never)]
+        pub(crate) fn set(&self, type_index: i32, value: *mut T) -> bool {
+            let Ok(index) = usize::try_from(type_index) else {
+                return false;
+            };
+            if index < STATIC_LIMIT {
+                self.static_slots[index].store(value, Ordering::Release);
+                return true;
+            }
             let dynamic = index - STATIC_LIMIT;
-            let chunk_slot = &DYNAMIC_INFO[dynamic / CHUNK_SIZE];
+            let Some(chunk_slot) = self.dynamic.get(dynamic / CHUNK_SIZE) else {
+                return false;
+            };
             let mut chunk = chunk_slot.load(Ordering::Acquire);
             if chunk.is_null() {
                 let fresh = Box::into_raw(Box::new(Chunk(
@@ -357,9 +364,51 @@ mod type_info_cache {
                 }
             }
             // SAFETY: a published chunk is leaked and never freed.
-            &unsafe { &*chunk }.0[dynamic % CHUNK_SIZE]
-        };
-        slot.store(info.cast_mut(), Ordering::Relaxed);
+            unsafe { &*chunk }.0[dynamic % CHUNK_SIZE].store(value, Ordering::Release);
+            true
+        }
+    }
+}
+
+/// Process-wide cache of `TVMFFIGetTypeInfo` results.
+///
+/// A registered `TVMFFITypeInfo` record is immortal (the runtime never frees
+/// its type table), so its address can be cached for the life of the process.
+/// `TVMFFIGetTypeInfo` is a C call that reaches the table through two
+/// un-inlined frames; the structural engines run one such lookup per non-final
+/// subtype test and per reflected node, which made it about 16% of a
+/// hook-driven mutation.
+mod type_info_cache {
+    use tvm_ffi_sys::{TVMFFIGetTypeInfo, TVMFFITypeInfo};
+
+    use super::type_index_table::TypeIndexTable;
+
+    static CACHE: TypeIndexTable<TVMFFITypeInfo> = TypeIndexTable::new();
+
+    /// The runtime type record of `type_index`, or null when it is not
+    /// registered. Equivalent to `TVMFFIGetTypeInfo` with a cache in front.
+    #[inline]
+    pub(crate) fn type_info(type_index: i32) -> *const TVMFFITypeInfo {
+        let cached = CACHE.get(type_index);
+        if cached.is_null() {
+            fill(type_index)
+        } else {
+            cached
+        }
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn fill(type_index: i32) -> *const TVMFFITypeInfo {
+        if type_index < 0 {
+            return std::ptr::null();
+        }
+        let info = unsafe { TVMFFIGetTypeInfo(type_index) };
+        if !info.is_null() {
+            // Not registered: a later registration must be able to fill it.
+            // Beyond the table: every lookup falls through to the runtime.
+            CACHE.set(type_index, info.cast_mut());
+        }
         info
     }
 }

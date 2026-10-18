@@ -52,6 +52,7 @@ use super::structural_common::{
     try_to_owned_without_normalization, with_structural_error_context, with_visit_error_context,
 };
 use super::structural_containers as containers;
+use super::structural_hooks::{self as hooks, StructuralMutateHook};
 use super::structural_visit::{
     field_def_region, for_each_field_info, free_var_child_region, type_attr_column, type_key_of,
     DefRegionKind, WalkOrder,
@@ -2443,6 +2444,228 @@ where
     }
 }
 
+/// Object-safe form of [`MutationDriver`] for a Rust structural hook, which is
+/// a plain function and so cannot be generic over the engine.
+trait ErasedMutation {
+    fn mutate_erased(
+        &mut self,
+        mutator: StructuralMutatorHandle,
+        raw: TVMFFIAny,
+        def_region_kind: DefRegionKind,
+        permit: Permit,
+    ) -> Result<Any>;
+
+    fn var_remap_get_erased(
+        &mut self,
+        mutator: StructuralMutatorHandle,
+        raw: TVMFFIAny,
+    ) -> Result<Option<Any>>;
+
+    fn var_remap_set_erased(
+        &mut self,
+        mutator: StructuralMutatorHandle,
+        raw: TVMFFIAny,
+        replacement: &Any,
+    ) -> Result<()>;
+}
+
+impl<D: MutationDriver> ErasedMutation for D {
+    #[inline]
+    fn mutate_erased(
+        &mut self,
+        mutator: StructuralMutatorHandle,
+        raw: TVMFFIAny,
+        def_region_kind: DefRegionKind,
+        permit: Permit,
+    ) -> Result<Any> {
+        self.dispatch_raw(mutator, raw, def_region_kind, permit)
+    }
+
+    #[inline]
+    fn var_remap_get_erased(
+        &mut self,
+        mutator: StructuralMutatorHandle,
+        raw: TVMFFIAny,
+    ) -> Result<Option<Any>> {
+        self.var_remap_get_raw(mutator, raw)
+    }
+
+    #[inline]
+    fn var_remap_set_erased(
+        &mut self,
+        mutator: StructuralMutatorHandle,
+        raw: TVMFFIAny,
+        replacement: &Any,
+    ) -> Result<()> {
+        self.var_remap_set_raw(mutator, raw, replacement)
+    }
+}
+
+/// The engine side of a Rust structural mutate hook: mutates the children the
+/// hook selects with the engine's callbacks and policies, and tells the hook
+/// whether its node may be updated in place.
+///
+/// One hook serves both the copying and the in-place protocol. When
+/// [`Self::is_inplace`] is true the engine has established that the node is
+/// uniquely owned on an owned path, so the hook may write the mutated
+/// children into the node through [`Self::inplace_node`] and return
+/// [`Unchanged`]; otherwise it returns a rebuilt node, or [`Unchanged`] when
+/// no child changed. Children are mutated with the matching permission: on an
+/// in-place node they may be updated in place themselves, on a shared node
+/// they are copied.
+///
+/// See [`crate::register_structural_hooks`].
+pub struct MutateChildren<'a> {
+    driver: &'a mut dyn ErasedMutation,
+    mutator: StructuralMutatorHandle,
+    node: TVMFFIAny,
+    def_region_kind: DefRegionKind,
+    inplace: bool,
+}
+
+impl MutateChildren<'_> {
+    /// Definition-region state active at the hook's value.
+    #[inline]
+    pub fn def_region_kind(&self) -> DefRegionKind {
+        self.def_region_kind
+    }
+
+    /// Whether the hook's node is uniquely owned on an owned path, so the hook
+    /// may update it in place.
+    #[inline]
+    pub fn is_inplace(&self) -> bool {
+        self.inplace
+    }
+
+    /// Mutate `child` under the current definition region.
+    ///
+    /// The result is the unchanged marker when the engine left the child as it
+    /// was, otherwise the replacement; [`UnchangedOr::unchanged_or_same_as`]
+    /// tells whether a field needs to be rewritten.
+    #[inline]
+    pub fn mutate<T>(&mut self, child: &T) -> Result<UnchangedOr<Any>>
+    where
+        for<'x> AnyView<'x>: From<&'x T>,
+    {
+        self.mutate_with(child, self.def_region_kind)
+    }
+
+    /// Mutate `child` under an explicit definition region, the Rust form of
+    /// C++ `mutator->WithDefRegionKind(kind, [&] { return mutator->Mutate(child); })`.
+    /// A pattern region in effect at the hook's value propagates instead.
+    #[inline]
+    pub fn mutate_with<T>(
+        &mut self,
+        child: &T,
+        def_region_kind: DefRegionKind,
+    ) -> Result<UnchangedOr<Any>>
+    where
+        for<'x> AnyView<'x>: From<&'x T>,
+    {
+        self.mutate_with_mode(child, def_region_kind, InplaceMode::Allow)
+    }
+
+    /// [`Self::mutate_with`] with an explicit in-place policy for the child.
+    ///
+    /// `Allow` follows the node: the child may be updated in place when the
+    /// node is ([`Self::is_inplace`]). `Disallow` always copies, for a child
+    /// reached through a container that is itself shared, where even a
+    /// uniquely referenced element is visible to the container's other
+    /// holders.
+    #[inline]
+    pub fn mutate_with_mode<T>(
+        &mut self,
+        child: &T,
+        def_region_kind: DefRegionKind,
+        mode: InplaceMode,
+    ) -> Result<UnchangedOr<Any>>
+    where
+        for<'x> AnyView<'x>: From<&'x T>,
+    {
+        let raw = *AnyView::from(child).as_raw_ffi_any();
+        let permit = if self.inplace && mode == InplaceMode::Allow {
+            Permit::MaybeInPlace
+        } else {
+            Permit::Copy
+        };
+        let mapped = self
+            .driver
+            .mutate_erased(self.mutator, raw, def_region_kind, permit)?;
+        Ok(UnchangedOr::from_carrier_unchecked(mapped))
+    }
+
+    /// The replacement recorded for the variable `var` by an enclosing
+    /// definition, if any. A recorded unchanged marker means the variable
+    /// keeps its identity.
+    #[inline]
+    pub fn var_remap_get<T>(&mut self, var: &T) -> Result<Option<UnchangedOr<Any>>>
+    where
+        for<'x> AnyView<'x>: From<&'x T>,
+    {
+        let raw = *AnyView::from(var).as_raw_ffi_any();
+        // The ABI uses None for a miss; an unchanged marker is a cached result.
+        Ok(self
+            .driver
+            .var_remap_get_erased(self.mutator, raw)?
+            .filter(|mapped| mapped.type_index() != TVMFFITypeIndex::kTVMFFINone as i32)
+            .map(UnchangedOr::from_carrier_unchecked))
+    }
+
+    /// Record `replacement` for later uses of the variable `var`.
+    #[inline]
+    pub fn var_remap_set<T>(&mut self, var: &T, replacement: &UnchangedOr<Any>) -> Result<()>
+    where
+        for<'x> AnyView<'x>: From<&'x T>,
+    {
+        let raw = *AnyView::from(var).as_raw_ffi_any();
+        self.driver
+            .var_remap_set_erased(self.mutator, raw, replacement.as_carrier())
+    }
+
+    /// The hook's node for in-place update, when [`Self::is_inplace`] holds
+    /// and the node is an `N`.
+    ///
+    /// # Safety
+    ///
+    /// The returned reference aliases the hook's `&StructuralView` argument
+    /// and any `&N` borrowed from it. The caller must not use such a shared
+    /// borrow after the first write through the returned reference: read the
+    /// fields to mutate first, then take this reference and assign.
+    #[inline]
+    pub unsafe fn inplace_node<N: ObjectCore>(&mut self) -> Option<&mut N> {
+        if !self.inplace {
+            return None;
+        }
+        // Reuse the typed check; the engine established unique ownership.
+        StructuralView::from_raw(self.node).as_node::<N>()?;
+        Some(&mut *(self.node.data_union.v_obj as *mut N))
+    }
+}
+
+/// Run a registered Rust mutate hook for `raw`.
+#[inline]
+fn run_mutate_hook<D: MutationDriver>(
+    mutator: StructuralMutatorHandle,
+    driver: &mut D,
+    hook: StructuralMutateHook,
+    raw: TVMFFIAny,
+    def_region_kind: DefRegionKind,
+    permit: Permit,
+) -> Result<Any> {
+    // The same selection as `structural_mutate_hook` makes between the C++
+    // copying and in-place hooks.
+    let inplace = permit == Permit::MaybeInPlace && object_is_unique(raw);
+    let mut children = MutateChildren {
+        driver,
+        mutator,
+        node: raw,
+        def_region_kind,
+        inplace,
+    };
+    let mapped = hook(&StructuralView::from_raw(raw), &mut children)?;
+    Ok(mapped.into_carrier())
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Permit {
     Copy,
@@ -3704,6 +3927,11 @@ fn default_mutate_driver_impl<D: MutationDriver>(
     // through their C++ hooks.
     if let Some(mutated) = mutate_container(mutator, driver, raw, def_region_kind, permit)? {
         return Ok(mutated);
+    }
+    // A Rust hook takes precedence over the type's C++ hooks and its fields,
+    // and like them owns any identity-remap policy for the type.
+    if let Some(hook) = hooks::mutate_hook(raw.type_index) {
+        return run_mutate_hook(mutator, driver, hook, raw, def_region_kind, permit);
     }
     // Match C++ DefaultMutateExpected: a registered type hook owns any
     // identity-remap policy for that type. Automatic remapping applies only

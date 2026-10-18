@@ -126,6 +126,21 @@ impl<T: ContainerElement> UnchangedOr<T> {
     }
 
     /// Move out the replacement, returning None when unchanged.
+    /// Like [`Self::unchanged_or_same_as`], for an original held as any
+    /// borrowable value: a node field whose declared type differs from `T`,
+    /// such as a `SeqStmt` field mapped as a `Stmt`.
+    #[inline]
+    pub fn unchanged_or_same_as_value<O>(&self, original: &O) -> bool
+    where
+        for<'x> AnyView<'x>: From<&'x O>,
+    {
+        self.is_unchanged()
+            || super::structural_common::same_shallow(
+                *AnyView::from(original).as_raw_ffi_any(),
+                *self.data.as_raw_ffi_any(),
+            )
+    }
+
     #[inline]
     pub fn into_option(self) -> Option<T> {
         if self.is_unchanged() {
@@ -208,6 +223,31 @@ impl UnchangedOr<Any> {
             data,
             _marker: PhantomData,
         })
+    }
+
+    /// Wrap a mutation result that is already either the unchanged marker or
+    /// an ordinary value (never an error).
+    #[inline]
+    pub(crate) fn from_carrier_unchecked(data: Any) -> Self {
+        debug_assert!(data.type_index() != TVMFFITypeIndex::kTVMFFIError as i32);
+        Self {
+            data,
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<T: ContainerElement> UnchangedOr<T> {
+    /// The ABI carrier: the unchanged marker or the value itself.
+    #[inline]
+    pub(crate) fn as_carrier(&self) -> &Any {
+        &self.data
+    }
+
+    /// Consume into the ABI carrier.
+    #[inline]
+    pub(crate) fn into_carrier(self) -> Any {
+        self.data
     }
 }
 

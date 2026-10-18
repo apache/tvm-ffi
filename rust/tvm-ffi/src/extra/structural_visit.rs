@@ -70,6 +70,7 @@ use super::structural_common::{
     with_visit_error_context,
 };
 use super::structural_containers as containers;
+use super::structural_hooks::{self as hooks, StructuralVisitHook, VisitHalt};
 
 const STRUCTURAL_VISIT_ATTR: &str = "__s_visit__";
 const FLAG_SEQ_HASH_IGNORE: i64 = kTVMFFIFieldFlagBitMaskSEqHashIgnore as i64;
@@ -1292,6 +1293,105 @@ trait ChildVisit {
     ) -> NativeResult;
 }
 
+/// Object-safe form of [`ChildVisit`] for a Rust structural hook, which is a
+/// plain function and so cannot be generic over the engine.
+trait ErasedChildVisit {
+    fn visit_child_erased(
+        &mut self,
+        child: &StructuralView,
+        def_region_kind: DefRegionKind,
+    ) -> NativeResult;
+}
+
+impl<C: ChildVisit> ErasedChildVisit for C {
+    #[inline]
+    fn visit_child_erased(
+        &mut self,
+        child: &StructuralView,
+        def_region_kind: DefRegionKind,
+    ) -> NativeResult {
+        self.visit_child(child, def_region_kind)
+    }
+}
+
+/// The engine side of a Rust structural visit hook: visits the children the
+/// hook selects, in the order it selects them, with the engine's callbacks
+/// and policies applied to each.
+///
+/// See [`crate::register_structural_hooks`].
+pub struct VisitChildren<'a> {
+    children: &'a mut dyn ErasedChildVisit,
+    def_region_kind: DefRegionKind,
+}
+
+impl VisitChildren<'_> {
+    /// Definition-region state active at the hook's value.
+    #[inline]
+    pub fn def_region_kind(&self) -> DefRegionKind {
+        self.def_region_kind
+    }
+
+    /// Visit `child` under the current definition region. A `None` child
+    /// is skipped.
+    #[inline]
+    pub fn visit<T>(&mut self, child: &T) -> std::result::Result<(), VisitHalt>
+    where
+        for<'x> AnyView<'x>: From<&'x T>,
+    {
+        self.visit_with(child, self.def_region_kind)
+    }
+
+    /// Visit `child` under an explicit definition region, the Rust form of
+    /// C++ `visitor->WithDefRegionKind(kind, [&] { return visitor->Visit(child); })`.
+    /// A pattern region in effect at the hook's value propagates instead.
+    #[inline]
+    pub fn visit_with<T>(
+        &mut self,
+        child: &T,
+        def_region_kind: DefRegionKind,
+    ) -> std::result::Result<(), VisitHalt>
+    where
+        for<'x> AnyView<'x>: From<&'x T>,
+    {
+        // Precedence: a pattern region propagates; entering any kind inside it has no effect.
+        let kind = if self.def_region_kind == DefRegionKind::Pattern {
+            DefRegionKind::Pattern
+        } else {
+            def_region_kind
+        };
+        let raw = raw_of(AnyView::from(child));
+        match self
+            .children
+            .visit_child_erased(&StructuralView::from_raw(raw), kind)
+        {
+            Ok(()) => Ok(()),
+            Err(NativeHalt::Interrupt(payload)) => {
+                Err(VisitHalt::Interrupt(VisitInterrupt { value: payload }))
+            }
+            Err(NativeHalt::Error(error)) => Err(VisitHalt::Error(error)),
+        }
+    }
+}
+
+/// Run a registered Rust visit hook for `value`.
+#[inline]
+fn run_visit_hook<C: ChildVisit>(
+    hook: StructuralVisitHook,
+    value: TVMFFIAny,
+    visitor: &mut C,
+    def_region_kind: DefRegionKind,
+) -> NativeResult {
+    let mut children = VisitChildren {
+        children: visitor,
+        def_region_kind,
+    };
+    match hook(&StructuralView::from_raw(value), &mut children) {
+        Ok(()) => Ok(()),
+        Err(VisitHalt::Interrupt(interrupt)) => Err(NativeHalt::Interrupt(interrupt.value)),
+        Err(VisitHalt::Error(error)) => Err(NativeHalt::Error(error)),
+    }
+}
+
 struct WalkChildren<'a, V, const PRE_ORDER: bool> {
     visitor: &'a mut V,
     handle: StructuralVisitorHandle,
@@ -1418,6 +1518,11 @@ fn visit_children_raw<C: ChildVisit>(
             return visit_map_values(value, visitor, def_region_kind);
         }
         _ => {}
+    }
+
+    // A Rust hook takes precedence over the type's C++ hook and its fields.
+    if let Some(hook) = hooks::visit_hook(value.type_index) {
+        return run_visit_hook(hook, value, visitor, def_region_kind);
     }
 
     if let Some(attr) =
