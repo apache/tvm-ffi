@@ -20,11 +20,11 @@
 use std::cell::{Cell, RefCell};
 use tvm_ffi::object::ObjectRef;
 use tvm_ffi::{
-    dispatch, get_type_attr, structural_visit, structural_walk, Any, Array, ContextPolicy,
-    DLDataType, DLDataTypeCode, DefRegionKind, Error, FieldGetter, Function, Map, Object,
-    ObjectRefCore, Result, String as FfiString, StructuralView, StructuralVisitor, TypeIndex,
-    VisitCallbacks, VisitContext, VisitInterrupt, WalkOrder, WalkResult, WalkWithContextPolicy,
-    RUNTIME_ERROR,
+    dispatch, get_type_attr, structural_visit, structural_walk, ActiveVisitor, Any, Array,
+    ContextPolicy, DLDataType, DLDataTypeCode, DefRegionKind, Error, FieldGetter, Function, Map,
+    Object, ObjectRefCore, Result, String as FfiString, StructuralView, StructuralVisitor,
+    TypeIndex, VisitCallbacks, VisitContext, VisitInterrupt, WalkOrder, WalkResult,
+    WalkWithContextPolicy, RUNTIME_ERROR,
 };
 
 fn runtime_error(message: &str) -> Error {
@@ -212,11 +212,12 @@ fn policy_continuation_scopes_regions_and_restores_after_halts() {
             &mut self,
             value: &StructuralView,
             kind: DefRegionKind,
+            visitor: ActiveVisitor<'_>,
         ) -> Result<Option<VisitInterrupt>> {
             if let Some(value) = value.cast::<i64>() {
                 self.record(value, kind)
             } else {
-                self.default_visit_children(value, kind)
+                self.default_visit_children(visitor, value, kind)
             }
         }
     }
@@ -659,6 +660,7 @@ impl PolicyRegionTrace {
         &mut self,
         value: &StructuralView,
         kind: DefRegionKind,
+        visitor: ActiveVisitor<'_>,
     ) -> Result<Option<VisitInterrupt>> {
         if let Some(integer) = value.cast::<i64>() {
             self.walk_integer(integer, kind);
@@ -666,7 +668,7 @@ impl PolicyRegionTrace {
                 return Ok(None);
             }
         }
-        self.default_visit_children(value, DefRegionKind::None)
+        self.default_visit_children(visitor, value, DefRegionKind::None)
     }
 }
 
@@ -991,18 +993,21 @@ struct ManualRegionVisitor {
 impl StructuralVisitor for ManualRegionVisitor {
     fn visit(
         &mut self,
+        visitor: ActiveVisitor<'_>,
         value: &StructuralView,
         def_region_kind: DefRegionKind,
     ) -> Result<Option<VisitInterrupt>> {
         if let Some(array) = value.cast::<Array<i64>>() {
             // Override the state for exactly this child's subtree...
             let overridden = array.get(0).unwrap();
-            if let Some(interrupt) = self.visit_child(&overridden, DefRegionKind::Simple)? {
+            if let Some(interrupt) =
+                self.visit_child(visitor, &overridden, DefRegionKind::Simple)?
+            {
                 return Ok(Some(interrupt));
             }
             // ...and forward the received state to inherit it.
             let inherited = array.get(1).unwrap();
-            return self.visit_child(&inherited, def_region_kind);
+            return self.visit_child(visitor, &inherited, def_region_kind);
         }
         if value.cast::<i64>().is_some() {
             self.seen.push(def_region_kind);
@@ -1053,10 +1058,11 @@ impl GeneratedRecursiveVisitor {
         &mut self,
         array: Array<i64>,
         kind: DefRegionKind,
+        visitor: ActiveVisitor<'_>,
     ) -> Result<Option<VisitInterrupt>> {
         self.events.push("enter:array".to_string());
         for value in array.iter() {
-            if let Some(interrupt) = self.visit_child(&value, kind)? {
+            if let Some(interrupt) = self.visit_child(visitor, &value, kind)? {
                 return Ok(Some(interrupt));
             }
         }
@@ -1137,6 +1143,7 @@ struct StraddleVisitor {
 impl StructuralVisitor for StraddleVisitor {
     fn visit(
         &mut self,
+        visitor: ActiveVisitor<'_>,
         value: &StructuralView,
         def_region_kind: DefRegionKind,
     ) -> Result<Option<VisitInterrupt>> {
@@ -1145,7 +1152,7 @@ impl StructuralVisitor for StraddleVisitor {
             None => "node".to_string(),
         };
         self.events.push(format!("enter:{label}"));
-        if let Some(interrupt) = self.default_visit_children(value, def_region_kind)? {
+        if let Some(interrupt) = self.default_visit_children(visitor, value, def_region_kind)? {
             return Ok(Some(interrupt));
         }
         self.events.push(format!("exit:{label}"));
@@ -1284,13 +1291,14 @@ fn visitor_errors_include_native_visit_path() {
     impl StructuralVisitor for FailingVisitor {
         fn visit(
             &mut self,
+            visitor: ActiveVisitor<'_>,
             value: &StructuralView,
             def_region_kind: DefRegionKind,
         ) -> Result<Option<VisitInterrupt>> {
             if value.cast::<i64>().is_some() {
                 return Err(runtime_error("visitor failed"));
             }
-            self.default_visit_children(value, def_region_kind)
+            self.default_visit_children(visitor, value, def_region_kind)
         }
     }
 
@@ -1344,13 +1352,14 @@ fn visitor_interrupt_propagates_through_default_children() {
     impl StructuralVisitor for InterruptingVisitor {
         fn visit(
             &mut self,
+            visitor: ActiveVisitor<'_>,
             value: &StructuralView,
             def_region_kind: DefRegionKind,
         ) -> Result<Option<VisitInterrupt>> {
             if value.cast::<i64>() == Some(2) {
                 return Ok(Some(VisitInterrupt::with(7i64)));
             }
-            self.default_visit_children(value, def_region_kind)
+            self.default_visit_children(visitor, value, def_region_kind)
         }
     }
 
@@ -1667,6 +1676,7 @@ struct InheritedRegionProbe {
 impl StructuralVisitor for InheritedRegionProbe {
     fn visit(
         &mut self,
+        visitor: ActiveVisitor<'_>,
         value: &StructuralView,
         def_region_kind: DefRegionKind,
     ) -> Result<Option<VisitInterrupt>> {
@@ -1674,10 +1684,10 @@ impl StructuralVisitor for InheritedRegionProbe {
             self.at_root = false;
             let outer = value.cast::<Array<Array<i64>>>().unwrap();
             let inner = outer.get(0).unwrap();
-            return self.visit_child(&inner, DefRegionKind::Pattern);
+            return self.visit_child(visitor, &inner, DefRegionKind::Pattern);
         }
         self.seen.push(def_region_kind);
-        self.default_visit_children(value, def_region_kind)
+        self.default_visit_children(visitor, value, def_region_kind)
     }
 }
 

@@ -179,12 +179,13 @@ fn expand(item_impl: &ItemImpl, args: DispatchArgs) -> syn::Result<TokenStream2>
                 quote! {
                     fn default_visit_children(
                         &mut self,
+                        visitor: #tvm_ffi::extra::structural_visit::ActiveVisitor<'_>,
                         value: &#tvm_ffi::StructuralView,
                         kind: #tvm_ffi::DefRegionKind,
                     ) -> #tvm_ffi::Result<Option<#tvm_ffi::VisitInterrupt>> {
                         let policy = #policy;
                         #tvm_ffi::extra::structural_visit::default_visit_with_policy(
-                            self, &policy, value, kind,
+                            self, visitor, &policy, value, kind,
                         )
                     }
                 },
@@ -268,6 +269,7 @@ fn expand(item_impl: &ItemImpl, args: DispatchArgs) -> syn::Result<TokenStream2>
                 #[allow(unreachable_code, unused_variables)]
                 fn visit(
                     &mut self,
+                    visitor: #tvm_ffi::extra::structural_visit::ActiveVisitor<'_>,
                     value: &#tvm_ffi::StructuralView,
                     def_region_kind: #tvm_ffi::extra::structural_visit::DefRegionKind,
                 ) -> #tvm_ffi::Result<
@@ -275,7 +277,7 @@ fn expand(item_impl: &ItemImpl, args: DispatchArgs) -> syn::Result<TokenStream2>
                 > {
                     #(#links)*
                     <Self as #tvm_ffi::extra::structural_visit::StructuralVisitor>::
-                        default_visit_children(self, value, def_region_kind)
+                        default_visit_children(self, visitor, value, def_region_kind)
                 }
             }
         },
@@ -349,6 +351,7 @@ fn expand_links(
             let trailing_arg = match mode {
                 DispatchMode::Mutate if handler.wants_mutator => quote!(, mutator),
                 DispatchMode::Mutate => quote!(),
+                _ if handler.wants_visitor => quote!(, def_region_kind, visitor),
                 _ if handler.wants_def_region => quote!(, def_region_kind),
                 _ => quote!(),
             };
@@ -419,6 +422,9 @@ struct Handler {
     method: syn::Ident,
     argument: HandlerArgument,
     wants_def_region: bool,
+    // A visit handler that recurses itself takes the `ActiveVisitor` after
+    // its `DefRegionKind`.
+    wants_visitor: bool,
     wants_mutator: bool,
     cfg_attrs: Vec<Meta>,
 }
@@ -438,7 +444,9 @@ fn parse_handler(method: &ImplItemMethod, mode: DispatchMode) -> syn::Result<Han
         }
         _ => false,
     };
-    let arity_is_expected = inputs.len() == 2 || inputs.len() == 3;
+    let arity_is_expected = inputs.len() == 2
+        || inputs.len() == 3
+        || (matches!(mode, DispatchMode::Visit) && inputs.len() == 4);
     if !receiver_is_expected || !arity_is_expected {
         let message = if matches!(mode, DispatchMode::Mutate) {
             "mutate handlers must take `&mut self`, a node, and optionally `&mut Mutator`"
@@ -446,13 +454,14 @@ fn parse_handler(method: &ImplItemMethod, mode: DispatchMode) -> syn::Result<Han
         } else {
             format!(
                 "{} handlers must take `&mut self`, a node, and optionally a trailing \
-                 `DefRegionKind` argument",
+                 `DefRegionKind` argument (visit handlers: then optionally `ActiveVisitor`)",
                 mode.name()
             )
         };
         return Err(syn::Error::new_spanned(&method.sig, message));
     }
-    let wants_def_region = !matches!(mode, DispatchMode::Mutate) && inputs.len() == 3;
+    let wants_def_region = !matches!(mode, DispatchMode::Mutate) && inputs.len() >= 3;
+    let wants_visitor = matches!(mode, DispatchMode::Visit) && inputs.len() == 4;
     let wants_mutator = matches!(mode, DispatchMode::Mutate) && inputs.len() >= 3;
     if wants_mutator {
         let context_type = match inputs.iter().nth(2) {
@@ -512,6 +521,7 @@ fn parse_handler(method: &ImplItemMethod, mode: DispatchMode) -> syn::Result<Han
         method: method.sig.ident.clone(),
         argument,
         wants_def_region,
+        wants_visitor,
         wants_mutator,
         cfg_attrs,
     })

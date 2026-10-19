@@ -22,13 +22,14 @@ use tvm_ffi::collections::map::MapObj;
 use tvm_ffi::function::FunctionObj;
 use tvm_ffi::object::ObjectRef;
 use tvm_ffi::{
-    dispatch, structural_map, structural_mutate, structural_visit, structural_walk, Any, AnyView,
-    Array, DefRegionKind, DefaultContextPolicy, DefaultMutContextPolicy, Error, FieldGetter,
-    Function, InplaceMode, InplaceValue, IntoMapper, Map, MapDispatch, MapWithContextPolicy,
-    MutContextPolicy, MutateCallbacks, MutateContext, MutateValue, Mutator, Object, ObjectArc,
-    ObjectRefCore, Result, String as FfiString, StructuralMutator, StructuralVarRemap,
-    StructuralView, StructuralVisitor, TypeIndex, Unchanged, UnchangedOr, VisitCallbacks,
-    VisitContext, VisitInterrupt, WalkOrder, WalkResult, RUNTIME_ERROR,
+    dispatch, structural_map, structural_mutate, structural_visit, structural_walk, ActiveMutator,
+    ActiveVisitor, Any, AnyView, Array, DefRegionKind, DefaultContextPolicy,
+    DefaultMutContextPolicy, Error, FieldGetter, Function, InplaceMode, InplaceValue, IntoMapper,
+    Map, MapDispatch, MapWithContextPolicy, MutContextPolicy, MutateCallbacks, MutateContext,
+    MutateValue, Mutator, Object, ObjectArc, ObjectRefCore, Result, String as FfiString,
+    StructuralMutator, StructuralVarRemap, StructuralView, StructuralVisitor, TypeIndex, Unchanged,
+    UnchangedOr, VisitCallbacks, VisitContext, VisitInterrupt, WalkOrder, WalkResult,
+    RUNTIME_ERROR,
 };
 
 struct IncrementIntegers;
@@ -53,29 +54,40 @@ struct ManualIncrement {
 impl StructuralMutator for ManualIncrement {
     fn dispatch_mutate(
         &mut self,
+        mutator: ActiveMutator<'_>,
         value: &StructuralView,
         def_region_kind: DefRegionKind,
     ) -> Result<Any> {
         if let Some(integer) = value.cast::<i64>() {
             Ok(Any::from(integer + 1))
         } else {
-            self.default_mutate(value, def_region_kind)
+            self.default_mutate(mutator, value, def_region_kind)
         }
     }
 
     fn dispatch_maybe_inplace_mutate(
         &mut self,
+        mutator: ActiveMutator<'_>,
         value: InplaceValue<'_>,
         def_region_kind: DefRegionKind,
     ) -> Result<Any> {
-        self.default_maybe_inplace_mutate(value, def_region_kind)
+        self.default_maybe_inplace_mutate(mutator, value, def_region_kind)
     }
 
-    fn var_remap_get(&mut self, var: &StructuralView) -> Result<Option<Any>> {
+    fn var_remap_get(
+        &mut self,
+        _mutator: ActiveMutator<'_>,
+        var: &StructuralView,
+    ) -> Result<Option<Any>> {
         self.remap.get(var)
     }
 
-    fn var_remap_set(&mut self, var: &StructuralView, mutated_value: &Any) -> Result<()> {
+    fn var_remap_set(
+        &mut self,
+        _mutator: ActiveMutator<'_>,
+        var: &StructuralView,
+        mutated_value: &Any,
+    ) -> Result<()> {
         self.remap.set(var, mutated_value)
     }
 }
@@ -89,6 +101,7 @@ struct ReplaceNone {
 impl StructuralMutator for ReplaceNone {
     fn dispatch_mutate(
         &mut self,
+        mutator: ActiveMutator<'_>,
         value: &StructuralView,
         def_region_kind: DefRegionKind,
     ) -> Result<Any> {
@@ -96,23 +109,33 @@ impl StructuralMutator for ReplaceNone {
             self.calls += 1;
             Ok(Any::from(8i64))
         } else {
-            self.default_mutate(value, def_region_kind)
+            self.default_mutate(mutator, value, def_region_kind)
         }
     }
 
     fn dispatch_maybe_inplace_mutate(
         &mut self,
+        mutator: ActiveMutator<'_>,
         value: InplaceValue<'_>,
         def_region_kind: DefRegionKind,
     ) -> Result<Any> {
-        self.default_maybe_inplace_mutate(value, def_region_kind)
+        self.default_maybe_inplace_mutate(mutator, value, def_region_kind)
     }
 
-    fn var_remap_get(&mut self, var: &StructuralView) -> Result<Option<Any>> {
+    fn var_remap_get(
+        &mut self,
+        _mutator: ActiveMutator<'_>,
+        var: &StructuralView,
+    ) -> Result<Option<Any>> {
         self.remap.get(var)
     }
 
-    fn var_remap_set(&mut self, var: &StructuralView, mutated_value: &Any) -> Result<()> {
+    fn var_remap_set(
+        &mut self,
+        _mutator: ActiveMutator<'_>,
+        var: &StructuralView,
+        mutated_value: &Any,
+    ) -> Result<()> {
         self.remap.set(var, mutated_value)
     }
 }
@@ -126,6 +149,7 @@ struct RecursiveEntryMutator {
 impl StructuralMutator for RecursiveEntryMutator {
     fn dispatch_mutate(
         &mut self,
+        mutator: ActiveMutator<'_>,
         value: &StructuralView,
         def_region_kind: DefRegionKind,
     ) -> Result<Any> {
@@ -133,30 +157,40 @@ impl StructuralMutator for RecursiveEntryMutator {
             if self.use_owned_value {
                 let value = Array::new(vec![1i64]);
                 self.owned_value_pointer = Some(array_pointer(&value) as usize);
-                self.maybe_inplace_mutate(value, def_region_kind)
+                self.maybe_inplace_mutate(mutator, value, def_region_kind)
             } else {
-                self.mutate(&1i64, def_region_kind)
+                self.mutate(mutator, &1i64, def_region_kind)
             }
         } else if let Some(integer) = value.cast::<i64>() {
             Ok(Any::from(integer + 1))
         } else {
-            self.default_mutate(value, def_region_kind)
+            self.default_mutate(mutator, value, def_region_kind)
         }
     }
 
     fn dispatch_maybe_inplace_mutate(
         &mut self,
+        mutator: ActiveMutator<'_>,
         value: InplaceValue<'_>,
         def_region_kind: DefRegionKind,
     ) -> Result<Any> {
-        self.default_maybe_inplace_mutate(value, def_region_kind)
+        self.default_maybe_inplace_mutate(mutator, value, def_region_kind)
     }
 
-    fn var_remap_get(&mut self, var: &StructuralView) -> Result<Option<Any>> {
+    fn var_remap_get(
+        &mut self,
+        _mutator: ActiveMutator<'_>,
+        var: &StructuralView,
+    ) -> Result<Option<Any>> {
         self.remap.get(var)
     }
 
-    fn var_remap_set(&mut self, var: &StructuralView, mutated_value: &Any) -> Result<()> {
+    fn var_remap_set(
+        &mut self,
+        _mutator: ActiveMutator<'_>,
+        var: &StructuralView,
+        mutated_value: &Any,
+    ) -> Result<()> {
         self.remap.set(var, mutated_value)
     }
 }
@@ -350,7 +384,12 @@ fn default_mutation_mode_preserves_ownership_and_unchanged_results() {
         increment: bool,
     }
     impl StructuralMutator for Controlled {
-        fn dispatch_mutate(&mut self, value: &StructuralView, _: DefRegionKind) -> Result<Any> {
+        fn dispatch_mutate(
+            &mut self,
+            _mutator: ActiveMutator<'_>,
+            value: &StructuralView,
+            _: DefRegionKind,
+        ) -> Result<Any> {
             let integer = value.cast::<i64>().unwrap();
             Ok(if self.increment {
                 Any::from(integer + 1)
@@ -360,14 +399,16 @@ fn default_mutation_mode_preserves_ownership_and_unchanged_results() {
         }
         fn dispatch_maybe_inplace_mutate(
             &mut self,
+            mutator: ActiveMutator<'_>,
             value: InplaceValue<'_>,
             kind: DefRegionKind,
         ) -> Result<Any> {
             if self.increment {
-                self.default_maybe_inplace_mutate_with_mode(value, kind, self.mode)
+                self.default_maybe_inplace_mutate_with_mode(mutator, value, kind, self.mode)
             } else {
-                let result =
-                    self.default_maybe_inplace_mutate_with_mode_result(value, kind, self.mode)?;
+                let result = self.default_maybe_inplace_mutate_with_mode_result(
+                    mutator, value, kind, self.mode,
+                )?;
                 assert!(result.is_unchanged());
                 Ok(result.into())
             }
@@ -751,11 +792,12 @@ fn callback_errors_preserve_message_and_add_object_context() {
             &mut self,
             value: &StructuralView,
             kind: DefRegionKind,
+            visitor: ActiveVisitor<'_>,
         ) -> Result<Option<VisitInterrupt>> {
             if value.cast::<i64>().is_some() {
                 return Err(self.0.clone());
             }
-            self.default_visit_children(value, kind)
+            self.default_visit_children(visitor, value, kind)
         }
     }
     #[dispatch(mutate, policy = (DefaultMutContextPolicy, DefaultMutContextPolicy))]

@@ -27,8 +27,8 @@
 //! definition region, the rest inherit the surrounding state.
 
 use tvm_ffi::{
-    structural_visit, Array, DefRegionKind, Result, String as FfiString, StructuralView,
-    StructuralVisitor, VisitInterrupt,
+    structural_visit, ActiveVisitor, Array, DefRegionKind, Result, String as FfiString,
+    StructuralView, StructuralVisitor, VisitInterrupt,
 };
 
 /// C++: class TestVisitorObj : public StructuralVisitorObj
@@ -49,6 +49,7 @@ impl StructuralVisitor for RecordingVisitor {
     /// `TFuncObj::StructuralVisit`.
     fn visit(
         &mut self,
+        visitor: ActiveVisitor<'_>,
         value: &StructuralView,
         def_region_kind: DefRegionKind,
     ) -> Result<Option<VisitInterrupt>> {
@@ -76,16 +77,16 @@ impl StructuralVisitor for RecordingVisitor {
             // C++: visitor->WithDefRegionKind(kTVMFFIDefRegionKindPattern,
             //          [&] { return visitor->VisitExpected(self->params); })
             let params = array.get(0).unwrap();
-            if let Some(interrupt) = self.visit_child(&params, DefRegionKind::Pattern)? {
+            if let Some(interrupt) = self.visit_child(visitor, &params, DefRegionKind::Pattern)? {
                 return Ok(Some(interrupt));
             }
             // C++: visitor->VisitExpected(self->body)  (inherits the state)
             let body = array.get(1).unwrap();
-            return self.visit_child(&body, def_region_kind);
+            return self.visit_child(visitor, &body, def_region_kind);
         }
 
         // C++: return DefaultVisitExpected(value);
-        self.default_visit_children(value, def_region_kind)
+        self.default_visit_children(visitor, value, def_region_kind)
     }
 }
 

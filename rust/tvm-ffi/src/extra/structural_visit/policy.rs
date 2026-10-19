@@ -138,12 +138,18 @@ impl<State, Policy: ContextPolicy<State>, D: VisitDriver<State> + ?Sized> VisitD
         self.driver.state_mut()
     }
     #[inline]
-    fn visit_raw(&mut self, raw: TVMFFIAny, kind: DefRegionKind) -> Result<Option<VisitInterrupt>> {
-        self.driver.visit_raw(raw, kind)
+    fn visit_raw(
+        &mut self,
+        visitor: ActiveVisitor<'_>,
+        raw: TVMFFIAny,
+        kind: DefRegionKind,
+    ) -> Result<Option<VisitInterrupt>> {
+        self.driver.visit_raw(visitor, raw, kind)
     }
     #[inline]
     fn visit_children_raw(
         &mut self,
+        _visitor: ActiveVisitor<'_>,
         raw: TVMFFIAny,
         kind: DefRegionKind,
     ) -> Result<Option<VisitInterrupt>> {
@@ -177,26 +183,37 @@ impl<State, V: StructuralVisitor + VisitCallbackState<State>> VisitDriver<State>
     fn state_mut(&mut self) -> &mut State {
         self.visitor.callback_state_mut()
     }
-    fn visit_raw(&mut self, raw: TVMFFIAny, kind: DefRegionKind) -> Result<Option<VisitInterrupt>> {
+    fn visit_raw(
+        &mut self,
+        visitor: ActiveVisitor<'_>,
+        raw: TVMFFIAny,
+        kind: DefRegionKind,
+    ) -> Result<Option<VisitInterrupt>> {
         if raw.type_index == TVMFFITypeIndex::kTVMFFINone as i32 {
             return Ok(None);
         }
         // Caller and callee are both Rust with a known visitor type: visit
         // directly instead of crossing the C-ABI vtable.
-        let active = active_structural_visitor()?;
+        let active = visitor.0;
         let context = std::ptr::from_mut(&mut *self.visitor).cast::<c_void>();
         checked_visitor_context(active, context)?;
         finish(with_visitor_def_region(active, kind, |kind| {
-            user_visit_raw(self.visitor, &StructuralView::from_raw(raw), kind)
+            user_visit_raw(self.visitor, active, &StructuralView::from_raw(raw), kind)
         }))
     }
     fn visit_children_raw(
         &mut self,
+        visitor: ActiveVisitor<'_>,
         raw: TVMFFIAny,
         kind: DefRegionKind,
     ) -> Result<Option<VisitInterrupt>> {
         // Bypass the current policy; children still re-enter the complete visitor.
-        default_user_visit_children(self.visitor, &StructuralView::from_raw(raw), kind)
+        default_user_visit_children(
+            self.visitor,
+            visitor.0,
+            &StructuralView::from_raw(raw),
+            kind,
+        )
     }
 }
 
@@ -315,7 +332,12 @@ impl<Walker: WalkDispatch, Policy: ContextPolicy<Walker>, const PRE_ORDER: bool>
         &mut self.visitor.walker
     }
     #[inline]
-    fn visit_raw(&mut self, raw: TVMFFIAny, kind: DefRegionKind) -> Result<Option<VisitInterrupt>> {
+    fn visit_raw(
+        &mut self,
+        _visitor: ActiveVisitor<'_>,
+        raw: TVMFFIAny,
+        kind: DefRegionKind,
+    ) -> Result<Option<VisitInterrupt>> {
         if raw.type_index == TVMFFITypeIndex::kTVMFFINone as i32 {
             return Ok(None);
         }
@@ -330,6 +352,7 @@ impl<Walker: WalkDispatch, Policy: ContextPolicy<Walker>, const PRE_ORDER: bool>
     #[inline]
     fn visit_children_raw(
         &mut self,
+        _visitor: ActiveVisitor<'_>,
         raw: TVMFFIAny,
         kind: DefRegionKind,
     ) -> Result<Option<VisitInterrupt>> {

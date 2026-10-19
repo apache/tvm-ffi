@@ -404,8 +404,8 @@ unmatched values use default child traversal:
 
 ```rust
 use tvm_ffi::{
-    dispatch, structural_visit, Array, DefRegionKind, Result, StructuralVisitor, VisitInterrupt,
-    StructuralView,
+    dispatch, structural_visit, ActiveVisitor, Array, DefRegionKind, Result, StructuralVisitor,
+    VisitInterrupt, StructuralView,
 };
 
 #[derive(Default)]
@@ -420,10 +420,11 @@ impl Depth {
         &mut self,
         value: &StructuralView,
         def_region_kind: DefRegionKind,
+        visitor: ActiveVisitor<'_>,
     ) -> Result<Option<VisitInterrupt>> {
         self.current += 1;
         self.max = self.max.max(self.current);
-        let interrupt = self.default_visit_children(value, def_region_kind)?;
+        let interrupt = self.default_visit_children(visitor, value, def_region_kind)?;
         self.current -= 1;
         Ok(interrupt)
     }
@@ -435,8 +436,13 @@ structural_visit(&values, &mut depth)?;
 assert_eq!(depth.max, 2);
 ```
 
+A handler that recurses itself takes the `ActiveVisitor` after its
+`DefRegionKind` and passes it to `visit_child` or `default_visit_children`. It
+identifies the running traversal, the way a C++ hook passes on the
+`StructuralVisitorObj*` it receives, and is valid only during that callback.
+
 Implement `StructuralVisitor` directly to override its low-level `visit`
-method.
+method; it receives the same `ActiveVisitor` first.
 
 Use `#[dispatch(visit, policy = MyPolicy)]` to apply a `ContextPolicy<Self>`
 to default recursion.
@@ -642,31 +648,38 @@ capability: callers cannot construct it from a read-only `StructuralView`. Overr
 `dispatch_maybe_inplace_mutate` to opt into default container reuse;
 `default_maybe_inplace_mutate` rechecks uniqueness before writing. Borrowed
 values can be re-entered with `mutate`, while owned values can use
-`maybe_inplace_mutate`:
+`maybe_inplace_mutate`. Every method receives the `ActiveMutator` of the running
+mutation first and passes it on to these helpers:
 
 ```rust
 use tvm_ffi::{
-    structural_mutate, Any, Array, DefRegionKind, InplaceValue, StructuralView, Result,
-    StructuralMutator,
+    structural_mutate, ActiveMutator, Any, Array, DefRegionKind, InplaceValue, StructuralView,
+    Result, StructuralMutator,
 };
 
 #[derive(Default)]
 struct Increment;
 
 impl StructuralMutator for Increment {
-    fn dispatch_mutate(&mut self, value: &StructuralView, kind: DefRegionKind) -> Result<Any> {
+    fn dispatch_mutate(
+        &mut self,
+        mutator: ActiveMutator<'_>,
+        value: &StructuralView,
+        kind: DefRegionKind,
+    ) -> Result<Any> {
         match value.cast::<i64>() {
             Some(value) => Ok(Any::from(value + 1)),
-            None => self.default_mutate(value, kind),
+            None => self.default_mutate(mutator, value, kind),
         }
     }
 
     fn dispatch_maybe_inplace_mutate(
         &mut self,
+        mutator: ActiveMutator<'_>,
         value: InplaceValue<'_>,
         kind: DefRegionKind,
     ) -> Result<Any> {
-        self.default_maybe_inplace_mutate(value, kind)
+        self.default_maybe_inplace_mutate(mutator, value, kind)
     }
 }
 

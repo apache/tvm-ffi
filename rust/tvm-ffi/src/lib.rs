@@ -57,16 +57,16 @@ pub use crate::extra::structural_hooks::{
     StructuralMutateHook, StructuralVisitHook, VisitHalt,
 };
 pub use crate::extra::structural_mutate::{
-    structural_map, structural_mutate, DefaultMutContextPolicy, InplaceMode, InplaceValue,
-    IntoMapper, IntoMutator, MapChainLink, MapDispatch, MapWithContextPolicy, MutContextPolicy,
-    MutateCallbacks, MutateChainLink, MutateChildren, MutateContext, MutateDispatch, MutateDriver,
-    MutateValue, Mutator, StructuralMutator, StructuralVarRemap,
+    structural_map, structural_mutate, ActiveMutator, DefaultMutContextPolicy, InplaceMode,
+    InplaceValue, IntoMapper, IntoMutator, MapChainLink, MapDispatch, MapWithContextPolicy,
+    MutContextPolicy, MutateCallbacks, MutateChainLink, MutateChildren, MutateContext,
+    MutateDispatch, MutateDriver, MutateValue, Mutator, StructuralMutator, StructuralVarRemap,
 };
 pub use crate::extra::structural_visit::{
-    structural_visit, structural_walk, ContextPolicy, DefRegionKind, DefaultContextPolicy,
-    IntoVisitor, IntoWalkResult, IntoWalker, StructuralVisitor, VisitCallbacks, VisitChainLink,
-    VisitChildren, VisitContext, VisitDriver, VisitInterrupt, WalkChainLink, WalkDispatch,
-    WalkOrder, WalkResult, WalkWithContextPolicy,
+    structural_visit, structural_walk, ActiveVisitor, ContextPolicy, DefRegionKind,
+    DefaultContextPolicy, IntoVisitor, IntoWalkResult, IntoWalker, StructuralVisitor,
+    VisitCallbacks, VisitChainLink, VisitChildren, VisitContext, VisitDriver, VisitInterrupt,
+    WalkChainLink, WalkDispatch, WalkOrder, WalkResult, WalkWithContextPolicy,
 };
 pub use crate::extra::unchanged::{Unchanged, UnchangedOr};
 pub use crate::extra::StructuralView;

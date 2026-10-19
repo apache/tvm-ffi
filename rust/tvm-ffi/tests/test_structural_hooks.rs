@@ -26,10 +26,10 @@ use std::sync::Once;
 use tvm_ffi::derive::{Object, ObjectRef};
 use tvm_ffi::{
     register_structural_hooks, register_structural_hooks_for_type_index, structural_map,
-    structural_mutate, structural_walk, Any, DefRegionKind, Error, Function, InplaceValue,
-    MapDispatch, MutateChildren, Object, ObjectArc, ObjectRefCore, Result, StructuralHooks,
-    StructuralMutator, StructuralVarRemap, StructuralView, TypeIndex, UnchangedOr, VisitChildren,
-    VisitHalt, WalkOrder, WalkResult, RUNTIME_ERROR,
+    structural_mutate, structural_walk, ActiveMutator, Any, DefRegionKind, Error, Function,
+    InplaceValue, MapDispatch, MutateChildren, Object, ObjectArc, ObjectRefCore, Result,
+    StructuralHooks, StructuralMutator, StructuralVarRemap, StructuralView, TypeIndex, UnchangedOr,
+    VisitChildren, VisitHalt, WalkOrder, WalkResult, RUNTIME_ERROR,
 };
 use tvm_ffi_sys::{TVMFFIByteArray, TVMFFITypeKeyToIndex};
 
@@ -526,6 +526,7 @@ fn user_mutators_reenter_through_hooks() {
     impl StructuralMutator for DoubleIntegers {
         fn dispatch_mutate(
             &mut self,
+            mutator: ActiveMutator<'_>,
             value: &StructuralView,
             def_region_kind: DefRegionKind,
         ) -> Result<Any> {
@@ -533,11 +534,12 @@ fn user_mutators_reenter_through_hooks() {
             if let Some(integer) = value.cast::<i64>() {
                 Ok(Any::from(integer * 2))
             } else {
-                self.default_mutate(value, def_region_kind)
+                self.default_mutate(mutator, value, def_region_kind)
             }
         }
         fn dispatch_maybe_inplace_mutate(
             &mut self,
+            mutator: ActiveMutator<'_>,
             value: InplaceValue<'_>,
             def_region_kind: DefRegionKind,
         ) -> Result<Any> {
@@ -545,13 +547,22 @@ fn user_mutators_reenter_through_hooks() {
             if let Some(integer) = value.as_value().cast::<i64>() {
                 Ok(Any::from(integer * 2))
             } else {
-                self.default_maybe_inplace_mutate(value, def_region_kind)
+                self.default_maybe_inplace_mutate(mutator, value, def_region_kind)
             }
         }
-        fn var_remap_get(&mut self, var: &StructuralView) -> Result<Option<Any>> {
+        fn var_remap_get(
+            &mut self,
+            _mutator: ActiveMutator<'_>,
+            var: &StructuralView,
+        ) -> Result<Option<Any>> {
             self.remap.get(var)
         }
-        fn var_remap_set(&mut self, var: &StructuralView, mutated_value: &Any) -> Result<()> {
+        fn var_remap_set(
+            &mut self,
+            _mutator: ActiveMutator<'_>,
+            var: &StructuralView,
+            mutated_value: &Any,
+        ) -> Result<()> {
             self.remap.set(var, mutated_value)
         }
     }
