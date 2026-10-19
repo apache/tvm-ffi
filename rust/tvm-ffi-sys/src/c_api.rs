@@ -474,6 +474,9 @@ unsafe extern "C" {
         child_slots_can_overflow: i32,
         parent_type_index: i32,
     ) -> i32;
+    pub fn TVMFFITypeRegisterField(type_index: i32, info: *const TVMFFIFieldInfo) -> i32;
+    pub fn TVMFFITypeRegisterMethod(type_index: i32, info: *const TVMFFIMethodInfo) -> i32;
+    pub fn TVMFFITypeRegisterMetadata(type_index: i32, metadata: *const TVMFFITypeMetadata) -> i32;
     pub fn TVMFFITypeRegisterAttr(
         type_index: i32,
         attr_name: *const TVMFFIByteArray,

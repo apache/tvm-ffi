@@ -17,7 +17,8 @@
  * under the License.
  */
 use proc_macro::TokenStream;
-use quote::quote;
+use quote::{format_ident, quote};
+use syn::ext::IdentExt;
 use syn::DeriveInput;
 
 use crate::utils::*;
@@ -88,6 +89,19 @@ pub fn derive_object(input: proc_macro::TokenStream) -> TokenStream {
     }
     .expect("First field must be `<base_name>: <ObjectCoreType>`");
 
+    let reflection = Reflection::parse(&derive_input);
+    assert!(
+        reflection.is_none() || (type_register && get_attr(&derive_input, "type_index").is_none()),
+        "#[reflect] and #[type_s_eq_hash_kind] need #[type_register] and no #[type_index]"
+    );
+    let (register_reflection, shallow_copy_impl) = match &reflection {
+        Some(reflection) => (
+            reflection.register_tokens(&struct_name, &type_key, &tvm_ffi_crate),
+            reflection.shallow_copy_tokens(&struct_name, &base_ty, &tvm_ffi_crate),
+        ),
+        None => (quote! {}, quote! {}),
+    };
+
     // A type with a static index has it; one defined here registers its key
     // under its parent on first use, or takes the index the key already has,
     // as C++ `TVM_FFI_DECLARE_OBJECT_INFO` does; any other type binds the
@@ -132,6 +146,7 @@ pub fn derive_object(input: proc_macro::TokenStream) -> TokenStream {
                                     #type_key
                                 );
                             }
+                            #register_reflection
                             tindex
                         }
                     );
@@ -216,8 +231,143 @@ pub fn derive_object(input: proc_macro::TokenStream) -> TokenStream {
 
             #base_def_tokens
         }
+
+        #shallow_copy_impl
     };
     TokenStream::from(expanded)
+}
+
+/// The reflection a `#[type_register]` type declares: its `#[reflect]` fields
+/// and its `#[type_s_eq_hash_kind]`.
+struct Reflection {
+    /// The structural kind; `None` inherits the parent's.
+    kind: Option<syn::Ident>,
+    /// The parent's field name and every other field's name.
+    base_id: syn::Ident,
+    field_ids: Vec<syn::Ident>,
+    /// The reflected fields: name, type and flag names.
+    reflected: Vec<(syn::Ident, syn::Type, Vec<syn::Ident>)>,
+}
+
+impl Reflection {
+    /// The type's reflection, or `None` when it declares none.
+    fn parse(derive_input: &DeriveInput) -> Option<Self> {
+        let kind = get_attr(derive_input, "type_s_eq_hash_kind").map(|attr| {
+            let kind = attr_to_str(attr);
+            syn::Ident::new(&kind.value(), kind.span())
+        });
+        let syn::Data::Struct(s) = &derive_input.data else {
+            return None;
+        };
+        let mut fields = s.fields.iter();
+        let base = fields.next()?;
+        assert!(
+            !base.attrs.iter().any(|a| a.path.is_ident("reflect")),
+            "the parent field cannot be #[reflect]; the parent registers its own fields"
+        );
+        let mut field_ids = Vec::new();
+        let mut reflected = Vec::new();
+        for field in fields {
+            let id = field
+                .ident
+                .clone()
+                .expect("#[derive(Object)] needs named fields");
+            field_ids.push(id.clone());
+            let Some(attr) = field.attrs.iter().find(|a| a.path.is_ident("reflect")) else {
+                continue;
+            };
+            let flags = match attr.parse_meta() {
+                Ok(syn::Meta::Path(_)) => Vec::new(),
+                Ok(syn::Meta::List(list)) => list
+                    .nested
+                    .iter()
+                    .map(|flag| match flag {
+                        syn::NestedMeta::Meta(syn::Meta::Path(path)) => path
+                            .get_ident()
+                            .cloned()
+                            .expect("Expect #[reflect(<flag>, ...)] with flag names"),
+                        _ => panic!("Expect #[reflect(<flag>, ...)] with flag names"),
+                    })
+                    .collect(),
+                _ => panic!("Expect #[reflect] or #[reflect(<flag>, ...)]"),
+            };
+            reflected.push((id, field.ty.clone(), flags));
+        }
+        if kind.is_none() && reflected.is_empty() {
+            return None;
+        }
+        Some(Self {
+            kind,
+            base_id: base
+                .ident
+                .clone()
+                .expect("First field must be `<base_name>: <ObjectCoreType>`"),
+            field_ids,
+            reflected,
+        })
+    }
+
+    /// Registers the reflection under `tindex`, inside the registration of
+    /// the type index, which holds the registration lock.
+    fn register_tokens(
+        &self,
+        struct_name: &syn::Ident,
+        type_key: &syn::LitStr,
+        tvm_ffi_crate: &proc_macro2::TokenStream,
+    ) -> proc_macro2::TokenStream {
+        let reflection = quote!(#tvm_ffi_crate::reflection);
+        let kind = match &self.kind {
+            Some(kind) => quote!(Some(#reflection::SEqHashKind::#kind)),
+            None => quote!(None),
+        };
+        let fields = self.reflected.iter().map(|(id, ty, flags)| {
+            let name = id.unraw().to_string();
+            // `#[reflect(seq_hash_ignore)]` names `FieldFlags::SEQ_HASH_IGNORE`.
+            let flags = flags.iter().map(|flag| {
+                format_ident!("{}", flag.to_string().to_uppercase(), span = flag.span())
+            });
+            quote! {
+                .field::<#ty>(
+                    #name,
+                    ::core::mem::offset_of!(#struct_name, #id),
+                    #reflection::FieldFlags::NONE #(| #reflection::FieldFlags::#flags)*,
+                )?
+            }
+        });
+        quote! {
+            let registered = (|| -> #tvm_ffi_crate::Result<()> {
+                #reflection::ObjectDef::<#struct_name>::registering(tindex, #kind)?
+                    #(#fields)*
+                    .shallow_copy()?
+                    .finish()
+            })();
+            if let Err(error) = registered {
+                panic!("Failed to register the reflection of type key {}: {}", #type_key, error);
+            }
+        }
+    }
+
+    /// `ShallowCopy`: the parent's shallow copy and a clone of every other field.
+    fn shallow_copy_tokens(
+        &self,
+        struct_name: &syn::Ident,
+        base_ty: &syn::Type,
+        tvm_ffi_crate: &proc_macro2::TokenStream,
+    ) -> proc_macro2::TokenStream {
+        let base_id = &self.base_id;
+        let field_ids = &self.field_ids;
+        quote! {
+            impl #tvm_ffi_crate::reflection::ShallowCopy for #struct_name {
+                fn shallow_copy(&self) -> Self {
+                    Self {
+                        #base_id: <#base_ty as #tvm_ffi_crate::reflection::ShallowCopy>
+                            ::shallow_copy(&self.#base_id),
+                        #(#field_ids: ::core::clone::Clone::clone(&self.#field_ids),)*
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// Derive ObjectRef trait for a struct to generate boilerplate code
@@ -243,15 +393,17 @@ pub fn derive_object_ref(input: proc_macro::TokenStream) -> TokenStream {
         unsafe impl #tvm_ffi_crate::object::ObjectRefCore for #struct_name {
             type ContainerType = <#data_ty as std::ops::Deref>::Target;
             #[inline]
-            fn data(this: &Self) -> &ObjectArc<Self::ContainerType> {
+            fn data(this: &Self) -> &#tvm_ffi_crate::object::ObjectArc<Self::ContainerType> {
                 &this.#data_id
             }
             #[inline]
-            fn into_data(this: Self) -> ObjectArc<Self::ContainerType> {
+            fn into_data(this: Self) -> #tvm_ffi_crate::object::ObjectArc<Self::ContainerType> {
                 this.#data_id
             }
             #[inline]
-            unsafe fn from_data(data: ObjectArc<Self::ContainerType>) -> Self {
+            unsafe fn from_data(
+                data: #tvm_ffi_crate::object::ObjectArc<Self::ContainerType>
+            ) -> Self {
                 Self { #data_id: data }
             }
         }

@@ -183,6 +183,45 @@ assert_eq!(i64::try_from(result)?, 3);
 `Function::from_type_method(type_index, name)` performs the same lookup when
 the type index is already known (e.g. from `Any::type_index`).
 
+### Defining Reflected Object Types
+
+An object type defined in Rust registers its type key with `#[type_register]`
+and its fields with `#[reflect]`, as C++ `TVM_FFI_DECLARE_OBJECT_INFO` and
+`refl::ObjectDef<T>().def_ro(...)` do. The registration runs on the type's
+first `type_index()`, which allocating an instance calls:
+
+```rust
+use tvm_ffi::derive::{Object, ObjectRef};
+use tvm_ffi::{Object, ObjectArc};
+
+#[repr(C)]
+#[derive(Object)]
+#[type_key = "my.Point"]
+#[type_register]
+#[type_s_eq_hash_kind = "TreeNode"]
+pub struct PointObj {
+    base: Object,
+    #[reflect]
+    pub x: i64,
+    #[reflect(writable, seq_hash_ignore)]
+    pub label: tvm_ffi::String,
+}
+
+#[repr(C)]
+#[derive(ObjectRef, Clone)]
+pub struct Point {
+    data: ObjectArc<PointObj>,
+}
+```
+
+Each reflected field gets a C ABI getter and setter and its type schema, so
+C++ structural equality and hashing, `ffi.ReprPrint`, `ffi.DeepCopy` and
+Python see it. The flags in `#[reflect(...)]` name
+`tvm_ffi::FieldFlags` constants. Without `#[type_s_eq_hash_kind]`, a type
+keeps its nearest reflected ancestor's kind. The derive also implements
+`ShallowCopy` and registers it as `__ffi_shallow_copy__`, which requires the
+parent to implement `ShallowCopy` and the other fields to be `Clone`.
+
 ### Converting Borrowed Values into `Any`
 
 `Any::from(value)` takes ownership of `value`. Use it when you own the value.
