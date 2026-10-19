@@ -21,7 +21,7 @@ on:
   workflow_dispatch:
     inputs:
       branch:
-        description: "Branch or tag to build"
+        description: "Branch or tag to publish (manual run)"
         required: true
         type: string
 
