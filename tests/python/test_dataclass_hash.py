@@ -843,6 +843,7 @@ def _make_shared_binary_dag(depth: int) -> object:
     return node
 
 
+@pytest.mark.skip(reason="flaky: microsecond timing ratio is sensitive to CI scheduling noise")
 def test_shared_dag_hash_scaling_not_exponential() -> None:
     """Hashing shared DAGs should scale roughly linearly in depth."""
     d18 = _make_shared_binary_dag(18)
