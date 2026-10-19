@@ -65,6 +65,23 @@ pub fn match_any(input: TokenStream) -> TokenStream {
 /// `_type_child_slots` (default 0) and `_type_child_slots_can_overflow`
 /// (default true).
 ///
+/// With `#[type_register]`, fields marked `#[reflect]` are registered with the
+/// type table when the type is, as C++ `refl::ObjectDef<T>().def_ro(...)`
+/// does: a getter, a setter and the type schema per field, the metadata, and
+/// the `__ffi_shallow_copy__` and `__ffi_type_final__` type attributes. C++
+/// structural equality and hashing, `repr`, deep copy and Python then see
+/// the fields. `#[reflect(writable, seq_hash_ignore, ...)]` adds the
+/// [`FieldFlags`] of those names. `#[type_s_eq_hash_kind = "TreeNode"]`
+/// names the [`SEqHashKind`]; without it the type keeps its nearest reflected
+/// ancestor's, as a C++ subclass inherits `_type_s_eq_hash_kind`. A type with
+/// either attribute also gets `ShallowCopy`, which shallow-copies the parent
+/// and clones every other field, so the parent must implement `ShallowCopy`
+/// (`Object` and reflected Rust types do) and the fields must be `Clone`; a
+/// reflected field's type must implement `AnyCompatible`.
+///
+/// [`FieldFlags`]: ../tvm_ffi/reflection/struct.FieldFlags.html
+/// [`SEqHashKind`]: ../tvm_ffi/reflection/enum.SEqHashKind.html
+///
 /// Registrations from Rust hold one lock, so they do not race each other. The
 /// runtime's type table is not locked otherwise: as for C++, a type must not
 /// be registered while another thread loads a library that registers types.
@@ -79,7 +96,9 @@ pub fn match_any(input: TokenStream) -> TokenStream {
         type_final,
         type_register,
         type_child_slots,
-        type_child_slots_can_overflow
+        type_child_slots_can_overflow,
+        type_s_eq_hash_kind,
+        reflect
     )
 )]
 pub fn derive_object(input: TokenStream) -> TokenStream {
