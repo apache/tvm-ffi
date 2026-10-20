@@ -71,6 +71,7 @@ def rust_module_path(path: Path) -> tuple[str, ...]:
 
     The crate is the nearest ancestor directory with a ``Cargo.toml``. ``src/lib.rs`` and
     ``src/main.rs`` are ``crate``; ``src/ir.rs`` and ``src/ir/mod.rs`` are ``crate::ir``.
+    A keyword segment is a raw identifier (``src/ir/type.rs`` is ``crate::ir::r#type``).
     Raises ``ValueError`` for a file outside a crate's ``src/``.
     """
     path = path.resolve()
@@ -83,7 +84,7 @@ def rust_module_path(path: Path) -> tuple[str, ...]:
     segments = list(path.relative_to(src).with_suffix("").parts)
     if segments[-1] == "mod" or (len(segments) == 1 and segments[0] in ("lib", "main")):
         segments.pop()
-    return ("crate", *segments)
+    return ("crate", *(f"r#{s}" if s in C.RUST_KEYWORDS else s for s in segments))
 
 
 def builtin_mirror_name(type_key: str) -> str:

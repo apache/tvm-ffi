@@ -1452,6 +1452,7 @@ def test_module_path_follows_the_file_under_src(tmp_path: Path) -> None:
         "ir/prim.rs": ("crate", "ir", "prim"),
         "ir/prim/mod.rs": ("crate", "ir", "prim"),
         "ir/lib.rs": ("crate", "ir", "lib"),  # `lib.rs` is the crate root only directly in `src`
+        "ir/type.rs": ("crate", "ir", "r#type"),
     }
     for name, module in cases.items():
         (src / name).write_text("", encoding="utf-8")
