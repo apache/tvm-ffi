@@ -19,6 +19,8 @@
 from __future__ import annotations
 
 import dataclasses
+import functools
+from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
 from . import consts as C
@@ -61,6 +63,27 @@ class RustUse:
 def is_crate_type_key(type_key: str) -> bool:
     """Whether the ``tvm_ffi`` crate binds ``type_key`` itself (every ``ffi.*`` key)."""
     return type_key.partition(".")[0] in C.RUST_MOD_MAP
+
+
+@functools.cache
+def rust_module_path(path: Path) -> tuple[str, ...]:
+    """Return the module a ``.rs`` file defines, from its place under its crate's ``src/``.
+
+    The crate is the nearest ancestor directory with a ``Cargo.toml``. ``src/lib.rs`` and
+    ``src/main.rs`` are ``crate``; ``src/ir.rs`` and ``src/ir/mod.rs`` are ``crate::ir``.
+    Raises ``ValueError`` for a file outside a crate's ``src/``.
+    """
+    path = path.resolve()
+    crate = next((d for d in path.parents if (d / "Cargo.toml").is_file()), None)
+    if crate is None:
+        raise ValueError(f"{path} is in no Cargo crate: no `Cargo.toml` above it")
+    src = crate / "src"
+    if src not in path.parents:
+        raise ValueError(f"{path} is not under `{src}`, so it is in no module of the crate")
+    segments = list(path.relative_to(src).with_suffix("").parts)
+    if segments[-1] == "mod" or (len(segments) == 1 and segments[0] in ("lib", "main")):
+        segments.pop()
+    return ("crate", *segments)
 
 
 def builtin_mirror_name(type_key: str) -> str:

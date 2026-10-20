@@ -399,6 +399,11 @@ When you run the tool, it:
       // tvm-ffi-stubgen(prefix): my_ffi_extension
       // tvm-ffi-stubgen(skip): my_ffi_extension.Internal
 
+   A generated type is named from the module of the file its block is in, not from its
+   type key: the module follows the file's place under the ``src/`` of the nearest
+   ``Cargo.toml`` (``src/ir/prim.rs`` is ``crate::ir::prim``). Other files refer to it by
+   that ``crate::`` path, so a namespace can live anywhere in the module tree.
+
 ``import-object`` - Import Object
    Injects a custom import into generated code. The format is
    ``<full_name>;<type_checking_only>;<alias>``.

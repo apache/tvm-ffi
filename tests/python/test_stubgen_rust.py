@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Container, Iterator
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 
 import pytest
@@ -41,7 +41,13 @@ from tvm_ffi.stub.rust_generator.codegen import (
     generate_rust_object,
 )
 from tvm_ffi.stub.rust_generator.directives import Directives, EnumSpec
-from tvm_ffi.stub.rust_generator.utils import RustImports, RustUse, render_rust_type, rust_ident
+from tvm_ffi.stub.rust_generator.utils import (
+    RustImports,
+    RustUse,
+    render_rust_type,
+    rust_ident,
+    rust_module_path,
+)
 from tvm_ffi.stub.utils import InitConfig, NamedTypeSchema, ObjectInfo, Options
 
 RUST = get_generator("rust")
@@ -119,20 +125,47 @@ def _object_block(type_key: str) -> CodeBlock:
     )
 
 
-class _Everything:
+def _module_of(type_key: str) -> tuple[str, ...]:
+    """Return the module a test places a type key's block in: its namespace under ``crate``."""
+    return ("crate", *type_key.split(".")[:-1])
+
+
+class _Everything(Mapping[str, tuple[str, ...]]):
     """Stands in for the run's declared type keys when a test does not care: all are asked for."""
+
+    def __getitem__(self, key: str) -> tuple[str, ...]:
+        return _module_of(key)
 
     def __contains__(self, key: object) -> bool:
         return True
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(())
+
+    def __len__(self) -> int:
+        return 0
 
 
 ALL_DECLARED = _Everything()
 
 
+def _declared(*type_keys: str) -> dict[str, tuple[str, ...]]:
+    """Only ``type_keys`` have a block in the run, each in the module of its namespace."""
+    return {key: _module_of(key) for key in type_keys}
+
+
+def _crate(root: Path) -> Path:
+    """Make ``root`` a Cargo crate; return its ``src`` directory."""
+    (root / "Cargo.toml").write_text('[package]\nname = "demo"\n', encoding="utf-8")
+    src = root / "src"
+    src.mkdir(exist_ok=True)
+    return src
+
+
 def _render(
     info: ObjectInfo,
     imports: RustImports | None = None,
-    declared: Container[str] = ALL_DECLARED,
+    declared: Mapping[str, tuple[str, ...]] = ALL_DECLARED,
 ) -> tuple[str, RustImports]:
     """Render ``info`` into a fresh object block; return the body text and the collector."""
     imports = RustImports() if imports is None else imports
@@ -407,7 +440,7 @@ def test_render_derived_object_cross_module() -> None:
     text, imports = _render(info)
     assert "    base: ExprObj," in text
     assert text.endswith("tvm_ffi::impl_object_upcast!(Add => Expr);")
-    assert {"super::ir::ExprObj", "super::ir::Expr"} <= _uses(imports)
+    assert {"crate::ir::ExprObj", "crate::ir::Expr"} <= _uses(imports)
 
 
 def test_render_object_under_builtin_parent() -> None:
@@ -608,8 +641,8 @@ def test_render_iter_var_golden() -> None:
     assert {
         "tvm_ffi::Error",
         "tvm_ffi::VALUE_ERROR",
-        "super::ir::Range",
-        "super::ir::Span",
+        "crate::ir::Range",
+        "crate::ir::Span",
     } <= _uses(imports)
 
 
@@ -794,10 +827,10 @@ def test_render_complete_add_golden() -> None:
     assert _uses(imports) == {
         "std::ops::Deref",
         "tvm_ffi::ObjectArc",
-        "super::ir::ExprObj",
-        "super::ir::Expr",
-        "super::ir::Span",
-        "super::ir::Type",
+        "crate::ir::ExprObj",
+        "crate::ir::Expr",
+        "crate::ir::Span",
+        "crate::ir::Type",
     }
 
 
@@ -1144,7 +1177,7 @@ def test_directive_disagreeing_with_bytes_is_an_error(
 
 def test_import_section_dedups_sorts_and_filters_defined_types() -> None:
     imports = RustImports()
-    for name in ("tvm_ffi::ObjectArc", "std::ops::Deref", "tvm_ffi::ObjectArc", "super::ir::Expr"):
+    for name in ("tvm_ffi::ObjectArc", "std::ops::Deref", "tvm_ffi::ObjectArc", "crate::ir::Expr"):
         imports.record(name)
     block = CodeBlock(
         kind="import-section",
@@ -1153,7 +1186,7 @@ def test_import_section_dedups_sorts_and_filters_defined_types() -> None:
         lineno_end=2,
         lines=[f"{C.RUST_SYNTAX.begin} import-section", C.RUST_SYNTAX.end],
     )
-    generate_rust_import_section(block, imports, Options(), defined_types={"super::ir::Expr"})
+    generate_rust_import_section(block, imports, Options(), defined_types={"crate::ir::Expr"})
     assert block.lines[1:-1] == ["use std::ops::Deref;", "use tvm_ffi::ObjectArc;"]
 
 
@@ -1242,7 +1275,8 @@ def test_registry_hidden_field_and_vptr_stay_opaque() -> None:
 
 
 def test_stage_3_applies_directives_to_a_registered_type(tmp_path: Path) -> None:
-    src = tmp_path / "mod.rs"
+    root = _crate(tmp_path)
+    src = root / "mod.rs"
     src.write_text(
         "\n".join(
             [
@@ -1266,6 +1300,7 @@ def test_stage_3_applies_directives_to_a_registered_type(tmp_path: Path) -> None
 
 
 def test_cli_init_generates_a_module_tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = _crate(tmp_path)
     monkeypatch.setattr(
         "sys.argv",
         [
@@ -1278,12 +1313,12 @@ def test_cli_init_generates_a_module_tree(tmp_path: Path, monkeypatch: pytest.Mo
             "demo_shared",
             "--init-prefix",
             "testing.",
-            str(tmp_path),
+            str(root),
         ],
     )
     assert stub_cli.__main__() == 0
-    assert (tmp_path / "mod.rs").read_text(encoding="utf-8") == "pub mod testing;\n"
-    text = (tmp_path / "testing" / "mod.rs").read_text(encoding="utf-8")
+    assert (root / "mod.rs").read_text(encoding="utf-8") == "pub mod testing;\n"
+    text = (root / "testing" / "mod.rs").read_text(encoding="utf-8")
     assert text.startswith("#![allow(dead_code, unused_imports)]\n")
     assert "use tvm_ffi::FieldGetter;" in text  # the opaque fixtures read through getters
     assert '#[type_key = "testing.TestCxxClassDerivedDerived"]' in text
@@ -1302,12 +1337,13 @@ def test_cli_init_generates_a_module_tree(tmp_path: Path, monkeypatch: pytest.Mo
     assert "pub struct TestCxxStrEnumObj {\n    base: FfiStrEnumObj,\n}" in text
     # Running again over the generated tree is a no-op.
     assert stub_cli.__main__() == 0
-    assert (tmp_path / "testing" / "mod.rs").read_text(encoding="utf-8") == text
+    assert (root / "testing" / "mod.rs").read_text(encoding="utf-8") == text
 
 
 def test_cli_check_reports_stale_files(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    root = _crate(tmp_path)
     monkeypatch.setattr(
         "sys.argv",
         [
@@ -1320,13 +1356,13 @@ def test_cli_check_reports_stale_files(
             "demo_shared",
             "--init-prefix",
             "testing.",
-            str(tmp_path),
+            str(root),
         ],
     )
     assert stub_cli.__main__() == 0
-    mod_rs = tmp_path / "testing" / "mod.rs"
+    mod_rs = root / "testing" / "mod.rs"
     fresh = mod_rs.read_text(encoding="utf-8")
-    check = ["tvm-ffi-stubgen", "--target", "rust", "--check", str(tmp_path)]
+    check = ["tvm-ffi-stubgen", "--target", "rust", "--check", str(root)]
     # An up-to-date tree passes the check.
     monkeypatch.setattr("sys.argv", check)
     assert stub_cli.__main__() == 0
@@ -1339,7 +1375,7 @@ def test_cli_check_reports_stale_files(
     assert f"[Stale] {mod_rs}" in capsys.readouterr().out
     assert mod_rs.read_text(encoding="utf-8") == stale
     # Running in place repairs it; the check passes again.
-    monkeypatch.setattr("sys.argv", ["tvm-ffi-stubgen", "--target", "rust", str(tmp_path)])
+    monkeypatch.setattr("sys.argv", ["tvm-ffi-stubgen", "--target", "rust", str(root)])
     assert stub_cli.__main__() == 0
     assert mod_rs.read_text(encoding="utf-8") == fresh
     monkeypatch.setattr("sys.argv", check)
@@ -1347,7 +1383,8 @@ def test_cli_check_reports_stale_files(
 
 
 def test_cli_failed_file_exits_2(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    (tmp_path / "mod.rs").write_text(
+    root = _crate(tmp_path)
+    (root / "mod.rs").write_text(
         "\n".join(
             [
                 f"{C.RUST_SYNTAX.directive('bogus')} testing.TestCxxClassBase",
@@ -1359,9 +1396,7 @@ def test_cli_failed_file_exits_2(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
         encoding="utf-8",
     )
     for extra in ([], ["--check"]):
-        monkeypatch.setattr(
-            "sys.argv", ["tvm-ffi-stubgen", "--target", "rust", *extra, str(tmp_path)]
-        )
+        monkeypatch.setattr("sys.argv", ["tvm-ffi-stubgen", "--target", "rust", *extra, str(root)])
         assert stub_cli.__main__() == 2
 
 
@@ -1398,12 +1433,71 @@ def test_unasked_dependencies_are_an_error() -> None:
         r"`tirx.Add` \(line 1\) depends on `ir.Expr`, `tirx.Var`, which this run does not ask"
     )
     with pytest.raises(ValueError, match=expected):
-        _render(info, declared=frozenset({"tirx.Add"}))
-    # Declared in another file of the run: reached by module path, as before.
-    text, imports = _render(info, declared=frozenset({"tirx.Add", "ir.Expr", "tirx.Var"}))
+        _render(info, declared=_declared("tirx.Add"))
+    # Declared in another file of the run: reached by the `crate::` path of its module.
+    text, imports = _render(info, declared=_declared("tirx.Add", "ir.Expr", "tirx.Var"))
     assert "    base: ExprObj," in text
     assert "pub fn a(&self) -> Result<Var> {" in text  # same module: a bare name
-    assert {"super::ir::ExprObj", "super::ir::Expr"} <= _uses(imports)
+    assert {"crate::ir::ExprObj", "crate::ir::Expr"} <= _uses(imports)
+
+
+def test_module_path_follows_the_file_under_src(tmp_path: Path) -> None:
+    src = _crate(tmp_path)
+    (src / "ir" / "prim").mkdir(parents=True)
+    cases = {
+        "lib.rs": ("crate",),
+        "main.rs": ("crate",),
+        "ir.rs": ("crate", "ir"),
+        "ir/mod.rs": ("crate", "ir"),
+        "ir/prim.rs": ("crate", "ir", "prim"),
+        "ir/prim/mod.rs": ("crate", "ir", "prim"),
+        "ir/lib.rs": ("crate", "ir", "lib"),  # `lib.rs` is the crate root only directly in `src`
+    }
+    for name, module in cases.items():
+        (src / name).write_text("", encoding="utf-8")
+        assert rust_module_path(src / name) == module, name
+    (tmp_path / "build.rs").write_text("", encoding="utf-8")
+    with pytest.raises(ValueError, match="is not under"):
+        rust_module_path(tmp_path / "build.rs")
+    loose = tmp_path.parent / f"{tmp_path.name}_loose.rs"
+    loose.write_text("", encoding="utf-8")
+    with pytest.raises(ValueError, match="is in no Cargo crate"):
+        rust_module_path(loose)
+
+
+def test_blocks_are_named_by_the_module_of_their_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A block's module is where its file is, whatever its type key; elsewhere it is `crate::`."""
+    src = _crate(tmp_path)
+    (src / "deep").mkdir()
+
+    def blocks(*keys: str) -> str:
+        lines = [f"{C.RUST_SYNTAX.begin} import-section", C.RUST_SYNTAX.end]
+        for key in keys:
+            lines += [f"{C.RUST_SYNTAX.begin} object/{key}", C.RUST_SYNTAX.end]
+        return "\n".join([*lines, ""])
+
+    lib, nested = src / "lib.rs", src / "deep" / "nested.rs"
+    lib.write_text(blocks("testing.TestCxxClassBase"), encoding="utf-8")
+    nested.write_text(blocks("testing.TestCxxClassDerived"), encoding="utf-8")
+    monkeypatch.setattr("sys.argv", ["tvm-ffi-stubgen", "--target", "rust", str(src)])
+    assert stub_cli.__main__() == 0
+    text = nested.read_text(encoding="utf-8")
+    assert "use crate::TestCxxClassBase;\nuse crate::TestCxxClassBaseObj;\n" in text
+    assert "    base: TestCxxClassBaseObj," in text
+    assert "tvm_ffi::impl_object_upcast!(TestCxxClassDerived => TestCxxClassBase);" in text
+    assert "super::" not in text
+    # Moving the parent's block moves the path, not the type key.
+    lib.write_text("", encoding="utf-8")
+    (src / "deep" / "mod.rs").write_text(blocks("testing.TestCxxClassBase"), encoding="utf-8")
+    assert stub_cli.__main__() == 0
+    text = nested.read_text(encoding="utf-8")
+    assert "use crate::deep::TestCxxClassBaseObj;" in text
+    # A file in no crate cannot be named, so its blocks fail.
+    (tmp_path / "Cargo.toml").unlink()
+    rust_module_path.cache_clear()
+    assert stub_cli.__main__() == 2
 
 
 def test_ty_map_parent_redirects_base_deref_and_upcast() -> None:
@@ -1411,7 +1505,7 @@ def test_ty_map_parent_redirects_base_deref_and_upcast() -> None:
     ty_map = {**RUST.default_ty_map(), "ir.Expr": "crate::ir::Expr"}
     block = _object_block("tirx.Add")
     imports = RustImports()
-    generate_rust_object(block, ty_map, imports, Options(), info, frozenset({"tirx.Add"}))
+    generate_rust_object(block, ty_map, imports, Options(), info, _declared("tirx.Add"))
     text = "\n".join(block.lines[1:-1])
     assert "    base: ExprObj," in text
     assert "impl Deref for AddObj {\n    type Target = ExprObj;" in text
@@ -1421,7 +1515,8 @@ def test_ty_map_parent_redirects_base_deref_and_upcast() -> None:
 
 
 def test_stage_3_checks_dependencies_across_the_run(tmp_path: Path) -> None:
-    src = tmp_path / "mod.rs"
+    root = _crate(tmp_path)
+    src = root / "mod.rs"
     blocks = [
         f"{C.RUST_SYNTAX.begin} import-section",
         C.RUST_SYNTAX.end,
@@ -1429,7 +1524,7 @@ def test_stage_3_checks_dependencies_across_the_run(tmp_path: Path) -> None:
         C.RUST_SYNTAX.end,
         "",
     ]
-    declared = frozenset({"testing.TestCxxClassDerived"})
+    declared = {"testing.TestCxxClassDerived": src}
     src.write_text("\n".join(blocks), encoding="utf-8")
     info = FileInfo.from_file(src)
     assert info is not None
@@ -1470,7 +1565,7 @@ def test_parent_with_the_objects_own_name_is_spelled_in_full() -> None:
     """A parent in another module sharing the leaf would collide with the block's own names."""
     info = _info("demo.s.Frame", parent="demo.t.Frame", ancestors=["ffi.Object", "demo.t.Frame"])
     text, imports = _render(info)
-    parent = "super::super::demo::t::Frame"
+    parent = "crate::demo::t::Frame"
     assert f"    base: {parent}Obj," in text
     assert f"    type Target = {parent}Obj;" in text
     assert text.endswith(f"tvm_ffi::impl_object_upcast!(Frame => {parent});")
@@ -1527,7 +1622,8 @@ def test_ty_map_target_in_the_files_own_module_is_not_imported() -> None:
 def test_prefix_directive_rolls_out_a_namespace(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    src = tmp_path / "testing.rs"
+    root = _crate(tmp_path)
+    src = root / "testing.rs"
     src.write_text(
         "\n".join(
             [
@@ -1544,10 +1640,10 @@ def test_prefix_directive_rolls_out_a_namespace(
         ),
         encoding="utf-8",
     )
-    check = ["tvm-ffi-stubgen", "--target", "rust", "--check", str(tmp_path)]
+    check = ["tvm-ffi-stubgen", "--target", "rust", "--check", str(root)]
     monkeypatch.setattr("sys.argv", check)
     assert stub_cli.__main__() == 1  # the blocks still to be added make the file stale
-    monkeypatch.setattr("sys.argv", ["tvm-ffi-stubgen", "--target", "rust", str(tmp_path)])
+    monkeypatch.setattr("sys.argv", ["tvm-ffi-stubgen", "--target", "rust", str(root)])
     assert stub_cli.__main__() == 0
     text = src.read_text(encoding="utf-8")
     begins = [line for line in text.splitlines() if line.startswith(C.RUST_SYNTAX.begin)]
@@ -1568,19 +1664,17 @@ def test_prefix_directive_rolls_out_a_namespace(
 def test_prefix_declared_twice_is_a_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    root = _crate(tmp_path)
     for name in ("a.rs", "b.rs"):
-        (tmp_path / name).write_text(
-            f"{C.RUST_SYNTAX.directive('prefix')} testing\n", encoding="utf-8"
-        )
-    monkeypatch.setattr(
-        "sys.argv", ["tvm-ffi-stubgen", "--target", "rust", "--check", str(tmp_path)]
-    )
+        (root / name).write_text(f"{C.RUST_SYNTAX.directive('prefix')} testing\n", encoding="utf-8")
+    monkeypatch.setattr("sys.argv", ["tvm-ffi-stubgen", "--target", "rust", "--check", str(root)])
     assert stub_cli.__main__() == 2
 
 
 def test_roll_out_matches_the_prefix_exactly(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    root = _crate(tmp_path)
     monkeypatch.setattr(
         stub_cli,
         "collect_type_keys",
@@ -1592,7 +1686,7 @@ def test_roll_out_matches_the_prefix_exactly(
         lambda keys: [ObjectInfo(fields=[], methods=[], type_key=key) for key in sorted(keys)],
     )
     begin, end = C.RUST_SYNTAX.begin, C.RUST_SYNTAX.end
-    src = tmp_path / "a.rs"
+    src = root / "a.rs"
     src.write_text(
         "\n".join(
             [
@@ -1631,20 +1725,19 @@ def test_roll_out_matches_the_prefix_exactly(
 
 def test_prefix_survives_init(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """`--init` rewrites the file on disk and reloads it; the roll-out must come after that."""
-    (tmp_path / "testing").mkdir()
-    mod_rs = tmp_path / "testing" / "mod.rs"
+    root = _crate(tmp_path)
+    (root / "testing").mkdir()
+    mod_rs = root / "testing" / "mod.rs"
     skip = f"{C.RUST_SYNTAX.directive('skip')} testing.TestCxxClassDerivedDerived"
     mod_rs.write_text(f"{C.RUST_SYNTAX.directive('prefix')} testing\n{skip}\n", encoding="utf-8")
     init = ["--init-pypkg", "demo", "--init-lib", "demo_shared", "--init-prefix", "testing."]
-    monkeypatch.setattr("sys.argv", ["tvm-ffi-stubgen", "--target", "rust", *init, str(tmp_path)])
+    monkeypatch.setattr("sys.argv", ["tvm-ffi-stubgen", "--target", "rust", *init, str(root)])
     assert stub_cli.__main__() == 0
     text = mod_rs.read_text(encoding="utf-8")
     assert text.startswith(f"{C.RUST_SYNTAX.directive('prefix')} testing\n")
     assert "pub struct TestCxxClassDerivedObj {" in text
     assert "object/testing.TestCxxClassDerivedDerived" not in text  # `--init` honours `skip`
-    monkeypatch.setattr(
-        "sys.argv", ["tvm-ffi-stubgen", "--target", "rust", "--check", str(tmp_path)]
-    )
+    monkeypatch.setattr("sys.argv", ["tvm-ffi-stubgen", "--target", "rust", "--check", str(root)])
     assert stub_cli.__main__() == 0
 
 
@@ -1656,7 +1749,8 @@ def test_prefix_survives_init(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
 def test_prefix_removes_blocks_of_unregistered_types(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    src = tmp_path / "testing.rs"
+    root = _crate(tmp_path)
+    src = root / "testing.rs"
     gone = f"{C.RUST_SYNTAX.begin} object/testing.NoLongerRegistered"
     src.write_text(
         "\n".join(
@@ -1664,21 +1758,20 @@ def test_prefix_removes_blocks_of_unregistered_types(
         ),
         encoding="utf-8",
     )
-    monkeypatch.setattr("sys.argv", ["tvm-ffi-stubgen", "--target", "rust", str(tmp_path)])
+    monkeypatch.setattr("sys.argv", ["tvm-ffi-stubgen", "--target", "rust", str(root)])
     assert stub_cli.__main__() == 0
     out = capsys.readouterr().out
     assert "[Removed]" in out and "`object/testing.NoLongerRegistered` (line 3)" in out
     text = src.read_text(encoding="utf-8")
     assert "NoLongerRegistered" not in text
     assert "pub struct TestCxxClassBaseObj {" in text  # the rest of the namespace is rolled out
-    monkeypatch.setattr(
-        "sys.argv", ["tvm-ffi-stubgen", "--target", "rust", "--check", str(tmp_path)]
-    )
+    monkeypatch.setattr("sys.argv", ["tvm-ffi-stubgen", "--target", "rust", "--check", str(root)])
     assert stub_cli.__main__() == 0
 
 
 def test_explicit_blocks_of_unregistered_types_are_reported_together(tmp_path: Path) -> None:
-    src = tmp_path / "mod.rs"
+    root = _crate(tmp_path)
+    src = root / "mod.rs"
     blocks = [
         f"{C.RUST_SYNTAX.begin} import-section",
         C.RUST_SYNTAX.end,
@@ -1698,7 +1791,7 @@ def test_explicit_blocks_of_unregistered_types_are_reported_together(tmp_path: P
         r"the type is no longer registered"
     )
     with pytest.raises(ValueError, match=expected):
-        _stage_3(info, Options(), RUST.default_ty_map(), {}, RUST, ALL_DECLARED)
+        _stage_3(info, Options(), RUST.default_ty_map(), {}, RUST)
     text = src.read_text(encoding="utf-8")
     assert "pub struct TestCxxClassBaseObj {" in text  # the other blocks are still written
     assert f"{C.RUST_SYNTAX.begin} object/demo.Gone\n{C.RUST_SYNTAX.end}" in text

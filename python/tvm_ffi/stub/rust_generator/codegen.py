@@ -42,6 +42,9 @@ provided in the same run: ``ffi.*`` by the crate, a ``ty-map`` by a hand-written
 binding whose object struct is ``<Name>Obj``, anything else by an ``object/``
 block in one of the processed files. Otherwise the block is an error naming the
 missing keys, so a partial binding never references a module that does not exist.
+A generated type is named from the module of the file its block is in (see
+:func:`~.utils.rust_module_path`), not from its type key: the bare name in that
+module, a ``crate::`` path anywhere else.
 """
 
 from __future__ import annotations
@@ -62,7 +65,7 @@ from .utils import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Container, Iterable
+    from collections.abc import Iterable, Mapping
     from pathlib import Path
 
     from ..file_utils import CodeBlock
@@ -114,10 +117,10 @@ class _ObjectRenderer:
     info: ObjectInfo
     imports: RustImports
     ty_map: dict[str, str]
-    #: Module segments of the file this object lands in (``tirx.transform.X`` -> ``("tirx", "transform")``).
-    mod_segments: tuple[str, ...]
-    #: Type keys with an ``object/`` block somewhere in this run (see :meth:`_provider`).
-    declared: Container[str]
+    #: Module of the file this object lands in (``src/tirx/transform.rs`` -> ``("crate", "tirx", "transform")``).
+    module: tuple[str, ...]
+    #: Type keys with an ``object/`` block somewhere in this run, to the module of the block's file.
+    declared: Mapping[str, tuple[str, ...]]
     #: Referenced type keys nobody provides; reported together once the body is built.
     missing: set[str] = dataclasses.field(default_factory=set)
 
@@ -160,13 +163,10 @@ class _ObjectRenderer:
         """Record the ``ty-map`` target of ``type_key``; one in this file's own module is in scope.
 
         A hand-written binding next to the generated ones (``ir.Op -> crate::ir::Op``
-        in ``ir``) must not import itself.
+        in ``crate::ir``) must not import itself.
         """
         module, _, name = path.rpartition("::")
-        own = "::".join(self.mod_segments)
-        if type_key.rpartition(".")[0] == ".".join(self.mod_segments) and module.endswith(
-            f"::{own}"
-        ):
+        if module == "::".join(self.module):
             return name
         return imports.record(path)
 
@@ -176,17 +176,18 @@ class _ObjectRenderer:
     def _generated_type_path(self, type_key: str) -> str:
         """Spell a generated type key from this file.
 
-        Same module: the bare leaf. Elsewhere: ``super::`` per segment of this
-        file's module, then the full path (edition 2021 rejects ``use ir::Expr``).
+        Same module: the bare leaf. Elsewhere: the ``crate::`` path of the module its block is in.
         """
         head, _, _ = type_key.partition(".")
         if head in C_RUST.RUST_MOD_MAP:
             return type_key
-        mod, _, type_leaf = type_key.rpartition(".")
-        if tuple(mod.split(".")) == self.mod_segments:
+        type_leaf = type_key.rpartition(".")[2]
+        if type_key not in self.declared:  # missing: reported once the body is built
             return type_leaf
-        supers = "super::" * len(self.mod_segments)
-        return f"{supers or 'self::'}{type_key.replace('.', '::')}"
+        module = self.declared[type_key]
+        if module == self.module:
+            return type_leaf
+        return "::".join((*module, type_leaf))
 
     def _provider(self, type_key: str) -> str | None:
         """Who provides the binding of ``type_key``; a key nobody does is recorded in :attr:`missing`.
@@ -607,11 +608,13 @@ def generate_rust_object(
     imports: RustImports,
     opt: Options,
     obj_info: ObjectInfo,
-    declared: Container[str],
+    declared: Mapping[str, tuple[str, ...]],
 ) -> None:
     """Emit the Rust binding of ``obj_info`` into an ``object/<key>`` block.
 
-    Raises ``ValueError`` when it refers to a type key this run does not provide.
+    ``declared`` maps each type key with an ``object/`` block in this run, ``obj_info``'s
+    own among them, to the module of the file the block is in. Raises ``ValueError`` when
+    the binding refers to a type key this run does not provide.
     """
     assert len(code.lines) >= 2
     assert isinstance(obj_info.type_key, str)
@@ -619,7 +622,7 @@ def generate_rust_object(
         info=obj_info,
         imports=imports,
         ty_map=ty_map,
-        mod_segments=tuple(obj_info.type_key.split(".")[:-1]),
+        module=declared[obj_info.type_key],
         declared=declared,
     )
     body = renderer.body()

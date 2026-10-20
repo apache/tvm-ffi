@@ -45,7 +45,7 @@ from .python_generator import PythonGenerator
 from .rust_generator import RustGenerator
 
 if TYPE_CHECKING:
-    from collections.abc import Container
+    from collections.abc import Mapping
     from pathlib import Path
 
     from .file_utils import CodeBlock
@@ -142,12 +142,13 @@ class Generator(Protocol):
         imports: Any,
         opt: Options,
         obj_info: ObjectInfo,
-        declared: Container[str] = frozenset(),
+        declared: Mapping[str, Path],
     ) -> None:
         """Emit a type definition (fields + methods + init) for an ``object/<key>`` block.
 
-        ``declared`` lists the type keys that have an ``object/`` block anywhere in
-        this run, for generators that must know what a binding may refer to.
+        ``declared`` maps the type keys that have an ``object/`` block anywhere in
+        this run to the file the block is in, for generators that must know what a
+        binding may refer to and where it is defined.
         """
         ...
 

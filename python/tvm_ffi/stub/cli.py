@@ -41,7 +41,7 @@ from .lib_state import (
 from .utils import FuncInfo, InitConfig, Options
 
 if TYPE_CHECKING:
-    from collections.abc import Container
+    from collections.abc import Mapping
 
     from .generator import Generator
 
@@ -105,13 +105,8 @@ def __main__() -> int:
     # Stage 3: Process
     # - `tvm-ffi-stubgen(begin): global/...`
     # - `tvm-ffi-stubgen(begin): object/...`
-    # Every `object/` block of the run: what a generated binding may refer to.
-    declared = frozenset(
-        code.param
-        for file in files
-        for code in file.code_blocks
-        if code.kind == "object" and isinstance(code.param, str)
-    )
+    # Every `object/` block of the run, to its file: what a generated binding may refer to.
+    declared = _declared_objects(files)
     for file in files:
         if opt.verbose:
             print(f"{C.TERM_CYAN}[File] {file.path}{C.TERM_RESET}")
@@ -340,19 +335,32 @@ def _stage_2(
     return generated_prefixes
 
 
+def _declared_objects(files: list[FileInfo]) -> dict[str, Path]:
+    """Map the type key of every ``object/`` block in ``files`` to the file it is in."""
+    declared: dict[str, Path] = {}
+    for file in files:
+        for code in file.code_blocks:
+            if code.kind == "object" and isinstance(code.param, str):
+                declared.setdefault(code.param, file.path)
+    return declared
+
+
 def _stage_3(  # noqa: PLR0912
     file: FileInfo,
     opt: Options,
     ty_map: dict[str, str],
     global_funcs: dict[str, list[FuncInfo]],
     generator: Generator,
-    declared: Container[str] = frozenset(),
+    declared: Mapping[str, Path] | None = None,
 ) -> bool:
     """Process one file's blocks; return whether its content is (or would be) changed.
 
-    An ``object/`` block whose type is no longer registered is left as is; once the rest
-    of the file is processed, they are reported together as an error.
+    ``declared`` defaults to the ``object/`` blocks of ``file`` alone. An ``object/``
+    block whose type is no longer registered is left as is; once the rest of the file
+    is processed, they are reported together as an error.
     """
+    if declared is None:
+        declared = _declared_objects([file])
     defined_funcs: set[str] = set()
     unregistered: list[str] = []
     defined_types: set[str] = set()
