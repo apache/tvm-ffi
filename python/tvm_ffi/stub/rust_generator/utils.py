@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import dataclasses
 import functools
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
@@ -27,6 +28,8 @@ from . import consts as C
 from .directives import Directives
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from tvm_ffi.core import TypeSchema
 
 
@@ -167,6 +170,27 @@ def _generic(base: str | None, *params: str | None) -> str | None:
     if base is None or any(p is None for p in params):
         return None
     return f"{base}<{', '.join(p for p in params if p is not None)}>"
+
+
+#: The module qualifier of a path (``crate::ir::``, ``super::super::``, ``::core::mem::``).
+_MODULE_QUALIFIER = re.compile(r"(?<![\w:])(?:::)?(?:[a-z_][a-z0-9_]*::)+(?=[A-Za-z_])")
+
+
+def check_tokens(lines: Iterable[str]) -> tuple[str, ...]:
+    """Return the tokens of generated Rust ``lines`` that ``--check`` compares.
+
+    ``use`` lines, comment lines and module qualifiers are dropped, and so is a
+    trailing comma, so neither the import paths nor how rustfmt wraps a call count.
+    """
+    text = " ".join(
+        line for line in (raw.strip() for raw in lines) if not line.startswith(("use ", "//"))
+    )
+    tokens = re.findall(r"\w+|\S", _MODULE_QUALIFIER.sub("", text))
+    return tuple(
+        token
+        for token, after in zip(tokens, [*tokens[1:], ""])
+        if not (token == "," and after in (")", "]", "}"))
+    )
 
 
 def rust_ident(name: str) -> str:

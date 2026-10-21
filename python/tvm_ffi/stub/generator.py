@@ -122,6 +122,10 @@ class Generator(Protocol):
         """
         ...
 
+    def check_view(self, code_blocks: list[CodeBlock]) -> object:
+        """Return what ``--check`` compares: a file is stale when a run changes it."""
+        ...
+
     # --- per-block generation (mutates `code.lines`) ------------------------
 
     def generate_global_funcs_block(

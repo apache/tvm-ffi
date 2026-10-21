@@ -44,6 +44,7 @@ from tvm_ffi.stub.rust_generator.directives import Directives, EnumSpec
 from tvm_ffi.stub.rust_generator.utils import (
     RustImports,
     RustUse,
+    check_tokens,
     render_rust_type,
     rust_ident,
     rust_module_path,
@@ -264,6 +265,32 @@ def test_rust_ident() -> None:
     assert rust_ident("crate") == "crate_"
     assert rust_ident("base") == "base_"  # the parent slot of every generated object struct
     assert rust_ident("data") == "data"  # the wrapper slot is `base`, so `data` is free
+
+
+def test_check_tokens_ignores_spelling() -> None:
+    generated = [
+        "use super::super::ir::ExprObj;",
+        "/// Complete: every field is mirrored.",
+        "#[derive(tvm_ffi::derive::Object)]",
+        "pub struct AddObj { base: ExprObj, pub a: i64, pub b: i64 }",
+        "const _: () = assert!(::core::mem::size_of::<AddObj>() == 40);",
+        "tvm_ffi::impl_object_upcast!(Add => super::super::ir::Expr);",
+    ]
+    respelled = [
+        "use crate::ir::Expr;",
+        "#[derive(Object)]",
+        "pub struct AddObj {",
+        "    base: crate::ir::ExprObj,",
+        "    pub a: i64,",
+        "    pub b: i64,",
+        "}",
+        "const _: () = assert!(core::mem::size_of::<AddObj>() == 40);",
+        "impl_object_upcast!(Add => Expr);",
+    ]
+    assert check_tokens(generated) == check_tokens(respelled)
+    for drift in [("a: i64", "a: i32"), ("40", "48"), ("ExprObj,", "StmtObj,"), ("Expr)", "Stmt)")]:
+        changed = [line.replace(*drift) for line in respelled]
+        assert check_tokens(generated) != check_tokens(changed), drift
 
 
 # ---------------------------------------------------------------------------
@@ -1380,6 +1407,65 @@ def test_cli_check_reports_stale_files(
     assert mod_rs.read_text(encoding="utf-8") == fresh
     monkeypatch.setattr("sys.argv", check)
     assert stub_cli.__main__() == 0
+
+
+def test_cli_check_ignores_how_a_binding_is_spelled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = _crate(tmp_path)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "tvm-ffi-stubgen",
+            "--target",
+            "rust",
+            "--init-pypkg",
+            "demo",
+            "--init-lib",
+            "demo_shared",
+            "--init-prefix",
+            "testing.",
+            str(root),
+        ],
+    )
+    assert stub_cli.__main__() == 0
+    mod_rs = root / "testing" / "mod.rs"
+    fresh = mod_rs.read_text(encoding="utf-8")
+    # Imports, paths, comments and wrapping differ from what a run writes; the bindings do not.
+    respelled = fresh
+    for old, new in [
+        ("use tvm_ffi::String;\n", ""),
+        ("use std::ops::Deref;\n", "use std::ops::Deref;\nuse crate::testing::TestCompare;\n"),
+        ("    base: Object,\n", "    base: tvm_ffi::Object,\n"),
+        ("/// Complete: ", "/// Mirrored: "),
+        (
+            "    pub(crate) fn new(\n"
+            "        p_required: i64,\n"
+            "        p_default: i64,\n"
+            "        k_required: i64,\n"
+            "        k_default: i64,\n"
+            "        hidden: i64,\n"
+            "    ) -> Self {\n",
+            "    pub(crate) fn new(p_required: i64, p_default: i64, k_required: i64, "
+            "k_default: i64, hidden: i64) -> Self {\n",
+        ),
+    ]:
+        assert old in respelled, old
+        respelled = respelled.replace(old, new)
+    mod_rs.write_text(respelled, encoding="utf-8")
+    check = ["tvm-ffi-stubgen", "--target", "rust", "--check", str(root)]
+    monkeypatch.setattr("sys.argv", check)
+    assert stub_cli.__main__() == 0
+    assert "[Stale]" not in capsys.readouterr().out
+    assert mod_rs.read_text(encoding="utf-8") == respelled
+    # A layout that no longer matches the registry is stale.
+    drifted = respelled.replace(
+        "size_of::<TestCompareObj>() == 56", "size_of::<TestCompareObj>() == 48"
+    )
+    assert drifted != respelled
+    mod_rs.write_text(drifted, encoding="utf-8")
+    assert stub_cli.__main__() == 1
+    assert f"[Stale] {mod_rs}" in capsys.readouterr().out
 
 
 def test_cli_failed_file_exits_2(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

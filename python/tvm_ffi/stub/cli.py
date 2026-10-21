@@ -98,6 +98,9 @@ def __main__() -> int:
             generator=generator,
         )
 
+    # `--check` compares the generator's view of each file before the run edits any block.
+    before = {file.path: generator.check_view(file.code_blocks) for file in files if opt.check}
+
     # Stage 2b. Add the object blocks a `tvm-ffi-stubgen(prefix)` file asks for. This runs
     # after `--init`, which rewrites files on disk and reloads them.
     failed += _roll_out_prefixes(files, generator)
@@ -125,7 +128,7 @@ def __main__() -> int:
                 f'{C.TERM_RED}[Failed] File "{file.path}": {traceback.format_exc()}{C.TERM_RESET}'
             )
             continue
-        if changed and opt.check:
+        if changed and opt.check and generator.check_view(file.code_blocks) != before[file.path]:
             stale += 1
             print(f"{C.TERM_YELLOW}[Stale] {file.path}{C.TERM_RESET}")
 
@@ -537,7 +540,9 @@ def _parse_args() -> Options:
         action="store_true",
         help=(
             "Don't write changes; report every file whose stub blocks are out of date "
-            "and exit with status 1 if there is any. Cannot be combined with --init-*."
+            "and exit with status 1 if there is any. For --target rust, only the generated "
+            "definitions count, not `use` lines, comments, layout or module paths. "
+            "Cannot be combined with --init-*."
         ),
     )
     parser.add_argument(

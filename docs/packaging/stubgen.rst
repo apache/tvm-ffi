@@ -250,6 +250,11 @@ All three are required together. When omitted, the tool operates in directive-on
    date and exit with status 1 if there is any (2 if a file failed to process), so CI
    can reject a stale tree. Cannot be combined with ``--init-*``.
 
+   With ``--target rust``, a file is stale only when a generated definition changes:
+   a type, field, accessor, allocator, upcast or layout assertion, or an ``object/``
+   block to add or remove. A run that would only rewrite ``use`` lines, comments,
+   line wrapping or the module path a type is spelled from leaves the file up to date.
+
 ``--imports``
    Additional Python modules to import before generation (semicolon-separated).
 

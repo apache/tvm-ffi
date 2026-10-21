@@ -33,7 +33,7 @@ from .codegen import (
     generate_rust_import_section,
     generate_rust_object,
 )
-from .utils import RustImports, RustUse, is_crate_type_key, rust_module_path
+from .utils import RustImports, RustUse, check_tokens, is_crate_type_key, rust_module_path
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -97,6 +97,20 @@ class RustGenerator:
     def is_builtin(self, type_key: str) -> bool:
         """Every ``ffi.*`` key is bound by the crate (the rule ``codegen`` resolves types with)."""
         return is_crate_type_key(type_key)
+
+    def check_view(self, code_blocks: list[CodeBlock]) -> dict[tuple[str, object], tuple[str, ...]]:
+        """Return what the ``object/`` blocks and the import section define, not their spelling.
+
+        A run that only changes ``use`` lines, comments, layout or the module a path is
+        spelled from (see :func:`check_tokens`) leaves the file up to date.
+        """
+        view: dict[tuple[str, object], tuple[str, ...]] = {}
+        for code in code_blocks:
+            if code.kind in ("object", "import-section"):
+                tokens = check_tokens(code.lines[1:-1])
+                if tokens:  # an import section of `use` lines alone is no definition
+                    view[code.kind, code.param] = tokens
+        return view
 
     # --- per-block generation -------------------------------------------------
 
