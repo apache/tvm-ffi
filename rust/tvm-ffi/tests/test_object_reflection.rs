@@ -115,8 +115,22 @@ fn call(name: &str, args: &[AnyView]) -> Any {
         .unwrap()
 }
 
+// A type registers on first use, and the runtime does not guard its type table
+// against readers on other threads, so each test registers every type here
+// before it reads the table.
+fn register_types() {
+    static REGISTERED: std::sync::Once = std::sync::Once::new();
+    REGISTERED.call_once(|| {
+        PointObj::type_index();
+        Point3Obj::type_index();
+        CounterObj::type_index();
+        no_imports::LeafObj::type_index();
+    });
+}
+
 #[test]
 fn test_reflected_fields_are_registered_with_the_type() {
+    register_types();
     let info = type_info::<PointObj>();
     let names: Vec<&str> = fields(info).iter().map(|f| f.name.as_str()).collect();
     assert_eq!(names, ["x", "y", "label"]);
@@ -167,6 +181,7 @@ fn test_reflected_fields_are_registered_with_the_type() {
 
 #[test]
 fn test_reflected_fields_read_and_write_through_the_c_abi() {
+    register_types();
     let p3 = point3(3, 4);
     let x = FieldGetter::new(Point3Obj::type_index(), "x").unwrap();
     let z = FieldGetter::new(Point3Obj::type_index(), "z").unwrap();
@@ -201,6 +216,7 @@ fn test_reflected_fields_read_and_write_through_the_c_abi() {
 
 #[test]
 fn test_cpp_structural_equality_and_hash_see_reflected_fields() {
+    register_types();
     let equal = |a: &Point, b: &Point| -> bool {
         let (a, b) = (Any::from(a.clone()), Any::from(b.clone()));
         let args = [
@@ -233,6 +249,7 @@ fn test_cpp_structural_equality_and_hash_see_reflected_fields() {
 
 #[test]
 fn test_repr_and_deep_copy_see_reflected_fields() {
+    register_types();
     let p = Any::from(point(5, 1.5, "hidden"));
     let repr = tvm_ffi::String::try_from(call("ffi.ReprPrint", &[AnyView::from(&p)])).unwrap();
     assert!(repr.as_str().contains("x=5"), "{}", repr.as_str());
@@ -255,6 +272,7 @@ fn test_repr_and_deep_copy_see_reflected_fields() {
 
 #[test]
 fn test_shallow_copy_and_finality_are_type_attributes() {
+    register_types();
     let original = point(1, 2.0, "p");
     let shallow_copy =
         Function::try_from(get_type_attr(PointObj::type_index(), "__ffi_shallow_copy__").unwrap())
@@ -307,6 +325,7 @@ struct Counter {
 
 #[test]
 fn test_types_without_reflect_register_no_reflection() {
+    register_types();
     let info = type_info::<CounterObj>();
     assert_eq!(info.num_fields, 0);
     assert!(info.metadata.is_null());
@@ -343,6 +362,7 @@ mod no_imports {
 
 #[test]
 fn test_derives_need_nothing_in_scope() {
+    register_types();
     let leaf = no_imports::leaf(9);
     let w = FieldGetter::new(no_imports::LeafObj::type_index(), "w").unwrap();
     assert_eq!(w.get::<_, i64>(&*leaf.data).unwrap(), 9);
