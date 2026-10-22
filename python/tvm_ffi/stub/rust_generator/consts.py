@@ -85,6 +85,13 @@ RUST_SCALAR_WIDTHS = {
     "f64": 8,
 }
 
+#: Parameters of the wrapper's allocator taken as their own type, as ``#[rs_class]``'s
+#: ``new`` takes them: a literal infers only from its exact type. Any other parameter is
+#: ``impl Into<T>``; ``<Leaf>Obj::new`` takes every one as its own type.
+RUST_EXACT_PARAMS = frozenset(
+    {"bool", "i8", "i16", "i32", "i64", "isize", "u8", "u16", "u32", "u64", "usize", "f32", "f64"}
+)
+
 #: Size of an object reference field; ``nullable`` may only wrap those.
 RUST_POINTER_SIZE = 8
 

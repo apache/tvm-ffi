@@ -103,8 +103,8 @@ impl IntPairObj {
 
 impl IntPair {
     /// Lossless complete-field allocation.
-    pub fn from_fields(a: i64, b: i64, kind: PairKind) -> Self {
-        let obj = IntPairObj::new(a, b, kind);
+    pub fn from_fields(a: i64, b: i64, kind: impl Into<PairKind>) -> Self {
+        let obj = IntPairObj::new(a, b, kind.into());
         Self { base: ObjectArc::new(obj) }
     }
 }

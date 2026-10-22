@@ -20,9 +20,11 @@
 use proc_macro::TokenStream;
 use proc_macro_error::proc_macro_error;
 
+mod def_object_ref;
 mod dispatch;
 mod match_any;
 mod object_macros;
+mod rs_class;
 mod utils;
 
 /// Generate `walk`, `map`, `visit`, or `mutate` dispatch from an inherent impl.
@@ -109,4 +111,101 @@ pub fn derive_object(input: TokenStream) -> TokenStream {
 #[proc_macro_derive(ObjectRef, attributes(type_key, type_index))]
 pub fn derive_object_ref(input: TokenStream) -> TokenStream {
     object_macros::derive_object_ref(input)
+}
+
+/// Define an object type in Rust from its object struct, as Python's
+/// `py_class` does: the type registers its key with the reflection of every
+/// field, so that C++ structural equality and hashing, `repr`, deep copy and
+/// Python see the fields.
+///
+/// ```ignore
+/// use tvm_ffi::{def_object_ref, rs_class};
+///
+/// /// A pair of values under a `Base`.
+/// #[rs_class("my_ext.Pair", final)]
+/// pub struct PairObj {
+///     base: BaseObj,
+///     pub first: tvm_ffi::String,
+///     pub second: tvm_ffi::String,
+///     #[reflect(seq_hash_ignore)]
+///     pub note: tvm_ffi::String,
+/// }
+///
+/// def_object_ref!(pub Pair, Base, PairObj);
+///
+/// let pair = Pair::from(PairObj::new(BaseObj::new(/* ... */), "a", "b", ""));
+/// let base = Base::from(pair);
+/// ```
+///
+/// The first field, `base`, is the parent's object, as the base class of a C++
+/// object is: `base: Object` for a type under `ffi.Object`. The parent's object
+/// must implement `ShallowCopy`, as `rs_class` types and non-final C++ types
+/// bound by `tvm-ffi-stubgen` do. Every other field is reflected;
+/// `#[reflect(writable, seq_hash_ignore, ...)]` gives a field the
+/// [`FieldFlags`] of those names. The macro adds to the struct:
+///
+/// - `#[repr(C)]` and `Deref` to the parent's object, so `obj.field` reads the
+///   fields of both.
+/// - `PairObj::new(base, ...)`, which builds the object from the parent's
+///   object and the fields in order: a scalar (`bool`, an integer or a float)
+///   as its own type, so that a literal infers as it, and any other field from
+///   anything that converts into it, as the `new` of a type bound by
+///   `tvm-ffi-stubgen` takes them.
+///
+/// [`def_object_ref!`] defines the reference to it and its conversion into the
+/// reference to its parent.
+///
+/// After the type key:
+///
+/// - `final`, `s_eq_hash_kind = "TreeNode"`, `child_slots = N` and
+///   `child_slots_can_overflow = bool` are `derive(Object)`'s `#[type_final]`,
+///   `#[type_s_eq_hash_kind]`, `#[type_child_slots]` and
+///   `#[type_child_slots_can_overflow]`.
+/// - `crate = path` is where the generated code finds tvm-ffi
+///   (`crate = ::my_lib::tvm_ffi`), for a crate that depends on it only through
+///   a re-export; by default `tvm_ffi`.
+///
+/// The type is a `derive(Object)` type with `#[type_register]`: it registers on
+/// its first `type_index()`, with the fields, `__ffi_shallow_copy__` and
+/// `__ffi_type_final__`, and without `__ffi_init__`. A field's type must
+/// implement `AnyCompatible` and `Clone`.
+///
+/// [`FieldFlags`]: ../tvm_ffi/reflection/struct.FieldFlags.html
+#[proc_macro_error]
+#[proc_macro_attribute]
+pub fn rs_class(args: TokenStream, item: TokenStream) -> TokenStream {
+    rs_class::rs_class(args, item)
+}
+
+/// Define the reference to an object type, as C++
+/// `TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE` does:
+/// `def_object_ref!(TypeName, ParentType, ObjectName)`.
+///
+/// ```ignore
+/// use tvm_ffi::def_object_ref;
+///
+/// def_object_ref!(
+///     /// A pair of values.
+///     pub Pair,
+///     Base,
+///     PairObj
+/// );
+/// ```
+///
+/// `Pair` holds a `PairObj` and is a `derive(ObjectRef)` type. It dereferences
+/// to `PairObj`, and a `PairObj` converts into it.
+///
+/// `ParentType` is the reference to the parent's object: `Base` here, and
+/// `tvm_ffi::object::ObjectRef` for a type under `ffi.Object`. `Pair` converts
+/// into it by `impl_object_upcast!`, so its object must be a registered base of
+/// `PairObj`, as that macro requires. A conversion into the reference to a
+/// further ancestor takes its own `impl_object_upcast!`.
+///
+/// Attributes and visibility before the name go on the struct. `crate = path`
+/// after the object type is where the generated code finds tvm-ffi, as for
+/// [`rs_class`].
+#[proc_macro_error]
+#[proc_macro]
+pub fn def_object_ref(input: TokenStream) -> TokenStream {
+    def_object_ref::def_object_ref(input)
 }

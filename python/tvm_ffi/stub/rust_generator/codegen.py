@@ -22,9 +22,14 @@ the verdict of :mod:`tvm_ffi.stub.layout`:
 
 - *complete*: the struct mirrors every physical field at its real offset and
   width, pinned by a ``const`` size/alignment assertion. ``<Leaf>Obj::new``
-  (crate-private) and the wrapper's ``new`` take every field root to leaf;
-  ``custom-new`` leaves the wrapper's ``new`` to hand-written code and names
-  the generated one ``from_fields``.
+  and the wrapper's ``new`` take every field root to leaf: the former each as
+  its own type, the latter a scalar as its own type and anything else as
+  ``impl Into``. ``custom-new`` leaves the wrapper's ``new`` to hand-written
+  code and names the generated one ``from_fields``. A type that is not final
+  can be the parent of a type defined in Rust (``tvm_ffi::rs_class``): its
+  ``<Leaf>Obj::new`` is public, and its object implements ``ShallowCopy`` when
+  every ancestor's is generated too (a ``ty-map``'d one is hand-written and
+  may not). ``<Leaf>Obj::new`` of a final type is crate-private.
 - *opaque*: the struct embeds only its parent, and each field is read through
   the C ABI getter. Nothing allocates it.
 
@@ -92,6 +97,16 @@ def _call_lines(open_: str, items: list[str], close: str) -> list[str]:
         *[f"{indent}    {item}," for item in items],
         f"{indent}{close.lstrip()}",
     ]
+
+
+def _param_type(rust_type: str) -> str:
+    """Type a parameter of the wrapper's allocator: a scalar as itself, anything else as ``impl Into``."""
+    return rust_type if rust_type in C_RUST.RUST_EXACT_PARAMS else f"impl Into<{rust_type}>"
+
+
+def _forward(ident: str, rust_type: str) -> str:
+    """Pass a parameter of the wrapper's allocator to ``<Leaf>Obj::new``, which takes ``rust_type``."""
+    return ident if rust_type in C_RUST.RUST_EXACT_PARAMS else f"{ident}.into()"
 
 
 def _check_width(target: str, field: NamedTypeSchema, rust_type: str, width: int) -> None:
@@ -482,10 +497,22 @@ class _ObjectRenderer:
         return self.imports.record(override) if "::" in override else override
 
     def _fn_lines(
-        self, head: str, params: list[tuple[str, str]], call: tuple[str, list[str]], init: list[str]
+        self,
+        head: str,
+        params: list[tuple[str, str]],
+        call: tuple[str, list[str]],
+        init: list[str],
+        *,
+        generic: bool = False,
     ) -> list[str]:
-        """Render ``<head>(<params>) -> Self { let <call>; Self { <init> } }`` in an ``impl`` block."""
-        plist = [f"{rust_ident(name)}: {rust_type}" for name, rust_type in params]
+        """Render ``<head>(<params>) -> Self { let <call>; Self { <init> } }`` in an ``impl`` block.
+
+        ``generic`` takes a parameter that is not a scalar as ``impl Into`` (:func:`_param_type`).
+        """
+        plist = [
+            f"{rust_ident(name)}: {_param_type(rust_type) if generic else rust_type}"
+            for name, rust_type in params
+        ]
         binding, args = call
         return [
             *[f"    {line}" for line in _allow_non_snake_case(rust_ident(n) for n, _ in params)],
@@ -498,7 +525,13 @@ class _ObjectRenderer:
     def _allocator_sections(self, base: str, has_parent: bool) -> list[list[str]]:
         """``<Leaf>Obj::new`` and the wrapper's ``new``.
 
+        ``<Leaf>Obj::new`` takes every field as its own type, so the parent's, generated
+        or hand-written, takes what it hands on. The wrapper's ``new`` takes a scalar
+        field as its own type and any other as ``impl Into`` (:func:`_param_type`), as
+        ``#[rs_class]``'s ``new`` does, and converts it on the way to ``<Leaf>Obj::new``.
         ``custom-new`` names the wrapper's allocator ``from_fields`` instead.
+        ``<Leaf>Obj::new`` of a type that is not final is public: a subtype defined in Rust
+        builds its parent's object with it.
         """
         inherited: list[tuple[str, str]] = []
         if has_parent:
@@ -510,13 +543,13 @@ class _ObjectRenderer:
             f"{rust_ident(name)}.into()" if rust_type != parent_type else rust_ident(name)
             for (name, rust_type), (_, parent_type) in zip(params, inherited)
         ]
-        own = [rust_ident(f.name) for f in sorted(self.info.fields, key=lambda f: f.offset or 0)]
-        forward = [rust_ident(name) for name, _ in params]
+        own = [rust_ident(name) for name, _ in params[len(inherited) :]]
+        forward = [_forward(rust_ident(name), rust_type) for name, rust_type in params]
         sections = [
             [
                 f"impl {self.obj_struct} {{",
                 *self._fn_lines(
-                    "pub(crate) fn new",
+                    "pub(crate) fn new" if self.info.is_final else "pub fn new",
                     params,
                     (f"base = {base}::new", to_parent),
                     ["base", *own],
@@ -534,11 +567,39 @@ class _ObjectRenderer:
                     params,
                     (f"obj = {self.obj_struct}::new", forward),
                     ["base: ObjectArc::new(obj)"],
+                    generic=True,
                 ),
                 "}",
             ]
         )
         return sections
+
+    def _shallow_copy_lines(self) -> list[str] | None:
+        """``ShallowCopy``, which a subtype defined in Rust needs of its parent's object.
+
+        The parent's shallow copy and a clone of every field, as ``derive(Object)``
+        implements it, for a type that is not final and whose ancestors below
+        ``ffi.Object`` are all generated: each of those implements it by this rule,
+        while a ``ty-map``'d one is hand-written and may not.
+        """
+        if self.info.is_final:
+            return None
+        ancestors = [key for key in self.info.ancestors if key != C_RUST.RUST_ROOT_TYPE_KEY]
+        if not all(self._provider(key) == "generated" for key in ancestors):
+            return None
+        shallow_copy = self.imports.record("tvm_ffi::ShallowCopy")
+        own = [rust_ident(f.name) for f in sorted(self.info.fields, key=lambda f: f.offset or 0)]
+        init = [
+            f"base: {shallow_copy}::shallow_copy(&self.base)",
+            *[f"{name}: Clone::clone(&self.{name})" for name in own],
+        ]
+        return [
+            f"impl {shallow_copy} for {self.obj_struct} {{",
+            "    fn shallow_copy(&self) -> Self {",
+            *_call_lines("        Self { ", init, " }"),
+            "    }",
+            "}",
+        ]
 
     def body(self) -> list[str]:
         """Build the Rust source lines for the object."""
@@ -590,6 +651,9 @@ class _ObjectRenderer:
             )
         elif verdict.is_complete:
             sections += self._allocator_sections(base, has_parent)
+            shallow_copy = self._shallow_copy_lines()
+            if shallow_copy:
+                sections.append(shallow_copy)
         upcasts = self._upcast_lines()
         if upcasts:
             sections.append(upcasts)

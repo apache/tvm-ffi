@@ -222,6 +222,52 @@ keeps its nearest reflected ancestor's kind. The derive also implements
 `ShallowCopy` and registers it as `__ffi_shallow_copy__`, which requires the
 parent to implement `ShallowCopy` and the other fields to be `Clone`.
 
+### Defining Object Types from Their Fields
+
+`#[rs_class]` defines such a type from its object struct, like Python's
+`py_class`. The first field, `base`, is the parent's object; every other field
+is reflected, and `#[reflect(...)]` sets its flags.
+`def_object_ref!(TypeName, ParentType, ObjectName)` defines the reference, as
+C++ `TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE` does:
+
+```rust
+use tvm_ffi::object::ObjectRef;
+use tvm_ffi::{def_object_ref, rs_class, Object};
+
+#[rs_class("my.Point", s_eq_hash_kind = "TreeNode")]
+pub struct PointObj {
+    base: Object,
+    pub x: i64,
+    #[reflect(writable, seq_hash_ignore)]
+    pub label: tvm_ffi::String,
+}
+
+def_object_ref!(pub Point, ObjectRef, PointObj);
+
+#[rs_class("my.Point3", final)]
+pub struct Point3Obj {
+    base: PointObj,
+    pub z: i64,
+}
+
+def_object_ref!(pub Point3, Point, Point3Obj);
+
+let point3 = Point3::from(Point3Obj::new(PointObj::new(Object::new(), 1, "p"), 3));
+assert_eq!((point3.x, point3.z), (1, 3));
+let point: Point = point3.into();
+```
+
+`#[rs_class]` adds `#[repr(C)]`, `Deref` to the parent's object and
+`Point3Obj::new`, which takes the parent's object, then the fields: a scalar
+(`bool`, an integer or a float) as its own type, so that a literal infers as it,
+and any other field from anything that converts into it, as the `new` of a type
+bound by `tvm-ffi-stubgen` does. The parent's object must implement
+`ShallowCopy`, as `rs_class` types and non-final C++ types bound by
+`tvm-ffi-stubgen` do. The reference dereferences to the object, and the object
+converts into it. The reference also converts into `ParentType`, the reference
+to its parent (`ObjectRef` for a type under `ffi.Object`);
+`impl_object_upcast!` converts it into the references to further ancestors.
+
 ### Converting Borrowed Values into `Any`
 
 `Any::from(value)` takes ownership of `value`. Use it when you own the value.

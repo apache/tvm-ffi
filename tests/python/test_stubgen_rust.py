@@ -730,7 +730,7 @@ impl Deref for Expr {
 }
 
 impl ExprObj {
-    pub(crate) fn new(span: Option<Span>, ty: Type) -> Self {
+    pub fn new(span: Option<Span>, ty: Type) -> Self {
         let base = Object::new();
         Self { base, span, ty }
     }
@@ -738,9 +738,19 @@ impl ExprObj {
 
 impl Expr {
     /// Lossless complete-field allocation.
-    pub fn new(span: Option<Span>, ty: Type) -> Self {
-        let obj = ExprObj::new(span, ty);
+    pub fn new(span: impl Into<Option<Span>>, ty: impl Into<Type>) -> Self {
+        let obj = ExprObj::new(span.into(), ty.into());
         Self { base: ObjectArc::new(obj) }
+    }
+}
+
+impl ShallowCopy for ExprObj {
+    fn shallow_copy(&self) -> Self {
+        Self {
+            base: ShallowCopy::shallow_copy(&self.base),
+            span: Clone::clone(&self.span),
+            ty: Clone::clone(&self.ty),
+        }
     }
 }"""
 
@@ -790,8 +800,13 @@ impl AddObj {
 
 impl Add {
     /// Lossless complete-field allocation.
-    pub fn new(span: Option<Span>, ty: PrimType, a: PrimExpr, b: PrimExpr) -> Self {
-        let obj = AddObj::new(span, ty, a, b);
+    pub fn new(
+        span: impl Into<Option<Span>>,
+        ty: impl Into<PrimType>,
+        a: impl Into<PrimExpr>,
+        b: impl Into<PrimExpr>,
+    ) -> Self {
+        let obj = AddObj::new(span.into(), ty.into(), a.into(), b.into());
         Self { base: ObjectArc::new(obj) }
     }
 }
@@ -805,15 +820,33 @@ def test_render_complete_expr_golden() -> None:
     RUST.add_directive(imports, "nullable", "ir.Expr.span", 1)
     text, imports = _render(_expr(), imports)
     assert text == EXPR_EXPECTED
-    assert _uses(imports) == {"std::ops::Deref", "tvm_ffi::Object", "tvm_ffi::ObjectArc"}
+    assert _uses(imports) == {
+        "std::ops::Deref",
+        "tvm_ffi::Object",
+        "tvm_ffi::ObjectArc",
+        "tvm_ffi::ShallowCopy",
+    }
+
+
+def test_render_shallow_copy_that_fits_is_one_line() -> None:
+    """A `ShallowCopy` within 100 columns is on one line, as rustfmt keeps it."""
+    text, _ = _render(_info("ir.Stmt", (_field("span", "ir.Span", 24, 8),), total_size=32))
+    assert (
+        "impl ShallowCopy for StmtObj {\n"
+        "    fn shallow_copy(&self) -> Self {\n"
+        "        Self { base: ShallowCopy::shallow_copy(&self.base), "
+        "span: Clone::clone(&self.span) }\n"
+        "    }\n"
+        "}"
+    ) in text
 
 
 def test_render_complete_add_golden() -> None:
     """`tirx.Add` as tvm-rust-ext hand-writes it, on top of a complete `ir.Expr`.
 
     `field` directives narrow `a` / `b` and the inherited allocator parameter
-    `ty` (upcast with `.into()` on the way to `ExprObj::new`); `upcast` adds
-    the `PrimExpr` view.
+    `ty` (upcast with `.into()` on the way to `ExprObj::new`, which takes `Type`
+    as it is); `upcast` adds the `PrimExpr` view.
     """
     _register(_expr())
     imports = RUST.new_imports()
@@ -898,7 +931,7 @@ def test_render_complete_enum_field() -> None:
     RUST.add_directive(imports, "enum", "demo.Pair.kind -> Kind(i32) { A=0, B=1 }", 1)
     text, imports = _render(info, imports)
     assert "    pub kind: Kind,\n" in text
-    assert "    pub fn new(a: i64, kind: Kind) -> Self {" in text
+    assert "    pub fn new(a: i64, kind: impl Into<Kind>) -> Self {" in text
     assert {"tvm_ffi::Result", "tvm_ffi::Error", "tvm_ffi::VALUE_ERROR"} <= _uses(imports)
     assert "tvm_ffi::FieldGetter" not in _uses(imports)
 
@@ -960,7 +993,10 @@ def test_complete_big_int_field_mirrors() -> None:
         "    pub count: i64,\n"
         "}"
     ) in text
-    assert "    pub fn new(value: BigInt, maybe: Optional<BigInt>, count: i64) -> Self {" in text
+    assert (
+        "    pub fn new(value: impl Into<BigInt>, maybe: impl Into<Optional<BigInt>>, count: i64)"
+        " -> Self {"
+    ) in text
     assert "assert!(::core::mem::size_of::<BigObj>() == 64);" in text
     assert {"tvm_ffi::BigInt", "tvm_ffi::Optional"} <= _uses(imports)
 
@@ -1071,8 +1107,13 @@ def test_custom_new_renames_the_wrapper_allocator() -> None:
     )
     assert (
         "impl Add {\n    /// Lossless complete-field allocation.\n"
-        "    pub fn from_fields(span: Span, ty: Type, a: Expr, b: Expr) -> Self {\n"
-        "        let obj = AddObj::new(span, ty, a, b);\n"
+        "    pub fn from_fields(\n"
+        "        span: impl Into<Span>,\n"
+        "        ty: impl Into<Type>,\n"
+        "        a: impl Into<Expr>,\n"
+        "        b: impl Into<Expr>,\n"
+        "    ) -> Self {\n"
+        "        let obj = AddObj::new(span.into(), ty.into(), a.into(), b.into());\n"
         "        Self { base: ObjectArc::new(obj) }\n"
         "    }\n}"
     ) in text
@@ -1243,7 +1284,7 @@ def test_registry_complete_chain_is_mirrored() -> None:
     # The allocator flattens the chain; a signature over 100 columns wraps.
     assert (
         "impl TestCxxClassDerivedDerivedObj {\n"
-        "    pub(crate) fn new(\n"
+        "    pub fn new(\n"
         "        v_i64: i64,\n"
         "        v_i32: i32,\n"
         "        v_f64: f64,\n"
@@ -1256,11 +1297,31 @@ def test_registry_complete_chain_is_mirrored() -> None:
         "    }\n"
         "}"
     ) in dd
+    # The wrapper's `new` takes a field that is not a scalar from anything that converts into it.
+    assert (
+        "        v_str: impl Into<String>,\n"
+        "        v_bool: bool,\n"
+        "    ) -> Self {\n"
+        "        let obj =\n"
+        "            TestCxxClassDerivedDerivedObj::new(v_i64, v_i32, v_f64, v_f32, v_str.into(), v_bool);\n"
+    ) in dd
+    # Not final, under generated ancestors: a Rust subtype can copy its parent's object.
+    assert (
+        "impl ShallowCopy for TestCxxClassDerivedDerivedObj {\n"
+        "    fn shallow_copy(&self) -> Self {\n"
+        "        Self {\n"
+        "            base: ShallowCopy::shallow_copy(&self.base),\n"
+        "            v_str: Clone::clone(&self.v_str),\n"
+        "            v_bool: Clone::clone(&self.v_bool),\n"
+        "        }\n"
+        "    }\n"
+        "}"
+    ) in dd
     assert dd.endswith(
         "tvm_ffi::impl_object_upcast!(TestCxxClassDerivedDerived => TestCxxClassBase, "
         "TestCxxClassDerivedDerived => TestCxxClassDerived);"
     )
-    assert "tvm_ffi::String" in _uses(imports)
+    assert {"tvm_ffi::String", "tvm_ffi::ShallowCopy"} <= _uses(imports)
 
 
 def test_registry_hidden_field_and_vptr_stay_opaque() -> None:
@@ -1515,6 +1576,44 @@ def test_ty_map_parent_redirects_base_deref_and_upcast() -> None:
     assert not any(path.startswith("super::") for path in _uses(imports))
 
 
+def test_allocator_hands_a_ty_map_parent_its_own_types() -> None:
+    """`<Leaf>Obj::new` takes each field as its own type, as a hand-written parent's `new` does.
+
+    A narrowed inherited scalar upcasts with `.into()`, whose target the parent's
+    `i32` names; only the wrapper's `new` takes `impl Into`.
+    """
+    _register(
+        _info(
+            "demo.Base",
+            (_field("name", "str", 24, 16), _field("kind", "int", 40, 4)),
+            total_size=48,
+        )
+    )
+    info = _info(
+        "demo.Child",
+        (_field("n", "int", 48, 8),),
+        parent="demo.Base",
+        total_size=56,
+        is_final=True,
+    )
+    ty_map = {**RUST.default_ty_map(), "demo.Base": "crate::hand::Base"}
+    imports = RUST.new_imports()
+    RUST.add_directive(imports, "field", "demo.Child.kind -> Kind", 1)
+    block = _object_block("demo.Child")
+    generate_rust_object(block, ty_map, imports, Options(), info, _declared("demo.Child"))
+    text = "\n".join(block.lines[1:-1])
+    assert (
+        "impl ChildObj {\n"
+        "    pub(crate) fn new(name: String, kind: Kind, n: i64) -> Self {\n"
+        "        let base = BaseObj::new(name, kind.into());\n"
+        "        Self { base, n }\n"
+    ) in text
+    assert (
+        "    pub fn new(name: impl Into<String>, kind: impl Into<Kind>, n: i64) -> Self {\n"
+        "        let obj = ChildObj::new(name.into(), kind.into(), n);\n"
+    ) in text
+
+
 def test_stage_3_checks_dependencies_across_the_run(tmp_path: Path) -> None:
     root = _crate(tmp_path)
     src = root / "mod.rs"
@@ -1542,6 +1641,9 @@ def test_stage_3_checks_dependencies_across_the_run(tmp_path: Path) -> None:
     text = "\n".join(line for block in info.code_blocks for line in block.lines)
     assert "    base: TestCxxClassBaseObj," in text
     assert "use crate::hand::TestCxxClassBaseObj;" in text
+    # Not final: public `new`; a hand-written parent may lack `ShallowCopy`, so the type has none.
+    assert "impl TestCxxClassDerivedObj {\n    pub fn new(" in text
+    assert "ShallowCopy" not in text
 
 
 # ---------------------------------------------------------------------------
