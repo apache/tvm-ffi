@@ -35,7 +35,7 @@ use tvm_ffi::VALUE_ERROR;
 // The `kind` field is an integer on the C++ side; this directive types it as an
 // open integer newtype in Rust.
 // tvm-ffi-stubgen(enum): rust_stubgen.IntPair.kind -> PairKind(i32) { Unordered=0, Ordered=1 }
-// `IntPair::new` is hand-written below, so the generated allocator is `from_complete_fields`.
+// `IntPair::new` is hand-written below, so the generated allocator is `from_fields`.
 // tvm-ffi-stubgen(custom-new): rust_stubgen.IntPair
 
 // tvm-ffi-stubgen(begin): object/rust_stubgen.IntPair
@@ -103,7 +103,7 @@ impl IntPairObj {
 
 impl IntPair {
     /// Lossless complete-field allocation.
-    pub fn from_complete_fields(a: i64, b: i64, kind: PairKind) -> Self {
+    pub fn from_fields(a: i64, b: i64, kind: PairKind) -> Self {
         let obj = IntPairObj::new(a, b, kind);
         Self { base: ObjectArc::new(obj) }
     }
@@ -116,6 +116,6 @@ impl IntPair {
     /// `a <= b`, unordered otherwise.
     pub fn new(a: i64, b: i64) -> Self {
         let kind = if a <= b { PairKind::Ordered } else { PairKind::Unordered };
-        Self::from_complete_fields(a, b, kind)
+        Self::from_fields(a, b, kind)
     }
 }

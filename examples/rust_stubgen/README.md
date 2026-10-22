@@ -85,7 +85,7 @@ file the command line points at. This example keeps them under
 ## Hand-written constructors
 
 `IntPair::new` is hand-written. The `custom-new` directive makes the generator
-name its lossless allocator `from_complete_fields` instead of `new`, and the
+name its lossless allocator `from_fields` instead of `new`, and the
 hand-written constructor calls it after deriving `kind` from the operands:
 
 ```rust
@@ -94,7 +94,7 @@ hand-written constructor calls it after deriving `kind` from the operands:
 impl IntPair {
     pub fn new(a: i64, b: i64) -> Self {
         let kind = if a <= b { PairKind::Ordered } else { PairKind::Unordered };
-        Self::from_complete_fields(a, b, kind)
+        Self::from_fields(a, b, kind)
     }
 }
 ```

@@ -1060,7 +1060,7 @@ def test_unrenderable_field_keeps_the_type_opaque(field: NamedTypeSchema) -> Non
 
 
 def test_custom_new_renames_the_wrapper_allocator() -> None:
-    """`custom-new`: `Add::new` stays hand-written, the allocator is `from_complete_fields`."""
+    """`custom-new`: `Add::new` stays hand-written, the allocator is `from_fields`."""
     _register(_expr())
     imports = RUST.new_imports()
     RUST.add_directive(imports, "custom-new", "tirx.Add", 1)
@@ -1071,7 +1071,7 @@ def test_custom_new_renames_the_wrapper_allocator() -> None:
     )
     assert (
         "impl Add {\n    /// Lossless complete-field allocation.\n"
-        "    pub fn from_complete_fields(span: Span, ty: Type, a: Expr, b: Expr) -> Self {\n"
+        "    pub fn from_fields(span: Span, ty: Type, a: Expr, b: Expr) -> Self {\n"
         "        let obj = AddObj::new(span, ty, a, b);\n"
         "        Self { base: ObjectArc::new(obj) }\n"
         "    }\n}"
