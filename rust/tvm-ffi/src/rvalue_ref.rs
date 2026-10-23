@@ -126,6 +126,15 @@ where
     }
 }
 
+impl<T> crate::type_traits::TypeSchema for RValueRef<T>
+where
+    T: ObjectRefCore + AnyCompatible,
+{
+    fn type_schema() -> std::string::String {
+        crate::type_traits::type_schema("ObjectRValueRef", &[T::type_schema()])
+    }
+}
+
 impl<T> ArgTryFromAnyView for RValueRef<T>
 where
     T: ObjectRefCore + AnyCompatible,

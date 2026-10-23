@@ -24,8 +24,8 @@ use crate::object::{Object, ObjectArc, ObjectCore};
 use crate::type_traits::AnyCompatible;
 use tvm_ffi_sys::{
     TVMFFIAny, TVMFFIByteArray, TVMFFIFunctionCell, TVMFFIFunctionCreate, TVMFFIFunctionGetGlobal,
-    TVMFFIFunctionSetGlobal, TVMFFIGetTypeInfo, TVMFFIObjectHandle, TVMFFISafeCallType,
-    TVMFFITypeIndex, TVMFFITypeKeyToIndex,
+    TVMFFIFunctionSetGlobalFromMethodInfo, TVMFFIGetTypeInfo, TVMFFIMethodInfo, TVMFFIObjectHandle,
+    TVMFFISafeCallType, TVMFFITypeIndex, TVMFFITypeKeyToIndex,
 };
 
 /// function object
@@ -298,6 +298,12 @@ impl Function {
     }
 
     /// Register a function as a global function
+    ///
+    /// The function's metadata records the type schema of an untyped
+    /// function, as C++ `refl::GlobalDef().def_packed` does. Use
+    /// [`Function::register_global_typed`] to record the parameter and return
+    /// types of a typed function, and a doc string.
+    ///
     /// # Arguments
     /// * `name` - The name of the function
     /// * `func` - The function to register
@@ -305,15 +311,50 @@ impl Function {
     /// # Returns
     /// * `Result<()>` - The result of the registration
     pub fn register_global(name: &str, func: Function) -> Result<()> {
+        let type_schema = crate::type_traits::type_schema(FunctionObj::TYPE_KEY, &[]);
+        Self::register_global_with_info(name, &func, &type_schema, "")
+    }
+
+    /// Register a typed function as a global function, with a doc string
+    ///
+    /// As C++ `refl::GlobalDef().def` does, the function's metadata records
+    /// its type schema, which `tvm_ffi.get_global_func_metadata` and the stub
+    /// generator read. An empty `doc` records no doc string.
+    ///
+    /// # Arguments
+    /// * `name` - The name of the function
+    /// * `func` - The typed function to register, as for [`Function::from_typed`]
+    /// * `doc` - The doc string of the function
+    ///
+    /// # Returns
+    /// * `Result<()>` - The result of the registration
+    pub fn register_global_typed<F, I, O>(name: &str, func: F, doc: &str) -> Result<()>
+    where
+        F: AsPackedCallable<I, O> + 'static,
+    {
+        let type_schema = F::type_schema();
+        Self::register_global_with_info(name, &Self::from_typed(func), &type_schema, doc)
+    }
+
+    fn register_global_with_info(
+        name: &str,
+        func: &Function,
+        type_schema: &str,
+        doc: &str,
+    ) -> Result<()> {
+        let metadata = crate::function_internal::type_schema_metadata(type_schema)?;
+        let mut method = TVMFFIAny::new();
         unsafe {
-            let name_arg = TVMFFIByteArray::from_str(name);
+            <Function as AnyCompatible>::copy_to_any_view(func, &mut method);
+            let info = TVMFFIMethodInfo {
+                name: TVMFFIByteArray::from_str(name),
+                doc: TVMFFIByteArray::from_str(doc),
+                metadata: TVMFFIByteArray::from_str(&metadata),
+                flags: 0,
+                method,
+            };
             let can_override = 0;
-            crate::check_safe_call!(TVMFFIFunctionSetGlobal(
-                &name_arg,
-                ObjectArc::as_raw(&func.data) as *mut FunctionObj as TVMFFIObjectHandle,
-                can_override
-            ))?;
-            Ok(())
+            crate::check_safe_call!(TVMFFIFunctionSetGlobalFromMethodInfo(&info, can_override))
         }
     }
     /// Construct a function from a packed function

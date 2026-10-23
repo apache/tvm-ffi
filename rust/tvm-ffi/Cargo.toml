@@ -39,8 +39,12 @@ tvm-ffi-macros = { version = "0.1.0-alpha.0", path = "../tvm-ffi-macros" }
 # The tests call the `testing.*` global functions.
 tvm-ffi-sys = { version = "0.1.0-alpha.0", path = "../tvm-ffi-sys", features = ["testing"] }
 
-# only needed for example building
 [features]
+# Export the metadata and doc string of each function that
+# `tvm_ffi_dll_export_typed_func!` and `tvm_ffi_dll_export_typed_func_doc!`
+# export, as C++ does with TVM_FFI_DLL_EXPORT_INCLUDE_METADATA.
+export-metadata = []
+# only needed for example building
 example = []
 
 [[example]]
