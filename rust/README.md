@@ -30,40 +30,31 @@ efficiency while maintaining interoperability.
 
 ## Installation
 
-The Rust support depends on `libtvm_ffi`.
-Please install the `tvm-ffi` pip package by running:
+Cargo builds `libtvm_ffi` from source and dynamically links it. No Python package
+is required. Install CMake 3.26+ and a C/C++17 toolchain; Unix builds also need
+`sh` and `make` for libbacktrace. Windows builds use MSVC.
+
+In a source checkout, initialize the submodules first:
 
 ```bash
-pip install -v ..
-```
-
-Confirm that `tvm-ffi-config` is available with:
-
-```bash
-tvm-ffi-config --libdir
-```
-
-Then build the workspace with:
-
-```bash
+git submodule update --init --recursive
+cd rust
 cargo build
+cargo test --workspace
 ```
 
-The build will:
+Keep the complete repository layout when using these crates as path dependencies.
+Cargo makes the shared runtime available to `cargo run` and `cargo test`.
 
-- Query `tvm-ffi-config --libdir` to add the appropriate link search path.
-- Link against `tvm_ffi`.
-- Update the appropriate dynamic loader path environment variable for `cargo run` and `cargo test` within this workspace.
-
-Downstream crates do not inherit this: set the `LD_LIBRARY_PATH` so `libtvm_ffi` is available in the path, also for `cargo run` and `cargo test`.
-
-```bash
-export LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:`tvm-ffi-config --libdir`
-```
+When running a binary outside Cargo, deploy the shared runtime and configure
+the platform's loader path or an application rpath.
 
 ## Running Examples
 
-You can run an optional library-loading example similar to the quick_start examples in [examples/quick_start](../examples/quick_start/).
+The optional library-loading example is similar to [examples/quickstart](../examples/quickstart/)
+and uses the Python `tvm_ffi` package to build its module. Install the Python
+package and activate its environment first
+(see [the source build guide](../docs/dev/source_build.rst)).
 
 ```bash
 cargo run --example load_library --features example

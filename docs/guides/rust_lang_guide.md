@@ -27,16 +27,13 @@ This guide demonstrates how to use TVM FFI from Rust applications.
 
 ### Prerequisites
 
-The Rust support depends on `libtvm_ffi`. First, install the `tvm-ffi` Python package:
+Cargo builds and dynamically links `libtvm_ffi` from the native sources in the
+same repository. No Python package is required. Install CMake 3.26+, a C/C++17
+toolchain, and, on Unix, `sh` and `make` for libbacktrace. Windows uses MSVC.
+When using a source checkout, first initialize its submodules:
 
 ```bash
-pip install -v -e .
-```
-
-Confirm that `tvm-ffi-config` is available:
-
-```bash
-tvm-ffi-config --libdir
+git submodule update --init --recursive
 ```
 
 ### Adding to Your Project
@@ -48,20 +45,11 @@ Add to your `Cargo.toml`:
 tvm-ffi = { path = "path/to/tvm-ffi/rust/tvm-ffi" }
 ```
 
-For published versions:
-
-```toml
-[dependencies]
-tvm-ffi = "0.1.14"
-```
-
 ### Environment Setup
 
-Set the library path so `libtvm_ffi` can be found at runtime:
-
-```bash
-export LD_LIBRARY_PATH=$(tvm-ffi-config --libdir):$LD_LIBRARY_PATH
-```
+Cargo builds the shared runtime and configures its loader path for `cargo run`
+and `cargo test`. Keep the complete repository layout when using path dependencies.
+For binaries run outside Cargo, deploy the shared runtime and configure its loader path.
 
 ## Basic Usage
 
@@ -758,6 +746,9 @@ substitutions without adding a field to the mutator. Override them and use
 ## Examples
 
 The repository includes a complete example in `rust/tvm-ffi/examples/load_library.rs`.
+This optional example uses the Python `tvm_ffi` package to build its example module.
+Install the Python package and activate its environment first
+(see [the source build guide](../dev/source_build.rst)).
 
 Run it with:
 

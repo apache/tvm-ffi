@@ -179,7 +179,7 @@ uv run pytest -vvs tests/python
 
 ### Run Rust tests
 
-Rust tests require the Python package to be installed first (Rust FFI bindings link against the built shared library):
+Cargo builds the C++ runtime from source; Rust tests do not require the Python package:
 
 ```bash
 cd rust && cargo test

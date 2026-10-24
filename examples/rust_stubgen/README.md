@@ -42,6 +42,10 @@ derived type depth matches the registry.
 
 ## Build and run
 
+Install the Python package and activate its environment first
+(see [the source build guide](../../docs/dev/source_build.rst)); the C++ build uses it
+to locate TVM FFI and generate the Rust bindings.
+
 ```bash
 # 1. Build the C++ library; the post-build step refreshes the bindings in place.
 cmake -B build -DCMAKE_BUILD_TYPE=Release
@@ -57,10 +61,6 @@ The program prints:
 a=2 b=1 kind=PairKind(0)
 sum=3
 ```
-
-The Rust crate depends on the `tvm-ffi` crate of this repository and needs
-`tvm-ffi-config` on `PATH` (activate the virtual environment where the
-`apache-tvm-ffi` package is installed).
 
 ## Demand-driven layout
 

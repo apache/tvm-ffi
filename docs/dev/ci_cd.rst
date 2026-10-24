@@ -155,10 +155,8 @@ This tests all workspace members (``tvm-ffi``, ``tvm-ffi-sys``,
 
 .. note::
 
-   CI runs Rust tests only after the Python package is installed (
-   ``uv pip install --group test -e .``), because the Rust FFI bindings link
-   against the built shared library. Make sure the Python package is
-   installed before running ``cargo test``.
+   Cargo builds the C++ runtime from source; no Python package is required.
+   See the :doc:`../guides/rust_lang_guide` for build prerequisites.
 
 
 Build Python Wheels
