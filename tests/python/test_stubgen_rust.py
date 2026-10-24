@@ -1500,14 +1500,14 @@ def test_cli_check_ignores_how_a_binding_is_spelled(
         ("    base: Object,\n", "    base: tvm_ffi::Object,\n"),
         ("/// Complete: ", "/// Mirrored: "),
         (
-            "    pub(crate) fn new(\n"
+            "    pub fn new(\n"
             "        p_required: i64,\n"
             "        p_default: i64,\n"
             "        k_required: i64,\n"
             "        k_default: i64,\n"
             "        hidden: i64,\n"
             "    ) -> Self {\n",
-            "    pub(crate) fn new(p_required: i64, p_default: i64, k_required: i64, "
+            "    pub fn new(p_required: i64, p_default: i64, k_required: i64, "
             "k_default: i64, hidden: i64) -> Self {\n",
         ),
     ]:

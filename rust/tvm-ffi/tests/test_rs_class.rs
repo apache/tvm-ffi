@@ -190,8 +190,24 @@ fn deep_copy<T: AnyCompatible + Clone + TryFrom<Any, Error = Error>>(value: &T) 
     T::try_from(call("ffi.DeepCopy", &[AnyView::from(&any)])).unwrap()
 }
 
+// A type registers on first use, and the runtime does not guard its type table
+// against readers on other threads, so each test registers every type here
+// before it reads the table.
+fn register_types() {
+    static REGISTERED: std::sync::Once = std::sync::Once::new();
+    REGISTERED.call_once(|| {
+        RsPointObj::type_index();
+        RsPoint3Obj::type_index();
+        RsMarkerObj::type_index();
+        RsScalarsObj::type_index();
+        RsCxxChildObj::type_index();
+        reexported::ReexportedObj::type_index();
+    });
+}
+
 #[test]
 fn test_fields_are_registered_with_their_flags() {
+    register_types();
     assert_eq!(field_names::<RsPointObj>(), ["x", "label"]);
     let [x, label] = fields(type_info::<RsPointObj>()) else {
         unreachable!()
@@ -229,6 +245,7 @@ fn test_fields_are_registered_with_their_flags() {
 
 #[test]
 fn test_constructors_deref_and_upcast() {
+    register_types();
     let p3 = point3(1, 3);
     // Through `RsPoint3Obj` to `RsPointObj`.
     assert_eq!((p3.x, p3.label.as_str()), (1, "p3"));
@@ -256,6 +273,7 @@ fn test_constructors_deref_and_upcast() {
 
 #[test]
 fn test_new_takes_literals_of_the_field_types() {
+    register_types();
     let scalars = RsScalars::from(RsScalarsObj::new(Object::new(), 5_000_000_000, 1, 2, 0.5));
     assert_eq!(
         (scalars.big, scalars.count, scalars.port, scalars.ratio),
@@ -269,6 +287,7 @@ fn test_new_takes_literals_of_the_field_types() {
 
 #[test]
 fn test_cpp_structural_equality_and_deep_copy_see_the_fields() {
+    register_types();
     // `label` is ignored.
     assert!(structural_equal(&point(1, "a"), &point(1, "b")));
     assert!(!structural_equal(&point(1, "a"), &point(2, "a")));
@@ -291,6 +310,7 @@ fn test_cpp_structural_equality_and_deep_copy_see_the_fields() {
 
 #[test]
 fn test_shallow_copy_and_finality_are_type_attributes() {
+    register_types();
     let attr = |type_index, name| get_type_attr(type_index, name).unwrap();
     let is_final = |type_index| bool::try_from(attr(type_index, "__ffi_type_final__")).unwrap();
     assert!(!is_final(RsPointObj::type_index()));
@@ -310,6 +330,7 @@ fn test_shallow_copy_and_finality_are_type_attributes() {
 
 #[test]
 fn test_subtype_of_a_cpp_type() {
+    register_types();
     let child = cxx_child(7, 8, "c");
     assert_eq!((child.v_i64, child.v_i32, child.name.as_str()), (7, 8, "c"));
     // The C++ fields are reflected under the subtype.
@@ -331,6 +352,7 @@ fn test_subtype_of_a_cpp_type() {
 
 #[test]
 fn test_crate_path_names_a_reexported_tvm_ffi() {
+    register_types();
     let value = reexported::Reexported::from(reexported::ReexportedObj::new(Object::new(), 5));
     assert_eq!(value.v, 5);
     assert!(ObjectRef::from(&value).same_as(&value));
