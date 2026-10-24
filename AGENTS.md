@@ -98,7 +98,7 @@ uv run pytest -vvs tests/python
 ### Rust tests
 
 ```bash
-cd rust && cargo test   # requires Python package installed first
+cd rust && cargo test   # Cargo builds the C++ runtime; no Python package required
 ```
 
 ## Linting

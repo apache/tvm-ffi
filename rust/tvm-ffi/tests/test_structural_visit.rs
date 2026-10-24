@@ -678,7 +678,13 @@ fn policies_preserve_reflected_pattern_before_default_descent() {
     assert!(structural_visit(&root, &mut visitor).unwrap().is_none());
     assert_eq!(
         visitor.0,
-        vec![(1, Simple), (2, Pattern), (99, Pattern), (3, Use), (100, Use)]
+        vec![
+            (1, Simple),
+            (2, Pattern),
+            (99, Pattern),
+            (3, Use),
+            (100, Use)
+        ]
     );
     for requested in [Use, Simple] {
         for order in [WalkOrder::PreOrder, WalkOrder::PostOrder] {

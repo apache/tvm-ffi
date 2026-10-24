@@ -23,6 +23,7 @@ description = "Low-level sys crate for tvm-ffi"
 version = "0.1.0-alpha.0"
 edition = "2021"
 license = "Apache-2.0"
+links = "tvm_ffi"
 
 
 [lib]
@@ -32,3 +33,6 @@ crate-type = ["lib"]
 [features]
 # Link libtvm_ffi_testing, which registers the `testing.*` global functions.
 testing = []
+
+[build-dependencies]
+cmake = "0.1"
