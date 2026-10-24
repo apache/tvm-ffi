@@ -205,7 +205,7 @@ def unpack_dataclass_to_tuple(x: Any) -> Any:
     """Fast recursively unpack a dataclass value to tuple representation.
 
     - Dataclass instances are unpacked to tuples of their field values.
-    - Lists and tuples are recursed element-wise, returning a tuple.
+    - Lists and tuples are recursed element-wise, preserving their type.
     - Dicts are recursed on values, returning a new dict.
     - All other values are returned as-is (leaf passthrough).
 
@@ -250,6 +250,9 @@ def unpack_dataclass_to_tuple(x: Any) -> Any:
         cache[cls] = fn
         return fn(x)
     if isinstance(x, (list, tuple)):
+        if isinstance(x, tuple) and hasattr(x, "_fields"):
+            # Named tuples take one positional argument per field.
+            return type(x)(*(unpack_dataclass_to_tuple(e) for e in x))
         return type(x)(unpack_dataclass_to_tuple(e) for e in x)
     if isinstance(x, dict):
         return {k: unpack_dataclass_to_tuple(v) for k, v in x.items()}
