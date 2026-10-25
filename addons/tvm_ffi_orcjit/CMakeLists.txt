@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.24)
 project(
   tvm_ffi_orcjit
   VERSION 0.1.2
@@ -16,40 +16,22 @@ find_package(
   REQUIRED
 )
 
-# ---- LLVM discovery ----
-# scikit-build-core overrides CMAKE_PREFIX_PATH via its init cache, so we read LLVM_PREFIX from the
-# environment instead. Explicit LLVM_PREFIX/LLVM_DIR settings take precedence over the build SDK.
-if (DEFINED ENV{LLVM_PREFIX} AND NOT "$ENV{LLVM_PREFIX}" STREQUAL "")
-  list(PREPEND CMAKE_PREFIX_PATH "$ENV{LLVM_PREFIX}")
-  if (EXISTS "$ENV{LLVM_PREFIX}/Library")
-    list(PREPEND CMAKE_PREFIX_PATH "$ENV{LLVM_PREFIX}/Library")
-  endif ()
-elseif (NOT LLVM_DIR AND NOT DEFINED ENV{LLVM_DIR})
-  execute_process(
-    COMMAND "${Python_EXECUTABLE}" -m mlc_llvm_static.config --cmake-dir
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    OUTPUT_VARIABLE _llvm_sdk_dir
-    RESULT_VARIABLE _llvm_sdk_rc
-    ERROR_QUIET
-  )
-  if (_llvm_sdk_rc EQUAL 0)
-    set(LLVM_DIR "${_llvm_sdk_dir}")
-    # On Windows the SDK's llvm-config is a pip console launcher, outside the LLVM prefix.
-    if (NOT LLVM_CONFIG_EXE)
-      execute_process(
-        COMMAND "${Python_EXECUTABLE}" -m mlc_llvm_static.config --llvm-config
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        OUTPUT_VARIABLE LLVM_CONFIG_EXE COMMAND_ERROR_IS_FATAL ANY
-      )
-    endif ()
-  endif ()
-endif ()
-
-# ---- Find packages ----
+# ---- LLVM static SDK ----
+execute_process(
+  COMMAND "${Python_EXECUTABLE}" -m mlc_llvm_static.config --prefix
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+  OUTPUT_VARIABLE _llvm_prefix COMMAND_ERROR_IS_FATAL ANY
+)
+list(PREPEND CMAKE_PREFIX_PATH "${_llvm_prefix}")
+set(LLVM_DIR "${_llvm_prefix}/lib/cmake/llvm")
+set(zstd_DIR "${_llvm_prefix}/lib/cmake/zstd") # cmake-lint: disable=C0103
+set(ZLIB_USE_STATIC_LIBS ON)
+# Discard system-zlib results cached by builds using the old manual link setup.
+unset(ZLIB_INCLUDE_DIR CACHE)
+unset(ZLIB_LIBRARY_RELEASE CACHE)
+unset(ZLIB_LIBRARY_DEBUG CACHE)
+set(MLC_LLVM_STATIC_PROFILE native)
 find_package(LLVM REQUIRED CONFIG)
-if (LLVM_PACKAGE_VERSION VERSION_LESS 23.1.1)
-  message(FATAL_ERROR "tvm_ffi_orcjit requires LLVM 23.1.1 or newer; found ${LLVM_PACKAGE_VERSION}")
-endif ()
 message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION} in ${LLVM_DIR}")
 
 execute_process(
@@ -82,115 +64,12 @@ set_target_properties(
 target_include_directories(
   tvm_ffi_orcjit PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${LLVM_INCLUDE_DIRS}
 )
-separate_arguments(LLVM_DEFINITIONS_LIST NATIVE_COMMAND ${LLVM_DEFINITIONS})
+separate_arguments(LLVM_DEFINITIONS_LIST NATIVE_COMMAND "${LLVM_DEFINITIONS}")
 target_compile_definitions(tvm_ffi_orcjit PRIVATE ${LLVM_DEFINITIONS_LIST})
 
-# ---- Static LLVM linking via llvm-config ----
-set(_llvm_config_hints ${LLVM_TOOLS_BINARY_DIR} "${LLVM_DIR}/../../../bin")
-if (DEFINED ENV{LLVM_PREFIX})
-  list(APPEND _llvm_config_hints "$ENV{LLVM_PREFIX}/bin" "$ENV{LLVM_PREFIX}/Library/bin")
-endif ()
-find_program(
-  LLVM_CONFIG_EXE
-  NAMES llvm-config-${LLVM_VERSION_MAJOR} llvm-config
-  HINTS ${_llvm_config_hints}
-)
-if (NOT LLVM_CONFIG_EXE)
-  message(FATAL_ERROR "llvm-config not found")
-endif ()
-
-execute_process(
-  COMMAND ${LLVM_CONFIG_EXE} --link-static --libs Core OrcJIT Support native
-  OUTPUT_STRIP_TRAILING_WHITESPACE
-  OUTPUT_VARIABLE _llvm_libs
-  ERROR_VARIABLE _llvm_libs_error
-  RESULT_VARIABLE _llvm_libs_rc
-)
-if (NOT _llvm_libs_rc EQUAL 0)
-  message(FATAL_ERROR "llvm-config --link-static --libs failed: ${_llvm_libs_error}")
-endif ()
-execute_process(
-  COMMAND ${LLVM_CONFIG_EXE} --link-static --ldflags
-  OUTPUT_STRIP_TRAILING_WHITESPACE
-  OUTPUT_VARIABLE _llvm_ldflags
-  ERROR_VARIABLE _llvm_ldflags_error
-  RESULT_VARIABLE _llvm_ldflags_rc
-)
-if (NOT _llvm_ldflags_rc EQUAL 0)
-  message(FATAL_ERROR "llvm-config --link-static --ldflags failed: ${_llvm_ldflags_error}")
-endif ()
-separate_arguments(_llvm_libs_list NATIVE_COMMAND "${_llvm_libs}")
-separate_arguments(_llvm_ldflags_list NATIVE_COMMAND "${_llvm_ldflags}")
-
-# ---- zlib (static, from LLVM prefix) ----
-cmake_path(GET LLVM_DIR PARENT_PATH _llvm_prefix)
-cmake_path(GET _llvm_prefix PARENT_PATH _llvm_prefix)
-cmake_path(GET _llvm_prefix PARENT_PATH _llvm_prefix)
-set(_lib_hints "${_llvm_prefix}/lib" "${_llvm_prefix}/lib64" "${_llvm_prefix}/Library/lib")
-
-if (WIN32)
-  find_library(
-    ZLIB_STATIC
-    NAMES zlibstatic z
-    HINTS ${_lib_hints} REQUIRED
-  )
-else ()
-  find_library(
-    ZLIB_STATIC
-    NAMES libz.a
-    HINTS ${_lib_hints} REQUIRED
-  )
-endif ()
-
-# ---- zstd (static, from LLVM prefix) ----
-if (WIN32)
-  find_library(
-    ZSTD_STATIC
-    NAMES zstd_static zstd
-    HINTS ${_lib_hints} REQUIRED
-  )
-else ()
-  find_library(
-    ZSTD_STATIC
-    NAMES libzstd.a
-    HINTS ${_lib_hints} REQUIRED
-  )
-endif ()
-
-# ---- Link everything ----
-target_link_libraries(
-  tvm_ffi_orcjit PRIVATE tvm_ffi::header tvm_ffi::shared ${_llvm_ldflags_list} ${_llvm_libs_list}
-                         ${ZLIB_STATIC} ${ZSTD_STATIC}
-)
-
-# LLVM system libs (ntdll/psapi on Windows, rt/dl on Linux), minus zlib/zstd (linked above).
-execute_process(
-  COMMAND ${LLVM_CONFIG_EXE} --system-libs
-  OUTPUT_STRIP_TRAILING_WHITESPACE
-  OUTPUT_VARIABLE _sys_libs
-  RESULT_VARIABLE _sys_libs_rc
-)
-if (_sys_libs_rc EQUAL 0 AND _sys_libs)
-  separate_arguments(_sys_libs_list NATIVE_COMMAND "${_sys_libs}")
-  list(FILTER _sys_libs_list EXCLUDE REGEX "(zstd|^-lz$|^z\\.lib$|xml2)")
-  target_link_libraries(tvm_ffi_orcjit PRIVATE ${_sys_libs_list})
-endif ()
-
-# ---- Platform-specific fixups ----
-if (APPLE)
-  add_custom_command(
-    TARGET tvm_ffi_orcjit
-    POST_BUILD
-    COMMAND install_name_tool -change @rpath/libc++.1.dylib /usr/lib/libc++.1.dylib
-            $<TARGET_FILE:tvm_ffi_orcjit>
-    COMMENT "Fixing libc++ rpath to use system library"
-  )
-endif ()
-
-# libstdc++/libgcc are linked DYNAMICALLY on Linux. The prebuilt LLVM this addon links against is
-# built inside the manylinux image with its gcc-toolset, so the toolchain already sits at the
-# manylinux ABI floor and no too-recent GLIBCXX_* symbol is imported -- the -static-libstdc++
-# workaround the older conda-forge LLVM required is no longer needed.
+# Imported targets carry the static compression libraries and platform system dependencies.
+llvm_map_components_to_libnames(LLVM_LIBS Core OrcJIT Support native)
+target_link_libraries(tvm_ffi_orcjit PRIVATE tvm_ffi::header tvm_ffi::shared ${LLVM_LIBS})
 
 # Export only the explicit initialization API. In particular, do not publish symbols from the
 # statically linked LLVM/zlib/zstd archives: the addon is loaded into host processes that may carry
@@ -219,22 +98,14 @@ endif ()
 # * macOS: MachOPlatform is skipped to sidestep the compact-unwind delta bug (see
 #   src/ffi/orcjit_session.cc); liborc_rt is unused.
 # * Windows: COFFPlatform is not hooked up; liborc_rt is unused.
-set(ORC_RT_PATH "")
-if (NOT APPLE AND NOT WIN32)
-  if (DEFINED ENV{ORC_RT_PATH})
-    set(ORC_RT_PATH "$ENV{ORC_RT_PATH}")
-  else ()
-    file(GLOB_RECURSE _orc_rt_candidates "${_llvm_prefix}/lib/clang/*/lib/liborc_rt*.a")
-    if (_orc_rt_candidates)
-      list(GET _orc_rt_candidates 0 ORC_RT_PATH)
-    endif ()
+if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  file(GLOB_RECURSE _orc_rt_candidates
+       "${_llvm_prefix}/lib/clang/${LLVM_VERSION_MAJOR}/lib/liborc_rt*.a"
+  )
+  if (NOT _orc_rt_candidates)
+    message(FATAL_ERROR "mlc-llvm-static is missing the Linux liborc_rt archive")
   endif ()
-  if (NOT ORC_RT_PATH)
-    message(WARNING "Could not find liborc_rt. Linux ORC platform lifecycle will be disabled.")
-  endif ()
-endif ()
-
-if (ORC_RT_PATH)
+  list(GET _orc_rt_candidates 0 ORC_RT_PATH)
   message(STATUS "Embedding liborc_rt: ${ORC_RT_PATH}")
   enable_language(ASM)
   configure_file(

@@ -64,12 +64,12 @@ pip install apache-tvm-ffi apache-tvm_ffi_orcjit
 
 #### Prerequisites
 
-- Python 3.10+, CMake 3.20+, C++17 compiler
+- Python 3.10+, CMake 3.24+, C++17 compiler
 
 The build automatically installs [mlc-llvm-static](https://pypi.org/project/mlc-llvm-static/)
 from PyPI. It supplies LLVM 23.1.1, static zlib/zstd, and the Linux ORC runtime.
-CMake discovers the SDK in the build environment; no separate LLVM installation
-or `LLVM_PREFIX` setting is needed. The SDK is linked statically and is not a
+CMake uses the SDK in the build environment and links its exported static targets.
+A separate LLVM installation is not used. The SDK is linked statically and is not a
 runtime dependency of the resulting addon wheel.
 
 The base SDK contains the native backend used by ORC JIT.
@@ -91,11 +91,9 @@ cd addons/tvm_ffi_orcjit
 pip install -e .
 ```
 
-To build against an existing LLVM 23.1.1+ installation instead, set `LLVM_PREFIX`
-to its install prefix or pass `LLVM_DIR` to CMake. That installation must also
-provide `llvm-config` and static zlib/zstd (plus `liborc_rt` on Linux). For a build
-without the PyPI SDK, install the other build requirements manually and use
-`pip install --no-build-isolation -e .` from the addon directory.
+For a build with `--no-build-isolation`, install the build requirements, including
+`mlc-llvm-static==23.1.1`, into the same Python environment first. `LLVM_PREFIX`
+and `LLVM_DIR` do not select a different SDK.
 
 On Linux, each `load_module` call follows the same default compiler selection
 as `tvm_ffi.cpp.build`: `$CXX`, or `c++` when unset. ORC asks that compiler for
@@ -253,13 +251,14 @@ for C++, or `__tvm_ffi_` prefix for C).
 MSVC/clang-cl objects must be compiled with `/GS-` to disable buffer security
 checks (`__security_cookie`) which are CRT symbols the JIT cannot resolve.
 
-### LLVM version mismatch
+### LLVM SDK discovery failure
 
-The default build uses the pinned PyPI SDK. To override it, set `LLVM_PREFIX`
-to an LLVM 23.1.1+ install prefix:
+Source builds require the pinned `mlc-llvm-static` package in the build
+interpreter's environment. Normal isolated builds install it automatically.
+For builds with `--no-build-isolation`, install it explicitly:
 
 ```bash
-export LLVM_PREFIX=/path/to/llvm
+pip install mlc-llvm-static==23.1.1
 ```
 
 ### Reclaiming unused JIT memory on Linux
