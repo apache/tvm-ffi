@@ -225,11 +225,7 @@ jobs:
           git diff --exit-code -- rust/src/generated
           cd rust && cargo run
 
-  # Build + test the orcjit wheel. On Linux the action downloads a prebuilt LLVM
-  # tarball from a GitHub Release (built from source under the manylinux
-  # gcc-toolset so the ABI stays under the floor); macOS/Windows install LLVM via
-  # conda inside the action. The LLVM release is produced out-of-band (rarely, on
-  # version bump) by mlc-ai/package's build_llvm workflow -- not on every CI run.
+  # Build and test the OrcJIT wheel using the LLVM static SDK from PyPI.
   orcjit:
     needs: [lint, prepare]
     if: >
@@ -240,10 +236,6 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       LLVM_VERSION: "23.1.1"
-      # Repo hosting the prebuilt LLVM release assets consumed on Linux. Built
-      # out-of-band from source in a manylinux image so the ABI stays under the
-      # manylinux_2_28 floor; see that repo's build_llvm workflow.
-      LLVM_RELEASE_REPO: "mlc-ai/package"
     strategy:
       fail-fast: false
       matrix:
@@ -265,7 +257,6 @@ jobs:
           build: ${{ matrix.build }}
           checkout_ref: ${{ github.sha }}
           llvm_version: ${{ env.LLVM_VERSION }}
-          llvm_release_repo: ${{ env.LLVM_RELEASE_REPO }}
 
       - uses: actions/upload-artifact@v4
         with:

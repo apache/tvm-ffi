@@ -53,7 +53,7 @@ def obj(name: str) -> str:
 
 
 def _find_orc_rt_archive() -> str:
-    """Locate a liborc_rt archive under LLVM_PREFIX, or skip.
+    """Locate a liborc_rt archive under LLVM_PREFIX or in the build SDK, or skip.
 
     Used only by the custom-``orc_rt`` override tests. There is no bundled copy
     next to the extension anymore (the runtime is embedded), so these tests fall
@@ -63,8 +63,9 @@ def _find_orc_rt_archive() -> str:
 
     prefix = os.environ.get("LLVM_PREFIX")
     if not prefix:
-        pytest.skip("LLVM_PREFIX not set; cannot locate a liborc_rt archive")
-    matches = sorted(Path(prefix).glob("lib/clang/*/lib/*/liborc_rt*.a"))
+        llvm = pytest.importorskip("mlc_llvm_static")
+        prefix = llvm.get_prefix()
+    matches = sorted(Path(prefix).glob("lib/clang/*/lib/**/liborc_rt*.a"))
     if not matches:
         pytest.skip("no liborc_rt archive found under LLVM_PREFIX")
     return str(matches[0])

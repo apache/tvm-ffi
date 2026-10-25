@@ -10,13 +10,38 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-# ---- LLVM_PREFIX handling ----
+find_package(
+  Python
+  COMPONENTS Interpreter
+  REQUIRED
+)
+
+# ---- LLVM discovery ----
 # scikit-build-core overrides CMAKE_PREFIX_PATH via its init cache, so we read LLVM_PREFIX from the
-# environment instead.
-if (DEFINED ENV{LLVM_PREFIX})
-  list(APPEND CMAKE_PREFIX_PATH "$ENV{LLVM_PREFIX}")
+# environment instead. Explicit LLVM_PREFIX/LLVM_DIR settings take precedence over the build SDK.
+if (DEFINED ENV{LLVM_PREFIX} AND NOT "$ENV{LLVM_PREFIX}" STREQUAL "")
+  list(PREPEND CMAKE_PREFIX_PATH "$ENV{LLVM_PREFIX}")
   if (EXISTS "$ENV{LLVM_PREFIX}/Library")
-    list(APPEND CMAKE_PREFIX_PATH "$ENV{LLVM_PREFIX}/Library")
+    list(PREPEND CMAKE_PREFIX_PATH "$ENV{LLVM_PREFIX}/Library")
+  endif ()
+elseif (NOT LLVM_DIR AND NOT DEFINED ENV{LLVM_DIR})
+  execute_process(
+    COMMAND "${Python_EXECUTABLE}" -m mlc_llvm_static.config --cmake-dir
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    OUTPUT_VARIABLE _llvm_sdk_dir
+    RESULT_VARIABLE _llvm_sdk_rc
+    ERROR_QUIET
+  )
+  if (_llvm_sdk_rc EQUAL 0)
+    set(LLVM_DIR "${_llvm_sdk_dir}")
+    # On Windows the SDK's llvm-config is a pip console launcher, outside the LLVM prefix.
+    if (NOT LLVM_CONFIG_EXE)
+      execute_process(
+        COMMAND "${Python_EXECUTABLE}" -m mlc_llvm_static.config --llvm-config
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        OUTPUT_VARIABLE LLVM_CONFIG_EXE COMMAND_ERROR_IS_FATAL ANY
+      )
+    endif ()
   endif ()
 endif ()
 
@@ -27,11 +52,6 @@ if (LLVM_PACKAGE_VERSION VERSION_LESS 23.1.1)
 endif ()
 message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION} in ${LLVM_DIR}")
 
-find_package(
-  Python
-  COMPONENTS Interpreter
-  REQUIRED
-)
 execute_process(
   COMMAND "${Python_EXECUTABLE}" -m tvm_ffi.config --cmakedir
   OUTPUT_STRIP_TRAILING_WHITESPACE

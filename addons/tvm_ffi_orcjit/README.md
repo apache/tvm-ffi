@@ -65,25 +65,17 @@ pip install apache-tvm-ffi apache-tvm_ffi_orcjit
 #### Prerequisites
 
 - Python 3.10+, CMake 3.20+, C++17 compiler
-- LLVM 23.1.1+ development libraries (`llvmdev`, `llvm-config`)
-- Static `zlib` and `zstd` libraries (in the same prefix as LLVM)
 
-#### Install LLVM via conda-forge
+The build automatically installs [mlc-llvm-static](https://pypi.org/project/mlc-llvm-static/)
+from PyPI. It supplies LLVM 23.1.1, static zlib/zstd, and the Linux ORC runtime.
+CMake discovers the SDK in the build environment; no separate LLVM installation
+or `LLVM_PREFIX` setting is needed. The SDK is linked statically and is not a
+runtime dependency of the resulting addon wheel.
 
-The easiest way to get all dependencies is via conda-forge:
-
-```bash
-conda create -p /opt/llvm -c conda-forge \
-  llvmdev=23.1.1 clangdev=23.1.1 compiler-rt=23.1.1 zlib zstd-static -y
-export LLVM_PREFIX=/opt/llvm
-```
-
-On Windows:
-
-```cmd
-conda create -p C:\opt\llvm -c conda-forge llvmdev=23.1.1 zlib zstd-static -y
-set LLVM_PREFIX=C:\opt\llvm
-```
+The base SDK contains the native backend used by ORC JIT.
+`mlc-llvm-static-extra-targets` adds cross-compilation backends and is not required
+for this addon. Clang and other compilers are separate tools; the SDK does not
+include them.
 
 #### Build and install
 
@@ -99,9 +91,11 @@ cd addons/tvm_ffi_orcjit
 pip install -e .
 ```
 
-The `LLVM_PREFIX` environment variable tells CMake where to find LLVM. If
-LLVM is installed in a conda env or a standard system path, CMake can
-auto-discover it and `LLVM_PREFIX` is not needed.
+To build against an existing LLVM 23.1.1+ installation instead, set `LLVM_PREFIX`
+to its install prefix or pass `LLVM_DIR` to CMake. That installation must also
+provide `llvm-config` and static zlib/zstd (plus `liborc_rt` on Linux). For a build
+without the PyPI SDK, install the other build requirements manually and use
+`pip install --no-build-isolation -e .` from the addon directory.
 
 On Linux, each `load_module` call follows the same default compiler selection
 as `tvm_ffi.cpp.build`: `$CXX`, or `c++` when unset. ORC asks that compiler for
@@ -261,7 +255,8 @@ checks (`__security_cookie`) which are CRT symbols the JIT cannot resolve.
 
 ### LLVM version mismatch
 
-The package requires LLVM 23.1.1+. Set `LLVM_PREFIX` to the LLVM install prefix:
+The default build uses the pinned PyPI SDK. To override it, set `LLVM_PREFIX`
+to an LLVM 23.1.1+ install prefix:
 
 ```bash
 export LLVM_PREFIX=/path/to/llvm

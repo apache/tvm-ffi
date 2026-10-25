@@ -16,7 +16,11 @@
 # under the License.
 
 [build-system]
-requires = ["scikit-build-core>=0.10.0", "apache-tvm-ffi>=0.1.14.post1"]
+requires = [
+  "scikit-build-core>=0.10.0",
+  "apache-tvm-ffi>=0.1.14.post1",
+  "mlc-llvm-static==23.1.1",
+]
 build-backend = "scikit_build_core.build"
 
 [project]
@@ -76,8 +80,6 @@ build = "cp312-*"
 skip = "*-win32 *-manylinux_i686 *-musllinux*"
 
 [tool.cibuildwheel.linux]
-# LLVM_PREFIX is unnecessary when LLVM is installed in a conda env
-# (cmake auto-discovers via CONDA_PREFIX) or in a standard system path.
 repair-wheel-command = "auditwheel repair --exclude libtvm_ffi.so -w {dest_dir} {wheel}"
 
 [tool.cibuildwheel.macos]
