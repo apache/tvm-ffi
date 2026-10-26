@@ -30,7 +30,10 @@
 #include <tvm/ffi/c_api.h>
 
 /* Hidden visibility: caller uses ADRP+ADD instead of GOT */
-__attribute__((visibility("hidden"))) int64_t hidden_helper_add(int64_t a, int64_t b) {
+#ifndef _MSC_VER
+__attribute__((visibility("hidden")))
+#endif
+int64_t hidden_helper_add(int64_t a, int64_t b) {
   return a + b;
 }
 
