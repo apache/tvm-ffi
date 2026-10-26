@@ -233,18 +233,21 @@ first `type_index()`, which allocating an instance calls:
 
 ```rust
 use tvm_ffi::derive::{Object, ObjectRef};
-use tvm_ffi::{Object, ObjectArc};
+use tvm_ffi::reflection::ObjectDef;
+use tvm_ffi::{Object, ObjectArc, Result};
 
 #[repr(C)]
 #[derive(Object)]
 #[type_key = "my.Point"]
 #[type_register]
 #[type_s_eq_hash_kind = "TreeNode"]
+#[type_reflection(PointObj::reflect_methods)]
 pub struct PointObj {
     base: Object,
+    /// The x coordinate.
     #[reflect]
     pub x: i64,
-    #[reflect(writable, seq_hash_ignore)]
+    #[reflect(writable, seq_hash_ignore, doc = "A label.")]
     pub label: tvm_ffi::String,
 }
 
@@ -253,21 +256,39 @@ pub struct PointObj {
 pub struct Point {
     data: ObjectArc<PointObj>,
 }
+
+impl PointObj {
+    fn reflect_methods(def: &mut ObjectDef<Self>) {
+        def.def("x_abs", |p: Point| -> Result<i64> { Ok(p.data.x.abs()) }, "The |x|.")
+            .def_static("zero", || -> Result<i64> { Ok(0) }, "");
+    }
+}
 ```
 
-Each reflected field gets a C ABI getter and setter and its type schema, so
-C++ structural equality and hashing, `ffi.ReprPrint`, `ffi.DeepCopy` and
-Python see it. The flags in `#[reflect(...)]` name
-`tvm_ffi::FieldFlags` constants. Without `#[type_s_eq_hash_kind]`, a type
-keeps its nearest reflected ancestor's kind. The derive also implements
-`ShallowCopy` and registers it as `__ffi_shallow_copy__`, which requires the
-parent to implement `ShallowCopy` and the other fields to be `Clone`.
+Each reflected field gets a C ABI getter and setter, its doc string and its
+type schema, so C++ structural equality and hashing, `ffi.ReprPrint`,
+`ffi.DeepCopy` and Python see it. The flags in `#[reflect(...)]` name
+`tvm_ffi::FieldFlags` constants; `name = "..."` registers the field under
+another name, and `doc = "..."` sets its doc string, otherwise the field's
+`///` doc comment. Without `#[type_s_eq_hash_kind]`, a type keeps its
+nearest reflected ancestor's kind. The derive also implements `ShallowCopy`
+and registers it as `__ffi_shallow_copy__`, which requires the parent to
+implement `ShallowCopy` and the other fields to be `Clone`.
+
+`#[type_reflection(path)]` names a function that registers the type's
+methods with `def` (the object is the first parameter) and `def_static`, as
+C++ `refl::ObjectDef<T>().def(...)` does, each with its type schema and doc
+string, where `Function::from_type_method` and Python find them. It runs
+while the type registers, so it must not call `type_index()` of the type or
+of another Rust type that is not registered yet. Method names, like
+reflected field names, must be unique in the type.
 
 ### Defining Object Types from Their Fields
 
 `#[rs_class]` defines such a type from its object struct, like Python's
 `py_class`. The first field, `base`, is the parent's object; every other field
-is reflected, and `#[reflect(...)]` sets its flags.
+is reflected, and `#[reflect(...)]` sets its flags, name and doc string.
+`reflection = path` after the type key is `#[type_reflection(path)]`.
 `def_object_ref!(TypeName, ParentType, ObjectName)` defines the reference, as
 C++ `TVM_FFI_DEFINE_OBJECT_REF_METHODS_NOTNULLABLE` does:
 

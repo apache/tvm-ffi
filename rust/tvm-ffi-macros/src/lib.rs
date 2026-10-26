@@ -69,17 +69,22 @@ pub fn match_any(input: TokenStream) -> TokenStream {
 ///
 /// With `#[type_register]`, fields marked `#[reflect]` are registered with the
 /// type table when the type is, as C++ `refl::ObjectDef<T>().def_ro(...)`
-/// does: a getter, a setter and the type schema per field, the metadata, and
-/// the `__ffi_shallow_copy__` and `__ffi_type_final__` type attributes. C++
-/// structural equality and hashing, `repr`, deep copy and Python then see
-/// the fields. `#[reflect(writable, seq_hash_ignore, ...)]` adds the
-/// [`FieldFlags`] of those names. `#[type_s_eq_hash_kind = "TreeNode"]`
-/// names the [`SEqHashKind`]; without it the type keeps its nearest reflected
-/// ancestor's, as a C++ subclass inherits `_type_s_eq_hash_kind`. A type with
-/// either attribute also gets `ShallowCopy`, which shallow-copies the parent
-/// and clones every other field, so the parent must implement `ShallowCopy`
-/// (`Object` and reflected Rust types do) and the fields must be `Clone`; a
-/// reflected field's type must implement `AnyCompatible`.
+/// does: a getter, a setter, the doc string and the type schema per field,
+/// the metadata, and the `__ffi_shallow_copy__` and `__ffi_type_final__`
+/// type attributes. C++ structural equality and hashing, `repr`, deep copy
+/// and Python then see the fields. `#[reflect(writable, seq_hash_ignore,
+/// ...)]` adds the [`FieldFlags`] of those names, `name = "..."` registers
+/// the field under another name, and `doc = "..."` sets its doc string,
+/// otherwise the field's `///` doc comment. `#[type_s_eq_hash_kind =
+/// "TreeNode"]` names the [`SEqHashKind`]; without it the type keeps its
+/// nearest reflected ancestor's, as a C++ subclass inherits
+/// `_type_s_eq_hash_kind`. `#[type_reflection(path)]` names a function
+/// `fn(&mut ObjectDef<Self>)` that registers the type's methods, as C++
+/// `refl::ObjectDef<T>().def(...)` does. A type with any of these attributes
+/// also gets `ShallowCopy`, which shallow-copies the parent and clones every
+/// other field, so the parent must implement `ShallowCopy` (`Object` and
+/// reflected Rust types do) and the fields must be `Clone`; a reflected
+/// field's type must implement `AnyCompatible`.
 ///
 /// [`FieldFlags`]: ../tvm_ffi/reflection/struct.FieldFlags.html
 /// [`SEqHashKind`]: ../tvm_ffi/reflection/enum.SEqHashKind.html
@@ -100,6 +105,7 @@ pub fn match_any(input: TokenStream) -> TokenStream {
         type_child_slots,
         type_child_slots_can_overflow,
         type_s_eq_hash_kind,
+        type_reflection,
         reflect
     )
 )]
@@ -142,7 +148,8 @@ pub fn derive_object_ref(input: TokenStream) -> TokenStream {
 /// must implement `ShallowCopy`, as `rs_class` types and non-final C++ types
 /// bound by `tvm-ffi-stubgen` do. Every other field is reflected;
 /// `#[reflect(writable, seq_hash_ignore, ...)]` gives a field the
-/// [`FieldFlags`] of those names. The macro adds to the struct:
+/// [`FieldFlags`] of those names, and `name` and `doc` as for
+/// `derive(Object)`. The macro adds to the struct:
 ///
 /// - `#[repr(C)]` and `Deref` to the parent's object, so `obj.field` reads the
 ///   fields of both.
@@ -157,18 +164,19 @@ pub fn derive_object_ref(input: TokenStream) -> TokenStream {
 ///
 /// After the type key:
 ///
-/// - `final`, `s_eq_hash_kind = "TreeNode"`, `child_slots = N` and
-///   `child_slots_can_overflow = bool` are `derive(Object)`'s `#[type_final]`,
-///   `#[type_s_eq_hash_kind]`, `#[type_child_slots]` and
-///   `#[type_child_slots_can_overflow]`.
+/// - `final`, `s_eq_hash_kind = "TreeNode"`, `child_slots = N`,
+///   `child_slots_can_overflow = bool` and `reflection = path` are
+///   `derive(Object)`'s `#[type_final]`, `#[type_s_eq_hash_kind]`,
+///   `#[type_child_slots]`, `#[type_child_slots_can_overflow]` and
+///   `#[type_reflection]`.
 /// - `crate = path` is where the generated code finds tvm-ffi
 ///   (`crate = ::my_lib::tvm_ffi`), for a crate that depends on it only through
 ///   a re-export; by default `tvm_ffi`.
 ///
 /// The type is a `derive(Object)` type with `#[type_register]`: it registers on
-/// its first `type_index()`, with the fields, `__ffi_shallow_copy__` and
-/// `__ffi_type_final__`, and without `__ffi_init__`. A field's type must
-/// implement `AnyCompatible` and `Clone`.
+/// its first `type_index()`, with the fields, the methods,
+/// `__ffi_shallow_copy__` and `__ffi_type_final__`, and without
+/// `__ffi_init__`. A field's type must implement `AnyCompatible` and `Clone`.
 ///
 /// [`FieldFlags`]: ../tvm_ffi/reflection/struct.FieldFlags.html
 #[proc_macro_error]

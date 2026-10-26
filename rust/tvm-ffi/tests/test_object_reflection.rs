@@ -17,31 +17,59 @@
  * under the License.
  */
 use tvm_ffi::derive::{Object, ObjectRef};
-use tvm_ffi::reflection::FieldFlags;
+use tvm_ffi::reflection::{FieldFlags, ObjectDef};
 use tvm_ffi::*;
 use tvm_ffi_sys::{
     TVMFFIFieldFlagBitMask, TVMFFIFieldInfo, TVMFFIFieldSetter, TVMFFIGetTypeInfo,
-    TVMFFISEqHashKind, TVMFFITypeInfo,
+    TVMFFIMethodInfo, TVMFFISEqHashKind, TVMFFITypeInfo,
 };
 
-// Rust-defined types whose `#[reflect]` fields reach the type table, so that
-// the C++ structural engines, `repr` and deep copy see them.
+// Rust-defined types whose `#[reflect]` fields and `#[type_reflection]`
+// methods reach the type table, so that the C++ structural engines, `repr`,
+// deep copy and other languages see them.
 
 #[repr(C)]
 #[derive(Object)]
 #[type_key = "testing.rust.ReflectedPoint"]
 #[type_register]
 #[type_s_eq_hash_kind = "TreeNode"]
+#[type_reflection(PointObj::reflect_methods)]
 struct PointObj {
     base: Object,
+    /// The x coordinate.
+    ///
+    /// Signed.
     #[reflect]
     x: i64,
-    #[reflect(writable)]
+    /// Not the registered doc: `doc = ` wins.
+    #[reflect(writable, doc = "The y coordinate.")]
     y: f64,
     #[reflect(seq_hash_ignore, repr_off)]
     label: tvm_ffi::String,
     // Not reflected: not in the type table, but still shallow-copied.
     hits: i64,
+}
+
+impl PointObj {
+    fn reflect_methods(def: &mut ObjectDef<Self>) {
+        def.def(
+            "norm1",
+            |p: Point| -> Result<f64> { Ok(p.data.x.abs() as f64 + p.data.y.abs()) },
+            "The L1 norm.",
+        )
+        .def(
+            "shifted",
+            |p: Point, dx: i64| -> Result<Point> {
+                Ok(point(p.data.x + dx, p.data.y, p.data.label.as_str()))
+            },
+            "",
+        )
+        .def_static(
+            "origin",
+            || -> Result<Point> { Ok(point(0, 0.0, "origin")) },
+            "The origin.",
+        );
+    }
 }
 
 #[repr(C)]
@@ -59,7 +87,7 @@ struct Point3Obj {
     base: PointObj,
     #[reflect]
     z: i64,
-    #[reflect]
+    #[reflect(name = "labels")]
     tags: Array<tvm_ffi::String>,
     #[reflect]
     r#type: Option<Point>,
@@ -108,6 +136,21 @@ fn fields(info: &TVMFFITypeInfo) -> &[TVMFFIFieldInfo] {
     unsafe { std::slice::from_raw_parts(info.fields, info.num_fields as usize) }
 }
 
+fn methods(info: &TVMFFITypeInfo) -> &[TVMFFIMethodInfo] {
+    if info.num_methods == 0 {
+        return &[];
+    }
+    unsafe { std::slice::from_raw_parts(info.methods, info.num_methods as usize) }
+}
+
+/// The metadata that records `type_schema`, as C++ `Metadata::ToJSON` writes it.
+fn metadata_of(type_schema: &str) -> std::string::String {
+    format!(
+        r#"{{"type_schema":"{}"}}"#,
+        type_schema.replace('"', "\\\"")
+    )
+}
+
 fn call(name: &str, args: &[AnyView]) -> Any {
     Function::get_global(name)
         .unwrap()
@@ -124,6 +167,7 @@ fn register_types() {
         PointObj::type_index();
         Point3Obj::type_index();
         CounterObj::type_index();
+        TallyObj::type_index();
         no_imports::LeafObj::type_index();
     });
 }
@@ -168,7 +212,7 @@ fn test_reflected_fields_are_registered_with_the_type() {
     // The subtype registers only its own fields, and inherits the kind.
     let info = type_info::<Point3Obj>();
     let names: Vec<&str> = fields(info).iter().map(|f| f.name.as_str()).collect();
-    assert_eq!(names, ["z", "tags", "type"]);
+    assert_eq!(names, ["z", "labels", "type"]);
     assert_eq!(
         fields(info)[1].metadata.as_str(),
         r#"{"type_schema":"{\"type\":\"ffi.Array\",\"args\":[{\"type\":\"ffi.String\"}]}"}"#
@@ -176,6 +220,132 @@ fn test_reflected_fields_are_registered_with_the_type() {
     assert_eq!(
         unsafe { (*info.metadata).structural_eq_hash_kind },
         TVMFFISEqHashKind::kTVMFFISEqHashKindTreeNode as i32
+    );
+}
+
+#[test]
+fn test_field_docs_come_from_doc_comments_or_reflect() {
+    register_types();
+    let [x, y, label] = fields(type_info::<PointObj>()) else {
+        unreachable!()
+    };
+    assert_eq!(x.doc.as_str(), "The x coordinate.\n\nSigned.");
+    assert_eq!(y.doc.as_str(), "The y coordinate.");
+    assert_eq!(label.doc.as_str(), "");
+    // A renamed field keeps its Rust type and offset.
+    let labels = &fields(type_info::<Point3Obj>())[1];
+    assert_eq!(labels.name.as_str(), "labels");
+    assert_eq!(labels.offset, std::mem::offset_of!(Point3Obj, tags) as i64);
+    let p3 = point3(1, 2);
+    let getter = FieldGetter::new(Point3Obj::type_index(), "labels").unwrap();
+    let tags = getter.get::<_, Array<tvm_ffi::String>>(&*p3.data).unwrap();
+    assert_eq!(tags.len(), 2);
+}
+
+#[test]
+fn test_methods_are_registered_with_the_type() {
+    register_types();
+    let info = type_info::<PointObj>();
+    let names: Vec<&str> = methods(info).iter().map(|m| m.name.as_str()).collect();
+    assert_eq!(names, ["norm1", "shifted", "origin"]);
+    let [norm1, shifted, origin] = methods(info) else {
+        unreachable!()
+    };
+    assert_eq!(norm1.flags, 0);
+    assert_eq!(norm1.doc.as_str(), "The L1 norm.");
+    assert_eq!(shifted.doc.as_str(), "");
+    assert_eq!(
+        origin.flags,
+        TVMFFIFieldFlagBitMask::kTVMFFIFieldFlagBitMaskIsStaticMethod as i64
+    );
+    assert_eq!(origin.doc.as_str(), "The origin.");
+    // Each method records its type schema, as C++ `ObjectDef::def` does.
+    let point = r#"{"type":"testing.rust.ReflectedPoint"}"#;
+    assert_eq!(
+        shifted.metadata.as_str(),
+        metadata_of(&format!(
+            r#"{{"type":"ffi.Function","named_args":{{"return":[{point}],"params":[{point},{{"type":"int"}}]}}}}"#
+        ))
+    );
+    assert_eq!(
+        origin.metadata.as_str(),
+        metadata_of(&format!(
+            r#"{{"type":"ffi.Function","named_args":{{"return":[{point}],"params":[]}}}}"#
+        ))
+    );
+    // The subtype's table holds only its own methods.
+    assert_eq!(methods(type_info::<Point3Obj>()).len(), 0);
+}
+
+#[test]
+fn test_methods_are_called_through_the_type_table() {
+    register_types();
+    let norm1 = Function::from_type_key_method("testing.rust.ReflectedPoint", "norm1").unwrap();
+    let norm = f64::try_from(norm1.call_tuple((point(3, -4.5, "p"),)).unwrap()).unwrap();
+    assert_eq!(norm, 7.5);
+    // An object of a subtype is an object of the type.
+    let norm = f64::try_from(norm1.call_tuple((point3(2, 9),)).unwrap()).unwrap();
+    assert_eq!(norm, 2.5);
+    let shifted = Function::from_type_method(PointObj::type_index(), "shifted").unwrap();
+    let moved = Point::try_from(shifted.call_tuple((point(3, 1.0, "p"), 4i64)).unwrap()).unwrap();
+    assert_eq!(
+        (moved.data.x, moved.data.y, moved.data.label.as_str()),
+        (7, 1.0, "p")
+    );
+    let origin = Function::from_type_key_method("testing.rust.ReflectedPoint", "origin").unwrap();
+    let origin = Point::try_from(origin.call_tuple(()).unwrap()).unwrap();
+    assert_eq!((origin.data.x, origin.data.label.as_str()), (0, "origin"));
+    // A wrong argument is a type error, not a panic.
+    let error = norm1.call_tuple((1i64,)).err().unwrap();
+    assert_eq!(error.kind(), TYPE_ERROR);
+}
+
+// A type with methods but no reflected fields registers its reflection too.
+
+#[repr(C)]
+#[derive(Object)]
+#[type_key = "testing.rust.ReflectedTally"]
+#[type_register]
+#[type_final]
+#[type_reflection(Self::reflect_methods)]
+struct TallyObj {
+    base: Object,
+    count: i64,
+}
+
+#[repr(C)]
+#[derive(ObjectRef, Clone)]
+struct Tally {
+    data: ObjectArc<TallyObj>,
+}
+
+impl TallyObj {
+    fn reflect_methods(def: &mut ObjectDef<Self>) {
+        def.def("count", |t: Tally| -> Result<i64> { Ok(t.data.count) }, "");
+    }
+}
+
+#[test]
+fn test_types_with_only_methods_register_their_reflection() {
+    register_types();
+    let info = type_info::<TallyObj>();
+    assert_eq!(info.num_fields, 0);
+    assert!(!info.metadata.is_null());
+    assert_eq!(methods(info).len(), 1);
+    assert!(
+        bool::try_from(get_type_attr(TallyObj::type_index(), "__ffi_type_final__").unwrap())
+            .unwrap()
+    );
+    let count = Function::from_type_method(TallyObj::type_index(), "count").unwrap();
+    let tally = Tally {
+        data: ObjectArc::new(TallyObj {
+            base: Object::new(),
+            count: 11,
+        }),
+    };
+    assert_eq!(
+        i64::try_from(count.call_tuple((tally,)).unwrap()).unwrap(),
+        11
     );
 }
 
@@ -366,4 +536,34 @@ fn test_derives_need_nothing_in_scope() {
     let leaf = no_imports::leaf(9);
     let w = FieldGetter::new(no_imports::LeafObj::type_index(), "w").unwrap();
     assert_eq!(w.get::<_, i64>(&*leaf.data).unwrap(), 9);
+}
+
+#[repr(C)]
+#[derive(Object)]
+#[type_key = "testing.rust.DuplicateMethod"]
+#[type_register]
+#[type_reflection(Self::reflect_methods)]
+struct DuplicateMethodObj {
+    base: Object,
+}
+
+impl DuplicateMethodObj {
+    fn reflect_methods(def: &mut ObjectDef<Self>) {
+        def.def(
+            "same",
+            |_: tvm_ffi::object::ObjectRef| -> Result<i64> { Ok(1) },
+            "",
+        )
+        .def(
+            "same",
+            |_: tvm_ffi::object::ObjectRef| -> Result<i64> { Ok(2) },
+            "",
+        );
+    }
+}
+
+#[test]
+#[should_panic(expected = "duplicate method `same` of `testing.rust.DuplicateMethod`")]
+fn test_duplicate_method_names_fail_the_registration() {
+    DuplicateMethodObj::type_index();
 }

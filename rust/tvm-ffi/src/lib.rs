@@ -73,7 +73,7 @@ pub use crate::object::{
 };
 pub use crate::optional::{Optional, OptionalCompatible};
 pub use crate::reflection::{
-    get_type_attr, FieldFlags, FieldGetter, SEqHashKind, ShallowCopy, TypeAttrColumn,
+    get_type_attr, FieldFlags, FieldGetter, ObjectDef, SEqHashKind, ShallowCopy, TypeAttrColumn,
 };
 pub use crate::rvalue_ref::RValueRef;
 pub use crate::string::{Bytes, String};

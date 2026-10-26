@@ -21,14 +21,17 @@
 //!
 //! [`ObjectDef`] fills the same type table entries as C++ `refl::ObjectDef<T>`
 //! and Python `_register_py_class`: the type metadata, one record per field
-//! with C ABI getter and setter, and the `__ffi_shallow_copy__` and
-//! `__ffi_type_final__` type attributes. Through them the C++ structural
-//! equality, hashing and mutation, `repr`, deep copy and Python's
-//! generated classes reach the fields of a Rust type.
+//! with C ABI getter and setter, one record per method, and the
+//! `__ffi_shallow_copy__` and `__ffi_type_final__` type attributes. Through
+//! them the C++ structural equality, hashing and mutation, `repr`, deep copy
+//! and Python's generated classes reach the fields and methods of a Rust
+//! type.
 //!
-//! Only `#[derive(Object)]` calls [`ObjectDef`], for a `#[type_register]`
-//! type with `#[reflect]` fields; the derive guarantees that each registered
-//! field's type and offset match.
+//! Only `#[derive(Object)]` creates an [`ObjectDef`], for a `#[type_register]`
+//! type with `#[reflect]` fields or a `#[type_reflection]` function; the
+//! derive guarantees that each registered field's type and offset match. The
+//! `#[type_reflection]` function receives the builder to register methods
+//! with [`ObjectDef::def`] and [`ObjectDef::def_static`].
 
 use std::ffi::c_void;
 use std::marker::PhantomData;
@@ -36,14 +39,16 @@ use std::mem::{align_of, size_of};
 use std::ops::BitOr;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
+use crate::function_internal::AsPackedCallable;
 use crate::object::{Object, ObjectArc, ObjectCore, ObjectRef, ObjectRefCore};
 use crate::tvm_ffi_sys::{
     TVMFFIAny, TVMFFIByteArray, TVMFFIFieldFlagBitMask, TVMFFIFieldInfo, TVMFFIFieldSetter,
-    TVMFFIGetTypeInfo, TVMFFIObject, TVMFFISEqHashKind, TVMFFITypeIndex, TVMFFITypeMetadata,
-    TVMFFITypeRegisterAttr, TVMFFITypeRegisterField, TVMFFITypeRegisterMetadata,
+    TVMFFIGetTypeInfo, TVMFFIMethodInfo, TVMFFIObject, TVMFFISEqHashKind, TVMFFITypeIndex,
+    TVMFFITypeMetadata, TVMFFITypeRegisterAttr, TVMFFITypeRegisterField,
+    TVMFFITypeRegisterMetadata, TVMFFITypeRegisterMethod,
 };
 use crate::type_traits::{type_schema_metadata, AnyCompatible};
-use crate::{Any, Error, Function, Result, INTERNAL_ERROR, TYPE_ERROR};
+use crate::{Any, Error, Function, Result, INTERNAL_ERROR, TYPE_ERROR, VALUE_ERROR};
 
 /// A copy of an object's own fields under a fresh object header (the C++ copy
 /// constructor), which `__ffi_shallow_copy__` returns.
@@ -139,15 +144,36 @@ impl BitOr for FieldFlags {
     }
 }
 
-/// Registers the reflection of the object type `N` (C++ `refl::ObjectDef<N>`)
-/// for `#[derive(Object)]`: the metadata on construction, then each field in
-/// call order, then the type attributes.
+/// Registers the reflection of the object type `N`, as C++ `refl::ObjectDef<N>`
+/// does: the metadata, each `#[reflect]` field, the methods and the type
+/// attributes.
 ///
-/// When `N` already has metadata in the type table, every call is a no-op.
-#[doc(hidden)]
+/// `#[derive(Object)]` creates one while it registers a `#[type_register]`
+/// type and passes it to the function `#[type_reflection(path)]` names, which
+/// registers methods with [`ObjectDef::def`] and [`ObjectDef::def_static`]:
+///
+/// ```ignore
+/// #[type_reflection(PointObj::reflect_methods)]
+/// struct PointObj { /* ... */ }
+///
+/// impl PointObj {
+///     fn reflect_methods(def: &mut ObjectDef<Self>) {
+///         def.def("norm1", |p: Point| -> Result<i64> { Ok(p.x.abs() + p.y.abs()) }, "The L1 norm.")
+///             .def_static("origin", || -> Result<Point> { Ok(origin()) }, "");
+///     }
+/// }
+/// ```
+///
+/// That function runs under the registration lock, before `N::type_index()`
+/// returns, so it must not call `type_index()` of `N` or of another Rust type
+/// that is not registered yet. When `N` already has metadata in the type
+/// table, every call is a no-op.
 pub struct ObjectDef<N: ObjectCore> {
     type_index: i32,
     fresh: bool,
+    /// The first failed method registration, which `finish` reports.
+    error: Option<Error>,
+    method_names: Vec<String>,
     _object: PhantomData<N>,
 }
 
@@ -162,6 +188,7 @@ impl<N: ObjectCore> ObjectDef<N> {
     ///
     /// The caller holds `TYPE_REGISTRATION` for the builder's lifetime, and
     /// `type_index` is `N`'s.
+    #[doc(hidden)]
     pub unsafe fn registering(type_index: i32, kind: Option<SEqHashKind>) -> Result<Self> {
         let info = TVMFFIGetTypeInfo(type_index);
         crate::ensure!(
@@ -187,20 +214,25 @@ impl<N: ObjectCore> ObjectDef<N> {
         Ok(Self {
             type_index,
             fresh,
+            error: None,
+            method_names: Vec::new(),
             _object: PhantomData,
         })
     }
 
     /// Registers the field of type `F` at byte offset `offset` in `N` under
-    /// `name`, which must be unique in `N`.
+    /// `name`, which must be unique in `N`, with its doc string (an empty one
+    /// records none).
     ///
     /// # Safety
     ///
     /// `offset` is `std::mem::offset_of!` of a field of `N` whose type is `F`:
     /// the registered getter and setter read and write an `F` there.
+    #[doc(hidden)]
     pub unsafe fn field<F: AnyCompatible>(
         self,
         name: &str,
+        doc: &str,
         offset: usize,
         flags: FieldFlags,
     ) -> Result<Self> {
@@ -210,7 +242,7 @@ impl<N: ObjectCore> ObjectDef<N> {
         let metadata = type_schema_metadata(&F::type_schema());
         let info = TVMFFIFieldInfo {
             name: unsafe { TVMFFIByteArray::from_str(name) },
-            doc: unsafe { TVMFFIByteArray::from_str("") },
+            doc: unsafe { TVMFFIByteArray::from_str(doc) },
             metadata: unsafe { TVMFFIByteArray::from_str(&metadata) },
             flags: flags.bits(),
             size: size_of::<F>() as i64,
@@ -229,6 +261,7 @@ impl<N: ObjectCore> ObjectDef<N> {
     /// Registers `__ffi_shallow_copy__`, which reflected mutation (copy on
     /// write through the field setters) needs; C++ `ObjectDef` registers the
     /// copy constructor.
+    #[doc(hidden)]
     pub fn shallow_copy(self) -> Result<Self>
     where
         N: ShallowCopy,
@@ -245,9 +278,81 @@ impl<N: ObjectCore> ObjectDef<N> {
         Ok(self)
     }
 
+    /// Registers `func`, a typed function as for [`Function::from_typed`]
+    /// whose first parameter is the object, as the method `name` of `N`,
+    /// which must be unique in `N`, with its type schema and `doc`, as C++
+    /// `ObjectDef::def` does. A failed registration is reported when the
+    /// type's registration finishes.
+    pub fn def<F, I, O>(&mut self, name: &str, func: F, doc: &str) -> &mut Self
+    where
+        F: AsPackedCallable<I, O> + 'static,
+    {
+        self.method(name, func, doc, false)
+    }
+
+    /// Registers `func` as the static method `name` of `N`, as C++
+    /// `ObjectDef::def_static` does; otherwise as [`ObjectDef::def`].
+    pub fn def_static<F, I, O>(&mut self, name: &str, func: F, doc: &str) -> &mut Self
+    where
+        F: AsPackedCallable<I, O> + 'static,
+    {
+        self.method(name, func, doc, true)
+    }
+
+    fn method<F, I, O>(&mut self, name: &str, func: F, doc: &str, is_static: bool) -> &mut Self
+    where
+        F: AsPackedCallable<I, O> + 'static,
+    {
+        if !self.fresh || self.error.is_some() {
+            return self;
+        }
+        if self.method_names.iter().any(|n| n == name) {
+            self.error = Some(Error::new(
+                VALUE_ERROR,
+                &format!("duplicate method `{name}` of `{}`", N::TYPE_KEY),
+                "",
+            ));
+            return self;
+        }
+        self.method_names.push(name.to_string());
+        let metadata = type_schema_metadata(&F::type_schema());
+        let func = Function::from_typed(func);
+        let flags = if is_static {
+            TVMFFIFieldFlagBitMask::kTVMFFIFieldFlagBitMaskIsStaticMethod as i64
+        } else {
+            0
+        };
+        let mut method = TVMFFIAny::new();
+        // SAFETY: the strings outlive the call, which copies them, and the
+        // table takes its own reference to the function.
+        let registered = unsafe {
+            <Function as AnyCompatible>::copy_to_any_view(&func, &mut method);
+            let info = TVMFFIMethodInfo {
+                name: TVMFFIByteArray::from_str(name),
+                doc: TVMFFIByteArray::from_str(doc),
+                metadata: TVMFFIByteArray::from_str(&metadata),
+                flags,
+                method,
+            };
+            crate::check_safe_call!(TVMFFITypeRegisterMethod(self.type_index, &info))
+        };
+        if let Err(error) = registered {
+            self.error = Some(Error::new(
+                error.kind(),
+                &format!("registering method `{name}`: {}", error.message()),
+                "",
+            ));
+        }
+        self
+    }
+
     /// Registers `__ffi_type_final__`, which no other registered metadata
-    /// exposes.
+    /// exposes, and reports the first failed method registration.
+    #[doc(hidden)]
     pub fn finish(self) -> Result<()> {
+        if let Some(error) = self.error {
+            return Err(error);
+        }
         if !self.fresh {
             return Ok(());
         }

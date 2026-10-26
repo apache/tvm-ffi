@@ -31,9 +31,7 @@ use crate::tvm_ffi_sys::{
 use crate::{Any, AnyView, Error, ObjectCore, Result, TYPE_ERROR};
 
 mod registry;
-#[doc(hidden)]
-pub use registry::ObjectDef;
-pub use registry::{FieldFlags, SEqHashKind, ShallowCopy};
+pub use registry::{FieldFlags, ObjectDef, SEqHashKind, ShallowCopy};
 
 /// A registry-owned type-attribute column indexed by runtime type.
 ///

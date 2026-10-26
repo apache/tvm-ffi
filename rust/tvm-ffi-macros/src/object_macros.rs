@@ -105,7 +105,8 @@ pub(crate) fn expand_object(
     let reflection = Reflection::parse(derive_input, reflect_always);
     assert!(
         reflection.is_none() || (type_register && get_attr(derive_input, "type_index").is_none()),
-        "#[reflect] and #[type_s_eq_hash_kind] need #[type_register] and no #[type_index]"
+        "#[reflect], #[type_s_eq_hash_kind] and #[type_reflection] need #[type_register] and no \
+         #[type_index]"
     );
     let (register_reflection, shallow_copy_impl) = match &reflection {
         Some(reflection) => (
@@ -251,16 +252,100 @@ pub(crate) fn expand_object(
     }
 }
 
-/// The reflection a `#[type_register]` type declares: its `#[reflect]` fields
-/// and its `#[type_s_eq_hash_kind]`.
+/// The reflection a `#[type_register]` type declares: its `#[reflect]` fields,
+/// its `#[type_s_eq_hash_kind]` and its `#[type_reflection]` function.
 struct Reflection {
     /// The structural kind; `None` inherits the parent's.
     kind: Option<syn::Ident>,
+    /// The function `#[type_reflection(path)]` names, which registers methods.
+    methods: Option<syn::Path>,
     /// The parent's field name and every other field's name.
     base_id: syn::Ident,
     field_ids: Vec<syn::Ident>,
-    /// The reflected fields: name, type and flag names.
-    reflected: Vec<(syn::Ident, syn::Type, Vec<syn::Ident>)>,
+    /// The reflected fields.
+    reflected: Vec<ReflectedField>,
+}
+
+/// A `#[reflect]` field: its identifier, type, flag names, and the name and
+/// doc string registered for it.
+struct ReflectedField {
+    id: syn::Ident,
+    ty: syn::Type,
+    flags: Vec<syn::Ident>,
+    name: String,
+    doc: String,
+}
+
+const EXPECTED_REFLECT: &str =
+    "Expect #[reflect] or #[reflect(<flag>, ..., name = \"<name>\", doc = \"<doc>\")]";
+
+impl ReflectedField {
+    /// The field's reflection from its `#[reflect]` attribute, whose `name`
+    /// and `doc` default to the field's name and its `///` doc comment.
+    fn parse(field: &syn::Field, attr: &syn::Attribute) -> Self {
+        let id = field
+            .ident
+            .clone()
+            .expect("#[derive(Object)] needs named fields");
+        let mut flags = Vec::new();
+        let mut name = None;
+        let mut doc = None;
+        let nested = match attr.parse_meta() {
+            Ok(syn::Meta::Path(_)) => Vec::new(),
+            Ok(syn::Meta::List(list)) => list.nested.into_iter().collect(),
+            _ => panic!("{EXPECTED_REFLECT}"),
+        };
+        for item in nested {
+            match item {
+                syn::NestedMeta::Meta(syn::Meta::Path(path)) => {
+                    flags.push(path.get_ident().cloned().expect(EXPECTED_REFLECT));
+                }
+                syn::NestedMeta::Meta(syn::Meta::NameValue(syn::MetaNameValue {
+                    path,
+                    lit: syn::Lit::Str(value),
+                    ..
+                })) if path.is_ident("name") || path.is_ident("doc") => {
+                    let slot = if path.is_ident("name") {
+                        &mut name
+                    } else {
+                        &mut doc
+                    };
+                    assert!(
+                        slot.is_none(),
+                        "duplicate `{}` in #[reflect] of field `{id}`",
+                        path.get_ident().unwrap()
+                    );
+                    *slot = Some(value.value());
+                }
+                _ => panic!("{EXPECTED_REFLECT}"),
+            }
+        }
+        Self {
+            name: name.unwrap_or_else(|| id.unraw().to_string()),
+            doc: doc.unwrap_or_else(|| doc_comment(&field.attrs)),
+            id,
+            ty: field.ty.clone(),
+            flags,
+        }
+    }
+}
+
+/// The `///` doc comment of an item, as rustdoc reads it: the lines of its
+/// `#[doc = "..."]` attributes without their leading space, joined by newlines.
+fn doc_comment(attrs: &[syn::Attribute]) -> String {
+    let lines: Vec<String> = attrs
+        .iter()
+        .filter(|attr| attr.path.is_ident("doc"))
+        .filter_map(|attr| match attr.parse_meta() {
+            Ok(syn::Meta::NameValue(syn::MetaNameValue {
+                lit: syn::Lit::Str(line),
+                ..
+            })) => Some(line.value()),
+            _ => None,
+        })
+        .map(|line| line.strip_prefix(' ').unwrap_or(&line).to_string())
+        .collect();
+    lines.join("\n").trim().to_string()
 }
 
 impl Reflection {
@@ -270,6 +355,10 @@ impl Reflection {
         let kind = get_attr(derive_input, "type_s_eq_hash_kind").map(|attr| {
             let kind = attr_to_str(attr);
             syn::Ident::new(&kind.value(), kind.span())
+        });
+        let methods = get_attr(derive_input, "type_reflection").map(|attr| {
+            attr.parse_args::<syn::Path>()
+                .expect("Expect #[type_reflection(<path to fn(&mut ObjectDef<Self>)>)]")
         });
         let syn::Data::Struct(s) = &derive_input.data else {
             return None;
@@ -281,38 +370,30 @@ impl Reflection {
             "the parent field cannot be #[reflect]; the parent registers its own fields"
         );
         let mut field_ids = Vec::new();
-        let mut reflected = Vec::new();
+        let mut reflected: Vec<ReflectedField> = Vec::new();
         for field in fields {
             let id = field
                 .ident
                 .clone()
                 .expect("#[derive(Object)] needs named fields");
-            field_ids.push(id.clone());
-            let Some(attr) = field.attrs.iter().find(|a| a.path.is_ident("reflect")) else {
-                continue;
-            };
-            let flags = match attr.parse_meta() {
-                Ok(syn::Meta::Path(_)) => Vec::new(),
-                Ok(syn::Meta::List(list)) => list
-                    .nested
-                    .iter()
-                    .map(|flag| match flag {
-                        syn::NestedMeta::Meta(syn::Meta::Path(path)) => path
-                            .get_ident()
-                            .cloned()
-                            .expect("Expect #[reflect(<flag>, ...)] with flag names"),
-                        _ => panic!("Expect #[reflect(<flag>, ...)] with flag names"),
-                    })
-                    .collect(),
-                _ => panic!("Expect #[reflect] or #[reflect(<flag>, ...)]"),
-            };
-            reflected.push((id, field.ty.clone(), flags));
+            field_ids.push(id);
+            if let Some(attr) = field.attrs.iter().find(|a| a.path.is_ident("reflect")) {
+                let field = ReflectedField::parse(field, attr);
+                if let Some(other) = reflected.iter().find(|f| f.name == field.name) {
+                    panic!(
+                        "fields `{}` and `{}` of `{}` both reflect as `{}`",
+                        other.id, field.id, derive_input.ident, field.name
+                    );
+                }
+                reflected.push(field);
+            }
         }
-        if kind.is_none() && reflected.is_empty() && !always {
+        if kind.is_none() && methods.is_none() && reflected.is_empty() && !always {
             return None;
         }
         Some(Self {
             kind,
+            methods,
             base_id: base
                 .ident
                 .clone()
@@ -335,8 +416,14 @@ impl Reflection {
             Some(kind) => quote!(Some(#reflection::SEqHashKind::#kind)),
             None => quote!(None),
         };
-        let fields = self.reflected.iter().map(|(id, ty, flags)| {
-            let name = id.unraw().to_string();
+        let fields = self.reflected.iter().map(|field| {
+            let ReflectedField {
+                id,
+                ty,
+                flags,
+                name,
+                doc,
+            } = field;
             // `#[reflect(seq_hash_ignore)]` names `FieldFlags::SEQ_HASH_IGNORE`.
             let flags = flags.iter().map(|flag| {
                 format_ident!("{}", flag.to_string().to_uppercase(), span = flag.span())
@@ -344,17 +431,35 @@ impl Reflection {
             quote! {
                 .field::<#ty>(
                     #name,
+                    #doc,
                     ::core::mem::offset_of!(#struct_name, #id),
                     #reflection::FieldFlags::NONE #(| #reflection::FieldFlags::#flags)*,
                 )?
             }
         });
+        // The `#[type_reflection]` function registers the methods after the
+        // fields, as a C++ `ObjectDef` chains `def` after `def_ro`.
+        let methods = self.methods.as_ref().map(|path| {
+            // The registration is a `static` initializer, where `Self` does
+            // not resolve, so `Self::f` names the struct.
+            let mut path = path.clone();
+            if let Some(first) = path.segments.first_mut() {
+                if first.ident == "Self" {
+                    first.ident = struct_name.clone();
+                }
+            }
+            quote! {
+                let mut def = def;
+                #path(&mut def);
+            }
+        });
         quote! {
             let registered = (|| -> #tvm_ffi_crate::Result<()> {
-                #reflection::ObjectDef::<#struct_name>::registering(tindex, #kind)?
+                let def = #reflection::ObjectDef::<#struct_name>::registering(tindex, #kind)?
                     #(#fields)*
-                    .shallow_copy()?
-                    .finish()
+                    .shallow_copy()?;
+                #methods
+                def.finish()
             })();
             if let Err(error) = registered {
                 panic!("Failed to register the reflection of type key {}: {}", #type_key, error);

@@ -18,7 +18,7 @@
  */
 use tvm_ffi::derive::Object;
 use tvm_ffi::object::ObjectRef;
-use tvm_ffi::reflection::FieldFlags;
+use tvm_ffi::reflection::{FieldFlags, ObjectDef};
 use tvm_ffi::*;
 use tvm_ffi_sys::{TVMFFIFieldInfo, TVMFFIGetTypeInfo, TVMFFISEqHashKind, TVMFFITypeInfo};
 
@@ -26,15 +26,32 @@ use tvm_ffi_sys::{TVMFFIFieldInfo, TVMFFIGetTypeInfo, TVMFFISEqHashKind, TVMFFIT
 // structural engines, `repr` and deep copy see.
 
 /// A root type, under `ffi.Object`.
-#[rs_class("testing.rust.RsPoint", s_eq_hash_kind = "TreeNode")]
+#[rs_class(
+    "testing.rust.RsPoint",
+    s_eq_hash_kind = "TreeNode",
+    reflection = RsPointObj::reflect_methods
+)]
 pub struct RsPointObj {
     base: Object,
+    /// The x coordinate.
     pub x: i64,
-    #[reflect(writable, seq_hash_ignore)]
+    #[reflect(writable, seq_hash_ignore, doc = "A label.")]
     pub label: tvm_ffi::String,
 }
 
 def_object_ref!(pub RsPoint, ObjectRef, RsPointObj);
+
+impl RsPointObj {
+    fn reflect_methods(def: &mut ObjectDef<Self>) {
+        def.def(
+            "with_label",
+            |p: RsPoint, label: tvm_ffi::String| -> Result<RsPoint> {
+                Ok(point(p.x, label.as_str()))
+            },
+            "The point with another label.",
+        );
+    }
+}
 
 /// A subtype of a Rust-defined type, with a private field.
 #[rs_class("testing.rust.RsPoint3", final)]
@@ -214,10 +231,12 @@ fn test_fields_are_registered_with_their_flags() {
     };
     assert_eq!(x.flags, FieldFlags::NONE.bits());
     assert_eq!(x.offset, std::mem::offset_of!(RsPointObj, x) as i64);
+    assert_eq!(x.doc.as_str(), "The x coordinate.");
     assert_eq!(
         label.flags,
         (FieldFlags::WRITABLE | FieldFlags::SEQ_HASH_IGNORE).bits()
     );
+    assert_eq!(label.doc.as_str(), "A label.");
     let metadata = unsafe { &*type_info::<RsPointObj>().metadata };
     assert_eq!(
         metadata.total_size as usize,
@@ -241,6 +260,24 @@ fn test_fields_are_registered_with_their_flags() {
         kind(type_info::<RsMarkerObj>()),
         TVMFFISEqHashKind::kTVMFFISEqHashKindTreeNode as i32
     );
+}
+
+#[test]
+fn test_reflection_registers_methods() {
+    register_types();
+    let info = type_info::<RsPointObj>();
+    assert_eq!(info.num_methods, 1);
+    let method = unsafe { &*info.methods };
+    assert_eq!(method.name.as_str(), "with_label");
+    assert_eq!(method.doc.as_str(), "The point with another label.");
+    let with_label = Function::from_type_key_method("testing.rust.RsPoint", "with_label").unwrap();
+    let relabeled = with_label
+        .call_tuple((point(4, "a"), tvm_ffi::String::from("b")))
+        .unwrap();
+    let relabeled = RsPoint::try_from(relabeled).unwrap();
+    assert_eq!((relabeled.x, relabeled.label.as_str()), (4, "b"));
+    // The subtype has no methods of its own.
+    assert_eq!(type_info::<RsPoint3Obj>().num_methods, 0);
 }
 
 #[test]

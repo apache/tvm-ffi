@@ -41,6 +41,7 @@ struct RsClassArgs {
     s_eq_hash_kind: Option<LitStr>,
     child_slots: Option<LitInt>,
     child_slots_can_overflow: Option<LitBool>,
+    reflection: Option<Path>,
     tvm_ffi_crate: Option<Path>,
 }
 
@@ -58,6 +59,7 @@ impl Parse for RsClassArgs {
             s_eq_hash_kind: None,
             child_slots: None,
             child_slots_can_overflow: None,
+            reflection: None,
             tvm_ffi_crate: None,
         };
         let mut seen = Vec::new();
@@ -80,12 +82,14 @@ impl Parse for RsClassArgs {
                 "s_eq_hash_kind" => args.s_eq_hash_kind = Some(input.parse()?),
                 "child_slots" => args.child_slots = Some(input.parse()?),
                 "child_slots_can_overflow" => args.child_slots_can_overflow = Some(input.parse()?),
+                "reflection" => args.reflection = Some(input.parse()?),
                 "crate" => args.tvm_ffi_crate = Some(Path::parse_mod_style(input)?),
                 _ => {
                     return Err(syn::Error::new(
                         name.span(),
                         "expected `final`, `s_eq_hash_kind = \"<kind>\"`, `child_slots = <n>`, \
-                         `child_slots_can_overflow = <bool>` or `crate = <path>`",
+                         `child_slots_can_overflow = <bool>`, `reflection = <path>` or \
+                         `crate = <path>`",
                     ));
                 }
             }
@@ -186,6 +190,9 @@ fn expand(args: &RsClassArgs, item: &DeriveInput) -> syn::Result<TokenStream2> {
     }
     if let Some(overflow) = &args.child_slots_can_overflow {
         derive_attrs.push(quote!(#[type_child_slots_can_overflow = #overflow]));
+    }
+    if let Some(reflection) = &args.reflection {
+        derive_attrs.push(quote!(#[type_reflection(#reflection)]));
     }
     let reflected_fields = fields.iter().map(|field| {
         if field.attrs.iter().any(|a| a.path.is_ident("reflect")) {
