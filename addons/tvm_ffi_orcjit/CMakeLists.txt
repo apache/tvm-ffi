@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.24)
 project(
   tvm_ffi_orcjit
-  VERSION 0.1.2
+  VERSION 0.1.3
   LANGUAGES C CXX
 )
 
@@ -57,6 +57,10 @@ elseif (WIN32)
     PRIVATE src/ffi/llvm_patches/init_fini_plugin.cc src/ffi/llvm_patches/win_coff_pdata_strip.cc
             src/ffi/llvm_patches/win_dll_import_generator.cc
   )
+  if (CMAKE_SYSTEM_PROCESSOR MATCHES "^(ARM64|arm64|aarch64)$")
+    target_sources(tvm_ffi_orcjit PRIVATE src/ffi/llvm_patches/win_arm64_rtdyld.cc)
+    target_compile_definitions(tvm_ffi_orcjit PRIVATE TVM_FFI_ORCJIT_WINDOWS_ARM64=1)
+  endif ()
 endif ()
 set_target_properties(
   tvm_ffi_orcjit PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON

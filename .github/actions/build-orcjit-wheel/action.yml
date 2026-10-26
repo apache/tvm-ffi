@@ -22,7 +22,7 @@ description: >
 
 inputs:
   arch:
-    description: "Target architecture (e.g., x86_64, aarch64, arm64, AMD64)"
+    description: "Target architecture (e.g., x86_64, aarch64, arm64, AMD64, ARM64)"
     required: true
   build:
     description: "cibuildwheel build selector (e.g., cp312-manylinux_x86_64)"
@@ -32,7 +32,7 @@ inputs:
     required: true
   llvm_version:
     description: "mlc-llvm-static version (keep in sync with the addon build requirements)"
-    default: "23.1.1"
+    default: "23.1.1.post0"
     required: false
 
 runs:
@@ -46,6 +46,19 @@ runs:
 
     - uses: ./.github/actions/detect-env-vars
       id: env_vars
+
+    - name: Activate native ARM64 Visual Studio tools
+      if: runner.os == 'Windows' && inputs.arch == 'ARM64'
+      shell: pwsh
+      run: |
+        $vsDevCmd = python .github/workflows/utils/locate_vsdevcmd_bat.py
+        $devEnv = cmd /c "`"$vsDevCmd`" -arch=arm64 -host_arch=arm64 >nul && set"
+        if ($LASTEXITCODE -ne 0) { throw "Failed to activate ARM64 Visual Studio tools" }
+        foreach ($line in $devEnv) {
+          if ($line -match '^([^=]+)=(.*)$') {
+            "$($Matches[1])=$($Matches[2])" | Out-File -FilePath $env:GITHUB_ENV -Append
+          }
+        }
 
     # ---- Build and test wheels ----
     - name: Build and test wheels

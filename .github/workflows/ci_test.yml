@@ -235,7 +235,7 @@ jobs:
     name: orcjit ${{ matrix.os }} (${{ matrix.arch }})
     runs-on: ${{ matrix.os }}
     env:
-      LLVM_VERSION: "23.1.1"
+      LLVM_VERSION: "23.1.1.post0"
     strategy:
       fail-fast: false
       matrix:
@@ -244,6 +244,7 @@ jobs:
           - {os: ubuntu-24.04-arm, arch: aarch64, build: "cp312-manylinux_aarch64"}
           - {os: macos-14, arch: arm64, build: "cp312-macosx_arm64"}
           - {os: windows-latest, arch: AMD64, build: "cp312-win_amd64"}
+          - {os: windows-11-vs2026-arm, arch: ARM64, build: "cp312-win_arm64"}
 
     steps:
       - uses: actions/checkout@v5

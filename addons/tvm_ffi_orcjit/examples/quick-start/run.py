@@ -43,8 +43,8 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 
 def _extra_cflags() -> list[str]:
     """Return extra compiler flags for the current platform."""
-    machine = platform.machine()
-    if machine in ("aarch64", "arm64"):
+    machine = platform.machine().lower()
+    if platform.system() != "Windows" and machine in ("aarch64", "arm64"):
         return ["-mno-outline-atomics"]
     return []
 

@@ -25,6 +25,7 @@ the module tears the dylib down.
 from __future__ import annotations
 
 import gc
+import platform
 import sys
 import tempfile
 import threading
@@ -42,6 +43,21 @@ from utils import build_test_objects
 # ---------------------------------------------------------------------------
 
 OBJ_DIR = build_test_objects()
+
+
+@pytest.mark.skipif(
+    sys.platform != "win32" or platform.machine().lower() not in ("arm64", "aarch64"),
+    reason="requires native Windows ARM64",
+)
+def test_windows_arm64_native_compilers() -> None:
+    """Require real ARM64 objects from both MSVC and clang-cl in native CI."""
+    for variant in ("c", "c-msvc"):
+        path = OBJ_DIR / variant / "test_funcs.o"
+        assert path.exists(), f"{variant} compiler did not build the ARM64 test objects"
+        assert int.from_bytes(path.read_bytes()[:2], "little") == 0xAA64
+        mod = ExecutionSession().load_module(str(path))
+        assert mod.test_add(10, 20) == 30
+
 
 _KNOWN_SUBDIRS = [
     "cc",

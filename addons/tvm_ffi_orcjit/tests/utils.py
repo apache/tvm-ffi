@@ -52,15 +52,15 @@ _DEFAULT_OUT_DIR = Path(tempfile.gettempdir()) / "tvm_ffi_orcjit_tests"
 
 
 def _extra_cflags() -> list[str]:
-    machine = platform.machine()
-    if machine in ("aarch64", "arm64"):
+    machine = platform.machine().lower()
+    if platform.system() != "Windows" and machine in ("aarch64", "arm64"):
         return ["-mno-outline-atomics"]
     return []
 
 
 def _extra_cuda_cflags() -> list[str]:
-    machine = platform.machine()
-    if machine in ("aarch64", "arm64"):
+    machine = platform.machine().lower()
+    if platform.system() != "Windows" and machine in ("aarch64", "arm64"):
         return ["-Xcompiler", "-mno-outline-atomics"]
     return []
 
@@ -214,6 +214,13 @@ def build_test_objects(out_dir: Path | None = None) -> Path:
             )
 
     elif system == "Windows":
+        # The runner may ship an x64-hosted clang-cl. Select native ARM64
+        # explicitly rather than inheriting that compiler's default target.
+        clang_target = (
+            ["--target=aarch64-pc-windows-msvc"]
+            if platform.machine().lower() in ("arm64", "aarch64")
+            else []
+        )
         llvm = _find_llvm_clang()
         if llvm:
             clang_cl = Path(llvm[0]).parent / "clang-cl.exe"
@@ -222,7 +229,7 @@ def build_test_objects(out_dir: Path | None = None) -> Path:
                     "LLVM clang-cl",
                     cc=str(clang_cl),
                     cxx=None,
-                    extra_cflags=["/GS-"],
+                    extra_cflags=["/GS-", *clang_target],
                     c_outdir=out_dir / "c",
                     cc_outdir=None,
                 )
@@ -240,7 +247,7 @@ def build_test_objects(out_dir: Path | None = None) -> Path:
                 "clang-cl",
                 cc="clang-cl",
                 cxx=None,
-                extra_cflags=["/GS-"],
+                extra_cflags=["/GS-", *clang_target],
                 c_outdir=out_dir / "c-clang-cl",
                 cc_outdir=None,
             )
