@@ -23,8 +23,9 @@
  *
  * LLVM 23.1.1 JITLink rejects COFF/AArch64 objects. RuntimeDyld supports
  * their relocations, long branches and DLL-import pointer slots, so use
- * RTDyldObjectLinkingLayer on this platform. A loaded-object callback records
- * .CRT$XC* / .CRT$XT* entries for the session's normal init/fini drain.
+ * RTDyldObjectLinkingLayer on this platform. A loaded-object callback stages
+ * .CRT$XC* / .CRT$XT* slots; successful emission publishes them for the
+ * session's normal init/fini drain. Failed objects discard their staged slots.
  *
  * Trigger: loading any native Windows ARM64 COFF object.
  * Symptom without the patch: "Unsupported target machine architecture in
