@@ -39,6 +39,7 @@
 #include <llvm/ADT/DenseMap.h>
 #include <llvm/ExecutionEngine/JITLink/JITLink.h>
 #include <llvm/ExecutionEngine/JITLink/x86_64.h>
+#include <llvm/ExecutionEngine/Orc/AbsoluteSymbols.h>
 #include <llvm/ExecutionEngine/Orc/Shared/ExecutorAddress.h>
 #include <llvm/Support/DynamicLibrary.h>
 #include <llvm/Support/Error.h>

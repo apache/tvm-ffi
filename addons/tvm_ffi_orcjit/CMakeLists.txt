@@ -70,6 +70,15 @@ target_include_directories(
 )
 separate_arguments(LLVM_DEFINITIONS_LIST NATIVE_COMMAND "${LLVM_DEFINITIONS}")
 target_compile_definitions(tvm_ffi_orcjit PRIVATE ${LLVM_DEFINITIONS_LIST})
+# LLVM-facing subclasses must use the SDK's RTTI mode: otherwise their typeinfo references LLVM
+# base-class typeinfo that a no-RTTI SDK does not provide.
+if (NOT LLVM_ENABLE_RTTI)
+  if (MSVC)
+    target_compile_options(tvm_ffi_orcjit PRIVATE /GR-)
+  else ()
+    target_compile_options(tvm_ffi_orcjit PRIVATE -fno-rtti)
+  endif ()
+endif ()
 
 # Imported targets carry the static compression libraries and platform system dependencies.
 llvm_map_components_to_libnames(LLVM_LIBS Core OrcJIT Support native)
